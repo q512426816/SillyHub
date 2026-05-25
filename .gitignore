@@ -1,0 +1,11 @@
+# IDE
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+target/
+build/
+out/
