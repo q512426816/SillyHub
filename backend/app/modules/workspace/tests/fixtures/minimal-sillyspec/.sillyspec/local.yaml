@@ -1,0 +1,3 @@
+workspace:
+  name: minimal-sillyspec
+  description: Fixture used by workspace scanner tests.
