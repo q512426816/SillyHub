@@ -1,0 +1,4 @@
+# Workspace-level ruff settings live in pyproject.toml.
+# This file exists so that `ruff` invocations without a pyproject.toml in cwd
+# (e.g. running from a sub-directory) still pick up the same config.
+extend = "pyproject.toml"
