@@ -1,0 +1,19 @@
+id: silly-admin-ui
+name: Silly Admin UI
+type: frontend
+role: admin_console
+path: ../silly-admin-ui
+repo_url: git@example.com:org/silly-admin-ui.git
+default_branch: main
+tech_stack:
+  - TypeScript
+  - React
+  - Vite
+commands:
+  build: pnpm build
+  test: pnpm test
+  dev: pnpm dev
+relations:
+  - target: silly
+    type: consumes_api_from
+    description: 调用 silly 后端 API

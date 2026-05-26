@@ -1,5 +1,7 @@
 # IDE
 .idea/
+.vscode/
+.claude/
 
 # OS
 .DS_Store
@@ -9,3 +11,41 @@ Thumbs.db
 target/
 build/
 out/
+.sillyspec/.runtime/
+.sillyspec/codebase/SCAN-RAW.md
+.sillyspec/local.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+.venv-*/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+
+# Node / Next.js
+node_modules/
+.next/
+.turbo/
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# Env / Secrets
+.env
+.env.*
+!.env.example
+
+# Docker
+.docker/data/
+
+# Spike artefacts
+spikes/**/tmp/
+spikes/**/*.log

@@ -1,0 +1,17 @@
+id: silly
+name: Silly Core Backend
+type: backend
+role: api
+path: ../silly
+repo_url: git@example.com:org/silly.git
+default_branch: main
+tech_stack:
+  - Java
+  - Spring Boot
+commands:
+  build: ./gradlew build
+  test: ./gradlew test
+relations:
+  - target: silly-admin-ui
+    type: publishes_to
+    description: 暴露 REST API 给后台
