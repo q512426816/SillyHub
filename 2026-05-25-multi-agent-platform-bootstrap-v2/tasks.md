@@ -9,7 +9,8 @@
 | task-01 | 初始化平台仓库与基础工程 | V1 | P0 | 16 | — | 前后端骨架 + Postgres / Redis |
 | task-02 | 实现 Workspace 识别与扫描 | V1 | P0 | 16 | 01 | 识别 `.sillyspec` |
 | task-03 | 实现 projects 组件配置解析 | V1 | P0 | 14 | 02 | **注意：projects 是项目组组件，不是项目列表** |
-| task-04 | 实现 scan docs 解析与展示 | V1 | P0 | 10 | 03 | 组件认知文档 |
+| task-04a | 实现用户认证与 RBAC（horizontal slice） | V1 | P0 | 20 | 03 | 替换 X-Debug-User 占位；下游 task 才能验证 403 / 401 |
+| task-04 | 实现 scan docs 解析与展示 | V1 | P0 | 10 | 04a | 组件认知文档 |
 | task-05 | 实现 Change 解析与变更中心 | V1 | P0 | 18 | 02 | change / archive |
 | task-06 | 实现 Task 解析与任务看板 | V1 | P0 | 16 | 05 | tasks.md + tasks/*.md |
 | task-07 | 实现 Runtime 状态展示 | V1 | P1 | 8 | 02 | `.runtime` 读取 |
@@ -22,13 +23,13 @@
 | task-14 | 实现 Agent Adapter 接口与首个 Adapter | V4 | P1 | 40 | 10, 11, 13 | **spike 03 必须先通过**；首发 Claude Code |
 | task-15 | 实现 Tool Gateway 通用能力 | V4 | P1 | 24 | 11, 14 | file/shell/test/git/network |
 | task-16 | 实现部署、归档与知识沉淀闭环 | V5 | P2 | 40 | 13, 15 | release / archive / knowledge |
-| **合计** |  |  |  | **334** |  | ≈ 单人 8.5 周满负荷 / 实际 14-20 周 |
+| **合计** |  |  |  | **354** |  | ≈ 单人 9 周满负荷 / 实际 15-21 周 |
 
 ## 第一批必须完成（V1 P0）
 
 ```text
-task-01 → task-02 → task-03 → task-04 → task-05 → task-06
-                          ↘ task-09 → task-10
+task-01 → task-02 → task-03 → task-04a → task-04 → task-05 → task-06
+                                     ↘ task-09 → task-10
 ```
 
 完成后平台具备：
@@ -57,6 +58,8 @@ task-01 (基建)
 ┌── task-02 (Workspace)
 │     ↓
 │  ┌── task-03 (Component)
+│  │     ↓
+│  │  task-04a (Auth + RBAC, horizontal slice)
 │  │     ↓
 │  │  task-04 (Scan Docs)
 │  └── task-05 (Change)

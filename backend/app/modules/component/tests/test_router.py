@@ -23,26 +23,37 @@ def _copy_fixture(src: Path, tmp_path: Path, name: str = "ws") -> Path:
 
 
 @pytest.fixture()
-async def workspace_id(client, tmp_path: Path) -> str:
+async def workspace_id(client, tmp_path: Path, auth_headers: dict[str, str]) -> str:
     """Register a workspace pointing at the valid fixture and return its id."""
     root = _copy_fixture(VALID_FIXTURE, tmp_path)
     resp = await client.post(
         "/api/workspaces",
         json={"name": "valid-fixture", "root_path": str(root)},
+        headers=auth_headers,
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["id"]
 
 
-async def test_list_components_empty_before_reparse(client, workspace_id: str) -> None:
-    resp = await client.get(f"/api/workspaces/{workspace_id}/components")
+async def test_list_components_empty_before_reparse(
+    client, workspace_id: str, auth_headers: dict[str, str]
+) -> None:
+    resp = await client.get(
+        f"/api/workspaces/{workspace_id}/components",
+        headers=auth_headers,
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert body == {"items": [], "total": 0}
 
 
-async def test_reparse_returns_components_and_relations(client, workspace_id: str) -> None:
-    resp = await client.post(f"/api/workspaces/{workspace_id}/components/reparse")
+async def test_reparse_returns_components_and_relations(
+    client, workspace_id: str, auth_headers: dict[str, str]
+) -> None:
+    resp = await client.post(
+        f"/api/workspaces/{workspace_id}/components/reparse",
+        headers=auth_headers,
+    )
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["stats"]["parsed"] == 2
@@ -54,9 +65,17 @@ async def test_reparse_returns_components_and_relations(client, workspace_id: st
     assert body["errors"] == []
 
 
-async def test_list_after_reparse_returns_components(client, workspace_id: str) -> None:
-    await client.post(f"/api/workspaces/{workspace_id}/components/reparse")
-    resp = await client.get(f"/api/workspaces/{workspace_id}/components")
+async def test_list_after_reparse_returns_components(
+    client, workspace_id: str, auth_headers: dict[str, str]
+) -> None:
+    await client.post(
+        f"/api/workspaces/{workspace_id}/components/reparse",
+        headers=auth_headers,
+    )
+    resp = await client.get(
+        f"/api/workspaces/{workspace_id}/components",
+        headers=auth_headers,
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert body["total"] == 2
@@ -64,10 +83,18 @@ async def test_list_after_reparse_returns_components(client, workspace_id: str) 
     assert keys == ["silly", "silly-admin-ui"]
 
 
-async def test_get_component_returns_full_detail(client, workspace_id: str) -> None:
-    reparse = await client.post(f"/api/workspaces/{workspace_id}/components/reparse")
+async def test_get_component_returns_full_detail(
+    client, workspace_id: str, auth_headers: dict[str, str]
+) -> None:
+    reparse = await client.post(
+        f"/api/workspaces/{workspace_id}/components/reparse",
+        headers=auth_headers,
+    )
     cid = next(c["id"] for c in reparse.json()["components"] if c["component_key"] == "silly")
-    resp = await client.get(f"/api/workspaces/{workspace_id}/components/{cid}")
+    resp = await client.get(
+        f"/api/workspaces/{workspace_id}/components/{cid}",
+        headers=auth_headers,
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert body["component_key"] == "silly"
@@ -77,9 +104,17 @@ async def test_get_component_returns_full_detail(client, workspace_id: str) -> N
     assert body["extra"]["commands"] == {"dev": "uv run uvicorn app.main:app --reload"}
 
 
-async def test_topology_endpoint_shape(client, workspace_id: str) -> None:
-    await client.post(f"/api/workspaces/{workspace_id}/components/reparse")
-    resp = await client.get(f"/api/workspaces/{workspace_id}/components/topology")
+async def test_topology_endpoint_shape(
+    client, workspace_id: str, auth_headers: dict[str, str]
+) -> None:
+    await client.post(
+        f"/api/workspaces/{workspace_id}/components/reparse",
+        headers=auth_headers,
+    )
+    resp = await client.get(
+        f"/api/workspaces/{workspace_id}/components/topology",
+        headers=auth_headers,
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert len(body["nodes"]) == 2
@@ -88,15 +123,21 @@ async def test_topology_endpoint_shape(client, workspace_id: str) -> None:
     assert edge["relation_type"] == "consumes_api_from"
 
 
-async def test_reparse_surfaces_warnings_for_invalid_fixture(client, tmp_path: Path) -> None:
+async def test_reparse_surfaces_warnings_for_invalid_fixture(
+    client, tmp_path: Path, auth_headers: dict[str, str]
+) -> None:
     root = _copy_fixture(INVALID_FIXTURE, tmp_path)
     create = await client.post(
         "/api/workspaces",
         json={"name": "invalid-fixture", "root_path": str(root)},
+        headers=auth_headers,
     )
     assert create.status_code == 201, create.text
     ws_id = create.json()["id"]
-    resp = await client.post(f"/api/workspaces/{ws_id}/components/reparse")
+    resp = await client.post(
+        f"/api/workspaces/{ws_id}/components/reparse",
+        headers=auth_headers,
+    )
     assert resp.status_code == 200
     body = resp.json()
     warning_codes = {w["code"] for w in body["warnings"]}
@@ -107,17 +148,23 @@ async def test_reparse_surfaces_warnings_for_invalid_fixture(client, tmp_path: P
     assert "yaml_error" in error_codes
 
 
-async def test_get_component_404_when_unknown(client, workspace_id: str) -> None:
+async def test_get_component_404_when_unknown(
+    client, workspace_id: str, auth_headers: dict[str, str]
+) -> None:
     resp = await client.get(
-        f"/api/workspaces/{workspace_id}/components/00000000-0000-0000-0000-000000000000"
+        f"/api/workspaces/{workspace_id}/components/00000000-0000-0000-0000-000000000000",
+        headers=auth_headers,
     )
     assert resp.status_code == 404
     body = resp.json()
     assert body["code"] == "HTTP_404_COMPONENT_NOT_FOUND"
 
 
-async def test_components_404_for_unknown_workspace(client) -> None:
-    resp = await client.get("/api/workspaces/00000000-0000-0000-0000-000000000000/components")
+async def test_components_404_for_unknown_workspace(client, auth_headers: dict[str, str]) -> None:
+    resp = await client.get(
+        "/api/workspaces/00000000-0000-0000-0000-000000000000/components",
+        headers=auth_headers,
+    )
     assert resp.status_code == 404
     body = resp.json()
     assert body["code"] == "HTTP_404_WORKSPACE_NOT_FOUND"

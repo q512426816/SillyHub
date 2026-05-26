@@ -88,6 +88,90 @@ class ComponentNotFound(AppError):
     http_status = status.HTTP_404_NOT_FOUND
 
 
+class ScanDocNotFound(AppError):
+    code = "HTTP_404_SCAN_DOC_NOT_FOUND"
+    http_status = status.HTTP_404_NOT_FOUND
+
+
+# ── Change errors ────────────────────────────────────────────────────────────
+
+
+class ChangeNotFound(AppError):
+    code = "HTTP_404_CHANGE_NOT_FOUND"
+    http_status = status.HTTP_404_NOT_FOUND
+
+
+class ChangeDocNotFound(AppError):
+    code = "HTTP_404_CHANGE_DOC_NOT_FOUND"
+    http_status = status.HTTP_404_NOT_FOUND
+
+
+# ── Task errors ──
+
+
+class TaskNotFound(AppError):
+    code = "HTTP_404_TASK_NOT_FOUND"
+    http_status = status.HTTP_404_NOT_FOUND
+
+
+# ── Auth errors ──────────────────────────────────────────────────────────────
+
+
+class AuthTokenMissing(AppError):
+    code = "HTTP_401_AUTH_TOKEN_MISSING"
+    http_status = status.HTTP_401_UNAUTHORIZED
+
+
+class AuthTokenInvalid(AppError):
+    code = "HTTP_401_AUTH_TOKEN_INVALID"
+    http_status = status.HTTP_401_UNAUTHORIZED
+
+
+class AuthTokenExpired(AppError):
+    code = "HTTP_401_AUTH_TOKEN_EXPIRED"
+    http_status = status.HTTP_401_UNAUTHORIZED
+
+
+class AuthInvalidCredentials(AppError):
+    code = "HTTP_401_AUTH_INVALID_CREDENTIALS"
+    http_status = status.HTTP_401_UNAUTHORIZED
+
+
+class AuthRefreshReused(AppError):
+    """Old refresh token reused → reuse attack; all sessions get killed."""
+
+    code = "HTTP_401_AUTH_REFRESH_REUSED"
+    http_status = status.HTTP_401_UNAUTHORIZED
+
+
+class AuthUserInactive(AppError):
+    code = "HTTP_401_AUTH_USER_INACTIVE"
+    http_status = status.HTTP_401_UNAUTHORIZED
+
+
+class PermissionDenied(AppError):
+    code = "HTTP_403_PERMISSION_DENIED"
+    http_status = status.HTTP_403_FORBIDDEN
+
+
+# ── Worktree errors ──
+
+
+class WorktreeLeaseNotFound(AppError):
+    code = "HTTP_404_WORKTREE_LEASE_NOT_FOUND"
+    http_status = status.HTTP_404_NOT_FOUND
+
+
+class WorktreeLeaseAlreadyReleased(AppError):
+    code = "WORKTREE_LEASE_ALREADY_RELEASED"
+    http_status = status.HTTP_409_CONFLICT
+
+
+class WorktreeAcquireFailed(AppError):
+    code = "WORKTREE_ACQUIRE_FAILED"
+    http_status = status.HTTP_503_SERVICE_UNAVAILABLE
+
+
 def _request_id(request: Request) -> str:
     rid = request.headers.get("x-request-id")
     if rid:

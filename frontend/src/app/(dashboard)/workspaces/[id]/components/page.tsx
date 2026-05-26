@@ -117,6 +117,18 @@ export default function ComponentsPage({ params }: Props) {
         </div>
         <div className="flex gap-2">
           <Link
+            href={`/workspaces/${workspaceId}/changes`}
+            className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-4 text-sm font-medium transition-colors hover:bg-muted"
+          >
+            变更中心
+          </Link>
+          <Link
+            href={`/workspaces/${workspaceId}/scan-docs`}
+            className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-4 text-sm font-medium transition-colors hover:bg-muted"
+          >
+            扫描文档
+          </Link>
+          <Link
             href={`/workspaces/${workspaceId}/components/topology`}
             className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-4 text-sm font-medium transition-colors hover:bg-muted"
           >

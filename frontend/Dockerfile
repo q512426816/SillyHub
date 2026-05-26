@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # Multi-stage build for the Next.js frontend.
 # Stage 1: install with pnpm and run `next build` (output: standalone).
 # Stage 2: copy the standalone build into a minimal runtime image.

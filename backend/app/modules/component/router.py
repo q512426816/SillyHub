@@ -12,7 +12,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth_deps import require_permission
 from app.core.db import get_session
+from app.modules.auth.model import User
+from app.modules.auth.permissions import Permission
 from app.modules.component.model import ComponentRelation, ProjectComponent
 from app.modules.component.parser import ParseResult
 from app.modules.component.schema import (
@@ -59,7 +62,11 @@ def _build_reparse_response(
 
 
 @router.get("", response_model=ComponentList)
-async def list_components(workspace_id: uuid.UUID, session: SessionDep) -> ComponentList:
+async def list_components(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.COMPONENT_READ))],
+) -> ComponentList:
     service = ComponentService(session)
     items, total = await service.list_(workspace_id)
     return ComponentList(
@@ -69,7 +76,11 @@ async def list_components(workspace_id: uuid.UUID, session: SessionDep) -> Compo
 
 
 @router.get("/topology", response_model=TopologyResponse)
-async def get_topology(workspace_id: uuid.UUID, session: SessionDep) -> TopologyResponse:
+async def get_topology(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.COMPONENT_READ))],
+) -> TopologyResponse:
     service = ComponentService(session)
     components, relations = await service.topology(workspace_id)
     return TopologyResponse(
@@ -101,7 +112,11 @@ async def get_topology(workspace_id: uuid.UUID, session: SessionDep) -> Topology
     response_model=ReparseResponse,
     status_code=status.HTTP_200_OK,
 )
-async def reparse_components(workspace_id: uuid.UUID, session: SessionDep) -> ReparseResponse:
+async def reparse_components(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.COMPONENT_WRITE))],
+) -> ReparseResponse:
     service = ComponentService(session)
     parse, stats, components, relations = await service.reparse(workspace_id)
     return _build_reparse_response(
@@ -118,6 +133,7 @@ async def get_component(
     workspace_id: uuid.UUID,
     component_id: uuid.UUID,
     session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.COMPONENT_READ))],
 ) -> ComponentRead:
     service = ComponentService(session)
     return ComponentRead.model_validate(await service.get(workspace_id, component_id))

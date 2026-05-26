@@ -1,0 +1,96 @@
+"""Permission resolution.
+
+``platform_admin`` bypasses every check (this is the V1 simplification
+documented in task-04a §1). Everyone else must have the permission granted
+via at least one role inside the requested workspace.
+"""
+
+from __future__ import annotations
+
+import uuid
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
+
+from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
+from app.modules.auth.permissions import Permission
+
+
+async def collect_permissions(
+    session: AsyncSession, *, user_id: uuid.UUID, workspace_id: uuid.UUID
+) -> set[str]:
+    """Return the union of every permission this user has in this workspace."""
+    stmt = (
+        select(col(RolePermission.permission))
+        .join(Role, col(Role.id) == col(RolePermission.role_id))
+        .join(UserWorkspaceRole, col(UserWorkspaceRole.role_id) == col(Role.id))
+        .where(col(UserWorkspaceRole.user_id) == user_id)
+        .where(col(UserWorkspaceRole.workspace_id) == workspace_id)
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    return set(rows)
+
+
+async def collect_permissions_all(session: AsyncSession, *, user_id: uuid.UUID) -> set[str]:
+    """Union of permissions this user holds across *all* workspaces."""
+    stmt = (
+        select(col(RolePermission.permission))
+        .join(Role, col(Role.id) == col(RolePermission.role_id))
+        .join(UserWorkspaceRole, col(UserWorkspaceRole.role_id) == col(Role.id))
+        .where(col(UserWorkspaceRole.user_id) == user_id)
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    return set(rows)
+
+
+async def has_permission(
+    session: AsyncSession,
+    *,
+    user: User,
+    permission: Permission,
+    workspace_id: uuid.UUID | None,
+) -> bool:
+    """``True`` iff ``user`` may perform ``permission`` in this workspace."""
+    if user.is_platform_admin:
+        return True
+    if workspace_id is None:
+        perms = await collect_permissions_all(session, user_id=user.id)
+        return permission.value in perms or Permission.PLATFORM_ADMIN.value in perms
+    perms = await collect_permissions(session, user_id=user.id, workspace_id=workspace_id)
+    return permission.value in perms or Permission.PLATFORM_ADMIN.value in perms
+
+
+async def list_user_workspace_roles(
+    session: AsyncSession, *, user_id: uuid.UUID
+) -> list[tuple[uuid.UUID, str, str]]:
+    """For ``GET /api/auth/me``: returns (workspace_id, role_key, role_name)."""
+    stmt = (
+        select(col(UserWorkspaceRole.workspace_id), col(Role.key), col(Role.name))
+        .join(Role, col(Role.id) == col(UserWorkspaceRole.role_id))
+        .where(col(UserWorkspaceRole.user_id) == user_id)
+    )
+    rows = (await session.execute(stmt)).all()
+    return [(wid, key, name) for wid, key, name in rows]
+
+
+async def allowed_workspace_ids(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    permission: Permission,
+) -> list[uuid.UUID]:
+    """Return workspace_ids where user has the exact ``permission`` granted.
+
+    Platform admin bypasses this at the dependency layer.
+    """
+    stmt = (
+        select(col(UserWorkspaceRole.workspace_id))
+        .join(Role, col(Role.id) == col(UserWorkspaceRole.role_id))
+        .join(RolePermission, col(RolePermission.role_id) == col(Role.id))
+        .where(col(UserWorkspaceRole.user_id) == user_id)
+        .where(col(RolePermission.permission) == permission.value)
+        .distinct()
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    return list(rows)

@@ -4,9 +4,14 @@
  * - Always sends `x-request-id` so server-side logs can be correlated.
  * - Throws `ApiError` (with `code` / `details`) instead of plain `Error`.
  */
+import { useSession } from "@/stores/session";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? "http://localhost:8000";
+
+function isAuthEndpoint(pathname: string): boolean {
+  return pathname.startsWith("/api/auth/");
+}
 
 export interface ApiErrorPayload {
   code: string;
@@ -64,6 +69,10 @@ export async function apiFetch<T = unknown>(
     ...headers,
   };
 
+  // Attach bearer token if the client has one.
+  const { accessToken } = useSession.getState();
+  if (accessToken) finalHeaders.Authorization = `Bearer ${accessToken}`;
+
   const init: RequestInit = { ...rest, headers: finalHeaders };
   if (json !== undefined) {
     finalHeaders["content-type"] = "application/json";
@@ -95,6 +104,58 @@ export async function apiFetch<T = unknown>(
             request_id: resp.headers.get("x-request-id"),
             details: payload,
           };
+    // Token expired? Try refresh+retry once.
+    if (
+      resp.status === 401 &&
+      !String(finalHeaders["x-auth-retry"] ?? "").includes("1") &&
+      !isAuthEndpoint(url.pathname)
+    ) {
+      try {
+        const {
+          refreshToken,
+          setTokens,
+          hydrated,
+        } = useSession.getState();
+        if (refreshToken && hydrated) {
+          const refreshResp = await fetch(`${url.origin}/api/auth/refresh`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              "x-request-id": String(finalHeaders["x-request-id"]),
+            },
+            body: JSON.stringify({ refresh_token: refreshToken }),
+          });
+          const refreshText = await refreshResp.text();
+          const refreshPayload = refreshText ? safeJsonParse(refreshText) : null;
+
+          if (refreshResp.ok && refreshPayload && typeof refreshPayload === "object") {
+            const pair = refreshPayload as any;
+            setTokens({
+              accessToken: pair.access_token ?? null,
+              refreshToken: pair.refresh_token ?? null,
+            });
+            // Retry original call with new access token.
+            return apiFetch<T>(path, {
+              ...options,
+              headers: { ...headers, "x-auth-retry": "1" },
+              json,
+              query,
+            });
+          }
+        } else if (!hydrated) {
+          // Not hydrated yet; don't guess refresh token.
+        }
+      } catch {
+        // fallthrough to original error throw
+      }
+
+      useSession.getState().clear();
+
+      if (typeof window !== "undefined") {
+        window.location.href = "/login";
+      }
+    }
+
     throw new ApiError(resp.status, errorPayload);
   }
 

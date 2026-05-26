@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # Multi-stage build for the FastAPI backend.
 # Stage 1: install dependencies with uv into an isolated venv.
 # Stage 2: copy the venv + source into a slim runtime.

@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 # IMPORTANT: env vars must be set before any `from app.*` import so that
@@ -27,6 +28,7 @@ os.environ.setdefault(
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production-use-only")
 os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("SILLYSPEC_MASTER_KEY", "v1:" + "aa" * 32)
 
 
 @pytest.fixture(autouse=True)
@@ -45,7 +47,13 @@ async def db_engine() -> AsyncIterator[Any]:
     from app.models.base import BaseModel
 
     # Registering feature models attaches their tables to BaseModel.metadata.
+    from app.modules.auth import model as _auth_model  # noqa: F401
+    from app.modules.change import model as _change_model  # noqa: F401
     from app.modules.component import model as _component_model  # noqa: F401
+    from app.modules.git_identity import model as _git_identity_model  # noqa: F401
+    from app.modules.scan_docs import model as _scan_docs_model  # noqa: F401
+    from app.modules.task import model as _task_model  # noqa: F401
+    from app.modules.worktree import model as _worktree_model  # noqa: F401
     from app.modules.workspace import model as _ws_model  # noqa: F401
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
@@ -87,3 +95,47 @@ async def client(db_engine: Any) -> AsyncIterator[AsyncClient]:
             yield ac
     finally:
         app.dependency_overrides.pop(get_session, None)
+
+
+@pytest.fixture()
+async def auth_admin_token(db_session: AsyncSession) -> str:
+    """Create (or reuse) an in-memory platform admin and return access token."""
+    from app.core.config import get_settings
+    from app.core.security import create_access_token, password_hasher
+    from app.modules.auth.model import User
+
+    settings = get_settings()
+    # Make sure bcrypt rounds match test config.
+    password_hasher.configure(settings.auth_bcrypt_rounds)
+
+    admin_email = "admin@example.com"
+    stmt = select(User).where(User.email == admin_email).limit(1)
+    user = (await db_session.execute(stmt)).scalars().first()
+    if user is None:
+        import uuid
+
+        admin_id = uuid.uuid4()
+        user = User(
+            id=admin_id,
+            email=admin_email,
+            password_hash=password_hasher.hash("Admin123!@#"),
+            display_name="Admin",
+            status="active",
+            is_platform_admin=True,
+        )
+        db_session.add(user)
+        await db_session.commit()
+        await db_session.refresh(user)
+
+    token, _ = create_access_token(
+        user_id=user.id,
+        email=user.email,
+        is_admin=user.is_platform_admin,
+        settings=settings,
+    )
+    return token
+
+
+@pytest.fixture()
+def auth_headers(auth_admin_token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {auth_admin_token}"}

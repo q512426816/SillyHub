@@ -8,6 +8,7 @@ from feature code.
 from __future__ import annotations
 
 import subprocess
+import sys
 from functools import lru_cache
 from typing import Annotated, Literal
 
@@ -38,6 +39,36 @@ class Settings(BaseSettings):
     )
     otel_endpoint: str | None = None
     commit_sha: str | None = None
+
+    # ── Auth (task-04a) ────────────────────────────────────────────────
+    auth_access_ttl_minutes: int = Field(15, ge=1, le=24 * 60)
+    auth_refresh_ttl_days: int = Field(14, ge=1, le=90)
+    auth_bcrypt_rounds: int = Field(12, ge=4, le=15)
+    platform_bootstrap_admin_email: str | None = None
+    platform_bootstrap_admin_password: str | None = Field(default=None, min_length=8)
+    platform_bootstrap_admin_display_name: str | None = None
+
+    # ── Worktree (task-10) ─────────────────────────────────────────────
+    worktree_base_dir: str = Field(
+        default=(
+            "C:/data/sillyspec-workspaces"
+            if sys.platform == "win32"
+            else "/data/sillyspec-workspaces"
+        ),
+        description="Root directory for worktree lease filesystem trees.",
+    )
+
+    # ── Docker path mapping ────────────────────────────────────────────
+    host_path_prefix: str = Field(
+        default="",
+        description="Host filesystem prefix (e.g. C:/Users/qinyi/IdeaProjects). "
+                    "When running in Docker, this is rewritten to container_path_prefix.",
+    )
+    container_path_prefix: str = Field(
+        default="",
+        description="Container mount point that maps to host_path_prefix "
+                    "(e.g. /host-projects).",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

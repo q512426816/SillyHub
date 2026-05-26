@@ -16,8 +16,14 @@ from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis
 from app.core.telemetry import init_telemetry
+from app.modules.auth.router import router as auth_router
+from app.modules.change import change_router
 from app.modules.component import component_router
 from app.modules.health import health_router
+from app.modules.scan_docs.router import router as scan_docs_router
+from app.modules.git_identity import git_identity_router
+from app.modules.task import task_router
+from app.modules.worktree import lease_router, worktree_router
 from app.modules.workspace import workspace_router
 
 
@@ -34,6 +40,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         commit=settings.resolved_commit_sha,
     )
     try:
+        # Bootstrap auth once the DB connection pool exists.
+        from app.core.db import get_session_factory
+        from app.modules.auth.service import bootstrap_admin_and_seed_rbac
+
+        factory = get_session_factory()
+        async with factory() as session:
+            await bootstrap_admin_and_seed_rbac(session, settings=settings)
         yield
     finally:
         log.info("app.shutdown")
@@ -77,6 +90,13 @@ def create_app() -> FastAPI:
     app.include_router(health_router, prefix="/api")
     app.include_router(workspace_router, prefix="/api")
     app.include_router(component_router, prefix="/api")
+    app.include_router(auth_router, prefix="/api")
+    app.include_router(change_router, prefix="/api")
+    app.include_router(scan_docs_router, prefix="/api")
+    app.include_router(task_router, prefix="/api")
+    app.include_router(git_identity_router, prefix="/api")
+    app.include_router(worktree_router, prefix="/api")
+    app.include_router(lease_router, prefix="/api")
 
     return app
 

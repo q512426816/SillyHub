@@ -1,12 +1,23 @@
-/**
- * Dashboard layout placeholder.
- *
- * Real navigation chrome lives in task-05 once the Workspace shell exists.
- */
-export default function DashboardLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return <div className="min-h-screen bg-background">{children}</div>;
+"use client";
+
+import type { ReactNode } from "react";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+
+import { AppShell } from "@/components/app-shell";
+import { useSession } from "@/stores/session";
+
+export default function DashboardLayout({ children }: { children: ReactNode }) {
+  const router = useRouter();
+  const { hydrated, accessToken } = useSession();
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (!accessToken) router.replace("/login");
+  }, [hydrated, accessToken, router]);
+
+  if (!hydrated) return null;
+  if (!accessToken) return null;
+
+  return <AppShell>{children}</AppShell>;
 }

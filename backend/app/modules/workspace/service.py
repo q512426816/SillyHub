@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from app.core.config import get_settings
 from app.core.errors import (
     WorkspaceNotFound,
     WorkspaceNotSillyspec,
@@ -33,6 +34,26 @@ from app.modules.workspace.schema import WorkspaceCreate, slugify
 log = get_logger(__name__)
 
 
+def _rewrite_path(root_path: str) -> str:
+    """Rewrite a host-style path to the container mount if configured.
+
+    When running inside Docker the host filesystem is not directly accessible.
+    If ``host_path_prefix`` and ``container_path_prefix`` are set (via env vars),
+    paths starting with the host prefix are rewritten to the container prefix.
+    """
+    settings = get_settings()
+    host_prefix = settings.host_path_prefix
+    container_prefix = settings.container_path_prefix
+    if not host_prefix or not container_prefix:
+        return root_path
+    # Normalize both to forward-slash for comparison
+    normalized = root_path.replace("\\", "/")
+    host_norm = host_prefix.replace("\\", "/")
+    if normalized.startswith(host_norm):
+        return container_prefix + normalized[len(host_norm):]
+    return root_path
+
+
 class WorkspaceService:
     """Coordinates filesystem scans and DB persistence for workspaces."""
 
@@ -44,7 +65,8 @@ class WorkspaceService:
 
     def scan(self, root_path: str) -> ScanResult:
         """Run a dry-run scan and translate filesystem problems to AppError."""
-        path = Path(root_path)
+        resolved = _rewrite_path(root_path)
+        path = Path(resolved)
         self._guard_path(path)
         return self._scanner.scan(path)
 
@@ -60,20 +82,24 @@ class WorkspaceService:
         if not scan.is_sillyspec:
             raise WorkspaceNotSillyspec(
                 "Provided root_path is not a SillySpec workspace.",
-                details={"root_path": scan.root_path, "warnings": scan.warnings},
+                details={"root_path": payload.root_path, "warnings": scan.warnings},
             )
 
         slug = payload.slug or slugify(payload.name)
         now = datetime.utcnow()
+        # Store the original (host) path in DB for display; use rewritten path for sillyspec_path
+        sillyspec_rel = scan.sillyspec_path
+        if sillyspec_rel.startswith(str(Path(_rewrite_path(payload.root_path)))):
+            sillyspec_rel = payload.root_path + sillyspec_rel[len(str(Path(_rewrite_path(payload.root_path)))):]
 
         # Soft-deleted rows keep the same root_path, so before inserting a
         # fresh row we look for a tombstone we can resurrect. This is the
         # natural user expectation: "I removed it, now I want it back".
         revived = await self._resurrect_soft_deleted(
-            root_path=scan.root_path,
+            root_path=payload.root_path,
             payload=payload,
             slug=slug,
-            sillyspec_path=scan.sillyspec_path,
+            sillyspec_path=sillyspec_rel or scan.sillyspec_path,
             created_by=created_by,
             now=now,
         )
@@ -84,8 +110,8 @@ class WorkspaceService:
             id=uuid.uuid4(),
             name=payload.name,
             slug=slug,
-            root_path=scan.root_path,
-            sillyspec_path=scan.sillyspec_path,
+            root_path=payload.root_path,
+            sillyspec_path=sillyspec_rel or scan.sillyspec_path,
             status="active",
             created_by=created_by,
             created_at=now,
