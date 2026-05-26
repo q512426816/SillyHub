@@ -1,0 +1,10 @@
+id: alone
+name: Solo Component
+type: backend
+path: ./nope-not-here
+relations:
+  - target: missing-friend
+    type: depends_on
+  - target: alone
+    type: depends_on
+  - type: depends_on

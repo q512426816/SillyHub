@@ -1,0 +1,15 @@
+id: silly
+name: Silly Backend
+type: backend
+role: api_server
+path: ./silly
+repo_url: git@github.com:org/silly.git
+default_branch: main
+tech_stack:
+  - Python
+  - FastAPI
+  - PostgreSQL
+commands:
+  build: uv build
+  test: uv run pytest
+  dev: uv run uvicorn app.main:app --reload

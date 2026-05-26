@@ -1,0 +1,3 @@
+id: dup
+name: Second Duplicate (should be skipped)
+type: tooling
