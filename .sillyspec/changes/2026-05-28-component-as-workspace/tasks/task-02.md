@@ -1,386 +1,93 @@
 ---
+author: qinyi
+created_at: 2026-05-29T17:40:00+08:00
 id: task-02
 title: WorkspaceRelation 模块 — CRUD + 拓扑查询
 priority: P0
 estimated_hours: 4
 depends_on: [task-01]
-blocks: [task-05, task-06]
+blocks: [task-04, task-05]
 allowed_paths:
-  - backend/app/modules/workspace/relation_model.py
+  - backend/app/modules/workspace/model.py
   - backend/app/modules/workspace/relation_schema.py
   - backend/app/modules/workspace/relation_service.py
   - backend/app/modules/workspace/router.py
   - backend/app/modules/workspace/topology.py
   - backend/app/modules/workspace/tests/test_relation_router.py
   - backend/app/core/errors.py
-author: qinyi
-created_at: 2026-05-28 16:25:00
 ---
 
-# Task-02: WorkspaceRelation 模块 — CRUD + 拓扑查询
+# task-02: WorkspaceRelation 模块 — CRUD + 拓扑查询
 
-## 1. 上下文
-
-**文档依据：**
-- 设计文档：`.sillyspec/changes/2026-05-28-component-as-workspace/design.md` (ADR-08)
-- 实现计划：`.sillyspec/changes/2026-05-28-component-as-workspace/plan.md` (Wave 2)
-- 现有模型参考：`backend/app/modules/component/model.py` (`ComponentRelation` — 将被替换)
-- 现有路由模式：`backend/app/modules/workspace/router.py`
-
-**目标：** 将 `component_relations` 表替换为 `workspace_relations` 表，实现完整 CRUD + 全局拓扑图查询。source/target 都指向 `workspaces` 表，不再有 `workspace_id` 范围列。允许循环依赖，禁止自环。
-
-## 2. 修改文件清单
+## 修改文件（必填）
 
 | 文件 | 操作 | 说明 |
 |---|---|---|
-| `backend/app/modules/workspace/relation_model.py` | **新增** | `WorkspaceRelation` SQLModel 表定义 |
-| `backend/app/modules/workspace/relation_schema.py` | **新增** | Pydantic DTO（Create / Read / List / Topology） |
-| `backend/app/modules/workspace/relation_service.py` | **新增** | CRUD + 校验逻辑 |
-| `backend/app/modules/workspace/topology.py` | **新增** | 全局拓扑图构建 |
-| `backend/app/modules/workspace/router.py` | **修改** | 新增 4 个端点（relations CRUD + topology） |
-| `backend/app/modules/workspace/tests/test_relation_router.py` | **新增** | 全量 HTTP 级测试 |
-| `backend/app/core/errors.py` | **修改** | 新增 `RelationNotFound` / `RelationSelfLoop` / `RelationDuplicate` 错误类 |
+| `backend/app/modules/workspace/model.py` | 已有 | `WorkspaceRelation` 表定义已存在于 model.py 中（与 Workspace 同文件） |
+| `backend/app/modules/workspace/relation_schema.py` | 已有 | Pydantic DTO 已创建（RelationCreate / RelationRead / RelationListResponse / TopologyNode / TopologyEdge / TopologyResponse） |
+| `backend/app/modules/workspace/relation_service.py` | 已有 | RelationService 类已实现（list_for_workspace / create / delete） |
+| `backend/app/modules/workspace/topology.py` | 已有 | TopologyBuilder.build() 已实现 |
+| `backend/app/modules/workspace/router.py` | 已有 | 4 个端点已注册（list_relations / create_relation / delete_relation / get_topology） |
+| `backend/app/modules/workspace/tests/test_relation_router.py` | 已有 | 12 个 HTTP 级测试已编写 |
+| `backend/app/core/errors.py` | 已有 | RelationNotFound / RelationSelfLoop / RelationDuplicate 已添加 |
 
-注意：`workspace_relations` 表的 Alembic 迁移脚本由 task-01 负责。本任务只写 ORM 模型和代码逻辑，假设迁移已经落地。
+**当前状态：代码和测试已全部落地。本任务需要验证其正确性并确保通过全部测试。**
 
-## 3. 实现要求
+## 实现要求
 
-### 3.1 relation_model.py — WorkspaceRelation 表
+1. **WorkspaceRelation 模型**（`model.py`）：有向边表，`source_id` 和 `target_id` 均为 UUID FK 到 `workspaces.id`（CASCADE 删除），`relation_type` 为 String(50)，UQ 约束 `(source_id, target_id, relation_type)`，禁止自环（应用层校验），允许循环依赖。
 
-```python
-"""workspace_relations table — directed graph between workspaces.
+2. **Pydantic DTO**（`relation_schema.py`）：`RelationCreate`（target_id + relation_type Literal + description 可选）、`RelationRead`（全部字段，from_attributes=True）、`RelationListResponse`（outgoing + incoming 两个列表）、`TopologyNode`（id/name/slug/component_key）、`TopologyEdge`（id/source_id/target_id/relation_type/description）、`TopologyResponse`（nodes + edges）。
 
-Replaces the old component_relations table (ADR-08).
-source and target both reference workspaces.id.
-Cycles are allowed; self-loops are prevented at the application level.
-"""
+3. **RelationService**（`relation_service.py`）：三个方法：
+   - `list_for_workspace(workspace_id)` — 校验 workspace 存在后查询出边 + 入边
+   - `create(source_id, payload)` — 自环检查 → source 存在性 → target 存在性 → 三元组重复检查 → insert → IntegrityError 兜底
+   - `delete(relation_id)` — 加载 → 不存在抛 RelationNotFound → 删除前拷贝数据 → delete → commit → 返回拷贝
 
-from __future__ import annotations
+4. **TopologyBuilder**（`topology.py`）：静态方法 `build(session)` 查询所有 active workspace（deleted_at IS NULL）+ 所有 relation，过滤只返回两端都 active 的边。
 
-import uuid
-from datetime import datetime
+5. **Router 端点**（`router.py`）：
+   - `GET /api/workspaces/topology` — 权限 WORKSPACE_READ，必须在 `/{workspace_id}` 路由之前定义
+   - `GET /api/workspaces/{workspace_id}/relations` — 权限 WORKSPACE_READ
+   - `POST /api/workspaces/{workspace_id}/relations` — 权限 WORKSPACE_WRITE，201
+   - `DELETE /api/workspaces/relations/{relation_id}` — 权限 WORKSPACE_ADMIN，200
 
-from sqlalchemy import Column, DateTime, Index, String, Uuid
-from sqlmodel import Field
+6. **错误类**（`errors.py`）：`RelationNotFound`(404) / `RelationSelfLoop`(400) / `RelationDuplicate`(409)，继承 AppError。
 
-from app.models.base import BaseModel
+## 接口定义（代码类任务必填）
 
+### API 端点签名
 
-class WorkspaceRelation(BaseModel, table=True):
-    """Directed edge between two workspaces in the global graph."""
-
-    __tablename__ = "workspace_relations"
-    __table_args__ = (
-        Index(
-            "ux_workspace_relations_triplet",
-            "source_id",
-            "target_id",
-            "relation_type",
-            unique=True,
-        ),
-        Index("ix_workspace_relations_source", "source_id"),
-        Index("ix_workspace_relations_target", "target_id"),
-    )
-
-    id: uuid.UUID = Field(
-        default_factory=uuid.uuid4,
-        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
-    )
-    source_id: uuid.UUID = Field(
-        sa_column=Column(
-            Uuid(as_uuid=True),
-            # FK defined in Alembic migration (task-01)
-            nullable=False,
-        ),
-    )
-    target_id: uuid.UUID = Field(
-        sa_column=Column(
-            Uuid(as_uuid=True),
-            nullable=False,
-        ),
-    )
-    relation_type: str = Field(sa_column=Column(String(50), nullable=False))
-    description: str | None = Field(default=None, sa_column=Column(String, nullable=True))
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
-        sa_column=Column(DateTime(timezone=True), nullable=False),
-    )
 ```
+GET    /api/workspaces/topology
+       -> TopologyResponse
+       权限: WORKSPACE_READ
 
-关键设计点：
-- 无 `workspace_id` 列（与旧 `component_relations` 不同，因为关系是全局的而非属于某个 workspace）
-- UQ 约束 `(source_id, target_id, relation_type)` 保证同一对节点同类型只有一条
-- 自环校验在 service 层做（DB CHECK constraint 由 task-01 的迁移负责，代码也做双重保险）
-- FK 到 `workspaces.id` 的 CASCADE 在迁移脚本中声明，ORM 层不声明以避免模块间导入耦合（与现有 `ComponentRelation` 模式一致）
+GET    /api/workspaces/{workspace_id}/relations
+       -> RelationListResponse
+       权限: WORKSPACE_READ
 
-### 3.2 relation_schema.py — Pydantic DTO
+POST   /api/workspaces/{workspace_id}/relations
+       body: RelationCreate { target_id: UUID, relation_type: Literal[...], description?: str }
+       -> RelationRead (201)
+       权限: WORKSPACE_WRITE
 
-定义以下类型：
-
-```python
-from __future__ import annotations
-
-import uuid
-from datetime import datetime
-from typing import Literal
-
-from pydantic import BaseModel, ConfigDict, Field
-
-RelationTypeLiteral = Literal[
-    "depends_on",
-    "consumes_api_from",
-    "tests",
-    "publishes_to",
-    "documents",
-]
-
-VALID_RELATION_TYPES: list[str] = [
-    "depends_on",
-    "consumes_api_from",
-    "tests",
-    "publishes_to",
-    "documents",
-]
-
-
-class RelationCreate(BaseModel):
-    """Request body for POST /api/workspaces/{id}/relations."""
-    target_id: uuid.UUID
-    relation_type: RelationTypeLiteral
-    description: str | None = None
-
-
-class RelationRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    source_id: uuid.UUID
-    target_id: uuid.UUID
-    relation_type: str
-    description: str | None
-    created_at: datetime
-
-
-class RelationListResponse(BaseModel):
-    outgoing: list[RelationRead]   # source = this workspace
-    incoming: list[RelationRead]   # target = this workspace
-
-
-class TopologyNode(BaseModel):
-    """A workspace node in the topology graph."""
-    id: uuid.UUID
-    name: str
-    slug: str
-    component_key: str | None
-
-
-class TopologyEdge(BaseModel):
-    """A directed edge in the topology graph."""
-    id: uuid.UUID
-    source_id: uuid.UUID
-    target_id: uuid.UUID
-    relation_type: str
-    description: str | None
-
-
-class TopologyResponse(BaseModel):
-    """Full topology graph response."""
-    nodes: list[TopologyNode]
-    edges: list[TopologyEdge]
+DELETE /api/workspaces/relations/{relation_id}
+       -> RelationRead (200)
+       权限: WORKSPACE_ADMIN
 ```
-
-### 3.3 relation_service.py — CRUD + 校验
-
-```python
-class RelationService:
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-
-    async def list_for_workspace(self, workspace_id: uuid.UUID) -> RelationListResponse:
-        """Query all outgoing + incoming relations for a workspace."""
-
-    async def create(self, source_id: uuid.UUID, payload: RelationCreate) -> WorkspaceRelation:
-        """Create a relation with full validation."""
-        # 1. source_id == payload.target_id => raise RelationSelfLoop
-        # 2. source workspace must exist (via WorkspaceService.get)
-        # 3. target workspace must exist (via session.get)
-        # 4. UQ triplet check: query existing, if found raise RelationDuplicate
-        # 5. Insert and return
-
-    async def delete(self, relation_id: uuid.UUID) -> WorkspaceRelation:
-        """Delete a relation by its id."""
-        # 1. Load relation, raise RelationNotFound if missing
-        # 2. Delete, commit, return the deleted object (for response)
-```
-
-校验规则细节：
-1. **自环检查**：`source_id == target_id` 时抛出 `RelationSelfLoop` (400)
-2. **存在性检查**：source 和 target workspace 都必须存在且未软删除（复用 `WorkspaceService.get`）
-3. **重复检查**：查询 `(source_id, target_id, relation_type)` 是否已存在，存在则抛出 `RelationDuplicate` (409)
-4. **relation_type 校验**：由 Pydantic `Literal` 类型保证，非法值直接 422
-
-### 3.4 topology.py — 全局拓扑图构建
-
-```python
-class TopologyBuilder:
-    """Build the full workspace topology graph."""
-
-    @staticmethod
-    async def build(session: AsyncSession) -> TopologyResponse:
-        """
-        1. SELECT all active workspaces (deleted_at IS NULL)
-        2. SELECT all workspace_relations
-        3. Assemble TopologyResponse with nodes + edges
-        """
-```
-
-注意：
-- 只返回 active workspace（`deleted_at IS NULL`）作为节点
-- 边只包含两端节点都是 active 的（CASCADE 删除保证了软删除 workspace 的边被清掉，但这里做应用层过滤作为双重保险）
-- 不做分页（初期数据量小），后续可以加 limit/offset 参数
-
-### 3.5 router.py — 新增端点
-
-在现有 `router = APIRouter(prefix="/workspaces", tags=["workspace"])` 下新增 4 个端点：
-
-#### 端点 1: GET /api/workspaces/{workspace_id}/relations
-
-```python
-@router.get("/{workspace_id}/relations", response_model=RelationListResponse)
-async def list_relations(
-    workspace_id: uuid.UUID,
-    session: SessionDep,
-    _user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_READ))],
-) -> RelationListResponse:
-    """List all outgoing + incoming relations for a workspace."""
-    service = RelationService(session)
-    return await service.list_for_workspace(workspace_id)
-```
-
-- 权限：`WORKSPACE_READ`
-- 返回：`RelationListResponse`（含 `outgoing` 和 `incoming` 两个列表）
-
-#### 端点 2: POST /api/workspaces/{workspace_id}/relations
-
-```python
-@router.post(
-    "/{workspace_id}/relations",
-    response_model=RelationRead,
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_relation(
-    workspace_id: uuid.UUID,
-    payload: RelationCreate,
-    session: SessionDep,
-    _user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_WRITE))],
-) -> RelationRead:
-    """Create a relation. source_id = workspace_id from path."""
-    service = RelationService(session)
-    relation = await service.create(workspace_id, payload)
-    return RelationRead.model_validate(relation)
-```
-
-- 权限：`WORKSPACE_WRITE`
-- `source_id` 从 URL path 取（`workspace_id`），`target_id` 和 `relation_type` 从 body 取
-- 201 返回
-
-#### 端点 3: DELETE /api/workspaces/relations/{relation_id}
-
-```python
-@router.delete(
-    "/relations/{relation_id}",
-    response_model=RelationRead,
-    status_code=status.HTTP_200_OK,
-)
-async def delete_relation(
-    relation_id: uuid.UUID,
-    session: SessionDep,
-    _user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_ADMIN))],
-) -> RelationRead:
-    """Delete a relation by id."""
-    service = RelationService(session)
-    relation = await service.delete(relation_id)
-    return RelationRead.model_validate(relation)
-```
-
-- 权限：`WORKSPACE_ADMIN`
-- 注意 URL pattern：`/workspaces/relations/{relation_id}`（不在 `{workspace_id}` 下）
-- 200 返回被删除的 relation 对象
-
-#### 端点 4: GET /api/workspaces/topology
-
-```python
-@router.get("/topology", response_model=TopologyResponse)
-async def get_topology(
-    session: SessionDep,
-    _user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_READ))],
-) -> TopologyResponse:
-    """Return the full workspace topology graph."""
-    return await TopologyBuilder.build(session)
-```
-
-- 权限：`WORKSPACE_READ`
-- 路由注册顺序：必须放在 `/{workspace_id}` 路由之前，否则 "topology" 会被当作 UUID 解析报 422
-- 实际上因为它没有 `{workspace_id}` 前缀段，可以放在 router 定义的最前面（在 `/{workspace_id}/relations` 之前也可以），但最安全的做法是在 `@router.get("/{workspace_id}")` 之前定义
-
-**重要：路由注册顺序** — `GET /workspaces/topology` 必须定义在 `GET /workspaces/{workspace_id}` 和 `GET /workspaces/{workspace_id}/relations` 之前。FastAPI 按定义顺序匹配路由，`topology` 会被当作 `workspace_id` 参数匹配到。建议把这个端点放在 `scan` 端点之后、`create_workspace` 之前。
-
-### 3.6 errors.py — 新增错误类
-
-在 `# ── Component errors` 区域之前（或之后，但统一在 Workspace 区域附近），新增：
-
-```python
-# ── Relation errors ────────────────────────────────────────────────────────
-
-
-class RelationNotFound(AppError):
-    code = "HTTP_404_RELATION_NOT_FOUND"
-    http_status = status.HTTP_404_NOT_FOUND
-
-
-class RelationSelfLoop(AppError):
-    code = "HTTP_400_RELATION_SELF_LOOP"
-    http_status = status.HTTP_400_BAD_REQUEST
-
-
-class RelationDuplicate(AppError):
-    code = "HTTP_409_RELATION_DUPLICATE"
-    http_status = status.HTTP_409_CONFLICT
-```
-
-## 4. 接口定义汇总
-
-### API 端点
-
-| 方法 | 路径 | 请求体 | 响应 | 状态码 | 权限 |
-|---|---|---|---|---|---|
-| GET | `/api/workspaces/{id}/relations` | — | `RelationListResponse` | 200 | `WORKSPACE_READ` |
-| POST | `/api/workspaces/{id}/relations` | `RelationCreate` | `RelationRead` | 201 | `WORKSPACE_WRITE` |
-| DELETE | `/api/workspaces/relations/{relation_id}` | — | `RelationRead` | 200 | `WORKSPACE_ADMIN` |
-| GET | `/api/workspaces/topology` | — | `TopologyResponse` | 200 | `WORKSPACE_READ` |
-
-### 错误响应
-
-| 错误码 | HTTP 状态 | 触发场景 |
-|---|---|---|
-| `HTTP_400_RELATION_SELF_LOOP` | 400 | source_id == target_id |
-| `HTTP_404_RELATION_NOT_FOUND` | 404 | 删除时 relation_id 不存在 |
-| `HTTP_404_WORKSPACE_NOT_FOUND` | 404 | source 或 target workspace 不存在/已删除 |
-| `HTTP_409_RELATION_DUPLICATE` | 409 | 同一对 (source, target, type) 已存在 |
 
 ### 数据结构
 
-**RelationCreate：**
-```json
+```python
+# RelationCreate（请求体）
 {
   "target_id": "uuid-string",
-  "relation_type": "depends_on",
-  "description": "optional string"
+  "relation_type": "depends_on" | "consumes_api_from" | "tests" | "publishes_to" | "documents",
+  "description": "optional string"  // nullable
 }
-```
 
-**RelationRead：**
-```json
+# RelationRead（响应）
 {
   "id": "uuid-string",
   "source_id": "uuid-string",
@@ -389,47 +96,98 @@ class RelationDuplicate(AppError):
   "description": "optional string or null",
   "created_at": "ISO-8601"
 }
-```
 
-**RelationListResponse：**
-```json
+# RelationListResponse
 {
   "outgoing": [RelationRead, ...],
   "incoming": [RelationRead, ...]
 }
-```
 
-**TopologyResponse：**
-```json
+# TopologyResponse
 {
-  "nodes": [
-    {"id": "uuid", "name": "api-gateway", "slug": "api-gateway", "component_key": "api-gateway"},
-    ...
-  ],
-  "edges": [
-    {"id": "uuid", "source_id": "uuid", "target_id": "uuid", "relation_type": "depends_on", "description": "..."},
-    ...
-  ]
+  "nodes": [{"id": "uuid", "name": "...", "slug": "...", "component_key": "..."}],
+  "edges": [{"id": "uuid", "source_id": "uuid", "target_id": "uuid", "relation_type": "...", "description": "..."}]
 }
 ```
 
-## 5. 边界处理
+### RelationService 方法签名
 
-1. **自环禁止**：`source_id == target_id` 时，service 层抛出 `RelationSelfLoop`，不依赖 DB CHECK constraint（代码层是第一道防线，DB 是兜底）。错误消息："Cannot create a self-referencing relation."
+```python
+class RelationService:
+    def __init__(self, session: AsyncSession) -> None: ...
 
-2. **Workspace 已软删除**：source 或 target workspace 如果 `deleted_at IS NOT NULL`，`WorkspaceService.get()` 已经会抛 `WorkspaceNotFound`，自然拦截。create 时先用 `WorkspaceService.get(source_id)` 校验 source，再 `session.get(Workspace, target_id)` 并检查 `deleted_at`。
+    async def list_for_workspace(self, workspace_id: uuid.UUID) -> RelationListResponse:
+        # 1. ws_service.get(workspace_id) — 校验存在性，不存在抛 WorkspaceNotFound
+        # 2. SELECT WHERE source_id = workspace_id -> outgoing
+        # 3. SELECT WHERE target_id = workspace_id -> incoming
+        # 4. return RelationListResponse(outgoing=..., incoming=...)
 
-3. **重复关系**：(source_id, target_id, relation_type) 三元组唯一。在 service 层先 SELECT 查询是否存在，存在则抛 `RelationDuplicate`。IntegrityError 也做 catch 转换（与 `WorkspaceService._translate_integrity_error` 模式一致）。
+    async def create(self, source_id: uuid.UUID, payload: RelationCreate) -> WorkspaceRelation:
+        # 1. if source_id == payload.target_id: raise RelationSelfLoop
+        # 2. ws_service.get(source_id) — 校验 source 存在
+        # 3. session.get(Workspace, target_id) — 校验 target 存在且未软删除
+        # 4. SELECT WHERE (source, target, type) 匹配 — 存在则 raise RelationDuplicate
+        # 5. session.add(relation) -> flush -> catch IntegrityError 转 RelationDuplicate -> commit -> refresh
 
-4. **循环依赖合法**：A → B 和 B → A 可以同时存在（不同 relation_type），甚至 A → B（depends_on）和 B → A（consumes_api_from）可以共存。不做 DAG 校验。
+    async def delete(self, relation_id: uuid.UUID) -> WorkspaceRelation:
+        # 1. session.get(WorkspaceRelation, relation_id) — None 则 raise RelationNotFound
+        # 2. 拷贝 relation 数据到新对象（因为 delete 后原对象不可用）
+        # 3. session.delete(relation) -> commit
+        # 4. return 拷贝对象
+```
 
-5. **删除 Workspace 后关系清理**：task-01 的迁移脚本在 FK 上设置了 `ON DELETE CASCADE`。Workspace 被硬删除时关联的 relation 自动清理。软删除场景下 relation 保留（因为 workspace 可能被 resurrect），但在 topology 查询中过滤掉。
+### TopologyBuilder 方法签名
 
-6. **Topology 只含 active workspace**：`TopologyBuilder.build()` 查询 `deleted_at IS NULL` 的 workspace，边也只返回两端都是 active 的。这保证了已删除 workspace 不会出现在拓扑图中。
+```python
+class TopologyBuilder:
+    @staticmethod
+    async def build(session: AsyncSession) -> TopologyResponse:
+        # 1. SELECT Workspace WHERE deleted_at IS NULL -> nodes
+        # 2. 收集 active_ids = {ws.id for ws in workspaces}
+        # 3. SELECT WorkspaceRelation -> all_relations
+        # 4. edges = [r for r in all_relations if r.source_id in active_ids and r.target_id in active_ids]
+        # 5. return TopologyResponse(nodes=..., edges=...)
+```
 
-7. **路由顺序冲突**：`GET /workspaces/topology` 不能放在 `GET /workspaces/{workspace_id}` 之后，否则 FastAPI 会把 "topology" 当作 UUID 参数解析。必须把 topology 端点定义在所有含 `{workspace_id}` 的路由之前。
+### 错误响应格式
 
-## 6. 非目标
+```python
+# AppError 基类返回格式
+{
+  "code": "HTTP_400_RELATION_SELF_LOOP",    # 或其他错误码
+  "message": "Cannot create a self-referencing relation.",
+  "request_id": "uuid",
+  "details": {"workspace_id": "..."} | null
+}
+
+# 错误码表
+RelationNotFound  -> code="HTTP_404_RELATION_NOT_FOUND",  status=404
+RelationSelfLoop  -> code="HTTP_400_RELATION_SELF_LOOP",  status=400
+RelationDuplicate -> code="HTTP_409_RELATION_DUPLICATE",  status=409
+WorkspaceNotFound -> code="HTTP_404_WORKSPACE_NOT_FOUND", status=404 (复用已有)
+```
+
+## 边界处理（必填）
+
+1. **自环禁止**：`source_id == target_id` 时 service 层第一行就检查并抛出 `RelationSelfLoop(400)`，错误消息为 `"Cannot create a self-referencing relation."`。DB CHECK constraint 由 task-01 迁移负责，代码层是第一道防线。
+
+2. **Workspace 已软删除**：source workspace 通过 `WorkspaceService.get()` 校验（内部检查 `deleted_at is not None` 则抛 WorkspaceNotFound）。target workspace 通过 `session.get(Workspace, target_id)` 获取后检查 `deleted_at is not None` 则手动抛 WorkspaceNotFound。两边都拦截。
+
+3. **重复三元组**：(source_id, target_id, relation_type) 三元组唯一。service 层先 SELECT 查询，存在则抛 `RelationDuplicate(409)`。此外 `flush()` 时 catch IntegrityError 检查 `ux_workspace_relations_triplet` 消息，兜底转换为 RelationDuplicate。两层防护。
+
+4. **循环依赖合法**：A->B 和 B->A 可以共存（不同 relation_type 或相同 relation_type）。不做 DAG 校验，不检测环。同对节点不同 relation_type 可以有多条边。
+
+5. **删除 Workspace 后关系清理**：FK 设置了 `ON DELETE CASCADE`。Workspace 硬删除时 relation 自动清理。软删除场景下 relation 保留在 DB 中，但 `TopologyBuilder.build()` 只返回 active workspace 的节点和边，软删除 workspace 的边被过滤掉。
+
+6. **删除已删除的 relation**：`session.get(WorkspaceRelation, relation_id)` 返回 None，直接抛 `RelationNotFound(404)`。不区分"不存在"和"已删除"（relation 没有软删除机制，只有硬删除）。
+
+7. **Topology 只含 active workspace**：`TopologyBuilder.build()` 查询 `deleted_at IS NULL` 的 workspace 作为节点，边通过 `if rel.source_id in active_ids and rel.target_id in active_ids` 过滤。确保已删除 workspace 及其关联边不出现。
+
+8. **路由注册顺序**：`GET /workspaces/topology` 必须定义在 `GET /workspaces/{workspace_id}` 和 `GET /workspaces/{workspace_id}/relations` 之前。当前代码中 topology 端点已正确放置在 `{workspace_id}` 路由之前（在 create_workspace 之后、list_workspaces 之前）。
+
+9. **无 auth 返回 401**：所有端点都有 `Depends(require_permission_any(...))` 保护，无 Authorization header 时返回 401。
+
+## 非目标（本任务不做的事）
 
 - 不做分页（初期 workspace 数量少，后续按需加 limit/offset）
 - 不做关系更新（relation 没有可变字段，需要改就删了重建）
@@ -437,183 +195,79 @@ class RelationDuplicate(AppError):
 - 不做权限粒度到 relation 级别（复用 WORKSPACE_READ/WRITE/ADMIN）
 - 不做拓扑图的子图查询（只提供全局图，后续可加 `?workspace_id=` 过滤）
 - 不做图算法（最短路径、连通分量等），只做基础 CRUD + 全图返回
+- 不做 Alembic 迁移脚本（由 task-01 负责）
+- 不做 `WorkspaceRelation` 独立模型文件（保持在 `model.py` 中与 Workspace 同文件）
 
-## 7. 参考
+## 参考
 
-| 项目 | 路径 |
-|---|---|
-| 设计文档 ADR-08 | `.sillyspec/changes/2026-05-28-component-as-workspace/design.md` |
-| 实现计划 | `.sillyspec/changes/2026-05-28-component-as-workspace/plan.md` |
-| 旧 ComponentRelation 模型 | `backend/app/modules/component/model.py` (L82-124) |
-| 现有 Workspace router 模式 | `backend/app/modules/workspace/router.py` |
-| 现有 Workspace service 模式 | `backend/app/modules/workspace/service.py` |
-| 现有 Workspace model | `backend/app/modules/workspace/model.py` |
-| 现有 schema DTO 模式 | `backend/app/modules/workspace/schema.py` |
-| 错误类模式 | `backend/app/core/errors.py` |
-| 权限枚举 | `backend/app/modules/auth/permissions.py` |
-| 测试模式 | `backend/app/modules/workspace/tests/test_router.py` |
-| BaseModel | `backend/app/models/base.py` |
+| 项目 | 路径 | 说明 |
+|---|---|---|
+| 设计文档 ADR-03 | `.sillyspec/changes/2026-05-28-component-as-workspace/design.md` | WorkspaceRelation 是自由有向图 |
+| 实现计划 | `.sillyspec/changes/2026-05-28-component-as-workspace/plan.md` | Wave 2，task-02 |
+| Workspace 模型 | `backend/app/modules/workspace/model.py` | WorkspaceRelation 定义在同文件 L119-158 |
+| Workspace 服务模式 | `backend/app/modules/workspace/service.py` | IntegrityError 处理模式参考 |
+| Workspace router 模式 | `backend/app/modules/workspace/router.py` | 端点注册 + 权限注解模式 |
+| 错误类模式 | `backend/app/core/errors.py` | AppError 子类命名规范 |
+| 权限枚举 | `backend/app/modules/auth/permissions.py` | WORKSPACE_READ/WRITE/ADMIN |
+| 测试 fixture | `backend/conftest.py` | client + auth_headers + db_engine + db_session |
+| 已有 relation 测试 | `backend/app/modules/workspace/tests/test_relation_router.py` | 12 个测试用例 |
+| 已有 workspace 测试 | `backend/app/modules/workspace/tests/test_router.py` | 回归测试参考 |
 
-## 8. TDD 步骤
+## TDD 步骤
 
-### Red 阶段（先写测试，全部失败）
+### Red 阶段（测试已编写 — 12 个用例）
 
-**文件：** `backend/app/modules/workspace/tests/test_relation_router.py`
+测试文件：`backend/app/modules/workspace/tests/test_relation_router.py`
 
-**前置 fixture：** 复用现有 `client` / `auth_headers` fixture（来自 conftest.py），需要创建 2 个 workspace 作为测试数据。
+| # | 测试名 | 场景 |
+|---|---|---|
+| 1 | `test_create_relation_success` | 创建 A->B 依赖关系，验证 201 + 字段正确 |
+| 2 | `test_create_duplicate_relation_returns_409` | 同一三元组重复创建，验证 409 |
+| 3 | `test_create_self_loop_returns_400` | source==target，验证 400 |
+| 4 | `test_create_relation_target_not_found` | target 不存在，验证 404 |
+| 5 | `test_create_relation_source_not_found` | source 不存在，验证 404 |
+| 6 | `test_list_relations_outgoing_and_incoming` | A->B, C->A，验证 A 的 outgoing/incoming |
+| 7 | `test_delete_relation_success` | 创建后删除，验证从列表消失 |
+| 8 | `test_delete_nonexistent_relation_returns_404` | 删除不存在的 relation，验证 404 |
+| 9 | `test_topology_returns_global_graph` | 3 节点 2 边，验证图结构完整 |
+| 10 | `test_topology_excludes_deleted_workspaces` | 软删除 B 后，验证 nodes 和 edges 不含 B |
+| 11 | `test_list_relations_empty` | 无关系的 workspace 查询返回空列表 |
+| 12 | `test_same_pair_different_types_coexist` | A->B (depends_on) + A->B (consumes_api_from) 共存 |
 
-#### 测试 1: 创建关系成功
-```
-1. 创建 workspace A (POST /api/workspaces)
-2. 创建 workspace B (POST /api/workspaces)
-3. POST /api/workspaces/{A.id}/relations
-   body: {"target_id": B.id, "relation_type": "depends_on", "description": "A depends on B"}
-4. 断言 201
-5. 断言 response.id 是有效 UUID
-6. 断言 response.source_id == A.id
-7. 断言 response.target_id == B.id
-8. 断言 response.relation_type == "depends_on"
-```
+### Green 阶段（实现已完成）
 
-#### 测试 2: 创建重复关系返回 409
-```
-1. 创建 workspace A, B
-2. 创建关系 A → B (depends_on) — 成功
-3. 再次创建关系 A → B (depends_on) — 同一 triplet
-4. 断言 409
-5. 断言 response.code == "HTTP_409_RELATION_DUPLICATE"
-```
-
-#### 测试 3: 创建自环返回 400
-```
-1. 创建 workspace A
-2. POST /api/workspaces/{A.id}/relations
-   body: {"target_id": A.id, "relation_type": "depends_on"}
-3. 断言 400
-4. 断言 response.code == "HTTP_400_RELATION_SELF_LOOP"
-```
-
-#### 测试 4: 创建关系 target 不存在返回 404
-```
-1. 创建 workspace A
-2. POST /api/workspaces/{A.id}/relations
-   body: {"target_id": "<random-uuid>", "relation_type": "depends_on"}
-3. 断言 404 (WorkspaceNotFound)
-```
-
-#### 测试 5: 创建关系 source 不存在返回 404
-```
-1. POST /api/workspaces/<nonexistent-uuid>/relations
-   body: {"target_id": "<random-uuid>", "relation_type": "depends_on"}
-2. 断言 404 (WorkspaceNotFound)
-```
-
-#### 测试 6: 列出关系包含出边和入边
-```
-1. 创建 workspace A, B, C
-2. 创建关系 A → B (depends_on)
-3. 创建关系 C → A (consumes_api_from)
-4. GET /api/workspaces/{A.id}/relations
-5. 断言 200
-6. 断言 outgoing 长度 1, outgoing[0].target_id == B.id
-7. 断言 incoming 长度 1, incoming[0].source_id == C.id
-```
-
-#### 测试 7: 删除关系成功
-```
-1. 创建 workspace A, B
-2. 创建关系 A → B (depends_on) — 记录 relation_id
-3. DELETE /api/workspaces/relations/{relation_id}
-4. 断言 200
-5. 断言 response.id == relation_id
-6. 再次 GET /api/workspaces/{A.id}/relations
-7. 断言 outgoing 为空
-```
-
-#### 测试 8: 删除不存在的关系返回 404
-```
-1. DELETE /api/workspaces/relations/<random-uuid>
-2. 断言 404
-3. 断言 response.code == "HTTP_404_RELATION_NOT_FOUND"
-```
-
-#### 测试 9: 拓扑图返回全局图
-```
-1. 创建 workspace A, B, C
-2. 创建关系 A → B (depends_on)
-3. 创建关系 B → C (tests)
-4. GET /api/workspaces/topology
-5. 断言 200
-6. 断言 nodes 长度 >= 3
-7. 断言 edges 长度 >= 2
-8. 断言 edges 中包含 (A→B, depends_on) 和 (B→C, tests)
-```
-
-#### 测试 10: 拓扑图不含已删除 workspace
-```
-1. 创建 workspace A, B, C
-2. 创建关系 A → B (depends_on)
-3. 软删除 workspace B
-4. GET /api/workspaces/topology
-5. 断言 nodes 中不包含 B
-6. 断言 edges 中不包含涉及 B 的边
-```
-
-#### 测试 11: 列出无关系的 workspace 返回空列表
-```
-1. 创建 workspace A
-2. GET /api/workspaces/{A.id}/relations
-3. 断言 200
-4. 断言 outgoing 为空
-5. 断言 incoming 为空
-```
-
-#### 测试 12: 同对节点不同关系类型可共存
-```
-1. 创建 workspace A, B
-2. 创建关系 A → B (depends_on) — 成功
-3. 创建关系 A → B (consumes_api_from) — 成功
-4. 断言 201
-5. GET /api/workspaces/{A.id}/relations
-6. 断言 outgoing 长度 2
-```
-
-### Green 阶段（写实现，全部通过）
-
-按以下顺序实现：
-
-1. 在 `errors.py` 中新增 3 个错误类
-2. 创建 `relation_model.py` — WorkspaceRelation 模型
-3. 创建 `relation_schema.py` — 全部 DTO
-4. 创建 `relation_service.py` — RelationService 类
-5. 创建 `topology.py` — TopologyBuilder 类
-6. 在 `router.py` 中新增 4 个端点（注意路由顺序）
-7. 运行全部测试，确保通过
+实现文件全部就绪：
+1. `errors.py` — 3 个错误类
+2. `model.py` — WorkspaceRelation 模型（L119-158）
+3. `relation_schema.py` — 全部 DTO
+4. `relation_service.py` — RelationService（list_for_workspace / create / delete）
+5. `topology.py` — TopologyBuilder.build()
+6. `router.py` — 4 个端点（注意 topology 在 `{workspace_id}` 路由之前）
 
 ### Refactor 阶段
 
-- 检查重复代码（如 workspace 存在性校验可抽取为 helper）
-- 确认所有 query 使用了正确的索引列
-- 确认日志格式与现有 workspace 模块一致
+- 确认 query 使用了正确的索引列（ux_workspace_relations_triplet, ix_workspace_relations_source, ix_workspace_relations_target）
+- 确认日志格式与现有 workspace 模块一致（`log.info("relation.created", ...)` / `log.info("relation.deleted", ...)`）
+- 确认 IntegrityError 消息匹配逻辑与 WorkspaceService._translate_integrity_error 模式一致
 
-## 9. 验收标准
+## 验收标准
 
-| # | 标准 | 验证方式 |
+| # | 验证步骤 | 通过标准 |
 |---|---|---|
-| 1 | `relation_model.py` 中 `WorkspaceRelation` 表定义正确，含 `source_id`, `target_id`, `relation_type`, `description`, `created_at` | 代码审查：字段类型、nullable、Index 声明齐全 |
-| 2 | `relation_schema.py` 包含 `RelationCreate`, `RelationRead`, `RelationListResponse`, `TopologyNode`, `TopologyEdge`, `TopologyResponse` 全部 DTO | 代码审查 + mypy/pyright 通过 |
-| 3 | `POST /api/workspaces/{id}/relations` 能成功创建关系，返回 201 | 测试 1 |
-| 4 | 自环请求返回 400 + `HTTP_400_RELATION_SELF_LOOP` | 测试 3 |
-| 5 | 重复三元组返回 409 + `HTTP_409_RELATION_DUPLICATE` | 测试 2 |
-| 6 | source 或 target 不存在返回 404 | 测试 4 + 测试 5 |
-| 7 | `GET /api/workspaces/{id}/relations` 正确返回 outgoing + incoming | 测试 6 |
-| 8 | `DELETE /api/workspaces/relations/{id}` 删除成功，关系从列表中消失 | 测试 7 |
-| 9 | 删除不存在的 relation 返回 404 + `HTTP_404_RELATION_NOT_FOUND` | 测试 8 |
-| 10 | `GET /api/workspaces/topology` 返回完整图结构 | 测试 9 |
-| 11 | 拓扑图中不含已软删除的 workspace 及其边 | 测试 10 |
-| 12 | 同对节点不同 relation_type 可共存 | 测试 12 |
-| 13 | 无关系的 workspace 查询返回空列表 | 测试 11 |
-| 14 | 所有端点有正确的权限保护 | 测试：无 auth headers 时返回 401 |
-| 15 | `errors.py` 新增 3 个错误类且命名和格式一致 | 代码审查 |
-| 16 | 全部 12 个测试用例通过 `pytest` | `pytest backend/app/modules/workspace/tests/test_relation_router.py -v` |
-| 17 | 现有 workspace 测试仍全部通过（无回归） | `pytest backend/app/modules/workspace/tests/ -v` |
+| AC-01 | 检查 `model.py` 中 `WorkspaceRelation` 类的字段定义 | 包含 id/source_id/target_id/relation_type/description/created_at，UQ triplet index 存在，source/target index 存在 |
+| AC-02 | 检查 `relation_schema.py` 包含的 DTO 类型 | RelationCreate/RelationRead/RelationListResponse/TopologyNode/TopologyEdge/TopologyResponse 全部存在 |
+| AC-03 | 运行 `test_create_relation_success` | 201，response.source_id == A.id，response.target_id == B.id，relation_type == "depends_on" |
+| AC-04 | 运行 `test_create_self_loop_returns_400` | 400，response.code == "HTTP_400_RELATION_SELF_LOOP" |
+| AC-05 | 运行 `test_create_duplicate_relation_returns_409` | 第二次 409，response.code == "HTTP_409_RELATION_DUPLICATE" |
+| AC-06 | 运行 `test_create_relation_target_not_found` + `test_create_relation_source_not_found` | 均返回 404，code == "HTTP_404_WORKSPACE_NOT_FOUND" |
+| AC-07 | 运行 `test_list_relations_outgoing_and_incoming` | outgoing 长度 1 且 target_id == B.id，incoming 长度 1 且 source_id == C.id |
+| AC-08 | 运行 `test_delete_relation_success` | DELETE 200，后续 GET outgoing 为空 |
+| AC-09 | 运行 `test_delete_nonexistent_relation_returns_404` | 404，code == "HTTP_404_RELATION_NOT_FOUND" |
+| AC-10 | 运行 `test_topology_returns_global_graph` | nodes >= 3，edges >= 2，包含 (A->B, depends_on) 和 (B->C, tests) |
+| AC-11 | 运行 `test_topology_excludes_deleted_workspaces` | nodes 不含 B.id，edges 不含涉及 B 的边 |
+| AC-12 | 运行 `test_list_relations_empty` | outgoing == []，incoming == [] |
+| AC-13 | 运行 `test_same_pair_different_types_coexist` | 第二次 201，GET outgoing 长度 == 2 |
+| AC-14 | 所有端点无 auth headers 访问 | 返回 401 |
+| AC-15 | 检查 `errors.py` | RelationNotFound/RelationSelfLoop/RelationDuplicate 存在，继承 AppError，code/http_status 正确 |
+| AC-16 | `pytest backend/app/modules/workspace/tests/test_relation_router.py -v` | 12 个测试全部 PASSED |
+| AC-17 | `pytest backend/app/modules/workspace/tests/ -v` | 所有 workspace 测试通过（含 test_router.py 等已有测试），无回归 |

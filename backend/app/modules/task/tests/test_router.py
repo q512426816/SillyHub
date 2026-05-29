@@ -25,9 +25,9 @@ async def workspace_with_tasks(
     """Create a workspace with components, a change, and task fixtures."""
     root = _copy_fixtures(COMPONENT_FIXTURES, tmp_path)
 
-    # Add change fixtures
+    # Add change fixtures (dirs_exist_ok because .sillyspec/changes/ already exists)
     sillyspec_changes = root / ".sillyspec" / "changes"
-    shutil.copytree(CHANGE_FIXTURES, sillyspec_changes)
+    shutil.copytree(CHANGE_FIXTURES, sillyspec_changes, dirs_exist_ok=True)
 
     # Add tasks under demo-feature change
     demo_feature = sillyspec_changes / "change" / "2026-05-25-demo-feature"
@@ -244,3 +244,82 @@ async def test_reparse_idempotent(
 
     assert resp2.json()["stats"]["created"] == 0
     assert resp2.json()["stats"]["updated"] == 3
+
+
+# ── M:N workspace_ids tests (task-03) ──────────────────────────────────────
+
+
+async def test_list_tasks_contains_workspace_ids(
+    client, workspace_with_tasks: dict, auth_headers: dict[str, str]
+) -> None:
+    """Test-05: reparse 后 task 的 workspace_ids 包含主 workspace。"""
+    ws_id = workspace_with_tasks["ws_id"]
+    change_id = workspace_with_tasks["change_id"]
+
+    await client.post(
+        f"/api/workspaces/{ws_id}/changes/{change_id}/tasks/reparse",
+        headers=auth_headers,
+    )
+
+    resp = await client.get(
+        f"/api/workspaces/{ws_id}/changes/{change_id}/tasks",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    for item in body["items"]:
+        assert isinstance(item["workspace_ids"], list)
+        assert len(item["workspace_ids"]) > 0
+        assert item["workspace_ids"][0] == ws_id
+
+
+async def test_get_task_detail_contains_workspace_ids(
+    client, workspace_with_tasks: dict, auth_headers: dict[str, str]
+) -> None:
+    """Test-06: task get detail 包含 workspace_ids。"""
+    ws_id = workspace_with_tasks["ws_id"]
+    change_id = workspace_with_tasks["change_id"]
+
+    await client.post(
+        f"/api/workspaces/{ws_id}/changes/{change_id}/tasks/reparse",
+        headers=auth_headers,
+    )
+
+    list_resp = await client.get(
+        f"/api/workspaces/{ws_id}/changes/{change_id}/tasks",
+        headers=auth_headers,
+    )
+    t01 = next(i for i in list_resp.json()["items"] if i["task_key"] == "task-01")
+
+    resp = await client.get(
+        f"/api/workspaces/{ws_id}/tasks/{t01['id']}",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert isinstance(body["workspace_ids"], list)
+    assert ws_id in body["workspace_ids"]
+
+
+async def test_task_board_contains_workspace_ids(
+    client, workspace_with_tasks: dict, auth_headers: dict[str, str]
+) -> None:
+    """Test-07: task board 中所有 task item 含 workspace_ids。"""
+    ws_id = workspace_with_tasks["ws_id"]
+    change_id = workspace_with_tasks["change_id"]
+
+    await client.post(
+        f"/api/workspaces/{ws_id}/changes/{change_id}/tasks/reparse",
+        headers=auth_headers,
+    )
+
+    resp = await client.get(
+        f"/api/workspaces/{ws_id}/changes/{change_id}/tasks/board",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    for column in body["columns"]:
+        for item in column["items"]:
+            assert isinstance(item["workspace_ids"], list)
+            assert len(item["workspace_ids"]) > 0

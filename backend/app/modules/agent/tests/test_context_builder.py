@@ -1003,3 +1003,134 @@ def test_render_bundle_no_referenced_workspaces() -> None:
     )
     md = render_bundle_to_claude_md(bundle)
     assert "## Referenced Workspaces" not in md
+
+
+# ---------------------------------------------------------------------------
+# Task-08: _fetch_referenced_workspaces depth=2 tests
+# ---------------------------------------------------------------------------
+
+
+async def test_fetch_referenced_workspaces_depth_2(
+    db_session: AsyncSession,
+) -> None:
+    """A->B, B->C with max_depth=2 returns B and C (two hops)."""
+    from app.modules.agent.context_builder import _fetch_referenced_workspaces
+    from app.modules.workspace.model import Workspace, WorkspaceRelation
+
+    ws_a = Workspace(
+        id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active"
+    )
+    ws_b = Workspace(
+        id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active"
+    )
+    ws_c = Workspace(
+        id=uuid.uuid4(), name="C", slug="c", root_path="/c", status="active"
+    )
+    db_session.add_all([ws_a, ws_b, ws_c])
+
+    rel_ab = WorkspaceRelation(
+        id=uuid.uuid4(),
+        source_id=ws_a.id,
+        target_id=ws_b.id,
+        relation_type="depends_on",
+    )
+    rel_bc = WorkspaceRelation(
+        id=uuid.uuid4(),
+        source_id=ws_b.id,
+        target_id=ws_c.id,
+        relation_type="depends_on",
+    )
+    db_session.add_all([rel_ab, rel_bc])
+    await db_session.commit()
+
+    result = await _fetch_referenced_workspaces(db_session, ws_a.id, max_depth=2)
+    ws_ids = {s.workspace_id for s in result}
+    assert ws_b.id in ws_ids
+    assert ws_c.id in ws_ids
+
+
+async def test_fetch_referenced_workspaces_depth_2_with_cycle(
+    db_session: AsyncSession,
+) -> None:
+    """A->B, B->C, C->A with max_depth=2 — no infinite recursion, returns B and C."""
+    from app.modules.agent.context_builder import _fetch_referenced_workspaces
+    from app.modules.workspace.model import Workspace, WorkspaceRelation
+
+    ws_a = Workspace(
+        id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active"
+    )
+    ws_b = Workspace(
+        id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active"
+    )
+    ws_c = Workspace(
+        id=uuid.uuid4(), name="C", slug="c", root_path="/c", status="active"
+    )
+    db_session.add_all([ws_a, ws_b, ws_c])
+
+    rel_ab = WorkspaceRelation(
+        id=uuid.uuid4(),
+        source_id=ws_a.id,
+        target_id=ws_b.id,
+        relation_type="depends_on",
+    )
+    rel_bc = WorkspaceRelation(
+        id=uuid.uuid4(),
+        source_id=ws_b.id,
+        target_id=ws_c.id,
+        relation_type="depends_on",
+    )
+    rel_ca = WorkspaceRelation(
+        id=uuid.uuid4(),
+        source_id=ws_c.id,
+        target_id=ws_a.id,
+        relation_type="depends_on",
+    )
+    db_session.add_all([rel_ab, rel_bc, rel_ca])
+    await db_session.commit()
+
+    result = await _fetch_referenced_workspaces(db_session, ws_a.id, max_depth=2)
+    ws_ids = {s.workspace_id for s in result}
+    # A is the origin, should not be in results
+    assert ws_a.id not in ws_ids
+    # B and C should be found
+    assert ws_b.id in ws_ids
+    assert ws_c.id in ws_ids
+
+
+async def test_fetch_referenced_workspaces_depth_1_excludes_second_hop(
+    db_session: AsyncSession,
+) -> None:
+    """A->B, B->C with max_depth=1 returns only B, not C."""
+    from app.modules.agent.context_builder import _fetch_referenced_workspaces
+    from app.modules.workspace.model import Workspace, WorkspaceRelation
+
+    ws_a = Workspace(
+        id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active"
+    )
+    ws_b = Workspace(
+        id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active"
+    )
+    ws_c = Workspace(
+        id=uuid.uuid4(), name="C", slug="c", root_path="/c", status="active"
+    )
+    db_session.add_all([ws_a, ws_b, ws_c])
+
+    rel_ab = WorkspaceRelation(
+        id=uuid.uuid4(),
+        source_id=ws_a.id,
+        target_id=ws_b.id,
+        relation_type="depends_on",
+    )
+    rel_bc = WorkspaceRelation(
+        id=uuid.uuid4(),
+        source_id=ws_b.id,
+        target_id=ws_c.id,
+        relation_type="depends_on",
+    )
+    db_session.add_all([rel_ab, rel_bc])
+    await db_session.commit()
+
+    result = await _fetch_referenced_workspaces(db_session, ws_a.id, max_depth=1)
+    ws_ids = {s.workspace_id for s in result}
+    assert ws_b.id in ws_ids
+    assert ws_c.id not in ws_ids

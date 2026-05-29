@@ -85,14 +85,6 @@ class SpecWorkspaceNotFound(AppError):
     http_status = status.HTTP_404_NOT_FOUND
 
 
-# ── Component errors ─────────────────────────────────────────────────────────
-
-
-class ComponentNotFound(AppError):
-    code = "HTTP_404_COMPONENT_NOT_FOUND"
-    http_status = status.HTTP_404_NOT_FOUND
-
-
 class ScanDocNotFound(AppError):
     code = "HTTP_404_SCAN_DOC_NOT_FOUND"
     http_status = status.HTTP_404_NOT_FOUND

@@ -70,6 +70,41 @@ class WorkspaceCreate(BaseModel):
         return v
 
 
+class WorkspaceUpdate(BaseModel):
+    """Request body for ``PATCH /api/workspaces/{workspace_id}``.
+
+    All fields are optional — only those explicitly provided by the caller are
+    applied.  Uses ``exclude_unset=True`` at the service layer so omitted fields
+    are left untouched.
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    slug: str | None = Field(default=None, max_length=100)
+    root_path: str | None = Field(default=None, min_length=1, max_length=4096)
+    component_key: str | None = Field(default=None, max_length=100)
+    type: str | None = Field(default=None, max_length=50)
+    role: str | None = Field(default=None, max_length=100)
+    repo_url: str | None = Field(default=None)
+    default_branch: str | None = Field(default=None, max_length=100)
+    tech_stack: list[str] | None = Field(default=None)
+    build_command: str | None = Field(default=None)
+    test_command: str | None = Field(default=None)
+    source_yaml_path: str | None = Field(default=None)
+    status: str | None = Field(default=None)
+
+    @field_validator("slug")
+    @classmethod
+    def _validate_slug(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not _SLUG_RE.match(v):
+            raise ValueError(
+                "slug must be lower-case alphanumeric with hyphens, "
+                "starting and ending with an alphanumeric character (1-100 chars)"
+            )
+        return v
+
+
 class WorkspaceRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

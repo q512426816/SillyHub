@@ -20,6 +20,8 @@ from app.core.logging import get_logger
 from app.modules.change.service import ChangeService
 from app.modules.task.model import Task
 from app.modules.task.parser import TaskParser, TaskParserResult
+from app.modules.task.schema import TaskRead, TaskSummary
+from app.modules.workspace.model import TaskWorkspace, Workspace
 from app.modules.workspace.service import WorkspaceService
 
 log = get_logger(__name__)
@@ -56,8 +58,14 @@ class TaskService:
         phase: str | None = None,
     ) -> tuple[list[Task], int]:
         await self._change_service.get(workspace_id, change_id)
+
+        # Query via primary workspace FK OR M:N association table
+        mn_subq = select(TaskWorkspace.task_id).where(
+            col(TaskWorkspace.workspace_id) == workspace_id,
+        )
         stmt = select(Task).where(
-            col(Task.workspace_id) == workspace_id,
+            (col(Task.workspace_id) == workspace_id)
+            | (col(Task.id).in_(mn_subq)),
             col(Task.change_id) == change_id,
         )
         if status:
@@ -70,14 +78,33 @@ class TaskService:
             stmt = stmt.where(col(Task.phase) == phase)
         stmt = stmt.order_by(col(Task.task_key).asc())
         items = list((await self._session.execute(stmt)).scalars().all())
-        return items, len(items)
+        # De-duplicate
+        seen: set[uuid.UUID] = set()
+        unique_items: list[Task] = []
+        for item in items:
+            if item.id not in seen:
+                seen.add(item.id)
+                unique_items.append(item)
+        return unique_items, len(unique_items)
 
     async def get(self, workspace_id: uuid.UUID, task_id: uuid.UUID) -> Task:
+        # Try primary workspace match first
         stmt = select(Task).where(
             col(Task.id) == task_id,
             col(Task.workspace_id) == workspace_id,
         )
         task = (await self._session.execute(stmt)).scalars().first()
+
+        # If primary workspace doesn't match, check M:N table
+        if task is None:
+            mn_stmt = select(TaskWorkspace).where(
+                col(TaskWorkspace.task_id) == task_id,
+                col(TaskWorkspace.workspace_id) == workspace_id,
+            )
+            mn = (await self._session.execute(mn_stmt)).scalars().first()
+            if mn is not None:
+                task = await self._session.get(Task, task_id)
+
         if task is None:
             raise TaskNotFound(
                 f"Task '{task_id}' not found.",
@@ -140,6 +167,18 @@ class TaskService:
                 self._session.add(row)
                 stats["created"] += 1
 
+            # Sync M:N workspace associations
+            target_id = (
+                existing_by_key[parsed.task_key].id
+                if parsed.task_key in existing_by_key
+                else row.id
+            )
+            await self._sync_task_workspaces(
+                task_id=target_id,
+                workspace_id=workspace_id,
+                parsed=parsed,
+            )
+
         for key, row in existing_by_key.items():
             if key not in seen_keys:
                 await self._session.delete(row)
@@ -159,6 +198,74 @@ class TaskService:
     async def _fetch_existing_tasks(self, change_id: uuid.UUID) -> list[Task]:
         stmt = select(Task).where(col(Task.change_id) == change_id)
         return list((await self._session.execute(stmt)).scalars().all())
+
+    # ── M:N Enrichment ──────────────────────────────────────────────────
+
+    async def enrich_with_workspace_ids(self, task: Task) -> TaskRead:
+        """Build TaskRead with workspace_ids populated from M:N table."""
+        stmt = select(TaskWorkspace.workspace_id).where(
+            col(TaskWorkspace.task_id) == task.id,
+        )
+        all_mn = [row[0] for row in (await self._session.execute(stmt)).all()]
+        # Exclude primary workspace_id to avoid duplication
+        secondary = [wid for wid in all_mn if wid != task.workspace_id]
+        data = TaskRead.model_validate(task)
+        data.workspace_ids = [task.workspace_id] + secondary
+        return data
+
+    async def enrich_summaries(self, tasks: list[Task]) -> list[TaskSummary]:
+        """Build TaskSummary list with workspace_ids populated."""
+        result: list[TaskSummary] = []
+        for t in tasks:
+            stmt = select(TaskWorkspace.workspace_id).where(
+                col(TaskWorkspace.task_id) == t.id,
+            )
+            all_mn = [row[0] for row in (await self._session.execute(stmt)).all()]
+            secondary = [wid for wid in all_mn if wid != t.workspace_id]
+            data = TaskSummary.model_validate(t)
+            data.workspace_ids = [t.workspace_id] + secondary
+            result.append(data)
+        return result
+
+    # ── M:N Sync ────────────────────────────────────────────────────────
+
+    async def _sync_task_workspaces(
+        self,
+        task_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        parsed: Any,
+    ) -> None:
+        """Sync M:N associations for a task based on affected_components."""
+        ws_ids: set[uuid.UUID] = {workspace_id}
+        if parsed.affected_components:
+            stmt = select(Workspace.id).where(
+                col(Workspace.component_key).in_(parsed.affected_components),
+                col(Workspace.deleted_at).is_(None),
+            )
+            extra = [row[0] for row in (await self._session.execute(stmt)).all()]
+            ws_ids.update(extra)
+
+        existing_stmt = select(TaskWorkspace).where(
+            col(TaskWorkspace.task_id) == task_id,
+        )
+        existing = list(
+            (await self._session.execute(existing_stmt)).scalars().all()
+        )
+        existing_ws_ids = {tw.workspace_id for tw in existing}
+
+        for tw in existing:
+            if tw.workspace_id not in ws_ids:
+                await self._session.delete(tw)
+
+        for wid in ws_ids - existing_ws_ids:
+            role = "primary" if wid == workspace_id else "affected"
+            self._session.add(
+                TaskWorkspace(
+                    task_id=task_id,
+                    workspace_id=wid,
+                    role=role,
+                )
+            )
 
     @staticmethod
     def _build_task(

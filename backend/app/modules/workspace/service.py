@@ -7,11 +7,12 @@ HTTP <-> service calls.
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -27,9 +28,14 @@ from app.core.errors import (
     WorkspaceSlugDuplicate,
 )
 from app.core.logging import get_logger
-from app.modules.workspace.model import Workspace
+from app.modules.workspace.model import Workspace, WorkspaceRelation
+from app.modules.workspace.parser import (
+    ParseResult,
+    ParsedWorkspace,
+    WorkspaceParser,
+)
 from app.modules.workspace.scanner import ScanResult, WorkspaceScanner
-from app.modules.workspace.schema import WorkspaceCreate, slugify
+from app.modules.workspace.schema import WorkspaceCreate, WorkspaceUpdate, slugify
 
 log = get_logger(__name__)
 
@@ -256,6 +262,264 @@ class WorkspaceService:
         await self._session.refresh(workspace)
         log.info("workspace.soft_deleted", workspace_id=str(workspace.id))
         return workspace
+
+    async def update(
+        self,
+        workspace_id: uuid.UUID,
+        payload: WorkspaceUpdate,
+    ) -> Workspace:
+        """Update an existing workspace with only the fields provided by the caller.
+
+        Uses ``exclude_unset=True`` so omitted fields are left untouched.
+        """
+        ws = await self.get(workspace_id)
+        changes = payload.model_dump(exclude_unset=True)
+        if changes:
+            # Pre-check slug uniqueness before mutating to avoid rollback issues
+            # with SQLite sessions.
+            new_slug = changes.get("slug")
+            if new_slug is not None and new_slug != ws.slug:
+                slug_stmt = (
+                    select(Workspace)
+                    .where(col(Workspace.slug) == new_slug)
+                    .where(col(Workspace.deleted_at).is_(None))
+                )
+                existing = (
+                    await self._session.execute(slug_stmt)
+                ).scalars().first()
+                if existing is not None:
+                    raise WorkspaceSlugDuplicate(
+                        "Another workspace already uses this slug.",
+                        details={"slug": new_slug},
+                    )
+
+            for field, value in changes.items():
+                setattr(ws, field, value)
+            ws.updated_at = datetime.utcnow()
+            await self._session.commit()
+            await self._session.refresh(ws)
+            log.info(
+                "workspace.updated",
+                workspace_id=str(ws.id),
+                updated_fields=list(changes.keys()),
+            )
+        return ws
+
+    # -- Reparse ---
+
+    async def reparse(
+        self,
+        workspace_id: uuid.UUID,
+    ) -> tuple[ParseResult, dict[str, int], list[Workspace], list[WorkspaceRelation]]:
+        """Parse projects/*.yaml under a parent Workspace and create child
+        Workspaces + WorkspaceRelations.
+
+        Args:
+            workspace_id: Parent Workspace UUID.
+
+        Returns:
+            tuple of (ParseResult, stats, children, relations).
+
+        Raises:
+            WorkspaceNotFound: if workspace_id is missing or soft-deleted.
+        """
+        # 1. Verify parent workspace
+        ws = await self.get(workspace_id)
+
+        # 2. Determine parse root
+        root_path = _rewrite_path(ws.root_path)
+
+        # 3. Call parser
+        parser = WorkspaceParser()
+        parse_result = parser.parse(root_path)
+
+        # 4. path_missing re-validation
+        for pw in parse_result.workspaces:
+            if pw.status == "path_missing" and pw.path:
+                resolved = Path(root_path) / pw.path
+                if resolved.exists():
+                    pw.status = "active"
+
+        # 5. Query existing child workspaces
+        # Children have root_path under parent_root/ (constructed by _build_child_root_path).
+        # Use root_path LIKE to find them, excluding the parent itself.
+        normalized_root = root_path.replace("\\", "/")
+        stmt = select(Workspace).where(
+            col(Workspace.root_path).like(normalized_root + "/%"),
+            col(Workspace.deleted_at).is_(None),
+        )
+        existing_rows = list((await self._session.execute(stmt)).scalars().all())
+        existing_children: dict[str, Workspace] = {
+            ws.source_yaml_path: ws for ws in existing_rows if ws.source_yaml_path
+        }
+        existing_by_key: dict[str, Workspace] = {
+            ws.component_key: ws for ws in existing_rows if ws.component_key
+        }
+
+        # 6. Iterate parsed workspaces — UPSERT
+        stats: dict[str, int] = {
+            "parsed": 0,
+            "created": 0,
+            "updated": 0,
+            "deleted": 0,
+            "relations_created": 0,
+            "relations_deleted": 0,
+        }
+        seen_child_ids: set[uuid.UUID] = set()
+
+        for pw in parse_result.workspaces:
+            stats["parsed"] += 1
+            child_root = self._build_child_root_path(root_path, pw)
+
+            # Match existing row
+            existing = existing_children.get(pw.source_yaml_path) or existing_by_key.get(
+                pw.component_key
+            )
+
+            if existing:
+                # UPDATE
+                existing.name = pw.name
+                existing.type = pw.type
+                existing.role = pw.role
+                existing.repo_url = pw.repo_url
+                existing.default_branch = pw.default_branch
+                existing.tech_stack = pw.tech_stack
+                existing.build_command = pw.build_command
+                existing.test_command = pw.test_command
+                existing.source_yaml_path = pw.source_yaml_path
+                existing.component_key = pw.component_key
+                existing.root_path = child_root
+                existing.updated_at = datetime.utcnow()
+                stats["updated"] += 1
+                seen_child_ids.add(existing.id)
+            else:
+                # CREATE
+                slug = (slugify(pw.name)[:78] + "-" + pw.component_key[:20])[:100]
+                child = Workspace(
+                    id=uuid.uuid4(),
+                    name=pw.name,
+                    slug=slug,
+                    root_path=child_root,
+                    status="active",
+                    component_key=pw.component_key,
+                    type=pw.type,
+                    role=pw.role,
+                    repo_url=pw.repo_url,
+                    default_branch=pw.default_branch,
+                    tech_stack=pw.tech_stack,
+                    build_command=pw.build_command,
+                    test_command=pw.test_command,
+                    source_yaml_path=pw.source_yaml_path,
+                    created_by=None,
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow(),
+                )
+                self._session.add(child)
+                stats["created"] += 1
+                seen_child_ids.add(child.id)
+
+        await self._session.flush()
+
+        # 7. Soft-delete removed children
+        for source_path, child in existing_children.items():
+            if child.id not in seen_child_ids:
+                child.deleted_at = datetime.utcnow()
+                child.status = "deleted"
+                child.updated_at = datetime.utcnow()
+                stats["deleted"] += 1
+
+        await self._session.flush()
+
+        # 8. Delete old relations + create new relations
+        # Collect key -> id mapping from all children (including newly created)
+        all_children_stmt = select(Workspace).where(
+            col(Workspace.id).in_(seen_child_ids)
+        )
+        all_children = list(
+            (await self._session.execute(all_children_stmt)).scalars().all()
+        )
+        key_to_id: dict[str, uuid.UUID] = {
+            ws.component_key: ws.id for ws in all_children if ws.component_key
+        }
+
+        # Delete old relations where source or target is in seen_child_ids
+        old_rels_stmt = select(WorkspaceRelation).where(
+            or_(
+                col(WorkspaceRelation.source_id).in_(seen_child_ids),
+                col(WorkspaceRelation.target_id).in_(seen_child_ids),
+            )
+        )
+
+        deleted_rel_ids: set[uuid.UUID] = set()
+        for rel in (await self._session.execute(old_rels_stmt)).scalars().all():
+            if rel.id not in deleted_rel_ids:
+                await self._session.delete(rel)
+                deleted_rel_ids.add(rel.id)
+                stats["relations_deleted"] += 1
+
+        await self._session.flush()
+
+        # Create new relations with in-memory dedup
+        seen_edges: set[tuple[uuid.UUID, uuid.UUID, str]] = set()
+        for pr in parse_result.relations:
+            src_id = key_to_id.get(pr.source_key)
+            tgt_id = key_to_id.get(pr.target_key)
+            if not src_id or not tgt_id:
+                continue
+            edge = (src_id, tgt_id, pr.relation_type)
+            if edge in seen_edges:
+                continue
+            seen_edges.add(edge)
+            rel = WorkspaceRelation(
+                id=uuid.uuid4(),
+                source_id=src_id,
+                target_id=tgt_id,
+                relation_type=pr.relation_type,
+                description=pr.description,
+            )
+            self._session.add(rel)
+            stats["relations_created"] += 1
+
+        # 9. Commit + return
+        await self._session.commit()
+
+        # Re-query final state
+        final_children = list(
+            (
+                await self._session.execute(
+                    select(Workspace).where(col(Workspace.id).in_(seen_child_ids))
+                )
+            ).scalars().all()
+        )
+        final_rels = list(
+            (
+                await self._session.execute(
+                    select(WorkspaceRelation).where(
+                        or_(
+                            col(WorkspaceRelation.source_id).in_(seen_child_ids),
+                            col(WorkspaceRelation.target_id).in_(seen_child_ids),
+                        )
+                    )
+                )
+            ).scalars().all()
+        )
+
+        return parse_result, stats, final_children, final_rels
+
+    @staticmethod
+    def _build_child_root_path(parent_root: str, parsed: ParsedWorkspace) -> str:
+        """Construct the root_path for a child Workspace.
+
+        Rules:
+        1. parsed.path is not None and not empty: os.path.join(parent_root, parsed.path)
+        2. parsed.path is None or empty: parent_root + "/" + component_key
+
+        Returns forward-slash normalized path.
+        """
+        if parsed.path:
+            joined = os.path.join(parent_root, parsed.path)
+            return os.path.normpath(joined).replace("\\", "/")
+        return os.path.normpath(parent_root).replace("\\", "/") + "/" + parsed.component_key
 
     # -- Helpers ---
 

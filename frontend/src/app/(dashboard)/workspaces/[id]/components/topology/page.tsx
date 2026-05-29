@@ -15,7 +15,10 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiError } from "@/lib/api";
-import { getTopology, type TopologyResponse } from "@/lib/components";
+import {
+  getTopology,
+  type TopologyResponse,
+} from "@/lib/workspaces";
 
 interface Props {
   params: { id: string };
@@ -27,15 +30,18 @@ const TYPE_COLORS: Record<string, string> = {
   tooling: "#f59e0b",
   docs: "#6366f1",
   test: "#ec4899",
+  library: "#8b5cf6",
+  service: "#06b6d4",
+  monorepo: "#f97316",
 };
 
-type ComponentNodeData = {
+type WorkspaceNodeData = {
   label: string;
   type: string | null;
-  status: string;
+  slug: string;
 };
 
-function ComponentNode({ data }: NodeProps<Node<ComponentNodeData>>) {
+function WorkspaceNode({ data }: NodeProps<Node<WorkspaceNodeData>>) {
   const bg = data.type ? TYPE_COLORS[data.type] ?? "#64748b" : "#64748b";
   return (
     <div
@@ -46,16 +52,14 @@ function ComponentNode({ data }: NodeProps<Node<ComponentNodeData>>) {
       <div className="font-semibold text-[11px]">{data.label}</div>
       <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
         <span>{data.type ?? "—"}</span>
-        <span className={data.status === "active" ? "text-emerald-600" : "text-destructive"}>
-          {data.status}
-        </span>
+        <span className="font-mono">{data.slug}</span>
       </div>
       <Handle type="source" position={Position.Right} style={{ background: bg }} />
     </div>
   );
 }
 
-const nodeTypes = { component: ComponentNode };
+const nodeTypes = { component: WorkspaceNode };
 
 export default function TopologyPage({ params }: Props) {
   const workspaceId = params.id;
@@ -66,7 +70,8 @@ export default function TopologyPage({ params }: Props) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    getTopology(workspaceId)
+    // Global topology API — no workspace_id needed
+    getTopology()
       .then((data) => {
         if (!cancelled) setTopology(data);
       })
@@ -81,7 +86,7 @@ export default function TopologyPage({ params }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, []);
 
   const { nodes, edges } = useMemo(() => {
     if (!topology) return { nodes: [] as Node[], edges: [] as Edge[] };
@@ -95,14 +100,14 @@ export default function TopologyPage({ params }: Props) {
       },
       data: {
         label: n.name,
-        type: n.type,
-        status: n.status,
-      } satisfies ComponentNodeData,
+        type: n.component_key ?? null,
+        slug: n.slug,
+      } satisfies WorkspaceNodeData,
     }));
     const edges: Edge[] = topology.edges.map((e, idx) => ({
       id: `edge-${idx}`,
-      source: e.source,
-      target: e.target,
+      source: e.source_id,
+      target: e.target_id,
       label: e.relation_type,
       animated: true,
       style: { stroke: "#94a3b8" },
@@ -117,10 +122,10 @@ export default function TopologyPage({ params }: Props) {
         <div>
           <p className="text-[11px] text-muted-foreground">
             <Link href={`/workspaces/${workspaceId}/components`} className="hover:underline">
-              ← 组件列表
+              ← 关系列表
             </Link>
           </p>
-          <h1 className="text-base font-semibold">组件拓扑</h1>
+          <h1 className="text-base font-semibold">Workspace 拓扑</h1>
         </div>
         <div className="text-[11px] text-muted-foreground">
           {topology ? `${topology.nodes.length} 节点 · ${topology.edges.length} 边` : ""}
@@ -138,12 +143,12 @@ export default function TopologyPage({ params }: Props) {
           </div>
         ) : nodes.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
-            <p>这个 Workspace 还没有组件。</p>
+            <p>暂无 Workspace 拓扑数据。</p>
             <Link
-              href={`/workspaces/${workspaceId}/components`}
+              href="/workspaces"
               className="text-primary hover:underline"
             >
-              去解析组件
+              返回 Workspace 列表
             </Link>
           </div>
         ) : (

@@ -31,6 +31,7 @@ from app.modules.workspace.schema import (
     WorkspaceListResponse,
     WorkspaceRead,
     WorkspaceStructureDTO,
+    WorkspaceUpdate,
 )
 from app.modules.workspace.service import WorkspaceService
 from app.modules.workspace.topology import TopologyBuilder
@@ -200,3 +201,19 @@ async def delete_workspace(
 ) -> WorkspaceRead:
     service = WorkspaceService(session)
     return WorkspaceRead.model_validate(await service.soft_delete(workspace_id))
+
+
+@router.patch(
+    "/{workspace_id}",
+    response_model=WorkspaceRead,
+    status_code=status.HTTP_200_OK,
+)
+async def update_workspace(
+    workspace_id: uuid.UUID,
+    payload: WorkspaceUpdate,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_ADMIN))],
+) -> WorkspaceRead:
+    service = WorkspaceService(session)
+    ws = await service.update(workspace_id, payload)
+    return WorkspaceRead.model_validate(ws)

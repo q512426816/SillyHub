@@ -353,3 +353,111 @@ async def test_same_pair_different_types_coexist(
     )
     assert list_resp.status_code == 200
     assert len(list_resp.json()["outgoing"]) == 2
+
+
+# ── Test 13-16: No-auth tests ─────────────────────────────────────────────────
+
+
+async def test_no_auth_create_relation_returns_401(
+    client: AsyncClient, tmp_path: Path
+) -> None:
+    """POST /api/workspaces/{id}/relations without Authorization returns 401."""
+    resp = await client.post(
+        "/api/workspaces/00000000-0000-0000-0000-000000000000/relations",
+        json={"target_id": "00000000-0000-0000-0000-000000000001", "relation_type": "depends_on"},
+    )
+    assert resp.status_code == 401
+
+
+async def test_no_auth_list_relations_returns_401(
+    client: AsyncClient, tmp_path: Path
+) -> None:
+    """GET /api/workspaces/{id}/relations without Authorization returns 401."""
+    resp = await client.get(
+        "/api/workspaces/00000000-0000-0000-0000-000000000000/relations",
+    )
+    assert resp.status_code == 401
+
+
+async def test_no_auth_delete_relation_returns_401(
+    client: AsyncClient,
+) -> None:
+    """DELETE /api/workspaces/relations/{id} without Authorization returns 401."""
+    resp = await client.delete(
+        "/api/workspaces/relations/00000000-0000-0000-0000-000000000000",
+    )
+    assert resp.status_code == 401
+
+
+async def test_no_auth_topology_returns_401(
+    client: AsyncClient,
+) -> None:
+    """GET /api/workspaces/topology without Authorization returns 401."""
+    resp = await client.get("/api/workspaces/topology")
+    assert resp.status_code == 401
+
+
+# ── Test 17-18: Cycle tests via HTTP ──────────────────────────────────────────
+
+
+async def test_cycle_two_nodes_via_http(
+    client: AsyncClient, tmp_path: Path, auth_headers: dict[str, str]
+) -> None:
+    """A->B and B->A cycle through HTTP, topology returns 2 edges."""
+    ws_a = await _create_workspace(client, auth_headers, tmp_path, "workspace-a")
+    ws_b = await _create_workspace(client, auth_headers, tmp_path, "workspace-b")
+
+    await client.post(
+        f"/api/workspaces/{ws_a['id']}/relations",
+        json={"target_id": ws_b["id"], "relation_type": "depends_on"},
+        headers=auth_headers,
+    )
+    await client.post(
+        f"/api/workspaces/{ws_b['id']}/relations",
+        json={"target_id": ws_a["id"], "relation_type": "depends_on"},
+        headers=auth_headers,
+    )
+
+    resp = await client.get("/api/workspaces/topology", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    cycle_edges = [
+        e for e in body["edges"]
+        if (e["source_id"] == ws_a["id"] and e["target_id"] == ws_b["id"])
+        or (e["source_id"] == ws_b["id"] and e["target_id"] == ws_a["id"])
+    ]
+    assert len(cycle_edges) == 2
+
+
+async def test_cycle_three_nodes_via_http(
+    client: AsyncClient, tmp_path: Path, auth_headers: dict[str, str]
+) -> None:
+    """A->B, B->C, C->A cycle through HTTP, topology returns 3 nodes + 3 edges."""
+    ws_a = await _create_workspace(client, auth_headers, tmp_path, "workspace-a")
+    ws_b = await _create_workspace(client, auth_headers, tmp_path, "workspace-b")
+    ws_c = await _create_workspace(client, auth_headers, tmp_path, "workspace-c")
+
+    await client.post(
+        f"/api/workspaces/{ws_a['id']}/relations",
+        json={"target_id": ws_b["id"], "relation_type": "depends_on"},
+        headers=auth_headers,
+    )
+    await client.post(
+        f"/api/workspaces/{ws_b['id']}/relations",
+        json={"target_id": ws_c["id"], "relation_type": "depends_on"},
+        headers=auth_headers,
+    )
+    await client.post(
+        f"/api/workspaces/{ws_c['id']}/relations",
+        json={"target_id": ws_a["id"], "relation_type": "depends_on"},
+        headers=auth_headers,
+    )
+
+    resp = await client.get("/api/workspaces/topology", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    node_ids = {n["id"] for n in body["nodes"]}
+    assert ws_a["id"] in node_ids
+    assert ws_b["id"] in node_ids
+    assert ws_c["id"] in node_ids
+    assert len(body["edges"]) >= 3

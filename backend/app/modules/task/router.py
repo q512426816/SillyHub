@@ -52,10 +52,8 @@ async def list_tasks(
         priority=priority,
         phase=phase,
     )
-    return TaskList(
-        items=[TaskSummary.model_validate(t) for t in items],
-        total=total,
-    )
+    enriched = await service.enrich_summaries(items)
+    return TaskList(items=enriched, total=total)
 
 
 @router.get(
@@ -70,7 +68,7 @@ async def get_task(
 ) -> TaskRead:
     service = TaskService(session)
     task = await service.get(workspace_id, task_id)
-    return TaskRead.model_validate(task)
+    return await service.enrich_with_workspace_ids(task)
 
 
 @router.get(
@@ -85,16 +83,17 @@ async def get_task_board(
 ) -> TaskBoard:
     service = TaskService(session)
     columns = await service.get_board(workspace_id, change_id)
-    return TaskBoard(
-        columns=[
+    enriched_columns = []
+    for c in columns:
+        enriched_items = await service.enrich_summaries(c["items"])
+        enriched_columns.append(
             TaskBoardColumn(
                 status=c["status"],
                 count=c["count"],
-                items=[TaskSummary.model_validate(t) for t in c["items"]],
+                items=enriched_items,
             )
-            for c in columns
-        ]
-    )
+        )
+    return TaskBoard(columns=enriched_columns)
 
 
 @router.post(

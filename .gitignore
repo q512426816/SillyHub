@@ -49,3 +49,9 @@ yarn-error.log*
 # Spike artefacts
 spikes/**/tmp/
 spikes/**/*.log
+
+# Local / temp
+.loop-progress.md
+prototype/
+.playwright-mcp/
+bash.exe.stackdump

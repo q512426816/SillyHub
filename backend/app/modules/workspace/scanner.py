@@ -13,6 +13,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.modules.workspace.parser import ParseIssue, ParsedRelation, ParsedWorkspace
 
 # Public warning codes — stable identifiers shipped to API consumers.
 WARN_NO_SILLYSPEC = "no_sillyspec_dir"
@@ -58,10 +62,10 @@ class ScanResult:
     structure: WorkspaceStructure = field(default_factory=WorkspaceStructure)
     warnings: list[str] = field(default_factory=list)
     # Parser integration (task-05)
-    parsed_workspaces: list = field(default_factory=list)
-    parsed_relations: list = field(default_factory=list)
-    parse_warnings: list = field(default_factory=list)
-    parse_errors: list = field(default_factory=list)
+    parsed_workspaces: list[ParsedWorkspace] = field(default_factory=list)
+    parsed_relations: list[ParsedRelation] = field(default_factory=list)
+    parse_warnings: list[ParseIssue] = field(default_factory=list)
+    parse_errors: list[ParseIssue] = field(default_factory=list)
 
 
 class WorkspaceScanner:
@@ -113,6 +117,15 @@ class WorkspaceScanner:
         struct.has_docs_dir = (sillyspec / "docs").is_dir()
         struct.has_runtime_dir = (sillyspec / ".runtime").is_dir()
         struct.has_local_yaml = (sillyspec / "local.yaml").is_file()
+
+        # --- task-05: parser integration ---
+        from app.modules.workspace.parser import WorkspaceParser as _WP
+
+        parse_result = _WP().parse(root)
+        result.parsed_workspaces = parse_result.workspaces
+        result.parsed_relations = parse_result.relations
+        result.parse_warnings = parse_result.warnings
+        result.parse_errors = parse_result.errors
 
         return result
 

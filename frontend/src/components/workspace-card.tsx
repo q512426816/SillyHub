@@ -76,6 +76,16 @@ export function WorkspaceCard({ workspace, onChanged }: Props) {
         <dd>{formatTs(workspace.last_scanned_at)}</dd>
         <dt className="text-muted-foreground">创建于</dt>
         <dd>{formatTs(workspace.created_at)}</dd>
+        {workspace.tech_stack && workspace.tech_stack.length > 0 && (
+          <>
+            <dt className="text-muted-foreground">技术栈</dt>
+            <dd className="flex flex-wrap gap-1">
+              {workspace.tech_stack.map((t) => (
+                <Badge key={t} variant="outline" className="text-[10px]">{t}</Badge>
+              ))}
+            </dd>
+          </>
+        )}
       </dl>
 
       {error && (
@@ -93,7 +103,7 @@ export function WorkspaceCard({ workspace, onChanged }: Props) {
           href={`/workspaces/${workspace.id}/components`}
           className="inline-flex h-7 items-center rounded border border-border px-2 text-xs text-foreground hover:bg-muted"
         >
-          项目组件
+          关系
         </Link>
         <Button size="sm" variant="ghost" onClick={handleRescan} disabled={busy !== null}>
           {busy === "rescan" ? "扫描中…" : "Re-scan"}

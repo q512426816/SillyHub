@@ -10,6 +10,7 @@ import pytest
 from app.modules.workspace.scanner import (
     WARN_MISSING_PROJECTS_DIR,
     WARN_NO_SILLYSPEC,
+    ScanResult,
     WorkspaceScanner,
 )
 
@@ -116,3 +117,47 @@ def test_dotfiles_under_change_are_ignored(tmp_path: Path) -> None:
     (base / "changes" / "change" / ".hidden").write_text("nope\n", encoding="utf-8")
     result = WorkspaceScanner().scan(tmp_path)
     assert result.structure.active_changes_count == 0
+
+
+# --- task-05: ScanResult parser fields ---
+
+
+def test_scan_result_parser_fields_default_empty() -> None:
+    """ScanResult parser fields default to empty lists (AC-01)."""
+    result = ScanResult(root_path="/tmp", sillyspec_path="/tmp/.sillyspec", is_sillyspec=False)
+    assert result.parsed_workspaces == []
+    assert result.parsed_relations == []
+    assert result.parse_warnings == []
+    assert result.parse_errors == []
+
+
+def test_scan_fills_parser_fields(tmp_path: Path) -> None:
+    """scan() populates parsed_workspaces when projects/*.yaml exists (AC-02, AC-03)."""
+    base = tmp_path / ".sillyspec"
+    (base / "projects").mkdir(parents=True)
+    (base / "changes" / "change").mkdir(parents=True)
+    (base / "changes" / "archive").mkdir(parents=True)
+
+    (base / "projects" / "backend.yaml").write_text(
+        "id: backend\nname: Backend\n", encoding="utf-8"
+    )
+
+    result = WorkspaceScanner().scan(tmp_path)
+    assert len(result.parsed_workspaces) == 1
+    assert result.parsed_workspaces[0].component_key == "backend"
+    assert result.parsed_workspaces[0].name == "Backend"
+    assert result.parsed_relations == []
+    assert result.parse_errors == []
+
+
+def test_scan_empty_projects_dir_parser_fields_empty(tmp_path: Path) -> None:
+    """When projects/ dir exists but is empty, parsed_workspaces is []."""
+    base = tmp_path / ".sillyspec"
+    (base / "projects").mkdir(parents=True)
+    (base / "changes" / "change").mkdir(parents=True)
+    (base / "changes" / "archive").mkdir(parents=True)
+
+    result = WorkspaceScanner().scan(tmp_path)
+    assert result.parsed_workspaces == []
+    assert result.parsed_relations == []
+    assert result.parse_errors == []

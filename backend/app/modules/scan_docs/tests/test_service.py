@@ -186,7 +186,9 @@ class TestReparseCreatesDocs:
             "# Test Architecture\nContent here.", encoding="utf-8"
         )
 
-        ws = await _create_workspace(db_session, component_key="silly")
+        ws = await _create_workspace(
+            db_session, root_path=str(sillyspec_root), component_key="silly"
+        )
         await _create_spec_workspace(db_session, ws, str(sillyspec_root))
 
         svc = ScanDocsService(db_session)
@@ -217,7 +219,9 @@ class TestReparseUpdatesDocs:
             "# V1 Architecture\nOriginal.", encoding="utf-8"
         )
 
-        ws = await _create_workspace(db_session, component_key="silly")
+        ws = await _create_workspace(
+            db_session, root_path=str(sillyspec_root), component_key="silly"
+        )
         await _create_spec_workspace(db_session, ws, str(sillyspec_root))
 
         svc = ScanDocsService(db_session)
@@ -253,7 +257,9 @@ class TestReparseIdempotent:
             "# Stable Content\nUnchanged.", encoding="utf-8"
         )
 
-        ws = await _create_workspace(db_session, component_key="silly")
+        ws = await _create_workspace(
+            db_session, root_path=str(sillyspec_root), component_key="silly"
+        )
         await _create_spec_workspace(db_session, ws, str(sillyspec_root))
 
         svc = ScanDocsService(db_session)
@@ -282,7 +288,9 @@ class TestReparseRemovesDeletedFiles:
         arch_file = scan_dir / "ARCHITECTURE.md"
         arch_file.write_text("# Architecture\nContent.", encoding="utf-8")
 
-        ws = await _create_workspace(db_session, component_key="silly")
+        ws = await _create_workspace(
+            db_session, root_path=str(sillyspec_root), component_key="silly"
+        )
         await _create_spec_workspace(db_session, ws, str(sillyspec_root))
 
         svc = ScanDocsService(db_session)

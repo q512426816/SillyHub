@@ -218,3 +218,224 @@ async def test_create_resurrect_conflicts_with_active_slug(db_session, tmp_path:
             WorkspaceCreate(name="A again", slug="shared", root_path=str(root_a)),
             created_by=None,
         )
+
+
+# ── task-05: reparse helpers + tests ─────────────────────────────────────────
+
+
+def _write_yaml(directory: Path, filename: str, content: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    p = directory / filename
+    p.write_text(content, encoding="utf-8")
+    return p
+
+
+def _make_workspace_with_projects(tmp_path: Path, name: str = "ws") -> Path:
+    """Create a workspace with .sillyspec/projects/ directory."""
+    return _make_workspace(tmp_path, name)
+
+
+async def _create_parent_and_reparse(
+    service: WorkspaceService,
+    root: Path,
+) -> tuple:
+    """Helper: create a parent workspace from root, then call reparse."""
+    ws = await service.create(
+        WorkspaceCreate(name="Parent", root_path=str(root)),
+        created_by=None,
+    )
+    return await service.reparse(ws.id)
+
+
+async def test_reparse_creates_child_workspaces(db_session, tmp_path: Path) -> None:
+    """reparse creates independent child Workspaces from YAML (AC-04, AC-05)."""
+    root = _make_workspace_with_projects(tmp_path)
+    projects = root / ".sillyspec" / "projects"
+
+    _write_yaml(
+        projects,
+        "backend.yaml",
+        "id: backend\nname: Backend Service\ntype: service\npath: backend\n"
+        "tech_stack:\n  - python\n  - fastapi\ncommands:\n  build: pip install\n"
+        "  test: pytest\nrelations:\n  - target: frontend\n    type: consumes_api_from\n",
+    )
+    _write_yaml(
+        projects,
+        "frontend.yaml",
+        "id: frontend\nname: Frontend App\ntype: frontend\npath: frontend\n"
+        "tech_stack:\n  - typescript\n  - react\n",
+    )
+
+    service = WorkspaceService(db_session)
+    parse_result, stats, children, relations = await _create_parent_and_reparse(service, root)
+
+    assert stats["parsed"] == 2
+    assert stats["created"] == 2
+    assert stats["updated"] == 0
+
+    assert len(children) == 2
+    by_key = {c.component_key: c for c in children}
+    assert "backend" in by_key
+    assert "frontend" in by_key
+
+    be = by_key["backend"]
+    assert be.name == "Backend Service"
+    assert be.type == "service"
+    assert be.tech_stack == ["python", "fastapi"]
+    assert be.build_command == "pip install"
+    assert be.test_command == "pytest"
+    assert be.status == "active"
+
+    fe = by_key["frontend"]
+    assert fe.name == "Frontend App"
+    assert fe.type == "frontend"
+    assert fe.tech_stack == ["typescript", "react"]
+
+    # Relation
+    assert stats["relations_created"] == 1
+    assert len(relations) == 1
+    rel = relations[0]
+    assert rel.source_id == by_key["backend"].id
+    assert rel.target_id == by_key["frontend"].id
+    assert rel.relation_type == "consumes_api_from"
+
+
+async def test_reparse_updates_existing_children(db_session, tmp_path: Path) -> None:
+    """Second reparse updates metadata instead of creating new rows (AC-06)."""
+    root = _make_workspace_with_projects(tmp_path)
+    projects = root / ".sillyspec" / "projects"
+
+    _write_yaml(projects, "backend.yaml", "id: backend\nname: Backend\ntype: service\n")
+    _write_yaml(projects, "frontend.yaml", "id: frontend\nname: Frontend\ntype: frontend\n")
+
+    service = WorkspaceService(db_session)
+    ws = await service.create(
+        WorkspaceCreate(name="Parent", root_path=str(root)),
+        created_by=None,
+    )
+
+    # First reparse
+    _, stats1, children1, _ = await service.reparse(ws.id)
+    assert stats1["created"] == 2
+    assert stats1["updated"] == 0
+
+    # Modify YAML content
+    _write_yaml(projects, "backend.yaml", "id: backend\nname: Backend V2\ntype: library\n")
+
+    # Second reparse
+    _, stats2, children2, _ = await service.reparse(ws.id)
+    assert stats2["created"] == 0
+    assert stats2["updated"] == 2
+
+    by_key = {c.component_key: c for c in children2}
+    assert by_key["backend"].name == "Backend V2"
+    assert by_key["backend"].type == "library"
+
+
+async def test_reparse_soft_deletes_removed_components(db_session, tmp_path: Path) -> None:
+    """Removed YAML triggers soft-delete of child Workspace (AC-07)."""
+    root = _make_workspace_with_projects(tmp_path)
+    projects = root / ".sillyspec" / "projects"
+
+    _write_yaml(projects, "backend.yaml", "id: backend\nname: Backend\n")
+    _write_yaml(projects, "frontend.yaml", "id: frontend\nname: Frontend\n")
+    _write_yaml(projects, "shared.yaml", "id: shared\nname: Shared Lib\n")
+
+    service = WorkspaceService(db_session)
+    ws = await service.create(
+        WorkspaceCreate(name="Parent", root_path=str(root)),
+        created_by=None,
+    )
+
+    # First reparse
+    _, stats1, _, _ = await service.reparse(ws.id)
+    assert stats1["parsed"] == 3
+    assert stats1["created"] == 3
+
+    # Remove one YAML
+    (projects / "shared.yaml").unlink()
+
+    # Second reparse
+    _, stats2, children2, _ = await service.reparse(ws.id)
+    assert stats2["parsed"] == 2
+    assert stats2["deleted"] == 1
+    assert len(children2) == 2
+
+    # Verify the soft-deleted workspace
+    from sqlalchemy import select
+    from sqlmodel import col
+
+    from app.modules.workspace.model import Workspace
+
+    stmt = select(Workspace).where(col(Workspace.component_key) == "shared")
+    deleted_ws = (await db_session.execute(stmt)).scalars().first()
+    assert deleted_ws is not None
+    assert deleted_ws.deleted_at is not None
+    assert deleted_ws.status == "deleted"
+
+
+async def test_reparse_empty_projects_dir(db_session, tmp_path: Path) -> None:
+    """Empty projects/ results in all-zero stats, no errors (E-01)."""
+    root = _make_workspace_with_projects(tmp_path)
+    # projects/ dir exists but is empty
+
+    service = WorkspaceService(db_session)
+    ws = await service.create(
+        WorkspaceCreate(name="Parent", root_path=str(root)),
+        created_by=None,
+    )
+    _, stats, children, relations = await service.reparse(ws.id)
+
+    assert stats["parsed"] == 0
+    assert stats["created"] == 0
+    assert stats["updated"] == 0
+    assert stats["deleted"] == 0
+    assert stats["relations_created"] == 0
+    assert stats["relations_deleted"] == 0
+    assert len(children) == 0
+    assert len(relations) == 0
+
+
+async def test_reparse_unknown_workspace_raises(db_session) -> None:
+    """Random UUID raises WorkspaceNotFound (AC-08)."""
+    service = WorkspaceService(db_session)
+    with pytest.raises(WorkspaceNotFound):
+        await service.reparse(uuid.uuid4())
+
+
+async def test_reparse_soft_deleted_parent_raises(db_session, tmp_path: Path) -> None:
+    """Soft-deleted parent raises WorkspaceNotFound (E-08)."""
+    root = _make_workspace_with_projects(tmp_path)
+    service = WorkspaceService(db_session)
+    ws = await service.create(
+        WorkspaceCreate(name="Parent", root_path=str(root)),
+        created_by=None,
+    )
+    await service.soft_delete(ws.id)
+    with pytest.raises(WorkspaceNotFound):
+        await service.reparse(ws.id)
+
+
+async def test_reparse_path_missing_correction(db_session, tmp_path: Path) -> None:
+    """path_missing corrected when subdirectory exists (AC-09)."""
+    root = _make_workspace_with_projects(tmp_path)
+    projects = root / ".sillyspec" / "projects"
+
+    # YAML references a path that we'll create on disk
+    _write_yaml(projects, "backend.yaml", "id: backend\nname: Backend\npath: backend\n")
+
+    # Create the subdirectory so path_missing gets corrected
+    (root / "backend").mkdir(parents=True, exist_ok=True)
+
+    service = WorkspaceService(db_session)
+    ws = await service.create(
+        WorkspaceCreate(name="Parent", root_path=str(root)),
+        created_by=None,
+    )
+    _, stats, children, _ = await service.reparse(ws.id)
+
+    assert stats["parsed"] == 1
+    assert stats["created"] == 1
+    assert len(children) == 1
+    assert children[0].status == "active"
+    assert "backend" in children[0].root_path

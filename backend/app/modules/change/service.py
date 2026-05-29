@@ -18,6 +18,8 @@ from app.core.errors import ChangeDocNotFound, ChangeNotFound
 from app.core.logging import get_logger
 from app.modules.change.model import Change, ChangeDocument
 from app.modules.change.parser import ChangeParser, ChangeParserResult, ParsedChange
+from app.modules.change.schema import ChangeRead, ChangeSummary
+from app.modules.workspace.model import ChangeWorkspace, Workspace
 from app.modules.workspace.service import WorkspaceService
 
 log = get_logger(__name__)
@@ -50,7 +52,16 @@ class ChangeService:
         owner: str | None = None,
     ) -> tuple[list[Change], int]:
         await self._workspace_service.get(workspace_id)
-        stmt = select(Change).where(col(Change.workspace_id) == workspace_id)
+
+        # Query via primary workspace FK OR M:N association table
+        mn_subq = select(ChangeWorkspace.change_id).where(
+            col(ChangeWorkspace.workspace_id) == workspace_id,
+        )
+        stmt = select(Change).where(
+            (col(Change.workspace_id) == workspace_id)
+            | (col(Change.id).in_(mn_subq))
+        )
+
         if location:
             stmt = stmt.where(col(Change.location) == location)
         if status:
@@ -63,15 +74,35 @@ class ChangeService:
                 pass  # invalid UUID, skip filter
         stmt = stmt.order_by(col(Change.change_key).asc())
         items = list((await self._session.execute(stmt)).scalars().all())
-        return items, len(items)
+        # De-duplicate (primary workspace and M:N may overlap)
+        seen: set[uuid.UUID] = set()
+        unique_items: list[Change] = []
+        for item in items:
+            if item.id not in seen:
+                seen.add(item.id)
+                unique_items.append(item)
+        return unique_items, len(unique_items)
 
     async def get(self, workspace_id: uuid.UUID, change_id: uuid.UUID) -> Change:
         await self._workspace_service.get(workspace_id)
+
+        # Try primary workspace match first
         stmt = select(Change).where(
             col(Change.id) == change_id,
             col(Change.workspace_id) == workspace_id,
         )
         change = (await self._session.execute(stmt)).scalars().first()
+
+        # If primary workspace doesn't match, check M:N table
+        if change is None:
+            mn_stmt = select(ChangeWorkspace).where(
+                col(ChangeWorkspace.change_id) == change_id,
+                col(ChangeWorkspace.workspace_id) == workspace_id,
+            )
+            mn = (await self._session.execute(mn_stmt)).scalars().first()
+            if mn is not None:
+                change = await self._session.get(Change, change_id)
+
         if change is None:
             raise ChangeNotFound(
                 f"Change '{change_id}' not found.",
@@ -193,6 +224,18 @@ class ChangeService:
                 stats=stats,
             )
 
+            # Sync M:N workspace associations
+            target_id = (
+                existing_by_key[parsed.change_key].id
+                if parsed.change_key in existing_by_key
+                else row.id
+            )
+            await self._sync_change_workspaces(
+                change_id=target_id,
+                workspace_id=workspace_id,
+                parsed=parsed,
+            )
+
         # Delete changes whose keys disappeared
         for key, row in existing_by_key.items():
             if key not in seen_keys:
@@ -253,6 +296,91 @@ class ChangeService:
             col(ChangeDocument.change_id) == change_id
         )
         return list((await self._session.execute(stmt)).scalars().all())
+
+    # ── M:N Enrichment ──────────────────────────────────────────────────
+
+    async def enrich_with_workspace_ids(self, change: Change) -> ChangeRead:
+        """Build ChangeRead with workspace_ids populated from M:N table.
+
+        workspace_ids list starts with the primary workspace_id, followed by
+        secondary workspace IDs from the M:N table. No duplicates.
+        """
+        stmt = select(ChangeWorkspace.workspace_id).where(
+            col(ChangeWorkspace.change_id) == change.id,
+        )
+        all_mn = [row[0] for row in (await self._session.execute(stmt)).all()]
+        # Exclude primary workspace_id to avoid duplication
+        secondary = [wid for wid in all_mn if wid != change.workspace_id]
+        data = ChangeRead.model_validate(change)
+        data.workspace_ids = [change.workspace_id] + secondary
+        return data
+
+    async def enrich_summaries(self, changes: list[Change]) -> list[ChangeSummary]:
+        """Build ChangeSummary list with workspace_ids populated.
+
+        Queries the M:N table for each change to get associated workspace IDs.
+        For MVP scale, per-item queries are sufficient.
+        """
+        result: list[ChangeSummary] = []
+        for c in changes:
+            stmt = select(ChangeWorkspace.workspace_id).where(
+                col(ChangeWorkspace.change_id) == c.id,
+            )
+            all_mn = [row[0] for row in (await self._session.execute(stmt)).all()]
+            secondary = [wid for wid in all_mn if wid != c.workspace_id]
+            data = ChangeSummary.model_validate(c)
+            data.workspace_ids = [c.workspace_id] + secondary
+            result.append(data)
+        return result
+
+    # ── M:N Sync ────────────────────────────────────────────────────────
+
+    async def _sync_change_workspaces(
+        self,
+        change_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        parsed: ParsedChange,
+    ) -> None:
+        """Sync M:N associations for a change based on affected_components.
+
+        Strategy:
+        1. Primary workspace is always written with role="primary"
+        2. affected_components matching a workspace component_key -> role="affected"
+        3. Existing associations not in the new list are deleted
+        """
+        ws_ids: set[uuid.UUID] = {workspace_id}
+        if parsed.affected_components:
+            stmt = select(Workspace.id).where(
+                col(Workspace.component_key).in_(parsed.affected_components),
+                col(Workspace.deleted_at).is_(None),
+            )
+            extra = [row[0] for row in (await self._session.execute(stmt)).all()]
+            ws_ids.update(extra)
+
+        # Get existing associations
+        existing_stmt = select(ChangeWorkspace).where(
+            col(ChangeWorkspace.change_id) == change_id,
+        )
+        existing = list(
+            (await self._session.execute(existing_stmt)).scalars().all()
+        )
+        existing_ws_ids = {cw.workspace_id for cw in existing}
+
+        # Delete stale associations
+        for cw in existing:
+            if cw.workspace_id not in ws_ids:
+                await self._session.delete(cw)
+
+        # Add new associations
+        for wid in ws_ids - existing_ws_ids:
+            role = "primary" if wid == workspace_id else "affected"
+            self._session.add(
+                ChangeWorkspace(
+                    change_id=change_id,
+                    workspace_id=wid,
+                    role=role,
+                )
+            )
 
     @staticmethod
     def _build_change(

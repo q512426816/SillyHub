@@ -49,10 +49,8 @@ async def list_changes(
         status=status,
         owner=owner,
     )
-    return ChangeList(
-        items=[ChangeSummary.model_validate(c) for c in items],
-        total=total,
-    )
+    enriched = await service.enrich_summaries(items)
+    return ChangeList(items=enriched, total=total)
 
 
 @router.get(
@@ -67,7 +65,7 @@ async def get_change(
 ) -> ChangeRead:
     service = ChangeService(session)
     change = await service.get(workspace_id, change_id)
-    return ChangeRead.model_validate(change)
+    return await service.enrich_with_workspace_ids(change)
 
 
 @router.get(

@@ -1,5 +1,19 @@
+/**
+ * @deprecated This module is deprecated. Use `@/lib/workspaces` instead.
+ *
+ * The backend component API endpoints have been removed and replaced by
+ * Workspace Relations and global Topology APIs. This file provides minimal
+ * compatibility shims so that existing pages not yet migrated can compile.
+ *
+ * See task-10 for the migration plan.
+ */
 import { apiFetch } from "./api";
+import type { Workspace } from "./workspaces";
 
+/**
+ * @deprecated Use `Workspace` from `@/lib/workspaces` instead.
+ * Component type preserved for backward compatibility with unmigrated pages.
+ */
 export type Component = {
   id: string;
   workspace_id: string;
@@ -75,18 +89,28 @@ export type TopologyResponse = {
   edges: TopologyEdge[];
 };
 
+/**
+ * @deprecated Use `getWorkspaceRelations` from `@/lib/workspaces` instead.
+ * This calls a removed endpoint and will fail at runtime.
+ */
 export function listComponents(workspaceId: string) {
   return apiFetch<{ items: Component[]; total: number }>(
     `/api/workspaces/${workspaceId}/components`,
   );
 }
 
+/**
+ * @deprecated Use `getWorkspace` from `@/lib/workspaces` instead.
+ */
 export function getComponent(workspaceId: string, componentId: string) {
   return apiFetch<Component>(
     `/api/workspaces/${workspaceId}/components/${componentId}`,
   );
 }
 
+/**
+ * @deprecated Use `rescanWorkspace` from `@/lib/workspaces` instead.
+ */
 export function reparseComponents(workspaceId: string) {
   return apiFetch<ReparseResponse>(
     `/api/workspaces/${workspaceId}/components/reparse`,
@@ -94,6 +118,9 @@ export function reparseComponents(workspaceId: string) {
   );
 }
 
+/**
+ * @deprecated Use `getTopology` from `@/lib/workspaces` instead.
+ */
 export function getTopology(workspaceId: string) {
   return apiFetch<TopologyResponse>(
     `/api/workspaces/${workspaceId}/components/topology`,

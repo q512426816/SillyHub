@@ -22,11 +22,6 @@ class Permission(StrEnum):
     WORKSPACE_ADMIN = "workspace:admin"
     WORKSPACE_MEMBER_MANAGE = "workspace:member:manage"
 
-    # ── Component ───────────────────────────────────────────
-    COMPONENT_READ = "component:read"
-    COMPONENT_WRITE = "component:write"
-    COMPONENT_ADMIN = "component:admin"
-
     # ── Change ──────────────────────────────────────────────
     CHANGE_CREATE = "change:create"
     CHANGE_READ = "change:read"

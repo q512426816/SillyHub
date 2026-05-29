@@ -178,3 +178,180 @@ async def test_create_validates_slug_format(
         headers=auth_headers,
     )
     assert resp.status_code == 422
+
+
+# ── PATCH tests (task-09) ───────────────────────────────────────────────
+
+
+async def _create_workspace(
+    client: AsyncClient, workspace_root: Path, auth_headers: dict[str, str]
+) -> dict:
+    """Helper: create a workspace and return the JSON body."""
+    resp = await client.post(
+        "/api/workspaces",
+        json={"name": "Patch Target", "root_path": str(workspace_root)},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+async def test_patch_updates_name(
+    client: AsyncClient, workspace_root: Path, auth_headers: dict[str, str]
+) -> None:
+    """AC-01: PATCH updates name, returns 200 with new name."""
+    created = await _create_workspace(client, workspace_root, auth_headers)
+    ws_id = created["id"]
+
+    resp = await client.patch(
+        f"/api/workspaces/{ws_id}",
+        json={"name": "New Name"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["name"] == "New Name"
+    assert body["id"] == ws_id
+
+
+async def test_patch_updates_multiple_fields(
+    client: AsyncClient, workspace_root: Path, auth_headers: dict[str, str]
+) -> None:
+    """AC-02: PATCH updates several metadata fields at once."""
+    created = await _create_workspace(client, workspace_root, auth_headers)
+    ws_id = created["id"]
+
+    resp = await client.patch(
+        f"/api/workspaces/{ws_id}",
+        json={
+            "name": "Multi Update",
+            "component_key": "backend-api",
+            "type": "service",
+            "role": "api-gateway",
+            "tech_stack": ["python", "fastapi", "postgresql"],
+            "build_command": "make build",
+            "test_command": "make test",
+        },
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["name"] == "Multi Update"
+    assert body["component_key"] == "backend-api"
+    assert body["type"] == "service"
+    assert body["role"] == "api-gateway"
+    assert body["tech_stack"] == ["python", "fastapi", "postgresql"]
+    assert body["build_command"] == "make build"
+    assert body["test_command"] == "make test"
+
+
+async def test_patch_not_found(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    """AC-03: PATCH a non-existent workspace returns 404."""
+    import uuid
+
+    fake_id = str(uuid.uuid4())
+    resp = await client.patch(
+        f"/api/workspaces/{fake_id}",
+        json={"name": "Does Not Matter"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404
+
+
+async def test_patch_no_auth(
+    client: AsyncClient, workspace_root: Path, auth_headers: dict[str, str]
+) -> None:
+    """AC-04: PATCH without authentication returns 401."""
+    created = await _create_workspace(client, workspace_root, auth_headers)
+    ws_id = created["id"]
+
+    resp = await client.patch(
+        f"/api/workspaces/{ws_id}",
+        json={"name": "Should Fail"},
+    )
+    assert resp.status_code == 401
+
+
+async def test_patch_empty_body_is_idempotent(
+    client: AsyncClient, workspace_root: Path, auth_headers: dict[str, str]
+) -> None:
+    """AC-05: PATCH with no fields returns 200 with original values."""
+    created = await _create_workspace(client, workspace_root, auth_headers)
+    ws_id = created["id"]
+
+    resp = await client.patch(
+        f"/api/workspaces/{ws_id}",
+        json={},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["name"] == created["name"]
+    assert body["slug"] == created["slug"]
+    assert body["root_path"] == created["root_path"]
+
+
+async def test_patch_rejects_empty_name(
+    client: AsyncClient, workspace_root: Path, auth_headers: dict[str, str]
+) -> None:
+    """Boundary: name as empty string should be rejected with 422."""
+    created = await _create_workspace(client, workspace_root, auth_headers)
+    ws_id = created["id"]
+
+    resp = await client.patch(
+        f"/api/workspaces/{ws_id}",
+        json={"name": ""},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
+
+
+async def test_patch_validates_slug_format(
+    client: AsyncClient, workspace_root: Path, auth_headers: dict[str, str]
+) -> None:
+    """Boundary: invalid slug format should be rejected with 422."""
+    created = await _create_workspace(client, workspace_root, auth_headers)
+    ws_id = created["id"]
+
+    resp = await client.patch(
+        f"/api/workspaces/{ws_id}",
+        json={"slug": "Bad Slug!"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
+
+
+async def test_patch_slug_conflict_returns_409(
+    client: AsyncClient, tmp_path: Path, auth_headers: dict[str, str]
+) -> None:
+    """Boundary: updating slug to an already-taken slug returns 409."""
+    # Create first workspace
+    root1 = _make_workspace(tmp_path, "ws-a")
+    resp1 = await client.post(
+        "/api/workspaces",
+        json={"name": "WS A", "root_path": str(root1)},
+        headers=auth_headers,
+    )
+    assert resp1.status_code == 201
+    ws_a_id = resp1.json()["id"]
+    ws_a_slug = resp1.json()["slug"]  # "ws-a"
+
+    # Create second workspace
+    root2 = _make_workspace(tmp_path, "ws-b")
+    resp2 = await client.post(
+        "/api/workspaces",
+        json={"name": "WS B", "root_path": str(root2)},
+        headers=auth_headers,
+    )
+    assert resp2.status_code == 201
+    ws_b_id = resp2.json()["id"]
+
+    # Try to update WS B's slug to WS A's slug
+    resp = await client.patch(
+        f"/api/workspaces/{ws_b_id}",
+        json={"slug": ws_a_slug},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 409

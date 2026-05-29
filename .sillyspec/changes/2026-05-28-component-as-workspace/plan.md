@@ -13,27 +13,35 @@ created_at: 2026-05-28 16:20:00
 
 模型重构是关键路径起点，必须先完成。
 
-- [ ] task-01: 数据模型重构 — Workspace 吸收 Component 元数据
+- [x] task-01: 数据模型重构 — Workspace 吸收 Component 元数据 ✅ 76 tests passed
 
 ## Wave 2：核心功能（task-02, task-03, task-07）
 
 三个任务并行，均依赖 W1 的模型变更，彼此独立。
 
-- [ ] task-02: WorkspaceRelation 模块 — CRUD + 拓扑查询
-- [ ] task-03: Change/Task/AgentRun M:N 关联 — 关联表 + 查询逻辑
-- [ ] task-07: SpecWorkspace/ScanDocs 适配 — 适配新 Workspace 模型
+- [x] task-02: WorkspaceRelation 模块 — CRUD + 拓扑查询 ✅ 12 tests passed
+- [x] task-03: Change/Task/AgentRun M:N 关联 — 关联表 + 查询逻辑 ✅ 27 tests passed
+- [x] task-07: SpecWorkspace/ScanDocs 适配 — 适配新 Workspace 模型 ✅ 26 tests passed
 
 ## Wave 3：集成 + 清理（task-04, task-05, task-06）
 
 依赖 W1+W2 的模型和模块。
 
-- [ ] task-04: 解析器迁移 — Scanner 创建独立 Workspace + WorkspaceRelation
-- [ ] task-05: Agent 跨空间上下文构建 — 基于 WorkspaceRelation 拉取 spec 摘要
-- [ ] task-06: 删除 Component 模块 — 移除 component/ 目录，清理所有引用
+- [x] task-04: 解析器迁移 — Scanner 创建独立 Workspace + WorkspaceRelation ✅ 86 tests passed
+- [x] task-05: Agent 跨空间上下文构建 — 基于 WorkspaceRelation 拉取 spec 摘要 ✅ 30 tests passed
+- [x] task-06: 删除 Component 模块 — 移除 component/ 目录，清理所有引用 ✅ 188 tests passed
 
-## Wave 4：验证（task-08）
+## Wave 4：前端迁移（task-10）
 
-- [ ] task-08: 测试覆盖 — 全量 pytest
+- [x] task-10: 前端迁移 — workspaces API client + components 页面 + topology 页面 ✅ TypeScript 编译通过, 5 文件迁移完成
+
+## Wave 5：补漏（task-09）
+
+- [x] task-09: Workspace PATCH 端点 — 支持更新元数据字段 ✅ 138 tests passed
+
+## Wave 6：验证（task-08）
+
+- [x] task-08: 测试覆盖 — 全量 pytest ✅ 250 tests passed (5 new files + 2 modified)
 
 ## 任务总表
 
@@ -46,7 +54,8 @@ created_at: 2026-05-28 16:20:00
 | task-04 | 解析器迁移 | W3 | P0 | 4h | task-01, task-02 | workspace/scanner.py + service.py：YAML 解析后创建独立 Workspace + WorkspaceRelation |
 | task-05 | Agent 跨空间上下文 | W3 | P1 | 3h | task-02 | context_builder.py：通过 WorkspaceRelation 查询关联 Workspace，构建 referenced_workspaces 摘要 |
 | task-06 | 删除 Component 模块 | W3 | P0 | 2h | task-04, task-07 | 删除 backend/app/modules/component/，清理 main.py + migrations/env.py + conftest.py + 4 个 test 文件中的 import |
-| task-08 | 测试覆盖 | W4 | P0 | 3h | task-01~07 | workspace tests（relation/topology）+ change/task/agent M:N tests + parser migration tests + 全量 pytest |
+| task-09 | Workspace PATCH 端点 | W4 | P1 | 1h | task-01 | router.py 新增 PATCH /api/workspaces/{workspace_id}，schema 新增 WorkspaceUpdate，service 新增 update 方法 |
+| task-08 | 测试覆盖 | W5 | P0 | 3h | task-01~09 | workspace tests（relation/topology）+ change/task/agent M:N tests + parser migration tests + 全量 pytest |
 
 ## 依赖关系图
 
