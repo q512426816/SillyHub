@@ -128,7 +128,7 @@ class SpecValidator:
         if not projects_dir.exists():
             return issues
 
-        required_fields = {"name"}
+        required_fields = {"id", "name", "type"}
 
         for yaml_file in list(projects_dir.glob("*.yaml")) + list(projects_dir.glob("*.yml")):
             try:
@@ -152,14 +152,23 @@ class SpecValidator:
                 ))
                 continue
 
-            # Check required fields
-            missing = required_fields - set(data.keys())
+            # Minimal spec: a YAML that contains only `name` is treated as a
+            # valid placeholder (id derived from filename, type defaults).
+            # Any additional key triggers full schema validation.
+            data_keys = set(data.keys())
+            if data_keys == {"name"}:
+                # Derive id from filename stem for reference checks
+                component_ids.append(yaml_file.stem)
+                continue
+
+            # Full schema validation
+            missing = required_fields - data_keys
             if missing:
                 issues.append(ValidationIssue(
-                    severity="warning",
+                    severity="error",
                     category="schema",
                     path=str(yaml_file),
-                    message=f"Missing optional fields: {', '.join(sorted(missing))}.",
+                    message=f"Missing required fields: {', '.join(sorted(missing))}.",
                 ))
 
             # Collect component IDs for reference check

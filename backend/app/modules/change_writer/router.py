@@ -55,9 +55,32 @@ async def create_change(
 
 @router.post(
     "/changes/{change_id}/documents/generate",
+    response_model=MarkdownGenerateResponse,
+)
+async def generate_document(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    data: MarkdownGenerateRequest,
+    session: SessionDep,
+    user: CurrentUser,
+) -> MarkdownGenerateResponse:
+    service = ChangeWriterService(session)
+    rel_path, size = await service.generate_document(
+        workspace_id,
+        user.id,
+        change_id=change_id,
+        doc_type=data.doc_type,
+        content=data.content,
+        lease_id=data.lease_id,  # type: ignore[arg-type]
+    )
+    return MarkdownGenerateResponse(doc_type=data.doc_type, path=rel_path, size=size)
+
+
+@router.post(
+    "/changes/{change_id}/documents/batch-generate",
     response_model=BatchGenerateResponse,
 )
-async def generate_documents(
+async def batch_generate_documents(
     workspace_id: uuid.UUID,
     change_id: uuid.UUID,
     data: BatchGenerateRequest,

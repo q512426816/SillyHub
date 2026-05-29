@@ -195,6 +195,14 @@ class WorktreeAcquireFailed(AppError):
     http_status = status.HTTP_503_SERVICE_UNAVAILABLE
 
 
+# ── Spec errors ──────────────────────────────────────────────────────────────────
+
+
+class SpecConflictNotFound(AppError):
+    code = "HTTP_404_SPEC_CONFLICT_NOT_FOUND"
+    http_status = status.HTTP_404_NOT_FOUND
+
+
 def _request_id(request: Request) -> str:
     rid = request.headers.get("x-request-id")
     if rid:
