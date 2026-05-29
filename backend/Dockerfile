@@ -35,9 +35,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Non-root runtime user
 RUN groupadd --system app && useradd --system --gid app --home /app app
 
-# Install minimal runtime dependencies (libpq for asyncpg/psycopg fallback if ever needed)
+# Install minimal runtime dependencies + Node.js/sillyspec CLI
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates \
+ && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+ && apt-get install -y --no-install-recommends nodejs \
+ && npm install -g sillyspec \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
