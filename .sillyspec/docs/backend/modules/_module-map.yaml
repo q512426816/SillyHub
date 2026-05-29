@@ -1,0 +1,138 @@
+---
+author: qinyi
+created_at: 2026-05-29T17:44:00
+---
+
+# 模块映射 — backend
+# 用于 archive 阶段识别变更影响的模块
+
+modules:
+  core:
+    paths:
+      - app/core/**
+    description: 横切关注点（config, db, auth, redis, errors, logging, telemetry, security, crypto）
+
+  models:
+    paths:
+      - app/models/**
+    description: 共享 ORM 基类（BaseModel）
+
+  workspace:
+    paths:
+      - app/modules/workspace/**
+    description: 工作区 CRUD、扫描状态、软删除/复活
+
+  auth:
+    paths:
+      - app/modules/auth/**
+    description: JWT 认证 + RBAC 权限控制
+
+  change:
+    paths:
+      - app/modules/change/**
+    description: 变更管理
+
+  change_writer:
+    paths:
+      - app/modules/change_writer/**
+    description: 变更文档写入和生成
+
+  task:
+    paths:
+      - app/modules/task/**
+    description: 任务看板管理
+
+  agent:
+    paths:
+      - app/modules/agent/**
+    description: Agent 运行管理（Claude Code 适配器 + Redis pub/sub）
+
+  worktree:
+    paths:
+      - app/modules/worktree/**
+    description: Git worktree CRUD + 租约管理
+
+  git_gateway:
+    paths:
+      - app/modules/git_gateway/**
+    description: Git 操作网关 + 审计日志
+
+  git_identity:
+    paths:
+      - app/modules/git_identity/**
+    description: Git 身份管理 + GitHub PAT 验证
+
+  tool_gateway:
+    paths:
+      - app/modules/tool_gateway/**
+    description: 工具操作网关 + 审计日志
+
+  scan_docs:
+    paths:
+      - app/modules/scan_docs/**
+    description: 扫描文档索引与解析
+
+  release:
+    paths:
+      - app/modules/release/**
+    description: 发布管理 + 审批
+
+  incident:
+    paths:
+      - app/modules/incident/**
+    description: 事件追踪 + 复盘
+
+  workflow:
+    paths:
+      - app/modules/workflow/**
+    description: 工作流/审批流程 + FSM + spec guardian
+
+  settings:
+    paths:
+      - app/modules/settings/**
+    description: 平台设置
+
+  knowledge:
+    paths:
+      - app/modules/knowledge/**
+    description: 知识库
+
+  runtime:
+    paths:
+      - app/modules/runtime/**
+    description: 运行时状态读取
+
+  archive:
+    paths:
+      - app/modules/archive/**
+    description: 归档操作
+
+  spec_profile:
+    paths:
+      - app/modules/spec_profile/**
+    description: Spec profile 管理
+
+  spec_workspace:
+    paths:
+      - app/modules/spec_workspace/**
+    description: Spec workspace 管理
+
+  migrations:
+    paths:
+      - migrations/**
+    description: Alembic 数据库迁移
+
+  tests:
+    paths:
+      - tests/**
+      - app/**/tests/**
+      - conftest.py
+    description: 测试文件
+
+  build:
+    paths:
+      - pyproject.toml
+      - Dockerfile
+      - alembic.ini
+      - ruff.toml
+    description: 构建和工具配置

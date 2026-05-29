@@ -1,0 +1,51 @@
+---
+author: qinyi
+created_at: 2026-05-29T17:44:00
+---
+
+# 模块映射 — frontend
+# 用于 archive 阶段识别变更影响的模块
+
+modules:
+  pages:
+    paths:
+      - src/app/**
+    description: Next.js App Router 页面（22 个路由）
+
+  components:
+    paths:
+      - src/components/**
+    description: 共享业务组件 + shadcn/ui 基础组件
+
+  api:
+    paths:
+      - src/lib/*.ts
+    description: API 客户端层 + TypeScript 类型定义（21 个模块）
+
+  stores:
+    paths:
+      - src/stores/**
+    description: Zustand 状态管理（session store）
+
+  styles:
+    paths:
+      - src/app/globals.css
+    description: 全局样式（Tailwind + CSS 变量）
+
+  test:
+    paths:
+      - src/test/**
+      - src/lib/__tests__/**
+    description: 测试配置和测试文件
+
+  build:
+    paths:
+      - package.json
+      - next.config.mjs
+      - tailwind.config.ts
+      - tsconfig.json
+      - vitest.config.ts
+      - postcss.config.mjs
+      - Dockerfile
+      - .eslintrc.json
+    description: 构建和工具配置

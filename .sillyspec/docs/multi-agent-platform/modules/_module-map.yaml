@@ -1,0 +1,50 @@
+---
+author: qinyi
+created_at: 2026-05-29T17:44:00
+---
+
+# 模块映射 — multi-agent-platform (monorepo)
+# 用于 archive 阶段识别变更影响的模块
+
+modules:
+  backend:
+    paths:
+      - backend/**
+    description: FastAPI 后端 API 服务器
+
+  frontend:
+    paths:
+      - frontend/**
+    description: Next.js 前端 Web 应用
+
+  deploy:
+    paths:
+      - deploy/**
+    description: Docker Compose 部署配置
+
+  prototype:
+    paths:
+      - prototype/**
+    description: HTML 原型页面
+
+  docs:
+    paths:
+      - docs/**
+    description: 设计文档和参考资料
+
+  ci:
+    paths:
+      - .github/**
+    description: GitHub Actions CI 配置
+
+  sillyspec:
+    paths:
+      - .sillyspec/**
+    description: SillySpec 规范驱动开发框架配置
+
+  build:
+    paths:
+      - Makefile
+      - .editorconfig
+      - .gitignore
+    description: 构建和项目配置
