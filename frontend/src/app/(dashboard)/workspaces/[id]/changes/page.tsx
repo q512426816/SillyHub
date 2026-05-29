@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,19 +34,38 @@ const STATUS_COLORS: Record<string, "success" | "outline" | "destructive" | "def
 export default function ChangesPage({ params }: Props) {
   const workspaceId = params.id;
   const [tab, setTab] = useState<"active" | "archive">("active");
-  const [items, setItems] = useState<ChangeSummary[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeItems, setActiveItems] = useState<ChangeSummary[]>([]);
+  const [archiveItems, setArchiveItems] = useState<ChangeSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [reparsing, setReparsing] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
   const [stats, setStats] = useState<ChangeReparseStats | null>(null);
   const [warnings, setWarnings] = useState<ChangeWarning[]>([]);
 
-  const load = async (location: string) => {
+  const items = tab === "active" ? activeItems : archiveItems;
+
+  const filtered = useMemo(() => {
+    if (!searchQuery.trim()) return items;
+    const q = searchQuery.toLowerCase();
+    return items.filter(
+      (c) =>
+        c.change_key.toLowerCase().includes(q) ||
+        (c.title ?? "").toLowerCase().includes(q) ||
+        c.affected_components.some((comp) => comp.toLowerCase().includes(q)),
+    );
+  }, [items, searchQuery]);
+
+  const loadAll = async () => {
     setLoading(true);
     setPageError(null);
     try {
-      const list = await listChanges(workspaceId, { location });
-      setItems(list.items);
+      const [active, archive] = await Promise.all([
+        listChanges(workspaceId, { location: "active" }),
+        listChanges(workspaceId, { location: "archive" }),
+      ]);
+      setActiveItems(active.items);
+      setArchiveItems(archive.items);
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "加载变更列表失败");
     } finally {
@@ -55,9 +74,9 @@ export default function ChangesPage({ params }: Props) {
   };
 
   useEffect(() => {
-    void load(tab);
+    void loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, tab]);
+  }, [workspaceId]);
 
   const handleReparse = async () => {
     setReparsing(true);
@@ -66,7 +85,7 @@ export default function ChangesPage({ params }: Props) {
       const resp = await reparseChanges(workspaceId);
       setStats(resp.stats);
       setWarnings(resp.warnings);
-      await load(tab);
+      await loadAll();
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "重新解析失败");
     } finally {
@@ -75,44 +94,54 @@ export default function ChangesPage({ params }: Props) {
   };
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6 px-6 py-8">
-      <header className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">
+    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
+      <header className="flex items-center justify-between">
+        <div>
+          <p className="text-[11px] text-muted-foreground">
             <Link href={`/workspaces/${workspaceId}/components`} className="hover:underline">
-              &larr; 回到组件
+              ← 组件列表
             </Link>
           </p>
-          <h1 className="text-2xl font-semibold tracking-tight">变更中心</h1>
-          <p className="text-sm text-muted-foreground">
-            解析 <code>.sillyspec/changes/</code> 下的变更目录并展示变更清单。
-          </p>
+          <h1 className="mt-0.5">变更中心</h1>
         </div>
-        <div className="flex gap-2">
-          <Button onClick={handleReparse} disabled={reparsing}>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            placeholder="搜索 Key / 标题 / 组件…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-7 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none"
+          />
+          <Link
+            href={`/workspaces/${workspaceId}/create-change`}
+            className="inline-flex h-7 items-center rounded border border-border px-2 text-xs text-foreground hover:bg-muted"
+          >
+            + 创建变更
+          </Link>
+          <Button size="sm" onClick={handleReparse} disabled={reparsing}>
             {reparsing ? "解析中…" : "重新扫描"}
           </Button>
         </div>
       </header>
 
       {pageError && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+        <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {pageError}
         </div>
       )}
 
       {stats && (
-        <div className="rounded-md border border-emerald-500/30 bg-emerald-50 p-3 text-sm text-emerald-800">
-          <strong>已重新扫描</strong>：解析 {stats.parsed} 个变更，新增 {stats.created} · 更新{" "}
+        <div className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+          已重新扫描：解析 {stats.parsed}，新增 {stats.created} · 更新{" "}
           {stats.updated} · 删除 {stats.deleted}。
           {warnings.length > 0 && ` ${warnings.length} 个 warning。`}
         </div>
       )}
 
       {warnings.length > 0 && (
-        <section className="space-y-2 rounded-md border bg-card p-4">
-          <h2 className="text-sm font-medium">解析警告</h2>
-          <ul className="list-disc space-y-1 pl-5 text-xs text-amber-600">
+        <section className="rounded-md border bg-card p-3">
+          <h3 className="mb-1.5">解析警告</h3>
+          <ul className="list-disc space-y-0.5 pl-4 text-xs text-amber-600">
             {warnings.map((w, i) => (
               <li key={i}>
                 <span className="font-mono">[{w.code}]</span>{" "}
@@ -123,66 +152,70 @@ export default function ChangesPage({ params }: Props) {
         </section>
       )}
 
-      <div className="flex gap-2 border-b pb-0">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key as "active" | "archive")}
-            className={`border-b-2 px-4 pb-2 text-sm font-medium transition-colors ${
-              tab === t.key
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div className="flex gap-4 border-b">
+        {TABS.map((t) => {
+          const count = t.key === "active" ? activeItems.length : archiveItems.length;
+          return (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key as "active" | "archive")}
+              className={`border-b-2 pb-1.5 text-xs font-medium transition-colors ${
+                tab === t.key
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t.label} ({count})
+            </button>
+          );
+        })}
       </div>
 
       <section className="rounded-md border bg-card">
         {loading ? (
-          <p className="p-8 text-center text-sm text-muted-foreground">加载中…</p>
-        ) : items.length === 0 ? (
-          <div className="space-y-2 p-8 text-center text-sm text-muted-foreground">
-            <p>当前没有{tab === "active" ? "进行中" : "已归档"}的变更。</p>
-            <p>点击右上角&ldquo;重新扫描&rdquo;从 .sillyspec/changes/ 读取。</p>
+          <p className="py-12 text-center text-xs text-muted-foreground">加载中…</p>
+        ) : filtered.length === 0 ? (
+          <div className="py-12 text-center text-xs text-muted-foreground">
+            {items.length === 0
+              ? `当前没有${tab === "active" ? "进行中" : "已归档"}的变更。`
+              : "没有匹配的变更。"}
           </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="border-b text-left text-xs text-muted-foreground">
+          <table>
+            <thead>
               <tr>
-                <th className="px-4 py-3">变更 Key</th>
-                <th className="px-4 py-3">标题</th>
-                <th className="px-4 py-3">类型</th>
-                <th className="px-4 py-3">状态</th>
-                <th className="px-4 py-3">影响组件</th>
-                <th className="px-4 py-3 text-right">更新时间</th>
+                <th>变更 Key</th>
+                <th>标题</th>
+                <th>类型</th>
+                <th>状态</th>
+                <th>影响组件</th>
+                <th className="text-right">更新时间</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((c) => (
-                <tr key={c.id} className="border-b last:border-b-0 hover:bg-muted/40">
-                  <td className="px-4 py-3">
+              {filtered.map((c) => (
+                <tr key={c.id}>
+                  <td>
                     <Link
                       href={`/workspaces/${workspaceId}/changes/${c.id}`}
-                      className="font-mono text-xs text-primary hover:underline"
+                      className="font-mono text-[11px] text-primary hover:underline"
                     >
                       {c.change_key}
                     </Link>
                   </td>
-                  <td className="px-4 py-3">{c.title ?? "—"}</td>
-                  <td className="px-4 py-3 text-xs">{c.change_type ?? "—"}</td>
-                  <td className="px-4 py-3">
+                  <td className="font-medium">{c.title ?? "—"}</td>
+                  <td className="text-xs">{c.change_type ?? "—"}</td>
+                  <td>
                     <Badge variant={STATUS_COLORS[c.status] ?? "outline"}>
                       {c.status}
                     </Badge>
                   </td>
-                  <td className="max-w-[200px] truncate px-4 py-3 text-xs">
+                  <td className="max-w-[180px] truncate text-[11px]">
                     {c.affected_components.length > 0
                       ? c.affected_components.join(", ")
                       : "—"}
                   </td>
-                  <td className="px-4 py-3 text-right text-xs text-muted-foreground">
+                  <td className="text-right text-[11px] text-muted-foreground">
                     {new Date(c.updated_at).toLocaleDateString()}
                   </td>
                 </tr>
@@ -190,6 +223,29 @@ export default function ChangesPage({ params }: Props) {
             </tbody>
           </table>
         )}
+      </section>
+
+      <section className="rounded-md border bg-card px-6 py-4">
+        <h3 className="mb-3 text-xs font-medium text-muted-foreground">变更生命周期</h3>
+        <div className="flex items-center justify-center gap-0">
+          {[
+            "需求输入",
+            "Change 创建",
+            "Task 拆分",
+            "执行",
+            "验证",
+            "归档",
+          ].map((step, i) => (
+            <div key={step} className="flex items-center">
+              <div className="whitespace-nowrap rounded-md border border-border bg-muted/40 px-3 py-1.5 text-[11px] font-medium text-foreground">
+                {step}
+              </div>
+              {i < 5 && (
+                <span className="mx-2 text-muted-foreground">&rarr;</span>
+              )}
+            </div>
+          ))}
+        </div>
       </section>
     </div>
   );

@@ -52,19 +52,19 @@ class WorktreeService:
         identity = await self._get_identity(data.git_identity_id, user_id)
         self._assert_identity_usable(identity)
 
-        # 2. Get component repo_url
-        component = await self._get_component(data.component_id, workspace_id)
-        if not component.repo_url:
+        # 2. Get workspace repo_url
+        workspace_obj = await self._get_workspace(workspace_id)
+        if not workspace_obj.repo_url:
             raise WorktreeAcquireFailed(
-                "Component has no repo_url configured.",
-                details={"component_id": str(data.component_id)},
+                "Workspace has no repo_url configured.",
+                details={"workspace_id": str(workspace_id)},
             )
 
         # 3. Compute paths
         run_id = uuid.uuid4()
         ids = {
             "ws": str(workspace_id),
-            "comp": str(data.component_id),
+            "comp": str(workspace_id),
             "user": str(user_id),
             "change": str(data.change_id),
             "task": str(data.task_id),
@@ -101,7 +101,7 @@ class WorktreeService:
         # 5. Filesystem operations
         try:
             env = self._exec_env.build_env_vars(lease_root)
-            await self._git_runner.clone_bare(component.repo_url, bare_path, env)
+            await self._git_runner.clone_bare(workspace_obj.repo_url, bare_path, env)
             await self._git_runner.worktree_add(bare_path, repo_dir, branch_name, env)
             self._exec_env.create_directories(lease_root)
             self._exec_env.write_gitconfig(
@@ -266,18 +266,15 @@ class WorktreeService:
                 details={"identity_id": str(identity.id)},
             )
 
-    async def _get_component(self, component_id: uuid.UUID, workspace_id: uuid.UUID):
-        from app.modules.component.model import ProjectComponent
+    async def _get_workspace(self, workspace_id: uuid.UUID):
+        from app.modules.workspace.model import Workspace
 
-        stmt = select(ProjectComponent).where(
-            col(ProjectComponent.id) == component_id,
-            col(ProjectComponent.workspace_id) == workspace_id,
-        )
+        stmt = select(Workspace).where(col(Workspace.id) == workspace_id)
         row = (await self._session.execute(stmt)).scalars().first()
         if row is None:
             raise WorktreeLeaseNotFound(
-                f"Component '{component_id}' not found.",
-                details={"component_id": str(component_id)},
+                f"Workspace '{workspace_id}' not found.",
+                details={"workspace_id": str(workspace_id)},
             )
         return row
 

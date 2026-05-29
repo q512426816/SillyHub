@@ -31,7 +31,6 @@ class ScanRequest(BaseModel):
 
 class ScanResponse(BaseModel):
     root_path: str
-    sillyspec_path: str
     is_sillyspec: bool
     structure: WorkspaceStructureDTO
     warnings: list[str] = Field(default_factory=list)
@@ -47,6 +46,16 @@ class WorkspaceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     slug: str | None = Field(default=None, max_length=100)
     root_path: str = Field(min_length=1, max_length=4096)
+    # Component metadata fields (all optional, for parsed workspaces)
+    component_key: str | None = Field(default=None, max_length=100)
+    type: str | None = Field(default=None, max_length=50)
+    role: str | None = Field(default=None, max_length=100)
+    repo_url: str | None = Field(default=None)
+    default_branch: str | None = Field(default="main", max_length=100)
+    tech_stack: list[str] = Field(default_factory=list)
+    build_command: str | None = Field(default=None)
+    test_command: str | None = Field(default=None)
+    source_yaml_path: str | None = Field(default=None)
 
     @field_validator("slug")
     @classmethod
@@ -68,8 +77,18 @@ class WorkspaceRead(BaseModel):
     name: str
     slug: str
     root_path: str
-    sillyspec_path: str
     status: WorkspaceStatusLiteral
+    # Component metadata fields
+    component_key: str | None
+    type: str | None
+    role: str | None
+    repo_url: str | None
+    default_branch: str | None
+    tech_stack: list[str]
+    build_command: str | None
+    test_command: str | None
+    source_yaml_path: str | None
+    # Original fields
     created_by: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
@@ -80,6 +99,23 @@ class WorkspaceRead(BaseModel):
 class WorkspaceListResponse(BaseModel):
     items: list[WorkspaceRead]
     total: int
+
+
+class WorkspaceRelationCreate(BaseModel):
+    target_id: uuid.UUID
+    relation_type: str = Field(min_length=1, max_length=50)
+    description: str | None = Field(default=None)
+
+
+class WorkspaceRelationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    source_id: uuid.UUID
+    target_id: uuid.UUID
+    relation_type: str
+    description: str | None
+    created_at: datetime
 
 
 def slugify(name: str) -> str:

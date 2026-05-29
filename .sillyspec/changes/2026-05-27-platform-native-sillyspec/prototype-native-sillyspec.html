@@ -1,0 +1,295 @@
+<!--
+author: qinyi
+created_at: 2026-05-27 10:06:00
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Platform Native SillySpec Prototype</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --ink: #222222;
+      --muted: #666666;
+      --line: #d8d8d2;
+      --accent: #27615a;
+      --warn: #9a5b16;
+      --bad: #a33b32;
+      --ok: #2f6b3f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      padding: 16px 22px;
+    }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 18px; }
+    main {
+      display: grid;
+      grid-template-columns: 260px 1fr 320px;
+      gap: 14px;
+      padding: 14px;
+      min-height: calc(100vh - 67px);
+    }
+    section, aside {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      min-width: 0;
+    }
+    .nav, .inspector { padding: 12px; }
+    .nav button, .toolbar button {
+      width: 100%;
+      text-align: left;
+      border: 1px solid var(--line);
+      background: #fbfbf8;
+      color: var(--ink);
+      border-radius: 4px;
+      padding: 9px 10px;
+      margin-bottom: 8px;
+      font: inherit;
+      cursor: pointer;
+    }
+    .nav button.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: #eef7f4;
+    }
+    .content { padding: 14px; }
+    .toolbar {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .toolbar button {
+      margin: 0;
+      text-align: center;
+    }
+    .toolbar button.active {
+      border-color: var(--accent);
+      background: #eef7f4;
+      color: var(--accent);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .box {
+      border: 1px dashed var(--line);
+      border-radius: 4px;
+      padding: 10px;
+      min-height: 88px;
+      background: #fdfdfb;
+    }
+    .box h3 {
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+    .kv {
+      display: grid;
+      grid-template-columns: 132px 1fr;
+      gap: 6px 10px;
+      font-size: 12px;
+    }
+    .muted { color: var(--muted); }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 2px 7px;
+      font-size: 12px;
+      background: #fbfbf8;
+    }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--bad); }
+    pre {
+      white-space: pre-wrap;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 10px;
+      background: #fbfbf8;
+      overflow: auto;
+      font: inherit;
+      font-size: 12px;
+    }
+    .flow {
+      margin-top: 12px;
+      display: grid;
+      gap: 8px;
+    }
+    .step {
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent);
+      border-radius: 4px;
+      padding: 9px;
+      background: #fcfcf9;
+    }
+    .step[data-state="warn"] { border-left-color: var(--warn); }
+    .step[data-state="bad"] { border-left-color: var(--bad); }
+    .inspector h2 { font-size: 14px; margin-bottom: 10px; }
+    .log {
+      display: grid;
+      gap: 8px;
+      font-size: 12px;
+    }
+    @media (max-width: 1050px) {
+      main { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>multi-agent-platform / Native SillySpec</h1>
+    <p class="muted">普通项目可被管理；SillySpec 由平台托管，仓库同步是显式策略。</p>
+  </header>
+  <main>
+    <aside class="nav">
+      <button class="active" data-view="onboard">1. 工作区接入</button>
+      <button data-view="manifest">2. Agent Spec Profile</button>
+      <button data-view="policy">3. 冲突策略</button>
+      <button data-view="agent">4. Agent 执行</button>
+    </aside>
+
+    <section class="content">
+      <div id="view-onboard" class="view">
+        <h2>工作区创建：代码目录扫描 + 规范空间初始化</h2>
+        <div class="toolbar" data-mode-group>
+          <button class="active" data-mode="platform-managed">platform-managed</button>
+          <button data-mode="repo-mirrored">repo-mirrored</button>
+          <button data-mode="repo-native">repo-native</button>
+        </div>
+        <div class="grid">
+          <div class="box">
+            <h3>代码目录扫描</h3>
+            <div class="kv">
+              <span class="muted">root_path</span><span>C:\repo\plain-project</span>
+              <span class="muted">git</span><span class="ok">detected</span>
+              <span class="muted">.sillyspec</span><span class="warn">not required</span>
+              <span class="muted">stack</span><span>node, python</span>
+            </div>
+          </div>
+          <div class="box">
+            <h3>平台规范空间</h3>
+            <div class="kv">
+              <span class="muted">spec_root</span><span>/data/spec-workspaces/ws_123</span>
+              <span class="muted">strategy</span><span id="strategy-label">platform-managed</span>
+              <span class="muted">manifest</span><span>sillyspec@3.10.3</span>
+              <span class="muted">status</span><span class="ok">ready</span>
+            </div>
+          </div>
+        </div>
+        <div class="flow">
+          <div class="step">scan code directory -> detect repo/stack/components</div>
+          <div class="step">create workspace row -> create platform spec root</div>
+          <div class="step" data-state="warn">optional: import or mirror repo .sillyspec when user chooses</div>
+        </div>
+      </div>
+
+      <div id="view-manifest" class="view" hidden>
+        <h2>AgentSpecProfile: SillySpec is the Agent-facing spec contract</h2>
+        <pre>SpecProfileManifest {
+  source: "C:\\Users\\qinyi\\IdeaProjects\\sillyspec",
+  version: "3.10.3",
+  stages: ["scan", "brainstorm", "propose", "plan", "execute", "verify", "archive"],
+  docs: ["MASTER.md", "design.md", "tasks.md", "plan.md"],
+  agent_contract: ["context", "constraints", "allowed_paths", "acceptance", "gates"],
+  cli_role: "reference-validator-and-import-export"
+}</pre>
+        <div class="flow">
+          <div class="step">load Agent-facing spec contract from provider</div>
+          <div class="step">persist profile version used by workspace/change/task</div>
+          <div class="step" data-state="warn">on upgrade: manifest diff -> migration review</div>
+        </div>
+      </div>
+
+      <div id="view-policy" class="view" hidden>
+        <h2>DocumentPolicy：不忽略、不写死的冲突解决</h2>
+        <div class="grid">
+          <div class="box">
+            <h3>平台要求</h3>
+            <p>审批、人员权限、Agent run、审计日志、发布门禁。</p>
+          </div>
+          <div class="box">
+            <h3>Agent/SillySpec 规范要求</h3>
+            <p>阶段步骤、必需文档、metadata、自检门控、归档流程。</p>
+          </div>
+        </div>
+        <pre>resolve(policy, platformRule, sillyspecRule):
+  if either.hard_gate -> hard_gate
+  if same_kind -> stricter_validation
+  if platform_extra -> extension_metadata
+  if name_or_path_diff -> adapter_transform
+  else -> conflict_record + human_approval</pre>
+      </div>
+
+      <div id="view-agent" class="view" hidden>
+        <h2>Agent 执行：从平台上下文组装，不直接依赖仓库 .sillyspec</h2>
+        <div class="flow">
+          <div class="step">scan complete -> proposal/design/tasks/plan confirmed</div>
+          <div class="step">task selected -> permission check by workspace/change/task/stage</div>
+          <div class="step">acquire worktree lease for target component and branch</div>
+          <div class="step">build AgentSpecBundle from spec store + task + code summary + profile</div>
+          <div class="step">dispatch adapter: claude_code -> CLAUDE.md + prompt -> claude CLI</div>
+          <div class="step">capture logs, diff, exit code, validation result</div>
+          <div class="step" data-state="warn">optional sync back to repo .sillyspec via explicit action</div>
+          <div class="step">write audit: actor, strategy, profile version, result</div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="inspector">
+      <h2>状态检查</h2>
+      <div class="log">
+        <span class="pill ok">普通项目：允许创建</span>
+        <span class="pill ok">默认策略：platform-managed</span>
+        <span class="pill warn">仓库 .sillyspec：可选同步</span>
+        <span class="pill ok">规则来源：SpecProfileManifest</span>
+        <span class="pill warn">冲突：进入 policy/approval</span>
+      </div>
+      <h2 style="margin-top:18px;">关键边界</h2>
+      <pre>root_path != spec_root
+repo .sillyspec != platform requirement
+agent contract != hardcoded UI condition
+Agent context != direct filesystem assumption</pre>
+    </aside>
+  </main>
+  <script>
+    const navButtons = document.querySelectorAll(".nav button");
+    const views = document.querySelectorAll(".view");
+    navButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        navButtons.forEach((b) => b.classList.remove("active"));
+        button.classList.add("active");
+        views.forEach((view) => {
+          view.hidden = view.id !== "view-" + button.dataset.view;
+        });
+      });
+    });
+
+    const modeButtons = document.querySelectorAll("[data-mode]");
+    const strategyLabel = document.getElementById("strategy-label");
+    modeButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        modeButtons.forEach((b) => b.classList.remove("active"));
+        button.classList.add("active");
+        strategyLabel.textContent = button.dataset.mode;
+      });
+    });
+  </script>
+</body>
+</html>

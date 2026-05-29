@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Workspace Graph Prototype</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; padding: 24px; }
+h1 { font-size: 20px; margin-bottom: 8px; color: #38bdf8; }
+h2 { font-size: 16px; margin: 16px 0 8px; color: #94a3b8; }
+.subtitle { font-size: 13px; color: #64748b; margin-bottom: 20px; }
+.canvas { position: relative; width: 100%; height: 420px; background: #1e293b; border-radius: 12px; border: 1px solid #334155; margin-bottom: 16px; overflow: hidden; }
+.node { position: absolute; padding: 12px 16px; background: #1e293b; border: 2px solid #38bdf8; border-radius: 8px; cursor: grab; min-width: 140px; z-index: 2; }
+.node:hover { border-color: #7dd3fc; box-shadow: 0 0 12px rgba(56,189,248,0.3); }
+.node-title { font-weight: 600; font-size: 13px; color: #38bdf8; }
+.node-meta { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+.node-spec { font-size: 10px; color: #64748b; margin-top: 2px; }
+svg.edges { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+.legend { display: flex; gap: 24px; font-size: 12px; color: #94a3b8; flex-wrap: wrap; }
+.legend-item { display: flex; align-items: center; gap: 6px; }
+.legend-dot { width: 12px; height: 3px; border-radius: 2px; }
+.model-section { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+.model-card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 16px; }
+.model-card h3 { font-size: 14px; color: #38bdf8; margin-bottom: 8px; }
+.field { font-size: 12px; padding: 2px 0; color: #cbd5e1; }
+.field-name { color: #38bdf8; font-family: monospace; }
+.field-type { color: #64748b; font-size: 11px; }
+.new-tag { background: #065f46; color: #6ee7b7; font-size: 10px; padding: 1px 5px; border-radius: 3px; margin-left: 4px; }
+.removed-tag { background: #7f1d1d; color: #fca5a5; font-size: 10px; padding: 1px 5px; border-radius: 3px; margin-left: 4px; text-decoration: line-through; }
+.flow-section { margin-top: 16px; }
+.flow { display: flex; align-items: center; gap: 8px; padding: 8px 0; font-size: 13px; color: #94a3b8; }
+.flow-arrow { color: #38bdf8; font-size: 16px; }
+.flow-box { background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 12px; font-size: 12px; color: #e2e8f0; }
+</style>
+</head>
+<body>
+<h1>Workspace Graph — 数据模型原型</h1>
+<p class="subtitle">纯图结构：无层级、无分组、允许循环依赖 | Change/Task/AgentRun M:N 关联</p>
+
+<h2>Workspace Graph 交互视图</h2>
+<div class="canvas" id="canvas">
+  <svg class="edges" id="edges"></svg>
+  <div class="node" id="n1" style="left:60px;top:40px">
+    <div class="node-title">api-gateway</div>
+    <div class="node-meta">root: /repo/services/api</div>
+    <div class="node-spec">spec: /data/spec/{id}/</div>
+  </div>
+  <div class="node" id="n2" style="left:340px;top:30px">
+    <div class="node-title">auth-service</div>
+    <div class="node-meta">root: /repo/services/auth</div>
+    <div class="node-spec">spec: /data/spec/{id}/</div>
+  </div>
+  <div class="node" id="n3" style="left:600px;top:100px">
+    <div class="node-title">user-db</div>
+    <div class="node-meta">root: /repo/db/user</div>
+    <div class="node-spec">spec: /data/spec/{id}/</div>
+  </div>
+  <div class="node" id="n4" style="left:340px;top:240px">
+    <div class="node-title">frontend</div>
+    <div class="node-meta">root: /repo/frontend</div>
+    <div class="node-spec">spec: /data/spec/{id}/</div>
+  </div>
+  <div class="node" id="n5" style="left:60px;top:260px">
+    <div class="node-title">shared-libs</div>
+    <div class="node-meta">root: /repo/libs/shared</div>
+    <div class="node-spec">spec: /data/spec/{id}/</div>
+  </div>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#38bdf8"></div>depends_on</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#a78bfa"></div>consumes_api_from</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f472b6"></div>publishes_to</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#34d399"></div>tests</div>
+</div>
+
+<h2>数据模型变更</h2>
+<div class="model-section">
+  <div class="model-card">
+    <h3>workspaces (变更)</h3>
+    <div class="field"><span class="field-name">id</span> <span class="field-type">UUID PK</span></div>
+    <div class="field"><span class="field-name">name</span> <span class="field-type">String(200)</span></div>
+    <div class="field"><span class="field-name">slug</span> <span class="field-type">String(100)</span></div>
+    <div class="field"><span class="field-name">root_path</span> <span class="field-type">String</span></div>
+    <div class="field"><span class="field-name">status</span> <span class="field-type">String(20)</span></div>
+    <div class="field"><span class="field-name">tech_stack</span> <span class="field-type">JSON</span> <span class="new-tag">NEW</span></div>
+    <div class="field"><span class="field-name">build_command</span> <span class="field-type">String</span> <span class="new-tag">NEW</span></div>
+    <div class="field"><span class="field-name">test_command</span> <span class="field-type">String</span> <span class="new-tag">NEW</span></div>
+    <div class="field"><span class="field-name">component_key</span> <span class="field-type">String(100)</span> <span class="new-tag">NEW</span></div>
+    <div class="field"><span class="field-name">role</span> <span class="field-type">String</span> <span class="new-tag">NEW</span></div>
+    <div class="field"><span class="field-name">repo_url</span> <span class="field-type">String</span> <span class="new-tag">NEW</span></div>
+    <div class="field"><span class="field-name">default_branch</span> <span class="field-type">String</span> <span class="new-tag">NEW</span></div>
+    <div class="field" style="text-decoration:line-through;color:#f87171"><span class="field-name">sillyspec_path</span> <span class="removed-tag">REMOVED</span></div>
+  </div>
+  <div class="model-card">
+    <h3>workspace_relations (新表)</h3>
+    <div class="field"><span class="field-name">id</span> <span class="field-type">UUID PK</span></div>
+    <div class="field"><span class="field-name">source_id</span> <span class="field-type">UUID FK → workspaces</span></div>
+    <div class="field"><span class="field-name">target_id</span> <span class="field-type">UUID FK → workspaces</span></div>
+    <div class="field"><span class="field-name">relation_type</span> <span class="field-type">String(50)</span></div>
+    <div class="field"><span class="field-name">description</span> <span class="field-type">String</span></div>
+    <div class="field"><span class="field-name">created_at</span> <span class="field-type">DateTime</span></div>
+    <div style="margin-top:8px;font-size:11px;color:#64748b">
+      UQ: (source_id, target_id, relation_type)<br>
+      允许循环依赖 (A→B→A)<br>
+      5 种关系类型: depends_on, consumes_api_from, tests, publishes_to, documents
+    </div>
+  </div>
+  <div class="model-card">
+    <h3>change_workspaces / task_workspaces (新表)</h3>
+    <div class="field"><span class="field-name">change_id / task_id</span> <span class="field-type">UUID FK</span></div>
+    <div class="field"><span class="field-name">workspace_id</span> <span class="field-type">UUID FK → workspaces</span></div>
+    <div style="margin-top:8px;font-size:11px;color:#64748b">
+      Change/Task 表保留原有字段<br>
+      原 workspace_id 保留为"主 workspace"<br>
+      新增 M:N 关联支持多 workspace
+    </div>
+  </div>
+  <div class="model-card">
+    <h3>删除的表</h3>
+    <div class="field" style="text-decoration:line-through;color:#f87171"><span class="field-name">project_components</span> <span class="removed-tag">REMOVED</span></div>
+    <div style="font-size:11px;color:#64748b;margin:4px 0">元数据合并到 workspaces 表</div>
+    <div class="field" style="text-decoration:line-through;color:#f87171"><span class="field-name">component_relations</span> <span class="removed-tag">REMOVED</span></div>
+    <div style="font-size:11px;color:#64748b;margin:4px 0">替换为 workspace_relations</div>
+  </div>
+</div>
+
+<h2>Agent 上下文构建流程</h2>
+<div class="flow-section">
+  <div class="flow">
+    <div class="flow-box">选择 Task</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">查询 Task 关联的 Workspace 列表</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">通过 WorkspaceRelation 查询关联 Workspace</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">构建 AgentSpecBundle<br><span style="font-size:10px;color:#64748b">含 referenced_workspaces 摘要</span></div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box">Agent 执行</div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const edgesSvg = document.getElementById('edges');
+const nodes = {};
+document.querySelectorAll('.node').forEach(n => {
+  nodes[n.id] = n;
+  let dragging = false, ox = 0, oy = 0;
+  n.addEventListener('mousedown', e => { dragging = true; ox = e.offsetX; oy = e.offsetY; });
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const r = canvas.getBoundingClientRect();
+    n.style.left = (e.clientX - r.left - ox) + 'px';
+    n.style.top = (e.clientY - r.top - oy) + 'px';
+    drawEdges();
+  });
+  document.addEventListener('mouseup', () => dragging = false);
+});
+
+const relations = [
+  { from: 'n1', to: 'n2', type: 'consumes_api_from', color: '#a78bfa' },
+  { from: 'n2', to: 'n3', type: 'depends_on', color: '#38bdf8' },
+  { from: 'n4', to: 'n1', type: 'consumes_api_from', color: '#a78bfa' },
+  { from: 'n5', to: 'n1', type: 'depends_on', color: '#38bdf8' },
+  { from: 'n5', to: 'n2', type: 'depends_on', color: '#38bdf8' },
+  { from: 'n1', to: 'n3', type: 'publishes_to', color: '#f472b6' },
+  { from: 'n4', to: 'n5', type: 'depends_on', color: '#38bdf8' },
+];
+
+function drawEdges() {
+  let svg = '';
+  relations.forEach(r => {
+    const a = nodes[r.from], b = nodes[r.to];
+    if (!a || !b) return;
+    const ax = a.offsetLeft + a.offsetWidth/2, ay = a.offsetTop + a.offsetHeight/2;
+    const bx = b.offsetLeft + b.offsetWidth/2, by = b.offsetTop + b.offsetHeight/2;
+    svg += `<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="${r.color}" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arr)"/>`;
+  });
+  edgesSvg.innerHTML = `<defs><marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#64748b"/></marker></defs>` + svg;
+}
+drawEdges();
+</script>
+</body>
+</html>

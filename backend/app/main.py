@@ -18,8 +18,8 @@ from app.core.redis import close_redis
 from app.core.telemetry import init_telemetry
 from app.modules.auth.router import router as auth_router
 from app.modules.change import change_router
-from app.modules.component import component_router
 from app.modules.health import health_router
+from app.modules.agent.router import router as agent_router
 from app.modules.scan_docs.router import router as scan_docs_router
 from app.modules.git_identity import git_identity_router
 from app.modules.task import task_router
@@ -89,12 +89,12 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router, prefix="/api")
     app.include_router(workspace_router, prefix="/api")
-    app.include_router(component_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
     app.include_router(change_router, prefix="/api")
     app.include_router(scan_docs_router, prefix="/api")
     app.include_router(task_router, prefix="/api")
     app.include_router(git_identity_router, prefix="/api")
+    app.include_router(agent_router, prefix="/api")
     app.include_router(worktree_router, prefix="/api")
     app.include_router(lease_router, prefix="/api")
 

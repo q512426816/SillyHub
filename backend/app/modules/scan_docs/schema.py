@@ -14,7 +14,7 @@ class ScanDocRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    component_id: uuid.UUID
+    workspace_id: uuid.UUID
     doc_type: str
     path: str
     title: str | None = None
@@ -29,7 +29,7 @@ class ScanDocSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    component_id: uuid.UUID
+    workspace_id: uuid.UUID
     doc_type: str
     path: str
     title: str | None = None

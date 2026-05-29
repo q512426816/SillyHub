@@ -1,0 +1,644 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ApiError } from "@/lib/api";
+import { getHealth, type HealthResponse } from "@/lib/health";
+import {
+  createUser,
+  deleteUser,
+  listSettings,
+  listUsers,
+  updateUser,
+  updateSettings,
+  type UserRead,
+  type UserListResponse,
+} from "@/lib/settings";
+
+type Tab = "workspace" | "users" | "agent" | "security" | "integrations";
+
+const TABS: { key: Tab; label: string }[] = [
+  { key: "workspace", label: "Workspace 信息" },
+  { key: "users", label: "用户管理" },
+  { key: "agent", label: "Agent 配置" },
+  { key: "security", label: "安全策略" },
+  { key: "integrations", label: "集成" },
+];
+
+const inputCls =
+  "h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none";
+
+/* ---------- Workspace Tab ---------- */
+
+function WorkspaceTab({ dbStatus }: { dbStatus: HealthResponse | null }) {
+  const [wsName, setWsName] = useState("");
+  const [sillyspecPath, setSillyspecPath] = useState("");
+  const [worktreeRoot, setWorktreeRoot] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await listSettings();
+        const map = Object.fromEntries(resp.settings.map((s) => [s.key, s.value]));
+        setWsName(map["workspace_name"] ?? "multi-agent-platform");
+        setSillyspecPath(map["sillyspec_path"] ?? "");
+        setWorktreeRoot(map["worktree_root"] ?? "");
+      } catch {
+        // Use defaults if API unavailable
+        setWsName("multi-agent-platform");
+      }
+    })();
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const payload: Record<string, string> = {};
+      if (wsName) payload["workspace_name"] = wsName;
+      if (sillyspecPath) payload["sillyspec_path"] = sillyspecPath;
+      if (worktreeRoot) payload["worktree_root"] = worktreeRoot;
+      await updateSettings(payload);
+      setMessage({ ok: true, text: "保存成功" });
+    } catch (err) {
+      setMessage({
+        ok: false,
+        text: err instanceof ApiError ? err.message : "保存失败",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <div className="rounded-md border bg-card p-4">
+        <h3 className="text-xs font-medium text-muted-foreground">基本信息</h3>
+        <div className="mt-3 space-y-2.5">
+          <div>
+            <label className="text-[11px] text-muted-foreground">Workspace 名称</label>
+            <input value={wsName} onChange={(e) => setWsName(e.target.value)} className={`mt-0.5 ${inputCls}`} />
+          </div>
+          <div>
+            <label className="text-[11px] text-muted-foreground">SillySpec 路径</label>
+            <input value={sillyspecPath} onChange={(e) => setSillyspecPath(e.target.value)} className={`mt-0.5 ${inputCls}`} />
+          </div>
+          <div>
+            <label className="text-[11px] text-muted-foreground">Worktree 根路径</label>
+            <input value={worktreeRoot} onChange={(e) => setWorktreeRoot(e.target.value)} className={`mt-0.5 ${inputCls}`} />
+          </div>
+          <div className="flex items-center gap-3">
+            <Button size="sm" onClick={handleSave} disabled={saving}>
+              {saving ? "保存中…" : "保存设置"}
+            </Button>
+            {message && (
+              <span className={`text-xs ${message.ok ? "text-emerald-600" : "text-destructive"}`}>
+                {message.text}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-md border bg-card p-4">
+        <h3 className="text-xs font-medium text-muted-foreground">数据库</h3>
+        <div className="mt-3">
+          <KVRow label="类型" value="PostgreSQL 16" />
+          <KVRow label="Host" value={dbStatus ? "Connected" : "—"} />
+          <KVRow label="版本" value={dbStatus?.version ?? "—"} />
+          <div className="flex items-center justify-between py-1.5 text-xs">
+            <span className="text-muted-foreground">连接状态</span>
+            <Badge variant={dbStatus?.db === "ok" ? "success" : "destructive"}>
+              {dbStatus?.db === "ok" ? "Connected" : "Disconnected"}
+            </Badge>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Users Tab ---------- */
+
+function UsersTab() {
+  const [users, setUsers] = useState<UserRead[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [pageError, setPageError] = useState<string | null>(null);
+
+  const [showCreate, setShowCreate] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newAdmin, setNewAdmin] = useState(false);
+  const [creating, setCreating] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setPageError(null);
+    try {
+      const resp = await listUsers();
+      setUsers(resp.items);
+      setTotal(resp.total);
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "加载用户列表失败");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const handleCreate = async () => {
+    setCreating(true);
+    setPageError(null);
+    try {
+      await createUser({
+        email: newEmail,
+        password: newPassword,
+        display_name: newName || undefined,
+        is_platform_admin: newAdmin,
+      });
+      setShowCreate(false);
+      setNewEmail("");
+      setNewPassword("");
+      setNewName("");
+      setNewAdmin(false);
+      await load();
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "创建用户失败");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleToggleAdmin = async (user: UserRead) => {
+    try {
+      await updateUser(user.id, { is_platform_admin: !user.is_platform_admin });
+      await load();
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "更新失败");
+    }
+  };
+
+  const handleToggleStatus = async (user: UserRead) => {
+    const next = user.status === "active" ? "disabled" : "active";
+    try {
+      await updateUser(user.id, { status: next });
+      await load();
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "更新失败");
+    }
+  };
+
+  const handleDelete = async (user: UserRead) => {
+    if (!confirm(`确定删除用户 ${user.email}？`)) return;
+    try {
+      await deleteUser(user.id);
+      await load();
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "删除失败");
+    }
+  };
+
+  return (
+    <div>
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">{total} 个用户</span>
+        <Button size="sm" onClick={() => setShowCreate(!showCreate)}>
+          {showCreate ? "取消" : "+ 添加用户"}
+        </Button>
+      </div>
+
+      {pageError && (
+        <div className="mb-3 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
+          {pageError}
+        </div>
+      )}
+
+      {showCreate && (
+        <div className="mb-3 rounded-md border bg-card p-3">
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            <div>
+              <label className="text-[11px] text-muted-foreground">邮箱</label>
+              <input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className={`mt-0.5 ${inputCls}`} placeholder="user@example.com" />
+            </div>
+            <div>
+              <label className="text-[11px] text-muted-foreground">密码</label>
+              <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={`mt-0.5 ${inputCls}`} placeholder="至少 8 位" />
+            </div>
+            <div>
+              <label className="text-[11px] text-muted-foreground">显示名</label>
+              <input value={newName} onChange={(e) => setNewName(e.target.value)} className={`mt-0.5 ${inputCls}`} placeholder="可选" />
+            </div>
+            <div className="flex items-end gap-3">
+              <label className="flex items-center gap-2 pb-1.5">
+                <input type="checkbox" checked={newAdmin} onChange={(e) => setNewAdmin(e.target.checked)} className="h-3.5 w-3.5 rounded border border-input" />
+                <span className="text-xs">管理员</span>
+              </label>
+              <Button size="sm" onClick={handleCreate} disabled={creating || !newEmail || !newPassword}>
+                {creating ? "创建中…" : "确认创建"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <p className="py-8 text-center text-xs text-muted-foreground">加载中…</p>
+      ) : (
+        <div className="rounded-md border bg-card">
+          <table>
+            <thead>
+              <tr>
+                <th>邮箱</th>
+                <th>显示名</th>
+                <th>角色</th>
+                <th>状态</th>
+                <th>最后登录</th>
+                <th className="text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id}>
+                  <td className="text-xs font-mono">{u.email}</td>
+                  <td className="text-xs">{u.display_name ?? "—"}</td>
+                  <td>
+                    <Badge variant={u.is_platform_admin ? "default" : "outline"}>
+                      {u.is_platform_admin ? "Admin" : "User"}
+                    </Badge>
+                  </td>
+                  <td>
+                    <Badge variant={u.status === "active" ? "success" : "destructive"}>
+                      {u.status === "active" ? "已激活" : u.status}
+                    </Badge>
+                  </td>
+                  <td className="text-[11px] text-muted-foreground">
+                    {u.last_login_at ? new Date(u.last_login_at).toLocaleString("zh-CN") : "—"}
+                  </td>
+                  <td className="text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+                        onClick={() => void handleToggleAdmin(u)}
+                      >
+                        {u.is_platform_admin ? "取消管理员" : "设为管理员"}
+                      </button>
+                      <button
+                        className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+                        onClick={() => void handleToggleStatus(u)}
+                      >
+                        {u.status === "active" ? "禁用" : "启用"}
+                      </button>
+                      <button
+                        className="text-[11px] text-destructive hover:underline"
+                        onClick={() => void handleDelete(u)}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {users.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-xs text-muted-foreground">
+                    暂无用户
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Agent Config Tab ---------- */
+
+function AgentConfigTab() {
+  const [defaultAgent, setDefaultAgent] = useState("claude_code");
+  const [maxConcurrent, setMaxConcurrent] = useState(4);
+  const [timeout, setTimeout_] = useState(30);
+  const [autoCleanup, setAutoCleanup] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await listSettings();
+        const map = Object.fromEntries(resp.settings.map((s) => [s.key, s.value]));
+        if (map["agent_default_type"]) setDefaultAgent(map["agent_default_type"]);
+        if (map["agent_max_concurrent"]) setMaxConcurrent(Number(map["agent_max_concurrent"]));
+        if (map["agent_default_timeout_min"]) setTimeout_(Number(map["agent_default_timeout_min"]));
+        if (map["agent_auto_cleanup"]) setAutoCleanup(map["agent_auto_cleanup"] === "true");
+      } catch {
+        // Use defaults
+      }
+    })();
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      await updateSettings({
+        agent_default_type: defaultAgent,
+        agent_max_concurrent: String(maxConcurrent),
+        agent_default_timeout_min: String(timeout),
+        agent_auto_cleanup: String(autoCleanup),
+      });
+      setMessage({ ok: true, text: "保存成功" });
+    } catch (err) {
+      setMessage({
+        ok: false,
+        text: err instanceof ApiError ? err.message : "保存失败",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <div className="rounded-md border bg-card p-4">
+        <h3 className="text-xs font-medium text-muted-foreground">Agent 运行时配置</h3>
+        <div className="mt-3 space-y-2.5">
+          <div>
+            <label className="text-[11px] text-muted-foreground">默认 Agent</label>
+            <select value={defaultAgent} onChange={(e) => setDefaultAgent(e.target.value)} className={`mt-0.5 w-full ${inputCls}`}>
+              <option value="claude_code">Claude Code</option>
+              <option value="codex">Codex</option>
+              <option value="cursor">Cursor</option>
+              <option value="shell">Shell</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-[11px] text-muted-foreground">最大并发 Agent Run</label>
+            <input type="number" min={1} value={maxConcurrent} onChange={(e) => setMaxConcurrent(Number(e.target.value))} className={`mt-0.5 w-32 ${inputCls}`} />
+          </div>
+          <div>
+            <label className="text-[11px] text-muted-foreground">默认超时（分钟）</label>
+            <input type="number" min={1} value={timeout} onChange={(e) => setTimeout_(Number(e.target.value))} className={`mt-0.5 w-32 ${inputCls}`} />
+          </div>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={autoCleanup} onChange={(e) => setAutoCleanup(e.target.checked)} className="h-3.5 w-3.5 rounded border border-input" />
+            <span className="text-xs">执行完成后自动清理 Worktree</span>
+          </label>
+          <div className="flex items-center gap-3">
+            <Button size="sm" onClick={handleSave} disabled={saving}>
+              {saving ? "保存中…" : "保存配置"}
+            </Button>
+            {message && (
+              <span className={`text-xs ${message.ok ? "text-emerald-600" : "text-destructive"}`}>
+                {message.text}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-md border bg-card p-4">
+        <h3 className="text-xs font-medium text-muted-foreground">Spec Profile &amp; Agent 信息</h3>
+        <div className="mt-3">
+          <KVRow label="Profile 版本" value="0.1.0" />
+          <KVRow label="默认 Agent 类型" value="claude_code" />
+          <KVRow label="Spec 策略" value="platform-managed" />
+          <KVRow label="Adapter" value="ClaudeCodeAdapter" />
+          <div className="flex items-center justify-between border-b py-1.5 text-xs">
+            <span className="text-muted-foreground">Profile 状态</span>
+            <Badge variant="success">Active</Badge>
+          </div>
+        </div>
+        <p className="mt-3 text-[11px] text-muted-foreground">
+          以上为当前平台默认配置，后续版本支持自定义编辑。
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Security Tab ---------- */
+
+function SecurityTab() {
+  const policies = [
+    { title: "凭据加密", desc: "使用 libsodium secretbox", key: "security_credential_encryption" },
+    { title: "高危操作审批", desc: "git_push_branch / create_pr 需人工审批", key: "security_high_risk_approval" },
+    { title: "极端风险操作拦截", desc: "deploy / db_migration / git_merge / push_main", key: "security_extreme_risk_block" },
+    { title: "日志脱敏", desc: "自动脱敏凭据和敏感信息", key: "security_log_desensitization" },
+    { title: "Worktree 隔离", desc: "每 Run 独立 worktree + 临时 HOME", key: "security_worktree_isolation" },
+  ];
+
+  const [enabledMap, setEnabledMap] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(true);
+  const [toggling, setToggling] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await listSettings();
+        const map: Record<string, boolean> = {};
+        for (const s of resp.settings) {
+          if (s.key.startsWith("security_")) {
+            map[s.key] = s.value === "true";
+          }
+        }
+        // Default all to enabled
+        for (const p of policies) {
+          if (!(p.key in map)) map[p.key] = true;
+        }
+        setEnabledMap(map);
+      } catch {
+        const map: Record<string, boolean> = {};
+        for (const p of policies) map[p.key] = true;
+        setEnabledMap(map);
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleToggle = async (key: string) => {
+    const next = !enabledMap[key];
+    setToggling(key);
+    try {
+      await updateSettings({ [key]: String(next) });
+      setEnabledMap((prev) => ({ ...prev, [key]: next }));
+    } catch {
+      // Revert on error
+    } finally {
+      setToggling(null);
+    }
+  };
+
+  if (loading) return <p className="py-8 text-center text-xs text-muted-foreground">加载中…</p>;
+
+  return (
+    <div className="space-y-2">
+      {policies.map((p) => (
+        <div key={p.key} className="flex items-center justify-between rounded-md border bg-card px-4 py-3">
+          <div>
+            <p className="text-xs font-medium">{p.title}</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">{p.desc}</p>
+          </div>
+          <button
+            onClick={() => void handleToggle(p.key)}
+            disabled={toggling === p.key}
+            className="cursor-pointer"
+          >
+            <Badge variant={enabledMap[p.key] ? "success" : "outline"}>
+              {toggling === p.key ? "…" : enabledMap[p.key] ? "已启用" : "已禁用"}
+            </Badge>
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ---------- Integrations Tab ---------- */
+
+function IntegrationsTab() {
+  const [integrations, setIntegrations] = useState<
+    { name: string; key: string; connected: boolean }[]
+  >([]);
+  const [loading, setLoading] = useState(true);
+  const [toggling, setToggling] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await listSettings();
+        const keys = ["integration_github", "integration_gitlab"];
+        const list = keys.map((k) => {
+          const s = resp.settings.find((s) => s.key === k);
+          return {
+            name: k.replace("integration_", "").replace(/^\w/, (c) => c.toUpperCase()),
+            key: k,
+            connected: s?.value === "true",
+          };
+        });
+        setIntegrations(list);
+      } catch {
+        setIntegrations([
+          { name: "GitHub", key: "integration_github", connected: false },
+          { name: "GitLab", key: "integration_gitlab", connected: false },
+        ]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const handleToggle = async (key: string) => {
+    const current = integrations.find((i) => i.key === key);
+    const next = !current?.connected;
+    setToggling(key);
+    try {
+      await updateSettings({ [key]: String(next) });
+      setIntegrations((prev) =>
+        prev.map((i) => (i.key === key ? { ...i, connected: next } : i)),
+      );
+    } catch {
+      // Revert
+    } finally {
+      setToggling(null);
+    }
+  };
+
+  if (loading) return <p className="py-8 text-center text-xs text-muted-foreground">加载中…</p>;
+
+  return (
+    <div>
+      <h3 className="mb-3 text-xs font-medium text-muted-foreground">已配置集成</h3>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {integrations.map((ig) => (
+          <div key={ig.key} className="flex items-center justify-between rounded-md border bg-card px-4 py-3">
+            <div>
+              <p className="text-xs font-medium">{ig.name}</p>
+            </div>
+            <button onClick={() => void handleToggle(ig.key)} disabled={toggling === ig.key}>
+              <Badge variant={ig.connected ? "success" : "outline"}>
+                {toggling === ig.key ? "切换中…" : ig.connected ? "已连接" : "未连接"}
+              </Badge>
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Helpers ---------- */
+
+function KVRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between border-b py-1.5 text-xs">
+      <span className="text-muted-foreground">{label}</span>
+      <span>{value}</span>
+    </div>
+  );
+}
+
+/* ---------- Main Page ---------- */
+
+export default function SettingsPage() {
+  const [tab, setTab] = useState<Tab>("workspace");
+  const [health, setHealth] = useState<HealthResponse | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await getHealth();
+        if (!cancelled) setHealth(data);
+      } catch {
+        // keep null
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
+      <header>
+        <h1 className="mt-0.5">设置</h1>
+        <p className="text-xs text-muted-foreground">平台配置、用户管理、安全策略</p>
+      </header>
+
+      <div className="flex gap-4 border-b">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`border-b-2 pb-1.5 text-xs font-medium transition-colors ${
+              tab === t.key
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "workspace" && <WorkspaceTab dbStatus={health} />}
+      {tab === "users" && <UsersTab />}
+      {tab === "agent" && <AgentConfigTab />}
+      {tab === "security" && <SecurityTab />}
+      {tab === "integrations" && <IntegrationsTab />}
+    </div>
+  );
+}

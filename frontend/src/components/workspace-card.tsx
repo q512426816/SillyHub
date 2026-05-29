@@ -54,41 +54,54 @@ export function WorkspaceCard({ workspace, onChanged }: Props) {
   };
 
   return (
-    <article className="flex flex-col gap-3 rounded-lg border bg-card p-5 shadow-sm">
-      <header className="flex items-start justify-between gap-2">
-        <div>
-          <h3 className="text-base font-semibold tracking-tight">{workspace.name}</h3>
-          <p className="font-mono text-xs text-muted-foreground">{workspace.slug}</p>
+    <article className="flex flex-col rounded-md border bg-card">
+      <header className="flex items-center justify-between border-b px-4 py-2.5">
+        <div className="min-w-0">
+          <h3 className="truncate text-sm font-medium">{workspace.name}</h3>
+          <p className="truncate font-mono text-[11px] text-muted-foreground">
+            {workspace.slug}
+          </p>
         </div>
         <Badge variant={workspace.status === "active" ? "success" : "outline"}>
           {workspace.status}
         </Badge>
       </header>
 
-      <dl className="grid grid-cols-[6rem_1fr] gap-y-1 text-xs">
+      <dl className="grid grid-cols-[5.5rem_1fr] gap-y-1 px-4 py-3 text-xs">
         <dt className="text-muted-foreground">root_path</dt>
-        <dd className="break-all font-mono">{workspace.root_path}</dd>
+        <dd className="truncate font-mono" title={workspace.root_path}>
+          {workspace.root_path}
+        </dd>
         <dt className="text-muted-foreground">最后扫描</dt>
         <dd>{formatTs(workspace.last_scanned_at)}</dd>
         <dt className="text-muted-foreground">创建于</dt>
         <dd>{formatTs(workspace.created_at)}</dd>
       </dl>
 
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && (
+        <p className="px-4 pb-2 text-xs text-destructive">{error}</p>
+      )}
 
-      <footer className="flex flex-wrap justify-end gap-2 pt-1">
+      <footer className="flex items-center justify-end gap-2 border-t px-4 py-2">
+        <Link
+          href={`/workspaces/${workspace.id}`}
+          className="inline-flex h-7 items-center rounded border border-border px-2 text-xs text-foreground hover:bg-muted"
+        >
+          详情
+        </Link>
         <Link
           href={`/workspaces/${workspace.id}/components`}
-          className="inline-flex h-8 items-center justify-center rounded-md border border-input bg-background px-3 text-xs font-medium transition-colors hover:bg-muted"
+          className="inline-flex h-7 items-center rounded border border-border px-2 text-xs text-foreground hover:bg-muted"
         >
           项目组件
         </Link>
-        <Button size="sm" variant="outline" onClick={handleRescan} disabled={busy !== null}>
+        <Button size="sm" variant="ghost" onClick={handleRescan} disabled={busy !== null}>
           {busy === "rescan" ? "扫描中…" : "Re-scan"}
         </Button>
         <Button
           size="sm"
-          variant="destructive"
+          variant="ghost"
+          className="text-destructive hover:text-destructive"
           onClick={handleDelete}
           disabled={busy !== null}
         >

@@ -1,0 +1,5 @@
+name: backend
+path: ./backend
+status: active
+role: 后端 - FastAPI + Python 3.12 + SQLModel + PostgreSQL + Redis
+repo: https://github.com/qinyi/multi-agent-platform

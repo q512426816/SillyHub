@@ -26,6 +26,7 @@ class TaskSummary(BaseModel):
     blocks: list[str] = []
     created_at: datetime
     updated_at: datetime
+    workspace_ids: list[uuid.UUID] = []
 
 
 class TaskRead(TaskSummary):

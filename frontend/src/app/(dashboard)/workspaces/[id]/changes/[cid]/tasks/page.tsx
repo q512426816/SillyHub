@@ -25,11 +25,11 @@ const PRIORITY_COLORS: Record<string, "destructive" | "default" | "outline"> = {
 };
 
 const COLUMN_COLORS: Record<string, string> = {
-  draft: "bg-muted/50",
-  ready: "bg-blue-50 dark:bg-blue-950/20",
-  in_progress: "bg-amber-50 dark:bg-amber-950/20",
-  review: "bg-purple-50 dark:bg-purple-950/20",
-  done: "bg-green-50 dark:bg-green-950/20",
+  draft: "bg-muted/30",
+  ready: "bg-blue-50/60",
+  in_progress: "bg-amber-50/60",
+  review: "bg-violet-50/60",
+  done: "bg-emerald-50/60",
 };
 
 function TaskCard({
@@ -44,26 +44,24 @@ function TaskCard({
   return (
     <Link
       href={`/workspaces/${workspaceId}/changes/${changeId}/tasks/${task.id}`}
-      className="block rounded-md border bg-card p-3 shadow-sm transition-shadow hover:shadow-md"
+      className="block rounded border bg-card p-2.5 transition-shadow hover:shadow-sm"
     >
       <div className="flex items-center justify-between gap-2">
-        <code className="text-xs text-muted-foreground">{task.task_key}</code>
+        <code className="text-[11px] text-muted-foreground">{task.task_key}</code>
         {task.priority && (
-          <Badge variant={PRIORITY_COLORS[task.priority] ?? "outline"} className="text-[10px] px-1.5 py-0">
+          <Badge variant={PRIORITY_COLORS[task.priority] ?? "outline"} className="text-[10px] px-1 py-0">
             {task.priority}
           </Badge>
         )}
       </div>
-      <p className="mt-1 text-sm font-medium leading-snug">
+      <p className="mt-1 text-xs font-medium leading-snug">
         {task.title ?? task.task_key}
       </p>
-      <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+      <div className="mt-1.5 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
         {task.owner_key && <span>@{task.owner_key}</span>}
-        {task.estimated_hours != null && (
-          <span>{task.estimated_hours}h</span>
-        )}
+        {task.estimated_hours != null && <span>{task.estimated_hours}h</span>}
         {task.affected_components.length > 0 && (
-          <span>{task.affected_components.join(", ")}</span>
+          <span className="truncate">{task.affected_components.join(", ")}</span>
         )}
       </div>
     </Link>
@@ -119,16 +117,16 @@ export default function TaskBoardPage({ params }: Props) {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-[1400px] px-6 py-8">
-        <p className="text-sm text-muted-foreground">加载中…</p>
+      <div className="mx-auto max-w-[1400px] px-6 py-6">
+        <p className="text-xs text-muted-foreground">加载中…</p>
       </div>
     );
   }
 
   if (pageError && !board) {
     return (
-      <div className="mx-auto max-w-[1400px] px-6 py-8">
-        <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+      <div className="mx-auto max-w-[1400px] px-6 py-6">
+        <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {pageError}
         </div>
       </div>
@@ -136,31 +134,31 @@ export default function TaskBoardPage({ params }: Props) {
   }
 
   return (
-    <div className="mx-auto flex max-w-[1400px] flex-col gap-6 px-6 py-8">
+    <div className="mx-auto flex max-w-[1400px] flex-col gap-5 px-6 py-6">
       <header className="flex items-center justify-between">
-        <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">
+        <div>
+          <p className="text-[11px] text-muted-foreground">
             <Link href={`/workspaces/${workspaceId}/changes/${changeId}`} className="hover:underline">
-              &larr; 回到变更详情
+              ← 变更详情
             </Link>
           </p>
-          <h1 className="text-2xl font-semibold tracking-tight">任务看板</h1>
+          <h1 className="mt-0.5">任务看板</h1>
         </div>
         <button
           onClick={handleReparse}
           disabled={reparsing}
-          className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          className="inline-flex h-7 items-center rounded bg-primary px-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
-          {reparsing ? "解析中…" : "重新解析任务"}
+          {reparsing ? "解析中…" : "重新解析"}
         </button>
       </header>
 
       {reparseResult && (
-        <div className="rounded-md border bg-muted/50 p-3 text-sm">
+        <div className="rounded border bg-muted/40 px-3 py-2 text-xs">
           解析完成：新增 {reparseResult.stats.created}，更新{" "}
           {reparseResult.stats.updated}，删除 {reparseResult.stats.deleted}
           {reparseResult.warnings.length > 0 && (
-            <span className="ml-2 text-amber-600">
+            <span className="ml-1 text-amber-600">
               ({reparseResult.warnings.length} 个警告)
             </span>
           )}
@@ -168,16 +166,16 @@ export default function TaskBoardPage({ params }: Props) {
       )}
 
       {board && board.columns.length > 0 ? (
-        <div className="grid auto-cols-fr grid-flow-col gap-4">
+        <div className="grid auto-cols-fr grid-flow-col gap-3">
           {board.columns.map((col) => (
-            <div key={col.status} className={`flex flex-col rounded-lg p-3 ${COLUMN_COLORS[col.status] ?? ""}`}>
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold">{col.status}</h3>
-                <span className="rounded-full bg-muted px-2 py-0.5 text-xs">
+            <div key={col.status} className={`flex flex-col rounded-md p-2.5 ${COLUMN_COLORS[col.status] ?? ""}`}>
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-xs font-semibold">{col.status}</h3>
+                <span className="rounded bg-muted/60 px-1.5 py-px text-[10px]">
                   {col.count}
                 </span>
               </div>
-              <div className="flex flex-1 flex-col gap-2">
+              <div className="flex flex-1 flex-col gap-1.5">
                 {col.items.map((task) => (
                   <TaskCard
                     key={task.id}
@@ -187,7 +185,7 @@ export default function TaskBoardPage({ params }: Props) {
                   />
                 ))}
                 {col.items.length === 0 && (
-                  <p className="py-4 text-center text-xs text-muted-foreground">
+                  <p className="py-4 text-center text-[11px] text-muted-foreground">
                     暂无任务
                   </p>
                 )}
@@ -196,8 +194,8 @@ export default function TaskBoardPage({ params }: Props) {
           ))}
         </div>
       ) : (
-        <div className="rounded-md border p-8 text-center text-sm text-muted-foreground">
-          暂无任务。点击 &ldquo;重新解析任务&rdquo; 从文件系统加载。
+        <div className="rounded-md border py-12 text-center text-xs text-muted-foreground">
+          暂无任务。点击&ldquo;重新解析&rdquo;从文件系统加载。
         </div>
       )}
     </div>

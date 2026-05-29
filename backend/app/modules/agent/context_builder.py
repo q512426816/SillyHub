@@ -1,0 +1,461 @@
+"""Context builder — assembles TaskContext / AgentSpecBundle from change/task/component data."""
+
+from __future__ import annotations
+
+import uuid
+from pathlib import Path
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
+
+from app.core.logging import get_logger
+from app.modules.agent.base import AgentSpecBundle, TaskContext, WorkspaceSpecSummary
+from app.modules.change.model import Change, ChangeDocument
+from app.modules.scan_docs.model import ScanDocument
+from app.modules.spec_profile.provider import SpecProfileProvider
+from app.modules.spec_workspace.model import SpecWorkspace
+from app.modules.task.model import Task
+from app.modules.workspace.model import Workspace, WorkspaceRelation
+
+log = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Legacy builder — retained for backward compatibility
+# ---------------------------------------------------------------------------
+
+
+async def build_task_context(
+    session: AsyncSession,
+    change_id: uuid.UUID,
+    task_id: uuid.UUID,
+) -> TaskContext:
+    """Build a TaskContext from DB records for agent injection."""
+    # Load task
+    task = (await session.get(Task, task_id))
+    if task is None or task.change_id != change_id:
+        msg = f"Task '{task_id}' not found for change '{change_id}'."
+        raise ValueError(msg)
+
+    # Load change
+    change = (await session.get(Change, change_id))
+    if change is None:
+        msg = f"Change '{change_id}' not found."
+        raise ValueError(msg)
+
+    # Load documents
+    stmt = select(ChangeDocument).where(
+        col(ChangeDocument.change_id) == change_id,
+        col(ChangeDocument.exists).is_(True),
+    )
+    docs = list((await session.execute(stmt)).scalars().all())
+    doc_map: dict[str, str] = {}
+    for doc in docs:
+        # Try to read file content from path
+        doc_map[doc.doc_type] = doc.path
+
+    ctx = TaskContext(
+        change_title=change.title or "",
+        task_title=task.title or "",
+        task_key=task.task_key,
+        proposal=doc_map.get("proposal"),
+        requirements=doc_map.get("requirements"),
+        design=doc_map.get("design"),
+        plan=doc_map.get("plan"),
+        allowed_paths=task.allowed_paths or [],
+        denied_paths=[],
+    )
+    return ctx
+
+
+# ---------------------------------------------------------------------------
+# New builder — produces AgentSpecBundle
+# ---------------------------------------------------------------------------
+
+
+async def _fetch_referenced_workspaces(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    *,
+    max_depth: int = 1,
+    snippet_max_chars: int = 2000,
+) -> list[WorkspaceSpecSummary]:
+    """Traverse WorkspaceRelation graph and collect spec summaries.
+
+    Args:
+        session: Async DB session.
+        workspace_id: The primary workspace whose relations to traverse.
+        max_depth: Graph traversal depth. Default 1 = immediate neighbours only.
+            Must be >= 1. Values > 1 may cause performance issues on large graphs.
+        snippet_max_chars: Maximum characters to read from each spec doc file.
+
+    Returns:
+        List of WorkspaceSpecSummary for all reachable workspaces, deduplicated
+        by workspace_id (first encounter wins).
+    """
+    if max_depth < 1:
+        raise ValueError("max_depth must be >= 1")
+
+    visited: set[uuid.UUID] = {workspace_id}
+    results: list[WorkspaceSpecSummary] = []
+
+    # BFS frontier: each entry is (related_ws_id, relation_type, direction)
+    frontier: list[tuple[uuid.UUID, str, str]] = []
+
+    # -- Initial pass: find all direct relations of the primary workspace ------
+    rel_stmt = select(WorkspaceRelation).where(
+        (col(WorkspaceRelation.source_id) == workspace_id)
+        | (col(WorkspaceRelation.target_id) == workspace_id),
+    )
+    relations = list((await session.execute(rel_stmt)).scalars().all())
+
+    for rel in relations:
+        if rel.source_id == workspace_id:
+            related_id = rel.target_id
+            direction = "outgoing"
+        else:
+            related_id = rel.source_id
+            direction = "incoming"
+
+        if related_id in visited:
+            continue
+        visited.add(related_id)
+        frontier.append((related_id, rel.relation_type, direction))
+
+    # -- Process frontier (BFS for depth > 1) ---------------------------------
+    depth = 1
+    while frontier and depth < max_depth:
+        next_frontier: list[tuple[uuid.UUID, str, str]] = []
+        for related_id, _rt, _dir in frontier:
+            sub_rel_stmt = select(WorkspaceRelation).where(
+                (col(WorkspaceRelation.source_id) == related_id)
+                | (col(WorkspaceRelation.target_id) == related_id),
+            )
+            sub_rels = list((await session.execute(sub_rel_stmt)).scalars().all())
+            for sr in sub_rels:
+                if sr.source_id == related_id:
+                    nid = sr.target_id
+                else:
+                    nid = sr.source_id
+                if nid in visited:
+                    continue
+                visited.add(nid)
+                # Direction is always from the perspective of the primary workspace
+                # For deeper hops, treat them as outgoing from the chain
+                next_frontier.append((nid, sr.relation_type, "outgoing"))
+        frontier.extend(next_frontier)
+        depth += 1
+
+    # -- Build summaries for all discovered workspaces -------------------------
+    for related_id, relation_type, direction in frontier:
+        # Fetch workspace row
+        ws = await session.get(Workspace, related_id)
+        if ws is None:
+            continue
+        # Skip soft-deleted workspaces
+        if ws.deleted_at is not None or ws.status == "deleted":
+            continue
+
+        # Fetch SpecWorkspace (may not exist)
+        sw_stmt = select(SpecWorkspace).where(
+            col(SpecWorkspace.workspace_id) == related_id,
+        )
+        spec_ws = (await session.execute(sw_stmt)).scalar_one_or_none()
+        spec_root: str | None = spec_ws.spec_root if spec_ws else None
+
+        # Fetch scan documents with content
+        doc_stmt = (
+            select(ScanDocument)
+            .where(
+                col(ScanDocument.workspace_id) == related_id,
+                col(ScanDocument.exists).is_(True),
+            )
+            .order_by(col(ScanDocument.doc_type))
+        )
+        docs = list((await session.execute(doc_stmt)).scalars().all())
+
+        doc_summaries: dict[str, str] = {}
+        for doc in docs:
+            # Prefer the content column, fall back to reading file from path
+            raw_content: str | None = doc.content
+            if raw_content is None:
+                raw_content = _read_file_safe(doc.path)
+            if raw_content is not None:
+                if snippet_max_chars <= 0:
+                    doc_summaries[doc.doc_type] = ""
+                else:
+                    doc_summaries[doc.doc_type] = raw_content[:snippet_max_chars]
+
+        results.append(
+            WorkspaceSpecSummary(
+                workspace_id=ws.id,
+                name=ws.name,
+                slug=ws.slug,
+                component_key=ws.component_key,
+                relation_type=relation_type,
+                direction=direction,
+                spec_root=spec_root,
+                doc_summaries=doc_summaries,
+            )
+        )
+
+    return results
+
+
+async def build_spec_bundle(
+    session: AsyncSession,
+    change_id: uuid.UUID,
+    task_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+) -> AgentSpecBundle:
+    """Build an ``AgentSpecBundle`` from DB records.
+
+    This is the primary entry point for the new agent execution pipeline.
+    It loads change/task info, reads spec document content, resolves the
+    workspace's spec strategy and profile version, and fetches profile
+    gates via ``SpecProfileProvider``.
+    """
+    # -- 1. Load task & change -------------------------------------------------
+    task = await session.get(Task, task_id)
+    if task is None or task.change_id != change_id:
+        msg = f"Task '{task_id}' not found for change '{change_id}'."
+        raise ValueError(msg)
+
+    change = await session.get(Change, change_id)
+    if change is None:
+        msg = f"Change '{change_id}' not found."
+        raise ValueError(msg)
+
+    # -- 2. Load document content ----------------------------------------------
+    stmt = select(ChangeDocument).where(
+        col(ChangeDocument.change_id) == change_id,
+        col(ChangeDocument.exists).is_(True),
+    )
+    docs = list((await session.execute(stmt)).scalars().all())
+
+    doc_content: dict[str, str | None] = {}
+    for doc in docs:
+        doc_content[doc.doc_type] = _read_file_safe(doc.path)
+
+    # -- 3. Resolve SpecWorkspace (strategy, profile version) ------------------
+    sw_stmt = select(SpecWorkspace).where(
+        col(SpecWorkspace.workspace_id) == workspace_id,
+    )
+    spec_ws = (await session.execute(sw_stmt)).scalar_one_or_none()
+
+    spec_strategy: str | None = None
+    profile_version: str | None = None
+    if spec_ws is not None:
+        spec_strategy = spec_ws.strategy
+        profile_version = spec_ws.profile_version
+
+    # -- 4. Profile gates (currently stub) -------------------------------------
+    provider = SpecProfileProvider()
+    manifest = await provider.get_active_manifest()
+    profile_gates: list[dict[str, Any]] = []
+    if manifest is not None:
+        profile_gates = list(manifest.gates)
+
+    # -- 4b. Cross-workspace context via WorkspaceRelation --------------------
+    referenced = await _fetch_referenced_workspaces(
+        session,
+        workspace_id,
+        max_depth=1,
+    )
+
+    # -- 5. Assemble bundle ----------------------------------------------------
+    change_summary = change.title or ""
+    task_title = task.title or ""
+
+    # Task markdown content
+    task_markdown: str | None = task.content
+
+    # Acceptance criteria — extracted from task content if present.
+    # In the current data model there is no dedicated column, so we
+    # leave it empty for now.  A future task can parse the task markdown
+    # for an acceptance-criteria section.
+    acceptance_criteria: list[str] = []
+
+    bundle = AgentSpecBundle(
+        change_summary=change_summary,
+        task_key=task.task_key,
+        task_title=task_title,
+        proposal=doc_content.get("proposal"),
+        requirements=doc_content.get("requirements"),
+        design=doc_content.get("design"),
+        plan=doc_content.get("plan"),
+        task_markdown=task_markdown,
+        allowed_paths=task.allowed_paths or [],
+        denied_paths=[],
+        acceptance_criteria=acceptance_criteria,
+        profile_version=profile_version,
+        spec_strategy=spec_strategy,
+        profile_gates=profile_gates,
+        available_tools=["sillyspec"],
+        platform_metadata={
+            "workspace_id": str(workspace_id),
+            "change_id": str(change_id),
+            "task_id": str(task_id),
+            "change_key": change.change_key,
+        },
+        referenced_workspaces=referenced,
+    )
+
+    log.info(
+        "spec_bundle_built",
+        task_key=bundle.task_key,
+        spec_strategy=bundle.spec_strategy,
+        profile_version=bundle.profile_version,
+        doc_types=list(doc_content.keys()),
+    )
+    return bundle
+
+
+# ---------------------------------------------------------------------------
+# CLAUDE.md renderers
+# ---------------------------------------------------------------------------
+
+
+def render_claude_md(ctx: TaskContext) -> str:
+    """Render a CLAUDE.md file from the task context."""
+    lines: list[str] = [
+        f"# Task: {ctx.task_key} — {ctx.task_title}",
+        f"# Change: {ctx.change_title}",
+        "",
+    ]
+    if ctx.proposal:
+        lines.append("## Proposal")
+        lines.append(f"See: {ctx.proposal}")
+        lines.append("")
+    if ctx.requirements:
+        lines.append("## Requirements")
+        lines.append(f"See: {ctx.requirements}")
+        lines.append("")
+    if ctx.design:
+        lines.append("## Design")
+        lines.append(f"See: {ctx.design}")
+        lines.append("")
+    if ctx.plan:
+        lines.append("## Plan")
+        lines.append(f"See: {ctx.plan}")
+        lines.append("")
+    if ctx.allowed_paths:
+        lines.append("## Allowed Paths")
+        for p in ctx.allowed_paths:
+            lines.append(f"- {p}")
+        lines.append("")
+    if ctx.conventions:
+        lines.append("## Conventions")
+        lines.append(ctx.conventions)
+    return "\n".join(lines)
+
+
+def render_bundle_to_claude_md(bundle: AgentSpecBundle) -> str:
+    """Render a full CLAUDE.md from an ``AgentSpecBundle``.
+
+    Unlike the legacy ``render_claude_md`` which only writes file paths as
+    references, this renderer inlines the full document content so that the
+    agent has immediate access to all spec material.
+    """
+    lines: list[str] = [
+        f"# Task: {bundle.task_key} — {bundle.task_title}",
+        f"# Change: {bundle.change_summary}",
+        "",
+    ]
+
+    # -- Spec documents (inlined) ---
+    for label, content in [
+        ("Proposal", bundle.proposal),
+        ("Requirements", bundle.requirements),
+        ("Design", bundle.design),
+        ("Plan", bundle.plan),
+        ("Task", bundle.task_markdown),
+    ]:
+        if content:
+            lines.append(f"## {label}")
+            lines.append(content)
+            lines.append("")
+
+    # -- Constraints ---
+    if bundle.allowed_paths:
+        lines.append("## Allowed Paths")
+        for p in bundle.allowed_paths:
+            lines.append(f"- {p}")
+        lines.append("")
+
+    if bundle.denied_paths:
+        lines.append("## Denied Paths")
+        for p in bundle.denied_paths:
+            lines.append(f"- {p}")
+        lines.append("")
+
+    if bundle.acceptance_criteria:
+        lines.append("## Acceptance Criteria")
+        for criterion in bundle.acceptance_criteria:
+            lines.append(f"- [ ] {criterion}")
+        lines.append("")
+
+    # -- Profile ---
+    if bundle.spec_strategy or bundle.profile_version:
+        lines.append("## Profile")
+        if bundle.spec_strategy:
+            lines.append(f"- **Strategy**: {bundle.spec_strategy}")
+        if bundle.profile_version:
+            lines.append(f"- **Profile version**: {bundle.profile_version}")
+        lines.append("")
+
+    if bundle.profile_gates:
+        lines.append("## Profile Gates")
+        for gate in bundle.profile_gates:
+            name = gate.get("name", "unnamed")
+            gate_type = gate.get("type", "")
+            lines.append(f"- {name} ({gate_type})")
+        lines.append("")
+
+    # -- Referenced Workspaces ---
+    if bundle.referenced_workspaces:
+        lines.append("## Referenced Workspaces")
+        for ws in bundle.referenced_workspaces:
+            direction_label = "→" if ws.direction == "outgoing" else "←"
+            lines.append(
+                f"### {direction_label} {ws.name} ({ws.relation_type})"
+            )
+            if ws.component_key:
+                lines.append(f"- **component_key**: {ws.component_key}")
+            if ws.spec_root:
+                lines.append(f"- **spec_root**: {ws.spec_root}")
+            for doc_type, snippet in ws.doc_summaries.items():
+                lines.append(f"- **{doc_type}**:")
+                # Indent snippet lines
+                for snippet_line in snippet.splitlines():
+                    lines.append(f"  {snippet_line}")
+            lines.append("")
+
+    # -- Available Tools ---
+    if bundle.available_tools:
+        lines.append("## Available Tools")
+        for tool in bundle.available_tools:
+            if tool == "sillyspec":
+                lines.append("- **sillyspec**: Use `sillyspec init --dir <spec_root>` to initialize spec space, then `sillyspec run scan --dir <spec_root>` to scan. Do NOT write .sillyspec files directly — always use the CLI.")
+            else:
+                lines.append(f"- {tool}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _read_file_safe(path: str | None) -> str | None:
+    """Read a file and return its content, or ``None`` on any failure."""
+    if not path:
+        return None
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        log.warning("spec_bundle_read_failed", path=path)
+        return None

@@ -19,11 +19,10 @@ def _auth(token: str) -> dict[str, str]:
 
 
 async def _setup_prerequisites(db_session) -> dict:
-    """Create workspace, component, change, task, git_identity in DB."""
+    """Create workspace, change, task, git_identity in DB."""
     from app.core.security import password_hasher
     from app.modules.auth.model import User
     from app.modules.change.model import Change
-    from app.modules.component.model import ProjectComponent
     from app.modules.git_identity.model import GitIdentity
     from app.modules.task.model import Task
     from app.modules.workspace.model import Workspace
@@ -34,22 +33,13 @@ async def _setup_prerequisites(db_session) -> dict:
         name="Test WS",
         slug=f"test-ws-{ws_id.hex[:8]}",
         root_path="/tmp/test",
-        sillyspec_path="/tmp/test/.sillyspec",
         status="active",
-    )
-    db_session.add(ws)
-
-    comp_id = uuid.uuid4()
-    comp = ProjectComponent(
-        id=comp_id,
-        workspace_id=ws_id,
         component_key="backend",
-        name="Backend",
         repo_url="https://github.com/org/repo.git",
         default_branch="main",
         source_yaml_path="projects/backend.yaml",
     )
-    db_session.add(comp)
+    db_session.add(ws)
 
     change_id = uuid.uuid4()
     change = Change(
@@ -111,7 +101,6 @@ async def _setup_prerequisites(db_session) -> dict:
 
     return {
         "ws_id": ws_id,
-        "comp_id": comp_id,
         "change_id": change_id,
         "task_id": task_id,
         "user_id": user_id,
@@ -160,7 +149,7 @@ async def test_acquire_returns_201(
     resp = await client.post(
         f"/api/workspaces/{p['ws_id']}/worktrees/acquire",
         json={
-            "component_id": str(p["comp_id"]),
+            "component_id": str(p["ws_id"]),
             "change_id": str(p["change_id"]),
             "task_id": str(p["task_id"]),
             "git_identity_id": str(p["identity_id"]),
@@ -183,7 +172,7 @@ async def test_list_worktrees_empty(
     ws_id = uuid.uuid4()
     db_session.add(Workspace(
         id=ws_id, name="WS", slug=f"ws-{ws_id.hex[:8]}", root_path="/tmp",
-        sillyspec_path="/tmp/.sillyspec", status="active",
+        status="active",
     ))
     await db_session.commit()
 
@@ -219,7 +208,7 @@ async def test_release_worktree(
     resp = await client.post(
         f"/api/workspaces/{p['ws_id']}/worktrees/acquire",
         json={
-            "component_id": str(p["comp_id"]),
+            "component_id": str(p["ws_id"]),
             "change_id": str(p["change_id"]),
             "task_id": str(p["task_id"]),
             "git_identity_id": str(p["identity_id"]),
@@ -248,7 +237,7 @@ async def test_get_lease_detail(
     resp = await client.post(
         f"/api/workspaces/{p['ws_id']}/worktrees/acquire",
         json={
-            "component_id": str(p["comp_id"]),
+            "component_id": str(p["ws_id"]),
             "change_id": str(p["change_id"]),
             "task_id": str(p["task_id"]),
             "git_identity_id": str(p["identity_id"]),
@@ -275,7 +264,7 @@ async def test_extend_lease(
     resp = await client.post(
         f"/api/workspaces/{p['ws_id']}/worktrees/acquire",
         json={
-            "component_id": str(p["comp_id"]),
+            "component_id": str(p["ws_id"]),
             "change_id": str(p["change_id"]),
             "task_id": str(p["task_id"]),
             "git_identity_id": str(p["identity_id"]),
@@ -310,7 +299,7 @@ async def test_cross_user_release_403(
     resp = await client.post(
         f"/api/workspaces/{p['ws_id']}/worktrees/acquire",
         json={
-            "component_id": str(p["comp_id"]),
+            "component_id": str(p["ws_id"]),
             "change_id": str(p["change_id"]),
             "task_id": str(p["task_id"]),
             "git_identity_id": str(p["identity_id"]),

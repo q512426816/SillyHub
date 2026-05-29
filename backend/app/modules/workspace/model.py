@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from sqlalchemy import Column, DateTime, Index, String, Uuid, text
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, String, Uuid, text
 from sqlmodel import Field
 
 from app.models.base import BaseModel
@@ -55,8 +55,45 @@ class Workspace(BaseModel, table=True):
     name: str = Field(sa_column=Column(String(200), nullable=False))
     slug: str = Field(sa_column=Column(String(100), nullable=False))
     root_path: str = Field(sa_column=Column(String, nullable=False))
-    sillyspec_path: str = Field(sa_column=Column(String, nullable=False))
     status: str = Field(default="active", sa_column=Column(String(20), nullable=False))
+
+    # Component metadata fields (absorbed from ProjectComponent, ADR-07)
+    component_key: str | None = Field(
+        default=None,
+        sa_column=Column(String(100), nullable=True),
+    )
+    type: str | None = Field(
+        default=None,
+        sa_column=Column(String(50), nullable=True),
+    )
+    role: str | None = Field(
+        default=None,
+        sa_column=Column(String(100), nullable=True),
+    )
+    repo_url: str | None = Field(
+        default=None,
+        sa_column=Column(String, nullable=True),
+    )
+    default_branch: str | None = Field(
+        default="main",
+        sa_column=Column(String(100), nullable=True),
+    )
+    tech_stack: list[str] = Field(
+        default_factory=list,
+        sa_column=Column(JSON, nullable=False, default=list),
+    )
+    build_command: str | None = Field(
+        default=None,
+        sa_column=Column(String, nullable=True),
+    )
+    test_command: str | None = Field(
+        default=None,
+        sa_column=Column(String, nullable=True),
+    )
+    source_yaml_path: str | None = Field(
+        default=None,
+        sa_column=Column(String, nullable=True),
+    )
     created_by: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(Uuid(as_uuid=True), nullable=True),
@@ -76,4 +113,132 @@ class Workspace(BaseModel, table=True):
     deleted_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+
+
+class WorkspaceRelation(BaseModel, table=True):
+    """Directed relation between two workspaces."""
+
+    __tablename__ = "workspace_relations"
+    __table_args__ = (
+        Index(
+            "ux_workspace_relations_triplet",
+            "source_id",
+            "target_id",
+            "relation_type",
+            unique=True,
+        ),
+        Index("ix_workspace_relations_source", "source_id"),
+        Index("ix_workspace_relations_target", "target_id"),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    source_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    target_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    relation_type: str = Field(sa_column=Column(String(50), nullable=False))
+    description: str | None = Field(default=None, sa_column=Column(String, nullable=True))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.utcnow(),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class ChangeWorkspace(BaseModel, table=True):
+    """M:N association between changes and workspaces."""
+
+    __tablename__ = "change_workspaces"
+    __table_args__ = (
+        Index("ix_change_workspaces_workspace", "workspace_id"),
+    )
+
+    change_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("changes.id", ondelete="CASCADE"),
+            primary_key=True,
+            nullable=False,
+        ),
+    )
+    workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="CASCADE"),
+            primary_key=True,
+            nullable=False,
+        ),
+    )
+    role: str | None = Field(
+        default=None,
+        sa_column=Column(String(30), nullable=True),
+    )
+
+
+class TaskWorkspace(BaseModel, table=True):
+    """M:N association between tasks and workspaces."""
+
+    __tablename__ = "task_workspaces"
+    __table_args__ = (
+        Index("ix_task_workspaces_workspace", "workspace_id"),
+    )
+
+    task_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("tasks.id", ondelete="CASCADE"),
+            primary_key=True,
+            nullable=False,
+        ),
+    )
+    workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="CASCADE"),
+            primary_key=True,
+            nullable=False,
+        ),
+    )
+    role: str | None = Field(
+        default=None,
+        sa_column=Column(String(30), nullable=True),
+    )
+
+
+class AgentRunWorkspace(BaseModel, table=True):
+    """M:N association between agent runs and workspaces."""
+
+    __tablename__ = "agent_run_workspaces"
+    __table_args__ = (
+        Index("ix_agent_run_workspaces_workspace", "workspace_id"),
+    )
+
+    agent_run_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_runs.id", ondelete="CASCADE"),
+            primary_key=True,
+            nullable=False,
+        ),
+    )
+    workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="CASCADE"),
+            primary_key=True,
+            nullable=False,
+        ),
     )

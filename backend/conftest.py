@@ -49,12 +49,12 @@ async def db_engine() -> AsyncIterator[Any]:
     # Registering feature models attaches their tables to BaseModel.metadata.
     from app.modules.auth import model as _auth_model  # noqa: F401
     from app.modules.change import model as _change_model  # noqa: F401
-    from app.modules.component import model as _component_model  # noqa: F401
     from app.modules.git_identity import model as _git_identity_model  # noqa: F401
     from app.modules.scan_docs import model as _scan_docs_model  # noqa: F401
     from app.modules.task import model as _task_model  # noqa: F401
     from app.modules.worktree import model as _worktree_model  # noqa: F401
     from app.modules.workspace import model as _ws_model  # noqa: F401
+    from app.modules.agent import model as _agent_model  # noqa: F401
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
     async with engine.begin() as conn:

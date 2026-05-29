@@ -9,6 +9,11 @@ import { useSession } from "@/stores/session";
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? "http://localhost:8000";
 
+/** Public getter so other modules (e.g. EventSource helpers) can resolve the backend origin. */
+export function getApiBaseUrl(): string {
+  return API_BASE_URL;
+}
+
 function isAuthEndpoint(pathname: string): boolean {
   return pathname.startsWith("/api/auth/");
 }

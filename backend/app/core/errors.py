@@ -80,6 +80,11 @@ class WorkspaceSlugDuplicate(AppError):
     http_status = status.HTTP_409_CONFLICT
 
 
+class SpecWorkspaceNotFound(AppError):
+    code = "HTTP_404_SPEC_WORKSPACE_NOT_FOUND"
+    http_status = status.HTTP_404_NOT_FOUND
+
+
 # ── Component errors ─────────────────────────────────────────────────────────
 
 
@@ -90,6 +95,32 @@ class ComponentNotFound(AppError):
 
 class ScanDocNotFound(AppError):
     code = "HTTP_404_SCAN_DOC_NOT_FOUND"
+    http_status = status.HTTP_404_NOT_FOUND
+
+
+# ── Relation errors ──────────────────────────────────────────────────────────
+
+
+class RelationNotFound(AppError):
+    code = "HTTP_404_RELATION_NOT_FOUND"
+    http_status = status.HTTP_404_NOT_FOUND
+
+
+class RelationSelfLoop(AppError):
+    code = "HTTP_400_RELATION_SELF_LOOP"
+    http_status = status.HTTP_400_BAD_REQUEST
+
+
+class RelationDuplicate(AppError):
+    code = "HTTP_409_RELATION_DUPLICATE"
+    http_status = status.HTTP_409_CONFLICT
+
+
+# ── Agent errors ──────────────────────────────────────────────────────────────
+
+
+class AgentRunNotFound(AppError):
+    code = "HTTP_404_AGENT_RUN_NOT_FOUND"
     http_status = status.HTTP_404_NOT_FOUND
 
 

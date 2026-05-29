@@ -1,0 +1,373 @@
+"""Claude Code adapter — manages claude CLI as a subprocess.
+
+Uses stream-json protocol (matching multica's approach) to capture
+full agent conversation including tool calls, thinking, and results.
+
+author: qinyi
+created_at: 2026-05-28 09:35:00
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+from app.core.logging import get_logger
+from app.core.redis import get_redis
+from app.modules.agent.base import AgentAdapter, AgentRunResult, AgentSpecBundle, TaskContext
+from app.modules.agent.context_builder import render_bundle_to_claude_md
+from app.modules.git_gateway.service import redact_output
+
+log = get_logger(__name__)
+
+_CLAUDE_CLI = "claude"
+
+
+def _build_stream_input(prompt: str) -> bytes:
+    """Encode prompt as a stream-json user message for stdin."""
+    payload = {
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{"type": "text", "text": prompt}],
+        },
+    }
+    return json.dumps(payload, ensure_ascii=False).encode() + b"\n"
+
+
+def _parse_stream_events(raw_stdout: str) -> list[dict]:
+    """Parse stream-json stdout into structured event list."""
+    events: list[dict] = []
+    for line in raw_stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            events.append({"type": "raw", "text": line})
+    return events
+
+
+def _format_conversation_log(events: list[dict]) -> str:
+    """Convert stream events into a human-readable conversation log."""
+    lines: list[str] = []
+    for event in events:
+        etype = event.get("type", "")
+
+        if etype == "assistant":
+            message = event.get("message", {})
+            content_blocks = message.get("content", [])
+            for block in content_blocks:
+                if not isinstance(block, dict):
+                    continue
+                btype = block.get("type", "")
+                if btype == "text":
+                    text = block.get("text", "").strip()
+                    if text:
+                        lines.append(f"[ASSISTANT] {text}")
+                elif btype == "thinking":
+                    text = block.get("text", "").strip()
+                    if text:
+                        preview = text[:300] + ("..." if len(text) > 300 else "")
+                        lines.append(f"[THINKING] {preview}")
+                elif btype == "tool_use":
+                    tool_name = block.get("name", "unknown")
+                    tool_input = block.get("input", {})
+                    if isinstance(tool_input, dict):
+                        cmd_str = tool_input.get("command", "")
+                        if cmd_str:
+                            lines.append(f"[TOOL_USE] {tool_name}: {cmd_str}")
+                        else:
+                            args_preview = json.dumps(tool_input, ensure_ascii=False)[:200]
+                            lines.append(f"[TOOL_USE] {tool_name}: {args_preview}")
+
+        elif etype == "user":
+            message = event.get("message", {})
+            content_blocks = message.get("content", [])
+            for block in content_blocks:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    content = block.get("content", "")
+                    if isinstance(content, str) and content.strip():
+                        preview = content.strip()[:500]
+                        lines.append(f"[TOOL_RESULT] {preview}")
+
+        elif etype == "result":
+            text = event.get("result", "").strip()
+            subtype = event.get("subtype", "")
+            duration_ms = event.get("duration_ms")
+            num_turns = event.get("num_turns")
+            cost_info = ""
+            if duration_ms is not None:
+                cost_info += f" duration={duration_ms}ms"
+            if num_turns is not None:
+                cost_info += f" turns={num_turns}"
+            label = f"[RESULT{':'+subtype if subtype else ''}]"
+            if text:
+                lines.append(f"{label} {text}{cost_info}")
+            elif cost_info:
+                lines.append(f"{label}{cost_info}")
+
+        elif etype == "system":
+            msg = event.get("message", "")
+            subtype = event.get("subtype", "")
+            if msg:
+                lines.append(f"[SYSTEM{':'+subtype if subtype else ''}] {msg}")
+
+        elif etype == "raw":
+            lines.append(event.get("text", ""))
+
+    return "\n".join(lines)
+
+
+class ClaudeCodeAdapter(AgentAdapter):
+    """Execute Claude Code CLI as a subprocess using stream-json protocol."""
+
+    async def run_with_bundle(
+        self,
+        run_id: uuid.UUID,
+        bundle: AgentSpecBundle,
+        lease_path: Path,
+        timeout: int = 600,
+    ) -> AgentRunResult:
+        """Execute Claude Code CLI using the full spec bundle."""
+        claude_md = render_bundle_to_claude_md(bundle)
+        (lease_path / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
+
+        prompt = (
+            f"Implement task {bundle.task_key}: {bundle.task_title}.\n"
+            f"Change: {bundle.change_summary}.\n"
+            "Read CLAUDE.md for full spec context before starting."
+        )
+
+        if "sillyspec" in bundle.available_tools:
+            prompt += (
+                "\n\nYou have access to the `sillyspec` CLI tool. "
+                "Use it to generate spec files instead of writing them directly. "
+                "Commands: `sillyspec init --dir <path>`, `sillyspec run scan --dir <path>`. "
+                "The spec root directory is where .sillyspec/ structure should be created."
+            )
+
+        cmd = [
+            _CLAUDE_CLI,
+            "-p",
+            "--output-format", "stream-json",
+            "--input-format", "stream-json",
+            "--verbose",
+            "--permission-mode", "bypassPermissions",
+            "--disallowedTools", "AskUserQuestion",
+        ]
+
+        env_vars: dict[str, str] = {}
+        if bundle.allowed_paths:
+            env_vars["CLAUDE_ALLOWED_PATHS"] = ":".join(bundle.allowed_paths)
+
+        log.info(
+            "agent_start",
+            run_id=str(run_id),
+            task_key=bundle.task_key,
+            spec_strategy=bundle.spec_strategy,
+            profile_version=bundle.profile_version,
+        )
+
+        return await self._exec_stream(run_id, cmd, prompt, lease_path, env_vars, timeout)
+
+    async def run(
+        self,
+        run_id: uuid.UUID,
+        task_context: TaskContext,
+        lease_path: Path,
+        timeout: int = 600,
+    ) -> AgentRunResult:
+        cmd = [
+            _CLAUDE_CLI,
+            "-p",
+            "--output-format", "stream-json",
+            "--input-format", "stream-json",
+            "--verbose",
+            "--permission-mode", "bypassPermissions",
+        ]
+        env_vars: dict[str, str] = {}
+        if task_context.allowed_paths:
+            env_vars["CLAUDE_ALLOWED_PATHS"] = ":".join(task_context.allowed_paths)
+
+        log.info("agent_start", run_id=str(run_id))
+        return await self._exec_stream(run_id, cmd, task_context.task_title, lease_path, env_vars, timeout)
+
+    async def _exec_stream(
+        self,
+        run_id: uuid.UUID,
+        cmd: list[str],
+        prompt: str,
+        cwd: Path,
+        env_vars: dict[str, str],
+        timeout: int,
+    ) -> AgentRunResult:
+        """Run claude CLI with stream-json protocol.
+
+        Reads stdout line-by-line, parses each stream-json event, publishes
+        formatted lines to Redis Pub/Sub channel ``agent_run:{run_id}``, and
+        accumulates the full output for the returned ``AgentRunResult``.
+        """
+        child_env = {**os.environ, **env_vars}
+        channel = f"agent_run:{run_id}"
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(cwd),
+                env=child_env,
+            )
+        except FileNotFoundError:
+            log.error("agent_cli_not_found", cli=_CLAUDE_CLI)
+            return AgentRunResult(
+                exit_code=127,
+                stdout="",
+                stderr=f"CLI '{_CLAUDE_CLI}' not found.",
+                redacted_output=f"CLI '{_CLAUDE_CLI}' not found in PATH.",
+            )
+
+        # Write user prompt to stdin and close it
+        stdin_data = _build_stream_input(prompt)
+        try:
+            proc.stdin.write(stdin_data)
+            await proc.stdin.drain()
+            proc.stdin.close()
+        except Exception:
+            pass
+
+        # Acquire Redis client for Pub/Sub publishing
+        redis = get_redis()
+
+        # Accumulators
+        stdout_lines: list[str] = []
+        all_events: list[dict] = []
+
+        async def _read_stdout() -> None:
+            """Read stdout line-by-line, parse events, publish to Redis."""
+            while True:
+                try:
+                    line_bytes = await asyncio.wait_for(
+                        proc.stdout.readline(), timeout=timeout,
+                    )
+                except TimeoutError:
+                    break
+                if not line_bytes:
+                    break
+                line = line_bytes.decode("utf-8", errors="replace").rstrip("\n").rstrip("\r")
+                if not line:
+                    continue
+                stdout_lines.append(line)
+
+                # Parse the stream-json event
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    event = {"type": "raw", "text": line}
+                all_events.append(event)
+
+                # Format into a human-readable log line
+                formatted = _format_conversation_log([event])
+                if not formatted:
+                    continue
+
+                # Publish to Redis
+                try:
+                    msg = json.dumps(
+                        {
+                            "channel": "stdout",
+                            "content": formatted,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                        ensure_ascii=False,
+                    )
+                    await redis.publish(channel, msg)
+                except Exception:
+                    log.warning("redis_publish_failed", run_id=str(run_id))
+
+        async def _read_stderr() -> str:
+            """Read stderr fully after process ends."""
+            raw = await proc.stderr.read()
+            return raw.decode("utf-8", errors="replace")
+
+        try:
+            stdout_task = asyncio.create_task(_read_stdout())
+            await proc.wait()
+            # stdout task should finish once the pipe closes
+            await asyncio.wait_for(stdout_task, timeout=5)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            log.warning("agent_timeout", run_id=str(run_id))
+            # Publish done event before returning
+            try:
+                done_msg = json.dumps(
+                    {
+                        "channel": "stdout",
+                        "content": "[TIMEOUT] Agent execution timed out.",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                    ensure_ascii=False,
+                )
+                await redis.publish(channel, done_msg)
+                await redis.publish(
+                    channel,
+                    json.dumps({"event": "done", "timestamp": datetime.now(timezone.utc).isoformat()}),
+                )
+            except Exception:
+                pass
+            return AgentRunResult(
+                exit_code=-1,
+                stdout="",
+                stderr="Agent timed out.",
+                redacted_output="Agent execution timed out.",
+                timed_out=True,
+            )
+
+        stderr_raw = await _read_stderr()
+        stdout_raw = "\n".join(stdout_lines)
+
+        # Publish done event
+        try:
+            await redis.publish(
+                channel,
+                json.dumps({"event": "done", "timestamp": datetime.now(timezone.utc).isoformat()}),
+            )
+        except Exception:
+            log.warning("redis_publish_done_failed", run_id=str(run_id))
+
+        # Build conversation log from accumulated events
+        conversation_log = _format_conversation_log(all_events)
+
+        combined = conversation_log
+        if stderr_raw.strip():
+            combined += "\n\n[STDERR]\n" + stderr_raw
+
+        redacted = redact_output(combined)
+
+        log.info(
+            "agent_done",
+            run_id=str(run_id),
+            exit_code=proc.returncode,
+            output_len=len(redacted),
+            event_count=len(all_events),
+        )
+        return AgentRunResult(
+            exit_code=proc.returncode or 1,
+            stdout=stdout_raw,
+            stderr=stderr_raw,
+            redacted_output=redacted,
+        )
+
+    def supported_tools(self) -> list[str]:
+        return [
+            "file_read", "file_write", "file_list", "file_search",
+            "shell_exec", "git", "web_fetch",
+        ]

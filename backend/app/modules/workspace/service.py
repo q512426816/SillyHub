@@ -61,7 +61,7 @@ class WorkspaceService:
         self._session = session
         self._scanner = scanner or WorkspaceScanner()
 
-    # ── Scanning ──────────────────────────────────────────────────────────
+    # -- Scanning ---
 
     def scan(self, root_path: str) -> ScanResult:
         """Run a dry-run scan and translate filesystem problems to AppError."""
@@ -70,7 +70,7 @@ class WorkspaceService:
         self._guard_path(path)
         return self._scanner.scan(path)
 
-    # ── Create / list / get ────────────────────────────────────────────────
+    # -- Create / list / get ---
 
     async def create(
         self,
@@ -87,10 +87,6 @@ class WorkspaceService:
 
         slug = payload.slug or slugify(payload.name)
         now = datetime.utcnow()
-        # Store the original (host) path in DB for display; use rewritten path for sillyspec_path
-        sillyspec_rel = scan.sillyspec_path
-        if sillyspec_rel.startswith(str(Path(_rewrite_path(payload.root_path)))):
-            sillyspec_rel = payload.root_path + sillyspec_rel[len(str(Path(_rewrite_path(payload.root_path)))):]
 
         # Soft-deleted rows keep the same root_path, so before inserting a
         # fresh row we look for a tombstone we can resurrect. This is the
@@ -99,7 +95,6 @@ class WorkspaceService:
             root_path=payload.root_path,
             payload=payload,
             slug=slug,
-            sillyspec_path=sillyspec_rel or scan.sillyspec_path,
             created_by=created_by,
             now=now,
         )
@@ -111,8 +106,16 @@ class WorkspaceService:
             name=payload.name,
             slug=slug,
             root_path=payload.root_path,
-            sillyspec_path=sillyspec_rel or scan.sillyspec_path,
             status="active",
+            component_key=payload.component_key,
+            type=payload.type,
+            role=payload.role,
+            repo_url=payload.repo_url,
+            default_branch=payload.default_branch,
+            tech_stack=payload.tech_stack,
+            build_command=payload.build_command,
+            test_command=payload.test_command,
+            source_yaml_path=payload.source_yaml_path,
             created_by=created_by,
             created_at=now,
             updated_at=now,
@@ -143,7 +146,6 @@ class WorkspaceService:
         root_path: str,
         payload: WorkspaceCreate,
         slug: str,
-        sillyspec_path: str,
         created_by: uuid.UUID | None,
         now: datetime,
     ) -> Workspace | None:
@@ -166,12 +168,21 @@ class WorkspaceService:
 
         result.name = payload.name
         result.slug = slug
-        result.sillyspec_path = sillyspec_path
         result.status = "active"
         result.deleted_at = None
         result.created_by = created_by
         result.last_scanned_at = now
         result.updated_at = now
+        # Update component metadata fields if provided
+        result.component_key = payload.component_key
+        result.type = payload.type
+        result.role = payload.role
+        result.repo_url = payload.repo_url
+        result.default_branch = payload.default_branch
+        result.tech_stack = payload.tech_stack
+        result.build_command = payload.build_command
+        result.test_command = payload.test_command
+        result.source_yaml_path = payload.source_yaml_path
 
         try:
             await self._session.flush()
@@ -219,7 +230,7 @@ class WorkspaceService:
             )
         return workspace
 
-    # ── Mutate ────────────────────────────────────────────────────────────
+    # -- Mutate ---
 
     async def rescan(self, workspace_id: uuid.UUID) -> tuple[Workspace, ScanResult]:
         workspace = await self.get(workspace_id)
@@ -246,7 +257,7 @@ class WorkspaceService:
         log.info("workspace.soft_deleted", workspace_id=str(workspace.id))
         return workspace
 
-    # ── Helpers ───────────────────────────────────────────────────────────
+    # -- Helpers ---
 
     @staticmethod
     def _guard_path(path: Path) -> None:

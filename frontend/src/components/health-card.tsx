@@ -45,53 +45,53 @@ export function HealthCard() {
   }, []);
 
   return (
-    <section className="rounded-lg border bg-card p-6 shadow-sm">
-      <header className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold tracking-tight">平台健康</h2>
+    <section className="rounded-md border bg-card">
+      <header className="flex items-center justify-between border-b px-4 py-2.5">
+        <h2>平台健康</h2>
         {state.kind === "ok" ? (
           <Badge variant={state.data.status === "ok" ? "success" : "warning"}>
-            后端健康: {state.data.status}
+            后端: {state.data.status}
           </Badge>
         ) : state.kind === "loading" ? (
           <Badge variant="outline">加载中…</Badge>
         ) : (
-          <Badge variant="destructive">后端不可达</Badge>
+          <Badge variant="destructive">不可达</Badge>
         )}
       </header>
 
       {state.kind === "ok" ? (
-        <dl className="grid grid-cols-2 gap-4 text-sm">
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-2 p-4 text-xs">
           <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">数据库</span>
-            {depBadge(state.data.db, "db")}
+            <dt className="text-muted-foreground">数据库</dt>
+            <dd>{depBadge(state.data.db, "db")}</dd>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">Redis</span>
-            {depBadge(state.data.redis, "redis")}
+            <dt className="text-muted-foreground">Redis</dt>
+            <dd>{depBadge(state.data.redis, "redis")}</dd>
           </div>
           <div>
-            <span className="text-muted-foreground">版本</span>
-            <p className="font-mono">{state.data.version}</p>
+            <dt className="text-muted-foreground">版本</dt>
+            <dd className="font-mono">{state.data.version}</dd>
           </div>
           <div>
-            <span className="text-muted-foreground">commit</span>
-            <p className="font-mono">{state.data.commit_sha.slice(0, 12)}</p>
+            <dt className="text-muted-foreground">commit</dt>
+            <dd className="font-mono">{state.data.commit_sha.slice(0, 12)}</dd>
           </div>
           <div>
-            <span className="text-muted-foreground">环境</span>
-            <p className="font-mono">{state.data.environment}</p>
+            <dt className="text-muted-foreground">环境</dt>
+            <dd className="font-mono">{state.data.environment}</dd>
           </div>
           <div>
-            <span className="text-muted-foreground">服务器时间</span>
-            <p className="font-mono">
+            <dt className="text-muted-foreground">服务器时间</dt>
+            <dd className="font-mono">
               {new Date(state.data.server_time).toLocaleString()}
-            </p>
+            </dd>
           </div>
         </dl>
       ) : state.kind === "error" ? (
-        <p className="text-sm text-destructive">{state.message}</p>
+        <p className="p-4 text-xs text-destructive">{state.message}</p>
       ) : (
-        <p className="text-sm text-muted-foreground">读取后端 /api/health…</p>
+        <p className="p-4 text-xs text-muted-foreground">读取 /api/health…</p>
       )}
     </section>
   );

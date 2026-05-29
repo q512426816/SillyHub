@@ -1,0 +1,264 @@
+<!doctype html>
+<!--
+author: qinyi
+created_at: 2026-05-29 17:35:00
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SillyHub Change Packages Prototype</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: #f8fafc;
+      color: #111827;
+    }
+    header {
+      padding: 20px 28px;
+      border-bottom: 1px solid #d1d5db;
+      background: #ffffff;
+    }
+    h1 { margin: 0 0 6px; font-size: 22px; }
+    .subtitle { margin: 0; color: #4b5563; font-size: 13px; }
+    main {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      min-height: calc(100vh - 82px);
+    }
+    aside {
+      border-right: 1px solid #d1d5db;
+      background: #ffffff;
+      padding: 18px;
+    }
+    .phase-list { display: grid; gap: 10px; }
+    .phase-button {
+      width: 100%;
+      text-align: left;
+      border: 1px solid #d1d5db;
+      background: #f9fafb;
+      border-radius: 6px;
+      padding: 10px;
+      cursor: pointer;
+    }
+    .phase-button.active {
+      border-color: #2563eb;
+      background: #eff6ff;
+    }
+    .phase-title { font-weight: 700; font-size: 13px; }
+    .phase-name { margin-top: 3px; font-family: Consolas, monospace; font-size: 11px; color: #4b5563; }
+    .content { padding: 22px 28px; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+    section {
+      background: #ffffff;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      padding: 16px;
+    }
+    h2 { margin: 0 0 12px; font-size: 17px; }
+    h3 { margin: 14px 0 8px; font-size: 14px; }
+    .pipeline {
+      display: grid;
+      gap: 8px;
+      font-family: Consolas, monospace;
+      font-size: 12px;
+    }
+    .step {
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: #f8fafc;
+    }
+    .arrow { color: #64748b; padding-left: 12px; }
+    .meta {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 7px 10px;
+      font-size: 13px;
+    }
+    .label { color: #6b7280; }
+    .value { font-family: Consolas, monospace; }
+    .flow {
+      margin-top: 12px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .flow-box {
+      border: 1px dashed #94a3b8;
+      border-radius: 6px;
+      min-height: 66px;
+      padding: 8px;
+      background: #f8fafc;
+      font-size: 12px;
+    }
+    .flow-box strong { display: block; margin-bottom: 4px; }
+    .note {
+      margin-top: 12px;
+      border-left: 3px solid #2563eb;
+      padding-left: 10px;
+      color: #374151;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .small { color: #6b7280; font-size: 12px; line-height: 1.5; }
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+      aside { border-right: 0; border-bottom: 1px solid #d1d5db; }
+      .grid { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>SillyHub 独立变更包主线</h1>
+    <p class="subtitle">Workspace Graph -> Harness -> Local Runner -> Knowledge -> Server Runner</p>
+  </header>
+
+  <main>
+    <aside>
+      <h2>Change Packages</h2>
+      <div class="phase-list" id="phaseList"></div>
+    </aside>
+
+    <div class="content">
+      <div class="grid">
+        <section>
+          <h2 id="detailTitle"></h2>
+          <div class="meta">
+            <div class="label">变更名</div><div class="value" id="detailName"></div>
+            <div class="label">阶段目标</div><div id="detailGoal"></div>
+            <div class="label">不做范围</div><div id="detailOut"></div>
+            <div class="label">验收信号</div><div id="detailAccept"></div>
+          </div>
+          <div class="note" id="detailNote"></div>
+        </section>
+
+        <section>
+          <h2>依赖主线</h2>
+          <div class="pipeline">
+            <div class="step">Phase 0: Workspace Graph 数据面</div>
+            <div class="arrow">↓</div>
+            <div class="step">Phase 1: Workspace Intake + Spec Bootstrap</div>
+            <div class="arrow">↓</div>
+            <div class="step">Phase 2: Harness Control Plane</div>
+            <div class="arrow">↓</div>
+            <div class="step">Phase 3: Local Runner Execution Loop</div>
+            <div class="arrow">↓</div>
+            <div class="step">Phase 4: Knowledge Lifecycle</div>
+            <div class="arrow">↓</div>
+            <div class="step">Phase 5: Server Sandbox Runner</div>
+          </div>
+          <p class="small">Phase 1 和 Phase 2 可以小范围并行，但必须共享 SpecWorkspace 与 Workflow gate 接口。Phase 5 不早于 Phase 3。</p>
+        </section>
+      </div>
+
+      <section style="margin-top:16px">
+        <h2>Local Runner 参考 multica 的执行闭环</h2>
+        <div class="flow">
+          <div class="flow-box"><strong>Register runtime</strong>workspace + provider + device + heartbeat</div>
+          <div class="flow-box"><strong>Claim task</strong>poll server, claim, start, recover orphan</div>
+          <div class="flow-box"><strong>Prepare env</strong>workdir / output / logs + AgentSpecBundle</div>
+          <div class="flow-box"><strong>Run CLI</strong>Claude / Codex backend abstraction</div>
+          <div class="flow-box"><strong>Stream messages</strong>batch DB writes + SSE fanout</div>
+          <div class="flow-box"><strong>Pin session</strong>record session id for resume</div>
+          <div class="flow-box"><strong>Watchdog</strong>idle timeout aware of tool in-flight</div>
+          <div class="flow-box"><strong>Collect result</strong>diff / tests / artifacts / review gate</div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const phases = [
+      {
+        title: "Phase 0",
+        name: "2026-05-28-component-as-workspace",
+        goal: "Workspace 成为唯一基本单元，Component 元数据并入 Workspace，WorkspaceRelation 表达跨 Workspace 有向图。",
+        out: "不做完整 Runner、Knowledge 生命周期、复杂 Workflow Template。",
+        accept: "后端和前端不再把 /components 作为核心数据面；Change/Task/AgentRun 支持多 Workspace。",
+        note: "这是后续执行、权限、上下文和知识沉淀的统一数据基础。"
+      },
+      {
+        title: "Phase 1",
+        name: "2026-05-29-workspace-intake-spec-bootstrap",
+        goal: "普通代码仓库可以注册为 Workspace；SpecWorkspace 由平台托管并支持 bootstrap/sync。",
+        out: "不要求 repo 预先存在 .sillyspec；不让 Agent 手写规范格式。",
+        accept: "创建 Workspace 时可选择 spec_strategy，SpecValidator 成为执行前硬门禁。",
+        note: "SillySpec CLI 是格式专家，平台负责编排和校验。"
+      },
+      {
+        title: "Phase 2",
+        name: "2026-05-29-harness-control-plane",
+        goal: "接入 workflow、agent、tool_gateway、git_gateway、runtime、knowledge router，并建立 Workflow/Policy/Audit 边界。",
+        out: "不做具体 CLI Runner 执行细节。",
+        accept: "Change/Task 状态流转、权限校验、审计日志有统一契约。",
+        note: "Prompt 管认知，Policy 管权限，Workflow 管流程，Gateway 管操作。"
+      },
+      {
+        title: "Phase 3",
+        name: "2026-05-29-local-runner-execution-loop",
+        goal: "优先实现本地 daemon runtime，按 workspace/provider 注册、claim task、隔离执行并流式上报。",
+        out: "不先做云端托管 Runner。",
+        accept: "Local Runner 能完成 Task -> workdir -> Agent CLI -> logs -> diff/tests -> review gate 闭环。",
+        note: "参考 C:\\Users\\qinyi\\IdeaProjects\\multica 的 daemon/runtime/task loop，抽取模式，不照搬实现。"
+      },
+      {
+        title: "Phase 4",
+        name: "2026-05-29-knowledge-lifecycle",
+        goal: "引入知识 metadata 生命周期：candidate -> confirmed -> verified -> promoted -> deprecated。",
+        out: "Agent 不能直接写正式知识；向量索引不作为知识本体。",
+        accept: "任务产物只能生成 candidate，Reviewer 审核后才沉淀。",
+        note: "避免错误知识污染团队资产。"
+      },
+      {
+        title: "Phase 5",
+        name: "2026-05-29-server-sandbox-runner",
+        goal: "Local Runner 稳定后，补云端托管 Runner 与沙箱执行边界。",
+        out: "Claude/Codex HTTP 服务不直接暴露给用户。",
+        accept: "沙箱按 tenant/user/workspace/task 隔离，文件快照有白名单、黑名单、保留周期和审计。",
+        note: "这是规模化执行能力，不是第一阶段 MVP。"
+      }
+    ];
+
+    const phaseList = document.getElementById("phaseList");
+    const detailTitle = document.getElementById("detailTitle");
+    const detailName = document.getElementById("detailName");
+    const detailGoal = document.getElementById("detailGoal");
+    const detailOut = document.getElementById("detailOut");
+    const detailAccept = document.getElementById("detailAccept");
+    const detailNote = document.getElementById("detailNote");
+
+    function render(index) {
+      const phase = phases[index];
+      detailTitle.textContent = phase.title;
+      detailName.textContent = phase.name;
+      detailGoal.textContent = phase.goal;
+      detailOut.textContent = phase.out;
+      detailAccept.textContent = phase.accept;
+      detailNote.textContent = phase.note;
+      document.querySelectorAll(".phase-button").forEach((button, i) => {
+        button.classList.toggle("active", i === index);
+      });
+    }
+
+    phases.forEach((phase, index) => {
+      const button = document.createElement("button");
+      button.className = "phase-button";
+      button.innerHTML = `<div class="phase-title">${phase.title}</div><div class="phase-name">${phase.name}</div>`;
+      button.addEventListener("click", () => render(index));
+      phaseList.appendChild(button);
+    });
+
+    render(0);
+  </script>
+</body>
+</html>

@@ -21,6 +21,8 @@ from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.auth.rbac import allowed_workspace_ids
 from app.modules.workspace.model import Workspace
+from app.modules.workspace.relation_schema import RelationCreate, RelationRead, RelationListResponse, TopologyResponse
+from app.modules.workspace.relation_service import RelationService
 from app.modules.workspace.scanner import ScanResult
 from app.modules.workspace.schema import (
     ScanRequest,
@@ -31,6 +33,7 @@ from app.modules.workspace.schema import (
     WorkspaceStructureDTO,
 )
 from app.modules.workspace.service import WorkspaceService
+from app.modules.workspace.topology import TopologyBuilder
 
 router = APIRouter(prefix="/workspaces", tags=["workspace"])
 
@@ -40,7 +43,6 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 def _build_scan_response(result: ScanResult) -> ScanResponse:
     return ScanResponse(
         root_path=result.root_path,
-        sillyspec_path=result.sillyspec_path,
         is_sillyspec=result.is_sillyspec,
         structure=WorkspaceStructureDTO(**result.structure.as_dict()),
         warnings=list(result.warnings),
@@ -70,6 +72,15 @@ async def create_workspace(
     service = WorkspaceService(session)
     workspace = await service.create(payload, created_by=user.id)
     return WorkspaceRead.model_validate(workspace)
+
+
+@router.get("/topology", response_model=TopologyResponse)
+async def get_topology(
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_READ))],
+) -> TopologyResponse:
+    """Return the full workspace topology graph."""
+    return await TopologyBuilder.build(session)
 
 
 @router.get("", response_model=WorkspaceListResponse)
@@ -120,6 +131,50 @@ async def get_workspace(
 ) -> WorkspaceRead:
     service = WorkspaceService(session)
     return WorkspaceRead.model_validate(await service.get(workspace_id))
+
+
+@router.get("/{workspace_id}/relations", response_model=RelationListResponse)
+async def list_relations(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_READ))],
+) -> RelationListResponse:
+    """List all outgoing + incoming relations for a workspace."""
+    service = RelationService(session)
+    return await service.list_for_workspace(workspace_id)
+
+
+@router.post(
+    "/{workspace_id}/relations",
+    response_model=RelationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_relation(
+    workspace_id: uuid.UUID,
+    payload: RelationCreate,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_WRITE))],
+) -> RelationRead:
+    """Create a relation. source_id = workspace_id from path."""
+    service = RelationService(session)
+    relation = await service.create(workspace_id, payload)
+    return RelationRead.model_validate(relation)
+
+
+@router.delete(
+    "/relations/{relation_id}",
+    response_model=RelationRead,
+    status_code=status.HTTP_200_OK,
+)
+async def delete_relation(
+    relation_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_ADMIN))],
+) -> RelationRead:
+    """Delete a relation by id."""
+    service = RelationService(session)
+    relation = await service.delete(relation_id)
+    return RelationRead.model_validate(relation)
 
 
 @router.post("/{workspace_id}/rescan", response_model=ScanResponse)

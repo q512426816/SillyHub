@@ -13,6 +13,7 @@ class ChangeRead(BaseModel):
 
     id: uuid.UUID
     workspace_id: uuid.UUID
+    workspace_ids: list[uuid.UUID] = []
     change_key: str
     title: str | None
     status: str
@@ -38,6 +39,7 @@ class ChangeSummary(BaseModel):
     affected_components: list[str]
     owner_id: uuid.UUID | None
     updated_at: datetime
+    workspace_ids: list[uuid.UUID] = []
 
 
 class ChangeList(BaseModel):

@@ -1,0 +1,158 @@
+<!--
+author: qinyi
+created_at: 2026-05-28 13:20:00
+-->
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Agent Log Streaming Prototype</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: monospace; background: #0d1117; color: #c9d1d9; padding: 20px; }
+.header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.status-badge { padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+.status-running { background: #1f6feb33; color: #58a6ff; animation: pulse 2s infinite; }
+.status-completed { background: #23863633; color: #3fb950; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+.toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+.toolbar button { padding: 6px 14px; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; cursor: pointer; font-size: 13px; }
+.toolbar button:hover { background: #30363d; }
+.toolbar button.active { background: #1f6feb; border-color: #1f6feb; color: white; }
+.log-panel {
+  background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+  padding: 12px; height: 500px; overflow-y: auto; font-size: 13px; line-height: 1.6;
+}
+.log-line { padding: 2px 0; white-space: pre-wrap; word-break: break-all; }
+.log-line.assistant { color: #e6edf3; }
+.log-line.tool-use { color: #58a6ff; }
+.log-line.tool-result { color: #8b949e; }
+.log-line.thinking { color: #8957e5; font-style: italic; }
+.log-line.system { color: #3fb950; }
+.log-line.stderr { color: #f85149; }
+.log-line.cursor { border-left: 2px solid #58a6ff; padding-left: 8px; animation: blink 1s step-end infinite; }
+@keyframes blink { 50% { border-color: transparent; } }
+.info-bar { display: flex; justify-content: space-between; margin-top: 8px; font-size: 12px; color: #8b949e; }
+.connection-status { display: flex; align-items: center; gap: 6px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; }
+.dot.connected { background: #3fb950; }
+.dot.disconnected { background: #f85149; }
+.dot.connecting { background: #d29922; animation: pulse 1s infinite; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h2>Agent Run #63071822</h2>
+  <span id="statusBadge" class="status-badge status-running">RUNNING</span>
+</div>
+
+<div class="toolbar">
+  <button id="btnRunning" class="active" onclick="simulateRunning()">Running (SSE stream)</button>
+  <button id="btnCompleted" onclick="simulateCompleted()">Completed (DB query)</button>
+</div>
+
+<div class="log-panel" id="logPanel"></div>
+
+<div class="info-bar">
+  <div class="connection-status">
+    <div id="connDot" class="dot connected"></div>
+    <span id="connText">SSE connected</span>
+  </div>
+  <span id="lineCount">0 lines</span>
+</div>
+
+<script>
+const panel = document.getElementById('logPanel');
+const statusBadge = document.getElementById('statusBadge');
+const connDot = document.getElementById('connDot');
+const connText = document.getElementById('connText');
+const lineCount = document.getElementById('lineCount');
+
+const sampleLogs = [
+  { cls: 'system', text: '[SYSTEM:stream_start] Agent run started. spec_strategy=platform-managed' },
+  { cls: 'tool-use', text: '[TOOL_USE] Bash: sillyspec init --dir /data/spec-workspaces/094575f5' },
+  { cls: 'tool-result', text: '[TOOL_RESULT] ✓ Created .sillyspec/ directory structure at /data/spec-workspaces/094575f5...' },
+  { cls: 'thinking', text: '[THINKING] The init command created the skeleton. Now I need to run scan to generate spec documents from the code...' },
+  { cls: 'assistant', text: '[ASSISTANT] Skeleton created. Running scan now...' },
+  { cls: 'tool-use', text: '[TOOL_USE] Bash: sillyspec run scan --dir /data/spec-workspaces/094575f5' },
+  { cls: 'tool-result', text: '[TOOL_RESULT] Scanning project at /host-projects/multi-agent-platform...\nFound: backend (service), frontend (webapp), deploy (infra)\nGenerated: 3 component YAML files, 7 scan documents' },
+  { cls: 'thinking', text: '[THINKING] Scan completed successfully. Now I should verify the generated files match the expected structure...' },
+  { cls: 'assistant', text: '[ASSISTANT] Scan complete. Verifying generated files...' },
+  { cls: 'tool-use', text: '[TOOL_USE] Bash: python3 -c "import yaml... # verification script"' },
+  { cls: 'tool-result', text: '[TOOL_RESULT] VALIDATION PASSED' },
+  { cls: 'assistant', text: '[ASSISTANT] All files verified. Bootstrap complete.' },
+];
+
+let lines = 0;
+let timer = null;
+
+function addLine(cls, text, isCursor) {
+  const div = document.createElement('div');
+  div.className = 'log-line ' + cls + (isCursor ? ' cursor' : '');
+  div.textContent = text;
+  panel.appendChild(div);
+  lines++;
+  lineCount.textContent = lines + ' lines';
+  panel.scrollTop = panel.scrollHeight;
+}
+
+function clearPanel() {
+  panel.innerHTML = '';
+  lines = 0;
+  lineCount.textContent = '0 lines';
+  if (timer) { clearInterval(timer); timer = null; }
+}
+
+function simulateRunning() {
+  clearPanel();
+  document.getElementById('btnRunning').className = 'active';
+  document.getElementById('btnCompleted').className = '';
+  statusBadge.textContent = 'RUNNING';
+  statusBadge.className = 'status-badge status-running';
+  connDot.className = 'dot connected';
+  connText.textContent = 'SSE connected';
+
+  let i = 0;
+  function next() {
+    if (i >= sampleLogs.length) {
+      // Send done event
+      statusBadge.textContent = 'COMPLETED';
+      statusBadge.className = 'status-badge status-completed';
+      connDot.className = 'dot disconnected';
+      connText.textContent = 'SSE closed (event: done)';
+      return;
+    }
+    const log = sampleLogs[i++];
+    addLine(log.cls, log.text, false);
+
+    // Show cursor while "waiting" for next line
+    const cursor = document.createElement('div');
+    cursor.className = 'log-line assistant cursor';
+    cursor.textContent = '';
+    panel.appendChild(cursor);
+    panel.scrollTop = panel.scrollHeight;
+
+    setTimeout(() => {
+      panel.removeChild(cursor);
+      next();
+    }, 800 + Math.random() * 1200);
+  }
+  next();
+}
+
+function simulateCompleted() {
+  clearPanel();
+  document.getElementById('btnCompleted').className = 'active';
+  document.getElementById('btnRunning').className = '';
+  statusBadge.textContent = 'COMPLETED';
+  statusBadge.className = 'status-badge status-completed';
+  connDot.className = 'dot disconnected';
+  connText.textContent = 'DB query (no SSE)';
+
+  // Load all logs at once (simulating DB query)
+  sampleLogs.forEach(log => addLine(log.cls, log.text, false));
+}
+</script>
+</body>
+</html>

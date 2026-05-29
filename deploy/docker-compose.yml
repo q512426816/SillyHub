@@ -43,8 +43,9 @@ services:
     volumes:
       # Mount host project directories so the scanner can read .sillyspec trees.
       # Adjust the left side to match your local path.
-      - ${HOST_PROJECTS_DIR:-C:/Users/qinyi/IdeaProjects}:/host-projects:ro
+      - ${HOST_PROJECTS_DIR:-C:/Users/qinyi/IdeaProjects}:/host-projects
       - worktree-data:/data/sillyspec-workspaces
+      - spec-data:/data/spec-workspaces
     environment:
       # Prefix that rewrites host-style paths into container mount paths.
       HOST_PATH_PREFIX: ${HOST_PATH_PREFIX:-C:/Users/qinyi/IdeaProjects}
@@ -62,6 +63,13 @@ services:
       PLATFORM_BOOTSTRAP_ADMIN_DISPLAY_NAME: ${PLATFORM_BOOTSTRAP_ADMIN_DISPLAY_NAME:-}
       SILLYSPEC_MASTER_KEY: ${SILLYSPEC_MASTER_KEY:?must set SILLYSPEC_MASTER_KEY}
       WORKTREE_BASE_DIR: /data/sillyspec-workspaces
+      SPEC_DATA_ROOT: /data/spec-workspaces
+      # Claude Code agent configuration
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
+      ANTHROPIC_DEFAULT_SONNET_MODEL: ${ANTHROPIC_DEFAULT_SONNET_MODEL:-glm-5}
+      ANTHROPIC_DEFAULT_OPUS_MODEL: ${ANTHROPIC_DEFAULT_OPUS_MODEL:-glm-5.1}
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     # Run migrations before serving so a fresh stack always lands on head.
@@ -89,4 +97,5 @@ services:
 volumes:
   pgdata:
   redisdata:
+  spec-data:
   worktree-data:

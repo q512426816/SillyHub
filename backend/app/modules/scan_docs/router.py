@@ -28,17 +28,16 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 @router.get(
-    "/components/{component_id}/scan-docs",
+    "/scan-docs",
     response_model=ScanDocList,
 )
 async def list_scan_docs(
     workspace_id: uuid.UUID,
-    component_id: uuid.UUID,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.COMPONENT_READ))],
+    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
 ) -> ScanDocList:
     service = ScanDocsService(session)
-    items, total = await service.list_(workspace_id, component_id)
+    items, total = await service.list_(workspace_id)
     return ScanDocList(
         items=[ScanDocSummary.model_validate(d) for d in items],
         total=total,
@@ -46,18 +45,17 @@ async def list_scan_docs(
 
 
 @router.get(
-    "/components/{component_id}/scan-docs/{doc_type}",
+    "/scan-docs/{doc_type}",
     response_model=ScanDocRead,
 )
 async def get_scan_doc(
     workspace_id: uuid.UUID,
-    component_id: uuid.UUID,
     doc_type: str,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.COMPONENT_READ))],
+    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
 ) -> ScanDocRead:
     service = ScanDocsService(session)
-    doc = await service.get(workspace_id, component_id, doc_type)
+    doc = await service.get(workspace_id, doc_type)
     return ScanDocRead.model_validate(doc)
 
 
@@ -69,7 +67,7 @@ async def get_scan_doc(
 async def reparse_scan_docs(
     workspace_id: uuid.UUID,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.COMPONENT_WRITE))],
+    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
 ) -> ScanDocReparseResponse:
     service = ScanDocsService(session)
     stats, results = await service.reparse(workspace_id)

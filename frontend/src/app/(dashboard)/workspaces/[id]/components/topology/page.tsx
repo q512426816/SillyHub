@@ -22,11 +22,11 @@ interface Props {
 }
 
 const TYPE_COLORS: Record<string, string> = {
-  frontend: "#a78bfa",
-  backend: "#34d399",
-  tooling: "#fbbf24",
-  docs: "#60a5fa",
-  test: "#f472b6",
+  frontend: "#3b82f6",
+  backend: "#10b981",
+  tooling: "#f59e0b",
+  docs: "#6366f1",
+  test: "#ec4899",
 };
 
 type ComponentNodeData = {
@@ -36,23 +36,17 @@ type ComponentNodeData = {
 };
 
 function ComponentNode({ data }: NodeProps<Node<ComponentNodeData>>) {
-  const bg = data.type ? TYPE_COLORS[data.type] ?? "#94a3b8" : "#94a3b8";
+  const bg = data.type ? TYPE_COLORS[data.type] ?? "#64748b" : "#64748b";
   return (
     <div
-      className="rounded-md border bg-card px-3 py-2 text-xs shadow-sm"
+      className="rounded border bg-card px-3 py-2 text-xs shadow-sm"
       style={{ borderColor: bg }}
     >
       <Handle type="target" position={Position.Left} style={{ background: bg }} />
-      <div className="font-semibold">{data.label}</div>
+      <div className="font-semibold text-[11px]">{data.label}</div>
       <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
         <span>{data.type ?? "—"}</span>
-        <span
-          className={
-            data.status === "active"
-              ? "text-emerald-600"
-              : "text-destructive"
-          }
-        >
+        <span className={data.status === "active" ? "text-emerald-600" : "text-destructive"}>
           {data.status}
         </span>
       </div>
@@ -121,37 +115,35 @@ export default function TopologyPage({ params }: Props) {
     <div className="flex h-screen flex-col">
       <header className="flex items-center justify-between border-b bg-card px-6 py-3">
         <div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-[11px] text-muted-foreground">
             <Link href={`/workspaces/${workspaceId}/components`} className="hover:underline">
-              ← 回到组件列表
+              ← 组件列表
             </Link>
           </p>
-          <h1 className="text-lg font-semibold tracking-tight">组件拓扑</h1>
+          <h1 className="text-base font-semibold">组件拓扑</h1>
         </div>
-        <div className="text-xs text-muted-foreground">
-          {topology
-            ? `${topology.nodes.length} 节点 · ${topology.edges.length} 边`
-            : ""}
+        <div className="text-[11px] text-muted-foreground">
+          {topology ? `${topology.nodes.length} 节点 · ${topology.edges.length} 边` : ""}
         </div>
       </header>
 
       <div className="flex-1 bg-muted/20">
         {loading ? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
             加载中…
           </div>
         ) : pageError ? (
-          <div className="flex h-full items-center justify-center text-sm text-destructive">
+          <div className="flex h-full items-center justify-center text-xs text-destructive">
             {pageError}
           </div>
         ) : nodes.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
             <p>这个 Workspace 还没有组件。</p>
             <Link
               href={`/workspaces/${workspaceId}/components`}
               className="text-primary hover:underline"
             >
-              去解析 .sillyspec/projects
+              去解析组件
             </Link>
           </div>
         ) : (

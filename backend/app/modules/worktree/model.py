@@ -33,7 +33,7 @@ class WorktreeLease(BaseModel, table=True):
     component_id: uuid.UUID = Field(
         sa_column=Column(
             Uuid(as_uuid=True),
-            ForeignKey("project_components.id", ondelete="CASCADE"),
+            ForeignKey("workspaces.id", ondelete="CASCADE"),
             nullable=False,
         ),
     )

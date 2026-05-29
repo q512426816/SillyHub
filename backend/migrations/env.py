@@ -21,8 +21,8 @@ from app.models.base import BaseModel
 # Eagerly import every feature module so its SQLModel tables are attached to
 # ``BaseModel.metadata`` before autogenerate runs. Add new modules here.
 from app.modules.auth import model as _auth_model  # noqa: F401
-from app.modules.component import model as _component_model  # noqa: F401
 from app.modules.workspace import model as _workspace_model  # noqa: F401
+from app.modules.agent import model as _agent_model  # noqa: F401
 
 config = context.config
 

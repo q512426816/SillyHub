@@ -63,7 +63,6 @@ async def test_create_persists_workspace(db_session, tmp_path: Path) -> None:
     assert ws.id is not None
     assert ws.slug == "my-workspace"
     assert ws.root_path == str(root.resolve())
-    assert ws.sillyspec_path.endswith(".sillyspec")
     assert ws.last_scanned_at is not None
 
 

@@ -50,13 +50,18 @@ class WorkspaceStructure:
 
 @dataclass(slots=True)
 class ScanResult:
-    """The outcome of a single workspace scan — used for both dry-run and persist flows."""
+    """The outcome of a single workspace scan -- used for both dry-run and persist flows."""
 
     root_path: str
     sillyspec_path: str
     is_sillyspec: bool
     structure: WorkspaceStructure = field(default_factory=WorkspaceStructure)
     warnings: list[str] = field(default_factory=list)
+    # Parser integration (task-05)
+    parsed_workspaces: list = field(default_factory=list)
+    parsed_relations: list = field(default_factory=list)
+    parse_warnings: list = field(default_factory=list)
+    parse_errors: list = field(default_factory=list)
 
 
 class WorkspaceScanner:

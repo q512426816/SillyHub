@@ -1,0 +1,4 @@
+id: silly
+name: Silly Backend
+type: service
+path: silly

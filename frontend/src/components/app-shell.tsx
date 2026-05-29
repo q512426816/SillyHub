@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { useRouter } from "next/navigation";
@@ -7,8 +9,47 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/stores/session";
 
+interface NavItem {
+  href: string;
+  icon: string;
+  label: string;
+  matchPattern?: string;
+  absolute?: boolean;
+}
+
+const OVERVIEW_NAV: NavItem[] = [
+  { href: "/workspaces", icon: "\u{1F3E0}", label: "Workspace 首页", absolute: true },
+  { href: "components", icon: "\u{1F4E6}", label: "项目组组件", matchPattern: "/components" },
+  { href: "components/topology", icon: "\u{1F5FA}", label: "拓扑图", matchPattern: "/components/topology" },
+  { href: "changes", icon: "\u{1F504}", label: "变更中心", matchPattern: "/changes" },
+  { href: "scan-docs", icon: "\u{1F4C4}", label: "扫描文档", matchPattern: "/scan-docs" },
+  { href: "runtime", icon: "\u{26A1}", label: "运行时", matchPattern: "/runtime" },
+  { href: "knowledge", icon: "\u{1F4DA}", label: "知识 & 日志", matchPattern: "/knowledge" },
+  { href: "releases", icon: "\u{1F680}", label: "发布", matchPattern: "/releases" },
+];
+
+const MANAGEMENT_NAV: NavItem[] = [
+  { href: "/settings/git-identities", icon: "\u{1F511}", label: "Git 身份管理", matchPattern: "/settings/git-identities", absolute: true },
+  { href: "agent", icon: "\u{1F916}", label: "Agent 控制台", matchPattern: "/agent" },
+  { href: "approvals", icon: "✅", label: "审批中心", matchPattern: "/approvals" },
+  { href: "audit", icon: "\u{1F4DC}", label: "审计中心", matchPattern: "/audit" },
+  { href: "incidents", icon: "\u{1F6A8}", label: "事件", matchPattern: "/incidents" },
+];
+
+const SYSTEM_NAV: NavItem[] = [
+  { href: "/settings", icon: "⚙️", label: "设置", absolute: true, matchPattern: "/settings" },
+];
+
+function useWorkspaceId(): string | null {
+  const pathname = usePathname();
+  const match = pathname.match(/^\/workspaces\/([^/]+)/);
+  return match?.[1] ?? null;
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const workspaceId = useWorkspaceId();
   const { user, accessToken, refreshToken, clear } = useSession();
 
   const displayName = useMemo(() => {
@@ -16,8 +57,26 @@ export function AppShell({ children }: { children: ReactNode }) {
     return user.displayName || user.email;
   }, [user]);
 
+  const resolveHref = (item: NavItem) =>
+    item.absolute
+      ? item.href
+      : workspaceId
+        ? `/workspaces/${workspaceId}/${item.href}`
+        : "/workspaces";
+
+  const isActive = (item: NavItem) => {
+    if (item.absolute) {
+      if (item.href === "/workspaces") return pathname === "/workspaces";
+      if (item.matchPattern) return pathname.startsWith(item.matchPattern);
+      return pathname === item.href;
+    }
+    if (!workspaceId) return false;
+    if (item.matchPattern) return pathname.includes(item.matchPattern);
+    const full = `/workspaces/${workspaceId}/${item.href}`;
+    return pathname === full || pathname.startsWith(full + "/");
+  };
+
   const onLogout = async () => {
-    // Best-effort logout; regardless of response we clear client state.
     try {
       if (refreshToken) {
         await fetch("/api/auth/logout", {
@@ -35,22 +94,91 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   };
 
+  const renderNavLink = (item: NavItem) => {
+    const hasWorkspace = !!workspaceId || item.absolute;
+    const active = isActive(item);
+    const href = resolveHref(item);
+
+    const classes = hasWorkspace
+      ? `flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] font-medium transition-colors ${
+          active
+            ? "bg-primary/10 text-primary"
+            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+        }`
+      : "flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] font-medium text-muted-foreground/40 cursor-not-allowed";
+
+    if (!hasWorkspace) {
+      return (
+        <span key={item.href} className={classes}>
+          <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center text-[15px]">
+            {item.icon}
+          </span>
+          {item.label}
+        </span>
+      );
+    }
+
+    return (
+      <Link key={item.href} href={href} className={classes}>
+        <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center text-[15px]">
+          {item.icon}
+        </span>
+        {item.label}
+      </Link>
+    );
+  };
+
   return (
-    <div className="min-h-screen bg-background">
-      <header className="flex items-center justify-between border-b px-4 py-3">
-        <div className="flex items-center gap-3">
-          <div className="font-semibold">Multi-Agent Platform</div>
+    <div className="flex min-h-screen bg-background">
+      {/* Sidebar */}
+      <aside className="fixed inset-y-0 left-0 z-40 flex w-[260px] flex-col border-r bg-card">
+        {/* Brand */}
+        <div className="border-b px-5 pt-5 pb-4">
+          <Link href="/workspaces" className="text-[15px] font-bold tracking-tight text-foreground hover:text-primary transition-colors">
+            Multi-Agent Platform
+          </Link>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">SillySpec Native</p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="text-sm text-muted-foreground">{displayName}</div>
-          <Button variant="outline" onClick={onLogout}>
-            退出
-          </Button>
+        {/* Navigation */}
+        <nav className="flex-1 overflow-y-auto px-3 pt-2 pb-4">
+          <div className="px-2 pt-3 pb-1">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Overview
+            </p>
+          </div>
+          {OVERVIEW_NAV.map(renderNavLink)}
+
+          <div className="px-2 pt-5 pb-1">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Management
+            </p>
+          </div>
+          {MANAGEMENT_NAV.map(renderNavLink)}
+
+          <div className="px-2 pt-5 pb-1">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              System
+            </p>
+          </div>
+          {SYSTEM_NAV.map(renderNavLink)}
+        </nav>
+
+        {/* User section at bottom */}
+        <div className="border-t px-4 py-3">
+          <div className="flex items-center justify-between">
+            <span className="truncate text-xs text-muted-foreground">{displayName}</span>
+            <Button variant="ghost" size="sm" onClick={onLogout}>
+              退出
+            </Button>
+          </div>
         </div>
-      </header>
-      {children}
+      </aside>
+
+      {/* Main content */}
+      <div className="ml-[260px] flex flex-1 flex-col">
+        <div className="flex-1">{children}</div>
+      </div>
     </div>
   );
 }
-

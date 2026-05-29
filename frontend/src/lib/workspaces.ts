@@ -18,6 +18,7 @@ export interface ScanResult {
   root_path: string;
   sillyspec_path: string;
   is_sillyspec: boolean;
+  sillyspec_strategy_hint: string;
   structure: WorkspaceStructure;
   warnings: string[];
 }
@@ -58,6 +59,7 @@ export interface CreateWorkspaceInput {
   name: string;
   root_path: string;
   slug?: string;
+  spec_strategy?: string;
 }
 
 export async function createWorkspace(input: CreateWorkspaceInput): Promise<Workspace> {
@@ -73,4 +75,8 @@ export async function rescanWorkspace(id: string): Promise<ScanResult> {
 
 export async function deleteWorkspace(id: string): Promise<Workspace> {
   return apiFetch<Workspace>(`/api/workspaces/${id}`, { method: "DELETE" });
+}
+
+export async function getWorkspace(id: string): Promise<Workspace> {
+  return apiFetch<Workspace>(`/api/workspaces/${id}`);
 }

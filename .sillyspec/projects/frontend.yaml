@@ -1,0 +1,5 @@
+name: frontend
+path: ./frontend
+status: active
+role: 前端 - Next.js 14 + React 18 + TypeScript + Tailwind CSS
+repo: https://github.com/qinyi/multi-agent-platform

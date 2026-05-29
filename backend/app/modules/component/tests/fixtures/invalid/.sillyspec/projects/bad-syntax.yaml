@@ -1,5 +1,0 @@
-id: bad-syntax
-name: Bad Yaml
-relations:
-  - target: silly
-    type:    [this is not yaml-valid

@@ -1,3 +1,19 @@
+id: multi-agent-platform
 name: multi-agent-platform
+type: platform
+role: monorepo
 path: .
+repo_url: https://github.com/qinyi/multi-agent-platform
+default_branch: main
+tech_stack:
+  - python
+  - typescript
+  - fastapi
+  - nextjs
+  - postgresql
+  - redis
+commands:
+  build: docker compose build
+  test: pytest && npm test
+relations: []
 status: active

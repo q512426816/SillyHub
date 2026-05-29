@@ -87,33 +87,30 @@ export default function ScanDocsPage({ params }: Props) {
   const selectedCompObj = components.find((c) => c.id === selectedComp);
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6 px-6 py-8">
-      <header className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">
+    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
+      <header className="flex items-center justify-between">
+        <div>
+          <p className="text-[11px] text-muted-foreground">
             <Link href={`/workspaces/${workspaceId}/components`} className="hover:underline">
-              ← 回到组件列表
+              ← 组件列表
             </Link>
           </p>
-          <h1 className="text-2xl font-semibold tracking-tight">扫描文档</h1>
-          <p className="text-sm text-muted-foreground">
-            浏览 <code>.sillyspec/docs/</code> 中各组件的扫描文档。
-          </p>
+          <h1 className="mt-0.5">扫描文档</h1>
         </div>
-        <Button onClick={handleReparse} disabled={reparsing}>
+        <Button size="sm" onClick={handleReparse} disabled={reparsing}>
           {reparsing ? "解析中…" : "重新扫描"}
         </Button>
       </header>
 
       {pageError && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+        <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {pageError}
         </div>
       )}
 
       {reparseResult && (
-        <div className="rounded-md border border-emerald-500/30 bg-emerald-50 p-3 text-sm text-emerald-800">
-          <strong>扫描完成</strong>：解析 {reparseResult.stats.parsed} 个文档，
+        <div className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+          扫描完成：解析 {reparseResult.stats.parsed} 个文档，
           新增 {reparseResult.stats.created} · 更新 {reparseResult.stats.updated} · 删除{" "}
           {reparseResult.stats.deleted}。
           {reparseResult.warnings.length > 0 &&
@@ -122,9 +119,9 @@ export default function ScanDocsPage({ params }: Props) {
       )}
 
       {reparseResult && reparseResult.warnings.length > 0 && (
-        <section className="space-y-2 rounded-md border bg-card p-4">
-          <h2 className="text-sm font-medium">扫描警告</h2>
-          <ul className="list-disc space-y-1 pl-5 text-xs text-amber-600">
+        <section className="rounded-md border bg-card p-3">
+          <h3 className="mb-1.5">扫描警告</h3>
+          <ul className="list-disc space-y-0.5 pl-4 text-xs text-amber-600">
             {reparseResult.warnings.map((w, i) => (
               <li key={i}>
                 <span className="font-mono">[{w.code}]</span>{" "}
@@ -136,37 +133,33 @@ export default function ScanDocsPage({ params }: Props) {
       )}
 
       {loading ? (
-        <p className="p-8 text-center text-sm text-muted-foreground">加载中…</p>
+        <p className="py-12 text-center text-xs text-muted-foreground">加载中…</p>
       ) : components.length === 0 ? (
-        <div className="space-y-2 p-8 text-center text-sm text-muted-foreground">
-          <p>当前 Workspace 还没有解析过组件。</p>
-          <p>
-            请先前往{" "}
-            <Link href={`/workspaces/${workspaceId}/components`} className="underline">
-              组件列表
-            </Link>{" "}
-            进行组件解析。
-          </p>
+        <div className="py-12 text-center text-xs text-muted-foreground">
+          当前 Workspace 还没有解析过组件。请先前往{" "}
+          <Link href={`/workspaces/${workspaceId}/components`} className="underline">
+            组件列表
+          </Link>{" "}
+          进行组件解析。
         </div>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-[240px_1fr]">
-          {/* Component sidebar */}
-          <nav className="space-y-1 rounded-md border bg-card p-2">
+        <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
+          <nav className="space-y-px rounded-md border bg-card">
             {components.map((c) => {
               const docs = docMap.get(c.id) ?? [];
               const existsCount = docs.filter((d) => d.exists).length;
               return (
                 <button
                   key={c.id}
-                  className={`w-full rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                  className={`w-full px-3 py-2 text-left text-xs transition-colors ${
                     selectedComp === c.id
-                      ? "bg-primary/10 font-medium text-primary"
-                      : "hover:bg-muted/60"
-                  }`}
+                      ? "bg-primary/8 font-medium text-primary"
+                      : "hover:bg-muted/50"
+                  } ${components.indexOf(c) === 0 ? "rounded-t-md" : ""} ${components.indexOf(c) === components.length - 1 ? "rounded-b-md" : ""}`}
                   onClick={() => setSelectedComp(c.id)}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs">{c.component_key}</span>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate font-mono">{c.component_key}</span>
                     <Badge variant={existsCount > 0 ? "success" : "outline"}>
                       {existsCount}/{docs.length}
                     </Badge>
@@ -176,49 +169,41 @@ export default function ScanDocsPage({ params }: Props) {
             })}
           </nav>
 
-          {/* Doc list for selected component */}
           <section className="rounded-md border bg-card">
-            <div className="border-b px-4 py-3">
-              <h2 className="text-sm font-medium">
+            <div className="border-b px-3 py-2">
+              <h2 className="text-xs font-medium">
                 {selectedCompObj?.component_key ?? "选择组件"}
               </h2>
             </div>
             {selectedDocs.length === 0 ? (
-              <p className="p-6 text-center text-sm text-muted-foreground">
+              <p className="p-6 text-center text-xs text-muted-foreground">
                 暂无扫描文档。
               </p>
             ) : (
-              <table className="w-full text-sm">
-                <thead className="border-b text-left text-xs text-muted-foreground">
+              <table>
+                <thead>
                   <tr>
-                    <th className="px-4 py-3">类型</th>
-                    <th className="px-4 py-3">标题</th>
-                    <th className="px-4 py-3">路径</th>
-                    <th className="px-4 py-3">状态</th>
-                    <th className="px-4 py-3">最后修改</th>
+                    <th>类型</th>
+                    <th>标题</th>
+                    <th>路径</th>
+                    <th>状态</th>
+                    <th>最后修改</th>
                   </tr>
                 </thead>
                 <tbody>
                   {selectedDocs.map((doc) => (
-                    <tr
-                      key={doc.id}
-                      className="border-b last:border-b-0 hover:bg-muted/40"
-                    >
-                      <td className="px-4 py-3 font-mono text-xs">
-                        {doc.doc_type}
-                      </td>
-                      <td className="px-4 py-3">
-                        {doc.title ?? "—"}
-                      </td>
-                      <td className="max-w-[200px] break-all px-4 py-3 font-mono text-xs">
+                    <tr key={doc.id}>
+                      <td className="font-mono text-[11px]">{doc.doc_type}</td>
+                      <td>{doc.title ?? "—"}</td>
+                      <td className="max-w-[180px] truncate font-mono text-[11px]" title={doc.path}>
                         {doc.path}
                       </td>
-                      <td className="px-4 py-3">
+                      <td>
                         <Badge variant={doc.exists ? "success" : "outline"}>
                           {doc.exists ? "存在" : "缺失"}
                         </Badge>
                       </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                      <td className="text-[11px] text-muted-foreground">
                         {doc.last_modified_at
                           ? new Date(doc.last_modified_at).toLocaleString()
                           : "—"}

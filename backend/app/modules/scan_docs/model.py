@@ -16,18 +16,17 @@ from app.models.base import BaseModel
 
 
 class ScanDocument(BaseModel, table=True):
-    """A single scan document associated with a project component."""
+    """A single scan document associated with a workspace."""
 
     __tablename__ = "scan_documents"
     __table_args__ = (
         Index(
-            "ux_scan_docs_component_type",
-            "component_id",
+            "ux_scan_docs_workspace_type",
+            "workspace_id",
             "doc_type",
             unique=True,
         ),
         Index("ix_scan_docs_workspace", "workspace_id"),
-        Index("ix_scan_docs_component", "component_id"),
     )
 
     id: uuid.UUID = Field(
@@ -38,13 +37,6 @@ class ScanDocument(BaseModel, table=True):
         sa_column=Column(
             Uuid(as_uuid=True),
             ForeignKey("workspaces.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-    )
-    component_id: uuid.UUID = Field(
-        sa_column=Column(
-            Uuid(as_uuid=True),
-            ForeignKey("project_components.id", ondelete="CASCADE"),
             nullable=False,
         ),
     )

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-COMPONENT_FIXTURES = Path(__file__).parent.parent.parent / "component" / "tests" / "fixtures" / "valid"
+COMPONENT_FIXTURES = Path(__file__).parent / "fixtures" / "valid"
 CHANGE_FIXTURES = Path(__file__).parent.parent.parent / "change" / "tests" / "fixtures" / "changes"
 TASK_FIXTURES = Path(__file__).parent / "fixtures" / "change-with-tasks"
 

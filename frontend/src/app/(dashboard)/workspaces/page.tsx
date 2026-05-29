@@ -34,16 +34,18 @@ export default function WorkspacesPage() {
   };
 
   return (
-    <main className="container mx-auto flex max-w-5xl flex-col gap-6 px-4 py-12">
+    <main className="mx-auto flex max-w-5xl flex-col gap-5 px-6 py-8">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Workspaces</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            管理已注册的 SillySpec 仓库。任务 / 变更 / 组件全部归属在 Workspace 之下。
+          <h1>Workspaces</h1>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            管理已注册的项目工作区
           </p>
         </div>
         {!showDialog && (
-          <Button onClick={() => setShowDialog(true)}>添加 Workspace</Button>
+          <Button size="sm" onClick={() => setShowDialog(true)}>
+            + 添加 Workspace
+          </Button>
         )}
       </header>
 
@@ -55,19 +57,19 @@ export default function WorkspacesPage() {
       )}
 
       {error && (
-        <p className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+        <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {error}
-        </p>
+        </div>
       )}
 
       {items === null ? (
-        <p className="text-sm text-muted-foreground">加载中…</p>
+        <p className="py-8 text-center text-xs text-muted-foreground">加载中…</p>
       ) : items.length === 0 ? (
-        <section className="rounded-lg border border-dashed bg-muted/30 p-8 text-center text-sm text-muted-foreground">
-          还没有 Workspace。点击右上角“添加 Workspace”绑定一个 SillySpec 仓库。
+        <section className="rounded-md border border-dashed py-12 text-center text-xs text-muted-foreground">
+          还没有 Workspace。点击右上角&ldquo;添加 Workspace&rdquo;绑定一个项目仓库。
         </section>
       ) : (
-        <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {items.map((w) => (
             <WorkspaceCard key={w.id} workspace={w} onChanged={reload} />
           ))}
