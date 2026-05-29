@@ -61,3 +61,72 @@ export async function bootstrapSpecWorkspace(
     { method: "POST" },
   );
 }
+
+// ── Spec Workspace Update ──
+
+export interface SpecWorkspaceUpdateInput {
+  strategy?: SpecStrategy;
+  repo_sillyspec_path?: string | null;
+  profile_version?: string;
+}
+
+export async function updateSpecWorkspace(
+  workspaceId: string,
+  input: SpecWorkspaceUpdateInput,
+): Promise<SpecWorkspace> {
+  return apiFetch<SpecWorkspace>(
+    `/api/workspaces/${workspaceId}/spec-workspace`,
+    { method: "PATCH", json: input },
+  );
+}
+
+// ── Spec Conflicts ──
+
+export type SpecConflictStatus = "open" | "approved" | "rejected" | "resolved";
+
+export interface SpecConflictRead {
+  id: string;
+  workspace_id: string;
+  change_id: string | null;
+  task_id: string | null;
+  stage: string;
+  conflict_type: string;
+  details_json: string | null;
+  status: SpecConflictStatus;
+  created_at: string;
+}
+
+export interface SpecConflictListResponse {
+  items: SpecConflictRead[];
+  total: number;
+}
+
+export interface SpecConflictResolveInput {
+  status: SpecConflictStatus;
+  details_json?: string | null;
+}
+
+export function listSpecConflicts(
+  workspaceId: string,
+  params?: {
+    status_filter?: string;
+    limit?: number;
+    offset?: number;
+  },
+): Promise<SpecConflictListResponse> {
+  return apiFetch<SpecConflictListResponse>(
+    `/api/workspaces/${workspaceId}/spec-conflicts`,
+    { query: params as Record<string, string | number | undefined> },
+  );
+}
+
+export function resolveSpecConflict(
+  workspaceId: string,
+  conflictId: string,
+  input: SpecConflictResolveInput,
+): Promise<SpecConflictRead> {
+  return apiFetch<SpecConflictRead>(
+    `/api/workspaces/${workspaceId}/spec-conflicts/${conflictId}/resolve`,
+    { method: "POST", json: input },
+  );
+}
