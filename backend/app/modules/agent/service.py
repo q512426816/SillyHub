@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import signal
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime
@@ -14,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.core.errors import AppError, TaskNotFound, WorktreeLeaseNotFound
+from app.core.errors import AgentRunNotFound, AgentRunNotRunning
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.modules.agent.adapters.claude_code import ClaudeCodeAdapter
@@ -43,6 +45,10 @@ class AgentRunError(AppError):
 
 
 class AgentService:
+    # 进程注册表 — 类属性，所有实例共享
+    # key: run_id (UUID), value: asyncio.subprocess.Process
+    _proc_registry: dict[uuid.UUID, asyncio.subprocess.Process] = {}
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
@@ -203,7 +209,29 @@ class AgentService:
         run.output_redacted = result.redacted_output[:10000]  # truncate
         self._session.add(run)
 
-        # -- 5. Log stdout/stderr -------------------------------------------------
+        # -- 5. Collect diff ------------------------------------------------------
+        try:
+            from app.modules.agent.diff_collector import collect_diff
+
+            diff_result = await collect_diff(lease_path)
+            if diff_result.files_changed > 0:
+                run.diff_summary = (
+                    f"{diff_result.stat_summary}\n"
+                    f"--- Summary: {diff_result.files_changed} files changed, "
+                    f"{diff_result.insertions} insertions(+), "
+                    f"{diff_result.deletions} deletions(-)"
+                )
+            else:
+                run.diff_summary = None
+            self._session.add(run)
+        except Exception as exc:
+            log.warning(
+                "diff_collect_failed",
+                run_id=str(run_id),
+                error=str(exc),
+            )
+
+        # -- 6. Log stdout/stderr -------------------------------------------------
         for channel, content in [
             ("stdout", result.stdout),
             ("stderr", result.stderr),
@@ -217,7 +245,7 @@ class AgentService:
                 )
                 self._session.add(log_entry)
 
-        # -- 6. Write audit log ---------------------------------------------------
+        # -- 7. Write audit log ---------------------------------------------------
         from app.modules.workflow.model import AuditLog
 
         audit = AuditLog(
@@ -239,6 +267,76 @@ class AgentService:
         self._session.add(audit)
 
         await self._session.commit()
+
+    # ------------------------------------------------------------------
+    # Kill mechanism
+    # ------------------------------------------------------------------
+
+    async def kill_run(self, run_id: uuid.UUID) -> AgentRun:
+        """Terminate a running agent execution.
+
+        Sends SIGTERM, waits up to 5 seconds, then sends SIGKILL if
+        the process has not exited.
+
+        Args:
+            run_id: UUID of the AgentRun to terminate.
+
+        Returns:
+            The updated AgentRun with status='killed'.
+
+        Raises:
+            AgentRunNotFound: run_id does not exist in the database.
+            AgentRunNotRunning: run exists but status is not 'running'.
+        """
+        # -- 1. Load run record ---------------------------------------------------
+        run = await self._session.get(AgentRun, run_id)
+        if run is None:
+            raise AgentRunNotFound(
+                f"Run '{run_id}' not found.",
+                details={"run_id": str(run_id)},
+            )
+
+        # -- 2. Status check ------------------------------------------------------
+        if run.status != "running":
+            raise AgentRunNotRunning(
+                f"Run '{run_id}' is not running (status={run.status}).",
+                details={"run_id": str(run_id), "status": run.status},
+            )
+
+        # -- 3. Find process in registry ------------------------------------------
+        proc = self._proc_registry.get(run_id)
+
+        if proc is not None and proc.returncode is None:
+            # 3a. Send SIGTERM
+            try:
+                proc.send_signal(signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+            # 3b. Wait up to 5 seconds
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                # 3c. SIGKILL
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                await proc.wait()
+
+        # -- 4. Remove from registry (whether proc exists or not) ------------------
+        self._proc_registry.pop(run_id, None)
+
+        # -- 5. Update database record --------------------------------------------
+        run.status = "killed"
+        run.finished_at = datetime.utcnow()
+        run.exit_code = run.exit_code if run.exit_code is not None else -9
+        self._session.add(run)
+        await self._session.commit()
+        await self._session.refresh(run)
+
+        log.info("run_killed", run_id=str(run_id))
+        return run
 
     # ------------------------------------------------------------------
     # Query helpers
@@ -342,6 +440,48 @@ class AgentService:
         finally:
             await pubsub.unsubscribe(channel)
             await pubsub.close()
+
+
+    # ------------------------------------------------------------------
+    # Stale run cleanup
+    # ------------------------------------------------------------------
+
+    async def cleanup_stale_runs(self) -> int:
+        """Clean up stale running-state AgentRun records.
+
+        Called during service startup to mark any runs that were
+        running when the service restarted as failed.
+        """
+        return await _cleanup_stale_runs_impl(self._session)
+
+
+async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
+    """Scan for stale running-state AgentRuns and mark them as failed.
+
+    When the service restarts, the in-memory process registry is empty,
+    but database records may still show status='running'.  This function
+    marks them as failed so they don't appear stuck forever.
+
+    Returns:
+        Number of stale runs cleaned up.
+    """
+    stmt = select(AgentRun).where(col(AgentRun.status) == "running")
+    stale_runs = list((await session.execute(stmt)).scalars().all())
+
+    if not stale_runs:
+        return 0
+
+    now = datetime.utcnow()
+    for run in stale_runs:
+        run.status = "failed"
+        run.finished_at = now
+        run.exit_code = -1
+        run.output_redacted = "Run interrupted: service restarted while agent was running."
+        session.add(run)
+        log.warning("stale_run_cleaned", run_id=str(run.id))
+
+    await session.commit()
+    return len(stale_runs)
 
 
 def redact_agent_output(text: str) -> str:

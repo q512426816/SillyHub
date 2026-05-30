@@ -11,10 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import require_permission
 from app.core.db import get_session
-from app.core.errors import AgentRunNotFound
+from app.core.errors import AgentRunNotFound, AgentRunNotRunning
 from app.modules.agent.schema import (
     AgentRunCreate,
     AgentRunLogEntry,
+    AgentKillResponse,
     AgentRunResponse,
 )
 from app.modules.agent.service import AgentService
@@ -66,6 +67,34 @@ async def get_agent_run(
             details={"run_id": str(run_id)},
         )
     return await svc.enrich_with_workspace_ids(run)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/agent/runs/{run_id}/kill",
+    response_model=AgentKillResponse,
+)
+async def kill_agent_run(
+    workspace_id: uuid.UUID,
+    run_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.TASK_RUN_AGENT))],
+) -> AgentKillResponse:
+    """Terminate a running agent execution."""
+    svc = AgentService(session)
+    run = await svc.get_run(run_id)
+    if run is None:
+        raise AgentRunNotFound(
+            f"Agent run '{run_id}' not found.",
+            details={"run_id": str(run_id)},
+        )
+    if run.status not in ("pending", "running"):
+        raise AgentRunNotRunning(
+            f"Agent run '{run_id}' is not running (current status: {run.status}).",
+            details={"run_id": str(run_id), "status": run.status},
+        )
+    await svc.kill_run(run_id)
+    await session.refresh(run)
+    return AgentKillResponse(id=run.id, status=run.status)
 
 
 @router.get(

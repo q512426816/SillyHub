@@ -121,6 +121,11 @@ class AgentRunNotFound(AppError):
     http_status = status.HTTP_404_NOT_FOUND
 
 
+class AgentRunNotRunning(AppError):
+    code = "HTTP_409_AGENT_RUN_NOT_RUNNING"
+    http_status = status.HTTP_409_CONFLICT
+
+
 # ── Change errors ────────────────────────────────────────────────────────────
 
 
