@@ -14,13 +14,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from app.core.errors import AppError, TaskNotFound, WorktreeLeaseNotFound
-from app.core.errors import AgentRunNotFound, AgentRunNotRunning
+from app.core.errors import (
+    AgentRunNotFound,
+    AgentRunNotRunning,
+    AppError,
+    TaskNotFound,
+    WorktreeLeaseNotFound,
+)
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.modules.agent.adapters.claude_code import ClaudeCodeAdapter
 from app.modules.agent.base import AgentAdapter, AgentSpecBundle
 from app.modules.agent.context_builder import build_spec_bundle, render_bundle_to_claude_md
+from app.modules.agent.coordinator import ExecutionCoordinatorService
 from app.modules.agent.model import AgentRun, AgentRunLog
 from app.modules.agent.schema import AgentRunResponse
 from app.modules.task.model import Task
@@ -60,6 +66,7 @@ class AgentService:
         task_id: uuid.UUID,
         lease_id: uuid.UUID,
         agent_type: str = "claude_code",
+        idempotency_key: str | None = None,
     ) -> AgentRun:
         """Create an AgentRun record and trigger background execution.
 
@@ -68,7 +75,20 @@ class AgentService:
         ``_execute_run_background``.  In the current implementation the
         background call happens synchronously within the request, but the
         code structure is ready for a true task-queue replacement.
+
+        If ``idempotency_key`` is provided and a run with that key already
+        exists, the existing run is returned immediately (HTTP 200 instead
+        of 201 — handled by the router layer).
         """
+        coordinator = ExecutionCoordinatorService(self._session)
+
+        # -- 0. Idempotency check ------------------------------------------------
+        if idempotency_key:
+            existing = await coordinator.check_idempotency(idempotency_key)
+            if existing is not None:
+                log.info("idempotent_run_returned", run_id=str(existing.id), key=idempotency_key)
+                return existing
+
         # -- 1. Validate task -----------------------------------------------------
         task = await self._session.get(Task, task_id)
         if task is None or task.workspace_id != workspace_id:
@@ -107,6 +127,9 @@ class AgentService:
             workspace_id=workspace_id,
         )
 
+        # -- 4b. Compute context fingerprint --------------------------------------
+        fingerprint = coordinator.compute_fingerprint(bundle)
+
         # -- 5. Create run record (pending) --------------------------------------
         run = AgentRun(
             id=uuid.uuid4(),
@@ -116,10 +139,15 @@ class AgentService:
             status="pending",
             spec_strategy=bundle.spec_strategy,
             profile_version=bundle.profile_version,
+            idempotency_key=idempotency_key,
+            context_fingerprint=fingerprint,
         )
         self._session.add(run)
         await self._session.commit()
         await self._session.refresh(run)
+
+        # -- 5a. Generate resume_token for potential future resume ----------------
+        await coordinator.generate_resume_token(run)
 
         # -- 5b. Create M:N workspace associations -------------------------------
         task_ws_stmt = select(TaskWorkspace.workspace_id).where(

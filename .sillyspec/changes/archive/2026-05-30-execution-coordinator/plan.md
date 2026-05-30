@@ -7,23 +7,23 @@ created_at: 2026-05-30T23:19:00
 
 ## Wave 1 — 数据模型 + 迁移（无外部依赖）
 
-- [ ] task-01: AgentRun 模型扩展（6 个新字段 + checkpoint_data）
-- [ ] task-02: Alembic 迁移（新增列 + 索引）
+- [x] task-01: AgentRun 模型扩展（6 个新字段 + checkpoint_data）
+- [x] task-02: Alembic 迁移（新增列 + 索引）
 
 ## Wave 2 — CoordinatorService 核心（依赖 task-01）
 
-- [ ] task-03: ExecutionCoordinatorService — 幂等检查 + 乐观锁 + 指纹计算
-- [ ] task-04: ExecutionCoordinatorService — resume + checkpoint + approval
+- [x] task-03: ExecutionCoordinatorService — 幂等检查 + 乐观锁 + 指纹计算
+- [x] task-04: ExecutionCoordinatorService — resume + checkpoint + approval
 
 ## Wave 3 — API + 集成（依赖 Wave 2）
 
-- [ ] task-05: Coordinator schemas + router + 注册
-- [ ] task-06: AgentService.start_run 集成 coordinator
+- [x] task-05: Coordinator schemas + router + 注册
+- [x] task-06: AgentService.start_run 集成 coordinator
 
 ## Wave 4 — 测试 + 验收（依赖 Wave 3）
 
-- [ ] task-07: Coordinator 测试套件（≥15 新测试）
-- [ ] task-08: 全量回归验证
+- [x] task-07: Coordinator 测试套件（≥15 新测试）
+- [x] task-08: 全量回归验证
 
 ## 任务总表
 
@@ -59,12 +59,12 @@ task-01 → task-03 → task-05 → task-07 → task-08（最长路径，~8h）
 
 ## 全局验收标准
 
-- [ ] idempotency_key 去重生效（相同 key 不重复创建）
-- [ ] resume_token 恢复执行正常
-- [ ] checkpoint save/load 正确（version 递增）
-- [ ] optimistic lock 检测并发冲突（返回 409）
-- [ ] approval_token 审批流程正常（一次性 token）
-- [ ] context_fingerprint 校验正常（不匹配返回 409）
-- [ ] 所有新字段向后兼容（可 NULL / 有默认值）
-- [ ] 新增测试 ≥ 15
-- [ ] pytest 全套无回归
+- [x] idempotency_key 去重生效（相同 key 不重复创建）
+- [x] resume_token 恢复执行正常
+- [x] checkpoint save/load 正确（version 递增）
+- [x] optimistic lock 检测并发冲突（返回 409）
+- [x] approval_token 审批流程正常（一次性 token）
+- [x] context_fingerprint 校验正常（不匹配返回 409）
+- [x] 所有新字段向后兼容（可 NULL / 有默认值）
+- [x] 新增测试 ≥ 15
+- [x] pytest 全套无回归

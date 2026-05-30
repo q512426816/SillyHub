@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text, Uuid
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, Integer, String, Text, Uuid, text
 from sqlmodel import Field
 
 from app.models.base import BaseModel
@@ -18,6 +18,19 @@ class AgentRun(BaseModel, table=True):
     __table_args__ = (
         Index("ix_agent_runs_task", "task_id"),
         Index("ix_agent_runs_lease", "lease_id"),
+        Index(
+            "ix_agent_runs_idempotency_key", "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
+        Index(
+            "ix_agent_runs_resume_token", "resume_token",
+            postgresql_where=text("resume_token IS NOT NULL"),
+        ),
+        Index(
+            "ix_agent_runs_context_fingerprint", "context_fingerprint",
+            postgresql_where=text("context_fingerprint IS NOT NULL"),
+        ),
     )
 
     id: uuid.UUID = Field(
@@ -72,6 +85,43 @@ class AgentRun(BaseModel, table=True):
     diff_summary: str | None = Field(
         default=None,
         sa_column=Column(Text, nullable=True),
+    )
+    # ── Execution Coordinator fields ──
+    idempotency_key: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    resume_token: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    checkpoint_version: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, default=0),
+    )
+    version: int = Field(
+        default=1,
+        sa_column=Column(Integer, nullable=False, default=1),
+    )
+    approval_token: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    context_fingerprint: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    checkpoint_data: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    max_retries: int = Field(
+        default=3,
+        sa_column=Column(Integer, nullable=False, default=3),
+    )
+    retry_count: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, default=0),
     )
 
 
