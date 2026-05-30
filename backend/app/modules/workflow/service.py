@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,7 +49,7 @@ class WorkflowService:
             )
 
         change.status = target
-        change.updated_at = datetime.utcnow()
+        change.updated_at = datetime.now(timezone.utc)
         self._session.add(change)
         await self._record_audit(
             workspace_id=workspace_id,
@@ -79,7 +79,7 @@ class WorkflowService:
         TaskFSM.validate_transition(previous, target)
 
         task.status = target
-        task.updated_at = datetime.utcnow()
+        task.updated_at = datetime.now(timezone.utc)
         self._session.add(task)
         await self._record_audit(
             workspace_id=workspace_id,
@@ -119,7 +119,7 @@ class WorkflowService:
             can_reject = ChangeFSM.can_transition(change.status, "rejected")
             if can_reject:
                 change.status = "rejected"
-                change.updated_at = datetime.utcnow()
+                change.updated_at = datetime.now(timezone.utc)
                 self._session.add(change)
 
         await self._record_audit(

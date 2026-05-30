@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime, ForeignKey, Index, String, Text, Uuid
 from sqlmodel import Field
@@ -40,7 +40,7 @@ class ChangeReview(BaseModel, table=True):
     verdict: str = Field(sa_column=Column(String(20), nullable=False))  # approve / reject
     comment: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     created_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 
@@ -79,6 +79,6 @@ class AuditLog(BaseModel, table=True):
     resource_id: uuid.UUID = Field(sa_column=Column(Uuid(as_uuid=True), nullable=False))
     details_json: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
