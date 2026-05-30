@@ -90,6 +90,11 @@ class ScanDocNotFound(AppError):
     http_status = status.HTTP_404_NOT_FOUND
 
 
+class SpecConflictNotFound(AppError):
+    code = "HTTP_404_SPEC_CONFLICT_NOT_FOUND"
+    http_status = status.HTTP_404_NOT_FOUND
+
+
 # ── Relation errors ──────────────────────────────────────────────────────────
 
 
