@@ -6,7 +6,7 @@ Schema follows ``references/17-db-schema.md`` §2.4 with extensions per task-06.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Index, String, Text, Uuid
 from sqlmodel import Field
@@ -67,10 +67,10 @@ class Task(BaseModel, table=True):
     path: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     content: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     created_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )

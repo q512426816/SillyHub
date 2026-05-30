@@ -6,9 +6,9 @@ Schema follows ``references/17-db-schema.md`` §2.4.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, String, Text, Uuid
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, Uuid
 from sqlalchemy import JSON
 from sqlmodel import Field
 
@@ -55,11 +55,11 @@ class Change(BaseModel, table=True):
         sa_column=Column(Uuid(as_uuid=True), ForeignKey("users.id"), nullable=True),
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     archived_at: datetime | None = Field(
@@ -101,4 +101,9 @@ class ChangeDocument(BaseModel, table=True):
     last_modified_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+
+    word_count: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
     )

@@ -24,10 +24,11 @@ from app.modules.scan_docs.router import router as scan_docs_router
 from app.modules.git_identity import git_identity_router
 from app.modules.task import task_router
 from app.modules.worktree import lease_router, worktree_router
+from app.modules.workflow.router import router as workflow_router
 from app.modules.workspace import workspace_router
 from app.modules.git_gateway.router import router as git_gateway_router
 from app.modules.change_writer.router import router as change_writer_router
-from app.modules.workflow.router import router as workflow_router
+
 from app.modules.incident.router import router as incident_router
 from app.modules.knowledge.router import router as knowledge_router
 from app.modules.release.router import router as release_router

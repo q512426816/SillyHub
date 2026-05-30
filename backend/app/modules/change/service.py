@@ -176,6 +176,9 @@ class ChangeService:
             content = full_path.read_text(encoding="utf-8", errors="replace")
             if size > MAX_CONTENT_BYTES:
                 content = content[: MAX_CONTENT_BYTES // 4]
+            # Update word_count on content read
+            doc.word_count = len(content.split())
+            self._session.add(doc)
             return doc.path, content, True
         except ChangeDocNotFound:
             raise

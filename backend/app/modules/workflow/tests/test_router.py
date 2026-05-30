@@ -26,6 +26,8 @@ async def _setup(db_session) -> dict:
     )
     db_session.add(ws)
 
+    await db_session.flush()  # ensure FK target exists before referencing it
+
     change_id = uuid.uuid4()
     change = Change(
         id=change_id,
