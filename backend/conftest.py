@@ -56,6 +56,7 @@ async def db_engine() -> AsyncIterator[Any]:
     from app.modules.workspace import model as _ws_model  # noqa: F401
     from app.modules.workflow import model as _workflow_model  # noqa: F401
     from app.modules.agent import model as _agent_model  # noqa: F401
+    from app.modules.tool_gateway import tool_policy as _tool_policy_model  # noqa: F401
     from app.modules.spec_workspace import model as _spec_ws_model  # noqa: F401
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)

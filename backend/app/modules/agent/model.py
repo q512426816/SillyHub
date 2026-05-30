@@ -123,6 +123,14 @@ class AgentRun(BaseModel, table=True):
         default=0,
         sa_column=Column(Integer, nullable=False, default=0),
     )
+    tool_policy_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("tool_policies.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
 
 
 class AgentRunLog(BaseModel, table=True):

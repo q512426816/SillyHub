@@ -34,6 +34,7 @@ from app.modules.knowledge.router import router as knowledge_router
 from app.modules.release.router import router as release_router
 from app.modules.runtime.router import router as runtime_router
 from app.modules.tool_gateway.router import router as tool_gateway_router
+from app.modules.tool_gateway.policy_router import router as policy_crud_router
 from app.modules.archive.router import router as archive_router
 from app.modules.settings.router import router as settings_router
 from app.modules.spec_workspace.router import router as spec_workspace_router
@@ -117,6 +118,7 @@ def create_app() -> FastAPI:
     app.include_router(release_router, prefix="/api")
     app.include_router(runtime_router, prefix="/api")
     app.include_router(tool_gateway_router, prefix="/api")
+    app.include_router(policy_crud_router, prefix="/api")
     app.include_router(archive_router, prefix="/api")
     app.include_router(settings_router, prefix="/api")
     app.include_router(spec_workspace_router, prefix="/api")
