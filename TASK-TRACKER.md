@@ -1,8 +1,8 @@
 # SillyHub 开发任务追踪
 
 > 更新时间：2026-05-31
-> 基础测试：700 passed, 0 failed
-> 最新 commit：b3adad6 (archive Tool Gateway)
+> 测试：700 passed, 0 failed (backend) + 4 passed (frontend)
+> 最新 commit：5d3df05 (cleanup worktree residual)
 
 ---
 
@@ -36,18 +36,30 @@
 
 ---
 
-## 三、最终验收
+## 三、最终验收 ✅
 
-- [x] 全套测试通过（700 tests）
-- [ ] 前端 build 通过
-- [ ] 后端服务启动正常
-- [x] 清理所有 worktree 和临时分支
-- [x] 最终 git commit
+- [x] 后端测试：700 passed, 0 failed
+- [x] 前端 build：成功（Next.js 14, 28 routes）
+- [x] 前端测试：4 passed
+- [x] 后端服务启动：health=ok, db=ok, redis=ok
+- [x] DB migration：alembic upgrade head 成功
+- [x] Alembic env.py：所有模型已注册
+
+## 四、E2E 冒烟测试 ✅
+
+- [x] 登录 admin@sillyhub.local → token 获取成功
+- [x] 创建 workspace → 成功
+- [x] 创建 ToolPolicy → 成功（allowed_tools, blocked_commands, max_timeout）
+- [x] 列出 policies → 1 条
+- [x] 列出 workspaces → total=1
+- [x] 获取当前用户 → admin, is_platform_admin=true
+- [x] 删除 workspace → 200 OK, status=deleted
 
 ---
 
-## 四、部署 + E2E
+## 五、Docker 部署（可选）
 
-- [ ] 后端服务部署验证
-- [ ] 前端服务部署验证
-- [ ] E2E 冒烟测试
+- deploy/docker-compose.yml 已配置完整
+- backend/Dockerfile 多阶段构建
+- frontend/Dockerfile Next.js standalone
+- 需要设置 SECRET_KEY + SILLYSPEC_MASTER_KEY 环境变量
