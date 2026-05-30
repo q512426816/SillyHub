@@ -6,7 +6,7 @@ created_at: 2026-05-30 16:48:00
 # git_gateway
 
 > 最后更新：2026-05-30
-> 最近变更：2026-05-30-change-writer
+> 最近变更：2026-05-29-harness-control-plane
 > 模块路径：`backend/app/modules/git_gateway/**`
 
 ## 职责
@@ -83,3 +83,4 @@ created_at: 2026-05-30 16:48:00
 | 日期 | 变更 | 摘要 |
 |------|------|------|
 | 2026-05-30 | 2026-05-30-change-writer | router/schema/service 微调以支持 change_writer Phase B 调用 |
+| 2026-05-30 | 2026-05-29-harness-control-plane | brainstorm-only：设计审计日志接入和 Policy Engine 调用关系 |
