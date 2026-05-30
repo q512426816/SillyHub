@@ -1,0 +1,250 @@
+{
+  "_version": 3,
+  "project": "SillyHub",
+  "currentStage": "archive",
+  "currentChange": "2026-05-30-workflow-state-machine",
+  "stages": {
+    "scan": {
+      "status": "pending",
+      "steps": [],
+      "startedAt": null,
+      "completedAt": null
+    },
+    "brainstorm": {
+      "status": "completed",
+      "startedAt": "2026/5/30 16:54:23",
+      "completedAt": "2026/5/30 17:02:36",
+      "steps": [
+        {
+          "name": "状态检查",
+          "status": "completed",
+          "completedAt": "2026/5/30 16:54:31",
+          "output": "变更已初始化，当前阶段 brainstorm step 1/10，状态正常。这是 Goal 4 工作流/审批/审计的 task-13，涉及 Change 状态机、Task 状态机、Spec Guardian、Review 封驳、审计日志。"
+        },
+        {
+          "name": "加载项目上下文",
+          "status": "completed",
+          "completedAt": "2026/5/30 17:00:53",
+          "output": "Brainstorm 完成。生成文件：(1) proposal.md — 动机、3 个痛点、变更范围、不在范围清单、6 条成功标准 (2) requirements.md — 7 个 FR（GWT 格式）+ 非功能需求 (3) design.md — 3 个架构决策、12 个文件变更清单、数据模型变更、9 条 Guard Rules、风险登记 (4) tasks.md — 4 Wave 10 个任…"
+        },
+        {
+          "name": "协作与复用检查",
+          "status": "completed",
+          "completedAt": "2026/5/30 17:01:07",
+          "output": "无冲突，10个活跃变更均不重叠，无全局模板"
+        },
+        {
+          "name": "原型/设计图分析",
+          "status": "completed",
+          "completedAt": "2026/5/30 17:01:11",
+          "output": "无原型或截图，跳过"
+        },
+        {
+          "name": "需求范围评估",
+          "status": "completed",
+          "completedAt": "2026/5/30 17:01:19",
+          "output": "无需拆分，无批量模式。单一workflow模块增强，改动5-6个文件"
+        },
+        {
+          "name": "对话式探索",
+          "status": "completed",
+          "completedAt": "2026/5/30 17:01:25",
+          "output": "6个需求点确认：ChangeFSM已有、TaskFSM已有、Guard+3规则、Review增强、Audit hook、Bug修复。无歧义"
+        },
+        {
+          "name": "提出 2-3 种方案",
+          "status": "completed",
+          "completedAt": "2026/5/30 17:02:10",
+          "output": "3方案：A最小增强(4h)、B全面增强(8-12h推荐)、C激进重构(24h+)。推荐B：SQLAlchemy event hook+guard+3规则+bugfix"
+        },
+        {
+          "name": "分段展示设计",
+          "status": "completed",
+          "completedAt": "2026/5/30 17:02:16",
+          "output": "3段设计确认：(1)Bug修复+deprecation (2)Guard+3规则(G4字数/G5组件/G7review) (3)Audit hook架构。变更名2026-05-30-workflow-state-machine"
+        },
+        {
+          "name": "HTML 原型生成",
+          "status": "completed",
+          "completedAt": "2026/5/30 17:02:21",
+          "output": "已生成prototype-fsm-diagrams.html，含Change/Task FSM状态图+Guard Rules表+Audit Hook架构图"
+        },
+        {
+          "name": "用户确认并生成规范文件",
+          "status": "completed",
+          "completedAt": "2026/5/30 17:02:36",
+          "output": "规范文件已生成：(1)proposal.md-动机/痛点/范围/成功标准 (2)requirements.md-7个FR(GWT)+非功能需求 (3)design.md-3个AD/12个文件变更/9条Guard Rules/风险登记 (4)tasks.md-4Wave10任务 (5)prototype-fsm-diagrams.html。已git add。无后续变更包。"
+        }
+      ]
+    },
+    "plan": {
+      "status": "completed",
+      "startedAt": "2026/5/30 17:02:46",
+      "completedAt": "2026/05/30 17:18:44",
+      "steps": [
+        {
+          "name": "状态检查",
+          "status": "completed",
+          "completedAt": "2026/5/30 17:02:58",
+          "output": "Plan阶段已启动，当前stage=plan，brainstorm 10/10已完成。规范文件齐全(proposal/design/requirements/tasks)。"
+        },
+        {
+          "name": "加载上下文",
+          "status": "completed",
+          "completedAt": "2026/5/30 17:03:30",
+          "output": "上下文已加载：proposal.md(3痛点+4变更范围)、design.md(3个AD+12个文件变更+9条Guard Rules)、requirements.md(7个FR GWT格式)、tasks.md(4Wave 10任务)。涉及模块：core/change/task/workflow/migrations/tests。无独立模块md文档。"
+        },
+        {
+          "name": "锚定确认",
+          "status": "completed",
+          "completedAt": "2026/5/30 17:03:42",
+          "output": "锚定确认：21个文件已读，3个不存在。所有规范文件和源码文件已加载。local.yaml不存在将使用默认命令。"
+        },
+        {
+          "name": "展开任务并分组",
+          "status": "completed",
+          "completedAt": "2026/5/30 17:04:13",
+          "output": "plan.md已生成。4 Wave 10 任务：W1(修复+清理)、W2(Guard+3规则)、W3(Audit hook)、W4(全量验证)。关键路径5.5h。无Spike需求（技术方案确定）。依赖关系：task-01→task-03/05/06, task-03→task-04, task-02→task-07→task-08→task-09→task-10。"
+        },
+        {
+          "name": "生成任务蓝图（子代理并行）",
+          "status": "completed",
+          "prompt": "为 plan.md 中的每个任务生成独立蓝图文件。\n\n## 任务清单\n- task-01: 修复 test_change_transition_draft_to_proposed 失败\n- task-02: datetime.utcnow → datetime.now(timezone.utc) 清理\n- task-03: ChangeDocument 新增 word_count 字段 + Alembic migration\n- task-04: Spec Guardian G4 — 文档字数 ≥ 100 检查\n- task-05: Spec Guardian G5 — 关联组件存在性检查\n- task-06: Spec Guardian G7 — 未解决 reject review 检查\n- task-07: 新建 core/audit_hooks.py — SQLAlchemy event hook\n- task-08: get_session 注入 audit_context\n- task-09: Audit hook 单元测试\n- task-10: 全量测试验证\n\n## 执行方式（必须严格遵守）\n\n**你必须使用 Agent tool 启动子代理来写每个蓝图，不要自己写。**\n\n1. 确认 `/Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/` 目录存在（不存在则创建）\n2. 为每个任务启动一个独立子代理（Agent tool），可并行启动多个\n3. 每个子代理使用对应的 prompt（见下方模板）\n4. 等待所有子代理完成\n5. 验证每个 task-N.md 文件已生成且非空\n\n### 子代理 prompt 模板\n为每个任务使用以下 prompt 启动子代理：\n\n```\n任务编号：task-01\n任务名称：修复 test_change_transition_draft_to_proposed 失败\n文件路径：/Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-01.md\n\n操作：\n1. 读取 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/design.md 和 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/plan.md 了解上下文\n2. 读取相关源文件了解现有代码\n3. 按以下格式编写任务蓝图并保存到 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-01.md：\n\n---\nid: task-01\ntitle: 修复 test_change_transition_draft_to_proposed 失败\npriority: P0/P1/P2\nestimated_hours: N\ndepends_on: [task-XX]\nblocks: [task-XX]\nallowed_paths:\n  - ...\n---\n\n# task-01: 修复 test_change_transition_draft_to_proposed 失败\n\n## 修改文件（必填）\n- 精确到文件路径\n\n## 实现要求\n1. 具体做什么\n\n## 接口定义（代码类任务必填）\n方法签名、数据结构、控制流伪代码\n\n## 边界处理（必填）\n- null/空值行为\n- 兼容旧行为（brownfield：未配置新功能时行为不变）\n- 异常不静默吞掉（明确返回值或抛出）\n- 不修改传入参数\n- 歧义/冲突场景的处理策略\n\n## 非目标（本任务不做的事）\n- 明确边界，防止 scope creep\n\n## 参考\n- 可参考的模式\n\n## TDD 步骤\n1. 写测试 → 2. 确认失败 → 3. 写代码 → 4. 确认通过 → 5. 回归\n\n## 验收标准\n| # | 验证步骤 | 通过标准 |\n|---|---|---|\n| AC-01 | ... | ... |\n\n关键规则：\n- 必须独立完整，execute 子代理只读这一个文件就能干活\n- 不要依赖其他 task-N.md 的内容\n- 接口定义写到\"搬砖工照着做\"的程度\n- 边界处理至少 5 条\n- 验收标准用表格，禁止笼统表述\n- 写完后用 Write tool 保存到文件\n```\n\n```\n任务编号：task-02\n任务名称：datetime.utcnow → datetime.now(timezone.utc) 清理\n文件路径：/Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-02.md\n\n操作：\n1. 读取 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/design.md 和 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/plan.md 了解上下文\n2. 读取相关源文件了解现有代码\n3. 按以下格式编写任务蓝图并保存到 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-02.md：\n\n---\nid: task-02\ntitle: datetime.utcnow → datetime.now(timezone.utc) 清理\npriority: P0/P1/P2\nestimated_hours: N\ndepends_on: [task-XX]\nblocks: [task-XX]\nallowed_paths:\n  - ...\n---\n\n# task-02: datetime.utcnow → datetime.now(timezone.utc) 清理\n\n## 修改文件（必填）\n- 精确到文件路径\n\n## 实现要求\n1. 具体做什么\n\n## 接口定义（代码类任务必填）\n方法签名、数据结构、控制流伪代码\n\n## 边界处理（必填）\n- null/空值行为\n- 兼容旧行为（brownfield：未配置新功能时行为不变）\n- 异常不静默吞掉（明确返回值或抛出）\n- 不修改传入参数\n- 歧义/冲突场景的处理策略\n\n## 非目标（本任务不做的事）\n- 明确边界，防止 scope creep\n\n## 参考\n- 可参考的模式\n\n## TDD 步骤\n1. 写测试 → 2. 确认失败 → 3. 写代码 → 4. 确认通过 → 5. 回归\n\n## 验收标准\n| # | 验证步骤 | 通过标准 |\n|---|---|---|\n| AC-01 | ... | ... |\n\n关键规则：\n- 必须独立完整，execute 子代理只读这一个文件就能干活\n- 不要依赖其他 task-N.md 的内容\n- 接口定义写到\"搬砖工照着做\"的程度\n- 边界处理至少 5 条\n- 验收标准用表格，禁止笼统表述\n- 写完后用 Write tool 保存到文件\n```\n\n```\n任务编号：task-03\n任务名称：ChangeDocument 新增 word_count 字段 + Alembic migration\n文件路径：/Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-03.md\n\n操作：\n1. 读取 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/design.md 和 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/plan.md 了解上下文\n2. 读取相关源文件了解现有代码\n3. 按以下格式编写任务蓝图并保存到 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-03.md：\n\n---\nid: task-03\ntitle: ChangeDocument 新增 word_count 字段 + Alembic migration\npriority: P0/P1/P2\nestimated_hours: N\ndepends_on: [task-XX]\nblocks: [task-XX]\nallowed_paths:\n  - ...\n---\n\n# task-03: ChangeDocument 新增 word_count 字段 + Alembic migration\n\n## 修改文件（必填）\n- 精确到文件路径\n\n## 实现要求\n1. 具体做什么\n\n## 接口定义（代码类任务必填）\n方法签名、数据结构、控制流伪代码\n\n## 边界处理（必填）\n- null/空值行为\n- 兼容旧行为（brownfield：未配置新功能时行为不变）\n- 异常不静默吞掉（明确返回值或抛出）\n- 不修改传入参数\n- 歧义/冲突场景的处理策略\n\n## 非目标（本任务不做的事）\n- 明确边界，防止 scope creep\n\n## 参考\n- 可参考的模式\n\n## TDD 步骤\n1. 写测试 → 2. 确认失败 → 3. 写代码 → 4. 确认通过 → 5. 回归\n\n## 验收标准\n| # | 验证步骤 | 通过标准 |\n|---|---|---|\n| AC-01 | ... | ... |\n\n关键规则：\n- 必须独立完整，execute 子代理只读这一个文件就能干活\n- 不要依赖其他 task-N.md 的内容\n- 接口定义写到\"搬砖工照着做\"的程度\n- 边界处理至少 5 条\n- 验收标准用表格，禁止笼统表述\n- 写完后用 Write tool 保存到文件\n```\n\n```\n任务编号：task-04\n任务名称：Spec Guardian G4 — 文档字数 ≥ 100 检查\n文件路径：/Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-04.md\n\n操作：\n1. 读取 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/design.md 和 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/plan.md 了解上下文\n2. 读取相关源文件了解现有代码\n3. 按以下格式编写任务蓝图并保存到 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-04.md：\n\n---\nid: task-04\ntitle: Spec Guardian G4 — 文档字数 ≥ 100 检查\npriority: P0/P1/P2\nestimated_hours: N\ndepends_on: [task-XX]\nblocks: [task-XX]\nallowed_paths:\n  - ...\n---\n\n# task-04: Spec Guardian G4 — 文档字数 ≥ 100 检查\n\n## 修改文件（必填）\n- 精确到文件路径\n\n## 实现要求\n1. 具体做什么\n\n## 接口定义（代码类任务必填）\n方法签名、数据结构、控制流伪代码\n\n## 边界处理（必填）\n- null/空值行为\n- 兼容旧行为（brownfield：未配置新功能时行为不变）\n- 异常不静默吞掉（明确返回值或抛出）\n- 不修改传入参数\n- 歧义/冲突场景的处理策略\n\n## 非目标（本任务不做的事）\n- 明确边界，防止 scope creep\n\n## 参考\n- 可参考的模式\n\n## TDD 步骤\n1. 写测试 → 2. 确认失败 → 3. 写代码 → 4. 确认通过 → 5. 回归\n\n## 验收标准\n| # | 验证步骤 | 通过标准 |\n|---|---|---|\n| AC-01 | ... | ... |\n\n关键规则：\n- 必须独立完整，execute 子代理只读这一个文件就能干活\n- 不要依赖其他 task-N.md 的内容\n- 接口定义写到\"搬砖工照着做\"的程度\n- 边界处理至少 5 条\n- 验收标准用表格，禁止笼统表述\n- 写完后用 Write tool 保存到文件\n```\n\n```\n任务编号：task-05\n任务名称：Spec Guardian G5 — 关联组件存在性检查\n文件路径：/Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-05.md\n\n操作：\n1. 读取 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/design.md 和 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/plan.md 了解上下文\n2. 读取相关源文件了解现有代码\n3. 按以下格式编写任务蓝图并保存到 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-05.md：\n\n---\nid: task-05\ntitle: Spec Guardian G5 — 关联组件存在性检查\npriority: P0/P1/P2\nestimated_hours: N\ndepends_on: [task-XX]\nblocks: [task-XX]\nallowed_paths:\n  - ...\n---\n\n# task-05: Spec Guardian G5 — 关联组件存在性检查\n\n## 修改文件（必填）\n- 精确到文件路径\n\n## 实现要求\n1. 具体做什么\n\n## 接口定义（代码类任务必填）\n方法签名、数据结构、控制流伪代码\n\n## 边界处理（必填）\n- null/空值行为\n- 兼容旧行为（brownfield：未配置新功能时行为不变）\n- 异常不静默吞掉（明确返回值或抛出）\n- 不修改传入参数\n- 歧义/冲突场景的处理策略\n\n## 非目标（本任务不做的事）\n- 明确边界，防止 scope creep\n\n## 参考\n- 可参考的模式\n\n## TDD 步骤\n1. 写测试 → 2. 确认失败 → 3. 写代码 → 4. 确认通过 → 5. 回归\n\n## 验收标准\n| # | 验证步骤 | 通过标准 |\n|---|---|---|\n| AC-01 | ... | ... |\n\n关键规则：\n- 必须独立完整，execute 子代理只读这一个文件就能干活\n- 不要依赖其他 task-N.md 的内容\n- 接口定义写到\"搬砖工照着做\"的程度\n- 边界处理至少 5 条\n- 验收标准用表格，禁止笼统表述\n- 写完后用 Write tool 保存到文件\n```\n\n```\n任务编号：task-06\n任务名称：Spec Guardian G7 — 未解决 reject review 检查\n文件路径：/Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-06.md\n\n操作：\n1. 读取 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/design.md 和 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/plan.md 了解上下文\n2. 读取相关源文件了解现有代码\n3. 按以下格式编写任务蓝图并保存到 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-06.md：\n\n---\nid: task-06\ntitle: Spec Guardian G7 — 未解决 reject review 检查\npriority: P0/P1/P2\nestimated_hours: N\ndepends_on: [task-XX]\nblocks: [task-XX]\nallowed_paths:\n  - ...\n---\n\n# task-06: Spec Guardian G7 — 未解决 reject review 检查\n\n## 修改文件（必填）\n- 精确到文件路径\n\n## 实现要求\n1. 具体做什么\n\n## 接口定义（代码类任务必填）\n方法签名、数据结构、控制流伪代码\n\n## 边界处理（必填）\n- null/空值行为\n- 兼容旧行为（brownfield：未配置新功能时行为不变）\n- 异常不静默吞掉（明确返回值或抛出）\n- 不修改传入参数\n- 歧义/冲突场景的处理策略\n\n## 非目标（本任务不做的事）\n- 明确边界，防止 scope creep\n\n## 参考\n- 可参考的模式\n\n## TDD 步骤\n1. 写测试 → 2. 确认失败 → 3. 写代码 → 4. 确认通过 → 5. 回归\n\n## 验收标准\n| # | 验证步骤 | 通过标准 |\n|---|---|---|\n| AC-01 | ... | ... |\n\n关键规则：\n- 必须独立完整，execute 子代理只读这一个文件就能干活\n- 不要依赖其他 task-N.md 的内容\n- 接口定义写到\"搬砖工照着做\"的程度\n- 边界处理至少 5 条\n- 验收标准用表格，禁止笼统表述\n- 写完后用 Write tool 保存到文件\n```\n\n```\n任务编号：task-07\n任务名称：新建 core/audit_hooks.py — SQLAlchemy event hook\n文件路径：/Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-07.md\n\n操作：\n1. 读取 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/design.md 和 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/plan.md 了解上下文\n2. 读取相关源文件了解现有代码\n3. 按以下格式编写任务蓝图并保存到 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-07.md：\n\n---\nid: task-07\ntitle: 新建 core/audit_hooks.py — SQLAlchemy event hook\npriority: P0/P1/P2\nestimated_hours: N\ndepends_on: [task-XX]\nblocks: [task-XX]\nallowed_paths:\n  - ...\n---\n\n# task-07: 新建 core/audit_hooks.py — SQLAlchemy event hook\n\n## 修改文件（必填）\n- 精确到文件路径\n\n## 实现要求\n1. 具体做什么\n\n## 接口定义（代码类任务必填）\n方法签名、数据结构、控制流伪代码\n\n## 边界处理（必填）\n- null/空值行为\n- 兼容旧行为（brownfield：未配置新功能时行为不变）\n- 异常不静默吞掉（明确返回值或抛出）\n- 不修改传入参数\n- 歧义/冲突场景的处理策略\n\n## 非目标（本任务不做的事）\n- 明确边界，防止 scope creep\n\n## 参考\n- 可参考的模式\n\n## TDD 步骤\n1. 写测试 → 2. 确认失败 → 3. 写代码 → 4. 确认通过 → 5. 回归\n\n## 验收标准\n| # | 验证步骤 | 通过标准 |\n|---|---|---|\n| AC-01 | ... | ... |\n\n关键规则：\n- 必须独立完整，execute 子代理只读这一个文件就能干活\n- 不要依赖其他 task-N.md 的内容\n- 接口定义写到\"搬砖工照着做\"的程度\n- 边界处理至少 5 条\n- 验收标准用表格，禁止笼统表述\n- 写完后用 Write tool 保存到文件\n```\n\n```\n任务编号：task-08\n任务名称：get_session 注入 audit_context\n文件路径：/Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-08.md\n\n操作：\n1. 读取 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/design.md 和 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/plan.md 了解上下文\n2. 读取相关源文件了解现有代码\n3. 按以下格式编写任务蓝图并保存到 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-08.md：\n\n---\nid: task-08\ntitle: get_session 注入 audit_context\npriority: P0/P1/P2\nestimated_hours: N\ndepends_on: [task-XX]\nblocks: [task-XX]\nallowed_paths:\n  - ...\n---\n\n# task-08: get_session 注入 audit_context\n\n## 修改文件（必填）\n- 精确到文件路径\n\n## 实现要求\n1. 具体做什么\n\n## 接口定义（代码类任务必填）\n方法签名、数据结构、控制流伪代码\n\n## 边界处理（必填）\n- null/空值行为\n- 兼容旧行为（brownfield：未配置新功能时行为不变）\n- 异常不静默吞掉（明确返回值或抛出）\n- 不修改传入参数\n- 歧义/冲突场景的处理策略\n\n## 非目标（本任务不做的事）\n- 明确边界，防止 scope creep\n\n## 参考\n- 可参考的模式\n\n## TDD 步骤\n1. 写测试 → 2. 确认失败 → 3. 写代码 → 4. 确认通过 → 5. 回归\n\n## 验收标准\n| # | 验证步骤 | 通过标准 |\n|---|---|---|\n| AC-01 | ... | ... |\n\n关键规则：\n- 必须独立完整，execute 子代理只读这一个文件就能干活\n- 不要依赖其他 task-N.md 的内容\n- 接口定义写到\"搬砖工照着做\"的程度\n- 边界处理至少 5 条\n- 验收标准用表格，禁止笼统表述\n- 写完后用 Write tool 保存到文件\n```\n\n```\n任务编号：task-09\n任务名称：Audit hook 单元测试\n文件路径：/Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-09.md\n\n操作：\n1. 读取 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/design.md 和 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/plan.md 了解上下文\n2. 读取相关源文件了解现有代码\n3. 按以下格式编写任务蓝图并保存到 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-09.md：\n\n---\nid: task-09\ntitle: Audit hook 单元测试\npriority: P0/P1/P2\nestimated_hours: N\ndepends_on: [task-XX]\nblocks: [task-XX]\nallowed_paths:\n  - ...\n---\n\n# task-09: Audit hook 单元测试\n\n## 修改文件（必填）\n- 精确到文件路径\n\n## 实现要求\n1. 具体做什么\n\n## 接口定义（代码类任务必填）\n方法签名、数据结构、控制流伪代码\n\n## 边界处理（必填）\n- null/空值行为\n- 兼容旧行为（brownfield：未配置新功能时行为不变）\n- 异常不静默吞掉（明确返回值或抛出）\n- 不修改传入参数\n- 歧义/冲突场景的处理策略\n\n## 非目标（本任务不做的事）\n- 明确边界，防止 scope creep\n\n## 参考\n- 可参考的模式\n\n## TDD 步骤\n1. 写测试 → 2. 确认失败 → 3. 写代码 → 4. 确认通过 → 5. 回归\n\n## 验收标准\n| # | 验证步骤 | 通过标准 |\n|---|---|---|\n| AC-01 | ... | ... |\n\n关键规则：\n- 必须独立完整，execute 子代理只读这一个文件就能干活\n- 不要依赖其他 task-N.md 的内容\n- 接口定义写到\"搬砖工照着做\"的程度\n- 边界处理至少 5 条\n- 验收标准用表格，禁止笼统表述\n- 写完后用 Write tool 保存到文件\n```\n\n```\n任务编号：task-10\n任务名称：全量测试验证\n文件路径：/Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-10.md\n\n操作：\n1. 读取 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/design.md 和 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/plan.md 了解上下文\n2. 读取相关源文件了解现有代码\n3. 按以下格式编写任务蓝图并保存到 /Users/qinyi/SillyHub/.sillyspec/changes/2026-05-30-workflow-state-machine/tasks/task-10.md：\n\n---\nid: task-10\ntitle: 全量测试验证\npriority: P0/P1/P2\nestimated_hours: N\ndepends_on: [task-XX]\nblocks: [task-XX]\nallowed_paths:\n  - ...\n---\n\n# task-10: 全量测试验证\n\n## 修改文件（必填）\n- 精确到文件路径\n\n## 实现要求\n1. 具体做什么\n\n## 接口定义（代码类任务必填）\n方法签名、数据结构、控制流伪代码\n\n## 边界处理（必填）\n- null/空值行为\n- 兼容旧行为（brownfield：未配置新功能时行为不变）\n- 异常不静默吞掉（明确返回值或抛出）\n- 不修改传入参数\n- 歧义/冲突场景的处理策略\n\n## 非目标（本任务不做的事）\n- 明确边界，防止 scope creep\n\n## 参考\n- 可参考的模式\n\n## TDD 步骤\n1. 写测试 → 2. 确认失败 → 3. 写代码 → 4. 确认通过 → 5. 回归\n\n## 验收标准\n| # | 验证步骤 | 通过标准 |\n|---|---|---|\n| AC-01 | ... | ... |\n\n关键规则：\n- 必须独立完整，execute 子代理只读这一个文件就能干活\n- 不要依赖其他 task-N.md 的内容\n- 接口定义写到\"搬砖工照着做\"的程度\n- 边界处理至少 5 条\n- 验收标准用表格，禁止笼统表述\n- 写完后用 Write tool 保存到文件\n```\n\n## 验收\n- 每个 task-N.md 文件存在且非空\n- 包含 YAML frontmatter（id、title、priority、depends_on、blocks、allowed_paths）\n- 包含所有必要章节：修改文件、实现要求、接口定义、边界处理（≥5条）、非目标、TDD 步骤、验收标准（表格格式）\n- 边界处理覆盖：null/空值、兼容性、异常处理、参数不可变、歧义场景",
+          "outputHint": "蓝图生成结果",
+          "optional": false,
+          "completedAt": "2026/05/30 17:18:44",
+          "output": "10个任务蓝图全部生成（task-01~10），每个蓝图包含完整的YAML frontmatter、修改文件、实现要求、接口定义、边界处理（≥5条）、非目标、TDD步骤、验收标准表格。"
+        },
+        {
+          "name": "自检总览",
+          "status": "completed",
+          "completedAt": "2026/05/30 17:18:44",
+          "output": "plan.md 4 Wave 10 任务结构完整，关键路径5.5h，依赖关系DAG无循环。"
+        },
+        {
+          "name": "生成任务蓝图",
+          "status": "completed",
+          "completedAt": "2026/05/30 17:18:44",
+          "output": "task-07~10 蓝图已通过子代理并行生成，含 audit hook、get_session 注入、audit 测试、全量验证。"
+        },
+        {
+          "name": "审查一致性",
+          "status": "completed",
+          "completedAt": "2026/05/30 17:18:44",
+          "output": "一致性审查通过：(A)依赖一致性✅ (B)覆盖完整性✅ design.md 12个文件全部覆盖 (C)接口契约✅ task-07/08/09 接口互相匹配 (D)验收标准完整性✅ 8条全局标准全覆盖。无循环依赖，无遗漏需求。"
+        },
+        {
+          "name": "保存并更新进度",
+          "status": "completed",
+          "completedAt": "2026/05/30 17:18:44",
+          "output": "progress.json 已更新，plan 阶段完成，准备进入 execute。"
+        }
+      ]
+    },
+    "execute": {
+      "status": "pending",
+      "steps": [],
+      "startedAt": null,
+      "completedAt": null
+    },
+    "verify": {
+      "status": "completed",
+      "startedAt": "2026/5/30 18:12:00",
+      "completedAt": "2026/5/30 18:16:51",
+      "steps": [
+        {
+          "name": "状态检查",
+          "status": "completed",
+          "completedAt": "2026/5/30 18:12:06",
+          "output": "当前阶段为 verify，状态正常。brainstorm 10/10 完成，plan 8/8 完成，execute 已完成，进入 verify 阶段。"
+        },
+        {
+          "name": "加载规范并锚定",
+          "status": "completed",
+          "completedAt": "2026/5/30 18:12:39",
+          "output": "规范文件加载确认：(1) proposal.md ✅ 存在，含动机/3痛点/4变更范围/成功标准 (2) design.md ✅ 存在，含3个AD/12文件变更/Guard规则列表/风险登记 (3) tasks.md ✅ 存在，4 Wave 10 任务 (4) requirements.md ✅ 存在，7个FR/非功能需求 (5) plan.md ✅ 存在，含Wave分组/依赖DAG/验收标准。项…"
+        },
+        {
+          "name": "逐项检查任务",
+          "status": "completed",
+          "completedAt": "2026/5/30 18:13:53",
+          "output": "任务完成度 10/10 (100%)：T1修复测试 ✅ T2 datetime清理 ✅ T3 word_count字段+migration ✅ T4 G4文档字数3测试 ✅ T5 G5组件存在性3测试 ✅ T6 G7未解决review3测试 ✅ T7 audit_hooks.py ✅ T8 get_session注入 ✅ T9 test_audit_hooks ✅ T10 全量608测试通过"
+        },
+        {
+          "name": "对照设计检查",
+          "status": "completed",
+          "completedAt": "2026/5/30 18:14:44",
+          "output": "探针报告 + 设计一致性检查结果：\n\n【探针1 未实现标记】✅ 无 TODO/FIXME/HACK 标记\n\n【探针2 关键词覆盖】✅ 10/12关键词命中。⚠️ audit_skip 未实现（FR-04要求session级跳过机制）。⚠️ check_no_unresolved_reviews 函数名为_check_no_unresolved_reject（功能一致，命名差异）\n\n【探针3 测试覆…"
+        },
+        {
+          "name": "任务蓝图验收",
+          "status": "completed",
+          "completedAt": "2026/5/30 18:15:07",
+          "output": "任务蓝图验收结果：通过。10个task蓝图均包含验收标准（table格式），格式一致。task-01(4个AC) task-02(6个AC) task-03(6个AC) task-04(6个AC) task-05(6个AC) task-06(6个AC) task-07(10个AC) task-08(10个AC) task-09(10个AC) task-10(4个AC)。所有AC描述清晰、可验证。无…"
+        },
+        {
+          "name": "运行测试和质量扫描",
+          "status": "completed",
+          "completedAt": "2026/5/30 18:16:27",
+          "output": "测试结果：变更模块108 passed(0 failed), 全量608 passed(0 failed) ✅。耗时45.82s。技术债务：变更文件0个TODO/FIXME/HACK/XXX标记。DeprecationWarning备注：auth/model.py, workspace/model.py, workspace/service.py, change/parser.py, worktr…"
+        },
+        {
+          "name": "输出验证报告",
+          "status": "completed",
+          "completedAt": "2026/5/30 18:16:51",
+          "output": "验证报告已生成：.sillyspec/changes/2026-05-30-workflow-state-machine/verification.md。结论：PASS WITH NOTES。10/10任务完成，12/12文件齐全，608测试全绿。唯一遗漏：audit_skip机制(P2级别)。下一步：sillyspec run archive"
+        }
+      ]
+    },
+    "archive": {
+      "status": "completed",
+      "startedAt": "2026/5/30 18:16:57",
+      "completedAt": "2026/5/30 19:00:00",
+      "steps": [
+        {
+          "name": "任务完成度检查",
+          "status": "completed",
+          "completedAt": "2026/5/30 19:00:05",
+          "output": "10/10 任务完成，608 passed 0 failed，验证报告 PASS WITH NOTES"
+        },
+        {
+          "name": "extract-module-impact",
+          "status": "completed",
+          "completedAt": "2026/5/30 19:00:10",
+          "output": "6 个模块受影响：core/change/task/workflow/migrations/conftest。15 files +1036 lines"
+        },
+        {
+          "name": "sync-module-docs",
+          "status": "completed",
+          "completedAt": "2026/5/30 19:00:12",
+          "output": "无现有模块文档，跳过同步。影响信息记录在归档 MASTER.md"
+        },
+        {
+          "name": "确认归档",
+          "status": "completed",
+          "completedAt": "2026/5/30 19:00:15",
+          "output": "MASTER.md 已生成，归档至 .sillyspec/changes/archive/2026-05-30-workflow-state-machine/"
+        },
+        {
+          "name": "更新路线图和提交",
+          "status": "completed",
+          "completedAt": "2026/5/30 19:00:20",
+          "output": "无 ROADMAP.md（首次归档），合并 worktree 到 main 并提交"
+        }
+      ]
+    },
+    "quick": {
+      "status": "pending",
+      "steps": [],
+      "startedAt": null,
+      "completedAt": null
+    },
+    "explore": {
+      "status": "pending",
+      "steps": [],
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  "lastActive": "2026/5/30 19:00:20"
+}

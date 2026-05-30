@@ -1,0 +1,177 @@
+<!--
+author: qinyi
+created_at: 2026-05-30T09:00:00
+-->
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Workflow State Machine — FSM Diagrams</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'SF Mono', monospace; background: #1a1a2e; color: #e0e0e0; padding: 2rem; }
+  h1 { color: #00d2ff; margin-bottom: 0.5rem; }
+  h2 { color: #7b61ff; margin: 1.5rem 0 0.5rem; font-size: 1.1rem; }
+  .subtitle { color: #888; margin-bottom: 2rem; font-size: 0.85rem; }
+  .diagram { background: #16213e; border: 1px solid #0f3460; border-radius: 8px; padding: 1.5rem; margin: 1rem 0 2rem; overflow-x: auto; }
+  .state { display: inline-block; background: #0f3460; color: #00d2ff; padding: 0.4rem 0.8rem; border-radius: 4px; margin: 0.2rem; cursor: pointer; transition: all 0.2s; font-size: 0.85rem; }
+  .state:hover { background: #1a4a8a; transform: scale(1.05); }
+  .state.terminal { background: #2d1b4e; color: #a855f7; border: 1px solid #a855f7; }
+  .state.start { background: #1b4332; color: #4ade80; border: 1px solid #4ade80; }
+  .arrow { color: #555; display: inline; margin: 0 0.3rem; }
+  .arrow.rej { color: #ef4444; }
+  pre { color: #aaa; font-size: 0.8rem; line-height: 1.6; }
+  .flow-row { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem; margin: 0.3rem 0; }
+  .guard-box { background: #1e1e3a; border-left: 3px solid #f59e0b; padding: 0.5rem 1rem; margin: 0.3rem 0; font-size: 0.8rem; }
+  .guard-box .label { color: #f59e0b; font-weight: bold; }
+  .audit-box { background: #1e1e3a; border-left: 3px solid #22c55e; padding: 0.5rem 1rem; margin: 0.3rem 0; font-size: 0.8rem; }
+  .audit-box .label { color: #22c55e; font-weight: bold; }
+  table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; font-size: 0.8rem; }
+  th, td { border: 1px solid #0f3460; padding: 0.4rem 0.6rem; text-align: left; }
+  th { background: #0f3460; color: #00d2ff; }
+  td { color: #ccc; }
+  .badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.7rem; }
+  .badge.new { background: #4ade80; color: #000; }
+  .badge.existing { background: #555; color: #ccc; }
+  .legend { margin: 1rem 0; font-size: 0.8rem; }
+  .legend span { margin-right: 1rem; }
+</style>
+</head>
+<body>
+
+<h1>Workflow State Machine</h1>
+<p class="subtitle">2026-05-30-workflow-state-machine — Goal 4, Task 13</p>
+
+<div class="legend">
+  <span><span class="badge existing">EXISTING</span> 已实现</span>
+  <span><span class="badge new">NEW</span> 本次新增</span>
+</div>
+
+<!-- ==================== Change FSM ==================== -->
+<h2>1. Change FSM — 状态转移图</h2>
+<div class="diagram">
+  <div class="flow-row">
+    <span class="state start">draft</span>
+    <span class="arrow">→</span>
+    <span class="state">proposed</span>
+    <span class="arrow">→</span>
+    <span class="state">reviewed</span>
+    <span class="arrow">→</span>
+    <span class="state">approved</span>
+    <span class="arrow">→</span>
+    <span class="state">in_progress</span>
+    <span class="arrow">→</span>
+    <span class="state">completed</span>
+    <span class="arrow">→</span>
+    <span class="state terminal">merged</span>
+  </div>
+  <div class="flow-row" style="margin-left: 2rem;">
+    <span class="arrow rej">↘ rejected</span>
+    <span class="arrow rej">→</span>
+    <span class="state start">draft</span>
+    <span style="color:#666; font-size:0.75rem;">(rework loop)</span>
+  </div>
+
+  <h2 style="margin-top:1rem;">Guard Rules（前置条件检查）</h2>
+  <table>
+    <tr><th>Transition</th><th>Rule</th><th>Status</th></tr>
+    <tr><td>draft → proposed</td><td>MASTER.md exists</td><td><span class="badge existing">EXISTING</span></td></tr>
+    <tr><td>proposed → reviewed</td><td>Proposal exists</td><td><span class="badge existing">EXISTING</span></td></tr>
+    <tr><td>reviewed → approved</td><td>Requirements + Design exist</td><td><span class="badge existing">EXISTING</span></td></tr>
+    <tr><td>reviewed → approved</td><td>All docs word_count ≥ 100</td><td><span class="badge new">NEW</span></td></tr>
+    <tr><td>reviewed → approved</td><td>affected_components all exist</td><td><span class="badge new">NEW</span></td></tr>
+    <tr><td>approved → in_progress</td><td>Plan exists</td><td><span class="badge existing">EXISTING</span></td></tr>
+    <tr><td>approved → in_progress</td><td>No unresolved reject reviews</td><td><span class="badge new">NEW</span></td></tr>
+    <tr><td>in_progress → completed</td><td>(none)</td><td><span class="badge existing">EXISTING</span></td></tr>
+    <tr><td>completed → merged</td><td>(none)</td><td><span class="badge existing">EXISTING</span></td></tr>
+  </table>
+</div>
+
+<!-- ==================== Task FSM ==================== -->
+<h2>2. Task FSM — 状态转移图</h2>
+<div class="diagram">
+  <div class="flow-row">
+    <span class="state start">draft</span>
+    <span class="arrow">→</span>
+    <span class="state">ready</span>
+    <span class="arrow">→</span>
+    <span class="state">in_progress</span>
+    <span class="arrow">→</span>
+    <span class="state">review</span>
+    <span class="arrow">→</span>
+    <span class="state terminal">done</span>
+  </div>
+  <div class="flow-row" style="margin-left: 10rem;">
+    <span class="arrow rej">↕ blocked</span>
+  </div>
+  <div class="flow-row" style="margin-left: 5rem;">
+    <span class="arrow rej">↘ cancelled (from: ready, in_progress, blocked)</span>
+  </div>
+</div>
+
+<!-- ==================== Audit Hook Architecture ==================== -->
+<h2>3. Audit Hook — 自动审计架构</h2>
+<div class="diagram">
+  <pre>
+┌─────────────────────────────────────────────────────────┐
+│                    FastAPI Request                       │
+│  get_current_user → request.state.user                  │
+│  get_session → session.info["audit_context"] = {...}    │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│              SQLAlchemy Session Events                   │
+│  after_insert / after_update / after_delete              │
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │ audit_hooks.py                                   │    │
+│  │  • Read session.info["audit_context"]            │    │
+│  │  • Skip AuditLog model (no recursion)            │    │
+│  │  • Create AuditLog entry automatically           │    │
+│  └─────────────────────────────────────────────────┘    │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│                    audit_logs table                      │
+│  id | actor_id | action | resource_type | resource_id   │
+│     | details_json | timestamp                          │
+└─────────────────────────────────────────────────────────┘
+  </pre>
+  <div class="audit-box">
+    <span class="label">Auto-covered models:</span>
+    Change, ChangeDocument, Task, Workspace, User, AgentRun,
+    Release, Incident, WorktreeLease, PlatformSetting, ...
+  </div>
+</div>
+
+<!-- ==================== Review Flow ==================== -->
+<h2>4. Review + Reject Flow</h2>
+<div class="diagram">
+  <pre>
+  Reviewer submits review (approve / reject)
+       │
+       ├── verdict = "approve"
+       │     └── Review record saved, no auto-transition
+       │
+       └── verdict = "reject"
+             ├── If FSM allows → rejected state (auto-transition)
+             └── Review record saved with comment (reason)
+                    │
+                    └── Change can be reworked:
+                        rejected → draft → proposed → ... (restart)
+  </pre>
+</div>
+
+<script>
+// Highlight clicked states
+document.querySelectorAll('.state').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.state').forEach(s => s.style.outline = 'none');
+    el.style.outline = '2px solid #fff';
+  });
+});
+</script>
+</body>
+</html>
