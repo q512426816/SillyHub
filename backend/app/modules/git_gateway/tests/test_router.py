@@ -295,3 +295,183 @@ async def test_git_failure_returns_log_with_nonzero(client, db_session, mock_rep
     assert resp.status_code == 200
     body = resp.json()
     assert body["result_code"] == 128
+
+
+async def test_push_to_main_rejected(client, db_session, mock_repo_dir):
+    refs = await _setup_active_lease(db_session)
+    resp = await client.post(
+        f"/api/worktrees/{refs['lease_id']}/git",
+        json={"operation": "push", "args": ["origin", "main"]},
+        headers=_auth(refs["token"]),
+    )
+    assert resp.status_code == 403
+    assert "protected" in resp.json()["message"].lower()
+
+
+async def test_push_to_master_rejected(client, db_session, mock_repo_dir):
+    refs = await _setup_active_lease(db_session)
+    resp = await client.post(
+        f"/api/worktrees/{refs['lease_id']}/git",
+        json={"operation": "push", "args": ["origin", "master"]},
+        headers=_auth(refs["token"]),
+    )
+    assert resp.status_code == 403
+
+
+async def test_shell_injection_rejected(client, db_session, mock_repo_dir):
+    refs = await _setup_active_lease(db_session)
+    resp = await client.post(
+        f"/api/worktrees/{refs['lease_id']}/git",
+        json={"operation": "commit", "args": ["-m", "$(whoami)"]},
+        headers=_auth(refs["token"]),
+    )
+    assert resp.status_code == 403
+
+
+async def test_git_env_injected_with_identity(client, db_session, mock_repo_dir):
+    """When user has a GitIdentity with git_username/git_email, env vars are passed."""
+    refs = await _setup_active_lease(db_session)
+
+    # Update the identity to have username/email
+    from sqlalchemy import select
+    from app.modules.git_identity.model import GitIdentity
+
+    stmt = select(GitIdentity).where(GitIdentity.id == refs["identity_id"])
+    identity = (await db_session.execute(stmt)).scalars().first()
+    identity.git_username = "TestUser"
+    identity.git_email = "test@example.com"
+    await db_session.commit()
+
+    with patch("app.modules.git_gateway.service.asyncio.create_subprocess_exec") as mock_exec:
+        proc = AsyncMock()
+        proc.communicate = AsyncMock(return_value=(b"ok\n", b""))
+        proc.returncode = 0
+        mock_exec.return_value = proc
+
+        resp = await client.post(
+            f"/api/worktrees/{refs['lease_id']}/git",
+            json={"operation": "status", "args": []},
+            headers=_auth(refs["token"]),
+        )
+    assert resp.status_code == 200
+
+    # Verify env was passed to subprocess
+    call_kwargs = mock_exec.call_args.kwargs
+    assert "env" in call_kwargs
+    env = call_kwargs["env"]
+    assert env["GIT_AUTHOR_NAME"] == "TestUser"
+    assert env["GIT_AUTHOR_EMAIL"] == "test@example.com"
+    assert env["GIT_COMMITTER_NAME"] == "TestUser"
+    assert env["GIT_COMMITTER_EMAIL"] == "test@example.com"
+
+
+async def test_git_env_defaults_without_identity(client, db_session, mock_repo_dir):
+    """When user has no usable GitIdentity, default identity env vars are used."""
+    refs = await _setup_active_lease(db_session)
+
+    # Revoke the identity so none is usable
+    from sqlalchemy import select
+    from app.modules.git_identity.model import GitIdentity
+    from datetime import datetime
+
+    stmt = select(GitIdentity).where(GitIdentity.id == refs["identity_id"])
+    identity = (await db_session.execute(stmt)).scalars().first()
+    identity.revoked_at = datetime.utcnow()
+    await db_session.commit()
+
+    with patch("app.modules.git_gateway.service.asyncio.create_subprocess_exec") as mock_exec:
+        proc = AsyncMock()
+        proc.communicate = AsyncMock(return_value=(b"ok\n", b""))
+        proc.returncode = 0
+        mock_exec.return_value = proc
+
+        resp = await client.post(
+            f"/api/worktrees/{refs['lease_id']}/git",
+            json={"operation": "status", "args": []},
+            headers=_auth(refs["token"]),
+        )
+    assert resp.status_code == 200
+
+    call_kwargs = mock_exec.call_args.kwargs
+    env = call_kwargs["env"]
+    assert env["GIT_AUTHOR_NAME"] == "SillyHub Agent"
+    assert env["GIT_AUTHOR_EMAIL"] == "agent@sillyhub.local"
+
+
+async def test_list_git_operations_empty(client, db_session):
+    refs = await _setup_active_lease(db_session)
+    resp = await client.get(
+        "/api/git/operations",
+        headers=_auth(refs["token"]),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 0
+    assert body["items"] == []
+    assert body["page"] == 1
+    assert body["page_size"] == 20
+
+
+async def test_list_git_operations_with_data(client, db_session, mock_repo_dir):
+    refs = await _setup_active_lease(db_session)
+
+    # Create a log entry via the execute endpoint
+    with patch("app.modules.git_gateway.service.asyncio.create_subprocess_exec") as mock_exec:
+        proc = AsyncMock()
+        proc.communicate = AsyncMock(return_value=(b"ok\n", b""))
+        proc.returncode = 0
+        mock_exec.return_value = proc
+
+        await client.post(
+            f"/api/worktrees/{refs['lease_id']}/git",
+            json={"operation": "status", "args": []},
+            headers=_auth(refs["token"]),
+        )
+
+    # Now list
+    resp = await client.get(
+        "/api/git/operations",
+        headers=_auth(refs["token"]),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] >= 1
+    assert len(body["items"]) >= 1
+    item = body["items"][0]
+    assert item["operation"] == "status"
+    assert item["workspace_id"] == str(refs["ws_id"])
+    assert item["lease_id"] == str(refs["lease_id"])
+
+
+async def test_list_git_operations_filter_by_workspace(client, db_session, mock_repo_dir):
+    refs = await _setup_active_lease(db_session)
+
+    resp = await client.get(
+        f"/api/git/operations?workspace_id={refs['ws_id']}",
+        headers=_auth(refs["token"]),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 0
+
+
+async def test_list_git_operations_filter_by_lease(client, db_session, mock_repo_dir):
+    refs = await _setup_active_lease(db_session)
+
+    resp = await client.get(
+        f"/api/git/operations?lease_id={refs['lease_id']}",
+        headers=_auth(refs["token"]),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 0
+
+
+async def test_list_git_operations_pagination(client, db_session):
+    refs = await _setup_active_lease(db_session)
+    resp = await client.get(
+        "/api/git/operations?page=1&page_size=5",
+        headers=_auth(refs["token"]),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["page"] == 1
+    assert body["page_size"] == 5
