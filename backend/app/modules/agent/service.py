@@ -585,8 +585,9 @@ class AgentService:
         ))
         await self._session.commit()
 
-        # -- 6. Execute agent --------------------------------------------------
-        await self._execute_stage_run(
+        # -- 6. Execute agent (fire-and-forget) --------------------------------
+        import asyncio
+        asyncio.create_task(self._execute_stage_run(
             run_id=run.id,
             prompt=prompt,
             work_dir=work_dir,
@@ -595,9 +596,9 @@ class AgentService:
             change_id=change_id,
             user_id=user_id,
             stage=stage,
-        )
+        ))
 
-        await self._session.refresh(run)
+        # Return immediately — caller can poll agent-status for progress
         return run
 
     async def _try_acquire_lease(
@@ -658,100 +659,108 @@ class AgentService:
         user_id: uuid.UUID,
         stage: str,
     ) -> None:
-        """Execute a stage-level agent run."""
-        run = await self._session.get(AgentRun, run_id)
-        if run is None:
-            log.error("stage_run_missing", run_id=str(run_id))
-            return
+        """Execute a stage-level agent run (runs in background task).
 
-        adapter_cls = ADAPTERS.get("claude_code")
-        if adapter_cls is None:
-            run.status = "failed"
-            run.finished_at = datetime.utcnow()
-            run.exit_code = 1
-            run.output_redacted = "Unknown agent type."
-            self._session.add(run)
-            await self._session.commit()
-            return
-
-        # Mark running
-        run.status = "running"
-        run.started_at = datetime.utcnow()
-        self._session.add(run)
-        await self._session.commit()
-
-        # Build a minimal bundle for the adapter
+        Uses an independent DB session since we are called via
+        ``asyncio.create_task`` and the parent request's session may be
+        closed already.
+        """
+        from app.core.db import get_session_factory
         from app.modules.agent.base import AgentSpecBundle
 
-        bundle = AgentSpecBundle(
-            change_summary=f"Change stage: {stage}",
-            task_key=f"stage:{stage}",
-            task_title=f"Stage dispatch: {stage}",
-        )
+        factory = get_session_factory()
+        async with factory() as session:
+            run = await session.get(AgentRun, run_id)
+            if run is None:
+                log.error("stage_run_missing", run_id=str(run_id))
+                return
 
-        # Ensure work directory exists
-        work_dir.mkdir(parents=True, exist_ok=True)
-        if read_only:
-            claude_md = (
-                f"# Stage Dispatch: {stage}\n\n"
-                f"{prompt}\n\n"
-                f"## Mode: READ-ONLY\n"
-                f"Do NOT modify any files. Only analyze and report.\n"
+            adapter_cls = ADAPTERS.get("claude_code")
+            if adapter_cls is None:
+                run.status = "failed"
+                run.finished_at = datetime.utcnow()
+                run.exit_code = 1
+                run.output_redacted = "Unknown agent type."
+                session.add(run)
+                await session.commit()
+                return
+
+            # Mark running
+            run.status = "running"
+            run.started_at = datetime.utcnow()
+            session.add(run)
+            await session.commit()
+
+            # Build a minimal bundle for the adapter
+            bundle = AgentSpecBundle(
+                change_summary=f"Change stage: {stage}",
+                task_key=f"stage:{stage}",
+                task_title=f"Stage dispatch: {stage}",
             )
-        else:
-            claude_md = (
-                f"# Stage Dispatch: {stage}\n\n"
-                f"{prompt}\n\n"
-                f"## Mode: WRITE\n"
-                f"You may modify files in the worktree as needed.\n"
-            )
-        (work_dir / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
 
-        adapter = adapter_cls()
-        result = await adapter.run_with_bundle(run_id, bundle, work_dir)
-
-        # Update run record
-        run.status = "completed" if result.exit_code == 0 else "failed"
-        run.finished_at = datetime.utcnow()
-        run.exit_code = result.exit_code
-        run.output_redacted = result.redacted_output[:10000]
-        self._session.add(run)
-
-        # Log stdout/stderr
-        for channel, content in [
-            ("stdout", result.stdout),
-            ("stderr", result.stderr),
-        ]:
-            if content:
-                log_entry = AgentRunLog(
-                    id=uuid.uuid4(),
-                    run_id=run.id,
-                    channel=channel,
-                    content_redacted=redact_agent_output(content)[:5000],
+            # Ensure work directory exists
+            work_dir.mkdir(parents=True, exist_ok=True)
+            if read_only:
+                claude_md = (
+                    f"# Stage Dispatch: {stage}\n\n"
+                    f"{prompt}\n\n"
+                    f"## Mode: READ-ONLY\n"
+                    f"Do NOT modify any files. Only analyze and report.\n"
                 )
-                self._session.add(log_entry)
+            else:
+                claude_md = (
+                    f"# Stage Dispatch: {stage}\n\n"
+                    f"{prompt}\n\n"
+                    f"## Mode: WRITE\n"
+                    f"You may modify files in the worktree as needed.\n"
+                )
+            (work_dir / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
 
-        # Write audit log
-        from app.modules.workflow.model import AuditLog
+            adapter = adapter_cls()
+            result = await adapter.run_with_bundle(run_id, bundle, work_dir)
 
-        audit = AuditLog(
-            id=uuid.uuid4(),
-            workspace_id=workspace_id,
-            actor_id=user_id,
-            action="agent.stage_dispatch",
-            resource_type="agent_run",
-            resource_id=run.id,
-            details_json=json.dumps({
-                "change_id": str(change_id),
-                "stage": stage,
-                "agent_type": "claude_code",
-                "exit_code": result.exit_code,
-                "read_only": read_only,
-            }),
-        )
-        self._session.add(audit)
+            # Update run record
+            run.status = "completed" if result.exit_code == 0 else "failed"
+            run.finished_at = datetime.utcnow()
+            run.exit_code = result.exit_code
+            run.output_redacted = result.redacted_output[:10000]
+            session.add(run)
 
-        await self._session.commit()
+            # Log stdout/stderr
+            for channel, content in [
+                ("stdout", result.stdout),
+                ("stderr", result.stderr),
+            ]:
+                if content:
+                    log_entry = AgentRunLog(
+                        id=uuid.uuid4(),
+                        run_id=run.id,
+                        channel=channel,
+                        content_redacted=redact_agent_output(content)[:5000],
+                    )
+                    session.add(log_entry)
+
+            # Write audit log
+            from app.modules.workflow.model import AuditLog
+
+            audit = AuditLog(
+                id=uuid.uuid4(),
+                workspace_id=workspace_id,
+                actor_id=user_id,
+                action="agent.stage_dispatch",
+                resource_type="agent_run",
+                resource_id=run.id,
+                details_json=json.dumps({
+                    "change_id": str(change_id),
+                    "stage": stage,
+                    "agent_type": "claude_code",
+                    "exit_code": result.exit_code,
+                    "read_only": read_only,
+                }),
+            )
+            session.add(audit)
+
+            await session.commit()
 
     async def _get_workspace_root(self, workspace_id: uuid.UUID) -> str:
         """Get the root_path of a workspace."""

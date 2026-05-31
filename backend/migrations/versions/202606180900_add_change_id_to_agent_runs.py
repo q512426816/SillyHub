@@ -1,7 +1,7 @@
 """add change_id to agent_runs
 
 Revision ID: 202606180900
-Revises: 4d9236aa3abb
+Revises: 202606170900
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "202606180900"
-down_revision = "4d9236aa3abb"
+down_revision = "202606170900"
 branch_labels = None
 depends_on = None
 

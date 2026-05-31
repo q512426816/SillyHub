@@ -12,11 +12,14 @@ export interface ReviewEntry {
 export function transitionChange(
   workspaceId: string,
   changeId: string,
-  targetStatus: string,
+  targetStage: string,
+  reason?: string,
 ) {
+  const body: Record<string, unknown> = { target_stage: targetStage };
+  if (reason !== undefined) body.reason = reason;
   return apiFetch<{ id: string; status: string }>(
     `/api/workspaces/${workspaceId}/changes/${changeId}/transition`,
-    { method: "POST", json: { target: targetStatus } },
+    { method: "POST", json: body },
   );
 }
 
