@@ -691,30 +691,40 @@ class AgentService:
             session.add(run)
             await session.commit()
 
-            # Build a minimal bundle for the adapter
+            # ── 构建包含阶段 prompt 的完整 bundle ──
+            # 将阶段 prompt 嵌入 task_markdown，让 render_bundle_to_claude_md
+            # 将其作为 "Task" section inline 到 CLAUDE.md 中
+            mode_suffix = (
+                "\n\n## Mode: READ-ONLY\n"
+                "Do NOT modify any files. Only analyze and report.\n"
+                if read_only
+                else "\n\n## Mode: WRITE\n"
+                "You may modify files in the worktree as needed.\n"
+            )
+
             bundle = AgentSpecBundle(
                 change_summary=f"Change stage: {stage}",
                 task_key=f"stage:{stage}",
                 task_title=f"Stage dispatch: {stage}",
+                # ★ 关键：将阶段 prompt + 模式标记嵌入 task_markdown
+                # render_bundle_to_claude_md 会将其作为 ## Task section 输出
+                task_markdown=prompt + mode_suffix,
+                # 通过 platform_metadata 传递 stage 上下文（供 adapter / task-06 使用）
+                platform_metadata={
+                    "stage_dispatch": True,
+                    "stage": stage,
+                    "read_only": read_only,
+                    "change_id": str(change_id),
+                    "workspace_id": str(workspace_id),
+                },
+                available_tools=["sillyspec"],
             )
 
             # Ensure work directory exists
             work_dir.mkdir(parents=True, exist_ok=True)
-            if read_only:
-                claude_md = (
-                    f"# Stage Dispatch: {stage}\n\n"
-                    f"{prompt}\n\n"
-                    f"## Mode: READ-ONLY\n"
-                    f"Do NOT modify any files. Only analyze and report.\n"
-                )
-            else:
-                claude_md = (
-                    f"# Stage Dispatch: {stage}\n\n"
-                    f"{prompt}\n\n"
-                    f"## Mode: WRITE\n"
-                    f"You may modify files in the worktree as needed.\n"
-                )
-            (work_dir / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
+
+            # ──（已移除）直接写 CLAUDE.md ──
+            # CLAUDE.md 现在由 adapter.run_with_bundle() 内部统一渲染和写入
 
             adapter = adapter_cls()
             result = await adapter.run_with_bundle(run_id, bundle, work_dir)

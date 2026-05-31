@@ -39,6 +39,50 @@ def _build_stream_input(prompt: str) -> bytes:
     return json.dumps(payload, ensure_ascii=False).encode() + b"\n"
 
 
+def _build_stage_dispatch_prompt(bundle: AgentSpecBundle) -> str:
+    """为 stage_dispatch 模式生成明确的 SillySpec 阶段执行 prompt。
+
+    Args:
+        bundle: 已包含 stage_dispatch=True 的 AgentSpecBundle，
+                必须包含 stage 和 change_key 字段。
+
+    Returns:
+        完整的阶段执行 prompt 字符串。
+    """
+    stage = bundle.stage or "unknown"
+    change_key = bundle.change_key or "unknown"
+
+    if bundle.stage is None:
+        log.warning("stage_dispatch_missing_stage", change_key=bundle.change_key)
+    if bundle.change_key is None:
+        log.warning("stage_dispatch_missing_change_key", stage=bundle.stage)
+
+    prompt = (
+        f"你是 SillySpec {stage} 阶段的执行者。\n\n"
+        f"## 任务\n"
+        f"为变更 {change_key} 完成 SillySpec {stage} 阶段。\n\n"
+        f"## 执行步骤\n"
+        f"1. 运行 `sillyspec run {stage} --change {change_key}`\n"
+        f"2. 阅读当前 step 的 prompt\n"
+        f"3. 按 prompt 完成工作\n"
+        f"4. `sillyspec run {stage} --done --change {change_key} --input '...' --output '...'`\n"
+        f"5. 重复直到所有步骤完成\n\n"
+        f"## 规则\n"
+        f"- 所有文档写入 `.sillyspec/changes/{change_key}/`\n"
+        f"- 只产出文档，禁止改代码\n"
+        f"- 文档头部 author + created_at\n"
+        f"- 每步完成立即 --done\n"
+    )
+
+    if bundle.read_only:
+        prompt += "\n## 模式: READ-ONLY\nDo NOT modify any files. Only analyze and report.\n"
+
+    if bundle.step_prompt is not None:
+        prompt += f"\n## 当前步骤 Prompt\n{bundle.step_prompt}\n"
+
+    return prompt
+
+
 def _parse_stream_events(raw_stdout: str) -> list[dict]:
     """Parse stream-json stdout into structured event list."""
     events: list[dict] = []
@@ -138,19 +182,27 @@ class ClaudeCodeAdapter(AgentAdapter):
         claude_md = render_bundle_to_claude_md(bundle)
         (lease_path / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
 
-        prompt = (
-            f"Implement task {bundle.task_key}: {bundle.task_title}.\n"
-            f"Change: {bundle.change_summary}.\n"
-            "Read CLAUDE.md for full spec context before starting."
-        )
-
-        if "sillyspec" in bundle.available_tools:
-            prompt += (
-                "\n\nYou have access to the `sillyspec` CLI tool. "
-                "Use it to generate spec files instead of writing them directly. "
-                "Commands: `sillyspec init --dir <path>`, `sillyspec run scan --dir <path>`. "
-                "The spec root directory is where .sillyspec/ structure should be created."
+        if getattr(bundle, 'stage_dispatch', False):
+            prompt = _build_stage_dispatch_prompt(bundle)
+            log.info(
+                "stage_dispatch_prompt",
+                stage=bundle.stage,
+                change_key=bundle.change_key,
             )
+        else:
+            prompt = (
+                f"Implement task {bundle.task_key}: {bundle.task_title}.\n"
+                f"Change: {bundle.change_summary}.\n"
+                "Read CLAUDE.md for full spec context before starting."
+            )
+
+            if "sillyspec" in bundle.available_tools:
+                prompt += (
+                    "\n\nYou have access to the `sillyspec` CLI tool. "
+                    "Use it to generate spec files instead of writing them directly. "
+                    "Commands: `sillyspec init --dir <path>`, `sillyspec run scan --dir <path>`. "
+                    "The spec root directory is where .sillyspec/ structure should be created."
+                )
 
         cmd = [
             _CLAUDE_CLI,

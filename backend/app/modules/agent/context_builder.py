@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from app.core.errors import ChangeNotFound, WorkspaceNotFound
 from app.core.logging import get_logger
 from app.modules.agent.base import AgentSpecBundle, TaskContext, WorkspaceSpecSummary
 from app.modules.change.model import Change, ChangeDocument
@@ -308,6 +309,110 @@ async def build_spec_bundle(
         spec_strategy=bundle.spec_strategy,
         profile_version=bundle.profile_version,
         doc_types=list(doc_content.keys()),
+    )
+    return bundle
+
+
+# ---------------------------------------------------------------------------
+# Stage-level bundle builder
+# ---------------------------------------------------------------------------
+
+
+async def build_stage_bundle(
+    session: AsyncSession,
+    change_id: uuid.UUID,
+    stage: str,
+    workspace_id: uuid.UUID,
+    *,
+    read_only: bool = False,
+    step_prompt: str | None = None,
+) -> AgentSpecBundle:
+    """构造阶段级 AgentSpecBundle，用于 SillySpec 阶段调度。
+
+    Args:
+        session: 异步数据库会话。
+        change_id: 变更 ID。
+        stage: 目标 SillySpec 阶段名称（如 "propose"、"plan"）。
+        workspace_id: 工作区 ID。
+        read_only: 是否只读模式。默认 False。
+        step_prompt: SillySpec CLI 当前 step 输出的 prompt。默认 None。
+
+    Returns:
+        完整的 AgentSpecBundle，stage_dispatch=True。
+
+    Raises:
+        WorkspaceNotFound: workspace_id 对应的 Workspace 不存在。
+        ChangeNotFound: change_id 对应的 Change 记录不存在。
+    """
+    # Step 1 — 校验 Workspace 存在性
+    workspace = await session.get(Workspace, workspace_id)
+    if workspace is None:
+        raise WorkspaceNotFound(f"Workspace '{workspace_id}' not found.")
+
+    # Step 2 — 加载 Change 记录
+    change = await session.get(Change, change_id)
+    if change is None:
+        raise ChangeNotFound(f"Change '{change_id}' not found.")
+
+    # Step 3 — 加载已有文档内容
+    stmt = select(ChangeDocument).where(
+        col(ChangeDocument.change_id) == change_id,
+        col(ChangeDocument.exists).is_(True),
+    )
+    docs = list((await session.execute(stmt)).scalars().all())
+
+    doc_content: dict[str, str | None] = {}
+    for doc in docs:
+        doc_content[doc.doc_type] = _read_file_safe(doc.path)
+
+    # Step 4 — 读取 spec_root 路径
+    sw_stmt = select(SpecWorkspace).where(
+        col(SpecWorkspace.workspace_id) == workspace_id,
+    )
+    spec_ws = (await session.execute(sw_stmt)).scalar_one_or_none()
+    spec_root: str | None = spec_ws.spec_root if spec_ws else None
+
+    # Step 5 — 组装 AgentSpecBundle
+    bundle = AgentSpecBundle(
+        # 核心 context
+        change_summary=change.title or change.change_key,
+        task_key=f"stage:{stage}",
+        task_title=f"Stage dispatch: {stage}",
+        # 已有文档内容
+        proposal=doc_content.get("proposal"),
+        requirements=doc_content.get("requirements"),
+        design=doc_content.get("design"),
+        plan=doc_content.get("plan"),
+        task_markdown=doc_content.get("tasks"),
+        # 约束（阶段级调度无 task 级 allowed_paths）
+        allowed_paths=[],
+        denied_paths=[],
+        # 工具
+        available_tools=["sillyspec"],
+        # 元数据
+        platform_metadata={
+            "workspace_id": str(workspace_id),
+            "change_id": str(change_id),
+            "change_key": change.change_key,
+            "stage": stage,
+        },
+        # Stage dispatch 扩展字段（task-02 新增）
+        stage_dispatch=True,
+        change_key=change.change_key,
+        stage=stage,
+        spec_root=spec_root,
+        step_prompt=step_prompt,
+        read_only=read_only,
+    )
+
+    # Step 6 — 记录日志并返回
+    log.info(
+        "stage_bundle_built",
+        change_key=bundle.change_key,
+        stage=bundle.stage,
+        spec_root=bundle.spec_root,
+        doc_types=list(doc_content.keys()),
+        read_only=read_only,
     )
     return bundle
 
