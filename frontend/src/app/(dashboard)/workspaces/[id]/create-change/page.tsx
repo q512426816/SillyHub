@@ -8,29 +8,21 @@ import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import { listComponents, type Component } from "@/lib/components";
-import { createChange, generateDocs } from "@/lib/change-writer";
+import { createChange, type CreateChangeInput } from "@/lib/changes";
 
 interface Props {
   params: { id: string };
 }
 
-const DOC_OPTIONS = [
-  { key: "proposal", label: "Proposal（提案）" },
-  { key: "requirements", label: "Requirements（需求）" },
-  { key: "design", label: "Design（设计）" },
-  { key: "plan", label: "Plan（计划）" },
-] as const;
-
 export default function CreateChangePage({ params }: Props) {
   const workspaceId = params.id;
   const router = useRouter();
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [scope, setScope] = useState<"full" | "quick">("full");
   const [components, setComponents] = useState<Component[]>([]);
-  const [selectedComponents, setSelectedComponents] = useState<string[]>([]);  // component_key values
-  const [selectedDocs, setSelectedDocs] = useState<string[]>(["proposal"]);
+  const [selectedComponents, setSelectedComponents] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  const [step, setStep] = useState<1 | 2>(1);
-  const [createdChangeId, setCreatedChangeId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,33 +31,21 @@ export default function CreateChangePage({ params }: Props) {
       .catch(() => {});
   }, [workspaceId]);
 
-  const handleCreate = async () => {
+  const handleSubmit = async () => {
     if (!title.trim()) return;
     setLoading(true);
     setError(null);
     try {
-      const result = await createChange(workspaceId, {
+      const input: CreateChangeInput = {
         title: title.trim(),
+        description: description.trim() || undefined,
+        scope,
         affected_components: selectedComponents.length > 0 ? selectedComponents : undefined,
-      });
-      setCreatedChangeId(result.id);
-      setStep(2);
+      };
+      const result = await createChange(workspaceId, input);
+      router.push(`/workspaces/${workspaceId}/changes/${result.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "创建变更失败");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGenerate = async () => {
-    if (!createdChangeId || selectedDocs.length === 0) return;
-    setLoading(true);
-    setError(null);
-    try {
-      await generateDocs(workspaceId, createdChangeId, selectedDocs);
-      router.push(`/workspaces/${workspaceId}/changes/${createdChangeId}`);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "生成文档失败");
     } finally {
       setLoading(false);
     }
@@ -74,12 +54,6 @@ export default function CreateChangePage({ params }: Props) {
   const toggleComponent = (id: string) => {
     setSelectedComponents((prev) =>
       prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id],
-    );
-  };
-
-  const toggleDoc = (key: string) => {
-    setSelectedDocs((prev) =>
-      prev.includes(key) ? prev.filter((d) => d !== key) : [...prev, key],
     );
   };
 
@@ -100,85 +74,95 @@ export default function CreateChangePage({ params }: Props) {
         </div>
       )}
 
-      {step === 1 ? (
-        <section className="space-y-4 rounded-md border bg-card p-4">
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">标题 *</label>
-            <input
-              className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
-              placeholder="输入变更标题"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-          </div>
+      <section className="space-y-4 rounded-md border bg-card p-4">
+        {/* 标题 */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">标题 *</label>
+          <input
+            className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
+            placeholder="输入变更标题"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+        </div>
 
-          {components.length > 0 && (
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">关联组件</label>
-              <div className="flex flex-wrap gap-1.5">
-                {components.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => toggleComponent(c.component_key)}
-                    className={`rounded border px-2 py-1 text-[11px] transition-colors ${
-                      selectedComponents.includes(c.component_key)
-                        ? "border-primary bg-primary/8 text-primary"
-                        : "border-border hover:bg-muted"
-                    }`}
-                  >
-                    {c.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+        {/* 需求描述 */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">需求描述</label>
+          <textarea
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[120px] resize-y focus:border-ring focus:outline-none"
+            placeholder="描述变更的需求背景和目标（可选）"
+            rows={6}
+            maxLength={5000}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
 
-          <div className="flex gap-2 pt-1">
-            <Button size="sm" onClick={handleCreate} disabled={loading || !title.trim()}>
-              {loading ? "创建中…" : "创建变更"}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => router.back()}>
-              取消
-            </Button>
+        {/* 规模选择 */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">规模</label>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setScope("full")}
+              className={`rounded-md px-3 py-2 text-sm transition-colors ${
+                scope === "full"
+                  ? "bg-primary text-primary-foreground"
+                  : "border border-border hover:bg-muted"
+              }`}
+            >
+              🔧 大需求
+            </button>
+            <button
+              type="button"
+              onClick={() => setScope("quick")}
+              className={`rounded-md px-3 py-2 text-sm transition-colors ${
+                scope === "quick"
+                  ? "bg-primary text-primary-foreground"
+                  : "border border-border hover:bg-muted"
+              }`}
+            >
+              ⚡ 小修改
+            </button>
           </div>
-        </section>
-      ) : (
-        <section className="space-y-4 rounded-md border bg-card p-4">
-          <p className="text-xs text-emerald-700">
-            变更已创建！选择要生成的文档模板。
+          <p className="text-[11px] text-muted-foreground">
+            {scope === "full" ? "走完整 SillySpec 流程" : "快速修复模式"}
           </p>
+        </div>
+
+        {/* 关联组件 */}
+        {components.length > 0 && (
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">文档模板</label>
-            <div className="space-y-1">
-              {DOC_OPTIONS.map((doc) => (
-                <label key={doc.key} className="flex items-center gap-2 text-xs">
-                  <input
-                    type="checkbox"
-                    checked={selectedDocs.includes(doc.key)}
-                    onChange={() => toggleDoc(doc.key)}
-                    className="size-3.5"
-                  />
-                  {doc.label}
-                </label>
+            <label className="text-xs font-medium text-muted-foreground">关联组件</label>
+            <div className="flex flex-wrap gap-1.5">
+              {components.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => toggleComponent(c.component_key)}
+                  className={`rounded border px-2 py-1 text-[11px] transition-colors ${
+                    selectedComponents.includes(c.component_key)
+                      ? "border-primary bg-primary/8 text-primary"
+                      : "border-border hover:bg-muted"
+                  }`}
+                >
+                  {c.name}
+                </button>
               ))}
             </div>
           </div>
-          <div className="flex gap-2 pt-1">
-            <Button size="sm" onClick={handleGenerate} disabled={loading || selectedDocs.length === 0}>
-              {loading ? "生成中…" : "生成文档"}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() =>
-                router.push(`/workspaces/${workspaceId}/changes/${createdChangeId}`)
-              }
-            >
-              跳过
-            </Button>
-          </div>
-        </section>
-      )}
+        )}
+
+        {/* 提交 */}
+        <div className="flex gap-2 pt-1">
+          <Button size="sm" onClick={handleSubmit} disabled={loading || !title.trim()}>
+            {loading ? "创建中…" : "创建变更"}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => router.back()}>
+            取消
+          </Button>
+        </div>
+      </section>
     </div>
   );
 }

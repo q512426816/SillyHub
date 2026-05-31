@@ -419,3 +419,116 @@ class ExecutionCoordinatorService:
 
         log.info("run_approved", run_id=str(run_id))
         return run
+
+    # ------------------------------------------------------------------
+    # 7. SillySpec dispatch
+    # ------------------------------------------------------------------
+
+    async def start_sillyspec_run(
+        self,
+        *,
+        change_key: str,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID,
+        scope: str = "full",
+        repo_dir: "Path",
+    ) -> AgentRun:
+        """Create and launch a SillySpec AgentRun in the background.
+
+        Args:
+            change_key: Change key (e.g. "2026-05-31-my-feature").
+            workspace_id: Workspace UUID.
+            user_id: User who triggered the run.
+            scope: ``"full"`` or ``"quick"``.
+            repo_dir: Repository root directory.
+
+        Returns:
+            The newly created AgentRun record (status=pending).
+        """
+        import asyncio
+
+        run = AgentRun(
+            id=uuid.uuid4(),
+            task_id=None,  # change-level run, not tied to a task
+            lease_id=None,  # no lease needed
+            agent_type=f"sillyspec_{scope}",
+            status="pending",
+            spec_strategy="sillyspec",
+        )
+        self.session.add(run)
+        await self.session.commit()
+        await self.session.refresh(run)
+
+        # Fire-and-forget background task
+        asyncio.create_task(
+            self._run_sillyspec_background(
+                run_id=run.id,
+                change_key=change_key,
+                scope=scope,
+                repo_dir=repo_dir,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
+        )
+        return run
+
+    async def _run_sillyspec_background(
+        self,
+        *,
+        run_id: uuid.UUID,
+        change_key: str,
+        scope: str,
+        repo_dir: "Path",
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        """Execute a sillyspec command in the background and persist results."""
+        import asyncio
+        from datetime import datetime, timezone
+
+        run = await self.session.get(AgentRun, run_id)
+        if run is None:
+            return
+
+        # Mark as running
+        run.status = "running"
+        run.started_at = datetime.now(timezone.utc)
+        self.session.add(run)
+        await self.session.commit()
+
+        try:
+            # Build command
+            if scope == "full":
+                cmd = ["sillyspec", "run", "--change", change_key]
+            else:
+                cmd = ["sillyspec", "quick", "--change", change_key]
+
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(repo_dir),
+            )
+            stdout, stderr = await process.communicate()
+
+            # Persist result
+            run.status = "completed" if process.returncode == 0 else "failed"
+            run.finished_at = datetime.now(timezone.utc)
+            run.exit_code = process.returncode
+            run.output_redacted = (stdout or b"").decode("utf-8", errors="replace")[:10000]
+            self.session.add(run)
+            await self.session.commit()
+
+            log.info(
+                "sillyspec_run_completed",
+                run_id=str(run_id),
+                exit_code=process.returncode,
+            )
+        except Exception as exc:
+            log.error("sillyspec_run_failed", run_id=str(run_id), error=str(exc))
+            run.status = "failed"
+            run.finished_at = datetime.now(timezone.utc)
+            run.exit_code = 1
+            run.output_redacted = str(exc)[:10000]
+            self.session.add(run)
+            await self.session.commit()

@@ -96,3 +96,55 @@ async def batch_generate_documents(
         doc_types=data.doc_types,
     )
     return BatchGenerateResponse(generated=generated)
+
+
+@router.post(
+    "/changes/{change_key}/execute",
+    response_model=dict,
+)
+async def execute_change(
+    workspace_id: uuid.UUID,
+    change_key: str,
+    session: SessionDep,
+    user: CurrentUser,
+) -> dict:
+    """Trigger change execution — create a SillySpec AgentRun and dispatch in background."""
+    from pathlib import Path
+
+    from sqlalchemy import select
+    from sqlmodel import col
+
+    from app.core.errors import AppError, WorkspaceNotFound
+    from app.modules.agent.coordinator import ExecutionCoordinatorService
+    from app.modules.change.model import Change
+    from app.modules.workspace.model import Workspace
+    from app.modules.workspace.service import _rewrite_path
+
+    # Look up the change record
+    stmt = select(Change).where(
+        col(Change.workspace_id) == workspace_id,
+        col(Change.change_key) == change_key,
+    )
+    change = (await session.execute(stmt)).scalars().first()
+    if change is None:
+        raise AppError(f"Change '{change_key}' not found.", http_status=404)
+
+    # Resolve repo directory from workspace
+    workspace = await session.get(Workspace, workspace_id)
+    if workspace is None:
+        raise WorkspaceNotFound("Workspace not found.")
+    repo_dir = Path(_rewrite_path(workspace.root_path))
+
+    # Determine scope from change_type, default to "full"
+    scope = change.change_type if change.change_type in ("full", "quick") else "full"
+
+    coordinator = ExecutionCoordinatorService(session)
+    run = await coordinator.start_sillyspec_run(
+        change_key=change_key,
+        workspace_id=workspace_id,
+        user_id=user.id,
+        scope=scope,
+        repo_dir=repo_dir,
+    )
+
+    return {"ok": True, "run_id": str(run.id)}
