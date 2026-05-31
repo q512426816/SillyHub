@@ -73,7 +73,7 @@ class ChangeWriterService:
         # Compute change_key from date + slugified title
         date_prefix = datetime.utcnow().strftime("%Y-%m-%d")
         slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40] or "untitled"
-        change_key = f"{date_prefix}-{slug}"
+        change_key = f"{date_prefix}-{slug}-{uuid.uuid4().hex[:6]}"
         change_dir = repo_dir / ".sillyspec" / "changes" / "change" / change_key
         change_dir.mkdir(parents=True, exist_ok=True)
 

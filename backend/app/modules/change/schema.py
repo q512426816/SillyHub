@@ -22,6 +22,12 @@ class ChangeRead(BaseModel):
     affected_components: list[str]
     change_type: str | None
     owner_id: uuid.UUID | None
+    current_stage: str | None = None
+    stages: dict | None = None
+    approval_status: str | None = None
+    approved_by: str | None = None
+    approved_at: datetime | None = None
+    rejection_reason: str | None = None
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
@@ -38,6 +44,7 @@ class ChangeSummary(BaseModel):
     change_type: str | None
     affected_components: list[str]
     owner_id: uuid.UUID | None
+    current_stage: str | None = None
     updated_at: datetime
     workspace_ids: list[uuid.UUID] = []
 
