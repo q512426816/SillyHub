@@ -49,8 +49,9 @@ class ChangeWriterService:
         change_type: str | None = None,
         affected_components: list[str] | None = None,
         lease_id: uuid.UUID | None = None,
+        description: str = "",
     ) -> Change:
-        """Create a change directory + MASTER.md inside the lease worktree or workspace root."""
+        """Create a change directory + MASTER.md + proposal.md inside the lease worktree or workspace root."""
         if lease_id is not None:
             lease = await self._get_active_lease(lease_id, user_id)
             if lease.workspace_id != workspace_id:
@@ -84,18 +85,26 @@ class ChangeWriterService:
         )
         (change_dir / "MASTER.md").write_text(master_content, encoding="utf-8")
 
+        # Write proposal.md with user description
+        now = datetime.utcnow()
+        if description:
+            proposal_content = f"# {title}\n\n## 需求描述\n\n{description}\n"
+            (change_dir / "proposal.md").write_text(proposal_content, encoding="utf-8")
+
         # Create DB record
         change = Change(
             id=uuid.uuid4(),
             workspace_id=workspace_id,
             change_key=change_key,
             title=title,
-            status="draft",
+            status="active",
             location="active",
             path=str(change_dir.relative_to(repo_dir)),
             affected_components=affected_components or [],
             change_type=change_type,
             owner_id=user_id,
+            current_stage="created",
+            stages={"created": {"status": "done", "at": now.isoformat()}},
         )
         self._session.add(change)
 
@@ -106,9 +115,21 @@ class ChangeWriterService:
             doc_type="master",
             path=str(change_dir.relative_to(repo_dir) / "MASTER.md"),
             exists=True,
-            last_modified_at=datetime.utcnow(),
+            last_modified_at=now,
         )
         self._session.add(doc)
+
+        # Add proposal.md as a document (if description was provided)
+        if description:
+            proposal_doc = ChangeDocument(
+                id=uuid.uuid4(),
+                change_id=change.id,
+                doc_type="proposal",
+                path=str(change_dir.relative_to(repo_dir) / "proposal.md"),
+                exists=True,
+                last_modified_at=now,
+            )
+            self._session.add(proposal_doc)
 
         await self._session.commit()
         await self._session.refresh(change)
@@ -118,6 +139,7 @@ class ChangeWriterService:
             change_id=str(change.id),
             change_key=change_key,
             lease_id=str(lease_id),
+            current_stage="created",
         )
         return change
 

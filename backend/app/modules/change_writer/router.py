@@ -49,6 +49,7 @@ async def create_change(
         change_type=data.change_type,
         affected_components=data.affected_components,
         lease_id=data.lease_id,
+        description=data.description,
     )
     return ChangeCreateResponse.model_validate(change)
 

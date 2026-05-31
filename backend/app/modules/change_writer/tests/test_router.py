@@ -155,7 +155,7 @@ async def test_create_change_success(client, db_session, mock_repo_dir):
     assert resp.status_code == 201
     body = resp.json()
     assert body["title"] == "Add Login Feature"
-    assert body["status"] == "draft"
+    assert body["status"] == "active"
     assert "add-login-feature" in body["change_key"]
 
     # Verify file was created on disk
