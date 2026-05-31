@@ -125,6 +125,21 @@ export async function rescanWorkspace(id: string): Promise<ScanResult> {
   return apiFetch<ScanResult>(`/api/workspaces/${id}/rescan`, { method: "POST" });
 }
 
+export interface ReparseResult {
+  parsed: number;
+  created: number;
+  updated: number;
+  deleted: number;
+  relations_created: number;
+  relations_deleted: number;
+  children: { id: string; name: string; component_key: string; slug: string }[];
+  relations: { id: string; source_id: string; target_id: string; relation_type: string }[];
+}
+
+export async function reparseWorkspace(id: string): Promise<ReparseResult> {
+  return apiFetch<ReparseResult>(`/api/workspaces/${id}/reparse`, { method: "POST" });
+}
+
 export async function deleteWorkspace(id: string): Promise<Workspace> {
   return apiFetch<Workspace>(`/api/workspaces/${id}`, { method: "DELETE" });
 }

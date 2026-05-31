@@ -11,6 +11,7 @@ import {
   getWorkspaceRelations,
   getWorkspace,
   rescanWorkspace,
+  reparseWorkspace,
   type Workspace,
   type WorkspaceRelation,
 } from "@/lib/workspaces";
@@ -78,11 +79,14 @@ export default function ComponentsPage({ params }: Props) {
     setReparsing(true);
     setPageError(null);
     try {
-      await rescanWorkspace(workspaceId);
-      // Reload relations after rescan
+      await reparseWorkspace(workspaceId);
+      // Reload relations after reparse
       const relData = await getWorkspaceRelations(workspaceId);
       setOutgoing(relData.outgoing);
       setIncoming(relData.incoming);
+      // Also reload workspace metadata
+      const ws = await getWorkspace(workspaceId);
+      setWorkspace(ws);
     } catch (err) {
       setPageError(
         err instanceof ApiError ? err.message : "重新扫描失败",
