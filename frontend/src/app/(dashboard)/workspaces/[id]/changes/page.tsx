@@ -32,31 +32,46 @@ const STATUS_COLORS: Record<string, "success" | "outline" | "destructive" | "def
 };
 
 const STAGE_VARIANT: Record<string, "outline" | "default" | "warning" | "destructive" | "success"> = {
-  created: "outline",
-  propose: "default",
-  plan: "warning",
-  execute: "destructive",
+  draft: "outline",
+  scan: "default",
+  brainstorm: "warning",
+  propose: "warning",
+  plan: "default",
+  execute: "default",
   verify: "success",
-  archived: "outline",
+  rework_required: "destructive",
+  accepted: "success",
+  archive: "outline",
+  quick: "default",
 };
 
 const STAGE_LABEL: Record<string, string> = {
-  created: "已创建",
+  draft: "草稿",
+  scan: "扫描",
+  brainstorm: "需求分析",
   propose: "提案",
   plan: "规划",
   execute: "执行",
   verify: "验证",
-  archived: "归档",
+  rework_required: "需返工",
+  accepted: "已验收",
+  archive: "归档",
+  quick: "快速",
 };
 
 const STAGE_OPTIONS = [
   { value: "", label: "全部阶段" },
-  { value: "created", label: "已创建" },
+  { value: "draft", label: "草稿" },
+  { value: "scan", label: "扫描" },
+  { value: "brainstorm", label: "需求分析" },
   { value: "propose", label: "提案" },
   { value: "plan", label: "规划" },
   { value: "execute", label: "执行" },
   { value: "verify", label: "验证" },
-  { value: "archived", label: "归档" },
+  { value: "rework_required", label: "需返工" },
+  { value: "accepted", label: "已验收" },
+  { value: "archive", label: "归档" },
+  { value: "quick", label: "快速" },
 ] as const;
 
 export default function ChangesPage({ params }: Props) {

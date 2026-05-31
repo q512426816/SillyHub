@@ -452,9 +452,9 @@ class ChangeService:
             raise InvalidTransition(f"无效的反馈类别: {category}")
 
         FEEDBACK_TARGETS = {
-            "A": "in_dev",
-            "B": "design_review",
-            "C": "clarifying",
+            "A": "execute",
+            "B": "propose",
+            "C": "brainstorm",
             "D": "accepted",
         }
         rework_target = target_stage or FEEDBACK_TARGETS[category]
@@ -463,9 +463,9 @@ class ChangeService:
 
         # Validate current stage allows feedback
         current = change.current_stage or "draft"
-        if current not in ("technical_verification", "business_review"):
+        if current not in ("verify", "accepted"):
             raise InvalidTransition(
-                "当前阶段不允许提交反馈，仅限 technical_verification 和 business_review"
+                "当前阶段不允许提交反馈，仅限 verify 和 accepted"
             )
 
         # Save feedback info

@@ -10,11 +10,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from app.core.errors import ChangeNotFound, TaskNotFound
+from app.core.errors import ChangeNotFound, InvalidTransition, TaskNotFound
 from app.core.logging import get_logger
-from app.modules.change.model import Change
+from app.modules.change.model import Change, StageEnum, TRANSITIONS, can_transition
 from app.modules.task.model import Task
-from app.modules.workflow.fsm import ChangeFSM, TaskFSM
+from app.modules.workflow.fsm import TaskFSM
 from app.modules.workflow.model import AuditLog, ChangeReview
 from app.modules.workflow.spec_guardian import run_guard
 
@@ -37,18 +37,26 @@ class WorkflowService:
         """Transition a change to *target* state. Returns (change, previous_status)."""
         change = await self._get_change(change_id, workspace_id)
         previous = change.status
-        ChangeFSM.validate_transition(previous, target)
+
+        # Validate using unified TRANSITIONS (operates on current_stage)
+        current_stage = change.current_stage or "draft"
+        current_key = StageEnum(current_stage)
+        target_key = StageEnum(target)
+        if not can_transition(current_key, target_key):
+            raise InvalidTransition(
+                f"不允许从 {current_stage} 流转到 {target}",
+                details={"from": current_stage, "to": target},
+            )
 
         violations = await run_guard(self._session, change, target)
         if violations:
-            from app.modules.workflow.fsm import TransitionError
-
-            raise TransitionError(
+            raise InvalidTransition(
                 "Guard rules prevent this transition.",
                 details={"violations": violations},
             )
 
         change.status = target
+        change.current_stage = target
         change.updated_at = datetime.now(timezone.utc)
         self._session.add(change)
         await self._record_audit(
@@ -114,11 +122,13 @@ class WorkflowService:
         )
         self._session.add(review)
 
-        # Auto-transition based on verdict
+        # Auto-transition based on verdict — use unified TRANSITIONS
         if verdict == "reject":
-            can_reject = ChangeFSM.can_transition(change.status, "rejected")
-            if can_reject:
-                change.status = "rejected"
+            current_stage = change.current_stage or "draft"
+            current_key = StageEnum(current_stage)
+            if can_transition(current_key, StageEnum.REWORK_REQUIRED):
+                change.current_stage = "rework_required"
+                change.status = "rework_required"
                 change.updated_at = datetime.now(timezone.utc)
                 self._session.add(change)
 
