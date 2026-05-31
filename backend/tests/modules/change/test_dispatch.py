@@ -76,14 +76,14 @@ async def _create_agent_run(
 # ===================================================================
 
 
-def test_get_config_for_clarifying() -> None:
-    """Clarifying stage has a valid config."""
-    config = get_config_for_stage("clarifying")
+def test_get_config_for_propose() -> None:
+    """Propose stage has a valid config."""
+    config = get_config_for_stage("propose")
     assert config is not None
     assert config.enabled is True
-    assert config.prompt_template == "clarifying.md"
-    assert config.requires_worktree is False
-    assert config.read_only is True
+    assert config.prompt_template == "propose.md"
+    assert config.requires_worktree is True
+    assert config.read_only is False
 
 
 def test_get_config_for_draft_returns_none() -> None:
@@ -143,7 +143,7 @@ async def test_has_active_run_false_with_failed(db_session: AsyncSession) -> Non
 
 
 # ===================================================================
-# 3. dispatch() — clarifying stage
+# 3. dispatch() — propose stage
 # ===================================================================
 
 
@@ -162,14 +162,14 @@ async def test_dispatch_no_config_for_stage(db_session: AsyncSession) -> None:
 
 async def test_dispatch_active_run_blocks(db_session: AsyncSession) -> None:
     """An existing running agent blocks new dispatch."""
-    change = await _create_change(db_session, current_stage="clarifying")
+    change = await _create_change(db_session, current_stage="draft")
     await _create_agent_run(db_session, change_id=change.id, status="running")
 
     result = await dispatch(
         session=db_session,
         workspace_id=change.workspace_id,
         change_id=change.id,
-        target_stage="clarifying",
+        target_stage="propose",
         user_id=uuid.uuid4(),
     )
     assert result["dispatched"] is False
@@ -182,7 +182,7 @@ async def test_dispatch_change_not_found(db_session: AsyncSession) -> None:
         session=db_session,
         workspace_id=uuid.uuid4(),
         change_id=uuid.uuid4(),
-        target_stage="clarifying",
+        target_stage="propose",
         user_id=uuid.uuid4(),
     )
     assert result["dispatched"] is False
@@ -208,21 +208,21 @@ async def test_dispatch_updates_last_dispatch_in_stages(db_session: AsyncSession
             session=db_session,
             workspace_id=change.workspace_id,
             change_id=change.id,
-            target_stage="clarifying",
+            target_stage="propose",
             user_id=uuid.uuid4(),
         )
 
     assert result["dispatched"] is True
-    assert result["stage"] == "clarifying"
+    assert result["stage"] == "propose"
 
     # Verify stages JSON was updated
     await db_session.refresh(change)
     last_dispatch = change.stages.get("last_dispatch")
     assert last_dispatch is not None
-    assert last_dispatch["stage"] == "clarifying"
+    assert last_dispatch["stage"] == "propose"
     assert "at" in last_dispatch
     assert "config" in last_dispatch
-    assert last_dispatch["config"]["prompt_template"] == "clarifying.md"
+    assert last_dispatch["config"]["prompt_template"] == "propose.md"
 
 
 # ===================================================================

@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import uuid
+import warnings
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -435,6 +436,13 @@ class ExecutionCoordinatorService:
     ) -> AgentRun:
         """Create and launch a SillySpec AgentRun in the background.
 
+        .. deprecated::
+            ``start_sillyspec_run`` bypasses the Agent adapter layer and
+            directly runs a subprocess, preventing log/status/progress
+            collection.  Use
+            ``SillySpecStageDispatchService.dispatch_next_step()``
+            instead.
+
         Args:
             change_key: Change key (e.g. "2026-05-31-my-feature").
             workspace_id: Workspace UUID.
@@ -445,6 +453,20 @@ class ExecutionCoordinatorService:
         Returns:
             The newly created AgentRun record (status=pending).
         """
+        # ── deprecated warning ──
+        warnings.warn(
+            "start_sillyspec_run is deprecated. "
+            "Use SillySpecStageDispatchService.dispatch_next_step() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        log.warning(
+            "deprecated_method_called",
+            method="start_sillyspec_run",
+            change_key=change_key,
+            scope=scope,
+        )
+
         import asyncio
 
         run = AgentRun(
@@ -482,7 +504,18 @@ class ExecutionCoordinatorService:
         workspace_id: uuid.UUID,
         user_id: uuid.UUID,
     ) -> None:
-        """Execute a sillyspec command in the background and persist results."""
+        """Execute a sillyspec command in the background and persist results.
+
+        .. deprecated::
+            This method is called internally by ``start_sillyspec_run``
+            and is likewise deprecated.
+        """
+        log.warning(
+            "deprecated_method_called",
+            method="_run_sillyspec_background",
+            run_id=str(run_id),
+        )
+
         import asyncio
         from datetime import datetime, timezone
 

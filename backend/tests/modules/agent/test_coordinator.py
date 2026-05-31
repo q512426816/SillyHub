@@ -321,3 +321,74 @@ async def test_approve_token_is_one_time(db_session: AsyncSession) -> None:
     # Second call fails because status is no longer pending_approval
     with pytest.raises(AgentRunNotPendingApproval):
         await coordinator.approve(run.id, token)
+
+
+# ===================================================================
+# 7. SillySpec run deprecation tests
+# ===================================================================
+
+
+async def test_start_sillyspec_run_emits_deprecation_warning(
+    db_session: AsyncSession,
+) -> None:
+    """Calling start_sillyspec_run emits a DeprecationWarning."""
+    import warnings
+    from pathlib import Path
+    from unittest.mock import AsyncMock, patch
+
+    coordinator = ExecutionCoordinatorService(db_session)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with patch.object(
+            coordinator,
+            "_run_sillyspec_background",
+            new_callable=AsyncMock,
+        ):
+            await coordinator.start_sillyspec_run(
+                change_key="test-change",
+                workspace_id=uuid.uuid4(),
+                user_id=uuid.uuid4(),
+                scope="full",
+                repo_dir=Path("/tmp"),
+            )
+
+    deprecation_warnings = [
+        w for w in caught if issubclass(w.category, DeprecationWarning)
+    ]
+    assert len(deprecation_warnings) >= 1, (
+        "Expected at least one DeprecationWarning from start_sillyspec_run"
+    )
+    assert "start_sillyspec_run is deprecated" in str(
+        deprecation_warnings[0].message
+    )
+
+
+async def test_start_sillyspec_run_still_returns_agent_run(
+    db_session: AsyncSession,
+) -> None:
+    """Deprecated start_sillyspec_run still returns a valid AgentRun."""
+    import warnings
+    from pathlib import Path
+    from unittest.mock import AsyncMock, patch
+
+    coordinator = ExecutionCoordinatorService(db_session)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        with patch.object(
+            coordinator,
+            "_run_sillyspec_background",
+            new_callable=AsyncMock,
+        ):
+            run = await coordinator.start_sillyspec_run(
+                change_key="test-change",
+                workspace_id=uuid.uuid4(),
+                user_id=uuid.uuid4(),
+                scope="full",
+                repo_dir=Path("/tmp"),
+            )
+
+    assert run is not None
+    assert run.status == "pending"
+    assert run.agent_type == "sillyspec_full"

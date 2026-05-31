@@ -46,32 +46,31 @@ class TestStageAgentConfig:
     def test_propose_config_values(self):
         config = get_config_for_stage("propose")
         assert config.enabled is True
-        assert config.prompt_template == "clarifying.md"
-        assert config.phase == "Proposal / Clarification"
-        assert config.requires_worktree is False
-        assert config.read_only is True
+        assert config.prompt_template == "propose.md"
+        assert config.phase == "Propose"
+        assert config.requires_worktree is True
+        assert config.read_only is False
 
     def test_all_expected_stages_present(self):
         expected = {
             "propose", "brainstorm", "plan",
             "execute", "verify", "scan",
+            "archive", "quick",
         }
         assert set(STAGE_AGENT_CONFIG.keys()) == expected
 
     def test_no_config_for_non_dispatch_stages(self):
-        for stage in ("draft", "rework_required", "accepted", "archive"):
+        for stage in ("draft", "rework_required", "accepted"):
             assert get_config_for_stage(stage) is None
 
-    def test_read_only_stages_dont_require_worktree(self):
-        read_only_stages = ["propose", "brainstorm", "plan", "scan"]
-        for stage in read_only_stages:
-            config = get_config_for_stage(stage)
-            assert config is not None
-            assert config.requires_worktree is False
-            assert config.read_only is True
+    def test_scan_does_not_require_worktree(self):
+        config = get_config_for_stage("scan")
+        assert config is not None
+        assert config.requires_worktree is False
+        assert config.read_only is False
 
     def test_write_stages_require_worktree(self):
-        write_stages = ["execute", "verify"]
+        write_stages = ["execute", "verify", "brainstorm", "propose", "plan", "archive", "quick"]
         for stage in write_stages:
             config = get_config_for_stage(stage)
             assert config is not None
@@ -252,7 +251,7 @@ class TestDispatch:
 
         assert result["dispatched"] is True
         assert result["stage"] == "propose"
-        assert result["phase"] == "Proposal / Clarification"
+        assert result["phase"] == "Propose"
         assert "agent_run_id" in result
 
         # Verify last_dispatch recorded in stages JSON
@@ -758,9 +757,9 @@ class TestProposeStageFullFlow:
         mock_start.assert_called_once()
         call_kwargs = mock_start.call_args[1]
         assert call_kwargs["stage"] == "propose"
-        assert call_kwargs["prompt_template"] == "clarifying.md"
-        assert call_kwargs["read_only"] is True
-        assert call_kwargs["requires_worktree"] is False
+        assert call_kwargs["prompt_template"] == "propose.md"
+        assert call_kwargs["read_only"] is False
+        assert call_kwargs["requires_worktree"] is True
 
         # Step 2: Verify dispatch is blocked when active run exists
         # Create a fake active run for this change

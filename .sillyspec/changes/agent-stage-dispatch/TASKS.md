@@ -1,26 +1,23 @@
-# TASKS: agent-stage-dispatch plan
+# TASKS: agent-stage-dispatch execute — Wave 1
 
-## 目标
-为变更 `agent-stage-dispatch` 完成 SillySpec plan 阶段。
+## 当前目标
+执行 Wave 1 的 3 个并行任务（无依赖，基础设施层）。
 
-## 背景
-propose 阶段已完成，产出：
-- `.sillyspec/changes/agent-stage-dispatch/proposal.md` — 动机、7 Phase 变更范围
-- `.sillyspec/changes/agent-stage-dispatch/design.md` — 目标架构 + 详细设计
-- `.sillyspec/changes/agent-stage-dispatch/requirements.md` — 10 个 FR
-- `.sillyspec/changes/agent-stage-dispatch/tasks.md` — 22 个 Task（按 Phase 分组）
+## Wave 1 任务
+1. **task-01**: 废弃 start_sillyspec_run 子进程路径 → `backend/app/modules/agent/coordinator.py`
+2. **task-02**: 扩展 AgentSpecBundle 添加 stage_dispatch 字段 → `backend/app/modules/agent/base.py`
+3. **task-03**: 补齐 STAGE_AGENT_CONFIG 阶段配置 → `backend/app/modules/change/dispatch.py`
 
 ## 执行方式
-使用 sillyspec CLI：
-```bash
-sillyspec run plan --change agent-stage-dispatch
-```
-按 CLI 输出的 step prompt 逐步执行。每完成一步用 `--done` 提交。
+按顺序执行 task-01、task-02、task-03。每个 task 的详细说明在：
+- `.sillyspec/changes/agent-stage-dispatch/tasks/task-01.md`
+- `.sillyspec/changes/agent-stage-dispatch/tasks/task-02.md`
+- `.sillyspec/changes/agent-stage-dispatch/tasks/task-03.md`
 
 ## 关键规则
-- 所有文档写入 `.sillyspec/changes/agent-stage-dispatch/`
-- 先读 tasks.md 理解 22 个 task，然后按 CLI step prompt 排优先级
-- 每步完成立即 --done
-- 只产出文档，禁止改代码
-- 不要编造 CLI 子命令
-- plan.md 必须包含 Wave 分组（哪些 task 哪个 Wave）
+- **先读 task 文件**理解具体要求，再改代码
+- TDD：先写测试再写实现（task 文件里有 TDD 步骤）
+- 每完成一个 task 就运行相关测试验证
+- 全部完成后运行全量测试 `pytest backend/`
+- 只修改 task 指定的文件
+- 不要修改 SillySpec 文档（.sillyspec/changes/ 下的 md 文件）

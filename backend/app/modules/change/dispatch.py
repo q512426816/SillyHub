@@ -19,6 +19,7 @@ from sqlmodel import col
 
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentRun
+from app.modules.change.model import Change, StageEnum
 
 log = get_logger(__name__)
 
@@ -40,53 +41,69 @@ class StageAgentConfig:
 
 
 STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
-    "propose": StageAgentConfig(
+    StageEnum.SCAN.value: StageAgentConfig(
         enabled=True,
-        prompt_template="clarifying.md",
-        phase="Proposal / Clarification",
+        prompt_template="scan.md",
+        phase="Scan",
         requires_worktree=False,
-        read_only=True,
-        description="Review change proposal and identify ambiguities; produce clarifying questions.",
+        read_only=False,
+        description="Write scan documents to .sillyspec/docs/.",
     ),
-    "plan": StageAgentConfig(
+    StageEnum.BRAINSTORM.value: StageAgentConfig(
         enabled=True,
-        prompt_template="plan_tasks.md",
-        phase="Task Planning",
-        requires_worktree=False,
-        read_only=True,
-        description="Break down the change into concrete implementation tasks.",
-    ),
-    "execute": StageAgentConfig(
-        enabled=True,
-        prompt_template="execute_task.md",
-        phase="Task Execution",
+        prompt_template="brainstorm.md",
+        phase="Brainstorm",
         requires_worktree=True,
         read_only=False,
-        description="Implement the assigned task within the change worktree.",
+        description="Write question lists and decision records to change directory.",
     ),
-    "verify": StageAgentConfig(
+    StageEnum.PROPOSE.value: StageAgentConfig(
+        enabled=True,
+        prompt_template="propose.md",
+        phase="Propose",
+        requires_worktree=True,
+        read_only=False,
+        description="Write the four-piece proposal set to change directory.",
+    ),
+    StageEnum.PLAN.value: StageAgentConfig(
+        enabled=True,
+        prompt_template="plan.md",
+        phase="Plan",
+        requires_worktree=True,
+        read_only=False,
+        description="Write plan.md and task blueprints.",
+    ),
+    StageEnum.EXECUTE.value: StageAgentConfig(
+        enabled=True,
+        prompt_template="execute.md",
+        phase="Execute",
+        requires_worktree=True,
+        read_only=False,
+        description="Implement tasks; must use worktree.",
+    ),
+    StageEnum.VERIFY.value: StageAgentConfig(
         enabled=True,
         prompt_template="verify.md",
-        phase="Technical Verification",
+        phase="Verify",
         requires_worktree=True,
         read_only=False,
-        description="Run verification checks against the implementation in the worktree.",
+        description="Write verify-result.md and run verification checks.",
     ),
-    "brainstorm": StageAgentConfig(
+    StageEnum.ARCHIVE.value: StageAgentConfig(
         enabled=True,
-        prompt_template="design_review.md",
-        phase="Brainstorm / Design Review",
-        requires_worktree=False,
-        read_only=True,
-        description="Analyze change design docs for completeness, consistency, and risk.",
+        prompt_template="archive.md",
+        phase="Archive",
+        requires_worktree=True,
+        read_only=False,
+        description="Write module-impact analysis and move change directory to archive.",
     ),
-    "scan": StageAgentConfig(
+    StageEnum.QUICK.value: StageAgentConfig(
         enabled=True,
-        prompt_template="review.md",
-        phase="Scan / Review",
-        requires_worktree=False,
-        read_only=True,
-        description="Summarize the change for review, highlighting risks and impact.",
+        prompt_template="quick.md",
+        phase="Quick",
+        requires_worktree=True,
+        read_only=False,
+        description="Write quicklog and may modify code directly.",
     ),
 }
 
@@ -136,7 +153,6 @@ async def dispatch(
         }
 
     # Record last_dispatch in change stages JSON (loaded fresh to avoid stale data)
-    from app.modules.change.model import Change
 
     change = await session.get(Change, change_id)
     if change is None:
