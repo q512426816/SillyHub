@@ -1,18 +1,28 @@
-"""Runtime service — reads .sillyspec/.runtime/ files."""
+"""Runtime service — reads ``.sillyspec/.runtime/`` state files.
+
+Priority:
+1. ``sillyspec.db`` (SQLite) — SillySpec v4 canonical state source
+2. ``progress.json`` — legacy fallback (emits deprecation warning)
+"""
 
 from __future__ import annotations
 
 import json
+import sqlite3
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.core.spec_paths import SpecPathResolver
 from app.modules.runtime.schema import (
     ArtifactEntry,
     RuntimeProgress,
+    StageProgress,
+    StageStep,
     UserInputEntry,
 )
 from app.modules.spec_workspace.model import SpecWorkspace
@@ -34,10 +44,13 @@ class RuntimeService:
         self._ws_service = workspace_service or WorkspaceService(session)
 
     def _resolve_runtime_dir(self, workspace_id: uuid.UUID, workspace, spec_ws) -> Path | None:
+        resolver_root = None
         if spec_ws and spec_ws.strategy != "repo-native":
-            return Path(spec_ws.spec_root) / ".sillyspec" / ".runtime"
-        if workspace.root_path:
-            return Path(workspace.root_path) / ".sillyspec" / ".runtime"
+            resolver_root = spec_ws.spec_root
+        elif workspace.root_path:
+            resolver_root = workspace.root_path
+        if resolver_root:
+            return SpecPathResolver(resolver_root).runtime_dir()
         return None
 
     async def _get_base(self, workspace_id: uuid.UUID):
@@ -52,17 +65,131 @@ class RuntimeService:
         if not runtime_dir:
             return None
 
-        progress_path = runtime_dir / "progress.json"
-        if not progress_path.is_file():
-            return None
+        resolver = SpecPathResolver(
+            spec_ws.spec_root if spec_ws and spec_ws.strategy != "repo-native"
+            else workspace.root_path
+        )
 
+        # --- Priority 1: sillyspec.db (SQLite) ---
+        db_path = resolver.db_path()
+        if db_path.is_file():
+            progress = self._read_sqlite_progress(db_path, runtime_dir)
+            if progress is not None:
+                return progress
+
+        # --- Priority 2: legacy progress.json ---
+        progress_path = resolver.legacy_progress_path()
+        if progress_path.is_file():
+            log.warning(
+                "runtime.legacy_progress_json",
+                detail="Reading legacy progress.json. Migrate to sillyspec.db.",
+            )
+            try:
+                raw = json.loads(progress_path.read_text(encoding="utf-8"))
+                return RuntimeProgress.model_validate(raw)
+            except (json.JSONDecodeError, OSError) as exc:
+                log.warning("runtime.progress_read_failed", error=str(exc))
+                return None
+
+        return None
+
+    # ------------------------------------------------------------------
+    # SQLite reader
+    # ------------------------------------------------------------------
+
+    def _read_sqlite_progress(self, db_path: Path, runtime_dir: Path) -> RuntimeProgress | None:
+        """Read the most recent active change from ``sillyspec.db`` and map to RuntimeProgress."""
         try:
-            raw = json.loads(progress_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as exc:
-            log.warning("runtime.progress_read_failed", error=str(exc))
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            conn.row_factory = sqlite3.Row
+            try:
+                # Get the most recently active change
+                row = conn.execute(
+                    "SELECT name, current_stage, status, last_active, created_at "
+                    "FROM changes ORDER BY last_active DESC LIMIT 1"
+                ).fetchone()
+                if row is None:
+                    return None
+
+                change_name = row["name"]
+                current_stage = row["current_stage"]
+                change_status = row["status"]
+                last_active = row["last_active"]
+
+                # Get project info
+                project_row = conn.execute("SELECT name FROM project LIMIT 1").fetchone()
+                project_name = project_row["name"] if project_row else None
+
+                # Get stages for this change
+                stages: dict[str, StageProgress] = {}
+                stage_rows = conn.execute(
+                    "SELECT stage, status, started_at, completed_at "
+                    "FROM stages WHERE change_id = "
+                    "(SELECT id FROM changes WHERE name = ?) "
+                    "ORDER BY stage",
+                    (change_name,),
+                ).fetchall()
+
+                for sr in stage_rows:
+                    stage_name = sr["stage"]
+                    stage_progress = StageProgress(
+                        status=sr["status"] or "pending",
+                        started_at=self._parse_dt(sr["started_at"]),
+                        completed_at=self._parse_dt(sr["completed_at"]),
+                    )
+
+                    # Get steps for this stage
+                    step_rows = conn.execute(
+                        "SELECT name, status, output, completed_at "
+                        "FROM steps WHERE stage_id = "
+                        "(SELECT s.id FROM stages s "
+                        " JOIN changes c ON s.change_id = c.id "
+                        " WHERE c.name = ? AND s.stage = ?) "
+                        "ORDER BY ordering",
+                        (change_name, stage_name),
+                    ).fetchall()
+
+                    for stp in step_rows:
+                        stage_progress.steps.append(
+                            StageStep(
+                                name=stp["name"],
+                                status=stp["status"] or "pending",
+                                output=stp["output"],
+                                completed_at=self._parse_dt(stp["completed_at"]),
+                            )
+                        )
+
+                    stages[stage_name] = stage_progress
+
+                return RuntimeProgress(
+                    _version=4,
+                    project=project_name,
+                    currentStage=current_stage,
+                    currentChange=change_name,
+                    stages=stages,
+                    lastActive=self._parse_dt(last_active),
+                )
+
+            finally:
+                conn.close()
+
+        except sqlite3.Error as exc:
+            log.warning("runtime.sqlite_read_failed", error=str(exc), db=str(db_path))
             return None
 
-        return RuntimeProgress.model_validate(raw)
+    @staticmethod
+    def _parse_dt(value: str | None) -> datetime | None:
+        """Parse ISO-format datetime string."""
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value)
+        except (ValueError, TypeError):
+            return None
+
+    # ------------------------------------------------------------------
+    # User inputs & artifacts (unchanged, file-based)
+    # ------------------------------------------------------------------
 
     async def get_user_inputs(self, workspace_id: uuid.UUID) -> list[UserInputEntry]:
         workspace, spec_ws = await self._get_base(workspace_id)

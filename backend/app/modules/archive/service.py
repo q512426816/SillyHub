@@ -1,6 +1,7 @@
 """Archive Service.
 
-Archives completed changes by moving their directory to an archive location.
+Archives completed changes by moving their directory to the v4 archive
+location: ``.sillyspec/changes/archive/<name>/``.
 Generates knowledge summaries from change content.
 """
 
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.core.spec_paths import SpecPathResolver
 from app.modules.change.model import Change, ChangeDocument
 from app.modules.workspace.model import Workspace
 
@@ -64,16 +66,20 @@ class ArchiveService:
             raise ArchiveNotFound(f"Workspace '{workspace_id}' not found.")
 
         ws_root = Path(workspace.root_path)
+        resolver = SpecPathResolver(ws_root)
         change_dir = ws_root / change.path
-        archive_dir = ws_root / "archive" / change.path.replace("/", "-")
+        archive_dest = resolver.archive_dir(change.change_key)
 
         if change_dir.exists():
-            archive_dir.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(change_dir), str(archive_dir))
-            log.info("archive_moved", change_id=str(change_id), dest=str(archive_dir))
+            archive_dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(change_dir), str(archive_dest))
+            log.info("archive_moved", change_id=str(change_id), dest=str(archive_dest))
 
         change.status = "archived"
+        change.location = "archive"
         change.archived_at = datetime.utcnow()
+        # Update path to reflect new archive location
+        change.path = str(archive_dest.relative_to(ws_root))
         await self._session.commit()
         await self._session.refresh(change)
 
