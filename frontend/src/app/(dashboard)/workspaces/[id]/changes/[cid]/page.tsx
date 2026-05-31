@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import {
   approveChange,
+  executeChange,
   getChange,
   getChangeDocumentContent,
   getChangeDocuments,
@@ -129,6 +130,7 @@ export default function ChangeDetailPage({ params }: Props) {
   const [taskBoard, setTaskBoard] = useState<TaskBoard | null>(null);
   const [rejectionInput, setRejectionInput] = useState("");
   const [showRejectInput, setShowRejectInput] = useState(false);
+  const [executing, setExecuting] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -238,6 +240,25 @@ export default function ChangeDetailPage({ params }: Props) {
     }
   };
 
+  const handleExecute = async () => {
+    if (!change) return;
+    setExecuting(true);
+    setPageError(null);
+    try {
+      const result = await executeChange(workspaceId, change.change_key);
+      if (result.ok) {
+        // Refresh change data after successful execution
+        const updated = await getChange(workspaceId, changeId);
+        setChange(updated);
+        setPageError(null);
+      }
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "启动执行失败");
+    } finally {
+      setExecuting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="mx-auto max-w-6xl px-6 py-6">
@@ -277,6 +298,15 @@ export default function ChangeDetailPage({ params }: Props) {
           <Badge variant={STATUS_COLORS[change.status] ?? "outline"}>
             {STATUS_LABELS[change.status] ?? change.status}
           </Badge>
+          {change.current_stage !== "archived" && change.current_stage !== "completed" && (
+            <Button
+              size="sm"
+              onClick={() => void handleExecute()}
+              disabled={executing}
+            >
+              {executing ? "执行中…" : "🚀 启动执行"}
+            </Button>
+          )}
         </div>
         <div className="mt-1 flex flex-wrap gap-x-5 gap-y-0.5 text-xs text-muted-foreground">
           <span>Key: <code className="font-mono">{change.change_key}</code></span>
