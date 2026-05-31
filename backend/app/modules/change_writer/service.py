@@ -103,8 +103,8 @@ class ChangeWriterService:
             affected_components=affected_components or [],
             change_type=change_type,
             owner_id=user_id,
-            current_stage="created",
-            stages={"created": {"status": "done", "at": now.isoformat()}},
+            current_stage="draft",
+            stages={"draft": {"status": "done", "at": now.isoformat()}},
         )
         self._session.add(change)
 
@@ -139,7 +139,7 @@ class ChangeWriterService:
             change_id=str(change.id),
             change_key=change_key,
             lease_id=str(lease_id),
-            current_stage="created",
+            current_stage="draft",
         )
         return change
 
