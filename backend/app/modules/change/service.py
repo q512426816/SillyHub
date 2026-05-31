@@ -379,6 +379,59 @@ class ChangeService:
         await self._session.commit()
         return change
 
+    async def transition_with_dispatch(
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        target_stage: str,
+        user_role: str,
+        *,
+        reason: str | None = None,
+        user_id: uuid.UUID | None = None,
+    ) -> dict:
+        """Execute transition and optionally dispatch an agent for the target stage.
+
+        Returns a dict with the change data and agent dispatch info.
+        """
+        change = await self.transition(
+            workspace_id=workspace_id,
+            change_id=change_id,
+            target_stage=target_stage,
+            user_role=user_role,
+            reason=reason,
+        )
+
+        # Attempt agent dispatch after commit (best-effort, non-blocking)
+        dispatch_result: dict = {}
+        if user_id is not None:
+            try:
+                from app.modules.change.dispatch import dispatch
+
+                dispatch_result = await dispatch(
+                    session=self._session,
+                    workspace_id=workspace_id,
+                    change_id=change_id,
+                    target_stage=target_stage,
+                    user_id=user_id,
+                )
+            except Exception as exc:
+                log.warning(
+                    "dispatch_after_transition_failed",
+                    change_id=str(change_id),
+                    target_stage=target_stage,
+                    error=str(exc),
+                )
+                dispatch_result = {
+                    "dispatched": False,
+                    "reason": "dispatch_exception",
+                    "error": str(exc),
+                }
+
+        return {
+            "change": change,
+            "agent_dispatch": dispatch_result,
+        }
+
     async def submit_feedback(
         self,
         workspace_id: uuid.UUID,

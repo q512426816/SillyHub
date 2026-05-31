@@ -482,6 +482,290 @@ class AgentService:
         """
         return await _cleanup_stale_runs_impl(self._session)
 
+    # ------------------------------------------------------------------
+    # Stage dispatch (change-level, not task-level)
+    # ------------------------------------------------------------------
+
+    async def start_stage_dispatch(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        user_id: uuid.UUID,
+        stage: str,
+        prompt_template: str,
+        requires_worktree: bool,
+        read_only: bool = True,
+    ) -> AgentRun:
+        """Create and execute an AgentRun driven by a stage transition.
+
+        This is separate from ``start_run`` because:
+        - No task_id is required (change-level dispatch).
+        - Worktree lease is optional (skipped for read-only stages).
+        - The prompt is rendered from the stage template, not from a Task.
+        """
+        from app.modules.change.dispatch import load_prompt_template
+        from app.modules.change.model import Change
+
+        # -- 1. Load change ---------------------------------------------------
+        change = await self._session.get(Change, change_id)
+        if change is None:
+            raise AgentRunError(
+                f"Change '{change_id}' not found.",
+                details={"change_id": str(change_id)},
+            )
+
+        workspace_root = await self._get_workspace_root(workspace_id)
+
+        # -- 2. Resolve worktree or working directory -------------------------
+        from app.modules.worktree.model import WorktreeLease
+
+        lease: WorktreeLease | None = None
+        work_dir: Path
+
+        if requires_worktree:
+            lease = await self._try_acquire_lease(
+                workspace_id=workspace_id,
+                change_id=change_id,
+                user_id=user_id,
+            )
+            if lease is None:
+                raise AgentRunError(
+                    f"Cannot acquire worktree for stage '{stage}': "
+                    "workspace has no git identity configured.",
+                    details={
+                        "stage": stage,
+                        "change_id": str(change_id),
+                        "workspace_id": str(workspace_id),
+                    },
+                )
+            work_dir = Path(lease.path) / "repo"
+        else:
+            # Read-only: use workspace root or change path
+            change_path = Path(change.path)
+            if change_path.is_dir():
+                work_dir = change_path
+            else:
+                work_dir = Path(workspace_root)
+
+        # -- 3. Build prompt --------------------------------------------------
+        prompt_context = {
+            "change_title": change.title or "",
+            "change_key": change.change_key,
+            "current_stage": change.current_stage or "draft",
+            "stage": stage,
+            "change_type": change.change_type or "",
+            "affected_components": ", ".join(change.affected_components),
+            "workspace_id": str(workspace_id),
+        }
+        prompt = load_prompt_template(prompt_template, prompt_context)
+        if not prompt:
+            raise AgentRunError(
+                f"Prompt template '{prompt_template}' not found or empty.",
+                details={"template": prompt_template},
+            )
+
+        # -- 4. Create AgentRun record ----------------------------------------
+        run = AgentRun(
+            id=uuid.uuid4(),
+            task_id=None,
+            lease_id=lease.id if lease else None,
+            change_id=change_id,
+            agent_type="claude_code",
+            status="pending",
+        )
+        self._session.add(run)
+        await self._session.commit()
+        await self._session.refresh(run)
+
+        # -- 5. Create M:N workspace association ------------------------------
+        self._session.add(AgentRunWorkspace(
+            agent_run_id=run.id,
+            workspace_id=workspace_id,
+        ))
+        await self._session.commit()
+
+        # -- 6. Execute agent --------------------------------------------------
+        await self._execute_stage_run(
+            run_id=run.id,
+            prompt=prompt,
+            work_dir=work_dir,
+            read_only=read_only,
+            workspace_id=workspace_id,
+            change_id=change_id,
+            user_id=user_id,
+            stage=stage,
+        )
+
+        await self._session.refresh(run)
+        return run
+
+    async def _try_acquire_lease(
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> WorktreeLease | None:
+        """Try to acquire a worktree lease for the change.
+
+        Returns the lease if successful, or ``None`` if the workspace
+        has no git identity configured (the caller should skip dispatch).
+        """
+        from app.modules.git_identity.model import GitIdentity
+        from app.modules.worktree.schema import WorktreeAcquireRequest
+        from app.modules.worktree.service import WorktreeService
+        from app.modules.workspace.model import Workspace
+
+        # Find workspace
+        ws_stmt = select(Workspace).where(col(Workspace.id) == workspace_id)
+        workspace = (await self._session.execute(ws_stmt)).scalars().first()
+        if workspace is None or not workspace.repo_url:
+            return None
+
+        # Find a usable git identity for this user
+        id_stmt = select(GitIdentity).where(
+            col(GitIdentity.user_id) == user_id,
+            col(GitIdentity.revoked_at).is_(None),
+        )
+        identity = (await self._session.execute(id_stmt)).scalars().first()
+        if identity is None:
+            return None
+
+        ws_svc = WorktreeService(self._session)
+        request = WorktreeAcquireRequest(
+            component_id=workspace_id,  # use workspace as component for stage dispatch
+            change_id=change_id,
+            task_id=uuid.uuid4(),  # synthetic task for lease
+            git_identity_id=identity.id,
+            ttl_seconds=3600,
+        )
+        lease = await ws_svc.acquire(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            data=request,
+        )
+        return lease
+
+    async def _execute_stage_run(
+        self,
+        *,
+        run_id: uuid.UUID,
+        prompt: str,
+        work_dir: Path,
+        read_only: bool,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        user_id: uuid.UUID,
+        stage: str,
+    ) -> None:
+        """Execute a stage-level agent run."""
+        run = await self._session.get(AgentRun, run_id)
+        if run is None:
+            log.error("stage_run_missing", run_id=str(run_id))
+            return
+
+        adapter_cls = ADAPTERS.get("claude_code")
+        if adapter_cls is None:
+            run.status = "failed"
+            run.finished_at = datetime.utcnow()
+            run.exit_code = 1
+            run.output_redacted = "Unknown agent type."
+            self._session.add(run)
+            await self._session.commit()
+            return
+
+        # Mark running
+        run.status = "running"
+        run.started_at = datetime.utcnow()
+        self._session.add(run)
+        await self._session.commit()
+
+        # Build a minimal bundle for the adapter
+        from app.modules.agent.base import AgentSpecBundle
+
+        bundle = AgentSpecBundle(
+            change_summary=f"Change stage: {stage}",
+            task_key=f"stage:{stage}",
+            task_title=f"Stage dispatch: {stage}",
+        )
+
+        # Ensure work directory exists
+        work_dir.mkdir(parents=True, exist_ok=True)
+        if read_only:
+            claude_md = (
+                f"# Stage Dispatch: {stage}\n\n"
+                f"{prompt}\n\n"
+                f"## Mode: READ-ONLY\n"
+                f"Do NOT modify any files. Only analyze and report.\n"
+            )
+        else:
+            claude_md = (
+                f"# Stage Dispatch: {stage}\n\n"
+                f"{prompt}\n\n"
+                f"## Mode: WRITE\n"
+                f"You may modify files in the worktree as needed.\n"
+            )
+        (work_dir / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
+
+        adapter = adapter_cls()
+        result = await adapter.run_with_bundle(run_id, bundle, work_dir)
+
+        # Update run record
+        run.status = "completed" if result.exit_code == 0 else "failed"
+        run.finished_at = datetime.utcnow()
+        run.exit_code = result.exit_code
+        run.output_redacted = result.redacted_output[:10000]
+        self._session.add(run)
+
+        # Log stdout/stderr
+        for channel, content in [
+            ("stdout", result.stdout),
+            ("stderr", result.stderr),
+        ]:
+            if content:
+                log_entry = AgentRunLog(
+                    id=uuid.uuid4(),
+                    run_id=run.id,
+                    channel=channel,
+                    content_redacted=redact_agent_output(content)[:5000],
+                )
+                self._session.add(log_entry)
+
+        # Write audit log
+        from app.modules.workflow.model import AuditLog
+
+        audit = AuditLog(
+            id=uuid.uuid4(),
+            workspace_id=workspace_id,
+            actor_id=user_id,
+            action="agent.stage_dispatch",
+            resource_type="agent_run",
+            resource_id=run.id,
+            details_json=json.dumps({
+                "change_id": str(change_id),
+                "stage": stage,
+                "agent_type": "claude_code",
+                "exit_code": result.exit_code,
+                "read_only": read_only,
+            }),
+        )
+        self._session.add(audit)
+
+        await self._session.commit()
+
+    async def _get_workspace_root(self, workspace_id: uuid.UUID) -> str:
+        """Get the root_path of a workspace."""
+        from app.modules.workspace.model import Workspace
+
+        ws_stmt = select(Workspace).where(col(Workspace.id) == workspace_id)
+        workspace = (await self._session.execute(ws_stmt)).scalars().first()
+        if workspace is None:
+            raise AgentRunError(
+                f"Workspace '{workspace_id}' not found.",
+                details={"workspace_id": str(workspace_id)},
+            )
+        return workspace.root_path
+
 
 async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
     """Scan for stale running-state AgentRuns and mark them as failed.

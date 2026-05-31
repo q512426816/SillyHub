@@ -18,6 +18,7 @@ class AgentRun(BaseModel, table=True):
     __table_args__ = (
         Index("ix_agent_runs_task", "task_id"),
         Index("ix_agent_runs_lease", "lease_id"),
+        Index("ix_agent_runs_change_id", "change_id"),
         Index(
             "ix_agent_runs_idempotency_key", "idempotency_key",
             unique=True,
@@ -128,6 +129,14 @@ class AgentRun(BaseModel, table=True):
         sa_column=Column(
             Uuid(as_uuid=True),
             ForeignKey("tool_policies.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    change_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("changes.id", ondelete="CASCADE"),
             nullable=True,
         ),
     )

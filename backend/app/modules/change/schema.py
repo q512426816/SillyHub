@@ -169,3 +169,16 @@ class ArchiveGateResponse(BaseModel):
     """归档门禁检查结果。"""
     can_archive: bool
     checks: list[ArchiveCheckItem] = Field(default_factory=list)
+
+
+# ── Agent Dispatch (task-04) ─────────────────────────────────────────────
+
+
+class DispatchResponse(BaseModel):
+    """Agent dispatch status for a change."""
+    change_id: uuid.UUID
+    current_stage: str
+    has_active_run: bool = False
+    config_enabled: bool = False
+    last_dispatch: dict | None = None
+    dispatch_result: dict | None = None
