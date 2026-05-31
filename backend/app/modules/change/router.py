@@ -13,6 +13,8 @@ from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.change.schema import (
+    ApprovalRead,
+    ApproveRequest,
     ChangeDocContent,
     ChangeDocMatrix,
     ChangeDocMatrixEntry,
@@ -22,6 +24,11 @@ from app.modules.change.schema import (
     ChangeReparseStats,
     ChangeSummary,
     ChangeWarning,
+    DocumentsSyncRequest,
+    DocumentsSyncResponse,
+    OkResponse,
+    ProgressUpdate,
+    RejectRequest,
 )
 from app.modules.change.service import ChangeService
 
@@ -150,3 +157,92 @@ async def reparse_changes(
         stats=ChangeReparseStats(**stats),
         warnings=warnings,
     )
+
+
+# ── Progress / Approval / Documents sync ─────────────────────────────────
+
+
+@router.post(
+    "/changes/{change_key}/progress",
+    response_model=OkResponse,
+)
+async def update_progress(
+    workspace_id: uuid.UUID,
+    change_key: str,
+    body: ProgressUpdate,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> OkResponse:
+    service = ChangeService(session)
+    await service.update_progress(
+        workspace_id,
+        change_key,
+        current_stage=body.currentStage,
+        stages=body.stages,
+        last_active=body.lastActive,
+    )
+    return OkResponse()
+
+
+@router.get(
+    "/changes/{change_key}/approval",
+    response_model=ApprovalRead,
+)
+async def get_approval(
+    workspace_id: uuid.UUID,
+    change_key: str,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+) -> ApprovalRead:
+    service = ChangeService(session)
+    approval_status, reason = await service.get_approval(workspace_id, change_key)
+    return ApprovalRead(status=approval_status, reason=reason)
+
+
+@router.post(
+    "/changes/{change_key}/approve",
+    response_model=OkResponse,
+)
+async def approve_change(
+    workspace_id: uuid.UUID,
+    change_key: str,
+    body: ApproveRequest,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> OkResponse:
+    service = ChangeService(session)
+    await service.approve(workspace_id, change_key, approved_by=body.approved_by)
+    return OkResponse()
+
+
+@router.post(
+    "/changes/{change_key}/reject",
+    response_model=OkResponse,
+)
+async def reject_change(
+    workspace_id: uuid.UUID,
+    change_key: str,
+    body: RejectRequest,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> OkResponse:
+    service = ChangeService(session)
+    await service.reject(workspace_id, change_key, reason=body.reason)
+    return OkResponse()
+
+
+@router.post(
+    "/changes/{change_key}/documents",
+    response_model=DocumentsSyncResponse,
+)
+async def sync_documents(
+    workspace_id: uuid.UUID,
+    change_key: str,
+    body: DocumentsSyncRequest,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> DocumentsSyncResponse:
+    service = ChangeService(session)
+    docs = body.iter_documents()
+    synced = await service.sync_documents(workspace_id, change_key, documents=docs)
+    return DocumentsSyncResponse(synced=synced)
