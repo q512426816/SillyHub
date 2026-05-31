@@ -405,15 +405,19 @@ class ChangeService:
         dispatch_result: dict = {}
         if user_id is not None:
             try:
+                from app.core.db import get_session_factory
                 from app.modules.change.dispatch import dispatch
 
-                dispatch_result = await dispatch(
-                    session=self._session,
-                    workspace_id=workspace_id,
-                    change_id=change_id,
-                    target_stage=target_stage,
-                    user_id=user_id,
-                )
+                # Use a fresh session to avoid conflicts with transition's session
+                factory = get_session_factory()
+                async with factory() as dispatch_session:
+                    dispatch_result = await dispatch(
+                        session=dispatch_session,
+                        workspace_id=workspace_id,
+                        change_id=change_id,
+                        target_stage=target_stage,
+                        user_id=user_id,
+                    )
             except Exception as exc:
                 log.warning(
                     "dispatch_after_transition_failed",

@@ -21,3 +21,8 @@ created_at: 2026-05-28 11:10:00
 文件：change/schema.py, service.py, router.py, task/schema.py, service.py, router.py, agent/schema.py, service.py, router.py, change/tests/test_router.py, task/tests/test_router.py
 蓝图：.sillyspec/changes/2026-05-28-component-as-workspace/tasks/task-03.md
 结果：schema 新增 workspace_ids 字段(ChangeRead/ChangeSummary/TaskSummary/TaskRead/AgentRunResponse)。service 层新增 M:N 查询(list_通过M:N子查询+去重、get支持M:N回退)、enrich方法(enrich_with_workspace_ids/enrich_summaries)、sync方法(_sync_change_workspaces/_sync_task_workspaces，reparse时自动创建关联)。router 层全部适配enrich调用。agent service 的 start_run 在创建 run 后写入M:N关联，list_runs 改用 M:N 查询。新增8个测试(4 change + 3 task)，全部80个测试通过无回归。
+
+## 2026-05-31 18:00:00 — Stage dispatch: clarifying — 修复前后端不匹配 + last_dispatch 状态更新 + 测试
+状态：进行中
+文件：frontend/src/lib/workflow.ts, frontend/src/lib/changes.ts, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, backend/app/modules/agent/service.py, backend/app/modules/change/dispatch.py, backend/tests/modules/change/test_dispatch.py
+蓝图：.sillyspec/changes/2026-05-31-stage-driven-agent-dispatch-32aeb1/design.md
