@@ -31,10 +31,39 @@ const STATUS_COLORS: Record<string, "success" | "outline" | "destructive" | "def
   unknown: "destructive",
 };
 
+const STAGE_VARIANT: Record<string, "outline" | "default" | "warning" | "destructive" | "success"> = {
+  created: "outline",
+  propose: "default",
+  plan: "warning",
+  execute: "destructive",
+  verify: "success",
+  archived: "outline",
+};
+
+const STAGE_LABEL: Record<string, string> = {
+  created: "已创建",
+  propose: "提案",
+  plan: "规划",
+  execute: "执行",
+  verify: "验证",
+  archived: "归档",
+};
+
+const STAGE_OPTIONS = [
+  { value: "", label: "全部阶段" },
+  { value: "created", label: "已创建" },
+  { value: "propose", label: "提案" },
+  { value: "plan", label: "规划" },
+  { value: "execute", label: "执行" },
+  { value: "verify", label: "验证" },
+  { value: "archived", label: "归档" },
+] as const;
+
 export default function ChangesPage({ params }: Props) {
   const workspaceId = params.id;
   const [tab, setTab] = useState<"active" | "archive">("active");
   const [searchQuery, setSearchQuery] = useState("");
+  const [stageFilter, setStageFilter] = useState("");
   const [activeItems, setActiveItems] = useState<ChangeSummary[]>([]);
   const [archiveItems, setArchiveItems] = useState<ChangeSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,15 +75,21 @@ export default function ChangesPage({ params }: Props) {
   const items = tab === "active" ? activeItems : archiveItems;
 
   const filtered = useMemo(() => {
-    if (!searchQuery.trim()) return items;
-    const q = searchQuery.toLowerCase();
-    return items.filter(
-      (c) =>
-        c.change_key.toLowerCase().includes(q) ||
-        (c.title ?? "").toLowerCase().includes(q) ||
-        c.affected_components.some((comp) => comp.toLowerCase().includes(q)),
-    );
-  }, [items, searchQuery]);
+    let result = items;
+    if (stageFilter) {
+      result = result.filter((c) => c.current_stage === stageFilter);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (c) =>
+          c.change_key.toLowerCase().includes(q) ||
+          (c.title ?? "").toLowerCase().includes(q) ||
+          c.affected_components.some((comp) => comp.toLowerCase().includes(q)),
+      );
+    }
+    return result;
+  }, [items, searchQuery, stageFilter]);
 
   const loadAll = async () => {
     setLoading(true);
@@ -112,11 +147,22 @@ export default function ChangesPage({ params }: Props) {
             onChange={(e) => setSearchQuery(e.target.value)}
             className="h-7 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none"
           />
+          <select
+            value={stageFilter}
+            onChange={(e) => setStageFilter(e.target.value)}
+            className="h-7 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none"
+          >
+            {STAGE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
           <Link
             href={`/workspaces/${workspaceId}/create-change`}
             className="inline-flex h-7 items-center rounded border border-border px-2 text-xs text-foreground hover:bg-muted"
           >
-            + 创建变更
+            + 新建变更
           </Link>
           <Button size="sm" onClick={handleReparse} disabled={reparsing}>
             {reparsing ? "解析中…" : "重新扫描"}
@@ -188,6 +234,7 @@ export default function ChangesPage({ params }: Props) {
                 <th>标题</th>
                 <th>类型</th>
                 <th>状态</th>
+                <th>阶段</th>
                 <th>影响组件</th>
                 <th className="text-right">更新时间</th>
               </tr>
@@ -209,6 +256,13 @@ export default function ChangesPage({ params }: Props) {
                     <Badge variant={STATUS_COLORS[c.status] ?? "outline"}>
                       {c.status}
                     </Badge>
+                  </td>
+                  <td>
+                    {c.current_stage && (
+                      <Badge variant={STAGE_VARIANT[c.current_stage] ?? "outline"}>
+                        {STAGE_LABEL[c.current_stage] ?? c.current_stage}
+                      </Badge>
+                    )}
                   </td>
                   <td className="max-w-[180px] truncate text-[11px]">
                     {c.affected_components.length > 0

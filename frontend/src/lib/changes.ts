@@ -9,6 +9,7 @@ export type ChangeSummary = {
   change_type: string | null;
   affected_components: string[];
   owner_id: string | null;
+  current_stage: string | null;
   created_at: string;
   updated_at: string;
 };
