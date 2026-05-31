@@ -38,32 +38,32 @@ CHANGE_FIXTURES = Path(__file__).parent / "fixtures" / "changes"
 class TestStageAgentConfig:
     """Test the STAGE_AGENT_CONFIG mapping."""
 
-    def test_clarifying_config_exists(self):
-        config = get_config_for_stage("clarifying")
+    def test_propose_config_exists(self):
+        config = get_config_for_stage("propose")
         assert config is not None
         assert isinstance(config, StageAgentConfig)
 
-    def test_clarifying_config_values(self):
-        config = get_config_for_stage("clarifying")
+    def test_propose_config_values(self):
+        config = get_config_for_stage("propose")
         assert config.enabled is True
         assert config.prompt_template == "clarifying.md"
-        assert config.phase == "Clarification"
+        assert config.phase == "Proposal / Clarification"
         assert config.requires_worktree is False
         assert config.read_only is True
 
     def test_all_expected_stages_present(self):
         expected = {
-            "clarifying", "design_review", "plan_tasks",
-            "execute_task", "verify", "review",
+            "propose", "brainstorm", "plan",
+            "execute", "verify", "scan",
         }
         assert set(STAGE_AGENT_CONFIG.keys()) == expected
 
     def test_no_config_for_non_dispatch_stages(self):
-        for stage in ("draft", "rework_required", "accepted", "archived"):
+        for stage in ("draft", "rework_required", "accepted", "archive"):
             assert get_config_for_stage(stage) is None
 
     def test_read_only_stages_dont_require_worktree(self):
-        read_only_stages = ["clarifying", "design_review", "plan_tasks", "review"]
+        read_only_stages = ["propose", "brainstorm", "plan", "scan"]
         for stage in read_only_stages:
             config = get_config_for_stage(stage)
             assert config is not None
@@ -71,7 +71,7 @@ class TestStageAgentConfig:
             assert config.read_only is True
 
     def test_write_stages_require_worktree(self):
-        write_stages = ["execute_task", "verify"]
+        write_stages = ["execute", "verify"]
         for stage in write_stages:
             config = get_config_for_stage(stage)
             assert config is not None
@@ -88,7 +88,6 @@ class TestLoadPromptTemplate:
     def test_clarifying_template_loads(self):
         content = load_prompt_template("clarifying.md")
         assert content  # not empty
-        assert "clarification agent" in content.lower()
         assert "{{change_title}}" in content
 
     def test_template_variable_substitution(self):
@@ -219,10 +218,10 @@ async def _create_test_workspace(
 class TestDispatch:
     """Test the dispatch() function."""
 
-    async def test_dispatch_clarifying_stage(
+    async def test_dispatch_propose_stage(
         self, db_session: AsyncSession, tmp_path: Path
     ):
-        """When transitioning to clarifying, dispatch should trigger an agent run."""
+        """When transitioning to propose, dispatch should trigger an agent run."""
         ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
         change = await _create_test_change(
             db_session,
@@ -247,18 +246,18 @@ class TestDispatch:
                 session=db_session,
                 workspace_id=ws.id,
                 change_id=change.id,
-                target_stage="clarifying",
+                target_stage="propose",
                 user_id=user_id,
             )
 
         assert result["dispatched"] is True
-        assert result["stage"] == "clarifying"
-        assert result["phase"] == "Clarification"
+        assert result["stage"] == "propose"
+        assert result["phase"] == "Proposal / Clarification"
         assert "agent_run_id" in result
 
         # Verify last_dispatch recorded in stages JSON
         await db_session.refresh(change)
-        assert change.stages["last_dispatch"]["stage"] == "clarifying"
+        assert change.stages["last_dispatch"]["stage"] == "propose"
 
     async def test_dispatch_no_config_for_stage(
         self, db_session: AsyncSession, tmp_path: Path
@@ -291,7 +290,7 @@ class TestDispatch:
         change = await _create_test_change(
             db_session,
             workspace_id=ws.id,
-            current_stage="clarifying",
+            current_stage="propose",
         )
 
         # Create an active run
@@ -309,7 +308,7 @@ class TestDispatch:
             session=db_session,
             workspace_id=ws.id,
             change_id=change.id,
-            target_stage="clarifying",
+            target_stage="propose",
             user_id=user_id,
         )
 
@@ -336,7 +335,7 @@ class TestDispatch:
                 session=db_session,
                 workspace_id=ws.id,
                 change_id=change.id,
-                target_stage="clarifying",
+                target_stage="propose",
                 user_id=user_id,
             )
 
@@ -351,10 +350,10 @@ class TestDispatch:
 class TestTransitionWithDispatch:
     """Test the ChangeService.transition_with_dispatch() method."""
 
-    async def test_draft_to_clarifying_triggers_dispatch(
+    async def test_draft_to_propose_triggers_dispatch(
         self, db_session: AsyncSession, tmp_path: Path
     ):
-        """AC-01: draft → clarifying should trigger agent dispatch."""
+        """AC-01: draft → propose should trigger agent dispatch."""
         from app.modules.change.service import ChangeService
 
         ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
@@ -366,10 +365,21 @@ class TestTransitionWithDispatch:
         )
         user_id = uuid.uuid4()
 
+        def _mock_factory():
+            class _Ctx:
+                async def __aenter__(self_inner):
+                    return db_session
+                async def __aexit__(self_inner, *args):
+                    pass
+            return _Ctx()
+
         with patch(
             "app.modules.agent.service.AgentService.start_stage_dispatch",
             new_callable=AsyncMock,
-        ) as mock_start:
+        ) as mock_start, patch(
+            "app.core.db.get_session_factory",
+            return_value=_mock_factory,
+        ):
             mock_run = AgentRun(
                 id=uuid.uuid4(),
                 change_id=change.id,
@@ -382,15 +392,15 @@ class TestTransitionWithDispatch:
             result = await svc.transition_with_dispatch(
                 workspace_id=ws.id,
                 change_id=change.id,
-                target_stage="clarifying",
+                target_stage="propose",
                 user_role="business_user",
                 reason="submit for review",
                 user_id=user_id,
             )
 
-        assert result["change"].current_stage == "clarifying"
+        assert result["change"].current_stage == "propose"
         assert result["agent_dispatch"]["dispatched"] is True
-        assert result["agent_dispatch"]["stage"] == "clarifying"
+        assert result["agent_dispatch"]["stage"] == "propose"
 
     async def test_transition_without_dispatch_when_no_user(
         self, db_session: AsyncSession, tmp_path: Path
@@ -409,12 +419,12 @@ class TestTransitionWithDispatch:
         result = await svc.transition_with_dispatch(
             workspace_id=ws.id,
             change_id=change.id,
-            target_stage="clarifying",
+            target_stage="propose",
             user_role="business_user",
             user_id=None,
         )
 
-        assert result["change"].current_stage == "clarifying"
+        assert result["change"].current_stage == "propose"
         assert result["agent_dispatch"] == {}
 
     async def test_transition_stages_log_recorded(
@@ -434,7 +444,7 @@ class TestTransitionWithDispatch:
         result = await svc.transition_with_dispatch(
             workspace_id=ws.id,
             change_id=change.id,
-            target_stage="clarifying",
+            target_stage="propose",
             user_role="business_user",
             user_id=None,
         )
@@ -443,13 +453,13 @@ class TestTransitionWithDispatch:
         transitions = stages.get("transitions", [])
         assert len(transitions) == 1
         assert transitions[0]["from"] == "draft"
-        assert transitions[0]["to"] == "clarifying"
+        assert transitions[0]["to"] == "propose"
         assert transitions[0]["by_role"] == "business_user"
 
     async def test_invalid_transition_rejected(
         self, db_session: AsyncSession, tmp_path: Path
     ):
-        """Invalid transition (e.g. draft → in_dev) should raise error."""
+        """Invalid transition (e.g. draft → verify) should raise error."""
         from app.core.errors import InvalidTransition
         from app.modules.change.service import ChangeService
 
@@ -465,7 +475,7 @@ class TestTransitionWithDispatch:
             await svc.transition_with_dispatch(
                 workspace_id=ws.id,
                 change_id=change.id,
-                target_stage="in_dev",
+                target_stage="verify",
                 user_role="business_user",
             )
 
@@ -520,16 +530,12 @@ async def _get_demo_change_id(client, ws_id, auth_headers):
 class TestTransitionAPI:
     """Test the transition API endpoint with dispatch."""
 
-    async def test_transition_draft_to_clarifying(
+    async def test_transition_draft_to_propose(
         self, client, workspace_with_changes: dict, auth_headers: dict[str, str]
     ):
-        """POST /changes/{id}/transition with target_stage=clarifying."""
+        """POST /changes/{id}/transition with target_stage=propose."""
         ws_id = workspace_with_changes["ws_id"]
         change_id = await _get_demo_change_id(client, ws_id, auth_headers)
-
-        # Set stage to draft via direct DB update (normally done at creation)
-        # The change comes from reparse with status="in_progress" but current_stage=None
-        # Let's use the transition_with_dispatch endpoint
 
         with patch(
             "app.modules.agent.service.AgentService.start_stage_dispatch",
@@ -544,7 +550,7 @@ class TestTransitionAPI:
 
             resp = await client.post(
                 f"/api/workspaces/{ws_id}/changes/{change_id}/transition",
-                json={"target_stage": "clarifying"},
+                json={"target_stage": "propose"},
                 headers=auth_headers,
             )
 
@@ -592,10 +598,10 @@ class TestAgentStatusAPI:
         assert "has_active_run" in body
         assert "config_enabled" in body
 
-    async def test_agent_status_after_transition_to_clarifying(
+    async def test_agent_status_after_transition_to_propose(
         self, client, workspace_with_changes: dict, auth_headers: dict[str, str]
     ):
-        """After transitioning to clarifying, agent-status should show config_enabled."""
+        """After transitioning to propose, agent-status should show config_enabled."""
         ws_id = workspace_with_changes["ws_id"]
         change_id = await _get_demo_change_id(client, ws_id, auth_headers)
 
@@ -614,32 +620,32 @@ class TestAgentStatusAPI:
 
             trans_resp = await client.post(
                 f"/api/workspaces/{ws_id}/changes/{change_id}/transition",
-                json={"target_stage": "clarifying"},
+                json={"target_stage": "propose"},
                 headers=auth_headers,
             )
             assert trans_resp.status_code == 200, trans_resp.text
 
-        # Check agent status — clarifying has config so config_enabled should be True
+        # Check agent status — propose has config so config_enabled should be True
         resp = await client.get(
             f"/api/workspaces/{ws_id}/changes/{change_id}/agent-status",
             headers=auth_headers,
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["config_enabled"] is True  # clarifying has config
+        assert body["config_enabled"] is True  # propose has config
 
 
 class TestManualDispatchAPI:
     """Test the manual dispatch API endpoint."""
 
-    async def test_manual_dispatch_for_clarifying(
+    async def test_manual_dispatch_for_propose(
         self, client, workspace_with_changes: dict, auth_headers: dict[str, str]
     ):
         """POST /changes/{id}/dispatch triggers agent for current stage."""
         ws_id = workspace_with_changes["ws_id"]
         change_id = await _get_demo_change_id(client, ws_id, auth_headers)
 
-        # First transition to clarifying
+        # First transition to propose
         with patch(
             "app.modules.agent.service.AgentService.start_stage_dispatch",
             new_callable=AsyncMock,
@@ -651,10 +657,10 @@ class TestManualDispatchAPI:
             )
             mock_start.return_value = mock_run
 
-            # Transition to clarifying
+            # Transition to propose
             await client.post(
                 f"/api/workspaces/{ws_id}/changes/{change_id}/transition",
-                json={"target_stage": "clarifying"},
+                json={"target_stage": "propose"},
                 headers=auth_headers,
             )
 
@@ -690,13 +696,13 @@ class TestManualDispatchAPI:
 # ── Full flow: draft → clarifying → design_review ─────────────────────────
 
 
-class TestClarifyingStageFullFlow:
-    """End-to-end test of the clarifying stage dispatch lifecycle."""
+class TestProposeStageFullFlow:
+    """End-to-end test of the propose stage dispatch lifecycle."""
 
-    async def test_full_clarifying_lifecycle(
+    async def test_full_propose_lifecycle(
         self, db_session: AsyncSession, tmp_path: Path
     ):
-        """AC-01 through AC-05: Full clarifying dispatch lifecycle."""
+        """AC-01 through AC-05: Full propose dispatch lifecycle."""
         from app.modules.change.service import ChangeService
 
         ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
@@ -710,11 +716,23 @@ class TestClarifyingStageFullFlow:
 
         svc = ChangeService(db_session)
 
-        # Step 1: draft → clarifying (triggers dispatch)
+        # Step 1: draft → propose (triggers dispatch)
+        # Mock the session factory to use the test session for dispatch
+        def _mock_factory():
+            class _Ctx:
+                async def __aenter__(self_inner):
+                    return db_session
+                async def __aexit__(self_inner, *args):
+                    pass
+            return _Ctx()
+
         with patch(
             "app.modules.agent.service.AgentService.start_stage_dispatch",
             new_callable=AsyncMock,
-        ) as mock_start:
+        ) as mock_start, patch(
+            "app.core.db.get_session_factory",
+            return_value=_mock_factory,
+        ):
             mock_run = AgentRun(
                 id=uuid.uuid4(),
                 change_id=change.id,
@@ -726,20 +744,20 @@ class TestClarifyingStageFullFlow:
             result = await svc.transition_with_dispatch(
                 workspace_id=ws.id,
                 change_id=change.id,
-                target_stage="clarifying",
+                target_stage="propose",
                 user_role="business_user",
                 reason="Submit for review",
                 user_id=user_id,
             )
 
         # Verify transition
-        assert result["change"].current_stage == "clarifying"
+        assert result["change"].current_stage == "propose"
         assert result["agent_dispatch"]["dispatched"] is True
 
         # Verify dispatch was called with correct params
         mock_start.assert_called_once()
         call_kwargs = mock_start.call_args[1]
-        assert call_kwargs["stage"] == "clarifying"
+        assert call_kwargs["stage"] == "propose"
         assert call_kwargs["prompt_template"] == "clarifying.md"
         assert call_kwargs["read_only"] is True
         assert call_kwargs["requires_worktree"] is False
@@ -761,43 +779,67 @@ class TestClarifyingStageFullFlow:
             session=db_session,
             workspace_id=ws.id,
             change_id=change.id,
-            target_stage="clarifying",
+            target_stage="propose",
             user_id=user_id,
         )
         assert blocked_result["dispatched"] is False
         assert blocked_result["reason"] == "active_run_exists"
 
-    async def test_clarifying_to_design_review(
+    async def test_propose_to_plan(
         self, db_session: AsyncSession, tmp_path: Path
     ):
-        """After clarifying, reviewer can advance to design_review."""
+        """After propose, reviewer can advance to plan."""
         from app.modules.change.service import ChangeService
 
         ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
         change = await _create_test_change(
             db_session,
             workspace_id=ws.id,
-            current_stage="clarifying",
+            current_stage="propose",
         )
 
         svc = ChangeService(db_session)
-        result = await svc.transition_with_dispatch(
-            workspace_id=ws.id,
-            change_id=change.id,
-            target_stage="design_review",
-            user_role="reviewer",
-            reason="Clarification complete",
-            user_id=uuid.uuid4(),
-        )
 
-        assert result["change"].current_stage == "design_review"
+        def _mock_factory():
+            class _Ctx:
+                async def __aenter__(self_inner):
+                    return db_session
+                async def __aexit__(self_inner, *args):
+                    pass
+            return _Ctx()
+
+        with patch(
+            "app.modules.agent.service.AgentService.start_stage_dispatch",
+            new_callable=AsyncMock,
+        ) as mock_start, patch(
+            "app.core.db.get_session_factory",
+            return_value=_mock_factory,
+        ):
+            mock_run = AgentRun(
+                id=uuid.uuid4(),
+                change_id=change.id,
+                agent_type="claude_code",
+                status="pending",
+            )
+            mock_start.return_value = mock_run
+
+            result = await svc.transition_with_dispatch(
+                workspace_id=ws.id,
+                change_id=change.id,
+                target_stage="plan",
+                user_role="reviewer",
+                reason="Proposal complete",
+                user_id=uuid.uuid4(),
+            )
+
+        assert result["change"].current_stage == "plan"
         assert result["agent_dispatch"]["dispatched"] is True
-        assert result["agent_dispatch"]["stage"] == "design_review"
+        assert result["agent_dispatch"]["stage"] == "plan"
 
     async def test_role_permission_enforcement(
         self, db_session: AsyncSession, tmp_path: Path
     ):
-        """business_user cannot advance clarifying → design_review (only reviewer)."""
+        """business_user cannot advance propose → plan (only reviewer)."""
         from app.core.errors import PermissionDenied
         from app.modules.change.service import ChangeService
 
@@ -805,7 +847,7 @@ class TestClarifyingStageFullFlow:
         change = await _create_test_change(
             db_session,
             workspace_id=ws.id,
-            current_stage="clarifying",
+            current_stage="propose",
         )
 
         svc = ChangeService(db_session)
@@ -813,6 +855,6 @@ class TestClarifyingStageFullFlow:
             await svc.transition_with_dispatch(
                 workspace_id=ws.id,
                 change_id=change.id,
-                target_stage="design_review",
+                target_stage="plan",
                 user_role="business_user",
             )

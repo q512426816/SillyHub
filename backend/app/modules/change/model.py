@@ -17,53 +17,86 @@ from app.models.base import BaseModel
 
 
 class StageEnum(str, enum.Enum):
-    """Change 工作流 10 阶段枚举。"""
-    draft = "draft"
-    clarifying = "clarifying"
-    design_review = "design_review"
-    ready_for_dev = "ready_for_dev"
-    in_dev = "in_dev"
-    technical_verification = "technical_verification"
-    business_review = "business_review"
-    rework_required = "rework_required"
-    accepted = "accepted"
-    archived = "archived"
+    """统一工作流阶段枚举：SillySpec 8 主阶段 + Hub 3 业务扩展。"""
+
+    # ── SillySpec 主阶段（由 CLI 管理） ──
+    SCAN = "scan"
+    BRAINSTORM = "brainstorm"
+    PROPOSE = "propose"
+    PLAN = "plan"
+    EXECUTE = "execute"
+    VERIFY = "verify"
+    ARCHIVE = "archive"
+    QUICK = "quick"
+
+    # ── Hub 业务扩展阶段 ──
+    DRAFT = "draft"
+    REWORK_REQUIRED = "rework_required"
+    ACCEPTED = "accepted"
+
+    @classmethod
+    def spec_stages(cls) -> list["StageEnum"]:
+        """SillySpec 主阶段列表。"""
+        return [
+            cls.SCAN, cls.BRAINSTORM, cls.PROPOSE, cls.PLAN,
+            cls.EXECUTE, cls.VERIFY, cls.ARCHIVE, cls.QUICK,
+        ]
+
+    @classmethod
+    def hub_stages(cls) -> list["StageEnum"]:
+        """Hub 业务扩展阶段列表。"""
+        return [cls.DRAFT, cls.REWORK_REQUIRED, cls.ACCEPTED]
+
+    @classmethod
+    def all_stages(cls) -> list["StageEnum"]:
+        """全部阶段列表。"""
+        return cls.spec_stages() + cls.hub_stages()
 
 
 TRANSITIONS: dict[StageEnum, dict[StageEnum, list[str]]] = {
-    StageEnum.draft: {
-        StageEnum.clarifying: ["business_user", "agent"],
+    # ── Hub: draft → SillySpec 入口 ──
+    StageEnum.DRAFT: {
+        StageEnum.PROPOSE: ["business_user", "agent"],
+        StageEnum.QUICK: ["business_user", "agent"],
+        StageEnum.EXECUTE: ["admin"],
+        StageEnum.SCAN: ["agent"],
     },
-    StageEnum.clarifying: {
-        StageEnum.design_review: ["reviewer"],
+    # ── SillySpec 主线流程 ──
+    StageEnum.SCAN: {
+        StageEnum.BRAINSTORM: ["agent"],
     },
-    StageEnum.design_review: {
-        StageEnum.ready_for_dev: ["reviewer"],
-        StageEnum.clarifying: ["reviewer"],
+    StageEnum.BRAINSTORM: {
+        StageEnum.PROPOSE: ["agent"],
     },
-    StageEnum.ready_for_dev: {
-        StageEnum.in_dev: ["system"],
+    StageEnum.PROPOSE: {
+        StageEnum.PLAN: ["reviewer", "agent"],
+        StageEnum.BRAINSTORM: ["reviewer"],
     },
-    StageEnum.in_dev: {
-        StageEnum.technical_verification: ["agent"],
+    StageEnum.PLAN: {
+        StageEnum.EXECUTE: ["reviewer", "agent"],
+        StageEnum.PROPOSE: ["reviewer"],
     },
-    StageEnum.technical_verification: {
-        StageEnum.business_review: ["agent", "reviewer"],
-        StageEnum.rework_required: ["reviewer"],
+    StageEnum.EXECUTE: {
+        StageEnum.VERIFY: ["agent"],
     },
-    StageEnum.business_review: {
-        StageEnum.accepted: ["reviewer"],
-        StageEnum.rework_required: ["reviewer"],
+    StageEnum.VERIFY: {
+        StageEnum.ACCEPTED: ["reviewer"],
+        StageEnum.REWORK_REQUIRED: ["reviewer"],
     },
-    StageEnum.rework_required: {
-        StageEnum.clarifying: ["reviewer"],
-        StageEnum.design_review: ["reviewer"],
-        StageEnum.in_dev: ["reviewer"],
+    StageEnum.QUICK: {
+        StageEnum.ACCEPTED: ["reviewer"],
+        StageEnum.REWORK_REQUIRED: ["reviewer"],
     },
-    StageEnum.accepted: {
-        StageEnum.archived: ["system"],
+    # ── Hub 业务扩展 ──
+    StageEnum.REWORK_REQUIRED: {
+        StageEnum.PROPOSE: ["reviewer"],
+        StageEnum.PLAN: ["reviewer"],
+        StageEnum.EXECUTE: ["reviewer"],
     },
-    StageEnum.archived: {},
+    StageEnum.ACCEPTED: {
+        StageEnum.ARCHIVE: ["system"],
+    },
+    StageEnum.ARCHIVE: {},
 }
 
 

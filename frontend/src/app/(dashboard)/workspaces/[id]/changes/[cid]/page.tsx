@@ -36,54 +36,64 @@ interface Props {
   params: { id: string; cid: string };
 }
 
-// ── Workflow Stages (task-06) ──────────────────────────────────────
+// ── Workflow Stages (unified with SillySpec) ───────────────────────
+// SillySpec 主线: scan → brainstorm → propose → plan → execute → verify → archive + quick
+// Hub 扩展: draft, rework_required, accepted
 const WORKFLOW_STAGES = [
-  "draft", "clarifying", "design_review", "ready_for_dev",
-  "in_dev", "technical_verification", "business_review",
-  "rework_required", "accepted", "archived",
+  "draft", "scan", "brainstorm", "propose", "plan",
+  "execute", "verify", "rework_required",
+  "accepted", "archive", "quick",
 ] as const;
 
 const WORKFLOW_STAGE_LABELS: Record<string, string> = {
-  draft: "草稿", clarifying: "需求澄清", design_review: "设计评审",
-  ready_for_dev: "待开发", in_dev: "开发中",
-  technical_verification: "技术验证", business_review: "业务验收",
-  rework_required: "需返工", accepted: "已验收", archived: "已归档",
+  draft: "草稿", scan: "扫描", brainstorm: "需求分析",
+  propose: "提案", plan: "规划", execute: "执行",
+  verify: "验证", rework_required: "需返工",
+  accepted: "已验收", archive: "归档", quick: "快速",
 };
 
 const WORKFLOW_STAGE_COLORS: Record<string, "success" | "outline" | "destructive" | "default" | "warning"> = {
-  draft: "outline", clarifying: "warning", design_review: "warning",
-  ready_for_dev: "default", in_dev: "default",
-  technical_verification: "warning", business_review: "warning",
-  rework_required: "destructive", accepted: "success", archived: "default",
+  draft: "outline", scan: "default", brainstorm: "warning",
+  propose: "warning", plan: "default", execute: "default",
+  verify: "warning", rework_required: "destructive",
+  accepted: "success", archive: "default", quick: "default",
 };
 
 const WORKFLOW_TRANSITIONS: Record<
   string,
   { target: string; label: string; variant: "default" | "outline" | "destructive"; icon?: string }[]
 > = {
-  draft: [{ target: "clarifying", label: "提交审核", variant: "default", icon: "📝" }],
-  clarifying: [{ target: "design_review", label: "提交设计评审", variant: "default", icon: "🔍" }],
-  design_review: [
-    { target: "ready_for_dev", label: "评审通过", variant: "default", icon: "✅" },
-    { target: "clarifying", label: "退回澄清", variant: "destructive", icon: "↩️" },
+  draft: [
+    { target: "propose", label: "提交提案", variant: "default", icon: "📝" },
+    { target: "quick", label: "快速变更", variant: "outline", icon: "⚡" },
+    { target: "scan", label: "开始扫描", variant: "outline", icon: "🔍" },
   ],
-  ready_for_dev: [{ target: "in_dev", label: "开始开发", variant: "default", icon: "🚀" }],
-  in_dev: [{ target: "technical_verification", label: "提交自测", variant: "default", icon: "🧪" }],
-  technical_verification: [
-    { target: "business_review", label: "提交验收", variant: "default", icon: "📋" },
+  scan: [{ target: "brainstorm", label: "需求分析", variant: "default", icon: "💡" }],
+  brainstorm: [{ target: "propose", label: "提交提案", variant: "default", icon: "📝" }],
+  propose: [
+    { target: "plan", label: "评审通过", variant: "default", icon: "✅" },
+    { target: "brainstorm", label: "退回需求分析", variant: "destructive", icon: "↩️" },
+  ],
+  plan: [
+    { target: "execute", label: "开始执行", variant: "default", icon: "🚀" },
+    { target: "propose", label: "退回提案", variant: "destructive", icon: "↩️" },
+  ],
+  execute: [{ target: "verify", label: "提交验证", variant: "default", icon: "🧪" }],
+  verify: [
+    { target: "accepted", label: "验证通过", variant: "default", icon: "✅" },
     { target: "rework_required", label: "退回返工", variant: "destructive", icon: "⚠️" },
   ],
-  business_review: [
-    { target: "accepted", label: "验收通过", variant: "default", icon: "✅" },
+  quick: [
+    { target: "accepted", label: "验证通过", variant: "default", icon: "✅" },
     { target: "rework_required", label: "退回返工", variant: "destructive", icon: "⚠️" },
   ],
   rework_required: [
-    { target: "clarifying", label: "返回澄清", variant: "outline", icon: "↩️" },
-    { target: "design_review", label: "返回设计评审", variant: "outline", icon: "↩️" },
-    { target: "in_dev", label: "返回开发", variant: "outline", icon: "↩️" },
+    { target: "propose", label: "返回提案", variant: "outline", icon: "↩️" },
+    { target: "plan", label: "返回规划", variant: "outline", icon: "↩️" },
+    { target: "execute", label: "返回执行", variant: "outline", icon: "↩️" },
   ],
-  accepted: [{ target: "archived", label: "归档", variant: "default", icon: "📦" }],
-  archived: [],
+  accepted: [{ target: "archive", label: "归档", variant: "default", icon: "📦" }],
+  archive: [],
 };
 
 const APPROVAL_LABELS: Record<string, string> = {

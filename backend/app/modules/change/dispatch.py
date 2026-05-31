@@ -40,23 +40,15 @@ class StageAgentConfig:
 
 
 STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
-    "clarifying": StageAgentConfig(
+    "propose": StageAgentConfig(
         enabled=True,
         prompt_template="clarifying.md",
-        phase="Clarification",
+        phase="Proposal / Clarification",
         requires_worktree=False,
         read_only=True,
         description="Review change proposal and identify ambiguities; produce clarifying questions.",
     ),
-    "design_review": StageAgentConfig(
-        enabled=True,
-        prompt_template="design_review.md",
-        phase="Design Review",
-        requires_worktree=False,
-        read_only=True,
-        description="Analyze change design docs for completeness, consistency, and risk.",
-    ),
-    "plan_tasks": StageAgentConfig(
+    "plan": StageAgentConfig(
         enabled=True,
         prompt_template="plan_tasks.md",
         phase="Task Planning",
@@ -64,7 +56,7 @@ STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
         read_only=True,
         description="Break down the change into concrete implementation tasks.",
     ),
-    "execute_task": StageAgentConfig(
+    "execute": StageAgentConfig(
         enabled=True,
         prompt_template="execute_task.md",
         phase="Task Execution",
@@ -80,13 +72,21 @@ STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
         read_only=False,
         description="Run verification checks against the implementation in the worktree.",
     ),
-    "review": StageAgentConfig(
+    "brainstorm": StageAgentConfig(
         enabled=True,
-        prompt_template="review.md",
-        phase="Business Review",
+        prompt_template="design_review.md",
+        phase="Brainstorm / Design Review",
         requires_worktree=False,
         read_only=True,
-        description="Summarize the change for business review, highlighting risks and impact.",
+        description="Analyze change design docs for completeness, consistency, and risk.",
+    ),
+    "scan": StageAgentConfig(
+        enabled=True,
+        prompt_template="review.md",
+        phase="Scan / Review",
+        requires_worktree=False,
+        read_only=True,
+        description="Summarize the change for review, highlighting risks and impact.",
     ),
 }
 
