@@ -13,9 +13,13 @@ import {
   getChangeDocumentContent,
   getChangeDocuments,
   rejectChange,
+  submitFeedback,
+  checkArchiveGate,
   type ChangeDocContent,
   type ChangeDocMatrix,
   type ChangeRead,
+  type ArchiveGateResponse,
+  type ArchiveCheckItem,
 } from "@/lib/changes";
 import { getTaskBoard, type TaskBoard } from "@/lib/tasks";
 import {
@@ -29,14 +33,54 @@ interface Props {
   params: { id: string; cid: string };
 }
 
-const STAGES = ["scan", "brainstorm", "plan", "execute", "verify", "archived"] as const;
-const STAGE_LABELS: Record<string, string> = {
-  scan: "扫描",
-  brainstorm: "构思",
-  plan: "规划",
-  execute: "执行",
-  verify: "验证",
-  archived: "归档",
+// ── Workflow Stages (task-06) ──────────────────────────────────────
+const WORKFLOW_STAGES = [
+  "draft", "clarifying", "design_review", "ready_for_dev",
+  "in_dev", "technical_verification", "business_review",
+  "rework_required", "accepted", "archived",
+] as const;
+
+const WORKFLOW_STAGE_LABELS: Record<string, string> = {
+  draft: "草稿", clarifying: "需求澄清", design_review: "设计评审",
+  ready_for_dev: "待开发", in_dev: "开发中",
+  technical_verification: "技术验证", business_review: "业务验收",
+  rework_required: "需返工", accepted: "已验收", archived: "已归档",
+};
+
+const WORKFLOW_STAGE_COLORS: Record<string, "success" | "outline" | "destructive" | "default" | "warning"> = {
+  draft: "outline", clarifying: "warning", design_review: "warning",
+  ready_for_dev: "default", in_dev: "default",
+  technical_verification: "warning", business_review: "warning",
+  rework_required: "destructive", accepted: "success", archived: "default",
+};
+
+const WORKFLOW_TRANSITIONS: Record<
+  string,
+  { target: string; label: string; variant: "default" | "outline" | "destructive"; icon?: string }[]
+> = {
+  draft: [{ target: "clarifying", label: "提交审核", variant: "default", icon: "📝" }],
+  clarifying: [{ target: "design_review", label: "提交设计评审", variant: "default", icon: "🔍" }],
+  design_review: [
+    { target: "ready_for_dev", label: "评审通过", variant: "default", icon: "✅" },
+    { target: "clarifying", label: "退回澄清", variant: "destructive", icon: "↩️" },
+  ],
+  ready_for_dev: [{ target: "in_dev", label: "开始开发", variant: "default", icon: "🚀" }],
+  in_dev: [{ target: "technical_verification", label: "提交自测", variant: "default", icon: "🧪" }],
+  technical_verification: [
+    { target: "business_review", label: "提交验收", variant: "default", icon: "📋" },
+    { target: "rework_required", label: "退回返工", variant: "destructive", icon: "⚠️" },
+  ],
+  business_review: [
+    { target: "accepted", label: "验收通过", variant: "default", icon: "✅" },
+    { target: "rework_required", label: "退回返工", variant: "destructive", icon: "⚠️" },
+  ],
+  rework_required: [
+    { target: "clarifying", label: "返回澄清", variant: "outline", icon: "↩️" },
+    { target: "design_review", label: "返回设计评审", variant: "outline", icon: "↩️" },
+    { target: "in_dev", label: "返回开发", variant: "outline", icon: "↩️" },
+  ],
+  accepted: [{ target: "archived", label: "归档", variant: "default", icon: "📦" }],
+  archived: [],
 };
 
 const APPROVAL_LABELS: Record<string, string> = {
@@ -83,16 +127,6 @@ const STATUS_LABELS: Record<string, string> = {
   archived: "已归档",
 };
 
-const TRANSITIONS: Record<string, { target: string; label: string; variant: "default" | "outline" | "destructive" }[]> = {
-  draft: [{ target: "proposed", label: "提议", variant: "default" }],
-  proposed: [{ target: "reviewed", label: "标记已审查", variant: "default" }, { target: "rejected", label: "驳回", variant: "destructive" }],
-  reviewed: [{ target: "approved", label: "批准", variant: "default" }, { target: "rejected", label: "驳回", variant: "destructive" }],
-  approved: [{ target: "in_progress", label: "开始执行", variant: "default" }],
-  in_progress: [{ target: "completed", label: "标记完成", variant: "default" }],
-  completed: [{ target: "merged", label: "标记已合并", variant: "default" }],
-  rejected: [{ target: "draft", label: "回到草稿", variant: "outline" }],
-};
-
 const COMPONENT_EMOJI: Record<string, string> = {
   frontend: "🌐",
   web: "🌐",
@@ -132,6 +166,16 @@ export default function ChangeDetailPage({ params }: Props) {
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // ── Feedback form state (task-06) ──────────────────────────────────
+  const [feedbackCategory, setFeedbackCategory] = useState<string>("");
+  const [feedbackText, setFeedbackText] = useState("");
+  const [submittingFeedback, setSubmittingFeedback] = useState(false);
+
+  // ── Archive gate state (task-06) ───────────────────────────────────
+  const [archiveGate, setArchiveGate] = useState<ArchiveGateResponse | null>(null);
+  const [loadingArchiveGate, setLoadingArchiveGate] = useState(false);
+  const [archiving, setArchiving] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -176,13 +220,16 @@ export default function ChangeDetailPage({ params }: Props) {
     }
   };
 
-  const handleTransition = async (targetStatus: string) => {
+  const handleTransition = async (targetStage: string) => {
     if (!change) return;
     setTransitioning(true);
     setPageError(null);
     try {
-      const result = await transitionChange(workspaceId, changeId, targetStatus);
-      setChange({ ...change, status: result.status });
+      const result = await transitionChange(workspaceId, changeId, targetStage);
+      setChange({ ...change, current_stage: targetStage, status: result.status ?? change.status });
+      if (targetStage === "accepted") {
+        setArchiveGate(null);
+      }
     } catch (err) {
       if (err instanceof ApiError) {
         const violations = (err.details as { violations?: string[] })?.violations;
@@ -262,6 +309,70 @@ export default function ChangeDetailPage({ params }: Props) {
     }
   };
 
+  // ── Feedback submit handler (task-06) ────────────────────────────
+  const handleSubmitFeedback = async () => {
+    if (!change || !feedbackCategory || !feedbackText.trim()) return;
+    setSubmittingFeedback(true);
+    setPageError(null);
+    try {
+      const result = await submitFeedback(
+        workspaceId,
+        changeId,
+        feedbackCategory,
+        feedbackText.trim(),
+      );
+      setChange({
+        ...change,
+        current_stage: result.current_stage ?? change.current_stage,
+        status: result.status ?? change.status,
+      });
+      setFeedbackCategory("");
+      setFeedbackText("");
+      setSuccessMsg("✅ 反馈已提交");
+      setTimeout(() => setSuccessMsg(null), 3000);
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "提交反馈失败");
+    } finally {
+      setSubmittingFeedback(false);
+    }
+  };
+
+  // ── Archive gate handler (task-06) ──────────────────────────────
+  const loadArchiveGate = async () => {
+    setLoadingArchiveGate(true);
+    try {
+      const result = await checkArchiveGate(workspaceId, changeId);
+      setArchiveGate(result);
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "加载归档检查失败");
+    } finally {
+      setLoadingArchiveGate(false);
+    }
+  };
+
+  const handleArchive = async () => {
+    if (!change) return;
+    setArchiving(true);
+    setPageError(null);
+    try {
+      await handleTransition("archived");
+      setSuccessMsg("📦 变更已归档");
+      setTimeout(() => setSuccessMsg(null), 3000);
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "归档失败");
+    } finally {
+      setArchiving(false);
+    }
+  };
+
+  // Auto-load archive gate when entering "accepted" stage
+  useEffect(() => {
+    if (change?.current_stage === "accepted" && !archiveGate && !loadingArchiveGate) {
+      void loadArchiveGate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [change?.current_stage]);
+
   if (loading) {
     return (
       <div className="mx-auto max-w-6xl px-6 py-6">
@@ -286,7 +397,7 @@ export default function ChangeDetailPage({ params }: Props) {
     );
   }
 
-  const availableTransitions = TRANSITIONS[change.status] ?? [];
+  const availableTransitions = WORKFLOW_TRANSITIONS[change.current_stage ?? "draft"] ?? [];
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
@@ -298,18 +409,9 @@ export default function ChangeDetailPage({ params }: Props) {
         </p>
         <div className="mt-0.5 flex items-center gap-2">
           <h1 className="truncate">{change.title ?? change.change_key}</h1>
-          <Badge variant={STATUS_COLORS[change.status] ?? "outline"}>
-            {STATUS_LABELS[change.status] ?? change.status}
+          <Badge variant={WORKFLOW_STAGE_COLORS[change.current_stage ?? "draft"] ?? "outline"}>
+            {WORKFLOW_STAGE_LABELS[change.current_stage ?? "draft"] ?? change.current_stage ?? "未知"}
           </Badge>
-          {change.current_stage !== "archived" && change.current_stage !== "completed" && (
-            <Button
-              size="sm"
-              onClick={() => void handleExecute()}
-              disabled={executing}
-            >
-              {executing ? "执行中…" : "🚀 启动执行"}
-            </Button>
-          )}
         </div>
         <div className="mt-1 flex flex-wrap gap-x-5 gap-y-0.5 text-xs text-muted-foreground">
           <span>Key: <code className="font-mono">{change.change_key}</code></span>
@@ -320,14 +422,14 @@ export default function ChangeDetailPage({ params }: Props) {
       </header>
 
       {change.current_stage && (() => {
-        const currentIndex = STAGES.indexOf(change.current_stage as typeof STAGES[number]);
+        const currentIndex = WORKFLOW_STAGES.indexOf(change.current_stage as typeof WORKFLOW_STAGES[number]);
         if (currentIndex < 0) return null;
         const stagesObj = change.stages as Record<string, { lastActive?: string }> | null;
         const lastActive = stagesObj?.[change.current_stage]?.lastActive ?? change.updated_at;
         return (
           <div className="rounded-md border bg-card px-3 py-2">
-            <div className="flex items-center gap-1">
-              {STAGES.map((stage, i) => {
+            <div className="flex flex-wrap items-center gap-1">
+              {WORKFLOW_STAGES.map((stage, i) => {
                 const isCompleted = currentIndex > i;
                 const isCurrent = currentIndex === i;
                 return (
@@ -348,16 +450,16 @@ export default function ChangeDetailPage({ params }: Props) {
                         isCurrent ? "text-foreground font-medium" : "text-muted-foreground"
                       }`}
                     >
-                      {STAGE_LABELS[stage]}
+                      {WORKFLOW_STAGE_LABELS[stage]}
                     </span>
-                    {i < STAGES.length - 1 && <div className="mx-1 h-px flex-1 bg-border" />}
+                    {i < WORKFLOW_STAGES.length - 1 && <div className="mx-1 h-px w-3 bg-border" />}
                   </div>
                 );
               })}
             </div>
             {lastActive && (
               <p className="mt-1.5 text-[11px] text-muted-foreground">
-                最后活跃: {new Date(lastActive).toLocaleString()}
+                当前阶段: {new Date(lastActive).toLocaleString()}
               </p>
             )}
           </div>
@@ -379,9 +481,19 @@ export default function ChangeDetailPage({ params }: Props) {
             onClick={() => void handleTransition(t.target)}
             disabled={transitioning}
           >
+            {t.icon && <span className="mr-1">{t.icon}</span>}
             {t.label}
           </Button>
         ))}
+        {change.current_stage === "ready_for_dev" && (
+          <Button
+            size="sm"
+            onClick={() => void handleExecute()}
+            disabled={executing}
+          >
+            {executing ? "执行中…" : "🚀 启动执行"}
+          </Button>
+        )}
       </div>
 
       {pageError && (
@@ -622,6 +734,103 @@ export default function ChangeDetailPage({ params }: Props) {
               </div>
             )}
           </section>
+
+          {(change.current_stage === "business_review" || change.current_stage === "technical_verification") && (
+            <section className="rounded-md border bg-card p-3">
+              <h3 className="mb-2 text-xs font-medium">提交反馈（返工）</h3>
+              <div className="space-y-2">
+                <div>
+                  <label className="mb-1 block text-[11px] text-muted-foreground">反馈类别</label>
+                  <select
+                    className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs focus:border-ring focus:outline-none"
+                    value={feedbackCategory}
+                    onChange={(e) => setFeedbackCategory(e.target.value)}
+                  >
+                    <option value="">— 选择类别 —</option>
+                    <option value="A">A — Bug / 快速修复</option>
+                    <option value="B">B — 需求理解错误（重设计）</option>
+                    <option value="C">C — 歧义 / 信息不足</option>
+                    <option value="D">D — 衍生新 change（当前通过）</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] text-muted-foreground">反馈内容</label>
+                  <textarea
+                    className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs focus:border-ring focus:outline-none"
+                    rows={3}
+                    placeholder="描述具体问题…"
+                    value={feedbackText}
+                    onChange={(e) => setFeedbackText(e.target.value)}
+                    maxLength={2000}
+                  />
+                </div>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={submittingFeedback || !feedbackCategory || !feedbackText.trim()}
+                  onClick={() => void handleSubmitFeedback()}
+                >
+                  {submittingFeedback ? "提交中…" : "提交反馈并退回"}
+                </Button>
+              </div>
+            </section>
+          )}
+
+          {change.current_stage === "accepted" && (
+            <section className="rounded-md border bg-card">
+              <div className="flex items-center justify-between border-b px-3 py-2">
+                <h2 className="text-xs font-medium">归档门禁</h2>
+                {archiveGate && (
+                  <Badge variant={archiveGate.can_archive ? "success" : "destructive"}>
+                    {archiveGate.can_archive ? "✅ 全部通过" : `${archiveGate.failed_checks.length} 项未通过`}
+                  </Badge>
+                )}
+              </div>
+              <div className="px-3 py-2 space-y-2">
+                {loadingArchiveGate ? (
+                  <p className="text-xs text-muted-foreground">检查中…</p>
+                ) : archiveGate ? (
+                  <>
+                    {[
+                      { check: "no_unresolved_feedback", label: "无未解决反馈" },
+                      { check: "ac_confirmed", label: "验收标准已确认" },
+                      { check: "tech_verification_passed", label: "技术验证已通过" },
+                      { check: "business_review_passed", label: "业务评审已通过" },
+                      { check: "feedback_categorized", label: "反馈已分类" },
+                      { check: "documents_complete", label: "文档已全部完成" },
+                    ].map((item) => {
+                      const failed = archiveGate.failed_checks.find((c) => c.check === item.check);
+                      const passed = !failed;
+                      return (
+                        <div key={item.check} className="flex items-center gap-2 text-xs">
+                          <span className={passed ? "text-emerald-600" : "text-destructive"}>
+                            {passed ? "✓" : "✗"}
+                          </span>
+                          <span className={passed ? "text-foreground" : "text-destructive"}>
+                            {item.label}
+                          </span>
+                          {!passed && failed?.message && (
+                            <span className="text-muted-foreground text-[10px]">— {failed.message}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                    <div className="pt-2">
+                      <Button
+                        size="sm"
+                        disabled={!archiveGate.can_archive || archiving}
+                        onClick={() => void handleArchive()}
+                      >
+                        {archiving ? "归档中…" : "📦 确认归档"}
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground">加载归档检查…</p>
+                )}
+              </div>
+            </section>
+          )}
 
           {change.affected_components.length > 0 && (
             <section className="rounded-md border bg-card">
