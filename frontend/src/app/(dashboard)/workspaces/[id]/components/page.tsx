@@ -10,6 +10,7 @@ import { ApiError } from "@/lib/api";
 import {
   getWorkspaceRelations,
   getWorkspace,
+  listWorkspaces,
   rescanWorkspace,
   reparseWorkspace,
   type Workspace,
@@ -39,6 +40,7 @@ export default function ComponentsPage({ params }: Props) {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [outgoing, setOutgoing] = useState<WorkspaceRelation[]>([]);
   const [incoming, setIncoming] = useState<WorkspaceRelation[]>([]);
+  const [children, setChildren] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(true);
   const [reparsing, setReparsing] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -54,13 +56,21 @@ export default function ComponentsPage({ params }: Props) {
     setLoading(true);
     setPageError(null);
     try {
-      const [ws, relData] = await Promise.all([
+      const [ws, relData, allWs] = await Promise.all([
         getWorkspace(workspaceId),
         getWorkspaceRelations(workspaceId),
+        listWorkspaces(),
       ]);
       setWorkspace(ws);
       setOutgoing(relData.outgoing);
       setIncoming(relData.incoming);
+      // 子组件：root_path 以当前 workspace 的 root_path + "/" 开头（排除自身）
+      const prefix = ws.root_path + "/";
+      setChildren(
+        allWs.items.filter(
+          (w: Workspace) => w.root_path.startsWith(prefix) && w.id !== ws.id,
+        ),
+      );
     } catch (err) {
       setPageError(
         err instanceof ApiError ? err.message : "加载关系失败",
@@ -188,6 +198,46 @@ export default function ComponentsPage({ params }: Props) {
           </dl>
         </section>
       )}
+
+      {/* 子组件列表 */}
+      <section className="rounded-md border bg-card">
+        <div className="border-b px-3 py-2">
+          <h3 className="text-sm font-medium">
+            子组件 · {children.length} 个
+          </h3>
+        </div>
+        {children.length === 0 ? (
+          <p className="py-6 text-center text-xs text-muted-foreground">无子组件</p>
+        ) : (
+          <div className="divide-y">
+            {children.map((child) => (
+              <div key={child.id} className="flex items-center justify-between px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <Badge variant={child.status === "active" ? "success" : "outline"}>
+                    {child.status}
+                  </Badge>
+                  <Link href={`/workspaces/${child.id}/components`} className="text-sm font-medium text-primary hover:underline">
+                    {child.name}
+                  </Link>
+                  {child.component_key && (
+                    <span className="font-mono text-[11px] text-muted-foreground">{child.component_key}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {child.role && <span className="text-xs text-muted-foreground">{child.role}</span>}
+                  {child.tech_stack.length > 0 && (
+                    <div className="flex gap-1">
+                      {child.tech_stack.map((t) => (
+                        <Badge key={t} variant="outline" className="text-[10px]">{t}</Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* Outgoing relations */}
       <section className="rounded-md border bg-card">
