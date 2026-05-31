@@ -28,29 +28,31 @@ async def _make_workspace(db_session, tmp_path: Path) -> uuid.UUID:
 
 async def _make_change(
     db_session, ws_id: uuid.UUID, status: str = "done",
-) -> uuid.UUID:
+) -> tuple[uuid.UUID, str]:
     from app.modules.change.model import Change
 
     change_id = uuid.uuid4()
+    change_key = f"change-{change_id.hex[:8]}"
     change = Change(
         id=change_id,
         workspace_id=ws_id,
-        change_key=f"change-{change_id.hex[:8]}",
+        change_key=change_key,
         title="Test Change",
         status=status,
-        location="local",
-        path="changes/local/test-change",
+        location="active",
+        path=f".sillyspec/changes/{change_key}",
     )
     db_session.add(change)
     await db_session.commit()
-    return change_id
+    return change_id, change_key
 
 
 async def test_archive_change_success(db_session, tmp_path):
     ws_id = await _make_workspace(db_session, tmp_path)
-    change_id = await _make_change(db_session, ws_id, status="done")
+    change_id, change_key = await _make_change(db_session, ws_id, status="done")
 
-    change_dir = tmp_path / "changes" / "local" / "test-change"
+    # v4 layout: .sillyspec/changes/<change_key>/MASTER.md
+    change_dir = tmp_path / ".sillyspec" / "changes" / change_key
     change_dir.mkdir(parents=True)
     (change_dir / "MASTER.md").write_text("# Change", encoding="utf-8")
 
@@ -58,15 +60,17 @@ async def test_archive_change_success(db_session, tmp_path):
     archived = await svc.archive_change(ws_id, change_id)
     assert archived.status == "archived"
     assert archived.archived_at is not None
+    assert archived.location == "archive"
 
-    archive_dir = tmp_path / "archive" / "changes-local-test-change"
+    # v4 archive: .sillyspec/changes/archive/<change_key>/
+    archive_dir = tmp_path / ".sillyspec" / "changes" / "archive" / change_key
     assert archive_dir.exists()
     assert (archive_dir / "MASTER.md").exists()
 
 
 async def test_archive_change_not_done(db_session, tmp_path):
     ws_id = await _make_workspace(db_session, tmp_path)
-    change_id = await _make_change(db_session, ws_id, status="in_progress")
+    change_id, _ = await _make_change(db_session, ws_id, status="in_progress")
 
     svc = ArchiveService(db_session)
     with pytest.raises(ChangeNotArchivable):
@@ -82,7 +86,7 @@ async def test_archive_change_not_found(db_session, tmp_path):
 
 async def test_distill_knowledge(db_session, tmp_path):
     ws_id = await _make_workspace(db_session, tmp_path)
-    change_id = await _make_change(db_session, ws_id, status="done")
+    change_id, change_key = await _make_change(db_session, ws_id, status="done")
 
     from app.modules.change.model import ChangeDocument
 
@@ -90,13 +94,13 @@ async def test_distill_knowledge(db_session, tmp_path):
         id=uuid.uuid4(),
         change_id=change_id,
         doc_type="proposal",
-        path="changes/local/test-change/proposal.md",
+        path=f".sillyspec/changes/{change_key}/proposal.md",
         exists=True,
     )
     db_session.add(doc)
     await db_session.commit()
 
-    doc_path = tmp_path / "changes" / "local" / "test-change" / "proposal.md"
+    doc_path = tmp_path / ".sillyspec" / "changes" / change_key / "proposal.md"
     doc_path.parent.mkdir(parents=True, exist_ok=True)
     doc_path.write_text("# Proposal\nThis is a test proposal.", encoding="utf-8")
 
@@ -106,7 +110,7 @@ async def test_distill_knowledge(db_session, tmp_path):
     assert len(summary["documents"]) == 1
     assert summary["documents"][0]["type"] == "proposal"
 
-    knowledge_file = tmp_path / ".sillyspec" / "knowledge" / f"change-{change_id.hex[:8]}.md"
+    knowledge_file = tmp_path / ".sillyspec" / "knowledge" / f"{change_key}.md"
     assert knowledge_file.exists()
 
 

@@ -55,8 +55,8 @@ class TestParseWorkspace:
     def test_missing_master_still_creates_change(
         self, parser: ChangeParser, silly_root: Path
     ) -> None:
-        # Add a directory without MASTER.md
-        no_master_dir = silly_root / ".sillyspec" / "changes" / "change" / "no-master"
+        # Add a directory without MASTER.md (v4 layout: changes/<name>/)
+        no_master_dir = silly_root / ".sillyspec" / "changes" / "no-master"
         no_master_dir.mkdir(parents=True, exist_ok=True)
         result = parser.parse_workspace(silly_root)
         no_master = next(c for c in result.changes if c.change_key == "no-master")
@@ -69,7 +69,7 @@ class TestParseWorkspace:
         result = parser.parse_workspace(silly_root)
         demo = next(c for c in result.changes if c.change_key == "2026-05-25-demo-feature")
         doc_types = {d.doc_type for d in demo.docs}
-        # Should have all 7 standard types
+        # Should have all standard types
         assert STANDARD_DOC_TYPES.issubset(doc_types)
 
     def test_existing_vs_missing_docs(self, parser: ChangeParser, silly_root: Path) -> None:
@@ -83,10 +83,10 @@ class TestParseWorkspace:
         assert "design" in existing
         assert "plan" in missing
         assert "tasks" in missing
-        assert "verification" in missing
+        assert "verify_result" in missing
 
     def test_prototypes_detected(self, parser: ChangeParser, silly_root: Path) -> None:
-        change_dir = silly_root / ".sillyspec" / "changes" / "change" / "2026-05-25-demo-feature"
+        change_dir = silly_root / ".sillyspec" / "changes" / "2026-05-25-demo-feature"
         (change_dir / "prototype-search.html").write_text("<html></html>", encoding="utf-8")
         result = parser.parse_workspace(silly_root)
         demo = next(c for c in result.changes if c.change_key == "2026-05-25-demo-feature")
@@ -100,7 +100,6 @@ class TestParseWorkspace:
             silly_root
             / ".sillyspec"
             / "changes"
-            / "change"
             / "2026-05-25-demo-feature"
             / "references"
         )
@@ -115,8 +114,6 @@ class TestParseWorkspace:
     def test_missing_changes_dir(self, parser: ChangeParser, tmp_path: Path) -> None:
         result = parser.parse_workspace(tmp_path)
         assert len(result.changes) == 0
-        warning_codes = [w.code for w in result.warnings]
-        assert "CHANGES_DIR_MISSING" in warning_codes
 
     def test_path_traversal_guard(self, parser: ChangeParser, silly_root: Path) -> None:
         result = parser.parse_workspace(silly_root)
@@ -130,3 +127,23 @@ class TestParseWorkspace:
     ) -> None:
         result = parser.parse_workspace(silly_root)
         assert all(c.change_key for c in result.changes)
+
+    def test_legacy_change_dir_with_warning(self, parser: ChangeParser, silly_root: Path) -> None:
+        """Legacy changes/change/<key>/ directories are still scanned with warning."""
+        legacy_dir = silly_root / ".sillyspec" / "changes" / "change" / "legacy-change"
+        legacy_dir.mkdir(parents=True, exist_ok=True)
+        (legacy_dir / "MASTER.md").write_text(
+            "---\ntitle: Legacy Change\nstatus: draft\n---\n# Legacy",
+            encoding="utf-8",
+        )
+        result = parser.parse_workspace(silly_root)
+        legacy = next(c for c in result.changes if c.change_key == "legacy-change")
+        assert legacy.location == "active"
+        warning_codes = [w.code for w in result.warnings]
+        assert "LEGACY_CHANGE_DIR" in warning_codes
+
+    def test_archive_excluded_from_active_scan(self, parser: ChangeParser, silly_root: Path) -> None:
+        """The 'archive' directory itself should not appear as an active change."""
+        result = parser.parse_workspace(silly_root)
+        keys = {c.change_key for c in result.changes}
+        assert "archive" not in keys
