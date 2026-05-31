@@ -72,6 +72,40 @@ export type ChangeReparseResponse = {
   warnings: ChangeWarning[];
 };
 
+// ── Workflow Types (task-05) ────────────────────────────────────────────
+
+/** 阶段流转请求参数 */
+export type TransitionRequest = {
+  /** 目标阶段，对应后端 StageEnum 值 */
+  target_stage: string;
+  /** 流转原因（可选） */
+  reason?: string;
+};
+
+/** 反馈提交请求参数 */
+export type FeedbackRequest = {
+  /** 反馈类别: A=Bug, B=设计错误, C=信息不足, D=衍生新change */
+  category: string;
+  /** 反馈内容 */
+  text: string;
+};
+
+/** 归档门禁单项检查结果 */
+export type ArchiveCheckItem = {
+  /** 检查项名称 */
+  check: string;
+  /** 未通过时的说明信息 */
+  message: string;
+};
+
+/** 归档门禁检查响应 */
+export type ArchiveGateResponse = {
+  /** 是否全部通过，可执行归档 */
+  can_archive: boolean;
+  /** 未通过的检查项列表 */
+  failed_checks: ArchiveCheckItem[];
+};
+
 /** 创建变更的请求参数 */
 export type CreateChangeInput = {
   title: string;
@@ -213,5 +247,63 @@ export function executeChange(
   return apiFetch<{ ok: boolean; run_id: string }>(
     `/api/workspaces/${workspaceId}/changes/${changeKey}/execute`,
     { method: "POST" },
+  );
+}
+
+/**
+ * 阶段流转 — POST /api/workspaces/{wid}/changes/{cid}/transition
+ *
+ * 将 change 从当前阶段流转到 target_stage。
+ * 后端会校验 TRANSITIONS 合法性和角色权限。
+ */
+export function transitionChange(
+  workspaceId: string,
+  changeId: string,
+  targetStage: string,
+  reason?: string,
+) {
+  const body: TransitionRequest = { target_stage: targetStage };
+  if (reason !== undefined) {
+    body.reason = reason;
+  }
+  return apiFetch<ChangeRead>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/transition`,
+    {
+      method: "POST",
+      json: body,
+    },
+  );
+}
+
+/**
+ * 提交反馈 — POST /api/workspaces/{wid}/changes/{cid}/feedback
+ *
+ * 在 technical_verification 或 business_review 阶段提交反馈。
+ * 后端根据 category 自动决定返工目标阶段，并触发 rework_required 流转。
+ */
+export function submitFeedback(
+  workspaceId: string,
+  changeId: string,
+  category: string,
+  text: string,
+) {
+  return apiFetch<ChangeRead>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/feedback`,
+    {
+      method: "POST",
+      json: { category, text } satisfies FeedbackRequest,
+    },
+  );
+}
+
+/**
+ * 归档门禁检查 — GET /api/workspaces/{wid}/changes/{cid}/archive-gate
+ *
+ * 检查 change 是否满足归档的前置条件（6 项检查）。
+ * 返回 can_archive 标志和未通过项列表。
+ */
+export function checkArchiveGate(workspaceId: string, changeId: string) {
+  return apiFetch<ArchiveGateResponse>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/archive-gate`,
   );
 }
