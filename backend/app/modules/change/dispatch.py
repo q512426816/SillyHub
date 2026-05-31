@@ -209,6 +209,206 @@ async def dispatch(
 
 
 # ---------------------------------------------------------------------------
+# SillySpecStageDispatchService — unified dispatch entry (task-07)
+# ---------------------------------------------------------------------------
+
+
+class SillySpecStageDispatchService:
+    """Unified dispatch entry: create AgentRun + compose agent instructions.
+
+    Replaces the legacy ``dispatch()`` function as the sole entry point
+    for all stage-level agent dispatch.  Callers include:
+    - ChangeService.transition_with_dispatch()
+    - POST /changes/{id}/dispatch route
+    - sync_stage_status() internal auto-dispatch
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        """Initialize the dispatch service.
+
+        Args:
+            session: Async database session.
+        """
+        self._session = session
+
+    async def dispatch_next_step(
+        self,
+        session: AsyncSession,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        user_id: uuid.UUID,
+        target_stage: str,
+    ) -> dict[str, Any]:
+        """Dispatch the next step for a change stage.
+
+        Checks stage config -> checks active runs -> builds bundle
+        -> creates AgentRun -> starts execution -> returns result.
+
+        Args:
+            session: Async database session.
+            workspace_id: Workspace UUID.
+            change_id: Change UUID.
+            user_id: User UUID triggering the dispatch.
+            target_stage: Target SillySpec stage name (e.g. "propose").
+
+        Returns:
+            Dict with dispatched, agent_run_id, stage, reason, etc.
+
+        Raises:
+            ChangeNotFound: change_id does not correspond to an existing Change.
+        """
+        from app.core.errors import ChangeNotFound
+        from app.modules.agent.base import AgentSpecBundle
+        from app.modules.workspace.model import AgentRunWorkspace
+
+        # Step 1: Check STAGE_AGENT_CONFIG
+        config = STAGE_AGENT_CONFIG.get(target_stage)
+        if config is None:
+            return {"dispatched": False, "reason": "stage_not_configured", "stage": target_stage}
+        if not config.enabled:
+            return {"dispatched": False, "reason": "stage_not_enabled", "stage": target_stage}
+
+        # Step 2: Check Change exists
+        change = await session.get(Change, change_id)
+        if change is None:
+            raise ChangeNotFound(f"Change '{change_id}' not found.")
+
+        # Step 3: Check active AgentRun (prevent duplicate dispatch)
+        if await has_active_run(session, change_id):
+            return {"dispatched": False, "reason": "active_run_exists", "stage": target_stage}
+
+        # Step 4: Build AgentSpecBundle
+        try:
+            await self._build_stage_bundle(session, change_id, target_stage, workspace_id)
+        except Exception as exc:
+            log.warning(
+                "bundle_build_failed",
+                change_id=str(change_id),
+                stage=target_stage,
+                error=str(exc),
+            )
+            return {"dispatched": False, "reason": "bundle_build_error", "stage": target_stage}
+
+        # Step 5: Create AgentRun record
+        run = AgentRun(
+            id=uuid.uuid4(),
+            task_id=None,              # stage-level dispatch, no task association
+            lease_id=None,             # determined by AgentService based on config
+            change_id=change_id,
+            agent_type="claude_code",
+            status="pending",
+            spec_strategy="sillyspec",
+        )
+        session.add(run)
+
+        # Step 6: Create M:N workspace association
+        session.add(AgentRunWorkspace(
+            agent_run_id=run.id,
+            workspace_id=workspace_id,
+        ))
+        await session.commit()
+        await session.refresh(run)
+
+        # Step 7: Record last_dispatch in change.stages JSON
+        stages = change.stages or {}
+        stages["last_dispatch"] = {
+            "stage": target_stage,
+            "user_id": str(user_id),
+            "at": datetime.now(timezone.utc).isoformat(),
+            "run_id": str(run.id),
+            "config": {
+                "phase": config.phase,
+                "requires_worktree": config.requires_worktree,
+                "read_only": config.read_only,
+            },
+        }
+        change.stages = stages
+        session.add(change)
+        await session.commit()
+
+        # Step 8: Start Agent execution
+        try:
+            from app.modules.agent.service import AgentService
+
+            agent_service = AgentService(session)
+            await agent_service.start_stage_dispatch(
+                workspace_id=workspace_id,
+                change_id=change_id,
+                user_id=user_id,
+                stage=target_stage,
+                prompt_template=config.prompt_template,
+                requires_worktree=config.requires_worktree,
+                read_only=config.read_only,
+            )
+        except Exception as exc:
+            log.warning("agent_start_failed", run_id=str(run.id), error=str(exc))
+            # Mark run as failed, keep record for debugging
+            run.status = "failed"
+            run.output_redacted = f"Agent start failed: {exc}"
+            session.add(run)
+            await session.commit()
+            return {"dispatched": False, "reason": "agent_start_error", "stage": target_stage}
+
+        # Step 9: Return success
+        return {
+            "dispatched": True,
+            "agent_run_id": str(run.id),
+            "stage": target_stage,
+        }
+
+    async def _build_stage_bundle(
+        self,
+        session: AsyncSession,
+        change_id: uuid.UUID,
+        stage: str,
+        workspace_id: uuid.UUID,
+    ) -> "AgentSpecBundle":
+        """Build a stage-level AgentSpecBundle.
+
+        Tries ``context_builder.build_stage_bundle()`` first; if unavailable
+        (e.g. task-05 not yet complete), falls back to a minimal bundle.
+
+        Args:
+            session: Async database session.
+            change_id: Change UUID.
+            stage: Target stage name.
+            workspace_id: Workspace UUID.
+
+        Returns:
+            AgentSpecBundle with stage_dispatch=True.
+        """
+        from app.modules.agent.base import AgentSpecBundle
+
+        # Try task-05 build_stage_bundle
+        try:
+            from app.modules.agent.context_builder import build_stage_bundle
+
+            return await build_stage_bundle(
+                session=session,
+                change_id=change_id,
+                stage=stage,
+                workspace_id=workspace_id,
+            )
+        except ImportError:
+            log.info("build_stage_bundle_not_available, using fallback")
+        except Exception as exc:
+            log.warning("build_stage_bundle_failed", error=str(exc))
+
+        # Fallback: minimal bundle
+        change = await session.get(Change, change_id)
+        return AgentSpecBundle(
+            change_summary=change.title if change else f"Stage dispatch: {stage}",
+            task_key=f"stage:{stage}",
+            task_title=f"Stage dispatch: {stage}",
+            stage_dispatch=True,
+            change_key=change.change_key if change else None,
+            stage=stage,
+            spec_root=None,
+            read_only=False,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Prompt template loader
 # ---------------------------------------------------------------------------
 

@@ -108,17 +108,13 @@ async def execute_change(
     session: SessionDep,
     user: CurrentUser,
 ) -> dict:
-    """Trigger change execution — create a SillySpec AgentRun and dispatch in background."""
-    from pathlib import Path
-
+    """Trigger change execution — dispatch via unified stage dispatch service."""
     from sqlalchemy import select
     from sqlmodel import col
 
-    from app.core.errors import AppError, WorkspaceNotFound
-    from app.modules.agent.coordinator import ExecutionCoordinatorService
+    from app.core.errors import AppError
+    from app.modules.change.dispatch import SillySpecStageDispatchService
     from app.modules.change.model import Change
-    from app.modules.workspace.model import Workspace
-    from app.modules.workspace.service import _rewrite_path
 
     # Look up the change record
     stmt = select(Change).where(
@@ -129,33 +125,35 @@ async def execute_change(
     if change is None:
         raise AppError(f"Change '{change_key}' not found.", http_status=404)
 
-    # ── Stage guard (task-04) ──────────────────────────────────────────────
+    # Stage guard
     current_stage = getattr(change, "current_stage", None) or "draft"
     if current_stage != "ready_for_dev":
         raise AppError(
-            f"Change '{change_key}' 当前阶段为 '{current_stage}'，"
-            f"仅当阶段为 'ready_for_dev' 时可执行。"
-            f"请先完成设计评审并流转至 ready_for_dev。",
+            f"Change '{change_key}' \u5f53\u524d\u9636\u6bb5\u4e3a '{current_stage}'\uff0c"
+            f"\u4ec5\u5f53\u9636\u6bb5\u4e3a 'ready_for_dev' \u65f6\u53ef\u6267\u884c\u3002"
+            f"\u8bf7\u5148\u5b8c\u6210\u8bbe\u8ba1\u8bc4\u5ba1\u5e76\u6d41\u8f6c\u81f3 ready_for_dev\u3002",
             http_status=409,
         )
-    # ── End stage guard ────────────────────────────────────────────────────
 
-    # Resolve repo directory from workspace
-    workspace = await session.get(Workspace, workspace_id)
-    if workspace is None:
-        raise WorkspaceNotFound("Workspace not found.")
-    repo_dir = Path(_rewrite_path(workspace.root_path))
-
-    # Determine scope from change_type, default to "full"
-    scope = change.change_type if change.change_type in ("full", "quick") else "full"
-
-    coordinator = ExecutionCoordinatorService(session)
-    run = await coordinator.start_sillyspec_run(
-        change_key=change_key,
+    # Dispatch via unified service
+    service = SillySpecStageDispatchService(session)
+    result = await service.dispatch_next_step(
+        session=session,
         workspace_id=workspace_id,
+        change_id=change.id,
         user_id=user.id,
-        scope=scope,
-        repo_dir=repo_dir,
+        target_stage="execute",
     )
 
-    return {"ok": True, "run_id": str(run.id)}
+    if not result.get("dispatched"):
+        return {
+            "ok": False,
+            "reason": result.get("reason", "dispatch_failed"),
+            "stage": result.get("stage"),
+        }
+
+    return {
+        "ok": True,
+        "run_id": result["agent_run_id"],
+        "stage": result.get("stage"),
+    }
