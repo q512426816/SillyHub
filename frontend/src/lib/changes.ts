@@ -71,6 +71,28 @@ export type ChangeReparseResponse = {
   warnings: ChangeWarning[];
 };
 
+/** 创建变更的请求参数 */
+export type CreateChangeInput = {
+  title: string;
+  description?: string;
+  scope?: "full" | "quick";
+  change_type?: string;
+  affected_components?: string[];
+  lease_id?: string;
+};
+
+/** 创建变更的响应 */
+export type CreateChangeResponse = {
+  id: string;
+  workspace_id: string;
+  change_key: string;
+  title: string | null;
+  status: string;
+  path: string;
+  current_stage: string | null;
+  created_at: string;
+};
+
 export function listChanges(
   workspaceId: string,
   params?: { location?: string; status?: string; owner?: string },
@@ -157,5 +179,38 @@ export function updateChangeProgress(
       method: "POST",
       json: data,
     },
+  );
+}
+
+/**
+ * 创建变更 — POST /workspaces/{id}/changes/create
+ *
+ * 支持传入 description 和 scope，两者均有后端默认值。
+ */
+export function createChange(
+  workspaceId: string,
+  input: CreateChangeInput,
+) {
+  return apiFetch<CreateChangeResponse>(
+    `/api/workspaces/${workspaceId}/changes/create`,
+    {
+      method: "POST",
+      json: input,
+    },
+  );
+}
+
+/**
+ * 启动变更执行 — POST /workspaces/{id}/changes/{changeKey}/execute
+ *
+ * 后端会创建 AgentRun 并后台执行 SillySpec 流程。
+ */
+export function executeChange(
+  workspaceId: string,
+  changeKey: string,
+) {
+  return apiFetch<{ ok: boolean; run_id: string }>(
+    `/api/workspaces/${workspaceId}/changes/${changeKey}/execute`,
+    { method: "POST" },
   );
 }
