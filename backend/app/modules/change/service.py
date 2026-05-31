@@ -412,7 +412,10 @@ class ChangeService:
         workspace_id: uuid.UUID,
     ) -> None:
         row.title = parsed.title
-        row.status = parsed.status
+        # DB is the source of truth for status — never overwrite from file.
+        # The file frontmatter status is only used when creating a new row
+        # (see _build_change). Workflow transitions update DB directly;
+        # reparse must not reset them back to the file value.
         row.location = parsed.location
         row.path = parsed.path
         row.affected_components = parsed.affected_components

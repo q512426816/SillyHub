@@ -103,6 +103,7 @@ export default function ChangeDetailPage({ params }: Props) {
   const [loadingDoc, setLoadingDoc] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [reviews, setReviews] = useState<ReviewEntry[]>([]);
   const [transitioning, setTransitioning] = useState(false);
   const [reviewComment, setReviewComment] = useState("");
@@ -112,6 +113,7 @@ export default function ChangeDetailPage({ params }: Props) {
     const load = async () => {
       setLoading(true);
       setPageError(null);
+      setLoadError(null);
       try {
         const [c, m, r, tb] = await Promise.all([
           getChange(workspaceId, changeId),
@@ -124,7 +126,7 @@ export default function ChangeDetailPage({ params }: Props) {
         setReviews(r);
         setTaskBoard(tb);
       } catch (err) {
-        setPageError(err instanceof ApiError ? err.message : "加载变更详情失败");
+        setLoadError(err instanceof ApiError ? err.message : "加载变更详情失败");
       } finally {
         setLoading(false);
       }
@@ -193,11 +195,11 @@ export default function ChangeDetailPage({ params }: Props) {
     );
   }
 
-  if (pageError || !change) {
+  if (loadError || !change) {
     return (
       <div className="mx-auto max-w-6xl px-6 py-6">
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
-          {pageError ?? "变更未找到"}
+          {loadError ?? "变更未找到"}
         </div>
         <Link
           href={`/workspaces/${workspaceId}/changes`}

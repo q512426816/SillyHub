@@ -101,6 +101,20 @@ async def deploy_release(
 
 
 @router.post(
+    "/releases/{release_id}/promote",
+    response_model=ReleaseResponse,
+)
+async def promote_release(
+    release_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.DEPLOY_STAGING))],
+) -> ReleaseResponse:
+    svc = ReleaseService(session)
+    release = await svc.promote_to_staging(release_id)
+    return ReleaseResponse.model_validate(release)
+
+
+@router.post(
     "/releases/{release_id}/rollback",
     response_model=ReleaseResponse,
 )

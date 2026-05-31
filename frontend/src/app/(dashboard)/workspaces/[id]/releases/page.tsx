@@ -10,6 +10,7 @@ import {
   createRelease,
   deployRelease,
   listReleases,
+  promoteRelease,
   rollbackRelease,
   type Release,
 } from "@/lib/releases";
@@ -91,6 +92,19 @@ export default function ReleasesPage({ params }: Props) {
       await reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "部署失败");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handlePromote = async (releaseId: string) => {
+    setActionLoading(releaseId);
+    setError(null);
+    try {
+      await promoteRelease(releaseId);
+      await reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "提交到预发布失败");
     } finally {
       setActionLoading(null);
     }
@@ -205,6 +219,16 @@ export default function ReleasesPage({ params }: Props) {
                     {new Date(r.updated_at).toLocaleDateString()}
                   </td>
                   <td className="text-right">
+                    {r.status === "draft" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handlePromote(r.id)}
+                        disabled={actionLoading !== null}
+                      >
+                        {actionLoading === r.id ? "…" : "提交到预发布"}
+                      </Button>
+                    )}
                     {(r.status === "staging" || r.status === "approved") && (
                       <Button
                         size="sm"

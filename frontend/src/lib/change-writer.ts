@@ -46,11 +46,10 @@ export function generateDocs(
   workspaceId: string,
   changeId: string,
   docTypes: string[],
-) {
-  return apiFetch<{ doc_type: string; path: string; size: number }>(
-    `/api/workspaces/${workspaceId}/changes/${changeId}/documents/generate`,
-    { method: "POST", json: { doc_types: docTypes } },
-  );
+): Promise<BatchGenerateResponse> {
+  // Use batch-generate endpoint — the single /generate endpoint expects
+  // {doc_type, content} which is for uploading, not batch creation.
+  return batchGenerateDocuments(workspaceId, changeId, docTypes);
 }
 
 /** Batch-generate multiple document types in a single call. */
