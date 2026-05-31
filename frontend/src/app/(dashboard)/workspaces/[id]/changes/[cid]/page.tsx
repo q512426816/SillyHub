@@ -236,9 +236,27 @@ export default function ChangeDetailPage({ params }: Props) {
     setPageError(null);
     try {
       const result = await transitionChange(workspaceId, changeId, targetStage);
-      setChange({ ...change, current_stage: targetStage, status: result.status ?? change.status });
+      // Backend returns { change: {...}, agent_dispatch: {...} }
+      const changeData = result.change;
+      setChange({
+        ...change,
+        current_stage: targetStage,
+        status: changeData.status ?? change.status,
+        stages: (changeData.stages as Record<string, unknown>) ?? change.stages,
+      });
       if (targetStage === "accepted") {
         setArchiveGate(null);
+      }
+      // Show agent dispatch feedback
+      if (result.agent_dispatch?.dispatched) {
+        setSuccessMsg(`🤖 Agent 已自动派发 (${result.agent_dispatch.phase ?? targetStage})`);
+        setTimeout(() => setSuccessMsg(null), 4000);
+      } else if (result.agent_dispatch && !result.agent_dispatch.dispatched) {
+        const reason = result.agent_dispatch.reason;
+        if (reason === "active_run_exists") {
+          setSuccessMsg("⚠️ Agent 已在运行中，跳过重复派发");
+          setTimeout(() => setSuccessMsg(null), 3000);
+        }
       }
       // Refresh agent status after transition
       try {
