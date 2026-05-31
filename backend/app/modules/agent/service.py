@@ -760,6 +760,23 @@ class AgentService:
             )
             session.add(audit)
 
+            # Update change.stages.last_dispatch with final status
+            from app.modules.change.model import Change
+
+            change = await session.get(Change, change_id)
+            if change is not None:
+                stages = change.stages or {}
+                last_dispatch = stages.get("last_dispatch", {})
+                last_dispatch.update({
+                    "status": run.status,
+                    "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                    "run_id": str(run.id),
+                    "exit_code": run.exit_code,
+                })
+                stages["last_dispatch"] = last_dispatch
+                change.stages = stages
+                session.add(change)
+
             await session.commit()
 
     async def _get_workspace_root(self, workspace_id: uuid.UUID) -> str:
