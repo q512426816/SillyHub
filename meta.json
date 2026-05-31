@@ -1,9 +1,0 @@
-{
-  "changeName": "frontend-api-fix",
-  "branch": "sillyspec/frontend-api-fix",
-  "baseBranch": "main",
-  "baseHash": "bcb776dd0926c3a9113972ca8e05aa08656fc057",
-  "actualBaseHash": "bcb776dd0926c3a9113972ca8e05aa08656fc057",
-  "createdAt": "2026-05-31T00:47:03.683Z",
-  "worktreePath": "/Users/qinyi/SillyHub/.sillyspec/.runtime/worktrees/frontend-api-fix"
-}
