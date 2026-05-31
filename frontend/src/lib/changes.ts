@@ -16,6 +16,12 @@ export type ChangeSummary = {
 export type ChangeRead = ChangeSummary & {
   path: string;
   archived_at: string | null;
+  current_stage: string | null;
+  stages: Record<string, any> | null;
+  approval_status: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  rejection_reason: string | null;
 };
 
 export type ChangeList = {
@@ -107,5 +113,49 @@ export function reparseChanges(workspaceId: string) {
   return apiFetch<ChangeReparseResponse>(
     `/api/workspaces/${workspaceId}/changes/reparse`,
     { method: "POST" },
+  );
+}
+
+// 获取审批状态
+export function getChangeApproval(workspaceId: string, changeKey: string) {
+  return apiFetch<{ status: string; reason: string | null }>(
+    `/api/workspaces/${workspaceId}/changes/${changeKey}/approval`,
+  );
+}
+
+// 批准
+export function approveChange(workspaceId: string, changeKey: string, approvedBy: string) {
+  return apiFetch<{ ok: boolean }>(
+    `/api/workspaces/${workspaceId}/changes/${changeKey}/approve`,
+    {
+      method: "POST",
+      json: { approved_by: approvedBy },
+    },
+  );
+}
+
+// 驳回
+export function rejectChange(workspaceId: string, changeKey: string, reason: string) {
+  return apiFetch<{ ok: boolean }>(
+    `/api/workspaces/${workspaceId}/changes/${changeKey}/reject`,
+    {
+      method: "POST",
+      json: { reason },
+    },
+  );
+}
+
+// 更新进度
+export function updateChangeProgress(
+  workspaceId: string,
+  changeKey: string,
+  data: { currentStage: string; stages: Record<string, any>; lastActive: string },
+) {
+  return apiFetch<{ ok: boolean }>(
+    `/api/workspaces/${workspaceId}/changes/${changeKey}/progress`,
+    {
+      method: "POST",
+      json: data,
+    },
   );
 }
