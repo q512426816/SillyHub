@@ -41,9 +41,9 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 def _get_user_role(user: User) -> str:
-    if getattr(user, 'is_superuser', False):
-        return 'reviewer'
-    return 'business_user'
+    if getattr(user, "is_platform_admin", False):
+        return "admin"
+    return "business_user"
 
 
 @router.get(

@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from app.core.errors import ChangeDocNotFound, ChangeNotFound, PermissionDenied
+from app.core.errors import ChangeDocNotFound, ChangeNotFound, InvalidTransition, PermissionDenied
 from app.core.logging import get_logger
 from app.modules.change.model import Change, ChangeDocument, StageEnum, TRANSITIONS
 from app.modules.change.parser import ChangeParser, ChangeParserResult, ParsedChange
@@ -342,19 +342,19 @@ class ChangeService:
         # Validate current stage exists in TRANSITIONS
         current_key = StageEnum(current)  # convert to StageEnum
         if current_key not in TRANSITIONS:
-            raise ValueError(f"未知阶段: {current_key}")
+            raise InvalidTransition(f"未知阶段: {current_key}")
 
         # Find the target transition
         transitions_from_current = TRANSITIONS[current_key]
         target_key = StageEnum(target_stage)
         if target_key not in transitions_from_current:
-            raise ValueError(
+            raise InvalidTransition(
                 f"不允许从 {current_key.value} 流转到 {target_stage}"
             )
 
-        # Check role permission
+        # Check role permission (admin bypasses all)
         allowed_roles = transitions_from_current[target_key]
-        if user_role not in allowed_roles:
+        if user_role != "admin" and user_role not in allowed_roles:
             raise PermissionDenied(
                 f"角色 '{user_role}' 无权执行 {current_key.value} → {target_stage} 流转"
             )
@@ -392,7 +392,7 @@ class ChangeService:
         """提交反馈并自动流转至 rework_required。"""
         # Validate category
         if category not in ("A", "B", "C", "D"):
-            raise ValueError(f"无效的反馈类别: {category}")
+            raise InvalidTransition(f"无效的反馈类别: {category}")
 
         FEEDBACK_TARGETS = {
             "A": "in_dev",
@@ -407,7 +407,7 @@ class ChangeService:
         # Validate current stage allows feedback
         current = change.current_stage or "draft"
         if current not in ("technical_verification", "business_review"):
-            raise ValueError(
+            raise InvalidTransition(
                 "当前阶段不允许提交反馈，仅限 technical_verification 和 business_review"
             )
 
