@@ -140,3 +140,32 @@ class DocumentsSyncRequest(BaseModel):
 
 class DocumentsSyncResponse(BaseModel):
     synced: int
+
+
+# ── Workflow (task-03) ──────────────────────────────────────────────────
+
+
+class TransitionRequest(BaseModel):
+    """状态流转请求。"""
+    target_stage: str = Field(..., description="目标阶段，对应 StageEnum 值")
+    reason: str | None = Field(default=None, description="流转原因（可选）")
+
+
+class FeedbackRequest(BaseModel):
+    """反馈提交请求。"""
+    category: str = Field(..., pattern=r"^[A-D]$", description="反馈类别: A=Bug, B=设计错误, C=信息不足, D=衍生新change")
+    text: str = Field(..., min_length=1, max_length=2000, description="反馈内容")
+    target_stage: str | None = Field(default=None, description="自定义返工目标（覆盖类别默认值，可选）")
+
+
+class ArchiveCheckItem(BaseModel):
+    """归档门禁单项检查结果。"""
+    name: str = Field(..., description="检查项名称")
+    passed: bool
+    detail: str = Field(default="", description="未通过时的说明信息")
+
+
+class ArchiveGateResponse(BaseModel):
+    """归档门禁检查结果。"""
+    can_archive: bool
+    checks: list[ArchiveCheckItem] = Field(default_factory=list)

@@ -129,6 +129,17 @@ async def execute_change(
     if change is None:
         raise AppError(f"Change '{change_key}' not found.", http_status=404)
 
+    # ── Stage guard (task-04) ──────────────────────────────────────────────
+    current_stage = getattr(change, "current_stage", None) or "draft"
+    if current_stage != "ready_for_dev":
+        raise AppError(
+            f"Change '{change_key}' 当前阶段为 '{current_stage}'，"
+            f"仅当阶段为 'ready_for_dev' 时可执行。"
+            f"请先完成设计评审并流转至 ready_for_dev。",
+            http_status=409,
+        )
+    # ── End stage guard ────────────────────────────────────────────────────
+
     # Resolve repo directory from workspace
     workspace = await session.get(Workspace, workspace_id)
     if workspace is None:

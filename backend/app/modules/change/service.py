@@ -15,11 +15,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from app.core.errors import ChangeDocNotFound, ChangeNotFound
+from app.core.errors import ChangeDocNotFound, ChangeNotFound, PermissionDenied
 from app.core.logging import get_logger
-from app.modules.change.model import Change, ChangeDocument
+from app.modules.change.model import Change, ChangeDocument, StageEnum, TRANSITIONS
 from app.modules.change.parser import ChangeParser, ChangeParserResult, ParsedChange
-from app.modules.change.schema import ChangeRead, ChangeSummary
+from app.modules.change.schema import ArchiveCheckItem, ArchiveGateResponse, ChangeRead, ChangeSummary
 from app.modules.workspace.model import ChangeWorkspace, Workspace
 from app.modules.workspace.service import WorkspaceService
 
@@ -323,6 +323,227 @@ class ChangeService:
 
         await self._session.commit()
         return synced
+
+    # ── Workflow ────────────────────────────────────────────────────────
+
+    async def transition(
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        target_stage: str,
+        user_role: str,
+        *,
+        reason: str | None = None,
+    ) -> Change:
+        """执行状态流转。"""
+        change = await self.get(workspace_id, change_id)
+        current = change.current_stage or "draft"
+
+        # Validate current stage exists in TRANSITIONS
+        current_key = StageEnum(current)  # convert to StageEnum
+        if current_key not in TRANSITIONS:
+            raise ValueError(f"未知阶段: {current_key}")
+
+        # Find the target transition
+        transitions_from_current = TRANSITIONS[current_key]
+        target_key = StageEnum(target_stage)
+        if target_key not in transitions_from_current:
+            raise ValueError(
+                f"不允许从 {current_key.value} 流转到 {target_stage}"
+            )
+
+        # Check role permission
+        allowed_roles = transitions_from_current[target_key]
+        if user_role not in allowed_roles:
+            raise PermissionDenied(
+                f"角色 '{user_role}' 无权执行 {current_key.value} → {target_stage} 流转"
+            )
+
+        # Log transition to stages JSON
+        stages = change.stages or {}
+        transitions_log = stages.get("transitions", [])
+        transitions_log.append({
+            "from": current,
+            "to": target_stage,
+            "by_role": user_role,
+            "reason": reason,
+            "at": datetime.now(timezone.utc).isoformat(),
+        })
+        stages["transitions"] = transitions_log
+
+        # Update change
+        change.current_stage = target_stage
+        change.stages = stages
+        change.updated_at = datetime.now(timezone.utc)
+        self._session.add(change)
+        await self._session.commit()
+        return change
+
+    async def submit_feedback(
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        category: str,
+        text: str,
+        user_id: uuid.UUID,
+        *,
+        target_stage: str | None = None,
+    ) -> Change:
+        """提交反馈并自动流转至 rework_required。"""
+        # Validate category
+        if category not in ("A", "B", "C", "D"):
+            raise ValueError(f"无效的反馈类别: {category}")
+
+        FEEDBACK_TARGETS = {
+            "A": "in_dev",
+            "B": "design_review",
+            "C": "clarifying",
+            "D": "accepted",
+        }
+        rework_target = target_stage or FEEDBACK_TARGETS[category]
+
+        change = await self.get(workspace_id, change_id)
+
+        # Validate current stage allows feedback
+        current = change.current_stage or "draft"
+        if current not in ("technical_verification", "business_review"):
+            raise ValueError(
+                "当前阶段不允许提交反馈，仅限 technical_verification 和 business_review"
+            )
+
+        # Save feedback info
+        change.feedback_category = category
+        change.feedback_text = text
+        # reviewer info stored in stages JSON
+
+        # Update stages JSON
+        stages = change.stages or {}
+        stages["last_feedback"] = {
+            "category": category,
+            "text": text,
+            "rework_target": rework_target,
+            "submitted_by": str(user_id),
+            "submitted_at": datetime.now(timezone.utc).isoformat(),
+        }
+        change.stages = stages
+
+        if category == "D":
+            # D: directly go to accepted (spawn new change separately)
+            change.current_stage = "accepted"
+            # Log the special transition
+            transitions_log = stages.get("transitions", [])
+            transitions_log.append({
+                "from": current,
+                "to": "accepted",
+                "by_role": "reviewer",
+                "reason": f"反馈类别 D（衍生新 change）: {text[:100]}",
+                "at": datetime.now(timezone.utc).isoformat(),
+            })
+            stages["transitions"] = transitions_log
+            change.stages = stages
+        else:
+            # A/B/C: transition to rework_required
+            change.current_stage = "rework_required"
+            transitions_log = stages.get("transitions", [])
+            transitions_log.append({
+                "from": current,
+                "to": "rework_required",
+                "by_role": "reviewer",
+                "reason": f"反馈类别 {category}: {text[:100]}",
+                "at": datetime.now(timezone.utc).isoformat(),
+            })
+            stages["transitions"] = transitions_log
+            stages["rework_target"] = rework_target
+            change.stages = stages
+
+        change.updated_at = datetime.now(timezone.utc)
+        self._session.add(change)
+        await self._session.commit()
+        return change
+
+    async def check_archive_gate(
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+    ) -> ArchiveGateResponse:
+        """归档门禁检查。"""
+        change = await self.get(workspace_id, change_id)
+        checks: list[ArchiveCheckItem] = []
+
+        current = change.current_stage or "draft"
+        if current != "accepted":
+            # Not in accepted stage - all checks fail
+            for name in [
+                "no_unresolved_feedback",
+                "ac_confirmed",
+                "tech_verification_passed",
+                "business_review_passed",
+                "feedback_categorized",
+                "documents_complete",
+            ]:
+                checks.append(ArchiveCheckItem(
+                    name=name,
+                    passed=False,
+                    detail="当前阶段非 accepted，无法归档",
+                ))
+            return ArchiveGateResponse(can_archive=False, checks=checks)
+
+        # Check 1: no unresolved feedback
+        checks.append(ArchiveCheckItem(
+            name="no_unresolved_feedback",
+            passed=change.feedback_category is None,
+            detail="" if change.feedback_category is None
+                   else f"存在未解决反馈，类别: {change.feedback_category}",
+        ))
+
+        stages = change.stages or {}
+
+        # Check 2: AC confirmed
+        ac_confirmed = stages.get("ac_confirmed", False)
+        checks.append(ArchiveCheckItem(
+            name="ac_confirmed",
+            passed=bool(ac_confirmed),
+            detail="" if ac_confirmed else "验收标准尚未确认",
+        ))
+
+        # Check 3: tech verification passed
+        tech_passed = stages.get("tech_verification_passed", False)
+        checks.append(ArchiveCheckItem(
+            name="tech_verification_passed",
+            passed=bool(tech_passed),
+            detail="" if tech_passed else "技术验证未通过",
+        ))
+
+        # Check 4: business review passed
+        biz_passed = stages.get("business_review_passed", False)
+        checks.append(ArchiveCheckItem(
+            name="business_review_passed",
+            passed=bool(biz_passed),
+            detail="" if biz_passed else "业务评审未通过",
+        ))
+
+        # Check 5: feedback categorized
+        feedback_records = stages.get("feedback_history", [])
+        uncategorized = [f for f in feedback_records if not f.get("category")]
+        checks.append(ArchiveCheckItem(
+            name="feedback_categorized",
+            passed=len(uncategorized) == 0,
+            detail="" if not uncategorized
+                   else f"{len(uncategorized)} 条反馈未分类",
+        ))
+
+        # Check 6: documents complete
+        docs, _, _ = await self.get_documents(workspace_id, change_id)
+        incomplete = [d for d in docs if not d.status and d.exists]
+        checks.append(ArchiveCheckItem(
+            name="documents_complete",
+            passed=len(incomplete) == 0,
+            detail="" if not incomplete
+                   else f"{len(incomplete)} 个文档未完成",
+        ))
+
+        can_archive = all(check.passed for check in checks)
+        return ArchiveGateResponse(can_archive=can_archive, checks=checks)
 
     # ── Reparse ───────────────────────────────────────────────────────────
 

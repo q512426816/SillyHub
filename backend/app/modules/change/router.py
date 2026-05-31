@@ -15,6 +15,7 @@ from app.modules.auth.permissions import Permission
 from app.modules.change.schema import (
     ApprovalRead,
     ApproveRequest,
+    ArchiveGateResponse,
     ChangeDocContent,
     ChangeDocMatrix,
     ChangeDocMatrixEntry,
@@ -26,15 +27,23 @@ from app.modules.change.schema import (
     ChangeWarning,
     DocumentsSyncRequest,
     DocumentsSyncResponse,
+    FeedbackRequest,
     OkResponse,
     ProgressUpdate,
     RejectRequest,
+    TransitionRequest,
 )
 from app.modules.change.service import ChangeService
 
 router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["change"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+def _get_user_role(user: User) -> str:
+    if getattr(user, 'is_superuser', False):
+        return 'reviewer'
+    return 'business_user'
 
 
 @router.get(
@@ -246,3 +255,65 @@ async def sync_documents(
     docs = body.iter_documents()
     synced = await service.sync_documents(workspace_id, change_key, documents=docs)
     return DocumentsSyncResponse(synced=synced)
+
+
+# ── Workflow endpoints (task-04) ──────────────────────────────────────────
+
+
+@router.post(
+    "/changes/{change_id}/transition",
+    response_model=ChangeRead,
+)
+async def transition_change(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    body: TransitionRequest,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> ChangeRead:
+    service = ChangeService(session)
+    change = await service.transition(
+        workspace_id,
+        change_id,
+        target_stage=body.target_stage,
+        user_role=_get_user_role(_user),
+        reason=body.reason,
+    )
+    return await service.enrich_with_workspace_ids(change)
+
+
+@router.post(
+    "/changes/{change_id}/feedback",
+    response_model=ChangeRead,
+)
+async def submit_feedback(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    body: FeedbackRequest,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> ChangeRead:
+    service = ChangeService(session)
+    change = await service.submit_feedback(
+        workspace_id,
+        change_id,
+        category=body.category,
+        text=body.text,
+        user_id=_user.id,
+        target_stage=body.target_stage,
+    )
+    return await service.enrich_with_workspace_ids(change)
+
+
+@router.get(
+    "/changes/{change_id}/archive-gate",
+    response_model=ArchiveGateResponse,
+)
+async def check_archive_gate(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+) -> ArchiveGateResponse:
+    service = ChangeService(session)
+    return await service.check_archive_gate(workspace_id, change_id)
