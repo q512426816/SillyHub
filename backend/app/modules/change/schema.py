@@ -87,3 +87,49 @@ class ChangeReparseResponse(BaseModel):
     workspace_id: uuid.UUID
     stats: ChangeReparseStats
     warnings: list[ChangeWarning] = Field(default_factory=list)
+
+
+# ── Progress ────────────────────────────────────────────────────────────
+
+
+class ProgressUpdate(BaseModel):
+    currentStage: str
+    stages: dict
+    lastActive: str
+
+
+class OkResponse(BaseModel):
+    ok: bool = True
+
+
+# ── Approval ────────────────────────────────────────────────────────────
+
+
+class ApprovalRead(BaseModel):
+    status: str
+    reason: str | None = None
+
+
+class ApproveRequest(BaseModel):
+    approved_by: str
+
+
+class RejectRequest(BaseModel):
+    reason: str
+
+
+# ── Documents sync ─────────────────────────────────────────────────────
+
+
+class DocumentsSyncRequest(BaseModel):
+    """Key is filename, value is file content."""
+
+    model_config = ConfigDict(extra="allow")
+
+    def iter_documents(self) -> list[tuple[str, str]]:
+        """Return list of (filename, content) pairs."""
+        return [(k, v) for k, v in self.model_extra.items()] if self.model_extra else []
+
+
+class DocumentsSyncResponse(BaseModel):
+    synced: int

@@ -66,6 +66,30 @@ class Change(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    current_stage: str | None = Field(
+        default=None,
+        sa_column=Column(String, nullable=True, default=None),
+    )
+    stages: dict = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=True, default=dict),
+    )
+    approval_status: str = Field(
+        default="not_required",
+        sa_column=Column(String, nullable=False, default="not_required"),
+    )
+    approved_by: str | None = Field(
+        default=None,
+        sa_column=Column(String, nullable=True, default=None),
+    )
+    approved_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, default=None),
+    )
+    rejection_reason: str | None = Field(
+        default=None,
+        sa_column=Column(String, nullable=True, default=None),
+    )
 
 
 class ChangeDocument(BaseModel, table=True):

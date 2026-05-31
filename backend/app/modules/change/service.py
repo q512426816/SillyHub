@@ -8,6 +8,7 @@ content is read from the filesystem on-demand (not stored in DB).
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import select
@@ -82,6 +83,41 @@ class ChangeService:
                 seen.add(item.id)
                 unique_items.append(item)
         return unique_items, len(unique_items)
+
+    async def get_by_key(
+        self, workspace_id: uuid.UUID, change_key: str
+    ) -> Change:
+        """Look up a change by its *change_key* within the workspace."""
+        await self._workspace_service.get(workspace_id)
+
+        # Primary workspace match
+        stmt = select(Change).where(
+            col(Change.workspace_id) == workspace_id,
+            col(Change.change_key) == change_key,
+        )
+        change = (await self._session.execute(stmt)).scalars().first()
+
+        # Fallback: M:N association
+        if change is None:
+            mn_stmt = (
+                select(Change)
+                .join(ChangeWorkspace, ChangeWorkspace.change_id == Change.id)
+                .where(
+                    col(ChangeWorkspace.workspace_id) == workspace_id,
+                    col(Change.change_key) == change_key,
+                )
+            )
+            change = (await self._session.execute(mn_stmt)).scalars().first()
+
+        if change is None:
+            raise ChangeNotFound(
+                f"Change '{change_key}' not found.",
+                details={
+                    "workspace_id": str(workspace_id),
+                    "change_key": change_key,
+                },
+            )
+        return change
 
     async def get(self, workspace_id: uuid.UUID, change_id: uuid.UUID) -> Change:
         await self._workspace_service.get(workspace_id)
@@ -184,6 +220,109 @@ class ChangeService:
             raise
         except Exception:
             return doc.path, None, False
+
+    # ── Progress / Approval / Documents ─────────────────────────────────
+
+    async def update_progress(
+        self,
+        workspace_id: uuid.UUID,
+        change_key: str,
+        *,
+        current_stage: str,
+        stages: dict,
+        last_active: str,
+    ) -> None:
+        change = await self.get_by_key(workspace_id, change_key)
+        change.current_stage = current_stage
+        change.stages = stages
+        change.updated_at = datetime.now(timezone.utc)
+        self._session.add(change)
+        await self._session.commit()
+
+    async def get_approval(
+        self, workspace_id: uuid.UUID, change_key: str
+    ) -> tuple[str, str | None]:
+        change = await self.get_by_key(workspace_id, change_key)
+        return change.approval_status, change.rejection_reason
+
+    async def approve(
+        self,
+        workspace_id: uuid.UUID,
+        change_key: str,
+        *,
+        approved_by: str,
+    ) -> None:
+        change = await self.get_by_key(workspace_id, change_key)
+        change.approval_status = "approved"
+        change.approved_by = approved_by
+        change.approved_at = datetime.now(timezone.utc)
+        change.updated_at = datetime.now(timezone.utc)
+        self._session.add(change)
+        await self._session.commit()
+
+    async def reject(
+        self,
+        workspace_id: uuid.UUID,
+        change_key: str,
+        *,
+        reason: str,
+    ) -> None:
+        change = await self.get_by_key(workspace_id, change_key)
+        change.approval_status = "rejected"
+        change.rejection_reason = reason
+        change.updated_at = datetime.now(timezone.utc)
+        self._session.add(change)
+        await self._session.commit()
+
+    async def sync_documents(
+        self,
+        workspace_id: uuid.UUID,
+        change_key: str,
+        documents: list[tuple[str, str]],
+    ) -> int:
+        """Write document files to disk and upsert ChangeDocument rows.
+
+        Returns the number of documents synced.
+        """
+        change = await self.get_by_key(workspace_id, change_key)
+        workspace = await self._workspace_service.get(workspace_id)
+        root = Path(workspace.root_path)
+
+        synced = 0
+        for filename, content in documents:
+            # Write file to .sillyspec/changes/{change_key}/{filename}
+            relative = f".sillyspec/changes/{change_key}/{filename}"
+            full_path = root / relative
+            resolved = full_path.resolve()
+            if not str(resolved).startswith(str(root.resolve())):
+                raise ChangeDocNotFound("Path traversal detected.")
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            full_path.write_text(content, encoding="utf-8")
+            now = datetime.now(timezone.utc)
+
+            # Upsert ChangeDocument row
+            stmt = select(ChangeDocument).where(
+                col(ChangeDocument.change_id) == change.id,
+                col(ChangeDocument.doc_type) == filename,
+            )
+            doc = (await self._session.execute(stmt)).scalars().first()
+            if doc is None:
+                doc = ChangeDocument(
+                    id=uuid.uuid4(),
+                    change_id=change.id,
+                    doc_type=filename,
+                    path=relative,
+                    exists=True,
+                    last_modified_at=now,
+                )
+                self._session.add(doc)
+            else:
+                doc.exists = True
+                doc.last_modified_at = now
+            synced += 1
+
+        await self._session.commit()
+        return synced
 
     # ── Reparse ───────────────────────────────────────────────────────────
 
