@@ -1,18 +1,21 @@
 /**
- * @deprecated This module is deprecated. Use `@/lib/workspaces` instead.
+ * Compatibility shims for the removed component API endpoints.
  *
- * The backend component API endpoints have been removed and replaced by
- * Workspace Relations and global Topology APIs. This file provides minimal
- * compatibility shims so that existing pages not yet migrated can compile.
+ * After the backend refactor, "components" are just child workspaces
+ * (identifiable by `component_key !== null`).  This module remaps the
+ * old component API calls to the current workspace endpoints so that
+ * pages not yet fully migrated can still compile and work.
  *
- * See task-10 for the migration plan.
+ * See `.claude-tasks/frontend-api-fix.md` for the migration context.
  */
 import { apiFetch } from "./api";
 import type { Workspace } from "./workspaces";
 
 /**
- * @deprecated Use `Workspace` from `@/lib/workspaces` instead.
  * Component type preserved for backward compatibility with unmigrated pages.
+ *
+ * Mapped from `Workspace` — every child workspace (component_key !== null)
+ * is treated as a component.
  */
 export type Component = {
   id: string;
@@ -89,40 +92,124 @@ export type TopologyResponse = {
   edges: TopologyEdge[];
 };
 
-/**
- * @deprecated Use `getWorkspaceRelations` from `@/lib/workspaces` instead.
- * This calls a removed endpoint and will fail at runtime.
- */
-export function listComponents(workspaceId: string) {
-  return apiFetch<{ items: Component[]; total: number }>(
-    `/api/workspaces/${workspaceId}/components`,
-  );
+/** Map a Workspace object to the legacy Component shape. */
+function workspaceToComponent(
+  ws: Workspace,
+  parentWorkspaceId: string,
+): Component {
+  return {
+    id: ws.id,
+    workspace_id: parentWorkspaceId,
+    component_key: ws.component_key ?? ws.slug,
+    name: ws.name,
+    type: ws.type,
+    role: ws.role,
+    path: ws.root_path,
+    repo_url: ws.repo_url,
+    default_branch: ws.default_branch,
+    tech_stack: ws.tech_stack,
+    build_command: ws.build_command,
+    test_command: ws.test_command,
+    source_yaml_path: ws.source_yaml_path ?? "",
+    status: ws.status,
+    extra: {},
+    created_at: ws.created_at,
+    updated_at: ws.updated_at,
+  };
 }
 
 /**
- * @deprecated Use `getWorkspace` from `@/lib/workspaces` instead.
+ * List all child workspaces (components) under the given parent workspace.
+ *
+ * Calls `GET /api/workspaces` and filters by `component_key !== null`.
  */
-export function getComponent(workspaceId: string, componentId: string) {
-  return apiFetch<Component>(
-    `/api/workspaces/${workspaceId}/components/${componentId}`,
+export async function listComponents(
+  workspaceId: string,
+): Promise<{ items: Component[]; total: number }> {
+  const resp = await apiFetch<{ items: Workspace[]; total: number }>(
+    "/api/workspaces",
   );
+  const items = resp.items
+    .filter((ws) => ws.component_key !== null)
+    .map((ws) => workspaceToComponent(ws, workspaceId));
+  return { items, total: items.length };
 }
 
 /**
- * @deprecated Use `rescanWorkspace` from `@/lib/workspaces` instead.
+ * Get a single component (child workspace) by its ID.
+ *
+ * Calls `GET /api/workspaces/${componentId}` directly.
  */
-export function reparseComponents(workspaceId: string) {
-  return apiFetch<ReparseResponse>(
-    `/api/workspaces/${workspaceId}/components/reparse`,
+export async function getComponent(
+  _workspaceId: string,
+  componentId: string,
+): Promise<Component> {
+  const ws = await apiFetch<Workspace>(
+    `/api/workspaces/${componentId}`,
+  );
+  return workspaceToComponent(ws, _workspaceId);
+}
+
+/**
+ * Re-scan / re-parse a workspace's components.
+ *
+ * Calls `POST /api/workspaces/${workspaceId}/rescan` and maps the
+ * `ScanResult` response back to the legacy `ReparseResponse` shape.
+ */
+export async function reparseComponents(
+  workspaceId: string,
+): Promise<ReparseResponse> {
+  await apiFetch<unknown>(
+    `/api/workspaces/${workspaceId}/rescan`,
     { method: "POST" },
   );
+  // After rescan, re-fetch the component list to populate the response
+  const comps = await listComponents(workspaceId);
+  return {
+    workspace_id: workspaceId,
+    stats: {
+      parsed: 0,
+      created: 0,
+      updated: 0,
+      deleted: 0,
+      relations_created: 0,
+      relations_deleted: 0,
+    },
+    components: comps.items,
+    relations: [],
+    warnings: [],
+    errors: [],
+  };
 }
 
 /**
- * @deprecated Use `getTopology` from `@/lib/workspaces` instead.
+ * Get the global workspace topology.
+ *
+ * Calls `GET /api/workspaces/topology` (global — no per-workspace filtering).
+ * Maps the response to the legacy `TopologyResponse` shape.
  */
-export function getTopology(workspaceId: string) {
-  return apiFetch<TopologyResponse>(
-    `/api/workspaces/${workspaceId}/components/topology`,
-  );
+export async function getTopology(
+  _workspaceId?: string,
+): Promise<TopologyResponse> {
+  const resp = await apiFetch<{
+    nodes: { id: string; name: string; slug: string; component_key: string | null }[];
+    edges: { id: string; source_id: string; target_id: string; relation_type: string; description: string | null }[];
+  }>("/api/workspaces/topology");
+
+  return {
+    workspace_id: _workspaceId ?? "",
+    nodes: resp.nodes.map((n) => ({
+      id: n.id,
+      component_key: n.component_key ?? n.slug,
+      name: n.name,
+      type: null,
+      status: "active",
+    })),
+    edges: resp.edges.map((e) => ({
+      source: e.source_id,
+      target: e.target_id,
+      relation_type: e.relation_type,
+      description: e.description,
+    })),
+  };
 }

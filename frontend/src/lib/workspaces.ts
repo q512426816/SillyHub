@@ -153,10 +153,14 @@ export async function createRelation(
   );
 }
 
-export async function deleteRelation(relationId: string): Promise<void> {
-  await apiFetch<unknown>(`/api/workspaces/relations/${relationId}`, {
-    method: "DELETE",
-  });
+export async function deleteRelation(
+  workspaceId: string,
+  relationId: string,
+): Promise<void> {
+  await apiFetch<unknown>(
+    `/api/workspaces/${workspaceId}/relations/${relationId}`,
+    { method: "DELETE" },
+  );
 }
 
 // ── Global Topology ──
