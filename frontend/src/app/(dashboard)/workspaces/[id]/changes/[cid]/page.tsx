@@ -7,9 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import {
+  approveChange,
   getChange,
   getChangeDocumentContent,
   getChangeDocuments,
+  rejectChange,
   type ChangeDocContent,
   type ChangeDocMatrix,
   type ChangeRead,
@@ -25,6 +27,23 @@ import {
 interface Props {
   params: { id: string; cid: string };
 }
+
+const STAGES = ["scan", "brainstorm", "plan", "execute", "verify", "archived"] as const;
+const STAGE_LABELS: Record<string, string> = {
+  scan: "扫描",
+  brainstorm: "构思",
+  plan: "规划",
+  execute: "执行",
+  verify: "验证",
+  archived: "归档",
+};
+
+const APPROVAL_LABELS: Record<string, string> = {
+  pending: "待审批",
+  approved: "已批准",
+  rejected: "已驳回",
+  not_required: "无需审批",
+};
 
 const DOC_TABS = [
   "MASTER",
@@ -108,6 +127,8 @@ export default function ChangeDetailPage({ params }: Props) {
   const [transitioning, setTransitioning] = useState(false);
   const [reviewComment, setReviewComment] = useState("");
   const [taskBoard, setTaskBoard] = useState<TaskBoard | null>(null);
+  const [rejectionInput, setRejectionInput] = useState("");
+  const [showRejectInput, setShowRejectInput] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -187,6 +208,36 @@ export default function ChangeDetailPage({ params }: Props) {
 
   const docExistsMap = new Map(matrix?.documents.map((d) => [d.doc_type, d]) ?? []);
 
+  const handleApprove = async () => {
+    if (!change) return;
+    setTransitioning(true);
+    setPageError(null);
+    try {
+      await approveChange(workspaceId, change.change_key, "admin");
+      setChange({ ...change, approval_status: "approved" });
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "审批操作失败");
+    } finally {
+      setTransitioning(false);
+    }
+  };
+
+  const handleReject = async () => {
+    if (!change || !rejectionInput.trim()) return;
+    setTransitioning(true);
+    setPageError(null);
+    try {
+      await rejectChange(workspaceId, change.change_key, rejectionInput.trim());
+      setChange({ ...change, approval_status: "rejected", rejection_reason: rejectionInput.trim() });
+      setRejectionInput("");
+      setShowRejectInput(false);
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "驳回操作失败");
+    } finally {
+      setTransitioning(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="mx-auto max-w-6xl px-6 py-6">
@@ -234,6 +285,51 @@ export default function ChangeDetailPage({ params }: Props) {
           <span>影响: {change.affected_components.length > 0 ? change.affected_components.join(", ") : "—"}</span>
         </div>
       </header>
+
+      {change.current_stage && (() => {
+        const currentIndex = STAGES.indexOf(change.current_stage as typeof STAGES[number]);
+        if (currentIndex < 0) return null;
+        const stagesObj = change.stages as Record<string, { lastActive?: string }> | null;
+        const lastActive = stagesObj?.[change.current_stage]?.lastActive ?? change.updated_at;
+        return (
+          <div className="rounded-md border bg-card px-3 py-2">
+            <div className="flex items-center gap-1">
+              {STAGES.map((stage, i) => {
+                const isCompleted = currentIndex > i;
+                const isCurrent = currentIndex === i;
+                return (
+                  <div key={stage} className="flex items-center">
+                    <div
+                      className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-medium ${
+                        isCurrent
+                          ? "bg-primary text-primary-foreground"
+                          : isCompleted
+                            ? "bg-emerald-500 text-white"
+                            : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      {isCompleted ? "✓" : i + 1}
+                    </div>
+                    <span
+                      className={`ml-1 text-[11px] ${
+                        isCurrent ? "text-foreground font-medium" : "text-muted-foreground"
+                      }`}
+                    >
+                      {STAGE_LABELS[stage]}
+                    </span>
+                    {i < STAGES.length - 1 && <div className="mx-1 h-px flex-1 bg-border" />}
+                  </div>
+                );
+              })}
+            </div>
+            {lastActive && (
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                最后活跃: {new Date(lastActive).toLocaleString()}
+              </p>
+            )}
+          </div>
+        );
+      })()}
 
       <div className="flex flex-wrap items-center gap-2">
         <Link
@@ -393,6 +489,74 @@ export default function ChangeDetailPage({ params }: Props) {
         </section>
 
         <aside className="space-y-3">
+          {change.approval_status && change.approval_status !== "not_required" && (
+            <section className="rounded-md border bg-card">
+              <div className="border-b px-3 py-2">
+                <h2 className="text-xs font-medium">审批状态</h2>
+              </div>
+              <div className="px-3 py-2 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Badge
+                    variant={
+                      change.approval_status === "approved"
+                        ? "success"
+                        : change.approval_status === "rejected"
+                          ? "destructive"
+                          : "warning"
+                    }
+                  >
+                    {APPROVAL_LABELS[change.approval_status] ?? change.approval_status}
+                  </Badge>
+                </div>
+                {change.approval_status === "rejected" && change.rejection_reason && (
+                  <p className="text-xs text-destructive">驳回原因：{change.rejection_reason}</p>
+                )}
+                {change.approval_status === "approved" && change.approved_by && (
+                  <p className="text-[11px] text-muted-foreground">
+                    审批人: {change.approved_by}
+                    {change.approved_at && ` · ${new Date(change.approved_at).toLocaleString()}`}
+                  </p>
+                )}
+                {change.approval_status === "pending" && (
+                  <div className="space-y-2 pt-1">
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => void handleApprove()} disabled={transitioning}>
+                        批准
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => setShowRejectInput(!showRejectInput)}
+                        disabled={transitioning}
+                      >
+                        驳回
+                      </Button>
+                    </div>
+                    {showRejectInput && (
+                      <div className="space-y-2">
+                        <input
+                          type="text"
+                          className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs focus:border-ring focus:outline-none"
+                          placeholder="输入驳回原因"
+                          value={rejectionInput}
+                          onChange={(e) => setRejectionInput(e.target.value)}
+                        />
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => void handleReject()}
+                          disabled={transitioning || !rejectionInput.trim()}
+                        >
+                          确认驳回
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
           <section className="rounded-md border bg-card">
             <div className="border-b px-3 py-2">
               <h2 className="text-xs font-medium">审查记录 ({reviews.length})</h2>
