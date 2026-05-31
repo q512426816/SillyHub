@@ -43,7 +43,7 @@ export default function CreateChangePage({ params }: Props) {
         affected_components: selectedComponents.length > 0 ? selectedComponents : undefined,
       };
       const result = await createChange(workspaceId, input);
-      router.push(`/workspaces/${workspaceId}/changes/${result.change_key}`);
+      router.push(`/workspaces/${workspaceId}/changes/${result.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "创建变更失败");
     } finally {
