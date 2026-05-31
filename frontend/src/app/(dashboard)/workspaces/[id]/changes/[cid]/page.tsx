@@ -15,11 +15,14 @@ import {
   rejectChange,
   submitFeedback,
   checkArchiveGate,
+  getAgentStatus,
+  triggerDispatch,
   type ChangeDocContent,
   type ChangeDocMatrix,
   type ChangeRead,
   type ArchiveGateResponse,
   type ArchiveCheckItem,
+  type DispatchResponse,
 } from "@/lib/changes";
 import { getTaskBoard, type TaskBoard } from "@/lib/tasks";
 import {
@@ -177,22 +180,29 @@ export default function ChangeDetailPage({ params }: Props) {
   const [loadingArchiveGate, setLoadingArchiveGate] = useState(false);
   const [archiving, setArchiving] = useState(false);
 
+  // ── Agent Dispatch state ───────────────────────────────────────────
+  const [agentStatus, setAgentStatus] = useState<DispatchResponse | null>(null);
+  const [loadingAgentStatus, setLoadingAgentStatus] = useState(false);
+  const [dispatching, setDispatching] = useState(false);
+
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       setPageError(null);
       setLoadError(null);
       try {
-        const [c, m, r, tb] = await Promise.all([
+        const [c, m, r, tb, as] = await Promise.all([
           getChange(workspaceId, changeId),
           getChangeDocuments(workspaceId, changeId),
           listReviews(workspaceId, changeId).catch(() => []),
           getTaskBoard(workspaceId, changeId).catch(() => null),
+          getAgentStatus(workspaceId, changeId).catch(() => null),
         ]);
         setChange(c);
         setMatrix(m);
         setReviews(r);
         setTaskBoard(tb);
+        setAgentStatus(as);
       } catch (err) {
         setLoadError(err instanceof ApiError ? err.message : "加载变更详情失败");
       } finally {
@@ -230,6 +240,11 @@ export default function ChangeDetailPage({ params }: Props) {
       if (targetStage === "accepted") {
         setArchiveGate(null);
       }
+      // Refresh agent status after transition
+      try {
+        const as = await getAgentStatus(workspaceId, changeId);
+        setAgentStatus(as);
+      } catch { /* silent */ }
     } catch (err) {
       if (err instanceof ApiError) {
         const violations = (err.details as { violations?: string[] })?.violations;
@@ -347,6 +362,34 @@ export default function ChangeDetailPage({ params }: Props) {
       setPageError(err instanceof ApiError ? err.message : "加载归档检查失败");
     } finally {
       setLoadingArchiveGate(false);
+    }
+  };
+
+  // ── Agent Dispatch handler ─────────────────────────────────────────
+  const refreshAgentStatus = async () => {
+    setLoadingAgentStatus(true);
+    try {
+      const as = await getAgentStatus(workspaceId, changeId);
+      setAgentStatus(as);
+    } catch { /* silent */ } finally {
+      setLoadingAgentStatus(false);
+    }
+  };
+
+  const handleDispatch = async () => {
+    setDispatching(true);
+    setPageError(null);
+    try {
+      const result = await triggerDispatch(workspaceId, changeId);
+      setAgentStatus(result);
+      if (result.has_active_run) {
+        setSuccessMsg("🤖 Agent 已触发执行");
+        setTimeout(() => setSuccessMsg(null), 3000);
+      }
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "触发 Agent 失败");
+    } finally {
+      setDispatching(false);
     }
   };
 
@@ -495,6 +538,86 @@ export default function ChangeDetailPage({ params }: Props) {
           </Button>
         )}
       </div>
+
+      {/* ── Agent Dispatch Status Panel ──────────────────────────── */}
+      {agentStatus && (
+        <section className="rounded-md border bg-card">
+          <div className="flex items-center justify-between border-b px-3 py-2">
+            <h2 className="text-xs font-medium">🤖 Agent 运行状态</h2>
+            <button
+              onClick={() => void refreshAgentStatus()}
+              disabled={loadingAgentStatus}
+              className="text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+            >
+              {loadingAgentStatus ? "刷新中…" : "↻ 刷新"}
+            </button>
+          </div>
+          <div className="px-3 py-2.5 space-y-2">
+            {!agentStatus.config_enabled ? (
+              /* idle — 无 agent 配置 */
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="inline-block h-2 w-2 rounded-full bg-gray-300" />
+                <span>当前阶段未配置 Agent</span>
+              </div>
+            ) : agentStatus.has_active_run ? (
+              /* running — 活跃运行中 */
+              <div className="flex items-center gap-2 text-xs text-emerald-600">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                </span>
+                <span className="font-medium">Agent 运行中…</span>
+              </div>
+            ) : agentStatus.last_dispatch?.status === "completed" ? (
+              /* completed */
+              <div className="flex items-center gap-2 text-xs text-emerald-600">
+                <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+                <span className="font-medium">上次执行成功</span>
+                {agentStatus.last_dispatch.finished_at && (
+                  <span className="text-[11px] text-muted-foreground">
+                    · {new Date(agentStatus.last_dispatch.finished_at).toLocaleString()}
+                  </span>
+                )}
+              </div>
+            ) : agentStatus.last_dispatch?.status === "failed" ? (
+              /* failed */
+              <div className="flex items-center gap-2 text-xs text-destructive">
+                <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
+                <span className="font-medium">上次执行失败</span>
+                {agentStatus.last_dispatch.finished_at && (
+                  <span className="text-[11px] text-muted-foreground">
+                    · {new Date(agentStatus.last_dispatch.finished_at).toLocaleString()}
+                  </span>
+                )}
+              </div>
+            ) : (
+              /* ready — 可触发 */
+              <div className="flex items-center gap-2 text-xs text-blue-600">
+                <span className="inline-block h-2 w-2 rounded-full bg-blue-500" />
+                <span>就绪，可手动触发 Agent 执行</span>
+              </div>
+            )}
+
+            {/* 输出摘要 */}
+            {agentStatus.last_dispatch?.output_summary && (
+              <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded bg-muted/60 px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground">
+                {agentStatus.last_dispatch.output_summary}
+              </pre>
+            )}
+
+            {/* 手动触发按钮 */}
+            {agentStatus.config_enabled && !agentStatus.has_active_run && (
+              <Button
+                size="sm"
+                onClick={() => void handleDispatch()}
+                disabled={dispatching}
+              >
+                {dispatching ? "触发中…" : "🤖 触发 Agent 执行"}
+              </Button>
+            )}
+          </div>
+        </section>
+      )}
 
       {pageError && (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">

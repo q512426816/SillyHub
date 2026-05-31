@@ -307,3 +307,42 @@ export function checkArchiveGate(workspaceId: string, changeId: string) {
     `/api/workspaces/${workspaceId}/changes/${changeId}/archive-gate`,
   );
 }
+
+// ── Agent Dispatch Types ─────────────────────────────────────────────
+
+/** Agent 运行结果 */
+export type DispatchResult = {
+  status: "running" | "completed" | "failed";
+  output_summary?: string | null;
+  run_id?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+} | null;
+
+/** Agent 状态响应 */
+export type DispatchResponse = {
+  change_id: string;
+  current_stage: string | null;
+  has_active_run: boolean;
+  config_enabled: boolean;
+  last_dispatch: DispatchResult;
+};
+
+/**
+ * 获取 Agent 运行状态 — GET /api/workspaces/{wid}/changes/{cid}/agent-status
+ */
+export function getAgentStatus(workspaceId: string, changeId: string) {
+  return apiFetch<DispatchResponse>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/agent-status`,
+  );
+}
+
+/**
+ * 手动触发 Agent Dispatch — POST /api/workspaces/{wid}/changes/{cid}/dispatch
+ */
+export function triggerDispatch(workspaceId: string, changeId: string) {
+  return apiFetch<DispatchResponse>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/dispatch`,
+    { method: "POST" },
+  );
+}
