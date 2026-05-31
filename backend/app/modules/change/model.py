@@ -5,6 +5,7 @@ Schema follows ``references/17-db-schema.md`` §2.4.
 
 from __future__ import annotations
 
+import enum
 import uuid
 from datetime import datetime, timezone
 
@@ -13,6 +14,62 @@ from sqlalchemy import JSON
 from sqlmodel import Field
 
 from app.models.base import BaseModel
+
+
+class StageEnum(str, enum.Enum):
+    """Change 工作流 10 阶段枚举。"""
+    draft = "draft"
+    clarifying = "clarifying"
+    design_review = "design_review"
+    ready_for_dev = "ready_for_dev"
+    in_dev = "in_dev"
+    technical_verification = "technical_verification"
+    business_review = "business_review"
+    rework_required = "rework_required"
+    accepted = "accepted"
+    archived = "archived"
+
+
+TRANSITIONS: dict[StageEnum, dict[StageEnum, list[str]]] = {
+    StageEnum.draft: {
+        StageEnum.clarifying: ["business_user", "agent"],
+    },
+    StageEnum.clarifying: {
+        StageEnum.design_review: ["reviewer"],
+    },
+    StageEnum.design_review: {
+        StageEnum.ready_for_dev: ["reviewer"],
+        StageEnum.clarifying: ["reviewer"],
+    },
+    StageEnum.ready_for_dev: {
+        StageEnum.in_dev: ["system"],
+    },
+    StageEnum.in_dev: {
+        StageEnum.technical_verification: ["agent"],
+    },
+    StageEnum.technical_verification: {
+        StageEnum.business_review: ["agent", "reviewer"],
+        StageEnum.rework_required: ["reviewer"],
+    },
+    StageEnum.business_review: {
+        StageEnum.accepted: ["reviewer"],
+        StageEnum.rework_required: ["reviewer"],
+    },
+    StageEnum.rework_required: {
+        StageEnum.clarifying: ["reviewer"],
+        StageEnum.design_review: ["reviewer"],
+        StageEnum.in_dev: ["reviewer"],
+    },
+    StageEnum.accepted: {
+        StageEnum.archived: ["system"],
+    },
+    StageEnum.archived: {},
+}
+
+
+def can_transition(current: StageEnum, target: StageEnum) -> bool:
+    """检查从 current 到 target 的流转是否合法（仅检查边是否存在，不检查角色）。"""
+    return target in TRANSITIONS.get(current, {})
 
 
 class Change(BaseModel, table=True):
@@ -89,6 +146,14 @@ class Change(BaseModel, table=True):
     rejection_reason: str | None = Field(
         default=None,
         sa_column=Column(String, nullable=True, default=None),
+    )
+    feedback_category: str | None = Field(
+        default=None,
+        sa_column=Column(String(30), nullable=True, default=None),
+    )
+    feedback_text: str | None = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True, default=None),
     )
 
 
