@@ -131,6 +131,7 @@ export default function ChangeDetailPage({ params }: Props) {
   const [rejectionInput, setRejectionInput] = useState("");
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [executing, setExecuting] = useState(false);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -244,13 +245,15 @@ export default function ChangeDetailPage({ params }: Props) {
     if (!change) return;
     setExecuting(true);
     setPageError(null);
+    setSuccessMsg(null);
     try {
       const result = await executeChange(workspaceId, change.change_key);
       if (result.ok) {
         // Refresh change data after successful execution
         const updated = await getChange(workspaceId, changeId);
         setChange(updated);
-        setPageError(null);
+        setSuccessMsg("✅ Agent 执行已启动 (run_id: " + (result.run_id?.slice(0, 8) ?? "unknown") + ")");
+        setTimeout(() => setSuccessMsg(null), 5000);
       }
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "启动执行失败");
@@ -384,6 +387,12 @@ export default function ChangeDetailPage({ params }: Props) {
       {pageError && (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {pageError}
+        </div>
+      )}
+
+      {successMsg && (
+        <div className="rounded border border-green-300 bg-green-50 px-3 py-2 text-xs text-green-700">
+          {successMsg}
         </div>
       )}
 
