@@ -1,9 +1,9 @@
 {
-  "changeName": "default",
-  "branch": "sillyspec/default",
+  "changeName": "fix-sse-auth",
+  "branch": "sillyspec/fix-sse-auth",
   "baseBranch": "main",
-  "baseHash": "a83e821aa88d4297dad4400ba073f2b98ec95ba3",
-  "actualBaseHash": "a83e821aa88d4297dad4400ba073f2b98ec95ba3",
-  "createdAt": "2026-06-01T03:30:13.500Z",
-  "worktreePath": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\.runtime\\worktrees\\default"
+  "baseHash": "7bb46510975da4539c08275000748a835aaa728d",
+  "actualBaseHash": "7bb46510975da4539c08275000748a835aaa728d",
+  "createdAt": "2026-06-01T06:14:20.681Z",
+  "worktreePath": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\.runtime\\worktrees\\fix-sse-auth"
 }

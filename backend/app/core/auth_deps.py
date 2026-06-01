@@ -30,12 +30,11 @@ from app.modules.auth.rbac import has_permission
 
 def _extract_bearer(request: Request) -> str | None:
     raw = request.headers.get("authorization") or request.headers.get("Authorization")
-    if not raw:
-        return None
-    parts = raw.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        return None
-    return parts[1].strip() or None
+    if raw:
+        parts = raw.split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            return parts[1].strip() or None
+    return request.query_params.get("token")
 
 
 async def get_current_user(
