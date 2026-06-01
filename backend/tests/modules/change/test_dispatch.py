@@ -562,3 +562,386 @@ async def test_dispatch_next_step_idempotency(db_session: AsyncSession) -> None:
         )
         assert result2["dispatched"] is False
         assert result2["reason"] == "active_run_exists"
+
+
+
+# ===================================================================
+# 7. StageSyncResult + sync_stage_status (task-09)
+# ===================================================================
+
+
+import sqlite3
+from pathlib import Path as SyncPath
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from app.core.spec_paths import SpecPathResolver
+from app.modules.change.dispatch import StageSyncResult, SillySpecStageDispatchService
+
+
+def _create_sillyspec_db(
+    tmp_path: SyncPath,
+    change_key: str = "test-change",
+    current_stage: str = "propose",
+    stages: list[dict] | None = None,
+    steps: list[dict] | None = None,
+) -> SyncPath:
+    """Create a minimal sillyspec.db for testing sync_stage_status."""
+    from app.core.spec_paths import SpecPathResolver
+
+    db_path = SpecPathResolver(str(tmp_path)).db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    conn = sqlite3.connect(str(db_path))
+    cur = conn.cursor()
+    cur.execute(
+        "CREATE TABLE IF NOT EXISTS changes "
+        "(id INTEGER PRIMARY KEY, name TEXT UNIQUE, current_stage TEXT, status TEXT)"
+    )
+    cur.execute(
+        "CREATE TABLE IF NOT EXISTS stages "
+        "(id INTEGER PRIMARY KEY, change_id INTEGER, stage TEXT, status TEXT, "
+        "started_at TEXT, completed_at TEXT)"
+    )
+    cur.execute(
+        "CREATE TABLE IF NOT EXISTS steps "
+        "(id INTEGER PRIMARY KEY, stage_id INTEGER, name TEXT, status TEXT, "
+        "output TEXT, completed_at TEXT, ordering INTEGER)"
+    )
+    cur.execute(
+        "INSERT INTO changes (name, current_stage, status) VALUES (?, ?, ?)",
+        (change_key, current_stage, "in-progress"),
+    )
+    change_id = cur.lastrowid
+
+    if stages is None:
+        stages = [{"stage": current_stage, "status": "in-progress"}]
+    for s in stages:
+        cur.execute(
+            "INSERT INTO stages (change_id, stage, status, started_at, completed_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (change_id, s["stage"], s["status"], "2026-01-01", None),
+        )
+        stage_id = cur.lastrowid
+        if steps:
+            for i, step in enumerate(steps):
+                cur.execute(
+                    "INSERT INTO steps (stage_id, name, status, output, completed_at, ordering) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (stage_id, step["name"], step["status"], "", None, i),
+                )
+
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+async def test_sync_stage_status_normal_sync(db_session: AsyncSession) -> None:
+    """正常同步 — sillyspec.db 中有 change_key、stage in-progress、部分 steps completed。"""
+    workspace_id = await _create_workspace(db_session)
+    change = Change(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        change_key="test-sync",
+        title="Test sync",
+        status="draft",
+        location="active",
+        path=".sillyspec/changes/test-sync",
+        current_stage="draft",
+        stages={},
+    )
+    db_session.add(change)
+    await db_session.commit()
+    await db_session.refresh(change)
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        _create_sillyspec_db(
+            SyncPath(tmp_dir),
+            change_key="test-sync",
+            current_stage="propose",
+            steps=[
+                {"name": "step1", "status": "completed"},
+                {"name": "step2", "status": "pending"},
+            ],
+        )
+        service = SillySpecStageDispatchService(db_session)
+        run_id = uuid.uuid4()
+        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
+            mock_resolve.return_value = SpecPathResolver(tmp_dir).db_path()
+            result = await service.sync_stage_status(db_session, change.id, run_id)
+
+    assert result.synced is True
+    assert result.current_stage == "propose"
+    assert result.current_step == "step2"
+    assert result.stage_completed is False
+    assert result.has_pending_step is True
+    assert "step1" in result.steps_completed
+    assert "step2" in result.steps_pending
+
+    # Verify Change.current_stage was updated
+    await db_session.refresh(change)
+    assert change.current_stage == "propose"
+    assert "propose" in change.stages
+    assert change.stages["propose"]["steps"]["completed"] == ["step1"]
+
+
+async def test_sync_stage_status_all_steps_completed(db_session: AsyncSession) -> None:
+    """stage completed — 所有 steps 状态为 completed。"""
+    workspace_id = await _create_workspace(db_session)
+    change = Change(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        change_key="test-completed",
+        title="Test completed",
+        status="draft",
+        location="active",
+        path=".sillyspec/changes/test-completed",
+        current_stage="propose",
+        stages={},
+    )
+    db_session.add(change)
+    await db_session.commit()
+    await db_session.refresh(change)
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        _create_sillyspec_db(
+            SyncPath(tmp_dir),
+            change_key="test-completed",
+            current_stage="propose",
+            stages=[{"stage": "propose", "status": "completed"}],
+            steps=[
+                {"name": "step1", "status": "completed"},
+                {"name": "step2", "status": "completed"},
+            ],
+        )
+        service = SillySpecStageDispatchService(db_session)
+        run_id = uuid.uuid4()
+        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
+            mock_resolve.return_value = SpecPathResolver(tmp_dir).db_path()
+            result = await service.sync_stage_status(db_session, change.id, run_id)
+
+    assert result.synced is True
+    assert result.stage_completed is True
+    assert result.has_pending_step is False
+    assert result.steps_pending == []
+    assert len(result.steps_completed) == 2
+
+
+async def test_sync_stage_status_db_not_found(db_session: AsyncSession) -> None:
+    """sillyspec.db 不存在 — synced=False，无异常。"""
+    workspace_id = await _create_workspace(db_session)
+    change = await _create_change(db_session, workspace_id=workspace_id)
+
+    service = SillySpecStageDispatchService(db_session)
+    run_id = uuid.uuid4()
+    with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
+        mock_resolve.return_value = SyncPath("/nonexistent/sillyspec.db")
+        result = await service.sync_stage_status(db_session, change.id, run_id)
+
+    assert result.synced is False
+    assert "not found" in result.error
+
+
+async def test_sync_stage_status_db_connect_failed(db_session: AsyncSession) -> None:
+    """sillyspec.db 连接失败 — synced=False。"""
+    workspace_id = await _create_workspace(db_session)
+    change = await _create_change(db_session, workspace_id=workspace_id)
+
+    service = SillySpecStageDispatchService(db_session)
+    run_id = uuid.uuid4()
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # Create a dummy file so is_file() returns True
+        dummy_db = SyncPath(tmp_dir) / "sillyspec.db"
+        dummy_db.write_text("not a real db")
+        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
+            mock_resolve.return_value = dummy_db
+            with patch("app.modules.change.dispatch.sqlite3.connect", side_effect=sqlite3.Error("corrupt")):
+                result = await service.sync_stage_status(db_session, change.id, run_id)
+
+    assert result.synced is False
+    assert "db_connect_failed" in result.error
+
+
+async def test_sync_stage_status_db_read_failed(db_session: AsyncSession) -> None:
+    """sillyspec.db 读取失败 — synced=False。"""
+    workspace_id = await _create_workspace(db_session)
+    change = await _create_change(db_session, workspace_id=workspace_id)
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # Create a valid db so connect succeeds but make execute fail
+        db_path = SyncPath(tmp_dir) / ".sillyspec" / ".runtime" / "sillyspec.db"
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE changes (id INTEGER PRIMARY KEY, name TEXT)")
+        conn.commit()
+        conn.close()
+
+        service = SillySpecStageDispatchService(db_session)
+        run_id = uuid.uuid4()
+        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
+            mock_resolve.return_value = db_path
+            result = await service.sync_stage_status(db_session, change.id, run_id)
+
+    assert result.synced is False
+    assert "db_read_failed" in result.error
+
+
+async def test_sync_stage_status_change_key_not_in_db(db_session: AsyncSession) -> None:
+    """changes 表中无 change_key — synced=False。"""
+    workspace_id = await _create_workspace(db_session)
+    change = await _create_change(db_session, workspace_id=workspace_id)
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        _create_sillyspec_db(SyncPath(tmp_dir), change_key="other-change")
+
+        service = SillySpecStageDispatchService(db_session)
+        run_id = uuid.uuid4()
+        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
+            mock_resolve.return_value = SpecPathResolver(tmp_dir).db_path()
+            result = await service.sync_stage_status(db_session, change.id, run_id)
+
+    assert result.synced is False
+    assert "change_key not found" in result.error
+
+
+async def test_sync_stage_status_change_not_found(db_session: AsyncSession) -> None:
+    """Change 不存在 — 抛出 ChangeNotFound。"""
+    from app.core.errors import ChangeNotFound
+
+    service = SillySpecStageDispatchService(db_session)
+    run_id = uuid.uuid4()
+    with pytest.raises(ChangeNotFound):
+        await service.sync_stage_status(db_session, uuid.uuid4(), run_id)
+
+
+async def test_sync_stage_status_no_stage_record(db_session: AsyncSession) -> None:
+    """stages 表无当前 stage 记录 — synced=True, stage_completed=False。"""
+    workspace_id = await _create_workspace(db_session)
+    change = Change(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        change_key="test-no-stage",
+        title="Test no stage",
+        status="draft",
+        location="active",
+        path=".sillyspec/changes/test-no-stage",
+        current_stage="draft",
+        stages={},
+    )
+    db_session.add(change)
+    await db_session.commit()
+    await db_session.refresh(change)
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        _create_sillyspec_db(
+            SyncPath(tmp_dir),
+            change_key="test-no-stage",
+            current_stage="plan",
+            stages=[],  # No stage records
+        )
+        service = SillySpecStageDispatchService(db_session)
+        run_id = uuid.uuid4()
+        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
+            mock_resolve.return_value = SpecPathResolver(tmp_dir).db_path()
+            result = await service.sync_stage_status(db_session, change.id, run_id)
+
+    assert result.synced is True
+    assert result.stage_completed is False
+    assert result.current_stage == "plan"
+
+    # Verify Change.current_stage was updated
+    await db_session.refresh(change)
+    assert change.current_stage == "plan"
+
+
+async def test_sync_stage_status_empty_steps(db_session: AsyncSession) -> None:
+    """steps 表为空 — synced=True, has_pending_step=False。"""
+    workspace_id = await _create_workspace(db_session)
+    change = Change(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        change_key="test-empty-steps",
+        title="Test empty steps",
+        status="draft",
+        location="active",
+        path=".sillyspec/changes/test-empty-steps",
+        current_stage="propose",
+        stages={},
+    )
+    db_session.add(change)
+    await db_session.commit()
+    await db_session.refresh(change)
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        _create_sillyspec_db(
+            SyncPath(tmp_dir),
+            change_key="test-empty-steps",
+            current_stage="propose",
+            stages=[{"stage": "propose", "status": "in-progress"}],
+            steps=[],  # No steps
+        )
+        service = SillySpecStageDispatchService(db_session)
+        run_id = uuid.uuid4()
+        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
+            mock_resolve.return_value = SpecPathResolver(tmp_dir).db_path()
+            result = await service.sync_stage_status(db_session, change.id, run_id)
+
+    assert result.synced is True
+    assert result.has_pending_step is False
+    assert result.steps_completed == []
+    assert result.steps_pending == []
+
+
+async def test_sync_stage_status_updates_change_stages_json(db_session: AsyncSession) -> None:
+    """Change.stages JSON 已更新包含 steps 投影。"""
+    workspace_id = await _create_workspace(db_session)
+    change = Change(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        change_key="test-json",
+        title="Test json",
+        status="draft",
+        location="active",
+        path=".sillyspec/changes/test-json",
+        current_stage="draft",
+        stages={},
+    )
+    db_session.add(change)
+    await db_session.commit()
+    await db_session.refresh(change)
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        _create_sillyspec_db(
+            SyncPath(tmp_dir),
+            change_key="test-json",
+            current_stage="plan",
+            stages=[{"stage": "plan", "status": "in-progress"}],
+            steps=[
+                {"name": "task-1", "status": "completed"},
+                {"name": "task-2", "status": "pending"},
+            ],
+        )
+        service = SillySpecStageDispatchService(db_session)
+        run_id = uuid.uuid4()
+        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
+            mock_resolve.return_value = SpecPathResolver(tmp_dir).db_path()
+            result = await service.sync_stage_status(db_session, change.id, run_id)
+
+    assert result.synced is True
+    await db_session.refresh(change)
+    stage_info = change.stages.get("plan")
+    assert stage_info is not None
+    assert stage_info["status"] == "in_progress"
+    assert stage_info["steps"]["completed"] == ["task-1"]
+    assert stage_info["steps"]["pending"] == ["task-2"]
+    assert stage_info["current_step"] == "task-2"
+    assert "synced_at" in stage_info
+    assert str(run_id) == stage_info["synced_from_run"]

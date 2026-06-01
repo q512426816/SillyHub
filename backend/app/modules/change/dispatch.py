@@ -7,6 +7,7 @@ defining how the agent should be invoked.
 
 from __future__ import annotations
 
+import sqlite3
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -39,6 +40,23 @@ class StageAgentConfig:
     description: str = ""
     read_only: bool = True  # True = agent should only read/analyse, not write code
 
+
+
+
+@dataclass
+class StageSyncResult:
+    """sync_stage_status 的返回值，携带同步结果和步骤状态摘要。"""
+
+    synced: bool                              # 同步是否成功
+    change_id: uuid.UUID                      # 变更 ID
+    run_id: uuid.UUID                         # 触发同步的 AgentRun ID
+    current_stage: str | None = None          # sillyspec.db 中的 current_stage
+    current_step: str | None = None           # 第一个 pending step 名称
+    stage_completed: bool = False             # 当前 stage 全部 steps 已完成
+    has_pending_step: bool = False            # 当前 stage 还有 pending step
+    steps_completed: list[str] = field(default_factory=list)
+    steps_pending: list[str] = field(default_factory=list)
+    error: str | None = None                  # synced=False 时的错误描述
 
 STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
     StageEnum.SCAN.value: StageAgentConfig(
@@ -106,6 +124,124 @@ STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
         description="Write quicklog and may modify code directly.",
     ),
 }
+
+# ---------------------------------------------------------------------------
+# Auto-dispatch chain management (task-10)
+# ---------------------------------------------------------------------------
+
+_DISPATCH_CHAIN_LIMIT: int = 10
+
+
+def _get_chain_count(stages: dict) -> int:
+    """从 Change.stages JSON 中读取连续 auto-dispatch 计数。"""
+    return stages.get("_dispatch_chain_count", 0)
+
+
+def _increment_chain_count(stages: dict) -> dict:
+    """递增连续 auto-dispatch 计数，返回更新后的 stages dict。"""
+    stages["_dispatch_chain_count"] = _get_chain_count(stages) + 1
+    return stages
+
+
+def _reset_chain_count(stages: dict) -> dict:
+    """重置连续 auto-dispatch 计数为 0。"""
+    stages["_dispatch_chain_count"] = 0
+    return stages
+
+
+async def auto_dispatch_next_step(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    user_id: uuid.UUID,
+    sync_result: StageSyncResult,
+) -> dict[str, Any]:
+    """根据 sync_stage_status 的结果决定是否自动调度下一个 AgentRun。
+
+    在 sync_stage_status 返回后调用。核心调度链路的"决策点"。
+
+    Args:
+        session: 数据库会话
+        workspace_id: 工作区 ID
+        change_id: 变更 ID
+        user_id: 触发用户 ID（通常为上一个 AgentRun 的触发者）
+        sync_result: sync_stage_status() 的返回结果
+
+    Returns:
+        dispatch 结果字典：
+        - {"dispatched": True, "agent_run_id": ..., "stage": ..., "reason": "auto_dispatch"}
+        - {"dispatched": False, "reason": "no_pending_step"}
+        - {"dispatched": False, "reason": "stage_completed"}
+        - {"dispatched": False, "reason": "sync_failed"}
+        - {"dispatched": False, "reason": "chain_limit_reached"}
+    """
+    # 1. sync failed
+    if not sync_result.synced:
+        log.info(
+            "auto_dispatch_skip_sync_failed",
+            change_id=str(change_id),
+            error=sync_result.error,
+        )
+        return {"dispatched": False, "reason": "sync_failed"}
+
+    # 2. stage completed
+    if sync_result.stage_completed:
+        log.info(
+            "auto_dispatch_skip_stage_completed",
+            change_id=str(change_id),
+            stage=sync_result.current_stage,
+        )
+        return {"dispatched": False, "reason": "stage_completed"}
+
+    # 3. no pending step
+    if not sync_result.has_pending_step:
+        log.info(
+            "auto_dispatch_skip_no_pending",
+            change_id=str(change_id),
+            stage=sync_result.current_stage,
+        )
+        return {"dispatched": False, "reason": "no_pending_step"}
+
+    # 4. Check chain limit
+    change = await session.get(Change, change_id)
+    if change is None:
+        return {"dispatched": False, "reason": "change_not_found"}
+
+    stages = change.stages or {}
+    chain_count = _get_chain_count(stages)
+    if chain_count >= _DISPATCH_CHAIN_LIMIT:
+        log.warning(
+            "dispatch_chain_limit_reached",
+            change_id=str(change_id),
+            chain_count=chain_count,
+            limit=_DISPATCH_CHAIN_LIMIT,
+        )
+        return {"dispatched": False, "reason": "chain_limit_reached"}
+
+    # 5. Increment chain count and dispatch
+    stages = _increment_chain_count(stages)
+    change.stages = stages
+    session.add(change)
+    await session.commit()
+
+    dispatch_result = await dispatch(
+        session=session,
+        workspace_id=workspace_id,
+        change_id=change_id,
+        target_stage=sync_result.current_stage,
+        user_id=user_id,
+    )
+
+    if dispatch_result.get("dispatched"):
+        dispatch_result["reason"] = "auto_dispatch"
+    else:
+        # Reset chain count on dispatch failure
+        stages = _reset_chain_count(stages)
+        change.stages = stages
+        session.add(change)
+        await session.commit()
+
+    return dispatch_result
 
 
 # ---------------------------------------------------------------------------
@@ -406,6 +542,232 @@ class SillySpecStageDispatchService:
             spec_root=None,
             read_only=False,
         )
+
+    # ------------------------------------------------------------------
+    # Stage status sync (task-09)
+    # ------------------------------------------------------------------
+
+    async def sync_stage_status(
+        self,
+        session: AsyncSession,
+        change_id: uuid.UUID,
+        run_id: uuid.UUID,
+    ) -> StageSyncResult:
+        """AgentRun 完成后从 sillyspec.db 同步阶段/步骤状态到 Hub。
+
+        读取 sillyspec.db 的 changes + stages + steps 表，投影到
+        Change.current_stage 和 Change.stages JSON。
+
+        Args:
+            session: SQLAlchemy async session。
+            change_id: 目标变更的 UUID。
+            run_id: 刚完成的 AgentRun 的 UUID（用于审计追踪）。
+
+        Returns:
+            StageSyncResult 包含同步状态和步骤信息。
+            synced=True 表示同步成功。
+            synced=False 表示跳过（db 不存在、读取失败等），不中断主流程。
+
+        Raises:
+            ChangeNotFound: 当 change_id 在 Hub DB 中不存在时。
+        """
+        from app.core.errors import ChangeNotFound
+        from app.core.spec_paths import SpecPathResolver
+
+        # Step 1: Load Change
+        change = await session.get(Change, change_id)
+        if change is None:
+            raise ChangeNotFound(f"Change '{change_id}' not found.")
+
+        # Step 2: Resolve sillyspec.db path
+        db_path = await self._resolve_db_path(session, change)
+        if db_path is None or not db_path.is_file():
+            log.warning(
+                "sync_stage_status.db_not_found",
+                change_id=str(change_id),
+                db_path=str(db_path) if db_path else None,
+            )
+            return StageSyncResult(
+                synced=False,
+                change_id=change_id,
+                run_id=run_id,
+                error="sillyspec.db not found",
+            )
+
+        # Step 3: Read sillyspec.db
+        conn: sqlite3.Connection | None = None
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            conn.row_factory = sqlite3.Row
+        except sqlite3.Error as exc:
+            log.info(
+                "sync_stage_status.db_connect_failed",
+                change_id=str(change_id),
+                error=str(exc),
+            )
+            return StageSyncResult(
+                synced=False,
+                change_id=change_id,
+                run_id=run_id,
+                error=f"db_connect_failed: {exc}",
+            )
+
+        try:
+            # Step 3a: Find change record by change_key
+            row = conn.execute(
+                "SELECT current_stage, status FROM changes WHERE name = ?",
+                (change.change_key,),
+            ).fetchone()
+
+            if row is None:
+                log.warning(
+                    "sync_stage_status.change_not_in_db",
+                    change_key=change.change_key,
+                    change_id=str(change_id),
+                )
+                conn.close()
+                return StageSyncResult(
+                    synced=False,
+                    change_id=change_id,
+                    run_id=run_id,
+                    error="change_key not found in sillyspec.db",
+                )
+
+            db_current_stage = row["current_stage"]
+
+            # Step 3b: Find the current stage record
+            stage_row = conn.execute(
+                "SELECT id, status, completed_at FROM stages "
+                "WHERE change_id = (SELECT id FROM changes WHERE name = ?) "
+                "AND stage = ?",
+                (change.change_key, db_current_stage),
+            ).fetchone()
+
+            stage_completed = False
+            steps_completed: list[str] = []
+            steps_pending: list[str] = []
+            current_step: str | None = None
+
+            if stage_row is not None:
+                stage_completed = stage_row["status"] == "completed"
+
+                # Step 3c: Find all steps for this stage
+                step_rows = conn.execute(
+                    "SELECT name, status FROM steps "
+                    "WHERE stage_id = ? ORDER BY ordering",
+                    (stage_row["id"],),
+                ).fetchall()
+
+                for step in step_rows:
+                    if step["status"] == "completed":
+                        steps_completed.append(step["name"])
+                    else:
+                        steps_pending.append(step["name"])
+
+                # Step 3d: Determine current_step (first non-completed)
+                has_pending = len(steps_pending) > 0
+                if has_pending:
+                    current_step = steps_pending[0]
+            else:
+                # Stage record doesn't exist yet
+                has_pending = True
+                current_step = None
+
+        except sqlite3.Error as exc:
+            log.info(
+                "sync_stage_status.db_read_failed",
+                change_id=str(change_id),
+                error=str(exc),
+            )
+            if conn:
+                conn.close()
+            return StageSyncResult(
+                synced=False,
+                change_id=change_id,
+                run_id=run_id,
+                error=f"db_read_failed: {exc}",
+            )
+        finally:
+            if conn:
+                conn.close()
+
+        # Step 4: Sync current_stage to Change record
+        if change.current_stage != db_current_stage:
+            log.info(
+                "sync_stage_status.stage_updated",
+                change_id=str(change_id),
+                old=change.current_stage,
+                new=db_current_stage,
+            )
+            change.current_stage = db_current_stage
+
+        # Step 5: Sync step status to Change.stages JSON
+        stages_json = change.stages or {}
+        stage_key = db_current_stage
+        stages_json[stage_key] = {
+            "status": "completed" if stage_completed else "in_progress",
+            "steps": {
+                "completed": steps_completed,
+                "pending": steps_pending,
+            },
+            "current_step": current_step,
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+            "synced_from_run": str(run_id),
+        }
+        change.stages = stages_json
+        change.updated_at = datetime.now(timezone.utc)
+        session.add(change)
+        await session.commit()
+
+        # Step 6: Build and return StageSyncResult
+        return StageSyncResult(
+            synced=True,
+            change_id=change_id,
+            run_id=run_id,
+            current_stage=db_current_stage,
+            current_step=current_step,
+            stage_completed=stage_completed,
+            has_pending_step=len(steps_pending) > 0,
+            steps_completed=steps_completed,
+            steps_pending=steps_pending,
+        )
+
+    async def _resolve_db_path(
+        self,
+        session: AsyncSession,
+        change: Change,
+    ) -> Path | None:
+        """解析 sillyspec.db 文件路径。
+
+        优先使用 SpecWorkspace.spec_root，fallback 到 workspace.root_path。
+        返回 None 表示无法确定路径。
+        """
+        from app.core.spec_paths import SpecPathResolver
+
+        try:
+            from app.modules.spec_workspace.model import SpecWorkspace
+
+            stmt = select(SpecWorkspace).where(
+                SpecWorkspace.workspace_id == change.workspace_id
+            )
+            spec_ws = (await session.execute(stmt)).scalars().first()
+
+            if spec_ws and spec_ws.strategy != "repo-native":
+                resolver_root = spec_ws.spec_root
+                return SpecPathResolver(resolver_root).db_path()
+        except Exception:
+            pass
+
+        # Fallback: use workspace root_path
+        from app.modules.workspace.model import Workspace
+
+        ws_stmt = select(Workspace).where(Workspace.id == change.workspace_id)
+        workspace = (await session.execute(ws_stmt)).scalars().first()
+        if not workspace or not workspace.root_path:
+            return None
+
+        return SpecPathResolver(workspace.root_path).db_path()
+
 
 
 # ---------------------------------------------------------------------------

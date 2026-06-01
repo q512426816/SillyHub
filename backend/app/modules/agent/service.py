@@ -50,6 +50,60 @@ class AgentRunError(AppError):
     http_status = 400
 
 
+
+
+def resolve_work_dir(
+    *,
+    workspace_root: str,
+    change_path: str | None,
+    change_key: str | None,
+    lease: WorktreeLease | None,
+    requires_worktree: bool,
+    read_only: bool,
+) -> Path:
+    """根据阶段配置和 worktree 可用性确定工作目录。
+
+    策略：
+      - 有 lease（workspace 有 git identity + 写阶段） → worktree repo
+      - 无 lease + 写阶段（无 git identity）→ workspace root
+      - 只读阶段 → workspace root（拼接 change.path）
+
+    Args:
+        workspace_root: workspace 的根路径（来自 Workspace.root_path）。
+        change_path: change.path 字段值，可能为 None。
+        change_key: change.change_key，用于拼接 worktree 内 .sillyspec 路径。
+        lease: 已获取的 WorktreeLease，无 git identity 时为 None。
+        requires_worktree: 阶段配置是否要求 worktree。
+        read_only: 阶段是否只读。
+
+    Returns:
+        确定的工作目录 Path。
+
+    Raises:
+        AgentRunError: workspace_root 路径不存在时。
+    """
+    ws_root = Path(workspace_root)
+    if not ws_root.exists():
+        raise AgentRunError(
+            f"Workspace root does not exist: {workspace_root}",
+            details={"workspace_root": workspace_root},
+        )
+
+    # 只读阶段 → workspace root（拼接 change.path）
+    if read_only:
+        if change_path:
+            candidate = ws_root / change_path if not Path(change_path).is_absolute() else Path(change_path)
+            if candidate.is_dir():
+                return candidate
+        return ws_root
+
+    # 写阶段 + 有 lease → worktree repo
+    if lease is not None:
+        return Path(lease.path) / "repo"
+
+    # 写阶段 + 无 lease → workspace root（审计日志由调用方记录）
+    return ws_root
+
 class AgentService:
     # 进程注册表 — 类属性，所有实例共享
     # key: run_id (UUID), value: asyncio.subprocess.Process
@@ -521,7 +575,6 @@ class AgentService:
         from app.modules.worktree.model import WorktreeLease
 
         lease: WorktreeLease | None = None
-        work_dir: Path
 
         if requires_worktree:
             lease = await self._try_acquire_lease(
@@ -529,24 +582,34 @@ class AgentService:
                 change_id=change_id,
                 user_id=user_id,
             )
-            if lease is None:
-                raise AgentRunError(
-                    f"Cannot acquire worktree for stage '{stage}': "
-                    "workspace has no git identity configured.",
-                    details={
-                        "stage": stage,
-                        "change_id": str(change_id),
-                        "workspace_id": str(workspace_id),
-                    },
-                )
-            work_dir = Path(lease.path) / "repo"
-        else:
-            # Read-only: use workspace root or change path
-            change_path = Path(change.path)
-            if change_path.is_dir():
-                work_dir = change_path
-            else:
-                work_dir = Path(workspace_root)
+            # No longer raise on None — fallback to workspace root
+
+        work_dir = resolve_work_dir(
+            workspace_root=workspace_root,
+            change_path=change.path,
+            change_key=change.change_key,
+            lease=lease,
+            requires_worktree=requires_worktree,
+            read_only=read_only,
+        )
+
+        # 审计日志：写阶段 + 无 lease → 记录 warning
+        if not read_only and lease is None:
+            log.warning(
+                "stage_dispatch_no_worktree_fallback",
+                stage=stage,
+                change_id=str(change_id),
+                workspace_id=str(workspace_id),
+                work_dir=str(work_dir),
+            )
+
+        # -- 2b. Ensure .sillyspec/changes/<key>/ exists in worktree -----------
+        if change.change_key and not read_only:
+            await self._ensure_change_dir_in_worktree(
+                work_dir=work_dir,
+                change_key=change.change_key,
+                workspace_root=workspace_root,
+            )
 
         # -- 3. Build prompt --------------------------------------------------
         prompt_context = {
@@ -600,6 +663,49 @@ class AgentService:
 
         # Return immediately — caller can poll agent-status for progress
         return run
+
+    async def _ensure_change_dir_in_worktree(
+        self,
+        work_dir: Path,
+        change_key: str,
+        workspace_root: str,
+    ) -> None:
+        """确保 worktree 内 .sillyspec/changes/<change_key>/ 目录存在。
+
+        如果目录不存在，从主 repo 复制。如果复制失败，记录 warning
+        并继续（agent 启动后可通过 sillyspec init 创建）。
+        """
+        change_dir = work_dir / ".sillyspec" / "changes" / change_key
+        if change_dir.exists():
+            return
+
+        log.info(
+            "ensuring_change_dir_in_worktree",
+            change_key=change_key,
+            work_dir=str(work_dir),
+        )
+
+        # 尝试从主 repo 复制
+        source_dir = Path(workspace_root) / ".sillyspec" / "changes" / change_key
+        if source_dir.exists():
+            try:
+                import shutil
+                change_dir.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(str(source_dir), str(change_dir))
+                log.info("change_dir_copied_from_main_repo", dest=str(change_dir))
+            except Exception as exc:
+                log.warning(
+                    "change_dir_copy_failed",
+                    source=str(source_dir),
+                    dest=str(change_dir),
+                    error=str(exc),
+                )
+        else:
+            log.warning(
+                "change_dir_not_in_main_repo",
+                change_key=change_key,
+                source=str(source_dir),
+            )
 
     async def _try_acquire_lease(
         self,
@@ -786,6 +892,53 @@ class AgentService:
                 stages["last_dispatch"] = last_dispatch
                 change.stages = stages
                 session.add(change)
+
+            # -- 8. Sync stage status + auto dispatch next step -----------------
+            if run.status == "completed":
+                try:
+                    from app.modules.change.dispatch import (
+                        auto_dispatch_next_step,
+                        SillySpecStageDispatchService,
+                    )
+
+                    dispatch_svc = SillySpecStageDispatchService(session)
+                    sync_result = await dispatch_svc.sync_stage_status(
+                        session=session,
+                        change_id=change_id,
+                        run_id=run_id,
+                    )
+                    log.info(
+                        "stage_sync_completed",
+                        run_id=str(run_id),
+                        change_id=str(change_id),
+                        synced=sync_result.synced,
+                        has_pending_step=sync_result.has_pending_step,
+                        stage_completed=sync_result.stage_completed,
+                    )
+
+                    if sync_result.synced and sync_result.has_pending_step:
+                        auto_result = await auto_dispatch_next_step(
+                            session=session,
+                            workspace_id=workspace_id,
+                            change_id=change_id,
+                            user_id=user_id,
+                            sync_result=sync_result,
+                        )
+                        log.info(
+                            "auto_dispatch_result",
+                            run_id=str(run_id),
+                            change_id=str(change_id),
+                            dispatched=auto_result.get("dispatched"),
+                            reason=auto_result.get("reason"),
+                        )
+                except Exception as exc:
+                    # 自动调度失败不应影响主流程（AgentRun 已完成）
+                    log.warning(
+                        "auto_dispatch_failed",
+                        run_id=str(run_id),
+                        change_id=str(change_id),
+                        error=str(exc),
+                    )
 
             await session.commit()
 

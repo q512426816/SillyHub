@@ -490,3 +490,178 @@ def test_stage_dispatch_prompt_stage_none_fallback():
     )
     result = _build_stage_dispatch_prompt(bundle)
     assert "sillyspec run unknown --change x" in result
+
+
+# ---------------------------------------------------------------------------
+# Task-11 tests: Read-only path judgment fix
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_read_only_relative_path_exists_in_workspace(tmp_path):
+    """change.path 为相对路径 + workspace root 下该目录存在 → work_dir 指向拼接路径。"""
+    from app.modules.agent.service import AgentService
+    from app.modules.change.model import Change
+
+    # Setup
+    ws_root = tmp_path / "workspace"
+    ws_root.mkdir()
+    change_dir = ws_root / ".sillyspec" / "changes" / "my-change"
+    change_dir.mkdir(parents=True)
+
+    mock_session = AsyncMock(spec=AsyncSession)
+    mock_change = MagicMock(spec=Change)
+    mock_change.path = ".sillyspec/changes/my-change"
+    mock_change.change_key = "my-change"
+    mock_change.title = "Test"
+    mock_change.current_stage = "scan"
+    mock_change.change_type = ""
+    mock_change.affected_components = []
+
+    async def _get(model, pk):
+        return mock_change
+    mock_session.get = AsyncMock(side_effect=_get)
+
+    svc = AgentService(mock_session)
+    with patch.object(svc, "_get_workspace_root", new_callable=AsyncMock, return_value=str(ws_root)):
+        with patch.object(svc, "_try_acquire_lease", new_callable=AsyncMock, return_value=None):
+            with patch.object(svc, "_execute_stage_run", new_callable=AsyncMock) as mock_exec:
+                with patch("app.modules.change.dispatch.load_prompt_template", return_value="test prompt"):
+                    await svc.start_stage_dispatch(
+                        workspace_id=uuid.uuid4(),
+                        change_id=uuid.uuid4(),
+                        user_id=uuid.uuid4(),
+                        stage="scan",
+                        prompt_template="scan.md",
+                        requires_worktree=False,
+                        read_only=True,
+                    )
+
+    # Verify _execute_stage_run was called with the correct work_dir
+    call_kwargs = mock_exec.call_args[1]
+    assert call_kwargs["work_dir"] == ws_root / ".sillyspec" / "changes" / "my-change"
+
+
+@pytest.mark.asyncio
+async def test_read_only_relative_path_not_exists_fallback(tmp_path):
+    """change.path 为相对路径 + workspace root 下该目录不存在 → work_dir fallback 到 workspace_root。"""
+    from app.modules.agent.service import AgentService
+    from app.modules.change.model import Change
+
+    ws_root = tmp_path / "workspace"
+    ws_root.mkdir()
+
+    mock_session = AsyncMock(spec=AsyncSession)
+    mock_change = MagicMock(spec=Change)
+    mock_change.path = ".sillyspec/changes/nonexistent"
+    mock_change.change_key = "nonexistent"
+    mock_change.title = "Test"
+    mock_change.current_stage = "scan"
+    mock_change.change_type = ""
+    mock_change.affected_components = []
+
+    async def _get(model, pk):
+        return mock_change
+    mock_session.get = AsyncMock(side_effect=_get)
+
+    svc = AgentService(mock_session)
+    with patch.object(svc, "_get_workspace_root", new_callable=AsyncMock, return_value=str(ws_root)):
+        with patch.object(svc, "_try_acquire_lease", new_callable=AsyncMock, return_value=None):
+            with patch.object(svc, "_execute_stage_run", new_callable=AsyncMock) as mock_exec:
+                with patch("app.modules.change.dispatch.load_prompt_template", return_value="test prompt"):
+                    await svc.start_stage_dispatch(
+                        workspace_id=uuid.uuid4(),
+                        change_id=uuid.uuid4(),
+                        user_id=uuid.uuid4(),
+                        stage="scan",
+                        prompt_template="scan.md",
+                        requires_worktree=False,
+                        read_only=True,
+                    )
+
+    call_kwargs = mock_exec.call_args[1]
+    assert call_kwargs["work_dir"] == ws_root
+
+
+@pytest.mark.asyncio
+async def test_read_only_absolute_path_exists(tmp_path):
+    """change.path 为绝对路径 + 路径存在 → work_dir 直接使用绝对路径。"""
+    from app.modules.agent.service import AgentService
+    from app.modules.change.model import Change
+
+    ws_root = tmp_path / "workspace"
+    ws_root.mkdir()
+    abs_dir = tmp_path / "abs" / "path"
+    abs_dir.mkdir(parents=True)
+
+    mock_session = AsyncMock(spec=AsyncSession)
+    mock_change = MagicMock(spec=Change)
+    mock_change.path = str(abs_dir)
+    mock_change.change_key = "test"
+    mock_change.title = "Test"
+    mock_change.current_stage = "scan"
+    mock_change.change_type = ""
+    mock_change.affected_components = []
+
+    async def _get(model, pk):
+        return mock_change
+    mock_session.get = AsyncMock(side_effect=_get)
+
+    svc = AgentService(mock_session)
+    with patch.object(svc, "_get_workspace_root", new_callable=AsyncMock, return_value=str(ws_root)):
+        with patch.object(svc, "_try_acquire_lease", new_callable=AsyncMock, return_value=None):
+            with patch.object(svc, "_execute_stage_run", new_callable=AsyncMock) as mock_exec:
+                with patch("app.modules.change.dispatch.load_prompt_template", return_value="test prompt"):
+                    await svc.start_stage_dispatch(
+                        workspace_id=uuid.uuid4(),
+                        change_id=uuid.uuid4(),
+                        user_id=uuid.uuid4(),
+                        stage="scan",
+                        prompt_template="scan.md",
+                        requires_worktree=False,
+                        read_only=True,
+                    )
+
+    call_kwargs = mock_exec.call_args[1]
+    assert call_kwargs["work_dir"] == abs_dir
+
+
+@pytest.mark.asyncio
+async def test_read_only_absolute_path_not_exists_fallback(tmp_path):
+    """change.path 为绝对路径 + 路径不存在 → work_dir fallback 到 workspace_root。"""
+    from app.modules.agent.service import AgentService
+    from app.modules.change.model import Change
+
+    ws_root = tmp_path / "workspace"
+    ws_root.mkdir()
+
+    mock_session = AsyncMock(spec=AsyncSession)
+    mock_change = MagicMock(spec=Change)
+    mock_change.path = "/tmp/nonexistent_abs_path_xyz"
+    mock_change.change_key = "test"
+    mock_change.title = "Test"
+    mock_change.current_stage = "scan"
+    mock_change.change_type = ""
+    mock_change.affected_components = []
+
+    async def _get(model, pk):
+        return mock_change
+    mock_session.get = AsyncMock(side_effect=_get)
+
+    svc = AgentService(mock_session)
+    with patch.object(svc, "_get_workspace_root", new_callable=AsyncMock, return_value=str(ws_root)):
+        with patch.object(svc, "_try_acquire_lease", new_callable=AsyncMock, return_value=None):
+            with patch.object(svc, "_execute_stage_run", new_callable=AsyncMock) as mock_exec:
+                with patch("app.modules.change.dispatch.load_prompt_template", return_value="test prompt"):
+                    await svc.start_stage_dispatch(
+                        workspace_id=uuid.uuid4(),
+                        change_id=uuid.uuid4(),
+                        user_id=uuid.uuid4(),
+                        stage="scan",
+                        prompt_template="scan.md",
+                        requires_worktree=False,
+                        read_only=True,
+                    )
+
+    call_kwargs = mock_exec.call_args[1]
+    assert call_kwargs["work_dir"] == ws_root
