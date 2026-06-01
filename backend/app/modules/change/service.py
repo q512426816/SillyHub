@@ -7,6 +7,7 @@ content is read from the filesystem on-demand (not stored in DB).
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -342,7 +343,10 @@ class ChangeService:
 
         # Find the target transition
         transitions_from_current = TRANSITIONS[current_key]
-        target_key = StageEnum(target_stage)
+        try:
+            target_key = StageEnum(target_stage)
+        except ValueError:
+            raise InvalidTransition(f"无效的目标阶段: {target_stage}") from None
         if target_key not in transitions_from_current:
             raise InvalidTransition(f"不允许从 {current_key.value} 流转到 {target_stage}")
 
@@ -372,6 +376,21 @@ class ChangeService:
         change.stages = stages
         change.updated_at = datetime.now(UTC)
         self._session.add(change)
+
+        # Record audit log
+        from app.modules.workflow.model import AuditLog
+
+        audit_entry = AuditLog(
+            id=uuid.uuid4(),
+            workspace_id=workspace_id,
+            actor_id=None,
+            action="change.transition",
+            resource_type="change",
+            resource_id=change.id,
+            details_json=json.dumps({"from": current, "to": target_stage}),
+        )
+        self._session.add(audit_entry)
+
         await self._session.commit()
         return change
 

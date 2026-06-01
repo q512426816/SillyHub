@@ -28,7 +28,7 @@ async def workspace_with_tasks(client, tmp_path: Path, auth_headers: dict[str, s
     shutil.copytree(CHANGE_FIXTURES, sillyspec_changes, dirs_exist_ok=True)
 
     # Add tasks under demo-feature change
-    demo_feature = sillyspec_changes / "change" / "2026-05-25-demo-feature"
+    demo_feature = sillyspec_changes / "2026-05-25-demo-feature"
     shutil.copytree(TASK_FIXTURES / "tasks", demo_feature / "tasks")
 
     # Create workspace
