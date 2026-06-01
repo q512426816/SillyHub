@@ -16,28 +16,27 @@ from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis
 from app.core.telemetry import init_telemetry
+from app.modules.agent.router import router as agent_router
+from app.modules.archive.router import router as archive_router
 from app.modules.auth.router import router as auth_router
 from app.modules.change import change_router
-from app.modules.health import health_router
-from app.modules.agent.router import router as agent_router
-from app.modules.scan_docs.router import router as scan_docs_router
-from app.modules.git_identity import git_identity_router
-from app.modules.task import task_router
-from app.modules.worktree import lease_router, worktree_router
-from app.modules.workflow.router import router as workflow_router
-from app.modules.workspace import workspace_router
-from app.modules.git_gateway.router import router as git_gateway_router
 from app.modules.change_writer.router import router as change_writer_router
-
+from app.modules.git_gateway.router import router as git_gateway_router
+from app.modules.git_identity import git_identity_router
+from app.modules.health import health_router
 from app.modules.incident.router import router as incident_router
 from app.modules.knowledge.router import router as knowledge_router
 from app.modules.release.router import router as release_router
 from app.modules.runtime.router import router as runtime_router
-from app.modules.tool_gateway.router import router as tool_gateway_router
-from app.modules.tool_gateway.policy_router import router as policy_crud_router
-from app.modules.archive.router import router as archive_router
+from app.modules.scan_docs.router import router as scan_docs_router
 from app.modules.settings.router import router as settings_router
 from app.modules.spec_workspace.router import router as spec_workspace_router
+from app.modules.task import task_router
+from app.modules.tool_gateway.policy_router import router as policy_crud_router
+from app.modules.tool_gateway.router import router as tool_gateway_router
+from app.modules.workflow.router import router as workflow_router
+from app.modules.workspace import workspace_router
+from app.modules.worktree import lease_router, worktree_router
 
 
 @asynccontextmanager

@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import uuid
 
-import pytest
 
-
-async def test_list_empty(
-    client, auth_headers: dict[str, str]
-) -> None:
+async def test_list_empty(client, auth_headers: dict[str, str]) -> None:
     resp = await client.get("/api/git/identities", headers=auth_headers)
     assert resp.status_code == 200
     body = resp.json()
@@ -18,9 +13,7 @@ async def test_list_empty(
     assert body["items"] == []
 
 
-async def test_create_identity(
-    client, auth_headers: dict[str, str]
-) -> None:
+async def test_create_identity(client, auth_headers: dict[str, str]) -> None:
     resp = await client.post(
         "/api/git/identities",
         json={
@@ -43,9 +36,7 @@ async def test_create_identity(
     assert body["revoked_at"] is None
 
 
-async def test_list_after_create(
-    client, auth_headers: dict[str, str]
-) -> None:
+async def test_list_after_create(client, auth_headers: dict[str, str]) -> None:
     await client.post(
         "/api/git/identities",
         json={
@@ -60,9 +51,7 @@ async def test_list_after_create(
     assert resp.json()["total"] == 1
 
 
-async def test_get_identity_detail(
-    client, auth_headers: dict[str, str]
-) -> None:
+async def test_get_identity_detail(client, auth_headers: dict[str, str]) -> None:
     create_resp = await client.post(
         "/api/git/identities",
         json={
@@ -86,9 +75,7 @@ async def test_get_identity_detail(
     assert "encrypted_credential" not in body
 
 
-async def test_revoke_identity(
-    client, auth_headers: dict[str, str]
-) -> None:
+async def test_revoke_identity(client, auth_headers: dict[str, str]) -> None:
     create_resp = await client.post(
         "/api/git/identities",
         json={
@@ -108,9 +95,7 @@ async def test_revoke_identity(
     assert resp.json()["revoked_at"] is not None
 
 
-async def test_revoke_already_revoked(
-    client, auth_headers: dict[str, str]
-) -> None:
+async def test_revoke_already_revoked(client, auth_headers: dict[str, str]) -> None:
     create_resp = await client.post(
         "/api/git/identities",
         json={
@@ -127,12 +112,10 @@ async def test_revoke_already_revoked(
     assert resp.status_code == 400
 
 
-async def test_cross_user_isolation(
-    client, auth_headers: dict[str, str], db_session
-) -> None:
+async def test_cross_user_isolation(client, auth_headers: dict[str, str], db_session) -> None:
     """User A cannot see User B's identities."""
-    from app.core.security import create_access_token, password_hasher
     from app.core.config import get_settings
+    from app.core.security import create_access_token, password_hasher
     from app.modules.auth.model import User
 
     settings = get_settings()
@@ -173,21 +156,17 @@ async def test_no_auth_returns_401(client) -> None:
     assert resp.status_code == 401
 
 
-async def test_get_nonexistent_identity(
-    client, auth_headers: dict[str, str]
-) -> None:
+async def test_get_nonexistent_identity(client, auth_headers: dict[str, str]) -> None:
     fake_id = str(uuid.uuid4())
     resp = await client.get(f"/api/git/identities/{fake_id}", headers=auth_headers)
     assert resp.status_code == 404
 
 
-async def test_create_encrypts_credential(
-    client, auth_headers: dict[str, str], db_session
-) -> None:
+async def test_create_encrypts_credential(client, auth_headers: dict[str, str], db_session) -> None:
     """Verify DB stores ciphertext, not plaintext."""
-    from app.modules.git_identity.model import GitIdentity
-    from sqlmodel import col
     from sqlalchemy import select
+
+    from app.modules.git_identity.model import GitIdentity
 
     await client.post(
         "/api/git/identities",

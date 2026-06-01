@@ -23,7 +23,6 @@ from app.modules.agent.coordinator import (
 )
 from app.modules.agent.model import AgentRun
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -223,7 +222,9 @@ async def test_resume_run_raises_on_non_resumable_status(db_session: AsyncSessio
 async def test_resume_run_raises_on_fingerprint_mismatch(db_session: AsyncSession) -> None:
     """FingerprintMismatchError raised when context has changed."""
     coordinator = ExecutionCoordinatorService(db_session)
-    run = await _create_run(db_session, status="failed", resume_token="tok", context_fingerprint="original")
+    run = await _create_run(
+        db_session, status="failed", resume_token="tok", context_fingerprint="original"
+    )
     with pytest.raises(FingerprintMismatchError):
         await coordinator.resume_run(run.id, "tok", context_fingerprint="changed")
 
@@ -353,15 +354,11 @@ async def test_start_sillyspec_run_emits_deprecation_warning(
                 repo_dir=Path("/tmp"),
             )
 
-    deprecation_warnings = [
-        w for w in caught if issubclass(w.category, DeprecationWarning)
-    ]
+    deprecation_warnings = [w for w in caught if issubclass(w.category, DeprecationWarning)]
     assert len(deprecation_warnings) >= 1, (
         "Expected at least one DeprecationWarning from start_sillyspec_run"
     )
-    assert "start_sillyspec_run is deprecated" in str(
-        deprecation_warnings[0].message
-    )
+    assert "start_sillyspec_run is deprecated" in str(deprecation_warnings[0].message)
 
 
 async def test_start_sillyspec_run_still_returns_agent_run(

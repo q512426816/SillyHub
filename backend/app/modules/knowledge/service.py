@@ -33,9 +33,7 @@ class KnowledgeService:
         items = [self._to_knowledge_entry(e, include_content=False) for e in entries]
         return KnowledgeList(items=items, total=len(items))
 
-    async def get_knowledge(
-        self, workspace_id: uuid.UUID, filename: str
-    ) -> KnowledgeEntry:
+    async def get_knowledge(self, workspace_id: uuid.UUID, filename: str) -> KnowledgeEntry:
         workspace = await self._ws_service.get(workspace_id)
         root = Path(workspace.root_path) / ".sillyspec"
         entries = self._parser.parse_knowledge(root)
@@ -44,6 +42,7 @@ class KnowledgeService:
                 return self._to_knowledge_entry(e, include_content=True)
 
         from app.core.errors import WorkspaceNotFound
+
         raise WorkspaceNotFound(
             f"Knowledge file '{filename}' not found.",
             details={"workspace_id": str(workspace_id), "filename": filename},
@@ -56,9 +55,7 @@ class KnowledgeService:
         items = [self._to_quicklog_entry(e, include_content=False) for e in entries]
         return QuicklogList(items=items, total=len(items))
 
-    async def get_quicklog(
-        self, workspace_id: uuid.UUID, filename: str
-    ) -> QuicklogEntry:
+    async def get_quicklog(self, workspace_id: uuid.UUID, filename: str) -> QuicklogEntry:
         workspace = await self._ws_service.get(workspace_id)
         root = Path(workspace.root_path) / ".sillyspec"
         entries = self._parser.parse_quicklog(root)
@@ -67,6 +64,7 @@ class KnowledgeService:
                 return self._to_quicklog_entry(e, include_content=True)
 
         from app.core.errors import WorkspaceNotFound
+
         raise WorkspaceNotFound(
             f"Quicklog file '{filename}' not found.",
             details={"workspace_id": str(workspace_id), "filename": filename},

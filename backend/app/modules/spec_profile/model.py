@@ -36,9 +36,7 @@ class SpecProfileManifest(BaseModel, table=True):
     """
 
     __tablename__ = "spec_profile_manifests"
-    __table_args__ = (
-        Index("ix_spec_profile_manifests_is_active", "is_active"),
-    )
+    __table_args__ = (Index("ix_spec_profile_manifests_is_active", "is_active"),)
 
     id: uuid.UUID = Field(
         default_factory=uuid.uuid4,

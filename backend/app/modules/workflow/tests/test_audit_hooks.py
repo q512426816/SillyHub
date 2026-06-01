@@ -12,8 +12,8 @@ from sqlmodel import col
 from app.core.audit_hooks import register_audit_hooks
 from app.modules.auth.model import User
 from app.modules.change.model import Change
-from app.modules.workspace.model import Workspace
 from app.modules.workflow.model import AuditLog
+from app.modules.workspace.model import Workspace
 
 # ---------------------------------------------------------------------------
 # Fixed IDs for reproducible test data
@@ -211,11 +211,11 @@ async def test_audit_log_does_not_trigger_hook(db_session: AsyncSession) -> None
     user, ws = await _setup_audit_env(db_session)
     _set_audit_context(db_session, user.id, ws.id)
 
-    change = await _make_change(db_session)
+    _change = await _make_change(db_session)
 
     all_logs = await _get_audit_logs(db_session)
-    change_logs = [l for l in all_logs if l.resource_type == "change"]
-    audit_self_logs = [l for l in all_logs if l.resource_type == "audit_log"]
+    change_logs = [line for line in all_logs if line.resource_type == "change"]
+    audit_self_logs = [line for line in all_logs if line.resource_type == "audit_log"]
 
     assert len(change_logs) >= 1
     assert len(audit_self_logs) == 0  # recursion protection
@@ -278,8 +278,8 @@ async def test_actor_id_and_workspace_id_recorded(db_session: AsyncSession) -> N
     await db_session.commit()
 
     all_logs = await _get_audit_logs(db_session)
-    insert_logs = [l for l in all_logs if l.action == "change.insert"]
-    update_logs = [l for l in all_logs if l.action == "change.update"]
+    insert_logs = [line for line in all_logs if line.action == "change.insert"]
+    update_logs = [line for line in all_logs if line.action == "change.update"]
 
     assert len(insert_logs) >= 1
     assert insert_logs[0].actor_id == user.id

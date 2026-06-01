@@ -89,12 +89,12 @@ class AgentSpecBundle:
     referenced_workspaces: list[WorkspaceSpecSummary] = field(default_factory=list)
 
     # --- Stage dispatch extension ---
-    stage_dispatch: bool = False              # True = stage-level dispatch (not task-level)
-    change_key: str | None = None             # change key (e.g. "agent-stage-dispatch")
-    stage: str | None = None                  # target SillySpec stage (e.g. "propose")
-    spec_root: str | None = None              # .sillyspec/ root directory path
-    step_prompt: str | None = None            # SillySpec CLI current step prompt
-    read_only: bool = False                   # read-only mode (analyze only, no writes)
+    stage_dispatch: bool = False  # True = stage-level dispatch (not task-level)
+    change_key: str | None = None  # change key (e.g. "agent-stage-dispatch")
+    stage: str | None = None  # target SillySpec stage (e.g. "propose")
+    spec_root: str | None = None  # .sillyspec/ root directory path
+    step_prompt: str | None = None  # SillySpec CLI current step prompt
+    read_only: bool = False  # read-only mode (analyze only, no writes)
 
 
 @dataclass

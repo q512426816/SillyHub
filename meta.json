@@ -1,9 +1,9 @@
 {
-  "changeName": "quick-stage-dispatch-clarifying",
-  "branch": "sillyspec/quick-stage-dispatch-clarifying",
+  "changeName": "default",
+  "branch": "sillyspec/default",
   "baseBranch": "main",
-  "baseHash": "502fdacc8975c180ca39f5a42ecd6df6ed41916b",
-  "actualBaseHash": "502fdacc8975c180ca39f5a42ecd6df6ed41916b",
-  "createdAt": "2026-05-31T12:04:05.488Z",
-  "worktreePath": "/Users/qinyi/SillyHub/.sillyspec/.runtime/worktrees/quick-stage-dispatch-clarifying"
+  "baseHash": "a83e821aa88d4297dad4400ba073f2b98ec95ba3",
+  "actualBaseHash": "a83e821aa88d4297dad4400ba073f2b98ec95ba3",
+  "createdAt": "2026-06-01T03:30:13.500Z",
+  "worktreePath": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\.runtime\\worktrees\\default"
 }

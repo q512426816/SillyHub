@@ -28,9 +28,7 @@ class FSM:
 
     def __init__(self, name: str, transitions: dict[str, set[str]]) -> None:
         self.name = name
-        self._transitions = {
-            src: set(dsts) for src, dsts in transitions.items()
-        }
+        self._transitions = {src: set(dsts) for src, dsts in transitions.items()}
 
     @property
     def valid_states(self) -> set[str]:

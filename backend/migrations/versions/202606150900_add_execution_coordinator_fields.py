@@ -83,9 +83,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "ix_agent_runs_context_fingerprint", table_name="agent_runs"
-    )
+    op.drop_index("ix_agent_runs_context_fingerprint", table_name="agent_runs")
     op.drop_index("ix_agent_runs_resume_token", table_name="agent_runs")
     op.drop_index("ix_agent_runs_idempotency_key", table_name="agent_runs")
 

@@ -12,7 +12,6 @@ from app.modules.change.model import Change, ChangeDocument
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.workspace.model import Workspace
 
-
 # ---------------------------------------------------------------------------
 # Task-04 tests: _execute_stage_run does NOT directly write CLAUDE.md
 # ---------------------------------------------------------------------------
@@ -40,8 +39,12 @@ async def test_execute_stage_run_bundle_contains_task_markdown_with_prompt():
     # Mock session factory — _execute_stage_run imports get_session_factory locally
     mock_session = AsyncMock(spec=AsyncSession)
     agent_run_mock = MagicMock(
-        id=run_id, status="pending", started_at=None,
-        finished_at=None, exit_code=None, output_redacted=None,
+        id=run_id,
+        status="pending",
+        started_at=None,
+        finished_at=None,
+        exit_code=None,
+        output_redacted=None,
         diff_summary=None,
     )
     change_mock = MagicMock(stages={})
@@ -62,24 +65,26 @@ async def test_execute_stage_run_bundle_contains_task_markdown_with_prompt():
     mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
     mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("app.core.db.get_session_factory", return_value=mock_factory):
-        with patch(
+    with (
+        patch("app.core.db.get_session_factory", return_value=mock_factory),
+        patch(
             "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
             side_effect=mock_run_with_bundle,
-        ):
-            with patch("app.modules.agent.service.AgentRunLog"):
-                with patch("app.modules.workflow.model.AuditLog"):
-                    svc = AgentService(AsyncMock(spec=AsyncSession))
-                    await svc._execute_stage_run(
-                        run_id=run_id,
-                        prompt="你是一个 propose 阶段的执行者。",
-                        work_dir=MagicMock(mkdir=MagicMock()),
-                        read_only=True,
-                        workspace_id=uuid.uuid4(),
-                        change_id=uuid.uuid4(),
-                        user_id=uuid.uuid4(),
-                        stage="propose",
-                    )
+        ),
+        patch("app.modules.agent.service.AgentRunLog"),
+        patch("app.modules.workflow.model.AuditLog"),
+    ):
+        svc = AgentService(AsyncMock(spec=AsyncSession))
+        await svc._execute_stage_run(
+            run_id=run_id,
+            prompt="你是一个 propose 阶段的执行者。",
+            work_dir=MagicMock(mkdir=MagicMock()),
+            read_only=True,
+            workspace_id=uuid.uuid4(),
+            change_id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            stage="propose",
+        )
 
     # 验证 bundle 包含 task_markdown（含 prompt 和 READ-ONLY 模式标记）
     assert captured_bundle is not None
@@ -114,8 +119,12 @@ async def test_execute_stage_run_bundle_write_mode():
 
     mock_session = AsyncMock(spec=AsyncSession)
     agent_run_mock = MagicMock(
-        id=run_id, status="pending", started_at=None,
-        finished_at=None, exit_code=None, output_redacted=None,
+        id=run_id,
+        status="pending",
+        started_at=None,
+        finished_at=None,
+        exit_code=None,
+        output_redacted=None,
         diff_summary=None,
     )
     change_mock = MagicMock(stages={})
@@ -136,24 +145,26 @@ async def test_execute_stage_run_bundle_write_mode():
     mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
     mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("app.core.db.get_session_factory", return_value=mock_factory):
-        with patch(
+    with (
+        patch("app.core.db.get_session_factory", return_value=mock_factory),
+        patch(
             "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
             side_effect=mock_run_with_bundle,
-        ):
-            with patch("app.modules.agent.service.AgentRunLog"):
-                with patch("app.modules.workflow.model.AuditLog"):
-                    svc = AgentService(AsyncMock(spec=AsyncSession))
-                    await svc._execute_stage_run(
-                        run_id=run_id,
-                        prompt="Execute the plan phase.",
-                        work_dir=MagicMock(mkdir=MagicMock()),
-                        read_only=False,
-                        workspace_id=uuid.uuid4(),
-                        change_id=uuid.uuid4(),
-                        user_id=uuid.uuid4(),
-                        stage="plan",
-                    )
+        ),
+        patch("app.modules.agent.service.AgentRunLog"),
+        patch("app.modules.workflow.model.AuditLog"),
+    ):
+        svc = AgentService(AsyncMock(spec=AsyncSession))
+        await svc._execute_stage_run(
+            run_id=run_id,
+            prompt="Execute the plan phase.",
+            work_dir=MagicMock(mkdir=MagicMock()),
+            read_only=False,
+            workspace_id=uuid.uuid4(),
+            change_id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            stage="plan",
+        )
 
     assert captured_bundle is not None
     assert "Execute the plan phase." in captured_bundle.task_markdown
@@ -252,16 +263,25 @@ async def _mock_session(fake_workspace, fake_change, fake_spec_workspace, fake_c
 
 @pytest.mark.asyncio
 async def test_build_stage_bundle_returns_valid_bundle(
-    fake_workspace, fake_change, fake_spec_workspace, fake_change_doc,
+    fake_workspace,
+    fake_change,
+    fake_spec_workspace,
+    fake_change_doc,
 ):
     """build_stage_bundle 返回包含正确 stage 字段的 bundle。"""
     from app.modules.agent.context_builder import build_stage_bundle
 
     session = await _mock_session(
-        fake_workspace, fake_change, fake_spec_workspace, [fake_change_doc],
+        fake_workspace,
+        fake_change,
+        fake_spec_workspace,
+        [fake_change_doc],
     )
     bundle = await build_stage_bundle(
-        session, fake_change.id, "propose", fake_workspace.id,
+        session,
+        fake_change.id,
+        "propose",
+        fake_workspace.id,
     )
 
     assert isinstance(bundle, AgentSpecBundle)
@@ -291,7 +311,10 @@ async def test_build_stage_bundle_change_not_found(fake_workspace):
 
     with pytest.raises(ChangeNotFound):
         await build_stage_bundle(
-            session, uuid.uuid4(), "propose", fake_workspace.id,
+            session,
+            uuid.uuid4(),
+            "propose",
+            fake_workspace.id,
         )
 
 
@@ -305,22 +328,33 @@ async def test_build_stage_bundle_workspace_not_found():
 
     with pytest.raises(WorkspaceNotFound):
         await build_stage_bundle(
-            session, uuid.uuid4(), "propose", uuid.uuid4(),
+            session,
+            uuid.uuid4(),
+            "propose",
+            uuid.uuid4(),
         )
 
 
 @pytest.mark.asyncio
 async def test_build_stage_bundle_no_documents(
-    fake_workspace, fake_change, fake_spec_workspace,
+    fake_workspace,
+    fake_change,
+    fake_spec_workspace,
 ):
     """文档不存在时 bundle 的文档字段为 None，不报错。"""
     from app.modules.agent.context_builder import build_stage_bundle
 
     session = await _mock_session(
-        fake_workspace, fake_change, fake_spec_workspace, [],
+        fake_workspace,
+        fake_change,
+        fake_spec_workspace,
+        [],
     )
     bundle = await build_stage_bundle(
-        session, fake_change.id, "plan", fake_workspace.id,
+        session,
+        fake_change.id,
+        "plan",
+        fake_workspace.id,
     )
 
     assert bundle.proposal is None
@@ -333,16 +367,23 @@ async def test_build_stage_bundle_no_documents(
 
 @pytest.mark.asyncio
 async def test_build_stage_bundle_no_spec_workspace(
-    fake_workspace, fake_change,
+    fake_workspace,
+    fake_change,
 ):
     """SpecWorkspace 不存在时 spec_root 为 None，不报错。"""
     from app.modules.agent.context_builder import build_stage_bundle
 
     session = await _mock_session(
-        fake_workspace, fake_change, None, [],
+        fake_workspace,
+        fake_change,
+        None,
+        [],
     )
     bundle = await build_stage_bundle(
-        session, fake_change.id, "propose", fake_workspace.id,
+        session,
+        fake_change.id,
+        "propose",
+        fake_workspace.id,
     )
 
     assert bundle.spec_root is None
@@ -351,16 +392,24 @@ async def test_build_stage_bundle_no_spec_workspace(
 
 @pytest.mark.asyncio
 async def test_build_stage_bundle_with_step_prompt(
-    fake_workspace, fake_change, fake_spec_workspace,
+    fake_workspace,
+    fake_change,
+    fake_spec_workspace,
 ):
     """传入 step_prompt 时 bundle 正确包含。"""
     from app.modules.agent.context_builder import build_stage_bundle
 
     session = await _mock_session(
-        fake_workspace, fake_change, fake_spec_workspace, [],
+        fake_workspace,
+        fake_change,
+        fake_spec_workspace,
+        [],
     )
     bundle = await build_stage_bundle(
-        session, fake_change.id, "propose", fake_workspace.id,
+        session,
+        fake_change.id,
+        "propose",
+        fake_workspace.id,
         step_prompt="Write the proposal document for this change",
     )
 
@@ -369,16 +418,24 @@ async def test_build_stage_bundle_with_step_prompt(
 
 @pytest.mark.asyncio
 async def test_build_stage_bundle_read_only_true(
-    fake_workspace, fake_change, fake_spec_workspace,
+    fake_workspace,
+    fake_change,
+    fake_spec_workspace,
 ):
     """read_only=True 时 bundle 正确标记。"""
     from app.modules.agent.context_builder import build_stage_bundle
 
     session = await _mock_session(
-        fake_workspace, fake_change, fake_spec_workspace, [],
+        fake_workspace,
+        fake_change,
+        fake_spec_workspace,
+        [],
     )
     bundle = await build_stage_bundle(
-        session, fake_change.id, "scan", fake_workspace.id,
+        session,
+        fake_change.id,
+        "scan",
+        fake_workspace.id,
         read_only=True,
     )
 
@@ -520,13 +577,18 @@ async def test_read_only_relative_path_exists_in_workspace(tmp_path):
 
     async def _get(model, pk):
         return mock_change
+
     mock_session.get = AsyncMock(side_effect=_get)
 
     svc = AgentService(mock_session)
-    with patch.object(svc, "_get_workspace_root", new_callable=AsyncMock, return_value=str(ws_root)):
+    with patch.object(
+        svc, "_get_workspace_root", new_callable=AsyncMock, return_value=str(ws_root)
+    ):
         with patch.object(svc, "_try_acquire_lease", new_callable=AsyncMock, return_value=None):
             with patch.object(svc, "_execute_stage_run", new_callable=AsyncMock) as mock_exec:
-                with patch("app.modules.change.dispatch.load_prompt_template", return_value="test prompt"):
+                with patch(
+                    "app.modules.change.dispatch.load_prompt_template", return_value="test prompt"
+                ):
                     await svc.start_stage_dispatch(
                         workspace_id=uuid.uuid4(),
                         change_id=uuid.uuid4(),
@@ -562,13 +624,18 @@ async def test_read_only_relative_path_not_exists_fallback(tmp_path):
 
     async def _get(model, pk):
         return mock_change
+
     mock_session.get = AsyncMock(side_effect=_get)
 
     svc = AgentService(mock_session)
-    with patch.object(svc, "_get_workspace_root", new_callable=AsyncMock, return_value=str(ws_root)):
+    with patch.object(
+        svc, "_get_workspace_root", new_callable=AsyncMock, return_value=str(ws_root)
+    ):
         with patch.object(svc, "_try_acquire_lease", new_callable=AsyncMock, return_value=None):
             with patch.object(svc, "_execute_stage_run", new_callable=AsyncMock) as mock_exec:
-                with patch("app.modules.change.dispatch.load_prompt_template", return_value="test prompt"):
+                with patch(
+                    "app.modules.change.dispatch.load_prompt_template", return_value="test prompt"
+                ):
                     await svc.start_stage_dispatch(
                         workspace_id=uuid.uuid4(),
                         change_id=uuid.uuid4(),
@@ -605,13 +672,18 @@ async def test_read_only_absolute_path_exists(tmp_path):
 
     async def _get(model, pk):
         return mock_change
+
     mock_session.get = AsyncMock(side_effect=_get)
 
     svc = AgentService(mock_session)
-    with patch.object(svc, "_get_workspace_root", new_callable=AsyncMock, return_value=str(ws_root)):
+    with patch.object(
+        svc, "_get_workspace_root", new_callable=AsyncMock, return_value=str(ws_root)
+    ):
         with patch.object(svc, "_try_acquire_lease", new_callable=AsyncMock, return_value=None):
             with patch.object(svc, "_execute_stage_run", new_callable=AsyncMock) as mock_exec:
-                with patch("app.modules.change.dispatch.load_prompt_template", return_value="test prompt"):
+                with patch(
+                    "app.modules.change.dispatch.load_prompt_template", return_value="test prompt"
+                ):
                     await svc.start_stage_dispatch(
                         workspace_id=uuid.uuid4(),
                         change_id=uuid.uuid4(),
@@ -646,13 +718,18 @@ async def test_read_only_absolute_path_not_exists_fallback(tmp_path):
 
     async def _get(model, pk):
         return mock_change
+
     mock_session.get = AsyncMock(side_effect=_get)
 
     svc = AgentService(mock_session)
-    with patch.object(svc, "_get_workspace_root", new_callable=AsyncMock, return_value=str(ws_root)):
+    with patch.object(
+        svc, "_get_workspace_root", new_callable=AsyncMock, return_value=str(ws_root)
+    ):
         with patch.object(svc, "_try_acquire_lease", new_callable=AsyncMock, return_value=None):
             with patch.object(svc, "_execute_stage_run", new_callable=AsyncMock) as mock_exec:
-                with patch("app.modules.change.dispatch.load_prompt_template", return_value="test prompt"):
+                with patch(
+                    "app.modules.change.dispatch.load_prompt_template", return_value="test prompt"
+                ):
                     await svc.start_stage_dispatch(
                         workspace_id=uuid.uuid4(),
                         change_id=uuid.uuid4(),

@@ -5,14 +5,12 @@ from __future__ import annotations
 import uuid
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.auth.model import User
 from app.modules.change.model import Change
 from app.modules.workspace.model import Workspace
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -55,6 +53,7 @@ async def _setup_workspace_and_change(
 async def _setup_user(session: AsyncSession) -> User:
     """Create a test user and return it."""
     from app.core.security import password_hasher
+
     user = User(
         id=uuid.uuid4(),
         email=f"test-{uuid.uuid4().hex[:6]}@example.com",
@@ -81,15 +80,15 @@ async def test_execute_change_calls_dispatch_next_step(
     """POST /changes/{change_key}/execute calls SillySpecStageDispatchService.dispatch_next_step."""
     ws, change = await _setup_workspace_and_change(db_session)
 
-    with patch(
-        "app.modules.change.dispatch.SillySpecStageDispatchService"
-    ) as MockService:
+    with patch("app.modules.change.dispatch.SillySpecStageDispatchService") as MockService:
         mock_svc = MockService.return_value
-        mock_svc.dispatch_next_step = AsyncMock(return_value={
-            "dispatched": True,
-            "agent_run_id": str(uuid.uuid4()),
-            "stage": "execute",
-        })
+        mock_svc.dispatch_next_step = AsyncMock(
+            return_value={
+                "dispatched": True,
+                "agent_run_id": str(uuid.uuid4()),
+                "stage": "execute",
+            }
+        )
 
         resp = await client.post(
             f"/api/workspaces/{ws.id}/changes/{change.change_key}/execute",
@@ -118,15 +117,15 @@ async def test_execute_change_returns_run_id_on_success(
     ws, change = await _setup_workspace_and_change(db_session)
     run_id = str(uuid.uuid4())
 
-    with patch(
-        "app.modules.change.dispatch.SillySpecStageDispatchService"
-    ) as MockService:
+    with patch("app.modules.change.dispatch.SillySpecStageDispatchService") as MockService:
         mock_svc = MockService.return_value
-        mock_svc.dispatch_next_step = AsyncMock(return_value={
-            "dispatched": True,
-            "agent_run_id": run_id,
-            "stage": "execute",
-        })
+        mock_svc.dispatch_next_step = AsyncMock(
+            return_value={
+                "dispatched": True,
+                "agent_run_id": run_id,
+                "stage": "execute",
+            }
+        )
 
         resp = await client.post(
             f"/api/workspaces/{ws.id}/changes/{change.change_key}/execute",
@@ -153,15 +152,15 @@ async def test_execute_change_returns_reason_on_dispatch_failure(
     """Dispatch failure returns ok=False with reason and stage."""
     ws, change = await _setup_workspace_and_change(db_session)
 
-    with patch(
-        "app.modules.change.dispatch.SillySpecStageDispatchService"
-    ) as MockService:
+    with patch("app.modules.change.dispatch.SillySpecStageDispatchService") as MockService:
         mock_svc = MockService.return_value
-        mock_svc.dispatch_next_step = AsyncMock(return_value={
-            "dispatched": False,
-            "reason": "active_run_exists",
-            "stage": "execute",
-        })
+        mock_svc.dispatch_next_step = AsyncMock(
+            return_value={
+                "dispatched": False,
+                "reason": "active_run_exists",
+                "stage": "execute",
+            }
+        )
 
         resp = await client.post(
             f"/api/workspaces/{ws.id}/changes/{change.change_key}/execute",
@@ -182,8 +181,9 @@ async def test_execute_change_returns_reason_on_dispatch_failure(
 
 def test_execute_change_does_not_import_coordinator() -> None:
     """router.py source must not contain ExecutionCoordinatorService import."""
-    import app.modules.change_writer.router as router_mod
     import inspect
+
+    import app.modules.change_writer.router as router_mod
 
     source = inspect.getsource(router_mod)
     assert "ExecutionCoordinatorService" not in source

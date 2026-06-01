@@ -23,8 +23,18 @@ PROGRESS_PAYLOAD = {
     "currentStage": "execute",
     "currentChange": "change-001",
     "stages": {
-        "scan": {"status": "completed", "steps": [], "startedAt": "2026-01-01T00:00:00Z", "completedAt": "2026-01-01T00:01:00Z"},
-        "execute": {"status": "in_progress", "steps": [{"name": "step-1", "status": "completed"}], "startedAt": "2026-01-01T00:02:00Z", "completedAt": None},
+        "scan": {
+            "status": "completed",
+            "steps": [],
+            "startedAt": "2026-01-01T00:00:00Z",
+            "completedAt": "2026-01-01T00:01:00Z",
+        },
+        "execute": {
+            "status": "in_progress",
+            "steps": [{"name": "step-1", "status": "completed"}],
+            "startedAt": "2026-01-01T00:02:00Z",
+            "completedAt": None,
+        },
     },
     "lastActive": "2026-01-01T00:03:00Z",
 }

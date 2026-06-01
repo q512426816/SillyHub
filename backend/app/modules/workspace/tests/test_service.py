@@ -267,7 +267,7 @@ async def test_reparse_creates_child_workspaces(db_session, tmp_path: Path) -> N
     )
 
     service = WorkspaceService(db_session)
-    parse_result, stats, children, relations = await _create_parent_and_reparse(service, root)
+    _parse_result, stats, children, relations = await _create_parent_and_reparse(service, root)
 
     assert stats["parsed"] == 2
     assert stats["created"] == 2
@@ -315,7 +315,7 @@ async def test_reparse_updates_existing_children(db_session, tmp_path: Path) -> 
     )
 
     # First reparse
-    _, stats1, children1, _ = await service.reparse(ws.id)
+    _, stats1, _children1, _ = await service.reparse(ws.id)
     assert stats1["created"] == 2
     assert stats1["updated"] == 0
 

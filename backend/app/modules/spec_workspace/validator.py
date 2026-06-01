@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import yaml
 
@@ -20,15 +19,17 @@ log = get_logger(__name__)
 @dataclass
 class ValidationIssue:
     """A single validation problem found in spec files."""
+
     severity: str  # "error" or "warning"
     category: str  # "schema" | "reference" | "structure"
-    path: str      # file path or "directory"
+    path: str  # file path or "directory"
     message: str
 
 
 @dataclass
 class ValidationReport:
     """Result of validating a spec workspace directory."""
+
     passed: bool
     issues: list[ValidationIssue] = field(default_factory=list)
 
@@ -64,12 +65,14 @@ class SpecValidator:
         issues: list[ValidationIssue] = []
 
         if not root.exists():
-            issues.append(ValidationIssue(
-                severity="error",
-                category="structure",
-                path=str(root),
-                message="Spec root directory does not exist.",
-            ))
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    category="structure",
+                    path=str(root),
+                    message="Spec root directory does not exist.",
+                )
+            )
             return ValidationReport(passed=False, issues=issues)
 
         # 1. Directory structure check
@@ -100,19 +103,23 @@ class SpecValidator:
         projects_dir = root / ".sillyspec" / "projects"
 
         if not projects_dir.exists():
-            issues.append(ValidationIssue(
-                severity="error",
-                category="structure",
-                path=str(projects_dir),
-                message="Required directory .sillyspec/projects/ does not exist.",
-            ))
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    category="structure",
+                    path=str(projects_dir),
+                    message="Required directory .sillyspec/projects/ does not exist.",
+                )
+            )
         elif not any(projects_dir.glob("*.yaml")) and not any(projects_dir.glob("*.yml")):
-            issues.append(ValidationIssue(
-                severity="warning",
-                category="structure",
-                path=str(projects_dir),
-                message="No YAML files found in .sillyspec/projects/.",
-            ))
+            issues.append(
+                ValidationIssue(
+                    severity="warning",
+                    category="structure",
+                    path=str(projects_dir),
+                    message="No YAML files found in .sillyspec/projects/.",
+                )
+            )
 
         return issues
 
@@ -135,21 +142,25 @@ class SpecValidator:
                 content = yaml_file.read_text(encoding="utf-8")
                 data = yaml.safe_load(content)
             except (OSError, yaml.YAMLError) as exc:
-                issues.append(ValidationIssue(
-                    severity="error",
-                    category="schema",
-                    path=str(yaml_file),
-                    message=f"Failed to parse YAML: {exc}",
-                ))
+                issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        category="schema",
+                        path=str(yaml_file),
+                        message=f"Failed to parse YAML: {exc}",
+                    )
+                )
                 continue
 
             if not isinstance(data, dict):
-                issues.append(ValidationIssue(
-                    severity="error",
-                    category="schema",
-                    path=str(yaml_file),
-                    message="YAML content is not a mapping/dict.",
-                ))
+                issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        category="schema",
+                        path=str(yaml_file),
+                        message="YAML content is not a mapping/dict.",
+                    )
+                )
                 continue
 
             # Minimal spec: a YAML that contains only `name` is treated as a
@@ -164,12 +175,14 @@ class SpecValidator:
             # Full schema validation
             missing = required_fields - data_keys
             if missing:
-                issues.append(ValidationIssue(
-                    severity="error",
-                    category="schema",
-                    path=str(yaml_file),
-                    message=f"Missing required fields: {', '.join(sorted(missing))}.",
-                ))
+                issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        category="schema",
+                        path=str(yaml_file),
+                        message=f"Missing required fields: {', '.join(sorted(missing))}.",
+                    )
+                )
 
             # Collect component IDs for reference check
             comp_id = data.get("id") or data.get("name")
@@ -211,11 +224,13 @@ class SpecValidator:
                     continue
                 target = rel.get("target")
                 if target and str(target) not in id_set:
-                    issues.append(ValidationIssue(
-                        severity="error",
-                        category="reference",
-                        path=str(yaml_file),
-                        message=f"Relation target '{target}' does not exist in component list.",
-                    ))
+                    issues.append(
+                        ValidationIssue(
+                            severity="error",
+                            category="reference",
+                            path=str(yaml_file),
+                            message=f"Relation target '{target}' does not exist in component list.",
+                        )
+                    )
 
         return issues

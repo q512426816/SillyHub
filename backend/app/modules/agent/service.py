@@ -50,8 +50,6 @@ class AgentRunError(AppError):
     http_status = 400
 
 
-
-
 def resolve_work_dir(
     *,
     workspace_root: str,
@@ -92,7 +90,9 @@ def resolve_work_dir(
     # 只读阶段 → workspace root（拼接 change.path）
     if read_only:
         if change_path:
-            candidate = ws_root / change_path if not Path(change_path).is_absolute() else Path(change_path)
+            candidate = (
+                ws_root / change_path if not Path(change_path).is_absolute() else Path(change_path)
+            )
             if candidate.is_dir():
                 return candidate
         return ws_root
@@ -103,6 +103,7 @@ def resolve_work_dir(
 
     # 写阶段 + 无 lease → workspace root（审计日志由调用方记录）
     return ws_root
+
 
 class AgentService:
     # 进程注册表 — 类属性，所有实例共享
@@ -211,10 +212,12 @@ class AgentService:
         all_ws_ids = set(task_ws_ids)
         all_ws_ids.add(workspace_id)
         for wid in all_ws_ids:
-            self._session.add(AgentRunWorkspace(
-                agent_run_id=run.id,
-                workspace_id=wid,
-            ))
+            self._session.add(
+                AgentRunWorkspace(
+                    agent_run_id=run.id,
+                    workspace_id=wid,
+                )
+            )
         await self._session.commit()
 
         # -- 6. Write CLAUDE.md into lease path -----------------------------------
@@ -337,14 +340,16 @@ class AgentService:
             action="agent.run",
             resource_type="agent_run",
             resource_id=run.id,
-            details_json=json.dumps({
-                "task_id": str(task_id),
-                "agent_type": agent_type,
-                "exit_code": result.exit_code,
-                "timed_out": result.timed_out,
-                "spec_strategy": bundle.spec_strategy,
-                "profile_version": bundle.profile_version,
-            }),
+            details_json=json.dumps(
+                {
+                    "task_id": str(task_id),
+                    "agent_type": agent_type,
+                    "exit_code": result.exit_code,
+                    "timed_out": result.timed_out,
+                    "spec_strategy": bundle.spec_strategy,
+                    "profile_version": bundle.profile_version,
+                }
+            ),
         )
         self._session.add(audit)
 
@@ -398,7 +403,7 @@ class AgentService:
             # 3b. Wait up to 5 seconds
             try:
                 await asyncio.wait_for(proc.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # 3c. SIGKILL
                 try:
                     proc.kill()
@@ -502,7 +507,7 @@ class AgentService:
                         pubsub.get_message(timeout=25),
                         timeout=30,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": keepalive\n\n"
                     continue
                 if message and message["type"] == "message":
@@ -522,7 +527,6 @@ class AgentService:
         finally:
             await pubsub.unsubscribe(channel)
             await pubsub.close()
-
 
     # ------------------------------------------------------------------
     # Stale run cleanup
@@ -572,7 +576,6 @@ class AgentService:
         workspace_root = await self._get_workspace_root(workspace_id)
 
         # -- 2. Resolve worktree or working directory -------------------------
-        from app.modules.worktree.model import WorktreeLease
 
         lease: WorktreeLease | None = None
 
@@ -642,24 +645,29 @@ class AgentService:
         await self._session.refresh(run)
 
         # -- 5. Create M:N workspace association ------------------------------
-        self._session.add(AgentRunWorkspace(
-            agent_run_id=run.id,
-            workspace_id=workspace_id,
-        ))
+        self._session.add(
+            AgentRunWorkspace(
+                agent_run_id=run.id,
+                workspace_id=workspace_id,
+            )
+        )
         await self._session.commit()
 
         # -- 6. Execute agent (fire-and-forget) --------------------------------
         import asyncio
-        asyncio.create_task(self._execute_stage_run(
-            run_id=run.id,
-            prompt=prompt,
-            work_dir=work_dir,
-            read_only=read_only,
-            workspace_id=workspace_id,
-            change_id=change_id,
-            user_id=user_id,
-            stage=stage,
-        ))
+
+        asyncio.create_task(
+            self._execute_stage_run(
+                run_id=run.id,
+                prompt=prompt,
+                work_dir=work_dir,
+                read_only=read_only,
+                workspace_id=workspace_id,
+                change_id=change_id,
+                user_id=user_id,
+                stage=stage,
+            )
+        )
 
         # Return immediately — caller can poll agent-status for progress
         return run
@@ -690,6 +698,7 @@ class AgentService:
         if source_dir.exists():
             try:
                 import shutil
+
                 change_dir.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copytree(str(source_dir), str(change_dir))
                 log.info("change_dir_copied_from_main_repo", dest=str(change_dir))
@@ -719,9 +728,9 @@ class AgentService:
         has no git identity configured (the caller should skip dispatch).
         """
         from app.modules.git_identity.model import GitIdentity
+        from app.modules.workspace.model import Workspace
         from app.modules.worktree.schema import WorktreeAcquireRequest
         from app.modules.worktree.service import WorktreeService
-        from app.modules.workspace.model import Workspace
 
         # Find workspace
         ws_stmt = select(Workspace).where(col(Workspace.id) == workspace_id)
@@ -801,11 +810,9 @@ class AgentService:
             # 将阶段 prompt 嵌入 task_markdown，让 render_bundle_to_claude_md
             # 将其作为 "Task" section inline 到 CLAUDE.md 中
             mode_suffix = (
-                "\n\n## Mode: READ-ONLY\n"
-                "Do NOT modify any files. Only analyze and report.\n"
+                "\n\n## Mode: READ-ONLY\nDo NOT modify any files. Only analyze and report.\n"
                 if read_only
-                else "\n\n## Mode: WRITE\n"
-                "You may modify files in the worktree as needed.\n"
+                else "\n\n## Mode: WRITE\nYou may modify files in the worktree as needed.\n"
             )
 
             bundle = AgentSpecBundle(
@@ -866,13 +873,15 @@ class AgentService:
                 action="agent.stage_dispatch",
                 resource_type="agent_run",
                 resource_id=run.id,
-                details_json=json.dumps({
-                    "change_id": str(change_id),
-                    "stage": stage,
-                    "agent_type": "claude_code",
-                    "exit_code": result.exit_code,
-                    "read_only": read_only,
-                }),
+                details_json=json.dumps(
+                    {
+                        "change_id": str(change_id),
+                        "stage": stage,
+                        "agent_type": "claude_code",
+                        "exit_code": result.exit_code,
+                        "read_only": read_only,
+                    }
+                ),
             )
             session.add(audit)
 
@@ -883,12 +892,14 @@ class AgentService:
             if change is not None:
                 stages = change.stages or {}
                 last_dispatch = stages.get("last_dispatch", {})
-                last_dispatch.update({
-                    "status": run.status,
-                    "finished_at": run.finished_at.isoformat() if run.finished_at else None,
-                    "run_id": str(run.id),
-                    "exit_code": run.exit_code,
-                })
+                last_dispatch.update(
+                    {
+                        "status": run.status,
+                        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                        "run_id": str(run.id),
+                        "exit_code": run.exit_code,
+                    }
+                )
                 stages["last_dispatch"] = last_dispatch
                 change.stages = stages
                 session.add(change)
@@ -897,8 +908,8 @@ class AgentService:
             if run.status == "completed":
                 try:
                     from app.modules.change.dispatch import (
-                        auto_dispatch_next_step,
                         SillySpecStageDispatchService,
+                        auto_dispatch_next_step,
                     )
 
                     dispatch_svc = SillySpecStageDispatchService(session)
@@ -988,4 +999,5 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
 def redact_agent_output(text: str) -> str:
     """Redact sensitive patterns from agent output."""
     from app.modules.git_gateway.service import redact_output
+
     return redact_output(text)

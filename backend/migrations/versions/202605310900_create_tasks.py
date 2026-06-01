@@ -90,12 +90,8 @@ def upgrade() -> None:
             name="ck_tasks_priority",
         ),
     )
-    op.create_index(
-        "ux_tasks_change_key", "tasks", ["change_id", "task_key"], unique=True
-    )
-    op.create_index(
-        "ix_tasks_workspace", "tasks", ["workspace_id", "status"]
-    )
+    op.create_index("ux_tasks_change_key", "tasks", ["change_id", "task_key"], unique=True)
+    op.create_index("ix_tasks_workspace", "tasks", ["workspace_id", "status"])
 
 
 def downgrade() -> None:

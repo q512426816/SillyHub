@@ -65,10 +65,19 @@ select = ["E", "F", "I", "B", "UP", "N", "SIM", "RUF", "BLE"]
 # E501: line length is enforced by the formatter.
 # N818: domain exceptions are named after the event (e.g. ``WorkspaceNotFound``)
 #       not the suffix; the abstract ``AppError`` base still ends in "Error".
-ignore = ["E501", "N818"]
+# RUF001/002/003: project uses Chinese text in strings/comments/docstrings.
+# BLE001: catching bare Exception is common in async error handling.
+# SIM105: contextlib.suppress hides traceback; explicit try/except preferred.
+# SIM117: nested-with readability is fine.
+# B008: FastAPI Query() in argument defaults is the standard pattern.
+# RUF012: Pydantic models use mutable class attributes intentionally.
+# RUF006: fire-and-forget tasks don't need a reference.
+# RUF005: list concat style is a preference.
+ignore = ["E501", "N818", "RUF001", "RUF002", "RUF003", "BLE001", "SIM105", "SIM117", "B008", "RUF012", "RUF006", "RUF005"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["N802", "N803", "N806"]
+"tests/*" = ["N802", "N803", "N806", "E402", "B017"]
+"**/tests/*" = ["N802", "N803", "N806", "E402", "B017"]
 "migrations/versions/*" = ["UP035"]  # alembic uses `typing.Sequence` in its template
 
 [tool.ruff.format]

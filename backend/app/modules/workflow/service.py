@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +12,7 @@ from sqlmodel import col
 
 from app.core.errors import ChangeNotFound, InvalidTransition, TaskNotFound
 from app.core.logging import get_logger
-from app.modules.change.model import Change, StageEnum, TRANSITIONS, can_transition
+from app.modules.change.model import Change, StageEnum, can_transition
 from app.modules.task.model import Task
 from app.modules.workflow.fsm import TaskFSM
 from app.modules.workflow.model import AuditLog, ChangeReview
@@ -57,7 +57,7 @@ class WorkflowService:
 
         change.status = target
         change.current_stage = target
-        change.updated_at = datetime.now(timezone.utc)
+        change.updated_at = datetime.now(UTC)
         self._session.add(change)
         await self._record_audit(
             workspace_id=workspace_id,
@@ -87,7 +87,7 @@ class WorkflowService:
         TaskFSM.validate_transition(previous, target)
 
         task.status = target
-        task.updated_at = datetime.now(timezone.utc)
+        task.updated_at = datetime.now(UTC)
         self._session.add(task)
         await self._record_audit(
             workspace_id=workspace_id,
@@ -129,7 +129,7 @@ class WorkflowService:
             if can_transition(current_key, StageEnum.REWORK_REQUIRED):
                 change.current_stage = "rework_required"
                 change.status = "rework_required"
-                change.updated_at = datetime.now(timezone.utc)
+                change.updated_at = datetime.now(UTC)
                 self._session.add(change)
 
         await self._record_audit(
@@ -180,7 +180,9 @@ class WorkflowService:
     # ── Helpers ─────────────────────────────────────────────────────────
 
     async def _get_change(
-        self, change_id: uuid.UUID, workspace_id: uuid.UUID,
+        self,
+        change_id: uuid.UUID,
+        workspace_id: uuid.UUID,
     ) -> Change:
         stmt = select(Change).where(
             col(Change.id) == change_id,
@@ -195,7 +197,9 @@ class WorkflowService:
         return change
 
     async def _get_task(
-        self, task_id: uuid.UUID, workspace_id: uuid.UUID,
+        self,
+        task_id: uuid.UUID,
+        workspace_id: uuid.UUID,
     ) -> Task:
         stmt = select(Task).where(
             col(Task.id) == task_id,

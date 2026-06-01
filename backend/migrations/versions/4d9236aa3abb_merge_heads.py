@@ -9,12 +9,8 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from alembic import op
-import sqlalchemy as sa
-
-
-revision: str = '4d9236aa3abb'
-down_revision: str | None = ('202605301700', '202606150900')
+revision: str = "4d9236aa3abb"
+down_revision: str | None = ("202605301700", "202606150900")
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

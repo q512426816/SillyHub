@@ -7,4 +7,4 @@ PROVIDERS: dict[str, GitProvider] = {
     "github": GitHubProvider(),
 }
 
-__all__ = ["AccessResult", "GitProvider", "GitHubProvider", "PROVIDERS"]
+__all__ = ["PROVIDERS", "AccessResult", "GitHubProvider", "GitProvider"]

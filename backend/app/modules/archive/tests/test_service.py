@@ -27,7 +27,9 @@ async def _make_workspace(db_session, tmp_path: Path) -> uuid.UUID:
 
 
 async def _make_change(
-    db_session, ws_id: uuid.UUID, status: str = "done",
+    db_session,
+    ws_id: uuid.UUID,
+    status: str = "done",
 ) -> tuple[uuid.UUID, str]:
     from app.modules.change.model import Change
 

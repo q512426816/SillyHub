@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import stat
 from pathlib import Path
 
@@ -30,7 +29,9 @@ def _ids() -> dict[str, str]:
 def test_lease_root_structure(builder: ExecEnvBuilder, tmp_path: Path) -> None:
     ids = _ids()
     root = builder.lease_root(**ids)
-    assert root == tmp_path / "ws-001/components/comp-001/worktrees/user-001/chg-001/task-001/run-001"
+    assert (
+        root == tmp_path / "ws-001/components/comp-001/worktrees/user-001/chg-001/task-001/run-001"
+    )
 
 
 def test_bare_repo_path(builder: ExecEnvBuilder, tmp_path: Path) -> None:

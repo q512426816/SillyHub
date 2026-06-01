@@ -5,7 +5,6 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.workspace.model import Workspace, WorkspaceRelation

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Diff Collector — collect git diff stats after agent execution.
 
 Executes ``git diff --stat`` and ``git diff`` in the lease's repo directory,
@@ -107,13 +106,16 @@ async def collect_diff(
     # 2. git diff --stat
     try:
         proc_stat = await asyncio.create_subprocess_exec(
-            "git", "diff", "--stat",
+            "git",
+            "diff",
+            "--stat",
             cwd=str(repo_dir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         stdout_stat, _ = await asyncio.wait_for(
-            proc_stat.communicate(), timeout=15,
+            proc_stat.communicate(),
+            timeout=15,
         )
     except (TimeoutError, FileNotFoundError, OSError) as exc:
         log.warning("diff_collector_stat_failed", error=str(exc))
@@ -131,13 +133,15 @@ async def collect_diff(
     # 3. git diff (full)
     try:
         proc_diff = await asyncio.create_subprocess_exec(
-            "git", "diff",
+            "git",
+            "diff",
             cwd=str(repo_dir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         stdout_diff, _ = await asyncio.wait_for(
-            proc_diff.communicate(), timeout=30,
+            proc_diff.communicate(),
+            timeout=30,
         )
     except (TimeoutError, FileNotFoundError, OSError) as exc:
         log.warning("diff_collector_diff_failed", error=str(exc))

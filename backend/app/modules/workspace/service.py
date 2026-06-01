@@ -30,8 +30,8 @@ from app.core.errors import (
 from app.core.logging import get_logger
 from app.modules.workspace.model import Workspace, WorkspaceRelation
 from app.modules.workspace.parser import (
-    ParseResult,
     ParsedWorkspace,
+    ParseResult,
     WorkspaceParser,
 )
 from app.modules.workspace.scanner import ScanResult, WorkspaceScanner
@@ -56,7 +56,7 @@ def _rewrite_path(root_path: str) -> str:
     normalized = root_path.replace("\\", "/")
     host_norm = host_prefix.replace("\\", "/")
     if normalized.startswith(host_norm):
-        return container_prefix + normalized[len(host_norm):]
+        return container_prefix + normalized[len(host_norm) :]
     return root_path
 
 
@@ -284,9 +284,7 @@ class WorkspaceService:
                     .where(col(Workspace.slug) == new_slug)
                     .where(col(Workspace.deleted_at).is_(None))
                 )
-                existing = (
-                    await self._session.execute(slug_stmt)
-                ).scalars().first()
+                existing = (await self._session.execute(slug_stmt)).scalars().first()
                 if existing is not None:
                     raise WorkspaceSlugDuplicate(
                         "Another workspace already uses this slug.",
@@ -421,7 +419,7 @@ class WorkspaceService:
         await self._session.flush()
 
         # 7. Soft-delete removed children
-        for source_path, child in existing_children.items():
+        for _source_path, child in existing_children.items():
             if child.id not in seen_child_ids:
                 child.deleted_at = datetime.utcnow()
                 child.status = "deleted"
@@ -432,12 +430,8 @@ class WorkspaceService:
 
         # 8. Delete old relations + create new relations
         # Collect key -> id mapping from all children (including newly created)
-        all_children_stmt = select(Workspace).where(
-            col(Workspace.id).in_(seen_child_ids)
-        )
-        all_children = list(
-            (await self._session.execute(all_children_stmt)).scalars().all()
-        )
+        all_children_stmt = select(Workspace).where(col(Workspace.id).in_(seen_child_ids))
+        all_children = list((await self._session.execute(all_children_stmt)).scalars().all())
         key_to_id: dict[str, uuid.UUID] = {
             ws.component_key: ws.id for ws in all_children if ws.component_key
         }
@@ -489,7 +483,9 @@ class WorkspaceService:
                 await self._session.execute(
                     select(Workspace).where(col(Workspace.id).in_(seen_child_ids))
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         final_rels = list(
             (
@@ -501,7 +497,9 @@ class WorkspaceService:
                         )
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
         return parse_result, stats, final_children, final_rels

@@ -20,7 +20,6 @@ from app.modules.task.schema import (
     TaskRead,
     TaskReparseResponse,
     TaskReparseStats,
-    TaskSummary,
 )
 from app.modules.task.service import TaskService
 

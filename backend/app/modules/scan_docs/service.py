@@ -38,9 +38,7 @@ class ScanDocsService:
 
     # -- Queries ---
 
-    async def list_(
-        self, workspace_id: uuid.UUID
-    ) -> tuple[list[ScanDocument], int]:
+    async def list_(self, workspace_id: uuid.UUID) -> tuple[list[ScanDocument], int]:
         await self._workspace_service.get(workspace_id)
         stmt = (
             select(ScanDocument)
@@ -74,9 +72,7 @@ class ScanDocsService:
 
     # -- Reparse ---
 
-    async def reparse(
-        self, workspace_id: uuid.UUID
-    ) -> tuple[dict[str, int], list[ScanDocsResult]]:
+    async def reparse(self, workspace_id: uuid.UUID) -> tuple[dict[str, int], list[ScanDocsResult]]:
         """Reparse scan docs for a workspace."""
         workspace = await self._workspace_service.get(workspace_id)
         sillyspec_root = Path(workspace.root_path)
@@ -133,9 +129,7 @@ class ScanDocsService:
     # -- Helpers ---
 
     async def _fetch_existing(self, workspace_id: uuid.UUID) -> list[ScanDocument]:
-        stmt = select(ScanDocument).where(
-            col(ScanDocument.workspace_id) == workspace_id
-        )
+        stmt = select(ScanDocument).where(col(ScanDocument.workspace_id) == workspace_id)
         return list((await self._session.execute(stmt)).scalars().all())
 
     async def _sync_other_docs(

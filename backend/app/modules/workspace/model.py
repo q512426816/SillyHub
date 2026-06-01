@@ -162,9 +162,7 @@ class ChangeWorkspace(BaseModel, table=True):
     """M:N association between changes and workspaces."""
 
     __tablename__ = "change_workspaces"
-    __table_args__ = (
-        Index("ix_change_workspaces_workspace", "workspace_id"),
-    )
+    __table_args__ = (Index("ix_change_workspaces_workspace", "workspace_id"),)
 
     change_id: uuid.UUID = Field(
         sa_column=Column(
@@ -192,9 +190,7 @@ class TaskWorkspace(BaseModel, table=True):
     """M:N association between tasks and workspaces."""
 
     __tablename__ = "task_workspaces"
-    __table_args__ = (
-        Index("ix_task_workspaces_workspace", "workspace_id"),
-    )
+    __table_args__ = (Index("ix_task_workspaces_workspace", "workspace_id"),)
 
     task_id: uuid.UUID = Field(
         sa_column=Column(
@@ -222,9 +218,7 @@ class AgentRunWorkspace(BaseModel, table=True):
     """M:N association between agent runs and workspaces."""
 
     __tablename__ = "agent_run_workspaces"
-    __table_args__ = (
-        Index("ix_agent_run_workspaces_workspace", "workspace_id"),
-    )
+    __table_args__ = (Index("ix_agent_run_workspaces_workspace", "workspace_id"),)
 
     agent_run_id: uuid.UUID = Field(
         sa_column=Column(

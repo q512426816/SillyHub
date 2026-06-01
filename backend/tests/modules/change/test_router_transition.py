@@ -18,8 +18,7 @@ import pytest
 
 # backend/tests/modules/change/ → parents[3] = backend/
 _FIXTURES_BASE = (
-    Path(__file__).resolve().parents[3]
-    / "app" / "modules" / "change" / "tests" / "fixtures"
+    Path(__file__).resolve().parents[3] / "app" / "modules" / "change" / "tests" / "fixtures"
 )
 COMPONENT_FIXTURES = _FIXTURES_BASE / "valid"
 CHANGE_FIXTURES = _FIXTURES_BASE / "changes"
@@ -32,9 +31,7 @@ def _copy_fixtures(src: Path, tmp_path: Path, name: str = "ws") -> Path:
 
 
 @pytest.fixture()
-async def ws_with_changes(
-    client, tmp_path: Path, auth_headers: dict[str, str]
-) -> dict:
+async def ws_with_changes(client, tmp_path: Path, auth_headers: dict[str, str]) -> dict:
     """Create a workspace with change fixtures for API testing."""
     root = _copy_fixtures(COMPONENT_FIXTURES, tmp_path)
     sillyspec_changes = root / ".sillyspec" / "changes"

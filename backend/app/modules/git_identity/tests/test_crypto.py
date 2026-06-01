@@ -65,7 +65,7 @@ class TestLoadMasterKey:
     def test_valid_key_without_version(self, monkeypatch: pytest.MonkeyPatch) -> None:
         hex_key = "ab" * 32
         monkeypatch.setenv("SILLYSPEC_MASTER_KEY", hex_key)
-        key, kid = _load_master_key()
+        _key, kid = _load_master_key()
         assert kid == "v1"
 
     def test_wrong_length_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:

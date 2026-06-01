@@ -13,7 +13,7 @@ import asyncio
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.core.logging import get_logger
@@ -150,7 +150,7 @@ def _format_conversation_log(events: list[dict]) -> str:
                 cost_info += f" duration={duration_ms}ms"
             if num_turns is not None:
                 cost_info += f" turns={num_turns}"
-            label = f"[RESULT{':'+subtype if subtype else ''}]"
+            label = f"[RESULT{':' + subtype if subtype else ''}]"
             if text:
                 lines.append(f"{label} {text}{cost_info}")
             elif cost_info:
@@ -160,7 +160,7 @@ def _format_conversation_log(events: list[dict]) -> str:
             msg = event.get("message", "")
             subtype = event.get("subtype", "")
             if msg:
-                lines.append(f"[SYSTEM{':'+subtype if subtype else ''}] {msg}")
+                lines.append(f"[SYSTEM{':' + subtype if subtype else ''}] {msg}")
 
         elif etype == "raw":
             lines.append(event.get("text", ""))
@@ -182,7 +182,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         claude_md = render_bundle_to_claude_md(bundle)
         (lease_path / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
 
-        if getattr(bundle, 'stage_dispatch', False):
+        if getattr(bundle, "stage_dispatch", False):
             prompt = _build_stage_dispatch_prompt(bundle)
             log.info(
                 "stage_dispatch_prompt",
@@ -207,11 +207,15 @@ class ClaudeCodeAdapter(AgentAdapter):
         cmd = [
             _CLAUDE_CLI,
             "-p",
-            "--output-format", "stream-json",
-            "--input-format", "stream-json",
+            "--output-format",
+            "stream-json",
+            "--input-format",
+            "stream-json",
             "--verbose",
-            "--permission-mode", "bypassPermissions",
-            "--disallowedTools", "AskUserQuestion",
+            "--permission-mode",
+            "bypassPermissions",
+            "--disallowedTools",
+            "AskUserQuestion",
         ]
 
         env_vars: dict[str, str] = {}
@@ -238,17 +242,22 @@ class ClaudeCodeAdapter(AgentAdapter):
         cmd = [
             _CLAUDE_CLI,
             "-p",
-            "--output-format", "stream-json",
-            "--input-format", "stream-json",
+            "--output-format",
+            "stream-json",
+            "--input-format",
+            "stream-json",
             "--verbose",
-            "--permission-mode", "bypassPermissions",
+            "--permission-mode",
+            "bypassPermissions",
         ]
         env_vars: dict[str, str] = {}
         if task_context.allowed_paths:
             env_vars["CLAUDE_ALLOWED_PATHS"] = ":".join(task_context.allowed_paths)
 
         log.info("agent_start", run_id=str(run_id))
-        return await self._exec_stream(run_id, cmd, task_context.task_title, lease_path, env_vars, timeout)
+        return await self._exec_stream(
+            run_id, cmd, task_context.task_title, lease_path, env_vars, timeout
+        )
 
     async def _exec_stream(
         self,
@@ -289,6 +298,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         # ---- Register process in _proc_registry ----
         # Local import to avoid circular dependency (service → claude_code → service)
         from app.modules.agent.service import AgentService
+
         AgentService._proc_registry[run_id] = proc
 
         try:
@@ -313,7 +323,8 @@ class ClaudeCodeAdapter(AgentAdapter):
                 while True:
                     try:
                         line_bytes = await asyncio.wait_for(
-                            proc.stdout.readline(), timeout=timeout,
+                            proc.stdout.readline(),
+                            timeout=timeout,
                         )
                     except TimeoutError:
                         break
@@ -342,7 +353,7 @@ class ClaudeCodeAdapter(AgentAdapter):
                             {
                                 "channel": "stdout",
                                 "content": formatted,
-                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "timestamp": datetime.now(UTC).isoformat(),
                             },
                             ensure_ascii=False,
                         )
@@ -370,14 +381,14 @@ class ClaudeCodeAdapter(AgentAdapter):
                         {
                             "channel": "stdout",
                             "content": "[TIMEOUT] Agent execution timed out.",
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "timestamp": datetime.now(UTC).isoformat(),
                         },
                         ensure_ascii=False,
                     )
                     await redis.publish(channel, done_msg)
                     await redis.publish(
                         channel,
-                        json.dumps({"event": "done", "timestamp": datetime.now(timezone.utc).isoformat()}),
+                        json.dumps({"event": "done", "timestamp": datetime.now(UTC).isoformat()}),
                     )
                 except Exception:
                     pass
@@ -396,7 +407,7 @@ class ClaudeCodeAdapter(AgentAdapter):
             try:
                 await redis.publish(
                     channel,
-                    json.dumps({"event": "done", "timestamp": datetime.now(timezone.utc).isoformat()}),
+                    json.dumps({"event": "done", "timestamp": datetime.now(UTC).isoformat()}),
                 )
             except Exception:
                 log.warning("redis_publish_done_failed", run_id=str(run_id))
@@ -430,6 +441,11 @@ class ClaudeCodeAdapter(AgentAdapter):
 
     def supported_tools(self) -> list[str]:
         return [
-            "file_read", "file_write", "file_list", "file_search",
-            "shell_exec", "git", "web_fetch",
+            "file_read",
+            "file_write",
+            "file_list",
+            "file_search",
+            "shell_exec",
+            "git",
+            "web_fetch",
         ]

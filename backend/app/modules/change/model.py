@@ -7,16 +7,26 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, Uuid
-from sqlalchemy import JSON
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    Uuid,
+)
 from sqlmodel import Field
 
 from app.models.base import BaseModel
 
 
-class StageEnum(str, enum.Enum):
+class StageEnum(enum.StrEnum):
     """统一工作流阶段枚举：SillySpec 8 主阶段 + Hub 3 业务扩展。"""
 
     # ── SillySpec 主阶段（由 CLI 管理） ──
@@ -35,20 +45,26 @@ class StageEnum(str, enum.Enum):
     ACCEPTED = "accepted"
 
     @classmethod
-    def spec_stages(cls) -> list["StageEnum"]:
+    def spec_stages(cls) -> list[StageEnum]:
         """SillySpec 主阶段列表。"""
         return [
-            cls.SCAN, cls.BRAINSTORM, cls.PROPOSE, cls.PLAN,
-            cls.EXECUTE, cls.VERIFY, cls.ARCHIVE, cls.QUICK,
+            cls.SCAN,
+            cls.BRAINSTORM,
+            cls.PROPOSE,
+            cls.PLAN,
+            cls.EXECUTE,
+            cls.VERIFY,
+            cls.ARCHIVE,
+            cls.QUICK,
         ]
 
     @classmethod
-    def hub_stages(cls) -> list["StageEnum"]:
+    def hub_stages(cls) -> list[StageEnum]:
         """Hub 业务扩展阶段列表。"""
         return [cls.DRAFT, cls.REWORK_REQUIRED, cls.ACCEPTED]
 
     @classmethod
-    def all_stages(cls) -> list["StageEnum"]:
+    def all_stages(cls) -> list[StageEnum]:
         """全部阶段列表。"""
         return cls.spec_stages() + cls.hub_stages()
 
@@ -132,7 +148,9 @@ class Change(BaseModel, table=True):
     )
     change_key: str = Field(sa_column=Column(String(200), nullable=False))
     title: str | None = Field(default=None, sa_column=Column(String(500), nullable=True))
-    status: str = Field(default="draft", sa_column=Column(String(30), nullable=False, default="draft"))
+    status: str = Field(
+        default="draft", sa_column=Column(String(30), nullable=False, default="draft")
+    )
     location: str = Field(sa_column=Column(String(20), nullable=False))
     path: str = Field(sa_column=Column(Text, nullable=False))
     affected_components: list[str] = Field(
@@ -145,11 +163,11 @@ class Change(BaseModel, table=True):
         sa_column=Column(Uuid(as_uuid=True), ForeignKey("users.id"), nullable=True),
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     archived_at: datetime | None = Field(

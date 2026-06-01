@@ -1,17 +1,15 @@
 """Tests for diff_collector module — task-06."""
-import asyncio
+
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.modules.agent.diff_collector import (
-    DiffResult,
     ZERO_DIFF_RESULT,
-    collect_diff,
     _parse_stat_numbers,
+    collect_diff,
 )
-
 
 # ---------------------------------------------------------------------------
 # _parse_stat_numbers
@@ -91,9 +89,7 @@ class TestCollectDiff:
         (tmp_path / "repo").mkdir()
         (tmp_path / "repo" / ".git").mkdir()
 
-        stat_output = (
-            b" foo.py | 5 +++--\n 1 file changed, 3 insertions(+), 2 deletions(-)\n"
-        )
+        stat_output = b" foo.py | 5 +++--\n 1 file changed, 3 insertions(+), 2 deletions(-)\n"
         diff_output = b"diff --git a/foo.py b/foo.py\n--- a/foo.py\n+++ b/foo.py\n"
 
         call_count = 0
@@ -105,12 +101,14 @@ class TestCollectDiff:
                 return _make_fake_proc(stdout=stat_output)
             return _make_fake_proc(stdout=diff_output)
 
-        with patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
-            with patch(
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=_fake_exec),
+            patch(
                 "app.modules.agent.diff_collector.redact_output",
                 side_effect=lambda x: x,
-            ):
-                result = await collect_diff(tmp_path)
+            ),
+        ):
+            result = await collect_diff(tmp_path)
 
         assert result.files_changed == 1
         assert result.insertions == 3
@@ -135,12 +133,14 @@ class TestCollectDiff:
                 return _make_fake_proc(stdout=stat_output)
             return _make_fake_proc(stdout=big_diff)
 
-        with patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
-            with patch(
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=_fake_exec),
+            patch(
                 "app.modules.agent.diff_collector.redact_output",
                 side_effect=lambda x: x,
-            ):
-                result = await collect_diff(tmp_path, max_diff_size=1000)
+            ),
+        ):
+            result = await collect_diff(tmp_path, max_diff_size=1000)
 
         assert result.full_diff.endswith("...[truncated]")
         assert len(result.full_diff) < 100_000
@@ -162,12 +162,14 @@ class TestCollectDiff:
                 return _make_fake_proc(stdout=stat_output)
             return _make_fake_proc(returncode=1, stdout=b"")
 
-        with patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
-            with patch(
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=_fake_exec),
+            patch(
                 "app.modules.agent.diff_collector.redact_output",
                 side_effect=lambda x: x,
-            ):
-                result = await collect_diff(tmp_path)
+            ),
+        ):
+            result = await collect_diff(tmp_path)
 
         assert result.stat_summary != ""
         assert result.full_diff == ""
@@ -233,14 +235,16 @@ class TestCollectDiff:
                 return _make_fake_proc(stdout=stat_output)
             return _make_fake_proc(stdout=diff_output)
 
-        with patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
-            with patch(
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=_fake_exec),
+            patch(
                 "app.modules.agent.diff_collector.redact_output",
                 return_value="REDACTED",
-            ) as mock_redact:
-                await collect_diff(tmp_path)
+            ) as mock_redact,
+        ):
+            await collect_diff(tmp_path)
 
-                assert mock_redact.call_count >= 1
+            assert mock_redact.call_count >= 1
 
     def test_zero_result_is_zero(self):
         assert ZERO_DIFF_RESULT.stat_summary == ""

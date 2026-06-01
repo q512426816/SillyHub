@@ -12,7 +12,6 @@ Wave 3 test suite covering:
 from __future__ import annotations
 
 import json
-import socket
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -27,7 +26,6 @@ from app.modules.tool_gateway.tool_policy import (
     ToolPolicyService,
     default_policy,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -89,7 +87,9 @@ class TestCheckCommandBlocked:
         """Command + args combined matching blocked pattern raises."""
         policy = _make_policy(blocked_commands=["wget"])
         with pytest.raises(ToolOperationForbidden, match="blocked"):
-            ToolPolicyService.check(policy, "shell_exec", {"command": "wget", "args": ["http://evil.com"]})
+            ToolPolicyService.check(
+                policy, "shell_exec", {"command": "wget", "args": ["http://evil.com"]}
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -208,6 +208,7 @@ class TestRunTestsHandler:
     async def test_run_tests_unsupported_runner(self, tmp_path: Path) -> None:
         """Unsupported runner returns error."""
         from app.modules.tool_gateway.service import ToolGatewayService
+
         svc = ToolGatewayService.__new__(ToolGatewayService)
         result = await svc._handle_run_tests({"runner": "maven"}, tmp_path)
         assert result["result_code"] == 1
@@ -216,6 +217,7 @@ class TestRunTestsHandler:
     async def test_run_tests_success(self, tmp_path: Path) -> None:
         """Successful pytest run with mocked subprocess."""
         from app.modules.tool_gateway.service import ToolGatewayService
+
         svc = ToolGatewayService.__new__(ToolGatewayService)
         with patch("app.modules.tool_gateway.service.asyncio.create_subprocess_exec") as mock_exec:
             proc = AsyncMock()
@@ -236,6 +238,7 @@ class TestHttpGetHandler:
     async def test_http_get_missing_url(self, tmp_path: Path) -> None:
         """Missing URL returns error."""
         from app.modules.tool_gateway.service import ToolGatewayService
+
         svc = ToolGatewayService.__new__(ToolGatewayService)
         result = await svc._handle_http_get({}, tmp_path)
         assert result["result_code"] == 1
@@ -244,6 +247,7 @@ class TestHttpGetHandler:
     async def test_http_get_bad_scheme(self, tmp_path: Path) -> None:
         """Non http/https scheme returns error."""
         from app.modules.tool_gateway.service import ToolGatewayService
+
         svc = ToolGatewayService.__new__(ToolGatewayService)
         result = await svc._handle_http_get({"url": "ftp://files.example.com/data"}, tmp_path)
         assert result["result_code"] == 1
@@ -275,18 +279,26 @@ async def test_audit_dual_write(client, db_session, tmp_path: Path) -> None:
 
     # Verify ToolOperationLog
     op_logs = list(
-        (await db_session.execute(
-            select(ToolOperationLog).where(ToolOperationLog.lease_id == refs["lease_id"]),
-        )).scalars().all(),
+        (
+            await db_session.execute(
+                select(ToolOperationLog).where(ToolOperationLog.lease_id == refs["lease_id"]),
+            )
+        )
+        .scalars()
+        .all(),
     )
     assert len(op_logs) == 1
     assert op_logs[0].tool_type == "file_read"
 
     # Verify AuditLog dual write
     audit_logs = list(
-        (await db_session.execute(
-            select(AuditLog).where(AuditLog.workspace_id == refs["ws_id"]),
-        )).scalars().all(),
+        (
+            await db_session.execute(
+                select(AuditLog).where(AuditLog.workspace_id == refs["ws_id"]),
+            )
+        )
+        .scalars()
+        .all(),
     )
     assert len(audit_logs) == 1
     assert audit_logs[0].action == "tool:file_read"

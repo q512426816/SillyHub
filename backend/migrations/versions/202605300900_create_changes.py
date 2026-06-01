@@ -96,9 +96,7 @@ def upgrade() -> None:
         sa.Column("last_modified_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(["change_id"], ["changes.id"], ondelete="CASCADE"),
-        sa.UniqueConstraint(
-            "change_id", "doc_type", "path", name="ux_change_docs_type_path"
-        ),
+        sa.UniqueConstraint("change_id", "doc_type", "path", name="ux_change_docs_type_path"),
     )
     op.create_index(
         "ix_change_docs_change",

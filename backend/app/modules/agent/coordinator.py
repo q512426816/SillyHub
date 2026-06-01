@@ -15,6 +15,8 @@ import hashlib
 import secrets
 import uuid
 import warnings
+from datetime import UTC
+from pathlib import Path
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -159,9 +161,7 @@ class ExecutionCoordinatorService:
         payload = "\n---\n".join(parts)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
-    async def validate_fingerprint(
-        self, run_id: uuid.UUID, fingerprint: str
-    ) -> bool:
+    async def validate_fingerprint(self, run_id: uuid.UUID, fingerprint: str) -> bool:
         """Check if the given fingerprint matches the stored one.
 
         Returns ``True`` if they match, ``False`` otherwise.
@@ -241,15 +241,19 @@ class ExecutionCoordinatorService:
             )
 
         # Optionally validate fingerprint
-        if context_fingerprint and run.context_fingerprint and run.context_fingerprint != context_fingerprint:
-                raise FingerprintMismatchError(
-                    "Context fingerprint mismatch — spec has changed since last run.",
-                    details={
-                        "run_id": str(run_id),
-                        "expected": run.context_fingerprint,
-                        "provided": context_fingerprint,
-                    },
-                )
+        if (
+            context_fingerprint
+            and run.context_fingerprint
+            and run.context_fingerprint != context_fingerprint
+        ):
+            raise FingerprintMismatchError(
+                "Context fingerprint mismatch — spec has changed since last run.",
+                details={
+                    "run_id": str(run_id),
+                    "expected": run.context_fingerprint,
+                    "provided": context_fingerprint,
+                },
+            )
 
         # Reset for re-execution
         run.status = "pending"
@@ -432,7 +436,7 @@ class ExecutionCoordinatorService:
         workspace_id: uuid.UUID,
         user_id: uuid.UUID,
         scope: str = "full",
-        repo_dir: "Path",
+        repo_dir: Path,
     ) -> AgentRun:
         """Create and launch a SillySpec AgentRun in the background.
 
@@ -500,7 +504,7 @@ class ExecutionCoordinatorService:
         run_id: uuid.UUID,
         change_key: str,
         scope: str,
-        repo_dir: "Path",
+        repo_dir: Path,
         workspace_id: uuid.UUID,
         user_id: uuid.UUID,
     ) -> None:
@@ -517,7 +521,7 @@ class ExecutionCoordinatorService:
         )
 
         import asyncio
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         run = await self.session.get(AgentRun, run_id)
         if run is None:
@@ -525,7 +529,7 @@ class ExecutionCoordinatorService:
 
         # Mark as running
         run.status = "running"
-        run.started_at = datetime.now(timezone.utc)
+        run.started_at = datetime.now(UTC)
         self.session.add(run)
         await self.session.commit()
 
@@ -542,11 +546,11 @@ class ExecutionCoordinatorService:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(repo_dir),
             )
-            stdout, stderr = await process.communicate()
+            stdout, _stderr = await process.communicate()
 
             # Persist result
             run.status = "completed" if process.returncode == 0 else "failed"
-            run.finished_at = datetime.now(timezone.utc)
+            run.finished_at = datetime.now(UTC)
             run.exit_code = process.returncode
             run.output_redacted = (stdout or b"").decode("utf-8", errors="replace")[:10000]
             self.session.add(run)
@@ -560,7 +564,7 @@ class ExecutionCoordinatorService:
         except Exception as exc:
             log.error("sillyspec_run_failed", run_id=str(run_id), error=str(exc))
             run.status = "failed"
-            run.finished_at = datetime.now(timezone.utc)
+            run.finished_at = datetime.now(UTC)
             run.exit_code = 1
             run.output_redacted = str(exc)[:10000]
             self.session.add(run)

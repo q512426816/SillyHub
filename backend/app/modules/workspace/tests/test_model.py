@@ -10,7 +10,6 @@ import uuid
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Step 1: Workspace model field existence
 # ---------------------------------------------------------------------------
@@ -82,9 +81,7 @@ def test_workspace_relation_table_constraints() -> None:
     """WorkspaceRelation table should have UQ triplet + source/target indexes. (AC-04)"""
     from app.modules.workspace.model import WorkspaceRelation
 
-    index_names = {
-        idx.name for idx in WorkspaceRelation.__table_args__ if hasattr(idx, "name")
-    }
+    index_names = {idx.name for idx in WorkspaceRelation.__table_args__ if hasattr(idx, "name")}
     assert "ux_workspace_relations_triplet" in index_names
     assert "ix_workspace_relations_source" in index_names
     assert "ix_workspace_relations_target" in index_names
@@ -249,15 +246,11 @@ async def test_workspace_relation_unique_triplet(db_session) -> None:
     db_session.add_all([ws1, ws2])
     await db_session.flush()
 
-    rel1 = WorkspaceRelation(
-        source_id=ws1.id, target_id=ws2.id, relation_type="depends_on"
-    )
+    rel1 = WorkspaceRelation(source_id=ws1.id, target_id=ws2.id, relation_type="depends_on")
     db_session.add(rel1)
     await db_session.flush()
 
-    rel2 = WorkspaceRelation(
-        source_id=ws1.id, target_id=ws2.id, relation_type="depends_on"
-    )
+    rel2 = WorkspaceRelation(source_id=ws1.id, target_id=ws2.id, relation_type="depends_on")
     db_session.add(rel2)
     with pytest.raises(Exception):  # IntegrityError on both SQLite & Postgres
         await db_session.flush()

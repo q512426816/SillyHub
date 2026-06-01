@@ -66,7 +66,8 @@ class RuntimeService:
             return None
 
         resolver = SpecPathResolver(
-            spec_ws.spec_root if spec_ws and spec_ws.strategy != "repo-native"
+            spec_ws.spec_root
+            if spec_ws and spec_ws.strategy != "repo-native"
             else workspace.root_path
         )
 
@@ -113,7 +114,7 @@ class RuntimeService:
 
                 change_name = row["name"]
                 current_stage = row["current_stage"]
-                change_status = row["status"]
+                _change_status = row["status"]
                 last_active = row["last_active"]
 
                 # Get project info
@@ -246,11 +247,13 @@ class RuntimeService:
                 stat = f.stat()
                 from datetime import datetime as dt
 
-                entries.append(ArtifactEntry(
-                    filename=f.name,
-                    size_bytes=stat.st_size,
-                    last_modified=dt.fromtimestamp(stat.st_mtime).isoformat(),
-                ))
+                entries.append(
+                    ArtifactEntry(
+                        filename=f.name,
+                        size_bytes=stat.st_size,
+                        last_modified=dt.fromtimestamp(stat.st_mtime).isoformat(),
+                    )
+                )
         return entries
 
     async def get_artifact_content(self, workspace_id: uuid.UUID, filename: str) -> str | None:

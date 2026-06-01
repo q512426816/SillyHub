@@ -25,10 +25,10 @@ from app.modules.change.model import Change, ChangeDocument
 from app.modules.change_writer.markdown_builder import (
     build_master_md,
 )
-from app.modules.worktree.exec_env import ExecEnvBuilder
-from app.modules.worktree.model import WorktreeLease
 from app.modules.workspace.model import Workspace
 from app.modules.workspace.service import _rewrite_path
+from app.modules.worktree.exec_env import ExecEnvBuilder
+from app.modules.worktree.model import WorktreeLease
 
 log = get_logger(__name__)
 
@@ -278,7 +278,7 @@ class ChangeWriterService:
             filename = SpecPathResolver.STANDARD_FILENAMES.get(doc_type, f"{doc_type}.md")
             file_path = change_dir / filename
             file_path.write_text(content, encoding="utf-8")
-            size = file_path.stat().st_size
+            _size = file_path.stat().st_size
             rel_path = str(file_path.relative_to(repo_dir))
 
             stmt = select(ChangeDocument).where(
@@ -324,15 +324,14 @@ class ChangeWriterService:
             return content
 
         frontmatter_block = (
-            "---\n"
-            f"author: \"{author}\"\n"
-            f"created_at: \"{created_at.isoformat()}\"\n"
-            "---\n\n"
+            f'---\nauthor: "{author}"\ncreated_at: "{created_at.isoformat()}"\n---\n\n'
         )
         return frontmatter_block + content
 
     async def _get_active_lease(
-        self, lease_id: uuid.UUID, user_id: uuid.UUID,
+        self,
+        lease_id: uuid.UUID,
+        user_id: uuid.UUID,
     ) -> WorktreeLease:
         stmt = select(WorktreeLease).where(col(WorktreeLease.id) == lease_id)
         lease = (await self._session.execute(stmt)).scalars().first()
@@ -354,7 +353,9 @@ class ChangeWriterService:
         return lease
 
     async def _get_change(
-        self, change_id: uuid.UUID, workspace_id: uuid.UUID,
+        self,
+        change_id: uuid.UUID,
+        workspace_id: uuid.UUID,
     ) -> Change:
         stmt = select(Change).where(
             col(Change.id) == change_id,

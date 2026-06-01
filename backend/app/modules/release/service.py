@@ -19,9 +19,16 @@ from app.modules.release.schema import ReleaseCreate
 
 log = get_logger(__name__)
 
-VALID_STATUSES = frozenset({
-    "draft", "staging", "approved", "deploying", "deployed", "rolled_back",
-})
+VALID_STATUSES = frozenset(
+    {
+        "draft",
+        "staging",
+        "approved",
+        "deploying",
+        "deployed",
+        "rolled_back",
+    }
+)
 
 VALID_ENVIRONMENTS = frozenset({"staging", "production"})
 
@@ -167,7 +174,8 @@ class ReleaseService:
         return approval
 
     async def list_approvals(
-        self, release_id: uuid.UUID,
+        self,
+        release_id: uuid.UUID,
     ) -> list[ReleaseApproval]:
         stmt = (
             select(ReleaseApproval)
@@ -244,9 +252,13 @@ class ReleaseService:
         policy = release.deploy_policy or {}
         min_approvals = policy.get("min_approvers", DEFAULT_MIN_APPROVERS)
 
-        count_stmt = select(func.count()).select_from(ReleaseApproval).where(
-            ReleaseApproval.release_id == release.id,
-            ReleaseApproval.verdict == "approve",
+        count_stmt = (
+            select(func.count())
+            .select_from(ReleaseApproval)
+            .where(
+                ReleaseApproval.release_id == release.id,
+                ReleaseApproval.verdict == "approve",
+            )
         )
         count = (await self._session.execute(count_stmt)).scalar() or 0
 
@@ -259,9 +271,13 @@ class ReleaseService:
         policy = release.deploy_policy or {}
         min_approvals = policy.get("min_approvers", DEFAULT_MIN_APPROVERS)
 
-        count_stmt = select(func.count()).select_from(ReleaseApproval).where(
-            ReleaseApproval.release_id == release.id,
-            ReleaseApproval.verdict == "approve",
+        count_stmt = (
+            select(func.count())
+            .select_from(ReleaseApproval)
+            .where(
+                ReleaseApproval.release_id == release.id,
+                ReleaseApproval.verdict == "approve",
+            )
         )
         count = (await self._session.execute(count_stmt)).scalar() or 0
 

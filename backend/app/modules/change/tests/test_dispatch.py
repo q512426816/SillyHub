@@ -7,14 +7,11 @@ from __future__ import annotations
 
 import shutil
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
 from app.modules.agent.model import AgentRun
 from app.modules.change.dispatch import (
@@ -25,7 +22,7 @@ from app.modules.change.dispatch import (
     has_active_run,
     load_prompt_template,
 )
-from app.modules.change.model import Change, StageEnum
+from app.modules.change.model import Change
 from app.modules.workspace.model import Workspace
 
 COMPONENT_FIXTURES = Path(__file__).parent / "fixtures" / "valid"
@@ -53,9 +50,14 @@ class TestStageAgentConfig:
 
     def test_all_expected_stages_present(self):
         expected = {
-            "propose", "brainstorm", "plan",
-            "execute", "verify", "scan",
-            "archive", "quick",
+            "propose",
+            "brainstorm",
+            "plan",
+            "execute",
+            "verify",
+            "scan",
+            "archive",
+            "quick",
         }
         assert set(STAGE_AGENT_CONFIG.keys()) == expected
 
@@ -217,9 +219,7 @@ async def _create_test_workspace(
 class TestDispatch:
     """Test the dispatch() function."""
 
-    async def test_dispatch_propose_stage(
-        self, db_session: AsyncSession, tmp_path: Path
-    ):
+    async def test_dispatch_propose_stage(self, db_session: AsyncSession, tmp_path: Path):
         """When transitioning to propose, dispatch should trigger an agent run."""
         ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
         change = await _create_test_change(
@@ -258,9 +258,7 @@ class TestDispatch:
         await db_session.refresh(change)
         assert change.stages["last_dispatch"]["stage"] == "propose"
 
-    async def test_dispatch_no_config_for_stage(
-        self, db_session: AsyncSession, tmp_path: Path
-    ):
+    async def test_dispatch_no_config_for_stage(self, db_session: AsyncSession, tmp_path: Path):
         """Stages without config (e.g. draft) should not dispatch."""
         ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
         change = await _create_test_change(
@@ -281,9 +279,7 @@ class TestDispatch:
         assert result["dispatched"] is False
         assert "no_config_for_stage" in result["reason"]
 
-    async def test_dispatch_blocked_by_active_run(
-        self, db_session: AsyncSession, tmp_path: Path
-    ):
+    async def test_dispatch_blocked_by_active_run(self, db_session: AsyncSession, tmp_path: Path):
         """If an active run exists, dispatch should be skipped."""
         ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
         change = await _create_test_change(
@@ -314,9 +310,7 @@ class TestDispatch:
         assert result["dispatched"] is False
         assert result["reason"] == "active_run_exists"
 
-    async def test_dispatch_error_does_not_raise(
-        self, db_session: AsyncSession, tmp_path: Path
-    ):
+    async def test_dispatch_error_does_not_raise(self, db_session: AsyncSession, tmp_path: Path):
         """Agent service errors should be caught and returned, not raised."""
         ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
         change = await _create_test_change(
@@ -366,18 +360,23 @@ class TestTransitionWithDispatch:
 
         def _mock_factory():
             class _Ctx:
-                async def __aenter__(self_inner):
+                async def __aenter__(self):
                     return db_session
-                async def __aexit__(self_inner, *args):
+
+                async def __aexit__(self, *args):
                     pass
+
             return _Ctx()
 
-        with patch(
-            "app.modules.agent.service.AgentService.start_stage_dispatch",
-            new_callable=AsyncMock,
-        ) as mock_start, patch(
-            "app.core.db.get_session_factory",
-            return_value=_mock_factory,
+        with (
+            patch(
+                "app.modules.agent.service.AgentService.start_stage_dispatch",
+                new_callable=AsyncMock,
+            ) as mock_start,
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=_mock_factory,
+            ),
         ):
             mock_run = AgentRun(
                 id=uuid.uuid4(),
@@ -426,9 +425,7 @@ class TestTransitionWithDispatch:
         assert result["change"].current_stage == "propose"
         assert result["agent_dispatch"] == {}
 
-    async def test_transition_stages_log_recorded(
-        self, db_session: AsyncSession, tmp_path: Path
-    ):
+    async def test_transition_stages_log_recorded(self, db_session: AsyncSession, tmp_path: Path):
         """Transition should log the stage change in stages JSON."""
         from app.modules.change.service import ChangeService
 
@@ -455,9 +452,7 @@ class TestTransitionWithDispatch:
         assert transitions[0]["to"] == "propose"
         assert transitions[0]["by_role"] == "business_user"
 
-    async def test_invalid_transition_rejected(
-        self, db_session: AsyncSession, tmp_path: Path
-    ):
+    async def test_invalid_transition_rejected(self, db_session: AsyncSession, tmp_path: Path):
         """Invalid transition (e.g. draft → verify) should raise error."""
         from app.core.errors import InvalidTransition
         from app.modules.change.service import ChangeService
@@ -489,9 +484,7 @@ def _copy_fixtures(src: Path, tmp_path: Path, name: str = "ws") -> Path:
 
 
 @pytest.fixture()
-async def workspace_with_changes(
-    client, tmp_path: Path, auth_headers: dict[str, str]
-) -> dict:
+async def workspace_with_changes(client, tmp_path: Path, auth_headers: dict[str, str]) -> dict:
     """Create a workspace with changes for API testing."""
     root = _copy_fixtures(COMPONENT_FIXTURES, tmp_path)
     sillyspec_changes = root / ".sillyspec" / "changes"
@@ -698,9 +691,7 @@ class TestManualDispatchAPI:
 class TestProposeStageFullFlow:
     """End-to-end test of the propose stage dispatch lifecycle."""
 
-    async def test_full_propose_lifecycle(
-        self, db_session: AsyncSession, tmp_path: Path
-    ):
+    async def test_full_propose_lifecycle(self, db_session: AsyncSession, tmp_path: Path):
         """AC-01 through AC-05: Full propose dispatch lifecycle."""
         from app.modules.change.service import ChangeService
 
@@ -719,18 +710,23 @@ class TestProposeStageFullFlow:
         # Mock the session factory to use the test session for dispatch
         def _mock_factory():
             class _Ctx:
-                async def __aenter__(self_inner):
+                async def __aenter__(self):
                     return db_session
-                async def __aexit__(self_inner, *args):
+
+                async def __aexit__(self, *args):
                     pass
+
             return _Ctx()
 
-        with patch(
-            "app.modules.agent.service.AgentService.start_stage_dispatch",
-            new_callable=AsyncMock,
-        ) as mock_start, patch(
-            "app.core.db.get_session_factory",
-            return_value=_mock_factory,
+        with (
+            patch(
+                "app.modules.agent.service.AgentService.start_stage_dispatch",
+                new_callable=AsyncMock,
+            ) as mock_start,
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=_mock_factory,
+            ),
         ):
             mock_run = AgentRun(
                 id=uuid.uuid4(),
@@ -774,6 +770,7 @@ class TestProposeStageFullFlow:
 
         # Directly call dispatch — should be blocked
         from app.modules.change.dispatch import dispatch as dispatch_fn
+
         blocked_result = await dispatch_fn(
             session=db_session,
             workspace_id=ws.id,
@@ -784,9 +781,7 @@ class TestProposeStageFullFlow:
         assert blocked_result["dispatched"] is False
         assert blocked_result["reason"] == "active_run_exists"
 
-    async def test_propose_to_plan(
-        self, db_session: AsyncSession, tmp_path: Path
-    ):
+    async def test_propose_to_plan(self, db_session: AsyncSession, tmp_path: Path):
         """After propose, reviewer can advance to plan."""
         from app.modules.change.service import ChangeService
 
@@ -801,18 +796,23 @@ class TestProposeStageFullFlow:
 
         def _mock_factory():
             class _Ctx:
-                async def __aenter__(self_inner):
+                async def __aenter__(self):
                     return db_session
-                async def __aexit__(self_inner, *args):
+
+                async def __aexit__(self, *args):
                     pass
+
             return _Ctx()
 
-        with patch(
-            "app.modules.agent.service.AgentService.start_stage_dispatch",
-            new_callable=AsyncMock,
-        ) as mock_start, patch(
-            "app.core.db.get_session_factory",
-            return_value=_mock_factory,
+        with (
+            patch(
+                "app.modules.agent.service.AgentService.start_stage_dispatch",
+                new_callable=AsyncMock,
+            ) as mock_start,
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=_mock_factory,
+            ),
         ):
             mock_run = AgentRun(
                 id=uuid.uuid4(),
@@ -835,9 +835,7 @@ class TestProposeStageFullFlow:
         assert result["agent_dispatch"]["dispatched"] is True
         assert result["agent_dispatch"]["stage"] == "plan"
 
-    async def test_role_permission_enforcement(
-        self, db_session: AsyncSession, tmp_path: Path
-    ):
+    async def test_role_permission_enforcement(self, db_session: AsyncSession, tmp_path: Path):
         """business_user cannot advance propose → plan (only reviewer)."""
         from app.core.errors import PermissionDenied
         from app.modules.change.service import ChangeService

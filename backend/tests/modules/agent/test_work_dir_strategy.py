@@ -1,6 +1,5 @@
 """Tests for task-12: resolve_work_dir + _ensure_change_dir_in_worktree."""
 
-import shutil
 import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -8,10 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import AppError
 from app.modules.agent.service import AgentRunError, AgentService, resolve_work_dir
 from app.modules.change.model import Change
-
 
 # ---------------------------------------------------------------------------
 # resolve_work_dir tests
@@ -237,10 +234,14 @@ async def test_start_stage_dispatch_write_no_worktree_logs_warning(tmp_path):
     mock_session.get = AsyncMock(side_effect=_get)
 
     svc = AgentService(mock_session)
-    with patch.object(svc, "_get_workspace_root", new_callable=AsyncMock, return_value=str(ws_root)):
+    with patch.object(
+        svc, "_get_workspace_root", new_callable=AsyncMock, return_value=str(ws_root)
+    ):
         with patch.object(svc, "_try_acquire_lease", new_callable=AsyncMock, return_value=None):
             with patch.object(svc, "_execute_stage_run", new_callable=AsyncMock) as mock_exec:
-                with patch("app.modules.change.dispatch.load_prompt_template", return_value="test prompt"):
+                with patch(
+                    "app.modules.change.dispatch.load_prompt_template", return_value="test prompt"
+                ):
                     await svc.start_stage_dispatch(
                         workspace_id=uuid.uuid4(),
                         change_id=uuid.uuid4(),
@@ -277,11 +278,18 @@ async def test_start_stage_dispatch_read_only_skips_ensure_dir(tmp_path):
     mock_session.get = AsyncMock(side_effect=_get)
 
     svc = AgentService(mock_session)
-    with patch.object(svc, "_get_workspace_root", new_callable=AsyncMock, return_value=str(ws_root)):
+    with patch.object(
+        svc, "_get_workspace_root", new_callable=AsyncMock, return_value=str(ws_root)
+    ):
         with patch.object(svc, "_try_acquire_lease", new_callable=AsyncMock, return_value=None):
-            with patch.object(svc, "_ensure_change_dir_in_worktree", new_callable=AsyncMock) as mock_ensure:
-                with patch.object(svc, "_execute_stage_run", new_callable=AsyncMock) as mock_exec:
-                    with patch("app.modules.change.dispatch.load_prompt_template", return_value="test prompt"):
+            with patch.object(
+                svc, "_ensure_change_dir_in_worktree", new_callable=AsyncMock
+            ) as mock_ensure:
+                with patch.object(svc, "_execute_stage_run", new_callable=AsyncMock) as _mock_exec:
+                    with patch(
+                        "app.modules.change.dispatch.load_prompt_template",
+                        return_value="test prompt",
+                    ):
                         await svc.start_stage_dispatch(
                             workspace_id=uuid.uuid4(),
                             change_id=uuid.uuid4(),

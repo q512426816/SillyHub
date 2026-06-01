@@ -18,9 +18,7 @@ def _copy_fixtures(src: Path, tmp_path: Path, name: str = "ws") -> Path:
 
 
 @pytest.fixture()
-async def workspace_with_changes(
-    client, tmp_path: Path, auth_headers: dict[str, str]
-) -> dict:
+async def workspace_with_changes(client, tmp_path: Path, auth_headers: dict[str, str]) -> dict:
     """Create a workspace with components and change fixtures."""
     root = _copy_fixtures(COMPONENT_FIXTURES, tmp_path)
 
@@ -252,9 +250,7 @@ async def test_no_auth_returns_401(client, workspace_with_changes: dict) -> None
     assert resp.status_code == 401
 
 
-async def test_unknown_workspace_returns_404(
-    client, auth_headers: dict[str, str]
-) -> None:
+async def test_unknown_workspace_returns_404(client, auth_headers: dict[str, str]) -> None:
     resp = await client.get(
         "/api/workspaces/00000000-0000-0000-0000-000000000000/changes",
         headers=auth_headers,

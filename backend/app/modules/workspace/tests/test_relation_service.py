@@ -13,7 +13,7 @@ from app.core.errors import (
     RelationSelfLoop,
     WorkspaceNotFound,
 )
-from app.modules.workspace.model import Workspace, WorkspaceRelation
+from app.modules.workspace.model import Workspace
 from app.modules.workspace.relation_schema import RelationCreate
 from app.modules.workspace.relation_service import RelationService
 
@@ -44,9 +44,7 @@ async def test_create_relation_success(db_session: AsyncSession) -> None:
     ws_b = await _create_workspace(db_session, "Bravo")
 
     svc = RelationService(db_session)
-    payload = RelationCreate(
-        target_id=ws_b.id, relation_type="depends_on", description="A needs B"
-    )
+    payload = RelationCreate(target_id=ws_b.id, relation_type="depends_on", description="A needs B")
     rel = await svc.create(ws_a.id, payload)
 
     assert rel.source_id == ws_a.id
@@ -83,9 +81,7 @@ async def test_create_with_nonexistent_source_raises(
 ) -> None:
     """Source workspace does not exist -> WorkspaceNotFound."""
     svc = RelationService(db_session)
-    payload = RelationCreate(
-        target_id=uuid.uuid4(), relation_type="depends_on"
-    )
+    payload = RelationCreate(target_id=uuid.uuid4(), relation_type="depends_on")
     with pytest.raises(WorkspaceNotFound):
         await svc.create(uuid.uuid4(), payload)
 
@@ -96,9 +92,7 @@ async def test_create_with_nonexistent_target_raises(
     """Target workspace does not exist -> WorkspaceNotFound."""
     ws_a = await _create_workspace(db_session, "Alpha")
     svc = RelationService(db_session)
-    payload = RelationCreate(
-        target_id=uuid.uuid4(), relation_type="depends_on"
-    )
+    payload = RelationCreate(target_id=uuid.uuid4(), relation_type="depends_on")
     with pytest.raises(WorkspaceNotFound):
         await svc.create(ws_a.id, payload)
 
@@ -110,12 +104,8 @@ async def test_list_for_workspace_outgoing(db_session: AsyncSession) -> None:
     ws_c = await _create_workspace(db_session, "Charlie")
 
     svc = RelationService(db_session)
-    await svc.create(
-        ws_a.id, RelationCreate(target_id=ws_b.id, relation_type="depends_on")
-    )
-    await svc.create(
-        ws_a.id, RelationCreate(target_id=ws_c.id, relation_type="depends_on")
-    )
+    await svc.create(ws_a.id, RelationCreate(target_id=ws_b.id, relation_type="depends_on"))
+    await svc.create(ws_a.id, RelationCreate(target_id=ws_c.id, relation_type="depends_on"))
 
     result = await svc.list_for_workspace(ws_a.id)
     assert len(result.outgoing) == 2
@@ -129,12 +119,8 @@ async def test_list_for_workspace_incoming(db_session: AsyncSession) -> None:
     ws_c = await _create_workspace(db_session, "Charlie")
 
     svc = RelationService(db_session)
-    await svc.create(
-        ws_b.id, RelationCreate(target_id=ws_a.id, relation_type="depends_on")
-    )
-    await svc.create(
-        ws_c.id, RelationCreate(target_id=ws_a.id, relation_type="depends_on")
-    )
+    await svc.create(ws_b.id, RelationCreate(target_id=ws_a.id, relation_type="depends_on"))
+    await svc.create(ws_c.id, RelationCreate(target_id=ws_a.id, relation_type="depends_on"))
 
     result = await svc.list_for_workspace(ws_a.id)
     assert len(result.outgoing) == 0
@@ -150,12 +136,8 @@ async def test_list_for_workspace_both_directions(
     ws_c = await _create_workspace(db_session, "Charlie")
 
     svc = RelationService(db_session)
-    await svc.create(
-        ws_a.id, RelationCreate(target_id=ws_b.id, relation_type="depends_on")
-    )
-    await svc.create(
-        ws_c.id, RelationCreate(target_id=ws_a.id, relation_type="depends_on")
-    )
+    await svc.create(ws_a.id, RelationCreate(target_id=ws_b.id, relation_type="depends_on"))
+    await svc.create(ws_c.id, RelationCreate(target_id=ws_a.id, relation_type="depends_on"))
 
     result = await svc.list_for_workspace(ws_a.id)
     assert len(result.outgoing) == 1
@@ -178,9 +160,7 @@ async def test_delete_relation_success(db_session: AsyncSession) -> None:
     ws_b = await _create_workspace(db_session, "Bravo")
 
     svc = RelationService(db_session)
-    rel = await svc.create(
-        ws_a.id, RelationCreate(target_id=ws_b.id, relation_type="depends_on")
-    )
+    rel = await svc.create(ws_a.id, RelationCreate(target_id=ws_b.id, relation_type="depends_on"))
 
     deleted = await svc.delete(rel.id)
     assert deleted.id == rel.id
@@ -204,9 +184,7 @@ async def test_all_five_relation_types(db_session: AsyncSession) -> None:
 
     svc = RelationService(db_session)
     for rtype in ("depends_on", "consumes_api_from", "tests", "publishes_to", "documents"):
-        await svc.create(
-            ws_a.id, RelationCreate(target_id=ws_b.id, relation_type=rtype)
-        )
+        await svc.create(ws_a.id, RelationCreate(target_id=ws_b.id, relation_type=rtype))
 
     result = await svc.list_for_workspace(ws_a.id)
     assert len(result.outgoing) == 5
@@ -223,12 +201,8 @@ async def test_cycle_two_nodes(db_session: AsyncSession) -> None:
     ws_b = await _create_workspace(db_session, "Bravo")
 
     svc = RelationService(db_session)
-    await svc.create(
-        ws_a.id, RelationCreate(target_id=ws_b.id, relation_type="depends_on")
-    )
-    await svc.create(
-        ws_b.id, RelationCreate(target_id=ws_a.id, relation_type="depends_on")
-    )
+    await svc.create(ws_a.id, RelationCreate(target_id=ws_b.id, relation_type="depends_on"))
+    await svc.create(ws_b.id, RelationCreate(target_id=ws_a.id, relation_type="depends_on"))
 
     result_a = await svc.list_for_workspace(ws_a.id)
     assert len(result_a.outgoing) == 1
@@ -250,15 +224,9 @@ async def test_cycle_three_nodes(db_session: AsyncSession) -> None:
     ws_c = await _create_workspace(db_session, "Charlie")
 
     svc = RelationService(db_session)
-    await svc.create(
-        ws_a.id, RelationCreate(target_id=ws_b.id, relation_type="depends_on")
-    )
-    await svc.create(
-        ws_b.id, RelationCreate(target_id=ws_c.id, relation_type="depends_on")
-    )
-    await svc.create(
-        ws_c.id, RelationCreate(target_id=ws_a.id, relation_type="depends_on")
-    )
+    await svc.create(ws_a.id, RelationCreate(target_id=ws_b.id, relation_type="depends_on"))
+    await svc.create(ws_b.id, RelationCreate(target_id=ws_c.id, relation_type="depends_on"))
+    await svc.create(ws_c.id, RelationCreate(target_id=ws_a.id, relation_type="depends_on"))
 
     result_a = await svc.list_for_workspace(ws_a.id)
     assert len(result_a.outgoing) == 1
@@ -273,9 +241,7 @@ async def test_same_pair_different_types_coexist(db_session: AsyncSession) -> No
     ws_b = await _create_workspace(db_session, "Bravo")
 
     svc = RelationService(db_session)
-    await svc.create(
-        ws_a.id, RelationCreate(target_id=ws_b.id, relation_type="depends_on")
-    )
+    await svc.create(ws_a.id, RelationCreate(target_id=ws_b.id, relation_type="depends_on"))
     await svc.create(
         ws_a.id,
         RelationCreate(target_id=ws_b.id, relation_type="consumes_api_from"),

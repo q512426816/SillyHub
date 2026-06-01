@@ -11,8 +11,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.modules.worktree.model import WorktreeLease
-
 
 def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
@@ -165,15 +163,22 @@ async def test_acquire_returns_201(
 
 
 async def test_list_worktrees_empty(
-    client, auth_headers, db_session,
+    client,
+    auth_headers,
+    db_session,
 ) -> None:
     from app.modules.workspace.model import Workspace
 
     ws_id = uuid.uuid4()
-    db_session.add(Workspace(
-        id=ws_id, name="WS", slug=f"ws-{ws_id.hex[:8]}", root_path="/tmp",
-        status="active",
-    ))
+    db_session.add(
+        Workspace(
+            id=ws_id,
+            name="WS",
+            slug=f"ws-{ws_id.hex[:8]}",
+            root_path="/tmp",
+            status="active",
+        )
+    )
     await db_session.commit()
 
     resp = await client.get(
@@ -198,9 +203,7 @@ async def test_acquire_no_auth_returns_401(client, db_session) -> None:
     assert resp.status_code == 401
 
 
-async def test_release_worktree(
-    client, db_session, mock_git, mock_exec_env, mock_cipher
-) -> None:
+async def test_release_worktree(client, db_session, mock_git, mock_exec_env, mock_cipher) -> None:
     p = await _setup_prerequisites(db_session)
     headers = _auth(p["token"])
 
@@ -228,9 +231,7 @@ async def test_release_worktree(
     assert resp.json()["released_at"] is not None
 
 
-async def test_get_lease_detail(
-    client, db_session, mock_git, mock_exec_env, mock_cipher
-) -> None:
+async def test_get_lease_detail(client, db_session, mock_git, mock_exec_env, mock_cipher) -> None:
     p = await _setup_prerequisites(db_session)
     headers = _auth(p["token"])
 
@@ -255,9 +256,7 @@ async def test_get_lease_detail(
     assert resp.json()["id"] == lease_id
 
 
-async def test_extend_lease(
-    client, db_session, mock_git, mock_exec_env, mock_cipher
-) -> None:
+async def test_extend_lease(client, db_session, mock_git, mock_exec_env, mock_cipher) -> None:
     p = await _setup_prerequisites(db_session)
     headers = _auth(p["token"])
 
@@ -322,7 +321,10 @@ async def test_cross_user_release_403(
     db_session.add(user_b)
     await db_session.commit()
     token_b, _ = create_access_token(
-        user_id=user_b.id, email=user_b.email, is_admin=False, settings=settings,
+        user_id=user_b.id,
+        email=user_b.email,
+        is_admin=False,
+        settings=settings,
     )
 
     # User B tries to release
@@ -334,7 +336,8 @@ async def test_cross_user_release_403(
 
 
 async def test_get_nonexistent_lease(
-    client, auth_headers,
+    client,
+    auth_headers,
 ) -> None:
     resp = await client.get(
         f"/api/worktrees/{uuid.uuid4()}",

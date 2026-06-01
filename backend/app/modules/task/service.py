@@ -64,8 +64,7 @@ class TaskService:
             col(TaskWorkspace.workspace_id) == workspace_id,
         )
         stmt = select(Task).where(
-            (col(Task.workspace_id) == workspace_id)
-            | (col(Task.id).in_(mn_subq)),
+            (col(Task.workspace_id) == workspace_id) | (col(Task.id).in_(mn_subq)),
             col(Task.change_id) == change_id,
         )
         if status:
@@ -248,9 +247,7 @@ class TaskService:
         existing_stmt = select(TaskWorkspace).where(
             col(TaskWorkspace.task_id) == task_id,
         )
-        existing = list(
-            (await self._session.execute(existing_stmt)).scalars().all()
-        )
+        existing = list((await self._session.execute(existing_stmt)).scalars().all())
         existing_ws_ids = {tw.workspace_id for tw in existing}
 
         for tw in existing:

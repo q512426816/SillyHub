@@ -38,7 +38,9 @@ def _load_master_key() -> tuple[bytes, str]:
     if not raw:
         raise MasterKeyMissing(
             "SILLYSPEC_MASTER_KEY environment variable is required.",
-            details={"hint": "Generate one: python -c \"import secrets; print(f'v1:{secrets.token_hex(32)}')\""},
+            details={
+                "hint": "Generate one: python -c \"import secrets; print(f'v1:{secrets.token_hex(32)}')\""
+            },
         )
     if ":" in raw:
         key_id, hex_key = raw.split(":", 1)

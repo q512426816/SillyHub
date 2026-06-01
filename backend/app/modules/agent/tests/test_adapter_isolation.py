@@ -1,6 +1,5 @@
 """Tests for ClaudeCodeAdapter isolation and output sanitization — task-07."""
-import asyncio
-import os
+
 import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -9,7 +8,6 @@ import pytest
 
 from app.modules.agent.adapters.claude_code import ClaudeCodeAdapter
 from app.modules.agent.service import AgentService
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -111,7 +109,9 @@ class TestAllowedPaths:
 
         from app.modules.agent.base import TaskContext
 
-        ctx = TaskContext(change_title="test change", task_title="test task", task_key="task-01", allowed_paths=[])
+        ctx = TaskContext(
+            change_title="test change", task_title="test task", task_key="task-01", allowed_paths=[]
+        )
 
         with patch("asyncio.create_subprocess_exec", side_effect=_capture_exec):
             with patch("app.modules.agent.adapters.claude_code.get_redis") as mr:
@@ -273,7 +273,7 @@ class TestProcessRegistration:
         run_id = uuid.uuid4()
         fake_proc = fake_proc_factory()
 
-        registry_during_exec = {}
+        _registry_during_exec = {}
 
         async def _capture_exec(*args, **kwargs):
             proc = fake_proc

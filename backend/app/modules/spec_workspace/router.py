@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -150,8 +150,12 @@ async def list_spec_conflicts(
     stmt = select(SpecConflict).where(
         SpecConflict.workspace_id == workspace_id,
     )
-    count_stmt = select(func.count()).select_from(SpecConflict).where(
-        SpecConflict.workspace_id == workspace_id,
+    count_stmt = (
+        select(func.count())
+        .select_from(SpecConflict)
+        .where(
+            SpecConflict.workspace_id == workspace_id,
+        )
     )
 
     if status_filter is not None:

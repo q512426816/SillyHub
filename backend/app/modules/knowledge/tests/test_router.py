@@ -142,17 +142,13 @@ async def test_get_quicklog_not_found(
     assert resp.status_code == 404
 
 
-async def test_knowledge_no_auth_returns_401(
-    client, workspace_with_knowledge: dict
-) -> None:
+async def test_knowledge_no_auth_returns_401(client, workspace_with_knowledge: dict) -> None:
     ws_id = workspace_with_knowledge["ws_id"]
     resp = await client.get(f"/api/workspaces/{ws_id}/knowledge")
     assert resp.status_code == 401
 
 
-async def test_quicklog_no_auth_returns_401(
-    client, workspace_with_knowledge: dict
-) -> None:
+async def test_quicklog_no_auth_returns_401(client, workspace_with_knowledge: dict) -> None:
     ws_id = workspace_with_knowledge["ws_id"]
     resp = await client.get(f"/api/workspaces/{ws_id}/quicklog")
     assert resp.status_code == 401

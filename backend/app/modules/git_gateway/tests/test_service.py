@@ -6,10 +6,8 @@ import pytest
 
 from app.modules.git_gateway.service import (
     ALLOWED_OPERATIONS,
-    BLOCKED_PATTERNS,
     DEFAULT_GIT_AUTHOR_EMAIL,
     DEFAULT_GIT_AUTHOR_NAME,
-    SHELL_INJECTION_PATTERNS,
     GitOperationForbidden,
     redact_output,
     validate_operation,
@@ -19,8 +17,18 @@ from app.modules.git_gateway.service import (
 class TestWhitelist:
     def test_all_allowed_operations_recognized(self) -> None:
         expected = {
-            "status", "diff", "add", "commit", "push", "pull", "fetch",
-            "log", "branch", "checkout", "merge", "rebase",
+            "status",
+            "diff",
+            "add",
+            "commit",
+            "push",
+            "pull",
+            "fetch",
+            "log",
+            "branch",
+            "checkout",
+            "merge",
+            "rebase",
         }
         assert expected == ALLOWED_OPERATIONS
 

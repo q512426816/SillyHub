@@ -8,7 +8,6 @@ files takes precedence).
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -18,9 +17,7 @@ from app.core.logging import get_logger
 
 log = get_logger(__name__)
 
-VALID_STATUSES = frozenset(
-    {"draft", "ready", "in_progress", "review", "done", "cancelled"}
-)
+VALID_STATUSES = frozenset({"draft", "ready", "in_progress", "review", "done", "cancelled"})
 
 
 @dataclass

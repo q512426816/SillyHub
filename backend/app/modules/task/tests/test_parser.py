@@ -59,7 +59,9 @@ class TestTaskParser:
         assert t02.depends_on == ["task-01"]
         assert t02.blocks == []
 
-    def test_no_frontmatter_fallback(self, parser: TaskParser, workspace_root: tuple[Path, str]) -> None:
+    def test_no_frontmatter_fallback(
+        self, parser: TaskParser, workspace_root: tuple[Path, str]
+    ) -> None:
         root, rel_path = workspace_root
         result = parser.parse_tasks(root, rel_path)
         t03 = next(t for t in result.tasks if t.task_key == "task-03")

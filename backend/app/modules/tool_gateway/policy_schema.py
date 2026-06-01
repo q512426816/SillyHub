@@ -7,10 +7,17 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-ALL_TOOL_TYPES: frozenset[str] = frozenset({
-    "file_read", "file_write", "file_list", "file_search",
-    "shell_exec", "run_tests", "http_get",
-})
+ALL_TOOL_TYPES: frozenset[str] = frozenset(
+    {
+        "file_read",
+        "file_write",
+        "file_list",
+        "file_search",
+        "shell_exec",
+        "run_tests",
+        "http_get",
+    }
+)
 
 
 class ToolPolicyCreate(BaseModel):
@@ -27,7 +34,9 @@ class ToolPolicyCreate(BaseModel):
     def _validate_allowed_tools(cls, v: list[str]) -> list[str]:
         unknown = set(v) - ALL_TOOL_TYPES
         if unknown:
-            raise ValueError(f"Unknown tool types: {sorted(unknown)}, allowed: {sorted(ALL_TOOL_TYPES)}")
+            raise ValueError(
+                f"Unknown tool types: {sorted(unknown)}, allowed: {sorted(ALL_TOOL_TYPES)}"
+            )
         return v
 
 
@@ -47,7 +56,9 @@ class ToolPolicyUpdate(BaseModel):
             return None
         unknown = set(v) - ALL_TOOL_TYPES
         if unknown:
-            raise ValueError(f"Unknown tool types: {sorted(unknown)}, allowed: {sorted(ALL_TOOL_TYPES)}")
+            raise ValueError(
+                f"Unknown tool types: {sorted(unknown)}, allowed: {sorted(ALL_TOOL_TYPES)}"
+            )
         return v
 
 

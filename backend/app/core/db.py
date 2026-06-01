@@ -89,7 +89,7 @@ def _try_inject_audit_context(session: AsyncSession, request: Request) -> None:
 
     try:
         from app.core.config import get_settings
-        from app.core.security import AccessTokenError, decode_access_token
+        from app.core.security import decode_access_token
 
         settings = get_settings()
         payload = decode_access_token(token, settings=settings)

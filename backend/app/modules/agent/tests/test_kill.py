@@ -1,5 +1,5 @@
 """Tests for process registry and kill mechanism — task-02."""
-import asyncio
+
 import signal
 import uuid
 from datetime import datetime
@@ -8,12 +8,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.core.errors import AgentRunNotRunning, AgentRunNotFound
+from app.core.errors import AgentRunNotFound, AgentRunNotRunning
 from app.modules.agent.model import AgentRun
 from app.modules.agent.service import AgentService
 
-
 # ---- Fixtures ----
+
 
 @pytest.fixture
 def mock_session():
@@ -36,6 +36,7 @@ def clear_registry():
 
 # ---- Test: _proc_registry 基础行为 ----
 
+
 class TestProcRegistry:
     @pytest.mark.asyncio
     async def test_registry_starts_empty(self, agent_service):
@@ -52,6 +53,7 @@ class TestProcRegistry:
 
 
 # ---- Test: kill_run 正常终止 ----
+
 
 class TestKillRun:
     @pytest.mark.asyncio
@@ -145,9 +147,7 @@ class TestKillRun:
 
         fake_proc = AsyncMock()
         fake_proc.returncode = None
-        fake_proc.wait = AsyncMock(
-            side_effect=[asyncio.TimeoutError(), None]
-        )
+        fake_proc.wait = AsyncMock(side_effect=[TimeoutError(), None])
         fake_proc.kill = MagicMock()
         AgentService._proc_registry[run_id] = fake_proc
 
@@ -242,6 +242,7 @@ class TestKillRun:
 
 # ---- Test: _exec_stream 注册/注销 ----
 
+
 class TestExecStreamRegistry:
     @pytest.mark.asyncio
     async def test_process_registered_during_exec(self):
@@ -330,9 +331,7 @@ class TestExecStreamRegistry:
         fake_proc.wait = AsyncMock(return_value=0)
         fake_proc.stdin = AsyncMock()
         fake_proc.stdout = AsyncMock()
-        fake_proc.stdout.readline = AsyncMock(
-            side_effect=asyncio.TimeoutError()
-        )
+        fake_proc.stdout.readline = AsyncMock(side_effect=TimeoutError())
         fake_proc.stderr = AsyncMock()
         fake_proc.stderr.read = AsyncMock(return_value=b"")
         fake_proc.kill = MagicMock()

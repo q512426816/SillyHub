@@ -6,7 +6,7 @@ Schema follows ``references/17-db-schema.md`` §2.4 with extensions per task-06.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Index, String, Text, Uuid
 from sqlmodel import Field
@@ -43,7 +43,9 @@ class Task(BaseModel, table=True):
     )
     task_key: str = Field(sa_column=Column(String(200), nullable=False))
     title: str | None = Field(default=None, sa_column=Column(String(500), nullable=True))
-    status: str = Field(default="draft", sa_column=Column(String(30), nullable=False, default="draft"))
+    status: str = Field(
+        default="draft", sa_column=Column(String(30), nullable=False, default="draft")
+    )
     phase: str | None = Field(default=None, sa_column=Column(String(20), nullable=True))
     priority: str | None = Field(default=None, sa_column=Column(String(10), nullable=True))
     owner_key: str | None = Field(default=None, sa_column=Column(String(100), nullable=True))
@@ -67,10 +69,10 @@ class Task(BaseModel, table=True):
     path: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     content: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )

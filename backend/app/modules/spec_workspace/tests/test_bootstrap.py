@@ -66,9 +66,7 @@ async def _create_spec_workspace(
 class TestBootstrapCreatesDirectory:
     """bootstrap() creates spec_root directory on disk."""
 
-    async def test_directory_created(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_directory_created(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session)
         spec_root = tmp_path / "specs" / str(ws.id)
         await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -88,9 +86,7 @@ class TestBootstrapCreatesDirectory:
 class TestBootstrapValidatesAndSetsClean:
     """When validator passes, sync_status becomes 'clean'."""
 
-    async def test_sync_status_clean(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_sync_status_clean(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session)
         spec_root = tmp_path / "specs" / str(ws.id)
         await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -122,9 +118,7 @@ class TestBootstrapValidatesAndSetsClean:
 class TestBootstrapValidationFailureSetsDirty:
     """When validator finds errors, sync_status becomes 'dirty'."""
 
-    async def test_sync_status_dirty(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_sync_status_dirty(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session)
         spec_root = tmp_path / "specs" / str(ws.id)
         await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -151,9 +145,7 @@ class TestBootstrapValidationFailureSetsDirty:
 class TestBootstrapCreatesConflictOnFailure:
     """Validation errors create SpecConflict records in the database."""
 
-    async def test_conflict_records_created(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_conflict_records_created(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session)
         spec_root = tmp_path / "specs" / str(ws.id)
         await _create_spec_workspace(db_session, ws, str(spec_root))

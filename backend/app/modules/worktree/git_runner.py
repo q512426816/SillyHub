@@ -48,14 +48,14 @@ class GitRunner:
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
+            _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             raise WorktreeAcquireFailed(
                 f"git command timed out after {timeout}s",
                 details={"args": args[:3]},
-            )
+            ) from None
         if proc.returncode != 0:
             err_text = stderr.decode(errors="replace").strip()
             log.warning(

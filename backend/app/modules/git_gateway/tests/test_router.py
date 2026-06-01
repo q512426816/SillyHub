@@ -334,6 +334,7 @@ async def test_git_env_injected_with_identity(client, db_session, mock_repo_dir)
 
     # Update the identity to have username/email
     from sqlalchemy import select
+
     from app.modules.git_identity.model import GitIdentity
 
     stmt = select(GitIdentity).where(GitIdentity.id == refs["identity_id"])
@@ -370,9 +371,11 @@ async def test_git_env_defaults_without_identity(client, db_session, mock_repo_d
     refs = await _setup_active_lease(db_session)
 
     # Revoke the identity so none is usable
-    from sqlalchemy import select
-    from app.modules.git_identity.model import GitIdentity
     from datetime import datetime
+
+    from sqlalchemy import select
+
+    from app.modules.git_identity.model import GitIdentity
 
     stmt = select(GitIdentity).where(GitIdentity.id == refs["identity_id"])
     identity = (await db_session.execute(stmt)).scalars().first()

@@ -52,14 +52,25 @@ class TestChangeFSM:
     def _import_deprecated(self):
         """Import ChangeFSM which triggers a DeprecationWarning."""
         from app.modules.workflow.fsm import ChangeFSM as _ChangeFSM
+
         self.ChangeFSM = _ChangeFSM
 
     def test_happy_path(self):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
-            path = ["draft", "proposed", "reviewed", "approved", "in_progress", "completed", "merged"]
+            path = [
+                "draft",
+                "proposed",
+                "reviewed",
+                "approved",
+                "in_progress",
+                "completed",
+                "merged",
+            ]
             for i in range(len(path) - 1):
-                assert self.ChangeFSM.can_transition(path[i], path[i + 1]), f"{path[i]} -> {path[i + 1]}"
+                assert self.ChangeFSM.can_transition(path[i], path[i + 1]), (
+                    f"{path[i]} -> {path[i + 1]}"
+                )
 
     def test_rejected_returns_to_draft(self):
         with warnings.catch_warnings():

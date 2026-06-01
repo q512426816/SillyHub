@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +23,6 @@ from app.modules.change.schema import (
     ChangeRead,
     ChangeReparseResponse,
     ChangeReparseStats,
-    ChangeSummary,
     ChangeWarning,
     DispatchResponse,
     DocumentsSyncRequest,
@@ -98,9 +97,7 @@ async def get_change_documents(
     _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
 ) -> ChangeDocMatrix:
     service = ChangeService(session)
-    docs, prototypes, references = await service.get_documents(
-        workspace_id, change_id
-    )
+    docs, prototypes, references = await service.get_documents(workspace_id, change_id)
     return ChangeDocMatrix(
         change_id=change_id,
         documents=[

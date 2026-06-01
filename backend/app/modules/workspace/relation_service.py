@@ -42,18 +42,12 @@ class RelationService:
             col(WorkspaceRelation.target_id) == workspace_id,
         )
 
-        outgoing = list(
-            (await self._session.execute(outgoing_stmt)).scalars().all()
-        )
-        incoming = list(
-            (await self._session.execute(incoming_stmt)).scalars().all()
-        )
+        outgoing = list((await self._session.execute(outgoing_stmt)).scalars().all())
+        incoming = list((await self._session.execute(incoming_stmt)).scalars().all())
 
         return RelationListResponse(outgoing=outgoing, incoming=incoming)
 
-    async def create(
-        self, source_id: uuid.UUID, payload: RelationCreate
-    ) -> WorkspaceRelation:
+    async def create(self, source_id: uuid.UUID, payload: RelationCreate) -> WorkspaceRelation:
         """Create a relation with full validation."""
         # 1. Self-loop check
         if source_id == payload.target_id:

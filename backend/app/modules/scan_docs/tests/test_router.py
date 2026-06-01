@@ -67,9 +67,7 @@ async def test_no_auth_returns_401(client, workspace_for_scan_docs: dict) -> Non
     assert resp.status_code == 401
 
 
-async def test_unknown_workspace_returns_404(
-    client, auth_headers: dict[str, str]
-) -> None:
+async def test_unknown_workspace_returns_404(client, auth_headers: dict[str, str]) -> None:
     resp = await client.get(
         "/api/workspaces/00000000-0000-0000-0000-000000000000/scan-docs",
         headers=auth_headers,

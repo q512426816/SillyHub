@@ -89,6 +89,7 @@ def migrate_layout(workspace_root: str | Path) -> dict:
         if master_path.is_file():
             try:
                 import frontmatter
+
                 post = frontmatter.load(str(master_path))
                 if post.metadata.get("status") == "archived":
                     dest = resolver.archive_dir(change_entry.name)

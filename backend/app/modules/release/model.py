@@ -15,9 +15,7 @@ class Release(BaseModel, table=True):
     """A release bundles one or more changes for deployment."""
 
     __tablename__ = "releases"
-    __table_args__ = (
-        Index("ix_releases_workspace_status", "workspace_id", "status"),
-    )
+    __table_args__ = (Index("ix_releases_workspace_status", "workspace_id", "status"),)
 
     id: uuid.UUID = Field(
         default_factory=uuid.uuid4,

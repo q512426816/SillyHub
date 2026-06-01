@@ -3,6 +3,7 @@
 Revision ID: 202606190900
 Revises: 202606180900
 """
+
 from __future__ import annotations
 
 from alembic import op
@@ -46,9 +47,7 @@ def upgrade() -> None:
     # Update changes.status — same mapping, plus archived → accepted
     for old_val, new_val in STAGE_MAP_STATUS.items():
         conn.execute(
-            __import__("sqlalchemy").text(
-                "UPDATE changes SET status = :new WHERE status = :old"
-            ),
+            __import__("sqlalchemy").text("UPDATE changes SET status = :new WHERE status = :old"),
             {"old": old_val, "new": new_val},
         )
 
@@ -67,7 +66,7 @@ def upgrade() -> None:
             {
                 "old_json": f'"rework_target": "{old_val}"',
                 "new_json": f'"rework_target": "{new_val}"',
-                "pattern": f'%rework_target%{old_val}%',
+                "pattern": f"%rework_target%{old_val}%",
             },
         )
 

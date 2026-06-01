@@ -84,8 +84,11 @@ def _read_file_safe(path: Path) -> tuple[str, bool]:
     truncated = False
     if size > MAX_CONTENT_BYTES:
         truncated = True
-        content = path.read_text(encoding="utf-8", errors="replace")[
-            : MAX_CONTENT_BYTES // 4  # char approximation
+        content = path.read_text(
+            encoding="utf-8", errors="replace"
+        )[
+            : MAX_CONTENT_BYTES
+            // 4  # char approximation
         ]
     else:
         content = path.read_text(encoding="utf-8", errors="replace")

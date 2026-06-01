@@ -16,10 +16,10 @@ from app.core.security import password_hasher
 from app.modules.auth.model import User
 from app.modules.settings.model import PlatformSetting
 from app.modules.settings.schema import (
+    SettingRead,
     SettingsBulkRead,
     SettingsUpdateRequest,
     SettingsUpdateResponse,
-    SettingRead,
     UserCreateRequest,
     UserListResponse,
     UserRead,
@@ -97,8 +97,14 @@ async def list_users(
     total = (await session.execute(total_q)).scalar() or 0
 
     rows = (
-        await session.execute(base.order_by(col(User.created_at).desc()).limit(limit).offset(offset))
-    ).scalars().all()
+        (
+            await session.execute(
+                base.order_by(col(User.created_at).desc()).limit(limit).offset(offset)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     return UserListResponse(
         items=[UserRead.model_validate(u) for u in rows],
@@ -112,8 +118,8 @@ async def create_user(
     session: SessionDep,
     _user: CurrentUser,
 ) -> User:
-    from datetime import UTC, datetime
     import uuid as _uuid
+    from datetime import UTC, datetime
 
     pw_hash = password_hasher.hash(payload.password)
     new_user = User(

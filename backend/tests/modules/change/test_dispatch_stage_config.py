@@ -29,9 +29,7 @@ def test_all_stages_enabled():
 def test_all_stages_read_only_false():
     """All 8 stages must have read_only=False (every stage writes files)."""
     for stage, config in STAGE_AGENT_CONFIG.items():
-        assert config.read_only is False, (
-            f"Stage '{stage}' has read_only=True, expected False"
-        )
+        assert config.read_only is False, f"Stage '{stage}' has read_only=True, expected False"
 
 
 def test_propose_read_only_false():

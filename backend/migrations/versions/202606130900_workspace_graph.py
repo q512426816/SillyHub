@@ -31,11 +31,18 @@ def upgrade() -> None:
     op.add_column("workspaces", sa.Column("repo_url", sa.Text(), nullable=True))
     op.add_column(
         "workspaces",
-        sa.Column("default_branch", sa.String(length=100), nullable=True, server_default=sa.text("'main'")),
+        sa.Column(
+            "default_branch", sa.String(length=100), nullable=True, server_default=sa.text("'main'")
+        ),
     )
     op.add_column(
         "workspaces",
-        sa.Column("tech_stack", postgresql.JSONB(astext_type=sa.Text()), nullable=True, server_default=sa.text("'[]'::jsonb")),
+        sa.Column(
+            "tech_stack",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=True,
+            server_default=sa.text("'[]'::jsonb"),
+        ),
     )
     op.add_column("workspaces", sa.Column("build_command", sa.Text(), nullable=True))
     op.add_column("workspaces", sa.Column("test_command", sa.Text(), nullable=True))

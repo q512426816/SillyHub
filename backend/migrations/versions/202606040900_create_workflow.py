@@ -58,9 +58,7 @@ def upgrade() -> None:
         sa.Column("details_json", sa.Text, nullable=True),
         sa.Column("timestamp", sa.DateTime(timezone=True), nullable=False),
     )
-    op.create_index(
-        "ix_audit_workspace_ts", "audit_logs", ["workspace_id", "timestamp"]
-    )
+    op.create_index("ix_audit_workspace_ts", "audit_logs", ["workspace_id", "timestamp"])
     op.create_index("ix_audit_resource", "audit_logs", ["resource_type", "resource_id"])
 
 

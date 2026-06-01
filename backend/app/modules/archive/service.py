@@ -114,11 +114,13 @@ class ArchiveService:
             content = ""
             if doc_path.exists() and doc_path.is_file():
                 content = doc_path.read_text(encoding="utf-8", errors="replace")[:2000]
-            doc_summaries.append({
-                "type": doc.doc_type,
-                "path": doc.path,
-                "content_preview": content[:500] if content else None,
-            })
+            doc_summaries.append(
+                {
+                    "type": doc.doc_type,
+                    "path": doc.path,
+                    "content_preview": content[:500] if content else None,
+                }
+            )
 
         summary = {
             "change_key": change.change_key,

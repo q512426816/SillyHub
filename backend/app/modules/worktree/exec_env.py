@@ -50,13 +50,7 @@ class ExecEnvBuilder:
         )
 
     def bare_repo_path(self, workspace_id: str, component_id: str) -> Path:
-        return (
-            self._base_dir
-            / workspace_id
-            / "components"
-            / component_id
-            / ".repo-bare"
-        )
+        return self._base_dir / workspace_id / "components" / component_id / ".repo-bare"
 
     def repo_dir(self, lease_root: Path) -> Path:
         return lease_root / "repo"
@@ -94,7 +88,7 @@ class ExecEnvBuilder:
         if sys.platform == "win32":
             content = f"@echo off\necho {token}\n"
         else:
-            content = f"#!/bin/sh\necho \"{token}\"\n"
+            content = f'#!/bin/sh\necho "{token}"\n'
         path.write_text(content)
         if sys.platform != "win32":
             path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)

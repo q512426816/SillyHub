@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from app.modules.workspace.parser import ParseIssue, ParsedRelation, ParsedWorkspace
+    from app.modules.workspace.parser import ParsedRelation, ParsedWorkspace, ParseIssue
 
 # Public warning codes — stable identifiers shipped to API consumers.
 WARN_NO_SILLYSPEC = "no_sillyspec_dir"
@@ -119,7 +119,7 @@ class WorkspaceScanner:
         struct.has_local_yaml = (sillyspec / "local.yaml").is_file()
 
         # --- task-05: parser integration ---
-        from app.modules.workspace.parser import WorkspaceParser as _WP
+        from app.modules.workspace.parser import WorkspaceParser as _WP  # noqa: N814
 
         parse_result = _WP().parse(root)
         result.parsed_workspaces = parse_result.workspaces

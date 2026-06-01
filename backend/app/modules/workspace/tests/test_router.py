@@ -245,9 +245,7 @@ async def test_patch_updates_multiple_fields(
     assert body["test_command"] == "make test"
 
 
-async def test_patch_not_found(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_patch_not_found(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     """AC-03: PATCH a non-existent workspace returns 404."""
     import uuid
 
@@ -335,7 +333,7 @@ async def test_patch_slug_conflict_returns_409(
         headers=auth_headers,
     )
     assert resp1.status_code == 201
-    ws_a_id = resp1.json()["id"]
+    _ws_a_id = resp1.json()["id"]
     ws_a_slug = resp1.json()["slug"]  # "ws-a"
 
     # Create second workspace

@@ -2,8 +2,6 @@
 
 import json
 
-import pytest
-
 
 def test_import_transition_schemas():
     """AC-06: schemas can be imported without error."""

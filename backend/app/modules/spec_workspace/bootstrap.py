@@ -19,17 +19,15 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.core.errors import SpecWorkspaceNotFound
 from app.core.logging import get_logger
 from app.modules.agent.adapters.claude_code import ClaudeCodeAdapter
 from app.modules.agent.base import AgentSpecBundle
-from app.modules.agent.model import AgentRun
+from app.modules.agent.model import AgentRun, AgentRunLog
 from app.modules.spec_profile.model import SpecConflict
-from app.modules.workflow.model import AuditLog
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.spec_workspace.validator import SpecValidator
-from app.modules.agent.model import AgentRunLog
+from app.modules.workflow.model import AuditLog
 from app.modules.workspace.model import Workspace
 
 log = get_logger(__name__)
@@ -133,15 +131,19 @@ class SpecBootstrapService:
         spec_root.mkdir(parents=True, exist_ok=True)
 
         # Audit: bootstrap started
-        self._session.add(AuditLog(
-            id=uuid.uuid4(),
-            workspace_id=workspace_id,
-            actor_id=user_id,
-            action="spec_bootstrap.start",
-            resource_type="spec_workspace",
-            resource_id=workspace_id,
-            details_json=json.dumps({"spec_root": str(spec_root), "strategy": spec_ws.strategy}),
-        ))
+        self._session.add(
+            AuditLog(
+                id=uuid.uuid4(),
+                workspace_id=workspace_id,
+                actor_id=user_id,
+                action="spec_bootstrap.start",
+                resource_type="spec_workspace",
+                resource_id=workspace_id,
+                details_json=json.dumps(
+                    {"spec_root": str(spec_root), "strategy": spec_ws.strategy}
+                ),
+            )
+        )
         await self._session.commit()
 
         # 3. Build bootstrap bundle
@@ -208,7 +210,7 @@ class SpecBootstrapService:
                     id=uuid.uuid4(),
                     run_id=run.id,
                     channel="stdout",
-                    content_redacted=log_text[i:i + chunk_size],
+                    content_redacted=log_text[i : i + chunk_size],
                 )
                 self._session.add(log_entry)
         if result.stderr and result.stderr.strip():
@@ -240,31 +242,37 @@ class SpecBootstrapService:
                     workspace_id=workspace_id,
                     stage="bootstrap",
                     conflict_type=issue.category,
-                    details_json=json.dumps({
-                        "path": issue.path,
-                        "message": issue.message,
-                        "category": issue.category,
-                    }),
+                    details_json=json.dumps(
+                        {
+                            "path": issue.path,
+                            "message": issue.message,
+                            "category": issue.category,
+                        }
+                    ),
                     status="open",
                     created_at=now,
                 )
                 self._session.add(conflict)
 
         # Audit: bootstrap completed
-        self._session.add(AuditLog(
-            id=uuid.uuid4(),
-            workspace_id=workspace_id,
-            actor_id=user_id,
-            action="spec_bootstrap.complete",
-            resource_type="agent_run",
-            resource_id=run.id,
-            details_json=json.dumps({
-                "validation_passed": report.passed,
-                "error_count": len(report.errors),
-                "sync_status": spec_ws.sync_status,
-                "agent_exit_code": result.exit_code,
-            }),
-        ))
+        self._session.add(
+            AuditLog(
+                id=uuid.uuid4(),
+                workspace_id=workspace_id,
+                actor_id=user_id,
+                action="spec_bootstrap.complete",
+                resource_type="agent_run",
+                resource_id=run.id,
+                details_json=json.dumps(
+                    {
+                        "validation_passed": report.passed,
+                        "error_count": len(report.errors),
+                        "sync_status": spec_ws.sync_status,
+                        "agent_exit_code": result.exit_code,
+                    }
+                ),
+            )
+        )
 
         spec_ws.updated_at = now
         await self._session.commit()

@@ -34,13 +34,13 @@ async def build_task_context(
 ) -> TaskContext:
     """Build a TaskContext from DB records for agent injection."""
     # Load task
-    task = (await session.get(Task, task_id))
+    task = await session.get(Task, task_id)
     if task is None or task.change_id != change_id:
         msg = f"Task '{task_id}' not found for change '{change_id}'."
         raise ValueError(msg)
 
     # Load change
-    change = (await session.get(Change, change_id))
+    change = await session.get(Change, change_id)
     if change is None:
         msg = f"Change '{change_id}' not found."
         raise ValueError(msg)
@@ -135,10 +135,7 @@ async def _fetch_referenced_workspaces(
             )
             sub_rels = list((await session.execute(sub_rel_stmt)).scalars().all())
             for sr in sub_rels:
-                if sr.source_id == related_id:
-                    nid = sr.target_id
-                else:
-                    nid = sr.source_id
+                nid = sr.target_id if sr.source_id == related_id else sr.source_id
                 if nid in visited:
                     continue
                 visited.add(nid)
@@ -523,9 +520,7 @@ def render_bundle_to_claude_md(bundle: AgentSpecBundle) -> str:
         lines.append("## Referenced Workspaces")
         for ws in bundle.referenced_workspaces:
             direction_label = "→" if ws.direction == "outgoing" else "←"
-            lines.append(
-                f"### {direction_label} {ws.name} ({ws.relation_type})"
-            )
+            lines.append(f"### {direction_label} {ws.name} ({ws.relation_type})")
             if ws.component_key:
                 lines.append(f"- **component_key**: {ws.component_key}")
             if ws.spec_root:
@@ -542,7 +537,9 @@ def render_bundle_to_claude_md(bundle: AgentSpecBundle) -> str:
         lines.append("## Available Tools")
         for tool in bundle.available_tools:
             if tool == "sillyspec":
-                lines.append("- **sillyspec**: Use `sillyspec init --dir <spec_root>` to initialize spec space, then `sillyspec run scan --dir <spec_root>` to scan. Do NOT write .sillyspec files directly — always use the CLI.")
+                lines.append(
+                    "- **sillyspec**: Use `sillyspec init --dir <spec_root>` to initialize spec space, then `sillyspec run scan --dir <spec_root>` to scan. Do NOT write .sillyspec files directly — always use the CLI."
+                )
             else:
                 lines.append(f"- {tool}")
         lines.append("")

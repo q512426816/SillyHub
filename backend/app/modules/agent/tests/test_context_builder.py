@@ -437,9 +437,7 @@ async def test_fetch_referenced_workspaces_outgoing_relation(
     from app.modules.agent.context_builder import _fetch_referenced_workspaces
     from app.modules.workspace.model import Workspace, WorkspaceRelation
 
-    ws_a = Workspace(
-        id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active"
-    )
+    ws_a = Workspace(id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active")
     ws_b = Workspace(
         id=uuid.uuid4(),
         name="B",
@@ -478,12 +476,8 @@ async def test_fetch_referenced_workspaces_incoming_relation(
     from app.modules.agent.context_builder import _fetch_referenced_workspaces
     from app.modules.workspace.model import Workspace, WorkspaceRelation
 
-    ws_a = Workspace(
-        id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active"
-    )
-    ws_b = Workspace(
-        id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active"
-    )
+    ws_a = Workspace(id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active")
+    ws_b = Workspace(id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active")
     db_session.add_all([ws_a, ws_b])
 
     rel = WorkspaceRelation(
@@ -512,9 +506,7 @@ async def test_fetch_referenced_workspaces_skips_deleted_workspace(
     from app.modules.agent.context_builder import _fetch_referenced_workspaces
     from app.modules.workspace.model import Workspace, WorkspaceRelation
 
-    ws_a = Workspace(
-        id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active"
-    )
+    ws_a = Workspace(id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active")
     ws_deleted = Workspace(
         id=uuid.uuid4(),
         name="Deleted",
@@ -545,12 +537,8 @@ async def test_fetch_referenced_workspaces_skips_no_spec_workspace(
     from app.modules.agent.context_builder import _fetch_referenced_workspaces
     from app.modules.workspace.model import Workspace, WorkspaceRelation
 
-    ws_a = Workspace(
-        id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active"
-    )
-    ws_b = Workspace(
-        id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active"
-    )
+    ws_a = Workspace(id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active")
+    ws_b = Workspace(id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active")
     db_session.add_all([ws_a, ws_b])
 
     rel = WorkspaceRelation(
@@ -577,12 +565,8 @@ async def test_fetch_referenced_workspaces_reads_doc_snippets(
     from app.modules.scan_docs.model import ScanDocument
     from app.modules.workspace.model import Workspace, WorkspaceRelation
 
-    ws_a = Workspace(
-        id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active"
-    )
-    ws_b = Workspace(
-        id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active"
-    )
+    ws_a = Workspace(id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active")
+    ws_b = Workspace(id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active")
     db_session.add_all([ws_a, ws_b])
 
     rel = WorkspaceRelation(
@@ -606,9 +590,7 @@ async def test_fetch_referenced_workspaces_reads_doc_snippets(
     db_session.add(doc)
     await db_session.commit()
 
-    result = await _fetch_referenced_workspaces(
-        db_session, ws_a.id, snippet_max_chars=2000
-    )
+    result = await _fetch_referenced_workspaces(db_session, ws_a.id, snippet_max_chars=2000)
     assert len(result) == 1
     assert "ARCHITECTURE" in result[0].doc_summaries
     assert "Architecture Overview" in result[0].doc_summaries["ARCHITECTURE"]
@@ -622,12 +604,8 @@ async def test_fetch_referenced_workspaces_snippet_truncation(
     from app.modules.scan_docs.model import ScanDocument
     from app.modules.workspace.model import Workspace, WorkspaceRelation
 
-    ws_a = Workspace(
-        id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active"
-    )
-    ws_b = Workspace(
-        id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active"
-    )
+    ws_a = Workspace(id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active")
+    ws_b = Workspace(id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active")
     db_session.add_all([ws_a, ws_b])
 
     rel = WorkspaceRelation(
@@ -650,9 +628,7 @@ async def test_fetch_referenced_workspaces_snippet_truncation(
     db_session.add(doc)
     await db_session.commit()
 
-    result = await _fetch_referenced_workspaces(
-        db_session, ws_a.id, snippet_max_chars=100
-    )
+    result = await _fetch_referenced_workspaces(db_session, ws_a.id, snippet_max_chars=100)
     assert len(result) == 1
     snippet = result[0].doc_summaries["STRUCTURE"]
     assert len(snippet) == 100
@@ -666,12 +642,8 @@ async def test_fetch_referenced_workspaces_circular_dependency(
     from app.modules.agent.context_builder import _fetch_referenced_workspaces
     from app.modules.workspace.model import Workspace, WorkspaceRelation
 
-    ws_a = Workspace(
-        id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active"
-    )
-    ws_b = Workspace(
-        id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active"
-    )
+    ws_a = Workspace(id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active")
+    ws_b = Workspace(id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active")
     db_session.add_all([ws_a, ws_b])
 
     rel_ab = WorkspaceRelation(
@@ -705,9 +677,7 @@ async def test_fetch_referenced_workspaces_invalid_max_depth(
     from app.modules.agent.context_builder import _fetch_referenced_workspaces
     from app.modules.workspace.model import Workspace
 
-    ws = Workspace(
-        id=uuid.uuid4(), name="X", slug="x", root_path="/x", status="active"
-    )
+    ws = Workspace(id=uuid.uuid4(), name="X", slug="x", root_path="/x", status="active")
     db_session.add(ws)
     await db_session.commit()
 
@@ -725,12 +695,8 @@ async def test_fetch_referenced_workspaces_multiple_relations_same_pair(
     from app.modules.agent.context_builder import _fetch_referenced_workspaces
     from app.modules.workspace.model import Workspace, WorkspaceRelation
 
-    ws_a = Workspace(
-        id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active"
-    )
-    ws_b = Workspace(
-        id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active"
-    )
+    ws_a = Workspace(id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active")
+    ws_b = Workspace(id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active")
     db_session.add_all([ws_a, ws_b])
 
     rel1 = WorkspaceRelation(
@@ -763,12 +729,8 @@ async def test_fetch_referenced_workspaces_zero_snippet_chars(
     from app.modules.scan_docs.model import ScanDocument
     from app.modules.workspace.model import Workspace, WorkspaceRelation
 
-    ws_a = Workspace(
-        id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active"
-    )
-    ws_b = Workspace(
-        id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active"
-    )
+    ws_a = Workspace(id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active")
+    ws_b = Workspace(id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active")
     db_session.add_all([ws_a, ws_b])
 
     rel = WorkspaceRelation(
@@ -790,9 +752,7 @@ async def test_fetch_referenced_workspaces_zero_snippet_chars(
     db_session.add(doc)
     await db_session.commit()
 
-    result = await _fetch_referenced_workspaces(
-        db_session, ws_a.id, snippet_max_chars=0
-    )
+    result = await _fetch_referenced_workspaces(db_session, ws_a.id, snippet_max_chars=0)
     assert len(result) == 1
     assert result[0].doc_summaries["ARCHITECTURE"] == ""
 
@@ -811,9 +771,7 @@ async def test_build_spec_bundle_includes_referenced_workspaces(
     from app.modules.workspace.model import Workspace, WorkspaceRelation
 
     # Primary workspace
-    ws_a = Workspace(
-        id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active"
-    )
+    ws_a = Workspace(id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active")
     # Related workspace with spec
     ws_b = Workspace(
         id=uuid.uuid4(),
@@ -887,9 +845,7 @@ async def test_build_spec_bundle_no_relations_empty_list(
     from app.modules.spec_workspace.model import SpecWorkspace
     from app.modules.workspace.model import Workspace
 
-    ws = Workspace(
-        id=uuid.uuid4(), name="Solo", slug="solo", root_path="/solo", status="active"
-    )
+    ws = Workspace(id=uuid.uuid4(), name="Solo", slug="solo", root_path="/solo", status="active")
     db_session.add(ws)
     spec_ws = SpecWorkspace(
         id=uuid.uuid4(),
@@ -1017,15 +973,9 @@ async def test_fetch_referenced_workspaces_depth_2(
     from app.modules.agent.context_builder import _fetch_referenced_workspaces
     from app.modules.workspace.model import Workspace, WorkspaceRelation
 
-    ws_a = Workspace(
-        id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active"
-    )
-    ws_b = Workspace(
-        id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active"
-    )
-    ws_c = Workspace(
-        id=uuid.uuid4(), name="C", slug="c", root_path="/c", status="active"
-    )
+    ws_a = Workspace(id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active")
+    ws_b = Workspace(id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active")
+    ws_c = Workspace(id=uuid.uuid4(), name="C", slug="c", root_path="/c", status="active")
     db_session.add_all([ws_a, ws_b, ws_c])
 
     rel_ab = WorkspaceRelation(
@@ -1056,15 +1006,9 @@ async def test_fetch_referenced_workspaces_depth_2_with_cycle(
     from app.modules.agent.context_builder import _fetch_referenced_workspaces
     from app.modules.workspace.model import Workspace, WorkspaceRelation
 
-    ws_a = Workspace(
-        id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active"
-    )
-    ws_b = Workspace(
-        id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active"
-    )
-    ws_c = Workspace(
-        id=uuid.uuid4(), name="C", slug="c", root_path="/c", status="active"
-    )
+    ws_a = Workspace(id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active")
+    ws_b = Workspace(id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active")
+    ws_c = Workspace(id=uuid.uuid4(), name="C", slug="c", root_path="/c", status="active")
     db_session.add_all([ws_a, ws_b, ws_c])
 
     rel_ab = WorkspaceRelation(
@@ -1104,15 +1048,9 @@ async def test_fetch_referenced_workspaces_depth_1_excludes_second_hop(
     from app.modules.agent.context_builder import _fetch_referenced_workspaces
     from app.modules.workspace.model import Workspace, WorkspaceRelation
 
-    ws_a = Workspace(
-        id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active"
-    )
-    ws_b = Workspace(
-        id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active"
-    )
-    ws_c = Workspace(
-        id=uuid.uuid4(), name="C", slug="c", root_path="/c", status="active"
-    )
+    ws_a = Workspace(id=uuid.uuid4(), name="A", slug="a", root_path="/a", status="active")
+    ws_b = Workspace(id=uuid.uuid4(), name="B", slug="b", root_path="/b", status="active")
+    ws_c = Workspace(id=uuid.uuid4(), name="C", slug="c", root_path="/c", status="active")
     db_session.add_all([ws_a, ws_b, ws_c])
 
     rel_ab = WorkspaceRelation(

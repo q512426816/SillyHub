@@ -20,16 +20,19 @@ class AgentRun(BaseModel, table=True):
         Index("ix_agent_runs_lease", "lease_id"),
         Index("ix_agent_runs_change_id", "change_id"),
         Index(
-            "ix_agent_runs_idempotency_key", "idempotency_key",
+            "ix_agent_runs_idempotency_key",
+            "idempotency_key",
             unique=True,
             postgresql_where=text("idempotency_key IS NOT NULL"),
         ),
         Index(
-            "ix_agent_runs_resume_token", "resume_token",
+            "ix_agent_runs_resume_token",
+            "resume_token",
             postgresql_where=text("resume_token IS NOT NULL"),
         ),
         Index(
-            "ix_agent_runs_context_fingerprint", "context_fingerprint",
+            "ix_agent_runs_context_fingerprint",
+            "context_fingerprint",
             postgresql_where=text("context_fingerprint IS NOT NULL"),
         ),
     )
@@ -146,9 +149,7 @@ class AgentRunLog(BaseModel, table=True):
     """Individual log lines from an agent run."""
 
     __tablename__ = "agent_run_logs"
-    __table_args__ = (
-        Index("ix_agent_run_logs_run", "run_id"),
-    )
+    __table_args__ = (Index("ix_agent_run_logs_run", "run_id"),)
 
     id: uuid.UUID = Field(
         default_factory=uuid.uuid4,

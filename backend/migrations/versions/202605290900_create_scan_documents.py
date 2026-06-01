@@ -43,9 +43,7 @@ def upgrade() -> None:
         sa.Column("last_modified_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(["workspace_id"], ["workspaces.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(
-            ["component_id"], ["project_components.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["component_id"], ["project_components.id"], ondelete="CASCADE"),
     )
     op.create_index(
         "ux_scan_docs_component_type",

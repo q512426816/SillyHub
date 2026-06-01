@@ -7,12 +7,11 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.change.dispatch import (
-    StageSyncResult,
-    SillySpecStageDispatchService,
     _DISPATCH_CHAIN_LIMIT,
+    SillySpecStageDispatchService,
+    StageSyncResult,
     auto_dispatch_next_step,
 )
-
 
 # ---------------------------------------------------------------------------
 # auto_dispatch_next_step tests
@@ -292,8 +291,12 @@ async def test_execute_stage_run_calls_auto_dispatch_on_success():
 
     mock_session = AsyncMock(spec=AsyncSession)
     agent_run_mock = MagicMock(
-        id=run_id, status="pending", started_at=None,
-        finished_at=None, exit_code=None, output_redacted=None,
+        id=run_id,
+        status="pending",
+        started_at=None,
+        finished_at=None,
+        exit_code=None,
+        output_redacted=None,
         diff_summary=None,
     )
     change_mock = MagicMock(stages={})
@@ -325,39 +328,41 @@ async def test_execute_stage_run_calls_auto_dispatch_on_success():
         steps_pending=["write-requirements"],
     )
 
-    with patch("app.core.db.get_session_factory", return_value=mock_factory):
-        with patch(
+    with (
+        patch("app.core.db.get_session_factory", return_value=mock_factory),
+        patch(
             "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
             new_callable=AsyncMock,
             return_value=fake_result,
-        ):
-            with patch("app.modules.agent.service.AgentRunLog"):
-                with patch("app.modules.workflow.model.AuditLog"):
-                    with patch.object(
-                        SillySpecStageDispatchService,
-                        "sync_stage_status",
-                        new_callable=AsyncMock,
-                        return_value=sync_result,
-                    ) as mock_sync:
-                        with patch(
-                            "app.modules.change.dispatch.auto_dispatch_next_step",
-                            new_callable=AsyncMock,
-                        ) as mock_auto:
-                            mock_auto.return_value = {
-                                "dispatched": True,
-                                "reason": "auto_dispatch",
-                            }
-                            svc = AgentService(AsyncMock(spec=AsyncSession))
-                            await svc._execute_stage_run(
-                                run_id=run_id,
-                                prompt="Execute propose stage.",
-                                work_dir=MagicMock(mkdir=MagicMock()),
-                                read_only=False,
-                                workspace_id=workspace_id,
-                                change_id=change_id,
-                                user_id=user_id,
-                                stage="propose",
-                            )
+        ),
+        patch("app.modules.agent.service.AgentRunLog"),
+        patch("app.modules.workflow.model.AuditLog"),
+    ):
+        with patch.object(
+            SillySpecStageDispatchService,
+            "sync_stage_status",
+            new_callable=AsyncMock,
+            return_value=sync_result,
+        ) as mock_sync:
+            with patch(
+                "app.modules.change.dispatch.auto_dispatch_next_step",
+                new_callable=AsyncMock,
+            ) as mock_auto:
+                mock_auto.return_value = {
+                    "dispatched": True,
+                    "reason": "auto_dispatch",
+                }
+                svc = AgentService(AsyncMock(spec=AsyncSession))
+                await svc._execute_stage_run(
+                    run_id=run_id,
+                    prompt="Execute propose stage.",
+                    work_dir=MagicMock(mkdir=MagicMock()),
+                    read_only=False,
+                    workspace_id=workspace_id,
+                    change_id=change_id,
+                    user_id=user_id,
+                    stage="propose",
+                )
 
     mock_sync.assert_called_once()
     mock_auto.assert_called_once()
@@ -381,8 +386,12 @@ async def test_execute_stage_run_skips_auto_dispatch_on_failure():
 
     mock_session = AsyncMock(spec=AsyncSession)
     agent_run_mock = MagicMock(
-        id=run_id, status="pending", started_at=None,
-        finished_at=None, exit_code=None, output_redacted=None,
+        id=run_id,
+        status="pending",
+        started_at=None,
+        finished_at=None,
+        exit_code=None,
+        output_redacted=None,
         diff_summary=None,
     )
     change_mock = MagicMock(stages={})
@@ -403,34 +412,36 @@ async def test_execute_stage_run_skips_auto_dispatch_on_failure():
     mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
     mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("app.core.db.get_session_factory", return_value=mock_factory):
-        with patch(
+    with (
+        patch("app.core.db.get_session_factory", return_value=mock_factory),
+        patch(
             "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
             new_callable=AsyncMock,
             return_value=fake_result,
-        ):
-            with patch("app.modules.agent.service.AgentRunLog"):
-                with patch("app.modules.workflow.model.AuditLog"):
-                    with patch.object(
-                        SillySpecStageDispatchService,
-                        "sync_stage_status",
-                        new_callable=AsyncMock,
-                    ) as mock_sync:
-                        with patch(
-                            "app.modules.change.dispatch.auto_dispatch_next_step",
-                            new_callable=AsyncMock,
-                        ) as mock_auto:
-                            svc = AgentService(AsyncMock(spec=AsyncSession))
-                            await svc._execute_stage_run(
-                                run_id=run_id,
-                                prompt="Execute propose stage.",
-                                work_dir=MagicMock(mkdir=MagicMock()),
-                                read_only=False,
-                                workspace_id=workspace_id,
-                                change_id=change_id,
-                                user_id=user_id,
-                                stage="propose",
-                            )
+        ),
+        patch("app.modules.agent.service.AgentRunLog"),
+        patch("app.modules.workflow.model.AuditLog"),
+    ):
+        with patch.object(
+            SillySpecStageDispatchService,
+            "sync_stage_status",
+            new_callable=AsyncMock,
+        ) as mock_sync:
+            with patch(
+                "app.modules.change.dispatch.auto_dispatch_next_step",
+                new_callable=AsyncMock,
+            ) as mock_auto:
+                svc = AgentService(AsyncMock(spec=AsyncSession))
+                await svc._execute_stage_run(
+                    run_id=run_id,
+                    prompt="Execute propose stage.",
+                    work_dir=MagicMock(mkdir=MagicMock()),
+                    read_only=False,
+                    workspace_id=workspace_id,
+                    change_id=change_id,
+                    user_id=user_id,
+                    stage="propose",
+                )
 
     mock_sync.assert_not_called()
     mock_auto.assert_not_called()
@@ -454,8 +465,12 @@ async def test_execute_stage_run_auto_dispatch_exception_does_not_affect_run():
 
     mock_session = AsyncMock(spec=AsyncSession)
     agent_run_mock = MagicMock(
-        id=run_id, status="pending", started_at=None,
-        finished_at=None, exit_code=None, output_redacted=None,
+        id=run_id,
+        status="pending",
+        started_at=None,
+        finished_at=None,
+        exit_code=None,
+        output_redacted=None,
         diff_summary=None,
     )
     change_mock = MagicMock(stages={})
@@ -485,37 +500,39 @@ async def test_execute_stage_run_auto_dispatch_exception_does_not_affect_run():
         stage_completed=False,
     )
 
-    with patch("app.core.db.get_session_factory", return_value=mock_factory):
-        with patch(
+    with (
+        patch("app.core.db.get_session_factory", return_value=mock_factory),
+        patch(
             "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
             new_callable=AsyncMock,
             return_value=fake_result,
+        ),
+        patch("app.modules.agent.service.AgentRunLog"),
+        patch("app.modules.workflow.model.AuditLog"),
+    ):
+        with patch.object(
+            SillySpecStageDispatchService,
+            "sync_stage_status",
+            new_callable=AsyncMock,
+            return_value=sync_result,
         ):
-            with patch("app.modules.agent.service.AgentRunLog"):
-                with patch("app.modules.workflow.model.AuditLog"):
-                    with patch.object(
-                        SillySpecStageDispatchService,
-                        "sync_stage_status",
-                        new_callable=AsyncMock,
-                        return_value=sync_result,
-                    ):
-                        with patch(
-                            "app.modules.change.dispatch.auto_dispatch_next_step",
-                            new_callable=AsyncMock,
-                            side_effect=RuntimeError("unexpected error"),
-                        ):
-                            svc = AgentService(AsyncMock(spec=AsyncSession))
-                            # Should NOT raise
-                            await svc._execute_stage_run(
-                                run_id=run_id,
-                                prompt="Execute propose stage.",
-                                work_dir=MagicMock(mkdir=MagicMock()),
-                                read_only=False,
-                                workspace_id=workspace_id,
-                                change_id=change_id,
-                                user_id=user_id,
-                                stage="propose",
-                            )
+            with patch(
+                "app.modules.change.dispatch.auto_dispatch_next_step",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("unexpected error"),
+            ):
+                svc = AgentService(AsyncMock(spec=AsyncSession))
+                # Should NOT raise
+                await svc._execute_stage_run(
+                    run_id=run_id,
+                    prompt="Execute propose stage.",
+                    work_dir=MagicMock(mkdir=MagicMock()),
+                    read_only=False,
+                    workspace_id=workspace_id,
+                    change_id=change_id,
+                    user_id=user_id,
+                    stage="propose",
+                )
 
     # AgentRun should still be "completed"
     assert agent_run_mock.status == "completed"

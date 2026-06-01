@@ -105,5 +105,7 @@ class TestParseComponent:
         scan_dir.mkdir(parents=True, exist_ok=True)
         (scan_dir / "custom-readme.md").write_text("# Custom Readme")
         result = parser.parse_component(silly_root, "silly")
-        others = [d for d in result.docs if d.doc_type == "OTHER" and d.filename == "custom-readme.md"]
+        others = [
+            d for d in result.docs if d.doc_type == "OTHER" and d.filename == "custom-readme.md"
+        ]
         assert len(others) == 1

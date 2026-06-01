@@ -48,6 +48,7 @@ class GitIdentityService:
     @staticmethod
     def _default_cipher() -> CredentialCipher:
         from app.core.crypto import get_cipher
+
         return get_cipher()
 
     # ── CRUD ──────────────────────────────────────────────────────────

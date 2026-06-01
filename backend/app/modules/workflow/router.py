@@ -42,7 +42,10 @@ async def transition_change(
 ) -> TransitionResponse:
     svc = WorkflowService(session)
     change, prev = await svc.transition_change(
-        workspace_id, change_id, user.id, data.target,
+        workspace_id,
+        change_id,
+        user.id,
+        data.target,
     )
     return TransitionResponse(id=change.id, status=change.status, previous_status=prev)
 
@@ -61,7 +64,11 @@ async def submit_review(
 ) -> ReviewResponse:
     svc = WorkflowService(session)
     review = await svc.submit_review(
-        workspace_id, change_id, user.id, data.verdict, data.comment,
+        workspace_id,
+        change_id,
+        user.id,
+        data.verdict,
+        data.comment,
     )
     return ReviewResponse.model_validate(review)
 
@@ -94,7 +101,9 @@ async def list_audit_logs(
 ) -> list[AuditLogEntry]:
     svc = WorkflowService(session)
     logs = await svc.list_audit_logs(
-        workspace_id, resource_type=resource_type, limit=limit,
+        workspace_id,
+        resource_type=resource_type,
+        limit=limit,
     )
     return [AuditLogEntry.model_validate(e) for e in logs]
 
@@ -112,6 +121,9 @@ async def transition_task(
 ) -> TaskTransitionResponse:
     svc = WorkflowService(session)
     task, prev = await svc.transition_task(
-        workspace_id, task_id, user.id, data.target,
+        workspace_id,
+        task_id,
+        user.id,
+        data.target,
     )
     return TaskTransitionResponse(id=task.id, status=task.status, previous_status=prev)

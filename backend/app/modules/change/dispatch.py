@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.core.logging import get_logger
+from app.modules.agent.base import AgentSpecBundle
 from app.modules.agent.model import AgentRun
 from app.modules.change.model import Change, StageEnum
 
@@ -41,22 +42,21 @@ class StageAgentConfig:
     read_only: bool = True  # True = agent should only read/analyse, not write code
 
 
-
-
 @dataclass
 class StageSyncResult:
     """sync_stage_status 的返回值，携带同步结果和步骤状态摘要。"""
 
-    synced: bool                              # 同步是否成功
-    change_id: uuid.UUID                      # 变更 ID
-    run_id: uuid.UUID                         # 触发同步的 AgentRun ID
-    current_stage: str | None = None          # sillyspec.db 中的 current_stage
-    current_step: str | None = None           # 第一个 pending step 名称
-    stage_completed: bool = False             # 当前 stage 全部 steps 已完成
-    has_pending_step: bool = False            # 当前 stage 还有 pending step
+    synced: bool  # 同步是否成功
+    change_id: uuid.UUID  # 变更 ID
+    run_id: uuid.UUID  # 触发同步的 AgentRun ID
+    current_stage: str | None = None  # sillyspec.db 中的 current_stage
+    current_step: str | None = None  # 第一个 pending step 名称
+    stage_completed: bool = False  # 当前 stage 全部 steps 已完成
+    has_pending_step: bool = False  # 当前 stage 还有 pending step
     steps_completed: list[str] = field(default_factory=list)
     steps_pending: list[str] = field(default_factory=list)
-    error: str | None = None                  # synced=False 时的错误描述
+    error: str | None = None  # synced=False 时的错误描述
+
 
 STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
     StageEnum.SCAN.value: StageAgentConfig(
@@ -298,7 +298,7 @@ async def dispatch(
     stages["last_dispatch"] = {
         "stage": target_stage,
         "user_id": str(user_id),
-        "at": datetime.now(timezone.utc).isoformat(),
+        "at": datetime.now(UTC).isoformat(),
         "config": {
             "prompt_template": config.prompt_template,
             "requires_worktree": config.requires_worktree,
@@ -394,7 +394,6 @@ class SillySpecStageDispatchService:
             ChangeNotFound: change_id does not correspond to an existing Change.
         """
         from app.core.errors import ChangeNotFound
-        from app.modules.agent.base import AgentSpecBundle
         from app.modules.workspace.model import AgentRunWorkspace
 
         # Step 1: Check STAGE_AGENT_CONFIG
@@ -428,8 +427,8 @@ class SillySpecStageDispatchService:
         # Step 5: Create AgentRun record
         run = AgentRun(
             id=uuid.uuid4(),
-            task_id=None,              # stage-level dispatch, no task association
-            lease_id=None,             # determined by AgentService based on config
+            task_id=None,  # stage-level dispatch, no task association
+            lease_id=None,  # determined by AgentService based on config
             change_id=change_id,
             agent_type="claude_code",
             status="pending",
@@ -438,10 +437,12 @@ class SillySpecStageDispatchService:
         session.add(run)
 
         # Step 6: Create M:N workspace association
-        session.add(AgentRunWorkspace(
-            agent_run_id=run.id,
-            workspace_id=workspace_id,
-        ))
+        session.add(
+            AgentRunWorkspace(
+                agent_run_id=run.id,
+                workspace_id=workspace_id,
+            )
+        )
         await session.commit()
         await session.refresh(run)
 
@@ -450,7 +451,7 @@ class SillySpecStageDispatchService:
         stages["last_dispatch"] = {
             "stage": target_stage,
             "user_id": str(user_id),
-            "at": datetime.now(timezone.utc).isoformat(),
+            "at": datetime.now(UTC).isoformat(),
             "run_id": str(run.id),
             "config": {
                 "phase": config.phase,
@@ -498,7 +499,7 @@ class SillySpecStageDispatchService:
         change_id: uuid.UUID,
         stage: str,
         workspace_id: uuid.UUID,
-    ) -> "AgentSpecBundle":
+    ) -> AgentSpecBundle:
         """Build a stage-level AgentSpecBundle.
 
         Tries ``context_builder.build_stage_bundle()`` first; if unavailable
@@ -572,7 +573,6 @@ class SillySpecStageDispatchService:
             ChangeNotFound: 当 change_id 在 Hub DB 中不存在时。
         """
         from app.core.errors import ChangeNotFound
-        from app.core.spec_paths import SpecPathResolver
 
         # Step 1: Load Change
         change = await session.get(Change, change_id)
@@ -653,8 +653,7 @@ class SillySpecStageDispatchService:
 
                 # Step 3c: Find all steps for this stage
                 step_rows = conn.execute(
-                    "SELECT name, status FROM steps "
-                    "WHERE stage_id = ? ORDER BY ordering",
+                    "SELECT name, status FROM steps WHERE stage_id = ? ORDER BY ordering",
                     (stage_row["id"],),
                 ).fetchall()
 
@@ -711,11 +710,11 @@ class SillySpecStageDispatchService:
                 "pending": steps_pending,
             },
             "current_step": current_step,
-            "synced_at": datetime.now(timezone.utc).isoformat(),
+            "synced_at": datetime.now(UTC).isoformat(),
             "synced_from_run": str(run_id),
         }
         change.stages = stages_json
-        change.updated_at = datetime.now(timezone.utc)
+        change.updated_at = datetime.now(UTC)
         session.add(change)
         await session.commit()
 
@@ -747,9 +746,7 @@ class SillySpecStageDispatchService:
         try:
             from app.modules.spec_workspace.model import SpecWorkspace
 
-            stmt = select(SpecWorkspace).where(
-                SpecWorkspace.workspace_id == change.workspace_id
-            )
+            stmt = select(SpecWorkspace).where(SpecWorkspace.workspace_id == change.workspace_id)
             spec_ws = (await session.execute(stmt)).scalars().first()
 
             if spec_ws and spec_ws.strategy != "repo-native":
@@ -767,7 +764,6 @@ class SillySpecStageDispatchService:
             return None
 
         return SpecPathResolver(workspace.root_path).db_path()
-
 
 
 # ---------------------------------------------------------------------------

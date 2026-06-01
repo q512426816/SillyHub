@@ -34,7 +34,7 @@ async def _check_db() -> DependencyStatus:
         async with factory() as session:
             await session.execute(text("SELECT 1"))
         return "ok"
-    except Exception as exc:  # noqa: BLE001 — health check must not propagate
+    except Exception as exc:
         log.warning("health.db.down", error=str(exc))
         return "down"
 
@@ -44,7 +44,7 @@ async def _check_redis() -> DependencyStatus:
         client = get_redis()
         pong = await client.ping()  # type: ignore[misc]  # redis-py async stubs are loose
         return "ok" if pong else "down"
-    except Exception as exc:  # noqa: BLE001 — health check must not propagate
+    except Exception as exc:
         log.warning("health.redis.down", error=str(exc))
         return "down"
 

@@ -400,7 +400,6 @@ async def test_stream_no_auth(client, db_session, tmp_path):
 
 async def test_stream_running_run_sse_data_events(db_session):
     """AC-01: stream_run_logs yields data events from Redis pubsub."""
-    import asyncio
     import json
     from unittest.mock import MagicMock
 
@@ -495,7 +494,6 @@ async def test_stream_done_event_closes(db_session):
 
 async def test_stream_keepalive_on_no_message(db_session):
     """AC-04: asyncio.TimeoutError triggers keepalive comment."""
-    import asyncio
     import json
     from unittest.mock import MagicMock
 
@@ -526,7 +524,7 @@ async def test_stream_keepalive_on_no_message(db_session):
         nonlocal call_count
         call_count += 1
         if call_count <= 2:
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
         return done_msg
 
     mock_pubsub.get_message = fake_get_message

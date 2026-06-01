@@ -21,7 +21,12 @@ from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.auth.rbac import allowed_workspace_ids
 from app.modules.workspace.model import Workspace
-from app.modules.workspace.relation_schema import RelationCreate, RelationRead, RelationListResponse, TopologyResponse
+from app.modules.workspace.relation_schema import (
+    RelationCreate,
+    RelationListResponse,
+    RelationRead,
+    TopologyResponse,
+)
 from app.modules.workspace.relation_service import RelationService
 from app.modules.workspace.scanner import ScanResult
 from app.modules.workspace.schema import (

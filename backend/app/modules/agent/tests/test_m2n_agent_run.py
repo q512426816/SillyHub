@@ -31,9 +31,7 @@ async def _create_workspace(session: AsyncSession, name: str) -> Workspace:
     return ws
 
 
-async def _create_change(
-    session: AsyncSession, workspace_id: uuid.UUID
-) -> Change:
+async def _create_change(session: AsyncSession, workspace_id: uuid.UUID) -> Change:
     ch = Change(
         id=uuid.uuid4(),
         workspace_id=workspace_id,
@@ -66,9 +64,7 @@ async def _create_task(
     return t
 
 
-async def _create_agent_run(
-    session: AsyncSession, task_id: uuid.UUID
-) -> AgentRun:
+async def _create_agent_run(session: AsyncSession, task_id: uuid.UUID) -> AgentRun:
     run = AgentRun(
         id=uuid.uuid4(),
         task_id=task_id,

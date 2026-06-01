@@ -62,12 +62,11 @@ class Settings(BaseSettings):
     host_path_prefix: str = Field(
         default="",
         description="Host filesystem prefix (e.g. C:/Users/qinyi/IdeaProjects). "
-                    "When running in Docker, this is rewritten to container_path_prefix.",
+        "When running in Docker, this is rewritten to container_path_prefix.",
     )
     container_path_prefix: str = Field(
         default="",
-        description="Container mount point that maps to host_path_prefix "
-                    "(e.g. /host-projects).",
+        description="Container mount point that maps to host_path_prefix (e.g. /host-projects).",
     )
 
     model_config = SettingsConfigDict(
@@ -108,7 +107,7 @@ class Settings(BaseSettings):
                 .decode()
                 .strip()
             )
-        except Exception:  # noqa: BLE001 — best-effort fallback
+        except Exception:
             return "unknown"
 
 

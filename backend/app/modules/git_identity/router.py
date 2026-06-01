@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth_deps import get_current_user
 from app.core.db import get_session
 from app.modules.auth.model import User
-from app.modules.auth.permissions import Permission
 from app.modules.git_identity.schema import (
     AccessCheckRequest,
     AccessCheckResult,
@@ -61,6 +60,7 @@ async def get_identity(
     user: CurrentUser,
 ) -> GitIdentityRead:
     import uuid
+
     service = GitIdentityService(session)
     row = await service.get(uuid.UUID(identity_id), user.id)
     return GitIdentityRead.model_validate(row)
@@ -76,6 +76,7 @@ async def revoke_identity(
     user: CurrentUser,
 ) -> GitIdentityRead:
     import uuid
+
     service = GitIdentityService(session)
     row = await service.revoke(uuid.UUID(identity_id), user.id)
     return GitIdentityRead.model_validate(row)

@@ -15,7 +15,8 @@ from app.modules.workflow.model import ChangeReview
 
 
 async def check_change_ready_for_proposed(
-    session: AsyncSession, change: Change,
+    session: AsyncSession,
+    change: Change,
 ) -> list[str]:
     """Draft -> proposed: MASTER.md must exist."""
     violations: list[str] = []
@@ -31,7 +32,8 @@ async def check_change_ready_for_proposed(
 
 
 async def check_change_ready_for_reviewed(
-    session: AsyncSession, change: Change,
+    session: AsyncSession,
+    change: Change,
 ) -> list[str]:
     """Proposed -> reviewed: proposal must exist and be non-trivial."""
     violations: list[str] = []
@@ -50,7 +52,8 @@ async def check_change_ready_for_reviewed(
 
 
 async def _check_docs_non_trivial(
-    session: AsyncSession, change: Change,
+    session: AsyncSession,
+    change: Change,
 ) -> list[str]:
     """G4: reviewed -> approved — all existing docs must have >= 100 words."""
     violations: list[str] = []
@@ -62,9 +65,7 @@ async def _check_docs_non_trivial(
     for doc in docs:
         wc = doc.word_count if doc.word_count is not None else 0
         if wc < 100:
-            violations.append(
-                f"Document \'{doc.doc_type}\' has only {wc} words (minimum 100)."
-            )
+            violations.append(f"Document '{doc.doc_type}' has only {wc} words (minimum 100).")
     return violations
 
 
@@ -72,7 +73,8 @@ async def _check_docs_non_trivial(
 
 
 async def _check_components_exist(
-    session: AsyncSession, change: Change,
+    session: AsyncSession,
+    change: Change,
 ) -> list[str]:
     """G5: reviewed -> approved — all affected_components must exist as active workspaces."""
     violations: list[str] = []
@@ -80,6 +82,7 @@ async def _check_components_exist(
         return violations
 
     from app.modules.workspace.model import Workspace
+
     for comp in change.affected_components:
         stmt = select(Workspace).where(
             col(Workspace.component_key) == comp,
@@ -87,14 +90,13 @@ async def _check_components_exist(
         )
         ws = (await session.execute(stmt)).scalars().first()
         if ws is None:
-            violations.append(
-                f"Affected component \'{comp}\' does not exist as an active workspace."
-            )
+            violations.append(f"Affected component '{comp}' does not exist as an active workspace.")
     return violations
 
 
 async def check_change_ready_for_approved(
-    session: AsyncSession, change: Change,
+    session: AsyncSession,
+    change: Change,
 ) -> list[str]:
     """Reviewed -> approved: requirements + design must exist + G4 + G5."""
     violations: list[str] = []
@@ -118,7 +120,8 @@ async def check_change_ready_for_approved(
 
 
 async def _check_no_unresolved_reject(
-    session: AsyncSession, change: Change,
+    session: AsyncSession,
+    change: Change,
 ) -> list[str]:
     """G7: approved -> in_progress — no unresolved reject reviews."""
     violations: list[str] = []
@@ -141,7 +144,8 @@ async def _check_no_unresolved_reject(
 
 
 async def check_change_ready_for_in_progress(
-    session: AsyncSession, change: Change,
+    session: AsyncSession,
+    change: Change,
 ) -> list[str]:
     """Approved -> in_progress: plan must exist + G7."""
     violations: list[str] = []
@@ -159,14 +163,16 @@ async def check_change_ready_for_in_progress(
 
 
 async def check_change_ready_for_completed(
-    session: AsyncSession, change: Change,
+    session: AsyncSession,
+    change: Change,
 ) -> list[str]:
     """In progress -> completed: no hard requirement beyond the FSM."""
     return []
 
 
 async def check_change_ready_for_merged(
-    session: AsyncSession, change: Change,
+    session: AsyncSession,
+    change: Change,
 ) -> list[str]:
     """Completed -> merged: no hard requirement beyond the FSM."""
     return []

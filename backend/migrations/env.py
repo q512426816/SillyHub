@@ -17,14 +17,11 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
 from app.models.base import BaseModel
+from app.modules.agent import model as _agent_model  # noqa: F401
 
 # Eagerly import every feature module so its SQLModel tables are attached to
 # ``BaseModel.metadata`` before autogenerate runs. Add new modules here.
 from app.modules.auth import model as _auth_model  # noqa: F401
-from app.modules.workspace import model as _workspace_model  # noqa: F401
-from app.modules.agent import model as _agent_model  # noqa: F401
-from app.modules.tool_gateway import model as _tg_model  # noqa: F401
-from app.modules.tool_gateway import tool_policy as _tg_policy  # noqa: F401
 from app.modules.change import model as _change_model  # noqa: F401
 from app.modules.git_gateway import model as _gg_model  # noqa: F401
 from app.modules.git_identity import model as _gi_model  # noqa: F401
@@ -35,7 +32,10 @@ from app.modules.settings import model as _settings_model  # noqa: F401
 from app.modules.spec_profile import model as _spec_profile_model  # noqa: F401
 from app.modules.spec_workspace import model as _spec_ws_model  # noqa: F401
 from app.modules.task import model as _task_model  # noqa: F401
+from app.modules.tool_gateway import model as _tg_model  # noqa: F401
+from app.modules.tool_gateway import tool_policy as _tg_policy  # noqa: F401
 from app.modules.workflow import model as _workflow_model  # noqa: F401
+from app.modules.workspace import model as _workspace_model  # noqa: F401
 from app.modules.worktree import model as _worktree_model  # noqa: F401
 
 config = context.config

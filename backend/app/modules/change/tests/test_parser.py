@@ -96,13 +96,7 @@ class TestParseWorkspace:
         assert prototypes[0].exists is True
 
     def test_references_detected(self, parser: ChangeParser, silly_root: Path) -> None:
-        ref_dir = (
-            silly_root
-            / ".sillyspec"
-            / "changes"
-            / "2026-05-25-demo-feature"
-            / "references"
-        )
+        ref_dir = silly_root / ".sillyspec" / "changes" / "2026-05-25-demo-feature" / "references"
         ref_dir.mkdir(parents=True, exist_ok=True)
         (ref_dir / "01-api-spec.md").write_text("# API Spec", encoding="utf-8")
         result = parser.parse_workspace(silly_root)
@@ -122,9 +116,7 @@ class TestParseWorkspace:
             for d in c.docs:
                 assert ".." not in d.path
 
-    def test_change_key_from_directory_name(
-        self, parser: ChangeParser, silly_root: Path
-    ) -> None:
+    def test_change_key_from_directory_name(self, parser: ChangeParser, silly_root: Path) -> None:
         result = parser.parse_workspace(silly_root)
         assert all(c.change_key for c in result.changes)
 
@@ -142,7 +134,9 @@ class TestParseWorkspace:
         warning_codes = [w.code for w in result.warnings]
         assert "LEGACY_CHANGE_DIR" in warning_codes
 
-    def test_archive_excluded_from_active_scan(self, parser: ChangeParser, silly_root: Path) -> None:
+    def test_archive_excluded_from_active_scan(
+        self, parser: ChangeParser, silly_root: Path
+    ) -> None:
         """The 'archive' directory itself should not appear as an active change."""
         result = parser.parse_workspace(silly_root)
         keys = {c.change_key for c in result.changes}

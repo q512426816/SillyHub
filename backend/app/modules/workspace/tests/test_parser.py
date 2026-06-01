@@ -4,15 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from app.modules.workspace.parser import (
-    ALLOWED_RELATION_TYPES,
-    WorkspaceParser,
-    ParseIssue,
-    ParseResult,
     ParsedWorkspace,
-    ParsedRelation,
+    ParseResult,
+    WorkspaceParser,
 )
 
 
@@ -321,6 +316,7 @@ def test_relation_missing_target_and_type(tmp_path: Path) -> None:
 def test_no_pure_function_no_db_imports() -> None:
     """WorkspaceParser must not import DB or FastAPI dependencies."""
     import importlib
+
     import app.modules.workspace.parser as parser_mod
 
     source = importlib.util.find_spec("app.modules.workspace.parser")

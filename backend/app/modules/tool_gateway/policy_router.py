@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response
@@ -16,7 +16,11 @@ from app.core.db import get_session
 from app.core.errors import AppError
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
-from app.modules.tool_gateway.policy_schema import ToolPolicyCreate, ToolPolicyRead, ToolPolicyUpdate
+from app.modules.tool_gateway.policy_schema import (
+    ToolPolicyCreate,
+    ToolPolicyRead,
+    ToolPolicyUpdate,
+)
 from app.modules.tool_gateway.tool_policy import ToolPolicy
 
 router = APIRouter(tags=["tool_policy"])
@@ -54,8 +58,8 @@ async def create_policy(
     policy = ToolPolicy(
         id=uuid.uuid4(),
         workspace_id=workspace_id,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
         **data.model_dump(),
     )
     try:
@@ -128,7 +132,7 @@ async def update_policy(
         return ToolPolicyRead.model_validate(policy)
     for key, value in update_data.items():
         setattr(policy, key, value)
-    policy.updated_at = datetime.now(timezone.utc)
+    policy.updated_at = datetime.now(UTC)
     try:
         await session.commit()
         await session.refresh(policy)

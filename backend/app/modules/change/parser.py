@@ -8,7 +8,6 @@ Supports legacy ``changes/change/<key>/`` layout with deprecation warnings.
 
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -85,7 +84,9 @@ class ChangeParser:
                     continue
 
                 parsed = self._parse_change(
-                    sillyspec_root, entry, location="active",
+                    sillyspec_root,
+                    entry,
+                    location="active",
                     rel_prefix=f".sillyspec/changes/{entry.name}",
                 )
                 result.changes.append(parsed)
@@ -102,7 +103,9 @@ class ChangeParser:
                     continue
 
                 parsed = self._parse_change(
-                    sillyspec_root, entry, location="archive",
+                    sillyspec_root,
+                    entry,
+                    location="archive",
                     rel_prefix=f".sillyspec/changes/archive/{entry.name}",
                 )
                 result.changes.append(parsed)
@@ -129,7 +132,9 @@ class ChangeParser:
                     continue
 
                 parsed = self._parse_change(
-                    sillyspec_root, entry, location="active",
+                    sillyspec_root,
+                    entry,
+                    location="active",
                     rel_prefix=f".sillyspec/changes/change/{entry.name}",
                     is_legacy=True,
                 )
@@ -183,7 +188,7 @@ class ChangeParser:
                 ParseWarning(
                     code="LEGACY_CHANGE_PATH",
                     detail=f"Change '{change_key}' is at legacy path 'changes/change/{change_key}'. "
-                           "Migrate to 'changes/{change_key}'.",
+                    "Migrate to 'changes/{change_key}'.",
                     change_key=change_key,
                 )
             )
@@ -255,7 +260,7 @@ class ChangeParser:
                                 ParseWarning(
                                     code="LEGACY_FILENAME",
                                     detail=f"Found legacy '{legacy_name}', expected '{canonical_name}' "
-                                           f"for change '{change_key}'.",
+                                    f"for change '{change_key}'.",
                                     change_key=change_key,
                                     doc_type=doc_type,
                                 )

@@ -8,7 +8,7 @@ content is read from the filesystem on-demand (not stored in DB).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
@@ -17,9 +17,14 @@ from sqlmodel import col
 
 from app.core.errors import ChangeDocNotFound, ChangeNotFound, InvalidTransition, PermissionDenied
 from app.core.logging import get_logger
-from app.modules.change.model import Change, ChangeDocument, StageEnum, TRANSITIONS
+from app.modules.change.model import TRANSITIONS, Change, ChangeDocument, StageEnum
 from app.modules.change.parser import ChangeParser, ChangeParserResult, ParsedChange
-from app.modules.change.schema import ArchiveCheckItem, ArchiveGateResponse, ChangeRead, ChangeSummary
+from app.modules.change.schema import (
+    ArchiveCheckItem,
+    ArchiveGateResponse,
+    ChangeRead,
+    ChangeSummary,
+)
 from app.modules.workspace.model import ChangeWorkspace, Workspace
 from app.modules.workspace.service import WorkspaceService
 
@@ -59,8 +64,7 @@ class ChangeService:
             col(ChangeWorkspace.workspace_id) == workspace_id,
         )
         stmt = select(Change).where(
-            (col(Change.workspace_id) == workspace_id)
-            | (col(Change.id).in_(mn_subq))
+            (col(Change.workspace_id) == workspace_id) | (col(Change.id).in_(mn_subq))
         )
 
         if location:
@@ -84,9 +88,7 @@ class ChangeService:
                 unique_items.append(item)
         return unique_items, len(unique_items)
 
-    async def get_by_key(
-        self, workspace_id: uuid.UUID, change_key: str
-    ) -> Change:
+    async def get_by_key(self, workspace_id: uuid.UUID, change_key: str) -> Change:
         """Look up a change by its *change_key* within the workspace."""
         await self._workspace_service.get(workspace_id)
 
@@ -153,16 +155,10 @@ class ChangeService:
         self, workspace_id: uuid.UUID, change_id: uuid.UUID
     ) -> tuple[list[ChangeDocument], list[str], list[str]]:
         change = await self.get(workspace_id, change_id)
-        stmt = select(ChangeDocument).where(
-            col(ChangeDocument.change_id) == change.id
-        )
+        stmt = select(ChangeDocument).where(col(ChangeDocument.change_id) == change.id)
         docs = list((await self._session.execute(stmt)).scalars().all())
-        prototypes = [
-            Path(d.path).name for d in docs if d.doc_type == "prototype" and d.exists
-        ]
-        references = [
-            Path(d.path).name for d in docs if d.doc_type == "reference" and d.exists
-        ]
+        prototypes = [Path(d.path).name for d in docs if d.doc_type == "prototype" and d.exists]
+        references = [Path(d.path).name for d in docs if d.doc_type == "reference" and d.exists]
         return docs, prototypes, references
 
     async def get_document_content(
@@ -235,7 +231,7 @@ class ChangeService:
         change = await self.get_by_key(workspace_id, change_key)
         change.current_stage = current_stage
         change.stages = stages
-        change.updated_at = datetime.now(timezone.utc)
+        change.updated_at = datetime.now(UTC)
         self._session.add(change)
         await self._session.commit()
 
@@ -255,8 +251,8 @@ class ChangeService:
         change = await self.get_by_key(workspace_id, change_key)
         change.approval_status = "approved"
         change.approved_by = approved_by
-        change.approved_at = datetime.now(timezone.utc)
-        change.updated_at = datetime.now(timezone.utc)
+        change.approved_at = datetime.now(UTC)
+        change.updated_at = datetime.now(UTC)
         self._session.add(change)
         await self._session.commit()
 
@@ -270,7 +266,7 @@ class ChangeService:
         change = await self.get_by_key(workspace_id, change_key)
         change.approval_status = "rejected"
         change.rejection_reason = reason
-        change.updated_at = datetime.now(timezone.utc)
+        change.updated_at = datetime.now(UTC)
         self._session.add(change)
         await self._session.commit()
 
@@ -298,7 +294,7 @@ class ChangeService:
                 raise ChangeDocNotFound("Path traversal detected.")
             full_path.parent.mkdir(parents=True, exist_ok=True)
             full_path.write_text(content, encoding="utf-8")
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
 
             # Upsert ChangeDocument row
             stmt = select(ChangeDocument).where(
@@ -348,9 +344,7 @@ class ChangeService:
         transitions_from_current = TRANSITIONS[current_key]
         target_key = StageEnum(target_stage)
         if target_key not in transitions_from_current:
-            raise InvalidTransition(
-                f"不允许从 {current_key.value} 流转到 {target_stage}"
-            )
+            raise InvalidTransition(f"不允许从 {current_key.value} 流转到 {target_stage}")
 
         # Check role permission (admin bypasses all)
         allowed_roles = transitions_from_current[target_key]
@@ -362,19 +356,21 @@ class ChangeService:
         # Log transition to stages JSON
         stages = change.stages or {}
         transitions_log = stages.get("transitions", [])
-        transitions_log.append({
-            "from": current,
-            "to": target_stage,
-            "by_role": user_role,
-            "reason": reason,
-            "at": datetime.now(timezone.utc).isoformat(),
-        })
+        transitions_log.append(
+            {
+                "from": current,
+                "to": target_stage,
+                "by_role": user_role,
+                "reason": reason,
+                "at": datetime.now(UTC).isoformat(),
+            }
+        )
         stages["transitions"] = transitions_log
 
         # Update change
         change.current_stage = target_stage
         change.stages = stages
-        change.updated_at = datetime.now(timezone.utc)
+        change.updated_at = datetime.now(UTC)
         self._session.add(change)
         await self._session.commit()
         return change
@@ -451,7 +447,7 @@ class ChangeService:
         if category not in ("A", "B", "C", "D"):
             raise InvalidTransition(f"无效的反馈类别: {category}")
 
-        FEEDBACK_TARGETS = {
+        FEEDBACK_TARGETS = {  # noqa: N806
             "A": "execute",
             "B": "propose",
             "C": "brainstorm",
@@ -464,9 +460,7 @@ class ChangeService:
         # Validate current stage allows feedback
         current = change.current_stage or "draft"
         if current not in ("verify", "accepted"):
-            raise InvalidTransition(
-                "当前阶段不允许提交反馈，仅限 verify 和 accepted"
-            )
+            raise InvalidTransition("当前阶段不允许提交反馈，仅限 verify 和 accepted")
 
         # Save feedback info
         change.feedback_category = category
@@ -480,7 +474,7 @@ class ChangeService:
             "text": text,
             "rework_target": rework_target,
             "submitted_by": str(user_id),
-            "submitted_at": datetime.now(timezone.utc).isoformat(),
+            "submitted_at": datetime.now(UTC).isoformat(),
         }
         change.stages = stages
 
@@ -489,31 +483,35 @@ class ChangeService:
             change.current_stage = "accepted"
             # Log the special transition
             transitions_log = stages.get("transitions", [])
-            transitions_log.append({
-                "from": current,
-                "to": "accepted",
-                "by_role": "reviewer",
-                "reason": f"反馈类别 D（衍生新 change）: {text[:100]}",
-                "at": datetime.now(timezone.utc).isoformat(),
-            })
+            transitions_log.append(
+                {
+                    "from": current,
+                    "to": "accepted",
+                    "by_role": "reviewer",
+                    "reason": f"反馈类别 D（衍生新 change）: {text[:100]}",
+                    "at": datetime.now(UTC).isoformat(),
+                }
+            )
             stages["transitions"] = transitions_log
             change.stages = stages
         else:
             # A/B/C: transition to rework_required
             change.current_stage = "rework_required"
             transitions_log = stages.get("transitions", [])
-            transitions_log.append({
-                "from": current,
-                "to": "rework_required",
-                "by_role": "reviewer",
-                "reason": f"反馈类别 {category}: {text[:100]}",
-                "at": datetime.now(timezone.utc).isoformat(),
-            })
+            transitions_log.append(
+                {
+                    "from": current,
+                    "to": "rework_required",
+                    "by_role": "reviewer",
+                    "reason": f"反馈类别 {category}: {text[:100]}",
+                    "at": datetime.now(UTC).isoformat(),
+                }
+            )
             stages["transitions"] = transitions_log
             stages["rework_target"] = rework_target
             change.stages = stages
 
-        change.updated_at = datetime.now(timezone.utc)
+        change.updated_at = datetime.now(UTC)
         self._session.add(change)
         await self._session.commit()
         return change
@@ -538,75 +536,86 @@ class ChangeService:
                 "feedback_categorized",
                 "documents_complete",
             ]:
-                checks.append(ArchiveCheckItem(
-                    name=name,
-                    passed=False,
-                    detail="当前阶段非 accepted，无法归档",
-                ))
+                checks.append(
+                    ArchiveCheckItem(
+                        name=name,
+                        passed=False,
+                        detail="当前阶段非 accepted，无法归档",
+                    )
+                )
             return ArchiveGateResponse(can_archive=False, checks=checks)
 
         # Check 1: no unresolved feedback
-        checks.append(ArchiveCheckItem(
-            name="no_unresolved_feedback",
-            passed=change.feedback_category is None,
-            detail="" if change.feedback_category is None
-                   else f"存在未解决反馈，类别: {change.feedback_category}",
-        ))
+        checks.append(
+            ArchiveCheckItem(
+                name="no_unresolved_feedback",
+                passed=change.feedback_category is None,
+                detail=""
+                if change.feedback_category is None
+                else f"存在未解决反馈，类别: {change.feedback_category}",
+            )
+        )
 
         stages = change.stages or {}
 
         # Check 2: AC confirmed
         ac_confirmed = stages.get("ac_confirmed", False)
-        checks.append(ArchiveCheckItem(
-            name="ac_confirmed",
-            passed=bool(ac_confirmed),
-            detail="" if ac_confirmed else "验收标准尚未确认",
-        ))
+        checks.append(
+            ArchiveCheckItem(
+                name="ac_confirmed",
+                passed=bool(ac_confirmed),
+                detail="" if ac_confirmed else "验收标准尚未确认",
+            )
+        )
 
         # Check 3: tech verification passed
         tech_passed = stages.get("tech_verification_passed", False)
-        checks.append(ArchiveCheckItem(
-            name="tech_verification_passed",
-            passed=bool(tech_passed),
-            detail="" if tech_passed else "技术验证未通过",
-        ))
+        checks.append(
+            ArchiveCheckItem(
+                name="tech_verification_passed",
+                passed=bool(tech_passed),
+                detail="" if tech_passed else "技术验证未通过",
+            )
+        )
 
         # Check 4: business review passed
         biz_passed = stages.get("business_review_passed", False)
-        checks.append(ArchiveCheckItem(
-            name="business_review_passed",
-            passed=bool(biz_passed),
-            detail="" if biz_passed else "业务评审未通过",
-        ))
+        checks.append(
+            ArchiveCheckItem(
+                name="business_review_passed",
+                passed=bool(biz_passed),
+                detail="" if biz_passed else "业务评审未通过",
+            )
+        )
 
         # Check 5: feedback categorized
         feedback_records = stages.get("feedback_history", [])
         uncategorized = [f for f in feedback_records if not f.get("category")]
-        checks.append(ArchiveCheckItem(
-            name="feedback_categorized",
-            passed=len(uncategorized) == 0,
-            detail="" if not uncategorized
-                   else f"{len(uncategorized)} 条反馈未分类",
-        ))
+        checks.append(
+            ArchiveCheckItem(
+                name="feedback_categorized",
+                passed=len(uncategorized) == 0,
+                detail="" if not uncategorized else f"{len(uncategorized)} 条反馈未分类",
+            )
+        )
 
         # Check 6: documents complete
         docs, _, _ = await self.get_documents(workspace_id, change_id)
         incomplete = [d for d in docs if not d.status and d.exists]
-        checks.append(ArchiveCheckItem(
-            name="documents_complete",
-            passed=len(incomplete) == 0,
-            detail="" if not incomplete
-                   else f"{len(incomplete)} 个文档未完成",
-        ))
+        checks.append(
+            ArchiveCheckItem(
+                name="documents_complete",
+                passed=len(incomplete) == 0,
+                detail="" if not incomplete else f"{len(incomplete)} 个文档未完成",
+            )
+        )
 
         can_archive = all(check.passed for check in checks)
         return ArchiveGateResponse(can_archive=can_archive, checks=checks)
 
     # ── Reparse ───────────────────────────────────────────────────────────
 
-    async def reparse(
-        self, workspace_id: uuid.UUID
-    ) -> tuple[dict[str, int], ChangeParserResult]:
+    async def reparse(self, workspace_id: uuid.UUID) -> tuple[dict[str, int], ChangeParserResult]:
         workspace = await self._workspace_service.get(workspace_id)
         sillyspec_root = Path(workspace.root_path)
 
@@ -668,9 +677,7 @@ class ChangeService:
 
     # ── Helpers ───────────────────────────────────────────────────────────
 
-    async def _fetch_existing_changes(
-        self, workspace_id: uuid.UUID
-    ) -> list[Change]:
+    async def _fetch_existing_changes(self, workspace_id: uuid.UUID) -> list[Change]:
         stmt = select(Change).where(col(Change.workspace_id) == workspace_id)
         return list((await self._session.execute(stmt)).scalars().all())
 
@@ -709,12 +716,8 @@ class ChangeService:
             if key not in seen_keys:
                 await self._session.delete(row)
 
-    async def _fetch_existing_docs(
-        self, change_id: uuid.UUID
-    ) -> list[ChangeDocument]:
-        stmt = select(ChangeDocument).where(
-            col(ChangeDocument.change_id) == change_id
-        )
+    async def _fetch_existing_docs(self, change_id: uuid.UUID) -> list[ChangeDocument]:
+        stmt = select(ChangeDocument).where(col(ChangeDocument.change_id) == change_id)
         return list((await self._session.execute(stmt)).scalars().all())
 
     # ── M:N Enrichment ──────────────────────────────────────────────────
@@ -781,9 +784,7 @@ class ChangeService:
         existing_stmt = select(ChangeWorkspace).where(
             col(ChangeWorkspace.change_id) == change_id,
         )
-        existing = list(
-            (await self._session.execute(existing_stmt)).scalars().all()
-        )
+        existing = list((await self._session.execute(existing_stmt)).scalars().all())
         existing_ws_ids = {cw.workspace_id for cw in existing}
 
         # Delete stale associations

@@ -2,21 +2,17 @@
 
 from __future__ import annotations
 
-import shutil
 import uuid
 from pathlib import Path
-from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ScanDocNotFound, WorkspaceNotFound
 from app.modules.scan_docs.model import ScanDocument
-from app.modules.scan_docs.parser import ScanDocsParser, ScanDocsResult
 from app.modules.scan_docs.service import ScanDocsService
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.workspace.model import Workspace
-from app.modules.workspace.service import WorkspaceService
 
 SCAN_FIXTURES = Path(__file__).parent / "fixtures" / "docs"
 
@@ -175,9 +171,7 @@ class TestReparseNoComponentKey:
 class TestReparseCreatesDocs:
     """reparse() creates new ScanDocument rows from filesystem."""
 
-    async def test_creates_rows(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_creates_rows(self, db_session: AsyncSession, tmp_path: Path) -> None:
         # Set up filesystem fixture
         sillyspec_root = tmp_path / "spec"
         scan_dir = sillyspec_root / ".sillyspec" / "docs" / "silly" / "scan"
@@ -192,7 +186,7 @@ class TestReparseCreatesDocs:
         await _create_spec_workspace(db_session, ws, str(sillyspec_root))
 
         svc = ScanDocsService(db_session)
-        stats, result = await svc.reparse(ws.id)
+        stats, _result = await svc.reparse(ws.id)
 
         assert stats["created"] > 0
         # Verify the doc exists in DB
@@ -208,16 +202,12 @@ class TestReparseCreatesDocs:
 class TestReparseUpdatesDocs:
     """reparse() updates existing rows when content changes."""
 
-    async def test_updates_rows(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_updates_rows(self, db_session: AsyncSession, tmp_path: Path) -> None:
         # Set up filesystem fixture
         sillyspec_root = tmp_path / "spec"
         scan_dir = sillyspec_root / ".sillyspec" / "docs" / "silly" / "scan"
         scan_dir.mkdir(parents=True, exist_ok=True)
-        (scan_dir / "ARCHITECTURE.md").write_text(
-            "# V1 Architecture\nOriginal.", encoding="utf-8"
-        )
+        (scan_dir / "ARCHITECTURE.md").write_text("# V1 Architecture\nOriginal.", encoding="utf-8")
 
         ws = await _create_workspace(
             db_session, root_path=str(sillyspec_root), component_key="silly"
@@ -247,15 +237,11 @@ class TestReparseUpdatesDocs:
 class TestReparseIdempotent:
     """Two consecutive reparses produce consistent state."""
 
-    async def test_idempotent(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_idempotent(self, db_session: AsyncSession, tmp_path: Path) -> None:
         sillyspec_root = tmp_path / "spec"
         scan_dir = sillyspec_root / ".sillyspec" / "docs" / "silly" / "scan"
         scan_dir.mkdir(parents=True, exist_ok=True)
-        (scan_dir / "ARCHITECTURE.md").write_text(
-            "# Stable Content\nUnchanged.", encoding="utf-8"
-        )
+        (scan_dir / "ARCHITECTURE.md").write_text("# Stable Content\nUnchanged.", encoding="utf-8")
 
         ws = await _create_workspace(
             db_session, root_path=str(sillyspec_root), component_key="silly"
@@ -272,16 +258,14 @@ class TestReparseIdempotent:
         assert stats2["updated"] > 0
 
         # Same total count
-        items1, total1 = await svc.list_(ws.id)
+        _items1, total1 = await svc.list_(ws.id)
         assert total1 == stats1["created"] + stats1["updated"]
 
 
 class TestReparseRemovesDeletedFiles:
     """reparse() marks rows as exists=False when files are removed from disk."""
 
-    async def test_marks_not_existing(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_marks_not_existing(self, db_session: AsyncSession, tmp_path: Path) -> None:
         sillyspec_root = tmp_path / "spec"
         scan_dir = sillyspec_root / ".sillyspec" / "docs" / "silly" / "scan"
         scan_dir.mkdir(parents=True, exist_ok=True)
@@ -300,7 +284,7 @@ class TestReparseRemovesDeletedFiles:
         arch_file.unlink()
 
         # Reparse again
-        stats, _ = await svc.reparse(ws.id)
+        _stats, _ = await svc.reparse(ws.id)
 
         items, _ = await svc.list_(ws.id)
         arch = next(d for d in items if d.doc_type == "ARCHITECTURE")

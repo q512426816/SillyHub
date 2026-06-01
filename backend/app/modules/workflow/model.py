@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Column, DateTime, ForeignKey, Index, String, Text, Uuid
 from sqlmodel import Field
@@ -15,9 +15,7 @@ class ChangeReview(BaseModel, table=True):
     """A review verdict on a change."""
 
     __tablename__ = "change_reviews"
-    __table_args__ = (
-        Index("ix_change_reviews_change", "change_id"),
-    )
+    __table_args__ = (Index("ix_change_reviews_change", "change_id"),)
 
     id: uuid.UUID = Field(
         default_factory=uuid.uuid4,
@@ -40,7 +38,7 @@ class ChangeReview(BaseModel, table=True):
     verdict: str = Field(sa_column=Column(String(20), nullable=False))  # approve / reject
     comment: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 
@@ -79,6 +77,6 @@ class AuditLog(BaseModel, table=True):
     resource_id: uuid.UUID = Field(sa_column=Column(Uuid(as_uuid=True), nullable=False))
     details_json: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )

@@ -62,13 +62,15 @@ def parse_md_directory(directory: Path, sillyspec_root: Path, rel_prefix: str) -
         except OSError:
             mtime = None
 
-        entries.append(ParsedEntry(
-            filename=md_file.name,
-            path=rel_path,
-            title=title,
-            content=content,
-            last_modified_at=mtime,
-        ))
+        entries.append(
+            ParsedEntry(
+                filename=md_file.name,
+                path=rel_path,
+                title=title,
+                content=content,
+                last_modified_at=mtime,
+            )
+        )
 
     return entries
 

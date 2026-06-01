@@ -19,12 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.agent.model import AgentRun
 from app.modules.change.dispatch import (
     SillySpecStageDispatchService,
-    StageSyncResult,
     auto_dispatch_next_step,
-    dispatch,
 )
 from app.modules.change.model import Change
-
 
 # ---------------------------------------------------------------------------
 # Helpers (same pattern as test_dispatch.py)

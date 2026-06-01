@@ -7,15 +7,14 @@ load_prompt_template for the clarifying stage.
 from __future__ import annotations
 
 import uuid
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
-from unittest.mock import AsyncMock, patch
 
 from app.modules.agent.model import AgentRun
 from app.modules.change.dispatch import (
     STAGE_AGENT_CONFIG,
-    StageAgentConfig,
     SillySpecStageDispatchService,
     dispatch,
     get_config_for_stage,
@@ -23,7 +22,6 @@ from app.modules.change.dispatch import (
     load_prompt_template,
 )
 from app.modules.change.model import Change
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -117,8 +115,8 @@ def test_get_config_for_archived_returns_none() -> None:
 def test_all_configured_stages_have_templates() -> None:
     """Every stage in STAGE_AGENT_CONFIG has a non-empty template name."""
     for stage, config in STAGE_AGENT_CONFIG.items():
-        assert config.prompt_template, f"Stage \'{stage}\' missing prompt_template"
-        assert config.phase, f"Stage \'{stage}\' missing phase"
+        assert config.prompt_template, f"Stage '{stage}' missing prompt_template"
+        assert config.phase, f"Stage '{stage}' missing phase"
 
 
 # ===================================================================
@@ -212,9 +210,7 @@ async def test_dispatch_updates_last_dispatch_in_stages(db_session: AsyncSession
     change = await _create_change(db_session, current_stage="draft")
 
     mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
-    with patch(
-        "app.modules.agent.service.AgentService"
-    ) as MockAgentService:
+    with patch("app.modules.agent.service.AgentService") as MockAgentService:
         mock_svc = MockAgentService.return_value
         mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
 
@@ -286,9 +282,7 @@ async def test_dispatch_next_step_creates_agent_run(db_session: AsyncSession) ->
     change = await _create_change(db_session, workspace_id=workspace_id)
 
     mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
-    with patch(
-        "app.modules.agent.service.AgentService"
-    ) as MockAgentService:
+    with patch("app.modules.agent.service.AgentService") as MockAgentService:
         mock_svc = MockAgentService.return_value
         mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
 
@@ -314,9 +308,7 @@ async def test_dispatch_next_step_passes_prompt_template(db_session: AsyncSessio
     change = await _create_change(db_session, workspace_id=workspace_id)
 
     mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
-    with patch(
-        "app.modules.agent.service.AgentService"
-    ) as MockAgentService:
+    with patch("app.modules.agent.service.AgentService") as MockAgentService:
         mock_svc = MockAgentService.return_value
         mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
 
@@ -419,13 +411,9 @@ async def test_dispatch_next_step_agent_start_error(db_session: AsyncSession) ->
     workspace_id = await _create_workspace(db_session)
     change = await _create_change(db_session, workspace_id=workspace_id)
 
-    with patch(
-        "app.modules.agent.service.AgentService"
-    ) as MockAgentService:
+    with patch("app.modules.agent.service.AgentService") as MockAgentService:
         mock_svc = MockAgentService.return_value
-        mock_svc.start_stage_dispatch = AsyncMock(
-            side_effect=RuntimeError("Agent crashed")
-        )
+        mock_svc.start_stage_dispatch = AsyncMock(side_effect=RuntimeError("Agent crashed"))
 
         service = SillySpecStageDispatchService(db_session)
         result = await service.dispatch_next_step(
@@ -459,9 +447,7 @@ async def test_dispatch_next_step_records_last_dispatch(db_session: AsyncSession
     change = await _create_change(db_session, workspace_id=workspace_id)
 
     mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
-    with patch(
-        "app.modules.agent.service.AgentService"
-    ) as MockAgentService:
+    with patch("app.modules.agent.service.AgentService") as MockAgentService:
         mock_svc = MockAgentService.return_value
         mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
 
@@ -491,9 +477,7 @@ async def test_dispatch_next_step_creates_workspace_association(db_session: Asyn
     change = await _create_change(db_session, workspace_id=workspace_id)
 
     mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
-    with patch(
-        "app.modules.agent.service.AgentService"
-    ) as MockAgentService:
+    with patch("app.modules.agent.service.AgentService") as MockAgentService:
         mock_svc = MockAgentService.return_value
         mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
 
@@ -512,6 +496,7 @@ async def test_dispatch_next_step_creates_workspace_association(db_session: Asyn
     # Verify AgentRunWorkspace association exists
     from sqlalchemy import select as sa_select
     from sqlmodel import col as sa_col
+
     from app.modules.workspace.model import AgentRunWorkspace
 
     stmt = sa_select(AgentRunWorkspace).where(
@@ -534,9 +519,7 @@ async def test_dispatch_next_step_idempotency(db_session: AsyncSession) -> None:
     user_id = uuid.uuid4()
 
     mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
-    with patch(
-        "app.modules.agent.service.AgentService"
-    ) as MockAgentService:
+    with patch("app.modules.agent.service.AgentService") as MockAgentService:
         mock_svc = MockAgentService.return_value
         mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
 
@@ -564,7 +547,6 @@ async def test_dispatch_next_step_idempotency(db_session: AsyncSession) -> None:
         assert result2["reason"] == "active_run_exists"
 
 
-
 # ===================================================================
 # 7. StageSyncResult + sync_stage_status (task-09)
 # ===================================================================
@@ -572,10 +554,9 @@ async def test_dispatch_next_step_idempotency(db_session: AsyncSession) -> None:
 
 import sqlite3
 from pathlib import Path as SyncPath
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.core.spec_paths import SpecPathResolver
-from app.modules.change.dispatch import StageSyncResult, SillySpecStageDispatchService
+from app.modules.change.dispatch import StageSyncResult
 
 
 def _create_sillyspec_db(
@@ -654,6 +635,7 @@ async def test_sync_stage_status_normal_sync(db_session: AsyncSession) -> None:
     await db_session.refresh(change)
 
     import tempfile
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         _create_sillyspec_db(
             SyncPath(tmp_dir),
@@ -704,6 +686,7 @@ async def test_sync_stage_status_all_steps_completed(db_session: AsyncSession) -
     await db_session.refresh(change)
 
     import tempfile
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         _create_sillyspec_db(
             SyncPath(tmp_dir),
@@ -752,13 +735,16 @@ async def test_sync_stage_status_db_connect_failed(db_session: AsyncSession) -> 
     run_id = uuid.uuid4()
 
     import tempfile
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         # Create a dummy file so is_file() returns True
         dummy_db = SyncPath(tmp_dir) / "sillyspec.db"
         dummy_db.write_text("not a real db")
         with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
             mock_resolve.return_value = dummy_db
-            with patch("app.modules.change.dispatch.sqlite3.connect", side_effect=sqlite3.Error("corrupt")):
+            with patch(
+                "app.modules.change.dispatch.sqlite3.connect", side_effect=sqlite3.Error("corrupt")
+            ):
                 result = await service.sync_stage_status(db_session, change.id, run_id)
 
     assert result.synced is False
@@ -771,6 +757,7 @@ async def test_sync_stage_status_db_read_failed(db_session: AsyncSession) -> Non
     change = await _create_change(db_session, workspace_id=workspace_id)
 
     import tempfile
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         # Create a valid db so connect succeeds but make execute fail
         db_path = SyncPath(tmp_dir) / ".sillyspec" / ".runtime" / "sillyspec.db"
@@ -796,6 +783,7 @@ async def test_sync_stage_status_change_key_not_in_db(db_session: AsyncSession) 
     change = await _create_change(db_session, workspace_id=workspace_id)
 
     import tempfile
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         _create_sillyspec_db(SyncPath(tmp_dir), change_key="other-change")
 
@@ -838,6 +826,7 @@ async def test_sync_stage_status_no_stage_record(db_session: AsyncSession) -> No
     await db_session.refresh(change)
 
     import tempfile
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         _create_sillyspec_db(
             SyncPath(tmp_dir),
@@ -879,6 +868,7 @@ async def test_sync_stage_status_empty_steps(db_session: AsyncSession) -> None:
     await db_session.refresh(change)
 
     import tempfile
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         _create_sillyspec_db(
             SyncPath(tmp_dir),
@@ -918,6 +908,7 @@ async def test_sync_stage_status_updates_change_stages_json(db_session: AsyncSes
     await db_session.refresh(change)
 
     import tempfile
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         _create_sillyspec_db(
             SyncPath(tmp_dir),
@@ -945,7 +936,6 @@ async def test_sync_stage_status_updates_change_stages_json(db_session: AsyncSes
     assert stage_info["current_step"] == "task-2"
     assert "synced_at" in stage_info
     assert str(run_id) == stage_info["synced_from_run"]
-
 
 
 # ===================================================================
@@ -980,9 +970,7 @@ async def test_dispatch_then_sync_partial_progress(db_session: AsyncSession) -> 
 
     # --- Phase 1: dispatch_next_step ---
     mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
-    with patch(
-        "app.modules.agent.service.AgentService"
-    ) as MockAgentService:
+    with patch("app.modules.agent.service.AgentService") as MockAgentService:
         mock_svc = MockAgentService.return_value
         mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
 
@@ -1023,7 +1011,9 @@ async def test_dispatch_then_sync_partial_progress(db_session: AsyncSession) -> 
         with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
             mock_resolve.return_value = SpecPathResolver(tmp_dir).db_path()
             sync_result = await service.sync_stage_status(
-                db_session, change.id, agent_run_id,
+                db_session,
+                change.id,
+                agent_run_id,
             )
 
     # Verify sync_result
@@ -1104,7 +1094,9 @@ async def test_dispatch_then_sync_all_completed(db_session: AsyncSession) -> Non
         with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
             mock_resolve.return_value = SpecPathResolver(tmp_dir).db_path()
             sync_result = await service.sync_stage_status(
-                db_session, change.id, agent_run_id,
+                db_session,
+                change.id,
+                agent_run_id,
             )
 
     assert sync_result.synced is True
@@ -1165,8 +1157,6 @@ async def test_dispatch_then_sync_no_db_stops_chain(db_session: AsyncSession) ->
     # Change.current_stage should NOT have been updated (String column persisted)
     await db_session.refresh(change)
     assert change.current_stage == "draft"
-
-
 
 
 async def test_dispatch_sync_auto_dispatch_chain(db_session: AsyncSession) -> None:

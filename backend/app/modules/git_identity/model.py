@@ -80,6 +80,4 @@ class GitIdentity(BaseModel, table=True):
         sa_column=Column(DateTime, nullable=False, default=datetime.utcnow),
     )
 
-    __table_args__ = (
-        Index("idx_git_identities_user", "user_id", "revoked_at"),
-    )
+    __table_args__ = (Index("idx_git_identities_user", "user_id", "revoked_at"),)

@@ -31,10 +31,22 @@ log = get_logger(__name__)
 
 # ── Whitelist / Blacklist ───────────────────────────────────────────────────
 
-ALLOWED_OPERATIONS: frozenset[str] = frozenset({
-    "status", "diff", "add", "commit", "push", "pull", "fetch",
-    "log", "branch", "checkout", "merge", "rebase",
-})
+ALLOWED_OPERATIONS: frozenset[str] = frozenset(
+    {
+        "status",
+        "diff",
+        "add",
+        "commit",
+        "push",
+        "pull",
+        "fetch",
+        "log",
+        "branch",
+        "checkout",
+        "merge",
+        "rebase",
+    }
+)
 
 BLOCKED_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"--force", re.IGNORECASE),
@@ -52,12 +64,12 @@ DEFAULT_GIT_AUTHOR_EMAIL = "agent@sillyhub.local"
 # ── Shell injection patterns ────────────────────────────────────────────────
 
 SHELL_INJECTION_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"\$\("),          # $( command substitution
-    re.compile(r"`"),             # backtick command substitution
-    re.compile(r";\s*\w"),        # ;cmd chain
-    re.compile(r"\|\s*[a-zA-Z]"), # |cmd pipe
-    re.compile(r"&&\s*\w"),       # && chain
-    re.compile(r">\s*/"),         # > /path redirect
+    re.compile(r"\$\("),  # $( command substitution
+    re.compile(r"`"),  # backtick command substitution
+    re.compile(r";\s*\w"),  # ;cmd chain
+    re.compile(r"\|\s*[a-zA-Z]"),  # |cmd pipe
+    re.compile(r"&&\s*\w"),  # && chain
+    re.compile(r">\s*/"),  # > /path redirect
 ]
 
 # ── Redaction ───────────────────────────────────────────────────────────────
@@ -137,7 +149,7 @@ def validate_operation(operation: str, args: list[str]) -> None:
         for pat in SHELL_INJECTION_PATTERNS:
             if pat.search(arg):
                 raise GitOperationForbidden(
-                    f"Shell injection pattern detected in argument.",
+                    "Shell injection pattern detected in argument.",
                     details={"operation": operation, "args": args},
                 )
 
@@ -192,7 +204,8 @@ class GitGatewayService:
             )
             try:
                 stdout, _ = await asyncio.wait_for(
-                    proc.communicate(), timeout=GIT_TIMEOUT,
+                    proc.communicate(),
+                    timeout=GIT_TIMEOUT,
                 )
             except TimeoutError:
                 proc.kill()
@@ -211,7 +224,7 @@ class GitGatewayService:
 
             # Failure → retry if allowed
             if retry_policy and attempt < max_attempts - 1:
-                delay = retry_policy.base_delay * (2 ** attempt)
+                delay = retry_policy.base_delay * (2**attempt)
                 log.warning(
                     "git_gateway_retry",
                     operation=operation,
@@ -265,11 +278,16 @@ class GitGatewayService:
 
         # Count
         from sqlalchemy import func
+
         count_stmt = select(func.count()).select_from(base.subquery())
         total = (await self._session.execute(count_stmt)).scalar() or 0
 
         # Paginate
-        stmt = base.order_by(GitOperationLog.timestamp.desc()).offset((page - 1) * page_size).limit(page_size)
+        stmt = (
+            base.order_by(GitOperationLog.timestamp.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
         rows = list((await self._session.execute(stmt)).scalars().all())
         return rows, total
 
@@ -293,7 +311,9 @@ class GitGatewayService:
         return DEFAULT_GIT_AUTHOR_NAME, DEFAULT_GIT_AUTHOR_EMAIL
 
     async def _get_active_lease(
-        self, lease_id: uuid.UUID, user_id: uuid.UUID,
+        self,
+        lease_id: uuid.UUID,
+        user_id: uuid.UUID,
     ) -> WorktreeLease:
         stmt = select(WorktreeLease).where(col(WorktreeLease.id) == lease_id)
         lease = (await self._session.execute(stmt)).scalars().first()

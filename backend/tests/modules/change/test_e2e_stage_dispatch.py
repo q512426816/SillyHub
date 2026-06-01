@@ -23,11 +23,9 @@ from sqlmodel import col as sa_col
 from app.modules.agent.model import AgentRun
 from app.modules.change.dispatch import (
     SillySpecStageDispatchService,
-    StageSyncResult,
     auto_dispatch_next_step,
 )
-from app.modules.change.model import Change, StageEnum
-
+from app.modules.change.model import Change
 
 # ---------------------------------------------------------------------------
 # Helpers (same pattern as test_dispatch_chain.py)
@@ -129,9 +127,7 @@ def _update_sillyspec_db(
     )
 
     # Get change id
-    row = cur.execute(
-        "SELECT id FROM changes WHERE name = ?", (change_key,)
-    ).fetchone()
+    row = cur.execute("SELECT id FROM changes WHERE name = ?", (change_key,)).fetchone()
     change_id = row[0]
 
     # Delete any existing stage+steps records for this stage to avoid duplicates
@@ -165,7 +161,6 @@ def _update_sillyspec_db(
 
     conn.commit()
     conn.close()
-
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +281,7 @@ async def test_e2e_draft_propose_plan_chain(
     assert change.current_stage == "propose"
 
     # Auto dispatch should NOT trigger (stage completed)
-    with patch("app.modules.change.dispatch.dispatch", new_callable=AsyncMock) as mock_dispatch:
+    with patch("app.modules.change.dispatch.dispatch", new_callable=AsyncMock) as _mock_dispatch:
         auto_result = await auto_dispatch_next_step(
             session=db_session,
             workspace_id=workspace_id,

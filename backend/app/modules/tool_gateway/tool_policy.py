@@ -11,7 +11,7 @@ import ipaddress
 import socket
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -26,8 +26,13 @@ log = get_logger(__name__)
 
 # All supported tool types — used as default for allowed_tools.
 ALL_TOOLS: list[str] = [
-    "file_read", "file_write", "file_list", "file_search",
-    "shell_exec", "run_tests", "http_get",
+    "file_read",
+    "file_write",
+    "file_list",
+    "file_search",
+    "shell_exec",
+    "run_tests",
+    "http_get",
 ]
 
 
@@ -86,20 +91,20 @@ class ToolPolicy(BaseModel, table=True):
         sa_column=Column(Integer, nullable=False, default=64000),
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(
             DateTime(timezone=True),
             nullable=False,
-            default=lambda: datetime.now(timezone.utc),
+            default=lambda: datetime.now(UTC),
         ),
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(
             DateTime(timezone=True),
             nullable=False,
-            default=lambda: datetime.now(timezone.utc),
-            onupdate=lambda: datetime.now(timezone.utc),
+            default=lambda: datetime.now(UTC),
+            onupdate=lambda: datetime.now(UTC),
         ),
     )
 
@@ -128,6 +133,7 @@ def default_policy() -> ToolPolicy:
 
 class ToolOperationForbidden(AppError):
     """Raised when a tool call violates the workspace policy."""
+
     code = "TOOL_OPERATION_FORBIDDEN"
     http_status = 403
 
@@ -138,6 +144,7 @@ class ToolOperationForbidden(AppError):
 @dataclass(frozen=True)
 class PolicyLimits:
     """Resolved resource limits after applying policy constraints."""
+
     effective_timeout: int
     max_output_size: int
 

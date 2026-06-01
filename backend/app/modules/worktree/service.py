@@ -104,9 +104,7 @@ class WorktreeService:
             await self._git_runner.clone_bare(workspace_obj.repo_url, bare_path, env)
             await self._git_runner.worktree_add(bare_path, repo_dir, branch_name, env)
             self._exec_env.create_directories(lease_root)
-            self._exec_env.write_gitconfig(
-                lease_root, identity.git_username, identity.git_email
-            )
+            self._exec_env.write_gitconfig(lease_root, identity.git_username, identity.git_email)
             token = self._cipher.decrypt(identity.encrypted_credential, identity.key_id)
             self._exec_env.write_askpass(lease_root, token)
         except Exception:
@@ -239,9 +237,7 @@ class WorktreeService:
             )
         return row
 
-    async def _get_identity(
-        self, identity_id: uuid.UUID, user_id: uuid.UUID
-    ) -> GitIdentity:
+    async def _get_identity(self, identity_id: uuid.UUID, user_id: uuid.UUID) -> GitIdentity:
         stmt = select(GitIdentity).where(col(GitIdentity.id) == identity_id)
         row = (await self._session.execute(stmt)).scalars().first()
         if row is None:

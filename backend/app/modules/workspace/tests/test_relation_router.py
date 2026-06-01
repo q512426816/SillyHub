@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from httpx import AsyncClient
 
 
@@ -260,9 +259,7 @@ async def test_topology_returns_global_graph(
     assert len(body["nodes"]) >= 3
     assert len(body["edges"]) >= 2
 
-    edge_types = {
-        (e["source_id"], e["target_id"]): e["relation_type"] for e in body["edges"]
-    }
+    edge_types = {(e["source_id"], e["target_id"]): e["relation_type"] for e in body["edges"]}
     assert (ws_a["id"], ws_b["id"]) in edge_types
     assert edge_types[(ws_a["id"], ws_b["id"])] == "depends_on"
     assert (ws_b["id"], ws_c["id"]) in edge_types
@@ -277,7 +274,7 @@ async def test_topology_excludes_deleted_workspaces(
 ) -> None:
     ws_a = await _create_workspace(client, auth_headers, tmp_path, "workspace-a")
     ws_b = await _create_workspace(client, auth_headers, tmp_path, "workspace-b")
-    ws_c = await _create_workspace(client, auth_headers, tmp_path, "workspace-c")
+    _ws_c = await _create_workspace(client, auth_headers, tmp_path, "workspace-c")
 
     # A -> B (depends_on)
     await client.post(
@@ -358,9 +355,7 @@ async def test_same_pair_different_types_coexist(
 # ── Test 13-16: No-auth tests ─────────────────────────────────────────────────
 
 
-async def test_no_auth_create_relation_returns_401(
-    client: AsyncClient, tmp_path: Path
-) -> None:
+async def test_no_auth_create_relation_returns_401(client: AsyncClient, tmp_path: Path) -> None:
     """POST /api/workspaces/{id}/relations without Authorization returns 401."""
     resp = await client.post(
         "/api/workspaces/00000000-0000-0000-0000-000000000000/relations",
@@ -369,9 +364,7 @@ async def test_no_auth_create_relation_returns_401(
     assert resp.status_code == 401
 
 
-async def test_no_auth_list_relations_returns_401(
-    client: AsyncClient, tmp_path: Path
-) -> None:
+async def test_no_auth_list_relations_returns_401(client: AsyncClient, tmp_path: Path) -> None:
     """GET /api/workspaces/{id}/relations without Authorization returns 401."""
     resp = await client.get(
         "/api/workspaces/00000000-0000-0000-0000-000000000000/relations",
@@ -422,7 +415,8 @@ async def test_cycle_two_nodes_via_http(
     assert resp.status_code == 200
     body = resp.json()
     cycle_edges = [
-        e for e in body["edges"]
+        e
+        for e in body["edges"]
         if (e["source_id"] == ws_a["id"] and e["target_id"] == ws_b["id"])
         or (e["source_id"] == ws_b["id"] and e["target_id"] == ws_a["id"])
     ]

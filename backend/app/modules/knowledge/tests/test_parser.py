@@ -10,7 +10,9 @@ from app.modules.knowledge.parser import KnowledgeParser, parse_md_directory
 def test_parse_knowledge_with_files(tmp_path: Path) -> None:
     knowledge_dir = tmp_path / "knowledge"
     knowledge_dir.mkdir()
-    (knowledge_dir / "INDEX.md").write_text("# Knowledge Index\n\nSome index text.", encoding="utf-8")
+    (knowledge_dir / "INDEX.md").write_text(
+        "# Knowledge Index\n\nSome index text.", encoding="utf-8"
+    )
     (knowledge_dir / "cors.md").write_text("# CORS Notes\n\nCross-origin stuff.", encoding="utf-8")
 
     entries = parse_md_directory(knowledge_dir, tmp_path, ".sillyspec/knowledge")

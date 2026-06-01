@@ -13,26 +13,37 @@ import re
 import uuid
 from collections.abc import Callable, Coroutine
 from pathlib import Path
+from urllib.parse import urlparse
 
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from urllib.parse import urlparse
 
 from app.core.errors import AppError, PermissionDenied, WorktreeLeaseNotFound
 from app.core.logging import get_logger
 from app.modules.git_gateway.service import redact_output
 from app.modules.task.model import Task
 from app.modules.tool_gateway.model import ToolOperationLog
-from app.modules.tool_gateway.tool_policy import ToolPolicy, ToolPolicyService, default_policy
+from app.modules.tool_gateway.tool_policy import (
+    PolicyLimits,
+    ToolPolicy,
+    ToolPolicyService,
+    default_policy,
+)
 from app.modules.workflow.model import AuditLog
 from app.modules.worktree.model import WorktreeLease
 
 log = get_logger(__name__)
 
-TOOL_TYPES = frozenset({
-    "file_read", "file_write", "file_list", "file_search", "shell_exec",
-    "run_tests", "http_get",
-})
+TOOL_TYPES = frozenset(
+    {
+        "file_read",
+        "file_write",
+        "file_list",
+        "file_search",
+        "shell_exec",
+        "run_tests",
+        "http_get",
+    }
+)
 
 MAX_OUTPUT_SIZE = 64_000
 DEFAULT_TIMEOUT = 30
@@ -91,9 +102,7 @@ def validate_path(
         rel = target.relative_to(root)
         rel_str = str(rel).replace("\\", "/")
         matched = any(
-            rel_str == ap
-            or rel_str == ap.rstrip("/")
-            or rel_str.startswith(ap.rstrip("/") + "/")
+            rel_str == ap or rel_str == ap.rstrip("/") or rel_str.startswith(ap.rstrip("/") + "/")
             for ap in allowed_paths
         )
         if not matched:
@@ -155,7 +164,9 @@ class ToolGatewayService:
         # Truncate output to policy limit
         output = result.get("output", "")
         if output and len(output) > limits.max_output_size:
-            output = output[:limits.max_output_size] + f"\n... (truncated, {len(output)} total chars)"
+            output = (
+                output[: limits.max_output_size] + f"\n... (truncated, {len(output)} total chars)"
+            )
             result["output"] = output
 
         op_log = ToolOperationLog(
@@ -178,12 +189,14 @@ class ToolGatewayService:
             action=f"tool:{tool_type}",
             resource_type="tool_operation",
             resource_id=op_log.id,
-            details_json=json.dumps({
-                "tool_type": tool_type,
-                "result_code": result["result_code"],
-                "lease_id": str(lease_id),
-                "policy_name": policy.name,
-            }),
+            details_json=json.dumps(
+                {
+                    "tool_type": tool_type,
+                    "result_code": result["result_code"],
+                    "lease_id": str(lease_id),
+                    "policy_name": policy.name,
+                }
+            ),
         )
         self._session.add(audit)
 
@@ -205,7 +218,7 @@ class ToolGatewayService:
         params: dict,
         lease_root: Path,
         allowed_paths: list[str],
-        limits: "PolicyLimits | None" = None,
+        limits: PolicyLimits | None = None,
     ) -> dict:
         handlers: dict[str, Callable[..., Coroutine[object, object, dict]]] = {
             "file_read": self._handle_file_read,
@@ -225,7 +238,10 @@ class ToolGatewayService:
         return await handler(params, lease_root, allowed_paths)
 
     async def _handle_file_read(
-        self, params: dict, lease_root: Path, allowed_paths: list[str],
+        self,
+        params: dict,
+        lease_root: Path,
+        allowed_paths: list[str],
     ) -> dict:
         path_str = params.get("path", "")
         target = validate_path(lease_root, path_str, allowed_paths)
@@ -241,7 +257,10 @@ class ToolGatewayService:
         return {"result_code": 0, "output": redact_output(content)}
 
     async def _handle_file_write(
-        self, params: dict, lease_root: Path, allowed_paths: list[str],
+        self,
+        params: dict,
+        lease_root: Path,
+        allowed_paths: list[str],
     ) -> dict:
         path_str = params.get("path", "")
         content = params.get("content", "")
@@ -256,7 +275,10 @@ class ToolGatewayService:
         return {"result_code": 0, "output": f"Written {len(content)} chars to {path_str}"}
 
     async def _handle_file_list(
-        self, params: dict, lease_root: Path, allowed_paths: list[str],
+        self,
+        params: dict,
+        lease_root: Path,
+        allowed_paths: list[str],
     ) -> dict:
         path_str = params.get("path", ".")
         recursive = params.get("recursive", False)
@@ -284,7 +306,10 @@ class ToolGatewayService:
         return {"result_code": 0, "output": output}
 
     async def _handle_file_search(
-        self, params: dict, lease_root: Path, allowed_paths: list[str],
+        self,
+        params: dict,
+        lease_root: Path,
+        allowed_paths: list[str],
     ) -> dict:
         path_str = params.get("path", ".")
         pattern = params.get("pattern", "")
@@ -307,7 +332,9 @@ class ToolGatewayService:
         return {"result_code": 0, "output": output}
 
     async def _handle_shell_exec(
-        self, params: dict, lease_root: Path,
+        self,
+        params: dict,
+        lease_root: Path,
     ) -> dict:
         command = params.get("command", "")
         args = params.get("args", [])
@@ -328,7 +355,8 @@ class ToolGatewayService:
             )
             try:
                 stdout, _ = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout,
+                    proc.communicate(),
+                    timeout=timeout,
                 )
             except TimeoutError:
                 proc.kill()
@@ -347,7 +375,9 @@ class ToolGatewayService:
         return {"result_code": result_code, "output": safe_output}
 
     async def _handle_run_tests(
-        self, params: dict, lease_root: Path,
+        self,
+        params: dict,
+        lease_root: Path,
     ) -> dict:
         """Execute test runner (pytest) and parse structured results."""
         runner = params.get("runner", "pytest")
@@ -375,7 +405,8 @@ class ToolGatewayService:
             )
             try:
                 stdout, _ = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout,
+                    proc.communicate(),
+                    timeout=timeout,
                 )
             except TimeoutError:
                 proc.kill()
@@ -421,9 +452,21 @@ class ToolGatewayService:
                     return None
 
             passed = int(summary_match.group(1) or 0)
-            failed = int(summary_match.group(2) or 0) if summary_match.lastindex and summary_match.lastindex >= 2 else 0
-            skipped = int(summary_match.group(3) or 0) if summary_match.lastindex and summary_match.lastindex >= 3 else 0
-            errors = int(summary_match.group(4) or 0) if summary_match.lastindex and summary_match.lastindex >= 4 else 0
+            failed = (
+                int(summary_match.group(2) or 0)
+                if summary_match.lastindex and summary_match.lastindex >= 2
+                else 0
+            )
+            skipped = (
+                int(summary_match.group(3) or 0)
+                if summary_match.lastindex and summary_match.lastindex >= 3
+                else 0
+            )
+            errors = (
+                int(summary_match.group(4) or 0)
+                if summary_match.lastindex and summary_match.lastindex >= 4
+                else 0
+            )
 
             # Extract failed test names
             failed_tests: list[str] = []
@@ -434,7 +477,9 @@ class ToolGatewayService:
 
             # Output summary (last 50 lines)
             output_lines = raw_output.strip().split("\n")
-            summary_text = "\n".join(output_lines[-50:]) if len(output_lines) > 50 else raw_output.strip()
+            summary_text = (
+                "\n".join(output_lines[-50:]) if len(output_lines) > 50 else raw_output.strip()
+            )
 
             return {
                 "runner": "pytest",
@@ -449,7 +494,9 @@ class ToolGatewayService:
         return None
 
     async def _handle_http_get(
-        self, params: dict, lease_root: Path,
+        self,
+        params: dict,
+        lease_root: Path,
     ) -> dict:
         """Execute HTTP GET request with SSRF protection and domain whitelist.
 
@@ -472,7 +519,9 @@ class ToolGatewayService:
             return {"result_code": 1, "output": f"Unsupported scheme: {parsed.scheme}"}
 
         try:
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, max_redirects=3) as client:
+            async with httpx.AsyncClient(
+                timeout=timeout, follow_redirects=True, max_redirects=3
+            ) as client:
                 resp = await client.get(url, headers=headers)
                 body = resp.text
 
@@ -490,7 +539,9 @@ class ToolGatewayService:
             return {"result_code": 1, "output": f"HTTP request failed: {e}"}
 
     async def _get_lease_and_task(
-        self, lease_id: uuid.UUID, user_id: uuid.UUID,
+        self,
+        lease_id: uuid.UUID,
+        user_id: uuid.UUID,
     ) -> tuple[WorktreeLease, Task | None]:
         lease = await self._session.get(WorktreeLease, lease_id)
         if lease is None:
@@ -505,11 +556,7 @@ class ToolGatewayService:
                 "Lease is not active.",
                 details={"lease_id": str(lease_id), "status": lease.status},
             )
-        task = (
-            await self._session.get(Task, lease.task_id)
-            if lease.task_id
-            else None
-        )
+        task = await self._session.get(Task, lease.task_id) if lease.task_id else None
         return lease, task
 
     @staticmethod
