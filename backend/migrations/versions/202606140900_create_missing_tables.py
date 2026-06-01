@@ -68,8 +68,14 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.func.now(),
         ),
+        if_not_exists=True,
     )
-    op.create_index("ix_releases_workspace_status", "releases", ["workspace_id", "status"])
+    op.create_index(
+        "ix_releases_workspace_status",
+        "releases",
+        ["workspace_id", "status"],
+        if_not_exists=True,
+    )
 
     # ── 2. release_approvals ────────────────────────────────────────────
     op.create_table(
@@ -95,12 +101,14 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.func.now(),
         ),
+        if_not_exists=True,
     )
     op.create_index(
         "ux_release_approvals_release_user",
         "release_approvals",
         ["release_id", "approver_id"],
         unique=True,
+        if_not_exists=True,
     )
 
     # ── 3. incidents ────────────────────────────────────────────────────
@@ -151,8 +159,14 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.func.now(),
         ),
+        if_not_exists=True,
     )
-    op.create_index("ix_incidents_workspace_status", "incidents", ["workspace_id", "status"])
+    op.create_index(
+        "ix_incidents_workspace_status",
+        "incidents",
+        ["workspace_id", "status"],
+        if_not_exists=True,
+    )
 
     # ── 4. postmortems ──────────────────────────────────────────────────
     op.create_table(
@@ -188,6 +202,7 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.func.now(),
         ),
+        if_not_exists=True,
     )
 
     # ── 5. tool_operation_logs ──────────────────────────────────────────
@@ -222,9 +237,20 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.func.now(),
         ),
+        if_not_exists=True,
     )
-    op.create_index("ix_tool_op_lease", "tool_operation_logs", ["lease_id", "timestamp"])
-    op.create_index("ix_tool_op_workspace", "tool_operation_logs", ["workspace_id", "timestamp"])
+    op.create_index(
+        "ix_tool_op_lease",
+        "tool_operation_logs",
+        ["lease_id", "timestamp"],
+        if_not_exists=True,
+    )
+    op.create_index(
+        "ix_tool_op_workspace",
+        "tool_operation_logs",
+        ["workspace_id", "timestamp"],
+        if_not_exists=True,
+    )
 
     # ── 6. change_reviews ───────────────────────────────────────────────
     op.create_table(
@@ -250,8 +276,14 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.func.now(),
         ),
+        if_not_exists=True,
     )
-    op.create_index("ix_change_reviews_change", "change_reviews", ["change_id"])
+    op.create_index(
+        "ix_change_reviews_change",
+        "change_reviews",
+        ["change_id"],
+        if_not_exists=True,
+    )
 
     # ── 7. audit_logs ───────────────────────────────────────────────────
     op.create_table(
@@ -279,9 +311,20 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.func.now(),
         ),
+        if_not_exists=True,
     )
-    op.create_index("ix_audit_workspace_ts", "audit_logs", ["workspace_id", "timestamp"])
-    op.create_index("ix_audit_resource", "audit_logs", ["resource_type", "resource_id"])
+    op.create_index(
+        "ix_audit_workspace_ts",
+        "audit_logs",
+        ["workspace_id", "timestamp"],
+        if_not_exists=True,
+    )
+    op.create_index(
+        "ix_audit_resource",
+        "audit_logs",
+        ["resource_type", "resource_id"],
+        if_not_exists=True,
+    )
 
     # ── 8. scan_documents ───────────────────────────────────────────────
     # Uses the post-migration-202606130900 schema (workspace_id only, no component_id).
@@ -311,14 +354,21 @@ def upgrade() -> None:
         ),
         sa.Column("content", sa.Text, nullable=True),
         sa.Column("last_modified_at", sa.DateTime(timezone=True), nullable=True),
+        if_not_exists=True,
     )
     op.create_index(
         "ux_scan_docs_workspace_type",
         "scan_documents",
         ["workspace_id", "doc_type"],
         unique=True,
+        if_not_exists=True,
     )
-    op.create_index("ix_scan_docs_workspace", "scan_documents", ["workspace_id"])
+    op.create_index(
+        "ix_scan_docs_workspace",
+        "scan_documents",
+        ["workspace_id"],
+        if_not_exists=True,
+    )
 
 
 def downgrade() -> None:

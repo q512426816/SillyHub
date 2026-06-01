@@ -1,60 +1,156 @@
 ---
 author: qinyi
-created_at: 2026-05-29T17:38:00
+created_at: 2026-05-31T23:30:00
 ---
 
-# CONVENTIONS
+# 项目规范
 
-## 框架隐形规则
+> 最后更新：2026-05-31
+> 范围：SillyHub monorepo 顶层开发规范
 
-- API router 在 `backend/app/main.py` 统一 include，挂载到 `/api` 前缀。
-- 后端路由通过 `Depends(get_current_user)` 或 `Depends(require_permission(...))` 显式声明认证授权；无全局认证中间件。
-- 异常以 `AppError` 派生类建模（~30 个子类），由 `register_exception_handlers` 统一映射为 HTTP 响应。
-- 请求链路使用 request id middleware（读/生成 UUID，附加到 request.state 和 response header）和 structlog。
-- 前端 API 层通过 `apiFetch<T>()` 统一处理：自动添加 Authorization header、401 自动 refresh + 重试、统一 `ApiError` 错误类型。
-- 前端 AppShell auth guard 检查 Zustand store 的 `accessToken`，缺失则重定向 `/login`。
-- 工作流、agent、Git gateway、tool gateway 写入审计或操作日志。
+## 1. 分支策略
 
-## 实体继承规范
+- **main**：主分支，始终保持可部署状态
+- **feature/***：功能分支，从 main 创建，PR 合入
+- 代码修改通过 **worktree 隔离**进行，不依赖传统分支隔离
+- GitGateway 白名单拒绝 `--force` 推送到 main/master
 
-### Backend
+## 2. Commit 规范
 
-- 持久化模型基于 SQLModel，通用基类为 `backend/app/models/base.py` 的 `BaseModel`。
-- 所有表模型使用 `(BaseModel, table=True)` 多重继承。
-- 基类提供 `id` (UUID)、`created_at`、`updated_at` 通用字段。
-- 软删除使用 `deleted_at: datetime | None`（Workspace、User），配合部分唯一索引 `postgresql_where=text("deleted_at IS NULL")`。
-- 复活模式：`_resurrect_soft_deleted()` 可在同名 slug 重建时恢复已软删除记录。
-- 服务层持有 `AsyncSession`，写入模式：`session.add()` → `commit()` → `refresh()`。
+### 格式
 
-### Frontend
+```
+<type>(<scope>): <description>
+```
 
-- 无 ORM，类型定义在各 `src/lib/*.ts` 中与 API 函数共存。
-- `interface` 用于实体数据结构和 Props 类型；`type` 用于联合字面量和简单别名。
-- 约 90+ TypeScript 接口/类型分布在 19 个领域模块中。
+### Type 列表
 
-## 代码风格
-
-### Backend
-
-| 维度 | 约定 |
+| 类型 | 用途 |
 |------|------|
-| 模块结构 | `model.py` + `schema.py` + `service.py` + `router.py` + `tests/` |
-| 函数命名 | snake_case（`list_workspaces`, `soft_delete`） |
-| 私有方法 | 单下划线前缀（`_resurrect_soft_deleted`） |
-| Schema 命名 | `<Entity><Action>` 后缀：`Create`, `Read`, `Update`, `Response`, `ListResponse`, `Summary` |
-| 依赖注入 | `Annotated` 类型别名（`SessionDep`, `CurrentUser`）+ `Depends()` |
-| 字段声明 | `Field(...)` 声明验证、默认值和 DB column |
-| Lint | Ruff (E,F,I,B,UP,N,SIM,RUF,BLE) line-length=100 + mypy |
+| feat | 新功能 |
+| fix | Bug 修复 |
+| refactor | 重构（不改变行为） |
+| docs | 文档变更 |
+| test | 测试相关 |
+| chore | 构建/工具/配置 |
+| perf | 性能优化 |
 
-### Frontend
+### Scope
 
-| 维度 | 约定 |
-|------|------|
-| 文件命名 | kebab-case（`workspace-card.tsx`, `api.ts`） |
-| 组件命名 | PascalCase |
-| 函数命名 | camelCase + CRUD 动词前缀（`listChanges`, `getChange`, `createChange`） |
-| 导出模式 | 页面 = `export default`，组件 = 命名导出 |
-| CSS | 100% Tailwind utility + shadcn/ui 语义 token（`bg-card`, `text-muted-foreground`） |
-| API 函数 | 全部 `export function` 声明式，无箭头函数导出 |
-| TypeScript | strict + noUncheckedIndexedAccess |
-| 测试 | Vitest + jsdom + Testing Library |
+- 后端：模块名（auth、workspace、git_gateway）
+- 前端：frontend 或具体页面名
+- 顶层：deploy、ci、sillyspec
+
+### 示例
+
+```
+feat(git_gateway): add retry policy with exponential backoff
+fix(workspace): resolve path rewriting on Windows
+docs(readme): update local development setup
+```
+
+## 3. PR 规范
+
+### 描述模板
+
+```markdown
+## 变更内容
+- [x] 做了什么
+
+## 关联
+- SillySpec 变更包：`.sillyspec/changes/change/<key>/`
+
+## 测试
+- [x] `make backend-test` 通过
+- [x] `make frontend-test` 通过
+
+## 验证步骤
+1. 具体可执行的验证步骤
+```
+
+- 至少一人 Review
+- CI 全绿
+- 数据库迁移必须人工审查
+
+## 4. 代码风格
+
+### 通用
+
+- `.editorconfig`：UTF-8、LF、末尾换行
+- 默认 2 空格，Python 4 空格，Makefile tab
+
+### 后端 (Python)
+
+- **格式化**：Ruff（`ruff format .` + `ruff check .`）
+- **类型检查**：mypy（`uv run mypy app`）
+- **线宽**：88 字符
+- **命名**：snake_case（函数/变量）、PascalCase（类）
+- **异步**：所有 DB/IO 操作使用 async/await
+- **错误处理**：通过 `app.core.errors` 统一异常体系
+
+### 前端 (TypeScript)
+
+- **格式化**：ESLint + Prettier（`pnpm lint`）
+- **类型检查**：`pnpm typecheck`（严格模式）
+- **组件**：函数组件 + hooks
+- **样式**：Tailwind CSS 工具类
+- **API 调用**：统一走 `src/lib/api.ts`
+
+## 5. 文档规范
+
+### SillySpec 变更包（6 节模板）
+
+1. MASTER.md — 变更总览 + 进度
+2. proposal.md — 提案
+3. requirements.md — 需求 + 验收标准
+4. design.md — 架构/数据模型/API
+5. plan.md — 任务分解/排期
+6. tasks.md — 任务总表
+7. verification.md — 验证检查表
+
+### Task 文档（6 节模板）
+
+1. 目标（≤ 5 行 + "不在范围"）
+2. 输入（文件路径）
+3. 产出（文件/API/DB/命令）
+4. 验收（可点击验证）
+5. 风险（具体对策）
+6. DoD（checkbox）
+
+### 扫描文档
+
+`docs/{component}/scan/` 下 7 个固定文件：ARCHITECTURE / PROJECT / STRUCTURE / CONVENTIONS / INTEGRATIONS / TESTING / CONCERNS
+
+### 模块文档
+
+`docs/{component}/modules/` 下每个模块一个 `.md`：职责 → 设计 → 接口 → 数据流 → 决策 → 依赖 → 注意 → 变更索引
+
+## 6. SillySpec 工作流规范
+
+### 变更阶段
+
+```
+propose → clarify → brainstorm → plan → review
+→ execute → verify → approve → archive → close
+```
+
+### Agent 使用
+
+- 仅在 worktree 隔离环境中执行
+- subprocess 启动，不直接暴露终端
+- ContextBuilder 注入 SillySpec 知识
+- 日志实时回传（SSE）
+
+### Git 操作
+
+- 必须通过 GitGatewayService
+- 白名单审计 + 输出脱敏
+- 禁止 --force/--hard/clean
+- main/master 禁止直接 push
+
+## 7. 环境变量管理
+
+- `.env` 统一 gitignored
+- `deploy/.env.example` 为唯一模板
+- 敏感变量不在代码中硬编码
+- Docker 通过 `env_file` + `environment` 注入

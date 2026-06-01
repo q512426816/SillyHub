@@ -1,40 +1,115 @@
 ---
 author: qinyi
-created_at: 2026-05-29T17:42:00
+created_at: 2026-05-31T23:30:00
 ---
 
-# PROJECT — multi-agent-platform (monorepo)
+# 项目定位
 
-## 项目信息
+> 最后更新：2026-05-31
+> 范围：SillyHub 产品与业务视角
 
-- **名称**：multi-agent-platform
-- **目标**：围绕 SillySpec 文档资产构建多 agent 协作平台
-- **形态**：FastAPI 后端 + Next.js 前端 + Docker Compose 部署
-- **仓库**：https://github.com/qinyi/multi-agent-platform
-- **默认分支**：main
-- **开发状态**：未正式上线
+## 1. 一句话定位
 
-## 当前能力
+SillyHub 是一个将 SillySpec 变更管理规范产品化的多智能体协作平台，让多人、多项目、多 Agent 在统一工作流下协同完成软件全生命周期管理。
 
-- 可扫描工作区下 `.sillyspec` skeleton
-- 可解析 `.sillyspec/projects`、`.sillyspec/docs`、`.sillyspec/changes`、`.sillyspec/.runtime`
-- 可管理组件、变更、任务、工作流、agent 执行、工具/Git 审计、发布与事故
-- Agent 适配器可调用 Claude Code CLI 执行任务
-- Redis pub/sub 支持 Agent 日志实时流式传输
-- JWT 认证 + RBAC 权限控制
-- 完整的 CRUD API（19 个业务模块）
+## 2. 产品背景
 
-## 关键产品判断
+SillySpec 是一套轻量级的项目规范框架，通过 `.sillyspec/` 目录组织变更包、项目组、知识库等内容。但它仅是文件系统层面的约定，缺乏：
 
-- 如果平台目标是"管理任何代码项目"，则 SillySpec 应该是平台内置能力和内部工作层，而不是被管理项目的前置格式要求。
-- 被管理项目可以没有 `.sillyspec`；平台应能创建、映射、生成或托管对应 SillySpec 工作区。
+- **多人协作**：谁在做什么？工作区怎么隔离？
+- **流程自动化**：变更的 10 个阶段如何推进？Agent 何时介入？
+- **Git 集成**：多人在同一服务器上如何安全操作不同的 Git 身份？
+- **可视化**：变更状态、Agent 执行、审计日志如何呈现？
 
-## 技术栈概览
+SillyHub 正是为填补这些空白而构建的平台。它不是重新定义 SillySpec，而是把 `.sillyspec` 的真实目录结构、变更包、项目组组件、运行态和 Git 执行边界，**产品化成可交互的 Web 系统**。
 
-| 维度 | 技术 |
-|------|------|
-| 后端 | Python 3.12 + FastAPI + SQLModel + PostgreSQL + Redis |
-| 前端 | TypeScript + Next.js 14 + React 18 + Tailwind CSS |
-| 部署 | Docker Compose (4 服务) |
-| CI/CD | GitHub Actions (backend CI) |
-| 规范框架 | SillySpec (文档驱动开发) |
+## 3. 目标用户
+
+### 3.1 主要用户
+
+- **项目负责人**：管理多个工作空间和项目组件，追踪变更进度
+- **开发者**：通过平台创建变更、查看文档、提交代码、创建 PR
+- **AI Agent（Claude Code）**：在 worktree 隔离环境中自动执行编码任务
+
+### 3.2 次要用户
+
+- **运维人员**：部署和监控 Docker Compose 环境
+- **审计人员**：查看 Git 操作审计日志和变更历史
+
+## 4. 核心功能
+
+### 4.1 工作空间管理
+
+- 注册和扫描 SillySpec 工作空间
+- 识别 `.sillyspec/projects/*.yaml` 定义的子项目/组件
+- 维护组件间依赖关系拓扑图
+- 多对多关系支持（一个变更可影响多个组件）
+
+### 4.2 变更全生命周期
+
+- **创建变更包**：按 SillySpec 规范生成目录 + MASTER.md + 模板文档
+- **10 阶段工作流**：propose → clarify → brainstorm → plan → review → execute → verify → approve → archive → close
+- **阶段自动推进**：FSM 状态机 + SpecGuardian 文档完整性校验
+- **归档管理**：完成的变更自动归档到 `.sillyspec/changes/archive/`
+
+### 4.3 Agent 调度
+
+- Claude Code 子进程管理，首发适配
+- worktree 隔离执行环境（每人/每变更独立工作树）
+- 实时日志流（SSE）回传前端
+- 上下文构建器为 Agent 注入 SillySpec 知识
+
+### 4.4 Git 操作审计
+
+- 白名单操作（status/diff/add/commit/push/pull/fetch/log/branch/checkout/merge/rebase）
+- 受保护分支保护（禁止 force push main/master）
+- Shell 注入防护
+- 输出脱敏（PAT/Bearer token 自动遮蔽）
+- 全量审计日志
+
+### 4.5 认证与权限
+
+- JWT 认证 + RBAC 角色体系
+- Git Identity 管理（多用户多 Git 身份）
+- 凭据加密存储（libsodium secretbox）
+- Admin 引导程序（首次启动自动创建管理员）
+
+## 5. 业务价值
+
+### 5.1 对开发者
+
+- 不需要记忆 SillySpec 的目录结构约定，平台自动生成
+- 变更包一键创建 + 模板文档批量生成
+- Agent 自动执行编码任务，人工审核结果
+
+### 5.2 对团队
+
+- 多人在同一服务器上安全协作，Git 身份和工作区完全隔离
+- 变更状态透明可见，不会出现"谁在改什么"的混乱
+- 完整审计日志满足合规需求
+
+### 5.3 对 Agent 工作流
+
+- 标准化的 10 阶段变更流程，Agent 知道"现在该做什么"
+- 文档即状态的核心理念，Agent 的产出直接写入 SillySpec 文档
+- 可观测的执行过程，实时查看 Agent 输出
+
+## 6. 与同类产品的差异
+
+| 维度 | SillyHub | GitHub Projects | Linear |
+|------|----------|----------------|--------|
+| 规范驱动 | SillySpec 内建 | 无 | 无 |
+| Agent 集成 | Claude Code 原生 | Copilot | 无 |
+| 变更包 | 文件系统 + DB 双写 | Issue + PR | Issue |
+| Git 隔离 | worktree + 身份管理 | fork/branch | 无 |
+| 自托管 | Docker Compose 单机 | SaaS | SaaS |
+
+## 7. 当前阶段
+
+项目处于 **V1 功能开发后期**：
+
+- V0 Spikes 已全部通过（Git 隔离、工作空间扫描、Claude Code 子进程可控性）
+- 核心模块 20+ 已实现（auth、workspace、change、agent、git_gateway、workflow 等）
+- 前端基础 UI 已搭建（App Router + shadcn/ui + TanStack Query）
+- CI/CD 流水线就绪（backend-ci / frontend-ci）
+- 正在完善 Agent 调度和变更工作流的深度集成

@@ -6,9 +6,12 @@
  */
 import { useSession } from "@/stores/session";
 
-/** Absolute backend URL — used only for SSR / EventSource / direct fetches. */
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? "http://localhost:8000";
+/** Absolute backend URL — used only for SSR / direct server-side fetches. */
+const SERVER_API_BASE_URL = (
+  process.env.INTERNAL_API_BASE_URL ??
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  "http://localhost:8000"
+).replace(/\/$/, "");
 
 /**
  * When running in the browser, use a relative URL so requests go through
@@ -19,12 +22,13 @@ const API_BASE_URL =
 function resolveUrl(path: string): URL {
   if (path.startsWith("http")) return new URL(path);
   if (typeof window !== "undefined") return new URL(path, window.location.origin);
-  return new URL(path, API_BASE_URL);
+  return new URL(path, SERVER_API_BASE_URL);
 }
 
 /** Public getter so other modules (e.g. EventSource helpers) can resolve the backend origin. */
 export function getApiBaseUrl(): string {
-  return API_BASE_URL;
+  if (typeof window !== "undefined") return window.location.origin;
+  return SERVER_API_BASE_URL;
 }
 
 function isAuthEndpoint(pathname: string): boolean {

@@ -44,22 +44,18 @@ export type ScanDocReparseResponse = {
   warnings: ScanDocWarning[];
 };
 
-export function listScanDocs(
-  workspaceId: string,
-  componentId: string,
-) {
+export function listScanDocs(workspaceId: string) {
   return apiFetch<ScanDocList>(
-    `/api/workspaces/${workspaceId}/components/${componentId}/scan-docs`,
+    `/api/workspaces/${workspaceId}/scan-docs`,
   );
 }
 
 export function getScanDoc(
   workspaceId: string,
-  componentId: string,
   docType: string,
 ) {
   return apiFetch<ScanDocRead>(
-    `/api/workspaces/${workspaceId}/components/${componentId}/scan-docs/${docType}`,
+    `/api/workspaces/${workspaceId}/scan-docs/${docType}`,
   );
 }
 

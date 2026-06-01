@@ -1,72 +1,136 @@
 ---
 author: qinyi
-created_at: 2026-05-29T17:40:00
+created_at: 2026-05-31T23:30:00
 ---
 
-# INTEGRATIONS — multi-agent-platform (monorepo)
+# 集成总览
 
-## 数据库和缓存
+> 最后更新：2026-05-31
+> 范围：SillyHub 子项目间集成、外部服务、部署基础设施
 
-| 集成 | 用途 |
+## 1. 子项目间集成
+
+### 1.1 Frontend → Backend
+
+**协议**：HTTP REST API
+
+前端通过 `src/lib/api.ts` 统一封装 fetch，指向 `NEXT_PUBLIC_API_BASE_URL`：
+
+```text
+前端 (Next.js :3000) → HTTP → 后端 (FastAPI :8000)
+```
+
+- 基础 URL 从环境变量读取，自动附加 JWT token
+- Docker 内网：`INTERNAL_API_BASE_URL=http://backend:8000`
+- CORS 通过 `CORS_ALLOWED_ORIGINS` 配置（默认 `["http://localhost:3000"]`）
+- API 按业务模块拆分（auth/changes/workspaces/agent 等）
+
+### 1.2 Backend 数据层
+
+```text
+backend → PostgreSQL 16 (asyncpg) + SQLModel + Alembic
+backend → Redis 7 (缓存/会话)
+```
+
+### 1.3 Backend → Git
+
+```text
+backend → GitGatewayService → subprocess (git CLI)
+  → 白名单审计 + 输出脱敏 + 审计日志
+```
+
+### 1.4 Backend → Claude Code
+
+```text
+backend → AgentDispatchService → Claude Code subprocess
+  → worktree 隔离 + ContextBuilder + SSE 日志流
+```
+
+## 2. 外部服务
+
+### 2.1 Anthropic / 智谱 API
+
+```text
+Claude Code → ANTHROPIC_BASE_URL (智谱代理)
+  ├─ glm-5 (Haiku) / glm-5.1 (Sonnet/Opus)
+  └─ CLAUDE_CODE_MODEL=opus[1m]，超时 50min
+```
+
+### 2.2 GitHub API
+
+```text
+change_writer → httpx → GitHub REST API
+  → 创建 PR（PAT 解密后使用，不落日志）
+```
+
+### 2.3 OpenTelemetry（预留）
+
+SDK 已集成，`OTEL_ENDPOINT` 配置就绪，暂未启用。
+
+## 3. 部署基础设施
+
+### 3.1 Docker Compose
+
+```text
+docker-compose.yml
+├─ postgres:16-alpine    → pgdata 卷
+├─ redis:7-alpine        → redisdata 卷
+├─ backend               → alembic migrate + uvicorn :8000
+└─ frontend              → Next.js :3000
+```
+
+启动依赖：`postgres (healthy) + redis (healthy) → backend → frontend`
+
+持久卷：pgdata / redisdata / worktree-data / spec-data / claude-data
+
+### 3.2 frp 隧道
+
+```text
+公网 → frp server → frp client → localhost:3000
+```
+
+前端通过 frp 暴露，后端主要供内网调用。
+
+### 3.3 宿主机挂载
+
+后端挂载 `${HOST_PROJECTS_DIR}:/host-projects`，通过 `HOST_PATH_PREFIX`/`CONTAINER_PATH_PREFIX` 映射，供 SillySpec 扫描读取 `.sillyspec/` 目录。
+
+### 3.4 后端启动流程
+
+```bash
+alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+## 4. 开发环境
+
+### 4.1 本地模式
+
+```text
+docker compose dev (PG + Redis) + uvicorn --reload + pnpm dev
+```
+
+### 4.2 CI/CD
+
+- **backend-ci**：ruff → mypy → pytest（覆盖率 ≥ 60%）
+- **frontend-ci**：lint → typecheck → test → build
+- 路径触发：`backend/**` / `frontend/**`
+- `workflow_dispatch` 手动触发
+
+### 4.3 Makefile
+
+| 命令 | 作用 |
 |------|------|
-| PostgreSQL 16 (asyncpg) | 后端主数据库，24+ 张表 |
-| Alembic | 数据库迁移（22 个版本文件） |
-| Redis 7 | 缓存 + Agent 日志 pub/sub + 健康检查 |
+| `make dev-up` | PG + Redis |
+| `make up/down` | 全栈容器启停 |
+| `make test` | 后端 + 前端测试 |
+| `make lint` | 后端 + 前端检查 |
+| `make backend-migrate` | 数据库迁移 |
 
-## 认证和安全
+## 5. 集成风险
 
-| 集成 | 用途 |
+| 风险 | 缓解 |
 |------|------|
-| python-jose (JWT) | Access/refresh token 签发和验证 |
-| passlib (bcrypt) | 密码哈希（默认 12 轮） |
-| PyNaCl | 额外加密操作 |
-
-## 外部服务
-
-| 集成 | 用途 |
-|------|------|
-| GitHub API (httpx) | Git identity PAT 验证（`GET /repos/{owner}/{repo}`） |
-| Claude Code CLI (subprocess) | Agent 适配器通过子进程调用 claude CLI |
-
-## 文件系统
-
-| 集成 | 用途 |
-|------|------|
-| `.sillyspec/` 目录树 | 读取 projects/*.yaml、docs/、changes/、.runtime/ |
-| Worktree 数据目录 | 默认 Windows `C:/data/sillyspec-workspaces`，Linux `/data/sillyspec-workspaces` |
-| Docker 挂载 | 宿主机项目目录挂载到容器，供扫描器读取 |
-
-## 前后端通信
-
-| 集成 | 用途 |
-|------|------|
-| REST API (`/api` 前缀) | 前端通过 `apiFetch<T>()` 调用后端 18+ 个业务域端点 |
-| SSE (Redis pub/sub) | Agent 运行日志实时流式传输 |
-| CORS | 配置 `cors_allowed_origins`，默认 `http://localhost:3000` |
-
-## 可观测性
-
-| 集成 | 用途 |
-|------|------|
-| structlog | 结构化日志（全链路使用） |
-| OpenTelemetry | 配置项预留（`otel_endpoint`），当前为 stub |
-| Request ID middleware | 请求追踪 UUID |
-
-## CI/CD
-
-| 集成 | 用途 |
-|------|------|
-| GitHub Actions | Backend CI: ruff → mypy → pytest --cov-fail-under=60 |
-| Docker Compose | 全栈部署（4 服务） + 开发模式（2 服务） |
-| Makefile | 20 个统一命令 target |
-
-## SillySpec 文件约定
-
-| 路径 | 用途 |
-|------|------|
-| `.sillyspec/projects/*.yaml` | 子项目配置 |
-| `.sillyspec/docs/{component}/scan/*.md` | 扫描文档 |
-| `.sillyspec/changes/{change}/` | 变更文档 |
-| `.sillyspec/.runtime/progress.json` | 运行时进度 |
-| `.sillyspec/knowledge/` | 知识库 |
-| `.sillyspec/shared/` | 共享规范 |
+| 宿主机路径映射不一致 | 正确配置 HOST_PATH_PREFIX |
+| frp 隧道不稳定 | 健康检查 + 自动重连 |
+| 智谱 API 限流 | 重试 + API_TIMEOUT_MS |
+| Docker 卷数据丢失 | 定期备份 pgdata |
