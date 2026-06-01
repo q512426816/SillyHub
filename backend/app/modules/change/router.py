@@ -32,7 +32,9 @@ from app.modules.change.schema import (
     OkResponse,
     ProgressUpdate,
     RejectRequest,
+    TransitionDispatchResponse,
     TransitionRequest,
+    TransitionResponse,
 )
 from app.modules.change.service import ChangeService
 
@@ -263,6 +265,7 @@ async def sync_documents(
 
 @router.post(
     "/changes/{change_id}/transition",
+    response_model=TransitionResponse,
 )
 async def transition_change(
     workspace_id: uuid.UUID,
@@ -270,7 +273,7 @@ async def transition_change(
     body: TransitionRequest,
     session: SessionDep,
     _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
-) -> dict[str, Any]:
+) -> TransitionResponse:
     service = ChangeService(session)
     result = await service.transition_with_dispatch(
         workspace_id=workspace_id,
@@ -282,10 +285,22 @@ async def transition_change(
     )
     # Enrich the change data for the response
     enriched_change = await service.enrich_with_workspace_ids(result["change"])
-    return {
-        "change": enriched_change.model_dump(),
-        "agent_dispatch": result["agent_dispatch"],
-    }
+
+    # Build agent_dispatch: convert raw dict to TransitionDispatchResponse or None
+    agent_dispatch: TransitionDispatchResponse | None = None
+    raw_dispatch = result.get("agent_dispatch")
+    if raw_dispatch and raw_dispatch.get("dispatched") is True:
+        agent_dispatch = TransitionDispatchResponse(
+            dispatched=True,
+            agent_run_id=raw_dispatch.get("agent_run_id"),
+            stage=raw_dispatch.get("stage"),
+            reason=None,
+        )
+
+    return TransitionResponse(
+        change=enriched_change.model_dump(),
+        agent_dispatch=agent_dispatch,
+    )
 
 
 @router.post(

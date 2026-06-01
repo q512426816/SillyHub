@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -182,3 +183,47 @@ class DispatchResponse(BaseModel):
     config_enabled: bool = False
     last_dispatch: dict | None = None
     dispatch_result: dict | None = None
+
+
+# ── Transition Response (task-13) ──────────────────────────────────────────
+
+
+class TransitionDispatchResponse(BaseModel):
+    """Transition 专用的 agent dispatch 结果。
+
+    与 DispatchResponse（agent-status/manual-dispatch 端点使用）不同，
+    此 schema 仅描述 transition 触发 dispatch 的结果。
+    """
+
+    dispatched: bool = Field(
+        ...,
+        description="是否成功 dispatch 了 AgentRun",
+    )
+    agent_run_id: str | None = Field(
+        default=None,
+        description="AgentRun ID（dispatched=True 时有值）",
+    )
+    stage: str | None = Field(
+        default=None,
+        description="目标 SillySpec 阶段",
+    )
+    reason: str | None = Field(
+        default=None,
+        description="未 dispatch 的原因（dispatched=False 时有值）",
+    )
+
+
+class TransitionResponse(BaseModel):
+    """POST /changes/{id}/transition 的返回类型。
+
+    包含变更状态和 agent dispatch 信息。
+    """
+
+    change: dict[str, Any] = Field(
+        ...,
+        description="变更数据（ChangeRead 的 dict 表示）",
+    )
+    agent_dispatch: TransitionDispatchResponse | None = Field(
+        default=None,
+        description="Agent dispatch 结果（无 dispatch 时为 null）",
+    )
