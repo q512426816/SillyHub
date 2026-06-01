@@ -24,12 +24,11 @@ from app.core.logging import get_logger
 from app.modules.agent.adapters.claude_code import ClaudeCodeAdapter
 from app.modules.agent.base import AgentSpecBundle
 from app.modules.agent.model import AgentRun, AgentRunLog
-from app.modules.workspace.model import AgentRunWorkspace
 from app.modules.spec_profile.model import SpecConflict
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.spec_workspace.validator import SpecValidator
 from app.modules.workflow.model import AuditLog
-from app.modules.workspace.model import Workspace
+from app.modules.workspace.model import AgentRunWorkspace, Workspace
 
 log = get_logger(__name__)
 
