@@ -266,7 +266,7 @@ export function transitionChange(
   if (reason !== undefined) {
     body.reason = reason;
   }
-  return apiFetch<ChangeRead>(
+  return apiFetch<TransitionResponse>(
     `/api/workspaces/${workspaceId}/changes/${changeId}/transition`,
     {
       method: "POST",
@@ -309,6 +309,26 @@ export function checkArchiveGate(workspaceId: string, changeId: string) {
 }
 
 // ── Agent Dispatch Types ─────────────────────────────────────────────
+
+/** Transition 专用的 agent dispatch 结果（对应后端 TransitionDispatchResponse） */
+export type TransitionDispatchResponse = {
+  /** 是否成功 dispatch 了 AgentRun */
+  dispatched: boolean;
+  /** AgentRun ID（dispatched=true 时有值） */
+  agent_run_id: string | null;
+  /** 目标 SillySpec 阶段 */
+  stage: string | null;
+  /** 未 dispatch 的原因（dispatched=false 时有值） */
+  reason: string | null;
+};
+
+/** POST /changes/{id}/transition 的返回类型（对应后端 TransitionResponse） */
+export type TransitionResponse = {
+  /** 变更数据（ChangeRead 的 dict 表示） */
+  change: ChangeRead;
+  /** Agent dispatch 结果（无 dispatch 时为 null） */
+  agent_dispatch: TransitionDispatchResponse | null;
+};
 
 /** Agent 运行结果 */
 export type DispatchResult = {
