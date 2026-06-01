@@ -10,8 +10,8 @@ import { login } from "@/lib/auth";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("admin@example.com");
-  const [password, setPassword] = useState("Admin123!@#");
+  const [email, setEmail] = useState("admin@sillyhub.local");
+  const [password, setPassword] = useState("admin12345");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

@@ -145,7 +145,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
               <dt className="text-muted-foreground">root_path</dt>
               <dd className="break-all font-mono">{scan.root_path}</dd>
               <dt className="text-muted-foreground">.sillyspec</dt>
-              <dd className="break-all font-mono">{scan.sillyspec_path || "未找到"}</dd>
+              <dd className="break-all font-mono">{scan.is_sillyspec ? "✓ 已检测到" : "未找到"}</dd>
               <dt className="text-muted-foreground">projects</dt>
               <dd>{scan.structure.projects_count}</dd>
               <dt className="text-muted-foreground">active changes</dt>
@@ -158,6 +158,8 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
                   scan.structure.has_docs_dir && "docs",
                   scan.structure.has_runtime_dir && ".runtime",
                   scan.structure.has_local_yaml && "local.yaml",
+                  scan.structure.has_projects_dir && "projects",
+                  scan.structure.has_changes_dir && "changes",
                 ]
                   .filter(Boolean)
                   .join(" / ") || "---"}

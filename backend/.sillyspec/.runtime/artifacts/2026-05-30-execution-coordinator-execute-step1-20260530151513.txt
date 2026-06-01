@@ -1,0 +1,1 @@
+上下文已加载：plan.md (4W8T)、design.md (6能力点)、CONVENTIONS.md (feature-slice)、ARCHITECTURE.md、agent模块全部文件 (model/schema/router/service/context_builder/base)、errors.py、迁移链 (最新head 202606140900 + 202605301700 双分支)。AgentRun当前14字段，需新增9字段+checkpoint_data JSONB。执行范围：task-01 到 task-08 全部执行。

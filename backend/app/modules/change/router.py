@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,9 @@ from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.change.schema import (
+    ApprovalRead,
+    ApproveRequest,
+    ArchiveGateResponse,
     ChangeDocContent,
     ChangeDocMatrix,
     ChangeDocMatrixEntry,
@@ -22,12 +25,28 @@ from app.modules.change.schema import (
     ChangeReparseStats,
     ChangeSummary,
     ChangeWarning,
+    DispatchResponse,
+    DocumentsSyncRequest,
+    DocumentsSyncResponse,
+    FeedbackRequest,
+    OkResponse,
+    ProgressUpdate,
+    RejectRequest,
+    TransitionDispatchResponse,
+    TransitionRequest,
+    TransitionResponse,
 )
 from app.modules.change.service import ChangeService
 
 router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["change"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+def _get_user_role(user: User) -> str:
+    if getattr(user, "is_platform_admin", False):
+        return "admin"
+    return "business_user"
 
 
 @router.get(
@@ -149,4 +168,260 @@ async def reparse_changes(
         workspace_id=workspace_id,
         stats=ChangeReparseStats(**stats),
         warnings=warnings,
+    )
+
+
+# ── Progress / Approval / Documents sync ─────────────────────────────────
+
+
+@router.post(
+    "/changes/{change_key}/progress",
+    response_model=OkResponse,
+)
+async def update_progress(
+    workspace_id: uuid.UUID,
+    change_key: str,
+    body: ProgressUpdate,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> OkResponse:
+    service = ChangeService(session)
+    await service.update_progress(
+        workspace_id,
+        change_key,
+        current_stage=body.currentStage,
+        stages=body.stages,
+        last_active=body.lastActive,
+    )
+    return OkResponse()
+
+
+@router.get(
+    "/changes/{change_key}/approval",
+    response_model=ApprovalRead,
+)
+async def get_approval(
+    workspace_id: uuid.UUID,
+    change_key: str,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+) -> ApprovalRead:
+    service = ChangeService(session)
+    approval_status, reason = await service.get_approval(workspace_id, change_key)
+    return ApprovalRead(status=approval_status, reason=reason)
+
+
+@router.post(
+    "/changes/{change_key}/approve",
+    response_model=OkResponse,
+)
+async def approve_change(
+    workspace_id: uuid.UUID,
+    change_key: str,
+    body: ApproveRequest,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> OkResponse:
+    service = ChangeService(session)
+    await service.approve(workspace_id, change_key, approved_by=body.approved_by)
+    return OkResponse()
+
+
+@router.post(
+    "/changes/{change_key}/reject",
+    response_model=OkResponse,
+)
+async def reject_change(
+    workspace_id: uuid.UUID,
+    change_key: str,
+    body: RejectRequest,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> OkResponse:
+    service = ChangeService(session)
+    await service.reject(workspace_id, change_key, reason=body.reason)
+    return OkResponse()
+
+
+@router.post(
+    "/changes/{change_key}/documents",
+    response_model=DocumentsSyncResponse,
+)
+async def sync_documents(
+    workspace_id: uuid.UUID,
+    change_key: str,
+    body: DocumentsSyncRequest,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> DocumentsSyncResponse:
+    service = ChangeService(session)
+    docs = body.iter_documents()
+    synced = await service.sync_documents(workspace_id, change_key, documents=docs)
+    return DocumentsSyncResponse(synced=synced)
+
+
+# ── Workflow endpoints ───────────────────────────────────────────────────
+
+
+@router.post(
+    "/changes/{change_id}/transition",
+    response_model=TransitionResponse,
+)
+async def transition_change(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    body: TransitionRequest,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> TransitionResponse:
+    service = ChangeService(session)
+    result = await service.transition_with_dispatch(
+        workspace_id=workspace_id,
+        change_id=change_id,
+        target_stage=body.target_stage,
+        user_role=_get_user_role(_user),
+        reason=body.reason,
+        user_id=_user.id,
+    )
+    # Enrich the change data for the response
+    enriched_change = await service.enrich_with_workspace_ids(result["change"])
+
+    # Build agent_dispatch: convert raw dict to TransitionDispatchResponse or None
+    agent_dispatch: TransitionDispatchResponse | None = None
+    raw_dispatch = result.get("agent_dispatch")
+    if raw_dispatch and raw_dispatch.get("dispatched") is True:
+        agent_dispatch = TransitionDispatchResponse(
+            dispatched=True,
+            agent_run_id=raw_dispatch.get("agent_run_id"),
+            stage=raw_dispatch.get("stage"),
+            reason=None,
+        )
+
+    return TransitionResponse(
+        change=enriched_change.model_dump(),
+        agent_dispatch=agent_dispatch,
+    )
+
+
+@router.post(
+    "/changes/{change_id}/feedback",
+    response_model=ChangeRead,
+)
+async def submit_feedback(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    body: FeedbackRequest,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> ChangeRead:
+    service = ChangeService(session)
+    change = await service.submit_feedback(
+        workspace_id,
+        change_id,
+        category=body.category,
+        text=body.text,
+        user_id=_user.id,
+        target_stage=body.target_stage,
+    )
+    return await service.enrich_with_workspace_ids(change)
+
+
+@router.get(
+    "/changes/{change_id}/archive-gate",
+    response_model=ArchiveGateResponse,
+)
+async def check_archive_gate(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+) -> ArchiveGateResponse:
+    service = ChangeService(session)
+    return await service.check_archive_gate(workspace_id, change_id)
+
+
+# ── Agent dispatch endpoints ────────────────────────────────────────────
+
+
+@router.get(
+    "/changes/{change_id}/agent-status",
+    response_model=DispatchResponse,
+)
+async def get_agent_status(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+) -> DispatchResponse:
+    """Get the current agent dispatch status for a change."""
+    from app.modules.change.dispatch import get_config_for_stage, has_active_run
+
+    service = ChangeService(session)
+    change = await service.get(workspace_id, change_id)
+
+    current_stage = change.current_stage or "draft"
+    config = get_config_for_stage(current_stage)
+    has_active = await has_active_run(session, change_id)
+
+    # Extract last_dispatch from stages JSON
+    stages = change.stages or {}
+    last_dispatch = stages.get("last_dispatch")
+
+    return DispatchResponse(
+        change_id=change_id,
+        current_stage=current_stage,
+        has_active_run=has_active,
+        config_enabled=config is not None and config.enabled if config else False,
+        last_dispatch=last_dispatch,
+    )
+
+
+@router.post(
+    "/changes/{change_id}/dispatch",
+    response_model=DispatchResponse,
+)
+async def manual_dispatch(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> DispatchResponse:
+    """Manually trigger agent dispatch for the current stage of a change."""
+    from app.modules.change.dispatch import dispatch, get_config_for_stage
+
+    service = ChangeService(session)
+    change = await service.get(workspace_id, change_id)
+
+    current_stage = change.current_stage or "draft"
+    config = get_config_for_stage(current_stage)
+
+    if config is None or not config.enabled:
+        return DispatchResponse(
+            change_id=change_id,
+            current_stage=current_stage,
+            has_active_run=False,
+            config_enabled=False,
+            last_dispatch=None,
+        )
+
+    dispatch_result = await dispatch(
+        session=session,
+        workspace_id=workspace_id,
+        change_id=change_id,
+        target_stage=current_stage,
+        user_id=_user.id,
+    )
+
+    # Refresh change to get updated stages
+    await session.refresh(change)
+    stages = change.stages or {}
+    last_dispatch = stages.get("last_dispatch")
+
+    return DispatchResponse(
+        change_id=change_id,
+        current_stage=current_stage,
+        has_active_run=dispatch_result.get("dispatched", False),
+        config_enabled=True,
+        last_dispatch=last_dispatch,
+        dispatch_result=dispatch_result,
     )

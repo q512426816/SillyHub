@@ -39,6 +39,50 @@ def _build_stream_input(prompt: str) -> bytes:
     return json.dumps(payload, ensure_ascii=False).encode() + b"\n"
 
 
+def _build_stage_dispatch_prompt(bundle: AgentSpecBundle) -> str:
+    """为 stage_dispatch 模式生成明确的 SillySpec 阶段执行 prompt。
+
+    Args:
+        bundle: 已包含 stage_dispatch=True 的 AgentSpecBundle，
+                必须包含 stage 和 change_key 字段。
+
+    Returns:
+        完整的阶段执行 prompt 字符串。
+    """
+    stage = bundle.stage or "unknown"
+    change_key = bundle.change_key or "unknown"
+
+    if bundle.stage is None:
+        log.warning("stage_dispatch_missing_stage", change_key=bundle.change_key)
+    if bundle.change_key is None:
+        log.warning("stage_dispatch_missing_change_key", stage=bundle.stage)
+
+    prompt = (
+        f"你是 SillySpec {stage} 阶段的执行者。\n\n"
+        f"## 任务\n"
+        f"为变更 {change_key} 完成 SillySpec {stage} 阶段。\n\n"
+        f"## 执行步骤\n"
+        f"1. 运行 `sillyspec run {stage} --change {change_key}`\n"
+        f"2. 阅读当前 step 的 prompt\n"
+        f"3. 按 prompt 完成工作\n"
+        f"4. `sillyspec run {stage} --done --change {change_key} --input '...' --output '...'`\n"
+        f"5. 重复直到所有步骤完成\n\n"
+        f"## 规则\n"
+        f"- 所有文档写入 `.sillyspec/changes/{change_key}/`\n"
+        f"- 只产出文档，禁止改代码\n"
+        f"- 文档头部 author + created_at\n"
+        f"- 每步完成立即 --done\n"
+    )
+
+    if bundle.read_only:
+        prompt += "\n## 模式: READ-ONLY\nDo NOT modify any files. Only analyze and report.\n"
+
+    if bundle.step_prompt is not None:
+        prompt += f"\n## 当前步骤 Prompt\n{bundle.step_prompt}\n"
+
+    return prompt
+
+
 def _parse_stream_events(raw_stdout: str) -> list[dict]:
     """Parse stream-json stdout into structured event list."""
     events: list[dict] = []
@@ -138,19 +182,27 @@ class ClaudeCodeAdapter(AgentAdapter):
         claude_md = render_bundle_to_claude_md(bundle)
         (lease_path / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
 
-        prompt = (
-            f"Implement task {bundle.task_key}: {bundle.task_title}.\n"
-            f"Change: {bundle.change_summary}.\n"
-            "Read CLAUDE.md for full spec context before starting."
-        )
-
-        if "sillyspec" in bundle.available_tools:
-            prompt += (
-                "\n\nYou have access to the `sillyspec` CLI tool. "
-                "Use it to generate spec files instead of writing them directly. "
-                "Commands: `sillyspec init --dir <path>`, `sillyspec run scan --dir <path>`. "
-                "The spec root directory is where .sillyspec/ structure should be created."
+        if getattr(bundle, 'stage_dispatch', False):
+            prompt = _build_stage_dispatch_prompt(bundle)
+            log.info(
+                "stage_dispatch_prompt",
+                stage=bundle.stage,
+                change_key=bundle.change_key,
             )
+        else:
+            prompt = (
+                f"Implement task {bundle.task_key}: {bundle.task_title}.\n"
+                f"Change: {bundle.change_summary}.\n"
+                "Read CLAUDE.md for full spec context before starting."
+            )
+
+            if "sillyspec" in bundle.available_tools:
+                prompt += (
+                    "\n\nYou have access to the `sillyspec` CLI tool. "
+                    "Use it to generate spec files instead of writing them directly. "
+                    "Commands: `sillyspec init --dir <path>`, `sillyspec run scan --dir <path>`. "
+                    "The spec root directory is where .sillyspec/ structure should be created."
+                )
 
         cmd = [
             _CLAUDE_CLI,
@@ -234,137 +286,147 @@ class ClaudeCodeAdapter(AgentAdapter):
                 redacted_output=f"CLI '{_CLAUDE_CLI}' not found in PATH.",
             )
 
-        # Write user prompt to stdin and close it
-        stdin_data = _build_stream_input(prompt)
+        # ---- Register process in _proc_registry ----
+        # Local import to avoid circular dependency (service → claude_code → service)
+        from app.modules.agent.service import AgentService
+        AgentService._proc_registry[run_id] = proc
+
         try:
-            proc.stdin.write(stdin_data)
-            await proc.stdin.drain()
-            proc.stdin.close()
-        except Exception:
-            pass
+            # Write user prompt to stdin and close it
+            stdin_data = _build_stream_input(prompt)
+            try:
+                proc.stdin.write(stdin_data)
+                await proc.stdin.drain()
+                proc.stdin.close()
+            except Exception:
+                pass
 
-        # Acquire Redis client for Pub/Sub publishing
-        redis = get_redis()
+            # Acquire Redis client for Pub/Sub publishing
+            redis = get_redis()
 
-        # Accumulators
-        stdout_lines: list[str] = []
-        all_events: list[dict] = []
+            # Accumulators
+            stdout_lines: list[str] = []
+            all_events: list[dict] = []
 
-        async def _read_stdout() -> None:
-            """Read stdout line-by-line, parse events, publish to Redis."""
-            while True:
+            async def _read_stdout() -> None:
+                """Read stdout line-by-line, parse events, publish to Redis."""
+                while True:
+                    try:
+                        line_bytes = await asyncio.wait_for(
+                            proc.stdout.readline(), timeout=timeout,
+                        )
+                    except TimeoutError:
+                        break
+                    if not line_bytes:
+                        break
+                    line = line_bytes.decode("utf-8", errors="replace").rstrip("\n").rstrip("\r")
+                    if not line:
+                        continue
+                    stdout_lines.append(line)
+
+                    # Parse the stream-json event
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        event = {"type": "raw", "text": line}
+                    all_events.append(event)
+
+                    # Format into a human-readable log line
+                    formatted = _format_conversation_log([event])
+                    if not formatted:
+                        continue
+
+                    # Publish to Redis
+                    try:
+                        msg = json.dumps(
+                            {
+                                "channel": "stdout",
+                                "content": formatted,
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            },
+                            ensure_ascii=False,
+                        )
+                        await redis.publish(channel, msg)
+                    except Exception:
+                        log.warning("redis_publish_failed", run_id=str(run_id))
+
+            async def _read_stderr() -> str:
+                """Read stderr fully after process ends."""
+                raw = await proc.stderr.read()
+                return raw.decode("utf-8", errors="replace")
+
+            try:
+                stdout_task = asyncio.create_task(_read_stdout())
+                await proc.wait()
+                # stdout task should finish once the pipe closes
+                await asyncio.wait_for(stdout_task, timeout=5)
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                log.warning("agent_timeout", run_id=str(run_id))
+                # Publish done event before returning
                 try:
-                    line_bytes = await asyncio.wait_for(
-                        proc.stdout.readline(), timeout=timeout,
-                    )
-                except TimeoutError:
-                    break
-                if not line_bytes:
-                    break
-                line = line_bytes.decode("utf-8", errors="replace").rstrip("\n").rstrip("\r")
-                if not line:
-                    continue
-                stdout_lines.append(line)
-
-                # Parse the stream-json event
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    event = {"type": "raw", "text": line}
-                all_events.append(event)
-
-                # Format into a human-readable log line
-                formatted = _format_conversation_log([event])
-                if not formatted:
-                    continue
-
-                # Publish to Redis
-                try:
-                    msg = json.dumps(
+                    done_msg = json.dumps(
                         {
                             "channel": "stdout",
-                            "content": formatted,
+                            "content": "[TIMEOUT] Agent execution timed out.",
                             "timestamp": datetime.now(timezone.utc).isoformat(),
                         },
                         ensure_ascii=False,
                     )
-                    await redis.publish(channel, msg)
+                    await redis.publish(channel, done_msg)
+                    await redis.publish(
+                        channel,
+                        json.dumps({"event": "done", "timestamp": datetime.now(timezone.utc).isoformat()}),
+                    )
                 except Exception:
-                    log.warning("redis_publish_failed", run_id=str(run_id))
-
-        async def _read_stderr() -> str:
-            """Read stderr fully after process ends."""
-            raw = await proc.stderr.read()
-            return raw.decode("utf-8", errors="replace")
-
-        try:
-            stdout_task = asyncio.create_task(_read_stdout())
-            await proc.wait()
-            # stdout task should finish once the pipe closes
-            await asyncio.wait_for(stdout_task, timeout=5)
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
-            log.warning("agent_timeout", run_id=str(run_id))
-            # Publish done event before returning
-            try:
-                done_msg = json.dumps(
-                    {
-                        "channel": "stdout",
-                        "content": "[TIMEOUT] Agent execution timed out.",
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    },
-                    ensure_ascii=False,
+                    pass
+                return AgentRunResult(
+                    exit_code=-1,
+                    stdout="",
+                    stderr="Agent timed out.",
+                    redacted_output="Agent execution timed out.",
+                    timed_out=True,
                 )
-                await redis.publish(channel, done_msg)
+
+            stderr_raw = await _read_stderr()
+            stdout_raw = "\n".join(stdout_lines)
+
+            # Publish done event
+            try:
                 await redis.publish(
                     channel,
                     json.dumps({"event": "done", "timestamp": datetime.now(timezone.utc).isoformat()}),
                 )
             except Exception:
-                pass
+                log.warning("redis_publish_done_failed", run_id=str(run_id))
+
+            # Build conversation log from accumulated events
+            conversation_log = _format_conversation_log(all_events)
+
+            combined = conversation_log
+            if stderr_raw.strip():
+                combined += "\n\n[STDERR]\n" + stderr_raw
+
+            redacted = redact_output(combined)
+
+            log.info(
+                "agent_done",
+                run_id=str(run_id),
+                exit_code=proc.returncode,
+                output_len=len(redacted),
+                event_count=len(all_events),
+            )
             return AgentRunResult(
-                exit_code=-1,
-                stdout="",
-                stderr="Agent timed out.",
-                redacted_output="Agent execution timed out.",
-                timed_out=True,
+                exit_code=proc.returncode or 1,
+                stdout=stdout_raw,
+                stderr=stderr_raw,
+                redacted_output=redacted,
             )
 
-        stderr_raw = await _read_stderr()
-        stdout_raw = "\n".join(stdout_lines)
-
-        # Publish done event
-        try:
-            await redis.publish(
-                channel,
-                json.dumps({"event": "done", "timestamp": datetime.now(timezone.utc).isoformat()}),
-            )
-        except Exception:
-            log.warning("redis_publish_done_failed", run_id=str(run_id))
-
-        # Build conversation log from accumulated events
-        conversation_log = _format_conversation_log(all_events)
-
-        combined = conversation_log
-        if stderr_raw.strip():
-            combined += "\n\n[STDERR]\n" + stderr_raw
-
-        redacted = redact_output(combined)
-
-        log.info(
-            "agent_done",
-            run_id=str(run_id),
-            exit_code=proc.returncode,
-            output_len=len(redacted),
-            event_count=len(all_events),
-        )
-        return AgentRunResult(
-            exit_code=proc.returncode or 1,
-            stdout=stdout_raw,
-            stderr=stderr_raw,
-            redacted_output=redacted,
-        )
+        finally:
+            # ---- Unregister process from _proc_registry (guaranteed cleanup) ----
+            AgentService._proc_registry.pop(run_id, None)
 
     def supported_tools(self) -> list[str]:
         return [

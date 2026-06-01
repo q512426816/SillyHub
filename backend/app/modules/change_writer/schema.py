@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class ChangeCreateRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
+    description: str = Field(default="", max_length=5000)
+    scope: str = Field(default="full", pattern="^(full|quick)$")
     change_type: str | None = Field(default=None, max_length=50)
     affected_components: list[str] = Field(default_factory=list)
     lease_id: uuid.UUID | None = None
@@ -23,6 +25,7 @@ class ChangeCreateResponse(BaseModel):
     change_key: str
     title: str | None
     status: str
+    current_stage: str | None
     path: str
     created_at: datetime
 

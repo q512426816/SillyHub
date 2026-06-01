@@ -16,17 +16,22 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from urllib.parse import urlparse
+
 from app.core.errors import AppError, PermissionDenied, WorktreeLeaseNotFound
 from app.core.logging import get_logger
 from app.modules.git_gateway.service import redact_output
 from app.modules.task.model import Task
 from app.modules.tool_gateway.model import ToolOperationLog
+from app.modules.tool_gateway.tool_policy import ToolPolicy, ToolPolicyService, default_policy
+from app.modules.workflow.model import AuditLog
 from app.modules.worktree.model import WorktreeLease
 
 log = get_logger(__name__)
 
 TOOL_TYPES = frozenset({
     "file_read", "file_write", "file_list", "file_search", "shell_exec",
+    "run_tests", "http_get",
 })
 
 MAX_OUTPUT_SIZE = 64_000
@@ -123,6 +128,7 @@ class ToolGatewayService:
         user_id: uuid.UUID,
         tool_type: str,
         params: dict,
+        policy: ToolPolicy | None = None,
     ) -> ToolOperationLog:
         if tool_type not in TOOL_TYPES:
             raise ToolOperationForbidden(
@@ -134,7 +140,23 @@ class ToolGatewayService:
         lease_root = self._resolve_lease_root(lease)
         allowed_paths = task.allowed_paths if task else []
 
-        result = await self._dispatch(tool_type, params, lease_root, allowed_paths)
+        # Load or use provided policy
+        if policy is None:
+            policy = default_policy()
+
+        # Policy check — raises ToolOperationForbidden on violation
+        ToolPolicyService.check(policy, tool_type, params, lease_root)
+
+        # Apply resource limits
+        limits = ToolPolicyService.apply_limits(policy, params)
+
+        result = await self._dispatch(tool_type, params, lease_root, allowed_paths, limits)
+
+        # Truncate output to policy limit
+        output = result.get("output", "")
+        if output and len(output) > limits.max_output_size:
+            output = output[:limits.max_output_size] + f"\n... (truncated, {len(output)} total chars)"
+            result["output"] = output
 
         op_log = ToolOperationLog(
             id=uuid.uuid4(),
@@ -147,6 +169,24 @@ class ToolGatewayService:
             redacted_output=result["output"][:MAX_OUTPUT_SIZE] if result["output"] else None,
         )
         self._session.add(op_log)
+
+        # Audit dual write — write to workflow AuditLog as well
+        audit = AuditLog(
+            id=uuid.uuid4(),
+            workspace_id=lease.workspace_id,
+            actor_id=user_id,
+            action=f"tool:{tool_type}",
+            resource_type="tool_operation",
+            resource_id=op_log.id,
+            details_json=json.dumps({
+                "tool_type": tool_type,
+                "result_code": result["result_code"],
+                "lease_id": str(lease_id),
+                "policy_name": policy.name,
+            }),
+        )
+        self._session.add(audit)
+
         await self._session.commit()
         await self._session.refresh(op_log)
 
@@ -155,6 +195,7 @@ class ToolGatewayService:
             tool_type=tool_type,
             lease_id=str(lease_id),
             result_code=result["result_code"],
+            policy=policy.name,
         )
         return op_log
 
@@ -164,6 +205,7 @@ class ToolGatewayService:
         params: dict,
         lease_root: Path,
         allowed_paths: list[str],
+        limits: "PolicyLimits | None" = None,
     ) -> dict:
         handlers: dict[str, Callable[..., Coroutine[object, object, dict]]] = {
             "file_read": self._handle_file_read,
@@ -171,12 +213,14 @@ class ToolGatewayService:
             "file_list": self._handle_file_list,
             "file_search": self._handle_file_search,
             "shell_exec": self._handle_shell_exec,
+            "run_tests": self._handle_run_tests,
+            "http_get": self._handle_http_get,
         }
         handler = handlers.get(tool_type)
         if handler is None:
             raise ToolOperationForbidden(f"Unhandled tool type: {tool_type}")
 
-        if tool_type == "shell_exec":
+        if tool_type in ("shell_exec", "run_tests", "http_get"):
             return await handler(params, lease_root)
         return await handler(params, lease_root, allowed_paths)
 
@@ -301,6 +345,149 @@ class ToolGatewayService:
             return {"result_code": 127, "output": f"Command not found: {command}"}
 
         return {"result_code": result_code, "output": safe_output}
+
+    async def _handle_run_tests(
+        self, params: dict, lease_root: Path,
+    ) -> dict:
+        """Execute test runner (pytest) and parse structured results."""
+        runner = params.get("runner", "pytest")
+        test_args = params.get("args", [])
+        test_path = params.get("path", ".")
+        timeout = min(params.get("timeout", DEFAULT_TIMEOUT), 120)
+
+        # Build command based on runner
+        if runner == "pytest":
+            cmd = ["python", "-m", "pytest", test_path, *test_args, "--tb=short", "-q"]
+        elif runner == "go_test":
+            cmd = ["go", "test", test_path, *test_args]
+        else:
+            return {"result_code": 1, "output": f"Unsupported runner: {runner}"}
+
+        # Validate shell command against blocked patterns
+        validate_shell_command(cmd[0], cmd[1:])
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=str(lease_root),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(
+                    proc.communicate(), timeout=timeout,
+                )
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                return {
+                    "result_code": -1,
+                    "output": f"Test run timed out after {timeout}s.",
+                }
+
+            raw_output = stdout.decode(errors="replace") if stdout else ""
+            result_code = proc.returncode if proc.returncode is not None else -1
+
+            # Parse structured results from pytest output
+            structured = self._parse_test_output(raw_output, runner)
+            return {
+                "result_code": result_code,
+                "output": json.dumps(structured) if structured else redact_output(raw_output),
+            }
+        except FileNotFoundError:
+            return {"result_code": 127, "output": f"Runner not found: {cmd[0]}"}
+
+    @staticmethod
+    def _parse_test_output(raw_output: str, runner: str) -> dict | None:
+        """Parse test runner output into structured result dict.
+
+        Returns None if parsing fails (caller should use raw output).
+        """
+        import re as _re
+
+        if runner == "pytest":
+            # Match pytest summary line: "X passed, Y failed, Z skipped, W errors"
+            summary_match = _re.search(
+                r"(\d+) passed(?:,\s*(\d+) failed)?(?:,\s*(\d+) skipped)?(?:,\s*(\d+) errors?|,\s*(\d+) warnings?)",
+                raw_output,
+            )
+            if not summary_match:
+                # Try simpler pattern
+                summary_match = _re.search(
+                    r"(\d+) (?:passed|failed|error)",
+                    raw_output,
+                )
+                if not summary_match:
+                    return None
+
+            passed = int(summary_match.group(1) or 0)
+            failed = int(summary_match.group(2) or 0) if summary_match.lastindex and summary_match.lastindex >= 2 else 0
+            skipped = int(summary_match.group(3) or 0) if summary_match.lastindex and summary_match.lastindex >= 3 else 0
+            errors = int(summary_match.group(4) or 0) if summary_match.lastindex and summary_match.lastindex >= 4 else 0
+
+            # Extract failed test names
+            failed_tests: list[str] = []
+            for line in raw_output.split("\n"):
+                fail_match = _re.match(r"FAILED (.+)", line.strip())
+                if fail_match:
+                    failed_tests.append(fail_match.group(1))
+
+            # Output summary (last 50 lines)
+            output_lines = raw_output.strip().split("\n")
+            summary_text = "\n".join(output_lines[-50:]) if len(output_lines) > 50 else raw_output.strip()
+
+            return {
+                "runner": "pytest",
+                "passed": passed,
+                "failed": failed,
+                "skipped": skipped,
+                "errors": errors,
+                "failed_tests": failed_tests,
+                "output_summary": redact_output(summary_text),
+            }
+
+        return None
+
+    async def _handle_http_get(
+        self, params: dict, lease_root: Path,
+    ) -> dict:
+        """Execute HTTP GET request with SSRF protection and domain whitelist.
+
+        SSRF protection is enforced via ToolPolicyService._check_not_private_ip
+        (called during policy check phase). This handler only does the actual
+        HTTP request after validation has passed.
+        """
+        import httpx
+
+        url = params.get("url", "")
+        headers = params.get("headers", {})
+        timeout = min(params.get("timeout", 10), 30)
+
+        if not url:
+            return {"result_code": 1, "output": "Missing URL."}
+
+        # Enforce HTTPS or HTTP scheme only
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return {"result_code": 1, "output": f"Unsupported scheme: {parsed.scheme}"}
+
+        try:
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, max_redirects=3) as client:
+                resp = await client.get(url, headers=headers)
+                body = resp.text
+
+                # Truncate output
+                if len(body) > MAX_OUTPUT_SIZE:
+                    body = body[:MAX_OUTPUT_SIZE] + f"\n... (truncated, {len(body)} total chars)"
+
+                return {
+                    "result_code": resp.status_code,
+                    "output": redact_output(body),
+                }
+        except httpx.TimeoutException:
+            return {"result_code": -1, "output": f"HTTP request timed out after {timeout}s."}
+        except httpx.RequestError as e:
+            return {"result_code": 1, "output": f"HTTP request failed: {e}"}
 
     async def _get_lease_and_task(
         self, lease_id: uuid.UUID, user_id: uuid.UUID,

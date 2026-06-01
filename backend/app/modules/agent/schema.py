@@ -13,6 +13,7 @@ class AgentRunCreate(BaseModel):
     lease_id: uuid.UUID
     agent_type: str = Field(default="claude_code", max_length=30)
     profile_version: str | None = None
+    idempotency_key: str | None = Field(default=None, max_length=64)
 
 
 class AgentRunResponse(BaseModel):
@@ -28,6 +29,11 @@ class AgentRunResponse(BaseModel):
     spec_strategy: str | None = None
     profile_version: str | None = None
     diff_summary: str | None = None
+    idempotency_key: str | None = None
+    resume_token: str | None = None
+    version: int | None = None
+    context_fingerprint: str | None = None
+    checkpoint_version: int | None = None
     workspace_ids: list[uuid.UUID] = []   # all associated workspaces
     model_config = {"from_attributes": True}
 

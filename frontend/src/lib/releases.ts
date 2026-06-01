@@ -81,6 +81,12 @@ export function deployRelease(releaseId: string) {
   });
 }
 
+export function promoteRelease(releaseId: string) {
+  return apiFetch<Release>(`/api/releases/${releaseId}/promote`, {
+    method: "POST",
+  });
+}
+
 export function rollbackRelease(releaseId: string) {
   return apiFetch<Release>(`/api/releases/${releaseId}/rollback`, {
     method: "POST",

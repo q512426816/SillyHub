@@ -189,6 +189,38 @@ async def rescan_workspace(
     return _build_scan_response(scan)
 
 
+@router.post("/{workspace_id}/reparse")
+async def reparse_workspace(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_ADMIN))],
+) -> dict:
+    """Parse projects/*.yaml under a parent Workspace and sync children + relations."""
+    service = WorkspaceService(session)
+    _parse_result, stats, children, relations = await service.reparse(workspace_id)
+    return {
+        **stats,
+        "children": [
+            {
+                "id": str(c.id),
+                "name": c.name,
+                "component_key": c.component_key,
+                "slug": c.slug,
+            }
+            for c in children
+        ],
+        "relations": [
+            {
+                "id": str(r.id),
+                "source_id": str(r.source_id),
+                "target_id": str(r.target_id),
+                "relation_type": r.relation_type,
+            }
+            for r in relations
+        ],
+    }
+
+
 @router.delete(
     "/{workspace_id}",
     response_model=WorkspaceRead,

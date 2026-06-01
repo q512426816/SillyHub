@@ -34,6 +34,11 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
+      args:
+        CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.158}
+        SILLYSPEC_VERSION: ${SILLYSPEC_VERSION:-3.12.0}
+    env_file:
+      - .env
     restart: unless-stopped
     depends_on:
       postgres:
@@ -46,6 +51,7 @@ services:
       - ${HOST_PROJECTS_DIR:-C:/Users/qinyi/IdeaProjects}:/host-projects
       - worktree-data:/data/sillyspec-workspaces
       - spec-data:/data/spec-workspaces
+      - claude-data:/app/.claude
     environment:
       # Prefix that rewrites host-style paths into container mount paths.
       HOST_PATH_PREFIX: ${HOST_PATH_PREFIX:-C:/Users/qinyi/IdeaProjects}
@@ -64,12 +70,10 @@ services:
       SILLYSPEC_MASTER_KEY: ${SILLYSPEC_MASTER_KEY:?must set SILLYSPEC_MASTER_KEY}
       WORKTREE_BASE_DIR: /data/sillyspec-workspaces
       SPEC_DATA_ROOT: /data/spec-workspaces
-      # Claude Code agent configuration
-      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}
-      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
-      ANTHROPIC_DEFAULT_SONNET_MODEL: ${ANTHROPIC_DEFAULT_SONNET_MODEL:-glm-5}
-      ANTHROPIC_DEFAULT_OPUS_MODEL: ${ANTHROPIC_DEFAULT_OPUS_MODEL:-glm-5.1}
-      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+      HOME: /app
+      NPM_CONFIG_CACHE: /tmp/.npm
+      # Claude Code agent configuration is loaded from deploy/.env via env_file
+      # so host-level ANTHROPIC_* variables do not override the Docker settings.
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     # Run migrations before serving so a fresh stack always lands on head.
@@ -83,12 +87,14 @@ services:
       context: ../frontend
       dockerfile: Dockerfile
       args:
+        INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL:-http://backend:8000}
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
         NEXT_PUBLIC_COMMIT_SHA: ${NEXT_PUBLIC_COMMIT_SHA:-}
     restart: unless-stopped
     depends_on:
       - backend
     environment:
+      INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL:-http://backend:8000}
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
       NEXT_PUBLIC_COMMIT_SHA: ${NEXT_PUBLIC_COMMIT_SHA:-}
     ports:
@@ -99,3 +105,4 @@ volumes:
   redisdata:
   spec-data:
   worktree-data:
+  claude-data:

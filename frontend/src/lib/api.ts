@@ -6,12 +6,29 @@
  */
 import { useSession } from "@/stores/session";
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? "http://localhost:8000";
+/** Absolute backend URL — used only for SSR / direct server-side fetches. */
+const SERVER_API_BASE_URL = (
+  process.env.INTERNAL_API_BASE_URL ??
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  "http://localhost:8000"
+).replace(/\/$/, "");
+
+/**
+ * When running in the browser, use a relative URL so requests go through
+ * the Next.js rewrite proxy (/api/* → backend).  This keeps the app
+ * accessible from any origin (frp tunnel, LAN, localhost) without
+ * hard-coding the backend address in the client bundle.
+ */
+function resolveUrl(path: string): URL {
+  if (path.startsWith("http")) return new URL(path);
+  if (typeof window !== "undefined") return new URL(path, window.location.origin);
+  return new URL(path, SERVER_API_BASE_URL);
+}
 
 /** Public getter so other modules (e.g. EventSource helpers) can resolve the backend origin. */
 export function getApiBaseUrl(): string {
-  return API_BASE_URL;
+  if (typeof window !== "undefined") return window.location.origin;
+  return SERVER_API_BASE_URL;
 }
 
 function isAuthEndpoint(pathname: string): boolean {
@@ -60,7 +77,7 @@ export async function apiFetch<T = unknown>(
 ): Promise<T> {
   const { json, query, headers = {}, ...rest } = options;
 
-  const url = new URL(path.startsWith("http") ? path : `${API_BASE_URL}${path}`);
+  const url = resolveUrl(path);
   if (query) {
     for (const [k, v] of Object.entries(query)) {
       if (v === undefined || v === null) continue;

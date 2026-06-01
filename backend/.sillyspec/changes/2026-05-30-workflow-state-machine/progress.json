@@ -1,0 +1,116 @@
+{
+  "_version": 3,
+  "project": "backend",
+  "currentStage": "",
+  "currentChange": "2026-05-30-workflow-state-machine",
+  "stages": {
+    "scan": {
+      "status": "pending",
+      "steps": [],
+      "startedAt": null,
+      "completedAt": null
+    },
+    "brainstorm": {
+      "status": "in-progress",
+      "startedAt": "2026/5/30 16:56:20",
+      "completedAt": null,
+      "steps": [
+        {
+          "name": "状态检查",
+          "status": "completed",
+          "completedAt": "2026/5/30 16:56:20",
+          "output": "SillyHub 是 FastAPI + Next.js monorepo，后端 feature-slice 架构。workflow 模块已有大量代码（FSM/ChangeFSM/TaskFSM、ChangeReview+AuditLog 表、WorkflowService、4 个 API 端点、spec_guardian 6 条规则），43/44 测试通过。本次变更是棕地增强，需评估现有实现缺口…"
+        },
+        {
+          "name": "加载项目上下文",
+          "status": "completed",
+          "completedAt": "2026/5/30 16:56:28",
+          "output": "SillyHub 是 FastAPI + Next.js monorepo，后端 feature-slice 架构 19 个模块。workflow 模块已有完整 FSM（ChangeFSM/TaskFSM）、ChangeReview+AuditLog 表、WorkflowService（transition/review/audit）、4 个 API 端点、spec_guardian 6 条规则。…"
+        },
+        {
+          "name": "协作与复用检查",
+          "status": "completed",
+          "completedAt": "2026/5/30 16:56:37",
+          "output": "无冲突。10 个活跃变更均涉及不同模块，无重叠。无全局模板。"
+        },
+        {
+          "name": "原型/设计图分析",
+          "status": "completed",
+          "completedAt": "2026/5/30 16:56:40",
+          "output": "无原型或设计图，跳过此步骤。"
+        },
+        {
+          "name": "需求范围评估",
+          "status": "completed",
+          "completedAt": "2026/5/30 16:57:09",
+          "output": "棕地增强，核心框架已存在，无需拆分，无批量模式。剩余缺口：(1) spec_guardian 增加3条规则（文档字数≥100、关联组件存在、无未解决review）(2) 审计日志自动覆盖所有写入操作（SQLAlchemy event hook）(3) 修复1个已知失败测试。复杂度中等，单一模块内完成。"
+        },
+        {
+          "name": "对话式探索",
+          "status": "completed",
+          "completedAt": "2026/5/30 16:57:36",
+          "output": "需求确认：棕地增强 workflow 模块。6个需求点：(1) ChangeFSM 状态转移 ✅已有 (2) TaskFSM ✅已有 (3) spec_guardian 增加3条规则（字数≥100、组件校验、未解决review检查）(4) Review 封驳增强 ✅已有基础 (5) 审计日志自动覆盖 → 选择 SQLAlchemy event hook 方案 (6) 修复 test_change_…"
+        },
+        {
+          "name": "提出 2-3 种方案",
+          "status": "completed",
+          "completedAt": "2026/5/30 16:57:53",
+          "output": "推荐方案 B：全面增强。核心决策：(1) 审计用 SQLAlchemy event hook（after_insert/after_update/after_delete），通过 session.info 传递 actor/workspace 上下文 (2) spec_guardian 扩展为可注册规则引擎，新增3条规则 (3) 修复已知 bug + datetime.utcnow depreca…"
+        },
+        {
+          "name": "分段展示设计",
+          "status": "completed",
+          "completedAt": "2026/5/30 16:58:10",
+          "output": "设计确认，3段设计：(1) Bug修复：AuditLog外键约束+datetime.utcnow deprecation (2) Spec Guardian +3规则：文档非空(字数≥100)、组件存在性、无未解决review (3) 审计自动覆盖：新建 core/audit_hooks.py，SQLAlchemy event hook + session.info 上下文传递。变更名 2026-…"
+        },
+        {
+          "name": "HTML 原型生成",
+          "status": "completed",
+          "completedAt": "2026/5/30 16:59:05",
+          "output": "生成 HTML 原型展示 Change/Task FSM 状态转移图、Guard Rules 对照表、Audit Hook 架构图。原型文件：.sillyspec/changes/2026-05-30-workflow-state-machine/prototype-fsm-diagrams.html"
+        },
+        {
+          "name": "用户确认并生成规范文件",
+          "status": "pending"
+        }
+      ]
+    },
+    "plan": {
+      "status": "pending",
+      "steps": [],
+      "startedAt": null,
+      "completedAt": null
+    },
+    "execute": {
+      "status": "pending",
+      "steps": [],
+      "startedAt": null,
+      "completedAt": null
+    },
+    "verify": {
+      "status": "pending",
+      "steps": [],
+      "startedAt": null,
+      "completedAt": null
+    },
+    "archive": {
+      "status": "pending",
+      "steps": [],
+      "startedAt": null,
+      "completedAt": null
+    },
+    "quick": {
+      "status": "pending",
+      "steps": [],
+      "startedAt": null,
+      "completedAt": null
+    },
+    "explore": {
+      "status": "pending",
+      "steps": [],
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  "lastActive": "2026/5/30 16:59:05"
+}

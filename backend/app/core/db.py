@@ -6,9 +6,11 @@ invocations don't open a real connection at import time.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator
 from typing import Final
 
+from fastapi import Request
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -57,10 +59,68 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     return _SessionFactory
 
 
-async def get_session() -> AsyncIterator[AsyncSession]:
-    """FastAPI dependency: yield a session and ensure rollback on errors."""
+# ---------------------------------------------------------------------------
+# Audit context injection helpers
+# ---------------------------------------------------------------------------
+
+
+def _extract_token_from_request(request: Request) -> str | None:
+    """Extract Bearer token from Authorization header (no external deps)."""
+    raw = request.headers.get("authorization") or request.headers.get("Authorization")
+    if not raw:
+        return None
+    parts = raw.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    return parts[1].strip() or None
+
+
+def _try_inject_audit_context(session: AsyncSession, request: Request) -> None:
+    """Try to decode Bearer token and inject audit_context into session.info.
+
+    Silently skips on failure (no token, invalid token, etc).
+    """
+    if "audit_context" in session.info:
+        return  # Already set, do not overwrite
+
+    token = _extract_token_from_request(request)
+    if not token:
+        return
+
+    try:
+        from app.core.config import get_settings
+        from app.core.security import AccessTokenError, decode_access_token
+
+        settings = get_settings()
+        payload = decode_access_token(token, settings=settings)
+    except Exception:
+        return  # Invalid token — silent skip
+
+    if payload.sub is None:
+        return
+
+    workspace_id = None
+    path_params = request.path_params
+    if "workspace_id" in path_params:
+        try:
+            workspace_id = uuid.UUID(path_params["workspace_id"])
+        except (ValueError, TypeError):
+            pass
+
+    session.info["audit_context"] = {
+        "actor_id": payload.sub,
+        "workspace_id": workspace_id,
+    }
+
+
+async def get_session(
+    request: Request = None,  # type: ignore[assignment]
+) -> AsyncIterator[AsyncSession]:
+    """FastAPI dependency: yield a session with audit_context injected when possible."""
     factory = get_session_factory()
     async with factory() as session:
+        if request is not None:
+            _try_inject_audit_context(session, request)
         try:
             yield session
         except Exception:

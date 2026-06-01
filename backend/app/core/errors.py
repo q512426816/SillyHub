@@ -90,6 +90,11 @@ class ScanDocNotFound(AppError):
     http_status = status.HTTP_404_NOT_FOUND
 
 
+class SpecConflictNotFound(AppError):
+    code = "HTTP_404_SPEC_CONFLICT_NOT_FOUND"
+    http_status = status.HTTP_404_NOT_FOUND
+
+
 # ── Relation errors ──────────────────────────────────────────────────────────
 
 
@@ -114,6 +119,11 @@ class RelationDuplicate(AppError):
 class AgentRunNotFound(AppError):
     code = "HTTP_404_AGENT_RUN_NOT_FOUND"
     http_status = status.HTTP_404_NOT_FOUND
+
+
+class AgentRunNotRunning(AppError):
+    code = "HTTP_409_AGENT_RUN_NOT_RUNNING"
+    http_status = status.HTTP_409_CONFLICT
 
 
 # ── Change errors ────────────────────────────────────────────────────────────
@@ -177,6 +187,11 @@ class PermissionDenied(AppError):
     http_status = status.HTTP_403_FORBIDDEN
 
 
+class InvalidTransition(AppError):
+    code = "HTTP_422_INVALID_TRANSITION"
+    http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
 # ── Worktree errors ──
 
 
@@ -193,6 +208,14 @@ class WorktreeLeaseAlreadyReleased(AppError):
 class WorktreeAcquireFailed(AppError):
     code = "WORKTREE_ACQUIRE_FAILED"
     http_status = status.HTTP_503_SERVICE_UNAVAILABLE
+
+
+# ── Spec errors ──────────────────────────────────────────────────────────────────
+
+
+class SpecConflictNotFound(AppError):
+    code = "HTTP_404_SPEC_CONFLICT_NOT_FOUND"
+    http_status = status.HTTP_404_NOT_FOUND
 
 
 def _request_id(request: Request) -> str:

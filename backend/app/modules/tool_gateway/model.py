@@ -44,8 +44,8 @@ class ToolOperationLog(BaseModel, table=True):
         ),
     )
     tool_type: str = Field(
-        max_length=30,
-        sa_column=Column(String(30), nullable=False),
+        max_length=50,
+        sa_column=Column(String(50), nullable=False),
     )
     params_json: str | None = Field(
         default=None,

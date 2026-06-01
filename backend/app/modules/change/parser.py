@@ -1,11 +1,14 @@
-"""Filesystem parser for ``.sillyspec/changes/{location}/{change_key}/``.
+"""Filesystem parser for ``.sillyspec/changes/<change_key>/``.
 
-Walks both ``change/`` (active) and ``archive/`` directories, reads each
+Walks both active and ``archive/`` directories, reads each
 MASTER.md frontmatter, and returns structured records for DB persistence.
+
+Supports legacy ``changes/change/<key>/`` layout with deprecation warnings.
 """
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -13,30 +16,14 @@ from pathlib import Path
 import frontmatter
 
 from app.core.logging import get_logger
+from app.core.spec_paths import SpecPathResolver
 
 log = get_logger(__name__)
 
-STANDARD_DOC_TYPES: frozenset[str] = frozenset(
-    {
-        "MASTER",
-        "proposal",
-        "requirements",
-        "design",
-        "plan",
-        "tasks",
-        "verification",
-    }
-)
+# Re-export constants from SpecPathResolver for backward compatibility
+STANDARD_DOC_TYPES: frozenset[str] = SpecPathResolver.STANDARD_DOC_TYPES
 
-STANDARD_FILENAMES: dict[str, str] = {
-    "MASTER": "MASTER.md",
-    "proposal": "proposal.md",
-    "requirements": "requirements.md",
-    "design": "design.md",
-    "plan": "plan.md",
-    "tasks": "tasks.md",
-    "verification": "verification.md",
-}
+STANDARD_FILENAMES: dict[str, str] = dict(SpecPathResolver.STANDARD_FILENAMES)
 
 
 @dataclass
@@ -82,60 +69,124 @@ class ChangeParser:
 
     def parse_workspace(self, sillyspec_root: Path) -> ChangeParserResult:
         result = ChangeParserResult()
-        changes_base = sillyspec_root / ".sillyspec" / "changes"
+        resolver = SpecPathResolver(sillyspec_root)
+        changes_base = resolver.changes_root()
 
-        for dir_name, location in (("change", "active"), ("archive", "archive")):
-            location_dir = changes_base / dir_name
-            if not location_dir.is_dir():
-                result.warnings.append(
-                    ParseWarning(
-                        code="CHANGES_DIR_MISSING",
-                        detail=f"No changes/{location} directory",
-                    )
+        # --- 1. Scan active changes: changes/<name>/ (excluding archive/) ---
+        if changes_base.is_dir():
+            for entry in sorted(changes_base.iterdir()):
+                if entry.name.startswith(".") or not entry.is_dir():
+                    continue
+                # Skip the archive directory itself
+                if entry.name == "archive":
+                    continue
+
+                if not self._is_safe_path(sillyspec_root, entry, result):
+                    continue
+
+                parsed = self._parse_change(
+                    sillyspec_root, entry, location="active",
+                    rel_prefix=f".sillyspec/changes/{entry.name}",
                 )
-                continue
+                result.changes.append(parsed)
+                result.warnings.extend(parsed.warnings)
 
-            for entry in sorted(location_dir.iterdir()):
+        # --- 2. Scan archived changes: changes/archive/<name>/ ---
+        archive_base = resolver.archive_dir()
+        if archive_base.is_dir():
+            for entry in sorted(archive_base.iterdir()):
                 if entry.name.startswith(".") or not entry.is_dir():
                     continue
 
-                # Path traversal guard
-                try:
-                    resolved = entry.resolve()
-                    base_resolved = sillyspec_root.resolve()
-                    if not str(resolved).startswith(str(base_resolved)):
-                        result.warnings.append(
-                            ParseWarning(
-                                code="PATH_TRAVERSAL",
-                                detail=f"Skipping directory outside root: {entry}",
-                                change_key=entry.name,
-                            )
-                        )
-                        continue
-                except (OSError, ValueError):
+                if not self._is_safe_path(sillyspec_root, entry, result):
                     continue
 
-                parsed = self._parse_change(sillyspec_root, entry, dir_name, location)
+                parsed = self._parse_change(
+                    sillyspec_root, entry, location="archive",
+                    rel_prefix=f".sillyspec/changes/archive/{entry.name}",
+                )
+                result.changes.append(parsed)
+                result.warnings.extend(parsed.warnings)
+
+        # --- 3. Legacy: scan changes/change/<key>/ with deprecation warning ---
+        legacy_base = changes_base / "change"
+        if legacy_base.is_dir():
+            log.warning(
+                "legacy_changes_dir_found",
+                detail="Found legacy 'changes/change/' directory. Please migrate to v4 layout.",
+            )
+            result.warnings.append(
+                ParseWarning(
+                    code="LEGACY_CHANGE_DIR",
+                    detail="Legacy 'changes/change/' directory found. Migrate to changes/<name>/ layout.",
+                )
+            )
+            for entry in sorted(legacy_base.iterdir()):
+                if entry.name.startswith(".") or not entry.is_dir():
+                    continue
+
+                if not self._is_safe_path(sillyspec_root, entry, result):
+                    continue
+
+                parsed = self._parse_change(
+                    sillyspec_root, entry, location="active",
+                    rel_prefix=f".sillyspec/changes/change/{entry.name}",
+                    is_legacy=True,
+                )
                 result.changes.append(parsed)
                 result.warnings.extend(parsed.warnings)
 
         return result
 
+    # ------------------------------------------------------------------
+    # Internals
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_safe_path(root: Path, entry: Path, result: ChangeParserResult) -> bool:
+        """Path traversal guard. Returns True if safe."""
+        try:
+            resolved = entry.resolve()
+            base_resolved = root.resolve()
+            if not str(resolved).startswith(str(base_resolved)):
+                result.warnings.append(
+                    ParseWarning(
+                        code="PATH_TRAVERSAL",
+                        detail=f"Skipping directory outside root: {entry}",
+                        change_key=entry.name,
+                    )
+                )
+                return False
+        except (OSError, ValueError):
+            return False
+        return True
+
     def _parse_change(
         self,
         sillyspec_root: Path,
         change_dir: Path,
-        dir_name: str,
+        *,
         location: str,
+        rel_prefix: str,
+        is_legacy: bool = False,
     ) -> ParsedChange:
         change_key = change_dir.name
-        rel_path = f".sillyspec/changes/{dir_name}/{change_key}"
 
         parsed = ParsedChange(
             change_key=change_key,
             location=location,
-            path=rel_path,
+            path=rel_prefix,
         )
+
+        if is_legacy:
+            parsed.warnings.append(
+                ParseWarning(
+                    code="LEGACY_CHANGE_PATH",
+                    detail=f"Change '{change_key}' is at legacy path 'changes/change/{change_key}'. "
+                           "Migrate to 'changes/{change_key}'.",
+                    change_key=change_key,
+                )
+            )
 
         # Parse MASTER.md frontmatter
         master_path = change_dir / "MASTER.md"
@@ -169,37 +220,64 @@ class ChangeParser:
                     )
                 )
 
-        # Scan standard documents
-        for doc_type in STANDARD_DOC_TYPES:
-            filename = STANDARD_FILENAMES[doc_type]
+        # Scan standard documents using SpecPathResolver constants
+        for doc_type, filename in STANDARD_FILENAMES.items():
             filepath = change_dir / filename
             if filepath.is_file():
                 mtime = datetime.utcfromtimestamp(filepath.stat().st_mtime)
                 parsed.docs.append(
                     ParsedDoc(
                         doc_type=doc_type,
-                        path=f"{rel_path}/{filename}",
+                        path=f"{rel_prefix}/{filename}",
                         exists=True,
                         filename=filename,
                         last_modified_at=mtime,
                     )
                 )
             else:
-                parsed.docs.append(
-                    ParsedDoc(
-                        doc_type=doc_type,
-                        path=f"{rel_path}/{filename}",
-                        exists=False,
-                        filename=filename,
+                # Check legacy alias (e.g. verification.md → verify-result.md)
+                legacy_found = False
+                for legacy_name, canonical_name in SpecPathResolver.LEGACY_FILENAME_MAP.items():
+                    if canonical_name == filename:
+                        legacy_path = change_dir / legacy_name
+                        if legacy_path.is_file():
+                            mtime = datetime.utcfromtimestamp(legacy_path.stat().st_mtime)
+                            parsed.docs.append(
+                                ParsedDoc(
+                                    doc_type=doc_type,
+                                    path=f"{rel_prefix}/{legacy_name}",
+                                    exists=True,
+                                    filename=legacy_name,
+                                    last_modified_at=mtime,
+                                )
+                            )
+                            parsed.warnings.append(
+                                ParseWarning(
+                                    code="LEGACY_FILENAME",
+                                    detail=f"Found legacy '{legacy_name}', expected '{canonical_name}' "
+                                           f"for change '{change_key}'.",
+                                    change_key=change_key,
+                                    doc_type=doc_type,
+                                )
+                            )
+                            legacy_found = True
+                            break
+                if not legacy_found:
+                    parsed.docs.append(
+                        ParsedDoc(
+                            doc_type=doc_type,
+                            path=f"{rel_prefix}/{filename}",
+                            exists=False,
+                            filename=filename,
+                        )
                     )
-                )
 
         # Scan prototypes
         for proto in sorted(change_dir.glob("prototype-*.html")):
             parsed.docs.append(
                 ParsedDoc(
                     doc_type="prototype",
-                    path=f"{rel_path}/{proto.name}",
+                    path=f"{rel_prefix}/{proto.name}",
                     exists=True,
                     filename=proto.name,
                     last_modified_at=datetime.utcfromtimestamp(proto.stat().st_mtime),
@@ -214,7 +292,7 @@ class ChangeParser:
                     parsed.docs.append(
                         ParsedDoc(
                             doc_type="reference",
-                            path=f"{rel_path}/references/{ref.name}",
+                            path=f"{rel_prefix}/references/{ref.name}",
                             exists=True,
                             filename=ref.name,
                             last_modified_at=datetime.utcfromtimestamp(ref.stat().st_mtime),

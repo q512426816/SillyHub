@@ -1,0 +1,1 @@
+推荐方案 B：全面增强。核心决策：(1) 审计用 SQLAlchemy event hook（after_insert/after_update/after_delete），通过 session.info 传递 actor/workspace 上下文 (2) spec_guardian 扩展为可注册规则引擎，新增3条规则 (3) 修复已知 bug + datetime.utcnow deprecation (4) 改动范围 5-6 个文件，预计 8-12h。方案 A 最小增强和方案 C 激进重构未选。

@@ -54,3 +54,4 @@ spikes/**/*.log
 prototype/
 .playwright-mcp/
 bash.exe.stackdump
+.claude/worktrees/

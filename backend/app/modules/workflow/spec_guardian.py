@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.modules.change.model import Change, ChangeDocument
+from app.modules.workflow.model import ChangeReview
 
 
 async def check_change_ready_for_proposed(
@@ -45,10 +46,57 @@ async def check_change_ready_for_reviewed(
     return violations
 
 
+# ── G4: document word count >= 100 ──────────────────────────────────────
+
+
+async def _check_docs_non_trivial(
+    session: AsyncSession, change: Change,
+) -> list[str]:
+    """G4: reviewed -> approved — all existing docs must have >= 100 words."""
+    violations: list[str] = []
+    stmt = select(ChangeDocument).where(
+        col(ChangeDocument.change_id) == change.id,
+        col(ChangeDocument.exists).is_(True),
+    )
+    docs = (await session.execute(stmt)).scalars().all()
+    for doc in docs:
+        wc = doc.word_count if doc.word_count is not None else 0
+        if wc < 100:
+            violations.append(
+                f"Document \'{doc.doc_type}\' has only {wc} words (minimum 100)."
+            )
+    return violations
+
+
+# ── G5: component existence ─────────────────────────────────────────────
+
+
+async def _check_components_exist(
+    session: AsyncSession, change: Change,
+) -> list[str]:
+    """G5: reviewed -> approved — all affected_components must exist as active workspaces."""
+    violations: list[str] = []
+    if not change.affected_components:
+        return violations
+
+    from app.modules.workspace.model import Workspace
+    for comp in change.affected_components:
+        stmt = select(Workspace).where(
+            col(Workspace.component_key) == comp,
+            col(Workspace.deleted_at).is_(None),
+        )
+        ws = (await session.execute(stmt)).scalars().first()
+        if ws is None:
+            violations.append(
+                f"Affected component \'{comp}\' does not exist as an active workspace."
+            )
+    return violations
+
+
 async def check_change_ready_for_approved(
     session: AsyncSession, change: Change,
 ) -> list[str]:
-    """Reviewed -> approved: requirements + design must exist."""
+    """Reviewed -> approved: requirements + design must exist + G4 + G5."""
     violations: list[str] = []
     for doc_type in ("requirements", "design"):
         stmt = select(ChangeDocument).where(
@@ -59,13 +107,43 @@ async def check_change_ready_for_approved(
         doc = (await session.execute(stmt)).scalars().first()
         if doc is None:
             violations.append(f"{doc_type.capitalize()} document is missing.")
+    # G4: word count
+    violations.extend(await _check_docs_non_trivial(session, change))
+    # G5: component existence
+    violations.extend(await _check_components_exist(session, change))
+    return violations
+
+
+# ── G7: unresolved reject review ────────────────────────────────────────
+
+
+async def _check_no_unresolved_reject(
+    session: AsyncSession, change: Change,
+) -> list[str]:
+    """G7: approved -> in_progress — no unresolved reject reviews."""
+    violations: list[str] = []
+    stmt = (
+        select(ChangeReview)
+        .where(col(ChangeReview.change_id) == change.id)
+        .order_by(col(ChangeReview.created_at).desc())
+    )
+    reviews = list((await session.execute(stmt)).scalars().all())
+
+    if not reviews:
+        return violations
+
+    last_review = reviews[0]
+    if last_review.verdict == "reject":
+        violations.append(
+            "Change has an unresolved reject review. Submit an approve review after rework."
+        )
     return violations
 
 
 async def check_change_ready_for_in_progress(
     session: AsyncSession, change: Change,
 ) -> list[str]:
-    """Approved -> in_progress: plan must exist."""
+    """Approved -> in_progress: plan must exist + G7."""
     violations: list[str] = []
     stmt = select(ChangeDocument).where(
         col(ChangeDocument.change_id) == change.id,
@@ -75,6 +153,8 @@ async def check_change_ready_for_in_progress(
     doc = (await session.execute(stmt)).scalars().first()
     if doc is None:
         violations.append("Plan document is missing.")
+    # G7: no unresolved reject
+    violations.extend(await _check_no_unresolved_reject(session, change))
     return violations
 
 

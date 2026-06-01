@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ToolExecuteRequest(BaseModel):
-    tool_type: Literal["file_read", "file_write", "file_list", "file_search", "shell_exec"]
+    tool_type: Literal["file_read", "file_write", "file_list", "file_search", "shell_exec", "run_tests", "http_get"]
     params: dict[str, Any] = Field(default_factory=dict)
 
 

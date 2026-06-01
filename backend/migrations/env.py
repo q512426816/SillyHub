@@ -23,6 +23,20 @@ from app.models.base import BaseModel
 from app.modules.auth import model as _auth_model  # noqa: F401
 from app.modules.workspace import model as _workspace_model  # noqa: F401
 from app.modules.agent import model as _agent_model  # noqa: F401
+from app.modules.tool_gateway import model as _tg_model  # noqa: F401
+from app.modules.tool_gateway import tool_policy as _tg_policy  # noqa: F401
+from app.modules.change import model as _change_model  # noqa: F401
+from app.modules.git_gateway import model as _gg_model  # noqa: F401
+from app.modules.git_identity import model as _gi_model  # noqa: F401
+from app.modules.incident import model as _incident_model  # noqa: F401
+from app.modules.release import model as _release_model  # noqa: F401
+from app.modules.scan_docs import model as _scan_model  # noqa: F401
+from app.modules.settings import model as _settings_model  # noqa: F401
+from app.modules.spec_profile import model as _spec_profile_model  # noqa: F401
+from app.modules.spec_workspace import model as _spec_ws_model  # noqa: F401
+from app.modules.task import model as _task_model  # noqa: F401
+from app.modules.workflow import model as _workflow_model  # noqa: F401
+from app.modules.worktree import model as _worktree_model  # noqa: F401
 
 config = context.config
 

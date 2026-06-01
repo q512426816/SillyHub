@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +21,11 @@ from sqlmodel import col
 from app.core.errors import AppError, PermissionDenied, WorktreeLeaseNotFound
 from app.core.logging import get_logger
 from app.modules.git_gateway.model import GitOperationLog
+from app.modules.git_identity.model import GitIdentity
 from app.modules.worktree.model import WorktreeLease
+
+if TYPE_CHECKING:
+    from app.modules.git_gateway.schema import RetryPolicy
 
 log = get_logger(__name__)
 
@@ -36,6 +42,22 @@ BLOCKED_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"clean\s", re.IGNORECASE),
     re.compile(r"\breflog\b", re.IGNORECASE),
     re.compile(r"--exec", re.IGNORECASE),
+]
+
+# ── Default git identity ────────────────────────────────────────────────────
+
+DEFAULT_GIT_AUTHOR_NAME = "SillyHub Agent"
+DEFAULT_GIT_AUTHOR_EMAIL = "agent@sillyhub.local"
+
+# ── Shell injection patterns ────────────────────────────────────────────────
+
+SHELL_INJECTION_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\$\("),          # $( command substitution
+    re.compile(r"`"),             # backtick command substitution
+    re.compile(r";\s*\w"),        # ;cmd chain
+    re.compile(r"\|\s*[a-zA-Z]"), # |cmd pipe
+    re.compile(r"&&\s*\w"),       # && chain
+    re.compile(r">\s*/"),         # > /path redirect
 ]
 
 # ── Redaction ───────────────────────────────────────────────────────────────
@@ -94,6 +116,31 @@ def validate_operation(operation: str, args: list[str]) -> None:
                 details={"operation": operation, "args": args},
             )
 
+    # Default branch push protection: reject pushes targeting main/master
+    # Also reject force push short flag -f
+    if operation == "push":
+        protected = {"main", "master"}
+        for arg in args:
+            if arg in protected:
+                raise GitOperationForbidden(
+                    f"Push to protected branch '{arg}' is forbidden.",
+                    details={"operation": operation, "args": args},
+                )
+            if arg == "-f":
+                raise GitOperationForbidden(
+                    "Blocked pattern in command: push -f",
+                    details={"operation": operation, "args": args},
+                )
+
+    # Shell injection detection
+    for arg in args:
+        for pat in SHELL_INJECTION_PATTERNS:
+            if pat.search(arg):
+                raise GitOperationForbidden(
+                    f"Shell injection pattern detected in argument.",
+                    details={"operation": operation, "args": args},
+                )
+
 
 class GitGatewayService:
     """Execute validated git operations inside a worktree lease."""
@@ -107,6 +154,7 @@ class GitGatewayService:
         user_id: uuid.UUID,
         operation: str,
         args: list[str],
+        retry_policy: RetryPolicy | None = None,
     ) -> GitOperationLog:
         """Validate, execute, and log a git operation."""
         # 1. Validate
@@ -115,32 +163,67 @@ class GitGatewayService:
         # 2. Resolve lease
         lease = await self._get_active_lease(lease_id, user_id)
 
-        # 3. Build command
+        # 3. Resolve git identity for env vars
+        author_name, author_email = await self._resolve_git_identity(user_id)
+
+        # 4. Build command + env
         repo_dir = self._resolve_repo_dir(lease)
         cmd = ["git", operation, *args]
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": author_name,
+            "GIT_AUTHOR_EMAIL": author_email,
+            "GIT_COMMITTER_NAME": author_name,
+            "GIT_COMMITTER_EMAIL": author_email,
+        }
 
-        # 4. Execute
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(repo_dir),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        try:
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=GIT_TIMEOUT)
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
-            raise GitOperationFailed(
-                f"Git operation timed out after {GIT_TIMEOUT}s.",
-                details={"operation": operation},
-            ) from None
+        # 5. Execute (with optional retry on failure)
+        max_attempts = 1 + (retry_policy.max_retries if retry_policy else 0)
+        result_code: int = -1
+        raw_output = ""
 
-        raw_output = stdout.decode(errors="replace") if stdout else ""
+        for attempt in range(max_attempts):
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=str(repo_dir),
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(
+                    proc.communicate(), timeout=GIT_TIMEOUT,
+                )
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                raise GitOperationFailed(
+                    f"Git operation timed out after {GIT_TIMEOUT}s.",
+                    details={"operation": operation},
+                ) from None
+
+            raw_output = stdout.decode(errors="replace") if stdout else ""
+            result_code = proc.returncode if proc.returncode is not None else -1
+
+            # Success → stop retrying
+            if result_code == 0:
+                break
+
+            # Failure → retry if allowed
+            if retry_policy and attempt < max_attempts - 1:
+                delay = retry_policy.base_delay * (2 ** attempt)
+                log.warning(
+                    "git_gateway_retry",
+                    operation=operation,
+                    attempt=attempt + 1,
+                    result_code=result_code,
+                    delay=delay,
+                )
+                await asyncio.sleep(delay)
+
         safe_output = redact_output(raw_output)
-        result_code = proc.returncode if proc.returncode is not None else -1
 
-        # 5. Log
+        # 6. Log
         op_log = GitOperationLog(
             id=uuid.uuid4(),
             workspace_id=lease.workspace_id,
@@ -162,6 +245,52 @@ class GitGatewayService:
             result_code=result_code,
         )
         return op_log
+
+    async def list_operations(
+        self,
+        user_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        lease_id: uuid.UUID | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[GitOperationLog], int]:
+        """List git operation audit logs for the current user."""
+        base = select(GitOperationLog).where(
+            GitOperationLog.user_id == user_id,
+        )
+        if workspace_id is not None:
+            base = base.where(GitOperationLog.workspace_id == workspace_id)
+        if lease_id is not None:
+            base = base.where(GitOperationLog.lease_id == lease_id)
+
+        # Count
+        from sqlalchemy import func
+        count_stmt = select(func.count()).select_from(base.subquery())
+        total = (await self._session.execute(count_stmt)).scalar() or 0
+
+        # Paginate
+        stmt = base.order_by(GitOperationLog.timestamp.desc()).offset((page - 1) * page_size).limit(page_size)
+        rows = list((await self._session.execute(stmt)).scalars().all())
+        return rows, total
+
+    async def _resolve_git_identity(self, user_id: uuid.UUID) -> tuple[str, str]:
+        """Look up a non-revoked GitIdentity for the user.
+
+        Returns (git_username, git_email).  Falls back to defaults if none found
+        or if the identity has no username/email set.
+        """
+        stmt = (
+            select(GitIdentity)
+            .where(
+                GitIdentity.user_id == user_id,
+                GitIdentity.revoked_at.is_(None),
+            )
+            .limit(1)
+        )
+        identity = (await self._session.execute(stmt)).scalars().first()
+        if identity and identity.git_username and identity.git_email:
+            return identity.git_username, identity.git_email
+        return DEFAULT_GIT_AUTHOR_NAME, DEFAULT_GIT_AUTHOR_EMAIL
 
     async def _get_active_lease(
         self, lease_id: uuid.UUID, user_id: uuid.UUID,

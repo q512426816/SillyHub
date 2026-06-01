@@ -49,15 +49,39 @@ async def create_change(
         change_type=data.change_type,
         affected_components=data.affected_components,
         lease_id=data.lease_id,
+        description=data.description,
     )
     return ChangeCreateResponse.model_validate(change)
 
 
 @router.post(
     "/changes/{change_id}/documents/generate",
+    response_model=MarkdownGenerateResponse,
+)
+async def generate_document(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    data: MarkdownGenerateRequest,
+    session: SessionDep,
+    user: CurrentUser,
+) -> MarkdownGenerateResponse:
+    service = ChangeWriterService(session)
+    rel_path, size = await service.generate_document(
+        workspace_id,
+        user.id,
+        change_id=change_id,
+        doc_type=data.doc_type,
+        content=data.content,
+        lease_id=data.lease_id,  # type: ignore[arg-type]
+    )
+    return MarkdownGenerateResponse(doc_type=data.doc_type, path=rel_path, size=size)
+
+
+@router.post(
+    "/changes/{change_id}/documents/batch-generate",
     response_model=BatchGenerateResponse,
 )
-async def generate_documents(
+async def batch_generate_documents(
     workspace_id: uuid.UUID,
     change_id: uuid.UUID,
     data: BatchGenerateRequest,
@@ -72,3 +96,64 @@ async def generate_documents(
         doc_types=data.doc_types,
     )
     return BatchGenerateResponse(generated=generated)
+
+
+@router.post(
+    "/changes/{change_key}/execute",
+    response_model=dict,
+)
+async def execute_change(
+    workspace_id: uuid.UUID,
+    change_key: str,
+    session: SessionDep,
+    user: CurrentUser,
+) -> dict:
+    """Trigger change execution — dispatch via unified stage dispatch service."""
+    from sqlalchemy import select
+    from sqlmodel import col
+
+    from app.core.errors import AppError
+    from app.modules.change.dispatch import SillySpecStageDispatchService
+    from app.modules.change.model import Change
+
+    # Look up the change record
+    stmt = select(Change).where(
+        col(Change.workspace_id) == workspace_id,
+        col(Change.change_key) == change_key,
+    )
+    change = (await session.execute(stmt)).scalars().first()
+    if change is None:
+        raise AppError(f"Change '{change_key}' not found.", http_status=404)
+
+    # Stage guard
+    current_stage = getattr(change, "current_stage", None) or "draft"
+    if current_stage != "ready_for_dev":
+        raise AppError(
+            f"Change '{change_key}' \u5f53\u524d\u9636\u6bb5\u4e3a '{current_stage}'\uff0c"
+            f"\u4ec5\u5f53\u9636\u6bb5\u4e3a 'ready_for_dev' \u65f6\u53ef\u6267\u884c\u3002"
+            f"\u8bf7\u5148\u5b8c\u6210\u8bbe\u8ba1\u8bc4\u5ba1\u5e76\u6d41\u8f6c\u81f3 ready_for_dev\u3002",
+            http_status=409,
+        )
+
+    # Dispatch via unified service
+    service = SillySpecStageDispatchService(session)
+    result = await service.dispatch_next_step(
+        session=session,
+        workspace_id=workspace_id,
+        change_id=change.id,
+        user_id=user.id,
+        target_stage="execute",
+    )
+
+    if not result.get("dispatched"):
+        return {
+            "ok": False,
+            "reason": result.get("reason", "dispatch_failed"),
+            "stage": result.get("stage"),
+        }
+
+    return {
+        "ok": True,
+        "run_id": result["agent_run_id"],
+        "stage": result.get("stage"),
+    }

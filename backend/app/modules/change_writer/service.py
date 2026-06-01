@@ -2,6 +2,9 @@
 
 Creates change packages inside worktree lease directories and
 syncs the DB accordingly. All file I/O is scoped to the lease root.
+
+v4 layout: ``.sillyspec/changes/<change_key>/`` (no intermediate ``change/`` dir).
+All generated .md files include YAML frontmatter with ``author`` and ``created_at``.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from sqlmodel import col
 
 from app.core.errors import AppError, WorkspaceNotFound, WorktreeLeaseNotFound
 from app.core.logging import get_logger
+from app.core.spec_paths import SpecPathResolver
 from app.modules.change.model import Change, ChangeDocument
 from app.modules.change_writer.markdown_builder import (
     build_master_md,
@@ -49,8 +53,9 @@ class ChangeWriterService:
         change_type: str | None = None,
         affected_components: list[str] | None = None,
         lease_id: uuid.UUID | None = None,
+        description: str = "",
     ) -> Change:
-        """Create a change directory + MASTER.md inside the lease worktree or workspace root."""
+        """Create a change directory + MASTER.md + proposal.md inside the lease worktree or workspace root."""
         if lease_id is not None:
             lease = await self._get_active_lease(lease_id, user_id)
             if lease.workspace_id != workspace_id:
@@ -72,17 +77,30 @@ class ChangeWriterService:
         # Compute change_key from date + slugified title
         date_prefix = datetime.utcnow().strftime("%Y-%m-%d")
         slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40] or "untitled"
-        change_key = f"{date_prefix}-{slug}"
-        change_dir = repo_dir / ".sillyspec" / "changes" / "change" / change_key
+        change_key = f"{date_prefix}-{slug}-{uuid.uuid4().hex[:6]}"
+
+        # v4 layout: .sillyspec/changes/<change_key>/  (no intermediate change/ dir)
+        resolver = SpecPathResolver(repo_dir)
+        change_dir = resolver.change_dir(change_key)
         change_dir.mkdir(parents=True, exist_ok=True)
 
-        # Write MASTER.md
+        now = datetime.utcnow()
+        author = str(user_id)
+
+        # Write MASTER.md with frontmatter
         master_content = build_master_md(
             title=title,
             change_type=change_type,
             affected_components=affected_components,
         )
+        master_content = self._ensure_frontmatter(master_content, author, now)
         (change_dir / "MASTER.md").write_text(master_content, encoding="utf-8")
+
+        # Write proposal.md with user description (with frontmatter)
+        if description:
+            proposal_content = f"# {title}\n\n## 需求描述\n\n{description}\n"
+            proposal_content = self._ensure_frontmatter(proposal_content, author, now)
+            (change_dir / "proposal.md").write_text(proposal_content, encoding="utf-8")
 
         # Create DB record
         change = Change(
@@ -90,12 +108,14 @@ class ChangeWriterService:
             workspace_id=workspace_id,
             change_key=change_key,
             title=title,
-            status="draft",
+            status="active",
             location="active",
             path=str(change_dir.relative_to(repo_dir)),
             affected_components=affected_components or [],
             change_type=change_type,
             owner_id=user_id,
+            current_stage="draft",
+            stages={"draft": {"status": "done", "at": now.isoformat()}},
         )
         self._session.add(change)
 
@@ -106,9 +126,21 @@ class ChangeWriterService:
             doc_type="master",
             path=str(change_dir.relative_to(repo_dir) / "MASTER.md"),
             exists=True,
-            last_modified_at=datetime.utcnow(),
+            last_modified_at=now,
         )
         self._session.add(doc)
+
+        # Add proposal.md as a document (if description was provided)
+        if description:
+            proposal_doc = ChangeDocument(
+                id=uuid.uuid4(),
+                change_id=change.id,
+                doc_type="proposal",
+                path=str(change_dir.relative_to(repo_dir) / "proposal.md"),
+                exists=True,
+                last_modified_at=now,
+            )
+            self._session.add(proposal_doc)
 
         await self._session.commit()
         await self._session.refresh(change)
@@ -118,6 +150,7 @@ class ChangeWriterService:
             change_id=str(change.id),
             change_key=change_key,
             lease_id=str(lease_id),
+            current_stage="draft",
         )
         return change
 
@@ -150,8 +183,15 @@ class ChangeWriterService:
                 details={"path": str(change_dir)},
             )
 
-        filename = f"{doc_type}.md"
+        # Use canonical filename from SpecPathResolver when available
+        filename = SpecPathResolver.STANDARD_FILENAMES.get(doc_type, f"{doc_type}.md")
         file_path = change_dir / filename
+
+        # Ensure frontmatter
+        now = datetime.utcnow()
+        author = str(user_id)
+        content = self._ensure_frontmatter(content, author, now)
+
         file_path.write_text(content, encoding="utf-8")
         size = file_path.stat().st_size
 
@@ -165,7 +205,7 @@ class ChangeWriterService:
         if existing:
             existing.exists = True
             existing.path = rel_path
-            existing.last_modified_at = datetime.utcnow()
+            existing.last_modified_at = now
         else:
             doc = ChangeDocument(
                 id=uuid.uuid4(),
@@ -173,7 +213,7 @@ class ChangeWriterService:
                 doc_type=doc_type,
                 path=rel_path,
                 exists=True,
-                last_modified_at=datetime.utcnow(),
+                last_modified_at=now,
             )
             self._session.add(doc)
 
@@ -225,13 +265,17 @@ class ChangeWriterService:
 
         generated: list[str] = []
         now = datetime.utcnow()
+        author = str(user_id)
 
         for doc_type in doc_types:
             builder = DOCUMENT_BUILDERS.get(doc_type)
             if builder is None:
                 continue
             content = builder(title=change.title or change.change_key)
-            filename = f"{doc_type}.md"
+            content = self._ensure_frontmatter(content, author, now)
+
+            # Use canonical filename from SpecPathResolver when available
+            filename = SpecPathResolver.STANDARD_FILENAMES.get(doc_type, f"{doc_type}.md")
             file_path = change_dir / filename
             file_path.write_text(content, encoding="utf-8")
             size = file_path.stat().st_size
@@ -265,6 +309,27 @@ class ChangeWriterService:
             generated=generated,
         )
         return generated
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _ensure_frontmatter(content: str, author: str, created_at: datetime) -> str:
+        """Ensure the markdown content starts with YAML frontmatter containing author + created_at.
+
+        If content already starts with ``---``, leave it as-is (assume it has frontmatter).
+        """
+        if content.startswith("---"):
+            return content
+
+        frontmatter_block = (
+            "---\n"
+            f"author: \"{author}\"\n"
+            f"created_at: \"{created_at.isoformat()}\"\n"
+            "---\n\n"
+        )
+        return frontmatter_block + content
 
     async def _get_active_lease(
         self, lease_id: uuid.UUID, user_id: uuid.UUID,

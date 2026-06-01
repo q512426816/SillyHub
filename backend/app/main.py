@@ -24,7 +24,20 @@ from app.modules.scan_docs.router import router as scan_docs_router
 from app.modules.git_identity import git_identity_router
 from app.modules.task import task_router
 from app.modules.worktree import lease_router, worktree_router
+from app.modules.workflow.router import router as workflow_router
 from app.modules.workspace import workspace_router
+from app.modules.git_gateway.router import router as git_gateway_router
+from app.modules.change_writer.router import router as change_writer_router
+
+from app.modules.incident.router import router as incident_router
+from app.modules.knowledge.router import router as knowledge_router
+from app.modules.release.router import router as release_router
+from app.modules.runtime.router import router as runtime_router
+from app.modules.tool_gateway.router import router as tool_gateway_router
+from app.modules.tool_gateway.policy_router import router as policy_crud_router
+from app.modules.archive.router import router as archive_router
+from app.modules.settings.router import router as settings_router
+from app.modules.spec_workspace.router import router as spec_workspace_router
 
 
 @asynccontextmanager
@@ -97,6 +110,18 @@ def create_app() -> FastAPI:
     app.include_router(agent_router, prefix="/api")
     app.include_router(worktree_router, prefix="/api")
     app.include_router(lease_router, prefix="/api")
+    app.include_router(git_gateway_router, prefix="/api")
+    app.include_router(change_writer_router, prefix="/api")
+    app.include_router(workflow_router, prefix="/api")
+    app.include_router(incident_router, prefix="/api")
+    app.include_router(knowledge_router, prefix="/api")
+    app.include_router(release_router, prefix="/api")
+    app.include_router(runtime_router, prefix="/api")
+    app.include_router(tool_gateway_router, prefix="/api")
+    app.include_router(policy_crud_router, prefix="/api")
+    app.include_router(archive_router, prefix="/api")
+    app.include_router(settings_router, prefix="/api")
+    app.include_router(spec_workspace_router, prefix="/api")
 
     return app
 

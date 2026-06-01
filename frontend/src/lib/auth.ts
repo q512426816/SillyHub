@@ -71,7 +71,7 @@ export async function logout(): Promise<void> {
 
   try {
     // We still call logout with current tokens; auth endpoints require access.
-    await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"}/api/auth/logout`, {
+    await fetch(`/api/auth/logout`, {
       method: "POST",
       headers: {
         "content-type": "application/json",

@@ -9,14 +9,38 @@ export interface ReviewEntry {
   created_at: string;
 }
 
+/** Agent dispatch info returned by transition endpoint. */
+export type AgentDispatchResult = {
+  dispatched: boolean;
+  reason?: string;
+  stage?: string;
+  phase?: string;
+  agent_run_id?: string;
+  error?: string;
+};
+
+/** Transition endpoint response — wraps change data + agent dispatch info. */
+export type TransitionResponse = {
+  change: {
+    id: string;
+    status: string;
+    current_stage: string | null;
+    [key: string]: unknown;
+  };
+  agent_dispatch: AgentDispatchResult | null;
+};
+
 export function transitionChange(
   workspaceId: string,
   changeId: string,
-  targetStatus: string,
+  targetStage: string,
+  reason?: string,
 ) {
-  return apiFetch<{ id: string; status: string }>(
+  const body: Record<string, unknown> = { target_stage: targetStage };
+  if (reason !== undefined) body.reason = reason;
+  return apiFetch<TransitionResponse>(
     `/api/workspaces/${workspaceId}/changes/${changeId}/transition`,
-    { method: "POST", json: { target: targetStatus } },
+    { method: "POST", json: body },
   );
 }
 

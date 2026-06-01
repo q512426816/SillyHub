@@ -1,0 +1,209 @@
+<!--
+author: qinyi
+created_at: 2026-05-30T18:45:00
+-->
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Agent Run Monitor — Prototype</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; padding: 24px; }
+  h1 { font-size: 20px; margin-bottom: 16px; }
+  h2 { font-size: 16px; margin-bottom: 8px; color: #94a3b8; }
+  .page { display: none; }
+  .page.active { display: block; }
+  /* -- Status badges -- */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+  .badge-pending { background: #334155; color: #94a3b8; }
+  .badge-running { background: #1e3a5f; color: #60a5fa; animation: pulse 2s infinite; }
+  .badge-completed { background: #14532d; color: #4ade80; }
+  .badge-failed { background: #451a1a; color: #f87171; }
+  .badge-killed { background: #3b1764; color: #c084fc; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+  /* -- Run card -- */
+  .run-card {
+    background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+    padding: 16px; margin-bottom: 8px; cursor: pointer;
+  }
+  .run-card:hover { border-color: #60a5fa; }
+  .run-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .run-meta { font-size: 13px; color: #94a3b8; }
+  /* -- Detail page -- */
+  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+  .detail-field { background: #1e293b; padding: 12px; border-radius: 6px; }
+  .detail-label { font-size: 12px; color: #64748b; margin-bottom: 4px; }
+  .detail-value { font-size: 14px; }
+  /* -- Log stream -- */
+  .log-container {
+    background: #0c0c0c; border: 1px solid #334155; border-radius: 8px;
+    padding: 12px; font-family: 'Menlo', monospace; font-size: 12px;
+    height: 300px; overflow-y: auto;
+  }
+  .log-line { padding: 2px 0; border-bottom: 1px solid #1a1a2e; }
+  .log-line.stdout { color: #e2e8f0; }
+  .log-line.stderr { color: #f87171; }
+  .log-line.tool_call { color: #fbbf24; }
+  .log-timestamp { color: #64748b; margin-right: 8px; }
+  /* -- Kill button -- */
+  .btn-kill {
+    background: #dc2626; color: white; border: none; padding: 8px 16px;
+    border-radius: 6px; cursor: pointer; font-weight: 600; margin-top: 12px;
+  }
+  .btn-kill:hover { background: #b91c1c; }
+  .btn-kill:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
+  .btn-back { background: #334155; color: #e2e8f0; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; margin-bottom: 16px; }
+  /* -- Diff summary -- */
+  .diff-box {
+    background: #1a1a2e; border: 1px solid #334155; border-radius: 6px;
+    padding: 12px; font-family: 'Menlo', monospace; font-size: 12px;
+    max-height: 200px; overflow-y: auto; margin-top: 12px;
+  }
+  .diff-add { color: #4ade80; } .diff-del { color: #f87171; }
+</style>
+</head>
+<body>
+
+<h1>🤖 Agent Run Monitor — Prototype</h1>
+<p style="color:#64748b; margin-bottom:24px;">Wireframe for the Agent Run monitoring interface</p>
+
+<!-- ===================== LIST PAGE ===================== -->
+<div id="list-page" class="page active">
+  <h2>Agent Runs</h2>
+  <div id="run-list">
+    <div class="run-card" onclick="showDetail('run-1')">
+      <div class="run-header">
+        <span><strong>task-14: Implement Agent Adapter</strong></span>
+        <span class="badge badge-completed">completed</span>
+      </div>
+      <div class="run-meta">
+        claude_code · exit 0 · 3m 42s · 2026-05-30 18:20
+      </div>
+    </div>
+    <div class="run-card" onclick="showDetail('run-2')">
+      <div class="run-header">
+        <span><strong>task-14: Add kill mechanism</strong></span>
+        <span class="badge badge-running">running</span>
+      </div>
+      <div class="run-meta">
+        claude_code · started 2m ago · 2026-05-30 18:25
+      </div>
+    </div>
+    <div class="run-card" onclick="showDetail('run-3')">
+      <div class="run-header">
+        <span><strong>task-14: Frontend page</strong></span>
+        <span class="badge badge-failed">failed</span>
+      </div>
+      <div class="run-meta">
+        claude_code · exit 1 · 1m 15s · 2026-05-30 17:50
+      </div>
+    </div>
+    <div class="run-card" onclick="showDetail('run-4')">
+      <div class="run-header">
+        <span><strong>task-14: Diff collector</strong></span>
+        <span class="badge badge-killed">killed</span>
+      </div>
+      <div class="run-meta">
+        claude_code · SIGTERM · 2026-05-30 17:30
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== DETAIL PAGE ===================== -->
+<div id="detail-page" class="page">
+  <button class="btn-back" onclick="showList()">← Back to list</button>
+  <h2 id="detail-title">task-14: Add kill mechanism</h2>
+
+  <div class="detail-grid">
+    <div class="detail-field">
+      <div class="detail-label">Status</div>
+      <div class="detail-value"><span class="badge badge-running" id="detail-status">running</span></div>
+    </div>
+    <div class="detail-field">
+      <div class="detail-label">Agent Type</div>
+      <div class="detail-value" id="detail-type">claude_code</div>
+    </div>
+    <div class="detail-field">
+      <div class="detail-label">Started</div>
+      <div class="detail-value" id="detail-started">2026-05-30 18:25:31</div>
+    </div>
+    <div class="detail-field">
+      <div class="detail-label">Duration</div>
+      <div class="detail-value" id="detail-duration">2m 12s</div>
+    </div>
+    <div class="detail-field">
+      <div class="detail-label">Exit Code</div>
+      <div class="detail-value" id="detail-exit">—</div>
+    </div>
+    <div class="detail-field">
+      <div class="detail-label">Spec Strategy</div>
+      <div class="detail-value" id="detail-strategy">platform-managed</div>
+    </div>
+  </div>
+
+  <!-- SSE Log Stream -->
+  <h2>Live Log Stream <span style="color:#4ade80; font-size:12px;">● CONNECTED</span></h2>
+  <div class="log-container" id="log-stream">
+    <div class="log-line stdout"><span class="log-timestamp">18:25:32</span>[SYSTEM] Agent starting...</div>
+    <div class="log-line stdout"><span class="log-timestamp">18:25:33</span>[ASSISTANT] I'll implement the kill mechanism for agent runs.</div>
+    <div class="log-line tool_call"><span class="log-timestamp">18:25:35</span>[TOOL_USE] Read: backend/app/modules/agent/service.py</div>
+    <div class="log-line stdout"><span class="log-timestamp">18:25:36</span>[TOOL_RESULT] ... 200 lines read</div>
+    <div class="log-line tool_call"><span class="log-timestamp">18:25:38</span>[TOOL_USE] Write: backend/app/modules/agent/service.py</div>
+    <div class="log-line stdout"><span class="log-timestamp">18:25:40</span>[ASSISTANT] Added _proc_registry dict to track running processes...</div>
+  </div>
+
+  <!-- Kill Button -->
+  <button class="btn-kill" id="btn-kill" onclick="killRun()">⚠ Kill Agent</button>
+
+  <!-- Diff Summary (completed runs) -->
+  <h2 style="margin-top:20px;">Diff Summary</h2>
+  <div class="diff-box" id="diff-box">
+    <div><span class="diff-del">- 3 lines removed</span> in service.py</div>
+    <div><span class="diff-add">+ 28 lines added</span> in service.py</div>
+    <div><span class="diff-add">+ 45 lines added</span> in test_kill.py</div>
+    <div><span class="diff-add">+ 67 lines added</span> in diff_collector.py</div>
+    <div style="margin-top:8px; color:#94a3b8;">4 files changed, 140 insertions(+), 3 deletions(-)</div>
+  </div>
+</div>
+
+<script>
+function showDetail(runId) {
+  document.getElementById('list-page').classList.remove('active');
+  document.getElementById('detail-page').classList.add('active');
+}
+function showList() {
+  document.getElementById('detail-page').classList.remove('active');
+  document.getElementById('list-page').classList.add('active');
+}
+function killRun() {
+  const btn = document.getElementById('btn-kill');
+  btn.disabled = true;
+  btn.textContent = 'Terminating...';
+  setTimeout(() => {
+    document.getElementById('detail-status').textContent = 'killed';
+    document.getElementById('detail-status').className = 'badge badge-killed';
+    btn.textContent = '✓ Agent killed';
+  }, 1500);
+}
+// Simulate live log entries
+const logContainer = document.getElementById('log-stream');
+const messages = [
+  { ch: 'stdout', ts: '18:25:42', text: '[ASSISTANT] Now implementing the kill endpoint...' },
+  { ch: 'tool_call', ts: '18:25:44', text: '[TOOL_USE] Bash: pytest tests/ -x' },
+  { ch: 'stdout', ts: '18:25:48', text: '[TOOL_RESULT] 30 passed in 4.2s' },
+];
+let idx = 0;
+setInterval(() => {
+  if (idx >= messages.length) return;
+  const m = messages[idx++];
+  const div = document.createElement('div');
+  div.className = 'log-line ' + m.ch;
+  div.innerHTML = `<span class="log-timestamp">${m.ts}</span>${m.text}`;
+  logContainer.appendChild(div);
+  logContainer.scrollTop = logContainer.scrollHeight;
+}, 3000);
+</script>
+</body>
+</html>

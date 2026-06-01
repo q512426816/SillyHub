@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
@@ -46,11 +46,33 @@ function useWorkspaceId(): string | null {
   return match?.[1] ?? null;
 }
 
+const COLLAPSED_KEY = "sidebar-collapsed";
+
 export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const workspaceId = useWorkspaceId();
   const { user, accessToken, refreshToken, clear } = useSession();
+
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      const stored = localStorage.getItem(COLLAPSED_KEY);
+      return stored === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLLAPSED_KEY, String(collapsed));
+    } catch {
+      // ignore storage errors
+    }
+  }, [collapsed]);
+
+  const toggleCollapsed = () => setCollapsed((prev) => !prev);
 
   const displayName = useMemo(() => {
     if (!user) return "用户";
@@ -107,76 +129,128 @@ export function AppShell({ children }: { children: ReactNode }) {
         }`
       : "flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] font-medium text-muted-foreground/40 cursor-not-allowed";
 
+    const icon = (
+      <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center text-[15px]">
+        {item.icon}
+      </span>
+    );
+
     if (!hasWorkspace) {
       return (
-        <span key={item.href} className={classes}>
-          <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center text-[15px]">
-            {item.icon}
-          </span>
-          {item.label}
+        <span key={item.href} className={classes} title={collapsed ? item.label : undefined}>
+          {icon}
+          {!collapsed && <span className="truncate">{item.label}</span>}
         </span>
       );
     }
 
     return (
-      <Link key={item.href} href={href} className={classes}>
-        <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center text-[15px]">
-          {item.icon}
-        </span>
-        {item.label}
+      <Link key={item.href} href={href} className={classes} title={collapsed ? item.label : undefined}>
+        {icon}
+        {!collapsed && <span className="truncate">{item.label}</span>}
       </Link>
     );
   };
 
+  const renderGroupTitle = (title: string) => (
+    <div className="px-2 pt-5 pb-1">
+      <p
+        className={`text-[11px] font-semibold uppercase tracking-wide text-muted-foreground transition-all duration-200 ${
+          collapsed ? "opacity-0 h-0 overflow-hidden" : "opacity-100"
+        }`}
+      >
+        {title}
+      </p>
+    </div>
+  );
+
   return (
     <div className="flex min-h-screen bg-background">
       {/* Sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-40 flex w-[260px] flex-col border-r bg-card">
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 flex flex-col border-r bg-card transition-all duration-200 ${
+          collapsed ? "w-[60px]" : "w-[260px]"
+        }`}
+      >
         {/* Brand */}
-        <div className="border-b px-5 pt-5 pb-4">
-          <Link href="/workspaces" className="text-[15px] font-bold tracking-tight text-foreground hover:text-primary transition-colors">
-            Multi-Agent Platform
-          </Link>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">SillySpec Native</p>
+        <div className="border-b px-5 pt-5 pb-4 flex items-center justify-between">
+          <div className="overflow-hidden transition-all duration-200">
+            <Link
+              href="/workspaces"
+              className="text-[15px] font-bold tracking-tight text-foreground hover:text-primary transition-colors whitespace-nowrap"
+            >
+              Multi-Agent Platform
+            </Link>
+            <p
+              className={`mt-0.5 text-[11px] text-muted-foreground transition-all duration-200 ${
+                collapsed ? "opacity-0 h-0" : "opacity-100"
+              }`}
+            >
+              SillySpec Native
+            </p>
+          </div>
         </div>
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 pt-2 pb-4">
           <div className="px-2 pt-3 pb-1">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <p
+              className={`text-[11px] font-semibold uppercase tracking-wide text-muted-foreground transition-all duration-200 ${
+                collapsed ? "opacity-0 h-0 overflow-hidden" : "opacity-100"
+              }`}
+            >
               Overview
             </p>
           </div>
           {OVERVIEW_NAV.map(renderNavLink)}
 
-          <div className="px-2 pt-5 pb-1">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Management
-            </p>
-          </div>
+          {renderGroupTitle("Management")}
           {MANAGEMENT_NAV.map(renderNavLink)}
 
-          <div className="px-2 pt-5 pb-1">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              System
-            </p>
-          </div>
+          {renderGroupTitle("System")}
           {SYSTEM_NAV.map(renderNavLink)}
         </nav>
 
         {/* User section at bottom */}
         <div className="border-t px-4 py-3">
           <div className="flex items-center justify-between">
-            <span className="truncate text-xs text-muted-foreground">{displayName}</span>
-            <Button variant="ghost" size="sm" onClick={onLogout}>
-              退出
+            <span
+              className={`truncate text-xs text-muted-foreground transition-all duration-200 ${
+                collapsed ? "opacity-0 w-0 overflow-hidden" : "opacity-100"
+              }`}
+            >
+              {displayName}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onLogout}
+              title="退出登录"
+              className="shrink-0"
+            >
+              {collapsed ? "🚪" : "退出"}
             </Button>
           </div>
         </div>
+
+        {/* Collapse toggle */}
+        <button
+          onClick={toggleCollapsed}
+          className="flex items-center justify-center border-t py-2.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          title={collapsed ? "展开侧边栏" : "收缩侧边栏"}
+        >
+          <span className="text-sm">
+            {collapsed ? "→" : "←"}
+          </span>
+        </button>
       </aside>
 
       {/* Main content */}
-      <div className="ml-[260px] flex flex-1 flex-col">
+      <div
+        className={`flex flex-1 flex-col transition-all duration-200 ${
+          collapsed ? "ml-[60px]" : "ml-[260px]"
+        }`}
+      >
         <div className="flex-1">{children}</div>
       </div>
     </div>
