@@ -59,9 +59,9 @@ ls .sillyspec/projects/*.yaml 2>/dev/null | grep -q .
    name: <name>
    path: <relative-path>
    status: active
-   role: <description>
-   repo: <repo-url>  # 可选
    ```
+   > ⚠️ `sillyspec init` 只会写入 `name`、`path`、`status` 三个字段。
+   > `role` 和 `repo` 由 `/sillyspec:workspace add` 追加。
 5. 创建 `.sillyspec/shared/` 目录
 
 #### 3b. 添加子项目（`add`）
@@ -129,6 +129,14 @@ done
 
 每个子项目对应 `.sillyspec/projects/<name>.yaml`：
 
+**sillyspec init 创建的格式（3 字段）：**
+```yaml
+name: frontend
+path: ./frontend
+status: active
+```
+
+**workspace add 扩展的格式（最多 5 字段）：**
 ```yaml
 name: frontend
 path: ./frontend

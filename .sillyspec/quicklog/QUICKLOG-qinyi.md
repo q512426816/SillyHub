@@ -26,3 +26,11 @@ created_at: 2026-05-28 11:10:00
 状态：进行中
 文件：frontend/src/lib/workflow.ts, frontend/src/lib/changes.ts, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, backend/app/modules/agent/service.py, backend/app/modules/change/dispatch.py, backend/tests/modules/change/test_dispatch.py
 蓝图：.sillyspec/changes/2026-05-31-stage-driven-agent-dispatch-32aeb1/design.md
+
+## 2026-06-01 00:00:00 — fix 4 ruff lint errors: SIM103, BLE001, UP017, F401
+状态：进行中
+文件：backend/app/core/audit_hooks.py, backend/app/core/crypto.py
+
+## 2026-06-01 14:00:00 — 更新 SillySpec 版本从 3.12.0 到 3.12.3
+状态：进行中
+文件：deploy/docker-compose.yml, backend/Dockerfile
