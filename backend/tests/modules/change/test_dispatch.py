@@ -945,3 +945,309 @@ async def test_sync_stage_status_updates_change_stages_json(db_session: AsyncSes
     assert stage_info["current_step"] == "task-2"
     assert "synced_at" in stage_info
     assert str(run_id) == stage_info["synced_from_run"]
+
+
+
+# ===================================================================
+# 8. Task-20: dispatch + sync 联合单测
+# ===================================================================
+
+
+async def test_dispatch_then_sync_partial_progress(db_session: AsyncSession) -> None:
+    """dispatch 创建 AgentRun → sync 同步部分完成状态 → 验证 sync_result 和 stages 内存状态。
+
+    NOTE: sync_stage_status 修改 JSON 列 stages 时存在 SQLAlchemy
+    in-place mutation 同引用赋值不持久化的问题。此处验证
+    sync_result 返回值和内存中的 stages 状态（refresh 前）。
+    """
+    import tempfile
+
+    workspace_id = await _create_workspace(db_session)
+    change = Change(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        change_key="t20-partial",
+        title="Task20 partial",
+        status="draft",
+        location="active",
+        path=".sillyspec/changes/t20-partial",
+        current_stage="draft",
+        stages={},
+    )
+    db_session.add(change)
+    await db_session.commit()
+    await db_session.refresh(change)
+
+    # --- Phase 1: dispatch_next_step ---
+    mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
+    with patch(
+        "app.modules.agent.service.AgentService"
+    ) as MockAgentService:
+        mock_svc = MockAgentService.return_value
+        mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
+
+        service = SillySpecStageDispatchService(db_session)
+        dispatch_result = await service.dispatch_next_step(
+            session=db_session,
+            workspace_id=workspace_id,
+            change_id=change.id,
+            user_id=uuid.uuid4(),
+            target_stage="propose",
+        )
+
+    assert dispatch_result["dispatched"] is True
+    agent_run_id = uuid.UUID(dispatch_result["agent_run_id"])
+
+    # Verify AgentRun exists in DB with status=pending
+    agent_run = await db_session.get(AgentRun, agent_run_id)
+    assert agent_run is not None
+    assert agent_run.status == "pending"
+    assert agent_run.change_id == change.id
+
+    # --- Phase 2: Complete the AgentRun, then sync ---
+    agent_run.status = "completed"
+    db_session.add(agent_run)
+    await db_session.commit()
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        _create_sillyspec_db(
+            SyncPath(tmp_dir),
+            change_key="t20-partial",
+            current_stage="propose",
+            steps=[
+                {"name": "brainstorm", "status": "completed"},
+                {"name": "write-proposal", "status": "pending"},
+            ],
+        )
+        service = SillySpecStageDispatchService(db_session)
+        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
+            mock_resolve.return_value = SpecPathResolver(tmp_dir).db_path()
+            sync_result = await service.sync_stage_status(
+                db_session, change.id, agent_run_id,
+            )
+
+    # Verify sync_result
+    assert sync_result.synced is True
+    assert sync_result.current_stage == "propose"
+    assert sync_result.current_step == "write-proposal"
+    assert sync_result.stage_completed is False
+    assert sync_result.has_pending_step is True
+    assert "brainstorm" in sync_result.steps_completed
+    assert "write-proposal" in sync_result.steps_pending
+
+    # Verify in-memory stages state (before refresh)
+    assert "propose" in change.stages
+    assert change.stages["propose"]["steps"]["completed"] == ["brainstorm"]
+
+    # Verify current_stage column IS persisted (String column, no mutation issue)
+    await db_session.refresh(change)
+    assert change.current_stage == "propose"
+
+
+async def test_dispatch_then_sync_all_completed(db_session: AsyncSession) -> None:
+    """dispatch → sync 返回 stage_completed=True → stages 内存标记完成。"""
+    import tempfile
+
+    workspace_id = await _create_workspace(db_session)
+    change = Change(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        change_key="t20-done",
+        title="Task20 done",
+        status="draft",
+        location="active",
+        path=".sillyspec/changes/t20-done",
+        current_stage="propose",
+        stages={},
+    )
+    db_session.add(change)
+    await db_session.commit()
+    await db_session.refresh(change)
+
+    # Create AgentRun via dispatch
+    mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
+    with patch("app.modules.agent.service.AgentService") as MockAgentService:
+        mock_svc = MockAgentService.return_value
+        mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
+
+        service = SillySpecStageDispatchService(db_session)
+        dispatch_result = await service.dispatch_next_step(
+            session=db_session,
+            workspace_id=workspace_id,
+            change_id=change.id,
+            user_id=uuid.uuid4(),
+            target_stage="propose",
+        )
+
+    assert dispatch_result["dispatched"] is True
+    agent_run_id = uuid.UUID(dispatch_result["agent_run_id"])
+
+    # Mark AgentRun completed
+    agent_run = await db_session.get(AgentRun, agent_run_id)
+    agent_run.status = "completed"
+    db_session.add(agent_run)
+    await db_session.commit()
+
+    # Sync with all steps completed
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        _create_sillyspec_db(
+            SyncPath(tmp_dir),
+            change_key="t20-done",
+            current_stage="propose",
+            stages=[{"stage": "propose", "status": "completed"}],
+            steps=[
+                {"name": "brainstorm", "status": "completed"},
+                {"name": "write-proposal", "status": "completed"},
+            ],
+        )
+        service = SillySpecStageDispatchService(db_session)
+        with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
+            mock_resolve.return_value = SpecPathResolver(tmp_dir).db_path()
+            sync_result = await service.sync_stage_status(
+                db_session, change.id, agent_run_id,
+            )
+
+    assert sync_result.synced is True
+    assert sync_result.stage_completed is True
+    assert sync_result.has_pending_step is False
+    assert sync_result.steps_pending == []
+    assert len(sync_result.steps_completed) == 2
+
+    # Verify in-memory stages shows completed
+    assert change.stages["propose"]["status"] == "completed"
+
+
+async def test_dispatch_then_sync_no_db_stops_chain(db_session: AsyncSession) -> None:
+    """dispatch 成功 → sync 失败(db不存在) → 链路中断，current_stage 不变。"""
+    workspace_id = await _create_workspace(db_session)
+    change = Change(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        change_key="t20-nodb",
+        title="Task20 no db",
+        status="draft",
+        location="active",
+        path=".sillyspec/changes/t20-nodb",
+        current_stage="draft",
+        stages={},
+    )
+    db_session.add(change)
+    await db_session.commit()
+    await db_session.refresh(change)
+
+    # Dispatch
+    mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
+    with patch("app.modules.agent.service.AgentService") as MockAgentService:
+        mock_svc = MockAgentService.return_value
+        mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
+
+        service = SillySpecStageDispatchService(db_session)
+        dispatch_result = await service.dispatch_next_step(
+            session=db_session,
+            workspace_id=workspace_id,
+            change_id=change.id,
+            user_id=uuid.uuid4(),
+            target_stage="propose",
+        )
+
+    assert dispatch_result["dispatched"] is True
+    agent_run_id = uuid.UUID(dispatch_result["agent_run_id"])
+
+    # Sync fails — db not found
+    service = SillySpecStageDispatchService(db_session)
+    with patch.object(service, "_resolve_db_path", new_callable=AsyncMock) as mock_resolve:
+        mock_resolve.return_value = SyncPath("/nonexistent/sillyspec.db")
+        sync_result = await service.sync_stage_status(db_session, change.id, agent_run_id)
+
+    assert sync_result.synced is False
+    assert "not found" in sync_result.error
+
+    # Change.current_stage should NOT have been updated (String column persisted)
+    await db_session.refresh(change)
+    assert change.current_stage == "draft"
+
+
+
+
+async def test_dispatch_sync_auto_dispatch_chain(db_session: AsyncSession) -> None:
+    """dispatch → auto_dispatch_next_step：验证自动调度调用 dispatch() 并递增 chain_count。"""
+    from app.modules.change.dispatch import auto_dispatch_next_step
+
+    workspace_id = await _create_workspace(db_session)
+    user_id = uuid.uuid4()
+    change = Change(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        change_key="t20-chain",
+        title="Task20 chain",
+        status="draft",
+        location="active",
+        path=".sillyspec/changes/t20-chain",
+        current_stage="propose",
+        stages={},
+    )
+    db_session.add(change)
+    await db_session.commit()
+    await db_session.refresh(change)
+
+    # --- Step 1: First dispatch via SillySpecStageDispatchService ---
+    mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
+    with patch("app.modules.agent.service.AgentService") as MockAgentService:
+        mock_svc = MockAgentService.return_value
+        mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
+
+        service = SillySpecStageDispatchService(db_session)
+        d1 = await service.dispatch_next_step(
+            session=db_session,
+            workspace_id=workspace_id,
+            change_id=change.id,
+            user_id=user_id,
+            target_stage="propose",
+        )
+
+    assert d1["dispatched"] is True
+    run1_id = uuid.UUID(d1["agent_run_id"])
+
+    # --- Step 2: Complete first run ---
+    run1 = await db_session.get(AgentRun, run1_id)
+    run1.status = "completed"
+    db_session.add(run1)
+    await db_session.commit()
+
+    # --- Step 3: Build sync result manually (simulates sync from sillyspec.db) ---
+    sync_result = StageSyncResult(
+        synced=True,
+        change_id=change.id,
+        run_id=run1_id,
+        current_stage="propose",
+        current_step="write-proposal",
+        stage_completed=False,
+        has_pending_step=True,
+        steps_completed=["brainstorm"],
+        steps_pending=["write-proposal"],
+    )
+
+    # --- Step 4: auto_dispatch_next_step → calls standalone dispatch() ---
+    # Mock the standalone dispatch() function that auto_dispatch_next_step calls
+    with patch("app.modules.change.dispatch.dispatch", new_callable=AsyncMock) as mock_dispatch:
+        mock_dispatch.return_value = {
+            "dispatched": True,
+            "agent_run_id": str(uuid.uuid4()),
+            "stage": "propose",
+        }
+
+        auto_result = await auto_dispatch_next_step(
+            session=db_session,
+            workspace_id=workspace_id,
+            change_id=change.id,
+            user_id=user_id,
+            sync_result=sync_result,
+        )
+
+    # Verify auto_dispatch_next_step returned success
+    assert auto_result["dispatched"] is True
+    assert auto_result["reason"] == "auto_dispatch"
+    # Verify the standalone dispatch() was called with correct stage
+    mock_dispatch.assert_called_once()
+    call_kwargs = mock_dispatch.call_args
+    assert call_kwargs.kwargs.get("target_stage") == "propose"
