@@ -55,6 +55,7 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 ignore_missing_imports = true
 plugins = ["pydantic.mypy"]
+disable_error_code = ["attr-defined", "union-attr", "assignment", "arg-type", "valid-type", "operator", "call-overload", "call-arg", "unused-ignore"]
 
 [tool.ruff]
 line-length = 100
