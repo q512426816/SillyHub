@@ -24,6 +24,7 @@ from app.core.logging import get_logger
 from app.modules.agent.adapters.claude_code import ClaudeCodeAdapter
 from app.modules.agent.base import AgentSpecBundle
 from app.modules.agent.model import AgentRun, AgentRunLog
+from app.modules.workspace.model import AgentRunWorkspace
 from app.modules.spec_profile.model import SpecConflict
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.spec_workspace.validator import SpecValidator
@@ -180,6 +181,14 @@ class SpecBootstrapService:
         await self._session.commit()
         await self._session.refresh(run)
 
+        # 4b. Create M:N workspace association
+        self._session.add(
+            AgentRunWorkspace(
+                agent_run_id=run.id,
+                workspace_id=workspace_id,
+            )
+        )
+        await self._session.commit()
         # 5. Execute agent
         run.status = "running"
         run.started_at = datetime.datetime.utcnow()

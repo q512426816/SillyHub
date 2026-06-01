@@ -39,3 +39,8 @@ created_at: 2026-05-28 11:10:00
 状态：已完成
 文件：backend/pyproject.toml, backend/app/core/errors.py, backend/app/modules/agent/coordinator.py, backend/app/modules/change/dispatch.py, backend/app/modules/tool_gateway/service.py, 等共 130 文件
 结果：更新 pyproject.toml ignore 列表（RUF001-003/BLE001/SIM105/117/B008/RUF012/006/005），修复 F821 缺导入、F811 重复定义、F841 未使用变量、N805 mock 参数、E741 变量名、B007/B904 等。ruff check + format --check 全部通过。
+
+## 2026-06-01 16:00:00 — fix SSE stream 401: _extract_bearer 增加 query param token fallback
+状态：已完成
+文件：backend/app/core/auth_deps.py
+结果：_extract_bearer 在 Authorization header 为空时 fallback 到 request.query_params.get("token")，解决 EventSource 无法设 header 导致 SSE stream 端点 401 的问题。
