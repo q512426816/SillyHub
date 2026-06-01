@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import event, inspect
@@ -36,9 +36,7 @@ def _should_audit(instance: object) -> bool:
     table_name = getattr(instance, "__tablename__", None)
     if table_name is None:
         return False
-    if table_name in _EXCLUDED_TABLES:
-        return False
-    return True
+    return table_name not in _EXCLUDED_TABLES
 
 
 def _singularize(table_name: str) -> str:
@@ -88,7 +86,7 @@ def _get_audit_context(connection: Any, target: object = None) -> dict | None:
             session = state.session
             if session is not None:
                 return session.info.get("audit_context")
-        except Exception:
+        except (AttributeError, KeyError, TypeError):
             pass
 
     return None
@@ -136,7 +134,7 @@ def _write_audit_log(
     """Insert an AuditLog record using Core SQL."""
     from app.modules.workflow.model import AuditLog
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     log_id = uuid.uuid4()
 
     connection.execute(

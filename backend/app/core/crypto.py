@@ -8,7 +8,6 @@ bound to a single key version, and old versions are kept around for decryption.
 from __future__ import annotations
 
 import os
-from typing import NoReturn
 
 from nacl import secret, utils
 
