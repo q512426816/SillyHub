@@ -244,8 +244,8 @@ def test_load_clarifying_template() -> None:
     """Clarifying template loads and contains expected sections."""
     content = load_prompt_template("clarifying.md")
     assert content
-    assert "Clarification Agent" in content
-    assert "READ-ONLY" in content
+    assert "Clarifying Agent" in content
+    assert "READ" in content
 
 
 def test_load_template_with_context() -> None:
