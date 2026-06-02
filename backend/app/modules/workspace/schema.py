@@ -32,6 +32,7 @@ class ScanRequest(BaseModel):
 class ScanResponse(BaseModel):
     root_path: str
     is_sillyspec: bool
+    sillyspec_path: str | None = None
     structure: WorkspaceStructureDTO
     warnings: list[str] = Field(default_factory=list)
 

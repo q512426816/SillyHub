@@ -172,11 +172,6 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
             <div className="mb-2 flex items-center justify-between">
               <span className="font-medium">扫描结果</span>
               <div className="flex items-center gap-2">
-                {scan.sillyspec_strategy_hint && (
-                  <Badge variant="default">
-                    {scan.sillyspec_strategy_hint}
-                  </Badge>
-                )}
                 <Badge variant={sillyspecBadgeVariant}>
                   {sillyspecBadgeLabel}
                 </Badge>
@@ -217,7 +212,12 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
         )}
 
         {scan && phase === "ready" && (
-          <div className="flex justify-center">
+          <div className="flex justify-center gap-3">
+            {scan.is_sillyspec && (
+              <Button size="sm" variant="outline" onClick={handleCreate}>
+                直接创建
+              </Button>
+            )}
             <Button size="sm" onClick={handleGenerate}>
               生成项目规范
             </Button>

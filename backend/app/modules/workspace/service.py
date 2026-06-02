@@ -136,6 +136,9 @@ class WorkspaceService:
             self._translate_integrity_error(exc, slug=slug, root_path=scan.root_path)
             raise  # _translate_integrity_error always raises; this is unreachable
 
+        # Create SpecWorkspace with repo-native strategy
+        await self._ensure_spec_workspace(workspace.id, scan.sillyspec_path)
+
         await self._session.commit()
         await self._session.refresh(workspace)
         log.info(
@@ -196,6 +199,11 @@ class WorkspaceService:
             await self._session.rollback()
             self._translate_integrity_error(exc, slug=slug, root_path=root_path)
             raise
+
+        # Ensure SpecWorkspace exists for resurrected workspace
+        scan = self.scan(root_path)
+        if scan.is_sillyspec:
+            await self._ensure_spec_workspace(result.id, scan.sillyspec_path)
 
         await self._session.commit()
         await self._session.refresh(result)
@@ -642,6 +650,47 @@ class WorkspaceService:
         return (await self._session.execute(stmt)).scalars().first()
 
     # -- Helpers ---
+
+    async def _ensure_spec_workspace(
+        self,
+        workspace_id: uuid.UUID,
+        sillyspec_path: str,
+    ) -> None:
+        """Create a SpecWorkspace and import projects + changes from .sillyspec."""
+        from app.modules.spec_workspace.schema import SpecWorkspaceCreate
+        from app.modules.spec_workspace.service import SpecWorkspaceService
+
+        spec_ws_svc = SpecWorkspaceService(self._session)
+        try:
+            await spec_ws_svc.get(workspace_id)
+            return  # already exists
+        except Exception:
+            pass
+
+        await spec_ws_svc.create(
+            workspace_id=workspace_id,
+            payload=SpecWorkspaceCreate(
+                spec_root=sillyspec_path,
+                strategy="repo-native",
+                repo_sillyspec_path=sillyspec_path,
+            ),
+        )
+
+        # Import projects and changes from .sillyspec into DB
+        try:
+            await self.reparse(workspace_id)
+            log.info("spec_workspace.projects_imported", workspace_id=str(workspace_id))
+        except Exception as exc:
+            log.warning("spec_workspace.projects_import_failed", workspace_id=str(workspace_id), error=str(exc))
+
+        try:
+            from app.modules.change.service import ChangeService
+
+            change_svc = ChangeService(self._session)
+            await change_svc.reparse(workspace_id)
+            log.info("spec_workspace.changes_imported", workspace_id=str(workspace_id))
+        except Exception as exc:
+            log.warning("spec_workspace.changes_import_failed", workspace_id=str(workspace_id), error=str(exc))
 
     @staticmethod
     def _guard_path(path: Path) -> None:

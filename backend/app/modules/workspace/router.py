@@ -52,6 +52,7 @@ def _build_scan_response(result: ScanResult) -> ScanResponse:
     return ScanResponse(
         root_path=result.root_path,
         is_sillyspec=result.is_sillyspec,
+        sillyspec_path=result.sillyspec_path if result.is_sillyspec else None,
         structure=WorkspaceStructureDTO(**result.structure.as_dict()),
         warnings=list(result.warnings),
     )

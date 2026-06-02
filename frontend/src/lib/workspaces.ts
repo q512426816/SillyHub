@@ -16,11 +16,8 @@ export interface WorkspaceStructure {
 
 export interface ScanResult {
   root_path: string;
-  /** @deprecated Backend no longer returns this field */
   sillyspec_path?: string;
   is_sillyspec: boolean;
-  /** @deprecated Backend no longer returns this field */
-  sillyspec_strategy_hint?: string;
   structure: WorkspaceStructure;
   warnings: string[];
 }
