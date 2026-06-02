@@ -1,37 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { streamAgentRunLogs, type StreamLogEvent } from "@/lib/agent";
 import { ApiError } from "@/lib/api";
 import {
   createWorkspace,
+  rescanWorkspace,
+  scanGenerate,
   scanWorkspace,
   type ScanResult,
 } from "@/lib/workspaces";
-import type { SpecStrategy } from "@/lib/spec-workspaces";
 
-type Phase = "idle" | "scanning" | "ready" | "creating";
-
-const STRATEGY_OPTIONS: { value: SpecStrategy; label: string; description: string }[] = [
-  {
-    value: "platform-managed",
-    label: "Platform Managed",
-    description: "规范由平台托管，与代码目录分离",
-  },
-  {
-    value: "repo-mirrored",
-    label: "Repo Mirrored",
-    description: "平台托管但同步回仓库 .sillyspec 目录",
-  },
-  {
-    value: "repo-native",
-    label: "Repo Native",
-    description: "直接使用仓库 .sillyspec 作为规范来源",
-  },
-];
+type Phase = "idle" | "scanning" | "ready" | "generating" | "generated" | "creating";
 
 interface Props {
   onCreated: () => void;
@@ -42,9 +26,14 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   const [rootPath, setRootPath] = useState("");
   const [name, setName] = useState("");
   const [scan, setScan] = useState<ScanResult | null>(null);
-  const [specStrategy, setSpecStrategy] = useState<SpecStrategy>("platform-managed");
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
+
+  // SSE / generate state
+  const [logs, setLogs] = useState<string[]>([]);
+  const [agentRunId, setAgentRunId] = useState<string | null>(null);
+  const [generatedScan, setGeneratedScan] = useState<ScanResult | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
 
   const handleScan = async () => {
     setError(null);
@@ -57,15 +46,60 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
         const last = rootPath.split(/[\\/]/).filter(Boolean).at(-1);
         if (last) setName(last);
       }
-      // Auto-select strategy based on hint
-      if (result.sillyspec_strategy_hint === "repo-native") {
-        setSpecStrategy("repo-native");
-      }
       setPhase("ready");
     } catch (err) {
       const msg = err instanceof ApiError ? `${err.code}: ${err.message}` : "扫描失败";
       setError(msg);
       setPhase("idle");
+    }
+  };
+
+  const handleGenerate = async () => {
+    if (!scan) return;
+    setError(null);
+    setLogs([]);
+    setGeneratedScan(null);
+    setPhase("generating");
+
+    try {
+      // 1. Call scanGenerate API
+      const result = await scanGenerate(scan.root_path);
+      setAgentRunId(result.agent_run_id);
+
+      // 2. Subscribe to SSE stream
+      const workspaceId = result.workspace_id;
+      const es = streamAgentRunLogs(
+        workspaceId,
+        result.agent_run_id,
+        // onMessage: append log
+        (event: StreamLogEvent) => {
+          setLogs((prev) => [...prev.slice(-500), event.content]);
+        },
+        // onDone: agent completed
+        async () => {
+          try {
+            // 3. Auto rescan
+            const rescanResult = await rescanWorkspace(workspaceId);
+            setGeneratedScan(rescanResult);
+            setPhase("generated");
+          } catch {
+            // rescan failure doesn't block main flow
+            setPhase("generated");
+          }
+        },
+        // onError: SSE connection error
+        (error: Error) => {
+          setError(`实时日志连接失败: ${error.message}`);
+          setPhase("ready");
+        },
+      );
+
+      // Store EventSource ref for cancellation
+      eventSourceRef.current = es;
+    } catch (err) {
+      const msg = err instanceof ApiError ? `${err.code}: ${err.message}` : "生成失败";
+      setError(msg);
+      setPhase("ready");
     }
   };
 
@@ -77,7 +111,6 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
       await createWorkspace({
         name: name.trim() || rootPath,
         root_path: scan.root_path,
-        spec_strategy: specStrategy,
       });
       onCreated();
     } catch (err) {
@@ -87,6 +120,14 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
     }
   };
 
+  const handleCancel = () => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    onCancel();
+  };
+
   const sillyspecBadgeVariant = scan?.is_sillyspec ? "success" : "outline";
   const sillyspecBadgeLabel = scan?.is_sillyspec ? "已检测到 .sillyspec" : "未检测到 .sillyspec";
 
@@ -94,7 +135,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
     <div className="rounded-md border bg-card">
       <header className="flex items-center justify-between border-b px-4 py-2.5">
         <h3>添加 Workspace</h3>
-        <Button variant="ghost" size="sm" onClick={onCancel}>
+        <Button variant="ghost" size="sm" onClick={handleCancel}>
           取消
         </Button>
       </header>
@@ -110,12 +151,12 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
               value={rootPath}
               placeholder="C:\\path\\to\\repo  或  /abs/path/to/repo"
               onChange={(e) => setRootPath(e.target.value)}
-              disabled={phase === "scanning" || phase === "creating"}
+              disabled={phase === "scanning" || phase === "creating" || phase === "generating"}
             />
             <Button
               size="sm"
               onClick={handleScan}
-              disabled={!rootPath || phase === "scanning" || phase === "creating"}
+              disabled={!rootPath || phase === "scanning" || phase === "creating" || phase === "generating"}
             >
               {phase === "scanning" ? "扫描中..." : "扫描"}
             </Button>
@@ -175,7 +216,49 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
           </section>
         )}
 
-        {scan && (
+        {scan && phase === "ready" && (
+          <div className="flex justify-center">
+            <Button size="sm" onClick={handleGenerate}>
+              生成项目规范
+            </Button>
+          </div>
+        )}
+
+        {phase === "generating" && (
+          <section className="rounded border bg-gray-950 p-3 text-xs font-mono">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="font-medium text-green-400">Agent 执行中...</span>
+              <span className="text-gray-500">run: {agentRunId?.slice(0, 8)}...</span>
+            </div>
+            <div className="max-h-64 overflow-y-auto whitespace-pre-wrap text-gray-300">
+              {logs.map((line, i) => (
+                <div key={i}>{line}</div>
+              ))}
+              {logs.length === 0 && (
+                <div className="text-gray-500 animate-pulse">等待 agent 输出...</div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {phase === "generated" && generatedScan && (
+          <section className="rounded border bg-green-50 p-3 text-xs">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="font-medium text-green-700">规范生成完成</span>
+              <Badge variant="success">.sillyspec 已生成</Badge>
+            </div>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-1">
+              <dt className="text-muted-foreground">root_path</dt>
+              <dd className="break-all font-mono">{generatedScan.root_path}</dd>
+              <dt className="text-muted-foreground">projects</dt>
+              <dd>{generatedScan.structure.projects_count}</dd>
+              <dt className="text-muted-foreground">active changes</dt>
+              <dd>{generatedScan.structure.active_changes_count}</dd>
+            </dl>
+          </section>
+        )}
+
+        {scan && phase !== "generating" && (
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground" htmlFor="ws-name">
               Workspace 名称
@@ -185,60 +268,31 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="my-workspace"
+              disabled={phase === "creating"}
             />
-          </div>
-        )}
-
-        {scan && (
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">
-              规范策略 (Spec Strategy)
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {STRATEGY_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  className={`rounded border px-3 py-2 text-left text-xs transition-colors ${
-                    specStrategy === opt.value
-                      ? "border-primary bg-primary/5 ring-1 ring-primary"
-                      : "border-border hover:bg-muted/50"
-                  }`}
-                  onClick={() => setSpecStrategy(opt.value)}
-                >
-                  <span className="font-medium">{opt.label}</span>
-                  <p className="mt-0.5 text-[10px] text-muted-foreground">
-                    {opt.description}
-                  </p>
-                </button>
-              ))}
-            </div>
-            {scan.is_sillyspec && specStrategy !== "repo-native" && (
-              <p className="text-[11px] text-amber-600">
-                检测到 .sillyspec 但未选择 repo-native 策略。规范将独立托管。
-              </p>
-            )}
-            {!scan.is_sillyspec && specStrategy === "repo-native" && (
-              <p className="text-[11px] text-amber-600">
-                未检测到 .sillyspec，选择 repo-native 需后续手动导入。
-              </p>
-            )}
           </div>
         )}
 
         {error && <p className="text-xs text-destructive">{error}</p>}
 
         <footer className="flex items-center justify-end gap-2 pt-1">
-          <Button variant="outline" size="sm" onClick={onCancel}>
-            取消
-          </Button>
           <Button
+            variant="outline"
             size="sm"
-            onClick={handleCreate}
-            disabled={!scan || !name.trim() || phase === "creating"}
+            onClick={handleCancel}
+            disabled={phase === "scanning"}
           >
-            {phase === "creating" ? "创建中..." : "确认创建"}
+            {phase === "generating" ? "取消生成" : "取消"}
           </Button>
+          {phase === "generated" && (
+            <Button
+              size="sm"
+              onClick={handleCreate}
+              disabled={!scan || !name.trim()}
+            >
+              确认创建
+            </Button>
+          )}
         </footer>
       </div>
     </div>

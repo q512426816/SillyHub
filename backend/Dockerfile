@@ -71,8 +71,8 @@ RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /build /app
 
-RUN mkdir -p /app/.cache /app/.config /app/.claude /tmp/.npm \
- && chown -R app:app /app /tmp/.npm \
+RUN mkdir -p /app/.cache /app/.config /app/.claude /tmp/.npm /data/spec-workspaces \
+ && chown -R app:app /app /tmp/.npm /data/spec-workspaces \
  && chmod +x /app/docker-entrypoint.sh \
  && ln -sf /app/docker-entrypoint.sh /usr/local/bin/sillyhub-backend-entrypoint
 USER app

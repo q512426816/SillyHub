@@ -2,6 +2,8 @@
 set -eu
 
 mkdir -p "${HOME:-/app}/.claude"
+mkdir -p /data/spec-workspaces
+chown -R app:app /data/spec-workspaces 2>/dev/null || true
 
 python - <<'PY'
 import json

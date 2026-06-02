@@ -103,6 +103,18 @@ export async function scanWorkspace(rootPath: string): Promise<ScanResult> {
   });
 }
 
+export interface ScanGenerateResponse {
+  workspace_id: string;
+  agent_run_id: string;
+}
+
+export async function scanGenerate(rootPath: string): Promise<ScanGenerateResponse> {
+  return apiFetch<ScanGenerateResponse>("/api/workspaces/scan-generate", {
+    method: "POST",
+    json: { root_path: rootPath },
+  });
+}
+
 export async function listWorkspaces(): Promise<WorkspaceListResponse> {
   return apiFetch<WorkspaceListResponse>("/api/workspaces");
 }

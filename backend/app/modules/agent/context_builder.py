@@ -415,6 +415,91 @@ async def build_stage_bundle(
 
 
 # ---------------------------------------------------------------------------
+# Scan bundle builder — workspace-level scan (no Change dependency)
+# ---------------------------------------------------------------------------
+
+
+async def build_scan_bundle(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    spec_root: str,
+    root_path: str,
+) -> AgentSpecBundle:
+    """构建 scan 模式的 AgentSpecBundle，不依赖 change_id。
+
+    用于 workspace scan-generate 场景：agent 对项目目录只读扫描，
+    产出写入平台托管的 spec_root 路径。
+
+    Args:
+        session: 异步数据库会话。
+        workspace_id: 工作区 ID。
+        spec_root: 平台托管 spec 目录路径。
+        root_path: 用户项目根目录路径（只读）。
+
+    Returns:
+        scan 模式的 AgentSpecBundle，stage="scan"。
+
+    Raises:
+        WorkspaceNotFound: workspace_id 对应的 Workspace 不存在。
+    """
+    # Step 1 — 校验 Workspace 存在性
+    workspace = await session.get(Workspace, workspace_id)
+    if workspace is None:
+        raise WorkspaceNotFound(f"Workspace '{workspace_id}' not found.")
+
+    # Step 2 — 构建 scan 执行指令
+    step_prompt = (
+        f"你是一个项目分析 agent。请执行以下步骤：\n\n"
+        f"1. 扫描项目目录 {root_path} 的结构\n"
+        f"2. 使用 sillyspec 初始化规范空间：\n"
+        f"   sillyspec init --dir {spec_root}\n"
+        f"3. 执行扫描生成规范文档：\n"
+        f"   sillyspec run scan --dir {spec_root}\n"
+        f"4. 完成后确认：\n"
+        f'   sillyspec run scan --done --output "扫描完成"\n\n'
+        f"注意：\n"
+        f"- 对 {root_path} 目录只读，不要修改任何项目文件\n"
+        f"- 所有产出写入 {spec_root} 目录"
+    )
+
+    # Step 3 — 组装 AgentSpecBundle
+    bundle = AgentSpecBundle(
+        # 核心 context
+        change_summary="Scan workspace project structure",
+        task_key="stage:scan",
+        task_title="Stage dispatch: scan",
+        # 约束
+        allowed_paths=[spec_root],
+        denied_paths=[root_path],
+        # 工具
+        available_tools=["sillyspec"],
+        # 元数据
+        platform_metadata={
+            "workspace_id": str(workspace_id),
+            "mode": "scan",
+            "root_path": root_path,
+        },
+        # Stage dispatch 扩展字段
+        stage_dispatch=True,
+        change_key=None,
+        stage="scan",
+        spec_root=spec_root,
+        step_prompt=step_prompt,
+        read_only=True,
+    )
+
+    # Step 4 — 记录日志并返回
+    log.info(
+        "scan_bundle_built",
+        workspace_id=str(workspace_id),
+        spec_root=bundle.spec_root,
+        root_path=root_path,
+        read_only=True,
+    )
+    return bundle
+
+
+# ---------------------------------------------------------------------------
 # CLAUDE.md renderers
 # ---------------------------------------------------------------------------
 
@@ -538,7 +623,10 @@ def render_bundle_to_claude_md(bundle: AgentSpecBundle) -> str:
         for tool in bundle.available_tools:
             if tool == "sillyspec":
                 lines.append(
-                    "- **sillyspec**: Use `sillyspec init --dir <spec_root>` to initialize spec space, then `sillyspec run scan --dir <spec_root>` to scan. Do NOT write .sillyspec files directly — always use the CLI."
+                    "- **sillyspec**: Use `sillyspec init --dir <spec_root>` to"
+                    " initialize spec space, then `sillyspec run scan --dir"
+                    " <spec_root>` to scan. Do NOT write .sillyspec files"
+                    " directly — always use the CLI."
                 )
             else:
                 lines.append(f"- {tool}")

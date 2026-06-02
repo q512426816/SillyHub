@@ -519,6 +519,128 @@ class WorkspaceService:
             return os.path.normpath(joined).replace("\\", "/")
         return os.path.normpath(parent_root).replace("\\", "/") + "/" + parsed.component_key
 
+    # -- Scan-generate ---
+
+    async def scan_generate(
+        self,
+        *,
+        root_path: str,
+        user_id: uuid.UUID,
+        agent_service: "AgentService",  # noqa: F821
+    ) -> tuple[uuid.UUID, uuid.UUID]:
+        """Create workspace + spec_workspace and trigger scan agent.
+
+        Args:
+            root_path: Absolute path to the user's project directory.
+            user_id: User who initiated the scan request.
+            agent_service: AgentService instance (injected by caller).
+
+        Returns:
+            (workspace_id, agent_run_id) tuple.
+
+        Raises:
+            WorkspacePathNotFound: root_path does not exist.
+            WorkspacePathNotDir: root_path is not a directory.
+            WorkspacePermissionDenied: Insufficient path permissions.
+        """
+        # 1. Validate root_path
+        resolved = _rewrite_path(root_path)
+        path = Path(resolved)
+        self._guard_path(path)
+
+        # 2. Idempotency: check if active workspace already exists for this root_path
+        workspace = await self._find_active_by_root_path(root_path)
+
+        if workspace is None:
+            # 3. Create Workspace record
+            name = Path(root_path).name
+            slug = slugify(name)
+
+            # 2b. Check slug uniqueness, append suffix if taken
+            existing_slug = await self._find_active_by_slug(slug)
+            if existing_slug is not None:
+                suffix = uuid.uuid4().hex[:8]
+                slug = f"{slugify(name)[:90]}-{suffix}"
+
+            now = datetime.utcnow()
+            workspace = Workspace(
+                id=uuid.uuid4(),
+                name=name,
+                slug=slug,
+                root_path=root_path,
+                status="active",
+                created_by=user_id,
+                created_at=now,
+                updated_at=now,
+                last_scanned_at=now,
+            )
+            self._session.add(workspace)
+            await self._session.flush()  # obtain workspace.id
+
+            # 4. Create SpecWorkspace record
+            from app.modules.spec_workspace.schema import SpecWorkspaceCreate
+            from app.modules.spec_workspace.service import SpecWorkspaceService
+
+            spec_ws_svc = SpecWorkspaceService(self._session)
+            await spec_ws_svc.create(
+                workspace_id=workspace.id,
+                payload=SpecWorkspaceCreate(
+                    strategy="platform-managed",
+                ),
+            )
+
+        # 5. Get spec_root from SpecWorkspace
+        from app.modules.spec_workspace.service import SpecWorkspaceService
+
+        spec_ws_svc = SpecWorkspaceService(self._session)
+        spec_ws = await spec_ws_svc.get(workspace.id)
+        spec_root = spec_ws.spec_root
+
+        # 6. Trigger agent scan dispatch
+        agent_run = await agent_service.start_scan_dispatch(
+            workspace_id=workspace.id,
+            user_id=user_id,
+            root_path=root_path,
+            spec_root=spec_root,
+        )
+
+        # 7. Return
+        log.info(
+            "workspace.scan_generated",
+            workspace_id=str(workspace.id),
+            agent_run_id=str(agent_run.id),
+            root_path=root_path,
+        )
+        return (workspace.id, agent_run.id)
+
+    async def _find_active_by_root_path(self, root_path: str) -> Workspace | None:
+        """Find active (non-soft-deleted) workspace by root_path.
+
+        Returns:
+            Workspace record or None.
+        """
+        stmt = (
+            select(Workspace)
+            .where(col(Workspace.root_path) == root_path)
+            .where(col(Workspace.deleted_at).is_(None))
+            .limit(1)
+        )
+        return (await self._session.execute(stmt)).scalars().first()
+
+    async def _find_active_by_slug(self, slug: str) -> Workspace | None:
+        """Find active (non-soft-deleted) workspace by slug.
+
+        Returns:
+            Workspace record or None.
+        """
+        stmt = (
+            select(Workspace)
+            .where(col(Workspace.slug) == slug)
+            .where(col(Workspace.deleted_at).is_(None))
+            .limit(1)
+        )
+        return (await self._session.execute(stmt)).scalars().first()
+
     # -- Helpers ---
 
     @staticmethod

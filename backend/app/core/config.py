@@ -58,6 +58,16 @@ class Settings(BaseSettings):
         description="Root directory for worktree lease filesystem trees.",
     )
 
+    # ── Spec data root (platform-managed spec storage) ─────────────────
+    spec_data_root: str = Field(
+        default=(
+            "C:/data/sillyspec-data"
+            if sys.platform == "win32"
+            else "/data/sillyspec-data"
+        ),
+        description="Root directory for platform-managed spec storage.",
+    )
+
     # ── Docker path mapping ────────────────────────────────────────────
     host_path_prefix: str = Field(
         default="",

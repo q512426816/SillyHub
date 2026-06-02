@@ -36,6 +36,19 @@ class ScanResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class ScanGenerateRequest(BaseModel):
+    """Request body for ``POST /api/workspaces/scan-generate``."""
+
+    root_path: str = Field(min_length=1, max_length=4096)
+
+
+class ScanGenerateResponse(BaseModel):
+    """Response body for ``POST /api/workspaces/scan-generate``."""
+
+    workspace_id: uuid.UUID
+    agent_run_id: uuid.UUID
+
+
 class WorkspaceCreate(BaseModel):
     """Request body for ``POST /api/workspaces``.
 

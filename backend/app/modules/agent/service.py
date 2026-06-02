@@ -953,6 +953,208 @@ class AgentService:
 
             await session.commit()
 
+    # ------------------------------------------------------------------
+    # Scan dispatch (workspace-level, no Change dependency)
+    # ------------------------------------------------------------------
+
+    async def start_scan_dispatch(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID,
+        root_path: str,
+        spec_root: str,
+    ) -> AgentRun:
+        """Create and execute a scan-mode AgentRun.
+
+        Unlike ``start_stage_dispatch``, this method has no dependency on a
+        Change record.  It builds a scan bundle via ``build_scan_bundle``,
+        creates an ``AgentRun`` with ``change_id=None``, and fires off a
+        background execution via ``_execute_scan_run``.
+
+        Args:
+            workspace_id: Existing Workspace record ID.
+            user_id: User who initiated the scan.
+            root_path: Absolute path to the user's project directory (read-only).
+            spec_root: Absolute path to the platform-managed spec directory.
+
+        Returns:
+            The newly created AgentRun record (status="pending").
+
+        Raises:
+            AgentRunError: If root_path does not exist or is not a directory.
+        """
+        from app.modules.agent.context_builder import build_scan_bundle
+
+        # -- 1. Validate root_path ------------------------------------------------
+        work_dir = Path(root_path)
+        if not work_dir.exists() or not work_dir.is_dir():
+            raise AgentRunError(
+                f"root_path does not exist or is not a directory: {root_path}",
+                details={"root_path": root_path},
+            )
+
+        # -- 2. Build scan bundle -------------------------------------------------
+        bundle = await build_scan_bundle(
+            session=self._session,
+            workspace_id=workspace_id,
+            spec_root=spec_root,
+            root_path=root_path,
+        )
+
+        # -- 3. Create AgentRun record --------------------------------------------
+        run = AgentRun(
+            id=uuid.uuid4(),
+            task_id=None,
+            change_id=None,
+            lease_id=None,
+            agent_type="claude_code",
+            status="pending",
+            spec_strategy="platform-managed",
+        )
+        self._session.add(run)
+        await self._session.commit()
+        await self._session.refresh(run)
+
+        # -- 4. Create M:N workspace association ----------------------------------
+        self._session.add(
+            AgentRunWorkspace(
+                agent_run_id=run.id,
+                workspace_id=workspace_id,
+            )
+        )
+        await self._session.commit()
+
+        # -- 5. Fire-and-forget background execution -----------------------------
+        asyncio.create_task(
+            self._execute_scan_run(
+                run_id=run.id,
+                bundle=bundle,
+                work_dir=work_dir,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
+        )
+
+        return run
+
+    async def _execute_scan_run(
+        self,
+        *,
+        run_id: uuid.UUID,
+        bundle: AgentSpecBundle,
+        work_dir: Path,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        """Execute a scan-mode agent run (runs in background task).
+
+        Uses an independent DB session since we are called via
+        ``asyncio.create_task`` and the parent request's session may be
+        closed already.
+
+        This method does **not** call any Change-related logic (no
+        ``change.stages`` update, no ``auto_dispatch_next_step``).
+        """
+        from app.core.db import get_session_factory
+        from app.modules.workflow.model import AuditLog
+
+        factory = get_session_factory()
+        async with factory() as session:
+            try:
+                # -- 1. Load AgentRun record --------------------------------------
+                run = await session.get(AgentRun, run_id)
+                if run is None:
+                    log.error("scan_run_missing", run_id=str(run_id))
+                    return
+
+                # -- 2. Get adapter -----------------------------------------------
+                adapter_cls = ADAPTERS.get("claude_code")
+                if adapter_cls is None:
+                    run.status = "failed"
+                    run.finished_at = datetime.utcnow()
+                    run.exit_code = 1
+                    run.output_redacted = "Unknown agent type."
+                    session.add(run)
+                    await session.commit()
+                    return
+
+                # -- 3. Mark running -----------------------------------------------
+                run.status = "running"
+                run.started_at = datetime.utcnow()
+                session.add(run)
+                await session.commit()
+
+                # -- 4. Ensure work directory exists --------------------------------
+                work_dir.mkdir(parents=True, exist_ok=True)
+
+                # -- 5. Execute via adapter -----------------------------------------
+                adapter = adapter_cls()
+                result = await adapter.run_with_bundle(run_id, bundle, work_dir)
+
+                # -- 6. Update run record -------------------------------------------
+                run.status = "completed" if result.exit_code == 0 else "failed"
+                run.finished_at = datetime.utcnow()
+                run.exit_code = result.exit_code
+                run.output_redacted = result.redacted_output[:10000]
+                session.add(run)
+
+                # -- 7. Log stdout/stderr -------------------------------------------
+                for channel, content in [
+                    ("stdout", result.stdout),
+                    ("stderr", result.stderr),
+                ]:
+                    if content:
+                        log_entry = AgentRunLog(
+                            id=uuid.uuid4(),
+                            run_id=run.id,
+                            channel=channel,
+                            content_redacted=redact_agent_output(content)[:5000],
+                        )
+                        session.add(log_entry)
+
+                # -- 8. Write audit log ---------------------------------------------
+                audit = AuditLog(
+                    id=uuid.uuid4(),
+                    workspace_id=workspace_id,
+                    actor_id=user_id,
+                    action="agent.scan_dispatch",
+                    resource_type="agent_run",
+                    resource_id=run.id,
+                    details_json=json.dumps(
+                        {
+                            "workspace_id": str(workspace_id),
+                            "agent_type": "claude_code",
+                            "exit_code": result.exit_code,
+                        }
+                    ),
+                )
+                session.add(audit)
+
+                await session.commit()
+
+            except Exception as exc:
+                # -- Guard: mark failed on unhandled exception ----------------------
+                log.error(
+                    "scan_run_exception",
+                    run_id=str(run_id),
+                    error=str(exc),
+                )
+                try:
+                    run = await session.get(AgentRun, run_id)
+                    if run is not None and run.status not in ("completed", "failed", "killed"):
+                        run.status = "failed"
+                        run.finished_at = datetime.utcnow()
+                        run.exit_code = -1
+                        run.output_redacted = f"Unhandled exception: {exc}"[:10000]
+                        session.add(run)
+                        await session.commit()
+                except Exception:
+                    log.error(
+                        "scan_run_exception_cleanup_failed",
+                        run_id=str(run_id),
+                    )
+
     async def _get_workspace_root(self, workspace_id: uuid.UUID) -> str:
         """Get the root_path of a workspace."""
         from app.modules.workspace.model import Workspace

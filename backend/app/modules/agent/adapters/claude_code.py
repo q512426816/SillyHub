@@ -285,6 +285,13 @@ class ClaudeCodeAdapter(AgentAdapter):
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(cwd),
                 env=child_env,
+                limit=10 * 1024 * 1024,  # 10 MB — stream-json lines can exceed default 64 KB
+            )
+            log.info(
+                "subprocess_created",
+                run_id=str(run_id),
+                pid=proc.pid,
+                stdout_fd=str(proc.stdout),
             )
         except FileNotFoundError:
             log.error("agent_cli_not_found", cli=_CLAUDE_CLI)
@@ -320,6 +327,8 @@ class ClaudeCodeAdapter(AgentAdapter):
 
             async def _read_stdout() -> None:
                 """Read stdout line-by-line, parse events, publish to Redis."""
+                log.info("stdout_reader_started", run_id=str(run_id), pid=proc.pid)
+                line_count = 0
                 while True:
                     try:
                         line_bytes = await asyncio.wait_for(
@@ -327,13 +336,29 @@ class ClaudeCodeAdapter(AgentAdapter):
                             timeout=timeout,
                         )
                     except TimeoutError:
+                        log.warning("stdout_reader_timeout", run_id=str(run_id), line_count=line_count)
+                        break
+                    except ValueError as ve:
+                        log.warning("stdout_line_too_long", run_id=str(run_id), error=str(ve))
+                        break
+                    except Exception as exc:
+                        log.error("stdout_reader_error", run_id=str(run_id), error=str(exc))
                         break
                     if not line_bytes:
+                        log.info("stdout_reader_eof", run_id=str(run_id), line_count=line_count)
                         break
                     line = line_bytes.decode("utf-8", errors="replace").rstrip("\n").rstrip("\r")
                     if not line:
                         continue
                     stdout_lines.append(line)
+                    line_count += 1
+                    if line_count <= 3:
+                        log.info(
+                            "stdout_line",
+                            run_id=str(run_id),
+                            line_num=line_count,
+                            line_preview=line[:200],
+                        )
 
                     # Parse the stream-json event
                     try:
@@ -345,6 +370,13 @@ class ClaudeCodeAdapter(AgentAdapter):
                     # Format into a human-readable log line
                     formatted = _format_conversation_log([event])
                     if not formatted:
+                        if line_count <= 5:
+                            log.info(
+                                "stdout_line_no_format",
+                                run_id=str(run_id),
+                                event_type=event.get("type", "?"),
+                                line_num=line_count,
+                            )
                         continue
 
                     # Publish to Redis

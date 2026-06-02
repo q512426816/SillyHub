@@ -30,6 +30,8 @@ from app.modules.workspace.relation_schema import (
 from app.modules.workspace.relation_service import RelationService
 from app.modules.workspace.scanner import ScanResult
 from app.modules.workspace.schema import (
+    ScanGenerateRequest,
+    ScanGenerateResponse,
     ScanRequest,
     ScanResponse,
     WorkspaceCreate,
@@ -63,6 +65,27 @@ async def scan_workspace(
 ) -> ScanResponse:
     service = WorkspaceService(session)
     return _build_scan_response(service.scan(payload.root_path))
+
+
+@router.post("/scan-generate", response_model=ScanGenerateResponse)
+async def scan_generate(
+    payload: ScanGenerateRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_WRITE))],
+) -> ScanGenerateResponse:
+    from app.modules.agent.service import AgentService
+
+    agent_service = AgentService(session)
+    service = WorkspaceService(session)
+    workspace_id, agent_run_id = await service.scan_generate(
+        root_path=payload.root_path,
+        user_id=user.id,
+        agent_service=agent_service,
+    )
+    return ScanGenerateResponse(
+        workspace_id=workspace_id,
+        agent_run_id=agent_run_id,
+    )
 
 
 @router.post(
