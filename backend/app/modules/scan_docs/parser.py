@@ -1,6 +1,6 @@
-"""Filesystem parser for ``.sillyspec/docs/{component_key}/scan/*.md``.
+"""Filesystem parser for ``.sillyspec/docs/`` tree.
 
-Walks the scan directory, reads each markdown file, and returns structured
+Recursively walks all files under the docs directory and returns structured
 records ready for DB persistence.
 """
 
@@ -53,20 +53,17 @@ class ParseWarning:
 
 @dataclass
 class ScanDocsResult:
-    """Result of parsing one component's scan directory."""
+    """Result of parsing the docs tree."""
 
-    component_key: str
+    component_key: str | None
     docs: list[ParsedDoc] = field(default_factory=list)
     warnings: list[ParseWarning] = field(default_factory=list)
 
 
 def _doc_type_from_filename(filename: str) -> str:
-    """Map filename (without extension) to doc_type.
-
-    Standard names map directly; anything else becomes OTHER.
-    """
+    """Map filename (without extension) to doc_type."""
     stem = Path(filename).stem.upper()
-    return stem if stem in STANDARD_DOC_TYPES else "OTHER"
+    return stem if stem in STANDARD_DOC_TYPES else stem
 
 
 def _extract_title(content: str) -> str | None:
@@ -88,7 +85,7 @@ def _read_file_safe(path: Path) -> tuple[str, bool]:
             encoding="utf-8", errors="replace"
         )[
             : MAX_CONTENT_BYTES
-            // 4  # char approximation
+            // 4
         ]
     else:
         content = path.read_text(encoding="utf-8", errors="replace")
@@ -96,96 +93,77 @@ def _read_file_safe(path: Path) -> tuple[str, bool]:
 
 
 class ScanDocsParser:
-    """Parses ``.sillyspec/docs/{component_key}/scan/`` directories."""
+    """Parses all files under ``.sillyspec/docs/`` recursively."""
 
-    def parse_component(
+    def parse_docs_tree(
         self,
         sillyspec_root: Path,
-        component_key: str,
     ) -> ScanDocsResult:
-        """Parse scan docs for a single component.
+        """Recursively parse all docs under .sillyspec/docs/.
 
         Parameters
         ----------
         sillyspec_root:
             Path to the workspace root (where ``.sillyspec/`` lives).
-        component_key:
-            The component key, e.g. ``silly``, ``silly-admin-ui``.
         """
-        result = ScanDocsResult(component_key=component_key)
-        docs_dir = sillyspec_root / ".sillyspec" / "docs" / component_key / "scan"
+        result = ScanDocsResult(component_key=None)
+        docs_dir = sillyspec_root / ".sillyspec" / "docs"
 
         if not docs_dir.is_dir():
             result.warnings.append(
                 ParseWarning(
-                    code="SCAN_DIR_MISSING",
-                    detail=f"No scan docs directory for component '{component_key}'",
-                    component_key=component_key,
+                    code="DOCS_DIR_MISSING",
+                    detail="No .sillyspec/docs directory found",
                 )
             )
-            # Still emit placeholder rows for all standard types
-            for dt in sorted(STANDARD_DOC_TYPES):
-                result.docs.append(
-                    ParsedDoc(
-                        doc_type=dt,
-                        filename=f"{dt}.md",
-                        path=f".sillyspec/docs/{component_key}/scan/{dt}.md",
-                        exists=False,
-                    )
-                )
             return result
 
-        found_types: dict[str, ParsedDoc] = {}
+        sillyspec_resolved = sillyspec_root.resolve()
 
-        for md_file in sorted(docs_dir.glob("*.md")):
+        for file_path in sorted(docs_dir.rglob("*")):
+            if not file_path.is_file():
+                continue
+
+            # Only parse .md and .yaml/.yml files
+            if file_path.suffix not in (".md", ".yaml", ".yml"):
+                continue
+
             # Path traversal guard
             try:
-                resolved = md_file.resolve()
-                sillyspec_resolved = sillyspec_root.resolve()
+                resolved = file_path.resolve()
                 if not str(resolved).startswith(str(sillyspec_resolved)):
-                    result.warnings.append(
-                        ParseWarning(
-                            code="PATH_TRAVERSAL",
-                            detail=f"Skipping file outside sillyspec root: {md_file}",
-                            component_key=component_key,
-                        )
-                    )
                     continue
             except (OSError, ValueError):
                 continue
 
-            if not md_file.is_file():
-                continue
+            rel_path = file_path.relative_to(sillyspec_root)
+            rel_str = str(rel_path).replace("\\", "/")
 
-            doc_type = _doc_type_from_filename(md_file.name)
-            rel_path = f".sillyspec/docs/{component_key}/scan/{md_file.name}"
+            doc_type = _doc_type_from_filename(file_path.name)
+
+            # For yaml files, use a derived doc_type
+            if file_path.suffix in (".yaml", ".yml"):
+                doc_type = file_path.stem
 
             try:
-                content, truncated = _read_file_safe(md_file)
+                content, truncated = _read_file_safe(file_path)
             except OSError as exc:
                 result.warnings.append(
                     ParseWarning(
                         code="READ_ERROR",
-                        detail=f"Cannot read {md_file.name}: {exc}",
-                        component_key=component_key,
+                        detail=f"Cannot read {rel_str}: {exc}",
                         doc_type=doc_type,
                     )
                 )
-                found_types[doc_type] = ParsedDoc(
-                    doc_type=doc_type,
-                    filename=md_file.name,
-                    path=rel_path,
-                    exists=False,
-                )
                 continue
 
-            title = _extract_title(content)
-            mtime = datetime.utcfromtimestamp(md_file.stat().st_mtime)
+            title = _extract_title(content) if file_path.suffix == ".md" else None
+            mtime = datetime.utcfromtimestamp(file_path.stat().st_mtime)
 
             parsed = ParsedDoc(
                 doc_type=doc_type,
-                filename=md_file.name,
-                path=rel_path,
+                filename=file_path.name,
+                path=rel_str,
                 title=title,
                 content=content,
                 exists=True,
@@ -197,27 +175,11 @@ class ScanDocsParser:
                 result.warnings.append(
                     ParseWarning(
                         code="CONTENT_TRUNCATED",
-                        detail=f"{md_file.name} exceeds 1 MB, truncated",
-                        component_key=component_key,
+                        detail=f"{rel_str} exceeds 1 MB, truncated",
                         doc_type=doc_type,
                     )
                 )
 
-            # For OTHER type, allow multiple; for standard types, last wins
-            if doc_type == "OTHER":
-                found_types[f"OTHER:{md_file.name}"] = parsed
-            else:
-                found_types[doc_type] = parsed
+            result.docs.append(parsed)
 
-        # Add placeholders for missing standard types
-        for dt in sorted(STANDARD_DOC_TYPES):
-            if dt not in found_types:
-                found_types[dt] = ParsedDoc(
-                    doc_type=dt,
-                    filename=f"{dt}.md",
-                    path=f".sillyspec/docs/{component_key}/scan/{dt}.md",
-                    exists=False,
-                )
-
-        result.docs = list(found_types.values())
         return result

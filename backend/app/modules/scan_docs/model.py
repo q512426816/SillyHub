@@ -21,9 +21,9 @@ class ScanDocument(BaseModel, table=True):
     __tablename__ = "scan_documents"
     __table_args__ = (
         Index(
-            "ux_scan_docs_workspace_type",
+            "ux_scan_docs_workspace_path",
             "workspace_id",
-            "doc_type",
+            "path",
             unique=True,
         ),
         Index("ix_scan_docs_workspace", "workspace_id"),
@@ -40,7 +40,7 @@ class ScanDocument(BaseModel, table=True):
             nullable=False,
         ),
     )
-    doc_type: str = Field(sa_column=Column(String(30), nullable=False))
+    doc_type: str = Field(sa_column=Column(String(100), nullable=False))
     path: str = Field(sa_column=Column(Text, nullable=False))
     title: str | None = Field(default=None, sa_column=Column(String(500), nullable=True))
     exists: bool = Field(default=True, sa_column=Column(Boolean, nullable=False, default=True))

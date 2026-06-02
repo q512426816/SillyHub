@@ -41,6 +41,7 @@ export default function ComponentsPage({ params }: Props) {
   const [outgoing, setOutgoing] = useState<WorkspaceRelation[]>([]);
   const [incoming, setIncoming] = useState<WorkspaceRelation[]>([]);
   const [children, setChildren] = useState<Workspace[]>([]);
+  const [allWorkspaces, setAllWorkspaces] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(true);
   const [reparsing, setReparsing] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -66,6 +67,7 @@ export default function ComponentsPage({ params }: Props) {
       setIncoming(relData.incoming);
       // 子组件：root_path 以当前 workspace 的 root_path + "/" 开头（排除自身）
       const prefix = ws.root_path + "/";
+      setAllWorkspaces(allWs.items);
       setChildren(
         allWs.items.filter(
           (w: Workspace) => w.root_path.startsWith(prefix) && w.id !== ws.id,
@@ -109,6 +111,12 @@ export default function ComponentsPage({ params }: Props) {
   // For the detail drawer — build a map of related workspaces (nodes)
   // In the relation context, the "nodes" are the workspace itself and its peers.
   // We collect unique workspace ids from the relations for display.
+  const wsMap = useMemo(() => {
+    const m = new Map<string, Workspace>();
+    for (const ws of allWorkspaces) m.set(ws.id, ws);
+    return m;
+  }, [allWorkspaces]);
+
   const relatedWorkspaceIds = useMemo(() => {
     const ids = new Set<string>();
     for (const r of allRelations) {
@@ -260,12 +268,15 @@ export default function ComponentsPage({ params }: Props) {
             <tbody>
               {outgoing.map((r) => (
                 <tr key={r.id}>
-                  <td className="font-mono text-xs">
+                  <td className="text-xs">
                     <Link
                       href={`/workspaces/${r.target_id}`}
                       className="text-primary hover:underline"
                     >
-                      {r.target_id.slice(0, 8)}…
+                      {wsMap.get(r.target_id)?.name ?? r.target_id.slice(0, 8)}
+                      {wsMap.get(r.target_id)?.component_key ? (
+                        <span className="ml-1 text-muted-foreground">({wsMap.get(r.target_id)!.component_key})</span>
+                      ) : null}
                     </Link>
                   </td>
                   <td>
@@ -302,12 +313,15 @@ export default function ComponentsPage({ params }: Props) {
             <tbody>
               {incoming.map((r) => (
                 <tr key={r.id}>
-                  <td className="font-mono text-xs">
+                  <td className="text-xs">
                     <Link
                       href={`/workspaces/${r.source_id}`}
                       className="text-primary hover:underline"
                     >
-                      {r.source_id.slice(0, 8)}…
+                      {wsMap.get(r.source_id)?.name ?? r.source_id.slice(0, 8)}
+                      {wsMap.get(r.source_id)?.component_key ? (
+                        <span className="ml-1 text-muted-foreground">({wsMap.get(r.source_id)!.component_key})</span>
+                      ) : null}
                     </Link>
                   </td>
                   <td>

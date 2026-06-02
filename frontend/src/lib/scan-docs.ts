@@ -52,10 +52,10 @@ export function listScanDocs(workspaceId: string) {
 
 export function getScanDoc(
   workspaceId: string,
-  docType: string,
+  docId: string,
 ) {
   return apiFetch<ScanDocRead>(
-    `/api/workspaces/${workspaceId}/scan-docs/${docType}`,
+    `/api/workspaces/${workspaceId}/scan-docs/${docId}`,
   );
 }
 

@@ -126,12 +126,14 @@ function workspaceToComponent(
 export async function listComponents(
   workspaceId: string,
 ): Promise<{ items: Component[]; total: number }> {
-  const resp = await apiFetch<{ items: Workspace[]; total: number }>(
-    "/api/workspaces",
-  );
+  const [ws, resp] = await Promise.all([
+    apiFetch<Workspace>(`/api/workspaces/${workspaceId}`),
+    apiFetch<{ items: Workspace[]; total: number }>("/api/workspaces"),
+  ]);
+  const prefix = ws.root_path + "/";
   const items = resp.items
-    .filter((ws) => ws.component_key !== null)
-    .map((ws) => workspaceToComponent(ws, workspaceId));
+    .filter((w) => w.root_path.startsWith(prefix) && w.id !== ws.id)
+    .map((w) => workspaceToComponent(w, workspaceId));
   return { items, total: items.length };
 }
 

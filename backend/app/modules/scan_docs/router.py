@@ -45,17 +45,17 @@ async def list_scan_docs(
 
 
 @router.get(
-    "/scan-docs/{doc_type}",
+    "/scan-docs/{doc_id}",
     response_model=ScanDocRead,
 )
 async def get_scan_doc(
     workspace_id: uuid.UUID,
-    doc_type: str,
+    doc_id: uuid.UUID,
     session: SessionDep,
     _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
 ) -> ScanDocRead:
     service = ScanDocsService(session)
-    doc = await service.get(workspace_id, doc_type)
+    doc = await service.get(workspace_id, doc_id)
     return ScanDocRead.model_validate(doc)
 
 
@@ -70,18 +70,17 @@ async def reparse_scan_docs(
     _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
 ) -> ScanDocReparseResponse:
     service = ScanDocsService(session)
-    stats, results = await service.reparse(workspace_id)
+    stats, result = await service.reparse(workspace_id)
     warnings: list[ScanDocWarning] = []
-    for r in results:
-        for w in r.warnings:
-            warnings.append(
-                ScanDocWarning(
-                    code=w.code,
-                    detail=w.detail,
-                    component_key=w.component_key,
-                    doc_type=w.doc_type,
-                )
+    for w in result.warnings:
+        warnings.append(
+            ScanDocWarning(
+                code=w.code,
+                detail=w.detail,
+                component_key=w.component_key,
+                doc_type=w.doc_type,
             )
+        )
     return ScanDocReparseResponse(
         workspace_id=workspace_id,
         stats=ScanDocReparseStats(**stats),

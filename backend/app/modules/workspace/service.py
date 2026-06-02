@@ -52,11 +52,15 @@ def _rewrite_path(root_path: str) -> str:
     container_prefix = settings.container_path_prefix
     if not host_prefix or not container_prefix:
         return root_path
-    # Normalize both to forward-slash for comparison
-    normalized = root_path.replace("\\", "/")
-    host_norm = host_prefix.replace("\\", "/")
-    if normalized.startswith(host_norm):
-        return container_prefix + normalized[len(host_norm) :]
+    # Normalize both to forward-slash, ensure prefix ends with /
+    normalized = root_path.replace("\\", "/").rstrip("/")
+    host_norm = host_prefix.replace("\\", "/").rstrip("/") + "/"
+    if normalized.startswith(host_norm) or normalized + "/" == host_norm:
+        remainder = normalized[len(host_norm.rstrip("/")):]
+        # Ensure remainder starts with /
+        if not remainder.startswith("/"):
+            remainder = "/" + remainder
+        return container_prefix.rstrip("/") + remainder
     return root_path
 
 
@@ -251,6 +255,14 @@ class WorkspaceService:
         scan = self.scan(workspace.root_path)
         workspace.last_scanned_at = datetime.utcnow()
         workspace.updated_at = workspace.last_scanned_at
+
+        if scan.is_sillyspec and scan.structure.has_projects_dir:
+            try:
+                await self.reparse(workspace_id)
+                log.info("workspace.rescan.projects_imported", workspace_id=str(workspace.id))
+            except Exception as exc:
+                log.warning("workspace.rescan.projects_import_failed", workspace_id=str(workspace.id), error=str(exc))
+
         await self._session.commit()
         await self._session.refresh(workspace)
         log.info(
@@ -376,6 +388,11 @@ class WorkspaceService:
         for pw in parse_result.workspaces:
             stats["parsed"] += 1
             child_root = self._build_child_root_path(root_path, pw)
+
+            # Skip if child root_path would collide with parent
+            if os.path.normpath(child_root) == os.path.normpath(root_path):
+                stats["parsed"] -= 1
+                continue
 
             # Match existing row
             existing = existing_children.get(pw.source_yaml_path) or existing_by_key.get(
@@ -517,12 +534,18 @@ class WorkspaceService:
         """Construct the root_path for a child Workspace.
 
         Rules:
-        1. parsed.path is not None and not empty: os.path.join(parent_root, parsed.path)
-        2. parsed.path is None or empty: parent_root + "/" + component_key
+        1. parsed.path is absolute (host path) -> rewrite via _rewrite_path
+        2. parsed.path is relative -> os.path.join(parent_root, parsed.path)
+        3. parsed.path is None or empty -> parent_root + "/" + component_key
 
         Returns forward-slash normalized path.
         """
         if parsed.path:
+            p = parsed.path.replace("\\", "/")
+            # Detect absolute Windows (C:/...) or Posix (/...) paths
+            is_absolute = len(p) >= 2 and p[1] == ":" or p.startswith("/")
+            if is_absolute:
+                return _rewrite_path(parsed.path)
             joined = os.path.join(parent_root, parsed.path)
             return os.path.normpath(joined).replace("\\", "/")
         return os.path.normpath(parent_root).replace("\\", "/") + "/" + parsed.component_key
@@ -663,18 +686,15 @@ class WorkspaceService:
         spec_ws_svc = SpecWorkspaceService(self._session)
         try:
             await spec_ws_svc.get(workspace_id)
-            return  # already exists
         except Exception:
-            pass
-
-        await spec_ws_svc.create(
-            workspace_id=workspace_id,
-            payload=SpecWorkspaceCreate(
-                spec_root=sillyspec_path,
-                strategy="repo-native",
-                repo_sillyspec_path=sillyspec_path,
-            ),
-        )
+            await spec_ws_svc.create(
+                workspace_id=workspace_id,
+                payload=SpecWorkspaceCreate(
+                    spec_root=sillyspec_path,
+                    strategy="repo-native",
+                    repo_sillyspec_path=sillyspec_path,
+                ),
+            )
 
         # Import projects and changes from .sillyspec into DB
         try:
