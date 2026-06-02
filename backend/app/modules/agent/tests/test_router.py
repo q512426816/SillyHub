@@ -578,3 +578,203 @@ async def test_stream_redis_error_sends_error_event(db_session):
     assert len(collected) == 1
     assert "event: error" in collected[0]
     assert "redis connection failed" in collected[0]
+
+
+# ---------------------------------------------------------------------------
+# AgentRun user input endpoint tests
+# ---------------------------------------------------------------------------
+
+
+async def test_submit_agent_run_input_success(client, db_session, tmp_path):
+    """AC-02/03: Submit user input to a running agent run returns 200 and persists log."""
+    from app.modules.agent.model import AgentRun
+    from app.modules.workspace.model import AgentRunWorkspace
+
+    refs = await _setup(db_session, tmp_path)
+
+    run = AgentRun(
+        id=uuid.uuid4(),
+        task_id=refs["task_id"],
+        lease_id=refs["lease_id"],
+        agent_type="claude_code",
+        status="running",
+        started_at=datetime.utcnow(),
+    )
+    db_session.add(run)
+    db_session.add(
+        AgentRunWorkspace(
+            agent_run_id=run.id,
+            workspace_id=refs["ws_id"],
+        )
+    )
+    await db_session.commit()
+
+    mock_redis = AsyncMock()
+    mock_redis.publish = AsyncMock()
+
+    with patch("app.modules.agent.service.get_redis", return_value=mock_redis):
+        resp = await client.post(
+            f"/api/workspaces/{refs['ws_id']}/agent/runs/{run.id}/input",
+            json={"content": "  continue with defaults  "},
+            headers=_auth(refs["token"]),
+        )
+
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+    body = resp.json()
+    assert body["run_id"] == str(run.id)
+    assert body["accepted"] is True
+
+    # Verify DB log entry
+    from sqlalchemy import select as sa_select
+
+    from app.modules.agent.model import AgentRunLog
+
+    stmt = sa_select(AgentRunLog).where(
+        AgentRunLog.run_id == run.id,
+        AgentRunLog.channel == "user_input",
+    )
+    log_entry = (await db_session.execute(stmt)).scalars().first()
+    assert log_entry is not None, "Expected AgentRunLog with channel='user_input'"
+    assert log_entry.content_redacted == "continue with defaults"
+
+
+async def test_submit_agent_run_input_no_auth_returns_401(client, db_session, tmp_path):
+    """AC-05: No auth token returns 401."""
+    refs = await _setup(db_session, tmp_path)
+    fake_run = uuid.uuid4()
+    resp = await client.post(
+        f"/api/workspaces/{refs['ws_id']}/agent/runs/{fake_run}/input",
+        json={"content": "hello"},
+    )
+    assert resp.status_code == 401
+
+
+async def test_submit_agent_run_input_requires_workspace_write_returns_403(
+    client, db_session, tmp_path
+):
+    """AC-06: User without workspace:write permission gets 403."""
+    from app.core.config import get_settings
+    from app.core.security import create_access_token, password_hasher
+    from app.modules.auth.model import User
+
+    refs = await _setup(db_session, tmp_path)
+
+    # Create a non-admin user (no platform admin, no workspace write)
+    reader_id = uuid.uuid4()
+    reader = User(
+        id=reader_id,
+        email=f"reader-{reader_id.hex[:8]}@example.com",
+        password_hash=password_hasher.hash("Pass123!"),
+        display_name="Reader",
+        status="active",
+        is_platform_admin=False,
+    )
+    db_session.add(reader)
+    await db_session.commit()
+
+    settings = get_settings()
+    reader_token, _ = create_access_token(
+        user_id=reader.id,
+        email=reader.email,
+        is_admin=False,
+        settings=settings,
+    )
+
+    fake_run = uuid.uuid4()
+    resp = await client.post(
+        f"/api/workspaces/{refs['ws_id']}/agent/runs/{fake_run}/input",
+        json={"content": "hello"},
+        headers=_auth(reader_token),
+    )
+    assert resp.status_code == 403
+
+
+async def test_submit_agent_run_input_missing_run_returns_404(client, db_session, tmp_path):
+    """AC-07: Non-existent run_id returns 404."""
+    refs = await _setup(db_session, tmp_path)
+    fake_run = uuid.uuid4()
+    resp = await client.post(
+        f"/api/workspaces/{refs['ws_id']}/agent/runs/{fake_run}/input",
+        json={"content": "hello"},
+        headers=_auth(refs["token"]),
+    )
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404_AGENT_RUN_NOT_FOUND"
+
+
+async def test_submit_agent_run_input_wrong_workspace_returns_404(client, db_session, tmp_path):
+    """AC-08: Run exists but not associated with this workspace returns 404."""
+    from app.modules.agent.model import AgentRun
+    from app.modules.workspace.model import AgentRunWorkspace
+
+    refs = await _setup(db_session, tmp_path)
+
+    run = AgentRun(
+        id=uuid.uuid4(),
+        task_id=refs["task_id"],
+        lease_id=refs["lease_id"],
+        agent_type="claude_code",
+        status="running",
+        started_at=datetime.utcnow(),
+    )
+    db_session.add(run)
+    # Associate with a different workspace
+    other_ws_id = uuid.uuid4()
+    db_session.add(
+        AgentRunWorkspace(
+            agent_run_id=run.id,
+            workspace_id=other_ws_id,
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/workspaces/{refs['ws_id']}/agent/runs/{run.id}/input",
+        json={"content": "hello"},
+        headers=_auth(refs["token"]),
+    )
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "HTTP_404_AGENT_RUN_NOT_FOUND"
+
+
+async def test_submit_agent_run_input_blank_content_returns_422(client, db_session, tmp_path):
+    """AC-09: Blank/empty content returns 422."""
+    refs = await _setup(db_session, tmp_path)
+    fake_run = uuid.uuid4()
+
+    # Empty string
+    resp1 = await client.post(
+        f"/api/workspaces/{refs['ws_id']}/agent/runs/{fake_run}/input",
+        json={"content": ""},
+        headers=_auth(refs["token"]),
+    )
+    assert resp1.status_code == 422
+
+    # Whitespace only
+    resp2 = await client.post(
+        f"/api/workspaces/{refs['ws_id']}/agent/runs/{fake_run}/input",
+        json={"content": "   "},
+        headers=_auth(refs["token"]),
+    )
+    assert resp2.status_code == 422
+
+    # Missing content field
+    resp3 = await client.post(
+        f"/api/workspaces/{refs['ws_id']}/agent/runs/{fake_run}/input",
+        json={},
+        headers=_auth(refs["token"]),
+    )
+    assert resp3.status_code == 422
+
+
+async def test_submit_agent_run_input_too_long_content_returns_422(client, db_session, tmp_path):
+    """AC-10: Content exceeding 4000 characters returns 422."""
+    refs = await _setup(db_session, tmp_path)
+    fake_run = uuid.uuid4()
+
+    resp = await client.post(
+        f"/api/workspaces/{refs['ws_id']}/agent/runs/{fake_run}/input",
+        json={"content": "x" * 4001},
+        headers=_auth(refs["token"]),
+    )
+    assert resp.status_code == 422

@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AgentRunCreate(BaseModel):
@@ -64,3 +64,24 @@ class WorkspaceSpecSummaryDTO(BaseModel):
     direction: str
     spec_root: str | None = None
     doc_summaries: dict[str, str] = Field(default_factory=dict)
+
+
+class AgentRunInputRequest(BaseModel):
+    """Request DTO for submitting user guidance to an AgentRun."""
+
+    content: str = Field(min_length=1, max_length=4000)
+
+    @field_validator("content")
+    @classmethod
+    def _content_not_blank(cls, value: str) -> str:
+        content = value.strip()
+        if not content:
+            raise ValueError("content must not be blank")
+        return content
+
+
+class AgentRunInputResponse(BaseModel):
+    """Response DTO for user input submission."""
+
+    run_id: uuid.UUID
+    accepted: bool

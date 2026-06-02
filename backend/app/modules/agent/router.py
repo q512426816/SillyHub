@@ -24,6 +24,8 @@ from app.modules.agent.model import AgentRun
 from app.modules.agent.schema import (
     AgentKillResponse,
     AgentRunCreate,
+    AgentRunInputRequest,
+    AgentRunInputResponse,
     AgentRunLogEntry,
     AgentRunResponse,
 )
@@ -110,6 +112,27 @@ async def kill_agent_run(
     await svc.kill_run(run_id)
     await session.refresh(run)
     return AgentKillResponse(id=run.id, status=run.status)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/agent/runs/{run_id}/input",
+    response_model=AgentRunInputResponse,
+)
+async def submit_agent_run_input(
+    workspace_id: uuid.UUID,
+    run_id: uuid.UUID,
+    data: AgentRunInputRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+) -> AgentRunInputResponse:
+    """Submit user guidance input to an agent run."""
+    svc = AgentService(session)
+    await svc.submit_run_input(
+        workspace_id=workspace_id,
+        run_id=run_id,
+        content=data.content,
+    )
+    return AgentRunInputResponse(run_id=run_id, accepted=True)
 
 
 @router.get(

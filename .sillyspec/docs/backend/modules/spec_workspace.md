@@ -5,13 +5,13 @@ created_at: 2026-05-31T23:30:00
 
 # spec_workspace — Spec workspace 管理
 
-> 最后更新：2026-05-31
-> 最近变更：初始模块文档
+> 最后更新：2026-06-02
+> 最近变更：2026-06-02-spec-bootstrap-agent-stream-interaction
 > 模块路径：`app/modules/spec_workspace/**`
 
 ## 职责
 
-管理每个 workspace 对应的 spec 空间。提供 spec workspace 的 CRUD、导入/同步（stub）、bootstrap（Agent 驱动初始化）以及 spec conflict 的列表和解决。本模块是 spec 体系的核心协调层。
+管理每个 workspace 对应的 spec 空间。提供 spec workspace 的 CRUD、导入/同步（stub）、**异步 bootstrap（通过 AgentRun + ClaudeCodeAdapter 后台执行）** 以及 spec conflict 的列表和解决。本模块是 spec 体系的核心协调层。
 
 ## 当前设计（架构 + 关键逻辑）
 
@@ -19,7 +19,7 @@ created_at: 2026-05-31T23:30:00
 
 - **Router** — 7 个端点（4 个 spec workspace + 1 个 bootstrap + 2 个 conflict）
 - **Service** — `SpecWorkspaceService`：CRUD + sync status
-- **BootstrapService** — `SpecBootstrapService`：通过 Agent + CLI 初始化 spec 空间
+- **BootstrapService** — `SpecBootstrapService`：创建 AgentRun 记录、构造 bootstrap 专用 `AgentSpecBundle`，通过后台 `ClaudeCodeAdapter.run_with_bundle()` 异步执行 `sillyspec init` + `sillyspec run scan`，完成后 `SpecValidator` 验证收尾
 - **Validator** — `SpecValidator`：验证 `.sillyspec` 目录结构和内容
 
 ### 数据模型
@@ -44,18 +44,26 @@ created_at: 2026-05-31T23:30:00
 
 ### Bootstrap 流程
 
-`SpecBootstrapService.bootstrap()` 是本模块最复杂的操作：
+`SpecBootstrapService.bootstrap()` 异步执行流程：
 
 1. 加载 SpecWorkspace + Workspace 记录
 2. 确保 spec_root 目录存在
 3. 创建 AuditLog（start）
-4. 构建 `AgentSpecBundle`（含 bootstrap prompt + allowed_paths）
-5. 创建 `AgentRun` 记录，通过 `ClaudeCodeAdapter` 执行
-6. Agent 使用 `sillyspec init` + `sillyspec run scan` 初始化
-7. 写入 AgentRunLog（分段写入，每段 4000 字符）
-8. `SpecValidator.validate()` 验证结果
-9. 通过 → sync_status=clean；失败 → sync_status=dirty + 创建 SpecConflict
-10. 创建 AuditLog（complete），返回结果 dict
+4. 创建 AgentRun(status=pending, agent_type="claude_code")
+5. 创建 AgentRunWorkspace（M:N 关联 run 和 workspace）
+6. 更新 AgentRun 状态为 running
+7. 返回 agent_run_id + stream_url + status（立即返回，不等待执行完成）
+8. 后台任务：构造 bootstrap 专用 AgentSpecBundle
+   - task_key="spec-bootstrap"
+   - task_title="Bootstrap spec workspace"
+   - proposal/task_markdown 包含 init、scan、验证步骤
+   - allowed_paths=[spec_root, code_root]
+   - available_tools=["sillyspec"]
+   - platform_metadata={"bootstrap": True, "workspace_id": ...}
+9. 后台任务：ClaudeCodeAdapter.run_with_bundle() 执行
+10. 后台任务：SpecValidator.validate(spec_root) 验证收尾
+11. 后台任务：根据 CLI exit_code + 验证结果更新 run status、sync_status、创建 SpecConflict
+12. 后台任务：创建 AuditLog（complete）
 
 ### SpecValidator 验证规则
 
@@ -76,7 +84,7 @@ created_at: 2026-05-31T23:30:00
 | POST | `/workspaces/{wid}/spec-workspace/import` | WORKSPACE_WRITE | `SpecWorkspaceRead` | 从仓库导入 spec 文件（stub） |
 | POST | `/workspaces/{wid}/spec-workspace/sync` | WORKSPACE_WRITE | `SpecWorkspaceRead` | 同步 spec 文件（stub） |
 | PATCH | `/workspaces/{wid}/spec-workspace` | WORKSPACE_WRITE | `SpecWorkspaceRead` | 更新 spec workspace 配置 |
-| POST | `/workspaces/{wid}/spec-bootstrap` | WORKSPACE_WRITE | `dict` | Agent 驱动初始化 spec 空间 |
+| POST | `/workspaces/{wid}/spec-bootstrap` | WORKSPACE_WRITE | `dict` | 创建异步 AgentRun 执行 bootstrap，立即返回 run 信息和 stream URL |
 | GET | `/workspaces/{wid}/spec-conflicts` | WORKSPACE_READ | `SpecConflictListResponse` | 列出 spec 冲突 |
 | POST | `/workspaces/{wid}/spec-conflicts/{id}/resolve` | WORKSPACE_WRITE | `SpecConflictRead` | 解决 spec 冲突 |
 
@@ -89,18 +97,18 @@ Bootstrap 流程:
       → 加载 SpecWorkspace + Workspace
       → mkdir spec_root
       → AuditLog("spec_bootstrap.start")
-      → 构建 AgentSpecBundle (prompt + tools)
-      → AgentRun(status=pending → running)
-      → ClaudeCodeAdapter.run_with_bundle(timeout=1800s)
-        → Agent 调用 sillyspec init + scan
-      → 写入 AgentRunLog (分段)
-      → SpecValidator.validate(spec_root)
-        → _check_directory_structure
-        → _check_yaml_schema
-        → _check_references
-      → passed? → sync_status=clean : dirty + SpecConflict
-      → AuditLog("spec_bootstrap.complete")
-    ← { agent_run_id, validation_passed, sync_status, errors, warnings }
+      → AgentRun(status=pending, agent_type="claude_code")
+      → AgentRunWorkspace(agent_run_id, workspace_id)
+      → AgentRun(status=running)
+      → return { agent_run_id, stream_url, status, spec_root, message }
+      → [后台] build AgentSpecBundle
+      → [后台] ClaudeCodeAdapter.run_with_bundle(bundle, on_log=callback)
+      → [后台] SpecValidator.validate(spec_root)
+      → [后台] update AgentRun status + output + exit_code
+      → [后台] update SpecWorkspace sync_status (clean/dirty)
+      → [后台] create SpecConflict for failures
+      → [后台] AuditLog("spec_bootstrap.complete")
+  ← { agent_run_id, stream_url: "/api/workspaces/{wid}/agent/runs/{run_id}/stream", status: "pending", spec_root, message: "Bootstrap agent run started." }
 ```
 
 ## 设计决策
@@ -109,23 +117,25 @@ Bootstrap 流程:
 |------|------|------|
 | 1:1 关系 | workspace_id 唯一索引 | 每个 workspace 仅一个 spec 空间 |
 | 三种策略 | platform-managed / repo-mirrored / repo-native | 适配不同团队工作流 |
-| Agent 驱动 bootstrap | ClaudeCodeAdapter + sillyspec CLI | spec 初始化需要理解代码结构，Agent 比硬编码逻辑更灵活 |
+| Bootstrap 异步 AgentRun | 创建 AgentRun 后立即返回，后台通过 ClaudeCodeAdapter 执行 | 前端可立即连接 SSE stream 获取实时进度，避免同步等待造成页面空白 |
 | 验证后置 | bootstrap 完成后验证 | Agent 可能自修复，最终状态决定成功与否 |
 | import/sync 为 stub | 仅更新 sync_status | 文件系统双向同步涉及复杂冲突处理，预留接口 |
 | 分段写入日志 | 4000 字符/段 | 避免 DB 列长度溢出 |
+| Bootstrap 验证由后端收尾 | Agent prompt 要求自查，但最终 sync_status 必须由 SpecValidator.validate() 决定 | 避免 CLI 自然语言输出和平台状态不一致 |
 
 ## 依赖关系
 
 - **workspace**：`Workspace` model — 获取 `root_path`（代码根目录）
 - **spec_profile**：`SpecConflict` model — conflict 的数据模型和 schema
-- **agent**：`ClaudeCodeAdapter`, `AgentRun`, `AgentRunLog`, `AgentSpecBundle` — Agent 执行
+- **agent**：`ClaudeCodeAdapter`, `AgentRun`, `AgentRunLog`, `AgentSpecBundle` — bootstrap 异步执行链路和日志流
 - **workflow**：`AuditLog` — 审计日志记录
 - **runtime**：依赖 `SpecWorkspace` 的 strategy 和 spec_root 来定位 `.runtime/` 目录
 
 ## 注意事项
 
 - import 和 sync 端点当前为 stub，仅将 sync_status 设为 clean 并更新时间戳
-- bootstrap 的 Agent 超时设为 1800 秒（30 分钟），对于大型项目可能不够
+- bootstrap 通过 ClaudeCodeAdapter 异步执行，prompt 包含 `sillyspec init --dir <spec_root>` 和 `sillyspec run scan --dir <spec_root>`；前端通过 SSE stream 实时获取执行进度
+- bootstrap 后台执行异常时，外层 try/except/finally 保证 AgentRun status 更新为 failed 并写入 stderr 日志
 - SpecValidator 使用 `datetime.utcfromtimestamp()`（已被 Python 3.12 标记为 deprecated）
 - conflict 解决端点直接在 router 中操作 DB，未通过 service 层（直接 session.get + commit）
 - AgentRunLog 的分段写入策略（4000 字符）是硬编码常量，未做配置化
@@ -136,3 +146,4 @@ Bootstrap 流程:
 |------|------|
 | 2026-05-27 | 初始实现：model + service + router + bootstrap + validator |
 | 2026-05-31 | 文档归档 |
+| 2026-06-02 | 2026-06-02-spec-bootstrap-agent-stream-interaction | `/spec-bootstrap` 改为异步 AgentRun + ClaudeCodeAdapter 后台执行 + SpecValidator 验证收尾，立即返回 stream_url |

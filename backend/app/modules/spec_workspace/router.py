@@ -31,6 +31,7 @@ from app.modules.spec_profile.schema import (
 )
 from app.modules.spec_workspace.bootstrap import SpecBootstrapService
 from app.modules.spec_workspace.schema import (
+    SpecBootstrapRunStartResponse,
     SpecWorkspaceRead,
     SpecWorkspaceUpdate,
 )
@@ -116,20 +117,23 @@ async def update_spec_workspace(
 
 @router.post(
     "/spec-bootstrap",
-    response_model=dict,
+    response_model=SpecBootstrapRunStartResponse,
 )
 async def bootstrap_spec_workspace(
     workspace_id: uuid.UUID,
     session: SessionDep,
     _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
-) -> dict:
-    """Bootstrap the spec workspace via Agent + SillySpec CLI.
+) -> SpecBootstrapRunStartResponse:
+    """Launch an asynchronous bootstrap AgentRun for the spec workspace.
 
-    Creates an Agent run that uses the sillyspec CLI to initialize the spec
-    space, then validates the result with SpecValidator.
+    Creates a pending AgentRun, writes a start audit event, links the run
+    to the workspace, and returns immediately with the run ID and stream URL.
+    The actual execution (ClaudeCodeAdapter + SillySpec CLI + validation)
+    happens in a background task.
     """
     service = SpecBootstrapService(session)
-    return await service.bootstrap(workspace_id, user_id=_user.id)
+    result = await service.bootstrap(workspace_id, user_id=_user.id)
+    return SpecBootstrapRunStartResponse(**result)
 
 
 # ── Spec Conflicts ─────────────────────────────────────────────────────────────

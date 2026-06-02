@@ -5,11 +5,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api";
 import {
   getAgentRunLogs,
   listAgentRuns,
   streamAgentRunLogs,
+  submitAgentRunInput,
   type AgentRun,
   type AgentRunLogEntry,
 } from "@/lib/agent";
@@ -128,9 +130,28 @@ function levelTag(channel: string): {
       return { label: "TOOL", cls: "text-blue-600" };
     case "stderr":
       return { label: "WARN", cls: "text-amber-600" };
+    case "pending_input":
+      return { label: "PENDING", cls: "text-amber-700 font-medium" };
+    case "user_input":
+      return { label: "INPUT", cls: "text-blue-700 font-medium" };
     default:
       return { label: "INFO", cls: "text-muted-foreground" };
   }
+}
+
+/**
+ * 判断一个 pending_input 日志是否已被回复。
+ * 遍历所有日志，如果存在时间戳晚于该 pending_input 的 user_input，则视为已回复。
+ */
+function isPendingReplied(
+  logTimestamp: string,
+  allLogs: AgentRunLogEntry[],
+): boolean {
+  return allLogs.some(
+    (l) =>
+      l.channel === "user_input" &&
+      l.timestamp >= logTimestamp,
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -149,6 +170,16 @@ export default function AgentPage({ params }: Props) {
   const [expandedLogs, setExpandedLogs] = useState<AgentRunLogEntry[] | null>(null);
   const [expandedLogsLoading, setExpandedLogsLoading] = useState(false);
   const logContainerRef = useRef<HTMLDivElement>(null);
+
+  // ── Pending input / User guidance state ──
+  // 指导输入状态：key 为 pending_input 日志条目的 id
+  const [inputValues, setInputValues] = useState<Record<string, string>>({});
+  // 提交中状态：key 为 pending_input 日志条目的 id
+  const [submittingInputs, setSubmittingInputs] = useState<Record<string, boolean>>({});
+  // 提交错误状态
+  const [inputErrors, setInputErrors] = useState<Record<string, string>>({});
+  // 已回复的 pending_input 条目 id 集合
+  const [repliedInputs, setRepliedInputs] = useState<Set<string>>(new Set());
 
   /* ---- Derived ---- */
   const runningRuns = useMemo(
@@ -175,8 +206,16 @@ export default function AgentPage({ params }: Props) {
     const success = activeToolCalls.filter((t) => t.success && t.status === "allowed").length;
     const failed = activeToolCalls.filter((t) => !t.success).length;
     const pending = activeToolCalls.filter((t) => t.status === "pending").length;
-    return { success, failed, pending };
-  }, [activeToolCalls]);
+    const pendingGuidance = activeLogs
+      ? activeLogs.filter(
+          (l) =>
+            l.channel === "pending_input" &&
+            !isPendingReplied(l.timestamp, activeLogs) &&
+            !repliedInputs.has(l.id),
+        ).length
+      : 0;
+    return { success, failed, pending, pendingGuidance };
+  }, [activeToolCalls, activeLogs, repliedInputs]);
 
   /* ---- Load runs ---- */
   const reload = useCallback(async () => {
@@ -278,6 +317,39 @@ export default function AgentPage({ params }: Props) {
       }
     },
     [expandedRunId, workspaceId],
+  );
+
+  /* ---- Submit user guidance for pending_input ---- */
+  const handleSubmitInput = useCallback(
+    async (pendingLogId: string, runId: string) => {
+      const content = inputValues[pendingLogId]?.trim();
+      if (!content) return;
+
+      setSubmittingInputs((prev) => ({ ...prev, [pendingLogId]: true }));
+      setInputErrors((prev) => {
+        const next = { ...prev };
+        delete next[pendingLogId];
+        return next;
+      });
+
+      try {
+        const result = await submitAgentRunInput(workspaceId, runId, { content });
+        if (result.accepted) {
+          setRepliedInputs((prev) => new Set(prev).add(pendingLogId));
+          setInputValues((prev) => {
+            const next = { ...prev };
+            delete next[pendingLogId];
+            return next;
+          });
+        }
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.message : "提交失败";
+        setInputErrors((prev) => ({ ...prev, [pendingLogId]: msg }));
+      } finally {
+        setSubmittingInputs((prev) => ({ ...prev, [pendingLogId]: false }));
+      }
+    },
+    [workspaceId, inputValues],
   );
 
   /* ---- Scroll log container ---- */
@@ -431,6 +503,9 @@ export default function AgentPage({ params }: Props) {
               {toolSummary.pending > 0 && (
                 <Badge variant="warning">{toolSummary.pending} 待审批</Badge>
               )}
+              {toolSummary.pendingGuidance > 0 && (
+                <Badge variant="warning">{toolSummary.pendingGuidance} 待指导</Badge>
+              )}
               <Button
                 size="sm"
                 variant="ghost"
@@ -461,30 +536,87 @@ export default function AgentPage({ params }: Props) {
                 {activeLogs.map((log) => {
                   const tag = levelTag(log.channel);
                   return (
-                    <div key={log.id} className="flex items-start gap-2 px-3 py-1.5">
-                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                        {new Date(log.timestamp).toLocaleTimeString()}
-                      </span>
-                      <span
-                        className={`shrink-0 font-mono text-[11px] font-medium ${tag.cls}`}
-                      >
-                        [{tag.label}]
-                      </span>
-                      <span className="flex-1 break-all text-[11px]">
-                        {log.content_redacted}
-                      </span>
-                      {log.channel === "tool_call" && (() => {
-                        const tc = parseToolCallContent(log.content_redacted);
-                        if (!tc) return null;
+                    <div key={log.id}>
+                      <div className="flex items-start gap-2 px-3 py-1.5">
+                        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                          {new Date(log.timestamp).toLocaleTimeString()}
+                        </span>
+                        <span
+                          className={`shrink-0 font-mono text-[11px] font-medium ${tag.cls}`}
+                        >
+                          [{tag.label}]
+                        </span>
+                        <span className="flex-1 break-all text-[11px]">
+                          {log.content_redacted}
+                        </span>
+                        {log.channel === "tool_call" && (() => {
+                          const tc = parseToolCallContent(log.content_redacted);
+                          if (!tc) return null;
+                          return (
+                            <Badge
+                              variant={tc.status === "pending" ? "warning" : "success"}
+                              className="shrink-0"
+                            >
+                              {tc.status === "pending" ? "待审批" : "allowed"}
+                            </Badge>
+                          );
+                        })()}
+                      </div>
+                      {/* pending_input: 交互输入面板 */}
+                      {log.channel === "pending_input" && (() => {
+                        const isReplied = repliedInputs.has(log.id)
+                          || isPendingReplied(log.timestamp, activeLogs);
+                        if (isReplied) {
+                          return (
+                            <div className="px-3 pb-1.5">
+                              <Badge variant="success">已回复</Badge>
+                            </div>
+                          );
+                        }
                         return (
-                          <Badge
-                            variant={tc.status === "pending" ? "warning" : "success"}
-                            className="shrink-0"
-                          >
-                            {tc.status === "pending" ? "待审批" : "allowed"}
-                          </Badge>
+                          <div className="px-3 pb-1.5">
+                            <div className="flex gap-2 bg-amber-50 border border-amber-200 rounded px-3 py-1.5">
+                              <Input
+                                placeholder="输入指导文本..."
+                                value={inputValues[log.id] ?? ""}
+                                onChange={(e) =>
+                                  setInputValues((prev) => ({
+                                    ...prev,
+                                    [log.id]: e.target.value,
+                                  }))
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && !e.shiftKey) {
+                                    e.preventDefault();
+                                    void handleSubmitInput(log.id, activeRunId);
+                                  }
+                                }}
+                                disabled={submittingInputs[log.id]}
+                                className="text-xs h-7"
+                              />
+                              <Button
+                                size="sm"
+                                variant="default"
+                                onClick={() => void handleSubmitInput(log.id, activeRunId)}
+                                disabled={!inputValues[log.id]?.trim() || submittingInputs[log.id]}
+                              >
+                                {submittingInputs[log.id] ? "提交中..." : "提交指导"}
+                              </Button>
+                            </div>
+                            {inputErrors[log.id] && (
+                              <p className="text-xs text-destructive mt-1 px-3">{inputErrors[log.id]}</p>
+                            )}
+                          </div>
                         );
                       })()}
+                      {/* user_input: 蓝色高亮展示 */}
+                      {log.channel === "user_input" && (
+                        <div className="px-3 pb-1.5">
+                          <div className="ml-2 border-l-2 border-blue-400 pl-2 text-xs text-blue-800 bg-blue-50 rounded px-2 py-1">
+                            [用户指导] {log.content_redacted}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -605,6 +737,20 @@ export default function AgentPage({ params }: Props) {
                                       return (
                                         <div key={i} className="text-destructive">
                                           {log.content_redacted}
+                                        </div>
+                                      );
+                                    }
+                                    if (log.channel === "pending_input") {
+                                      return (
+                                        <div key={i} className="ml-2 border-l-2 border-amber-400 pl-2 text-amber-800 bg-amber-50 rounded px-2 py-1 not-italic">
+                                          [待确认] {log.content_redacted}
+                                        </div>
+                                      );
+                                    }
+                                    if (log.channel === "user_input") {
+                                      return (
+                                        <div key={i} className="ml-2 border-l-2 border-blue-400 pl-2 text-blue-800 bg-blue-50 rounded px-2 py-1 not-italic">
+                                          [用户指导] {log.content_redacted}
                                         </div>
                                       );
                                     }

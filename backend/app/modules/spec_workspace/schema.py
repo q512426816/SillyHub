@@ -56,3 +56,17 @@ class SyncStatusUpdate(BaseModel):
     """Body for the ``update_sync_status`` endpoint."""
 
     sync_status: SyncStatusLiteral
+
+
+class SpecBootstrapRunStartResponse(BaseModel):
+    """Response DTO for the async spec-bootstrap launch.
+
+    Returned immediately after creating the AgentRun; the actual execution
+    happens in a background task (task-02).
+    """
+
+    agent_run_id: uuid.UUID
+    stream_url: str
+    status: Literal["pending"]
+    spec_root: str
+    message: str

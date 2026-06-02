@@ -24,11 +24,18 @@ export interface AgentRun {
   created_at: string;
 }
 
+export type AgentRunLogChannel =
+  | "stdout"
+  | "stderr"
+  | "tool_call"
+  | "pending_input"
+  | "user_input";
+
 export interface AgentRunLogEntry {
   id: string;
   run_id: string;
   timestamp: string;
-  channel: "stdout" | "stderr" | "tool_call";
+  channel: AgentRunLogChannel;
   content_redacted: string;
 }
 
@@ -63,7 +70,7 @@ export function getAgentRunLogs(workspaceId: string, runId: string) {
 }
 
 export interface StreamLogEvent {
-  channel: "stdout" | "stderr";
+  channel: AgentRunLogChannel;
   content: string;
   timestamp: string;
 }
@@ -71,9 +78,9 @@ export interface StreamLogEvent {
 export function streamAgentRunLogs(
   workspaceId: string,
   runId: string,
-  onMessage: (event: StreamLogEvent) => void,
+  onMessage: (_event: StreamLogEvent) => void,
   onDone: () => void,
-  onError?: (error: Error) => void,
+  onError?: (_error: Error) => void,
 ): EventSource {
   const base = getApiBaseUrl();
   const { accessToken } = useSession.getState();
@@ -102,4 +109,26 @@ export function streamAgentRunLogs(
   };
 
   return es;
+}
+
+// ── Agent Run User Input ──
+
+export interface AgentRunInputRequest {
+  content: string;
+}
+
+export interface AgentRunInputResponse {
+  run_id: string;
+  accepted: boolean;
+}
+
+export function submitAgentRunInput(
+  workspaceId: string,
+  runId: string,
+  input: AgentRunInputRequest,
+): Promise<AgentRunInputResponse> {
+  return apiFetch<AgentRunInputResponse>(
+    `/api/workspaces/${workspaceId}/agent/runs/${runId}/input`,
+    { method: "POST", json: input },
+  );
 }

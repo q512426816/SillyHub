@@ -45,6 +45,10 @@ AGENT_TYPE_ALIASES: dict[str, str] = {
 }
 
 
+USER_INPUT_CHANNEL = "user_input"
+MAX_USER_INPUT_CHARS = 4000
+
+
 class AgentRunError(AppError):
     code = "AGENT_RUN_ERROR"
     http_status = 400
@@ -483,6 +487,108 @@ class AgentService:
             .order_by(col(AgentRunLog.timestamp))
         )
         return list((await self._session.execute(stmt)).scalars().all())
+
+    # ------------------------------------------------------------------
+    # User input submission
+    # ------------------------------------------------------------------
+
+    async def submit_run_input(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        run_id: uuid.UUID,
+        content: str,
+    ) -> AgentRunLog:
+        """Record user guidance input for an AgentRun and push via SSE.
+
+        Validates the run belongs to the workspace and is in an active
+        status, persists a ``AgentRunLog(channel="user_input")``, then
+        publishes the event to the ``agent_run:{run_id}`` Redis Pub/Sub
+        channel so connected SSE clients receive it in real-time.
+
+        Args:
+            workspace_id: Workspace that must be associated with the run.
+            run_id: The AgentRun to attach the input to.
+            content: User guidance text (will be redacted before storage).
+
+        Returns:
+            The persisted ``AgentRunLog`` instance.
+
+        Raises:
+            AgentRunError: Content is blank or exceeds length limit.
+            AgentRunNotFound: Run does not exist or is not linked to workspace.
+            AgentRunNotRunning: Run is in a terminal status.
+        """
+        # -- 1. Validate content -------------------------------------------------
+        stripped = content.strip()
+        if not stripped:
+            raise AgentRunError(
+                "Input content must not be empty.",
+                details={"run_id": str(run_id)},
+            )
+        if len(stripped) > MAX_USER_INPUT_CHARS:
+            raise AgentRunError(
+                f"Input content exceeds {MAX_USER_INPUT_CHARS} characters.",
+                details={"run_id": str(run_id), "length": len(stripped)},
+            )
+
+        # -- 2. Validate run exists and belongs to workspace ----------------------
+        arw_stmt = select(AgentRunWorkspace).where(
+            col(AgentRunWorkspace.agent_run_id) == run_id,
+            col(AgentRunWorkspace.workspace_id) == workspace_id,
+        )
+        arw = (await self._session.execute(arw_stmt)).scalars().first()
+        if arw is None:
+            raise AgentRunNotFound(
+                f"Run '{run_id}' not found.",
+                details={"run_id": str(run_id)},
+            )
+
+        # -- 3. Validate run status -----------------------------------------------
+        run = await self._session.get(AgentRun, run_id)
+        if run is None:
+            raise AgentRunNotFound(
+                f"Run '{run_id}' not found.",
+                details={"run_id": str(run_id)},
+            )
+        if run.status not in ("pending", "running"):
+            raise AgentRunNotRunning(
+                f"Run '{run_id}' is not running (status={run.status}).",
+                details={"run_id": str(run_id), "status": run.status},
+            )
+
+        # -- 4. Persist log -------------------------------------------------------
+        redacted = redact_agent_output(stripped)
+        log_entry = AgentRunLog(
+            id=uuid.uuid4(),
+            run_id=run.id,
+            channel=USER_INPUT_CHANNEL,
+            content_redacted=redacted,
+            timestamp=datetime.utcnow(),
+        )
+        self._session.add(log_entry)
+        await self._session.commit()
+        await self._session.refresh(log_entry)
+
+        # -- 5. Publish to Redis (fire-and-forget, best-effort) -------------------
+        try:
+            redis = get_redis()
+            payload = json.dumps(
+                {
+                    "channel": USER_INPUT_CHANNEL,
+                    "content": redacted,
+                    "timestamp": log_entry.timestamp.isoformat(),
+                },
+                ensure_ascii=False,
+            )
+            await redis.publish(f"agent_run:{run_id}", payload)
+        except Exception:
+            log.warning(
+                "agent_run_input_publish_failed",
+                run_id=str(run_id),
+            )
+
+        return log_entry
 
     # ------------------------------------------------------------------
     # SSE streaming

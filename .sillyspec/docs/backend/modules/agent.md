@@ -5,8 +5,8 @@ created_at: 2026-05-30 20:20:00
 
 # agent
 
-> 最后更新：2026-05-31
-> 最近变更：2026-05-30-execution-coordinator
+> 最后更新：2026-06-02
+> 最近变更：2026-06-02-spec-bootstrap-agent-stream-interaction
 > 模块路径：`app/modules/agent/**`
 
 ## 职责
@@ -40,6 +40,7 @@ AgentService（编排层）
    - **执行恢复**：`resume_token`（一次性）恢复 failed/killed 的 AgentRun
    - **进度快照**：`checkpoint_data` JSONB + `checkpoint_version` 递增
    - **审批门**：`approval_token`（一次性）管理高风险操作审批
+7. **用户指导输入**：`AgentService.submit_run_input()` 接受用户对 `pending_input` 事件的回复，写入 `AgentRunLog(channel="user_input")` 并通过 Redis Pub/Sub 推送给订阅该 run 的 SSE 客户端。新增通道约定：`pending_input`（Agent 请求用户确认或指导）和 `user_input`（用户提交的指导文本）。
 
 ## 对外接口
 
@@ -56,6 +57,7 @@ AgentService（编排层）
 | `POST /workspaces/{ws}/agent/runs/{id}/approve` | `approve()` | 审批 pending_approval 的 run（需 approval_token） | 前端 |
 | `GET /workspaces/{ws}/agent/runs/{id}/checkpoint` | `load_checkpoint()` | 获取最新 checkpoint | 前端 |
 | `POST /workspaces/{ws}/agent/runs/{id}/checkpoint` | `save_checkpoint()` | 保存 checkpoint（version 递增） | 前端 |
+| `POST /workspaces/{ws}/agent/runs/{id}/input` | `submit_run_input()` | 向 AgentRun 提交用户指导文本（pending_input 通道回复） | 前端 |
 
 ## 关键数据流
 
@@ -91,6 +93,22 @@ AgentService（编排层）
   → AgentRun.status = "pending", token 置 NULL
 ```
 
+```
+前端 → POST /runs/{id}/input → AgentService.submit_run_input()
+  → 校验 run 属于 workspace 且用户具备 WORKSPACE_WRITE
+  → 创建 AgentRunLog(channel="user_input", content_redacted=content)
+  → Redis Pub/Sub publish → SSE 推送到所有订阅该 run 的客户端
+  ← { run_id, accepted: true }
+```
+
+```
+Agent 执行中 → ClaudeCodeAdapter 输出 pending_input
+  → AgentRunLog(channel="pending_input", content_redacted=问题文本)
+  → Redis Pub/Sub publish → SSE 推送
+  → 前端展示交互输入面板
+  → 用户提交指导 → POST /input → 如上流程
+```
+
 ## 设计决策
 
 | 决策 | 理由 | 来源 |
@@ -105,6 +123,7 @@ AgentService（编排层）
 | Checkpoint 存 JSONB 列 | 与 AgentRun 1:1 关系，数据量小，不需要独立表 | 2026-05-30-execution-coordinator |
 | Fingerprint 用 SHA-256 | 碰撞概率可忽略、计算快速、输出固定 64 字符 | 2026-05-30-execution-coordinator |
 | Token 一次性消费 | resume_token/approval_token 使用后置 NULL | 2026-05-30-execution-coordinator |
+| pending_input/user_input 通道约定 | 用户指导作为结构化日志事件，复用 AgentRunLog + SSE 推送，不新增表或 schema enum | 2026-06-02-spec-bootstrap-agent-stream-interaction |
 
 ## 依赖关系
 
@@ -137,3 +156,4 @@ AgentService（编排层）
 |------|------|------|
 | 2026-05-31 | 2026-05-30-execution-coordinator | ExecutionCoordinatorService + AgentRun 9 字段 + 4 新端点 + 25 测试 |
 | 2026-05-30 | 2026-05-30-agent-adapter | Kill API + Diff Collector + 进程注册表 + 40 新增测试 |
+| 2026-06-02 | 2026-06-02-spec-bootstrap-agent-stream-interaction | 新增 `submit_run_input()` 服务方法、`POST /runs/{id}/input` 端点、`pending_input`/`user_input` 通道约定、SSE 用户指导推送 |

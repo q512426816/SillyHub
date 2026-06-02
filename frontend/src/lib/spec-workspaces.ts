@@ -2,6 +2,7 @@
  * Spec Workspace API client. Mirrors backend spec_workspace endpoints.
  */
 import { apiFetch } from "@/lib/api";
+import type { AgentRunStatus } from "@/lib/agent";
 
 export type SpecStrategy = "platform-managed" | "repo-mirrored" | "repo-native";
 export type SyncStatus = "clean" | "dirty" | "conflicted";
@@ -46,11 +47,11 @@ export async function syncSpecWorkspace(
 }
 
 export interface BootstrapResult {
+  agent_run_id: string;
+  stream_url: string;
+  status: AgentRunStatus;
   spec_root: string;
-  validation_passed: boolean;
-  errors: { path: string; message: string; category: string }[];
-  warnings: { path: string; message: string; category: string }[];
-  sync_status: string;
+  message: string;
 }
 
 export async function bootstrapSpecWorkspace(

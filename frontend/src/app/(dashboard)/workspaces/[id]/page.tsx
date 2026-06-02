@@ -1,11 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
+import {
+  streamAgentRunLogs,
+  submitAgentRunInput,
+  type AgentRunLogEntry,
+  type AgentRunStatus,
+  type StreamLogEvent,
+} from "@/lib/agent";
 import { listComponents } from "@/lib/components";
 import { listChanges } from "@/lib/changes";
 import {
@@ -21,9 +28,17 @@ import {
   type Workspace,
 } from "@/lib/workspaces";
 
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
+
 interface Props {
   params: { id: string };
 }
+
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                            */
+/* ------------------------------------------------------------------ */
 
 const SYNC_STATUS_VARIANT: Record<string, "success" | "warning" | "destructive"> = {
   clean: "success",
@@ -43,6 +58,41 @@ const STRATEGY_LABEL: Record<string, string> = {
   "repo-native": "仓库原生",
 };
 
+function channelLabel(channel: string): string {
+  switch (channel) {
+    case "stdout": return "INFO";
+    case "stderr": return "WARN";
+    case "tool_call": return "TOOL";
+    case "pending_input": return "INPUT";
+    case "user_input": return "USER";
+    default: return channel.toUpperCase();
+  }
+}
+
+function channelTagCls(channel: string): string {
+  switch (channel) {
+    case "stderr": return "text-amber-600";
+    case "tool_call": return "text-blue-600";
+    case "pending_input": return "text-amber-700";
+    case "user_input": return "text-emerald-700";
+    default: return "text-muted-foreground";
+  }
+}
+
+function statusToVariant(status: AgentRunStatus | null): "success" | "warning" | "destructive" | "outline" {
+  switch (status) {
+    case "completed": return "success";
+    case "running": return "warning";
+    case "failed":
+    case "killed": return "destructive";
+    default: return "outline";
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Component                                                          */
+/* ------------------------------------------------------------------ */
+
 export default function WorkspaceDetailPage({ params }: Props) {
   const workspaceId = params.id;
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
@@ -56,6 +106,17 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const [importing, setImporting] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
+
+  // Bootstrap SSE state
+  const [activeBootstrapRunId, setActiveBootstrapRunId] = useState<string | null>(null);
+  const [bootstrapLogs, setBootstrapLogs] = useState<AgentRunLogEntry[]>([]);
+  const [bootstrapStatus, setBootstrapStatus] = useState<AgentRunStatus | null>(null);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [pendingInputPrompt, setPendingInputPrompt] = useState<string | null>(null);
+  const [userInputText, setUserInputText] = useState("");
+  const [submittingInput, setSubmittingInput] = useState(false);
+
+  const bootstrapEsRef = useRef<EventSource | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -84,8 +145,130 @@ export default function WorkspaceDetailPage({ params }: Props) {
 
   useEffect(() => {
     void load();
+    return () => {
+      // Cleanup: close EventSource on unmount without modifying state
+      bootstrapEsRef.current?.close();
+      bootstrapEsRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId]);
+
+  /* ---- SSE helpers ---- */
+
+  function closeBootstrapStream() {
+    bootstrapEsRef.current?.close();
+    bootstrapEsRef.current = null;
+  }
+
+  function closeBootstrapPanel() {
+    closeBootstrapStream();
+    setActiveBootstrapRunId(null);
+    setBootstrapLogs([]);
+    setBootstrapStatus(null);
+    setBootstrapError(null);
+    setPendingInputPrompt(null);
+  }
+
+  /* ---- Bootstrap handler ---- */
+
+  async function handleBootstrap() {
+    setBootstrapping(true);
+    setPageError(null);
+    // Close old connection and reset state
+    closeBootstrapStream();
+    setActiveBootstrapRunId(null);
+    setBootstrapLogs([]);
+    setBootstrapStatus(null);
+    setBootstrapError(null);
+    setPendingInputPrompt(null);
+
+    try {
+      const result = await bootstrapSpecWorkspace(workspaceId);
+      setActiveBootstrapRunId(result.agent_run_id);
+      setBootstrapStatus(result.status);
+
+      // Dedup key helper
+      const logKey = (log: { timestamp: string; channel: string; content: string }) =>
+        `${result.agent_run_id}|${log.timestamp}|${log.channel}|${log.content}`;
+
+      // Connect SSE immediately
+      const es = streamAgentRunLogs(
+        workspaceId,
+        result.agent_run_id,
+        (event: StreamLogEvent) => {
+          const incomingKey = logKey(event);
+          setBootstrapLogs((prev) => {
+            // Dedup: skip if same key already exists
+            if (prev.some((l) => logKey({ timestamp: l.timestamp, channel: l.channel, content: l.content_redacted }) === incomingKey)) {
+              return prev;
+            }
+            return [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                run_id: result.agent_run_id,
+                timestamp: event.timestamp,
+                channel: event.channel,
+                content_redacted: event.content,
+              },
+            ];
+          });
+          // Handle pending_input channel
+          if (event.channel === "pending_input") {
+            setPendingInputPrompt(event.content || "");
+          }
+        },
+        () => {
+          // onDone: run reached terminal state
+          setBootstrapStatus("completed");
+          closeBootstrapStream();
+          void load(); // Refresh SpecWorkspace status
+        },
+        (err: Error) => {
+          // onError
+          setBootstrapError(err.message);
+          closeBootstrapStream();
+        },
+      );
+      bootstrapEsRef.current = es;
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "初始化失败");
+    } finally {
+      setBootstrapping(false);
+    }
+  }
+
+  /* ---- User input submission ---- */
+
+  async function handleSubmitInput() {
+    if (!activeBootstrapRunId || !userInputText.trim()) return;
+    setSubmittingInput(true);
+    try {
+      await submitAgentRunInput(workspaceId, activeBootstrapRunId, {
+        content: userInputText.trim(),
+      });
+      // Append user_input log to panel
+      setBootstrapLogs((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          run_id: activeBootstrapRunId,
+          timestamp: new Date().toISOString(),
+          channel: "user_input" as const,
+          content_redacted: userInputText.trim(),
+        },
+      ]);
+      setUserInputText("");
+      setPendingInputPrompt(null);
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "提交输入失败");
+      // Keep input text and prompt visible for retry
+    } finally {
+      setSubmittingInput(false);
+    }
+  }
+
+  /* ---- Other handlers ---- */
 
   const handleSync = async () => {
     setSyncing(true);
@@ -110,19 +293,6 @@ export default function WorkspaceDetailPage({ params }: Props) {
       setPageError(err instanceof ApiError ? err.message : "导入失败");
     } finally {
       setImporting(false);
-    }
-  };
-
-  const handleBootstrap = async () => {
-    setBootstrapping(true);
-    setPageError(null);
-    try {
-      await bootstrapSpecWorkspace(workspaceId);
-      await load();
-    } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "初始化失败");
-    } finally {
-      setBootstrapping(false);
     }
   };
 
@@ -220,9 +390,13 @@ export default function WorkspaceDetailPage({ params }: Props) {
                   size="sm"
                   variant="outline"
                   onClick={handleBootstrap}
-                  disabled={bootstrapping || syncing || importing}
+                  disabled={bootstrapping || !!activeBootstrapRunId || syncing || importing}
                 >
-                  {bootstrapping ? "初始化中..." : "Bootstrap"}
+                  {bootstrapping
+                    ? "初始化中..."
+                    : activeBootstrapRunId
+                      ? "Bootstrap 运行中..."
+                      : "Bootstrap"}
                 </Button>
               )}
               <Button
@@ -248,7 +422,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
         </div>
 
         {/* Bootstrap guidance for empty platform-managed spec roots */}
-        {specWs && specWs.strategy === "platform-managed" && !bootstrapping && (
+        {specWs && specWs.strategy === "platform-managed" && !bootstrapping && !activeBootstrapRunId && (
           <div className="mx-4 mt-3 mb-1 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
             <p className="font-medium">此工作区使用平台托管策略。</p>
             <p className="mt-0.5 text-blue-600">
@@ -256,6 +430,86 @@ export default function WorkspaceDetailPage({ params }: Props) {
               <strong> Bootstrap </strong>按钮使用 SillySpec CLI 初始化规范空间，或点击
               <strong> Import </strong>从代码仓库导入已有的 .sillyspec。
             </p>
+          </div>
+        )}
+
+        {/* Bootstrap SSE log panel */}
+        {activeBootstrapRunId && (
+          <div className="mx-4 mt-3 rounded border bg-muted/40">
+            {/* Panel title bar */}
+            <div className="flex items-center justify-between border-b px-3 py-1.5">
+              <div className="flex items-center gap-2">
+                <code className="text-[11px] font-mono">
+                  Bootstrap Run: {activeBootstrapRunId.length > 8 ? activeBootstrapRunId.slice(0, 8) + "..." : activeBootstrapRunId}
+                </code>
+                <Badge variant={statusToVariant(bootstrapStatus)}>
+                  {bootstrapStatus ?? "connecting"}
+                </Badge>
+              </div>
+              <Button size="sm" variant="ghost" onClick={closeBootstrapPanel}>
+                关闭
+              </Button>
+            </div>
+
+            {/* Log area */}
+            <div className="max-h-[300px] overflow-auto">
+              {bootstrapLogs.length === 0 ? (
+                <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+                  等待日志输出...
+                </p>
+              ) : (
+                <div className="divide-y">
+                  {bootstrapLogs.map((log) => (
+                    <div key={log.id} className="flex items-start gap-2 px-3 py-1.5">
+                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                        {new Date(log.timestamp).toLocaleTimeString()}
+                      </span>
+                      <span className={`shrink-0 font-mono text-[11px] font-medium ${channelTagCls(log.channel)}`}>
+                        [{channelLabel(log.channel)}]
+                      </span>
+                      <span className="flex-1 break-all text-[11px]">
+                        {log.content_redacted}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* User input area (shown when pending_input event received) */}
+            {pendingInputPrompt !== null && (
+              <div className="border-t px-3 py-2">
+                <p className="text-xs text-amber-700 font-medium mb-1">
+                  Agent 请求指导{pendingInputPrompt ? `: ${pendingInputPrompt}` : ""}
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    className="flex-1 rounded border bg-background px-2 py-1 text-xs"
+                    placeholder="输入指导..."
+                    value={userInputText}
+                    onChange={(e) => setUserInputText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !submittingInput) handleSubmitInput();
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    disabled={!userInputText.trim() || submittingInput}
+                    onClick={handleSubmitInput}
+                  >
+                    {submittingInput ? "提交中..." : "提交"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Error display */}
+            {bootstrapError && (
+              <div className="border-t px-3 py-2 text-xs text-destructive">
+                {bootstrapError}
+              </div>
+            )}
           </div>
         )}
 

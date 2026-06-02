@@ -1,9 +1,9 @@
 {
-  "changeName": "fix-sse-auth",
-  "branch": "sillyspec/fix-sse-auth",
+  "changeName": "2026-06-02-spec-bootstrap-agent-stream-interaction",
+  "branch": "sillyspec/2026-06-02-spec-bootstrap-agent-stream-interaction",
   "baseBranch": "main",
-  "baseHash": "7bb46510975da4539c08275000748a835aaa728d",
-  "actualBaseHash": "7bb46510975da4539c08275000748a835aaa728d",
-  "createdAt": "2026-06-01T06:14:20.681Z",
-  "worktreePath": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\.runtime\\worktrees\\fix-sse-auth"
+  "baseHash": "6a6e1da5f1455808ff7433e2c5dcc370928bbfae",
+  "actualBaseHash": "6a6e1da5f1455808ff7433e2c5dcc370928bbfae",
+  "createdAt": "2026-06-02T02:21:16.615Z",
+  "worktreePath": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\.runtime\\worktrees\\2026-06-02-spec-bootstrap-agent-stream-interaction"
 }
