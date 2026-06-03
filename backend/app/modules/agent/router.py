@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,8 +24,6 @@ from app.modules.agent.model import AgentRun
 from app.modules.agent.schema import (
     AgentKillResponse,
     AgentRunCreate,
-    AgentRunInputRequest,
-    AgentRunInputResponse,
     AgentRunLogEntry,
     AgentRunResponse,
 )
@@ -114,27 +112,6 @@ async def kill_agent_run(
     return AgentKillResponse(id=run.id, status=run.status)
 
 
-@router.post(
-    "/workspaces/{workspace_id}/agent/runs/{run_id}/input",
-    response_model=AgentRunInputResponse,
-)
-async def submit_agent_run_input(
-    workspace_id: uuid.UUID,
-    run_id: uuid.UUID,
-    data: AgentRunInputRequest,
-    session: SessionDep,
-    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
-) -> AgentRunInputResponse:
-    """Submit user guidance input to an agent run."""
-    svc = AgentService(session)
-    await svc.submit_run_input(
-        workspace_id=workspace_id,
-        run_id=run_id,
-        content=data.content,
-    )
-    return AgentRunInputResponse(run_id=run_id, accepted=True)
-
-
 @router.get(
     "/workspaces/{workspace_id}/agent/runs/{run_id}/logs",
     response_model=list[AgentRunLogEntry],
@@ -156,6 +133,13 @@ async def get_agent_run_logs(
     return [AgentRunLogEntry.model_validate(e) for e in logs]
 
 
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+
 @router.get(
     "/workspaces/{workspace_id}/agent/runs/{run_id}/stream",
 )
@@ -164,7 +148,6 @@ async def stream_agent_run_logs(
     run_id: uuid.UUID,
     session: SessionDep,
     user: Annotated[User, Depends(require_permission(Permission.TASK_READ))],
-    after: str | None = Query(None, description="Resume from log id (UUID)"),
 ) -> StreamingResponse:
     """SSE endpoint — stream real-time logs for a running agent run."""
     svc = AgentService(session)
@@ -174,18 +157,16 @@ async def stream_agent_run_logs(
             f"Agent run '{run_id}' not found.",
             details={"run_id": str(run_id)},
         )
+    if run.status not in ("pending", "running"):
+        return StreamingResponse(
+            iter(["event: done\ndata: {}\n\n"]),
+            media_type="text/event-stream",
+            headers=_SSE_HEADERS,
+        )
     return StreamingResponse(
-        svc.stream_run_logs(
-            run_id,
-            follow=run.status in ("pending", "running"),
-            after=after,
-        ),
+        svc.stream_run_logs(run_id, session=session),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers=_SSE_HEADERS,
     )
 
 
