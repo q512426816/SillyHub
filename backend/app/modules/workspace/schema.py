@@ -13,6 +13,14 @@ WorkspaceStatusLiteral = Literal["active", "archived", "deleted"]
 
 _SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$")
 
+# Unicode bidirectional / invisible characters commonly copied from Windows
+# Explorer address bar (U+200E-200F, U+202A-202E, U+2066-2069, U+FEFF).
+_INVISIBLE_RE = re.compile(r"[‎‏‪‫‬‭‮⁦⁧⁨⁩﻿]")
+
+
+def _sanitize_path(v: str) -> str:
+    return _INVISIBLE_RE.sub("", v).strip()
+
 
 class WorkspaceStructureDTO(BaseModel):
     has_projects_dir: bool
@@ -28,6 +36,11 @@ class WorkspaceStructureDTO(BaseModel):
 class ScanRequest(BaseModel):
     root_path: str = Field(min_length=1, max_length=4096)
 
+    @field_validator("root_path", mode="before")
+    @classmethod
+    def _sanitize_root_path(cls, v: str) -> str:
+        return _sanitize_path(v)
+
 
 class ScanResponse(BaseModel):
     root_path: str
@@ -41,6 +54,11 @@ class ScanGenerateRequest(BaseModel):
     """Request body for ``POST /api/workspaces/scan-generate``."""
 
     root_path: str = Field(min_length=1, max_length=4096)
+
+    @field_validator("root_path", mode="before")
+    @classmethod
+    def _sanitize_root_path(cls, v: str) -> str:
+        return _sanitize_path(v)
 
 
 class ScanGenerateResponse(BaseModel):
@@ -70,6 +88,11 @@ class WorkspaceCreate(BaseModel):
     build_command: str | None = Field(default=None)
     test_command: str | None = Field(default=None)
     source_yaml_path: str | None = Field(default=None)
+
+    @field_validator("root_path", mode="before")
+    @classmethod
+    def _sanitize_root_path(cls, v: str) -> str:
+        return _sanitize_path(v)
 
     @field_validator("slug")
     @classmethod

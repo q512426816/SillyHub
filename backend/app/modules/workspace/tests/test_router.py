@@ -48,6 +48,34 @@ async def test_scan_endpoint_path_not_found(
     assert resp.json()["code"] == "HTTP_400_WORKSPACE_PATH_NOT_FOUND"
 
 
+async def test_scan_strips_invisible_unicode(
+    client: AsyncClient, tmp_path: Path, auth_headers: dict[str, str]
+) -> None:
+    """Path with U+202A (Left-to-Right Embedding) prefix should be stripped."""
+    fixture = Path(__file__).parent / "fixtures" / "minimal-sillyspec"
+    dirty_path = "‪" + str(fixture)
+    resp = await client.post(
+        "/api/workspaces/scan",
+        json={"root_path": dirty_path},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+
+
+async def test_scan_strips_trailing_whitespace(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    """Trailing spaces/newlines in root_path should be stripped."""
+    fixture = Path(__file__).parent / "fixtures" / "minimal-sillyspec"
+    dirty_path = str(fixture) + "  \n"
+    resp = await client.post(
+        "/api/workspaces/scan",
+        json={"root_path": dirty_path},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+
+
 async def test_scan_endpoint_returns_no_sillyspec_for_plain_dir(
     client: AsyncClient, tmp_path: Path, auth_headers: dict[str, str]
 ) -> None:
