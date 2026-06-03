@@ -1,3 +1,25 @@
 {
-
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/pre-push-ci-check.sh",
+            "if": "Bash(git push*)",
+            "timeout": 300,
+            "statusMessage": "Running local CI checks before push..."
+          },
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/pre-push-ci-check.sh",
+            "if": "Bash(git commit*)",
+            "timeout": 300,
+            "statusMessage": "Running local CI checks before commit..."
+          }
+        ]
+      }
+    ]
+  }
 }

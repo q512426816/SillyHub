@@ -11,13 +11,17 @@ input=$(cat)
 # Extract command field using node (jq may not be available)
 cmd=$(node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));process.stdout.write(d.tool_input?.command||'')" <<< "$input")
 
-# Only trigger on git push commands
-if ! echo "$cmd" | grep -qE 'git\s+push'; then
+# Only trigger on git push or git commit commands
+if echo "$cmd" | grep -qE 'git\s+push'; then
+  action="push"
+elif echo "$cmd" | grep -qE 'git\s+commit'; then
+  action="commit"
+else
   echo '{"continue": true}'
   exit 0
 fi
 
-echo "[pre-push-ci] 检测到 git push，开始本地 CI 检查..." >&2
+echo "[pre-push-ci] 检测到 git ${action}，开始本地 CI 检查..." >&2
 
 # Determine which subprojects changed
 changed=$(git diff --name-only HEAD~1 2>/dev/null || git diff --name-only --cached 2>/dev/null || true)
@@ -71,11 +75,11 @@ fi
 
 if [ ${#errors[@]} -gt 0 ]; then
   err_list=$(printf '❌ %s\n' "${errors[@]}")
-  msg="本地 CI 检查未通过，已阻止 git push：\n${err_list}请修复后再推送。"
+  msg="本地 CI 检查未通过，已阻止 git ${action}：\n${err_list}请修复后再操作。"
   # Output JSON with stopReason
   node -e "const m=process.argv[1];process.stdout.write(JSON.stringify({continue:false,stopReason:m}))" "$msg"
   exit 0
 fi
 
-echo "[pre-push-ci] 全部通过 ✅ 允许推送" >&2
+echo "[pre-push-ci] 全部通过 ✅ 允许 ${action}" >&2
 echo '{"continue": true}'
