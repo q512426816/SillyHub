@@ -5,8 +5,8 @@ created_at: 2026-05-31T23:30:00
 
 # change
 
-> 最后更新：2026-05-31
-> 最近变更：feat(change): stage-driven agent dispatch — auto-dispatch Claude Code on transition
+> 最后更新：2026-06-03
+> 最近变更：fix(change) 文档解析对齐 SillySpec 文件生命周期 — MASTER.md 改可选、parser 不读 frontmatter
 > 模块路径：`app/modules/change/**`
 
 ## 职责
@@ -88,7 +88,7 @@ POST /changes/{id}/feedback → ChangeService.submit_feedback()
 | 状态机用字典而非 FSM 库 | 10 阶段固定、无动态扩展需求 | model.py `TRANSITIONS` |
 | 文档内容不存 DB | 按需读文件，避免 DB 膨胀 | service.py `get_document_content` |
 | 调度用独立 session | 避免 transition 的 session 未提交时并发操作 | service.py `transition_with_dispatch` |
-| Reparse 不覆盖 status | DB 是状态真相源，文件 frontmatter 仅用于新建行 | service.py `_apply_parsed` 注释 |
+| Reparse 不覆盖 DB 元数据 | DB 是 status/change_type/affected_components 真相源；parser 不读 frontmatter，title 取自 proposal.md 首个 # 标题，fallback change_key | service.py `_apply_parsed`、parser.py `_extract_title` |
 | 反馈类别 A/B/C/D 映射回退目标 | 简化分类，前端无需选择目标阶段 | service.py `submit_feedback` |
 | stages 字段存 JSONB | 灵活存储 transitions 日志、dispatch 信息等 | model.py `stages` |
 
@@ -111,6 +111,8 @@ POST /changes/{id}/feedback → ChangeService.submit_feedback()
 
 - `list_()` 查询可能返回重复行（主 workspace FK + M:N 重叠），需内存去重
 - 归档门禁检查中"文档完整"依赖 `ChangeDocument.status`，reparse 时需同步更新
+- MASTER.md 是可选文件（仅大需求拆分时生成）：parser 缺失时不报警、status 默认 draft；解析器只做文件存在性检查 + 标题提取，不再解析任何 frontmatter 元数据
+- 标准文档类型含 `module_impact`（module-impact.md）；前端 doc_type 用 `verify_result`（对应 verify-result.md），勿写成 `verification`
 - Agent 调度是 best-effort：失败不回滚已提交的状态流转
 - 文档读取有 1MB 大小限制（`MAX_CONTENT_BYTES`），超大文件截断返回
 - 路径遍历防护：`resolved` 必须以 `root.resolve()` 为前缀
@@ -120,3 +122,4 @@ POST /changes/{id}/feedback → ChangeService.submit_feedback()
 | 日期 | 变更 | 摘要 |
 |------|------|------|
 | 2026-05-31 | 初始归档 | 从代码逆向生成模块文档 |
+| 2026-06-03 | 文档解析对齐生命周期 | MASTER.md 改可选、parser 移除 frontmatter 解析、title 取自 proposal.md、标准文档新增 module_impact |

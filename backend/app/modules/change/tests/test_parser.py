@@ -43,27 +43,59 @@ class TestParseWorkspace:
         assert by_key["2026-05-21-demo-archived"].location == "archive"
         assert by_key["2026-05-25-conflict-status"].location == "active"
 
-    def test_master_frontmatter_parsed(self, parser: ChangeParser, silly_root: Path) -> None:
+    def test_metadata_not_read_from_frontmatter(
+        self, parser: ChangeParser, silly_root: Path
+    ) -> None:
+        # Parser no longer reads MASTER frontmatter. Title comes from proposal.md's
+        # first heading; change_type/owner/affected_components are DB-owned and
+        # left empty by the parser (file-lifecycle.md).
         result = parser.parse_workspace(silly_root)
         demo = next(c for c in result.changes if c.change_key == "2026-05-25-demo-feature")
-        assert demo.title == "Demo Feature Implementation"
-        assert demo.status == "in_progress"
-        assert demo.change_type == "feature"
-        assert demo.owner == "admin"
-        assert demo.affected_components == ["platform-api", "platform-web"]
+        assert demo.title == "Proposal"  # from proposal.md "# Proposal"
+        assert demo.status == "draft"
+        assert demo.change_type is None
+        assert demo.owner is None
+        assert demo.affected_components == []
 
     def test_missing_master_still_creates_change(
         self, parser: ChangeParser, silly_root: Path
     ) -> None:
-        # Add a directory without MASTER.md (v4 layout: changes/<name>/)
+        # MASTER.md is optional (file-lifecycle.md §9): a change without it must
+        # still parse, default to status "draft", and emit no MASTER_MISSING warning.
         no_master_dir = silly_root / ".sillyspec" / "changes" / "no-master"
         no_master_dir.mkdir(parents=True, exist_ok=True)
         result = parser.parse_workspace(silly_root)
         no_master = next(c for c in result.changes if c.change_key == "no-master")
-        assert no_master.status == "unknown"
+        assert no_master.status == "draft"
         assert no_master.title == "no-master"
         warning_codes = [w.code for w in no_master.warnings]
-        assert "MASTER_MISSING" in warning_codes
+        assert "MASTER_MISSING" not in warning_codes
+
+    def test_title_extracted_from_proposal(
+        self, parser: ChangeParser, silly_root: Path
+    ) -> None:
+        # Title comes from the first '# ' heading in proposal.md, not frontmatter.
+        change_dir = silly_root / ".sillyspec" / "changes" / "title-from-proposal"
+        change_dir.mkdir(parents=True, exist_ok=True)
+        (change_dir / "proposal.md").write_text(
+            "author: qinyi\n\n# 用户登录超时修复\n\n## 动机\n...",
+            encoding="utf-8",
+        )
+        result = parser.parse_workspace(silly_root)
+        change = next(c for c in result.changes if c.change_key == "title-from-proposal")
+        assert change.title == "用户登录超时修复"
+
+    def test_module_impact_is_standard_doc(
+        self, parser: ChangeParser, silly_root: Path
+    ) -> None:
+        change_dir = silly_root / ".sillyspec" / "changes" / "with-impact"
+        change_dir.mkdir(parents=True, exist_ok=True)
+        (change_dir / "module-impact.md").write_text("# 模块影响分析", encoding="utf-8")
+        result = parser.parse_workspace(silly_root)
+        change = next(c for c in result.changes if c.change_key == "with-impact")
+        impact = next(d for d in change.docs if d.doc_type == "module_impact")
+        assert impact.exists is True
+        assert impact.filename == "module-impact.md"
 
     def test_standard_docs_detected(self, parser: ChangeParser, silly_root: Path) -> None:
         result = parser.parse_workspace(silly_root)

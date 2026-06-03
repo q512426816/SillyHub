@@ -594,33 +594,6 @@ class WorkspaceService:
 
         return parse_result, stats, final_children, final_rels
 
-    async def activate(self, workspace_id: uuid.UUID) -> Workspace:
-        """Activate a pending workspace: set status='active', scan for .sillyspec,
-        create SpecWorkspace + child projects."""
-        workspace = await self._session.get(Workspace, workspace_id)
-        if workspace is None or workspace.deleted_at is not None:
-            raise WorkspaceNotFound(
-                "Workspace not found.",
-                details={"workspace_id": str(workspace_id)},
-            )
-        if workspace.status != "pending":
-            return workspace
-
-        workspace.status = "active"
-        workspace.updated_at = datetime.utcnow()
-        workspace.last_scanned_at = datetime.utcnow()
-        await self._session.flush()
-
-        # Scan for .sillyspec and create SpecWorkspace + child projects
-        scan = self.scan(workspace.root_path)
-        if scan.is_sillyspec:
-            await self._ensure_spec_workspace(workspace.id, scan.sillyspec_path)
-
-        await self._session.commit()
-        await self._session.refresh(workspace)
-        log.info("workspace.activated", workspace_id=str(workspace.id))
-        return workspace
-
     @staticmethod
     def _build_child_root_path(parent_root: str, parsed: ParsedWorkspace) -> str:
         """Construct the root_path for a child Workspace.

@@ -1,138 +1,718 @@
 ---
 author: qinyi
-created_at: 2026-05-29T17:44:00
+created_at: 2026-06-03T20:35:00+08:00
 ---
 
-# 模块映射 — backend
-# 用于 archive 阶段识别变更影响的模块
+schema_version: 1
+project: backend
+source_commit: e91d708
+generated_at: 2026-06-03 14:14:00
+generator: sillyspec-scan
 
 modules:
   core:
+    status: active
+    doc: modules/core.md
     paths:
       - app/core/**
-    description: 横切关注点（config, db, auth, redis, errors, logging, telemetry, security, crypto）
+    tags:
+      - config
+      - database
+      - redis
+      - auth
+      - security
+      - crypto
+      - logging
+      - telemetry
+      - errors
+    aliases:
+      - infrastructure
+      - 基础设施
+    entrypoints:
+      - get_settings
+      - create_app
+    main_symbols:
+      - Settings
+      - get_session_factory
+      - get_logger
+      - configure_logging
+    depends_on: []
+    used_by:
+      - workspace
+      - auth
+      - change
+      - agent
+      - worktree
+      - git_gateway
+      - tool_gateway
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   models:
+    status: active
+    doc: modules/archive.md
     paths:
       - app/models/**
-    description: 共享 ORM 基类（BaseModel）
+    tags:
+      - base-model
+      - orm
+    aliases:
+      - shared-models
+    entrypoints:
+      - BaseModel
+    main_symbols:
+      - BaseModel
+    depends_on: []
+    used_by:
+      - workspace
+      - auth
+      - change
+      - task
+      - agent
+      - worktree
+      - git_identity
+      - incident
+      - release
+      - scan_docs
+      - spec_profile
+      - spec_workspace
+      - workflow
+      - tool_gateway
+      - knowledge
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   workspace:
+    status: active
+    doc: modules/workspace.md
     paths:
       - app/modules/workspace/**
-    description: 工作区 CRUD、扫描状态、软删除/复活
+    tags:
+      - workspace
+      - crud
+      - scan
+      - topology
+    aliases:
+      - workspaces
+      - 工作区
+    entrypoints:
+      - WorkspaceService
+      - workspace_router
+    main_symbols:
+      - Workspace
+      - WorkspaceRelation
+      - WorkspaceService
+      - WorkspaceScanner
+      - slugify
+    depends_on:
+      - core
+      - models
+      - spec_workspace
+      - agent
+    used_by:
+      - change
+      - task
+      - agent
+      - change_writer
+      - archive
+      - knowledge
+      - runtime
+      - scan_docs
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   auth:
+    status: active
+    doc: modules/auth.md
     paths:
       - app/modules/auth/**
-    description: JWT 认证 + RBAC 权限控制
+    tags:
+      - auth
+      - jwt
+      - rbac
+      - login
+      - token
+    aliases:
+      - authentication
+      - 认证
+    entrypoints:
+      - AuthService
+      - auth_router
+      - bootstrap_admin_and_seed_rbac
+    main_symbols:
+      - AuthService
+      - User
+      - Session
+      - Role
+      - UserWorkspaceRole
+    depends_on:
+      - core
+      - models
+      - workspace
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   change:
+    status: active
+    doc: modules/change.md
     paths:
       - app/modules/change/**
-    description: 变更管理
-
-  change_writer:
-    paths:
-      - app/modules/change_writer/**
-    description: 变更文档写入和生成
+    tags:
+      - change
+      - 变更
+      - proposal
+      - design
+    aliases:
+      - changes
+    entrypoints:
+      - ChangeService
+      - change_router
+    main_symbols:
+      - Change
+      - ChangeDocument
+      - StageEnum
+      - ChangeService
+      - ChangeParser
+    depends_on:
+      - core
+      - models
+      - workspace
+      - workflow
+    used_by:
+      - task
+      - agent
+      - change_writer
+      - archive
+      - workflow
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   task:
+    status: active
+    doc: modules/task.md
     paths:
       - app/modules/task/**
-    description: 任务看板管理
+    tags:
+      - task
+      - todo
+      - 任务
+    aliases:
+      - tasks
+    entrypoints:
+      - TaskService
+      - task_router
+    main_symbols:
+      - Task
+      - TaskService
+      - TaskParser
+    depends_on:
+      - core
+      - models
+      - change
+      - workspace
+    used_by:
+      - agent
+      - tool_gateway
+      - workflow
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   agent:
+    status: active
+    doc: modules/agent.md
     paths:
       - app/modules/agent/**
-    description: Agent 运行管理（Claude Code 适配器 + Redis pub/sub）
+    tags:
+      - agent
+      - claude-code
+      - execution
+      - coordinator
+    aliases:
+      - agents
+      - ai
+    entrypoints:
+      - AgentService
+      - agent_router
+    main_symbols:
+      - AgentService
+      - AgentRun
+      - AgentRunLog
+      - ExecutionCoordinatorService
+      - ClaudeCodeAdapter
+      - build_spec_bundle
+    depends_on:
+      - core
+      - models
+      - workspace
+      - task
+      - worktree
+      - git_identity
+      - change
+      - workflow
+    used_by:
+      - workspace
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   worktree:
+    status: active
+    doc: modules/worktree.md
     paths:
       - app/modules/worktree/**
-    description: Git worktree CRUD + 租约管理
+    tags:
+      - worktree
+      - git
+      - lease
+    aliases:
+      - worktrees
+    entrypoints:
+      - WorktreeService
+      - worktree_router
+      - lease_router
+    main_symbols:
+      - WorktreeLease
+      - WorktreeService
+      - GitRunner
+      - ExecEnvBuilder
+    depends_on:
+      - core
+      - models
+      - git_identity
+      - workspace
+    used_by:
+      - agent
+      - git_gateway
+      - change_writer
+      - tool_gateway
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   git_gateway:
+    status: active
+    doc: modules/git_identity.md
     paths:
       - app/modules/git_gateway/**
-    description: Git 操作网关 + 审计日志
+    tags:
+      - git
+      - gateway
+      - audit
+    aliases:
+      - git-ops
+    entrypoints:
+      - GitGatewayService
+      - git_gateway_router
+    main_symbols:
+      - GitGatewayService
+      - GitOperationLog
+    depends_on:
+      - core
+      - models
+      - git_identity
+      - worktree
+    used_by:
+      - tool_gateway
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   git_identity:
+    status: active
+    doc: modules/git_identity.md
     paths:
       - app/modules/git_identity/**
-    description: Git 身份管理 + GitHub PAT 验证
+    tags:
+      - git
+      - identity
+      - pat
+      - github
+    aliases:
+      - git-identities
+    entrypoints:
+      - GitIdentityService
+      - git_identity_router
+    main_symbols:
+      - GitIdentity
+      - GitIdentityService
+    depends_on:
+      - core
+      - models
+    used_by:
+      - worktree
+      - git_gateway
+      - agent
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   tool_gateway:
+    status: active
+    doc: modules/tool_gateway.md
     paths:
       - app/modules/tool_gateway/**
-    description: 工具操作网关 + 审计日志
+    tags:
+      - tool
+      - gateway
+      - policy
+      - audit
+    aliases:
+      - tools
+    entrypoints:
+      - ToolGatewayService
+      - tool_gateway_router
+      - policy_crud_router
+    main_symbols:
+      - ToolGatewayService
+      - ToolOperationLog
+      - ToolPolicy
+    depends_on:
+      - core
+      - models
+      - git_gateway
+      - task
+      - workflow
+      - worktree
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   scan_docs:
+    status: active
+    doc: modules/scan_docs.md
     paths:
       - app/modules/scan_docs/**
-    description: 扫描文档索引与解析
+    tags:
+      - scan
+      - docs
+      - parser
+    aliases:
+      - scan-docs
+    entrypoints:
+      - ScanDocsService
+      - scan_docs_router
+    main_symbols:
+      - ScanDocsService
+      - ScanDocsParser
+      - ScanDocument
+    depends_on:
+      - core
+      - models
+      - workspace
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   release:
+    status: active
+    doc: modules/release.md
     paths:
       - app/modules/release/**
-    description: 发布管理 + 审批
+    tags:
+      - release
+      - approval
+      - 发布
+    aliases:
+      - releases
+    entrypoints:
+      - ReleaseService
+      - release_router
+    main_symbols:
+      - Release
+      - ReleaseApproval
+      - ReleaseService
+    depends_on:
+      - core
+      - models
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   incident:
+    status: active
+    doc: modules/incident.md
     paths:
       - app/modules/incident/**
-    description: 事件追踪 + 复盘
+    tags:
+      - incident
+      - postmortem
+      - 事件
+    aliases:
+      - incidents
+    entrypoints:
+      - IncidentService
+      - incident_router
+    main_symbols:
+      - Incident
+      - Postmortem
+      - IncidentService
+    depends_on:
+      - core
+      - models
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   workflow:
+    status: active
+    doc: modules/workflow.md
     paths:
       - app/modules/workflow/**
-    description: 工作流/审批流程 + FSM + spec guardian
+    tags:
+      - workflow
+      - fsm
+      - approval
+      - spec-guardian
+      - audit
+    aliases:
+      - 审批
+    entrypoints:
+      - WorkflowService
+      - workflow_router
+    main_symbols:
+      - WorkflowService
+      - TaskFSM
+      - AuditLog
+      - ChangeReview
+      - run_guard
+    depends_on:
+      - core
+      - models
+      - change
+      - task
+    used_by:
+      - agent
+      - change
+      - tool_gateway
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   settings:
+    status: active
+    doc: modules/settings.md
     paths:
       - app/modules/settings/**
-    description: 平台设置
+    tags:
+      - settings
+      - config
+      - 设置
+    aliases:
+      - platform-settings
+    entrypoints:
+      - settings_router
+    main_symbols:
+      - Settings
+    depends_on:
+      - core
+      - models
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   knowledge:
+    status: active
+    doc: modules/knowledge.md
     paths:
       - app/modules/knowledge/**
-    description: 知识库
+    tags:
+      - knowledge
+      - quicklog
+      - 知识库
+    aliases:
+      - 知识
+    entrypoints:
+      - KnowledgeService
+      - knowledge_router
+    main_symbols:
+      - KnowledgeService
+      - KnowledgeParser
+    depends_on:
+      - core
+      - models
+      - workspace
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   runtime:
+    status: active
+    doc: modules/runtime.md
     paths:
       - app/modules/runtime/**
-    description: 运行时状态读取
+    tags:
+      - runtime
+      - progress
+      - artifacts
+    aliases:
+      - 运行时
+    entrypoints:
+      - RuntimeService
+      - runtime_router
+    main_symbols:
+      - RuntimeService
+    depends_on:
+      - core
+      - models
+      - spec_workspace
+      - workspace
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   archive:
+    status: active
+    doc: modules/archive.md
     paths:
       - app/modules/archive/**
-    description: 归档操作
+    tags:
+      - archive
+      - 归档
+    aliases:
+      - 归档
+    entrypoints:
+      - ArchiveService
+      - archive_router
+    main_symbols:
+      - ArchiveService
+    depends_on:
+      - core
+      - models
+      - change
+      - workspace
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  change_writer:
+    status: active
+    doc: modules/archive.md
+    paths:
+      - app/modules/change_writer/**
+    tags:
+      - change-writer
+      - markdown
+      - document
+    aliases:
+      - writer
+    entrypoints:
+      - ChangeWriterService
+      - change_writer_router
+    main_symbols:
+      - ChangeWriterService
+      - MarkdownBuilder
+    depends_on:
+      - core
+      - models
+      - change
+      - workspace
+      - worktree
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   spec_profile:
+    status: active
+    doc: modules/spec_profile.md
     paths:
       - app/modules/spec_profile/**
-    description: Spec profile 管理
+    tags:
+      - spec
+      - profile
+    aliases:
+      - spec-profile
+    entrypoints: []
+    main_symbols:
+      - SpecProfile
+      - SpecProfilePolicy
+    depends_on:
+      - core
+      - models
+    used_by:
+      - spec_workspace
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   spec_workspace:
+    status: active
+    doc: modules/spec_workspace.md
     paths:
       - app/modules/spec_workspace/**
-    description: Spec workspace 管理
+    tags:
+      - spec
+      - workspace
+      - bootstrap
+      - validator
+    aliases:
+      - spec-ws
+    entrypoints:
+      - SpecWorkspaceService
+      - spec_workspace_router
+    main_symbols:
+      - SpecWorkspace
+      - SpecWorkspaceService
+    depends_on:
+      - core
+      - models
+      - spec_profile
+    used_by:
+      - workspace
+      - runtime
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   migrations:
+    status: active
     paths:
       - migrations/**
-    description: Alembic 数据库迁移
-
-  tests:
-    paths:
-      - tests/**
-      - app/**/tests/**
-      - conftest.py
-    description: 测试文件
+    tags:
+      - alembic
+      - migration
+      - database
+    aliases:
+      - db-migration
+    entrypoints: []
+    main_symbols: []
+    depends_on: []
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   build:
+    status: active
     paths:
       - pyproject.toml
       - Dockerfile
       - alembic.ini
       - ruff.toml
-    description: 构建和工具配置
+    tags:
+      - build
+      - config
+    aliases:
+      - project-config
+    entrypoints: []
+    main_symbols: []
+    depends_on: []
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []

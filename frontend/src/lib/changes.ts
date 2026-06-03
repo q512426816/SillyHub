@@ -91,19 +91,24 @@ export type FeedbackRequest = {
 };
 
 /** 归档门禁单项检查结果 */
+/** 归档门禁单项检查结果（对齐后端 ArchiveCheckItem） */
 export type ArchiveCheckItem = {
-  /** 检查项名称 */
-  check: string;
-  /** 未通过时的说明信息 */
-  message: string;
+  /** 检查项名称，固定 6 项之一：no_unresolved_feedback / ac_confirmed /
+   *  tech_verification_passed / business_review_passed /
+   *  feedback_categorized / documents_complete */
+  name: string;
+  /** 该项是否通过 */
+  passed: boolean;
+  /** 说明信息（通过时通常为空串，未通过时给出原因） */
+  detail: string;
 };
 
-/** 归档门禁检查响应 */
+/** 归档门禁检查响应（对齐后端 ArchiveGateResponse） */
 export type ArchiveGateResponse = {
   /** 是否全部通过，可执行归档 */
   can_archive: boolean;
-  /** 未通过的检查项列表 */
-  failed_checks: ArchiveCheckItem[];
+  /** 全部 6 项检查结果（含通过与未通过） */
+  checks: ArchiveCheckItem[];
 };
 
 /** 创建变更的请求参数 */

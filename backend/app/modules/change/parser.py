@@ -12,8 +12,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-import frontmatter
-
 from app.core.logging import get_logger
 from app.core.spec_paths import SpecPathResolver
 
@@ -166,6 +164,21 @@ class ChangeParser:
             return False
         return True
 
+    @staticmethod
+    def _extract_title(change_dir: Path) -> str | None:
+        """Return the first ``# `` heading in proposal.md, or None."""
+        proposal = change_dir / SpecPathResolver.PROPOSAL
+        if not proposal.is_file():
+            return None
+        try:
+            for line in proposal.read_text(encoding="utf-8", errors="replace").splitlines():
+                stripped = line.strip()
+                if stripped.startswith("# "):
+                    return stripped[2:].strip() or None
+        except OSError:
+            return None
+        return None
+
     def _parse_change(
         self,
         sillyspec_root: Path,
@@ -193,37 +206,12 @@ class ChangeParser:
                 )
             )
 
-        # Parse MASTER.md frontmatter
-        master_path = change_dir / "MASTER.md"
-        if not master_path.is_file():
-            parsed.status = "unknown"
-            parsed.title = change_key
-            parsed.warnings.append(
-                ParseWarning(
-                    code="MASTER_MISSING",
-                    detail=f"No MASTER.md for change '{change_key}'",
-                    change_key=change_key,
-                )
-            )
-        else:
-            try:
-                post = frontmatter.load(str(master_path))
-                meta = post.metadata
-                parsed.title = meta.get("title") or change_key
-                parsed.status = meta.get("status", "draft")
-                parsed.change_type = meta.get("change_type")
-                parsed.owner = meta.get("owner")
-                parsed.affected_components = meta.get("affected_components", [])
-            except Exception as exc:
-                parsed.status = "unknown"
-                parsed.title = change_key
-                parsed.warnings.append(
-                    ParseWarning(
-                        code="FRONTMATTER_PARSE_ERROR",
-                        detail=f"Cannot parse MASTER.md for '{change_key}': {exc}",
-                        change_key=change_key,
-                    )
-                )
+        # Title resolution (no frontmatter parsing):
+        #   1. First ``# `` heading in proposal.md
+        #   2. Fallback to change_key (directory name)
+        # Metadata fields (change_type / owner / affected_components / status)
+        # are owned by the platform DB, not by files — see file-lifecycle.md.
+        parsed.title = self._extract_title(change_dir) or change_key
 
         # Scan standard documents using SpecPathResolver constants
         for doc_type, filename in STANDARD_FILENAMES.items():

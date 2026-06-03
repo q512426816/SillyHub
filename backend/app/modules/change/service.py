@@ -618,14 +618,16 @@ class ChangeService:
             )
         )
 
-        # Check 6: documents complete
+        # Check 6: documents complete — 四件套必须齐全（exists）
+        REQUIRED_DOC_TYPES = {"proposal", "design", "requirements", "tasks"}  # noqa: N806
         docs, _, _ = await self.get_documents(workspace_id, change_id)
-        incomplete = [d for d in docs if not d.status and d.exists]
+        existing_types = {d.doc_type for d in docs if d.exists}
+        missing = REQUIRED_DOC_TYPES - existing_types
         checks.append(
             ArchiveCheckItem(
                 name="documents_complete",
-                passed=len(incomplete) == 0,
-                detail="" if not incomplete else f"{len(incomplete)} 个文档未完成",
+                passed=len(missing) == 0,
+                detail="" if not missing else f"缺少必需文档: {', '.join(sorted(missing))}",
             )
         )
 
@@ -849,11 +851,11 @@ class ChangeService:
         workspace_id: uuid.UUID,
     ) -> None:
         row.title = parsed.title
-        # DB is the source of truth for status — never overwrite from file.
-        # The file frontmatter status is only used when creating a new row
-        # (see _build_change). Workflow transitions update DB directly;
-        # reparse must not reset them back to the file value.
+        # DB is the source of truth for status, change_type, and
+        # affected_components — never overwrite them from the filesystem.
+        # change_type/owner come from the change-creation form; affected_components
+        # is written from module-impact.md during archive. The parser no longer
+        # reads frontmatter, so parsed values for these are empty placeholders.
+        # Workflow transitions update DB directly; reparse must not reset them.
         row.location = parsed.location
         row.path = parsed.path
-        row.affected_components = parsed.affected_components
-        row.change_type = parsed.change_type

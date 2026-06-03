@@ -1,50 +1,152 @@
 ---
 author: qinyi
-created_at: 2026-05-29T17:44:00
+created_at: 2026-06-03T20:35:00+08:00
 ---
 
-# 模块映射 — multi-agent-platform (monorepo)
-# 用于 archive 阶段识别变更影响的模块
+schema_version: 1
+project: multi-agent-platform
+source_commit: e91d708
+generated_at: 2026-06-03 14:14:00
+generator: sillyspec-scan
 
 modules:
   backend:
+    status: active
     paths:
       - backend/**
-    description: FastAPI 后端 API 服务器
+    tags:
+      - backend
+      - fastapi
+      - python
+      - api
+    aliases:
+      - 后端
+      - api-server
+    entrypoints:
+      - backend/app/main.py
+    main_symbols:
+      - create_app
+    depends_on: []
+    used_by:
+      - frontend
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   frontend:
+    status: active
     paths:
       - frontend/**
-    description: Next.js 前端 Web 应用
+    tags:
+      - frontend
+      - nextjs
+      - react
+      - typescript
+    aliases:
+      - 前端
+      - web
+    entrypoints:
+      - frontend/src/app/layout.tsx
+    main_symbols: []
+    depends_on:
+      - backend
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   deploy:
+    status: active
     paths:
       - deploy/**
-    description: Docker Compose 部署配置
-
-  prototype:
-    paths:
-      - prototype/**
-    description: HTML 原型页面
+    tags:
+      - docker
+      - deploy
+      - compose
+      - 部署
+    aliases:
+      - docker-compose
+      - 部署
+    entrypoints:
+      - deploy/docker-compose.yml
+    main_symbols: []
+    depends_on:
+      - backend
+      - frontend
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   docs:
+    status: active
     paths:
       - docs/**
-    description: 设计文档和参考资料
+    tags:
+      - docs
+      - design
+      - 文档
+    aliases:
+      - 文档
+    entrypoints: []
+    main_symbols: []
+    depends_on: []
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
-  ci:
+  spikes:
+    status: active
     paths:
-      - .github/**
-    description: GitHub Actions CI 配置
+      - spikes/**
+    tags:
+      - spike
+      - research
+      - 调研
+    aliases:
+      - 调研
+    entrypoints: []
+    main_symbols: []
+    depends_on: []
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   sillyspec:
+    status: active
     paths:
       - .sillyspec/**
-    description: SillySpec 规范驱动开发框架配置
+    tags:
+      - sillyspec
+      - spec
+      - workflow
+    aliases:
+      - spec
+    entrypoints: []
+    main_symbols: []
+    depends_on: []
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   build:
+    status: active
     paths:
       - Makefile
       - .editorconfig
       - .gitignore
-    description: 构建和项目配置
+    tags:
+      - build
+      - config
+    aliases:
+      - project-config
+    entrypoints: []
+    main_symbols: []
+    depends_on: []
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []

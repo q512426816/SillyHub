@@ -21,6 +21,7 @@ $ARGUMENTS
 1. 运行 `sillyspec run auto --input "<用户需求>"`
 2. 读取 CLI 输出的 step prompt（包含你的角色描述）
 3. 执行 prompt 中的操作
+4. **记录 CLI 输出中显示的 Change 名称**（如 `Change: 2026-06-02-xxx`）
 
 ### 步骤循环
 重复以下循环直到 CLI 输出"全部流程已完成"：
@@ -31,6 +32,9 @@ $ARGUMENTS
    - 纯内部操作 → **直接执行**
 3. **执行 prompt 要求的操作**
 4. **完成后运行** `sillyspec run auto --done --output "<你的摘要>"`
+   - ⚠️ **必须携带 --change <变更名>**，变更名来自启动时 CLI 输出的 `Change:` 字段
+   - 示例：`sillyspec run auto --done --change 2026-06-02-spec-bootstrap-agent-stream-interaction --output "摘要"`
+   - **绝不使用 `--change default`**，除非 CLI 启动时明确显示的 Change 名称就是 `default`
 5. **读取 CLI 输出的下一步 prompt**，回到步骤 1
 
 ### 阶段审核门控
@@ -69,6 +73,7 @@ $ARGUMENTS
 - 不要使用 npx
 - 不要编造不存在的 CLI 子命令
 - 遇到命令报错 → 展示错误，暂停等用户介入
+- **每次调用 `sillyspec run auto --done` 都必须携带 `--change <变更名>`**，变更名 = CLI 首次输出中显示的 Change 名称。如果 CLI 首次运行没有显示 Change 名称，从 progress 或用户输入中确认变更名后再调用
 
 ### 异常处理
 - 命令执行失败 → 展示错误信息，暂停等待用户指示

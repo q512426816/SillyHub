@@ -130,11 +130,13 @@ async def test_get_change_detail(
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["title"] == "Demo Feature Implementation"
-    assert body["status"] == "in_progress"
-    assert body["change_type"] == "feature"
+    # Title comes from proposal.md's first heading ("# Proposal"); metadata
+    # fields are DB-owned and no longer read from MASTER frontmatter.
+    assert body["title"] == "Proposal"
+    assert body["status"] == "draft"
+    assert body["change_type"] is None
     assert body["location"] == "active"
-    assert "platform-api" in body["affected_components"]
+    assert body["affected_components"] == []
 
 
 async def test_get_document_matrix(

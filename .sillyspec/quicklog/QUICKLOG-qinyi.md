@@ -113,3 +113,8 @@ created_at: 2026-05-28 11:10:00
 状态：已完成
 文件：frontend/src/lib/agent.ts, frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx
 结果：agent.ts 新增 killAgentRun() API 函数，page.tsx 新增 handleKill 回调并绑定到 Stop 按钮 onClick。后端 POST /kill 端点已完整，无需修改。TypeScript 检查通过。
+
+## 2026-06-03 16:20:00 — 修复变更中心文档解析与 SillySpec 文件生命周期规范对齐
+状态：已完成
+文件：backend/app/core/spec_paths.py, backend/app/modules/change/parser.py, backend/app/modules/change/service.py, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, backend/app/modules/change/tests/test_parser.py, backend/app/modules/change/tests/test_router.py
+结果：1) spec_paths.py STANDARD_FILENAMES 新增 module_impact→module-impact.md。2) parser.py 移除 frontmatter 依赖，MASTER.md 改为可选（缺失不再报 MASTER_MISSING、status 默认 draft 而非 unknown），新增 _extract_title 从 proposal.md 首个 # 标题提取 title、fallback change_key，不再读任何 frontmatter 元数据。3) service.py _apply_parsed 不再用文件值覆盖 DB 的 change_type/affected_components（元数据由平台 DB 为准）。4) 前端 DOC_TABS verification→verify_result 并新增 module_impact，新增 DOC_LABELS 映射真实文件名。测试：change 全量 143 passed，前端 tsc 0 错误。

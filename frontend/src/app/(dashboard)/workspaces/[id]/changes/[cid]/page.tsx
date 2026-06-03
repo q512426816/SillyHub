@@ -111,7 +111,33 @@ const DOC_TABS = [
   "design",
   "plan",
   "tasks",
-  "verification",
+  "verify_result",
+  "module_impact",
+  "prototypes",
+  "references",
+] as const;
+
+const DOC_LABELS: Record<string, string> = {
+  MASTER: "MASTER.md",
+  proposal: "proposal.md",
+  requirements: "requirements.md",
+  design: "design.md",
+  plan: "plan.md",
+  tasks: "tasks.md",
+  verify_result: "verify-result.md",
+  module_impact: "module-impact.md",
+  prototypes: "prototypes",
+  references: "references",
+};
+
+// 必需文档（四件套）— 完整度"就绪"计数只以此为分母
+const REQUIRED_DOCS = ["proposal", "design", "requirements", "tasks"] as const;
+// 可选/阶段性文档 — 单独展示存在状态，不计入完整度分母
+const OPTIONAL_DOCS = [
+  "plan",
+  "verify_result",
+  "module_impact",
+  "MASTER",
   "prototypes",
   "references",
 ] as const;
@@ -600,55 +626,76 @@ export default function ChangeDetailPage({ params }: Props) {
         <div className="flex items-center justify-between border-b px-3 py-2">
           <h2 className="text-xs font-medium">变更文档完整性</h2>
           <span className="text-[11px] text-muted-foreground">
-            {DOC_TABS.filter((dt) => {
-              const doc = docExistsMap.get(dt);
-              const isSpecial = dt === "prototypes" || dt === "references";
-              return isSpecial
-                ? (dt === "prototypes"
-                    ? (matrix?.prototypes.length ?? 0)
-                    : (matrix?.references.length ?? 0)) > 0
-                : (doc?.exists ?? false);
-            }).length}
-            /{DOC_TABS.length} 文档就绪
+            {REQUIRED_DOCS.filter((dt) => docExistsMap.get(dt)?.exists ?? false).length}
+            /{REQUIRED_DOCS.length} 必需文档就绪
           </span>
         </div>
-        <div className="flex flex-wrap gap-2 px-3 py-3">
-          {DOC_TABS.map((dt) => {
-            const doc = docExistsMap.get(dt);
-            const isSpecial = dt === "prototypes" || dt === "references";
-            const count = isSpecial
-              ? dt === "prototypes"
-                ? (matrix?.prototypes.length ?? 0)
-                : (matrix?.references.length ?? 0)
-              : 0;
-            const exists = isSpecial ? count > 0 : (doc?.exists ?? false);
-            const isPartial = isSpecial && count > 0;
+        <div className="space-y-2 px-3 py-3">
+          <div>
+            <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              必需文档
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {REQUIRED_DOCS.map((dt) => {
+                const exists = docExistsMap.get(dt)?.exists ?? false;
+                const bg = exists
+                  ? "bg-emerald-50 border-emerald-200/60"
+                  : "bg-red-50 border-red-200/60";
+                const textColor = exists ? "text-emerald-600" : "text-destructive";
+                return (
+                  <div
+                    key={dt}
+                    className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 ${bg}`}
+                  >
+                    <span className={`text-[11px] ${textColor}`}>{exists ? "✓" : "✗"}</span>
+                    <span className={`text-[11px] font-medium ${textColor}`}>
+                      {DOC_LABELS[dt] ?? `${dt}.md`}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              可选 / 阶段性文档
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {OPTIONAL_DOCS.map((dt) => {
+                const isSpecial = dt === "prototypes" || dt === "references";
+                const count = isSpecial
+                  ? dt === "prototypes"
+                    ? (matrix?.prototypes.length ?? 0)
+                    : (matrix?.references.length ?? 0)
+                  : 0;
+                const exists = isSpecial
+                  ? count > 0
+                  : (docExistsMap.get(dt)?.exists ?? false);
 
-            let bg = "bg-gray-100 border-gray-200";
-            let textColor = "text-gray-400";
-            let icon = "—";
-            if (exists && !isPartial) {
-              bg = "bg-emerald-50 border-emerald-200/60";
-              textColor = "text-emerald-600";
-              icon = "✓";
-            } else if (isPartial) {
-              bg = "bg-amber-50 border-amber-200/60";
-              textColor = "text-amber-600";
-              icon = "◐";
-            }
+                let bg = "bg-gray-100 border-gray-200";
+                let textColor = "text-gray-400";
+                let icon = "—";
+                if (exists) {
+                  bg = "bg-emerald-50 border-emerald-200/60";
+                  textColor = "text-emerald-600";
+                  icon = isSpecial ? "◐" : "✓";
+                }
 
-            return (
-              <div
-                key={dt}
-                className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 ${bg}`}
-              >
-                <span className={`text-[11px] ${textColor}`}>{icon}</span>
-                <span className={`text-[11px] font-medium ${textColor}`}>
-                  {dt === "MASTER" ? "MASTER.md" : `${dt}.md`}
-                </span>
-              </div>
-            );
-          })}
+                return (
+                  <div
+                    key={dt}
+                    className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 ${bg}`}
+                  >
+                    <span className={`text-[11px] ${textColor}`}>{icon}</span>
+                    <span className={`text-[11px] font-medium ${textColor}`}>
+                      {DOC_LABELS[dt] ?? `${dt}.md`}
+                      {isSpecial && count > 0 && ` (${count})`}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </section>
 
@@ -675,7 +722,11 @@ export default function ChangeDetailPage({ params }: Props) {
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  {dt === "MASTER" ? "MASTER" : dt}
+                  {dt === "verify_result"
+                    ? "verify"
+                    : dt === "module_impact"
+                      ? "module-impact"
+                      : dt}
                   {!isSpecial && !exists && (
                     <span className="ml-0.5 opacity-40">∅</span>
                   )}
@@ -870,7 +921,9 @@ export default function ChangeDetailPage({ params }: Props) {
                 <h2 className="text-xs font-medium">归档门禁</h2>
                 {archiveGate && (
                   <Badge variant={archiveGate.can_archive ? "success" : "destructive"}>
-                    {archiveGate.can_archive ? "✅ 全部通过" : `${archiveGate.failed_checks.length} 项未通过`}
+                    {archiveGate.can_archive
+                      ? "✅ 全部通过"
+                      : `${archiveGate.checks.filter((c) => !c.passed).length} 项未通过`}
                   </Badge>
                 )}
               </div>
@@ -887,8 +940,8 @@ export default function ChangeDetailPage({ params }: Props) {
                       { check: "feedback_categorized", label: "反馈已分类" },
                       { check: "documents_complete", label: "文档已全部完成" },
                     ].map((item) => {
-                      const failed = archiveGate.failed_checks.find((c) => c.check === item.check);
-                      const passed = !failed;
+                      const found = archiveGate.checks.find((c) => c.name === item.check);
+                      const passed = found?.passed ?? false;
                       return (
                         <div key={item.check} className="flex items-center gap-2 text-xs">
                           <span className={passed ? "text-emerald-600" : "text-destructive"}>
@@ -897,8 +950,8 @@ export default function ChangeDetailPage({ params }: Props) {
                           <span className={passed ? "text-foreground" : "text-destructive"}>
                             {item.label}
                           </span>
-                          {!passed && failed?.message && (
-                            <span className="text-muted-foreground text-[10px]">— {failed.message}</span>
+                          {!passed && found?.detail && (
+                            <span className="text-muted-foreground text-[10px]">— {found.detail}</span>
                           )}
                         </div>
                       );

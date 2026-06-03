@@ -15,23 +15,23 @@ AI 驱动的多 Agent 协作平台的 Web 前端，提供 SillySpec 文档驱动
 
 ## 技术栈
 
-| 类别         | 技术                                   | 版本        |
-| ------------ | -------------------------------------- | ----------- |
-| 框架         | Next.js (App Router)                   | 14.2.5      |
-| UI 库        | React                                  | 18.3.1      |
-| 语言         | TypeScript                             | 5.5.4       |
-| 样式         | Tailwind CSS + shadcn/ui 风格组件      | 3.4.7       |
-| 状态管理     | Zustand (persist middleware)           | 4.5.x       |
-| 数据请求     | 原生 fetch（通过 apiFetch 封装）       | --          |
-| 流程图       | @xyflow/react                          | 12.10.x     |
-| Markdown     | @uiw/react-markdown-preview            | 5.2.x       |
-| 表单校验     | zod                                    | 3.23.x      |
-| CSS 工具     | class-variance-authority + tailwind-merge | --        |
-| 图标         | lucide-react                           | 0.400.x     |
-| 包管理       | pnpm                                   | 9.6.0       |
-| Node.js      | >= 20                                  | --          |
-| 测试         | Vitest + @testing-library/react + jsdom | 2.x        |
-| Lint         | ESLint + eslint-config-next            | 8.57.0      |
+| 类别 | 技术 | 版本 |
+|------|------|------|
+| 框架 | Next.js (App Router) | 14.2.5 |
+| UI 库 | React | 18.3.1 |
+| 语言 | TypeScript | 5.5.4 |
+| 样式 | Tailwind CSS + shadcn/ui 风格组件 | 3.4.7 |
+| 状态管理 | Zustand (persist middleware) | 4.5.x |
+| 数据请求 | 原生 fetch（通过 apiFetch 封装） | -- |
+| 流程图 | @xyflow/react | 12.10.x |
+| Markdown | @uiw/react-markdown-preview | 5.2.x |
+| 表单校验 | zod | 3.23.x |
+| CSS 工具 | class-variance-authority + tailwind-merge | -- |
+| 图标 | lucide-react | 0.400.x |
+| 包管理 | pnpm | 9.6.0 |
+| Node.js | >= 20 | -- |
+| 测试 | Vitest + @testing-library/react + jsdom | 2.x |
+| Lint | ESLint + eslint-config-next | 8.57.0 |
 
 ## 核心功能模块
 
@@ -65,11 +65,11 @@ AI 驱动的多 Agent 协作平台的 Web 前端，提供 SillySpec 文档驱动
 
 | 指标 | 数值 |
 |------|------|
-| TS/TSX 文件 | 65 |
+| TS/TSX 文件 | 58 |
 | 页面路由 | 20 |
 | 业务组件 | 6 |
 | 基础 UI 组件 | 3 |
-| Lib API 客户端 | 24 |
+| Lib API 客户端 | 25 |
 | Store | 1 |
 | Route Handler | 1 |
 | 测试文件 | 3 |

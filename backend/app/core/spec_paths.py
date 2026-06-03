@@ -48,6 +48,7 @@ class SpecPathResolver:
         "plan": PLAN,
         "tasks": TASKS,
         "verify_result": VERIFY_RESULT,
+        "module_impact": MODULE_IMPACT,
     }
 
     # Legacy alias: old name → canonical name

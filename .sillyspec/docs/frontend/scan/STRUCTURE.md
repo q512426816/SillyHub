@@ -10,8 +10,8 @@ created_at: 2026-06-03T20:35:00+08:00
 ```
 frontend/
   package.json          # 依赖和脚本
-  next.config.mjs       # Next.js 配置（API 代理、standalone 模式）
-  tailwind.config.ts    # Tailwind CSS 配置（shadcn/ui 主题色）
+  next.config.mjs       # Next.js 配置（API 代理、standalone 模式、typedRoutes）
+  tailwind.config.ts    # Tailwind CSS 配置（shadcn/ui 主题色、container、animate 插件）
   tsconfig.json         # TypeScript 配置（strict、路径别名 @/*）
   vitest.config.ts      # Vitest 测试配置（jsdom、路径别名）
   postcss.config.mjs    # PostCSS 配置（Tailwind）
@@ -23,135 +23,137 @@ frontend/
 ```
 src/
   app/                          # Next.js App Router 页面
-    layout.tsx                  # 根布局（lang=zh-CN、全局样式）
-    page.tsx                    # 首页（健康检查、进入 Workspaces）
-    globals.css                 # 全局 CSS（Tailwind 指令 + CSS 变量主题）
+    layout.tsx                  # 根布局（lang=zh-CN、全局样式、Metadata）
+    page.tsx                    # 首页（健康检查卡片 + 进入 Workspaces 入口）
+    globals.css                 # 全局 CSS（Tailwind 指令 + CSS 变量主题 + 基础排版）
 
-    (auth)/                     # 认证路由组
+    (auth)/                     # 认证路由组（无侧边栏布局）
       login/
-        page.tsx                # 登录页
+        page.tsx                # 登录页（email + password 表单，默认填充管理员账号）
 
-    (dashboard)/                # 仪表盘路由组（需要登录）
-      layout.tsx                # 仪表盘布局（AppShell、Auth Guard）
+    (dashboard)/                # 仪表盘路由组（Auth Guard + AppShell）
+      layout.tsx                # 仪表盘布局（检测 hydrated/accessToken，渲染 AppShell）
       settings/
-        page.tsx                # 系统设置
+        page.tsx                # 系统设置（平台配置 CRUD + 用户管理）
         git-identities/
-          page.tsx              # Git 身份管理
+          page.tsx              # Git 身份管理（SSH/Token 凭证管理 + 访问检查）
       workspaces/
-        page.tsx                # Workspace 列表
+        page.tsx                # Workspace 列表（扫描创建 + 卡片列表）
         [id]/                   # 动态路由：单个 Workspace
-          page.tsx              # Workspace 详情
+          page.tsx              # Workspace 详情（概览信息 + 操作面板）
           components/
-            page.tsx            # 组件/关系列表
+            page.tsx            # 组件/关系列表（子 Workspace 列表 + 关系管理）
             topology/
-              page.tsx          # 拓扑图（@xyflow/react）
+              page.tsx          # 拓扑图（@xyflow/react 可视化）
           changes/
-            page.tsx            # 变更列表
+            page.tsx            # 变更列表（筛选 + 状态标签）
             [cid]/
-              page.tsx          # 变更详情（文档、工作流、审批）
+              page.tsx          # 变更详情（SillySpec 阶段进度 + 文档矩阵 + Agent dispatch）
               tasks/
-                page.tsx        # 任务看板
+                page.tsx        # 任务看板（按状态分列）
                 [tid]/
-                  page.tsx      # 任务详情
+                  page.tsx      # 任务详情（任务信息 + 状态流转）
           create-change/
-            page.tsx            # 创建变更
+            page.tsx            # 创建变更（表单：标题/描述/范围/类型/组件）
           scan-docs/
-            page.tsx            # 扫描文档
+            page.tsx            # 扫描文档（7 份 scan 文档列表 + 内容查看）
           runtime/
-            page.tsx            # 运行时监控
+            page.tsx            # 运行时监控（阶段进度 + Artifacts）
           knowledge/
-            page.tsx            # 知识库
+            page.tsx            # 知识库（Knowledge + Quicklog 文档浏览）
           releases/
-            page.tsx            # 发布管理
+            page.tsx            # 发布管理（Release CRUD + 审批 + 部署）
           agent/
-            page.tsx            # Agent 控制台
+            page.tsx            # Agent 控制台（运行列表 + SSE 实时日志 + 用户输入）
           approvals/
-            page.tsx            # 审批中心
+            page.tsx            # 审批中心（待审批 + 历史记录）
           audit/
-            page.tsx            # 审计日志
+            page.tsx            # 审计日志（操作日志列表 + 筛选）
           incidents/
             page.tsx            # 事件列表
             [iid]/
-              page.tsx          # 事件详情
+              page.tsx          # 事件详情（事件信息 + Postmortem）
 
-    api/                        # Next.js Route Handlers
+    api/                        # Next.js Route Handlers（BFF 代理层）
       workspaces/
         [workspaceId]/
           agent/
             runs/
               [runId]/
                 stream/
-                  route.ts      # SSE 代理（Agent 日志流）
+                  route.ts      # SSE 代理（转发后端 SSE 流，X-Accel-Buffering: no）
 
   components/                   # React 组件
-    app-shell.tsx               # 主布局壳（侧边栏导航 + 内容区）
-    health-card.tsx             # 健康检查卡片
-    workspace-card.tsx          # Workspace 列表卡片
-    workspace-scan-dialog.tsx   # Workspace 扫描/创建对话框
-    component-detail-drawer.tsx # 组件详情抽屉
-    sillyspec-step-progress.tsx # SillySpec 步骤进度组件
+    app-shell.tsx               # 主布局壳（三组侧边栏导航 + 用户信息 + 内容区）
+    health-card.tsx             # 健康检查卡片（5 秒轮询 /api/health）
+    workspace-card.tsx          # Workspace 列表卡片（rescan / delete 操作）
+    workspace-scan-dialog.tsx   # Workspace 扫描/创建对话框（多步骤：扫描 -> 生成规范 -> 创建）
+    component-detail-drawer.tsx # 组件详情抽屉（侧边滑出面板，Escape 关闭）
+    sillyspec-step-progress.tsx # SillySpec 步骤进度组件（横向步骤条 + Agent 运行状态 + 触发按钮）
 
     ui/                         # 基础 UI 组件（shadcn/ui 风格）
-      badge.tsx                 # Badge 标签
-      button.tsx                # Button 按钮
-      input.tsx                 # Input 输入框
+      badge.tsx                 # Badge 标签（default/success/warning/destructive/outline 变体）
+      button.tsx                # Button 按钮（4 变体 x 3 尺寸，forwardRef）
+      input.tsx                 # Input 输入框（forwardRef）
 
-  lib/                          # 工具函数和 API 客户端
-    api.ts                      # 核心 HTTP 客户端（apiFetch、ApiError、Token 刷新）
-    utils.ts                    # 通用工具（cn 函数）
-    auth.ts                     # 认证 API（login/logout/refresh）
+  lib/                          # 工具函数和 API 客户端（25 个模块）
+    api.ts                      # 核心 HTTP 客户端（apiFetch、ApiError、URL 解析、Token 自动刷新）
+    utils.ts                    # cn() 工具函数（clsx + tailwind-merge）
+    auth.ts                     # 认证 API（login/logout/refreshTokens）
     health.ts                   # 健康检查 API
-    workspaces.ts               # Workspace CRUD + 关系 + 拓扑
-    components.ts               # 组件兼容层（映射 Workspace 到 Component）
-    spec-workspaces.ts          # Spec Workspace 管理
-    changes.ts                  # 变更 CRUD + 工作流 + Agent Dispatch
+    workspaces.ts               # Workspace CRUD + 扫描 + 关系 + 拓扑
+    components.ts               # 组件兼容层（映射 Workspace 到 Component，客户端过滤）
+    spec-workspaces.ts          # Spec Workspace 管理（策略/Bootstrap/同步/冲突）
+    changes.ts                  # 变更 CRUD + 工作流（transition/feedback/archive-gate/dispatch）
     change-writer.ts            # 变更写入（创建 + 文档批量生成）
     tasks.ts                    # 任务 CRUD + 看板
-    workflow.ts                 # 工作流（transition + review）
-    agent.ts                    # Agent Run 管理 + SSE 日志流
-    agent-stream.ts             # Agent SSE 客户端（重连、去重、backoff）
-    runtime.ts                  # 运行时进度 + Artifacts
+    workflow.ts                 # 工作流（transition + review + task transition）
+    agent.ts                    # Agent Run 管理 + SSE 日志流（streamAgentRunLogs）
+    agent-stream.ts             # AgentRunStreamClient（面向对象 SSE 客户端，重连/去重/backoff）
+    runtime.ts                  # 运行时进度 + Artifacts + User Inputs
     scan-docs.ts                # 扫描文档
     knowledge.ts                # 知识库 + Quicklog
-    releases.ts                 # 发布管理
-    approvals.ts                # 审批管理
+    releases.ts                 # 发布管理（CRUD/审批/部署/回滚）
+    approvals.ts                # 审批管理（pending/history/approve/reject）
     audit.ts                    # 审计日志
     incidents.ts                # 事件管理 + Postmortem
     archive.ts                  # 变更归档 + 知识蒸馏
     settings.ts                 # 系统设置 + 用户管理
-    git-identities.ts           # Git 身份管理
-    git-gateway.ts              # Git 操作网关
-    tool-gateway.ts             # Tool 执行网关
-    worktree.ts                 # Worktree 租约管理
+    git-identities.ts           # Git 身份管理（CRUD + 访问检查）
+    git-gateway.ts              # Git 操作网关（在 Worktree 中执行 git 命令）
+    tool-gateway.ts             # Tool 执行网关（file_read/write/list/search, shell_exec）
+    worktree.ts                 # Worktree 租约管理（acquire/list/get/release/extend）
 
     __tests__/                  # API 客户端单元测试
-      api.test.ts               # apiFetch 核心测试
-      agent.test.ts             # Agent API 测试
-      spec-workspaces.test.ts   # Spec Workspace API 测试
+      api.test.ts               # apiFetch 核心测试（4 用例）
+      agent.test.ts             # Agent API 测试（1 用例）
+      spec-workspaces.test.ts   # Spec Workspace API 测试（1 用例）
 
   stores/                       # Zustand Store
-    session.ts                  # 会话状态（user、tokens、hydration）
+    session.ts                  # 会话状态（user/tokens/hydration，persist to localStorage）
 
   test/                         # 测试基础设施
-    setup.ts                    # Vitest setup（@testing-library/jest-dom/vitest）
+    setup.ts                    # Vitest 全局 setup（@testing-library/jest-dom/vitest）
 ```
 
 ## 文件统计
 
 | 类别 | 数量 |
 |------|------|
-| 页面文件 (page.tsx) | ~20 |
+| 页面文件 (page.tsx) | 20 |
 | 布局文件 (layout.tsx) | 3 |
-| API 客户端 (lib/*.ts) | 24 |
+| API 客户端 (lib/*.ts) | 25 |
 | 业务组件 (components/*.tsx) | 6 |
 | 基础 UI 组件 (components/ui/*.tsx) | 3 |
 | Route Handler (route.ts) | 1 |
 | 测试文件 | 3 |
 | Store | 1 |
+| **总计 TS/TSX 文件** | **~58** |
 
 ## 组织原则
 
-- **按功能分文件**: 每个后端模块对应一个 lib 文件，一对一映射
-- **按路由分目录**: 页面目录结构完全反映 URL 层级
-- **路由组隔离**: `(auth)` 和 `(dashboard)` 分别管理有无认证的布局
-- **组件就近放置**: 拓扑图等特定页面的自定义节点组件直接放在页面文件中
+- **按功能分文件**: 每个后端模块对应一个 lib 文件，类型定义和 API 函数一对一映射后端 schema
+- **按路由分目录**: 页面目录结构完全反映 URL 层级，使用动态路由 `[id]`/`[cid]`/`[tid]`/`[iid]`
+- **路由组隔离**: `(auth)` 和 `(dashboard)` 分别管理有无认证的布局，路由组不影响 URL
+- **组件就近放置**: 通用组件放在 `components/`，特定页面的内联逻辑直接写在页面文件中
+- **测试就近放置**: 测试文件放在被测模块同级的 `__tests__/` 目录下
