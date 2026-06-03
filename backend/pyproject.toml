@@ -74,7 +74,7 @@ select = ["E", "F", "I", "B", "UP", "N", "SIM", "RUF", "BLE"]
 # RUF012: Pydantic models use mutable class attributes intentionally.
 # RUF006: fire-and-forget tasks don't need a reference.
 # RUF005: list concat style is a preference.
-ignore = ["E501", "N818", "RUF001", "RUF002", "RUF003", "BLE001", "SIM105", "SIM117", "B008", "RUF012", "RUF006", "RUF005"]
+ignore = ["E501", "N818", "RUF001", "RUF002", "RUF003", "BLE001", "SIM105", "SIM117", "B008", "RUF012", "RUF006", "RUF005", "UP037"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["N802", "N803", "N806", "E402", "B017"]
