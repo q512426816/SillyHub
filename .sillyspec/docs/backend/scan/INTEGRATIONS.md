@@ -41,7 +41,7 @@ created_at: 2026-06-03T10:00:00
 
 ### SillySpec CLI
 - **集成方式**: subprocess 调用
-- **版本**: `SILLYSPEC_VERSION` 构建参数（默认 3.13.0）
+- **版本**: `SILLYSPEC_VERSION` 构建参数（默认 3.14.0）
 
 ## Docker
 

@@ -209,12 +209,12 @@ def test_workspace_relation_read_schema() -> None:
     assert expected.issubset(field_names), f"Missing: {expected - field_names}"
 
 
-def test_scan_response_has_no_sillyspec_path() -> None:
-    """ScanResponse should NOT contain sillyspec_path."""
+def test_scan_response_has_sillyspec_path() -> None:
+    """ScanResponse should contain sillyspec_path."""
     from app.modules.workspace.schema import ScanResponse
 
     field_names = set(ScanResponse.model_fields.keys())
-    assert "sillyspec_path" not in field_names
+    assert "sillyspec_path" in field_names
 
 
 # ---------------------------------------------------------------------------

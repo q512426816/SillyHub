@@ -107,9 +107,7 @@ async def test_scan_generate_idempotent_reuse(
 
 
 @pytest.mark.asyncio
-async def test_scan_generate_slug_conflict(
-    db_session: AsyncSession, mock_agent_service, tmp_path
-):
+async def test_scan_generate_slug_conflict(db_session: AsyncSession, mock_agent_service, tmp_path):
     """When two paths share the same trailing segment, slug gets a suffix."""
     dir_a = tmp_path / "alpha" / "my-project"
     dir_b = tmp_path / "beta" / "my-project"
@@ -146,9 +144,7 @@ async def test_scan_generate_slug_conflict(
 
 
 @pytest.mark.asyncio
-async def test_scan_generate_name_from_path(
-    db_session: AsyncSession, mock_agent_service, tmp_path
-):
+async def test_scan_generate_name_from_path(db_session: AsyncSession, mock_agent_service, tmp_path):
     """workspace name is the trailing segment of root_path."""
     project_dir = tmp_path / "CoolProject"
     project_dir.mkdir()

@@ -38,7 +38,7 @@ async def workspace_with_changes(client, tmp_path: Path, auth_headers: dict[str,
     return {"ws_id": ws_id}
 
 
-async def test_list_empty_before_reparse(
+async def test_list_after_auto_reparse(
     client, workspace_with_changes: dict, auth_headers: dict[str, str]
 ) -> None:
     ws_id = workspace_with_changes["ws_id"]
@@ -48,11 +48,12 @@ async def test_list_empty_before_reparse(
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["total"] == 0
-    assert body["items"] == []
+    # create() auto-reparses changes, so they already exist
+    assert body["total"] > 0
+    assert len(body["items"]) > 0
 
 
-async def test_reparse_creates_changes(
+async def test_reparse_updates_existing_changes(
     client, workspace_with_changes: dict, auth_headers: dict[str, str]
 ) -> None:
     ws_id = workspace_with_changes["ws_id"]
@@ -62,7 +63,8 @@ async def test_reparse_creates_changes(
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["stats"]["created"] > 0
+    # create() auto-reparses changes, so second reparse sees updates
+    assert body["stats"]["updated"] > 0
     assert body["stats"]["parsed"] > 0
 
 

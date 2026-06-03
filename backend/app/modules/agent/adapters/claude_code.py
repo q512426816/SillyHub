@@ -261,7 +261,9 @@ class ClaudeCodeAdapter(AgentAdapter):
             profile_version=bundle.profile_version,
         )
 
-        return await self._exec_stream(run_id, cmd, prompt, lease_path, env_vars, timeout, on_log=on_log)
+        return await self._exec_stream(
+            run_id, cmd, prompt, lease_path, env_vars, timeout, on_log=on_log
+        )
 
     async def run(
         self,
@@ -318,9 +320,7 @@ class ClaudeCodeAdapter(AgentAdapter):
             )
         except FileNotFoundError as exc:
             missing = exc.filename or cmd[0]
-            message = (
-                f"CLI command '{missing}' not found while starting '{_CLAUDE_CLI}'."
-            )
+            message = f"CLI command '{missing}' not found while starting '{_CLAUDE_CLI}'."
             ts = datetime.now(UTC).isoformat()
             log.error("agent_cli_not_found", cli=_CLAUDE_CLI, missing=missing)
             if on_log is not None:
@@ -388,7 +388,9 @@ class ClaudeCodeAdapter(AgentAdapter):
                             timeout=timeout,
                         )
                     except TimeoutError:
-                        log.warning("stdout_reader_timeout", run_id=str(run_id), line_count=line_count)
+                        log.warning(
+                            "stdout_reader_timeout", run_id=str(run_id), line_count=line_count
+                        )
                         break
                     except ValueError as ve:
                         log.warning("stdout_line_too_long", run_id=str(run_id), error=str(ve))

@@ -159,9 +159,7 @@ async def stream_agent_run_logs(
             details={"run_id": str(run_id)},
         )
     if run.status not in ("pending", "running"):
-        done_data = json.dumps(
-            {"status": run.status, "exit_code": run.exit_code}
-        )
+        done_data = json.dumps({"status": run.status, "exit_code": run.exit_code})
         return StreamingResponse(
             iter([f"event: done\ndata: {done_data}\n\n"]),
             media_type="text/event-stream",

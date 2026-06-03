@@ -85,7 +85,6 @@ export interface DoneEventData {
 export function streamAgentRunLogs(
   workspaceId: string,
   runId: string,
-<<<<<<< HEAD
   onMessage: (_event: StreamLogEvent) => void,
   onDone: (_data: DoneEventData) => void,
   onError?: (_error: Error) => void,

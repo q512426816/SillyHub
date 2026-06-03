@@ -11,6 +11,10 @@ import os
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.modules.agent.service import AgentService
 
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -56,7 +60,7 @@ def _rewrite_path(root_path: str) -> str:
     normalized = root_path.replace("\\", "/").rstrip("/")
     host_norm = host_prefix.replace("\\", "/").rstrip("/") + "/"
     if normalized.startswith(host_norm) or normalized + "/" == host_norm:
-        remainder = normalized[len(host_norm.rstrip("/")):]
+        remainder = normalized[len(host_norm.rstrip("/")) :]
         # Ensure remainder starts with /
         if not remainder.startswith("/"):
             remainder = "/" + remainder
@@ -279,7 +283,11 @@ class WorkspaceService:
                 await self.reparse(workspace_id)
                 log.info("workspace.rescan.projects_imported", workspace_id=str(workspace.id))
             except Exception as exc:
-                log.warning("workspace.rescan.projects_import_failed", workspace_id=str(workspace.id), error=str(exc))
+                log.warning(
+                    "workspace.rescan.projects_import_failed",
+                    workspace_id=str(workspace.id),
+                    error=str(exc),
+                )
 
         await self._session.commit()
         await self._session.refresh(workspace)
@@ -547,7 +555,6 @@ class WorkspaceService:
 
         return parse_result, stats, final_children, final_rels
 
-
     async def activate(self, workspace_id: uuid.UUID) -> Workspace:
         """Activate a pending workspace: set status='active', scan for .sillyspec,
         create SpecWorkspace + child projects."""
@@ -603,7 +610,7 @@ class WorkspaceService:
         *,
         root_path: str,
         user_id: uuid.UUID,
-        agent_service: "AgentService",  # noqa: F821
+        agent_service: "AgentService",
     ) -> tuple[uuid.UUID, uuid.UUID]:
         """Create workspace + spec_workspace and trigger scan agent.
 
@@ -747,7 +754,11 @@ class WorkspaceService:
             await self.reparse(workspace_id)
             log.info("spec_workspace.projects_imported", workspace_id=str(workspace_id))
         except Exception as exc:
-            log.warning("spec_workspace.projects_import_failed", workspace_id=str(workspace_id), error=str(exc))
+            log.warning(
+                "spec_workspace.projects_import_failed",
+                workspace_id=str(workspace_id),
+                error=str(exc),
+            )
 
         try:
             from app.modules.change.service import ChangeService
@@ -756,7 +767,11 @@ class WorkspaceService:
             await change_svc.reparse(workspace_id)
             log.info("spec_workspace.changes_imported", workspace_id=str(workspace_id))
         except Exception as exc:
-            log.warning("spec_workspace.changes_import_failed", workspace_id=str(workspace_id), error=str(exc))
+            log.warning(
+                "spec_workspace.changes_import_failed",
+                workspace_id=str(workspace_id),
+                error=str(exc),
+            )
 
     @staticmethod
     def _guard_path(path: Path) -> None:

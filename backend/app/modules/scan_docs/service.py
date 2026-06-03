@@ -52,16 +52,26 @@ class ScanDocsService:
     async def get(
         self,
         workspace_id: uuid.UUID,
-        doc_id: uuid.UUID,
+        doc_id_or_type: uuid.UUID | str,
     ) -> ScanDocument:
         await self._workspace_service.get(workspace_id)
-        doc = await self._session.get(ScanDocument, doc_id)
-        if doc is None or doc.workspace_id != workspace_id:
+        if isinstance(doc_id_or_type, str):
+            stmt = (
+                select(ScanDocument)
+                .where(col(ScanDocument.workspace_id) == workspace_id)
+                .where(col(ScanDocument.doc_type) == doc_id_or_type)
+            )
+            doc = (await self._session.execute(stmt)).scalar_one_or_none()
+        else:
+            doc = await self._session.get(ScanDocument, doc_id_or_type)
+            if doc is not None and doc.workspace_id != workspace_id:
+                doc = None
+        if doc is None:
             raise ScanDocNotFound(
                 "Scan doc not found.",
                 details={
                     "workspace_id": str(workspace_id),
-                    "doc_id": str(doc_id),
+                    "doc_id_or_type": str(doc_id_or_type),
                 },
             )
         return doc
@@ -75,7 +85,11 @@ class ScanDocsService:
 
         stats = {"parsed": 0, "created": 0, "updated": 0, "deleted": 0}
 
-        result = self._parser.parse_docs_tree(sillyspec_root)
+        if not workspace.component_key:
+            result = ScanDocsResult(component_key=None)
+            return stats, result
+
+        result = self._parser.parse_component(sillyspec_root, workspace.component_key)
         stats["parsed"] = len([d for d in result.docs if d.exists])
 
         # Fetch existing rows keyed by path
@@ -97,10 +111,11 @@ class ScanDocsService:
                 self._session.add(row)
                 stats["created"] += 1
 
-        # Delete rows whose files disappeared
+        # Soft-delete rows whose files disappeared
         for row in existing:
             if row.path not in parsed_paths:
-                await self._session.delete(row)
+                row.exists = False
+                row.content = None
                 stats["deleted"] += 1
 
         await self._session.commit()

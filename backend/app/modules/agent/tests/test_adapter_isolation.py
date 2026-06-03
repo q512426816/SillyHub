@@ -382,14 +382,17 @@ class TestProcessRegistration:
         redis = AsyncMock()
         redis.publish = AsyncMock()
 
-        with patch(
-            "asyncio.create_subprocess_exec",
-            side_effect=FileNotFoundError(
-                2,
-                "No such file or directory",
-                "claude",
+        with (
+            patch(
+                "asyncio.create_subprocess_exec",
+                side_effect=FileNotFoundError(
+                    2,
+                    "No such file or directory",
+                    "claude",
+                ),
             ),
-        ), patch("app.modules.agent.adapters.claude_code.get_redis", return_value=redis):
+            patch("app.modules.agent.adapters.claude_code.get_redis", return_value=redis),
+        ):
             result = await adapter._exec_stream(
                 run_id=run_id,
                 cmd=["claude"],

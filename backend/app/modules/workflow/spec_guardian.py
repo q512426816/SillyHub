@@ -128,7 +128,7 @@ async def _check_no_unresolved_reject(
     stmt = (
         select(ChangeReview)
         .where(col(ChangeReview.change_id) == change.id)
-        .order_by(col(ChangeReview.created_at).desc())
+        .order_by(col(ChangeReview.created_at).desc(), col(ChangeReview.id).desc())
     )
     reviews = list((await session.execute(stmt)).scalars().all())
 

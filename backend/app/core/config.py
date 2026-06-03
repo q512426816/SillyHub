@@ -60,11 +60,7 @@ class Settings(BaseSettings):
 
     # ── Spec data root (platform-managed spec storage) ─────────────────
     spec_data_root: str = Field(
-        default=(
-            "C:/data/sillyspec-data"
-            if sys.platform == "win32"
-            else "/data/sillyspec-data"
-        ),
+        default=("C:/data/sillyspec-data" if sys.platform == "win32" else "/data/sillyspec-data"),
         description="Root directory for platform-managed spec storage.",
     )
 

@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ScanDocNotFound, WorkspaceNotFound
@@ -165,7 +166,7 @@ class TestReparseNoComponentKey:
         svc = ScanDocsService(db_session)
         stats, result = await svc.reparse(ws.id)
         assert stats == {"parsed": 0, "created": 0, "updated": 0, "deleted": 0}
-        assert result == []
+        assert result.docs == []
 
 
 class TestReparseCreatesDocs:
@@ -286,7 +287,11 @@ class TestReparseRemovesDeletedFiles:
         # Reparse again
         _stats, _ = await svc.reparse(ws.id)
 
-        items, _ = await svc.list_(ws.id)
-        arch = next(d for d in items if d.doc_type == "ARCHITECTURE")
+        # list_() filters by exists=True, so query directly to verify soft-delete
+        stmt = select(ScanDocument).where(
+            ScanDocument.workspace_id == ws.id,
+            ScanDocument.doc_type == "ARCHITECTURE",
+        )
+        arch = (await db_session.execute(stmt)).scalar_one()
         assert arch.exists is False
         assert arch.content is None

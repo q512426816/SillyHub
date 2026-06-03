@@ -239,7 +239,13 @@ async def _create_parent_and_reparse(
     service: WorkspaceService,
     root: Path,
 ) -> tuple:
-    """Helper: create a parent workspace from root, then call reparse."""
+    """Helper: create a parent workspace from root, then call reparse.
+
+    Note: ``service.create()`` triggers an implicit reparse via
+    ``_ensure_spec_workspace``, so the *second* explicit ``reparse()``
+    call will see updates, not creates.  The test assertions are
+    written accordingly.
+    """
     ws = await service.create(
         WorkspaceCreate(name="Parent", root_path=str(root)),
         created_by=None,
@@ -270,8 +276,9 @@ async def test_reparse_creates_child_workspaces(db_session, tmp_path: Path) -> N
     _parse_result, stats, children, relations = await _create_parent_and_reparse(service, root)
 
     assert stats["parsed"] == 2
-    assert stats["created"] == 2
-    assert stats["updated"] == 0
+    # create() already ran an implicit reparse, so second reparse sees updates
+    assert stats["created"] == 0
+    assert stats["updated"] == 2
 
     assert len(children) == 2
     by_key = {c.component_key: c for c in children}
@@ -314,10 +321,10 @@ async def test_reparse_updates_existing_children(db_session, tmp_path: Path) -> 
         created_by=None,
     )
 
-    # First reparse
+    # First reparse (create() already ran implicit reparse, so this is second)
     _, stats1, _children1, _ = await service.reparse(ws.id)
-    assert stats1["created"] == 2
-    assert stats1["updated"] == 0
+    assert stats1["created"] == 0
+    assert stats1["updated"] == 2
 
     # Modify YAML content
     _write_yaml(projects, "backend.yaml", "id: backend\nname: Backend V2\ntype: library\n")
@@ -347,10 +354,11 @@ async def test_reparse_soft_deletes_removed_components(db_session, tmp_path: Pat
         created_by=None,
     )
 
-    # First reparse
+    # First reparse (create() already ran implicit reparse, so this is second)
     _, stats1, _, _ = await service.reparse(ws.id)
     assert stats1["parsed"] == 3
-    assert stats1["created"] == 3
+    assert stats1["created"] == 0
+    assert stats1["updated"] == 3
 
     # Remove one YAML
     (projects / "shared.yaml").unlink()
@@ -435,7 +443,9 @@ async def test_reparse_path_missing_correction(db_session, tmp_path: Path) -> No
     _, stats, children, _ = await service.reparse(ws.id)
 
     assert stats["parsed"] == 1
-    assert stats["created"] == 1
+    # create() already ran implicit reparse, so second reparse sees update
+    assert stats["created"] == 0
+    assert stats["updated"] == 1
     assert len(children) == 1
     assert children[0].status == "active"
     assert "backend" in children[0].root_path

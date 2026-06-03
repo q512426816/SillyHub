@@ -151,27 +151,21 @@ async def _get_run(session: AsyncSession, run_id: uuid.UUID) -> AgentRun | None:
     return await session.get(AgentRun, run_id)
 
 
-async def _get_spec_ws(
-    session: AsyncSession, workspace_id: uuid.UUID
-) -> SpecWorkspace | None:
+async def _get_spec_ws(session: AsyncSession, workspace_id: uuid.UUID) -> SpecWorkspace | None:
     stmt = select(SpecWorkspace).where(
         SpecWorkspace.workspace_id == workspace_id,
     )
     return (await session.execute(stmt)).scalars().first()
 
 
-async def _get_conflicts(
-    session: AsyncSession, workspace_id: uuid.UUID
-) -> list[SpecConflict]:
+async def _get_conflicts(session: AsyncSession, workspace_id: uuid.UUID) -> list[SpecConflict]:
     stmt = select(SpecConflict).where(
         SpecConflict.workspace_id == workspace_id,
     )
     return list((await session.execute(stmt)).scalars().all())
 
 
-async def _get_run_logs(
-    session: AsyncSession, run_id: uuid.UUID
-) -> list[AgentRunLog]:
+async def _get_run_logs(session: AsyncSession, run_id: uuid.UUID) -> list[AgentRunLog]:
     stmt = select(AgentRunLog).where(AgentRunLog.run_id == run_id)
     return list((await session.execute(stmt)).scalars().all())
 
@@ -196,9 +190,7 @@ async def _get_audit_logs(
 class TestBootstrapReturnsPendingRunStartContract:
     """bootstrap() returns the correct pending run start response."""
 
-    async def test_returns_required_fields(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_returns_required_fields(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session)
         spec_root = tmp_path / "specs" / str(ws.id)
         await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -212,9 +204,7 @@ class TestBootstrapReturnsPendingRunStartContract:
         assert "spec_root" in result
         assert "message" in result
 
-    async def test_status_is_pending(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_status_is_pending(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session)
         spec_root = tmp_path / "specs" / str(ws.id)
         await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -224,9 +214,7 @@ class TestBootstrapReturnsPendingRunStartContract:
 
         assert result["status"] == "pending"
 
-    async def test_stream_url_format(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_stream_url_format(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session)
         spec_root = tmp_path / "specs" / str(ws.id)
         await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -262,9 +250,7 @@ class TestBootstrapReturnsPendingRunStartContract:
 
         assert result["spec_root"] == str(spec_root)
 
-    async def test_no_legacy_sync_fields(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_no_legacy_sync_fields(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session)
         spec_root = tmp_path / "specs" / str(ws.id)
         await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -304,9 +290,7 @@ class TestBootstrapCreatesClaudeCodeAgentRun:
         assert run is not None
         assert run.agent_type == "claude_code"
 
-    async def test_status_is_pending_in_db(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_status_is_pending_in_db(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session)
         spec_root = tmp_path / "specs" / str(ws.id)
         await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -318,9 +302,7 @@ class TestBootstrapCreatesClaudeCodeAgentRun:
         assert run is not None
         assert run.status == "pending"
 
-    async def test_task_id_is_none(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_task_id_is_none(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session)
         spec_root = tmp_path / "specs" / str(ws.id)
         await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -331,9 +313,7 @@ class TestBootstrapCreatesClaudeCodeAgentRun:
         run = await db_session.get(AgentRun, result["agent_run_id"])
         assert run.task_id is None
 
-    async def test_lease_id_is_none(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_lease_id_is_none(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session)
         spec_root = tmp_path / "specs" / str(ws.id)
         await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -344,9 +324,7 @@ class TestBootstrapCreatesClaudeCodeAgentRun:
         run = await db_session.get(AgentRun, result["agent_run_id"])
         assert run.lease_id is None
 
-    async def test_started_at_is_none(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_started_at_is_none(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session)
         spec_root = tmp_path / "specs" / str(ws.id)
         await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -357,9 +335,7 @@ class TestBootstrapCreatesClaudeCodeAgentRun:
         run = await db_session.get(AgentRun, result["agent_run_id"])
         assert run.started_at is None
 
-    async def test_finished_at_is_none(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_finished_at_is_none(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session)
         spec_root = tmp_path / "specs" / str(ws.id)
         await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -370,9 +346,7 @@ class TestBootstrapCreatesClaudeCodeAgentRun:
         run = await db_session.get(AgentRun, result["agent_run_id"])
         assert run.finished_at is None
 
-    async def test_exit_code_is_none(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_exit_code_is_none(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session)
         spec_root = tmp_path / "specs" / str(ws.id)
         await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -413,9 +387,7 @@ class TestBootstrapCreatesClaudeCodeAgentRun:
 class TestBootstrapCreatesAgentRunWorkspaceLink:
     """bootstrap() creates AgentRunWorkspace association."""
 
-    async def test_link_exists(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_link_exists(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session)
         spec_root = tmp_path / "specs" / str(ws.id)
         await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -436,9 +408,7 @@ class TestBootstrapCreatesAgentRunWorkspaceLink:
 class TestBootstrapWritesStartAuditOnly:
     """bootstrap() writes spec_bootstrap.start audit log."""
 
-    async def test_start_audit_exists(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_start_audit_exists(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session)
         spec_root = tmp_path / "specs" / str(ws.id)
         await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -530,9 +500,7 @@ class TestBootstrapDoesNotCallAdapterOrValidator:
 
             mock_validate.assert_not_called()
 
-    async def test_no_subprocess_exec(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_no_subprocess_exec(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session)
         spec_root = tmp_path / "specs" / str(ws.id)
         await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -550,9 +518,7 @@ class TestBootstrapDoesNotCallAdapterOrValidator:
 class TestBootstrapCreatesDirectory:
     """bootstrap() creates spec_root directory on disk."""
 
-    async def test_directory_created(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_directory_created(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session)
         spec_root = tmp_path / "specs" / str(ws.id)
         await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -573,9 +539,7 @@ class TestBootstrapWorkspaceNotFound:
         with pytest.raises(SpecWorkspaceNotFound):
             await svc.bootstrap(uuid.uuid4(), user_id=uuid.uuid4())
 
-    async def test_no_orphan_agent_run_on_missing_workspace(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_no_orphan_agent_run_on_missing_workspace(self, db_session: AsyncSession) -> None:
         random_id = uuid.uuid4()
         svc = SpecBootstrapService(db_session)
 
@@ -610,20 +574,24 @@ class TestBackgroundExecutionAdapterBundle:
             captured_bundle = bundle
             return _fake_agent_result()
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            side_effect=_capture_bundle,
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
-                return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                side_effect=_capture_bundle,
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=True),
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=MagicMock(
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
+            ),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=True),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -651,20 +619,24 @@ class TestBackgroundExecutionAdapterBundle:
             captured_bundle = bundle
             return _fake_agent_result()
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            side_effect=_capture_bundle,
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
-                return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                side_effect=_capture_bundle,
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=True),
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=MagicMock(
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
+            ),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=True),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -692,20 +664,24 @@ class TestBackgroundExecutionAdapterBundle:
             captured_bundle = bundle
             return _fake_agent_result()
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            side_effect=_capture_bundle,
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
-                return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                side_effect=_capture_bundle,
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=True),
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=MagicMock(
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
+            ),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=True),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -733,20 +709,24 @@ class TestBackgroundExecutionAdapterBundle:
             captured_bundle = bundle
             return _fake_agent_result()
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            side_effect=_capture_bundle,
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
-                return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                side_effect=_capture_bundle,
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=True),
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=MagicMock(
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
+            ),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=True),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -775,20 +755,24 @@ class TestBackgroundExecutionAdapterBundle:
             captured_bundle = bundle
             return _fake_agent_result()
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            side_effect=_capture_bundle,
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
-                return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                side_effect=_capture_bundle,
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=True),
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=MagicMock(
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
+            ),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=True),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -816,20 +800,24 @@ class TestBackgroundExecutionAdapterBundle:
             captured_bundle = bundle
             return _fake_agent_result()
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            side_effect=_capture_bundle,
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
-                return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                side_effect=_capture_bundle,
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=True),
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=MagicMock(
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
+            ),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=True),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -857,20 +845,24 @@ class TestBackgroundExecutionAdapterBundle:
             captured_bundle = bundle
             return _fake_agent_result()
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            side_effect=_capture_bundle,
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
-                return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                side_effect=_capture_bundle,
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=True),
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=MagicMock(
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
+            ),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=True),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -889,9 +881,7 @@ class TestBackgroundExecutionAdapterBundle:
 class TestBackgroundExecutionSuccess:
     """When adapter and validator both succeed, run should complete."""
 
-    async def test_run_completed(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_run_completed(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session, root_path=str(tmp_path / "code"))
         spec_root = tmp_path / "specs" / str(ws.id)
         spec_ws = await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -901,21 +891,25 @@ class TestBackgroundExecutionSuccess:
         # Write minimal valid spec so validator would pass (but we mock anyway)
         _write_minimal_valid_spec(spec_root)
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            new_callable=AsyncMock,
-            return_value=_fake_agent_result(exit_code=0),
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
-                return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                new_callable=AsyncMock,
+                return_value=_fake_agent_result(exit_code=0),
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=True),
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=MagicMock(
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
+            ),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=True),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -948,23 +942,28 @@ class TestBackgroundExecutionSuccess:
             await on_log("stdout", "adapter first log", "2026-06-02T00:00:00")
             return _fake_agent_result(exit_code=0)
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            side_effect=_capture_bundle,
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
-                return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                side_effect=_capture_bundle,
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=True),
-        ), patch(
-            "app.modules.spec_workspace.bootstrap.get_redis",
-            return_value=redis,
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=MagicMock(
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
+            ),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=True),
+            ),
+            patch(
+                "app.modules.spec_workspace.bootstrap.get_redis",
+                return_value=redis,
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -980,9 +979,7 @@ class TestBackgroundExecutionSuccess:
         assert "adapter first log" in contents
         assert redis.publish.await_count >= 1
 
-    async def test_sync_status_clean(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_sync_status_clean(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session, root_path=str(tmp_path / "code"))
         spec_root = tmp_path / "specs" / str(ws.id)
         spec_ws = await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -991,21 +988,25 @@ class TestBackgroundExecutionSuccess:
 
         _write_minimal_valid_spec(spec_root)
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            new_callable=AsyncMock,
-            return_value=_fake_agent_result(exit_code=0),
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
-                return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                new_callable=AsyncMock,
+                return_value=_fake_agent_result(exit_code=0),
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=True),
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=MagicMock(
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
+            ),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=True),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -1018,9 +1019,7 @@ class TestBackgroundExecutionSuccess:
         await db_session.refresh(spec_ws)
         assert spec_ws.sync_status == "clean"
 
-    async def test_last_synced_at_set(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_last_synced_at_set(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session, root_path=str(tmp_path / "code"))
         spec_root = tmp_path / "specs" / str(ws.id)
         spec_ws = await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -1029,21 +1028,25 @@ class TestBackgroundExecutionSuccess:
 
         _write_minimal_valid_spec(spec_root)
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            new_callable=AsyncMock,
-            return_value=_fake_agent_result(exit_code=0),
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
-                return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                new_callable=AsyncMock,
+                return_value=_fake_agent_result(exit_code=0),
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=True),
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=MagicMock(
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
+            ),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=True),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -1056,9 +1059,7 @@ class TestBackgroundExecutionSuccess:
         await db_session.refresh(spec_ws)
         assert spec_ws.last_synced_at is not None
 
-    async def test_complete_audit_written(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_complete_audit_written(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session, root_path=str(tmp_path / "code"))
         spec_root = tmp_path / "specs" / str(ws.id)
         spec_ws = await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -1067,21 +1068,25 @@ class TestBackgroundExecutionSuccess:
 
         _write_minimal_valid_spec(spec_root)
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            new_callable=AsyncMock,
-            return_value=_fake_agent_result(exit_code=0),
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
-                return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                new_callable=AsyncMock,
+                return_value=_fake_agent_result(exit_code=0),
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=True),
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=MagicMock(
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
+            ),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=True),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -1108,21 +1113,25 @@ class TestBackgroundExecutionSuccess:
 
         _write_minimal_valid_spec(spec_root)
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            new_callable=AsyncMock,
-            return_value=_fake_agent_result(exit_code=0),
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
-                return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                new_callable=AsyncMock,
+                return_value=_fake_agent_result(exit_code=0),
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=True),
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=MagicMock(
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
+            ),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=True),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -1139,9 +1148,7 @@ class TestBackgroundExecutionSuccess:
 class TestBackgroundExecutionValidationFailure:
     """When adapter succeeds but validator reports errors."""
 
-    async def test_run_failed(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_run_failed(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session, root_path=str(tmp_path / "code"))
         spec_root = tmp_path / "specs" / str(ws.id)
         spec_ws = await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -1157,21 +1164,25 @@ class TestBackgroundExecutionValidationFailure:
             )
         ]
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            new_callable=AsyncMock,
-            return_value=_fake_agent_result(exit_code=0),
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
-                return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                new_callable=AsyncMock,
+                return_value=_fake_agent_result(exit_code=0),
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=False, errors=validation_errors),
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=MagicMock(
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
+            ),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=False, errors=validation_errors),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -1184,9 +1195,7 @@ class TestBackgroundExecutionValidationFailure:
         await db_session.refresh(run)
         assert run.status == "failed"
 
-    async def test_sync_status_dirty(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_sync_status_dirty(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session, root_path=str(tmp_path / "code"))
         spec_root = tmp_path / "specs" / str(ws.id)
         spec_ws = await _create_spec_workspace(db_session, ws, str(spec_root))
@@ -1202,21 +1211,25 @@ class TestBackgroundExecutionValidationFailure:
             )
         ]
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            new_callable=AsyncMock,
-            return_value=_fake_agent_result(exit_code=0),
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
-                return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                new_callable=AsyncMock,
+                return_value=_fake_agent_result(exit_code=0),
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=False, errors=validation_errors),
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=MagicMock(
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
+            ),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=False, errors=validation_errors),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -1247,21 +1260,25 @@ class TestBackgroundExecutionValidationFailure:
             )
         ]
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            new_callable=AsyncMock,
-            return_value=_fake_agent_result(exit_code=0),
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
-                return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                new_callable=AsyncMock,
+                return_value=_fake_agent_result(exit_code=0),
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=False, errors=validation_errors),
+            patch(
+                "app.core.db.get_session_factory",
+                return_value=MagicMock(
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
+            ),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=False, errors=validation_errors),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -1281,32 +1298,34 @@ class TestBackgroundExecutionValidationFailure:
 class TestBackgroundExecutionAdapterFailure:
     """When adapter returns non-zero exit code."""
 
-    async def test_run_failed(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_run_failed(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session, root_path=str(tmp_path / "code"))
         spec_root = tmp_path / "specs" / str(ws.id)
         spec_ws = await _create_spec_workspace(db_session, ws, str(spec_root))
         run = await _create_pending_run(db_session, ws, spec_ws)
         user_id = uuid.uuid4()
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            new_callable=AsyncMock,
-            return_value=_fake_agent_result(
-                exit_code=1, stderr="boom", redacted_output="failed"
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                new_callable=AsyncMock,
+                return_value=_fake_agent_result(
+                    exit_code=1, stderr="boom", redacted_output="failed"
+                ),
             ),
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
+            patch(
+                "app.core.db.get_session_factory",
                 return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=True),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=True),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -1320,32 +1339,34 @@ class TestBackgroundExecutionAdapterFailure:
         assert run.status == "failed"
         assert run.exit_code == 1
 
-    async def test_stderr_log_written(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_stderr_log_written(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session, root_path=str(tmp_path / "code"))
         spec_root = tmp_path / "specs" / str(ws.id)
         spec_ws = await _create_spec_workspace(db_session, ws, str(spec_root))
         run = await _create_pending_run(db_session, ws, spec_ws)
         user_id = uuid.uuid4()
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            new_callable=AsyncMock,
-            return_value=_fake_agent_result(
-                exit_code=1, stderr="error output here", redacted_output="failed"
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                new_callable=AsyncMock,
+                return_value=_fake_agent_result(
+                    exit_code=1, stderr="error output here", redacted_output="failed"
+                ),
             ),
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
+            patch(
+                "app.core.db.get_session_factory",
                 return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=True),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=True),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -1359,32 +1380,34 @@ class TestBackgroundExecutionAdapterFailure:
         stderr_logs = [entry for entry in logs if entry.channel == "stderr"]
         assert len(stderr_logs) >= 1
 
-    async def test_sync_status_dirty(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_sync_status_dirty(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session, root_path=str(tmp_path / "code"))
         spec_root = tmp_path / "specs" / str(ws.id)
         spec_ws = await _create_spec_workspace(db_session, ws, str(spec_root))
         run = await _create_pending_run(db_session, ws, spec_ws)
         user_id = uuid.uuid4()
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            new_callable=AsyncMock,
-            return_value=_fake_agent_result(
-                exit_code=1, stderr="boom", redacted_output="failed"
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                new_callable=AsyncMock,
+                return_value=_fake_agent_result(
+                    exit_code=1, stderr="boom", redacted_output="failed"
+                ),
             ),
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
+            patch(
+                "app.core.db.get_session_factory",
                 return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=True),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=True),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -1406,23 +1429,27 @@ class TestBackgroundExecutionAdapterFailure:
         run = await _create_pending_run(db_session, ws, spec_ws)
         user_id = uuid.uuid4()
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            new_callable=AsyncMock,
-            return_value=_fake_agent_result(
-                exit_code=1, stderr="boom", redacted_output="failed"
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                new_callable=AsyncMock,
+                return_value=_fake_agent_result(
+                    exit_code=1, stderr="boom", redacted_output="failed"
+                ),
             ),
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
+            patch(
+                "app.core.db.get_session_factory",
                 return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
             ),
-        ), patch(
-            "app.modules.spec_workspace.validator.SpecValidator.validate",
-            return_value=_fake_validation_report(passed=True),
+            patch(
+                "app.modules.spec_workspace.validator.SpecValidator.validate",
+                return_value=_fake_validation_report(passed=True),
+            ),
         ):
             await _execute_bootstrap_agent_run(
                 run_id=run.id,
@@ -1441,26 +1468,27 @@ class TestBackgroundExecutionAdapterFailure:
 class TestBackgroundExecutionAdapterException:
     """When adapter throws an exception, run must not stay in 'running'."""
 
-    async def test_run_failed_on_exception(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_run_failed_on_exception(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session, root_path=str(tmp_path / "code"))
         spec_root = tmp_path / "specs" / str(ws.id)
         spec_ws = await _create_spec_workspace(db_session, ws, str(spec_root))
         run = await _create_pending_run(db_session, ws, spec_ws)
         user_id = uuid.uuid4()
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("adapter crashed"),
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("adapter crashed"),
+            ),
+            patch(
+                "app.core.db.get_session_factory",
                 return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
             ),
         ):
             await _execute_bootstrap_agent_run(
@@ -1475,26 +1503,27 @@ class TestBackgroundExecutionAdapterException:
         assert run.status == "failed"
         assert run.status != "running"
 
-    async def test_error_written_to_output(
-        self, db_session: AsyncSession, tmp_path: Path
-    ) -> None:
+    async def test_error_written_to_output(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session, root_path=str(tmp_path / "code"))
         spec_root = tmp_path / "specs" / str(ws.id)
         spec_ws = await _create_spec_workspace(db_session, ws, str(spec_root))
         run = await _create_pending_run(db_session, ws, spec_ws)
         user_id = uuid.uuid4()
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("adapter crashed"),
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("adapter crashed"),
+            ),
+            patch(
+                "app.core.db.get_session_factory",
                 return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
             ),
         ):
             await _execute_bootstrap_agent_run(
@@ -1518,17 +1547,20 @@ class TestBackgroundExecutionAdapterException:
         run = await _create_pending_run(db_session, ws, spec_ws)
         user_id = uuid.uuid4()
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("adapter crashed"),
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("adapter crashed"),
+            ),
+            patch(
+                "app.core.db.get_session_factory",
                 return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
             ),
         ):
             await _execute_bootstrap_agent_run(
@@ -1552,17 +1584,20 @@ class TestBackgroundExecutionAdapterException:
         run = await _create_pending_run(db_session, ws, spec_ws)
         user_id = uuid.uuid4()
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("adapter crashed"),
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("adapter crashed"),
+            ),
+            patch(
+                "app.core.db.get_session_factory",
                 return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
             ),
         ):
             await _execute_bootstrap_agent_run(
@@ -1585,17 +1620,20 @@ class TestBackgroundExecutionAdapterException:
         run = await _create_pending_run(db_session, ws, spec_ws)
         user_id = uuid.uuid4()
 
-        with patch(
-            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("adapter crashed"),
-        ), patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(
+        with (
+            patch(
+                "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("adapter crashed"),
+            ),
+            patch(
+                "app.core.db.get_session_factory",
                 return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=db_session),
-                    __aexit__=AsyncMock(return_value=False),
-                )
+                    return_value=MagicMock(
+                        __aenter__=AsyncMock(return_value=db_session),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
+                ),
             ),
         ):
             await _execute_bootstrap_agent_run(
