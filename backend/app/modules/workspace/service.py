@@ -768,15 +768,27 @@ class WorkspaceService:
         # Copy .sillyspec tree from source to platform directory
         source = Path(sillyspec_path)
         if source.is_dir():
-            if platform_sillyspec.exists():
-                shutil.rmtree(platform_sillyspec)
-            shutil.copytree(str(source), str(platform_sillyspec))
-            log.info(
-                "spec_workspace.sillyspec_copied",
-                workspace_id=str(workspace_id),
-                source=str(source),
-                dest=str(platform_sillyspec),
-            )
+            try:
+                if platform_sillyspec.exists():
+                    shutil.rmtree(platform_sillyspec)
+                shutil.copytree(
+                    str(source),
+                    str(platform_sillyspec),
+                    ignore_dangling_symlinks=True,
+                )
+                log.info(
+                    "spec_workspace.sillyspec_copied",
+                    workspace_id=str(workspace_id),
+                    source=str(source),
+                    dest=str(platform_sillyspec),
+                )
+            except Exception as exc:
+                log.warning(
+                    "spec_workspace.sillyspec_copy_failed",
+                    workspace_id=str(workspace_id),
+                    source=str(source),
+                    error=str(exc),
+                )
 
         spec_ws_svc = SpecWorkspaceService(self._session)
         try:
