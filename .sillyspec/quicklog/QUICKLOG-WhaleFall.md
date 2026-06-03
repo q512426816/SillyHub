@@ -17,3 +17,8 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：backend/app/modules/agent/router.py, backend/app/modules/agent/service.py, backend/app/modules/agent/tests/test_router.py, frontend/src/lib/api.ts, frontend/src/lib/agent.ts, frontend/src/components/workspace-scan-dialog.tsx
 结果：1) EventSource 改用 getDirectApiBaseUrl() 直连后端绕过 Next.js rewrite 代理缓冲；2) done 事件携带 {status, exit_code}，前端不再调 getAgentRun() 避免长任务 token 过期 401，16 tests 通过
+
+## 2026-06-03 10:44:29 — 直接创建时拷贝 .sillyspec 到平台目录，脱离本地依赖
+状态：已完成
+文件：backend/app/modules/workspace/service.py, backend/app/modules/workspace/router.py, frontend/src/lib/workspaces.ts
+结果：_ensure_spec_workspace 改用 shutil.copytree 将 .sillyspec 拷贝到 spec_data_root/<ws_id>/，策略改为 platform-managed；reparse/rescan 从 spec_root 读取；新增 activate endpoint + service 方法，19 tests 通过
