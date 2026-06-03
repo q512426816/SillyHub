@@ -270,7 +270,18 @@ class WorkspaceService:
 
     async def rescan(self, workspace_id: uuid.UUID) -> tuple[Workspace, ScanResult]:
         workspace = await self.get(workspace_id)
-        scan = self.scan(workspace.root_path)
+
+        # For platform-managed workspaces, scan from spec_root instead of root_path
+        from app.modules.spec_workspace.service import SpecWorkspaceService
+
+        try:
+            spec_ws_svc = SpecWorkspaceService(self._session)
+            spec_ws = await spec_ws_svc.get(workspace.id)
+            scan_path = spec_ws.spec_root if spec_ws.strategy == "platform-managed" else workspace.root_path
+        except Exception:
+            scan_path = workspace.root_path
+
+        scan = self.scan(scan_path)
         workspace.last_scanned_at = datetime.utcnow()
         workspace.updated_at = workspace.last_scanned_at
 
@@ -362,8 +373,18 @@ class WorkspaceService:
         # 1. Verify parent workspace
         ws = await self.get(workspace_id)
 
-        # 2. Determine parse root
-        root_path = _rewrite_path(ws.root_path)
+        # 2. Determine parse root — prefer spec_root for platform-managed
+        from app.modules.spec_workspace.service import SpecWorkspaceService
+
+        spec_ws_svc = SpecWorkspaceService(self._session)
+        try:
+            spec_ws = await spec_ws_svc.get(ws.id)
+            if spec_ws.strategy == "platform-managed" and spec_ws.spec_root:
+                root_path = spec_ws.spec_root
+            else:
+                root_path = _rewrite_path(ws.root_path)
+        except Exception:
+            root_path = _rewrite_path(ws.root_path)
 
         # 3. Call parser
         parser = WorkspaceParser()
@@ -718,6 +739,26 @@ class WorkspaceService:
         )
         return (await self._session.execute(stmt)).scalars().first()
 
+    async def activate(self, workspace_id: uuid.UUID) -> Workspace:
+        """Activate a pending workspace: copy .sillyspec, set status='active'."""
+        workspace = await self.get(workspace_id)
+        if workspace.status != "pending":
+            return workspace
+
+        workspace.status = "active"
+        workspace.updated_at = datetime.utcnow()
+        workspace.last_scanned_at = datetime.utcnow()
+
+        # Scan and copy .sillyspec to platform storage
+        scan = self.scan(workspace.root_path)
+        if scan.is_sillyspec:
+            await self._ensure_spec_workspace(workspace.id, scan.sillyspec_path)
+
+        await self._session.commit()
+        await self._session.refresh(workspace)
+        log.info("workspace.activated", workspace_id=str(workspace.id))
+        return workspace
+
     # -- Helpers ---
 
     async def _ensure_spec_workspace(
@@ -725,9 +766,28 @@ class WorkspaceService:
         workspace_id: uuid.UUID,
         sillyspec_path: str,
     ) -> None:
-        """Create a SpecWorkspace and import projects + changes from .sillyspec."""
+        """Copy .sillyspec to platform storage and import projects + changes."""
+        import shutil
+
         from app.modules.spec_workspace.schema import SpecWorkspaceCreate
         from app.modules.spec_workspace.service import SpecWorkspaceService
+
+        settings = get_settings()
+        platform_root = f"{settings.spec_data_root}/{workspace_id}"
+        platform_sillyspec = Path(platform_root) / ".sillyspec"
+
+        # Copy .sillyspec tree from source to platform directory
+        source = Path(sillyspec_path)
+        if source.is_dir():
+            if platform_sillyspec.exists():
+                shutil.rmtree(platform_sillyspec)
+            shutil.copytree(str(source), str(platform_sillyspec))
+            log.info(
+                "spec_workspace.sillyspec_copied",
+                workspace_id=str(workspace_id),
+                source=str(source),
+                dest=str(platform_sillyspec),
+            )
 
         spec_ws_svc = SpecWorkspaceService(self._session)
         try:
@@ -736,8 +796,8 @@ class WorkspaceService:
             await spec_ws_svc.create(
                 workspace_id=workspace_id,
                 payload=SpecWorkspaceCreate(
-                    spec_root=sillyspec_path,
-                    strategy="repo-native",
+                    spec_root=platform_root,
+                    strategy="platform-managed",
                     repo_sillyspec_path=sillyspec_path,
                 ),
             )
