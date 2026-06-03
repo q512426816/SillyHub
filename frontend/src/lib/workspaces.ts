@@ -112,6 +112,12 @@ export async function scanGenerate(rootPath: string): Promise<ScanGenerateRespon
   });
 }
 
+export async function activateWorkspace(workspaceId: string): Promise<Workspace> {
+  return apiFetch<Workspace>(`/api/workspaces/${workspaceId}/activate`, {
+    method: "POST",
+  });
+}
+
 export async function listWorkspaces(): Promise<WorkspaceListResponse> {
   return apiFetch<WorkspaceListResponse>("/api/workspaces");
 }

@@ -104,6 +104,17 @@ async def create_workspace(
     return WorkspaceRead.model_validate(workspace)
 
 
+
+@router.post("/{workspace_id}/activate", response_model=WorkspaceRead)
+async def activate_workspace(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_WRITE))],
+) -> WorkspaceRead:
+    service = WorkspaceService(session)
+    workspace = await service.activate(workspace_id)
+    return WorkspaceRead.model_validate(workspace)
+
 @router.get("/topology", response_model=TopologyResponse)
 async def get_topology(
     session: SessionDep,

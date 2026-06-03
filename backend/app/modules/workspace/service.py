@@ -98,6 +98,22 @@ class WorkspaceService:
         slug = payload.slug or slugify(payload.name)
         now = datetime.utcnow()
 
+        # If a pending workspace exists for this root_path (e.g. from a
+        # previous scan-generate that was never activated), activate it.
+        existing = await self._find_active_by_root_path(payload.root_path)
+        if existing and existing.status == "pending":
+            existing.name = payload.name
+            existing.slug = slug
+            existing.status = "active"
+            existing.updated_at = now
+            existing.last_scanned_at = now
+            await self._session.flush()
+            await self._ensure_spec_workspace(existing.id, scan.sillyspec_path)
+            await self._session.commit()
+            await self._session.refresh(existing)
+            log.info("workspace.activated_from_create", workspace_id=str(existing.id))
+            return existing
+
         # Soft-deleted rows keep the same root_path, so before inserting a
         # fresh row we look for a tombstone we can resurrect. This is the
         # natural user expectation: "I removed it, now I want it back".
@@ -229,6 +245,7 @@ class WorkspaceService:
         stmt = select(Workspace)
         if not include_deleted:
             stmt = stmt.where(col(Workspace.deleted_at).is_(None))
+        stmt = stmt.where(col(Workspace.status) != "pending")
         stmt = stmt.order_by(col(Workspace.created_at).desc()).limit(limit).offset(offset)
 
         items = list((await self._session.execute(stmt)).scalars().all())
@@ -236,6 +253,7 @@ class WorkspaceService:
         count_stmt = select(Workspace)
         if not include_deleted:
             count_stmt = count_stmt.where(col(Workspace.deleted_at).is_(None))
+        count_stmt = count_stmt.where(col(Workspace.status) != "pending")
         total = len((await self._session.execute(count_stmt)).scalars().all())
         return items, total
 
@@ -529,6 +547,34 @@ class WorkspaceService:
 
         return parse_result, stats, final_children, final_rels
 
+
+    async def activate(self, workspace_id: uuid.UUID) -> Workspace:
+        """Activate a pending workspace: set status='active', scan for .sillyspec,
+        create SpecWorkspace + child projects."""
+        workspace = await self._session.get(Workspace, workspace_id)
+        if workspace is None or workspace.deleted_at is not None:
+            raise WorkspaceNotFound(
+                "Workspace not found.",
+                details={"workspace_id": str(workspace_id)},
+            )
+        if workspace.status != "pending":
+            return workspace
+
+        workspace.status = "active"
+        workspace.updated_at = datetime.utcnow()
+        workspace.last_scanned_at = datetime.utcnow()
+        await self._session.flush()
+
+        # Scan for .sillyspec and create SpecWorkspace + child projects
+        scan = self.scan(workspace.root_path)
+        if scan.is_sillyspec:
+            await self._ensure_spec_workspace(workspace.id, scan.sillyspec_path)
+
+        await self._session.commit()
+        await self._session.refresh(workspace)
+        log.info("workspace.activated", workspace_id=str(workspace.id))
+        return workspace
+
     @staticmethod
     def _build_child_root_path(parent_root: str, parsed: ParsedWorkspace) -> str:
         """Construct the root_path for a child Workspace.
@@ -599,7 +645,7 @@ class WorkspaceService:
                 name=name,
                 slug=slug,
                 root_path=root_path,
-                status="active",
+                status="pending",
                 created_by=user_id,
                 created_at=now,
                 updated_at=now,
