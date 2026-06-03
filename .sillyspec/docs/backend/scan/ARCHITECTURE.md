@@ -1,152 +1,175 @@
 ---
 author: qinyi
-created_at: 2026-06-03T00:00:00
+created_at: 2026-06-03T20:35:00+08:00
 ---
 
-# Backend (FastAPI) — 架构文档
+# Backend -- 架构文档
 
-## 技术栈
-
-| 类别       | 技术 / 库                          | 版本          |
-|------------|-------------------------------------|---------------|
-| 语言       | Python                              | >=3.12        |
-| Web 框架   | FastAPI + Uvicorn                   | >=0.115       |
-| ORM        | SQLModel + SQLAlchemy (async)       | >=0.0.22 / >=2.0 |
-| 数据库     | PostgreSQL                          | 16-alpine     |
-| 缓存       | Redis                               | 7-alpine      |
-| 迁移       | Alembic                             | >=1.13        |
-| 数据验证   | Pydantic + pydantic-settings        | >=2.8 / >=2.4 |
-| 认证       | python-jose + passlib[bcrypt] + pynacl | >=3.3 / >=1.7 / >=1.5 |
-| HTTP 客户端 | httpx                              | >=0.27        |
-| 日志       | structlog                           | >=24.4        |
-| 驱动       | asyncpg                             | >=0.29        |
-| 包管理     | uv + hatchling                      | hatchling     |
-| 测试       | pytest + pytest-asyncio + pytest-cov | >=8           |
-| Lint       | ruff + mypy                         | >=0.6 / >=1.11 |
-
-## 架构概览
-
-### 分层架构
+## 分层架构
 
 ```
 backend/
 ├── app/
-│   ├── main.py              # FastAPI 应用入口，注册所有路由 + 中间件
-│   ├── core/                # 基础设施层（DB、Redis、配置、安全、日志）
-│   ├── models/              # 共享 BaseModel 基类
-│   └── modules/             # 业务模块（按领域拆分）
+│   ├── main.py              # FastAPI 应用入口：注册路由 + 中间件 + 生命周期
+│   ├── __init__.py           # 版本号 __version__ = "0.1.0"
+│   ├── core/                 # 基础设施层
+│   │   ├── config.py         # Settings(BaseSettings) -- 全部配置集中管理
+│   │   ├── db.py             # AsyncEngine + AsyncSession 工厂 + 审计上下文注入
+│   │   ├── redis.py          # Redis 单例（进程级共享）
+│   │   ├── security.py       # JWT + bcrypt + refresh token
+│   │   ├── crypto.py         # PyNaCl 凭证加密 (xchacha20-poly1305)
+│   │   ├── auth_deps.py      # FastAPI Depends -- get_current_user / require_permission
+│   │   ├── errors.py         # AppError 异常族 + 全局异常处理器
+│   │   ├── logging.py        # structlog JSON 日志
+│   │   ├── telemetry.py      # OpenTelemetry 占位（V2 待实现）
+│   │   ├── audit_hooks.py    # ORM 变更审计钩子
+│   │   ├── spec_paths.py     # SillySpec v4 目录布局路径解析器
+│   │   └── layout_migration.py
+│   ├── models/
+│   │   └── base.py           # BaseModel(SQLModel) -- 所有表模型的统一基类
+│   └── modules/              # 业务模块层（21 个领域模块）
 │       └── <module>/
-│           ├── model.py     # SQLModel 数据模型
-│           ├── schema.py    # Pydantic 请求/响应 Schema
-│           ├── router.py    # APIRouter 路由定义
-│           ├── service.py   # 业务逻辑
-│           └── tests/       # 模块级单元测试
-├── alembic.ini              # Alembic 配置
-├── migrations/              # 数据库迁移脚本
-├── pyproject.toml           # 项目元数据 + 依赖 + 工具配置
-└── tests/                   # 集成测试套件
+│           ├── model.py      # SQLModel 数据模型（表定义）
+│           ├── schema.py     # Pydantic 请求/响应 DTO
+│           ├── router.py     # APIRouter 路由定义
+│           ├── service.py    # 业务逻辑（核心用例）
+│           ├── parser.py     # 文件系统解析器（部分模块）
+│           └── tests/        # 模块级单元测试
+├── migrations/               # Alembic 数据库迁移
+│   ├── env.py                # 异步迁移入口
+│   └── versions/             # 33 个迁移版本文件
+├── tests/                    # 顶层集成测试
+├── pyproject.toml            # 项目配置 + 依赖 + 工具链
+├── ruff.toml                 # ruff 配置（extend pyproject.toml）
+├── alembic.ini               # Alembic 配置
+├── Dockerfile                # 多阶段 Docker 构建
+└── .env.example              # 环境变量模板
 ```
 
-### 核心设计模式
+## 核心设计模式
 
-1. **模块化架构**：每个业务领域独立为 `app/modules/<module>/`，包含 model / schema / router / service
-2. **异步优先**：全链路 async（asyncpg + AsyncSession + async def service）
-3. **共享 BaseModel**：所有模型继承 `app.models.base.BaseModel(SQLModel)`，确保统一的 Alembic 元数据
-4. **依赖注入**：FastAPI Depends 注入数据库 session、认证用户、审计上下文
-5. **审计钩子**：`core/audit_hooks.py` 捕获所有 `BaseModel(table=True)` 变更并写入 AuditLog
-6. **SSE 流式输出**：Agent 模块通过 Server-Sent Events 支持异步 AgentRun 实时输出
-7. **Agent 适配器模式**：`agent/adapters/claude_code.py` 实现 Claude Code CLI 适配器，支持可扩展的 Agent 后端
+### 1. 模块化架构
 
-### API 路由注册（main.py）
+每个业务领域独立为 `app/modules/<module>/`，遵循统一结构：`model.py` + `schema.py` + `router.py` + `service.py`。模块之间通过 Service 类调用，避免 router 直接操作数据库。
 
-所有模块路由在 `app/main.py` 统一注册，包括：
-- auth, agent, archive, change, change_writer
-- git_gateway, git_identity, health, incident, knowledge
-- release, runtime, scan_docs, settings, spec_workspace
-- task, tool_gateway (router + policy_router), workflow
-- workspace, worktree (router + lease_router)
+### 2. 异步优先
 
-## 数据模型（摘要）
+全链路 async：`asyncpg` 异步驱动 + `AsyncSession` + `async def` service 方法。后台任务通过 `asyncio.create_task` 派发（fire-and-forget），使用独立的 `get_session_factory()` 获取新 session。
 
-### 模型总览
+### 3. 依赖注入
 
-| 模块 | 表名 | 说明 | 字段数(约) |
-|------|------|------|-----------|
-| **auth** | `User` | 用户账户 | 33 (模块总计) |
-| | `Session` | 用户会话 | |
-| | `Role` | 角色 | |
-| | `RolePermission` | 角色权限 | |
-| | `UserWorkspaceRole` | 用户-工作区-角色关联 | |
-| **workspace** | `Workspace` | 工作区（项目） | 33 (模块总计) |
-| | `WorkspaceRelation` | 工作区关系 | |
-| | `ChangeWorkspace` | 变更-工作区关联 | |
-| | `TaskWorkspace` | 任务-工作区关联 | |
-| | `AgentRunWorkspace` | Agent运行-工作区关联 | |
-| **change** | `Change` | 变更（SillySpec 核心） | 29 (模块总计) |
-| | `ChangeDocument` | 变更文档 | |
-| **agent** | `AgentRun` | Agent 运行记录 | 28 (模块总计) |
-| | `AgentRunLog` | Agent 运行日志 | |
-| **task** | `Task` | 任务 | 18 |
-| **incident** | `Incident` | 事件 | 25 (模块总计) |
-| | `Postmortem` | 事后总结 | |
-| **release** | `Release` | 发布 | 22 (模块总计) |
-| | `ReleaseApproval` | 发布审批 | |
-| **workflow** | `ChangeReview` | 变更评审 | 14 (模块总计) |
-| | `AuditLog` | 审计日志 | |
-| **spec_workspace** | `SpecWorkspace` | SillySpec 工作区配置 | 10 |
-| **spec_profile** | `SpecProfileManifest` | Spec Profile 清单 | 15 (模块总计) |
-| | `SpecConflict` | Spec 冲突 | |
-| **worktree** | `WorktreeLease` | Worktree 租约 | 14 |
-| **git_identity** | `GitIdentity` | Git 身份配置 | 13 |
-| **git_gateway** | `GitOperationLog` | Git 操作日志 | 9 |
-| **tool_gateway** | `ToolOperationLog` | 工具操作日志 | 9 |
-| | `ToolPolicy` | 工具策略 | (tool_policy.py) |
-| **scan_docs** | `ScanDocument` | 扫描文档 | 8 |
-| **settings** | `PlatformSetting` | 平台设置 | 4 |
+FastAPI `Depends()` 机制贯穿全局：
+- `get_session` -- 注入 AsyncSession（含审计上下文自动注入）
+- `get_current_user` -- 提取 Bearer Token，返回 User 对象
+- `require_permission(Permission.X)` -- RBAC 权限校验，返回已授权的 User
+- `require_permission_any(Permission.X)` -- 不需要 workspace_id 的全局权限检查
 
-**合计约 32 张数据库表**，覆盖认证、工作区管理、变更生命周期、Agent 调度、任务跟踪、发布审批、审计等完整业务域。
+### 4. 共享 BaseModel
 
-## 模块划分
+所有 ORM 模型继承 `app.models.base.BaseModel(SQLModel)`，确保 Alembic autogenerate 扫描统一的 `metadata`。在 `migrations/env.py` 中显式 import 每个模块的 model 以注册表。
 
-### 核心基础设施 (`app/core/`)
+### 5. 审计追踪
 
-| 文件 | 职责 |
-|------|------|
-| `config.py` | 应用配置（Pydantic BaseSettings） |
-| `db.py` | 异步 SQLAlchemy 引擎 + Session 工厂 + 审计上下文注入 |
-| `redis.py` | Redis 连接管理 |
-| `auth_deps.py` | FastAPI 认证依赖（JWT 校验、当前用户提取） |
-| `security.py` | 密码哈希、JWT 令牌生成 |
-| `crypto.py` | 加密工具（SILLYSPEC_MASTER_KEY） |
-| `audit_hooks.py` | 数据变更审计钩子 |
-| `logging.py` | structlog 日志配置 |
-| `errors.py` | 全局异常处理器注册 |
-| `telemetry.py` | OpenTelemetry 初始化 |
-| `spec_paths.py` | SillySpec 文件路径工具 |
-| `layout_migration.py` | 布局迁移工具 |
+- `core/db.py` 的 `get_session` 依赖会自动从 JWT 提取 `actor_id` 和 `workspace_id` 注入 `session.info["audit_context"]`
+- `core/audit_hooks.py` 注册 SQLAlchemy 事件钩子（after_insert/update/delete），自动写入 `workflow/model.py` 的 `AuditLog` 表
+- 审计钩子通过 `register_audit_hooks(engine)` 在应用启动后注册
 
-### 业务模块 (`app/modules/`)
+### 6. Agent 适配器模式
 
-| 模块 | 路由前缀 | 职责 |
-|------|----------|------|
-| **auth** | `/auth` | 用户认证（登录/登出/刷新）、JWT、RBAC |
-| **workspace** | `/workspaces` | 项目工作区 CRUD、扫描、拓扑关系 |
-| **change** | `/workspaces/{id}/change` | 变更全生命周期管理 |
-| **change_writer** | (spec-workspace) | 变更文档写入 |
-| **task** | `/workspaces/{id}/task` | 任务 CRUD |
-| **agent** | `/agent` | Agent 运行调度、Claude Code 适配器、SSE 流 |
-| **spec_workspace** | `/workspaces/{id}/spec-workspace` | SillySpec 工作区管理、bootstrap |
-| **spec_profile** | -- | Spec Profile 与冲突检测 |
-| **scan_docs** | `/workspaces/{id}/scan-docs` | 项目扫描文档查询 |
-| **runtime** | `/workspaces/{id}/runtime` | 运行时进度、用户输入、产物 |
-| **knowledge** | `/workspaces/{id}/knowledge` | 知识库与快速日志 |
-| **workflow** | `/workflow` | 变更评审、审批流程 |
-| **release** | `/releases` | 发布管理与审批 |
-| **incident** | `/incidents` | 事件管理与事后总结 |
-| **git_gateway** | `/git_gateway` | Git 操作代理与日志 |
-| **git_identity** | `/git` | Git 身份管理 |
-| **tool_gateway** | `/tool_gateway` | 工具网关（操作代理 + 策略管理） |
-| **worktree** | `/workspaces/{id}` | Git Worktree 租约管理 |
-| **archive** | `/archive` | 变更归档 |
-| **settings** | `/settings` | 平台设置与用户管理 |
-| **health** | `/health` | 健康检查与版本信息 |
+`AgentAdapter` 抽象基类定义统一接口，`ClaudeCodeAdapter` 为具体实现。通过 `ADAPTERS` 注册表 + `AGENT_TYPE_ALIASES` 别名映射支持多种 Agent 后端。当前仅 `claude_code` 一种实现。
+
+### 7. SSE 实时流
+
+`AgentService.stream_run_logs()` 通过 Redis Pub/Sub 订阅 `agent_run:{run_id}` 频道，向客户端推送 SSE 事件，含 keepalive 心跳和 done 终止事件。
+
+## 请求生命周期
+
+```
+客户端请求
+  -> CORS 中间件（allow_origins from Settings）
+  -> request_id 中间件（生成/透传 x-request-id）
+  -> FastAPI 路由匹配
+  -> Depends(get_session) 注入 DB session + 审计上下文
+  -> Depends(require_permission) JWT 解码 + RBAC 检查
+  -> Router 调用 Service 方法
+  -> Service 执行业务逻辑（DB 读写 + 文件系统操作）
+  -> 异常被 AppError handler 捕获，统一 JSON 响应
+  -> 响应头附加 x-request-id
+```
+
+## 数据模型关系
+
+```
+User --1:N--> Session
+User --M:N--> Workspace (via UserWorkspaceRole -> Role -> RolePermission)
+Workspace --M:N--> Workspace (via WorkspaceRelation, 有向边)
+Workspace --1:N--> Change
+Workspace --M:N--> Change (via ChangeWorkspace, affected_components)
+Change --1:N--> ChangeDocument
+Change --1:N--> Task
+Workspace --M:N--> Task (via TaskWorkspace)
+Task --1:N--> AgentRun
+Workspace --M:N--> AgentRun (via AgentRunWorkspace)
+Workspace --1:N--> WorktreeLease
+Workspace --1:N--> ScanDocument
+Workspace --1:1--> SpecWorkspace
+```
+
+## 模块一览
+
+| 模块 | 路由前缀 | 核心职责 |
+|------|----------|----------|
+| health | `/api` | 健康检查（DB + Redis 探针） |
+| auth | `/api/auth` | JWT 认证、登录/刷新/登出/me、RBAC 种子 |
+| workspace | `/api/workspaces` | 工作区 CRUD、扫描、reparse、拓扑关系 |
+| change | `/api/workspaces/{id}/changes` | 变更生命周期、文档管理、状态流转、Agent dispatch |
+| change_writer | `/api/workspaces/{id}/change-writer` | Agent 驱动的代码写入 |
+| task | `/api/workspaces/{id}/tasks` | 任务 CRUD、看板、reparse |
+| agent | `/api/agents` | AgentRun 创建/查询/终止、SSE 日志流 |
+| spec_workspace | `/api/workspaces/{id}/spec-workspace` | SillySpec 工作区配置 |
+| spec_profile | -- | Spec Profile 与冲突检测（无路由） |
+| scan_docs | `/api/workspaces/{id}/scan-docs` | 项目扫描文档 |
+| runtime | `/api/workspaces/{id}/runtime` | 运行时进度（读 SillySpec .runtime/） |
+| knowledge | `/api/workspaces/{id}/knowledge` | 知识库 + Quicklog |
+| workflow | `/api/workspaces/{id}/workflow` | 审批流程、审计日志 |
+| release | `/api/releases` | 发布管理（多审批人 + 部署窗口） |
+| incident | `/api/incidents` | 事件管理 + 事后总结 |
+| git_gateway | `/api/git-gateway` | Git 操作代理（白名单 + 脱敏） |
+| git_identity | `/api/git` | Git 身份管理 |
+| tool_gateway | `/api/tool-gateway` | 工具操作代理 + 策略管理 |
+| worktree | `/api/workspaces/{id}/worktrees` | Git worktree 租约管理 |
+| archive | `/api/archive` | 变更归档 + 知识蒸馏 |
+| settings | `/api/settings` + `/api/users` | 平台设置 + 用户管理 |
+
+## 状态机
+
+### Change 状态流转
+
+StageEnum 定义 11 个阶段（8 个 SillySpec 主阶段 + 3 个 Hub 扩展）：
+
+```
+SillySpec 主阶段: scan -> brainstorm -> propose -> plan -> execute -> verify -> archive / quick
+Hub 扩展阶段: draft -> rework_required -> accepted
+```
+
+合法流转通过 `TRANSITIONS` 字典定义，包含源阶段 -> 目标阶段 -> 允许角色映射：
+```
+draft -> propose / quick / execute / scan
+scan -> brainstorm
+brainstorm -> propose
+propose -> plan / brainstorm (回退)
+plan -> execute / propose (回退)
+execute -> verify
+verify -> accepted / rework_required
+quick -> accepted / rework_required
+rework_required -> propose / plan / execute
+accepted -> archive
+```
+
+### AgentRun 状态
+
+```
+pending -> running -> completed / failed / killed
+```
+
+支持幂等重试（idempotency_key）、乐观锁（version）、上下文指纹（context_fingerprint）、断点续跑（resume_token）、检查点（checkpoint_data）。

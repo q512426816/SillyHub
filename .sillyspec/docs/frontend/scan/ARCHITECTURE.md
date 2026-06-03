@@ -1,156 +1,170 @@
 ---
 author: qinyi
-created_at: 2026-06-03T00:00:00
+created_at: 2026-06-03T20:35:00+08:00
 ---
 
-# Frontend (Next.js) — 架构文档
-
-## 技术栈
-
-| 类别         | 技术 / 库                              | 版本          |
-|--------------|----------------------------------------|---------------|
-| 语言         | TypeScript                             | 5.5.4         |
-| 框架         | Next.js                                | 14.2.5        |
-| UI 库        | React                                  | 18.3.1        |
-| 样式         | Tailwind CSS + tailwind-merge + CVA    | 3.4.7         |
-| 状态管理     | Zustand                                | ^4.5.0        |
-| 数据请求     | @tanstack/react-query                  | ^5.51.0       |
-| 图表/流程    | @xyflow/react                          | ^12.10.2      |
-| Markdown     | @uiw/react-markdown-preview            | ^5.2.1        |
-| 图标         | lucide-react                           | ^0.400.0      |
-| 校验         | Zod                                    | ^3.23.0       |
-| 包管理       | pnpm                                   | 9.6.0         |
-| 测试         | Vitest + Testing Library + jsdom       | ^2.0.0        |
-| Lint         | ESLint + eslint-config-next            | 8.57.0        |
+# Frontend - 架构文档
 
 ## 架构概览
 
-### 整体架构模式
-
-前端采用 **Next.js App Router** 架构，基于文件系统路由：
+本项目采用 **Next.js 14 App Router** 架构，是一个纯客户端渲染的 SPA 风格应用（所有业务页面均标记 `"use client"`）。Next.js 主要用作路由框架和 API 代理层。
 
 ```
-frontend/
-├── src/
-│   ├── app/                 # Next.js App Router 页面
-│   │   ├── (auth)/          # 认证路由组（无侧边栏布局）
-│   │   │   └── login/
-│   │   ├── (dashboard)/     # 仪表盘路由组（带侧边栏布局）
-│   │   │   ├── layout.tsx
-│   │   │   ├── settings/
-│   │   │   └── workspaces/
-│   │   ├── api/             # Next.js API Routes
-│   │   ├── globals.css      # 全局样式
-│   │   ├── layout.tsx       # 根布局
-│   │   └── page.tsx         # 首页
-│   ├── components/          # 共享 UI 组件
-│   │   ├── ui/              # 基础 UI 组件（button, input, badge）
-│   │   └── *.tsx            # 业务组件
-│   └── lib/                 # API 客户端 + 工具函数
-│       ├── api.ts           # 基础 API 客户端
-│       ├── *.ts             # 各模块 API 封装
-│       └── __tests__/       # API 客户端测试
-├── package.json
-├── tsconfig.json
-├── tailwind.config.ts
-├── postcss.config.mjs
-└── next.config.mjs
+浏览器
+  |
+  +-- Next.js App Router (页面路由)
+  |     +-- (auth) 路由组 -- 登录页（无 Auth Guard）
+  |     +-- (dashboard) 路由组 -- 业务页面（Auth Guard + AppShell）
+  |
+  +-- Next.js Rewrite Proxy
+  |     +-- /api/* --> 后端 FastAPI (localhost:8000)
+  |
+  +-- SSE 直连（绕过代理缓冲）
+        +-- NEXT_PUBLIC_API_BASE_URL 直接连接
 ```
 
-### 核心设计模式
+## 页面路由
 
-1. **App Router 路由组**：`(auth)` 无侧边栏布局，`(dashboard)` 带侧边栏布局
-2. **API 客户端层**：`src/lib/` 下每个模块一个文件，封装后端 REST API 调用
-3. **SSE 流式通信**：`src/lib/agent-stream.ts` 支持 Agent 运行时的 SSE 流式输出
-4. **UI 组件库**：`src/components/ui/` 提供基础 UI 原子组件（Button、Input、Badge）
-5. **React Query 数据层**：使用 `@tanstack/react-query` 管理服务端状态
-6. **Zustand 客户端状态**：轻量级客户端状态管理
+### 路由组设计
 
-## 数据模型（摘要）
+| 路由组      | 路径前缀                 | 布局             | Auth Guard |
+| ----------- | ------------------------ | ---------------- | ---------- |
+| (auth)      | /login                   | 无（独立页面）    | 无         |
+| (dashboard) | /workspaces, /settings   | AppShell（侧边栏 + 内容区） | 有（检测 accessToken） |
 
-前端不定义数据库模型。数据模型由后端 API 提供，前端通过以下方式消费：
+### 核心路由表
 
-- **API Schema**：`src/lib/` 中每个模块文件封装对应的后端 API 类型
-- **运行时类型**：依赖后端 API 响应的隐式类型（无前端独立 Schema 生成）
-- **主要数据实体**：Workspace、Change、Task、AgentRun、Incident、Release 等（与后端模型一一对应）
+| 路径                                             | 功能              |
+| ------------------------------------------------ | ----------------- |
+| `/`                                              | 首页（健康检查）  |
+| `/login`                                         | 登录              |
+| `/workspaces`                                    | Workspace 列表    |
+| `/workspaces/[id]`                               | Workspace 详情    |
+| `/workspaces/[id]/components`                    | 组件关系列表      |
+| `/workspaces/[id]/components/topology`           | 拓扑图            |
+| `/workspaces/[id]/changes`                       | 变更列表          |
+| `/workspaces/[id]/changes/[cid]`                 | 变更详情          |
+| `/workspaces/[id]/changes/[cid]/tasks`           | 任务看板          |
+| `/workspaces/[id]/changes/[cid]/tasks/[tid]`     | 任务详情          |
+| `/workspaces/[id]/create-change`                 | 创建变更          |
+| `/workspaces/[id]/scan-docs`                     | 扫描文档          |
+| `/workspaces/[id]/runtime`                       | 运行时监控        |
+| `/workspaces/[id]/knowledge`                     | 知识库            |
+| `/workspaces/[id]/releases`                      | 发布管理          |
+| `/workspaces/[id]/agent`                         | Agent 控制台      |
+| `/workspaces/[id]/approvals`                     | 审批中心          |
+| `/workspaces/[id]/audit`                         | 审计日志          |
+| `/workspaces/[id]/incidents`                     | 事件列表          |
+| `/workspaces/[id]/incidents/[iid]`               | 事件详情          |
+| `/settings`                                      | 系统设置          |
+| `/settings/git-identities`                       | Git 身份管理      |
 
-## 模块划分
+## 组件层次
 
-### 页面路由 (`src/app/`)
+```
+RootLayout (layout.tsx)
+  +-- (auth)/login/page.tsx
+  |     +-- 独立登录表单
+  |
+  +-- (dashboard)/layout.tsx [Auth Guard]
+        +-- AppShell
+              +-- 侧边栏（可折叠）
+              |     +-- 品牌标识
+              |     +-- Overview 导航组（Workspace 首页 / 组件 / 拓扑 / 变更 / 扫描文档 / 运行时 / 知识 / 发布）
+              |     +-- Management 导航组（Git 身份 / Agent / 审批 / 审计 / 事件）
+              |     +-- System 导航组（设置）
+              |     +-- 用户信息 + 退出
+              |     +-- 折叠切换
+              +-- 内容区
+                    +-- 各业务页面（使用 useState + useEffect 管理状态）
+```
 
-| 路由 | 文件路径 | 功能 |
-|------|----------|------|
-| `/` | `page.tsx` | 首页/入口 |
-| `/login` | `(auth)/login/page.tsx` | 用户登录 |
-| `/settings` | `(dashboard)/settings/page.tsx` | 平台设置 |
-| `/settings/git-identities` | `(dashboard)/settings/git-identities/page.tsx` | Git 身份管理 |
-| `/workspaces` | `(dashboard)/workspaces/page.tsx` | 工作区列表 |
-| `/workspaces/[id]` | `(dashboard)/workspaces/[id]/page.tsx` | 工作区详情 |
-| `/workspaces/[id]/agent` | `(dashboard)/workspaces/[id]/agent/page.tsx` | Agent 运行 |
-| `/workspaces/[id]/changes` | `(dashboard)/workspaces/[id]/changes/page.tsx` | 变更列表 |
-| `/workspaces/[id]/changes/[cid]` | `(dashboard)/workspaces/[id]/changes/[cid]/page.tsx` | 变更详情 |
-| `/workspaces/[id]/changes/[cid]/tasks/[tid]` | `.../tasks/[tid]/page.tsx` | 任务详情 |
-| `/workspaces/[id]/create-change` | `.../create-change/page.tsx` | 创建变更 |
-| `/workspaces/[id]/components` | `.../components/page.tsx` | 组件扫描 |
-| `/workspaces/[id]/components/topology` | `.../topology/page.tsx` | 组件拓扑图 |
-| `/workspaces/[id]/scan-docs` | `.../scan-docs/page.tsx` | 扫描文档 |
-| `/workspaces/[id]/knowledge` | `.../knowledge/page.tsx` | 知识库 |
-| `/workspaces/[id]/runtime` | `.../runtime/page.tsx` | 运行时进度 |
-| `/workspaces/[id]/approvals` | `.../approvals/page.tsx` | 审批管理 |
-| `/workspaces/[id]/releases` | `.../releases/page.tsx` | 发布管理 |
-| `/workspaces/[id]/incidents` | `.../incidents/page.tsx` | 事件列表 |
-| `/workspaces/[id]/incidents/[iid]` | `.../incidents/[iid]/page.tsx` | 事件详情 |
-| `/workspaces/[id]/audit` | `.../audit/page.tsx` | 审计日志 |
+## 状态管理
 
-### API 客户端 (`src/lib/`)
+### Zustand Store
 
-| 文件 | 对应后端模块 | 职责 |
-|------|-------------|------|
-| `api.ts` | -- | 基础 HTTP 客户端封装（fetch wrapper） |
-| `auth.ts` | auth | 认证（登录/登出/刷新） |
-| `workspaces.ts` | workspace | 工作区 CRUD、扫描 |
-| `changes.ts` | change | 变更管理 |
-| `change-writer.ts` | change_writer | 变更文档写入 |
-| `tasks.ts` | task | 任务管理 |
-| `agent.ts` | agent | Agent 运行 |
-| `agent-stream.ts` | agent | Agent SSE 流式通信 |
-| `spec-workspaces.ts` | spec_workspace | SillySpec 工作区 |
-| `scan-docs.ts` | scan_docs | 扫描文档 |
-| `runtime.ts` | runtime | 运行时状态 |
-| `knowledge.ts` | knowledge | 知识库 |
-| `workflow.ts` | workflow | 工作流/审批 |
-| `releases.ts` | release | 发布管理 |
-| `incidents.ts` | incident | 事件管理 |
-| `git-gateway.ts` | git_gateway | Git 操作 |
-| `git-identities.ts` | git_identity | Git 身份 |
-| `tool-gateway.ts` | tool_gateway | 工具网关 |
-| `worktree.ts` | worktree | Worktree 管理 |
-| `archive.ts` | archive | 归档 |
-| `settings.ts` | settings | 平台设置 |
-| `health.ts` | health | 健康检查 |
-| `audit.ts` | workflow | 审计日志 |
-| `approvals.ts` | workflow | 审批 |
-| `components.ts` | scan_docs | 组件数据 |
-| `utils.ts` | -- | 通用工具函数 |
+项目使用 **单一 Zustand Store**（`stores/session.ts`），仅管理认证会话状态：
 
-### 共享组件 (`src/components/`)
+```typescript
+SessionState {
+  hydrated: boolean          // SSR hydration 完成标志
+  user: SessionUser | null   // 当前用户信息
+  accessToken: string | null // JWT Access Token
+  refreshToken: string | null// JWT Refresh Token
+  // Actions
+  setUser / setTokens / clear / markHydrated
+}
+```
 
-| 组件 | 文件 | 职责 |
-|------|------|------|
-| `AppShell` | `app-shell.tsx` | 应用外壳（侧边栏 + 主内容区） |
-| `WorkspaceCard` | `workspace-card.tsx` | 工作区卡片 |
-| `WorkspaceScanDialog` | `workspace-scan-dialog.tsx` | 工作区扫描对话框 |
-| `HealthCard` | `health-card.tsx` | 健康状态卡片 |
-| `SillyspecStepProgress` | `sillyspec-step-progress.tsx` | SillySpec 步骤进度条 |
-| `ComponentDetailDrawer` | `component-detail-drawer.tsx` | 组件详情抽屉 |
-| `Button` | `ui/button.tsx` | 按钮（CVA 变体） |
-| `Input` | `ui/input.tsx` | 输入框 |
-| `Badge` | `ui/badge.tsx` | 徽标 |
+- 使用 `persist` middleware 持久化到 `localStorage`（key: `multi-agent-platform.session`）
+- `hydrated` 标志用于解决 Zustand persist 异步 hydration 的竞态问题
 
-### 测试 (`src/lib/__tests__/`)
+### 页面级状态
 
-| 测试文件 | 覆盖范围 |
-|----------|----------|
-| `api.test.ts` | 基础 API 客户端 |
-| `agent.test.ts` | Agent API |
-| `spec-workspaces.test.ts` | SillySpec 工作区 API |
+所有业务页面使用 React `useState` + `useEffect` 管理本地状态，没有使用 React Query 等服务端状态库。每个页面自行管理 loading / error / data 三态。
+
+## API 层架构
+
+### apiFetch 核心客户端
+
+```
+apiFetch<T>(path, options) --> Promise<T>
+  +-- URL 解析：浏览器用相对路径（走 rewrite），SSR 用绝对路径
+  +-- 自动附加 Authorization: Bearer <accessToken>
+  +-- 自动附加 x-request-id（crypto.randomUUID）
+  +-- 401 自动刷新：调用 /api/auth/refresh，成功后重试一次
+  +-- 401 刷新失败：清除 session，跳转 /login
+  +-- 错误包装：抛出 ApiError { status, code, message, requestId, details }
+```
+
+### SSE 实时流
+
+Agent 日志流通过三种方式实现：
+
+1. **EventSource 直连** (`agent.ts:streamAgentRunLogs`) -- 绕过 Next.js rewrite proxy，直接连接后端 SSE 端点
+2. **Next.js Route Handler 代理** (`app/api/workspaces/[workspaceId]/agent/runs/[runId]/stream/route.ts`) -- 服务端转发 SSE 流
+3. **AgentRunStreamClient** (`agent-stream.ts`) -- 高级 SSE 客户端，支持自动重连（5 次指数退避）、消息去重（log_id）、断线日志回填
+
+## 认证流程
+
+```
+1. 用户在 /login 提交 email + password
+2. 调用 POST /api/auth/login --> 获取 { access_token, refresh_token }
+3. 调用 GET /api/auth/me --> 获取用户信息
+4. 存入 Zustand session store（persisted to localStorage）
+5. Dashboard layout 检查 accessToken --> 无则跳转 /login
+6. apiFetch 在每次请求自动附加 Bearer Token
+7. 401 时自动尝试 refresh --> 失败则清除 session 并跳转 /login
+```
+
+## API 代理架构
+
+```
+浏览器请求 /api/*
+  |
+  +-- 普通请求 --> next.config.mjs rewrite --> 后端 FastAPI
+  |     source: /api/:path*
+  |     destination: {INTERNAL_API_BASE_URL}/api/:path*
+  |
+  +-- SSE 请求 --> 直连后端（需 NEXT_PUBLIC_API_BASE_URL）
+        或通过 Route Handler 代理
+```
+
+环境变量优先级：
+- `INTERNAL_API_BASE_URL`（SSR / Route Handler）
+- `NEXT_PUBLIC_API_BASE_URL`（浏览器端）
+- 默认 `http://localhost:8000`
+
+## SillySpec 工作流集成
+
+变更详情页（`changes/[cid]/page.tsx`）实现了完整的 SillySpec 工作流阶段流转：
+
+```
+draft --> scan --> brainstorm --> propose --> plan --> execute --> verify --> accepted --> archive
+  |                                                                                      ^
+  +--> quick -----------------------------------------------------------------------------+
+                                                                                          |
+rework_required --> propose / plan / execute（退回）
+```
+
+每个阶段对应后端 Agent Dispatch，前端通过 `SillySpecStepProgress` 组件展示步骤执行进度。

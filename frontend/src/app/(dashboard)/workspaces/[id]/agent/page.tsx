@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api";
 import {
   getAgentRunLogs,
+  killAgentRun,
   listAgentRuns,
   streamAgentRunLogs,
   submitAgentRunInput,
@@ -264,6 +265,18 @@ export default function AgentPage({ params }: Props) {
     [activeRunId, workspaceId],
   );
 
+  const handleKill = useCallback(
+    async (runId: string) => {
+      try {
+        await killAgentRun(workspaceId, runId);
+        reload();
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "停止 Agent 失败");
+      }
+    },
+    [workspaceId, reload],
+  );
+
   /* ---- Stream active logs via SSE (running) ---- */
   useEffect(() => {
     if (!activeRunId) return;
@@ -434,7 +447,11 @@ export default function AgentPage({ params }: Props) {
                     >
                       Logs
                     </Button>
-                    <Button size="sm" variant="destructive">
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => void handleKill(run.id)}
+                    >
                       Stop
                     </Button>
                   </div>

@@ -5,7 +5,7 @@
 ARG PYTHON_VERSION=3.12
 ARG NODE_VERSION=20
 ARG CLAUDE_CODE_VERSION=2.1.158
-ARG SILLYSPEC_VERSION=3.14.0
+ARG SILLYSPEC_VERSION=3.14.1
 
 FROM node:${NODE_VERSION}-slim AS node-tools
 
@@ -54,8 +54,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN groupadd --system app && useradd --system --gid app --home /app app
 
 # Install minimal runtime dependencies plus git for agent worktrees.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends curl ca-certificates git libstdc++6 \
+RUN apt-get update -o Acquire::Retries=3 \
+ && apt-get install -y --no-install-recommends --fix-missing curl ca-certificates git libstdc++6 \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

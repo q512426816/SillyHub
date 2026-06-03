@@ -281,7 +281,9 @@ class WorkspaceService:
         try:
             spec_ws_svc = SpecWorkspaceService(self._session)
             spec_ws = await spec_ws_svc.get(workspace.id)
-            scan_path = spec_ws.spec_root if spec_ws.strategy == "platform-managed" else workspace.root_path
+            scan_path = (
+                spec_ws.spec_root if spec_ws.strategy == "platform-managed" else workspace.root_path
+            )
         except Exception:
             scan_path = workspace.root_path
 
@@ -745,26 +747,6 @@ class WorkspaceService:
             .limit(1)
         )
         return (await self._session.execute(stmt)).scalars().first()
-
-    async def activate(self, workspace_id: uuid.UUID) -> Workspace:
-        """Activate a pending workspace: copy .sillyspec, set status='active'."""
-        workspace = await self.get(workspace_id)
-        if workspace.status != "pending":
-            return workspace
-
-        workspace.status = "active"
-        workspace.updated_at = datetime.utcnow()
-        workspace.last_scanned_at = datetime.utcnow()
-
-        # Scan and copy .sillyspec to platform storage
-        scan = self.scan(workspace.root_path)
-        if scan.is_sillyspec:
-            await self._ensure_spec_workspace(workspace.id, scan.sillyspec_path)
-
-        await self._session.commit()
-        await self._session.refresh(workspace)
-        log.info("workspace.activated", workspace_id=str(workspace.id))
-        return workspace
 
     # -- Helpers ---
 

@@ -98,3 +98,18 @@ created_at: 2026-05-28 11:10:00
 文件：.claude/settings.json, .claude/hooks/pre-commit-ci-check.cjs
 结果：`.claude/settings.json` 收敛为单个 Claude Code `PreToolUse` Bash hook，仅匹配 `Bash(git commit*)`；hook 命令改用 Node 脚本，避免 Windows `bash` 路径和 CRLF 换行问题。新脚本读取 Claude hook stdin JSON，只在 `git commit` 时运行本地 CI，失败时输出 `hookSpecificOutput.permissionDecision=deny`，非 commit Bash 命令安静放行。
 验证：`node --check .claude/hooks/pre-commit-ci-check.cjs` 通过；`.claude/settings.json` JSON 解析通过；模拟非 commit 输入无输出放行；模拟 CI 失败会返回 Claude Code 可识别的 deny JSON。
+
+## 2026-06-03 13:29:21 — 修复 SSE stream endpoint CORS 错误
+状态：已完成
+文件：backend/.env
+结果：CORS_ALLOWED_ORIGINS 添加 http://127.0.0.1:3000。根因是 localhost 和 127.0.0.1 是不同的 CORS origin，用户从 127.0.0.1:3000 访问时 origin 不匹配。
+
+## 2026-06-03 13:44:47 — 修复 SSE streamAgentRunLogs 直连后端 CORS/认证失败
+状态：已完成
+文件：frontend/src/lib/agent.ts
+结果：streamAgentRunLogs 的 getDirectApiBaseUrl() 改为 getApiBaseUrl()，SSE 请求走 Next.js Route Handler 同源代理，避免 EventSource 直连后端时的 CORS 和 session 认证问题。
+
+## 2026-06-03 13:45:41 — 修复 Agent 页面 Stop 按钮无响应
+状态：已完成
+文件：frontend/src/lib/agent.ts, frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx
+结果：agent.ts 新增 killAgentRun() API 函数，page.tsx 新增 handleKill 回调并绑定到 Stop 按钮 onClick。后端 POST /kill 端点已完整，无需修改。TypeScript 检查通过。

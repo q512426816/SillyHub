@@ -1,9 +1,9 @@
 ---
 author: qinyi
-created_at: 2026-06-03T10:00:00
+created_at: 2026-06-03T20:35:00+08:00
 ---
 
-# 测试策略
+# Frontend - 测试策略
 
 ## 测试框架
 
@@ -11,10 +11,10 @@ created_at: 2026-06-03T10:00:00
 
 | 项目 | 版本 | 说明 |
 |------|------|------|
-| Vitest | ^2.0.0 | 测试框架 |
-| @testing-library/react | ^16.0.0 | React 组件测试工具 |
+| Vitest | ^2.0.0 | 测试框架（兼容 Vite 生态） |
+| @testing-library/react | ^16.0.0 | React 组件测试工具（当前未实际使用） |
 | @testing-library/jest-dom | ^6.4.6 | DOM 断言扩展（toBeInTheDocument 等） |
-| @vitejs/plugin-react | ^4.3.1 | Vitest React 支持 |
+| @vitejs/plugin-react | ^4.3.1 | Vitest React JSX 支持 |
 | jsdom | ^24.1.0 | 浏览器 DOM 模拟环境 |
 
 ### Vitest 配置
@@ -28,7 +28,7 @@ created_at: 2026-06-03T10:00:00
     environment: "jsdom",         // 模拟浏览器 DOM
     globals: true,                // describe/it/expect 全局可用，无需 import
     setupFiles: ["./src/test/setup.ts"],
-    css: false,                   // 跳过 CSS 处理
+    css: false,                   // 跳过 CSS 处理加速测试
   },
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },  // 与 tsconfig 路径别名一致
@@ -44,13 +44,20 @@ created_at: 2026-06-03T10:00:00
 import "@testing-library/jest-dom/vitest";
 ```
 
-仅引入 jest-dom 的 Vitest 适配，提供 DOM 相关断言匹配器。
+仅引入 jest-dom 的 Vitest 适配，提供 DOM 相关断言匹配器（如 `toBeInTheDocument`）。
 
-## 测试结构
+## 测试命令
 
-### 文件分布
+```bash
+pnpm test          # 单次运行全部测试（vitest run）
+pnpm test:watch    # 监听模式（vitest）
+pnpm typecheck     # 类型检查（tsc --noEmit）
+pnpm lint          # ESLint 检查（next lint）
+```
 
-所有测试文件位于 `frontend/src/lib/__tests__/` 目录，与被测模块同属 `lib/` 目录：
+## 测试文件分布
+
+所有测试文件位于 `frontend/src/lib/__tests__/`，采用就近放置原则（与被测模块同属 `lib/` 目录）：
 
 ```
 frontend/src/
@@ -62,14 +69,14 @@ frontend/src/
     api.ts                     # 被测模块
     agent.ts                   # 被测模块
     spec-workspaces.ts         # 被测模块
-    ... (22 个其他 lib 模块，无测试)
+    ... (21 个其他 lib 模块，无测试)
   test/
     setup.ts                   # 全局 setup
 ```
 
-### 测试文件详情
+## 测试详情
 
-#### `api.test.ts` — apiFetch 核心封装（4 个用例）
+### `api.test.ts` -- apiFetch 核心封装（4 个用例）
 
 | 用例 | 验证内容 |
 |------|---------|
@@ -78,89 +85,57 @@ frontend/src/
 | 网络错误处理 | fetch reject 被包装为 `ApiError(status=0, code='network_error')` |
 | x-request-id 请求头 | 每次请求自动附加 UUID 格式的 request-id（长度 >8） |
 
-Mock 方式: `vi.stubGlobal("fetch", vi.fn().mockResolvedValue(...))`
+Mock 方式: `vi.stubGlobal("fetch", vi.fn().mockResolvedValue(...))`，配合 `afterEach(() => fetchMock.mockReset())`。
 
-#### `agent.test.ts` — submitAgentRunInput（1 个用例）
+### `agent.test.ts` -- submitAgentRunInput（1 个用例）
 
 | 用例 | 验证内容 |
 |------|---------|
 | POST input 请求 | URL 包含 `/agent/runs/{runId}/input`，method 为 POST，content-type 为 application/json，body 正确序列化，响应结构匹配 |
 
-#### `spec-workspaces.test.ts` — bootstrapSpecWorkspace（1 个用例）
+### `spec-workspaces.test.ts` -- bootstrapSpecWorkspace（1 个用例）
 
 | 用例 | 验证内容 |
 |------|---------|
 | POST bootstrap 请求 | URL 包含 `/spec-bootstrap`，method 为 POST，响应包含 agent_run_id / stream_url / status / spec_root / message |
 
-## 测试命令
-
-```bash
-# 单次运行全部测试
-pnpm test
-# 等同于: vitest run
-
-# 监听模式（开发时使用）
-pnpm test:watch
-# 等同于: vitest
-
-# 类型检查 + Lint + 测试（完整检查流程）
-pnpm typecheck && pnpm lint && pnpm test
-```
-
-相关 npm scripts：
-
-| 命令 | 实际执行 |
-|------|---------|
-| `pnpm test` | `vitest run` |
-| `pnpm test:watch` | `vitest` |
-| `pnpm typecheck` | `tsc --noEmit` |
-| `pnpm lint` | `next lint` |
-
 ## 覆盖范围
 
-### 有测试的模块
+### 已覆盖
 
-| 模块 | 文件 | 用例数 | 覆盖状态 |
+| 模块 | 文件 | 用例数 | 覆盖范围 |
 |------|------|--------|---------|
-| `api.ts` | `__tests__/api.test.ts` | 4 | 较完整（正常/错误/网络/请求头） |
-| `agent.ts` | `__tests__/agent.test.ts` | 1 | 仅覆盖 submitAgentRunInput 一个函数 |
-| `spec-workspaces.ts` | `__tests__/spec-workspaces.test.ts` | 1 | 仅覆盖 bootstrapSpecWorkspace 一个函数 |
+| `api.ts` | `__tests__/api.test.ts` | 4 | 核心封装（正常/错误/网络/请求头），但未覆盖 Token 刷新逻辑 |
+| `agent.ts` | `__tests__/agent.test.ts` | 1 | 仅 `submitAgentRunInput`，未覆盖 SSE stream、list/create/logs |
+| `spec-workspaces.ts` | `__tests__/spec-workspaces.test.ts` | 1 | 仅 `bootstrapSpecWorkspace`，未覆盖 import/sync/conflicts |
 
 **总计: 3 个测试文件, 6 个用例**
 
-### 无测试的模块（按优先级）
+### 未覆盖（按优先级排序）
 
-#### API 层 — 高优先级
+#### 高优先级 -- API 层
 
-以下 `lib/*.ts` 模块无测试覆盖：
+以下 `lib/*.ts` 模块无任何测试：
 
-- `auth.ts` — 登录/登出/token 刷新流程
-- `workspaces.ts` — Workspace CRUD + 扫描
-- `changes.ts` — 变更生命周期（最大的 API 模块）
-- `agent-stream.ts` — SSE 连接管理（断线重连、去重、token 刷新）
-- `workflow.ts` — 审批 + 状态流转
-- `tasks.ts` — 任务管理
-- `approvals.ts` / `audit.ts` / `incidents.ts` / `releases.ts` / `runtime.ts`
-- `knowledge.ts` / `scan-docs.ts` / `health.ts`
-- `git-identities.ts` / `settings.ts` / `archive.ts`
-- `worktree.ts` / `git-gateway.ts` / `tool-gateway.ts`
-- `change-writer.ts` / `components.ts`
+- `api.ts` 的 Token 刷新/重试逻辑（最核心的认证逻辑）
+- `agent-stream.ts` -- SSE 重连、去重、backoff 算法
+- `auth.ts` -- 登录/登出/token 刷新流程
+- `workspaces.ts` -- Workspace CRUD + 扫描 + 关系
+- `changes.ts` -- 变更生命周期（最大的 API 模块，含工作流流转）
+- `workflow.ts` -- 审批 + 状态流转
+- `tasks.ts` -- 任务管理 + 看板
+- 其他 16 个模块: approvals/audit/incidents/releases/runtime/knowledge/scan-docs/health/git-identities/settings/archive/worktree/git-gateway/tool-gateway/change-writer/components
 
-#### Store 层 — 中优先级
+#### 中优先级 -- Store + 组件
 
-- `stores/session.ts` — Token 管理、persist 持久化、水合逻辑
+- `stores/session.ts` -- Token 管理、persist 持久化、hydration 逻辑
+- `components/workspace-scan-dialog.tsx` -- 多步骤扫描创建流程
+- `components/sillyspec-step-progress.tsx` -- 步骤进度展示
+- `components/app-shell.tsx` -- 侧边栏导航和 Auth Guard
+- `components/health-card.tsx` -- 定时轮询健康状态
+- 其他组件: workspace-card, component-detail-drawer, ui/*
 
-#### 组件层 — 中优先级
+#### 低优先级 -- 页面层
 
-- `components/app-shell.tsx` — 侧边栏导航
-- `components/workspace-scan-dialog.tsx` — 多步骤扫描创建流程
-- `components/health-card.tsx` — 健康状态轮询
-- `components/workspace-card.tsx` — Workspace 卡片交互
-- `components/sillyspec-step-progress.tsx` — 步骤进度条
-- `components/component-detail-drawer.tsx` — 组件详情抽屉
-- `components/ui/*.tsx` — 基础 UI 原子组件（button, input, badge）
-
-#### 页面层 — 低优先级
-
-- 25 个 `page.tsx` 页面无测试（建议使用 E2E 测试覆盖）
-- 1 个 API Route: `app/api/workspaces/[workspaceId]/agent/runs/[runId]/stream/route.ts`
+- 20 个 `page.tsx` 页面（建议使用 E2E 测试覆盖）
+- 1 个 Route Handler: SSE 代理

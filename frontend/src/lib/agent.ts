@@ -1,4 +1,4 @@
-import { apiFetch, getDirectApiBaseUrl } from "./api";
+import { apiFetch, getApiBaseUrl } from "./api";
 import { useSession } from "@/stores/session";
 
 export type AgentRunStatus =
@@ -89,8 +89,8 @@ export function streamAgentRunLogs(
   onDone: (_data: DoneEventData) => void,
   onError?: (_error: Error) => void,
 ): EventSource {
-  // Bypass Next.js rewrite proxy to avoid SSE buffering
-  const base = getDirectApiBaseUrl();
+  // Use Next.js Route Handler proxy (avoids CORS + auth issues with direct backend access)
+  const base = getApiBaseUrl();
   const { accessToken } = useSession.getState();
   const url = new URL(`${base}/api/workspaces/${workspaceId}/agent/runs/${runId}/stream`);
   if (accessToken) url.searchParams.set("token", accessToken);
@@ -134,6 +134,13 @@ export interface AgentRunInputRequest {
 export interface AgentRunInputResponse {
   run_id: string;
   accepted: boolean;
+}
+
+export function killAgentRun(workspaceId: string, runId: string) {
+  return apiFetch<{ id: string; status: AgentRunStatus }>(
+    `/api/workspaces/${workspaceId}/agent/runs/${runId}/kill`,
+    { method: "POST" },
+  );
 }
 
 export function submitAgentRunInput(
