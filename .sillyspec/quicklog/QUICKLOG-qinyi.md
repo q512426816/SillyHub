@@ -92,3 +92,9 @@ created_at: 2026-05-28 11:10:00
 文件：frontend/src/app/api/workspaces/[workspaceId]/agent/runs/[runId]/stream/route.ts
 根因：Next.js `rewrites()` 代理缓冲 SSE 响应，浏览器 EventSource 收不到任何数据（包括 keepalive 注释），约 5 秒后超时触发 onerror → 前端 `AgentRunStreamClient` 指数退避重连（1s→2s→4s→...）。
 结果：创建 Next.js Route Handler `app/api/.../stream/route.ts`，优先匹配 rewrite，直接透传后端 SSE 流。设置 `runtime=nodejs`、`dynamic=force-dynamic`、正确 SSE headers（`text/event-stream`、`no-cache`、`X-Accel-Buffering: no`）。
+
+## 2026-06-03 13:21:56 — 修复 Claude Code Bash(git commit) hook 触发
+状态：已完成
+文件：.claude/settings.json, .claude/hooks/pre-commit-ci-check.cjs
+结果：`.claude/settings.json` 收敛为单个 Claude Code `PreToolUse` Bash hook，仅匹配 `Bash(git commit*)`；hook 命令改用 Node 脚本，避免 Windows `bash` 路径和 CRLF 换行问题。新脚本读取 Claude hook stdin JSON，只在 `git commit` 时运行本地 CI，失败时输出 `hookSpecificOutput.permissionDecision=deny`，非 commit Bash 命令安静放行。
+验证：`node --check .claude/hooks/pre-commit-ci-check.cjs` 通过；`.claude/settings.json` JSON 解析通过；模拟非 commit 输入无输出放行；模拟 CI 失败会返回 Claude Code 可识别的 deny JSON。
