@@ -521,7 +521,10 @@ class AgentService:
             if session is not None:
                 run = await session.get(AgentRun, run_id)
                 if run is not None and run.status not in ("pending", "running"):
-                    yield "event: done\ndata: {}\n\n"
+                    done_data = json.dumps(
+                        {"status": run.status, "exit_code": run.exit_code}
+                    )
+                    yield f"event: done\ndata: {done_data}\n\n"
                     return
 
             while True:
@@ -540,7 +543,12 @@ class AgentService:
                     except (json.JSONDecodeError, TypeError):
                         payload = {}
                     if payload.get("event") == "done":
-                        yield "event: done\ndata: {}\n\n"
+                        # Include run status from done payload if available
+                        done_data = json.dumps({
+                            "status": payload.get("status"),
+                            "exit_code": payload.get("exit_code"),
+                        })
+                        yield f"event: done\ndata: {done_data}\n\n"
                         break
                     yield f"data: {data}\n\n"
                 else:
