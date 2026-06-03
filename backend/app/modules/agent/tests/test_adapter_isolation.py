@@ -1,5 +1,6 @@
 """Tests for ClaudeCodeAdapter isolation and output sanitization — task-07."""
 
+import json
 import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -121,6 +122,48 @@ class TestAllowedPaths:
                 await adapter.run(run_id, ctx, Path("/tmp/lease"))
 
         assert "CLAUDE_ALLOWED_PATHS" not in captured_env
+
+
+# ---------------------------------------------------------------------------
+# Command construction
+# ---------------------------------------------------------------------------
+
+
+class TestCommandConstruction:
+    @pytest.mark.asyncio
+    async def test_run_uses_direct_claude_when_stdbuf_is_unavailable_on_windows(
+        self, fake_proc_factory
+    ):
+        """Windows does not ship stdbuf, so the adapter should launch claude directly."""
+        adapter = ClaudeCodeAdapter()
+        run_id = uuid.uuid4()
+        fake_proc = fake_proc_factory()
+        captured_args: list[str] = []
+
+        async def _capture_exec(*args, **kwargs):
+            captured_args.extend(args)
+            return fake_proc
+
+        from app.modules.agent.base import TaskContext
+
+        ctx = TaskContext(
+            change_title="test change",
+            task_title="test task",
+            task_key="task-01",
+            allowed_paths=[],
+        )
+
+        with patch("app.modules.agent.adapters.claude_code.os.name", "nt"):
+            with patch("app.modules.agent.adapters.claude_code.shutil.which", return_value=None):
+                with patch("asyncio.create_subprocess_exec", side_effect=_capture_exec):
+                    with patch("app.modules.agent.adapters.claude_code.get_redis") as mr:
+                        r = AsyncMock()
+                        r.publish = AsyncMock()
+                        mr.return_value = r
+                        await adapter.run(run_id, ctx, Path("/tmp/lease"))
+
+        assert captured_args[0] == "claude"
+        assert "stdbuf" not in captured_args[:2]
 
 
 # ---------------------------------------------------------------------------
@@ -331,10 +374,22 @@ class TestProcessRegistration:
         adapter = ClaudeCodeAdapter()
         run_id = uuid.uuid4()
 
+        emitted_logs = []
+
+        async def _on_log(channel: str, content: str, ts: str) -> None:
+            emitted_logs.append((channel, content, ts))
+
+        redis = AsyncMock()
+        redis.publish = AsyncMock()
+
         with patch(
             "asyncio.create_subprocess_exec",
-            side_effect=FileNotFoundError("no cli"),
-        ):
+            side_effect=FileNotFoundError(
+                2,
+                "No such file or directory",
+                "claude",
+            ),
+        ), patch("app.modules.agent.adapters.claude_code.get_redis", return_value=redis):
             result = await adapter._exec_stream(
                 run_id=run_id,
                 cmd=["claude"],
@@ -342,7 +397,16 @@ class TestProcessRegistration:
                 cwd=Path("/tmp"),
                 env_vars={},
                 timeout=5,
+                on_log=_on_log,
             )
 
         assert result.exit_code == 127
+        assert emitted_logs
+        assert emitted_logs[0][0] == "stderr"
+        assert "claude" in emitted_logs[0][1]
+        assert redis.publish.await_count == 2
+        error_payload = json.loads(redis.publish.await_args_list[0].args[1])
+        done_payload = json.loads(redis.publish.await_args_list[1].args[1])
+        assert error_payload["channel"] == "stderr"
+        assert done_payload["event"] == "done"
         assert run_id not in AgentService._proc_registry

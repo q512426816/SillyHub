@@ -7,12 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import {
-  streamAgentRunLogs,
   submitAgentRunInput,
   type AgentRunLogEntry,
   type AgentRunStatus,
-  type StreamLogEvent,
 } from "@/lib/agent";
+import { AgentRunStreamClient, type StreamStatus } from "@/lib/agent-stream";
 import { listComponents } from "@/lib/components";
 import { listChanges } from "@/lib/changes";
 import {
@@ -23,6 +22,7 @@ import {
   type SpecWorkspace,
 } from "@/lib/spec-workspaces";
 import { getRuntimeProgress } from "@/lib/runtime";
+import { useSession } from "@/stores/session";
 import {
   getWorkspace,
   type Workspace,
@@ -115,8 +115,9 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const [pendingInputPrompt, setPendingInputPrompt] = useState<string | null>(null);
   const [userInputText, setUserInputText] = useState("");
   const [submittingInput, setSubmittingInput] = useState(false);
+  const [bootstrapStreamStatus, setBootstrapStreamStatus] = useState<StreamStatus>("disconnected");
 
-  const bootstrapEsRef = useRef<EventSource | null>(null);
+  const streamClientRef = useRef<AgentRunStreamClient | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -146,9 +147,9 @@ export default function WorkspaceDetailPage({ params }: Props) {
   useEffect(() => {
     void load();
     return () => {
-      // Cleanup: close EventSource on unmount without modifying state
-      bootstrapEsRef.current?.close();
-      bootstrapEsRef.current = null;
+      // Cleanup: close stream client on unmount
+      streamClientRef.current?.disconnect();
+      streamClientRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId]);
@@ -156,8 +157,8 @@ export default function WorkspaceDetailPage({ params }: Props) {
   /* ---- SSE helpers ---- */
 
   function closeBootstrapStream() {
-    bootstrapEsRef.current?.close();
-    bootstrapEsRef.current = null;
+    streamClientRef.current?.disconnect();
+    streamClientRef.current = null;
   }
 
   function closeBootstrapPanel() {
@@ -166,6 +167,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
     setBootstrapLogs([]);
     setBootstrapStatus(null);
     setBootstrapError(null);
+    setBootstrapStreamStatus("disconnected");
     setPendingInputPrompt(null);
   }
 
@@ -174,7 +176,6 @@ export default function WorkspaceDetailPage({ params }: Props) {
   async function handleBootstrap() {
     setBootstrapping(true);
     setPageError(null);
-    // Close old connection and reset state
     closeBootstrapStream();
     setActiveBootstrapRunId(null);
     setBootstrapLogs([]);
@@ -187,50 +188,43 @@ export default function WorkspaceDetailPage({ params }: Props) {
       setActiveBootstrapRunId(result.agent_run_id);
       setBootstrapStatus(result.status);
 
-      // Dedup key helper
-      const logKey = (log: { timestamp: string; channel: string; content: string }) =>
-        `${result.agent_run_id}|${log.timestamp}|${log.channel}|${log.content}`;
+      const client = new AgentRunStreamClient(workspaceId, result.agent_run_id);
+      streamClientRef.current = client;
 
-      // Connect SSE immediately
-      const es = streamAgentRunLogs(
-        workspaceId,
-        result.agent_run_id,
-        (event: StreamLogEvent) => {
-          const incomingKey = logKey(event);
-          setBootstrapLogs((prev) => {
-            // Dedup: skip if same key already exists
-            if (prev.some((l) => logKey({ timestamp: l.timestamp, channel: l.channel, content: l.content_redacted }) === incomingKey)) {
-              return prev;
-            }
-            return [
-              ...prev,
-              {
-                id: crypto.randomUUID(),
-                run_id: result.agent_run_id,
-                timestamp: event.timestamp,
-                channel: event.channel,
-                content_redacted: event.content,
-              },
-            ];
-          });
-          // Handle pending_input channel
-          if (event.channel === "pending_input") {
-            setPendingInputPrompt(event.content || "");
-          }
-        },
-        () => {
-          // onDone: run reached terminal state
-          setBootstrapStatus("completed");
-          closeBootstrapStream();
-          void load(); // Refresh SpecWorkspace status
-        },
-        (err: Error) => {
-          // onError
-          setBootstrapError(err.message);
-          closeBootstrapStream();
-        },
-      );
-      bootstrapEsRef.current = es;
+      client.onStatusChange((status: StreamStatus) => {
+        setBootstrapStreamStatus(status);
+        if (status === "error") {
+          setBootstrapError("连接失败，请重试");
+        }
+      });
+
+      client.onMessage((event) => {
+        setBootstrapLogs((prev) => {
+          if (event.log_id != null && prev.some((l) => l.id === event.log_id)) return prev;
+          return [
+            ...prev,
+            {
+              id: event.log_id ?? crypto.randomUUID(),
+              run_id: result.agent_run_id,
+              timestamp: event.timestamp,
+              channel: event.channel,
+              content_redacted: event.content,
+            },
+          ];
+        });
+        if (event.channel === "pending_input") {
+          setPendingInputPrompt(event.content || "");
+        }
+      });
+
+      client.onDone(() => {
+        setBootstrapStatus("completed");
+        client.disconnect();
+        void load();
+      });
+
+      const { accessToken } = useSession.getState();
+      if (accessToken) client.connect(accessToken);
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "初始化失败");
     } finally {
@@ -443,7 +437,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
                   Bootstrap Run: {activeBootstrapRunId.length > 8 ? activeBootstrapRunId.slice(0, 8) + "..." : activeBootstrapRunId}
                 </code>
                 <Badge variant={statusToVariant(bootstrapStatus)}>
-                  {bootstrapStatus ?? "connecting"}
+                  {bootstrapStatus ?? bootstrapStreamStatus}
                 </Badge>
               </div>
               <Button size="sm" variant="ghost" onClick={closeBootstrapPanel}>

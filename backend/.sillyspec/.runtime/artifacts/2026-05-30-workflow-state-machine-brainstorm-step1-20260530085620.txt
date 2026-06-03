@@ -1,1 +1,0 @@
-SillyHub 是 FastAPI + Next.js monorepo，后端 feature-slice 架构。workflow 模块已有大量代码（FSM/ChangeFSM/TaskFSM、ChangeReview+AuditLog 表、WorkflowService、4 个 API 端点、spec_guardian 6 条规则），43/44 测试通过。本次变更是棕地增强，需评估现有实现缺口。本变更属于 backend 子项目。

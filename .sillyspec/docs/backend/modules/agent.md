@@ -6,7 +6,7 @@ created_at: 2026-05-30 20:20:00
 # agent
 
 > 最后更新：2026-06-02
-> 最近变更：2026-06-02-spec-bootstrap-agent-stream-interaction
+> 最近变更：2026-06-02-sse-reliable-stream
 > 模块路径：`app/modules/agent/**`
 
 ## 职责
@@ -32,7 +32,7 @@ AgentService（编排层）
 2. **Kill 机制**：先 SIGTERM，等 5s，未终止则 SIGKILL；仅 `pending`/`running` 状态可 kill
 3. **Diff 收集**：agent 执行完成后自动调用 `collect_diff()`，结果写入 `AgentRun.diff_summary`
 4. **Stale Run 清理**：`_cleanup_stale_runs()` 定期清理超过 1h 仍 running 的僵尸 run
-5. **流式日志**：通过 Redis Pub/Sub SSE 实时推送 agent 输出
+5. **流式日志**：通过 Redis Pub/Sub SSE 实时推送 agent 输出。SSE 端点支持 `after` 查询参数（AgentRunLog.id UUID），DB replay 阶段只返回 id 在指定 log 之后的记录，实现断线续传。SSE 事件携带 `log_id` 字段用于前端去重。
 6. **执行可靠性保证**：`ExecutionCoordinatorService` 封装 6 个能力点：
    - **幂等创建**：`idempotency_key` 去重，相同 key 返回已有 AgentRun
    - **乐观锁**：`version` 字段 + UPDATE WHERE version=expected + rowcount 检测
@@ -51,7 +51,7 @@ AgentService（编排层）
 | `GET /workspaces/{ws}/agent/runs` | `list_runs()` | 列出 workspace runs | 前端 |
 | `GET /workspaces/{ws}/tasks/{tid}/agent/runs` | `list_runs(task_id=)` | 列出 task runs | 前端 |
 | `GET /workspaces/{ws}/agent/runs/{id}/logs` | `get_run_logs()` | 获取历史日志 | 前端 |
-| `GET /workspaces/{ws}/agent/runs/{id}/stream` | `stream_run_logs()` | SSE 实时日志流 | 前端 |
+| `GET /workspaces/{ws}/agent/runs/{id}/stream` | `stream_run_logs()` | SSE 实时日志流；支持 `after` 查询参数（UUID，可选）续传断线日志 | 前端 |
 | `POST /workspaces/{ws}/agent/runs/{id}/kill` | `kill_run()` | 终止 running agent | 前端 |
 | `POST /workspaces/{ws}/agent/runs/{id}/resume` | `resume_run()` | 恢复中断的 run（需 resume_token） | 前端 |
 | `POST /workspaces/{ws}/agent/runs/{id}/approve` | `approve()` | 审批 pending_approval 的 run（需 approval_token） | 前端 |
@@ -124,6 +124,7 @@ Agent 执行中 → ClaudeCodeAdapter 输出 pending_input
 | Fingerprint 用 SHA-256 | 碰撞概率可忽略、计算快速、输出固定 64 字符 | 2026-05-30-execution-coordinator |
 | Token 一次性消费 | resume_token/approval_token 使用后置 NULL | 2026-05-30-execution-coordinator |
 | pending_input/user_input 通道约定 | 用户指导作为结构化日志事件，复用 AgentRunLog + SSE 推送，不新增表或 schema enum | 2026-06-02-spec-bootstrap-agent-stream-interaction |
+| SSE 事件携带 `log_id`（AgentRunLog.id UUID） | 前端通过 log_id Set 去重回填与实时推送的交集事件，替代 timestamp+content 拼接去重 | 2026-06-02-sse-reliable-stream |
 
 ## 依赖关系
 
@@ -157,3 +158,5 @@ Agent 执行中 → ClaudeCodeAdapter 输出 pending_input
 | 2026-05-31 | 2026-05-30-execution-coordinator | ExecutionCoordinatorService + AgentRun 9 字段 + 4 新端点 + 25 测试 |
 | 2026-05-30 | 2026-05-30-agent-adapter | Kill API + Diff Collector + 进程注册表 + 40 新增测试 |
 | 2026-06-02 | 2026-06-02-spec-bootstrap-agent-stream-interaction | 新增 `submit_run_input()` 服务方法、`POST /runs/{id}/input` 端点、`pending_input`/`user_input` 通道约定、SSE 用户指导推送 |
+| 2026-06-02 | 2026-06-02-sse-reliable-stream | SSE 端点增加 `after` 查询参数（UUID）实现断线续传；SSE 事件增加 `log_id` 字段支持可靠去重；前端 `AgentRunStreamClient` 封装连接管理、重连、回填、去重 |
+| 2026-06-02 | quick-fix-bootstrap-sse-log-empty | `ClaudeCodeAdapter` 增加跨平台命令 guard 和启动失败 `stderr` + `done` SSE 事件；Docker 镜像内 `claude`/`sillyspec`/`stdbuf` 可用，部署侧空流主要由 bootstrap Redis publish 误用和日志批量 commit 修复覆盖 |

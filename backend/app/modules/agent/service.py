@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from app.core.db import get_session_factory
 from app.core.errors import (
     AgentRunNotFound,
     AgentRunNotRunning,
@@ -52,6 +53,23 @@ MAX_USER_INPUT_CHARS = 4000
 class AgentRunError(AppError):
     code = "AGENT_RUN_ERROR"
     http_status = 400
+
+
+def _parse_log_timestamp(ts: str) -> datetime:
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return datetime.utcnow()
+
+
+def _serialize_log_event(entry: AgentRunLog) -> str:
+    payload = {
+        "channel": entry.channel,
+        "content": entry.content_redacted or "",
+        "timestamp": entry.timestamp.isoformat(),
+        "log_id": entry.id,
+    }
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def resolve_work_dir(
@@ -229,135 +247,25 @@ class AgentService:
         claude_md = render_bundle_to_claude_md(bundle)
         (lease_path / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
 
-        # -- 7. Execute (currently synchronous, structured for future async) ------
-        await self._execute_run_background(
-            run_id=run.id,
-            bundle=bundle,
-            lease_path=lease_path,
-            agent_type=canonical,
-            workspace_id=workspace_id,
-            user_id=user_id,
-            task_id=task_id,
+        # -- 7. Launch background execution (non-blocking) -----------------------
+        asyncio.create_task(
+            _run_agent_task(
+                run_id=run.id,
+                bundle=bundle,
+                lease_path=lease_path,
+                agent_type=canonical,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                task_id=task_id,
+            )
         )
 
-        # Refresh to pick up status changes from _execute_run_background
-        await self._session.refresh(run)
         return run
 
     # ------------------------------------------------------------------
     # Background execution (currently called synchronously)
     # ------------------------------------------------------------------
 
-    async def _execute_run_background(
-        self,
-        *,
-        run_id: uuid.UUID,
-        bundle: AgentSpecBundle,
-        lease_path: Path,
-        agent_type: str,
-        workspace_id: uuid.UUID,
-        user_id: uuid.UUID,
-        task_id: uuid.UUID,
-    ) -> None:
-        """Execute the agent and update run records.
-
-        Designed as an async method that can be dispatched by a background
-        task scheduler in the future.  For now it is called directly from
-        ``start_run``.
-        """
-        # -- 1. Load run record ---------------------------------------------------
-        run = await self._session.get(AgentRun, run_id)
-        if run is None:
-            log.error("execute_run_background_run_missing", run_id=str(run_id))
-            return
-
-        adapter_cls = ADAPTERS.get(agent_type)
-        if adapter_cls is None:
-            run.status = "failed"
-            run.finished_at = datetime.utcnow()
-            run.exit_code = 1
-            run.output_redacted = f"Unknown agent type '{agent_type}'."
-            self._session.add(run)
-            await self._session.commit()
-            return
-
-        # -- 2. Mark running ------------------------------------------------------
-        run.status = "running"
-        run.started_at = datetime.utcnow()
-        self._session.add(run)
-        await self._session.commit()
-
-        # -- 3. Execute via adapter -----------------------------------------------
-        adapter = adapter_cls()
-        result = await adapter.run_with_bundle(run_id, bundle, lease_path)
-
-        # -- 4. Update run record -------------------------------------------------
-        run.status = "completed" if result.exit_code == 0 else "failed"
-        run.finished_at = datetime.utcnow()
-        run.exit_code = result.exit_code
-        run.output_redacted = result.redacted_output[:10000]  # truncate
-        self._session.add(run)
-
-        # -- 5. Collect diff ------------------------------------------------------
-        try:
-            from app.modules.agent.diff_collector import collect_diff
-
-            diff_result = await collect_diff(lease_path)
-            if diff_result.files_changed > 0:
-                run.diff_summary = (
-                    f"{diff_result.stat_summary}\n"
-                    f"--- Summary: {diff_result.files_changed} files changed, "
-                    f"{diff_result.insertions} insertions(+), "
-                    f"{diff_result.deletions} deletions(-)"
-                )
-            else:
-                run.diff_summary = None
-            self._session.add(run)
-        except Exception as exc:
-            log.warning(
-                "diff_collect_failed",
-                run_id=str(run_id),
-                error=str(exc),
-            )
-
-        # -- 6. Log stdout/stderr -------------------------------------------------
-        for channel, content in [
-            ("stdout", result.stdout),
-            ("stderr", result.stderr),
-        ]:
-            if content:
-                log_entry = AgentRunLog(
-                    id=uuid.uuid4(),
-                    run_id=run.id,
-                    channel=channel,
-                    content_redacted=redact_agent_output(content)[:5000],
-                )
-                self._session.add(log_entry)
-
-        # -- 7. Write audit log ---------------------------------------------------
-        from app.modules.workflow.model import AuditLog
-
-        audit = AuditLog(
-            id=uuid.uuid4(),
-            workspace_id=workspace_id,
-            actor_id=user_id,
-            action="agent.run",
-            resource_type="agent_run",
-            resource_id=run.id,
-            details_json=json.dumps(
-                {
-                    "task_id": str(task_id),
-                    "agent_type": agent_type,
-                    "exit_code": result.exit_code,
-                    "timed_out": result.timed_out,
-                    "spec_strategy": bundle.spec_strategy,
-                    "profile_version": bundle.profile_version,
-                }
-            ),
-        )
-        self._session.add(audit)
-
-        await self._session.commit()
 
     # ------------------------------------------------------------------
     # Kill mechanism
@@ -480,12 +388,24 @@ class AgentService:
             result.append(enriched)
         return result
 
-    async def get_run_logs(self, run_id: uuid.UUID) -> list[AgentRunLog]:
+    async def get_run_logs(
+        self, run_id: uuid.UUID, *, after: str | None = None
+    ) -> list[AgentRunLog]:
         stmt = (
             select(AgentRunLog)
             .where(col(AgentRunLog.run_id) == run_id)
-            .order_by(col(AgentRunLog.timestamp))
+            .order_by(col(AgentRunLog.timestamp), col(AgentRunLog.id))
         )
+        if after is not None:
+            try:
+                after_uuid = uuid.UUID(after)
+                after_log = await self._session.get(AgentRunLog, after_uuid)
+                if after_log:
+                    stmt = stmt.where(
+                        col(AgentRunLog.timestamp) > after_log.timestamp
+                    )
+            except (ValueError, AttributeError):
+                pass
         return list((await self._session.execute(stmt)).scalars().all())
 
     # ------------------------------------------------------------------
@@ -594,30 +514,54 @@ class AgentService:
     # SSE streaming
     # ------------------------------------------------------------------
 
-    async def stream_run_logs(self, run_id: uuid.UUID) -> AsyncGenerator[str, None]:
+    async def stream_run_logs(
+        self,
+        run_id: uuid.UUID,
+        *,
+        follow: bool = True,
+        after: str | None = None,
+    ) -> AsyncGenerator[str, None]:
         """Yield SSE formatted events from Redis Pub/Sub for a given run.
 
-        Subscribes to the ``agent_run:{run_id}`` channel.  Emits ``data``
-        events for each message, a ``done`` event when the agent signals
-        completion, and ``: keepalive`` comments every ~30 seconds of
-        silence to prevent connection timeouts.
+        Existing persisted logs are replayed first so clients that attach
+        after a run starts do not miss Pub/Sub messages.  When ``follow`` is
+        true the stream then subscribes to ``agent_run:{run_id}`` for live
+        messages, emits ``done`` when the agent signals completion, and sends
+        keepalive comments during quiet periods.  ``after`` filters the DB
+        replay to only return logs after the specified log_id (UUID string).
         """
-        redis = get_redis()
-        pubsub = redis.pubsub()
         channel = f"agent_run:{run_id}"
+        pubsub = None
         try:
-            await pubsub.subscribe(channel)
+            if follow:
+                redis = get_redis()
+                pubsub = redis.pubsub()
+                await pubsub.subscribe(channel)
+                yield ": connected\n\n"
+
+            for entry in await self.get_run_logs(run_id, after=after):
+                yield f"data: {_serialize_log_event(entry)}\n\n"
+
+            if not follow:
+                yield "event: done\ndata: {}\n\n"
+                return
+
+            assert pubsub is not None
             while True:
                 try:
                     message = await asyncio.wait_for(
-                        pubsub.get_message(timeout=25),
-                        timeout=30,
+                        pubsub.get_message(timeout=5),
+                        timeout=10,
                     )
                 except TimeoutError:
-                    yield ": keepalive\n\n"
-                    continue
+                    message = None
                 if message and message["type"] == "message":
-                    data = message["data"]
+                    raw_data = message["data"]
+                    data = (
+                        raw_data.decode("utf-8", errors="replace")
+                        if isinstance(raw_data, bytes)
+                        else str(raw_data)
+                    )
                     try:
                         payload = json.loads(data)
                     except (json.JSONDecodeError, TypeError):
@@ -627,12 +571,24 @@ class AgentService:
                         break
                     yield f"data: {data}\n\n"
                 else:
+                    run = await self._session.get(
+                        AgentRun,
+                        run_id,
+                        populate_existing=True,
+                    )
+                    if run is None or run.status not in ("pending", "running"):
+                        yield "event: done\ndata: {}\n\n"
+                        break
                     yield ": keepalive\n\n"
         except Exception:
             yield 'event: error\ndata: {"error": "redis connection failed"}\n\n'
         finally:
-            await pubsub.unsubscribe(channel)
-            await pubsub.close()
+            if pubsub is not None:
+                try:
+                    await pubsub.unsubscribe(channel)
+                    await pubsub.close()
+                except Exception:
+                    log.warning("agent_stream_pubsub_close_failed", run_id=str(run_id))
 
     # ------------------------------------------------------------------
     # Stale run cleanup
@@ -945,29 +901,53 @@ class AgentService:
             # ──（已移除）直接写 CLAUDE.md ──
             # CLAUDE.md 现在由 adapter.run_with_bundle() 内部统一渲染和写入
 
+            # Incremental log callback
+            _sd_flush_n = 0
+
+            async def _sd_on_log(channel: str, content: str, ts: str) -> None:
+                nonlocal _sd_flush_n
+                try:
+                    entry = AgentRunLog(
+                        id=uuid.uuid4(),
+                        run_id=run_id,
+                        timestamp=_parse_log_timestamp(ts),
+                        channel=channel,
+                        content_redacted=content[:4000],
+                    )
+                    session.add(entry)
+                    _sd_flush_n += 1
+                    if _sd_flush_n >= 5:
+                        await session.commit()
+                        _sd_flush_n = 0
+                except Exception:
+                    log.warning("incremental_log_write_failed", run_id=str(run_id))
+
             adapter = adapter_cls()
-            result = await adapter.run_with_bundle(run_id, bundle, work_dir)
+            result = await adapter.run_with_bundle(run_id, bundle, work_dir, on_log=_sd_on_log)
+
+            if _sd_flush_n > 0:
+                try:
+                    await session.commit()
+                except Exception:
+                    log.warning("log_flush_final_failed", run_id=str(run_id))
 
             # Update run record
+            run = await session.get(AgentRun, run_id)
             run.status = "completed" if result.exit_code == 0 else "failed"
             run.finished_at = datetime.utcnow()
             run.exit_code = result.exit_code
             run.output_redacted = result.redacted_output[:10000]
             session.add(run)
 
-            # Log stdout/stderr
-            for channel, content in [
-                ("stdout", result.stdout),
-                ("stderr", result.stderr),
-            ]:
-                if content:
-                    log_entry = AgentRunLog(
-                        id=uuid.uuid4(),
-                        run_id=run.id,
-                        channel=channel,
-                        content_redacted=redact_agent_output(content)[:5000],
-                    )
-                    session.add(log_entry)
+            # stderr (stdout/tool_call already written incrementally)
+            if result.stderr and result.stderr.strip():
+                log_entry = AgentRunLog(
+                    id=uuid.uuid4(),
+                    run_id=run.id,
+                    channel="stderr",
+                    content_redacted=redact_agent_output(result.stderr)[:4000],
+                )
+                session.add(log_entry)
 
             # Write audit log
             from app.modules.workflow.model import AuditLog
@@ -1273,6 +1253,156 @@ class AgentService:
                 details={"workspace_id": str(workspace_id)},
             )
         return workspace.root_path
+
+
+async def _run_agent_task(
+    run_id: uuid.UUID,
+    bundle: AgentSpecBundle,
+    lease_path: Path,
+    agent_type: str,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    task_id: uuid.UUID,
+) -> None:
+    """Execute agent in background with its own DB session."""
+    factory = get_session_factory()
+    async with factory() as session:
+        await _run_agent_body(
+            session, run_id, bundle, lease_path, agent_type,
+            workspace_id, user_id, task_id,
+        )
+
+
+async def _run_agent_body(
+    session: AsyncSession,
+    run_id: uuid.UUID,
+    bundle: AgentSpecBundle,
+    lease_path: Path,
+    agent_type: str,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    task_id: uuid.UUID,
+) -> None:
+    """Execute the agent and update run records."""
+    # -- 1. Load run record ---------------------------------------------------
+    run = await session.get(AgentRun, run_id)
+    if run is None:
+        log.error("execute_run_background_run_missing", run_id=str(run_id))
+        return
+
+    adapter_cls = ADAPTERS.get(agent_type)
+    if adapter_cls is None:
+        run.status = "failed"
+        run.finished_at = datetime.utcnow()
+        run.exit_code = 1
+        run.output_redacted = f"Unknown agent type '{agent_type}'."
+        session.add(run)
+        await session.commit()
+        return
+
+    # -- 2. Mark running ------------------------------------------------------
+    run.status = "running"
+    run.started_at = datetime.utcnow()
+    session.add(run)
+    await session.commit()
+
+    # -- 3. Execute via adapter -----------------------------------------------
+    # -- 3. Execute via adapter with incremental log writes -------------------
+    _log_flush_n = 0
+
+    async def _on_log(channel: str, content: str, ts: str) -> None:
+        nonlocal _log_flush_n
+        try:
+            entry = AgentRunLog(
+                id=uuid.uuid4(),
+                run_id=run_id,
+                timestamp=_parse_log_timestamp(ts),
+                channel=channel,
+                content_redacted=content[:4000],
+            )
+            session.add(entry)
+            _log_flush_n += 1
+            if _log_flush_n >= 5:
+                await session.commit()
+                _log_flush_n = 0
+        except Exception:
+            log.warning("incremental_log_write_failed", run_id=str(run_id))
+
+    adapter = adapter_cls()
+    result = await adapter.run_with_bundle(run_id, bundle, lease_path, on_log=_on_log)
+
+    if _log_flush_n > 0:
+        try:
+            await session.commit()
+        except Exception:
+            log.warning("log_flush_final_failed", run_id=str(run_id))
+
+    # -- 4. Update run record -------------------------------------------------
+    run = await session.get(AgentRun, run_id)
+    run.status = "completed" if result.exit_code == 0 else "failed"
+    run.finished_at = datetime.utcnow()
+    run.exit_code = result.exit_code
+    run.output_redacted = result.redacted_output[:10000]  # truncate
+    session.add(run)
+
+    # -- 5. Collect diff ------------------------------------------------------
+    try:
+        from app.modules.agent.diff_collector import collect_diff
+
+        diff_result = await collect_diff(lease_path)
+        if diff_result.files_changed > 0:
+            run.diff_summary = (
+                f"{diff_result.stat_summary}\n"
+                f"--- Summary: {diff_result.files_changed} files changed, "
+                f"{diff_result.insertions} insertions(+), "
+                f"{diff_result.deletions} deletions(-)"
+            )
+        else:
+            run.diff_summary = None
+        session.add(run)
+    except Exception as exc:
+        log.warning(
+            "diff_collect_failed",
+            run_id=str(run_id),
+            error=str(exc),
+        )
+
+
+    # -- 6. Store stderr (stdout/tool_call already written incrementally) ----
+    if result.stderr and result.stderr.strip():
+        log_entry = AgentRunLog(
+            id=uuid.uuid4(),
+            run_id=run.id,
+            channel="stderr",
+            content_redacted=redact_agent_output(result.stderr)[:4000],
+        )
+        session.add(log_entry)
+
+    # -- 7. Write audit log ---------------------------------------------------
+    from app.modules.workflow.model import AuditLog
+
+    audit = AuditLog(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        actor_id=user_id,
+        action="agent.run",
+        resource_type="agent_run",
+        resource_id=run.id,
+        details_json=json.dumps(
+            {
+                "task_id": str(task_id),
+                "agent_type": agent_type,
+                "exit_code": result.exit_code,
+                "timed_out": result.timed_out,
+                "spec_strategy": bundle.spec_strategy,
+                "profile_version": bundle.profile_version,
+            }
+        ),
+    )
+    session.add(audit)
+
+    await session.commit()
+
 
 
 async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:

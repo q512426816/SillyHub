@@ -1,1 +1,0 @@
-需求确认：棕地增强 workflow 模块。6个需求点：(1) ChangeFSM 状态转移 ✅已有 (2) TaskFSM ✅已有 (3) spec_guardian 增加3条规则（字数≥100、组件校验、未解决review检查）(4) Review 封驳增强 ✅已有基础 (5) 审计日志自动覆盖 → 选择 SQLAlchemy event hook 方案 (6) 修复 test_change_transition_draft_to_proposed。无歧义，可进入方案设计。

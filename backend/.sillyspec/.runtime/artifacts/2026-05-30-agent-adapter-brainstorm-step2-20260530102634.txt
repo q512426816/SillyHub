@@ -1,1 +1,0 @@
-项目现状：后端 backend/ 模块化 feature-slice 架构(FastAPI+SQLModel+PostgreSQL+Redis)。agent/ 模块已有完整实现：AgentAdapter基类+AgentSpecBundle+ClaudeCodeAdapter(stream-json协议)+context_builder+service+router+63个测试全通过。前端 Next.js 14 尚无 Agent 页面。数据库已有 agent_runs 和 agent_run_logs 表。本次属于 backend+frontend 双子项目棕地开发。

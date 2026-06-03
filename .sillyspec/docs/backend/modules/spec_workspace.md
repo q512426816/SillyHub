@@ -135,6 +135,7 @@ Bootstrap 流程:
 
 - import 和 sync 端点当前为 stub，仅将 sync_status 设为 clean 并更新时间戳
 - bootstrap 通过 ClaudeCodeAdapter 异步执行，prompt 包含 `sillyspec init --dir <spec_root>` 和 `sillyspec run scan --dir <spec_root>`；前端通过 SSE stream 实时获取执行进度
+- bootstrap 后台进入 running 后会先写入并推送一条启动 `AgentRunLog`，随后 adapter 的 `on_log` 回调每条立即 commit，保证 SSE 后连可回放；实时 stdout/tool_call 仍由 `ClaudeCodeAdapter` 发布到 Redis。
 - bootstrap 后台执行异常时，外层 try/except/finally 保证 AgentRun status 更新为 failed 并写入 stderr 日志
 - SpecValidator 使用 `datetime.utcfromtimestamp()`（已被 Python 3.12 标记为 deprecated）
 - conflict 解决端点直接在 router 中操作 DB，未通过 service 层（直接 session.get + commit）
@@ -147,3 +148,4 @@ Bootstrap 流程:
 | 2026-05-27 | 初始实现：model + service + router + bootstrap + validator |
 | 2026-05-31 | 文档归档 |
 | 2026-06-02 | 2026-06-02-spec-bootstrap-agent-stream-interaction | `/spec-bootstrap` 改为异步 AgentRun + ClaudeCodeAdapter 后台执行 + SpecValidator 验证收尾，立即返回 stream_url |
+| 2026-06-02 | quick-fix-bootstrap-sse-log-empty | 修复 bootstrap `get_redis()` await 误用、日志批量 commit 造成 stream 运行中无业务内容的问题；同时为 adapter 启动失败补即时 SSE 错误事件，并保留无 `stdbuf` 环境兼容 |

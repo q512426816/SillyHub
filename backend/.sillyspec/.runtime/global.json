@@ -1,9 +1,0 @@
-{
-  "_version": 3,
-  "project": "backend",
-  "activeChanges": [
-    "2026-05-30-workflow-state-machine",
-    "2026-05-30-agent-adapter",
-    "2026-05-30-execution-coordinator"
-  ]
-}

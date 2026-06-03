@@ -63,9 +63,10 @@ export function listAgentRuns(workspaceId: string, taskId?: string) {
   );
 }
 
-export function getAgentRunLogs(workspaceId: string, runId: string) {
+export function getAgentRunLogs(workspaceId: string, runId: string, after?: string) {
+  const qs = after ? `?after=${encodeURIComponent(after)}` : "";
   return apiFetch<AgentRunLogEntry[]>(
-    `/api/workspaces/${workspaceId}/agent/runs/${runId}/logs`,
+    `/api/workspaces/${workspaceId}/agent/runs/${runId}/logs${qs}`,
   );
 }
 
@@ -73,6 +74,7 @@ export interface StreamLogEvent {
   channel: AgentRunLogChannel;
   content: string;
   timestamp: string;
+  log_id: string | null;
 }
 
 export function streamAgentRunLogs(

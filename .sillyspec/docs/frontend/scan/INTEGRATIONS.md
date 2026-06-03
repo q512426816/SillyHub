@@ -1,15 +1,15 @@
 ---
 author: qinyi
-created_at: 2026-05-31T23:30:00
+created_at: 2026-06-03T10:00:00
 ---
 
 # 集成与依赖
 
-## 后端 API 对接
+## 后端 API
 
-### API 代理架构
+### Next.js rewrites 代理配置
 
-前端通过 Next.js `rewrites` 代理所有 `/api/*` 请求到后端服务：
+前端通过 `next.config.mjs` 中的 `rewrites` 将所有 `/api/*` 请求代理到后端服务：
 
 ```javascript
 // next.config.mjs
@@ -23,147 +23,135 @@ async rewrites() {
 }
 ```
 
-- `INTERNAL_API_BASE_URL`：服务端渲染专用，优先级最高
-- `NEXT_PUBLIC_API_BASE_URL`：公开环境变量，暴露到客户端 bundle
-- 浏览器端使用相对 URL `/api/*`（通过 rewrites 代理）
-- 服务端使用绝对 URL 直连后端
+环境变量优先级：
+
+| 变量 | 作用域 | 说明 |
+|------|--------|------|
+| `INTERNAL_API_BASE_URL` | 服务端 | SSR 直连后端，优先级最高 |
+| `NEXT_PUBLIC_API_BASE_URL` | 客户端+服务端 | 公开环境变量，暴露到浏览器 bundle |
+| 兜底值 | — | `http://localhost:8000` |
+
+前端始终使用相对路径 `/api/*`，由 rewrites 在服务端完成代理。
 
 ### API 模块清单
 
-前端共 25 个 API 模块文件，覆盖后端全部业务领域：
+共 25 个 API 模块文件位于 `frontend/src/lib/`，覆盖后端全部业务领域：
 
-| 模块 | 后端路径前缀 | 核心端点 |
-|------|-------------|---------|
+| 模块 | 路径前缀 | 核心端点 |
+|------|----------|---------|
+| `api.ts` | — | `apiFetch` 通用封装 + `ApiError` 异常类 |
 | `auth.ts` | `/api/auth/` | login, refresh, logout, me |
 | `workspaces.ts` | `/api/workspaces/` | CRUD, scan, rescan, reparse, relations, topology |
-| `components.ts` | `/api/workspaces/` (兼容层) | listComponents, getComponent, getTopology |
+| `components.ts` | `/api/workspaces/` | listComponents, getComponent, getTopology（兼容层） |
 | `changes.ts` | `/api/workspaces/{id}/changes/` | CRUD, transition, feedback, archive-gate, agent-status, dispatch |
 | `workflow.ts` | `/api/workspaces/{id}/changes/` | submitReview, transitionChange, transitionTask |
 | `tasks.ts` | `/api/workspaces/{id}/changes/{id}/tasks/` | list, get, board, reparse |
-| `agent.ts` | `/api/workspaces/{id}/agent/runs/` | CRUD, logs, SSE stream（pending/running 连接，历史回放去重）, submit input（用户指导提交） |
+| `agent.ts` | `/api/workspaces/{id}/agent/runs/` | CRUD, logs（`after` 参数分页）, submit input |
+| `agent-stream.ts` | `/api/workspaces/{id}/agent/runs/{id}/stream` | `AgentRunStreamClient` — SSE 连接管理、断线重连（5 次指数退避）、token 刷新、日志回填、`log_id` 去重 |
 | `approvals.ts` | `/api/workspaces/{id}/approvals/` | pending, history, approve, reject |
 | `audit.ts` | `/api/workspaces/{id}/audit` | list (with filters) |
-| `incidents.ts` | `/api/workspaces/{id}/incidents/`, `/api/incidents/` | CRUD, postmortem |
-| `releases.ts` | `/api/workspaces/{id}/releases/`, `/api/releases/` | CRUD, approve, deploy, promote, rollback |
+| `incidents.ts` | `/api/workspaces/{id}/incidents/` | CRUD, postmortem |
+| `releases.ts` | `/api/workspaces/{id}/releases/` | CRUD, approve, deploy, promote, rollback |
 | `runtime.ts` | `/api/workspaces/{id}/runtime/` | progress, user-inputs, artifacts |
-| `knowledge.ts` | `/api/workspaces/{id}/knowledge/`, `/quicklog/` | list, get |
+| `knowledge.ts` | `/api/workspaces/{id}/knowledge/` | list, get |
 | `scan-docs.ts` | `/api/workspaces/{id}/scan-docs/` | list, get, reparse |
 | `health.ts` | `/api/health` | getHealth |
-| `spec-workspaces.ts` | `/api/workspaces/{id}/spec-workspace/` | get, import, sync, bootstrap（异步返回 agent_run_id + stream_url + status）、conflicts, update |
-| `git-identities.ts` | `/api/git/identities/`, `/api/git/check-access` | CRUD, access check |
-| `settings.ts` | `/api/settings/`, `/api/users/` | settings CRUD, user CRUD |
+| `spec-workspaces.ts` | `/api/workspaces/{id}/spec-workspace/` | get, import, sync, bootstrap, conflicts, update |
+| `git-identities.ts` | `/api/git/identities/` | CRUD, access check |
+| `settings.ts` | `/api/settings/` | settings CRUD, user CRUD |
 | `archive.ts` | `/api/workspaces/{id}/changes/{id}/` | archive, distill |
-| `worktree.ts` | `/api/workspaces/{id}/worktrees/`, `/api/worktrees/` | acquire, list, get, release, extend |
+| `worktree.ts` | `/api/workspaces/{id}/worktrees/` | acquire, list, get, release, extend |
 | `git-gateway.ts` | `/api/worktrees/{id}/git` | execute git operations |
 | `tool-gateway.ts` | `/api/worktrees/{id}/tools` | execute tools (file ops, shell) |
 | `change-writer.ts` | `/api/workspaces/{id}/changes/` | create change, batch-generate documents |
 
-## 认证机制
+### 认证流程
 
-### Token 流程
+1. 登录: `POST /api/auth/login` → 获取 `TokenPair`（access_token + refresh_token）
+2. 存储: Token 写入 Zustand `useSession` store → `localStorage` 持久化
+3. 请求: `apiFetch` 自动附加 `Authorization: Bearer` 头
+4. 刷新: 401 响应 → 自动 `POST /api/auth/refresh` → 换取新 token
+5. 失败: Refresh 失败 → 清除 store → 重定向 `/login`
 
-1. **登录**：POST `/api/auth/login` (email + password) → 获取 `TokenPair`
-   - `access_token`：短期访问令牌
-   - `refresh_token`：长期刷新令牌
-   - `access_expires_in` / `refresh_expires_in`：过期时间（秒）
-2. **存储**：Token 写入 Zustand `useSession` store → 自动持久化到 localStorage
-3. **使用**：`apiFetch` 每次请求自动从 store 读取并附加 `Authorization: Bearer` 头
-4. **刷新**：收到 401 响应时，自动尝试 POST `/api/auth/refresh` 换取新 token
-5. **失败**：Refresh 失败 → 清除 store → 重定向 `/login`
+SSE 连接认证通过 URL query 参数 `?token=xxx` 传递。
 
-### Session Store
+## 状态管理
+
+### Zustand — 全局客户端状态
+
+唯一 store: `frontend/src/stores/session.ts`
 
 ```typescript
 interface SessionState {
-  hydrated: boolean;           // Zustand persist 水合完成标志
-  user: SessionUser | null;    // { id, email, displayName }
+  hydrated: boolean;          // persist 水合完成标志
+  user: SessionUser | null;   // { id, email, displayName }
   accessToken: string | null;
   refreshToken: string | null;
 }
 ```
 
-- 使用 `zustand/middleware/persist` 持久化到 `localStorage`
-- key: `multi-agent-platform.session`
-- `hydrated` 标志确保服务端/客户端渲染一致性
-- `onRehydrateStorage` 回调在水合完成后设置 `hydrated = true`
+- 使用 `zustand/middleware/persist` 持久化到 `localStorage`（key: `multi-agent-platform.session`）
+- `onRehydrateStorage` 回调设置 `hydrated = true`，确保 SSR/CSR 一致性
+- DashboardLayout 通过 `hydrated + accessToken` 实现认证守卫
 
-### 认证守卫
+### React Query — 服务端状态（预留）
 
-DashboardLayout 实现客户端认证守卫：
-```typescript
-useEffect(() => {
-  if (!hydrated) return;
-  if (!accessToken) router.replace("/login");
-}, [hydrated, accessToken, router]);
-```
+`@tanstack/react-query` v5.51.0 已安装，但当前页面主要使用 `useState + useEffect` 模式直接调用 `apiFetch`。未来可逐步迁移至 React Query 管理服务端状态缓存。
 
-### SSE 认证
+## UI 组件库
 
-Agent 日志流通过 SSE (EventSource) 传输，认证方式为 URL query 参数：
-```typescript
-url.searchParams.set("token", accessToken);
-const es = new EventSource(url.toString());
-```
+### 样式基础
 
-Bootstrap SSE 连接：Workspace 详情页点击 Bootstrap 后，前端调用 `/spec-bootstrap` 获取 `agent_run_id` 和 `stream_url`，立即通过 `streamAgentRunLogs(workspaceId, runId)` 建立 SSE 连接。SSE 推送包含 stdout/stderr/tool_call/pending_input/user_input 五种通道。前端对 pending_input 渲染交互输入面板，用户提交指导后通过 `POST /agent/runs/{run_id}/input` 提交，提交结果通过 SSE 的 user_input 事件回传。
+- **Tailwind CSS** v3.4.7 — 原子化 CSS 框架
+- **tailwindcss-animate** v1.0.7 — 动画插件
+- **clsx** + **tailwind-merge** — `cn()` 工具函数合并类名
+- **class-variance-authority** v0.7.0 — 组件 variant 管理
 
-### Bootstrap API
+### 图标
 
-Workspace 详情页的 Bootstrap 流程使用以下 API 组合：
+- **lucide-react** v0.400.0 — 侧边栏导航图标等
 
-1. `POST /api/workspaces/{id}/spec-bootstrap` — 触发异步 bootstrap，返回 `BootstrapResult`（含 `agent_run_id`, `stream_url`, `status`）
-2. `GET /api/workspaces/{id}/agent/runs/{run_id}/stream` — SSE 实时日志流，展示 bootstrap 执行进度
-3. `POST /api/workspaces/{id}/agent/runs/{run_id}/input` — 用户指导输入提交（回复 pending_input）
+### 流程图 / 拓扑图
 
-## 外部依赖分析
+- **@xyflow/react** v12.10.2 — 仅 `frontend/src/app/(dashboard)/workspaces/[id]/components/topology/page.tsx` 使用
+- 渲染 workspace 组件依赖拓扑
 
-### 运行时依赖
+### Markdown 渲染
 
-| 依赖 | 用途 | 使用程度 |
-|------|------|---------|
-| `next` | 框架核心 (App Router, SSR, rewrites) | 高 |
-| `react` / `react-dom` | UI 渲染 | 高 |
-| `zustand` | 全局状态管理 (session) | 中 (仅 1 个 store) |
-| `@tanstack/react-query` | 服务端状态管理 | 低 (已安装未大量使用) |
-| `@xyflow/react` | 流程图/拓扑图可视化 | 低 (仅 topology 页面) |
-| `lucide-react` | 图标库 | 中 (侧边栏图标) |
-| `zod` | 运行时类型校验 | 低 (已安装未使用) |
-| `clsx` + `tailwind-merge` | CSS 类名合并工具 | 高 (cn 函数) |
-| `class-variance-authority` | 组件 variant 管理 | 低 (UI 原子组件) |
-| `tailwindcss-animate` | Tailwind 动画插件 | 低 |
+- **@uiw/react-markdown-preview** v5.2.1 — 仅 `frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx` 使用
+- 渲染 scan-docs 目录中的 Markdown 文档内容
 
-### 开发依赖
+### 类型校验
 
-| 依赖 | 用途 |
-|------|------|
-| `vitest` | 单元测试框架 |
-| `@testing-library/react` | React 组件测试 |
-| `@testing-library/jest-dom` | DOM 断言扩展 |
-| `@vitejs/plugin-react` | Vitest React 支持 |
-| `jsdom` | 测试环境 DOM 模拟 |
-| `typescript` | 类型检查 |
-| `eslint` + `eslint-config-next` | 代码检查 |
-| `tailwindcss` + `autoprefixer` + `postcss` | 样式处理 |
+- **zod** v3.23.0 — 已安装，当前未在表单校验中使用，预留
 
-### 未使用/低使用率依赖
+## Docker
 
-- `@tanstack/react-query`：已安装 (v5.51.0)，但页面主要使用 useState+useEffect 模式
-- `zod`：已安装 (v3.23.0)，但未发现表单校验使用
-- `@xyflow/react`：已安装 (v12.10.2)，仅 topology 页面使用
+### 前端容器化
 
-## 环境变量
+`frontend/Dockerfile` 使用三阶段构建：
 
-| 变量 | 用途 | 默认值 |
-|------|------|--------|
-| `INTERNAL_API_BASE_URL` | SSR 直连后端 URL | — |
-| `NEXT_PUBLIC_API_BASE_URL` | 客户端后端 URL (仅 fallback) | — |
-| `NEXT_BUILD_STANDALONE` | 启用 standalone 输出模式 | `"1"` |
-| 两者均未设置时 | 兜底后端地址 | `http://localhost:8000` |
+| 阶段 | 基础镜像 | 作用 |
+|------|---------|------|
+| deps | `node:20-alpine` | pnpm install 依赖 |
+| builder | `node:20-alpine` | `pnpm build`（standalone 输出） |
+| runtime | `node:20-alpine` | 最小运行时镜像 |
 
-## 构建与部署
+构建参数：
 
-- **开发**：`pnpm dev` — Next.js 开发服务器 (默认 3000 端口)
-- **构建**：`pnpm build` — 生产构建
-- **Standalone 输出**：`NEXT_BUILD_STANDALONE=1 pnpm build` — 生成独立部署包
-- **运行**：`pnpm start` — 启动生产服务器
-- **Node 要求**：`>=20.0.0`
+- `INTERNAL_API_BASE_URL` — 服务端 API 地址（Docker 网络内）
+- `NEXT_PUBLIC_API_BASE_URL` — 客户端 API 地址
+- `NEXT_PUBLIC_COMMIT_SHA` — Git commit 信息
+
+运行时配置：
+
+- `PORT=3000`, `HOSTNAME=0.0.0.0`
+- 非 root 用户 `nextjs:nodejs`（uid/gid 1001）
+- 健康检查: `wget -qO- http://127.0.0.1:3000`（30s 间隔，20s 启动等待）
+- 启动命令: `node server.js`（Next.js standalone 模式）
+
+## Markdown 渲染
+
+- 库: `@uiw/react-markdown-preview` v5.2.1
+- 使用位置: `frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx`
+- 用途: 渲染 SillySpec scan 生成的 Markdown 文档（架构文档、模块文档等）

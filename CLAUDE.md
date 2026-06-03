@@ -1,11 +1,28 @@
-# Task: stage:scan — Stage dispatch: scan
-# Change: Scan workspace project structure
+# SillyHub (multi-agent-platform)
 
-## Allowed Paths
-- /data/spec-workspaces/3f3b3602-3b96-43c3-a0ab-4088dcf85339
+AI 驱动的多 Agent 协作平台，基于 SillySpec 文档驱动开发。
 
-## Denied Paths
-- /host-projects/SillyHub
+## 技术栈
 
-## Available Tools
-- **sillyspec**: Use `sillyspec init --dir <spec_root>` to initialize spec space, then `sillyspec run scan --dir <spec_root>` to scan. Do NOT write .sillyspec files directly — always use the CLI.
+- **后端**: FastAPI + Python 3.12 + SQLModel + PostgreSQL + Redis
+- **前端**: Next.js 14 + React 18 + TypeScript + Tailwind CSS
+- **部署**: Docker Compose（配置在 `deploy/`）
+- **Agent**: Claude Code CLI + SillySpec CLI
+
+## 项目结构
+
+```
+backend/          # FastAPI 后端
+  app/modules/    # 业务模块（agent, workspace, change, task 等）
+  tests/          # 测试
+frontend/         # Next.js 前端
+  src/app/        # 页面路由
+  src/lib/        # API 客户端和工具函数
+  src/components/ # 组件
+deploy/           # Docker Compose 部署配置
+.sillyspec/       # SillySpec 文档（设计、模块文档、quicklog）
+```
+
+## 开发规则
+
+详见 `.claude/CLAUDE.md`。

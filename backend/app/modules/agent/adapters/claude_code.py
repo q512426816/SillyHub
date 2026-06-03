@@ -12,7 +12,9 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -25,6 +27,28 @@ from app.modules.git_gateway.service import redact_output
 log = get_logger(__name__)
 
 _CLAUDE_CLI = "claude"
+
+LogCallback = Callable[[str, str, str], Awaitable[None]]
+
+
+def _build_claude_command(*, disallow_ask_user: bool = False) -> list[str]:
+    """Build a cross-platform Claude CLI command."""
+    cmd = [
+        _CLAUDE_CLI,
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--input-format",
+        "stream-json",
+        "--verbose",
+        "--permission-mode",
+        "bypassPermissions",
+    ]
+    if disallow_ask_user:
+        cmd.extend(["--disallowedTools", "AskUserQuestion"])
+    if os.name != "nt" and shutil.which("stdbuf") is not None:
+        return ["stdbuf", "-oL", *cmd]
+    return cmd
 
 
 def _build_stream_input(prompt: str) -> bytes:
@@ -83,6 +107,17 @@ def _build_stage_dispatch_prompt(bundle: AgentSpecBundle) -> str:
     return prompt
 
 
+def _extract_tool_use_blocks(event: dict) -> list[dict]:
+    """Extract tool_use content blocks from a stream-json event."""
+    if event.get("type") != "assistant":
+        return []
+    blocks: list[dict] = []
+    for block in event.get("message", {}).get("content", []):
+        if isinstance(block, dict) and block.get("type") == "tool_use":
+            blocks.append(block)
+    return blocks
+
+
 def _parse_stream_events(raw_stdout: str) -> list[dict]:
     """Parse stream-json stdout into structured event list."""
     events: list[dict] = []
@@ -115,7 +150,7 @@ def _format_conversation_log(events: list[dict]) -> str:
                     if text:
                         lines.append(f"[ASSISTANT] {text}")
                 elif btype == "thinking":
-                    text = block.get("text", "").strip()
+                    text = (block.get("thinking") or block.get("text") or "").strip()
                     if text:
                         preview = text[:300] + ("..." if len(text) > 300 else "")
                         lines.append(f"[THINKING] {preview}")
@@ -161,6 +196,13 @@ def _format_conversation_log(events: list[dict]) -> str:
             subtype = event.get("subtype", "")
             if msg:
                 lines.append(f"[SYSTEM{':' + subtype if subtype else ''}] {msg}")
+            elif subtype == "init":
+                lines.append("[SYSTEM:init] session started")
+            elif subtype == "api_retry":
+                attempt = event.get("attempt", "?")
+                max_retries = event.get("max_retries", "?")
+                error = event.get("error", "unknown")
+                lines.append(f"[SYSTEM:api_retry] attempt {attempt}/{max_retries}, error: {error}")
 
         elif etype == "raw":
             lines.append(event.get("text", ""))
@@ -177,6 +219,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         bundle: AgentSpecBundle,
         lease_path: Path,
         timeout: int = 600,
+        on_log: LogCallback | None = None,
     ) -> AgentRunResult:
         """Execute Claude Code CLI using the full spec bundle."""
         claude_md = render_bundle_to_claude_md(bundle)
@@ -204,19 +247,7 @@ class ClaudeCodeAdapter(AgentAdapter):
                     "The spec root directory is where .sillyspec/ structure should be created."
                 )
 
-        cmd = [
-            _CLAUDE_CLI,
-            "-p",
-            "--output-format",
-            "stream-json",
-            "--input-format",
-            "stream-json",
-            "--verbose",
-            "--permission-mode",
-            "bypassPermissions",
-            "--disallowedTools",
-            "AskUserQuestion",
-        ]
+        cmd = _build_claude_command(disallow_ask_user=True)
 
         env_vars: dict[str, str] = {}
         if bundle.allowed_paths:
@@ -230,7 +261,7 @@ class ClaudeCodeAdapter(AgentAdapter):
             profile_version=bundle.profile_version,
         )
 
-        return await self._exec_stream(run_id, cmd, prompt, lease_path, env_vars, timeout)
+        return await self._exec_stream(run_id, cmd, prompt, lease_path, env_vars, timeout, on_log=on_log)
 
     async def run(
         self,
@@ -238,25 +269,16 @@ class ClaudeCodeAdapter(AgentAdapter):
         task_context: TaskContext,
         lease_path: Path,
         timeout: int = 600,
+        on_log: LogCallback | None = None,
     ) -> AgentRunResult:
-        cmd = [
-            _CLAUDE_CLI,
-            "-p",
-            "--output-format",
-            "stream-json",
-            "--input-format",
-            "stream-json",
-            "--verbose",
-            "--permission-mode",
-            "bypassPermissions",
-        ]
+        cmd = _build_claude_command()
         env_vars: dict[str, str] = {}
         if task_context.allowed_paths:
             env_vars["CLAUDE_ALLOWED_PATHS"] = ":".join(task_context.allowed_paths)
 
         log.info("agent_start", run_id=str(run_id))
         return await self._exec_stream(
-            run_id, cmd, task_context.task_title, lease_path, env_vars, timeout
+            run_id, cmd, task_context.task_title, lease_path, env_vars, timeout, on_log=on_log
         )
 
     async def _exec_stream(
@@ -267,6 +289,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         cwd: Path,
         env_vars: dict[str, str],
         timeout: int,
+        on_log: LogCallback | None = None,
     ) -> AgentRunResult:
         """Run claude CLI with stream-json protocol.
 
@@ -293,13 +316,42 @@ class ClaudeCodeAdapter(AgentAdapter):
                 pid=proc.pid,
                 stdout_fd=str(proc.stdout),
             )
-        except FileNotFoundError:
-            log.error("agent_cli_not_found", cli=_CLAUDE_CLI)
+        except FileNotFoundError as exc:
+            missing = exc.filename or cmd[0]
+            message = (
+                f"CLI command '{missing}' not found while starting '{_CLAUDE_CLI}'."
+            )
+            ts = datetime.now(UTC).isoformat()
+            log.error("agent_cli_not_found", cli=_CLAUDE_CLI, missing=missing)
+            if on_log is not None:
+                try:
+                    await on_log("stderr", message, ts)
+                except Exception:
+                    log.warning("on_log_callback_failed", run_id=str(run_id))
+            try:
+                redis = get_redis()
+                await redis.publish(
+                    channel,
+                    json.dumps(
+                        {
+                            "channel": "stderr",
+                            "content": message,
+                            "timestamp": ts,
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+                await redis.publish(
+                    channel,
+                    json.dumps({"event": "done", "timestamp": ts}),
+                )
+            except Exception:
+                log.warning("redis_publish_spawn_failure_failed", run_id=str(run_id))
             return AgentRunResult(
                 exit_code=127,
                 stdout="",
-                stderr=f"CLI '{_CLAUDE_CLI}' not found.",
-                redacted_output=f"CLI '{_CLAUDE_CLI}' not found in PATH.",
+                stderr=message,
+                redacted_output=message,
             )
 
         # ---- Register process in _proc_registry ----
@@ -379,17 +431,52 @@ class ClaudeCodeAdapter(AgentAdapter):
                             )
                         continue
 
-                    # Publish to Redis
+                    # Publish to Redis — detect tool_use events for tool_call channel
                     try:
+                        ts = datetime.now(UTC).isoformat()
+                        tool_use_blocks = _extract_tool_use_blocks(event)
+                        # Publish formatted text as stdout
                         msg = json.dumps(
                             {
                                 "channel": "stdout",
                                 "content": formatted,
-                                "timestamp": datetime.now(UTC).isoformat(),
+                                "timestamp": ts,
                             },
                             ensure_ascii=False,
                         )
                         await redis.publish(channel, msg)
+                        # Incremental DB write for stdout
+                        if on_log:
+                            try:
+                                await on_log("stdout", formatted[:4000], ts)
+                            except Exception:
+                                log.warning("on_log_callback_failed", run_id=str(run_id))
+                        # Publish structured tool_call events
+                        for tb in tool_use_blocks:
+                            tc_content = json.dumps(
+                                {
+                                    "tool": tb.get("name", "unknown"),
+                                    "args": tb.get("input", {}),
+                                    "timestamp": ts,
+                                    "status": "allowed",
+                                    "success": True,
+                                },
+                                ensure_ascii=False,
+                            )
+                            tc_msg = json.dumps(
+                                {
+                                    "channel": "tool_call",
+                                    "content": tc_content,
+                                    "timestamp": ts,
+                                },
+                                ensure_ascii=False,
+                            )
+                            await redis.publish(channel, tc_msg)
+                            if on_log:
+                                try:
+                                    await on_log("tool_call", tc_content[:4000], ts)
+                                except Exception:
+                                    log.warning("on_log_callback_failed", run_id=str(run_id))
                     except Exception:
                         log.warning("redis_publish_failed", run_id=str(run_id))
 

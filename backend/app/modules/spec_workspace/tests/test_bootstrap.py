@@ -605,7 +605,7 @@ class TestBackgroundExecutionAdapterBundle:
 
         captured_bundle: AgentSpecBundle | None = None
 
-        async def _capture_bundle(*, run_id, bundle, lease_path, timeout=600):
+        async def _capture_bundle(*, run_id, bundle, lease_path, timeout=600, on_log=None):
             nonlocal captured_bundle
             captured_bundle = bundle
             return _fake_agent_result()
@@ -646,7 +646,7 @@ class TestBackgroundExecutionAdapterBundle:
 
         captured_bundle: AgentSpecBundle | None = None
 
-        async def _capture_bundle(*, run_id, bundle, lease_path, timeout=600):
+        async def _capture_bundle(*, run_id, bundle, lease_path, timeout=600, on_log=None):
             nonlocal captured_bundle
             captured_bundle = bundle
             return _fake_agent_result()
@@ -687,7 +687,7 @@ class TestBackgroundExecutionAdapterBundle:
 
         captured_bundle: AgentSpecBundle | None = None
 
-        async def _capture_bundle(*, run_id, bundle, lease_path, timeout=600):
+        async def _capture_bundle(*, run_id, bundle, lease_path, timeout=600, on_log=None):
             nonlocal captured_bundle
             captured_bundle = bundle
             return _fake_agent_result()
@@ -728,7 +728,7 @@ class TestBackgroundExecutionAdapterBundle:
 
         captured_bundle: AgentSpecBundle | None = None
 
-        async def _capture_bundle(*, run_id, bundle, lease_path, timeout=600):
+        async def _capture_bundle(*, run_id, bundle, lease_path, timeout=600, on_log=None):
             nonlocal captured_bundle
             captured_bundle = bundle
             return _fake_agent_result()
@@ -770,7 +770,7 @@ class TestBackgroundExecutionAdapterBundle:
 
         captured_bundle: AgentSpecBundle | None = None
 
-        async def _capture_bundle(*, run_id, bundle, lease_path, timeout=600):
+        async def _capture_bundle(*, run_id, bundle, lease_path, timeout=600, on_log=None):
             nonlocal captured_bundle
             captured_bundle = bundle
             return _fake_agent_result()
@@ -811,7 +811,7 @@ class TestBackgroundExecutionAdapterBundle:
 
         captured_bundle: AgentSpecBundle | None = None
 
-        async def _capture_bundle(*, run_id, bundle, lease_path, timeout=600):
+        async def _capture_bundle(*, run_id, bundle, lease_path, timeout=600, on_log=None):
             nonlocal captured_bundle
             captured_bundle = bundle
             return _fake_agent_result()
@@ -852,7 +852,7 @@ class TestBackgroundExecutionAdapterBundle:
 
         captured_bundle: AgentSpecBundle | None = None
 
-        async def _capture_bundle(*, run_id, bundle, lease_path, timeout=600):
+        async def _capture_bundle(*, run_id, bundle, lease_path, timeout=600, on_log=None):
             nonlocal captured_bundle
             captured_bundle = bundle
             return _fake_agent_result()
@@ -929,6 +929,56 @@ class TestBackgroundExecutionSuccess:
         await db_session.refresh(run)
         assert run.status == "completed"
         assert run.exit_code == 0
+
+    async def test_start_and_adapter_logs_are_persisted_immediately(
+        self, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        ws = await _create_workspace(db_session, root_path=str(tmp_path / "code"))
+        spec_root = tmp_path / "specs" / str(ws.id)
+        spec_ws = await _create_spec_workspace(db_session, ws, str(spec_root))
+        run = await _create_pending_run(db_session, ws, spec_ws)
+        user_id = uuid.uuid4()
+        redis = AsyncMock()
+        redis.publish = AsyncMock()
+
+        _write_minimal_valid_spec(spec_root)
+
+        async def _capture_bundle(*, run_id, bundle, lease_path, timeout=600, on_log=None):
+            assert on_log is not None
+            await on_log("stdout", "adapter first log", "2026-06-02T00:00:00")
+            return _fake_agent_result(exit_code=0)
+
+        with patch(
+            "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
+            side_effect=_capture_bundle,
+        ), patch(
+            "app.core.db.get_session_factory",
+            return_value=MagicMock(
+                return_value=MagicMock(
+                    __aenter__=AsyncMock(return_value=db_session),
+                    __aexit__=AsyncMock(return_value=False),
+                )
+            ),
+        ), patch(
+            "app.modules.spec_workspace.validator.SpecValidator.validate",
+            return_value=_fake_validation_report(passed=True),
+        ), patch(
+            "app.modules.spec_workspace.bootstrap.get_redis",
+            return_value=redis,
+        ):
+            await _execute_bootstrap_agent_run(
+                run_id=run.id,
+                workspace_id=ws.id,
+                user_id=user_id,
+                spec_root=str(spec_root),
+                code_root=str(tmp_path / "code"),
+            )
+
+        logs = await _get_run_logs(db_session, run.id)
+        contents = [entry.content_redacted for entry in logs]
+        assert any("Agent run started" in content for content in contents)
+        assert "adapter first log" in contents
+        assert redis.publish.await_count >= 1
 
     async def test_sync_status_clean(
         self, db_session: AsyncSession, tmp_path: Path

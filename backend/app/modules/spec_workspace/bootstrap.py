@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import SpecWorkspaceNotFound
 from app.core.logging import get_logger
+from app.core.redis import get_redis
 from app.modules.agent.base import AgentSpecBundle
 from app.modules.agent.model import AgentRun, AgentRunLog
 from app.modules.spec_profile.model import SpecConflict
@@ -222,6 +223,19 @@ async def _execute_bootstrap_agent_run(
             session.add(run)
             await session.commit()
 
+            start_ts = datetime.utcnow().isoformat()
+            start_message = (
+                "[BOOTSTRAP] Agent run started. Connecting ClaudeCodeAdapter "
+                "for sillyspec init and scan."
+            )
+            await _write_run_log(
+                session,
+                run_id=run_id,
+                channel="stdout",
+                content=start_message,
+            )
+            await _publish_log_event(run_id, "stdout", start_message, start_ts)
+
             # -- 3. Build runtime directory + bundle --------------------------------
             spec_root_path = Path(spec_root)
             code_root_path = Path(code_root)
@@ -237,13 +251,36 @@ async def _execute_bootstrap_agent_run(
                 code_root=code_root_path,
             )
 
-            # -- 4. Execute via adapter ---------------------------------------------
+            # -- 4. Execute via adapter (with real-time log writing) ---------------
             adapter = ClaudeCodeAdapter()
+
+            async def _on_log(channel: str, content: str, ts: str) -> None:
+                try:
+                    session.add(
+                        AgentRunLog(
+                            id=uuid.uuid4(),
+                            run_id=run_id,
+                            timestamp=_parse_log_timestamp(ts),
+                            channel=channel,
+                            content_redacted=content[:4000],
+                        )
+                    )
+                    await session.commit()
+                except Exception as exc:
+                    await session.rollback()
+                    log.warning(
+                        "bootstrap_on_log_failed",
+                        run_id=str(run_id),
+                        channel=channel,
+                        error=str(exc),
+                    )
+
             result = await adapter.run_with_bundle(
                 run_id=run_id,
                 bundle=bundle,
                 lease_path=runtime_dir,
                 timeout=600,
+                on_log=_on_log,
             )
 
             # -- 5. Run validation --------------------------------------------------
@@ -525,3 +562,34 @@ async def _load_spec_workspace(
     )
     result = (await session.execute(stmt)).scalars().first()
     return result
+
+
+def _parse_log_timestamp(ts: str) -> datetime:
+    """Parse ISO timestamp from adapter callback."""
+    try:
+        return datetime.fromisoformat(ts)
+    except (ValueError, TypeError):
+        return datetime.utcnow()
+
+
+async def _publish_log_event(
+    run_id: uuid.UUID,
+    channel: str,
+    content: str,
+    ts: str,
+) -> None:
+    """Publish a log event to Redis for SSE subscribers."""
+    try:
+        redis = get_redis()
+        payload = json.dumps(
+            {
+                "run_id": str(run_id),
+                "channel": channel,
+                "content": content[:4000],
+                "timestamp": ts,
+            },
+            ensure_ascii=False,
+        )
+        await redis.publish(f"agent_run:{run_id}", payload)
+    except Exception:
+        log.warning("bootstrap_redis_publish_failed", run_id=str(run_id))

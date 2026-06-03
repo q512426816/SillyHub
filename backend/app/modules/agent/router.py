@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -164,6 +164,7 @@ async def stream_agent_run_logs(
     run_id: uuid.UUID,
     session: SessionDep,
     user: Annotated[User, Depends(require_permission(Permission.TASK_READ))],
+    after: str | None = Query(None, description="Resume from log id (UUID)"),
 ) -> StreamingResponse:
     """SSE endpoint — stream real-time logs for a running agent run."""
     svc = AgentService(session)
@@ -173,14 +174,18 @@ async def stream_agent_run_logs(
             f"Agent run '{run_id}' not found.",
             details={"run_id": str(run_id)},
         )
-    if run.status not in ("pending", "running"):
-        return StreamingResponse(
-            iter(["event: done\ndata: {}\n\n"]),
-            media_type="text/event-stream",
-        )
     return StreamingResponse(
-        svc.stream_run_logs(run_id),
+        svc.stream_run_logs(
+            run_id,
+            follow=run.status in ("pending", "running"),
+            after=after,
+        ),
         media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

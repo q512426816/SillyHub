@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Spec Bootstrap Agent Stream Interaction Prototype</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --line: #d8dde8;
+      --text: #172033;
+      --muted: #657089;
+      --accent: #1769aa;
+      --ok: #166534;
+      --warn: #9a5b00;
+      --bad: #b42318;
+      --code: #101828;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      padding: 18px 24px;
+    }
+    h1 { margin: 0; font-size: 20px; }
+    main {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 16px;
+      padding: 18px;
+    }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--line);
+      padding: 12px 14px;
+      font-weight: 600;
+    }
+    .body { padding: 14px; }
+    button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #fff;
+      border-radius: 6px;
+      padding: 7px 10px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: #fff;
+      color: var(--accent);
+    }
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 3px 8px;
+      color: var(--muted);
+      font-size: 12px;
+      background: #fff;
+    }
+    .pill.ok { color: var(--ok); border-color: #bbf7d0; background: #f0fdf4; }
+    .pill.warn { color: var(--warn); border-color: #fde68a; background: #fffbeb; }
+    .pill.bad { color: var(--bad); border-color: #fecaca; background: #fef2f2; }
+    .log {
+      min-height: 260px;
+      max-height: 360px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #0b1220;
+      color: #dbeafe;
+      padding: 10px;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+    .flow {
+      display: grid;
+      gap: 8px;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 12px;
+    }
+    .step {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px;
+      background: #fbfcff;
+    }
+    .ask {
+      border-left: 3px solid var(--warn);
+      background: #fffbeb;
+      padding: 10px;
+      margin-top: 12px;
+      border-radius: 6px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 72px;
+      margin-top: 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px;
+      font: inherit;
+      resize: vertical;
+    }
+    .muted { color: var(--muted); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+      background: #fbfcff;
+    }
+    .metric strong { display: block; font-size: 16px; }
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Spec Bootstrap: Agent Stream + User Interaction</h1>
+    <div class="muted">Wireframe for POST /workspaces/{id}/spec-bootstrap</div>
+  </header>
+
+  <main>
+    <section>
+      <div class="title">
+        <span>Workspace Bootstrap Panel</span>
+        <button id="start">Bootstrap</button>
+      </div>
+      <div class="body">
+        <div class="row">
+          <span class="pill" id="run">agent_run_id: not started</span>
+          <span class="pill" id="state">status: idle</span>
+          <span class="pill">stream: /agent/runs/{id}/stream</span>
+        </div>
+        <div class="grid">
+          <div class="metric"><strong>1</strong><span class="muted">create AgentRun</span></div>
+          <div class="metric"><strong>2</strong><span class="muted">connect SSE</span></div>
+          <div class="metric"><strong>3</strong><span class="muted">validate spec</span></div>
+        </div>
+        <h3>Live Stream</h3>
+        <div class="log" id="log">Click Bootstrap to start the simulated stream.</div>
+        <div class="ask" id="ask" hidden>
+          <strong>Agent needs confirmation</strong>
+          <div class="muted">Same pending input is visible in the Agent Console.</div>
+          <textarea id="answer">Use sensible defaults and continue scan.</textarea>
+          <div class="row" style="margin-top:8px">
+            <button id="send">Send guidance</button>
+            <button class="secondary" id="openAgent">Open Agent Console</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="title">
+        <span>Backend Execution Flow</span>
+        <span class="pill ok">recommended</span>
+      </div>
+      <div class="body">
+        <div class="flow">
+          <div class="step">POST /spec-bootstrap</div>
+          <div class="step">SpecBootstrapService creates AgentRun + AgentRunWorkspace</div>
+          <div class="step">Immediate response: { agent_run_id, stream_url }</div>
+          <div class="step">Background task builds AgentSpecBundle</div>
+          <div class="step">ClaudeCodeAdapter.run_with_bundle()</div>
+          <div class="step">Agent runs: sillyspec init --dir &lt;spec_root&gt;</div>
+          <div class="step">Agent runs: sillyspec run scan --dir &lt;spec_root&gt;</div>
+          <div class="step">SpecValidator validates output and writes conflicts</div>
+          <div class="step">SSE emits replayable logs and done event</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const log = document.getElementById("log");
+    const run = document.getElementById("run");
+    const state = document.getElementById("state");
+    const ask = document.getElementById("ask");
+    const start = document.getElementById("start");
+    const send = document.getElementById("send");
+
+    const lines = [
+      "[HTTP] POST /api/workspaces/{id}/spec-bootstrap",
+      "[RUN] created AgentRun 511267ae-dd53-4063-b1c2-5b7e65e5d9e2",
+      "[SSE] connected; replay DB logs then follow Redis pub/sub",
+      "[AGENT] ClaudeCodeAdapter started with AgentSpecBundle",
+      "[TOOL_USE] sillyspec init --dir C:/platform/specs/{workspace}",
+      "[TOOL_RESULT] init completed",
+      "[TOOL_USE] sillyspec run scan --dir C:/platform/specs/{workspace}",
+      "[ASK_USER] scan found ambiguous package roots. Need confirmation.",
+    ];
+
+    let timer = null;
+    start.onclick = () => {
+      log.textContent = "";
+      ask.hidden = true;
+      run.textContent = "agent_run_id: 511267ae-dd53-4063-b1c2-5b7e65e5d9e2";
+      state.textContent = "status: running";
+      state.className = "pill warn";
+      let i = 0;
+      clearInterval(timer);
+      timer = setInterval(() => {
+        log.textContent += lines[i] + "\\n";
+        i += 1;
+        if (i >= lines.length) {
+          clearInterval(timer);
+          ask.hidden = false;
+          state.textContent = "status: waiting for input";
+        }
+      }, 450);
+    };
+
+    send.onclick = () => {
+      ask.hidden = true;
+      log.textContent += "[USER_INPUT] Use sensible defaults and continue scan.\\n";
+      log.textContent += "[AGENT] continuing with user guidance\\n";
+      log.textContent += "[VALIDATOR] SpecValidator passed with warnings=0 errors=0\\n";
+      log.textContent += "[DONE] sync_status=clean\\n";
+      state.textContent = "status: completed";
+      state.className = "pill ok";
+    };
+
+    document.getElementById("openAgent").onclick = () => {
+      log.textContent += "[NAV] open /workspaces/{id}/agent?run=511267ae-dd53-4063-b1c2-5b7e65e5d9e2\\n";
+    };
+  </script>
+</body>
+</html>

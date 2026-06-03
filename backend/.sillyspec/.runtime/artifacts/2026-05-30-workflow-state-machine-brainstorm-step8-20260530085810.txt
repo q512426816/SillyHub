@@ -1,1 +1,0 @@
-设计确认，3段设计：(1) Bug修复：AuditLog外键约束+datetime.utcnow deprecation (2) Spec Guardian +3规则：文档非空(字数≥100)、组件存在性、无未解决review (3) 审计自动覆盖：新建 core/audit_hooks.py，SQLAlchemy event hook + session.info 上下文传递。变更名 2026-05-30-workflow-state-machine 已确认。

@@ -1,213 +1,73 @@
 ---
 author: qinyi
-created_at: 2026-05-31T23:30:00
+created_at: 2026-06-03T10:00:00
 ---
 
-# 编码规范与约定
+# CONVENTIONS — frontend
 
-## TypeScript 规范
+## 命名规范
 
-### 严格模式
+- **文件命名**: `kebab-case.tsx`（如 `workspace-card.tsx`, `scan-docs.ts`）
+- **目录命名**: `kebab-case/`（如 `scan-docs/`, `create-change/`）
+- **组件命名**: `PascalCase` 函数组件（如 `AppShell`, `WorkspaceCard`）
+- **Lib 文件**: `kebab-case.ts`，与后端模块名对应（如 `changes.ts`, `agent.ts`）
+- **页面文件**: 统一 `page.tsx`（Next.js App Router 约定）
 
-项目启用 TypeScript strict 模式，额外开启 `noUncheckedIndexedAccess`。
+## 框架隐形规则
 
-```json
-{
-  "strict": true,
-  "noUncheckedIndexedAccess": true,
-  "target": "ES2022",
-  "moduleResolution": "bundler"
-}
+### Next.js App Router
+- 路由组 `(auth)` 和 `(dashboard)` 用于布局分组，不影响 URL
+- `layout.tsx` 定义嵌套布局
+- `page.tsx` 是路由入口，必须是 default export
+- API Routes 位于 `src/app/api/`
+
+### API 代理
+所有 `/api/*` 请求通过 `next.config.mjs` rewrites 代理到后端：
+```javascript
+rewrites() → /api/:path* → http://localhost:8000/api/:path*
 ```
 
-### 类型定义约定
+## 组件规范
 
-- 每个 API 模块文件内联定义所需类型（不使用独立的 types/ 目录）
-- 使用 `type` 关键字声明类型别名（而非 `interface`），但两者混用也常见
-- 后端响应类型以 `Read` / `Response` / `List` 后缀命名：
-  - `Workspace` — 单个对象
-  - `WorkspaceListResponse` — 分页列表 `{ items, total }`
-  - `ChangeRead` — 详细读模型 (extends summary)
-  - `ChangeSummary` — 列表摘要模型
-- 请求参数类型以 `Input` / `Request` 后缀命名：
-  - `CreateChangeInput` — 创建请求体
-  - `UpdateIncidentInput` — 更新请求体
-- 枚举使用联合类型 (`type Status = "open" | "closed"`) 而非 enum
+### 函数组件 + 命名导出
+```tsx
+export function WorkspaceCard({ workspace, onChanged }: Props) { ... }
+```
+- 不使用 default export（有利于 tree-shaking 和重构）
+- Props 使用内联类型或 `interface Props`
 
-### 路径别名
+### UI 组件
+`components/ui/` 下是基础 UI 原子组件（如 Badge），使用 CVA（class-variance-authority）管理变体。
 
+## 代码风格
+
+- **ESLint**: eslint-config-next
+- **TypeScript**: 严格模式，`tsconfig.json`
+- **路径别名**: `@/` → `src/`
+- **CSS**: Tailwind CSS + CSS 变量主题系统
+
+## API 调用规范
+
+### Lib 层封装
+每个后端模块对应一个 lib 文件，封装 API 调用：
 ```typescript
-// tsconfig.json
-{
-  "baseUrl": ".",
-  "paths": { "@/*": ["./src/*"] }
-}
+// src/lib/workspaces.ts
+export async function listWorkspaces() { ... }
+export async function createWorkspace(data: CreateWorkspaceInput) { ... }
 ```
 
-所有 import 统一使用 `@/` 前缀：
-```typescript
-import { apiFetch } from "@/lib/api";
-import { Button } from "@/components/ui/button";
-import { useSession } from "@/stores/session";
-```
+### 认证
+API 调用自动携带 session store 中的 access token。
 
-## React 组件规范
+### SSE 流
+Agent 模块使用 SSE 流式通信（`src/lib/agent-stream.ts`）。
 
-### 组件声明
+## 状态管理规范
 
-- 函数组件使用 `function` 声明（非箭头函数）
-- Props 使用 `interface` 定义，命名为 `Props`：
-  ```typescript
-  interface Props {
-    open: boolean;
-    workspace: Workspace | null;
-    onClose: () => void;
-  }
-  export function ComponentDetailDrawer({ open, workspace, onClose }: Props) { ... }
-  ```
-- 页面组件接收 `params` prop（Next.js 约定）：
-  ```typescript
-  interface Props { params: { id: string } }
-  export default function WorkspaceDetailPage({ params }: Props) { ... }
-  ```
+### Zustand
+- 全局 store 在 `src/stores/` 下
+- `session.ts`: 用户会话（token + user info），使用 `persist` 中间件
+- 页面级状态优先使用 React state，跨页面状态使用 Zustand
 
-### "use client" 指令
-
-- 几乎所有业务页面和业务组件都标记 `"use client"`
-- 仅根 `layout.tsx` 为服务端组件
-- DashboardLayout 为客户端组件（需读取 Zustand store）
-
-### Hooks 使用模式
-
-- 状态管理：`useState` + `useEffect` 手动 fetch 模式（占主导）
-- 路由：`useRouter` / `usePathname` (next/navigation)
-- 全局状态：`useSession()` 从 Zustand store 读取
-- 侧边栏折叠状态：`useState` + `localStorage` 持久化
-- 轮询：`useEffect` + `setInterval`（如 HealthCard 每 5s 轮询）
-
-### 条件渲染与加载态
-
-页面级组件采用三段式渲染：
-
-```typescript
-if (loading) return <div>加载中...</div>;
-if (!workspace) return <div>错误信息</div>;
-return <main>...</main>;
-```
-
-### 样式约定
-
-- 全部使用 Tailwind CSS 原子类，无 CSS Modules
-- 使用 `cn()` (clsx + tailwind-merge) 合并条件类名
-- 字号倾向使用硬编码值：`text-xs` (12px), `text-[11px]`, `text-sm` (14px), `text-base` (16px)
-- 组件间距：`gap-5` (section), `gap-2` (元素), `gap-6` (大区块)
-- 卡片结构：`rounded-md border bg-card` + `border-b px-4 py-2.5` header
-- 表格：`globals.css` 中定义的统一表格样式
-- 深色模式：CSS 变量切换，Tailwind `darkMode: ["class"]`
-
-## API 调用模式
-
-### 统一 fetch 封装
-
-所有 API 调用通过 `apiFetch<T>()` 发起：
-
-```typescript
-// GET 请求
-const data = await apiFetch<WorkspaceListResponse>("/api/workspaces");
-
-// POST 请求
-const result = await apiFetch<Workspace>("/api/workspaces", {
-  method: "POST",
-  json: { name: "test", root_path: "/path" },
-});
-
-// 带查询参数
-const data = await apiFetch<ChangeList>(
-  `/api/workspaces/${id}/changes?status=active`
-);
-```
-
-### 错误处理
-
-```typescript
-try {
-  const data = await someApiCall();
-} catch (err) {
-  const msg = err instanceof ApiError
-    ? `${err.code}: ${err.message}`
-    : "操作失败";
-  setError(msg);
-}
-```
-
-### API 模块组织
-
-每个 API 文件遵循统一结构：
-
-```typescript
-import { apiFetch } from "./api";
-
-// ── 类型定义 ──
-export type SomeType = { ... };
-export interface SomeResponse { ... }
-
-// ── API 函数 ──
-export function listItems(workspaceId: string) {
-  return apiFetch<SomeResponse>(`/api/workspaces/${workspaceId}/items`);
-}
-
-export function createItem(workspaceId: string, input: SomeInput) {
-  return apiFetch<Item>(`/api/workspaces/${workspaceId}/items`, {
-    method: "POST",
-    json: input,
-  });
-}
-```
-
-### Token 管理
-
-- Token 存储在 Zustand store (`useSession`)，自动持久化到 localStorage
-- `apiFetch` 每次请求自动从 store 读取 `accessToken` 并附加 `Authorization: Bearer` 头
-- 401 响应自动触发 token refresh 流程
-- Refresh 失败自动清除 store 并重定向到 `/login`
-- SSE 连接通过 URL query 参数传递 token (`?token=xxx`)
-
-## 命名约定
-
-### 文件命名
-
-- 页面：`page.tsx` (Next.js 约定)
-- 布局：`layout.tsx` (Next.js 约定)
-- 组件：`kebab-case.tsx`（如 `app-shell.tsx`, `workspace-card.tsx`）
-- API 模块：`kebab-case.ts`（如 `scan-docs.ts`, `git-gateway.ts`）
-- Store：`kebab-case.ts`（如 `session.ts`）
-
-### 变量命名
-
-- 组件：`PascalCase` (`WorkspaceCard`, `HealthCard`)
-- 函数：`camelCase` (`listChanges`, `apiFetch`)
-- 类型/接口：`PascalCase` (`ChangeSummary`, `ApiErrorPayload`)
-- 常量：`UPPER_SNAKE_CASE` (`SYNC_STATUS_VARIANT`, `COLLAPSED_KEY`)
-- CSS 类：Tailwind 原子类，不使用自定义 CSS class 命名
-
-### 路由参数
-
-- 动态段：`[id]`, `[cid]`, `[tid]`, `[iid]`
-- params 对象：`params.id`, `params.cid` 等
-
-## ESLint 规则
-
-```json
-{
-  "extends": ["next/core-web-vitals"],
-  "rules": {
-    "no-unused-vars": ["warn", {
-      "argsIgnorePattern": "^_",
-      "varsIgnorePattern": "^_"
-    }]
-  }
-}
-```
-
-- 未使用变量前缀 `_` 可消除警告
-- 继承 Next.js 推荐的 Web Vitals 规则
+### React Query
+已引入 `@tanstack/react-query` 但当前使用较少，主要数据获取通过 lib 层直接 fetch。
