@@ -58,7 +58,7 @@ class ScanDocsService:
         doc = await self._session.get(ScanDocument, doc_id)
         if doc is None or doc.workspace_id != workspace_id:
             raise ScanDocNotFound(
-                f"Scan doc not found.",
+                "Scan doc not found.",
                 details={
                     "workspace_id": str(workspace_id),
                     "doc_id": str(doc_id),

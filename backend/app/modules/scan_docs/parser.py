@@ -63,7 +63,7 @@ class ScanDocsResult:
 def _doc_type_from_filename(filename: str) -> str:
     """Map filename (without extension) to doc_type."""
     stem = Path(filename).stem.upper()
-    return stem if stem in STANDARD_DOC_TYPES else stem
+    return stem
 
 
 def _extract_title(content: str) -> str | None:

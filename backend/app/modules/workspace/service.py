@@ -543,7 +543,7 @@ class WorkspaceService:
         if parsed.path:
             p = parsed.path.replace("\\", "/")
             # Detect absolute Windows (C:/...) or Posix (/...) paths
-            is_absolute = len(p) >= 2 and p[1] == ":" or p.startswith("/")
+            is_absolute = (len(p) >= 2 and p[1] == ":") or p.startswith("/")
             if is_absolute:
                 return _rewrite_path(parsed.path)
             joined = os.path.join(parent_root, parsed.path)
@@ -557,7 +557,7 @@ class WorkspaceService:
         *,
         root_path: str,
         user_id: uuid.UUID,
-        agent_service: "AgentService",  # noqa: F821
+        agent_service: AgentService,  # noqa: F821
     ) -> tuple[uuid.UUID, uuid.UUID]:
         """Create workspace + spec_workspace and trigger scan agent.
 

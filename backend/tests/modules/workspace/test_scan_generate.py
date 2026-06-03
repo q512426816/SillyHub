@@ -6,8 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import AsyncClient
 
-from app.modules.auth.permissions import Permission
-
 
 @pytest.mark.asyncio
 async def test_scan_generate_success(client: AsyncClient, auth_headers):

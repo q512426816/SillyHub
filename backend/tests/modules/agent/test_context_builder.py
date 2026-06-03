@@ -1,10 +1,10 @@
 """Tests for build_scan_bundle()."""
 
 import uuid
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
-from unittest.mock import AsyncMock
 
 from app.core.errors import WorkspaceNotFound
 from app.modules.agent.base import AgentSpecBundle
