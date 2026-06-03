@@ -9,13 +9,12 @@ import { streamAgentRunLogs, type StreamLogEvent, type DoneEventData } from "@/l
 import { ApiError } from "@/lib/api";
 import {
   createWorkspace,
-  rescanWorkspace,
   scanGenerate,
   scanWorkspace,
   type ScanResult,
 } from "@/lib/workspaces";
 
-type Phase = "idle" | "scanning" | "ready" | "generating" | "generated" | "creating";
+type Phase = "idle" | "scanning" | "ready" | "generating" | "creating";
 
 interface Props {
   onCreated: () => void;
@@ -32,7 +31,6 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   // SSE / generate state
   const [logs, setLogs] = useState<string[]>([]);
   const [agentRunId, setAgentRunId] = useState<string | null>(null);
-  const [generatedScan, setGeneratedScan] = useState<ScanResult | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   const handleScan = async () => {
@@ -58,7 +56,6 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
     if (!scan) return;
     setError(null);
     setLogs([]);
-    setGeneratedScan(null);
     setPhase("generating");
 
     try {
@@ -75,7 +72,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
         (event: StreamLogEvent) => {
           setLogs((prev) => [...prev.slice(-500), event.content]);
         },
-        // onDone: agent completed — use SSE done event data directly
+        // onDone: agent completed — auto-create workspace
         async (doneData: DoneEventData) => {
           if (
             doneData.status === "failed" ||
@@ -88,12 +85,16 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
             return;
           }
           try {
-            const rescanResult = await rescanWorkspace(workspaceId);
-            setGeneratedScan(rescanResult);
-          } catch {
-            // rescan failure doesn't block main flow
+            await createWorkspace({
+              name: name.trim() || scan.root_path,
+              root_path: scan.root_path,
+            });
+            onCreated();
+          } catch (err) {
+            const msg = err instanceof ApiError ? `${err.code}: ${err.message}` : "创建失败";
+            setError(msg);
+            setPhase("ready");
           }
-          setPhase("generated");
         },
         // onError: SSE connection error
         (error: Error) => {
@@ -249,23 +250,6 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
           </section>
         )}
 
-        {phase === "generated" && generatedScan && (
-          <section className="rounded border bg-green-50 p-3 text-xs">
-            <div className="mb-2 flex items-center gap-2">
-              <span className="font-medium text-green-700">规范生成完成</span>
-              <Badge variant="success">.sillyspec 已生成</Badge>
-            </div>
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-1">
-              <dt className="text-muted-foreground">root_path</dt>
-              <dd className="break-all font-mono">{generatedScan.root_path}</dd>
-              <dt className="text-muted-foreground">projects</dt>
-              <dd>{generatedScan.structure.projects_count}</dd>
-              <dt className="text-muted-foreground">active changes</dt>
-              <dd>{generatedScan.structure.active_changes_count}</dd>
-            </dl>
-          </section>
-        )}
-
         {scan && phase !== "generating" && (
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground" htmlFor="ws-name">
@@ -292,15 +276,6 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
           >
             {phase === "generating" ? "取消生成" : "取消"}
           </Button>
-          {phase === "generated" && (
-            <Button
-              size="sm"
-              onClick={handleCreate}
-              disabled={!scan || !name.trim()}
-            >
-              确认创建
-            </Button>
-          )}
         </footer>
       </div>
     </div>

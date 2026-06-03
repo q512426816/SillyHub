@@ -81,7 +81,18 @@ class ScanDocsService:
     async def reparse(self, workspace_id: uuid.UUID) -> tuple[dict[str, int], ScanDocsResult]:
         """Reparse all docs under .sillyspec/docs/ for a workspace."""
         workspace = await self._workspace_service.get(workspace_id)
+
+        # For platform-managed workspaces, read from spec_root instead of root_path
         sillyspec_root = Path(workspace.root_path)
+        try:
+            from app.modules.spec_workspace.service import SpecWorkspaceService
+
+            spec_ws_svc = SpecWorkspaceService(self._session)
+            spec_ws = await spec_ws_svc.get(workspace.id)
+            if spec_ws.strategy == "platform-managed" and spec_ws.spec_root:
+                sillyspec_root = Path(spec_ws.spec_root)
+        except Exception:
+            pass
 
         stats = {"parsed": 0, "created": 0, "updated": 0, "deleted": 0}
 

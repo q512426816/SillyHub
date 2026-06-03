@@ -120,8 +120,12 @@ export default function ScanDocsPage({ params }: Props) {
 
   const load = useCallback(async () => {
     setLoading(true); setPageError(null);
-    try { const resp = await listScanDocs(workspaceId); setDocs(resp.items); }
-    catch (err) { setPageError(err instanceof ApiError ? err.message : "加载扫描文档失败"); }
+    try {
+      // Auto-reparse to get latest from platform storage
+      await reparseScanDocs(workspaceId);
+      const resp = await listScanDocs(workspaceId);
+      setDocs(resp.items);
+    } catch (err) { setPageError(err instanceof ApiError ? err.message : "加载扫描文档失败"); }
     finally { setLoading(false); }
   }, [workspaceId]);
 

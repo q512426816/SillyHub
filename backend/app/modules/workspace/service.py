@@ -92,31 +92,36 @@ class WorkspaceService:
         *,
         created_by: uuid.UUID | None,
     ) -> Workspace:
+        slug = payload.slug or slugify(payload.name)
+        now = datetime.utcnow()
+
+        # If an active/pending workspace already exists for this root_path,
+        # activate it instead of creating a new one.
+        existing = await self._find_active_by_root_path(payload.root_path)
+        if existing:
+            if existing.status == "active":
+                return existing
+            # Pending workspace (e.g. from a previous scan-generate): activate it.
+            existing.name = payload.name
+            existing.slug = await self._ensure_unique_slug(slug)
+            existing.status = "active"
+            existing.updated_at = now
+            existing.last_scanned_at = now
+            await self._session.flush()
+            # Check if platform storage already has .sillyspec (scan-generate case)
+            await self._ensure_spec_workspace_from_platform(existing)
+            await self._session.commit()
+            await self._session.refresh(existing)
+            log.info("workspace.activated_from_create", workspace_id=str(existing.id))
+            return existing
+
+        # For new workspaces, scan local path for .sillyspec
         scan = self.scan(payload.root_path)
         if not scan.is_sillyspec:
             raise WorkspaceNotSillyspec(
                 "Provided root_path is not a SillySpec workspace.",
                 details={"root_path": payload.root_path, "warnings": scan.warnings},
             )
-
-        slug = payload.slug or slugify(payload.name)
-        now = datetime.utcnow()
-
-        # If a pending workspace exists for this root_path (e.g. from a
-        # previous scan-generate that was never activated), activate it.
-        existing = await self._find_active_by_root_path(payload.root_path)
-        if existing and existing.status == "pending":
-            existing.name = payload.name
-            existing.slug = slug
-            existing.status = "active"
-            existing.updated_at = now
-            existing.last_scanned_at = now
-            await self._session.flush()
-            await self._ensure_spec_workspace(existing.id, scan.sillyspec_path)
-            await self._session.commit()
-            await self._session.refresh(existing)
-            log.info("workspace.activated_from_create", workspace_id=str(existing.id))
-            return existing
 
         # Soft-deleted rows keep the same root_path, so before inserting a
         # fresh row we look for a tombstone we can resurrect. This is the
@@ -200,7 +205,7 @@ class WorkspaceService:
             return None
 
         result.name = payload.name
-        result.slug = slug
+        result.slug = await self._ensure_unique_slug(slug)
         result.status = "active"
         result.deleted_at = None
         result.created_by = created_by
@@ -387,35 +392,46 @@ class WorkspaceService:
         from app.modules.spec_workspace.service import SpecWorkspaceService
 
         spec_ws_svc = SpecWorkspaceService(self._session)
+        parse_root: str | None = None
         try:
             spec_ws = await spec_ws_svc.get(ws.id)
             if spec_ws.strategy == "platform-managed" and spec_ws.spec_root:
-                root_path = spec_ws.spec_root
-            else:
-                root_path = _rewrite_path(ws.root_path)
+                parse_root = spec_ws.spec_root
         except Exception:
-            root_path = _rewrite_path(ws.root_path)
+            pass
+        root_path = parse_root or _rewrite_path(ws.root_path)
+        # For building child root_paths, always use the original host root
+        host_root = _rewrite_path(ws.root_path)
 
-        # 3. Call parser
+        # 3. Call parser (reads YAML from parse root)
         parser = WorkspaceParser()
         parse_result = parser.parse(root_path)
 
         # 4. path_missing re-validation
         for pw in parse_result.workspaces:
             if pw.status == "path_missing" and pw.path:
-                resolved = Path(root_path) / pw.path
+                resolved = Path(host_root) / pw.path
                 if resolved.exists():
                     pw.status = "active"
 
         # 5. Query existing child workspaces
-        # Children have root_path under parent_root/ (constructed by _build_child_root_path).
-        # Use root_path LIKE to find them, excluding the parent itself.
-        normalized_root = root_path.replace("\\", "/")
+        # Children have root_path under host_root/ (constructed by _build_child_root_path).
+        normalized_host = host_root.replace("\\", "/")
         stmt = select(Workspace).where(
-            col(Workspace.root_path).like(normalized_root + "/%"),
+            col(Workspace.root_path).like(normalized_host + "/%"),
             col(Workspace.deleted_at).is_(None),
         )
         existing_rows = list((await self._session.execute(stmt)).scalars().all())
+        # Also find orphaned children from previous parse_root-based paths
+        if parse_root and parse_root != host_root:
+            normalized_parse = parse_root.replace("\\", "/")
+            orphan_stmt = select(Workspace).where(
+                col(Workspace.root_path).like(normalized_parse + "/%"),
+                col(Workspace.deleted_at).is_(None),
+            )
+            for row in (await self._session.execute(orphan_stmt)).scalars().all():
+                if row not in existing_rows:
+                    existing_rows.append(row)
         existing_children: dict[str, Workspace] = {
             ws.source_yaml_path: ws for ws in existing_rows if ws.source_yaml_path
         }
@@ -436,10 +452,10 @@ class WorkspaceService:
 
         for pw in parse_result.workspaces:
             stats["parsed"] += 1
-            child_root = self._build_child_root_path(root_path, pw)
+            child_root = self._build_child_root_path(host_root, pw)
 
             # Skip if child root_path would collide with parent
-            if os.path.normpath(child_root) == os.path.normpath(root_path):
+            if os.path.normpath(child_root) == os.path.normpath(host_root):
                 stats["parsed"] -= 1
                 continue
 
@@ -748,7 +764,69 @@ class WorkspaceService:
         )
         return (await self._session.execute(stmt)).scalars().first()
 
+    async def _ensure_unique_slug(self, slug: str) -> str:
+        """Return a unique slug, appending a short suffix if the slug is taken."""
+        existing = await self._find_active_by_slug(slug)
+        if existing is None:
+            return slug
+        suffix = uuid.uuid4().hex[:8]
+        return f"{slug[:90]}-{suffix}"
+
+    async def activate(self, workspace_id: uuid.UUID) -> Workspace:
+        """Activate a pending workspace: copy .sillyspec, set status='active'."""
+        workspace = await self.get(workspace_id)
+        if workspace.status != "pending":
+            return workspace
+
+        workspace.status = "active"
+        workspace.updated_at = datetime.utcnow()
+        workspace.last_scanned_at = datetime.utcnow()
+
+        # Scan and copy .sillyspec to platform storage
+        scan = self.scan(workspace.root_path)
+        if scan.is_sillyspec:
+            await self._ensure_spec_workspace(workspace.id, scan.sillyspec_path)
+
+        await self._session.commit()
+        await self._session.refresh(workspace)
+        log.info("workspace.activated", workspace_id=str(workspace.id))
+        return workspace
+
     # -- Helpers ---
+
+    async def _ensure_spec_workspace_from_platform(
+        self,
+        workspace: Workspace,
+    ) -> None:
+        """Ensure spec workspace exists — prefer platform storage if already present."""
+        from app.modules.spec_workspace.service import SpecWorkspaceService
+
+        spec_ws_svc = SpecWorkspaceService(self._session)
+        try:
+            spec_ws = await spec_ws_svc.get(workspace.id)
+            if spec_ws.strategy == "platform-managed" and spec_ws.spec_root:
+                platform_sillyspec = Path(spec_ws.spec_root) / ".sillyspec"
+                if platform_sillyspec.is_dir():
+                    # Platform storage already has .sillyspec — just reimport children
+                    try:
+                        await self.reparse(workspace.id)
+                        log.info("spec_workspace.projects_imported", workspace_id=str(workspace.id))
+                    except Exception as exc:
+                        log.warning("spec_workspace.projects_import_failed", workspace_id=str(workspace.id), error=str(exc))
+                    try:
+                        from app.modules.change.service import ChangeService
+                        change_svc = ChangeService(self._session)
+                        await change_svc.reparse(workspace.id)
+                        log.info("spec_workspace.changes_imported", workspace_id=str(workspace.id))
+                    except Exception as exc:
+                        log.warning("spec_workspace.changes_import_failed", workspace_id=str(workspace.id), error=str(exc))
+                    return
+        except Exception:
+            pass
+        # No spec_workspace or no .sillyspec on platform — try local scan
+        scan = self.scan(workspace.root_path)
+        if scan.is_sillyspec:
+            await self._ensure_spec_workspace(workspace.id, scan.sillyspec_path)
 
     async def _ensure_spec_workspace(
         self,
@@ -765,7 +843,8 @@ class WorkspaceService:
         platform_root = f"{settings.spec_data_root}/{workspace_id}"
         platform_sillyspec = Path(platform_root) / ".sillyspec"
 
-        # Copy .sillyspec tree from source to platform directory
+        # Copy .sillyspec tree from source to platform directory,
+        # excluding .runtime/ (worktrees/artifacts — large, not needed on platform)
         source = Path(sillyspec_path)
         if source.is_dir():
             try:
@@ -774,6 +853,7 @@ class WorkspaceService:
                 shutil.copytree(
                     str(source),
                     str(platform_sillyspec),
+                    ignore=shutil.ignore_patterns(".runtime"),
                     ignore_dangling_symlinks=True,
                 )
                 log.info(
