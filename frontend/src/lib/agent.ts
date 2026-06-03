@@ -1,4 +1,4 @@
-import { apiFetch, getApiBaseUrl } from "./api";
+import { apiFetch, getDirectApiBaseUrl } from "./api";
 import { useSession } from "@/stores/session";
 
 export type AgentRunStatus =
@@ -77,14 +77,21 @@ export interface StreamLogEvent {
   log_id: string | null;
 }
 
+export interface DoneEventData {
+  status?: string;
+  exit_code?: number | null;
+}
+
 export function streamAgentRunLogs(
   workspaceId: string,
   runId: string,
+<<<<<<< HEAD
   onMessage: (_event: StreamLogEvent) => void,
-  onDone: () => void,
+  onDone: (_data: DoneEventData) => void,
   onError?: (_error: Error) => void,
 ): EventSource {
-  const base = getApiBaseUrl();
+  // Bypass Next.js rewrite proxy to avoid SSE buffering
+  const base = getDirectApiBaseUrl();
   const { accessToken } = useSession.getState();
   const url = new URL(`${base}/api/workspaces/${workspaceId}/agent/runs/${runId}/stream`);
   if (accessToken) url.searchParams.set("token", accessToken);
@@ -99,9 +106,15 @@ export function streamAgentRunLogs(
     }
   };
 
-  es.addEventListener("done", () => {
+  es.addEventListener("done", (e: MessageEvent<string>) => {
     es.close();
-    onDone();
+    let data: DoneEventData = {};
+    try {
+      data = JSON.parse(e.data);
+    } catch {
+      // empty done data is valid
+    }
+    onDone(data);
   });
 
   es.onerror = () => {

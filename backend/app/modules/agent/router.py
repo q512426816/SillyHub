@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Annotated
 
@@ -158,8 +159,11 @@ async def stream_agent_run_logs(
             details={"run_id": str(run_id)},
         )
     if run.status not in ("pending", "running"):
+        done_data = json.dumps(
+            {"status": run.status, "exit_code": run.exit_code}
+        )
         return StreamingResponse(
-            iter(["event: done\ndata: {}\n\n"]),
+            iter([f"event: done\ndata: {done_data}\n\n"]),
             media_type="text/event-stream",
             headers=_SSE_HEADERS,
         )

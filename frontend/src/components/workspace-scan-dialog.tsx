@@ -5,7 +5,7 @@ import { useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { streamAgentRunLogs, type StreamLogEvent } from "@/lib/agent";
+import { streamAgentRunLogs, type StreamLogEvent, type DoneEventData } from "@/lib/agent";
 import { ApiError } from "@/lib/api";
 import {
   createWorkspace,
@@ -75,17 +75,25 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
         (event: StreamLogEvent) => {
           setLogs((prev) => [...prev.slice(-500), event.content]);
         },
-        // onDone: agent completed
-        async () => {
+        // onDone: agent completed — use SSE done event data directly
+        async (doneData: DoneEventData) => {
+          if (
+            doneData.status === "failed" ||
+            (doneData.exit_code !== undefined &&
+              doneData.exit_code !== null &&
+              doneData.exit_code !== 0)
+          ) {
+            setError("Agent 执行失败，请查看日志获取详情。");
+            setPhase("ready");
+            return;
+          }
           try {
-            // 3. Auto rescan
             const rescanResult = await rescanWorkspace(workspaceId);
             setGeneratedScan(rescanResult);
-            setPhase("generated");
           } catch {
             // rescan failure doesn't block main flow
-            setPhase("generated");
           }
+          setPhase("generated");
         },
         // onError: SSE connection error
         (error: Error) => {

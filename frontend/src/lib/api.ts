@@ -31,6 +31,21 @@ export function getApiBaseUrl(): string {
   return SERVER_API_BASE_URL;
 }
 
+/**
+ * Direct backend URL — bypasses the Next.js rewrite proxy.
+ * Used for SSE connections where proxy buffering breaks real-time streaming.
+ * Requires NEXT_PUBLIC_API_BASE_URL to be set for browser usage.
+ */
+export function getDirectApiBaseUrl(): string {
+  if (
+    typeof window !== "undefined" &&
+    process.env.NEXT_PUBLIC_API_BASE_URL
+  ) {
+    return process.env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, "");
+  }
+  return getApiBaseUrl();
+}
+
 function isAuthEndpoint(pathname: string): boolean {
   return pathname.startsWith("/api/auth/");
 }

@@ -374,7 +374,8 @@ async def test_stream_completed_run_returns_done(client, db_session, tmp_path):
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "text/event-stream; charset=utf-8"
     assert "event: done" in resp.text
-    assert "data: {}" in resp.text
+    assert '"status": "completed"' in resp.text
+    assert '"exit_code": 0' in resp.text
 
 
 async def test_stream_not_found_run(client, db_session, tmp_path):
@@ -446,7 +447,8 @@ async def test_stream_running_run_sse_data_events(db_session):
 
     assert 'data: {"text": "line 1"}\n\n' in collected
     assert 'data: {"text": "line 2"}\n\n' in collected
-    assert "event: done\ndata: {}\n\n" in collected
+    assert "event: done" in collected[-1]
+    assert '"status"' in collected[-1]
     mock_pubsub.unsubscribe.assert_called_once()
     mock_pubsub.close.assert_called_once()
 
@@ -487,7 +489,7 @@ async def test_stream_done_event_closes(db_session):
         async for event in svc.stream_run_logs(run_id):
             collected.append(event)
 
-    assert "event: done\ndata: {}\n\n" in collected
+    assert "event: done" in collected[-1]
     mock_pubsub.unsubscribe.assert_called_once()
     mock_pubsub.close.assert_called_once()
 
@@ -539,7 +541,7 @@ async def test_stream_keepalive_on_no_message(db_session):
             collected.append(event)
 
     assert ": keepalive\n\n" in collected
-    assert "event: done\ndata: {}\n\n" in collected
+    assert "event: done" in collected[-1]
 
 
 async def test_stream_redis_error_sends_error_event(db_session):
