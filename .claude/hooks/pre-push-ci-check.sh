@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # pre-push-ci-check.sh
-# PreToolUse hook for git push — runs local CI checks matching GitHub Actions.
+# PreToolUse hook for git commit/push — runs local CI checks matching GitHub Actions.
 # Any failure blocks the push with a clear error message.
 
 set -euo pipefail
