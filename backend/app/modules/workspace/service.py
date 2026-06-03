@@ -603,7 +603,7 @@ class WorkspaceService:
         *,
         root_path: str,
         user_id: uuid.UUID,
-        agent_service: "AgentService",  # noqa: F821
+        agent_service: "AgentService",  # noqa: F821, UP037
     ) -> tuple[uuid.UUID, uuid.UUID]:
         """Create workspace + spec_workspace and trigger scan agent.
 
