@@ -85,31 +85,35 @@ def _build_stage_dispatch_prompt(bundle: AgentSpecBundle) -> str:
     if stage == "scan":
         prompt = bundle.step_prompt or ""
         if not prompt:
-            # fallback: 从 platform_metadata 构建命令
+            # fallback: 从 platform_metadata 构建命令（含平台参数）
             meta = bundle.platform_metadata or {}
             spec_root = meta.get("spec_root", "")
             root_path = meta.get("root_path", "")
+            runtime_root = meta.get("runtime_root", "")
+            ws_id = meta.get("workspace_id", "")
+            scan_run_id = meta.get("scan_run_id", "")
             prompt = (
                 f"你是一个项目分析 agent。请对项目目录 {root_path} 执行 sillyspec scan。\n\n"
-                f"## 重要：sillyspec scan 是分步交互式 CLI\n"
-                f"每次运行 `sillyspec run scan --dir <dir>` 会输出当前步骤的 prompt，你必须：\n"
-                f"1. 读 step prompt\n"
-                f"2. 按 prompt 的指示执行操作（扫描文件、分析结构等）\n"
-                f"3. 用 --done 完成当前步骤：\n"
-                f'   sillyspec run scan --done --change default --input "步骤描述" --output "步骤摘要"\n'
-                f"4. CLI 会自动输出下一步 prompt，重复直到所有步骤完成\n\n"
+                f"## 关键：平台参数（必须传递）\n"
+                f"首次 scan 命令必须包含以下平台参数：\n"
+                f"  --spec-root {spec_root}\n"
+                f"  --runtime-root {runtime_root}\n"
+                f"  --workspace-id {ws_id}\n"
+                f"  --scan-run-id {scan_run_id}\n\n"
                 f"## 执行步骤\n"
-                f"1. 先执行 init（如果尚未初始化）：\n"
-                f"   sillyspec init --dir {spec_root}\n"
-                f"2. 开始 scan：\n"
-                f"   sillyspec run scan --dir {spec_root}\n"
-                f"3. 按 step prompt 逐步执行，每步用 --done 推进\n"
-                f"4. 所有步骤完成后确认\n\n"
-                f"## 规则\n"
-                f"- 对 {root_path} 目录只读，不要修改任何项目文件\n"
-                f"- 所有产出写入 {spec_root} 目录\n"
-                f"- 每个步骤必须用 --done 完成，不要跳过\n"
-                f"- sillyspec run scan --dir 后会输出 step prompt，仔细阅读后执行"
+                f"1. sillyspec init --dir {spec_root}\n"
+                f"2. 开始 scan（仅此一次需要平台参数）：\n"
+                f"   sillyspec run scan \\\n"
+                f"     --dir {spec_root} \\\n"
+                f"     --spec-root {spec_root} \\\n"
+                f"     --runtime-root {runtime_root} \\\n"
+                f"     --workspace-id {ws_id} \\\n"
+                f"     --scan-run-id {scan_run_id}\n"
+                f"3. 按 step prompt 逐步执行，每步用 --done 推进：\n"
+                f"   sillyspec run scan --done \\\n"
+                f"     --change default \\\n"
+                f'     --dir {spec_root} --input "..." --output "..."\n'
+                f"4. 对 {root_path} 只读，产出写入 {spec_root}\n"
             )
         if bundle.read_only:
             prompt += "\n## 模式: READ-ONLY\nDo NOT modify any files. Only analyze and report.\n"

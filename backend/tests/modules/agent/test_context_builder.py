@@ -125,7 +125,6 @@ async def test_build_scan_bundle_no_referenced_workspaces(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="step_prompt format does not include --spec-root parameter")
 async def test_build_scan_bundle_prompt_contains_spec_root(
     mock_session, mock_workspace, sample_run_id
 ):
@@ -144,7 +143,6 @@ async def test_build_scan_bundle_prompt_contains_spec_root(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="step_prompt format does not include --runtime-root parameter")
 async def test_build_scan_bundle_prompt_contains_runtime_root(
     mock_session, mock_workspace, sample_run_id
 ):
@@ -159,13 +157,12 @@ async def test_build_scan_bundle_prompt_contains_runtime_root(
         run_id=sample_run_id,
     )
 
-    # runtime_root 默认推导: spec_root/../runtime/{workspace_id}
-    expected_runtime = str(Path("/data/specs/ws-abc").parent / "runtime" / str(mock_workspace.id))
+    # runtime_root 默认推导: spec_root/runtime
+    expected_runtime = str(Path("/data/specs/ws-abc") / "runtime")
     assert f"--runtime-root {expected_runtime}" in bundle.step_prompt
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="step_prompt format does not include --workspace-id parameter")
 async def test_build_scan_bundle_prompt_contains_workspace_id(
     mock_session, mock_workspace, sample_run_id
 ):
@@ -184,7 +181,6 @@ async def test_build_scan_bundle_prompt_contains_workspace_id(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="step_prompt format does not include --scan-run-id parameter")
 async def test_build_scan_bundle_prompt_contains_scan_run_id(
     mock_session, mock_workspace, sample_run_id
 ):
@@ -203,7 +199,6 @@ async def test_build_scan_bundle_prompt_contains_scan_run_id(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="step_prompt format does not include --spec-root parameter in command")
 async def test_build_scan_bundle_prompt_contains_full_scan_command(
     mock_session, mock_workspace, sample_run_id
 ):
@@ -222,7 +217,8 @@ async def test_build_scan_bundle_prompt_contains_full_scan_command(
 
     prompt = bundle.step_prompt
     assert "sillyspec init --dir /data/specs/ws-full" in prompt
-    assert "sillyspec run scan --dir /data/specs/ws-full" in prompt
+    assert "sillyspec run scan" in prompt
+    assert "--dir /data/specs/ws-full" in prompt
     assert "--spec-root /data/specs/ws-full" in prompt
     assert f"--workspace-id {mock_workspace.id}" in prompt
     assert f"--scan-run-id {sample_run_id}" in prompt
@@ -255,8 +251,6 @@ async def test_build_scan_bundle_platform_metadata_contains_platform_params(
 
 
 @pytest.mark.asyncio
-@pytest.mark.asyncio
-@pytest.mark.skip(reason="step_prompt format does not include --runtime-root parameter")
 async def test_build_scan_bundle_custom_runtime_root(mock_session, mock_workspace, sample_run_id):
     """显式传入 runtime_root 时，不使用推导值。"""
     mock_session.get = AsyncMock(return_value=mock_workspace)
@@ -294,3 +288,31 @@ async def test_build_scan_bundle_runtime_root_default_derivation(
     expected = str(Path(spec_root) / "runtime")
     assert bundle.platform_metadata["runtime_root"] == expected
     assert bundle.runtime_root == expected
+
+
+@pytest.mark.asyncio
+async def test_build_scan_bundle_done_command_has_no_platform_params(
+    mock_session, mock_workspace, sample_run_id
+):
+    """--done 命令示例不包含平台参数（CLI 从 platform-scan.json 恢复）。"""
+    mock_session.get = AsyncMock(return_value=mock_workspace)
+
+    bundle = await build_scan_bundle(
+        session=mock_session,
+        workspace_id=mock_workspace.id,
+        spec_root="/data/specs/ws-abc",
+        root_path="/home/user/project",
+        run_id=sample_run_id,
+    )
+
+    # 找到 --done 行
+    prompt = bundle.step_prompt
+    done_section_start = prompt.find("sillyspec run scan --done")
+    assert done_section_start != -1, "--done 命令示例应在 prompt 中"
+
+    # --done 区域之后 200 字符内不应出现平台参数
+    done_section = prompt[done_section_start:done_section_start + 300]
+    assert "--spec-root" not in done_section, "--done 命令不应包含 --spec-root"
+    assert "--runtime-root" not in done_section, "--done 命令不应包含 --runtime-root"
+    assert "--workspace-id" not in done_section, "--done 命令不应包含 --workspace-id"
+    assert "--scan-run-id" not in done_section, "--done 命令不应包含 --scan-run-id"
