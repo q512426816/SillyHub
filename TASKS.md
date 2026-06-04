@@ -1,56 +1,54 @@
-# TASKS.md — fix/spec-data-root-path-resolution
+# TASKS.md — fix/scan-dispatch-spec-root-params
 
-## 问题
-SPEC_DATA_ROOT=./data/spec-storage 被 os.path.abspath() 按 CWD=backend/ 解析，
-导致 spec_root 写成 backend/data/spec-storage/{ws_id}。
-正确应该是 <repo-root>/data/spec-storage/{ws_id}。
+## 目标
+让 SillyHub dispatch 调用 `sillyspec run scan` 时显式传入 `--spec-root` / `--runtime-root` / `--workspace-id` / `--scan-run-id`，确保 scan 结果落入 workspace.spec_root 而非平台仓库 .sillyspec/docs/。
 
-## Task 清单
+## 改动范围
 
-### [ ] Task-01: 新增统一路径解析函数 resolve_spec_data_root()
-- 文件: `backend/app/core/paths.py`（新建）
-- 逻辑:
-  - 绝对路径 → 原样返回
-  - 相对路径 → 解析为 `REPO_ROOT / relative_path`
-  - REPO_ROOT = `Path(__file__).resolve().parents[2]`（backend/app/core/paths.py → parents[2] = repo root）
-- 不要写死本地路径
+### Task-01: 修改 build_scan_bundle 的 step_prompt
+- 文件: `backend/app/modules/agent/context_builder.py`
+- 当前 prompt 让 CC 调 `sillyspec init --dir {spec_root}` 和 `sillyspec run scan --dir {spec_root}`
+- 修改为：
+  ```
+  sillyspec init --dir {spec_root}
+  sillyspec run scan --dir {spec_root} --spec-root {spec_root} --runtime-root {runtime_root} --workspace-id {workspace_id} --scan-run-id {run_id}
+  ```
+- 需要在 build_scan_bundle 参数中新增 `run_id` 和 `runtime_root`
+- runtime_root 推导为 `{spec_root}/../runtime/{workspace_id}` 或直接用 `str(Path(spec_root).parent / "runtime" / str(workspace_id))`
+- 确保 init 和 run 的 `--dir` 也指向 spec_root（sillyspec 用这个来定位 .sillyspec/）
 
-### [ ] Task-02: config.py 使用 resolve_spec_data_root()
-- 文件: `backend/app/core/config.py`
-- 添加 validator：spec_data_root 字段在加载时调用 resolve_spec_data_root()
-- 或者不改 config.py 的 validator，而是在所有使用 spec_data_root 的地方调用 resolve 函数
+### Task-02: 修改 start_scan_dispatch 传入 run_id
+- 文件: `backend/app/modules/agent/service.py`
+- `start_scan_dispatch` 先创建 AgentRun 拿到 run.id，然后把 run.id 传给 build_scan_bundle
+- 当前是先 build bundle 再创建 run，需要调换顺序，或者先创建 run 再 build bundle
 
-### [ ] Task-03: 新增 repair migration 修正已有错误 spec_root
-- 文件: `backend/alembic/versions/202606230900_repair_spec_root_paths.py`（新建）
-- 逻辑:
-  - 读取所有 spec_workspaces 行
-  - 对每行 spec_root，检查是否包含 /backend/data/spec-storage
-  - 如果是，替换为 <repo-root>/data/spec-storage/{ws_id}
-  - repo-root 通过 migration 文件位置推导：Path(__file__).resolve().parents[3]
-    (migration 在 backend/alembic/versions/，parents[3] = repo root)
-  - 创建新物理目录
-  - 幂等：已正确的不动
+### Task-03: scan 完成后触发 reparse + manifest 校验
+- 文件: `backend/app/modules/agent/service.py`
+- 在 `_execute_scan_run` 的第 6 步后，如果 exit_code == 0：
+  1. 检查 `{spec_root}/manifest.json` 是否存在
+  2. 如果存在，读取 manifest.source_commit，校验与 `git -C {root_path} rev-parse HEAD` 一致
+  3. 调用 ScanDocsService.reparse() 从 spec_root 重新解析文档到 DB
+- 需要用独立 session 调 reparse（因为 _execute_scan_run 已经在一个 session 里）
 
-### [ ] Task-04: 修复 migrate_scan_docs.py 路径解析
-- 文件: `scripts/migrate_scan_docs.py`
-- 脚本从 DB 读 spec_root（已是绝对路径），不需要额外解析
-- 但确保 _PROJECT_ROOT 正确
+### Task-04: 修改 _build_stage_dispatch_prompt 支持 scan stage
+- 文件: `backend/app/modules/agent/adapters/claude_code.py`
+- 当 `bundle.stage == "scan"` 时，prompt 中的命令也要包含平台参数：
+  `sillyspec run scan --spec-root {spec_root} --runtime-root {runtime_root} --workspace-id {workspace_id} --scan-run-id {scan_run_id}`
+- 从 bundle.platform_metadata 读取这些值
 
-### [ ] Task-05: 修复旧 backfill migration 的路径解析
-- 文件: `backend/alembic/versions/202606220900_backfill_spec_workspaces.py`
-- 修改 .env 读取后的 abspath 逻辑，改用 repo-root 相对解析
-- parents[2] = backend 目录，parents[3] = repo root
+### Task-05: 补测试
+- 测试 build_scan_bundle 的 prompt 包含正确的 --spec-root 等参数
+- 测试 _execute_scan_run 完成后触发 reparse
+- Mock git HEAD 校验
 
-### [ ] Task-06: 补测试
-- 文件: `backend/app/core/tests/test_paths.py`（新建）
-- 测试 resolve_spec_data_root()：
-  - 绝对路径原样返回
-  - 相对路径解析到 repo-root 下
-  - 从 backend/ CWD 执行也正确
-- 测试 repair migration 幂等性
+## 约束
+- 子进程 cwd = workspace.root_path（不是 lease_path）
+- sillyspec 的 --dir 参数指向 spec_root（sillyspec 用它来定位 .sillyspec/ 目录）
+- 不要污染平台仓库 .sillyspec/docs/
+- 保持 fire-and-forget（不阻塞 HTTP 响应）
 
-## 验收标准
-- DB 中 3 行 spec_root = <repo-root>/data/spec-storage/{ws_id}（不含 /backend/）
-- <repo-root>/data/spec-storage/{ws_id} 物理目录存在
-- migrate_scan_docs.py 能从 .sillyspec/docs/ 复制到正确 spec_root
-- pytest 全量通过
+## 关键参考
+- sillyspec CLI 参数：`--spec-root`、`--runtime-root`、`--workspace-id`、`--scan-run-id`
+- SpecWorkspaceService：`backend/app/modules/spec_workspace/service.py`
+- ScanDocsService：`backend/app/modules/scan_docs/service.py`
+- config.py 的 resolve_spec_data_root() 已确保 spec_root 是绝对路径
