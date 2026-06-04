@@ -100,13 +100,16 @@ class WorkspaceService:
         slug = payload.slug or slugify(payload.name)
         now = datetime.utcnow()
 
-        # If an active/pending workspace already exists for this root_path,
-        # activate it instead of creating a new one.
+        # If an active workspace already exists for this root_path, reject as duplicate.
+        # Pending workspace can be activated (e.g. from a previous scan-generate).
         existing = await self._find_active_by_root_path(payload.root_path)
         if existing:
             if existing.status == "active":
-                return existing
-            # Pending workspace (e.g. from a previous scan-generate): activate it.
+                raise WorkspacePathDuplicate(
+                    "Another workspace is already registered for this root_path.",
+                    details={"root_path": payload.root_path, "existing_workspace_id": str(existing.id)},
+                )
+            # Pending workspace: activate it.
             existing.name = payload.name
             existing.slug = await self._ensure_unique_slug(slug)
             existing.status = "active"

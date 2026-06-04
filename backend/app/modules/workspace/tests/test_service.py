@@ -244,10 +244,10 @@ async def test_create_resurrects_soft_deleted_workspace(db_session, tmp_path: Pa
 
 
 async def test_create_resurrect_conflicts_with_active_slug(db_session, tmp_path: Path) -> None:
-    """Resurrecting must respect the *active* unique constraint on slug.
+    """Resurrecting handles slug conflicts by auto-generating a unique slug.
 
-    If another active workspace already holds the slug we want to revive
-    with, we must 409 instead of silently corrupting unique invariants.
+    If another active workspace already holds the slug we want to revive,
+    the system automatically appends a suffix to preserve uniqueness.
     """
     root_a = _make_workspace(tmp_path, "a")
     root_b = _make_workspace(tmp_path, "b")
@@ -265,15 +265,14 @@ async def test_create_resurrect_conflicts_with_active_slug(db_session, tmp_path:
         created_by=None,
     )
 
-    # Creating with root_a again: service returns existing soft-deleted ws_a
-    # re-activated (since root_a differs from root_b), with slug dedup
-    result = await service.create(
+    # Resurrecting A with the same slug should auto-generate a unique slug
+    ws_a_revived = await service.create(
         WorkspaceCreate(name="A again", slug="shared", root_path=str(root_a)),
         created_by=None,
     )
-    # The service either returns the resurrected workspace or the active one
-    # depending on slug conflict handling — just verify no crash
-    assert result is not None
+    assert ws_a_revived.slug.startswith("shared-")
+    assert ws_a_revived.slug != "shared"
+
 
 
 # ── task-05: reparse helpers + tests ─────────────────────────────────────────
@@ -377,13 +376,30 @@ async def test_reparse_updates_existing_children(db_session, tmp_path: Path) -> 
         created_by=None,
     )
 
-    # Reparse
-    _, stats1, children1, _ = await service.reparse(ws.id)
-    assert stats1["parsed"] == 2
-    assert len(children1) == 2
-    by_key = {c.component_key: c for c in children1}
-    assert "backend" in by_key
-    assert "frontend" in by_key
+    # Get platform storage spec_root for updating YAML files
+    from app.modules.spec_workspace.service import SpecWorkspaceService
+    spec_ws_svc = SpecWorkspaceService(db_session)
+    spec_ws = await spec_ws_svc.get(ws.id)
+    spec_projects = Path(spec_ws.spec_root) / ".sillyspec" / "projects"
+
+    # First reparse (create() already ran implicit reparse, so this is second)
+    _, stats1, _children1, _ = await service.reparse(ws.id)
+    assert stats1["created"] == 0
+    assert stats1["updated"] == 2
+
+    # Modify YAML content in both local and platform storage
+    _write_yaml(projects, "backend.yaml", "id: backend\nname: Backend V2\ntype: library\n")
+    _write_yaml(spec_projects, "backend.yaml", "id: backend\nname: Backend V2\ntype: library\n")
+
+    # Second reparse
+    _, stats2, children2, _ = await service.reparse(ws.id)
+    assert stats2["created"] == 0
+    assert stats2["updated"] == 2
+
+    by_key = {c.component_key: c for c in children2}
+    assert by_key["backend"].name == "Backend V2"
+    assert by_key["backend"].type == "library"
+
 
 
 async def test_reparse_soft_deletes_removed_components(db_session, tmp_path: Path) -> None:
@@ -401,12 +417,20 @@ async def test_reparse_soft_deletes_removed_components(db_session, tmp_path: Pat
         created_by=None,
     )
 
-    # First reparse
+    # Get platform storage spec_root for updating YAML files
+    from app.modules.spec_workspace.service import SpecWorkspaceService
+    spec_ws_svc = SpecWorkspaceService(db_session)
+    spec_ws = await spec_ws_svc.get(ws.id)
+    spec_projects = Path(spec_ws.spec_root) / ".sillyspec" / "projects"
+
+    # First reparse (create() already ran implicit reparse, so this is second)
+
     _, stats1, _, _ = await service.reparse(ws.id)
     assert stats1["parsed"] == 3
 
-    # Remove one YAML
+    # Remove one YAML from both local and platform storage
     (projects / "shared.yaml").unlink()
+    (spec_projects / "shared.yaml").unlink()
 
     # Second reparse — children should reflect removal
     _, _stats2, children2, _ = await service.reparse(ws.id)
