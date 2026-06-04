@@ -45,6 +45,9 @@ yarn-error.log*
 # Docker
 .docker/data/
 
+# Spec storage (platform-managed workspace docs)
+data/spec-storage/
+
 # Spike artefacts
 spikes/**/tmp/
 spikes/**/*.log
