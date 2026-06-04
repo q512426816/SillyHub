@@ -585,7 +585,7 @@ class ClaudeCodeAdapter(AgentAdapter):
                 event_count=len(all_events),
             )
             return AgentRunResult(
-                exit_code=proc.returncode or 1,
+                exit_code=proc.returncode if proc.returncode is not None else 1,
                 stdout=stdout_raw,
                 stderr=stderr_raw,
                 redacted_output=redacted,
