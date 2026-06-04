@@ -127,6 +127,7 @@ def _create_test_db(db_path: Path) -> None:
 
 @pytest.fixture()
 async def workspace_with_runtime(client, tmp_path: Path, auth_headers: dict[str, str]) -> dict:
+    from app.core.config import get_settings
     root = _copy_fixture(COMPONENT_FIXTURES, tmp_path)
 
     ws_resp = await client.post(
@@ -138,8 +139,9 @@ async def workspace_with_runtime(client, tmp_path: Path, auth_headers: dict[str,
     ws_id = ws_resp.json()["id"]
 
     # Create sillyspec.db in platform storage
-    # Platform storage path: C:\data\sillyspec-data\{workspace_id}\.sillyspec\.runtime
-    platform_runtime_dir = Path(r"C:\data\sillyspec-data") / ws_id / ".sillyspec" / ".runtime"
+    # Use the same spec_data_root as configured in Settings
+    settings = get_settings()
+    platform_runtime_dir = Path(settings.spec_data_root) / ws_id / ".sillyspec" / ".runtime"
     platform_runtime_dir.mkdir(parents=True, exist_ok=True)
     _create_test_db(platform_runtime_dir / "sillyspec.db")
 

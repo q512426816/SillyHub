@@ -79,6 +79,7 @@ def _make_bundle(**overrides: object) -> AgentSpecBundle:
 # ===================================================================
 
 
+@pytest.mark.asyncio
 async def test_check_idempotency_returns_existing_run(db_session: AsyncSession) -> None:
     """Same idempotency_key returns the existing AgentRun."""
     run = await _create_run(db_session, idempotency_key="key-abc")
@@ -88,6 +89,7 @@ async def test_check_idempotency_returns_existing_run(db_session: AsyncSession) 
     assert found.id == run.id
 
 
+@pytest.mark.asyncio
 async def test_check_idempotency_returns_none_for_unknown_key(db_session: AsyncSession) -> None:
     """Non-existent key returns None."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -95,6 +97,7 @@ async def test_check_idempotency_returns_none_for_unknown_key(db_session: AsyncS
     assert found is None
 
 
+@pytest.mark.asyncio
 async def test_check_idempotency_returns_none_for_null_key(db_session: AsyncSession) -> None:
     """Run with no idempotency_key is not found by any key."""
     await _create_run(db_session)  # no key
@@ -108,6 +111,7 @@ async def test_check_idempotency_returns_none_for_null_key(db_session: AsyncSess
 # ===================================================================
 
 
+@pytest.mark.asyncio
 async def test_update_with_lock_succeeds_on_matching_version(db_session: AsyncSession) -> None:
     """Update succeeds when expected_version matches."""
     run = await _create_run(db_session, version=1)
@@ -117,6 +121,7 @@ async def test_update_with_lock_succeeds_on_matching_version(db_session: AsyncSe
     assert updated.status == "running"
 
 
+@pytest.mark.asyncio
 async def test_update_with_lock_raises_on_version_mismatch(db_session: AsyncSession) -> None:
     """OptimisticLockError raised when version does not match."""
     run = await _create_run(db_session, version=1)
@@ -125,6 +130,7 @@ async def test_update_with_lock_raises_on_version_mismatch(db_session: AsyncSess
         await coordinator.update_with_lock(run.id, expected_version=99, status="running")
 
 
+@pytest.mark.asyncio
 async def test_update_with_lock_raises_on_nonexistent_run(db_session: AsyncSession) -> None:
     """OptimisticLockError raised for non-existent run_id."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -137,6 +143,7 @@ async def test_update_with_lock_raises_on_nonexistent_run(db_session: AsyncSessi
 # ===================================================================
 
 
+@pytest.mark.asyncio
 async def test_compute_fingerprint_deterministic(db_session: AsyncSession) -> None:
     """Same bundle produces same fingerprint."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -147,6 +154,7 @@ async def test_compute_fingerprint_deterministic(db_session: AsyncSession) -> No
     assert len(fp1) == 64  # SHA-256 hex digest
 
 
+@pytest.mark.asyncio
 async def test_compute_fingerprint_changes_on_content_change(db_session: AsyncSession) -> None:
     """Different bundle content produces different fingerprint."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -155,6 +163,7 @@ async def test_compute_fingerprint_changes_on_content_change(db_session: AsyncSe
     assert fp1 != fp2
 
 
+@pytest.mark.asyncio
 async def test_validate_fingerprint_matches(db_session: AsyncSession) -> None:
     """validate_fingerprint returns True when fingerprints match."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -164,6 +173,7 @@ async def test_validate_fingerprint_matches(db_session: AsyncSession) -> None:
     assert await coordinator.validate_fingerprint(run.id, fp) is True
 
 
+@pytest.mark.asyncio
 async def test_validate_fingerprint_mismatch(db_session: AsyncSession) -> None:
     """validate_fingerprint returns False when fingerprints differ."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -171,6 +181,7 @@ async def test_validate_fingerprint_mismatch(db_session: AsyncSession) -> None:
     assert await coordinator.validate_fingerprint(run.id, "different-fp") is False
 
 
+@pytest.mark.asyncio
 async def test_validate_fingerprint_skips_when_none(db_session: AsyncSession) -> None:
     """validate_fingerprint returns True when no fingerprint stored."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -183,6 +194,7 @@ async def test_validate_fingerprint_skips_when_none(db_session: AsyncSession) ->
 # ===================================================================
 
 
+@pytest.mark.asyncio
 async def test_generate_resume_token(db_session: AsyncSession) -> None:
     """generate_resume_token creates and stores a token."""
     run = await _create_run(db_session)
@@ -192,6 +204,7 @@ async def test_generate_resume_token(db_session: AsyncSession) -> None:
     assert run.resume_token == token
 
 
+@pytest.mark.asyncio
 async def test_resume_run_succeeds_with_valid_token(db_session: AsyncSession) -> None:
     """resume_run resets status to pending on valid token."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -203,6 +216,7 @@ async def test_resume_run_succeeds_with_valid_token(db_session: AsyncSession) ->
     assert resumed.retry_count == 1
 
 
+@pytest.mark.asyncio
 async def test_resume_run_raises_on_invalid_token(db_session: AsyncSession) -> None:
     """InvalidTokenError raised when token does not match."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -211,6 +225,7 @@ async def test_resume_run_raises_on_invalid_token(db_session: AsyncSession) -> N
         await coordinator.resume_run(run.id, "wrong-token")
 
 
+@pytest.mark.asyncio
 async def test_resume_run_raises_on_non_resumable_status(db_session: AsyncSession) -> None:
     """AgentRunNotResumable raised when status is not failed/killed."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -219,6 +234,7 @@ async def test_resume_run_raises_on_non_resumable_status(db_session: AsyncSessio
         await coordinator.resume_run(run.id, "some-token")
 
 
+@pytest.mark.asyncio
 async def test_resume_run_raises_on_fingerprint_mismatch(db_session: AsyncSession) -> None:
     """FingerprintMismatchError raised when context has changed."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -234,6 +250,7 @@ async def test_resume_run_raises_on_fingerprint_mismatch(db_session: AsyncSessio
 # ===================================================================
 
 
+@pytest.mark.asyncio
 async def test_save_checkpoint_increments_version(db_session: AsyncSession) -> None:
     """save_checkpoint increments checkpoint_version."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -245,6 +262,7 @@ async def test_save_checkpoint_increments_version(db_session: AsyncSession) -> N
     assert new_ver2 == 2
 
 
+@pytest.mark.asyncio
 async def test_save_checkpoint_raises_on_version_conflict(db_session: AsyncSession) -> None:
     """OptimisticLockError raised when checkpoint_version mismatch."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -253,6 +271,7 @@ async def test_save_checkpoint_raises_on_version_conflict(db_session: AsyncSessi
         await coordinator.save_checkpoint(run.id, {"data": 1}, expected_version=0)
 
 
+@pytest.mark.asyncio
 async def test_load_checkpoint_returns_data(db_session: AsyncSession) -> None:
     """load_checkpoint returns the stored data."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -262,6 +281,7 @@ async def test_load_checkpoint_returns_data(db_session: AsyncSession) -> None:
     assert data == {"progress": 50}
 
 
+@pytest.mark.asyncio
 async def test_load_checkpoint_returns_none_when_empty(db_session: AsyncSession) -> None:
     """load_checkpoint returns None when no checkpoint saved."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -275,6 +295,7 @@ async def test_load_checkpoint_returns_none_when_empty(db_session: AsyncSession)
 # ===================================================================
 
 
+@pytest.mark.asyncio
 async def test_request_approval_generates_token(db_session: AsyncSession) -> None:
     """request_approval generates token and sets pending_approval status."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -286,6 +307,7 @@ async def test_request_approval_generates_token(db_session: AsyncSession) -> Non
     assert run.approval_token == token
 
 
+@pytest.mark.asyncio
 async def test_approve_succeeds_with_valid_token(db_session: AsyncSession) -> None:
     """approve consumes token and sets status to pending."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -296,6 +318,7 @@ async def test_approve_succeeds_with_valid_token(db_session: AsyncSession) -> No
     assert approved.approval_token is None  # consumed
 
 
+@pytest.mark.asyncio
 async def test_approve_raises_on_invalid_token(db_session: AsyncSession) -> None:
     """InvalidTokenError raised when token does not match."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -304,6 +327,7 @@ async def test_approve_raises_on_invalid_token(db_session: AsyncSession) -> None
         await coordinator.approve(run.id, "wrong-token")
 
 
+@pytest.mark.asyncio
 async def test_approve_raises_on_wrong_status(db_session: AsyncSession) -> None:
     """AgentRunNotPendingApproval raised when status is not pending_approval."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -312,6 +336,7 @@ async def test_approve_raises_on_wrong_status(db_session: AsyncSession) -> None:
         await coordinator.approve(run.id, "tok")
 
 
+@pytest.mark.asyncio
 async def test_approve_token_is_one_time(db_session: AsyncSession) -> None:
     """Approval token cannot be used twice."""
     coordinator = ExecutionCoordinatorService(db_session)
@@ -329,6 +354,7 @@ async def test_approve_token_is_one_time(db_session: AsyncSession) -> None:
 # ===================================================================
 
 
+@pytest.mark.asyncio
 async def test_start_sillyspec_run_emits_deprecation_warning(
     db_session: AsyncSession,
 ) -> None:
@@ -361,6 +387,7 @@ async def test_start_sillyspec_run_emits_deprecation_warning(
     assert "start_sillyspec_run is deprecated" in str(deprecation_warnings[0].message)
 
 
+@pytest.mark.asyncio
 async def test_start_sillyspec_run_still_returns_agent_run(
     db_session: AsyncSession,
 ) -> None:

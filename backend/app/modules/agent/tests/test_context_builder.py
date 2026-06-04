@@ -52,6 +52,7 @@ async def _seed(session: AsyncSession) -> dict:
     return {"ws_id": ws_id, "change_id": change_id, "task_id": task_id}
 
 
+@pytest.mark.asyncio
 async def test_build_task_context_populates_fields(db_session: AsyncSession):
     from app.modules.agent.context_builder import build_task_context
 
@@ -67,6 +68,7 @@ async def test_build_task_context_populates_fields(db_session: AsyncSession):
     assert ctx.allowed_paths == ["src/", "tests/"]
 
 
+@pytest.mark.asyncio
 async def test_build_task_context_missing_task(db_session: AsyncSession):
     from app.modules.agent.context_builder import build_task_context
 
@@ -75,6 +77,7 @@ async def test_build_task_context_missing_task(db_session: AsyncSession):
         await build_task_context(db_session, refs["change_id"], uuid.uuid4())
 
 
+@pytest.mark.asyncio
 async def test_build_task_context_missing_change(db_session: AsyncSession):
     from app.modules.agent.context_builder import build_task_context
 
@@ -137,6 +140,7 @@ async def _seed_with_spec_workspace(session: AsyncSession) -> dict:
     }
 
 
+@pytest.mark.asyncio
 async def test_build_spec_bundle_assembles_correctly(db_session: AsyncSession) -> None:
     """build_spec_bundle loads task, change, spec_workspace into an AgentSpecBundle."""
     from app.modules.agent.context_builder import build_spec_bundle
@@ -163,6 +167,7 @@ async def test_build_spec_bundle_assembles_correctly(db_session: AsyncSession) -
     assert bundle.platform_metadata["change_key"] == "bundle-test-change"
 
 
+@pytest.mark.asyncio
 async def test_build_spec_bundle_without_spec_workspace(db_session: AsyncSession) -> None:
     """When no SpecWorkspace exists, strategy and profile_version are None."""
     from app.modules.agent.context_builder import build_spec_bundle
@@ -206,6 +211,7 @@ async def test_build_spec_bundle_without_spec_workspace(db_session: AsyncSession
     assert bundle.profile_version is None
 
 
+@pytest.mark.asyncio
 async def test_build_spec_bundle_missing_task_raises(db_session: AsyncSession) -> None:
     from app.modules.agent.context_builder import build_spec_bundle
 
@@ -411,6 +417,7 @@ def test_agent_spec_bundle_has_referenced_workspaces() -> None:
     assert bundle2.referenced_workspaces[0].name == "ws-b"
 
 
+@pytest.mark.asyncio
 async def test_fetch_referenced_workspaces_no_relations(db_session: AsyncSession) -> None:
     """Workspace with no relations returns empty list."""
     from app.modules.agent.context_builder import _fetch_referenced_workspaces
@@ -430,6 +437,7 @@ async def test_fetch_referenced_workspaces_no_relations(db_session: AsyncSession
     assert result == []
 
 
+@pytest.mark.asyncio
 async def test_fetch_referenced_workspaces_outgoing_relation(
     db_session: AsyncSession,
 ) -> None:
@@ -469,6 +477,7 @@ async def test_fetch_referenced_workspaces_outgoing_relation(
     assert result[0].doc_summaries == {}
 
 
+@pytest.mark.asyncio
 async def test_fetch_referenced_workspaces_incoming_relation(
     db_session: AsyncSession,
 ) -> None:
@@ -497,6 +506,7 @@ async def test_fetch_referenced_workspaces_incoming_relation(
     assert result[0].relation_type == "consumes_api_from"
 
 
+@pytest.mark.asyncio
 async def test_fetch_referenced_workspaces_skips_deleted_workspace(
     db_session: AsyncSession,
 ) -> None:
@@ -530,6 +540,7 @@ async def test_fetch_referenced_workspaces_skips_deleted_workspace(
     assert result == []
 
 
+@pytest.mark.asyncio
 async def test_fetch_referenced_workspaces_skips_no_spec_workspace(
     db_session: AsyncSession,
 ) -> None:
@@ -557,6 +568,7 @@ async def test_fetch_referenced_workspaces_skips_no_spec_workspace(
     assert result[0].doc_summaries == {}
 
 
+@pytest.mark.asyncio
 async def test_fetch_referenced_workspaces_reads_doc_snippets(
     db_session: AsyncSession,
 ) -> None:
@@ -596,6 +608,7 @@ async def test_fetch_referenced_workspaces_reads_doc_snippets(
     assert "Architecture Overview" in result[0].doc_summaries["ARCHITECTURE"]
 
 
+@pytest.mark.asyncio
 async def test_fetch_referenced_workspaces_snippet_truncation(
     db_session: AsyncSession,
 ) -> None:
@@ -635,6 +648,7 @@ async def test_fetch_referenced_workspaces_snippet_truncation(
     assert snippet == "x" * 100
 
 
+@pytest.mark.asyncio
 async def test_fetch_referenced_workspaces_circular_dependency(
     db_session: AsyncSession,
 ) -> None:
@@ -670,6 +684,7 @@ async def test_fetch_referenced_workspaces_circular_dependency(
     assert len(result) == 1
 
 
+@pytest.mark.asyncio
 async def test_fetch_referenced_workspaces_invalid_max_depth(
     db_session: AsyncSession,
 ) -> None:
@@ -688,6 +703,7 @@ async def test_fetch_referenced_workspaces_invalid_max_depth(
         await _fetch_referenced_workspaces(db_session, ws.id, max_depth=-1)
 
 
+@pytest.mark.asyncio
 async def test_fetch_referenced_workspaces_multiple_relations_same_pair(
     db_session: AsyncSession,
 ) -> None:
@@ -721,6 +737,7 @@ async def test_fetch_referenced_workspaces_multiple_relations_same_pair(
     assert result[0].relation_type in ("depends_on", "consumes_api_from")
 
 
+@pytest.mark.asyncio
 async def test_fetch_referenced_workspaces_zero_snippet_chars(
     db_session: AsyncSession,
 ) -> None:
@@ -762,6 +779,7 @@ async def test_fetch_referenced_workspaces_zero_snippet_chars(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_build_spec_bundle_includes_referenced_workspaces(
     db_session: AsyncSession,
 ) -> None:
@@ -837,6 +855,7 @@ async def test_build_spec_bundle_includes_referenced_workspaces(
     assert bundle.referenced_workspaces[0].direction == "outgoing"
 
 
+@pytest.mark.asyncio
 async def test_build_spec_bundle_no_relations_empty_list(
     db_session: AsyncSession,
 ) -> None:
@@ -966,6 +985,7 @@ def test_render_bundle_no_referenced_workspaces() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_fetch_referenced_workspaces_depth_2(
     db_session: AsyncSession,
 ) -> None:
@@ -999,6 +1019,7 @@ async def test_fetch_referenced_workspaces_depth_2(
     assert ws_c.id in ws_ids
 
 
+@pytest.mark.asyncio
 async def test_fetch_referenced_workspaces_depth_2_with_cycle(
     db_session: AsyncSession,
 ) -> None:
@@ -1041,6 +1062,7 @@ async def test_fetch_referenced_workspaces_depth_2_with_cycle(
     assert ws_c.id in ws_ids
 
 
+@pytest.mark.asyncio
 async def test_fetch_referenced_workspaces_depth_1_excludes_second_hop(
     db_session: AsyncSession,
 ) -> None:
