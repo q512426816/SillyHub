@@ -92,35 +92,27 @@ def _build_stage_dispatch_prompt(bundle: AgentSpecBundle) -> str:
             workspace_id = meta.get("workspace_id", "")
             scan_run_id = meta.get("scan_run_id", "")
             root_path = meta.get("root_path", "")
-            scan_cmd = (
-                f"sillyspec run scan"
-                f" --dir {root_path}"
-                f" --spec-root {spec_root}"
-                f" --runtime-root {runtime_root}"
-                f" --workspace-id {workspace_id}"
-                f" --scan-run-id {scan_run_id}"
-            )
             prompt = (
                 f"你是一个项目分析 agent。请对项目目录 {root_path} 执行 sillyspec scan。\n\n"
                 f"## 重要：sillyspec scan 是分步交互式 CLI\n"
-                f"运行 scan 命令后会输出当前步骤的 prompt，你必须：\n"
+                f"每次运行 `sillyspec run scan --dir <dir>` 会输出当前步骤的 prompt，你必须：\n"
                 f"1. 读 step prompt\n"
                 f"2. 按 prompt 的指示执行操作（扫描文件、分析结构等）\n"
-                f'3. 用 --done 完成当前步骤：\n'
+                f"3. 用 --done 完成当前步骤：\n"
                 f'   sillyspec run scan --done --change default --input "步骤描述" --output "步骤摘要"\n'
                 f"4. CLI 会自动输出下一步 prompt，重复直到所有步骤完成\n\n"
                 f"## 执行步骤\n"
                 f"1. 先执行 init（如果尚未初始化）：\n"
                 f"   sillyspec init --dir {spec_root}\n"
-                f"2. 开始 scan（带完整平台参数）：\n"
-                f"   {scan_cmd}\n"
+                f"2. 开始 scan：\n"
+                f"   sillyspec run scan --dir {spec_root}\n"
                 f"3. 按 step prompt 逐步执行，每步用 --done 推进\n"
                 f"4. 所有步骤完成后确认\n\n"
                 f"## 规则\n"
                 f"- 对 {root_path} 目录只读，不要修改任何项目文件\n"
                 f"- 所有产出写入 {spec_root} 目录\n"
                 f"- 每个步骤必须用 --done 完成，不要跳过\n"
-                f"- 运行 scan 命令后会输出 step prompt，仔细阅读后执行"
+                f"- sillyspec run scan --dir 后会输出 step prompt，仔细阅读后执行"
             )
         if bundle.read_only:
             prompt += "\n## 模式: READ-ONLY\nDo NOT modify any files. Only analyze and report.\n"
