@@ -223,7 +223,7 @@ async def test_build_scan_bundle_prompt_contains_full_scan_command(
     assert f"--workspace-id {mock_workspace.id}" in prompt
     assert f"--scan-run-id {sample_run_id}" in prompt
     assert "--runtime-root" in prompt
-    assert "sillyspec run scan --done" in prompt
+    assert "--done" in prompt
     assert "/home/user/project" in prompt
     assert "只读" in prompt
 

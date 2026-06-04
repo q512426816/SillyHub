@@ -459,44 +459,41 @@ async def build_scan_bundle(
     # Step 2 — 构建 scan 执行指令（分步交互式，含平台参数）
     ws_id = str(workspace_id)
     run_id_str = str(run_id)
+    # 完整命令行（单行，避免 LLM 忽略续行）
+    init_cmd = f"sillyspec init --dir {spec_root}"
+    scan_start_cmd = (
+        f"sillyspec run scan"
+        f" --dir {spec_root}"
+        f" --spec-root {spec_root}"
+        f" --runtime-root {runtime_root}"
+        f" --workspace-id {ws_id}"
+        f" --scan-run-id {run_id_str}"
+    )
+    scan_done_cmd = (
+        f'sillyspec run scan --done --change default --dir {spec_root}'
+        f' --input "步骤描述" --output "步骤摘要"'
+    )
     step_prompt = (
         f"你是一个项目分析 agent。请对项目目录 {root_path} 执行 sillyspec scan。\n\n"
-        f"## 关键：平台参数（必须传递）\n"
-        f"首次 scan 命令必须包含以下平台参数，否则 manifest.json 不会生成：\n"
-        f"  --spec-root {spec_root}\n"
-        f"  --runtime-root {runtime_root}\n"
-        f"  --workspace-id {ws_id}\n"
-        f"  --scan-run-id {run_id_str}\n\n"
-        f"## 重要：sillyspec scan 是分步交互式 CLI\n"
-        f"每次运行 `sillyspec run scan` 会输出当前步骤的 prompt，你必须：\n"
-        f"1. 读 step prompt\n"
-        f"2. 按 prompt 的指示执行操作（扫描文件、分析结构等）\n"
-        f"3. 用 --done 完成当前步骤（不需要重复平台参数）\n"
-        f"4. CLI 会自动输出下一步 prompt，重复直到所有步骤完成\n\n"
-        f"## 执行步骤\n"
-        f"1. 先执行 init（如果尚未初始化）：\n"
-        f"   sillyspec init --dir {spec_root}\n"
-        f"2. 开始 scan（仅此一次需要平台参数）：\n"
-        f"   sillyspec run scan \\\n"
-        f"     --dir {spec_root} \\\n"
-        f"     --spec-root {spec_root} \\\n"
-        f"     --runtime-root {runtime_root} \\\n"
-        f"     --workspace-id {ws_id} \\\n"
-        f"     --scan-run-id {run_id_str}\n"
-        f"3. 按 step prompt 逐步执行，每步用 --done 推进：\n"
-        f"   sillyspec run scan --done \\\n"
-        f"     --change default \\\n"
-        f"     --dir {spec_root} \\\n"
-        f'     --input "步骤描述" \\\n'
-        f'     --output "步骤摘要"\n'
-        f"4. 所有步骤完成后确认\n\n"
+        f"## ⚠️ 命令模板（严格复制，不要省略任何参数）\n\n"
+        f"**第 1 步 — 初始化（仅一次）：**\n"
+        f"```\n{init_cmd}\n```\n\n"
+        f"**第 2 步 — 启动 scan（仅一次，必须包含全部平台参数）：**\n"
+        f"```\n{scan_start_cmd}\n```\n\n"
+        f"**第 3-N 步 — 逐步推进（每次完成后执行）：**\n"
+        f"```\n{scan_done_cmd}\n"
+        f"```\n\n"
+        f"## 执行流程\n"
+        f"1. 执行 init 命令\n"
+        f"2. 执行 scan 启动命令（包含全部平台参数）\n"
+        f"3. CLI 输出 step prompt → 执行扫描操作 → 用 done 命令推进\n"
+        f"4. 重复 step 3 直到 10/10 步全部完成\n\n"
         f"## 规则\n"
         f"- 对 {root_path} 目录只读，不要修改任何项目文件\n"
         f"- 所有产出写入 {spec_root} 目录\n"
-        f"- 每个步骤必须用 --done 完成，不要跳过\n"
-        f"- 首次 scan 命令必须包含全部平台参数\n"
-        f"- 后续 --done 不需要重复平台参数（CLI 会从 platform-scan.json 恢复）\n"
-        f"- sillyspec run scan 后会输出 step prompt，仔细阅读后执行"
+        f"- 启动 scan 命令必须包含 --spec-root/--runtime-root/--workspace-id/--scan-run-id\n"
+        f"- done 命令不需要重复平台参数\n"
+        f"- 每个步骤必须用 done 完成，不要跳过"
     )
 
     # Step 3 — 组装 AgentSpecBundle

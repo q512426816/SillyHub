@@ -92,28 +92,27 @@ def _build_stage_dispatch_prompt(bundle: AgentSpecBundle) -> str:
             runtime_root = meta.get("runtime_root", "")
             ws_id = meta.get("workspace_id", "")
             scan_run_id = meta.get("scan_run_id", "")
+            scan_start_cmd = (
+                f"sillyspec run scan"
+                f" --dir {spec_root}"
+                f" --spec-root {spec_root}"
+                f" --runtime-root {runtime_root}"
+                f" --workspace-id {ws_id}"
+                f" --scan-run-id {scan_run_id}"
+            )
             prompt = (
                 f"你是一个项目分析 agent。请对项目目录 {root_path} 执行 sillyspec scan。\n\n"
-                f"## 关键：平台参数（必须传递）\n"
-                f"首次 scan 命令必须包含以下平台参数：\n"
-                f"  --spec-root {spec_root}\n"
-                f"  --runtime-root {runtime_root}\n"
-                f"  --workspace-id {ws_id}\n"
-                f"  --scan-run-id {scan_run_id}\n\n"
-                f"## 执行步骤\n"
-                f"1. sillyspec init --dir {spec_root}\n"
-                f"2. 开始 scan（仅此一次需要平台参数）：\n"
-                f"   sillyspec run scan \\\n"
-                f"     --dir {spec_root} \\\n"
-                f"     --spec-root {spec_root} \\\n"
-                f"     --runtime-root {runtime_root} \\\n"
-                f"     --workspace-id {ws_id} \\\n"
-                f"     --scan-run-id {scan_run_id}\n"
-                f"3. 按 step prompt 逐步执行，每步用 --done 推进：\n"
-                f"   sillyspec run scan --done \\\n"
-                f"     --change default \\\n"
-                f'     --dir {spec_root} --input "..." --output "..."\n'
-                f"4. 对 {root_path} 只读，产出写入 {spec_root}\n"
+                f"## ⚠️ 命令模板（严格复制）\n\n"
+                f"**第 1 步：**\n"
+                f"```\nsillyspec init --dir {spec_root}\n```\n\n"
+                f"**第 2 步（必须包含全部平台参数）：**\n"
+                f"```\n{scan_start_cmd}\n```\n\n"
+                f"**第 3-N 步：**\n"
+                f"```\n"
+                f'sillyspec run scan --done --change default --dir {spec_root}'
+                f' --input "..." --output "..."\n'
+                f"```\n\n"
+                f"对 {root_path} 只读，产出写入 {spec_root}\n"
             )
         if bundle.read_only:
             prompt += "\n## 模式: READ-ONLY\nDo NOT modify any files. Only analyze and report.\n"
