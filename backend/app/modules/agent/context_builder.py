@@ -424,6 +424,9 @@ async def build_scan_bundle(
     workspace_id: uuid.UUID,
     spec_root: str,
     root_path: str,
+    *,
+    run_id: uuid.UUID,
+    runtime_root: str | None = None,
 ) -> AgentSpecBundle:
     """构建 scan 模式的 AgentSpecBundle，不依赖 change_id。
 
@@ -435,6 +438,8 @@ async def build_scan_bundle(
         workspace_id: 工作区 ID。
         spec_root: 平台托管 spec 目录路径。
         root_path: 用户项目根目录路径（只读）。
+        run_id: AgentRun 记录 ID，用于 --scan-run-id 参数。
+        runtime_root: 平台运行时目录路径。默认从 spec_root 推导。
 
     Returns:
         scan 模式的 AgentSpecBundle，stage="scan"。
@@ -447,14 +452,25 @@ async def build_scan_bundle(
     if workspace is None:
         raise WorkspaceNotFound(f"Workspace '{workspace_id}' not found.")
 
-    # Step 2 — 构建 scan 执行指令
+    # Step 1b — 推导 runtime_root
+    if runtime_root is None:
+        runtime_root = str(Path(spec_root).parent / "runtime" / str(workspace_id))
+
+    # Step 2 — 构建 scan 执行指令（含完整平台参数）
+    scan_cmd = (
+        f"sillyspec run scan --dir {spec_root}"
+        f" --spec-root {spec_root}"
+        f" --runtime-root {runtime_root}"
+        f" --workspace-id {workspace_id}"
+        f" --scan-run-id {run_id}"
+    )
     step_prompt = (
         f"你是一个项目分析 agent。请执行以下步骤：\n\n"
         f"1. 扫描项目目录 {root_path} 的结构\n"
         f"2. 使用 sillyspec 初始化规范空间：\n"
         f"   sillyspec init --dir {spec_root}\n"
         f"3. 执行扫描生成规范文档：\n"
-        f"   sillyspec run scan --dir {spec_root}\n"
+        f"   {scan_cmd}\n"
         f"4. 完成后确认：\n"
         f'   sillyspec run scan --done --output "扫描完成"\n\n'
         f"注意：\n"
@@ -478,6 +494,9 @@ async def build_scan_bundle(
             "workspace_id": str(workspace_id),
             "mode": "scan",
             "root_path": root_path,
+            "spec_root": spec_root,
+            "runtime_root": runtime_root,
+            "scan_run_id": str(run_id),
         },
         # Stage dispatch 扩展字段
         stage_dispatch=True,
@@ -492,7 +511,9 @@ async def build_scan_bundle(
     log.info(
         "scan_bundle_built",
         workspace_id=str(workspace_id),
+        run_id=str(run_id),
         spec_root=bundle.spec_root,
+        runtime_root=runtime_root,
         root_path=root_path,
         read_only=True,
     )

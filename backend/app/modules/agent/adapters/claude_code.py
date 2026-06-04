@@ -81,6 +81,39 @@ def _build_stage_dispatch_prompt(bundle: AgentSpecBundle) -> str:
     if bundle.change_key is None:
         log.warning("stage_dispatch_missing_change_key", stage=bundle.stage)
 
+    # ── scan 阶段：使用 step_prompt（已包含完整平台参数） ──
+    if stage == "scan":
+        prompt = bundle.step_prompt or ""
+        if not prompt:
+            # fallback: 从 platform_metadata 构建命令
+            meta = bundle.platform_metadata or {}
+            spec_root = meta.get("spec_root", "")
+            runtime_root = meta.get("runtime_root", "")
+            workspace_id = meta.get("workspace_id", "")
+            scan_run_id = meta.get("scan_run_id", "")
+            root_path = meta.get("root_path", "")
+            prompt = (
+                f"你是一个项目分析 agent。请执行以下步骤：\n\n"
+                f"1. 扫描项目目录 {root_path} 的结构\n"
+                f"2. 使用 sillyspec 初始化规范空间：\n"
+                f"   sillyspec init --dir {spec_root}\n"
+                f"3. 执行扫描生成规范文档：\n"
+                f"   sillyspec run scan --dir {spec_root}"
+                f" --spec-root {spec_root}"
+                f" --runtime-root {runtime_root}"
+                f" --workspace-id {workspace_id}"
+                f" --scan-run-id {scan_run_id}\n"
+                f"4. 完成后确认：\n"
+                f'   sillyspec run scan --done --output "扫描完成"\n\n'
+                f"注意：\n"
+                f"- 对 {root_path} 目录只读，不要修改任何项目文件\n"
+                f"- 所有产出写入 {spec_root} 目录"
+            )
+        if bundle.read_only:
+            prompt += "\n## 模式: READ-ONLY\nDo NOT modify any files. Only analyze and report.\n"
+        return prompt
+
+    # ── 通用阶段（propose/plan/execute 等） ──
     prompt = (
         f"你是 SillySpec {stage} 阶段的执行者。\n\n"
         f"## 任务\n"
