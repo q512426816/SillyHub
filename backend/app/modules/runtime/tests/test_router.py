@@ -128,6 +128,7 @@ def _create_test_db(db_path: Path) -> None:
 @pytest.fixture()
 async def workspace_with_runtime(client, tmp_path: Path, auth_headers: dict[str, str]) -> dict:
     from app.core.config import get_settings
+
     root = _copy_fixture(COMPONENT_FIXTURES, tmp_path)
 
     ws_resp = await client.post(
