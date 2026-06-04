@@ -15,6 +15,8 @@ from typing import Annotated, Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from app.core.paths import resolve_spec_data_root
+
 
 class Settings(BaseSettings):
     """Top-level settings model.
@@ -61,8 +63,17 @@ class Settings(BaseSettings):
     # ── Spec data root (platform-managed spec storage) ─────────────────
     spec_data_root: str = Field(
         default=("C:/data/sillyspec-data" if sys.platform == "win32" else "/data/sillyspec-data"),
-        description="Root directory for platform-managed spec storage.",
+        description="Root directory for platform-managed spec storage. "
+        "Relative paths are resolved against the repo root, not CWD.",
     )
+
+    @field_validator("spec_data_root", mode="before")
+    @classmethod
+    def _resolve_spec_data_root(cls, raw: object) -> object:
+        """Resolve relative paths against the repo root."""
+        if isinstance(raw, str):
+            return resolve_spec_data_root(raw)
+        return raw
 
     # ── Docker path mapping ────────────────────────────────────────────
     host_path_prefix: str = Field(

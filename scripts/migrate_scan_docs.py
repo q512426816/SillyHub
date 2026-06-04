@@ -117,7 +117,11 @@ def main() -> None:
             total_skipped += 1
             continue
 
+        # Source: try root_path first, then project root (for monorepo
+        # sub-projects whose .sillyspec lives at the repo root).
         source_dir = Path(root_path) / ".sillyspec" / "docs" / component_key / "scan"
+        if not source_dir.exists():
+            source_dir = _PROJECT_ROOT / ".sillyspec" / "docs" / component_key / "scan"
         target_dir = Path(spec_root) / ".sillyspec" / "docs" / component_key / "scan"
 
         if not source_dir.exists():

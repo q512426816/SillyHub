@@ -17,23 +17,37 @@ import uuid
 
 import sqlalchemy as sa
 from alembic import op
+from pathlib import Path
 
 revision = "202606220900"
 down_revision = "202606210900"
 branch_labels = None
 depends_on = None
 
+# Repo root:  backend/alembic/versions/*.py → parents[3] = repo root
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
 
 def upgrade() -> None:
     conn = op.get_bind()
 
     # Determine spec_data_root — prefer env var, fallback to default.
-    spec_data_root = os.environ.get(
-        "SPEC_DATA_ROOT",
-        "/data/sillyspec-data",
-    )
-    # Resolve to absolute path so that spec_root is unambiguous.
-    spec_data_root = os.path.abspath(spec_data_root)
+    # Try loading from .env if not already set.
+    spec_data_root = os.environ.get("SPEC_DATA_ROOT")
+    if not spec_data_root:
+        _dotenv = _REPO_ROOT / "backend" / ".env"
+        if _dotenv.exists():
+            for line in _dotenv.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line.startswith("SPEC_DATA_ROOT="):
+                    spec_data_root = line.split("=", 1)[1].strip().strip("\"'")
+                    break
+    if not spec_data_root:
+        spec_data_root = "/data/sillyspec-data"
+    # Resolve relative paths against repo root (NOT CWD).
+    p = Path(spec_data_root)
+    if not p.is_absolute():
+        spec_data_root = str(_REPO_ROOT / p)
 
     # Fetch all active workspaces.
     workspaces = conn.execute(
