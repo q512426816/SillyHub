@@ -1,30 +1,56 @@
-# TASKS.md — workspace-spec-root-managed-p0
+# TASKS.md — fix/spec-data-root-path-resolution
 
-## 变更概述
-打通 Workspace 专属文档目录，让平台扫描的项目文档写入 workspace.spec_root 而非 SillyHub 自身仓库。
+## 问题
+SPEC_DATA_ROOT=./data/spec-storage 被 os.path.abspath() 按 CWD=backend/ 解析，
+导致 spec_root 写成 backend/data/spec-storage/{ws_id}。
+正确应该是 <repo-root>/data/spec-storage/{ws_id}。
 
 ## Task 清单
 
-### [ ] Task-01: 配置 SPEC_DATA_ROOT 环境变量
-- 文件: `backend/.env`, `.gitignore`
-- 操作: .env 加 `SPEC_DATA_ROOT`，.gitignore 加 `data/spec-storage/`
+### [ ] Task-01: 新增统一路径解析函数 resolve_spec_data_root()
+- 文件: `backend/app/core/paths.py`（新建）
+- 逻辑:
+  - 绝对路径 → 原样返回
+  - 相对路径 → 解析为 `REPO_ROOT / relative_path`
+  - REPO_ROOT = `Path(__file__).resolve().parents[2]`（backend/app/core/paths.py → parents[2] = repo root）
+- 不要写死本地路径
 
-### [ ] Task-02: 创建 alembic data migration 补建 spec_workspaces
-- 文件: `backend/alembic/versions/202606210900_backfill_spec_workspaces.py`
-- 操作: 遍历 workspaces 表所有 active 行，为每行在 spec_workspaces 创建对应记录
-- 幂等: 先 SELECT 再 INSERT，已存在则跳过
+### [ ] Task-02: config.py 使用 resolve_spec_data_root()
+- 文件: `backend/app/core/config.py`
+- 添加 validator：spec_data_root 字段在加载时调用 resolve_spec_data_root()
+- 或者不改 config.py 的 validator，而是在所有使用 spec_data_root 的地方调用 resolve 函数
 
-### [x] Task-03: 迁移已有 scan 文档
+### [ ] Task-03: 新增 repair migration 修正已有错误 spec_root
+- 文件: `backend/alembic/versions/202606230900_repair_spec_root_paths.py`（新建）
+- 逻辑:
+  - 读取所有 spec_workspaces 行
+  - 对每行 spec_root，检查是否包含 /backend/data/spec-storage
+  - 如果是，替换为 <repo-root>/data/spec-storage/{ws_id}
+  - repo-root 通过 migration 文件位置推导：Path(__file__).resolve().parents[3]
+    (migration 在 backend/alembic/versions/，parents[3] = repo root)
+  - 创建新物理目录
+  - 幂等：已正确的不动
+
+### [ ] Task-04: 修复 migrate_scan_docs.py 路径解析
 - 文件: `scripts/migrate_scan_docs.py`
-- 操作: 从 `.sillyspec/docs/{component_key}/scan/` 复制到 `{spec_root}/.sillyspec/docs/{component_key}/scan/`
-- 幂等: dirs_exist_ok=True
+- 脚本从 DB 读 spec_root（已是绝对路径），不需要额外解析
+- 但确保 _PROJECT_ROOT 正确
 
-### [ ] Task-04: 补充测试
-- 文件: `backend/app/modules/spec_workspace/tests/test_backfill.py`
-- 测试: backfill 幂等性、ScanDocsService 从 spec_root 读取
+### [ ] Task-05: 修复旧 backfill migration 的路径解析
+- 文件: `backend/alembic/versions/202606220900_backfill_spec_workspaces.py`
+- 修改 .env 读取后的 abspath 逻辑，改用 repo-root 相对解析
+- parents[2] = backend 目录，parents[3] = repo root
 
-### [ ] Task-05: 验证端到端链路
-- 手动验证: migration → 迁移脚本 → ScanDocsService 读取
+### [ ] Task-06: 补测试
+- 文件: `backend/app/core/tests/test_paths.py`（新建）
+- 测试 resolve_spec_data_root()：
+  - 绝对路径原样返回
+  - 相对路径解析到 repo-root 下
+  - 从 backend/ CWD 执行也正确
+- 测试 repair migration 幂等性
 
-## 详细设计
-见 `.sillyspec/changes/workspace-spec-root-managed-p0/tasks/` 下各 task 文件。
+## 验收标准
+- DB 中 3 行 spec_root = <repo-root>/data/spec-storage/{ws_id}（不含 /backend/）
+- <repo-root>/data/spec-storage/{ws_id} 物理目录存在
+- migrate_scan_docs.py 能从 .sillyspec/docs/ 复制到正确 spec_root
+- pytest 全量通过
