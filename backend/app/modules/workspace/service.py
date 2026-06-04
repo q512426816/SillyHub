@@ -32,7 +32,12 @@ from app.core.errors import (
     WorkspaceSlugDuplicate,
 )
 from app.core.logging import get_logger
-from app.modules.workspace.model import Workspace, WorkspaceRelation
+from app.modules.agent.model import AgentRun
+from app.modules.workspace.model import (
+    AgentRunWorkspace,
+    Workspace,
+    WorkspaceRelation,
+)
 from app.modules.workspace.parser import (
     ParsedWorkspace,
     ParseResult,
@@ -254,7 +259,6 @@ class WorkspaceService:
         stmt = select(Workspace)
         if not include_deleted:
             stmt = stmt.where(col(Workspace.deleted_at).is_(None))
-        stmt = stmt.where(col(Workspace.status) != "pending")
         stmt = stmt.order_by(col(Workspace.created_at).desc()).limit(limit).offset(offset)
 
         items = list((await self._session.execute(stmt)).scalars().all())
@@ -262,7 +266,6 @@ class WorkspaceService:
         count_stmt = select(Workspace)
         if not include_deleted:
             count_stmt = count_stmt.where(col(Workspace.deleted_at).is_(None))
-        count_stmt = count_stmt.where(col(Workspace.status) != "pending")
         total = len((await self._session.execute(count_stmt)).scalars().all())
         return items, total
 
@@ -685,6 +688,17 @@ class WorkspaceService:
                 ),
             )
 
+        # 5a. Idempotency: reuse in-progress scan run if one exists
+        existing_run = await self._find_active_scan_run(workspace.id)
+        if existing_run is not None:
+            log.info(
+                "workspace.scan_generate.idempotent_hit",
+                workspace_id=str(workspace.id),
+                agent_run_id=str(existing_run.id),
+                status=existing_run.status,
+            )
+            return (workspace.id, existing_run.id)
+
         # 5. Get spec_root from SpecWorkspace
         from app.modules.spec_workspace.service import SpecWorkspaceService
 
@@ -719,6 +733,26 @@ class WorkspaceService:
             select(Workspace)
             .where(col(Workspace.root_path) == root_path)
             .where(col(Workspace.deleted_at).is_(None))
+            .limit(1)
+        )
+        return (await self._session.execute(stmt)).scalars().first()
+
+    async def _find_active_scan_run(self, workspace_id: uuid.UUID) -> AgentRun | None:
+        """Find the most recent in-progress (pending/running) scan run
+        associated with the given workspace.
+
+        A scan run is identified by change_id IS NULL (it is not tied to a
+        change execution). Returns None if no in-progress scan run exists.
+        """
+        arw_subq = select(AgentRunWorkspace.agent_run_id).where(
+            col(AgentRunWorkspace.workspace_id) == workspace_id,
+        )
+        stmt = (
+            select(AgentRun)
+            .where(col(AgentRun.id).in_(arw_subq))
+            .where(col(AgentRun.change_id).is_(None))
+            .where(col(AgentRun.status).in_(["pending", "running"]))
+            .order_by(col(AgentRun.started_at).desc())
             .limit(1)
         )
         return (await self._session.execute(stmt)).scalars().first()

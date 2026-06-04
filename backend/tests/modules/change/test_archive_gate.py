@@ -39,10 +39,10 @@ async def _make_workspace(session: AsyncSession) -> uuid.UUID:
     return ws.id
 
 
-async def _make_accepted_change(session: AsyncSession, ws_id: uuid.UUID) -> Change:
-    """Create a Change in 'accepted' stage with the other 5 gate items ready.
+async def _make_archive_ready_change(session: AsyncSession, ws_id: uuid.UUID) -> Change:
+    """Create a Change in 'archive' stage with the other 5 gate items ready.
 
-    This lets check_archive_gate proceed past the accepted short-circuit and
+    This lets check_archive_gate proceed past the archive stage check and
     pass checks 1-5, so documents_complete is the only deciding factor.
     """
     change = Change(
@@ -53,7 +53,7 @@ async def _make_accepted_change(session: AsyncSession, ws_id: uuid.UUID) -> Chan
         status="draft",
         location="active",
         path="/tmp/test",
-        current_stage="accepted",
+        current_stage="archive",
         feedback_category=None,
         stages={
             "ac_confirmed": True,
@@ -102,7 +102,7 @@ async def test_documents_complete_passes_when_all_four_present(
 ) -> None:
     """四件套齐全 → documents_complete.passed=True, detail=="", can_archive=True."""
     ws_id = await _make_workspace(db_session)
-    change = await _make_accepted_change(db_session, ws_id)
+    change = await _make_archive_ready_change(db_session, ws_id)
     for doc_type in ("proposal", "design", "requirements", "tasks"):
         await _add_doc(db_session, change.id, doc_type)
 
@@ -120,7 +120,7 @@ async def test_documents_complete_fails_when_design_missing(
 ) -> None:
     """缺 design → passed=False, detail 含 'design', can_archive=False."""
     ws_id = await _make_workspace(db_session)
-    change = await _make_accepted_change(db_session, ws_id)
+    change = await _make_archive_ready_change(db_session, ws_id)
     for doc_type in ("proposal", "requirements", "tasks"):
         await _add_doc(db_session, change.id, doc_type)
 
@@ -138,7 +138,7 @@ async def test_documents_complete_detail_lists_all_missing(
 ) -> None:
     """同时缺 requirements 与 tasks → detail 同时含两者（子串，不绑顺序）。"""
     ws_id = await _make_workspace(db_session)
-    change = await _make_accepted_change(db_session, ws_id)
+    change = await _make_archive_ready_change(db_session, ws_id)
     for doc_type in ("proposal", "design"):
         await _add_doc(db_session, change.id, doc_type)
 
@@ -156,7 +156,7 @@ async def test_documents_complete_ignores_optional_docs(
 ) -> None:
     """四件套齐全(status=None)+缺可选文档 → passed=True（可选文档不计入分母）。"""
     ws_id = await _make_workspace(db_session)
-    change = await _make_accepted_change(db_session, ws_id)
+    change = await _make_archive_ready_change(db_session, ws_id)
     # 四件套齐全，status 全留 None（回归保护：不再依赖 status）
     for doc_type in ("proposal", "design", "requirements", "tasks"):
         await _add_doc(db_session, change.id, doc_type)

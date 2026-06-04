@@ -541,11 +541,20 @@ class AgentService:
                     except (json.JSONDecodeError, TypeError):
                         payload = {}
                     if payload.get("event") == "done":
-                        # Include run status from done payload if available
+                        # Prefer the authoritative DB status/exit_code over the
+                        # pub/sub payload, which some publishers leave as null.
+                        status_val = payload.get("status")
+                        exit_code_val = payload.get("exit_code")
+                        if session is not None and (status_val is None or exit_code_val is None):
+                            session.expire_all()
+                            run = await session.get(AgentRun, run_id)
+                            if run is not None:
+                                status_val = run.status
+                                exit_code_val = run.exit_code
                         done_data = json.dumps(
                             {
-                                "status": payload.get("status"),
-                                "exit_code": payload.get("exit_code"),
+                                "status": status_val,
+                                "exit_code": exit_code_val,
                             }
                         )
                         yield f"event: done\ndata: {done_data}\n\n"
@@ -1163,6 +1172,62 @@ class AgentService:
                 session.add(audit)
 
                 await session.commit()
+
+                # -- 9. Success finalize: activate workspace + reparse children -----
+                # run completed/failed state is already committed above; the steps
+                # below are enhancements that must never flip a successful run to
+                # failed.
+                if result.exit_code == 0:
+                    # 9a. Promote the bootstrapping workspace from pending -> active.
+                    # Without this the row stays pending and list_() filters it out,
+                    # so /workspaces never shows the just-generated project.
+                    try:
+                        from app.modules.workspace.model import Workspace
+
+                        ws = await session.get(Workspace, workspace_id)
+                        if ws is not None and ws.status == "pending":
+                            ws.status = "active"
+                            ws.last_scanned_at = datetime.utcnow()
+                            ws.updated_at = datetime.utcnow()
+                            session.add(ws)
+                            await session.commit()
+                            log.info(
+                                "scan_run_workspace_activated",
+                                run_id=str(run_id),
+                                workspace_id=str(workspace_id),
+                            )
+                    except Exception as exc:
+                        log.warning(
+                            "scan_run_workspace_activate_failed",
+                            run_id=str(run_id),
+                            workspace_id=str(workspace_id),
+                            error=str(exc),
+                        )
+
+                    # 9b. Auto-reparse child workspaces.
+                    try:
+                        from app.modules.workspace.service import WorkspaceService
+
+                        svc = WorkspaceService(session)
+                        # reparse commits internally; do NOT commit again here.
+                        _parse_result, stats, _children, _relations = await svc.reparse(
+                            workspace_id
+                        )
+                        log.info(
+                            "scan_run_reparse_done",
+                            run_id=str(run_id),
+                            workspace_id=str(workspace_id),
+                            created=stats.get("created"),
+                            relations_created=stats.get("relations_created"),
+                        )
+                    except Exception as exc:
+                        log.warning(
+                            "scan_run_reparse_failed",
+                            run_id=str(run_id),
+                            workspace_id=str(workspace_id),
+                            error=str(exc),
+                        )
+                        # do not change run.status / exit_code, do not re-raise
 
             except Exception as exc:
                 # -- Guard: mark failed on unhandled exception ----------------------

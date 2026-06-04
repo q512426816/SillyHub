@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Change Detail - Gate-Based Interaction Prototype</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, sans-serif; background: #f5f5f5; padding: 24px; }
+  .container { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom: 16px; }
+  .card { background: white; border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .status-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+  .stage-badge { padding: 4px 12px; border-radius: 4px; font-size: 13px; font-weight: 600; }
+  .stage-draft { background: #e0e0e0; color: #333; }
+  .stage-brainstorm { background: #fff3e0; color: #e65100; }
+  .stage-propose { background: #e3f2fd; color: #1565c0; }
+  .stage-plan { background: #f3e5f5; color: #7b1fa2; }
+  .stage-execute { background: #e8f5e9; color: #2e7d32; }
+  .stage-verify { background: #fce4ec; color: #c62828; }
+  .stage-quick { background: #fff8e1; color: #f57f17; }
+  .stage-archive { background: #eceff1; color: #37474f; }
+  .stage-archived { background: #c8e6c9; color: #1b5e20; }
+  .stage-blocked { background: #ffebee; color: #b71c1c; }
+  .gate-badge { padding: 4px 12px; border-radius: 4px; font-size: 12px; background: #fff9c4; color: #f57f17; border: 1px solid #fdd835; }
+  .gate-none { background: #e8f5e9; color: #2e7d32; border-color: #a5d6a7; }
+  .gate-blocked { background: #ffebee; color: #b71c1c; border-color: #ef9a9a; }
+  .pipeline { display: flex; gap: 2px; margin-bottom: 16px; }
+  .pipeline-stage { flex: 1; padding: 6px 4px; text-align: center; font-size: 10px; border-radius: 3px; background: #e0e0e0; color: #666; }
+  .pipeline-stage.active { background: #1976d2; color: white; }
+  .pipeline-stage.done { background: #c8e6c9; color: #2e7d32; }
+  .action-panel { border: 2px solid #1976d2; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .action-panel h3 { font-size: 14px; margin-bottom: 12px; color: #1976d2; }
+  .action-btn { display: inline-block; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; margin-right: 8px; margin-bottom: 8px; }
+  .btn-primary { background: #1976d2; color: white; }
+  .btn-warning { background: #f57c00; color: white; }
+  .btn-danger { background: #d32f2f; color: white; }
+  .btn-secondary { background: #e0e0e0; color: #333; }
+  .agent-status { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #f5f5f5; border-radius: 6px; margin-bottom: 12px; font-size: 13px; }
+  .agent-running { width: 8px; height: 8px; border-radius: 50%; background: #4caf50; animation: pulse 1.5s infinite; }
+  .agent-idle { width: 8px; height: 8px; border-radius: 50%; background: #bdbdbd; }
+  .agent-failed { width: 8px; height: 8px; border-radius: 50%; background: #f44336; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .scenario-tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+  .scenario-tab { padding: 6px 12px; border-radius: 4px; border: 1px solid #e0e0e0; background: white; cursor: pointer; font-size: 12px; }
+  .scenario-tab.active { background: #1976d2; color: white; border-color: #1976d2; }
+  .docs-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
+  .doc-card { padding: 8px; border: 1px solid #e0e0e0; border-radius: 4px; text-align: center; font-size: 11px; }
+  .doc-gen { border-color: #a5d6a7; background: #e8f5e9; }
+  .doc-confirm { border-color: #64b5f6; background: #e3f2fd; }
+  .doc-missing { border-color: #ef9a9a; background: #ffebee; }
+  .doc-icon { font-size: 16px; margin-bottom: 4px; }
+  .next-step { padding: 8px 12px; background: #e3f2fd; border-radius: 6px; font-size: 12px; color: #1565c0; margin-top: 8px; }
+  label { display: block; font-size: 12px; margin-bottom: 4px; color: #666; }
+  textarea { width: 100%; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; font-size: 13px; resize: vertical; min-height: 60px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Change Detail - Gate-Based Interaction Prototype</h1>
+
+  <div class="scenario-tabs">
+    <button class="scenario-tab active" onclick="showScenario('draft')">Draft</button>
+    <button class="scenario-tab" onclick="showScenario('propose')">Propose</button>
+    <button class="scenario-tab" onclick="showScenario('plan')">Plan</button>
+    <button class="scenario-tab" onclick="showScenario('verify')">Verify</button>
+    <button class="scenario-tab" onclick="showScenario('blocked')">Blocked</button>
+    <button class="scenario-tab" onclick="showScenario('archive')">Archive</button>
+  </div>
+
+  <div id="scenario-draft" class="scenario">
+    <div class="status-bar">
+      <span class="stage-badge stage-draft">draft</span>
+      <span class="gate-badge gate-none">Agent 分析中</span>
+    </div>
+    <div class="pipeline">
+      <div class="pipeline-stage active">draft</div>
+      <div class="pipeline-stage">brainstorm</div>
+      <div class="pipeline-stage">propose</div>
+      <div class="pipeline-stage">plan</div>
+      <div class="pipeline-stage">execute</div>
+      <div class="pipeline-stage">verify</div>
+      <div class="pipeline-stage">archive</div>
+    </div>
+    <div class="card">
+      <div class="agent-status"><div class="agent-running"></div> Agent 正在分析需求...</div>
+      <div class="next-step">Agent 将判断需求是否明确，自动进入 brainstorm 或 propose</div>
+    </div>
+  </div>
+
+  <div id="scenario-propose" class="scenario" style="display:none">
+    <div class="status-bar">
+      <span class="stage-badge stage-propose">propose</span>
+      <span class="gate-badge">need_proposal_review</span>
+    </div>
+    <div class="pipeline">
+      <div class="pipeline-stage done">draft</div>
+      <div class="pipeline-stage done">brainstorm</div>
+      <div class="pipeline-stage active">propose</div>
+      <div class="pipeline-stage">plan</div>
+      <div class="pipeline-stage">execute</div>
+      <div class="pipeline-stage">verify</div>
+      <div class="pipeline-stage">archive</div>
+    </div>
+    <div class="docs-grid">
+      <div class="doc-card doc-confirm"><div class="doc-icon">?</div><b>proposal.md</b><br>待确认</div>
+      <div class="doc-card doc-confirm"><div class="doc-icon">?</div><b>requirements.md</b><br>待确认</div>
+      <div class="doc-card doc-confirm"><div class="doc-icon">?</div><b>design.md</b><br>待确认</div>
+      <div class="doc-card doc-confirm"><div class="doc-icon">?</div><b>tasks.md</b><br>待确认</div>
+    </div>
+    <div class="action-panel">
+      <h3>四件套已生成，请确认</h3>
+      <button class="action-btn btn-primary">确认通过，进入计划</button>
+      <button class="action-btn btn-warning">提出修改意见</button>
+      <button class="action-btn btn-secondary">需求仍不明确，回到 Brainstorm</button>
+      <div style="margin-top:12px">
+        <label>修改意见（可选）</label>
+        <textarea placeholder="请描述需要修改的内容..."></textarea>
+      </div>
+    </div>
+    <div class="next-step">确认通过后，Agent 将自动生成执行计划</div>
+  </div>
+
+  <div id="scenario-plan" class="scenario" style="display:none">
+    <div class="status-bar">
+      <span class="stage-badge stage-plan">plan</span>
+      <span class="gate-badge">need_plan_review</span>
+    </div>
+    <div class="pipeline">
+      <div class="pipeline-stage done">draft</div>
+      <div class="pipeline-stage done">brainstorm</div>
+      <div class="pipeline-stage done">propose</div>
+      <div class="pipeline-stage active">plan</div>
+      <div class="pipeline-stage">execute</div>
+      <div class="pipeline-stage">verify</div>
+      <div class="pipeline-stage">archive</div>
+    </div>
+    <div class="action-panel">
+      <h3>执行计划已生成，请确认</h3>
+      <button class="action-btn btn-primary">确认计划，开始执行</button>
+      <button class="action-btn btn-warning">计划不合理，重新计划</button>
+      <button class="action-btn btn-secondary">设计有问题，退回文档</button>
+      <button class="action-btn btn-secondary">需求有问题，退回澄清</button>
+      <div style="margin-top:12px">
+        <label>修改意见（可选）</label>
+        <textarea placeholder="请描述需要修改的内容..."></textarea>
+      </div>
+    </div>
+    <div class="next-step">确认后 Agent 将自动执行所有任务并验证</div>
+  </div>
+
+  <div id="scenario-verify" class="scenario" style="display:none">
+    <div class="status-bar">
+      <span class="stage-badge stage-verify">verify</span>
+      <span class="gate-badge">need_human_test</span>
+    </div>
+    <div class="pipeline">
+      <div class="pipeline-stage done">draft</div>
+      <div class="pipeline-stage done">brainstorm</div>
+      <div class="pipeline-stage done">propose</div>
+      <div class="pipeline-stage done">plan</div>
+      <div class="pipeline-stage done">execute</div>
+      <div class="pipeline-stage active">verify</div>
+      <div class="pipeline-stage">archive</div>
+    </div>
+    <div class="card">
+      <div class="agent-status"><div class="agent-idle"></div> Agent 自动验证已通过 (3/3 check passed)</div>
+    </div>
+    <div class="action-panel">
+      <h3>自动验证通过，请人工测试</h3>
+      <button class="action-btn btn-primary">测试通过</button>
+      <button class="action-btn btn-danger">发现 BUG</button>
+      <button class="action-btn btn-warning">文档/需求不符合</button>
+      <div style="margin-top:12px">
+        <label>测试意见（可选）</label>
+        <textarea placeholder="请描述测试结果或 BUG..."></textarea>
+      </div>
+    </div>
+    <div class="next-step">测试通过后将进入归档确认</div>
+  </div>
+
+  <div id="scenario-blocked" class="scenario" style="display:none">
+    <div class="status-bar">
+      <span class="stage-badge stage-blocked">verify</span>
+      <span class="gate-badge gate-blocked">blocked (自动修复 3 次未通过)</span>
+    </div>
+    <div class="pipeline">
+      <div class="pipeline-stage done">draft</div>
+      <div class="pipeline-stage done">brainstorm</div>
+      <div class="pipeline-stage done">propose</div>
+      <div class="pipeline-stage done">plan</div>
+      <div class="pipeline-stage done">execute</div>
+      <div class="pipeline-stage active">verify</div>
+      <div class="pipeline-stage">archive</div>
+    </div>
+    <div class="card" style="border-color:#ef9a9a">
+      <div class="agent-status"><div class="agent-failed"></div> 自动修复已达上限 (3/3)</div>
+      <p style="font-size:12px;color:#c62828;margin-bottom:8px">Agent 尝试了 3 次自动修复均未通过验证。</p>
+      <p style="font-size:12px;color:#666">失败原因：test_scan_run_reparse_raises ... assertion failed</p>
+    </div>
+    <div class="action-panel" style="border-color:#d32f2f">
+      <h3 style="color:#d32f2f">需要人工介入</h3>
+      <button class="action-btn btn-warning">重试修复</button>
+      <button class="action-btn btn-secondary">退回执行，调整方案</button>
+      <button class="action-btn btn-secondary">退回计划，重新规划</button>
+    </div>
+  </div>
+
+  <div id="scenario-archive" class="scenario" style="display:none">
+    <div class="status-bar">
+      <span class="stage-badge stage-archive">archive</span>
+      <span class="gate-badge">need_archive_confirm</span>
+    </div>
+    <div class="pipeline">
+      <div class="pipeline-stage done">draft</div>
+      <div class="pipeline-stage done">brainstorm</div>
+      <div class="pipeline-stage done">propose</div>
+      <div class="pipeline-stage done">plan</div>
+      <div class="pipeline-stage done">execute</div>
+      <div class="pipeline-stage done">verify</div>
+      <div class="pipeline-stage active">archive</div>
+    </div>
+    <div class="card">
+      <h3 style="font-size:14px;margin-bottom:8px">归档检查</h3>
+      <div style="font-size:12px">
+        <div style="color:#2e7d32">? 四件套确认完成</div>
+        <div style="color:#2e7d32">? 执行计划确认完成</div>
+        <div style="color:#2e7d32">? 自动验证通过</div>
+        <div style="color:#2e7d32">? 人工测试通过</div>
+        <div style="color:#2e7d32">? 无未解决反馈</div>
+        <div style="color:#2e7d32">? 文档完整</div>
+      </div>
+    </div>
+    <div class="action-panel">
+      <button class="action-btn btn-primary">确认归档</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function showScenario(id) {
+  document.querySelectorAll('.scenario').forEach(s => s.style.display = 'none');
+  document.querySelectorAll('.scenario-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('scenario-' + id).style.display = '';
+  event.target.classList.add('active');
+}
+</script>
+</body>
+</html>

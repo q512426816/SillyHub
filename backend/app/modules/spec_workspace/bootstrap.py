@@ -381,6 +381,8 @@ async def _execute_bootstrap_agent_run(
 
             await session.commit()
 
+            await _publish_done_event(run_id, run.status, run.exit_code)
+
             log.info(
                 "spec_bootstrap.complete",
                 run_id=str(run_id),
@@ -447,6 +449,8 @@ async def _execute_bootstrap_agent_run(
                         session.add(spec_ws)
 
                     await session.commit()
+
+                    await _publish_done_event(run_id, "failed", 1)
             except Exception as inner_exc:
                 log.error(
                     "spec_bootstrap_exception_cleanup_failed",
@@ -593,3 +597,28 @@ async def _publish_log_event(
         await redis.publish(f"agent_run:{run_id}", payload)
     except Exception:
         log.warning("bootstrap_redis_publish_failed", run_id=str(run_id))
+
+
+async def _publish_done_event(
+    run_id: uuid.UUID,
+    status: str,
+    exit_code: int | None,
+) -> None:
+    """Publish a terminal ``done`` event so SSE subscribers stop waiting.
+
+    Without this the bootstrap stream never signals completion, leaving the
+    frontend stuck showing ``pending`` until the auth token expires.
+    """
+    try:
+        redis = get_redis()
+        payload = json.dumps(
+            {
+                "event": "done",
+                "run_id": str(run_id),
+                "status": status,
+                "exit_code": exit_code,
+            }
+        )
+        await redis.publish(f"agent_run:{run_id}", payload)
+    except Exception:
+        log.warning("bootstrap_redis_done_publish_failed", run_id=str(run_id))

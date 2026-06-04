@@ -47,7 +47,7 @@ class SpecValidator:
 
     Checks:
     1. Directory structure: at least `.sillyspec/projects/` must exist
-    2. YAML schema: each `projects/*.yaml` must have `id`, `name`, `type` fields
+    2. YAML schema: each `projects/*.yaml` must have `name` or `id` field
     3. Reference integrity: `relations.target` must reference an existing component
     """
 
@@ -135,8 +135,6 @@ class SpecValidator:
         if not projects_dir.exists():
             return issues
 
-        required_fields = {"id", "name", "type"}
-
         for yaml_file in list(projects_dir.glob("*.yaml")) + list(projects_dir.glob("*.yml")):
             try:
                 content = yaml_file.read_text(encoding="utf-8")
@@ -163,31 +161,27 @@ class SpecValidator:
                 )
                 continue
 
-            # Minimal spec: a YAML that contains only `name` is treated as a
-            # valid placeholder (id derived from filename, type defaults).
-            # Any additional key triggers full schema validation.
             data_keys = set(data.keys())
-            if data_keys == {"name"}:
-                # Derive id from filename stem for reference checks
-                component_ids.append(yaml_file.stem)
-                continue
 
-            # Full schema validation
-            missing = required_fields - data_keys
-            if missing:
+            # name is the only truly required field — parser derives id from
+            # filename stem and treats type as optional, so the validator
+            # should match that leniency.
+            if "name" not in data_keys and "id" not in data_keys:
                 issues.append(
                     ValidationIssue(
                         severity="error",
                         category="schema",
                         path=str(yaml_file),
-                        message=f"Missing required fields: {', '.join(sorted(missing))}.",
+                        message="Missing 'name' or 'id' field.",
                     )
                 )
+                # Still collect id for reference checks
+                component_ids.append(yaml_file.stem)
+                continue
 
-            # Collect component IDs for reference check
-            comp_id = data.get("id") or data.get("name")
-            if comp_id:
-                component_ids.append(str(comp_id))
+            # Collect component ID for reference checks — mirrors parser logic
+            comp_id = data.get("id") or data.get("name") or yaml_file.stem
+            component_ids.append(str(comp_id))
 
         return issues
 

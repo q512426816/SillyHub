@@ -1,14 +1,16 @@
 """Tests for WorkspaceService.scan_generate()."""
 
 import uuid
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import WorkspacePathNotFound
+from app.modules.agent.model import AgentRun
 from app.modules.agent.service import AgentService
-from app.modules.workspace.model import Workspace
+from app.modules.workspace.model import AgentRunWorkspace, Workspace
 from app.modules.workspace.schema import slugify
 from app.modules.workspace.service import WorkspaceService
 
@@ -195,3 +197,209 @@ async def test_scan_generate_passes_correct_args_to_agent(
     assert call_args.kwargs["user_id"] == user_id
     assert call_args.kwargs["root_path"] == str(project_dir)
     assert "spec_root" in call_args.kwargs
+
+
+# ---------------------------------------------------------------------------
+# Idempotent in-progress scan run reuse (task-05)
+# ---------------------------------------------------------------------------
+
+
+async def _make_scan_run(
+    db_session: AsyncSession,
+    workspace_id: uuid.UUID,
+    *,
+    status: str = "running",
+    change_id: uuid.UUID | None = None,
+    started_at: datetime | None = None,
+) -> AgentRun:
+    """Create a scan/bootstrap run (change_id=None) linked to a workspace."""
+    run = AgentRun(
+        id=uuid.uuid4(),
+        agent_type="claude_code",  # NOT NULL, must be set explicitly
+        status=status,
+        change_id=change_id,  # None => scan run; non-None => change-bound
+        started_at=started_at or datetime.utcnow(),
+    )
+    db_session.add(run)
+    await db_session.flush()
+    db_session.add(AgentRunWorkspace(agent_run_id=run.id, workspace_id=workspace_id))
+    await db_session.flush()
+    return run
+
+
+async def _bootstrap_workspace(svc: WorkspaceService, mock_agent_service, project_dir) -> uuid.UUID:
+    """Trigger a first scan_generate to create a workspace, return its id."""
+    fake_run = MagicMock()
+    fake_run.id = uuid.uuid4()
+    mock_agent_service.start_scan_dispatch.return_value = fake_run
+    ws_id, _ = await svc.scan_generate(
+        root_path=str(project_dir),
+        user_id=uuid.uuid4(),
+        agent_service=mock_agent_service,
+    )
+    return ws_id
+
+
+@pytest.mark.asyncio
+async def test_scan_generate_no_active_run_creates_and_dispatches(
+    db_session: AsyncSession, mock_agent_service, tmp_path
+):
+    """Case 1: no in-progress run -> create new run and dispatch once."""
+    project_dir = tmp_path / "p1"
+    project_dir.mkdir()
+
+    fake_run = MagicMock()
+    fake_run.id = uuid.uuid4()
+    mock_agent_service.start_scan_dispatch.return_value = fake_run
+
+    svc = WorkspaceService(db_session)
+    _ws_id, run_id = await svc.scan_generate(
+        root_path=str(project_dir),
+        user_id=uuid.uuid4(),
+        agent_service=mock_agent_service,
+    )
+
+    assert run_id == fake_run.id
+    mock_agent_service.start_scan_dispatch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["running", "pending"])
+async def test_scan_generate_idempotent_active_run(
+    db_session: AsyncSession, mock_agent_service, tmp_path, status
+):
+    """Case 2: existing pending/running scan run -> idempotent, no dispatch."""
+    project_dir = tmp_path / f"p-{status}"
+    project_dir.mkdir()
+
+    svc = WorkspaceService(db_session)
+    ws_id = await _bootstrap_workspace(svc, mock_agent_service, project_dir)
+
+    existing = await _make_scan_run(db_session, ws_id, status=status)
+    mock_agent_service.start_scan_dispatch.reset_mock()
+
+    ws_id_2, run_id_2 = await svc.scan_generate(
+        root_path=str(project_dir),
+        user_id=uuid.uuid4(),
+        agent_service=mock_agent_service,
+    )
+
+    assert ws_id_2 == ws_id
+    assert run_id_2 == existing.id
+    mock_agent_service.start_scan_dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["completed", "failed"])
+async def test_scan_generate_ignores_terminal_run(
+    db_session: AsyncSession, mock_agent_service, tmp_path, status
+):
+    """Case 3: only completed/failed run -> still create new run + dispatch."""
+    project_dir = tmp_path / f"p-term-{status}"
+    project_dir.mkdir()
+
+    svc = WorkspaceService(db_session)
+    ws_id = await _bootstrap_workspace(svc, mock_agent_service, project_dir)
+
+    await _make_scan_run(db_session, ws_id, status=status)
+
+    fake_run_new = MagicMock()
+    fake_run_new.id = uuid.uuid4()
+    mock_agent_service.start_scan_dispatch.reset_mock()
+    mock_agent_service.start_scan_dispatch.return_value = fake_run_new
+
+    _ws_id, run_id = await svc.scan_generate(
+        root_path=str(project_dir),
+        user_id=uuid.uuid4(),
+        agent_service=mock_agent_service,
+    )
+
+    assert run_id == fake_run_new.id
+    mock_agent_service.start_scan_dispatch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_scan_generate_returns_most_recent_active_run(
+    db_session: AsyncSession, mock_agent_service, tmp_path
+):
+    """Case 4: multiple in-progress runs -> return most recent by started_at."""
+    project_dir = tmp_path / "p-multi"
+    project_dir.mkdir()
+
+    svc = WorkspaceService(db_session)
+    ws_id = await _bootstrap_workspace(svc, mock_agent_service, project_dir)
+
+    now = datetime.utcnow()
+    await _make_scan_run(db_session, ws_id, status="running", started_at=now - timedelta(minutes=5))
+    newer = await _make_scan_run(db_session, ws_id, status="running", started_at=now)
+    mock_agent_service.start_scan_dispatch.reset_mock()
+
+    _ws_id, run_id = await svc.scan_generate(
+        root_path=str(project_dir),
+        user_id=uuid.uuid4(),
+        agent_service=mock_agent_service,
+    )
+
+    assert run_id == newer.id
+    mock_agent_service.start_scan_dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_scan_generate_ignores_run_on_other_workspace(
+    db_session: AsyncSession, mock_agent_service, tmp_path
+):
+    """Case 7 (hardening): active run linked to a different workspace must not
+    trigger idempotency for the current one -> still creates + dispatches."""
+    project_dir = tmp_path / "p-isolated"
+    project_dir.mkdir()
+
+    svc = WorkspaceService(db_session)
+    ws_id = await _bootstrap_workspace(svc, mock_agent_service, project_dir)
+
+    # Active scan run associated with an unrelated workspace id.
+    other_ws_id = uuid.uuid4()
+    await _make_scan_run(db_session, other_ws_id, status="running")
+
+    fake_run_new = MagicMock()
+    fake_run_new.id = uuid.uuid4()
+    mock_agent_service.start_scan_dispatch.reset_mock()
+    mock_agent_service.start_scan_dispatch.return_value = fake_run_new
+
+    _ws_id, run_id = await svc.scan_generate(
+        root_path=str(project_dir),
+        user_id=uuid.uuid4(),
+        agent_service=mock_agent_service,
+    )
+
+    assert _ws_id == ws_id
+    assert run_id == fake_run_new.id
+    mock_agent_service.start_scan_dispatch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_scan_generate_ignores_change_bound_run(
+    db_session: AsyncSession, mock_agent_service, tmp_path
+):
+    """Case 8 (hardening): a running but change-bound run (change_id non-None)
+    is not a scan run -> idempotency must not hit, create + dispatch."""
+    project_dir = tmp_path / "p-change-bound"
+    project_dir.mkdir()
+
+    svc = WorkspaceService(db_session)
+    ws_id = await _bootstrap_workspace(svc, mock_agent_service, project_dir)
+
+    await _make_scan_run(db_session, ws_id, status="running", change_id=uuid.uuid4())
+
+    fake_run_new = MagicMock()
+    fake_run_new.id = uuid.uuid4()
+    mock_agent_service.start_scan_dispatch.reset_mock()
+    mock_agent_service.start_scan_dispatch.return_value = fake_run_new
+
+    _ws_id, run_id = await svc.scan_generate(
+        root_path=str(project_dir),
+        user_id=uuid.uuid4(),
+        agent_service=mock_agent_service,
+    )
+
+    assert run_id == fake_run_new.id
+    mock_agent_service.start_scan_dispatch.assert_awaited_once()

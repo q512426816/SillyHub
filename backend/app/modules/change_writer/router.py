@@ -51,7 +51,39 @@ async def create_change(
         lease_id=data.lease_id,
         description=data.description,
     )
-    return ChangeCreateResponse.model_validate(change)
+
+    # Auto-dispatch brainstorm agent (best-effort, non-blocking)
+    dispatch_info = None
+    try:
+        from app.core.db import get_session_factory
+        from app.modules.change.dispatch import dispatch
+
+        change.current_stage = "brainstorm"
+        session.add(change)
+        await session.commit()
+
+        factory = get_session_factory()
+        async with factory() as dispatch_session:
+            dispatch_info = await dispatch(
+                session=dispatch_session,
+                workspace_id=workspace_id,
+                change_id=change.id,
+                target_stage="brainstorm",
+                user_id=user.id,
+            )
+    except Exception as exc:
+        from app.core.logging import get_logger
+
+        log = get_logger(__name__)
+        log.warning(
+            "auto_brainstorm_dispatch_failed",
+            change_id=str(change.id),
+            error=str(exc),
+        )
+
+    response = ChangeCreateResponse.model_validate(change)
+    response.agent_dispatch = dispatch_info
+    return response
 
 
 @router.post(

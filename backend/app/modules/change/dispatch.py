@@ -186,6 +186,63 @@ async def auto_dispatch_next_step(
 
     # 2. stage completed
     if sync_result.stage_completed:
+        change = await session.get(Change, change_id)
+        if change and change.human_gate and change.human_gate != "none":
+            log.info(
+                "auto_dispatch_blocked_by_gate",
+                change_id=str(change_id),
+                human_gate=change.human_gate,
+                stage=sync_result.current_stage,
+            )
+            return {
+                "dispatched": False,
+                "reason": "human_gate_active",
+                "human_gate": change.human_gate,
+                "stage": sync_result.current_stage,
+            }
+
+        # verify auto-fix: if verify completed without gate (failed), try quick fix
+        if change and sync_result.current_stage == "verify":
+            stages = change.stages or {}
+            fix_count = stages.get("_auto_fix_count", 0)
+            if fix_count < 3:
+                stages["_auto_fix_count"] = fix_count + 1
+                change.stages = stages
+                session.add(change)
+                await session.commit()
+                log.info(
+                    "verify_auto_fix_dispatching_quick",
+                    change_id=str(change_id),
+                    attempt=fix_count + 1,
+                )
+                dispatch_result = await dispatch(
+                    session=session,
+                    workspace_id=workspace_id,
+                    change_id=change_id,
+                    target_stage="quick",
+                    user_id=user_id,
+                )
+                dispatch_result["reason"] = "verify_auto_fix"
+                return dispatch_result
+            else:
+                change.human_gate = "blocked"
+                stages = change.stages or {}
+                stages["_auto_fix_count"] = fix_count
+                change.stages = stages
+                session.add(change)
+                await session.commit()
+                log.warning(
+                    "verify_auto_fix_limit_reached",
+                    change_id=str(change_id),
+                    attempts=fix_count,
+                )
+                return {
+                    "dispatched": False,
+                    "reason": "verify_auto_fix_limit",
+                    "stage": "verify",
+                    "human_gate": "blocked",
+                }
+
         log.info(
             "auto_dispatch_skip_stage_completed",
             change_id=str(change_id),

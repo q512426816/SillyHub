@@ -10,6 +10,7 @@ export type ChangeSummary = {
   affected_components: string[];
   owner_id: string | null;
   current_stage: string | null;
+  human_gate: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -18,6 +19,7 @@ export type ChangeRead = ChangeSummary & {
   path: string;
   archived_at: string | null;
   current_stage: string | null;
+  human_gate: string | null;
   stages: Record<string, any> | null;
   approval_status: string | null;
   approved_by: string | null;
@@ -369,5 +371,66 @@ export function triggerDispatch(workspaceId: string, changeId: string) {
   return apiFetch<DispatchResponse>(
     `/api/workspaces/${workspaceId}/changes/${changeId}/dispatch`,
     { method: "POST" },
+  );
+}
+
+// ── HumanGate & Review API ─────────────────────────────────────────────
+
+export type HumanGate =
+  | "none"
+  | "need_requirement_input"
+  | "need_proposal_review"
+  | "need_plan_review"
+  | "need_human_test"
+  | "need_archive_confirm"
+  | "blocked";
+
+export type ReviewResponse = {
+  change: ChangeRead;
+  agent_dispatch: TransitionDispatchResponse | null;
+};
+
+export function proposalReview(
+  workspaceId: string,
+  changeId: string,
+  decision: "approve" | "revise" | "unclear",
+  comment?: string,
+) {
+  return apiFetch<ReviewResponse>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/proposal-review`,
+    {
+      method: "POST",
+      json: { decision, comment: comment ?? null },
+    },
+  );
+}
+
+export function planReview(
+  workspaceId: string,
+  changeId: string,
+  decision: "approve" | "replan" | "back_to_propose" | "back_to_brainstorm",
+  comment?: string,
+) {
+  return apiFetch<ReviewResponse>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/plan-review`,
+    {
+      method: "POST",
+      json: { decision, comment: comment ?? null },
+    },
+  );
+}
+
+export function humanTest(
+  workspaceId: string,
+  changeId: string,
+  result: "pass" | "bug" | "doc_mismatch",
+  comment?: string,
+) {
+  return apiFetch<ReviewResponse>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/human-test`,
+    {
+      method: "POST",
+      json: { result, comment: comment ?? null },
+    },
   );
 }

@@ -97,10 +97,10 @@ class ScanDocsService:
         stats = {"parsed": 0, "created": 0, "updated": 0, "deleted": 0}
 
         if not workspace.component_key:
-            result = ScanDocsResult(component_key=None)
-            return stats, result
-
-        result = self._parser.parse_component(sillyspec_root, workspace.component_key)
+            # Parent workspace — parse the entire docs tree recursively
+            result = self._parser.parse_docs_tree(sillyspec_root)
+        else:
+            result = self._parser.parse_component(sillyspec_root, workspace.component_key)
         stats["parsed"] = len([d for d in result.docs if d.exists])
 
         # Fetch existing rows keyed by path

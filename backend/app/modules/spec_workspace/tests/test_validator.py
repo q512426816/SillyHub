@@ -110,32 +110,65 @@ class TestValidateValidYaml:
 
 
 class TestValidateMissingRequiredFields:
-    """YAML without required field (e.g. id) -> error."""
+    """YAML without required fields."""
 
-    def test_missing_id(self, validator: SpecValidator, tmp_path: Path) -> None:
+    def test_missing_id_passes_when_name_present(
+        self, validator: SpecValidator, tmp_path: Path
+    ) -> None:
+        """id is auto-derived from filename when missing; name present -> passes."""
         projects_dir = tmp_path / ".sillyspec" / "projects"
         _write_yaml(
-            projects_dir / "bad.yaml",
-            "name: MissingID\ntype: service\n",
+            projects_dir / "my-service.yaml",
+            "name: My Service\ntype: service\n",
         )
         report = validator.validate(tmp_path)
 
-        assert report.passed is False
-        assert any("id" in e.message for e in report.errors)
+        assert report.passed is True
 
-    def test_missing_multiple_fields(self, validator: SpecValidator, tmp_path: Path) -> None:
+    def test_missing_type_passes(self, validator: SpecValidator, tmp_path: Path) -> None:
+        """type is optional in parser, so validator should not reject it."""
+        projects_dir = tmp_path / ".sillyspec" / "projects"
+        _write_yaml(
+            projects_dir / "backend.yaml",
+            "id: backend\nname: Backend\n",
+        )
+        report = validator.validate(tmp_path)
+
+        assert report.passed is True
+
+    def test_missing_both_name_and_id(self, validator: SpecValidator, tmp_path: Path) -> None:
+        """YAML with neither name nor id -> error."""
         projects_dir = tmp_path / ".sillyspec" / "projects"
         _write_yaml(
             projects_dir / "empty.yaml",
-            "description: no required fields\n",
+            "description: no name or id\n",
         )
         report = validator.validate(tmp_path)
 
         assert report.passed is False
-        error_msgs = " ".join(e.message for e in report.errors)
-        assert "id" in error_msgs
-        assert "name" in error_msgs
-        assert "type" in error_msgs
+        assert any("name" in e.message or "id" in e.message for e in report.errors)
+
+    def test_id_only_passes(self, validator: SpecValidator, tmp_path: Path) -> None:
+        """YAML with only id (no name) -> passes, name derived from id."""
+        projects_dir = tmp_path / ".sillyspec" / "projects"
+        _write_yaml(
+            projects_dir / "svc.yaml",
+            "id: my-svc\npath: ./svc\n",
+        )
+        report = validator.validate(tmp_path)
+
+        assert report.passed is True
+
+    def test_scan_generated_format_passes(self, validator: SpecValidator, tmp_path: Path) -> None:
+        """Typical LLM-generated YAML with name/path/role but no id/type -> passes."""
+        projects_dir = tmp_path / ".sillyspec" / "projects"
+        _write_yaml(
+            projects_dir / "frontend.yaml",
+            "name: frontend\npath: ./frontend\nrole: Frontend App\ntech_stack:\n  - react\n",
+        )
+        report = validator.validate(tmp_path)
+
+        assert report.passed is True
 
 
 class TestValidateInvalidYamlSyntax:

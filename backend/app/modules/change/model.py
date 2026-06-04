@@ -41,8 +41,8 @@ class StageEnum(enum.StrEnum):
 
     # ── Hub 业务扩展阶段 ──
     DRAFT = "draft"
-    REWORK_REQUIRED = "rework_required"
-    ACCEPTED = "accepted"
+    BLOCKED = "blocked"
+    ARCHIVED = "archived"
 
     @classmethod
     def spec_stages(cls) -> list[StageEnum]:
@@ -61,7 +61,7 @@ class StageEnum(enum.StrEnum):
     @classmethod
     def hub_stages(cls) -> list[StageEnum]:
         """Hub 业务扩展阶段列表。"""
-        return [cls.DRAFT, cls.REWORK_REQUIRED, cls.ACCEPTED]
+        return [cls.DRAFT, cls.BLOCKED, cls.ARCHIVED]
 
     @classmethod
     def all_stages(cls) -> list[StageEnum]:
@@ -69,12 +69,22 @@ class StageEnum(enum.StrEnum):
         return cls.spec_stages() + cls.hub_stages()
 
 
+class HumanGate(enum.StrEnum):
+    """人工等待门控枚举 — 表达「人在等什么」。"""
+
+    NONE = "none"
+    NEED_REQUIREMENT_INPUT = "need_requirement_input"
+    NEED_PROPOSAL_REVIEW = "need_proposal_review"
+    NEED_PLAN_REVIEW = "need_plan_review"
+    NEED_HUMAN_TEST = "need_human_test"
+    NEED_ARCHIVE_CONFIRM = "need_archive_confirm"
+    BLOCKED = "blocked"  # 自动修复超限等，需人工介入
+
+
 TRANSITIONS: dict[StageEnum, dict[StageEnum, list[str]]] = {
-    # ── Hub: draft → SillySpec 入口 ──
+    # ── draft → SillySpec 入口（Agent 接管） ──
     StageEnum.DRAFT: {
-        StageEnum.PROPOSE: ["business_user", "agent"],
-        StageEnum.QUICK: ["business_user", "agent"],
-        StageEnum.EXECUTE: ["admin"],
+        StageEnum.BRAINSTORM: ["agent"],
         StageEnum.SCAN: ["agent"],
     },
     # ── SillySpec 主线流程 ──
@@ -91,28 +101,29 @@ TRANSITIONS: dict[StageEnum, dict[StageEnum, list[str]]] = {
     StageEnum.PLAN: {
         StageEnum.EXECUTE: ["reviewer", "agent"],
         StageEnum.PROPOSE: ["reviewer"],
+        StageEnum.BRAINSTORM: ["reviewer"],
     },
     StageEnum.EXECUTE: {
         StageEnum.VERIFY: ["agent"],
     },
     StageEnum.VERIFY: {
-        StageEnum.ACCEPTED: ["reviewer"],
-        StageEnum.REWORK_REQUIRED: ["reviewer"],
+        StageEnum.QUICK: ["agent"],
+        StageEnum.ARCHIVE: ["reviewer", "agent"],
+        StageEnum.BLOCKED: ["agent"],
     },
     StageEnum.QUICK: {
-        StageEnum.ACCEPTED: ["reviewer"],
-        StageEnum.REWORK_REQUIRED: ["reviewer"],
+        StageEnum.VERIFY: ["agent"],
+        StageEnum.BLOCKED: ["agent"],
     },
-    # ── Hub 业务扩展 ──
-    StageEnum.REWORK_REQUIRED: {
+    StageEnum.BLOCKED: {
         StageEnum.PROPOSE: ["reviewer"],
         StageEnum.PLAN: ["reviewer"],
         StageEnum.EXECUTE: ["reviewer"],
     },
-    StageEnum.ACCEPTED: {
-        StageEnum.ARCHIVE: ["system"],
+    StageEnum.ARCHIVE: {
+        StageEnum.ARCHIVED: ["system"],
     },
-    StageEnum.ARCHIVE: {},
+    StageEnum.ARCHIVED: {},
 }
 
 
@@ -177,6 +188,10 @@ class Change(BaseModel, table=True):
     current_stage: str | None = Field(
         default=None,
         sa_column=Column(String, nullable=True, default=None),
+    )
+    human_gate: str = Field(
+        default="none",
+        sa_column=Column(String(50), nullable=False, server_default="none"),
     )
     stages: dict = Field(
         default_factory=dict,

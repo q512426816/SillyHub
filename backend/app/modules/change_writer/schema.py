@@ -28,6 +28,7 @@ class ChangeCreateResponse(BaseModel):
     current_stage: str | None
     path: str
     created_at: datetime
+    agent_dispatch: dict | None = None
 
 
 class MarkdownGenerateRequest(BaseModel):

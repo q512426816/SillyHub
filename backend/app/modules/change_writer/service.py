@@ -102,6 +102,12 @@ class ChangeWriterService:
             proposal_content = self._ensure_frontmatter(proposal_content, author, now)
             (change_dir / "proposal.md").write_text(proposal_content, encoding="utf-8")
 
+        # Write request.md with user's original requirement (with frontmatter)
+        if description:
+            request_content = f"# {title}\n\n{description}\n"
+            request_content = self._ensure_frontmatter(request_content, author, now)
+            (change_dir / "request.md").write_text(request_content, encoding="utf-8")
+
         # Create DB record
         change = Change(
             id=uuid.uuid4(),
@@ -141,6 +147,18 @@ class ChangeWriterService:
                 last_modified_at=now,
             )
             self._session.add(proposal_doc)
+
+        # Add request.md as a document (if description was provided)
+        if description:
+            request_doc = ChangeDocument(
+                id=uuid.uuid4(),
+                change_id=change.id,
+                doc_type="request",
+                path=str(change_dir.relative_to(repo_dir) / "request.md"),
+                exists=True,
+                last_modified_at=now,
+            )
+            self._session.add(request_doc)
 
         await self._session.commit()
         await self._session.refresh(change)

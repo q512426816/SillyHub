@@ -86,17 +86,17 @@ async def _add_doc(session, change_id: uuid.UUID, doc_type: str) -> None:
 # ── Change transition tests ────────────────────────────────────────────────
 
 
-async def test_change_transition_draft_to_proposed(client, db_session):
+async def test_change_transition_draft_to_brainstorm(client, db_session):
     refs = await _setup(db_session)
     await _add_doc(db_session, refs["change_id"], "master")
     resp = await client.post(
         f"/api/workspaces/{refs['ws_id']}/changes/{refs['change_id']}/transition",
-        json={"target_stage": "propose"},
+        json={"target_stage": "brainstorm"},
         headers=_auth(refs["token"]),
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["change"]["current_stage"] == "propose"
+    assert body["change"]["current_stage"] == "brainstorm"
 
 
 async def test_change_transition_invalid(client, db_session):
@@ -124,7 +124,7 @@ async def test_change_transition_no_auth(client, db_session):
     refs = await _setup(db_session)
     resp = await client.post(
         f"/api/workspaces/{refs['ws_id']}/changes/{refs['change_id']}/transition",
-        json={"target_stage": "propose"},
+        json={"target_stage": "brainstorm"},
     )
     assert resp.status_code == 401
 
@@ -134,7 +134,7 @@ async def test_change_transition_not_found(client, db_session):
     fake_id = uuid.uuid4()
     resp = await client.post(
         f"/api/workspaces/{refs['ws_id']}/changes/{fake_id}/transition",
-        json={"target_stage": "propose"},
+        json={"target_stage": "brainstorm"},
         headers=_auth(refs["token"]),
     )
     assert resp.status_code == 404
@@ -158,11 +158,11 @@ async def test_submit_review_approve(client, db_session):
 
 async def test_submit_review_reject_transitions(client, db_session):
     refs = await _setup(db_session)
-    # First transition to propose
+    # First transition to brainstorm
     await _add_doc(db_session, refs["change_id"], "master")
     await client.post(
         f"/api/workspaces/{refs['ws_id']}/changes/{refs['change_id']}/transition",
-        json={"target_stage": "propose"},
+        json={"target_stage": "brainstorm"},
         headers=_auth(refs["token"]),
     )
     # Reject
@@ -174,9 +174,7 @@ async def test_submit_review_reject_transitions(client, db_session):
     assert resp.status_code == 201
     assert resp.json()["verdict"] == "reject"
 
-    # Verify change was set to rework_required
-    # Note: propose -> rework_required is not a valid TRANSITIONS edge,
-    # so the auto-transition is skipped. The review record is still created.
+    # Review record is created; brainstorm -> blocked is not in TRANSITIONS
     from sqlalchemy import select
     from sqlmodel import col
 
@@ -184,9 +182,7 @@ async def test_submit_review_reject_transitions(client, db_session):
 
     stmt = select(Change).where(col(Change.id) == refs["change_id"])
     change = (await db_session.execute(stmt)).scalars().first()
-    # Status stays at "draft" (set by _setup), current_stage is "propose"
-    # because propose -> rework_required is not in TRANSITIONS
-    assert change.current_stage == "propose"
+    assert change.current_stage == "brainstorm"
 
 
 async def test_list_reviews(client, db_session):
@@ -222,7 +218,7 @@ async def test_audit_log_written_on_transition(client, db_session):
     await _add_doc(db_session, refs["change_id"], "master")
     await client.post(
         f"/api/workspaces/{refs['ws_id']}/changes/{refs['change_id']}/transition",
-        json={"target_stage": "propose"},
+        json={"target_stage": "brainstorm"},
         headers=_auth(refs["token"]),
     )
     resp = await client.get(
@@ -241,7 +237,7 @@ async def test_audit_log_filter_by_resource_type(client, db_session):
     await _add_doc(db_session, refs["change_id"], "master")
     await client.post(
         f"/api/workspaces/{refs['ws_id']}/changes/{refs['change_id']}/transition",
-        json={"target_stage": "propose"},
+        json={"target_stage": "brainstorm"},
         headers=_auth(refs["token"]),
     )
     resp = await client.get(

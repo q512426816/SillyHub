@@ -24,6 +24,7 @@ class ChangeRead(BaseModel):
     change_type: str | None
     owner_id: uuid.UUID | None
     current_stage: str | None = None
+    human_gate: str | None = "none"
     stages: dict | None = None
     approval_status: str | None = None
     approved_by: str | None = None
@@ -46,6 +47,7 @@ class ChangeSummary(BaseModel):
     affected_components: list[str]
     owner_id: uuid.UUID | None
     current_stage: str | None = None
+    human_gate: str | None = "none"
     updated_at: datetime
     workspace_ids: list[uuid.UUID] = []
 
@@ -238,3 +240,26 @@ class TransitionResponse(BaseModel):
         default=None,
         description="Agent dispatch 结果（无 dispatch 时为 null）",
     )
+
+
+# ── Review Gate DTOs ───────────────────────────────────────────────────
+
+
+class ProposalReviewRequest(BaseModel):
+    decision: str = Field(..., pattern=r"^(approve|revise|unclear)$")
+    comment: str | None = None
+
+
+class PlanReviewRequest(BaseModel):
+    decision: str = Field(..., pattern=r"^(approve|replan|back_to_propose|back_to_brainstorm)$")
+    comment: str | None = None
+
+
+class HumanTestRequest(BaseModel):
+    result: str = Field(..., pattern=r"^(pass|bug|doc_mismatch)$")
+    comment: str | None = None
+
+
+class ReviewResponse(BaseModel):
+    change: dict[str, Any]
+    agent_dispatch: TransitionDispatchResponse | None = None

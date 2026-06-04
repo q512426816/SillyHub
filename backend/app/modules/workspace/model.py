@@ -16,7 +16,7 @@ from sqlmodel import Field
 
 from app.models.base import BaseModel
 
-WorkspaceStatus = Literal["active", "archived", "deleted"]
+WorkspaceStatus = Literal["pending", "active", "archived", "deleted"]
 
 
 class Workspace(BaseModel, table=True):

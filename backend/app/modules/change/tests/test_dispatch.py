@@ -62,7 +62,7 @@ class TestStageAgentConfig:
         assert set(STAGE_AGENT_CONFIG.keys()) == expected
 
     def test_no_config_for_non_dispatch_stages(self):
-        for stage in ("draft", "rework_required", "accepted"):
+        for stage in ("draft", "blocked", "archived"):
             assert get_config_for_stage(stage) is None
 
     def test_scan_does_not_require_worktree(self):
@@ -343,10 +343,10 @@ class TestDispatch:
 class TestTransitionWithDispatch:
     """Test the ChangeService.transition_with_dispatch() method."""
 
-    async def test_draft_to_propose_triggers_dispatch(
+    async def test_draft_to_brainstorm_triggers_dispatch(
         self, db_session: AsyncSession, tmp_path: Path
     ):
-        """AC-01: draft → propose should trigger agent dispatch."""
+        """AC-01: draft → brainstorm should trigger agent dispatch."""
         from app.modules.change.service import ChangeService
 
         ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
@@ -390,15 +390,15 @@ class TestTransitionWithDispatch:
             result = await svc.transition_with_dispatch(
                 workspace_id=ws.id,
                 change_id=change.id,
-                target_stage="propose",
-                user_role="business_user",
+                target_stage="brainstorm",
+                user_role="admin",
                 reason="submit for review",
                 user_id=user_id,
             )
 
-        assert result["change"].current_stage == "propose"
+        assert result["change"].current_stage == "brainstorm"
         assert result["agent_dispatch"]["dispatched"] is True
-        assert result["agent_dispatch"]["stage"] == "propose"
+        assert result["agent_dispatch"]["stage"] == "brainstorm"
 
     async def test_transition_without_dispatch_when_no_user(
         self, db_session: AsyncSession, tmp_path: Path
@@ -417,12 +417,12 @@ class TestTransitionWithDispatch:
         result = await svc.transition_with_dispatch(
             workspace_id=ws.id,
             change_id=change.id,
-            target_stage="propose",
-            user_role="business_user",
+            target_stage="brainstorm",
+            user_role="admin",
             user_id=None,
         )
 
-        assert result["change"].current_stage == "propose"
+        assert result["change"].current_stage == "brainstorm"
         assert result["agent_dispatch"] == {}
 
     async def test_transition_stages_log_recorded(self, db_session: AsyncSession, tmp_path: Path):
@@ -440,8 +440,8 @@ class TestTransitionWithDispatch:
         result = await svc.transition_with_dispatch(
             workspace_id=ws.id,
             change_id=change.id,
-            target_stage="propose",
-            user_role="business_user",
+            target_stage="brainstorm",
+            user_role="admin",
             user_id=None,
         )
 
@@ -449,8 +449,8 @@ class TestTransitionWithDispatch:
         transitions = stages.get("transitions", [])
         assert len(transitions) == 1
         assert transitions[0]["from"] == "draft"
-        assert transitions[0]["to"] == "propose"
-        assert transitions[0]["by_role"] == "business_user"
+        assert transitions[0]["to"] == "brainstorm"
+        assert transitions[0]["by_role"] == "admin"
 
     async def test_invalid_transition_rejected(self, db_session: AsyncSession, tmp_path: Path):
         """Invalid transition (e.g. draft → verify) should raise error."""
@@ -522,10 +522,10 @@ async def _get_demo_change_id(client, ws_id, auth_headers):
 class TestTransitionAPI:
     """Test the transition API endpoint with dispatch."""
 
-    async def test_transition_draft_to_propose(
+    async def test_transition_draft_to_brainstorm(
         self, client, workspace_with_changes: dict, auth_headers: dict[str, str]
     ):
-        """POST /changes/{id}/transition with target_stage=propose."""
+        """POST /changes/{id}/transition with target_stage=brainstorm."""
         ws_id = workspace_with_changes["ws_id"]
         change_id = await _get_demo_change_id(client, ws_id, auth_headers)
 
@@ -542,7 +542,7 @@ class TestTransitionAPI:
 
             resp = await client.post(
                 f"/api/workspaces/{ws_id}/changes/{change_id}/transition",
-                json={"target_stage": "propose"},
+                json={"target_stage": "brainstorm"},
                 headers=auth_headers,
             )
 
@@ -562,10 +562,10 @@ class TestTransitionAPI:
         # Use a valid StageEnum value but one not allowed from draft
         resp = await client.post(
             f"/api/workspaces/{ws_id}/changes/{change_id}/transition",
-            json={"target_stage": "accepted"},
+            json={"target_stage": "archived"},
             headers=auth_headers,
         )
-        # Should be 422 (InvalidTransition) since draft→accepted is not allowed
+        # Should be 422 (InvalidTransition) since draft→archived is not allowed
         assert resp.status_code == 422
 
 
@@ -590,15 +590,13 @@ class TestAgentStatusAPI:
         assert "has_active_run" in body
         assert "config_enabled" in body
 
-    async def test_agent_status_after_transition_to_propose(
+    async def test_agent_status_after_transition_to_brainstorm(
         self, client, workspace_with_changes: dict, auth_headers: dict[str, str]
     ):
-        """After transitioning to propose, agent-status should show config_enabled."""
+        """After transitioning to brainstorm, agent-status should show config_enabled."""
         ws_id = workspace_with_changes["ws_id"]
         change_id = await _get_demo_change_id(client, ws_id, auth_headers)
 
-        # Mock start_stage_dispatch so the agent doesn't actually run.
-        # AgentService is imported lazily inside dispatch(), so patch at the source.
         with patch(
             "app.modules.agent.service.AgentService.start_stage_dispatch",
             new_callable=AsyncMock,
@@ -612,32 +610,32 @@ class TestAgentStatusAPI:
 
             trans_resp = await client.post(
                 f"/api/workspaces/{ws_id}/changes/{change_id}/transition",
-                json={"target_stage": "propose"},
+                json={"target_stage": "brainstorm"},
                 headers=auth_headers,
             )
             assert trans_resp.status_code == 200, trans_resp.text
 
-        # Check agent status — propose has config so config_enabled should be True
+        # Check agent status — brainstorm has config so config_enabled should be True
         resp = await client.get(
             f"/api/workspaces/{ws_id}/changes/{change_id}/agent-status",
             headers=auth_headers,
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["config_enabled"] is True  # propose has config
+        assert body["config_enabled"] is True  # brainstorm has config
 
 
 class TestManualDispatchAPI:
     """Test the manual dispatch API endpoint."""
 
-    async def test_manual_dispatch_for_propose(
+    async def test_manual_dispatch_for_brainstorm(
         self, client, workspace_with_changes: dict, auth_headers: dict[str, str]
     ):
         """POST /changes/{id}/dispatch triggers agent for current stage."""
         ws_id = workspace_with_changes["ws_id"]
         change_id = await _get_demo_change_id(client, ws_id, auth_headers)
 
-        # First transition to propose
+        # First transition to brainstorm
         with patch(
             "app.modules.agent.service.AgentService.start_stage_dispatch",
             new_callable=AsyncMock,
@@ -649,10 +647,10 @@ class TestManualDispatchAPI:
             )
             mock_start.return_value = mock_run
 
-            # Transition to propose
+            # Transition to brainstorm
             await client.post(
                 f"/api/workspaces/{ws_id}/changes/{change_id}/transition",
-                json={"target_stage": "propose"},
+                json={"target_stage": "brainstorm"},
                 headers=auth_headers,
             )
 
@@ -691,8 +689,8 @@ class TestManualDispatchAPI:
 class TestProposeStageFullFlow:
     """End-to-end test of the propose stage dispatch lifecycle."""
 
-    async def test_full_propose_lifecycle(self, db_session: AsyncSession, tmp_path: Path):
-        """AC-01 through AC-05: Full propose dispatch lifecycle."""
+    async def test_full_brainstorm_lifecycle(self, db_session: AsyncSession, tmp_path: Path):
+        """AC-01 through AC-05: Full brainstorm dispatch lifecycle."""
         from app.modules.change.service import ChangeService
 
         ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
@@ -706,8 +704,7 @@ class TestProposeStageFullFlow:
 
         svc = ChangeService(db_session)
 
-        # Step 1: draft → propose (triggers dispatch)
-        # Mock the session factory to use the test session for dispatch
+        # Step 1: draft → brainstorm (triggers dispatch)
         def _mock_factory():
             class _Ctx:
                 async def __aenter__(self):
@@ -739,26 +736,25 @@ class TestProposeStageFullFlow:
             result = await svc.transition_with_dispatch(
                 workspace_id=ws.id,
                 change_id=change.id,
-                target_stage="propose",
-                user_role="business_user",
+                target_stage="brainstorm",
+                user_role="admin",
                 reason="Submit for review",
                 user_id=user_id,
             )
 
         # Verify transition
-        assert result["change"].current_stage == "propose"
+        assert result["change"].current_stage == "brainstorm"
         assert result["agent_dispatch"]["dispatched"] is True
 
         # Verify dispatch was called with correct params
         mock_start.assert_called_once()
         call_kwargs = mock_start.call_args[1]
-        assert call_kwargs["stage"] == "propose"
-        assert call_kwargs["prompt_template"] == "propose.md"
+        assert call_kwargs["stage"] == "brainstorm"
+        assert call_kwargs["prompt_template"] == "brainstorm.md"
         assert call_kwargs["read_only"] is False
         assert call_kwargs["requires_worktree"] is True
 
         # Step 2: Verify dispatch is blocked when active run exists
-        # Create a fake active run for this change
         active = AgentRun(
             id=uuid.uuid4(),
             change_id=change.id,
@@ -768,14 +764,13 @@ class TestProposeStageFullFlow:
         db_session.add(active)
         await db_session.commit()
 
-        # Directly call dispatch — should be blocked
         from app.modules.change.dispatch import dispatch as dispatch_fn
 
         blocked_result = await dispatch_fn(
             session=db_session,
             workspace_id=ws.id,
             change_id=change.id,
-            target_stage="propose",
+            target_stage="brainstorm",
             user_id=user_id,
         )
         assert blocked_result["dispatched"] is False

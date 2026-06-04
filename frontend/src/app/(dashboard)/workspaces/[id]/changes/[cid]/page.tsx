@@ -17,12 +17,15 @@ import {
   checkArchiveGate,
   getAgentStatus,
   triggerDispatch,
+  proposalReview,
+  planReview,
+  humanTest,
   type ChangeDocContent,
   type ChangeDocMatrix,
   type ChangeRead,
   type ArchiveGateResponse,
-  type ArchiveCheckItem,
   type DispatchResponse,
+  type HumanGate,
 } from "@/lib/changes";
 import { SillySpecStepProgress, type StepInfo } from "@/components/sillyspec-step-progress";
 import { getTaskBoard, type TaskBoard } from "@/lib/tasks";
@@ -38,63 +41,76 @@ interface Props {
 }
 
 // ── Workflow Stages (unified with SillySpec) ───────────────────────
-// SillySpec 主线: scan → brainstorm → propose → plan → execute → verify → archive + quick
-// Hub 扩展: draft, rework_required, accepted
 const WORKFLOW_STAGES = [
   "draft", "scan", "brainstorm", "propose", "plan",
-  "execute", "verify", "rework_required",
-  "accepted", "archive", "quick",
+  "execute", "verify", "quick", "archive", "archived", "blocked",
 ] as const;
 
 const WORKFLOW_STAGE_LABELS: Record<string, string> = {
   draft: "草稿", scan: "扫描", brainstorm: "需求分析",
   propose: "提案", plan: "规划", execute: "执行",
-  verify: "验证", rework_required: "需返工",
-  accepted: "已验收", archive: "归档", quick: "快速",
+  verify: "验证", archive: "归档", quick: "快速修复",
+  archived: "已归档", blocked: "已阻塞",
 };
 
 const WORKFLOW_STAGE_COLORS: Record<string, "success" | "outline" | "destructive" | "default" | "warning"> = {
   draft: "outline", scan: "default", brainstorm: "warning",
   propose: "warning", plan: "default", execute: "default",
-  verify: "warning", rework_required: "destructive",
-  accepted: "success", archive: "default", quick: "default",
+  verify: "warning", archive: "default", quick: "default",
+  archived: "success", blocked: "destructive",
 };
 
-const WORKFLOW_TRANSITIONS: Record<
-  string,
-  { target: string; label: string; variant: "default" | "outline" | "destructive"; icon?: string }[]
-> = {
-  draft: [
-    { target: "propose", label: "提交提案", variant: "default", icon: "📝" },
-    { target: "quick", label: "快速变更", variant: "outline", icon: "⚡" },
-    { target: "scan", label: "开始扫描", variant: "outline", icon: "🔍" },
-  ],
-  scan: [{ target: "brainstorm", label: "需求分析", variant: "default", icon: "💡" }],
-  brainstorm: [{ target: "propose", label: "提交提案", variant: "default", icon: "📝" }],
-  propose: [
-    { target: "plan", label: "评审通过", variant: "default", icon: "✅" },
-    { target: "brainstorm", label: "退回需求分析", variant: "destructive", icon: "↩️" },
-  ],
-  plan: [
-    { target: "execute", label: "开始执行", variant: "default", icon: "🚀" },
-    { target: "propose", label: "退回提案", variant: "destructive", icon: "↩️" },
-  ],
-  execute: [{ target: "verify", label: "提交验证", variant: "default", icon: "🧪" }],
-  verify: [
-    { target: "accepted", label: "验证通过", variant: "default", icon: "✅" },
-    { target: "rework_required", label: "退回返工", variant: "destructive", icon: "⚠️" },
-  ],
-  quick: [
-    { target: "accepted", label: "验证通过", variant: "default", icon: "✅" },
-    { target: "rework_required", label: "退回返工", variant: "destructive", icon: "⚠️" },
-  ],
-  rework_required: [
-    { target: "propose", label: "返回提案", variant: "outline", icon: "↩️" },
-    { target: "plan", label: "返回规划", variant: "outline", icon: "↩️" },
-    { target: "execute", label: "返回执行", variant: "outline", icon: "↩️" },
-  ],
-  accepted: [{ target: "archive", label: "归档", variant: "default", icon: "📦" }],
-  archive: [],
+// Gate panel config: what to show for each human_gate value
+const GATE_PANELS: Record<string, {
+  title: string;
+  description: string;
+  actions: { label: string; variant: "default" | "outline" | "destructive"; action: string }[];
+}> = {
+  need_requirement_input: {
+    title: "请补充需求",
+    description: "Agent 分析后认为需求不够明确，请补充详细信息",
+    actions: [{ label: "重新分析需求", variant: "default", action: "redispatch_brainstorm" }],
+  },
+  need_proposal_review: {
+    title: "四件套已生成，请确认",
+    description: "Agent 已生成 proposal / requirements / design / tasks，请审阅后决定",
+    actions: [
+      { label: "确认通过", variant: "default", action: "proposal_approve" },
+      { label: "需要修改", variant: "outline", action: "proposal_revise" },
+      { label: "需求不明确", variant: "destructive", action: "proposal_unclear" },
+    ],
+  },
+  need_plan_review: {
+    title: "执行计划已生成，请确认",
+    description: "Agent 已生成执行计划，请审阅后决定",
+    actions: [
+      { label: "确认计划", variant: "default", action: "plan_approve" },
+      { label: "重新计划", variant: "outline", action: "plan_replan" },
+      { label: "退回文档", variant: "destructive", action: "plan_back_to_propose" },
+      { label: "退回需求", variant: "destructive", action: "plan_back_to_brainstorm" },
+    ],
+  },
+  need_human_test: {
+    title: "自动验证通过，请人工测试",
+    description: "Agent 已完成自动验证，请进行人工测试",
+    actions: [
+      { label: "测试通过", variant: "default", action: "test_pass" },
+      { label: "发现 BUG", variant: "destructive", action: "test_bug" },
+      { label: "文档不符", variant: "outline", action: "test_doc_mismatch" },
+    ],
+  },
+  need_archive_confirm: {
+    title: "归档确认",
+    description: "所有验证已通过，确认归档此变更",
+    actions: [{ label: "确认归档", variant: "default", action: "test_pass" }],
+  },
+  blocked: {
+    title: "需要人工介入",
+    description: "Agent 自动修复达到上限，需要人工处理",
+    actions: [
+      { label: "退回执行", variant: "outline", action: "transition_execute" },
+    ],
+  },
 };
 
 const APPROVAL_LABELS: Record<string, string> = {
@@ -141,31 +157,6 @@ const OPTIONAL_DOCS = [
   "prototypes",
   "references",
 ] as const;
-
-const STATUS_COLORS: Record<string, "success" | "outline" | "destructive" | "default" | "warning"> = {
-  in_progress: "success",
-  draft: "outline",
-  proposed: "warning",
-  reviewed: "warning",
-  approved: "success",
-  completed: "success",
-  merged: "success",
-  rejected: "destructive",
-  archived: "default",
-  unknown: "destructive",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  draft: "草稿",
-  proposed: "已提议",
-  reviewed: "已审查",
-  approved: "已批准",
-  in_progress: "进行中",
-  completed: "已完成",
-  merged: "已合并",
-  rejected: "已驳回",
-  archived: "已归档",
-};
 
 const COMPONENT_EMOJI: Record<string, string> = {
   frontend: "🌐",
@@ -495,7 +486,44 @@ export default function ChangeDetailPage({ params }: Props) {
     );
   }
 
-  const availableTransitions = WORKFLOW_TRANSITIONS[change.current_stage ?? "draft"] ?? [];
+  const humanGate = (change.human_gate ?? "none") as HumanGate;
+  const gatePanel = GATE_PANELS[humanGate];
+
+  const handleGateAction = async (action: string) => {
+    if (transitioning) return;
+    setTransitioning(true);
+    try {
+      if (action === "proposal_approve") {
+        await proposalReview(workspaceId, changeId, "approve");
+      } else if (action === "proposal_revise") {
+        await proposalReview(workspaceId, changeId, "revise");
+      } else if (action === "proposal_unclear") {
+        await proposalReview(workspaceId, changeId, "unclear");
+      } else if (action === "plan_approve") {
+        await planReview(workspaceId, changeId, "approve");
+      } else if (action === "plan_replan") {
+        await planReview(workspaceId, changeId, "replan");
+      } else if (action === "plan_back_to_propose") {
+        await planReview(workspaceId, changeId, "back_to_propose");
+      } else if (action === "plan_back_to_brainstorm") {
+        await planReview(workspaceId, changeId, "back_to_brainstorm");
+      } else if (action === "test_pass") {
+        await humanTest(workspaceId, changeId, "pass");
+      } else if (action === "test_bug") {
+        await humanTest(workspaceId, changeId, "bug");
+      } else if (action === "test_doc_mismatch") {
+        await humanTest(workspaceId, changeId, "doc_mismatch");
+      } else if (action === "transition_execute") {
+        await transitionChange(workspaceId, changeId, "execute");
+      }
+      const updated = await getChange(workspaceId, changeId);
+      setChange(updated);
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "操作失败");
+    } finally {
+      setTransitioning(false);
+    }
+  };
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
@@ -571,18 +599,35 @@ export default function ChangeDetailPage({ params }: Props) {
         >
           任务看板
         </Link>
-        {availableTransitions.map((t) => (
-          <Button
-            key={t.target}
-            variant={t.variant}
-            size="sm"
-            onClick={() => void handleTransition(t.target)}
-            disabled={transitioning}
-          >
-            {t.icon && <span className="mr-1">{t.icon}</span>}
-            {t.label}
-          </Button>
-        ))}
+        {gatePanel && (
+          <div className="rounded-md border bg-card px-3 py-2.5 space-y-2">
+            <div>
+              <p className="text-sm font-medium">{gatePanel.title}</p>
+              <p className="text-[11px] text-muted-foreground">{gatePanel.description}</p>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {gatePanel.actions.map((a) => (
+                <Button
+                  key={a.action}
+                  variant={a.variant}
+                  size="sm"
+                  onClick={() => void handleGateAction(a.action)}
+                  disabled={transitioning}
+                >
+                  {a.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+        {humanGate === "none" && (
+          <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
+            <div className="h-2 w-2 animate-pulse rounded-full bg-primary" />
+            <span className="text-xs text-muted-foreground">
+              Agent 正在执行 {WORKFLOW_STAGE_LABELS[change.current_stage ?? "draft"] ?? change.current_stage} 阶段
+            </span>
+          </div>
+        )}
         {change.current_stage === "ready_for_dev" && (
           <Button
             size="sm"

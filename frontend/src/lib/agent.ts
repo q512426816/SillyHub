@@ -21,6 +21,7 @@ export interface AgentRun {
   spec_strategy: string | null;
   profile_version: string | null;
   diff_summary: string | null;
+  change_id: string | null;
   created_at: string;
 }
 

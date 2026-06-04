@@ -18,7 +18,7 @@ from sqlmodel import col
 
 from app.core.errors import ChangeDocNotFound, ChangeNotFound, InvalidTransition, PermissionDenied
 from app.core.logging import get_logger
-from app.modules.change.model import TRANSITIONS, Change, ChangeDocument, StageEnum
+from app.modules.change.model import TRANSITIONS, Change, ChangeDocument, HumanGate, StageEnum
 from app.modules.change.parser import ChangeParser, ChangeParserResult, ParsedChange
 from app.modules.change.schema import (
     ArchiveCheckItem,
@@ -32,6 +32,20 @@ from app.modules.workspace.service import WorkspaceService
 log = get_logger(__name__)
 
 MAX_CONTENT_BYTES = 1_000_000  # 1 MB
+
+# Stage → default human_gate after transition
+_GATE_MAP: dict[str, str] = {
+    "brainstorm": HumanGate.NEED_REQUIREMENT_INPUT,
+    "propose": HumanGate.NEED_PROPOSAL_REVIEW,
+    "plan": HumanGate.NEED_PLAN_REVIEW,
+    "verify": HumanGate.NEED_HUMAN_TEST,
+    "archive": HumanGate.NEED_ARCHIVE_CONFIRM,
+}
+
+
+def resolve_human_gate(target_stage: str) -> str:
+    """Return the default human_gate for a given target stage."""
+    return _GATE_MAP.get(target_stage, HumanGate.NONE)
 
 
 class ChangeService:
@@ -374,6 +388,7 @@ class ChangeService:
         # Update change
         change.current_stage = target_stage
         change.stages = stages
+        change.human_gate = resolve_human_gate(target_stage)
         change.updated_at = datetime.now(UTC)
         self._session.add(change)
 
@@ -461,7 +476,7 @@ class ChangeService:
         *,
         target_stage: str | None = None,
     ) -> Change:
-        """提交反馈并自动流转至 rework_required。"""
+        """提交反馈并流转至 blocked（human_gate）阶段。"""
         # Validate category
         if category not in ("A", "B", "C", "D"):
             raise InvalidTransition(f"无效的反馈类别: {category}")
@@ -470,7 +485,7 @@ class ChangeService:
             "A": "execute",
             "B": "propose",
             "C": "brainstorm",
-            "D": "accepted",
+            "D": "archive",
         }
         rework_target = target_stage or FEEDBACK_TARGETS[category]
 
@@ -478,8 +493,8 @@ class ChangeService:
 
         # Validate current stage allows feedback
         current = change.current_stage or "draft"
-        if current not in ("verify", "accepted"):
-            raise InvalidTransition("当前阶段不允许提交反馈，仅限 verify 和 accepted")
+        if current not in ("verify", "archive"):
+            raise InvalidTransition("当前阶段不允许提交反馈，仅限 verify 和 archive")
 
         # Save feedback info
         change.feedback_category = category
@@ -498,14 +513,14 @@ class ChangeService:
         change.stages = stages
 
         if category == "D":
-            # D: directly go to accepted (spawn new change separately)
-            change.current_stage = "accepted"
+            # D: accept as-is, move to archive stage
+            change.current_stage = "archive"
             # Log the special transition
             transitions_log = stages.get("transitions", [])
             transitions_log.append(
                 {
                     "from": current,
-                    "to": "accepted",
+                    "to": "archive",
                     "by_role": "reviewer",
                     "reason": f"反馈类别 D（衍生新 change）: {text[:100]}",
                     "at": datetime.now(UTC).isoformat(),
@@ -514,13 +529,13 @@ class ChangeService:
             stages["transitions"] = transitions_log
             change.stages = stages
         else:
-            # A/B/C: transition to rework_required
-            change.current_stage = "rework_required"
+            # A/B/C: transition to blocked (human_gate mechanism)
+            change.current_stage = "blocked"
             transitions_log = stages.get("transitions", [])
             transitions_log.append(
                 {
                     "from": current,
-                    "to": "rework_required",
+                    "to": "blocked",
                     "by_role": "reviewer",
                     "reason": f"反馈类别 {category}: {text[:100]}",
                     "at": datetime.now(UTC).isoformat(),
@@ -545,8 +560,8 @@ class ChangeService:
         checks: list[ArchiveCheckItem] = []
 
         current = change.current_stage or "draft"
-        if current != "accepted":
-            # Not in accepted stage - all checks fail
+        if current != "archive":
+            # Not in archive stage - all checks fail
             for name in [
                 "no_unresolved_feedback",
                 "ac_confirmed",
@@ -559,7 +574,7 @@ class ChangeService:
                     ArchiveCheckItem(
                         name=name,
                         passed=False,
-                        detail="当前阶段非 accepted，无法归档",
+                        detail=f"当前阶段非 archive（{current}），无法归档",
                     )
                 )
             return ArchiveGateResponse(can_archive=False, checks=checks)
@@ -859,3 +874,161 @@ class ChangeService:
         # Workflow transitions update DB directly; reparse must not reset them.
         row.location = parsed.location
         row.path = parsed.path
+
+    # ── Review Gate methods ────────────────────────────────────────────
+
+    async def proposal_review(
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        decision: str,
+        comment: str | None,
+        user_id: uuid.UUID,
+    ) -> dict:
+        change = await self.get(workspace_id, change_id)
+        if change.current_stage != "propose" or change.human_gate != "need_proposal_review":
+            raise InvalidTransition(
+                "当前状态不允许 proposal review",
+                details={"current_stage": change.current_stage, "human_gate": change.human_gate},
+            )
+
+        if decision == "approve":
+            return await self.transition_with_dispatch(
+                workspace_id=workspace_id,
+                change_id=change_id,
+                target_stage="plan",
+                user_role="reviewer",
+                reason=comment or "proposal approved",
+                user_id=user_id,
+            )
+        elif decision == "revise":
+            change.human_gate = "none"
+            stages = change.stages or {}
+            stages["last_review"] = {"decision": decision, "comment": comment}
+            change.stages = stages
+            self._session.add(change)
+            await self._session.commit()
+            return await self.transition_with_dispatch(
+                workspace_id=workspace_id,
+                change_id=change_id,
+                target_stage="propose",
+                user_role="admin",
+                reason=comment or "proposal needs revision",
+                user_id=user_id,
+            )
+        else:  # unclear
+            return await self.transition_with_dispatch(
+                workspace_id=workspace_id,
+                change_id=change_id,
+                target_stage="brainstorm",
+                user_role="admin",
+                reason=comment or "proposal unclear, back to brainstorm",
+                user_id=user_id,
+            )
+
+    async def plan_review(
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        decision: str,
+        comment: str | None,
+        user_id: uuid.UUID,
+    ) -> dict:
+        change = await self.get(workspace_id, change_id)
+        if change.current_stage != "plan" or change.human_gate != "need_plan_review":
+            raise InvalidTransition(
+                "当前状态不允许 plan review",
+                details={"current_stage": change.current_stage, "human_gate": change.human_gate},
+            )
+
+        if decision == "approve":
+            return await self.transition_with_dispatch(
+                workspace_id=workspace_id,
+                change_id=change_id,
+                target_stage="execute",
+                user_role="reviewer",
+                reason=comment or "plan approved",
+                user_id=user_id,
+            )
+        elif decision == "replan":
+            change.human_gate = "none"
+            stages = change.stages or {}
+            stages["last_review"] = {"decision": decision, "comment": comment}
+            change.stages = stages
+            self._session.add(change)
+            await self._session.commit()
+            return await self.transition_with_dispatch(
+                workspace_id=workspace_id,
+                change_id=change_id,
+                target_stage="plan",
+                user_role="admin",
+                reason=comment or "plan needs revision",
+                user_id=user_id,
+            )
+        elif decision == "back_to_propose":
+            return await self.transition_with_dispatch(
+                workspace_id=workspace_id,
+                change_id=change_id,
+                target_stage="propose",
+                user_role="admin",
+                reason=comment or "back to propose",
+                user_id=user_id,
+            )
+        else:  # back_to_brainstorm
+            return await self.transition_with_dispatch(
+                workspace_id=workspace_id,
+                change_id=change_id,
+                target_stage="brainstorm",
+                user_role="admin",
+                reason=comment or "back to brainstorm",
+                user_id=user_id,
+            )
+
+    async def human_test(
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        result: str,
+        comment: str | None,
+        user_id: uuid.UUID,
+    ) -> dict:
+        change = await self.get(workspace_id, change_id)
+        if change.current_stage != "verify" or change.human_gate != "need_human_test":
+            raise InvalidTransition(
+                "当前状态不允许 human test",
+                details={"current_stage": change.current_stage, "human_gate": change.human_gate},
+            )
+
+        if result == "pass":
+            return await self.transition_with_dispatch(
+                workspace_id=workspace_id,
+                change_id=change_id,
+                target_stage="archive",
+                user_role="reviewer",
+                reason=comment or "human test passed",
+                user_id=user_id,
+            )
+        elif result == "bug":
+            change.human_gate = "none"
+            stages = change.stages or {}
+            stages["last_review"] = {"decision": result, "comment": comment}
+            change.stages = stages
+            self._session.add(change)
+            await self._session.commit()
+            return await self.transition_with_dispatch(
+                workspace_id=workspace_id,
+                change_id=change_id,
+                target_stage="quick",
+                user_role="admin",
+                reason=comment or "bug found in human test",
+                user_id=user_id,
+            )
+        else:  # doc_mismatch
+            return await self.transition_with_dispatch(
+                workspace_id=workspace_id,
+                change_id=change_id,
+                target_stage="propose",
+                user_role="admin",
+                reason=comment or "doc mismatch found in human test",
+                user_id=user_id,
+            )

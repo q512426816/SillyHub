@@ -13,6 +13,7 @@ from sqlmodel import col
 from app.core.errors import ChangeNotFound, InvalidTransition, TaskNotFound
 from app.core.logging import get_logger
 from app.modules.change.model import Change, StageEnum, can_transition
+from app.modules.change.service import resolve_human_gate
 from app.modules.task.model import Task
 from app.modules.workflow.fsm import TaskFSM
 from app.modules.workflow.model import AuditLog, ChangeReview
@@ -57,6 +58,7 @@ class WorkflowService:
 
         change.status = target
         change.current_stage = target
+        change.human_gate = resolve_human_gate(target)
         change.updated_at = datetime.now(UTC)
         self._session.add(change)
         await self._record_audit(
@@ -126,9 +128,10 @@ class WorkflowService:
         if verdict == "reject":
             current_stage = change.current_stage or "draft"
             current_key = StageEnum(current_stage)
-            if can_transition(current_key, StageEnum.REWORK_REQUIRED):
-                change.current_stage = "rework_required"
-                change.status = "rework_required"
+            if can_transition(current_key, StageEnum.BLOCKED):
+                change.current_stage = "blocked"
+                change.status = "blocked"
+                change.human_gate = "blocked"
                 change.updated_at = datetime.now(UTC)
                 self._session.add(change)
 

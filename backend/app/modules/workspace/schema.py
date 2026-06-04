@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-WorkspaceStatusLiteral = Literal["active", "archived", "deleted"]
+WorkspaceStatusLiteral = Literal["pending", "active", "archived", "deleted"]
 
 _SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$")
 

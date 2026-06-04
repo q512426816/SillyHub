@@ -7,7 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import {
+  listAgentRuns,
   submitAgentRunInput,
+  type AgentRun,
   type AgentRunLogEntry,
   type AgentRunStatus,
 } from "@/lib/agent";
@@ -137,6 +139,24 @@ export default function WorkspaceDetailPage({ params }: Props) {
       setActiveChanges(active.total ?? active.items?.length ?? 0);
       setArchivedChanges(archived.total ?? archived.items?.length ?? 0);
       setCurrentStage(rt?.current_stage ?? null);
+
+      // Recover an in-progress Bootstrap/scan run (change_id == null) if any.
+      const runs = await listAgentRuns(workspaceId).catch(() => [] as AgentRun[]);
+      const scanRun = runs
+        .filter((r) => r.change_id == null)
+        .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))[0];
+
+      if (
+        scanRun &&
+        (scanRun.status === "pending" || scanRun.status === "running") &&
+        !streamClientRef.current &&
+        activeBootstrapRunId !== scanRun.id
+      ) {
+        setActiveBootstrapRunId(scanRun.id);
+        setBootstrapStatus(scanRun.status);
+        setBootstrapLogs([]);
+        connectBootstrapStream(scanRun.id);
+      }
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "加载工作区失败");
     } finally {
@@ -171,6 +191,60 @@ export default function WorkspaceDetailPage({ params }: Props) {
     setPendingInputPrompt(null);
   }
 
+  /**
+   * Establish (or re-establish) the SSE stream for a Bootstrap/scan run.
+   * Shared by handleBootstrap (fresh run) and load (recover in-progress run).
+   * Always closes any existing connection first to guarantee a single stream.
+   */
+  function connectBootstrapStream(runId: string) {
+    closeBootstrapStream();
+
+    const client = new AgentRunStreamClient(workspaceId, runId);
+    streamClientRef.current = client;
+
+    client.onStatusChange((status: StreamStatus) => {
+      setBootstrapStreamStatus(status);
+      if (status === "error") {
+        setBootstrapError("连接失败，请重试");
+      }
+    });
+
+    client.onMessage((event) => {
+      setBootstrapLogs((prev) => {
+        if (event.log_id != null && prev.some((l) => l.id === event.log_id)) return prev;
+        return [
+          ...prev,
+          {
+            id: event.log_id ?? crypto.randomUUID(),
+            run_id: runId,
+            timestamp: event.timestamp,
+            channel: event.channel,
+            content_redacted: event.content,
+          },
+        ];
+      });
+      if (event.channel === "pending_input") {
+        setPendingInputPrompt(event.content || "");
+      }
+    });
+
+    client.onDone((data) => {
+      if (data.status) {
+        setBootstrapStatus(data.status as AgentRunStatus);
+      }
+      client.disconnect();
+      void load();
+    });
+
+    const { accessToken } = useSession.getState();
+    if (accessToken) {
+      client.connect(accessToken);
+    } else {
+      setBootstrapError("会话已失效，请重新登录后查看实时日志");
+      streamClientRef.current = null;
+    }
+  }
+
   /* ---- Bootstrap handler ---- */
 
   async function handleBootstrap() {
@@ -187,44 +261,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
       const result = await bootstrapSpecWorkspace(workspaceId);
       setActiveBootstrapRunId(result.agent_run_id);
       setBootstrapStatus(result.status);
-
-      const client = new AgentRunStreamClient(workspaceId, result.agent_run_id);
-      streamClientRef.current = client;
-
-      client.onStatusChange((status: StreamStatus) => {
-        setBootstrapStreamStatus(status);
-        if (status === "error") {
-          setBootstrapError("连接失败，请重试");
-        }
-      });
-
-      client.onMessage((event) => {
-        setBootstrapLogs((prev) => {
-          if (event.log_id != null && prev.some((l) => l.id === event.log_id)) return prev;
-          return [
-            ...prev,
-            {
-              id: event.log_id ?? crypto.randomUUID(),
-              run_id: result.agent_run_id,
-              timestamp: event.timestamp,
-              channel: event.channel,
-              content_redacted: event.content,
-            },
-          ];
-        });
-        if (event.channel === "pending_input") {
-          setPendingInputPrompt(event.content || "");
-        }
-      });
-
-      client.onDone(() => {
-        setBootstrapStatus("completed");
-        client.disconnect();
-        void load();
-      });
-
-      const { accessToken } = useSession.getState();
-      if (accessToken) client.connect(accessToken);
+      connectBootstrapStream(result.agent_run_id);
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "初始化失败");
     } finally {

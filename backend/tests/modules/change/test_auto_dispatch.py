@@ -80,6 +80,7 @@ async def test_auto_dispatch_stops_on_stage_completed():
     mock_session = AsyncMock(spec=AsyncSession)
     mock_change = MagicMock()
     mock_change.stages = {}
+    mock_change.human_gate = "none"
     mock_session.get = AsyncMock(return_value=mock_change)
 
     with patch("app.modules.change.dispatch.dispatch", new_callable=AsyncMock) as mock_dispatch:

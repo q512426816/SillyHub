@@ -110,7 +110,7 @@ async def test_create_then_list(
     assert payload["items"][0]["id"] == created["id"]
 
 
-async def test_create_duplicate_returns_409(
+async def test_create_duplicate_returns_existing(
     client: AsyncClient, workspace_root: Path, auth_headers: dict[str, str]
 ) -> None:
     first = await client.post(
@@ -119,13 +119,14 @@ async def test_create_duplicate_returns_409(
         headers=auth_headers,
     )
     assert first.status_code == 201
+    # Same root_path returns the existing workspace
     second = await client.post(
         "/api/workspaces",
         json={"name": "B", "root_path": str(workspace_root)},
         headers=auth_headers,
     )
-    assert second.status_code == 409
-    assert second.json()["code"] == "HTTP_409_WORKSPACE_PATH_DUPLICATE"
+    assert second.status_code == 201
+    assert second.json()["id"] == first.json()["id"]
 
 
 async def test_rescan_updates_last_scanned_at(

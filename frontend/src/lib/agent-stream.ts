@@ -4,6 +4,11 @@ import { useSession } from "@/stores/session";
 
 export type StreamStatus = "disconnected" | "connecting" | "connected" | "error";
 
+export interface StreamDoneData {
+  status?: string | null;
+  exit_code?: number | null;
+}
+
 export class AgentRunStreamClient {
   private workspaceId: string;
   private runId: string;
@@ -18,7 +23,7 @@ export class AgentRunStreamClient {
 
   private messageCallbacks: Array<(event: StreamLogEvent) => void> = [];
   private statusCallbacks: Array<(status: StreamStatus) => void> = [];
-  private doneCallbacks: Array<() => void> = [];
+  private doneCallbacks: Array<(data: StreamDoneData) => void> = [];
 
   constructor(workspaceId: string, runId: string) {
     this.workspaceId = workspaceId;
@@ -51,8 +56,14 @@ export class AgentRunStreamClient {
       }
     };
 
-    this.es.addEventListener("done", () => {
-      this.doneCallbacks.forEach((cb) => cb());
+    this.es.addEventListener("done", (e: MessageEvent<string>) => {
+      let data: StreamDoneData = {};
+      try {
+        data = JSON.parse(e.data);
+      } catch {
+        /* empty done data is valid */
+      }
+      this.doneCallbacks.forEach((cb) => cb(data));
       this.disconnect();
     });
 
@@ -88,7 +99,7 @@ export class AgentRunStreamClient {
     };
   }
 
-  onDone(cb: () => void): () => void {
+  onDone(cb: (data: StreamDoneData) => void): () => void {
     this.doneCallbacks.push(cb);
     return () => {
       this.doneCallbacks = this.doneCallbacks.filter((c) => c !== cb);

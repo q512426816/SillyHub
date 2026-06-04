@@ -1,11 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { streamAgentRunLogs, type StreamLogEvent, type DoneEventData } from "@/lib/agent";
 import { ApiError } from "@/lib/api";
 import {
   createWorkspace,
@@ -14,7 +14,7 @@ import {
   type ScanResult,
 } from "@/lib/workspaces";
 
-type Phase = "idle" | "scanning" | "ready" | "generating" | "creating";
+type Phase = "idle" | "scanning" | "ready" | "creating";
 
 interface Props {
   onCreated: () => void;
@@ -22,16 +22,12 @@ interface Props {
 }
 
 export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
+  const router = useRouter();
   const [rootPath, setRootPath] = useState("");
   const [name, setName] = useState("");
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
-
-  // SSE / generate state
-  const [logs, setLogs] = useState<string[]>([]);
-  const [agentRunId, setAgentRunId] = useState<string | null>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
 
   const handleScan = async () => {
     setError(null);
@@ -55,56 +51,10 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   const handleGenerate = async () => {
     if (!scan) return;
     setError(null);
-    setLogs([]);
-    setPhase("generating");
-
+    setPhase("creating");
     try {
-      // 1. Call scanGenerate API
       const result = await scanGenerate(scan.root_path);
-      setAgentRunId(result.agent_run_id);
-
-      // 2. Subscribe to SSE stream
-      const workspaceId = result.workspace_id;
-      const es = streamAgentRunLogs(
-        workspaceId,
-        result.agent_run_id,
-        // onMessage: append log
-        (event: StreamLogEvent) => {
-          setLogs((prev) => [...prev.slice(-500), event.content]);
-        },
-        // onDone: agent completed — auto-create workspace
-        async (doneData: DoneEventData) => {
-          if (
-            doneData.status === "failed" ||
-            (doneData.exit_code !== undefined &&
-              doneData.exit_code !== null &&
-              doneData.exit_code !== 0)
-          ) {
-            setError("Agent 执行失败，请查看日志获取详情。");
-            setPhase("ready");
-            return;
-          }
-          try {
-            await createWorkspace({
-              name: name.trim() || scan.root_path,
-              root_path: scan.root_path,
-            });
-            onCreated();
-          } catch (err) {
-            const msg = err instanceof ApiError ? `${err.code}: ${err.message}` : "创建失败";
-            setError(msg);
-            setPhase("ready");
-          }
-        },
-        // onError: SSE connection error
-        (error: Error) => {
-          setError(`实时日志连接失败: ${error.message}`);
-          setPhase("ready");
-        },
-      );
-
-      // Store EventSource ref for cancellation
-      eventSourceRef.current = es;
+      router.push(`/workspaces/${result.workspace_id}`);
     } catch (err) {
       const msg = err instanceof ApiError ? `${err.code}: ${err.message}` : "生成失败";
       setError(msg);
@@ -130,10 +80,6 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   };
 
   const handleCancel = () => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
     onCancel();
   };
 
@@ -160,12 +106,12 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
               value={rootPath}
               placeholder="C:\\path\\to\\repo  或  /abs/path/to/repo"
               onChange={(e) => setRootPath(e.target.value)}
-              disabled={phase === "scanning" || phase === "creating" || phase === "generating"}
+              disabled={phase === "scanning" || phase === "creating"}
             />
             <Button
               size="sm"
               onClick={handleScan}
-              disabled={!rootPath || phase === "scanning" || phase === "creating" || phase === "generating"}
+              disabled={!rootPath || phase === "scanning" || phase === "creating"}
             >
               {phase === "scanning" ? "扫描中..." : "扫描"}
             </Button>
@@ -233,24 +179,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
           </div>
         )}
 
-        {phase === "generating" && (
-          <section className="rounded border bg-gray-950 p-3 text-xs font-mono">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="font-medium text-green-400">Agent 执行中...</span>
-              <span className="text-gray-500">run: {agentRunId?.slice(0, 8)}...</span>
-            </div>
-            <div className="max-h-64 overflow-y-auto whitespace-pre-wrap text-gray-300">
-              {logs.map((line, i) => (
-                <div key={i}>{line}</div>
-              ))}
-              {logs.length === 0 && (
-                <div className="text-gray-500 animate-pulse">等待 agent 输出...</div>
-              )}
-            </div>
-          </section>
-        )}
-
-        {scan && phase !== "generating" && (
+        {scan && (
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground" htmlFor="ws-name">
               Workspace 名称
@@ -274,7 +203,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
             onClick={handleCancel}
             disabled={phase === "scanning"}
           >
-            {phase === "generating" ? "取消生成" : "取消"}
+            取消
           </Button>
         </footer>
       </div>

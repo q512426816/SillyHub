@@ -28,9 +28,13 @@ from app.modules.change.schema import (
     DocumentsSyncRequest,
     DocumentsSyncResponse,
     FeedbackRequest,
+    HumanTestRequest,
     OkResponse,
+    PlanReviewRequest,
     ProgressUpdate,
+    ProposalReviewRequest,
     RejectRequest,
+    ReviewResponse,
     TransitionDispatchResponse,
     TransitionRequest,
     TransitionResponse,
@@ -335,6 +339,102 @@ async def check_archive_gate(
 ) -> ArchiveGateResponse:
     service = ChangeService(session)
     return await service.check_archive_gate(workspace_id, change_id)
+
+
+# ── Review Gate endpoints ────────────────────────────────────────────────
+
+
+@router.post(
+    "/changes/{change_id}/proposal-review",
+    response_model=ReviewResponse,
+)
+async def proposal_review(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    body: ProposalReviewRequest,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> ReviewResponse:
+    service = ChangeService(session)
+    result = await service.proposal_review(
+        workspace_id,
+        change_id,
+        body.decision,
+        body.comment,
+        _user.id,
+    )
+    enriched = await service.enrich_with_workspace_ids(result["change"])
+    raw_dispatch = result.get("agent_dispatch")
+    agent_dispatch = None
+    if raw_dispatch and raw_dispatch.get("dispatched"):
+        agent_dispatch = TransitionDispatchResponse(
+            dispatched=True,
+            agent_run_id=raw_dispatch.get("agent_run_id"),
+            stage=raw_dispatch.get("stage"),
+        )
+    return ReviewResponse(change=enriched.model_dump(), agent_dispatch=agent_dispatch)
+
+
+@router.post(
+    "/changes/{change_id}/plan-review",
+    response_model=ReviewResponse,
+)
+async def plan_review(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    body: PlanReviewRequest,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> ReviewResponse:
+    service = ChangeService(session)
+    result = await service.plan_review(
+        workspace_id,
+        change_id,
+        body.decision,
+        body.comment,
+        _user.id,
+    )
+    enriched = await service.enrich_with_workspace_ids(result["change"])
+    raw_dispatch = result.get("agent_dispatch")
+    agent_dispatch = None
+    if raw_dispatch and raw_dispatch.get("dispatched"):
+        agent_dispatch = TransitionDispatchResponse(
+            dispatched=True,
+            agent_run_id=raw_dispatch.get("agent_run_id"),
+            stage=raw_dispatch.get("stage"),
+        )
+    return ReviewResponse(change=enriched.model_dump(), agent_dispatch=agent_dispatch)
+
+
+@router.post(
+    "/changes/{change_id}/human-test",
+    response_model=ReviewResponse,
+)
+async def human_test(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    body: HumanTestRequest,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> ReviewResponse:
+    service = ChangeService(session)
+    result = await service.human_test(
+        workspace_id,
+        change_id,
+        body.result,
+        body.comment,
+        _user.id,
+    )
+    enriched = await service.enrich_with_workspace_ids(result["change"])
+    raw_dispatch = result.get("agent_dispatch")
+    agent_dispatch = None
+    if raw_dispatch and raw_dispatch.get("dispatched"):
+        agent_dispatch = TransitionDispatchResponse(
+            dispatched=True,
+            agent_run_id=raw_dispatch.get("agent_run_id"),
+            stage=raw_dispatch.get("stage"),
+        )
+    return ReviewResponse(change=enriched.model_dump(), agent_dispatch=agent_dispatch)
 
 
 # ── Agent dispatch endpoints ────────────────────────────────────────────
