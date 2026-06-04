@@ -145,7 +145,7 @@ created_at: 2026-06-03T20:35:00+08:00
 ### SillySpec CLI
 
 - **集成方式**: `asyncio.create_subprocess_exec` 子进程调用
-- **版本**: Dockerfile 构建参数 `SILLYSPEC_VERSION=3.14.1`
+- **版本**: Dockerfile 构建参数 `SILLYSPEC_VERSION=3.16.0`
 - **安装**: Docker 中通过 npm 全局安装
 - **用途**: SillySpec 流程执行（sillyspec run / sillyspec quick）
 

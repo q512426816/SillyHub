@@ -47,7 +47,7 @@ created_at: 2026-06-03T20:35:00+08:00
 | 测试 | pytest + pytest-asyncio + pytest-cov + aiosqlite | >=8 |
 | 部署 | Docker (多阶段构建) | - |
 | Agent CLI | Claude Code CLI | 2.1.158 |
-| Spec CLI | SillySpec CLI | 3.14.1 |
+| Spec CLI | SillySpec CLI | 3.16.0 |
 
 ## API 路径前缀
 
