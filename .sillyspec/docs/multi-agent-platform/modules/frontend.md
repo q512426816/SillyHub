@@ -1,19 +1,260 @@
 ---
+schema_version: 1
+doc_type: module-card
+module_id: frontend
 author: qinyi
-created_at: 2026-06-03T09:24:16
+created_at: 2026-06-04T09:01:45+08:00
 ---
 
 # frontend
 
-## Current State
+## 定位
 
-- Next.js 14.2.5 + React 18 + TypeScript + Tailwind CSS
-- API 代理：`next.config.mjs` rewrites `/api/*` 到后端，但 SSE 流式端点由 Route Handler 直接透传（绕过 rewrite 缓冲）
-- SSE 流：`AgentRunStreamClient`（`agent-stream.ts`）提供指数退避重连（最多 5 次），`after` cursor 去重重放
-- 认证：`useSession` store 管理 access/refresh token，`apiFetch` 自动附加 Authorization header，EventSource 通过 `?token=` query param 传递
+Next.js 14 前端应用，负责 Web 用户界面和交互体验。提供工作区管理、变更生命周期、任务看板、Agent 运行时监控、知识库查询等功能的页面组件。不负责业务逻辑和数据持久化，所有数据操作通过调用后端 RESTful API 完成。
+
+## 契约摘要
+
+### 核心能力
+
+- **页面路由**：Next.js App Router，包含 `(dashboard)`、`(auth)` 两个路由组，约 20 个页面组件
+- **API 客户端层**：统一的 fetch 封装，自动认证、错误处理、token 刷新
+- **状态管理**：Zustand + persist 实现的客户端会话存储
+- **实时通信**：SSE 流客户端用于 Agent 运行日志实时推送
+- **UI 组件**：基于 Tailwind CSS + shadcn/ui 的组件库
+
+### 主要导出符号（按分类）
+
+#### API 客户端 (src/lib/*.ts)
+
+- `apiFetch<T>(path, options)`：统一请求封装，自动注入 Bearer Token，401 自动刷新重试
+- `getApiBaseUrl()` / `getDirectApiBaseUrl()`：获取后端 URL（后者用于 SSE 直连）
+- `ApiError`：标准错误类，包含 code/message/details
+
+**认证** (auth.ts)：
+- `login(email, password) -> TokenPair`
+- `refreshTokens() -> SessionTokens`
+- `logout() -> void`
+
+**工作区** (workspaces.ts)：
+- `listWorkspaces() -> WorkspaceListResponse`
+- `createWorkspace(input) -> Workspace`
+- `getWorkspace(id) -> Workspace`
+- `scanWorkspace(rootPath) -> ScanResult`
+- `rescanWorkspace(id) -> ScanResult`
+- `activateWorkspace(id) -> Workspace`
+- `deleteWorkspace(id) -> Workspace`
+- `getWorkspaceRelations(id) -> RelationListResponse`
+- `createRelation(data) -> WorkspaceRelation`
+- `deleteRelation(id) -> void`
+- `getTopology() -> TopologyResponse`
+
+**变更** (changes.ts)：
+- `listChanges(workspaceId, params) -> ChangeList`
+- `getChange(workspaceId, changeId) -> ChangeRead`
+- `getChangeDocMatrix(workspaceId, changeId) -> ChangeDocMatrix`
+- `getChangeDocContent(workspaceId, changeId, docType) -> ChangeDocContent`
+- `transitionChange(workspaceId, changeId, request) -> TransitionResponse`
+- `submitReview(workspaceId, changeId, data) -> TransitionResponse`
+
+**任务** (tasks.ts)：
+- `listTasks(workspaceId, changeId) -> TaskList`
+- `getTask(workspaceId, taskId) -> TaskRead`
+- `getTaskBoard(workspaceId, changeId) -> TaskBoard`
+- `transitionTask(workspaceId, taskId, request) -> TransitionResponse`
+- `reparseTasks(workspaceId, changeId) -> TaskReparseResponse`
+
+**Agent** (agent.ts)：
+- `createAgentRun(workspaceId, input) -> AgentRun`
+- `getAgentRun(workspaceId, runId) -> AgentRun`
+- `listAgentRuns(workspaceId, taskId?) -> AgentRun[]`
+- `getAgentRunLogs(workspaceId, runId, after?) -> AgentRunLogEntry[]`
+- `killAgentRun(workspaceId, runId) -> AgentRun`
+- `submitAgentRunInput(workspaceId, runId, input) -> AgentRunInputResponse`
+
+**Agent 流客户端** (agent-stream.ts)：
+- `AgentRunStreamClient` 类：SSE 连接管理，自动重连、日志补齐
+- `streamAgentRunLogs(..., onMessage, onError)`：原始流式订阅
+
+**组件** (components.ts)：
+- `listComponents(workspaceId) -> Component[]`
+- `getComponent(workspaceId, componentKey) -> Component`
+- `reparseComponents(workspaceId) -> ReparseResponse`
+- `getTopology(workspaceId) -> TopologyResponse`
+
+**扫描文档** (scan-docs.ts)：
+- `listScanDocs(workspaceId) -> ScanDocList`
+- `getScanDoc(workspaceId, docId) -> ScanDocRead`
+- `reparseScanDocs(workspaceId) -> ScanDocReparseResponse`
+
+**SillySpec 工作区** (spec-workspaces.ts)：
+- `getSpecWorkspace(workspaceId) -> SpecWorkspace`
+- `importSpecWorkspace(workspaceId) -> SpecWorkspace`
+- `syncSpecWorkspace(workspaceId) -> SpecWorkspace`
+- `bootstrapSpecWorkspace(workspaceId) -> BootstrapResult`
+- `updateSpecWorkspace(workspaceId, input) -> SpecWorkspace`
+- `listSpecConflicts(workspaceId) -> SpecConflictListResponse`
+- `resolveSpecConflict(workspaceId, conflictId, input) -> SpecConflictRead`
+
+**运行时** (runtime.ts)：
+- `getRuntimeProgress(workspaceId, changeId) -> RuntimeProgress`
+- `getRuntimeUserInputsRaw(workspaceId, changeId) -> ArtifactEntry[]`
+- `getRuntimeArtifacts(workspaceId, changeId) -> ArtifactEntry[]`
+- `getRuntimeArtifactContent(workspaceId, changeId, path) -> string`
+
+**发布** (releases.ts)：
+- `listReleases(workspaceId, status?) -> Release[]`
+- `createRelease(workspaceId, input) -> Release`
+- `approveRelease(releaseId, input) -> Release`
+- `deployRelease(releaseId) -> Release`
+- `promoteRelease(releaseId) -> Release`
+- `rollbackRelease(releaseId) -> Release`
+
+**Git 网关** (git-gateway.ts)：
+- `executeGitOperation(request) -> GitOperationResponse`
+
+**Worktree** (worktree.ts)：
+- `acquireWorktree(workspaceId, request) -> WorktreeLeaseRead`
+- `listWorktrees(workspaceId) -> WorktreeLeaseList`
+- `getWorktree(leaseId) -> WorktreeLeaseRead`
+- `releaseWorktree(leaseId) -> WorktreeLeaseRead`
+- `extendWorktree(leaseId, request) -> WorktreeLeaseRead`
+
+**归档** (archive.ts)：
+- `archiveChange(workspaceId, changeId) -> ArchivedChange`
+- `distillChange(workspaceId, changeId) -> ArchivedChange`
+
+**知识库** (knowledge.ts)：
+- `listKnowledge(workspaceId, query?) -> KnowledgeList`
+- `getKnowledge(workspaceId, entryId) -> KnowledgeEntry`
+- `listQuicklog(workspaceId) -> QuicklogList`
+- `getQuicklog(workspaceId, entryId) -> QuicklogEntry`
+
+**审批** (approvals.ts)：
+- `listPendingApprovals(workspaceId) -> ApprovalRequest[]`
+- `listApprovalHistory(workspaceId) -> ApprovalHistoryEntry[]`
+- `approveRequest(workspaceId, requestId) -> ApprovalRequest`
+- `rejectRequest(workspaceId, requestId) -> ApprovalRequest`
+
+**事件** (incidents.ts)：
+- `listIncidents(workspaceId, status?) -> Incident[]`
+- `createIncident(workspaceId, input) -> Incident`
+- `getIncident(incidentId) -> Incident`
+- `updateIncident(incidentId, input) -> Incident`
+- `createPostmortem(incidentId, input) -> Postmortem`
+- `getPostmortem(incidentId) -> Postmortem`
+
+**审计** (audit.ts)：
+- `listAuditLogs(workspaceId, params) -> AuditLogEntry[]`
+
+**设置** (settings.ts)：
+- `listSettings() -> SettingsBulkRead`
+- `updateSettings(updates) -> SettingsUpdateResponse`
+- `listUsers(params?) -> UserListResponse`
+- `createUser(data) -> UserRead`
+- `updateUser(userId, data) -> UserRead`
+- `deleteUser(userId) -> void`
+
+**Git 身份** (git-identities.ts)：
+- `listGitIdentities() -> GitIdentityList`
+- `createGitIdentity(data) -> GitIdentityRead`
+- `getGitIdentity(identityId) -> GitIdentityRead`
+- `revokeGitIdentity(identityId) -> void`
+- `checkGitAccess(data) -> AccessCheckResult`
+
+**变更创建** (change-writer.ts)：
+- `createChange(workspaceId, input) -> CreateChangeResponse`
+- `generateDocs(workspaceId, changeId, input) -> GenerateDocsInput`
+- `batchGenerateDocuments(workspaceId, changeId) -> BatchGenerateResponse`
+
+**健康检查** (health.ts)：
+- `getHealth() -> HealthResponse`
+
+**工具网关** (tool-gateway.ts)：
+- `executeTool(workspaceId, request) -> ToolExecuteResponse`
+
+#### 状态管理 (src/stores/session.ts)
+
+- `useSession`：Zustand store，包含 user/accessToken/refreshToken/hydrated
+- 方法：setUser/setTokens/clear/markHydrated
+
+#### React 组件 (src/components/*)
+
+- `AppShell`：主布局，侧边栏导航、认证检查
+- `HealthCard`：健康状态卡片
+- `WorkspaceCard`：工作区卡片
+- `ComponentDetailDrawer`：组件详情抽屉
+- `SillySpecStepProgress`：SillySpec 步骤进度条
+- `WorkspaceScanDialog`：工作区扫描对话框
+
+## 关键逻辑
+
+### 请求流程
+
+```
+页面组件 -> lib/*.ts -> apiFetch() -> 后端 API
+   - resolveUrl() 根据环境决定 URL（浏览器用相对路径走 Next.js rewrite，SSR 用绝对 URL）
+   - 自动注入 Authorization: Bearer <token>
+   - 401 响应：自动刷新 token 并重试（带 x-auth-retry 标记防重入）
+   - 失败抛 ApiError(code/message/details)
+```
+
+### SSE 实时流
+
+```
+AgentRunStreamClient.connect()
+   -> 使用 getDirectApiBaseUrl() 绕过 Next.js rewrite 避免缓冲
+   -> 建立 EventSource 连接 /api/.../stream
+   -> onMessage 回调处理 StreamLogEvent / DoneEventData
+   -> 断线：指数退避重连（最多 5 次）
+   -> 重连前：用 getAgentRunLogs(after=<lastLogId>) 补齐缺失日志
+```
+
+### 路由守卫
+
+```
+dashboard/layout.tsx
+   - 检查 useSession().accessToken，未登录重定向到 /login
+   - 等待 hydrated === true 再渲染，避免 Zustand persist 导致的闪屏
+```
+
+### 会话管理
+
+```
+login() -> 存储到 useSession + localStorage (persist 中间件)
+refreshTokens() -> 401 时自动调用
+logout() -> 清空 useSession + 跳转 /login
+```
+
+## 注意事项
+
+1. **API 代理策略**：普通 HTTP 请求走 Next.js rewrite (`/api/* -> backend`)，SSE 流直连后端（需设置 `NEXT_PUBLIC_API_BASE_URL` 环境变量）
+
+2. **Token 刷新机制**：`apiFetch` 内置 401 自动刷新，非 auth 端点失败后会尝试刷新一次；刷新失败则清除会话并跳转登录页
+
+3. **测试覆盖**：当前测试覆盖极低（仅 `api.test.ts`、`agent.test.ts`、`spec-workspaces.test.ts`），新增 API 客户端时应补充 vitest 用例
+
+4. **依赖关系**：frontend -> backend（通过 HTTP API），不直接依赖其他模块
+
+5. **修改影响面**：
+   - 修改 API 客户端签名会影响所有调用页面
+   - 修改 session store 结构会影响认证流程和路由守卫
+   - 修改 `apiFetch` 错误处理逻辑会影响全局请求行为
+
+6. **TypeScript 严格模式**：项目启用了严格类型检查，新增 API 客户端时应正确定义请求/响应类型
+
+7. **环境变量**：
+   - `NEXT_PUBLIC_API_BASE_URL`：后端 API 地址（生产环境必填）
+   - `INTERNAL_API_BASE_URL`：SSR 时使用的后端地址
+
+## 人工备注
+
+<!-- MANUAL_NOTES_START -->
+
+<!-- MANUAL_NOTES_END -->
 
 ## Change Index
 
 | Date | Change | Summary |
 |---|---|---|
 | 2026-06-03 | fix-sse-nextjs-rewrite-buffering | 创建 `app/api/.../stream/route.ts` Route Handler 透传后端 SSE 流，修复 Next.js rewrites 缓冲导致 EventSource 5 秒断开重连 |
+| 2026-06-04 | update-module-card | 基于代码库最新状态更新模块卡片，补充完整 API 客户端导出符号列表 |

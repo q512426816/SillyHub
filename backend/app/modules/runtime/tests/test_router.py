@@ -44,17 +44,23 @@ PROGRESS_PAYLOAD = {
 async def workspace_with_runtime(client, tmp_path: Path, auth_headers: dict[str, str]) -> dict:
     root = _copy_fixture(COMPONENT_FIXTURES, tmp_path)
 
-    runtime_dir = root / ".sillyspec" / ".runtime"
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-    (runtime_dir / "progress.json").write_text(json.dumps(PROGRESS_PAYLOAD), encoding="utf-8")
-
     ws_resp = await client.post(
         "/api/workspaces",
         json={"name": "runtime-test", "root_path": str(root)},
         headers=auth_headers,
     )
     assert ws_resp.status_code == 201, ws_resp.text
-    return {"ws_id": ws_resp.json()["id"]}
+    ws_id = ws_resp.json()["id"]
+
+    # Create progress.json in platform storage (since .runtime is ignored during copy)
+    # Platform storage path: C:\data\sillyspec-data\{workspace_id}\.sillyspec\.runtime
+    platform_runtime_dir = Path(r"C:\data\sillyspec-data") / ws_id / ".sillyspec" / ".runtime"
+    platform_runtime_dir.mkdir(parents=True, exist_ok=True)
+    (platform_runtime_dir / "progress.json").write_text(
+        json.dumps(PROGRESS_PAYLOAD), encoding="utf-8"
+    )
+
+    return {"ws_id": ws_id}
 
 
 async def test_get_runtime_progress(
