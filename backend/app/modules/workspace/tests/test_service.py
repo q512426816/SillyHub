@@ -274,7 +274,6 @@ async def test_create_resurrect_conflicts_with_active_slug(db_session, tmp_path:
     assert ws_a_revived.slug != "shared"
 
 
-
 # ── task-05: reparse helpers + tests ─────────────────────────────────────────
 
 
@@ -378,6 +377,7 @@ async def test_reparse_updates_existing_children(db_session, tmp_path: Path) -> 
 
     # Get platform storage spec_root for updating YAML files
     from app.modules.spec_workspace.service import SpecWorkspaceService
+
     spec_ws_svc = SpecWorkspaceService(db_session)
     spec_ws = await spec_ws_svc.get(ws.id)
     spec_projects = Path(spec_ws.spec_root) / ".sillyspec" / "projects"
@@ -401,7 +401,6 @@ async def test_reparse_updates_existing_children(db_session, tmp_path: Path) -> 
     assert by_key["backend"].type == "library"
 
 
-
 async def test_reparse_soft_deletes_removed_components(db_session, tmp_path: Path) -> None:
     """Removed YAML triggers soft-delete of child Workspace (AC-07)."""
     root = _make_workspace_with_projects(tmp_path)
@@ -419,6 +418,7 @@ async def test_reparse_soft_deletes_removed_components(db_session, tmp_path: Pat
 
     # Get platform storage spec_root for updating YAML files
     from app.modules.spec_workspace.service import SpecWorkspaceService
+
     spec_ws_svc = SpecWorkspaceService(db_session)
     spec_ws = await spec_ws_svc.get(ws.id)
     spec_projects = Path(spec_ws.spec_root) / ".sillyspec" / "projects"

@@ -107,7 +107,10 @@ class WorkspaceService:
             if existing.status == "active":
                 raise WorkspacePathDuplicate(
                     "Another workspace is already registered for this root_path.",
-                    details={"root_path": payload.root_path, "existing_workspace_id": str(existing.id)},
+                    details={
+                        "root_path": payload.root_path,
+                        "existing_workspace_id": str(existing.id),
+                    },
                 )
             # Pending workspace: activate it.
             existing.name = payload.name
