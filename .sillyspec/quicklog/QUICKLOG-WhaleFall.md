@@ -61,3 +61,32 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：backend/app/modules/workspace/service.py
 结果：新增_ensure_unique_slug方法，slug冲突时自动加uuid后缀；pending激活和resurrect两处都已使用
+
+## 2026-06-03 16:26:03 — 修复 GET /api/workspaces/{id} 对 pending 状态 workspace 返回 500
+状态：已完成
+根因：workspace 创建时 status="pending"（bootstrap 生命周期合法状态），但 WorkspaceStatus / WorkspaceStatusLiteral 的 Literal 类型未包含 "pending"，导致单个 workspace 查询 pydantic 校验失败
+文件：backend/app/modules/workspace/model.py, backend/app/modules/workspace/schema.py, backend/app/modules/workspace/tests/test_service.py
+结果：两处 Literal 补上 "pending"；新增回归测试验证 pending workspace 能通过 WorkspaceRead.model_validate；重建后端镜像后真实 pending workspace GET 从 500 恢复为 200
+
+## 2026-06-03 16:50:00 — 生成项目规范后 /workspaces 列表看不到刚生成的项目
+状态：已完成
+根因：_execute_scan_run 成功收尾只 reparse 子组件，未把主 workspace 从 pending 转 active；list_() 过滤 status="pending"，导致列表页看不到。design.md 决策4 遗漏主 workspace 状态转换（Reverse Sync 先补 design）
+文件：.sillyspec/changes/2026-06-03-workspace-bootstrap-flow/design.md, backend/app/modules/agent/service.py, backend/app/modules/agent/tests/test_scan_run_reparse.py
+结果：1)补 design 决策4；2)成功分支新增 9a 把 pending workspace 转 active（独立 try/except 提交，失败仅 warning，不影响 run）；3)新增 2 个测试(success 转 active / failure 保持 pending)，test_scan_run_reparse.py 8 tests 全过；4)重建后端镜像；5)调 activate endpoint 修复存量 a145ade4，已验证出现在列表
+
+## 2026-06-03 17:10:00 — 未生成完成(pending)的 workspace 也要在 /workspaces 列表显示
+状态：已完成
+需求：与之前"过滤 pending"相反，用户希望生成中的 pending workspace 也能在列表看到（点详情看进度）。前端 workspace-card 已能优雅展示 pending（Badge outline + tech_stack 空时不渲染），仅需后端去掉 list_() 的 pending 过滤
+文件：backend/app/modules/workspace/service.py, backend/app/modules/workspace/tests/test_service.py
+结果：1)去掉 list_() 两处 status != "pending" 过滤；2)新增 test_list_includes_pending_workspaces 测试（通过，含 test_list_filters_soft_deleted_by_default 仍通过）；3)重建后端镜像；4)API 验证 total=3 三个 pending 均返回；5)Playwright 浏览器验证 /workspaces 渲染 3 张 pending 卡片，徽章显示 pending，前端无需改动
+
+## 2026-06-03 17:30:00 — spec-bootstrap run 卡 pending：SSE done 推 {status:null,exit_code:null} + validation_passed=false
+状态：已完成
+现象：run 822e5735 实际 failed/exit_code=1，但前端 SSE done 事件收到 {status:null,exit_code:null} 一直显示 pending。日志：agent_done exit_code=0(CLI成功913行) → spec_bootstrap.complete validation_passed=false sync_status=dirty exit_code=1
+根因：spec_workspace/bootstrap.py 完成时只更新 DB 状态，从不向 Redis publish done 事件 → SSE 永远收不到 done，挂到 token 过期；且前端 onDone 硬编码 setBootstrapStatus("completed") 忽略真实状态。validation 失败本身是 LLM 生成的 projects yaml 缺 id/type 字段（内容问题，非后端 bug）
+文件：backend/app/modules/spec_workspace/bootstrap.py, backend/app/modules/agent/service.py, frontend/src/lib/agent-stream.ts, frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
+结果：1)bootstrap 新增 _publish_done_event，正常+异常分支 commit 后都 publish 带 status/exit_code 的 done；2)SSE stream_run_logs 收 done 时若 payload status/exit_code 为 null 则 expire_all 后从 DB 兜底补全；3)前端 AgentRunStreamClient.onDone 携带 {status,exit_code}，page.tsx 用真实 status 而非硬编码 completed；4)重建前后端镜像；5)端到端验证：redis 订阅抓到 bootstrap publish 的 done {status:failed,exit_code:1}，已 failed run SSE 立即返回正确状态。前端不再卡 pending
+
+## ql-20260604-001-b7f2 | 2026-06-04 09:11:09 | Bootstrap 扫描文档查错路径排查
+状态：已完成
+文件：backend/app/modules/spec_workspace/bootstrap.py, backend/app/modules/spec_workspace/validator.py

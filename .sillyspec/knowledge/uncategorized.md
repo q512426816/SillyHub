@@ -8,6 +8,20 @@
 - Windows 下用 `bash .claude/hooks/*.sh` 容易命中 WSL bash，并且 CRLF shell 脚本会触发 `$'\r': command not found` / `pipefail\r` 错误；跨平台 hook 优先用 `node .claude/hooks/*.cjs`。
 - Claude Code `PreToolUse` 推荐用 `hookSpecificOutput.permissionDecision="deny"` 和 `permissionDecisionReason` 阻断工具调用；`continue:false` 是停止后续处理，不等同于 deny 当前 Bash 工具调用。
 
+## 2026-06-03 — pytest patch 函数内局部导入的目标
+
+- 被测函数内部用 `from app.core.db import get_session_factory`（函数级局部导入）时，`patch("app.modules.agent.service.get_session_factory")` 会报 `AttributeError: module does not have the attribute`，因为该名字从未绑定到 service 模块命名空间。
+- 正确做法：patch 源头模块属性 `app.core.db.get_session_factory`。局部导入每次执行时从源模块取属性，patch 源头才能拦截。
+- 同理适用于任何「函数内 import」的 mock。模块级 import 才 patch 使用方模块。
+
+## 2026-06-03 — 无本地 venv 时在 Docker 后端容器跑 pytest
+
+- 本机只有 Windows Store 的 python stub（exit 49 不执行），项目走 Docker 部署无 venv。
+- 主机 F 盘挂载在后端容器 `/host-projects`，git worktree 可经 `/host-projects/WorkNew/SillyHub/.sillyspec/.runtime/worktrees/<change>` 访问。
+- 生产镜像 venv 缺 pytest，但 `pip install pytest` 装到 `~/.local`(user-site)，venv python 默认不加载；运行时 `sys.path.insert(0, site.getusersitepackages())` 后 `pytest.main()` 即可。
+- 用 `PYTHONPATH=<worktree>/backend` 让测试 import 命中 worktree 改动代码，不污染容器 /app（镜像层）。
+- 验证回归：在 `/host-projects/.../backend`(main) 上跑同样测试对比，区分预存失败与本次引入的回归。
+
 ## 2026-06-03 — execute 的 worktree 基线不含未提交改动
 
 - `sillyspec worktree create` 从最新 commit（HEAD）干净 checkout，**不包含主工作区里 staged/未提交的改动**。如果上一个变更（如 quick 流程）的代码改动只 `git add` 未 commit，worktree 里看到的是改动前的旧版文件。

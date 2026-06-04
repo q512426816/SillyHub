@@ -30,6 +30,15 @@ SillyHub 填补了 SillySpec 在以下方面的空白：
 3. 支持 Agent 的 Worktree 隔离、Git 操作网关、工具调用策略管控
 4. 提供 Web UI 进行工作区管理、变更跟踪、Agent 运行监控
 
+### Workspace Bootstrap 流程
+
+「生成项目规范」统一为 Bootstrap 流程：
+
+- 弹窗职责单一化（扫描 + 新建 + 跳转），不在弹窗内即时回显；点击「生成项目规范」后跳转工作区详情页，由详情页承载触发 / 实时回显 / 进入恢复。
+- 防重复点击下沉到后端：`scan_generate` 幂等返回进行中的 scan run（`pending`/`running` 且 `change_id IS NULL`），多标签页 / 并发安全。
+- 详情页进入或刷新时基于真实 scan run 状态自动恢复 SSE 回显，无新增状态字段。
+- scan 成功后自动 reparse 创建子组件（子 workspace），「项目组组件」计数随之刷新。
+
 ## 技术栈摘要
 
 | 层级 | 技术选型 | 版本                     |

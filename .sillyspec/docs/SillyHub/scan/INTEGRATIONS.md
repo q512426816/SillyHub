@@ -55,6 +55,35 @@ backend → AgentDispatchService → Claude Code subprocess
   → 超时：API_TIMEOUT_MS=3000000（50 分钟）
 ```
 
+### 生成项目规范（scan-generate / Bootstrap 数据流）
+
+「生成项目规范」统一为 Bootstrap 流程：弹窗只负责扫描 + 新建 + 跳转，详情页承载触发 / 实时回显 / 进入恢复，后端保证幂等。端到端数据流：
+
+```
+弹窗（workspace-scan-dialog） → POST /api/workspaces/scan-generate
+  → workspace.service.scan_generate（幂等）
+      ├─ 查询是否已有进行中（pending/running 且 change_id IS NULL）的 scan run
+      │    有 → 直接返回该 run，不新建
+      │    无 → 触发 scan dispatch 新建 scan run
+  → 弹窗不在弹窗内订阅 SSE，scanGenerate 成功后 router.push('/workspaces/{id}') 跳详情页
+
+详情页 page.tsx load()
+  → GET /api/workspaces/{id}/agent/runs  筛出进行中的 scan run
+  → GET /api/workspaces/{id}/agent/runs/{run_id}/stream（SSE）自动恢复日志回显
+  → 刷新 / 重进详情页可恢复回显；run done 后刷新「项目组组件」计数
+
+scan run 成功收尾（agent.service._execute_scan_run，exit_code == 0）
+  → 自动 reparse spec_root/projects/*.yaml 创建子 workspace + relations
+  → reparse 包在独立 try/except，失败仅 log.warning，不改变 run 的 completed 状态
+```
+
+要点：
+- **后端幂等**：`scan_generate` 在触发 dispatch 前查进行中 scan run（`pending`/`running` 且 `change_id IS NULL`），命中则复用，防重复点击下沉到后端，多标签页 / 并发安全。
+- **弹窗去 SSE**：弹窗职责单一化（扫描 + 新建 + 跳转），不再在弹窗内即时回显。
+- **回显恢复**：详情页基于真实 run 状态恢复 SSE 回显，无新增 `sync_status` 等字段。
+- **自动子组件**：scan 成功后由 `_execute_scan_run` 收尾 reparse 创建子 workspace，子组件计数随之刷新。
+- 复用既有 SSE / agent runs / reparse 基础设施，**无新增表 / 字段 / API**。
+
 ## 外部服务
 
 ### Anthropic / 智谱 API
