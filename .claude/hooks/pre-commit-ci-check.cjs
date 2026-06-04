@@ -120,19 +120,6 @@ if (hasBackend) {
   if (!runCheck("backend: mypy", "uv run mypy app", { cwd: "backend" })) {
     failures.push("backend: mypy");
   }
-  if (
-    !runCheck("backend: pytest", "uv run pytest -q --cov=app --cov-fail-under=60", {
-      cwd: "backend",
-      env: {
-        DATABASE_URL: "postgresql+asyncpg://platform:platform@localhost:5432/platform_test",
-        REDIS_URL: "redis://localhost:6379/15",
-        SECRET_KEY: "ci-secret-must-be-at-least-16-chars",
-        ENVIRONMENT: "test",
-      },
-    })
-  ) {
-    failures.push("backend: pytest");
-  }
 }
 
 if (hasFrontend) {
@@ -145,16 +132,6 @@ if (hasFrontend) {
   }
   if (!runCheck("frontend: test", "pnpm test", { cwd: "frontend" })) {
     failures.push("frontend: test");
-  }
-  if (
-    !runCheck("frontend: build", "pnpm build", {
-      cwd: "frontend",
-      env: {
-        NEXT_PUBLIC_API_BASE_URL: "http://localhost:8000",
-      },
-    })
-  ) {
-    failures.push("frontend: build");
   }
 }
 

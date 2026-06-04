@@ -13,7 +13,6 @@ v4 layout::
         .runtime/
           sillyspec.db                  ← SQLite state
           gate-status.json
-          progress.json                 ← legacy fallback
         docs/<project>/
           scan/
           modules/
@@ -123,10 +122,6 @@ class SpecPathResolver:
     def gate_status_path(self) -> Path:
         """Gate status: ``.sillyspec/.runtime/gate-status.json``"""
         return self.runtime_dir() / "gate-status.json"
-
-    def legacy_progress_path(self) -> Path:
-        """Legacy progress: ``.sillyspec/.runtime/progress.json``"""
-        return self.runtime_dir() / "progress.json"
 
     # -- Docs / scan -------------------------------------------------------
 

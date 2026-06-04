@@ -785,14 +785,23 @@ class WorkspaceService:
                         await self.reparse(workspace.id)
                         log.info("spec_workspace.projects_imported", workspace_id=str(workspace.id))
                     except Exception as exc:
-                        log.warning("spec_workspace.projects_import_failed", workspace_id=str(workspace.id), error=str(exc))
+                        log.warning(
+                            "spec_workspace.projects_import_failed",
+                            workspace_id=str(workspace.id),
+                            error=str(exc),
+                        )
                     try:
                         from app.modules.change.service import ChangeService
+
                         change_svc = ChangeService(self._session)
                         await change_svc.reparse(workspace.id)
                         log.info("spec_workspace.changes_imported", workspace_id=str(workspace.id))
                     except Exception as exc:
-                        log.warning("spec_workspace.changes_import_failed", workspace_id=str(workspace.id), error=str(exc))
+                        log.warning(
+                            "spec_workspace.changes_import_failed",
+                            workspace_id=str(workspace.id),
+                            error=str(exc),
+                        )
                     return
         except Exception:
             pass

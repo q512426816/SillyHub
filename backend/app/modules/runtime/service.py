@@ -1,13 +1,10 @@
 """Runtime service — reads ``.sillyspec/.runtime/`` state files.
 
-Priority:
-1. ``sillyspec.db`` (SQLite) — SillySpec v4 canonical state source
-2. ``progress.json`` — legacy fallback (emits deprecation warning)
+SillySpec v4 uses ``sillyspec.db`` (SQLite) as the canonical state source.
 """
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import uuid
 from datetime import datetime
@@ -71,26 +68,10 @@ class RuntimeService:
             else workspace.root_path
         )
 
-        # --- Priority 1: sillyspec.db (SQLite) ---
+        # --- Read from sillyspec.db (SQLite) ---
         db_path = resolver.db_path()
         if db_path.is_file():
-            progress = self._read_sqlite_progress(db_path, runtime_dir)
-            if progress is not None:
-                return progress
-
-        # --- Priority 2: legacy progress.json ---
-        progress_path = resolver.legacy_progress_path()
-        if progress_path.is_file():
-            log.warning(
-                "runtime.legacy_progress_json",
-                detail="Reading legacy progress.json. Migrate to sillyspec.db.",
-            )
-            try:
-                raw = json.loads(progress_path.read_text(encoding="utf-8"))
-                return RuntimeProgress.model_validate(raw)
-            except (json.JSONDecodeError, OSError) as exc:
-                log.warning("runtime.progress_read_failed", error=str(exc))
-                return None
+            return self._read_sqlite_progress(db_path, runtime_dir)
 
         return None
 

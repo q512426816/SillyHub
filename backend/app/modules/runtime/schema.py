@@ -27,7 +27,7 @@ class StageProgress(BaseModel):
 
 
 class RuntimeProgress(BaseModel):
-    """Full runtime progress.json payload."""
+    """Runtime progress DTO (mapped from sillyspec.db)."""
 
     model_config = ConfigDict(populate_by_name=True)
 

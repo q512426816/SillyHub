@@ -71,9 +71,7 @@ class TestParseWorkspace:
         warning_codes = [w.code for w in no_master.warnings]
         assert "MASTER_MISSING" not in warning_codes
 
-    def test_title_extracted_from_proposal(
-        self, parser: ChangeParser, silly_root: Path
-    ) -> None:
+    def test_title_extracted_from_proposal(self, parser: ChangeParser, silly_root: Path) -> None:
         # Title comes from the first '# ' heading in proposal.md, not frontmatter.
         change_dir = silly_root / ".sillyspec" / "changes" / "title-from-proposal"
         change_dir.mkdir(parents=True, exist_ok=True)
@@ -85,9 +83,7 @@ class TestParseWorkspace:
         change = next(c for c in result.changes if c.change_key == "title-from-proposal")
         assert change.title == "用户登录超时修复"
 
-    def test_module_impact_is_standard_doc(
-        self, parser: ChangeParser, silly_root: Path
-    ) -> None:
+    def test_module_impact_is_standard_doc(self, parser: ChangeParser, silly_root: Path) -> None:
         change_dir = silly_root / ".sillyspec" / "changes" / "with-impact"
         change_dir.mkdir(parents=True, exist_ok=True)
         (change_dir / "module-impact.md").write_text("# 模块影响分析", encoding="utf-8")

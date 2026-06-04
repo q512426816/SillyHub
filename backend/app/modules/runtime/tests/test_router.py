@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import shutil
+import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -17,27 +18,111 @@ def _copy_fixture(src: Path, tmp_path: Path, name: str = "ws") -> Path:
     return dst
 
 
-PROGRESS_PAYLOAD = {
-    "_version": 2,
-    "project": "test-project",
-    "currentStage": "execute",
-    "currentChange": "change-001",
-    "stages": {
-        "scan": {
-            "status": "completed",
-            "steps": [],
-            "startedAt": "2026-01-01T00:00:00Z",
-            "completedAt": "2026-01-01T00:01:00Z",
-        },
-        "execute": {
-            "status": "in_progress",
-            "steps": [{"name": "step-1", "status": "completed"}],
-            "startedAt": "2026-01-01T00:02:00Z",
-            "completedAt": None,
-        },
-    },
-    "lastActive": "2026-01-01T00:03:00Z",
-}
+def _create_test_db(db_path: Path) -> None:
+    """Create a test sillyspec.db with sample progress data."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path))
+    try:
+        # Create tables
+        conn.execute(
+            """
+            CREATE TABLE project (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            )
+        """
+        )
+        conn.execute("INSERT INTO project (id, name) VALUES (1, 'test-project')")
+
+        conn.execute(
+            """
+            CREATE TABLE changes (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                current_stage TEXT,
+                status TEXT,
+                last_active TEXT,
+                created_at TEXT
+            )
+        """
+        )
+        now = datetime.now(UTC).isoformat()
+        conn.execute(
+            """
+            INSERT INTO changes (name, current_stage, status, last_active, created_at)
+            VALUES ('change-001', 'execute', 'in_progress', ?, ?)
+        """,
+            (now, now),
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE stages (
+                id INTEGER PRIMARY KEY,
+                change_id INTEGER,
+                stage TEXT NOT NULL,
+                status TEXT,
+                started_at TEXT,
+                completed_at TEXT,
+                FOREIGN KEY (change_id) REFERENCES changes(id)
+            )
+        """
+        )
+        conn.execute(
+            """
+            INSERT INTO stages (change_id, stage, status, started_at, completed_at)
+            VALUES (
+                (SELECT id FROM changes WHERE name = 'change-001'),
+                'scan',
+                'completed',
+                '2026-01-01T00:00:00Z',
+                '2026-01-01T00:01:00Z'
+            )
+        """
+        )
+        conn.execute(
+            """
+            INSERT INTO stages (change_id, stage, status, started_at, completed_at)
+            VALUES (
+                (SELECT id FROM changes WHERE name = 'change-001'),
+                'execute',
+                'in_progress',
+                '2026-01-01T00:02:00Z',
+                NULL
+            )
+        """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE steps (
+                id INTEGER PRIMARY KEY,
+                stage_id INTEGER,
+                ordering INTEGER,
+                name TEXT NOT NULL,
+                status TEXT,
+                output TEXT,
+                completed_at TEXT,
+                FOREIGN KEY (stage_id) REFERENCES stages(id)
+            )
+        """
+        )
+        conn.execute(
+            """
+            INSERT INTO steps (stage_id, ordering, name, status, completed_at)
+            VALUES (
+                (SELECT id FROM stages WHERE stage = 'execute'),
+                1,
+                'step-1',
+                'completed',
+                '2026-01-01T00:02:30Z'
+            )
+        """
+        )
+
+        conn.commit()
+    finally:
+        conn.close()
 
 
 @pytest.fixture()
@@ -52,13 +137,11 @@ async def workspace_with_runtime(client, tmp_path: Path, auth_headers: dict[str,
     assert ws_resp.status_code == 201, ws_resp.text
     ws_id = ws_resp.json()["id"]
 
-    # Create progress.json in platform storage (since .runtime is ignored during copy)
+    # Create sillyspec.db in platform storage
     # Platform storage path: C:\data\sillyspec-data\{workspace_id}\.sillyspec\.runtime
     platform_runtime_dir = Path(r"C:\data\sillyspec-data") / ws_id / ".sillyspec" / ".runtime"
     platform_runtime_dir.mkdir(parents=True, exist_ok=True)
-    (platform_runtime_dir / "progress.json").write_text(
-        json.dumps(PROGRESS_PAYLOAD), encoding="utf-8"
-    )
+    _create_test_db(platform_runtime_dir / "sillyspec.db")
 
     return {"ws_id": ws_id}
 
@@ -73,7 +156,8 @@ async def test_get_runtime_progress(
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["version"] == 2
+    # SQLite (_version: 4) uses different field names than legacy progress.json
+    assert body["version"] == 4
     assert body["project"] == "test-project"
     assert body["current_stage"] == "execute"
     assert body["current_change"] == "change-001"
@@ -93,30 +177,6 @@ async def test_get_runtime_missing_file(
     ws_resp = await client.post(
         "/api/workspaces",
         json={"name": "no-runtime", "root_path": str(root)},
-        headers=auth_headers,
-    )
-    assert ws_resp.status_code == 201
-    ws_id = ws_resp.json()["id"]
-
-    resp = await client.get(
-        f"/api/workspaces/{ws_id}/runtime",
-        headers=auth_headers,
-    )
-    assert resp.status_code == 200
-    assert resp.json() is None
-
-
-async def test_get_runtime_invalid_json(
-    client, tmp_path: Path, auth_headers: dict[str, str]
-) -> None:
-    root = _copy_fixture(COMPONENT_FIXTURES, tmp_path, "bad-json")
-    runtime_dir = root / ".sillyspec" / ".runtime"
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-    (runtime_dir / "progress.json").write_text("NOT VALID JSON{{{{", encoding="utf-8")
-
-    ws_resp = await client.post(
-        "/api/workspaces",
-        json={"name": "bad-json", "root_path": str(root)},
         headers=auth_headers,
     )
     assert ws_resp.status_code == 201

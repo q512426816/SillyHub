@@ -111,6 +111,10 @@ ChangeService.transition() -> 状态机校验 -> 更新 stage
 - **Redis**：通过 `app.core.redis.get_redis()` 获取 Redis 客户端
 - **错误处理**：使用 `AppError`（app.core.errors）统一错误处理
 
+## 变更索引
+
+- ql-20260604-001-progress | 移除 progress.json fallback，改用 SQLite sillyspec.db
+
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->
