@@ -11,6 +11,7 @@ Provides 6 capability points:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import secrets
 import uuid
@@ -78,8 +79,45 @@ class AgentRunNotPendingApproval(AppError):
 class ExecutionCoordinatorService:
     """Execution reliability guarantees for agent runs."""
 
+    # 后台任务引用集 — 防止 asyncio.Task 被 GC 回收
+    _background_tasks: set[asyncio.Task] = set()
+
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    # ------------------------------------------------------------------
+    # Background task lifecycle helpers
+    # ------------------------------------------------------------------
+
+    def _fire_background_task(
+        self,
+        coro,
+        *,
+        workspace_id: uuid.UUID | None = None,
+        run_id: uuid.UUID | None = None,
+    ) -> asyncio.Task:
+        """Create a background task and hold a strong reference to prevent GC."""
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._on_background_task_done)
+        log.info(
+            "background_task_fired",
+            task_id=id(task),
+            workspace_id=str(workspace_id),
+            run_id=str(run_id),
+        )
+        return task
+
+    @staticmethod
+    def _on_background_task_done(task: asyncio.Task) -> None:
+        """Remove task from the tracking set and surface exceptions."""
+        ExecutionCoordinatorService._background_tasks.discard(task)
+        try:
+            exc = task.exception()
+        except (asyncio.InvalidStateError, asyncio.CancelledError):
+            return
+        if exc is not None:
+            log.exception("background_task_failed", task_id=id(task), exc_info=exc)
 
     # ------------------------------------------------------------------
     # 1. Idempotency
@@ -471,8 +509,6 @@ class ExecutionCoordinatorService:
             scope=scope,
         )
 
-        import asyncio
-
         run = AgentRun(
             id=uuid.uuid4(),
             task_id=None,  # change-level run, not tied to a task
@@ -486,7 +522,7 @@ class ExecutionCoordinatorService:
         await self.session.refresh(run)
 
         # Fire-and-forget background task
-        asyncio.create_task(
+        self._fire_background_task(
             self._run_sillyspec_background(
                 run_id=run.id,
                 change_key=change_key,
@@ -494,7 +530,9 @@ class ExecutionCoordinatorService:
                 repo_dir=repo_dir,
                 workspace_id=workspace_id,
                 user_id=user_id,
-            )
+            ),
+            workspace_id=workspace_id,
+            run_id=run.id,
         )
         return run
 
@@ -520,7 +558,6 @@ class ExecutionCoordinatorService:
             run_id=str(run_id),
         )
 
-        import asyncio
         from datetime import datetime
 
         run = await self.session.get(AgentRun, run_id)
@@ -569,3 +606,19 @@ class ExecutionCoordinatorService:
             run.output_redacted = str(exc)[:10000]
             self.session.add(run)
             await self.session.commit()
+        finally:
+            # Safety net: ensure run is never stuck in "running"
+            try:
+                run = await self.session.get(AgentRun, run_id)
+                if run is not None and run.status == "running":
+                    run.status = "failed"
+                    run.finished_at = datetime.now(UTC)
+                    run.exit_code = -1
+                    run.output_redacted = "Force-failed: task lifecycle guard"[:10000]
+                    self.session.add(run)
+                    await self.session.commit()
+            except Exception:
+                log.error(
+                    "sillyspec_run_finally_guard_failed",
+                    run_id=str(run_id),
+                )

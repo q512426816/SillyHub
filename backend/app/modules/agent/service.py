@@ -110,8 +110,45 @@ class AgentService:
     # key: run_id (UUID), value: asyncio.subprocess.Process
     _proc_registry: dict[uuid.UUID, asyncio.subprocess.Process] = {}
 
+    # 后台任务引用集 — 防止 asyncio.Task 被 GC 回收
+    _background_tasks: set[asyncio.Task] = set()
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    # ------------------------------------------------------------------
+    # Background task lifecycle helpers
+    # ------------------------------------------------------------------
+
+    def _fire_background_task(
+        self,
+        coro,
+        *,
+        workspace_id: uuid.UUID | None = None,
+        run_id: uuid.UUID | None = None,
+    ) -> asyncio.Task:
+        """Create a background task and hold a strong reference to prevent GC."""
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._on_background_task_done)
+        log.info(
+            "background_task_fired",
+            task_id=id(task),
+            workspace_id=str(workspace_id),
+            run_id=str(run_id),
+        )
+        return task
+
+    @staticmethod
+    def _on_background_task_done(task: asyncio.Task) -> None:
+        """Remove task from the tracking set and surface exceptions."""
+        AgentService._background_tasks.discard(task)
+        try:
+            exc = task.exception()
+        except (asyncio.InvalidStateError, asyncio.CancelledError):
+            return
+        if exc is not None:
+            log.exception("background_task_failed", task_id=id(task), exc_info=exc)
 
     async def start_run(
         self,
@@ -694,9 +731,7 @@ class AgentService:
         await self._session.commit()
 
         # -- 6. Execute agent (fire-and-forget) --------------------------------
-        import asyncio
-
-        asyncio.create_task(
+        self._fire_background_task(
             self._execute_stage_run(
                 run_id=run.id,
                 prompt=prompt,
@@ -706,7 +741,9 @@ class AgentService:
                 change_id=change_id,
                 user_id=user_id,
                 stage=stage,
-            )
+            ),
+            workspace_id=workspace_id,
+            run_id=run.id,
         )
 
         # Return immediately — caller can poll agent-status for progress
@@ -825,173 +862,212 @@ class AgentService:
 
         factory = get_session_factory()
         async with factory() as session:
-            run = await session.get(AgentRun, run_id)
-            if run is None:
-                log.error("stage_run_missing", run_id=str(run_id))
-                return
+            try:
+                run = await session.get(AgentRun, run_id)
+                if run is None:
+                    log.error("stage_run_missing", run_id=str(run_id))
+                    return
 
-            adapter_cls = ADAPTERS.get("claude_code")
-            if adapter_cls is None:
-                run.status = "failed"
-                run.finished_at = datetime.utcnow()
-                run.exit_code = 1
-                run.output_redacted = "Unknown agent type."
+                adapter_cls = ADAPTERS.get("claude_code")
+                if adapter_cls is None:
+                    run.status = "failed"
+                    run.finished_at = datetime.utcnow()
+                    run.exit_code = 1
+                    run.output_redacted = "Unknown agent type."
+                    session.add(run)
+                    await session.commit()
+                    return
+
+                # Mark running
+                run.status = "running"
+                run.started_at = datetime.utcnow()
                 session.add(run)
                 await session.commit()
-                return
 
-            # Mark running
-            run.status = "running"
-            run.started_at = datetime.utcnow()
-            session.add(run)
-            await session.commit()
-
-            # ── 构建包含阶段 prompt 的完整 bundle ──
-            # 将阶段 prompt 嵌入 task_markdown，让 render_bundle_to_claude_md
-            # 将其作为 "Task" section inline 到 CLAUDE.md 中
-            mode_suffix = (
-                "\n\n## Mode: READ-ONLY\nDo NOT modify any files. Only analyze and report.\n"
-                if read_only
-                else "\n\n## Mode: WRITE\nYou may modify files in the worktree as needed.\n"
-            )
-
-            bundle = AgentSpecBundle(
-                change_summary=f"Change stage: {stage}",
-                task_key=f"stage:{stage}",
-                task_title=f"Stage dispatch: {stage}",
-                # ★ 关键：将阶段 prompt + 模式标记嵌入 task_markdown
-                # render_bundle_to_claude_md 会将其作为 ## Task section 输出
-                task_markdown=prompt + mode_suffix,
-                # 通过 platform_metadata 传递 stage 上下文（供 adapter / task-06 使用）
-                platform_metadata={
-                    "stage_dispatch": True,
-                    "stage": stage,
-                    "read_only": read_only,
-                    "change_id": str(change_id),
-                    "workspace_id": str(workspace_id),
-                },
-                available_tools=["sillyspec"],
-            )
-
-            # Ensure work directory exists
-            work_dir.mkdir(parents=True, exist_ok=True)
-
-            # ──（已移除）直接写 CLAUDE.md ──
-            # CLAUDE.md 现在由 adapter.run_with_bundle() 内部统一渲染和写入
-
-            adapter = adapter_cls()
-            result = await adapter.run_with_bundle(run_id, bundle, work_dir)
-
-            # Update run record
-            run.status = "completed" if result.exit_code == 0 else "failed"
-            run.finished_at = datetime.utcnow()
-            run.exit_code = result.exit_code
-            run.output_redacted = result.redacted_output[:10000]
-            session.add(run)
-
-            # Log stdout/stderr
-            for channel, content in [
-                ("stdout", result.stdout),
-                ("stderr", result.stderr),
-            ]:
-                if content:
-                    log_entry = AgentRunLog(
-                        id=uuid.uuid4(),
-                        run_id=run.id,
-                        channel=channel,
-                        content_redacted=redact_agent_output(content)[:5000],
-                    )
-                    session.add(log_entry)
-
-            # Write audit log
-            from app.modules.workflow.model import AuditLog
-
-            audit = AuditLog(
-                id=uuid.uuid4(),
-                workspace_id=workspace_id,
-                actor_id=user_id,
-                action="agent.stage_dispatch",
-                resource_type="agent_run",
-                resource_id=run.id,
-                details_json=json.dumps(
-                    {
-                        "change_id": str(change_id),
-                        "stage": stage,
-                        "agent_type": "claude_code",
-                        "exit_code": result.exit_code,
-                        "read_only": read_only,
-                    }
-                ),
-            )
-            session.add(audit)
-
-            # Update change.stages.last_dispatch with final status
-            from app.modules.change.model import Change
-
-            change = await session.get(Change, change_id)
-            if change is not None:
-                stages = change.stages or {}
-                last_dispatch = stages.get("last_dispatch", {})
-                last_dispatch.update(
-                    {
-                        "status": run.status,
-                        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
-                        "run_id": str(run.id),
-                        "exit_code": run.exit_code,
-                    }
+                # ── 构建包含阶段 prompt 的完整 bundle ──
+                # 将阶段 prompt 嵌入 task_markdown，让 render_bundle_to_claude_md
+                # 将其作为 "Task" section inline 到 CLAUDE.md 中
+                mode_suffix = (
+                    "\n\n## Mode: READ-ONLY\nDo NOT modify any files. Only analyze and report.\n"
+                    if read_only
+                    else "\n\n## Mode: WRITE\nYou may modify files in the worktree as needed.\n"
                 )
-                stages["last_dispatch"] = last_dispatch
-                change.stages = stages
-                session.add(change)
 
-            # -- 8. Sync stage status + auto dispatch next step -----------------
-            if run.status == "completed":
-                try:
-                    from app.modules.change.dispatch import (
-                        SillySpecStageDispatchService,
-                        auto_dispatch_next_step,
-                    )
+                bundle = AgentSpecBundle(
+                    change_summary=f"Change stage: {stage}",
+                    task_key=f"stage:{stage}",
+                    task_title=f"Stage dispatch: {stage}",
+                    # ★ 关键：将阶段 prompt + 模式标记嵌入 task_markdown
+                    # render_bundle_to_claude_md 会将其作为 ## Task section 输出
+                    task_markdown=prompt + mode_suffix,
+                    # 通过 platform_metadata 传递 stage 上下文（供 adapter / task-06 使用）
+                    platform_metadata={
+                        "stage_dispatch": True,
+                        "stage": stage,
+                        "read_only": read_only,
+                        "change_id": str(change_id),
+                        "workspace_id": str(workspace_id),
+                    },
+                    available_tools=["sillyspec"],
+                )
 
-                    dispatch_svc = SillySpecStageDispatchService(session)
-                    sync_result = await dispatch_svc.sync_stage_status(
-                        session=session,
-                        change_id=change_id,
-                        run_id=run_id,
-                    )
-                    log.info(
-                        "stage_sync_completed",
-                        run_id=str(run_id),
-                        change_id=str(change_id),
-                        synced=sync_result.synced,
-                        has_pending_step=sync_result.has_pending_step,
-                        stage_completed=sync_result.stage_completed,
-                    )
+                # Ensure work directory exists
+                work_dir.mkdir(parents=True, exist_ok=True)
 
-                    if sync_result.synced and sync_result.has_pending_step:
-                        auto_result = await auto_dispatch_next_step(
+                # ──（已移除）直接写 CLAUDE.md ──
+                # CLAUDE.md 现在由 adapter.run_with_bundle() 内部统一渲染和写入
+
+                adapter = adapter_cls()
+                result = await adapter.run_with_bundle(run_id, bundle, work_dir)
+
+                # Update run record
+                run.status = "completed" if result.exit_code == 0 else "failed"
+                run.finished_at = datetime.utcnow()
+                run.exit_code = result.exit_code
+                run.output_redacted = result.redacted_output[:10000]
+                session.add(run)
+
+                # Log stdout/stderr
+                for channel, content in [
+                    ("stdout", result.stdout),
+                    ("stderr", result.stderr),
+                ]:
+                    if content:
+                        log_entry = AgentRunLog(
+                            id=uuid.uuid4(),
+                            run_id=run.id,
+                            channel=channel,
+                            content_redacted=redact_agent_output(content)[:5000],
+                        )
+                        session.add(log_entry)
+
+                # Write audit log
+                from app.modules.workflow.model import AuditLog
+
+                audit = AuditLog(
+                    id=uuid.uuid4(),
+                    workspace_id=workspace_id,
+                    actor_id=user_id,
+                    action="agent.stage_dispatch",
+                    resource_type="agent_run",
+                    resource_id=run.id,
+                    details_json=json.dumps(
+                        {
+                            "change_id": str(change_id),
+                            "stage": stage,
+                            "agent_type": "claude_code",
+                            "exit_code": result.exit_code,
+                            "read_only": read_only,
+                        }
+                    ),
+                )
+                session.add(audit)
+
+                # Update change.stages.last_dispatch with final status
+                from app.modules.change.model import Change
+
+                change = await session.get(Change, change_id)
+                if change is not None:
+                    stages = change.stages or {}
+                    last_dispatch = stages.get("last_dispatch", {})
+                    last_dispatch.update(
+                        {
+                            "status": run.status,
+                            "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                            "run_id": str(run.id),
+                            "exit_code": run.exit_code,
+                        }
+                    )
+                    stages["last_dispatch"] = last_dispatch
+                    change.stages = stages
+                    session.add(change)
+
+                # -- 8. Sync stage status + auto dispatch next step -----------------
+                if run.status == "completed":
+                    try:
+                        from app.modules.change.dispatch import (
+                            SillySpecStageDispatchService,
+                            auto_dispatch_next_step,
+                        )
+
+                        dispatch_svc = SillySpecStageDispatchService(session)
+                        sync_result = await dispatch_svc.sync_stage_status(
                             session=session,
-                            workspace_id=workspace_id,
                             change_id=change_id,
-                            user_id=user_id,
-                            sync_result=sync_result,
+                            run_id=run_id,
                         )
                         log.info(
-                            "auto_dispatch_result",
+                            "stage_sync_completed",
                             run_id=str(run_id),
                             change_id=str(change_id),
-                            dispatched=auto_result.get("dispatched"),
-                            reason=auto_result.get("reason"),
+                            synced=sync_result.synced,
+                            has_pending_step=sync_result.has_pending_step,
+                            stage_completed=sync_result.stage_completed,
                         )
-                except Exception as exc:
-                    # 自动调度失败不应影响主流程（AgentRun 已完成）
-                    log.warning(
-                        "auto_dispatch_failed",
-                        run_id=str(run_id),
-                        change_id=str(change_id),
-                        error=str(exc),
-                    )
 
-            await session.commit()
+                        if sync_result.synced and sync_result.has_pending_step:
+                            auto_result = await auto_dispatch_next_step(
+                                session=session,
+                                workspace_id=workspace_id,
+                                change_id=change_id,
+                                user_id=user_id,
+                                sync_result=sync_result,
+                            )
+                            log.info(
+                                "auto_dispatch_result",
+                                run_id=str(run_id),
+                                change_id=str(change_id),
+                                dispatched=auto_result.get("dispatched"),
+                                reason=auto_result.get("reason"),
+                            )
+                    except Exception as exc:
+                        # 自动调度失败不应影响主流程（AgentRun 已完成）
+                        log.warning(
+                            "auto_dispatch_failed",
+                            run_id=str(run_id),
+                            change_id=str(change_id),
+                            error=str(exc),
+                        )
+
+                await session.commit()
+
+            except Exception as exc:
+                # -- Guard: mark failed on unhandled exception ----------------------
+                log.error(
+                    "stage_run_exception",
+                    run_id=str(run_id),
+                    error=str(exc),
+                )
+                try:
+                    run = await session.get(AgentRun, run_id)
+                    if run is not None and run.status not in ("completed", "failed", "killed"):
+                        run.status = "failed"
+                        run.finished_at = datetime.utcnow()
+                        run.exit_code = -1
+                        run.output_redacted = f"Unhandled exception: {exc}"[:10000]
+                        session.add(run)
+                        await session.commit()
+                except Exception:
+                    log.error(
+                        "stage_run_exception_cleanup_failed",
+                        run_id=str(run_id),
+                    )
+            finally:
+                # Safety net: ensure run is never stuck in "running"
+                try:
+                    run = await session.get(AgentRun, run_id)
+                    if run is not None and run.status == "running":
+                        run.status = "failed"
+                        run.finished_at = datetime.utcnow()
+                        run.exit_code = -1
+                        run.output_redacted = "Force-failed: task lifecycle guard"[:10000]
+                        session.add(run)
+                        await session.commit()
+                except Exception:
+                    log.error(
+                        "stage_run_finally_guard_failed",
+                        run_id=str(run_id),
+                    )
 
     # ------------------------------------------------------------------
     # Scan dispatch (workspace-level, no Change dependency)
@@ -1066,14 +1142,16 @@ class AgentService:
         await self._session.commit()
 
         # -- 5. Fire-and-forget background execution -----------------------------
-        asyncio.create_task(
+        self._fire_background_task(
             self._execute_scan_run(
                 run_id=run.id,
                 bundle=bundle,
                 work_dir=work_dir,
                 workspace_id=workspace_id,
                 user_id=user_id,
-            )
+            ),
+            workspace_id=workspace_id,
+            run_id=run.id,
         )
 
         return run
@@ -1248,6 +1326,22 @@ class AgentService:
                 except Exception:
                     log.error(
                         "scan_run_exception_cleanup_failed",
+                        run_id=str(run_id),
+                    )
+            finally:
+                # Safety net: ensure run is never stuck in "running"
+                try:
+                    run = await session.get(AgentRun, run_id)
+                    if run is not None and run.status == "running":
+                        run.status = "failed"
+                        run.finished_at = datetime.utcnow()
+                        run.exit_code = -1
+                        run.output_redacted = "Force-failed: task lifecycle guard"[:10000]
+                        session.add(run)
+                        await session.commit()
+                except Exception:
+                    log.error(
+                        "scan_run_finally_guard_failed",
                         run_id=str(run_id),
                     )
 
