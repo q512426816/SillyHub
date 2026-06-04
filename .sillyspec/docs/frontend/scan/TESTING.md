@@ -1,177 +1,122 @@
 ---
-author: qinyi
-created_at: 2026-06-03T20:35:00+08:00
+author: scan-agent
+created_at: "2026-06-03"
 ---
 
-# Frontend - 测试策略
+# SillyHub Frontend — 测试体系
 
 ## 测试框架
 
-### 技术栈
+- **Vitest** ^2.0.0 — 主测试运行器
+- **jsdom** ^24.1.0 — DOM 模拟环境
+- **@testing-library/jest-dom** ^6.4.6 — DOM 断言扩展
+- **@testing-library/react** ^16.0.0 — React 组件测试（已安装，测试中未使用）
+- **@vitejs/plugin-react** ^4.3.1 — Vite React 插件
 
-| 项目 | 版本 | 说明 |
-|------|------|------|
-| Vitest | ^2.0.0 | 测试框架（兼容 Vite 生态） |
-| @testing-library/react | ^16.0.0 | React 组件测试工具（当前未实际使用） |
-| @testing-library/jest-dom | ^6.4.6 | DOM 断言扩展（toBeInTheDocument 等） |
-| @vitejs/plugin-react | ^4.3.1 | Vitest React JSX 支持 |
-| jsdom | ^24.1.0 | 浏览器 DOM 模拟环境 |
+## 配置
 
 ### Vitest 配置
 
-文件: `frontend/vitest.config.ts`
+项目**没有独立的 vitest.config 文件**，使用 Vitest 默认配置。全局类型在 `tsconfig.json` 中声明：
 
-```typescript
+```json
 {
-  plugins: [react()],
-  test: {
-    environment: "jsdom",         // 模拟浏览器 DOM
-    globals: true,                // describe/it/expect 全局可用，无需 import
-    setupFiles: ["./src/test/setup.ts"],
-    css: false,                   // 跳过 CSS 处理加速测试
-  },
-  resolve: {
-    alias: { "@": path.resolve(__dirname, "./src") },  // 与 tsconfig 路径别名一致
-  },
+  "types": ["vitest/globals", "@testing-library/jest-dom"]
 }
 ```
 
-关键配置说明：
-- `globals: true` 允许直接使用 `describe`/`it`/`expect`/`vi` 而无需在每个文件中 import
-- `css: false` 跳过 CSS 处理以加速测试执行
-- 路径别名 `@` 与 `tsconfig.json` 保持一致
+### 全局 Setup
 
-### 测试 Setup
-
-文件: `frontend/src/test/setup.ts`
-
-```typescript
+`src/test/setup.ts`:
+```ts
 import "@testing-library/jest-dom/vitest";
 ```
 
-仅引入 jest-dom 的 Vitest 适配，提供 DOM 相关断言匹配器（如 `toBeInTheDocument`、`toHaveTextContent` 等）。
-
-## 测试命令
+### 运行命令
 
 ```bash
-pnpm test          # 单次运行全部测试（vitest run）
-pnpm test:watch    # 监听模式（vitest）
-pnpm typecheck     # 类型检查（tsc --noEmit）
-pnpm lint          # ESLint 检查（next lint）
+pnpm test          # vitest run（单次运行，CI 模式）
+pnpm test:watch    # vitest（监听模式）
 ```
 
 ## 测试文件分布
 
-所有测试文件位于 `frontend/src/lib/__tests__/`，采用就近放置原则（与被测模块同属 `lib/` 目录）：
+所有测试文件位于 `src/lib/__tests__/` 目录下，与源码同目录的 `__tests__` 子目录：
 
 ```
-frontend/src/
-  lib/
-    __tests__/
-      api.test.ts              # apiFetch 通用请求封装
-      agent.test.ts            # submitAgentRunInput 函数
-      spec-workspaces.test.ts  # bootstrapSpecWorkspace 函数
-    api.ts                     # 被测模块
-    agent.ts                   # 被测模块
-    spec-workspaces.ts         # 被测模块
-    ... (22 个其他 lib 模块，无测试)
-  test/
-    setup.ts                   # 全局 setup
+src/lib/__tests__/
+├── api.test.ts               # apiFetch 核心封装测试
+├── agent.test.ts             # Agent API 客户端测试
+└── spec-workspaces.test.ts    # Spec Workspace 测试
 ```
 
-## 测试详情
+**总计**: 3 个测试文件
 
-### `api.test.ts` -- apiFetch 核心封装（4 个用例）
+## 测试内容详情
 
-| 用例 | 验证内容 |
-|------|---------|
-| 2xx 响应解析 | 正常 JSON 响应被正确解析并返回类型化对象 `{ ok: true, n: 42 }` |
-| 4xx 错误处理 | 结构化错误 payload 被包装为 `ApiError`（检查 name, status, code, message, requestId） |
-| 网络错误处理 | fetch reject 被包装为 `ApiError(status=0, code='network_error')` |
-| x-request-id 请求头 | 每次请求自动附加 UUID 格式的 request-id（长度 >8） |
+### 1. `api.test.ts` — apiFetch 核心测试
 
-Mock 方式: `vi.stubGlobal("fetch", vi.fn().mockResolvedValue(...))`，配合 `afterEach(() => fetchMock.mockReset())`。
+测试 apiFetch 函数的关键行为：
 
-### `agent.test.ts` -- submitAgentRunInput（1 个用例）
+| 测试用例 | 验证内容 |
+|---------|---------|
+| 2xx 响应 | 返回正确解析的 JSON 对象 |
+| 4xx 响应 | 抛出 ApiError，包含 code/message/status/requestId |
+| 网络失败 | 抛出 ApiError(status=0, code="network_error") |
+| 请求头 | 每个请求自动附加 x-request-id |
 
-| 用例 | 验证内容 |
-|------|---------|
-| POST input 请求 | URL 包含 `/agent/runs/{runId}/input`，method 为 POST，content-type 为 application/json，body 正确序列化为 `{ content: "..." }`，响应结构匹配 `{ run_id, accepted }` |
+### 2. `agent.test.ts` — Agent API 测试
 
-Mock 方式: `vi.stubGlobal("fetch", ...)` + `beforeEach(() => vi.restoreAllMocks())`。
+| 测试用例 | 验证内容 |
+|---------|---------|
+| submitAgentRunInput | 发送 POST 到正确 URL，携带 JSON body，返回正确结构 |
 
-### `spec-workspaces.test.ts` -- bootstrapSpecWorkspace（1 个用例）
+### 3. `spec-workspaces.test.ts` — Spec Workspace 测试
 
-| 用例 | 验证内容 |
-|------|---------|
-| POST bootstrap 请求 | URL 包含 `/spec-bootstrap`，method 为 POST，响应包含 agent_run_id / stream_url / status / spec_root / message |
+| 测试用例 | 验证内容 |
+|---------|---------|
+| bootstrapSpecWorkspace | 发送 POST 到正确 URL，返回 agent_run_id/stream_url 等 |
 
-Mock 方式: `vi.stubGlobal("fetch", ...)` + `beforeEach(() => vi.restoreAllMocks())`。
+## 测试策略
 
-## 覆盖范围
+### 当前策略
+- **单元测试** — API 客户端函数的请求/响应验证
+- **Mock 方式** — `vi.stubGlobal("fetch", mockFn)` 替换全局 fetch
+- **测试范围** — 仅覆盖 `lib/` 层的 API 客户端函数
 
-### 已覆盖
-
-| 模块 | 文件 | 用例数 | 覆盖范围 |
-|------|------|--------|---------|
-| `api.ts` | `__tests__/api.test.ts` | 4 | 核心封装（正常/错误/网络/请求头），未覆盖 Token 刷新/重试逻辑 |
-| `agent.ts` | `__tests__/agent.test.ts` | 1 | 仅 `submitAgentRunInput`，未覆盖 SSE stream、list/create/logs/kill |
-| `spec-workspaces.ts` | `__tests__/spec-workspaces.test.ts` | 1 | 仅 `bootstrapSpecWorkspace`，未覆盖 import/sync/update/conflicts |
-
-**总计: 3 个测试文件, 6 个用例**
-
-### 未覆盖（按优先级排序）
-
-#### 高优先级 -- API 层
-
-以下 `lib/*.ts` 模块无任何测试：
-
-- `api.ts` 的 Token 刷新/重试逻辑（最核心的认证逻辑，包含 401 自动刷新 + x-auth-retry 防循环 + refresh 失败清除 session）
-- `agent-stream.ts` -- SSE 重连（5 次指数退避）、去重（seenLogIds Set）、断线日志回填
-- `auth.ts` -- 登录/登出/token 刷新流程（login 调用两次 API：login + me）
-- `workspaces.ts` -- Workspace CRUD + 扫描 + 关系 + 拓扑（最核心的业务模块）
-- `changes.ts` -- 变更生命周期（最大的 API 模块，含 transition/feedback/dispatch/documents 等）
-- `workflow.ts` -- 审批 + 状态流转
-- `tasks.ts` -- 任务管理 + 看板
-- 其他 17 个模块: approvals/audit/incidents/releases/runtime/knowledge/scan-docs/health/git-identities/settings/archive/worktree/git-gateway/tool-gateway/change-writer/components/utils
-
-#### 中优先级 -- Store + 组件
-
-- `stores/session.ts` -- Token 管理、persist 持久化、hydration 逻辑、partialize
-- `components/workspace-scan-dialog.tsx` -- 多步骤扫描创建流程（6 个 phase 状态机）
-- `components/sillyspec-step-progress.tsx` -- 步骤进度展示（3 种渲染模式：无配置/无步骤/完整步骤）
-- `components/app-shell.tsx` -- 侧边栏导航、路由感知、logout 流程
-- `components/health-card.tsx` -- 定时轮询健康状态
-- 其他组件: workspace-card, component-detail-drawer, ui/*
-
-#### 低优先级 -- 页面层
-
-- 20 个 `page.tsx` 页面（建议使用 Playwright E2E 测试覆盖）
-- 1 个 Route Handler: SSE 代理（转发逻辑简单，但应验证 header 设置）
-
-## Mock 模式
-
-所有测试采用统一的 Mock 模式：
-
-```typescript
-// 1. 全局 fetch mock
+### Mock 模式
+```ts
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
 
-// 2. afterEach 清理
 afterEach(() => {
   fetchMock.mockReset();
 });
 
-// 3. 测试用例中设置 mock 返回值
+// 设置 mock 响应
 fetchMock.mockResolvedValueOnce(
-  new Response(JSON.stringify({ ... }), { status: 200 })
+  new Response(JSON.stringify({ ok: true }), { status: 200 })
 );
-
-// 4. 验证调用参数
-const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-expect(url).toContain("/api/...");
-expect(init.method).toBe("POST");
 ```
 
-注意：`@testing-library/react` 已安装但未使用。当前测试仅覆盖纯函数式 API 调用，未涉及 React 组件渲染测试。
+## 测试覆盖缺口
+
+| 未覆盖领域 | 说明 |
+|-----------|------|
+| **组件测试** | 无任何 React 组件的渲染/交互测试 |
+| **页面测试** | 无页面级测试（路由、数据加载、用户交互） |
+| **Store 测试** | Zustand session store 未测试 |
+| **auth.ts 测试** | 登录/登出/token 刷新流程未测试 |
+| **SSE 流测试** | AgentRunStreamClient 未测试 |
+| **集成测试** | 无端到端流程测试 |
+| **E2E 测试** | 无 Playwright/Cypress 测试 |
+| **TypeScript 类型测试** | 无类型层面的验证 |
+| **API 客户端** | 22 个模块中仅 2 个有测试（覆盖率 ~9%） |
+
+## 改进建议
+
+1. **优先为 auth.ts 添加测试** — token 刷新、登出逻辑复杂且关键
+2. **为 AgentRunStreamClient 添加测试** — 断线重连、消息去重是核心逻辑
+3. **添加关键页面测试** — 至少覆盖登录页、Workspace 详情页
+4. **考虑引入 TanStack Query Testing** — 如果后续迁移到 TanStack Query 管理服务端状态
+5. **添加 E2E 测试** — Playwright 覆盖核心用户流程（登录 → 创建 Workspace → 查看详情）

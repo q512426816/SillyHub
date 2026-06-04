@@ -1,0 +1,154 @@
+# 模块映射（自动生成，可手动修改）
+# author: qinyi
+# created_at: 2026-06-01T12:00:00
+# 用于 archive 阶段识别变更影响的模块
+
+modules:
+  # === Backend 核心基础设施 ===
+  core:
+    paths:
+      - backend/app/core/**
+    description: 核心基础设施（配置、数据库、安全、日志、遥测）
+
+  models:
+    paths:
+      - backend/app/models/**
+    description: 数据模型基类和共享模型定义
+
+  # === Backend 业务模块 ===
+  agent:
+    paths:
+      - backend/app/modules/agent/**
+    description: Agent 管理和运行（AgentRun CRUD、Agent 配置）
+
+  archive:
+    paths:
+      - backend/app/modules/archive/**
+    description: 变更归档（已完成变更的归档管理）
+
+  auth:
+    paths:
+      - backend/app/modules/auth/**
+    description: 认证授权（JWT、用户登录、Token 刷新）
+
+  change:
+    paths:
+      - backend/app/modules/change/**
+    description: 变更管理（Change CRUD、状态机、阶段流转）
+
+  change_writer:
+    paths:
+      - backend/app/modules/change_writer/**
+    description: 变更文档写入（将产出写入变更目录）
+
+  git_gateway:
+    paths:
+      - backend/app/modules/git_gateway/**
+    description: Git 网关（Worktree 操作、Git 命令代理）
+
+  git_identity:
+    paths:
+      - backend/app/modules/git_identity/**
+    description: Git 身份管理（用户 Git 配置）
+
+  health:
+    paths:
+      - backend/app/modules/health/**
+    description: 健康检查（应用和依赖状态检查）
+
+  incident:
+    paths:
+      - backend/app/modules/incident/**
+    description: 事件管理（运行时事件记录和查询）
+
+  knowledge:
+    paths:
+      - backend/app/modules/knowledge/**
+    description: 知识库（知识条目 CRUD）
+
+  release:
+    paths:
+      - backend/app/modules/release/**
+    description: 版本发布（Release 管理）
+
+  runtime:
+    paths:
+      - backend/app/modules/runtime/**
+    description: 运行时管理（子进程管理、Claude Code 集成）
+
+  scan_docs:
+    paths:
+      - backend/app/modules/scan_docs/**
+    description: 扫描文档（架构扫描结果管理）
+
+  settings:
+    paths:
+      - backend/app/modules/settings/**
+    description: 设置管理（用户/项目配置）
+
+  spec_profile:
+    paths:
+      - backend/app/modules/spec_profile/**
+    description: Spec Profile（规范配置模板）
+
+  spec_workspace:
+    paths:
+      - backend/app/modules/spec_workspace/**
+    description: Spec Workspace（工作区规范管理）
+
+  task:
+    paths:
+      - backend/app/modules/task/**
+    description: 任务管理（Task CRUD 和状态流转）
+
+  tool_gateway:
+    paths:
+      - backend/app/modules/tool_gateway/**
+    description: 工具网关（MCP 工具调用代理）
+
+  workflow:
+    paths:
+      - backend/app/modules/workflow/**
+    description: 工作流（阶段调度、brainstorm/plan/execute/verify 流程）
+
+  workspace:
+    paths:
+      - backend/app/modules/workspace/**
+    description: 工作区管理（Workspace CRUD）
+
+  worktree:
+    paths:
+      - backend/app/modules/worktree/**
+    description: Worktree 管理（Git Worktree 生命周期）
+
+  # === Frontend 模块 ===
+  frontend_app:
+    paths:
+      - frontend/src/app/**
+    description: Next.js App Router 页面和布局
+
+  frontend_components:
+    paths:
+      - frontend/src/components/**
+    description: React UI 组件库
+
+  frontend_lib:
+    paths:
+      - frontend/src/lib/**
+    description: 前端工具库（API 封装、类型定义、工具函数）
+
+  frontend_stores:
+    paths:
+      - frontend/src/stores/**
+    description: Zustand 状态管理（全局状态 Store）
+
+  # === 基础设施 ===
+  deploy:
+    paths:
+      - deploy/**
+    description: 部署配置（Docker Compose、Nginx）
+
+  docs:
+    paths:
+      - docs/**
+    description: 项目文档

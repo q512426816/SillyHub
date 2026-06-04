@@ -1,299 +1,244 @@
----
-author: qinyi
-created_at: 2026-06-03T20:35:00+08:00
----
+# SillyHub 目录结构文档
 
-# STRUCTURE.md — SillyHub 目录结构和文件组织
+author: scan-agent
+created_at: 2026-06-03T12:00:01
 
-## 根目录结构
+## 1. 顶层目录
 
 ```
-multi-agent-platform/
-├── .claude/                 ← Claude Code 配置
-│   ├── CLAUDE.md            ← 项目级开发规则（SillySpec 流程 + 执行顺序）
-│   ├── settings.json        ← Claude Code 权限和钩子配置
-│   └── worktrees/           ← Claude Code 工作树（gitignored）
-├── .editorconfig            ← 编辑器统一配置（UTF-8, LF, 2空格, Python 4空格）
-├── .gitignore               ← Git 忽略规则
-├── .github/
-│   └── workflows/
-│       ├── backend-ci.yml   ← 后端 CI 流水线（ruff + mypy + pytest）
-│       └── frontend-ci.yml  ← 前端 CI 流水线（lint + typecheck + test + build）
-├── .idea/                   ← IntelliJ IDEA 配置（gitignored）
-├── .playwright-mcp/         ← Playwright MCP 配置（gitignored）
-├── .pytest_cache/           ← pytest 缓存（gitignored）
-├── .ruff_cache/             ← Ruff 缓存（gitignored）
-├── .sillyspec/              ← SillySpec 文档系统
-│   ├── .runtime/            ← 运行时状态（gitignored）
-│   ├── changes/             ← 变更文档（活跃 + 归档）
-│   │   ├── archive/         ← 已归档变更包（13 个已完成的变更）
-│   │   ├── default/         ← 当前活跃变更
-│   │   └── ...              ← 其他活跃变更包
-│   ├── docs/                ← 模块文档和扫描文档
-│   │   ├── SillyHub/        ← 主项目文档
-│   │   │   ├── modules/     ← 模块文档（change_writer.md, git_gateway.md）
-│   │   │   └── scan/        ← 扫描文档（7 份，本文件所在目录）
-│   │   ├── backend/         ← 后端扫描文档
-│   │   ├── frontend/        ← 前端扫描文档
-│   │   └── multi-agent-platform/ ← 历史文档
-│   ├── knowledge/           ← 知识库
-│   │   └── INDEX.md         ← 知识条目索引
-│   ├── progress.json        ← SillySpec 进度状态（当前无活跃变更）
-│   ├── projects/            ← 子项目注册
-│   │   ├── SillyHub.yaml    ← monorepo 定义（type: platform, role: monorepo）
-│   │   ├── backend.yaml     ← 后端子项目
-│   │   └── frontend.yaml    ← 前端子项目（声明 depends_on backend）
-│   └── quicklog/            ← 快速日志
-├── .venv-spike/             ← Spike 专用虚拟环境（gitignored）
-├── CLAUDE.md                ← 项目级 CLAUDE 说明（技术栈 + 项目结构 + 开发规则）
-├── Makefile                 ← 顶层构建命令（dev-up, test, lint, up/down 等）
-├── README.md                ← 项目 README
-├── backend/                 ← 后端项目（详见下方）
-├── deploy/                  ← 部署配置（详见下方）
-├── docs/                    ← 项目文档（非 SillySpec）
-│   ├── qa/                  ← QA 文档
-│   ├── sillyhub_refs/       ← SillyHub 参考文档
-│   ├── agent-sillyspec-stage-execution-analysis.md
-│   ├── change-center-redesign.md
-│   ├── claude-loop-v1-p0.md
-│   ├── execution-plan-v2-v5.md
-│   └── spec-alignment.md
-├── frontend/                ← 前端项目（详见下方）
-└── spikes/                  ← 技术调研
-    ├── 01-git-isolation/    ← Git 凭据隔离验证（run.ps1）
-    ├── 02-workspace-scan/   ← Workspace 扫描验证（scan.py）
-    ├── 03-claude-code/      ← Claude Code 受控验证
-    ├── README.md            ← Spike 概述（3/3 PASS，V1 门禁解除）
-    └── REPORT.md            ← Spike 结果报告
+sillyhub/
+├── backend/              # Python FastAPI 后端（独立 pyproject.toml）
+├── frontend/             # Next.js 前端（独立 package.json）
+├── deploy/               # Docker Compose 配置
+│   ├── docker-compose.dev.yml     # 开发环境（仅 Postgres + Redis）
+│   └── docker-compose.yml         # 生产环境（全栈）
+├── docs/                 # 项目文档
+├── spikes/               # 技术探索 / 实验性代码
+├── .sillyspec/           # SillySpec 规范空间（规范、变更、文档）
+├── .github/              # GitHub CI/CD 配置
+├── .claude/              # Claude Code 配置
+├── .editorconfig          # 编辑器格式化配置
+├── .gitignore
+├── CLAUDE.md              # Claude Code 任务指令
+├── Makefile               # 统一开发命令入口
+└── README.md
 ```
 
-## 后端目录结构（backend/）
+## 2. 后端结构 (`backend/`)
 
 ```
 backend/
-├── .dockerignore
-├── .env.example             ← 后端环境变量模板
-├── Dockerfile               ← 多阶段 Docker 构建
-├── README.md
-├── alembic.ini              ← Alembic 配置（URL 从环境变量读取）
+├── pyproject.toml         # uv 项目配置 + 依赖声明 + 工具链配置
+├── uv.lock               # uv 锁文件
+├── alembic.ini            # Alembic 迁移配置
+├── conftest.py           # pytest 全局 fixtures（内存 SQLite + httpx.AsyncClient）
+├── .env                  # 环境变量（仅开发环境加载）
+├── migrations/
+│   ├── env.py            # Alembic 迁移环境
+│   ├── script.py.mako    # 迁移模板
+│   └── versions/         # 38 个增量迁移文件（按时间戳命名）
+│       ├── 202605251400_create_health_probe.py
+│       ├── 202605280900_create_auth_and_rbac.py
+│       ├── 202605260900_create_workspaces.py
+│       ├── 202605270900_create_components_and_relations.py
+│       ├── 202605290900_create_scan_documents.py
+│       ├── 202605300900_create_changes.py
+│       ├── 202605310900_create_tasks.py
+│       ├── 202606010900_create_git_identities.py
+│       ├── 202606020900_create_worktree_leases.py
+│       ├── 202606030900_create_git_operation_logs.py
+│       ├── 202606040900_create_workflow.py
+│       ├── 202606050900_create_agent_runs.py
+│       └── ...           # 更多迁移
 ├── app/
-│   ├── __init__.py          ← 版本号定义（__version__）
-│   ├── main.py              ← FastAPI 应用入口（create_app + lifespan + 路由注册）
-│   ├── core/                ← 基础设施层（13 个模块）
-│   │   ├── __init__.py
-│   │   ├── audit_hooks.py   ← 审计钩子
-│   │   ├── auth_deps.py     ← 认证依赖注入（get_current_user, require_role）
-│   │   ├── config.py        ← pydantic-settings（Settings 类，完整环境变量映射）
-│   │   ├── crypto.py        ← NaCl secretbox 加密/解密
-│   │   ├── db.py            ← 数据库连接池、会话工厂、init/dispose
-│   │   ├── errors.py        ← 统一异常体系（AppError 层次结构）
-│   │   ├── layout_migration.py ← SillySpec 布局迁移工具
-│   │   ├── logging.py       ← structlog 配置
-│   │   ├── redis.py         ← Redis 连接管理
-│   │   ├── security.py      ← JWT + 密码哈希（passlib bcrypt）
-│   │   ├── spec_paths.py    ← SillySpec 路径解析
-│   │   └── telemetry.py     ← OpenTelemetry 初始化
-│   ├── models/              ← 共享 SQLModel 基类和枚举
-│   └── modules/             ← 业务模块（23 个垂直切片）
+│   ├── __init__.py       # 版本号定义
+│   ├── main.py           # FastAPI 应用工厂 + 路由注册 + lifespan
+│   ├── core/             # 横切基础设施层（12 个模块）
+│   │   ├── config.py             # Pydantic Settings（数据库/Redis/JWT/CORS 等配置）
+│   │   ├── db.py                 # Async SQLAlchemy engine + session factory + 审计上下文注入
+│   │   ├── redis.py              # 进程级 Redis 异步客户端
+│   │   ├── security.py           # JWT HS256 + bcrypt 密码哈希 + refresh token
+│   │   ├── auth_deps.py          # FastAPI 认证/授权依赖注入
+│   │   ├── errors.py             # 统一错误类 + 异常处理器注册
+│   │   ├── audit_hooks.py        # SQLAlchemy 事件钩子自动审计
+│   │   ├── logging.py            # structlog 结构化日志配置
+│   │   ├── telemetry.py          # OpenTelemetry bootstrap（V1 stub）
+│   │   ├── crypto.py             # NaCl 加密工具
+│   │   ├── layout_migration.py   # 工作区布局迁移
+│   │   └── spec_paths.py         # SillySpec 路径解析
+│   ├── models/
+│   │   └── base.py       # SQLModel 基类（共享 metadata）
+│   └── modules/          # 21 个业务模块
 │       ├── __init__.py
-│       ├── agent/           ← Agent 运行管理（AgentRun CRUD + subprocess 调度）
-│       ├── archive/         ← 归档管理（变更包归档）
-│       ├── auth/            ← 认证和 RBAC（登录、角色、权限种子）
-│       ├── change/          ← 变更管理（10 阶段工作流）
-│       ├── change_writer/   ← 变更文件写入（SillySpec 文档生成）
-│       ├── git_gateway/     ← Git 操作网关（白名单 + 审计）
-│       ├── git_identity/    ← Git 身份管理（多身份 + PAT 加密）
-│       ├── health/          ← 健康检查探针
-│       ├── incident/        ← 事件管理
-│       ├── knowledge/       ← 知识库
-│       ├── release/         ← 发布管理
-│       ├── runtime/         ← 运行时管理
-│       ├── scan_docs/       ← 扫描文档管理（单组件解析/软删除）
-│       ├── settings/        ← 平台设置
-│       ├── spec_profile/    ← SillySpec 配置
-│       ├── spec_workspace/  ← SillySpec 工作区
-│       ├── task/            ← 任务管理
-│       ├── tool_gateway/    ← 工具网关（策略 + 审计）
-│       ├── workflow/        ← 工作流引擎（FSM 状态机）
-│       ├── workspace/       ← 工作区管理（CRUD + 组件拓扑）
-│       └── worktree/        ← Worktree 管理（创建/租约/清理）
-├── conftest.py              ← pytest 全局 fixtures（async DB、test client）
-├── create_tables.py         ← 手动建表脚本（开发用）
-├── docker-entrypoint.sh     ← Docker 入口脚本
-├── migrations/              ← Alembic 迁移
-│   ├── env.py               ← Alembic 环境配置（从 Settings 读取 DATABASE_URL）
-│   ├── script.py.mako       ← 迁移模板
-│   └── versions/            ← 迁移版本文件（32 个）
-├── pyproject.toml           ← Python 项目配置（依赖 + pytest + mypy + ruff）
-├── ruff.toml                ← Ruff 配置（extend pyproject.toml）
-├── tests/                   ← 测试
-│   ├── __init__.py
-│   ├── test_config.py       ← 配置测试
-│   ├── test_health.py       ← 健康检查测试
-│   └── modules/             ← 模块级测试
-│       ├── agent/           ← Agent 模块测试
-│       ├── change/          ← 变更模块测试
-│       ├── change_writer/   ← 变更写入测试
-│       └── workspace/       ← 工作区测试
-└── uv.lock                  ← uv 锁文件
+│       ├── workspace/             # 工作区管理
+│       │   ├── model.py           # Workspace, WorkspaceRelation, Component 等 SQLModel
+│       │   ├── router.py          # REST 路由
+│       │   ├── service.py         # 业务逻辑
+│       │   ├── schema.py          # Pydantic 请求/响应 schema
+│       │   ├── parser.py          # YAML 解析器
+│       │   ├── scanner.py         # 工作区扫描器
+│       │   ├── topology.py        # 拓扑图构建
+│       │   ├── relation_schema.py # 关系 schema
+│       │   ├── relation_service.py# 关系业务逻辑
+│       │   └── tests/             # 9 个测试文件
+│       ├── change/                # 变更管理
+│       │   ├── model.py           # Change, ChangeDocument, StageEnum + TRANSITIONS
+│       │   ├── router.py          # REST + transition 路由
+│       │   ├── service.py         # 变更生命周期
+│       │   ├── dispatch.py        # 阶段自动调度引擎
+│       │   ├── schema.py          # 请求/响应 schema
+│       │   ├── parser.py          # 文档解析器
+│       │   └── tests/
+│       ├── task/                  # 任务管理
+│       │   ├── model.py           # Task SQLModel
+│       │   ├── router.py / service.py / schema.py / parser.py
+│       │   └── tests/
+│       ├── agent/                 # AI Agent 执行引擎
+│       │   ├── base.py            # AgentAdapter 抽象基类 + AgentSpecBundle
+│       │   ├── model.py           # AgentRun SQLModel
+│       │   ├── router.py          # REST 路由
+│       │   ├── service.py         # Agent 启动/终止/状态管理
+│       │   ├── coordinator.py      # ExecutionCoordinator（幂等/乐观锁/checkpoint）
+│       │   ├── coordinator_schema.py
+│       │   ├── context_builder.py  # CLAUDE.md 构建器
+│       │   ├── diff_collector.py   # 工作区 diff 收集
+│       │   ├── adapters/
+│       │   │   └── claude_code.py # Claude Code CLI 适配器（stream-json 协议）
+│       │   └── tests/             # 7 个测试文件
+│       ├── workflow/              # 工作流引擎
+│       │   ├── model.py           # AuditLog, ChangeReview, FSM 状态
+│       │   ├── fsm.py             # TaskFSM（已废弃 ChangeFSM）
+│       │   ├── service.py         # 工作流服务
+│       │   ├── spec_guardian.py   # 阶段转换前置校验
+│       │   ├── router.py / schema.py
+│       │   └── tests/
+│       ├── worktree/              # Worktree 租约
+│       │   ├── model.py / router.py / service.py / schema.py
+│       │   ├── exec_env.py        # 执行环境管理
+│       │   ├── git_runner.py      # Git 操作运行器
+│       │   └── tests/
+│       ├── auth/                  # 认证 + RBAC
+│       │   ├── model.py           # User, Role, UserRole, RefreshToken
+│       │   ├── router.py / service.py / schema.py
+│       │   ├── permissions.py      # Permission StrEnum（25 个权限）
+│       │   └── rbac.py            # 权限检查逻辑
+│       ├── git_identity/          # Git 身份管理
+│       │   ├── model.py / router.py / service.py / schema.py
+│       │   └── providers/          # GitHub OAuth provider
+│       ├── git_gateway/           # Git 操作网关
+│       │   ├── model.py / router.py / service.py / schema.py
+│       │   └── tests/
+│       ├── tool_gateway/          # 工具执行网关
+│       │   ├── model.py / router.py / service.py / schema.py
+│       │   ├── policy_router.py / policy_schema.py / tool_policy.py
+│       │   └── tests/
+│       ├── scan_docs/             # Scan 文档管理
+│       │   ├── model.py / router.py / service.py / schema.py / parser.py
+│       │   └── tests/
+│       ├── spec_workspace/         # Spec 工作区管理
+│       │   ├── model.py / router.py / service.py / schema.py
+│       │   ├── bootstrap.py / validator.py
+│       │   └── tests/
+│       ├── spec_profile/          # Spec 配置 profile
+│       │   ├── model.py / schema.py / policy.py / provider.py
+│       │   └── tests/
+│       ├── release/               # 发布管理
+│       ├── incident/              # 事件管理
+│       ├── knowledge/             # 知识库
+│       ├── change_writer/         # 变更文档写入器
+│       ├── archive/               # 归档管理
+│       ├── runtime/               # 运行时监控
+│       ├── settings/              # 平台设置
+│       └── health/               # 健康检查
 ```
 
-## 前端目录结构（frontend/）
+## 3. 前端结构 (`frontend/`)
 
 ```
 frontend/
-├── .dockerignore
-├── .env.example             ← 前端环境变量模板（NEXT_PUBLIC_API_BASE_URL）
-├── .eslintrc.json           ← ESLint 配置
-├── Dockerfile               ← 多阶段构建（deps → builder → runtime, standalone 输出）
-├── components.json          ← shadcn/ui 配置
-├── next-env.d.ts
-├── next.config.mjs          ← Next.js 配置（standalone + API rewrite 代理）
-├── package.json             ← 依赖声明 + 脚本（dev/build/test/lint/typecheck）
-├── package-lock.json
+├── package.json           # 依赖声明（pnpm）
 ├── pnpm-lock.yaml
-├── postcss.config.mjs
-├── public/                  ← 静态资源
-├── src/
-│   ├── app/                 ← Next.js App Router
-│   │   ├── globals.css      ← 全局样式（Tailwind 指令 + 自定义变量）
-│   │   ├── layout.tsx       ← 根布局
-│   │   ├── page.tsx         ← 首页（工作区列表 + 健康检查）
-│   │   ├── (auth)/          ← 认证路由组
-│   │   │   └── login/page.tsx ← 登录页
-│   │   ├── (dashboard)/     ← 仪表盘路由组（需登录）
-│   │   │   ├── layout.tsx   ← 仪表盘布局（含侧边栏）
-│   │   │   ├── settings/    ← 设置页
-│   │   │   │   ├── page.tsx ← 平台设置
-│   │   │   │   └── git-identities/page.tsx ← Git 身份管理
-│   │   │   └── workspaces/  ← 工作区
-│   │   │       ├── page.tsx ← 工作区列表
-│   │   │       └── [id]/    ← 工作区详情（含 12 个子页面）
-│   │   └── api/             ← API Route Handlers
-│   │       └── workspaces/[workspaceId]/agent/runs/[runId]/stream/
-│   │           └── route.ts ← SSE 流式代理（转发后端 SSE 到前端）
-│   ├── components/          ← React 组件
-│   │   ├── app-shell.tsx    ← 应用外壳（导航 + 侧边栏）
-│   │   ├── component-detail-drawer.tsx ← 组件详情抽屉
-│   │   ├── health-card.tsx  ← 健康检查卡片
-│   │   ├── sillyspec-step-progress.tsx ← SillySpec 步骤进度
-│   │   ├── workspace-card.tsx ← 工作区卡片
-│   │   ├── workspace-scan-dialog.tsx ← 工作区扫描对话框
-│   │   └── ui/              ← 基础 UI 组件（shadcn/ui 风格）
-│   │       ├── badge.tsx
-│   │       ├── button.tsx
-│   │       └── input.tsx
-│   ├── lib/                 ← API 客户端（30+ 模块 API 封装）和工具
-│   │   ├── __tests__/       ← lib 层测试
-│   │   │   ├── agent.test.ts
-│   │   │   ├── api.test.ts
-│   │   │   └── spec-workspaces.test.ts
-│   │   ├── api.ts           ← 基础 API 封装（fetch + JWT + 错误处理）
-│   │   ├── agent-stream.ts  ← Agent SSE 流客户端
-│   │   ├── agent.ts         ← Agent API
-│   │   ├── approvals.ts     ← 审批 API
-│   │   ├── archive.ts       ← 归档 API
-│   │   ├── audit.ts         ← 审计 API
-│   │   ├── auth.ts          ← 认证 API
-│   │   ├── change-writer.ts ← 变更写入 API
-│   │   ├── changes.ts       ← 变更管理 API
-│   │   ├── components.ts    ← 组件 API
-│   │   ├── git-gateway.ts   ← Git 网关 API
-│   │   ├── git-identities.ts ← Git 身份 API
-│   │   ├── health.ts        ← 健康检查 API
-│   │   ├── incidents.ts     ← 事件 API
-│   │   ├── knowledge.ts     ← 知识库 API
-│   │   ├── releases.ts      ← 发布 API
-│   │   ├── runtime.ts       ← 运行时 API
-│   │   ├── scan-docs.ts     ← 扫描文档 API
-│   │   ├── settings.ts      ← 设置 API
-│   │   ├── spec-workspaces.ts ← SillySpec 工作区 API
-│   │   ├── tasks.ts         ← 任务 API
-│   │   ├── tool-gateway.ts  ← 工具网关 API
-│   │   ├── utils.ts         ← 工具函数（cn = clsx + tailwind-merge）
-│   │   ├── workflow.ts      ← 工作流 API
-│   │   ├── workspaces.ts    ← 工作区 API
-│   │   └── worktree.ts      ← Worktree API
-│   ├── stores/              ← Zustand 状态管理
-│   │   └── session.ts       ← 会话状态（token, user）
-│   └── test/                ← 测试设置
-│       └── setup.ts         ← vitest 全局设置
-├── tailwind.config.ts       ← Tailwind 配置
-├── tsconfig.json            ← TypeScript 配置（strict + noUncheckedIndexedAccess）
-└── vitest.config.ts         ← vitest 配置（jsdom + react plugin）
+├── next.config.mjs        # Next.js 配置（rewrites 代理 /api/*）
+├── tsconfig.json
+├── postcss.config.mjs      # PostCSS + Tailwind
+├── Dockerfile              # 生产 Docker 镜像
+├── .env.local              # 本地环境变量
+└── src/
+    ├── app/                        # Next.js App Router
+    │   ├── layout.tsx              # 根布局（中文 lang）
+    │   ├── page.tsx                # 首页
+    │   ├── globals.css             # 全局样式（Tailwind）
+    │   ├── (auth)/login/page.tsx  # 登录页
+    │   ├── (dashboard)/            # 仪表盘路由组
+    │   │   ├── layout.tsx          # Dashboard 布局
+    │   │   └── workspaces/
+    │   │       ├── page.tsx        # 工作区列表
+    │   │       └── [id]/
+    │   │           ├── page.tsx     # 工作区概览
+    │   │           ├── components/page.tsx + topology/page.tsx
+    │   │           ├── changes/[cid]/tasks/[tid]/page.tsx
+    │   │           ├── agent/page.tsx
+    │   │           ├── incidents/[iid]/page.tsx
+    │   │           ├── releases/page.tsx
+    │   │           ├── scan-docs/page.tsx
+    │   │           ├── knowledge/page.tsx
+    │   │           ├── audit/page.tsx
+    │   │           ├── approvals/page.tsx
+    │   │           ├── runtime/page.tsx
+    │   │           └── create-change/page.tsx
+    │   └── api/                     # Next.js Route Handlers（仅 SSE 代理）
+    │       └── workspaces/[workspaceId]/agent/runs/[runId]/stream/route.ts
+    ├── components/                  # UI 组件
+    │   ├── ui/                      # 基础 UI 组件（badge, button, input）
+    │   ├── app-shell.tsx            # 应用外壳
+    │   ├── workspace-card.tsx       # 工作区卡片
+    │   ├── component-detail-drawer.tsx
+    │   ├── workspace-scan-dialog.tsx
+    │   ├── health-card.tsx
+    │   └── sillyspec-step-progress.tsx
+    ├── lib/                         # API 客户端层（20+ 文件）
+    │   ├── api.ts                   # 核心封装（token 注入 + 错误处理）
+    │   ├── auth.ts / workspaces.ts / changes.ts / tasks.ts
+    │   ├── agent.ts / agent-stream.ts
+    │   ├── workflow.ts / releases.ts / incidents.ts
+    │   ├── git-gateway.ts / git-identities.ts
+    │   ├── tool-gateway.ts / scan-docs.ts / knowledge.ts
+    │   ├── change-writer.ts / archive.ts / audit.ts
+    │   ├── approvals.ts / runtime.ts / settings.ts
+    │   ├── spec-workspaces.ts / components.ts / worktree.ts
+    │   ├── health.ts / utils.ts
+    │   └── __tests__/               # 前端单元测试
+    │       ├── api.test.ts
+    │       ├── agent.test.ts
+    │       └── spec-workspaces.test.ts
+    ├── stores/
+    │   └── session.ts              # Zustand session store（localStorage 持久化）
+    └── test/
+        └── setup.ts                # Vitest 全局 setup
 ```
 
-## 部署目录结构（deploy/）
+## 4. 部署结构 (`deploy/`)
 
 ```
 deploy/
-├── .env                     ← 运行时环境变量（gitignored，包含所有敏感配置）
-├── .env.example             ← 环境变量模板（PostgreSQL/Redis/Backend/Frontend/Claude Code/Auth 配置）
-├── docker-compose.yml       ← 全栈部署配置（4 服务 + 5 持久卷）
-└── docker-compose.dev.yml   ← 开发依赖配置（仅 postgres + redis）
+├── docker-compose.dev.yml   # 开发环境：PostgreSQL 16 + Redis 7（后端/前端本地运行）
+└── docker-compose.yml       # 生产环境：全栈容器化部署
+    ├── postgres             # PostgreSQL 16 Alpine
+    ├── redis                # Redis 7 Alpine（AOF 持久化）
+    ├── backend              # FastAPI + Claude Code CLI + SillySpec CLI
+    └── frontend             # Next.js standalone
 ```
 
-## Spikes 目录结构（spikes/）
+## 5. 文件统计
 
-```
-spikes/
-├── 01-git-isolation/        ← Spike 1: Git 凭据隔离
-│   ├── README.md            ← PASS 条件和测试步骤
-│   └── run.ps1              ← Windows PowerShell 执行脚本
-├── 02-workspace-scan/       ← Spike 2: SillySpec 目录解析
-│   ├── README.md
-│   ├── scan.py              ← Python 扫描脚本
-│   └── requirements.txt
-├── 03-claude-code/          ← Spike 3: Claude Code 子进程可控性
-│   ├── README.md
-│   └── requirements.txt
-├── README.md                ← Spike 概述（3/3 PASS, V1 门禁解除）
-└── REPORT.md                ← 全部 Spike 结果报告
-```
-
-## 配置文件索引
-
-| 文件 | 用途 |
-|------|------|
-| `Makefile` | dev/test/lint/deploy 快捷命令 |
-| `.editorconfig` | 编辑器统一（2 空格、Python 4 空格、LF、UTF-8） |
-| `.gitignore` | Python/Node/Docker/SillySpec/IDE 忽略 |
-| `deploy/.env.example` | 环境变量模板（含 Claude Code 配置、Auth 引导、API 超时） |
-| `deploy/docker-compose.yml` | 全栈编排（postgres + redis + backend + frontend） |
-| `deploy/docker-compose.dev.yml` | 开发依赖（postgres + redis，端口映射到宿主机） |
-| `.github/workflows/backend-ci.yml` | 后端 CI（ruff + mypy + pytest） |
-| `.github/workflows/frontend-ci.yml` | 前端 CI（lint + typecheck + test + build） |
-| `CLAUDE.md` | 项目级说明（技术栈 + 项目结构 + 开发规则） |
-| `.claude/CLAUDE.md` | 开发流程规则（SillySpec 流程 + 执行顺序） |
-| `backend/pyproject.toml` | Python 依赖 + pytest + mypy + ruff 配置 |
-| `backend/ruff.toml` | Ruff 配置（extend pyproject.toml） |
-| `backend/alembic.ini` | Alembic 配置 |
-| `frontend/package.json` | 前端依赖 + 脚本 |
-| `frontend/tsconfig.json` | TypeScript 配置 |
-| `frontend/vitest.config.ts` | vitest 配置 |
-| `frontend/next.config.mjs` | Next.js 配置 |
-| `frontend/tailwind.config.ts` | Tailwind 配置 |
-| `.sillyspec/projects/SillyHub.yaml` | monorepo 定义 |
-| `.sillyspec/projects/backend.yaml` | 后端子项目 |
-| `.sillyspec/projects/frontend.yaml` | 前端子项目 |
-| `.sillyspec/progress.json` | SillySpec 工作流进度 |
-| `.sillyspec/knowledge/INDEX.md` | 知识库索引 |
-
-## .sillyspec 目录规范
-
-```
-.sillyspec/
-├── projects/          # 子项目声明（YAML）
-├── changes/
-│   ├── <active>/      # 活跃变更包（含 proposal, design, plan, tasks/）
-│   └── archive/       # 已归档变更（13 个已完成的变更包）
-├── docs/{component}/
-│   ├── scan/          # 7 维扫描文档（ARCHITECTURE, PROJECT, STRUCTURE, CONVENTIONS, INTEGRATIONS, TESTING, CONCERNS）
-│   └── modules/       # 模块级文档
-├── knowledge/         # 项目知识库
-├── quicklog/          # 快速记录
-├── progress.json      # 工作流进度
-└── .runtime/          # 本地运行态（gitignored）
-```
-
-每个组件（SillyHub / backend / frontend）在 `docs/` 下有独立的 `scan/` 和 `modules/` 目录，形成分层认知体系。
+| 分类 | 文件数 | 说明 |
+|------|--------|------|
+| 后端 Python 源码 | ~160 | 含 core/ + modules/ + models/ + main.py |
+| 后端测试 | 182 | test_*.py |
+| 后端迁移 | 38 | Alembic versions |
+| 后端配置 | ~6 | pyproject.toml, alembic.ini, conftest.py 等 |
+| 前端 TS/TSX | ~70 | 含 pages, components, lib |
+| 前端测试 | 159 | *.test.ts（含 node_modules 里的） |
+| 前端配置 | ~8 | package.json, next.config, tsconfig 等 |
+| 部署配置 | 2 | docker-compose 文件 |
+| 根目录配置 | ~8 | Makefile, CLAUDE.md, README 等 |

@@ -1,218 +1,174 @@
----
-author: qinyi
-created_at: 2026-06-03T20:35:00+08:00
----
+# SillyHub 架构文档
 
-# ARCHITECTURE.md — SillyHub 整体架构
+author: scan-agent
+created_at: 2026-06-03T12:00:00
 
-## Monorepo 结构
+## 1. 总体架构
 
-SillyHub 采用 monorepo 结构，所有代码在一个 Git 仓库中管理：
+SillyHub 采用经典的前后端分离架构：
 
-```
-multi-agent-platform/          ← monorepo 根目录
-├── backend/                   ← FastAPI 后端（Python 3.12）
-│   ├── app/                   ← 应用源码
-│   │   ├── core/              ← 基础设施层（config, db, auth, errors, crypto, redis, spec_paths）
-│   │   ├── models/            ← SQLModel 数据模型
-│   │   └── modules/           ← 业务模块（23 个子模块）
-│   ├── migrations/            ← Alembic 数据库迁移（32 个版本文件）
-│   ├── tests/                 ← 测试代码
-│   ├── Dockerfile             ← 后端多阶段构建（node-tools → builder → runtime）
-│   └── pyproject.toml         ← Python 项目配置
-├── frontend/                  ← Next.js 前端（TypeScript）
-│   ├── src/
-│   │   ├── app/               ← Next.js App Router 页面（20+ 路由）
-│   │   ├── components/        ← React 组件（app-shell, ui/ 基础组件）
-│   │   ├── lib/               ← API 客户端（30+ 模块 API 封装）和工具函数
-│   │   └── stores/            ← Zustand 状态管理
-│   ├── Dockerfile             ← 前端多阶段构建（deps → builder → runtime）
-│   └── package.json
-├── deploy/                    ← Docker Compose 部署
-│   ├── docker-compose.yml     ← 全栈部署（postgres + redis + backend + frontend）
-│   ├── docker-compose.dev.yml ← 开发依赖（仅 postgres + redis）
-│   └── .env.example           ← 环境变量模板
-├── docs/                      ← 项目文档（设计分析、QA、参考资料）
-├── spikes/                    ← 技术调研记录（3/3 PASS）
-└── .sillyspec/                ← SillySpec 文档系统
-```
-
-## 前后端关系
-
-### 通信方式
-
-- 前端通过 **REST API** 调用后端（`/api/*` 路径前缀）
-- 前端 Next.js 提供 **API 代理 rewrite**：将 `/api/:path*` 转发到后端服务
-- Agent 运行支持 **SSE（Server-Sent Events）** 实时流式推送
-- Docker 部署时前端通过 `INTERNAL_API_BASE_URL` 直接访问后端容器
-
-### API 架构
-
-后端 API 统一挂载在 `/api` 前缀下，由 `app/main.py` 中的 `create_app()` 注册所有路由。当前注册了 23 个路由模块：
-
-| 路由模块 | 路径前缀 | 功能 |
-|----------|----------|------|
-| health | /api | 健康检查 |
-| workspace | /api | 工作区管理 |
-| auth | /api | 认证与 RBAC |
-| change | /api | 变更管理 |
-| scan_docs | /api | 扫描文档 |
-| task | /api | 任务管理 |
-| git_identity | /api | Git 身份管理 |
-| agent | /api | Agent 运行 |
-| worktree | /api | Worktree 管理 |
-| lease | /api | Worktree 租约 |
-| git_gateway | /api | Git 操作网关 |
-| change_writer | /api | 变更写入 |
-| workflow | /api | 工作流引擎 |
-| incident | /api | 事件管理 |
-| knowledge | /api | 知识库 |
-| release | /api | 发布管理 |
-| runtime | /api | 运行时管理 |
-| tool_gateway | /api | 工具网关 |
-| policy | /api | 工具策略 |
-| archive | /api | 归档管理 |
-| settings | /api | 平台设置 |
-| spec_workspace | /api | SillySpec 工作区 |
-| spec_profile | — | SillySpec 配置（内部使用） |
-
-### 前端路由结构
+- **后端**：Python FastAPI 应用，提供 RESTful JSON API，监听 8000 端口
+- **前端**：Next.js 14 (App Router) SPA + SSR，监听 3000 端口
+- **通信**：前端通过 Next.js rewrites 代理 `/api/*` 请求到后端；SSE 用于 Agent 运行时实时日志流
 
 ```
-/                           → 首页（工作区列表）
-/login                      → 登录页
-/workspaces                 → 工作区列表
-/workspaces/[id]            → 工作区详情（含子页面）
-  /agent                    → Agent 交互页（SSE 流式）
-  /approvals                → 审批管理
-  /audit                    → 审计日志
-  /changes                  → 变更列表
-    /[cid]                  → 变更详情
-      /tasks                → 任务列表
-        /[tid]              → 任务详情
-  /components               → 组件管理
-    /topology               → 组件拓扑图
-  /create-change            → 创建变更
-  /incidents                → 事件列表
-    /[iid]                  → 事件详情
-  /knowledge                → 知识库
-  /releases                 → 发布列表
-  /runtime                  → 运行时
-  /scan-docs                → 扫描文档
-/settings                   → 平台设置
-/settings/git-identities    → Git 身份管理
-/api/workspaces/[id]/agent/runs/[runId]/stream → SSE 流式代理 Route Handler
+┌─────────────┐     /api/* 代理      ┌──────────────────────────┐
+│   Next.js    │ ──────────────────→ │      FastAPI (uvicorn)    │
+│   前端 :3000  │                      │          后端 :8000       │
+└─────────────┘                      └───────┬──────────────────┘
+                                              │
+                                    ┌─────────┴─────────┐
+                                    │                   │
+                              ┌─────▼─────┐     ┌─────▼─────┐
+                              │ PostgreSQL │     │   Redis    │
+                              │   :5432    │     │   :6379    │
+                              └───────────┘     └───────────┘
 ```
 
-## 部署架构
+## 2. 后端架构
 
-### 生产部署（docker-compose.yml）
+### 2.1 分层结构
 
-```
-                    ┌─────────────────────────────────┐
-                    │        Docker Compose 网络        │
-                    │                                   │
-  用户浏览器 ──────→│  frontend (Next.js, port 3000)    │
-                    │    │ rewrite /api/*               │
-                    │    ↓                               │
-                    │  backend (FastAPI, port 8000)      │
-                    │    │             │                 │
-                    │    ↓             ↓                 │
-                    │  postgres:16   redis:7             │
-                    │  (volume)      (volume)            │
-                    │                                   │
-                    │  挂载卷：                          │
-                    │  - /host-projects → 宿主项目目录     │
-                    │  - worktree-data → Agent 工作树     │
-                    │  - spec-data → SillySpec 数据      │
-                    │  - claude-data → Claude 配置       │
-                    └─────────────────────────────────┘
-```
-
-### 开发模式（docker-compose.dev.yml）
-
-仅启动 PostgreSQL 和 Redis 作为开发依赖，前端和后端在宿主机上直接运行（uvicorn --reload / next dev），加快迭代速度。
-
-### 后端容器特性
-
-- 多阶段构建：node-tools（Claude Code + SillySpec CLI）→ builder（uv 依赖安装）→ runtime（slim 镜像）
-- 内嵌 Claude Code CLI 和 SillySpec CLI（通过 npm 全局安装）
-- 非 root 用户运行（app 用户）
-- 启动时自动执行 `alembic upgrade head` 数据库迁移
-- 挂载宿主项目目录以读取 .sillyspec 树
-- 支持 OTLP 遥测导出
-- 健康检查：`curl -fsS http://127.0.0.1:8000/api/health`
-- 路径重写：`HOST_PATH_PREFIX` / `CONTAINER_PATH_PREFIX` 环境变量
-
-### 前端容器特性
-
-- 多阶段构建：deps（pnpm install）→ builder（next build standalone）→ runtime（最小镜像）
-- Next.js standalone 输出模式
-- 非 root 用户运行（nextjs 用户）
-- 健康检查：`wget -qO- http://127.0.0.1:3000`
-
-## 后端模块架构
-
-后端采用模块化设计，每个业务模块位于 `app/modules/` 下，结构统一：
+后端采用 **模块化单体（Modular Monolith）** 模式，每个业务域封装为独立模块：
 
 ```
-app/modules/<module>/
-├── router.py      ← FastAPI 路由定义
-├── service.py     ← 业务逻辑
-├── models.py      ← SQLModel 数据模型（部分模块）
-└── schemas.py     ← Pydantic 请求/响应模型（部分模块）
+app/
+├── main.py              # 应用入口 + 路由注册 + lifespan
+├── core/                # 横切关注点（配置、DB、安全、错误处理）
+│   ├── config.py        # Pydantic Settings（环境变量驱动）
+│   ├── db.py            # Async SQLAlchemy engine + session factory
+│   ├── redis.py         # 进程级 Redis 单例
+│   ├── security.py      # JWT + bcrypt 密码哈希
+│   ├── auth_deps.py     # FastAPI 依赖注入（get_current_user / require_permission）
+│   ├── errors.py        # 统一错误信封 + 异常处理器
+│   ├── audit_hooks.py   # SQLAlchemy 事件钩子自动审计日志
+│   └── telemetry.py     # OpenTelemetry bootstrap（V1 no-op）
+├── models/
+│   └── base.py          # SQLModel 基类（共享 metadata）
+└── modules/             # 21 个业务模块
+    ├── agent/           # AI Agent 执行引擎
+    ├── workspace/       # 工作区 + 组件管理
+    ├── change/          # 变更管理 + 阶段状态机
+    ├── task/            # 任务管理
+    ├── workflow/        # 工作流 FSM + 审计 + Spec Guardian
+    ├── worktree/        # Worktree 租约管理
+    ├── auth/            # 认证 + RBAC
+    └── ...              # 其余 15 个模块
 ```
 
-核心基础设施层 `app/core/` 提供：
+### 2.2 核心数据流
 
-| 模块 | 职责 |
-|------|------|
-| config | pydantic-settings 配置管理（环境变量、SECRET_KEY、CORS 等） |
-| db | 数据库连接池、会话工厂（asyncpg + SQLModel） |
-| auth_deps | 认证依赖注入（JWT + RBAC 角色） |
-| security | 密码哈希、JWT 令牌生成/验证 |
-| crypto | 敏感数据加密/解密（NaCl secretbox） |
-| errors | 统一异常体系（AppError 基类 + HTTP 异常映射） |
-| redis | Redis 连接管理 |
-| logging | structlog 日志配置 |
-| telemetry | OpenTelemetry 初始化 |
-| spec_paths | SillySpec 路径解析和布局迁移 |
-| audit_hooks | 审计钩子 |
-| layout_migration | 布局迁移工具 |
-
-## 应用生命周期
+**Agent 执行流程**（最核心的业务流程）：
 
 ```
-应用启动 (lifespan)
-  → configure_logging
-  → init_telemetry
-  → bootstrap_admin_and_seed_rbac（首次启动创建管理员 + RBAC 角色）
-  → yield（服务运行中）
-  → dispose_engine（关闭数据库连接池）
-  → close_redis（关闭 Redis 连接）
+用户触发变更 → ChangeService.transition_with_dispatch()
+  → SillySpecStageDispatchService.dispatch_next_step()
+    → AgentService.start_stage_dispatch()
+      → WorktreeService.acquire_lease()（如需 worktree）
+      → ContextBuilder 构建 AgentSpecBundle
+      → ClaudeCodeAdapter.run_with_bundle()（子进程执行 Claude Code CLI）
+        → Redis Pub/Sub 实时推送日志到前端
+      → ExecutionCoordinatorService.save_checkpoint()
+      → sync_stage_status() → auto_dispatch_next_step()（自动链式调度）
 ```
 
-## 数据库迁移
+### 2.3 模块关系图
 
-使用 Alembic 管理，当前有 32 个迁移版本文件，涵盖以下数据表：
+```
+workspace ◄──────┐
+    │            │ (WorkspaceRelation)
+    ├── components    │
+    ├── relations    │
+    └── topology     │
+                   │
+change ──► task ──► agent ◄── worktree
+  │                                    │
+  ├── dispatch (stage agent)           ├── claude_code adapter
+  ├── documents                       ├── context_builder
+  └── stage FSM                       └── coordinator
+        │
+workflow ──► audit_hooks (SQLAlchemy events)
+        ──► spec_guardian (transition validation)
 
-- health_probe（健康探针）
-- workspaces + components + relations（工作区、组件、关系拓扑）
-- auth + rbac（用户、角色、权限）
-- changes + tasks（变更、任务）
-- git_identities + git_operation_logs（Git 身份、操作日志）
-- agent_runs + worktree_leases（Agent 运行、工作树租约）
-- scan_documents（扫描文档）
-- workflow + releases + incidents（工作流、发布、事件）
-- spec_workspaces + spec_profile（SillySpec 工作区、配置）
-- tool_policies + tool_operation_logs（工具策略、操作日志）
-- platform_settings（平台设置）
+auth ──► rbac ──► permissions (StrEnum)
+                 ──► auth_deps (FastAPI Depends)
 
-## 关键设计决策
+git_identity ──► providers/github (OAuth)
+tool_gateway ──► tool_policy (工具白名单)
+release ◄─── change
+incident ◄─── agent
+knowledge ◄─── workspace
+scan_docs ◄─── workspace
+spec_workspace ◄─── workspace
+spec_profile ──► policy/provider
+settings ◀── platform config
+archive ◀── change lifecycle end
+runtime ◀── workspace monitoring
+health ◀── heartbeat
+```
 
-1. **SillySpec 文档驱动**：所有功能变更必须先有文档（proposal + design + tasks），禁止先写代码再补文档
-2. **主机项目挂载**：Docker 部署时通过卷挂载将宿主机项目目录映射到容器内，支持扫描 `.sillyspec` 目录
-3. **Agent 集成**：通过 Claude Code CLI 作为 Agent 适配器（subprocess 模式），支持异步 AgentRun + SSE 流式输出
-4. **路径重写**：容器内通过 `HOST_PATH_PREFIX` / `CONTAINER_PATH_PREFIX` 环境变量实现路径映射
-5. **白名单安全**：Git 操作白名单审计 + Shell 注入防护 + 输出脱敏
-6. **文件系统 + DB 双写**：SillySpec 文档以文件系统为主，DB 为查询加速
+## 3. 前端架构
+
+### 3.1 技术选型
+
+- **框架**：Next.js 14 (App Router)，支持 SSR + Client Components
+- **状态管理**：Zustand（持久化 session store）+ React Query（服务端数据缓存）
+- **UI**：Tailwind CSS + Radix 风格的组件（button, badge, input）
+- **可视化**：@xyflow/react（组件拓扑图）
+- **Markdown**：@uiw/react-markdown-preview
+
+### 3.2 路由结构
+
+```
+src/app/
+├── (auth)/login/                # 登录页
+├── (dashboard)/                 # 需要认证的仪表盘路由组
+│   ├── layout.tsx                # Dashboard 布局
+│   ├── workspaces/               # 工作区列表
+│   │   └── [id]/                 # 工作区详情
+│   │       ├── page.tsx          # 概览
+│   │       ├── components/       # 组件管理 + 拓扑图
+│   │       ├── changes/          # 变更管理
+│   │       │   └── [cid]/tasks/  # 任务列表 + 详情
+│   │       ├── agent/            # Agent 运行管理
+│   │       ├── incidents/        # 事件管理
+│   │       ├── releases/         # 发布管理
+│   │       ├── scan-docs/        # Scan 文档查看
+│   │       ├── knowledge/        # 知识库
+│   │       ├── audit/            # 审计日志
+│   │       ├── approvals/        # 审批
+│   │       └── runtime/          # 运行时监控
+│   └── settings/                 # 平台设置
+└── api/                          # Next.js API Routes（仅 SSE 代理）
+    └── workspaces/[workspaceId]/agent/runs/[runId]/stream/
+```
+
+### 3.3 前端数据层
+
+每个后端模块对应一个 `src/lib/*.ts` API 客户端文件，统一通过 `apiFetch()` 调用后端：
+
+```
+src/lib/
+├── api.ts              # 核心 fetch wrapper（token 注入、错误处理、自动刷新）
+├── auth.ts / workspaces.ts / changes.ts / tasks.ts / ...
+├── agent.ts / agent-stream.ts   # Agent SSE 实时日志
+├── workflow.ts
+└── utils.ts
+```
+
+## 4. 关键设计决策
+
+### 4.1 模块化单体 vs 微服务
+采用模块化单体模式：所有模块在同一进程内运行，通过 Python import 直接调用，降低了分布式系统的复杂性。模块边界通过清晰的目录结构和依赖方向（core ← modules，模块间禁止循环依赖）来维护。
+
+### 4.2 SQLModel + Async SQLAlchemy
+使用 SQLModel 作为 ORM 层，统一 Pydantic schema 和 SQL 表定义。数据库访问全部通过 `AsyncSession` 进行异步操作。
+
+### 4.3 Agent 子进程模型
+Claude Code 作为子进程执行（非 in-process），通过 stream-json 协议捕获完整对话日志，通过 Redis Pub/Sub 实时推送给前端。这种设计隔离了 Agent 运行时的稳定性问题。
+
+### 4.4 统一错误信封
+所有 API 错误返回统一的 JSON 结构 `{code, message, request_id, details}`，前端 `ApiError` 类直接映射。
+
+### 4.5 自动审计
+通过 SQLAlchemy `after_insert/update/delete` 事件钩子自动记录所有模型变更到 `audit_logs` 表，无需业务代码显式写入。

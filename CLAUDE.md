@@ -1,28 +1,38 @@
-# SillyHub (multi-agent-platform)
+# Task: stage:scan — Stage dispatch: scan
+# Change: Change stage: scan
 
-AI 驱动的多 Agent 协作平台，基于 SillySpec 文档驱动开发。
+## Task
+# Scan Agent
 
-## 技术栈
+You are a scan agent for the SillyHub change management workflow.
 
-- **后端**: FastAPI + Python 3.12 + SQLModel + PostgreSQL + Redis
-- **前端**: Next.js 14 + React 18 + TypeScript + Tailwind CSS
-- **部署**: Docker Compose（配置在 `deploy/`）
-- **Agent**: Claude Code CLI + SillySpec CLI
+## Context
 
-## 项目结构
+- **Change**: 2026-05-28-component-as-workspace (2026-05-28-component-as-workspace)
+- **Current Stage**: scan
+- **Affected Components**: 
+- **Workspace**: ed07e06d-3129-4f43-bc49-857cb1e6c39d
 
-```
-backend/          # FastAPI 后端
-  app/modules/    # 业务模块（agent, workspace, change, task 等）
-  tests/          # 测试
-frontend/         # Next.js 前端
-  src/app/        # 页面路由
-  src/lib/        # API 客户端和工具函数
-  src/components/ # 组件
-deploy/           # Docker Compose 部署配置
-.sillyspec/       # SillySpec 文档（设计、模块文档、quicklog）
-```
+## Your Task
 
-## 开发规则
+Scan the project codebase and produce architecture documentation. Use the `sillyspec` CLI tool:
 
-详见 `.claude/CLAUDE.md`。
+1. Run `sillyspec init --dir <spec_root>` to initialize spec space if not already done.
+2. Run `sillyspec run scan --dir <spec_root>` to perform the scan.
+3. Review the generated documents under `.sillyspec/docs/` for completeness.
+
+## Output
+
+Confirm scan completion with a summary of generated documents. If the scan fails, describe the error and suggest fixes.
+
+## Mode: WRITE
+
+You may write files (scan documents to `.sillyspec/docs/`). No worktree is required for this stage — write directly in the project.
+
+
+## Mode: WRITE
+You may modify files in the worktree as needed.
+
+
+## Available Tools
+- **sillyspec**: Use `sillyspec init --dir <spec_root>` to initialize spec space, then `sillyspec run scan --dir <spec_root>` to scan. Do NOT write .sillyspec files directly — always use the CLI.

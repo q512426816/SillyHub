@@ -1,236 +1,162 @@
----
-author: qinyi
-created_at: 2026-06-03T20:35:00+08:00
----
+# SillyHub 测试文档
 
-# TESTING.md — SillyHub 测试策略和工具链
+author: scan-agent
+created_at: 2026-06-03T12:00:04
 
-## 测试分层
+## 1. 后端测试
 
-```
-┌─────────────────────────────────┐
-│         E2E 测试（手动）         │  前端 → 后端全链路
-├─────────────────────────────────┤
-│       集成测试 (pytest)         │  API 端到端 + DB
-├─────────────────────────────────┤
-│       单元测试 (pytest/vitest)  │  纯逻辑 + mock
-├─────────────────────────────────┤
-│     静态分析 (ruff/mypy/eslint) │  类型 + 风格
-└─────────────────────────────────┘
-```
+### 1.1 框架与工具
 
-## 后端测试
+- **测试框架**：pytest 8+
+- **异步支持**：pytest-asyncio（asyncio_mode=auto）
+- **覆盖率**：pytest-cov（要求 >= 60%）
+- **HTTP 测试**：httpx.AsyncClient + ASGITransport（模拟 FastAPI 请求）
+- **内存数据库**：aiosqlite（替代 PostgreSQL，无外部依赖）
+- **Mock**：标准 unittest.mock / pytest monkeypatch
 
-### 测试框架
+### 1.2 测试配置
 
-- **pytest** + pytest-asyncio（异步测试，auto 模式）
-- **pytest-cov**（覆盖率报告，阈值 >= 60%）
-- **httpx.AsyncClient**（FastAPI TestClient 替代）
-- **anyio**（异步测试工具）
-- **aiosqlite**（SQLite 内存数据库，可选）
-
-### 测试配置（pyproject.toml）
-
-```toml
-[tool.pytest.ini_options]
+```ini
+# pyproject.toml [tool.pytest.ini_options]
 asyncio_mode = "auto"
 addopts = "-ra"
-testpaths = ["tests", "app"]
+testpaths = ["tests", "app"]      # 搜索顶层 tests/ 和各模块内 tests/
 python_files = ["test_*.py"]
 ```
 
-- 同时发现顶层集成测试（`tests/`）和模块内单元测试（`app/`）
-- 自动异步模式，无需 `@pytest.mark.asyncio` 装饰器
+### 1.3 全局 Fixtures（conftest.py）
 
-### 测试类型和位置
+`backend/conftest.py` 提供以下核心 fixtures：
 
-| 类型 | 位置 | 说明 |
-|------|------|------|
-| 集成测试 | `tests/` | 全局 conftest.py 提供 async DB + test client fixtures |
-| 配置测试 | `tests/test_config.py` | Settings 配置验证 |
-| 健康检查测试 | `tests/test_health.py` | /api/health 端点测试 |
-| 模块测试 | `tests/modules/` | 各模块独立测试 |
-| Agent 测试 | `tests/modules/agent/` | Agent 调度相关 |
-| 变更测试 | `tests/modules/change/` | 变更管理 |
-| 变更写入测试 | `tests/modules/change_writer/` | 文档生成 |
-| 工作区测试 | `tests/modules/workspace/` | 工作区 CRUD |
-| 模块内测试 | `app/modules/*/tests/` | 紧贴业务代码的单元测试 |
+- **`_reset_settings_cache`**（autouse）：每个测试前后清除 Settings 缓存
+- **`db_engine`**：创建内存 SQLite 引擎 + 自动建表（注册所有模块 model）
+- **`db_session`**：提供 AsyncSession（绑定到测试引擎）
+- **`client`**：httpx.AsyncClient 绑定到 FastAPI app + 测试 DB
+- **`auth_admin_token`**：创建管理员用户并返回 access token
+- **`auth_headers`**：`{"Authorization": "Bearer ..."}` 字典
 
-### conftest.py 全局 Fixtures
+### 1.4 测试隔离策略
 
-`backend/conftest.py` 提供：
-- 异步数据库会话（测试 DB）
-- httpx.AsyncClient（FastAPI 测试客户端）
-- 认证 fixtures（测试用户、JWT token）
-- 数据清理
+- **不依赖外部服务**：所有测试使用内存 SQLite，无需 Postgres/Redis
+- **环境变量预设**：`conftest.py` 在 import app 前注入安全默认值
+- **Settings 缓存清理**：autouse fixture 确保每个测试获取干净的 Settings
+- **DB session 隔离**：每个测试函数获得独立的 AsyncSession
+- **App 依赖覆盖**：client fixture 通过 `dependency_overrides` 替换 `get_session`
 
-### CI 测试环境
+### 1.5 测试组织
 
-```yaml
-DATABASE_URL: postgresql+asyncpg://platform:platform@localhost:5432/platform_test
-REDIS_URL: redis://localhost:6379/15
-SECRET_KEY: ci-secret-must-be-at-least-16-chars
-ENVIRONMENT: test
+测试文件放置在各模块的 `tests/` 子目录中：
+
+```
+backend/app/modules/
+├── agent/tests/         # 7 个测试文件
+│   ├── test_adapter_isolation.py
+│   ├── test_base.py
+│   ├── test_context_builder.py
+│   ├── test_diff_collector.py
+│   ├── test_kill.py
+│   ├── test_m2n_agent_run.py
+│   └── test_router.py
+├── workspace/tests/     # 9 个测试文件
+│   ├── test_model.py
+│   ├── test_parser.py
+│   ├── test_router.py
+│   ├── test_service.py
+│   ├── test_scanner.py
+│   ├── test_relation_router.py
+│   ├── test_relation_service.py
+│   ├── test_m2n_change.py
+│   ├── test_m2n_task.py
+│   └── test_topology.py
+├── change/tests/        # 4 个测试文件
+│   ├── test_dispatch.py
+│   ├── test_parser.py
+│   ├── test_router.py
+│   └── test_transition_response.py
+├── workflow/tests/       # 4 个测试文件
+│   ├── test_fsm.py
+│   ├── test_router.py
+│   ├── test_audit_hooks.py
+│   └── test_spec_guardian.py
+├── worktree/tests/       # 2 个测试文件
+├── auth/tests/           # 无测试文件（认证通过集成测试覆盖）
+├── git_gateway/tests/    # 3 个测试文件
+├── git_identity/tests/   # 2 个测试文件
+├── scan_docs/tests/      # 3 个测试文件
+├── spec_workspace/tests/ # 2 个测试文件
+├── spec_profile/tests/   # 1 个测试文件
+├── tool_gateway/tests/   # 3 个测试文件
+├── task/tests/          # 2 个测试文件
+├── incident/tests/       # 2 个测试文件
+├── release/tests/        # 2 个测试文件
+├── change_writer/tests/ # 2 个测试文件
+├── archive/tests/        # 1 个测试文件
+├── runtime/tests/       # 1 个测试文件
+└── knowledge/tests/      # 2 个测试文件
 ```
 
-- 使用独立的 `platform_test` 数据库
-- Redis 使用 DB 15 隔离
-- SECRET_KEY 为 CI 专用固定值
-- 超时 15 分钟
-
-### 覆盖率
-
-- 命令：`pytest -q --cov=app --cov-fail-under=60`
-- 当前阈值：60%
-- CI 门禁：覆盖率低于 60% 流水线失败
-- 后续目标提升到 80%
-
-### 后端 Lint 检查链
+### 1.6 运行命令
 
 ```bash
-uv run ruff check .              # 代码风格 + 导入 + 常见错误
-uv run ruff format --check .     # 格式检查
-uv run mypy app                  # 类型检查
+make backend-test    # pytest -q --cov=app --cov-fail-under=60
+cd backend && uv run pytest -q          # 快速运行
+cd backend && uv run pytest -v          # 详细输出
+cd backend && uv run pytest -v -k "test_router"  # 过滤运行
 ```
 
-CI 中三个命令串行执行，任一失败则流水线失败。
+## 2. 前端测试
 
-## 前端测试
+### 2.1 框架与工具
 
-### 测试框架
+- **测试框架**：Vitest 2.0
+- **DOM 模拟**：jsdom
+- **React 测试**：@testing-library/react + @testing-library/jest-dom
+- **React 插件**：@vitejs/plugin-react
 
-- **vitest** 2.0（单元测试 + 组件测试）
-- **@testing-library/react**（组件测试工具）
-- **@testing-library/jest-dom**（DOM 断言扩展）
-- **jsdom**（浏览器环境模拟）
-- **TypeScript 类型检查**（`pnpm typecheck`，strict 模式）
+### 2.2 测试配置
 
-### 测试配置（vitest.config.ts）
+Vitest 全局 setup 位于 `src/test/setup.ts`，引入 jest-dom 匹配器。
 
-```typescript
-{
-  plugins: [react()],
-  test: {
-    environment: "jsdom",
-    globals: true,
-    setupFiles: ["./src/test/setup.ts"],
-    css: false,
-  },
-  resolve: {
-    alias: { "@": path.resolve(__dirname, "./src") },
-  },
-}
+### 2.3 测试文件
+
+```
+frontend/src/lib/__tests__/
+├── api.test.ts              # apiFetch 核心封装测试（5 个用例）
+│   ├── 200 响应 JSON 解析
+│   ├── 4xx 结构化错误
+│   ├── 网络错误包装
+│   └── x-request-id 请求头
+├── agent.test.ts            # Agent API 测试
+└── spec-workspaces.test.ts  # Spec 工作区 API 测试
 ```
 
-### 测试文件
-
-| 位置 | 内容 |
-|------|------|
-| `src/test/setup.ts` | vitest 全局设置 |
-| `src/lib/__tests__/api.test.ts` | API 客户端工具函数测试 |
-| `src/lib/__tests__/agent.test.ts` | Agent API 客户端测试 |
-| `src/lib/__tests__/spec-workspaces.test.ts` | SillySpec 工作区 API 测试 |
-
-### CI 检查链
+### 2.4 运行命令
 
 ```bash
-pnpm install --frozen-lockfile   # 锁定依赖
-pnpm lint                         # ESLint 检查
-pnpm typecheck                    # TypeScript 严格模式（tsc --noEmit）
-pnpm test                         # vitest
-pnpm build                        # Next.js 构建（最终兜底）
+make frontend-test    # pnpm test (= vitest run)
+pnpm test:watch       # vitest（watch 模式）
 ```
 
-构建（`pnpm build`）是最终兜底，确保编译无错误。
+## 3. 测试策略总结
 
-### 前端测试现状
+### 3.1 后端策略
 
-- 当前测试覆盖以 lib 层 API 客户端工具函数为主
-- 组件级测试待补充
-- E2E 测试（Playwright）在配置中预留（`CLAUDE_PLUGIN_PLAYWRIGHT_ENABLED=true`），但尚未集成到 CI
+- **层级**：HTTP 级集成测试为主（通过 client fixture 发送真实 HTTP 请求）
+- **隔离**：每个测试使用独立内存数据库 + 独立 session
+- **认证**：auth_admin_token fixture 提供预认证 token，auth_headers fixture 提供请求头
+- **覆盖目标**：>= 60%（pytest-cov --cov-fail-under=60）
+- **测试发现**：同时搜索顶层 `tests/` 和模块内 `tests/`
 
-## CI/CD 流水线
+### 3.2 前端策略
 
-### 触发规则
+- **层级**：API 客户端单元测试（mock fetch）
+- **范围**：主要测试 `apiFetch` 核心封装、错误处理、token 注入
+- **覆盖范围**：当前覆盖核心 API 层，页面组件暂无测试
 
-| 流水线 | 触发路径 | 触发事件 |
-|--------|----------|----------|
-| backend-ci | `backend/**` + workflow 文件 | push / PR / workflow_dispatch |
-| frontend-ci | `frontend/**` + workflow 文件 | push / PR / workflow_dispatch |
-
-- 使用路径过滤避免无关变更触发 CI
-- 支持 `workflow_dispatch` 手动触发
-
-### 执行环境
-
-- **Runner**：ubuntu-latest
-- **Python**：3.12（通过 uv 安装）
-- **Node.js**：20（通过 pnpm）
-- **超时**：15 分钟
-
-### 无 E2E CI
-
-当前 CI 不包含端到端测试。全链路验证依赖：
-
-- 手动 E2E：`make up` 启动后浏览器访问 `localhost:3000`
-- 健康检查：首页应显示后端健康状态
-- Agent E2E：通过前端界面触发变更流程，验证 Claude Code 执行
-
-## 本地开发测试命令
+### 3.3 测试命令汇总
 
 ```bash
-# 完整测试
-make test                          # 后端 pytest + 前端 vitest
-
-# 分项测试
-make backend-test                  # pytest -q --cov=app --cov-fail-under=60
-make frontend-test                 # pnpm test（vitest run）
-
-# lint 检查
-make lint                          # 后端 ruff+mypy + 前端 eslint+typecheck
-make backend-lint                  # ruff check + format check + mypy
-make frontend-lint                 # pnpm lint
-make frontend-typecheck            # pnpm typecheck（tsc --noEmit）
-
-# 格式化
-make backend-format                # ruff format + ruff check --fix
-
-# 构建
-make frontend-build                # pnpm build
-make backend-migrate               # alembic upgrade head
+make test        # 后端 + 前端全部测试
+make backend-test
+make frontend-test
 ```
-
-## 测试策略改进方向
-
-### 短期目标
-
-- 提升后端覆盖率到 75%
-- 补充前端组件测试
-- 增加 API 集成测试用例
-
-### 中期目标
-
-- 引入 Playwright E2E（CI 集成）
-- 覆盖率阈值 80%
-- CI 并行化
-
-### 长期目标
-
-- 全栈 E2E 自动化
-- 性能基准测试
-- 安全扫描（依赖审计 + SAST）
-
-## 测试数据与环境
-
-- 后端测试使用独立 `platform_test` 数据库，Redis DB 15 隔离
-- 测试间通过 pytest fixture 管理 DB 清理
-- 前端测试通过 vitest mock 隔离网络请求
-- conftest.py 提供完整的基础设施 fixtures
-
-## Spike 验证
-
-V0 通过 3 个 spike 验证关键技术风险（3/3 PASS，详见 `spikes/REPORT.md`）：
-
-1. **01-git-isolation**：单机多用户 Git 凭据 / 环境隔离
-2. **02-workspace-scan**：SillySpec Native Layout 实际可解析、性能可接受
-3. **03-claude-code**：Claude Code 子进程可受控、工具调用可拦截

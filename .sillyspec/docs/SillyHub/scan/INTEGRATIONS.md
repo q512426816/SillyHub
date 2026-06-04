@@ -1,259 +1,196 @@
----
-author: qinyi
-created_at: 2026-06-03T20:35:00+08:00
----
+# SillyHub 集成文档
 
-# INTEGRATIONS.md — SillyHub 外部集成
+author: scan-agent
+created_at: 2026-06-03T12:00:03
 
-## 子项目间集成
+## 1. PostgreSQL 集成
 
-### Frontend → Backend
+### 1.1 连接配置
 
-**协议**：HTTP REST API + SSE
-
-前端通过 `src/lib/api.ts` 统一封装 fetch，指向 `NEXT_PUBLIC_API_BASE_URL`：
+后端通过 `Settings.database_url` 配置数据库连接，使用 AsyncPG 驱动：
 
 ```
-前端 (Next.js :3000) → HTTP → 后端 (FastAPI :8000)
-  ↑ SSE 流式推送（Agent 日志）
+DATABASE_URL=postgresql+asyncpg://platform:platform@localhost:5432/platform
 ```
 
-- 基础 URL 从环境变量读取，自动附加 JWT token
-- Docker 内网：`INTERNAL_API_BASE_URL=http://backend:8000`
-- CORS 通过 `CORS_ALLOWED_ORIGINS` 配置（默认 `["http://localhost:3000"]`）
-- API 按业务模块拆分为 30+ 独立 API 客户端文件（`src/lib/*.ts`）
-- Agent 运行日志通过 SSE Route Handler（`/api/workspaces/[id]/agent/runs/[runId]/stream`）代理转发
+### 1.2 连接池
 
-### Backend 数据层
+`app/core/db.py` 管理全局 AsyncEngine，连接池参数：
+- `pool_size`：10
+- `max_overflow`：10
+- `pool_timeout`：30s
+- `pool_recycle`：1800s（30 分钟回收）
+- `pool_pre_ping`：启用（自动检测断连）
 
-```
-backend → PostgreSQL 16 (asyncpg) + SQLModel + Alembic
-  → 异步连接池
-  → 32 个迁移版本
+### 1.3 Session 管理
 
-backend → Redis 7 (缓存/会话)
-  → async redis client
-```
+- 通过 `get_session()` FastAPI 依赖注入 AsyncSession
+- `expire_on_commit=False`：提交后对象属性仍可访问
+- `autoflush=False`：手动控制 flush 时机
+- 异常时自动 `rollback`
 
-### Backend → Git
+### 1.4 审计上下文注入
 
-```
-backend → GitGatewayService → subprocess (git CLI)
-  → 白名单审计 + 输出脱敏 + 审计日志（GitOperationLog 表）
-  → 支持操作：status/diff/add/commit/push/pull/fetch/log/branch/checkout/merge/rebase
-  → 禁止：--force/--hard/clean
-  → Shell 注入防护（管道、命令替换、链式执行）
-  → PAT/Bearer token 自动遮蔽
-```
+`get_session()` 在创建 session 时自动从 Bearer token 中提取 `actor_id` 和 `workspace_id`，注入到 `session.info["audit_context"]`。SQLAlchemy 事件钩子读取此上下文写入审计日志。
 
-### Backend → Claude Code
+### 1.5 数据库迁移
 
-```
-backend → AgentDispatchService → Claude Code subprocess
-  → worktree 隔离 + ContextBuilder + SSE 日志流
-  → 环境变量注入（ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_MODEL）
-  → 超时：API_TIMEOUT_MS=3000000（50 分钟）
-```
+使用 Alembic 管理数据库 schema，迁移文件位于 `backend/migrations/versions/`，按时间戳命名。当前共 38 个迁移文件，覆盖所有业务表。
 
-### 生成项目规范（scan-generate / Bootstrap 数据流）
-
-「生成项目规范」统一为 Bootstrap 流程：弹窗只负责扫描 + 新建 + 跳转，详情页承载触发 / 实时回显 / 进入恢复，后端保证幂等。端到端数据流：
-
-```
-弹窗（workspace-scan-dialog） → POST /api/workspaces/scan-generate
-  → workspace.service.scan_generate（幂等）
-      ├─ 查询是否已有进行中（pending/running 且 change_id IS NULL）的 scan run
-      │    有 → 直接返回该 run，不新建
-      │    无 → 触发 scan dispatch 新建 scan run
-  → 弹窗不在弹窗内订阅 SSE，scanGenerate 成功后 router.push('/workspaces/{id}') 跳详情页
-
-详情页 page.tsx load()
-  → GET /api/workspaces/{id}/agent/runs  筛出进行中的 scan run
-  → GET /api/workspaces/{id}/agent/runs/{run_id}/stream（SSE）自动恢复日志回显
-  → 刷新 / 重进详情页可恢复回显；run done 后刷新「项目组组件」计数
-
-scan run 成功收尾（agent.service._execute_scan_run，exit_code == 0）
-  → 自动 reparse spec_root/projects/*.yaml 创建子 workspace + relations
-  → reparse 包在独立 try/except，失败仅 log.warning，不改变 run 的 completed 状态
-```
-
-要点：
-- **后端幂等**：`scan_generate` 在触发 dispatch 前查进行中 scan run（`pending`/`running` 且 `change_id IS NULL`），命中则复用，防重复点击下沉到后端，多标签页 / 并发安全。
-- **弹窗去 SSE**：弹窗职责单一化（扫描 + 新建 + 跳转），不再在弹窗内即时回显。
-- **回显恢复**：详情页基于真实 run 状态恢复 SSE 回显，无新增 `sync_status` 等字段。
-- **自动子组件**：scan 成功后由 `_execute_scan_run` 收尾 reparse 创建子 workspace，子组件计数随之刷新。
-- 复用既有 SSE / agent runs / reparse 基础设施，**无新增表 / 字段 / API**。
-
-## 外部服务
-
-### Anthropic / 智谱 API
-
-```
-Claude Code → ANTHROPIC_BASE_URL (智谱代理: https://open.bigmodel.cn/api/anthropic)
-  ├─ ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-5
-  ├─ ANTHROPIC_DEFAULT_SONNET_MODEL=glm-5.1
-  ├─ ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.1
-  └─ CLAUDE_CODE_MODEL=opus[1m]，超时 50min
-```
-
-- 通过智谱 API 的 Anthropic 兼容接口调用
-- 非 Anthropic 原生 API
-- 超时配置 API_TIMEOUT_MS=3000000ms
-
-### GitHub API
-
-```
-change_writer → httpx → GitHub REST API
-  → 创建 PR（PAT 解密后使用，不落日志）
-```
-
-- 使用 Git Identity 中加密存储的 PAT
-- 解密后仅在内存使用，日志脱敏
-
-### OpenTelemetry（预留）
-
-- SDK 已集成（`app/core/telemetry.py`）
-- `OTEL_ENDPOINT` 配置就绪
-- 当前未启用（OTEL_ENDPOINT 为空）
-- 后续可接入 Grafana/Jaeger
-
-## 部署基础设施
-
-### Docker Compose（全栈）
-
-```
-docker-compose.yml
-├─ postgres:16-alpine    → pgdata 卷（健康检查: pg_isready）
-├─ redis:7-alpine        → redisdata 卷（健康检查: redis-cli ping）
-├─ backend               → alembic migrate + uvicorn :8000（依赖 postgres + redis healthy）
-└─ frontend              → Next.js :3000（依赖 backend）
-```
-
-启动依赖链：`postgres (healthy) + redis (healthy) → backend → frontend`
-
-持久卷：
-- pgdata — PostgreSQL 数据
-- redisdata — Redis 数据（appendonly）
-- worktree-data — Agent 工作树
-- spec-data — SillySpec 数据
-- claude-data — Claude Code 配置
-
-### Docker Compose（开发）
-
-```
-docker-compose.dev.yml
-├─ postgres:16-alpine    → 端口映射 5432:5432
-└─ redis:7-alpine        → 端口映射 6379:6379
-```
-
-仅启动基础设施，前后端在宿主机上用 `uvicorn --reload` / `pnpm dev` 运行。
-
-### 宿主机挂载
-
-后端挂载 `${HOST_PROJECTS_DIR:-C:/Users/qinyi/IdeaProjects}:/host-projects`，通过 `HOST_PATH_PREFIX` / `CONTAINER_PATH_PREFIX` 映射，供 SillySpec 扫描读取 `.sillyspec/` 目录。
-
-### 后端启动流程
-
+迁移命令：
 ```bash
-# Docker entrypoint
-alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+make backend-migrate   # alembic upgrade head
 ```
 
-1. 执行数据库迁移（alembic upgrade head）
-2. 启动 FastAPI 应用（uvicorn）
-3. lifespan 钩子：配置日志 → 初始化遥测 → 创建管理员 + RBAC 种子
+### 1.6 核心数据表
 
-### 前端启动流程
+| 表 | 模块 | 用途 |
+|----|------|------|
+| users | auth | 用户账户 |
+| roles / user_roles | auth | RBAC 角色绑定 |
+| refresh_tokens | auth | Refresh token 存储 |
+| workspaces | workspace | 工作区 |
+| workspace_relations | workspace | 工作区间关系 |
+| changes / change_documents | change | 变更管理 |
+| tasks | task | 任务管理 |
+| agent_runs | agent | Agent 运行记录 |
+| worktree_leases | worktree | Worktree 租约 |
+| audit_logs | workflow | 自动审计日志 |
+| change_reviews | workflow | 变更审批 |
+| git_identities | git_identity | Git 身份凭证 |
+| git_operation_logs | git_gateway | Git 操作日志 |
+| tool_operation_logs | tool_gateway | 工具操作日志 |
+| tool_policies | tool_gateway | 工具策略 |
+| releases | release | 发布记录 |
+| incidents | incident | 事件记录 |
+| scan_documents | scan_docs | Scan 文档索引 |
+| spec_workspaces | spec_workspace | Spec 工作区 |
+| spec_profiles | spec_profile | Spec 配置 profile |
+| platform_settings | settings | 平台设置 |
+| health_probes | health | 健康检查 |
+| agent_run_workspaces | workspace | Agent 运行 ↔ 工作区 M:N |
 
-```bash
-node server.js  # standalone 模式
-```
+## 2. Redis 集成
 
-- Next.js standalone 输出
-- API 请求 rewrite 到后端
-
-### frp 隧道
-
-```
-公网 → frp server → frp client → localhost:3000
-```
-
-前端通过 frp 暴露给公网，后端主要供内网调用。
-
-## CI/CD
-
-### GitHub Actions
-
-#### backend-ci
-
-```
-触发：backend/** push/PR + workflow_dispatch
-步骤：
-  1. checkout (actions/checkout@v6)
-  2. setup uv (astral-sh/setup-uv@v8.1.0, version 0.4.18)
-  3. install Python 3.12
-  4. uv sync --all-extras
-  5. ruff check .
-  6. ruff format --check .
-  7. mypy app
-  8. pytest -q --cov=app --cov-fail-under=60
-环境变量：
-  DATABASE_URL=postgresql+asyncpg://platform:platform@localhost:5432/platform_test
-  REDIS_URL=redis://localhost:6379/15
-  SECRET_KEY=ci-secret-must-be-at-least-16-chars
-  ENVIRONMENT=test
-超时：15 分钟
-```
-
-#### frontend-ci
+### 2.1 连接配置
 
 ```
-触发：frontend/** push/PR + workflow_dispatch
-步骤：
-  1. checkout (actions/checkout@v4)
-  2. setup pnpm (pnpm/action-setup@v4, version 9.6.0)
-  3. setup Node 20 (actions/setup-node@v4, pnpm cache)
-  4. pnpm install --frozen-lockfile
-  5. pnpm lint
-  6. pnpm typecheck
-  7. pnpm test
-  8. pnpm build（NEXT_PUBLIC_API_BASE_URL=http://localhost:8000）
-超时：15 分钟
+REDIS_URL=redis://localhost:6379/0
 ```
 
-### Makefile 命令
+使用 `redis.asyncio.Redis` 客户端，全局单例模式（`app/core/redis.py`），自动管理连接池，健康检查间隔 30 秒。
 
-| 命令 | 作用 |
-|------|------|
-| `make dev-up` | 启动 PG + Redis（docker-compose.dev.yml） |
-| `make dev-down` | 停止开发依赖 |
-| `make dev-logs` | 查看开发依赖日志 |
-| `make dev-reset` | 清除 PG/Redis 数据（DESTRUCTIVE） |
-| `make up` | 全栈容器启动（docker-compose.yml） |
-| `make down` | 全栈容器停止 |
-| `make logs` | 全栈容器日志 |
-| `make test` | 后端 pytest + 前端 vitest |
-| `make lint` | 后端 ruff+mypy + 前端 eslint+typecheck |
-| `make backend-install` | uv sync |
-| `make backend-run` | uvicorn --reload :8000 |
-| `make backend-test` | pytest --cov --cov-fail-under=60 |
-| `make backend-lint` | ruff check + format check + mypy |
-| `make backend-format` | ruff format + ruff check --fix |
-| `make backend-migrate` | alembic upgrade head |
-| `make frontend-install` | pnpm install |
-| `make frontend-run` | pnpm dev |
-| `make frontend-test` | pnpm test |
-| `make frontend-lint` | pnpm lint |
-| `make frontend-typecheck` | pnpm typecheck |
-| `make frontend-build` | pnpm build |
+### 2.2 用途
 
-## 集成风险
+Redis 主要用于 **Agent 运行时的实时日志推送**：
 
-| 风险 | 影响 | 缓解 |
-|------|------|------|
-| 宿主机路径映射不一致 | SillySpec 扫描失败 | 正确配置 HOST_PATH_PREFIX + HOST_PROJECTS_DIR |
-| 智谱 API 限流/不稳定 | Agent 执行超时 | API_TIMEOUT_MS=3000000 + 重试策略 |
-| Docker 卷数据丢失 | 数据库数据丢失 | 定期备份 pgdata 卷 |
-| frp 隧道不稳定 | 公网不可访问 | 健康检查 + 自动重连 |
-| Claude Code 版本锁定 | 功能过期 | .env 中 CLAUDE_CODE_VERSION 可调整 |
-| SillySpec CLI 版本锁定 | 兼容性风险 | .env 中 SILLYSPEC_VERSION 可调整 |
+- Agent 子进程的 stdout/stderr 通过 `redis.publish(channel, message)` 发布
+- 前端通过 SSE 代理订阅 Redis Pub/Sub channel `agent_run:{run_id}`
+- 消息格式：`{"channel": "stdout"|"stderr"|"tool_call"|"done", "content": "...", "timestamp": "..."}`
+
+## 3. 认证系统
+
+### 3.1 认证流程
+
+**登录**：
+1. 用户提交 email + password
+2. 后端验证凭据（bcrypt 哈希比对）
+3. 返回 `access_token`（JWT HS256, 15 分钟 TTL）+ `refresh_token`（opaque, 32 字节）
+4. 前端存入 Zustand session store（localStorage 持久化）
+
+**请求认证**：
+1. 前端 `apiFetch` 自动从 session store 读取 `accessToken`
+2. 附加 `Authorization: Bearer <token>` 请求头
+3. 后端 `auth_deps.get_current_user()` 解码 JWT + 查询用户
+
+**Token 刷新**：
+1. Access token 过期（401 响应）
+2. 前端自动调用 `/api/auth/refresh`，传入 refresh_token
+3. 获取新的 access_token + refresh_token
+4. 重试原始请求
+5. 刷新失败则清除 session，跳转登录页
+
+**安全设计**：
+- Refresh token 在 DB 中存储为 bcrypt 哈希
+- 重放检测：如果 refresh token 被重用，所有 session 立即失效（`AuthRefreshReused`）
+- 密码哈希使用 bcrypt（cost 12 生产环境，cost 4 测试环境）
+
+### 3.2 RBAC 权限模型
+
+权限通过 `Permission` StrEnum 定义（25 个权限），分为 7 个域：
+
+- **Platform**：platform:admin, platform:billing, platform:audit:read
+- **Workspace**：workspace:read/write/admin/member:manage
+- **Change**：change:create/read/update/approve/archive
+- **Task**：task:read/create/assign/run_agent/cancel/approve
+- **Code**：code:read/write/review/merge
+- **Deploy**：deploy:staging/production/rollback
+- **Tool**：tool:shell_exec/network/database/secret:read
+
+权限检查通过 `require_permission(Permission.X)` FastAPI 依赖注入实现，在路由级别显式声明。
+
+### 3.3 管理员引导
+
+应用启动时自动引导管理员账户（通过 `PLATFORM_BOOTSTRAP_ADMIN_*` 环境变量），并初始化 RBAC 角色和权限。
+
+## 4. 前后端 API 对接
+
+### 4.1 请求代理
+
+Next.js 通过 `rewrites` 将前端 `/api/*` 请求代理到后端：
+
+```javascript
+// next.config.mjs
+rewrites() {
+  return [{
+    source: "/api/:path*",
+    destination: `${apiBaseUrl}/api/:path*`,
+  }];
+}
+```
+
+### 4.2 SSE 直连
+
+Agent 实时日志通过 SSE（Server-Sent Events）推送，前端使用 `getDirectApiBaseUrl()` 直连后端（绕过 Next.js 代理的缓冲问题），通过 Next.js Route Handler (`src/app/api/workspaces/.../stream/route.ts`) 代理。
+
+### 4.3 错误格式
+
+后端统一错误信封：
+```json
+{
+  "code": "workspace_not_found",
+  "message": "Workspace not found.",
+  "request_id": "uuid",
+  "details": { "workspace_id": "uuid" }
+}
+```
+
+前端 `ApiError` 类直接映射此结构。
+
+### 4.4 CORS
+
+后端通过 `CORSMiddleware` 配置 `cors_allowed_origins`，暴露 `x-request-id` 响应头。
+
+## 5. Claude Code 集成
+
+### 5.1 Agent 执行
+
+后端通过 `ClaudeCodeAdapter` 将 Claude Code CLI 作为子进程启动：
+- 使用 stream-json 协议捕获完整对话
+- 通过 `--permission-mode bypassPermissions` 跳过交互确认
+- 通过 `--disallowedTools AskUserQuestion` 禁止用户交互
+- 工作目录设为 Worktree 租约路径
+
+### 5.2 SillySpec CLI 集成
+
+Agent 可以调用 `sillyspec` CLI 工具进行规范生成和管理。
+
+## 6. Git 集成
+
+### 6.1 Git Identity 管理
+
+通过 `git_identity` 模块管理 GitHub OAuth 身份，凭证使用 NaCl 加密存储。
+
+### 6.2 Git Gateway
+
+`git_gateway` 模块提供 Git 操作 API，输出自动脱敏（redact）。

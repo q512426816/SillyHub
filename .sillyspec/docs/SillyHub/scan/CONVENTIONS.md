@@ -1,240 +1,194 @@
----
-author: qinyi
-created_at: 2026-06-03T20:35:00+08:00
----
+# SillyHub 编码规范文档
 
-# CONVENTIONS.md — SillyHub 项目级编码规范和约定
+author: scan-agent
+created_at: 2026-06-03T12:00:02
 
-## 分支策略
+## 1. 后端 Python 规范
 
-- **main**：主分支，始终保持可部署状态
-- **feature/***：功能分支，从 main 创建，PR 合入
-- 代码修改通过 **worktree 隔离**进行，不依赖传统分支隔离
-- GitGateway 白名单拒绝 `--force` 推送到 main/master
+### 1.1 项目配置
 
-## Commit 规范
+- **Python 版本**：>= 3.12
+- **包管理器**：uv
+- **构建系统**：hatchling
+- **Lint 工具链**：Ruff（lint + format）+ Mypy（类型检查）
+- **Ruff 配置**：line-length=100, target-version=py312
+- **Ruff 规则集**：E, F, I, B, UP, N, SIM, RUF, BLE
+- **测试框架**：pytest + pytest-asyncio（asyncio_mode=auto）
 
-### 格式
+### 1.2 API 路由规范
 
-```
-<type>(<scope>): <description>
-```
+每个业务模块包含 `router.py`，注册到 FastAPI 应用时统一添加 `/api` 前缀：
 
-### Type 列表
-
-| 类型 | 用途 |
-|------|------|
-| feat | 新功能 |
-| fix | Bug 修复 |
-| refactor | 重构（不改变行为） |
-| docs | 文档变更 |
-| test | 测试相关 |
-| chore | 构建/工具/配置 |
-| perf | 性能优化 |
-| ci | CI/CD 相关 |
-
-### Scope
-
-- 后端：模块名（auth、workspace、git_gateway、agent 等）
-- 前端：frontend 或具体页面名
-- 顶层：deploy、ci、sillyspec
-
-### 示例
-
-```
-feat(git_gateway): add retry policy with exponential backoff
-fix(workspace): resolve path rewriting on Windows
-docs(readme): update local development setup
-refactor: ruff lint 合规 + ScanDocs 单组件解析/软删除 + 测试适配 auto-reparse
+```python
+# 注册路由（app/main.py）
+app.include_router(workspace_router, prefix="/api")
 ```
 
-## PR 规范
+路由使用 FastAPI 依赖注入获取认证信息和数据库会话：
 
-### 描述模板
-
-```markdown
-## 变更内容
-- [x] 做了什么
-
-## 关联
-- SillySpec 变更包：`.sillyspec/changes/<key>/`
-
-## 测试
-- [x] `make backend-test` 通过
-- [x] `make frontend-test` 通过
-
-## 验证步骤
-1. 具体可执行的验证步骤
+```python
+@router.get("/workspaces/{workspace_id}")
+async def get_workspace(
+    workspace_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> WorkspaceRead:
+    ...
 ```
 
-- 至少一人 Review
-- CI 全绿
-- 数据库迁移必须人工审查
+权限检查通过 `require_permission()` 依赖实现，每个受保护路由显式声明所需权限。
 
-## 代码风格
+### 1.3 Pydantic Schema 规范
 
-### 通用（.editorconfig）
+每个模块的 `schema.py` 定义请求/响应模型，使用 Pydantic v2：
 
-- UTF-8 编码
-- LF 换行
-- 末尾空行
-- 去除尾部空格（Markdown 除外）
-- 默认 2 空格缩进
-- Python 4 空格缩进
-- Makefile tab 缩进
+- **请求 schema**：以 `Create` / `Update` 命名
+- **响应 schema**：以 `Read` / `ListResponse` 命名
+- Schema 继承 SQLModel 模型的字段，可添加计算字段
 
-### 后端（Python）
+### 1.4 SQLModel 模型规范
 
-- **格式化**：Ruff（`ruff format .` + `ruff check .`）
-- **类型检查**：mypy（`uv run mypy app`）
-- **线宽**：100 字符（pyproject.toml `line-length = 100`）
-- **命名**：snake_case（函数/变量）、PascalCase（类）
-- **异步**：所有 DB/IO 操作使用 async/await
-- **错误处理**：通过 `app.core.errors` 统一异常体系（AppError 基类）
-- **日志**：structlog 结构化日志
-- **导入排序**：Ruff isort（I 规则）
+所有持久化模型继承自 `app.models.base.BaseModel`（而非直接继承 SQLModel），确保共享统一的 metadata 对象供 Alembic autogenerate 扫描。
 
-#### Ruff 规则
+模型命名使用单数形式，字段使用 snake_case：
 
-启用的规则集：E, F, I, B, UP, N, SIM, RUF, BLE
-
-主要忽略项（pyproject.toml）：
-- E501（行长度由 formatter 强制）
-- N818（异常命名不强制 Error 后缀）
-- RUF001/002/003（中文字符）
-- BLE001（bare Exception 捕获）
-- UP037（ruff vs mypy forward-ref 冲突）
-
-#### mypy 配置
-
-- Python 版本：3.12
-- strict = false（渐进式类型化）
-- warn_unused_ignores = true
-- pydantic.mypy 插件启用
-- ignore_missing_imports = true
-- 部分错误码禁用（attr-defined, union-attr 等）
-
-### 前端（TypeScript）
-
-- **格式化**：ESLint（`pnpm lint`）
-- **类型检查**：TypeScript 严格模式（`pnpm typecheck`）
-- **目标**：ES2022
-- **模块**：esnext + bundler resolution
-- **严格模式**：strict = true, noUncheckedIndexedAccess = true
-- **组件**：函数组件 + hooks
-- **样式**：Tailwind CSS 工具类 + cn()（clsx + tailwind-merge）
-- **API 调用**：统一走 `src/lib/api.ts`
-- **路径别名**：`@/*` → `./src/*`
-
-## 文档规范
-
-### SillySpec 变更包
-
-每个变更包包含以下文档：
-
-1. **MASTER.md** — 变更总览 + 进度追踪
-2. **proposal.md** — 提案（为什么做）
-3. **requirements.md** — 需求 + 验收标准
-4. **design.md** — 架构/数据模型/API 设计
-5. **plan.md** — 任务分解/排期（Wave 分组）
-6. **tasks/** — 单个任务文件
-7. **verify-result.md** — 验证结果
-
-### Task 文档模板
-
-1. 目标（5 行内 + "不在范围"）
-2. 输入（文件路径）
-3. 产出（文件/API/DB/命令）
-4. 验收（可点击验证）
-5. 风险（具体对策）
-6. DoD（checkbox）
-
-### 扫描文档
-
-`docs/{component}/scan/` 下 7 个固定文件：
-- ARCHITECTURE.md — 架构
-- PROJECT.md — 项目概述
-- STRUCTURE.md — 目录结构
-- CONVENTIONS.md — 编码规范
-- INTEGRATIONS.md — 外部集成
-- TESTING.md — 测试策略
-- CONCERNS.md — 风险和关注
-
-### 模块文档
-
-`docs/{component}/modules/` 下每个模块一个 `.md`，结构：
-职责 → 设计 → 接口 → 数据流 → 决策 → 依赖 → 注意 → 变更索引
-
-## SillySpec 工作流规范
-
-### 变更阶段
-
-```
-propose → clarify → brainstorm → plan → review
-→ execute → verify → approve → archive → close
+```python
+class Workspace(BaseModel, table=True):
+    __tablename__ = "workspaces"
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    name: str = Field(max_length=255)
+    slug: str = Field(max_length=255, unique=True)
+    ...
 ```
 
-### 开发流程（硬性规则）
+### 1.5 服务层规范
 
-1. 禁止无文档改代码，禁止先写代码再补文档
-2. 新功能 / 大改动走完整流程：`sillyspec run brainstorm` → plan → execute → verify
-3. 小修复 / 小调整：`sillyspec run quick`
-4. 修改代码前，说明依据的文档路径
-5. 实现完成后，对照文档验收
+`service.py` 封装业务逻辑，接收 `AsyncSession` 作为构造参数：
 
-### 执行顺序
-
-```
-文档 → 读现有代码 → 写测试 → 写实现 → 跑测试 → 验收
+```python
+class WorkspaceService:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
 ```
 
-### Agent 使用
+### 1.6 错误处理规范
 
-- 仅在 worktree 隔离环境中执行
-- subprocess 启动，不直接暴露终端
-- ContextBuilder 注入 SillySpec 知识
-- 日志实时回传（SSE）
+所有领域错误继承自 `AppError`，包含 `code`（snake_case）和 `http_status`：
 
-### Git 操作
+```python
+class WorkspaceNotFound(AppError):
+    code = "HTTP_404_WORKSPACE_NOT_FOUND"
+    http_status = status.HTTP_404_NOT_FOUND
+```
 
-- 必须通过 GitGatewayService
-- 白名单审计 + 输出脱敏
-- 禁止 --force/--hard/clean
-- main/master 禁止直接 push
+### 1.7 日志规范
 
-## 环境变量管理
+使用 structlog，通过 `get_logger(__name__)` 获取 logger：
 
-- `.env` 统一 gitignored
-- `deploy/.env.example` 为唯一模板
-- 敏感变量不在代码中硬编码
-- Docker 通过 `env_file` + `environment` 注入
-- 必须设置的环境变量：SECRET_KEY, SILLYSPEC_MASTER_KEY
-- LLM 配置：ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_MODEL
+```python
+from app.core.logging import get_logger
+log = get_logger(__name__)
+log.info("workspace_created", workspace_id=str(ws.id), name=ws.name)
+```
 
-## 包管理约定
+### 1.8 Ruff 忽略规则说明
 
-### 后端
+项目有意选择忽略部分规则：
+- `E501`：行长度由 formatter 控制
+- `N818`：领域异常以事件命名（如 `WorkspaceNotFound`），非 `Error` 后缀
+- `RUF001/002/003`：项目使用中文文本
+- `BLE001`：异步错误处理中常用裸 `Exception`
+- `B008`：FastAPI `Query()` 在参数默认值中是标准模式
+- `SIM105`：显式 try/except 优于 contextlib.suppress（保留 traceback）
 
-- 包管理器：uv
-- 依赖声明：pyproject.toml
-- 锁文件：uv.lock
-- 安装命令：`uv sync --all-extras`
-- 运行命令：`uv run <command>`
+### 1.9 文件命名
 
-### 前端
+- 迁移文件：`YYYYMMDDHHMI_descriptive_name.py`
+- 测试文件：`test_*.py`（与被测模块同目录的 `tests/` 子目录）
+- 模块文件：snake_case
 
-- 包管理器：pnpm 9.6.0
-- 依赖声明：package.json
-- 锁文件：pnpm-lock.yaml
-- Node 版本要求：>= 20.0.0
-- 安装命令：`pnpm install --frozen-lockfile`
+## 2. 前端 TypeScript 规范
 
-## 前后端 API 约定
+### 2.1 项目配置
 
-- API 路径前缀：`/api/*`
-- 认证方式：JWT Bearer token
-- 请求 ID：`x-request-id` header（自动生成或透传）
-- CORS：通过 `CORS_ALLOWED_ORIGINS` 配置
-- 错误响应：统一 JSON 格式（code + message + detail）
-- 健康检查：`GET /api/health`
-- API 文档：`/api/docs`（Swagger UI）、`/api/redoc`（ReDoc）
+- **Node 版本**：>= 20.0.0
+- **包管理器**：pnpm 9.6.0
+- **框架**：Next.js 14.2.5（App Router）
+- **语言**：TypeScript 5.5.4（strict 模式未启用）
+- **Lint**：ESLint 8 + eslint-config-next
+- **测试**：Vitest 2.0 + Testing Library + jsdom
+- **CSS**：Tailwind CSS 3.4 + PostCSS + autoprefixer
+
+### 2.2 组件结构规范
+
+- **页面组件**：放置在 `src/app/(dashboard)/` 路由目录中，使用 `"use client"` 声明客户端组件
+- **共享组件**：放置在 `src/components/`，基础 UI 组件放在 `src/components/ui/`
+- **组件样式**：使用 Tailwind CSS 类名，通过 `clsx` + `tailwind-merge` 合并类名
+
+### 2.3 API 调用规范
+
+所有 API 调用通过 `src/lib/api.ts` 的 `apiFetch()` 函数统一封装：
+
+```typescript
+import { apiFetch } from "@/lib/api";
+
+export async function listWorkspaces(params?: {
+  page?: number;
+  size?: number;
+}): Promise<WorkspaceListResponse> {
+  return apiFetch<WorkspaceListResponse>("/api/workspaces", { query: params });
+}
+```
+
+`apiFetch` 自动处理：
+- Bearer token 注入（从 Zustand session store 读取）
+- `x-request-id` 请求头生成
+- 统一错误信封解析为 `ApiError`
+- 401 时自动 refresh token + 重试一次
+- refresh 失败后清除 session 并跳转登录页
+
+### 2.4 状态管理规范
+
+- **全局 session**：Zustand `useSession` store（localStorage 持久化），存储 user + tokens
+- **服务端数据**：React Query（`@tanstack/react-query`）用于缓存和自动刷新
+- **URL 路径参数**：Next.js 动态路由 `[id]`, `[cid]`, `[tid]`
+
+### 2.5 类型定义规范
+
+API 客户端文件中定义与后端 schema 对应的 TypeScript 接口：
+
+```typescript
+export interface Workspace {
+  id: string;
+  name: string;
+  slug: string;
+  root_path: string;
+  status: WorkspaceStatus;
+  // ...与后端 WorkspaceRead schema 对应
+}
+```
+
+### 2.6 文件组织规范
+
+- `src/lib/*.ts`：每个后端模块对应一个 API 客户端文件
+- `src/lib/__tests__/*.test.ts`：对应 API 客户端的单元测试
+- `src/stores/*.ts`：Zustand store
+- `src/components/ui/*.tsx`：基础 UI 组件
+- `src/app/**/*.tsx`：页面组件
+
+## 3. 通用规范
+
+### 3.1 编码语言
+
+项目使用中英混合：
+- 代码注释和日志消息可使用中文
+- 变量名、函数名、类型名使用英文 snake_case/camelCase
+- 错误消息和用户提示优先使用英文
+
+### 3.2 导入规范
+
+后端使用 `from __future__ import annotations` 启用延迟注解求值（所有 .py 文件）。
+
+### 3.3 环境变量规范
+
+所有运行时配置通过 `app.core.config.Settings` 管理，禁止在业务代码中直接读取 `os.environ`。配置优先级：环境变量 > .env 文件（仅非生产）> 默认值。

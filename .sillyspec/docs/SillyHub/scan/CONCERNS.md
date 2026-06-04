@@ -1,168 +1,141 @@
----
-author: qinyi
-created_at: 2026-06-03T20:35:00+08:00
----
+# SillyHub 技术关注点文档
 
-# CONCERNS.md — 已知问题、技术债、风险点
+author: scan-agent
+created_at: 2026-06-03T12:00:05
 
-## 当前风险
+## 1. 安全关注点
 
-### 高优先级
+### 1.1 密钥管理
 
-| 风险 | 影响 | 状态 | 缓解措施 |
-|------|------|------|----------|
-| Claude Code 版本锁定风险 | 2.1.158 版本可能过期或功能变更 | 活跃 | deploy/.env 中 CLAUDE_CODE_VERSION 可调整，Docker 构建时注入 |
-| 智谱 API 稳定性 | Agent 执行可能超时或限流 | 活跃 | API_TIMEOUT_MS=3000000（50 分钟）+ 重试策略 |
-| 宿主机路径映射差异 | 不同环境（Windows/Linux/macOS）部署困难 | 活跃 | HOST_PATH_PREFIX / CONTAINER_PATH_PREFIX 环境变量配置，默认 Windows 路径 |
-| 单点部署无 HA | 服务器宕机全站不可用 | 已知 | 初期可接受（单机 Docker Compose），后续可迁移 K8s |
-| branch protection 未强制 | 直接 push main 未被 GitHub 层面阻止 | 待修复 | 需在 GitHub Settings 中配置 branch protection rules |
+- **SECRET_KEY**：JWT 签名密钥，通过环境变量注入，生产环境必须设置
+- **SILLYSPEC_MASTER_KEY**：SillySpec CLI 主密钥，生产环境必须设置
+- **风险**：`.env` 文件不应提交到版本控制（已在 `.gitignore` 中）
+- **建议**：考虑使用 HashiCorp Vault 或云密钥管理服务替代环境变量
 
-### 中优先级
+### 1.2 Claude Code 权限
 
-| 风险 | 影响                                          | 状态 | 缓解措施 |
-|------|---------------------------------------------|------|----------|
-| 测试覆盖率偏低（60%） | 回归风险较高                                      | 改进中 | 逐步提升阈值，目标 80% |
-| E2E 测试缺失 | 全链路回归依赖人工                                   | 待建设 | Playwright 集成预留 |
-| Claude Code 单 Agent 限制 | 仅支持 Claude Code，无法使用其他 LLM                  | 已知 | Adapter 抽象层已预留扩展点 |
-| 凭据安全 | PAT 内存使用后是否彻底清除                             | 已缓解 | libsodium 加密存储 + 代码审查 + 日志脱敏 |
-| 多身份场景未完善 | 同用户多 Git 身份的切换和管理行为                         | 待增强 | git_identity 模块待完善 |
-| SillySpec CLI 版本 | Docker 构建使用 3.14.1，但 .env.example 写 3.14.1 | 注意 | 版本不一致需统一 |
+- Claude Code 以 `--permission-mode bypassPermissions` 运行，跳过所有交互式权限确认
+- Agent 可以执行任意 shell 命令、写入任意文件
+- **缓解措施**：通过 `allowed_paths` / `denied_paths` 限制工作目录范围
+- **风险**：如果 Worktree 租约路径未正确隔离，Agent 可能访问宿主机文件
 
-### 低优先级
+### 1.3 Git 凭证安全
 
-| 风险 | 影响 | 状态 | 缓解措施 |
-|------|------|------|----------|
-| Windows 兼容性 | asyncpg 安装和路径问题 | 已知 | 文档说明 + Docker fallback |
-| OpenTelemetry 未启用 | 无法观测生产性能 | 预留 | OTEL_ENDPOINT 配置就绪，SDK 已集成 |
-| frp 隧道单点 | 公网暴露依赖 frp 稳定性 | 已知 | 足够初期使用 |
-| ruff vs mypy 冲突 | UP037 规则在 ruff 和 mypy 间有 forward-ref 冲突 | 已处理 | 全局忽略 UP037 |
+- Git Identity 凭证使用 NaCl 加密存储在数据库中
+- 加密密钥通过 `GIT_IDENTITY_ENCRYPTION_KEY` 环境变量传入
+- **风险**：加密密钥泄露将暴露所有存储的 Git 凭证
 
-## 技术债务
+### 1.4 Refresh Token 安全
 
-### 已知债务
+- Refresh token 存储为 bcrypt 哈希，防止数据库泄露后直接使用
+- 实现了重放检测（`AuthRefreshReused`），重用 token 将使所有 session 失效
+- **建议**：考虑添加 refresh token 轮换策略（每次刷新生成新的 refresh token）
 
-- **Agent 仅 Claude Code**：Adapter 层已抽象，但仅实现 Claude Code 适配器。GPT/Cursor 等待扩展。
-- **变更工作流 FSM 待完善**：10 阶段状态机已实现基础转换，但阶段间的自动推进逻辑（Agent 触发条件）仍在迭代。
-- **前端页面骨架**：大量路由页面（workspace/changes/agent/knowledge 等 20+ 页面）已创建，但内容填充和交互完善仍在进行。
-- **SillySpec CLI 版本依赖**：扫描和变更管理依赖 `sillyspec` CLI，版本锁定在 Dockerfile 和 .env 中。
-- **测试金字塔倒挂**：单元测试覆盖不足，过多依赖集成测试。
-- **模块测试覆盖不均衡**：23 个后端模块中仅 4 个有独立测试目录（agent, change, change_writer, workspace）。
-- **前端测试薄弱**：仅 3 个 lib 层测试文件，组件和页面测试缺失。
+### 1.5 CORS 配置
 
-### 架构债务
+- `cors_allowed_origins` 通过环境变量配置
+- 开发环境通常允许 `http://localhost:3000`
+- **风险**：生产环境必须严格配置允许的 origin 列表
 
-- **无消息队列**：Agent 任务调度直接 subprocess，缺乏队列和重试机制。Redis 可作为后续消息层。
-- **无 WebSocket**：实时日志当前通过 SSE，长连接场景可能不足。
-- **无水平扩展设计**：单实例部署，session 和状态未考虑多实例。
-- **数据库迁移前置**：容器启动时 `alembic upgrade head`，无回滚机制。
-- **API 文档待完善**：FastAPI 自动生成的 OpenAPI 文档可用，但缺乏业务语义描述。
-- **无 rate limiting**：API 未实现请求限流。
+### 1.6 Agent 子进程隔离
 
-## 安全关注
+- Claude Code 作为子进程运行在宿主机上（Docker 环境中在容器内）
+- **建议**：考虑使用沙箱（如 gVisor / Firecracker）进一步隔离 Agent 执行环境
 
-### 凭据管理
+## 2. 性能关注点
 
-- SECRET_KEY、SILLYSPEC_MASTER_KEY、ANTHROPIC_AUTH_TOKEN 为核心敏感配置
-- 通过 `.env` 文件管理，不提交代码（.gitignore 覆盖）
-- Git Identity PAT 使用 libsodium secretbox 加密存储
-- 解密后 token 仅在内存中使用，日志脱敏
-- Auth 引导程序：PLATFORM_BOOTSTRAP_ADMIN_* 环境变量创建初始管理员
+### 2.1 数据库连接池
 
-### Git 操作安全
+- 连接池配置：pool_size=10, max_overflow=10
+- **风险**：高并发场景下 20 个连接可能不足
+- **建议**：监控连接池使用率，根据负载调整
 
-- 白名单操作，拒绝危险命令（--force、--hard、clean）
-- Shell 注入防护（扫描管道、命令替换、链式执行）
-- 受保护分支 push 拒绝（main/master）
-- 全量审计日志（GitOperationLog 表）
-- 输出脱敏（PAT/Bearer token 自动遮蔽）
+### 2.2 内存 SQLite 测试限制
 
-### 认证安全
+- 测试使用 SQLite 内存数据库，与生产 PostgreSQL 存在语法和类型差异
+- **风险**：某些 PostgreSQL 特有功能（如 JSONB 操作、partial unique index）可能在 SQLite 测试中被忽略
+- **建议**：关键业务逻辑添加 PostgreSQL 集成测试
 
-- JWT token 认证（python-jose + passlib bcrypt）
-- RBAC 角色体系（admin/member/viewer）
-- CORS 白名单限制
-- x-request-id 请求追踪
+### 2.3 Agent 执行超时
 
-## 路线图
+- Agent 子进程默认超时 600 秒（10 分钟）
+- stdout 读取使用 `wait_for(timeout)` 逐行读取
+- **风险**：长时间运行的 Agent 可能触发超时，stdout 缓冲可能溢出（10 MB 限制）
 
-### V1（当前阶段 — 功能完善）
+### 2.4 Redis 单节点
 
-- [x] V0 Spikes 验证通过（3/3 PASS）
-- [x] 核心模块实现（23 个模块）
-- [x] 基础前端 UI（20+ 路由页面）
-- [x] CI/CD 流水线（backend-ci + frontend-ci）
-- [x] Docker Compose 全栈部署
-- [x] 认证和 RBAC
-- [x] Git 操作审计网关
-- [x] Agent SSE 流式日志
-- [ ] Agent 调度深度集成（stage-driven dispatch）
-- [ ] 变更工作流完善（FSM 自动推进）
-- [ ] 前端交互完善
-- [ ] 测试覆盖率提升
+- Redis 作为单节点运行，无集群或哨兵配置
+- **风险**：Redis 故障将导致 Agent 实时日志推送中断
+- **建议**：生产环境考虑 Redis Sentinel 或 Cluster
 
-### V2（稳定性提升）
+### 2.5 SQLAlchemy 审计钩子
 
-- Playwright E2E 测试集成
-- 测试覆盖率 >= 80%
-- 消息队列引入（Agent 任务队列化）
-- WebSocket 实时通信
-- 多 Agent 支持（GPT Adapter）
-- 性能优化和监控启用（OpenTelemetry -> Grafana）
-- API rate limiting
-- branch protection 强制
+- 所有 BaseModel 子类的 insert/update/delete 都触发审计日志写入
+- **风险**：高写入频率场景下审计日志表可能成为瓶颈
+- **建议**：考虑异步审计（如写入消息队列再批量入库）
 
-### V3（规模化）
+### 2.6 Docker 卷 I/O
 
-- 多实例部署支持
-- K8s 编排
-- 多租户隔离增强
-- 工作空间配额和资源限制
-- 审计日志持久化和检索
+- 后端容器挂载 `host-projects`、`worktree-data`、`spec-data` 等卷
+- **风险**：大量文件扫描和 Agent 操作可能导致 I/O 瓶颈
 
-### 长期愿景
+## 3. 技术债务关注点
 
-- Agent 市场化（可插拔 Agent 适配器）
-- SillySpec 规范生态扩展
-- 插件系统
-- 多语言 SDK
+### 3.1 已废弃的 API
 
-## 变更历史概览
+- `ClaudeCodeAdapter.run()`（legacy 接口）标记为 deprecated，应使用 `run_with_bundle()`
+- `TaskContext` dataclass 标记为 deprecated，应使用 `AgentSpecBundle`
+- `ChangeFSM`（`workflow/fsm.py`）标记为 deprecated，应使用 `StageEnum + TRANSITIONS`
+- `ExecutionCoordinatorService.start_sillyspec_run()` 标记为 deprecated
 
-项目已完成的 SillySpec 变更包（`.sillyspec/changes/archive/`）：
+### 3.2 迁移文件数量
 
-| 日期 | 变更 | 要点 |
-|------|------|------|
-| 2026-05-25 | multi-agent-platform-bootstrap-v2 | 项目引导（16 个参考文档 + 16 个任务） |
-| 2026-05-27 | platform-native-sillyspec | SillySpec 原生支持 |
-| 2026-05-28 | component-as-workspace | 组件即工作空间 |
-| 2026-05-28 | agent-log-streaming | Agent 日志实时流 |
-| 2026-05-29 | workspace-intake-spec-bootstrap | 工作空间接入规范 |
-| 2026-05-29 | knowledge-lifecycle | 知识库生命周期 |
-| 2026-05-29 | harness-control-plane | Agent 控制面 |
-| 2026-05-29 | server-sandbox-runner | 服务端沙箱执行器 |
-| 2026-05-29 | local-runner-execution-loop | 本地执行循环 |
-| 2026-05-30 | workflow-state-machine | 工作流状态机 |
-| 2026-05-30 | change-writer | 变更文档生成器 |
-| 2026-05-30 | tool-gateway | 工具网关 |
-| 2026-05-30 | agent-adapter | Agent 适配器 |
-| 2026-05-30 | execution-coordinator | 执行协调器 |
+- 当前有 38 个 Alembic 迁移文件，且包含一次合并迁移（`4d9236aa3abb_merge_heads.py`）
+- **风险**：随着项目演进，迁移链可能变得复杂且难以管理
+- **建议**：定期执行 squash migration，合并历史迁移
 
-活跃变更（`.sillyspec/changes/` 非 archive）：
-- stage-driven-agent-dispatch
-- change-workflow-engine
-- change-center-redesign
-- spec-bootstrap-agent-stream-interaction
-- sse-reliable-stream
+### 3.3 部分模块缺少测试
 
-## 关键决策记录
+- `auth` 模块无测试文件（认证逻辑通过 conftest 的 auth_admin_token 间接覆盖）
+- `health`、`settings` 模块无测试文件
+- 部分模块仅有 1-2 个测试文件，覆盖面较窄
 
-| 决策 | 背景 | 结论 |
-|------|------|------|
-| monorepo vs 多仓库 | 子项目紧密耦合 | monorepo，共享 Git 和 SillySpec |
-| Claude Code 首发适配 | Agent 生态初期 | 仅 Claude Code，Adapter 层预留扩展 |
-| subprocess vs SDK | Claude Code 集成方式 | subprocess，更贴近 CLI 模式 |
-| Docker Compose vs K8s | 部署复杂度 | Compose 单机起步，后续可迁移 |
-| 文件系统 + DB 双写 | SillySpec 文档管理 | 文件系统为主，DB 为查询加速 |
-| 白名单 Git 操作 | 安全模型 | 安全默认，最小权限 |
-| 智谱 API 代理 | LLM 服务 | 使用 Anthropic 兼容接口，降低迁移成本 |
-| Next.js standalone | 前端部署 | 最小化 Docker 镜像，无需 node_modules |
+### 3.4 Mypy 配置宽松
+
+```ini
+strict = false
+disable_error_code = ["attr-defined", "union-attr", "assignment", "arg-type", ...]
+```
+禁用了大量类型检查错误码，类型安全性较弱。
+
+### 3.5 前端测试覆盖不足
+
+- 前端仅有 3 个测试文件（api.test.ts, agent.test.ts, spec-workspaces.test.ts）
+- 页面组件无测试
+- 状态管理无测试
+
+### 3.6 Telemetry 仅为 Stub
+
+- `telemetry.py` 仅包含 no-op 实现，当 `OTEL_ENDPOINT` 为空时跳过
+- **影响**：生产环境缺乏链路追踪和指标采集
+
+### 3.7 dispatch 模块中的 sqlite3 导入
+
+- `change/dispatch.py` 顶部导入了 `sqlite3` 标准库
+- **风险**：可能是历史遗留代码，生产环境不应使用 SQLite
+
+### 3.8 硬编码的调度链限制
+
+- `auto_dispatch_next_step` 限制连续自动调度最多 10 次（`_DISPATCH_CHAIN_LIMIT = 10`）
+- **风险**：复杂变更可能超过此限制导致调度中断
+
+### 3.9 conftest 中的数据库 URL
+
+- `conftest.py` 硬编码了 `DATABASE_URL` 默认值为 `postgresql+asyncpg://...`
+- 实际测试使用内存 SQLite（`db_engine` fixture 覆盖）
+- **风险**：Settings 加载时仍会尝试解析 PostgreSQL URL（虽不影响测试，但语义混乱）
+
+### 3.10 前端 API 客户端文件数量
+
+- `src/lib/` 包含 20+ 个 API 客户端文件，每个文件对应一个后端模块
+- **建议**：考虑使用 OpenAPI code generator 自动生成 TypeScript 类型
