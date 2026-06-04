@@ -1110,17 +1110,21 @@ class AgentService:
                 details={"root_path": root_path},
             )
 
-        # -- 2. Build scan bundle -------------------------------------------------
+        # -- 2. Pre-generate run_id so we can pass it to the bundle builder ------
+        run_id = uuid.uuid4()
+
+        # -- 3. Build scan bundle -------------------------------------------------
         bundle = await build_scan_bundle(
             session=self._session,
             workspace_id=workspace_id,
             spec_root=spec_root,
             root_path=root_path,
+            run_id=run_id,
         )
 
-        # -- 3. Create AgentRun record --------------------------------------------
+        # -- 4. Create AgentRun record --------------------------------------------
         run = AgentRun(
-            id=uuid.uuid4(),
+            id=run_id,
             task_id=None,
             change_id=None,
             lease_id=None,
