@@ -3,6 +3,7 @@
 用法:
     python scan.py <repo_root>
 """
+
 from __future__ import annotations
 
 import json
@@ -153,7 +154,9 @@ def scan(root: Path) -> WorkspaceScan:
         for d in sorted(base.iterdir()):
             if not d.is_dir():
                 continue
-            changes.append(parse_change(d, "active" if location == "change" else "archive"))
+            changes.append(
+                parse_change(d, "active" if location == "change" else "archive")
+            )
 
     elapsed = (time.perf_counter() - t0) * 1000
     return WorkspaceScan(
@@ -182,7 +185,10 @@ def main() -> int:
         print("[spike02] WARNING: target is not a SillySpec workspace", file=sys.stderr)
         return 1
     if result.elapsed_ms > 500:
-        print(f"[spike02] FAIL: scan too slow ({result.elapsed_ms:.0f}ms > 500ms)", file=sys.stderr)
+        print(
+            f"[spike02] FAIL: scan too slow ({result.elapsed_ms:.0f}ms > 500ms)",
+            file=sys.stderr,
+        )
         return 1
     print("[spike02] SPIKE PASSED", file=sys.stderr)
     return 0

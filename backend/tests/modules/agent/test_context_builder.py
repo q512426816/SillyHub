@@ -2,7 +2,7 @@
 
 import uuid
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -102,7 +102,9 @@ async def test_build_scan_bundle_no_spec_documents(mock_session, mock_workspace,
 
 
 @pytest.mark.asyncio
-async def test_build_scan_bundle_no_referenced_workspaces(mock_session, mock_workspace, sample_run_id):
+async def test_build_scan_bundle_no_referenced_workspaces(
+    mock_session, mock_workspace, sample_run_id
+):
     """scan bundle 不包含跨 workspace 上下文。"""
     mock_session.get = AsyncMock(return_value=mock_workspace)
 
@@ -123,7 +125,9 @@ async def test_build_scan_bundle_no_referenced_workspaces(mock_session, mock_wor
 
 
 @pytest.mark.asyncio
-async def test_build_scan_bundle_prompt_contains_spec_root(mock_session, mock_workspace, sample_run_id):
+async def test_build_scan_bundle_prompt_contains_spec_root(
+    mock_session, mock_workspace, sample_run_id
+):
     """step_prompt 包含 --spec-root 参数。"""
     mock_session.get = AsyncMock(return_value=mock_workspace)
 
@@ -139,7 +143,9 @@ async def test_build_scan_bundle_prompt_contains_spec_root(mock_session, mock_wo
 
 
 @pytest.mark.asyncio
-async def test_build_scan_bundle_prompt_contains_runtime_root(mock_session, mock_workspace, sample_run_id):
+async def test_build_scan_bundle_prompt_contains_runtime_root(
+    mock_session, mock_workspace, sample_run_id
+):
     """step_prompt 包含 --runtime-root 参数。"""
     mock_session.get = AsyncMock(return_value=mock_workspace)
 
@@ -157,7 +163,9 @@ async def test_build_scan_bundle_prompt_contains_runtime_root(mock_session, mock
 
 
 @pytest.mark.asyncio
-async def test_build_scan_bundle_prompt_contains_workspace_id(mock_session, mock_workspace, sample_run_id):
+async def test_build_scan_bundle_prompt_contains_workspace_id(
+    mock_session, mock_workspace, sample_run_id
+):
     """step_prompt 包含 --workspace-id 参数。"""
     mock_session.get = AsyncMock(return_value=mock_workspace)
 
@@ -173,7 +181,9 @@ async def test_build_scan_bundle_prompt_contains_workspace_id(mock_session, mock
 
 
 @pytest.mark.asyncio
-async def test_build_scan_bundle_prompt_contains_scan_run_id(mock_session, mock_workspace, sample_run_id):
+async def test_build_scan_bundle_prompt_contains_scan_run_id(
+    mock_session, mock_workspace, sample_run_id
+):
     """step_prompt 包含 --scan-run-id 参数。"""
     mock_session.get = AsyncMock(return_value=mock_workspace)
 
@@ -189,7 +199,9 @@ async def test_build_scan_bundle_prompt_contains_scan_run_id(mock_session, mock_
 
 
 @pytest.mark.asyncio
-async def test_build_scan_bundle_prompt_contains_full_scan_command(mock_session, mock_workspace, sample_run_id):
+async def test_build_scan_bundle_prompt_contains_full_scan_command(
+    mock_session, mock_workspace, sample_run_id
+):
     """step_prompt 包含完整的 scan 命令行（所有平台参数）。"""
     mock_session.get = AsyncMock(return_value=mock_workspace)
     spec_root = "/data/specs/ws-full"
@@ -257,7 +269,9 @@ async def test_build_scan_bundle_custom_runtime_root(mock_session, mock_workspac
 
 
 @pytest.mark.asyncio
-async def test_build_scan_bundle_runtime_root_default_derivation(mock_session, mock_workspace, sample_run_id):
+async def test_build_scan_bundle_runtime_root_default_derivation(
+    mock_session, mock_workspace, sample_run_id
+):
     """不传 runtime_root 时，从 spec_root 推导。"""
     mock_session.get = AsyncMock(return_value=mock_workspace)
     spec_root = "/data/specs/ws-derive"

@@ -1233,15 +1233,13 @@ class AgentService:
                 spec_root = bundle.spec_root or str(work_dir)
                 log_dir = Path(spec_root) / ".runtime" / "scan-runs" / str(run_id)
                 log_dir.mkdir(parents=True, exist_ok=True)
-                (log_dir / "output.log").write_text(
-                    result.redacted_output or "", encoding="utf-8"
-                )
-                (log_dir / "stderr.log").write_text(
-                    result.stderr or "", encoding="utf-8"
-                )
+                (log_dir / "output.log").write_text(result.redacted_output or "", encoding="utf-8")
+                (log_dir / "stderr.log").write_text(result.stderr or "", encoding="utf-8")
 
                 # DB only stores tail
-                run.output_redacted = result.redacted_output[-10000:] if result.redacted_output else ""
+                run.output_redacted = (
+                    result.redacted_output[-10000:] if result.redacted_output else ""
+                )
                 session.add(run)
 
                 # -- 7. Log stdout/stderr (fallback) --------------------------------

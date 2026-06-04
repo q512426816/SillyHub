@@ -4,6 +4,7 @@
   1. 已安装 claude code CLI (`claude` 命令可用)
   2. 设置环境变量 ANTHROPIC_API_KEY
 """
+
 from __future__ import annotations
 
 import json
@@ -18,7 +19,9 @@ from pathlib import Path
 CLAUDE_BIN = shutil.which("claude") or shutil.which("claude-code")
 
 
-def run_claude_in_box(task_prompt: str, sample_seed: str = "print('hi from spike')") -> dict:
+def run_claude_in_box(
+    task_prompt: str, sample_seed: str = "print('hi from spike')"
+) -> dict:
     if not CLAUDE_BIN:
         return {"error": "claude CLI not found in PATH"}
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -50,14 +53,22 @@ def run_claude_in_box(task_prompt: str, sample_seed: str = "print('hi from spike
         env["ANTHROPIC_BASE_URL"] = base_url
     # 透传可选的网络代理 / 模型映射 / 其他 Anthropic SDK 环境
     for var in (
-        "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
-        "http_proxy", "https_proxy", "no_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
         "ANTHROPIC_DEFAULT_HAIKU_MODEL",
         "ANTHROPIC_DEFAULT_SONNET_MODEL",
         "ANTHROPIC_DEFAULT_OPUS_MODEL",
         "API_TIMEOUT_MS",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
-        "ComSpec", "SystemRoot", "SystemDrive", "TEMP", "TMP",
+        "ComSpec",
+        "SystemRoot",
+        "SystemDrive",
+        "TEMP",
+        "TMP",
         "PATHEXT",
     ):
         if var in os.environ:
@@ -137,7 +148,13 @@ def main() -> int:
         "文件内容为 print('hi from spike')。仅创建这个文件，不做其他操作。"
     )
     result = run_claude_in_box(prompt)
-    print(json.dumps({k: v for k, v in result.items() if k != "stdout_tail"}, indent=2, ensure_ascii=False))
+    print(
+        json.dumps(
+            {k: v for k, v in result.items() if k != "stdout_tail"},
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
 
     if "error" in result:
         print(f"[spike03] FAIL: {result['error']}", file=sys.stderr)
@@ -146,7 +163,10 @@ def main() -> int:
     fails: list[str] = []
     if result["exit_code"] != 0:
         fails.append(f"exit_code={result['exit_code']}")
-    if not any("sample/hello.py" in f or "sample\\hello.py" in f for f in result["files_in_workdir"]):
+    if not any(
+        "sample/hello.py" in f or "sample\\hello.py" in f
+        for f in result["files_in_workdir"]
+    ):
         fails.append("hello.py not created")
     if result["leaked_to_home"]:
         fails.append(f"leaked_to_home={result['leaked_to_home']}")

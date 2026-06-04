@@ -463,7 +463,7 @@ async def build_scan_bundle(
         f"每次运行 `sillyspec run scan --dir <dir>` 会输出当前步骤的 prompt，你必须：\n"
         f"1. 读 step prompt\n"
         f"2. 按 prompt 的指示执行操作（扫描文件、分析结构等）\n"
-        f'3. 用 --done 完成当前步骤：\n'
+        f"3. 用 --done 完成当前步骤：\n"
         f'   sillyspec run scan --done --change default --input "步骤描述" --output "步骤摘要"\n'
         f"4. CLI 会自动输出下一步 prompt，重复直到所有步骤完成\n\n"
         f"## 执行步骤\n"

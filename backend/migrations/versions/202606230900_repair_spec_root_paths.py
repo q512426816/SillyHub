@@ -22,11 +22,10 @@ Revises: 202606220900
 from __future__ import annotations
 
 import os
-import uuid
+from pathlib import Path
 
 import sqlalchemy as sa
 from alembic import op
-from pathlib import Path
 
 revision = "202606230900"
 down_revision = "202606220900"
@@ -59,9 +58,7 @@ def upgrade() -> None:
         spec_data_root = str(_REPO_ROOT / p)
 
     # Fetch all spec_workspaces rows.
-    rows = conn.execute(
-        sa.text("SELECT workspace_id, spec_root FROM spec_workspaces")
-    ).fetchall()
+    rows = conn.execute(sa.text("SELECT workspace_id, spec_root FROM spec_workspaces")).fetchall()
 
     if not rows:
         print("[repair_spec_root_paths] No spec_workspaces rows found, nothing to do.")
@@ -86,8 +83,10 @@ def upgrade() -> None:
         os.makedirs(correct_root, exist_ok=True)
         fixed += 1
 
-    print(f"[repair_spec_root_paths] {fixed} row(s) fixed, "
-          f"{len(rows) - fixed} row(s) already correct.")
+    print(
+        f"[repair_spec_root_paths] {fixed} row(s) fixed, "
+        f"{len(rows) - fixed} row(s) already correct."
+    )
 
 
 def downgrade() -> None:

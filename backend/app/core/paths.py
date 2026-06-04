@@ -16,7 +16,6 @@ All "relative to the repo root" resolution should go through
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 # ---------------------------------------------------------------------------

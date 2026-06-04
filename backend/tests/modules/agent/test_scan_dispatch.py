@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.modules.agent.base import AgentSpecBundle, AgentRunResult
+from app.modules.agent.base import AgentRunResult, AgentSpecBundle
 from app.modules.agent.model import AgentRun
 from app.modules.agent.service import AgentService
 
@@ -154,7 +154,9 @@ async def test_post_scan_reparse_calls_scan_docs_reparse(tmp_path):
     manifest_path = Path(spec_root) / "manifest.json"
     manifest_path.write_text(json.dumps({"source_commit": "abc123"}), encoding="utf-8")
 
-    bundle = _make_scan_bundle(workspace_id, spec_root=spec_root, root_path=str(tmp_path / "project"))
+    bundle = _make_scan_bundle(
+        workspace_id, spec_root=spec_root, root_path=str(tmp_path / "project")
+    )
 
     mock_session = AsyncMock()
 
@@ -163,7 +165,9 @@ async def test_post_scan_reparse_calls_scan_docs_reparse(tmp_path):
         patch("app.modules.scan_docs.service.ScanDocsService") as MockScanDocsSvc,
     ):
         mock_scan_instance = AsyncMock()
-        mock_scan_instance.reparse = AsyncMock(return_value=({"parsed": 5, "created": 3, "updated": 0, "deleted": 0}, MagicMock()))
+        mock_scan_instance.reparse = AsyncMock(
+            return_value=({"parsed": 5, "created": 3, "updated": 0, "deleted": 0}, MagicMock())
+        )
         MockScanDocsSvc.return_value = mock_scan_instance
 
         svc = AgentService(AsyncMock())
@@ -230,7 +234,9 @@ async def test_post_scan_reparse_manifest_commit_match(tmp_path):
     manifest_path = Path(spec_root) / "manifest.json"
     manifest_path.write_text(json.dumps({"source_commit": commit_hash}), encoding="utf-8")
 
-    bundle = _make_scan_bundle(workspace_id, spec_root=spec_root, root_path=str(tmp_path / "project"))
+    bundle = _make_scan_bundle(
+        workspace_id, spec_root=spec_root, root_path=str(tmp_path / "project")
+    )
 
     mock_session = AsyncMock()
 

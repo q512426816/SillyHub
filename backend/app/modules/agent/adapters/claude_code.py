@@ -88,9 +88,6 @@ def _build_stage_dispatch_prompt(bundle: AgentSpecBundle) -> str:
             # fallback: 从 platform_metadata 构建命令
             meta = bundle.platform_metadata or {}
             spec_root = meta.get("spec_root", "")
-            runtime_root = meta.get("runtime_root", "")
-            workspace_id = meta.get("workspace_id", "")
-            scan_run_id = meta.get("scan_run_id", "")
             root_path = meta.get("root_path", "")
             prompt = (
                 f"你是一个项目分析 agent。请对项目目录 {root_path} 执行 sillyspec scan。\n\n"

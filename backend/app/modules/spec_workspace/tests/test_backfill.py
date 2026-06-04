@@ -12,18 +12,15 @@ created_at: 2026-06-04
 
 from __future__ import annotations
 
-import os
 import uuid
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
-import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.workspace.model import Workspace
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -88,11 +85,15 @@ class TestBackfillIdempotent:
         """backfill 应为没有 spec_workspaces 行的 active workspace 创建新行。"""
         # 创建两个 active workspace，各自使用不同的 root_path
         ws1 = await _create_workspace(
-            db_session, name="ws1", slug="ws1-backfill",
+            db_session,
+            name="ws1",
+            slug="ws1-backfill",
             root_path=f"/tmp/test-ws-backfill-{uuid.uuid4().hex[:8]}",
         )
         ws2 = await _create_workspace(
-            db_session, name="ws2", slug="ws2-backfill",
+            db_session,
+            name="ws2",
+            slug="ws2-backfill",
             root_path=f"/tmp/test-ws-backfill-{uuid.uuid4().hex[:8]}",
         )
 
@@ -102,19 +103,15 @@ class TestBackfillIdempotent:
 
         # 模拟 backfill 逻辑：为所有没有 spec_workspaces 的 active workspace 插入
         spec_data_root = str(tmp_path / "sillyspec-data")
-        existing = (
-            await db_session.execute(
-                select(SpecWorkspace.workspace_id)
-            )
-        ).scalars().all()
+        existing = (await db_session.execute(select(SpecWorkspace.workspace_id))).scalars().all()
         existing_ids = set(existing)
 
         # 查询所有 active workspace
         active_wss = (
-            await db_session.execute(
-                select(Workspace.id).where(Workspace.status == "active")
-            )
-        ).scalars().all()
+            (await db_session.execute(select(Workspace.id).where(Workspace.status == "active")))
+            .scalars()
+            .all()
+        )
 
         inserted = 0
         for ws_id in active_wss:
@@ -138,17 +135,19 @@ class TestBackfillIdempotent:
         assert inserted == 1
 
         # 验证两个 workspace 都有 spec_workspaces 行
-        all_spec_ws = (
-            await db_session.execute(select(SpecWorkspace))
-        ).scalars().all()
+        all_spec_ws = (await db_session.execute(select(SpecWorkspace))).scalars().all()
         assert len(all_spec_ws) == 2
 
         # ws2 的 spec_root 指向正确路径
         ws2_spec = (
-            await db_session.execute(
-                select(SpecWorkspace).where(SpecWorkspace.workspace_id == ws2.id)
+            (
+                await db_session.execute(
+                    select(SpecWorkspace).where(SpecWorkspace.workspace_id == ws2.id)
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         assert ws2_spec is not None
         assert ws2_spec.strategy == "platform-managed"
         assert ws2_spec.spec_root == f"{spec_data_root}/{ws2.id}"
@@ -162,31 +161,29 @@ class TestBackfillIdempotent:
         original_spec_ws = await _create_spec_workspace(db_session, ws, spec_root)
 
         # 模拟再次运行 backfill
-        existing = (
-            await db_session.execute(
-                select(SpecWorkspace.workspace_id)
-            )
-        ).scalars().all()
+        existing = (await db_session.execute(select(SpecWorkspace.workspace_id))).scalars().all()
         existing_ids = set(existing)
 
         active_wss = (
-            await db_session.execute(
-                select(Workspace.id).where(Workspace.status == "active")
-            )
-        ).scalars().all()
+            (await db_session.execute(select(Workspace.id).where(Workspace.status == "active")))
+            .scalars()
+            .all()
+        )
 
         inserted = 0
         for ws_id in active_wss:
             if ws_id in existing_ids:
                 continue
-            db_session.add(SpecWorkspace(
-                id=uuid.uuid4(),
-                workspace_id=ws_id,
-                spec_root=f"/data/{ws_id}",
-                strategy="platform-managed",
-                profile_version="0.1.0",
-                sync_status="clean",
-            ))
+            db_session.add(
+                SpecWorkspace(
+                    id=uuid.uuid4(),
+                    workspace_id=ws_id,
+                    spec_root=f"/data/{ws_id}",
+                    strategy="platform-managed",
+                    profile_version="0.1.0",
+                    sync_status="clean",
+                )
+            )
             inserted += 1
 
         # 不应插入任何新行
@@ -194,10 +191,14 @@ class TestBackfillIdempotent:
 
         # 原始 spec_workspace 行未被修改
         all_spec_ws = (
-            await db_session.execute(
-                select(SpecWorkspace).where(SpecWorkspace.workspace_id == ws.id)
+            (
+                await db_session.execute(
+                    select(SpecWorkspace).where(SpecWorkspace.workspace_id == ws.id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(all_spec_ws) == 1
         assert all_spec_ws[0].id == original_spec_ws.id
         assert all_spec_ws[0].spec_root == spec_root
@@ -240,7 +241,6 @@ class TestScanDocsReparseUsesSpecRoot:
 
         # mock parser，捕获传入的 sillyspec_root 参数
         captured_root = None
-        original_parse_component = ScanDocsParser.parse_component
 
         def fake_parse_component(self_parser, root: Path, component_key: str):
             nonlocal captured_root
@@ -248,11 +248,9 @@ class TestScanDocsReparseUsesSpecRoot:
             return ScanDocsResult(component_key=component_key)
 
         mock_parser = ScanDocsParser()
-        with patch.object(
-            type(mock_parser), "parse_component", fake_parse_component
-        ):
+        with patch.object(type(mock_parser), "parse_component", fake_parse_component):
             svc = ScanDocsService(db_session, parser=mock_parser)
-            stats, result = await svc.reparse(ws.id)
+            _, _ = await svc.reparse(ws.id)
 
         # 验证 parse_component 收到的根路径是 spec_root 而非 root_path
         assert captured_root == spec_root_path

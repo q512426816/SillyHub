@@ -2,7 +2,6 @@
 
 import asyncio
 import uuid
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -134,19 +133,26 @@ class TestExecuteStageRunException:
         mock_inner.add = MagicMock()
         mock_inner.commit = AsyncMock()
 
-        with patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(return_value=AsyncMock(
-                __aenter__=AsyncMock(return_value=mock_inner),
-                __aexit__=AsyncMock(return_value=False),
-            )),
-        ), patch.dict(
-            "app.modules.agent.service.ADAPTERS",
-            {"claude_code": MagicMock(
+        with (
+            patch(
+                "app.core.db.get_session_factory",
                 return_value=MagicMock(
-                    run_with_bundle=AsyncMock(side_effect=RuntimeError("adapter exploded")),
+                    return_value=AsyncMock(
+                        __aenter__=AsyncMock(return_value=mock_inner),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
                 ),
-            )},
+            ),
+            patch.dict(
+                "app.modules.agent.service.ADAPTERS",
+                {
+                    "claude_code": MagicMock(
+                        return_value=MagicMock(
+                            run_with_bundle=AsyncMock(side_effect=RuntimeError("adapter exploded")),
+                        ),
+                    )
+                },
+            ),
         ):
             await svc._execute_stage_run(
                 run_id=run.id,
@@ -190,19 +196,28 @@ class TestExecuteScanRunException:
         mock_inner.add = MagicMock()
         mock_inner.commit = AsyncMock()
 
-        with patch(
-            "app.core.db.get_session_factory",
-            return_value=MagicMock(return_value=AsyncMock(
-                __aenter__=AsyncMock(return_value=mock_inner),
-                __aexit__=AsyncMock(return_value=False),
-            )),
-        ), patch.dict(
-            "app.modules.agent.service.ADAPTERS",
-            {"claude_code": MagicMock(
+        with (
+            patch(
+                "app.core.db.get_session_factory",
                 return_value=MagicMock(
-                    run_with_bundle=AsyncMock(side_effect=RuntimeError("scan adapter exploded")),
+                    return_value=AsyncMock(
+                        __aenter__=AsyncMock(return_value=mock_inner),
+                        __aexit__=AsyncMock(return_value=False),
+                    )
                 ),
-            )},
+            ),
+            patch.dict(
+                "app.modules.agent.service.ADAPTERS",
+                {
+                    "claude_code": MagicMock(
+                        return_value=MagicMock(
+                            run_with_bundle=AsyncMock(
+                                side_effect=RuntimeError("scan adapter exploded")
+                            ),
+                        ),
+                    )
+                },
+            ),
         ):
             from app.modules.agent.base import AgentSpecBundle
 

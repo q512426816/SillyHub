@@ -13,11 +13,10 @@ Revises: 202606210900
 from __future__ import annotations
 
 import os
-import uuid
+from pathlib import Path
 
 import sqlalchemy as sa
 from alembic import op
-from pathlib import Path
 
 revision = "202606220900"
 down_revision = "202606210900"
@@ -51,22 +50,16 @@ def upgrade() -> None:
 
     # Fetch all active workspaces.
     workspaces = conn.execute(
-        sa.text(
-            "SELECT id FROM workspaces "
-            "WHERE status = 'active' AND deleted_at IS NULL"
-        )
+        sa.text("SELECT id FROM workspaces WHERE status = 'active' AND deleted_at IS NULL")
     ).fetchall()
 
     if not workspaces:
         return
 
     # Collect existing workspace_ids that already have a spec_workspaces row.
-    existing = conn.execute(
-        sa.text("SELECT workspace_id FROM spec_workspaces")
-    ).fetchall()
+    existing = conn.execute(sa.text("SELECT workspace_id FROM spec_workspaces")).fetchall()
     existing_ids = {row[0] for row in existing}
 
-    now = sa.text("NOW()")
     inserted = 0
 
     for (ws_id,) in workspaces:
@@ -89,8 +82,10 @@ def upgrade() -> None:
         os.makedirs(spec_root, exist_ok=True)
         inserted += 1
 
-    print(f"[backfill_spec_workspaces] {inserted} rows inserted, "
-          f"{len(workspaces) - inserted} skipped (already exist).")
+    print(
+        f"[backfill_spec_workspaces] {inserted} rows inserted, "
+        f"{len(workspaces) - inserted} skipped (already exist)."
+    )
 
 
 def downgrade() -> None:
@@ -100,12 +95,6 @@ def downgrade() -> None:
     """
     conn = op.get_bind()
     conn.execute(
-        sa.text(
-            "DELETE FROM spec_workspaces "
-            "WHERE workspace_id IN ("
-            "  SELECT id FROM workspaces"
-            ")"
-        )
+        sa.text("DELETE FROM spec_workspaces WHERE workspace_id IN (  SELECT id FROM workspaces)")
     )
-    print("[backfill_spec_workspaces] Removed all spec_workspaces rows "
-          "linked to workspaces.")
+    print("[backfill_spec_workspaces] Removed all spec_workspaces rows linked to workspaces.")

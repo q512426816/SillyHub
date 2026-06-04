@@ -15,12 +15,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from app.core.paths import REPO_ROOT, repo_root, resolve_spec_data_root
-
 
 # ---------------------------------------------------------------------------
 # repo_root()
@@ -44,7 +42,7 @@ class TestRepoRoot:
         assert (r / "scripts").is_dir()
 
     def test_constant_matches_function(self) -> None:
-        assert REPO_ROOT == repo_root()
+        assert repo_root() == REPO_ROOT
 
 
 # ---------------------------------------------------------------------------
@@ -98,9 +96,7 @@ class TestResolveSpecDataRoot:
             result_path = Path(result)
 
             # Must NOT contain /backend/ in the resolved path
-            assert "/backend/" not in result, (
-                f"Path should not contain /backend/ but got: {result}"
-            )
+            assert "/backend/" not in result, f"Path should not contain /backend/ but got: {result}"
 
             # Must be under repo root
             assert str(result_path).startswith(str(repo_root()))
