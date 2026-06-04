@@ -58,3 +58,5 @@ prototype/
 .playwright-mcp/
 bash.exe.stackdump
 .claude/worktrees/
+*.sillyspec/
+frontend/CLAUDE.md

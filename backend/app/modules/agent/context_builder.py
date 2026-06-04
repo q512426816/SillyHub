@@ -454,7 +454,7 @@ async def build_scan_bundle(
 
     # Step 1b — 推导 runtime_root
     if runtime_root is None:
-        runtime_root = str(Path(spec_root).parent / "runtime" / str(workspace_id))
+        runtime_root = str(Path(spec_root) / "runtime")
 
     # Step 2 — 构建 scan 执行指令（分步交互式）
     step_prompt = (
@@ -505,6 +505,7 @@ async def build_scan_bundle(
         change_key=None,
         stage="scan",
         spec_root=spec_root,
+        runtime_root=runtime_root,
         step_prompt=step_prompt,
         read_only=True,
     )

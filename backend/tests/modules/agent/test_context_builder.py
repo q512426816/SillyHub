@@ -291,5 +291,6 @@ async def test_build_scan_bundle_runtime_root_default_derivation(
         run_id=sample_run_id,
     )
 
-    expected = str(Path(spec_root).parent / "runtime" / str(mock_workspace.id))
+    expected = str(Path(spec_root) / "runtime")
     assert bundle.platform_metadata["runtime_root"] == expected
+    assert bundle.runtime_root == expected
