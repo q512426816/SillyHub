@@ -11,6 +11,7 @@ Tests must not require a live Postgres / Redis. ``conftest`` therefore:
 from __future__ import annotations
 
 import os
+import tempfile
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
@@ -31,7 +32,6 @@ os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("SILLYSPEC_MASTER_KEY", "v1:" + "aa" * 32)
 
 # Set spec_data_root to a temp directory for tests (CI may not have /data permissions)
-import tempfile
 _test_data_root = tempfile.gettempdir()
 os.environ.setdefault("SPEC_DATA_ROOT", _test_data_root)
 
@@ -39,10 +39,29 @@ os.environ.setdefault("SPEC_DATA_ROOT", _test_data_root)
 @pytest.fixture(autouse=True)
 def _reset_settings_cache() -> Iterator[None]:
     """Clear the cached Settings between tests so env-var overrides take effect."""
-    from app.core.config import get_settings
+    import tempfile
 
+    from app.core.config import Settings, get_settings
+
+    # Clear cache first
     get_settings.cache_clear()
+
+    # Create a temp directory for spec data in tests
+    test_data_root = tempfile.gettempdir()
+
+    # Manually set spec_data_root in Settings to avoid permission issues in CI
+    original_init = Settings.__init__
+
+    def _patched_init(self, **kwargs):
+        kwargs.setdefault("spec_data_root", test_data_root)
+        original_init(self, **kwargs)
+
+    Settings.__init__ = _patched_init
+
     yield
+
+    # Restore original
+    Settings.__init__ = original_init
     get_settings.cache_clear()
 
 
