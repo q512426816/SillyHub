@@ -10,6 +10,13 @@
             "if": "Bash(git commit*)",
             "timeout": 300,
             "statusMessage": "Running local CI checks before commit..."
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/pre-commit-ci-check.cjs",
+            "if": "Bash(git push*)",
+            "timeout": 300,
+            "statusMessage": "Running local CI checks before push..."
           }
         ]
       }

@@ -30,6 +30,11 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production-use-only
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("SILLYSPEC_MASTER_KEY", "v1:" + "aa" * 32)
 
+# Set spec_data_root to a temp directory for tests (CI may not have /data permissions)
+import tempfile
+_test_data_root = tempfile.gettempdir()
+os.environ.setdefault("SPEC_DATA_ROOT", _test_data_root)
+
 
 @pytest.fixture(autouse=True)
 def _reset_settings_cache() -> Iterator[None]:
