@@ -1208,16 +1208,43 @@ class AgentService:
 
                 # -- 5. Execute via adapter -----------------------------------------
                 adapter = adapter_cls()
-                result = await adapter.run_with_bundle(run_id, bundle, work_dir)
+
+                async def on_log(channel: str, content: str, ts: str) -> None:
+                    log_entry = AgentRunLog(
+                        id=uuid.uuid4(),
+                        run_id=run.id,
+                        channel=channel,
+                        content_redacted=redact_agent_output(content)[:5000],
+                    )
+                    try:
+                        session.add(log_entry)
+                        await session.commit()
+                    except Exception:
+                        log.warning("scan_on_log_failed", run_id=str(run_id))
+
+                result = await adapter.run_with_bundle(run_id, bundle, work_dir, on_log=on_log)
 
                 # -- 6. Update run record -------------------------------------------
                 run.status = "completed" if result.exit_code == 0 else "failed"
                 run.finished_at = datetime.utcnow()
                 run.exit_code = result.exit_code
-                run.output_redacted = result.redacted_output[:10000]
+
+                # Save full output to file for debugging
+                spec_root = bundle.spec_root or str(work_dir)
+                log_dir = Path(spec_root) / ".runtime" / "scan-runs" / str(run_id)
+                log_dir.mkdir(parents=True, exist_ok=True)
+                (log_dir / "output.log").write_text(
+                    result.redacted_output or "", encoding="utf-8"
+                )
+                (log_dir / "stderr.log").write_text(
+                    result.stderr or "", encoding="utf-8"
+                )
+
+                # DB only stores tail
+                run.output_redacted = result.redacted_output[-10000:] if result.redacted_output else ""
                 session.add(run)
 
-                # -- 7. Log stdout/stderr -------------------------------------------
+                # -- 7. Log stdout/stderr (fallback) --------------------------------
                 for channel, content in [
                     ("stdout", result.stdout),
                     ("stderr", result.stderr),
