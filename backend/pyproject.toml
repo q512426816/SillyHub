@@ -83,3 +83,8 @@ ignore = ["E501", "N818", "RUF001", "RUF002", "RUF003", "BLE001", "SIM105", "SIM
 
 [tool.ruff.format]
 quote-style = "double"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.6.0",
+]
