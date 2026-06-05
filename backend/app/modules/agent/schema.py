@@ -40,6 +40,8 @@ class AgentRunResponse(BaseModel):
     duration_api_ms: int | None = None
     num_turns: int | None = None
     session_id: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
     model_config = {"from_attributes": True}
 
 

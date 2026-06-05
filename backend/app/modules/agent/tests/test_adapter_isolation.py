@@ -448,7 +448,8 @@ class TestResultMetadata:
         from app.modules.agent.adapters.claude_code import _extract_result_metadata
 
         meta = _extract_result_metadata([{"type": "raw", "text": "hello"}])
-        assert meta == {}
+        assert meta.get("total_cost_usd") is None
+        assert meta.get("input_tokens") is None
 
     def test_extract_result_metadata_partial_fields(self):
         from app.modules.agent.adapters.claude_code import _extract_result_metadata
@@ -506,3 +507,199 @@ class TestResultMetadata:
         assert result.session_id == "sess-uuid-1234"
         assert result.conversation_events is not None
         assert len(result.conversation_events) == 1
+
+    def test_extract_tokens_from_result_usage(self):
+        """result event with usage field → tokens extracted directly."""
+        from app.modules.agent.adapters.claude_code import _extract_result_metadata
+
+        events = [
+            {"type": "result", "usage": {"input_tokens": 1200, "output_tokens": 350}},
+        ]
+        meta = _extract_result_metadata(events)
+        assert meta["input_tokens"] == 1200
+        assert meta["output_tokens"] == 350
+
+    def test_extract_tokens_fallback_from_assistant_events(self):
+        """No usage in result → sum from assistant events."""
+        from app.modules.agent.adapters.claude_code import _extract_result_metadata
+
+        events = [
+            {
+                "type": "assistant",
+                "message": {"usage": {"input_tokens": 500, "output_tokens": 100}},
+            },
+            {
+                "type": "assistant",
+                "message": {"usage": {"input_tokens": 700, "output_tokens": 250}},
+            },
+            {"type": "result", "total_cost_usd": 0.01},
+        ]
+        meta = _extract_result_metadata(events)
+        assert meta["input_tokens"] == 1200
+        assert meta["output_tokens"] == 350
+
+    def test_extract_tokens_none_when_no_data(self):
+        """No usage anywhere → tokens are None."""
+        from app.modules.agent.adapters.claude_code import _extract_result_metadata
+
+        meta = _extract_result_metadata([{"type": "raw", "text": "hello"}])
+        assert meta.get("input_tokens") is None
+        assert meta.get("output_tokens") is None
+
+    def test_result_usage_takes_priority_over_assistant(self):
+        """result.usage present → ignore assistant fallback."""
+        from app.modules.agent.adapters.claude_code import _extract_result_metadata
+
+        events = [
+            {
+                "type": "assistant",
+                "message": {"usage": {"input_tokens": 999, "output_tokens": 888}},
+            },
+            {"type": "result", "usage": {"input_tokens": 100, "output_tokens": 50}},
+        ]
+        meta = _extract_result_metadata(events)
+        assert meta["input_tokens"] == 100
+        assert meta["output_tokens"] == 50
+
+    def test_result_event_has_cost_and_timing(self):
+        """result event with cost/timing → metadata extracted."""
+        from app.modules.agent.adapters.claude_code import _extract_result_metadata
+
+        events = [
+            {
+                "type": "result",
+                "total_cost_usd": 0.012,
+                "duration_ms": 360819,
+                "num_turns": 73,
+            }
+        ]
+        meta = _extract_result_metadata(events)
+        assert meta["total_cost_usd"] == 0.012
+        assert meta["duration_ms"] == 360819
+        assert meta["num_turns"] == 73
+
+    def test_assistant_message_usage_extracted(self):
+        """assistant events with message.usage → tokens extracted."""
+        from app.modules.agent.adapters.claude_code import _extract_result_metadata
+
+        events = [
+            {
+                "type": "assistant",
+                "message": {"usage": {"input_tokens": 500, "output_tokens": 100}},
+            },
+            {
+                "type": "assistant",
+                "message": {"usage": {"input_tokens": 700, "output_tokens": 250}},
+            },
+            {"type": "raw", "text": "noise"},
+        ]
+        meta = _extract_result_metadata(events)
+        assert meta["input_tokens"] == 1200
+        assert meta["output_tokens"] == 350
+
+    def test_no_result_but_delta_usage(self):
+        """No result event but delta/stream_event with usage → tokens extracted."""
+        from app.modules.agent.adapters.claude_code import _extract_result_metadata
+
+        events = [
+            {"type": "stream_event", "usage": {"input_tokens": 300, "output_tokens": 80}},
+            {"type": "delta", "usage": {"input_tokens": 200, "output_tokens": 40}},
+        ]
+        meta = _extract_result_metadata(events)
+        assert meta["input_tokens"] == 500
+        assert meta["output_tokens"] == 120
+
+    @pytest.mark.asyncio
+    async def test_conversation_events_always_list(self):
+        """_exec_stream returns [] not None for conversation_events."""
+        adapter = ClaudeCodeAdapter()
+        run_id = uuid.uuid4()
+        fake_proc = _make_fake_proc(stdout_data=b"")
+
+        with patch("asyncio.create_subprocess_exec", return_value=fake_proc):
+            with patch("app.modules.agent.adapters.claude_code.get_redis") as mr:
+                r = AsyncMock()
+                r.publish = AsyncMock()
+                mr.return_value = r
+                result = await adapter._exec_stream(
+                    run_id=run_id,
+                    cmd=["claude"],
+                    prompt="test",
+                    cwd=Path("/tmp"),
+                    env_vars={},
+                    timeout=5,
+                )
+
+        assert result.conversation_events is not None
+        assert isinstance(result.conversation_events, list)
+
+    def test_mixed_non_json_lines_dont_break_parsing(self):
+        """Non-JSON lines mixed with valid events → tokens still extracted."""
+        from app.modules.agent.adapters.claude_code import _extract_result_metadata
+
+        events = [
+            {"type": "raw", "text": "some random output"},
+            {
+                "type": "assistant",
+                "message": {"usage": {"input_tokens": 400, "output_tokens": 150}},
+            },
+            {"type": "raw", "text": "more noise"},
+        ]
+        meta = _extract_result_metadata(events)
+        assert meta["input_tokens"] == 400
+        assert meta["output_tokens"] == 150
+
+    def test_model_usage_takes_priority(self):
+        """result event with modelUsage → tokens aggregated from per-model data."""
+        from app.modules.agent.adapters.claude_code import _extract_result_metadata
+
+        events = [
+            {
+                "type": "result",
+                "total_cost_usd": 0.05,
+                "modelUsage": {
+                    "claude-sonnet": {
+                        "inputTokens": 1000,
+                        "outputTokens": 200,
+                    },
+                    "claude-haiku": {
+                        "inputTokens": 500,
+                        "outputTokens": 100,
+                    },
+                },
+            },
+        ]
+        meta = _extract_result_metadata(events)
+        assert meta["input_tokens"] == 1500
+        assert meta["output_tokens"] == 300
+        assert meta["total_cost_usd"] == 0.05
+
+    def test_model_usage_fallback_to_usage(self):
+        """result event without modelUsage but with usage → usage used."""
+        from app.modules.agent.adapters.claude_code import _extract_result_metadata
+
+        events = [
+            {
+                "type": "result",
+                "total_cost_usd": 0.01,
+                "usage": {"input_tokens": 800, "output_tokens": 400},
+            },
+        ]
+        meta = _extract_result_metadata(events)
+        assert meta["input_tokens"] == 800
+        assert meta["output_tokens"] == 400
+
+    def test_model_usage_empty_falls_through(self):
+        """result event with empty modelUsage → falls through to usage."""
+        from app.modules.agent.adapters.claude_code import _extract_result_metadata
+
+        events = [
+            {
+                "type": "result",
+                "modelUsage": {},
+                "usage": {"input_tokens": 600, "output_tokens": 300},
+            },
+        ]
+        meta = _extract_result_metadata(events)
+        assert meta["input_tokens"] == 600
+        assert meta["output_tokens"] == 300

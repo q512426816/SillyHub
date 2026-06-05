@@ -335,6 +335,8 @@ class AgentService:
         run.num_turns = result.num_turns
         run.session_id = result.session_id
         run.conversation_events = result.conversation_events
+        run.input_tokens = result.input_tokens
+        run.output_tokens = result.output_tokens
         self._session.add(run)
 
         # -- 5. Collect diff ------------------------------------------------------
@@ -937,6 +939,8 @@ class AgentService:
                 run.num_turns = result.num_turns
                 run.session_id = result.session_id
                 run.conversation_events = result.conversation_events
+                run.input_tokens = result.input_tokens
+                run.output_tokens = result.output_tokens
                 session.add(run)
 
                 # Log stdout/stderr
@@ -1226,15 +1230,18 @@ class AgentService:
                 adapter = adapter_cls()
 
                 async def on_log(channel: str, content: str, ts: str) -> None:
-                    log_entry = AgentRunLog(
-                        id=uuid.uuid4(),
-                        run_id=run.id,
-                        channel=channel,
-                        content_redacted=redact_agent_output(content)[:5000],
-                    )
+                    """Write log entry using a SEPARATE session to avoid
+                    expiring the ``run`` object in the main session."""
                     try:
-                        session.add(log_entry)
-                        await session.commit()
+                        async with factory() as log_session:
+                            log_entry = AgentRunLog(
+                                id=uuid.uuid4(),
+                                run_id=run.id,
+                                channel=channel,
+                                content_redacted=redact_agent_output(content)[:5000],
+                            )
+                            log_session.add(log_entry)
+                            await log_session.commit()
                     except Exception:
                         log.warning("scan_on_log_failed", run_id=str(run_id))
 
@@ -1264,9 +1271,21 @@ class AgentService:
                 run.num_turns = result.num_turns
                 run.session_id = result.session_id
                 run.conversation_events = result.conversation_events
+                run.input_tokens = result.input_tokens
+                run.output_tokens = result.output_tokens
                 session.add(run)
 
-                # -- 7. Log stdout/stderr (fallback) --------------------------------
+                log.info(
+                    "scan_run_result_metadata",
+                    run_id=str(run_id),
+                    total_cost_usd=result.total_cost_usd,
+                    duration_ms=result.duration_ms,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                    conversation_events_count=len(result.conversation_events)
+                    if result.conversation_events
+                    else None,
+                )
                 for channel, content in [
                     ("stdout", result.stdout),
                     ("stderr", result.stderr),
@@ -1297,6 +1316,19 @@ class AgentService:
                     ),
                 )
                 session.add(audit)
+
+                log.info(
+                    "scan_run_pre_commit",
+                    run_id=str(run_id),
+                    run_total_cost_usd=run.total_cost_usd,
+                    run_duration_ms=run.duration_ms,
+                    run_input_tokens=run.input_tokens,
+                    run_output_tokens=run.output_tokens,
+                    run_session_id=run.session_id,
+                    run_status=run.status,
+                    result_total_cost_usd=result.total_cost_usd,
+                    result_input_tokens=result.input_tokens,
+                )
 
                 await session.commit()
 

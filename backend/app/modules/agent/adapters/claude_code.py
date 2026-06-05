@@ -157,17 +157,75 @@ def _extract_tool_use_blocks(event: dict) -> list[dict]:
 
 
 def _extract_result_metadata(events: list[dict]) -> dict:
-    """Extract cost, timing, and session metadata from the result event."""
+    """Extract cost, timing, and token metadata from stream events.
+
+    Follows Multica's extraction strategy:
+    1. result event's ``modelUsage`` (per-model, highest priority)
+    2. result event's ``usage`` (single-model)
+    3. assistant events' ``message.usage`` (accumulated per-turn)
+    4. delta / stream_event usage fields
+    """
+    meta: dict = {}
+    result_event = None
+
+    # --- Phase 1: find result event ---
     for event in reversed(events):
         if event.get("type") == "result":
-            return {
-                "total_cost_usd": event.get("total_cost_usd"),
-                "duration_ms": event.get("duration_ms"),
-                "duration_api_ms": event.get("duration_api_ms"),
-                "num_turns": event.get("num_turns"),
-                "session_id": event.get("session_id"),
-            }
-    return {}
+            result_event = event
+            break
+
+    if result_event is not None:
+        meta["total_cost_usd"] = result_event.get("total_cost_usd")
+        meta["duration_ms"] = result_event.get("duration_ms")
+        meta["duration_api_ms"] = result_event.get("duration_api_ms")
+        meta["num_turns"] = result_event.get("num_turns")
+        meta["session_id"] = result_event.get("session_id")
+
+        # Tokens — try modelUsage first (per-model breakdown), then usage
+        model_usage = result_event.get("modelUsage")
+        if isinstance(model_usage, dict) and model_usage:
+            agg_in = 0
+            agg_out = 0
+            for _model, u in model_usage.items():
+                if isinstance(u, dict):
+                    agg_in += u.get("inputTokens", 0) or 0
+                    agg_out += u.get("outputTokens", 0) or 0
+            if agg_in or agg_out:
+                meta["input_tokens"] = agg_in
+                meta["output_tokens"] = agg_out
+
+        if meta.get("input_tokens") is None:
+            usage = result_event.get("usage", {})
+            if isinstance(usage, dict):
+                meta["input_tokens"] = usage.get("input_tokens")
+                meta["output_tokens"] = usage.get("output_tokens")
+    else:
+        for k in ("total_cost_usd", "duration_ms", "duration_api_ms", "num_turns", "session_id"):
+            meta[k] = None
+
+    # --- Phase 2: fallback — accumulate from assistant / delta / stream_event ---
+    if meta.get("input_tokens") is None or meta.get("output_tokens") is None:
+        agg_input = 0
+        agg_output = 0
+        for event in events:
+            etype = event.get("type", "")
+            if etype == "assistant":
+                usage = event.get("message", {}).get("usage", {})
+                if isinstance(usage, dict):
+                    agg_input += usage.get("input_tokens", 0) or 0
+                    agg_output += usage.get("output_tokens", 0) or 0
+            elif etype in ("delta", "stream_event"):
+                usage = event.get("usage", {})
+                if isinstance(usage, dict):
+                    agg_input += usage.get("input_tokens", 0) or 0
+                    agg_output += usage.get("output_tokens", 0) or 0
+
+        if meta.get("input_tokens") is None and agg_input:
+            meta["input_tokens"] = agg_input
+        if meta.get("output_tokens") is None and agg_output:
+            meta["output_tokens"] = agg_output
+
+    return meta
 
 
 def _parse_stream_events(raw_stdout: str) -> list[dict]:
@@ -429,6 +487,13 @@ class ClaudeCodeAdapter(AgentAdapter):
             stdout_lines: list[str] = []
             all_events: list[dict] = []
 
+            # Raw debug output paths — persist under /tmp for easy inspection
+            debug_dir = Path("/tmp/agent-debug")
+            try:
+                debug_dir.mkdir(exist_ok=True)
+            except OSError:
+                debug_dir = None
+
             async def _read_stdout() -> None:
                 """Read stdout line-by-line, parse events, publish to Redis."""
                 log.info("stdout_reader_started", run_id=str(run_id), pid=proc.pid)
@@ -576,6 +641,29 @@ class ClaudeCodeAdapter(AgentAdapter):
             stderr_raw = await _read_stderr()
             stdout_raw = "\n".join(stdout_lines)
 
+            # Parse stderr JSONL lines into events as well
+            for line in stderr_raw.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                    if event.get("type") and event not in all_events:
+                        all_events.append(event)
+                except json.JSONDecodeError:
+                    pass
+
+            # Write raw debug files for diagnostics
+            try:
+                if debug_dir is not None:
+                    (debug_dir / f"{run_id}-stdout.jsonl").write_text(stdout_raw, encoding="utf-8")
+                    if stderr_raw.strip():
+                        (debug_dir / f"{run_id}-stderr.txt").write_text(
+                            stderr_raw, encoding="utf-8"
+                        )
+            except Exception:
+                log.warning("debug_write_failed", run_id=str(run_id))
+
             # Publish done event
             try:
                 await redis.publish(
@@ -602,6 +690,20 @@ class ClaudeCodeAdapter(AgentAdapter):
                 event_count=len(all_events),
             )
             metadata = _extract_result_metadata(all_events)
+
+            log.info(
+                "extracted_metadata",
+                run_id=str(run_id),
+                total_cost_usd=metadata.get("total_cost_usd"),
+                duration_ms=metadata.get("duration_ms"),
+                input_tokens=metadata.get("input_tokens"),
+                output_tokens=metadata.get("output_tokens"),
+                num_turns=metadata.get("num_turns"),
+                session_id=metadata.get("session_id"),
+                event_count=len(all_events),
+                result_event_found=any(e.get("type") == "result" for e in all_events),
+            )
+
             return AgentRunResult(
                 exit_code=proc.returncode if proc.returncode is not None else 1,
                 stdout=stdout_raw,
@@ -612,7 +714,9 @@ class ClaudeCodeAdapter(AgentAdapter):
                 duration_api_ms=metadata.get("duration_api_ms"),
                 num_turns=metadata.get("num_turns"),
                 session_id=metadata.get("session_id"),
-                conversation_events=all_events if all_events else None,
+                conversation_events=all_events,
+                input_tokens=metadata.get("input_tokens"),
+                output_tokens=metadata.get("output_tokens"),
             )
 
         finally:

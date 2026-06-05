@@ -113,6 +113,8 @@ class AgentRunResult:
     num_turns: int | None = None
     session_id: str | None = None
     conversation_events: list[dict] | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 class AgentAdapter(ABC):

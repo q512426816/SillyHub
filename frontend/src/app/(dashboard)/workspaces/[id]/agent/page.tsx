@@ -477,6 +477,8 @@ export default function AgentPage({ params }: Props) {
                     ["Change", run.lease_id ? shortId(run.lease_id) : "—"],
                     ["Runtime", calcDuration(run)],
                     ["Cost", run.total_cost_usd != null ? `$${run.total_cost_usd.toFixed(4)}` : "—"],
+                    ["In Tokens", run.input_tokens != null ? run.input_tokens.toLocaleString() : "—"],
+                    ["Out Tokens", run.output_tokens != null ? run.output_tokens.toLocaleString() : "—"],
                   ].map(([label, value]) => (
                     <div key={label as string} className="bg-card px-3 py-1.5">
                       <span className="text-muted-foreground">{label as string}</span>
@@ -725,7 +727,7 @@ export default function AgentPage({ params }: Props) {
                         <td colSpan={10} className="p-0">
                           <div className="border-t bg-muted/30">
                             {/* Usage / Cost summary card */}
-                            {(run.total_cost_usd != null || run.duration_ms != null || run.num_turns != null) && (
+                            {(run.total_cost_usd != null || run.duration_ms != null || run.num_turns != null || run.input_tokens != null || run.output_tokens != null) && (
                               <div className="grid grid-cols-2 gap-px bg-border border-b text-xs sm:grid-cols-4">
                                 {run.total_cost_usd != null && (
                                   <div className="bg-card px-3 py-2">
@@ -749,6 +751,18 @@ export default function AgentPage({ params }: Props) {
                                   <div className="bg-card px-3 py-2">
                                     <span className="text-muted-foreground">Turns</span>
                                     <span className="ml-2 font-medium">{run.num_turns}</span>
+                                  </div>
+                                )}
+                                {run.input_tokens != null && (
+                                  <div className="bg-card px-3 py-2">
+                                    <span className="text-muted-foreground">Input Tokens</span>
+                                    <span className="ml-2 font-medium">{run.input_tokens.toLocaleString()}</span>
+                                  </div>
+                                )}
+                                {run.output_tokens != null && (
+                                  <div className="bg-card px-3 py-2">
+                                    <span className="text-muted-foreground">Output Tokens</span>
+                                    <span className="ml-2 font-medium">{run.output_tokens.toLocaleString()}</span>
                                   </div>
                                 )}
                               </div>

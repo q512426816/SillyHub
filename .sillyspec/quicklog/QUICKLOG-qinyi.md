@@ -24,3 +24,8 @@
 状态：已完成
 文件：frontend/src/lib/agent.ts、frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx
 摘要：AgentRun type 新增 5 字段，Active Runs 卡片 Cost 用真实数据，Completed Runs 表新增 Cost/Turns 列，展开日志新增 Usage/Cost 摘要卡片。
+
+## ql-20260605-005-f2b8 | 2026-06-05 15:48:09 | 修复 Agent Run metadata 持久化失败 + 参考 Multica 细化 token 采集
+状态：已完成
+文件：backend/app/modules/agent/adapters/claude_code.py、backend/app/modules/agent/service.py、backend/app/modules/agent/tests/test_adapter_isolation.py
+摘要：3 项修复：(1) on_log 改用独立 session，隔离主 session 的 run 对象，避免 session.commit 干扰 metadata 赋值；(2) _extract_result_metadata 参考 Multica 新增 modelUsage 解析，三级优先：modelUsage → usage → assistant 累积；(3) 添加 extracted_metadata + scan_run_pre_commit 诊断日志追踪 metadata 提取和持久化。新增 3 个测试，26/26 通过。已部署。

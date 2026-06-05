@@ -180,6 +180,14 @@ class AgentRun(BaseModel, table=True):
         default=None,
         sa_column=Column(JSON, nullable=True),
     )
+    input_tokens: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
+    output_tokens: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
 
 
 class AgentRunLog(BaseModel, table=True):

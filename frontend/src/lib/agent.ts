@@ -28,6 +28,8 @@ export interface AgentRun {
   duration_api_ms: number | null;
   num_turns: number | null;
   session_id: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
 }
 
 export type AgentRunLogChannel =
