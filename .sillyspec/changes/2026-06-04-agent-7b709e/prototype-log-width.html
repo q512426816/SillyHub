@@ -1,0 +1,144 @@
+<!--
+author: qinyi
+created_at: 2026-06-04T08:15:00+08:00
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Console Log Width - Before/After Prototype</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; padding: 24px; }
+  h1 { font-size: 18px; margin-bottom: 16px; color: #333; }
+  h2 { font-size: 14px; margin-bottom: 8px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+  .container { max-width: 1152px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+
+  .panel { border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; background: #fff; }
+  .panel-header { padding: 12px 16px; background: #fafafa; border-bottom: 1px solid #e0e0e0; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 9999px; font-weight: 500; }
+  .badge-red { background: #fee2e2; color: #dc2626; }
+  .badge-green { background: #dcfce7; color: #16a34a; }
+
+  /* Before: current behavior */
+  .log-before {
+    max-height: 200px;
+    overflow: auto;
+    padding: 8px 12px;
+    font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    background: #fafafa;
+  }
+  .log-before .line {
+    word-break: break-all; /* current: break-all */
+    white-space: pre-wrap; /* current: pre-wrap */
+  }
+  .log-before .timestamp { color: #9ca3af; }
+  .log-before .tag { font-weight: 600; }
+  .log-before .tag-tool { color: #2563eb; }
+  .log-before .tag-result { color: #059669; }
+  .log-before .tag-warn { color: #d97706; }
+  .log-before .tag-info { color: #6b7280; }
+
+  /* After: horizontal scroll */
+  .log-after {
+    max-height: 200px;
+    overflow: auto;
+    padding: 8px 12px;
+    font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    background: #fafafa;
+  }
+  .log-after .line {
+    white-space: pre; /* after: no wrap */
+  }
+  .log-after .timestamp { color: #9ca3af; }
+  .log-after .tag { font-weight: 600; }
+  .log-after .tag-tool { color: #2563eb; }
+  .log-after .tag-result { color: #059669; }
+  .log-after .tag-warn { color: #d97706; }
+  .log-after .tag-info { color: #6b7280; }
+
+  .note {
+    font-size: 12px;
+    color: #888;
+    padding: 8px 0;
+    font-style: italic;
+  }
+
+  .arrow { text-align: center; font-size: 24px; color: #16a34a; padding: 8px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Agent Console Log Width - Before / After</h1>
+
+  <!-- BEFORE: Active Run Logs -->
+  <div>
+    <h2>Before (current) — Active Run Logs</h2>
+    <div class="note">word-break: break-all + white-space: pre-wrap → 长行被强制折行</div>
+    <div class="panel">
+      <div class="panel-header">Tool Call Stream <span class="badge badge-red">break-all</span></div>
+      <div class="log-before">
+<div class="line"><span class="timestamp">07:23:45</span> <span class="tag tag-info">[INFO]</span> Agent run started for task: implement-user-auth</div>
+<div class="line"><span class="timestamp">07:23:46</span> <span class="tag tag-tool">[TOOL_USE]</span> Read file: frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx — checking existing implementation for the agent console log display component that renders SSE streaming output</div>
+<div class="line"><span class="timestamp">07:23:47</span> <span class="tag tag-result">[TOOL_RESULT]</span> File content (804 lines): 1| "use client"; 2| import { useState, useEffect, useRef, useCallback } from "react"; 3| import { listAgentRuns, getAgentRunLogs, streamAgentRunLogs, killAgentRun, submitAgentRunInput } from "@/lib/agent"; ...</div>
+<div class="line"><span class="timestamp">07:23:48</span> <span class="tag tag-warn">[WARN]</span> Response payload exceeds 10KB, truncating tool_result content to first 2000 characters for display in the console output panel</div>
+<div class="line"><span class="timestamp">07:23:49</span> <span class="tag tag-info">[INFO]</span> Running command: docker compose exec backend python -m pytest tests/modules/agent/test_agent_console.py -v --tb=short -x</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow">↓ 改动后 ↓</div>
+
+  <!-- AFTER: Active Run Logs -->
+  <div>
+    <h2>After (proposed) — Active Run Logs</h2>
+    <div class="note">white-space: pre + overflow-x: auto → 长行保持完整，水平滚动查看</div>
+    <div class="panel">
+      <div class="panel-header">Tool Call Stream <span class="badge badge-green">overflow-x-auto</span></div>
+      <div class="log-after">
+<div class="line"><span class="timestamp">07:23:45</span> <span class="tag tag-info">[INFO]</span> Agent run started for task: implement-user-auth</div>
+<div class="line"><span class="timestamp">07:23:46</span> <span class="tag tag-tool">[TOOL_USE]</span> Read file: frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx — checking existing implementation for the agent console log display component that renders SSE streaming output</div>
+<div class="line"><span class="timestamp">07:23:47</span> <span class="tag tag-result">[TOOL_RESULT]</span> File content (804 lines): 1| "use client"; 2| import { useState, useEffect, useRef, useCallback } from "react"; 3| import { listAgentRuns, getAgentRunLogs, streamAgentRunLogs, killAgentRun, submitAgentRunInput } from "@/lib/agent"; ...</div>
+<div class="line"><span class="timestamp">07:23:48</span> <span class="tag tag-warn">[WARN]</span> Response payload exceeds 10KB, truncating tool_result content to first 2000 characters for display in the console output panel</div>
+<div class="line"><span class="timestamp">07:23:49</span> <span class="tag tag-info">[INFO]</span> Running command: docker compose exec backend python -m pytest tests/modules/agent/test_agent_console.py -v --tb=short -x</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BEFORE: Completed Run Logs -->
+  <div style="margin-top: 16px;">
+    <h2>Before (current) — Completed Run Logs (pre block)</h2>
+    <div class="note">whitespace-pre-wrap → 自动在容器宽度处换行</div>
+    <div class="panel">
+      <div class="panel-header">Completed Run Log <span class="badge badge-red">pre-wrap</span></div>
+      <div class="log-before">
+<div class="line"><span class="timestamp">07:23:45</span> <span class="tag tag-info">[INFO]</span> Agent run started for task: implement-user-auth</div>
+<div class="line"><span class="timestamp">07:23:46</span> <span class="tag tag-tool">[TOOL_USE]</span> Read file: backend/app/modules/agent/router.py — checking the agent module router that handles SSE streaming, log retrieval, and agent run management endpoints</div>
+<div class="line"><span class="timestamp">07:23:47</span> <span class="tag tag-result">[TOOL_RESULT]</span> 200 OK — {"run_id": "abc-123", "status": "completed", "logs": [{"channel": "stdout", "content": "All tests passed successfully", "timestamp": "2026-06-04T07:23:47Z"}, {"channel": "stderr", "content": "2 warnings in test_agent_console.py::test_log_display_width", "timestamp": "2026-06-04T07:23:47Z"}]}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow">↓ 改动后 ↓</div>
+
+  <!-- AFTER: Completed Run Logs -->
+  <div>
+    <h2>After (proposed) — Completed Run Logs (pre block)</h2>
+    <div class="note">whitespace-pre + overflow-x-auto → 长行完整显示，水平滚动</div>
+    <div class="panel">
+      <div class="panel-header">Completed Run Log <span class="badge badge-green">pre + scroll</span></div>
+      <div class="log-after">
+<div class="line"><span class="timestamp">07:23:45</span> <span class="tag tag-info">[INFO]</span> Agent run started for task: implement-user-auth</div>
+<div class="line"><span class="timestamp">07:23:46</span> <span class="tag tag-tool">[TOOL_USE]</span> Read file: backend/app/modules/agent/router.py — checking the agent module router that handles SSE streaming, log retrieval, and agent run management endpoints</div>
+<div class="line"><span class="timestamp">07:23:47</span> <span class="tag tag-result">[TOOL_RESULT]</span> 200 OK — {"run_id": "abc-123", "status": "completed", "logs": [{"channel": "stdout", "content": "All tests passed successfully", "timestamp": "2026-06-04T07:23:47Z"}, {"channel": "stderr", "content": "2 warnings in test_agent_console.py::test_log_display_width", "timestamp": "2026-06-04T07:23:47Z"}]}</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

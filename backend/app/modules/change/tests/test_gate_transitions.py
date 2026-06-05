@@ -1,5 +1,7 @@
 """Tests for human_gate transitions and resolve_human_gate."""
 
+import pytest
+
 from app.modules.change.model import TRANSITIONS, HumanGate, StageEnum
 from app.modules.change.service import resolve_human_gate
 
@@ -19,32 +21,25 @@ class TestHumanGateEnum:
 
 
 class TestResolveHumanGate:
-    def test_brainstorm(self):
-        assert resolve_human_gate("brainstorm") == "need_requirement_input"
+    """AD-01: resolve_human_gate always returns none after task-01."""
 
-    def test_propose(self):
-        assert resolve_human_gate("propose") == "need_proposal_review"
-
-    def test_plan(self):
-        assert resolve_human_gate("plan") == "need_plan_review"
-
-    def test_verify(self):
-        assert resolve_human_gate("verify") == "need_human_test"
-
-    def test_archive(self):
-        assert resolve_human_gate("archive") == "need_archive_confirm"
-
-    def test_execute_returns_none(self):
-        assert resolve_human_gate("execute") == "none"
-
-    def test_draft_returns_none(self):
-        assert resolve_human_gate("draft") == "none"
-
-    def test_quick_returns_none(self):
-        assert resolve_human_gate("quick") == "none"
-
-    def test_unknown_returns_none(self):
-        assert resolve_human_gate("unknown_stage") == "none"
+    @pytest.mark.parametrize(
+        "stage",
+        [
+            "brainstorm",
+            "propose",
+            "plan",
+            "verify",
+            "archive",
+            "execute",
+            "quick",
+            "scan",
+            "draft",
+            "unknown_stage",
+        ],
+    )
+    def test_always_returns_none(self, stage):
+        assert resolve_human_gate(stage) == HumanGate.NONE
 
 
 class TestTransitionsTable:
@@ -55,7 +50,12 @@ class TestTransitionsTable:
 
     def test_verify_exits(self):
         verify_targets = set(TRANSITIONS[StageEnum.VERIFY].keys())
-        assert verify_targets == {StageEnum.QUICK, StageEnum.ARCHIVE, StageEnum.BLOCKED}
+        assert verify_targets == {
+            StageEnum.QUICK,
+            StageEnum.ARCHIVE,
+            StageEnum.BLOCKED,
+            StageEnum.PROPOSE,
+        }
 
     def test_quick_exits(self):
         quick_targets = set(TRANSITIONS[StageEnum.QUICK].keys())

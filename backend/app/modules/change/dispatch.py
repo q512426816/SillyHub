@@ -184,71 +184,94 @@ async def auto_dispatch_next_step(
         )
         return {"dispatched": False, "reason": "sync_failed"}
 
-    # 2. stage completed
+    # 2. stage completed → call complete_stage then optionally dispatch
     if sync_result.stage_completed:
-        change = await session.get(Change, change_id)
-        if change and change.human_gate and change.human_gate != "none":
-            log.info(
-                "auto_dispatch_blocked_by_gate",
-                change_id=str(change_id),
-                human_gate=change.human_gate,
-                stage=sync_result.current_stage,
-            )
-            return {
-                "dispatched": False,
-                "reason": "human_gate_active",
-                "human_gate": change.human_gate,
-                "stage": sync_result.current_stage,
-            }
+        if not sync_result.current_stage:
+            return {"dispatched": False, "reason": "stage_completed"}
 
-        # verify auto-fix: if verify completed without gate (failed), try quick fix
-        if change and sync_result.current_stage == "verify":
+        # AD-01: Use complete_stage to set current_stage + human_gate
+        from app.modules.change.service import ChangeService
+
+        cs = ChangeService(session)
+        complete_result = await cs.complete_stage(
+            workspace_id=workspace_id,
+            change_id=change_id,
+            stage=sync_result.current_stage,
+            result=None,
+            summary=None,
+        )
+
+        if complete_result.dispatch_target:
+            target = complete_result.dispatch_target
+
+            # verify auto-fix: check auto_fix_count before dispatching quick
+            if sync_result.current_stage == "verify" and target == "quick":
+                change = await session.get(Change, change_id)
+                if change:
+                    stages = change.stages or {}
+                    fix_count = stages.get("_auto_fix_count", 0)
+                    if fix_count >= 3:
+                        change.human_gate = "blocked"
+                        change.stages = stages
+                        session.add(change)
+                        await session.commit()
+                        log.warning(
+                            "verify_auto_fix_limit_reached",
+                            change_id=str(change_id),
+                            attempts=fix_count,
+                        )
+                        return {
+                            "dispatched": False,
+                            "reason": "verify_auto_fix_limit",
+                            "stage": "verify",
+                            "human_gate": "blocked",
+                        }
+                    stages["_auto_fix_count"] = fix_count + 1
+                    change.stages = stages
+                    session.add(change)
+                    await session.commit()
+                    log.info(
+                        "verify_auto_fix_dispatching_quick",
+                        change_id=str(change_id),
+                        attempt=fix_count + 1,
+                    )
+
+            # Chain limit check
+            change = await session.get(Change, change_id)
+            if change is None:
+                return {"dispatched": False, "reason": "change_not_found"}
             stages = change.stages or {}
-            fix_count = stages.get("_auto_fix_count", 0)
-            if fix_count < 3:
-                stages["_auto_fix_count"] = fix_count + 1
-                change.stages = stages
-                session.add(change)
-                await session.commit()
-                log.info(
-                    "verify_auto_fix_dispatching_quick",
-                    change_id=str(change_id),
-                    attempt=fix_count + 1,
-                )
-                dispatch_result = await dispatch(
-                    session=session,
-                    workspace_id=workspace_id,
-                    change_id=change_id,
-                    target_stage="quick",
-                    user_id=user_id,
-                )
-                dispatch_result["reason"] = "verify_auto_fix"
-                return dispatch_result
-            else:
-                change.human_gate = "blocked"
-                stages = change.stages or {}
-                stages["_auto_fix_count"] = fix_count
-                change.stages = stages
-                session.add(change)
-                await session.commit()
-                log.warning(
-                    "verify_auto_fix_limit_reached",
-                    change_id=str(change_id),
-                    attempts=fix_count,
-                )
-                return {
-                    "dispatched": False,
-                    "reason": "verify_auto_fix_limit",
-                    "stage": "verify",
-                    "human_gate": "blocked",
-                }
+            chain_count = _get_chain_count(stages)
+            if chain_count >= _DISPATCH_CHAIN_LIMIT:
+                return {"dispatched": False, "reason": "chain_limit_reached"}
 
+            stages = _increment_chain_count(stages)
+            change.stages = stages
+            session.add(change)
+            await session.commit()
+
+            dispatch_result = await dispatch(
+                session=session,
+                workspace_id=workspace_id,
+                change_id=change_id,
+                target_stage=target,
+                user_id=user_id,
+            )
+            dispatch_result["reason"] = "auto_dispatch_after_complete"
+            return dispatch_result
+
+        # No dispatch needed — gate set, wait for human
         log.info(
-            "auto_dispatch_skip_stage_completed",
+            "auto_dispatch_stage_completed_with_gate",
             change_id=str(change_id),
+            gate=complete_result.gate,
             stage=sync_result.current_stage,
         )
-        return {"dispatched": False, "reason": "stage_completed"}
+        return {
+            "dispatched": False,
+            "reason": "stage_completed",
+            "human_gate": complete_result.gate,
+        }
 
     # 3. no pending step
     if not sync_result.has_pending_step:
@@ -285,7 +308,7 @@ async def auto_dispatch_next_step(
         session=session,
         workspace_id=workspace_id,
         change_id=change_id,
-        target_stage=sync_result.current_stage,
+        target_stage=sync_result.current_stage or "",
         user_id=user_id,
     )
 
@@ -591,7 +614,7 @@ class SillySpecStageDispatchService:
         # Fallback: minimal bundle
         change = await session.get(Change, change_id)
         return AgentSpecBundle(
-            change_summary=change.title if change else f"Stage dispatch: {stage}",
+            change_summary=change.title if change and change.title else f"Stage dispatch: {stage}",
             task_key=f"stage:{stage}",
             task_title=f"Stage dispatch: {stage}",
             stage_dispatch=True,
@@ -803,7 +826,9 @@ class SillySpecStageDispatchService:
         try:
             from app.modules.spec_workspace.model import SpecWorkspace
 
-            stmt = select(SpecWorkspace).where(SpecWorkspace.workspace_id == change.workspace_id)
+            stmt = select(SpecWorkspace).where(
+                col(SpecWorkspace.workspace_id) == change.workspace_id
+            )
             spec_ws = (await session.execute(stmt)).scalars().first()
 
             if spec_ws and spec_ws.strategy != "repo-native":
@@ -815,7 +840,7 @@ class SillySpecStageDispatchService:
         # Fallback: use workspace root_path
         from app.modules.workspace.model import Workspace
 
-        ws_stmt = select(Workspace).where(Workspace.id == change.workspace_id)
+        ws_stmt = select(Workspace).where(col(Workspace.id) == change.workspace_id)
         workspace = (await session.execute(ws_stmt)).scalars().first()
         if not workspace or not workspace.root_path:
             return None

@@ -13,3 +13,4 @@ htmlcov/
 tests/
 **/*.md
 !README.md
+!app/modules/change/prompts/*.md

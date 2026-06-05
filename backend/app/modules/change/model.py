@@ -110,6 +110,7 @@ TRANSITIONS: dict[StageEnum, dict[StageEnum, list[str]]] = {
         StageEnum.QUICK: ["agent"],
         StageEnum.ARCHIVE: ["reviewer", "agent"],
         StageEnum.BLOCKED: ["agent"],
+        StageEnum.PROPOSE: ["reviewer"],  # AD-03: human_test doc_mismatch 回退
     },
     StageEnum.QUICK: {
         StageEnum.VERIFY: ["agent"],

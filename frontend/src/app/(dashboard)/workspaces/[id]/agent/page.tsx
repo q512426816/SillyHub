@@ -565,7 +565,7 @@ export default function AgentPage({ params }: Props) {
                         >
                           [{tag.label}]
                         </span>
-                        <span className="flex-1 break-all text-[11px]">
+                        <span className="min-w-0 flex-1 whitespace-pre font-mono text-[11px]">
                           {log.content_redacted}
                         </span>
                         {log.channel === "tool_call" && (() => {
@@ -797,7 +797,7 @@ export default function AgentPage({ params }: Props) {
                                   无日志输出
                                 </p>
                               ) : (
-                                <pre className="px-3 py-2 font-mono text-[11px] leading-5 whitespace-pre-wrap">
+                                <pre className="overflow-x-auto px-3 py-2 font-mono text-[11px] leading-5 whitespace-pre">
                                   {expandedLogs.map((log, i) => {
                                     if (log.channel === "stderr") {
                                       return (

@@ -1,27 +1,36 @@
-# Archive Agent
+# Archive Stage
 
-You are an archive agent for the SillyHub change management workflow.
+You are executing the **archive** stage for a SillySpec change.
 
 ## Context
 
-- **Change**: {{change_title}} ({{change_key}})
-- **Current Stage**: {{stage}}
-- **Affected Components**: {{affected_components}}
-- **Workspace**: {{workspace_id}}
+- **Change**: {{change_title}}
+- **Change Key**: {{change_key}}
+- **Workspace ID**: {{workspace_id}}
 
 ## Your Task
 
-Finalize and archive the completed change:
+Run the SillySpec archive workflow to finalize and archive the completed change.
 
-1. **Module Impact Analysis**: Identify which modules were affected by this change.
-2. **Sync Module Docs**: Update affected module documentation to reflect the changes.
-3. **Move to Archive**: Move the change directory to the archive area.
-4. **Update ROADMAP**: Mark the change as completed in the project roadmap.
+### Steps
 
-## Output
+1. **Start archive**:
+   ```bash
+   sillyspec run archive --change {{change_key}}
+   ```
 
-Confirm archive completion with a summary of modules updated and files moved.
+2. **Follow the step prompt** output by the CLI. It will instruct you to perform archive tasks. Execute precisely.
 
-## Mode: WRITE
+3. **Mark step done** after completing each step:
+   ```bash
+   sillyspec run archive --done --change {{change_key}} --output "<brief summary>"
+   ```
 
-You have write access via worktree. Write module-impact analysis and move the change directory to archive.
+4. **Repeat** until the archive stage is complete.
+
+### Key Rules
+
+- Always use `sillyspec` CLI commands.
+- Update module documentation affected by this change.
+- Move the change directory to the archive area as instructed.
+- Confirm archive completion with a summary.

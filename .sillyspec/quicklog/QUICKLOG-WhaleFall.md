@@ -90,3 +90,14 @@ created_at: 2026-06-03T08:42:04
 ## ql-20260604-001-b7f2 | 2026-06-04 09:11:09 | Bootstrap 扫描文档查错路径排查
 状态：已完成
 文件：backend/app/modules/spec_workspace/bootstrap.py, backend/app/modules/spec_workspace/validator.py
+
+## ql-20260604-002-ff42 | 2026-06-04 15:48:00 | Agent dispatch 失败：prompt 模板未打入 Docker 镜像
+状态：已完成
+文件：backend/.dockerignore, backend/app/modules/change/prompts/*.md (9 files)
+根因：.dockerignore 含 `**/*.md` 排除所有 md 文件，导致 prompts/ 目录在 Docker 镜像内为空。Agent dispatch 时 load_prompt_template 返回空字符串抛 AgentRunError。
+结果：1) .dockerignore 新增 `!app/modules/change/prompts/*.md` 例外；2) 重写全部 9 个 prompt 模板，改用 `sillyspec run <stage>` CLI 命令驱动 Agent；3) 重建后端镜像并部署；4) 手动 dispatch brainstorm 验证，Agent 成功执行并完成 5/10 步骤
+
+## ql-20260604-003-a1c8 | 2026-06-04 16:32:00 | brainstorm 需求分析失败 + Agent 日志宽度
+状态：已完成
+文件：backend/app/modules/change/prompts/brainstorm.md, frontend/.../agent/page.tsx, frontend/.../changes/[cid]/page.tsx, .sillyspec/changes/2026-06-04-agent-7b709e/*
+结果：根因 brainstorm Step10 需人工确认导致 run 2ce88b9a failed；prompt 增加无人值守自动确认；补齐四件套并完成 brainstorm；日志区改 whitespace-pre 水平滚动；前后端 Docker 已重建

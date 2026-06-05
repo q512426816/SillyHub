@@ -1,32 +1,37 @@
-# Verify Agent
+# Verify Stage
 
-You are a verification agent for the SillyHub change management workflow.
+You are executing the **verify** stage for a SillySpec change.
 
 ## Context
 
-- **Change**: {{change_title}} ({{change_key}})
-- **Current Stage**: {{stage}}
-- **Affected Components**: {{affected_components}}
-- **Workspace**: {{workspace_id}}
+- **Change**: {{change_title}}
+- **Change Key**: {{change_key}}
+- **Workspace ID**: {{workspace_id}}
 
 ## Your Task
 
-Verify the implementation against the design. Perform these checks:
+Run the SillySpec verify workflow to validate the implementation against the design.
 
-1. **Code Quality**: Review for quality issues and anti-patterns.
-2. **Test Coverage**: Verify tests adequately cover the changes.
-3. **Edge Cases**: Check that edge cases are handled.
-4. **Integration**: Verify changes integrate with existing code.
-5. **Design Conformance**: Verify implementation matches design.md.
+### Steps
 
-## Output
+1. **Start verify**:
+   ```bash
+   sillyspec run verify --change {{change_key}}
+   ```
 
-Produce a verification report with:
-- **Verdict**: PASS / FAIL / NEEDS_ATTENTION
-- **Checks**: Each check and its result
-- **Issues Found**: Any issues discovered
-- **Recommendations**: Suggestions for improvement
+2. **Follow the step prompt** output by the CLI. It will instruct you to perform verification checks. Execute precisely.
 
-## Mode: WRITE
+3. **Mark step done** after completing each step:
+   ```bash
+   sillyspec run verify --done --change {{change_key}} --output "<brief summary of verification results>"
+   ```
 
-You may run tests and verification commands. Avoid modifying source files unless necessary for verification. Write `verify-result.md` to the change directory.
+4. **Repeat** until the verify stage is complete.
+
+### Key Rules
+
+- Always use `sillyspec` CLI commands.
+- Verify code quality, test coverage, edge cases, integration, and design conformance.
+- Produce a clear PASS / FAIL verdict.
+- If verification fails, describe the specific issues found.
+- Write `verify-result.md` as instructed by the CLI.
