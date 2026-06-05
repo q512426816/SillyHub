@@ -413,3 +413,96 @@ class TestProcessRegistration:
         assert error_payload["channel"] == "stderr"
         assert done_payload["event"] == "done"
         assert run_id not in AgentService._proc_registry
+
+
+# ---------------------------------------------------------------------------
+# Result metadata extraction
+# ---------------------------------------------------------------------------
+
+
+class TestResultMetadata:
+    def test_extract_result_metadata_from_result_event(self):
+        """_extract_result_metadata parses cost and timing from result event."""
+        from app.modules.agent.adapters.claude_code import _extract_result_metadata
+
+        events = [
+            {"type": "system", "subtype": "init"},
+            {
+                "type": "result",
+                "subtype": "success",
+                "total_cost_usd": 0.0034,
+                "duration_ms": 2847,
+                "duration_api_ms": 1923,
+                "num_turns": 4,
+                "session_id": "abc-123",
+            },
+        ]
+        meta = _extract_result_metadata(events)
+        assert meta["total_cost_usd"] == 0.0034
+        assert meta["duration_ms"] == 2847
+        assert meta["duration_api_ms"] == 1923
+        assert meta["num_turns"] == 4
+        assert meta["session_id"] == "abc-123"
+
+    def test_extract_result_metadata_no_result_event(self):
+        from app.modules.agent.adapters.claude_code import _extract_result_metadata
+
+        meta = _extract_result_metadata([{"type": "raw", "text": "hello"}])
+        assert meta == {}
+
+    def test_extract_result_metadata_partial_fields(self):
+        from app.modules.agent.adapters.claude_code import _extract_result_metadata
+
+        events = [{"type": "result", "duration_ms": 1000}]
+        meta = _extract_result_metadata(events)
+        assert meta["duration_ms"] == 1000
+        assert meta["total_cost_usd"] is None
+        assert meta["session_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_exec_stream_returns_metadata(self, fake_proc_factory):
+        """_exec_stream populates cost/timing fields in AgentRunResult."""
+        adapter = ClaudeCodeAdapter()
+        run_id = uuid.uuid4()
+
+        result_event = (
+            json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "total_cost_usd": 0.05,
+                    "duration_ms": 5000,
+                    "duration_api_ms": 3200,
+                    "num_turns": 8,
+                    "session_id": "sess-uuid-1234",
+                }
+            ).encode()
+            + b"\n"
+        )
+        fake_proc = fake_proc_factory(stdout_data=result_event)
+
+        with patch("asyncio.create_subprocess_exec", return_value=fake_proc):
+            with patch("app.modules.agent.adapters.claude_code.get_redis") as mr:
+                r = AsyncMock()
+                r.publish = AsyncMock()
+                mr.return_value = r
+                with patch(
+                    "app.modules.agent.adapters.claude_code.redact_output",
+                    return_value="OK",
+                ):
+                    result = await adapter._exec_stream(
+                        run_id=run_id,
+                        cmd=["claude"],
+                        prompt="test",
+                        cwd=Path("/tmp"),
+                        env_vars={},
+                        timeout=5,
+                    )
+
+        assert result.total_cost_usd == 0.05
+        assert result.duration_ms == 5000
+        assert result.duration_api_ms == 3200
+        assert result.num_turns == 8
+        assert result.session_id == "sess-uuid-1234"
+        assert result.conversation_events is not None
+        assert len(result.conversation_events) == 1

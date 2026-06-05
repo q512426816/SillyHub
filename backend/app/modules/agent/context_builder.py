@@ -460,17 +460,19 @@ async def build_scan_bundle(
     ws_id = str(workspace_id)
     run_id_str = str(run_id)
     # 完整命令行（单行，避免 LLM 忽略续行）
-    init_cmd = f"sillyspec init --dir {spec_root}"
+    # --dir 指向源码目录（root_path），sillyspec 用它定位项目代码并创建 .sillyspec/
+    # --spec-root 指向平台托管 spec 目录，sillyspec 将文档写入此路径
+    init_cmd = f"sillyspec init --dir {root_path}"
     scan_start_cmd = (
         f"sillyspec run scan"
-        f" --dir {spec_root}"
+        f" --dir {root_path}"
         f" --spec-root {spec_root}"
         f" --runtime-root {runtime_root}"
         f" --workspace-id {ws_id}"
         f" --scan-run-id {run_id_str}"
     )
     scan_done_cmd = (
-        f'sillyspec run scan --done --change default --dir {spec_root}'
+        f"sillyspec run scan --done --change default --dir {root_path}"
         f' --input "步骤描述" --output "步骤摘要"'
     )
     step_prompt = (
@@ -484,13 +486,15 @@ async def build_scan_bundle(
         f"```\n{scan_done_cmd}\n"
         f"```\n\n"
         f"## 执行流程\n"
-        f"1. 执行 init 命令\n"
-        f"2. 执行 scan 启动命令（包含全部平台参数）\n"
+        f"1. 执行 init 命令（--dir 指向源码目录 {root_path}）\n"
+        f"2. 执行 scan 启动命令（包含全部平台参数，文档输出到 {spec_root}）\n"
         f"3. CLI 输出 step prompt → 执行扫描操作 → 用 done 命令推进\n"
         f"4. 重复 step 3 直到 10/10 步全部完成\n\n"
         f"## 规则\n"
-        f"- 对 {root_path} 目录只读，不要修改任何项目文件\n"
-        f"- 所有产出写入 {spec_root} 目录\n"
+        f"- --dir 必须指向源码目录 {root_path}（不是 spec_root）\n"
+        f"- 对 {root_path} 目录中的源码只读，不要修改项目文件\n"
+        f"- .sillyspec/ 目录会在源码目录下创建（由 --dir 决定）\n"
+        f"- 文档生成在 {spec_root}/.sillyspec/docs/ 目录下\n"
         f"- 启动 scan 命令必须包含 --spec-root/--runtime-root/--workspace-id/--scan-run-id\n"
         f"- done 命令不需要重复平台参数\n"
         f"- 每个步骤必须用 done 完成，不要跳过"
@@ -502,9 +506,9 @@ async def build_scan_bundle(
         change_summary="Scan workspace project structure",
         task_key="stage:scan",
         task_title="Stage dispatch: scan",
-        # 约束
-        allowed_paths=[spec_root],
-        denied_paths=[root_path],
+        # 约束 — root_path 允许写入（sillyspec 需要创建 .sillyspec/）
+        allowed_paths=[spec_root, root_path],
+        denied_paths=[],
         # 工具
         available_tools=["sillyspec"],
         # 元数据
@@ -663,10 +667,10 @@ def render_bundle_to_claude_md(bundle: AgentSpecBundle) -> str:
         for tool in bundle.available_tools:
             if tool == "sillyspec":
                 lines.append(
-                    "- **sillyspec**: Use `sillyspec init --dir <spec_root>` to"
+                    "- **sillyspec**: Use `sillyspec init --dir <source_root>` to"
                     " initialize spec space, then `sillyspec run scan --dir"
-                    " <spec_root>` to scan. Do NOT write .sillyspec files"
-                    " directly — always use the CLI."
+                    " <source_root> --spec-root <spec_root>` to scan."
+                    " Do NOT write .sillyspec files directly — always use the CLI."
                 )
             else:
                 lines.append(f"- {tool}")

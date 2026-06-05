@@ -35,6 +35,11 @@ class AgentRunResponse(BaseModel):
     context_fingerprint: str | None = None
     checkpoint_version: int | None = None
     workspace_ids: list[uuid.UUID] = []  # all associated workspaces
+    total_cost_usd: float | None = None
+    duration_ms: int | None = None
+    duration_api_ms: int | None = None
+    num_turns: int | None = None
+    session_id: str | None = None
     model_config = {"from_attributes": True}
 
 

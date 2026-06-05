@@ -5,13 +5,13 @@ created_at: 2026-05-30 20:20:00
 
 # agent
 
-> 最后更新：2026-06-02
-> 最近变更：2026-06-02-sse-reliable-stream
+> 最后更新：2026-06-05
+> 最近变更：ql-20260605-003-c8e4
 > 模块路径：`app/modules/agent/**`
 
 ## 职责
 
-管理 AI Agent（Claude Code）的运行生命周期：启动、日志流收集、Kill 终止、diff 收集、状态管理、执行可靠性保证。通过适配器模式支持多种 Agent 类型。
+管理 AI Agent（Claude Code）的运行生命周期：启动、日志流收集、Kill 终止、diff 收集、状态管理、执行可靠性保证、Usage/Cost 追踪。通过适配器模式支持多种 Agent 类型。
 
 ## 当前设计
 
@@ -41,6 +41,7 @@ AgentService（编排层）
    - **进度快照**：`checkpoint_data` JSONB + `checkpoint_version` 递增
    - **审批门**：`approval_token`（一次性）管理高风险操作审批
 7. **用户指导输入**：`AgentService.submit_run_input()` 接受用户对 `pending_input` 事件的回复，写入 `AgentRunLog(channel="user_input")` 并通过 Redis Pub/Sub 推送给订阅该 run 的 SSE 客户端。新增通道约定：`pending_input`（Agent 请求用户确认或指导）和 `user_input`（用户提交的指导文本）。
+8. **Usage/Cost 追踪**：`ClaudeCodeAdapter._exec_stream()` 从 CLI stream-json result 事件提取 `total_cost_usd`、`duration_ms`、`duration_api_ms`、`num_turns`、`session_id` 元数据，以及完整结构化对话事件 `conversation_events`（JSONB），持久化到 `AgentRun` 表。API 响应暴露 cost/timing 字段。
 
 ## 对外接口
 
@@ -160,3 +161,4 @@ Agent 执行中 → ClaudeCodeAdapter 输出 pending_input
 | 2026-06-02 | 2026-06-02-spec-bootstrap-agent-stream-interaction | 新增 `submit_run_input()` 服务方法、`POST /runs/{id}/input` 端点、`pending_input`/`user_input` 通道约定、SSE 用户指导推送 |
 | 2026-06-02 | 2026-06-02-sse-reliable-stream | SSE 端点增加 `after` 查询参数（UUID）实现断线续传；SSE 事件增加 `log_id` 字段支持可靠去重；前端 `AgentRunStreamClient` 封装连接管理、重连、回填、去重 |
 | 2026-06-02 | quick-fix-bootstrap-sse-log-empty | `ClaudeCodeAdapter` 增加跨平台命令 guard 和启动失败 `stderr` + `done` SSE 事件；Docker 镜像内 `claude`/`sillyspec`/`stdbuf` 可用，部署侧空流主要由 bootstrap Redis publish 误用和日志批量 commit 修复覆盖 |
+| 2026-06-05 | ql-20260605-003-c8e4 | AgentRun 新增 6 列（total_cost_usd/duration_ms/duration_api_ms/num_turns/session_id/conversation_events），适配器解析 CLI result 元数据，3 个执行路径持久化，API 响应暴露 5 字段 |

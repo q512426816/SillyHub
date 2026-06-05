@@ -23,6 +23,11 @@ export interface AgentRun {
   diff_summary: string | null;
   change_id: string | null;
   created_at: string;
+  total_cost_usd: number | null;
+  duration_ms: number | null;
+  duration_api_ms: number | null;
+  num_turns: number | null;
+  session_id: string | null;
 }
 
 export type AgentRunLogChannel =

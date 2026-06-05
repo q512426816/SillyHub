@@ -329,6 +329,12 @@ class AgentService:
         run.finished_at = datetime.utcnow()
         run.exit_code = result.exit_code
         run.output_redacted = result.redacted_output[:10000]  # truncate
+        run.total_cost_usd = result.total_cost_usd
+        run.duration_ms = result.duration_ms
+        run.duration_api_ms = result.duration_api_ms
+        run.num_turns = result.num_turns
+        run.session_id = result.session_id
+        run.conversation_events = result.conversation_events
         self._session.add(run)
 
         # -- 5. Collect diff ------------------------------------------------------
@@ -925,6 +931,12 @@ class AgentService:
                 run.finished_at = datetime.utcnow()
                 run.exit_code = result.exit_code
                 run.output_redacted = result.redacted_output[:10000]
+                run.total_cost_usd = result.total_cost_usd
+                run.duration_ms = result.duration_ms
+                run.duration_api_ms = result.duration_api_ms
+                run.num_turns = result.num_turns
+                run.session_id = result.session_id
+                run.conversation_events = result.conversation_events
                 session.add(run)
 
                 # Log stdout/stderr
@@ -1246,6 +1258,12 @@ class AgentService:
                 run.output_redacted = (
                     result.redacted_output[-10000:] if result.redacted_output else ""
                 )
+                run.total_cost_usd = result.total_cost_usd
+                run.duration_ms = result.duration_ms
+                run.duration_api_ms = result.duration_api_ms
+                run.num_turns = result.num_turns
+                run.session_id = result.session_id
+                run.conversation_events = result.conversation_events
                 session.add(run)
 
                 # -- 7. Log stdout/stderr (fallback) --------------------------------

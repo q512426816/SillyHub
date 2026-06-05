@@ -476,7 +476,7 @@ export default function AgentPage({ params }: Props) {
                     ],
                     ["Change", run.lease_id ? shortId(run.lease_id) : "—"],
                     ["Runtime", calcDuration(run)],
-                    ["Cost", "$0.00"],
+                    ["Cost", run.total_cost_usd != null ? `$${run.total_cost_usd.toFixed(4)}` : "—"],
                   ].map(([label, value]) => (
                     <div key={label as string} className="bg-card px-3 py-1.5">
                       <span className="text-muted-foreground">{label as string}</span>
@@ -656,6 +656,8 @@ export default function AgentPage({ params }: Props) {
                   <th>Task</th>
                   <th>Status</th>
                   <th>Duration</th>
+                  <th>Cost</th>
+                  <th>Turns</th>
                   <th>Exit Code</th>
                   <th>Finished</th>
                   <th className="text-right">操作</th>
@@ -697,6 +699,10 @@ export default function AgentPage({ params }: Props) {
                         </Badge>
                       </td>
                       <td className="text-xs">{calcDuration(run)}</td>
+                      <td className="text-xs font-mono">
+                        {run.total_cost_usd != null ? `$${run.total_cost_usd.toFixed(4)}` : "—"}
+                      </td>
+                      <td className="text-xs text-center">{run.num_turns ?? "—"}</td>
                       <td className="font-mono text-[11px]">{run.exit_code ?? "—"}</td>
                       <td className="whitespace-nowrap text-[11px] text-muted-foreground">
                         {run.finished_at ? timeAgo(run.finished_at) : "—"}
@@ -716,8 +722,37 @@ export default function AgentPage({ params }: Props) {
                     {/* Inline log viewer for completed runs */}
                     {expandedRunId === run.id && (
                       <tr key={`${run.id}-logs`}>
-                        <td colSpan={8} className="p-0">
+                        <td colSpan={10} className="p-0">
                           <div className="border-t bg-muted/30">
+                            {/* Usage / Cost summary card */}
+                            {(run.total_cost_usd != null || run.duration_ms != null || run.num_turns != null) && (
+                              <div className="grid grid-cols-2 gap-px bg-border border-b text-xs sm:grid-cols-4">
+                                {run.total_cost_usd != null && (
+                                  <div className="bg-card px-3 py-2">
+                                    <span className="text-muted-foreground">Cost</span>
+                                    <span className="ml-2 font-semibold">${run.total_cost_usd.toFixed(4)}</span>
+                                  </div>
+                                )}
+                                {run.duration_ms != null && (
+                                  <div className="bg-card px-3 py-2">
+                                    <span className="text-muted-foreground">Wall Time</span>
+                                    <span className="ml-2 font-medium">{formatDuration(run.duration_ms)}</span>
+                                  </div>
+                                )}
+                                {run.duration_api_ms != null && (
+                                  <div className="bg-card px-3 py-2">
+                                    <span className="text-muted-foreground">API Time</span>
+                                    <span className="ml-2 font-medium">{formatDuration(run.duration_api_ms)}</span>
+                                  </div>
+                                )}
+                                {run.num_turns != null && (
+                                  <div className="bg-card px-3 py-2">
+                                    <span className="text-muted-foreground">Turns</span>
+                                    <span className="ml-2 font-medium">{run.num_turns}</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                             <div className="flex items-center justify-between border-b px-3 py-1.5">
                               <div className="flex items-center gap-2">
                                 <code className="text-[11px] font-mono">

@@ -236,9 +236,27 @@ async def _execute_bootstrap_agent_run(
             )
             await _publish_log_event(run_id, "stdout", start_message, start_ts)
 
-            # -- 3. Build runtime directory + bundle --------------------------------
-            spec_root_path = Path(spec_root)
+            # -- 3. Preflight checks ------------------------------------------------
             code_root_path = Path(code_root)
+            preflight_error = _run_preflight(code_root_path)
+            if preflight_error:
+                run.status = "failed"
+                run.finished_at = datetime.utcnow()
+                run.exit_code = 1
+                run.output_redacted = preflight_error
+                session.add(run)
+                await _write_run_log(
+                    session,
+                    run_id=run_id,
+                    channel="stderr",
+                    content=preflight_error,
+                )
+                await session.commit()
+                await _publish_done_event(run_id, "failed", 1)
+                return
+
+            # -- 4. Build runtime directory + bundle --------------------------------
+            spec_root_path = Path(spec_root)
             spec_root_path.mkdir(parents=True, exist_ok=True)
 
             runtime_dir = spec_root_path / ".runtime" / "bootstrap" / str(run_id)
@@ -246,12 +264,15 @@ async def _execute_bootstrap_agent_run(
 
             bundle = _build_bootstrap_bundle(
                 workspace_id=workspace_id,
+                workspace=workspace,
                 spec_ws=spec_ws,
                 spec_root=spec_root_path,
                 code_root=code_root_path,
+                run_id=run_id,
             )
 
-            # -- 4. Execute via adapter (with real-time log writing) ---------------
+            # -- 5. Execute via adapter (with real-time log writing) ---------------
+            # lease_path = code_root so Claude CWD is the source directory
             adapter = ClaudeCodeAdapter()
 
             async def _on_log(channel: str, content: str, ts: str) -> None:
@@ -278,16 +299,16 @@ async def _execute_bootstrap_agent_run(
             result = await adapter.run_with_bundle(
                 run_id=run_id,
                 bundle=bundle,
-                lease_path=runtime_dir,
+                lease_path=code_root_path,
                 timeout=600,
                 on_log=_on_log,
             )
 
-            # -- 5. Run validation --------------------------------------------------
+            # -- 6. Run validation --------------------------------------------------
             report = SpecValidator().validate(spec_root)
             validation_passed = result.exit_code == 0 and report.passed
 
-            # -- 6. Write stderr AgentRunLog (chunked) ------------------------------
+            # -- 7. Write stderr AgentRunLog (chunked) ------------------------------
             if result.stderr.strip():
                 await _write_run_log(
                     session,
@@ -296,7 +317,7 @@ async def _execute_bootstrap_agent_run(
                     content=result.stderr,
                 )
 
-            # -- 7. Update AgentRun + SpecWorkspace ---------------------------------
+            # -- 8. Update AgentRun + SpecWorkspace ---------------------------------
             now = datetime.utcnow()
             exit_code = result.exit_code
 
@@ -356,7 +377,7 @@ async def _execute_bootstrap_agent_run(
             session.add(run)
             session.add(spec_ws)
 
-            # -- 8. Write complete audit log ----------------------------------------
+            # -- 9. Write complete audit log ----------------------------------------
             error_count = len(report.errors)
             warning_count = len(report.warnings)
             audit_details = {
@@ -464,54 +485,142 @@ async def _execute_bootstrap_agent_run(
 # ---------------------------------------------------------------------------
 
 
+_PROJECT_SIGNATURES = [
+    "package.json",
+    "pyproject.toml",
+    "pom.xml",
+    "build.gradle",
+    "go.mod",
+    "Cargo.toml",
+    "Makefile",
+    "backend",
+    "frontend",
+    "src",
+    "lib",
+    "app",
+]
+
+# Entries that are not considered meaningful project content
+_PLATFORM_ENTRIES = frozenset({".sillyspec", "worktree", "README.md", ".git"})
+
+
+def _run_preflight(code_root: Path) -> str | None:
+    """Validate code_root before launching the bootstrap agent.
+
+    Returns an error string if preflight fails, or ``None`` if OK.
+    """
+    if not code_root.exists():
+        return f"source_root does not exist: {code_root}"
+    if not code_root.is_dir():
+        return f"source_root is not a directory: {code_root}"
+    entries = list(code_root.iterdir())
+    meaningful = [e for e in entries if e.name not in _PLATFORM_ENTRIES]
+    if not meaningful:
+        return f"source_root is empty (no files besides platform-managed dirs): {code_root}"
+    has_signature = any((code_root / sig).exists() for sig in _PROJECT_SIGNATURES)
+    if not has_signature:
+        # Check one level deeper — code may live inside a subdirectory
+        for entry in entries:
+            if (
+                entry.is_dir()
+                and entry.name not in _PLATFORM_ENTRIES
+                and any((entry / sig).exists() for sig in _PROJECT_SIGNATURES)
+            ):
+                return None
+        names = ", ".join(e.name for e in entries[:10])
+        return (
+            f"source_root has no recognizable project signature "
+            f"(checked: {', '.join(_PROJECT_SIGNATURES[:7])}). "
+            f"Found: {names}"
+        )
+    return None
+
+
 def _build_bootstrap_bundle(
     *,
     workspace_id: uuid.UUID,
+    workspace: Workspace,
     spec_ws: SpecWorkspace,
     spec_root: Path,
     code_root: Path,
+    run_id: uuid.UUID,
 ) -> AgentSpecBundle:
     """Return the exact bootstrap AgentSpecBundle consumed by ClaudeCodeAdapter.
 
     The bundle instructs Claude to:
-    - Run ``sillyspec init --dir <spec_root>``
-    - Run ``sillyspec run scan --dir <spec_root>``
+    - Run ``sillyspec init --dir <code_root>``
+    - Run ``sillyspec run scan --dir <code_root> --spec-root <spec_root> ...``
     - NOT wait for real stdin interaction; use conservative defaults instead.
     """
-    task_markdown = (
-        "# Bootstrap Spec Workspace\n\n"
-        "## Goal\n"
-        "Initialize the platform-managed spec root directory for this workspace.\n\n"
-        "## Steps\n"
-        "1. Run `sillyspec init --dir <spec_root>` to create the initial "
-        ".sillyspec directory structure.\n"
-        "2. Run `sillyspec run scan --dir <spec_root>` to scan the codebase "
-        "and generate architecture documentation.\n\n"
-        "## Important Rules\n"
-        "- Do NOT wait for real stdin interaction. If you encounter a prompt "
-        "that requires user confirmation, write a log entry describing the "
-        "blocking point and continue using conservative default values.\n"
-        "- If you cannot continue at all, exit with a non-zero code.\n"
-        "- The spec root directory is where .sillyspec/ structure should be created.\n"
-        f"- spec_root: {spec_root}\n"
-        f"- code_root: {code_root}\n"
+    runtime_root = str(spec_root / "runtime")
+    ws_id = str(workspace_id)
+    run_id_str = str(run_id)
+
+    init_cmd = f"sillyspec init --dir {code_root}"
+    scan_start_cmd = (
+        f"sillyspec run scan"
+        f" --dir {code_root}"
+        f" --spec-root {spec_root}"
+        f" --runtime-root {runtime_root}"
+        f" --workspace-id {ws_id}"
+        f" --scan-run-id {run_id_str}"
+    )
+    scan_done_cmd = (
+        f"sillyspec run scan --done --change default --dir {code_root}"
+        f' --input "步骤描述" --output "步骤摘要"'
+    )
+    step_prompt = (
+        f"你是一个项目分析 agent。请对项目目录 {code_root} 执行 sillyspec scan。\n\n"
+        f"## ⚠️ 命令模板（严格复制，不要省略任何参数）\n\n"
+        f"**第 1 步 — 初始化（仅一次）：**\n"
+        f"```\n{init_cmd}\n```\n\n"
+        f"**第 2 步 — 启动 scan（仅一次，必须包含全部平台参数）：**\n"
+        f"```\n{scan_start_cmd}\n```\n\n"
+        f"**第 3-N 步 — 逐步推进（每次完成后执行）：**\n"
+        f"```\n{scan_done_cmd}\n"
+        f"```\n\n"
+        f"## 执行流程\n"
+        f"1. 执行 init 命令（--dir 指向源码目录 {code_root}）\n"
+        f"2. 执行 scan 启动命令（包含全部平台参数，文档输出到 {spec_root}）\n"
+        f"3. CLI 输出 step prompt → 执行扫描操作 → 用 done 命令推进\n"
+        f"4. 重复 step 3 直到 10/10 步全部完成\n\n"
+        f"## 规则\n"
+        f"- --dir 必须指向源码目录 {code_root}（不是 spec_root）\n"
+        f"- 对 {code_root} 目录中的源码只读，不要修改项目文件\n"
+        f"- .sillyspec/ 目录会在源码目录下创建（由 --dir 决定）\n"
+        f"- 文档生成在 {spec_root}/.sillyspec/docs/ 目录下\n"
+        f"- 启动 scan 命令必须包含 --spec-root/--runtime-root/--workspace-id/--scan-run-id\n"
+        f"- done 命令不需要重复平台参数\n"
+        f"- 每个步骤必须用 done 完成，不要跳过\n"
+        f"- Do NOT wait for real stdin interaction; use conservative defaults.\n"
     )
 
     return AgentSpecBundle(
         change_summary="Spec workspace bootstrap",
-        task_key="spec-bootstrap",
-        task_title="Bootstrap spec workspace",
-        task_markdown=task_markdown,
+        task_key="stage:scan",
+        task_title="Stage dispatch: scan",
         allowed_paths=[str(spec_root), str(code_root)],
+        denied_paths=[],
         available_tools=["sillyspec"],
         spec_strategy=spec_ws.strategy,
         profile_version=spec_ws.profile_version,
         platform_metadata={
             "bootstrap": True,
-            "workspace_id": str(workspace_id),
+            "workspace_id": ws_id,
             "spec_root": str(spec_root),
             "code_root": str(code_root),
+            "root_path": str(code_root),
+            "runtime_root": runtime_root,
+            "scan_run_id": run_id_str,
+            "mode": "scan",
         },
+        stage_dispatch=True,
+        change_key=None,
+        stage="scan",
+        spec_root=str(spec_root),
+        runtime_root=runtime_root,
+        step_prompt=step_prompt,
+        read_only=True,
     )
 
 

@@ -5,7 +5,19 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, Integer, String, Text, Uuid, text
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    Uuid,
+    text,
+)
 from sqlmodel import Field
 
 from app.models.base import BaseModel
@@ -142,6 +154,31 @@ class AgentRun(BaseModel, table=True):
             ForeignKey("changes.id", ondelete="CASCADE"),
             nullable=True,
         ),
+    )
+    # ── Usage / cost tracking fields ──
+    total_cost_usd: float | None = Field(
+        default=None,
+        sa_column=Column(Float, nullable=True),
+    )
+    duration_ms: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
+    duration_api_ms: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
+    num_turns: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
+    session_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(128), nullable=True),
+    )
+    conversation_events: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
     )
 
 

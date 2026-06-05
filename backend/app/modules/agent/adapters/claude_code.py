@@ -94,7 +94,7 @@ def _build_stage_dispatch_prompt(bundle: AgentSpecBundle) -> str:
             scan_run_id = meta.get("scan_run_id", "")
             scan_start_cmd = (
                 f"sillyspec run scan"
-                f" --dir {spec_root}"
+                f" --dir {root_path}"
                 f" --spec-root {spec_root}"
                 f" --runtime-root {runtime_root}"
                 f" --workspace-id {ws_id}"
@@ -104,15 +104,15 @@ def _build_stage_dispatch_prompt(bundle: AgentSpecBundle) -> str:
                 f"你是一个项目分析 agent。请对项目目录 {root_path} 执行 sillyspec scan。\n\n"
                 f"## ⚠️ 命令模板（严格复制）\n\n"
                 f"**第 1 步：**\n"
-                f"```\nsillyspec init --dir {spec_root}\n```\n\n"
+                f"```\nsillyspec init --dir {root_path}\n```\n\n"
                 f"**第 2 步（必须包含全部平台参数）：**\n"
                 f"```\n{scan_start_cmd}\n```\n\n"
                 f"**第 3-N 步：**\n"
                 f"```\n"
-                f'sillyspec run scan --done --change default --dir {spec_root}'
+                f"sillyspec run scan --done --change default --dir {root_path}"
                 f' --input "..." --output "..."\n'
                 f"```\n\n"
-                f"对 {root_path} 只读，产出写入 {spec_root}\n"
+                f"对 {root_path} 中的源码只读，产出写入 {spec_root}\n"
             )
         if bundle.read_only:
             prompt += "\n## 模式: READ-ONLY\nDo NOT modify any files. Only analyze and report.\n"
@@ -154,6 +154,20 @@ def _extract_tool_use_blocks(event: dict) -> list[dict]:
         if isinstance(block, dict) and block.get("type") == "tool_use":
             blocks.append(block)
     return blocks
+
+
+def _extract_result_metadata(events: list[dict]) -> dict:
+    """Extract cost, timing, and session metadata from the result event."""
+    for event in reversed(events):
+        if event.get("type") == "result":
+            return {
+                "total_cost_usd": event.get("total_cost_usd"),
+                "duration_ms": event.get("duration_ms"),
+                "duration_api_ms": event.get("duration_api_ms"),
+                "num_turns": event.get("num_turns"),
+                "session_id": event.get("session_id"),
+            }
+    return {}
 
 
 def _parse_stream_events(raw_stdout: str) -> list[dict]:
@@ -587,11 +601,18 @@ class ClaudeCodeAdapter(AgentAdapter):
                 output_len=len(redacted),
                 event_count=len(all_events),
             )
+            metadata = _extract_result_metadata(all_events)
             return AgentRunResult(
                 exit_code=proc.returncode if proc.returncode is not None else 1,
                 stdout=stdout_raw,
                 stderr=stderr_raw,
                 redacted_output=redacted,
+                total_cost_usd=metadata.get("total_cost_usd"),
+                duration_ms=metadata.get("duration_ms"),
+                duration_api_ms=metadata.get("duration_api_ms"),
+                num_turns=metadata.get("num_turns"),
+                session_id=metadata.get("session_id"),
+                conversation_events=all_events if all_events else None,
             )
 
         finally:

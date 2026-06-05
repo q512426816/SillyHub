@@ -107,6 +107,12 @@ class AgentRunResult:
     stderr: str
     redacted_output: str
     timed_out: bool = False
+    total_cost_usd: float | None = None
+    duration_ms: int | None = None
+    duration_api_ms: int | None = None
+    num_turns: int | None = None
+    session_id: str | None = None
+    conversation_events: list[dict] | None = None
 
 
 class AgentAdapter(ABC):
