@@ -542,6 +542,46 @@ export default function ChangeDetailPage({ params }: Props) {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [agentLogs]);
 
+  // ── Poll agent-status while active, refresh on completion ─────────
+  useEffect(() => {
+    if (!isRunActive) return;
+    const interval = setInterval(async () => {
+      try {
+        const [as, m] = await Promise.all([
+          getAgentStatus(workspaceId, changeId),
+          getChangeDocuments(workspaceId, changeId),
+        ]);
+        setAgentStatus(as);
+        setMatrix(m);
+        // Agent finished → also refresh change to pick up new stage/gate
+        if (!as.has_active_run) {
+          const c = await getChange(workspaceId, changeId);
+          setChange(c);
+        }
+      } catch { /* silent */ }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [isRunActive, workspaceId, changeId]);
+
+  // ── Auto-refresh active doc content when matrix updates ──────────
+  useEffect(() => {
+    if (
+      activeDoc &&
+      activeDoc !== "prototypes" &&
+      activeDoc !== "references" &&
+      matrix &&
+      !loadingDoc
+    ) {
+      const docEntry = docExistsMap.get(activeDoc);
+      if (docEntry?.exists) {
+        void getChangeDocumentContent(workspaceId, changeId, activeDoc)
+          .then((content) => setDocContent(content))
+          .catch(() => {});
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matrix]);
+
   // Auto-load archive gate when entering archive stage
   useEffect(() => {
     if (change?.current_stage === "archive" && !archiveGate && !loadingArchiveGate) {
@@ -683,41 +723,13 @@ export default function ChangeDetailPage({ params }: Props) {
         );
       })()}
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-2">
         <Link
           href={`/workspaces/${workspaceId}/changes/${changeId}/tasks`}
           className="inline-flex h-7 items-center rounded bg-primary px-2 text-xs font-medium text-primary-foreground hover:bg-primary/90"
         >
           任务看板
         </Link>
-        {gatePanel && (
-          <div className="rounded-md border bg-card px-3 py-2.5 space-y-2">
-            <div>
-              <p className="text-sm font-medium">{gatePanel.title}</p>
-              <p className="text-[11px] text-muted-foreground">{gatePanel.description}</p>
-            </div>
-            <textarea
-              className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs focus:border-ring focus:outline-none"
-              rows={2}
-              placeholder="审核意见（可选）"
-              value={gateComment}
-              onChange={(e) => setGateComment(e.target.value)}
-            />
-            <div className="flex flex-wrap gap-1.5">
-              {gatePanel.actions.map((a) => (
-                <Button
-                  key={a.action}
-                  variant={a.variant}
-                  size="sm"
-                  onClick={() => void handleGateAction(a.action)}
-                  disabled={transitioning}
-                >
-                  {a.label}
-                </Button>
-              ))}
-            </div>
-          </div>
-        )}
         {humanGate === "none" && (agentStatus?.has_active_run || agentStatus?.config_enabled) && (
           <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
             <div className="h-2 w-2 animate-pulse rounded-full bg-primary" />
@@ -727,6 +739,35 @@ export default function ChangeDetailPage({ params }: Props) {
           </div>
         )}
       </div>
+
+      {gatePanel && (
+        <section className="rounded-md border-2 border-primary/20 bg-primary/5 px-4 py-3 space-y-2.5">
+          <div>
+            <p className="text-sm font-semibold">{gatePanel.title}</p>
+            <p className="text-xs text-muted-foreground">{gatePanel.description}</p>
+          </div>
+          <textarea
+            className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs focus:border-ring focus:outline-none"
+            rows={2}
+            placeholder="审核意见（可选）"
+            value={gateComment}
+            onChange={(e) => setGateComment(e.target.value)}
+          />
+          <div className="flex flex-wrap gap-2">
+            {gatePanel.actions.map((a) => (
+              <Button
+                key={a.action}
+                variant={a.variant}
+                size="sm"
+                onClick={() => void handleGateAction(a.action)}
+                disabled={transitioning}
+              >
+                {a.label}
+              </Button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ── SillySpec Step Progress ─────────────────────────────── */}
       <SillySpecStepProgress

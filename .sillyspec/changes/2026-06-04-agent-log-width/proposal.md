@@ -18,6 +18,7 @@ created_at: 2026-06-04T07:22:12.106630
 ## 变更范围
 
 - Agent 页（`/workspaces/[id]/agent`）活跃与已完成日志展示样式
+- Agent 页容器移除 `max-w-6xl` 宽度限制，让日志区域撑满可用空间
 - 变更详情页（`/workspaces/[id]/changes/[cid]`）Agent 日志展示样式
 
 ## 不在范围内（显式清单）

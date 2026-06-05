@@ -1,0 +1,231 @@
+<!--
+  author: qinyi
+  created_at: 2026-06-05T01:10:00
+  Agent Console Log Width - Before/After Comparison Prototype
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Console Log Width - Before vs After</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; }
+
+  .sidebar {
+    position: fixed; left: 0; top: 0; bottom: 0; width: 60px;
+    background: #1e293b; border-right: 1px solid #334155;
+    display: flex; flex-direction: column; align-items: center; padding-top: 16px; gap: 12px;
+  }
+  .sidebar-icon {
+    width: 36px; height: 36px; border-radius: 8px; background: #334155;
+    display: flex; align-items: center; justify-content: center; font-size: 14px; color: #94a3b8;
+  }
+  .sidebar-icon.active { background: #3b82f6; color: white; }
+
+  .main { margin-left: 60px; min-height: 100vh; }
+  .page { padding: 24px; }
+
+  .container-before { max-width: 1152px; margin: 0 auto; }
+  .container-after { width: 100%; }
+
+  .section { background: #1e293b; border: 1px solid #334155; border-radius: 8px; margin-bottom: 16px; }
+  .section-header {
+    padding: 12px 16px; border-bottom: 1px solid #334155;
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 14px; font-weight: 500;
+  }
+  .section-header .badge { background: #3b82f6; color: white; padding: 2px 8px; border-radius: 9999px; font-size: 11px; }
+
+  .stats { display: flex; gap: 12px; margin-bottom: 16px; }
+  .stat-card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 16px; flex: 1; }
+  .stat-card .label { font-size: 12px; color: #94a3b8; }
+  .stat-card .value { font-size: 24px; font-weight: 700; color: #3b82f6; }
+
+  .log-container { max-height: 300px; overflow: auto; }
+  .log-entry {
+    display: flex; padding: 4px 12px; gap: 8px; font-family: monospace; font-size: 11px;
+    border-bottom: 1px solid rgba(51, 65, 85, 0.5); align-items: flex-start;
+  }
+  .log-entry:hover { background: rgba(59, 130, 246, 0.05); }
+  .log-ts { color: #64748b; flex-shrink: 0; min-width: 70px; }
+  .log-channel { flex-shrink: 0; min-width: 60px; font-weight: 600; }
+  .log-channel.info { color: #3b82f6; }
+  .log-channel.tool { color: #a855f7; }
+  .log-channel.warn { color: #f59e0b; }
+  .log-content { flex: 1; min-width: 0; white-space: pre; }
+
+  .toggle-bar {
+    position: sticky; top: 0; z-index: 100; background: #0f172a; padding: 16px 24px;
+    border-bottom: 1px solid #334155; display: flex; align-items: center; gap: 16px;
+  }
+  .toggle-btn {
+    padding: 8px 16px; border-radius: 6px; border: 1px solid #334155; cursor: pointer;
+    font-size: 13px; font-weight: 500; transition: all 0.2s;
+  }
+  .toggle-btn.active { background: #3b82f6; color: white; border-color: #3b82f6; }
+  .toggle-btn:not(.active) { background: transparent; color: #94a3b8; }
+  .toggle-btn:not(.active):hover { border-color: #3b82f6; color: #3b82f6; }
+
+  .width-indicator {
+    font-size: 12px; color: #64748b; margin-left: auto;
+    font-family: monospace; background: #1e293b; padding: 4px 8px; border-radius: 4px;
+  }
+
+  .ruler {
+    height: 4px; margin-bottom: 8px; border-radius: 2px; position: relative;
+    background: linear-gradient(90deg, #3b82f6 var(--fill), #334155 var(--fill));
+  }
+  .ruler-label { font-size: 10px; color: #64748b; text-align: right; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="sidebar-icon active">🤖</div>
+  <div class="sidebar-icon">📊</div>
+  <div class="sidebar-icon">⚙️</div>
+  <div class="sidebar-icon">📁</div>
+</div>
+
+<div class="main">
+  <div class="toggle-bar">
+    <button class="toggle-btn active" onclick="showBefore()">❌ Before (max-w-6xl = 1152px)</button>
+    <button class="toggle-btn" onclick="showAfter()">✅ After (full width)</button>
+    <div class="width-indicator" id="widthIndicator">Content: 1104px / <span id="viewportWidth">--</span>px</div>
+  </div>
+
+  <div class="page">
+    <div id="containerBefore" class="container-before">
+      <div class="ruler"><div class="ruler-label" id="rulerLabel">max-w-6xl (1152px)</div></div>
+      <div class="stats">
+        <div class="stat-card"><div class="label">Running</div><div class="value">1</div></div>
+        <div class="stat-card"><div class="label">Completed</div><div class="value">12</div></div>
+        <div class="stat-card"><div class="label">Failed</div><div class="value">0</div></div>
+      </div>
+
+      <div class="section">
+        <div class="section-header">
+          <span>Agent Run #abc-123 — brainstorm</span>
+          <span class="badge">Running</span>
+        </div>
+        <div class="log-container">
+          <div class="log-entry">
+            <span class="log-ts">01:05:10</span>
+            <span class="log-channel info">[INFO]</span>
+            <span class="log-content">Starting brainstorm stage for change 2026-06-04-agent-log-width</span>
+          </div>
+          <div class="log-entry">
+            <span class="log-ts">01:05:11</span>
+            <span class="log-channel tool">[TOOL]</span>
+            <span class="log-content">Bash: sillyspec run brainstorm --change 2026-06-04-agent-log-width</span>
+          </div>
+          <div class="log-entry">
+            <span class="log-ts">01:05:12</span>
+            <span class="log-channel info">[INFO]</span>
+            <span class="log-content">stage: brainstorm, step: 1/10, stepName: 状态检查</span>
+          </div>
+          <div class="log-entry">
+            <span class="log-ts">01:05:15</span>
+            <span class="log-channel tool">[TOOL]</span>
+            <span class="log-content">Read: frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx (line 380) — className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6"</span>
+          </div>
+          <div class="log-entry">
+            <span class="log-ts">01:05:18</span>
+            <span class="log-channel tool">[TOOL]</span>
+            <span class="log-content">Edit: page.tsx:380 — old: "mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6" → new: "mx-auto flex flex-col gap-5 px-6 py-6"</span>
+          </div>
+          <div class="log-entry">
+            <span class="log-ts">01:05:20</span>
+            <span class="log-channel warn">[WARN]</span>
+            <span class="log-content">Long line example: Reading file /host-projects/WorkNew/SillyHub/frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx — the current implementation uses max-w-6xl which limits content to 1152px, but agent logs often contain very long paths and command output that get cut off</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="containerAfter" class="container-after" style="display:none">
+      <div class="ruler"><div class="ruler-label" id="rulerLabelAfter">Full width</div></div>
+      <div class="stats">
+        <div class="stat-card"><div class="label">Running</div><div class="value">1</div></div>
+        <div class="stat-card"><div class="label">Completed</div><div class="value">12</div></div>
+        <div class="stat-card"><div class="label">Failed</div><div class="value">0</div></div>
+      </div>
+
+      <div class="section">
+        <div class="section-header">
+          <span>Agent Run #abc-123 — brainstorm</span>
+          <span class="badge">Running</span>
+        </div>
+        <div class="log-container">
+          <div class="log-entry">
+            <span class="log-ts">01:05:10</span>
+            <span class="log-channel info">[INFO]</span>
+            <span class="log-content">Starting brainstorm stage for change 2026-06-04-agent-log-width</span>
+          </div>
+          <div class="log-entry">
+            <span class="log-ts">01:05:11</span>
+            <span class="log-channel tool">[TOOL]</span>
+            <span class="log-content">Bash: sillyspec run brainstorm --change 2026-06-04-agent-log-width</span>
+          </div>
+          <div class="log-entry">
+            <span class="log-ts">01:05:12</span>
+            <span class="log-channel info">[INFO]</span>
+            <span class="log-content">stage: brainstorm, step: 1/10, stepName: 状态检查</span>
+          </div>
+          <div class="log-entry">
+            <span class="log-ts">01:05:15</span>
+            <span class="log-channel tool">[TOOL]</span>
+            <span class="log-content">Read: frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx (line 380) — className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6"</span>
+          </div>
+          <div class="log-entry">
+            <span class="log-ts">01:05:18</span>
+            <span class="log-channel tool">[TOOL]</span>
+            <span class="log-content">Edit: page.tsx:380 — old: "mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6" → new: "mx-auto flex flex-col gap-5 px-6 py-6"</span>
+          </div>
+          <div class="log-entry">
+            <span class="log-ts">01:05:20</span>
+            <span class="log-channel warn">[WARN]</span>
+            <span class="log-content">Long line example: Reading file /host-projects/WorkNew/SillyHub/frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx — the current implementation uses max-w-6xl which limits content to 1152px, but agent logs often contain very long paths and command output that get cut off</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const before = document.getElementById('containerBefore');
+  const after = document.getElementById('containerAfter');
+  const indicator = document.getElementById('widthIndicator');
+  const vpWidth = document.getElementById('viewportWidth');
+
+  function updateWidth() {
+    const vw = window.innerWidth - 60; // minus sidebar
+    vpWidth.textContent = vw;
+    const beforeContent = before.offsetWidth - 48; // minus padding
+    const afterContent = after.offsetWidth - 48;
+    document.querySelector('#containerBefore .ruler').style.setProperty('--fill', (before.offsetWidth / vw * 100) + '%');
+    document.querySelector('#containerAfter .ruler').style.setProperty('--fill', (after.offsetWidth / vw * 100) + '%');
+  }
+
+  function showBefore() {
+    before.style.display = ''; after.style.display = 'none';
+    document.querySelectorAll('.toggle-btn')[0].classList.add('active');
+    document.querySelectorAll('.toggle-btn')[1].classList.remove('active');
+    updateWidth();
+  }
+
+  function showAfter() {
+    before.style.display = 'none'; after.style.display = '';
+    document.querySelectorAll('.toggle-btn')[0].classList.remove('active');
+    document.querySelectorAll('.toggle-btn')[1].classList.add('active');
+    updateWidth();
+  }
+
+  window.addEventListener('resize', updateWidth);
+  updateWidth();
+</script>
+</body>
+</html>
