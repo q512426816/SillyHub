@@ -224,6 +224,13 @@ export default function ChangeDetailPage({ params }: Props) {
   // ── Agent Log Stream state ──────────────────────────────────────────
   const [agentLogs, setAgentLogs] = useState<AgentRunLogEntry[]>([]);
   const [logsExpanded, setLogsExpanded] = useState(false);
+
+  // Auto-expand logs when agent becomes active or has last_dispatch
+  useEffect(() => {
+    if (!logsExpanded && (agentStatus?.has_active_run || agentStatus?.last_dispatch)) {
+      setLogsExpanded(true);
+    }
+  }, [agentStatus?.has_active_run, agentStatus?.last_dispatch]); // eslint-disable-line react-hooks/exhaustive-deps
   const [logStreaming, setLogStreaming] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
