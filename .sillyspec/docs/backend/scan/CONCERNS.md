@@ -91,7 +91,7 @@ Agent 通过 `asyncio.create_subprocess_exec` 调用 Claude Code CLI：
 
 ### SillySpec CLI 版本耦合
 
-同上，`SILLYSPEC_VERSION` 构建时注入。当前版本 3.16.0。
+同上，`SILLYSPEC_VERSION` 构建时注入。当前版本 3.16.2。
 
 ### bcrypt 直接依赖
 

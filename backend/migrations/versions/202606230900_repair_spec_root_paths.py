@@ -16,7 +16,7 @@ Idempotent: rows that are already correct (or do not match the broken
 pattern) are left untouched.
 
 Revision ID: 202606230900
-Revises: 202606220900
+Revises: 202606221800
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "202606230900"
-down_revision = "202606220900"
+down_revision = "202606221800"
 branch_labels = None
 depends_on = None
 
