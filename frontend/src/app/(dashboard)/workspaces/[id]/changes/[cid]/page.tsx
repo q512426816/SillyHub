@@ -542,26 +542,19 @@ export default function ChangeDetailPage({ params }: Props) {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [agentLogs]);
 
-  // ── Poll agent-status while active, refresh on completion ─────────
-  useEffect(() => {
-    if (!isRunActive) return;
-    const interval = setInterval(async () => {
-      try {
-        const [as, m] = await Promise.all([
-          getAgentStatus(workspaceId, changeId),
-          getChangeDocuments(workspaceId, changeId),
-        ]);
-        setAgentStatus(as);
-        setMatrix(m);
-        // Agent finished → also refresh change to pick up new stage/gate
-        if (!as.has_active_run) {
-          const c = await getChange(workspaceId, changeId);
-          setChange(c);
-        }
-      } catch { /* silent */ }
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [isRunActive, workspaceId, changeId]);
+  // ── Manual refresh: agent-status + documents + change ────────────
+  const refreshAll = useCallback(async () => {
+    try {
+      const [c, m, as] = await Promise.all([
+        getChange(workspaceId, changeId),
+        getChangeDocuments(workspaceId, changeId),
+        getAgentStatus(workspaceId, changeId),
+      ]);
+      setChange(c);
+      setMatrix(m);
+      setAgentStatus(as);
+    } catch { /* silent */ }
+  }, [workspaceId, changeId]);
 
   // ── Auto-refresh active doc content when matrix updates ──────────
   useEffect(() => {
@@ -902,10 +895,21 @@ export default function ChangeDetailPage({ params }: Props) {
       <section className="rounded-md border bg-card">
         <div className="flex items-center justify-between border-b px-3 py-2">
           <h2 className="text-xs font-medium">变更文档完整性</h2>
-          <span className="text-[11px] text-muted-foreground">
-            {REQUIRED_DOCS.filter((dt) => docExistsMap.get(dt)?.exists ?? false).length}
-            /{REQUIRED_DOCS.length} 必需文档就绪
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-muted-foreground">
+              {REQUIRED_DOCS.filter((dt) => docExistsMap.get(dt)?.exists ?? false).length}
+              /{REQUIRED_DOCS.length} 必需文档就绪
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-1.5 text-[11px]"
+              onClick={() => void refreshAll()}
+              disabled={transitioning}
+            >
+              刷新
+            </Button>
+          </div>
         </div>
         <div className="space-y-2 px-3 py-3">
           <div>
