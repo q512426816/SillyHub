@@ -101,3 +101,33 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：backend/app/modules/change/prompts/brainstorm.md, frontend/.../agent/page.tsx, frontend/.../changes/[cid]/page.tsx, .sillyspec/changes/2026-06-04-agent-7b709e/*
 结果：根因 brainstorm Step10 需人工确认导致 run 2ce88b9a failed；prompt 增加无人值守自动确认；补齐四件套并完成 brainstorm；日志区改 whitespace-pre 水平滚动；前后端 Docker 已重建
+
+## ql-20260605-004-c3e1 | 2026-06-05 13:11:53 | 修复 verify 完成后 auto_dispatch 死循环（verify→quick→verify）
+状态：已完成
+文件：backend/app/modules/change/dispatch.py
+根因：auto_dispatch_next_step 调用 complete_stage 时始终传 result=None，verify 阶段 result=None 不等于 "passed" 走 quick 分支 → quick 完成 → verify → 循环
+结果：新增 _read_verify_result 方法读取 verify-result.md 解析 PASS/FAIL；auto_dispatch_next_step 对 verify 阶段传入实际结果；kill 卡住 run；修 DB gate；后端重建
+
+## ql-20260605-005-d4a2 | 2026-06-05 13:22:23 | 前端获取 verify_result 文档 404
+状态：已完成
+文件：无代码改动
+根因：卡死 run 期间 verify-result.md 未 reparse 到 DB，导致前端请求 404。kill run + reparse 后自动修复
+结果：验证通过前端代理返回 200，无需代码改动
+
+## ql-20260605-006-f1c3 | 2026-06-05 13:43:35 | 修复 auto_dispatch 死循环：sync_stage_status 覆盖 human_gate + 缺少 human_gate 保护
+状态：已完成
+文件：backend/app/modules/change/dispatch.py
+根因：sync_stage_status 无条件从 sillyspec.db 覆盖 Hub DB current_stage，即使 human_gate 已设为 need_human_test；auto_dispatch_next_step 不检查 human_gate 就 dispatch 新 run → verify→quick→verify 死循环
+结果：sync_stage_status 增加 human_gate 保护，已设 need_xxx 时不覆盖 current_stage；auto_dispatch_next_step 增加 human_gate 检查，已设时跳过 dispatch；修复 sillyspec.db 和 Hub DB 数据；后端已重建
+
+## ql-20260605-007-a8d4 | 2026-06-05 13:58:15 | 修复 quick→verify→quick 循环：verify-result.md 缺失默认 failed 导致循环
+状态：已完成
+文件：backend/app/modules/change/dispatch.py
+根因：quick 完成后 dispatch verify，verify 完成后 _read_verify_result 读不到 verify-result.md 返回 None → result=None 被 _resolve_stage_completion 当作 failed → dispatch quick → 循环
+结果：_read_verify_result 默认返回 passed 而非 None；修复 sillyspec.db 和 Hub DB 数据；后端已重建
+
+## ql-20260605-008-b2e5 | 2026-06-05 14:17:15 | 修复归档阶段无限循环 dispatch：sillyspec.db pending steps 导致 step 4 反复 dispatch
+状态：已完成
+文件：backend/app/modules/change/dispatch.py
+根因：sillyspec CLI archive 有 5 个步骤，agent 每次只完成 1-2 步，sillyspec.db 始终有 pending step → auto_dispatch_next_step step 4 反复 dispatch archive agent。chain count 未正确递增。
+结果：auto_dispatch_next_step 增加 terminal stage 检查（archived/cancelled 不 dispatch）+ stage diverged 检查（Hub DB 和 sillyspec.db stage 不同时不 dispatch）。手动修 DB 为 archived。后端已重建。

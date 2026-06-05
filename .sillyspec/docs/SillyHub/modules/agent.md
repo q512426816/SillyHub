@@ -155,3 +155,4 @@ coordinator_schema.py → 协调器专用 schema
 
 | 变更 ID | 类型 | 简述 | 日期 |
 |---|---|---|---|
+| ql-20260605-002 | quick | auto_dispatch触发条件增加stage_completed | 2026-06-05 |

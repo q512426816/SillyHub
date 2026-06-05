@@ -1,33 +1,43 @@
-# Task: stage:scan — Stage dispatch: scan
-# Change: Change stage: scan
+# Task: stage:archive — Stage dispatch: archive
+# Change: Change stage: archive
 
 ## Task
-# Scan Agent
+# Archive Stage
 
-You are a scan agent for the SillyHub change management workflow.
+You are executing the **archive** stage for a SillySpec change.
 
 ## Context
 
-- **Change**: 2026-05-28-component-as-workspace (2026-05-28-component-as-workspace)
-- **Current Stage**: scan
-- **Affected Components**: 
-- **Workspace**: ed07e06d-3129-4f43-bc49-857cb1e6c39d
+- **Change**: Proposal: Agent 控制台日志回显宽度调整
+- **Change Key**: 2026-06-05-agent-74b61b
+- **Workspace ID**: 3a5e2cb6-84e2-43d4-b9dc-9479bd3afda4
 
 ## Your Task
 
-Scan the project codebase and produce architecture documentation. Use the `sillyspec` CLI tool:
+Run the SillySpec archive workflow to finalize and archive the completed change.
 
-1. Run `sillyspec init --dir <spec_root>` to initialize spec space if not already done.
-2. Run `sillyspec run scan --dir <spec_root>` to perform the scan.
-3. Review the generated documents under `.sillyspec/docs/` for completeness.
+### Steps
 
-## Output
+1. **Start archive**:
+   ```bash
+   sillyspec run archive --change 2026-06-05-agent-74b61b
+   ```
 
-Confirm scan completion with a summary of generated documents. If the scan fails, describe the error and suggest fixes.
+2. **Follow the step prompt** output by the CLI. It will instruct you to perform archive tasks. Execute precisely.
 
-## Mode: WRITE
+3. **Mark step done** after completing each step:
+   ```bash
+   sillyspec run archive --done --change 2026-06-05-agent-74b61b --output "<brief summary>"
+   ```
 
-You may write files (scan documents to `.sillyspec/docs/`). No worktree is required for this stage — write directly in the project.
+4. **Repeat** until the archive stage is complete.
+
+### Key Rules
+
+- Always use `sillyspec` CLI commands.
+- Update module documentation affected by this change.
+- Move the change directory to the archive area as instructed.
+- Confirm archive completion with a summary.
 
 
 ## Mode: WRITE

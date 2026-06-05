@@ -377,7 +377,7 @@ export default function AgentPage({ params }: Props) {
   /* ================================================================ */
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
+    <div className="flex flex-col gap-5 px-6 py-6">
       {/* ---- Header ---- */}
       <header className="flex items-center justify-between">
         <div>

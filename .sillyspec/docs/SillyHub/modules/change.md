@@ -161,3 +161,4 @@ Hub 业务扩展:      draft → rework_required → accepted
 
 | 变更 ID | 类型 | 简述 | 日期 |
 |---|---|---|---|
+| ql-20260605-002 | quick | sync_stage_status dual-db fallback + reparse before complete_stage | 2026-06-05 |

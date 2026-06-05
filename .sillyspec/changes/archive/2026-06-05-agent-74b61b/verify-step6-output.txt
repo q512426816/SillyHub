@@ -1,0 +1,20 @@
+## 测试与质量扫描结果
+
+### TypeScript 编译检查
+- **结果**: PASS — tsc --noEmit 零错误零警告
+
+### ESLint 检查
+- **结果**: PASS — next lint 针对 agent 页面目录无任何 warning 或 error
+
+### 技术债务扫描
+- **结果**: 无 TODO / FIXME / HACK / XXX 标记
+
+### 测试
+- **说明**: 项目未配置 test 脚本（package.json 中无 test 命令），仅有 typecheck + lint。本次变更为纯 CSS 类名移除（删除 max-w-6xl 和 mx-auto），无逻辑变更，typecheck + lint 覆盖充分。
+
+### 变更确认
+- 第380行已正确变更，移除了 max-w-6xl 和 mx-auto
+- 全文件无残留 max-w-* 限制
+- px-6 内边距保留，确保内容不贴边
+
+### 总评: PASS

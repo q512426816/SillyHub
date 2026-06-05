@@ -184,6 +184,34 @@ async def auto_dispatch_next_step(
         )
         return {"dispatched": False, "reason": "sync_failed"}
 
+    # 1.5 Guard: skip if human_gate is set (awaiting human action)
+    change = await session.get(Change, change_id)
+    if change and change.human_gate and change.human_gate not in ("none", "None", ""):
+        log.info(
+            "auto_dispatch_skip_human_gate",
+            change_id=str(change_id),
+            human_gate=change.human_gate,
+        )
+        return {
+            "dispatched": False,
+            "reason": "human_gate_pending",
+            "human_gate": change.human_gate,
+        }
+
+    # 1.6 Guard: skip if Hub DB current_stage is a terminal state
+    _terminal_stages = frozenset({"archived", "cancelled"})
+    if change and change.current_stage in _terminal_stages:
+        log.info(
+            "auto_dispatch_skip_terminal_stage",
+            change_id=str(change_id),
+            current_stage=change.current_stage,
+        )
+        return {
+            "dispatched": False,
+            "reason": "terminal_stage",
+            "current_stage": change.current_stage,
+        }
+
     # 2. stage completed → call complete_stage then optionally dispatch
     if sync_result.stage_completed:
         if not sync_result.current_stage:
@@ -207,12 +235,17 @@ async def auto_dispatch_next_step(
                 error=str(exc),
             )
 
+        # Resolve verify result from verify-result.md if applicable
+        stage_result = None
+        if sync_result.current_stage == "verify":
+            stage_result = await read_verify_result(session, change_id)
+
         # AD-01: Use complete_stage to set current_stage + human_gate
         complete_result = await cs.complete_stage(
             workspace_id=workspace_id,
             change_id=change_id,
             stage=sync_result.current_stage,
-            result=None,
+            result=stage_result,
             summary=None,
         )
 
@@ -301,6 +334,22 @@ async def auto_dispatch_next_step(
     change = await session.get(Change, change_id)
     if change is None:
         return {"dispatched": False, "reason": "change_not_found"}
+
+    # 4.1 Guard: don't dispatch if Hub DB stage diverges from sillyspec.db
+    # (e.g. complete_stage already set "archived" but sillyspec.db still "archive")
+    if change.current_stage != sync_result.current_stage:
+        log.info(
+            "auto_dispatch_skip_stage_diverged",
+            change_id=str(change_id),
+            hub_stage=change.current_stage,
+            sillyspec_stage=sync_result.current_stage,
+        )
+        return {
+            "dispatched": False,
+            "reason": "stage_diverged",
+            "hub_stage": change.current_stage,
+            "sillyspec_stage": sync_result.current_stage,
+        }
 
     stages = change.stages or {}
     chain_count = _get_chain_count(stages)
@@ -442,6 +491,39 @@ async def dispatch(
 # ---------------------------------------------------------------------------
 # SillySpecStageDispatchService — unified dispatch entry (task-07)
 # ---------------------------------------------------------------------------
+
+
+async def read_verify_result(
+    session: AsyncSession,
+    change_id: uuid.UUID,
+) -> str:
+    """Read verify-result.md and return 'passed' or 'failed'.
+
+    Default to 'passed' if file missing or no conclusive marker found,
+    to avoid verify→quick→verify loops.
+    """
+    change = await session.get(Change, change_id)
+    if not change or not change.path:
+        return "passed"
+
+    from app.modules.workspace.model import Workspace
+
+    ws = await session.get(Workspace, change.workspace_id)
+    if not ws or not ws.root_path:
+        return "passed"
+
+    vr_path = Path(ws.root_path) / change.path / "verify-result.md"
+    if not vr_path.is_file():
+        return "passed"
+
+    text = vr_path.read_text(encoding="utf-8", errors="replace")
+    for line in text.splitlines()[:30]:
+        stripped = line.strip().upper()
+        if "FAIL" in stripped and "PASS" not in stripped:
+            return "failed"
+        if "PASS" in stripped:
+            return "passed"
+    return "passed"
 
 
 class SillySpecStageDispatchService:
@@ -814,14 +896,36 @@ class SillySpecStageDispatchService:
                 conn.close()
 
         # Step 4: Sync current_stage to Change record
+        # Guard: don't overwrite if human_gate is set (awaiting human action)
+        _human_gate_gates = frozenset(
+            {
+                "need_human_test",
+                "need_proposal_review",
+                "need_plan_review",
+                "need_requirement_input",
+                "need_archive_confirm",
+                "blocked",
+            }
+        )
         if change.current_stage != db_current_stage:
-            log.info(
-                "sync_stage_status.stage_updated",
-                change_id=str(change_id),
-                old=change.current_stage,
-                new=db_current_stage,
-            )
-            change.current_stage = db_current_stage
+            if change.human_gate in _human_gate_gates:
+                log.info(
+                    "sync_stage_status.stage_update_skipped_human_gate",
+                    change_id=str(change_id),
+                    old=change.current_stage,
+                    new=db_current_stage,
+                    human_gate=change.human_gate,
+                )
+                # Override db_current_stage to keep Hub's view consistent
+                db_current_stage = change.current_stage
+            else:
+                log.info(
+                    "sync_stage_status.stage_updated",
+                    change_id=str(change_id),
+                    old=change.current_stage,
+                    new=db_current_stage,
+                )
+                change.current_stage = db_current_stage
 
         # Step 5: Sync step status to Change.stages JSON
         stages_json = change.stages or {}
@@ -904,6 +1008,13 @@ class SillySpecStageDispatchService:
         if not workspace or not workspace.root_path:
             return None
         return SpecPathResolver(workspace.root_path).db_path()
+
+    async def _read_verify_result(
+        self,
+        session: AsyncSession,
+        change_id: uuid.UUID,
+    ) -> str:
+        return await read_verify_result(session, change_id)
 
 
 # ---------------------------------------------------------------------------
