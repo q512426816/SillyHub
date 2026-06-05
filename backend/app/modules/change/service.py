@@ -1109,8 +1109,8 @@ class ChangeService:
         See design.md "complete_stage 阶段映射".
         """
         if stage == "brainstorm":
-            if result == "clear":
-                return ("propose", HumanGate.NONE, "propose")
+            if result == "clear" or result is None:
+                return ("propose", HumanGate.NEED_PROPOSAL_REVIEW, None)
             return ("brainstorm", HumanGate.NEED_REQUIREMENT_INPUT, None)
 
         if stage == "propose":

@@ -189,10 +189,25 @@ async def auto_dispatch_next_step(
         if not sync_result.current_stage:
             return {"dispatched": False, "reason": "stage_completed"}
 
-        # AD-01: Use complete_stage to set current_stage + human_gate
+        # Sync filesystem documents to DB before advancing stage
         from app.modules.change.service import ChangeService
 
         cs = ChangeService(session)
+        try:
+            await cs.reparse(workspace_id)
+            log.info(
+                "auto_dispatch_reparse_done",
+                change_id=str(change_id),
+                workspace_id=str(workspace_id),
+            )
+        except Exception as exc:
+            log.warning(
+                "auto_dispatch_reparse_failed",
+                change_id=str(change_id),
+                error=str(exc),
+            )
+
+        # AD-01: Use complete_stage to set current_stage + human_gate
         complete_result = await cs.complete_stage(
             workspace_id=workspace_id,
             change_id=change_id,
@@ -659,20 +674,24 @@ class SillySpecStageDispatchService:
         if change is None:
             raise ChangeNotFound(f"Change '{change_id}' not found.")
 
-        # Step 2: Resolve sillyspec.db path
+        # Step 2: Resolve sillyspec.db path — try all candidates
         db_path = await self._resolve_db_path(session, change)
+        fallback_db_path = await self._resolve_db_path_fallback(session, change)
         if db_path is None or not db_path.is_file():
-            log.warning(
-                "sync_stage_status.db_not_found",
-                change_id=str(change_id),
-                db_path=str(db_path) if db_path else None,
-            )
-            return StageSyncResult(
-                synced=False,
-                change_id=change_id,
-                run_id=run_id,
-                error="sillyspec.db not found",
-            )
+            if fallback_db_path and fallback_db_path.is_file():
+                db_path = fallback_db_path
+            else:
+                log.warning(
+                    "sync_stage_status.db_not_found",
+                    change_id=str(change_id),
+                    db_path=str(db_path) if db_path else None,
+                )
+                return StageSyncResult(
+                    synced=False,
+                    change_id=change_id,
+                    run_id=run_id,
+                    error="sillyspec.db not found",
+                )
 
         # Step 3: Read sillyspec.db
         conn: sqlite3.Connection | None = None
@@ -699,13 +718,37 @@ class SillySpecStageDispatchService:
                 (change.change_key,),
             ).fetchone()
 
+            if (
+                row is None
+                and fallback_db_path
+                and fallback_db_path.is_file()
+                and db_path != fallback_db_path
+            ):
+                # Try fallback db (workspace root_path)
+                conn.close()
+                log.info(
+                    "sync_stage_status.trying_fallback_db",
+                    change_key=change.change_key,
+                    fallback=str(fallback_db_path),
+                )
+                try:
+                    conn = sqlite3.connect(f"file:{fallback_db_path}?mode=ro", uri=True)
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute(
+                        "SELECT current_stage, status FROM changes WHERE name = ?",
+                        (change.change_key,),
+                    ).fetchone()
+                except sqlite3.Error:
+                    row = None
+
             if row is None:
                 log.warning(
                     "sync_stage_status.change_not_in_db",
                     change_key=change.change_key,
                     change_id=str(change_id),
                 )
-                conn.close()
+                if conn:
+                    conn.close()
                 return StageSyncResult(
                     synced=False,
                     change_id=change_id,
@@ -845,6 +888,21 @@ class SillySpecStageDispatchService:
         if not workspace or not workspace.root_path:
             return None
 
+        return SpecPathResolver(workspace.root_path).db_path()
+
+    async def _resolve_db_path_fallback(
+        self,
+        session: AsyncSession,
+        change: Change,
+    ) -> Path | None:
+        """Always resolve from workspace root_path (used when spec_root db lacks the change)."""
+        from app.core.spec_paths import SpecPathResolver
+        from app.modules.workspace.model import Workspace
+
+        ws_stmt = select(Workspace).where(col(Workspace.id) == change.workspace_id)
+        workspace = (await session.execute(ws_stmt)).scalars().first()
+        if not workspace or not workspace.root_path:
+            return None
         return SpecPathResolver(workspace.root_path).db_path()
 
 
