@@ -188,6 +188,23 @@ class AgentRun(BaseModel, table=True):
         default=None,
         sa_column=Column(Integer, nullable=True),
     )
+    # ── Post-scan validation fields ──
+    post_scan_status: str | None = Field(
+        default=None,
+        sa_column=Column(String(50), nullable=True),
+    )  # success, failed_post_check, completed_with_warnings
+    source_commit: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    is_resume: bool | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )  # Stored as 0/1 in DB
+    resumed_from_step: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
 
 
 class AgentRunLog(BaseModel, table=True):

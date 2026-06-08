@@ -322,7 +322,28 @@ class AgentService:
 
         # -- 3. Execute via adapter -----------------------------------------------
         adapter = adapter_cls()
-        result = await adapter.run_with_bundle(run_id, bundle, lease_path)
+
+        from app.core.db import get_session_factory
+
+        _factory = get_session_factory()
+
+        async def _on_metadata(meta: dict) -> None:
+            try:
+                async with _factory() as meta_session:
+                    meta_run = await meta_session.get(AgentRun, run_id)
+                    if meta_run is not None:
+                        if meta.get("input_tokens") is not None:
+                            meta_run.input_tokens = meta["input_tokens"]
+                        if meta.get("output_tokens") is not None:
+                            meta_run.output_tokens = meta["output_tokens"]
+                        if meta.get("num_turns") is not None:
+                            meta_run.num_turns = meta["num_turns"]
+                        meta_session.add(meta_run)
+                        await meta_session.commit()
+            except Exception:
+                log.warning("on_metadata_write_failed", run_id=str(run_id))
+
+        result = await adapter.run_with_bundle(run_id, bundle, lease_path, on_metadata=_on_metadata)
 
         # -- 4. Update run record -------------------------------------------------
         run.status = "completed" if result.exit_code == 0 else "failed"
@@ -926,7 +947,26 @@ class AgentService:
                 # CLAUDE.md 现在由 adapter.run_with_bundle() 内部统一渲染和写入
 
                 adapter = adapter_cls()
-                result = await adapter.run_with_bundle(run_id, bundle, work_dir)
+
+                async def _stage_on_metadata(meta: dict) -> None:
+                    try:
+                        async with factory() as meta_session:
+                            meta_run = await meta_session.get(AgentRun, run_id)
+                            if meta_run is not None:
+                                if meta.get("input_tokens") is not None:
+                                    meta_run.input_tokens = meta["input_tokens"]
+                                if meta.get("output_tokens") is not None:
+                                    meta_run.output_tokens = meta["output_tokens"]
+                                if meta.get("num_turns") is not None:
+                                    meta_run.num_turns = meta["num_turns"]
+                                meta_session.add(meta_run)
+                                await meta_session.commit()
+                    except Exception:
+                        log.warning("stage_on_metadata_write_failed", run_id=str(run_id))
+
+                result = await adapter.run_with_bundle(
+                    run_id, bundle, work_dir, on_metadata=_stage_on_metadata
+                )
 
                 # Update run record
                 run.status = "completed" if result.exit_code == 0 else "failed"
@@ -1245,21 +1285,112 @@ class AgentService:
                     except Exception:
                         log.warning("scan_on_log_failed", run_id=str(run_id))
 
-                result = await adapter.run_with_bundle(run_id, bundle, work_dir, on_log=on_log)
+                async def on_metadata(meta: dict) -> None:
+                    try:
+                        async with factory() as meta_session:
+                            meta_run = await meta_session.get(AgentRun, run_id)
+                            if meta_run is not None:
+                                if meta.get("input_tokens") is not None:
+                                    meta_run.input_tokens = meta["input_tokens"]
+                                if meta.get("output_tokens") is not None:
+                                    meta_run.output_tokens = meta["output_tokens"]
+                                if meta.get("num_turns") is not None:
+                                    meta_run.num_turns = meta["num_turns"]
+                                meta_session.add(meta_run)
+                                await meta_session.commit()
+                    except Exception:
+                        log.warning("scan_on_metadata_write_failed", run_id=str(run_id))
 
-                # -- 6. Update run record -------------------------------------------
-                run.status = "completed" if result.exit_code == 0 else "failed"
+                result = await adapter.run_with_bundle(
+                    run_id, bundle, work_dir, on_log=on_log, on_metadata=on_metadata
+                )
+
+                # -- 6. Platform-side post-scan validation ---------------------------
+                from app.modules.agent.post_scan_validator import (
+                    PostScanValidator,
+                    validate_resume_state,
+                )
+
+                runtime_root = bundle.runtime_root or str(
+                    Path(bundle.spec_root or work_dir) / "runtime"
+                )
+                runtime_path = Path(runtime_root)
+                runtime_path.mkdir(parents=True, exist_ok=True)
+
+                # Get source_root and spec_root from bundle metadata
+                meta = bundle.platform_metadata or {}
+                root_path = meta.get("root_path", str(work_dir))
+                spec_root = meta.get("spec_root", "")
+
+                post_validator = PostScanValidator(
+                    source_root=Path(root_path),
+                    spec_root=Path(spec_root) if spec_root else Path(work_dir),
+                    runtime_root=runtime_path,
+                    scan_run_id=str(run_id),
+                )
+                post_result = post_validator.validate(
+                    agent_output=result.redacted_output or "",
+                    agent_exit_code=result.exit_code or 0,
+                )
+
+                # Check resume state
+                resume_info = validate_resume_state(runtime_path, str(run_id))
+
+                # -- 7. Update run record with validation-aware status ------------
+                # Status depends on both agent exit code AND post-scan validation
+                if post_result.status.value == "failed_post_check":
+                    final_status = "failed"
+                elif post_result.status.value == "completed_with_warnings":
+                    final_status = "completed"  # Warnings don't fail the run
+                else:
+                    final_status = "completed" if result.exit_code == 0 else "failed"
+
+                run.status = final_status
                 run.finished_at = datetime.utcnow()
                 run.exit_code = result.exit_code
 
                 # Save full output to file for debugging
-                runtime_root = bundle.runtime_root or str(
-                    Path(bundle.spec_root or work_dir) / "runtime"
-                )
-                log_dir = Path(runtime_root) / "scan-runs" / str(run_id)
+                log_dir = runtime_path / "scan-runs" / str(run_id)
                 log_dir.mkdir(parents=True, exist_ok=True)
                 (log_dir / "output.log").write_text(result.redacted_output or "", encoding="utf-8")
                 (log_dir / "stderr.log").write_text(result.stderr or "", encoding="utf-8")
+
+                # Count docs for validation
+                source_docs_path = Path(root_path) / ".sillyspec" / "docs"
+                spec_docs_path = (Path(spec_root) / ".sillyspec" / "docs") if spec_root else None
+                source_docs_count = (
+                    len(list(source_docs_path.rglob("*"))) if source_docs_path.exists() else 0
+                )
+                spec_docs_count = (
+                    len(list(spec_docs_path.rglob("*")))
+                    if spec_docs_path and spec_docs_path.exists()
+                    else 0
+                )
+
+                (log_dir / "post_validation.json").write_text(
+                    json.dumps(
+                        {
+                            "status": post_result.status.value,
+                            "agent_exit_code": result.exit_code,
+                            "final_status": final_status,
+                            "errors": [
+                                {"code": e.code, "message": e.message, "severity": e.severity}
+                                for e in post_result.errors
+                            ],
+                            "warnings": [
+                                {"code": e.code, "message": e.message, "severity": e.severity}
+                                for e in post_result.warnings
+                            ],
+                            "metadata": post_result.metadata,
+                            "doc_counts": {
+                                "source_root_docs_count": source_docs_count,
+                                "spec_root_docs_count": spec_docs_count,
+                            },
+                            "resume_info": resume_info,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
 
                 # DB only stores tail
                 run.output_redacted = (
@@ -1273,6 +1404,11 @@ class AgentService:
                 run.conversation_events = result.conversation_events
                 run.input_tokens = result.input_tokens
                 run.output_tokens = result.output_tokens
+                # Post-scan validation fields
+                run.post_scan_status = post_result.status.value
+                run.source_commit = post_result.metadata.get("source_commit")
+                run.is_resume = resume_info.get("is_resume")
+                run.resumed_from_step = resume_info.get("resumed_from_step")
                 session.add(run)
 
                 log.info(
@@ -1299,7 +1435,7 @@ class AgentService:
                         )
                         session.add(log_entry)
 
-                # -- 8. Write audit log ---------------------------------------------
+                # -- 8. Write audit log with post-scan validation ------------------
                 audit = AuditLog(
                     id=uuid.uuid4(),
                     workspace_id=workspace_id,
@@ -1312,6 +1448,12 @@ class AgentService:
                             "workspace_id": str(workspace_id),
                             "agent_type": "claude_code",
                             "exit_code": result.exit_code,
+                            "post_scan_status": post_result.status.value,
+                            "post_scan_errors": len(post_result.errors),
+                            "post_scan_warnings": len(post_result.warnings),
+                            "source_commit": post_result.metadata.get("source_commit"),
+                            "is_resume": resume_info.get("is_resume", False),
+                            "resumed_from_step": resume_info.get("resumed_from_step"),
                         }
                     ),
                 )

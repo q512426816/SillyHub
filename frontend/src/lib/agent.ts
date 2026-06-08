@@ -30,6 +30,11 @@ export interface AgentRun {
   session_id: string | null;
   input_tokens: number | null;
   output_tokens: number | null;
+  // Post-scan validation fields
+  post_scan_status: string | null;
+  source_commit: string | null;
+  is_resume: boolean | null;
+  resumed_from_step: number | null;
 }
 
 export type AgentRunLogChannel =

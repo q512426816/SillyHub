@@ -304,9 +304,26 @@ async def _execute_bootstrap_agent_run(
                 on_log=_on_log,
             )
 
-            # -- 6. Run validation --------------------------------------------------
+            # -- 6. Platform-side post-scan validation ------------------------------
+            from app.modules.agent.post_scan_validator import PostScanValidator
+
+            runtime_dir = spec_root_path / "runtime"
+            validator = PostScanValidator(
+                source_root=code_root_path,
+                spec_root=spec_root_path,
+                runtime_root=runtime_dir,
+                scan_run_id=str(run_id),
+            )
+            post_result = validator.validate(
+                agent_output=result.redacted_output or "",
+                agent_exit_code=result.exit_code or 0,
+            )
+
+            # -- 7. SpecValidator for spec structure ---------------------------------
             report = SpecValidator().validate(spec_root)
-            validation_passed = result.exit_code == 0 and report.passed
+            validation_passed = (
+                result.exit_code == 0 and report.passed and post_result.status.value == "success"
+            )
 
             # -- 7. Write stderr AgentRunLog (chunked) ------------------------------
             if result.stderr.strip():
@@ -390,19 +407,57 @@ async def _execute_bootstrap_agent_run(
                         )
                     )
 
+                # Create SpecConflict for post-scan validation errors
+                for perr in post_result.errors:
+                    # Map validation error codes to specific conflict types
+                    conflict_type_map = {
+                        "source_root_pollution": "source_root_pollution",
+                        "expected_docs_missing": "missing_spec_artifact",
+                        "docs_empty": "missing_spec_artifact",
+                        "scan_dir_missing": "missing_spec_artifact",
+                        "missing_spec_artifacts": "missing_spec_artifact",
+                        "error_pattern_detected": "agent_log_error",
+                        "source_commit_failed": "metadata_error",
+                        "manifest_missing": "manifest_error",
+                    }
+                    conflict_type = conflict_type_map.get(perr.code, "post_scan_validation_error")
+
+                    session.add(
+                        SpecConflict(
+                            id=uuid.uuid4(),
+                            workspace_id=workspace_id,
+                            stage="bootstrap",
+                            conflict_type=conflict_type,
+                            details_json=json.dumps(
+                                {
+                                    "code": perr.code,
+                                    "message": perr.message,
+                                    "severity": perr.severity,
+                                    "details": perr.details,
+                                }
+                            ),
+                        )
+                    )
+
             session.add(run)
             session.add(spec_ws)
 
             # -- 9. Write complete audit log ----------------------------------------
-            error_count = len(report.errors)
-            warning_count = len(report.warnings)
+            error_count = len(report.errors) + len(post_result.errors)
+            warning_count = len(report.warnings) + len(post_result.warnings)
             audit_details = {
                 "validation_passed": validation_passed,
+                "post_scan_status": post_result.status.value,
                 "error_count": error_count,
                 "warning_count": warning_count,
                 "sync_status": spec_ws.sync_status,
                 "exit_code": exit_code,
                 "spec_root": str(spec_root),
+                "source_commit": post_result.metadata.get("source_commit"),
+                "source_commit_error": post_result.metadata.get("source_commit_error"),
+                "post_scan_errors": [
+                    {"code": e.code, "message": e.message} for e in post_result.errors
+                ],
             }
             session.add(
                 AuditLog(

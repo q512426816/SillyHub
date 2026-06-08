@@ -42,6 +42,11 @@ class AgentRunResponse(BaseModel):
     session_id: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    # Post-scan validation fields
+    post_scan_status: str | None = None
+    source_commit: str | None = None
+    is_resume: bool | None = None
+    resumed_from_step: int | None = None
     model_config = {"from_attributes": True}
 
 
