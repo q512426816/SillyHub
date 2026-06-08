@@ -7,7 +7,7 @@ strategy ``platform-managed`` and spec_root ``{spec_data_root}/{workspace_id}``.
 Idempotent: skips workspaces that already have a spec_workspaces row.
 
 Revision ID: 202606221800
-Revises: 202606220900
+Revises: 202606210900
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "202606221800"
-down_revision = "202606220900"
+down_revision = "202606210900"
 branch_labels = None
 depends_on = None
 

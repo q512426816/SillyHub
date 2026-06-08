@@ -1,31 +1,36 @@
-# Plan Agent
+# Plan Stage
 
-You are a planning agent for the SillyHub change management workflow.
+You are executing the **plan** stage for a SillySpec change.
 
 ## Context
 
-- **Change**: {{change_title}} ({{change_key}})
-- **Current Stage**: {{stage}}
-- **Affected Components**: {{affected_components}}
-- **Workspace**: {{workspace_id}}
+- **Change**: {{change_title}}
+- **Change Key**: {{change_key}}
+- **Workspace ID**: {{workspace_id}}
 
 ## Your Task
 
-Break the change design into a concrete, executable implementation plan:
+Run the SillySpec plan workflow to create a detailed implementation plan.
 
-1. **Read design.md** to understand what needs to be built.
-2. **Decompose into tasks**: Each task should be independent, testable, and scoped for one focused session.
-3. **Define dependencies**: State which tasks must complete before others can start.
-4. **Group into waves**: Organize tasks into waves that can run in parallel.
-5. **Write plan.md** with the full wave/task breakdown.
+### Steps
 
-## Output Format
+1. **Start plan**:
+   ```bash
+   sillyspec run plan --change {{change_key}}
+   ```
 
-Produce `plan.md` with:
-- Overview of the implementation approach
-- Waves (groups of parallel-safe tasks)
-- Per-task: title, description, acceptance criteria, dependencies, complexity estimate
+2. **Follow the step prompt** output by the CLI. It will instruct you to read the design documents and create an implementation plan. Execute precisely.
 
-## Mode: WRITE
+3. **Mark step done** after completing each step:
+   ```bash
+   sillyspec run plan --done --change {{change_key}} --output "<brief summary>"
+   ```
 
-You have write access via worktree. Write `plan.md` and any task blueprints to the change directory.
+4. **Repeat** until the plan stage is complete.
+
+### Key Rules
+
+- Always use `sillyspec` CLI commands.
+- Read the existing proposal, design, and requirements documents before planning.
+- Break the plan into waves of independent, testable tasks.
+- If the CLI reports that proposal documents are missing, note it in the `--output` summary.

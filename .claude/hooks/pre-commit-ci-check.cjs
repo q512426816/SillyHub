@@ -41,9 +41,16 @@ function deny(reason) {
 }
 
 function run(command, options = {}) {
+  const env = { ...process.env, ...(options.env || {}) };
+  // Ensure uv is on PATH (Windows: %USERPROFILE%\.local\bin, Unix: ~/.local/bin)
+  const home = process.env.USERPROFILE || process.env.HOME || "";
+  const uvBin = require("path").join(home, ".local", "bin");
+  if (!env.PATH.split(/[:;]/).includes(uvBin)) {
+    env.PATH = uvBin + (process.platform === "win32" ? ";" : ":") + env.PATH;
+  }
   return spawnSync(command, [], {
     cwd: options.cwd,
-    env: { ...process.env, ...(options.env || {}) },
+    env: env,
     encoding: "utf8",
     shell: true,
   });

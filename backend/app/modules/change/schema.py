@@ -263,3 +263,9 @@ class HumanTestRequest(BaseModel):
 class ReviewResponse(BaseModel):
     change: dict[str, Any]
     agent_dispatch: TransitionDispatchResponse | None = None
+
+
+class ArchiveConfirmRequest(BaseModel):
+    """归档确认请求。"""
+
+    comment: str | None = Field(default=None, description="归档备注（可选）")

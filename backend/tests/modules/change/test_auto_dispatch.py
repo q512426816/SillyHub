@@ -40,6 +40,8 @@ async def test_auto_dispatch_creates_next_run():
     mock_session = AsyncMock(spec=AsyncSession)
     mock_change = MagicMock()
     mock_change.stages = {}
+    mock_change.human_gate = "none"
+    mock_change.current_stage = "propose"
     mock_session.get = AsyncMock(return_value=mock_change)
 
     with patch("app.modules.change.dispatch.dispatch", new_callable=AsyncMock) as mock_dispatch:
@@ -81,9 +83,17 @@ async def test_auto_dispatch_stops_on_stage_completed():
     mock_change = MagicMock()
     mock_change.stages = {}
     mock_change.human_gate = "none"
+    mock_change.current_stage = "propose"
     mock_session.get = AsyncMock(return_value=mock_change)
 
-    with patch("app.modules.change.dispatch.dispatch", new_callable=AsyncMock) as mock_dispatch:
+    with (
+        patch("app.modules.change.dispatch.dispatch", new_callable=AsyncMock) as mock_dispatch,
+        patch("app.modules.change.service.ChangeService.reparse", new_callable=AsyncMock),
+        patch(
+            "app.modules.change.service.ChangeService.complete_stage", new_callable=AsyncMock
+        ) as mock_complete,
+    ):
+        mock_complete.return_value = MagicMock(dispatch_target=None, gate="need_proposal_review")
         result = await auto_dispatch_next_step(
             session=mock_session,
             workspace_id=uuid.uuid4(),
@@ -140,6 +150,8 @@ async def test_auto_dispatch_stops_on_no_pending_step():
     mock_session = AsyncMock(spec=AsyncSession)
     mock_change = MagicMock()
     mock_change.stages = {}
+    mock_change.human_gate = "none"
+    mock_change.current_stage = "plan"
     mock_session.get = AsyncMock(return_value=mock_change)
 
     with patch("app.modules.change.dispatch.dispatch", new_callable=AsyncMock) as mock_dispatch:
@@ -175,6 +187,8 @@ async def test_auto_dispatch_stops_on_chain_limit():
     mock_session = AsyncMock(spec=AsyncSession)
     mock_change = MagicMock()
     mock_change.stages = {"_dispatch_chain_count": _DISPATCH_CHAIN_LIMIT}
+    mock_change.human_gate = "none"
+    mock_change.current_stage = "execute"
     mock_session.get = AsyncMock(return_value=mock_change)
 
     with patch("app.modules.change.dispatch.dispatch", new_callable=AsyncMock) as mock_dispatch:
@@ -210,6 +224,8 @@ async def test_auto_dispatch_resets_chain_on_dispatch_failure():
     mock_session = AsyncMock(spec=AsyncSession)
     mock_change = MagicMock()
     mock_change.stages = {"_dispatch_chain_count": 5}
+    mock_change.human_gate = "none"
+    mock_change.current_stage = "propose"
     mock_session.get = AsyncMock(return_value=mock_change)
 
     with patch("app.modules.change.dispatch.dispatch", new_callable=AsyncMock) as mock_dispatch:
@@ -249,6 +265,8 @@ async def test_auto_dispatch_increments_chain_count():
     mock_session = AsyncMock(spec=AsyncSession)
     mock_change = MagicMock()
     mock_change.stages = {"_dispatch_chain_count": 3}
+    mock_change.human_gate = "none"
+    mock_change.current_stage = "execute"
     mock_session.get = AsyncMock(return_value=mock_change)
 
     with patch("app.modules.change.dispatch.dispatch", new_callable=AsyncMock) as mock_dispatch:

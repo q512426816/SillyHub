@@ -7,6 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.core.auth_deps import require_permission
 from app.core.db import get_session
@@ -15,6 +16,7 @@ from app.modules.auth.permissions import Permission
 from app.modules.change.schema import (
     ApprovalRead,
     ApproveRequest,
+    ArchiveConfirmRequest,
     ArchiveGateResponse,
     ChangeDocContent,
     ChangeDocMatrix,
@@ -437,6 +439,36 @@ async def human_test(
     return ReviewResponse(change=enriched.model_dump(), agent_dispatch=agent_dispatch)
 
 
+@router.post(
+    "/changes/{change_id}/archive-confirm",
+    response_model=ReviewResponse,
+)
+async def archive_confirm(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    body: ArchiveConfirmRequest,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> ReviewResponse:
+    service = ChangeService(session)
+    result = await service.archive_confirm(
+        workspace_id,
+        change_id,
+        body.comment,
+        _user.id,
+    )
+    enriched = await service.enrich_with_workspace_ids(result["change"])
+    raw_dispatch = result.get("agent_dispatch")
+    agent_dispatch = None
+    if raw_dispatch and raw_dispatch.get("dispatched"):
+        agent_dispatch = TransitionDispatchResponse(
+            dispatched=True,
+            agent_run_id=raw_dispatch.get("agent_run_id"),
+            stage=raw_dispatch.get("stage"),
+        )
+    return ReviewResponse(change=enriched.model_dump(), agent_dispatch=agent_dispatch)
+
+
 # ── Agent dispatch endpoints ────────────────────────────────────────────
 
 
@@ -464,6 +496,38 @@ async def get_agent_status(
     stages = change.stages or {}
     last_dispatch = stages.get("last_dispatch")
 
+    # Fallback: if last_dispatch has no run_id, query the most recent agent run
+    if not last_dispatch or not last_dispatch.get("run_id"):
+        from sqlalchemy import select
+
+        from app.modules.agent.model import AgentRun
+        from app.modules.workspace.model import AgentRunWorkspace
+
+        # Query via workspace association table (change_id on run may be null)
+        stmt = (
+            select(AgentRun)
+            .join(
+                AgentRunWorkspace,
+                col(AgentRunWorkspace.agent_run_id) == col(AgentRun.id),
+            )
+            .where(col(AgentRunWorkspace.workspace_id) == workspace_id)
+            .order_by(col(AgentRun.started_at).desc())
+            .limit(1)
+        )
+        result = await session.execute(stmt)
+        latest_run = result.scalar_one_or_none()
+        if latest_run:
+            last_dispatch = {
+                "run_id": str(latest_run.id),
+                "stage": current_stage,
+                "status": latest_run.status,
+                "at": latest_run.started_at.isoformat() if latest_run.started_at else None,
+                "finished_at": latest_run.finished_at.isoformat()
+                if latest_run.finished_at
+                else None,
+                "exit_code": latest_run.exit_code,
+            }
+
     return DispatchResponse(
         change_id=change_id,
         current_stage=current_stage,
@@ -484,7 +548,7 @@ async def manual_dispatch(
     _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
 ) -> DispatchResponse:
     """Manually trigger agent dispatch for the current stage of a change."""
-    from app.modules.change.dispatch import dispatch, get_config_for_stage
+    from app.modules.change.dispatch import dispatch, get_config_for_stage, has_active_run
 
     service = ChangeService(session)
     change = await service.get(workspace_id, change_id)
@@ -514,10 +578,43 @@ async def manual_dispatch(
     stages = change.stages or {}
     last_dispatch = stages.get("last_dispatch")
 
+    # Fallback: if last_dispatch has no run_id, query the most recent agent run
+    # (same logic as get_agent_status endpoint)
+    if not last_dispatch or not last_dispatch.get("run_id"):
+        from sqlalchemy import select
+
+        from app.modules.agent.model import AgentRun
+        from app.modules.workspace.model import AgentRunWorkspace
+
+        stmt = (
+            select(AgentRun)
+            .join(
+                AgentRunWorkspace,
+                col(AgentRunWorkspace.agent_run_id) == col(AgentRun.id),
+            )
+            .where(col(AgentRunWorkspace.workspace_id) == workspace_id)
+            .order_by(col(AgentRun.started_at).desc())
+            .limit(1)
+        )
+        result = await session.execute(stmt)
+        latest_run = result.scalar_one_or_none()
+        if latest_run:
+            last_dispatch = {
+                "run_id": str(latest_run.id),
+                "stage": current_stage,
+                "status": latest_run.status,
+                "at": latest_run.started_at.isoformat() if latest_run.started_at else None,
+                "finished_at": latest_run.finished_at.isoformat()
+                if latest_run.finished_at
+                else None,
+                "exit_code": latest_run.exit_code,
+            }
+
     return DispatchResponse(
         change_id=change_id,
         current_stage=current_stage,
-        has_active_run=dispatch_result.get("dispatched", False),
+        has_active_run=dispatch_result.get("dispatched", False)
+        or await has_active_run(session, change_id),
         config_enabled=True,
         last_dispatch=last_dispatch,
         dispatch_result=dispatch_result,

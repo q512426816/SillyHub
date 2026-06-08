@@ -60,3 +60,4 @@ bash.exe.stackdump
 .claude/worktrees/
 *.sillyspec/
 frontend/CLAUDE.md
+.sillyspec/.runtime/worktrees/

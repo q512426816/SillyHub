@@ -184,71 +184,142 @@ async def auto_dispatch_next_step(
         )
         return {"dispatched": False, "reason": "sync_failed"}
 
-    # 2. stage completed
-    if sync_result.stage_completed:
-        change = await session.get(Change, change_id)
-        if change and change.human_gate and change.human_gate != "none":
-            log.info(
-                "auto_dispatch_blocked_by_gate",
-                change_id=str(change_id),
-                human_gate=change.human_gate,
-                stage=sync_result.current_stage,
-            )
-            return {
-                "dispatched": False,
-                "reason": "human_gate_active",
-                "human_gate": change.human_gate,
-                "stage": sync_result.current_stage,
-            }
-
-        # verify auto-fix: if verify completed without gate (failed), try quick fix
-        if change and sync_result.current_stage == "verify":
-            stages = change.stages or {}
-            fix_count = stages.get("_auto_fix_count", 0)
-            if fix_count < 3:
-                stages["_auto_fix_count"] = fix_count + 1
-                change.stages = stages
-                session.add(change)
-                await session.commit()
-                log.info(
-                    "verify_auto_fix_dispatching_quick",
-                    change_id=str(change_id),
-                    attempt=fix_count + 1,
-                )
-                dispatch_result = await dispatch(
-                    session=session,
-                    workspace_id=workspace_id,
-                    change_id=change_id,
-                    target_stage="quick",
-                    user_id=user_id,
-                )
-                dispatch_result["reason"] = "verify_auto_fix"
-                return dispatch_result
-            else:
-                change.human_gate = "blocked"
-                stages = change.stages or {}
-                stages["_auto_fix_count"] = fix_count
-                change.stages = stages
-                session.add(change)
-                await session.commit()
-                log.warning(
-                    "verify_auto_fix_limit_reached",
-                    change_id=str(change_id),
-                    attempts=fix_count,
-                )
-                return {
-                    "dispatched": False,
-                    "reason": "verify_auto_fix_limit",
-                    "stage": "verify",
-                    "human_gate": "blocked",
-                }
-
+    # 1.5 Guard: skip if human_gate is set (awaiting human action)
+    change = await session.get(Change, change_id)
+    if change and change.human_gate and change.human_gate not in ("none", "None", ""):
         log.info(
-            "auto_dispatch_skip_stage_completed",
+            "auto_dispatch_skip_human_gate",
             change_id=str(change_id),
+            human_gate=change.human_gate,
+        )
+        return {
+            "dispatched": False,
+            "reason": "human_gate_pending",
+            "human_gate": change.human_gate,
+        }
+
+    # 1.6 Guard: skip if Hub DB current_stage is a terminal state
+    _terminal_stages = frozenset({"archived", "cancelled"})
+    if change and change.current_stage in _terminal_stages:
+        log.info(
+            "auto_dispatch_skip_terminal_stage",
+            change_id=str(change_id),
+            current_stage=change.current_stage,
+        )
+        return {
+            "dispatched": False,
+            "reason": "terminal_stage",
+            "current_stage": change.current_stage,
+        }
+
+    # 2. stage completed → call complete_stage then optionally dispatch
+    if sync_result.stage_completed:
+        if not sync_result.current_stage:
+            return {"dispatched": False, "reason": "stage_completed"}
+
+        # Sync filesystem documents to DB before advancing stage
+        from app.modules.change.service import ChangeService
+
+        cs = ChangeService(session)
+        try:
+            await cs.reparse(workspace_id)
+            log.info(
+                "auto_dispatch_reparse_done",
+                change_id=str(change_id),
+                workspace_id=str(workspace_id),
+            )
+        except Exception as exc:
+            log.warning(
+                "auto_dispatch_reparse_failed",
+                change_id=str(change_id),
+                error=str(exc),
+            )
+
+        # Resolve verify result from verify-result.md if applicable
+        stage_result = None
+        if sync_result.current_stage == "verify":
+            stage_result = await read_verify_result(session, change_id)
+
+        # AD-01: Use complete_stage to set current_stage + human_gate
+        complete_result = await cs.complete_stage(
+            workspace_id=workspace_id,
+            change_id=change_id,
+            stage=sync_result.current_stage,
+            result=stage_result,
+            summary=None,
+        )
+
+        if complete_result.dispatch_target:
+            target = complete_result.dispatch_target
+
+            # verify auto-fix: check auto_fix_count before dispatching quick
+            if sync_result.current_stage == "verify" and target == "quick":
+                change = await session.get(Change, change_id)
+                if change:
+                    stages = change.stages or {}
+                    fix_count = stages.get("_auto_fix_count", 0)
+                    if fix_count >= 3:
+                        change.human_gate = "blocked"
+                        change.stages = stages
+                        session.add(change)
+                        await session.commit()
+                        log.warning(
+                            "verify_auto_fix_limit_reached",
+                            change_id=str(change_id),
+                            attempts=fix_count,
+                        )
+                        return {
+                            "dispatched": False,
+                            "reason": "verify_auto_fix_limit",
+                            "stage": "verify",
+                            "human_gate": "blocked",
+                        }
+                    stages["_auto_fix_count"] = fix_count + 1
+                    change.stages = stages
+                    session.add(change)
+                    await session.commit()
+                    log.info(
+                        "verify_auto_fix_dispatching_quick",
+                        change_id=str(change_id),
+                        attempt=fix_count + 1,
+                    )
+
+            # Chain limit check
+            change = await session.get(Change, change_id)
+            if change is None:
+                return {"dispatched": False, "reason": "change_not_found"}
+            stages = change.stages or {}
+            chain_count = _get_chain_count(stages)
+            if chain_count >= _DISPATCH_CHAIN_LIMIT:
+                return {"dispatched": False, "reason": "chain_limit_reached"}
+
+            stages = _increment_chain_count(stages)
+            change.stages = stages
+            session.add(change)
+            await session.commit()
+
+            dispatch_result = await dispatch(
+                session=session,
+                workspace_id=workspace_id,
+                change_id=change_id,
+                target_stage=target,
+                user_id=user_id,
+            )
+            dispatch_result["reason"] = "auto_dispatch_after_complete"
+            return dispatch_result
+
+        # No dispatch needed — gate set, wait for human
+        log.info(
+            "auto_dispatch_stage_completed_with_gate",
+            change_id=str(change_id),
+            gate=complete_result.gate,
             stage=sync_result.current_stage,
         )
-        return {"dispatched": False, "reason": "stage_completed"}
+        return {
+            "dispatched": False,
+            "reason": "stage_completed",
+            "human_gate": complete_result.gate,
+        }
 
     # 3. no pending step
     if not sync_result.has_pending_step:
@@ -263,6 +334,22 @@ async def auto_dispatch_next_step(
     change = await session.get(Change, change_id)
     if change is None:
         return {"dispatched": False, "reason": "change_not_found"}
+
+    # 4.1 Guard: don't dispatch if Hub DB stage diverges from sillyspec.db
+    # (e.g. complete_stage already set "archived" but sillyspec.db still "archive")
+    if change.current_stage != sync_result.current_stage:
+        log.info(
+            "auto_dispatch_skip_stage_diverged",
+            change_id=str(change_id),
+            hub_stage=change.current_stage,
+            sillyspec_stage=sync_result.current_stage,
+        )
+        return {
+            "dispatched": False,
+            "reason": "stage_diverged",
+            "hub_stage": change.current_stage,
+            "sillyspec_stage": sync_result.current_stage,
+        }
 
     stages = change.stages or {}
     chain_count = _get_chain_count(stages)
@@ -285,7 +372,7 @@ async def auto_dispatch_next_step(
         session=session,
         workspace_id=workspace_id,
         change_id=change_id,
-        target_stage=sync_result.current_stage,
+        target_stage=sync_result.current_stage or "",
         user_id=user_id,
     )
 
@@ -321,6 +408,89 @@ async def has_active_run(session: AsyncSession, change_id: uuid.UUID) -> bool:
     return row is not None
 
 
+async def reconcile_stale_runs(
+    session: AsyncSession,
+    change_id: uuid.UUID,
+    max_age_hours: int = 2,
+) -> list[uuid.UUID]:
+    """Mark stale ``running`` AgentRuns as killed and attempt recovery.
+
+    Handles cases where the agent process died (container restart, OOM, etc.)
+    but the AgentRun record was never updated, blocking all future dispatches.
+
+    For each reconciled run, attempts to re-trigger ``sync_stage_status`` and
+    ``auto_dispatch_next_step`` to recover the lost completion callback.
+
+    Returns list of reconciled run IDs.
+    """
+    from datetime import timedelta
+
+    threshold = timedelta(hours=max_age_hours)
+    stmt = select(AgentRun).where(
+        col(AgentRun.change_id) == change_id,
+        col(AgentRun.status) == "running",
+    )
+    runs = list((await session.execute(stmt)).scalars().all())
+
+    if not runs:
+        return []
+
+    now = datetime.now(UTC)
+    reconciled: list[uuid.UUID] = []
+
+    for run in runs:
+        started = run.started_at
+        if started and started.tzinfo is None:
+            started = started.replace(tzinfo=UTC)
+        if started and (now - started) > threshold:
+            log.warning(
+                "reconciling_stale_run",
+                run_id=str(run.id),
+                change_id=str(change_id),
+                started_at=str(run.started_at),
+            )
+            run.status = "killed"
+            run.exit_code = -1
+            run.finished_at = now
+            session.add(run)
+            reconciled.append(run.id)
+
+    if reconciled:
+        await session.commit()
+
+        # Attempt recovery: re-sync stage status and auto-dispatch
+        change = await session.get(Change, change_id)
+        if change:
+            for run_id in reconciled:
+                try:
+                    svc = SillySpecStageDispatchService(session)
+                    sync_result = await svc.sync_stage_status(session, change_id, run_id)
+                    if sync_result.synced:
+                        stages = change.stages or {}
+                        last_dispatch = stages.get("last_dispatch", {})
+                        user_id_str = last_dispatch.get("user_id")
+                        recovery_user_id = (
+                            uuid.UUID(user_id_str)
+                            if user_id_str
+                            else (change.owner_id or uuid.UUID(int=0))
+                        )
+                        await auto_dispatch_next_step(
+                            session=session,
+                            workspace_id=change.workspace_id,
+                            change_id=change_id,
+                            user_id=recovery_user_id,
+                            sync_result=sync_result,
+                        )
+                except Exception as exc:
+                    log.warning(
+                        "reconcile_recovery_failed",
+                        run_id=str(run_id),
+                        error=str(exc),
+                    )
+
+    return reconciled
+
+
 async def dispatch(
     session: AsyncSession,
     workspace_id: uuid.UUID,
@@ -336,6 +506,9 @@ async def dispatch(
     config = get_config_for_stage(target_stage)
     if config is None or not config.enabled:
         return {"dispatched": False, "reason": f"no_config_for_stage:{target_stage}"}
+
+    # Reconcile stale runs before checking for active runs
+    await reconcile_stale_runs(session, change_id)
 
     # Check for concurrent runs
     if await has_active_run(session, change_id):
@@ -380,6 +553,17 @@ async def dispatch(
             requires_worktree=config.requires_worktree,
             read_only=config.read_only,
         )
+        # Update last_dispatch with run_id and status
+        stages = change.stages or {}
+        stages["last_dispatch"] = {
+            **stages.get("last_dispatch", {}),
+            "run_id": str(run.id),
+            "status": "running",
+        }
+        change.stages = stages
+        session.add(change)
+        await session.commit()
+
         return {
             "dispatched": True,
             "agent_run_id": str(run.id),
@@ -404,6 +588,39 @@ async def dispatch(
 # ---------------------------------------------------------------------------
 # SillySpecStageDispatchService — unified dispatch entry (task-07)
 # ---------------------------------------------------------------------------
+
+
+async def read_verify_result(
+    session: AsyncSession,
+    change_id: uuid.UUID,
+) -> str:
+    """Read verify-result.md and return 'passed' or 'failed'.
+
+    Default to 'passed' if file missing or no conclusive marker found,
+    to avoid verify→quick→verify loops.
+    """
+    change = await session.get(Change, change_id)
+    if not change or not change.path:
+        return "passed"
+
+    from app.modules.workspace.model import Workspace
+
+    ws = await session.get(Workspace, change.workspace_id)
+    if not ws or not ws.root_path:
+        return "passed"
+
+    vr_path = Path(ws.root_path) / change.path / "verify-result.md"
+    if not vr_path.is_file():
+        return "passed"
+
+    text = vr_path.read_text(encoding="utf-8", errors="replace")
+    for line in text.splitlines()[:30]:
+        stripped = line.strip().upper()
+        if "FAIL" in stripped and "PASS" not in stripped:
+            return "failed"
+        if "PASS" in stripped:
+            return "passed"
+    return "passed"
 
 
 class SillySpecStageDispatchService:
@@ -466,6 +683,7 @@ class SillySpecStageDispatchService:
             raise ChangeNotFound(f"Change '{change_id}' not found.")
 
         # Step 3: Check active AgentRun (prevent duplicate dispatch)
+        await reconcile_stale_runs(session, change_id)
         if await has_active_run(session, change_id):
             return {"dispatched": False, "reason": "active_run_exists", "stage": target_stage}
 
@@ -591,7 +809,7 @@ class SillySpecStageDispatchService:
         # Fallback: minimal bundle
         change = await session.get(Change, change_id)
         return AgentSpecBundle(
-            change_summary=change.title if change else f"Stage dispatch: {stage}",
+            change_summary=change.title if change and change.title else f"Stage dispatch: {stage}",
             task_key=f"stage:{stage}",
             task_title=f"Stage dispatch: {stage}",
             stage_dispatch=True,
@@ -636,20 +854,24 @@ class SillySpecStageDispatchService:
         if change is None:
             raise ChangeNotFound(f"Change '{change_id}' not found.")
 
-        # Step 2: Resolve sillyspec.db path
+        # Step 2: Resolve sillyspec.db path — try all candidates
         db_path = await self._resolve_db_path(session, change)
+        fallback_db_path = await self._resolve_db_path_fallback(session, change)
         if db_path is None or not db_path.is_file():
-            log.warning(
-                "sync_stage_status.db_not_found",
-                change_id=str(change_id),
-                db_path=str(db_path) if db_path else None,
-            )
-            return StageSyncResult(
-                synced=False,
-                change_id=change_id,
-                run_id=run_id,
-                error="sillyspec.db not found",
-            )
+            if fallback_db_path and fallback_db_path.is_file():
+                db_path = fallback_db_path
+            else:
+                log.warning(
+                    "sync_stage_status.db_not_found",
+                    change_id=str(change_id),
+                    db_path=str(db_path) if db_path else None,
+                )
+                return StageSyncResult(
+                    synced=False,
+                    change_id=change_id,
+                    run_id=run_id,
+                    error="sillyspec.db not found",
+                )
 
         # Step 3: Read sillyspec.db
         conn: sqlite3.Connection | None = None
@@ -676,13 +898,37 @@ class SillySpecStageDispatchService:
                 (change.change_key,),
             ).fetchone()
 
+            if (
+                row is None
+                and fallback_db_path
+                and fallback_db_path.is_file()
+                and db_path != fallback_db_path
+            ):
+                # Try fallback db (workspace root_path)
+                conn.close()
+                log.info(
+                    "sync_stage_status.trying_fallback_db",
+                    change_key=change.change_key,
+                    fallback=str(fallback_db_path),
+                )
+                try:
+                    conn = sqlite3.connect(f"file:{fallback_db_path}?mode=ro", uri=True)
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute(
+                        "SELECT current_stage, status FROM changes WHERE name = ?",
+                        (change.change_key,),
+                    ).fetchone()
+                except sqlite3.Error:
+                    row = None
+
             if row is None:
                 log.warning(
                     "sync_stage_status.change_not_in_db",
                     change_key=change.change_key,
                     change_id=str(change_id),
                 )
-                conn.close()
+                if conn:
+                    conn.close()
                 return StageSyncResult(
                     synced=False,
                     change_id=change_id,
@@ -748,14 +994,36 @@ class SillySpecStageDispatchService:
                 conn.close()
 
         # Step 4: Sync current_stage to Change record
+        # Guard: don't overwrite if human_gate is set (awaiting human action)
+        _human_gate_gates = frozenset(
+            {
+                "need_human_test",
+                "need_proposal_review",
+                "need_plan_review",
+                "need_requirement_input",
+                "need_archive_confirm",
+                "blocked",
+            }
+        )
         if change.current_stage != db_current_stage:
-            log.info(
-                "sync_stage_status.stage_updated",
-                change_id=str(change_id),
-                old=change.current_stage,
-                new=db_current_stage,
-            )
-            change.current_stage = db_current_stage
+            if change.human_gate in _human_gate_gates:
+                log.info(
+                    "sync_stage_status.stage_update_skipped_human_gate",
+                    change_id=str(change_id),
+                    old=change.current_stage,
+                    new=db_current_stage,
+                    human_gate=change.human_gate,
+                )
+                # Override db_current_stage to keep Hub's view consistent
+                db_current_stage = change.current_stage
+            else:
+                log.info(
+                    "sync_stage_status.stage_updated",
+                    change_id=str(change_id),
+                    old=change.current_stage,
+                    new=db_current_stage,
+                )
+                change.current_stage = db_current_stage
 
         # Step 5: Sync step status to Change.stages JSON
         stages_json = change.stages or {}
@@ -803,7 +1071,9 @@ class SillySpecStageDispatchService:
         try:
             from app.modules.spec_workspace.model import SpecWorkspace
 
-            stmt = select(SpecWorkspace).where(SpecWorkspace.workspace_id == change.workspace_id)
+            stmt = select(SpecWorkspace).where(
+                col(SpecWorkspace.workspace_id) == change.workspace_id
+            )
             spec_ws = (await session.execute(stmt)).scalars().first()
 
             if spec_ws and spec_ws.strategy != "repo-native":
@@ -815,12 +1085,34 @@ class SillySpecStageDispatchService:
         # Fallback: use workspace root_path
         from app.modules.workspace.model import Workspace
 
-        ws_stmt = select(Workspace).where(Workspace.id == change.workspace_id)
+        ws_stmt = select(Workspace).where(col(Workspace.id) == change.workspace_id)
         workspace = (await session.execute(ws_stmt)).scalars().first()
         if not workspace or not workspace.root_path:
             return None
 
         return SpecPathResolver(workspace.root_path).db_path()
+
+    async def _resolve_db_path_fallback(
+        self,
+        session: AsyncSession,
+        change: Change,
+    ) -> Path | None:
+        """Always resolve from workspace root_path (used when spec_root db lacks the change)."""
+        from app.core.spec_paths import SpecPathResolver
+        from app.modules.workspace.model import Workspace
+
+        ws_stmt = select(Workspace).where(col(Workspace.id) == change.workspace_id)
+        workspace = (await session.execute(ws_stmt)).scalars().first()
+        if not workspace or not workspace.root_path:
+            return None
+        return SpecPathResolver(workspace.root_path).db_path()
+
+    async def _read_verify_result(
+        self,
+        session: AsyncSession,
+        change_id: uuid.UUID,
+    ) -> str:
+        return await read_verify_result(session, change_id)
 
 
 # ---------------------------------------------------------------------------

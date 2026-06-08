@@ -156,9 +156,17 @@ const STATUS_CONFIG: Record<string, { label: string; badge: "success" | "destruc
 /*  Sub-components                                                     */
 /* ------------------------------------------------------------------ */
 
-function MetaItem({ label, children }: { label: string; children: React.ReactNode }) {
+function MetaItem({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className={`flex flex-col gap-0.5 ${className ?? ""}`}>
       <span className="text-[11px] text-muted-foreground">{label}</span>
       <span className="text-xs font-medium">{children}</span>
     </div>
@@ -388,7 +396,7 @@ export default function AgentPage({ params }: Props) {
   /* ================================================================ */
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6 px-6 py-8">
+    <div className="flex flex-col gap-5 px-6 py-6">
       {/* ---- Header ---- */}
       <header className="flex items-start justify-between gap-4">
         <div>
@@ -613,7 +621,7 @@ export default function AgentPage({ params }: Props) {
                         <span className={`shrink-0 font-medium ${tag.cls}`}>
                           [{tag.label}]
                         </span>
-                        <span className="flex-1 break-all text-zinc-300">
+                        <span className="min-w-0 flex-1 overflow-x-auto whitespace-pre font-mono text-[11px] text-zinc-300">
                           {log.content_redacted}
                         </span>
                         {log.channel === "tool_call" && (() => {
@@ -705,11 +713,13 @@ export default function AgentPage({ params }: Props) {
                 <tr>
                   <th>运行 ID</th>
                   <th>类型</th>
+                  <th>Task</th>
                   <th>状态</th>
                   <th>后置校验</th>
                   <th>时长</th>
                   <th>费用</th>
                   <th>词元数</th>
+                  <th>退出码</th>
                   <th>完成时间</th>
                   <th className="text-right">操作</th>
                 </tr>
@@ -721,10 +731,22 @@ export default function AgentPage({ params }: Props) {
                     <>
                       <tr key={run.id}>
                         <td>
-                          <code className="text-[11px] font-mono text-primary">{shortId(run.id)}</code>
+                          <code className="font-mono text-[11px] text-primary">{shortId(run.id)}</code>
                         </td>
                         <td>
                           <Badge variant="outline" className="text-[10px]">{run.agent_type}</Badge>
+                        </td>
+                        <td className="text-xs">
+                          {run.task_id ? (
+                            <Link
+                              href={`/workspaces/${workspaceId}/changes/-/tasks/${run.task_id}`}
+                              className="text-primary hover:underline"
+                            >
+                              {shortId(run.task_id)}
+                            </Link>
+                          ) : (
+                            "—"
+                          )}
                         </td>
                         <td>
                           <div className="flex items-center gap-1.5">
@@ -760,8 +782,8 @@ export default function AgentPage({ params }: Props) {
                             <span className="text-xs text-muted-foreground">—</span>
                           )}
                         </td>
-                        <td className="text-xs font-mono">{calcDuration(run)}</td>
-                        <td className="text-xs font-mono">
+                        <td className="font-mono text-xs">{calcDuration(run)}</td>
+                        <td className="font-mono text-xs">
                           {run.total_cost_usd != null ? `$${run.total_cost_usd.toFixed(4)}` : "—"}
                         </td>
                         <td className="text-xs text-muted-foreground">
@@ -773,6 +795,7 @@ export default function AgentPage({ params }: Props) {
                             </span>
                           ) : "—"}
                         </td>
+                        <td className="font-mono text-[11px]">{run.exit_code ?? "—"}</td>
                         <td className="whitespace-nowrap text-xs text-muted-foreground">
                           {run.finished_at ? formatTime(run.finished_at) : "—"}
                         </td>
@@ -788,12 +811,10 @@ export default function AgentPage({ params }: Props) {
                         </td>
                       </tr>
 
-                      {/* Inline log viewer for completed runs */}
                       {expandedRunId === run.id && (
                         <tr key={`${run.id}-logs`}>
-                          <td colSpan={9} className="p-0">
+                          <td colSpan={11} className="p-0">
                             <div className="border-t">
-                              {/* Usage summary */}
                               {(run.total_cost_usd != null || run.duration_ms != null || run.num_turns != null || run.input_tokens != null || run.output_tokens != null) && (
                                 <div className="flex flex-wrap gap-3 border-b bg-muted/30 px-4 py-3">
                                   {run.total_cost_usd != null && (
@@ -816,7 +837,6 @@ export default function AgentPage({ params }: Props) {
                                   )}
                                 </div>
                               )}
-                              {/* Terminal-style log viewer */}
                               <div className="bg-zinc-950 px-4 py-3 font-mono text-xs leading-5">
                                 <div className="mb-2 flex items-center gap-2 border-b border-zinc-800 pb-2">
                                   <div className="flex gap-1.5">

@@ -1,26 +1,38 @@
-# Scan Agent
+# Scan Stage
 
-You are a scan agent for the SillyHub change management workflow.
+You are executing the **scan** stage for a SillySpec workspace.
 
 ## Context
 
-- **Change**: {{change_title}} ({{change_key}})
-- **Current Stage**: {{stage}}
-- **Affected Components**: {{affected_components}}
-- **Workspace**: {{workspace_id}}
+- **Workspace ID**: {{workspace_id}}
 
 ## Your Task
 
-Scan the project codebase and produce architecture documentation. Use the `sillyspec` CLI tool:
+Run the SillySpec scan to generate architecture documentation.
 
-1. Run `sillyspec init --dir <spec_root>` to initialize spec space if not already done.
-2. Run `sillyspec run scan --dir <spec_root>` to perform the scan.
-3. Review the generated documents under `.sillyspec/docs/` for completeness.
+### Steps
 
-## Output
+1. **Initialize spec space** (if not already done):
+   ```bash
+   sillyspec init
+   ```
 
-Confirm scan completion with a summary of generated documents. If the scan fails, describe the error and suggest fixes.
+2. **Start scan**:
+   ```bash
+   sillyspec run scan
+   ```
 
-## Mode: WRITE
+3. **Follow the step prompt** output by the CLI. Execute the step instructions precisely.
 
-You may write files (scan documents to `.sillyspec/docs/`). No worktree is required for this stage — write directly in the project.
+4. **Mark step done** after completing each step:
+   ```bash
+   sillyspec run scan --done --output "<brief summary>"
+   ```
+
+5. **Repeat** until scan stage is complete.
+
+### Key Rules
+
+- Use `sillyspec` CLI commands only.
+- Scan writes documents to `.sillyspec/docs/`.
+- Review generated documents for completeness after the scan finishes.

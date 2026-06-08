@@ -4,8 +4,8 @@ created_at: 2026-06-01T12:00:00
 ---
 
 # frontend_app
-> 最后更新：2026-06-01
-> 最近变更：scan（初始生成）
+> 最后更新：2026-06-08
+> 最近变更：2026-06-08-change-center-columns（变更列表列展示优化）
 > 模块路径：frontend/src/app/**
 
 ## 职责
@@ -35,7 +35,7 @@ layout.tsx (根布局)
 | dashboard | `/workspaces/[id]/scan-docs` | `.../scan-docs/page.tsx` | 扫描文档查看 |
 | dashboard | `/workspaces/[id]/components` | `.../components/page.tsx` | 组件列表 |
 | dashboard | `/workspaces/[id]/components/topology` | `.../topology/page.tsx` | 拓扑图 |
-| dashboard | `/workspaces/[id]/changes` | `.../changes/page.tsx` | 变更列表 |
+| dashboard | `/workspaces/[id]/changes` | `.../changes/page.tsx` | 变更列表（状态列 human_gate 展示、阶段列 null 兜底、类型列颜色映射、影响组件标签） |
 | dashboard | `/workspaces/[id]/create-change` | `.../create-change/page.tsx` | 创建变更 |
 | dashboard | `/workspaces/[id]/changes/[cid]` | `.../changes/[cid]/page.tsx` | 变更详情 |
 | dashboard | `/workspaces/[id]/changes/[cid]/tasks` | `.../tasks/page.tsx` | 任务列表 |
@@ -98,3 +98,6 @@ layout.tsx (根布局)
 
 | 日期 | 变更 | 摘要 |
 |------|------|------|
+| 2026-06-05 | ql-20260605-001 | 变更详情页文档实时刷新 + Gate面板突出显示 |
+| 2026-06-05 | 2026-06-05-agent-74b61b | Agent 控制台移除 max-w-6xl 宽度限制，日志区域撑满主内容区 |
+| 2026-06-08 | 2026-06-08-change-center-columns | 变更列表列展示优化：human_gate 状态列 + draft 兜底 + 类型颜色 + 影响组件 |

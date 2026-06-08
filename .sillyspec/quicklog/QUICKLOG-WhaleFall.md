@@ -90,3 +90,90 @@ created_at: 2026-06-03T08:42:04
 ## ql-20260604-001-b7f2 | 2026-06-04 09:11:09 | Bootstrap 扫描文档查错路径排查
 状态：已完成
 文件：backend/app/modules/spec_workspace/bootstrap.py, backend/app/modules/spec_workspace/validator.py
+
+## ql-20260604-002-ff42 | 2026-06-04 15:48:00 | Agent dispatch 失败：prompt 模板未打入 Docker 镜像
+状态：已完成
+文件：backend/.dockerignore, backend/app/modules/change/prompts/*.md (9 files)
+根因：.dockerignore 含 `**/*.md` 排除所有 md 文件，导致 prompts/ 目录在 Docker 镜像内为空。Agent dispatch 时 load_prompt_template 返回空字符串抛 AgentRunError。
+结果：1) .dockerignore 新增 `!app/modules/change/prompts/*.md` 例外；2) 重写全部 9 个 prompt 模板，改用 `sillyspec run <stage>` CLI 命令驱动 Agent；3) 重建后端镜像并部署；4) 手动 dispatch brainstorm 验证，Agent 成功执行并完成 5/10 步骤
+
+## ql-20260604-003-a1c8 | 2026-06-04 16:32:00 | brainstorm 需求分析失败 + Agent 日志宽度
+状态：已完成
+文件：backend/app/modules/change/prompts/brainstorm.md, frontend/.../agent/page.tsx, frontend/.../changes/[cid]/page.tsx, .sillyspec/changes/2026-06-04-agent-7b709e/*
+结果：根因 brainstorm Step10 需人工确认导致 run 2ce88b9a failed；prompt 增加无人值守自动确认；补齐四件套并完成 brainstorm；日志区改 whitespace-pre 水平滚动；前后端 Docker 已重建
+
+## ql-20260605-004-c3e1 | 2026-06-05 13:11:53 | 修复 verify 完成后 auto_dispatch 死循环（verify→quick→verify）
+状态：已完成
+文件：backend/app/modules/change/dispatch.py
+根因：auto_dispatch_next_step 调用 complete_stage 时始终传 result=None，verify 阶段 result=None 不等于 "passed" 走 quick 分支 → quick 完成 → verify → 循环
+结果：新增 _read_verify_result 方法读取 verify-result.md 解析 PASS/FAIL；auto_dispatch_next_step 对 verify 阶段传入实际结果；kill 卡住 run；修 DB gate；后端重建
+
+## ql-20260605-005-d4a2 | 2026-06-05 13:22:23 | 前端获取 verify_result 文档 404
+状态：已完成
+文件：无代码改动
+根因：卡死 run 期间 verify-result.md 未 reparse 到 DB，导致前端请求 404。kill run + reparse 后自动修复
+结果：验证通过前端代理返回 200，无需代码改动
+
+## ql-20260605-006-f1c3 | 2026-06-05 13:43:35 | 修复 auto_dispatch 死循环：sync_stage_status 覆盖 human_gate + 缺少 human_gate 保护
+状态：已完成
+文件：backend/app/modules/change/dispatch.py
+根因：sync_stage_status 无条件从 sillyspec.db 覆盖 Hub DB current_stage，即使 human_gate 已设为 need_human_test；auto_dispatch_next_step 不检查 human_gate 就 dispatch 新 run → verify→quick→verify 死循环
+结果：sync_stage_status 增加 human_gate 保护，已设 need_xxx 时不覆盖 current_stage；auto_dispatch_next_step 增加 human_gate 检查，已设时跳过 dispatch；修复 sillyspec.db 和 Hub DB 数据；后端已重建
+
+## ql-20260605-007-a8d4 | 2026-06-05 13:58:15 | 修复 quick→verify→quick 循环：verify-result.md 缺失默认 failed 导致循环
+状态：已完成
+文件：backend/app/modules/change/dispatch.py
+根因：quick 完成后 dispatch verify，verify 完成后 _read_verify_result 读不到 verify-result.md 返回 None → result=None 被 _resolve_stage_completion 当作 failed → dispatch quick → 循环
+结果：_read_verify_result 默认返回 passed 而非 None；修复 sillyspec.db 和 Hub DB 数据；后端已重建
+
+## ql-20260605-008-b2e5 | 2026-06-05 14:17:15 | 修复归档阶段无限循环 dispatch：sillyspec.db pending steps 导致 step 4 反复 dispatch
+状态：已完成
+文件：backend/app/modules/change/dispatch.py
+根因：sillyspec CLI archive 有 5 个步骤，agent 每次只完成 1-2 步，sillyspec.db 始终有 pending step → auto_dispatch_next_step step 4 反复 dispatch archive agent。chain count 未正确递增。
+结果：auto_dispatch_next_step 增加 terminal stage 检查（archived/cancelled 不 dispatch）+ stage diverged 检查（Hub DB 和 sillyspec.db stage 不同时不 dispatch）。手动修 DB 为 archived。后端已重建。
+
+## ql-20260608-001-a7f3 | 2026-06-08 09:45:00 | 变更中心已归档变更仍显示在"进行中"tab
+状态：已完成
+文件：数据库修复
+根因：change_key 重命名 74b61b→log-width 后 DB 产生两条记录，log-width 的 location=active 但磁盘目录已移至 archive，reparse 未及时同步。活跃目录残留 74b61b 只含 module-impact.md。
+结果：删除 DB 中 log-width 记录，清理活跃目录残留 74b61b，reparse 后所有相关变更正确归档。
+
+## ql-20260608-006-a4d1 | 2026-06-08 14:00:00 | 修复 dispatch 后 agent 日志不出现（useEffect 竞态）
+状态：已完成
+文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+根因：dispatch 后 SSE 连接依赖 useEffect→useCallback 链路，多层间接导致竞态条件。改用命令式：dispatch 成功后直接关闭旧 SSE、清空日志、加载历史、建立新 SSE。
+结果：handleDispatch 改为命令式直接管理 SSE，不再依赖 useEffect 间接连接
+
+## ql-20260608-005-f3b8 | 2026-06-08 13:42:52 | 修复 dispatch 后 agent 日志消失（再次）
+状态：已完成
+文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+根因：handleDispatch 在 API 调用前 setAgentLogs([]) 清空日志，导致用户看到空白期。应保留旧日志直到新 run 的 loadHistoryLogs 自然替换。
+结果：去掉 setAgentLogs([])，只关闭旧 SSE，让新 run 的 loadHistoryLogs 自然替换旧日志
+
+## ql-20260608-004-c2e9 | 2026-06-08 13:30:13 | 变更详情页 agent 状态/日志不刷新 + dispatch 后日志消失
+状态：已完成
+文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+根因：1) handleGateAction 只刷新 change 不刷新 agentStatus，导致阶段流转后状态/日志停留旧 run；2) handleDispatch 后 agentLogs 未清空、旧 SSE 未断开
+结果：handleGateAction 改用 Promise.all 刷新 change+documents+agentStatus；handleDispatch dispatch 前清空 agentLogs + 关闭旧 SSE + 重置 logStreaming
+
+## ql-20260608-003-d5a7 | 2026-06-08 13:16:35 | 变更中心列宽调整+影响组件换行显示
+状态：已完成
+文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+结果：类型/状态/阶段列加 whitespace-nowrap + 固定宽度(w-20/w-24)，影响组件列去掉 truncate 允许换行
+
+## ql-20260608-002-e4b1 | 2026-06-08 13:06:39 | 变更中心类型列中文回显
+状态：已完成
+文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+结果：新增 TYPE_LABEL 映射（feature→功能, quick→快速, prototype→原型），类型 Badge 回显中文，未知类型 fallback 原始值
+
+## ql-20260605-009-c7f2 | 2026-06-05 15:00:06 | 变更文档完整性拿不到文档：change_key 和目录名不匹配
+状态：已完成
+文件：无代码改动（数据修复）
+根因：brainstorm agent 创建变更时用 2026-06-05-agent-x-965f93（随机后缀），sillyspec CLI rename 为 2026-06-05-agent-log-width，DB 没同步更新 path → reparse 读错目录 → 文档不全
+结果：修 DB change_key 和 path 为正确值，reparse 后 6/8 文档同步
+
+## ql-20260608-009-e3f7 | 2026-06-08 14:17:00 | 修复 dispatch 后 Agent 日志区域消失
+状态：进行中
+文件：backend/app/modules/change/dispatch.py, frontend/.../changes/[cid]/page.tsx
+根因：1) dispatch() 写 stages["last_dispatch"] 不含 run_id → 前端 activeRunId=null → 日志区域消失；2) useEffect cleanup 关闭 handleDispatch 打开的 SSE
+结果：dispatch() 拿到 run.id 后回写 run_id+status；前端加 dispatchOwnsSseRef 防 useEffect 竞态

@@ -1,0 +1,13 @@
+---
+author: "ffb4b640-9e8a-4ffb-987d-7b103ecb4457"
+created_at: "2026-06-05T02:00:19.044877"
+---
+
+# 调整【Agent 控制台】中【已完成运行】查看日志功能的日志回显宽度，使回显日志宽度不要超出范围。
+
+- **Status**: draft
+- **Created**: 2026-06-05T02:00:19.044889
+
+## Summary
+
+<!-- Describe the change summary here -->

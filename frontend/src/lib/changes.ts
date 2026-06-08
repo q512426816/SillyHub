@@ -434,3 +434,17 @@ export function humanTest(
     },
   );
 }
+
+export function archiveConfirm(
+  workspaceId: string,
+  changeId: string,
+  comment?: string,
+) {
+  return apiFetch<ReviewResponse>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/archive-confirm`,
+    {
+      method: "POST",
+      json: { comment: comment ?? null },
+    },
+  );
+}

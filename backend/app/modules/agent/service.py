@@ -1061,7 +1061,9 @@ class AgentService:
                             stage_completed=sync_result.stage_completed,
                         )
 
-                        if sync_result.synced and sync_result.has_pending_step:
+                        if sync_result.synced and (
+                            sync_result.has_pending_step or sync_result.stage_completed
+                        ):
                             auto_result = await auto_dispatch_next_step(
                                 session=session,
                                 workspace_id=workspace_id,

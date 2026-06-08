@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import {
   proposalReview,
   planReview,
   humanTest,
+  archiveConfirm,
   type ChangeDocContent,
   type ChangeDocMatrix,
   type ChangeRead,
@@ -28,6 +29,12 @@ import {
   type HumanGate,
 } from "@/lib/changes";
 import { SillySpecStepProgress, type StepInfo } from "@/components/sillyspec-step-progress";
+import {
+  streamAgentRunLogs,
+  getAgentRunLogs,
+  type AgentRunLogEntry,
+  type StreamLogEvent,
+} from "@/lib/agent";
 import { getTaskBoard, type TaskBoard } from "@/lib/tasks";
 import {
   listReviews,
@@ -102,7 +109,7 @@ const GATE_PANELS: Record<string, {
   need_archive_confirm: {
     title: "归档确认",
     description: "所有验证已通过，确认归档此变更",
-    actions: [{ label: "确认归档", variant: "default", action: "test_pass" }],
+    actions: [{ label: "确认归档", variant: "default", action: "archive_confirm" }],
   },
   blocked: {
     title: "需要人工介入",
@@ -212,6 +219,22 @@ export default function ChangeDetailPage({ params }: Props) {
   const [agentStatus, setAgentStatus] = useState<DispatchResponse | null>(null);
   const [loadingAgentStatus, setLoadingAgentStatus] = useState(false);
   const [dispatching, setDispatching] = useState(false);
+  const [gateComment, setGateComment] = useState("");
+
+  // ── Agent Log Stream state ──────────────────────────────────────────
+  const [agentLogs, setAgentLogs] = useState<AgentRunLogEntry[]>([]);
+  const [logsExpanded, setLogsExpanded] = useState(false);
+
+  // Auto-expand logs when agent becomes active or has last_dispatch
+  useEffect(() => {
+    if (!logsExpanded && (agentStatus?.has_active_run || agentStatus?.last_dispatch)) {
+      setLogsExpanded(true);
+    }
+  }, [agentStatus?.has_active_run, agentStatus?.last_dispatch]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [logStreaming, setLogStreaming] = useState(false);
+  const logEndRef = useRef<HTMLDivElement>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const dispatchOwnsSseRef = useRef(false);
 
   useEffect(() => {
     const load = async () => {
@@ -272,9 +295,6 @@ export default function ChangeDetailPage({ params }: Props) {
         status: changeData.status ?? change.status,
         stages: (changeData.stages as Record<string, unknown>) ?? change.stages,
       });
-      if (targetStage === "accepted") {
-        setArchiveGate(null);
-      }
       // Show agent dispatch feedback
       if (result.agent_dispatch?.dispatched) {
         setSuccessMsg(`🤖 Agent 已自动派发 (${result.agent_dispatch.phase ?? targetStage})`);
@@ -428,9 +448,57 @@ export default function ChangeDetailPage({ params }: Props) {
     try {
       const result = await triggerDispatch(workspaceId, changeId);
       setAgentStatus(result);
-      if (result.has_active_run) {
+      setLogsExpanded(true);
+
+      if (result.has_active_run && result.last_dispatch?.run_id) {
         setSuccessMsg("🤖 Agent 已触发执行");
         setTimeout(() => setSuccessMsg(null), 3000);
+
+        // Disconnect any existing SSE, then directly connect to new run
+        dispatchOwnsSseRef.current = true;
+        if (eventSourceRef.current) {
+          eventSourceRef.current.close();
+          eventSourceRef.current = null;
+        }
+        const newRunId = result.last_dispatch.run_id;
+        setAgentLogs([]);
+        setLogStreaming(true);
+        // Load history (fire-and-forget)
+        getAgentRunLogs(workspaceId, newRunId)
+          .then((logs) => setAgentLogs(logs))
+          .catch(() => {});
+        // Connect SSE
+        const es = streamAgentRunLogs(
+          workspaceId,
+          newRunId,
+          (evt: StreamLogEvent) => {
+            setAgentLogs((prev) => {
+              if (evt.log_id && prev.some((l) => l.id === evt.log_id)) return prev;
+              return [
+                ...prev,
+                {
+                  id: evt.log_id ?? crypto.randomUUID(),
+                  run_id: newRunId,
+                  timestamp: evt.timestamp,
+                  channel: evt.channel,
+                  content_redacted: evt.content,
+                },
+              ];
+            });
+          },
+          () => {
+            setLogStreaming(false);
+            eventSourceRef.current = null;
+            dispatchOwnsSseRef.current = false;
+            void refreshAgentStatus();
+          },
+          () => {
+            setLogStreaming(false);
+            eventSourceRef.current = null;
+            dispatchOwnsSseRef.current = false;
+          },
+        );
+        eventSourceRef.current = es;
       }
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "触发 Agent 失败");
@@ -454,9 +522,122 @@ export default function ChangeDetailPage({ params }: Props) {
     }
   };
 
-  // Auto-load archive gate when entering "accepted" stage
+  // ── Agent Log Stream ────────────────────────────────────────────────
+  const activeRunId = agentStatus?.last_dispatch?.run_id ?? null;
+  const isRunActive = agentStatus?.has_active_run ?? false;
+
+  const loadHistoryLogs = useCallback(() => {
+    if (!activeRunId || !workspaceId) return;
+    getAgentRunLogs(workspaceId, activeRunId)
+      .then((logs) => setAgentLogs(logs))
+      .catch(() => {});
+  }, [activeRunId, workspaceId]);
+
+  const connectLogStream = useCallback(() => {
+    if (!activeRunId || !workspaceId || eventSourceRef.current) return;
+    if (!isRunActive) {
+      // Not running — just load history
+      loadHistoryLogs();
+      return;
+    }
+    setLogStreaming(true);
+    // Load historical logs first
+    loadHistoryLogs();
+    // Connect SSE for real-time updates
+    const es = streamAgentRunLogs(
+      workspaceId,
+      activeRunId,
+      (evt: StreamLogEvent) => {
+        setAgentLogs((prev) => {
+          if (evt.log_id && prev.some((l) => l.id === evt.log_id)) return prev;
+          return [
+            ...prev,
+            {
+              id: evt.log_id ?? crypto.randomUUID(),
+              run_id: activeRunId,
+              timestamp: evt.timestamp,
+              channel: evt.channel,
+              content_redacted: evt.content,
+            },
+          ];
+        });
+      },
+      () => {
+        setLogStreaming(false);
+        eventSourceRef.current = null;
+        void refreshAgentStatus();
+      },
+      () => {
+        setLogStreaming(false);
+        eventSourceRef.current = null;
+      },
+    );
+    eventSourceRef.current = es;
+  }, [activeRunId, workspaceId, isRunActive, loadHistoryLogs]);
+
+  // Connect when logs expanded
   useEffect(() => {
-    if (change?.current_stage === "accepted" && !archiveGate && !loadingArchiveGate) {
+    if (dispatchOwnsSseRef.current) {
+      // handleDispatch is managing SSE — do not interfere
+      return () => {};
+    }
+    if (logsExpanded && activeRunId && !eventSourceRef.current) {
+      connectLogStream();
+    }
+    if (!activeRunId && eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+      setLogStreaming(false);
+    }
+    return () => {
+      if (eventSourceRef.current && !dispatchOwnsSseRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+    };
+  }, [logsExpanded, activeRunId, connectLogStream]);
+
+  // Auto-scroll logs
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [agentLogs]);
+
+  // ── Manual refresh: agent-status + documents + change ────────────
+  const refreshAll = useCallback(async () => {
+    try {
+      const [c, m, as] = await Promise.all([
+        getChange(workspaceId, changeId),
+        getChangeDocuments(workspaceId, changeId),
+        getAgentStatus(workspaceId, changeId),
+      ]);
+      setChange(c);
+      setMatrix(m);
+      setAgentStatus(as);
+    } catch { /* silent */ }
+  }, [workspaceId, changeId]);
+
+  // ── Auto-refresh active doc content when matrix updates ──────────
+  useEffect(() => {
+    if (
+      activeDoc &&
+      activeDoc !== "prototypes" &&
+      activeDoc !== "references" &&
+      matrix &&
+      !loadingDoc
+    ) {
+      const docEntry = docExistsMap.get(activeDoc);
+      if (docEntry?.exists) {
+        void getChangeDocumentContent(workspaceId, changeId, activeDoc)
+          .then((content) => setDocContent(content))
+          .catch(() => {});
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matrix]);
+
+  // Auto-load archive gate when entering archive stage
+  useEffect(() => {
+    if (change?.current_stage === "archive" && !archiveGate && !loadingArchiveGate) {
       void loadArchiveGate();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -494,30 +675,39 @@ export default function ChangeDetailPage({ params }: Props) {
     setTransitioning(true);
     try {
       if (action === "proposal_approve") {
-        await proposalReview(workspaceId, changeId, "approve");
+        await proposalReview(workspaceId, changeId, "approve", gateComment || undefined);
       } else if (action === "proposal_revise") {
-        await proposalReview(workspaceId, changeId, "revise");
+        await proposalReview(workspaceId, changeId, "revise", gateComment || undefined);
       } else if (action === "proposal_unclear") {
-        await proposalReview(workspaceId, changeId, "unclear");
+        await proposalReview(workspaceId, changeId, "unclear", gateComment || undefined);
       } else if (action === "plan_approve") {
-        await planReview(workspaceId, changeId, "approve");
+        await planReview(workspaceId, changeId, "approve", gateComment || undefined);
       } else if (action === "plan_replan") {
-        await planReview(workspaceId, changeId, "replan");
+        await planReview(workspaceId, changeId, "replan", gateComment || undefined);
       } else if (action === "plan_back_to_propose") {
-        await planReview(workspaceId, changeId, "back_to_propose");
+        await planReview(workspaceId, changeId, "back_to_propose", gateComment || undefined);
       } else if (action === "plan_back_to_brainstorm") {
-        await planReview(workspaceId, changeId, "back_to_brainstorm");
+        await planReview(workspaceId, changeId, "back_to_brainstorm", gateComment || undefined);
       } else if (action === "test_pass") {
-        await humanTest(workspaceId, changeId, "pass");
+        await humanTest(workspaceId, changeId, "pass", gateComment || undefined);
       } else if (action === "test_bug") {
-        await humanTest(workspaceId, changeId, "bug");
+        await humanTest(workspaceId, changeId, "bug", gateComment || undefined);
       } else if (action === "test_doc_mismatch") {
-        await humanTest(workspaceId, changeId, "doc_mismatch");
+        await humanTest(workspaceId, changeId, "doc_mismatch", gateComment || undefined);
+      } else if (action === "archive_confirm") {
+        await archiveConfirm(workspaceId, changeId, gateComment || undefined);
       } else if (action === "transition_execute") {
         await transitionChange(workspaceId, changeId, "execute");
       }
-      const updated = await getChange(workspaceId, changeId);
+      setGateComment("");
+      const [updated, updatedMatrix, updatedAgentStatus] = await Promise.all([
+        getChange(workspaceId, changeId),
+        getChangeDocuments(workspaceId, changeId),
+        getAgentStatus(workspaceId, changeId),
+      ]);
       setChange(updated);
+      setMatrix(updatedMatrix);
+      setAgentStatus(updatedAgentStatus);
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "操作失败");
     } finally {
@@ -592,35 +782,14 @@ export default function ChangeDetailPage({ params }: Props) {
         );
       })()}
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-2">
         <Link
           href={`/workspaces/${workspaceId}/changes/${changeId}/tasks`}
           className="inline-flex h-7 items-center rounded bg-primary px-2 text-xs font-medium text-primary-foreground hover:bg-primary/90"
         >
           任务看板
         </Link>
-        {gatePanel && (
-          <div className="rounded-md border bg-card px-3 py-2.5 space-y-2">
-            <div>
-              <p className="text-sm font-medium">{gatePanel.title}</p>
-              <p className="text-[11px] text-muted-foreground">{gatePanel.description}</p>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {gatePanel.actions.map((a) => (
-                <Button
-                  key={a.action}
-                  variant={a.variant}
-                  size="sm"
-                  onClick={() => void handleGateAction(a.action)}
-                  disabled={transitioning}
-                >
-                  {a.label}
-                </Button>
-              ))}
-            </div>
-          </div>
-        )}
-        {humanGate === "none" && (
+        {humanGate === "none" && (agentStatus?.has_active_run || agentStatus?.config_enabled) && (
           <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
             <div className="h-2 w-2 animate-pulse rounded-full bg-primary" />
             <span className="text-xs text-muted-foreground">
@@ -628,21 +797,62 @@ export default function ChangeDetailPage({ params }: Props) {
             </span>
           </div>
         )}
-        {change.current_stage === "ready_for_dev" && (
-          <Button
-            size="sm"
-            onClick={() => void handleExecute()}
-            disabled={executing}
-          >
-            {executing ? "执行中…" : "🚀 启动执行"}
-          </Button>
-        )}
       </div>
+
+      {gatePanel && (
+        <section className="rounded-md border-2 border-primary/20 bg-primary/5 px-4 py-3 space-y-2.5">
+          <div>
+            <p className="text-sm font-semibold">{gatePanel.title}</p>
+            <p className="text-xs text-muted-foreground">{gatePanel.description}</p>
+          </div>
+          <textarea
+            className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs focus:border-ring focus:outline-none"
+            rows={2}
+            placeholder="审核意见（可选）"
+            value={gateComment}
+            onChange={(e) => setGateComment(e.target.value)}
+          />
+          <div className="flex flex-wrap gap-2">
+            {gatePanel.actions.map((a) => (
+              <Button
+                key={a.action}
+                variant={a.variant}
+                size="sm"
+                onClick={() => void handleGateAction(a.action)}
+                disabled={transitioning}
+              >
+                {a.label}
+              </Button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ── SillySpec Step Progress ─────────────────────────────── */}
       <SillySpecStepProgress
         currentStage={change.current_stage}
-        steps={Array.isArray((change.stages as Record<string, unknown>)?.steps) ? ((change.stages as Record<string, unknown>)?.steps as StepInfo[]) : undefined}
+        steps={(() => {
+            const stages = change.stages as Record<string, unknown> | null;
+            if (!stages || !change.current_stage) return undefined;
+            // Try top-level steps first (legacy)
+            const topLevel = stages.steps;
+            if (Array.isArray(topLevel)) return topLevel as StepInfo[];
+            // Try nested under current stage: stages[current_stage].steps = {completed:[], pending:[]}
+            const stageData = stages[change.current_stage] as Record<string, unknown> | undefined;
+            if (stageData?.steps && typeof stageData.steps === "object" && !Array.isArray(stageData.steps)) {
+              const s = stageData.steps as { completed?: string[]; pending?: string[] };
+              const result: StepInfo[] = [];
+              let idx = 1;
+              for (const name of s.completed ?? []) {
+                result.push({ index: idx++, name, status: "completed" });
+              }
+              for (const name of s.pending ?? []) {
+                result.push({ index: idx++, name, status: "pending" });
+              }
+              return result.length > 0 ? result : undefined;
+            }
+            return undefined;
+          })()}
         hasActiveRun={agentStatus?.has_active_run ?? false}
         configEnabled={agentStatus?.config_enabled ?? false}
         lastDispatchStatus={agentStatus?.last_dispatch?.status as "running" | "completed" | "failed" | null}
@@ -654,6 +864,87 @@ export default function ChangeDetailPage({ params }: Props) {
         dispatching={dispatching}
         stageLabels={WORKFLOW_STAGE_LABELS}
       />
+
+      {/* ── Agent Log Viewer ────────────────────────────────────── */}
+      {activeRunId && (
+        <section className="rounded-md border bg-card">
+          <button
+            className="flex w-full items-center justify-between border-b px-3 py-2 text-left"
+            onClick={() => {
+              const next = !logsExpanded;
+              setLogsExpanded(next);
+              if (next && !agentLogs.length) {
+                void loadHistoryLogs();
+              }
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <h2 className="text-xs font-medium">Agent 执行日志</h2>
+              {logStreaming && (
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                </span>
+              )}
+              {!logStreaming && agentStatus?.last_dispatch?.status === "failed" && (
+                <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
+              )}
+              {!logStreaming && agentStatus?.last_dispatch?.status === "completed" && (
+                <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+              )}
+              <span className="text-[11px] text-muted-foreground">
+                {agentLogs.length > 0 ? `${agentLogs.length} 条` : ""}
+                {agentStatus?.last_dispatch?.status ? ` · ${agentStatus.last_dispatch.status}` : ""}
+              </span>
+            </div>
+            <span className="text-[11px] text-muted-foreground">
+              {logsExpanded ? "▾ 收起" : "▸ 展开"}
+            </span>
+          </button>
+          {logsExpanded && (
+            <div className="max-h-80 overflow-auto px-3 py-2 font-mono text-[11px] leading-relaxed">
+              {agentLogs.length === 0 ? (
+                <p className="text-muted-foreground">暂无日志…</p>
+              ) : (
+                agentLogs.map((log) => (
+                  <div key={log.id} className="flex gap-2 py-0.5">
+                    <span className="shrink-0 text-muted-foreground">
+                      {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : ""}
+                    </span>
+                    <span
+                      className={`shrink-0 rounded px-1 text-[10px] font-semibold ${
+                        log.channel === "tool_call"
+                          ? "bg-blue-100 text-blue-700"
+                          : log.channel === "stderr"
+                            ? "bg-amber-100 text-amber-700"
+                            : log.channel === "pending_input"
+                              ? "bg-amber-100 text-amber-700"
+                              : log.channel === "user_input"
+                                ? "bg-blue-100 text-blue-700"
+                                : "bg-gray-100 text-gray-600"
+                      }`}
+                    >
+                      {log.channel === "tool_call"
+                        ? "TOOL"
+                        : log.channel === "stderr"
+                          ? "WARN"
+                          : log.channel === "pending_input"
+                            ? "INPUT"
+                            : log.channel === "user_input"
+                              ? "SENT"
+                              : "INFO"}
+                    </span>
+                    <span className="min-w-0 flex-1 overflow-x-auto whitespace-pre font-mono text-foreground">
+                      {log.content_redacted}
+                    </span>
+                  </div>
+                ))
+              )}
+              <div ref={logEndRef} />
+            </div>
+          )}
+        </section>
+      )}
 
       {pageError && (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
@@ -670,10 +961,21 @@ export default function ChangeDetailPage({ params }: Props) {
       <section className="rounded-md border bg-card">
         <div className="flex items-center justify-between border-b px-3 py-2">
           <h2 className="text-xs font-medium">变更文档完整性</h2>
-          <span className="text-[11px] text-muted-foreground">
-            {REQUIRED_DOCS.filter((dt) => docExistsMap.get(dt)?.exists ?? false).length}
-            /{REQUIRED_DOCS.length} 必需文档就绪
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-muted-foreground">
+              {REQUIRED_DOCS.filter((dt) => docExistsMap.get(dt)?.exists ?? false).length}
+              /{REQUIRED_DOCS.length} 必需文档就绪
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-1.5 text-[11px]"
+              onClick={() => void refreshAll()}
+              disabled={transitioning}
+            >
+              刷新
+            </Button>
+          </div>
         </div>
         <div className="space-y-2 px-3 py-3">
           <div>
@@ -956,64 +1258,6 @@ export default function ChangeDetailPage({ params }: Props) {
                 >
                   {submittingFeedback ? "提交中…" : "提交反馈并退回"}
                 </Button>
-              </div>
-            </section>
-          )}
-
-          {change.current_stage === "accepted" && (
-            <section className="rounded-md border bg-card">
-              <div className="flex items-center justify-between border-b px-3 py-2">
-                <h2 className="text-xs font-medium">归档门禁</h2>
-                {archiveGate && (
-                  <Badge variant={archiveGate.can_archive ? "success" : "destructive"}>
-                    {archiveGate.can_archive
-                      ? "✅ 全部通过"
-                      : `${archiveGate.checks.filter((c) => !c.passed).length} 项未通过`}
-                  </Badge>
-                )}
-              </div>
-              <div className="px-3 py-2 space-y-2">
-                {loadingArchiveGate ? (
-                  <p className="text-xs text-muted-foreground">检查中…</p>
-                ) : archiveGate ? (
-                  <>
-                    {[
-                      { check: "no_unresolved_feedback", label: "无未解决反馈" },
-                      { check: "ac_confirmed", label: "验收标准已确认" },
-                      { check: "tech_verification_passed", label: "技术验证已通过" },
-                      { check: "business_review_passed", label: "业务评审已通过" },
-                      { check: "feedback_categorized", label: "反馈已分类" },
-                      { check: "documents_complete", label: "文档已全部完成" },
-                    ].map((item) => {
-                      const found = archiveGate.checks.find((c) => c.name === item.check);
-                      const passed = found?.passed ?? false;
-                      return (
-                        <div key={item.check} className="flex items-center gap-2 text-xs">
-                          <span className={passed ? "text-emerald-600" : "text-destructive"}>
-                            {passed ? "✓" : "✗"}
-                          </span>
-                          <span className={passed ? "text-foreground" : "text-destructive"}>
-                            {item.label}
-                          </span>
-                          {!passed && found?.detail && (
-                            <span className="text-muted-foreground text-[10px]">— {found.detail}</span>
-                          )}
-                        </div>
-                      );
-                    })}
-                    <div className="pt-2">
-                      <Button
-                        size="sm"
-                        disabled={!archiveGate.can_archive || archiving}
-                        onClick={() => void handleArchive()}
-                      >
-                        {archiving ? "归档中…" : "📦 确认归档"}
-                      </Button>
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-xs text-muted-foreground">加载归档检查…</p>
-                )}
               </div>
             </section>
           )}
