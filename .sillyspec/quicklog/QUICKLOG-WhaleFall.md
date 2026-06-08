@@ -131,3 +131,9 @@ created_at: 2026-06-03T08:42:04
 文件：backend/app/modules/change/dispatch.py
 根因：sillyspec CLI archive 有 5 个步骤，agent 每次只完成 1-2 步，sillyspec.db 始终有 pending step → auto_dispatch_next_step step 4 反复 dispatch archive agent。chain count 未正确递增。
 结果：auto_dispatch_next_step 增加 terminal stage 检查（archived/cancelled 不 dispatch）+ stage diverged 检查（Hub DB 和 sillyspec.db stage 不同时不 dispatch）。手动修 DB 为 archived。后端已重建。
+
+## ql-20260605-009-c7f2 | 2026-06-05 15:00:06 | 变更文档完整性拿不到文档：change_key 和目录名不匹配
+状态：已完成
+文件：无代码改动（数据修复）
+根因：brainstorm agent 创建变更时用 2026-06-05-agent-x-965f93（随机后缀），sillyspec CLI rename 为 2026-06-05-agent-log-width，DB 没同步更新 path → reparse 读错目录 → 文档不全
+结果：修 DB change_key 和 path 为正确值，reparse 后 6/8 文档同步

@@ -875,7 +875,7 @@ export default function ChangeDetailPage({ params }: Props) {
                               ? "SENT"
                               : "INFO"}
                     </span>
-                    <span className="min-w-0 flex-1 whitespace-pre font-mono text-foreground">
+                    <span className="min-w-0 flex-1 overflow-x-auto whitespace-pre font-mono text-foreground">
                       {log.content_redacted}
                     </span>
                   </div>

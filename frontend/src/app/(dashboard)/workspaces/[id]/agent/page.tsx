@@ -565,7 +565,7 @@ export default function AgentPage({ params }: Props) {
                         >
                           [{tag.label}]
                         </span>
-                        <span className="min-w-0 flex-1 whitespace-pre font-mono text-[11px]">
+                        <span className="min-w-0 flex-1 overflow-x-auto whitespace-pre font-mono text-[11px]">
                           {log.content_redacted}
                         </span>
                         {log.channel === "tool_call" && (() => {
@@ -724,7 +724,7 @@ export default function AgentPage({ params }: Props) {
                     {/* Inline log viewer for completed runs */}
                     {expandedRunId === run.id && (
                       <tr key={`${run.id}-logs`}>
-                        <td colSpan={10} className="p-0">
+                        <td colSpan={10} className="overflow-hidden p-0">
                           <div className="border-t bg-muted/30">
                             {/* Usage / Cost summary card */}
                             {(run.total_cost_usd != null || run.duration_ms != null || run.num_turns != null || run.input_tokens != null || run.output_tokens != null) && (

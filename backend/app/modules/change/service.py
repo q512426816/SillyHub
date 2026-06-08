@@ -666,11 +666,21 @@ class ChangeService:
         sillyspec_root = Path(workspace.root_path)
 
         result = self._parser.parse_workspace(sillyspec_root)
-        stats = {"parsed": 0, "created": 0, "updated": 0, "deleted": 0}
+        stats = {"parsed": 0, "created": 0, "updated": 0, "deleted": 0, "renamed": 0}
 
         # Fetch existing changes
         existing_changes = await self._fetch_existing_changes(workspace_id)
         existing_by_key = {c.change_key: c for c in existing_changes}
+
+        # Detect directory renames before processing
+        parsed_key_set = {p.change_key for p in result.changes}
+        rename_map = self._detect_renames(existing_by_key, parsed_key_set, sillyspec_root)
+
+        # Update existing_by_key for renamed entries: old_key → new_key
+        for new_key, old_row in rename_map.items():
+            old_key = old_row.change_key
+            existing_by_key.pop(old_key, None)
+            existing_by_key[new_key] = old_row
 
         seen_keys: set[str] = set()
 
@@ -681,7 +691,10 @@ class ChangeService:
             if parsed.change_key in existing_by_key:
                 row = existing_by_key[parsed.change_key]
                 self._apply_parsed(row, parsed, workspace_id=workspace_id)
-                stats["updated"] += 1
+                if parsed.change_key in rename_map:
+                    stats["renamed"] += 1
+                else:
+                    stats["updated"] += 1
             else:
                 row = self._build_change(parsed, workspace_id=workspace_id)
                 self._session.add(row)
@@ -708,7 +721,7 @@ class ChangeService:
                 parsed=parsed,
             )
 
-        # Delete changes whose keys disappeared
+        # Delete changes whose keys disappeared and were not renamed
         for key, row in existing_by_key.items():
             if key not in seen_keys:
                 await self._session.delete(row)
@@ -717,6 +730,59 @@ class ChangeService:
         await self._session.commit()
         log.info("changes.reparsed", workspace_id=str(workspace_id), **stats)
         return stats, result
+
+    @staticmethod
+    def _detect_renames(
+        existing_by_key: dict[str, Change],
+        parsed_keys: set[str],
+        sillyspec_root: Path,
+    ) -> dict[str, Change]:
+        """Detect directory renames by matching date prefix + directory absence.
+
+        When sillyspec CLI renames a change directory, the old key disappears
+        and a new key appears. This method matches them so the existing DB row
+        keeps its workflow state (current_stage, human_gate, stages JSON).
+
+        Returns a map of new_key → existing Change row for detected renames.
+        """
+        if not existing_by_key or not parsed_keys:
+            return {}
+
+        changes_dir = sillyspec_root / ".sillyspec" / "changes"
+
+        # Find orphaned DB rows whose directories no longer exist on disk
+        orphaned: dict[str, Change] = {}
+        for key, row in existing_by_key.items():
+            if key not in parsed_keys:
+                dir_path = changes_dir / key
+                if not dir_path.is_dir():
+                    orphaned[key] = row
+
+        new_keys = parsed_keys - set(existing_by_key.keys())
+        if not orphaned or not new_keys:
+            return {}
+
+        result: dict[str, Change] = {}
+        matched_old_keys: set[str] = set()
+
+        for new_key in new_keys:
+            new_prefix = new_key[:11]  # "YYYY-MM-DD-"
+            candidates = [
+                (old_key, row)
+                for old_key, row in orphaned.items()
+                if old_key[:11] == new_prefix and old_key not in matched_old_keys
+            ]
+            # Only match when unambiguous (exactly one candidate with same date)
+            if len(candidates) == 1:
+                result[new_key] = candidates[0][1]
+                matched_old_keys.add(candidates[0][0])
+                log.info(
+                    "reparse.rename_detected",
+                    old_key=candidates[0][0],
+                    new_key=new_key,
+                )
+
+        return result
 
     # ── Helpers ───────────────────────────────────────────────────────────
 
@@ -879,6 +945,7 @@ class ChangeService:
         # is written from module-impact.md during archive. The parser no longer
         # reads frontmatter, so parsed values for these are empty placeholders.
         # Workflow transitions update DB directly; reparse must not reset them.
+        row.change_key = parsed.change_key
         row.location = parsed.location
         row.path = parsed.path
 

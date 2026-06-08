@@ -408,6 +408,89 @@ async def has_active_run(session: AsyncSession, change_id: uuid.UUID) -> bool:
     return row is not None
 
 
+async def reconcile_stale_runs(
+    session: AsyncSession,
+    change_id: uuid.UUID,
+    max_age_hours: int = 2,
+) -> list[uuid.UUID]:
+    """Mark stale ``running`` AgentRuns as killed and attempt recovery.
+
+    Handles cases where the agent process died (container restart, OOM, etc.)
+    but the AgentRun record was never updated, blocking all future dispatches.
+
+    For each reconciled run, attempts to re-trigger ``sync_stage_status`` and
+    ``auto_dispatch_next_step`` to recover the lost completion callback.
+
+    Returns list of reconciled run IDs.
+    """
+    from datetime import timedelta
+
+    threshold = timedelta(hours=max_age_hours)
+    stmt = select(AgentRun).where(
+        col(AgentRun.change_id) == change_id,
+        col(AgentRun.status) == "running",
+    )
+    runs = list((await session.execute(stmt)).scalars().all())
+
+    if not runs:
+        return []
+
+    now = datetime.now(UTC)
+    reconciled: list[uuid.UUID] = []
+
+    for run in runs:
+        started = run.started_at
+        if started and started.tzinfo is None:
+            started = started.replace(tzinfo=UTC)
+        if started and (now - started) > threshold:
+            log.warning(
+                "reconciling_stale_run",
+                run_id=str(run.id),
+                change_id=str(change_id),
+                started_at=str(run.started_at),
+            )
+            run.status = "killed"
+            run.exit_code = -1
+            run.finished_at = now
+            session.add(run)
+            reconciled.append(run.id)
+
+    if reconciled:
+        await session.commit()
+
+        # Attempt recovery: re-sync stage status and auto-dispatch
+        change = await session.get(Change, change_id)
+        if change:
+            for run_id in reconciled:
+                try:
+                    svc = SillySpecStageDispatchService(session)
+                    sync_result = await svc.sync_stage_status(session, change_id, run_id)
+                    if sync_result.synced:
+                        stages = change.stages or {}
+                        last_dispatch = stages.get("last_dispatch", {})
+                        user_id_str = last_dispatch.get("user_id")
+                        recovery_user_id = (
+                            uuid.UUID(user_id_str)
+                            if user_id_str
+                            else (change.owner_id or uuid.UUID(int=0))
+                        )
+                        await auto_dispatch_next_step(
+                            session=session,
+                            workspace_id=change.workspace_id,
+                            change_id=change_id,
+                            user_id=recovery_user_id,
+                            sync_result=sync_result,
+                        )
+                except Exception as exc:
+                    log.warning(
+                        "reconcile_recovery_failed",
+                        run_id=str(run_id),
+                        error=str(exc),
+                    )
+
+    return reconciled
+
+
 async def dispatch(
     session: AsyncSession,
     workspace_id: uuid.UUID,
@@ -423,6 +506,9 @@ async def dispatch(
     config = get_config_for_stage(target_stage)
     if config is None or not config.enabled:
         return {"dispatched": False, "reason": f"no_config_for_stage:{target_stage}"}
+
+    # Reconcile stale runs before checking for active runs
+    await reconcile_stale_runs(session, change_id)
 
     # Check for concurrent runs
     if await has_active_run(session, change_id):
@@ -586,6 +672,7 @@ class SillySpecStageDispatchService:
             raise ChangeNotFound(f"Change '{change_id}' not found.")
 
         # Step 3: Check active AgentRun (prevent duplicate dispatch)
+        await reconcile_stale_runs(session, change_id)
         if await has_active_run(session, change_id):
             return {"dispatched": False, "reason": "active_run_exists", "stage": target_stage}
 

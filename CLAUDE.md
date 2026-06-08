@@ -1,43 +1,44 @@
-# Task: stage:archive — Stage dispatch: archive
-# Change: Change stage: archive
+# Task: stage:verify — Stage dispatch: verify
+# Change: Change stage: verify
 
 ## Task
-# Archive Stage
+# Verify Stage
 
-You are executing the **archive** stage for a SillySpec change.
+You are executing the **verify** stage for a SillySpec change.
 
 ## Context
 
-- **Change**: Proposal: Agent 控制台日志回显宽度调整
-- **Change Key**: 2026-06-05-agent-74b61b
+- **Change**: Proposal: Agent 控制台日志回显宽度修复
+- **Change Key**: 2026-06-05-agent-log-width
 - **Workspace ID**: 3a5e2cb6-84e2-43d4-b9dc-9479bd3afda4
 
 ## Your Task
 
-Run the SillySpec archive workflow to finalize and archive the completed change.
+Run the SillySpec verify workflow to validate the implementation against the design.
 
 ### Steps
 
-1. **Start archive**:
+1. **Start verify**:
    ```bash
-   sillyspec run archive --change 2026-06-05-agent-74b61b
+   sillyspec run verify --change 2026-06-05-agent-log-width
    ```
 
-2. **Follow the step prompt** output by the CLI. It will instruct you to perform archive tasks. Execute precisely.
+2. **Follow the step prompt** output by the CLI. It will instruct you to perform verification checks. Execute precisely.
 
 3. **Mark step done** after completing each step:
    ```bash
-   sillyspec run archive --done --change 2026-06-05-agent-74b61b --output "<brief summary>"
+   sillyspec run verify --done --change 2026-06-05-agent-log-width --output "<brief summary of verification results>"
    ```
 
-4. **Repeat** until the archive stage is complete.
+4. **Repeat** until the verify stage is complete.
 
 ### Key Rules
 
 - Always use `sillyspec` CLI commands.
-- Update module documentation affected by this change.
-- Move the change directory to the archive area as instructed.
-- Confirm archive completion with a summary.
+- Verify code quality, test coverage, edge cases, integration, and design conformance.
+- Produce a clear PASS / FAIL verdict.
+- If verification fails, describe the specific issues found.
+- Write `verify-result.md` as instructed by the CLI.
 
 
 ## Mode: WRITE
