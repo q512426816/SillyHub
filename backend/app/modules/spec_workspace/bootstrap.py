@@ -473,6 +473,54 @@ async def _execute_bootstrap_agent_run(
 
             await session.commit()
 
+            # -- 9b. Success post-processing: activate + reparse children ------
+            # Mirror the pattern from _execute_scan_run in agent/service.py.
+            if validation_passed:
+                # 9b-1. Promote workspace from pending -> active
+                try:
+                    from app.modules.workspace.model import Workspace
+
+                    ws = await session.get(Workspace, workspace_id)
+                    if ws is not None and ws.status == "pending":
+                        ws.status = "active"
+                        ws.last_scanned_at = datetime.utcnow()
+                        ws.updated_at = datetime.utcnow()
+                        session.add(ws)
+                        await session.commit()
+                        log.info(
+                            "bootstrap_workspace_activated",
+                            run_id=str(run_id),
+                            workspace_id=str(workspace_id),
+                        )
+                except Exception as exc:
+                    log.warning(
+                        "bootstrap_workspace_activate_failed",
+                        run_id=str(run_id),
+                        workspace_id=str(workspace_id),
+                        error=str(exc),
+                    )
+
+                # 9b-2. Auto-reparse child workspaces from generated specs
+                try:
+                    from app.modules.workspace.service import WorkspaceService
+
+                    svc = WorkspaceService(session)
+                    _parse_result, stats, _children, _relations = await svc.reparse(workspace_id)
+                    log.info(
+                        "bootstrap_reparse_done",
+                        run_id=str(run_id),
+                        workspace_id=str(workspace_id),
+                        created=stats.get("created"),
+                        relations_created=stats.get("relations_created"),
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "bootstrap_reparse_failed",
+                        run_id=str(run_id),
+                        workspace_id=str(workspace_id),
+                        error=str(exc),
+                    )
+
             await _publish_done_event(run_id, run.status, run.exit_code)
 
             log.info(
