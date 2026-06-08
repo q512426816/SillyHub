@@ -8,6 +8,7 @@ Supports legacy ``changes/change/<key>/`` layout with deprecation warnings.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -179,6 +180,267 @@ class ChangeParser:
             return None
         return None
 
+    @staticmethod
+    def _infer_change_type(change_dir: Path) -> str:
+        """从目录结构推断变更类型。
+
+        推断规则（按优先级从高到低）：
+        1. 有 prototype-*.html 文件 → "prototype"
+        2. 目录名包含 "quick" → "quick"
+        3. 有 tasks/ 子目录 且 有 (plan.md 或 design.md) → "feature"
+        4. 仅有 MASTER.md + request.md（无 tasks/、无 design.md、无 plan.md）→ "quick"
+        5. 默认 → "feature"
+
+        Args:
+            change_dir: 变更目录的 Path，例如 `.sillyspec/changes/2026-06-08-xxx/`
+
+        Returns:
+            字符串，取值为 "feature" / "quick" / "prototype"
+        """
+        # 规则 1: prototype 文件
+        if any(change_dir.glob("prototype-*.html")):
+            return "prototype"
+
+        dir_name_lower = change_dir.name.lower()
+
+        # 规则 2: 目录名含 "quick"
+        if "quick" in dir_name_lower:
+            return "quick"
+
+        has_tasks_dir = (change_dir / "tasks").is_dir()
+        has_design = (change_dir / "design.md").is_file()
+        has_plan = (change_dir / "plan.md").is_file()
+
+        # 规则 3: tasks/ + (plan.md 或 design.md)
+        if has_tasks_dir and (has_plan or has_design):
+            return "feature"
+
+        # 规则 4: 仅 MASTER.md（无 tasks/、无 design.md、无 plan.md）
+        has_master = (change_dir / "MASTER.md").is_file()
+        if not has_tasks_dir and not has_design and not has_plan and has_master:
+            return "quick"
+
+        # 规则 5: 默认
+        return "feature"
+
+    # ------------------------------------------------------------------
+    # Affected-components inference (task-02)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _infer_affected_components(change_dir: Path, sillyspec_root: Path) -> list[str]:
+        """从变更目录的文档中提取受影响的模块名列表。
+
+        推断优先级:
+          1. module-impact.md 存在 → 提取"模块影响矩阵"表中的模块名
+          2. 否则扫描 tasks.md + tasks/*.md → 提取文件路径 → 匹配 module-map
+
+        Args:
+            change_dir: 变更目录路径 (如 .sillyspec/changes/xxx/)
+            sillyspec_root: .sillyspec 根目录的父目录 (workspace root)
+
+        Returns:
+            模块名列表 (如 ["change", "frontend_app"])，去重且保持出现顺序。
+            无匹配返回空列表 []。
+        """
+        # Path 1: module-impact.md
+        module_impact_path = change_dir / "module-impact.md"
+        if module_impact_path.is_file():
+            try:
+                content = module_impact_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                content = ""
+            modules = ChangeParser._extract_from_impact_table(content)
+            if modules:
+                return modules
+
+        # Path 2: tasks.md + tasks/*.md
+        file_paths: set[str] = set()
+        tasks_md = change_dir / "tasks.md"
+        if tasks_md.is_file():
+            try:
+                file_paths |= ChangeParser._extract_file_paths(
+                    tasks_md.read_text(encoding="utf-8", errors="replace")
+                )
+            except OSError:
+                pass
+
+        tasks_dir = change_dir / "tasks"
+        if tasks_dir.is_dir():
+            for task_file in sorted(tasks_dir.glob("*.md")):
+                try:
+                    file_paths |= ChangeParser._extract_file_paths(
+                        task_file.read_text(encoding="utf-8", errors="replace")
+                    )
+                except OSError:
+                    pass
+
+        if not file_paths:
+            return []
+
+        # Path 3: match against module-map
+        module_map = ChangeParser._load_module_map(sillyspec_root)
+        if not module_map:
+            return []
+
+        return ChangeParser._match_paths_to_modules(file_paths, module_map)
+
+    @staticmethod
+    def _extract_from_impact_table(content: str) -> list[str]:
+        """从 module-impact.md 的 Markdown 表格提取模块名。
+
+        提取规则:
+          - 找到含 "| 模块 |" 的表头行
+          - 跳过紧随其后的分隔行 (|---|---|)
+          - 后续每行取第 1 列（strip 空白）
+          - 去重，保持出现顺序
+        """
+        modules: list[str] = []
+        seen: set[str] = set()
+        header_found = False
+        separator_skipped = False
+
+        for line in content.splitlines():
+            stripped = line.strip()
+
+            if not header_found:
+                if "| 模块 |" in stripped:
+                    header_found = True
+                continue
+
+            if not separator_skipped:
+                # Skip the separator line (|---|---|...)
+                if re.match(r"^\|[\s\-:|]+\|$", stripped):
+                    separator_skipped = True
+                continue
+
+            # Data rows
+            if not stripped.startswith("|"):
+                break
+            parts = stripped.split("|")
+            # parts[0] is empty (before first |), parts[1] is first column
+            if len(parts) >= 3:
+                name = parts[1].strip()
+                if name and name not in seen:
+                    seen.add(name)
+                    modules.append(name)
+
+        return modules
+
+    @staticmethod
+    def _extract_file_paths(text: str) -> set[str]:
+        """从 Markdown 文本中提取文件路径。
+
+        匹配规则:
+          1. 行内代码块中的路径: `backend/app/modules/xxx.py`
+          2. 裸路径: 行首或空格后的 backend/xxx 或 frontend/xxx 路径
+
+        Returns:
+            文件路径集合。
+        """
+        pattern_core = (
+            r"(?:backend|frontend|deploy|docs)"
+            r"/[a-zA-Z0-9_/.-]+\.(?:py|ts|tsx|js|jsx|yaml|yml|json|html|css|md)"
+        )
+
+        # Backtick-wrapped paths
+        backtick_pattern = r"`(" + pattern_core + r")`"
+        backtick_matches = re.findall(backtick_pattern, text)
+
+        # Bare paths (not preceded by a word character)
+        bare_pattern = r"(?<!\w)(" + pattern_core + r")"
+        bare_matches = re.findall(bare_pattern, text)
+
+        return set(backtick_matches) | set(bare_matches)
+
+    @staticmethod
+    def _load_module_map(sillyspec_root: Path) -> dict[str, list[str]]:
+        """加载 _module-map.yaml。
+
+        查找路径: .sillyspec/docs/*/modules/_module-map.yaml
+        取第一个存在的文件。
+
+        Returns:
+            {"agent": ["backend/app/modules/agent/"], ...}
+            paths 中的 ** 通配符被去掉，尾部保留 /
+        """
+        try:
+            import yaml
+        except ImportError:
+            return {}
+
+        docs_dir = sillyspec_root / ".sillyspec" / "docs"
+        if not docs_dir.is_dir():
+            return {}
+
+        # Scan project subdirectories for _module-map.yaml
+        for project_dir in sorted(docs_dir.iterdir()):
+            if not project_dir.is_dir():
+                continue
+            map_file = project_dir / "modules" / "_module-map.yaml"
+            if not map_file.is_file():
+                continue
+
+            try:
+                raw = yaml.safe_load(map_file.read_text(encoding="utf-8"))
+            except (OSError, Exception):
+                return {}
+
+            if not isinstance(raw, dict) or "modules" not in raw:
+                return {}
+
+            result: dict[str, list[str]] = {}
+            modules = raw["modules"]
+            if not isinstance(modules, dict):
+                return {}
+
+            for mod_name, mod_data in modules.items():
+                if not isinstance(mod_data, dict) or "paths" not in mod_data:
+                    continue
+                paths = mod_data["paths"]
+                if not isinstance(paths, list):
+                    continue
+                # Strip ** suffix, keep trailing /
+                cleaned: list[str] = []
+                for p in paths:
+                    p = p.rstrip("*")
+                    if not p.endswith("/"):
+                        p += "/"
+                    cleaned.append(p)
+                result[mod_name] = cleaned
+
+            return result
+
+        return {}
+
+    @staticmethod
+    def _match_paths_to_modules(
+        file_paths: set[str], module_map: dict[str, list[str]]
+    ) -> list[str]:
+        """将文件路径匹配到模块名。
+
+        匹配策略: 前缀匹配
+          file_path.startswith(module_prefix) -> 命中该模块
+
+        Returns:
+            匹配到的模块名列表，去重保持出现顺序。
+        """
+        matched: list[str] = []
+        seen: set[str] = set()
+
+        for fp in sorted(file_paths):
+            for mod_name, prefixes in module_map.items():
+                if mod_name in seen:
+                    continue
+                for prefix in prefixes:
+                    if fp.startswith(prefix):
+                        if mod_name not in seen:
+                            seen.add(mod_name)
+                            matched.append(mod_name)
+                        break
+
+        return matched
+
     def _parse_change(
         self,
         sillyspec_root: Path,
@@ -291,5 +553,9 @@ class ChangeParser:
                             last_modified_at=datetime.utcfromtimestamp(ref.stat().st_mtime),
                         )
                     )
+
+        # --- Infer change_type and affected_components ---
+        parsed.change_type = self._infer_change_type(change_dir)
+        parsed.affected_components = self._infer_affected_components(change_dir, sillyspec_root)
 
         return parsed

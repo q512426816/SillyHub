@@ -23,12 +23,18 @@ const TABS = [
   { key: "archive", label: "已归档" },
 ] as const;
 
-const STATUS_COLORS: Record<string, "success" | "outline" | "destructive" | "default"> = {
-  in_progress: "success",
-  draft: "outline",
-  completed: "success",
-  archived: "default",
-  unknown: "destructive",
+const GATE_LABELS: Record<string, { label: string; color: "warning" | "destructive" }> = {
+  need_proposal_review: { label: "待提案审核", color: "warning" },
+  need_plan_review: { label: "待计划审核", color: "warning" },
+  need_human_test: { label: "待人工测试", color: "warning" },
+  need_archive_confirm: { label: "待归档确认", color: "warning" },
+  blocked: { label: "阻塞中", color: "destructive" },
+};
+
+const TYPE_COLORS: Record<string, "default" | "warning" | "success"> = {
+  feature: "default",
+  quick: "warning",
+  prototype: "success",
 };
 
 const STAGE_VARIANT: Record<string, "outline" | "default" | "warning" | "destructive" | "success"> = {
@@ -266,18 +272,34 @@ export default function ChangesPage({ params }: Props) {
                     </Link>
                   </td>
                   <td className="font-medium">{c.title ?? "—"}</td>
-                  <td className="text-xs">{c.change_type ?? "—"}</td>
                   <td>
-                    <Badge variant={STATUS_COLORS[c.status] ?? "outline"}>
-                      {c.status}
-                    </Badge>
+                    {c.change_type ? (
+                      <Badge variant={TYPE_COLORS[c.change_type] ?? "outline"}>
+                        {c.change_type}
+                      </Badge>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </td>
                   <td>
-                    {c.current_stage && (
-                      <Badge variant={STAGE_VARIANT[c.current_stage] ?? "outline"}>
-                        {STAGE_LABEL[c.current_stage] ?? c.current_stage}
-                      </Badge>
-                    )}
+                    {(() => {
+                      const gate = GATE_LABELS[c.human_gate ?? ""];
+                      if (gate) {
+                        return <Badge variant={gate.color}>{gate.label}</Badge>;
+                      }
+                      if (c.current_stage === "accepted") {
+                        return <Badge variant="success">已完成</Badge>;
+                      }
+                      if (c.current_stage && c.current_stage !== "draft") {
+                        return <Badge variant="success">进行中</Badge>;
+                      }
+                      return <Badge variant="outline">空闲</Badge>;
+                    })()}
+                  </td>
+                  <td>
+                    <Badge variant={STAGE_VARIANT[c.current_stage ?? "draft"] ?? "outline"}>
+                      {STAGE_LABEL[c.current_stage ?? "draft"] ?? c.current_stage ?? "draft"}
+                    </Badge>
                   </td>
                   <td className="max-w-[180px] truncate text-[11px]">
                     {c.affected_components.length > 0

@@ -939,12 +939,12 @@ class ChangeService:
         workspace_id: uuid.UUID,
     ) -> None:
         row.title = parsed.title
-        # DB is the source of truth for status, change_type, and
-        # affected_components — never overwrite them from the filesystem.
-        # change_type/owner come from the change-creation form; affected_components
-        # is written from module-impact.md during archive. The parser no longer
-        # reads frontmatter, so parsed values for these are empty placeholders.
-        # Workflow transitions update DB directly; reparse must not reset them.
+        # change_type: only overwrite when DB value is None (protect user-set values)
+        if row.change_type is None and parsed.change_type is not None:
+            row.change_type = parsed.change_type
+        # affected_components: always overwrite (inferred value is more accurate)
+        if parsed.affected_components:
+            row.affected_components = parsed.affected_components
         row.change_key = parsed.change_key
         row.location = parsed.location
         row.path = parsed.path

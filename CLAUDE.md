@@ -1,10 +1,10 @@
-# Task: stage:verify — Stage dispatch: verify
-# Change: Change stage: verify
+# Task: stage:archive — Stage dispatch: archive
+# Change: Change stage: archive
 
 ## Task
-# Verify Stage
+# Archive Stage
 
-You are executing the **verify** stage for a SillySpec change.
+You are executing the **archive** stage for a SillySpec change.
 
 ## Context
 
@@ -14,31 +14,30 @@ You are executing the **verify** stage for a SillySpec change.
 
 ## Your Task
 
-Run the SillySpec verify workflow to validate the implementation against the design.
+Run the SillySpec archive workflow to finalize and archive the completed change.
 
 ### Steps
 
-1. **Start verify**:
+1. **Start archive**:
    ```bash
-   sillyspec run verify --change 2026-06-05-agent-log-width
+   sillyspec run archive --change 2026-06-05-agent-log-width
    ```
 
-2. **Follow the step prompt** output by the CLI. It will instruct you to perform verification checks. Execute precisely.
+2. **Follow the step prompt** output by the CLI. It will instruct you to perform archive tasks. Execute precisely.
 
 3. **Mark step done** after completing each step:
    ```bash
-   sillyspec run verify --done --change 2026-06-05-agent-log-width --output "<brief summary of verification results>"
+   sillyspec run archive --done --change 2026-06-05-agent-log-width --output "<brief summary>"
    ```
 
-4. **Repeat** until the verify stage is complete.
+4. **Repeat** until the archive stage is complete.
 
 ### Key Rules
 
 - Always use `sillyspec` CLI commands.
-- Verify code quality, test coverage, edge cases, integration, and design conformance.
-- Produce a clear PASS / FAIL verdict.
-- If verification fails, describe the specific issues found.
-- Write `verify-result.md` as instructed by the CLI.
+- Update module documentation affected by this change.
+- Move the change directory to the archive area as instructed.
+- Confirm archive completion with a summary.
 
 
 ## Mode: WRITE
@@ -46,4 +45,4 @@ You may modify files in the worktree as needed.
 
 
 ## Available Tools
-- **sillyspec**: Use `sillyspec init --dir <spec_root>` to initialize spec space, then `sillyspec run scan --dir <spec_root>` to scan. Do NOT write .sillyspec files directly — always use the CLI.
+- **sillyspec**: Use `sillyspec init --dir <source_root>` to initialize spec space, then `sillyspec run scan --dir <source_root> --spec-root <spec_root>` to scan. Do NOT write .sillyspec files directly — always use the CLI.
