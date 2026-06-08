@@ -548,7 +548,7 @@ async def manual_dispatch(
     _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
 ) -> DispatchResponse:
     """Manually trigger agent dispatch for the current stage of a change."""
-    from app.modules.change.dispatch import dispatch, get_config_for_stage
+    from app.modules.change.dispatch import dispatch, get_config_for_stage, has_active_run
 
     service = ChangeService(session)
     change = await service.get(workspace_id, change_id)
@@ -613,7 +613,8 @@ async def manual_dispatch(
     return DispatchResponse(
         change_id=change_id,
         current_stage=current_stage,
-        has_active_run=dispatch_result.get("dispatched", False) or await has_active_run(session, change_id),
+        has_active_run=dispatch_result.get("dispatched", False)
+        or await has_active_run(session, change_id),
         config_enabled=True,
         last_dispatch=last_dispatch,
         dispatch_result=dispatch_result,
