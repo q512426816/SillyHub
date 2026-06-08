@@ -29,6 +29,8 @@ log = get_logger(__name__)
 _CLAUDE_CLI = "claude"
 
 LogCallback = Callable[[str, str, str], Awaitable[None]]
+MetadataCallback = Callable[[dict], Awaitable[None]]
+_SESSION_METADATA_POLL_SECONDS = 2.0
 
 
 def _build_claude_command(*, disallow_ask_user: bool = False) -> list[str]:
@@ -203,6 +205,13 @@ def _extract_result_metadata(events: list[dict]) -> dict:
         for k in ("total_cost_usd", "duration_ms", "duration_api_ms", "num_turns", "session_id"):
             meta[k] = None
 
+    if meta.get("session_id") is None:
+        for event in reversed(events):
+            session_id = event.get("session_id")
+            if isinstance(session_id, str) and session_id:
+                meta["session_id"] = session_id
+                break
+
     # --- Phase 2: fallback — accumulate from assistant / delta / stream_event ---
     if meta.get("input_tokens") is None or meta.get("output_tokens") is None:
         agg_input = 0
@@ -226,6 +235,58 @@ def _extract_result_metadata(events: list[dict]) -> dict:
             meta["output_tokens"] = agg_output
 
     return meta
+
+
+def _claude_session_file(cwd: str, session_id: str, home: Path | None = None) -> Path:
+    """Return Claude Code's persisted session JSONL path for a working directory."""
+    project_key = cwd.replace("\\", "/").replace(":", "").replace("/", "-")
+    return (home or Path.home()) / ".claude" / "projects" / project_key / f"{session_id}.jsonl"
+
+
+def _find_claude_session_file(session_id: str, home: Path | None = None) -> Path | None:
+    """Find a Claude Code session JSONL by session id across project directories."""
+    projects_dir = (home or Path.home()) / ".claude" / "projects"
+    if not projects_dir.exists():
+        return None
+    try:
+        return next(projects_dir.glob(f"*/{session_id}.jsonl"))
+    except StopIteration:
+        return None
+
+
+def _read_claude_session_events(
+    cwd: str | None,
+    session_id: str | None,
+    home: Path | None = None,
+) -> list[dict]:
+    """Read usage-bearing events from Claude Code's persisted session JSONL."""
+    if not session_id:
+        return []
+    session_file = (
+        _claude_session_file(cwd, session_id, home=home)
+        if cwd
+        else _find_claude_session_file(session_id, home=home)
+    )
+    if session_file is None or not session_file.exists():
+        return []
+
+    events: list[dict] = []
+    try:
+        for line in session_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") in {"assistant", "result", "delta", "stream_event"}:
+                events.append(event)
+    except OSError:
+        log.warning(
+            "claude_session_metadata_read_failed",
+            cwd=cwd,
+            session_id=session_id,
+            path=str(session_file),
+        )
+    return events
 
 
 def _parse_stream_events(raw_stdout: str) -> list[dict]:
@@ -330,6 +391,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         lease_path: Path,
         timeout: int = 600,
         on_log: LogCallback | None = None,
+        on_metadata: MetadataCallback | None = None,
     ) -> AgentRunResult:
         """Execute Claude Code CLI using the full spec bundle."""
         claude_md = render_bundle_to_claude_md(bundle)
@@ -372,7 +434,14 @@ class ClaudeCodeAdapter(AgentAdapter):
         )
 
         return await self._exec_stream(
-            run_id, cmd, prompt, lease_path, env_vars, timeout, on_log=on_log
+            run_id,
+            cmd,
+            prompt,
+            lease_path,
+            env_vars,
+            timeout,
+            on_log=on_log,
+            on_metadata=on_metadata,
         )
 
     async def run(
@@ -382,6 +451,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         lease_path: Path,
         timeout: int = 600,
         on_log: LogCallback | None = None,
+        on_metadata: MetadataCallback | None = None,
     ) -> AgentRunResult:
         cmd = _build_claude_command()
         env_vars: dict[str, str] = {}
@@ -390,7 +460,14 @@ class ClaudeCodeAdapter(AgentAdapter):
 
         log.info("agent_start", run_id=str(run_id))
         return await self._exec_stream(
-            run_id, cmd, task_context.task_title, lease_path, env_vars, timeout, on_log=on_log
+            run_id,
+            cmd,
+            task_context.task_title,
+            lease_path,
+            env_vars,
+            timeout,
+            on_log=on_log,
+            on_metadata=on_metadata,
         )
 
     async def _exec_stream(
@@ -402,6 +479,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         env_vars: dict[str, str],
         timeout: int,
         on_log: LogCallback | None = None,
+        on_metadata: MetadataCallback | None = None,
     ) -> AgentRunResult:
         """Run claude CLI with stream-json protocol.
 
@@ -486,6 +564,64 @@ class ClaudeCodeAdapter(AgentAdapter):
             # Accumulators
             stdout_lines: list[str] = []
             all_events: list[dict] = []
+            last_metadata: dict = {}
+            session_cwd: str | None = cwd.as_posix()
+            session_id: str | None = None
+            last_session_metadata_read = 0.0
+
+            async def _emit_metadata(metadata: dict) -> None:
+                if on_metadata is None:
+                    return
+                live_metadata = {
+                    key: value
+                    for key, value in metadata.items()
+                    if key
+                    in {
+                        "total_cost_usd",
+                        "duration_ms",
+                        "duration_api_ms",
+                        "num_turns",
+                        "session_id",
+                        "input_tokens",
+                        "output_tokens",
+                    }
+                    and value is not None
+                }
+                if not live_metadata:
+                    return
+                changed = {
+                    key: value
+                    for key, value in live_metadata.items()
+                    if last_metadata.get(key) != value
+                }
+                if not changed:
+                    return
+                try:
+                    await on_metadata(changed)
+                    last_metadata.update(changed)
+                except Exception:
+                    log.warning("on_metadata_callback_failed", run_id=str(run_id))
+
+            def _capture_session_context(event: dict) -> None:
+                nonlocal session_cwd, session_id
+                event_session_id = event.get("session_id")
+                if isinstance(event_session_id, str) and event_session_id:
+                    session_id = event_session_id
+                event_cwd = event.get("cwd")
+                if isinstance(event_cwd, str) and event_cwd:
+                    session_cwd = event_cwd
+
+            async def _emit_session_metadata(force: bool = False) -> None:
+                nonlocal last_session_metadata_read
+                if on_metadata is None or not session_cwd or not session_id:
+                    return
+                now = asyncio.get_running_loop().time()
+                if not force and now - last_session_metadata_read < _SESSION_METADATA_POLL_SECONDS:
+                    return
+                last_session_metadata_read = now
+                session_events = _read_claude_session_events(session_cwd, session_id)
+                if session_events:
+                    await _emit_metadata(_extract_result_metadata(session_events))
 
             # Raw debug output paths — persist under /tmp for easy inspection
             debug_dir = Path("/tmp/agent-debug")
@@ -537,6 +673,10 @@ class ClaudeCodeAdapter(AgentAdapter):
                     except json.JSONDecodeError:
                         event = {"type": "raw", "text": line}
                     all_events.append(event)
+                    _capture_session_context(event)
+                    if on_metadata is not None:
+                        await _emit_metadata(_extract_result_metadata(all_events))
+                        await _emit_session_metadata()
 
                     # Format into a human-readable log line
                     formatted = _format_conversation_log([event])
@@ -613,6 +753,7 @@ class ClaudeCodeAdapter(AgentAdapter):
                 proc.kill()
                 await proc.wait()
                 log.warning("agent_timeout", run_id=str(run_id))
+                await _emit_session_metadata(force=True)
                 # Publish done event before returning
                 try:
                     done_msg = json.dumps(
@@ -650,6 +791,7 @@ class ClaudeCodeAdapter(AgentAdapter):
                     event = json.loads(line)
                     if event.get("type") and event not in all_events:
                         all_events.append(event)
+                        _capture_session_context(event)
                 except json.JSONDecodeError:
                     pass
 
@@ -663,6 +805,14 @@ class ClaudeCodeAdapter(AgentAdapter):
                         )
             except Exception:
                 log.warning("debug_write_failed", run_id=str(run_id))
+
+            session_events = _read_claude_session_events(session_cwd, session_id)
+            metadata = _extract_result_metadata(all_events)
+            if session_events:
+                for key, value in _extract_result_metadata(session_events).items():
+                    if value is not None:
+                        metadata[key] = value
+            await _emit_metadata(metadata)
 
             # Publish done event
             try:
@@ -689,8 +839,6 @@ class ClaudeCodeAdapter(AgentAdapter):
                 output_len=len(redacted),
                 event_count=len(all_events),
             )
-            metadata = _extract_result_metadata(all_events)
-
             log.info(
                 "extracted_metadata",
                 run_id=str(run_id),

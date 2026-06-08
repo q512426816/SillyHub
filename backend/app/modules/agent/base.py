@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+LogCallback = Callable[[str, str, str], Awaitable[None]]
+MetadataCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 @dataclass
@@ -131,6 +135,8 @@ class AgentAdapter(ABC):
         task_context: TaskContext,
         lease_path: Path,
         timeout: int = 600,
+        on_log: LogCallback | None = None,
+        on_metadata: MetadataCallback | None = None,
     ) -> AgentRunResult:
         """Execute the agent and return results.
 
@@ -150,6 +156,8 @@ class AgentAdapter(ABC):
         bundle: AgentSpecBundle,
         lease_path: Path,
         timeout: int = 600,
+        on_log: LogCallback | None = None,
+        on_metadata: MetadataCallback | None = None,
     ) -> AgentRunResult:
         """Execute the agent using a structured spec bundle.
 
@@ -168,7 +176,14 @@ class AgentAdapter(ABC):
             allowed_paths=bundle.allowed_paths,
             denied_paths=bundle.denied_paths,
         )
-        return await self.run(run_id, ctx, lease_path, timeout=timeout)
+        return await self.run(
+            run_id,
+            ctx,
+            lease_path,
+            timeout=timeout,
+            on_log=on_log,
+            on_metadata=on_metadata,
+        )
 
     # ------------------------------------------------------------------
     # Common helpers

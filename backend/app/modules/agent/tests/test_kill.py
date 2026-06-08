@@ -130,6 +130,41 @@ class TestKillRun:
         assert result.finished_at is not None
 
     @pytest.mark.asyncio
+    async def test_kill_backfills_usage_from_claude_session(self, agent_service, mock_session):
+        """kill_run reads persisted Claude session metadata before finalizing."""
+        run_id = uuid.uuid4()
+        run = AgentRun(
+            id=run_id,
+            task_id=uuid.uuid4(),
+            lease_id=uuid.uuid4(),
+            agent_type="claude_code",
+            status="running",
+            session_id="sess-live",
+        )
+        mock_session.get = AsyncMock(return_value=run)
+        mock_session.commit = AsyncMock()
+        mock_session.refresh = AsyncMock()
+
+        with patch(
+            "app.modules.agent.service._read_claude_session_events",
+            return_value=[
+                {
+                    "type": "result",
+                    "total_cost_usd": 0.25,
+                    "duration_ms": 1200,
+                    "usage": {"input_tokens": 1500, "output_tokens": 300},
+                }
+            ],
+        ):
+            result = await agent_service.kill_run(run_id)
+
+        assert result.status == "killed"
+        assert result.total_cost_usd == 0.25
+        assert result.duration_ms == 1200
+        assert result.input_tokens == 1500
+        assert result.output_tokens == 300
+
+    @pytest.mark.asyncio
     async def test_kill_sigterm_timeout_then_sigkill(self, agent_service, mock_session):
         """SIGTERM 后 5 秒超时 → SIGKILL"""
         run_id = uuid.uuid4()

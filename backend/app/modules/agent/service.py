@@ -23,7 +23,11 @@ from app.core.errors import (
 )
 from app.core.logging import get_logger
 from app.core.redis import get_redis
-from app.modules.agent.adapters.claude_code import ClaudeCodeAdapter
+from app.modules.agent.adapters.claude_code import (
+    ClaudeCodeAdapter,
+    _extract_result_metadata,
+    _read_claude_session_events,
+)
 from app.modules.agent.base import AgentAdapter, AgentSpecBundle
 from app.modules.agent.context_builder import build_spec_bundle, render_bundle_to_claude_md
 from app.modules.agent.coordinator import ExecutionCoordinatorService
@@ -43,6 +47,33 @@ ADAPTERS: dict[str, type[AgentAdapter]] = {
 AGENT_TYPE_ALIASES: dict[str, str] = {
     "claude-code": "claude_code",
 }
+
+_METADATA_FIELDS = (
+    "total_cost_usd",
+    "duration_ms",
+    "duration_api_ms",
+    "num_turns",
+    "session_id",
+    "input_tokens",
+    "output_tokens",
+)
+
+
+def _apply_run_metadata(run: AgentRun, meta: dict) -> None:
+    for field_name in _METADATA_FIELDS:
+        value = meta.get(field_name)
+        if value is not None:
+            setattr(run, field_name, value)
+
+
+def _backfill_claude_session_metadata(run: AgentRun) -> bool:
+    if run.agent_type != "claude_code" or not run.session_id:
+        return False
+    session_events = _read_claude_session_events(None, run.session_id)
+    if not session_events:
+        return False
+    _apply_run_metadata(run, _extract_result_metadata(session_events))
+    return True
 
 
 class AgentRunError(AppError):
@@ -227,6 +258,7 @@ class AgentService:
             id=uuid.uuid4(),
             task_id=task_id,
             lease_id=lease_id,
+            change_id=task.change_id,
             agent_type=canonical,
             status="pending",
             spec_strategy=bundle.spec_strategy,
@@ -332,12 +364,7 @@ class AgentService:
                 async with _factory() as meta_session:
                     meta_run = await meta_session.get(AgentRun, run_id)
                     if meta_run is not None:
-                        if meta.get("input_tokens") is not None:
-                            meta_run.input_tokens = meta["input_tokens"]
-                        if meta.get("output_tokens") is not None:
-                            meta_run.output_tokens = meta["output_tokens"]
-                        if meta.get("num_turns") is not None:
-                            meta_run.num_turns = meta["num_turns"]
+                        _apply_run_metadata(meta_run, meta)
                         meta_session.add(meta_run)
                         await meta_session.commit()
             except Exception:
@@ -458,6 +485,7 @@ class AgentService:
 
         # -- 3. Find process in registry ------------------------------------------
         proc = self._proc_registry.get(run_id)
+        metadata_backfilled = _backfill_claude_session_metadata(run)
 
         if proc is not None and proc.returncode is None:
             # 3a. Send SIGTERM
@@ -477,6 +505,8 @@ class AgentService:
                     pass
                 await proc.wait()
 
+            metadata_backfilled = _backfill_claude_session_metadata(run) or metadata_backfilled
+
         # -- 4. Remove from registry (whether proc exists or not) ------------------
         self._proc_registry.pop(run_id, None)
 
@@ -488,7 +518,14 @@ class AgentService:
         await self._session.commit()
         await self._session.refresh(run)
 
-        log.info("run_killed", run_id=str(run_id))
+        log.info(
+            "run_killed",
+            run_id=str(run_id),
+            metadata_backfilled=metadata_backfilled,
+            total_cost_usd=run.total_cost_usd,
+            input_tokens=run.input_tokens,
+            output_tokens=run.output_tokens,
+        )
         return run
 
     # ------------------------------------------------------------------
@@ -953,12 +990,7 @@ class AgentService:
                         async with factory() as meta_session:
                             meta_run = await meta_session.get(AgentRun, run_id)
                             if meta_run is not None:
-                                if meta.get("input_tokens") is not None:
-                                    meta_run.input_tokens = meta["input_tokens"]
-                                if meta.get("output_tokens") is not None:
-                                    meta_run.output_tokens = meta["output_tokens"]
-                                if meta.get("num_turns") is not None:
-                                    meta_run.num_turns = meta["num_turns"]
+                                _apply_run_metadata(meta_run, meta)
                                 meta_session.add(meta_run)
                                 await meta_session.commit()
                     except Exception:
@@ -1292,12 +1324,7 @@ class AgentService:
                         async with factory() as meta_session:
                             meta_run = await meta_session.get(AgentRun, run_id)
                             if meta_run is not None:
-                                if meta.get("input_tokens") is not None:
-                                    meta_run.input_tokens = meta["input_tokens"]
-                                if meta.get("output_tokens") is not None:
-                                    meta_run.output_tokens = meta["output_tokens"]
-                                if meta.get("num_turns") is not None:
-                                    meta_run.num_turns = meta["num_turns"]
+                                _apply_run_metadata(meta_run, meta)
                                 meta_session.add(meta_run)
                                 await meta_session.commit()
                     except Exception:

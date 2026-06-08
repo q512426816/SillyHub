@@ -35,6 +35,23 @@ from app.modules.workspace.service import WorkspaceService
 
 log = get_logger(__name__)
 
+_METADATA_FIELDS = (
+    "total_cost_usd",
+    "duration_ms",
+    "duration_api_ms",
+    "num_turns",
+    "session_id",
+    "input_tokens",
+    "output_tokens",
+)
+
+
+def _apply_run_metadata(run: AgentRun, meta: dict) -> None:
+    for field_name in _METADATA_FIELDS:
+        value = meta.get(field_name)
+        if value is not None:
+            setattr(run, field_name, value)
+
 
 class SpecBootstrapService:
     """Coordinates the launch phase of spec workspace bootstrap.
@@ -297,12 +314,28 @@ async def _execute_bootstrap_agent_run(
                         error=str(exc),
                     )
 
+            async def _on_metadata(meta: dict) -> None:
+                try:
+                    async with factory() as meta_session:
+                        meta_run = await meta_session.get(AgentRun, run_id)
+                        if meta_run is not None:
+                            _apply_run_metadata(meta_run, meta)
+                            meta_session.add(meta_run)
+                            await meta_session.commit()
+                except Exception as exc:
+                    log.warning(
+                        "bootstrap_on_metadata_failed",
+                        run_id=str(run_id),
+                        error=str(exc),
+                    )
+
             result = await adapter.run_with_bundle(
                 run_id=run_id,
                 bundle=bundle,
                 lease_path=code_root_path,
                 timeout=600,
                 on_log=_on_log,
+                on_metadata=_on_metadata,
             )
 
             # -- 6. Platform-side post-scan validation ------------------------------
@@ -438,6 +471,8 @@ async def _execute_bootstrap_agent_run(
                         )
                     )
 
+            run.post_scan_status = post_result.status.value
+            run.source_commit = post_result.metadata.get("source_commit")
             session.add(run)
             session.add(spec_ws)
 

@@ -247,11 +247,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Main content */}
       <div
-        className={`flex flex-1 flex-col transition-all duration-200 ${
+        className={`flex min-w-0 flex-1 flex-col transition-all duration-200 ${
           collapsed ? "ml-[60px]" : "ml-[260px]"
         }`}
       >
-        <div className="flex-1">{children}</div>
+        <div className="min-w-0 flex-1">{children}</div>
       </div>
     </div>
   );

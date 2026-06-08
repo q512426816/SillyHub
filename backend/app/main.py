@@ -54,11 +54,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     try:
         # Bootstrap auth once the DB connection pool exists.
         from app.core.db import get_session_factory
+        from app.modules.agent.service import AgentService
         from app.modules.auth.service import bootstrap_admin_and_seed_rbac
 
         factory = get_session_factory()
         async with factory() as session:
             await bootstrap_admin_and_seed_rbac(session, settings=settings)
+            try:
+                stale_count = await AgentService(session).cleanup_stale_runs()
+                if stale_count:
+                    log.warning("agent.stale_runs_cleaned_on_startup", count=stale_count)
+            except Exception:
+                log.exception("agent.stale_run_cleanup_failed")
         yield
     finally:
         log.info("app.shutdown")

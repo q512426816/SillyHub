@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -86,7 +87,7 @@ def _check_log_patterns(output: str) -> list[ValidationError]:
     Only scans stderr/system/tool channels to avoid false positives from
     document content that may mention "API Error" as examples.
     """
-    errors = []
+    errors: list[ValidationError] = []
     if not output:
         return errors
 
@@ -319,7 +320,7 @@ def _check_local_config(source_root: Path) -> list[ValidationError]:
     Returns:
         List of validation warnings for config issues.
     """
-    warnings = []
+    warnings: list[ValidationError] = []
     local_yaml = source_root / ".sillyspec" / "local.yaml"
 
     if not local_yaml.exists():
@@ -565,7 +566,7 @@ def validate_resume_state(runtime_root: Path, scan_run_id: str) -> dict:
     Returns:
         Dict with resumed_from_step, skipped_steps, is_resume flags.
     """
-    result = {
+    result: dict[str, Any] = {
         "is_resume": False,
         "resumed_from_step": None,
         "skipped_steps": [],

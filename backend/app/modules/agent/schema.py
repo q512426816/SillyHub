@@ -29,6 +29,7 @@ class AgentRunResponse(BaseModel):
     spec_strategy: str | None = None
     profile_version: str | None = None
     diff_summary: str | None = None
+    change_id: uuid.UUID | None = None
     idempotency_key: str | None = None
     resume_token: str | None = None
     version: int | None = None

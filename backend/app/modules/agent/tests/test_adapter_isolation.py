@@ -508,6 +508,162 @@ class TestResultMetadata:
         assert result.conversation_events is not None
         assert len(result.conversation_events) == 1
 
+    @pytest.mark.asyncio
+    async def test_exec_stream_emits_metadata_callback(self, fake_proc_factory):
+        """_exec_stream forwards live metadata before completion."""
+        adapter = ClaudeCodeAdapter()
+        run_id = uuid.uuid4()
+        seen: list[dict] = []
+
+        result_event = (
+            json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "total_cost_usd": 0.05,
+                    "duration_ms": 5000,
+                    "duration_api_ms": 3200,
+                    "num_turns": 8,
+                    "session_id": "sess-uuid-1234",
+                    "usage": {"input_tokens": 1200, "output_tokens": 350},
+                }
+            ).encode()
+            + b"\n"
+        )
+        fake_proc = fake_proc_factory(stdout_data=result_event)
+
+        async def _on_metadata(meta: dict) -> None:
+            seen.append(meta)
+
+        with patch("asyncio.create_subprocess_exec", return_value=fake_proc):
+            with patch("app.modules.agent.adapters.claude_code.get_redis") as mr:
+                r = AsyncMock()
+                r.publish = AsyncMock()
+                mr.return_value = r
+                with patch(
+                    "app.modules.agent.adapters.claude_code.redact_output",
+                    return_value="OK",
+                ):
+                    await adapter._exec_stream(
+                        run_id=run_id,
+                        cmd=["claude"],
+                        prompt="test",
+                        cwd=Path("/tmp"),
+                        env_vars={},
+                        timeout=5,
+                        on_metadata=_on_metadata,
+                    )
+
+        assert seen
+        merged = {key: value for meta in seen for key, value in meta.items()}
+        assert merged["total_cost_usd"] == 0.05
+        assert merged["input_tokens"] == 1200
+        assert merged["output_tokens"] == 350
+
+    def test_extract_session_id_from_system_init(self):
+        """system init session_id is available before result events."""
+        from app.modules.agent.adapters.claude_code import _extract_result_metadata
+
+        meta = _extract_result_metadata(
+            [{"type": "system", "subtype": "init", "session_id": "sess-live"}]
+        )
+        assert meta["session_id"] == "sess-live"
+
+    def test_read_claude_session_events_reads_usage_jsonl(self, tmp_path):
+        """Persisted Claude session JSONL can be used as a usage fallback."""
+        from app.modules.agent.adapters.claude_code import (
+            _extract_result_metadata,
+            _read_claude_session_events,
+        )
+
+        session_dir = tmp_path / ".claude" / "projects" / "-host-projects-myaaa"
+        session_dir.mkdir(parents=True)
+        (session_dir / "sess-live.jsonl").write_text(
+            "\n".join(
+                [
+                    json.dumps({"type": "system", "subtype": "init"}),
+                    "{not json",
+                    json.dumps(
+                        {
+                            "type": "assistant",
+                            "message": {"usage": {"input_tokens": 1200, "output_tokens": 350}},
+                        }
+                    ),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        events = _read_claude_session_events("/host-projects/myaaa", "sess-live", home=tmp_path)
+        meta = _extract_result_metadata(events)
+        assert meta["input_tokens"] == 1200
+        assert meta["output_tokens"] == 350
+
+    @pytest.mark.asyncio
+    async def test_exec_stream_reads_live_usage_from_session_file(self, fake_proc_factory):
+        """stdout system init + session JSONL usage emits live token metadata."""
+        adapter = ClaudeCodeAdapter()
+        run_id = uuid.uuid4()
+        seen: list[dict] = []
+        usage_events = [
+            {
+                "type": "assistant",
+                "message": {"usage": {"input_tokens": 1200, "output_tokens": 350}},
+            }
+        ]
+        fake_proc = fake_proc_factory()
+        fake_proc.stdout.readline = AsyncMock(
+            side_effect=[
+                json.dumps(
+                    {
+                        "type": "system",
+                        "subtype": "init",
+                        "cwd": "/host-projects/myaaa",
+                        "session_id": "sess-live",
+                    }
+                ).encode()
+                + b"\n",
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "message": {"content": [{"type": "text", "text": "working"}]},
+                    }
+                ).encode()
+                + b"\n",
+                b"",
+            ]
+        )
+
+        async def _on_metadata(meta: dict) -> None:
+            seen.append(meta)
+
+        with patch("asyncio.create_subprocess_exec", return_value=fake_proc):
+            with patch("app.modules.agent.adapters.claude_code.get_redis") as mr:
+                r = AsyncMock()
+                r.publish = AsyncMock()
+                mr.return_value = r
+                with patch(
+                    "app.modules.agent.adapters.claude_code._read_claude_session_events",
+                    return_value=usage_events,
+                ) as session_reader:
+                    result = await adapter._exec_stream(
+                        run_id=run_id,
+                        cmd=["claude"],
+                        prompt="test",
+                        cwd=Path("/host-projects/myaaa"),
+                        env_vars={},
+                        timeout=5,
+                        on_metadata=_on_metadata,
+                    )
+
+        session_reader.assert_called()
+        merged = {key: value for meta in seen for key, value in meta.items()}
+        assert merged["session_id"] == "sess-live"
+        assert merged["input_tokens"] == 1200
+        assert merged["output_tokens"] == 350
+        assert result.input_tokens == 1200
+        assert result.output_tokens == 350
+
     def test_extract_tokens_from_result_usage(self):
         """result event with usage field → tokens extracted directly."""
         from app.modules.agent.adapters.claude_code import _extract_result_metadata
