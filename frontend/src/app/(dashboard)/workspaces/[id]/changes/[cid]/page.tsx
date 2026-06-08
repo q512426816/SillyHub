@@ -444,8 +444,7 @@ export default function ChangeDetailPage({ params }: Props) {
   const handleDispatch = async () => {
     setDispatching(true);
     setPageError(null);
-    // Clear old logs and disconnect stale SSE before dispatch
-    setAgentLogs([]);
+    // Disconnect stale SSE before dispatch (logs will be replaced naturally by new run)
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;

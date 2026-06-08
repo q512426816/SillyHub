@@ -138,6 +138,12 @@ created_at: 2026-06-03T08:42:04
 根因：change_key 重命名 74b61b→log-width 后 DB 产生两条记录，log-width 的 location=active 但磁盘目录已移至 archive，reparse 未及时同步。活跃目录残留 74b61b 只含 module-impact.md。
 结果：删除 DB 中 log-width 记录，清理活跃目录残留 74b61b，reparse 后所有相关变更正确归档。
 
+## ql-20260608-005-f3b8 | 2026-06-08 13:42:52 | 修复 dispatch 后 agent 日志消失（再次）
+状态：已完成
+文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+根因：handleDispatch 在 API 调用前 setAgentLogs([]) 清空日志，导致用户看到空白期。应保留旧日志直到新 run 的 loadHistoryLogs 自然替换。
+结果：去掉 setAgentLogs([])，只关闭旧 SSE，让新 run 的 loadHistoryLogs 自然替换旧日志
+
 ## ql-20260608-004-c2e9 | 2026-06-08 13:30:13 | 变更详情页 agent 状态/日志不刷新 + dispatch 后日志消失
 状态：已完成
 文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
