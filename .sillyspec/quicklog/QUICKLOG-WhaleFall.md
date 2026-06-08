@@ -171,3 +171,9 @@ created_at: 2026-06-03T08:42:04
 文件：无代码改动（数据修复）
 根因：brainstorm agent 创建变更时用 2026-06-05-agent-x-965f93（随机后缀），sillyspec CLI rename 为 2026-06-05-agent-log-width，DB 没同步更新 path → reparse 读错目录 → 文档不全
 结果：修 DB change_key 和 path 为正确值，reparse 后 6/8 文档同步
+
+## ql-20260608-009-e3f7 | 2026-06-08 14:17:00 | 修复 dispatch 后 Agent 日志区域消失
+状态：进行中
+文件：backend/app/modules/change/dispatch.py, frontend/.../changes/[cid]/page.tsx
+根因：1) dispatch() 写 stages["last_dispatch"] 不含 run_id → 前端 activeRunId=null → 日志区域消失；2) useEffect cleanup 关闭 handleDispatch 打开的 SSE
+结果：dispatch() 拿到 run.id 后回写 run_id+status；前端加 dispatchOwnsSseRef 防 useEffect 竞态

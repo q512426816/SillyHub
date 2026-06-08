@@ -553,6 +553,17 @@ async def dispatch(
             requires_worktree=config.requires_worktree,
             read_only=config.read_only,
         )
+        # Update last_dispatch with run_id and status
+        stages = change.stages or {}
+        stages["last_dispatch"] = {
+            **stages.get("last_dispatch", {}),
+            "run_id": str(run.id),
+            "status": "running",
+        }
+        change.stages = stages
+        session.add(change)
+        await session.commit()
+
         return {
             "dispatched": True,
             "agent_run_id": str(run.id),
