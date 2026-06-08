@@ -277,18 +277,18 @@ async def _execute_bootstrap_agent_run(
 
             async def _on_log(channel: str, content: str, ts: str) -> None:
                 try:
-                    session.add(
-                        AgentRunLog(
-                            id=uuid.uuid4(),
-                            run_id=run_id,
-                            timestamp=_parse_log_timestamp(ts),
-                            channel=channel,
-                            content_redacted=content[:4000],
+                    async with factory() as log_session:
+                        log_session.add(
+                            AgentRunLog(
+                                id=uuid.uuid4(),
+                                run_id=run_id,
+                                timestamp=_parse_log_timestamp(ts),
+                                channel=channel,
+                                content_redacted=content[:4000],
+                            )
                         )
-                    )
-                    await session.commit()
+                        await log_session.commit()
                 except Exception as exc:
-                    await session.rollback()
                     log.warning(
                         "bootstrap_on_log_failed",
                         run_id=str(run_id),
@@ -326,6 +326,14 @@ async def _execute_bootstrap_agent_run(
                 run.exit_code = exit_code
                 run.output_redacted = result.redacted_output[:10000]
                 run.finished_at = now
+                run.total_cost_usd = result.total_cost_usd
+                run.duration_ms = result.duration_ms
+                run.duration_api_ms = result.duration_api_ms
+                run.num_turns = result.num_turns
+                run.session_id = result.session_id
+                run.conversation_events = result.conversation_events
+                run.input_tokens = result.input_tokens
+                run.output_tokens = result.output_tokens
 
                 spec_ws.sync_status = "clean"
                 spec_ws.last_synced_at = now
@@ -335,6 +343,14 @@ async def _execute_bootstrap_agent_run(
                 run.exit_code = exit_code
                 run.output_redacted = result.redacted_output[:10000]
                 run.finished_at = now
+                run.total_cost_usd = result.total_cost_usd
+                run.duration_ms = result.duration_ms
+                run.duration_api_ms = result.duration_api_ms
+                run.num_turns = result.num_turns
+                run.session_id = result.session_id
+                run.conversation_events = result.conversation_events
+                run.input_tokens = result.input_tokens
+                run.output_tokens = result.output_tokens
 
                 spec_ws.sync_status = "dirty"
                 spec_ws.updated_at = now
