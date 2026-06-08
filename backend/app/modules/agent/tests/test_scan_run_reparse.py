@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agent.base import AgentRunResult, AgentSpecBundle  # noqa: F401
+from app.modules.agent.base import AgentRunResult, AgentSpecBundle
 from app.modules.agent.model import AgentRun
 from app.modules.agent.service import AgentService
 from app.modules.workspace.model import Workspace
@@ -29,21 +29,24 @@ from app.modules.workspace.model import Workspace
 _RUN_WITH_BUNDLE = "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle"
 _REPARSE = "app.modules.workspace.service.WorkspaceService.reparse"
 _SESSION_FACTORY = "app.core.db.get_session_factory"
+_POST_SCAN = "app.modules.agent.post_scan_validator.PostScanValidator.validate"
+_RESUME_STATE = "app.modules.agent.post_scan_validator.validate_resume_state"
 
 
-def _fake_result(exit_code: int) -> MagicMock:
-    """Build a synchronous MagicMock standing in for AgentRunResult.
+def _fake_post_scan_result():
+    from app.modules.agent.post_scan_validator import PostScanValidationResult, ScanRunStatus
 
-    ``run_with_bundle`` is awaited (-> AsyncMock), but the result it returns is
-    only read, so a plain MagicMock with real-str ``redacted_output`` suffices.
-    """
-    r = MagicMock()
-    r.exit_code = exit_code
-    r.stdout = "scan output"
-    r.stderr = ""
-    r.redacted_output = "scan output"
-    r.timed_out = False
-    return r
+    return PostScanValidationResult(status=ScanRunStatus.SUCCESS)
+
+
+def _fake_result(exit_code: int) -> AgentRunResult:
+    """Build an AgentRunResult for scan run tests."""
+    return AgentRunResult(
+        exit_code=exit_code,
+        stdout="scan output",
+        stderr="",
+        redacted_output="scan output",
+    )
 
 
 def _factory_returning(session: AsyncSession) -> MagicMock:
@@ -123,6 +126,8 @@ async def test_scan_run_success_triggers_reparse(db_session: AsyncSession, tmp_p
         patch(_SESSION_FACTORY, new=_factory_returning(db_session)),
         patch(_RUN_WITH_BUNDLE, new=AsyncMock(return_value=_fake_result(0))),
         patch(_REPARSE, new=reparse_spy),
+        patch(_POST_SCAN, return_value=_fake_post_scan_result()),
+        patch(_RESUME_STATE, return_value={"is_resume": False}),
     ):
         svc = AgentService(db_session)
         await svc._execute_scan_run(
@@ -157,6 +162,8 @@ async def test_scan_run_failure_skips_reparse(db_session: AsyncSession, tmp_path
         patch(_SESSION_FACTORY, new=_factory_returning(db_session)),
         patch(_RUN_WITH_BUNDLE, new=AsyncMock(return_value=_fake_result(1))),
         patch(_REPARSE, new=reparse_spy),
+        patch(_POST_SCAN, return_value=_fake_post_scan_result()),
+        patch(_RESUME_STATE, return_value={"is_resume": False}),
     ):
         svc = AgentService(db_session)
         await svc._execute_scan_run(
@@ -191,6 +198,8 @@ async def test_scan_run_reparse_exception_keeps_completed(
         patch(_SESSION_FACTORY, new=_factory_returning(db_session)),
         patch(_RUN_WITH_BUNDLE, new=AsyncMock(return_value=_fake_result(0))),
         patch(_REPARSE, new=reparse_spy),
+        patch(_POST_SCAN, return_value=_fake_post_scan_result()),
+        patch(_RESUME_STATE, return_value={"is_resume": False}),
         patch("app.modules.agent.service.log.warning", new=warning_spy),
     ):
         svc = AgentService(db_session)
@@ -232,6 +241,8 @@ async def test_scan_run_reparse_empty_created(db_session: AsyncSession, tmp_path
         patch(_SESSION_FACTORY, new=_factory_returning(db_session)),
         patch(_RUN_WITH_BUNDLE, new=AsyncMock(return_value=_fake_result(0))),
         patch(_REPARSE, new=reparse_spy),
+        patch(_POST_SCAN, return_value=_fake_post_scan_result()),
+        patch(_RESUME_STATE, return_value={"is_resume": False}),
     ):
         svc = AgentService(db_session)
         await svc._execute_scan_run(
@@ -346,6 +357,8 @@ async def test_scan_run_success_activates_pending_workspace(
         patch(_SESSION_FACTORY, new=_factory_returning(db_session)),
         patch(_RUN_WITH_BUNDLE, new=AsyncMock(return_value=_fake_result(0))),
         patch(_REPARSE, new=reparse_spy),
+        patch(_POST_SCAN, return_value=_fake_post_scan_result()),
+        patch(_RESUME_STATE, return_value={"is_resume": False}),
         patch("app.modules.agent.service.log.info", new=info_spy),
     ):
         svc = AgentService(db_session)
@@ -383,6 +396,8 @@ async def test_scan_run_failure_keeps_workspace_pending(db_session: AsyncSession
         patch(_SESSION_FACTORY, new=_factory_returning(db_session)),
         patch(_RUN_WITH_BUNDLE, new=AsyncMock(return_value=_fake_result(1))),
         patch(_REPARSE, new=reparse_spy),
+        patch(_POST_SCAN, return_value=_fake_post_scan_result()),
+        patch(_RESUME_STATE, return_value={"is_resume": False}),
         patch("app.modules.agent.service.log.info", new=info_spy),
     ):
         svc = AgentService(db_session)
