@@ -179,7 +179,7 @@ created_at: 2026-06-03T08:42:04
 结果：dispatch() 回写 run_id；路由加 AgentRun 兜底 + has_active_run 修正；前端加 dispatchOwnsSseRef 防 useEffect 竞态
 
 ## ql-20260608-010-a1b2 | 2026-06-08 15:25:00 | Bootstrap 成功后不创建子组件 workspace
-状态：进行中
+状态：已完成
 文件：backend/app/modules/spec_workspace/bootstrap.py
-根因：_execute_bootstrap_agent_run 成功后只标记 run completed + spec_ws clean，缺少 activate pending workspace + reparse 子组件（_execute_scan_run 有此逻辑）
-结果：在 validation_passed 分支 commit 后加入 activate + reparse 子组件
+根因：1) 缺少 activate+reparse；2) UnboundLocalError（函数体内 import Workspace）；3) post-scan 软错误导致 validation_passed=false
+结果：加 activate+reparse；import 移至文件头；validation_passed 不再要求 post-scan status==success

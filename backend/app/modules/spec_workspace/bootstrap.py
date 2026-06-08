@@ -322,9 +322,7 @@ async def _execute_bootstrap_agent_run(
 
             # -- 7. SpecValidator for spec structure ---------------------------------
             report = SpecValidator().validate(spec_root)
-            validation_passed = (
-                result.exit_code == 0 and report.passed and post_result.status.value == "success"
-            )
+            validation_passed = result.exit_code == 0 and report.passed
 
             # -- 7. Write stderr AgentRunLog (chunked) ------------------------------
             if result.stderr.strip():
