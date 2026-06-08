@@ -444,18 +444,57 @@ export default function ChangeDetailPage({ params }: Props) {
   const handleDispatch = async () => {
     setDispatching(true);
     setPageError(null);
-    // Disconnect stale SSE before dispatch (logs will be replaced naturally by new run)
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
-    setLogStreaming(false);
     try {
       const result = await triggerDispatch(workspaceId, changeId);
       setAgentStatus(result);
-      if (result.has_active_run) {
+      setLogsExpanded(true);
+
+      if (result.has_active_run && result.last_dispatch?.run_id) {
         setSuccessMsg("🤖 Agent 已触发执行");
         setTimeout(() => setSuccessMsg(null), 3000);
+
+        // Disconnect any existing SSE, then directly connect to new run
+        if (eventSourceRef.current) {
+          eventSourceRef.current.close();
+          eventSourceRef.current = null;
+        }
+        const newRunId = result.last_dispatch.run_id;
+        setAgentLogs([]);
+        setLogStreaming(true);
+        // Load history (fire-and-forget)
+        getAgentRunLogs(workspaceId, newRunId)
+          .then((logs) => setAgentLogs(logs))
+          .catch(() => {});
+        // Connect SSE
+        const es = streamAgentRunLogs(
+          workspaceId,
+          newRunId,
+          (evt: StreamLogEvent) => {
+            setAgentLogs((prev) => {
+              if (evt.log_id && prev.some((l) => l.id === evt.log_id)) return prev;
+              return [
+                ...prev,
+                {
+                  id: evt.log_id ?? crypto.randomUUID(),
+                  run_id: newRunId,
+                  timestamp: evt.timestamp,
+                  channel: evt.channel,
+                  content_redacted: evt.content,
+                },
+              ];
+            });
+          },
+          () => {
+            setLogStreaming(false);
+            eventSourceRef.current = null;
+            void refreshAgentStatus();
+          },
+          () => {
+            setLogStreaming(false);
+            eventSourceRef.current = null;
+          },
+        );
+        eventSourceRef.current = es;
       }
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "触发 Agent 失败");

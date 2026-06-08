@@ -138,6 +138,12 @@ created_at: 2026-06-03T08:42:04
 根因：change_key 重命名 74b61b→log-width 后 DB 产生两条记录，log-width 的 location=active 但磁盘目录已移至 archive，reparse 未及时同步。活跃目录残留 74b61b 只含 module-impact.md。
 结果：删除 DB 中 log-width 记录，清理活跃目录残留 74b61b，reparse 后所有相关变更正确归档。
 
+## ql-20260608-006-a4d1 | 2026-06-08 14:00:00 | 修复 dispatch 后 agent 日志不出现（useEffect 竞态）
+状态：已完成
+文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+根因：dispatch 后 SSE 连接依赖 useEffect→useCallback 链路，多层间接导致竞态条件。改用命令式：dispatch 成功后直接关闭旧 SSE、清空日志、加载历史、建立新 SSE。
+结果：handleDispatch 改为命令式直接管理 SSE，不再依赖 useEffect 间接连接
+
 ## ql-20260608-005-f3b8 | 2026-06-08 13:42:52 | 修复 dispatch 后 agent 日志消失（再次）
 状态：已完成
 文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
