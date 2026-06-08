@@ -173,7 +173,13 @@ created_at: 2026-06-03T08:42:04
 结果：修 DB change_key 和 path 为正确值，reparse 后 6/8 文档同步
 
 ## ql-20260608-009-e3f7 | 2026-06-08 14:17:00 | 修复 dispatch 后 Agent 日志区域消失
-状态：进行中
-文件：backend/app/modules/change/dispatch.py, frontend/.../changes/[cid]/page.tsx
-根因：1) dispatch() 写 stages["last_dispatch"] 不含 run_id → 前端 activeRunId=null → 日志区域消失；2) useEffect cleanup 关闭 handleDispatch 打开的 SSE
-结果：dispatch() 拿到 run.id 后回写 run_id+status；前端加 dispatchOwnsSseRef 防 useEffect 竞态
+状态：已完成
+文件：backend/app/modules/change/dispatch.py, backend/app/modules/change/router.py, frontend/.../changes/[cid]/page.tsx
+根因：1) dispatch() 写 stages["last_dispatch"] 不含 run_id → 前端 activeRunId=null → 日志区域消失；2) dispatch 路由无 AgentRun 兜底查询；3) useEffect cleanup 关闭 handleDispatch 打开的 SSE
+结果：dispatch() 回写 run_id；路由加 AgentRun 兜底 + has_active_run 修正；前端加 dispatchOwnsSseRef 防 useEffect 竞态
+
+## ql-20260608-010-a1b2 | 2026-06-08 15:25:00 | Bootstrap 成功后不创建子组件 workspace
+状态：已完成
+文件：backend/app/modules/spec_workspace/bootstrap.py
+根因：1) 缺少 activate+reparse；2) UnboundLocalError（函数体内 import Workspace）；3) post-scan 软错误导致 validation_passed=false
+结果：加 activate+reparse；import 移至文件头；validation_passed 不再要求 post-scan status==success
