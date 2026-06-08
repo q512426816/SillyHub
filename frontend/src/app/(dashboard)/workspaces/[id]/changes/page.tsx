@@ -37,6 +37,12 @@ const TYPE_COLORS: Record<string, "default" | "warning" | "success"> = {
   prototype: "success",
 };
 
+const TYPE_LABEL: Record<string, string> = {
+  feature: "功能",
+  quick: "快速",
+  prototype: "原型",
+};
+
 const STAGE_VARIANT: Record<string, "outline" | "default" | "warning" | "destructive" | "success"> = {
   draft: "outline",
   scan: "default",
@@ -275,7 +281,7 @@ export default function ChangesPage({ params }: Props) {
                   <td>
                     {c.change_type ? (
                       <Badge variant={TYPE_COLORS[c.change_type] ?? "outline"}>
-                        {c.change_type}
+                        {TYPE_LABEL[c.change_type] ?? c.change_type}
                       </Badge>
                     ) : (
                       <span className="text-xs text-muted-foreground">—</span>
