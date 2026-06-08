@@ -138,6 +138,11 @@ created_at: 2026-06-03T08:42:04
 根因：change_key 重命名 74b61b→log-width 后 DB 产生两条记录，log-width 的 location=active 但磁盘目录已移至 archive，reparse 未及时同步。活跃目录残留 74b61b 只含 module-impact.md。
 结果：删除 DB 中 log-width 记录，清理活跃目录残留 74b61b，reparse 后所有相关变更正确归档。
 
+## ql-20260608-003-d5a7 | 2026-06-08 13:16:35 | 变更中心列宽调整+影响组件换行显示
+状态：已完成
+文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+结果：类型/状态/阶段列加 whitespace-nowrap + 固定宽度(w-20/w-24)，影响组件列去掉 truncate 允许换行
+
 ## ql-20260608-002-e4b1 | 2026-06-08 13:06:39 | 变更中心类型列中文回显
 状态：已完成
 文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx

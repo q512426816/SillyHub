@@ -257,13 +257,13 @@ export default function ChangesPage({ params }: Props) {
           <table>
             <thead>
               <tr>
-                <th>变更 Key</th>
+                <th className="whitespace-nowrap">变更 Key</th>
                 <th>标题</th>
-                <th>类型</th>
-                <th>状态</th>
-                <th>阶段</th>
+                <th className="whitespace-nowrap w-20">类型</th>
+                <th className="whitespace-nowrap w-24">状态</th>
+                <th className="whitespace-nowrap w-20">阶段</th>
                 <th>影响组件</th>
-                <th className="text-right">更新时间</th>
+                <th className="text-right whitespace-nowrap">更新时间</th>
               </tr>
             </thead>
             <tbody>
@@ -307,7 +307,7 @@ export default function ChangesPage({ params }: Props) {
                       {STAGE_LABEL[c.current_stage ?? "draft"] ?? c.current_stage ?? "draft"}
                     </Badge>
                   </td>
-                  <td className="max-w-[180px] truncate text-[11px]">
+                  <td className="text-[11px]">
                     {c.affected_components.length > 0
                       ? c.affected_components.join(", ")
                       : "—"}
