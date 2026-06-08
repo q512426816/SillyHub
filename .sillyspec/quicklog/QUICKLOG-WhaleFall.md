@@ -138,6 +138,12 @@ created_at: 2026-06-03T08:42:04
 根因：change_key 重命名 74b61b→log-width 后 DB 产生两条记录，log-width 的 location=active 但磁盘目录已移至 archive，reparse 未及时同步。活跃目录残留 74b61b 只含 module-impact.md。
 结果：删除 DB 中 log-width 记录，清理活跃目录残留 74b61b，reparse 后所有相关变更正确归档。
 
+## ql-20260608-004-c2e9 | 2026-06-08 13:30:13 | 变更详情页 agent 状态/日志不刷新 + dispatch 后日志消失
+状态：已完成
+文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+根因：1) handleGateAction 只刷新 change 不刷新 agentStatus，导致阶段流转后状态/日志停留旧 run；2) handleDispatch 后 agentLogs 未清空、旧 SSE 未断开
+结果：handleGateAction 改用 Promise.all 刷新 change+documents+agentStatus；handleDispatch dispatch 前清空 agentLogs + 关闭旧 SSE + 重置 logStreaming
+
 ## ql-20260608-003-d5a7 | 2026-06-08 13:16:35 | 变更中心列宽调整+影响组件换行显示
 状态：已完成
 文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx

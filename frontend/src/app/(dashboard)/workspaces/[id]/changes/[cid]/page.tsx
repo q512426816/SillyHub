@@ -444,6 +444,13 @@ export default function ChangeDetailPage({ params }: Props) {
   const handleDispatch = async () => {
     setDispatching(true);
     setPageError(null);
+    // Clear old logs and disconnect stale SSE before dispatch
+    setAgentLogs([]);
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    setLogStreaming(false);
     try {
       const result = await triggerDispatch(workspaceId, changeId);
       setAgentStatus(result);
@@ -647,8 +654,14 @@ export default function ChangeDetailPage({ params }: Props) {
         await transitionChange(workspaceId, changeId, "execute");
       }
       setGateComment("");
-      const updated = await getChange(workspaceId, changeId);
+      const [updated, updatedMatrix, updatedAgentStatus] = await Promise.all([
+        getChange(workspaceId, changeId),
+        getChangeDocuments(workspaceId, changeId),
+        getAgentStatus(workspaceId, changeId),
+      ]);
       setChange(updated);
+      setMatrix(updatedMatrix);
+      setAgentStatus(updatedAgentStatus);
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "操作失败");
     } finally {
