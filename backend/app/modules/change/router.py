@@ -578,10 +578,42 @@ async def manual_dispatch(
     stages = change.stages or {}
     last_dispatch = stages.get("last_dispatch")
 
+    # Fallback: if last_dispatch has no run_id, query the most recent agent run
+    # (same logic as get_agent_status endpoint)
+    if not last_dispatch or not last_dispatch.get("run_id"):
+        from sqlalchemy import select
+
+        from app.modules.agent.model import AgentRun
+        from app.modules.workspace.model import AgentRunWorkspace
+
+        stmt = (
+            select(AgentRun)
+            .join(
+                AgentRunWorkspace,
+                col(AgentRunWorkspace.agent_run_id) == col(AgentRun.id),
+            )
+            .where(col(AgentRunWorkspace.workspace_id) == workspace_id)
+            .order_by(col(AgentRun.started_at).desc())
+            .limit(1)
+        )
+        result = await session.execute(stmt)
+        latest_run = result.scalar_one_or_none()
+        if latest_run:
+            last_dispatch = {
+                "run_id": str(latest_run.id),
+                "stage": current_stage,
+                "status": latest_run.status,
+                "at": latest_run.started_at.isoformat() if latest_run.started_at else None,
+                "finished_at": latest_run.finished_at.isoformat()
+                if latest_run.finished_at
+                else None,
+                "exit_code": latest_run.exit_code,
+            }
+
     return DispatchResponse(
         change_id=change_id,
         current_stage=current_stage,
-        has_active_run=dispatch_result.get("dispatched", False),
+        has_active_run=dispatch_result.get("dispatched", False) or await has_active_run(session, change_id),
         config_enabled=True,
         last_dispatch=last_dispatch,
         dispatch_result=dispatch_result,
