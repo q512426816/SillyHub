@@ -234,6 +234,7 @@ export default function ChangeDetailPage({ params }: Props) {
   const [logStreaming, setLogStreaming] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const dispatchOwnsSseRef = useRef(false);
 
   useEffect(() => {
     const load = async () => {
@@ -454,6 +455,7 @@ export default function ChangeDetailPage({ params }: Props) {
         setTimeout(() => setSuccessMsg(null), 3000);
 
         // Disconnect any existing SSE, then directly connect to new run
+        dispatchOwnsSseRef.current = true;
         if (eventSourceRef.current) {
           eventSourceRef.current.close();
           eventSourceRef.current = null;
@@ -487,11 +489,13 @@ export default function ChangeDetailPage({ params }: Props) {
           () => {
             setLogStreaming(false);
             eventSourceRef.current = null;
+            dispatchOwnsSseRef.current = false;
             void refreshAgentStatus();
           },
           () => {
             setLogStreaming(false);
             eventSourceRef.current = null;
+            dispatchOwnsSseRef.current = false;
           },
         );
         eventSourceRef.current = es;
@@ -573,6 +577,10 @@ export default function ChangeDetailPage({ params }: Props) {
 
   // Connect when logs expanded
   useEffect(() => {
+    if (dispatchOwnsSseRef.current) {
+      // handleDispatch is managing SSE — do not interfere
+      return () => {};
+    }
     if (logsExpanded && activeRunId && !eventSourceRef.current) {
       connectLogStream();
     }
@@ -582,7 +590,7 @@ export default function ChangeDetailPage({ params }: Props) {
       setLogStreaming(false);
     }
     return () => {
-      if (eventSourceRef.current) {
+      if (eventSourceRef.current && !dispatchOwnsSseRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
       }
