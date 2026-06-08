@@ -31,6 +31,7 @@ from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.spec_workspace.validator import SpecValidator
 from app.modules.workflow.model import AuditLog
 from app.modules.workspace.model import AgentRunWorkspace, Workspace
+from app.modules.workspace.service import WorkspaceService
 
 log = get_logger(__name__)
 
@@ -478,8 +479,6 @@ async def _execute_bootstrap_agent_run(
             if validation_passed:
                 # 9b-1. Promote workspace from pending -> active
                 try:
-                    from app.modules.workspace.model import Workspace
-
                     ws = await session.get(Workspace, workspace_id)
                     if ws is not None and ws.status == "pending":
                         ws.status = "active"
@@ -502,8 +501,6 @@ async def _execute_bootstrap_agent_run(
 
                 # 9b-2. Auto-reparse child workspaces from generated specs
                 try:
-                    from app.modules.workspace.service import WorkspaceService
-
                     svc = WorkspaceService(session)
                     _parse_result, stats, _children, _relations = await svc.reparse(workspace_id)
                     log.info(
