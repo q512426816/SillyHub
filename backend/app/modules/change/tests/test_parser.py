@@ -53,7 +53,7 @@ class TestParseWorkspace:
         demo = next(c for c in result.changes if c.change_key == "2026-05-25-demo-feature")
         assert demo.title == "Proposal"  # from proposal.md "# Proposal"
         assert demo.status == "draft"
-        assert demo.change_type is None
+        assert demo.change_type == "feature"  # inferred by _infer_change_type
         assert demo.owner is None
         assert demo.affected_components == []
 

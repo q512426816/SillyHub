@@ -12,9 +12,9 @@ class TestResolveStageCompletion:
     @pytest.mark.parametrize(
         "stage,result,expected_stage,expected_gate,expected_dispatch",
         [
-            ("brainstorm", "clear", "propose", HumanGate.NONE, "propose"),
+            ("brainstorm", "clear", "propose", HumanGate.NEED_PROPOSAL_REVIEW, None),
             ("brainstorm", "ambiguous", "brainstorm", HumanGate.NEED_REQUIREMENT_INPUT, None),
-            ("brainstorm", None, "brainstorm", HumanGate.NEED_REQUIREMENT_INPUT, None),
+            ("brainstorm", None, "propose", HumanGate.NEED_PROPOSAL_REVIEW, None),
             ("propose", None, "propose", HumanGate.NEED_PROPOSAL_REVIEW, None),
             ("plan", None, "plan", HumanGate.NEED_PLAN_REVIEW, None),
             ("execute", None, "verify", HumanGate.NONE, "verify"),

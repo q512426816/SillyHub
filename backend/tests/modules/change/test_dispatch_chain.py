@@ -312,7 +312,10 @@ async def test_dispatch_complete_sync_stage_done_no_auto_dispatch(
     assert sync_result.has_pending_step is False
 
     # Auto dispatch should NOT trigger
-    with patch("app.modules.change.dispatch.dispatch", new_callable=AsyncMock) as mock_dispatch:
+    with (
+        patch("app.modules.change.dispatch.dispatch", new_callable=AsyncMock) as mock_dispatch,
+        patch("app.modules.change.service.ChangeService.reparse", new_callable=AsyncMock),
+    ):
         auto_result = await auto_dispatch_next_step(
             session=db_session,
             workspace_id=workspace_id,

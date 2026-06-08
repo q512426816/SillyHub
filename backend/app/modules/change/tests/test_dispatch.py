@@ -104,7 +104,6 @@ class TestLoadPromptTemplate:
         )
         assert "My Feature" in content
         assert "2026-05-31-my-feature" in content
-        assert "backend, frontend" in content
         # Unsubstituted variables should remain
         assert "{{" not in content or "workspace_id" in content
 

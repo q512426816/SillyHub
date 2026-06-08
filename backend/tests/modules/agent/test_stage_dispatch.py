@@ -31,7 +31,7 @@ async def test_execute_stage_run_bundle_contains_task_markdown_with_prompt():
 
     captured_bundle = None
 
-    async def mock_run_with_bundle(rid, bundle, lease_path, timeout=600):
+    async def mock_run_with_bundle(rid, bundle, lease_path, timeout=600, on_metadata=None):
         nonlocal captured_bundle
         captured_bundle = bundle
         return fake_result
@@ -112,7 +112,7 @@ async def test_execute_stage_run_bundle_write_mode():
 
     captured_bundle = None
 
-    async def mock_run_with_bundle(rid, bundle, lease_path, timeout=600):
+    async def mock_run_with_bundle(rid, bundle, lease_path, timeout=600, on_metadata=None):
         nonlocal captured_bundle
         captured_bundle = bundle
         return fake_result

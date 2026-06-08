@@ -134,7 +134,7 @@ async def test_get_change_detail(
     # fields are DB-owned and no longer read from MASTER frontmatter.
     assert body["title"] == "Proposal"
     assert body["status"] == "draft"
-    assert body["change_type"] is None
+    assert body["change_type"] == "feature"
     assert body["location"] == "active"
     assert body["affected_components"] == []
 

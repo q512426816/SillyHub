@@ -54,9 +54,18 @@ class TestResolveSpecDataRoot:
     """resolve_spec_data_root() resolves paths relative to repo root."""
 
     def test_absolute_path_returned_unchanged(self) -> None:
-        """An absolute path is returned as-is."""
+        """An absolute path is returned as-is (platform-normalised separators).
+
+        On POSIX the output matches the input verbatim.
+        On Windows a leading-slash path is drive-relative; the function
+        resolves it to a fully-qualified absolute path (e.g. C:\\data\\...).
+        """
         result = resolve_spec_data_root("/data/sillyspec-data")
-        assert result == "/data/sillyspec-data"
+        result_path = Path(result)
+        assert result_path.is_absolute()
+        # The tail components must match regardless of platform
+        assert result_path.name == "sillyspec-data"
+        assert result_path.parent.name == "data" or result_path.parts[-2] == "data"
 
     def test_relative_path_resolved_against_repo_root(self) -> None:
         """A relative path is joined with repo root."""
@@ -104,9 +113,10 @@ class TestResolveSpecDataRoot:
             os.chdir(original)
 
     def test_windows_absolute_path_unchanged(self) -> None:
-        """Windows absolute paths are also returned unchanged."""
+        """Windows absolute paths are also returned unchanged (platform-normalised)."""
         result = resolve_spec_data_root("C:/data/sillyspec-data")
-        assert result == "C:/data/sillyspec-data"
+        # Path() normalises separators; compare via Path so tests pass on both OSes
+        assert Path(result) == Path("C:/data/sillyspec-data")
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +146,7 @@ class TestRepairMigrationLogic:
         """Given a repo root and ws_id, the replacement path is correct."""
         repo = Path("/Users/qinyi/SillyHub")
         ws_id = "abc-123-def"
-        spec_data_root = str(repo / "data" / "spec-storage")
-        expected = f"{spec_data_root}/{ws_id}"
-        assert expected == "/Users/qinyi/SillyHub/data/spec-storage/abc-123-def"
-        assert "/backend/" not in expected
+        expected_path = repo / "data" / "spec-storage" / ws_id
+        # Use Path comparison to be platform-agnostic on separators
+        assert expected_path == Path("/Users/qinyi/SillyHub/data/spec-storage/abc-123-def")
+        assert "backend" not in expected_path.parts

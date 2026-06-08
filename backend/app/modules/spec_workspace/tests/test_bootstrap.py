@@ -559,6 +559,11 @@ class TestBootstrapWorkspaceNotFound:
 class TestBackgroundExecutionAdapterBundle:
     """_execute_bootstrap_agent_run passes the correct AgentSpecBundle."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_preflight(self):
+        with patch("app.modules.spec_workspace.bootstrap._run_preflight", return_value=None):
+            yield
+
     async def test_bundle_contains_bootstrap_task_key(
         self, db_session: AsyncSession, tmp_path: Path
     ) -> None:
@@ -604,7 +609,7 @@ class TestBackgroundExecutionAdapterBundle:
             )
 
         assert captured_bundle is not None
-        assert captured_bundle.task_key == "spec-bootstrap"
+        assert captured_bundle.task_key == "stage:scan"
 
     async def test_bundle_contains_bootstrap_task_title(
         self, db_session: AsyncSession, tmp_path: Path
@@ -651,7 +656,7 @@ class TestBackgroundExecutionAdapterBundle:
             )
 
         assert captured_bundle is not None
-        assert captured_bundle.task_title == "Bootstrap spec workspace"
+        assert captured_bundle.task_title == "Stage dispatch: scan"
 
     async def test_bundle_contains_sillyspec_tool(
         self, db_session: AsyncSession, tmp_path: Path
@@ -887,13 +892,18 @@ class TestBackgroundExecutionAdapterBundle:
             )
 
         assert captured_bundle is not None
-        md = captured_bundle.task_markdown or ""
-        assert "sillyspec init --dir" in md
-        assert "sillyspec run scan --dir" in md
+        prompt = captured_bundle.step_prompt or ""
+        assert "sillyspec init --dir" in prompt
+        assert "sillyspec run scan --dir" in prompt
 
 
 class TestBackgroundExecutionSuccess:
     """When adapter and validator both succeed, run should complete."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_preflight(self):
+        with patch("app.modules.spec_workspace.bootstrap._run_preflight", return_value=None):
+            yield
 
     async def test_run_completed(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session, root_path=str(tmp_path / "code"))
@@ -1236,6 +1246,11 @@ class TestBackgroundExecutionSuccess:
 class TestBackgroundExecutionValidationFailure:
     """When adapter succeeds but validator reports errors."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_preflight(self):
+        with patch("app.modules.spec_workspace.bootstrap._run_preflight", return_value=None):
+            yield
+
     async def test_run_failed(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session, root_path=str(tmp_path / "code"))
         spec_root = tmp_path / "specs" / str(ws.id)
@@ -1385,6 +1400,11 @@ class TestBackgroundExecutionValidationFailure:
 
 class TestBackgroundExecutionAdapterFailure:
     """When adapter returns non-zero exit code."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_preflight(self):
+        with patch("app.modules.spec_workspace.bootstrap._run_preflight", return_value=None):
+            yield
 
     async def test_run_failed(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session, root_path=str(tmp_path / "code"))
@@ -1555,6 +1575,11 @@ class TestBackgroundExecutionAdapterFailure:
 
 class TestBackgroundExecutionAdapterException:
     """When adapter throws an exception, run must not stay in 'running'."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_preflight(self):
+        with patch("app.modules.spec_workspace.bootstrap._run_preflight", return_value=None):
+            yield
 
     async def test_run_failed_on_exception(self, db_session: AsyncSession, tmp_path: Path) -> None:
         ws = await _create_workspace(db_session, root_path=str(tmp_path / "code"))
@@ -1740,6 +1765,11 @@ class TestBackgroundExecutionAdapterException:
 
 class TestBackgroundExecutionMissingRecords:
     """_execute_bootstrap_agent_run handles missing AgentRun / SpecWorkspace."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_preflight(self):
+        with patch("app.modules.spec_workspace.bootstrap._run_preflight", return_value=None):
+            yield
 
     async def test_missing_run_exits_gracefully(
         self, db_session: AsyncSession, tmp_path: Path

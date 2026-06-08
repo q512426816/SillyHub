@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from app.core.security import password_hasher
+from app.modules.agent.base import AgentRunResult
 from app.modules.auth.model import User
 from app.modules.change.model import Change
 from app.modules.git_identity.model import GitIdentity
@@ -126,12 +127,12 @@ async def test_create_agent_run_success(client, db_session, tmp_path):
 
     # Mock the adapter to avoid needing real claude CLI.
     # The service now calls run_with_bundle (not run), so we patch that.
-    mock_result = AsyncMock()
-    mock_result.exit_code = 0
-    mock_result.stdout = "Task completed successfully"
-    mock_result.stderr = ""
-    mock_result.redacted_output = "Task completed successfully"
-    mock_result.timed_out = False
+    mock_result = AgentRunResult(
+        exit_code=0,
+        stdout="Task completed successfully",
+        stderr="",
+        redacted_output="Task completed successfully",
+    )
 
     with patch(
         "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
@@ -202,12 +203,7 @@ async def test_create_agent_run_invalid_task(client, db_session, tmp_path):
 async def test_get_agent_run(client, db_session, tmp_path):
     refs = await _setup(db_session, tmp_path)
 
-    mock_result = AsyncMock()
-    mock_result.exit_code = 0
-    mock_result.stdout = "ok"
-    mock_result.stderr = ""
-    mock_result.redacted_output = "ok"
-    mock_result.timed_out = False
+    mock_result = AgentRunResult(exit_code=0, stdout="ok", stderr="", redacted_output="ok")
 
     with patch(
         "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
@@ -244,12 +240,12 @@ async def test_get_agent_run_not_found(client, db_session, tmp_path):
 async def test_get_agent_run_logs(client, db_session, tmp_path):
     refs = await _setup(db_session, tmp_path)
 
-    mock_result = AsyncMock()
-    mock_result.exit_code = 0
-    mock_result.stdout = "output line"
-    mock_result.stderr = "error line"
-    mock_result.redacted_output = "output line\nerror line"
-    mock_result.timed_out = False
+    mock_result = AgentRunResult(
+        exit_code=0,
+        stdout="output line",
+        stderr="error line",
+        redacted_output="output line\nerror line",
+    )
 
     with patch(
         "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
@@ -277,12 +273,7 @@ async def test_get_agent_run_logs(client, db_session, tmp_path):
 async def test_list_task_agent_runs(client, db_session, tmp_path):
     refs = await _setup(db_session, tmp_path)
 
-    mock_result = AsyncMock()
-    mock_result.exit_code = 0
-    mock_result.stdout = "done"
-    mock_result.stderr = ""
-    mock_result.redacted_output = "done"
-    mock_result.timed_out = False
+    mock_result = AgentRunResult(exit_code=0, stdout="done", stderr="", redacted_output="done")
 
     with patch(
         "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
@@ -308,12 +299,7 @@ async def test_list_task_agent_runs(client, db_session, tmp_path):
 async def test_agent_run_audit_logged(client, db_session, tmp_path):
     refs = await _setup(db_session, tmp_path)
 
-    mock_result = AsyncMock()
-    mock_result.exit_code = 0
-    mock_result.stdout = "ok"
-    mock_result.stderr = ""
-    mock_result.redacted_output = "ok"
-    mock_result.timed_out = False
+    mock_result = AgentRunResult(exit_code=0, stdout="ok", stderr="", redacted_output="ok")
 
     with patch(
         "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
@@ -346,12 +332,7 @@ async def test_stream_completed_run_returns_done(client, db_session, tmp_path):
     """AC-03: Non-running run immediately returns event: done."""
     refs = await _setup(db_session, tmp_path)
 
-    mock_result = AsyncMock()
-    mock_result.exit_code = 0
-    mock_result.stdout = "ok"
-    mock_result.stderr = ""
-    mock_result.redacted_output = "ok"
-    mock_result.timed_out = False
+    mock_result = AgentRunResult(exit_code=0, stdout="ok", stderr="", redacted_output="ok")
 
     with patch(
         "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",

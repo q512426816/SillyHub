@@ -49,7 +49,10 @@ def resolve_spec_data_root(raw: str) -> str:
     """
     p = Path(raw)
     # ``Path.is_absolute()`` does not recognise Windows drive-letter paths
-    # (e.g. ``C:/data``) as absolute on POSIX, so we check explicitly.
-    if p.is_absolute() or (len(raw) >= 2 and raw[1] == ":"):
-        return str(p)
+    # (e.g. ``C:/data``) as absolute on POSIX, nor POSIX-style ``/data``
+    # paths as absolute on Windows.  Check explicitly for both cases.
+    if p.is_absolute() or (len(raw) >= 2 and raw[1] == ":") or raw.startswith("/"):
+        # On Windows, Path("/data") is drive-relative (\data), not absolute.
+        # Resolve it so the result is truly absolute on all platforms.
+        return str(p.resolve()) if not p.is_absolute() else str(p)
     return str(REPO_ROOT / p)

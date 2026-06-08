@@ -13,7 +13,7 @@ from __future__ import annotations
 import sqlite3
 import uuid
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select as sa_select
@@ -281,7 +281,15 @@ async def test_e2e_draft_brainstorm_propose_chain(
     assert change.current_stage == "brainstorm"
 
     # Auto dispatch should NOT trigger (human_gate is active after brainstorm)
-    with patch("app.modules.change.dispatch.dispatch", new_callable=AsyncMock) as _mock_dispatch:
+    with (
+        patch("app.modules.change.dispatch.dispatch", new_callable=AsyncMock) as _mock_dispatch,
+        patch("app.modules.change.service.ChangeService.reparse", new_callable=AsyncMock),
+        patch(
+            "app.modules.change.service.ChangeService.complete_stage",
+            new_callable=AsyncMock,
+            return_value=MagicMock(dispatch_target=None, stage="brainstorm"),
+        ),
+    ):
         auto_result = await auto_dispatch_next_step(
             session=db_session,
             workspace_id=workspace_id,

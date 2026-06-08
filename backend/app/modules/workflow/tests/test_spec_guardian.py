@@ -277,15 +277,19 @@ async def test_g7_no_reviews_passes(db_session: AsyncSession) -> None:
 
 async def test_g7_reject_then_approve_passes(db_session: AsyncSession) -> None:
     """Approved -> in_progress with reject followed by approve should pass."""
+    from datetime import UTC, datetime, timedelta
+
     change = await _make_change(db_session, "approved")
     await _add_doc(db_session, change.id, "plan")
     user = await _ensure_user(db_session)
+    now = datetime.now(UTC)
     reject = ChangeReview(
         id=uuid.uuid4(),
         change_id=change.id,
         reviewer_id=user.id,
         verdict="reject",
         comment="Not ready",
+        created_at=now,
     )
     approve = ChangeReview(
         id=uuid.uuid4(),
@@ -293,6 +297,7 @@ async def test_g7_reject_then_approve_passes(db_session: AsyncSession) -> None:
         reviewer_id=user.id,
         verdict="approve",
         comment="LGTM now",
+        created_at=now + timedelta(seconds=1),
     )
     db_session.add(reject)
     db_session.add(approve)
