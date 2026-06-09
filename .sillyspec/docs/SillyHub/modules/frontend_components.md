@@ -93,3 +93,4 @@ AgentLogViewer（被 agent 控制台页、workspace 详情页共用）
 | 日期 | 变更 | 摘要 |
 |------|------|------|
 | 2026-06-09 | ql-20260609-005-d2f7 | 提取共享 AgentLogViewer 组件，Agent 控制台和 Bootstrap 页面共用 |
+| 2026-06-09 | ql-20260609-006-e3a1 | AgentLogViewer 内置自动滚动到底部 |
