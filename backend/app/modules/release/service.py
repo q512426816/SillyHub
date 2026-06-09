@@ -194,7 +194,7 @@ class ReleaseService:
                 details={"current_status": release.status},
             )
         release.status = "staging"
-        release.updated_at = datetime.utcnow()
+        release.updated_at = datetime.now(UTC)
         await self._session.commit()
         await self._session.refresh(release)
         return release
@@ -218,8 +218,8 @@ class ReleaseService:
             check_deploy_window(release.deploy_policy)
 
         release.status = "deployed"
-        release.deployed_at = datetime.utcnow()
-        release.updated_at = datetime.utcnow()
+        release.deployed_at = datetime.now(UTC)
+        release.updated_at = datetime.now(UTC)
         release.deploy_output = "Deploy completed successfully."
         await self._session.commit()
         await self._session.refresh(release)
@@ -239,8 +239,8 @@ class ReleaseService:
                 details={"current_status": release.status},
             )
         release.status = "rolled_back"
-        release.rolled_back_at = datetime.utcnow()
-        release.updated_at = datetime.utcnow()
+        release.rolled_back_at = datetime.now(UTC)
+        release.updated_at = datetime.now(UTC)
         await self._session.commit()
         await self._session.refresh(release)
 
@@ -264,7 +264,7 @@ class ReleaseService:
 
         if count >= min_approvals and release.status in ("draft", "staging"):
             release.status = "approved"
-            release.updated_at = datetime.utcnow()
+            release.updated_at = datetime.now(UTC)
 
     async def _require_approvals(self, release: Release) -> None:
         """Raise if production release lacks sufficient approvals."""

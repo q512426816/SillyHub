@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -592,8 +592,8 @@ async def _setup_active_lease(db_session, tmp_path: Path) -> dict:
         path=str(lease_path),
         branch_name="test-branch",
         status="locked",
-        locked_at=datetime.utcnow(),
-        expires_at=datetime.utcnow() + timedelta(hours=1),
+        locked_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
     )
     db_session.add(lease)
     await db_session.commit()

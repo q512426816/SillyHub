@@ -7,7 +7,7 @@ records ready for DB persistence.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.core.logging import get_logger
@@ -153,7 +153,7 @@ class ScanDocsParser:
                 continue
 
             title = _extract_title(content) if file_path.suffix == ".md" else None
-            mtime = datetime.utcfromtimestamp(file_path.stat().st_mtime)
+            mtime = datetime.fromtimestamp(file_path.stat().st_mtime, tz=UTC)
 
             parsed = ParsedDoc(
                 doc_type=doc_type,
@@ -229,7 +229,7 @@ class ScanDocsParser:
                     continue
 
                 title = _extract_title(content) if file_path.suffix == ".md" else None
-                mtime = datetime.utcfromtimestamp(file_path.stat().st_mtime)
+                mtime = datetime.fromtimestamp(file_path.stat().st_mtime, tz=UTC)
 
                 parsed = ParsedDoc(
                     doc_type=doc_type,

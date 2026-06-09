@@ -11,7 +11,7 @@ created_at: 2026-05-27
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
@@ -49,7 +49,7 @@ class SpecWorkspaceService:
         generated. This keeps the caller simple while still allowing explicit
         overrides.
         """
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         settings = get_settings()
         spec_root = payload.spec_root or f"{settings.spec_data_root}/{workspace_id}"
 
@@ -113,7 +113,7 @@ class SpecWorkspaceService:
     ) -> SpecWorkspace:
         """Partial-update mutable fields on the spec workspace."""
         spec_ws = await self.get(workspace_id)
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         if payload.strategy is not None:
             spec_ws.strategy = payload.strategy
@@ -144,7 +144,7 @@ class SpecWorkspaceService:
         in a later wave.
         """
         spec_ws = await self.get(workspace_id)
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         spec_ws.sync_status = "clean"
         spec_ws.last_synced_at = now
@@ -170,7 +170,7 @@ class SpecWorkspaceService:
         in a later wave.
         """
         spec_ws = await self.get(workspace_id)
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         spec_ws.sync_status = "clean"
         spec_ws.last_synced_at = now
@@ -200,7 +200,7 @@ class SpecWorkspaceService:
         ``now``, which is the natural semantic for "sync just completed".
         """
         spec_ws = await self.get(workspace_id)
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         spec_ws.sync_status = payload.sync_status
         if payload.sync_status == "clean":

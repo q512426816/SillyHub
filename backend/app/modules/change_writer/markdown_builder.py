@@ -5,7 +5,7 @@ Generates standard SillySpec change document content from parameters.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 def build_master_md(
@@ -26,7 +26,7 @@ def build_master_md(
         lines.append(f"- **Affected Components**: {', '.join(affected_components)}")
     lines.extend(
         [
-            f"- **Created**: {datetime.utcnow().isoformat()}",
+            f"- **Created**: {datetime.now(UTC).isoformat()}",
             "",
             "## Summary",
             "",

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.core.logging import get_logger
@@ -479,7 +479,7 @@ class ChangeParser:
         for doc_type, filename in STANDARD_FILENAMES.items():
             filepath = change_dir / filename
             if filepath.is_file():
-                mtime = datetime.utcfromtimestamp(filepath.stat().st_mtime)
+                mtime = datetime.fromtimestamp(filepath.stat().st_mtime, tz=UTC)
                 parsed.docs.append(
                     ParsedDoc(
                         doc_type=doc_type,
@@ -496,7 +496,7 @@ class ChangeParser:
                     if canonical_name == filename:
                         legacy_path = change_dir / legacy_name
                         if legacy_path.is_file():
-                            mtime = datetime.utcfromtimestamp(legacy_path.stat().st_mtime)
+                            mtime = datetime.fromtimestamp(legacy_path.stat().st_mtime, tz=UTC)
                             parsed.docs.append(
                                 ParsedDoc(
                                     doc_type=doc_type,
@@ -535,7 +535,7 @@ class ChangeParser:
                     path=f"{rel_prefix}/{proto.name}",
                     exists=True,
                     filename=proto.name,
-                    last_modified_at=datetime.utcfromtimestamp(proto.stat().st_mtime),
+                    last_modified_at=datetime.fromtimestamp(proto.stat().st_mtime, tz=UTC),
                 )
             )
 
@@ -550,7 +550,7 @@ class ChangeParser:
                             path=f"{rel_prefix}/references/{ref.name}",
                             exists=True,
                             filename=ref.name,
-                            last_modified_at=datetime.utcfromtimestamp(ref.stat().st_mtime),
+                            last_modified_at=datetime.fromtimestamp(ref.stat().st_mtime, tz=UTC),
                         )
                     )
 

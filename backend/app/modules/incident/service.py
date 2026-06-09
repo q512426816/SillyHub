@@ -7,7 +7,7 @@ Postmortem creation and knowledge distillation from resolved incidents.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -112,7 +112,7 @@ class IncidentService:
             incident.status = data.status
 
             if data.status == "resolved":
-                incident.resolved_at = datetime.utcnow()
+                incident.resolved_at = datetime.now(UTC)
                 if data.resolved_by:
                     incident.resolved_by = uuid.UUID(data.resolved_by)
 
@@ -125,7 +125,7 @@ class IncidentService:
         if data.resolution is not None:
             incident.resolution = data.resolution
 
-        incident.updated_at = datetime.utcnow()
+        incident.updated_at = datetime.now(UTC)
         await self._session.commit()
         await self._session.refresh(incident)
 

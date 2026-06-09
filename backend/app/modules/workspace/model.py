@@ -8,7 +8,7 @@ task-04, after which a follow-up migration will add the FK constraint.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, String, Uuid, text
@@ -99,11 +99,11 @@ class Workspace(BaseModel, table=True):
         sa_column=Column(Uuid(as_uuid=True), nullable=True),
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     last_scanned_at: datetime | None = Field(
@@ -153,7 +153,7 @@ class WorkspaceRelation(BaseModel, table=True):
     relation_type: str = Field(sa_column=Column(String(50), nullable=False))
     description: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     created_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 

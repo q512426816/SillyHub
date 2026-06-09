@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,7 +78,7 @@ class WorktreeService:
         lease_root = self._exec_env.lease_root(**ids)
         repo_dir = self._exec_env.repo_dir(lease_root)
         bare_path = self._exec_env.bare_repo_path(ids["ws"], ids["comp"])
-        expires_at = datetime.utcnow() + timedelta(seconds=data.ttl_seconds)
+        expires_at = datetime.now(UTC) + timedelta(seconds=data.ttl_seconds)
 
         # 4. Create DB record first
         lease = WorktreeLease(
@@ -93,7 +93,7 @@ class WorktreeService:
             path=str(lease_root),
             branch_name=branch_name,
             status="locked",
-            locked_at=datetime.utcnow(),
+            locked_at=datetime.now(UTC),
             expires_at=expires_at,
         )
         self._session.add(lease)
@@ -151,7 +151,7 @@ class WorktreeService:
             self._exec_env.cleanup(lease_root)
 
         lease.status = "released"
-        lease.released_at = datetime.utcnow()
+        lease.released_at = datetime.now(UTC)
         await self._session.commit()
         await self._session.refresh(lease)
         log.info("worktree_released", lease_id=str(lease_id))
@@ -209,7 +209,7 @@ class WorktreeService:
     async def gc_expired_leases(self) -> int:
         stmt = select(WorktreeLease).where(
             col(WorktreeLease.status) == "locked",
-            col(WorktreeLease.expires_at) < datetime.utcnow(),
+            col(WorktreeLease.expires_at) < datetime.now(UTC),
         )
         rows = list((await self._session.execute(stmt)).scalars().all())
         count = 0
@@ -256,7 +256,7 @@ class WorktreeService:
                 "Git identity has been revoked.",
                 details={"identity_id": str(identity.id)},
             )
-        if identity.expires_at and identity.expires_at < datetime.utcnow():
+        if identity.expires_at and identity.expires_at < datetime.now(UTC):
             raise WorktreeAcquireFailed(
                 "Git identity has expired.",
                 details={"identity_id": str(identity.id)},

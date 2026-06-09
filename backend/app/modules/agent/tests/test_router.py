@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from app.core.security import password_hasher
@@ -94,8 +94,8 @@ async def _setup(db_session, tmp_path) -> dict:
         path=str(lease_path),
         branch_name="test-branch",
         status="locked",
-        locked_at=datetime.utcnow(),
-        expires_at=datetime.utcnow() + timedelta(hours=1),
+        locked_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
     )
     db_session.add(lease)
     await db_session.commit()
@@ -395,7 +395,7 @@ async def test_stream_running_run_sse_data_events(db_session):
         lease_id=uuid.uuid4(),
         agent_type="claude_code",
         status="running",
-        started_at=datetime.utcnow(),
+        started_at=datetime.now(UTC),
     )
     db_session.add(run)
     await db_session.commit()
@@ -449,7 +449,7 @@ async def test_stream_done_event_closes(db_session):
         lease_id=uuid.uuid4(),
         agent_type="claude_code",
         status="running",
-        started_at=datetime.utcnow(),
+        started_at=datetime.now(UTC),
     )
     db_session.add(run)
     await db_session.commit()
@@ -490,7 +490,7 @@ async def test_stream_keepalive_on_no_message(db_session):
         lease_id=uuid.uuid4(),
         agent_type="claude_code",
         status="running",
-        started_at=datetime.utcnow(),
+        started_at=datetime.now(UTC),
     )
     db_session.add(run)
     await db_session.commit()
@@ -539,7 +539,7 @@ async def test_stream_redis_error_sends_error_event(db_session):
         lease_id=uuid.uuid4(),
         agent_type="claude_code",
         status="running",
-        started_at=datetime.utcnow(),
+        started_at=datetime.now(UTC),
     )
     db_session.add(run)
     await db_session.commit()

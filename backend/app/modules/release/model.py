@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, String, Text, Uuid
 from sqlmodel import Field
@@ -74,11 +74,11 @@ class Release(BaseModel, table=True):
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 
@@ -117,6 +117,6 @@ class ReleaseApproval(BaseModel, table=True):
     verdict: str = Field(sa_column=Column(String(20), nullable=False))
     comment: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     created_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )

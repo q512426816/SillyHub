@@ -2,7 +2,7 @@
 
 import signal
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -66,7 +66,7 @@ class TestKillRun:
             lease_id=uuid.uuid4(),
             agent_type="claude_code",
             status="running",
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(UTC),
         )
 
         mock_session.get = AsyncMock(return_value=run)
@@ -174,7 +174,7 @@ class TestKillRun:
             lease_id=uuid.uuid4(),
             agent_type="claude_code",
             status="running",
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(UTC),
         )
         mock_session.get = AsyncMock(return_value=run)
         mock_session.commit = AsyncMock()
@@ -203,7 +203,7 @@ class TestKillRun:
             lease_id=uuid.uuid4(),
             agent_type="claude_code",
             status="running",
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(UTC),
         )
         mock_session.get = AsyncMock(return_value=run)
         mock_session.commit = AsyncMock()
@@ -229,7 +229,7 @@ class TestKillRun:
             lease_id=uuid.uuid4(),
             agent_type="claude_code",
             status="running",
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(UTC),
         )
         mock_session.get = AsyncMock(return_value=run)
         mock_session.commit = AsyncMock()
@@ -256,7 +256,7 @@ class TestKillRun:
             lease_id=uuid.uuid4(),
             agent_type="claude_code",
             status="running",
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(UTC),
         )
         mock_session.get = AsyncMock(return_value=run)
         mock_session.commit = AsyncMock()

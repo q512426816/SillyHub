@@ -10,7 +10,7 @@ created_at: 2026-05-27
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from sqlalchemy import Column, DateTime, ForeignKey, Index, String, Text, Uuid
@@ -80,10 +80,10 @@ class SpecWorkspace(BaseModel, table=True):
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )

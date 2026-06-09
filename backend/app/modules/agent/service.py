@@ -7,7 +7,7 @@ import json
 import signal
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
@@ -339,7 +339,7 @@ class AgentService:
         adapter_cls = ADAPTERS.get(agent_type)
         if adapter_cls is None:
             run.status = "failed"
-            run.finished_at = datetime.utcnow()
+            run.finished_at = datetime.now(UTC)
             run.exit_code = 1
             run.output_redacted = f"Unknown agent type '{agent_type}'."
             self._session.add(run)
@@ -348,7 +348,7 @@ class AgentService:
 
         # -- 2. Mark running ------------------------------------------------------
         run.status = "running"
-        run.started_at = datetime.utcnow()
+        run.started_at = datetime.now(UTC)
         self._session.add(run)
         await self._session.commit()
 
@@ -374,7 +374,7 @@ class AgentService:
 
         # -- 4. Update run record -------------------------------------------------
         run.status = "completed" if result.exit_code == 0 else "failed"
-        run.finished_at = datetime.utcnow()
+        run.finished_at = datetime.now(UTC)
         run.exit_code = result.exit_code
         run.output_redacted = result.redacted_output[:10000]  # truncate
         run.total_cost_usd = result.total_cost_usd
@@ -512,7 +512,7 @@ class AgentService:
 
         # -- 5. Update database record --------------------------------------------
         run.status = "killed"
-        run.finished_at = datetime.utcnow()
+        run.finished_at = datetime.now(UTC)
         run.exit_code = run.exit_code if run.exit_code is not None else -9
         self._session.add(run)
         await self._session.commit()
@@ -937,7 +937,7 @@ class AgentService:
                 adapter_cls = ADAPTERS.get("claude_code")
                 if adapter_cls is None:
                     run.status = "failed"
-                    run.finished_at = datetime.utcnow()
+                    run.finished_at = datetime.now(UTC)
                     run.exit_code = 1
                     run.output_redacted = "Unknown agent type."
                     session.add(run)
@@ -946,7 +946,7 @@ class AgentService:
 
                 # Mark running
                 run.status = "running"
-                run.started_at = datetime.utcnow()
+                run.started_at = datetime.now(UTC)
                 session.add(run)
                 await session.commit()
 
@@ -1002,7 +1002,7 @@ class AgentService:
 
                 # Update run record
                 run.status = "completed" if result.exit_code == 0 else "failed"
-                run.finished_at = datetime.utcnow()
+                run.finished_at = datetime.now(UTC)
                 run.exit_code = result.exit_code
                 run.output_redacted = result.redacted_output[:10000]
                 run.total_cost_usd = result.total_cost_usd
@@ -1132,7 +1132,7 @@ class AgentService:
                     run = await session.get(AgentRun, run_id)
                     if run is not None and run.status not in ("completed", "failed", "killed"):
                         run.status = "failed"
-                        run.finished_at = datetime.utcnow()
+                        run.finished_at = datetime.now(UTC)
                         run.exit_code = -1
                         run.output_redacted = f"Unhandled exception: {exc}"[:10000]
                         session.add(run)
@@ -1148,7 +1148,7 @@ class AgentService:
                     run = await session.get(AgentRun, run_id)
                     if run is not None and run.status == "running":
                         run.status = "failed"
-                        run.finished_at = datetime.utcnow()
+                        run.finished_at = datetime.now(UTC)
                         run.exit_code = -1
                         run.output_redacted = "Force-failed: task lifecycle guard"[:10000]
                         session.add(run)
@@ -1284,7 +1284,7 @@ class AgentService:
                 adapter_cls = ADAPTERS.get("claude_code")
                 if adapter_cls is None:
                     run.status = "failed"
-                    run.finished_at = datetime.utcnow()
+                    run.finished_at = datetime.now(UTC)
                     run.exit_code = 1
                     run.output_redacted = "Unknown agent type."
                     session.add(run)
@@ -1293,7 +1293,7 @@ class AgentService:
 
                 # -- 3. Mark running -----------------------------------------------
                 run.status = "running"
-                run.started_at = datetime.utcnow()
+                run.started_at = datetime.now(UTC)
                 session.add(run)
                 await session.commit()
 
@@ -1375,7 +1375,7 @@ class AgentService:
                     final_status = "completed" if result.exit_code == 0 else "failed"
 
                 run.status = final_status
-                run.finished_at = datetime.utcnow()
+                run.finished_at = datetime.now(UTC)
                 run.exit_code = result.exit_code
 
                 # Save full output to file for debugging
@@ -1517,8 +1517,8 @@ class AgentService:
                         ws = await session.get(Workspace, workspace_id)
                         if ws is not None and ws.status == "pending":
                             ws.status = "active"
-                            ws.last_scanned_at = datetime.utcnow()
-                            ws.updated_at = datetime.utcnow()
+                            ws.last_scanned_at = datetime.now(UTC)
+                            ws.updated_at = datetime.now(UTC)
                             session.add(ws)
                             await session.commit()
                             log.info(
@@ -1570,7 +1570,7 @@ class AgentService:
                     run = await session.get(AgentRun, run_id)
                     if run is not None and run.status not in ("completed", "failed", "killed"):
                         run.status = "failed"
-                        run.finished_at = datetime.utcnow()
+                        run.finished_at = datetime.now(UTC)
                         run.exit_code = -1
                         run.output_redacted = f"Unhandled exception: {exc}"[:10000]
                         session.add(run)
@@ -1586,7 +1586,7 @@ class AgentService:
                     run = await session.get(AgentRun, run_id)
                     if run is not None and run.status == "running":
                         run.status = "failed"
-                        run.finished_at = datetime.utcnow()
+                        run.finished_at = datetime.now(UTC)
                         run.exit_code = -1
                         run.output_redacted = "Force-failed: task lifecycle guard"[:10000]
                         session.add(run)
@@ -1627,7 +1627,7 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
     if not stale_runs:
         return 0
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     for run in stale_runs:
         run.status = "failed"
         run.finished_at = now

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Column, DateTime, String, Uuid
 from sqlmodel import Field
@@ -24,6 +24,6 @@ class PlatformSetting(BaseModel, table=True):
         sa_column=Column(Uuid(as_uuid=True), nullable=True),
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )

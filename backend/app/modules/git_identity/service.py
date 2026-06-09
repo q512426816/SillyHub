@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -101,7 +101,7 @@ class GitIdentityService:
         row = await self.get(identity_id, user_id)
         if row.revoked_at is not None:
             raise IdentityRevoked("Identity already revoked.")
-        row.revoked_at = datetime.utcnow()
+        row.revoked_at = datetime.now(UTC)
         await self._session.commit()
         await self._session.refresh(row)
         log.info("git_identity.revoked", identity_id=str(identity_id))
@@ -124,7 +124,7 @@ class GitIdentityService:
         token = self._cipher.decrypt(row.encrypted_credential, row.key_id)
         result = await provider.check_pat_access(token, request.repo_url)
 
-        row.last_used_at = datetime.utcnow()
+        row.last_used_at = datetime.now(UTC)
         await self._session.commit()
         return result
 
@@ -137,7 +137,7 @@ class GitIdentityService:
                 "Identity has been revoked.",
                 details={"identity_id": str(row.id)},
             )
-        if row.expires_at and row.expires_at < datetime.utcnow():
+        if row.expires_at and row.expires_at < datetime.now(UTC):
             raise IdentityExpired(
                 "Identity has expired.",
                 details={"identity_id": str(row.id), "expires_at": str(row.expires_at)},

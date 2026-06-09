@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
@@ -75,7 +75,7 @@ class ChangeWriterService:
             repo_dir = Path(_rewrite_path(workspace.root_path))
 
         # Compute change_key from date + slugified title
-        date_prefix = datetime.utcnow().strftime("%Y-%m-%d")
+        date_prefix = datetime.now(UTC).strftime("%Y-%m-%d")
         slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40] or "untitled"
         change_key = f"{date_prefix}-{slug}-{uuid.uuid4().hex[:6]}"
 
@@ -84,7 +84,7 @@ class ChangeWriterService:
         change_dir = resolver.change_dir(change_key)
         change_dir.mkdir(parents=True, exist_ok=True)
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         author = str(user_id)
 
         # Write MASTER.md with frontmatter
@@ -206,7 +206,7 @@ class ChangeWriterService:
         file_path = change_dir / filename
 
         # Ensure frontmatter
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         author = str(user_id)
         content = self._ensure_frontmatter(content, author, now)
 
@@ -282,7 +282,7 @@ class ChangeWriterService:
             )
 
         generated: list[str] = []
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         author = str(user_id)
 
         for doc_type in doc_types:

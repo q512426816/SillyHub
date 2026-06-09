@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -101,7 +101,7 @@ async def test_topology_excludes_soft_deleted(db_session: AsyncSession) -> None:
     """Soft-deleted workspace not in nodes; its edges filtered out."""
     ws_a = await _create_workspace(db_session, "Alpha")
     ws_b = await _create_workspace(
-        db_session, "Bravo", status="deleted", deleted_at=datetime.utcnow()
+        db_session, "Bravo", status="deleted", deleted_at=datetime.now(UTC)
     )
     ws_c = await _create_workspace(db_session, "Charlie")
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import shutil
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
@@ -77,7 +77,7 @@ class ArchiveService:
 
         change.status = "archived"
         change.location = "archive"
-        change.archived_at = datetime.utcnow()
+        change.archived_at = datetime.now(UTC)
         # Update path to reflect new archive location
         change.path = str(archive_dest.relative_to(ws_root))
         await self._session.commit()
@@ -129,7 +129,7 @@ class ArchiveService:
             "change_type": change.change_type,
             "affected_components": change.affected_components,
             "documents": doc_summaries,
-            "distilled_at": datetime.utcnow().isoformat(),
+            "distilled_at": datetime.now(UTC).isoformat(),
         }
 
         # Write knowledge file

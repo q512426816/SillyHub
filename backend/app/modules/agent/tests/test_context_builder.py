@@ -511,7 +511,7 @@ async def test_fetch_referenced_workspaces_skips_deleted_workspace(
     db_session: AsyncSession,
 ) -> None:
     """Relations pointing to a soft-deleted workspace are skipped."""
-    from datetime import datetime
+    from datetime import UTC, datetime
 
     from app.modules.agent.context_builder import _fetch_referenced_workspaces
     from app.modules.workspace.model import Workspace, WorkspaceRelation
@@ -523,7 +523,7 @@ async def test_fetch_referenced_workspaces_skips_deleted_workspace(
         slug="deleted",
         root_path="/deleted",
         status="deleted",
-        deleted_at=datetime.utcnow(),
+        deleted_at=datetime.now(UTC),
     )
     db_session.add_all([ws_a, ws_deleted])
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 MAX_CONTENT_BYTES = 1_000_000
@@ -58,7 +58,7 @@ def parse_md_directory(directory: Path, sillyspec_root: Path, rel_prefix: str) -
         rel_path = f"{rel_prefix}/{md_file.name}"
         title = _extract_title(content)
         try:
-            mtime = datetime.utcfromtimestamp(md_file.stat().st_mtime)
+            mtime = datetime.fromtimestamp(md_file.stat().st_mtime, tz=UTC)
         except OSError:
             mtime = None
 

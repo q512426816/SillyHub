@@ -14,7 +14,7 @@ Tables
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, String, Text, Uuid, text
@@ -57,7 +57,7 @@ class SpecProfileManifest(BaseModel, table=True):
         sa_column=Column(Boolean, nullable=False, server_default=text("TRUE")),
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 
@@ -111,6 +111,6 @@ class SpecConflict(BaseModel, table=True):
         sa_column=Column(String(20), nullable=False, server_default=text("'open'")),
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )

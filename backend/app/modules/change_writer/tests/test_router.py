@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -97,8 +97,8 @@ async def _setup_prerequisites(db_session) -> dict:
         path=lease_root,
         branch_name="test-branch",
         status="locked",
-        locked_at=datetime.utcnow(),
-        expires_at=datetime.utcnow() + timedelta(hours=1),
+        locked_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
     )
     db_session.add(lease)
     await db_session.commit()

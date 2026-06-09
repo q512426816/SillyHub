@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -98,7 +98,7 @@ class WorkspaceService:
         created_by: uuid.UUID | None,
     ) -> Workspace:
         slug = payload.slug or slugify(payload.name)
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         # If an active/pending workspace already exists for this root_path,
         # activate it instead of creating a new one.
@@ -296,7 +296,7 @@ class WorkspaceService:
             scan_path = workspace.root_path
 
         scan = self.scan(scan_path)
-        workspace.last_scanned_at = datetime.utcnow()
+        workspace.last_scanned_at = datetime.now(UTC)
         workspace.updated_at = workspace.last_scanned_at
 
         if scan.is_sillyspec and scan.structure.has_projects_dir:
@@ -321,7 +321,7 @@ class WorkspaceService:
 
     async def soft_delete(self, workspace_id: uuid.UUID) -> Workspace:
         workspace = await self.get(workspace_id)
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         workspace.deleted_at = now
         workspace.updated_at = now
         workspace.status = "deleted"
@@ -360,7 +360,7 @@ class WorkspaceService:
 
             for field, value in changes.items():
                 setattr(ws, field, value)
-            ws.updated_at = datetime.utcnow()
+            ws.updated_at = datetime.now(UTC)
             await self._session.commit()
             await self._session.refresh(ws)
             log.info(
@@ -480,7 +480,7 @@ class WorkspaceService:
                 existing.source_yaml_path = pw.source_yaml_path
                 existing.component_key = pw.component_key
                 existing.root_path = child_root
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = datetime.now(UTC)
                 stats["updated"] += 1
                 seen_child_ids.add(existing.id)
             else:
@@ -502,8 +502,8 @@ class WorkspaceService:
                     test_command=pw.test_command,
                     source_yaml_path=pw.source_yaml_path,
                     created_by=None,
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow(),
+                    created_at=datetime.now(UTC),
+                    updated_at=datetime.now(UTC),
                 )
                 self._session.add(child)
                 stats["created"] += 1
@@ -514,9 +514,9 @@ class WorkspaceService:
         # 7. Soft-delete removed children
         for _source_path, child in existing_children.items():
             if child.id not in seen_child_ids:
-                child.deleted_at = datetime.utcnow()
+                child.deleted_at = datetime.now(UTC)
                 child.status = "deleted"
-                child.updated_at = datetime.utcnow()
+                child.updated_at = datetime.now(UTC)
                 stats["deleted"] += 1
 
         await self._session.flush()
@@ -661,7 +661,7 @@ class WorkspaceService:
                 suffix = uuid.uuid4().hex[:8]
                 slug = f"{slugify(name)[:90]}-{suffix}"
 
-            now = datetime.utcnow()
+            now = datetime.now(UTC)
             workspace = Workspace(
                 id=uuid.uuid4(),
                 name=name,
@@ -786,8 +786,8 @@ class WorkspaceService:
             return workspace
 
         workspace.status = "active"
-        workspace.updated_at = datetime.utcnow()
-        workspace.last_scanned_at = datetime.utcnow()
+        workspace.updated_at = datetime.now(UTC)
+        workspace.last_scanned_at = datetime.now(UTC)
 
         # Scan and copy .sillyspec to platform storage
         scan = self.scan(workspace.root_path)

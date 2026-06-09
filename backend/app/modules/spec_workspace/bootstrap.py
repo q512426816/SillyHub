@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
@@ -218,7 +218,7 @@ async def _execute_bootstrap_agent_run(
             spec_ws = await _load_spec_workspace(session, workspace_id)
             if spec_ws is None:
                 run.status = "failed"
-                run.finished_at = datetime.utcnow()
+                run.finished_at = datetime.now(UTC)
                 run.exit_code = 1
                 run.output_redacted = "SpecWorkspace not found for the given workspace."
                 session.add(run)
@@ -228,7 +228,7 @@ async def _execute_bootstrap_agent_run(
             workspace = await session.get(Workspace, workspace_id)
             if workspace is None:
                 run.status = "failed"
-                run.finished_at = datetime.utcnow()
+                run.finished_at = datetime.now(UTC)
                 run.exit_code = 1
                 run.output_redacted = "Workspace not found."
                 session.add(run)
@@ -237,11 +237,11 @@ async def _execute_bootstrap_agent_run(
 
             # -- 2. Mark running ---------------------------------------------------
             run.status = "running"
-            run.started_at = datetime.utcnow()
+            run.started_at = datetime.now(UTC)
             session.add(run)
             await session.commit()
 
-            start_ts = datetime.utcnow().isoformat()
+            start_ts = datetime.now(UTC).isoformat()
             start_message = (
                 "[BOOTSTRAP] Agent run started. Connecting ClaudeCodeAdapter "
                 "for sillyspec init and scan."
@@ -259,7 +259,7 @@ async def _execute_bootstrap_agent_run(
             preflight_error = _run_preflight(code_root_path)
             if preflight_error:
                 run.status = "failed"
-                run.finished_at = datetime.utcnow()
+                run.finished_at = datetime.now(UTC)
                 run.exit_code = 1
                 run.output_redacted = preflight_error
                 session.add(run)
@@ -367,7 +367,7 @@ async def _execute_bootstrap_agent_run(
                 )
 
             # -- 8. Update AgentRun + SpecWorkspace ---------------------------------
-            now = datetime.utcnow()
+            now = datetime.now(UTC)
             exit_code = result.exit_code
 
             if validation_passed:
@@ -515,8 +515,8 @@ async def _execute_bootstrap_agent_run(
                     ws = await session.get(Workspace, workspace_id)
                     if ws is not None and ws.status == "pending":
                         ws.status = "active"
-                        ws.last_scanned_at = datetime.utcnow()
-                        ws.updated_at = datetime.utcnow()
+                        ws.last_scanned_at = datetime.now(UTC)
+                        ws.updated_at = datetime.now(UTC)
                         session.add(ws)
                         await session.commit()
                         log.info(
@@ -575,7 +575,7 @@ async def _execute_bootstrap_agent_run(
                 run = await session.get(AgentRun, run_id)
                 if run is not None and run.status not in ("completed", "failed", "killed"):
                     run.status = "failed"
-                    run.finished_at = datetime.utcnow()
+                    run.finished_at = datetime.now(UTC)
                     run.exit_code = 1
                     run.output_redacted = f"Unhandled exception: {exc}"[:10000]
                     session.add(run)
@@ -615,7 +615,7 @@ async def _execute_bootstrap_agent_run(
                     spec_ws = await _load_spec_workspace(session, workspace_id)
                     if spec_ws is not None:
                         spec_ws.sync_status = "dirty"
-                        spec_ws.updated_at = datetime.utcnow()
+                        spec_ws.updated_at = datetime.now(UTC)
                         session.add(spec_ws)
 
                     await session.commit()
@@ -795,7 +795,7 @@ async def _write_run_log(
                 AgentRunLog(
                     id=uuid.uuid4(),
                     run_id=run_id,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(UTC),
                     channel=channel,
                     content_redacted=chunk,
                 )
@@ -831,7 +831,7 @@ def _parse_log_timestamp(ts: str) -> datetime:
     try:
         return datetime.fromisoformat(ts)
     except (ValueError, TypeError):
-        return datetime.utcnow()
+        return datetime.now(UTC)
 
 
 async def _publish_log_event(

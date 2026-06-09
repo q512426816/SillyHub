@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -103,8 +103,8 @@ async def _setup_active_lease(db_session) -> dict:
         path=lease_root,
         branch_name="test-branch",
         status="locked",
-        locked_at=datetime.utcnow(),
-        expires_at=datetime.utcnow() + timedelta(hours=1),
+        locked_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
     )
     db_session.add(lease)
     await db_session.commit()
@@ -371,7 +371,7 @@ async def test_git_env_defaults_without_identity(client, db_session, mock_repo_d
     refs = await _setup_active_lease(db_session)
 
     # Revoke the identity so none is usable
-    from datetime import datetime
+    from datetime import UTC, datetime
 
     from sqlalchemy import select
 
@@ -379,7 +379,7 @@ async def test_git_env_defaults_without_identity(client, db_session, mock_repo_d
 
     stmt = select(GitIdentity).where(GitIdentity.id == refs["identity_id"])
     identity = (await db_session.execute(stmt)).scalars().first()
-    identity.revoked_at = datetime.utcnow()
+    identity.revoked_at = datetime.now(UTC)
     await db_session.commit()
 
     with patch("app.modules.git_gateway.service.asyncio.create_subprocess_exec") as mock_exec:

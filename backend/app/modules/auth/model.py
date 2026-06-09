@@ -13,7 +13,7 @@ Schema follows ``references/15-authentication.md`` §2 and
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, String, Uuid
@@ -49,11 +49,11 @@ class User(BaseModel, table=True):
         sa_column=Column(Boolean, nullable=False, default=False),
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     last_login_at: datetime | None = Field(
@@ -91,7 +91,7 @@ class Session(BaseModel, table=True):
     user_agent: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     ip: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
     created_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     expires_at: datetime = Field(
@@ -120,7 +120,7 @@ class Role(BaseModel, table=True):
         sa_column=Column(Boolean, nullable=False, default=False),
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 
@@ -185,6 +185,6 @@ class UserWorkspaceRole(BaseModel, table=True):
         sa_column=Column(Uuid(as_uuid=True), nullable=True),
     )
     granted_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
