@@ -248,3 +248,8 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/components/agent-log-viewer.tsx
 结果：逐项验证10项需求均已实现（Bash tool 结构化渲染、command 折叠、stdout/stderr 分离、原始数据折叠、扫描自检摘要卡片、结果摘要列、状态区分、全屏+频道过滤、自动滚动、复制/下载），修复 parseScanCheckOutput 正则精确匹配中文格式
+
+## ql-20260609-013-a3f7 | 2026-06-09 16:20:00 | Agent 日志事件归一化 + 工具专属渲染(Write/Agent/Grep/Read/Edit)
+状态：已完成
+文件：frontend/src/components/agent-log/types.ts, frontend/src/components/agent-log/normalize.ts, frontend/src/components/agent-log/tool-renderers.tsx, frontend/src/components/agent-log-viewer.tsx
+结果：1) normalizeLogs 归一化：隐藏重复 TOOL_USE stdout、合并 TOOL_RESULT 到 tool_call 卡片；2) 6 种工具专属渲染器（Write 文件信息+内容折叠、Agent description+prompt折叠、Bash 增强输出折叠、Grep/Glob pattern+命中预览、Read 文件路径+内容折叠、Edit 变更对比折叠）；3) Thinking/System stdout 默认折叠+半透明；4) 通用 fallback 保留参数折叠；5) 全部 backward-compatible export

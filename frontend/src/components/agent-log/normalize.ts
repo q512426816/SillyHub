@@ -1,0 +1,176 @@
+import type { AgentRunLogEntry } from "@/lib/agent";
+import type { ProcessedLog, ScanCheckResult, ToolCallEntry } from "./types";
+
+/* ------------------------------------------------------------------ */
+/*  Constants                                                          */
+/* ------------------------------------------------------------------ */
+
+export const COMMAND_COLLAPSE_LINES = 5;
+export const COMMAND_COLLAPSE_CHARS = 500;
+export const EMPTY_REPLIED_INPUTS = new Set<string>();
+
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                            */
+/* ------------------------------------------------------------------ */
+
+function stringifyToolArgs(value: unknown): string {
+  if (value == null || value === "") return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+export function parseToolCallContent(raw: string): ToolCallEntry | null {
+  try {
+    const obj = JSON.parse(raw);
+    const args = obj.args ?? obj.arguments ?? "";
+    const toolName = obj.tool ?? obj.name ?? "unknown";
+    return {
+      timestamp: obj.timestamp ?? "",
+      tool: toolName,
+      args: stringifyToolArgs(args),
+      status: obj.requires_approval ? "pending" : "allowed",
+      success: obj.success !== false,
+      description: typeof args === "object" && args !== null ? args.description : undefined,
+      command: typeof args === "object" && args !== null ? args.command : undefined,
+      rawArgs: args,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function parseScanCheckOutput(text: string): ScanCheckResult | null {
+  const scanDocsMatch =
+    text.match(/Scan\s*文档\s*\((\d+\/\d+)\)/i) ||
+    text.match(/(\d+)\s*份\s*scan\s*文档/i);
+  const moduleMatch =
+    text.match(/(\d+)\s*个\s*模块/i) ||
+    text.match(/(\d+)个模块/i);
+  const flowMatch =
+    text.match(/(\d+)\s*份\s*业务流程/i) ||
+    text.match(/(\d+)\s*个\s*流程/i);
+  const glossaryOk =
+    /glossary\.md\s*\(.*?\)\s*✅/i.test(text) ||
+    /术语表.*?✅/i.test(text) ||
+    /glossary\.md\s*\(/i.test(text);
+  const totalMatch =
+    text.match(/(\d+)\s*份模块卡片/i) ||
+    text.match(/总文件数[:\s]*(\d+)/i);
+  const passed =
+    (/全部通过|✅.*?通过|self\.check.*?pass/i.test(text) || /扫描完整性验证通过/i.test(text))
+    && !/❌/.test(text.split("自检结果")[1] ?? text);
+
+  if (!scanDocsMatch && !moduleMatch) return null;
+  return {
+    scanDocs: scanDocsMatch?.[1] ?? "?",
+    moduleCount: moduleMatch?.[1] ?? "?",
+    flowCount: flowMatch?.[1] ?? "0",
+    glossary: glossaryOk,
+    totalFiles: totalMatch?.[1] ?? "?",
+    passed,
+  };
+}
+
+export function isPendingReplied(
+  logTimestamp: string,
+  allLogs: AgentRunLogEntry[],
+): boolean {
+  return allLogs.some(
+    (l) =>
+      l.channel === "user_input" &&
+      l.timestamp >= logTimestamp,
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Log normalization                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Normalize raw agent logs:
+ * 1. Hide stdout entries that duplicate [TOOL_USE] from a nearby tool_call
+ * 2. Merge [TOOL_RESULT] stdout lines into the nearest preceding tool_call
+ */
+export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
+  const result: ProcessedLog[] = logs.map((log) => ({ log, hidden: false }));
+
+  let lastToolCallIdx = -1;
+
+  for (let i = 0; i < logs.length; i++) {
+    const current = result[i];
+    if (!current) continue;
+
+    // Track last tool_call
+    if (current.log.channel === "tool_call") {
+      lastToolCallIdx = i;
+      continue;
+    }
+
+    if (current.log.channel !== "stdout") continue;
+
+    const content = current.log.content_redacted;
+    const lines = content.split("\n");
+    const nonEmpty = lines.filter((l) => l.trim());
+    if (nonEmpty.length === 0) continue;
+
+    const toolUseLines = nonEmpty.filter((l) => l.trim().startsWith("[TOOL_USE]"));
+    const toolResultLines = nonEmpty.filter((l) => l.trim().startsWith("[TOOL_RESULT]"));
+
+    // Pure [TOOL_USE] duplicate of a nearby tool_call → hide
+    if (
+      toolUseLines.length > 0 &&
+      toolResultLines.length === 0 &&
+      lastToolCallIdx >= 0 &&
+      i > lastToolCallIdx &&
+      i <= lastToolCallIdx + 3
+    ) {
+      current.hidden = true;
+      continue;
+    }
+
+    // [TOOL_RESULT] content → merge into last tool_call
+    if (toolResultLines.length > 0 && lastToolCallIdx >= 0) {
+      const tcEntry = result[lastToolCallIdx];
+      if (tcEntry) {
+        const resultContent = toolResultLines
+          .map((l) => l.replace(/^\s*\[TOOL_RESULT\]\s*/, ""))
+          .filter((l) => l.trim())
+          .join("\n");
+
+        if (tcEntry.mergedToolResult) {
+          tcEntry.mergedToolResult += "\n" + resultContent;
+        } else {
+          tcEntry.mergedToolResult = resultContent;
+        }
+      }
+
+      // If stdout only had [TOOL_RESULT] and [TOOL_USE], hide it
+      const remaining = nonEmpty.filter(
+        (l) => !l.trim().startsWith("[TOOL_RESULT]") && !l.trim().startsWith("[TOOL_USE]"),
+      );
+      if (remaining.length === 0) {
+        current.hidden = true;
+      }
+    }
+  }
+
+  return result;
+}
+
+/** Check if stdout content contains only thinking/system/assistant lines */
+export function isThinkingContent(content: string): boolean {
+  const lines = content.split("\n").filter((l) => l.trim());
+  return (
+    lines.length > 0 &&
+    lines.every(
+      (l) =>
+        /^\s*\[THINKING\]/.test(l) ||
+        /^\s*\[SYSTEM/.test(l) ||
+        /^\s*\[ASSISTANT\]/.test(l),
+    )
+  );
+}

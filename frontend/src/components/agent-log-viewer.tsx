@@ -2,11 +2,8 @@
 
 import {
   AlertTriangle,
-  ChevronDown,
-  ChevronRight,
   CircleDot,
   Clock3,
-  Copy,
   CornerDownRight,
   Maximize2,
   MessageSquareText,
@@ -14,87 +11,42 @@ import {
   Send,
   Wrench,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { AgentRunLogEntry } from "@/lib/agent";
 
-/* ------------------------------------------------------------------ */
-/*  Types                                                              */
-/* ------------------------------------------------------------------ */
+// New modules
+export type { ToolCallEntry, ScanCheckResult, AgentLogInputControls } from "./agent-log/types";
+export type { ProcessedLog } from "./agent-log/types";
+export {
+  COMMAND_COLLAPSE_LINES,
+  COMMAND_COLLAPSE_CHARS,
+  EMPTY_REPLIED_INPUTS,
+  parseToolCallContent,
+  parseScanCheckOutput,
+  isPendingReplied,
+  normalizeLogs,
+  isThinkingContent,
+} from "./agent-log/normalize";
+export { CopyButton, CollapsibleSection, ToolCallPreview } from "./agent-log/tool-renderers";
 
-export type ToolCallEntry = {
-  timestamp: string;
-  tool: string;
-  args: string;
-  status: "allowed" | "pending";
-  success: boolean;
-  description?: string;
-  command?: string;
-  rawArgs: unknown;
-};
-
-export type ScanCheckResult = {
-  scanDocs: string;
-  moduleCount: string;
-  flowCount: string;
-  glossary: boolean;
-  totalFiles: string;
-  passed: boolean;
-};
-
-export type AgentLogInputControls = {
-  inputValues: Record<string, string>;
-  submittingInputs: Record<string, boolean>;
-  inputErrors: Record<string, string>;
-  repliedInputs: Set<string>;
-  onChange: (_logId: string, _value: string) => void;
-  onSubmit: (_logId: string) => void;
-};
-
-/* ------------------------------------------------------------------ */
-/*  Constants                                                          */
-/* ------------------------------------------------------------------ */
-
-export const COMMAND_COLLAPSE_LINES = 5;
-export const COMMAND_COLLAPSE_CHARS = 500;
-export const EMPTY_REPLIED_INPUTS = new Set<string>();
+import {
+  isPendingReplied,
+  normalizeLogs,
+  parseScanCheckOutput,
+  parseToolCallContent,
+  isThinkingContent,
+  EMPTY_REPLIED_INPUTS,
+} from "./agent-log/normalize";
+import { ToolCallPreview, CollapsibleSection } from "./agent-log/tool-renderers";
+import type { AgentLogInputControls, ProcessedLog, ScanCheckResult } from "./agent-log/types";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
-
-export function parseToolCallContent(raw: string): ToolCallEntry | null {
-  try {
-    const obj = JSON.parse(raw);
-    const args = obj.args ?? obj.arguments ?? "";
-    const toolName = obj.tool ?? obj.name ?? "unknown";
-    return {
-      timestamp: obj.timestamp ?? "",
-      tool: toolName,
-      args: stringifyToolArgs(args),
-      status: obj.requires_approval ? "pending" : "allowed",
-      success: obj.success !== false,
-      description: typeof args === "object" && args !== null ? args.description : undefined,
-      command: typeof args === "object" && args !== null ? args.command : undefined,
-      rawArgs: args,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function stringifyToolArgs(value: unknown): string {
-  if (value == null || value === "") return "";
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
 
 function semanticLineClass(line: string): string {
   if (line.startsWith("[TOOL_USE]")) return "text-blue-400";
@@ -181,199 +133,9 @@ function renderLogLines(content: string) {
   );
 }
 
-export function isPendingReplied(
-  logTimestamp: string,
-  allLogs: AgentRunLogEntry[],
-): boolean {
-  return allLogs.some(
-    (l) =>
-      l.channel === "user_input" &&
-      l.timestamp >= logTimestamp,
-  );
-}
-
-export function parseScanCheckOutput(text: string): ScanCheckResult | null {
-  const scanDocsMatch =
-    text.match(/Scan\s*文档\s*\((\d+\/\d+)\)/i) ||
-    text.match(/(\d+)\s*份\s*scan\s*文档/i);
-  const moduleMatch =
-    text.match(/(\d+)\s*个\s*模块/i) ||
-    text.match(/(\d+)个模块/i);
-  const flowMatch =
-    text.match(/(\d+)\s*份\s*业务流程/i) ||
-    text.match(/(\d+)\s*个\s*流程/i);
-  const glossaryOk =
-    /glossary\.md\s*\(.*?\)\s*✅/i.test(text) ||
-    /术语表.*?✅/i.test(text) ||
-    /glossary\.md\s*\(/i.test(text);
-  const totalMatch =
-    text.match(/(\d+)\s*份模块卡片/i) ||
-    text.match(/总文件数[:\s]*(\d+)/i);
-  const passed =
-    (/全部通过|✅.*?通过|self\.check.*?pass/i.test(text) || /扫描完整性验证通过/i.test(text))
-    && !/❌/.test(text.split("自检结果")[1] ?? text);
-
-  if (!scanDocsMatch && !moduleMatch) return null;
-  return {
-    scanDocs: scanDocsMatch?.[1] ?? "?",
-    moduleCount: moduleMatch?.[1] ?? "?",
-    flowCount: flowMatch?.[1] ?? "0",
-    glossary: glossaryOk,
-    totalFiles: totalMatch?.[1] ?? "?",
-    passed,
-  };
-}
-
 /* ------------------------------------------------------------------ */
-/*  Sub-components                                                     */
+/*  ScanCheckSummaryCard                                               */
 /* ------------------------------------------------------------------ */
-
-function CopyButton({ text, label }: { text: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }, [text]);
-  return (
-    <button
-      onClick={handleCopy}
-      className="inline-flex items-center gap-1 rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-      title={label}
-    >
-      <Copy className="h-2.5 w-2.5" />
-      {copied ? "已复制" : label}
-    </button>
-  );
-}
-
-function CollapsibleSection({
-  title,
-  defaultOpen = false,
-  children,
-}: {
-  title: string;
-  defaultOpen?: boolean;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="mt-1">
-      <button
-        onClick={() => setOpen(!open)}
-        className="inline-flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300"
-      >
-        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        {title}
-      </button>
-      {open && <div className="mt-1">{children}</div>}
-    </div>
-  );
-}
-
-function BashToolPreview({ entry }: { entry: ToolCallEntry }) {
-  const desc = entry.description;
-  const cmd = entry.command ?? "";
-  const cmdLines = cmd.split("\n");
-  const cmdTooLong = cmdLines.length > COMMAND_COLLAPSE_LINES || cmd.length > COMMAND_COLLAPSE_CHARS;
-  const firstLine = cmdLines[0] ?? "";
-  const title = desc || (cmd ? firstLine.slice(0, 80) + (firstLine.length > 80 ? "..." : "") : entry.tool);
-
-  return (
-    <div className="min-w-0 space-y-1">
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-300">Bash</span>
-        <span className="min-w-0 break-words text-xs text-zinc-200 [overflow-wrap:anywhere]">{title}</span>
-        <span
-          className={cn(
-            "inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium",
-            entry.status === "pending"
-              ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
-              : entry.success
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                : "border-red-500/30 bg-red-500/10 text-red-300",
-          )}
-        >
-          {entry.status === "pending" ? "待审批" : entry.success ? "已通过" : "失败"}
-        </span>
-      </div>
-      {cmd && (
-        <div>
-          {cmdTooLong ? (
-            <CollapsibleSection title="执行命令">
-              <div className="relative">
-                <pre className="max-w-full whitespace-pre-wrap break-words rounded-md border border-zinc-800 bg-black/30 px-2 py-1 text-[11px] leading-5 text-zinc-400 [overflow-wrap:anywhere]">
-                  {cmd}
-                </pre>
-                <div className="mt-1">
-                  <CopyButton text={cmd} label="复制命令" />
-                </div>
-              </div>
-            </CollapsibleSection>
-          ) : (
-            <div>
-              <pre className="max-w-full whitespace-pre-wrap break-words rounded-md border border-zinc-800 bg-black/20 px-2 py-1 text-[11px] leading-5 text-zinc-400 [overflow-wrap:anywhere]">
-                {cmd}
-              </pre>
-              <div className="mt-1">
-                <CopyButton text={cmd} label="复制命令" />
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-      <CollapsibleSection title="原始数据">
-        <pre className="max-w-full whitespace-pre-wrap break-words rounded-md border border-zinc-800 bg-black/20 px-2 py-1 text-[10px] leading-4 text-zinc-500 [overflow-wrap:anywhere]">
-          {entry.args}
-        </pre>
-      </CollapsibleSection>
-    </div>
-  );
-}
-
-function GenericToolPreview({ entry }: { entry: ToolCallEntry }) {
-  const isBash = entry.tool === "Bash" || entry.tool === "bash";
-  if (isBash) return <BashToolPreview entry={entry} />;
-
-  return (
-    <div className="min-w-0 space-y-1">
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="min-w-0 break-words font-semibold text-blue-200 [overflow-wrap:anywhere]">
-          {entry.tool}
-        </span>
-        <span
-          className={cn(
-            "inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium",
-            entry.status === "pending"
-              ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
-              : entry.success
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                : "border-red-500/30 bg-red-500/10 text-red-300",
-          )}
-        >
-          {entry.status === "pending" ? "待审批" : entry.success ? "已通过" : "失败"}
-        </span>
-      </div>
-      {entry.args && (
-        <CollapsibleSection
-          title="参数"
-          defaultOpen={entry.args.length < 300}
-        >
-          <pre className="max-w-full whitespace-pre-wrap break-words rounded-md border border-zinc-800 bg-black/20 px-2 py-1 text-[11px] leading-5 text-zinc-400 [overflow-wrap:anywhere]">
-            {entry.args}
-          </pre>
-        </CollapsibleSection>
-      )}
-    </div>
-  );
-}
-
-function ToolCallPreview({ entry }: { entry: ToolCallEntry }) {
-  const isBash = entry.tool === "Bash" || entry.tool === "bash";
-  if (isBash) return <BashToolPreview entry={entry} />;
-  return <GenericToolPreview entry={entry} />;
-}
 
 function ScanCheckSummaryCard({ result }: { result: ScanCheckResult }) {
   return (
@@ -396,29 +158,37 @@ function ScanCheckSummaryCard({ result }: { result: ScanCheckResult }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/*  AgentLogRow                                                        */
+/* ------------------------------------------------------------------ */
+
 export function AgentLogRow({
-  log,
-  logs,
+  processedLog,
+  allLogs,
   compact,
   inputControls,
 }: {
-  log: AgentRunLogEntry;
-  logs: AgentRunLogEntry[];
+  processedLog: ProcessedLog;
+  allLogs: ProcessedLog[];
   compact?: boolean;
   inputControls?: AgentLogInputControls;
 }) {
+  const log = processedLog.log;
   const meta = logChannelMeta(log.channel);
   const toolCall = log.channel === "tool_call"
     ? parseToolCallContent(log.content_redacted)
     : null;
   const repliedInputs = inputControls?.repliedInputs ?? EMPTY_REPLIED_INPUTS;
   const isReplied = log.channel === "pending_input"
-    && (repliedInputs.has(log.id) || isPendingReplied(log.timestamp, logs));
+    && (repliedInputs.has(log.id) || isPendingReplied(log.timestamp, allLogs.map((p) => p.log)));
   const canReply = log.channel === "pending_input" && inputControls && !isReplied;
   const value = inputControls?.inputValues[log.id] ?? "";
   const submitting = inputControls?.submittingInputs[log.id] ?? false;
   const inputError = inputControls?.inputErrors[log.id];
   const Icon = meta.Icon;
+
+  // Check if stdout is thinking-only content
+  const isThinking = log.channel === "stdout" && isThinkingContent(log.content_redacted);
 
   return (
     <div
@@ -426,6 +196,7 @@ export function AgentLogRow({
         "grid min-w-0 max-w-full grid-cols-[58px_74px_minmax(0,1fr)] gap-2 px-3 py-2 transition-colors sm:grid-cols-[76px_84px_minmax(0,1fr)]",
         compact ? "text-[11px] leading-5" : "text-xs leading-5",
         meta.rowClass,
+        isThinking && "opacity-50",
       )}
     >
       <span className="mt-0.5 flex min-w-0 items-center gap-1 font-mono text-[11px] text-zinc-600">
@@ -442,25 +213,44 @@ export function AgentLogRow({
         {meta.label}
       </span>
       <div className="min-w-0 max-w-full">
-        <div
-          className={cn(
-            "min-w-0 max-w-full whitespace-pre-wrap break-words font-mono [overflow-wrap:anywhere]",
-            log.channel === "stderr" ? "text-amber-200" : "text-zinc-300",
-          )}
-        >
-          {toolCall ? <ToolCallPreview entry={toolCall} /> : (() => {
-            const scanCheck = log.channel === "stdout" ? parseScanCheckOutput(log.content_redacted) : null;
-            return (
-              <>
-                {scanCheck && <ScanCheckSummaryCard result={scanCheck} />}
-                <div className={scanCheck ? "mt-1" : ""}>
-                  {renderLogLines(log.content_redacted)}
-                </div>
-              </>
-            );
-          })()}
-        </div>
+        {/* Tool call → specialized renderer */}
+        {toolCall ? (
+          <div className="font-mono [overflow-wrap:anywhere]">
+            <ToolCallPreview
+              entry={toolCall}
+              mergedResult={processedLog.mergedToolResult}
+            />
+          </div>
+        ) : isThinking ? (
+          /* Thinking/System → collapsed */
+          <div className="font-mono [overflow-wrap:anywhere]">
+            <CollapsibleSection title="Thinking / System">
+              {renderLogLines(log.content_redacted)}
+            </CollapsibleSection>
+          </div>
+        ) : (
+          /* Default rendering */
+          <div
+            className={cn(
+              "min-w-0 max-w-full whitespace-pre-wrap break-words font-mono [overflow-wrap:anywhere]",
+              log.channel === "stderr" ? "text-amber-200" : "text-zinc-300",
+            )}
+          >
+            {(() => {
+              const scanCheck = log.channel === "stdout" ? parseScanCheckOutput(log.content_redacted) : null;
+              return (
+                <>
+                  {scanCheck && <ScanCheckSummaryCard result={scanCheck} />}
+                  <div className={scanCheck ? "mt-1" : ""}>
+                    {renderLogLines(log.content_redacted)}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        )}
 
+        {/* Pending input controls */}
         {log.channel === "pending_input" && (
           <div className="mt-2 min-w-0 max-w-full">
             {isReplied ? (
@@ -509,6 +299,10 @@ export function AgentLogRow({
   );
 }
 
+/* ------------------------------------------------------------------ */
+/*  AgentLogViewer                                                     */
+/* ------------------------------------------------------------------ */
+
 export function AgentLogViewer({
   title,
   runId,
@@ -538,15 +332,19 @@ export function AgentLogViewer({
   actions?: React.ReactNode;
   inputControls?: AgentLogInputControls;
 }) {
-  const logEntries = logs ?? [];
   const internalRef = useRef<HTMLDivElement>(null);
   const scrollRef = containerRef ?? internalRef;
   const [fullscreen, setFullscreen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
 
+  // Normalize raw logs → ProcessedLog[]
+  const processedLogs = normalizeLogs(logs ?? []);
+
+  // Apply channel filter to normalized (non-hidden) entries
+  const visibleLogs = processedLogs.filter((p) => !p.hidden);
   const filteredLogs = activeFilters.size > 0
-    ? logEntries.filter((l) => activeFilters.has(l.channel))
-    : logEntries;
+    ? visibleLogs.filter((p) => activeFilters.has(p.log.channel))
+    : visibleLogs;
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -605,7 +403,6 @@ export function AgentLogViewer({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          {/* Channel filter buttons */}
           {channelFilters.map((f) => (
             <button
               key={f.key}
@@ -630,7 +427,6 @@ export function AgentLogViewer({
           )}
           {summary}
           {actions}
-          {/* Fullscreen toggle */}
           <button
             onClick={() => setFullscreen(!fullscreen)}
             className="ml-1 inline-flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
@@ -656,15 +452,15 @@ export function AgentLogViewer({
           </div>
         ) : filteredLogs.length === 0 ? (
           <p className="px-4 py-10 text-center text-xs text-zinc-600">
-            {logEntries.length === 0 ? emptyText : "无匹配日志"}
+            {visibleLogs.length === 0 ? emptyText : "无匹配日志"}
           </p>
         ) : (
           <div className="min-w-0 max-w-full divide-y divide-zinc-900/90">
-            {filteredLogs.map((log) => (
+            {filteredLogs.map((plog) => (
               <AgentLogRow
-                key={log.id}
-                log={log}
-                logs={logEntries}
+                key={plog.log.id}
+                processedLog={plog}
+                allLogs={processedLogs}
                 compact={compact}
                 inputControls={inputControls}
               />
