@@ -209,6 +209,11 @@ created_at: 2026-06-03T08:42:04
 文件：frontend/src/components/agent-log-viewer.tsx, frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx
 结果：将自动滚动逻辑内置到 AgentLogViewer（internalRef + useEffect 监听 logEntries.length），移除 agent/page.tsx 外部 logContainerRef + useEffect，所有消费方自动获得滚动到底部行为
 
+## ql-20260609-007-b4c2 | 2026-06-09 13:47:04 | 工作区详情页显示上一次 Bootstrap 运行结果
+状态：已完成
+文件：frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
+结果：load() 保存 lastBsRun，无活跃运行时显示结果摘要卡片（状态徽章+开始时间+耗时+exit_code+run ID），前端已部署
+
 ## ql-20260609-002-f8a3 | 2026-06-09 10:16:43 | Agent 控制台日志展示优化：结构化 tool 回显 + 扫描自检摘要 + 状态区分
 状态：已完成
 文件：frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx

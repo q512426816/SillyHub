@@ -143,7 +143,11 @@ export default function WorkspaceDetailPage({ params }: Props) {
       const runs = await listAgentRuns(workspaceId).catch(() => [] as AgentRun[]);
       const bsRuns = runs
         .filter((r) => r.change_id == null)
-        .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+        .sort((a, b) => {
+          const ta = a.finished_at ?? a.started_at ?? "";
+          const tb = b.finished_at ?? b.started_at ?? "";
+          return +new Date(tb) - +new Date(ta);
+        });
       const activeRun = bsRuns[0];
 
       if (
