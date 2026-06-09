@@ -165,6 +165,37 @@ const OPTIONAL_DOCS = [
   "references",
 ] as const;
 
+type ToolCallEntry = {
+  tool: string;
+  args: string;
+  status: "allowed" | "pending";
+  success: boolean;
+  description?: string;
+  command?: string;
+};
+
+function parseToolCallContent(raw: string): ToolCallEntry | null {
+  try {
+    const obj = JSON.parse(raw);
+    const args = obj.args ?? obj.arguments ?? "";
+    const toolName = obj.tool ?? obj.name ?? "unknown";
+    return {
+      tool: toolName,
+      args: (() => {
+        if (args == null || args === "") return "";
+        if (typeof args === "string") return args;
+        try { return JSON.stringify(args, null, 2); } catch { return String(args); }
+      })(),
+      status: obj.requires_approval ? "pending" : "allowed",
+      success: obj.success !== false,
+      description: typeof args === "object" && args !== null ? args.description : undefined,
+      command: typeof args === "object" && args !== null ? args.command : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 const COMPONENT_EMOJI: Record<string, string> = {
   frontend: "🌐",
   web: "🌐",
@@ -935,7 +966,50 @@ export default function ChangeDetailPage({ params }: Props) {
                               : "INFO"}
                     </span>
                     <span className="min-w-0 flex-1 overflow-x-auto whitespace-pre font-mono text-foreground">
-                      {log.content_redacted}
+                      {log.channel === "tool_call"
+                        ? (() => {
+                            const tc = parseToolCallContent(log.content_redacted);
+                            if (!tc) return log.content_redacted;
+                            const isBash = tc.tool === "Bash" || tc.tool === "bash";
+                            const desc = tc.description;
+                            const cmd = tc.command ?? "";
+                            const cmdLines = cmd.split("\n");
+                            const firstLine = cmdLines[0] ?? "";
+                            const cmdTooLong = cmdLines.length > 5 || cmd.length > 500;
+                            const title = isBash
+                              ? (desc || (cmd ? firstLine.slice(0, 80) + (firstLine.length > 80 ? "..." : "") : tc.tool))
+                              : tc.tool;
+                            return (
+                              <span className="inline-flex flex-col gap-0.5">
+                                <span className="flex flex-wrap items-center gap-1.5">
+                                  {isBash && (
+                                    <span className="rounded bg-zinc-200 px-1 py-0.5 text-[10px] font-semibold text-emerald-700">Bash</span>
+                                  )}
+                                  <span className="font-semibold text-blue-600">{title}</span>
+                                  <span className={`inline-flex items-center rounded border px-1 py-0.5 text-[10px] font-medium ${
+                                    tc.status === "pending"
+                                      ? "border-amber-300 bg-amber-50 text-amber-700"
+                                      : tc.success
+                                        ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                                        : "border-red-300 bg-red-50 text-red-700"
+                                  }`}>
+                                    {tc.status === "pending" ? "待审批" : tc.success ? "已通过" : "失败"}
+                                  </span>
+                                </span>
+                                {isBash && cmd && !cmdTooLong && (
+                                  <pre className="whitespace-pre-wrap break-words rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] leading-4 text-zinc-600">
+                                    {cmd}
+                                  </pre>
+                                )}
+                                {!isBash && tc.args && (
+                                  <pre className="whitespace-pre-wrap break-words rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] leading-4 text-zinc-600">
+                                    {tc.args}
+                                  </pre>
+                                )}
+                              </span>
+                            );
+                          })()
+                        : log.content_redacted}
                     </span>
                   </div>
                 ))

@@ -185,7 +185,23 @@ created_at: 2026-06-03T08:42:04
 结果：加 activate+reparse；import 移至文件头；validation_passed 不再要求 post-scan status==success
 
 ## ql-20260609-001-c4d5 | 2026-06-09 09:55:00 | Agent 控制台日志截断 + TOOL 通道显示原始 JSON
-状态：进行中
+状态：已完成
 文件：backend/app/modules/agent/adapters/claude_code.py
+结果：tool args→2000、tool result→3000、thinking→2000、DB 写入→8000
+
+## ql-20260609-003-b5e2 | 2026-06-09 10:35:20 | Agent 控制台日志区域高度增加至 1.5 倍
+状态：已完成
+文件：frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx
+结果：实时日志 max-h 480px→720px，历史展开日志 max-h 320px→480px
+
+## ql-20260609-004-a9c1 | 2026-06-09 10:41:00 | Workspace Bootstrap 日志区域改为 Agent 控制台同款深色样式
+状态：已完成
+文件：frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
+结果：日志区域改为深色背景 bg-zinc-950 + 频道徽章(图标+颜色) + Bash tool 结构化渲染(description标题+command展示+状态徽章) + max-h-[720px]，清理旧 channelLabel/channelTagCls 函数
+
+## ql-20260609-002-f8a3 | 2026-06-09 10:16:43 | Agent 控制台日志展示优化：结构化 tool 回显 + 扫描自检摘要 + 状态区分
+状态：已完成
+文件：frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+结果：1) BashToolPreview 组件：description 标题 + command 折叠 + 复制按钮 + 原始数据折叠；2) ScanCheckSummaryCard 解析扫描自检输出为摘要卡片；3) 历史运行表格增加结果摘要列 + 状态区分后置校验；4) 下载日志按钮；5) 变更详情页同步优化 Bash tool 渲染。前端已重建部署。
 根因：_format_conversation_log 中 tool args 截断 200 字符、tool result 截断 500 字符、thinking 截断 300 字符；DB 写入截断 4000 字符可能破坏 JSON 导致前端解析失败
 结果：tool args→2000、tool result→3000、thinking→2000、DB 写入→8000

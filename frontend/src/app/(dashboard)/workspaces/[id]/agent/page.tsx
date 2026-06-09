@@ -3,26 +3,20 @@
 import Link from "next/link";
 import {
   Activity,
-  AlertTriangle,
   Bot,
   CheckCircle2,
-  CircleDot,
-  Clock3,
-  CornerDownRight,
+  Download,
   History,
-  MessageSquareText,
   RefreshCw,
-  Send,
   Square,
   Terminal,
-  Wrench,
   XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { AgentLogViewer, isPendingReplied, parseToolCallContent, parseScanCheckOutput, type ToolCallEntry } from "@/components/agent-log-viewer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
@@ -44,7 +38,7 @@ interface Props {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
+/*  Helpers (page-specific)                                            */
 /* ------------------------------------------------------------------ */
 
 function formatDuration(ms: number): string {
@@ -80,140 +74,39 @@ function formatTime(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-type ToolCallEntry = {
-  timestamp: string;
-  tool: string;
-  args: string;
-  status: "allowed" | "pending";
-  success: boolean;
-};
-
-function parseToolCallContent(raw: string): ToolCallEntry | null {
-  try {
-    const obj = JSON.parse(raw);
-    return {
-      timestamp: obj.timestamp ?? "",
-      tool: obj.tool ?? obj.name ?? "unknown",
-      args: stringifyToolArgs(obj.args ?? obj.arguments ?? ""),
-      status: obj.requires_approval ? "pending" : "allowed",
-      success: obj.success !== false,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function stringifyToolArgs(value: unknown): string {
-  if (value == null || value === "") return "";
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function semanticLineClass(line: string): string {
-  if (line.startsWith("[TOOL_USE]")) return "text-blue-400";
-  if (line.startsWith("[TOOL_RESULT]")) return "text-emerald-400";
-  if (line.startsWith("[THINKING]")) return "text-zinc-500";
-  if (line.startsWith("[RESULT")) return "text-sky-300 font-medium";
-  if (line.startsWith("[SYSTEM")) return "text-amber-400";
-  if (line.startsWith("[ASSISTANT]")) return "text-zinc-300";
-  return "text-zinc-400";
-}
-
-function logChannelMeta(channel: AgentRunLogEntry["channel"]): {
-  label: string;
-  Icon: React.ComponentType<{ className?: string }>;
-  badgeClass: string;
-  rowClass: string;
-} {
-  switch (channel) {
-    case "tool_call":
-      return {
-        label: "TOOL",
-        Icon: Wrench,
-        badgeClass: "border-blue-500/30 bg-blue-500/10 text-blue-300",
-        rowClass: "hover:bg-blue-500/[0.04]",
-      };
-    case "stderr":
-      return {
-        label: "WARN",
-        Icon: AlertTriangle,
-        badgeClass: "border-amber-500/30 bg-amber-500/10 text-amber-300",
-        rowClass: "bg-amber-500/[0.03] hover:bg-amber-500/[0.07]",
-      };
-    case "pending_input":
-      return {
-        label: "ASK",
-        Icon: MessageSquareText,
-        badgeClass: "border-amber-500/30 bg-amber-500/10 text-amber-300",
-        rowClass: "bg-amber-500/[0.04] hover:bg-amber-500/[0.08]",
-      };
-    case "user_input":
-      return {
-        label: "REPLY",
-        Icon: CornerDownRight,
-        badgeClass: "border-sky-500/30 bg-sky-500/10 text-sky-300",
-        rowClass: "bg-sky-500/[0.03] hover:bg-sky-500/[0.07]",
-      };
-    default:
-      return {
-        label: "INFO",
-        Icon: CircleDot,
-        badgeClass: "border-zinc-700 bg-zinc-900 text-zinc-400",
-        rowClass: "hover:bg-white/[0.03]",
-      };
-  }
-}
-
-function formatLogClock(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], {
-    hour12: false,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-function renderLogLines(content: string) {
-  const lines = content.split("\n").filter((line) => line.trim().length > 0);
-  if (lines.length === 0) return <span className="text-zinc-600">空输出</span>;
-
-  return (
-    <div className="space-y-1">
-      {lines.map((line, i) => {
-        const tsMatch = line.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*/);
-        const ts = tsMatch ? tsMatch[1] : null;
-        const rest = tsMatch ? line.slice(tsMatch[0].length) : line;
-        return (
-          <div key={`${i}-${rest.slice(0, 16)}`} className={semanticLineClass(rest)}>
-            {ts && <span className="mr-1 text-zinc-600">[{ts}]</span>}
-            <span>{rest}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function isPendingReplied(
-  logTimestamp: string,
-  allLogs: AgentRunLogEntry[],
-): boolean {
-  return allLogs.some(
-    (l) =>
-      l.channel === "user_input" &&
-      l.timestamp >= logTimestamp,
-  );
-}
-
 const STATUS_CONFIG: Record<string, { label: string; badge: "success" | "destructive" | "warning"; dot: string }> = {
   completed: { label: "已完成", badge: "success", dot: "bg-emerald-500" },
   failed: { label: "失败", badge: "destructive", dot: "bg-red-500" },
   killed: { label: "已终止", badge: "warning", dot: "bg-amber-500" },
 };
+
+function runStatusLabel(run: AgentRun): { label: string; badge: "success" | "destructive" | "warning" | "outline"; dot: string } {
+  if (run.status === "completed" && run.post_scan_status === "failed_post_check") {
+    return { label: "后置校验失败", badge: "warning", dot: "bg-amber-500" };
+  }
+  const cfg = STATUS_CONFIG[run.status];
+  if (cfg) return cfg;
+  return { label: run.status, badge: "outline" as const, dot: "bg-zinc-400" };
+}
+
+function extractRunSummary(logs: AgentRunLogEntry[] | null): string {
+  if (!logs || logs.length === 0) return "";
+  const stdoutLogs = logs.filter(l => l.channel === "stdout");
+  const allText = stdoutLogs.map(l => l.content_redacted).join("\n");
+  const scanCheck = parseScanCheckOutput(allText);
+  if (scanCheck) {
+    return `扫描自检${scanCheck.passed ? "通过" : "未通过"}：${scanCheck.scanDocs} 文档，${scanCheck.moduleCount} 模块`;
+  }
+  const bashCalls = logs
+    .filter(l => l.channel === "tool_call")
+    .map(l => parseToolCallContent(l.content_redacted))
+    .filter(Boolean) as ToolCallEntry[];
+  if (bashCalls.length > 0) {
+    const toolNames = [...new Set(bashCalls.map(t => t.tool))];
+    return `${bashCalls.length} 工具调用（${toolNames.join(", ")}）`;
+  }
+  return `${logs.length} 条日志`;
+}
 
 const postScanLabel: Record<string, string> = {
   success: "通过",
@@ -309,242 +202,6 @@ function SectionTitle({
       <Icon className="h-4 w-4 text-muted-foreground" />
       <h2 className="text-sm font-semibold">{title}</h2>
       {meta && <span className="text-[11px] text-muted-foreground">{meta}</span>}
-    </div>
-  );
-}
-
-const EMPTY_REPLIED_INPUTS = new Set<string>();
-
-type AgentLogInputControls = {
-  inputValues: Record<string, string>;
-  submittingInputs: Record<string, boolean>;
-  inputErrors: Record<string, string>;
-  repliedInputs: Set<string>;
-  onChange: (_logId: string, _value: string) => void;
-  onSubmit: (_logId: string) => void;
-};
-
-function ToolCallPreview({ entry }: { entry: ToolCallEntry }) {
-  return (
-    <div className="min-w-0 space-y-1">
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="min-w-0 break-words font-semibold text-blue-200 [overflow-wrap:anywhere]">
-          {entry.tool}
-        </span>
-        <span
-          className={cn(
-            "inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium",
-            entry.status === "pending"
-              ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
-              : entry.success
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                : "border-red-500/30 bg-red-500/10 text-red-300",
-          )}
-        >
-          {entry.status === "pending" ? "待审批" : entry.success ? "已通过" : "失败"}
-        </span>
-      </div>
-      {entry.args && (
-        <pre className="max-w-full whitespace-pre-wrap break-words rounded-md border border-zinc-800 bg-black/20 px-2 py-1 text-[11px] leading-5 text-zinc-400 [overflow-wrap:anywhere]">
-          {entry.args}
-        </pre>
-      )}
-    </div>
-  );
-}
-
-function AgentLogRow({
-  log,
-  logs,
-  compact,
-  inputControls,
-}: {
-  log: AgentRunLogEntry;
-  logs: AgentRunLogEntry[];
-  compact?: boolean;
-  inputControls?: AgentLogInputControls;
-}) {
-  const meta = logChannelMeta(log.channel);
-  const toolCall = log.channel === "tool_call"
-    ? parseToolCallContent(log.content_redacted)
-    : null;
-  const repliedInputs = inputControls?.repliedInputs ?? EMPTY_REPLIED_INPUTS;
-  const isReplied = log.channel === "pending_input"
-    && (repliedInputs.has(log.id) || isPendingReplied(log.timestamp, logs));
-  const canReply = log.channel === "pending_input" && inputControls && !isReplied;
-  const value = inputControls?.inputValues[log.id] ?? "";
-  const submitting = inputControls?.submittingInputs[log.id] ?? false;
-  const inputError = inputControls?.inputErrors[log.id];
-  const Icon = meta.Icon;
-
-  return (
-    <div
-      className={cn(
-        "grid min-w-0 max-w-full grid-cols-[58px_74px_minmax(0,1fr)] gap-2 px-3 py-2 transition-colors sm:grid-cols-[76px_84px_minmax(0,1fr)]",
-        compact ? "text-[11px] leading-5" : "text-xs leading-5",
-        meta.rowClass,
-      )}
-    >
-      <span className="mt-0.5 flex min-w-0 items-center gap-1 font-mono text-[11px] text-zinc-600">
-        <Clock3 className="hidden h-3 w-3 shrink-0 sm:block" />
-        <span className="truncate">{formatLogClock(log.timestamp)}</span>
-      </span>
-      <span
-        className={cn(
-          "mt-0.5 inline-flex h-5 w-[68px] shrink-0 items-center gap-1 rounded border px-1.5 text-[10px] font-semibold",
-          meta.badgeClass,
-        )}
-      >
-        <Icon className="h-3 w-3 shrink-0" />
-        {meta.label}
-      </span>
-      <div className="min-w-0 max-w-full">
-        <div
-          className={cn(
-            "min-w-0 max-w-full whitespace-pre-wrap break-words font-mono [overflow-wrap:anywhere]",
-            log.channel === "stderr" ? "text-amber-200" : "text-zinc-300",
-          )}
-        >
-          {toolCall ? <ToolCallPreview entry={toolCall} /> : renderLogLines(log.content_redacted)}
-        </div>
-
-        {log.channel === "pending_input" && (
-          <div className="mt-2 min-w-0 max-w-full">
-            {isReplied ? (
-              <span className="inline-flex items-center rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[11px] font-medium text-emerald-300">
-                已回复
-              </span>
-            ) : canReply ? (
-              <>
-                <div className="flex min-w-0 max-w-full flex-col gap-2 rounded-md border border-amber-500/30 bg-amber-950/30 px-2.5 py-2 sm:flex-row">
-                  <Input
-                    placeholder="输入指导文本..."
-                    value={value}
-                    onChange={(e) => inputControls.onChange(log.id, e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        inputControls.onSubmit(log.id);
-                      }
-                    }}
-                    disabled={submitting}
-                    className="h-8 min-w-0 border-zinc-700 bg-zinc-900 text-xs text-zinc-200 placeholder:text-zinc-600"
-                  />
-                  <Button
-                    size="sm"
-                    onClick={() => inputControls.onSubmit(log.id)}
-                    disabled={!value.trim() || submitting}
-                    className="h-8 shrink-0"
-                  >
-                    <Send className="mr-1.5 h-3.5 w-3.5" />
-                    {submitting ? "提交中" : "提交"}
-                  </Button>
-                </div>
-                {inputError && (
-                  <p className="mt-1 text-xs text-red-300">{inputError}</p>
-                )}
-              </>
-            ) : (
-              <span className="inline-flex items-center rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-300">
-                等待用户指导
-              </span>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function AgentLogViewer({
-  title,
-  runId,
-  logs,
-  loading,
-  emptyText,
-  maxHeightClass = "max-h-[480px]",
-  compact,
-  variant = "panel",
-  isLive,
-  containerRef,
-  summary,
-  actions,
-  inputControls,
-}: {
-  title: string;
-  runId: string;
-  logs: AgentRunLogEntry[] | null;
-  loading: boolean;
-  emptyText: string;
-  maxHeightClass?: string;
-  compact?: boolean;
-  variant?: "panel" | "embedded";
-  isLive?: boolean;
-  containerRef?: React.RefObject<HTMLDivElement>;
-  summary?: React.ReactNode;
-  actions?: React.ReactNode;
-  inputControls?: AgentLogInputControls;
-}) {
-  const logEntries = logs ?? [];
-
-  return (
-    <div
-      className={cn(
-        "min-w-0 max-w-full overflow-hidden bg-zinc-950 text-zinc-300",
-        variant === "panel" && "rounded-md border border-zinc-800 shadow-sm",
-      )}
-    >
-      <div className={cn(
-        "flex flex-col gap-2 border-b border-zinc-800 bg-zinc-950 px-4 py-3 sm:flex-row sm:items-center sm:justify-between",
-        compact && "px-3 py-2",
-      )}>
-        <div className="flex min-w-0 items-center gap-2">
-          <Terminal className="h-4 w-4 shrink-0 text-zinc-500" />
-          <span className="text-xs font-medium text-zinc-200">{title}</span>
-          <code className="truncate font-mono text-[11px] text-zinc-500">{shortId(runId)}</code>
-          {isLive && (
-            <span className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-300">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              LIVE
-            </span>
-          )}
-        </div>
-        {(summary || actions) && (
-          <div className="flex flex-wrap items-center gap-2">
-            {summary}
-            {actions}
-          </div>
-        )}
-      </div>
-
-      <div
-        ref={containerRef}
-        className={cn(
-          "min-w-0 max-w-full overflow-y-auto overflow-x-hidden font-mono",
-          maxHeightClass,
-        )}
-      >
-        {loading ? (
-          <div className="flex items-center justify-center gap-2 px-4 py-10 text-xs text-zinc-500">
-            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-300" />
-            加载日志中...
-          </div>
-        ) : logEntries.length === 0 ? (
-          <p className="px-4 py-10 text-center text-xs text-zinc-600">{emptyText}</p>
-        ) : (
-          <div className="min-w-0 max-w-full divide-y divide-zinc-900/90">
-            {logEntries.map((log) => (
-              <AgentLogRow
-                key={log.id}
-                log={log}
-                logs={logEntries}
-                compact={compact}
-                inputControls={inputControls}
-              />
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -997,14 +654,14 @@ export default function AgentPage({ params }: Props) {
           <SectionTitle icon={History} title="历史运行" meta={`${completedRuns.length} 条记录`} />
           <div className="min-w-0 max-w-full overflow-hidden rounded-md border bg-card">
             <div className="w-full max-w-full overflow-x-auto">
-            <table className="min-w-[1040px]">
+            <table className="min-w-[1140px]">
               <thead>
                 <tr>
                   <th>运行 ID</th>
                   <th>类型</th>
                   <th>Task</th>
                   <th>状态</th>
-                  <th>后置校验</th>
+                  <th>结果摘要</th>
                   <th>时长</th>
                   <th>费用</th>
                   <th>词元数</th>
@@ -1015,7 +672,7 @@ export default function AgentPage({ params }: Props) {
               </thead>
               <tbody>
                 {completedRuns.map((run) => {
-                  const sc = STATUS_CONFIG[run.status];
+                  const sl = runStatusLabel(run);
                   return (
                     <>
                       <tr key={run.id} className={expandedRunId === run.id ? "bg-muted/20" : undefined}>
@@ -1043,27 +700,20 @@ export default function AgentPage({ params }: Props) {
                         </td>
                         <td>
                           <div className="flex items-center gap-1.5">
-                            {sc && <span className={`h-1.5 w-1.5 rounded-full ${sc.dot}`} />}
-                            <Badge variant={sc?.badge ?? "outline"}>
-                              {sc?.label ?? run.status}
+                            <span className={`h-1.5 w-1.5 rounded-full ${sl.dot}`} />
+                            <Badge variant={sl.badge}>
+                              {sl.label}
                             </Badge>
                           </div>
                         </td>
-                        <td>
-                          {run.post_scan_status ? (
-                            <Badge
-                              variant={postScanVariant(run.post_scan_status)}
-                              className="text-[10px]"
-                            >
-                              {postScanLabel[run.post_scan_status] ?? run.post_scan_status}
-                            </Badge>
-                          ) : run.is_resume ? (
-                            <Badge variant="outline" className="text-[10px]">
-                              恢复 @{run.resumed_from_step ?? "?"}
-                            </Badge>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
+                        <td className="max-w-[200px] truncate text-xs text-muted-foreground">
+                          {expandedLogs && expandedRunId === run.id
+                            ? extractRunSummary(expandedLogs)
+                            : run.post_scan_status
+                              ? postScanLabel[run.post_scan_status] ?? run.post_scan_status
+                              : run.is_resume
+                                ? `恢复 @${run.resumed_from_step ?? "?"}`
+                                : "—"}
                         </td>
                         <td className="font-mono text-xs">{calcDuration(run)}</td>
                         <td className="font-mono text-xs">
@@ -1127,9 +777,33 @@ export default function AgentPage({ params }: Props) {
                                 logs={expandedLogs}
                                 loading={expandedLogsLoading}
                                 emptyText="无日志输出"
-                                maxHeightClass="max-h-[320px]"
+                                maxHeightClass="max-h-[480px]"
                                 compact
                                 variant="embedded"
+                                actions={
+                                  expandedLogs && expandedLogs.length > 0 ? (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
+                                      onClick={() => {
+                                        const text = expandedLogs.map(l =>
+                                          `[${new Date(l.timestamp).toISOString()}] [${l.channel}] ${l.content_redacted}`
+                                        ).join("\n");
+                                        const blob = new Blob([text], { type: "text/plain" });
+                                        const url = URL.createObjectURL(blob);
+                                        const a = document.createElement("a");
+                                        a.href = url;
+                                        a.download = `agent-run-${run.id.slice(0, 8)}.log`;
+                                        a.click();
+                                        URL.revokeObjectURL(url);
+                                      }}
+                                    >
+                                      <Download className="mr-1 h-3 w-3" />
+                                      下载
+                                    </Button>
+                                  ) : undefined
+                                }
                               />
                             </div>
                           </td>

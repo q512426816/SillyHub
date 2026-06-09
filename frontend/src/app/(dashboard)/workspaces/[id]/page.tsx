@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
+import { AgentLogViewer } from "@/components/agent-log-viewer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
@@ -60,27 +61,6 @@ const STRATEGY_LABEL: Record<string, string> = {
   "repo-native": "仓库原生",
 };
 
-function channelLabel(channel: string): string {
-  switch (channel) {
-    case "stdout": return "INFO";
-    case "stderr": return "WARN";
-    case "tool_call": return "TOOL";
-    case "pending_input": return "INPUT";
-    case "user_input": return "USER";
-    default: return channel.toUpperCase();
-  }
-}
-
-function channelTagCls(channel: string): string {
-  switch (channel) {
-    case "stderr": return "text-amber-600";
-    case "tool_call": return "text-blue-600";
-    case "pending_input": return "text-amber-700";
-    case "user_input": return "text-emerald-700";
-    default: return "text-muted-foreground";
-  }
-}
-
 function statusToVariant(status: AgentRunStatus | null): "success" | "warning" | "destructive" | "outline" {
   switch (status) {
     case "completed": return "success";
@@ -90,6 +70,7 @@ function statusToVariant(status: AgentRunStatus | null): "success" | "warning" |
     default: return "outline";
   }
 }
+
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
@@ -114,9 +95,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const [bootstrapLogs, setBootstrapLogs] = useState<AgentRunLogEntry[]>([]);
   const [bootstrapStatus, setBootstrapStatus] = useState<AgentRunStatus | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
-  const [pendingInputPrompt, setPendingInputPrompt] = useState<string | null>(null);
-  const [userInputText, setUserInputText] = useState("");
-  const [submittingInput, setSubmittingInput] = useState(false);
+  const [bsInputValues, setBsInputValues] = useState<Record<string, string>>({});
+  const [bsSubmittingInputs, setBsSubmittingInputs] = useState<Record<string, boolean>>({});
+  const [bsRepliedInputs, setBsRepliedInputs] = useState<Set<string>>(new Set());
+  const [bsInputErrors, setBsInputErrors] = useState<Record<string, string>>({});
   const [bootstrapStreamStatus, setBootstrapStreamStatus] = useState<StreamStatus>("disconnected");
 
   const streamClientRef = useRef<AgentRunStreamClient | null>(null);
@@ -188,7 +170,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
     setBootstrapStatus(null);
     setBootstrapError(null);
     setBootstrapStreamStatus("disconnected");
-    setPendingInputPrompt(null);
+    setBsInputValues({});
+    setBsSubmittingInputs({});
+    setBsRepliedInputs(new Set());
+    setBsInputErrors({});
   }
 
   /**
@@ -223,9 +208,6 @@ export default function WorkspaceDetailPage({ params }: Props) {
           },
         ];
       });
-      if (event.channel === "pending_input") {
-        setPendingInputPrompt(event.content || "");
-      }
     });
 
     client.onDone((data) => {
@@ -255,7 +237,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
     setBootstrapLogs([]);
     setBootstrapStatus(null);
     setBootstrapError(null);
-    setPendingInputPrompt(null);
+    setBsInputValues({});
+    setBsSubmittingInputs({});
+    setBsRepliedInputs(new Set());
+    setBsInputErrors({});
 
     try {
       const result = await bootstrapSpecWorkspace(workspaceId);
@@ -271,14 +256,15 @@ export default function WorkspaceDetailPage({ params }: Props) {
 
   /* ---- User input submission ---- */
 
-  async function handleSubmitInput() {
-    if (!activeBootstrapRunId || !userInputText.trim()) return;
-    setSubmittingInput(true);
+  async function handleBsSubmitInput(logId: string) {
+    if (!activeBootstrapRunId) return;
+    const value = bsInputValues[logId]?.trim();
+    if (!value) return;
+    setBsSubmittingInputs((prev) => ({ ...prev, [logId]: true }));
     try {
       await submitAgentRunInput(workspaceId, activeBootstrapRunId, {
-        content: userInputText.trim(),
+        content: value,
       });
-      // Append user_input log to panel
       setBootstrapLogs((prev) => [
         ...prev,
         {
@@ -286,16 +272,22 @@ export default function WorkspaceDetailPage({ params }: Props) {
           run_id: activeBootstrapRunId,
           timestamp: new Date().toISOString(),
           channel: "user_input" as const,
-          content_redacted: userInputText.trim(),
+          content_redacted: value,
         },
       ]);
-      setUserInputText("");
-      setPendingInputPrompt(null);
+      setBsRepliedInputs((prev) => new Set(prev).add(logId));
+      setBsInputValues((prev) => {
+        const next = { ...prev };
+        delete next[logId];
+        return next;
+      });
     } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "提交输入失败");
-      // Keep input text and prompt visible for retry
+      setBsInputErrors((prev) => ({
+        ...prev,
+        [logId]: err instanceof ApiError ? err.message : "提交输入失败",
+      }));
     } finally {
-      setSubmittingInput(false);
+      setBsSubmittingInputs((prev) => ({ ...prev, [logId]: false }));
     }
   }
 
@@ -464,82 +456,37 @@ export default function WorkspaceDetailPage({ params }: Props) {
           </div>
         )}
 
-        {/* Bootstrap SSE log panel */}
+        {/* Bootstrap SSE log panel — uses shared AgentLogViewer */}
         {activeBootstrapRunId && (
-          <div className="mx-4 mt-3 rounded border bg-muted/40">
-            {/* Panel title bar */}
-            <div className="flex items-center justify-between border-b px-3 py-1.5">
-              <div className="flex items-center gap-2">
-                <code className="text-[11px] font-mono">
-                  Bootstrap Run: {activeBootstrapRunId.length > 8 ? activeBootstrapRunId.slice(0, 8) + "..." : activeBootstrapRunId}
-                </code>
+          <div className="mx-4 mt-3">
+            <AgentLogViewer
+              title="Bootstrap Run"
+              runId={activeBootstrapRunId}
+              logs={bootstrapLogs}
+              loading={false}
+              emptyText="等待日志输出..."
+              isLive={bootstrapStatus === "running" || bootstrapStatus === "pending"}
+              summary={
                 <Badge variant={statusToVariant(bootstrapStatus)}>
                   {bootstrapStatus ?? bootstrapStreamStatus}
                 </Badge>
-              </div>
-              <Button size="sm" variant="ghost" onClick={closeBootstrapPanel}>
-                关闭
-              </Button>
-            </div>
-
-            {/* Log area */}
-            <div className="max-h-[300px] overflow-auto">
-              {bootstrapLogs.length === 0 ? (
-                <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-                  等待日志输出...
-                </p>
-              ) : (
-                <div className="divide-y">
-                  {bootstrapLogs.map((log) => (
-                    <div key={log.id} className="flex items-start gap-2 px-3 py-1.5">
-                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                        {new Date(log.timestamp).toLocaleTimeString()}
-                      </span>
-                      <span className={`shrink-0 font-mono text-[11px] font-medium ${channelTagCls(log.channel)}`}>
-                        [{channelLabel(log.channel)}]
-                      </span>
-                      <span className="flex-1 break-all text-[11px]">
-                        {log.content_redacted}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* User input area (shown when pending_input event received) */}
-            {pendingInputPrompt !== null && (
-              <div className="border-t px-3 py-2">
-                <p className="text-xs text-amber-700 font-medium mb-1">
-                  Agent 请求指导{pendingInputPrompt ? `: ${pendingInputPrompt}` : ""}
-                </p>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    className="flex-1 rounded border bg-background px-2 py-1 text-xs"
-                    placeholder="输入指导..."
-                    value={userInputText}
-                    onChange={(e) => setUserInputText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !submittingInput) handleSubmitInput();
-                    }}
-                  />
-                  <Button
-                    size="sm"
-                    disabled={!userInputText.trim() || submittingInput}
-                    onClick={handleSubmitInput}
-                  >
-                    {submittingInput ? "提交中..." : "提交"}
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* Error display */}
+              }
+              actions={
+                <Button size="sm" variant="ghost" onClick={closeBootstrapPanel}>
+                  关闭
+                </Button>
+              }
+              inputControls={{
+                inputValues: bsInputValues,
+                submittingInputs: bsSubmittingInputs,
+                inputErrors: bsInputErrors,
+                repliedInputs: bsRepliedInputs,
+                onChange: (logId, value) => setBsInputValues((prev) => ({ ...prev, [logId]: value })),
+                onSubmit: handleBsSubmitInput,
+              }}
+            />
             {bootstrapError && (
-              <div className="border-t px-3 py-2 text-xs text-destructive">
-                {bootstrapError}
-              </div>
+              <p className="mt-2 text-xs text-destructive">{bootstrapError}</p>
             )}
           </div>
         )}
