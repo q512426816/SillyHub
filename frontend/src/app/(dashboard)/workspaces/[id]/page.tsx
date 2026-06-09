@@ -71,6 +71,22 @@ function statusToVariant(status: AgentRunStatus | null): "success" | "warning" |
   }
 }
 
+const BS_STATUS_LABEL: Record<string, string> = {
+  completed: "成功",
+  failed: "失败",
+  killed: "已终止",
+  running: "运行中",
+  pending: "等待中",
+};
+
+function fmtDuration(ms: number | null): string {
+  if (ms == null) return "—";
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  return `${m}m ${s % 60}s`;
+}
+
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
@@ -92,6 +108,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
 
   // Bootstrap SSE state
   const [activeBootstrapRunId, setActiveBootstrapRunId] = useState<string | null>(null);
+  const [lastBsRun, setLastBsRun] = useState<AgentRun | null>(null);
   const [bootstrapLogs, setBootstrapLogs] = useState<AgentRunLogEntry[]>([]);
   const [bootstrapStatus, setBootstrapStatus] = useState<AgentRunStatus | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
@@ -124,21 +141,28 @@ export default function WorkspaceDetailPage({ params }: Props) {
 
       // Recover an in-progress Bootstrap/scan run (change_id == null) if any.
       const runs = await listAgentRuns(workspaceId).catch(() => [] as AgentRun[]);
-      const scanRun = runs
+      const bsRuns = runs
         .filter((r) => r.change_id == null)
-        .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))[0];
+        .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+      const activeRun = bsRuns[0];
 
       if (
-        scanRun &&
-        (scanRun.status === "pending" || scanRun.status === "running") &&
+        activeRun &&
+        (activeRun.status === "pending" || activeRun.status === "running") &&
         !streamClientRef.current &&
-        activeBootstrapRunId !== scanRun.id
+        activeBootstrapRunId !== activeRun.id
       ) {
-        setActiveBootstrapRunId(scanRun.id);
-        setBootstrapStatus(scanRun.status);
+        setActiveBootstrapRunId(activeRun.id);
+        setBootstrapStatus(activeRun.status);
         setBootstrapLogs([]);
-        connectBootstrapStream(scanRun.id);
+        connectBootstrapStream(activeRun.id);
       }
+
+      // Save last finished Bootstrap run for display.
+      const finished = bsRuns.find((r) =>
+        ["completed", "failed", "killed"].includes(r.status),
+      );
+      setLastBsRun(finished ?? null);
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "加载工作区失败");
     } finally {
@@ -453,6 +477,26 @@ export default function WorkspaceDetailPage({ params }: Props) {
               <strong> Bootstrap </strong>按钮使用 SillySpec CLI 初始化规范空间，或点击
               <strong> Import </strong>从代码仓库导入已有的 .sillyspec。
             </p>
+          </div>
+        )}
+
+        {/* Last Bootstrap run result */}
+        {!activeBootstrapRunId && lastBsRun && (
+          <div className="mx-4 mt-3 mb-1 flex flex-wrap items-center gap-x-4 gap-y-1 rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs">
+            <span className="text-muted-foreground">上次 Bootstrap</span>
+            <Badge variant={statusToVariant(lastBsRun.status)}>
+              {BS_STATUS_LABEL[lastBsRun.status] ?? lastBsRun.status}
+            </Badge>
+            <span className="text-muted-foreground">
+              {lastBsRun.started_at ? formatTs(lastBsRun.started_at) : "—"}
+            </span>
+            {lastBsRun.duration_ms != null && (
+              <span className="text-muted-foreground">耗时 {fmtDuration(lastBsRun.duration_ms)}</span>
+            )}
+            {lastBsRun.exit_code != null && lastBsRun.exit_code !== 0 && (
+              <span className="text-destructive">exit_code={lastBsRun.exit_code}</span>
+            )}
+            <span className="font-mono text-zinc-400">{lastBsRun.id.slice(0, 8)}</span>
           </div>
         )}
 
