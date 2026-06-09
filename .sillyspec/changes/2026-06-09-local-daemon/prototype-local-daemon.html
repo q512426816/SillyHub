@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>本地守护进程 - 原型</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f5; padding: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        h1 { margin-bottom: 20px; color: #333; }
+        h2 { margin: 20px 0 10px; color: #555; font-size: 18px; }
+        .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .section-title { font-weight: 600; color: #333; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #eee; }
+
+        /* 运行时列表 */
+        .runtime-list { list-style: none; }
+        .runtime-item { display: flex; align-items: center; padding: 12px; border: 1px solid #e0e0e0; border-radius: 6px; margin-bottom: 8px; }
+        .runtime-status { width: 10px; height: 10px; border-radius: 50%; margin-right: 12px; }
+        .runtime-status.online { background: #52c41a; }
+        .runtime-status.offline { background: #d9d9d9; }
+        .runtime-info { flex: 1; }
+        .runtime-name { font-weight: 500; }
+        .runtime-meta { font-size: 12px; color: #999; margin-top: 4px; }
+        .runtime-actions button { padding: 6px 12px; margin-left: 8px; border: 1px solid #d9d9d9; background: white; border-radius: 4px; cursor: pointer; }
+        .runtime-actions button:hover { border-color: #1890ff; color: #1890ff; }
+
+        /* 创建 Agent Run 表单 */
+        .form-group { margin-bottom: 16px; }
+        .form-label { display: block; margin-bottom: 8px; font-weight: 500; color: #333; }
+        .radio-group { display: flex; gap: 16px; }
+        .radio-item { display: flex; align-items: center; }
+        .radio-item input { margin-right: 8px; }
+        .radio-item label { cursor: pointer; }
+        .radio-item.disabled { opacity: 0.5; }
+        .radio-item.disabled label { cursor: not-allowed; }
+        .help-text { font-size: 12px; color: #999; margin-top: 8px; }
+
+        /* 按钮 */
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; }
+        .btn-primary { background: #1890ff; color: white; }
+        .btn-primary:hover { background: #40a9ff; }
+        .btn-primary:disabled { background: #d9d9d9; cursor: not-allowed; }
+
+        /* 架构图 */
+        .arch-diagram { font-family: monospace; font-size: 12px; line-height: 1.5; background: #f9f9f9; padding: 16px; border-radius: 6px; overflow-x: auto; }
+
+        /* 状态标签 */
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+        .badge-success { background: #f6ffed; border: 1px solid #b7eb8f; color: #52c41a; }
+        .badge-default { background: #f5f5f5; border: 1px solid #d9d9d9; color: #999; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>本地守护进程 - 设计原型</h1>
+
+        <!-- 页面 1: 运行时管理 -->
+        <div class="card">
+            <div class="section-title">页面 1：运行时管理（/runtimes）</div>
+            <p style="color: #666; margin-bottom: 16px;">用户可以查看和管理本地守护进程运行时</p>
+
+            <ul class="runtime-list">
+                <li class="runtime-item">
+                    <span class="runtime-status online"></span>
+                    <div class="runtime-info">
+                        <div class="runtime-name">MacBook Pro - qinyi</div>
+                        <div class="runtime-meta">claude-code 4.7.0 • sillyspec 0.1.0 • 最后心跳: 刚刚</div>
+                    </div>
+                    <div class="runtime-actions">
+                        <span class="badge badge-success">在线</span>
+                        <button>设为维护</button>
+                        <button>删除</button>
+                    </div>
+                </li>
+                <li class="runtime-item">
+                    <span class="runtime-status offline"></span>
+                    <div class="runtime-info">
+                        <div class="runtime-name">Desktop - dev</div>
+                        <div class="runtime-meta">claude-code 4.6.0 • 最后心跳: 2 小时前</div>
+                    </div>
+                    <div class="runtime-actions">
+                        <span class="badge badge-default">离线</span>
+                        <button>删除</button>
+                    </div>
+                </li>
+            </ul>
+
+            <button class="btn btn-primary" style="margin-top: 16px;">+ 添加运行时</button>
+        </div>
+
+        <!-- 页面 2: 创建 Agent Run 时的选择 -->
+        <div class="card">
+            <div class="section-title">页面 2：创建 Agent Run 时的运行位置选择</div>
+            <p style="color: #666; margin-bottom: 16px;">用户创建 Agent Run 时可以选择运行位置</p>
+
+            <div class="form-group">
+                <label class="form-label">运行位置</label>
+                <div class="radio-group">
+                    <div class="radio-item">
+                        <input type="radio" id="server" name="location" checked>
+                        <label for="server">服务器</label>
+                    </div>
+                    <div class="radio-item">
+                        <input type="radio" id="local" name="location">
+                        <label for="local">本地（MacBook Pro - qinyi）</label>
+                    </div>
+                </div>
+                <div class="help-text">
+                    💡 选择"本地"可在您的机器上执行 Agent，充分利用本地资源和完整的开发环境上下文。
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">任务描述</label>
+                <input type="text" placeholder="描述您的任务..." style="width: 100%; padding: 8px; border: 1px solid #d9d9d9; border-radius: 4px;">
+            </div>
+
+            <button class="btn btn-primary">创建 Agent Run</button>
+        </div>
+
+        <!-- 架构概览 -->
+        <div class="card">
+            <div class="section-title">架构概览</div>
+            <div class="arch-diagram">
+<pre>
+┌─────────────────────────────────────────────────────────────────┐
+│                        用户本地机器                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  ┌──────────────────┐         ┌──────────────────┐              │
+│  │   SillyHub CLI   │         │   Local Daemon   │              │
+│  │  (sillyspec)     │         │   (后台进程)      │              │
+│  │                  │         │                  │              │
+│  │  daemon start    │────────>│  - Agent 管理     │              │
+│  │  daemon status   │<────────│  - 任务轮询       │              │
+│  │  daemon stop     │         │  - 心跳保持       │              │
+│  └──────────────────┘         │  - 执行调度       │              │
+│                               └────────┬─────────┘              │
+│                                        │                        │
+│                                        │ WebSocket + HTTP      │
+│                                        ▼                        │
+└─────────────────────────────────────────────────────────────────┘
+                                                    │
+                                                    │ Internet
+                                                    │
+┌─────────────────────────────────────────────────────────────────┐
+│                        SillyHub 服务器                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │              Daemon WebSocket Hub                         │  │
+│  │  - 唤醒信号分发                                           │  │
+│  │  - 心跳确认                                               │  │
+│  └───────────────┬──────────────────────────────────────────┘  │
+│                  │                                               │
+│  ┌───────────────┴──────────────────────────────────────────┐  │
+│  │              Daemon API Handler                            │  │
+│  │  POST /api/daemon/register                                 │  │
+│  │  POST /api/daemon/heartbeat                                │  │
+│  │  POST /api/daemon/leases/{id}/claim                       │  │
+│  │  POST /api/daemon/leases/{id}/heartbeat                   │  │
+│  └───────────────┬──────────────────────────────────────────┘  │
+│                  │                                               │
+│  ┌───────────────┴──────────────────────────────────────────┐  │
+│  │              RunPlacement (统一调度入口)                   │  │
+│  │  start_run() / start_stage_dispatch() /                   │  │
+│  │  start_scan_dispatch() → decide_backend()                │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│                                                                   │
+└─────────────────────────────────────────────────────────────────┘
+</pre>
+            </div>
+        </div>
+
+        <!-- 关键设计要点 -->
+        <div class="card">
+            <div class="section-title">关键设计要点</div>
+            <ul style="padding-left: 20px; line-height: 1.8; color: #555;">
+                <li><strong>双通道通信</strong>：WebSocket 唤醒 + HTTP 权威状态</li>
+                <li><strong>Lease 机制</strong>：daemon_task_leases 防止双跑，60 秒心跳续期</li>
+                <li><strong>单一状态源</strong>：AgentRun/AgentRunLog 是状态事实源，lease 只做 dispatch</li>
+                <li><strong>统一调度入口</strong>：RunPlacement 决策层覆盖三个调度入口</li>
+                <li><strong>前端无感知</strong>：SSE 路径不变，daemon 只写回服务器</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // 简单交互演示
+        document.querySelectorAll('input[name="location"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                document.querySelectorAll('.radio-item').forEach(item => {
+                    item.classList.remove('disabled');
+                });
+                if (e.target.id === 'local') {
+                    // 模拟离线运行时
+                    console.log('选择本地运行');
+                }
+            });
+        });
+
+        document.querySelectorAll('.runtime-actions button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                console.log('按钮点击:', btn.textContent);
+            });
+        });
+    </script>
+</body>
+</html>

@@ -37,6 +37,7 @@ const MANAGEMENT_NAV: NavItem[] = [
 ];
 
 const SYSTEM_NAV: NavItem[] = [
+  { href: "/runtimes", icon: "\u{1F5A5}", label: "Daemon 运行时", absolute: true, matchPattern: "/runtimes" },
   { href: "/settings", icon: "⚙️", label: "设置", absolute: true, matchPattern: "/settings" },
 ];
 

@@ -10,7 +10,9 @@ import {
   createAgentRun,
   getAgentRunLogs,
   listAgentRuns,
+  listDaemonRuntimes,
   type AgentRun,
+  type DaemonRuntime,
 } from "@/lib/agent";
 import { getChange, type ChangeRead } from "@/lib/changes";
 import { getTask, type TaskRead } from "@/lib/tasks";
@@ -127,6 +129,9 @@ export default function TaskDetailPage({ params }: Props) {
   const [transitioning, setTransitioning] = useState(false);
   const [showAgentForm, setShowAgentForm] = useState(false);
   const [creatingRun, setCreatingRun] = useState(false);
+  const [daemonRuntimes, setDaemonRuntimes] = useState<DaemonRuntime[]>([]);
+  const [preferredBackend, setPreferredBackend] = useState<"server" | "daemon">("server");
+  const [runtimesLoading, setRuntimesLoading] = useState(false);
 
   /* ---- Data loading ---- */
   const loadTask = useCallback(async () => {
@@ -238,6 +243,7 @@ export default function TaskDetailPage({ params }: Props) {
         task_id: task.id,
         lease_id: "", // lease not required from UI
         agent_type: "claude_code",
+        preferred_backend: preferredBackend,
       });
       setShowAgentForm(false);
       // Reload to pick up the new run
@@ -376,7 +382,23 @@ export default function TaskDetailPage({ params }: Props) {
           </Link>
           <Button
             size="sm"
-            onClick={() => setShowAgentForm(!showAgentForm)}
+            onClick={() => {
+              setShowAgentForm(!showAgentForm);
+              if (!showAgentForm) {
+                setRuntimesLoading(true);
+                listDaemonRuntimes()
+                  .then((runtimes) => {
+                    setDaemonRuntimes(runtimes);
+                    const hasOnline = runtimes.some((r) => r.status === "online");
+                    setPreferredBackend(hasOnline ? "daemon" : "server");
+                  })
+                  .catch(() => {
+                    setDaemonRuntimes([]);
+                    setPreferredBackend("server");
+                  })
+                  .finally(() => setRuntimesLoading(false));
+              }
+            }}
           >
             分配给 Agent
           </Button>
@@ -389,32 +411,80 @@ export default function TaskDetailPage({ params }: Props) {
           <div className="mb-2 border-b px-3 py-2 text-xs font-medium">
             分配 Agent
           </div>
-          <div className="flex items-end gap-3 px-3 pt-2">
-            <div className="flex flex-col gap-1">
-              <label className="text-[11px] text-muted-foreground">
-                Agent 类型
-              </label>
-              <select
-                className="h-7 rounded border border-input bg-background px-2 text-xs"
-                disabled
+          <div className="flex flex-col gap-3 px-3 pt-2">
+            <div className="flex items-end gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] text-muted-foreground">
+                  Agent 类型
+                </label>
+                <select
+                  className="h-7 rounded border border-input bg-background px-2 text-xs"
+                  disabled
+                >
+                  <option>Claude Code</option>
+                </select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] text-muted-foreground">
+                  运行位置
+                </label>
+                <div className="flex items-center gap-3 h-7">
+                  <label className="flex cursor-pointer items-center gap-1.5 text-xs">
+                    <input
+                      type="radio"
+                      name="run-backend"
+                      value="server"
+                      checked={preferredBackend === "server"}
+                      onChange={() => setPreferredBackend("server")}
+                      className="accent-primary"
+                    />
+                    在服务器运行
+                  </label>
+                  <label
+                    className={`flex items-center gap-1.5 text-xs ${
+                      daemonRuntimes.some((r) => r.status === "online")
+                        ? "cursor-pointer"
+                        : "cursor-not-allowed opacity-40"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="run-backend"
+                      value="daemon"
+                      checked={preferredBackend === "daemon"}
+                      onChange={() => setPreferredBackend("daemon")}
+                      disabled={
+                        !daemonRuntimes.some((r) => r.status === "online")
+                      }
+                      className="accent-primary"
+                    />
+                    在本地运行
+                    {daemonRuntimes.some((r) => r.status === "online") && (
+                      <Badge variant="success" className="text-[9px] px-1 py-0">
+                        {daemonRuntimes.filter((r) => r.status === "online").length} 在线
+                      </Badge>
+                    )}
+                  </label>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => void handleCreateAgentRun()}
+                disabled={creatingRun}
               >
-                <option>Claude Code</option>
-              </select>
+                {creatingRun ? "创建中..." : "确认分配"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setShowAgentForm(false)}
+              >
+                取消
+              </Button>
             </div>
-            <Button
-              size="sm"
-              onClick={() => void handleCreateAgentRun()}
-              disabled={creatingRun}
-            >
-              {creatingRun ? "创建中..." : "确认分配"}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setShowAgentForm(false)}
-            >
-              取消
-            </Button>
+            {runtimesLoading && (
+              <p className="text-[11px] text-muted-foreground">检查运行时状态...</p>
+            )}
           </div>
         </div>
       )}

@@ -14,6 +14,7 @@ class AgentRunCreate(BaseModel):
     agent_type: str = Field(default="claude_code", max_length=30)
     profile_version: str | None = None
     idempotency_key: str | None = Field(default=None, max_length=64)
+    preferred_backend: str | None = Field(default=None, max_length=20)
 
 
 class AgentRunResponse(BaseModel):

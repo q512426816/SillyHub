@@ -57,6 +57,7 @@ async def create_agent_run(
         lease_id=data.lease_id,
         agent_type=data.agent_type,
         idempotency_key=data.idempotency_key,
+        preferred_backend=data.preferred_backend,
     )
     # If run was returned from idempotency check, return 200 instead of 201
     if data.idempotency_key and run.status not in ("pending", "running"):

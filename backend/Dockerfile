@@ -73,6 +73,7 @@ COPY --from=builder /build /app
 
 RUN mkdir -p /app/.cache /app/.config /app/.claude /tmp/.npm /data/spec-workspaces \
  && chown -R app:app /app /tmp/.npm /data/spec-workspaces \
+ && sed -i 's/\r$//' /app/docker-entrypoint.sh \
  && chmod +x /app/docker-entrypoint.sh \
  && ln -sf /app/docker-entrypoint.sh /usr/local/bin/sillyhub-backend-entrypoint
 USER app

@@ -56,6 +56,7 @@ export interface CreateAgentRunInput {
   task_id: string;
   lease_id: string;
   agent_type: string;
+  preferred_backend?: "server" | "daemon";
 }
 
 export function createAgentRun(workspaceId: string, input: CreateAgentRunInput) {
@@ -165,4 +166,22 @@ export function submitAgentRunInput(
     `/api/workspaces/${workspaceId}/agent/runs/${runId}/input`,
     { method: "POST", json: input },
   );
+}
+
+// ── Daemon Runtimes ──
+
+export interface DaemonRuntime {
+  id: string;
+  name: string | null;
+  provider: string | null;
+  version: string | null;
+  status: string | null;
+  last_heartbeat_at: string | null;
+  capabilities: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function listDaemonRuntimes() {
+  return apiFetch<DaemonRuntime[]>("/api/daemon/runtimes");
 }

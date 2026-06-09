@@ -191,6 +191,7 @@ class AgentService:
         lease_id: uuid.UUID,
         agent_type: str = "claude_code",
         idempotency_key: str | None = None,
+        preferred_backend: str | None = None,
     ) -> AgentRun:
         """Create an AgentRun record and trigger background execution.
 
@@ -302,6 +303,7 @@ class AgentService:
             user_id=user_id,
             change_id=task.change_id if task else None,
             task_id=task_id,
+            preferred_backend=preferred_backend,
         )
         log.info(
             "start_run_placement",

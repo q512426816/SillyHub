@@ -21,6 +21,7 @@ from app.modules.archive.router import router as archive_router
 from app.modules.auth.router import router as auth_router
 from app.modules.change import change_router
 from app.modules.change_writer.router import router as change_writer_router
+from app.modules.daemon.router import router as daemon_router
 from app.modules.git_gateway.router import router as git_gateway_router
 from app.modules.git_identity import git_identity_router
 from app.modules.health import health_router
@@ -114,6 +115,7 @@ def create_app() -> FastAPI:
     app.include_router(task_router, prefix="/api")
     app.include_router(git_identity_router, prefix="/api")
     app.include_router(agent_router, prefix="/api")
+    app.include_router(daemon_router, prefix="/api")
     app.include_router(worktree_router, prefix="/api")
     app.include_router(lease_router, prefix="/api")
     app.include_router(git_gateway_router, prefix="/api")

@@ -150,3 +150,21 @@ class DaemonTaskLeaseRead(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Lease sync ──────────────────────────────────────────────────────────────
+
+
+class LeaseSyncRequest(BaseModel):
+    """Request body for syncing AgentRun status from daemon."""
+
+    claim_token: str
+    status: str  # running, completed, failed, killed
+    error: str | None = None
+
+
+class LeaseSyncResponse(BaseModel):
+    """Response body for lease status sync."""
+
+    agent_run_id: uuid.UUID | None
+    status: str
