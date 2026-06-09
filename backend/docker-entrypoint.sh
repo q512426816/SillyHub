@@ -76,4 +76,7 @@ if is_enabled "${CLAUDE_SYNC_OFFICIAL_PLUGINS_ON_START:-true}"; then
   fi
 fi
 
+# Allow git operations on bind-mounted host directories
+git config --global --add safe.directory '*' 2>/dev/null || true
+
 exec "$@"

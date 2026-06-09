@@ -682,6 +682,20 @@ def _run_preflight(code_root: Path) -> str | None:
             f"(checked: {', '.join(_PROJECT_SIGNATURES[:7])}). "
             f"Found: {names}"
         )
+
+    # Ensure git safe.directory for bind-mounted host directories
+    import subprocess
+
+    try:
+        subprocess.run(
+            ["git", "config", "--global", "--add", "safe.directory", str(code_root)],
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except Exception:
+        pass
+
     return None
 
 
@@ -742,6 +756,11 @@ def _build_bootstrap_bundle(
         f"- done 命令不需要重复平台参数\n"
         f"- 每个步骤必须用 done 完成，不要跳过\n"
         f"- Do NOT wait for real stdin interaction; use conservative defaults.\n"
+        f"\n"
+        f"## ⛔ 严禁写入路径\n"
+        f"- 禁止将任何文档文件写入 {code_root}/.sillyspec/docs/\n"
+        f"- 所有文档必须写入 {spec_root}/.sillyspec/docs/（由 --spec-root 参数控制）\n"
+        f"- 如果 CLI 在 {code_root}/.sillyspec/ 下产生了 docs 文件，这是错误的\n"
     )
 
     return AgentSpecBundle(

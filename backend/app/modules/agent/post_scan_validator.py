@@ -151,25 +151,93 @@ def _get_source_commit(source_root: Path) -> tuple[str | None, str | None]:
     """
     import subprocess
 
-    try:
-        proc = subprocess.run(
+    def _try_rev_parse() -> tuple[str | None, str | None]:
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(source_root), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            if proc.returncode == 0:
+                commit = proc.stdout.strip()
+                if commit:
+                    return commit, None
+            return None, "not_git_repo"
+        except subprocess.TimeoutExpired:
+            return None, "git_timeout"
+        except FileNotFoundError:
+            return None, "git_not_found"
+        except Exception as exc:
+            return None, str(exc)
+
+    commit, error = _try_rev_parse()
+    if commit:
+        return commit, None
+
+    # Fallback: add safe.directory and retry (handles dubious ownership)
+    if error and "dubious" in (
+        subprocess.run(
             ["git", "-C", str(source_root), "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
             timeout=10,
             check=False,
+        ).stderr.lower()
+        if not commit
+        else ""
+    ):
+        subprocess.run(
+            ["git", "config", "--global", "--add", "safe.directory", str(source_root)],
+            capture_output=True,
+            check=False,
+            timeout=5,
         )
-        if proc.returncode == 0:
-            commit = proc.stdout.strip()
-            if commit:
-                return commit, None
-        return None, "not_git_repo"
-    except subprocess.TimeoutExpired:
-        return None, "git_timeout"
-    except FileNotFoundError:
-        return None, "git_not_found"
+        commit2, _error2 = _try_rev_parse()
+        if commit2:
+            return commit2, None
+
+    return commit, error
+
+
+def _archive_and_clean_pollution(
+    source_root: Path,
+    runtime_root: Path,
+    scan_run_id: str,
+) -> dict[str, Any]:
+    """Move source_root/.sillyspec/ to runtime_root/pollution/{scan_run_id}/.
+
+    Returns a dict with keys: archived (bool), archive_path (str|None), file_count (int).
+    """
+    import shutil
+
+    source_sillyspec = source_root / ".sillyspec"
+    if not source_sillyspec.exists():
+        return {"archived": False, "archive_path": None, "file_count": 0}
+
+    files = list(source_sillyspec.rglob("*"))
+    file_count = sum(1 for f in files if f.is_file())
+    if file_count == 0:
+        return {"archived": False, "archive_path": None, "file_count": 0}
+
+    archive_dir = runtime_root / "pollution" / scan_run_id
+    archive_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        shutil.move(str(source_sillyspec), str(archive_dir / ".sillyspec"))
+        return {
+            "archived": True,
+            "archive_path": str(archive_dir / ".sillyspec"),
+            "file_count": file_count,
+        }
     except Exception as exc:
-        return None, str(exc)
+        return {
+            "archived": False,
+            "archive_path": None,
+            "file_count": file_count,
+            "error": str(exc),
+        }
 
 
 def _check_source_pollution(source_root: Path, spec_root: Path) -> list[ValidationError]:
@@ -469,6 +537,22 @@ class PostScanValidator:
         # 3. Check for pollution in source_root
         pollution_errors = _check_source_pollution(self.source_root, self.spec_root)
         errors.extend(pollution_errors)
+
+        # 3.5 Archive and clean source_root pollution
+        if any(e.code == "source_root_pollution" for e in pollution_errors):
+            cleanup = _archive_and_clean_pollution(
+                self.source_root, self.runtime_root, self.scan_run_id
+            )
+            metadata["pollution_cleanup"] = cleanup
+            if cleanup.get("archived"):
+                warnings.append(
+                    ValidationError(
+                        code="pollution_archived",
+                        severity="warning",
+                        message=f"Moved {cleanup['file_count']} polluted files to {cleanup['archive_path']}",
+                        details=cleanup,
+                    )
+                )
 
         # 4. Verify output paths
         path_errors = _check_output_paths(self.spec_root)
