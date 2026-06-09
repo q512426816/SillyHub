@@ -143,16 +143,6 @@ function parseStdoutToolUse(content: string, logTimestamp: string): ToolCallEntr
   return null;
 }
 
-/** Check if content's first non-empty line starts with [TOOL_USE] */
-function startsWithToolUse(content: string): boolean {
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    return trimmed.startsWith("[TOOL_USE]");
-  }
-  return false;
-}
-
 /* ------------------------------------------------------------------ */
 /*  TOOL_RESULT merge helper                                           */
 /* ------------------------------------------------------------------ */
