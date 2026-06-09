@@ -40,4 +40,6 @@ export interface ProcessedLog {
   mergedToolResult?: string;
   /** Parsed tool info from stdout [TOOL_USE] line (when no channel=tool_call exists) */
   parsedStdoutTool?: ToolCallEntry;
+  /** Orphan [TOOL_RESULT] body (no preceding tool source to merge into) */
+  parsedToolResult?: string;
 }

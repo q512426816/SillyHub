@@ -479,3 +479,147 @@ export function ToolCallPreview({ entry, mergedResult }: ToolPreviewProps) {
       return <GenericToolPreview entry={entry} />;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/*  Tool result cards (standalone [TOOL_RESULT] rendering)             */
+/* ------------------------------------------------------------------ */
+
+const RESULT_COLLAPSE_LINES = 20;
+const RESULT_COLLAPSE_CHARS = 2000;
+
+/* --- Workflow Spec detection --- */
+
+interface WorkflowSpecSummary {
+  name: string;
+  description: string;
+  specVersion?: string;
+  roleCount: number;
+  roles: { id: string; name: string; task: string }[];
+  outputCount: number;
+  orchestrationMode?: string;
+  maxConcurrent?: string;
+  timeoutPerRole?: string;
+}
+
+function parseWorkflowSpec(text: string): WorkflowSpecSummary | null {
+  if (!/^name:/m.test(text) || !/^roles:/m.test(text)) return null;
+
+  const name = text.match(/^name:\s*(.+)$/m)?.[1]?.trim() ?? "";
+  const description = text.match(/^description:\s*"?(.+?)"?\s*$/m)?.[1]?.trim() ?? "";
+  const specVersion = text.match(/^spec_version:\s*(.+)$/m)?.[1]?.trim();
+
+  const roles: { id: string; name: string; task: string }[] = [];
+  const roleRegex = /-\s+id:\s*(.+)\n\s+name:\s*(.+)\n\s+task:\s*(.+)/g;
+  let m;
+  while ((m = roleRegex.exec(text)) !== null) {
+    roles.push({ id: (m[1] ?? "").trim(), name: (m[2] ?? "").trim(), task: (m[3] ?? "").trim() });
+  }
+
+  const orchestrationMode = text.match(/mode:\s*(.+)$/m)?.[1]?.trim();
+  const maxConcurrent = text.match(/max_concurrent:\s*(\d+)/)?.[1];
+  const timeoutPerRole = text.match(/timeout_per_role:\s*(.+)/)?.[1]?.trim();
+
+  const outputsSection = text.match(/outputs:\s*\n((?:\s+-.*\n?)*)/);
+  const outputCount = outputsSection ? ((outputsSection[1] ?? "").match(/\s+-/g) || []).length : 0;
+
+  return {
+    name,
+    description,
+    specVersion,
+    roleCount: roles.length || (text.match(/-\s+id:/g) || []).length,
+    roles,
+    outputCount,
+    orchestrationMode,
+    maxConcurrent,
+    timeoutPerRole,
+  };
+}
+
+/* --- WorkflowSpecResultCard --- */
+
+function WorkflowSpecResultCard({
+  summary,
+  fullText,
+}: {
+  summary: WorkflowSpecSummary;
+  fullText: string;
+}) {
+  return (
+    <div className="rounded-md border border-teal-700/40 bg-teal-950/30 px-2.5 py-2">
+      <div className="flex items-center gap-2 text-[11px] font-semibold text-teal-300">
+        Workflow: {summary.name}
+      </div>
+      {summary.description && (
+        <div className="mt-0.5 text-[10px] text-zinc-400">{summary.description}</div>
+      )}
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-zinc-500">
+        {summary.specVersion && (
+          <span>版本 <span className="text-zinc-300">{summary.specVersion}</span></span>
+        )}
+        <span>角色 <span className="text-zinc-300">{summary.roleCount}</span></span>
+        <span>输出 <span className="text-zinc-300">{summary.outputCount}</span></span>
+        {summary.orchestrationMode && (
+          <span>模式 <span className="text-zinc-300">{summary.orchestrationMode}</span></span>
+        )}
+        {summary.maxConcurrent && (
+          <span>并发 <span className="text-zinc-300">{summary.maxConcurrent}</span></span>
+        )}
+        {summary.timeoutPerRole && (
+          <span>超时 <span className="text-zinc-300">{summary.timeoutPerRole}</span></span>
+        )}
+      </div>
+      {summary.roles.length > 0 && (
+        <div className="mt-1 space-y-0.5">
+          {summary.roles.slice(0, 5).map((r, i) => (
+            <div key={i} className="text-[10px] text-zinc-500">
+              <span className="text-zinc-300">{r.id}</span>: {r.task.slice(0, 60)}
+            </div>
+          ))}
+        </div>
+      )}
+      <CollapsibleSection title="查看完整 YAML">
+        <pre className={CODE_CLS}>{fullText}</pre>
+        <div className="mt-1">
+          <CopyButton text={fullText} label="复制 YAML" />
+        </div>
+      </CollapsibleSection>
+    </div>
+  );
+}
+
+/* --- ToolResultCard (generic + YAML detection) --- */
+
+export function ToolResultCard({ body }: { body: string }) {
+  const lines = body.split("\n").filter((l) => l.trim());
+  const isLong = lines.length > RESULT_COLLAPSE_LINES || body.length > RESULT_COLLAPSE_CHARS;
+
+  const spec = parseWorkflowSpec(body);
+  if (spec) return <WorkflowSpecResultCard summary={spec} fullText={body} />;
+
+  return (
+    <div className="rounded-md border border-zinc-700/50 bg-zinc-900/50 px-2.5 py-2">
+      <div className="text-[11px] font-semibold text-emerald-300">Tool Result</div>
+      {isLong ? (
+        <>
+          <div className="mt-1 space-y-0.5">
+            {lines.slice(0, 5).map((line, i) => (
+              <div key={i} className="truncate text-[10px] text-zinc-400">
+                {line}
+              </div>
+            ))}
+          </div>
+          <CollapsibleSection title={`完整结果 (${lines.length} 行)`}>
+            <pre className={CODE_CLS}>{body}</pre>
+            <div className="mt-1">
+              <CopyButton text={body} label="复制结果" />
+            </div>
+          </CollapsibleSection>
+        </>
+      ) : (
+        <pre className="mt-1 max-w-full whitespace-pre-wrap break-words text-[11px] leading-5 text-zinc-400 [overflow-wrap:anywhere]">
+          {body}
+        </pre>
+      )}
+    </div>
+  );
+}

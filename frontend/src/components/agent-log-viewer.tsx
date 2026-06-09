@@ -32,7 +32,7 @@ export {
   isThinkingContent,
   filterToolProtocolLines,
 } from "./agent-log/normalize";
-export { CopyButton, CollapsibleSection, ToolCallPreview } from "./agent-log/tool-renderers";
+export { CopyButton, CollapsibleSection, ToolCallPreview, ToolResultCard } from "./agent-log/tool-renderers";
 
 import {
   isPendingReplied,
@@ -43,7 +43,7 @@ import {
   filterToolProtocolLines,
   EMPTY_REPLIED_INPUTS,
 } from "./agent-log/normalize";
-import { ToolCallPreview, CollapsibleSection } from "./agent-log/tool-renderers";
+import { ToolCallPreview, CollapsibleSection, ToolResultCard } from "./agent-log/tool-renderers";
 import type { AgentLogInputControls, ProcessedLog, ScanCheckResult } from "./agent-log/types";
 
 /* ------------------------------------------------------------------ */
@@ -231,6 +231,11 @@ export function AgentLogRow({
               mergedResult={processedLog.mergedToolResult}
             />
           </div>
+        ) : processedLog.parsedToolResult ? (
+          /* Orphan [TOOL_RESULT] → standalone ToolResultCard */
+          <div className="font-mono [overflow-wrap:anywhere]">
+            <ToolResultCard body={processedLog.parsedToolResult} />
+          </div>
         ) : isThinking ? (
           /* Thinking/System → collapsed */
           <div className="font-mono [overflow-wrap:anywhere]">
@@ -239,7 +244,7 @@ export function AgentLogRow({
             </CollapsibleSection>
           </div>
         ) : (
-          /* Default rendering — filter out TOOL_USE/TOOL_RESULT protocol lines */
+          /* Default rendering — filter out all protocol lines */
           <div
             className={cn(
               "min-w-0 max-w-full whitespace-pre-wrap break-words font-mono [overflow-wrap:anywhere]",

@@ -258,3 +258,8 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/components/agent-log/types.ts, frontend/src/components/agent-log/normalize.ts, frontend/src/components/agent-log-viewer.tsx
 结果：1) normalizeLogs 新增 parseStdoutToolUse 解析 stdout [TOOL_USE] ToolName: {json} 为 ToolCallEntry；2) 有 channel=tool_call 时隐藏 stdout 重复，无时转为 parsedStdoutTool 走工具专属卡片渲染；3) AgentLogRow 新增 parsedStdoutTool 分支；4) 默认渲染通过 filterToolProtocolLines 过滤 [TOOL_USE]/[TOOL_RESULT]；5) TypeScript 编译通过
+
+## ql-20260609-015-d4e9 | 2026-06-09 17:20:00 | 修复 stdout [TOOL_RESULT] 大段内容被当作普通 INFO 展示
+状态：已完成
+文件：frontend/src/components/agent-log/types.ts, frontend/src/components/agent-log/normalize.ts, frontend/src/components/agent-log/tool-renderers.tsx, frontend/src/components/agent-log-viewer.tsx
+结果：1) normalize.ts 新增 extractToolResultBody 解析完整 TOOL_RESULT body；2) normalizeLogs 重构 TOOL_RESULT 处理：有 tool source 时合并并隐藏，无时存入 parsedToolResult 独立渲染；3) tool-renderers.tsx 新增 ToolResultCard（长结果折叠+前5行摘要）和 WorkflowSpecResultCard（检测 YAML workflow spec 并展示摘要）；4) filterToolProtocolLines 扩展过滤 THINKING/SYSTEM/ASSISTANT；5) AgentLogRow 新增 parsedToolResult 渲染分支

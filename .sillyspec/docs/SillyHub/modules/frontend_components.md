@@ -98,3 +98,5 @@ AgentLogViewer（被 agent 控制台页、workspace 详情页共用）
 | 2026-06-09 | ql-20260609-005-d2f7 | 提取共享 AgentLogViewer 组件，Agent 控制台和 Bootstrap 页面共用 |
 | 2026-06-09 | ql-20260609-006-e3a1 | AgentLogViewer 内置自动滚动到底部 |
 | 2026-06-09 | ql-20260609-013-a3f7 | 日志事件归一化 + 6 种工具专属渲染器（agent-log 子目录拆分） |
+| 2026-06-09 | ql-20260609-014-c3d8 | stdout [TOOL_USE] 文本事件解析为工具卡片 |
+| 2026-06-09 | ql-20260609-015-d4e9 | stdout [TOOL_RESULT] 归一化 + ToolResultCard + WorkflowSpecResultCard |

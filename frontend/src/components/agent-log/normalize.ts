@@ -144,21 +144,39 @@ function parseStdoutToolUse(content: string, logTimestamp: string): ToolCallEntr
 }
 
 /* ------------------------------------------------------------------ */
-/*  TOOL_RESULT merge helper                                           */
+/*  TOOL_RESULT body extraction                                        */
 /* ------------------------------------------------------------------ */
 
-function mergeToolResult(target: ProcessedLog, toolResultLines: string[]) {
-  const resultContent = toolResultLines
-    .map((l) => l.replace(/^\s*\[TOOL_RESULT\]\s*/, ""))
-    .filter((l) => l.trim())
-    .join("\n");
+/** Extract full body from content containing [TOOL_RESULT] lines */
+function extractToolResultBody(content: string): string {
+  const lines = content.split("\n");
+  const bodyLines: string[] = [];
+  let started = false;
 
-  if (resultContent) {
-    if (target.mergedToolResult) {
-      target.mergedToolResult += "\n" + resultContent;
-    } else {
-      target.mergedToolResult = resultContent;
+  for (const line of lines) {
+    const toolResultMatch = line.match(/^\s*\[TOOL_RESULT\]\s*(.*)/);
+    if (toolResultMatch && !started) {
+      started = true;
+      if (toolResultMatch[1]?.trim()) bodyLines.push(toolResultMatch[1]);
+      continue;
     }
+
+    if (started) {
+      // Stop at other protocol prefixes
+      if (/^\s*\[(TOOL_USE|THINKING|SYSTEM|ASSISTANT)\]/.test(line)) break;
+      bodyLines.push(line);
+    }
+  }
+
+  return bodyLines.join("\n").trim();
+}
+
+function mergeToolResult(target: ProcessedLog, body: string) {
+  if (!body) return;
+  if (target.mergedToolResult) {
+    target.mergedToolResult += "\n" + body;
+  } else {
+    target.mergedToolResult = body;
   }
 }
 
@@ -168,14 +186,12 @@ function mergeToolResult(target: ProcessedLog, toolResultLines: string[]) {
 
 export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
   const result: ProcessedLog[] = logs.map((log) => ({ log, hidden: false }));
-  // Tracks index of last tool source (channel=tool_call OR parsed stdout [TOOL_USE])
   let lastToolSourceIdx = -1;
 
   for (let i = 0; i < logs.length; i++) {
     const current = result[i];
     if (!current) continue;
 
-    // Track channel=tool_call as tool source
     if (current.log.channel === "tool_call") {
       lastToolSourceIdx = i;
       continue;
@@ -188,18 +204,11 @@ export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
     const nonEmpty = lines.filter((l) => l.trim());
     if (nonEmpty.length === 0) continue;
 
-    const toolUseLines = nonEmpty.filter((l) => l.trim().startsWith("[TOOL_USE]"));
-    const toolResultLines = nonEmpty.filter((l) => l.trim().startsWith("[TOOL_RESULT]"));
-    const otherLines = nonEmpty.filter(
-      (l) => !l.trim().startsWith("[TOOL_USE]") && !l.trim().startsWith("[TOOL_RESULT]"),
-    );
-
-    const hasToolUse = toolUseLines.length > 0;
-    const hasToolResult = toolResultLines.length > 0;
+    const hasToolUse = nonEmpty.some((l) => l.trim().startsWith("[TOOL_USE]"));
+    const hasToolResult = nonEmpty.some((l) => l.trim().startsWith("[TOOL_RESULT]"));
 
     // ── [TOOL_USE] handling ──
     if (hasToolUse) {
-      // Check for nearby channel=tool_call to deduplicate
       const nearToolCall = lastToolSourceIdx >= 0
         && result[lastToolSourceIdx]?.log.channel === "tool_call"
         && i > lastToolSourceIdx
@@ -208,38 +217,40 @@ export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
       if (nearToolCall) {
         // Duplicate of tool_call → merge TOOL_RESULT if present, then hide
         if (hasToolResult) {
+          const body = extractToolResultBody(content);
           const tc = result[lastToolSourceIdx];
-          if (tc) mergeToolResult(tc, toolResultLines);
+          if (tc) mergeToolResult(tc, body);
         }
         current.hidden = true;
         continue;
       }
 
-      // No nearby tool_call → parse [TOOL_USE] as standalone tool event
       const parsed = parseStdoutToolUse(content, current.log.timestamp);
       if (parsed) {
         current.parsedStdoutTool = parsed;
         lastToolSourceIdx = i;
-
-        // Merge TOOL_RESULT from the same entry
         if (hasToolResult) {
-          mergeToolResult(current, toolResultLines);
+          mergeToolResult(current, extractToolResultBody(content));
         }
-
-        // If content is only TOOL_USE + TOOL_RESULT, skip further processing
-        if (otherLines.length === 0) continue;
-        // Otherwise fall through — otherLines will be rendered alongside the tool card
+        continue;
       }
     }
 
-    // ── [TOOL_RESULT] only (no TOOL_USE) → merge into last tool source ──
-    if (!hasToolUse && hasToolResult && lastToolSourceIdx >= 0) {
-      const tc = result[lastToolSourceIdx];
-      if (tc) mergeToolResult(tc, toolResultLines);
+    // ── [TOOL_RESULT] handling (no TOOL_USE) ──
+    if (!hasToolUse && hasToolResult) {
+      const body = extractToolResultBody(content);
 
-      // Hide if only TOOL_RESULT lines
-      if (otherLines.length === 0) {
+      if (lastToolSourceIdx >= 0) {
+        // Merge into previous tool source
+        const tc = result[lastToolSourceIdx];
+        if (tc) mergeToolResult(tc, body);
         current.hidden = true;
+      } else {
+        // Orphan TOOL_RESULT — standalone rendering
+        if (body) {
+          current.parsedToolResult = body;
+        }
+        // Don't hide — rendered as ToolResultCard
       }
     }
   }
@@ -261,7 +272,7 @@ export function isThinkingContent(content: string): boolean {
   );
 }
 
-/** Filter [TOOL_USE] and [TOOL_RESULT] lines from content for default rendering */
+/** Filter all protocol-prefixed lines from content for default rendering */
 export function filterToolProtocolLines(content: string): string {
   return content
     .split("\n")
@@ -269,7 +280,10 @@ export function filterToolProtocolLines(content: string): string {
       const trimmed = l.trim();
       return trimmed.length > 0
         && !trimmed.startsWith("[TOOL_USE]")
-        && !trimmed.startsWith("[TOOL_RESULT]");
+        && !trimmed.startsWith("[TOOL_RESULT]")
+        && !trimmed.startsWith("[THINKING]")
+        && !trimmed.startsWith("[SYSTEM")
+        && !trimmed.startsWith("[ASSISTANT]");
     })
     .join("\n");
 }
