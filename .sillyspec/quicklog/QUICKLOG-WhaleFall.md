@@ -199,6 +199,11 @@ created_at: 2026-06-03T08:42:04
 文件：frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
 结果：日志区域改为深色背景 bg-zinc-950 + 频道徽章(图标+颜色) + Bash tool 结构化渲染(description标题+command展示+状态徽章) + max-h-[720px]，清理旧 channelLabel/channelTagCls 函数
 
+## ql-20260609-005-d2f7 | 2026-06-09 10:56:22 | Bootstrap 日志区域完全复用 Agent 控制台组件
+状态：已完成
+文件：frontend/src/components/agent-log-viewer.tsx, frontend/src/app/(dashboard)/workspaces/[id]/page.tsx, frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx
+结果：提取共享组件 AgentLogViewer（含 BashToolPreview、ScanCheckSummaryCard、inline pending_input 回复等），Bootstrap 页面使用完全相同的组件，TypeScript 编译通过，前端已部署
+
 ## ql-20260609-002-f8a3 | 2026-06-09 10:16:43 | Agent 控制台日志展示优化：结构化 tool 回显 + 扫描自检摘要 + 状态区分
 状态：已完成
 文件：frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx

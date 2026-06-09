@@ -12,7 +12,7 @@ import {
   Send,
   Wrench,
 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -524,6 +524,14 @@ export function AgentLogViewer({
   inputControls?: AgentLogInputControls;
 }) {
   const logEntries = logs ?? [];
+  const internalRef = useRef<HTMLDivElement>(null);
+  const scrollRef = containerRef ?? internalRef;
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [logEntries.length, scrollRef]);
 
   return (
     <div
@@ -555,7 +563,7 @@ export function AgentLogViewer({
       </div>
 
       <div
-        ref={containerRef}
+        ref={scrollRef}
         className={cn(
           "min-w-0 max-w-full overflow-y-auto overflow-x-hidden font-mono",
           maxHeightClass,

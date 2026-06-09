@@ -12,7 +12,7 @@ import {
   Terminal,
   XCircle,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AgentLogViewer, isPendingReplied, parseToolCallContent, parseScanCheckOutput, type ToolCallEntry } from "@/components/agent-log-viewer";
 import { Badge } from "@/components/ui/badge";
@@ -221,7 +221,6 @@ export default function AgentPage({ params }: Props) {
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [expandedLogs, setExpandedLogs] = useState<AgentRunLogEntry[] | null>(null);
   const [expandedLogsLoading, setExpandedLogsLoading] = useState(false);
-  const logContainerRef = useRef<HTMLDivElement>(null);
 
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
   const [submittingInputs, setSubmittingInputs] = useState<Record<string, boolean>>({});
@@ -413,13 +412,6 @@ export default function AgentPage({ params }: Props) {
     [workspaceId, inputValues],
   );
 
-  /* ---- Scroll log container ---- */
-  useEffect(() => {
-    if (logContainerRef.current) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-    }
-  }, [activeLogs]);
-
   /* ================================================================ */
   /*  Render                                                           */
   /* ================================================================ */
@@ -602,7 +594,6 @@ export default function AgentPage({ params }: Props) {
             loading={logsLoading}
             emptyText="暂无日志输出"
             isLive
-            containerRef={logContainerRef}
             summary={
               <>
                 {toolSummary.success > 0 && (
