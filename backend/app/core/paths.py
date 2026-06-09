@@ -48,11 +48,17 @@ def resolve_spec_data_root(raw: str) -> str:
     Pydantic validators without side effects.
     """
     p = Path(raw)
-    # ``Path.is_absolute()`` does not recognise Windows drive-letter paths
-    # (e.g. ``C:/data``) as absolute on POSIX, nor POSIX-style ``/data``
-    # paths as absolute on Windows.  Check explicitly for both cases.
-    if p.is_absolute() or (len(raw) >= 2 and raw[1] == ":") or raw.startswith("/"):
-        # On Windows, Path("/data") is drive-relative (\data), not absolute.
-        # Resolve it so the result is truly absolute on all platforms.
-        return str(p.resolve()) if not p.is_absolute() else str(p)
+    if p.is_absolute():
+        return str(p)
+    # Windows drive-letter path (e.g. C:/data) — only absolute on Windows.
+    if len(raw) >= 2 and raw[1] == ":" and raw[0].isalpha():
+        import sys
+
+        if sys.platform == "win32":
+            return str(p.resolve())
+        # On POSIX, a "C:/..." string is not a real absolute path — treat
+        # it as relative so the caller gets a sensible repo-root path.
+    # POSIX-style leading-slash path on Windows is drive-relative — resolve.
+    if raw.startswith("/") and not p.is_absolute():
+        return str(p.resolve())
     return str(REPO_ROOT / p)

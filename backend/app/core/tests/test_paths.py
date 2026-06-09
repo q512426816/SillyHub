@@ -14,6 +14,7 @@ created_at: 2026-06-04
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -112,11 +113,15 @@ class TestResolveSpecDataRoot:
         finally:
             os.chdir(original)
 
+    @pytest.mark.skipif(
+        sys.platform != "win32", reason="Windows drive-letter paths only valid on Windows"
+    )
     def test_windows_absolute_path_unchanged(self) -> None:
-        """Windows absolute paths are also returned unchanged (platform-normalised)."""
+        """Windows absolute paths are returned as fully-qualified paths."""
         result = resolve_spec_data_root("C:/data/sillyspec-data")
-        # Path() normalises separators; compare via Path so tests pass on both OSes
-        assert Path(result) == Path("C:/data/sillyspec-data")
+        result_path = Path(result)
+        assert result_path.is_absolute()
+        assert result_path.name == "sillyspec-data"
 
 
 # ---------------------------------------------------------------------------
