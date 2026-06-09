@@ -183,3 +183,9 @@ created_at: 2026-06-03T08:42:04
 文件：backend/app/modules/spec_workspace/bootstrap.py
 根因：1) 缺少 activate+reparse；2) UnboundLocalError（函数体内 import Workspace）；3) post-scan 软错误导致 validation_passed=false
 结果：加 activate+reparse；import 移至文件头；validation_passed 不再要求 post-scan status==success
+
+## ql-20260609-001-c4d5 | 2026-06-09 09:55:00 | Agent 控制台日志截断 + TOOL 通道显示原始 JSON
+状态：进行中
+文件：backend/app/modules/agent/adapters/claude_code.py
+根因：_format_conversation_log 中 tool args 截断 200 字符、tool result 截断 500 字符、thinking 截断 300 字符；DB 写入截断 4000 字符可能破坏 JSON 导致前端解析失败
+结果：tool args→2000、tool result→3000、thinking→2000、DB 写入→8000

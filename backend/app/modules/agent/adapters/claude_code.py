@@ -323,7 +323,7 @@ def _format_conversation_log(events: list[dict]) -> str:
                 elif btype == "thinking":
                     text = (block.get("thinking") or block.get("text") or "").strip()
                     if text:
-                        preview = text[:300] + ("..." if len(text) > 300 else "")
+                        preview = text[:2000] + ("..." if len(text) > 2000 else "")
                         lines.append(f"[THINKING] {preview}")
                 elif btype == "tool_use":
                     tool_name = block.get("name", "unknown")
@@ -333,7 +333,7 @@ def _format_conversation_log(events: list[dict]) -> str:
                         if cmd_str:
                             lines.append(f"[TOOL_USE] {tool_name}: {cmd_str}")
                         else:
-                            args_preview = json.dumps(tool_input, ensure_ascii=False)[:200]
+                            args_preview = json.dumps(tool_input, ensure_ascii=False)[:2000]
                             lines.append(f"[TOOL_USE] {tool_name}: {args_preview}")
 
         elif etype == "user":
@@ -343,7 +343,7 @@ def _format_conversation_log(events: list[dict]) -> str:
                 if isinstance(block, dict) and block.get("type") == "tool_result":
                     content = block.get("content", "")
                     if isinstance(content, str) and content.strip():
-                        preview = content.strip()[:500]
+                        preview = content.strip()[:3000]
                         lines.append(f"[TOOL_RESULT] {preview}")
 
         elif etype == "result":
@@ -707,7 +707,7 @@ class ClaudeCodeAdapter(AgentAdapter):
                         # Incremental DB write for stdout
                         if on_log:
                             try:
-                                await on_log("stdout", formatted[:4000], ts)
+                                await on_log("stdout", formatted[:8000], ts)
                             except Exception:
                                 log.warning("on_log_callback_failed", run_id=str(run_id))
                         # Publish structured tool_call events
@@ -733,7 +733,7 @@ class ClaudeCodeAdapter(AgentAdapter):
                             await redis.publish(channel, tc_msg)
                             if on_log:
                                 try:
-                                    await on_log("tool_call", tc_content[:4000], ts)
+                                    await on_log("tool_call", tc_content[:8000], ts)
                                 except Exception:
                                     log.warning("on_log_callback_failed", run_id=str(run_id))
                     except Exception:
