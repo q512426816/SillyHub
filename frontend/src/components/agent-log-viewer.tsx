@@ -8,7 +8,9 @@ import {
   Clock3,
   Copy,
   CornerDownRight,
+  Maximize2,
   MessageSquareText,
+  Minimize2,
   Send,
   Wrench,
 } from "lucide-react";
@@ -526,18 +528,53 @@ export function AgentLogViewer({
   const logEntries = logs ?? [];
   const internalRef = useRef<HTMLDivElement>(null);
   const scrollRef = containerRef ?? internalRef;
+  const [fullscreen, setFullscreen] = useState(false);
+  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
+
+  const filteredLogs = activeFilters.size > 0
+    ? logEntries.filter((l) => activeFilters.has(l.channel))
+    : logEntries;
 
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [logEntries.length, scrollRef]);
+  }, [filteredLogs.length, scrollRef]);
+
+  useEffect(() => {
+    if (fullscreen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => { document.body.style.overflow = ""; };
+  }, [fullscreen]);
+
+  const channelFilters = [
+    { key: "stdout", label: "INFO" },
+    { key: "tool_call", label: "TOOL" },
+    { key: "stderr", label: "WARN" },
+    { key: "pending_input", label: "ASK" },
+    { key: "user_input", label: "REPLY" },
+  ];
+
+  function toggleFilter(key: string) {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   return (
     <div
       className={cn(
-        "min-w-0 max-w-full overflow-hidden bg-zinc-950 text-zinc-300",
-        variant === "panel" && "rounded-md border border-zinc-800 shadow-sm",
+        "min-w-0 overflow-hidden bg-zinc-950 text-zinc-300",
+        fullscreen
+          ? "fixed inset-0 z-50 flex flex-col"
+          : "max-w-full",
+        !fullscreen && variant === "panel" && "rounded-md border border-zinc-800 shadow-sm",
       )}
     >
       <div className={cn(
@@ -554,19 +591,49 @@ export function AgentLogViewer({
             </span>
           )}
         </div>
-        {(summary || actions) && (
-          <div className="flex flex-wrap items-center gap-2">
-            {summary}
-            {actions}
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {/* Channel filter buttons */}
+          {channelFilters.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => toggleFilter(f.key)}
+              className={cn(
+                "inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-semibold transition-colors",
+                activeFilters.has(f.key)
+                  ? "border-blue-500/40 bg-blue-500/15 text-blue-300"
+                  : "border-zinc-700 bg-zinc-900 text-zinc-500 hover:text-zinc-300",
+              )}
+            >
+              {f.label}
+            </button>
+          ))}
+          {activeFilters.size > 0 && (
+            <button
+              onClick={() => setActiveFilters(new Set())}
+              className="text-[10px] text-zinc-500 hover:text-zinc-300"
+            >
+              清除
+            </button>
+          )}
+          {summary}
+          {actions}
+          {/* Fullscreen toggle */}
+          <button
+            onClick={() => setFullscreen(!fullscreen)}
+            className="ml-1 inline-flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+            title={fullscreen ? "退出全屏" : "全屏"}
+          >
+            {fullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+          </button>
+        </div>
       </div>
 
       <div
         ref={scrollRef}
         className={cn(
-          "min-w-0 max-w-full overflow-y-auto overflow-x-hidden font-mono",
-          maxHeightClass,
+          "min-w-0 overflow-y-auto overflow-x-hidden font-mono",
+          fullscreen ? "flex-1" : "max-w-full",
+          !fullscreen && maxHeightClass,
         )}
       >
         {loading ? (
@@ -574,11 +641,13 @@ export function AgentLogViewer({
             <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-300" />
             加载日志中...
           </div>
-        ) : logEntries.length === 0 ? (
-          <p className="px-4 py-10 text-center text-xs text-zinc-600">{emptyText}</p>
+        ) : filteredLogs.length === 0 ? (
+          <p className="px-4 py-10 text-center text-xs text-zinc-600">
+            {logEntries.length === 0 ? emptyText : "无匹配日志"}
+          </p>
         ) : (
           <div className="min-w-0 max-w-full divide-y divide-zinc-900/90">
-            {logEntries.map((log) => (
+            {filteredLogs.map((log) => (
               <AgentLogRow
                 key={log.id}
                 log={log}

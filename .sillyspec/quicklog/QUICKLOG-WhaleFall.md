@@ -214,6 +214,18 @@ created_at: 2026-06-03T08:42:04
 文件：frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
 结果：load() 保存 lastBsRun，无活跃运行时显示结果摘要卡片（状态徽章+开始时间+耗时+exit_code+run ID），前端已部署
 
+## ql-20260609-008-a1d3 | 2026-06-09 14:10:00 | 修复 Bootstrap runs 排序：created_at 缺失导致取到错误 run
+状态：已完成
+文件：frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
+根因：API 返回的 AgentRun 没有 created_at 字段，sort 用 new Date(undefined) 全部 NaN 导致顺序随机，显示 d88ecf70 而非 598eb6d
+结果：排序改为 finished_at ?? started_at 降序，正确显示最近完成的 Bootstrap run
+
+## ql-20260609-009-c5f4 | 2026-06-09 14:30:00 | 修复 Bootstrap 结果卡片显示"成功"但实际后置校验失败
+状态：已完成
+文件：frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
+根因：结果卡片只看 status=completed 显示"成功"，未考虑 post_scan_status=failed_post_check
+结果：新增 bsRunStatus() 函数，status=completed + post_scan_status=failed_post_check 时显示"后置校验失败"，与 Agent 控制台 runStatusLabel 一致
+
 ## ql-20260609-002-f8a3 | 2026-06-09 10:16:43 | Agent 控制台日志展示优化：结构化 tool 回显 + 扫描自检摘要 + 状态区分
 状态：已完成
 文件：frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
