@@ -193,12 +193,25 @@ export function isPendingReplied(
 }
 
 export function parseScanCheckOutput(text: string): ScanCheckResult | null {
-  const scanDocsMatch = text.match(/Scan\s*文档\s*\((\d+\/\d+)\)/i) || text.match(/scan.*?(\d+\/\d+)/i);
-  const moduleMatch = text.match(/(\d+)\s*个?\s*模块/i) || text.match(/module.*?(\d+)/i);
-  const flowMatch = text.match(/(\d+)\s*个?\s*流程/i) || text.match(/flow.*?(\d+)/i);
-  const glossaryOk = /glossary.*?存在/i.test(text) || /glossary\.md.*?✅/i.test(text);
-  const totalMatch = text.match(/总文件数[:\s]*(\d+)/i) || text.match(/total.*?(\d+)/i);
-  const passed = /全部通过|✅.*?通过|self.check.*?pass/i.test(text) && !/❌/.test(text.split("自检结果")[1] ?? text);
+  const scanDocsMatch =
+    text.match(/Scan\s*文档\s*\((\d+\/\d+)\)/i) ||
+    text.match(/(\d+)\s*份\s*scan\s*文档/i);
+  const moduleMatch =
+    text.match(/(\d+)\s*个\s*模块/i) ||
+    text.match(/(\d+)个模块/i);
+  const flowMatch =
+    text.match(/(\d+)\s*份\s*业务流程/i) ||
+    text.match(/(\d+)\s*个\s*流程/i);
+  const glossaryOk =
+    /glossary\.md\s*\(.*?\)\s*✅/i.test(text) ||
+    /术语表.*?✅/i.test(text) ||
+    /glossary\.md\s*\(/i.test(text);
+  const totalMatch =
+    text.match(/(\d+)\s*份模块卡片/i) ||
+    text.match(/总文件数[:\s]*(\d+)/i);
+  const passed =
+    (/全部通过|✅.*?通过|self\.check.*?pass/i.test(text) || /扫描完整性验证通过/i.test(text))
+    && !/❌/.test(text.split("自检结果")[1] ?? text);
 
   if (!scanDocsMatch && !moduleMatch) return null;
   return {
