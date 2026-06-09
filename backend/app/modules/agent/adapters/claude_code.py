@@ -425,6 +425,25 @@ class ClaudeCodeAdapter(AgentAdapter):
         if bundle.allowed_paths:
             env_vars["CLAUDE_ALLOWED_PATHS"] = ":".join(bundle.allowed_paths)
 
+        # Scan-stage write guard: inject denied/allowed path env vars for
+        # the PreToolUse hook (scan_write_guard.py) to enforce.
+        if bundle.stage == "scan":
+            meta = bundle.platform_metadata or {}
+            code_root = meta.get("code_root") or meta.get("root_path", "")
+            spec_root = meta.get("spec_root") or bundle.spec_root or ""
+            runtime_root = meta.get("runtime_root") or bundle.runtime_root or ""
+
+            denied = []
+            if code_root:
+                denied.append(f"{code_root}/.sillyspec")
+                denied.append(f"{code_root}/docs")
+            if denied:
+                env_vars["SCAN_DENIED_WRITE_PATHS"] = ":".join(denied)
+
+            allowed = [p for p in [spec_root, runtime_root, "/tmp"] if p]
+            if allowed:
+                env_vars["SCAN_ALLOWED_WRITE_PATHS"] = ":".join(allowed)
+
         log.info(
             "agent_start",
             run_id=str(run_id),

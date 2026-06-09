@@ -768,7 +768,10 @@ def _build_bootstrap_bundle(
         task_key="stage:scan",
         task_title="Stage dispatch: scan",
         allowed_paths=[str(spec_root), str(code_root)],
-        denied_paths=[],
+        denied_paths=[
+            str(code_root / ".sillyspec"),
+            str(code_root / "docs"),
+        ],
         available_tools=["sillyspec"],
         spec_strategy=spec_ws.strategy,
         profile_version=spec_ws.profile_version,

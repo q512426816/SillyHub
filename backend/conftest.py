@@ -74,6 +74,7 @@ async def db_engine() -> AsyncIterator[Any]:
     # Registering feature models attaches their tables to BaseModel.metadata.
     from app.modules.auth import model as _auth_model  # noqa: F401
     from app.modules.change import model as _change_model  # noqa: F401
+    from app.modules.daemon import model as _daemon_model  # noqa: F401
     from app.modules.git_identity import model as _git_identity_model  # noqa: F401
     from app.modules.scan_docs import model as _scan_docs_model  # noqa: F401
     from app.modules.spec_workspace import model as _spec_ws_model  # noqa: F401

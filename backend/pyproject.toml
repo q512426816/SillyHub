@@ -60,6 +60,7 @@ disable_error_code = ["attr-defined", "union-attr", "assignment", "arg-type", "v
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = ["docker-entrypoint.sh"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "N", "SIM", "RUF", "BLE"]

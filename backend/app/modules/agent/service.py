@@ -32,6 +32,7 @@ from app.modules.agent.base import AgentAdapter, AgentSpecBundle
 from app.modules.agent.context_builder import build_spec_bundle, render_bundle_to_claude_md
 from app.modules.agent.coordinator import ExecutionCoordinatorService
 from app.modules.agent.model import AgentRun, AgentRunLog
+from app.modules.agent.placement import ExecutionBackend, RunPlacementService
 from app.modules.agent.schema import AgentRunResponse
 from app.modules.task.model import Task
 from app.modules.workspace.model import AgentRunWorkspace, TaskWorkspace
@@ -294,7 +295,36 @@ class AgentService:
         claude_md = render_bundle_to_claude_md(bundle)
         (lease_path / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
 
-        # -- 7. Execute (currently synchronous, structured for future async) ------
+        # -- 6b. Placement decision: daemon or server? ---------------------------
+        placement = RunPlacementService(self._session)
+        backend = await placement.decide_backend(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            change_id=task.change_id if task else None,
+            task_id=task_id,
+        )
+        log.info(
+            "start_run_placement",
+            run_id=str(run.id),
+            backend=backend.value,
+        )
+
+        if backend == ExecutionBackend.DAEMON:
+            lease_id_daemon = await placement.dispatch_to_daemon(run.id, user_id)
+            if lease_id_daemon:
+                log.info(
+                    "start_run_dispatched_to_daemon",
+                    run_id=str(run.id),
+                    daemon_lease_id=str(lease_id_daemon),
+                )
+                # Daemon will claim asynchronously; return run immediately.
+                return run
+            log.warning(
+                "start_run_daemon_dispatch_failed_fallback_server",
+                run_id=str(run.id),
+            )
+
+        # -- 7. Execute on server (existing logic) --------------------------------
         await self._execute_run_background(
             run_id=run.id,
             bundle=bundle,
@@ -796,7 +826,37 @@ class AgentService:
         )
         await self._session.commit()
 
-        # -- 6. Execute agent (fire-and-forget) --------------------------------
+        # -- 5b. Placement decision: daemon or server? --------------------------
+        placement = RunPlacementService(self._session)
+        backend = await placement.decide_backend(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            change_id=change_id,
+        )
+        log.info(
+            "start_stage_dispatch_placement",
+            run_id=str(run.id),
+            stage=stage,
+            backend=backend.value,
+        )
+
+        if backend == ExecutionBackend.DAEMON:
+            lease_id_daemon = await placement.dispatch_to_daemon(run.id, user_id)
+            if lease_id_daemon:
+                log.info(
+                    "start_stage_dispatch_dispatched_to_daemon",
+                    run_id=str(run.id),
+                    stage=stage,
+                    daemon_lease_id=str(lease_id_daemon),
+                )
+                return run
+            log.warning(
+                "start_stage_dispatch_daemon_dispatch_failed_fallback_server",
+                run_id=str(run.id),
+                stage=stage,
+            )
+
+        # -- 6. Execute agent on server (fire-and-forget) -----------------------
         self._fire_background_task(
             self._execute_stage_run(
                 run_id=run.id,
@@ -1235,7 +1295,33 @@ class AgentService:
         )
         await self._session.commit()
 
-        # -- 5. Fire-and-forget background execution -----------------------------
+        # -- 4b. Placement decision: daemon or server? ----------------------------
+        placement = RunPlacementService(self._session)
+        backend = await placement.decide_backend(
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        log.info(
+            "start_scan_dispatch_placement",
+            run_id=str(run.id),
+            backend=backend.value,
+        )
+
+        if backend == ExecutionBackend.DAEMON:
+            lease_id_daemon = await placement.dispatch_to_daemon(run.id, user_id)
+            if lease_id_daemon:
+                log.info(
+                    "start_scan_dispatch_dispatched_to_daemon",
+                    run_id=str(run.id),
+                    daemon_lease_id=str(lease_id_daemon),
+                )
+                return run
+            log.warning(
+                "start_scan_dispatch_daemon_dispatch_failed_fallback_server",
+                run_id=str(run.id),
+            )
+
+        # -- 5. Fire-and-forget background execution (server) ---------------------
         self._fire_background_task(
             self._execute_scan_run(
                 run_id=run.id,

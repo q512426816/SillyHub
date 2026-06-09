@@ -47,6 +47,20 @@ settings = {
         }
     },
     "skipDangerousModePermissionPrompt": enabled("CLAUDE_SKIP_DANGEROUS_MODE_PERMISSION_PROMPT"),
+    "hooks": {
+        "PreToolUse": [
+            {
+                "matcher": "Write|Edit|MultiEdit",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python /app/hooks/scan_write_guard.py",
+                        "timeout": 5,
+                    }
+                ],
+            }
+        ],
+    },
 }
 
 settings_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
