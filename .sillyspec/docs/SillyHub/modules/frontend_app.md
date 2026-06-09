@@ -106,3 +106,4 @@ layout.tsx (根布局)
 | 2026-06-09 | ql-20260609-004 | Workspace Bootstrap 日志区域改为 Agent 控制台同款深色样式 |
 | 2026-06-09 | ql-20260609-005-d2f7 | Bootstrap 日志区域完全复用共享 AgentLogViewer 组件 |
 | 2026-06-09 | ql-20260609-007-b4c2 | 工作区详情页显示上一次 Bootstrap 运行结果摘要 |
+| 2026-06-09 | ql-20260609-008 | 修复 Bootstrap runs 排序用 finished_at 而非缺失的 created_at |

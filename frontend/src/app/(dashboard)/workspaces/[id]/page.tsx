@@ -87,6 +87,13 @@ function fmtDuration(ms: number | null): string {
   return `${m}m ${s % 60}s`;
 }
 
+function bsRunStatus(run: AgentRun): { label: string; variant: "success" | "destructive" | "warning" | "outline" } {
+  if (run.status === "completed" && run.post_scan_status === "failed_post_check") {
+    return { label: "后置校验失败", variant: "warning" };
+  }
+  return { label: BS_STATUS_LABEL[run.status] ?? run.status, variant: statusToVariant(run.status) };
+}
+
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
@@ -485,11 +492,13 @@ export default function WorkspaceDetailPage({ params }: Props) {
         )}
 
         {/* Last Bootstrap run result */}
-        {!activeBootstrapRunId && lastBsRun && (
+        {!activeBootstrapRunId && lastBsRun && (() => {
+            const bs = bsRunStatus(lastBsRun);
+            return (
           <div className="mx-4 mt-3 mb-1 flex flex-wrap items-center gap-x-4 gap-y-1 rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs">
             <span className="text-muted-foreground">上次 Bootstrap</span>
-            <Badge variant={statusToVariant(lastBsRun.status)}>
-              {BS_STATUS_LABEL[lastBsRun.status] ?? lastBsRun.status}
+            <Badge variant={bs.variant}>
+              {bs.label}
             </Badge>
             <span className="text-muted-foreground">
               {lastBsRun.started_at ? formatTs(lastBsRun.started_at) : "—"}
@@ -502,7 +511,8 @@ export default function WorkspaceDetailPage({ params }: Props) {
             )}
             <span className="font-mono text-zinc-400">{lastBsRun.id.slice(0, 8)}</span>
           </div>
-        )}
+            );
+          })()}
 
         {/* Bootstrap SSE log panel — uses shared AgentLogViewer */}
         {activeBootstrapRunId && (
