@@ -232,3 +232,19 @@ created_at: 2026-06-03T08:42:04
 结果：1) BashToolPreview 组件：description 标题 + command 折叠 + 复制按钮 + 原始数据折叠；2) ScanCheckSummaryCard 解析扫描自检输出为摘要卡片；3) 历史运行表格增加结果摘要列 + 状态区分后置校验；4) 下载日志按钮；5) 变更详情页同步优化 Bash tool 渲染。前端已重建部署。
 根因：_format_conversation_log 中 tool args 截断 200 字符、tool result 截断 500 字符、thinking 截断 300 字符；DB 写入截断 4000 字符可能破坏 JSON 导致前端解析失败
 结果：tool args→2000、tool result→3000、thinking→2000、DB 写入→8000
+
+## ql-20260609-010-d6e7 | 2026-06-09 15:00:00 | Agent 控制台全屏按钮 + 频道过滤器(INFO/TOOL/WARN/ASK/REPLY)
+状态：已完成
+文件：frontend/src/components/agent-log-viewer.tsx, frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx
+结果：AgentLogViewer 新增全屏模式(fixed inset-0 z-50 + body scroll lock)和频道过滤(Set<string> toggle)，Agent 控制台和 Bootstrap 页面共用
+
+## ql-20260609-011-c8f9 | 2026-06-09 15:30:00 | 扫描自检摘要卡片 parseScanCheckOutput 正则修复
+状态：已完成
+文件：frontend/src/components/agent-log-viewer.tsx
+根因：原始正则匹配英文格式但实际输出为中文格式（"7份scan文档"、"19个模块"），宽泛回退 `module.*?(\d+)` 误匹配路径段 "modules/992cedec"
+结果：仅保留精确中文格式匹配，移除所有宽泛英文回退正则；commit 34c4e4 已推送部署
+
+## ql-20260609-012-a1b2 | 2026-06-09 16:00:00 | Agent 控制台日志10项优化全量验证 + parseScanCheckOutput 最终修复
+状态：已完成
+文件：frontend/src/components/agent-log-viewer.tsx
+结果：逐项验证10项需求均已实现（Bash tool 结构化渲染、command 折叠、stdout/stderr 分离、原始数据折叠、扫描自检摘要卡片、结果摘要列、状态区分、全屏+频道过滤、自动滚动、复制/下载），修复 parseScanCheckOutput 正则精确匹配中文格式

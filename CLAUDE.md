@@ -2,7 +2,7 @@
 # Change: Spec workspace bootstrap
 
 ## Allowed Paths
-- /data/spec-workspaces/41487501-0adb-4593-af8b-2768e3e1cb8c
+- /data/spec-workspaces/992cedec-8d7e-47ec-85c7-1d778cca41eb
 - /host-projects/WorkNew/SillyHub
 
 ## Profile
