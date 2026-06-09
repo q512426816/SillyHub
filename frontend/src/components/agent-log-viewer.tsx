@@ -30,6 +30,7 @@ export {
   isPendingReplied,
   normalizeLogs,
   isThinkingContent,
+  filterToolProtocolLines,
 } from "./agent-log/normalize";
 export { CopyButton, CollapsibleSection, ToolCallPreview } from "./agent-log/tool-renderers";
 
@@ -39,6 +40,7 @@ import {
   parseScanCheckOutput,
   parseToolCallContent,
   isThinkingContent,
+  filterToolProtocolLines,
   EMPTY_REPLIED_INPUTS,
 } from "./agent-log/normalize";
 import { ToolCallPreview, CollapsibleSection } from "./agent-log/tool-renderers";
@@ -213,11 +215,19 @@ export function AgentLogRow({
         {meta.label}
       </span>
       <div className="min-w-0 max-w-full">
-        {/* Tool call → specialized renderer */}
+        {/* channel=tool_call → specialized renderer */}
         {toolCall ? (
           <div className="font-mono [overflow-wrap:anywhere]">
             <ToolCallPreview
               entry={toolCall}
+              mergedResult={processedLog.mergedToolResult}
+            />
+          </div>
+        ) : processedLog.parsedStdoutTool ? (
+          /* stdout [TOOL_USE] parsed as tool event → specialized renderer */
+          <div className="font-mono [overflow-wrap:anywhere]">
+            <ToolCallPreview
+              entry={processedLog.parsedStdoutTool}
               mergedResult={processedLog.mergedToolResult}
             />
           </div>
@@ -229,7 +239,7 @@ export function AgentLogRow({
             </CollapsibleSection>
           </div>
         ) : (
-          /* Default rendering */
+          /* Default rendering — filter out TOOL_USE/TOOL_RESULT protocol lines */
           <div
             className={cn(
               "min-w-0 max-w-full whitespace-pre-wrap break-words font-mono [overflow-wrap:anywhere]",
@@ -238,12 +248,18 @@ export function AgentLogRow({
           >
             {(() => {
               const scanCheck = log.channel === "stdout" ? parseScanCheckOutput(log.content_redacted) : null;
+              const filteredContent = log.channel === "stdout"
+                ? filterToolProtocolLines(log.content_redacted)
+                : log.content_redacted;
+              const hasContent = filteredContent.trim().length > 0;
               return (
                 <>
                   {scanCheck && <ScanCheckSummaryCard result={scanCheck} />}
-                  <div className={scanCheck ? "mt-1" : ""}>
-                    {renderLogLines(log.content_redacted)}
-                  </div>
+                  {hasContent && (
+                    <div className={scanCheck ? "mt-1" : ""}>
+                      {renderLogLines(filteredContent)}
+                    </div>
+                  )}
                 </>
               );
             })()}

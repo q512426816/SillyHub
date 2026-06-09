@@ -253,3 +253,8 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/components/agent-log/types.ts, frontend/src/components/agent-log/normalize.ts, frontend/src/components/agent-log/tool-renderers.tsx, frontend/src/components/agent-log-viewer.tsx
 结果：1) normalizeLogs 归一化：隐藏重复 TOOL_USE stdout、合并 TOOL_RESULT 到 tool_call 卡片；2) 6 种工具专属渲染器（Write 文件信息+内容折叠、Agent description+prompt折叠、Bash 增强输出折叠、Grep/Glob pattern+命中预览、Read 文件路径+内容折叠、Edit 变更对比折叠）；3) Thinking/System stdout 默认折叠+半透明；4) 通用 fallback 保留参数折叠；5) 全部 backward-compatible export
+
+## ql-20260609-014-c3d8 | 2026-06-09 16:50:00 | 修复 stdout [TOOL_USE] 文本事件被当作普通 INFO 渲染
+状态：已完成
+文件：frontend/src/components/agent-log/types.ts, frontend/src/components/agent-log/normalize.ts, frontend/src/components/agent-log-viewer.tsx
+结果：1) normalizeLogs 新增 parseStdoutToolUse 解析 stdout [TOOL_USE] ToolName: {json} 为 ToolCallEntry；2) 有 channel=tool_call 时隐藏 stdout 重复，无时转为 parsedStdoutTool 走工具专属卡片渲染；3) AgentLogRow 新增 parsedStdoutTool 分支；4) 默认渲染通过 filterToolProtocolLines 过滤 [TOOL_USE]/[TOOL_RESULT]；5) TypeScript 编译通过

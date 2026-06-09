@@ -38,4 +38,6 @@ export interface ProcessedLog {
   hidden: boolean;
   /** [TOOL_RESULT] content merged from subsequent stdout entries */
   mergedToolResult?: string;
+  /** Parsed tool info from stdout [TOOL_USE] line (when no channel=tool_call exists) */
+  parsedStdoutTool?: ToolCallEntry;
 }
