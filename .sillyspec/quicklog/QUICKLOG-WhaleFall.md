@@ -279,3 +279,8 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/components/agent-log/types.ts, frontend/src/components/agent-log/normalize.ts, frontend/src/components/agent-log/tool-renderers.tsx, frontend/src/components/agent-log-viewer.tsx
 结果：1) normalize.ts 新增 extractToolResultBody 解析完整 TOOL_RESULT body；2) normalizeLogs 重构 TOOL_RESULT 处理：有 tool source 时合并并隐藏，无时存入 parsedToolResult 独立渲染；3) tool-renderers.tsx 新增 ToolResultCard（长结果折叠+前5行摘要）和 WorkflowSpecResultCard（检测 YAML workflow spec 并展示摘要）；4) filterToolProtocolLines 扩展过滤 THINKING/SYSTEM/ASSISTANT；5) AgentLogRow 新增 parsedToolResult 渲染分支
+
+## ql-20260610-004-c7f3 | 2026-06-10 15:43:55 | 重置密码后展示明文密码（后端生成随机密码并返回）
+状态：已完成
+文件：backend/app/modules/settings/service.py, backend/app/modules/settings/schema.py, backend/app/modules/settings/router.py, frontend/src/lib/settings.ts, frontend/src/app/(dashboard)/settings/page.tsx
+结果：service.py 新增 _generate_password 生成12位随机密码，reset_password 返回明文；schema.py 新增 ResetPasswordResponse；router.py 改为返回200+ResetPasswordResponse；前端去掉手动输入改为一键生成+展示明文+复制按钮
