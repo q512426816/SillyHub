@@ -1,0 +1,176 @@
+<!--
+  author: WhaleFall
+  created_at: 2026-06-08T10:50:00
+  变更中心列展示优化原型
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>变更中心列展示优化原型</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; margin: 20px; background: #f8f9fa; }
+  h2 { margin-top: 30px; }
+  .container { max-width: 1200px; margin: 0 auto; }
+  table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  th { background: #f1f5f9; padding: 10px 14px; text-align: left; font-size: 13px; color: #64748b; font-weight: 600; border-bottom: 1px solid #e2e8f0; }
+  td { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+  tr:hover { background: #f8fafc; }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 500; line-height: 1.4; }
+  .badge-blue { background: #dbeafe; color: #1d4ed8; }
+  .badge-green { background: #dcfce7; color: #15803d; }
+  .badge-yellow { background: #fef9c3; color: #a16207; }
+  .badge-purple { background: #f3e8ff; color: #7c3aed; }
+  .badge-orange { background: #ffedd5; color: #c2410c; }
+  .badge-gray { background: #f1f5f9; color: #64748b; }
+  .badge-red { background: #fee2e2; color: #dc2626; }
+
+  .component-tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; background: #f1f5f9; color: #475569; margin-right: 4px; }
+
+  .label-old { color: #ef4444; font-size: 11px; font-weight: 600; }
+  .label-new { color: #22c55e; font-size: 11px; font-weight: 600; }
+  .arrow { color: #94a3b8; margin: 0 6px; }
+
+  .section { margin: 30px 0; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .section h3 { margin-top: 0; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>变更中心列展示优化</h1>
+
+<div class="section">
+<h3>列对比（旧 → 新）</h3>
+<table>
+  <thead>
+    <tr>
+      <th>列名</th>
+      <th>旧逻辑</th>
+      <th></th>
+      <th>新逻辑</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>类型</strong></td>
+      <td><span class="label-old">change_type 手动输入，通常为空显示 "—"</span></td>
+      <td class="arrow">→</td>
+      <td><span class="label-new">Parser 从目录结构自动推断：feature / quick / prototype</span></td>
+    </tr>
+    <tr>
+      <td><strong>状态</strong></td>
+      <td><span class="label-old">status 字段（僵尸，只设一次：draft/active/unknown）</span></td>
+      <td class="arrow">→</td>
+      <td><span class="label-new">展示 human_gate 待办信息，无待办时展示阶段状态</span></td>
+    </tr>
+    <tr>
+      <td><strong>阶段</strong></td>
+      <td><span class="label-old">current_stage 为 null 时不显示（空白）</span></td>
+      <td class="arrow">→</td>
+      <td><span class="label-new">null 时显示 "draft" badge</span></td>
+    </tr>
+    <tr>
+      <td><strong>影响组件</strong></td>
+      <td><span class="label-old">手动输入，通常为空显示 "—"，仅归档后写入</span></td>
+      <td class="arrow">→</td>
+      <td><span class="label-new">Parser 从 tasks.md 文件路径提取模块名</span></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h2>优化后效果预览</h2>
+<table>
+  <thead>
+    <tr>
+      <th>变更 Key</th>
+      <th>标题</th>
+      <th>类型</th>
+      <th>状态</th>
+      <th>阶段</th>
+      <th>影响组件</th>
+      <th>更新时间</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><a href="#" style="color:#2563eb;text-decoration:none">2026-06-08-change-center-columns</a></td>
+      <td>变更中心列展示优化</td>
+      <td><span class="badge badge-blue">feature</span></td>
+      <td><span class="badge badge-orange">待提案审核</span></td>
+      <td><span class="badge badge-purple">propose</span></td>
+      <td><span class="component-tag">change</span><span class="component-tag">frontend_app</span></td>
+      <td>2026/6/8</td>
+    </tr>
+    <tr>
+      <td><a href="#" style="color:#2563eb;text-decoration:none">2026-06-05-agent-log-width</a></td>
+      <td>Agent 控制台日志回显宽度修复</td>
+      <td><span class="badge badge-yellow">quick</span></td>
+      <td><span class="badge badge-orange">待人工测试</span></td>
+      <td><span class="badge badge-purple">verify</span></td>
+      <td><span class="component-tag">frontend_app</span></td>
+      <td>2026/6/5</td>
+    </tr>
+    <tr>
+      <td><a href="#" style="color:#2563eb;text-decoration:none">2026-06-04-fix-agent-driven-change-center-flow</a></td>
+      <td>修复 Agent 驱动变更中心流程</td>
+      <td><span class="badge badge-blue">feature</span></td>
+      <td><span class="badge badge-green">执行中</span></td>
+      <td><span class="badge badge-purple">execute</span></td>
+      <td><span class="component-tag">change</span><span class="component-tag">agent</span><span class="component-tag">workflow</span></td>
+      <td>2026/6/4</td>
+    </tr>
+    <tr>
+      <td><a href="#" style="color:#2563eb;text-decoration:none">2026-06-03-workspace-bootstrap-flow</a></td>
+      <td>工作区初始化流程</td>
+      <td><span class="badge badge-blue">feature</span></td>
+      <td><span class="badge badge-green">进行中</span></td>
+      <td><span class="badge badge-purple">plan</span></td>
+      <td><span class="component-tag">workspace</span></td>
+      <td>2026/6/3</td>
+    </tr>
+    <tr>
+      <td><a href="#" style="color:#2563eb;text-decoration:none">2026-06-01-untitled-3838d3</a></td>
+      <td>—</td>
+      <td><span class="badge badge-gray">feature</span></td>
+      <td><span class="badge badge-gray">空闲</span></td>
+      <td><span class="badge badge-gray">draft</span></td>
+      <td>—</td>
+      <td>2026/6/1</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="section">
+<h3>状态列（human_gate）映射</h3>
+<table>
+  <thead><tr><th>human_gate 值</th><th>展示文案</th><th>Badge 颜色</th></tr></thead>
+  <tbody>
+    <tr><td><code>none</code> 或空</td><td>根据 current_stage 显示阶段状态</td><td>根据阶段映射</td></tr>
+    <tr><td><code>need_proposal_review</code></td><td>待提案审核</td><td><span class="badge badge-orange">orange</span></td></tr>
+    <tr><td><code>need_plan_review</code></td><td>待计划审核</td><td><span class="badge badge-orange">orange</span></td></tr>
+    <tr><td><code>need_human_test</code></td><td>待人工测试</td><td><span class="badge badge-orange">orange</span></td></tr>
+    <tr><td><code>need_archive_confirm</code></td><td>待归档确认</td><td><span class="badge badge-orange">orange</span></td></tr>
+    <tr><td><code>blocked</code></td><td>阻塞中</td><td><span class="badge badge-red">red</span></td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="section">
+<h3>类型推断规则</h3>
+<table>
+  <thead><tr><th>目录特征</th><th>推断类型</th><th>Badge 样式</th></tr></thead>
+  <tbody>
+    <tr><td>含 <code>tasks/</code> 子目录 + <code>plan.md</code>/<code>design.md</code></td><td>feature</td><td><span class="badge badge-blue">blue</span></td></tr>
+    <tr><td>目录名含 <code>quick</code> 或仅 MASTER.md + request.md</td><td>quick</td><td><span class="badge badge-yellow">yellow</span></td></tr>
+    <tr><td>含 <code>prototype-*.html</code></td><td>prototype</td><td><span class="badge badge-purple">purple</span></td></tr>
+    <tr><td>默认</td><td>feature</td><td><span class="badge badge-blue">blue</span></td></tr>
+  </tbody>
+</table>
+</div>
+
+</div>
+</body>
+</html>
