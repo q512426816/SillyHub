@@ -108,5 +108,9 @@ class UserWorkspaceRead(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-    new_password: str = Field(min_length=8)
+    new_password: str | None = Field(default=None, min_length=8)
     force_change_on_next_login: bool = False
+
+
+class ResetPasswordResponse(BaseModel):
+    plaintext_password: str

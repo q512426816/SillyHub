@@ -17,6 +17,7 @@ from app.modules.settings.model import PlatformSetting
 from app.modules.settings.schema import (
     AuditLogRead,
     ResetPasswordRequest,
+    ResetPasswordResponse,
     RevokeAllResponse,
     SettingRead,
     SettingsBulkRead,
@@ -213,16 +214,17 @@ async def list_user_workspaces(
     return await svc.list_workspaces(uuid.UUID(user_id))
 
 
-@router.post("/users/{user_id}/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/users/{user_id}/reset-password", response_model=ResetPasswordResponse)
 async def reset_user_password(
     user_id: str,
     payload: ResetPasswordRequest,
     session: SessionDep,
     _user: AdminUser,
-) -> None:
+) -> ResetPasswordResponse:
     svc = UserService(session, actor_id=_user.id)
-    await svc.reset_password(
+    plaintext = await svc.reset_password(
         uuid.UUID(user_id),
         payload.new_password,
         force_change_on_next_login=payload.force_change_on_next_login,
     )
+    return ResetPasswordResponse(plaintext_password=plaintext)

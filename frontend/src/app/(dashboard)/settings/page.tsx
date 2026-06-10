@@ -447,14 +447,13 @@ function UserDetailDrawer({
   }, [tab, user.id]);
 
   const handleResetPassword = async () => {
-    if (newPw.length < 8) return;
     setResetting(true);
     setMessage(null);
     try {
-      await resetUserPassword(user.id, newPw, forceChange);
+      const res = await resetUserPassword(user.id, forceChange);
+      setNewPw(res.plaintext_password);
       setMessage({ ok: true, text: "密码已重置，用户需重新登录" });
       setResetMode(false);
-      setNewPw("");
       setForceChange(false);
       onRefresh();
     } catch (err) {
@@ -555,13 +554,6 @@ function UserDetailDrawer({
               <div className="pt-3">
                 {resetMode ? (
                   <div className="space-y-2">
-                    <input
-                      type="password"
-                      value={newPw}
-                      onChange={(e) => setNewPw(e.target.value)}
-                      className={inputCls}
-                      placeholder="新密码（至少 8 位）"
-                    />
                     <label className="flex items-center gap-2">
                       <input
                         type="checkbox"
@@ -577,14 +569,14 @@ function UserDetailDrawer({
                       <Button
                         size="sm"
                         onClick={handleResetPassword}
-                        disabled={resetting || newPw.length < 8}
+                        disabled={resetting}
                       >
-                        {resetting ? "重置中…" : "确认重置"}
+                        {resetting ? "重置中…" : "生成新密码"}
                       </Button>
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => { setResetMode(false); setNewPw(""); setForceChange(false); }}
+                        onClick={() => { setResetMode(false); setForceChange(false); }}
                       >
                         取消
                       </Button>
@@ -594,7 +586,7 @@ function UserDetailDrawer({
                   <Button
                     size="sm"
                     variant="destructive"
-                    onClick={() => setResetMode(true)}
+                    onClick={() => { setResetMode(true); setNewPw(""); setMessage(null); }}
                   >
                     重置密码
                   </Button>
@@ -607,6 +599,21 @@ function UserDetailDrawer({
                   >
                     {message.text}
                   </p>
+                )}
+                {newPw && (
+                  <div className="mt-2 rounded border bg-muted/50 px-3 py-2">
+                    <p className="mb-1 text-xs font-medium text-muted-foreground">新密码</p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 text-sm font-mono break-all">{newPw}</code>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => navigator.clipboard.writeText(newPw)}
+                      >
+                        复制
+                      </Button>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>

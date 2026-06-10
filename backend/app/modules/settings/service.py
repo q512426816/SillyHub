@@ -7,6 +7,8 @@ on the session so that audit_hooks.py auto-generates AuditLog entries.
 from __future__ import annotations
 
 import json
+import secrets
+import string
 import uuid
 from datetime import UTC, datetime
 
@@ -331,27 +333,34 @@ class UserService:
 
     # ── Password reset ──────────────────────────────────────────────────
 
+    @staticmethod
+    def _generate_password(length: int = 12) -> str:
+        alphabet = string.ascii_letters + string.digits + "!@#$%&*"
+        return "".join(secrets.choice(alphabet) for _ in range(length))
+
     async def reset_password(
         self,
         target_id: uuid.UUID,
-        new_password: str,
+        new_password: str | None = None,
         force_change_on_next_login: bool = False,
-    ) -> None:
+    ) -> str:
         target = await self.session.get(User, target_id)
         if target is None or target.deleted_at is not None:
             raise HTTPException(status_code=404, detail="User not found")
 
+        plaintext = new_password or self._generate_password()
+
         self._set_audit_context()
-        target.password_hash = password_hasher.hash(new_password)
+        target.password_hash = password_hasher.hash(plaintext)
         target.updated_at = datetime.now(UTC)
         self.session.add(target)
 
         await self._revoke_sessions(target_id)
 
-        # Explicit audit log for password reset
         details = {
             "reset_by": str(self.actor_id),
             "force_change_on_next_login": force_change_on_next_login,
+            "auto_generated": new_password is None,
         }
         self.session.add(
             AuditLog(
@@ -368,3 +377,4 @@ class UserService:
 
         await self.session.commit()
         log.info("user.password_reset", target_id=str(target_id), actor_id=str(self.actor_id))
+        return plaintext

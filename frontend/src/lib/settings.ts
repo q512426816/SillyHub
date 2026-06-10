@@ -168,13 +168,11 @@ export async function listUserWorkspaces(
 
 export async function resetUserPassword(
   userId: string,
-  newPassword: string,
   forceChangeOnNextLogin: boolean = false,
-): Promise<void> {
-  await apiFetch(`/api/users/${userId}/reset-password`, {
+): Promise<{ plaintext_password: string }> {
+  return apiFetch(`/api/users/${userId}/reset-password`, {
     method: "POST",
     json: {
-      new_password: newPassword,
       force_change_on_next_login: forceChangeOnNextLogin,
     },
   });
