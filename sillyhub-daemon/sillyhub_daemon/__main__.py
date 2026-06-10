@@ -94,7 +94,8 @@ def start(server, token):
     click.echo(f"Runtime ID: {config.runtime_id}")
 
     client = HubClient(config.server_url, token=config.token)
-    workspace_mgr = WorkspaceManager()
+    workspace_dir = DEFAULT_CONFIG_DIR / "workspaces"
+    workspace_mgr = WorkspaceManager(base_dir=workspace_dir)
     credential_mgr = CredentialManager()
     task_runner = TaskRunner(client, workspace_mgr, credential_mgr)
     daemon = Daemon(config, client, task_runner=task_runner)

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import {
   isVersionBelow,
@@ -11,6 +12,7 @@ import {
   PROVIDER_META,
   type DaemonRuntimeRead,
 } from "@/lib/daemon";
+import { useSession } from "@/stores/session";
 
 /* ---------- Status helpers ---------- */
 
@@ -98,6 +100,36 @@ function VersionCell({ provider, version }: { provider: string | null; version: 
   );
 }
 
+/* ---------- Copy Daemon Command ---------- */
+
+function CopyDaemonCommand() {
+  const accessToken = useSession((s) => s.accessToken);
+  const [copied, setCopied] = useState(false);
+
+  if (!accessToken) return null;
+
+  const serverUrl =
+    typeof window !== "undefined" ? window.location.origin : "http://localhost:8001";
+  const cmd = `sillyhub-daemon start --server ${serverUrl} --token ${accessToken}`;
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(cmd);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <code className="max-w-md truncate rounded bg-muted px-2 py-1 font-mono text-[11px]">
+        sillyhub-daemon start --server {serverUrl} --token ...
+      </code>
+      <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={handleCopy}>
+        {copied ? "已复制" : "复制完整命令"}
+      </Button>
+    </div>
+  );
+}
+
 /* ---------- Main Page ---------- */
 
 export default function RuntimesPage() {
@@ -122,10 +154,15 @@ export default function RuntimesPage() {
   return (
     <main className="mx-auto flex max-w-5xl flex-col gap-5 px-6 py-8">
       <header>
-        <h1>Daemon Runtimes</h1>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          管理已注册的本地 Daemon 运行时
-        </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1>Daemon Runtimes</h1>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              管理已注册的本地 Daemon 运行时
+            </p>
+          </div>
+          <CopyDaemonCommand />
+        </div>
       </header>
 
       {error && (
@@ -150,15 +187,10 @@ export default function RuntimesPage() {
                 <code className="rounded bg-muted px-1 py-0.5">cd sillyhub-daemon && pip install -e .</code>
               </li>
               <li>
-                启动守护进程，指定服务器地址和认证 Token：
-                <br />
-                <code className="rounded bg-muted px-1 py-0.5 break-all">
-                  {`sillyhub-daemon start --server ${typeof window !== "undefined" ? window.location.origin : "http://your-server:8001"} --token <your-token>`}
-                </code>
+                点击右上角 <strong>「复制完整命令」</strong> 按钮，在本地终端粘贴执行即可。
               </li>
             </ol>
             <p className="mt-3 text-muted-foreground">
-              Token 通过 <code className="rounded bg-muted px-1 py-0.5">/api/auth/login</code> 接口获取。
               守护进程会自动检测本机已安装的 Agent（Claude Code、Codex、Copilot 等）并逐一注册到服务器。
             </p>
           </div>
