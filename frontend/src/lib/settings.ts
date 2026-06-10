@@ -62,11 +62,19 @@ export interface UserUpdateRequest {
   status?: string;
 }
 
-export async function listUsers(params?: {
+export interface UserListParams {
+  q?: string;
   status?: string;
+  role?: string;
+  sort?: string;
+  order?: string;
   limit?: number;
   offset?: number;
-}): Promise<UserListResponse> {
+}
+
+export async function listUsers(
+  params?: UserListParams,
+): Promise<UserListResponse> {
   return apiFetch<UserListResponse>("/api/users", {
     query: params as Record<string, string | number>,
   });
@@ -91,4 +99,83 @@ export async function updateUser(
 
 export async function deleteUser(userId: string): Promise<void> {
   await apiFetch(`/api/users/${userId}`, { method: "DELETE" });
+}
+
+// ── User detail endpoints ─────────────────────────────────────────────
+
+export interface UserSessionRead {
+  id: string;
+  user_agent: string | null;
+  ip: string | null;
+  created_at: string;
+}
+
+export interface UserWorkspaceRead {
+  workspace_name: string;
+  workspace_slug: string;
+  role_name: string;
+}
+
+export interface RevokeAllResponse {
+  revoked_count: number;
+}
+
+export interface AuditLogRead {
+  id: string;
+  actor_id: string | null;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  details_json: string | null;
+  timestamp: string;
+}
+
+export async function listUserSessions(
+  userId: string,
+): Promise<UserSessionRead[]> {
+  return apiFetch<UserSessionRead[]>(`/api/users/${userId}/sessions`);
+}
+
+export async function listUserAudit(
+  userId: string,
+): Promise<AuditLogRead[]> {
+  return apiFetch<AuditLogRead[]>(`/api/users/${userId}/audit`);
+}
+
+export async function revokeSession(
+  userId: string,
+  sessionId: string,
+): Promise<void> {
+  await apiFetch(`/api/users/${userId}/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function revokeAllSessions(
+  userId: string,
+): Promise<RevokeAllResponse> {
+  return apiFetch<RevokeAllResponse>(
+    `/api/users/${userId}/sessions/revoke-all`,
+    { method: "POST" },
+  );
+}
+
+export async function listUserWorkspaces(
+  userId: string,
+): Promise<UserWorkspaceRead[]> {
+  return apiFetch<UserWorkspaceRead[]>(`/api/users/${userId}/workspaces`);
+}
+
+export async function resetUserPassword(
+  userId: string,
+  newPassword: string,
+  forceChangeOnNextLogin: boolean = false,
+): Promise<void> {
+  await apiFetch(`/api/users/${userId}/reset-password`, {
+    method: "POST",
+    json: {
+      new_password: newPassword,
+      force_change_on_next_login: forceChangeOnNextLogin,
+    },
+  });
 }

@@ -44,6 +44,16 @@ class UserUpdateRequest(BaseModel):
     status: str | None = None
 
 
+class UserQueryParams(BaseModel):
+    q: str | None = None
+    status: str | None = None
+    role: str | None = None
+    sort: str = "created_at"
+    order: str = "desc"
+    limit: int = Field(default=20, ge=1, le=200)
+    offset: int = Field(default=0, ge=0)
+
+
 class UserListResponse(BaseModel):
     items: list[UserRead]
     total: int
@@ -59,3 +69,44 @@ class UserRead(BaseModel):
     is_platform_admin: bool
     last_login_at: datetime | None
     created_at: datetime
+
+
+# ── User detail endpoints ──────────────────────────────────────────────
+
+
+class UserSessionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    user_agent: str | None
+    ip: str | None
+    created_at: datetime
+
+
+class RevokeAllResponse(BaseModel):
+    revoked_count: int
+
+
+class AuditLogRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    actor_id: uuid.UUID | None
+    action: str
+    resource_type: str
+    resource_id: uuid.UUID
+    details_json: str | None
+    timestamp: datetime
+
+
+class UserWorkspaceRead(BaseModel):
+    """用户在某 Workspace 中持有的角色信息。"""
+
+    workspace_name: str
+    workspace_slug: str
+    role_name: str
+
+
+class ResetPasswordRequest(BaseModel):
+    new_password: str = Field(min_length=8)
+    force_change_on_next_login: bool = False

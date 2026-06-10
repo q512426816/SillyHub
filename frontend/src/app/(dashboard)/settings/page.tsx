@@ -8,13 +8,21 @@ import { ApiError } from "@/lib/api";
 import { getHealth, type HealthResponse } from "@/lib/health";
 import {
   createUser,
-  deleteUser,
   listSettings,
+  listUserAudit,
+  listUserSessions,
   listUsers,
-  updateUser,
+  listUserWorkspaces,
+  resetUserPassword,
+  revokeAllSessions,
+  revokeSession,
   updateSettings,
+  type AuditLogRead,
+  type RevokeAllResponse,
   type UserRead,
   type UserListResponse,
+  type UserSessionRead,
+  type UserWorkspaceRead,
 } from "@/lib/settings";
 
 type Tab = "workspace" | "users" | "agent" | "security" | "integrations";
@@ -137,11 +145,31 @@ function UsersTab() {
   const [newAdmin, setNewAdmin] = useState(false);
   const [creating, setCreating] = useState(false);
 
+  // Detail drawer
+  const [selectedUser, setSelectedUser] = useState<UserRead | null>(null);
+
+  // Filters & pagination
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [roleFilter, setRoleFilter] = useState<string>("");
+  const [sortBy, setSortBy] = useState("created_at");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [page, setPage] = useState(0);
+  const pageSize = 20;
+
   const load = useCallback(async () => {
     setLoading(true);
     setPageError(null);
     try {
-      const resp = await listUsers();
+      const resp = await listUsers({
+        q: search || undefined,
+        status: statusFilter || undefined,
+        role: roleFilter || undefined,
+        sort: sortBy,
+        order: sortOrder,
+        limit: pageSize,
+        offset: page * pageSize,
+      });
       setUsers(resp.items);
       setTotal(resp.total);
     } catch (err) {
@@ -149,7 +177,7 @@ function UsersTab() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [search, statusFilter, roleFilter, sortBy, sortOrder, page]);
 
   useEffect(() => {
     void load();
@@ -178,34 +206,17 @@ function UsersTab() {
     }
   };
 
-  const handleToggleAdmin = async (user: UserRead) => {
-    try {
-      await updateUser(user.id, { is_platform_admin: !user.is_platform_admin });
-      await load();
-    } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "更新失败");
+  const toggleSort = (col: string) => {
+    if (sortBy === col) {
+      setSortOrder((o) => (o === "desc" ? "asc" : "desc"));
+    } else {
+      setSortBy(col);
+      setSortOrder("desc");
     }
+    setPage(0);
   };
 
-  const handleToggleStatus = async (user: UserRead) => {
-    const next = user.status === "active" ? "disabled" : "active";
-    try {
-      await updateUser(user.id, { status: next });
-      await load();
-    } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "更新失败");
-    }
-  };
-
-  const handleDelete = async (user: UserRead) => {
-    if (!confirm(`确定删除用户 ${user.email}？`)) return;
-    try {
-      await deleteUser(user.id);
-      await load();
-    } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "删除失败");
-    }
-  };
+  const totalPages = Math.ceil(total / pageSize);
 
   return (
     <div>
@@ -221,6 +232,36 @@ function UsersTab() {
           {pageError}
         </div>
       )}
+
+      {/* Filters */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+          className={`w-48 ${inputCls}`}
+          placeholder="搜索邮箱/显示名…"
+        />
+        <select
+          value={statusFilter}
+          onChange={(e) => { setStatusFilter(e.target.value); setPage(0); }}
+          className={inputCls}
+          style={{ width: "auto" }}
+        >
+          <option value="">全部状态</option>
+          <option value="active">已激活</option>
+          <option value="disabled">已禁用</option>
+        </select>
+        <select
+          value={roleFilter}
+          onChange={(e) => { setRoleFilter(e.target.value); setPage(0); }}
+          className={inputCls}
+          style={{ width: "auto" }}
+        >
+          <option value="">全部角色</option>
+          <option value="admin">Admin</option>
+          <option value="user">User</option>
+        </select>
+      </div>
 
       {showCreate && (
         <div className="mb-3 rounded-md border bg-card p-3">
@@ -253,76 +294,425 @@ function UsersTab() {
       {loading ? (
         <p className="py-8 text-center text-xs text-muted-foreground">加载中…</p>
       ) : (
-        <div className="rounded-md border bg-card">
-          <table>
-            <thead>
-              <tr>
-                <th>邮箱</th>
-                <th>显示名</th>
-                <th>角色</th>
-                <th>状态</th>
-                <th>最后登录</th>
-                <th className="text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => (
-                <tr key={u.id}>
-                  <td className="text-xs font-mono">{u.email}</td>
-                  <td className="text-xs">{u.display_name ?? "—"}</td>
-                  <td>
-                    <Badge variant={u.is_platform_admin ? "default" : "outline"}>
-                      {u.is_platform_admin ? "Admin" : "User"}
-                    </Badge>
-                  </td>
-                  <td>
-                    <Badge variant={u.status === "active" ? "success" : "destructive"}>
-                      {u.status === "active" ? "已激活" : u.status}
-                    </Badge>
-                  </td>
-                  <td className="text-[11px] text-muted-foreground">
-                    {u.last_login_at ? new Date(u.last_login_at).toLocaleString("zh-CN") : "—"}
-                  </td>
-                  <td className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
-                        onClick={() => void handleToggleAdmin(u)}
-                      >
-                        {u.is_platform_admin ? "取消管理员" : "设为管理员"}
-                      </button>
-                      <button
-                        className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
-                        onClick={() => void handleToggleStatus(u)}
-                      >
-                        {u.status === "active" ? "禁用" : "启用"}
-                      </button>
-                      <button
-                        className="text-[11px] text-destructive hover:underline"
-                        onClick={() => void handleDelete(u)}
-                      >
-                        删除
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {users.length === 0 && (
+        <>
+          <div className="rounded-md border bg-card">
+            <table>
+              <thead>
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-xs text-muted-foreground">
-                    暂无用户
-                  </td>
+                  <th className="cursor-pointer select-none" onClick={() => toggleSort("email")}>
+                    邮箱 {sortBy === "email" ? (sortOrder === "desc" ? "↓" : "↑") : ""}
+                  </th>
+                  <th>显示名</th>
+                  <th>角色</th>
+                  <th>状态</th>
+                  <th className="cursor-pointer select-none" onClick={() => toggleSort("last_login_at")}>
+                    最后登录 {sortBy === "last_login_at" ? (sortOrder === "desc" ? "↓" : "↑") : ""}
+                  </th>
+                  <th className="text-right">操作</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {users.map((u) => (
+                  <tr key={u.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelectedUser(u)}>
+                    <td className="text-xs font-mono">{u.email}</td>
+                    <td className="text-xs">{u.display_name ?? "—"}</td>
+                    <td>
+                      <Badge variant={u.is_platform_admin ? "default" : "outline"}>
+                        {u.is_platform_admin ? "Admin" : "User"}
+                      </Badge>
+                    </td>
+                    <td>
+                      <Badge variant={u.status === "active" ? "success" : "destructive"}>
+                        {u.status === "active" ? "已激活" : u.status}
+                      </Badge>
+                    </td>
+                    <td className="text-[11px] text-muted-foreground">
+                      {u.last_login_at ? new Date(u.last_login_at).toLocaleString("zh-CN") : "—"}
+                    </td>
+                    <td className="text-right">
+                      <button
+                        className="text-[11px] text-primary hover:underline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedUser(u);
+                        }}
+                      >
+                        详情
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {users.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-xs text-muted-foreground">
+                      暂无用户
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+              <span>
+                第 {page * pageSize + 1}-{Math.min((page + 1) * pageSize, total)} / {total}
+              </span>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={page === 0}
+                  onClick={() => setPage((p) => p - 1)}
+                >
+                  上一页
+                </Button>
+                <span className="flex items-center px-2">
+                  {page + 1} / {totalPages}
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={page >= totalPages - 1}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  下一页
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* User detail drawer */}
+      {selectedUser && (
+        <UserDetailDrawer
+          user={selectedUser}
+          onClose={() => setSelectedUser(null)}
+          onRefresh={load}
+        />
       )}
     </div>
   );
 }
 
-/* ---------- Agent Config Tab ---------- */
+/* ---------- User Detail Drawer ---------- */
+
+type DrawerTab = "info" | "workspaces" | "sessions" | "audit";
+
+function UserDetailDrawer({
+  user,
+  onClose,
+  onRefresh,
+}: {
+  user: UserRead;
+  onClose: () => void;
+  onRefresh: () => void;
+}) {
+  const [tab, setTab] = useState<DrawerTab>("info");
+  const [sessions, setSessions] = useState<UserSessionRead[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogRead[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [resetMode, setResetMode] = useState(false);
+  const [newPw, setNewPw] = useState("");
+  const [resetting, setResetting] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [workspaces, setWorkspaces] = useState<UserWorkspaceRead[]>([]);
+  const [revoking, setRevoking] = useState<string | null>(null);
+  const [revokingAll, setRevokingAll] = useState(false);
+  const [revokeMsg, setRevokeMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [forceChange, setForceChange] = useState(false);
+
+  useEffect(() => {
+    if (tab === "sessions") {
+      setLoading(true);
+      listUserSessions(user.id)
+        .then(setSessions)
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    } else if (tab === "workspaces") {
+      setLoading(true);
+      listUserWorkspaces(user.id)
+        .then(setWorkspaces)
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    } else if (tab === "audit") {
+      setLoading(true);
+      listUserAudit(user.id)
+        .then(setAuditLogs)
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    }
+  }, [tab, user.id]);
+
+  const handleResetPassword = async () => {
+    if (newPw.length < 8) return;
+    setResetting(true);
+    setMessage(null);
+    try {
+      await resetUserPassword(user.id, newPw, forceChange);
+      setMessage({ ok: true, text: "密码已重置，用户需重新登录" });
+      setResetMode(false);
+      setNewPw("");
+      setForceChange(false);
+      onRefresh();
+    } catch (err) {
+      setMessage({ ok: false, text: err instanceof ApiError ? err.message : "重置失败" });
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const handleRevokeSession = async (sessionId: string) => {
+    setRevoking(sessionId);
+    setRevokeMsg(null);
+    try {
+      await revokeSession(user.id, sessionId);
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      setRevokeMsg({ ok: true, text: "会话已撤销" });
+    } catch (err) {
+      setRevokeMsg({
+        ok: false,
+        text: err instanceof ApiError ? err.message : "撤销失败",
+      });
+    } finally {
+      setRevoking(null);
+    }
+  };
+
+  const handleRevokeAllSessions = async () => {
+    if (!confirm(`确定撤销 ${user.email} 的全部会话？用户将被迫重新登录。`)) return;
+    setRevokingAll(true);
+    setRevokeMsg(null);
+    try {
+      const result = await revokeAllSessions(user.id);
+      setSessions([]);
+      setRevokeMsg({ ok: true, text: `已撤销 ${result.revoked_count} 个会话` });
+    } catch (err) {
+      setRevokeMsg({
+        ok: false,
+        text: err instanceof ApiError ? err.message : "批量撤销失败",
+      });
+    } finally {
+      setRevokingAll(false);
+    }
+  };
+
+  return (
+    <>
+      {/* Overlay */}
+      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
+      {/* Drawer */}
+      <div className="fixed right-0 top-0 z-50 h-full w-96 overflow-y-auto border-l bg-background shadow-xl">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <h3 className="text-sm font-medium">{user.email}</h3>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+            ✕
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex border-b">
+          {(["info", "workspaces", "sessions", "audit"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                tab === t
+                  ? "border-b-2 border-primary text-primary"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {{ info: "基本信息", workspaces: "所属 Workspace", sessions: "会话", audit: "审计" }[t]}
+            </button>
+          ))}
+        </div>
+
+        <div className="p-4">
+          {tab === "info" && (
+            <div className="space-y-1.5">
+              <KVRow label="邮箱" value={user.email} />
+              <KVRow label="显示名" value={user.display_name ?? "—"} />
+              <KVRow
+                label="状态"
+                value={user.status === "active" ? "已激活" : user.status}
+              />
+              <KVRow
+                label="角色"
+                value={user.is_platform_admin ? "Admin" : "User"}
+              />
+              <KVRow
+                label="创建时间"
+                value={new Date(user.created_at).toLocaleString("zh-CN")}
+              />
+              <KVRow
+                label="最后登录"
+                value={user.last_login_at
+                  ? new Date(user.last_login_at).toLocaleString("zh-CN")
+                  : "—"}
+              />
+              <div className="pt-3">
+                {resetMode ? (
+                  <div className="space-y-2">
+                    <input
+                      type="password"
+                      value={newPw}
+                      onChange={(e) => setNewPw(e.target.value)}
+                      className={inputCls}
+                      placeholder="新密码（至少 8 位）"
+                    />
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={forceChange}
+                        onChange={(e) => setForceChange(e.target.checked)}
+                        className="h-3.5 w-3.5 rounded border border-input"
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        强制下次登录时修改密码
+                      </span>
+                    </label>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={handleResetPassword}
+                        disabled={resetting || newPw.length < 8}
+                      >
+                        {resetting ? "重置中…" : "确认重置"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => { setResetMode(false); setNewPw(""); setForceChange(false); }}
+                      >
+                        取消
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => setResetMode(true)}
+                  >
+                    重置密码
+                  </Button>
+                )}
+                {message && (
+                  <p
+                    className={`mt-2 text-xs ${
+                      message.ok ? "text-emerald-600" : "text-destructive"
+                    }`}
+                  >
+                    {message.text}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {tab === "workspaces" && (
+            loading ? (
+              <p className="py-4 text-center text-xs text-muted-foreground">加载中…</p>
+            ) : workspaces.length === 0 ? (
+              <p className="py-4 text-center text-xs text-muted-foreground">该用户未加入任何 Workspace</p>
+            ) : (
+              <div className="space-y-2">
+                {workspaces.map((ws) => (
+                  <div key={ws.workspace_slug} className="rounded border bg-card p-2.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium">{ws.workspace_name}</span>
+                      <Badge variant="outline">{ws.role_name}</Badge>
+                    </div>
+                    <div className="mt-0.5 text-[11px] font-mono text-muted-foreground">
+                      {ws.workspace_slug}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+
+          {tab === "sessions" && (
+            loading ? (
+              <p className="py-4 text-center text-xs text-muted-foreground">加载中…</p>
+            ) : sessions.length === 0 ? (
+              <p className="py-4 text-center text-xs text-muted-foreground">无活跃会话</p>
+            ) : (
+              <div className="space-y-2">
+                {/* 撤销全部按钮 */}
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">
+                    {sessions.length} 个活跃会话
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => void handleRevokeAllSessions()}
+                    disabled={revokingAll}
+                  >
+                    {revokingAll ? "撤销中…" : "撤销全部"}
+                  </Button>
+                </div>
+                {revokeMsg && (
+                  <p
+                    className={`text-xs ${
+                      revokeMsg.ok ? "text-emerald-600" : "text-destructive"
+                    }`}
+                  >
+                    {revokeMsg.text}
+                  </p>
+                )}
+                {sessions.map((s) => (
+                  <div key={s.id} className="rounded border bg-card p-2.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="truncate font-mono text-muted-foreground">
+                        {s.user_agent ?? "Unknown"}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void handleRevokeSession(s.id)}
+                        disabled={revokingAll || revoking === s.id}
+                        className="ml-2 h-6 px-2 text-[11px]"
+                      >
+                        {revoking === s.id ? "撤销中…" : "撤销"}
+                      </Button>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
+                      <span>{s.ip ?? "—"}</span>
+                      <span>{new Date(s.created_at).toLocaleString("zh-CN")}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+
+          {tab === "audit" && (
+            loading ? (
+              <p className="py-4 text-center text-xs text-muted-foreground">加载中…</p>
+            ) : auditLogs.length === 0 ? (
+              <p className="py-4 text-center text-xs text-muted-foreground">无审计记录</p>
+            ) : (
+              <div className="space-y-2">
+                {auditLogs.map((a) => (
+                  <div key={a.id} className="rounded border bg-card p-2.5">
+                    <div className="text-xs font-medium">{a.action}</div>
+                    <div className="mt-0.5 text-[11px] text-muted-foreground">
+                      {new Date(a.timestamp).toLocaleString("zh-CN")}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
 
 function AgentConfigTab() {
   const [defaultAgent, setDefaultAgent] = useState("claude_code");

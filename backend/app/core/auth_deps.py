@@ -118,6 +118,13 @@ def require_permission_any(permission: Permission):
     return _checker
 
 
-async def require_platform_admin(user: User) -> User:
-    """A tiny helper to make intent explicit in routers."""
+async def require_platform_admin(
+    user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    """Require the current user to be a platform admin."""
+    if not user.is_platform_admin:
+        raise PermissionDenied(
+            "Platform admin required.",
+            details={"user_id": str(user.id)},
+        )
     return user
