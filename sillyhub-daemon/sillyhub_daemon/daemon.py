@@ -46,37 +46,60 @@ class Daemon:
         self._runtime_id: str = config.runtime_id
         self._running: bool = False
         self._tasks: set[asyncio.Task] = set()
+        # Maps agent_name -> runtime_id for each successfully registered agent.
+        self._registered_runtimes: dict[str, str] = {}
 
     # ── Public API ───────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Start daemon: detect agents, register, begin background loops."""
+        """Start daemon: detect agents, register each, begin background loops."""
         self._running = True
         logger.info("daemon.starting runtime_id=%s", self._runtime_id)
 
         # 1. Detect locally installed agents
         detector = AgentDetector()
         agents = await detector.detect_all()
-        capabilities = detector.get_capabilities(agents)
+        available_agents = [a for a in agents if a.available]
         logger.info(
             "daemon.agents_detected agents=%s",
-            [a.name for a in agents if a.available],
+            [a.name for a in available_agents],
         )
 
-        # 2. Register with the server
-        try:
-            result = await self._client.register(
-                name=platform.node(),
-                provider="claude-code",
-                version="0.1.0",
-                os=platform.system().lower(),
-                arch=platform.machine(),
-                capabilities=capabilities,
-            )
-            logger.info("daemon.registered result=%s", result)
-        except Exception as exc:
-            logger.error("daemon.register_failed error=%s", exc)
-            # Continue anyway — heartbeat loop will keep trying.
+        # 2. Register each available agent as an independent runtime
+        if not available_agents:
+            logger.info("daemon.no_agents_detected")
+        else:
+            for agent in available_agents:
+                runtime_id = f"{self._runtime_id}--{agent.name}"
+                try:
+                    await self._client.register(
+                        runtime_id=runtime_id,
+                        name=platform.node(),
+                        provider=agent.name,
+                        version=agent.version or "unknown",
+                        protocol=agent.protocol,
+                        os=platform.system().lower(),
+                        arch=platform.machine(),
+                        capabilities={
+                            "provider": agent.name,
+                            "version": agent.version,
+                            "protocol": agent.protocol,
+                            "bin_path": agent.bin_path,
+                        },
+                    )
+                    self._registered_runtimes[agent.name] = runtime_id
+                    logger.info(
+                        "daemon.registered provider=%s runtime_id=%s",
+                        agent.name,
+                        runtime_id,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "daemon.register_failed provider=%s error=%s",
+                        agent.name,
+                        exc,
+                    )
+                    # Continue registering other agents.
 
         # 3. Launch background loops
         self._fire(self._heartbeat_loop())

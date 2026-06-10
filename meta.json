@@ -1,0 +1,30 @@
+{
+  "changeName": "2026-06-09-daemon-agent-detection",
+  "branch": "sillyspec/2026-06-09-daemon-agent-detection",
+  "baseBranch": "main",
+  "baseHash": "801383955985472fa5bf96a05b74a6fa32527ce1",
+  "actualBaseHash": "d6cb28ca9794cf0465e2dcbbcacad1c370a32954",
+  "createdAt": "2026-06-09T15:34:26.184Z",
+  "worktreePath": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\.runtime\\worktrees\\2026-06-09-daemon-agent-detection",
+  "mode": "worktree",
+  "baselineFiles": [
+    ".sillyspec/changes/2026-06-09-daemon-agent-detection/design.md",
+    ".sillyspec/changes/2026-06-09-daemon-agent-detection/plan.md",
+    ".sillyspec/changes/2026-06-09-daemon-agent-detection/proposal.md",
+    ".sillyspec/changes/2026-06-09-daemon-agent-detection/requirements.md",
+    ".sillyspec/changes/2026-06-09-daemon-agent-detection/tasks.md",
+    ".sillyspec/changes/2026-06-09-daemon-agent-detection/tasks/task-01.md",
+    ".sillyspec/changes/2026-06-09-daemon-agent-detection/tasks/task-02.md",
+    ".sillyspec/changes/2026-06-09-daemon-agent-detection/tasks/task-03.md",
+    ".sillyspec/changes/2026-06-09-daemon-agent-detection/tasks/task-04.md",
+    ".sillyspec/changes/2026-06-09-daemon-agent-detection/tasks/task-05.md",
+    ".sillyspec/changes/2026-06-09-daemon-agent-detection/tasks/task-06.md",
+    ".sillyspec/changes/2026-06-09-daemon-agent-detection/tasks/task-07.md",
+    ".sillyspec/changes/2026-06-09-daemon-agent-detection/tasks/task-08.md",
+    ".sillyspec/changes/2026-06-09-daemon-agent-detection/tasks/task-09.md",
+    ".sillyspec/changes/2026-06-09-daemon-agent-detection/tasks/task-10.md",
+    ".sillyspec/changes/2026-06-09-daemon-agent-detection/tasks/task-11.md"
+  ],
+  "baselineCommit": "d6cb28ca9794cf0465e2dcbbcacad1c370a32954",
+  "baselineHash": "c6b9b85e38843127"
+}

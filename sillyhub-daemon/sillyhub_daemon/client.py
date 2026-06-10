@@ -52,13 +52,49 @@ class HubClient:
 
     # -- Runtime -------------------------------------------------------------
 
-    async def register(self, **kwargs: Any) -> dict[str, Any]:
+    async def register(
+        self,
+        *,
+        runtime_id: str | None = None,
+        name: str = "",
+        provider: str = "",
+        version: str = "",
+        protocol: str = "",
+        os: str = "",
+        arch: str = "",
+        capabilities: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         """Register this daemon runtime with the server.
 
-        Accepts arbitrary keyword arguments forwarded as the JSON body
-        (e.g. ``name``, ``capabilities``, ``agents``).
+        Parameters
+        ----------
+        runtime_id:
+            Unique runtime identifier. If not provided, the server generates one.
+        name:
+            Hostname of the machine running the daemon.
+        provider:
+            Agent provider name (e.g. "claude", "codex").
+        version:
+            Agent binary version string.
+        protocol:
+            Execution protocol (e.g. "stream_json", "json_rpc").
         """
-        resp = await self._http.post("/api/daemon/register", json=kwargs)
+        body: dict[str, Any] = {
+            "name": name,
+            "provider": provider,
+            "version": version,
+            "os": os,
+            "arch": arch,
+            **kwargs,
+        }
+        if runtime_id is not None:
+            body["runtime_id"] = runtime_id
+        if protocol:
+            body["protocol"] = protocol
+        if capabilities:
+            body["capabilities"] = capabilities
+        resp = await self._http.post("/api/daemon/register", json=body)
         resp.raise_for_status()
         return resp.json()
 

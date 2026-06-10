@@ -5,7 +5,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { ApiError } from "@/lib/api";
 import {
+  isVersionBelow,
   listDaemonRuntimes,
+  MIN_VERSIONS,
+  PROVIDER_META,
   type DaemonRuntimeRead,
 } from "@/lib/daemon";
 
@@ -40,6 +43,59 @@ function statusLabel(status: string | null): string {
 function formatTime(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("zh-CN");
+}
+
+/* ---------- Provider Badge ---------- */
+
+function ProviderBadge({ provider }: { provider: string | null }) {
+  const meta = provider ? PROVIDER_META[provider] : undefined;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${
+        meta?.color ?? "bg-gray-100 text-gray-600"
+      }`}
+    >
+      {meta?.icon ?? "⚪"} {meta?.label ?? provider ?? "Unknown"}
+    </span>
+  );
+}
+
+/* ---------- Agents List ---------- */
+
+function AgentsList({ agents }: { agents: string[] | undefined }) {
+  if (!agents || agents.length === 0) return <span className="text-muted-foreground">—</span>;
+  return (
+    <span className="inline-flex flex-wrap gap-1">
+      {agents.map((a) => (
+        <span
+          key={a}
+          className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+        >
+          {a}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/* ---------- Version Cell ---------- */
+
+function VersionCell({ provider, version }: { provider: string | null; version: string | null }) {
+  if (!version) return <span className="text-muted-foreground">—</span>;
+
+  const minVersion = provider ? MIN_VERSIONS[provider] : undefined;
+  const showWarning = minVersion ? isVersionBelow(version, minVersion) : false;
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      {version}
+      {showWarning && (
+        <span title={`版本低于最低要求 ${minVersion}`} className="text-amber-500">
+          ⚠️
+        </span>
+      )}
+    </span>
+  );
 }
 
 /* ---------- Main Page ---------- */
@@ -110,6 +166,7 @@ export default function RuntimesPage() {
               <tr>
                 <th>{"名称"}</th>
                 <th>Provider</th>
+                <th>Agents</th>
                 <th>{"版本"}</th>
                 <th>{"状态"}</th>
                 <th>{"最后心跳"}</th>
@@ -122,9 +179,14 @@ export default function RuntimesPage() {
                   <td className="text-xs font-mono">
                     {r.name ?? "—"}
                   </td>
-                  <td className="text-xs">{r.provider ?? "—"}</td>
+                  <td className="text-xs">
+                    <ProviderBadge provider={r.provider} />
+                  </td>
+                  <td className="text-xs">
+                    <AgentsList agents={r.capabilities?.agents} />
+                  </td>
                   <td className="text-xs font-mono">
-                    {r.version ?? "—"}
+                    <VersionCell provider={r.provider} version={r.version} />
                   </td>
                   <td>
                     <Badge variant={statusVariant(r.status)}>

@@ -89,7 +89,13 @@ class TestRegister:
 
         client._http.post.assert_awaited_once_with(
             "/api/daemon/register",
-            json={"name": "test-daemon"},
+            json={
+                "name": "test-daemon",
+                "provider": "",
+                "version": "",
+                "os": "",
+                "arch": "",
+            },
         )
         assert result == expected
 

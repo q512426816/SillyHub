@@ -1,8 +1,11 @@
 """Task execution engine for the SillyHub local daemon.
 
 Design reference: design section 4.2.4 (Wave 4) — TaskRunner receives a
-claimed lease + execution payload, prepares the workspace, launches an
-agent subprocess, streams progress, and collects the resulting diff.
+claimed lease + execution payload, prepares the workspace, delegates to
+the appropriate AgentBackend based on the provider field, streams progress,
+and collects the resulting diff.
+
+Blueprint: .sillyspec/changes/2026-06-09-daemon-agent-detection/tasks/task-08.md
 
 The public entry point is :meth:`TaskRunner.execute_task`.
 """
@@ -17,6 +20,11 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from sillyhub_daemon.backends import (
+    AgentEvent,
+    TaskResult as BackendTaskResult,
+    get_backend,
+)
 from sillyhub_daemon.client import HubClient
 from sillyhub_daemon.credential import CredentialManager
 from sillyhub_daemon.workspace import WorkspaceManager
@@ -53,13 +61,6 @@ class TaskRunner:
         Renders ``{{USER_*}}`` credential placeholders.
     """
 
-    # How often (in lines of output) we submit a progress message.
-    _PROGRESS_INTERVAL: int = 10
-
-    # Maximum output/error lengths to keep in TaskResult.
-    _MAX_OUTPUT: int = 10_000
-    _MAX_ERROR: int = 5_000
-
     def __init__(
         self,
         client: HubClient,
@@ -79,15 +80,15 @@ class TaskRunner:
         claim_token: str,
         payload: dict[str, Any],
     ) -> TaskResult:
-        """Execute a claimed task end-to-end.
+        """Execute a claimed task end-to-end using the appropriate agent backend.
 
         Steps:
 
         1. Prepare workspace (clone / pull).
         2. Write ``CLAUDE.md`` from the payload.
         3. Render credential placeholders into env vars.
-        4. Start the agent subprocess.
-        5. Stream progress to the server.
+        4. Resolve provider and obtain the correct backend via factory.
+        5. Delegate execution to the backend.
         6. Collect the unified diff.
         7. Return a :class:`TaskResult`.
 
@@ -99,7 +100,8 @@ class TaskRunner:
             Token that authorises lease operations (start / messages / complete).
         payload:
             Execution context returned by ``claim_lease`` — includes
-            ``workspace_name``, ``claude_md``, ``prompt``, ``tool_config``, etc.
+            ``workspace_name``, ``claude_md``, ``prompt``, ``tool_config``,
+            ``provider``, ``cmd_path``, etc.
         """
         start = time.monotonic()
         task_id = str(uuid.uuid4())
@@ -123,30 +125,68 @@ class TaskRunner:
                 claude_path.parent.mkdir(parents=True, exist_ok=True)
                 claude_path.write_text(claude_md, encoding="utf-8")
 
-            # 3. Render credentials → env dict
+            # 3. Render credentials -> env dict
             credential_config = payload.get("tool_config", {})
             extra_env = self._credentials.build_env(credential_config)
             env = {**os.environ, **extra_env}
 
-            # 4. Start agent subprocess
+            # 4. Resolve provider and obtain backend
+            provider = payload.get("provider", "claude")  # default: claude
+            cmd_path = payload.get("cmd_path", "")
             prompt = payload.get("prompt", "")
-            cmd: list[str] = ["claude", "--print", prompt] if prompt else ["claude"]
+            timeout = payload.get("timeout", 0)
+            model = payload.get("model", "")
+            session_id = payload.get("session_id", "")
 
-            proc = await self._launch_agent(cmd, cwd=str(work_dir), env=env)
+            try:
+                backend_cls = get_backend(provider)
+            except (ValueError, ImportError) as exc:
+                duration_ms = int((time.monotonic() - start) * 1000)
+                logger.warning(
+                    "unsupported_provider lease_id=%s provider=%s error=%s",
+                    lease_id,
+                    provider,
+                    exc,
+                )
+                return TaskResult(
+                    success=False,
+                    error=f"unsupported provider: {provider}",
+                    duration_ms=duration_ms,
+                )
 
-            # 5. Stream stdout in the background, collect stderr separately.
+            # 5. Create backend instance and build on_event callback
+            backend = backend_cls()
             agent_run_id = payload.get("agent_run_id", "")
 
-            stdout_text, stderr_bytes = await asyncio.gather(
-                self._stream_output(proc, lease_id, claim_token, agent_run_id),
-                proc.stderr.read(),
-            )
-            stderr_text = stderr_bytes.decode(errors="replace")
+            async def on_event(event: AgentEvent) -> None:
+                """Forward agent events to the server via submit_messages."""
+                message = self._event_to_message(event)
+                if message:
+                    try:
+                        await self._client.submit_messages(
+                            lease_id=lease_id,
+                            claim_token=claim_token,
+                            agent_run_id=agent_run_id,
+                            messages=[message],
+                        )
+                    except Exception as exc:
+                        logger.warning("event_forward_failed error=%s", exc)
 
-            exit_code = await proc.wait()
+            # 6. Delegate execution to backend
+            backend_result: BackendTaskResult = await backend.execute(
+                cmd_path=cmd_path,
+                task_prompt=prompt,
+                work_dir=str(work_dir),
+                env=env,
+                timeout=timeout,
+                model=model,
+                session_id=session_id,
+                on_event=on_event,
+            )
+
             duration_ms = int((time.monotonic() - start) * 1000)
 
-            # 6. Collect diff (non-fatal — failure to collect diff should
+            # 7. Collect diff (non-fatal — failure to collect diff should
             #    not mark the whole task as failed).
             diff_result: dict[str, Any] = {}
             try:
@@ -156,23 +196,25 @@ class TaskRunner:
                     "diff_collect_failed work_dir=%s error=%s", work_dir, exc
                 )
 
+            # 8. Convert backend result to TaskRunner TaskResult
+            success = backend_result.status == "completed"
             result = TaskResult(
-                success=exit_code == 0,
-                exit_code=exit_code,
+                success=success,
+                exit_code=0 if success else 1,
                 patch=diff_result.get("patch", ""),
                 files_changed=diff_result.get("files_changed", 0),
                 insertions=diff_result.get("insertions", 0),
                 deletions=diff_result.get("deletions", 0),
-                output=self._truncate(stdout_text, self._MAX_OUTPUT),
-                error=self._truncate(stderr_text, self._MAX_ERROR),
+                output=self._truncate(backend_result.output, self._MAX_OUTPUT),
+                error=self._truncate(backend_result.error, self._MAX_ERROR),
                 duration_ms=duration_ms,
             )
 
             logger.info(
-                "task_execute_done lease_id=%s exit_code=%s "
+                "task_execute_done lease_id=%s status=%s "
                 "duration_ms=%s files_changed=%s",
                 lease_id,
-                exit_code,
+                backend_result.status,
                 duration_ms,
                 result.files_changed,
             )
@@ -213,52 +255,9 @@ class TaskRunner:
 
     # ── Internal helpers ────────────────────────────────────────────────────
 
-    async def _launch_agent(
-        self,
-        cmd: list[str],
-        *,
-        cwd: str,
-        env: dict[str, str],
-    ) -> asyncio.subprocess.Process:
-        """Create the agent subprocess.  Extracted for testability."""
-        return await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
-
-    async def _stream_output(
-        self,
-        proc: asyncio.subprocess.Process,
-        lease_id: str,
-        claim_token: str,
-        agent_run_id: str,
-    ) -> str:
-        """Read *proc* stdout line-by-line, periodically reporting progress."""
-        lines: list[str] = []
-
-        while True:
-            raw = await proc.stdout.readline()
-            if not raw:
-                break
-            text = raw.decode(errors="replace")
-            lines.append(text)
-
-            # Periodically submit progress to the server.
-            if len(lines) % self._PROGRESS_INTERVAL == 0:
-                try:
-                    await self._client.submit_messages(
-                        lease_id=lease_id,
-                        claim_token=claim_token,
-                        agent_run_id=agent_run_id,
-                        messages=[{"content": text, "level": "info"}],
-                    )
-                except Exception as exc:
-                    logger.warning("progress_report_failed error=%s", exc)
-
-        return "".join(lines)
+    # Maximum output/error lengths to keep in TaskResult.
+    _MAX_OUTPUT: int = 10_000
+    _MAX_ERROR: int = 5_000
 
     @staticmethod
     def _truncate(text: str, limit: int) -> str:
@@ -266,3 +265,32 @@ class TaskRunner:
         if len(text) <= limit:
             return text
         return text[:limit]
+
+    @staticmethod
+    def _event_to_message(event: AgentEvent) -> dict[str, Any] | None:
+        """Convert an :class:`AgentEvent` to a submit_messages payload dict.
+
+        Returns ``None`` if the event should be silently dropped (e.g. empty
+        content with no meaningful metadata).
+        """
+        message: dict[str, Any] = {
+            "event_type": event.event_type,
+        }
+        if event.content:
+            message["content"] = event.content
+        if event.tool_name:
+            message["tool_name"] = event.tool_name
+        if event.call_id:
+            message["call_id"] = event.call_id
+        if event.status:
+            message["status"] = event.status
+        if event.level:
+            message["level"] = event.level
+        if event.session_id:
+            message["session_id"] = event.session_id
+
+        # Only return if there is meaningful content
+        if not event.content and not event.tool_name and not event.status:
+            return None
+
+        return message

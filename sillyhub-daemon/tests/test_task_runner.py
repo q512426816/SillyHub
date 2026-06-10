@@ -1,4 +1,10 @@
-"""Tests for TaskRunner: execute_task, progress streaming, diff collection."""
+"""Tests for TaskRunner: execute_task, progress streaming, diff collection.
+
+Updated for the provider-dispatch architecture (task-08):
+- _launch_agent and _stream_output have been removed.
+- execute_task delegates to AgentBackend via get_backend() factory.
+- Tests now mock get_backend instead of _launch_agent.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +15,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from sillyhub_daemon.backends import (
+    AgentBackend,
+    AgentEvent,
+    TaskResult as BackendTaskResult,
+)
 from sillyhub_daemon.credential import CredentialManager
 from sillyhub_daemon.task_runner import TaskResult, TaskRunner
 
@@ -85,26 +96,30 @@ def git_repo(tmp_path):
     return repo_dir
 
 
-def _make_fake_proc(
-    stdout_lines: list[bytes] | None = None,
-    stderr: bytes = b"",
-    exit_code: int = 0,
-) -> AsyncMock:
-    """Create a fake subprocess.Process mock with preloaded output."""
-    fake_proc = AsyncMock(spec=asyncio.subprocess.Process)
-    remaining = list(stdout_lines or [])
+def _make_mock_backend_class(
+    result: BackendTaskResult | None = None,
+) -> type[AgentBackend]:
+    """Create a mock AgentBackend class for testing.
 
-    async def _readline():
-        if remaining:
-            return remaining.pop(0)
-        return b""
+    Returns the **class** (type), matching the get_backend() contract.
+    """
+    if result is None:
+        result = BackendTaskResult(
+            status="completed",
+            output="line 1\nline 2\n",
+            duration_ms=50,
+        )
 
-    fake_proc.stdout = MagicMock()
-    fake_proc.stdout.readline = _readline
-    fake_proc.stderr = AsyncMock()
-    fake_proc.stderr.read = AsyncMock(return_value=stderr)
-    fake_proc.wait = AsyncMock(return_value=exit_code)
-    return fake_proc
+    class FakeBackend(AgentBackend):
+        provider = "fake"
+
+        async def execute(self, cmd_path, task_prompt, work_dir, env=None, **kwargs):
+            return result
+
+        async def parse_output(self, line):
+            return None
+
+    return FakeBackend
 
 
 # ---------------------------------------------------------------------------
@@ -159,14 +174,14 @@ class TestInit:
 
 
 # ---------------------------------------------------------------------------
-# execute_task — _launch_agent mocked
+# execute_task — get_backend mocked
 # ---------------------------------------------------------------------------
 
 
 class TestExecuteTask:
     @pytest.mark.asyncio
     async def test_successful_task(self, runner, client):
-        """When subprocess exits 0, result.success is True."""
+        """When backend returns completed, result.success is True."""
         payload = {
             "workspace_name": "test-ws",
             "claude_md": "# Instructions\nDo stuff.",
@@ -175,52 +190,43 @@ class TestExecuteTask:
             "agent_run_id": "run-123",
         }
 
-        fake_proc = _make_fake_proc(
-            stdout_lines=[b"line 1\n", b"line 2\n"],
-            stderr=b"stderr output",
-            exit_code=0,
+        backend_cls = _make_mock_backend_class(
+            BackendTaskResult(
+                status="completed",
+                output="line 1\nline 2\n",
+                error="",
+                duration_ms=100,
+            )
         )
 
-        launch_calls: list[tuple] = []
-
-        async def _fake_launch(cmd, *, cwd, env):
-            launch_calls.append((cmd, cwd, env))
-            return fake_proc
-
-        with patch.object(runner, "_launch_agent", side_effect=_fake_launch):
+        with patch("sillyhub_daemon.task_runner.get_backend", return_value=backend_cls):
             result = await runner.execute_task(
                 lease_id="lease-1",
                 claim_token="token-abc",
                 payload=payload,
             )
 
-        # Verify the command includes --print and the prompt.
-        cmd = launch_calls[0][0]
-        assert cmd[0] == "claude"
-        assert "--print" in cmd
-        assert "hello" in cmd
-
         assert result.success is True
         assert result.exit_code == 0
         assert "line 1" in result.output
         assert "line 2" in result.output
-        assert result.error == "stderr output"
         assert result.duration_ms >= 0
 
     @pytest.mark.asyncio
     async def test_failed_task(self, runner, client):
-        """When subprocess exits non-zero, result.success is False."""
+        """When backend returns failed, result.success is False."""
         payload = {"workspace_name": "fail-ws", "prompt": "bad prompt"}
 
-        fake_proc = _make_fake_proc(
-            stderr=b"error msg",
-            exit_code=1,
+        backend_cls = _make_mock_backend_class(
+            BackendTaskResult(
+                status="failed",
+                output="",
+                error="error msg",
+                duration_ms=50,
+            )
         )
 
-        async def _fake_launch(cmd, *, cwd, env):
-            return fake_proc
-
-        with patch.object(runner, "_launch_agent", side_effect=_fake_launch):
+        with patch("sillyhub_daemon.task_runner.get_backend", return_value=backend_cls):
             result = await runner.execute_task(
                 lease_id="lease-2",
                 claim_token="tok",
@@ -252,26 +258,24 @@ class TestExecuteTask:
         assert result.duration_ms >= 0
 
     @pytest.mark.asyncio
-    async def test_no_prompt_uses_bare_command(self, runner, client):
-        """When payload has no prompt, cmd is just ["claude"]."""
+    async def test_no_prompt_uses_default_provider(self, runner, client):
+        """When payload has no prompt, task still executes via backend."""
         payload = {"workspace_name": "bare"}
 
-        fake_proc = _make_fake_proc(exit_code=0)
-        launch_calls: list[tuple] = []
+        backend_cls = _make_mock_backend_class()
 
-        async def _fake_launch(cmd, *, cwd, env):
-            launch_calls.append((cmd, cwd, env))
-            return fake_proc
-
-        with patch.object(runner, "_launch_agent", side_effect=_fake_launch):
-            await runner.execute_task(
+        with patch(
+            "sillyhub_daemon.task_runner.get_backend", return_value=backend_cls
+        ) as mock_gb:
+            result = await runner.execute_task(
                 lease_id="lease-4",
                 claim_token="tok",
                 payload=payload,
             )
 
-        cmd = launch_calls[0][0]
-        assert cmd == ["claude"]
+        # Defaults to "claude" when no provider specified
+        mock_gb.assert_called_once_with("claude")
+        assert result.success is True
 
     @pytest.mark.asyncio
     async def test_claude_md_written(self, runner, client, workspace_base):
@@ -281,12 +285,9 @@ class TestExecuteTask:
             "claude_md": "# Project\nImportant instructions.",
         }
 
-        fake_proc = _make_fake_proc(exit_code=0)
+        backend_cls = _make_mock_backend_class()
 
-        async def _fake_launch(cmd, *, cwd, env):
-            return fake_proc
-
-        with patch.object(runner, "_launch_agent", side_effect=_fake_launch):
+        with patch("sillyhub_daemon.task_runner.get_backend", return_value=backend_cls):
             result = await runner.execute_task(
                 lease_id="lease-5",
                 claim_token="tok",
@@ -308,12 +309,9 @@ class TestExecuteTask:
         """When payload has no claude_md, no file is created."""
         payload = {"workspace_name": "no-md"}
 
-        fake_proc = _make_fake_proc(exit_code=0)
+        backend_cls = _make_mock_backend_class()
 
-        async def _fake_launch(cmd, *, cwd, env):
-            return fake_proc
-
-        with patch.object(runner, "_launch_agent", side_effect=_fake_launch):
+        with patch("sillyhub_daemon.task_runner.get_backend", return_value=backend_cls):
             await runner.execute_task(
                 lease_id="lease-6",
                 claim_token="tok",
@@ -327,7 +325,7 @@ class TestExecuteTask:
     async def test_credentials_rendered_into_env(
         self, runner, client, credential_manager
     ):
-        """Credential placeholders are resolved and passed to subprocess."""
+        """Credential placeholders are resolved and passed to backend."""
         credential_manager.set("USER_MY_API_KEY", "sk-secret-123")
 
         payload = {
@@ -335,21 +333,30 @@ class TestExecuteTask:
             "tool_config": {"api_key": "{{USER_MY_API_KEY}}"},
         }
 
-        fake_proc = _make_fake_proc(exit_code=0)
-        launch_calls: list[tuple] = []
+        execute_calls: list[dict] = []
 
-        async def _fake_launch(cmd, *, cwd, env):
-            launch_calls.append((cmd, cwd, env))
-            return fake_proc
+        class CaptureBackend(AgentBackend):
+            provider = "capture"
 
-        with patch.object(runner, "_launch_agent", side_effect=_fake_launch):
+            async def execute(
+                self, cmd_path, task_prompt, work_dir, env=None, **kwargs
+            ):
+                execute_calls.append({"env": env, **kwargs})
+                return BackendTaskResult(status="completed", output="", duration_ms=10)
+
+            async def parse_output(self, line):
+                return None
+
+        with patch(
+            "sillyhub_daemon.task_runner.get_backend", return_value=CaptureBackend
+        ):
             await runner.execute_task(
                 lease_id="lease-7",
                 claim_token="tok",
                 payload=payload,
             )
 
-        passed_env = launch_calls[0][2]
+        passed_env = execute_calls[0]["env"]
         assert passed_env.get("API_KEY") == "sk-secret-123"
 
     @pytest.mark.asyncio
@@ -357,16 +364,16 @@ class TestExecuteTask:
         """Very long output is truncated to _MAX_OUTPUT characters."""
         payload = {"workspace_name": "trunc"}
 
-        long_line = b"x" * 2000 + b"\n"
-        fake_proc = _make_fake_proc(
-            stdout_lines=[long_line] * 10,  # ~20,090 chars
-            exit_code=0,
+        long_output = "x" * 20_000
+        backend_cls = _make_mock_backend_class(
+            BackendTaskResult(
+                status="completed",
+                output=long_output,
+                duration_ms=10,
+            )
         )
 
-        async def _fake_launch(cmd, *, cwd, env):
-            return fake_proc
-
-        with patch.object(runner, "_launch_agent", side_effect=_fake_launch):
+        with patch("sillyhub_daemon.task_runner.get_backend", return_value=backend_cls):
             result = await runner.execute_task(
                 lease_id="lease-8",
                 claim_token="tok",
@@ -378,24 +385,34 @@ class TestExecuteTask:
 
 
 # ---------------------------------------------------------------------------
-# Progress streaming
+# Progress streaming (now via on_event callback)
 # ---------------------------------------------------------------------------
 
 
 class TestProgressStreaming:
     @pytest.mark.asyncio
-    async def test_submit_messages_called_periodically(self, runner, client):
-        """submit_messages is called every _PROGRESS_INTERVAL lines."""
+    async def test_submit_messages_called_on_event(self, runner, client):
+        """submit_messages is called when backend emits events via on_event."""
         payload = {"workspace_name": "progress-test"}
 
-        # 25 lines so we expect calls at line 10 and 20.
-        lines = [f"line {i}\n".encode() for i in range(25)]
-        fake_proc = _make_fake_proc(stdout_lines=lines, exit_code=0)
+        class EmitBackend(AgentBackend):
+            provider = "emit"
 
-        async def _fake_launch(cmd, *, cwd, env):
-            return fake_proc
+            async def execute(
+                self, cmd_path, task_prompt, work_dir, env=None, **kwargs
+            ):
+                on_event = kwargs.get("on_event")
+                if on_event:
+                    for i in range(3):
+                        await on_event(
+                            AgentEvent(event_type="text", content=f"event {i}")
+                        )
+                return BackendTaskResult(status="completed", output="", duration_ms=50)
 
-        with patch.object(runner, "_launch_agent", side_effect=_fake_launch):
+            async def parse_output(self, line):
+                return None
+
+        with patch("sillyhub_daemon.task_runner.get_backend", return_value=EmitBackend):
             result = await runner.execute_task(
                 lease_id="lease-progress",
                 claim_token="tok",
@@ -403,8 +420,7 @@ class TestProgressStreaming:
             )
 
         assert result.success is True
-        # 25 lines / 10 interval = 2 calls expected.
-        assert client.submit_messages.call_count == 2
+        assert client.submit_messages.call_count == 3
 
     @pytest.mark.asyncio
     async def test_submit_messages_failure_does_not_crash(self, runner, client):
@@ -413,14 +429,21 @@ class TestProgressStreaming:
 
         payload = {"workspace_name": "fail-progress"}
 
-        # 12 lines -> one progress report at line 10.
-        lines = [f"line {i}\n".encode() for i in range(12)]
-        fake_proc = _make_fake_proc(stdout_lines=lines, exit_code=0)
+        class EmitBackend(AgentBackend):
+            provider = "emit"
 
-        async def _fake_launch(cmd, *, cwd, env):
-            return fake_proc
+            async def execute(
+                self, cmd_path, task_prompt, work_dir, env=None, **kwargs
+            ):
+                on_event = kwargs.get("on_event")
+                if on_event:
+                    await on_event(AgentEvent(event_type="text", content="will fail"))
+                return BackendTaskResult(status="completed", output="", duration_ms=50)
 
-        with patch.object(runner, "_launch_agent", side_effect=_fake_launch):
+            async def parse_output(self, line):
+                return None
+
+        with patch("sillyhub_daemon.task_runner.get_backend", return_value=EmitBackend):
             result = await runner.execute_task(
                 lease_id="lease-prog-fail",
                 claim_token="tok",
@@ -430,18 +453,13 @@ class TestProgressStreaming:
         assert result.success is True
 
     @pytest.mark.asyncio
-    async def test_no_progress_when_few_lines(self, runner, client):
-        """Fewer than _PROGRESS_INTERVAL lines means no progress calls."""
+    async def test_no_progress_when_no_events(self, runner, client):
+        """Backend that emits no events means no submit_messages calls."""
         payload = {"workspace_name": "few-lines"}
 
-        # Only 5 lines — below the 10-line threshold.
-        lines = [b"short\n"] * 5
-        fake_proc = _make_fake_proc(stdout_lines=lines, exit_code=0)
+        backend_cls = _make_mock_backend_class()
 
-        async def _fake_launch(cmd, *, cwd, env):
-            return fake_proc
-
-        with patch.object(runner, "_launch_agent", side_effect=_fake_launch):
+        with patch("sillyhub_daemon.task_runner.get_backend", return_value=backend_cls):
             result = await runner.execute_task(
                 lease_id="lease-few",
                 claim_token="tok",
@@ -497,7 +515,6 @@ class TestDiffCollection:
         self, runner, client, git_repo, workspace_base
     ):
         """After execution, diff is collected from the workspace."""
-        # Clone the repo so there is a real workspace.
         ws_name = "diff-integration"
         ws_dir = await runner._workspace.prepare_workspace(
             ws_name,
@@ -514,12 +531,9 @@ class TestDiffCollection:
             "branch": "main",
         }
 
-        fake_proc = _make_fake_proc(exit_code=0)
+        backend_cls = _make_mock_backend_class()
 
-        async def _fake_launch(cmd, *, cwd, env):
-            return fake_proc
-
-        with patch.object(runner, "_launch_agent", side_effect=_fake_launch):
+        with patch("sillyhub_daemon.task_runner.get_backend", return_value=backend_cls):
             result = await runner.execute_task(
                 lease_id="lease-diff",
                 claim_token="tok",
@@ -540,12 +554,9 @@ class TestDiffCollection:
             "branch": "main",
         }
 
-        fake_proc = _make_fake_proc(exit_code=0)
+        backend_cls = _make_mock_backend_class()
 
-        async def _fake_launch(cmd, *, cwd, env):
-            return fake_proc
-
-        with patch.object(runner, "_launch_agent", side_effect=_fake_launch):
+        with patch("sillyhub_daemon.task_runner.get_backend", return_value=backend_cls):
             result = await runner.execute_task(
                 lease_id="lease-no-diff",
                 claim_token="tok",

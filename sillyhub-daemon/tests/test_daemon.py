@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from sillyhub_daemon.agent_detector import AgentInfo
+from sillyhub_daemon.agent_detector import DetectedAgent
 from sillyhub_daemon.client import HubClient
 from sillyhub_daemon.config import DaemonConfig
 from sillyhub_daemon.daemon import Daemon
@@ -75,10 +75,6 @@ class TestStart:
         with patch("sillyhub_daemon.daemon.AgentDetector") as MockDetector:
             mock_detector = MockDetector.return_value
             mock_detector.detect_all = AsyncMock(return_value=[])
-            mock_detector.get_capabilities.return_value = {
-                "agents": [],
-                "max_concurrent_tasks": 5,
-            }
 
             task = asyncio.create_task(daemon.start())
             await asyncio.sleep(0.1)
@@ -89,29 +85,33 @@ class TestStart:
             await task
 
     @pytest.mark.asyncio
-    async def test_start_detects_agents(self, daemon):
+    async def test_start_detects_agents(self, daemon, mock_client):
         with patch("sillyhub_daemon.daemon.AgentDetector") as MockDetector:
             mock_detector = MockDetector.return_value
             mock_agents = [
-                AgentInfo(
-                    name="claude-code",
-                    command="claude",
+                DetectedAgent(
+                    name="claude",
+                    bin_path="/usr/bin/claude",
                     version="1.0.0",
+                    protocol="stream_json",
                     available=True,
                 ),
-                AgentInfo(name="sillyspec", command="", available=False),
+                DetectedAgent(
+                    name="sillyspec",
+                    bin_path="",
+                    version=None,
+                    protocol="ndjson",
+                    available=False,
+                ),
             ]
             mock_detector.detect_all = AsyncMock(return_value=mock_agents)
-            mock_detector.get_capabilities.return_value = {
-                "agents": ["claude-code"],
-                "max_concurrent_tasks": 5,
-            }
 
             task = asyncio.create_task(daemon.start())
             await asyncio.sleep(0.1)
 
             mock_detector.detect_all.assert_awaited_once()
-            mock_detector.get_capabilities.assert_called_once_with(mock_agents)
+            # Only claude is available, so register should have been called once
+            mock_client.register.assert_awaited_once()
 
             await daemon.stop()
             await task
@@ -120,11 +120,17 @@ class TestStart:
     async def test_start_registers(self, daemon, mock_client):
         with patch("sillyhub_daemon.daemon.AgentDetector") as MockDetector:
             mock_detector = MockDetector.return_value
-            mock_detector.detect_all = AsyncMock(return_value=[])
-            mock_detector.get_capabilities.return_value = {
-                "agents": [],
-                "max_concurrent_tasks": 5,
-            }
+            # One available agent => one register call
+            mock_agents = [
+                DetectedAgent(
+                    name="claude",
+                    bin_path="/usr/bin/claude",
+                    version="2.0.0",
+                    protocol="stream_json",
+                    available=True,
+                ),
+            ]
+            mock_detector.detect_all = AsyncMock(return_value=mock_agents)
 
             task = asyncio.create_task(daemon.start())
             await asyncio.sleep(0.1)
@@ -140,11 +146,16 @@ class TestStart:
 
         with patch("sillyhub_daemon.daemon.AgentDetector") as MockDetector:
             mock_detector = MockDetector.return_value
-            mock_detector.detect_all = AsyncMock(return_value=[])
-            mock_detector.get_capabilities.return_value = {
-                "agents": [],
-                "max_concurrent_tasks": 5,
-            }
+            mock_agents = [
+                DetectedAgent(
+                    name="claude",
+                    bin_path="/usr/bin/claude",
+                    version="2.0.0",
+                    protocol="stream_json",
+                    available=True,
+                ),
+            ]
+            mock_detector.detect_all = AsyncMock(return_value=mock_agents)
 
             task = asyncio.create_task(daemon.start())
             await asyncio.sleep(0.1)
