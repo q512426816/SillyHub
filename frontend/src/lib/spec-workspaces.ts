@@ -63,6 +63,26 @@ export async function bootstrapSpecWorkspace(
   );
 }
 
+export interface GenerateProjectsResult {
+  generated_files: number;
+  reparse: {
+    parsed: number;
+    created: number;
+    updated: number;
+    deleted: number;
+  };
+  children: { id: string; name: string; component_key: string; slug: string }[];
+}
+
+export async function generateProjects(
+  workspaceId: string,
+): Promise<GenerateProjectsResult> {
+  return apiFetch<GenerateProjectsResult>(
+    `/api/workspaces/${workspaceId}/generate-projects`,
+    { method: "POST" },
+  );
+}
+
 // ── Spec Workspace Update ──
 
 export interface SpecWorkspaceUpdateInput {

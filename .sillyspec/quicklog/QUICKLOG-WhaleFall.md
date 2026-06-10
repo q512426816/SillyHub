@@ -259,6 +259,11 @@ created_at: 2026-06-03T08:42:04
 文件：frontend/src/components/agent-log/types.ts, frontend/src/components/agent-log/normalize.ts, frontend/src/components/agent-log-viewer.tsx
 结果：1) normalizeLogs 新增 parseStdoutToolUse 解析 stdout [TOOL_USE] ToolName: {json} 为 ToolCallEntry；2) 有 channel=tool_call 时隐藏 stdout 重复，无时转为 parsedStdoutTool 走工具专属卡片渲染；3) AgentLogRow 新增 parsedStdoutTool 分支；4) 默认渲染通过 filterToolProtocolLines 过滤 [TOOL_USE]/[TOOL_RESULT]；5) TypeScript 编译通过
 
+## ql-20260610-003-b5d4 | 2026-06-10 09:41:32 | Bootstrap 成功后增加"生成项目组件"按钮
+状态：已完成
+文件：backend/app/modules/workspace/service.py, backend/app/modules/workspace/router.py, frontend/src/app/(dashboard)/workspaces/[id]/page.tsx, frontend/src/lib/spec-workspaces.ts
+结果：1) 后端 generate_projects 从 _module-map.yaml 按前缀分组生成 projects/*.yaml + reparse 创建子 workspace；2) 前端 Bootstrap 成功且无组件时显示"生成项目组件"按钮；3) TypeScript 编译通过
+
 ## ql-20260610-002-e7c3 | 2026-06-10 09:31:16 | 修复 agent run 被误标为 failed（cleanup_stale_runs 覆盖已完成 run）
 状态：已完成
 根因：backend 重启时 cleanup_stale_runs 无条件将 status=running 的 run 标为 failed/exit_code=-1，但 agent 实际已完成（metadata 已写入 DB），只是 status commit 在重启中丢失

@@ -19,6 +19,7 @@ import { listComponents } from "@/lib/components";
 import { listChanges } from "@/lib/changes";
 import {
   bootstrapSpecWorkspace,
+  generateProjects,
   getSpecWorkspace,
   importSpecWorkspace,
   syncSpecWorkspace,
@@ -124,6 +125,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const [bsRepliedInputs, setBsRepliedInputs] = useState<Set<string>>(new Set());
   const [bsInputErrors, setBsInputErrors] = useState<Record<string, string>>({});
   const [bootstrapStreamStatus, setBootstrapStreamStatus] = useState<StreamStatus>("disconnected");
+  const [generatingProjects, setGeneratingProjects] = useState(false);
 
   const streamClientRef = useRef<AgentRunStreamClient | null>(null);
 
@@ -286,6 +288,25 @@ export default function WorkspaceDetailPage({ params }: Props) {
       setPageError(err instanceof ApiError ? err.message : "初始化失败");
     } finally {
       setBootstrapping(false);
+    }
+  }
+
+  /* ---- Generate Projects handler ---- */
+
+  async function handleGenerateProjects() {
+    setGeneratingProjects(true);
+    setPageError(null);
+    try {
+      const result = await generateProjects(workspaceId);
+      if (result.reparse.created > 0) {
+        void load();
+      } else {
+        setPageError("未生成新的项目组件（projects/*.yaml 可能已存在）");
+      }
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "生成项目组件失败");
+    } finally {
+      setGeneratingProjects(false);
     }
   }
 
@@ -510,6 +531,17 @@ export default function WorkspaceDetailPage({ params }: Props) {
               <span className="text-destructive">exit_code={lastBsRun.exit_code}</span>
             )}
             <span className="font-mono text-zinc-400">{lastBsRun.id.slice(0, 8)}</span>
+            {bs.variant === "success" && componentCount === 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleGenerateProjects}
+                disabled={generatingProjects}
+                className="ml-auto h-6 text-[11px]"
+              >
+                {generatingProjects ? "生成中..." : "生成项目组件"}
+              </Button>
+            )}
           </div>
             );
           })()}

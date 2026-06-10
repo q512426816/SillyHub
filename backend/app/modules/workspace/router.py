@@ -229,6 +229,17 @@ async def rescan_workspace(
     return _build_scan_response(scan)
 
 
+@router.post("/{workspace_id}/generate-projects")
+async def generate_projects(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_ADMIN))],
+) -> dict:
+    """Generate projects/*.yaml from _module-map.yaml and reparse into child workspaces."""
+    service = WorkspaceService(session)
+    return await service.generate_projects(workspace_id)
+
+
 @router.post("/{workspace_id}/reparse")
 async def reparse_workspace(
     workspace_id: uuid.UUID,

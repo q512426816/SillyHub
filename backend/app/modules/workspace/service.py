@@ -370,6 +370,148 @@ class WorkspaceService:
             )
         return ws
 
+    # -- Generate projects from module-map ---
+
+    async def generate_projects(
+        self,
+        workspace_id: uuid.UUID,
+    ) -> dict:
+        """Read _module-map.yaml, generate projects/*.yaml grouped by prefix, then reparse.
+
+        Returns stats dict from reparse.
+        """
+        import yaml
+
+        ws = await self.get(workspace_id)
+
+        # Determine spec_root
+        from app.modules.spec_workspace.service import SpecWorkspaceService
+
+        spec_ws_svc = SpecWorkspaceService(self._session)
+        spec_root: str | None = None
+        try:
+            spec_ws = await spec_ws_svc.get(ws.id)
+            if spec_ws.strategy == "platform-managed" and spec_ws.spec_root:
+                spec_root = spec_ws.spec_root
+        except Exception:
+            pass
+        if not spec_root:
+            spec_root = _rewrite_path(ws.root_path)
+
+        module_map_path = (
+            Path(spec_root) / ".sillyspec" / "docs" / ws.name / "modules" / "_module-map.yaml"
+        )
+        if not module_map_path.is_file():
+            raise WorkspaceNotSillyspec(f"No _module-map.yaml found at {module_map_path}")
+
+        with module_map_path.open("r", encoding="utf-8") as f:
+            module_map = yaml.safe_load(f)
+
+        modules = module_map.get("modules", {})
+        if not modules:
+            return {
+                "generated_files": 0,
+                "reparse": {"parsed": 0, "created": 0, "updated": 0, "deleted": 0},
+            }
+
+        # Group modules by prefix (e.g. "backend-agent" -> "backend", "core-config" -> "core")
+        groups: dict[str, list[tuple[str, dict]]] = {}
+        for key, info in modules.items():
+            if not isinstance(info, dict):
+                continue
+            prefix = key.split("-")[0] if "-" in key else key
+            groups.setdefault(prefix, []).append((key, info))
+
+        # Generate projects/*.yaml
+        projects_dir = Path(spec_root) / ".sillyspec" / "projects"
+        projects_dir.mkdir(parents=True, exist_ok=True)
+
+        # Collect all paths to detect tech_stack and build commands
+        tech_stack_map = {
+            "backend": ["Python", "FastAPI", "SQLAlchemy", "Pydantic"],
+            "frontend": ["TypeScript", "Next.js", "React", "Tailwind CSS"],
+            "core": ["Python", "SQLAlchemy", "Redis"],
+        }
+
+        generated_files = 0
+        all_relations: list[dict] = []
+        component_keys: set[str] = set()
+
+        for prefix, members in sorted(groups.items()):
+            component_key = prefix
+            component_keys.add(component_key)
+
+            # Collect paths
+            paths = set()
+            for _key, info in members:
+                for p in info.get("paths", []):
+                    paths.add(p)
+
+            # Determine relative path from workspace root
+            rel_path = paths.pop() if len(paths) == 1 else None
+            if rel_path:
+                # Make it relative
+                root_path = _rewrite_path(ws.root_path)
+                if rel_path.startswith(root_path):
+                    rel_path = os.path.relpath(rel_path, root_path).replace("\\", "/")
+
+            # Collect depends_on across members for relations
+            for _key, info in members:
+                for dep in info.get("depends_on", []):
+                    dep_prefix = dep.split("-")[0] if "-" in dep else dep
+                    if dep_prefix != prefix and dep_prefix in groups:
+                        all_relations.append(
+                            {
+                                "target": dep_prefix,
+                                "type": "depends_on",
+                            }
+                        )
+
+            name_map = {
+                "backend": "Backend API",
+                "frontend": "Frontend App",
+                "core": "Core Infrastructure",
+            }
+
+            project_def: dict = {
+                "id": component_key,
+                "name": name_map.get(prefix, prefix.capitalize()),
+                "type": "component",
+                "role": "service" if prefix in ("backend", "frontend") else "library",
+                "tech_stack": tech_stack_map.get(prefix, []),
+            }
+            if rel_path:
+                project_def["path"] = rel_path
+            if all_relations:
+                # Deduplicate
+                seen = set()
+                unique = []
+                for r in all_relations:
+                    k = (r["target"], r["type"])
+                    if k not in seen:
+                        seen.add(k)
+                        unique.append(r)
+                project_def["relations"] = unique
+
+            out_path = projects_dir / f"{component_key}.yaml"
+            with out_path.open("w", encoding="utf-8") as f:
+                yaml.dump(
+                    project_def, f, default_flow_style=False, allow_unicode=True, sort_keys=False
+                )
+            generated_files += 1
+
+        # Now reparse to create child workspaces
+        _parse_result, stats, children, _relations = await self.reparse(workspace_id)
+
+        return {
+            "generated_files": generated_files,
+            "reparse": stats,
+            "children": [
+                {"id": str(c.id), "name": c.name, "component_key": c.component_key, "slug": c.slug}
+                for c in children
+            ],
+        }
+
     # -- Reparse ---
 
     async def reparse(
