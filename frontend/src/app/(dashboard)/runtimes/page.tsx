@@ -108,8 +108,11 @@ function CopyDaemonCommand() {
 
   if (!accessToken) return null;
 
-  const serverUrl =
-    typeof window !== "undefined" ? window.location.origin : "http://localhost:8001";
+  // Daemon CLI needs the backend API URL, not the frontend URL.
+  // If frontend is on port 3001, backend is on 8001; otherwise same origin.
+  const frontendUrl =
+    typeof window !== "undefined" ? window.location.origin : "http://localhost:3001";
+  const serverUrl = frontendUrl.replace(/:3001$/, ":8001");
   const cmd = `sillyhub-daemon start --server ${serverUrl} --token ${accessToken}`;
 
   const handleCopy = async () => {
