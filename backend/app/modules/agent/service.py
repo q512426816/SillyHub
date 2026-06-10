@@ -1717,12 +1717,23 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
 
     now = datetime.now(UTC)
     for run in stale_runs:
-        run.status = "failed"
-        run.finished_at = now
-        run.exit_code = -1
-        run.output_redacted = "Run interrupted: service restarted while agent was running."
+        # If metadata was already written (agent actually finished but commit
+        # was lost during restart), restore as completed instead of failed.
+        if (run.num_turns or 0) > 0 and run.exit_code is not None and run.exit_code >= 0:
+            run.status = "completed" if run.exit_code == 0 else "failed"
+            run.finished_at = run.finished_at or now
+            log.info(
+                "stale_run_restored_from_metadata",
+                run_id=str(run.id),
+                exit_code=run.exit_code,
+            )
+        else:
+            run.status = "failed"
+            run.finished_at = now
+            run.exit_code = -1
+            run.output_redacted = "Run interrupted: service restarted while agent was running."
+            log.warning("stale_run_cleaned", run_id=str(run.id))
         session.add(run)
-        log.warning("stale_run_cleaned", run_id=str(run.id))
 
     await session.commit()
     return len(stale_runs)

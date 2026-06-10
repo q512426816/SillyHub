@@ -259,6 +259,17 @@ created_at: 2026-06-03T08:42:04
 文件：frontend/src/components/agent-log/types.ts, frontend/src/components/agent-log/normalize.ts, frontend/src/components/agent-log-viewer.tsx
 结果：1) normalizeLogs 新增 parseStdoutToolUse 解析 stdout [TOOL_USE] ToolName: {json} 为 ToolCallEntry；2) 有 channel=tool_call 时隐藏 stdout 重复，无时转为 parsedStdoutTool 走工具专属卡片渲染；3) AgentLogRow 新增 parsedStdoutTool 分支；4) 默认渲染通过 filterToolProtocolLines 过滤 [TOOL_USE]/[TOOL_RESULT]；5) TypeScript 编译通过
 
+## ql-20260610-002-e7c3 | 2026-06-10 09:31:16 | 修复 agent run 被误标为 failed（cleanup_stale_runs 覆盖已完成 run）
+状态：已完成
+根因：backend 重启时 cleanup_stale_runs 无条件将 status=running 的 run 标为 failed/exit_code=-1，但 agent 实际已完成（metadata 已写入 DB），只是 status commit 在重启中丢失
+文件：backend/app/modules/agent/service.py
+结果：1) cleanup_stale_runs 增加已有 metadata 检查（num_turns>0 且 exit_code>=0），恢复为 completed/failed 而非一律标 failed；2) 直接修复 run 2fcf4c69 数据 status→completed, exit_code→0
+
+## ql-20260610-001-f2a1 | 2026-06-10 09:13:46 | 修复 GET /api/workspaces 500（后端连接池耗尽）
+状态：已完成
+根因：之前调试时在容器内执行 curl 健康检查未加 `-m` 超时，堆积 20+ 僵尸 curl 进程耗尽 uvicorn 连接池，导致所有请求（包括 health）超时。重启 backend 清理后恢复。
+文件：无代码改动
+
 ## ql-20260609-015-d4e9 | 2026-06-09 17:20:00 | 修复 stdout [TOOL_RESULT] 大段内容被当作普通 INFO 展示
 状态：已完成
 文件：frontend/src/components/agent-log/types.ts, frontend/src/components/agent-log/normalize.ts, frontend/src/components/agent-log/tool-renderers.tsx, frontend/src/components/agent-log-viewer.tsx
