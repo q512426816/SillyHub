@@ -143,19 +143,23 @@ export default function RuntimesPage() {
           <p className="mb-4">尚未注册任何 Daemon 运行时。</p>
           <div className="mx-auto inline-block rounded-md border bg-muted/40 px-6 py-4 text-left text-[11px] leading-relaxed">
             <p className="mb-2 font-medium text-foreground">快速开始</p>
-            <ol className="list-decimal pl-4 space-y-1">
-              <li>安装守护进程：<code className="rounded bg-muted px-1 py-0.5">pip install sillyhub-daemon</code></li>
+            <ol className="list-decimal pl-4 space-y-2">
               <li>
-                编辑配置文件 <code className="rounded bg-muted px-1 py-0.5">~/.sillyhub/daemon/config.json</code>，填入服务器地址：
-                <pre className="mt-1 rounded bg-muted/60 px-2 py-1 font-mono text-[10px]">{`{
-  "server_url": "${typeof window !== "undefined" ? window.location.origin : "http://your-server:8001"}",
-  "runtime_name": "my-daemon"
-}`}</pre>
+                安装守护进程（项目本地包）：
+                <br />
+                <code className="rounded bg-muted px-1 py-0.5">cd sillyhub-daemon && pip install -e .</code>
               </li>
-              <li>启动守护进程：<code className="rounded bg-muted px-1 py-0.5">sillyhub daemon start</code></li>
+              <li>
+                启动守护进程，指定服务器地址和认证 Token：
+                <br />
+                <code className="rounded bg-muted px-1 py-0.5 break-all">
+                  {`sillyhub-daemon start --server ${typeof window !== "undefined" ? window.location.origin : "http://your-server:8001"} --token <your-token>`}
+                </code>
+              </li>
             </ol>
             <p className="mt-3 text-muted-foreground">
-              启动后守护进程会自动注册并出现在上方列表中。Agent Run 创建时可选择在本地运行。
+              Token 通过 <code className="rounded bg-muted px-1 py-0.5">/api/auth/login</code> 接口获取。
+              守护进程会自动检测本机已安装的 Agent（Claude Code、Codex、Copilot 等）并逐一注册到服务器。
             </p>
           </div>
         </section>

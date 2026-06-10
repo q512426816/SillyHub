@@ -15,13 +15,15 @@ MIN_VERSIONS: dict[str, tuple[int, int, int]] = {
 }
 
 
-def parse_semver(raw: str) -> tuple[int, int, int] | None:
+def parse_semver(raw: str | None) -> tuple[int, int, int] | None:
     """Extract first semver triple from an arbitrary string.
 
     Uses ``re.search`` so that leading text such as ``"Claude Code 2.1.5"``
-    is handled naturally.  Returns ``None`` when no ``major.minor.patch``
-    pattern is found.
+    is handled naturally.  Returns ``None`` when *raw* is ``None``/empty or
+    no ``major.minor.patch`` pattern is found.
     """
+    if not raw:
+        return None
     match = _SEMVER_RE.search(raw)
     if not match:
         return None

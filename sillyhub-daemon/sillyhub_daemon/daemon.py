@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import platform
+from typing import TYPE_CHECKING
 
 import websockets
 
@@ -25,6 +26,9 @@ from sillyhub_daemon.protocol import (
     MSG_HEARTBEAT_ACK,
     MSG_TASK_AVAILABLE,
 )
+
+if TYPE_CHECKING:
+    from sillyhub_daemon.task_runner import TaskRunner
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +44,15 @@ class Daemon:
         Async HTTP client used to talk to the SillyHub server REST API.
     """
 
-    def __init__(self, config: DaemonConfig, client: HubClient) -> None:
+    def __init__(
+        self,
+        config: DaemonConfig,
+        client: HubClient,
+        task_runner: TaskRunner | None = None,
+    ) -> None:
         self._config = config
         self._client = client
+        self._task_runner = task_runner
         self._runtime_id: str = config.runtime_id
         self._running: bool = False
         self._tasks: set[asyncio.Task] = set()
@@ -153,16 +163,22 @@ class Daemon:
     # ── Heartbeat loop ───────────────────────────────────────────────────────
 
     async def _heartbeat_loop(self) -> None:
-        """Send HTTP heartbeat every ``heartbeat_interval`` seconds."""
+        """Send HTTP heartbeat for every registered runtime."""
         while self._running:
             try:
                 await asyncio.sleep(self._config.heartbeat_interval)
-                result = await self._client.heartbeat(self._runtime_id)
-                logger.debug("daemon.heartbeat_sent result=%s", result)
+                all_ids = [self._runtime_id] + list(self._registered_runtimes.values())
+                for rid in all_ids:
+                    try:
+                        await self._client.heartbeat(rid)
+                    except Exception as exc:
+                        logger.warning(
+                            "daemon.heartbeat_failed runtime_id=%s error=%s",
+                            rid,
+                            exc,
+                        )
             except asyncio.CancelledError:
                 break
-            except Exception as exc:
-                logger.warning("daemon.heartbeat_failed error=%s", exc)
 
     # ── Poll loop ────────────────────────────────────────────────────────────
 
@@ -219,8 +235,81 @@ class Daemon:
 
         if msg_type == MSG_TASK_AVAILABLE:
             logger.info("daemon.task_available payload=%s", payload)
-            # Task execution will be wired in by TaskRunner (Wave 4).
+            if self._task_runner is None:
+                logger.warning("daemon.task_available_no_runner")
+                return
+            self._fire(self._execute_task(payload))
         elif msg_type == MSG_HEARTBEAT_ACK:
             logger.debug("daemon.heartbeat_ack payload=%s", payload)
         else:
             logger.warning("daemon.unknown_message type=%s", msg_type)
+
+    async def _execute_task(self, payload: dict) -> None:
+        """Handle a task_available notification: claim → start → execute → complete."""
+        lease_id = payload.get("lease_id")
+        runtime_id = payload.get("runtime_id")
+
+        if not lease_id:
+            logger.warning("daemon.task_no_lease_id payload=%s", payload)
+            return
+
+        # 1. Claim the lease
+        try:
+            claim_resp = await self._client.claim_lease(
+                lease_id=lease_id,
+                runtime_id=runtime_id or self._runtime_id,
+            )
+        except Exception as exc:
+            logger.error(
+                "daemon.lease_claim_failed lease_id=%s error=%s", lease_id, exc
+            )
+            return
+
+        claim_token = claim_resp.get("claim_token", "")
+        if not claim_token:
+            logger.error("daemon.lease_claim_no_token lease_id=%s", lease_id)
+            return
+
+        # 2. Start the lease
+        try:
+            await self._client.start_lease(lease_id=lease_id, claim_token=claim_token)
+        except Exception as exc:
+            logger.error(
+                "daemon.lease_start_failed lease_id=%s error=%s", lease_id, exc
+            )
+            return
+
+        # 3. Execute via TaskRunner
+        task_result = await self._task_runner.execute_task(
+            lease_id=lease_id,
+            claim_token=claim_token,
+            payload=claim_resp,
+        )
+
+        # 4. Complete the lease
+        try:
+            await self._client.complete_lease(
+                lease_id=lease_id,
+                claim_token=claim_token,
+                result={
+                    "success": task_result.success,
+                    "output": task_result.output,
+                    "error": task_result.error,
+                    "patch": task_result.patch,
+                    "files_changed": task_result.files_changed,
+                    "insertions": task_result.insertions,
+                    "deletions": task_result.deletions,
+                    "duration_ms": task_result.duration_ms,
+                },
+            )
+            logger.info(
+                "daemon.task_completed lease_id=%s success=%s",
+                lease_id,
+                task_result.success,
+            )
+        except Exception as exc:
+            logger.error(
+                "daemon.lease_complete_failed lease_id=%s error=%s",
+                lease_id,
+                exc,
+            )

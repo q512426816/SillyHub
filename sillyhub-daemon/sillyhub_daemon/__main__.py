@@ -74,7 +74,10 @@ def cli():
 def start(server, token):
     """Start the daemon."""
     from sillyhub_daemon.client import HubClient
+    from sillyhub_daemon.credential import CredentialManager
     from sillyhub_daemon.daemon import Daemon
+    from sillyhub_daemon.task_runner import TaskRunner
+    from sillyhub_daemon.workspace import WorkspaceManager
 
     config = DaemonConfig()
     if server:
@@ -91,7 +94,10 @@ def start(server, token):
     click.echo(f"Runtime ID: {config.runtime_id}")
 
     client = HubClient(config.server_url, token=config.token)
-    daemon = Daemon(config, client)
+    workspace_mgr = WorkspaceManager()
+    credential_mgr = CredentialManager()
+    task_runner = TaskRunner(client, workspace_mgr, credential_mgr)
+    daemon = Daemon(config, client, task_runner=task_runner)
 
     # Persist PID for stop / status commands
     import os

@@ -42,3 +42,14 @@ created_at: 2026-06-09 23:01:00
 - [ ] task-08: AgentDetector 单元测试（mock 检测、版本校验、环境变量覆盖）
 - [ ] task-09: Backend 协议解析单元测试（各协议的 parse_output）
 - [ ] task-10: 集成测试（daemon 启动 → 多 runtime 注册 → 任务执行）
+
+## Wave 6: 遗留问题修复
+
+- [x] task-11: 接通 daemon → TaskRunner WS 管道（daemon.py 收到 MSG_TASK_AVAILABLE 后调用 TaskRunner）
+  - `sillyhub-daemon/sillyhub_daemon/daemon.py`
+  - `sillyhub-daemon/sillyhub_daemon/__main__.py`
+- [x] task-12: 修复多 runtime 心跳（遍历 _registered_runtimes 逐个发送心跳）
+  - `sillyhub-daemon/sillyhub_daemon/daemon.py`
+- [x] task-13: 清理 version.py 重复代码（agent_detector.py 引用 version.py 的 semver 实现）
+  - `sillyhub-daemon/sillyhub_daemon/agent_detector.py`
+  - `sillyhub-daemon/sillyhub_daemon/version.py`

@@ -13,6 +13,17 @@ import re
 import shutil
 from dataclasses import dataclass
 
+from sillyhub_daemon.version import check_min_version, parse_semver
+
+__all__ = [
+    "AgentDef",
+    "AgentDetector",
+    "AgentInfo",
+    "DetectedAgent",
+    "check_min_version",
+    "parse_semver",
+]
+
 logger = logging.getLogger(__name__)
 
 
@@ -60,48 +71,8 @@ class AgentInfo:
 
 
 # ---------------------------------------------------------------------------
-# Semver helpers
+# Semver helpers (imported from version.py)
 # ---------------------------------------------------------------------------
-
-_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
-
-
-def parse_semver(version: str | None) -> tuple[int, int, int] | None:
-    """Parse a ``X.Y.Z`` version string into a 3-tuple of ints.
-
-    Returns ``None`` when *version* is ``None``, empty, or does not match
-    the ``X.Y.Z`` pattern exactly.
-    """
-    if not version:
-        return None
-    m = _SEMVER_RE.match(version.strip())
-    if not m:
-        return None
-    try:
-        return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
-    except (ValueError, IndexError):
-        return None
-
-
-def check_min_version(provider: str, version: str) -> str | None:
-    """Return a warning string if *version* is below the minimum for *provider*.
-
-    Returns ``None`` when the version meets or exceeds the minimum, when the
-    provider has no minimum requirement, or when either version string cannot
-    be parsed.
-    """
-    defn: AgentDef | None = AgentDetector.AGENT_DEFS.get(provider)  # type: ignore[attr-defined]
-    if defn is None or defn.min_version is None:
-        return None
-
-    current = parse_semver(version)
-    minimum = parse_semver(defn.min_version)
-    if current is None or minimum is None:
-        return None
-
-    if current < minimum:
-        return f"version {version} is below minimum {defn.min_version}"
-    return None
 
 
 # ---------------------------------------------------------------------------

@@ -41,6 +41,10 @@ def mock_client():
     client._http.aclose = AsyncMock()
     client.register = AsyncMock(return_value={"id": "rt-test-123", "status": "ok"})
     client.heartbeat = AsyncMock(return_value={"status": "ok"})
+    client.claim_lease = AsyncMock(return_value={"claim_token": "ct-1"})
+    client.start_lease = AsyncMock(return_value={"status": "started"})
+    client.complete_lease = AsyncMock(return_value={"status": "ok"})
+    client.submit_messages = AsyncMock(return_value={"status": "ok"})
     # Replace close with an AsyncMock so we can assert it was awaited
     client.close = AsyncMock()
     return client
@@ -321,6 +325,98 @@ class TestHandleWsMessage:
     async def test_unknown_message_type(self, daemon):
         msg = {"type": "unknown:type", "payload": {}}
         await daemon._handle_ws_message(msg)
+
+
+# ---------------------------------------------------------------------------
+# _execute_task (daemon → TaskRunner pipeline)
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteTask:
+    @pytest.mark.asyncio
+    async def test_full_pipeline(self, daemon, mock_client):
+        """task_available → claim → start → execute → complete."""
+        from sillyhub_daemon.task_runner import TaskResult
+
+        mock_runner = AsyncMock()
+        mock_runner.execute_task.return_value = TaskResult(
+            success=True, output="done", patch="", duration_ms=100
+        )
+        daemon._task_runner = mock_runner
+
+        mock_client.claim_lease.return_value = {
+            "claim_token": "ct-1",
+            "lease_id": "l-1",
+            "prompt": "hello",
+        }
+        mock_client.start_lease.return_value = {"status": "started"}
+        mock_client.complete_lease.return_value = {"status": "ok"}
+
+        payload = {"lease_id": "l-1", "runtime_id": "rt-1"}
+        await daemon._execute_task(payload)
+
+        mock_client.claim_lease.assert_awaited_once_with(
+            lease_id="l-1", runtime_id="rt-1"
+        )
+        mock_client.start_lease.assert_awaited_once_with(
+            lease_id="l-1", claim_token="ct-1"
+        )
+        mock_runner.execute_task.assert_awaited_once_with(
+            lease_id="l-1",
+            claim_token="ct-1",
+            payload={"claim_token": "ct-1", "lease_id": "l-1", "prompt": "hello"},
+        )
+        mock_client.complete_lease.assert_awaited_once()
+        call_kwargs = mock_client.complete_lease.call_args
+        assert call_kwargs.kwargs["lease_id"] == "l-1"
+        assert call_kwargs.kwargs["claim_token"] == "ct-1"
+        assert call_kwargs.kwargs["result"]["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_no_lease_id_logs_warning(self, daemon):
+        """Payload without lease_id → early return, no crash."""
+        mock_runner = AsyncMock()
+        daemon._task_runner = mock_runner
+        await daemon._execute_task({"runtime_id": "rt-1"})
+        mock_runner.execute_task.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_claim_failure_aborts(self, daemon, mock_client):
+        """claim_lease raises → no start/execute/complete."""
+        mock_runner = AsyncMock()
+        daemon._task_runner = mock_runner
+        mock_client.claim_lease.side_effect = ConnectionError("fail")
+
+        await daemon._execute_task({"lease_id": "l-1"})
+        mock_client.start_lease.assert_not_awaited()
+        mock_runner.execute_task.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_start_failure_aborts(self, daemon, mock_client):
+        """start_lease raises → no execute/complete."""
+        mock_runner = AsyncMock()
+        daemon._task_runner = mock_runner
+        mock_client.claim_lease.return_value = {"claim_token": "ct-1"}
+        mock_client.start_lease.side_effect = ConnectionError("fail")
+
+        await daemon._execute_task({"lease_id": "l-1"})
+        mock_runner.execute_task.assert_not_awaited()
+        mock_client.complete_lease.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_complete_failure_logged(self, daemon, mock_client):
+        """complete_lease raises → logged but no crash."""
+        from sillyhub_daemon.task_runner import TaskResult
+
+        mock_runner = AsyncMock()
+        mock_runner.execute_task.return_value = TaskResult(success=True, output="ok")
+        daemon._task_runner = mock_runner
+        mock_client.claim_lease.return_value = {"claim_token": "ct-1"}
+        mock_client.start_lease.return_value = {"status": "started"}
+        mock_client.complete_lease.side_effect = ConnectionError("fail")
+
+        # Should not raise
+        await daemon._execute_task({"lease_id": "l-1"})
 
 
 # ---------------------------------------------------------------------------
