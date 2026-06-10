@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
-from app.core.auth_deps import get_current_user
+from app.core.auth_deps import get_current_user, require_platform_admin
 from app.core.db import get_session
 from app.core.logging import get_logger
-from app.core.security import password_hasher
 from app.modules.auth.model import User
 from app.modules.settings.model import PlatformSetting
 from app.modules.settings.schema import (
+    AuditLogRead,
+    ResetPasswordRequest,
+    RevokeAllResponse,
     SettingRead,
     SettingsBulkRead,
     SettingsUpdateRequest,
@@ -23,14 +25,18 @@ from app.modules.settings.schema import (
     UserCreateRequest,
     UserListResponse,
     UserRead,
+    UserSessionRead,
     UserUpdateRequest,
+    UserWorkspaceRead,
 )
+from app.modules.settings.service import UserService
 
 log = get_logger(__name__)
 router = APIRouter(tags=["settings"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
+AdminUser = Annotated[User, Depends(require_platform_admin)]
 
 
 # ── Platform settings ──────────────────────────────────────────────────
@@ -84,28 +90,25 @@ async def update_settings(
 @router.get("/users", response_model=UserListResponse)
 async def list_users(
     session: SessionDep,
-    _user: CurrentUser,
+    user: AdminUser,
+    q: str | None = Query(None),
     status_filter: str | None = Query(None, alias="status"),
-    limit: int = Query(50, ge=1, le=200),
+    role: str | None = Query(None),
+    sort: str = Query("created_at"),
+    order: str = Query("desc"),
+    limit: int = Query(20, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> UserListResponse:
-    base = select(User).where(col(User.deleted_at).is_(None))
-    if status_filter:
-        base = base.where(col(User.status) == status_filter)
-
-    total_q = select(func.count()).select_from(base.subquery())
-    total = (await session.execute(total_q)).scalar() or 0
-
-    rows = (
-        (
-            await session.execute(
-                base.order_by(col(User.created_at).desc()).limit(limit).offset(offset)
-            )
-        )
-        .scalars()
-        .all()
+    svc = UserService(session, actor_id=user.id)
+    rows, total = await svc.list_users(
+        q=q,
+        status=status_filter,
+        role=role,
+        sort=sort,
+        order=order,
+        limit=limit,
+        offset=offset,
     )
-
     return UserListResponse(
         items=[UserRead.model_validate(u) for u in rows],
         total=total,
@@ -116,27 +119,15 @@ async def list_users(
 async def create_user(
     payload: UserCreateRequest,
     session: SessionDep,
-    _user: CurrentUser,
+    user: AdminUser,
 ) -> User:
-    import uuid as _uuid
-    from datetime import UTC, datetime
-
-    pw_hash = password_hasher.hash(payload.password)
-    new_user = User(
-        id=_uuid.uuid4(),
-        email=payload.email.lower().strip(),
-        password_hash=pw_hash,
-        display_name=payload.display_name or payload.email.split("@", 1)[0],
-        status="active",
+    svc = UserService(session, actor_id=user.id)
+    return await svc.create_user(
+        email=payload.email,
+        password=payload.password,
+        display_name=payload.display_name,
         is_platform_admin=payload.is_platform_admin,
-        created_at=datetime.now(UTC),
-        updated_at=datetime.now(UTC),
     )
-    session.add(new_user)
-    await session.commit()
-    await session.refresh(new_user)
-    log.info("settings.user_created", email=new_user.email, user_id=str(new_user.id))
-    return new_user
 
 
 @router.patch("/users/{user_id}", response_model=UserRead)
@@ -144,39 +135,94 @@ async def update_user(
     user_id: str,
     payload: UserUpdateRequest,
     session: SessionDep,
-    _user: CurrentUser,
+    user: AdminUser,
 ) -> User:
-    from datetime import UTC, datetime
-
-    target = await session.get(User, user_id)
-    if target is None or target.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    if payload.display_name is not None:
-        target.display_name = payload.display_name
-    if payload.is_platform_admin is not None:
-        target.is_platform_admin = payload.is_platform_admin
-    if payload.status is not None:
-        target.status = payload.status
-    target.updated_at = datetime.now(UTC)
-    session.add(target)
-    await session.commit()
-    await session.refresh(target)
-    return target
+    svc = UserService(session, actor_id=user.id)
+    return await svc.update_user(
+        uuid.UUID(user_id),
+        display_name=payload.display_name,
+        is_platform_admin=payload.is_platform_admin,
+        status=payload.status,
+    )
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: str,
     session: SessionDep,
-    _user: CurrentUser,
+    user: AdminUser,
 ) -> None:
-    from datetime import UTC, datetime
+    svc = UserService(session, actor_id=user.id)
+    await svc.delete_user(uuid.UUID(user_id))
 
-    target = await session.get(User, user_id)
-    if target is None:
-        return
-    target.deleted_at = datetime.now(UTC)
-    target.status = "deleted"
-    session.add(target)
-    await session.commit()
+
+# ── User detail endpoints ──────────────────────────────────────────────
+
+
+@router.get("/users/{user_id}/sessions", response_model=list[UserSessionRead])
+async def list_user_sessions(
+    user_id: str,
+    session: SessionDep,
+    _user: AdminUser,
+) -> list[UserSessionRead]:
+    svc = UserService(session, actor_id=_user.id)
+    rows = await svc.list_sessions(uuid.UUID(user_id))
+    return [UserSessionRead.model_validate(s) for s in rows]
+
+
+@router.delete("/users/{user_id}/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_user_session(
+    user_id: str,
+    session_id: str,
+    session: SessionDep,
+    _user: AdminUser,
+) -> None:
+    svc = UserService(session, actor_id=_user.id)
+    await svc.revoke_session(uuid.UUID(user_id), uuid.UUID(session_id))
+
+
+@router.post("/users/{user_id}/sessions/revoke-all", response_model=RevokeAllResponse)
+async def revoke_all_user_sessions(
+    user_id: str,
+    session: SessionDep,
+    _user: AdminUser,
+) -> RevokeAllResponse:
+    svc = UserService(session, actor_id=_user.id)
+    count = await svc.revoke_all_sessions(uuid.UUID(user_id))
+    return RevokeAllResponse(revoked_count=count)
+
+
+@router.get("/users/{user_id}/audit", response_model=list[AuditLogRead])
+async def list_user_audit(
+    user_id: str,
+    session: SessionDep,
+    _user: AdminUser,
+) -> list[AuditLogRead]:
+    svc = UserService(session, actor_id=_user.id)
+    rows = await svc.list_audit_logs(uuid.UUID(user_id))
+    return [AuditLogRead.model_validate(a) for a in rows]
+
+
+@router.get("/users/{user_id}/workspaces", response_model=list[UserWorkspaceRead])
+async def list_user_workspaces(
+    user_id: str,
+    session: SessionDep,
+    _user: AdminUser,
+) -> list[UserWorkspaceRead]:
+    svc = UserService(session, actor_id=_user.id)
+    return await svc.list_workspaces(uuid.UUID(user_id))
+
+
+@router.post("/users/{user_id}/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_user_password(
+    user_id: str,
+    payload: ResetPasswordRequest,
+    session: SessionDep,
+    _user: AdminUser,
+) -> None:
+    svc = UserService(session, actor_id=_user.id)
+    await svc.reset_password(
+        uuid.UUID(user_id),
+        payload.new_password,
+        force_change_on_next_login=payload.force_change_on_next_login,
+    )
