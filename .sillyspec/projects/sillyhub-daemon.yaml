@@ -1,0 +1,9 @@
+name: sillyhub-daemon
+path: ./sillyhub-daemon
+status: active
+role: 本地守护进程 - Python 3.12 + httpx + websockets + Click CLI
+repo: https://github.com/qinyi/multi-agent-platform
+relations:
+  - target: backend
+    type: connects_to
+    description: daemon 通过 HTTP/WebSocket 与 backend 通信

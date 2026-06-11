@@ -289,6 +289,7 @@ class JsonRpcBackend(AgentBackend):
         timeout: float = 0,
         model: str = "",
         session_id: str = "",
+        **kwargs,
     ) -> TaskResult:
         """Execute agent via JSON-RPC protocol.
 

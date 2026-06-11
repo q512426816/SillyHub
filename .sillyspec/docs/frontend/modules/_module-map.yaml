@@ -1,184 +1,916 @@
 ---
 author: qinyi
 created_at: 2026-06-03T20:35:00+08:00
+updated_at: 2026-06-10T16:45:00+08:00
 ---
 
 schema_version: 1
 project: frontend
-source_commit: e91d708
-generated_at: 2026-06-03 14:14:00
+source_commit: c97bad5
+generated_at: 2026-06-10 16:45:00
 generator: sillyspec-scan
 
 modules:
-  pages:
+  # ─── App Router Pages (top-level) ──────────────────────────────────
+
+  app-pages:
     status: active
+    doc: modules/app-pages.md
     paths:
-      - src/app/**
-    tags:
-      - pages
-      - routes
-      - app-router
-      - nextjs
-    aliases:
-      - 路由
-      - 页面
+      - "frontend/src/app/page.tsx"
+      - "frontend/src/app/(auth)/login/page.tsx"
+      - "frontend/src/app/(dashboard)/workspaces/page.tsx"
+      - "frontend/src/app/(dashboard)/runtimes/page.tsx"
+      - "frontend/src/app/(dashboard)/settings/page.tsx"
+      - "frontend/src/app/(dashboard)/settings/git-identities/page.tsx"
+    tags: [pages, nextjs-app-router, routes]
+    aliases: [pages, 路由, 页面]
     entrypoints:
-      - page.tsx (each route)
-    main_symbols: []
-    depends_on:
-      - api
-      - components
-      - stores
+      - HomePage          # / (root)
+      - LoginPage         # /login
+      - WorkspacesPage    # /workspaces
+      - RuntimesPage      # /runtimes
+      - SettingsPage      # /settings
+      - GitIdentitiesPage # /settings/git-identities
+    main_symbols:
+      - HomePage
+      - LoginPage
+      - WorkspacesPage
+      - RuntimesPage
+      - SettingsPage
+      - GitIdentitiesPage
+    depends_on: [components-ui, components-shared, lib-api, stores-session]
     used_by: []
     needs_review: false
     concerns: []
     review_reasons: []
 
-  components:
+  # ─── App Router Pages (workspace-scoped) ───────────────────────────
+
+  app-workspace-pages:
     status: active
+    doc: modules/app-workspace-pages.md
     paths:
-      - src/components/**
-    tags:
-      - components
-      - ui
-      - shadcn
-    aliases:
-      - 组件
+      - "frontend/src/app/(dashboard)/workspaces/[id]/**/*.tsx"
+    tags: [pages, nextjs-app-router, workspace-scoped]
+    aliases: [workspace-pages]
+    entrypoints:
+      - WorkspaceDetailPage # /workspaces/[id]
+      - ChangesPage         # /workspaces/[id]/changes
+      - ChangeDetailPage    # /workspaces/[id]/changes/[cid]
+      - TaskBoardPage       # /workspaces/[id]/changes/[cid]/tasks
+      - TaskDetailPage      # /workspaces/[id]/changes/[cid]/tasks/[tid]
+      - CreateChangePage    # /workspaces/[id]/create-change
+      - AgentPage           # /workspaces/[id]/agent
+      - ComponentsPage      # /workspaces/[id]/components
+      - TopologyPage        # /workspaces/[id]/components/topology
+      - ScanDocsPage        # /workspaces/[id]/scan-docs
+      - KnowledgePage       # /workspaces/[id]/knowledge
+      - RuntimePage         # /workspaces/[id]/runtime
+      - ReleasesPage        # /workspaces/[id]/releases
+      - ApprovalsPage       # /workspaces/[id]/approvals
+      - AuditPage           # /workspaces/[id]/audit
+      - IncidentsPage       # /workspaces/[id]/incidents
+      - IncidentDetailPage  # /workspaces/[id]/incidents/[iid]
+    main_symbols:
+      - WorkspaceDetailPage
+      - ChangesPage
+      - ChangeDetailPage
+      - TaskBoardPage
+      - TaskDetailPage
+      - CreateChangePage
+      - AgentPage
+      - ComponentsPage
+      - TopologyPage
+      - ScanDocsPage
+      - KnowledgePage
+      - RuntimePage
+      - ReleasesPage
+      - ApprovalsPage
+      - AuditPage
+      - IncidentsPage
+      - IncidentDetailPage
+    depends_on: [components-ui, components-shared, lib-api, stores-session, lib-agent-stream, components-agent-log, lib-changes, lib-tasks, lib-workflow, lib-components, lib-scan-docs, lib-knowledge, lib-runtime, lib-releases, lib-incidents, lib-approvals, lib-audit]
+    used_by: []
+    needs_review: false
+    concerns:
+      - 大部分 UI 内联在页面组件中，页面代码较长
+    review_reasons: []
+
+  # ─── App Layouts ───────────────────────────────────────────────────
+
+  app-layouts:
+    status: active
+    doc: modules/app-layouts.md
+    paths:
+      - "frontend/src/app/layout.tsx"
+      - "frontend/src/app/(dashboard)/layout.tsx"
+    tags: [layouts, nextjs-app-router]
+    aliases: [layouts]
+    entrypoints:
+      - RootLayout
+      - DashboardLayout
+    main_symbols:
+      - RootLayout
+      - DashboardLayout
+    depends_on: [components-shared, stores-session]
+    used_by: [app-pages, app-workspace-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── API Route Handlers ────────────────────────────────────────────
+
+  app-api-routes:
+    status: active
+    doc: modules/app-api-routes.md
+    paths:
+      - "frontend/src/app/api/**/route.ts"
+    tags: [api-routes, nextjs-app-router, sse-proxy]
+    aliases: [api-routes]
+    entrypoints:
+      - GET # /api/workspaces/[workspaceId]/agent/runs/[runId]/stream
+    main_symbols:
+      - GET
+    depends_on: []
+    used_by: [lib-agent-stream]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Shared Components ─────────────────────────────────────────────
+
+  components-shared:
+    status: active
+    doc: modules/components-shared.md
+    paths:
+      - "frontend/src/components/app-shell.tsx"
+      - "frontend/src/components/health-card.tsx"
+      - "frontend/src/components/workspace-card.tsx"
+      - "frontend/src/components/workspace-scan-dialog.tsx"
+      - "frontend/src/components/component-detail-drawer.tsx"
+      - "frontend/src/components/sillyspec-step-progress.tsx"
+    tags: [components, shared-ui]
+    aliases: [shared-components, 组件]
     entrypoints: []
     main_symbols:
       - AppShell
-      - WorkspaceCard
       - HealthCard
-      - ComponentDetailDrawer
+      - WorkspaceCard
       - WorkspaceScanDialog
-      - SillyspecStepProgress
-    depends_on:
-      - api
-      - styles
-    used_by:
-      - pages
+      - ComponentDetailDrawer
+      - SillySpecStepProgress
+    depends_on: [components-ui, stores-session]
+    used_by: [app-pages, app-workspace-pages, app-layouts]
     needs_review: false
-    concerns:
-      - 组件数量偏少，大部分 UI 内联在页面中
+    concerns: []
     review_reasons: []
 
-  api:
+  # ─── UI Primitive Components ───────────────────────────────────────
+
+  components-ui:
     status: active
+    doc: modules/components-ui.md
     paths:
-      - src/lib/*.ts
-    tags:
-      - api
-      - client
-      - fetch
-      - types
-    aliases:
-      - api-client
-      - lib
-    entrypoints:
-      - apiFetch
-      - getApiBaseUrl
+      - "frontend/src/components/ui/*.tsx"
+    tags: [components, ui-primitives, design-system, shadcn]
+    aliases: [ui-components]
+    entrypoints: []
+    main_symbols:
+      - Button
+      - Input
+      - Badge
+    depends_on: [lib-utils]
+    used_by: [components-shared, components-agent-log, app-pages, app-workspace-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Agent Log Viewer ──────────────────────────────────────────────
+
+  components-agent-log:
+    status: active
+    doc: modules/components-agent-log.md
+    paths:
+      - "frontend/src/components/agent-log-viewer.tsx"
+      - "frontend/src/components/agent-log/*.ts"
+      - "frontend/src/components/agent-log/*.tsx"
+    tags: [components, agent, log-viewer]
+    aliases: [agent-log]
+    entrypoints: []
+    main_symbols:
+      - AgentLogViewer
+      - AgentLogRow
+      - normalizeLogs
+      - parseToolCallContent
+      - parseScanCheckOutput
+      - isPendingReplied
+      - isThinkingContent
+      - filterToolProtocolLines
+      - ToolCallPreview
+      - ToolResultCard
+      - CopyButton
+      - CollapsibleSection
+    depends_on: [components-ui]
+    used_by: [app-workspace-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── API Client Core ───────────────────────────────────────────────
+
+  lib-api:
+    status: active
+    doc: modules/lib-api.md
+    paths:
+      - "frontend/src/lib/api.ts"
+      - "frontend/src/lib/utils.ts"
+    tags: [api, fetch, http-client, core]
+    aliases: [api-client, lib, api]
+    entrypoints: []
     main_symbols:
       - apiFetch
       - getApiBaseUrl
+      - getDirectApiBaseUrl
       - ApiError
-      - login
-      - listWorkspaces
-      - submitAgentRunInput
-      - AgentRunStreamClient
-      - listChanges
-      - listTasks
-      - bootstrapSpecWorkspace
-    depends_on:
-      - stores
+      - cn
+    depends_on: [stores-session]
     used_by:
-      - pages
-      - components
+      - lib-auth
+      - lib-workspaces
+      - lib-changes
+      - lib-agent
+      - lib-components
+      - lib-scan-docs
+      - lib-knowledge
+      - lib-tasks
+      - lib-workflow
+      - lib-releases
+      - lib-incidents
+      - lib-approvals
+      - lib-audit
+      - lib-health
+      - lib-settings
+      - lib-git-identities
+      - lib-git-gateway
+      - lib-tool-gateway
+      - lib-worktree
+      - lib-runtime
+      - lib-spec-workspaces
+      - lib-archive
+      - lib-change-writer
+      - lib-daemon
+      - app-pages
+      - app-workspace-pages
     needs_review: false
     concerns: []
     review_reasons: []
 
-  stores:
+  # ─── Auth Client ───────────────────────────────────────────────────
+
+  lib-auth:
     status: active
+    doc: modules/lib-auth.md
     paths:
-      - src/stores/**
-    tags:
-      - zustand
-      - state
-      - session
-      - persist
-    aliases:
-      - 状态管理
+      - "frontend/src/lib/auth.ts"
+    tags: [api, auth, login]
+    aliases: [auth]
     entrypoints: []
     main_symbols:
-      - useAuthStore
-    depends_on:
-      - api
-    used_by:
-      - pages
-      - components
+      - login
+      - refreshTokens
+      - logout
+    depends_on: [lib-api, stores-session]
+    used_by: [app-pages]
     needs_review: false
     concerns: []
     review_reasons: []
 
-  styles:
+  # ─── Workspaces Client ─────────────────────────────────────────────
+
+  lib-workspaces:
     status: active
+    doc: modules/lib-workspaces.md
     paths:
-      - src/app/globals.css
-    tags:
-      - css
-      - tailwind
-      - theme
-      - variables
-    aliases:
-      - 样式
+      - "frontend/src/lib/workspaces.ts"
+    tags: [api, workspaces]
+    aliases: [workspaces-api]
     entrypoints: []
-    main_symbols: []
+    main_symbols:
+      - scanWorkspace
+      - scanGenerate
+      - activateWorkspace
+      - listWorkspaces
+      - createWorkspace
+      - rescanWorkspace
+      - reparseWorkspace
+      - deleteWorkspace
+      - getWorkspace
+      - getWorkspaceRelations
+      - createRelation
+      - deleteRelation
+      - getTopology
+    depends_on: [lib-api]
+    used_by: [app-pages, app-workspace-pages, lib-components]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Changes Client ────────────────────────────────────────────────
+
+  lib-changes:
+    status: active
+    doc: modules/lib-changes.md
+    paths:
+      - "frontend/src/lib/changes.ts"
+    tags: [api, changes, sillyspec]
+    aliases: [changes-api]
+    entrypoints: []
+    main_symbols:
+      - listChanges
+      - getChange
+      - getChangeDocuments
+      - getChangeDocumentContent
+      - reparseChanges
+      - getChangeApproval
+      - approveChange
+      - rejectChange
+      - updateChangeProgress
+      - createChange
+      - executeChange
+      - transitionChange
+      - submitFeedback
+      - checkArchiveGate
+      - getAgentStatus
+      - triggerDispatch
+      - proposalReview
+      - planReview
+      - humanTest
+      - archiveConfirm
+    depends_on: [lib-api]
+    used_by: [app-workspace-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Agent Client ──────────────────────────────────────────────────
+
+  lib-agent:
+    status: active
+    doc: modules/lib-agent.md
+    paths:
+      - "frontend/src/lib/agent.ts"
+    tags: [api, agent]
+    aliases: [agent-api]
+    entrypoints: []
+    main_symbols:
+      - createAgentRun
+      - getAgentRun
+      - listAgentRuns
+      - getAgentRunLogs
+      - streamAgentRunLogs
+      - killAgentRun
+      - submitAgentRunInput
+      - listDaemonRuntimes
+    depends_on: [lib-api, stores-session]
+    used_by: [lib-agent-stream, lib-spec-workspaces, app-workspace-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Agent Stream Client ───────────────────────────────────────────
+
+  lib-agent-stream:
+    status: active
+    doc: modules/lib-agent-stream.md
+    paths:
+      - "frontend/src/lib/agent-stream.ts"
+    tags: [api, agent, sse, streaming]
+    aliases: [agent-stream]
+    entrypoints: []
+    main_symbols:
+      - AgentRunStreamClient
+    depends_on: [lib-api, lib-agent, stores-session]
+    used_by: [app-workspace-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Components Client ─────────────────────────────────────────────
+
+  lib-components:
+    status: active
+    doc: modules/lib-components.md
+    paths:
+      - "frontend/src/lib/components.ts"
+    tags: [api, components]
+    aliases: [components-api]
+    entrypoints: []
+    main_symbols:
+      - listComponents
+      - getComponent
+      - reparseComponents
+      - getTopology
+    depends_on: [lib-api, lib-workspaces]
+    used_by: [app-workspace-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Scan Docs Client ──────────────────────────────────────────────
+
+  lib-scan-docs:
+    status: active
+    doc: modules/lib-scan-docs.md
+    paths:
+      - "frontend/src/lib/scan-docs.ts"
+    tags: [api, scan-docs]
+    aliases: [scan-docs-api]
+    entrypoints: []
+    main_symbols:
+      - listScanDocs
+      - getScanDoc
+      - reparseScanDocs
+    depends_on: [lib-api]
+    used_by: [app-workspace-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Knowledge Client ──────────────────────────────────────────────
+
+  lib-knowledge:
+    status: active
+    doc: modules/lib-knowledge.md
+    paths:
+      - "frontend/src/lib/knowledge.ts"
+    tags: [api, knowledge]
+    aliases: [knowledge-api]
+    entrypoints: []
+    main_symbols:
+      - listKnowledge
+      - getKnowledge
+      - listQuicklog
+      - getQuicklog
+    depends_on: [lib-api]
+    used_by: [app-workspace-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Tasks Client ──────────────────────────────────────────────────
+
+  lib-tasks:
+    status: active
+    doc: modules/lib-tasks.md
+    paths:
+      - "frontend/src/lib/tasks.ts"
+    tags: [api, tasks]
+    aliases: [tasks-api]
+    entrypoints: []
+    main_symbols:
+      - listTasks
+      - getTask
+      - getTaskBoard
+      - reparseTasks
+    depends_on: [lib-api]
+    used_by: [app-workspace-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Workflow Client ───────────────────────────────────────────────
+
+  lib-workflow:
+    status: active
+    doc: modules/lib-workflow.md
+    paths:
+      - "frontend/src/lib/workflow.ts"
+    tags: [api, workflow, transitions]
+    aliases: [workflow-api]
+    entrypoints: []
+    main_symbols:
+      - transitionChange
+      - submitReview
+      - listReviews
+      - transitionTask
+    depends_on: [lib-api]
+    used_by: [app-workspace-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Releases Client ───────────────────────────────────────────────
+
+  lib-releases:
+    status: active
+    doc: modules/lib-releases.md
+    paths:
+      - "frontend/src/lib/releases.ts"
+    tags: [api, releases]
+    aliases: [releases-api]
+    entrypoints: []
+    main_symbols:
+      - listReleases
+      - createRelease
+      - approveRelease
+      - listApprovals
+      - deployRelease
+      - promoteRelease
+      - rollbackRelease
+    depends_on: [lib-api]
+    used_by: [app-workspace-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Incidents Client ──────────────────────────────────────────────
+
+  lib-incidents:
+    status: active
+    doc: modules/lib-incidents.md
+    paths:
+      - "frontend/src/lib/incidents.ts"
+    tags: [api, incidents]
+    aliases: [incidents-api]
+    entrypoints: []
+    main_symbols:
+      - listIncidents
+      - createIncident
+      - getIncident
+      - updateIncident
+      - createPostmortem
+      - getPostmortem
+    depends_on: [lib-api]
+    used_by: [app-workspace-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Approvals Client ──────────────────────────────────────────────
+
+  lib-approvals:
+    status: active
+    doc: modules/lib-approvals.md
+    paths:
+      - "frontend/src/lib/approvals.ts"
+    tags: [api, approvals]
+    aliases: [approvals-api]
+    entrypoints: []
+    main_symbols:
+      - listPendingApprovals
+      - listApprovalHistory
+      - approveRequest
+      - rejectRequest
+    depends_on: [lib-api]
+    used_by: [app-workspace-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Audit Client ──────────────────────────────────────────────────
+
+  lib-audit:
+    status: active
+    doc: modules/lib-audit.md
+    paths:
+      - "frontend/src/lib/audit.ts"
+    tags: [api, audit]
+    aliases: [audit-api]
+    entrypoints: []
+    main_symbols:
+      - listAuditLogs
+    depends_on: [lib-api]
+    used_by: [app-workspace-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Health Client ─────────────────────────────────────────────────
+
+  lib-health:
+    status: active
+    doc: modules/lib-health.md
+    paths:
+      - "frontend/src/lib/health.ts"
+    tags: [api, health]
+    aliases: [health-api]
+    entrypoints: []
+    main_symbols:
+      - getHealth
+    depends_on: [lib-api]
+    used_by: [app-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Settings Client ───────────────────────────────────────────────
+
+  lib-settings:
+    status: active
+    doc: modules/lib-settings.md
+    paths:
+      - "frontend/src/lib/settings.ts"
+    tags: [api, settings, users]
+    aliases: [settings-api]
+    entrypoints: []
+    main_symbols:
+      - listSettings
+      - updateSettings
+      - listUsers
+      - createUser
+      - updateUser
+      - deleteUser
+    depends_on: [lib-api]
+    used_by: [app-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Git Identities Client ─────────────────────────────────────────
+
+  lib-git-identities:
+    status: active
+    doc: modules/lib-git-identities.md
+    paths:
+      - "frontend/src/lib/git-identities.ts"
+    tags: [api, git, identities]
+    aliases: [git-identities-api]
+    entrypoints: []
+    main_symbols:
+      - listGitIdentities
+      - createGitIdentity
+      - getGitIdentity
+      - revokeGitIdentity
+      - checkGitAccess
+    depends_on: [lib-api]
+    used_by: [app-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Git Gateway Client ────────────────────────────────────────────
+
+  lib-git-gateway:
+    status: active
+    doc: modules/lib-git-gateway.md
+    paths:
+      - "frontend/src/lib/git-gateway.ts"
+    tags: [api, git, gateway]
+    aliases: [git-gateway-api]
+    entrypoints: []
+    main_symbols:
+      - executeGitOperation
+    depends_on: [lib-api]
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Tool Gateway Client ───────────────────────────────────────────
+
+  lib-tool-gateway:
+    status: active
+    doc: modules/lib-tool-gateway.md
+    paths:
+      - "frontend/src/lib/tool-gateway.ts"
+    tags: [api, tools, gateway]
+    aliases: [tool-gateway-api]
+    entrypoints: []
+    main_symbols:
+      - executeTool
+    depends_on: [lib-api]
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Worktree Client ───────────────────────────────────────────────
+
+  lib-worktree:
+    status: active
+    doc: modules/lib-worktree.md
+    paths:
+      - "frontend/src/lib/worktree.ts"
+    tags: [api, worktree]
+    aliases: [worktree-api]
+    entrypoints: []
+    main_symbols:
+      - acquireWorktree
+      - listWorktrees
+      - getWorktree
+      - releaseWorktree
+      - extendWorktree
+    depends_on: [lib-api]
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Runtime Client ────────────────────────────────────────────────
+
+  lib-runtime:
+    status: active
+    doc: modules/lib-runtime.md
+    paths:
+      - "frontend/src/lib/runtime.ts"
+    tags: [api, runtime]
+    aliases: [runtime-api]
+    entrypoints: []
+    main_symbols:
+      - getRuntimeProgress
+      - getRuntimeUserInputsRaw
+      - getRuntimeArtifacts
+      - getRuntimeArtifactContent
+    depends_on: [lib-api]
+    used_by: [app-workspace-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Spec Workspaces Client ────────────────────────────────────────
+
+  lib-spec-workspaces:
+    status: active
+    doc: modules/lib-spec-workspaces.md
+    paths:
+      - "frontend/src/lib/spec-workspaces.ts"
+    tags: [api, spec-workspaces, sillyspec]
+    aliases: [spec-workspaces-api]
+    entrypoints: []
+    main_symbols:
+      - getSpecWorkspace
+      - importSpecWorkspace
+      - syncSpecWorkspace
+      - bootstrapSpecWorkspace
+      - updateSpecWorkspace
+      - listSpecConflicts
+      - resolveSpecConflict
+    depends_on: [lib-api, lib-agent]
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Archive Client ────────────────────────────────────────────────
+
+  lib-archive:
+    status: active
+    doc: modules/lib-archive.md
+    paths:
+      - "frontend/src/lib/archive.ts"
+    tags: [api, archive]
+    aliases: [archive-api]
+    entrypoints: []
+    main_symbols:
+      - archiveChange
+      - distillChange
+    depends_on: [lib-api]
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Change Writer Client ──────────────────────────────────────────
+
+  lib-change-writer:
+    status: active
+    doc: modules/lib-change-writer.md
+    paths:
+      - "frontend/src/lib/change-writer.ts"
+    tags: [api, change-writer]
+    aliases: [change-writer-api]
+    entrypoints: []
+    main_symbols:
+      - createChange
+      - generateDocs
+      - batchGenerateDocuments
+    depends_on: [lib-api]
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Daemon Client ─────────────────────────────────────────────────
+
+  lib-daemon:
+    status: active
+    doc: modules/lib-daemon.md
+    paths:
+      - "frontend/src/lib/daemon.ts"
+    tags: [api, daemon]
+    aliases: [daemon-api]
+    entrypoints: []
+    main_symbols:
+      - listDaemonRuntimes
+      - getDaemonRuntime
+      - quickChat
+      - getQuickChatResult
+      - isVersionBelow
+    depends_on: [lib-api]
+    used_by: [app-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Session Store ─────────────────────────────────────────────────
+
+  stores-session:
+    status: active
+    doc: modules/stores-session.md
+    paths:
+      - "frontend/src/stores/session.ts"
+    tags: [store, zustand, auth, session, persist]
+    aliases: [session-store, 状态管理, stores]
+    entrypoints: []
+    main_symbols:
+      - useSession
+      - SessionUser
+      - SessionTokens
     depends_on: []
     used_by:
-      - pages
-      - components
+      - lib-api
+      - lib-auth
+      - lib-agent
+      - lib-agent-stream
+      - app-layouts
+      - components-shared
+      - app-pages
+      - app-workspace-pages
     needs_review: false
     concerns: []
     review_reasons: []
 
-  test:
+  # ─── Utilities ─────────────────────────────────────────────────────
+
+  lib-utils:
     status: active
+    doc: modules/lib-utils.md
     paths:
-      - src/test/**
-      - src/lib/__tests__/**
-    tags:
-      - test
-      - vitest
-      - testing-library
-    aliases:
-      - 测试
-    entrypoints:
-      - setup.ts
+      - "frontend/src/lib/utils.ts"
+    tags: [utils, tailwind, clsx]
+    aliases: [utils]
+    entrypoints: []
+    main_symbols:
+      - cn
+    depends_on: []
+    used_by: [components-ui, app-workspace-pages]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Test Infrastructure ───────────────────────────────────────────
+
+  test-utils:
+    status: active
+    doc: modules/test-utils.md
+    paths:
+      - "frontend/src/test/setup.ts"
+      - "frontend/src/lib/__tests__/*.test.ts"
+    tags: [testing, vitest]
+    aliases: [tests, 测试, test]
+    entrypoints: []
     main_symbols: []
-    depends_on:
-      - api
+    depends_on: [lib-api, lib-agent, lib-spec-workspaces]
     used_by: []
     needs_review: false
     concerns:
-      - 测试覆盖极低（仅 3 个测试文件）
+      - 测试覆盖极低（仅 3 个测试文件: api.test.ts, agent.test.ts, spec-workspaces.test.ts）
     review_reasons: []
+
+  # ─── Styles ────────────────────────────────────────────────────────
+
+  styles:
+    status: active
+    doc: modules/styles.md
+    paths:
+      - "frontend/src/app/globals.css"
+    tags: [css, tailwind, theme, variables]
+    aliases: [styles, 样式]
+    entrypoints: []
+    main_symbols: []
+    depends_on: []
+    used_by: [app-layouts]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  # ─── Build Config ──────────────────────────────────────────────────
 
   build:
     status: active
+    doc: modules/build.md
     paths:
-      - package.json
-      - next.config.mjs
-      - tailwind.config.ts
-      - tsconfig.json
-      - vitest.config.ts
-      - postcss.config.mjs
-      - Dockerfile
-      - components.json
-    tags:
-      - build
-      - config
-    aliases:
-      - project-config
+      - "frontend/package.json"
+      - "frontend/next.config.mjs"
+      - "frontend/tailwind.config.ts"
+      - "frontend/tsconfig.json"
+      - "frontend/vitest.config.ts"
+      - "frontend/postcss.config.mjs"
+      - "frontend/Dockerfile"
+      - "frontend/components.json"
+    tags: [build, config]
+    aliases: [project-config, build]
     entrypoints: []
     main_symbols: []
     depends_on: []

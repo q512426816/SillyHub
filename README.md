@@ -1,210 +1,209 @@
-# 多智能体协作管理平台 — SillySpec Native 搭建文档包 v2
+# SillyHub — 多智能体协作管理平台
 
-这是一套按 **SillySpec 真实变更包结构** 组织的平台搭建文档，不再使用理想化的 `/requirements、/plans、/tasks` 目录。
+SillyHub 将 [SillySpec](https://github.com/nicepkg/sillyspec) 规范驱动开发方法论产品化，提供多用户、多项目、多 Agent 的全生命周期管理系统。
 
-核心定位：
+通过 Web 界面管理工作空间（Git 仓库），编排 AI Agent（首发 Claude Code），跟踪结构化变更规格，协调团队协作。
 
-> 平台不是重新定义 SillySpec，而是把 `.sillyspec` 的真实目录、变更包、项目组组件、运行态、知识库和 Git 执行边界，产品化成多人、多项目、多 Agent 的全生命周期执行管理系统。
+## 核心功能
 
-## 入口
+- **工作空间管理** — 注册 Git 仓库为工作空间，扫描 `.sillyspec` 目录结构
+- **变更生命周期** — proposal → design → plan → tasks → execute → verify 完整流程
+- **AI Agent 编排** — 运行 Claude Code Agent 执行任务，实时 SSE 流式输出
+- **Git Worktree 隔离** — 每个变更在独立 worktree 中执行，互不干扰
+- **多用户认证** — JWT + bcrypt + RBAC 权限控制
+- **Git 凭据网关** — 共享服务器部署下的多用户 Git 凭据隔离
+- **本地 Daemon** — 轻量守护进程，负责宿主机 Agent 检测和任务执行
+- **拓扑可视化** — 基于流程图的组件拓扑交互视图
+- **知识库 / 事件 / 发布** — 内置知识库管理、事件追踪、发布工作流
 
-```text
-2026-05-25-multi-agent-platform-bootstrap-v2/
-  MASTER.md
-  proposal.md
-  requirements.md
-  design.md
-  plan.md
-  tasks.md
-  verification.md
-  tasks/
-  references/
+## 技术栈
+
+| 层 | 技术 |
+|---|---|
+| 后端 | Python 3.12 + FastAPI + SQLModel + Alembic + Redis |
+| 前端 | Next.js 14 (App Router) + TypeScript + shadcn/ui + TanStack Query + Zustand |
+| 数据库 | PostgreSQL 16 |
+| 缓存 | Redis 7 |
+| Agent | Claude Code CLI |
+| Daemon | Python，WebSocket 协议通信 |
+| 部署 | Docker Compose |
+
+## 架构概览
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│   Frontend   │────▶│    Backend   │────▶│  PostgreSQL  │
+│   Next.js    │     │   FastAPI    │     │              │
+└──────────────┘     └──────┬───────┘     └──────────────┘
+       │                    │
+       │ SSE (proxied)      │ WebSocket
+       │                    ▼
+       │             ┌──────────────┐
+       │             │   Daemon     │
+       │             │ (per host)   │
+       │             └──────┬───────┘
+       │                    │ subprocess
+       │                    ▼
+       │             ┌──────────────┐
+       └─────────────│  AI Agents   │
+                     │ Claude Code  │
+                     └──────────────┘
 ```
 
-## 本版重点修正
+## 快速开始
 
-1. `.sillyspec/projects/*.yaml` 不是项目列表，而是 **项目组成员 / 关联项目组件配置**。
-2. 一个 `.sillyspec` 根目录是一个 **Workspace**。
-3. `changes/change` 和 `changes/archive` 是 **Workspace 级变更管理**，一个变更可以影响多个组件。
-4. `docs/{component}/scan` 是 **组件级扫描认知**。
-5. `.runtime` 是本地运行态，不是长期事实源。
-6. 新增 **Git Identity、Credential、Worktree Lease、Git Tool Gateway**，解决单服务器部署下多人只能控制自己的 Git 的问题。
+### 前置工具
 
-## 推荐阅读顺序
-
-1. `MASTER.md`
-2. `proposal.md`
-3. `requirements.md`
-4. `design.md`
-5. `references/02-lifecycle-from-requirement-to-deployment.md`
-6. `references/04-git-identity-and-worktree-isolation.md`
-7. `references/15-authentication.md`
-8. `references/16-rbac.md`
-9. `references/17-db-schema.md`
-10. `references/18-error-recovery.md`
-11. `plan.md`
-12. `tasks.md` + `tasks/task-01.md`（task 模板）
-
-## 技术栈（已锁定）
-
-```text
-后端：FastAPI (Python 3.12) + SQLModel + Alembic
-前端：Next.js 14 App Router + TypeScript + shadcn/ui + TanStack Query + Zustand
-数据库：PostgreSQL 16（开启 pgvector / RLS）
-缓存：Redis 7
-Git：libgit2 / subprocess + 自研 Git Tool Gateway
-凭据加密：libsodium secretbox (PyNaCl)，主密钥外部注入
-监控：OpenTelemetry SDK
-部署：Docker Compose 单机起步
-Agent：subprocess + 自研 Adapter，首发 Claude Code
-```
-
-## 开工前必跑：V0 Spikes
-
-```text
-spikes/
-  01-git-isolation/    # 多用户 Git 凭据隔离（最关键）
-  02-workspace-scan/   # SillySpec 解析可用性
-  03-claude-code/      # Claude Code 子进程可控性
-```
-
-**任一 spike 不通过，V1 必须暂停**。详见 `spikes/README.md` 与 `spikes/REPORT.md`。
-
-当前状态：**3/3 PASS（2026-05-25）**，V1 前置门禁已解除。
-
-## 30 分钟跑通本地开发环境
-
-> 目标：在一台干净机器上，30 分钟内启动 `前端 → 后端 → Postgres → Redis` 全链路，访问 `localhost:3000` 看到"后端健康: ok"。
-
-### 0. 前置工具
-
-| 工具 | 版本 | 用途 |
-| ---- | ---- | ---- |
-| Docker Desktop / Engine | ≥ 24 | 起 Postgres + Redis（及完整容器化部署） |
-| Python | 3.12 | 后端 |
-| [`uv`](https://github.com/astral-sh/uv) | ≥ 0.4 | 替代 pip/poetry，速度快 |
-| Node.js | 20 | 前端 |
-| pnpm | 9 | 前端包管理 |
+| 工具 | 版本 | 说明 |
+|---|---|---|
+| Docker Desktop | ≥ 24 | 运行 Postgres + Redis（及完整容器化部署） |
+| Python | 3.12 | 后端运行时 |
+| [uv](https://github.com/astral-sh/uv) | ≥ 0.4 | Python 包管理（替代 pip/poetry） |
+| Node.js | 20 | 前端运行时 |
+| pnpm | 9 | 前端包管理（`corepack enable pnpm`） |
 | Git | ≥ 2.40 | 必须 |
 
-Windows 用户：用 Git Bash 或 PowerShell 7 都可；Makefile 在 Git Bash 下兼容性更好。
-
-### 1. 克隆并起依赖
+### 1. 克隆项目
 
 ```bash
 git clone <your-fork-url> multi-agent-platform
 cd multi-agent-platform
-
-cp deploy/.env.example deploy/.env       # 至少把 SECRET_KEY 改成随机串
-make dev-up                              # 启动 Postgres + Redis（仅依赖）
 ```
 
-### 2. 起后端
+### 2. 启动基础设施
+
+```bash
+make dev-up    # docker compose 启动 Postgres + Redis
+```
+
+### 3. 启动后端
 
 ```bash
 cd backend
-cp .env.example .env                     # DATABASE_URL/REDIS_URL 与 deploy/.env 对齐
-uv sync --all-extras                     # 装依赖
-uv run alembic upgrade head              # 建 _health_probe 表
+cp .env.example .env           # DATABASE_URL / REDIS_URL 与 deploy/.env 对齐
+uv sync --all-extras
+uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --port 8000
-
-# 验证
-curl http://localhost:8000/api/health
-# => {"status":"ok","db":"ok","redis":"ok",...}
 ```
 
-### 3. 起前端
+验证：`curl http://localhost:8000/api/health`
+
+### 4. 启动前端
 
 ```bash
 cd frontend
-cp .env.example .env.local               # 默认指向 http://localhost:8000
+cp .env.example .env.local     # 默认指向 http://localhost:8000
 pnpm install
-pnpm dev                                 # http://localhost:3000
+pnpm dev                       # http://localhost:3000
 ```
 
-打开 `http://localhost:3000`，看到"平台健康"卡片上有绿色 "后端健康: ok" 徽章即成功。
+打开 `http://localhost:3000`，登录后即可使用。
 
-### 4. 全链路容器化（可选，对应 AC-01）
+### 5. 全链路容器化部署（可选）
 
 ```bash
-make up                                  # docker compose -f deploy/docker-compose.yml up --build
-# 浏览器访问 http://localhost:3000
+cp deploy/.env.example deploy/.env   # 至少修改 SECRET_KEY
+make up                              # 构建并启动全部服务
+# 访问 http://localhost:3000
 make down
 ```
 
-### 5. 测试 / 校验
+## 项目结构
+
+```
+multi-agent-platform/
+├── backend/                  # FastAPI 后端
+│   ├── app/
+│   │   ├── core/             # 配置、数据库、Redis、认证、加密、日志
+│   │   └── modules/          # 24 个业务模块（vertical slice）
+│   ├── alembic/              # 数据库迁移
+│   ├── tests/                # 测试
+│   └── Dockerfile
+├── frontend/                 # Next.js 14 前端
+│   ├── src/
+│   │   ├── app/              # App Router 页面
+│   │   ├── components/       # 共享 UI 组件
+│   │   ├── lib/              # API 客户端（33 个模块）
+│   │   └── stores/           # Zustand 状态管理
+│   └── Dockerfile
+├── sillyhub-daemon/          # 本地守护进程包
+│   └── sillyhub_daemon/
+│       ├── daemon.py         # 主守护进程
+│       ├── agent_detector.py # Agent 检测（12 种运行时）
+│       ├── task_runner.py    # 任务执行器
+│       └── client.py         # WebSocket 客户端
+├── deploy/                   # Docker Compose + 环境变量模板
+├── .sillyspec/               # SillySpec 工作区元数据
+│   ├── changes/              # 变更包（活跃 + 归档）
+│   ├── docs/                 # 项目文档
+│   └── knowledge/            # 知识库索引
+└── Makefile                  # 开发工作流命令
+```
+
+## 开发指南
+
+### 常用命令
 
 ```bash
-make test          # 后端 pytest + 前端 vitest
-make lint          # 后端 ruff/mypy + 前端 eslint
+make help                     # 查看所有可用命令
+
+# 后端
+make backend-install          # 安装依赖
+make backend-run              # 启动开发服务器（热重载）
+make backend-test             # 运行测试（pytest，覆盖率 ≥ 60%）
+make backend-lint             # ruff + mypy 检查
+make backend-format           # ruff 格式化
+make backend-migrate          # 运行数据库迁移
+
+# 前端
+make frontend-install         # 安装依赖
+make frontend-run             # 启动开发服务器
+make frontend-test            # 运行测试
+make frontend-lint            # ESLint 检查
+make frontend-typecheck       # TypeScript 类型检查
+make frontend-build           # 构建生产包
+
+# 全量
+make test                     # 后端 + 前端测试
+make lint                     # 后端 + 前端 lint
 ```
 
-## 仓库结构
+### 添加后端业务模块
 
-```text
-multi-agent-platform/
-├─ backend/                              # FastAPI app（详见 backend/README.md）
-├─ frontend/                             # Next.js 14 app
-├─ deploy/                               # docker-compose 文件 + .env 模板
-├─ .github/workflows/                    # CI（backend-ci / frontend-ci）
-├─ spikes/                               # V0 风险验证脚本 + REPORT.md
-├─ 2026-05-25-multi-agent-platform-bootstrap-v2/    # SillySpec 当前变更包
-│  ├─ MASTER.md / proposal / requirements / design / plan / tasks / verification
-│  ├─ tasks/                             # 16 个 task 详单
-│  └─ references/                        # 18 篇参考文档
-├─ .sillyspec/                           # SillySpec 工作区元数据
-├─ Makefile / .editorconfig / .gitignore
-└─ README.md
-```
-
-## 如何贡献一个新 task
-
-1. 在 `2026-05-25-...-v2/tasks/` 新建 `task-NN.md`，**严格按 `task-01.md` 的 1~6 节模板**：
-   - 第 1 节"目标" ≤ 5 行，必须列"不在范围"
-   - 第 2 节"输入"列具体文件路径
-   - 第 3 节"产出"必须有：文件清单 / API / DB schema / 命令 / 配置
-   - 第 4 节"验收"每条可点击验证（不要写"功能可演示"这种）
-   - 第 5 节"风险"必须列具体对策
-   - 第 6 节"DoD"用 checkbox
-2. 在 `tasks.md` 的总表里追加一行（priority / phase / estimated_hours / depends_on）。
-3. 提 PR，至少一人 Review 后合入。
-
-## 如何加一个新业务模块（backend）
-
-后端按"vertical slice"组织 —— 每个业务功能是一个独立目录：
+后端按 vertical slice 组织，每个模块一个独立目录：
 
 ```
 backend/app/modules/<feature>/
-├─ __init__.py
-├─ router.py        # APIRouter
-├─ schema.py        # Pydantic 输入/输出模型
-├─ service.py       # 业务逻辑（无 HTTP / DB session 注入由 router 完成）
-├─ models.py        # SQLModel 表（如有）
-└─ tests/           # 紧挨业务代码（也可统一放 backend/tests/）
+├── router.py        # APIRouter — 路由定义
+├── schema.py        # Pydantic 输入/输出模型
+├── service.py       # 业务逻辑（不依赖 HTTP / DB session）
+├── models.py        # SQLModel 表定义（如有）
+└── tests/           # 测试
 ```
 
-落到代码上需要做的 5 件事：
+步骤：
 
-1. 新增 `app/modules/<feature>/` 目录，至少写 `router.py + schema.py`
-2. 在 `app/main.py` 里 `app.include_router(your_router, prefix="/api")`
-3. 如有新表：
-   - 在 `app/modules/<feature>/models.py` 写 SQLModel 类（继承 `BaseModel`）
-   - `cd backend && uv run alembic revision --autogenerate -m "create xxx"`
-   - 检查生成的 migration（**永远不要直接提交未审查的 autogenerate**）
-4. 在 `backend/tests/` 加测试，覆盖率不低于既有水位
-5. 跑 `make backend-lint backend-test` 全绿后再提 PR
+1. 创建 `app/modules/<feature>/` 目录
+2. 在 `app/main.py` 中 `app.include_router(router, prefix="/api")`
+3. 如需新表：写 SQLModel → `uv run alembic revision --autogenerate` → 审查迁移文件
+4. 补充测试，确保覆盖率 ≥ 60%
+5. `make backend-lint backend-test` 全绿后提 PR
 
-## 如何加一个新前端页面
+### 添加前端页面
 
-1. 在 `frontend/src/app/<route>/page.tsx` 新建路由（App Router 约定）
-2. 共享 UI 组件放 `src/components/`，shadcn 组件统一放 `src/components/ui/`
-3. API 调用统一走 `src/lib/api.ts`，禁止直接 `fetch`
+1. 在 `frontend/src/app/<route>/page.tsx` 新建路由
+2. 共享 UI 组件放 `src/components/`，shadcn 组件放 `src/components/ui/`
+3. API 调用统一走 `src/lib/api.ts`
 4. 全局状态用 Zustand（`src/stores/`），服务端状态用 TanStack Query
-5. 跑 `make frontend-lint frontend-typecheck frontend-test frontend-build`
+5. `make frontend-lint frontend-typecheck frontend-test frontend-build` 全绿后提 PR
 
 ## 常见问题
 
-- **`asyncpg` 在 Windows 装不上**：用 docker compose 起 Postgres，本地后端连容器即可；或临时 fallback `psycopg[binary]`。
-- **`pnpm: command not found`**：装 Node 20 后 `corepack enable pnpm`。
-- **`make` 在 Windows 没有**：装 Git for Windows 后用 Git Bash；或直接照搬 Makefile 里的命令手跑。
-- **/api/health 返回 `db: down`**：检查 `DATABASE_URL` 是否指向已 `make dev-up` 的 Postgres，以及是否跑过 `alembic upgrade head`。
+- **`asyncpg` 在 Windows 装不上** — 用 Docker 起 Postgres，本地后端连容器即可
+- **`pnpm: command not found`** — `corepack enable pnpm`
+- **`make` 在 Windows 没有** — 使用 Git Bash，或直接照搬 Makefile 里的命令
+- **`/api/health` 返回 `db: down`** — 检查 `DATABASE_URL` 是否指向已启动的 Postgres，确认已运行 `alembic upgrade head`
+
+## License
+
+Private

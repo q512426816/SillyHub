@@ -29,3 +29,8 @@
 状态：已完成
 文件：backend/app/modules/agent/adapters/claude_code.py、backend/app/modules/agent/service.py、backend/app/modules/agent/tests/test_adapter_isolation.py
 摘要：3 项修复：(1) on_log 改用独立 session，隔离主 session 的 run 对象，避免 session.commit 干扰 metadata 赋值；(2) _extract_result_metadata 参考 Multica 新增 modelUsage 解析，三级优先：modelUsage → usage → assistant 累积；(3) 添加 extracted_metadata + scan_run_pre_commit 诊断日志追踪 metadata 提取和持久化。新增 3 个测试，26/26 通过。已部署。
+
+## ql-20260611-001-c7a3 | 2026-06-11 08:48:19 | Quick Chat 多轮对话支持：session_id 持久化 + --resume 上下文延续
+状态：已完成
+摘要：Quick Chat 多轮对话：后端 prev_run_id → session_id 查询 → resume_session_id 传入 daemon → Claude CLI --resume；前端 lastRunId 状态跟踪；daemon stream_json backend 支持 --resume 参数；端到端测试通过。
+文件：backend/app/main.py, backend/app/modules/daemon/, frontend/src/app/(dashboard)/runtimes/page.tsx, frontend/src/lib/daemon.ts, sillyhub-daemon/sillyhub_daemon/backends/stream_json.py, sillyhub-daemon/sillyhub_daemon/daemon.py, sillyhub-daemon/sillyhub_daemon/task_runner.py

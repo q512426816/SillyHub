@@ -1,111 +1,107 @@
 ---
-author: scan-agent
-created_at: "2026-06-03"
+author: qinyi
+created_at: 2026-06-10T00:00:00
 ---
 
-# SillyHub Frontend — 技术关注点
+# Frontend 代码债务 / 风险
 
-## 性能
+## 🔴 严重
 
-### Bundle 大小
-- **依赖较多但合理**: Next.js、React、Zustand、TanStack Query、Zod、XYFlow 等均为按需加载
-- **未使用 tree-shaking 的隐患**: `@tanstack/react-query` 和 `zod` 已安装但大部分页面未实际使用，会增加 bundle 体积
-- **Markdown 渲染器**: `@uiw/react-markdown-preview` 较重，仅在部分页面使用，需确认动态导入
-- **XYFlow**: `@xyflow/react` 仅用于拓扑图页面，应使用 `next/dynamic` 懒加载
+### 1. 未使用 React Query — 数据获取缺少缓存和状态管理
 
-### SSR vs CSR
-- **根 layout.tsx**: 服务端组件（设置 metadata、导入全局 CSS）
-- **Dashboard Layout**: `"use client"` — 客户端组件（认证检查需要浏览器环境）
-- **几乎所有页面**: `"use client"` — 纯 CSR，无 SSR 数据预取
-- **首页 page.tsx**: 服务端组件（仅渲染静态链接 + HealthCard）
-- **影响**: 首次加载需等 JS 执行后才能获取数据，对 SEO 和首屏速度有一定影响
+虽然 `package.json` 中安装了 `@tanstack/react-query`，但全部数据获取通过 `useEffect` + `useState` 手动管理。这导致：
+- 页面切换后重新进入时重复请求
+- 无请求去重，同一数据可能并发请求多次
+- 无后台刷新 (stale-while-revalidate)
+- Loading/error 状态在每个组件中重复处理
 
-### 数据获取效率
-- **无缓存策略**: 所有页面使用 `useState + useEffect` 手动获取数据，无缓存、无去重、无后台刷新
-- **TanStack Query 未使用**: 已安装但未集成，缺少请求去重、缓存失效、乐观更新等能力
-- **轮询模式**: HealthCard 使用 `setInterval(5000)` 轮询，可考虑改用 TanStack Query 的 refetchInterval
+**涉及**: 所有 23 个页面组件
 
-### 大页面性能
-- `WorkspaceDetailPage` 单文件 **570+ 行**，包含大量 state 变量（~15 个 useState）和复杂逻辑，可能影响组件渲染性能
+### 2. 全部 CSR — 未利用 Next.js SSR/RSC 能力
 
-## 安全
+所有页面组件均标记 `"use client"`，导致：
+- 首屏渲染依赖客户端 JS 加载完成
+- SEO 完全不可用（虽然作为管理平台影响较小）
+- 无法利用 Server Components 减少客户端 JS bundle
+- 无 `loading.tsx` / `error.tsx` 内置加载和错误状态
 
-### XSS（跨站脚本）
-- **React 默认防护**: JSX 自动转义，`dangerouslySetInnerHTML` 未使用（除可能的 Markdown 预览）
-- **Markdown 预览**: `@uiw/react-markdown-preview` 内置 sanitize，但需确认配置
-- **API 响应**: `apiFetch` 返回原始 JSON，不做 sanitize，依赖 React 渲染时自动转义
-- **SSE 消息**: Agent 日志通过 `event.content` 直接渲染，如果包含 HTML 可能存在风险
+**涉及**: `src/app/` 下所有页面
 
-### CSRF（跨站请求伪造）
-- **Token 认证**: 使用 Bearer Token（非 Cookie），天然免疫 CSRF
-- **localStorage 持久化**: Token 存储在 localStorage，非 HttpOnly Cookie，存在 XSS 窃取风险
-- **无 CSRF Token**: 未实现 CSRF Token（因为使用 Bearer Token 方案，不需要）
+### 3. 测试覆盖极低 — 仅 3 个 API 单元测试
 
-### 认证安全
-- **Token 存储**: localStorage（非 HttpOnly Cookie），XSS 攻击可窃取 token
-- **Token 刷新**: 自动刷新机制良好，但刷新失败时直接清空跳转，无 grace period
-- **密码默认值**: 登录页有硬编码的默认 email/password（`admin@sillyhub.local` / `admin12345`），仅开发用，生产环境应移除
+23 个页面组件、20+ 个 API 客户端模块、1 个 SSE 流客户端、1 个 Zustand store — 仅 `src/lib/__tests__/` 下 3 个测试文件。无组件测试、无集成测试、无 E2E 测试。
 
-### 其他安全关注
-- **NEXT_PUBLIC_API_BASE_URL**: 公开环境变量暴露后端地址
-- **poweredByHeader**: 已禁用（`poweredByHeader: false`），好实践
-- **x-request-id**: 良好的请求追踪机制
+**涉及**: 整个前端项目
 
-## 技术债务
+## 🟡 中等
 
-### 高优先级
+### 4. 样式拼接不一致 — cn() 定义但未统一使用
 
-1. **TanStack Query 未使用**
-   - 已安装 `@tanstack/react-query` 但所有页面仍手动管理数据获取
-   - 建议: 逐步迁移到 `useQuery`/`useMutation`，获得缓存、去重、后台刷新等能力
-   - 影响: 数据获取效率、用户体验
+`src/lib/utils.ts` 定义了 `cn()` 工具函数 (clsx + tailwind-merge)，但大部分组件直接使用模板字符串拼接 Tailwind 类名。这可能导致：
+- 类名冲突无法自动合并
+- 条件样式逻辑分散，维护成本高
 
-2. **测试覆盖率极低**
-   - 22 个 API 模块中仅 3 个有测试
-   - 无组件测试、无页面测试、无 E2E 测试
-   - 建议: 优先覆盖认证流程、核心 API 客户端
+**涉及**: `app-shell.tsx`, `workspace-card.tsx` 等组件
 
-3. **组件层兼容 shim**
-   - `components.ts` 是旧 API 的兼容层，将 `Workspace` 映射为旧 `Component` 类型
-   - 注释中明确标注为迁移过渡，应尽快完成迁移并删除
+### 5. 页面组件过于庞大 — 缺少抽象
 
-### 中优先级
+多个页面组件（如 workspaces/[id]/page.tsx, changes/page.tsx）内联了大量业务逻辑（数据获取、状态管理、UI 渲染），未拆分为自定义 hook 和子组件。单个文件可能超过 200 行。
 
-4. **Zod 未使用**
-   - 已安装但未在前端做任何表单校验或运行时校验
-   - 建议: 在表单提交时使用 Zod 做客户端校验，减少无效请求
+**涉及**: `src/app/(dashboard)/workspaces/[id]/` 下的页面
 
-5. **大型页面文件**
-   - `WorkspaceDetailPage` 570+ 行，逻辑复杂
-   - 建议: 拆分为子组件（SpecWorkspacePanel、BootstrapPanel、OverviewCards）
+### 6. API 客户端类型与后端手动同步
 
-6. **无 Vitest 配置文件**
-   - 依赖默认配置，缺少 jsdom environment 显式声明、路径别名等
-   - 建议: 添加 `vitest.config.ts`
+前端 `src/lib/*.ts` 中的接口类型（如 `Workspace`, `ChangeRead`）是手动定义的，未从后端 schema 自动生成。前后端类型不同步可能导致运行时错误。
 
-### 低优先级
+**涉及**: `src/lib/` 下所有 API 文件
 
-7. **类型重复**
-   - `changes.ts` 和 `workflow.ts` 都定义了 `transitionChange` 函数
-   - `TransitionResponse` 类型在两个文件中有不同定义
-   - 建议: 统一到一处
+### 7. 认证 Token 存储在 localStorage
 
-8. **无错误边界**
-   - 无 React Error Boundary 包裹路由
-   - 组件渲染错误会导致白屏
+Zustand persist 默认使用 localStorage 存储 access_token 和 refresh_token。虽然简化了实现，但存在 XSS 攻击风险。
 
-9. **无 Loading UI 骆架**
-   - 每个页面自己实现 loading 状态（显示 "加载中…"）
-   - 未利用 Next.js App Router 的 `loading.tsx` 约定
+**涉及**: `src/stores/session.ts`
 
-10. **路径别名未在 Vitest 配置**
-    - 测试中的 `@/lib/api` 等导入依赖 tsconfig paths
-    - 当前能工作但不够明确
+## 🟢 轻微
 
-## 架构演进建议
+### 8. Emoji 作为导航图标
 
-1. **引入 TanStack Query** — 替换手动 useState/useEffect，统一数据获取层
-2. **增加测试** — 目标: 核心 API 客户端 >80% 覆盖，关键页面有渲染测试
-3. **拆分大页面** — WorkspaceDetailPage、ChangeDetailPage 等拆为子组件
-4. **添加 Error Boundary** — 全局 + 路由级别
-5. **清理技术债务** — 移除未使用的依赖或实际集成它们
+`AppShell` 侧边栏使用 emoji 字符作为图标（如 `\u{1F3E0}` 用于 Home），跨平台渲染不一致。
+
+**涉及**: `src/components/app-shell.tsx`
+
+### 9. 未使用 Zod 进行运行时校验
+
+安装了 `zod` 但未在代码中使用。前端接收后端数据后直接 `as T` 类型断言，无运行时校验。
+
+**涉及**: `src/lib/api.ts` 及所有调用方
+
+### 10. 无全局错误边界
+
+缺少 Next.js `error.tsx` 错误边界和 React Error Boundary，未捕获的异常会导致白屏。
+
+**涉及**: `src/app/` 全局
+
+### 11. 未使用 TypeScript 严格索引访问的潜力
+
+配置了 `noUncheckedIndexedAccess: true`，但部分代码仍使用 `any` 类型（如 `capabilities: Record<string, any>`）。
+
+**涉及**: `src/lib/daemon.ts` 等
+
+## 代码质量
+
+- **Lint**: ESLint (eslint-config-next)，运行 `pnpm lint`
+- **类型检查**: TypeScript strict mode (`tsc --noEmit`)
+- **格式化**: 无统一 formatter（无 Prettier 配置）
+- **提交检查**: 无 pre-commit hook
+- **Bundle 分析**: 未配置
+- **代码复杂度**: 多个页面组件超过 200 行，缺少自定义 hook 抽象
+
+## 依赖风险
+
+| 依赖 | 风险 | 说明 |
+|------|------|------|
+| `@tanstack/react-query` | 🟡 死依赖 | 已安装未使用，增加 bundle 大小 |
+| `puppeteer` | 🟡 死依赖 | 已安装未使用，体积大 (~300MB) |
+| `@playwright/test` | 🟡 死依赖 | 已安装无测试文件 |
+| `next@14.2.5` | 🟢 版本锁 | App Router 稳定版，无重大 bug |
+| `zustand@4.5` | 🟢 版本锁 | 成熟稳定，API 变更风险低 |

@@ -115,6 +115,7 @@ ChangeService.transition() -> 状态机校验 -> 更新 stage
 
 - ql-20260604-001-progress | 移除 progress.json fallback，改用 SQLite sillyspec.db
 - ql-20260605-005-f2b8 | 修复 Agent Run metadata 持久化 + 参考 Multica 细化 token 采集（on_log 独立 session、modelUsage 解析）
+- ql-20260611-001-c7a3 | Quick Chat 多轮对话：prev_run_id → session_id 查询 → resume_session_id 传入 daemon
 
 ## 人工备注
 

@@ -80,10 +80,8 @@ class Daemon:
             logger.info("daemon.no_agents_detected")
         else:
             for agent in available_agents:
-                runtime_id = f"{self._runtime_id}--{agent.name}"
                 try:
-                    await self._client.register(
-                        runtime_id=runtime_id,
+                    resp = await self._client.register(
                         name=platform.node(),
                         provider=agent.name,
                         version=agent.version or "unknown",
@@ -97,11 +95,12 @@ class Daemon:
                             "bin_path": agent.bin_path,
                         },
                     )
-                    self._registered_runtimes[agent.name] = runtime_id
+                    server_runtime_id = resp.get("id", "")
+                    self._registered_runtimes[agent.name] = server_runtime_id
                     logger.info(
                         "daemon.registered provider=%s runtime_id=%s",
                         agent.name,
-                        runtime_id,
+                        server_runtime_id,
                     )
                 except Exception as exc:
                     logger.error(
@@ -167,8 +166,7 @@ class Daemon:
         while self._running:
             try:
                 await asyncio.sleep(self._config.heartbeat_interval)
-                all_ids = [self._runtime_id] + list(self._registered_runtimes.values())
-                for rid in all_ids:
+                for rid in self._registered_runtimes.values():
                     try:
                         await self._client.heartbeat(rid)
                     except Exception as exc:
@@ -183,15 +181,34 @@ class Daemon:
     # ── Poll loop ────────────────────────────────────────────────────────────
 
     async def _poll_loop(self) -> None:
-        """Poll for pending tasks every ``poll_interval`` seconds.
-
-        Currently a no-op placeholder — the server does not yet expose a
-        ``/tasks/pending`` endpoint.  Will be extended once that API lands.
-        """
+        """Poll for pending tasks via HTTP as fallback for WS push."""
         while self._running:
             try:
                 await asyncio.sleep(self._config.poll_interval)
-                logger.debug("daemon.poll")
+                if self._task_runner is None:
+                    continue
+                # Poll each registered runtime for pending leases
+                all_ids = list(self._registered_runtimes.values())
+                for rid in all_ids:
+                    try:
+                        pending = await self._client.get_pending_leases(rid)
+                        for task in pending:
+                            lease_id = task.get("lease_id")
+                            if lease_id:
+                                logger.info("daemon.poll_task lease_id=%s", lease_id)
+                                payload = {
+                                    "lease_id": lease_id,
+                                    "agent_run_id": task.get("agent_run_id"),
+                                    "runtime_id": rid,
+                                    "prompt": task.get("prompt", ""),
+                                    "provider": task.get("provider", ""),
+                                    "cmd_path": task.get("cmd_path", ""),
+                                }
+                                self._fire(self._execute_task(payload))
+                    except Exception as exc:
+                        logger.debug(
+                            "daemon.poll_runtime_failed rid=%s error=%s", rid, exc
+                        )
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -202,13 +219,18 @@ class Daemon:
     async def _ws_loop(self) -> None:
         """Maintain a WebSocket connection for real-time wake-up signals.
 
-        Automatically reconnects with a short delay on disconnection or error.
+        Uses ``open_timeout`` so the connect call never blocks the event loop
+        indefinitely.  If WS is unavailable, the HTTP poll loop still works.
         """
         ws_url = self._build_ws_url()
 
         while self._running:
             try:
-                async with websockets.connect(ws_url) as ws:
+                async with websockets.connect(
+                    ws_url,
+                    open_timeout=10,
+                    close_timeout=5,
+                ) as ws:
                     logger.info("daemon.ws_connected")
                     async for raw_msg in ws:
                         if not self._running:
@@ -224,9 +246,9 @@ class Daemon:
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                logger.warning("daemon.ws_disconnected error=%s", exc)
+                logger.warning("daemon.ws_connect_failed error=%s", exc)
                 if self._running:
-                    await asyncio.sleep(5)  # reconnect back-off
+                    await asyncio.sleep(10)  # reconnect back-off
 
     async def _handle_ws_message(self, msg: dict) -> None:
         """Dispatch an incoming WebSocket message by type."""
@@ -280,10 +302,12 @@ class Daemon:
             return
 
         # 3. Execute via TaskRunner
+        # claim_resp structure: {"lease_id", "claim_token", "payload": {...}, "lease_expires_at"}
+        exec_payload = claim_resp.get("payload", claim_resp)
         task_result = await self._task_runner.execute_task(
             lease_id=lease_id,
             claim_token=claim_token,
-            payload=claim_resp,
+            payload=exec_payload,
         )
 
         # 4. Complete the lease
@@ -300,6 +324,7 @@ class Daemon:
                     "insertions": task_result.insertions,
                     "deletions": task_result.deletions,
                     "duration_ms": task_result.duration_ms,
+                    "session_id": task_result.metadata.get("session_id", ""),
                 },
             )
             logger.info(

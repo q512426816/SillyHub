@@ -1,9 +1,35 @@
 # SillyHub 项目概述文档
 
-author: scan-agent
+author: qinyi
 created_at: 2026-06-03T12:00:06
 
-## 1. 项目简介
+## 项目简介
+
+SillyHub 是一个基于 SillySpec 规范驱动的多 Agent 协作平台。它提供了完整的工作区管理、变更管理、AI Agent 执行引擎和规范文档系统，旨在将软件工程流程中的规格编写、任务分解、代码实现和验证通过 AI Agent 自动化串联起来。
+
+项目名称：Multi-Agent Platform (SillyHub)
+项目类型：全栈 Web 应用（模块化单体架构）
+开源协议：私有项目
+
+## 技术栈
+
+### 后端
+- Python 3.12+ / FastAPI 0.115+ / SQLModel + SQLAlchemy 2.0 (async) / PostgreSQL 16 / Redis 7
+- 认证: JWT (python-jose) + bcrypt / 加密: NaCl / 迁移: Alembic
+- 代码质量: Ruff + Mypy / 测试: pytest + pytest-asyncio
+
+### 前端
+- Node 20+ / Next.js 14 (App Router) / React 18 / TypeScript 5.5 / Tailwind CSS 3.4
+- 状态管理: Zustand / 数据获取: useEffect + useState
+- 测试: Vitest + Testing Library + Playwright
+
+### Daemon
+- Python 3.12+ / httpx / websockets / Click CLI
+- 5 种通信协议后端，支持 12 种 Agent provider
+
+### 部署
+- Docker Compose (PostgreSQL 16 + Redis 7 + Backend + Frontend)
+- 本地开发: uvicorn (backend) + next dev (frontend)
 
 SillyHub 是一个基于 SillySpec 规范驱动的多 Agent 协作平台。它提供了完整的工作区管理、变更管理、AI Agent 执行引擎和规范文档系统，旨在将软件工程流程中的规格编写、任务分解、代码实现和验证通过 AI Agent 自动化串联起来。
 

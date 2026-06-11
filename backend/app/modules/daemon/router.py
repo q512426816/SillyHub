@@ -122,6 +122,7 @@ async def list_runtimes(
 ) -> list[DaemonRuntimeRead]:
     """List all daemon runtimes for the current user."""
     svc = DaemonService(session)
+    await svc.cleanup_stale_runtimes()
     runtimes = await svc.list_runtimes(user.id)
     return [DaemonRuntimeRead.model_validate(r) for r in runtimes]
 
@@ -142,9 +143,10 @@ async def claim_lease(
     """Claim a pending task lease for execution."""
     svc = DaemonService(session)
     lease, payload = await svc.claim_lease(lease_id, data.runtime_id)
+    meta = lease.metadata_ or {}
     return LeaseClaimResponse(
         lease_id=lease.id,
-        claim_token=(lease.metadata_ or {})["claim_token"],
+        claim_token=meta.get("claim_token", ""),
         payload=payload,
         lease_expires_at=lease.lease_expires_at,  # type: ignore[arg-type]
     )
@@ -352,3 +354,45 @@ async def daemon_websocket(
         log.exception("ws_unexpected_error", runtime_id=str(rid))
     finally:
         await hub.disconnect(rid)
+
+
+@router.get(
+    "/runtimes/{runtime_id}/pending-leases",
+    response_model=list[dict],
+)
+async def get_pending_leases(
+    runtime_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_user)],
+) -> list[dict]:
+    """Return all pending leases for a runtime (polled by daemon)."""
+    from sqlalchemy import text as sa_text
+
+    result = await session.execute(
+        sa_text(
+            """
+            SELECT l.id, l.agent_run_id, l.metadata, r.provider, r.capabilities
+            FROM daemon_task_leases l
+            JOIN daemon_runtimes r ON l.runtime_id = r.id
+            WHERE l.runtime_id = :rid AND l.status = 'pending'
+            ORDER BY l.created_at
+            """
+        ),
+        {"rid": runtime_id},
+    )
+    rows = result.mappings().all()
+    out = []
+    for row in rows:
+        caps = row["capabilities"] or {}
+        meta = row["metadata"] or {}
+        out.append(
+            {
+                "lease_id": str(row["id"]),
+                "agent_run_id": str(row["agent_run_id"]) if row["agent_run_id"] else None,
+                "prompt": meta.get("prompt", ""),
+                "provider": meta.get("provider") or row["provider"],
+                "cmd_path": caps.get("bin_path", ""),
+                "protocol": caps.get("protocol", ""),
+            }
+        )
+    return out

@@ -138,6 +138,17 @@ class TaskRunner:
             model = payload.get("model", "")
             session_id = payload.get("session_id", "")
 
+            logger.info(
+                "task_execute_params lease_id=%s provider=%s cmd_path=%s work_dir=%s prompt_len=%d",
+                lease_id,
+                provider,
+                cmd_path,
+                str(work_dir),
+                len(prompt),
+            )
+
+            resume_session_id = payload.get("resume_session_id", "")
+
             try:
                 backend_cls = get_backend(provider)
             except (ValueError, ImportError) as exc:
@@ -181,6 +192,7 @@ class TaskRunner:
                 timeout=timeout,
                 model=model,
                 session_id=session_id,
+                resume_session_id=resume_session_id,
                 on_event=on_event,
             )
 
@@ -208,6 +220,9 @@ class TaskRunner:
                 output=self._truncate(backend_result.output, self._MAX_OUTPUT),
                 error=self._truncate(backend_result.error, self._MAX_ERROR),
                 duration_ms=duration_ms,
+                metadata={"session_id": backend_result.session_id}
+                if backend_result.session_id
+                else {},
             )
 
             logger.info(

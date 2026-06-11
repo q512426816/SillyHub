@@ -25,6 +25,39 @@ export async function getDaemonRuntime(
   return apiFetch<DaemonRuntimeRead>(`/api/daemon/runtimes/${runtimeId}`);
 }
 
+export interface QuickChatResponse {
+  id: string;
+  agent_type: string;
+  status: string;
+}
+
+export async function quickChat(
+  prompt: string,
+  provider: string,
+  prevRunId?: string,
+): Promise<QuickChatResponse> {
+  let url = `/api/daemon-chat?prompt=${encodeURIComponent(prompt)}&provider=${encodeURIComponent(provider)}`;
+  if (prevRunId) {
+    url += `&prev_run_id=${encodeURIComponent(prevRunId)}`;
+  }
+  return apiFetch<QuickChatResponse>(url, { method: "POST" });
+}
+
+export interface QuickChatResult {
+  id: string;
+  status: string;
+  output_redacted: string | null;
+  agent_type: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export async function getQuickChatResult(
+  runId: string,
+): Promise<QuickChatResult> {
+  return apiFetch<QuickChatResult>(`/api/daemon-chat/${runId}`);
+}
+
 /* ---------- Provider display metadata ---------- */
 
 /** Provider display name, icon emoji, and Tailwind color classes. */

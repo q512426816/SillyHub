@@ -12,6 +12,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import col
 
 from app.core.errors import AppError
@@ -274,14 +275,16 @@ class DaemonService:
         now = datetime.now(UTC)
         claim_token = secrets.token_hex(32)
 
-        # Update lease
+        # Update lease — keep original runtime_id if already set
         lease.status = "claimed"
         lease.claimed_at = now
         lease.lease_expires_at = now + timedelta(seconds=60)
-        lease.runtime_id = runtime_id
-        metadata = lease.metadata_ or {}
+        if not lease.runtime_id:
+            lease.runtime_id = runtime_id
+        metadata = dict(lease.metadata_ or {})
         metadata["claim_token"] = claim_token
         lease.metadata_ = metadata
+        flag_modified(lease, "metadata_")
         lease.updated_at = now
         self._session.add(lease)
 
@@ -337,6 +340,22 @@ class DaemonService:
         payload["agent_type"] = agent_run.agent_type
         payload["change_id"] = str(agent_run.change_id) if agent_run.change_id else None
         payload["task_id"] = str(agent_run.task_id) if agent_run.task_id else None
+
+        # Propagate prompt from lease metadata (quick-chat scenario)
+        lease_meta = lease.metadata_ or {}
+        if lease_meta.get("prompt"):
+            payload["prompt"] = lease_meta["prompt"]
+        if lease_meta.get("provider"):
+            payload["provider"] = lease_meta["provider"]
+        if lease_meta.get("resume_session_id"):
+            payload["resume_session_id"] = lease_meta["resume_session_id"]
+
+        # Include runtime capabilities (cmd_path, bin_path, protocol)
+        runtime = await self._session.get(DaemonRuntime, lease.runtime_id)
+        if runtime is not None and runtime.capabilities:
+            caps = runtime.capabilities if isinstance(runtime.capabilities, dict) else {}
+            payload["cmd_path"] = caps.get("bin_path", "")
+            payload["protocol"] = caps.get("protocol", "")
 
         return payload
 
@@ -431,6 +450,19 @@ class DaemonService:
                 )
                 agent_run.finished_at = now
 
+                # Store agent output and error
+                if result.get("output"):
+                    agent_run.output_redacted = result["output"]
+                if result.get("error"):
+                    existing = agent_run.output_redacted or ""
+                    agent_run.output_redacted = (
+                        existing + ("\n" if existing else "") + result["error"]
+                    )
+                if result.get("duration_ms"):
+                    agent_run.duration_ms = result["duration_ms"]
+                if result.get("session_id"):
+                    agent_run.session_id = result["session_id"]
+
                 # Apply usage stats from result if present
                 stats = result.get("stats")
                 if stats and isinstance(stats, dict):
@@ -495,12 +527,13 @@ class DaemonService:
                     agent_run_id=str(lease.agent_run_id),
                     conflict_detail=exc.message,
                 )
-                metadata = lease.metadata_ or {}
+                metadata = dict(lease.metadata_ or {})
                 metadata["patch_conflict"] = {
                     "error": exc.message,
                     "details": exc.details,
                 }
                 lease.metadata_ = metadata
+                flag_modified(lease, "metadata_")
                 self._session.add(lease)
                 await self._session.commit()
                 await self._session.refresh(lease)

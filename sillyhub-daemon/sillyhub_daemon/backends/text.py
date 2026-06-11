@@ -117,6 +117,7 @@ class TextBackend(AgentBackend):
         timeout: float = 0,
         model: str = "",
         session_id: str = "",
+        **kwargs,
     ) -> TaskResult:
         """Execute agy CLI and return structured result."""
         import time as _time

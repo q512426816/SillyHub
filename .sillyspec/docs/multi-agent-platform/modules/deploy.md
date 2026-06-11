@@ -68,6 +68,10 @@ created_at: 2026-06-04T10:30:00+08:00
 5. **密钥管理**: .env.example 中的占位密钥不可用于生产，SECRET_KEY 和 SILLYSPEC_MASTER_KEY 必须替换
 6. **前端 API 地址**: `NEXT_PUBLIC_API_BASE_URL` 决定浏览器向哪里发请求，`INTERNAL_API_BASE_URL` 决定容器内 SSR 向哪里发请求
 
+## 变更索引
+
+- ql-20260611-001-c7a3 | Quick Chat 多轮对话：deploy 配置更新（env example、compose args）
+
 ### 同步检查模块
 - 修改端口/环境变量时需检查: `backend/app/main.py` (CORS), `frontend/next.config.js` (rewrites)
 - 修改挂载路径时需检查: `backend/app/modules/agent/scanner.py` (路径重写逻辑)

@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 
-本项目使用 SillySpec，文档驱动开发。
+本项目使用 SillySpec，文档驱动开发，合理使用 sillyspec 相关 skills。
 
 ## 硬性规则
 

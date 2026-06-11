@@ -1,71 +1,69 @@
 ---
 author: qinyi
-created_at: 2026-06-04T08:54+08:00
+created_at: 2026-06-10T17:00:05
 ---
 
-# 项目技术债务与风险关注点
+# 代码债务与风险 — multi-agent-platform
 
-## 🔴 高危关注点
+## 代码质量
 
-### 代码质量 - 已弃用组件仍在使用
-- **workflow/fsm.py**: ChangeFSM 标记为 deprecated，但仍被引用用于向后兼容
-  - 影响: 状态迁移逻辑已迁移至 `app.modules.change.model.StageEnum + TRANSITIONS`
-  - 风险: 混用新旧状态机可能导致不一致
-  - 建议: 设定弃用时间表，强制迁移到新状态机
+### 🔴 高严重度
 
-### 代码质量 - 未实现的关键功能
-- **spec_profile/provider.py**: 多处 TODO 标记未实现功能
-  - Line 76: actual discovery
-  - Line 86: actual loading
-  - Line 96: stage conflict detection
-  - Line 97: document conflict detection
-- **agent/coordinator.py**: start_sillyspec_run 和 run_until_complete 方法已标记 deprecated
-  - 影响: 核心协调器功能不完整，可能导致规范执行失败
+- **Agent service.py 过大**: `backend/app/modules/agent/service.py` 约 71KB，职责过重，包含 Agent Run 的全部业务逻辑。应拆分为多个服务类。
+- **前端页面组件过大**: `frontend/src/app/(dashboard)/settings/page.tsx` 约 23KB、`runtimes/page.tsx` 约 14KB，单个文件承担过多 UI 逻辑，应提取子组件。
+- **Claude Code Adapter 过大**: `backend/app/modules/agent/adapters/claude_code.py` 约 37KB，Agent 适配器包含大量协议解析逻辑。
 
-### 依赖风险 - 核心依赖锁定不足
-- **Claude Code CLI**: 外部进程依赖，版本未锁定在 pyproject.toml
-  - 风险: CLI 行为变化可能破坏 Agent 适配器兼容性
-- **libgit2 绑定**: Python Git 生态依赖（pygit2 等）版本兼容性复杂
-  - Windows 上 `asyncpg` 安装问题需要文档明确 fallback 方案
+### 🟡 中严重度
 
-## 🟡 中等关注点
+- **测试覆盖不均**: 后端覆盖率门槛仅 60%，前端组件测试几乎为空。Daemon 测试最好（17 个文件），但 agent/adapters 层只有 adapter_isolation 测试。
+- **跳过的测试**: `backend/app/modules/agent/tests/test_run_input_service.py.skip` 存在被跳过的测试文件，需要修复或移除。
+- **硬编码路径**: `deploy/docker-compose.yml` 中 `HOST_PATH_PREFIX` 默认值为 `C:/Users/qinyi/IdeaProjects`，需要用户手动修改。
+- **mypy 严格度不足**: `strict=false`，且 disable 了 9 个 error_code，类型安全性偏弱。
 
-### 代码质量 - 前端测试覆盖率低
-- 前端仅有 `api.test.ts` 一个测试文件，组件测试几乎为空
-- shadcn/ui 组件未在项目中建立测试约定
-- 建议: 优先覆盖核心业务组件（workspace 列表、change 详情、task 状态）
+### 🟢 低严重度
 
-### 代码质量 - 异常处理一致性
-- Ruff 配置中 BLE001（捕获裸 Exception）被忽略
-- 代码中大量 `except Exception` 可能隐藏具体错误类型
-- 建议: 定义领域特定异常类（已有 AppError 基类），规范异常捕获
+- **Ruff ignore 规则偏多**: 忽略了 14 条 lint 规则，部分合理（如 B008 FastAPI 模式），但应定期审视是否可以逐步收紧。
+- **前端 node_modules 提交风险**: pnpm-lock.yaml 存在但 `node_modules` 在根目录下，确保 `.gitignore` 正确配置。
 
-### 依赖风险 - 类型检查配置过于宽松
-- MyPy 配置中禁用了大量错误码（attr-defined, union-arg, assignment 等）
-- 降低了类型安全收益，可能埋下运行时错误
-- 建议: 逐步收紧禁用列表，从新模块开始启用严格模式
+## 依赖风险
 
-## 🟢 低优关注点
+### 🔴 高严重度
 
-### 代码质量 - 国际化与本地化
-- 项目大量使用中文注释和字符串，但 RUF001/002/003 被忽略
-- 未来如需支持英文界面，需要文案层重构
+- **Claude Code 版本锁定**: 后端 Dockerfile 硬编码 `claude-code@2.1.158` 和 `sillyspec@3.17.15`，升级需要重新构建镜像。版本不匹配可能导致协议变更失效。
+- **Anthropic API 代理**: 默认使用 `open.bigmodel.cn/api/anthropic` 作为 API 代理，如果代理服务不稳定或变更，整个 Agent 功能受影响。
 
-### 依赖风险 - 前端包管理器锁定
-- package.json 指定 pnpm@9.6.0，但未在 CI 中强制执行
-- 可能导致 npm/yarn 用户安装依赖失败
+### 🟡 中严重度
 
-### 代码质量 - 文档同步
-- README.md 和 .sillyspec 变更包存在内容重复
-- 两处维护成本高，容易不同步
-- 建议: README 仅保留快速启动，详细设计指向 sillyspec 文档
+- **uv.lock 与 pyproject.toml 同步**: 后端使用 `uv.lock` 但 Dockerfile 中使用 `uv pip install -e .` (无 lock)，注释说 "Lock-less install is acceptable for V1"，生产环境应改为 `uv sync --frozen`。
+- **PostgreSQL 版本**: 使用 16-alpine，需关注主要版本升级的兼容性。
+- **Redis 持久化**: AOF 模式已启用，但无备份策略，volume 丢失即数据丢失。
 
-## 依赖风险汇总
+### 🟢 低严重度
 
-| 依赖 | 风险等级 | 缓解措施 |
-|------|----------|----------|
-| Claude Code CLI | 高 | 锁定版本，接口适配层隔离 |
-| asyncpg (Windows) | 中 | 文档明确 psycopg[binary] fallback |
-| Pydantic v2 | 低 | 已锁定 >=2.8，API 稳定 |
-| Next.js 14 | 低 | App Router 已稳定，锁定 14.2.5 |
-| TanStack Query v5 | 低 | API 稳定，锁定 5.51.0 |
+- **Python 3.12**: 较新版本，部分第三方库兼容性需要关注。
+- **Next.js 14**: App Router 仍在快速发展中，升级可能带来 breaking changes。
+
+## 架构风险
+
+### 🟡 中严重度
+
+- **单 Agent Adapter**: 目前只有 `claude_code.py` 一个适配器，如果要支持其他 Agent (如 GPT Code Interpreter) 需要抽象更大的 Adapter 接口。
+- **Daemon 多协议复杂度**: 5 种协议后端 (json_rpc, jsonl, ndjson, stream_json, text) 增加了维护负担，每个后端都需要独立测试和维护。
+- **Host 路径映射**: 容器内外路径映射 (`HOST_PATH_PREFIX` / `CONTAINER_PATH_PREFIX`) 是潜在的故障点，尤其在跨平台场景。
+
+### 🟢 低严重度
+
+- **SillySpec 工作区数据**: spec 数据存储在 Docker volume 中，无导出/备份机制。
+- **Bootstrap Admin**: 明文密码在环境变量中，虽然只在初始化时使用，但仍然不理想。
+
+## 安全风险
+
+### 🟡 中严重度
+
+- **SECRET_KEY 默认值**: `.env.example` 中 SECRET_KEY 为 `change-me-to-a-random-48-char-string`，存在用户忘记修改的风险。
+- **CORS 配置**: 开发环境允许 `localhost:3000`，生产部署时需要严格限制。
+- **SCAN_DENIED_WRITE_PATHS**: Claude Code hook 依赖环境变量控制写入权限，如果变量未设置则不生效。
+
+### 🟢 低严重度
+
+- **JWT token 存储**: 前端将 access_token 存在 localStorage，存在 XSS 攻击风险。当前项目未上线，风险可控。

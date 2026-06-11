@@ -1,0 +1,230 @@
+schema_version: 1
+project: sillyhub-daemon
+source_commit: c97bad5
+generated_at: 2026-06-10 16:52:00
+generator: sillyspec-scan
+
+modules:
+  cli:
+    status: active
+    doc: modules/cli.md
+    paths: ["sillyhub-daemon/sillyhub_daemon/__main__.py"]
+    tags: [cli, entrypoint]
+    aliases: [__main__]
+    entrypoints: [cli, start, stop, status, logs]
+    main_symbols: [cli, start, stop, status, logs, _read_pid, _is_process_alive, _write_pid, _remove_pid]
+    depends_on: [config]
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  config:
+    status: active
+    doc: modules/config.md
+    paths: ["sillyhub-daemon/sillyhub_daemon/config.py"]
+    tags: [config, infra]
+    aliases: []
+    entrypoints: []
+    main_symbols: [DaemonConfig]
+    depends_on: []
+    used_by: [cli, daemon]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  protocol:
+    status: active
+    doc: modules/protocol.md
+    paths: ["sillyhub-daemon/sillyhub_daemon/protocol.py"]
+    tags: [protocol, constants]
+    aliases: []
+    entrypoints: []
+    main_symbols: [MSG_TASK_AVAILABLE, MSG_HEARTBEAT, MSG_REGISTER, MSG_HEARTBEAT_ACK, MSG_LEASE_CLAIM, MSG_LEASE_START, MSG_LEASE_COMPLETE, MSG_LEASE_MESSAGES, STATE_PENDING, STATE_RUNNING, STATE_COMPLETED, STATE_FAILED, STATE_CANCELLED]
+    depends_on: []
+    used_by: [daemon]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  client:
+    status: active
+    doc: modules/client.md
+    paths: ["sillyhub-daemon/sillyhub_daemon/client.py"]
+    tags: [http, api-client]
+    aliases: [hub-client]
+    entrypoints: []
+    main_symbols: [HubClient]
+    depends_on: []
+    used_by: [cli, daemon, task-runner]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  credential:
+    status: active
+    doc: modules/credential.md
+    paths: ["sillyhub-daemon/sillyhub_daemon/credential.py"]
+    tags: [security, credential]
+    aliases: [credential-manager]
+    entrypoints: []
+    main_symbols: [CredentialManager]
+    depends_on: []
+    used_by: [cli, task-runner]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  workspace:
+    status: active
+    doc: modules/workspace.md
+    paths: ["sillyhub-daemon/sillyhub_daemon/workspace.py"]
+    tags: [workspace, git]
+    aliases: [workspace-manager]
+    entrypoints: []
+    main_symbols: [WorkspaceManager, _on_rmtree_error, _parse_shortstat]
+    depends_on: []
+    used_by: [cli, task-runner]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  version:
+    status: active
+    doc: modules/version.md
+    paths: ["sillyhub-daemon/sillyhub_daemon/version.py"]
+    tags: [version, utility]
+    aliases: []
+    entrypoints: []
+    main_symbols: [parse_semver, format_semver, check_min_version]
+    depends_on: []
+    used_by: [agent-detector]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  agent-detector:
+    status: active
+    doc: modules/agent-detector.md
+    paths: ["sillyhub-daemon/sillyhub_daemon/agent_detector.py"]
+    tags: [detection, agent]
+    aliases: [detector]
+    entrypoints: []
+    main_symbols: [AgentDef, DetectedAgent, AgentInfo, AgentDetector]
+    depends_on: [version]
+    used_by: [daemon]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  task-runner:
+    status: active
+    doc: modules/task-runner.md
+    paths: ["sillyhub-daemon/sillyhub_daemon/task_runner.py"]
+    tags: [task, execution]
+    aliases: [runner]
+    entrypoints: []
+    main_symbols: [TaskResult, TaskRunner]
+    depends_on: [backends, client, credential, workspace]
+    used_by: [cli, daemon]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  daemon:
+    status: active
+    doc: modules/daemon.md
+    paths: ["sillyhub-daemon/sillyhub_daemon/daemon.py"]
+    tags: [daemon, websocket, core]
+    aliases: []
+    entrypoints: []
+    main_symbols: [Daemon]
+    depends_on: [agent-detector, client, config, protocol]
+    used_by: [cli]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  backends:
+    status: active
+    doc: modules/backends.md
+    paths: ["sillyhub-daemon/sillyhub_daemon/backends/__init__.py"]
+    tags: [backend, abstraction, factory]
+    aliases: [agent-backend]
+    entrypoints: []
+    main_symbols: [AgentEvent, TaskResult, AgentBackend, PROTOCOL_PROVIDERS, get_protocol, get_backend]
+    depends_on: []
+    used_by: [task-runner, backend-stream-json, backend-json-rpc, backend-jsonl, backend-ndjson, backend-text]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  backend-stream-json:
+    status: active
+    doc: modules/backend-stream-json.md
+    paths: ["sillyhub-daemon/sillyhub_daemon/backends/stream_json.py"]
+    tags: [backend, protocol, stream-json]
+    aliases: [stream-json-backend]
+    entrypoints: []
+    main_symbols: [StreamJsonBackend]
+    depends_on: [backends]
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  backend-json-rpc:
+    status: active
+    doc: modules/backend-json-rpc.md
+    paths: ["sillyhub-daemon/sillyhub_daemon/backends/json_rpc.py"]
+    tags: [backend, protocol, json-rpc]
+    aliases: [json-rpc-backend]
+    entrypoints: []
+    main_symbols: [_JsonRpcTransport, JsonRpcBackend]
+    depends_on: [backends]
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  backend-jsonl:
+    status: active
+    doc: modules/backend-jsonl.md
+    paths: ["sillyhub-daemon/sillyhub_daemon/backends/jsonl.py"]
+    tags: [backend, protocol, jsonl]
+    aliases: [jsonl-backend]
+    entrypoints: []
+    main_symbols: [_JsonlState, JsonlBackend]
+    depends_on: [backends]
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  backend-ndjson:
+    status: active
+    doc: modules/backend-ndjson.md
+    paths: ["sillyhub-daemon/sillyhub_daemon/backends/ndjson.py"]
+    tags: [backend, protocol, ndjson]
+    aliases: [ndjson-backend]
+    entrypoints: []
+    main_symbols: [_NdjsonState, NdjsonBackend]
+    depends_on: [backends]
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  backend-text:
+    status: active
+    doc: modules/backend-text.md
+    paths: ["sillyhub-daemon/sillyhub_daemon/backends/text.py"]
+    tags: [backend, protocol, text]
+    aliases: [text-backend]
+    entrypoints: []
+    main_symbols: [_TextState, TextBackend]
+    depends_on: [backends]
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []

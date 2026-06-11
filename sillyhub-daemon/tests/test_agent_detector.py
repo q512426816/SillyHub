@@ -179,6 +179,17 @@ class TestResolveBinPath:
         assert result == "/usr/bin/claude"
 
     @patch.dict(os.environ, {}, clear=True)
+    @patch(
+        "sillyhub_daemon.agent_detector.shutil.which",
+        return_value=r"C:\nvm4w\nodejs\codex.CMD",
+    )
+    def test_windows_cmd_wrapper_is_preserved(self, mock_which):
+        detector = AgentDetector()
+        defn = AgentDetector.AGENT_DEFS["codex"]
+        result = detector._resolve_bin_path(defn)
+        assert result == r"C:\nvm4w\nodejs\codex.CMD"
+
+    @patch.dict(os.environ, {}, clear=True)
     @patch("sillyhub_daemon.agent_detector.shutil.which", return_value=None)
     def test_not_found(self, mock_which):
         detector = AgentDetector()
@@ -203,6 +214,33 @@ class TestDetectVersion:
         defn = AgentDetector.AGENT_DEFS["claude"]
         version = _run(detector._detect_version("/usr/bin/claude", defn))
         assert version == "2.1.5"
+
+    @patch("sillyhub_daemon.agent_detector.asyncio.create_subprocess_exec")
+    def test_detect_version_claude_suffix_format(self, mock_subprocess):
+        proc = MagicMock()
+        proc.communicate = AsyncMock(return_value=(b"2.1.150 (Claude Code)\n", b""))
+        mock_subprocess.return_value = proc
+
+        detector = AgentDetector()
+        defn = AgentDetector.AGENT_DEFS["claude"]
+        version = _run(detector._detect_version("/usr/bin/claude", defn))
+        assert version == "2.1.150"
+
+    @patch("sillyhub_daemon.agent_detector.asyncio.create_subprocess_shell")
+    @patch("sillyhub_daemon.agent_detector.platform.system", return_value="Windows")
+    def test_detect_version_windows_cmd_wrapper(self, mock_platform, mock_subprocess):
+        proc = MagicMock()
+        proc.communicate = AsyncMock(return_value=(b"codex-cli 0.131.0\n", b""))
+        mock_subprocess.return_value = proc
+
+        detector = AgentDetector()
+        defn = AgentDetector.AGENT_DEFS["codex"]
+        version = _run(detector._detect_version(r"C:\nvm4w\nodejs\codex.CMD", defn))
+
+        command = mock_subprocess.await_args.args[0]
+        assert r"C:\nvm4w\nodejs\codex.CMD" in command
+        assert "--version" in command
+        assert version == "0.131.0"
 
     @patch("sillyhub_daemon.agent_detector.asyncio.create_subprocess_exec")
     def test_detect_version_generic_pattern(self, mock_subprocess):

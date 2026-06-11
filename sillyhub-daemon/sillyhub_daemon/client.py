@@ -180,3 +180,13 @@ class HubClient:
         )
         resp.raise_for_status()
         return resp.json()
+
+    # -- Polling -------------------------------------------------------------
+
+    async def get_pending_leases(self, runtime_id: str) -> list[dict[str, Any]]:
+        """Fetch pending leases for a runtime (HTTP polling fallback)."""
+        resp = await self._http.get(
+            f"/api/daemon/runtimes/{runtime_id}/pending-leases",
+        )
+        resp.raise_for_status()
+        return resp.json()

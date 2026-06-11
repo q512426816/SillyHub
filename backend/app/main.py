@@ -107,7 +107,126 @@ def create_app() -> FastAPI:
 
     register_exception_handlers(app)
 
+    # ── Quick Chat (fixed path, before parameterized routes) ────────────────
+
+    def _register_quick_chat(app: FastAPI) -> None:
+        """Register the /api/daemon-chat endpoint with its own router."""
+        from fastapi import APIRouter, Depends, Query
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from app.core.auth_deps import require_permission_any
+        from app.core.db import get_session
+        from app.modules.auth.model import User
+        from app.modules.auth.permissions import Permission
+
+        qc_router = APIRouter()
+
+        @qc_router.post("/daemon-chat", status_code=201)
+        async def quick_chat(
+            prompt: str = Query(min_length=1, max_length=8000),
+            provider: str = Query(default="claude", max_length=30),
+            prev_run_id: str | None = Query(default=None, max_length=50),
+            session: AsyncSession = Depends(get_session),
+            user: User = Depends(require_permission_any(Permission.TASK_RUN_AGENT)),
+        ) -> dict:
+            import uuid
+
+            from sqlalchemy import text as sa_text
+
+            from app.modules.agent.placement import RunPlacementService
+
+            # Resolve resume session_id from previous run
+            resume_session_id = None
+            if prev_run_id:
+                row = (
+                    (
+                        await session.execute(
+                            sa_text(
+                                "SELECT session_id FROM agent_runs "
+                                "WHERE id = :id AND spec_strategy = 'quick-chat'"
+                            ),
+                            {"id": prev_run_id},
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if row and row["session_id"]:
+                    resume_session_id = row["session_id"]
+
+            run_id = uuid.uuid4()
+            await session.execute(
+                sa_text(
+                    "INSERT INTO agent_runs (id, agent_type, status, spec_strategy) "
+                    "VALUES (:id, :agent_type, 'pending', 'quick-chat')"
+                ),
+                {"id": run_id, "agent_type": provider},
+            )
+            await session.commit()
+
+            placement = RunPlacementService(session)
+            try:
+                lease_id = await placement.dispatch_to_daemon(
+                    run_id,
+                    user.id,
+                    provider=provider,
+                    prompt=prompt,
+                    resume_session_id=resume_session_id,
+                )
+            except Exception:
+                await session.rollback()
+                lease_id = None
+
+            final_status = "pending" if lease_id else "failed"
+            if not lease_id:
+                try:
+                    await session.execute(
+                        sa_text(
+                            "UPDATE agent_runs SET status='failed', "
+                            "output_redacted='No online daemon runtime found' "
+                            "WHERE id=:id"
+                        ),
+                        {"id": run_id},
+                    )
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+
+            return {
+                "id": str(run_id),
+                "agent_type": provider,
+                "status": final_status,
+            }
+
+        @qc_router.get("/daemon-chat/{run_id}")
+        async def get_quick_chat_result(
+            run_id: str,
+            session: AsyncSession = Depends(get_session),
+            user: User = Depends(require_permission_any(Permission.TASK_READ)),
+        ) -> dict:
+            from sqlalchemy import text as sa_text
+
+            result = await session.execute(
+                sa_text(
+                    "SELECT id, status, output_redacted, agent_type, started_at, finished_at "
+                    "FROM agent_runs WHERE id = :id AND spec_strategy = 'quick-chat'"
+                ),
+                {"id": run_id},
+            )
+            row = result.mappings().first()
+            if row is None:
+                from fastapi import HTTPException
+
+                raise HTTPException(status_code=404, detail="Run not found")
+            return dict(row)
+
+        app.include_router(qc_router, prefix="/api")
+
     app.include_router(health_router, prefix="/api")
+    # Quick-chat endpoint must be registered BEFORE workspace_router so that
+    # the fixed path /api/daemon-chat is matched before the parameterized
+    # /api/workspaces/{workspace_id}/... routes.
+    _register_quick_chat(app)
     app.include_router(workspace_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
     app.include_router(change_router, prefix="/api")

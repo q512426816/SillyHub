@@ -1,7 +1,23 @@
 # SillyHub 编码规范文档
 
-author: scan-agent
+author: qinyi
 created_at: 2026-06-03T12:00:02
+
+## 框架隐形规则
+
+- FastAPI 路由注册统一添加 `/api` 前缀，通过 `app.include_router(router, prefix="/api")`
+- SQLModel 模型继承 `BaseModel`，自动包含 `id`、`created_at`、`updated_at` 审计字段
+- 认证为 opt-in：路由默认无认证，需显式添加 `Depends(get_current_user)` 依赖
+- 前端所有页面均为 `"use client"` 客户端组件，数据获取用 `useEffect` + `useState`
+- Docker Compose 编排固定服务名和端口，前端 rewrite 到 `backend:8000`
+
+## 代码风格
+
+- **后端 Python**: Ruff lint+format (line-length=100), mypy type check, 遵循 PEP 8
+- **前端 TypeScript**: ESLint (eslint-config-next), Tailwind CSS utility-first
+- **命名**: 后端模块 snake_case，前端组件 PascalCase，API 路由 kebab-case
+- **异步**: 后端全 async/await (asyncpg, sqlalchemy async)，前端 useEffect 数据获取
+- **错误处理**: 后端统一 AppError 异常体系，前端 try/catch + toast 提示
 
 ## 1. 后端 Python 规范
 

@@ -1,7 +1,22 @@
 # SillyHub 技术关注点文档
 
-author: scan-agent
+author: qinyi
 created_at: 2026-06-03T12:00:05
+
+## 代码质量
+
+- **大文件**: agent/service.py (71KB), claude_code adapter (37KB), settings/page.tsx (23KB) 需拆分
+- **测试覆盖不均**: Daemon 最充分(17文件)，后端约30文件，前端仅3个lib测试，E2E为零
+- **死依赖**: 前端 @tanstack/react-query、puppeteer、@playwright/test 已安装未使用
+- **Lint**: 后端 Ruff 配置完善，前端 ESLint 基础配置
+- **类型安全**: 后端 mypy strict=false, 前端 TypeScript strict
+
+## 依赖风险
+
+- **Claude Code 版本硬编码**: Dockerfile 中 CLAUDE_CODE_VERSION 固定，升级需手动改
+- **Anthropic API 代理**: 核心功能依赖外部 API，无降级方案
+- **Python 3.12 绑定**: 后端和 Daemon 均要求 >=3.12，部署环境受限
+- **Next.js 14 版本锁**: App Router 稳定版，升级 15 需评估破坏性变更
 
 ## 1. 安全关注点
 

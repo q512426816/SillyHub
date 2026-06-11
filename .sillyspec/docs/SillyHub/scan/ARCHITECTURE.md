@@ -1,9 +1,24 @@
 # SillyHub 架构文档
 
-author: scan-agent
+author: qinyi
 created_at: 2026-06-03T12:00:00
 
-## 1. 总体架构
+## 技术栈
+
+- **后端**: FastAPI + Python 3.12 + SQLModel + SQLAlchemy(async) + PostgreSQL 16 + Redis 7
+- **前端**: Next.js 14 (App Router) + React 18 + TypeScript 5.5 + Tailwind CSS 3.4
+- **Daemon**: Python 3.12 + httpx + websockets + Click CLI
+- **部署**: Docker Compose (PostgreSQL + Redis + Backend + Frontend)
+- **测试**: pytest (backend) + Vitest + Playwright (frontend) + pytest (daemon)
+
+## 架构概览
+
+SillyHub 采用经典的前后端分离架构：
+
+- **后端**：Python FastAPI 应用，提供 RESTful JSON API，监听 8000 端口
+- **前端**：Next.js 14 (App Router) SPA + SSR，监听 3000 端口
+- **Daemon**：本地守护进程，通过 HTTP/WebSocket 与 Backend 通信
+- **通信**：前端通过 Next.js rewrites 代理 `/api/*` 请求到后端；SSE 用于 Agent 运行时实时日志流
 
 SillyHub 采用经典的前后端分离架构：
 

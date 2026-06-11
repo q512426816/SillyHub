@@ -1,55 +1,47 @@
----
-author: qinyi
-created_at: 2026-06-03T20:35:00+08:00
----
-
 schema_version: 1
 project: multi-agent-platform
-source_commit: e91d708
-generated_at: 2026-06-03 14:14:00
+source_commit: c97bad5
+generated_at: 2026-06-10 16:50:00
 generator: sillyspec-scan
 
 modules:
   backend:
     status: active
-    paths:
-      - backend/**
-    tags:
-      - backend
-      - fastapi
-      - python
-      - api
-    aliases:
-      - 后端
-      - api-server
-    entrypoints:
-      - backend/app/main.py
-    main_symbols:
-      - create_app
+    doc: modules/backend.md
+    paths: ["backend/**"]
+    tags: [fastapi, python, api, postgresql, redis]
+    aliases: [api, server, 后端]
+    entrypoints: ["uvicorn app.main:app"]
+    main_symbols: ["FastAPI app"]
     depends_on: []
-    used_by:
-      - frontend
+    used_by: [frontend, sillyhub-daemon]
     needs_review: false
     concerns: []
     review_reasons: []
 
   frontend:
     status: active
-    paths:
-      - frontend/**
-    tags:
-      - frontend
-      - nextjs
-      - react
-      - typescript
-    aliases:
-      - 前端
-      - web
-    entrypoints:
-      - frontend/src/app/layout.tsx
-    main_symbols: []
-    depends_on:
-      - backend
+    doc: modules/frontend.md
+    paths: ["frontend/**"]
+    tags: [nextjs, react, typescript, tailwind]
+    aliases: [web, ui, 前端]
+    entrypoints: ["next dev", "next start"]
+    main_symbols: ["Next.js app"]
+    depends_on: [backend]
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  sillyhub-daemon:
+    status: active
+    doc: modules/sillyhub-daemon.md
+    paths: ["sillyhub-daemon/**"]
+    tags: [daemon, cli, python, httpx, websockets]
+    aliases: [daemon, 守护进程]
+    entrypoints: ["sillyhub-daemon"]
+    main_symbols: ["cli"]
+    depends_on: [backend]
     used_by: []
     needs_review: false
     concerns: []
@@ -57,22 +49,13 @@ modules:
 
   deploy:
     status: active
-    paths:
-      - deploy/**
-    tags:
-      - docker
-      - deploy
-      - compose
-      - 部署
-    aliases:
-      - docker-compose
-      - 部署
-    entrypoints:
-      - deploy/docker-compose.yml
+    doc: modules/deploy.md
+    paths: ["deploy/**"]
+    tags: [docker, compose, deployment]
+    aliases: [docker, 部署]
+    entrypoints: ["docker-compose up"]
     main_symbols: []
-    depends_on:
-      - backend
-      - frontend
+    depends_on: [backend, frontend]
     used_by: []
     needs_review: false
     concerns: []
@@ -80,69 +63,10 @@ modules:
 
   docs:
     status: active
-    paths:
-      - docs/**
-    tags:
-      - docs
-      - design
-      - 文档
-    aliases:
-      - 文档
-    entrypoints: []
-    main_symbols: []
-    depends_on: []
-    used_by: []
-    needs_review: false
-    concerns: []
-    review_reasons: []
-
-  spikes:
-    status: active
-    paths:
-      - spikes/**
-    tags:
-      - spike
-      - research
-      - 调研
-    aliases:
-      - 调研
-    entrypoints: []
-    main_symbols: []
-    depends_on: []
-    used_by: []
-    needs_review: false
-    concerns: []
-    review_reasons: []
-
-  sillyspec:
-    status: active
-    paths:
-      - .sillyspec/**
-    tags:
-      - sillyspec
-      - spec
-      - workflow
-    aliases:
-      - spec
-    entrypoints: []
-    main_symbols: []
-    depends_on: []
-    used_by: []
-    needs_review: false
-    concerns: []
-    review_reasons: []
-
-  build:
-    status: active
-    paths:
-      - Makefile
-      - .editorconfig
-      - .gitignore
-    tags:
-      - build
-      - config
-    aliases:
-      - project-config
+    doc: modules/docs.md
+    paths: ["docs/**"]
+    tags: [documentation, markdown]
+    aliases: [文档]
     entrypoints: []
     main_symbols: []
     depends_on: []

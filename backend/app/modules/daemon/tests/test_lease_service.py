@@ -508,6 +508,30 @@ class TestDaemonHeartbeat:
         with pytest.raises(DaemonRuntimeNotFound):
             await svc.heartbeat(uuid.uuid4())
 
+    @pytest.mark.asyncio
+    async def test_cleanup_stale_runtimes_marks_old_heartbeats_offline(
+        self, db_session: AsyncSession
+    ) -> None:
+        """cleanup_stale_runtimes marks online runtimes offline after heartbeat timeout."""
+        user_id = await _create_user(db_session)
+        svc = DaemonService(db_session)
+        stale = await svc.register_runtime(user_id, name="stale", provider="claude")
+        fresh = await svc.register_runtime(user_id, name="fresh", provider="codex")
+
+        stale.last_heartbeat_at = datetime.now(UTC) - timedelta(seconds=180)
+        fresh.last_heartbeat_at = datetime.now(UTC)
+        db_session.add(stale)
+        db_session.add(fresh)
+        await db_session.commit()
+
+        count = await svc.cleanup_stale_runtimes(max_age_seconds=120)
+
+        assert count == 1
+        await db_session.refresh(stale)
+        await db_session.refresh(fresh)
+        assert stale.status == "offline"
+        assert fresh.status == "online"
+
 
 class TestCompleteLease:
     """Tests for DaemonService.complete_lease."""

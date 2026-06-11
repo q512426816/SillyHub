@@ -1,203 +1,160 @@
 ---
 author: qinyi
-created_at: 2026-06-04T08:55:00+08:00
+created_at: 2026-06-10T17:00:02
 ---
 
-# 项目结构
+# 目录结构 — multi-agent-platform
 
-## 目录树
+## 根目录
 
 ```
-multi-agent-platform/
-├── backend/                    # FastAPI 后端服务
-│   ├── app/
-│   │   ├── main.py            # 应用入口，Uvicorn 启动点
-│   │   ├── core/              # 核心基础设施（配置、数据库、依赖注入）
-│   │   ├── models/            # 共享数据模型（跨模块复用）
-│   │   └── modules/           # 业务模块（22+ 个模块）
-│   │       ├── agent/         # Agent 执行引擎
-│   │       ├── workspace/     # 工作区管理
-│   │       ├── change/        # 变更工作流
-│   │       ├── task/          # 任务管理
-│   │       ├── worktree/      # Git 工作树租约
-│   │       ├── auth/          # 认证授权
-│   │       ├── git_gateway/   # Git 操作网关
-│   │       ├── git_identity/  # Git 身份管理
-│   │       ├── change_writer/ # 代码写入器
-│   │       ├── tool_gateway/  # 工具调用网关
-│   │       ├── scan_docs/     # 文档扫描
-│   │       ├── spec_workspace/# 规格工作区
-│   │       ├── spec_profile/  # 规格档案
-│   │       ├── workflow/      # 工作流引擎
-│   │       ├── archive/       # 变更归档
-│   │       ├── release/       # 发布管理
-│   │       ├── incident/      # 事件管理
-│   │       ├── knowledge/     # 知识库
-│   │       ├── runtime/       # 运行时状态
-│   │       ├── health/        # 健康检查
-│   │       └── settings/      # 设置管理
-│   ├── tests/                # 后端集成测试
-│   ├── migrations/           # Alembic 数据库迁移
-│   └── pyproject.toml        # Python 项目配置
-│
-├── frontend/                  # Next.js 14 前端应用
-│   ├── src/
-│   │   ├── app/              # App Router 页面
-│   │   │   ├── (auth)/       # 认证路由组（登录页）
-│   │   │   ├── (dashboard)/  # 仪表盘路由组
-│   │   │   │   ├── workspaces/[id]/    # 工作区详情页
-│   │   │   │   ├── settings/           # 设置页面
-│   │   │   │   └── api/                # API 路由（代理后端）
-│   │   │   └── globals.css   # 全局样式
-│   │   ├── components/       # React 组件
-│   │   │   ├── ui/           # shadcn/ui 基础组件
-│   │   │   └── *.tsx         # 业务组件
-│   │   ├── lib/              # 工具库和 API 客户端
-│   │   │   ├── api.ts        # 核心 API 客户端
-│   │   │   ├── agent.ts      # Agent API
-│   │   │   ├── workspaces.ts # 工作区 API
-│   │   │   ├── changes.ts    # 变更 API
-│   │   │   ├── auth.ts       # 认证 API
-│   │   │   └── agent-stream.ts # SSE 流处理
-│   │   ├── stores/           # Zustand 全局状态
-│   │   └── test/             # 前端测试
-│   ├── package.json          # Node 依赖
-│   └── next.config.js        # Next.js 配置
-│
-├── deploy/                    # Docker Compose 部署
-│   └── docker-compose.yml    # 完整栈部署配置
-│
-├── .sillyspec/               # SillySpec 文档驱动开发
-│   ├── docs/                 # 文档输出
-│   ├── changes/              # 变更文档
-│   ├── knowledge/            # 知识库
-│   ├── quicklog/             # 快速日志
-│   └── workflows/            # 工作流定义
-│
-├── docs/                     # 额外文档
-├── spikes/                   # 技术验证原型
-└── Makefile                  # 一键命令
+multi-agent-platform/           # Monorepo 根
++-- Makefile                    # 统一开发命令入口 (dev-up, test, lint, up, down)
++-- README.md                   # 项目说明
++-- backend/                    # FastAPI 后端
++-- frontend/                   # Next.js 前端
++-- sillyhub-daemon/            # Daemon CLI 工具
++-- deploy/                     # Docker Compose 编排
++-- scripts/                    # 运维脚本
++-- spikes/                     # 技术调研 / PoC
++-- docs/                       # 项目文档
++-- .claude/                    # Claude Code 配置 + skills
++-- .sillyspec/                 # SillySpec 文档系统
 ```
 
-## 模块说明
+## backend/ — FastAPI 后端
 
-### 后端 (backend/)
+```
+backend/
++-- app/
+|   +-- main.py                 # FastAPI 入口，注册所有模块路由 + lifespan
+|   +-- __init__.py             # 版本号
+|   +-- core/                   # 基础设施
+|   |   +-- config.py           # Settings (pydantic-settings)
+|   |   +-- db.py               # AsyncPG 引擎 + session 工厂
+|   |   +-- redis.py            # Redis 连接
+|   |   +-- auth_deps.py        # 认证依赖注入
+|   |   +-- security.py         # JWT + 密码哈希
+|   |   +-- crypto.py           # 加密工具
+|   |   +-- errors.py           # 统一错误体系 (AppError + 子类)
+|   |   +-- audit_hooks.py      # SQLAlchemy 事件钩子 -> AuditLog
+|   |   +-- logging.py          # structlog 配置
+|   |   +-- telemetry.py        # OpenTelemetry 初始化
+|   |   +-- paths.py            # 路径解析
+|   |   +-- spec_paths.py       # SillySpec 路径工具
+|   |   +-- layout_migration.py # 数据布局迁移
+|   +-- models/
+|   |   +-- base.py             # BaseModel(SQLModel) — 所有表模型基类
+|   +-- modules/                # 22 个业务模块
+|       +-- agent/              # AI Agent 运行管理 (最大模块, ~71KB service.py)
+|       |   +-- adapters/       # Agent 适配器 (claude_code.py)
+|       |   +-- tests/          # 模块内测试
+|       +-- auth/               # 认证与 RBAC
+|       +-- workspace/          # 工作区管理
+|       +-- change/             # 变更管理
+|       +-- change_writer/      # 变更写入
+|       +-- daemon/             # Daemon 运行时管理
+|       +-- scan_docs/          # 扫描文档
+|       +-- spec_workspace/     # SillySpec 工作区
+|       +-- spec_profile/       # Spec Profile
+|       +-- task/               # 任务管理
+|       +-- workflow/           # 工作流 (审批/审计)
+|       +-- release/            # 发布管理
+|       +-- incident/           # 事件管理
+|       +-- knowledge/          # 知识库
+|       +-- git_identity/       # Git 身份管理
+|       +-- git_gateway/        # Git 操作网关
+|       +-- tool_gateway/       # 工具网关 + 策略
+|       +-- runtime/            # 运行时管理
+|       +-- archive/            # 归档
+|       +-- health/             # 健康检查
+|       +-- settings/           # 平台设置 + 用户管理
+|       +-- worktree/           # Worktree 租约管理
++-- migrations/                 # Alembic 迁移 (20 个版本)
++-- tests/                      # 集成测试套件
++-- hooks/                      # Claude Code hooks (scan_write_guard)
++-- conftest.py                 # Pytest fixtures
++-- docker-entrypoint.sh        # Docker 入口脚本
++-- Dockerfile                  # 多阶段构建
++-- pyproject.toml              # 项目依赖 + 工具配置
++-- ruff.toml                   # Ruff 扩展配置
++-- alembic.ini                 # Alembic 配置
++-- .pre-commit-config.yaml     # Pre-commit hooks
+```
 
-**app/core/** - 核心基础设施
-- config.py: 配置加载（环境变量、.env）
-- database.py: SQLAlchemy 会话管理
-- dependencies.py: FastAPI 依赖注入（认证、权限）
+## frontend/ — Next.js 前端
 
-**app/modules/agent/** - Agent 执行引擎
-- 协调器（AgentCoordinator）管理 Claude Code CLI 子进程
-- 阶段分发器（StageDispatcher）路由到不同 SillySpec 阶段
-- 工作目录策略（WorktreeStrategy）隔离执行环境
+```
+frontend/
++-- src/
+|   +-- app/                    # Next.js App Router
+|   |   +-- layout.tsx          # 根布局
+|   |   +-- page.tsx            # 首页
+|   |   +-- globals.css         # 全局样式
+|   |   +-- (auth)/login/       # 登录页
+|   |   +-- (dashboard)/        # 仪表盘路由组
+|   |       +-- layout.tsx      # Dashboard 布局
+|   |       +-- workspaces/     # 工作区列表 + 详情
+|   |       +-- settings/       # 设置页 + git-identities
+|   |       +-- runtimes/       # Daemon 运行时管理
+|   +-- lib/                    # API 客户端 + 工具函数 (~27 个模块)
+|   |   +-- api.ts              # 通用 apiFetch + base URL
+|   |   +-- auth.ts             # 登录/登出/刷新 token
+|   |   +-- agent.ts            # Agent Run CRUD + 流式日志
+|   |   +-- workspaces.ts       # 工作区 API
+|   |   +-- changes.ts          # 变更管理 API
+|   |   +-- daemon.ts           # Daemon 运行时 API
+|   |   +-- ...                 # 其余模块 API
+|   |   +-- __tests__/          # lib 层单元测试
+|   +-- components/             # 共享组件
+|   |   +-- ui/                 # shadcn/ui 基础组件
+|   |   +-- agent-log/          # Agent 日志组件
+|   |   +-- app-shell.tsx       # 应用外壳 (导航)
+|   |   +-- workspace-card.tsx  # 工作区卡片
+|   |   +-- ...                 # 其他业务组件
+|   +-- stores/
+|   |   +-- session.ts          # Zustand session store
+|   +-- test/
+|       +-- setup.ts            # Vitest setup
++-- Dockerfile                  # 多阶段 standalone 构建
++-- package.json                # 依赖 + 脚本
++-- next.config.mjs             # API rewrites + standalone 模式
++-- tailwind.config.ts          # Tailwind 配置
++-- vitest.config.ts            # 测试配置
+```
 
-**app/modules/workspace/** - 工作区管理
-- Workspace 模型：宿主机项目目录的抽象
-- 扫描仪（WorkspaceScanner）：生成项目结构文档
-- 拓扑服务（TopologyService）：分析模块依赖关系
+## sillyhub-daemon/ — Daemon CLI
 
-**app/modules/change/** - 变更工作流
-- Change 模型：工作流状态机（stage 字段）
-- 分发器（ChangeDispatcher）：自动路由到各阶段
-- 解析器（ChangeParser）：解析 proposal.md、plan.md
+```
+sillyhub-daemon/
++-- sillyhub_daemon/
+|   +-- __main__.py             # Click CLI 入口
+|   +-- daemon.py               # Daemon 核心 (生命周期/心跳)
+|   +-- agent_detector.py       # 检测 12 个 AI Agent provider
+|   +-- task_runner.py          # 任务执行引擎
+|   +-- client.py               # Backend HTTP/WS 客户端
+|   +-- config.py               # Daemon 配置
+|   +-- credential.py           # 凭证管理
+|   +-- workspace.py            # 工作区管理
+|   +-- protocol.py             # 通信协议定义
+|   +-- version.py              # 版本信息
+|   +-- backends/               # Agent 协议后端
+|       +-- __init__.py         # Backend registry
+|       +-- json_rpc.py         # JSON-RPC 协议
+|       +-- jsonl.py            # JSON Lines 协议
+|       +-- ndjson.py           # NDJSON 协议
+|       +-- stream_json.py      # Streaming JSON 协议
+|       +-- text.py             # 纯文本协议
++-- tests/                      # 17 个测试文件
++-- pyproject.toml
+```
 
-**app/modules/worktree/** - Git 工作树租约
-- Worktree 模型：租约管理（acquire、release、heartbeat）
-- 文件系统隔离：避免并发 Agent 写冲突
+## deploy/ — 编排
 
-**app/modules/auth/** - 认证授权
-- JWT 令牌：access token（15 分钟）+ refresh token（14 天）
-- 密码哈希：bcrypt（12 轮）
-- 权限模型：用户、角色、资源级权限
-
-**app/modules/git_gateway/** - Git 操作网关
-- 统一 Git 操作接口：commit、push、branch
-- 危险操作保护：force push、reset 需要审批
-
-**app/modules/git_identity/** - Git 身份管理
-- 加密存储：用户名、密码、SSH 密钥
-- 多提供商支持：GitHub、GitLab、自托管
-
-**app/modules/change_writer/** - 代码写入器
-- Agent 驱动的文件操作：Create、Edit、Delete
-- 冲突检测：基于文件指纹
-
-**app/modules/tool_gateway/** - 工具调用网关
-- 工具策略：允许、拒绝、审计
-- 调用日志：记录所有 Agent 工具使用
-
-**app/modules/scan_docs/** - 文档扫描
-- 生成 7 份扫描文档：ARCHITECTURE、STRUCTURE、CONVENTIONS、INTEGRATIONS、TESTING、CONCERNS、PROJECT
-- 模块卡片（MODULE_CARDS）：每个模块的索引
-
-**app/modules/spec_workspace/** - 规格工作区
-- SpecWorkspace 模型：.sillyspec 目录管理
-- 初始化模板：复制 SillySpec 脚手架
-
-**app/modules/workflow/** - 工作流引擎
-- FSM（有限状态机）：SpecGuardian 验证状态转换
-- 审计钩（AuditHook）：记录所有状态变更
-
-**app/modules/archive/** - 变更归档
-- 模块影响分析：更新 _module-map.yaml
-
-**app/modules/release/** - 发布管理
-- 审批流程：发布前需要审批
-- 版本打包：将已归档变更打包
-
-**app/modules/incident/** - 事件管理
-- 事件记录：生产问题追踪
-- 事后复盘：关联到相关变更
-
-**app/modules/knowledge/** - 知识库
-- 模式沉淀：fix-pattern、design-decision、api-contract
-
-**app/modules/runtime/** - 运行时状态
-- AgentRun 模型：一次 CLI 执行的完整记录
-- AgentRunLog 模型：日志流存储
-
-**app/modules/health/** - 健康检查
-- 数据库连接检查
-- Redis 连接检查
-- 提交 SHA 显示
-
-### 前端 (frontend/)
-
-**src/app/(dashboard)/workspaces/[id]/** - 工作区详情页
-- agent/：Agent 运行和日志流
-- changes/：变更列表和详情
-- tasks/：任务管理
-- runtime/：运行时状态
-- scan-docs/：扫描文档预览
-- components/：拓扑视图
-- releases/：发布管理
-- incidents/：事件管理
-- knowledge/：知识库
-
-**src/lib/api.ts** - 核心 API 客户端
-- apiFetch<T>()：统一处理认证、错误、序列化
-- 自动注入 access token（从 Zustand store）
-
-**src/lib/agent-stream.ts** - SSE 流处理
-- AgentOutputParser：解析流式日志
-- 重连机制：断线自动重连
-
-**src/stores/session.ts** - Zustand 全局状态
-- access token、refresh token
-- 用户信息、权限
-
-**src/components/app-shell.tsx** - 应用壳层
-- 侧边栏导航
-- 顶部用户菜单
-- 认证守卫
-
-### 部署 (deploy/)
-
-**docker-compose.yml** - 完整栈部署
-- postgres:16-alpine - 主数据库
-- redis:7-alpine - 缓存和 Pub/Sub
-- backend - FastAPI 服务（端口 8000）
-- frontend - Next.js 服务（端口 3000）
-- 卷挂载：项目目录、worktree 数据、spec 数据
+```
+deploy/
++-- docker-compose.yml          # 全栈编排 (postgres + redis + backend + frontend)
++-- docker-compose.dev.yml      # 开发依赖 (仅 postgres + redis)
++-- .env.example                # 环境变量模板
++-- .env                        # 本地环境变量 (gitignored)
+```

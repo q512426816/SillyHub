@@ -1,198 +1,102 @@
 ---
 author: qinyi
-created_at: 2026-06-03T20:35:00+08:00
+created_at: 2026-06-10T00:00:00
 ---
 
-# Backend -- 外部集成
+# Backend 外部集成
 
-## 数据库 -- PostgreSQL
+## 数据库：PostgreSQL (asyncpg)
 
-### 连接
+- **用途**：主数据存储，所有业务数据持久化
+- **连接**：通过 `settings.database_url` 配置，格式 `postgresql+asyncpg://user:pass@host:5432/db`
+- **连接池**：大小 10，溢出 10，超时 30s，回收 1800s，启用 `pool_pre_ping`
+- **迁移**：Alembic 管理，38 个版本化迁移文件
+- **ORM**：SQLModel (SQLModel + SQLAlchemy async)，`expire_on_commit=False`
+- **审计**：SQLAlchemy event hooks 自动捕获 BaseModel 变更写入 `audit_logs` 表
 
-- **引擎**: PostgreSQL 16
-- **驱动**: asyncpg（纯异步 Python 驱动）
-- **连接字符串**: `DATABASE_URL` 环境变量，格式 `postgresql+asyncpg://user:pass@host:5432/db`
-- **ORM**: SQLModel + SQLAlchemy async
+## 缓存/消息：Redis
 
-### 连接池配置
+- **用途**：
+  - Agent 运行状态缓存
+  - Daemon WebSocket 会话管理
+  - 租约状态追踪
+  - 分布式锁（乐观并发控制）
+- **连接**：`settings.redis_url`，默认 `redis://localhost:6379/0`
+- **客户端**：`redis.asyncio.Redis`，单例，`health_check_interval=30`
+- **使用位置**：`agent/adapters/claude_code.py`（运行状态）、`daemon/ws_hub.py`（会话管理）
 
-定义在 `core/db.py`：
+## 认证：JWT + bcrypt
 
-| 参数 | 值 | 说明 |
-|------|-----|------|
-| `pool_size` | 10 | 常驻连接数 |
-| `max_overflow` | 10 | 超出 pool_size 的最大临时连接 |
-| `pool_timeout` | 30s | 获取连接的超时 |
-| `pool_recycle` | 1800s (30min) | 杀掉过期连接 |
-| `pool_pre_ping` | True | 使用前检查连接可用性 |
+- **JWT 库**：python-jose (cryptography 后端)
+- **算法**：HS256
+- **Access Token**：15 分钟 TTL（可配置 `auth_access_ttl_minutes`）
+- **Refresh Token**：32 字节随机 token，14 天 TTL（可配置 `auth_refresh_ttl_days`），bcrypt 存储
+- **密码**：bcrypt，默认 cost 12（可配置 `auth_bcrypt_rounds`，测试中降到 4）
+- **Payload**：`{sub, email, is_admin, jti, iat, exp, typ}`
 
-### Session 管理
+## 加密：NaCl (libsodium)
 
-- `get_engine()` -- 懒创建进程级 AsyncEngine
-- `get_session_factory()` -- 懒创建 `async_sessionmaker`
-- `get_session(request)` -- FastAPI 依赖，yield session + 自动审计上下文注入 + 异常时 rollback
-- `dispose_engine()` -- 应用关闭时释放所有连接
+- **用途**：Git 凭证对称加密存储
+- **算法**：XChaCha20-Poly1305 (secretbox)
+- **密钥管理**：`SILLYSPEC_MASTER_KEY` 环境变量，格式 `<key_id>:<hex 32-byte key>`
+- **密钥版本**：支持多版本共存，解密时校验 key_id
+- **使用位置**：`git_identity/service.py`
 
-### 迁移
+## AI Agent：Claude Code
 
-- **工具**: Alembic
-- **入口**: `migrations/env.py` -- 异步迁移，从 `Settings` 读取连接 URL
-- **命令**: `alembic upgrade head`
-- **版本文件**: 33 个，位于 `migrations/versions/`
-- **表注册**: 在 `migrations/env.py` 显式 import 每个模块的 `model.py`
-- **命名规则**: `YYYYMMDDHHMM_<描述>.py`
+- **用途**：AI Agent 执行引擎
+- **集成方式**：CLI 子进程调用 (`claude` 命令)
+- **适配器**：`agent/adapters/claude_code.py`（继承 `AgentAdapter` ABC）
+- **通信**：stdin/stdout 流式读取
+- **上下文注入**：通过 `context_builder.py` 渲染 `CLAUDE.md` 到工作目录
+- **进程管理**：asyncio 子进程，支持 kill/超时
+- **Docker 集成**：Dockerfile 中通过 npm 安装 `@anthropic-ai/claude-code`
 
-### 数据表
+## Daemon 通信：WebSocket
 
-约 32 张表，核心表：
-- `users`, `sessions`, `roles`, `role_permissions`, `user_workspace_roles` -- 认证和 RBAC
-- `workspaces`, `workspace_relations` -- 工作区和关系
-- `changes`, `change_documents` -- 变更和文档
-- `tasks` -- 任务
-- `agent_runs`, `agent_run_logs` -- Agent 运行记录
-- `worktree_leases` -- Worktree 租约
-- `git_identities`, `git_operation_logs` -- Git 管理
-- `tool_operation_logs`, `tool_policies` -- 工具网关
-- `scan_documents` -- 扫描文档
-- `releases`, `release_approvals` -- 发布管理
-- `incidents`, `postmortems` -- 事件管理
-- `audit_logs`, `change_reviews` -- 审计和审批
-- `spec_workspaces`, `spec_profile_manifests`, `spec_conflicts` -- Spec 管理
-- `platform_settings` -- 平台配置
-- `change_workspaces`, `task_workspaces`, `agent_run_workspaces` -- M:N 关联表
+- **用途**：后端与守护进程的双向实时通信
+- **端点**：`/api/daemon/ws`
+- **协议**：自定义 JSON 消息信封 `DaemonMessage {type, payload}`
+- **消息类型**：
+  - Server→Daemon：`task_available`, `heartbeat`
+  - Daemon→Server：`register`, `heartbeat_ack`, `lease_claim`, `lease_start`, `lease_complete`, `lease_messages`
+- **实现**：`daemon/ws_hub.py`（连接管理、心跳、广播、慢连接驱逐）
+- **租约系统**：`daemon/lease_service.py`（任务分配、心跳续期、超时回收）
 
-## 缓存 -- Redis
+## Git 操作网关
 
-### 连接
+- **用途**：代理 Git 操作，安全审计
+- **功能**：Git 命令执行、diff 收集、输出脱敏（`redact_output`）
+- **审计**：所有操作记录到 `git_operation_logs` 表
 
-- **版本**: Redis 7
-- **驱动**: `redis.asyncio`
-- **连接字符串**: `REDIS_URL` 环境变量，默认 `redis://localhost:6379/0`
-- **单例模式**: 进程级共享实例，懒创建
+## 工具执行网关
 
-### 配置
+- **用途**：受控的 shell 命令执行
+- **策略控制**：`tool_policies` 表配置允许/阻止的命令、域名、路径限制
+- **安全**：路径校验、SSRF 防护、速率限制
+- **审计**：操作记录到 `tool_operation_logs` 表
 
-| 参数 | 值 |
-|------|-----|
-| `encoding` | utf-8 |
-| `decode_responses` | True |
-| `health_check_interval` | 30s |
+## HTTP 客户端：httpx
 
-### 用途
+- **用途**：外部 HTTP 请求（如 GitHub API 调用）
+- **使用位置**：`git_identity/providers/github.py`
 
-1. **Agent SSE 流** -- `agent_run:{run_id}` Pub/Sub 频道，推送 Agent 执行进度和输出
-2. **Keepalive** -- 25s 超时，30s 无消息发送 `: keepalive` SSE 注释
-3. **健康检查** -- `redis.ping()` 探活
+## 前端解析：python-frontmatter
 
-### 生命周期
+- **用途**：解析带 YAML frontmatter 的 Markdown 文件
+- **使用位置**：工作空间扫描和文档解析
 
-- 初始化：`get_redis()` 懒创建
-- 关闭：`close_redis()` 在 FastAPI lifespan shutdown 调用
+## CORS 配置
 
-## 认证 -- JWT + bcrypt
+- **允许来源**：`settings.cors_allowed_origins`，默认 `["http://localhost:3000"]`
+- **配置方式**：JSON 数组或逗号分隔字符串
+- **凭证**：允许
+- **暴露头**：`x-request-id`
 
-### JWT 配置
+## Docker 构建
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `secret_key` | 环境变量 | HS256 签名密钥（>=16 字符） |
-| `auth_access_ttl_minutes` | 15 min | Access token TTL |
-| `auth_refresh_ttl_days` | 14 days | Refresh token TTL |
-| `auth_bcrypt_rounds` | 12 | bcrypt cost factor |
-
-### Token 结构
-
-**Access Token (JWT)**:
-```json
-{
-  "sub": "<user_uuid>",
-  "email": "<email>",
-  "is_admin": true,
-  "jti": "<token_uuid>",
-  "iat": 1234567890,
-  "exp": 1234568790,
-  "typ": "access"
-}
-```
-
-**Refresh Token**: 32 字节 `secrets.token_urlsafe`，bcrypt 哈希后存入 `sessions` 表。
-
-### Token 刷新策略
-
-1. 客户端提交 refresh_token
-2. 遍历活跃 session 的 bcrypt 哈希查找匹配
-3. 找到后 revoke 旧 session，签发新 (access, refresh) 对
-4. 如果提交的是已 revoked 的 token → 判定为重放攻击 → revoke 该用户所有 session
-
-## HTTP 客户端 -- httpx
-
-### 用途
-
-- `git_identity/providers/github.py` -- GitHub API（OAuth token 验证）
-- `tool_gateway/service.py` -- 外部工具代理请求（`http_get` 工具类型）
-
-## CLI 工具集成
-
-### Claude Code CLI
-
-- **集成方式**: `asyncio.create_subprocess_exec` 子进程调用
-- **适配器**: `agent/adapters/claude_code.py` -- `ClaudeCodeAdapter(AgentAdapter)`
-- **协议**: stream-json（JSON 流式输出）
-- **版本**: Dockerfile 构建参数 `CLAUDE_CODE_VERSION=2.1.158`
-- **安装**: Docker 中通过 npm 全局安装
-- **用途**: 执行 Agent 任务（代码生成、分析、变更执行）
-
-### SillySpec CLI
-
-- **集成方式**: `asyncio.create_subprocess_exec` 子进程调用
-- **版本**: Dockerfile 构建参数 `SILLYSPEC_VERSION=3.16.2`
-- **安装**: Docker 中通过 npm 全局安装
-- **用途**: SillySpec 流程执行（sillyspec run / sillyspec quick）
-
-## Git 集成
-
-### git_gateway 模块
-
-- **操作白名单**: `status`, `diff`, `add`, `commit`, `push`, `pull`, `fetch`, `log`, `branch`, `checkout`, `merge`, `rebase`
-- **输出脱敏**: `redact_output()` 函数清理敏感信息（token、密钥等）
-- **审计日志**: 所有 Git 操作记录到 `git_operation_logs` 表
-
-### worktree 模块
-
-- **Git Worktree 隔离**: 每个任务/变更获取独立的 worktree
-- **租约管理**: acquire / release / extend / GC
-- **凭证加密**: PyNaCl 加密 Git 凭证（SSH key、token）
-
-### git_identity 模块
-
-- **身份类型**: GitHub OAuth token、SSH key
-- **Provider 抽象**: `providers/base.py` + `providers/github.py`
-
-## 加密 -- PyNaCl
-
-- **用途**: Worktree 凭证加密（`core/crypto.py`）
-- **密钥**: `SILLYSPEC_MASTER_KEY` 环境变量
-- **算法**: NaCl secretbox (XSalsa20-Poly1305)
-
-## Docker 部署
-
-### 多阶段构建
-
-1. **node-tools 阶段**: 安装 Claude Code CLI + SillySpec CLI
-2. **builder 阶段**: Python 3.12-slim + uv 安装 Python 依赖
-3. **runtime 阶段**: Python 3.12-slim + Node.js 二进制 + venv + 源码
-
-### 运行时配置
-
-| 参数 | 值 |
-|------|-----|
-| 端口 | 8000 |
-| 用户 | app (非 root) |
-| 健康检查 | `curl -fsS http://127.0.0.1:8000/api/health` |
-| 启动命令 | `uvicorn app.main:app --host 0.0.0.0 --port 8000` |
-| 入口脚本 | `docker-entrypoint.sh`（含 alembic migrate） |
-
-### 路径映射
-
-- `/data/spec-workspaces` -- Spec 数据持久化
-- `/host-projects` -- 宿主项目目录映射（通过 `host_path_prefix` / `container_path_prefix` 配置）
+- **多阶段构建**：node-tools (Claude Code + SillySpec) -> builder (Python 依赖) -> runtime
+- **运行时依赖**：curl, ca-certificates, git, libstdc++6
+- **非 root 运行**：`app` 用户
+- **健康检查**：`curl -fsS http://127.0.0.1:8000/api/health`
+- **入口**：`docker-entrypoint.sh` -> `uvicorn app.main:app`

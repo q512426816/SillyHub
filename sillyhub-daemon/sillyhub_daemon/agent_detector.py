@@ -9,8 +9,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import platform
 import re
 import shutil
+import subprocess
 from dataclasses import dataclass
 
 from sillyhub_daemon.version import check_min_version, parse_semver
@@ -97,7 +99,7 @@ class AgentDetector:
         "claude": AgentDef(
             bin="claude",
             env_path="SILLYHUB_CLAUDE_PATH",
-            version_pattern=r"Claude Code (\d+\.\d+\.\d+)",
+            version_pattern=r"(?:Claude Code\s+)?(\d+\.\d+\.\d+)(?:\s+\(Claude Code\))?",
             protocol="stream_json",
             min_version="2.0.0",
         ),
@@ -223,12 +225,15 @@ class AgentDetector:
         """Resolve the binary path for an agent.
 
         Priority: ``os.getenv(env_path)`` (if file exists) → ``shutil.which(bin)`` → ``None``.
+
+        On Windows, ``shutil.which`` may return npm-generated .cmd wrappers.
+        Keep the wrapper path so version detection runs the real CLI command
+        instead of accidentally treating ``node.exe`` as the agent binary.
         """
         env_val = os.getenv(defn.env_path)
         if env_val:
             if os.path.isfile(env_val):
                 return env_val
-            # Env var set but file does not exist — fall through to which()
             logger.debug(
                 "env_path %s=%s does not exist, falling back to which(%s)",
                 defn.env_path,
@@ -240,12 +245,22 @@ class AgentDetector:
     async def _detect_version(self, bin_path: str, defn: AgentDef) -> str | None:
         """Run ``<bin_path> --version`` and extract version string."""
         try:
-            proc = await asyncio.create_subprocess_exec(
-                bin_path,
-                "--version",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+            if platform.system() == "Windows" and bin_path.lower().endswith(
+                (".cmd", ".bat")
+            ):
+                command = subprocess.list2cmdline([bin_path, "--version"])
+                proc = await asyncio.create_subprocess_shell(
+                    command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+            else:
+                proc = await asyncio.create_subprocess_exec(
+                    bin_path,
+                    "--version",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
             output = (stdout or b"").decode(errors="replace") + (stderr or b"").decode(
                 errors="replace"

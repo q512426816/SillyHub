@@ -1,64 +1,86 @@
----
-author: qinyi
-created_at: 2026-06-03T20:35:00+08:00
----
-
 schema_version: 1
 project: backend
-source_commit: e91d708
-generated_at: 2026-06-03 14:14:00
+source_commit: c97bad5
+generated_at: 2026-06-10 16:45:00
 generator: sillyspec-scan
 
 modules:
+  # ── core 模块 ──────────────────────────────────────────────
+
   core:
     status: active
     doc: modules/core.md
     paths:
       - app/core/**
-    tags:
-      - config
-      - database
-      - redis
-      - auth
-      - security
-      - crypto
-      - logging
-      - telemetry
-      - errors
-    aliases:
-      - infrastructure
-      - 基础设施
+    tags: [config, database, redis, auth, security, crypto, logging, telemetry, errors, audit, paths]
+    aliases: [infrastructure]
     entrypoints:
       - get_settings
-      - create_app
-    main_symbols:
-      - Settings
-      - get_session_factory
+      - get_engine
+      - get_session
       - get_logger
       - configure_logging
+      - register_exception_handlers
+      - register_audit_hooks
+      - get_redis
+      - get_cipher
+      - get_current_user
+      - require_permission
+    main_symbols:
+      - Settings
+      - get_settings
+      - BaseModel
+      - get_engine
+      - get_session_factory
+      - get_session
+      - configure_logging
+      - get_logger
+      - AppError
+      - register_exception_handlers
+      - register_audit_hooks
+      - TokenPayload
+      - create_access_token
+      - decode_access_token
+      - CredentialCipher
+      - get_cipher
+      - SpecPathResolver
+      - repo_root
+      - resolve_spec_data_root
     depends_on: []
     used_by:
       - workspace
       - auth
       - change
+      - task
       - agent
+      - daemon
       - worktree
       - git_gateway
+      - git_identity
       - tool_gateway
+      - scan_docs
+      - release
+      - incident
+      - workflow
+      - knowledge
+      - runtime
+      - settings
+      - health
+      - spec_profile
+      - spec_workspace
+      - change_writer
+      - archive
     needs_review: false
     concerns: []
     review_reasons: []
 
   models:
     status: active
-    doc: modules/archive.md
+    doc: modules/core.md
     paths:
       - app/models/**
-    tags:
-      - base-model
-      - orm
-    aliases:
-      - shared-models
+    tags: [base-model, orm]
+    aliases: [shared-models]
     entrypoints:
       - BaseModel
     main_symbols:
@@ -70,56 +92,42 @@ modules:
       - change
       - task
       - agent
+      - daemon
       - worktree
       - git_identity
+      - git_gateway
+      - tool_gateway
+      - scan_docs
       - incident
       - release
-      - scan_docs
       - spec_profile
       - spec_workspace
       - workflow
-      - tool_gateway
       - knowledge
+      - settings
     needs_review: false
     concerns: []
     review_reasons: []
 
-  workspace:
+  # ── business 模块 ──────────────────────────────────────────
+
+  health:
     status: active
-    doc: modules/workspace.md
+    doc: modules/health.md
     paths:
-      - app/modules/workspace/**
-    tags:
-      - workspace
-      - crud
-      - scan
-      - topology
-    aliases:
-      - workspaces
-      - 工作区
+      - app/modules/health/**
+    tags: [health, monitoring, version]
+    aliases: []
     entrypoints:
-      - WorkspaceService
-      - workspace_router
+      - /api/health
+      - /api/version
     main_symbols:
-      - Workspace
-      - WorkspaceRelation
-      - WorkspaceService
-      - WorkspaceScanner
-      - slugify
+      - HealthResponse
+      - VersionResponse
+      - health_router
     depends_on:
       - core
-      - models
-      - spec_workspace
-      - agent
-    used_by:
-      - change
-      - task
-      - agent
-      - change_writer
-      - archive
-      - knowledge
-      - runtime
-      - scan_docs
+    used_by: []
     needs_review: false
     concerns: []
     review_reasons: []
@@ -129,30 +137,83 @@ modules:
     doc: modules/auth.md
     paths:
       - app/modules/auth/**
-    tags:
-      - auth
-      - jwt
-      - rbac
-      - login
-      - token
-    aliases:
-      - authentication
-      - 认证
+    tags: [auth, jwt, rbac, login, token]
+    aliases: [authentication]
     entrypoints:
-      - AuthService
-      - auth_router
-      - bootstrap_admin_and_seed_rbac
+      - /api/auth/login
+      - /api/auth/refresh
+      - /api/auth/logout
+      - /api/auth/me
     main_symbols:
       - AuthService
       - User
       - Session
       - Role
+      - RolePermission
       - UserWorkspaceRole
+      - Permission
+      - auth_router
     depends_on:
       - core
       - models
+    used_by:
       - workspace
-    used_by: []
+      - change
+      - task
+      - agent
+      - daemon
+      - worktree
+      - git_gateway
+      - git_identity
+      - tool_gateway
+      - scan_docs
+      - release
+      - incident
+      - workflow
+      - knowledge
+      - runtime
+      - settings
+      - spec_workspace
+      - change_writer
+      - archive
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  workspace:
+    status: active
+    doc: modules/workspace.md
+    paths:
+      - app/modules/workspace/**
+    tags: [workspace, crud, scan, topology]
+    aliases: [workspaces]
+    entrypoints:
+      - /api/workspaces
+    main_symbols:
+      - WorkspaceService
+      - RelationService
+      - Workspace
+      - WorkspaceRelation
+      - WorkspaceScanner
+      - TopologyBuilder
+      - slugify
+      - workspace_router
+    depends_on:
+      - core
+      - models
+      - auth
+    used_by:
+      - change
+      - task
+      - agent
+      - daemon
+      - change_writer
+      - archive
+      - knowledge
+      - runtime
+      - scan_docs
+      - spec_workspace
+      - release
     needs_review: false
     concerns: []
     review_reasons: []
@@ -162,33 +223,30 @@ modules:
     doc: modules/change.md
     paths:
       - app/modules/change/**
-    tags:
-      - change
-      - 变更
-      - proposal
-      - design
-    aliases:
-      - changes
+    tags: [change, proposal, design]
+    aliases: [changes]
     entrypoints:
-      - ChangeService
-      - change_router
+      - /api/workspaces/{workspace_id}/changes
     main_symbols:
+      - ChangeService
+      - SillySpecStageDispatchService
       - Change
       - ChangeDocument
       - StageEnum
-      - ChangeService
       - ChangeParser
+      - change_router
     depends_on:
       - core
       - models
+      - auth
       - workspace
-      - workflow
     used_by:
       - task
       - agent
       - change_writer
       - archive
       - workflow
+      - release
     needs_review: false
     concerns: []
     review_reasons: []
@@ -198,24 +256,21 @@ modules:
     doc: modules/task.md
     paths:
       - app/modules/task/**
-    tags:
-      - task
-      - todo
-      - 任务
-    aliases:
-      - tasks
+    tags: [task, todo]
+    aliases: [tasks]
     entrypoints:
-      - TaskService
-      - task_router
+      - /api/workspaces/{workspace_id}/tasks
     main_symbols:
-      - Task
       - TaskService
+      - Task
       - TaskParser
+      - task_router
     depends_on:
       - core
       - models
-      - change
+      - auth
       - workspace
+      - change
     used_by:
       - agent
       - tool_gateway
@@ -229,35 +284,130 @@ modules:
     doc: modules/agent.md
     paths:
       - app/modules/agent/**
-    tags:
-      - agent
-      - claude-code
-      - execution
-      - coordinator
-    aliases:
-      - agents
-      - ai
+    tags: [agent, claude-code, execution, coordinator]
+    aliases: [agents, ai]
     entrypoints:
-      - AgentService
-      - agent_router
+      - /api/workspaces/{workspace_id}/agents
     main_symbols:
       - AgentService
+      - ExecutionCoordinatorService
+      - RunPlacementService
       - AgentRun
       - AgentRunLog
-      - ExecutionCoordinatorService
-      - ClaudeCodeAdapter
+      - AgentAdapter
+      - AgentSpecBundle
       - build_spec_bundle
+      - agent_router
     depends_on:
       - core
       - models
+      - auth
       - workspace
       - task
       - worktree
-      - git_identity
-      - change
-      - workflow
     used_by:
+      - daemon
+      - spec_workspace
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  daemon:
+    status: active
+    doc: modules/daemon.md
+    paths:
+      - app/modules/daemon/**
+    tags: [daemon, runtime, heartbeat, lease, websocket]
+    aliases: [daemons]
+    entrypoints:
+      - /api/daemon
+      - /api/daemon/ws
+    main_symbols:
+      - DaemonService
+      - DaemonLeaseService
+      - DaemonRuntime
+      - DaemonTaskLease
+      - daemon_router
+    depends_on:
+      - core
+      - models
+      - auth
       - workspace
+      - agent
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  scan_docs:
+    status: active
+    doc: modules/scan_docs.md
+    paths:
+      - app/modules/scan_docs/**
+    tags: [scan, docs, parser]
+    aliases: [scan-docs]
+    entrypoints:
+      - /api/workspaces/{workspace_id}/scan-docs
+    main_symbols:
+      - ScanDocsService
+      - ScanDocsParser
+      - ScanDocument
+      - scan_docs_router
+    depends_on:
+      - core
+      - models
+      - auth
+      - workspace
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  knowledge:
+    status: active
+    doc: modules/knowledge.md
+    paths:
+      - app/modules/knowledge/**
+    tags: [knowledge, quicklog]
+    aliases: []
+    entrypoints:
+      - /api/workspaces/{workspace_id}/knowledge
+      - /api/workspaces/{workspace_id}/quicklog
+    main_symbols:
+      - KnowledgeService
+      - KnowledgeParser
+      - knowledge_router
+    depends_on:
+      - core
+      - models
+      - auth
+      - workspace
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  git_identity:
+    status: active
+    doc: modules/git_identity.md
+    paths:
+      - app/modules/git_identity/**
+    tags: [git, identity, pat, github, credentials]
+    aliases: [git-identities]
+    entrypoints:
+      - /api/git/identities
+    main_symbols:
+      - GitIdentityService
+      - GitIdentity
+      - git_identity_router
+    depends_on:
+      - core
+      - models
+      - auth
+    used_by:
+      - worktree
+      - git_gateway
+      - agent
     needs_review: false
     concerns: []
     review_reasons: []
@@ -267,26 +417,22 @@ modules:
     doc: modules/worktree.md
     paths:
       - app/modules/worktree/**
-    tags:
-      - worktree
-      - git
-      - lease
-    aliases:
-      - worktrees
+    tags: [worktree, git, lease]
+    aliases: [worktrees]
     entrypoints:
-      - WorktreeService
-      - worktree_router
-      - lease_router
+      - /api/workspaces/{workspace_id}/worktrees
     main_symbols:
-      - WorktreeLease
       - WorktreeService
+      - WorktreeLease
       - GitRunner
       - ExecEnvBuilder
+      - worktree_router
+      - lease_router
     depends_on:
       - core
       - models
+      - auth
       - git_identity
-      - workspace
     used_by:
       - agent
       - git_gateway
@@ -301,21 +447,18 @@ modules:
     doc: modules/git_identity.md
     paths:
       - app/modules/git_gateway/**
-    tags:
-      - git
-      - gateway
-      - audit
-    aliases:
-      - git-ops
+    tags: [git, gateway, audit, proxy]
+    aliases: [git-ops]
     entrypoints:
-      - GitGatewayService
-      - git_gateway_router
+      - /api/workspaces/{workspace_id}/git
     main_symbols:
       - GitGatewayService
       - GitOperationLog
+      - git_gateway_router
     depends_on:
       - core
       - models
+      - auth
       - git_identity
       - worktree
     used_by:
@@ -324,141 +467,25 @@ modules:
     concerns: []
     review_reasons: []
 
-  git_identity:
+  change_writer:
     status: active
-    doc: modules/git_identity.md
+    doc: modules/change_writer.md
     paths:
-      - app/modules/git_identity/**
-    tags:
-      - git
-      - identity
-      - pat
-      - github
-    aliases:
-      - git-identities
+      - app/modules/change_writer/**
+    tags: [change-writer, markdown, document]
+    aliases: [writer]
     entrypoints:
-      - GitIdentityService
-      - git_identity_router
+      - /api/workspaces/{workspace_id}/change-writer
     main_symbols:
-      - GitIdentity
-      - GitIdentityService
+      - ChangeWriterService
+      - change_writer_router
     depends_on:
       - core
       - models
-    used_by:
-      - worktree
-      - git_gateway
-      - agent
-    needs_review: false
-    concerns: []
-    review_reasons: []
-
-  tool_gateway:
-    status: active
-    doc: modules/tool_gateway.md
-    paths:
-      - app/modules/tool_gateway/**
-    tags:
-      - tool
-      - gateway
-      - policy
-      - audit
-    aliases:
-      - tools
-    entrypoints:
-      - ToolGatewayService
-      - tool_gateway_router
-      - policy_crud_router
-    main_symbols:
-      - ToolGatewayService
-      - ToolOperationLog
-      - ToolPolicy
-    depends_on:
-      - core
-      - models
-      - git_gateway
-      - task
-      - workflow
-      - worktree
-    used_by: []
-    needs_review: false
-    concerns: []
-    review_reasons: []
-
-  scan_docs:
-    status: active
-    doc: modules/scan_docs.md
-    paths:
-      - app/modules/scan_docs/**
-    tags:
-      - scan
-      - docs
-      - parser
-    aliases:
-      - scan-docs
-    entrypoints:
-      - ScanDocsService
-      - scan_docs_router
-    main_symbols:
-      - ScanDocsService
-      - ScanDocsParser
-      - ScanDocument
-    depends_on:
-      - core
-      - models
+      - auth
+      - change
       - workspace
-    used_by: []
-    needs_review: false
-    concerns: []
-    review_reasons: []
-
-  release:
-    status: active
-    doc: modules/release.md
-    paths:
-      - app/modules/release/**
-    tags:
-      - release
-      - approval
-      - 发布
-    aliases:
-      - releases
-    entrypoints:
-      - ReleaseService
-      - release_router
-    main_symbols:
-      - Release
-      - ReleaseApproval
-      - ReleaseService
-    depends_on:
-      - core
-      - models
-    used_by: []
-    needs_review: false
-    concerns: []
-    review_reasons: []
-
-  incident:
-    status: active
-    doc: modules/incident.md
-    paths:
-      - app/modules/incident/**
-    tags:
-      - incident
-      - postmortem
-      - 事件
-    aliases:
-      - incidents
-    entrypoints:
-      - IncidentService
-      - incident_router
-    main_symbols:
-      - Incident
-      - Postmortem
-      - IncidentService
-    depends_on:
-      - core
-      - models
+      - worktree
     used_by: []
     needs_review: false
     concerns: []
@@ -469,81 +496,25 @@ modules:
     doc: modules/workflow.md
     paths:
       - app/modules/workflow/**
-    tags:
-      - workflow
-      - fsm
-      - approval
-      - spec-guardian
-      - audit
-    aliases:
-      - 审批
+    tags: [workflow, fsm, approval, spec-guardian, audit]
+    aliases: []
     entrypoints:
-      - WorkflowService
-      - workflow_router
+      - /api/workspaces/{workspace_id}/workflow
     main_symbols:
       - WorkflowService
       - TaskFSM
       - AuditLog
       - ChangeReview
       - run_guard
+      - workflow_router
     depends_on:
       - core
       - models
+      - auth
       - change
       - task
     used_by:
-      - agent
-      - change
       - tool_gateway
-    needs_review: false
-    concerns: []
-    review_reasons: []
-
-  settings:
-    status: active
-    doc: modules/settings.md
-    paths:
-      - app/modules/settings/**
-    tags:
-      - settings
-      - config
-      - 设置
-    aliases:
-      - platform-settings
-    entrypoints:
-      - settings_router
-    main_symbols:
-      - Settings
-    depends_on:
-      - core
-      - models
-    used_by: []
-    needs_review: false
-    concerns: []
-    review_reasons: []
-
-  knowledge:
-    status: active
-    doc: modules/knowledge.md
-    paths:
-      - app/modules/knowledge/**
-    tags:
-      - knowledge
-      - quicklog
-      - 知识库
-    aliases:
-      - 知识
-    entrypoints:
-      - KnowledgeService
-      - knowledge_router
-    main_symbols:
-      - KnowledgeService
-      - KnowledgeParser
-    depends_on:
-      - core
-      - models
-      - workspace
-    used_by: []
     needs_review: false
     concerns: []
     review_reasons: []
@@ -553,22 +524,97 @@ modules:
     doc: modules/runtime.md
     paths:
       - app/modules/runtime/**
-    tags:
-      - runtime
-      - progress
-      - artifacts
-    aliases:
-      - 运行时
+    tags: [runtime, progress, artifacts]
+    aliases: []
     entrypoints:
-      - RuntimeService
-      - runtime_router
+      - /api/workspaces/{workspace_id}/runtime
     main_symbols:
       - RuntimeService
+      - RuntimeProgress
+      - UserInputEntry
+      - ArtifactEntry
+      - runtime_router
     depends_on:
       - core
       - models
-      - spec_workspace
+      - auth
       - workspace
+      - spec_workspace
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  release:
+    status: active
+    doc: modules/release.md
+    paths:
+      - app/modules/release/**
+    tags: [release, approval]
+    aliases: [releases]
+    entrypoints:
+      - /api/workspaces/{workspace_id}/releases
+    main_symbols:
+      - ReleaseService
+      - Release
+      - ReleaseApproval
+      - release_router
+    depends_on:
+      - core
+      - models
+      - auth
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  incident:
+    status: active
+    doc: modules/incident.md
+    paths:
+      - app/modules/incident/**
+    tags: [incident, postmortem]
+    aliases: [incidents]
+    entrypoints:
+      - /api/workspaces/{workspace_id}/incidents
+    main_symbols:
+      - IncidentService
+      - Incident
+      - Postmortem
+      - incident_router
+    depends_on:
+      - core
+      - models
+      - auth
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  tool_gateway:
+    status: active
+    doc: modules/tool_gateway.md
+    paths:
+      - app/modules/tool_gateway/**
+    tags: [tool, gateway, policy, audit]
+    aliases: [tools]
+    entrypoints:
+      - /api/workspaces/{workspace_id}/tools
+      - /api/tool-policies
+    main_symbols:
+      - ToolGatewayService
+      - ToolPolicyService
+      - ToolOperationLog
+      - tool_gateway_router
+      - policy_crud_router
+    depends_on:
+      - core
+      - models
+      - auth
+      - git_gateway
+      - task
+      - workflow
+      - worktree
     used_by: []
     needs_review: false
     concerns: []
@@ -579,19 +625,17 @@ modules:
     doc: modules/archive.md
     paths:
       - app/modules/archive/**
-    tags:
-      - archive
-      - 归档
-    aliases:
-      - 归档
+    tags: [archive]
+    aliases: []
     entrypoints:
-      - ArchiveService
-      - archive_router
+      - /api/workspaces/{workspace_id}/archive
     main_symbols:
       - ArchiveService
+      - archive_router
     depends_on:
       - core
       - models
+      - auth
       - change
       - workspace
     used_by: []
@@ -599,30 +643,54 @@ modules:
     concerns: []
     review_reasons: []
 
-  change_writer:
+  settings:
     status: active
-    doc: modules/archive.md
+    doc: modules/settings.md
     paths:
-      - app/modules/change_writer/**
-    tags:
-      - change-writer
-      - markdown
-      - document
-    aliases:
-      - writer
+      - app/modules/settings/**
+    tags: [settings, config, admin, users]
+    aliases: [platform-settings]
     entrypoints:
-      - ChangeWriterService
-      - change_writer_router
+      - /api/settings
+      - /api/users
     main_symbols:
-      - ChangeWriterService
-      - MarkdownBuilder
+      - PlatformSetting
+      - settings_router
     depends_on:
       - core
       - models
-      - change
-      - workspace
-      - worktree
+      - auth
     used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  spec_workspace:
+    status: active
+    doc: modules/spec_workspace.md
+    paths:
+      - app/modules/spec_workspace/**
+    tags: [spec, workspace, bootstrap, validator, import]
+    aliases: [spec-ws]
+    entrypoints:
+      - /api/workspaces/{workspace_id}/spec-workspace
+      - /api/workspaces/{workspace_id}/spec-conflicts
+    main_symbols:
+      - SpecWorkspaceService
+      - SpecBootstrapService
+      - SpecWorkspace
+      - SpecValidator
+      - spec_workspace_router
+    depends_on:
+      - core
+      - models
+      - auth
+      - spec_profile
+      - agent
+      - workspace
+    used_by:
+      - runtime
+      - scan_docs
     needs_review: false
     concerns: []
     review_reasons: []
@@ -632,14 +700,11 @@ modules:
     doc: modules/spec_profile.md
     paths:
       - app/modules/spec_profile/**
-    tags:
-      - spec
-      - profile
-    aliases:
-      - spec-profile
+    tags: [spec, profile, conflict]
+    aliases: [spec-profile]
     entrypoints: []
     main_symbols:
-      - SpecProfile
+      - SpecConflict
       - SpecProfilePolicy
     depends_on:
       - core
@@ -650,45 +715,14 @@ modules:
     concerns: []
     review_reasons: []
 
-  spec_workspace:
-    status: active
-    doc: modules/spec_workspace.md
-    paths:
-      - app/modules/spec_workspace/**
-    tags:
-      - spec
-      - workspace
-      - bootstrap
-      - validator
-    aliases:
-      - spec-ws
-    entrypoints:
-      - SpecWorkspaceService
-      - spec_workspace_router
-    main_symbols:
-      - SpecWorkspace
-      - SpecWorkspaceService
-    depends_on:
-      - core
-      - models
-      - spec_profile
-    used_by:
-      - workspace
-      - runtime
-    needs_review: false
-    concerns: []
-    review_reasons: []
+  # ── infra 模块 ─────────────────────────────────────────────
 
   migrations:
     status: active
     paths:
       - migrations/**
-    tags:
-      - alembic
-      - migration
-      - database
-    aliases:
-      - db-migration
+    tags: [alembic, migration, database]
+    aliases: [db-migration]
     entrypoints: []
     main_symbols: []
     depends_on: []
@@ -704,11 +738,8 @@ modules:
       - Dockerfile
       - alembic.ini
       - ruff.toml
-    tags:
-      - build
-      - config
-    aliases:
-      - project-config
+    tags: [build, config]
+    aliases: [project-config]
     entrypoints: []
     main_symbols: []
     depends_on: []

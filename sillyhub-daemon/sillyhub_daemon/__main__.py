@@ -105,11 +105,21 @@ def start(server, token):
 
     _write_pid(os.getpid())
 
+    async def _run() -> None:
+        await daemon.start()
+        # Block until stopped (Ctrl-C sets _running=False via stop())
+        try:
+            while daemon.is_running:
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await daemon.stop()
+
     try:
-        asyncio.run(daemon.start())
+        asyncio.run(_run())
     except KeyboardInterrupt:
         click.echo("\nShutting down...")
-        asyncio.run(daemon.stop())
     finally:
         _remove_pid()
 

@@ -285,6 +285,7 @@ class NdjsonBackend(AgentBackend):
         timeout: float = 0,
         model: str = "",
         session_id: str = "",
+        **kwargs,
     ) -> TaskResult:
         """Execute agent CLI and return structured result."""
         import time as _time

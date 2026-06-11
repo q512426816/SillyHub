@@ -125,6 +125,10 @@ class RunPlacementService:
         self,
         agent_run_id: uuid.UUID,
         user_id: uuid.UUID,
+        *,
+        provider: str | None = None,
+        prompt: str | None = None,
+        resume_session_id: str | None = None,
     ) -> uuid.UUID | None:
         """Dispatch an AgentRun to the user's daemon.
 
@@ -134,7 +138,7 @@ class RunPlacementService:
            (stub for now -- Wave 2).
         3. Return the lease_id.
         """
-        runtime = await self._get_online_runtime(user_id)
+        runtime = await self._get_online_runtime(user_id, provider=provider)
         if runtime is None:
             log.warning(
                 "dispatch_daemon_no_online_runtime",
@@ -147,20 +151,28 @@ class RunPlacementService:
 
         lease_id = uuid.uuid4()
         now = datetime.now(UTC)
+        metadata = {}
+        if prompt:
+            metadata["prompt"] = prompt
+        if provider:
+            metadata["provider"] = provider
+        if resume_session_id:
+            metadata["resume_session_id"] = resume_session_id
 
         await self._session.execute(
             text(
                 """
                 INSERT INTO daemon_task_leases
-                    (id, agent_run_id, runtime_id, status, created_at, updated_at)
+                    (id, agent_run_id, runtime_id, status, metadata, created_at, updated_at)
                 VALUES
-                    (:id, :agent_run_id, :runtime_id, 'pending', :now, :now)
+                    (:id, :agent_run_id, :runtime_id, 'pending', :metadata, :now, :now)
                 """
             ),
             {
                 "id": lease_id,
                 "agent_run_id": agent_run_id,
                 "runtime_id": runtime_id,
+                "metadata": json.dumps(metadata) if metadata else None,
                 "now": now,
             },
         )
@@ -273,21 +285,34 @@ class RunPlacementService:
             )
             return False
 
-    async def _get_online_runtime(self, user_id: uuid.UUID) -> dict | None:
-        """Return the first online daemon runtime for the user, or None."""
+    async def _get_online_runtime(
+        self,
+        user_id: uuid.UUID,
+        *,
+        provider: str | None = None,
+    ) -> dict | None:
+        """Return the first online daemon runtime for the user, or None.
+
+        If *provider* is given, only match runtimes with that provider.
+        """
         try:
+            where_extra = "AND provider = :provider" if provider else ""
+            params: dict = {"user_id": user_id}
+            if provider:
+                params["provider"] = provider
             result = await self._session.execute(
                 text(
-                    """
-                    SELECT id, user_id, status, connected_at
+                    f"""
+                    SELECT id, user_id, provider, status
                     FROM daemon_runtimes
                     WHERE user_id = :user_id
                       AND status = 'online'
-                    ORDER BY connected_at DESC
+                      {where_extra}
+                    ORDER BY last_heartbeat_at DESC NULLS LAST
                     LIMIT 1
                     """
                 ),
-                {"user_id": user_id},
+                params,
             )
             row = result.mappings().first()
             return dict(row) if row else None
@@ -305,7 +330,13 @@ class RunPlacementService:
         lease_id: uuid.UUID,
         agent_run_id: uuid.UUID,
     ) -> None:
-        """Send a WebSocket wake-up signal to the daemon via DaemonWsHub."""
+        """Send a WebSocket wake-up signal to the daemon via DaemonWsHub.
+
+        The daemon process connects WS using its primary runtime_id but
+        may have multiple provider-specific runtimes registered.  If the
+        target runtime has no WS connection we broadcast to every connected
+        runtime (they all belong to the same daemon host).
+        """
         from app.modules.daemon.ws_hub import get_ws_hub
 
         hub = get_ws_hub()
@@ -314,6 +345,20 @@ class RunPlacementService:
             log.info(
                 "ws_wakeup_sent",
                 runtime_id=str(runtime_id),
+                lease_id=str(lease_id),
+                agent_run_id=str(agent_run_id),
+            )
+            return
+
+        # Fallback: broadcast to any connected runtime from the same host.
+        connected = hub.connected_runtime_ids
+        if connected:
+            for rid in connected:
+                await hub.send_wakeup(rid, lease_id=str(lease_id))
+            log.info(
+                "ws_wakeup_broadcast",
+                target_runtime=str(runtime_id),
+                sent_to=[str(r) for r in connected],
                 lease_id=str(lease_id),
                 agent_run_id=str(agent_run_id),
             )

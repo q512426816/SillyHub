@@ -65,6 +65,7 @@ class AgentBackend(ABC):
         task_prompt: str,
         work_dir: str,
         env: dict | None = None,
+        **kwargs,
     ) -> TaskResult:
         """Execute agent CLI and return structured result."""
 

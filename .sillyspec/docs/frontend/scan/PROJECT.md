@@ -1,84 +1,108 @@
 ---
-author: scan-agent
-created_at: "2026-06-03"
+author: qinyi
+created_at: 2026-06-10T00:00:00
 ---
 
-# SillyHub Frontend — 项目概述
+# Frontend 项目概览
 
-## 基本信息
+## 项目简介
 
-- **包名**: `multi-agent-platform-web`
-- **版本**: `0.1.0`
-- **框架**: Next.js 14.2.5 (App Router) + React 18.3.1
-- **语言**: TypeScript 5.5.4 (strict mode)
-- **包管理器**: pnpm 9.6.0
-- **Node 要求**: >= 20.0.0
-- **UI 方案**: Tailwind CSS 3.4.7 + class-variance-authority + tailwindcss-animate
-- **图标库**: lucide-react
+Multi-Agent Platform Web 前端，是 SillySpec 原生的多 Agent 执行平台管理界面。提供工作空间管理、SillySpec 变更工作流、Agent 运行监控、拓扑可视化、审批中心等功能。
 
-## 核心依赖
+项目名称: `multi-agent-platform-web`
+版本: `0.1.0`
+许可证: 私有项目
 
-| 类别 | 库 | 版本 |
-|------|-----|------|
-| 状态管理 | zustand | ^4.5.0 |
-| 数据请求 | @tanstack/react-query | ^5.51.0（已安装但页面未实际使用） |
-| 表单校验 | zod | ^3.23.0（已安装但未广泛使用） |
-| Markdown 预览 | @uiw/react-markdown-preview | ^5.2.1 |
-| 流程图/拓扑 | @xyflow/react | ^12.10.2 |
-| CSS 工具 | clsx + tailwind-merge | ^2.1.1 / ^2.4.0 |
+## 技术栈
 
-## 页面统计
+| 分类 | 技术 |
+|------|------|
+| 框架 | Next.js 14 (App Router) |
+| 语言 | TypeScript 5.5 (strict) |
+| UI | React 18 + Tailwind CSS 3.4 + shadcn/ui |
+| 状态 | Zustand 4.5 (persist) |
+| 数据 | 原生 fetch (apiFetch 封装) |
+| 拓扑 | @xyflow/react (React Flow) |
+| 校验 | Zod (已安装，未使用) |
+| 测试 | Vitest + Testing Library |
+| 包管理 | pnpm 9.6 |
 
-前端共有 **21 个页面文件**（`src/app/` 下的 `page.tsx`），按路由组分布：
+## 功能模块
 
-### 根路由
-- `/` — 首页（健康检查 + 入口）
+### 认证系统
+- JWT Bearer Token 认证
+- 自动 token refresh + 重试
+- Session 持久化 (localStorage)
 
-### `(auth)` 路由组（公开，无需认证）
-- `/login` — 登录页
+### 工作空间管理
+- 工作空间扫描、创建、激活、删除
+- 组件列表与详情
+- 拓扑图可视化 (React Flow)
+- 关系管理 (组件间依赖)
 
-### `(dashboard)` 路由组（需认证，AppShell 侧边栏）
-- `/workspaces` — Workspace 列表
-- `/workspaces/[id]` — Workspace 详情（Spec Workspace 管理、Bootstrap SSE）
-- `/workspaces/[id]/components` — 子组件列表
-- `/workspaces/[id]/components/topology` — 拓扑图（@xyflow/react）
-- `/workspaces/[id]/changes` — 变更列表
-- `/workspaces/[id]/changes/[cid]` — 变更详情（文档矩阵、Agent dispatch）
-- `/workspaces/[id]/changes/[cid]/tasks` — 任务看板
-- `/workspaces/[id]/changes/[cid]/tasks/[tid]` — 任务详情
-- `/workspaces/[id]/create-change` — 创建变更
-- `/workspaces/[id]/scan-docs` — 扫描文档浏览
-- `/workspaces/[id]/runtime` — 运行时进度
-- `/workspaces/[id]/knowledge` — 知识库 & 日志
-- `/workspaces/[id]/releases` — 发布管理
-- `/workspaces/[id]/agent` — Agent 控制台
-- `/workspaces/[id]/incidents` — 事件列表
-- `/workspaces/[id]/incidents/[iid]` — 事件详情
-- `/workspaces/[id]/audit` — 审计日志
-- `/workspaces/[id]/approvals` — 审批中心
-- `/settings` — 全局设置
-- `/settings/git-identities` — Git 身份管理
+### 变更工作流 (SillySpec)
+- 变更创建与执行
+- 阶段流转 (brainstorm → propose → plan → execute → verify → archive)
+- 人工审批门禁 (proposal review, plan review, human test, archive confirm)
+- 文档矩阵与内容查看
+- 反馈提交
 
-### API Route Handler
-- `/api/workspaces/[workspaceId]/agent/runs/[runId]/stream` — SSE 代理
+### Agent 控制台
+- Agent Run 创建与管理
+- 实时日志流 (SSE + EventSource)
+- Agent 输入提交
+- Run 终止
+
+### 运维功能
+- Daemon 运行时管理 (12 个 AI Agent 提供商)
+- 发布管理 (创建/审批/部署/回滚)
+- 事件管理 (创建/更新/复盘)
+- 审计日志
+- 知识库
+- Git 身份管理
+- 审批中心
+
+## 路由结构
+
+| 路径 | 功能 |
+|------|------|
+| `/login` | 登录页 |
+| `/workspaces` | 工作空间列表 |
+| `/workspaces/[id]` | 工作空间首页 |
+| `/workspaces/[id]/changes` | 变更中心 |
+| `/workspaces/[id]/agent` | Agent 控制台 |
+| `/workspaces/[id]/components` | 组件列表 |
+| `/workspaces/[id]/components/topology` | 拓扑图 |
+| `/workspaces/[id]/releases` | 发布管理 |
+| `/workspaces/[id]/incidents` | 事件管理 |
+| `/workspaces/[id]/approvals` | 审批中心 |
+| `/workspaces/[id]/audit` | 审计日志 |
+| `/workspaces/[id]/knowledge` | 知识库 |
+| `/workspaces/[id]/scan-docs` | 扫描文档 |
+| `/workspaces/[id]/runtime` | 运行时 |
+| `/settings` | 系统设置 |
+| `/settings/git-identities` | Git 身份管理 |
+| `/runtimes` | Daemon 运行时 |
 
 ## 开发命令
 
 ```bash
-pnpm dev          # 启动开发服务器 (next dev)
-pnpm build        # 生产构建 (next build)
-pnpm start        # 启动生产服务器 (next start)
-pnpm lint         # ESLint 检查 (next lint)
-pnpm typecheck    # TypeScript 类型检查 (tsc --noEmit)
-pnpm test         # 运行测试 (vitest run，单次)
-pnpm test:watch   # 监听模式运行测试 (vitest)
+pnpm dev          # 启动开发服务器
+pnpm build        # 生产构建
+pnpm start        # 启动生产服务器
+pnpm lint         # ESLint 检查
+pnpm typecheck    # TypeScript 类型检查
+pnpm test         # 运行单元测试
+pnpm test:watch   # 监听模式运行测试
 ```
 
-## 项目定位
+## 代码规模
 
-这是 SillyHub 多智能体平台的前端，核心功能包括：
-1. **Workspace 管理** — 注册、扫描、解析项目工作区及其子组件
-2. **变更管理（Change）** — 创建/执行变更、SillySpec 阶段流转、审批
-3. **Agent 运行** — 触发/监控/输入 Agent 执行，SSE 实时日志流
-4. **知识 & 文档** — 浏览扫描文档、知识库、Markdown 预览
-5. **运维功能** — 发布、事件管理、审计、审批、健康监控
+| 分类 | 文件数 |
+|------|--------|
+| 页面 (page.tsx) | 23 |
+| 布局 (layout.tsx) | 2 |
+| 组件 (.tsx) | 11 |
+| API 客户端 (.ts) | 20+ |
+| Store | 1 |
+| 测试 | 3 |

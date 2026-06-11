@@ -17,6 +17,12 @@ class AgentRunCreate(BaseModel):
     preferred_backend: str | None = Field(default=None, max_length=20)
 
 
+class QuickChatRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=8000)
+    provider: str = Field(default="claude", max_length=30)
+    workspace_id: uuid.UUID | None = None
+
+
 class AgentRunResponse(BaseModel):
     id: uuid.UUID
     task_id: uuid.UUID | None

@@ -235,6 +235,7 @@ class TestHeartbeatLoop:
     @pytest.mark.asyncio
     async def test_heartbeat_called_periodically(self, daemon, mock_client):
         daemon._running = True
+        daemon._registered_runtimes = {"claude": "rt-claude"}
 
         task = asyncio.create_task(daemon._heartbeat_loop())
         await asyncio.sleep(0.2)
@@ -247,10 +248,36 @@ class TestHeartbeatLoop:
             pass
 
         assert mock_client.heartbeat.call_count >= 1
+        mock_client.heartbeat.assert_any_await("rt-claude")
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_only_uses_registered_runtimes(self, daemon, mock_client):
+        daemon._running = True
+        daemon._runtime_id = "config-runtime"
+        daemon._registered_runtimes = {
+            "claude": "rt-claude",
+            "codex": "rt-codex",
+        }
+
+        task = asyncio.create_task(daemon._heartbeat_loop())
+        await asyncio.sleep(0.08)
+
+        daemon._running = False
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        heartbeat_ids = [call.args[0] for call in mock_client.heartbeat.await_args_list]
+        assert "rt-claude" in heartbeat_ids
+        assert "rt-codex" in heartbeat_ids
+        assert "config-runtime" not in heartbeat_ids
 
     @pytest.mark.asyncio
     async def test_heartbeat_survives_errors(self, daemon, mock_client):
         daemon._running = True
+        daemon._registered_runtimes = {"claude": "rt-claude"}
         call_count = 0
 
         async def failing_heartbeat(runtime_id):

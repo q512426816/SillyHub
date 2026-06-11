@@ -1,111 +1,89 @@
 ---
 author: qinyi
-created_at: 2026-06-03T20:35:00+08:00
+created_at: 2026-06-10T00:00:00
 ---
 
-# Backend -- 已知问题、技术债、风险点
+# Backend 代码债务与风险
 
-## 高优先级
+## 代码质量
 
-### auth 模块完全无测试
+### [RED] Quick Chat 端点内联在 main.py
+- **位置**：`app/main.py:112-195`
+- **问题**：`_register_quick_chat()` 函数包含完整的路由定义、原始 SQL 和业务逻辑，直接写在 `main.py` 中，违反了项目自身的模块化约定
+- **影响**：维护困难，无法单独测试，与 `agent` 模块的架构模式不一致
+- **建议**：抽取到 `modules/agent/quick_chat.py` 或独立模块
 
-`auth` 模块涉及 JWT 认证、密码哈希、Refresh Token 轮换、重放攻击检测、RBAC 权限检查。这些是安全关键路径，缺少测试可能导致：
-- 权限绕过漏洞无法被检测
-- Token 刷新竞态条件
-- Refresh token 重放攻击检测失效
-- Bootstrap admin 逻辑回归
+### [RED] Quick Chat 使用原始 SQL
+- **位置**：`app/main.py:135-166`
+- **问题**：使用 `sqlalchemy.text()` 写原始 INSERT/UPDATE SQL，绕过了 SQLModel ORM 和审计 hooks
+- **影响**：审计日志缺失，SQL 注入风险（虽然使用了参数化查询），与 ORM 模式不一致
+- **建议**：改用 SQLModel ORM 操作
 
-涉及文件：`auth/service.py`, `auth/rbac.py`, `auth/router.py`, `auth/permissions.py`, `core/security.py`, `core/auth_deps.py`
+### [YELLOW] Spec Profile 多处 TODO 未实现
+- **位置**：`modules/spec_profile/provider.py:76,86,96` 和 `modules/spec_profile/policy.py:61,97`
+- **问题**：5 个 TODO 标记，涉及 actual discovery、loading、stage conflict detection、document conflict detection
+- **影响**：Spec Profile 功能不完整
+- **建议**：追踪为后续任务，在 design 文档中标记未完成状态
 
-### settings 模块无测试
+### [YELLOW] AgentAdapter 只有一个实现
+- **位置**：`modules/agent/adapters/claude_code.py`
+- **问题**：抽象基类 `AgentAdapter` 只有一个实现，接口抽象可能过早或与实际需求不匹配
+- **影响**：未来添加新 adapter 时可能需要重构接口
 
-`settings` 模块包含用户 CRUD 和平台配置更新，缺少测试可能导致：
-- 用户创建/更新/删除逻辑回归
-- 密码哈希一致性
-- 平台配置验证缺失
-
-### Agent 子进程可靠性
-
-Agent 通过 `asyncio.create_subprocess_exec` 调用 Claude Code CLI：
-- CLI 崩溃可能导致孤儿进程（有 `_proc_registry` + kill 机制，但仅在进程对象存活时有效）
-- 服务重启时进程注册表丢失，仅靠 `cleanup_stale_runs` 标记为 failed（不实际终止进程）
-- 长时间运行可能超时（`ClaudeCodeAdapter` 有 timeout 参数，默认 600s）
-- fire-and-forget 模式（`asyncio.create_task`），异常仅记录日志不传播
-
-### Refresh Token 查找性能
-
-`AuthService._consume_refresh_token()` 遍历所有活跃 session 的 bcrypt 哈希来匹配 refresh token。注释中承认这对 V1 可接受（<1k 活跃 session），但不可扩展。如果活跃 session 数量增长，每次刷新都是 O(n) 次 bcrypt 验证。
-
-## 中优先级
-
-### 全局异常处理器捕获裸 Exception
-
-`_unhandled` 处理器捕获所有 `Exception`，记录 `log.exception()` 并返回 500。这意味着未预期的异常不会被暴露到日志之外，开发时可能隐藏真正的 bug。但这是有意的设计选择，避免内部错误信息泄露给客户端。
-
-### 审计上下文注入的静默失败
-
-`_try_inject_audit_context()` 在 token 无效时静默跳过（`except Exception: return`）。这意味着如果 JWT 解码逻辑有 bug，审计上下文会静默丢失，不会报错。
-
-### spec_profile 未完成实现
-
-`spec_profile` 模块部分功能为占位实现：
-- `policy.py` 中的阶段冲突检测和文档冲突检测
-- 多个 TODO 标记
-
-### M:N 查询的 N+1 问题
-
-`enrich_summaries()` 方法对每个实体单独查询 M:N 关联表。注释中承认 "For MVP scale, per-item queries are sufficient"，但在大规模数据下会产生 N+1 查询问题。
-
-涉及模块：`change/service.py`, `task/service.py`, `agent/service.py`
-
-### datetime.utcnow() 使用
-
-多处使用 `datetime.utcnow()`（Python 3.12 已标记为 deprecated，应使用 `datetime.now(UTC)`）。部分代码已使用 `datetime.now(UTC)`，但不一致。
-
-### type: ignore / noqa 注释
-
-约 12 处 `type: ignore` 和大量 `noqa` 标注。主要集中在：
-- 复杂的 SQLAlchemy 类型推断
-- FastAPI 依赖注入的类型对齐
-- mypy 禁用了一批高噪音错误码
-
-## 低优先级
-
-### OpenTelemetry 占位
-
-`telemetry.py` 仅有 stub 实现，`init_telemetry()` 仅记录日志不实际初始化 OTEL SDK。等待 V2 实现。
-
-### CORS 配置宽松
-
-`allow_methods=["*"]` 和 `allow_headers=["*"]` 允许所有方法和头部。开发阶段可接受，生产环境应收紧。
-
-### Dockerfile 中 Claude Code 路径引用
-
-`claude.exe` 在 Linux 镜像中创建 symlink，文件名包含 `.exe` 后缀，可能引起混淆（实际是 Node.js CLI）。
+### [YELLOW] 部分模块缺少独立测试
+- **涉及模块**：knowledge, runtime, scan_docs, settings
+- **影响**：这些模块的 bug 不容易被 CI 捕获
+- **建议**：优先补充 settings 和 runtime 测试
 
 ## 依赖风险
 
-### Claude Code CLI 版本耦合
+### [RED] Claude Code CLI 依赖
+- **问题**：核心功能依赖 `@anthropic-ai/claude-code` npm 包（版本固定 2.1.158），通过 CLI 子进程调用
+- **风险**：CLI 接口变更可能无声破坏集成；版本升级需要重新测试整个 agent 流程
+- **缓解**：Dockerfile 中固定版本号
 
-`CLAUDE_CODE_VERSION` 构建时注入 Dockerfile，升级需重建镜像。Claude Code CLI 的 stream-json 协议变更可能导致适配器不兼容。当前版本 2.1.158。
+### [YELLOW] passlib 兼容性问题
+- **位置**：`core/security.py:41-47`
+- **问题**：代码注释明确说明绕过了 passlib，因为 "local bcrypt wheel is incompatible with passlib's bcrypt backend detection"
+- **影响**：直接使用 bcrypt 库而非 passlib 抽象层，如果未来需要支持其他哈希算法需要额外工作
+- **现状**：已通过自定义 `_PasswordHasher` 类封装，不影响功能
 
-### SillySpec CLI 版本耦合
+### [YELLOW] mypy 配置过于宽松
+- **位置**：`pyproject.toml [tool.mypy]`
+- **问题**：`strict = false`，禁用了 9 个错误码（attr-defined, union-attr, assignment 等）
+- **影响**：类型安全网较弱，许多类型错误不会被捕获
+- **建议**：逐步收紧，优先启用 assignment 和 arg-type
 
-同上，`SILLYSPEC_VERSION` 构建时注入。当前版本 3.16.2。
-
-### bcrypt 直接依赖
-
-项目直接使用 `bcrypt` 库而非 `passlib`（`core/security.py` 注释说明了原因：passlib 的 bcrypt 后端检测在当前环境有兼容性问题）。这意味着 passlib 的 `passlib[bcrypt]` 依赖虽然声明了，但实际未使用。
+### [GREEN] OpenTelemetry 为空实现
+- **位置**：`core/telemetry.py`
+- **问题**：仅输出 stub 日志，无实际追踪/指标采集
+- **影响**：生产环境缺乏可观测性
+- **现状**：已预留接口，未来可无缝接入
 
 ## 架构风险
 
-### 进程内状态 vs 分布式
+### [YELLOW] 全局单例模式
+- **涉及**：`get_settings()`, `get_redis()`, `get_engine()`, `get_session_factory()`
+- **问题**：通过模块级全局变量 + `@lru_cache` 实现单例，测试中需要手动重置
+- **影响**：测试隔离性受影响
+- **缓解**：`dispose_engine()` 和 `close_redis()` 用于清理
 
-- Agent 进程注册表 `_proc_registry` 是类属性（进程内共享），多实例部署时无法跨进程 kill
-- `asyncio.create_task` 的后台任务在进程重启后丢失
-- Redis Pub/Sub 在单实例场景正常，但多实例部署时需要考虑消息广播
+### [YELLOW] 20 个路由模块注册在 main.py
+- **位置**：`app/main.py:197-223`
+- **问题**：所有路由手动 import 和注册，每次新增模块需修改 main.py
+- **建议**：考虑自动发现机制
 
-### 数据一致性
+### [GREEN] Docker 入口脚本
+- **位置**：`docker-entrypoint.sh`
+- **问题**：ruff 配置中排除对该文件的检查，可能存在 shell 兼容性问题
+- **缓解**：Dockerfile 中执行 `sed -i 's/\r$//'` 处理行尾符
 
-- Service 方法直接操作文件系统 + 数据库，没有事务性保证（文件系统操作不可回滚）
-- `reparse` 模式会删除文件系统中不存在的数据库记录，可能导致数据丢失（设计如此，文件系统是 source of truth）
+## 迁移风险
+
+### [YELLOW] 38 个迁移文件无 merge head 管理
+- **问题**：仅发现一个 merge head 文件（`4d9236aa3abb_merge_heads.py`），多分支并行开发时可能产生冲突
+- **建议**：确保团队协调迁移文件创建顺序
+
+### [GREEN] 迁移文件命名规范
+- 所有迁移按日期时间命名，格式统一
+- 但迁移文件较多，建议定期考虑 squash

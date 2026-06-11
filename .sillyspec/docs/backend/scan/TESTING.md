@@ -1,180 +1,129 @@
 ---
 author: qinyi
-created_at: 2026-06-03T20:35:00+08:00
+created_at: 2026-06-10T00:00:00
 ---
 
-# Backend -- 测试策略
+# Backend 测试策略
 
 ## 测试框架
 
-| 工具 | 版本 | 用途 |
-|------|------|------|
-| pytest | >=8 | 测试运行器 |
-| pytest-asyncio | >=0.23 | 异步测试支持 |
-| pytest-cov | >=5 | 覆盖率收集 |
-| aiosqlite | >=0.20 | SQLite 内存测试数据库 |
-| httpx | >=0.27 | AsyncClient HTTP 测试 |
-| anyio | >=4 | 多后端异步测试 |
+- **pytest** >= 8 作为主框架
+- **pytest-asyncio** >= 0.23，`asyncio_mode = "auto"`（无需 `@pytest.mark.asyncio` 装饰器）
+- **pytest-cov** >= 5，覆盖率门槛 60%（`--cov-fail-under=60`）
+- **anyio** >= 4 用于异步测试辅助
+- **aiosqlite** >= 0.20 用于测试中的 SQLite 内存数据库
 
-## pytest 配置
-
-定义在 `pyproject.toml`:
-
-```toml
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-addopts = "-ra"
-testpaths = ["tests", "app"]
-python_files = ["test_*.py"]
-```
-
-- **异步模式**: `auto` -- 所有 `async def test_*` 自动作为协程运行
-- **测试发现**: 两个根目录 `tests/`（集成测试）和 `app/`（模块内测试）
-- **输出**: `-ra` 显示所有非通过的结果摘要
-
-## 测试结构
-
-### 顶层集成测试 (`tests/`)
+## 测试目录结构
 
 ```
-tests/
-├── __init__.py
-├── test_config.py                          # Settings 解析规则（CORS CSV/JSON、密钥长度）
-├── test_health.py                          # 健康检查端点（ok / degraded / version / request-id）
-└── modules/
-    ├── agent/
-    │   ├── test_coordinator.py             # 执行协调器测试
-    │   ├── test_stage_dispatch.py          # 阶段调度测试
-    │   ├── test_spec_bundle_stage_dispatch.py  # Spec Bundle 调度
-    │   ├── test_work_dir_strategy.py       # 工作目录策略
-    │   └── test_context_builder.py         # 上下文构建器
-    ├── change/
-    │   ├── test_dispatch.py                # Agent dispatch
-    │   ├── test_dispatch_chain.py          # 调度链
-    │   ├── test_dispatch_stage_config.py   # 阶段配置
-    │   ├── test_auto_dispatch.py           # 自动调度
-    │   ├── test_e2e_stage_dispatch.py      # 端到端阶段调度
-    │   └── test_router_transition.py       # 路由状态流转
-    ├── change_writer/
-    │   └── test_router.py                  # Change Writer 路由
-    └── workspace/
-        ├── test_scan_generate.py           # 扫描生成
-        └── test_scan_generate_service.py   # 扫描生成服务
+backend/
+├── tests/                          # 集成测试套件
+│   ├── test_config.py              # 配置加载测试
+│   ├── test_health.py              # 健康检查端点测试
+│   └── modules/
+│       ├── agent/                  # Agent 模块测试
+│       │   ├── test_coordinator.py
+│       │   ├── test_context_builder.py
+│       │   ├── test_diff_collector.py
+│       │   ├── test_scan_dispatch.py
+│       │   ├── test_stage_dispatch.py
+│       │   ├── test_spec_bundle_stage_dispatch.py
+│       │   ├── test_work_dir_strategy.py
+│       │   ├── test_kill.py
+│       │   ├── test_post_scan_validator.py
+│       │   ├── test_adapter_isolation.py
+│       │   ├── test_m2n_agent_run.py
+│       │   └── test_background_task_lifecycle.py
+│       ├── change/                 # Change 模块测试
+│       │   ├── test_dispatch.py
+│       │   ├── test_dispatch_chain.py
+│       │   ├── test_dispatch_stage_config.py
+│       │   ├── test_e2e_stage_dispatch.py
+│       │   ├── test_auto_dispatch.py
+│       │   ├── test_router_transition.py
+│       │   ├── test_transition_response.py
+│       │   └── test_archive_gate.py
+│       ├── change_writer/          # Change Writer 测试
+│       │   └── test_router.py
+│       ├── workspace/              # Workspace 测试
+│       │   ├── test_scan_generate.py
+│       │   ├── test_scan_generate_service.py
+│       │   ├── test_scanner.py
+│       │   ├── test_m2n_change.py
+│       │   └── test_m2n_task.py
+│       └── ...（其他模块测试）
+└── app/modules/*/tests/            # 模块内单元测试
+    ├── auth/tests/
+    ├── daemon/tests/
+    ├── git_gateway/tests/
+    ├── git_identity/tests/
+    ├── incident/tests/
+    ├── release/tests/
+    ├── spec_profile/tests/
+    ├── tool_gateway/tests/
+    ├── workflow/tests/
+    └── worktree/tests/
 ```
 
-### 模块内测试 (`app/modules/*/tests/`)
+## 测试运行命令
 
-每个模块的 `tests/` 子目录包含该模块的单元测试。
+```bash
+# 完整测试套件
+uv run pytest -q --cov=app --cov-fail-under=60
 
-#### 模块测试覆盖情况
+# 仅集成测试
+uv run pytest tests/ -q
 
-| 模块 | 有测试 | 测试文件（模块内 + 集成） |
-|------|--------|--------------------------|
-| workspace | Y | test_scanner, test_m2n_change, test_m2n_task (模块内) + test_scan_generate (集成) |
-| agent | Y | test_base (模块内) + test_coordinator, test_stage_dispatch, test_context_builder 等 (集成) |
-| change | Y | (集成) test_dispatch, test_dispatch_chain, test_e2e_stage_dispatch, test_router_transition |
-| workflow | Y | test_spec_guardian |
-| tool_gateway | Y | test_service, test_router |
-| git_gateway | Y | test_dangerous |
-| change_writer | Y | test_markdown_builder (模块内) + test_router (集成) |
-| scan_docs | Y | 模块内测试 |
-| spec_workspace | Y | test_validator |
-| spec_profile | Y | test_policy |
-| worktree | Y | 模块内测试 |
-| task | Y | 模块内测试 |
-| release | Y | test_router, test_service |
-| incident | Y | test_router, test_service |
-| knowledge | Y | 模块内测试 |
-| runtime | Y | 模块内测试 |
-| archive | Y | 模块内测试 |
-| auth | **无** | -- |
-| settings | **无** | -- |
-| health | 部分 | 顶层 test_health.py 覆盖端点，模块内无测试 |
+# 仅模块单元测试
+uv run pytest app/ -q
+
+# 特定模块
+uv run pytest tests/modules/agent/ -q
+```
+
+## 测试覆盖情况
+
+### 覆盖较好的模块
+- **agent** — 12 个测试文件，覆盖 coordinator、context_builder、diff_collector、dispatch、kill、adapter isolation、background task lifecycle 等
+- **daemon** — 覆盖 ws_hub（连接/心跳/广播/慢连接驱逐/完整生命周期）、lease_service（claim/heartbeat/expire/cancel/validate/register）、wave5 集成测试
+- **change** — 8 个测试文件，覆盖 dispatch chain、stage config、auto dispatch、router transition、archive gate
+- **tool_gateway** — service 路径校验、shell 验证、策略（工具允许/命令阻止/域名检查/SSRF/限额）
+- **workflow** — FSM 状态机、ChangeFSM、TaskFSM
+- **spec_profile** — policy 冲突检测
+
+### 测试较薄弱的模块
+- **knowledge** — 无独立测试文件
+- **runtime** — 无独立测试文件
+- **scan_docs** — 无独立测试文件
+- **settings** — 无独立测试文件
 
 ## 测试模式
 
-### 1. 端点测试（HTTP 层）
+### 1. 数据库测试
+使用 aiosqlite 内存数据库替代 PostgreSQL，避免外部依赖。
 
-使用 `httpx.AsyncClient` 配合 FastAPI TestClient 模式：
-
+### 2. Service 层单元测试
+直接实例化 Service 类，注入 mock session：
 ```python
-async def test_health_all_ok(client: AsyncClient) -> None:
-    resp = await client.get("/api/health")
-    assert resp.status_code == 200
+service = FeatureService(session)
+result = await service.method(...)
 ```
 
-### 2. Service 层测试
+### 3. Router 集成测试
+通过 FastAPI TestClient 测试完整请求-响应流程。
 
-直接实例化 Service 类，注入 mock/stub 依赖：
+### 4. 异步子进程测试
+Agent adapter 测试使用 mock 的 asyncio 子进程调用。
 
-```python
-class TestAgentService:
-    def setup_method(self):
-        self.session = MockSession()
-        self.service = AgentService(self.session)
-```
-
-### 3. 外部依赖 Stub
-
-使用 `monkeypatch` 替换外部依赖：
-
-```python
-@pytest.fixture()
-def _stub_all_ok(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _ok() -> str:
-        return "ok"
-    monkeypatch.setattr(health_module, "_check_db", _ok)
-    monkeypatch.setattr(health_module, "_check_redis", _ok)
-```
-
-### 4. 文件系统解析测试
-
-解析器接受 `Path` 输入，可指向测试数据目录：
-
-```python
-def test_parse_workspace(tmp_path):
-    parser = WorkspaceParser()
-    result = parser.parse(tmp_path)
-```
-
-## 测试数据库
-
-- 测试环境使用 aiosqlite（SQLite 内存），不依赖真实 PostgreSQL
-- 异步模式与生产环境一致（AsyncSession）
-- `ENVIRONMENT=test` 由测试配置注入
-
-## 运行命令
+## 代码质量工具
 
 ```bash
-# 全部测试
-pytest
+# Lint
+uv run ruff check .
 
-# 指定模块
-pytest backend/app/modules/agent/tests/
-pytest backend/tests/modules/agent/
+# Format 检查
+uv run ruff format --check .
 
-# 带覆盖率
-pytest --cov=app
-
-# 指定测试文件
-pytest backend/tests/test_health.py
-
-# 详细输出
-pytest -v
+# 类型检查
+uv run mypy app
 ```
-
-## 覆盖范围评估
-
-### 覆盖良好的领域
-
-- **Agent 调度**: coordinator, stage_dispatch, context_builder, work_dir_strategy 均有测试
-- **Change 工作流**: dispatch chain, auto_dispatch, e2e, router transition
-- **Workspace**: scanner, m2n_change, m2n_task, scan_generate
-- **Release / Incident**: router + service 双层测试
-- **Tool Gateway**: service + router
-
-### 缺失覆盖的领域
-
-- **auth 模块**: 完全无测试 -- JWT 编解码、RBAC 权限检查、登录/刷新/登出流程、重放攻击检测
-- **settings 模块**: 完全无测试 -- 用户 CRUD、平台配置更新
-- **git_identity**: 仅模块内标记文件，无实际测试内容可见

@@ -1,269 +1,114 @@
 ---
 author: qinyi
-created_at: 2026-06-04T08:56:00+08:00
+created_at: 2026-06-10T17:00:03
 ---
 
-# 外部集成
+# 外部集成 — multi-agent-platform
 
-## 数据库
+## 数据库与存储
 
-### PostgreSQL 16 (主数据库)
-
-**集成方式**: SQLAlchemy + AsyncPG
-
-**用途**:
-- 持久化所有业务数据（工作区、变更、任务、Agent 运行等）
-- 存储用户认证数据（哈希密码、refresh token 黑名单）
-- 存储审计日志和事件记录
-
-**连接配置**:
-```python
-DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/db
-```
-
-**健康检查**: 每 5 秒执行 `pg_isready`
-**数据卷**: `pgdata:/var/lib/postgresql/data`
-
-**关键表**:
-- users: 用户认证和权限
-- workspaces: 工作区元数据
-- changes: 变更工作流状态
-- agent_runs: Agent 执行记录
-- worktrees: Git 工作树租约
-- refresh_tokens: 令牌撤销跟踪
-
-## 缓存和消息队列
+### PostgreSQL 16
+- **用途**: 主数据存储，所有业务表
+- **连接方式**: asyncpg (异步驱动)，通过 `postgresql+asyncpg://` URL
+- **连接池**: SQLAlchemy async engine，在 lifespan 中初始化/销毁
+- **迁移管理**: Alembic，20 个迁移版本
+- **Docker**: postgres:16-alpine，持久化到 pgdata volume
 
 ### Redis 7
+- **用途**: 缓存、会话存储
+- **连接方式**: `redis://` URL，通过 `core/redis.py` 管理
+- **Docker**: redis:7-alpine，AOF 持久化，redisdata volume
 
-**集成方式**: redis-py (同步) + aioredis (异步)
+### 文件系统
+- **Host Mount**: 宿主机项目目录挂载到容器 `/host-projects`
+- **Worktree Volume**: `worktree-data` -> `/data/sillyspec-workspaces`
+- **Spec Volume**: `spec-data` -> `/data/spec-workspaces`
+- **Claude Data**: `claude-data` -> `/app/.claude`
 
-**用途 1 - 会话存储**:
-- 存储 refresh token 白名单
-- 用户会话缓存（减少数据库查询）
+## AI Agent 集成
 
-**用途 2 - Pub/Sub（Agent 流式日志）**:
-- **Channel**: `agent:run:{run_id}:log`
-- **发布者**: Agent I/O 进程（捕获 Claude Code 输出）
-- **订阅者**: SSE 端点（/api/agent/runs/{id}/stream）
-- **解耦优势**: I/O 进程异步推送，HTTP 连接独立订阅
+### Claude Code (Anthropic)
+- **版本**: 2.1.158 (Docker 内安装)
+- **用途**: 核心代码生成 Agent，通过 CLI 子进程调用
+- **集成方式**: `backend/app/modules/agent/adapters/claude_code.py` (~37KB)
+- **通信协议**: JSON-RPC over stdin/stdout (通过 Daemon backends)
+- **认证**: ANTHROPIC_AUTH_TOKEN 环境变量
+- **模型配置**: 支持配置 base URL、不同层级模型
+- **API 代理**: 默认通过 `https://open.bigmodel.cn/api/anthropic` 代理
 
-**用途 3 - 分布式锁**:
-- Worktree 租约获取
-- Change 状态转换锁
+### SillySpec
+- **版本**: 3.17.15 (Docker 内安装)
+- **用途**: 文档驱动开发工具，管理变更工作流
+- **集成方式**: CLI 调用 + spec 文件系统
 
-**连接配置**:
-```python
-REDIS_URL=redis://localhost:6379/0
-```
+### Daemon Agent Detector
+- **用途**: 自动检测本地已安装的 AI Agent 运行时
+- **支持的 Provider**: 12 个，包括 Claude Code、Cursor、Windsurf、Cline、Aider、Continue、Copilot 等
+- **实现**: `sillyhub-daemon/sillyhub_daemon/agent_detector.py`
 
-**健康检查**: 每 5 秒执行 `redis-cli ping`
-**数据卷**: `redisdata:/data`
+## 认证与安全
 
-## Git 集成
+### JWT 认证
+- **库**: python-jose (cryptography) + passlib (bcrypt)
+- **流程**: 登录 -> access_token + refresh_token
+- **加密**: PyNaCl (NaCl/libsodium)
+- **前端存储**: Zustand persist -> localStorage
 
-### Git 客户端
+### Bootstrap Admin
+- 环境变量配置初始管理员账户
+- `PLATFORM_BOOTSTRAP_ADMIN_EMAIL/PASSWORD/DISPLAY_NAME`
 
-**集成方式**: GitPython + 子进程调用
+### RBAC
+- 角色 + 权限 + 工作区级别角色绑定
+- User -> UserWorkspaceRole -> Role -> RolePermission
 
-**用途 1 - 工作树管理**:
-- `git worktree add`: 创建隔离工作目录
-- `git worktree remove`: 清理工作树
-- `git worktree list`: 列出活跃工作树
+## 前端依赖
 
-**用途 2 - 身份注入**:
-- 修改 `.git/config` 注入 user.name、user.email
-- 临时凭证注入（HTTPS token、SSH 密钥）
+### UI 框架
+- **Next.js 14**: App Router, standalone 输出, API rewrites
+- **React 18**: 函数组件 + hooks
+- **Tailwind CSS 3.4**: 原子化 CSS
+- **shadcn/ui**: 组件库 (通过 components.json 配置)
+- **Lucide React**: 图标库
 
-**用途 3 - 危险操作保护**:
-- git reset --hard
-- git push --force
-- git rebase
+### 数据管理
+- **@tanstack/react-query 5**: 服务端状态管理
+- **Zustand 4**: 客户端状态管理
+- **Zod**: Schema 验证
 
-**Git Gateway 模块**: 统一封装所有 Git 操作，提供审计日志
+### 可视化
+- **@xyflow/react**: 流程图/拓扑图 (用于工作区组件拓扑)
+- **@uiw/react-markdown-preview**: Markdown 渲染
 
-## Claude Code CLI
-
-### Agent 执行引擎
-
-**集成方式**: 子进程 + 适配器模式
-
-**启动参数**:
-```bash
-claude --agent sillyspec-auto \
-       --spec-bundle /path/to/spec.tar.gz \
-       --output-format json
-```
-
-**适配器层**:
-- **AgentAdapter**: 基类，定义标准接口
-- **ClaudeCodeAdapter**: 实现 Claude Code 特定逻辑
-- **GenericCLIAdapter**: 通用 CLI 包装（未来扩展）
-
-**通信协议**:
-- **输入**: JSON 规范包（spec_bundle）
-- **输出**: JSON 行流（结构化日志）
-- **控制**: 信号传递（SIGTERM、SIGKILL）
-
-**工作目录策略**:
-- **只读操作**: 直接在原项目目录执行
-- **写操作**: 在 Worktree 中执行（隔离环境）
-
-## SillySpec CLI
-
-### 文档驱动开发工具
-
-**集成方式**: 子进程调用
-
-**用途**:
-- 初始化 .sillyspec 目录
-- 生成标准文档模板
-- 执行工作流阶段命令
-
-**命令示例**:
-```bash
-sillyspec run brainstorm
-sillyspec run scan
-sillyspec run propose
-```
-
-## 外部服务（可选）
-
-### OpenTelemetry
-
-**集成方式**: OTLP Exporter
-
-**用途**: 分布式追踪（未强制启用，通过环境变量配置）
-
-**配置**:
-```env
-OTEL_ENDPOINT=http://jaeger:4317
-```
-
-### Anthropic API (Claude)
-
-**集成方式**: Claude Code CLI 内部集成
-
-**凭证**: 通过 deploy/.env 环境变量注入
-```env
-ANTHROPIC_API_KEY=sk-ant-xxx
-```
-
-## 前后端通信
+## 通信协议
 
 ### REST API
+- 后端暴露 RESTful API (FastAPI)
+- 前端通过 Next.js rewrites 代理 `/api/*` -> `http://backend:8000/api/*`
+- 内部通信: `INTERNAL_API_BASE_URL` (SSR/ISR)
 
-**协议**: HTTP/1.1
+### WebSocket
+- Agent Run 日志流: `streamAgentRunLogs` (前端 SSE)
+- Daemon <-> Backend: websockets 库
 
-**认证**:
-- Access Token: Bearer JWT（HTTP Header: `Authorization: Bearer xxx`）
-- Refresh Token: Cookie + 轮换机制
+### Daemon 协议后端
+- **JSON-RPC**: Claude Code 标准协议
+- **JSONL**: JSON Lines 流式输出
+- **NDJSON**: 换行分隔 JSON
+- **Stream JSON**: 流式 JSON 输出
+- **Text**: 纯文本输出
 
-**主要端点**:
-- `POST /api/v1/auth/login`: 登录
-- `POST /api/v1/auth/refresh`: 刷新令牌
-- `GET /api/v1/workspaces`: 工作区列表
-- `POST /api/v1/workspaces/{id}/agent/runs`: 启动 Agent
-- `GET /api/v1/workspaces/{id}/agent/runs/{id}/stream`: SSE 日志流
-
-### SSE (Server-Sent Events)
-
-**用途**: Agent 日志实时推送
-
-**架构**:
-```
-Agent I/O 进程 → Redis Pub/Sub → SSE 端点 → 浏览器
-```
-
-**实现**:
-- **后端**: `/api/agent/runs/{id}/stream` (FastAPI StreamingResponse)
-- **前端**: EventSource API (agent-stream.ts)
-
-**事件类型**:
-- `message`: 结构化日志（JSON）
-- `error`: Agent 异常
-- `done`: 执行完成
-
-## 前端集成
-
-### TanStack Query (React Query)
-
-**用途**: 数据获取和缓存管理
-
-**集成点**:
-- 工作区列表
-- 变更详情
-- 任务状态
-- Agent 运行记录
-
-### Zustand
-
-**用途**: 全局状态管理
-
-**Store**: session.ts
-- Access token / Refresh token
-- 用户信息
-- 登录/登出操作
-
-### XYFlow (@xyflow/react)
-
-**用途**: 模块拓扑可视化
-
-**用途**: 显示项目模块依赖关系图
-
-### UIW React Markdown Preview
-
-**用途**: SillySpec 文档渲染
-
-**用途**: 在前端预览 proposal.md、design.md
-
-## 部署集成
+## DevOps
 
 ### Docker Compose
+- 全栈: `deploy/docker-compose.yml` (4 services + 5 volumes)
+- 开发: `deploy/docker-compose.dev.yml` (仅 postgres + redis)
 
-**服务编排**:
-- 依赖管理（depends_on + healthcheck）
-- 环境变量注入（env_file）
-- 卷挂载（项目目录、持久化数据）
+### 监控
+- OpenTelemetry: `OTEL_ENDPOINT` 配置
+- 结构化日志: structlog
+- 健康检查: `/api/health` 端点 + Docker HEALTHCHECK
 
-**卷映射**:
-- `/host-projects`: 宿主机项目目录（Agent 扫描用）
-- `/data/sillyspec-workspaces`: Worktree 隔离环境
-- `/data/spec-workspaces`: Spec 数据存储
-- `/app/.claude`: Claude Code 配置持久化
-
-**网络**: 默认桥接网络，服务间通过服务名通信
-
-### 路径重写
-
-**Docker 环境变量映射**:
-```env
-HOST_PATH_PREFIX=C:/Users/qinyi/IdeaProjects
-CONTAINER_PATH_PREFIX=/host-projects
-```
-
-**用途**: 将宿主机路径重写为容器挂载路径（Agent 执行时）
-
-## 安全集成
-
-### 密码哈希
-
-**算法**: bcrypt（12 轮）
-
-**库**: passlib[bcrypt]
-
-### 令牌签名
-
-**算法**: HS256 (HMAC-SHA256)
-
-**库**: python-jose[cryptography]
-
-**密钥**: SECRET_KEY 环境变量（>= 16 字符）
-
-### Git 凭证加密
-
-**算法**: AES-256-GCM
-
-**库**: pynacl (PyNaCl)
-
-**密钥**: SILLYSPEC_MASTER_KEY 环境变量
+### CI/CD Hooks
+- Pre-commit: ruff-format + ruff-check
+- Claude Code Hooks: `scan_write_guard.py` 阻止扫描期间的非法写入
