@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"t_fail","turn":{"id":"turn_fail","status":"failed","error":{"message":"something went wrong"}}}}

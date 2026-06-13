@@ -1,0 +1,4 @@
+{"type":"system","session_id":"sess_001","subtype":"init"}
+{"type":"control_request","request_id":"req_001","request":{"subtype":"tool_use","tool_name":"Bash","input":{"command":"echo hello"}}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done"}]}}
+{"type":"result","session_id":"sess_001","result":"Done","is_error":false}

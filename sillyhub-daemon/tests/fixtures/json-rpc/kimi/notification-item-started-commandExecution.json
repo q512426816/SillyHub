@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"t1","item":{"id":"i2","type":"commandExecution","command":"ls -la"}}}

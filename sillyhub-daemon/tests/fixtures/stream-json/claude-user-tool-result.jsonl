@@ -1,0 +1,1 @@
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_001","content":"file contents here"}]}}

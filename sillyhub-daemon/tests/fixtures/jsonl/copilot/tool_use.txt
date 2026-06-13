@@ -1,0 +1,1 @@
+{"type":"assistant.message","data":{"messageId":"m1","content":"","toolRequests":[{"toolCallId":"tc1","name":"Read","arguments":{"file_path":"/tmp/x.py"},"type":"tool_call"}]}}

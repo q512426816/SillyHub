@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":11,"method":"item/fileChange/requestApproval","params":{"threadId":"t_1","item":{"id":"item_2","type":"fileChange"}}}

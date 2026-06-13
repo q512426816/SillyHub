@@ -1,0 +1,1 @@
+{"type":"control_request","request_id":"req_001","request":{"subtype":"tool_use","tool_name":"Bash","input":{"command":"ls"}}}

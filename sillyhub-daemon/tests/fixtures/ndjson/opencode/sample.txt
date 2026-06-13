@@ -1,0 +1,6 @@
+{"type":"text","part":{"text":"Hello from opencode"},"sessionID":"sess-opencode-1"}
+{"type":"step_start","part":{}}
+{"type":"tool_use","part":{"tool":"Bash","callID":"call-1","state":{"status":"running","input":{"command":"ls -la"}}}}
+{"type":"tool_use","part":{"tool":"Read","callID":"call-2","state":{"status":"completed","input":{"file_path":"/tmp/x.py"},"output":"file contents"}}}
+{"type":"step_finish","part":{"tokens":{"input":100,"output":50,"cache":{"read":20,"write":10}}}}
+{"type":"error","error":{"name":"ModelError","data":{"message":"invalid model"}}}

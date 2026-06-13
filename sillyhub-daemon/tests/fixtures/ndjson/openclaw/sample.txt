@@ -1,0 +1,2 @@
+{"type":"text","part":{"text":"Openclaw response"},"sessionID":"sess-openclaw-1"}
+{"type":"step_finish","part":{"tokens":{"input":80,"output":40}}}

@@ -1,0 +1,1 @@
+{"type":"session.start","data":{"sessionId":"abc-123","selectedModel":"gpt-4.1"}}

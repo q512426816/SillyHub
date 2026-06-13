@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"t1","item":{"id":"i1","type":"agentMessage","text":"Hello"}}}

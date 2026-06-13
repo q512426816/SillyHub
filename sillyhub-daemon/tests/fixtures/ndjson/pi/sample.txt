@@ -1,0 +1,2 @@
+{"type":"text","part":{"text":"Pi agent output"},"sessionID":"sess-pi-1"}
+{"type":"tool_use","part":{"tool":"Grep","callID":"call-pi-1","state":{"status":"completed","input":{"pattern":"foo"},"output":{"matches":["line1","line2"]}}}}

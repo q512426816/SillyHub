@@ -1,0 +1,33 @@
+{
+  "name": "sillyhub-daemon",
+  "version": "0.1.0",
+  "description": "SillyHub local daemon for task execution (Node.js rewrite)",
+  "private": true,
+  "type": "module",
+  "main": "./dist/cli.js",
+  "bin": {
+    "sillyhub-daemon": "./dist/cli.js"
+  },
+  "scripts": {
+    "dev": "tsc --watch",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "start": "node dist/cli.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "pnpm@9.6.0",
+  "dependencies": {
+    "commander": "^12.1.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.14.0",
+    "@types/ws": "^8.5.12",
+    "typescript": "5.5.4",
+    "vitest": "^2.0.0"
+  }
+}

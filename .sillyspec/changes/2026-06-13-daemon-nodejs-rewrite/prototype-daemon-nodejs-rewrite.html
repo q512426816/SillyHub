@@ -1,0 +1,203 @@
+<!--
+author: qinyi
+created_at: 2026-06-13T23:54:04+0800
+change: 2026-06-13-daemon-nodejs-rewrite
+purpose: SillyHub Daemon Python→Node.js 重写 设计可视化原型（方案B：协议抽象 + Wave 增量交付）
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Daemon Node.js Rewrite — 设计原型 (方案B)</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --line:#30363d; --txt:#c9d1d9;
+    --accent:#58a6ff; --ok:#3fb950; --warn:#d29922; --ir:#bc8cff; --bg2:#1f2630;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px;background:var(--bg);color:var(--txt);
+       font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;line-height:1.55}
+  h1{font-size:20px;color:#fff;border-bottom:1px solid var(--line);padding-bottom:10px;margin:0 0 4px}
+  .sub{color:#8b949e;font-size:12px;margin-bottom:28px}
+  h2{font-size:15px;color:var(--accent);margin:36px 0 12px;
+     border-left:3px solid var(--accent);padding-left:10px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px 20px;margin-bottom:8px}
+  .tag{display:inline-block;font-size:11px;padding:1px 8px;border:1px solid var(--line);
+       border-radius:10px;color:#8b949e;margin-right:6px}
+  /* 分层架构 */
+  .layer{border:1px dashed var(--line);border-radius:6px;padding:12px 14px;margin:8px 0;
+         background:var(--bg2);position:relative}
+  .layer .ln{color:#fff;font-weight:600;font-size:13px}
+  .layer .ds{color:#8b949e;font-size:12px;margin-top:3px}
+  .layer.star{border:2px solid var(--ir);background:#241b33}
+  .layer.star .ln{color:var(--ir)}
+  .badge{position:absolute;top:-9px;right:12px;font-size:10px;background:var(--bg);
+         border:1px solid var(--ir);color:var(--ir);padding:1px 8px;border-radius:8px}
+  .arrow{text-align:center;color:#6e7681;font-size:14px;margin:-2px 0}
+  /* 状态机 */
+  .states{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:6px}
+  .state{border:1px solid var(--ok);color:var(--ok);border-radius:6px;padding:8px 12px;
+         font-size:12px;min-width:96px;text-align:center;background:#0f1a14}
+  .state.srv{border-color:var(--accent);color:var(--accent);background:#0e1622}
+  .state.end{border-color:var(--warn);color:var(--warn)}
+  .tr{color:#6e7681;font-size:12px}
+  /* 数据流 */
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:6px;margin-top:8px}
+  .node{flex:1;min-width:120px;border:1px solid var(--line);border-radius:6px;padding:10px;
+        font-size:12px;background:var(--bg2)}
+  .node .t{color:#fff;font-weight:600}
+  .node .c{color:#8b949e;font-size:11px;margin-top:4px}
+  .node.ir{border-color:var(--ir)}
+  .node.ir .t{color:var(--ir)}
+  .arrow-h{display:flex;align-items:center;color:#6e7681}
+  /* Wave */
+  .waves{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-top:8px}
+  .wave{border:1px solid var(--line);border-radius:6px;padding:10px;cursor:pointer;
+        background:var(--bg2);transition:.15s;font-size:12px}
+  .wave:hover{border-color:var(--accent)}
+  .wave.sel{border-color:var(--accent);background:#112033}
+  .wave .w{color:var(--accent);font-weight:700}
+  .wave .d{color:#8b949e;font-size:11px;margin-top:4px}
+  .wdetail{margin-top:14px;padding:14px;border:1px solid var(--accent);border-radius:6px;
+           background:#0e1622;font-size:12px;min-height:60px}
+  .wdetail b{color:var(--accent)}
+  .legend{margin-top:18px;font-size:11px;color:#8b949e}
+  .legend span{margin-right:18px}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
+  td,th{border:1px solid var(--line);padding:6px 9px;text-align:left}
+  th{color:#fff;background:var(--bg2)}
+  .note{font-size:12px;color:#8b949e;margin-top:10px}
+</style>
+</head>
+<body>
+
+<h1>SillyHub Daemon — Python → Node.js 重写</h1>
+<div class="sub">
+  设计原型 · 方案B（协议抽象 + Wave 增量交付） · change: 2026-06-13-daemon-nodejs-rewrite
+  &nbsp;|&nbsp; 源码 4059 行 / 测试 6660 行 · 目标 Node.js 20 LTS + TypeScript
+</div>
+
+<!-- 1. 分层架构 -->
+<h2>① 分层架构（自顶向下）</h2>
+<div class="panel">
+
+  <div class="layer">
+    <div class="ln">CLI · commander</div>
+    <div class="ds">start / stop / status / logs（对齐现有 Click 命令）</div>
+  </div>
+  <div class="arrow">▼</div>
+
+  <div class="layer">
+    <div class="ln">Daemon 主类 · 生命周期</div>
+    <div class="ds">register → 心跳循环 → 事件分发 → 重连（10s）+ HTTP 轮询兜底</div>
+  </div>
+  <div class="arrow">▼&nbsp;&nbsp;WS 客户端 (ws)&nbsp;&nbsp;·&nbsp;&nbsp;HubClient REST (fetch)&nbsp;&nbsp;▼</div>
+
+  <div class="layer">
+    <div class="ln">TaskRunner · 编排</div>
+    <div class="ds">prepare_workspace → 写 CLAUDE.md → credential 渲染(0600) → 调 backend → collect_diff → submit_messages</div>
+  </div>
+  <div class="arrow">▼</div>
+
+  <div class="layer star">
+    <span class="badge">★ 方案B 核心</span>
+    <div class="ln">ProtocolAdapter 抽象层</div>
+    <div class="ds">唯一接口 <code>parse(line): AgentEvent | AgentEvent[] | null</code> + 可选 <code>onControl(stdin)</code>。
+        协议差异 100% 收敛于此；通用流程下沉到 TaskRunner。</div>
+  </div>
+  <div class="arrow">▼&nbsp;&nbsp;5 个 adapter（覆盖 12 provider）&nbsp;&nbsp;▼</div>
+
+  <table>
+    <tr><th>Adapter</th><th>Provider</th><th>解析特征</th></tr>
+    <tr><td>stream_json</td><td>claude · gemini · cursor</td><td>保持 stdin 应答 control_request，type=assistant/user/system/result</td></tr>
+    <tr><td>json_rpc</td><td>codex · hermes · kimi · kiro</td><td>JSON-RPC 2.0：initialize→initialized→thread/start→turn/start</td></tr>
+    <tr><td>jsonl</td><td>copilot</td><td>session.start，assistant.message_delta 累积，tool.execution_complete</td></tr>
+    <tr><td>ndjson</td><td>opencode · openclaw · pi</td><td>type=text|tool_use|error，completed 时同发 tool_use+tool_result</td></tr>
+    <tr><td>text</td><td>antigravity</td><td>每行 → text 事件，无结构化类型</td></tr>
+  </table>
+</div>
+
+<!-- 2. lease 状态机 -->
+<h2>② Lease 生命周期状态机（不可破坏的契约）</h2>
+<div class="panel">
+  <div class="states">
+    <div class="state srv">task_available<br><span class="tr">server→daemon</span></div>
+    <span class="tr">claim(→token)</span>
+    <div class="state">lease_claimed</div>
+    <span class="tr">start</span>
+    <div class="state">running<br><span class="tr">流式 messages</span></div>
+    <span class="tr">complete</span>
+    <div class="state end">lease_complete<br><span class="tr">patch + stats</span></div>
+  </div>
+  <div class="note">WS 常量逐字对齐 <code>backend/app/modules/daemon/protocol.py</code>：
+    daemon:register / heartbeat(_ack) / task_available / lease_claim / lease_start / lease_complete / lease_messages。</div>
+</div>
+
+<!-- 3. 协议数据流 -->
+<h2>③ 协议数据流（单次 lease 执行）</h2>
+<div class="panel">
+  <div class="flow">
+    <div class="node"><div class="t">spawn child</div><div class="c">子进程 + env 注入 + stdin 不关闭</div></div>
+    <div class="arrow-h">▶</div>
+    <div class="node"><div class="t">stdout line</div><div class="c">逐行读取</div></div>
+    <div class="arrow-h">▶</div>
+    <div class="node ir"><div class="t">ProtocolAdapter.parse()</div><div class="c">→ AgentEvent IR（统一中间表示）</div></div>
+    <div class="arrow-h">▶</div>
+    <div class="node"><div class="t">on_event 回调</div><div class="c">→ submit_messages(REST)</div></div>
+  </div>
+  <div class="flow" style="margin-top:8px">
+    <div class="node"><div class="t">结束</div><div class="c">status=completed</div></div>
+    <div class="arrow-h">▶</div>
+    <div class="node"><div class="t">collect git diff</div><div class="c">patch + files_changed</div></div>
+    <div class="arrow-h">▶</div>
+    <div class="node end" style="border-color:var(--warn)"><div class="t" style="color:var(--warn)">complete_lease</div><div class="c">result{status,patch,stats}</div></div>
+  </div>
+</div>
+
+<!-- 4. Wave 路线图 -->
+<h2>④ Wave 增量交付路线图（点击查看详情）</h2>
+<div class="panel">
+  <div class="waves" id="waves"></div>
+  <div class="wdetail" id="wdetail">点击上方 Wave 查看交付内容与验收标准。</div>
+  <div class="legend">
+    <span><i class="dot" style="background:#bc8cff"></i>方案B 核心 Wave</span>
+    <span><i class="dot" style="background:#58a6ff"></i>并行 Wave</span>
+    <span><i class="dot" style="background:#3fb950"></i>验收门槛：tsc + vitest 双绿</span>
+  </div>
+</div>
+
+<script>
+const WAVES = [
+  {w:"W0", c:"#3fb950", t:"项目骨架", d:"TS配置·目录·类型·vitest", ac:"编译通过 + 脚手架",
+   body:"TypeScript 严格模式、目录结构、类型定义（AgentEvent/TaskResult/DaemonMessage/Lease payload）、vitest 脚手架、零业务逻辑。"},
+  {w:"W1", c:"#bc8cff", t:"协议抽象层 ★", d:"ProtocolAdapter + 5 adapter", ac:"fixture 单测（复用 Python 样本）",
+   body:"ProtocolAdapter 接口 + 5 个 adapter（stream_json/json_rpc/jsonl/ndjson/text）+ provider→protocol 映射 + getBackend 工厂。方案B 的核心，依赖 W0。"},
+  {w:"W2", c:"#58a6ff", t:"基础设施", d:"config·cred·version·ws·detect", ac:"单测通过",
+   body:"config(配置读写) · credential(0600 权限 + 占位符渲染) · version · workspace(git mirror) · agent_detector(12 provider 探测)。与 W1 并行。"},
+  {w:"W3", c:"#58a6ff", t:"通信层", d:"HubClient REST + WS client", ac:"契约 mock 测试",
+   body:"HubClient(REST, fetch) 对齐全部端点 + WebSocket client(ws 库, 心跳+10s 重连+HTTP 轮询兜底)。严格对齐 protocol.py。依赖 W2。"},
+  {w:"W4", c:"#58a6ff", t:"编排层", d:"TaskRunner + Daemon 主类", ac:"端到端 mock 流程",
+   body:"TaskRunner 编排链 + Daemon 生命周期(register→heartbeat→task_available→claim→start→messages→complete)。依赖 W1+W3。"},
+  {w:"W5", c:"#d29922", t:"CLI + 冒烟", d:"commander + 真实连接", ac:"真实 daemon↔backend 一次 lease 全流程",
+   body:"CLI(commander: start/stop/status/logs) + 真实 backend 冒烟。依赖 W4。完成即等价于 Python 版。"},
+];
+const wc = document.getElementById('waves');
+const wd = document.getElementById('wdetail');
+let sel = 1;
+function render(){
+  wc.innerHTML = WAVES.map((x,i)=>`
+    <div class="wave ${i===sel?'sel':''}" data-i="${i}" style="${i===1?'border-color:#bc8cff':''}">
+      <div class="w" style="color:${x.c}">${x.w}</div>
+      <div class="d"><b style="color:#fff">${x.t}</b></div>
+      <div class="d">${x.d}</div>
+    </div>`).join('');
+  [...wc.children].forEach(c=>c.onclick=()=>{sel=+c.dataset.i; render();});
+  const x=WAVES[sel];
+  wd.innerHTML = `<b>${x.w} · ${x.t}</b><br>交付：${x.body}<br><br><b>验收标准：</b>${x.ac}`;
+}
+render();
+</script>
+
+</body>
+</html>
