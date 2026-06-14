@@ -5,8 +5,8 @@ created_at: 2026-05-31T23:30:00
 
 # workspace
 
-> 最后更新：2026-05-31
-> 最近变更：feat(worktree): worktree lease lifecycle management
+> 最后更新：2026-06-14
+> 最近变更：2026-06-14-agent-runtime-selection（新增 `default_agent` 列 + scan-generate provider 覆盖）
 > 模块路径：`app/modules/workspace/**`
 
 ## 职责
@@ -33,6 +33,7 @@ WorkspaceService（编排层）
 3. **Reparse 子工作区**：解析 `projects/*.yaml`，UPSERT 子 Workspace + WorkspaceRelation，移除已消失的子项
 4. **路径映射**：Docker 环境下 `host_path_prefix → container_path_prefix` 自动重写
 5. **IntegrityError 翻译**：Postgres UNIQUE 违例映射为 `WorkspacePathDuplicate` / `WorkspaceSlugDuplicate`
+6. **默认 Agent 持久化**（2026-06-14）：`Workspace.default_agent VARCHAR(64) NULL` 列（migration 202606280900）；`WorkspaceCreate/Update/Read` 增 `default_agent` 可选字段，Update 走 `exclude_unset`（传 null=清空，省略=不变）。供 agent 模块三入口解析 provider（显式 > default_agent > None，见 agent.md）。
 
 ## 对外接口
 
@@ -43,9 +44,10 @@ WorkspaceService（编排层）
 | `GET /workspaces` | `list_workspaces()` | 列表（管理员看全部，普通用户按 RBAC 过滤） | 前端 |
 | `GET /workspaces/topology` | `get_topology()` | 全局拓扑关系图 | 前端 |
 | `GET /workspaces/{id}` | `get_workspace()` | 获取单个工作区 | 前端 |
-| `PATCH /workspaces/{id}` | `update_workspace()` | 更新字段（exclude_unset） | 前端 |
+| `PATCH /workspaces/{id}` | `update_workspace()` | 更新字段（exclude_unset）；**2026-06-14 起** 支持传 `default_agent`（传 null=清空，省略=不变） | 前端 |
 | `DELETE /workspaces/{id}` | `delete_workspace()` | 软删除（status → deleted） | 前端 |
 | `POST /workspaces/{id}/rescan` | `rescan_workspace()` | 重新扫描文件系统 | 前端 |
+| `POST /workspaces/{id}/scan-generate` | `scan_generate()` | **2026-06-14 起** 支持 `?provider=` 覆盖 workspace 默认 agent，透传 `start_scan_dispatch(provider=)` | 前端 |
 | `POST /workspaces/{id}/reparse` | `reparse_workspace()` | 重新解析子工作区+关系 | 前端 |
 | `GET /workspaces/{id}/relations` | `list_relations()` | 列出出入关系 | 前端 |
 | `POST /workspaces/{id}/relations` | `create_relation()` | 创建关系 | 前端 |
@@ -110,4 +112,5 @@ POST /workspaces/{id}/reparse → WorkspaceService.reparse()
 
 | 日期 | 变更 | 摘要 |
 |------|------|------|
+| 2026-06-14 | 2026-06-14-agent-runtime-selection | 新增 `default_agent` 列（migration 202606280900）+ Create/Update/Read schema 字段（exclude_unset）；scan-generate 端点增 `?provider=` 覆盖透传 start_scan_dispatch |
 | 2026-05-31 | 初始归档 | 从代码逆向生成模块文档 |

@@ -5,8 +5,8 @@ created_at: 2026-05-31T23:30:00
 
 # change
 
-> 最后更新：2026-06-03
-> 最近变更：fix(change) 文档解析对齐 SillySpec 文件生命周期 — MASTER.md 改可选、parser 不读 frontmatter
+> 最后更新：2026-06-14
+> 最近变更：2026-06-14-agent-runtime-selection（stage 手动 dispatch 入口增 provider 覆盖）
 > 模块路径：`app/modules/change/**`
 
 ## 职责
@@ -35,6 +35,7 @@ ChangeService（业务层）
 5. **归档门禁**：6 项检查（无未解决反馈、AC 确认、技术验证通过、业务评审通过、反馈已分类、文档完整）
 6. **M:N 关联**：Change 可关联多个 Workspace（通过 `affected_components` 匹配 `component_key`）
 7. **文档内容**：从文件系统按需读取，不存 DB；有路径遍历防护和 1MB 大小限制
+8. **Stage 手动 dispatch provider 透传**（2026-06-14）：`dispatch()` / `dispatch_next_step()` 增 `provider` 形参，透传 `start_stage_dispatch(provider=)`；`manual_dispatch` 端点接收 `ManualDispatchRequest{provider?}`（FR-06）。自动调度链路（`auto_dispatch_next_step`）**不传** provider，由 `start_stage_dispatch` 内部读 `workspace.default_agent` 兜底（FR-04 / R-03）。
 
 ## 对外接口
 
@@ -54,7 +55,7 @@ ChangeService（业务层）
 | `POST /workspaces/{ws}/changes/{id}/feedback` | `submit_feedback()` | 提交反馈（A/B/C/D） | 前端 |
 | `GET /workspaces/{ws}/changes/{id}/archive-gate` | `check_archive_gate()` | 归档门禁 6 项检查 | 前端 |
 | `GET /workspaces/{ws}/changes/{id}/agent-status` | `get_agent_status()` | Agent 调度状态 | 前端 |
-| `POST /workspaces/{ws}/changes/{id}/dispatch` | `manual_dispatch()` | 手动触发 Agent 调度 | 前端 |
+| `POST /workspaces/{ws}/changes/{id}/dispatch` | `manual_dispatch()` | 手动触发 Agent 调度；**2026-06-14 起** 接收 `ManualDispatchRequest{provider?}` 覆盖默认 agent，透传 `dispatch(provider=)` → `start_stage_dispatch(provider=)` | 前端 |
 
 ## 关键数据流
 
@@ -121,5 +122,6 @@ POST /changes/{id}/feedback → ChangeService.submit_feedback()
 
 | 日期 | 变更 | 摘要 |
 |------|------|------|
+| 2026-06-14 | 2026-06-14-agent-runtime-selection | stage 手动 dispatch 入口增 `ManualDispatchRequest{provider?}`；dispatch/dispatch_next_step 透传 provider → start_stage_dispatch；自动调度链路不传 provider（内部读 default_agent 兜底） |
 | 2026-05-31 | 初始归档 | 从代码逆向生成模块文档 |
 | 2026-06-03 | 文档解析对齐生命周期 | MASTER.md 改可选、parser 移除 frontmatter 解析、title 取自 proposal.md、标准文档新增 module_impact |

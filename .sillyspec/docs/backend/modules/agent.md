@@ -6,7 +6,7 @@ created_at: 2026-05-30 20:20:00
 # agent
 
 > 最后更新：2026-06-14
-> 最近变更：2026-06-14-unified-agent-execution
+> 最近变更：2026-06-14-agent-runtime-selection（placement provider 严格匹配 + 跨 provider 回退告警；三入口 provider 解析）
 > 模块路径：`app/modules/agent/**`
 
 ## 职责
@@ -41,12 +41,13 @@ AgentService（编排层）
 8. **执行可靠性保证**：`ExecutionCoordinatorService` 封装 6 能力点：幂等创建（`idempotency_key`）、乐观锁（`version`）、上下文指纹（SHA-256）、执行恢复（`resume_token` 一次性）、进度快照（`checkpoint_data` JSONB + `checkpoint_version`）、审批门（`approval_token` 一次性）。
 9. **用户指导输入**：`submit_run_input()` 接受 `pending_input` 事件回复，写 `AgentRunLog(channel="user_input")` 并 Redis Pub/Sub 推送。通道约定：`pending_input`（Agent 请求确认）/ `user_input`（用户指导文本）。
 10. **Usage/Cost 追踪**：由 daemon `complete_lease` 写回 AgentRun `total_cost_usd/duration_ms/input_tokens/output_tokens/num_turns/session_id/exit_code`（task-06，daemon 侧 `usage` 跨 message 累加对齐原 SERVER `_extract_result_metadata`）。
+11. **Provider 解析与 placement 回退**（2026-06-14）：三入口（`start_run` / `start_stage_dispatch` / `start_scan_dispatch`）统一 `resolved_provider = provider or workspace.default_agent`（优先级：显式入参 > workspace.default_agent > None），解析后透传 `dispatch_to_daemon(provider=)`。placement 层 `_get_online_runtime(provider)` 严格匹配 provider：provider 给定且无在线 runtime → **跨 provider 回退任意在线** + `log.warning("placement_provider_fallback", wanted=provider, actual=...)`（不失败，R-01 靠告警暴露配置错误）；provider=None 维持 `ORDER BY last_heartbeat DESC`（旧行为不变，成功标准 1）。自动调度链路（`auto_dispatch_next_step`）不传 provider，由 `start_stage_dispatch` 内部读 default_agent 兜底（FR-04 / R-03）。
 
 ## 对外接口
 
 | 接口 | 方法 | 说明 | 调用方 |
 |------|------|------|--------|
-| `POST /workspaces/{ws}/agent/runs` | `start_run()` | 启动 agent run（无在线 daemon → failed + no_online_daemon） | 前端 |
+| `POST /workspaces/{ws}/agent/runs` | `start_run()` | 启动 agent run（无在线 daemon → failed + no_online_daemon）；**2026-06-14 起** 接收 `AgentRunCreate.provider` 覆盖默认 agent | 前端 |
 | `GET /agent-runs/{run_id}/execution-context` | `_get_execution_context()` | **task-02 新增**：透传完整 bundle（claude_md+prompt+repo/branch+allowed_paths+tool_config），run 类型分发 + 鉴权 + 归属校验 | daemon |
 | `GET /workspaces/{ws}/agent/runs/{id}` | `get_run()` | 查询单个 run | 前端 |
 | `GET /workspaces/{ws}/agent/runs` | `list_runs()` | 列出 workspace runs | 前端 |
@@ -125,6 +126,7 @@ daemon → complete_lease(stats + diff) → daemon 模块写回 AgentRun 字段 
 
 | 日期 | 变更 | 摘要 |
 |------|------|------|
+| 2026-06-14 | 2026-06-14-agent-runtime-selection | 三入口（start_run/start_stage_dispatch/start_scan_dispatch）provider 解析（显式 > workspace.default_agent > None）+ 透传 dispatch_to_daemon(provider=)；placement `_get_online_runtime(provider)` 严格匹配 + 跨 provider 回退告警（placement_provider_fallback）；AgentRunCreate.provider 字段 + create_agent_run 透传 |
 | 2026-06-14 | 2026-06-14-unified-agent-execution | 删 SERVER 路径（claude_code.py 整文件 + 三条执行体 + _proc_registry + SIGTERM 链）；daemon 唯一执行者 + NoOnlineDaemonError；新增 execution-context 端点；dispatch_to_daemon 扩字段 + lease.metadata 持久化；kill 改 cancel_lease + 状态映射单一驱动；diff 收口 daemon |
 | 2026-06-05 | ql-20260605-003-c8e4 | AgentRun 新增 6 列（cost/timing/num_turns/session_id/conversation_events），适配器解析 CLI result 元数据 |
 | 2026-06-02 | 2026-06-02-sse-reliable-stream | SSE `after` 续传 + `log_id` 去重 |

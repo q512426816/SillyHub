@@ -1,0 +1,202 @@
+<!--
+  author: qinyi
+  created_at: 2026-06-14T12:00:00
+  change: 2026-06-14-agent-runtime-selection
+  step: 9/11 HTML 原型
+  说明: 线框风格原型，展示 agent-runtime-selection 变更的三块 UI + provider 解析/回退流程。
+        单文件、浏览器直接打开、内联 CSS+JS。仅用于确认设计方向，非最终 UI。
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Agent Runtime Selection — 原型</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", "PingFang SC", monospace;
+    background: #f5f5f5; color: #222; margin: 0; padding: 24px;
+    line-height: 1.5;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 14px; margin: 0 0 12px; color: #555; text-transform: uppercase; letter-spacing: 1px; }
+  .sub { color: #888; font-size: 13px; margin-bottom: 24px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; max-width: 1200px; }
+  .panel {
+    background: #fff; border: 1px solid #ccc; border-radius: 4px; padding: 16px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .panel.full { grid-column: 1 / -1; }
+  label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
+  select, button {
+    font-family: inherit; font-size: 13px; padding: 6px 8px;
+    border: 1px solid #999; border-radius: 3px; background: #fff; cursor: pointer;
+  }
+  select { width: 100%; }
+  button.primary { background: #222; color: #fff; border-color: #222; padding: 6px 14px; }
+  .row { margin-bottom: 12px; }
+  .badge { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 10px; margin-left: 6px; }
+  .online { background: #e6f4ea; color: #1e7e34; }
+  .offline { background: #fbe9e7; color: #c0392b; }
+  .runtimes { font-size: 12px; color: #555; margin-top: 8px; }
+  .runtimes span { white-space: nowrap; }
+  .resolved {
+    background: #f0f4ff; border-left: 3px solid #4a6fa5; padding: 8px 10px;
+    font-size: 12px; margin-top: 12px; border-radius: 2px;
+  }
+  .warn {
+    background: #fff8e1; border-left: 3px solid #f0ad4e; padding: 8px 10px;
+    font-size: 12px; margin-top: 8px; border-radius: 2px; display: none;
+  }
+  .flow {
+    font-family: monospace; font-size: 12px; white-space: pre;
+    background: #fafafa; border: 1px dashed #bbb; padding: 12px; border-radius: 3px;
+    overflow-x: auto;
+  }
+  .legend { font-size: 11px; color: #999; margin-top: 16px; }
+  code { background: #eee; padding: 1px 4px; border-radius: 2px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>Agent Runtime Selection — 原型</h1>
+<div class="sub">
+  变更 <code>2026-06-14-agent-runtime-selection</code> · 线框原型，演示三处 UI 与 provider 解析/回退逻辑。
+  模拟 daemon 注册了 claude / codex / hermes 三个 provider（codex 设为离线以演示回退）。
+</div>
+
+<div class="grid">
+
+  <!-- ============ Panel A: workspace 默认 agent 设置 ============ -->
+  <div class="panel">
+    <h2>A · 工作空间设置</h2>
+    <div class="row">
+      <label>默认 Agent（workspace.default_agent）</label>
+      <select id="ws-default">
+        <option value="">（未设置 — 随机选在线 runtime）</option>
+        <option value="claude">🟣 Claude Code</option>
+        <option value="codex">🟢 Codex</option>
+        <option value="hermes">🟣 Hermes</option>
+      </select>
+    </div>
+    <button class="primary" onclick="saveDefault()">保存默认 Agent</button>
+    <div class="runtimes">
+      当前在线 runtime：
+      <span>claude <span class="badge online">online</span></span> ·
+      <span>codex <span class="badge offline">offline</span></span> ·
+      <span>hermes <span class="badge online">online</span></span>
+    </div>
+    <div class="resolved" id="ws-saved">默认 Agent 未设置</div>
+  </div>
+
+  <!-- ============ Panel B: task 触发下拉 ============ -->
+  <div class="panel">
+    <h2>B · Task 触发</h2>
+    <div class="row">
+      <label>Task #T-102 — 实现登录校验</label>
+    </div>
+    <div class="row">
+      <label>执行 Agent（临时覆盖默认）</label>
+      <select id="task-agent"></select>
+    </div>
+    <button class="primary" onclick="dispatchTask()">▶ 触发 Task 执行</button>
+    <div class="warn" id="task-warn"></div>
+    <div class="resolved" id="task-resolved"></div>
+    <div class="legend">stage / scan 触发卡片共用同一下拉组件（省略不画）。</div>
+  </div>
+
+  <!-- ============ Panel C: provider 解析流程 ============ -->
+  <div class="panel full">
+    <h2>C · Provider 解析与回退流程（placement._get_online_runtime）</h2>
+    <div class="flow">┌─────────────────────────────────────────────────────────────┐
+│  解析 provider（三入口 start_run / stage / scan）            │
+│                                                              │
+│   显式 provider 参数  &gt;  workspace.default_agent  &gt;  None     │
+│              │                       │                │       │
+│              ▼                       ▼                ▼       │
+│      _get_online_runtime(provider)  ────────►  ORDER BY 心跳  │
+│              │                                              │
+│   ┌──────────┴──────────┐                                   │
+│   ▼ 严格匹配该 provider │                                   │
+│  有在线? ──Yes──► 锁定该 runtime_id（provider 锁定）          │
+│   │No                                                        │
+│   ▼ 回退：任意在线 runtime（ORDER BY last_heartbeat）         │
+│   ▼ log.warning("placement_provider_fallback")               │
+│                                                              │
+│  注意：decide_backend 不参与 —— 只判有无在线 runtime          │
+└─────────────────────────────────────────────────────────────┘</div>
+  </div>
+
+</div>
+
+<script>
+  // 模拟 daemon 注册的 runtime（provider → online?）
+  const RUNTIMES = {
+    claude:  { online: true,  label: "🟣 Claude Code" },
+    codex:   { online: false, label: "🟢 Codex" },
+    hermes:  { online: true,  label: "🟣 Hermes" },
+  };
+
+  const taskSel = document.getElementById("task-agent");
+  const wsSaved = document.getElementById("ws-saved");
+  const taskWarn = document.getElementById("task-warn");
+  const taskResolved = document.getElementById("task-resolved");
+
+  // 同步 task 下拉：含"使用默认"选项 + 各 provider
+  function refreshTaskSelect() {
+    taskSel.innerHTML = "";
+    const def = document.getElementById("ws-default").value;
+    const useDef = document.createElement("option");
+    useDef.value = "";
+    useDef.textContent = def
+      ? `使用默认（${RUNTIMES[def]?.label || def}）`
+      : "使用默认（未设置 → 随机在线）";
+    taskSel.appendChild(useDef);
+    Object.entries(RUNTIMES).forEach(([k, v]) => {
+      const o = document.createElement("option");
+      o.value = k;
+      o.textContent = `${v.label} ${v.online ? "" : "(offline)"}`;
+      taskSel.appendChild(o);
+    });
+  }
+  document.getElementById("ws-default").addEventListener("change", refreshTaskSelect);
+  refreshTaskSelect();
+
+  function saveDefault() {
+    const v = document.getElementById("ws-default").value;
+    wsSaved.textContent = v
+      ? `已保存：workspace.default_agent = "${v}"`
+      : "已保存：默认 Agent 未设置（None → 随机）";
+  }
+
+  // 模拟 provider 解析 + 严格匹配 + 回退
+  function resolveProvider(explicit) {
+    const def = document.getElementById("ws-default").value;
+    // 优先级：显式 > workspace.default_agent > None
+    return explicit || def || null;
+  }
+
+  function dispatchTask() {
+    const explicit = taskSel.value; // "" = 使用默认
+    const wanted = resolveProvider(explicit);
+    taskWarn.style.display = "none";
+
+    if (wanted && RUNTIMES[wanted] && RUNTIMES[wanted].online) {
+      taskResolved.textContent = `✅ provider="${wanted}" 在线 → 锁定 runtime（严格匹配命中）`;
+    } else if (wanted && RUNTIMES[wanted] && !RUNTIMES[wanted].online) {
+      // 回退：选一个在线的
+      const fb = Object.entries(RUNTIMES).find(([, v]) => v.online)[0];
+      taskWarn.style.display = "block";
+      taskWarn.textContent = `⚠️ provider="${wanted}" 无在线 runtime → 回退到 "${fb}"（已记 placement_provider_fallback 警告）`;
+      taskResolved.textContent = `↩️ 实际 runtime provider="${fb}"`;
+    } else if (!wanted) {
+      const fb = Object.entries(RUNTIMES).find(([, v]) => v.online)[0];
+      taskResolved.textContent = `🎲 无指定 provider（None）→ 随机在线 = "${fb}"`;
+    } else {
+      taskResolved.textContent = `❓ provider="${wanted}" 未注册`;
+    }
+  }
+</script>
+</body>
+</html>
