@@ -290,29 +290,32 @@ class RunPlacementService:
     ) -> dict | None:
         """Return the first online daemon runtime for the user, or None.
 
-        If *provider* is given, only match runtimes with that provider.
+        If *provider* is given, prefer a runtime with that provider; if none
+        is online, fall back to any online runtime and emit
+        ``placement_provider_fallback`` (FR-03: dispatch must never silently
+        fail just because the requested provider is momentarily offline). When
+        *provider* is None, behavior is unchanged (ORDER BY last_heartbeat_at,
+        no warning).
         """
         try:
-            where_extra = "AND provider = :provider" if provider else ""
-            params: dict = {"user_id": user_id.hex}
             if provider:
-                params["provider"] = provider
-            result = await self._session.execute(
-                text(
-                    f"""
-                    SELECT id, user_id, provider, status
-                    FROM daemon_runtimes
-                    WHERE user_id = :user_id
-                      AND status = 'online'
-                      {where_extra}
-                    ORDER BY last_heartbeat_at DESC NULLS LAST
-                    LIMIT 1
-                    """
-                ),
-                params,
-            )
-            row = result.mappings().first()
-            return dict(row) if row else None
+                # 1) strict match on the requested provider
+                row = await self._query_online(user_id, provider=provider)
+                if row:
+                    return row
+                # 2) fall back to any online runtime + observable warning
+                fallback = await self._query_online(user_id, provider=None)
+                if fallback:
+                    log.warning(
+                        "placement_provider_fallback",
+                        wanted=provider,
+                        actual=fallback.get("provider"),
+                        user_id=str(user_id),
+                    )
+                    return fallback
+                return None
+            # provider=None: unchanged single query, no warning
+            return await self._query_online(user_id, provider=None)
         except Exception as exc:
             log.warning(
                 "placement_get_online_runtime_query_failed",
@@ -320,6 +323,39 @@ class RunPlacementService:
                 error=str(exc),
             )
             return None
+
+    async def _query_online(
+        self,
+        user_id: uuid.UUID,
+        *,
+        provider: str | None = None,
+    ) -> dict | None:
+        """Query the first online daemon runtime, optionally filtered by provider.
+
+        Ordered by ``last_heartbeat_at DESC`` so the most recently seen runtime
+        wins (R-02). Raises propagate to ``_get_online_runtime`` which owns the
+        error-suppression policy.
+        """
+        where_extra = "AND provider = :provider" if provider else ""
+        params: dict = {"user_id": user_id.hex}
+        if provider:
+            params["provider"] = provider
+        result = await self._session.execute(
+            text(
+                f"""
+                SELECT id, user_id, provider, status
+                FROM daemon_runtimes
+                WHERE user_id = :user_id
+                  AND status = 'online'
+                  {where_extra}
+                ORDER BY last_heartbeat_at DESC NULLS LAST
+                LIMIT 1
+                """
+            ),
+            params,
+        )
+        row = result.mappings().first()
+        return dict(row) if row else None
 
     async def _send_ws_wakeup(
         self,

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AgentProviderSelect } from "@/components/AgentProviderSelect";
 import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api";
 import {
@@ -28,6 +29,8 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
+  // 生成项目规范时使用的 agent provider 覆盖（FR-02，2026-06-14-agent-runtime-selection）
+  const [scanProvider, setScanProvider] = useState<string | null>(null);
 
   const handleScan = async () => {
     setError(null);
@@ -53,7 +56,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
     setError(null);
     setPhase("creating");
     try {
-      const result = await scanGenerate(scan.root_path);
+      const result = await scanGenerate(scan.root_path, scanProvider);
       router.push(`/workspaces/${result.workspace_id}`);
     } catch (err) {
       const msg = err instanceof ApiError ? `${err.code}: ${err.message}` : "生成失败";
@@ -164,6 +167,19 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
               </ul>
             )}
           </section>
+        )}
+
+        {scan && (
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">
+              Agent provider（生成项目规范时生效）
+            </label>
+            <AgentProviderSelect
+              value={scanProvider}
+              onChange={setScanProvider}
+              includeDefault="跟随工作区默认"
+            />
+          </div>
         )}
 
         {scan && phase === "ready" && (

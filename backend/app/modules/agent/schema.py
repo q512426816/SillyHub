@@ -15,6 +15,10 @@ class AgentRunCreate(BaseModel):
     profile_version: str | None = None
     idempotency_key: str | None = Field(default=None, max_length=64)
     preferred_backend: str | None = Field(default=None, max_length=20)
+    # Explicit agent provider override; when None the dispatch layer falls
+    # through to workspace.default_agent (FR-02, change
+    # 2026-06-14-agent-runtime-selection).
+    provider: str | None = Field(default=None, max_length=64)
 
 
 class ExecutionContextResponse(BaseModel):

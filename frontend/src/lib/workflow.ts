@@ -35,9 +35,11 @@ export function transitionChange(
   changeId: string,
   targetStage: string,
   reason?: string,
+  provider?: string | null,
 ) {
   const body: Record<string, unknown> = { target_stage: targetStage };
   if (reason !== undefined) body.reason = reason;
+  if (provider !== undefined) body.provider = provider;
   return apiFetch<TransitionResponse>(
     `/api/workspaces/${workspaceId}/changes/${changeId}/transition`,
     { method: "POST", json: body },

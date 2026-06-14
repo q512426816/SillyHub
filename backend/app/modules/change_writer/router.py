@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_user
@@ -139,6 +139,7 @@ async def execute_change(
     change_key: str,
     session: SessionDep,
     user: CurrentUser,
+    provider: str | None = Query(None),
 ) -> dict:
     """Trigger change execution — dispatch via unified stage dispatch service."""
     from sqlalchemy import select
@@ -175,6 +176,7 @@ async def execute_change(
         change_id=change.id,
         user_id=user.id,
         target_stage="execute",
+        provider=provider,
     )
 
     if not result.get("dispatched"):

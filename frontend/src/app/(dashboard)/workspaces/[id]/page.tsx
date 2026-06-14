@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { AgentLogViewer } from "@/components/agent-log-viewer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AgentProviderSelect } from "@/components/AgentProviderSelect";
 import { ApiError } from "@/lib/api";
 import {
   listAgentRuns,
@@ -29,6 +30,7 @@ import { getRuntimeProgress } from "@/lib/runtime";
 import { useSession } from "@/stores/session";
 import {
   getWorkspace,
+  updateWorkspace,
   type Workspace,
 } from "@/lib/workspaces";
 
@@ -126,8 +128,25 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const [bsInputErrors, setBsInputErrors] = useState<Record<string, string>>({});
   const [bootstrapStreamStatus, setBootstrapStreamStatus] = useState<StreamStatus>("disconnected");
   const [generatingProjects, setGeneratingProjects] = useState(false);
+  // workspace 级默认 agent provider 编辑态（FR-01/FR-02，2026-06-14-agent-runtime-selection）
+  const [defaultAgent, setDefaultAgent] = useState<string | null>(null);
+  const [savingDefaultAgent, setSavingDefaultAgent] = useState(false);
 
   const streamClientRef = useRef<AgentRunStreamClient | null>(null);
+
+  const handleSaveDefaultAgent = async () => {
+    if (!workspace) return;
+    setSavingDefaultAgent(true);
+    setPageError(null);
+    try {
+      const updated = await updateWorkspace(workspaceId, { default_agent: defaultAgent });
+      setWorkspace(updated);
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "保存默认 Agent 失败");
+    } finally {
+      setSavingDefaultAgent(false);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -142,6 +161,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
         getRuntimeProgress(workspaceId).catch(() => null),
       ]);
       setWorkspace(ws);
+      setDefaultAgent(ws.default_agent);
       setSpecWs(sw);
       setComponentCount(comps.total ?? comps.items?.length ?? 0);
       setActiveChanges(active.total ?? active.items?.length ?? 0);
@@ -436,6 +456,35 @@ export default function WorkspaceDetailPage({ params }: Props) {
           <dt className="text-muted-foreground">最后扫描</dt>
           <dd>{formatTs(workspace.last_scanned_at)}</dd>
         </dl>
+      </section>
+
+      {/* Default Agent provider（FR-01/FR-02）*/}
+      <section className="rounded-md border bg-card">
+        <div className="border-b px-4 py-2.5">
+          <h2 className="text-sm font-medium">默认 Agent provider</h2>
+        </div>
+        <div className="space-y-2.5 px-4 py-3">
+          <p className="text-xs text-muted-foreground">
+            自动派发（阶段流转、scan-generate）且未显式指定 provider 时使用。留空则由 daemon 默认决定。
+          </p>
+          <div className="flex items-end gap-2">
+            <div className="flex-1 space-y-1">
+              <label className="text-[11px] text-muted-foreground">Agent provider</label>
+              <AgentProviderSelect
+                value={defaultAgent}
+                onChange={setDefaultAgent}
+                includeDefault="未设置（由 daemon 默认决定）"
+              />
+            </div>
+            <Button
+              size="sm"
+              onClick={handleSaveDefaultAgent}
+              disabled={savingDefaultAgent || defaultAgent === workspace.default_agent}
+            >
+              {savingDefaultAgent ? "保存中..." : "保存"}
+            </Button>
+          </div>
+        </div>
       </section>
 
       {/* Overview cards */}

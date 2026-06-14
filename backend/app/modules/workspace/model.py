@@ -78,6 +78,13 @@ class Workspace(BaseModel, table=True):
         default="main",
         sa_column=Column(String(100), nullable=True),
     )
+    # Workspace-level default agent provider (e.g. "claude"/"codex"); applied when
+    # an explicit provider is not supplied at dispatch time. See change
+    # 2026-06-14-agent-runtime-selection (FR-01/FR-02).
+    default_agent: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
     tech_stack: list[str] = Field(
         default_factory=list,
         sa_column=Column(JSON, nullable=False, default=list),

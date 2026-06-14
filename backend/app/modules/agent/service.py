@@ -161,6 +161,7 @@ class AgentService:
         agent_type: str = "claude_code",
         idempotency_key: str | None = None,
         preferred_backend: str | None = None,
+        provider: str | None = None,
     ) -> AgentRun:
         """Create an AgentRun record and dispatch it to the daemon.
 
@@ -283,11 +284,17 @@ class AgentService:
         workspace = await self._session.get(Workspace, workspace_id)
         repo_url = workspace.repo_url if workspace else None
         branch = workspace.default_branch if workspace else None
+        # Provider resolution: explicit > workspace.default_agent > None (FR-02,
+        # change 2026-06-14-agent-runtime-selection). Identical expression in all
+        # three dispatch entry points so auto-scheduled runs (which never pass an
+        # explicit provider) inherit the workspace default (R-03).
+        resolved_provider = provider or (workspace.default_agent if workspace else None)
         lease_id_daemon = await placement.dispatch_to_daemon(
             run.id,
             user_id,
             repo_url=repo_url,
             branch=branch,
+            provider=resolved_provider,
         )
         if lease_id_daemon:
             log.info(
@@ -537,6 +544,7 @@ class AgentService:
         prompt_template: str,
         requires_worktree: bool,
         read_only: bool = True,
+        provider: str | None = None,
     ) -> AgentRun:
         """Create and execute an AgentRun driven by a stage transition.
 
@@ -663,6 +671,11 @@ class AgentService:
         workspace = await self._session.get(Workspace, workspace_id)
         repo_url = workspace.repo_url if workspace else None
         branch = workspace.default_branch if workspace else None
+        # Provider resolution: explicit > workspace.default_agent > None (FR-02,
+        # change 2026-06-14-agent-runtime-selection). Identical expression in all
+        # three dispatch entry points so auto-scheduled runs (which never pass an
+        # explicit provider) inherit the workspace default (R-03).
+        resolved_provider = provider or (workspace.default_agent if workspace else None)
         lease_id_daemon = await placement.dispatch_to_daemon(
             run.id,
             user_id,
@@ -671,6 +684,7 @@ class AgentService:
             read_only=read_only,
             repo_url=repo_url,
             branch=branch,
+            provider=resolved_provider,
         )
         if lease_id_daemon:
             log.info(
@@ -790,6 +804,7 @@ class AgentService:
         user_id: uuid.UUID,
         root_path: str,
         spec_root: str,
+        provider: str | None = None,
     ) -> AgentRun:
         """Create and execute a scan-mode AgentRun.
 
@@ -881,6 +896,11 @@ class AgentService:
         workspace = await self._session.get(Workspace, workspace_id)
         repo_url = workspace.repo_url if workspace else None
         branch = workspace.default_branch if workspace else None
+        # Provider resolution: explicit > workspace.default_agent > None (FR-02,
+        # change 2026-06-14-agent-runtime-selection). Identical expression in all
+        # three dispatch entry points so auto-scheduled runs (which never pass an
+        # explicit provider) inherit the workspace default (R-03).
+        resolved_provider = provider or (workspace.default_agent if workspace else None)
         lease_id_daemon = await placement.dispatch_to_daemon(
             run.id,
             user_id,
@@ -888,6 +908,7 @@ class AgentService:
             spec_root=spec_root,
             repo_url=repo_url,
             branch=branch,
+            provider=resolved_provider,
         )
         if lease_id_daemon:
             log.info(

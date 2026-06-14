@@ -57,6 +57,9 @@ export interface CreateAgentRunInput {
   lease_id: string;
   agent_type: string;
   preferred_backend?: "server" | "daemon";
+  // Explicit agent provider override; omitted/empty falls through to
+  // workspace.default_agent (FR-02, 2026-06-14-agent-runtime-selection).
+  provider?: string | null;
 }
 
 export function createAgentRun(workspaceId: string, input: CreateAgentRunInput) {

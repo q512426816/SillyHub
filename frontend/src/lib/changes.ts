@@ -82,6 +82,8 @@ export type TransitionRequest = {
   target_stage: string;
   /** 流转原因（可选） */
   reason?: string;
+  /** 显式 agent provider（可选）；省略则后端用 workspace.default_agent */
+  provider?: string | null;
 };
 
 /** 反馈提交请求参数 */
@@ -250,9 +252,11 @@ export function createChange(
 export function executeChange(
   workspaceId: string,
   changeKey: string,
+  provider?: string | null,
 ) {
+  const qs = provider ? `?provider=${encodeURIComponent(provider)}` : "";
   return apiFetch<{ ok: boolean; run_id: string }>(
-    `/api/workspaces/${workspaceId}/changes/${changeKey}/execute`,
+    `/api/workspaces/${workspaceId}/changes/${changeKey}/execute${qs}`,
     { method: "POST" },
   );
 }
@@ -268,10 +272,14 @@ export function transitionChange(
   changeId: string,
   targetStage: string,
   reason?: string,
+  provider?: string | null,
 ) {
   const body: TransitionRequest = { target_stage: targetStage };
   if (reason !== undefined) {
     body.reason = reason;
+  }
+  if (provider !== undefined) {
+    body.provider = provider;
   }
   return apiFetch<TransitionResponse>(
     `/api/workspaces/${workspaceId}/changes/${changeId}/transition`,
@@ -367,9 +375,14 @@ export function getAgentStatus(workspaceId: string, changeId: string) {
 /**
  * 手动触发 Agent Dispatch — POST /api/workspaces/{wid}/changes/{cid}/dispatch
  */
-export function triggerDispatch(workspaceId: string, changeId: string) {
+export function triggerDispatch(
+  workspaceId: string,
+  changeId: string,
+  provider?: string | null,
+) {
+  const qs = provider ? `?provider=${encodeURIComponent(provider)}` : "";
   return apiFetch<DispatchResponse>(
-    `/api/workspaces/${workspaceId}/changes/${changeId}/dispatch`,
+    `/api/workspaces/${workspaceId}/changes/${changeId}/dispatch${qs}`,
     { method: "POST" },
   );
 }

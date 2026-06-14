@@ -153,6 +153,12 @@ class TransitionRequest(BaseModel):
 
     target_stage: str = Field(..., description="目标阶段，对应 StageEnum 值")
     reason: str | None = Field(default=None, description="流转原因（可选）")
+    # Optional explicit agent provider override for the dispatched stage run;
+    # when None the dispatch layer falls through to workspace.default_agent
+    # (FR-02, change 2026-06-14-agent-runtime-selection).
+    provider: str | None = Field(
+        default=None, max_length=64, description="指定 agent provider（可选）"
+    )
 
 
 class FeedbackRequest(BaseModel):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.core.security import password_hasher
 from app.modules.auth.model import User
@@ -374,3 +374,34 @@ async def test_stream_redis_error_sends_error_event(db_session):
     assert collected[0] == ": connected\n\n"
     assert "event: error" in collected[1]
     assert "redis connection failed" in collected[1]
+
+
+async def test_create_agent_run_passes_provider(client, db_session, tmp_path):
+    """task-05: router forwards request body ``provider`` to ``start_run``.
+
+    ``AgentService`` is replaced with a mock so the test only asserts the
+    propagation of the provider field; the response status is intentionally
+    not checked (mocked enrich output need not satisfy AgentRunResponse).
+    """
+    refs = await _setup(db_session, tmp_path)
+    mock_svc = MagicMock()
+    mock_svc.start_run = AsyncMock(return_value=MagicMock(status="pending"))
+    mock_svc.enrich_with_workspace_ids = AsyncMock(return_value=MagicMock())
+    # The mocked enrich output does not satisfy AgentRunResponse, so the server
+    # raises during response serialization. That happens AFTER ``start_run`` has
+    # been called (router.py orders start_run before enrich), so the provider
+    # propagation is still observable from the recorded call.
+    with patch("app.modules.agent.router.AgentService", return_value=mock_svc):
+        try:
+            await client.post(
+                f"/api/workspaces/{refs['ws_id']}/agent/runs",
+                json={
+                    "task_id": str(refs["task_id"]),
+                    "lease_id": str(refs["lease_id"]),
+                    "provider": "codex",
+                },
+                headers=_auth(refs["token"]),
+            )
+        except Exception:  # ResponseValidationError is expected here
+            pass
+    assert mock_svc.start_run.call_args.kwargs["provider"] == "codex"

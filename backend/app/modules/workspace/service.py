@@ -152,6 +152,7 @@ class WorkspaceService:
             role=payload.role,
             repo_url=payload.repo_url,
             default_branch=payload.default_branch,
+            default_agent=payload.default_agent,
             tech_stack=payload.tech_stack,
             build_command=payload.build_command,
             test_command=payload.test_command,
@@ -222,6 +223,7 @@ class WorkspaceService:
         result.role = payload.role
         result.repo_url = payload.repo_url
         result.default_branch = payload.default_branch
+        result.default_agent = payload.default_agent
         result.tech_stack = payload.tech_stack
         result.build_command = payload.build_command
         result.test_command = payload.test_command
@@ -768,6 +770,7 @@ class WorkspaceService:
         root_path: str,
         user_id: uuid.UUID,
         agent_service: "AgentService",
+        provider: str | None = None,
     ) -> tuple[uuid.UUID, uuid.UUID]:
         """Create workspace + spec_workspace and trigger scan agent.
 
@@ -854,6 +857,7 @@ class WorkspaceService:
             user_id=user_id,
             root_path=root_path,
             spec_root=spec_root,
+            provider=provider,
         )
 
         # 7. Return

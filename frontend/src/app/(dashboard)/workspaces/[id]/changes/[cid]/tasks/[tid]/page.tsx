@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
+import { AgentProviderSelect } from "@/components/AgentProviderSelect";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
@@ -131,6 +132,8 @@ export default function TaskDetailPage({ params }: Props) {
   const [creatingRun, setCreatingRun] = useState(false);
   const [daemonRuntimes, setDaemonRuntimes] = useState<DaemonRuntime[]>([]);
   const [preferredBackend, setPreferredBackend] = useState<"server" | "daemon">("server");
+  // Selected agent provider for this run; null follows workspace.default_agent.
+  const [runProvider, setRunProvider] = useState<string | null>(null);
   const [runtimesLoading, setRuntimesLoading] = useState(false);
 
   /* ---- Data loading ---- */
@@ -244,6 +247,7 @@ export default function TaskDetailPage({ params }: Props) {
         lease_id: "", // lease not required from UI
         agent_type: "claude_code",
         preferred_backend: preferredBackend,
+        provider: runProvider,
       });
       setShowAgentForm(false);
       // Reload to pick up the new run
@@ -423,6 +427,16 @@ export default function TaskDetailPage({ params }: Props) {
                 >
                   <option>Claude Code</option>
                 </select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] text-muted-foreground">
+                  Agent provider
+                </label>
+                <AgentProviderSelect
+                  value={runProvider}
+                  onChange={setRunProvider}
+                  includeDefault="跟随工作区默认"
+                />
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-[11px] text-muted-foreground">

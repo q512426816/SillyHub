@@ -36,6 +36,9 @@ export interface Workspace {
   role: string | null;
   repo_url: string | null;
   default_branch: string | null;
+  // Default agent provider for auto-scheduled dispatch (FR-02,
+  // 2026-06-14-agent-runtime-selection).
+  default_agent: string | null;
   tech_stack: string[];
   build_command: string | null;
   test_command: string | null;
@@ -105,10 +108,13 @@ export interface ScanGenerateResponse {
   agent_run_id: string;
 }
 
-export async function scanGenerate(rootPath: string): Promise<ScanGenerateResponse> {
+export async function scanGenerate(
+  rootPath: string,
+  provider?: string | null,
+): Promise<ScanGenerateResponse> {
   return apiFetch<ScanGenerateResponse>("/api/workspaces/scan-generate", {
     method: "POST",
-    json: { root_path: rootPath },
+    json: { root_path: rootPath, ...(provider ? { provider } : {}) },
   });
 }
 
@@ -132,6 +138,30 @@ export interface CreateWorkspaceInput {
 export async function createWorkspace(input: CreateWorkspaceInput): Promise<Workspace> {
   return apiFetch<Workspace>("/api/workspaces", {
     method: "POST",
+    json: input,
+  });
+}
+
+export interface UpdateWorkspaceInput {
+  name?: string;
+  slug?: string;
+  repo_url?: string | null;
+  default_branch?: string | null;
+  // Default agent provider; omit to keep, null to clear (FR-02,
+  // 2026-06-14-agent-runtime-selection).
+  default_agent?: string | null;
+  tech_stack?: string[];
+  build_command?: string | null;
+  test_command?: string | null;
+  status?: WorkspaceStatus;
+}
+
+export async function updateWorkspace(
+  id: string,
+  input: UpdateWorkspaceInput,
+): Promise<Workspace> {
+  return apiFetch<Workspace>(`/api/workspaces/${id}`, {
+    method: "PATCH",
     json: input,
   });
 }

@@ -82,6 +82,7 @@ async def scan_generate(
         root_path=payload.root_path,
         user_id=user.id,
         agent_service=agent_service,
+        provider=payload.provider,
     )
     return ScanGenerateResponse(
         workspace_id=workspace_id,

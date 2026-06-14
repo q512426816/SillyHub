@@ -285,6 +285,7 @@ async def transition_change(
         user_role=_get_user_role(_user),
         reason=body.reason,
         user_id=_user.id,
+        provider=body.provider,
     )
     # Enrich the change data for the response
     enriched_change = await service.enrich_with_workspace_ids(result["change"])
@@ -546,6 +547,7 @@ async def manual_dispatch(
     change_id: uuid.UUID,
     session: SessionDep,
     _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+    provider: str | None = Query(None),
 ) -> DispatchResponse:
     """Manually trigger agent dispatch for the current stage of a change."""
     from app.modules.change.dispatch import dispatch, get_config_for_stage, has_active_run
@@ -571,6 +573,7 @@ async def manual_dispatch(
         change_id=change_id,
         target_stage=current_stage,
         user_id=_user.id,
+        provider=provider,
     )
 
     # Refresh change to get updated stages

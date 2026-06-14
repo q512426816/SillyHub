@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AgentProviderSelect } from "@/components/AgentProviderSelect";
 import { ApiError } from "@/lib/api";
 import {
   approveChange,
@@ -250,6 +251,8 @@ export default function ChangeDetailPage({ params }: Props) {
   const [agentStatus, setAgentStatus] = useState<DispatchResponse | null>(null);
   const [loadingAgentStatus, setLoadingAgentStatus] = useState(false);
   const [dispatching, setDispatching] = useState(false);
+  // 阶段流转 / 手动派发使用的 agent provider 覆盖（FR-02，2026-06-14-agent-runtime-selection）
+  const [stageProvider, setStageProvider] = useState<string | null>(null);
   const [gateComment, setGateComment] = useState("");
 
   // ── Agent Log Stream state ──────────────────────────────────────────
@@ -317,7 +320,7 @@ export default function ChangeDetailPage({ params }: Props) {
     setTransitioning(true);
     setPageError(null);
     try {
-      const result = await transitionChange(workspaceId, changeId, targetStage);
+      const result = await transitionChange(workspaceId, changeId, targetStage, undefined, stageProvider);
       // Backend returns { change: {...}, agent_dispatch: {...} }
       const changeData = result.change;
       setChange({
@@ -477,7 +480,7 @@ export default function ChangeDetailPage({ params }: Props) {
     setDispatching(true);
     setPageError(null);
     try {
-      const result = await triggerDispatch(workspaceId, changeId);
+      const result = await triggerDispatch(workspaceId, changeId, stageProvider);
       setAgentStatus(result);
       setLogsExpanded(true);
 
@@ -728,7 +731,7 @@ export default function ChangeDetailPage({ params }: Props) {
       } else if (action === "archive_confirm") {
         await archiveConfirm(workspaceId, changeId, gateComment || undefined);
       } else if (action === "transition_execute") {
-        await transitionChange(workspaceId, changeId, "execute");
+        await transitionChange(workspaceId, changeId, "execute", undefined, stageProvider);
       }
       setGateComment("");
       const [updated, updatedMatrix, updatedAgentStatus] = await Promise.all([
@@ -858,6 +861,18 @@ export default function ChangeDetailPage({ params }: Props) {
           </div>
         </section>
       )}
+
+      {/* ── Agent Provider Override（FR-02）─────────────────────── */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground whitespace-nowrap">
+          Agent provider（阶段流转 / 手动派发时生效）
+        </span>
+        <AgentProviderSelect
+          value={stageProvider}
+          onChange={setStageProvider}
+          includeDefault="跟随工作区默认"
+        />
+      </div>
 
       {/* ── SillySpec Step Progress ─────────────────────────────── */}
       <SillySpecStepProgress
