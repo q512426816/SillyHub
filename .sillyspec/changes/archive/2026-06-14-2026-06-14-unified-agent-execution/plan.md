@@ -27,37 +27,37 @@ stage: plan
 
 ### Wave 1 — 删除 SERVER 执行路径（P0，后端）
 
-- [ ] task-01: 删除 SERVER 执行路径（claude_code.py 整文件 + service.py 三条 `_execute_*_background` + `_proc_registry` + kill SIGTERM→SIGKILL 链 + placement.py `dispatch_to_server` + `decide_backend` SERVER 分支 + 新增 `NoOnlineDaemonError`）
+- [x] task-01: 删除 SERVER 执行路径（claude_code.py 整文件 + service.py 三条 `_execute_*_background` + `_proc_registry` + kill SIGTERM→SIGKILL 链 + placement.py `dispatch_to_server` + `decide_backend` SERVER 分支 + 新增 `NoOnlineDaemonError`）
 
 ### Wave 2 — dispatch 扩字段 + kill/状态机收口（P0，后端，task-01 落地后两任务并行）
 
-- [ ] task-03: `dispatch_to_daemon` 签名扩字段（repo_url/branch/allowed_paths/tool_config/timeout_seconds）+ 三处 dispatch（start_run / start_stage_dispatch / start_scan_dispatch）把 stage/scan 的上下文参数（prompt/step_prompt/stage/read_only/root_path/spec_root/runtime_root）持久化到 `lease.metadata` + `_build_claim_payload` 透传
-- [ ] task-04: `kill_run` 改道 `DaemonLeaseService.cancel_lease(agent_run_id)` + 移除 SERVER 侧 `collect_diff` 调用（diff 收口 daemon）+ 验证 lease.status → AgentRun.status 状态映射单一驱动
+- [x] task-03: `dispatch_to_daemon` 签名扩字段（repo_url/branch/allowed_paths/tool_config/timeout_seconds）+ 三处 dispatch（start_run / start_stage_dispatch / start_scan_dispatch）把 stage/scan 的上下文参数（prompt/step_prompt/stage/read_only/root_path/spec_root/runtime_root）持久化到 `lease.metadata` + `_build_claim_payload` 透传
+- [x] task-04: `kill_run` 改道 `DaemonLeaseService.cancel_lease(agent_run_id)` + 移除 SERVER 侧 `collect_diff` 调用（diff 收口 daemon）+ 验证 lease.status → AgentRun.status 状态映射单一驱动
 
 ### Wave 3 — execution-context 端点（P0，后端，task-03 落地后）
 
-- [ ] task-02: 新增 `GET /agent-runs/{run_id}/execution-context` —— run 类型分发（task/stage/scan，依据 task_id/change_id/spec_strategy）+ 从 lease.metadata 恢复上下文参数 + 复用 `build_spec_bundle`/`build_stage_bundle`/`build_scan_bundle` + `render_bundle_to_claude_md` + 鉴权 + run 归属校验
+- [x] task-02: 新增 `GET /agent-runs/{run_id}/execution-context` —— run 类型分发（task/stage/scan，依据 task_id/change_id/spec_strategy）+ 从 lease.metadata 恢复上下文参数 + 复用 `build_spec_bundle`/`build_stage_bundle`/`build_scan_bundle` + `render_bundle_to_claude_md` + 鉴权 + run 归属校验
 
 ### Wave 4 — daemon fetch 上下文 + 后端测试（P0，跨模块并行，task-02/03/04 落地后）
 
-- [ ] task-05: daemon `_runLeaseStateMachine` claim 后新增 execution-context fetch 步骤填充 `LeaseCtx` + `HubClient.getExecutionContext` + `ExecutionContextPayload` 类型 + task-runner CLAUDE.md 写入生效 + 真实 clone 生效（退役 `repoUrl ?? undefined` / `branch ?? 'main'` 兜底）
-- [ ] task-11: 后端测试（execution-context 端点三种 run 类型 + NoOnlineDaemon + 状态映射 + diff redact 二次脱敏）—— 与 task-05 无相互依赖，分属 agent / sillyhub-daemon 模块，可并行
+- [x] task-05: daemon `_runLeaseStateMachine` claim 后新增 execution-context fetch 步骤填充 `LeaseCtx` + `HubClient.getExecutionContext` + `ExecutionContextPayload` 类型 + task-runner CLAUDE.md 写入生效 + 真实 clone 生效（退役 `repoUrl ?? undefined` / `branch ?? 'main'` 兜底）
+- [x] task-11: 后端测试（execution-context 端点三种 run 类型 + NoOnlineDaemon + 状态映射 + diff redact 二次脱敏）—— 与 task-05 无相互依赖，分属 agent / sillyhub-daemon 模块，可并行
 
 ### Wave 5 — daemon 能力对齐 SERVER + P1 增强（P0/P1，task-05 落地后五任务并行）
 
-- [ ] task-06: A2 stats 透传链路补全 —— adapter `extractResultStats` 拆 `usage` 为 input/output_tokens 并跨 message 累加 + task-runner `_finish` 透传 stats 到 result + daemon `completeLease` payload 补 stats + 后端 `complete_lease` 写回 AgentRun cost/timing/tokens
-- [ ] task-07: A4 diff 截断 + redact —— daemon `collectDiff` 增加 50KB 截断 + stat_summary 生成 + 后端 `complete_lease` diff 入库前 `redact_output` 二次脱敏（redact 单一真相源留后端）
-- [ ] task-08: A1 实时流等价验证（`agent_run:{id}` channel 一致性测试）+ A3 conversation log 降级决策记录（前端基于 AgentRunLog 重建，保持逐行形态，不做汇总文本）
-- [ ] task-09: B1 token + `tool_config.env` 注入 claude 子进程 env（新增 spawn-env.ts）+ token 不入日志 / 不入 Redis publish payload / 不回传前端 + env dump 经 redact
-- [ ] task-10: B2 超时可配（`lease.metadata.timeout_seconds` > daemon config > 默认，优先级链）+ B3 spawn 级失败自动重试（仅非零退出/超时/非用户 cancel/非业务 is_error；重试前清 workspace 残留、不传 resume_session_id、重试次数入 metadata）
+- [x] task-06: A2 stats 透传链路补全 —— adapter `extractResultStats` 拆 `usage` 为 input/output_tokens 并跨 message 累加 + task-runner `_finish` 透传 stats 到 result + daemon `completeLease` payload 补 stats + 后端 `complete_lease` 写回 AgentRun cost/timing/tokens
+- [x] task-07: A4 diff 截断 + redact —— daemon `collectDiff` 增加 50KB 截断 + stat_summary 生成 + 后端 `complete_lease` diff 入库前 `redact_output` 二次脱敏（redact 单一真相源留后端）
+- [x] task-08: A1 实时流等价验证（`agent_run:{id}` channel 一致性测试）+ A3 conversation log 降级决策记录（前端基于 AgentRunLog 重建，保持逐行形态，不做汇总文本）
+- [x] task-09: B1 token + `tool_config.env` 注入 claude 子进程 env（新增 spawn-env.ts）+ token 不入日志 / 不入 Redis publish payload / 不回传前端 + env dump 经 redact
+- [x] task-10: B2 超时可配（`lease.metadata.timeout_seconds` > daemon config > 默认，优先级链）+ B3 spawn 级失败自动重试（仅非零退出/超时/非用户 cancel/非业务 is_error；重试前清 workspace 残留、不传 resume_session_id、重试次数入 metadata）
 
 ### Wave 6 — daemon 测试（P0，task-06/07/09/10 落地后）
 
-- [ ] task-12: daemon 测试（execution-context fetch + CLAUDE.md 写入 + 真实 clone + A2 stats 写回 + A4 截断 + B1 token 注入 + B2 超时 + B3 重试）
+- [x] task-12: daemon 测试（execution-context fetch + CLAUDE.md 写入 + 真实 clone + A2 stats 写回 + A4 截断 + B1 token 注入 + B2 超时 + B3 重试）
 
 ### Wave 7 — 清理与全量回归（P0，task-11/12 落地后）
 
-- [ ] task-13: 清理孤儿变更 `unified-agent-execution`（DB id=264，scan 阶段空存根）+ 全量回归（backend pytest + daemon vitest）
+- [x] task-13: 清理孤儿变更 `unified-agent-execution`（DB id=264，scan 阶段空存根）+ 全量回归（backend pytest + daemon vitest）
 
 ## 任务总表
 

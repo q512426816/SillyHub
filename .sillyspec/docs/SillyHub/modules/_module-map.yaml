@@ -21,6 +21,11 @@ modules:
       - backend/app/modules/agent/**
     description: Agent 管理和运行（AgentRun CRUD、Agent 配置）
 
+  daemon:
+    paths:
+      - backend/app/modules/daemon/**
+    description: Daemon 运行时管理（daemon 注册/心跳、任务 lease 生命周期、complete_lease 写回 AgentRun + 状态映射）
+
   archive:
     paths:
       - backend/app/modules/archive/**

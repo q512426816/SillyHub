@@ -3,7 +3,7 @@ project: sillyhub-daemon
 source_commit: 8229b42
 generated_at: 2026-06-14 10:40:45
 generator: sillyspec-archive
-last_change: 2026-06-13-daemon-nodejs-rewrite (Python → Node.js 重写)
+last_change: 2026-06-14-unified-agent-execution (新增 spawn-env 模块；client 新增 getExecutionContext；task-runner 依赖 spawn-env)
 
 modules:
   cli:
@@ -71,7 +71,21 @@ modules:
     entrypoints: []
     main_symbols: [CredentialManager, DEFAULT_CREDENTIALS_PATH]
     depends_on: []
-    used_by: [cli, task-runner]
+    used_by: [cli, spawn-env, task-runner]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  spawn-env:
+    status: active
+    doc: modules/spawn-env.md
+    paths: ["sillyhub-daemon/src/spawn-env.ts"]
+    tags: [security, env, spawn, credential]
+    aliases: [spawn-env-builder]
+    entrypoints: []
+    main_symbols: [buildSpawnEnv, redactEnv, ANTHROPIC_API_KEY_FIELD, CLAUDE_OAUTH_TOKEN_FIELD, SpawnCredentialManager, SpawnEnvCtx, BuildSpawnEnvOpts]
+    depends_on: [credential]
+    used_by: [task-runner]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -126,7 +140,7 @@ modules:
     aliases: [runner]
     entrypoints: []
     main_symbols: [TaskStatus, RunnerHubClient, RunnerWorkspaceManager, RunnerCredentialManager, TaskRunner, TaskRunnerResult]
-    depends_on: [backends, client, credential, workspace]
+    depends_on: [backends, client, credential, spawn-env, workspace]
     used_by: [cli, daemon]
     needs_review: false
     concerns: []

@@ -284,19 +284,23 @@ modules:
     doc: modules/agent.md
     paths:
       - app/modules/agent/**
-    tags: [agent, claude-code, execution, coordinator]
+    tags: [agent, claude-code, execution, coordinator, daemon-only]
     aliases: [agents, ai]
     entrypoints:
       - /api/workspaces/{workspace_id}/agents
+      - /api/agent-runs/{run_id}/execution-context
     main_symbols:
       - AgentService
       - ExecutionCoordinatorService
       - RunPlacementService
+      - NoOnlineDaemonError
       - AgentRun
       - AgentRunLog
       - AgentAdapter
       - AgentSpecBundle
+      - ExecutionContextResponse
       - build_spec_bundle
+      - render_bundle_to_claude_md
       - agent_router
     depends_on:
       - core

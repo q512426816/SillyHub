@@ -20,6 +20,7 @@ created_at: 2026-06-10T16:55:00
 - `leaseHeartbeat(leaseId, body: LeaseHeartbeatBody)` — POST `/api/daemon/leases/{id}/heartbeat`
 - `submitMessages(leaseId, body: SubmitMessagesBody)` — POST `/api/daemon/leases/{id}/messages`
 - `completeLease(leaseId, body: CompleteLeaseBody)` — POST `/api/daemon/leases/{id}/complete`
+- `getExecutionContext(agentRunId): Promise<ExecutionContextPayload>` — GET `/api/agent-runs/{id}/execution-context`（2026-06-14-unified-agent-execution / task-05 新增：claim 后 fetch bundle 上下文，填充 LeaseCtx 的 claudeMd/repoUrl/branch/allowedPaths/toolConfig）
 - 请求体类型：`RegisterBody` / `ClaimLeaseBody` / `StartLeaseBody` / `LeaseHeartbeatBody` / `SubmitMessagesBody` / `CompleteLeaseBody` / `HeartbeatBody`
 - `HubHttpError` — 非 2xx 响应抛出的错误类型（含 status / body）
 
@@ -40,6 +41,7 @@ new HubClient(serverUrl, token)
 - 修改 API 路径时需同步检查 server 端 router 定义
 - 对外 REST 端点路径与 Python 版完全相同（G-02 不变）
 - 被 cli、daemon、task-runner 三个模块使用
+- `getExecutionContext` 返回的 bundle 含 proposal/design 上下文，按 server 端 `_user_owns_run` 做归属校验，跨 user 访问 → 403（2026-06-14-unified-agent-execution）
 
 ## 人工备注
 
