@@ -40,3 +40,9 @@
 文件：sillyhub-daemon/src/adapters/stream-json.ts、sillyhub-daemon/tests/stream-json.test.ts
 依据：sillyhub-daemon/sillyhub_daemon/backends/stream_json.py L281-303、src/adapters/protocol-adapter.ts L83/L101、src/task-runner.ts L314/L457
 结果：在 StreamJsonAdapter 实现 buildArgs（返回 ['-p','--output-format','stream-json','--input-format','stream-json','--verbose','--permission-mode','bypassPermissions']，resumeSessionId 非空追加 --resume）和 buildInput（{type:user,message:{role:user,content:[{type:text,text:prompt}]}} JSON + \n），对照 Python _build_args/_build_input。补 7 个 buildArgs/buildInput 单测 + ProtocolAdapter 契约断言。验证：tsc --noEmit 零错误；vitest 536/536 通过（含新测试）。修复后 task-runner 走 stream-json 正确路径，claude 不再裸启动 hang。
+
+## ql-20260615-001-a7c3 | 2026-06-15 00:58:59 | 补 agent_runs.error_code 列的 Alembic migration
+状态：已完成
+文件：backend/migrations/versions/202606290900_add_agent_runs_error_code.py
+依据：backend/app/modules/agent/model.py L93-96 (error_code: str | None = Field(sa_column=Column(String(64), nullable=True)))；alembic head = 202606280900
+结果：新建 migration 202606290900（down_revision=202606280900），upgrade ADD COLUMN error_code VARCHAR(64) nullable，downgrade DROP。验证：当前开发库 schema 已领先版本号（列已存在→upgrade 报 DuplicateColumnError），故 alembic stamp 202606290900 对齐后，downgrade -1（DROP 成功）+ upgrade head（ADD 成功）往返验证双向 DDL；current=202606290900(head)，heads 单 head 无分叉。路径纠正：真实目录是 backend/migrations/versions/（alembic.ini script_location=migrations），非 backend/alembic/versions/。模块文档未同步（migration 不命中模块 glob，且既往 agent_runs migration 亦不入 agent 模块变更索引）。
