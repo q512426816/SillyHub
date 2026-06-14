@@ -89,6 +89,55 @@ export class StreamJsonAdapter implements ProtocolAdapter {
   }
 
   /**
+   * 构造子进程 spawn 命令的参数列表（不含 cmdPath 本身）。
+   * 对照 Python `stream_json.py _build_args` L281-291 + `execute` L49-52 的 resume 追加。
+   *
+   * 必须 `-p`（print 模式 / 非交互），否则 claude 裸启动会进入交互 REPL 阻塞 stdin，
+   * task 整体 hang（正是本 bug 的根因——TaskRunner 走可选兜底 args=[] 时命中此路径）。
+   * stream-json 输入输出格式让 prompt 走 stdin NDJSON、stdout 吐 NDJSON 事件流；
+   * `--permission-mode bypassPermissions` 配合下面的 control_response 自动批准，
+   * `--verbose` 让 result 事件带 usage/cost stats（parseResult 提取到 metadata.stats）。
+   *
+   * resumeSessionId 非空时追加 `--resume <id>`（多轮续跑，对照 Python execute L50-52）。
+   */
+  buildArgs(opts?: {
+    model?: string;
+    sessionId?: string;
+    resumeSessionId?: string;
+  }): string[] {
+    const args = [
+      '-p',
+      '--output-format', 'stream-json',
+      '--input-format', 'stream-json',
+      '--verbose',
+      '--permission-mode', 'bypassPermissions',
+    ];
+    if (opts?.resumeSessionId) {
+      args.push('--resume', opts.resumeSessionId);
+    }
+    return args;
+  }
+
+  /**
+   * 构造写入子进程 stdin 的 prompt 数据。
+   * 对照 Python `stream_json.py _build_input` L293-303。
+   *
+   * stream-json 输入格式要求把 prompt 包成一条 user message NDJSON（单行 JSON + `\n`）。
+   * TaskRunner（task-runner.ts:457-460）拿到本方法返回值后会 Buffer.from + stdin.write，
+   * 并保持 stdin 开启直到 result 事件（R-03），中途还能回写 control_response。
+   */
+  buildInput(prompt: string): string {
+    const payload = {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: prompt }],
+      },
+    };
+    return JSON.stringify(payload) + '\n';
+  }
+
+  /**
    * 解析子进程 stdout 的一行，返回 0..N 个 AgentEvent。
    *
    * 分支对照 Python stream_json.py parse_output L248-279：
@@ -335,8 +384,11 @@ export class StreamJsonAdapter implements ProtocolAdapter {
    * 此方法保留为契约签名，TaskRunner 也可在识别 control 类事件时直接调用——
    * 但因签名无 msg 参数，直接调用无法构造应答，故建议依赖 parse 内部已回写。
    */
-  onControl(_stdin: NodeJS.WritableStream): void {
-    // 空实现：具体回写在 writeControlResponse 内完成（见 handleControlRequest）。
+  onControl(_line: string, _stdin: NodeJS.WritableStream): void {
+    // 空实现：具体 control_response 回写在 parse 内部识别到 control_request 行时，
+    // 通过 handleControlRequest → writeControlResponse 完成（需 msg 上下文构造
+    // request_id / updatedInput，见 316-328）。此方法保留为 ProtocolAdapter 契约
+    // 签名（task-19 方案B：onControl(line, stdin)），但实际应答路径是 parse 内部回写。
     // 参数前缀 _ 表示契约保留但不在此使用。
   }
 

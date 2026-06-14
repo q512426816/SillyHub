@@ -235,6 +235,12 @@ export interface LeaseCtx {
   timeout?: number;
   /** 凭据/工具配置，渲染成环境变量。 */
   toolConfig?: ToolConfig;
+  /**
+   * claim_lease 颁发的令牌（WS 流程由 task-20 startLease 前注入；
+   * poll 流程由 TaskRunner 内部 _claimTokens map 兜底）。
+   * submitMessages / startLease / complete 必须携带，对齐 Python claim_token。
+   */
+  claimToken?: string;
 }
 
 /**

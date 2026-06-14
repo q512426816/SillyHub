@@ -286,5 +286,89 @@ describe('provider 三合一 (claude/gemini/cursor)', () => {
     expect(a.provider).toBe('claude');
     expect(typeof a.parse).toBe('function');
     expect(typeof a.onControl).toBe('function');
+    // buildArgs / buildInput 也是契约方法（task-runner spawn + stdin 写入依赖）
+    expect(typeof a.buildArgs).toBe('function');
+    expect(typeof a.buildInput).toBe('function');
+  });
+});
+
+// ===========================================================================
+// buildArgs / buildInput（spawn 参数 + stdin 输入，对照 Python _build_args/_build_input）
+// task-runner.ts:314/457 调用，缺失会让 claude 裸启动进交互模式 hang。
+// ===========================================================================
+
+describe('buildArgs / buildInput (spawn 参数 + stdin 输入)', () => {
+  it('buildArgs 含 -p + stream-json 输入输出格式 + bypassPermissions', () => {
+    const a = new StreamJsonAdapter('claude');
+    const args = a.buildArgs();
+    expect(args).toContain('-p');
+    expect(args).toContain('--output-format');
+    let idx = args.indexOf('--output-format');
+    expect(args[idx + 1]).toBe('stream-json');
+    expect(args).toContain('--input-format');
+    idx = args.indexOf('--input-format');
+    expect(args[idx + 1]).toBe('stream-json');
+    expect(args).toContain('--verbose');
+    expect(args).toContain('--permission-mode');
+    idx = args.indexOf('--permission-mode');
+    expect(args[idx + 1]).toBe('bypassPermissions');
+  });
+
+  it('buildArgs 无 resume 时不带 --resume', () => {
+    const a = new StreamJsonAdapter('claude');
+    expect(a.buildArgs()).not.toContain('--resume');
+    expect(a.buildArgs({})).not.toContain('--resume');
+    expect(a.buildArgs({ model: 'sonnet', sessionId: 's1' })).not.toContain('--resume');
+  });
+
+  it('buildArgs resumeSessionId 非空时追加 --resume <id>（多轮续跑）', () => {
+    const a = new StreamJsonAdapter('claude');
+    const args = a.buildArgs({ resumeSessionId: 'sess_resume_123' });
+    const idx = args.indexOf('--resume');
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe('sess_resume_123');
+    // 其余基础参数仍在
+    expect(args).toContain('-p');
+    expect(args).toContain('--output-format');
+  });
+
+  it('buildInput 返回合法 user message JSON（对照 Python TestBuildInput）', () => {
+    const a = new StreamJsonAdapter('claude');
+    const data = a.buildInput('hello world');
+    // 末尾换行先剥掉再 parse
+    expect(data.endsWith('\n')).toBe(true);
+    const parsed = JSON.parse(data.slice(0, -1)) as {
+      type: string;
+      message: { role: string; content: Array<{ type: string; text: string }> };
+    };
+    expect(parsed.type).toBe('user');
+    expect(parsed.message.role).toBe('user');
+    expect(parsed.message.content).toHaveLength(1);
+    expect(parsed.message.content[0]?.type).toBe('text');
+    expect(parsed.message.content[0]?.text).toBe('hello world');
+  });
+
+  it('buildInput 结尾是 \\n（NDJSON 单行）', () => {
+    const a = new StreamJsonAdapter('claude');
+    expect(a.buildInput('test prompt').endsWith('\n')).toBe(true);
+  });
+
+  it('buildInput 含特殊字符的 prompt 也合法（不破坏 JSON）', () => {
+    const a = new StreamJsonAdapter('claude');
+    const data = a.buildInput('line1\nline2 "quote" {brace}');
+    const json = data.slice(0, -1);
+    expect(() => JSON.parse(json)).not.toThrow();
+    const parsed = JSON.parse(json) as { message: { content: Array<{ text: string }> } };
+    expect(parsed.message.content[0]?.text).toBe('line1\nline2 "quote" {brace}');
+  });
+
+  it('三个 provider（claude/gemini/cursor）都实现了 buildArgs/buildInput', () => {
+    for (const p of ['claude', 'gemini', 'cursor'] as const) {
+      const a = new StreamJsonAdapter(p);
+      expect(typeof a.buildArgs).toBe('function');
+      expect(typeof a.buildInput).toBe('function');
+      expect(a.buildArgs()).toContain('-p');
+      expect(a.buildInput('hi').endsWith('\n')).toBe(true);
+    }
   });
 });

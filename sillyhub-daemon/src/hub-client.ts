@@ -1,0 +1,359 @@
+/**
+ * Daemon ↔ SillyHub server REST 客户端。
+ *
+ * 用 Node 20 原生 fetch（design.md G-05：零 HTTP 库依赖），覆盖：
+ *   - register / heartbeat（runtime 生命周期）
+ *   - claim / start / leaseHeartbeat / submitMessages / complete（lease 生命周期，FR-04）
+ *   - getPendingLeases（WS 断线时的 HTTP 轮询兜底）
+ *
+ * 端点路径用 task-03 的 REST_PREFIX 常量拼接（R-02 契约约束）。
+ * WebSocket 通信不在此类（归 task-18 WsClient）。
+ *
+ * Python 源对照：sillyhub_daemon/client.py（HubClient class，193 行，8 方法）。
+ * 1:1 对齐点：
+ *   - 构造器 base_url 去尾斜杠、token 存原始值、_auth_headers 按 token 存在/缺失返回
+ *   - 所有方法 POST（除 getPendingLeases 是 GET），raise_for_status → HubHttpError
+ *   - body 字段 snake_case（runtime_id / claim_token / agent_run_id）对齐 backend Pydantic
+ *   - timeout=30s（Python httpx）→ AbortSignal.timeout(30_000)（Node 20 内置）
+ *   - trust_env=False（Python httpx）→ Node fetch 默认不读 HTTP_PROXY，天然等价
+ *   - close()（Python aclose）→ fetch 无连接池，此方法 no-op 仅作 API 兼容
+ *
+ * @module hub-client
+ */
+
+import { REST_PREFIX } from './protocol.js';
+
+// ── body 类型（字段名 snake_case 对齐 backend Pydantic 模型）──────────────────
+
+/** register 请求体。必填字段总写入（空串也算），条件字段按存在性写入。 */
+export interface RegisterBody {
+  name: string;
+  provider: string;
+  version: string;
+  os: string;
+  arch: string;
+  /** 仅当调用方提供 runtimeId 时写入（对齐 Python `if runtime_id is not None`）。 */
+  runtime_id?: string;
+  /** 仅当非空串时写入（对齐 Python `if protocol:`）。 */
+  protocol?: string;
+  /** 仅当非 undefined 时写入（对齐 Python `if capabilities:`）。 */
+  capabilities?: Record<string, unknown>;
+  /** 对应 Python **kwargs 透传字段。 */
+  [extra: string]: unknown;
+}
+
+/** claim_lease 请求体。 */
+export interface ClaimLeaseBody {
+  runtime_id: string;
+}
+
+/** start_lease 请求体。 */
+export interface StartLeaseBody {
+  claim_token: string;
+}
+
+/** lease_heartbeat 请求体。 */
+export interface LeaseHeartbeatBody {
+  claim_token: string;
+}
+
+/** submit_messages 请求体。 */
+export interface SubmitMessagesBody {
+  claim_token: string;
+  agent_run_id: string;
+  messages: Record<string, unknown>[];
+}
+
+/** complete_lease 请求体。 */
+export interface CompleteLeaseBody {
+  claim_token: string;
+  result: Record<string, unknown>;
+}
+
+/** heartbeat（runtime 心跳）请求体。 */
+export interface HeartbeatBody {
+  runtime_id: string;
+}
+
+// ── 错误类型 ──────────────────────────────────────────────────────────────────
+
+/**
+ * HTTP 非 2xx 响应抛出。对齐 Python httpx.HTTPStatusError 的信息完备性
+ *（status_code + response.text + 请求 URL/method）。
+ *
+ * 调用方（TaskRunner / Daemon）按 `err.status` 分支处理：
+ *   - 401：token 无效，触发重新认证
+ *   - 409：lease 已被他人 claim，跳过本 lease
+ *   - 5xx：服务器错误，进入重连/失败标记
+ *
+ * 网络错误（DNS / 连接拒绝 / 超时）**不包装**为本类，透传 fetch 的原始
+ * TypeError / DOMException（理由：调用方需区分超时 vs 业务错误，见蓝图 R6）。
+ */
+export class HubHttpError extends Error {
+  constructor(
+    /** HTTP 状态码（4xx / 5xx）。 */
+    public readonly status: number,
+    /** 完整响应体文本（不截断，调用方可 JSON.parse 解析 detail）。 */
+    public readonly bodyText: string,
+    /** 完整请求 URL。 */
+    public readonly url: string,
+    /** HTTP method（'GET' / 'POST'）。 */
+    public readonly method: string,
+  ) {
+    // message 里 bodyText 截断到 200 字符仅用于日志可读性
+    super(`HTTP ${status} ${method} ${url}: ${bodyText.slice(0, 200)}`);
+    this.name = 'HubHttpError';
+  }
+}
+
+// ── HubClient ─────────────────────────────────────────────────────────────────
+
+/** 默认请求超时 30 秒，对齐 Python httpx.AsyncClient(timeout=30.0)。 */
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+/**
+ * Daemon 与 SillyHub server 之间的 REST 客户端。
+ *
+ * 无状态瘦客户端：每次请求独立调用原生 fetch（无连接池）。
+ * 不缓存 lease 状态（由 TaskRunner 持有 lease 状态机）。
+ * 不内置重试（失败即抛，由调用方决策，见蓝图 N-2）。
+ */
+export class HubClient {
+  private readonly baseUrl: string;
+  private readonly token?: string;
+
+  /**
+   * @param serverUrl  SillyHub server origin，如 'http://localhost:8000'。尾部斜杠会被去除。
+   * @param token      可选 Bearer token；为 undefined 时不发送 Authorization 头
+   *                   （对齐 Python `_auth_headers` 在无 token 时返回 `{}`）。
+   */
+  constructor(serverUrl: string, token?: string) {
+    // 去尾部一个或多个斜杠，确保 `${baseUrl}${REST_PREFIX}` 不产生双斜杠。
+    // 对齐 Python `server_url.rstrip("/")`（client.py:33）。
+    this.baseUrl = serverUrl.replace(/\/+$/, '');
+    this.token = token;
+  }
+
+  /**
+   * 关闭客户端。fetch 无连接池，此方法为 no-op，仅为 API 兼容保留
+   *（对齐 Python `await self._http.aclose()`，client.py:49-51）。
+   * 被 TaskRunner / Daemon 调用时无副作用。
+   */
+  close(): void {
+    /* no-op: fetch has no connection pool to close */
+  }
+
+  // -- 内部：统一请求入口（对齐 Python 的 self._http.post + raise_for_status）--
+
+  /**
+   * 构造请求头。无 token 时不带 Authorization（对齐 Python `_auth_headers` 返回 `{}`）。
+   * GET 请求也带 Content-Type（与 Python httpx 默认 header 一致，无害）。
+   */
+  private _headers(): Record<string, string> {
+    const h: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (this.token) {
+      h['Authorization'] = `Bearer ${this.token}`;
+    }
+    return h;
+  }
+
+  /**
+   * 统一 fetch 入口。
+   *
+   * 语义对齐 Python `resp = await self._http.post(path, json=body); resp.raise_for_status(); return resp.json()`：
+   *   - 非 2xx（!resp.ok）：读完整 body 文本后抛 HubHttpError（含 status/bodyText/url/method）。
+   *   - 2xx：解析 JSON 返回。
+   *   - 网络错误 / 超时：fetch 直接 reject，**不包装**（透传 TypeError / DOMException）。
+   *
+   * trust_env=False 等价性：Node 原生 fetch 默认不读 HTTP_PROXY/HTTPS_PROXY 环境变量
+   *（undici 需显式 dispatcher 才走代理），与 Python httpx 的 trust_env=False 语义一致，
+   * 此处不设置任何 proxy/dispatcher 字段。
+   */
+  private async _request<T>(
+    method: 'GET' | 'POST',
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
+    const url = `${this.baseUrl}${path}`;
+    const resp = await fetch(url, {
+      method,
+      headers: this._headers(),
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+      // Node 原生 fetch 默认不读 HTTP_PROXY/HTTPS_PROXY（等价 trust_env=False），
+      // 显式不设置 dispatcher 即可。
+    });
+    if (!resp.ok) {
+      const bodyText = await resp.text();
+      throw new HubHttpError(resp.status, bodyText, url, method);
+    }
+    return (await resp.json()) as T;
+  }
+
+  // -- Runtime 生命周期（FR-03 / FR-07）--
+
+  /**
+   * 注册 daemon runtime。
+   *
+   * body 条件字段拼装严格对齐 client.py:83-96：
+   *   - 必填（总写入，即使空串）：name / provider / version / os / arch
+   *   - runtime_id：仅当调用方提供 runtimeId 时写入（Python `if runtime_id is not None`）
+   *   - protocol：仅当非空串写入（Python `if protocol:`）
+   *   - capabilities：仅当非 undefined 时写入（Python `if capabilities:`）
+   *   - extra：展开进 body（对应 Python `**kwargs` 透传，client.py:89）
+   *
+   * 返回 backend 响应（通常含 `{ runtime_id }`）。
+   */
+  async register(params: {
+    runtimeId?: string;
+    name?: string;
+    provider?: string;
+    version?: string;
+    protocol?: string;
+    os?: string;
+    arch?: string;
+    capabilities?: Record<string, unknown>;
+    /** 对应 Python **kwargs 透传字段。 */
+    extra?: Record<string, unknown>;
+  }): Promise<Record<string, unknown>> {
+    const body: RegisterBody = {
+      name: params.name ?? '',
+      provider: params.provider ?? '',
+      version: params.version ?? '',
+      os: params.os ?? '',
+      arch: params.arch ?? '',
+      ...(params.extra ?? {}),
+    };
+    if (params.runtimeId !== undefined) {
+      body.runtime_id = params.runtimeId;
+    }
+    if (params.protocol) {
+      // 非空串才写入（Python `if protocol:`）
+      body.protocol = params.protocol;
+    }
+    if (params.capabilities) {
+      // 非 undefined 才写入（Python `if capabilities:`）
+      body.capabilities = params.capabilities;
+    }
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/register`,
+      body,
+    );
+  }
+
+  /**
+   * runtime HTTP 心跳（非 lease 心跳）。
+   * 端点：POST {REST_PREFIX}/heartbeat，body `{ runtime_id }`。
+   */
+  async heartbeat(runtimeId: string): Promise<Record<string, unknown>> {
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/heartbeat`,
+      { runtime_id: runtimeId } satisfies HeartbeatBody,
+    );
+  }
+
+  // -- Lease 生命周期（FR-04 核心）--
+
+  /**
+   * 认领 lease。
+   * 端点：POST {REST_PREFIX}/leases/{leaseId}/claim，body `{ runtime_id }`。
+   * 返回含 claim_token 的响应（后续操作需此 token）。
+   */
+  async claimLease(
+    leaseId: string,
+    runtimeId: string,
+  ): Promise<Record<string, unknown>> {
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/leases/${encodeURIComponent(leaseId)}/claim`,
+      { runtime_id: runtimeId } satisfies ClaimLeaseBody,
+    );
+  }
+
+  /**
+   * 标记 lease 已开始执行。
+   * 端点：POST {REST_PREFIX}/leases/{leaseId}/start，body `{ claim_token }`。
+   */
+  async startLease(
+    leaseId: string,
+    claimToken: string,
+  ): Promise<Record<string, unknown>> {
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/leases/${encodeURIComponent(leaseId)}/start`,
+      { claim_token: claimToken } satisfies StartLeaseBody,
+    );
+  }
+
+  /**
+   * lease 执行期间的心跳续期。
+   * 端点：POST {REST_PREFIX}/leases/{leaseId}/heartbeat，body `{ claim_token }`。
+   */
+  async leaseHeartbeat(
+    leaseId: string,
+    claimToken: string,
+  ): Promise<Record<string, unknown>> {
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/leases/${encodeURIComponent(leaseId)}/heartbeat`,
+      { claim_token: claimToken } satisfies LeaseHeartbeatBody,
+    );
+  }
+
+  /**
+   * 增量上报 agent 执行消息（流式）。
+   * 端点：POST {REST_PREFIX}/leases/{leaseId}/messages，
+   * body `{ claim_token, agent_run_id, messages }`。
+   */
+  async submitMessages(
+    leaseId: string,
+    claimToken: string,
+    agentRunId: string,
+    messages: Record<string, unknown>[],
+  ): Promise<Record<string, unknown>> {
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/leases/${encodeURIComponent(leaseId)}/messages`,
+      {
+        claim_token: claimToken,
+        agent_run_id: agentRunId,
+        messages,
+      } satisfies SubmitMessagesBody,
+    );
+  }
+
+  /**
+   * 完成 lease，提交 result（含 patch / stats / status）。
+   * 端点：POST {REST_PREFIX}/leases/{leaseId}/complete，
+   * body `{ claim_token, result }`。
+   */
+  async completeLease(
+    leaseId: string,
+    claimToken: string,
+    result: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/leases/${encodeURIComponent(leaseId)}/complete`,
+      { claim_token: claimToken, result } satisfies CompleteLeaseBody,
+    );
+  }
+
+  // -- 轮询兜底（FR-03：WS 断线时 HTTP 轮询 pending leases）--
+
+  /**
+   * 获取 runtime 的待处理 lease 列表。
+   * 端点：GET {REST_PREFIX}/runtimes/{runtimeId}/pending-leases（唯一非 POST 端点）。
+   * 无 body，返回 lease 列表。
+   */
+  async getPendingLeases(
+    runtimeId: string,
+  ): Promise<Record<string, unknown>[]> {
+    return this._request<Record<string, unknown>[]>(
+      'GET',
+      `${REST_PREFIX}/runtimes/${encodeURIComponent(runtimeId)}/pending-leases`,
+    );
+  }
+}

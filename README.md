@@ -126,12 +126,12 @@ multi-agent-platform/
 │   │   ├── lib/              # API 客户端（33 个模块）
 │   │   └── stores/           # Zustand 状态管理
 │   └── Dockerfile
-├── sillyhub-daemon/          # 本地守护进程包
-│   └── sillyhub_daemon/
-│       ├── daemon.py         # 主守护进程
-│       ├── agent_detector.py # Agent 检测（12 种运行时）
-│       ├── task_runner.py    # 任务执行器
-│       └── client.py         # WebSocket 客户端
+├── sillyhub-daemon/          # 本地守护进程包（Node.js）
+│   ├── src/                  # TypeScript 源码
+│   │   ├── daemon.ts         # 主守护进程
+│   │   ├── task-runner.ts    # 任务执行器
+│   │   └── hub-client.ts     # HTTP 客户端
+│   └── tests/                # vitest 测试
 ├── deploy/                   # Docker Compose + 环境变量模板
 ├── .sillyspec/               # SillySpec 工作区元数据
 │   ├── changes/              # 变更包（活跃 + 归档）

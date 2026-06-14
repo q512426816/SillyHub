@@ -1,1 +1,0 @@
-W0(task-01~04)已完成并验证：typecheck exit 0 零错误；vitest W0+W1 共 229 测试全 pass(_sanity/types/protocol.contract/adapters 全绿)。package.json(ws+commander,ts5.5.4,vitest2)、tsconfig strict+NodeNext、vitest.config、src/types.ts(11类型)、src/protocol.ts(8MSG+5STATE逐字对齐)、tests/helpers.ts+_sanity+fixtures全目录 均就位。注：W1(task-05~11)代码也已先行完成并绿，将在下一step确认。

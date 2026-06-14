@@ -34,3 +34,9 @@
 状态：已完成
 摘要：Quick Chat 多轮对话：后端 prev_run_id → session_id 查询 → resume_session_id 传入 daemon → Claude CLI --resume；前端 lastRunId 状态跟踪；daemon stream_json backend 支持 --resume 参数；端到端测试通过。
 文件：backend/app/main.py, backend/app/modules/daemon/, frontend/src/app/(dashboard)/runtimes/page.tsx, frontend/src/lib/daemon.ts, sillyhub-daemon/sillyhub_daemon/backends/stream_json.py, sillyhub-daemon/sillyhub_daemon/daemon.py, sillyhub-daemon/sillyhub_daemon/task_runner.py
+
+## ql-20260614-001-7e9a | 2026-06-14 09:38:22 | 修复 StreamJsonAdapter 缺失 buildArgs/buildInput 导致 claude 裸启动 hang
+状态：已完成
+文件：sillyhub-daemon/src/adapters/stream-json.ts、sillyhub-daemon/tests/stream-json.test.ts
+依据：sillyhub-daemon/sillyhub_daemon/backends/stream_json.py L281-303、src/adapters/protocol-adapter.ts L83/L101、src/task-runner.ts L314/L457
+结果：在 StreamJsonAdapter 实现 buildArgs（返回 ['-p','--output-format','stream-json','--input-format','stream-json','--verbose','--permission-mode','bypassPermissions']，resumeSessionId 非空追加 --resume）和 buildInput（{type:user,message:{role:user,content:[{type:text,text:prompt}]}} JSON + \n），对照 Python _build_args/_build_input。补 7 个 buildArgs/buildInput 单测 + ProtocolAdapter 契约断言。验证：tsc --noEmit 零错误；vitest 536/536 通过（含新测试）。修复后 task-runner 走 stream-json 正确路径，claude 不再裸启动 hang。

@@ -52,7 +52,7 @@ export interface ProtocolAdapter {
   parse(line: string): AgentEvent[] | null;
 
   /**
-   * 可选：对子进程 stdin 的 control_request 应答器。
+   * 可选：对子进程 stdin 的 control_request 应答器（R-03 核心）。
    *
    * 仅 stream_json 协议（claude / gemini / cursor）需要——子进程输出
    * `control_request`（工具批准 / 权限确认）时，需向 stdin 写应答 JSON
@@ -61,12 +61,44 @@ export interface ProtocolAdapter {
    * 其余 4 种协议（json_rpc / jsonl / ndjson / text）不需要 stdin 应答，
    * 故声明为可选方法，缺省即 no-op。
    *
-   * 调用时机由 TaskRunner（task-19）在解析到 control 类事件时触发，
-   * 传入子进程的 stdin writable stream。
+   * 调用时机由 TaskRunner（task-19）在解析到 control 类行时触发，
+   * 传入触发应答的原始行 + 子进程的 stdin writable stream。
    *
+   * @param line 触发 control_request 的原始 stdout 行（adapter 自行 JSON.parse）
    * @param stdin 子进程的 stdin（NodeJS.WritableStream），adapter 向其 write 应答
    */
-  onControl?(stdin: NodeJS.WritableStream): void;
+  onControl?(line: string, stdin: NodeJS.WritableStream): void | Promise<void>;
+
+  /**
+   * 可选：构造子进程 spawn 命令的参数列表（不含 cmdPath 本身）。
+   *
+   * 下沉自 Python StreamJsonBackend._build_args / _build_input（task-19 方案B
+   * 把「执行子进程」从 backend 下沉到 TaskRunner，cmd 构造随之归 adapter）。
+   * TaskRunner 用 `[cmdPath, ...adapter.buildArgs(opts)]` 启动 spawn。
+   *
+   * 若 adapter 未实现（如 text adapter 可能不需要参数），返回空数组等价 no-op。
+   *
+   * @param opts 模型 / 会话 ID / 恢复会话 ID 等透传参数
+   */
+  buildArgs?(opts: {
+    model?: string;
+    sessionId?: string;
+    resumeSessionId?: string;
+  }): string[];
+
+  /**
+   * 可选：构造写入子进程 stdin 的 prompt 数据。
+   *
+   * 下沉自 Python StreamJsonBackend._build_input。stream_json 协议需要把
+   * prompt 包成 `{type:"user",message:{content:[{type:"text",text:prompt}]}}` JSON
+   * + `\n`，而 text 协议可能直接写 `prompt + "\n"`。TaskRunner 调本方法拿到
+   * 最终 stdin 数据并 write。
+   *
+   * 若 adapter 未实现，TaskRunner 默认用 `${prompt}\n`（对齐 Python text backend）。
+   *
+   * @param prompt 任务 prompt 文本
+   */
+  buildInput?(prompt: string): string | Buffer;
 }
 
 /**

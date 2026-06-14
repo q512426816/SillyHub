@@ -44,46 +44,46 @@ plan_level: full
 
 ## Wave 0 — 项目骨架（无依赖）
 
-- [ ] task-01: Node 工程初始化（package.json + tsconfig strict + vitest.config.ts）
-- [ ] task-02: 共享类型定义（src/types.ts：AgentEvent / TaskResult / DaemonMessage / Lease payload）
-- [ ] task-03: 协议常量定义（src/protocol.ts，对齐 backend protocol.py）
-- [ ] task-04: 测试脚手架（tests/ + fixture 目录复用 Python 样本）
+- [x] task-01: Node 工程初始化（package.json + tsconfig strict + vitest.config.ts）
+- [x] task-02: 共享类型定义（src/types.ts：AgentEvent / TaskResult / DaemonMessage / Lease payload）
+- [x] task-03: 协议常量定义（src/protocol.ts，对齐 backend protocol.py）
+- [x] task-04: 测试脚手架（tests/ + fixture 目录复用 Python 样本）
 
 ## Wave 1 — 协议抽象层 ★（方案B 核心，依赖 W0）
 
-- [ ] task-05: ProtocolAdapter 接口 + AgentEvent IR（src/adapters/protocol-adapter.ts）
-- [ ] task-06: stream_json adapter（src/adapters/stream-json.ts，claude/gemini/cursor）
-- [ ] task-07: json_rpc adapter（src/adapters/json-rpc.ts，codex/hermes/kimi/kiro）
-- [ ] task-08: jsonl adapter（src/adapters/jsonl.ts，copilot）
-- [ ] task-09: ndjson adapter（src/adapters/ndjson.ts，opencode/openclaw/pi）
-- [ ] task-10: text adapter（src/adapters/text.ts，antigravity）
-- [ ] task-11: 工厂 + provider→protocol 映射（src/adapters/index.ts，getBackend + PROTOCOL_PROVIDERS）
+- [x] task-05: ProtocolAdapter 接口 + AgentEvent IR（src/adapters/protocol-adapter.ts）
+- [x] task-06: stream_json adapter（src/adapters/stream-json.ts，claude/gemini/cursor）
+- [x] task-07: json_rpc adapter（src/adapters/json-rpc.ts，codex/hermes/kimi/kiro）
+- [x] task-08: jsonl adapter（src/adapters/jsonl.ts，copilot）
+- [x] task-09: ndjson adapter（src/adapters/ndjson.ts，opencode/openclaw/pi）
+- [x] task-10: text adapter（src/adapters/text.ts，antigravity）
+- [x] task-11: 工厂 + provider→protocol 映射（src/adapters/index.ts，getBackend + PROTOCOL_PROVIDERS）
 
 ## Wave 2 — 基础设施（与 W1 并行，依赖 W0）
 
-- [ ] task-12: config（src/config.ts，DaemonConfig + config.json）
-- [ ] task-13: credential（src/credential.ts，0600 + `{{USER_*}}` 渲染）
-- [ ] task-14: version（src/version.ts，semver 解析与最低版本校验）
-- [ ] task-15: workspace（src/workspace.ts，git mirror/pull/diff + Windows rmtree）
-- [ ] task-16: agent-detector（src/agent-detector.ts，12 provider 探测，依赖 version）
+- [x] task-12: config（src/config.ts，DaemonConfig + config.json）
+- [x] task-13: credential（src/credential.ts，0600 + `{{USER_*}}` 渲染）
+- [x] task-14: version（src/version.ts，semver 解析与最低版本校验）
+- [x] task-15: workspace（src/workspace.ts，git mirror/pull/diff + Windows rmtree）
+- [x] task-16: agent-detector（src/agent-detector.ts，12 provider 探测，依赖 version）
 
 ## Wave 3 — 通信层（依赖 W2）
 
-- [ ] task-17: HubClient REST（src/hub-client.ts，lease 生命周期端点，原生 fetch）
-- [ ] task-18: WsClient（src/ws-client.ts，5s 重连 + HTTP 轮询兜底，ws 库）
+- [x] task-17: HubClient REST（src/hub-client.ts，lease 生命周期端点，原生 fetch）
+- [x] task-18: WsClient（src/ws-client.ts，5s 重连 + HTTP 轮询兜底，ws 库）
 
 ## Wave 4 — 编排层（依赖 W1 + W3）
 
-- [ ] task-19: TaskRunner（src/task-runner.ts，编排链 + 子进程执行 spawn）
-- [ ] task-20: Daemon 主类（src/daemon.ts，register/心跳/事件分发/lease 状态机）
+- [x] task-19: TaskRunner（src/task-runner.ts，编排链 + 子进程执行 spawn）
+- [x] task-20: Daemon 主类（src/daemon.ts，register/心跳/事件分发/lease 状态机）
 
 ## Wave 5 — CLI + 冒烟 + 收尾（依赖 W4）
 
-- [ ] task-21: CLI（src/cli.ts，commander：start/stop/status/logs）
-- [ ] task-22: 测试迁移（tests/**/*.test.ts，1:1 迁移 16 个 Python 测试文件）
-- [ ] task-23: 真实 backend 冒烟（task_available→claim→start→messages→complete+patch）
-- [ ] task-24: 删除 Python 源码（sillyhub_daemon/** + pyproject.toml）
-- [ ] task-25: Docker / 构建切换（deploy/docker-compose*.yml，如涉及 daemon 镜像）
+- [x] task-21: CLI（src/cli.ts，commander：start/stop/status/logs）
+- [x] task-22: 测试迁移（tests/**/*.test.ts，1:1 迁移 16 个 Python 测试文件）
+- [x] task-23: 真实 backend 冒烟（task_available→claim→start→messages→complete+patch）✅ PASSED 2026-06-14
+- [x] task-24: 删除 Python 源码（sillyhub_daemon/** + pyproject.toml）✅ DONE 2026-06-14
+- [x] task-25: Docker / 构建切换 — N/A（daemon 未容器化）✅ 2026-06-14
 
 ---
 

@@ -3,6 +3,8 @@
 // task-04 只搭骨架，fixture 内容由 task-06~10 从 Python 测试 inline 样本提取落盘。
 
 import { readFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -49,4 +51,28 @@ export function loadLines(relativePath: string): string[] {
     lines.pop();
   }
   return lines;
+}
+
+/**
+ * 创建一个独立的临时目录（task-22 R4）。
+ *
+ * 用 mkdtemp 在系统 tmp 根下建子目录，避免污染 /tmp 根或项目目录（AC-05/AC-06）。
+ * 调用方负责在 afterEach 内 cleanupDir(dir) 删除。
+ *
+ * @param prefix 目录名前缀，默认 'sillyhub-test-'
+ * @returns 临时目录绝对路径
+ */
+export async function makeTmpDir(prefix = 'sillyhub-test-'): Promise<string> {
+  return mkdtemp(join(tmpdir(), prefix));
+}
+
+/**
+ * 递归删除目录（best-effort，force:true 容忍路径不存在）。
+ *
+ * 用于 afterEach 清理 makeTmpDir 创建的目录（AC-05）。
+ *
+ * @param dir 目录绝对路径
+ */
+export async function cleanupDir(dir: string): Promise<void> {
+  await rm(dir, { recursive: true, force: true });
 }
