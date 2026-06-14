@@ -47,3 +47,17 @@
 - 前端看到的文档列表来自 DB，磁盘上的新文件（design.md, requirements.md, tasks.md）不会出现。
 - 修复：`auto_dispatch_next_step` 在调用 `complete_stage` 前先 `reparse` 同步文档。
 
+## 2026-06-14 — sillyspec DB 清理：SQLite PRAGMA foreign_keys 默认关闭致 CASCADE 失效
+
+- `.sillyspec/.runtime/sillyspec.db` 的 stages/steps 表虽声明 `REFERENCES changes(id) ON DELETE CASCADE`，但 SQLite 默认 `PRAGMA foreign_keys=OFF`，`DELETE FROM changes` **不会**级联删 stages/steps，残留孤儿行。
+- 清理孤儿变更记录（如无日期前缀的 `unified-agent-execution`）时，必须手动按外键依赖顺序：先 `DELETE FROM steps WHERE stage_id IN (SELECT id FROM stages WHERE change_id=X)`，再 `DELETE FROM stages WHERE change_id=X`，最后 `DELETE FROM changes WHERE id=X AND name='...'`（双条件防 id 复用误删）。
+- 验证：`SELECT COUNT(*) FROM stages WHERE change_id=X` 应为 0，`SELECT COUNT(*) FROM steps WHERE stage_id IN (SELECT id FROM stages WHERE change_id=X)` 应为 0。
+
+## 2026-06-14 — plan/execute 子代理可能把 CWD 设到变更目录，产生嵌套 .sillyspec 副作用
+
+- 现象：`.sillyspec/changes/<change>/.sillyspec/.runtime/sillyspec.db` 出现二级 runtime（含独立 db/wal/shm/artifacts/user-inputs.md），与根目录 `.sillyspec/.runtime/` 重复。
+- 成因：plan/execute 某些步骤的子代理或命令把工作目录设到了变更目录内，sillyspec 在那里又初始化了一个 .runtime。
+- 影响：归档时会带入垃圾；两个 sillyspec.db 容易混淆哪个是活跃的。
+- 排查：对比两个 db 的最后修改时间（`stat -f "%Sm %N"`），最新修改的是活跃 DB；plan 阶段时间戳的是死 DB。
+- 处理：`rm -rf .sillyspec/changes/<change>/.sillyspec`（确认非活跃后）；知识库审阅阶段务必检查变更目录是否干净。
+

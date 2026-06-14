@@ -35,6 +35,14 @@ const GIT_TIMEOUT_MS = 60_000;
 /** git diff 输出 maxBuffer（字节），大 diff 防溢出。 */
 const GIT_MAX_BUFFER = 10 * 1024 * 1024;
 
+/**
+ * diff patch 最大字符数（task-07 / A4）。
+ * 对齐 backend diff_collector.py:86 max_diff_size=50_000。
+ * 后端 redact_output 的 MAX_OUTPUT_SIZE=64_000（git_gateway/service.py:91）
+ * 大于本值，故 daemon 截到 50_000 后后端不会再截（无双截断标记）。
+ */
+export const MAX_PATCH_CHARS = 50_000;
+
 // logger 占位：task-01 未提供统一 logger 时用 console。
 // 后续 task（如 task-04 或 task-19）若引入 pino/winston，此处改为 import。
 // 当前保持与 Python logging.getLogger(__name__) 等价的极简输出。
@@ -75,7 +83,7 @@ export class GitError extends Error {
 
 /** collectDiff 返回结构，字段名与 Python dict key 完全一致。 */
 export interface WorkspaceResult {
-  /** 完整 unified diff 文本（git diff 输出）。 */
+  /** 截断后的 unified diff 文本（≤ MAX_PATCH_CHARS + 尾标，task-07 / A4）。 */
   patch: string;
   /** 改动文件数。 */
   files_changed: number;
@@ -83,7 +91,8 @@ export interface WorkspaceResult {
   insertions: number;
   /** 删除行数。 */
   deletions: number;
-  /** git diff --shortstat 原始行（已 strip）。 */
+  /** 即 stat_summary：git diff --shortstat 原文 trim 后的人可读串（对齐
+   *  backend diff_collector.DiffResult.stat_summary；redact 留后端二次处理）。 */
   stats: string;
 }
 
@@ -171,12 +180,19 @@ export class WorkspaceManager {
     const { files_changed, insertions, deletions } =
       parseShortstat(shortstat);
 
+    // task-07 / A4：patch 超 MAX_PATCH_CHARS 截断 + 尾标
+    // （对齐 backend diff_collector.py:168-170，redact 留后端 redact_output）
+    let patch = diffOutput;
+    if (diffOutput.length > MAX_PATCH_CHARS) {
+      patch = diffOutput.slice(0, MAX_PATCH_CHARS) + '\n...[truncated]';
+    }
+
     return {
-      patch: diffOutput,
+      patch,
       files_changed,
       insertions,
       deletions,
-      stats: shortstat.trim(),
+      stats: shortstat.trim(), // 即 stat_summary（redact 留后端二次处理）
     };
   }
 

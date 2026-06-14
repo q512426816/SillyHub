@@ -1,6 +1,5 @@
 """Tests for task-12: resolve_work_dir + _ensure_change_dir_in_worktree."""
 
-import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -8,7 +7,6 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.service import AgentRunError, AgentService, resolve_work_dir
-from app.modules.change.model import Change
 
 # ---------------------------------------------------------------------------
 # resolve_work_dir tests
@@ -211,93 +209,3 @@ async def test_ensure_change_dir_main_repo_also_missing(tmp_path):
 # ---------------------------------------------------------------------------
 # Integration: start_stage_dispatch work dir behavior
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_start_stage_dispatch_write_no_worktree_logs_warning(tmp_path):
-    """写阶段 + 无 lease → work_dir fallback 到 workspace root。"""
-    ws_root = tmp_path / "workspace"
-    ws_root.mkdir()
-
-    mock_session = AsyncMock(spec=AsyncSession)
-    mock_change = MagicMock(spec=Change)
-    mock_change.path = ".sillyspec/changes/test"
-    mock_change.change_key = "test"
-    mock_change.title = "Test"
-    mock_change.current_stage = "plan"
-    mock_change.change_type = ""
-    mock_change.affected_components = []
-
-    async def _get(model, pk):
-        return mock_change
-
-    mock_session.get = AsyncMock(side_effect=_get)
-
-    svc = AgentService(mock_session)
-    with patch.object(
-        svc, "_get_workspace_root", new_callable=AsyncMock, return_value=str(ws_root)
-    ):
-        with patch.object(svc, "_try_acquire_lease", new_callable=AsyncMock, return_value=None):
-            with patch.object(svc, "_execute_stage_run", new_callable=AsyncMock) as mock_exec:
-                with patch(
-                    "app.modules.change.dispatch.load_prompt_template", return_value="test prompt"
-                ):
-                    await svc.start_stage_dispatch(
-                        workspace_id=uuid.uuid4(),
-                        change_id=uuid.uuid4(),
-                        user_id=uuid.uuid4(),
-                        stage="plan",
-                        prompt_template="plan.md",
-                        requires_worktree=True,
-                        read_only=False,
-                    )
-
-    # Verify work_dir is workspace root (fallback)
-    call_kwargs = mock_exec.call_args[1]
-    assert call_kwargs["work_dir"] == ws_root
-
-
-@pytest.mark.asyncio
-async def test_start_stage_dispatch_read_only_skips_ensure_dir(tmp_path):
-    """只读阶段 → _ensure_change_dir_in_worktree 不被调用。"""
-    ws_root = tmp_path / "workspace"
-    ws_root.mkdir()
-
-    mock_session = AsyncMock(spec=AsyncSession)
-    mock_change = MagicMock(spec=Change)
-    mock_change.path = ".sillyspec/changes/test"
-    mock_change.change_key = "test"
-    mock_change.title = "Test"
-    mock_change.current_stage = "scan"
-    mock_change.change_type = ""
-    mock_change.affected_components = []
-
-    async def _get(model, pk):
-        return mock_change
-
-    mock_session.get = AsyncMock(side_effect=_get)
-
-    svc = AgentService(mock_session)
-    with patch.object(
-        svc, "_get_workspace_root", new_callable=AsyncMock, return_value=str(ws_root)
-    ):
-        with patch.object(svc, "_try_acquire_lease", new_callable=AsyncMock, return_value=None):
-            with patch.object(
-                svc, "_ensure_change_dir_in_worktree", new_callable=AsyncMock
-            ) as mock_ensure:
-                with patch.object(svc, "_execute_stage_run", new_callable=AsyncMock) as _mock_exec:
-                    with patch(
-                        "app.modules.change.dispatch.load_prompt_template",
-                        return_value="test prompt",
-                    ):
-                        await svc.start_stage_dispatch(
-                            workspace_id=uuid.uuid4(),
-                            change_id=uuid.uuid4(),
-                            user_id=uuid.uuid4(),
-                            stage="scan",
-                            prompt_template="scan.md",
-                            requires_worktree=False,
-                            read_only=True,
-                        )
-
-    mock_ensure.assert_not_called()

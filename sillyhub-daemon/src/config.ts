@@ -80,6 +80,16 @@ export interface DaemonConfig {
   max_concurrent_tasks: number;
   /** 日志级别，默认 "info"。 */
   log_level: string;
+  /**
+   * 单任务默认超时秒数（lease.metadata.timeout_seconds 未指定时用），默认 1800。
+   * task-10 B2：resolveTimeout 优先级链第 2 层。
+   */
+  default_timeout_seconds: number;
+  /**
+   * spawn 级失败最大重试次数，默认 1（业务 is_error 不重试）。
+   * task-10 B3：硬上限 3（resolveMaxRetries 截断 > 3 的值）。
+   */
+  max_retries: number;
 }
 
 // ── 默认值常量 ───────────────────────────────────────────────────────────────
@@ -110,6 +120,9 @@ export const DEFAULT_CONFIG: Readonly<DaemonConfig> = Object.freeze({
   heartbeat_interval: 15,
   max_concurrent_tasks: 5,
   log_level: 'info',
+  // task-10 B2/B3：超时优先级链兜底 + spawn 级失败重试上限。
+  default_timeout_seconds: 1800,
+  max_retries: 1,
 });
 
 // ── loadConfig（异步加载 + 合并默认 + 自动生成 runtime_id）──────────────────

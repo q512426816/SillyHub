@@ -233,6 +233,12 @@ export interface LeaseCtx {
   resumeSessionId?: string;
   /** 执行超时秒数，0 表示不限。 */
   timeout?: number;
+  /**
+   * 执行超时秒数（task-10 B2，lease.metadata.timeout_seconds 透传，优先级最高）。
+   * 0 = 不限（跳过走 config/兜底），-1 = 显式不限（resolveTimeout 返回 0）。
+   * resolveTimeout 优先读 timeoutSeconds，回退 timeout（兼容旧字段）。
+   */
+  timeoutSeconds?: number;
   /** 凭据/工具配置，渲染成环境变量。 */
   toolConfig?: ToolConfig;
   /**
@@ -248,6 +254,48 @@ export interface LeaseCtx {
  * 与 LeaseCtx 同构（task_available 阶段尚无 claim_token）。
  */
 export type LeasePayload = LeaseCtx;
+
+/**
+ * GET /api/agent-runs/{id}/execution-context 响应（daemon 拉取的完整 bundle 上下文）。
+ *
+ * 字段名 snake_case 与后端 Pydantic response 一一对齐（task-05 / design §7.3）。
+ * daemon 在 claim 之后、startLease 之前用 HubClient.getExecutionContext 拉取，
+ * 用本结构覆盖填充 LeaseCtx 的 claudeMd/repoUrl/branch/toolConfig 等字段
+ *（当前 ctx 构造时这些字段恒 undefined，需 fetch 后填充）。
+ *
+ * 注意：本响应与 LeasePayload（camelCase）字段映射：
+ *   claude_md       → ctx.claudeMd
+ *   repo_url        → ctx.repoUrl
+ *   branch          → ctx.branch
+ *   provider        → ctx.provider
+ *   tool_config     → ctx.toolConfig
+ *   resume_session_id → ctx.resumeSessionId
+ *   session_id      → ctx.sessionId
+ *   prompt          → **不从 fetch 覆盖**（保留 payload.prompt 作最终意图）
+ *   allowed_paths   → 暂未消费（task-05 非目标）
+ */
+export interface ExecutionContextPayload {
+  /** 对应 AgentRun id（回显请求路径里的 run_id）。 */
+  agent_run_id: string;
+  /** 写入 .claude/CLAUDE.md 的完整 bundle 文本。 */
+  claude_md: string;
+  /** 任务 prompt（dispatch 时传的最终意图，daemon 不覆盖 payload.prompt）。 */
+  prompt?: string;
+  /** agent provider（claude/codex/...）。 */
+  provider?: string;
+  /** 续跑用 session id（端点是最新源，优先于 payload）。 */
+  resume_session_id?: string;
+  /** git 远程 URL。 */
+  repo_url?: string;
+  /** git 分支名。 */
+  branch?: string;
+  /** 允许访问的路径列表（task-05 非目标，daemon 暂未消费）。 */
+  allowed_paths?: string[];
+  /** 凭据/工具配置，渲染成环境变量（snake_case Record<string,string>）。 */
+  tool_config?: Record<string, string>;
+  /** 当前会话 id。 */
+  session_id?: string;
+}
 
 /**
  * claim_lease 接口的响应结构。

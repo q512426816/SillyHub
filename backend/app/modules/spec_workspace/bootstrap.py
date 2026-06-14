@@ -2,9 +2,9 @@
 
 The bootstrap launch phase creates an AgentRun record, writes a start audit
 event, links the run to the workspace via AgentRunWorkspace, and returns
-immediately.  The actual execution (ClaudeCodeAdapter + SillySpec CLI +
-validation) is handled by ``_execute_bootstrap_agent_run`` which runs as a
-background task with its own DB session.
+immediately.  The actual execution (dispatched to the user's daemon via a
+``daemon_task_leases`` row) is handled by ``_execute_bootstrap_agent_run``
+which runs as a background task with its own DB session.
 
 author: qinyi
 created_at: 2026-05-27
@@ -24,33 +24,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import SpecWorkspaceNotFound
 from app.core.logging import get_logger
 from app.core.redis import get_redis
-from app.modules.agent.base import AgentSpecBundle
 from app.modules.agent.model import AgentRun, AgentRunLog
-from app.modules.spec_profile.model import SpecConflict
 from app.modules.spec_workspace.model import SpecWorkspace
-from app.modules.spec_workspace.validator import SpecValidator
 from app.modules.workflow.model import AuditLog
 from app.modules.workspace.model import AgentRunWorkspace, Workspace
-from app.modules.workspace.service import WorkspaceService
 
 log = get_logger(__name__)
-
-_METADATA_FIELDS = (
-    "total_cost_usd",
-    "duration_ms",
-    "duration_api_ms",
-    "num_turns",
-    "session_id",
-    "input_tokens",
-    "output_tokens",
-)
-
-
-def _apply_run_metadata(run: AgentRun, meta: dict) -> None:
-    for field_name in _METADATA_FIELDS:
-        value = meta.get(field_name)
-        if value is not None:
-            setattr(run, field_name, value)
 
 
 class SpecBootstrapService:
@@ -185,22 +164,25 @@ async def _execute_bootstrap_agent_run(
     spec_root: str,
     code_root: str,
 ) -> None:
-    """Run ClaudeCodeAdapter in the background and finalize bootstrap state.
+    """Dispatch the bootstrap AgentRun to the user's daemon (daemon-only).
 
-    Uses an independent DB session created via ``get_session_factory()``
-    because the caller's request-level session may be closed by the time
-    this background coroutine runs.
+    Previously this coroutine ran the agent adapter in-process and performed
+    inline post-scan validation / SpecConflict creation / workspace activation
+    / child reparse.  The SERVER subprocess backend was removed in task-01; the
+    run is now handed to the daemon via a ``daemon_task_leases`` row plus a
+    WebSocket wake-up.  The daemon claims the lease, fetches the
+    execution-context (task-05), runs the agent, applies the patch and reports
+    completion via ``complete_lease`` (task-07).
 
-    Control flow:
-        1. Open independent session, load AgentRun / SpecWorkspace / Workspace.
-        2. Mark run as running.
-        3. Build AgentSpecBundle and runtime directory.
-        4. Execute via ClaudeCodeAdapter.
-        5. Run SpecValidator on spec_root.
-        6. Update AgentRun + SpecWorkspace + SpecConflict + AuditLog.
+    Post-scan finalisation (SpecValidator / SpecConflict / workspace activation
+    / child reparse) is performed by the daemon completion hook and is
+    intentionally not duplicated here.
     """
     from app.core.db import get_session_factory
-    from app.modules.agent.adapters.claude_code import ClaudeCodeAdapter
+    from app.modules.agent.placement import (
+        NoOnlineDaemonError,
+        RunPlacementService,
+    )
 
     factory = get_session_factory()
     async with factory() as session:
@@ -218,47 +200,32 @@ async def _execute_bootstrap_agent_run(
             spec_ws = await _load_spec_workspace(session, workspace_id)
             if spec_ws is None:
                 run.status = "failed"
+                run.error_code = "spec_workspace_missing"
                 run.finished_at = datetime.now(UTC)
                 run.exit_code = 1
                 run.output_redacted = "SpecWorkspace not found for the given workspace."
                 session.add(run)
                 await session.commit()
+                await _publish_done_event(run_id, "failed", 1)
                 return
 
             workspace = await session.get(Workspace, workspace_id)
             if workspace is None:
                 run.status = "failed"
+                run.error_code = "workspace_missing"
                 run.finished_at = datetime.now(UTC)
                 run.exit_code = 1
                 run.output_redacted = "Workspace not found."
                 session.add(run)
                 await session.commit()
+                await _publish_done_event(run_id, "failed", 1)
                 return
 
-            # -- 2. Mark running ---------------------------------------------------
-            run.status = "running"
-            run.started_at = datetime.now(UTC)
-            session.add(run)
-            await session.commit()
-
-            start_ts = datetime.now(UTC).isoformat()
-            start_message = (
-                "[BOOTSTRAP] Agent run started. Connecting ClaudeCodeAdapter "
-                "for sillyspec init and scan."
-            )
-            await _write_run_log(
-                session,
-                run_id=run_id,
-                channel="stdout",
-                content=start_message,
-            )
-            await _publish_log_event(run_id, "stdout", start_message, start_ts)
-
-            # -- 3. Preflight checks ------------------------------------------------
-            code_root_path = Path(code_root)
-            preflight_error = _run_preflight(code_root_path)
-            if preflight_error:
+            # -- 2. Preflight (code_root sanity, daemon-agnostic) ----------------
+            preflight_error = _run_preflight(Path(code_root))
+            if preflight_error is not None:
                 run.status = "failed"
+                run.error_code = "preflight_failed"
                 run.finished_at = datetime.now(UTC)
                 run.exit_code = 1
                 run.output_redacted = preflight_error
@@ -273,357 +240,73 @@ async def _execute_bootstrap_agent_run(
                 await _publish_done_event(run_id, "failed", 1)
                 return
 
-            # -- 4. Build runtime directory + bundle --------------------------------
-            spec_root_path = Path(spec_root)
-            spec_root_path.mkdir(parents=True, exist_ok=True)
-
-            runtime_dir = spec_root_path / ".runtime" / "bootstrap" / str(run_id)
-            runtime_dir.mkdir(parents=True, exist_ok=True)
-
-            bundle = _build_bootstrap_bundle(
-                workspace_id=workspace_id,
-                workspace=workspace,
-                spec_ws=spec_ws,
-                spec_root=spec_root_path,
-                code_root=code_root_path,
-                run_id=run_id,
-            )
-
-            # -- 5. Execute via adapter (with real-time log writing) ---------------
-            # lease_path = code_root so Claude CWD is the source directory
-            adapter = ClaudeCodeAdapter()
-
-            async def _on_log(channel: str, content: str, ts: str) -> None:
-                try:
-                    async with factory() as log_session:
-                        log_session.add(
-                            AgentRunLog(
-                                id=uuid.uuid4(),
-                                run_id=run_id,
-                                timestamp=_parse_log_timestamp(ts),
-                                channel=channel,
-                                content_redacted=content[:4000],
-                            )
-                        )
-                        await log_session.commit()
-                except Exception as exc:
-                    log.warning(
-                        "bootstrap_on_log_failed",
-                        run_id=str(run_id),
-                        channel=channel,
-                        error=str(exc),
-                    )
-
-            async def _on_metadata(meta: dict) -> None:
-                try:
-                    async with factory() as meta_session:
-                        meta_run = await meta_session.get(AgentRun, run_id)
-                        if meta_run is not None:
-                            _apply_run_metadata(meta_run, meta)
-                            meta_session.add(meta_run)
-                            await meta_session.commit()
-                except Exception as exc:
-                    log.warning(
-                        "bootstrap_on_metadata_failed",
-                        run_id=str(run_id),
-                        error=str(exc),
-                    )
-
-            result = await adapter.run_with_bundle(
-                run_id=run_id,
-                bundle=bundle,
-                lease_path=code_root_path,
-                timeout=600,
-                on_log=_on_log,
-                on_metadata=_on_metadata,
-            )
-
-            # -- 6. Platform-side post-scan validation ------------------------------
-            from app.modules.agent.post_scan_validator import PostScanValidator
-
-            runtime_dir = spec_root_path / "runtime"
-            validator = PostScanValidator(
-                source_root=code_root_path,
-                spec_root=spec_root_path,
-                runtime_root=runtime_dir,
-                scan_run_id=str(run_id),
-            )
-            post_result = validator.validate(
-                agent_output=result.redacted_output or "",
-                agent_exit_code=result.exit_code or 0,
-            )
-
-            # -- 7. SpecValidator for spec structure ---------------------------------
-            report = SpecValidator().validate(spec_root)
-            validation_passed = result.exit_code == 0 and report.passed
-
-            # -- 7. Write stderr AgentRunLog (chunked) ------------------------------
-            if result.stderr.strip():
-                await _write_run_log(
-                    session,
-                    run_id=run_id,
-                    channel="stderr",
-                    content=result.stderr,
-                )
-
-            # -- 8. Update AgentRun + SpecWorkspace ---------------------------------
-            now = datetime.now(UTC)
-            exit_code = result.exit_code
-
-            if validation_passed:
-                run.status = "completed"
-                run.exit_code = exit_code
-                run.output_redacted = result.redacted_output[:10000]
-                run.finished_at = now
-                run.total_cost_usd = result.total_cost_usd
-                run.duration_ms = result.duration_ms
-                run.duration_api_ms = result.duration_api_ms
-                run.num_turns = result.num_turns
-                run.session_id = result.session_id
-                run.conversation_events = result.conversation_events
-                run.input_tokens = result.input_tokens
-                run.output_tokens = result.output_tokens
-
-                spec_ws.sync_status = "clean"
-                spec_ws.last_synced_at = now
-                spec_ws.updated_at = now
-            else:
-                run.status = "failed"
-                run.exit_code = exit_code
-                run.output_redacted = result.redacted_output[:10000]
-                run.finished_at = now
-                run.total_cost_usd = result.total_cost_usd
-                run.duration_ms = result.duration_ms
-                run.duration_api_ms = result.duration_api_ms
-                run.num_turns = result.num_turns
-                run.session_id = result.session_id
-                run.conversation_events = result.conversation_events
-                run.input_tokens = result.input_tokens
-                run.output_tokens = result.output_tokens
-
-                spec_ws.sync_status = "dirty"
-                spec_ws.updated_at = now
-
-                # Create SpecConflict for adapter non-zero exit
-                if exit_code != 0:
-                    session.add(
-                        SpecConflict(
-                            id=uuid.uuid4(),
-                            workspace_id=workspace_id,
-                            stage="bootstrap",
-                            conflict_type="command",
-                            details_json=json.dumps(
-                                {
-                                    "exit_code": exit_code,
-                                    "stderr_preview": result.stderr[:500],
-                                }
-                            ),
-                        )
-                    )
-
-                # Create SpecConflict for each validation error
-                for issue in report.errors:
-                    session.add(
-                        SpecConflict(
-                            id=uuid.uuid4(),
-                            workspace_id=workspace_id,
-                            stage="bootstrap",
-                            conflict_type=issue.category,
-                            details_json=json.dumps(
-                                {
-                                    "path": issue.path,
-                                    "message": issue.message,
-                                    "category": issue.category,
-                                }
-                            ),
-                        )
-                    )
-
-                # Create SpecConflict for post-scan validation errors
-                for perr in post_result.errors:
-                    # Map validation error codes to specific conflict types
-                    conflict_type_map = {
-                        "source_root_pollution": "source_root_pollution",
-                        "expected_docs_missing": "missing_spec_artifact",
-                        "docs_empty": "missing_spec_artifact",
-                        "scan_dir_missing": "missing_spec_artifact",
-                        "missing_spec_artifacts": "missing_spec_artifact",
-                        "error_pattern_detected": "agent_log_error",
-                        "source_commit_failed": "metadata_error",
-                        "manifest_missing": "manifest_error",
-                    }
-                    conflict_type = conflict_type_map.get(perr.code, "post_scan_validation_error")
-
-                    session.add(
-                        SpecConflict(
-                            id=uuid.uuid4(),
-                            workspace_id=workspace_id,
-                            stage="bootstrap",
-                            conflict_type=conflict_type,
-                            details_json=json.dumps(
-                                {
-                                    "code": perr.code,
-                                    "message": perr.message,
-                                    "severity": perr.severity,
-                                    "details": perr.details,
-                                }
-                            ),
-                        )
-                    )
-
-            run.post_scan_status = post_result.status.value
-            run.source_commit = post_result.metadata.get("source_commit")
-            session.add(run)
-            session.add(spec_ws)
-
-            # -- 9. Write complete audit log ----------------------------------------
-            error_count = len(report.errors) + len(post_result.errors)
-            warning_count = len(report.warnings) + len(post_result.warnings)
-            audit_details = {
-                "validation_passed": validation_passed,
-                "post_scan_status": post_result.status.value,
-                "error_count": error_count,
-                "warning_count": warning_count,
-                "sync_status": spec_ws.sync_status,
-                "exit_code": exit_code,
-                "spec_root": str(spec_root),
-                "source_commit": post_result.metadata.get("source_commit"),
-                "source_commit_error": post_result.metadata.get("source_commit_error"),
-                "post_scan_errors": [
-                    {"code": e.code, "message": e.message} for e in post_result.errors
-                ],
-            }
-            session.add(
-                AuditLog(
-                    id=uuid.uuid4(),
+            # -- 3. Dispatch to daemon (daemon-only since task-01) ----------------
+            placement = RunPlacementService(session)
+            try:
+                await placement.decide_backend(
                     workspace_id=workspace_id,
-                    actor_id=user_id,
-                    action="spec_bootstrap.complete",
-                    resource_type="agent_run",
-                    resource_id=run.id,
-                    details_json=json.dumps(audit_details),
+                    user_id=user_id,
                 )
+            except NoOnlineDaemonError as exc:
+                run.status = "failed"
+                run.error_code = "no_online_daemon"
+                run.output_redacted = exc.message
+                run.finished_at = datetime.now(UTC)
+                run.exit_code = 1
+                session.add(run)
+                await session.commit()
+                await _publish_done_event(run_id, "failed", 1)
+                log.warning(
+                    "spec_bootstrap_no_online_daemon",
+                    run_id=str(run_id),
+                    workspace_id=str(workspace_id),
+                )
+                return
+
+            lease_id = await placement.dispatch_to_daemon(
+                run.id,
+                user_id,
+                provider="claude_code",
             )
-
-            await session.commit()
-
-            # -- 9b. Success post-processing: activate + reparse children ------
-            # Mirror the pattern from _execute_scan_run in agent/service.py.
-            if validation_passed:
-                # 9b-1. Promote workspace from pending -> active
-                try:
-                    ws = await session.get(Workspace, workspace_id)
-                    if ws is not None and ws.status == "pending":
-                        ws.status = "active"
-                        ws.last_scanned_at = datetime.now(UTC)
-                        ws.updated_at = datetime.now(UTC)
-                        session.add(ws)
-                        await session.commit()
-                        log.info(
-                            "bootstrap_workspace_activated",
-                            run_id=str(run_id),
-                            workspace_id=str(workspace_id),
-                        )
-                except Exception as exc:
-                    log.warning(
-                        "bootstrap_workspace_activate_failed",
-                        run_id=str(run_id),
-                        workspace_id=str(workspace_id),
-                        error=str(exc),
-                    )
-
-                # 9b-2. Auto-reparse child workspaces from generated specs
-                try:
-                    svc = WorkspaceService(session)
-                    _parse_result, stats, _children, _relations = await svc.reparse(workspace_id)
-                    log.info(
-                        "bootstrap_reparse_done",
-                        run_id=str(run_id),
-                        workspace_id=str(workspace_id),
-                        created=stats.get("created"),
-                        relations_created=stats.get("relations_created"),
-                    )
-                except Exception as exc:
-                    log.warning(
-                        "bootstrap_reparse_failed",
-                        run_id=str(run_id),
-                        workspace_id=str(workspace_id),
-                        error=str(exc),
-                    )
-
-            await _publish_done_event(run_id, run.status, run.exit_code)
+            if lease_id is None:
+                run.status = "failed"
+                run.error_code = "no_online_daemon"
+                run.output_redacted = "未检测到在线 daemon，请启动 sillyhub-daemon 后重试"
+                run.finished_at = datetime.now(UTC)
+                run.exit_code = 1
+                session.add(run)
+                await session.commit()
+                await _publish_done_event(run_id, "failed", 1)
+                return
 
             log.info(
-                "spec_bootstrap.complete",
+                "spec_bootstrap_dispatched_to_daemon",
                 run_id=str(run_id),
                 workspace_id=str(workspace_id),
-                validation_passed=validation_passed,
-                exit_code=exit_code,
-                sync_status=spec_ws.sync_status,
+                lease_id=str(lease_id),
             )
 
         except Exception as exc:
-            # Outer guard: ensure run never stays in 'running' on unhandled exception
             log.exception(
-                "spec_bootstrap_exception",
+                "spec_bootstrap_dispatch_exception",
                 run_id=str(run_id),
                 workspace_id=str(workspace_id),
                 error=str(exc),
             )
             try:
-                # Re-read run in case it was modified before the exception
                 run = await session.get(AgentRun, run_id)
                 if run is not None and run.status not in ("completed", "failed", "killed"):
                     run.status = "failed"
+                    run.error_code = "dispatch_exception"
                     run.finished_at = datetime.now(UTC)
                     run.exit_code = 1
                     run.output_redacted = f"Unhandled exception: {exc}"[:10000]
                     session.add(run)
-
-                    # Write stderr log for SSE replay
-                    await _write_run_log(
-                        session,
-                        run_id=run_id,
-                        channel="stderr",
-                        content=f"Unhandled exception: {exc}",
-                    )
-
-                    # Write complete audit even on exception
-                    session.add(
-                        AuditLog(
-                            id=uuid.uuid4(),
-                            workspace_id=workspace_id,
-                            actor_id=user_id,
-                            action="spec_bootstrap.complete",
-                            resource_type="agent_run",
-                            resource_id=run_id,
-                            details_json=json.dumps(
-                                {
-                                    "validation_passed": False,
-                                    "error_count": -1,
-                                    "warning_count": 0,
-                                    "sync_status": "dirty",
-                                    "exit_code": 1,
-                                    "spec_root": spec_root,
-                                    "exception": str(exc)[:500],
-                                }
-                            ),
-                        )
-                    )
-
-                    # Update SpecWorkspace to dirty if possible
-                    spec_ws = await _load_spec_workspace(session, workspace_id)
-                    if spec_ws is not None:
-                        spec_ws.sync_status = "dirty"
-                        spec_ws.updated_at = datetime.now(UTC)
-                        session.add(spec_ws)
-
                     await session.commit()
-
                     await _publish_done_event(run_id, "failed", 1)
             except Exception as inner_exc:
                 log.error(
-                    "spec_bootstrap_exception_cleanup_failed",
+                    "spec_bootstrap_dispatch_cleanup_failed",
                     run_id=str(run_id),
                     error=str(inner_exc),
                 )
@@ -697,102 +380,6 @@ def _run_preflight(code_root: Path) -> str | None:
         pass
 
     return None
-
-
-def _build_bootstrap_bundle(
-    *,
-    workspace_id: uuid.UUID,
-    workspace: Workspace,
-    spec_ws: SpecWorkspace,
-    spec_root: Path,
-    code_root: Path,
-    run_id: uuid.UUID,
-) -> AgentSpecBundle:
-    """Return the exact bootstrap AgentSpecBundle consumed by ClaudeCodeAdapter.
-
-    The bundle instructs Claude to:
-    - Run ``sillyspec init --dir <code_root>``
-    - Run ``sillyspec run scan --dir <code_root> --spec-root <spec_root> ...``
-    - NOT wait for real stdin interaction; use conservative defaults instead.
-    """
-    runtime_root = str(spec_root / "runtime")
-    ws_id = str(workspace_id)
-    run_id_str = str(run_id)
-
-    init_cmd = f"sillyspec init --dir {code_root}"
-    scan_start_cmd = (
-        f"sillyspec run scan"
-        f" --dir {code_root}"
-        f" --spec-root {spec_root}"
-        f" --runtime-root {runtime_root}"
-        f" --workspace-id {ws_id}"
-        f" --scan-run-id {run_id_str}"
-    )
-    scan_done_cmd = (
-        f"sillyspec run scan --done --change default --dir {code_root}"
-        f' --input "步骤描述" --output "步骤摘要"'
-    )
-    step_prompt = (
-        f"你是一个项目分析 agent。请对项目目录 {code_root} 执行 sillyspec scan。\n\n"
-        f"## ⚠️ 命令模板（严格复制，不要省略任何参数）\n\n"
-        f"**第 1 步 — 初始化（仅一次）：**\n"
-        f"```\n{init_cmd}\n```\n\n"
-        f"**第 2 步 — 启动 scan（仅一次，必须包含全部平台参数）：**\n"
-        f"```\n{scan_start_cmd}\n```\n\n"
-        f"**第 3-N 步 — 逐步推进（每次完成后执行）：**\n"
-        f"```\n{scan_done_cmd}\n"
-        f"```\n\n"
-        f"## 执行流程\n"
-        f"1. 执行 init 命令（--dir 指向源码目录 {code_root}）\n"
-        f"2. 执行 scan 启动命令（包含全部平台参数，文档输出到 {spec_root}）\n"
-        f"3. CLI 输出 step prompt → 执行扫描操作 → 用 done 命令推进\n"
-        f"4. 重复 step 3 直到 10/10 步全部完成\n\n"
-        f"## 规则\n"
-        f"- --dir 必须指向源码目录 {code_root}（不是 spec_root）\n"
-        f"- 对 {code_root} 目录中的源码只读，不要修改项目文件\n"
-        f"- .sillyspec/ 目录会在源码目录下创建（由 --dir 决定）\n"
-        f"- 文档生成在 {spec_root}/.sillyspec/docs/ 目录下\n"
-        f"- 启动 scan 命令必须包含 --spec-root/--runtime-root/--workspace-id/--scan-run-id\n"
-        f"- done 命令不需要重复平台参数\n"
-        f"- 每个步骤必须用 done 完成，不要跳过\n"
-        f"- Do NOT wait for real stdin interaction; use conservative defaults.\n"
-        f"\n"
-        f"## ⛔ 严禁写入路径\n"
-        f"- 禁止将任何文档文件写入 {code_root}/.sillyspec/docs/\n"
-        f"- 所有文档必须写入 {spec_root}/.sillyspec/docs/（由 --spec-root 参数控制）\n"
-        f"- 如果 CLI 在 {code_root}/.sillyspec/ 下产生了 docs 文件，这是错误的\n"
-    )
-
-    return AgentSpecBundle(
-        change_summary="Spec workspace bootstrap",
-        task_key="stage:scan",
-        task_title="Stage dispatch: scan",
-        allowed_paths=[str(spec_root), str(code_root)],
-        denied_paths=[
-            str(code_root / ".sillyspec"),
-            str(code_root / "docs"),
-        ],
-        available_tools=["sillyspec"],
-        spec_strategy=spec_ws.strategy,
-        profile_version=spec_ws.profile_version,
-        platform_metadata={
-            "bootstrap": True,
-            "workspace_id": ws_id,
-            "spec_root": str(spec_root),
-            "code_root": str(code_root),
-            "root_path": str(code_root),
-            "runtime_root": runtime_root,
-            "scan_run_id": run_id_str,
-            "mode": "scan",
-        },
-        stage_dispatch=True,
-        change_key=None,
-        stage="scan",
-        spec_root=str(spec_root),
-        runtime_root=runtime_root,
-        step_prompt=step_prompt,
-        read_only=True,
-    )
 
 
 async def _write_run_log(

@@ -63,6 +63,20 @@ export class StreamJsonAdapter implements ProtocolAdapter {
   private lastResultInfo?: ResultInfo;
 
   /**
+   * 跨 assistant 事件累加的 usage（task-06：对齐 SERVER _extract_result_metadata 聚合策略）。
+   * parseAssistant 每次累加 message.usage.input_tokens/output_tokens；
+   * parseResult 时通过 extractResultStats 与 result.usage 求和（result.usage 优先 +
+   * accumulated 防御性双保险）。
+   *
+   * 跨 lease 重置：TaskRunner 在 runLease 步骤4 拿到 adapter 后调 resetAccumulator，
+   * 避免 adapter 单例场景下跨 lease 累加污染（task-06 §边界处理 6）。
+   */
+  private _accumulatedUsage: { input_tokens: number; output_tokens: number } = {
+    input_tokens: 0,
+    output_tokens: 0,
+  };
+
+  /**
    * 子进程 stdin 引用，control_request 回写用。
    * 由 TaskRunner（task-19）在 spawn 后通过 attachStdin 注入。
    * parse 内部识别到 control_request 行时调 writeControlResponse 回写。
@@ -76,6 +90,14 @@ export class StreamJsonAdapter implements ProtocolAdapter {
   /** TaskRunner 在 spawn 子进程后注入 stdin，使 parse 能在 control_request 时回写。 */
   attachStdin(stdin: NodeJS.WritableStream): void {
     this.stdin = stdin;
+  }
+
+  /**
+   * 重置跨 message 累加器（task-06）。
+   * TaskRunner 在 runLease 步骤4 拿到 adapter 后调用，避免 adapter 单例时跨 lease 污染。
+   */
+  resetAccumulator(): void {
+    this._accumulatedUsage = { input_tokens: 0, output_tokens: 0 };
   }
 
   /** 读取累积的 session_id（供 TaskRunner 在 lease 结束时上报）。 */
@@ -215,6 +237,18 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     const content = message.content;
     if (!Array.isArray(content)) return null;
 
+    // task-06：累加 message.usage（跨 turn 聚合，对齐 SERVER claude_code.py:222-225
+    // _extract_result_metadata 的 fallback 策略）。仅累加 number 类型字段，非 number 跳过。
+    const usage = message.usage;
+    if (isRecord(usage)) {
+      if (typeof usage.input_tokens === 'number') {
+        this._accumulatedUsage.input_tokens += usage.input_tokens;
+      }
+      if (typeof usage.output_tokens === 'number') {
+        this._accumulatedUsage.output_tokens += usage.output_tokens;
+      }
+    }
+
     const events: AgentEvent[] = [];
     for (const block of content) {
       if (!isRecord(block)) continue;
@@ -335,7 +369,7 @@ export class StreamJsonAdapter implements ProtocolAdapter {
         metadata: {
           session_id: sessionId,
           is_error: false,
-          stats: extractResultStats(msg),
+          stats: extractResultStats(msg, this._accumulatedUsage),
         },
       },
     ];
@@ -488,26 +522,49 @@ function normalizeToolResultContent(content: unknown): string {
 }
 
 /**
- * 从 result 消息提取 usage / cost 等 stats 字段（若存在）。
- * 对照 Python _parse_result 只提取 session_id/result/is_error，但 claude CLI
- * 实际 result 消息常带 total_cost_usd / usage 字段，方案B 收集到 metadata.stats。
+ * 从 result 消息提取 usage / cost 等 stats，并把 usage.input_tokens/output_tokens
+ * 拆平到顶层 + 与历史累加值求和（对齐 SERVER `_extract_result_metadata` 聚合策略，
+ * backend claude_code.py 同名实现）。
+ *
+ * task-06 §实现要求 1：
+ *   - knownKeys 收集顶层标量 stats（cost / duration / num_turns 等）；
+ *   - usage 拆平：优先取 result.usage（claude CLI 汇总值），叠加 accumulated（跨 assistant
+ *     事件累加值，防御性双保险；result.usage 本身已是 CLI 汇总，accumulated 兜底缺失场景）；
+ *   - result 无 usage 时仅用 accumulated。
+ *
+ * @param resultMsg   result 消息（type:'result' 那一行 JSON）
+ * @param accumulated 跨 message 累加的 input_tokens/output_tokens（来自 assistant 事件）
+ * @returns stats dict（input_tokens/output_tokens 已累加；含 total_cost_usd?/num_turns? 等）
  */
-function extractResultStats(msg: Record<string, unknown>): Record<string, unknown> {
+function extractResultStats(
+  resultMsg: Record<string, unknown>,
+  accumulated: { input_tokens: number; output_tokens: number },
+): Record<string, unknown> {
   const stats: Record<string, unknown> = {};
   const knownKeys = [
     'total_cost_usd',
     'total_duration_ms',
     'total_api_duration_ms',
-    'usage',
     'num_turns',
     'is_error',
     'duration_ms',
     'result',
   ];
   for (const key of knownKeys) {
-    if (key in msg) {
-      stats[key] = msg[key];
-    }
+    if (key in resultMsg) stats[key] = resultMsg[key];
+  }
+  // usage 拆平（优先取 result.usage；缺失时回落 accumulated）
+  const usage = resultMsg.usage;
+  if (isRecord(usage)) {
+    stats.input_tokens =
+      (typeof usage.input_tokens === 'number' ? usage.input_tokens : 0) + accumulated.input_tokens;
+    stats.output_tokens =
+      (typeof usage.output_tokens === 'number' ? usage.output_tokens : 0) +
+      accumulated.output_tokens;
+  } else if (accumulated.input_tokens > 0 || accumulated.output_tokens > 0) {
+    // result 无 usage → 仅用 accumulated（assistant 事件聚合值）
+    stats.input_tokens = accumulated.input_tokens;
+    stats.output_tokens = accumulated.output_tokens;
   }
   return stats;
 }

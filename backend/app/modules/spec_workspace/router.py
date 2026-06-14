@@ -128,8 +128,8 @@ async def bootstrap_spec_workspace(
 
     Creates a pending AgentRun, writes a start audit event, links the run
     to the workspace, and returns immediately with the run ID and stream URL.
-    The actual execution (ClaudeCodeAdapter + SillySpec CLI + validation)
-    happens in a background task.
+    The actual execution (dispatched to the user's daemon) happens in a
+    background task.
     """
     service = SpecBootstrapService(session)
     result = await service.bootstrap(workspace_id, user_id=_user.id)

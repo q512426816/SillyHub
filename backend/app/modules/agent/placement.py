@@ -14,13 +14,10 @@ import json
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
 from app.core.logging import get_logger
-from app.core.redis import get_redis
-from app.modules.agent.model import AgentRun
 
 log = get_logger(__name__)
 
@@ -33,8 +30,32 @@ log = get_logger(__name__)
 class ExecutionBackend(enum.Enum):
     """Where an AgentRun will be executed."""
 
-    SERVER = "server"  # server-side subprocess mode
+    SERVER = "server"  # legacy server subprocess mode (path removed task-01; enum retained)
     DAEMON = "daemon"  # local daemon mode
+
+
+class NoOnlineDaemonError(Exception):
+    """无在线 daemon，SERVER 路径已删除，无法执行 AgentRun。
+
+    上层（AgentService 三处 dispatch 入口）捕获后：
+    - 置 AgentRun.status = "failed"
+    - AgentRun.error_code = "no_online_daemon"
+    - AgentRun.output_redacted = "未检测到在线 daemon，请启动 sillyhub-daemon 后重试"
+    """
+
+    def __init__(
+        self,
+        *,
+        workspace_id: uuid.UUID | None = None,
+        user_id: uuid.UUID,
+        message: str = "未检测到在线 daemon，请启动 sillyhub-daemon 后重试",
+    ) -> None:
+        if user_id is None:
+            raise TypeError("NoOnlineDaemonError requires user_id")
+        self.workspace_id = workspace_id
+        self.user_id = user_id
+        self.message = message
+        super().__init__(message)
 
 
 # ---------------------------------------------------------------------------
@@ -63,16 +84,13 @@ class RunPlacementService:
     ) -> ExecutionBackend:
         """Decide which backend should execute the upcoming AgentRun.
 
-        Decision logic:
+        Daemon-Only (task-01): the SERVER subprocess backend has been removed.
+        This method now either returns ``ExecutionBackend.DAEMON`` (when an
+        online daemon runtime exists) or raises ``NoOnlineDaemonError``.
 
-        1. If the caller explicitly requests ``preferred_backend``:
-           - ``"server"``  -> ``ExecutionBackend.SERVER``
-           - ``"daemon"``  -> check whether an online daemon runtime exists
-             for the user; if yes -> ``DAEMON``, otherwise fallback to
-             ``SERVER``.
-        2. Without explicit preference, auto-detect: if the user has at
-           least one online runtime, prefer ``DAEMON``; otherwise fall back
-           to ``SERVER``.
+        The ``preferred_backend`` parameter is retained for signature
+        compatibility. Passing ``"server"`` is no longer supported and raises
+        ``NoOnlineDaemonError``; any other value is ignored (daemon-only path).
         """
         log.info(
             "placement_decide_backend",
@@ -83,39 +101,28 @@ class RunPlacementService:
             preferred_backend=preferred_backend,
         )
 
-        # -- explicit preference ------------------------------------------------
+        # SERVER backend removed (task-01); explicit "server" request is rejected.
         if preferred_backend is not None:
             pref = preferred_backend.lower().strip()
             if pref == "server":
-                log.info("placement_backend_forced", backend="server")
-                return ExecutionBackend.SERVER
-
-            if pref == "daemon":
-                has_runtime = await self._has_online_runtime(user_id)
-                if has_runtime:
-                    log.info("placement_backend_forced", backend="daemon")
-                    return ExecutionBackend.DAEMON
+                raise NoOnlineDaemonError(workspace_id=workspace_id, user_id=user_id)
+            if pref != "daemon":
                 log.warning(
-                    "placement_daemon_preferred_but_no_runtime",
-                    user_id=str(user_id),
+                    "placement_unknown_preferred_backend",
+                    preferred_backend=preferred_backend,
                 )
-                return ExecutionBackend.SERVER
 
-            log.warning(
-                "placement_unknown_preferred_backend",
-                preferred_backend=preferred_backend,
-            )
-            # fall through to auto-detect
-
-        # -- auto-detect --------------------------------------------------------
+        # Auto-detect: DAEMON when an online runtime exists, else fail loudly.
         has_runtime = await self._has_online_runtime(user_id)
-        backend = ExecutionBackend.DAEMON if has_runtime else ExecutionBackend.SERVER
-        log.info(
-            "placement_backend_auto",
-            backend=backend.value,
-            has_online_runtime=has_runtime,
-        )
-        return backend
+        if has_runtime:
+            log.info(
+                "placement_backend_auto",
+                backend="daemon",
+                has_online_runtime=True,
+            )
+            return ExecutionBackend.DAEMON
+
+        raise NoOnlineDaemonError(workspace_id=workspace_id, user_id=user_id)
 
     # ------------------------------------------------------------------
     # Dispatch helpers
@@ -126,17 +133,38 @@ class RunPlacementService:
         agent_run_id: uuid.UUID,
         user_id: uuid.UUID,
         *,
+        # 通用字段（design §7.2）
         provider: str | None = None,
         prompt: str | None = None,
         resume_session_id: str | None = None,
+        repo_url: str | None = None,
+        branch: str | None = None,
+        allowed_paths: list[str] | None = None,
+        tool_config: dict | None = None,
+        timeout_seconds: int | None = None,
+        # stage run 专用（R-stage）
+        step_prompt: str | None = None,
+        stage: str | None = None,
+        read_only: bool | None = None,
+        # scan run 专用（R-stage）
+        root_path: str | None = None,
+        spec_root: str | None = None,
+        runtime_root: str | None = None,
     ) -> uuid.UUID | None:
         """Dispatch an AgentRun to the user's daemon.
 
-        Steps:
-        1. Create a ``daemon_task_leases`` row (status=pending).
-        2. Send a WebSocket wake-up signal if an online WS connection exists
-           (stub for now -- Wave 2).
-        3. Return the lease_id.
+        所有上下文参数（除 CLAUDE.md，design §Phase 2 第 111 行）持久化到
+        ``daemon_task_leases.metadata`` JSON 列。daemon 通过
+        ``_build_claim_payload``（初始 claim）和 ``GET execution-context``
+        （fetch，task-02/task-05）读取。
+
+        守卫规则：
+        - 真值字段用 ``if x:``（None / 空串 / 空 list 不写入）；
+        - ``read_only`` / ``timeout_seconds`` 用 ``is not None``，避免
+          ``False`` / ``0`` 被吞（R-stage 显式 false 必须持久化）。
+
+        Returns lease_id，或 None（无在线 runtime——task-01 后此情况由
+        decide_backend 抛 NoOnlineDaemonError，此处保留 None 兜底）。
         """
         runtime = await self._get_online_runtime(user_id, provider=provider)
         if runtime is None:
@@ -147,17 +175,45 @@ class RunPlacementService:
             )
             return None
 
-        runtime_id: uuid.UUID = runtime["id"]
+        # raw SQL 返回的 id 在 SQLite 是 CHAR(32) hex string、在 PostgreSQL 是
+        # UUID 对象；统一标准化为 uuid.UUID，供后续 .hex / str() / WS hub 使用。
+        rid_raw = runtime["id"]
+        runtime_id: uuid.UUID = uuid.UUID(rid_raw) if isinstance(rid_raw, str) else rid_raw
 
         lease_id = uuid.uuid4()
         now = datetime.now(UTC)
-        metadata = {}
+        metadata: dict = {}
+        # 通用字段（design §7.2）
         if prompt:
             metadata["prompt"] = prompt
         if provider:
             metadata["provider"] = provider
         if resume_session_id:
             metadata["resume_session_id"] = resume_session_id
+        if repo_url:
+            metadata["repo_url"] = repo_url
+        if branch:
+            metadata["branch"] = branch
+        if allowed_paths:
+            metadata["allowed_paths"] = allowed_paths
+        if tool_config:
+            metadata["tool_config"] = tool_config
+        if timeout_seconds is not None:
+            metadata["timeout_seconds"] = timeout_seconds
+        # stage run 专用（R-stage 应对）
+        if step_prompt:
+            metadata["step_prompt"] = step_prompt
+        if stage:
+            metadata["stage"] = stage
+        if read_only is not None:
+            metadata["read_only"] = read_only
+        # scan run 专用（R-stage 应对）
+        if root_path:
+            metadata["root_path"] = root_path
+        if spec_root:
+            metadata["spec_root"] = spec_root
+        if runtime_root:
+            metadata["runtime_root"] = runtime_root
 
         await self._session.execute(
             text(
@@ -169,9 +225,11 @@ class RunPlacementService:
                 """
             ),
             {
-                "id": lease_id,
-                "agent_run_id": agent_run_id,
-                "runtime_id": runtime_id,
+                # SQLAlchemy ``Uuid`` 在 SQLite 以 CHAR(32) hex 存储；用 .hex
+                # 绑定参数（无连字符），PostgreSQL Uuid 列同样接受该形式。
+                "id": lease_id.hex,
+                "agent_run_id": agent_run_id.hex,
+                "runtime_id": runtime_id.hex,
                 "metadata": json.dumps(metadata) if metadata else None,
                 "now": now,
             },
@@ -189,67 +247,6 @@ class RunPlacementService:
         await self._send_ws_wakeup(runtime_id, lease_id, agent_run_id)
 
         return lease_id
-
-    async def dispatch_to_server(self, agent_run_id: uuid.UUID) -> None:
-        """Dispatch an AgentRun to the server subprocess backend.
-
-        Resets the AgentRun to ``pending`` so it will be picked up by the
-        server-side execution scheduler (e.g. ``AgentService``) on the next
-        scheduling cycle.  Publishes a Redis event so that any listeners
-        (WebSocket clients, progress trackers) are notified of the status
-        change.
-        """
-        # Load the AgentRun via ORM to update status
-        stmt = select(AgentRun).where(col(AgentRun.id) == agent_run_id)
-        agent_run = (await self._session.execute(stmt)).scalars().first()
-
-        if agent_run is None:
-            log.warning(
-                "dispatch_server_agent_run_missing",
-                agent_run_id=str(agent_run_id),
-            )
-            return
-
-        # Only act if the run is in a state that allows server re-execution
-        if agent_run.status not in ("pending", "running"):
-            log.info(
-                "dispatch_server_skip_non_reexecutable",
-                agent_run_id=str(agent_run_id),
-                current_status=agent_run.status,
-            )
-            return
-
-        # Reset to pending for server-side re-execution
-        agent_run.status = "pending"
-        agent_run.started_at = None
-        agent_run.finished_at = None
-        agent_run.exit_code = None
-        self._session.add(agent_run)
-        await self._session.commit()
-
-        # Publish Redis event so listeners know the run was rolled back
-        try:
-            redis = get_redis()
-            await redis.publish(
-                f"agent_run:{agent_run_id}",
-                json.dumps(
-                    {
-                        "event": "dispatched_to_server",
-                        "status": "pending",
-                        "agent_run_id": str(agent_run_id),
-                    }
-                ),
-            )
-        except Exception:
-            log.warning(
-                "dispatch_server_redis_publish_failed",
-                agent_run_id=str(agent_run_id),
-            )
-
-        log.info(
-            "dispatch_server_rollback",
-            agent_run_id=str(agent_run_id),
-        )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -272,7 +269,7 @@ class RunPlacementService:
                       AND status = 'online'
                     """
                 ),
-                {"user_id": user_id},
+                {"user_id": user_id.hex},
             )
             row = result.mappings().first()
             count = row["cnt"] if row else 0
@@ -297,7 +294,7 @@ class RunPlacementService:
         """
         try:
             where_extra = "AND provider = :provider" if provider else ""
-            params: dict = {"user_id": user_id}
+            params: dict = {"user_id": user_id.hex}
             if provider:
                 params["provider"] = provider
             result = await self._session.execute(

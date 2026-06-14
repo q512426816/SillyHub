@@ -22,6 +22,7 @@
  */
 
 import { REST_PREFIX } from './protocol.js';
+import type { ExecutionContextPayload } from './types.js';
 
 // ── body 类型（字段名 snake_case 对齐 backend Pydantic 模型）──────────────────
 
@@ -354,6 +355,34 @@ export class HubClient {
     return this._request<Record<string, unknown>[]>(
       'GET',
       `${REST_PREFIX}/runtimes/${encodeURIComponent(runtimeId)}/pending-leases`,
+    );
+  }
+
+  // -- Execution context 拉取（task-05：fetch bundle 上下文）--
+
+  /**
+   * 拉取 agent run 的完整执行上下文 bundle（CLAUDE.md / repo / branch / tool_config 等）。
+   *
+   * 端点：GET /api/agent-runs/{agentRunId}/execution-context（task-02 agent router）。
+   *
+   * **路径前缀注意**：用 `/api`（agent router 挂载点），**不用** REST_PREFIX（那是
+   * `/api/daemon`，daemon module 专用前缀，拼接会变成 `/api/daemon/agent-runs/...` 404）。
+   * design §7.1 + task-05 §边界处理 6 明确此约束。
+   *
+   * **鉴权**：沿用 _headers() 的 Bearer token；无 token 不带 Authorization（与既有方法一致）。
+   *
+   * **超时**：复用 DEFAULT_TIMEOUT_MS=30_000。
+   *
+   * **失败语义**：HTTP 非 2xx → 抛 HubHttpError；网络/超时 → 透传 fetch 原始错误
+   *（不包装，对齐 _request 既有语义）。调用方（daemon._runLeaseStateMachine）按
+   * R-03 捕获后继续降级执行，不中断 lease。
+   *
+   * @returns ExecutionContextPayload（snake_case 字段与后端 Pydantic 对齐）
+   */
+  async getExecutionContext(agentRunId: string): Promise<ExecutionContextPayload> {
+    return this._request<ExecutionContextPayload>(
+      'GET',
+      `/api/agent-runs/${encodeURIComponent(agentRunId)}/execution-context`,
     );
   }
 }

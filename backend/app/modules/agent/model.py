@@ -90,6 +90,10 @@ class AgentRun(BaseModel, table=True):
         default=None,
         sa_column=Column(Text, nullable=True),
     )
+    error_code: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )  # e.g. no_online_daemon (task-01)
     spec_strategy: str | None = Field(
         default=None,
         sa_column=Column(String(30), nullable=True),

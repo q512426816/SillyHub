@@ -46,6 +46,8 @@ import { randomUUID } from 'node:crypto';
 
 import { getBackend } from './adapters/index.js';
 import type { ProtocolAdapter } from './adapters/protocol-adapter.js';
+import { buildSpawnEnv } from './spawn-env.js';
+import type { DaemonConfig } from './config.js';
 import type {
   AgentEvent,
   LeaseCtx,
@@ -126,8 +128,13 @@ export interface RunnerWorkspaceManager {
  * buildEnv 签名与 CredentialManager.buildEnv 逐字一致（必传 config，
  * Record<string, unknown>），使 CredentialManager 实例可直接注入而无需
  * adapter 包装（G-04 类型安全）。调用点负责兜底 undefined（ctx.toolConfig ?? {}）。
+ *
+ * task-09：新增 get（读 credentials.json 顶层 token，供 buildSpawnEnv 注入
+ * ANTHROPIC_API_KEY / CLAUDE_OAUTH_TOKEN）。CredentialManager 实例天然有 get，
+ * 结构兼容 spawn-env.ts 的 SpawnCredentialManager（鸭子类型）。
  */
 export interface RunnerCredentialManager {
+  get(key: string): string | undefined;
   buildEnv(config: Record<string, unknown>): Record<string, string>;
 }
 
@@ -152,11 +159,14 @@ export class TaskRunner {
    * @param client     HubClient 实例（REST 调用）
    * @param workspace  WorkspaceManager 实例（git 镜像 + diff）
    * @param credential CredentialManager 实例（env 渲染）
+   * @param config     daemon 配置（task-10：resolveTimeout/resolveMaxRetries 用，
+   *                   可选，缺省走兜底默认 1800s / 1 retry）
    */
   constructor(
     private readonly client: RunnerHubClient,
     private readonly workspace: RunnerWorkspaceManager,
     private readonly credential: RunnerCredentialManager,
+    private readonly config?: DaemonConfig,
   ) {}
 
   // ── 追踪与取消 ────────────────────────────────────────────────────────────
@@ -253,9 +263,15 @@ export class TaskRunner {
 
     try {
       // 步骤 1：workspace.prepareWorkspace（失败直接抛 → finally 映射 failed）
+      // workspaceName 仍保留兜底（task-05 §实现要求 4：保留 ctx.workspaceName ?? 'default'）。
+      // repoUrl / branch **退役兜底**（task-05）：让 undefined 透传到 prepareWorkspace，
+      // 后者签名 `prepareWorkspace(name, repoUrl?, branch='main')` 接受 undefined——
+      // repoUrl undefined → 走空目录分支；branch undefined → 触发 prepareWorkspace 默认 'main'。
+      // 退役兜底的语义：fetch execution-context（task-05）填充 ctx 后，
+      // repoUrl/branch 已是 server 的真实意图；旧兜底会掩盖 server 未配置的真实情况。
       const wsName = ctx.workspaceName ?? 'default';
-      const repoUrl = ctx.repoUrl ?? undefined;
-      const branch = ctx.branch ?? 'main';
+      const repoUrl = ctx.repoUrl;
+      const branch = ctx.branch;
       const workDir = await this.workspace.prepareWorkspace(wsName, repoUrl, branch);
 
       // 步骤 2：claudeMd 非空 → 写 .claude/CLAUDE.md
@@ -270,10 +286,10 @@ export class TaskRunner {
         }
       }
 
-      // 步骤 3：credential.buildEnv
-      // ctx.toolConfig 是可选字段（Record<string,string>|undefined）；
-      // CredentialManager.buildEnv 必传，undefined 时兜底 {}（renderConfig 返回空 → 空 env）。
-      const extraEnv = this.credential.buildEnv(ctx.toolConfig ?? {});
+      // 步骤 3：spawn env 构造（task-09 接入 buildSpawnEnv）
+      // 三层合并：tool_config.env > claude token（credentials.json + process.env 兜底）
+      // > process.env 副本。token 绝不入日志/Redis/HTTP（R-09 不泄漏铁律）。
+      // buildSpawnEnv 内部调 credential.buildEnv 渲染 ctx.toolConfig 占位符（task-05 注入）。
 
       // 步骤 4：getBackend(provider)（默认 claude，对齐 Python DEFAULT_PROVIDER）
       const provider = ctx.provider ?? 'claude';
@@ -288,7 +304,15 @@ export class TaskRunner {
           diff: EMPTY_DIFF,
           exitCode: 1,
           spawnStatus: 'failed',
+          stats: undefined,
+          retryCount: 0,
         });
+      }
+      // task-06：adapter 累加器跨 lease 重置（防御性，避免 adapter 单例时跨 lease 污染）。
+      // StreamJsonAdapter 实现了 resetAccumulator；其他 adapter 无此方法则跳过。
+      const adapterWithReset = adapter as { resetAccumulator?: () => void };
+      if (typeof adapterWithReset.resetAccumulator === 'function') {
+        adapterWithReset.resetAccumulator();
       }
 
       // 步骤 5：startLease（失败仅 warn，不中断）
@@ -298,7 +322,7 @@ export class TaskRunner {
         console.warn('task_runner: start_lease_failed', leaseId, e);
       }
 
-      // 步骤 6：spawn 子进程 + 流式采集
+      // 步骤 6：spawn 子进程 + 流式采集（task-10 B3：spawn 级失败自动重试循环）
       const cmdPath = ctx.cmdPath ?? ctx.cmd ?? '';
       if (!cmdPath) {
         // cmdPath 空字符串 → 不能 spawn（B-19-13）
@@ -307,33 +331,64 @@ export class TaskRunner {
           diff: EMPTY_DIFF,
           exitCode: 1,
           spawnStatus: 'failed',
+          stats: undefined,
+          retryCount: 0,
         });
       }
 
-      const spawnEnv = { ...process.env, ...extraEnv };
-      const args = adapter.buildArgs
-        ? adapter.buildArgs({
-            model: ctx.model,
-            sessionId: ctx.sessionId,
-            resumeSessionId: ctx.resumeSessionId,
-          })
-        : [];
+      const spawnEnv = buildSpawnEnv(ctx, { credential: this.credential });
+      const maxRetries = resolveMaxRetries(this.config);
 
-      const result = await this._spawnAndStream({
-        cmdPath,
-        args,
-        opts: { cwd: workDir, env: spawnEnv },
-        adapter,
-        prompt: ctx.prompt ?? '',
-        ctx,
-        signal: ac.signal,
-        outputParts,
-        onSessionId: (sid: string) => {
-          if (sid) sessionId = sid;
-        },
-        leaseId,
-        claimToken,
-      });
+      // 重试循环：spawn → stream → 判定（task-10 B3）。
+      // 可重试：timeout / spawn ENOENT / OOM / segfault / killed。
+      // 不重试：cancelled / businessError（claude is_error）/ completed / 业务非零退出。
+      // R-10：重试清空 resumeSessionId（避免 --resume 重复 side-effect）。
+      let attempt = 0;
+      let result: SpawnAttemptResult;
+      let effectiveCtx = ctx;
+      for (;;) {
+        // 重试前重置 adapter 累加器（防御性，避免跨 attempt 污染）
+        if (attempt > 0) {
+          const adapterWithReset = adapter as { resetAccumulator?: () => void };
+          if (typeof adapterWithReset.resetAccumulator === 'function') {
+            adapterWithReset.resetAccumulator();
+          }
+        }
+        // args 每次重试都重新构建（重试时 effectiveCtx.resumeSessionId 已清空，buildArgs 不带 --resume）
+        const args = adapter.buildArgs
+          ? adapter.buildArgs({
+              model: effectiveCtx.model,
+              sessionId: effectiveCtx.sessionId,
+              resumeSessionId: effectiveCtx.resumeSessionId,
+            })
+          : [];
+
+        result = await this._spawnAndStream({
+          cmdPath,
+          args,
+          opts: { cwd: workDir, env: spawnEnv },
+          adapter,
+          prompt: ctx.prompt ?? '',
+          ctx: effectiveCtx,
+          signal: ac.signal,
+          outputParts,
+          onSessionId: (sid: string) => {
+            if (sid) sessionId = sid;
+          },
+          leaseId,
+          claimToken,
+        });
+
+        // 判定是否重试
+        const shouldRetry = isSpawnLevelFailure(result) && attempt < maxRetries;
+        if (!shouldRetry) break;
+        attempt++;
+        // R-10：重试清空 resumeSessionId（避免 --resume 重复 side-effect）
+        effectiveCtx = { ...effectiveCtx, resumeSessionId: undefined };
+        console.warn(
+          `task_runner: spawn_retry lease=${leaseId} attempt=${attempt} status=${result.status} error=${result.error ?? ''}`,
+        );
+      }
 
       // 步骤 7-8 已在 _spawnAndStream 内完成（parse + submit + exit 等待）。
       // 此处 result.exitCode / result.status / sessionId 已就绪。
@@ -359,6 +414,8 @@ export class TaskRunner {
         diff,
         exitCode: result.exitCode,
         spawnStatus: result.status,
+        stats: result.stats,
+        retryCount: attempt,
       });
     } catch (e) {
       // 顶层 try/catch：workspace / 其它未预期异常 → failed（对齐 Python except Exception）
@@ -368,6 +425,8 @@ export class TaskRunner {
         diff: EMPTY_DIFF,
         exitCode: 1,
         spawnStatus: 'failed',
+        stats: undefined,
+        retryCount: 0,
       });
     }
   }
@@ -403,7 +462,7 @@ export class TaskRunner {
     onSessionId: (sid: string) => void;
     leaseId: string;
     claimToken: string;
-  }): Promise<{ status: 'completed' | 'failed' | 'timeout' | 'cancelled'; exitCode: number; error?: string }> {
+  }): Promise<SpawnAttemptResult> {
     const {
       cmdPath, args, opts, adapter, prompt, ctx, signal,
       outputParts, onSessionId, leaseId, claimToken,
@@ -426,6 +485,9 @@ export class TaskRunner {
     let timedOut = false;
     let cancelled = false;
     let stderrBuf = '';
+    // task-06：收集 complete 事件 metadata.stats（claude result 消息的 usage/cost）。
+    // complete 事件通常仅一个，覆盖式赋值；失败路径保持 undefined。
+    let lastStats: Record<string, unknown> | undefined;
 
     // stderr 累积（用于失败诊断）
     child.stderr?.on('data', (chunk: Buffer | string) => {
@@ -479,10 +541,12 @@ export class TaskRunner {
       console.warn('task_runner: stdin_write_exception', e);
     }
 
-    // 超时看门狗（ctx.timeout 秒，0 = 不限）
+    // 超时看门狗（task-10 B2：resolveTimeout 优先级链
+    // ctx.timeoutSeconds > ctx.timeout > config.default_timeout_seconds > 1800；
+    // 返回 0 = 不限，不启动看门狗）
     let watchdog: ReturnType<typeof setTimeout> | null = null;
     let killTimer: ReturnType<typeof setTimeout> | null = null;
-    const timeoutSec = ctx.timeout ?? 0;
+    const timeoutSec = resolveTimeout(ctx, this.config);
     if (timeoutSec > 0) {
       watchdog = setTimeout(() => {
         timedOut = true;
@@ -537,6 +601,9 @@ export class TaskRunner {
             leaseId,
             claimToken,
             agentRunId: ctx.agentRunId ?? '',
+            onStats: (stats: Record<string, unknown>) => {
+              lastStats = stats;
+            },
           });
         }
         child.off('exit', exitCloser);
@@ -577,27 +644,36 @@ export class TaskRunner {
 
     // 计算最终状态
     if (cancelled) {
-      return { status: 'cancelled', exitCode: exitCode || 1, error: 'task cancelled' };
+      return { status: 'cancelled', exitCode: exitCode || 1, error: 'task cancelled', stats: lastStats };
     }
     if (timedOut) {
-      return { status: 'timeout', exitCode: exitCode || 1, error: `task timed out after ${timeoutSec}s` };
+      return { status: 'timeout', exitCode: exitCode || 1, error: `task timed out after ${timeoutSec}s`, stats: lastStats };
     }
     // spawnErrorRef.current：spawn 错误（'error' 事件异步赋值）。用对象容器
     // 避免 TS 对闭包内赋值的 let 变量做错误 narrowing（详见声明处注释）。
     if (spawnErrorRef.current) {
-      return { status: 'failed', exitCode: exitCode || 127, error: spawnErrorRef.current.message };
+      return { status: 'failed', exitCode: exitCode || 127, error: spawnErrorRef.current.message, stats: lastStats };
     }
     if (exitCode !== 0) {
       const errDetail = stderrBuf.trim();
+      // task-10 B3：判定是否业务错误（claude result is_error=true）。
+      // 鸭子类型调用 adapter.getLastResultInfo()（claude adapter 解析 result 消息时记录）。
+      // businessError=true → isSpawnLevelFailure 返回 false，不重试（R-10 side-effect 优先）。
+      const lastInfo = (adapter as {
+        getLastResultInfo?: () => { isError?: boolean } | undefined;
+      }).getLastResultInfo?.();
+      const businessError = lastInfo?.isError === true;
       return {
         status: 'failed',
         exitCode: 1, // 统一映射非零退出为 1（对齐 Python 把非零 exit 视为 failed）
         error: errDetail
           ? `agent process exited with exit code ${exitCode}: ${errDetail}`
           : `agent process exited with exit code ${exitCode}`,
+        stats: lastStats,
+        businessError,
       };
     }
-    return { status: 'completed', exitCode: 0 };
+    return { status: 'completed', exitCode: 0, stats: lastStats };
   }
 
   /**
@@ -616,6 +692,7 @@ export class TaskRunner {
       leaseId: string;
       claimToken: string;
       agentRunId: string;
+      onStats?: (stats: Record<string, unknown>) => void;
     },
   ): Promise<void> {
     // R-03：control_request 行优先交给 adapter.onControl 应答
@@ -662,6 +739,13 @@ export class TaskRunner {
       const sid = ev.metadata?.session_id;
       if (typeof sid === 'string' && sid) {
         env.onSessionId(sid);
+      }
+      // task-06：complete 事件收集 metadata.stats（cost/tokens/turns）
+      if (ev.type === 'complete' && ev.metadata?.stats && env.onStats) {
+        const stats = ev.metadata.stats;
+        if (stats && typeof stats === 'object' && !Array.isArray(stats)) {
+          env.onStats(stats as Record<string, unknown>);
+        }
       }
       // output 累积：仅 text / error 事件进 output 缓冲
       if (ev.type === 'text' || ev.type === 'error') {
@@ -787,6 +871,9 @@ export class TaskRunner {
       error?: string;
       exitCode?: number;
       spawnStatus?: string;
+      stats?: Record<string, unknown>;
+      /** task-10 B3：实际重试次数（0=未重试），写入 metadata.retry_count。 */
+      retryCount?: number;
     },
   ): TaskRunnerResult {
     this._states.set(leaseId, status);
@@ -804,8 +891,15 @@ export class TaskRunner {
       durationMs: Date.now() - startTime,
       sessionId,
       // metadata：对齐 Python task_runner.py TaskResult.metadata（默认空 dict），
-      // 此处把 session_id / runtime 诊断信息塞入，供 complete_lease 提取（types.ts LeaseCompleteResult.sessionId）。
-      metadata: { session_id: sessionId },
+      // 此处把 session_id / retry_count / runtime 诊断信息塞入，供 complete_lease 提取
+      //（types.ts LeaseCompleteResult.sessionId）。
+      metadata: {
+        session_id: sessionId,
+        // task-10 B3：retry_count（spawn 级失败重试次数，0=未重试）。
+        retry_count: extra.retryCount ?? 0,
+      },
+      // task-06：透传 adapter 收集的 stats（undefined 也允许，调用方 / 后端判空）。
+      stats: extra.stats,
     };
   }
 }
@@ -814,13 +908,19 @@ export class TaskRunner {
 
 /**
  * TaskRunner.runLease 的返回结构。
- * TaskResult 扩展加 status（终态）+ sessionId（直接平铺，便于调用方）。
+ * TaskResult 扩展加 status（终态）+ sessionId（直接平铺，便于调用方）+ stats（透传）。
  */
 export interface TaskRunnerResult extends TaskResult {
   /** 任务终态。 */
   status: TaskStatus;
   /** agent 会话 ID（可能为空）。 */
   sessionId: string;
+  /**
+   * claude result 消息 stats（cost/tokens/turns），透传到 daemon completeLease payload。
+   * 失败路径 / claude 无 result 消息时可能为 undefined。
+   * task-06：adapter 解析 complete 事件 metadata.stats 收集。
+   */
+  stats?: Record<string, unknown>;
 }
 
 // ── 内部常量 & 辅助函数 ───────────────────────────────────────────────────────
@@ -832,6 +932,106 @@ const EMPTY_DIFF = {
   deletions: 0,
   stats: '',
 } as const;
+
+// ── task-10 B2/B3：超时优先级链 + spawn 级失败重试（纯函数）─────────────────
+
+/** resolveMaxRetries 硬上限（防止 config 误配大值导致无限重试拖垮 daemon）。 */
+const MAX_RETRIES_HARD_CAP = 3;
+
+/** 兜底默认超时秒数（ctx + config 都未配时）。 */
+const DEFAULT_TIMEOUT_FALLBACK = 1800;
+
+/** 兜底默认重试次数（config 未配时）。 */
+const DEFAULT_MAX_RETRIES_FALLBACK = 1;
+
+/**
+ * spawn 级失败关键字（stderr / error 命中即判定为 spawn 级，可重试）。
+ * claude 业务非零退出（无这些关键字）→ 保守不重试（R-10 side-effect 优先）。
+ */
+const SPAWN_FAILURE_PATTERNS = /spawn ENOENT|segfault|oom|killed/i;
+
+/**
+ * _spawnAndStream 单次尝试的返回结构（task-10 B3：新增 businessError 区分业务错误）。
+ */
+interface SpawnAttemptResult {
+  status: 'completed' | 'failed' | 'timeout' | 'cancelled';
+  exitCode: number;
+  error?: string;
+  stats?: Record<string, unknown>;
+  /** claude 业务报错（result is_error=true）置 true，retry 判定优先看此字段。 */
+  businessError?: boolean;
+}
+
+/**
+ * 解析执行超时秒数（task-10 B2 优先级链）。
+ *
+ * 从高到低：ctx.timeoutSeconds > ctx.timeout（兼容旧字段）> config.default_timeout_seconds > 1800。
+ *
+ * 特殊语义：
+ *   - timeoutSeconds/timeout = -1（负数）→ 返回 0（显式不限，看门狗不启动）
+ *   - timeoutSeconds/timeout = 0 → 跳过（>0 判断），走 config/兜底
+ *
+ * 纯函数，不修改入参。
+ */
+export function resolveTimeout(ctx: LeaseCtx, config?: DaemonConfig): number {
+  // 显式 -1（timeoutSeconds 或兼容 timeout）→ 不限
+  const explicit = ctx.timeoutSeconds ?? ctx.timeout;
+  if (typeof explicit === 'number' && explicit < 0) return 0;
+  // 优先级 1：ctx.timeoutSeconds（lease.metadata 透传）
+  if (typeof ctx.timeoutSeconds === 'number' && ctx.timeoutSeconds > 0) return ctx.timeoutSeconds;
+  // 优先级 1b：ctx.timeout（兼容旧字段，既有测试 makeLease({ timeout }) 仍生效）
+  if (typeof ctx.timeout === 'number' && ctx.timeout > 0) return ctx.timeout;
+  // 优先级 2：config.default_timeout_seconds
+  const cfg = config?.default_timeout_seconds;
+  if (typeof cfg === 'number' && cfg > 0) return cfg;
+  // 优先级 3：兜底 1800
+  return DEFAULT_TIMEOUT_FALLBACK;
+}
+
+/**
+ * 解析最大重试次数（task-10 B3）。
+ *
+ * config.max_retries 缺失/非法 → 兜底 1；> 3 → 截断 3（log warn）；0 → 禁用重试。
+ *
+ * 纯函数，不修改入参。
+ */
+export function resolveMaxRetries(config?: DaemonConfig): number {
+  const cfg = config?.max_retries;
+  if (typeof cfg !== 'number' || cfg < 0 || !Number.isFinite(cfg)) {
+    return DEFAULT_MAX_RETRIES_FALLBACK;
+  }
+  if (cfg > MAX_RETRIES_HARD_CAP) {
+    console.warn(
+      `task_runner: max_retries_truncated value=${cfg} cap=${MAX_RETRIES_HARD_CAP}`,
+    );
+    return MAX_RETRIES_HARD_CAP;
+  }
+  return cfg;
+}
+
+/**
+ * 判定单次 spawn 尝试结果是否为「spawn 级失败」（可重试）。
+ *
+ * 可重试（true）：timeout / spawn ENOENT / OOM / segfault / killed。
+ * 不重试（false）：cancelled / businessError（claude is_error）/ completed /
+ *   业务非零退出（无 spawn 关键字，保守不重试，R-10 side-effect 优先）。
+ *
+ * 纯函数，不修改入参。
+ */
+export function isSpawnLevelFailure(
+  r: { status: string; exitCode: number; error?: string; businessError?: boolean },
+): boolean {
+  // 业务错误（claude result is_error=true）→ 不重试（最优先，避免与 failed 分支歧义）
+  if (r.businessError) return false;
+  if (r.status === 'timeout') return true;
+  if (r.status === 'cancelled') return false;
+  if (r.status === 'completed') return false;
+  if (r.status === 'failed') {
+    // 仅 spawn 级关键字命中才重试；业务非零退出（如 claude 逻辑错误返回非 0）不重试
+    return SPAWN_FAILURE_PATTERNS.test(r.error ?? '');
+  }
+  return false;
+}
 
 /**
  * 粗判一行是否是 control_request（含 '"control_request"' 字样）。

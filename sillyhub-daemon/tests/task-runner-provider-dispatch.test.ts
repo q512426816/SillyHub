@@ -115,6 +115,8 @@ function makeWorkspace(overrides: Record<string, unknown> = {}): Record<string, 
 
 function makeCred(env: Record<string, string> = { API_KEY: 'test' }): Record<string, unknown> {
   return {
+    // task-09：buildSpawnEnv 调 get 读 token，mock 返回 undefined（无 token 配置）
+    get: vi.fn(() => undefined),
     buildEnv: vi.fn().mockReturnValue(env),
   };
 }

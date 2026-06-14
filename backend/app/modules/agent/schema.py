@@ -17,6 +17,29 @@ class AgentRunCreate(BaseModel):
     preferred_backend: str | None = Field(default=None, max_length=20)
 
 
+class ExecutionContextResponse(BaseModel):
+    """daemon 执行所需的完整上下文（GET /agent-runs/{run_id}/execution-context）。
+
+    对应 ``2026-06-14-unified-agent-execution`` task-02 / design §Phase 2。
+    ``claude_md`` 由 ``render_bundle_to_claude_md`` 实时渲染（不入 lease.metadata），
+    其余字段从活跃 lease.metadata 恢复（task-03 持久化）。
+    """
+
+    agent_run_id: str
+    claude_md: str = Field(
+        ...,
+        description="render_bundle_to_claude_md 输出，daemon 写入 {workDir}/.claude/CLAUDE.md",
+    )
+    prompt: str | None = None
+    provider: str | None = None
+    resume_session_id: str | None = None
+    repo_url: str | None = None
+    branch: str | None = None
+    allowed_paths: list[str] | None = None
+    tool_config: dict | None = None
+    session_id: str | None = None
+
+
 class QuickChatRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
     provider: str = Field(default="claude", max_length=30)

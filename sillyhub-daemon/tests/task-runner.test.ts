@@ -37,6 +37,7 @@ import { TaskRunner } from '../src/task-runner.js';
 import { GitError } from '../src/workspace.js';
 import { createFakeChild, readStdin, waitForSpawn, type FakeChild } from './helpers/fake-child.js';
 import type { AgentEvent, LeaseCtx } from '../src/types.js';
+import type { DaemonConfig } from '../src/config.js';
 
 // ── 测试工具 ────────────────────────────────────────────────────────────────
 
@@ -103,7 +104,31 @@ function makeMockWorkspace(overrides: Record<string, unknown> = {}): Record<stri
 /** 构造 mock CredentialManager。 */
 function makeMockCred(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
+    // task-09：buildSpawnEnv 调 get 读 token，mock 返回 undefined（无 token 配置）
+    get: vi.fn(() => undefined),
     buildEnv: vi.fn().mockReturnValue({ API_KEY: 'sk-secret' }),
+    ...overrides,
+  };
+}
+
+/**
+ * 构造禁用重试的 daemon config（task-10）。
+ * 旧测试默认 max_retries=0，保持「单次 spawn 执行」语义（task-10 之前的行为）；
+ * 重试编排由 tests/task-runner-retry.test.ts 单独覆盖（注入 max_retries=1）。
+ */
+function makeNoRetryConfig(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
+  return {
+    server_url: 'http://localhost:8000',
+    token: null,
+    runtime_id: 'rt-test',
+    profile: 'default',
+    workspace_dir: '/tmp/ws',
+    poll_interval: 30,
+    heartbeat_interval: 15,
+    max_concurrent_tasks: 5,
+    log_level: 'info',
+    default_timeout_seconds: 1800,
+    max_retries: 0,
     ...overrides,
   };
 }
@@ -114,6 +139,7 @@ function setupRunner(opts: {
   workspace?: Record<string, unknown>;
   cred?: Record<string, unknown>;
   adapter?: Record<string, unknown>;
+  config?: DaemonConfig;
 }): {
   runner: TaskRunner;
   client: Record<string, unknown>;
@@ -124,7 +150,9 @@ function setupRunner(opts: {
   const workspace = opts.workspace ?? makeMockWorkspace();
   const cred = opts.cred ?? makeMockCred();
   mockAdapter = opts.adapter ?? defaultMockAdapter();
-  const runner = new TaskRunner(client as never, workspace as never, cred as never);
+  // task-10：默认注入 max_retries=0 的 config，禁用 spawn 重试（旧测试保持单次执行语义）。
+  const config = opts.config ?? makeNoRetryConfig();
+  const runner = new TaskRunner(client as never, workspace as never, cred as never, config);
   return { runner, client, workspace, cred };
 }
 
@@ -210,7 +238,9 @@ describe('AC-01：runLease 编排链 9 步完整执行', () => {
     const result = await resultP;
 
     // 步骤 2：workspace.prepareWorkspace 被调用
-    expect(workspace.prepareWorkspace).toHaveBeenCalledWith('test-ws', undefined, 'main');
+    // task-05 退役兜底：repoUrl/branch 透传 undefined（不再兜底 'main'），
+    // 由 prepareWorkspace 内部 branch='main' 默认值兜底（行为不变）。
+    expect(workspace.prepareWorkspace).toHaveBeenCalledWith('test-ws', undefined, undefined);
 
     // 步骤 4：credential.buildEnv 被调用
     expect(cred.buildEnv).toHaveBeenCalled();
@@ -735,6 +765,7 @@ describe('credential env 渲染（spawn env 含 buildEnv 产出）', () => {
     mockSpawnReturn(fakeChild);
     const cred = makeMockCred({
       buildEnv: vi.fn().mockReturnValue({ API_KEY: 'sk-secret-123' }),
+      get: vi.fn(() => undefined),
     });
     const { runner } = setupRunner({ cred });
 

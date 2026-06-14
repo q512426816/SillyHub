@@ -20,6 +20,7 @@ from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.modules.agent.model import AgentRun, AgentRunLog
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
+from app.modules.git_gateway.service import redact_output
 from app.modules.workspace.model import AgentRunWorkspace, Workspace
 
 log = get_logger(__name__)
@@ -349,6 +350,17 @@ class DaemonService:
             payload["provider"] = lease_meta["provider"]
         if lease_meta.get("resume_session_id"):
             payload["resume_session_id"] = lease_meta["resume_session_id"]
+        # Propagate bundle context fields from lease metadata (task-03 / Phase 2).
+        if lease_meta.get("repo_url"):
+            payload["repo_url"] = lease_meta["repo_url"]
+        if lease_meta.get("branch"):
+            payload["branch"] = lease_meta["branch"]
+        if lease_meta.get("allowed_paths"):
+            payload["allowed_paths"] = lease_meta["allowed_paths"]
+        if lease_meta.get("tool_config"):
+            payload["tool_config"] = lease_meta["tool_config"]  # 覆盖默认 {}
+        if lease_meta.get("timeout_seconds") is not None:
+            payload["timeout_seconds"] = lease_meta["timeout_seconds"]
 
         # Include runtime capabilities (cmd_path, bin_path, protocol)
         runtime = await self._session.get(DaemonRuntime, lease.runtime_id)
@@ -450,13 +462,14 @@ class DaemonService:
                 )
                 agent_run.finished_at = now
 
-                # Store agent output and error
+                # Store agent output and error（task-07：redact_output 二次脱敏，
+                # 单一真相源 git_gateway.redact_output，daemon 不移植正则规则）
                 if result.get("output"):
-                    agent_run.output_redacted = result["output"]
+                    agent_run.output_redacted = redact_output(result["output"])
                 if result.get("error"):
                     existing = agent_run.output_redacted or ""
                     agent_run.output_redacted = (
-                        existing + ("\n" if existing else "") + result["error"]
+                        existing + ("\n" if existing else "") + redact_output(result["error"])
                     )
                 if result.get("duration_ms"):
                     agent_run.duration_ms = result["duration_ms"]
@@ -474,6 +487,8 @@ class DaemonService:
                         agent_run.input_tokens = stats["input_tokens"]
                     if "output_tokens" in stats:
                         agent_run.output_tokens = stats["output_tokens"]
+                    if "num_turns" in stats:
+                        agent_run.num_turns = stats["num_turns"]
                     if "session_id" in stats:
                         agent_run.session_id = stats["session_id"]
                     if "exit_code" in stats:
@@ -504,9 +519,12 @@ class DaemonService:
                     lease_id=str(lease_id),
                 )
 
-        # Patch application
+        # Patch application（task-07：入库前 redact_output 二次脱敏 patch，
+        # 对齐 diff_collector.py:174，确保 daemon 上报的密钥不入库）
         patch = result.get("patch")
         if patch and lease.agent_run_id is not None:
+            if isinstance(patch, str):
+                patch = redact_output(patch)
             patch_data = json.dumps(patch) if isinstance(patch, dict) else str(patch)
             try:
                 await self._apply_patch_to_worktree(
@@ -821,8 +839,15 @@ class DaemonService:
             )
             return
 
-        # -- Rollback: reset AgentRun to pending and dispatch to server ------
+        # -- Rollback: reset AgentRun to pending and re-queue the lease ------
         next_attempt = attempt + 1
+
+        # Reset the run so the daemon re-claims it via the new lease.  The
+        # SERVER re-dispatch path was removed in task-01; the daemon picks up
+        # the new pending lease on WebSocket wake-up.
+        agent_run.status = "pending"
+        agent_run.started_at = None
+        self._session.add(agent_run)
 
         # Create a new pending lease with incremented attempt_number
         new_lease = DaemonTaskLease(
@@ -853,11 +878,13 @@ class DaemonService:
             new_lease_id=str(new_lease.id),
         )
 
-        # Dispatch to server for re-execution (resets AgentRun to pending)
+        # Notify the daemon about the new pending lease via WebSocket wake-up
+        # (daemon-only since task-01 — the SERVER re-dispatch path is gone).
+        # The new lease was created above; the daemon claims it on wake-up.
         from app.modules.agent.placement import RunPlacementService
 
         placement = RunPlacementService(self._session)
-        await placement.dispatch_to_server(agent_run_id)
+        await placement._send_ws_wakeup(lease.runtime_id, new_lease.id, agent_run_id)
 
     async def handle_expired_leases_batch(self) -> int:
         """Process all expired leases and handle their rollback logic.

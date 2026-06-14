@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import signal
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -16,38 +15,22 @@ from sqlmodel import col
 
 from app.core.errors import (
     AgentRunNotFound,
-    AgentRunNotRunning,
     AppError,
     TaskNotFound,
     WorktreeLeaseNotFound,
 )
 from app.core.logging import get_logger
 from app.core.redis import get_redis
-from app.modules.agent.adapters.claude_code import (
-    ClaudeCodeAdapter,
-    _extract_result_metadata,
-    _read_claude_session_events,
-)
-from app.modules.agent.base import AgentAdapter, AgentSpecBundle
-from app.modules.agent.context_builder import build_spec_bundle, render_bundle_to_claude_md
+from app.modules.agent.context_builder import build_spec_bundle
 from app.modules.agent.coordinator import ExecutionCoordinatorService
 from app.modules.agent.model import AgentRun, AgentRunLog
-from app.modules.agent.placement import ExecutionBackend, RunPlacementService
+from app.modules.agent.placement import NoOnlineDaemonError, RunPlacementService
 from app.modules.agent.schema import AgentRunResponse
 from app.modules.task.model import Task
 from app.modules.workspace.model import AgentRunWorkspace, TaskWorkspace
 from app.modules.worktree.model import WorktreeLease
 
 log = get_logger(__name__)
-
-ADAPTERS: dict[str, type[AgentAdapter]] = {
-    "claude_code": ClaudeCodeAdapter,
-}
-
-# Alias support — allows legacy agent type keys to resolve to the canonical name
-AGENT_TYPE_ALIASES: dict[str, str] = {
-    "claude-code": "claude_code",
-}
 
 _METADATA_FIELDS = (
     "total_cost_usd",
@@ -65,16 +48,6 @@ def _apply_run_metadata(run: AgentRun, meta: dict) -> None:
         value = meta.get(field_name)
         if value is not None:
             setattr(run, field_name, value)
-
-
-def _backfill_claude_session_metadata(run: AgentRun) -> bool:
-    if run.agent_type != "claude_code" or not run.session_id:
-        return False
-    session_events = _read_claude_session_events(None, run.session_id)
-    if not session_events:
-        return False
-    _apply_run_metadata(run, _extract_result_metadata(session_events))
-    return True
 
 
 class AgentRunError(AppError):
@@ -138,10 +111,6 @@ def resolve_work_dir(
 
 
 class AgentService:
-    # 进程注册表 — 类属性，所有实例共享
-    # key: run_id (UUID), value: asyncio.subprocess.Process
-    _proc_registry: dict[uuid.UUID, asyncio.subprocess.Process] = {}
-
     # 后台任务引用集 — 防止 asyncio.Task 被 GC 回收
     _background_tasks: set[asyncio.Task] = set()
 
@@ -193,13 +162,14 @@ class AgentService:
         idempotency_key: str | None = None,
         preferred_backend: str | None = None,
     ) -> AgentRun:
-        """Create an AgentRun record and trigger background execution.
+        """Create an AgentRun record and dispatch it to the daemon.
 
         The run record is created with status ``pending`` and returned
-        immediately.  Actual agent execution is delegated to
-        ``_execute_run_background``.  In the current implementation the
-        background call happens synchronously within the request, but the
-        code structure is ready for a true task-queue replacement.
+        immediately.  Execution is delegated to the user's daemon via
+        ``RunPlacementService.dispatch_to_daemon`` (daemon-only since
+        task-01 — the SERVER subprocess path has been removed).  If no
+        online daemon is available the run is marked ``failed`` with
+        ``error_code = no_online_daemon``.
 
         If ``idempotency_key`` is provided and a run with that key already
         exists, the existing run is returned immediately (HTTP 200 instead
@@ -235,14 +205,10 @@ class AgentService:
                 details={"lease_id": str(lease_id), "status": lease.status},
             )
 
-        # -- 3. Resolve adapter ---------------------------------------------------
-        canonical = AGENT_TYPE_ALIASES.get(agent_type, agent_type)
-        adapter_cls = ADAPTERS.get(canonical)
-        if adapter_cls is None:
-            raise AgentRunError(
-                f"Unknown agent type '{agent_type}'.",
-                details={"agent_type": canonical, "available": list(ADAPTERS.keys())},
-            )
+        # -- 3. Normalize agent type ----------------------------------------------
+        # daemon-only (task-01): no in-process adapter lookup; canonicalize the
+        # agent_type string for storage (legacy "claude-code" → "claude_code").
+        canonical = "claude_code" if agent_type in ("claude_code", "claude-code") else agent_type
 
         # -- 4. Build spec bundle -------------------------------------------------
         bundle = await build_spec_bundle(
@@ -291,193 +257,72 @@ class AgentService:
             )
         await self._session.commit()
 
-        # -- 6. Write CLAUDE.md into lease path -----------------------------------
-        lease_path = Path(lease.path)
-        claude_md = render_bundle_to_claude_md(bundle)
-        (lease_path / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
-
-        # -- 6b. Placement decision: daemon or server? ---------------------------
+        # -- 6. Placement decision (daemon-only) ----------------------------------
+        # CLAUDE.md is no longer written server-side; the daemon fetches the
+        # execution-context bundle and writes CLAUDE.md itself (task-05).
         placement = RunPlacementService(self._session)
-        backend = await placement.decide_backend(
-            workspace_id=workspace_id,
-            user_id=user_id,
-            change_id=task.change_id if task else None,
-            task_id=task_id,
-            preferred_backend=preferred_backend,
-        )
-        log.info(
-            "start_run_placement",
-            run_id=str(run.id),
-            backend=backend.value,
-        )
-
-        if backend == ExecutionBackend.DAEMON:
-            lease_id_daemon = await placement.dispatch_to_daemon(run.id, user_id)
-            if lease_id_daemon:
-                log.info(
-                    "start_run_dispatched_to_daemon",
-                    run_id=str(run.id),
-                    daemon_lease_id=str(lease_id_daemon),
-                )
-                # Daemon will claim asynchronously; return run immediately.
-                return run
-            log.warning(
-                "start_run_daemon_dispatch_failed_fallback_server",
-                run_id=str(run.id),
+        try:
+            backend = await placement.decide_backend(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                change_id=task.change_id if task else None,
+                task_id=task_id,
+                preferred_backend=preferred_backend,
             )
+        except NoOnlineDaemonError as exc:
+            await self._mark_no_online_daemon(run, exc)
+            return run
 
-        # -- 7. Execute on server (existing logic) --------------------------------
-        await self._execute_run_background(
-            run_id=run.id,
-            bundle=bundle,
-            lease_path=lease_path,
-            agent_type=canonical,
-            workspace_id=workspace_id,
-            user_id=user_id,
-            task_id=task_id,
+        log.info("start_run_placement", run_id=str(run.id), backend=backend.value)
+
+        # daemon-only: decide_backend returns the daemon backend or raises.
+        # task-03: 通用 bundle 字段（repo_url/branch）从 workspace 取并持久化到
+        # lease.metadata，daemon 经 execution-context 重建 bundle。
+        from app.modules.workspace.model import Workspace
+
+        workspace = await self._session.get(Workspace, workspace_id)
+        repo_url = workspace.repo_url if workspace else None
+        branch = workspace.default_branch if workspace else None
+        lease_id_daemon = await placement.dispatch_to_daemon(
+            run.id,
+            user_id,
+            repo_url=repo_url,
+            branch=branch,
         )
+        if lease_id_daemon:
+            log.info(
+                "start_run_dispatched_to_daemon",
+                run_id=str(run.id),
+                daemon_lease_id=str(lease_id_daemon),
+            )
+            # Daemon will claim asynchronously; return run immediately.
+            return run
 
-        # Refresh to pick up status changes from _execute_run_background
-        await self._session.refresh(run)
+        # Race: runtime went offline between decide_backend and dispatch.
+        # No SERVER fallback exists (task-01); mark the run as failed.
+        log.warning("start_run_dispatch_daemon_returned_none", run_id=str(run.id))
+        await self._mark_no_online_daemon(
+            run,
+            NoOnlineDaemonError(workspace_id=workspace_id, user_id=user_id),
+        )
         return run
 
     # ------------------------------------------------------------------
-    # Background execution (currently called synchronously)
+    # Daemon-only failure helper
     # ------------------------------------------------------------------
 
-    async def _execute_run_background(
-        self,
-        *,
-        run_id: uuid.UUID,
-        bundle: AgentSpecBundle,
-        lease_path: Path,
-        agent_type: str,
-        workspace_id: uuid.UUID,
-        user_id: uuid.UUID,
-        task_id: uuid.UUID,
-    ) -> None:
-        """Execute the agent and update run records.
+    async def _mark_no_online_daemon(self, run: AgentRun, exc: NoOnlineDaemonError) -> None:
+        """Mark an AgentRun as failed because no online daemon is available.
 
-        Designed as an async method that can be dispatched by a background
-        task scheduler in the future.  For now it is called directly from
-        ``start_run``.
+        The SERVER execution path was removed in task-01; if dispatch cannot
+        land on a daemon, the run is terminal-failed with ``error_code =
+        no_online_daemon`` and a redacted user-facing message.
         """
-        # -- 1. Load run record ---------------------------------------------------
-        run = await self._session.get(AgentRun, run_id)
-        if run is None:
-            log.error("execute_run_background_run_missing", run_id=str(run_id))
-            return
-
-        adapter_cls = ADAPTERS.get(agent_type)
-        if adapter_cls is None:
-            run.status = "failed"
-            run.finished_at = datetime.now(UTC)
-            run.exit_code = 1
-            run.output_redacted = f"Unknown agent type '{agent_type}'."
-            self._session.add(run)
-            await self._session.commit()
-            return
-
-        # -- 2. Mark running ------------------------------------------------------
-        run.status = "running"
-        run.started_at = datetime.now(UTC)
-        self._session.add(run)
-        await self._session.commit()
-
-        # -- 3. Execute via adapter -----------------------------------------------
-        adapter = adapter_cls()
-
-        from app.core.db import get_session_factory
-
-        _factory = get_session_factory()
-
-        async def _on_metadata(meta: dict) -> None:
-            try:
-                async with _factory() as meta_session:
-                    meta_run = await meta_session.get(AgentRun, run_id)
-                    if meta_run is not None:
-                        _apply_run_metadata(meta_run, meta)
-                        meta_session.add(meta_run)
-                        await meta_session.commit()
-            except Exception:
-                log.warning("on_metadata_write_failed", run_id=str(run_id))
-
-        result = await adapter.run_with_bundle(run_id, bundle, lease_path, on_metadata=_on_metadata)
-
-        # -- 4. Update run record -------------------------------------------------
-        run.status = "completed" if result.exit_code == 0 else "failed"
+        run.status = "failed"
+        run.error_code = "no_online_daemon"
+        run.output_redacted = exc.message
         run.finished_at = datetime.now(UTC)
-        run.exit_code = result.exit_code
-        run.output_redacted = result.redacted_output[:10000]  # truncate
-        run.total_cost_usd = result.total_cost_usd
-        run.duration_ms = result.duration_ms
-        run.duration_api_ms = result.duration_api_ms
-        run.num_turns = result.num_turns
-        run.session_id = result.session_id
-        run.conversation_events = result.conversation_events
-        run.input_tokens = result.input_tokens
-        run.output_tokens = result.output_tokens
         self._session.add(run)
-
-        # -- 5. Collect diff ------------------------------------------------------
-        try:
-            from app.modules.agent.diff_collector import collect_diff
-
-            diff_result = await collect_diff(lease_path)
-            if diff_result.files_changed > 0:
-                run.diff_summary = (
-                    f"{diff_result.stat_summary}\n"
-                    f"--- Summary: {diff_result.files_changed} files changed, "
-                    f"{diff_result.insertions} insertions(+), "
-                    f"{diff_result.deletions} deletions(-)"
-                )
-            else:
-                run.diff_summary = None
-            self._session.add(run)
-        except Exception as exc:
-            log.warning(
-                "diff_collect_failed",
-                run_id=str(run_id),
-                error=str(exc),
-            )
-
-        # -- 6. Log stdout/stderr -------------------------------------------------
-        for channel, content in [
-            ("stdout", result.stdout),
-            ("stderr", result.stderr),
-        ]:
-            if content:
-                log_entry = AgentRunLog(
-                    id=uuid.uuid4(),
-                    run_id=run.id,
-                    channel=channel,
-                    content_redacted=redact_agent_output(content)[:5000],
-                )
-                self._session.add(log_entry)
-
-        # -- 7. Write audit log ---------------------------------------------------
-        from app.modules.workflow.model import AuditLog
-
-        audit = AuditLog(
-            id=uuid.uuid4(),
-            workspace_id=workspace_id,
-            actor_id=user_id,
-            action="agent.run",
-            resource_type="agent_run",
-            resource_id=run.id,
-            details_json=json.dumps(
-                {
-                    "task_id": str(task_id),
-                    "agent_type": agent_type,
-                    "exit_code": result.exit_code,
-                    "timed_out": result.timed_out,
-                    "spec_strategy": bundle.spec_strategy,
-                    "profile_version": bundle.profile_version,
-                }
-            ),
-        )
-        self._session.add(audit)
-
         await self._session.commit()
 
     # ------------------------------------------------------------------
@@ -485,20 +330,25 @@ class AgentService:
     # ------------------------------------------------------------------
 
     async def kill_run(self, run_id: uuid.UUID) -> AgentRun:
-        """Terminate a running agent execution.
+        """Cancel a running agent execution via the daemon lease layer (task-04).
 
-        Sends SIGTERM, waits up to 5 seconds, then sends SIGKILL if
-        the process has not exited.
+        Daemon-only: ``kill_run`` delegates to
+        ``DaemonLeaseService.cancel_lease`` to flip the active lease to
+        ``cancelled``.  It does NOT directly mutate the AgentRun status
+        (AC-09): the AgentRun status is driven asynchronously by the daemon
+        via ``sync_agent_run_status`` once it observes the cancelled lease
+        (single-driver state mapping).  When no active lease exists,
+        ``cancel_lease`` logs a warning and returns, making kill_run idempotent.
 
         Args:
-            run_id: UUID of the AgentRun to terminate.
+            run_id: UUID of the AgentRun to cancel.
 
         Returns:
-            The updated AgentRun with status='killed'.
+            The AgentRun record (status unchanged; the daemon reports the
+            terminal state).
 
         Raises:
             AgentRunNotFound: run_id does not exist in the database.
-            AgentRunNotRunning: run exists but status is not 'running'.
         """
         # -- 1. Load run record ---------------------------------------------------
         run = await self._session.get(AgentRun, run_id)
@@ -508,56 +358,14 @@ class AgentService:
                 details={"run_id": str(run_id)},
             )
 
-        # -- 2. Status check ------------------------------------------------------
-        if run.status != "running":
-            raise AgentRunNotRunning(
-                f"Run '{run_id}' is not running (status={run.status}).",
-                details={"run_id": str(run_id), "status": run.status},
-            )
+        # -- 2. Delegate to daemon lease cancellation -----------------------------
+        # Cancellation flips the active lease to "cancelled"; the AgentRun
+        # status is NOT mutated here (single-driver state mapping, AC-09).
+        from app.modules.daemon.lease_service import DaemonLeaseService
 
-        # -- 3. Find process in registry ------------------------------------------
-        proc = self._proc_registry.get(run_id)
-        metadata_backfilled = _backfill_claude_session_metadata(run)
+        await DaemonLeaseService(self._session).cancel_lease(run_id)
 
-        if proc is not None and proc.returncode is None:
-            # 3a. Send SIGTERM
-            try:
-                proc.send_signal(signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-
-            # 3b. Wait up to 5 seconds
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=5.0)
-            except TimeoutError:
-                # 3c. SIGKILL
-                try:
-                    proc.kill()
-                except ProcessLookupError:
-                    pass
-                await proc.wait()
-
-            metadata_backfilled = _backfill_claude_session_metadata(run) or metadata_backfilled
-
-        # -- 4. Remove from registry (whether proc exists or not) ------------------
-        self._proc_registry.pop(run_id, None)
-
-        # -- 5. Update database record --------------------------------------------
-        run.status = "killed"
-        run.finished_at = datetime.now(UTC)
-        run.exit_code = run.exit_code if run.exit_code is not None else -9
-        self._session.add(run)
-        await self._session.commit()
-        await self._session.refresh(run)
-
-        log.info(
-            "run_killed",
-            run_id=str(run_id),
-            metadata_backfilled=metadata_backfilled,
-            total_cost_usd=run.total_cost_usd,
-            input_tokens=run.input_tokens,
-            output_tokens=run.output_tokens,
-        )
+        log.info("run_kill_requested", run_id=str(run_id))
         return run
 
     # ------------------------------------------------------------------
@@ -828,13 +636,18 @@ class AgentService:
         )
         await self._session.commit()
 
-        # -- 5b. Placement decision: daemon or server? --------------------------
+        # -- 5b. Placement decision (daemon-only) ------------------------------
         placement = RunPlacementService(self._session)
-        backend = await placement.decide_backend(
-            workspace_id=workspace_id,
-            user_id=user_id,
-            change_id=change_id,
-        )
+        try:
+            backend = await placement.decide_backend(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                change_id=change_id,
+            )
+        except NoOnlineDaemonError as exc:
+            await self._mark_no_online_daemon(run, exc)
+            return run
+
         log.info(
             "start_stage_dispatch_placement",
             run_id=str(run.id),
@@ -842,39 +655,42 @@ class AgentService:
             backend=backend.value,
         )
 
-        if backend == ExecutionBackend.DAEMON:
-            lease_id_daemon = await placement.dispatch_to_daemon(run.id, user_id)
-            if lease_id_daemon:
-                log.info(
-                    "start_stage_dispatch_dispatched_to_daemon",
-                    run_id=str(run.id),
-                    stage=stage,
-                    daemon_lease_id=str(lease_id_daemon),
-                )
-                return run
-            log.warning(
-                "start_stage_dispatch_daemon_dispatch_failed_fallback_server",
+        # daemon-only: decide_backend returns the daemon backend or raises.
+        # task-03 persists stage/read_only/prompt into lease.metadata so the
+        # daemon can reconstruct the stage bundle via execution-context.
+        from app.modules.workspace.model import Workspace
+
+        workspace = await self._session.get(Workspace, workspace_id)
+        repo_url = workspace.repo_url if workspace else None
+        branch = workspace.default_branch if workspace else None
+        lease_id_daemon = await placement.dispatch_to_daemon(
+            run.id,
+            user_id,
+            prompt=prompt,
+            stage=stage,
+            read_only=read_only,
+            repo_url=repo_url,
+            branch=branch,
+        )
+        if lease_id_daemon:
+            log.info(
+                "start_stage_dispatch_dispatched_to_daemon",
                 run_id=str(run.id),
                 stage=stage,
+                daemon_lease_id=str(lease_id_daemon),
             )
+            return run
 
-        # -- 6. Execute agent on server (fire-and-forget) -----------------------
-        self._fire_background_task(
-            self._execute_stage_run(
-                run_id=run.id,
-                prompt=prompt,
-                work_dir=work_dir,
-                read_only=read_only,
-                workspace_id=workspace_id,
-                change_id=change_id,
-                user_id=user_id,
-                stage=stage,
-            ),
-            workspace_id=workspace_id,
-            run_id=run.id,
+        # Race: runtime went offline between decide and dispatch.
+        log.warning(
+            "start_stage_dispatch_dispatch_daemon_returned_none",
+            run_id=str(run.id),
+            stage=stage,
         )
-
-        # Return immediately — caller can poll agent-status for progress
+        await self._mark_no_online_daemon(
+            run,
+            NoOnlineDaemonError(workspace_id=workspace_id, user_id=user_id),
+        )
         return run
 
     async def _ensure_change_dir_in_worktree(
@@ -967,264 +783,6 @@ class AgentService:
         )
         return lease
 
-    async def _execute_stage_run(
-        self,
-        *,
-        run_id: uuid.UUID,
-        prompt: str,
-        work_dir: Path,
-        read_only: bool,
-        workspace_id: uuid.UUID,
-        change_id: uuid.UUID,
-        user_id: uuid.UUID,
-        stage: str,
-    ) -> None:
-        """Execute a stage-level agent run (runs in background task).
-
-        Uses an independent DB session since we are called via
-        ``asyncio.create_task`` and the parent request's session may be
-        closed already.
-        """
-        from app.core.db import get_session_factory
-        from app.modules.agent.base import AgentSpecBundle
-
-        factory = get_session_factory()
-        async with factory() as session:
-            try:
-                run = await session.get(AgentRun, run_id)
-                if run is None:
-                    log.error("stage_run_missing", run_id=str(run_id))
-                    return
-
-                adapter_cls = ADAPTERS.get("claude_code")
-                if adapter_cls is None:
-                    run.status = "failed"
-                    run.finished_at = datetime.now(UTC)
-                    run.exit_code = 1
-                    run.output_redacted = "Unknown agent type."
-                    session.add(run)
-                    await session.commit()
-                    return
-
-                # Mark running
-                run.status = "running"
-                run.started_at = datetime.now(UTC)
-                session.add(run)
-                await session.commit()
-
-                # ── 构建包含阶段 prompt 的完整 bundle ──
-                # 将阶段 prompt 嵌入 task_markdown，让 render_bundle_to_claude_md
-                # 将其作为 "Task" section inline 到 CLAUDE.md 中
-                mode_suffix = (
-                    "\n\n## Mode: READ-ONLY\nDo NOT modify any files. Only analyze and report.\n"
-                    if read_only
-                    else "\n\n## Mode: WRITE\nYou may modify files in the worktree as needed.\n"
-                )
-
-                bundle = AgentSpecBundle(
-                    change_summary=f"Change stage: {stage}",
-                    task_key=f"stage:{stage}",
-                    task_title=f"Stage dispatch: {stage}",
-                    # ★ 关键：将阶段 prompt + 模式标记嵌入 task_markdown
-                    # render_bundle_to_claude_md 会将其作为 ## Task section 输出
-                    task_markdown=prompt + mode_suffix,
-                    # 通过 platform_metadata 传递 stage 上下文（供 adapter / task-06 使用）
-                    platform_metadata={
-                        "stage_dispatch": True,
-                        "stage": stage,
-                        "read_only": read_only,
-                        "change_id": str(change_id),
-                        "workspace_id": str(workspace_id),
-                    },
-                    available_tools=["sillyspec"],
-                )
-
-                # Ensure work directory exists
-                work_dir.mkdir(parents=True, exist_ok=True)
-
-                # ──（已移除）直接写 CLAUDE.md ──
-                # CLAUDE.md 现在由 adapter.run_with_bundle() 内部统一渲染和写入
-
-                adapter = adapter_cls()
-
-                async def _stage_on_metadata(meta: dict) -> None:
-                    try:
-                        async with factory() as meta_session:
-                            meta_run = await meta_session.get(AgentRun, run_id)
-                            if meta_run is not None:
-                                _apply_run_metadata(meta_run, meta)
-                                meta_session.add(meta_run)
-                                await meta_session.commit()
-                    except Exception:
-                        log.warning("stage_on_metadata_write_failed", run_id=str(run_id))
-
-                result = await adapter.run_with_bundle(
-                    run_id, bundle, work_dir, on_metadata=_stage_on_metadata
-                )
-
-                # Update run record
-                run.status = "completed" if result.exit_code == 0 else "failed"
-                run.finished_at = datetime.now(UTC)
-                run.exit_code = result.exit_code
-                run.output_redacted = result.redacted_output[:10000]
-                run.total_cost_usd = result.total_cost_usd
-                run.duration_ms = result.duration_ms
-                run.duration_api_ms = result.duration_api_ms
-                run.num_turns = result.num_turns
-                run.session_id = result.session_id
-                run.conversation_events = result.conversation_events
-                run.input_tokens = result.input_tokens
-                run.output_tokens = result.output_tokens
-                session.add(run)
-
-                # Log stdout/stderr
-                for channel, content in [
-                    ("stdout", result.stdout),
-                    ("stderr", result.stderr),
-                ]:
-                    if content:
-                        log_entry = AgentRunLog(
-                            id=uuid.uuid4(),
-                            run_id=run.id,
-                            channel=channel,
-                            content_redacted=redact_agent_output(content)[:5000],
-                        )
-                        session.add(log_entry)
-
-                # Write audit log
-                from app.modules.workflow.model import AuditLog
-
-                audit = AuditLog(
-                    id=uuid.uuid4(),
-                    workspace_id=workspace_id,
-                    actor_id=user_id,
-                    action="agent.stage_dispatch",
-                    resource_type="agent_run",
-                    resource_id=run.id,
-                    details_json=json.dumps(
-                        {
-                            "change_id": str(change_id),
-                            "stage": stage,
-                            "agent_type": "claude_code",
-                            "exit_code": result.exit_code,
-                            "read_only": read_only,
-                        }
-                    ),
-                )
-                session.add(audit)
-
-                # Update change.stages.last_dispatch with final status
-                from app.modules.change.model import Change
-
-                change = await session.get(Change, change_id)
-                if change is not None:
-                    stages = change.stages or {}
-                    last_dispatch = stages.get("last_dispatch", {})
-                    last_dispatch.update(
-                        {
-                            "status": run.status,
-                            "finished_at": run.finished_at.isoformat() if run.finished_at else None,
-                            "run_id": str(run.id),
-                            "exit_code": run.exit_code,
-                        }
-                    )
-                    stages["last_dispatch"] = last_dispatch
-                    change.stages = stages
-                    session.add(change)
-
-                # -- 8. Sync stage status + auto dispatch next step -----------------
-                if run.status == "completed":
-                    try:
-                        from app.modules.change.dispatch import (
-                            SillySpecStageDispatchService,
-                            auto_dispatch_next_step,
-                        )
-
-                        dispatch_svc = SillySpecStageDispatchService(session)
-                        sync_result = await dispatch_svc.sync_stage_status(
-                            session=session,
-                            change_id=change_id,
-                            run_id=run_id,
-                        )
-                        log.info(
-                            "stage_sync_completed",
-                            run_id=str(run_id),
-                            change_id=str(change_id),
-                            synced=sync_result.synced,
-                            has_pending_step=sync_result.has_pending_step,
-                            stage_completed=sync_result.stage_completed,
-                        )
-
-                        if sync_result.synced and (
-                            sync_result.has_pending_step or sync_result.stage_completed
-                        ):
-                            auto_result = await auto_dispatch_next_step(
-                                session=session,
-                                workspace_id=workspace_id,
-                                change_id=change_id,
-                                user_id=user_id,
-                                sync_result=sync_result,
-                            )
-                            log.info(
-                                "auto_dispatch_result",
-                                run_id=str(run_id),
-                                change_id=str(change_id),
-                                dispatched=auto_result.get("dispatched"),
-                                reason=auto_result.get("reason"),
-                            )
-                    except Exception as exc:
-                        # 自动调度失败不应影响主流程（AgentRun 已完成）
-                        log.warning(
-                            "auto_dispatch_failed",
-                            run_id=str(run_id),
-                            change_id=str(change_id),
-                            error=str(exc),
-                        )
-
-                await session.commit()
-
-            except Exception as exc:
-                # -- Guard: mark failed on unhandled exception ----------------------
-                log.error(
-                    "stage_run_exception",
-                    run_id=str(run_id),
-                    error=str(exc),
-                )
-                try:
-                    run = await session.get(AgentRun, run_id)
-                    if run is not None and run.status not in ("completed", "failed", "killed"):
-                        run.status = "failed"
-                        run.finished_at = datetime.now(UTC)
-                        run.exit_code = -1
-                        run.output_redacted = f"Unhandled exception: {exc}"[:10000]
-                        session.add(run)
-                        await session.commit()
-                except Exception:
-                    log.error(
-                        "stage_run_exception_cleanup_failed",
-                        run_id=str(run_id),
-                    )
-            finally:
-                # Safety net: ensure run is never stuck in "running"
-                try:
-                    run = await session.get(AgentRun, run_id)
-                    if run is not None and run.status == "running":
-                        run.status = "failed"
-                        run.finished_at = datetime.now(UTC)
-                        run.exit_code = -1
-                        run.output_redacted = "Force-failed: task lifecycle guard"[:10000]
-                        session.add(run)
-                        await session.commit()
-                except Exception:
-                    log.error(
-                        "stage_run_finally_guard_failed",
-                        run_id=str(run_id),
-                    )
-
-    # ------------------------------------------------------------------
-    # Scan dispatch (workspace-level, no Change dependency)
-    # ------------------------------------------------------------------
-
     async def start_scan_dispatch(
         self,
         *,
@@ -1237,8 +795,8 @@ class AgentService:
 
         Unlike ``start_stage_dispatch``, this method has no dependency on a
         Change record.  It builds a scan bundle via ``build_scan_bundle``,
-        creates an ``AgentRun`` with ``change_id=None``, and fires off a
-        background execution via ``_execute_scan_run``.
+        creates an ``AgentRun`` with ``change_id=None``, and dispatches it
+        to the user's daemon for execution.
 
         Args:
             workspace_id: Existing Workspace record ID.
@@ -1265,8 +823,9 @@ class AgentService:
         # -- 2. Pre-generate run_id so we can pass it to the bundle builder ------
         run_id = uuid.uuid4()
 
-        # -- 3. Build scan bundle -------------------------------------------------
-        bundle = await build_scan_bundle(
+        # -- 3. Build scan bundle（daemon 经 execution-context 重建；此处保留调用仅消费
+        #         build_scan_bundle 的 Workspace 存在性校验副作用，返回值不再本地使用）--
+        await build_scan_bundle(
             session=self._session,
             workspace_id=workspace_id,
             spec_root=spec_root,
@@ -1297,393 +856,57 @@ class AgentService:
         )
         await self._session.commit()
 
-        # -- 4b. Placement decision: daemon or server? ----------------------------
+        # -- 4b. Placement decision (daemon-only) --------------------------------
         placement = RunPlacementService(self._session)
-        backend = await placement.decide_backend(
-            workspace_id=workspace_id,
-            user_id=user_id,
-        )
+        try:
+            backend = await placement.decide_backend(
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
+        except NoOnlineDaemonError as exc:
+            await self._mark_no_online_daemon(run, exc)
+            return run
+
         log.info(
             "start_scan_dispatch_placement",
             run_id=str(run.id),
             backend=backend.value,
         )
 
-        if backend == ExecutionBackend.DAEMON:
-            lease_id_daemon = await placement.dispatch_to_daemon(run.id, user_id)
-            if lease_id_daemon:
-                log.info(
-                    "start_scan_dispatch_dispatched_to_daemon",
-                    run_id=str(run.id),
-                    daemon_lease_id=str(lease_id_daemon),
-                )
-                return run
-            log.warning(
-                "start_scan_dispatch_daemon_dispatch_failed_fallback_server",
-                run_id=str(run.id),
-            )
+        # daemon-only: decide_backend returns the daemon backend or raises.
+        # task-03 persists root_path/spec_root into lease.metadata so the daemon
+        # can reconstruct the scan bundle via execution-context.
+        from app.modules.workspace.model import Workspace
 
-        # -- 5. Fire-and-forget background execution (server) ---------------------
-        self._fire_background_task(
-            self._execute_scan_run(
-                run_id=run.id,
-                bundle=bundle,
-                work_dir=work_dir,
-                workspace_id=workspace_id,
-                user_id=user_id,
-            ),
-            workspace_id=workspace_id,
-            run_id=run.id,
+        workspace = await self._session.get(Workspace, workspace_id)
+        repo_url = workspace.repo_url if workspace else None
+        branch = workspace.default_branch if workspace else None
+        lease_id_daemon = await placement.dispatch_to_daemon(
+            run.id,
+            user_id,
+            root_path=root_path,
+            spec_root=spec_root,
+            repo_url=repo_url,
+            branch=branch,
         )
+        if lease_id_daemon:
+            log.info(
+                "start_scan_dispatch_dispatched_to_daemon",
+                run_id=str(run.id),
+                daemon_lease_id=str(lease_id_daemon),
+            )
+            return run
 
+        # Race: runtime went offline between decide and dispatch.
+        log.warning(
+            "start_scan_dispatch_dispatch_daemon_returned_none",
+            run_id=str(run.id),
+        )
+        await self._mark_no_online_daemon(
+            run,
+            NoOnlineDaemonError(workspace_id=workspace_id, user_id=user_id),
+        )
         return run
-
-    async def _execute_scan_run(
-        self,
-        *,
-        run_id: uuid.UUID,
-        bundle: AgentSpecBundle,
-        work_dir: Path,
-        workspace_id: uuid.UUID,
-        user_id: uuid.UUID,
-    ) -> None:
-        """Execute a scan-mode agent run (runs in background task).
-
-        Uses an independent DB session since we are called via
-        ``asyncio.create_task`` and the parent request's session may be
-        closed already.
-
-        This method does **not** call any Change-related logic (no
-        ``change.stages`` update, no ``auto_dispatch_next_step``).
-        """
-        from app.core.db import get_session_factory
-        from app.modules.workflow.model import AuditLog
-
-        factory = get_session_factory()
-        async with factory() as session:
-            try:
-                # -- 1. Load AgentRun record --------------------------------------
-                run = await session.get(AgentRun, run_id)
-                if run is None:
-                    log.error("scan_run_missing", run_id=str(run_id))
-                    return
-
-                # -- 2. Get adapter -----------------------------------------------
-                adapter_cls = ADAPTERS.get("claude_code")
-                if adapter_cls is None:
-                    run.status = "failed"
-                    run.finished_at = datetime.now(UTC)
-                    run.exit_code = 1
-                    run.output_redacted = "Unknown agent type."
-                    session.add(run)
-                    await session.commit()
-                    return
-
-                # -- 3. Mark running -----------------------------------------------
-                run.status = "running"
-                run.started_at = datetime.now(UTC)
-                session.add(run)
-                await session.commit()
-
-                # -- 4. Ensure work directory exists --------------------------------
-                work_dir.mkdir(parents=True, exist_ok=True)
-
-                # -- 5. Execute via adapter -----------------------------------------
-                adapter = adapter_cls()
-
-                async def on_log(channel: str, content: str, ts: str) -> None:
-                    """Write log entry using a SEPARATE session to avoid
-                    expiring the ``run`` object in the main session."""
-                    try:
-                        async with factory() as log_session:
-                            log_entry = AgentRunLog(
-                                id=uuid.uuid4(),
-                                run_id=run.id,
-                                channel=channel,
-                                content_redacted=redact_agent_output(content)[:5000],
-                            )
-                            log_session.add(log_entry)
-                            await log_session.commit()
-                    except Exception:
-                        log.warning("scan_on_log_failed", run_id=str(run_id))
-
-                async def on_metadata(meta: dict) -> None:
-                    try:
-                        async with factory() as meta_session:
-                            meta_run = await meta_session.get(AgentRun, run_id)
-                            if meta_run is not None:
-                                _apply_run_metadata(meta_run, meta)
-                                meta_session.add(meta_run)
-                                await meta_session.commit()
-                    except Exception:
-                        log.warning("scan_on_metadata_write_failed", run_id=str(run_id))
-
-                result = await adapter.run_with_bundle(
-                    run_id, bundle, work_dir, on_log=on_log, on_metadata=on_metadata
-                )
-
-                # -- 6. Platform-side post-scan validation ---------------------------
-                from app.modules.agent.post_scan_validator import (
-                    PostScanValidator,
-                    validate_resume_state,
-                )
-
-                runtime_root = bundle.runtime_root or str(
-                    Path(bundle.spec_root or work_dir) / "runtime"
-                )
-                runtime_path = Path(runtime_root)
-                runtime_path.mkdir(parents=True, exist_ok=True)
-
-                # Get source_root and spec_root from bundle metadata
-                meta = bundle.platform_metadata or {}
-                root_path = meta.get("root_path", str(work_dir))
-                spec_root = meta.get("spec_root", "")
-
-                post_validator = PostScanValidator(
-                    source_root=Path(root_path),
-                    spec_root=Path(spec_root) if spec_root else Path(work_dir),
-                    runtime_root=runtime_path,
-                    scan_run_id=str(run_id),
-                )
-                post_result = post_validator.validate(
-                    agent_output=result.redacted_output or "",
-                    agent_exit_code=result.exit_code or 0,
-                )
-
-                # Check resume state
-                resume_info = validate_resume_state(runtime_path, str(run_id))
-
-                # -- 7. Update run record with validation-aware status ------------
-                # Status depends on both agent exit code AND post-scan validation
-                if post_result.status.value == "failed_post_check":
-                    final_status = "failed"
-                elif post_result.status.value == "completed_with_warnings":
-                    final_status = "completed"  # Warnings don't fail the run
-                else:
-                    final_status = "completed" if result.exit_code == 0 else "failed"
-
-                run.status = final_status
-                run.finished_at = datetime.now(UTC)
-                run.exit_code = result.exit_code
-
-                # Save full output to file for debugging
-                log_dir = runtime_path / "scan-runs" / str(run_id)
-                log_dir.mkdir(parents=True, exist_ok=True)
-                (log_dir / "output.log").write_text(result.redacted_output or "", encoding="utf-8")
-                (log_dir / "stderr.log").write_text(result.stderr or "", encoding="utf-8")
-
-                # Count docs for validation
-                source_docs_path = Path(root_path) / ".sillyspec" / "docs"
-                spec_docs_path = (Path(spec_root) / ".sillyspec" / "docs") if spec_root else None
-                source_docs_count = (
-                    len(list(source_docs_path.rglob("*"))) if source_docs_path.exists() else 0
-                )
-                spec_docs_count = (
-                    len(list(spec_docs_path.rglob("*")))
-                    if spec_docs_path and spec_docs_path.exists()
-                    else 0
-                )
-
-                (log_dir / "post_validation.json").write_text(
-                    json.dumps(
-                        {
-                            "status": post_result.status.value,
-                            "agent_exit_code": result.exit_code,
-                            "final_status": final_status,
-                            "errors": [
-                                {"code": e.code, "message": e.message, "severity": e.severity}
-                                for e in post_result.errors
-                            ],
-                            "warnings": [
-                                {"code": e.code, "message": e.message, "severity": e.severity}
-                                for e in post_result.warnings
-                            ],
-                            "metadata": post_result.metadata,
-                            "doc_counts": {
-                                "source_root_docs_count": source_docs_count,
-                                "spec_root_docs_count": spec_docs_count,
-                            },
-                            "resume_info": resume_info,
-                        }
-                    ),
-                    encoding="utf-8",
-                )
-
-                # DB only stores tail
-                run.output_redacted = (
-                    result.redacted_output[-10000:] if result.redacted_output else ""
-                )
-                run.total_cost_usd = result.total_cost_usd
-                run.duration_ms = result.duration_ms
-                run.duration_api_ms = result.duration_api_ms
-                run.num_turns = result.num_turns
-                run.session_id = result.session_id
-                run.conversation_events = result.conversation_events
-                run.input_tokens = result.input_tokens
-                run.output_tokens = result.output_tokens
-                # Post-scan validation fields
-                run.post_scan_status = post_result.status.value
-                run.source_commit = post_result.metadata.get("source_commit")
-                run.is_resume = resume_info.get("is_resume")
-                run.resumed_from_step = resume_info.get("resumed_from_step")
-                session.add(run)
-
-                log.info(
-                    "scan_run_result_metadata",
-                    run_id=str(run_id),
-                    total_cost_usd=result.total_cost_usd,
-                    duration_ms=result.duration_ms,
-                    input_tokens=result.input_tokens,
-                    output_tokens=result.output_tokens,
-                    conversation_events_count=len(result.conversation_events)
-                    if result.conversation_events
-                    else None,
-                )
-                for channel, content in [
-                    ("stdout", result.stdout),
-                    ("stderr", result.stderr),
-                ]:
-                    if content:
-                        log_entry = AgentRunLog(
-                            id=uuid.uuid4(),
-                            run_id=run.id,
-                            channel=channel,
-                            content_redacted=redact_agent_output(content)[:5000],
-                        )
-                        session.add(log_entry)
-
-                # -- 8. Write audit log with post-scan validation ------------------
-                audit = AuditLog(
-                    id=uuid.uuid4(),
-                    workspace_id=workspace_id,
-                    actor_id=user_id,
-                    action="agent.scan_dispatch",
-                    resource_type="agent_run",
-                    resource_id=run.id,
-                    details_json=json.dumps(
-                        {
-                            "workspace_id": str(workspace_id),
-                            "agent_type": "claude_code",
-                            "exit_code": result.exit_code,
-                            "post_scan_status": post_result.status.value,
-                            "post_scan_errors": len(post_result.errors),
-                            "post_scan_warnings": len(post_result.warnings),
-                            "source_commit": post_result.metadata.get("source_commit"),
-                            "is_resume": resume_info.get("is_resume", False),
-                            "resumed_from_step": resume_info.get("resumed_from_step"),
-                        }
-                    ),
-                )
-                session.add(audit)
-
-                log.info(
-                    "scan_run_pre_commit",
-                    run_id=str(run_id),
-                    run_total_cost_usd=run.total_cost_usd,
-                    run_duration_ms=run.duration_ms,
-                    run_input_tokens=run.input_tokens,
-                    run_output_tokens=run.output_tokens,
-                    run_session_id=run.session_id,
-                    run_status=run.status,
-                    result_total_cost_usd=result.total_cost_usd,
-                    result_input_tokens=result.input_tokens,
-                )
-
-                await session.commit()
-
-                # -- 9. Success finalize: activate workspace + reparse children -----
-                # run completed/failed state is already committed above; the steps
-                # below are enhancements that must never flip a successful run to
-                # failed.
-                if result.exit_code == 0:
-                    # 9a. Promote the bootstrapping workspace from pending -> active.
-                    # Without this the row stays pending and list_() filters it out,
-                    # so /workspaces never shows the just-generated project.
-                    try:
-                        from app.modules.workspace.model import Workspace
-
-                        ws = await session.get(Workspace, workspace_id)
-                        if ws is not None and ws.status == "pending":
-                            ws.status = "active"
-                            ws.last_scanned_at = datetime.now(UTC)
-                            ws.updated_at = datetime.now(UTC)
-                            session.add(ws)
-                            await session.commit()
-                            log.info(
-                                "scan_run_workspace_activated",
-                                run_id=str(run_id),
-                                workspace_id=str(workspace_id),
-                            )
-                    except Exception as exc:
-                        log.warning(
-                            "scan_run_workspace_activate_failed",
-                            run_id=str(run_id),
-                            workspace_id=str(workspace_id),
-                            error=str(exc),
-                        )
-
-                    # 9b. Auto-reparse child workspaces.
-                    try:
-                        from app.modules.workspace.service import WorkspaceService
-
-                        svc = WorkspaceService(session)
-                        # reparse commits internally; do NOT commit again here.
-                        _parse_result, stats, _children, _relations = await svc.reparse(
-                            workspace_id
-                        )
-                        log.info(
-                            "scan_run_reparse_done",
-                            run_id=str(run_id),
-                            workspace_id=str(workspace_id),
-                            created=stats.get("created"),
-                            relations_created=stats.get("relations_created"),
-                        )
-                    except Exception as exc:
-                        log.warning(
-                            "scan_run_reparse_failed",
-                            run_id=str(run_id),
-                            workspace_id=str(workspace_id),
-                            error=str(exc),
-                        )
-                        # do not change run.status / exit_code, do not re-raise
-
-            except Exception as exc:
-                # -- Guard: mark failed on unhandled exception ----------------------
-                log.error(
-                    "scan_run_exception",
-                    run_id=str(run_id),
-                    error=str(exc),
-                )
-                try:
-                    run = await session.get(AgentRun, run_id)
-                    if run is not None and run.status not in ("completed", "failed", "killed"):
-                        run.status = "failed"
-                        run.finished_at = datetime.now(UTC)
-                        run.exit_code = -1
-                        run.output_redacted = f"Unhandled exception: {exc}"[:10000]
-                        session.add(run)
-                        await session.commit()
-                except Exception:
-                    log.error(
-                        "scan_run_exception_cleanup_failed",
-                        run_id=str(run_id),
-                    )
-            finally:
-                # Safety net: ensure run is never stuck in "running"
-                try:
-                    run = await session.get(AgentRun, run_id)
-                    if run is not None and run.status == "running":
-                        run.status = "failed"
-                        run.finished_at = datetime.now(UTC)
-                        run.exit_code = -1
-                        run.output_redacted = "Force-failed: task lifecycle guard"[:10000]
-                        session.add(run)
-                        await session.commit()
-                except Exception:
-                    log.error(
-                        "scan_run_finally_guard_failed",
-                        run_id=str(run_id),
-                    )
 
     async def _get_workspace_root(self, workspace_id: uuid.UUID) -> str:
         """Get the root_path of a workspace."""

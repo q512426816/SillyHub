@@ -41,6 +41,7 @@ import type { DaemonConfig } from './config.js';
 import { MSG, WS_PATH } from './protocol.js';
 import type {
   DaemonMessage,
+  ExecutionContextPayload,
   LeaseCtx,
   LeasePayload,
 } from './types.js';
@@ -150,6 +151,7 @@ interface ClientLike {
     result: Record<string, unknown>,
   ): Promise<unknown>;
   getPendingLeases(runtimeId: string): Promise<Record<string, unknown>[]>;
+  getExecutionContext(agentRunId: string): Promise<ExecutionContextPayload>;
   close(): void;
 }
 
@@ -608,14 +610,6 @@ export class Daemon {
       return;
     }
 
-    // 2. START：通知 server lease 开始（task-17 startLease）
-    try {
-      await this._client.startLease(leaseId, claimToken);
-    } catch (e) {
-      this._logger.error('lease_start_failed', { lease_id: leaseId, error: e });
-      return;
-    }
-
     // 3. EXECUTE：委托 TaskRunner.runLease（真实方法名，不是 executeTask）
     // claim_resp.payload 兼容两种形态（daemon.py:306）：
     //   - server 返回 { lease_id, claim_token, payload: {...}, lease_expires_at }
@@ -625,25 +619,60 @@ export class Daemon {
       ? { ...payload, ...nestedPayload }
       : { ...payload, ...(claimResp as unknown as LeasePayload) };
 
-    // 构造 LeaseCtx（对齐 types.ts LeaseCtx 接口，camelCase）
+    // 1.5 FETCH execution-context：claim 成功后、startLease 之前从 server 拉完整 bundle。
+    // 当前 ctx 构造字段恒 undefined（claudeMd/repoUrl/branch/toolConfig...），
+    // 必须先 fetch 再构造 ctx。位置必须在 startLease 之前：startLease 触发 server 把
+    // lease 标 claimed、AgentRun → running；放 startLease 前让 fetch 属 claim-claimed 过渡态，
+    // 避免 running 期间拉 bundle 增加窗口期延迟（task-05 §实现要求 3）。
+    // R-03：fetch 失败不致命——claim 已扣 token，中断会留 dangling lease；
+    // 记 error 供排查，继续用 payload 兜底（裸 prompt 也能跑）。
+    let execCtx: ExecutionContextPayload | null = null;
+    if (execPayload.agentRunId) {
+      try {
+        execCtx = await this._client.getExecutionContext(execPayload.agentRunId);
+      } catch (e) {
+        this._logger.error('execution_context_fetch_failed', {
+          lease_id: leaseId,
+          agent_run_id: execPayload.agentRunId,
+          error: e,
+        });
+      }
+    }
+
+    // 2. START：通知 server lease 开始（task-17 startLease）
+    try {
+      await this._client.startLease(leaseId, claimToken);
+    } catch (e) {
+      this._logger.error('lease_start_failed', { lease_id: leaseId, error: e });
+      return;
+    }
+
+    // 构造 LeaseCtx（对齐 types.ts LeaseCtx 接口，camelCase）。
+    // 字段优先级：execCtx（fetch 结果，最新源）?? execPayload（claim payload 兜底）。
+    // **prompt 不从 fetch 覆盖**：payload.prompt 是 dispatch 时写入 lease.metadata 的
+    // 最终意图，避免 fetch 端点重建 prompt 的潜在差异（task-05 §边界处理 5）。
     const ctx: LeaseCtx = {
       leaseId,
       runtimeId,
       claimToken,
       agentRunId: execPayload.agentRunId,
       workspaceName: execPayload.workspaceName,
-      repoUrl: execPayload.repoUrl,
-      branch: execPayload.branch,
-      claudeMd: execPayload.claudeMd,
-      provider: execPayload.provider,
+      // fetch 覆盖（fetch 失败 execCtx=null 时回落 payload，payload 仍可能 undefined）
+      repoUrl: execCtx?.repo_url ?? execPayload.repoUrl,
+      branch: execCtx?.branch ?? execPayload.branch,
+      claudeMd: execCtx?.claude_md ?? execPayload.claudeMd,
+      provider: execCtx?.provider ?? execPayload.provider,
+      // toolConfig：fetch.tool_config 是 snake_case Record，payload.toolConfig 是 camelCase；
+      // fetch 优先（端点是 task-03 之后的最新源）
+      toolConfig: execCtx?.tool_config ?? execPayload.toolConfig,
+      // resumeSessionId 优先用 fetch（端点是最新源）；session_id 兜底
+      resumeSessionId: execCtx?.resume_session_id ?? execPayload.resumeSessionId,
+      sessionId: execCtx?.session_id ?? execPayload.sessionId,
       cmdPath: execPayload.cmdPath,
       cmd: execPayload.cmd,
-      prompt: execPayload.prompt,
+      prompt: execPayload.prompt, // 不从 fetch 覆盖
       model: execPayload.model,
-      sessionId: execPayload.sessionId,
-      resumeSessionId: execPayload.resumeSessionId,
       timeout: execPayload.timeout,
-      toolConfig: execPayload.toolConfig,
     };
 
     const taskResult: TaskRunnerResult = await this._taskRunner!.runLease(ctx);
@@ -661,6 +690,9 @@ export class Daemon {
         deletions: taskResult.deletions,
         duration_ms: taskResult.durationMs,
         session_id: taskResult.metadata?.session_id ?? taskResult.sessionId ?? '',
+        stats: taskResult.stats,
+        exit_code: taskResult.exitCode,
+        status: taskResult.status,
       });
       this._logger.info('task_completed', {
         lease_id: leaseId,

@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from app.core.security import password_hasher
-from app.modules.agent.base import AgentRunResult
 from app.modules.auth.model import User
 from app.modules.change.model import Change
 from app.modules.git_identity.model import GitIdentity
@@ -122,44 +121,6 @@ async def _setup(db_session, tmp_path) -> dict:
     }
 
 
-async def test_create_agent_run_success(client, db_session, tmp_path):
-    refs = await _setup(db_session, tmp_path)
-
-    # Mock the adapter to avoid needing real claude CLI.
-    # The service now calls run_with_bundle (not run), so we patch that.
-    mock_result = AgentRunResult(
-        exit_code=0,
-        stdout="Task completed successfully",
-        stderr="",
-        redacted_output="Task completed successfully",
-    )
-
-    with patch(
-        "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-        return_value=mock_result,
-    ):
-        resp = await client.post(
-            f"/api/workspaces/{refs['ws_id']}/agent/runs",
-            json={
-                "task_id": str(refs["task_id"]),
-                "lease_id": str(refs["lease_id"]),
-                "agent_type": "claude_code",
-            },
-            headers=_auth(refs["token"]),
-        )
-    assert resp.status_code == 201, f"Expected 201, got {resp.status_code}: {resp.text}"
-    body = resp.json()
-    assert body["status"] == "completed"
-    assert body["exit_code"] == 0
-    assert body["agent_type"] == "claude_code"
-
-    # Verify CLAUDE.md was written
-    claude_md = refs["lease_path"] / "CLAUDE.md"
-    assert claude_md.exists()
-    content = claude_md.read_text(encoding="utf-8")
-    assert "Test Task" in content
-
-
 async def test_create_agent_run_no_auth(client, db_session, tmp_path):
     refs = await _setup(db_session, tmp_path)
     resp = await client.post(
@@ -200,33 +161,6 @@ async def test_create_agent_run_invalid_task(client, db_session, tmp_path):
     assert resp.status_code == 404
 
 
-async def test_get_agent_run(client, db_session, tmp_path):
-    refs = await _setup(db_session, tmp_path)
-
-    mock_result = AgentRunResult(exit_code=0, stdout="ok", stderr="", redacted_output="ok")
-
-    with patch(
-        "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-        return_value=mock_result,
-    ):
-        create_resp = await client.post(
-            f"/api/workspaces/{refs['ws_id']}/agent/runs",
-            json={
-                "task_id": str(refs["task_id"]),
-                "lease_id": str(refs["lease_id"]),
-            },
-            headers=_auth(refs["token"]),
-        )
-    run_id = create_resp.json()["id"]
-
-    resp = await client.get(
-        f"/api/workspaces/{refs['ws_id']}/agent/runs/{run_id}",
-        headers=_auth(refs["token"]),
-    )
-    assert resp.status_code == 200
-    assert resp.json()["id"] == run_id
-
-
 async def test_get_agent_run_not_found(client, db_session, tmp_path):
     refs = await _setup(db_session, tmp_path)
     fake_id = uuid.uuid4()
@@ -235,128 +169,6 @@ async def test_get_agent_run_not_found(client, db_session, tmp_path):
         headers=_auth(refs["token"]),
     )
     assert resp.status_code == 404  # AgentRunNotFound -> 404
-
-
-async def test_get_agent_run_logs(client, db_session, tmp_path):
-    refs = await _setup(db_session, tmp_path)
-
-    mock_result = AgentRunResult(
-        exit_code=0,
-        stdout="output line",
-        stderr="error line",
-        redacted_output="output line\nerror line",
-    )
-
-    with patch(
-        "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-        return_value=mock_result,
-    ):
-        create_resp = await client.post(
-            f"/api/workspaces/{refs['ws_id']}/agent/runs",
-            json={
-                "task_id": str(refs["task_id"]),
-                "lease_id": str(refs["lease_id"]),
-            },
-            headers=_auth(refs["token"]),
-        )
-    run_id = create_resp.json()["id"]
-
-    resp = await client.get(
-        f"/api/workspaces/{refs['ws_id']}/agent/runs/{run_id}/logs",
-        headers=_auth(refs["token"]),
-    )
-    assert resp.status_code == 200
-    logs = resp.json()
-    assert len(logs) >= 1
-
-
-async def test_list_task_agent_runs(client, db_session, tmp_path):
-    refs = await _setup(db_session, tmp_path)
-
-    mock_result = AgentRunResult(exit_code=0, stdout="done", stderr="", redacted_output="done")
-
-    with patch(
-        "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-        return_value=mock_result,
-    ):
-        await client.post(
-            f"/api/workspaces/{refs['ws_id']}/agent/runs",
-            json={
-                "task_id": str(refs["task_id"]),
-                "lease_id": str(refs["lease_id"]),
-            },
-            headers=_auth(refs["token"]),
-        )
-
-    resp = await client.get(
-        f"/api/workspaces/{refs['ws_id']}/tasks/{refs['task_id']}/agent/runs",
-        headers=_auth(refs["token"]),
-    )
-    assert resp.status_code == 200
-    assert len(resp.json()) >= 1
-
-
-async def test_agent_run_audit_logged(client, db_session, tmp_path):
-    refs = await _setup(db_session, tmp_path)
-
-    mock_result = AgentRunResult(exit_code=0, stdout="ok", stderr="", redacted_output="ok")
-
-    with patch(
-        "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-        return_value=mock_result,
-    ):
-        await client.post(
-            f"/api/workspaces/{refs['ws_id']}/agent/runs",
-            json={
-                "task_id": str(refs["task_id"]),
-                "lease_id": str(refs["lease_id"]),
-            },
-            headers=_auth(refs["token"]),
-        )
-
-    resp = await client.get(
-        f"/api/workspaces/{refs['ws_id']}/audit",
-        headers=_auth(refs["token"]),
-    )
-    assert resp.status_code == 200
-    actions = [e["action"] for e in resp.json()]
-    assert "agent.run" in actions
-
-
-# ---------------------------------------------------------------------------
-# SSE streaming endpoint tests
-# ---------------------------------------------------------------------------
-
-
-async def test_stream_completed_run_returns_done(client, db_session, tmp_path):
-    """AC-03: Non-running run immediately returns event: done."""
-    refs = await _setup(db_session, tmp_path)
-
-    mock_result = AgentRunResult(exit_code=0, stdout="ok", stderr="", redacted_output="ok")
-
-    with patch(
-        "app.modules.agent.adapters.claude_code.ClaudeCodeAdapter.run_with_bundle",
-        return_value=mock_result,
-    ):
-        create_resp = await client.post(
-            f"/api/workspaces/{refs['ws_id']}/agent/runs",
-            json={
-                "task_id": str(refs["task_id"]),
-                "lease_id": str(refs["lease_id"]),
-            },
-            headers=_auth(refs["token"]),
-        )
-    run_id = create_resp.json()["id"]
-
-    resp = await client.get(
-        f"/api/workspaces/{refs['ws_id']}/agent/runs/{run_id}/stream",
-        headers=_auth(refs["token"]),
-    )
-    assert resp.status_code == 200
-    assert resp.headers["content-type"] == "text/event-stream; charset=utf-8"
-    assert "event: done" in resp.text
-    assert '"status": "completed"' in resp.text
-    assert '"exit_code": 0' in resp.text
 
 
 async def test_stream_not_found_run(client, db_session, tmp_path):
