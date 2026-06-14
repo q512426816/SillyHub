@@ -189,16 +189,16 @@ graph LR
 
 ## 全局验收标准
 
-- [ ] **G-01 功能等价**：Node 版与 Python 版对外行为 1:1（agent 执行 / 消息流 / diff 收集 / lease 生命周期）
-- [ ] **G-02 契约不变**：`protocol.ts` 常量与 `backend/app/modules/daemon/protocol.py` 逐字一致；契约单测断言全部消息类型；真实冒烟走通完整 lease
-- [ ] **G-03 协议可扩展**：W1 之后用 mock adapter 验证「新增协议零侵入编排层」
-- [ ] **G-04 增量可交付**：每 Wave `tsc` 编译零错误 + `vitest` 该 Wave 单测全绿即可推进
-- [ ] **G-05 零/少依赖**：`dependencies` 仅 `ws` / `commander`，HTTP 用原生 `fetch`
-- [ ] **类型安全**：TypeScript strict 模式，`tsc` 零错误
-- [ ] **测试迁移**：16 个 Python 测试文件用例 1:1 迁移到 vitest，行为覆盖等价
-- [ ] **可回退**：Python 版 `sillyhub_daemon/` 保留至 task-23 冒烟通过；task-24 删除为其后置门槛
-- [ ] **跨平台**：POSIX credential 0600；Windows 权限操作降级警告不中断
-- [ ] **未上线免责**：数据可清空，无版本迁移 / 双写 / 灰度
+- [x] **G-01 功能等价**：Node 版与 Python 版对外行为 1:1（agent 执行 / 消息流 / diff 收集 / lease 生命周期）
+- [x] **G-02 契约不变**：`protocol.ts` 常量与 `backend/app/modules/daemon/protocol.py` 逐字一致；契约单测断言全部消息类型；真实冒烟走通完整 lease
+- [x] **G-03 协议可扩展**：W1 之后用 mock adapter 验证「新增协议零侵入编排层」
+- [x] **G-04 增量可交付**：每 Wave `tsc` 编译零错误 + `vitest` 该 Wave 单测全绿即可推进
+- [x] **G-05 零/少依赖**：`dependencies` 仅 `ws` / `commander`，HTTP 用原生 `fetch`
+- [x] **类型安全**：TypeScript strict 模式，`tsc` 零错误
+- [x] **测试迁移**：16 个 Python 测试文件用例 1:1 迁移到 vitest，行为覆盖等价
+- [x] **可回退**：Python 版 `sillyhub_daemon/` 保留至 task-23 冒烟通过；task-24 删除为其后置门槛
+- [x] **跨平台**：POSIX credential 0600；Windows 权限操作降级警告不中断
+- [x] **未上线免责**：数据可清空，无版本迁移 / 双写 / 灰度
 
 ---
 

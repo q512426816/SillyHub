@@ -1,1 +1,0 @@
-文件加载确认清单：[存在] proposal.md / design.md / requirements.md / tasks.md / plan.md / tasks/task-01..25.md(25个蓝图) / prototype-daemon-nodejs-rewrite.html。[不存在] local.yaml(用默认命令 tsc/vitest) / _module-map.yaml(docs目录未生成) / CODEBASE-OVERVIEW.md·CONVENTIONS.md·ARCHITECTURE.md·STACK.md(本项目未产出这些通用文档，上下文从 design §5.1分层+§6文件清单获取)。核心规范全部就位，可继续制定计划。

@@ -9,31 +9,36 @@ created_at: 2026-06-10T16:55:00
 # client
 
 ## 定位
-基于 httpx 的异步 HTTP 客户端，封装 daemon 与 SillyHub server 之间所有 REST API 调用。只负责 HTTP 通信，不负责 WebSocket（WebSocket 由 daemon.py 通过 websockets 库直接管理）。
+基于原生 `fetch` 的 REST HTTP 客户端，封装 daemon 与 SillyHub server 之间所有 REST API 调用。文件名 Node 版改名为 `hub-client.ts`（模块 id `client` 保持不变）。只负责 HTTP 通信，不负责 WebSocket（WebSocket 由独立 ws-client 模块处理）。
 
 ## 契约摘要
-- `HubClient(server_url, token?)` — 初始化，自动构建 Bearer 认证头
-- `register(runtime_id?, name, provider, version, protocol, ...)` — POST `/api/daemon/register`
-- `heartbeat(runtime_id)` — POST `/api/daemon/heartbeat`
-- `claim_lease(lease_id, runtime_id)` — POST `/api/daemon/leases/{id}/claim`
-- `start_lease(lease_id, claim_token)` — POST `/api/daemon/leases/{id}/start`
-- `lease_heartbeat(lease_id, claim_token)` — POST `/api/daemon/leases/{id}/heartbeat`
-- `submit_messages(lease_id, claim_token, agent_run_id, messages)` — POST `/api/daemon/leases/{id}/messages`
-- `complete_lease(lease_id, claim_token, result)` — POST `/api/daemon/leases/{id}/complete`
-- `close()` — 关闭底层连接池
+- `HubClient(serverUrl, token?)` — 初始化，自动构建 Bearer 认证头
+- `register(body: RegisterBody)` — POST `/api/daemon/register`
+- `heartbeat(body: HeartbeatBody)` — POST `/api/daemon/heartbeat`
+- `claimLease(leaseId, body: ClaimLeaseBody)` — POST `/api/daemon/leases/{id}/claim`
+- `startLease(leaseId, body: StartLeaseBody)` — POST `/api/daemon/leases/{id}/start`
+- `leaseHeartbeat(leaseId, body: LeaseHeartbeatBody)` — POST `/api/daemon/leases/{id}/heartbeat`
+- `submitMessages(leaseId, body: SubmitMessagesBody)` — POST `/api/daemon/leases/{id}/messages`
+- `completeLease(leaseId, body: CompleteLeaseBody)` — POST `/api/daemon/leases/{id}/complete`
+- 请求体类型：`RegisterBody` / `ClaimLeaseBody` / `StartLeaseBody` / `LeaseHeartbeatBody` / `SubmitMessagesBody` / `CompleteLeaseBody` / `HeartbeatBody`
+- `HubHttpError` — 非 2xx 响应抛出的错误类型（含 status / body）
 
 ## 关键逻辑
 ```
-HubClient.__init__(server_url, token)
-  → httpx.AsyncClient(base_url, headers=auth_headers, timeout=30, trust_env=False)
-  → 所有方法: resp = await self._http.post(path, json=body) → raise_for_status → resp.json()
+new HubClient(serverUrl, token)
+  → 保存 baseUrl、Authorization: `Bearer ${token}`
+  → 所有方法：fetch(baseUrl + path, { method: 'POST', headers, body: JSON.stringify(body) })
+    → !resp.ok → throw new HubHttpError(resp.status, await resp.text())
+    → return await resp.json()
 ```
 
 ## 注意事项
-- `trust_env=False` 明确禁用系统代理，daemon 直连本地 server
-- timeout 硬编码 30 秒，大文件上传场景可能不够
-- 所有方法在 HTTP 错误时直接 raise（httpx.HTTPStatusError），调用方需 try/except
+- 使用 Node ≥ 20 内置全局 `fetch`，不依赖 httpx / axios
+- 不读取系统代理环境变量（daemon 直连本地 server）
+- timeout 硬编码（通过 AbortController 实现），大文件上传场景可能不够
+- 所有方法在 HTTP 错误时直接 throw HubHttpError，调用方需 try/catch
 - 修改 API 路径时需同步检查 server 端 router 定义
+- 对外 REST 端点路径与 Python 版完全相同（G-02 不变）
 - 被 cli、daemon、task-runner 三个模块使用
 
 ## 人工备注

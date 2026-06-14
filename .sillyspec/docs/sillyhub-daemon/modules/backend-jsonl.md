@@ -9,39 +9,33 @@ created_at: 2026-06-10T16:55:00
 # backend-jsonl
 
 ## 定位
-Copilot JSONL 点分事件协议后端。copilot CLI 使用 `--output-format json` 输出换行分隔的 JSON 事件流，每行为 `{"type": "dotted.event.name", "data": {...}}`。
+Copilot JSONL 点分事件协议 adapter。copilot CLI 由 TaskRunner spawn 并传入 `--output-format json`，输出换行分隔的 JSON 事件流，每行为 `{"type": "dotted.event.name", "data": {...}}`。本 adapter 只负责解析。
 
 ## 契约摘要
-- `JsonlBackend(AgentBackend)` — provider="copilot"
-- `_JsonlState` — 内部状态累积器：output, session_id, active_model, final_status, final_error, usage
-- `build_args(task_prompt, *, model?, session_id?) -> list[str]` — 构建 CLI 参数
-- `parse_output(line) -> AgentEvent | None` — 解析单行
-- `parse_output_multi(line) -> list[AgentEvent]` — 解析单行返回多事件
+- `JsonlAdapter` implements `ProtocolAdapter` — provider="copilot"
+- `parse(line): AgentEvent[]` — 解析单行返回多事件
+- adapter 内部状态：output（累加）、sessionId、activeModel、finalStatus、finalError、usage
 
 ## 关键逻辑
 ```
-execute(cmd_path, task_prompt, work_dir, env)
-  args = ["-p", prompt, "--output-format", "json", "--allow-all", "--no-ask-user"]
-  spawn(cmd_path, args)
-  for each stdout line:
-    parse_output_multi(line) → events
-    accumulate into state.output, emit to on_event callback
-  return TaskResult(state.final_status, state.output, ...)
-
-_handle_event(evt_type, data, raw)
-  session.start → 记录 session_id, model
-  assistant.message_delta → 累加 deltaContent
-  assistant.message → 重置 output（去重 delta），提取 reasoning + toolRequests
-  assistant.reasoning/reasoning_delta → thinking event
-  tool.execution_complete → tool_result event
-  result → 设置 final_status
+parse(line)
+  obj = JSON.parse(line)  // { type, data }
+  switch obj.type:
+    session.start → 记录 sessionId, activeModel
+    assistant.message_delta → 累加 delta content，emit text
+    assistant.message → 重置 output（去重 delta），提取 reasoning + toolRequests
+    assistant.reasoning / reasoning_delta → text(thinking)
+    tool.execution_complete → tool_result
+    result → 设置 finalStatus
+  return events
 ```
 
 ## 注意事项
 - `assistant.message` 会重置 output 避免与 message_delta 重复计数（参考 copilot.go 逻辑）
-- `--allow-all` 和 `--no-ask-user` 标志意味着自动跳过所有权限确认
-- `_JsonlState` 在每次 execute 前需 `_reset_state()`
+- `--allow-all` 和 `--no-ask-user` 标志由 TaskRunner 在 spawn 时传入，意味着自动跳过所有权限确认
+- adapter 内部状态在每次任务前需重置（TaskRunner 启动新任务会取新 adapter 实例）
 - 事件类型使用点分命名（如 `session.start`, `assistant.message_delta`）
+- 依赖 backends（ProtocolAdapter 接口）
 
 ## 人工备注
 

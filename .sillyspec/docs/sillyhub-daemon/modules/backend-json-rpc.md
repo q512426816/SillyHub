@@ -9,38 +9,34 @@ created_at: 2026-06-10T16:55:00
 # backend-json-rpc
 
 ## 定位
-JSON-RPC 2.0 over stdio 协议后端，服务 codex / hermes / kimi / kiro 四种 provider。遵循 codex app-server 协议流程：initialize -> initialized -> thread/start -> turn/start -> stream items -> turn/completed。内置 `_JsonRpcTransport` 处理底层消息收发。
+JSON-RPC 2.0 over stdio 协议 adapter，服务 codex / hermes / kimi / kiro 四种 provider。Agent CLI 由 TaskRunner spawn，本 adapter 只负责按 codex app-server 协议流程解析双向 JSON-RPC 消息：initialize → initialized → thread/start → turn/start → stream items → turn/completed。底层消息收发（request/notify/respond）由 TaskRunner 通过 stdin/stdout 调度，本 adapter 提供解析与自动应答决策。
 
 ## 契约摘要
-- `JsonRpcBackend(AgentBackend)` — 无固定 provider（运行时确定）
-- `_JsonRpcTransport` — 底层 JSON-RPC 2.0 传输层
-  - `request(method, params?, timeout?) -> dict` — 发送请求并等待响应
-  - `notify(method, params?)` — 发送通知（无响应）
-  - `respond(req_id, result)` — 响应 server 请求
-- 自动应答：commandExecution、fileChange、mcpServer/elicitation 等 approval 请求
+- `JsonRpcAdapter` implements `ProtocolAdapter` — provider 运行时确定（codex/hermes/kimi/kiro）
+- `parse(line): AgentEvent[]` — 解析 stdout 单行 JSON-RPC 消息
+- 自动应答决策：commandExecution、fileChange、mcpServer/elicitation 等 approval 请求（返回 `decision: "accept"`）
+- 解析的请求方法：initialize / thread/start / turn/start / notifications/initialized / turn/completed / events.*
 
 ## 关键逻辑
 ```
-execute(cmd_path, task_prompt, work_dir, env)
-  spawn(cmd_path, provider_specific_args)
-  transport = _JsonRpcTransport(stdin, stdout_reader)
-  transport.start_read_loop()  # 后台读线程
-  # Handshake
-  transport.request("initialize", {...}, timeout=30)
-  transport.notify("notifications/initialized")
-  # Execute
-  transport.request("thread/start", {prompt, ...})
-  # 等待 turn/completed 通知
-  # 收集 output, session_id, events
-  return TaskResult(...)
+parse(line)
+  msg = JSON.parse(line)  // JSON-RPC 2.0
+  if msg.method starts with "approval/":
+    return [AgentEvent(...), { respond: { id: msg.id, decision: "accept" } }]
+  switch msg.method:
+    events/turn/message → text/tool_use/tool_result events
+    events/turn/started → session 记录
+    events/turn/completed → final status
+  return events + controlMsgs（如需写 stdin）
 ```
 
 ## 注意事项
-- 握手超时 `_HANDSHAKE_TIMEOUT = 30s`，语义不活跃超时 `_DEFAULT_SEMANTIC_INACTIVITY_TIMEOUT = 600s`
-- `_PROVIDER_COMMANDS` 定义各 provider 的启动参数（codex 需 `app-server --listen stdio://`）
-- transport 使用 early_responses 缓存机制处理响应先于请求注册到达的竞态情况
+- Node 版只做解析和应答决策；JSON-RPC 传输（request/notify/respond、early_responses 竞态处理）下沉到 TaskRunner
 - 自动审批所有 commandExecution 和 fileChange 请求（`decision: "accept"`）
-- stderr 仅保留最后 2048 字节用于错误诊断
+- 各 provider 的启动参数差异（codex 需 `app-server --listen stdio://`）由 TaskRunner 调度
+- adapter 内部跨行维护 session_id、final_status、final_error 状态，每次任务前需重置
+- 握手与不活跃超时由 TaskRunner 守护
+- 依赖 backends（ProtocolAdapter 接口）
 
 ## 人工备注
 

@@ -103,10 +103,10 @@ allowed_paths:
 
 ## 验收标准
 
-- [ ] `sillyhub-daemon start --server http://localhost:8000 --token test123` 能启动 daemon
-- [ ] `sillyhub-daemon status` 正确显示运行状态
-- [ ] `sillyhub-daemon stop` 能停止 daemon
-- [ ] `sillyhub-daemon logs --tail 10` 能显示日志
-- [ ] 输出格式与 Python 版完全一致
-- [ ] `npm i -g .` 后 `sillyhub-daemon` 命令可用
-- [ ] SIGINT (Ctrl+C) 正确触发优雅关闭
+- [x] `sillyhub-daemon start --server http://localhost:8000 --token test123` 能启动 daemon
+- [x] `sillyhub-daemon status` 正确显示运行状态
+- [x] `sillyhub-daemon stop` 能停止 daemon
+- [x] `sillyhub-daemon logs --tail 10` 能显示日志
+- [x] 输出格式与 Python 版完全一致
+- [x] `npm i -g .` 后 `sillyhub-daemon` 命令可用
+- [x] SIGINT (Ctrl+C) 正确触发优雅关闭
