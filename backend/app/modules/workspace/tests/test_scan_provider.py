@@ -60,9 +60,7 @@ class TestScanGenerateProviderPropagation:
             ),
         )
 
-    async def test_scan_generate_passes_provider(
-        self, db_session: AsyncSession, tmp_path: Path
-    ):
+    async def test_scan_generate_passes_provider(self, db_session: AsyncSession, tmp_path: Path):
         service = WorkspaceService(db_session)
         agent_service = self._build_agent_service()
 

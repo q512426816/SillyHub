@@ -65,9 +65,7 @@ class TestDispatchProviderPropagation:
         assert result["dispatched"] is True
         assert mock_start.call_args.kwargs["provider"] == "codex"
 
-    async def test_dispatch_defaults_provider_none(
-        self, db_session: AsyncSession, tmp_path: Path
-    ):
+    async def test_dispatch_defaults_provider_none(self, db_session: AsyncSession, tmp_path: Path):
         ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
         change = await _create_test_change(
             db_session,
