@@ -643,7 +643,7 @@ function EmptyState() {
         </div>
         <h2 className="mt-4 text-base font-semibold">尚未注册任何 Daemon 运行时</h2>
         <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-          启动本地守护进程后，平台会在这里显示提供方、版本、心跳和可用代理。
+          启动本地守护进程后，平台会在这里显示提供方、版本、心跳和可用代理。runtime 上线后，进入 workspace 详情页可在「默认 Agent」下拉里选择本次启动的提供方。
         </p>
       </div>
       <div className="rounded-md border bg-card p-4">
@@ -651,14 +651,28 @@ function EmptyState() {
           <Terminal className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-semibold">启动入口</h2>
         </div>
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Daemon 是 Node.js/TypeScript 实现，需要 Node ≥ 20。如果之前装过 Python 旧版的 <code className="font-mono">sillyhub-daemon</code>（脚本目录里残留 <code className="font-mono">sillyhub-daemon.exe</code>），先用 <code className="font-mono">pip uninstall sillyhub-daemon</code> 卸载，否则会冲突报 <code className="font-mono">ModuleNotFoundError: No module named &#39;sillyhub_daemon.__main__&#39;</code>。
+        </p>
         <ol className="mt-4 space-y-3 text-xs text-muted-foreground">
-          <li className="rounded border bg-muted/30 px-3 py-2">
-            <span className="font-medium text-foreground">1.</span> cd sillyhub-daemon && pip install -e .
+          <li className="rounded border bg-muted/30 px-3 py-2 font-mono">
+            <span className="mr-2 font-sans font-medium text-foreground">1.</span> cd sillyhub-daemon
+          </li>
+          <li className="rounded border bg-muted/30 px-3 py-2 font-mono">
+            <span className="mr-2 font-sans font-medium text-foreground">2.</span> pnpm install &amp;&amp; pnpm build
+            <span className="ml-2 block font-sans text-[10px] text-muted-foreground/80">没有 pnpm 时改用：npm install &amp;&amp; npx tsc</span>
+          </li>
+          <li className="rounded border bg-muted/30 px-3 py-2 font-mono">
+            <span className="mr-2 font-sans font-medium text-foreground">3.</span> npm link
+            <span className="ml-2 block font-sans text-[10px] text-muted-foreground/80">让本机 <code className="font-mono">sillyhub-daemon</code> 命令指向此项目；验证：<code className="font-mono">sillyhub-daemon --version</code></span>
           </li>
           <li className="rounded border bg-muted/30 px-3 py-2">
-            <span className="font-medium text-foreground">2.</span> 复制页面右上角守护进程启动命令
+            <span className="font-medium text-foreground">4.</span> 复制右上角守护进程启动命令，在本机终端运行
           </li>
         </ol>
+        <p className="mt-3 text-[11px] text-muted-foreground">
+          详细说明见仓库 <code className="font-mono">sillyhub-daemon/README.md</code>。
+        </p>
       </div>
     </section>
   );

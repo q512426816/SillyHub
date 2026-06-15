@@ -258,3 +258,4 @@ logout() -> 清空 useSession + 跳转 /login
 |---|---|---|
 | 2026-06-03 | fix-sse-nextjs-rewrite-buffering | 创建 `app/api/.../stream/route.ts` Route Handler 透传后端 SSE 流，修复 Next.js rewrites 缓冲导致 EventSource 5 秒断开重连 |
 | 2026-06-04 | update-module-card | 基于代码库最新状态更新模块卡片，补充完整 API 客户端导出符号列表 |
+| 2026-06-15 | ql-20260615-002-9b4f | 修复 `/runtimes` 空状态 EmptyState 错误的 `pip install -e .` 提示（daemon 已重写为 TS），改为 cd / pnpm install+build / npm link / 复制命令 4 步，加 Python 旧版残留卸载提示，末尾引导用户去 workspace 详情页配置默认 agent |

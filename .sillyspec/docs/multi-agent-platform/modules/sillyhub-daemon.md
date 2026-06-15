@@ -85,6 +85,7 @@ Claude CLI 交互:
 ## 变更索引
 
 - ql-20260611-001-c7a3 | Quick Chat 多轮对话：stream_json backend 支持 --resume，stdin 管理，control_request 自动审批
+- ql-20260615-002-9b4f | 修复 /runtimes 空状态错误的 pip 安装提示（daemon 已重写为 TS），新增 sillyhub-daemon/README.md 安装文档；本机卸载 Python 旧版残留、pnpm install+build、npm link，验证 sillyhub-daemon --version=0.1.0
 
 ## 人工备注
 

@@ -46,3 +46,10 @@
 文件：backend/migrations/versions/202606290900_add_agent_runs_error_code.py
 依据：backend/app/modules/agent/model.py L93-96 (error_code: str | None = Field(sa_column=Column(String(64), nullable=True)))；alembic head = 202606280900
 结果：新建 migration 202606290900（down_revision=202606280900），upgrade ADD COLUMN error_code VARCHAR(64) nullable，downgrade DROP。验证：当前开发库 schema 已领先版本号（列已存在→upgrade 报 DuplicateColumnError），故 alembic stamp 202606290900 对齐后，downgrade -1（DROP 成功）+ upgrade head（ADD 成功）往返验证双向 DDL；current=202606290900(head)，heads 单 head 无分叉。路径纠正：真实目录是 backend/migrations/versions/（alembic.ini script_location=migrations），非 backend/alembic/versions/。模块文档未同步（migration 不命中模块 glob，且既往 agent_runs migration 亦不入 agent 模块变更索引）。
+
+## ql-20260615-002-9b4f | 2026-06-15 17:11:20 | 修复 /runtimes 空状态错误的 pip 安装提示（daemon 已重写为 TS），新增 sillyhub-daemon README
+
+状态：已完成
+文件：frontend/src/app/(dashboard)/runtimes/page.tsx、sillyhub-daemon/README.md、.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md、.sillyspec/docs/multi-agent-platform/modules/frontend.md
+依据：sillyhub-daemon/package.json（type: module, bin: dist/cli.js, engines.node>=20, packageManager: pnpm@9.6.0）；sillyhub-daemon/src/cli.ts（npm i -g sillyhub-daemon 注释 L8）；runtimes/page.tsx EmptyState L654-661（错误的 `cd sillyhub-daemon && pip install -e .`）；用户机器残留 `C:\Users\qinyi\AppData\Local\Programs\Python\Python312\Scripts\sillyhub-daemon.exe`（旧 Python 实现 entry point）报 ModuleNotFoundError: No module named 'sillyhub_daemon.__main__'
+结果：(1) runtimes/page.tsx EmptyState 改写为 4 步安装（cd / pnpm install+build / npm link / 复制命令运行）+ Node>=20 提示 + Python 旧版残留卸载提示 + 末尾引导"启动后去 workspace 详情页配置默认 agent"。(2) 新增 sillyhub-daemon/README.md 含前置要求、双路安装（pnpm/npm）、start 全部选项表、子命令列表、配置文件路径表、6 类故障排查、开发说明。(3) 本机执行：pip uninstall -y sillyhub-daemon 成功（自动清掉残留 exe）→ pnpm install（4.5s）→ pnpm build（dist/cli.js 生成）→ npm link → sillyhub-daemon --version=0.1.0、status 输出正常（Runtime ID 68c63051，Server URL http://127.0.0.1:8001）。模块文档 sillyhub-daemon.md 变更索引 + frontend.md Change Index 同步追加。
