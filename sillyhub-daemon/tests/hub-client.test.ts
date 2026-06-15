@@ -310,3 +310,35 @@ describe('HubClient — close()', () => {
     expect(() => c.close()).not.toThrow();
   });
 });
+
+// ── daemon-api-key 变更：X-API-Key 鉴权路径 ──────────────────────────────────
+
+describe('HubClient — API Key 鉴权（X-API-Key）', () => {
+  beforeEach(() => vi.stubGlobal('fetch', mockFetchOk({})));
+
+  it('{ apiKey } → 发 X-API-Key 头，不发 Authorization', async () => {
+    const c = new HubClient('http://x:8000', { apiKey: 'shk_live_xyz' });
+    await c.heartbeat('rt-1');
+    const headers = lastCall!.init.headers as Record<string, string>;
+    expect(headers['X-API-Key']).toBe('shk_live_xyz');
+    expect(headers['Authorization']).toBeUndefined();
+  });
+
+  it('同时给 token 和 apiKey → apiKey 优先（对齐 backend X-API-Key 回退语义）', async () => {
+    const c = new HubClient('http://x:8000', {
+      token: 'short-lived',
+      apiKey: 'shk_live_long',
+    });
+    await c.heartbeat('rt-1');
+    const headers = lastCall!.init.headers as Record<string, string>;
+    expect(headers['X-API-Key']).toBe('shk_live_long');
+    expect(headers['Authorization']).toBeUndefined();
+  });
+
+  it('旧式 string 第二参仍可用（向后兼容）', async () => {
+    const c = new HubClient('http://x:8000', 'legacy-token');
+    await c.heartbeat('rt-1');
+    const headers = lastCall!.init.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Bearer legacy-token');
+  });
+});

@@ -64,8 +64,13 @@ export const DEFAULT_CONFIG_PATH: string = join(DEFAULT_CONFIG_DIR, 'config.json
 export interface DaemonConfig {
   /** backend 服务地址，默认 http://localhost:8000。 */
   server_url: string;
-  /** Bearer token，未配置时为 null（首次需 CLI 设置）。 */
+  /** Bearer token（浏览器 access_token，TTL 15min），未配置时为 null。 */
   token: string | null;
+  /**
+   * 长期 API Key（admin 通过 /settings/api-keys 签发，存于 X-API-Key）。
+   * 与 token 互斥；二者同时配置时 CLI 启动报错。
+   */
+  api_key: string | null;
   /** runtime 唯一标识，缺失时自动生成 uuid v4。 */
   runtime_id: string;
   /** 配置 profile 名，默认 "default"。 */
@@ -112,6 +117,8 @@ export const DEFAULT_CONFIG: Readonly<DaemonConfig> = Object.freeze({
   server_url: 'http://localhost:8000',
   /** Bearer token for server auth（对齐 Python config.py:24 注释）。 */
   token: null,
+  /** Long-lived API Key (X-API-Key)，与 token 互斥（daemon-api-key 变更）。 */
+  api_key: null,
   /** auto-generated（对齐 Python config.py:25 注释，load 时生成）。 */
   runtime_id: '',
   profile: 'default',

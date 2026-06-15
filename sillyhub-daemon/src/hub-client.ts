@@ -113,6 +113,20 @@ export class HubHttpError extends Error {
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
+ * Auth credentials for daemon → server requests.
+ *
+ * Either ``token`` (browser-style Bearer JWT, short-lived) or ``apiKey``
+ * (long-lived opaque key, sent via ``X-API-Key``). At most one should be
+ * set; if both are present, ``apiKey`` wins on the wire (matches the
+ * backend ``get_current_principal`` semantics where X-API-Key is the
+ * fallback for non-browser callers).
+ */
+export interface HubClientAuth {
+  token?: string;
+  apiKey?: string;
+}
+
+/**
  * Daemon 与 SillyHub server 之间的 REST 客户端。
  *
  * 无状态瘦客户端：每次请求独立调用原生 fetch（无连接池）。
@@ -122,17 +136,25 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 export class HubClient {
   private readonly baseUrl: string;
   private readonly token?: string;
+  private readonly apiKey?: string;
 
   /**
-   * @param serverUrl  SillyHub server origin，如 'http://localhost:8000'。尾部斜杠会被去除。
-   * @param token      可选 Bearer token；为 undefined 时不发送 Authorization 头
-   *                   （对齐 Python `_auth_headers` 在无 token 时返回 `{}`）。
+   * @param serverUrl SillyHub server origin，如 'http://localhost:8000'。尾部斜杠会被去除。
+   * @param authOrToken  两种合法形态（向后兼容）：
+   *   - string：旧式 Bearer token，等价于 ``{ token }``；
+   *   - ``{ token?, apiKey? }``：新式 options，daemon 长期凭证场景使用 ``{ apiKey }``。
+   *   两者都为空（undefined）时请求不带任何鉴权头。
    */
-  constructor(serverUrl: string, token?: string) {
+  constructor(serverUrl: string, authOrToken?: string | HubClientAuth) {
     // 去尾部一个或多个斜杠，确保 `${baseUrl}${REST_PREFIX}` 不产生双斜杠。
     // 对齐 Python `server_url.rstrip("/")`（client.py:33）。
     this.baseUrl = serverUrl.replace(/\/+$/, '');
-    this.token = token;
+    if (typeof authOrToken === 'string') {
+      this.token = authOrToken;
+    } else if (authOrToken) {
+      this.token = authOrToken.token;
+      this.apiKey = authOrToken.apiKey;
+    }
   }
 
   /**
@@ -147,12 +169,16 @@ export class HubClient {
   // -- 内部：统一请求入口（对齐 Python 的 self._http.post + raise_for_status）--
 
   /**
-   * 构造请求头。无 token 时不带 Authorization（对齐 Python `_auth_headers` 返回 `{}`）。
-   * GET 请求也带 Content-Type（与 Python httpx 默认 header 一致，无害）。
+   * 构造请求头。鉴权优先级：
+   *   1. apiKey（X-API-Key，daemon 长期凭证）
+   *   2. token（Authorization: Bearer …，浏览器短期 JWT）
+   * 两者都缺失时不带鉴权头（对齐 Python `_auth_headers` 返回 `{}`）。
    */
   private _headers(): Record<string, string> {
     const h: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (this.token) {
+    if (this.apiKey) {
+      h['X-API-Key'] = this.apiKey;
+    } else if (this.token) {
       h['Authorization'] = `Bearer ${this.token}`;
     }
     return h;

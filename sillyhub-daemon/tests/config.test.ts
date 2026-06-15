@@ -35,8 +35,9 @@ describe('config', () => {
   // ── AC-03：字段与默认值对照 Python config.py:22-32 DEFAULTS ──
 
   describe('字段与默认值（AC-03，对照 Python DEFAULTS）', () => {
-    it('DEFAULT_CONFIG 正好 11 字段，键名 1:1（task-10 新增 default_timeout_seconds / max_retries）', () => {
+    it('DEFAULT_CONFIG 正好 12 字段，键名 1:1（task-10 新增 default_timeout_seconds / max_retries；daemon-api-key 新增 api_key）', () => {
       expect(Object.keys(DEFAULT_CONFIG).sort()).toEqual([
+        'api_key',
         'default_timeout_seconds',
         'heartbeat_interval',
         'log_level',

@@ -3,6 +3,11 @@
 Routes opt into auth by calling ``Depends(get_current_user)`` directly or
 ``Depends(require_permission(Permission.X))``. There is *no* global middleware
 that injects identity: every protected route states what it needs.
+
+``get_current_principal`` is the dual-path dependency: it tries JWT first
+(``Authorization: Bearer …``) and falls back to API key
+(``X-API-Key: …``). Use it on routes that must accept long-lived daemon
+credentials in addition to browser sessions.
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ from app.core.errors import (
     PermissionDenied,
 )
 from app.core.security import AccessTokenError, decode_access_token
+from app.modules.auth.api_key_service import ApiKeyService
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.auth.rbac import has_permission
@@ -35,6 +41,15 @@ def _extract_bearer(request: Request) -> str | None:
         if len(parts) == 2 and parts[0].lower() == "bearer":
             return parts[1].strip() or None
     return request.query_params.get("token")
+
+
+def _extract_api_key(request: Request) -> str | None:
+    """Read the ``X-API-Key`` header (case-insensitive). Falls back to the
+    ``api_key`` query param so daemon logs can stay header-free."""
+    raw = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
+    if raw:
+        return raw.strip() or None
+    return request.query_params.get("api_key")
 
 
 async def get_current_user(
@@ -80,7 +95,7 @@ def require_permission(permission: Permission):
     """Return a dependency that enforces ``permission`` inside ``{workspace_id}``."""
 
     async def _checker(
-        user: Annotated[User, Depends(get_current_user)],
+        user: Annotated[User, Depends(get_current_principal)],
         session: Annotated[AsyncSession, Depends(get_session)],
         workspace_id: Annotated[uuid.UUID, Path(...)],
     ) -> User:
@@ -104,7 +119,7 @@ def require_permission_any(permission: Permission):
     """Enforce permission across *any* workspace (used by APIs without ws_id)."""
 
     async def _checker(
-        user: Annotated[User, Depends(get_current_user)],
+        user: Annotated[User, Depends(get_current_principal)],
         session: Annotated[AsyncSession, Depends(get_session)],
     ) -> User:
         ok = await has_permission(session, user=user, permission=permission, workspace_id=None)
@@ -120,4 +135,38 @@ def require_permission_any(permission: Permission):
 
 async def require_platform_admin(user: User) -> User:
     """A tiny helper to make intent explicit in routers."""
+    return user
+
+
+async def get_current_principal(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> User:
+    """Dual-path required-auth dependency.
+
+    Precedence:
+    1. ``Authorization: Bearer <jwt>`` → ``get_current_user`` (identical
+       behaviour to existing browser-session routes).
+    2. ``X-API-Key: <plaintext>`` → :class:`ApiKeyService.authenticate`.
+
+    Raises ``AuthTokenMissing`` if neither header is present,
+    ``AuthTokenInvalid`` for any API-key failure path (unknown / revoked /
+    expired / owner-disabled — the message is uniform on purpose).
+    """
+    if _extract_bearer(request) is not None:
+        return await get_current_user(request, session, settings)
+
+    plaintext = _extract_api_key(request)
+    if not plaintext:
+        raise AuthTokenMissing(
+            "Bearer token or API key is required.",
+            details={
+                "hint": "Send 'Authorization: Bearer <access_token>' or 'X-API-Key: <api_key>'."
+            },
+        )
+
+    user = await ApiKeyService(session, settings=settings).authenticate(plaintext=plaintext)
+    if user is None:
+        raise AuthTokenInvalid("API key is invalid, expired, or revoked.")
     return user

@@ -30,6 +30,7 @@ const OVERVIEW_NAV: NavItem[] = [
 
 const MANAGEMENT_NAV: NavItem[] = [
   { href: "/settings/git-identities", icon: "\u{1F511}", label: "Git 身份管理", matchPattern: "/settings/git-identities", absolute: true },
+  { href: "/settings/api-keys", icon: "\u{1F4A1}", label: "API Keys", matchPattern: "/settings/api-keys", absolute: true },
   { href: "agent", icon: "\u{1F916}", label: "Agent 控制台", matchPattern: "/agent" },
   { href: "approvals", icon: "✅", label: "审批中心", matchPattern: "/approvals" },
   { href: "audit", icon: "\u{1F4DC}", label: "审计中心", matchPattern: "/audit" },

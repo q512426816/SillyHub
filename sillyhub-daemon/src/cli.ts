@@ -186,7 +186,8 @@ export function createProgram(): Command {
     .command('start')
     .description('Start the daemon.')
     .option('--server <url>', 'Server URL (e.g. http://localhost:8000)')
-    .option('--token <token>', 'Bearer token for server authentication')
+    .option('--token <token>', 'Bearer access token (short-lived, 15min) — mutually exclusive with --api-key')
+    .option('--api-key <key>', 'Long-lived API key (X-API-Key) — mutually exclusive with --token')
     .option('--workspace-dir <dir>', 'Workspace base directory')
     .option('--poll-interval <sec>', 'HTTP poll interval in seconds')
     .option('--heartbeat-interval <sec>', 'WS heartbeat interval in seconds')
@@ -236,6 +237,7 @@ export function createProgram(): Command {
 interface StartOptions {
   server?: string;
   token?: string;
+  'api-key'?: string;
   'workspace-dir'?: string;
   'poll-interval'?: string;
   'heartbeat-interval'?: string;
@@ -266,6 +268,13 @@ interface LogsOptions {
  * @returns 退出码（0 正常退出，1 错误）
  */
 export async function startAction(opts: StartOptions): Promise<number> {
+  // step 0: 互斥校验（先于 config 加载，避免污染持久化文件）。
+  // --token 与 --api-key 同时给 → 退出码 1，避免运行时鉴权歧义。
+  if (opts.token && opts['api-key']) {
+    process.stderr.write('Error: --token and --api-key are mutually exclusive.\n');
+    return 1;
+  }
+
   // step 1-2: 加载配置 + CLI 覆盖字段。
   // config.ts 是函数式 loadConfig(path?)，返回 DaemonConfig 纯对象（非 class 实例）。
   const configPath = DEFAULT_CONFIG_PATH;
@@ -276,6 +285,12 @@ export async function startAction(opts: StartOptions): Promise<number> {
   }
   if (opts.token) {
     config.token = opts.token;
+    // 选 token 时清掉 api_key，避免持久化文件里两个都非空导致下次启动歧义。
+    config.api_key = null;
+  }
+  if (opts['api-key']) {
+    config.api_key = opts['api-key'];
+    config.token = null;
   }
   if (opts['workspace-dir']) {
     config.workspace_dir = opts['workspace-dir'];
@@ -299,11 +314,10 @@ export async function startAction(opts: StartOptions): Promise<number> {
   // step 3: 持久化配置（对齐 Python `config.save()`）。
   await saveConfigFn(config, configPath);
 
-  // step 4: 校验 token（对齐 Python __main__.py:89-91）。
-  // Python `if not config.token`：None / 空串都视为缺失。TS config.token 是 string | null。
-  if (!config.token) {
+  // step 4: 凭证缺失校验（兼容旧版错误消息：仍是 token/api_key 任一即可）。
+  if (!config.token && !config.api_key) {
     process.stderr.write(
-      'Error: --token is required. Get one from the SillyHub web UI.\n',
+      'Error: --token or --api-key is required. Get one from the SillyHub web UI.\n',
     );
     return 1;
   }
@@ -313,18 +327,19 @@ export async function startAction(opts: StartOptions): Promise<number> {
   process.stdout.write(`Runtime ID: ${config.runtime_id}\n`);
 
   // step 5: 实例化 5 个模块（构造签名以真实 src 为准，Reverse Sync）。
-  //   - HubClient: new HubClient(serverUrl, token?)  —— 位置参数
-  //   - WorkspaceManager: new WorkspaceManager(baseDir)  —— Python 用 base_dir=
-  //     关键字，TS 是位置参数。baseDir 对齐 Python `DEFAULT_CONFIG_DIR / "workspaces"`
-  //     （__main__.py:97）。
-  //   - CredentialManager: new CredentialManager()  —— Python 无参，TS 可选 path
-  //   - TaskRunner: new TaskRunner(client, workspace, credential)  —— 3 位置参数，
-  //     Python 是 `TaskRunner(client, workspace_mgr, credential_mgr)`，TS 签名一致。
+  //   - HubClient: new HubClient(serverUrl, auth?) —— auth 为 string（旧式 token）
+  //     或 { token?, apiKey? } 对象。daemon-api-key 变更新增 apiKey 分支。
+  //   - WorkspaceManager: new WorkspaceManager(baseDir)
+  //   - CredentialManager: new CredentialManager()
+  //   - TaskRunner: new TaskRunner(client, workspace, credential)
   //   - Daemon: new Daemon(config, client, taskRunner?, options?)
   //
   // CredentialManager 直接满足 TaskRunner 的 RunnerCredentialManager 鸭子接口
   // （buildEnv 签名已在 task-runner.ts 对齐 credential.ts），无需 adapter 包装（G-04）。
-  const client = new HubClient(config.server_url, config.token ?? undefined);
+  const clientAuth = config.api_key
+    ? { apiKey: config.api_key }
+    : { token: config.token ?? undefined };
+  const client = new HubClient(config.server_url, clientAuth);
   const workspaceDir = join(DEFAULT_CONFIG_DIR, 'workspaces');
   const workspaceMgr = new WorkspaceManager(workspaceDir);
   const credentialMgr = new CredentialManager();

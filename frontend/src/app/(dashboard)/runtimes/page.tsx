@@ -273,13 +273,37 @@ function VersionCell({ provider, version }: { provider: string | null; version: 
 function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
   const accessToken = useSession((s) => s.accessToken);
   const [copied, setCopied] = useState(false);
+  const [apiKey, setApiKey] = useState<string | null>(null);
 
-  if (!accessToken) return null;
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getLatestActiveApiKey } = await import("@/lib/api-keys");
+        const latest = await getLatestActiveApiKey();
+        if (!cancelled) setApiKey(latest ? latest.key_prefix + "…" : null);
+      } catch {
+        // 非 admin 或尚未签发：fallback 到 access_token
+        if (!cancelled) setApiKey(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 渲染所需：apiKey（优先）或 accessToken（fallback）
+  if (!apiKey && !accessToken) return null;
 
   const frontendUrl =
     typeof window !== "undefined" ? window.location.origin : "http://localhost:3001";
   const serverUrl = frontendUrl.replace(/:3001$/, ":8001");
-  const cmd = `sillyhub-daemon start --server ${serverUrl} --token ${accessToken}`;
+  // 优先用长期 API Key；fallback 到浏览器短期 access_token（TTL 15min，不适合长期运行）。
+  const useApiKey = !!apiKey;
+  const placeholderCred = useApiKey ? (apiKey as string) : "<access_token>";
+  const cmd = useApiKey
+    ? `sillyhub-daemon start --server ${serverUrl} --api-key <粘贴你的 API Key>`
+    : `sillyhub-daemon start --server ${serverUrl} --token ${accessToken}`;
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(cmd);
@@ -288,23 +312,35 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
   };
 
   return (
-    <div className={cn("flex min-w-0 items-center gap-2", compact && "w-full")}>
-      <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 shadow-sm">
-        <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <code className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
-          sillyhub-daemon start --server {serverUrl} --token ...
-        </code>
+    <div className={cn("flex min-w-0 flex-col gap-1.5", compact && "w-full")}>
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 shadow-sm">
+          <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <code className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+            sillyhub-daemon start --server {serverUrl}{" "}
+            {useApiKey ? "--api-key" : "--token"} {placeholderCred}
+          </code>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 shrink-0 gap-1.5 px-2.5"
+          onClick={handleCopy}
+          title={copied ? "已复制" : "复制完整命令"}
+        >
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          <span className="hidden sm:inline">{copied ? "已复制" : "复制命令"}</span>
+        </Button>
       </div>
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-8 shrink-0 gap-1.5 px-2.5"
-        onClick={handleCopy}
-        title={copied ? "已复制" : "复制完整命令"}
-      >
-        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-        <span className="hidden sm:inline">{copied ? "已复制" : "复制命令"}</span>
-      </Button>
+      {!useApiKey && (
+        <p className="text-[10px] text-amber-600">
+          ⚠️ 当前显示的 --token 是浏览器 access_token（15 分钟过期），daemon 长期运行建议{" "}
+          <a href="/settings/api-keys" className="underline">
+            签发 API Key
+          </a>{" "}
+          后用 --api-key。
+        </p>
+      )}
     </div>
   );
 }

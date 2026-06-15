@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_deps import get_current_user
+from app.core.auth_deps import get_current_principal
 from app.core.db import get_session
 from app.core.logging import get_logger
 from app.modules.auth.model import User
@@ -57,7 +57,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 async def register_daemon(
     data: DaemonRegisterRequest,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_principal)],
 ) -> DaemonRuntimeRead:
     """Register a new daemon runtime or return existing one."""
     svc = DaemonService(session)
@@ -80,7 +80,7 @@ async def register_daemon(
 async def daemon_heartbeat(
     data: DaemonHeartbeatRequest,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_principal)],
 ) -> DaemonHeartbeatResponse:
     """HTTP heartbeat endpoint (fallback for when WebSocket is unavailable)."""
     svc = DaemonService(session)
@@ -99,7 +99,7 @@ async def daemon_heartbeat(
 async def get_runtime(
     runtime_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_principal)],
 ) -> DaemonRuntimeRead:
     """Get daemon runtime info by ID."""
     svc = DaemonService(session)
@@ -118,7 +118,7 @@ async def get_runtime(
 )
 async def list_runtimes(
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_principal)],
 ) -> list[DaemonRuntimeRead]:
     """List all daemon runtimes for the current user."""
     svc = DaemonService(session)
@@ -138,7 +138,7 @@ async def claim_lease(
     lease_id: uuid.UUID,
     data: LeaseClaimRequest,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_principal)],
 ) -> LeaseClaimResponse:
     """Claim a pending task lease for execution."""
     svc = DaemonService(session)
@@ -160,7 +160,7 @@ async def start_lease(
     lease_id: uuid.UUID,
     data: LeaseStartRequest,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_principal)],
 ) -> LeaseStartResponse:
     """Mark a claimed lease as started (agent is now running)."""
     svc = DaemonService(session)
@@ -179,7 +179,7 @@ async def lease_heartbeat(
     lease_id: uuid.UUID,
     data: LeaseHeartbeatRequest,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_principal)],
 ) -> LeaseHeartbeatResponse:
     """Send a heartbeat for an active lease to prevent expiry."""
     svc = DaemonService(session)
@@ -198,7 +198,7 @@ async def submit_lease_messages(
     lease_id: uuid.UUID,
     data: LeaseMessagesRequest,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_principal)],
 ) -> LeaseMessagesResponse:
     """Submit agent conversation messages for a running lease."""
     svc = DaemonService(session)
@@ -219,7 +219,7 @@ async def complete_lease(
     lease_id: uuid.UUID,
     data: LeaseCompleteRequest,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_principal)],
 ) -> LeaseCompleteResponse:
     """Mark a lease as completed with execution results."""
     svc = DaemonService(session)
@@ -238,7 +238,7 @@ async def sync_lease_status(
     lease_id: uuid.UUID,
     data: LeaseSyncRequest,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_principal)],
 ) -> LeaseSyncResponse:
     """Sync AgentRun status from daemon side."""
     svc = DaemonService(session)
@@ -261,7 +261,7 @@ async def sync_lease_status(
 async def get_lease(
     lease_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_principal)],
 ) -> DaemonTaskLeaseRead:
     """Get lease info by ID."""
     svc = DaemonService(session)
@@ -281,7 +281,7 @@ async def get_lease(
 async def list_runtime_leases(
     runtime_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_principal)],
 ) -> list[DaemonTaskLeaseRead]:
     """List all leases for a given daemon runtime."""
     svc = DaemonService(session)
@@ -363,7 +363,7 @@ async def daemon_websocket(
 async def get_pending_leases(
     runtime_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_principal)],
 ) -> list[dict]:
     """Return all pending leases for a runtime (polled by daemon)."""
     from sqlalchemy import text as sa_text

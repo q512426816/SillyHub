@@ -1,0 +1,149 @@
+<!--
+author: qinyi
+created_at: 2026-06-16T12:00:00
+description: daemon-api-key 变更 /settings/api-keys 页面 HTML 线框原型
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>API Keys — 线框原型</title>
+  <style>
+    body { font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 32px; }
+    .wrap { max-width: 960px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .sub { color: #64748b; margin-bottom: 24px; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 20px; margin-bottom: 16px; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .btn { padding: 6px 14px; border-radius: 4px; border: 1px solid #cbd5e1; background: #fff; cursor: pointer; font-size: 13px; }
+    .btn-primary { background: #0f172a; color: #fff; border-color: #0f172a; }
+    .btn-danger { color: #b91c1c; border-color: #fecaca; background: #fef2f2; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #e2e8f0; }
+    th { font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 500; }
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+    .pill { padding: 2px 8px; border-radius: 10px; font-size: 11px; background: #dcfce7; color: #166534; }
+    .pill-revoked { background: #fee2e2; color: #991b1b; }
+    .pill-expired { background: #fef3c7; color: #92400e; }
+    .modal-bg { position: fixed; inset: 0; background: rgba(15,23,42,.5); display: flex; align-items: center; justify-content: center; }
+    .modal { background: #fff; border-radius: 8px; padding: 24px; width: 480px; max-width: 90vw; }
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-size: 12px; color: #64748b; margin-bottom: 4px; }
+    .field input, .field select { width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; }
+    .warn { background: #fef3c7; border: 1px solid #fde68a; color: #92400e; padding: 10px 12px; border-radius: 4px; font-size: 12px; margin-top: 12px; }
+    .plaintext { background: #0f172a; color: #f1f5f9; padding: 10px; border-radius: 4px; font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
+    .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+    .hidden { display: none; }
+    .hint { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>API Keys</h1>
+  <p class="sub">为本地 daemon 签发长期凭证。daemon 用 <code>--api-key</code> 替代短期 access_token 启动，永不过期/可吊销。</p>
+
+  <div class="card">
+    <div class="row">
+      <strong>当前 admin 的 API Keys</strong>
+      <button class="btn btn-primary" onclick="document.getElementById('modal-create').classList.remove('hidden')">+ 签发 API Key</button>
+    </div>
+
+    <table style="margin-top:16px">
+      <thead>
+        <tr><th>名称</th><th>前缀</th><th>创建于</th><th>最近使用</th><th>过期</th><th>状态</th><th></th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>my-laptop-daemon</td>
+          <td class="mono">ab12cd34•••</td>
+          <td>2026-06-16</td>
+          <td>刚刚</td>
+          <td>永不过期</td>
+          <td><span class="pill">活跃</span></td>
+          <td><button class="btn btn-danger" onclick="alert('二次确认对话框（mock）')">吊销</button></td>
+        </tr>
+        <tr>
+          <td>ci-runner</td>
+          <td class="mono">ef5678ab•••</td>
+          <td>2026-06-01</td>
+          <td>2 天前</td>
+          <td>2026-09-30</td>
+          <td><span class="pill">活跃</span></td>
+          <td><button class="btn btn-danger">吊销</button></td>
+        </tr>
+        <tr style="opacity:.55">
+          <td>old-laptop</td>
+          <td class="mono">99zz88yy•••</td>
+          <td>2026-05-10</td>
+          <td>—</td>
+          <td>—</td>
+          <td><span class="pill pill-revoked">已吊销</span></td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="row" style="align-items:flex-start">
+      <div>
+        <strong>daemon 启动命令</strong>
+        <p class="hint">优先使用 API Key（永不过期），fallback 到 access_token（15min 过期）</p>
+      </div>
+    </div>
+    <div style="background:#0f172a;color:#f1f5f9;padding:10px 12px;border-radius:4px;font-family:ui-monospace,monospace;font-size:12px;margin-top:8px;word-break:break-all">
+      sillyhub-daemon start --server http://127.0.0.1:8001 --api-key ab12cd34_full_plaintext_hidden
+    </div>
+    <div style="margin-top:8px"><button class="btn">复制命令</button></div>
+  </div>
+</div>
+
+<!-- 创建弹窗 -->
+<div id="modal-create" class="modal-bg hidden">
+  <div class="modal">
+    <h2 style="margin-top:0">签发 API Key</h2>
+
+    <!-- 阶段 1: 表单 -->
+    <div id="form-stage">
+      <div class="field">
+        <label>名称（用于识别）</label>
+        <input placeholder="my-laptop-daemon" />
+      </div>
+      <div class="field">
+        <label>有效期</label>
+        <select>
+          <option>永不过期（推荐 daemon 场景）</option>
+          <option>7 天</option>
+          <option>30 天</option>
+          <option>90 天</option>
+          <option>365 天</option>
+          <option>自定义…</option>
+        </select>
+      </div>
+      <div class="actions">
+        <button class="btn" onclick="document.getElementById('modal-create').classList.add('hidden')">取消</button>
+        <button class="btn btn-primary" onclick="swapToPlaintext()">签发</button>
+      </div>
+    </div>
+
+    <!-- 阶段 2: 一次性显示 plaintext -->
+    <div id="plaintext-stage" class="hidden">
+      <p>API Key 已生成。<strong>关闭后将不再显示明文</strong>，请立即复制保存：</p>
+      <div class="plaintext">shk_live_ab12cd34ef5678ab91011121314151617181920212223242526</div>
+      <div class="warn">⚠ 此明文仅显示一次。丢失只能吊销重建。</div>
+      <div class="actions">
+        <button class="btn btn-primary" onclick="document.getElementById('modal-create').classList.add('hidden'); document.getElementById('form-stage').classList.remove('hidden'); document.getElementById('plaintext-stage').classList.add('hidden')">我已保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function swapToPlaintext() {
+    document.getElementById('form-stage').classList.add('hidden');
+    document.getElementById('plaintext-stage').classList.remove('hidden');
+  }
+</script>
+</body>
+</html>

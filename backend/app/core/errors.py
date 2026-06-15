@@ -187,6 +187,11 @@ class PermissionDenied(AppError):
     http_status = status.HTTP_403_FORBIDDEN
 
 
+class ApiKeyNotFound(AppError):
+    code = "HTTP_404_API_KEY_NOT_FOUND"
+    http_status = status.HTTP_404_NOT_FOUND
+
+
 class InvalidTransition(AppError):
     code = "HTTP_422_INVALID_TRANSITION"
     http_status = status.HTTP_422_UNPROCESSABLE_ENTITY

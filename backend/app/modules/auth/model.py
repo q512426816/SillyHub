@@ -143,6 +143,57 @@ class RolePermission(BaseModel, table=True):
     )
 
 
+class ApiKey(BaseModel, table=True):
+    """A long-lived API key issued by a platform admin.
+
+    The plaintext key is shown to the admin **once** at creation time and
+    never persisted. The DB row stores ``bcrypt(plaintext)`` in
+    ``key_hash`` plus a non-sensitive ``key_prefix`` (the first 12 chars
+    of the plaintext) for display in the admin UI.
+
+    Revocation sets ``revoked_at``; expiry sets ``expires_at``. Both are
+    checked at authenticate time. ``last_used_at`` is updated on every
+    successful authenticate.
+    """
+
+    __tablename__ = "api_keys"
+    __table_args__ = (
+        Index("ix_api_keys_user_revoked", "user_id", "revoked_at"),
+        Index("ix_api_keys_prefix", "key_prefix"),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    user_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    name: str = Field(sa_column=Column(String(100), nullable=False))
+    key_prefix: str = Field(sa_column=Column(String(16), nullable=False))
+    key_hash: str = Field(sa_column=Column(String(255), nullable=False))
+    last_used_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    expires_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    revoked_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+
+
 class UserWorkspaceRole(BaseModel, table=True):
     """Bind a User to a Role inside a Workspace.
 

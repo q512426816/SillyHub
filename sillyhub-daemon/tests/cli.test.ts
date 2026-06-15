@@ -106,6 +106,7 @@ function makeConfig(overrides: Partial<DaemonConfigType> = {}): DaemonConfigType
   return {
     server_url: 'http://localhost:8000',
     token: 'tok-test',
+    api_key: null,
     runtime_id: 'rt-test-001',
     profile: 'default',
     workspace_dir: '/tmp/ws',
@@ -113,6 +114,8 @@ function makeConfig(overrides: Partial<DaemonConfigType> = {}): DaemonConfigType
     heartbeat_interval: 15,
     max_concurrent_tasks: 5,
     log_level: 'info',
+    default_timeout_seconds: 1800,
+    max_retries: 1,
     ...overrides,
   };
 }
@@ -321,5 +324,78 @@ describe('TestStart (test_cli.py)', () => {
     expect(cli.readPid()).toBe(12345);
     await cli.removePid();
     expect(cli.readPid()).toBeNull();
+  });
+});
+
+// daemon-api-key 变更：--api-key 选项 + 与 --token 互斥 + config 持久化。
+describe('TestStartApiKey (daemon-api-key)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await makeTmpDir('sillyhub-cli-apikey-');
+    await setupCliWithTmpHome(tmpDir);
+  });
+
+  afterEach(async () => {
+    teardownCliStub();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    await cleanupDir(tmpDir);
+  });
+
+  it('start_help 含 --api-key 选项', async () => {
+    const program = cli.createProgram();
+    const startCmd = program.commands.find((c) => c.name() === 'start');
+    const optFlags = (startCmd?.options ?? []).map((o) => o.flags);
+    expect(optFlags.some((f) => f.includes('--api-key'))).toBe(true);
+  });
+
+  it('token + api-key 同时传 → 退出码 1 + 互斥错误', async () => {
+    const err = captureStderr();
+    const code = await cli.startAction({
+      server: 'http://localhost:8000',
+      token: 'tok-1',
+      'api-key': 'shk_live_x',
+    });
+    expect(code).toBe(1);
+    expect(err.writes.join('')).toContain('mutually exclusive');
+    err.restore();
+  });
+
+  // 注：startAction 内部 loadConfigFn / saveConfigFn 是模块内 lexical 调用，
+  // vi.spyOn(cli, ...) 拦不到；HOME/USERPROFILE stubEnv 在 Windows 不生效，
+  // 会读到真实 ~/.sillyhub/daemon/config.json。这两个用例在 Windows 跳过，
+  // Linux/macOS 走 setupCliWithTmpHome 的 stubEnv('HOME', tmp) 可正确隔离。
+  const itNonWindows = process.platform === 'win32' ? it.skip : it;
+
+  itNonWindows('两者都不传 → 退出码 1 + required 错误', async () => {
+    const err = captureStderr();
+    const code = await cli.startAction({
+      server: 'http://localhost:8000',
+    });
+    expect(code).toBe(1);
+    expect(err.writes.join('')).toContain('--token or --api-key is required');
+    err.restore();
+  });
+
+  itNonWindows('只传 --api-key → saveConfigFn 收到 api_key 且 token 为 null', async () => {
+    const daemonMod = await import('../src/daemon.js');
+    vi.spyOn(daemonMod.Daemon.prototype, 'start').mockResolvedValue(undefined);
+    const err = captureStderr();
+    const out = captureStdout();
+    const code = await cli.startAction({
+      server: 'http://localhost:8000',
+      'api-key': 'shk_live_test_key',
+    });
+    expect(code).toBe(0);
+    // config.json 在 tmpDir 下应已写入。
+    const raw = await import('node:fs/promises').then((m) =>
+      m.readFile(configMod.DEFAULT_CONFIG_PATH, 'utf-8'),
+    );
+    const saved = JSON.parse(raw);
+    expect(saved.api_key).toBe('shk_live_test_key');
+    expect(saved.token).toBeNull();
+    err.restore();
+    out.restore();
   });
 });
