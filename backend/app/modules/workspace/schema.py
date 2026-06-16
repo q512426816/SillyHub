@@ -210,3 +210,40 @@ def slugify(name: str) -> str:
     base = re.sub(r"[^a-zA-Z0-9]+", "-", name).strip("-").lower()
     base = re.sub(r"-+", "-", base) or "workspace"
     return base[:100]
+
+
+class WorkspaceMemberView(BaseModel):
+    user_id: uuid.UUID
+    email: str
+    display_name: str | None
+    role_key: str
+    role_name: str
+    granted_at: datetime
+    is_current_user: bool  # 给前端高亮"你"
+
+
+class WorkspaceMemberListResponse(BaseModel):
+    items: list[WorkspaceMemberView]
+
+
+class WorkspaceMemberAddRequest(BaseModel):
+    user_id: uuid.UUID
+    # 宽 str 类型——由 service 层（task-02）的 ROLE_KEY_WHITELIST 校验，
+    # 让非法值（如 platform_admin）走业务路径返 400 invalid_role_key，
+    # 而不是 Pydantic Literal 路径返 422。见 FR-03 / task-03 §4.2。
+    role_key: str
+
+
+class WorkspaceMemberUpdateRequest(BaseModel):
+    role_key: str  # 同上，service 层白名单校验
+
+
+class UserSearchHit(BaseModel):
+    user_id: uuid.UUID
+    email: str
+    display_name: str | None
+    is_member: bool  # 通常为 False（搜索时已排除），保留字段供前端展示
+
+
+class UserSearchResponse(BaseModel):
+    items: list[UserSearchHit]

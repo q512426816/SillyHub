@@ -417,7 +417,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
   }
 
   return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-5 px-6 py-8">
+    <div className="flex flex-col gap-5">
       <header>
         <p className="text-[11px] text-muted-foreground">
           <Link href="/workspaces" className="hover:underline">
@@ -688,6 +688,6 @@ export default function WorkspaceDetailPage({ params }: Props) {
           </Link>
         ))}
       </section>
-    </main>
+    </div>
   );
 }

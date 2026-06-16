@@ -26,7 +26,13 @@ log = get_logger(__name__)
 
 
 class AppError(Exception):
-    """Base class for domain errors raised inside the application."""
+    """Base class for domain errors raised inside the application.
+
+    The class attributes ``code`` and ``http_status`` are the defaults for an
+    error type; per-instance overrides can be passed via ``__init__`` so a
+    translator (e.g. ``members_router._translate_service_error``) can raise a
+    domain-shaped error without declaring a one-off subclass for every code.
+    """
 
     code: str = "internal_error"
     http_status: int = status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -35,11 +41,19 @@ class AppError(Exception):
         self,
         message: str | None = None,
         *,
+        code: str | None = None,
+        http_status: int | None = None,
         details: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message or self.code)
         self.message = message or self.code
         self.details = details
+        # Per-instance overrides — only mutate the instance, never the class
+        # attribute, so callers sharing a subclass do not leak state.
+        if code is not None:
+            self.code = code
+        if http_status is not None:
+            self.http_status = http_status
 
 
 # ── Workspace errors ─────────────────────────────────────────────────────────

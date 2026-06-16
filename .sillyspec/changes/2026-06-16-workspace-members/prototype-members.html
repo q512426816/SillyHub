@@ -1,0 +1,193 @@
+<!--
+author: qinyi
+created_at: 2026-06-16T09:30:00
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Workspace Members — prototype</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font: 13px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; background: #f5f5f5; color: #222; }
+  .wrap { max-width: 1100px; margin: 24px auto; background: #fff; border: 1px solid #e5e5e5; border-radius: 6px; }
+  header { padding: 16px 24px; border-bottom: 1px solid #eee; }
+  h1 { margin: 0; font-size: 18px; }
+  header .meta { color: #888; font-size: 11px; margin-top: 4px; }
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid #eee; padding: 0 24px; }
+  .tab { padding: 12px 16px; border-bottom: 2px solid transparent; cursor: pointer; }
+  .tab.active { border-bottom-color: #2563eb; color: #2563eb; font-weight: 600; }
+  .content { padding: 16px 24px; }
+  .bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .hint { color: #666; font-size: 12px; }
+  button.btn { background: #fff; border: 1px solid #d4d4d4; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  button.btn.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+  button.btn.danger { color: #b91c1c; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
+  th { font-size: 11px; text-transform: uppercase; color: #888; }
+  td.actions { text-align: right; white-space: nowrap; }
+  .role-pill { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; }
+  .role-owner { background: #fef3c7; color: #92400e; }
+  .role-dev { background: #dbeafe; color: #1e40af; }
+  .role-viewer { background: #f3f4f6; color: #374151; }
+  select.role-select { padding: 4px 8px; font-size: 12px; border: 1px solid #d4d4d4; border-radius: 4px; }
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 50; }
+  .modal-bg.open { display: flex; }
+  .modal { background: #fff; width: 480px; border-radius: 8px; padding: 20px; box-shadow: 0 6px 24px rgba(0,0,0,0.15); }
+  .modal h2 { margin: 0 0 4px; font-size: 16px; }
+  .modal .sub { color: #666; font-size: 12px; margin-bottom: 16px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 11px; color: #666; margin-bottom: 4px; }
+  input, select { width: 100%; padding: 8px; border: 1px solid #d4d4d4; border-radius: 4px; font-size: 13px; }
+  .candidates { margin-top: 6px; border: 1px solid #eee; border-radius: 4px; max-height: 180px; overflow: auto; }
+  .cand { padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f5f5f5; }
+  .cand:hover { background: #f5f5ff; }
+  .cand.selected { background: #dbeafe; }
+  .cand .nm { font-weight: 500; }
+  .cand .em { color: #666; font-size: 11px; }
+  .actions-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .note { background: #fef3c7; border-left: 3px solid #f59e0b; padding: 8px 12px; margin-top: 12px; font-size: 12px; color: #92400e; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>myaaa <span style="color:#888;font-weight:normal;font-size:13px;">workspace</span></h1>
+    <div class="meta">/workspaces/67564b2f-5fcc-407c-a902-376ce4832ec9/members</div>
+  </header>
+
+  <div class="tabs">
+    <div class="tab">Overview</div>
+    <div class="tab">Components</div>
+    <div class="tab">Changes</div>
+    <div class="tab active">Members</div>
+  </div>
+
+  <div class="content">
+    <div class="bar">
+      <div class="hint">3 members · 你是 workspace_owner</div>
+      <button class="btn primary" onclick="openModal()">+ Add Member</button>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Email</th>
+          <th>Role</th>
+          <th>Granted At</th>
+          <th class="actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Admin SillyHub</strong> (you)</td>
+          <td>admin@sillyhub.local</td>
+          <td><span class="role-pill role-owner">workspace_owner</span></td>
+          <td>2026-06-05</td>
+          <td class="actions">
+            <button class="btn" disabled style="opacity:.5" title="已是 owner">Set Owner</button>
+            <button class="btn danger" disabled style="opacity:.5" title="不能移除自己（最后 owner）">Remove</button>
+          </td>
+        </tr>
+        <tr>
+          <td>Alice Chen</td>
+          <td>alice@example.com</td>
+          <td>
+            <select class="role-select">
+              <option>workspace_owner</option>
+              <option selected>developer</option>
+              <option>viewer</option>
+            </select>
+          </td>
+          <td>2026-06-10</td>
+          <td class="actions">
+            <button class="btn" onclick="alert('transfer-ownership: Alice → owner, you → developer (单事务)')">Set Owner</button>
+            <button class="btn danger" onclick="alert('DELETE /members/alice-id')">Remove</button>
+          </td>
+        </tr>
+        <tr>
+          <td>Bob Wang</td>
+          <td>bob@example.com</td>
+          <td>
+            <select class="role-select">
+              <option>workspace_owner</option>
+              <option>developer</option>
+              <option selected>viewer</option>
+            </select>
+          </td>
+          <td>2026-06-12</td>
+          <td class="actions">
+            <button class="btn">Set Owner</button>
+            <button class="btn danger">Remove</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="note">
+      ⚠️ <strong>不变量</strong>：每个 workspace 至少保留 1 个 workspace_owner。
+      移除最后一个 owner 或修改其角色会被后端拒绝（HTTP 400）。
+      transfer-ownership 是单事务的两行 UPDATE，确保中途不会出现「无 owner」状态。
+    </div>
+  </div>
+</div>
+
+<!-- Add Member Modal -->
+<div class="modal-bg" id="modal">
+  <div class="modal">
+    <h2>Add Member to myaaa</h2>
+    <div class="sub">搜索用户（display_name / email 模糊匹配），指定角色后提交。</div>
+
+    <div class="field">
+      <label>搜索用户</label>
+      <input type="text" placeholder="输入用户名或邮箱前缀..." oninput="onSearch(this.value)">
+      <div class="candidates" id="cands">
+        <div class="cand selected" onclick="pick(this)">
+          <div class="nm">Carol Liu</div>
+          <div class="em">carol@example.com</div>
+        </div>
+        <div class="cand" onclick="pick(this)">
+          <div class="nm">Catherine Zhao</div>
+          <div class="em">cathy@x.com</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Role</label>
+      <select>
+        <option value="viewer">viewer — 只读</option>
+        <option value="developer" selected>developer — 可写</option>
+        <option value="workspace_owner">workspace_owner — 全权</option>
+      </select>
+    </div>
+
+    <div class="note" style="margin-top:8px;background:#f0f9ff;border-left-color:#2563eb;color:#1e40af;">
+      ℹ️ 添加已成员的用户会更新其角色（幂等）。不能添加 platform_admin 角色（系统级保留）。
+    </div>
+
+    <div class="actions-row">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn primary" onclick="alert('POST /api/workspaces/{id}/members  {user_id, role_key}')">Add</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  function openModal() { document.getElementById('modal').classList.add('open'); }
+  function closeModal() { document.getElementById('modal').classList.remove('open'); }
+  function pick(el) {
+    document.querySelectorAll('.cand').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+  }
+  function onSearch(q) {
+    // 真实实现：debounce 300ms → GET /api/workspaces/{id}/members/search?q=...
+    // 这里仅作示意
+  }
+</script>
+
+</body>
+</html>

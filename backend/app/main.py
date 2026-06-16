@@ -37,6 +37,7 @@ from app.modules.tool_gateway.policy_router import router as policy_crud_router
 from app.modules.tool_gateway.router import router as tool_gateway_router
 from app.modules.workflow.router import router as workflow_router
 from app.modules.workspace import workspace_router
+from app.modules.workspace.members_router import router as members_router
 from app.modules.worktree import lease_router, worktree_router
 
 
@@ -295,6 +296,15 @@ def create_app() -> FastAPI:
     # /api/workspaces/{workspace_id}/... routes.
     _register_quick_chat(app)
     app.include_router(workspace_router, prefix="/api")
+    # Workspace members sub-router (task-04 of change
+    # ``2026-06-16-workspace-members``). members_router ships its own
+    # ``/workspaces/{workspace_id}/members`` prefix, so the outer include only
+    # adds ``/api`` to land at ``/api/workspaces/{workspace_id}/members/*``
+    # (design §5.1). Mounted as a sibling of workspace_router rather than
+    # nested inside it because FastAPI ``include_router(prefix=...)`` would
+    # double-count members_router's own prefix and raise
+    # ``ValueError: Duplicated param name workspace_id``.
+    app.include_router(members_router, prefix="/api", tags=["workspace-members"])
     app.include_router(auth_router, prefix="/api")
     app.include_router(change_router, prefix="/api")
     app.include_router(scan_docs_router, prefix="/api")
