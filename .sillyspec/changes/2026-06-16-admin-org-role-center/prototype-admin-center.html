@@ -1,0 +1,407 @@
+<!doctype html>
+<!--
+author: WhaleFall
+created_at: 2026-06-16T09:50:00
+description: ql-20260616-003 admin org role center 原型（线框图）
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>SillyHub / 系统管理 · 原型</title>
+<style>
+  :root { --bg: #fafafa; --line: #d4d4d8; --ink: #18181b; --mute: #71717a; --acc: #2563eb; --ok: #16a34a; --warn: #d97706; --err: #dc2626; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace; background: var(--bg); color: var(--ink); font-size: 13px; }
+  .layout { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+  .nav { background: #f4f4f5; border-right: 1px solid var(--line); padding: 16px 12px; }
+  .nav h3 { font-size: 11px; text-transform: uppercase; color: var(--mute); margin: 16px 0 6px; letter-spacing: .08em; }
+  .nav a { display: block; padding: 6px 10px; border-radius: 4px; color: var(--ink); text-decoration: none; cursor: pointer; }
+  .nav a:hover { background: #e4e4e7; }
+  .nav a.active { background: var(--acc); color: #fff; }
+  .main { padding: 24px 32px; }
+  h1 { margin: 0 0 4px; font-size: 20px; }
+  .desc { color: var(--mute); margin: 0 0 24px; }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }
+  .btn { padding: 6px 14px; border: 1px solid var(--line); background: #fff; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 12px; }
+  .btn-primary { background: var(--acc); color: #fff; border-color: var(--acc); }
+  .btn-danger { color: var(--err); border-color: var(--err); }
+  .btn[disabled] { opacity: .5; cursor: not-allowed; }
+  .input, select { padding: 6px 10px; border: 1px solid var(--line); border-radius: 4px; font-family: inherit; font-size: 12px; background: #fff; min-width: 200px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); font-size: 12px; }
+  th { background: #f4f4f5; font-weight: 600; color: var(--mute); }
+  tr:last-child td { border-bottom: none; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 500; }
+  .b-green { background: #dcfce7; color: var(--ok); }
+  .b-gray { background: #e4e4e7; color: var(--mute); }
+  .b-blue { background: #dbeafe; color: var(--acc); }
+  .b-amber { background: #fef3c7; color: var(--warn); }
+  .b-red { background: #fee2e2; color: var(--err); }
+  .page { display: none; }
+  .page.show { display: block; }
+  /* drawer */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; }
+  .overlay.show { display: block; }
+  .drawer { position: fixed; right: 0; top: 0; bottom: 0; width: 480px; background: #fff; box-shadow: -4px 0 16px rgba(0,0,0,.1); padding: 24px; overflow-y: auto; transform: translateX(100%); transition: transform .2s; }
+  .drawer.show { transform: translateX(0); }
+  .drawer h2 { margin-top: 0; }
+  .form-row { margin-bottom: 14px; }
+  .form-row label { display: block; font-size: 11px; color: var(--mute); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .05em; }
+  /* permission picker */
+  .perm-group { border: 1px solid var(--line); border-radius: 4px; margin-bottom: 8px; }
+  .perm-group summary { padding: 8px 12px; cursor: pointer; font-weight: 600; background: #f9fafb; }
+  .perm-group .body { padding: 8px 12px 12px 28px; }
+  .perm-group label { display: block; padding: 3px 0; font-size: 12px; }
+  /* tree */
+  .tree { font-size: 12px; }
+  .tree ul { list-style: none; padding-left: 18px; border-left: 1px dashed var(--line); margin: 4px 0; }
+  .tree li { padding: 4px 8px; cursor: pointer; border-radius: 4px; }
+  .tree li.sel { background: #dbeafe; }
+  .tree li.disabled { color: var(--mute); text-decoration: line-through; }
+  .splitter { display: grid; grid-template-columns: 280px 1fr; gap: 24px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 4px; padding: 16px; margin-bottom: 16px; }
+  .card h3 { margin: 0 0 12px; font-size: 13px; }
+  .pill-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pill { background: #f4f4f5; padding: 3px 10px; border-radius: 999px; font-size: 11px; }
+  .micro { font-size: 11px; color: var(--mute); }
+  .actions { display: flex; gap: 6px; }
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <nav class="nav">
+    <h3>工作区</h3>
+    <a>SillyHub</a>
+    <a>成员管理</a>
+    <a>变更中心</a>
+
+    <h3>系统管理</h3>
+    <a data-page="users" class="active">用户管理</a>
+    <a data-page="orgs">组织管理</a>
+    <a data-page="roles">角色管理</a>
+
+    <h3>个人</h3>
+    <a>平台设置</a>
+    <a>API Keys</a>
+    <a>Git 身份</a>
+  </nav>
+
+  <main class="main">
+
+    <!-- ========== USERS ========== -->
+    <section id="page-users" class="page show">
+      <h1>用户管理</h1>
+      <p class="desc">/admin/users · 平台用户的创建、编辑、登录权限、组织与角色绑定</p>
+
+      <div class="toolbar">
+        <input class="input" placeholder="搜索 email / 显示名" />
+        <select><option>所有状态</option><option>可登录</option><option>已禁登录</option></select>
+        <select><option>所有组织</option><option>SillyHub HQ</option><option>Engineering</option></select>
+        <select><option>所有角色</option><option>platform_admin</option><option>viewer</option></select>
+        <span style="flex:1"></span>
+        <button class="btn btn-primary" onclick="openDrawer('user-drawer')">+ 新建用户</button>
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>用户</th><th>组织</th><th>角色</th><th>登录</th><th>平台管理员</th><th>最近登录</th><th>操作</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>admin@sillyhub.local</strong><br><span class="micro">Admin User</span></td>
+            <td><span class="pill">SillyHub HQ</span></td>
+            <td><span class="badge b-blue">platform_admin</span></td>
+            <td><span class="badge b-green">可登录</span></td>
+            <td><span class="badge b-amber">是</span></td>
+            <td class="micro">2 分钟前</td>
+            <td class="actions"><button class="btn" onclick="openDrawer('user-drawer')">编辑</button><button class="btn btn-danger" disabled title="不能删除自己">删除</button></td>
+          </tr>
+          <tr>
+            <td><strong>alice@corp.com</strong><br><span class="micro">Alice Wang</span></td>
+            <td><span class="pill">Engineering</span> <span class="pill">QA</span></td>
+            <td><span class="badge b-blue">workspace_admin</span></td>
+            <td><span class="badge b-green">可登录</span></td>
+            <td><span class="badge b-gray">否</span></td>
+            <td class="micro">1 小时前</td>
+            <td class="actions"><button class="btn" onclick="openDrawer('user-drawer')">编辑</button><button class="btn btn-danger">删除</button></td>
+          </tr>
+          <tr>
+            <td><strong>bob@corp.com</strong><br><span class="micro">Bob Li</span></td>
+            <td><span class="pill">Sales</span></td>
+            <td><span class="micro">—</span></td>
+            <td><span class="badge b-red">禁登录</span></td>
+            <td><span class="badge b-gray">否</span></td>
+            <td class="micro">3 天前</td>
+            <td class="actions"><button class="btn" onclick="openDrawer('user-drawer')">编辑</button><button class="btn btn-danger">删除</button></td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="micro" style="margin-top:12px">→ 自保护：当前登录用户行的「删除」「禁登录」按钮自动禁用。最后一个 platform_admin 同样保护。</p>
+    </section>
+
+    <!-- ========== ORGANIZATIONS ========== -->
+    <section id="page-orgs" class="page">
+      <h1>组织管理</h1>
+      <p class="desc">/admin/organizations · 组织树（多对多关联用户）</p>
+
+      <div class="splitter">
+        <div>
+          <div class="toolbar">
+            <button class="btn btn-primary" onclick="openDrawer('org-drawer')" style="margin-left:auto">+ 新建组织</button>
+          </div>
+          <div class="card" style="padding:12px">
+            <div class="tree">
+              <ul>
+                <li class="sel">▼ SillyHub HQ <span class="badge b-green" style="margin-left:6px">active</span></li>
+                <ul>
+                  <li>► Engineering <span class="badge b-green" style="margin-left:6px">active</span> <span class="micro">(2 成员)</span></li>
+                  <ul>
+                    <li>► Frontend <span class="micro">(0 成员)</span></li>
+                    <li>► Backend <span class="micro">(1 成员)</span></li>
+                  </ul>
+                  <li>► QA <span class="badge b-green" style="margin-left:6px">active</span> <span class="micro">(1 成员)</span></li>
+                  <li class="disabled">► Sales <span class="badge b-gray" style="margin-left:6px">disabled</span> <span class="micro">(1 成员)</span></li>
+                </ul>
+                <li>► Partners <span class="micro">(0 成员)</span></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card">
+            <h3>SillyHub HQ <span class="badge b-green">active</span></h3>
+            <div class="form-row"><label>code</label><div>HQ</div></div>
+            <div class="form-row"><label>parent</label><div>—（根组织）</div></div>
+            <div class="form-row"><label>sort_order</label><div>0</div></div>
+            <div class="form-row"><label>子组织</label><div>Engineering, QA, Sales</div></div>
+            <div class="form-row"><label>关联成员</label><div>1（admin@sillyhub.local）</div></div>
+            <div class="actions">
+              <button class="btn" onclick="openDrawer('org-drawer')">编辑</button>
+              <button class="btn">禁用</button>
+              <button class="btn btn-danger" disabled title="有子组织 + 关联用户">删除</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>子组织</h3>
+            <table>
+              <thead><tr><th>名称</th><th>状态</th><th>成员</th></tr></thead>
+              <tbody>
+                <tr><td>Engineering</td><td><span class="badge b-green">active</span></td><td>2</td></tr>
+                <tr><td>QA</td><td><span class="badge b-green">active</span></td><td>1</td></tr>
+                <tr><td>Sales</td><td><span class="badge b-gray">disabled</span></td><td>1</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <p class="micro" style="margin-top:12px">→ 删除前置：无子组织 + 无关联用户。否则按钮禁用并显示原因 tooltip。</p>
+    </section>
+
+    <!-- ========== ROLES ========== -->
+    <section id="page-roles" class="page">
+      <h1>角色管理</h1>
+      <p class="desc">/admin/roles · 平台级角色 + 权限配置（按 Permission.group 分组）</p>
+
+      <div class="toolbar">
+        <input class="input" placeholder="搜索 key / name" />
+        <span style="flex:1"></span>
+        <button class="btn btn-primary" onclick="openDrawer('role-drawer')">+ 新建角色</button>
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>Key</th><th>名称</th><th>状态</th><th>系统内置</th><th>权限数</th><th>用户数</th><th>操作</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>platform_admin</code></td>
+            <td>Platform Admin</td>
+            <td><span class="badge b-green">active</span></td>
+            <td><span class="badge b-amber">是</span></td>
+            <td>32（全部）</td>
+            <td>1</td>
+            <td class="actions"><button class="btn">查看</button><button class="btn" disabled title="系统内置不可改">编辑</button><button class="btn btn-danger" disabled title="系统内置不可删">删除</button></td>
+          </tr>
+          <tr>
+            <td><code>workspace_admin</code></td>
+            <td>Workspace Admin</td>
+            <td><span class="badge b-green">active</span></td>
+            <td><span class="badge b-gray">否</span></td>
+            <td>8</td>
+            <td>1</td>
+            <td class="actions"><button class="btn">查看</button><button class="btn" onclick="openDrawer('role-drawer')">编辑</button><button class="btn btn-danger" disabled title="有 1 个用户绑定">删除</button></td>
+          </tr>
+          <tr>
+            <td><code>viewer</code></td>
+            <td>Read-Only Viewer</td>
+            <td><span class="badge b-gray">disabled</span></td>
+            <td><span class="badge b-gray">否</span></td>
+            <td>5</td>
+            <td>0</td>
+            <td class="actions"><button class="btn">查看</button><button class="btn" onclick="openDrawer('role-drawer')">编辑</button><button class="btn btn-danger">删除</button></td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="micro" style="margin-top:12px">→ is_system=true 行：编辑/删除按钮禁用。删除前置：用户数=0。</p>
+    </section>
+
+  </main>
+</div>
+
+<!-- ========== USER DRAWER ========== -->
+<div class="overlay" id="overlay" onclick="closeAll()"></div>
+<aside class="drawer" id="user-drawer">
+  <h2>编辑用户</h2>
+  <div class="form-row"><label>Email *</label><input class="input" style="width:100%" value="alice@corp.com" /></div>
+  <div class="form-row"><label>显示名</label><input class="input" style="width:100%" value="Alice Wang" /></div>
+  <div class="form-row"><label>密码</label><button class="btn">重置（生成随机密码）</button><span class="micro" style="margin-left:8px">→ 撤销所有 sessions</span></div>
+
+  <div class="form-row">
+    <label>组织（多对多）</label>
+    <div class="pill-row">
+      <span class="pill">Engineering ×</span>
+      <span class="pill">QA ×</span>
+      <span class="pill" style="background:#dbeafe;color:var(--acc);cursor:pointer">+ 添加组织</span>
+    </div>
+  </div>
+
+  <div class="form-row">
+    <label>角色（平台级）</label>
+    <div class="pill-row">
+      <span class="pill">workspace_admin ×</span>
+      <span class="pill" style="background:#dbeafe;color:var(--acc);cursor:pointer">+ 添加角色</span>
+    </div>
+  </div>
+
+  <div class="form-row">
+    <label>登录权限</label>
+    <label style="text-transform:none;font-size:12px;color:var(--ink)"><input type="checkbox" checked /> 允许登录（关闭后立即撤销该用户所有 sessions）</label>
+  </div>
+  <div class="form-row">
+    <label>平台超级管理员</label>
+    <label style="text-transform:none;font-size:12px;color:var(--ink)"><input type="checkbox" /> is_platform_admin（短路所有权限检查）</label>
+    <span class="micro">→ 最后一个 platform_admin 不能取消勾选</span>
+  </div>
+
+  <div class="actions" style="margin-top:24px">
+    <button class="btn btn-primary">保存</button>
+    <button class="btn" onclick="closeAll()">取消</button>
+  </div>
+</aside>
+
+<!-- ========== ORG DRAWER ========== -->
+<aside class="drawer" id="org-drawer">
+  <h2>编辑组织</h2>
+  <div class="form-row"><label>名称 *</label><input class="input" style="width:100%" value="Engineering" /></div>
+  <div class="form-row"><label>Code *</label><input class="input" style="width:100%" value="ENG" /><span class="micro">全局唯一</span></div>
+  <div class="form-row"><label>描述</label><textarea class="input" style="width:100%;min-height:60px">工程团队</textarea></div>
+  <div class="form-row"><label>上级组织</label>
+    <select class="input" style="width:100%"><option>SillyHub HQ（根）</option><option>—（作为根组织）</option></select>
+  </div>
+  <div class="form-row"><label>排序权重</label><input class="input" style="width:100%" value="10" /></div>
+  <div class="form-row"><label>状态</label>
+    <label style="text-transform:none;font-size:12px;color:var(--ink)"><input type="radio" name="st" checked /> active</label>
+    <label style="text-transform:none;font-size:12px;color:var(--ink);margin-left:12px"><input type="radio" name="st" /> disabled</label>
+  </div>
+  <div class="actions" style="margin-top:24px">
+    <button class="btn btn-primary">保存</button>
+    <button class="btn" onclick="closeAll()">取消</button>
+  </div>
+</aside>
+
+<!-- ========== ROLE DRAWER ========== -->
+<aside class="drawer" id="role-drawer" style="width:560px">
+  <h2>编辑角色 · workspace_admin</h2>
+  <div class="form-row"><label>Key *</label><input class="input" style="width:100%" value="workspace_admin" /></div>
+  <div class="form-row"><label>名称 *</label><input class="input" style="width:100%" value="Workspace Admin" /></div>
+  <div class="form-row"><label>描述</label><textarea class="input" style="width:100%;min-height:50px">工作区管理员</textarea></div>
+  <div class="form-row"><label>状态</label>
+    <label style="text-transform:none;font-size:12px;color:var(--ink)"><input type="radio" name="rs" checked /> active</label>
+    <label style="text-transform:none;font-size:12px;color:var(--ink);margin-left:12px"><input type="radio" name="rs" /> disabled</label>
+  </div>
+
+  <div class="form-row">
+    <label>权限配置（按分组）</label>
+
+    <details class="perm-group" open>
+      <summary>▢ 用户/组织/角色管理 (admin) <span class="micro">— 8 项</span></summary>
+      <div class="body">
+        <label><input type="checkbox" checked> user:read</label>
+        <label><input type="checkbox" checked> user:write</label>
+        <label><input type="checkbox"> user:login:manage</label>
+        <label><input type="checkbox" checked> organization:read</label>
+        <label><input type="checkbox"> organization:write</label>
+        <label><input type="checkbox" checked> role:read</label>
+        <label><input type="checkbox"> role:write</label>
+        <label><input type="checkbox"> platform:admin</label>
+      </div>
+    </details>
+
+    <details class="perm-group">
+      <summary>▢ 工作区 (workspace) <span class="micro">— 4 项</span></summary>
+      <div class="body">
+        <label><input type="checkbox" checked> workspace:read</label>
+        <label><input type="checkbox" checked> workspace:write</label>
+        <label><input type="checkbox" checked> workspace:admin</label>
+        <label><input type="checkbox"> workspace:member:manage</label>
+      </div>
+    </details>
+
+    <details class="perm-group">
+      <summary>▢ 变更 (change) <span class="micro">— 5 项</span></summary>
+      <div class="body">
+        <label><input type="checkbox" checked> change:create</label>
+        <label><input type="checkbox" checked> change:read</label>
+        <label><input type="checkbox"> change:update</label>
+        <label><input type="checkbox"> change:approve</label>
+        <label><input type="checkbox"> change:archive</label>
+      </div>
+    </details>
+
+    <details class="perm-group">
+      <summary>▢ Agent / Task <span class="micro">— 7 项</span></summary>
+      <div class="body">
+        <label><input type="checkbox" checked> task:read</label>
+        <label><input type="checkbox"> task:create</label>
+        <span class="micro">…</span>
+      </div>
+    </details>
+
+    <details class="perm-group">
+      <summary>▢ 审计 (audit) <span class="micro">— 1 项</span></summary>
+      <div class="body">
+        <label><input type="checkbox"> platform:audit:read</label>
+      </div>
+    </details>
+  </div>
+
+  <div class="actions" style="margin-top:24px">
+    <button class="btn btn-primary">保存</button>
+    <button class="btn" onclick="closeAll()">取消</button>
+  </div>
+</aside>
+
+<script>
+  function showPage(name) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('show'));
+    document.getElementById('page-' + name).classList.add('show');
+    document.querySelectorAll('.nav a[data-page]').forEach(a => a.classList.toggle('active', a.dataset.page === name));
+  }
+  document.querySelectorAll('.nav a[data-page]').forEach(a => {
+    a.addEventListener('click', () => { showPage(a.dataset.page); closeAll(); });
+  });
+  function openDrawer(id) {
+    document.getElementById('overlay').classList.add('show');
+    document.getElementById(id).classList.add('show');
+  }
+  function closeAll() {
+    document.getElementById('overlay').classList.remove('show');
+    document.querySelectorAll('.drawer').forEach(d => d.classList.remove('show'));
+  }
+</script>
+
+</body>
+</html>
