@@ -237,7 +237,9 @@ export function createProgram(): Command {
 interface StartOptions {
   server?: string;
   token?: string;
-  'api-key'?: string;
+  // commander 把 --api-key 存为 camelCase apiKey（不是 opts['api-key']）。
+  // 测试也用 camelCase 调 startAction，与 commander 解析保持一致。
+  apiKey?: string;
   'workspace-dir'?: string;
   'poll-interval'?: string;
   'heartbeat-interval'?: string;
@@ -270,7 +272,7 @@ interface LogsOptions {
 export async function startAction(opts: StartOptions): Promise<number> {
   // step 0: 互斥校验（先于 config 加载，避免污染持久化文件）。
   // --token 与 --api-key 同时给 → 退出码 1，避免运行时鉴权歧义。
-  if (opts.token && opts['api-key']) {
+  if (opts.token && opts.apiKey) {
     process.stderr.write('Error: --token and --api-key are mutually exclusive.\n');
     return 1;
   }
@@ -288,8 +290,8 @@ export async function startAction(opts: StartOptions): Promise<number> {
     // 选 token 时清掉 api_key，避免持久化文件里两个都非空导致下次启动歧义。
     config.api_key = null;
   }
-  if (opts['api-key']) {
-    config.api_key = opts['api-key'];
+  if (opts.apiKey) {
+    config.api_key = opts.apiKey;
     config.token = null;
   }
   if (opts['workspace-dir']) {

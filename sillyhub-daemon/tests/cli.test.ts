@@ -355,7 +355,7 @@ describe('TestStartApiKey (daemon-api-key)', () => {
     const code = await cli.startAction({
       server: 'http://localhost:8000',
       token: 'tok-1',
-      'api-key': 'shk_live_x',
+      apiKey: 'shk_live_x',
     });
     expect(code).toBe(1);
     expect(err.writes.join('')).toContain('mutually exclusive');
@@ -385,7 +385,7 @@ describe('TestStartApiKey (daemon-api-key)', () => {
     const out = captureStdout();
     const code = await cli.startAction({
       server: 'http://localhost:8000',
-      'api-key': 'shk_live_test_key',
+      apiKey: 'shk_live_test_key',
     });
     expect(code).toBe(0);
     // config.json 在 tmpDir 下应已写入。
@@ -396,6 +396,34 @@ describe('TestStartApiKey (daemon-api-key)', () => {
     expect(saved.api_key).toBe('shk_live_test_key');
     expect(saved.token).toBeNull();
     err.restore();
+    out.restore();
+  });
+
+  // 回归测试：commander 把 --api-key 存为 camelCase apiKey（不是 opts['api-key']）。
+  // 走真实 commander 解析（不是直接调 startAction），确保 CLI 解析层正确传值。
+  // 失败说明 startAction 读 opts['api-key'] 会拿到 undefined，config 残留旧值。
+  itNonWindows('commander 解析 --api-key 后 config.api_key 是真实 key（非 undefined）', async () => {
+    const daemonMod = await import('../src/daemon.js');
+    vi.spyOn(daemonMod.Daemon.prototype, 'start').mockResolvedValue(undefined);
+    const out = captureStdout();
+
+    const program = cli.createProgram();
+    await program.parseAsync([
+      'node',
+      'sillyhub-daemon',
+      'start',
+      '--server',
+      'http://localhost:8000',
+      '--api-key',
+      'shk_live_commander_real',
+    ]);
+
+    const raw = await import('node:fs/promises').then((m) =>
+      m.readFile(configMod.DEFAULT_CONFIG_PATH, 'utf-8'),
+    );
+    const saved = JSON.parse(raw);
+    expect(saved.api_key).toBe('shk_live_commander_real');
+    expect(saved.token).toBeNull();
     out.restore();
   });
 });
