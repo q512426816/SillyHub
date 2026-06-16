@@ -184,8 +184,15 @@ export type ProviderName = keyof typeof PROVIDER_SPECS;
 // AgentDetector
 // ---------------------------------------------------------------------------
 
-/** Windows 上 PATH 查找尝试追加的可执行后缀（对齐 shutil.which 在 Windows 的行为）。 */
-const WINDOWS_EXTS = ['', '.exe', '.cmd', '.bat', '.ps1'];
+/**
+ * Windows 上 PATH 查找尝试追加的可执行后缀。
+ *
+ * 故意把空扩展名放最后：npm/pnpm 全局安装的 bin 在 Windows 上同时生成无扩展名
+ * sh wrapper（给 git-bash/WSL 用）和 .cmd（给 cmd/PowerShell 用）。Node 的 spawn 不
+ * 走 shell 时无法 CreateProcess 无扩展名 sh 脚本，会 ENOENT。优先返回真正可执行的
+ * .exe/.cmd/.bat，只在它们都找不到时才回退到无扩展名（极少数纯 git-bash 环境）。
+ */
+const WINDOWS_EXTS = ['.exe', '.cmd', '.bat', '.ps1', ''];
 
 /**
  * 探测本机 12 种 coding agent CLI。

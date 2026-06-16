@@ -469,10 +469,15 @@ export class TaskRunner {
     } = params;
 
     // spawn（stdio 全管道：stdin / stdout / stderr 都需要）
+    // Windows 上 .cmd/.bat 包装器必须走 shell（与 detectVersion 的 exec 分支一致），
+    // 否则 Node spawn 不带 shell 直接 CreateProcess 这些 wrapper 脚本会 ENOENT。
+    const isWindowsCmdWrapper =
+      process.platform === 'win32' && /\.(cmd|bat)$/i.test(cmdPath);
     const child = spawn(cmdPath, args, {
       cwd: opts.cwd,
       env: opts.env,
       stdio: ['pipe', 'pipe', 'pipe'],
+      ...(isWindowsCmdWrapper ? { shell: true } : {}),
     }) as ChildProcess;
 
     let exitCode = 0;

@@ -284,3 +284,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：backend/app/modules/settings/service.py, backend/app/modules/settings/schema.py, backend/app/modules/settings/router.py, frontend/src/lib/settings.ts, frontend/src/app/(dashboard)/settings/page.tsx
 结果：service.py 新增 _generate_password 生成12位随机密码，reset_password 返回明文；schema.py 新增 ResetPasswordResponse；router.py 改为返回200+ResetPasswordResponse；前端去掉手动输入改为一键生成+展示明文+复制按钮
+
+## ql-20260616-001-8b4e | 2026-06-16 09:05:00 | 修复 Windows 上 sillyhub-daemon spawn claude 报 ENOENT
+状态：已完成
+根因：Windows 上 npm 全局安装的 claude 同时生成无扩展名 sh wrapper（git-bash 用）和 claude.cmd。agent-detector.ts:188 WINDOWS_EXTS 把 '' 放首位 → findOnPath 返回 sh wrapper；task-runner.ts:472 spawn 没传 shell:true → Windows Node 无法 CreateProcess 无扩展名脚本 → ENOENT，同时 stdin.write 因 stdio 关闭报 EPIPE
+文件：sillyhub-daemon/src/agent-detector.ts, sillyhub-daemon/src/task-runner.ts
+结果：1) WINDOWS_EXTS 把 '' 移到末尾（'.exe', '.cmd', '.bat', '.ps1', ''），优先返回真正可执行的 .cmd；2) task-runner spawn 前 check Windows + /\.(cmd|bat)$/i 命中则传 shell:true，与 detectVersion 的 exec 分支行为对齐；3) daemon rebuild + 重启后 task 执行链路恢复
