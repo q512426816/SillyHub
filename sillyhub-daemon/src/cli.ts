@@ -193,6 +193,11 @@ export function createProgram(): Command {
     .option('--heartbeat-interval <sec>', 'WS heartbeat interval in seconds')
     .option('--max-concurrent <n>', 'Max concurrent tasks')
     .option('--log-level <level>', 'Log level (debug/info/warn/error)')
+    // ql-20260616-003：本地终端观察（弹独立窗口 tail 任务日志）
+    .option('--open-terminal', 'Open a local terminal window tail-ing the observer log for each agent task')
+    .option('--terminal-mode <mode>', 'Observer log mode: parsed (default) / raw / both')
+    .option('--terminal-close-on-exit', 'Close observer terminal after task exits (best-effort, platform-dependent)')
+    .option('--terminal-command <cmd>', 'Custom terminal launch command template, supports {log} and {title} placeholders')
     .action(async (opts: StartOptions) => {
       const code = await startAction(opts);
       if (code !== 0) process.exit(code);
@@ -245,6 +250,13 @@ interface StartOptions {
   'heartbeat-interval'?: string;
   'max-concurrent'?: string;
   'log-level'?: string;
+  // ql-20260616-003：terminal observer 参数。commander 把 kebab-case 选项
+  // 存为同名 bracket 访问（opts['open-terminal']），与现有 --workspace-dir
+  // 一致；--terminal-close-on-exit 同理。
+  'open-terminal'?: boolean;
+  'terminal-mode'?: string;
+  'terminal-close-on-exit'?: boolean;
+  'terminal-command'?: string;
 }
 
 interface LogsOptions {
@@ -313,6 +325,26 @@ export async function startAction(opts: StartOptions): Promise<number> {
     config.log_level = opts['log-level'];
   }
 
+  // ql-20260616-003：terminal observer 选项合并
+  if (opts['open-terminal']) {
+    config.terminal_observer_enabled = true;
+  }
+  if (opts['terminal-mode']) {
+    const m = opts['terminal-mode'];
+    if (m === 'parsed' || m === 'raw' || m === 'both') {
+      config.terminal_observer_mode = m;
+    } else {
+      process.stderr.write('Error: --terminal-mode must be one of parsed/raw/both.\n');
+      return 1;
+    }
+  }
+  if (opts['terminal-close-on-exit']) {
+    config.terminal_observer_close_on_exit = true;
+  }
+  if (opts['terminal-command']) {
+    config.terminal_observer_command = opts['terminal-command'];
+  }
+
   // step 3: 持久化配置（对齐 Python `config.save()`）。
   await saveConfigFn(config, configPath);
 
@@ -347,7 +379,10 @@ export async function startAction(opts: StartOptions): Promise<number> {
   const credentialMgr = new CredentialManager();
   // CredentialManager 直接满足 TaskRunner 的 RunnerCredentialManager 鸭子接口
   // （buildEnv 签名已对齐，task-runner.ts:127），无需 adapter 包装（G-04）。
-  const taskRunner = new TaskRunner(client, workspaceMgr, credentialMgr);
+  // ql-20260616-003：第 4 参传 config —— TaskRunner 需要读 terminal_observer_*
+  // 字段决定是否写日志 + 弹独立终端。之前漏传，导致 config 一直走兜底（observer
+  // 字段未生效）。
+  const taskRunner = new TaskRunner(client, workspaceMgr, credentialMgr, config);
   const daemon = new Daemon(config, client, taskRunner);
 
   // step 6: 写 PID 文件（对齐 Python __main__.py:106 `_write_pid(os.getpid())`）。

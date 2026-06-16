@@ -35,7 +35,7 @@ describe('config', () => {
   // ── AC-03：字段与默认值对照 Python config.py:22-32 DEFAULTS ──
 
   describe('字段与默认值（AC-03，对照 Python DEFAULTS）', () => {
-    it('DEFAULT_CONFIG 正好 12 字段，键名 1:1（task-10 新增 default_timeout_seconds / max_retries；daemon-api-key 新增 api_key）', () => {
+    it('DEFAULT_CONFIG 正好 16 字段，键名 1:1（task-10 新增 default_timeout_seconds / max_retries；daemon-api-key 新增 api_key；ql-20260616-003 新增 4 个 terminal_observer_*）', () => {
       expect(Object.keys(DEFAULT_CONFIG).sort()).toEqual([
         'api_key',
         'default_timeout_seconds',
@@ -47,9 +47,20 @@ describe('config', () => {
         'profile',
         'runtime_id',
         'server_url',
+        'terminal_observer_close_on_exit',
+        'terminal_observer_command',
+        'terminal_observer_enabled',
+        'terminal_observer_mode',
         'token',
         'workspace_dir',
       ]);
+    });
+
+    it('ql-20260616-003：terminal_observer_* 4 字段默认值', () => {
+      expect(DEFAULT_CONFIG.terminal_observer_enabled).toBe(false);
+      expect(DEFAULT_CONFIG.terminal_observer_mode).toBe('parsed');
+      expect(DEFAULT_CONFIG.terminal_observer_close_on_exit).toBe(false);
+      expect(DEFAULT_CONFIG.terminal_observer_command).toBeNull();
     });
 
     it('默认值逐字对齐 Python', () => {

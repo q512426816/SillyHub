@@ -116,6 +116,11 @@ function makeConfig(overrides: Partial<DaemonConfigType> = {}): DaemonConfigType
     log_level: 'info',
     default_timeout_seconds: 1800,
     max_retries: 1,
+    // ql-20260616-003：terminal observer 4 字段（与 DEFAULT_CONFIG 默认对齐）
+    terminal_observer_enabled: false,
+    terminal_observer_mode: 'parsed',
+    terminal_observer_close_on_exit: false,
+    terminal_observer_command: null,
     ...overrides,
   };
 }
@@ -424,6 +429,116 @@ describe('TestStartApiKey (daemon-api-key)', () => {
     const saved = JSON.parse(raw);
     expect(saved.api_key).toBe('shk_live_commander_real');
     expect(saved.token).toBeNull();
+    out.restore();
+  });
+});
+
+// ql-20260616-003：terminal observer 4 个 CLI 选项 + mode 校验
+describe('TestStartTerminalObserver (ql-20260616-003)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await makeTmpDir('sillyhub-cli-terminal-');
+    await setupCliWithTmpHome(tmpDir);
+  });
+
+  afterEach(async () => {
+    teardownCliStub();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    await cleanupDir(tmpDir);
+  });
+
+  // createProgram 必须暴露 4 个新选项（导出层断言）
+  it('start_help 含 4 个 terminal observer 选项', async () => {
+    const program = cli.createProgram();
+    const startCmd = program.commands.find((c) => c.name() === 'start');
+    const optFlags = (startCmd?.options ?? []).map((o) => o.flags);
+    expect(optFlags.some((f) => f.includes('--open-terminal'))).toBe(true);
+    expect(optFlags.some((f) => f.includes('--terminal-mode'))).toBe(true);
+    expect(optFlags.some((f) => f.includes('--terminal-close-on-exit'))).toBe(true);
+    expect(optFlags.some((f) => f.includes('--terminal-command'))).toBe(true);
+  });
+
+  // 非法 mode 直接返回 1（验证在 config 写盘前，跨平台可跑）
+  it('--terminal-mode abc 返回退出码 1 + 非法错误（跨平台）', async () => {
+    const err = captureStderr();
+    const code = await cli.startAction({
+      server: 'http://localhost:8000',
+      token: 'tok-x',
+      'terminal-mode': 'abc',
+    });
+    expect(code).toBe(1);
+    expect(err.writes.join('')).toContain('must be one of parsed/raw/both');
+    err.restore();
+  });
+
+  // 合法的 3 种 mode 都接受（在 token/apiKey 互斥检查之前，命中第一个 return 1
+  // 是「缺凭证」而非「mode 非法」—— 用 --api-key 让流程推进到 saveConfig 阶段）。
+  // Windows 上 HOME/USERPROFILE stubEnv 不生效，只在 Linux/macOS 跑落盘验证。
+  const itNonWindows = process.platform === 'win32' ? it.skip : it;
+
+  for (const m of ['parsed', 'raw', 'both'] as const) {
+    itNonWindows(`--terminal-mode ${m} 写入 config.terminal_observer_mode`, async () => {
+      const daemonMod = await import('../src/daemon.js');
+      vi.spyOn(daemonMod.Daemon.prototype, 'start').mockResolvedValue(undefined);
+      const out = captureStdout();
+
+      const code = await cli.startAction({
+        server: 'http://localhost:8000',
+        apiKey: 'shk_live_mode_test',
+        'terminal-mode': m,
+      });
+      expect(code).toBe(0);
+
+      const raw = await import('node:fs/promises').then((fs) =>
+        fs.readFile(configMod.DEFAULT_CONFIG_PATH, 'utf-8'),
+      );
+      const saved = JSON.parse(raw);
+      expect(saved.terminal_observer_mode).toBe(m);
+      out.restore();
+    });
+  }
+
+  itNonWindows('--open-terminal 让 config.terminal_observer_enabled=true', async () => {
+    const daemonMod = await import('../src/daemon.js');
+    vi.spyOn(daemonMod.Daemon.prototype, 'start').mockResolvedValue(undefined);
+    const out = captureStdout();
+
+    const code = await cli.startAction({
+      server: 'http://localhost:8000',
+      apiKey: 'shk_live_open_term',
+      'open-terminal': true,
+    });
+    expect(code).toBe(0);
+
+    const raw = await import('node:fs/promises').then((fs) =>
+      fs.readFile(configMod.DEFAULT_CONFIG_PATH, 'utf-8'),
+    );
+    const saved = JSON.parse(raw);
+    expect(saved.terminal_observer_enabled).toBe(true);
+    out.restore();
+  });
+
+  itNonWindows('--terminal-close-on-exit + --terminal-command 写入 config', async () => {
+    const daemonMod = await import('../src/daemon.js');
+    vi.spyOn(daemonMod.Daemon.prototype, 'start').mockResolvedValue(undefined);
+    const out = captureStdout();
+
+    const code = await cli.startAction({
+      server: 'http://localhost:8000',
+      apiKey: 'shk_live_close_cmd',
+      'terminal-close-on-exit': true,
+      'terminal-command': 'xterm -e tail -f {log}',
+    });
+    expect(code).toBe(0);
+
+    const raw = await import('node:fs/promises').then((fs) =>
+      fs.readFile(configMod.DEFAULT_CONFIG_PATH, 'utf-8'),
+    );
+    const saved = JSON.parse(raw);
+    expect(saved.terminal_observer_close_on_exit).toBe(true);
+    expect(saved.terminal_observer_command).toBe('xterm -e tail -f {log}');
     out.restore();
   });
 });

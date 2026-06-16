@@ -95,6 +95,31 @@ export interface DaemonConfig {
    * task-10 B3：硬上限 3（resolveMaxRetries 截断 > 3 的值）。
    */
   max_retries: number;
+  /**
+   * 是否在 agent run 启动时弹出本地终端窗口观察执行过程。默认 false。
+   * daemon 写观察日志到 ~/.sillyhub/daemon/runs/<leaseId>/terminal.log，
+   * enabled=true 时调 terminal-launcher 弹终端 tail 该日志。
+   * 服务器/无 GUI 环境保持 false，避免乱弹窗。
+   */
+  terminal_observer_enabled: boolean;
+  /**
+   * 观察日志写入模式：
+   *   - 'parsed'：只写 echoAgentEvent/echoTaskBoundary 渲染后的可读文本
+   *   - 'raw'：只写 Claude 原始 stdout/stderr
+   *   - 'both'：parsed + raw 都写
+   */
+  terminal_observer_mode: 'parsed' | 'raw' | 'both';
+  /**
+   * 任务退出后是否关闭观察终端窗口。默认 false（保留窗口方便查看）。
+   * 实现层弹窗命令带 -Wait/-NoExit 时该字段控制是否替换为会退出的命令。
+   */
+  terminal_observer_close_on_exit: boolean;
+  /**
+   * 自定义终端启动命令模板，支持 {log} 和 {title} 占位符。
+   * 例：'konsole --new-tab -e tail -f {log}'。
+   * null 时按平台默认（win32 wt.exe、darwin osascript、linux x-terminal-emulator）。
+   */
+  terminal_observer_command: string | null;
 }
 
 // ── 默认值常量 ───────────────────────────────────────────────────────────────
@@ -130,6 +155,11 @@ export const DEFAULT_CONFIG: Readonly<DaemonConfig> = Object.freeze({
   // task-10 B2/B3：超时优先级链兜底 + spawn 级失败重试上限。
   default_timeout_seconds: 1800,
   max_retries: 1,
+  // ql-20260616-003：本地终端观察（默认关闭，--open-terminal 开启）
+  terminal_observer_enabled: false,
+  terminal_observer_mode: 'parsed',
+  terminal_observer_close_on_exit: false,
+  terminal_observer_command: null,
 });
 
 // ── loadConfig（异步加载 + 合并默认 + 自动生成 runtime_id）──────────────────

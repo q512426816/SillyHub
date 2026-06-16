@@ -47,6 +47,11 @@ import { randomUUID } from 'node:crypto';
 import { getBackend } from './adapters/index.js';
 import type { ProtocolAdapter } from './adapters/protocol-adapter.js';
 import { buildSpawnEnv } from './spawn-env.js';
+import {
+  createTerminalObserver,
+  NOOP_TERMINAL_OBSERVER,
+  type TerminalObserver,
+} from './terminal-observer.js';
 import type { DaemonConfig } from './config.js';
 import type {
   AgentEvent,
@@ -468,8 +473,53 @@ export class TaskRunner {
       outputParts, onSessionId, leaseId, claimToken,
     } = params;
 
-    // 本地终端 echo：开始边界，让用户看到 spawn 命令
+    // ql-20260616-003：创建终端观察日志（写文件 + 可选弹独立终端）。
+    // 关键设计：observer 创建是异步的（mkdir + writeFile），但**绝不**在 spawn 之前
+    // 阻塞 —— 否则会让旧测试的「spawn 后单 setImmediate 等 listener 注册」断言失效
+    // （实际生产无影响，仅是测试时序脆弱性）。改为 fire-and-forget：
+    //   1. spawn 同步发生（spawn 必须先返回才能注册 listener）
+    //   2. observer promise 在后台创建，就绪后用 .then 替换 NOOP
+    //   3. 中间几条早期 stdout/stderr 可能丢（observer 仍是 NOOP 时 writeRaw 是 no-op）
+    //      —— 这是可接受的权衡：观察日志是辅助功能，绝不能改变 spawn 时序
+    let observer: TerminalObserver = NOOP_TERMINAL_OBSERVER;
+    createTerminalObserver({
+      leaseId,
+      cwd: opts.cwd,
+      cmdPath,
+      args,
+      config: this.config,
+    })
+      .then((obs) => {
+        observer = obs;
+      })
+      .catch((e) => {
+        console.warn('task_runner: observer_create_failed', e);
+      });
+
+    // 本地终端 echo + observer：开始边界，让用户看到 spawn 命令
+    // observer 此时可能还是 NOOP（promise 未 resolve）—— start 行可能错过 observer 日志，
+    // 但 echo 一定写到 stdout（用户本地能看到）。
+    const startLine = renderTaskBoundary(leaseId, 'start', { cmdPath, args });
+    observer.writeParsed(startLine);
     echoTaskBoundary(leaseId, 'start', { cmdPath, args });
+
+    // 封装结束路径：echo + observer + return 一次性完成，避免漏写 close。
+    // 任务终态时 observer promise 通常已 resolve（spawn + readline + exit 流程比 mkdir 长）。
+    const finishAttempt = (result: SpawnAttemptResult): SpawnAttemptResult => {
+      const endLine = renderTaskBoundary(leaseId, 'end', {
+        status: result.status,
+        exitCode: result.exitCode,
+        error: result.error,
+      });
+      observer.writeParsed(endLine);
+      observer.close(endLine);
+      echoTaskBoundary(leaseId, 'end', {
+        status: result.status,
+        exitCode: result.exitCode,
+        error: result.error,
+      });
+      return result;
+    };
 
     // spawn（stdio 全管道：stdin / stdout / stderr 都需要）
     // Windows 上 .cmd/.bat 包装器必须走 shell（与 detectVersion 的 exec 分支一致），
@@ -497,9 +547,17 @@ export class TaskRunner {
     // complete 事件通常仅一个，覆盖式赋值；失败路径保持 undefined。
     let lastStats: Record<string, unknown> | undefined;
 
-    // stderr 累积（用于失败诊断）
+    // stderr 累积（用于失败诊断）+ observer raw 写入
     child.stderr?.on('data', (chunk: Buffer | string) => {
-      stderrBuf += typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
+      const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
+      stderrBuf += text;
+      // ql-20260616-003：把 stderr 实时投给 observer（mode=raw/both 时落日志）
+      // 按行切分写入，避免大块 chunk 一次性塞进去难读
+      const lines = text.split(/\r?\n/);
+      for (const ln of lines) {
+        if (ln.length === 0) continue;
+        observer.writeRawStderr(ln);
+      }
       // stderr 也算 error 文本上限保护（避免无限累积）
       if (stderrBuf.length > MAX_ERROR * 4) {
         stderrBuf = stderrBuf.slice(0, MAX_ERROR * 4);
@@ -521,6 +579,11 @@ export class TaskRunner {
       exitSignal = sig;
       exited = true;
     });
+
+    // ql-20260616-003：observer 创建是 fire-and-forget，但需要让一个 microtask
+    // 跑完让 promise 链启动（否则 observer promise 在本函数返回前都不会 resolve）。
+    // 这里的 await 是为了 .then 回调有机会被调度（实际不阻塞 spawn —— spawn 已同步执行）。
+    await Promise.resolve();
 
     // 步骤 6b：写 prompt 到 stdin（不立即 end）
     try {
@@ -603,12 +666,15 @@ export class TaskRunner {
           if (cancelled || timedOut) {
             break;
           }
+          // ql-20260616-003：原始 stdout 行投给 observer（mode=raw/both 时落日志）
+          observer.writeRawStdout(line);
           await this._handleLine(line, adapter, child, {
             outputParts,
             onSessionId,
             leaseId,
             claimToken,
             agentRunId: ctx.agentRunId ?? '',
+            observer,
             onStats: (stats: Record<string, unknown>) => {
               lastStats = stats;
             },
@@ -652,18 +718,15 @@ export class TaskRunner {
 
     // 计算最终状态
     if (cancelled) {
-      echoTaskBoundary(leaseId, 'end', { status: 'cancelled', exitCode: exitCode || 1, error: 'task cancelled' });
-      return { status: 'cancelled', exitCode: exitCode || 1, error: 'task cancelled', stats: lastStats };
+      return finishAttempt({ status: 'cancelled', exitCode: exitCode || 1, error: 'task cancelled', stats: lastStats });
     }
     if (timedOut) {
-      echoTaskBoundary(leaseId, 'end', { status: 'timeout', exitCode: exitCode || 1, error: `task timed out after ${timeoutSec}s` });
-      return { status: 'timeout', exitCode: exitCode || 1, error: `task timed out after ${timeoutSec}s`, stats: lastStats };
+      return finishAttempt({ status: 'timeout', exitCode: exitCode || 1, error: `task timed out after ${timeoutSec}s`, stats: lastStats });
     }
     // spawnErrorRef.current：spawn 错误（'error' 事件异步赋值）。用对象容器
     // 避免 TS 对闭包内赋值的 let 变量做错误 narrowing（详见声明处注释）。
     if (spawnErrorRef.current) {
-      echoTaskBoundary(leaseId, 'end', { status: 'failed', exitCode: exitCode || 127, error: spawnErrorRef.current.message });
-      return { status: 'failed', exitCode: exitCode || 127, error: spawnErrorRef.current.message, stats: lastStats };
+      return finishAttempt({ status: 'failed', exitCode: exitCode || 127, error: spawnErrorRef.current.message, stats: lastStats });
     }
     if (exitCode !== 0) {
       const errDetail = stderrBuf.trim();
@@ -677,17 +740,15 @@ export class TaskRunner {
       const errMsg = errDetail
         ? `agent process exited with exit code ${exitCode}: ${errDetail}`
         : `agent process exited with exit code ${exitCode}`;
-      echoTaskBoundary(leaseId, 'end', { status: 'failed', exitCode: 1, error: errMsg });
-      return {
+      return finishAttempt({
         status: 'failed',
         exitCode: 1, // 统一映射非零退出为 1（对齐 Python 把非零 exit 视为 failed）
         error: errMsg,
         stats: lastStats,
         businessError,
-      };
+      });
     }
-    echoTaskBoundary(leaseId, 'end', { status: 'completed', exitCode: 0 });
-    return { status: 'completed', exitCode: 0, stats: lastStats };
+    return finishAttempt({ status: 'completed', exitCode: 0, stats: lastStats });
   }
 
   /**
@@ -706,6 +767,7 @@ export class TaskRunner {
       leaseId: string;
       claimToken: string;
       agentRunId: string;
+      observer: TerminalObserver;
       onStats?: (stats: Record<string, unknown>) => void;
     },
   ): Promise<void> {
@@ -749,10 +811,15 @@ export class TaskRunner {
     // 累积 output + 提交 submitMessages
     const messages: Record<string, unknown>[] = [];
     for (const ev of events) {
-      // 本地终端 echo（quick-chat 实时观察）：把每个 AgentEvent 渲染成单行打印。
-      // 不受 log_level 控制 —— daemon 是前台进程，stdout 跟着终端/重定向走。
-      // 业务逻辑（submitMessages / output 累积）不受影响。
-      echoAgentEvent(env.leaseId, ev);
+      // 本地终端 echo + 观察日志：用同一份 render 渲染保证字节一致。
+      // echo 写 daemon 本地 stdout；observer.writeParsed 按配置 mode 决定是否落日志。
+      const rendered = renderAgentEvent(env.leaseId, ev);
+      env.observer.writeParsed(rendered);
+      try {
+        process.stdout.write(rendered + '\n');
+      } catch {
+        // stdout 关闭：忽略
+      }
       // 提取 sessionId（complete / status 事件可能在 metadata.session_id 带）
       const sid = ev.metadata?.session_id;
       if (typeof sid === 'string' && sid) {
@@ -1077,7 +1144,22 @@ const ECHO_MAX_LEN = 2000;
  *
  * 不是 TaskRunner 成员方法：纯函数 + leaseId 入参，便于单测独立验证。
  */
-export function echoAgentEvent(leaseId: string, ev: AgentEvent): void {
+/**
+ * 把 AgentEvent 渲染成单行文本（不含换行符）。
+ *
+ * ql-20260616-003：拆出纯函数 render，echo 和 terminal observer 写日志复用
+ * 同一份渲染逻辑，保证本地 stdout 和观察日志文件内容字节一致。
+ *
+ * 渲染规则：
+ *   - 前缀 `[task <leaseId前8位>]`，长 UUID 截短避免刷屏
+ *   - text         → 直接拼 content（带可选 [status]）
+ *   - tool_use     → [tool_use <name>] <input>
+ *   - tool_result  → [tool_result <name>] <output>
+ *   - error        → [<level>] <content>
+ *   - complete     → [complete] usage=<json>（可选）
+ *   - 单条超 ECHO_MAX_LEN 截断 + 标记
+ */
+export function renderAgentEvent(leaseId: string, ev: AgentEvent): string {
   const prefix = `[task ${shortLeaseId(leaseId)}]`;
   let line: string;
   switch (ev.type) {
@@ -1117,8 +1199,16 @@ export function echoAgentEvent(leaseId: string, ev: AgentEvent): void {
   if (line.length > ECHO_MAX_LEN) {
     line = line.slice(0, ECHO_MAX_LEN) + '…<truncated>';
   }
+  return line;
+}
+
+/**
+ * 把渲染好的 line 写到 daemon 本地 stdout。
+ * 包装 try/catch 避免极端情况（stdout 已关闭）影响业务。
+ */
+export function echoAgentEvent(leaseId: string, ev: AgentEvent): void {
   try {
-    process.stdout.write(line + '\n');
+    process.stdout.write(renderAgentEvent(leaseId, ev) + '\n');
   } catch {
     // stdout 已关闭（极端场景：进程退出中）—— 静默吞掉，不影响业务
   }
@@ -1130,35 +1220,42 @@ function shortLeaseId(leaseId: string): string {
 }
 
 /**
- * 任务开始/结束的边界 echo（_spawnAndStream 调用）。
- * start：打印 cmd + args，让用户看到子进程启动。
- * end：打印 status + exit_code，让用户看到子进程结束。
+ * 渲染任务开始/结束边界行（不含换行符）。ql-20260616-003 拆出纯函数。
+ *
+ * start：`[task xxx] spawn: <cmd> <args...>`
+ * end：  `[task xxx] done: status=<status> exit=<exitCode> error=<error>`
+ */
+export function renderTaskBoundary(
+  leaseId: string,
+  phase: 'start' | 'end',
+  kv: { cmdPath?: string; args?: string[]; status?: string; exitCode?: number; error?: string },
+): string {
+  const prefix = `[task ${shortLeaseId(leaseId)}]`;
+  if (phase === 'start') {
+    const argStr = (kv.args ?? []).join(' ');
+    const cmd = kv.cmdPath ?? '';
+    return `${prefix} spawn: ${cmd} ${argStr}`;
+  }
+  const parts = [`status=${kv.status ?? '?'}`, `exit=${kv.exitCode ?? '?'}`];
+  if (kv.error) {
+    const e = kv.error.length > ECHO_MAX_LEN ? kv.error.slice(0, ECHO_MAX_LEN) + '…<truncated>' : kv.error;
+    parts.push(`error=${e}`);
+  }
+  return `${prefix} done: ${parts.join(' ')}`;
+}
+
+/**
+ * 任务边界写入 daemon 本地 stdout。包装 try/catch。
  */
 export function echoTaskBoundary(
   leaseId: string,
   phase: 'start' | 'end',
   kv: { cmdPath?: string; args?: string[]; status?: string; exitCode?: number; error?: string },
 ): void {
-  const prefix = `[task ${shortLeaseId(leaseId)}]`;
-  if (phase === 'start') {
-    const argStr = (kv.args ?? []).join(' ');
-    const cmd = kv.cmdPath ?? '';
-    try {
-      process.stdout.write(`${prefix} spawn: ${cmd} ${argStr}\n`);
-    } catch {
-      // ignore
-    }
-  } else {
-    const parts = [`status=${kv.status ?? '?'}`, `exit=${kv.exitCode ?? '?'}`];
-    if (kv.error) {
-      const e = kv.error.length > ECHO_MAX_LEN ? kv.error.slice(0, ECHO_MAX_LEN) + '…<truncated>' : kv.error;
-      parts.push(`error=${e}`);
-    }
-    try {
-      process.stdout.write(`${prefix} done: ${parts.join(' ')}\n`);
-    } catch {
-      // ignore
-    }
+  try {
+    process.stdout.write(renderTaskBoundary(leaseId, phase, kv) + '\n');
+  } catch {
+    // ignore
   }
 }
 
