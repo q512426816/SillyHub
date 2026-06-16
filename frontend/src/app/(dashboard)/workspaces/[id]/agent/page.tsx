@@ -5,7 +5,10 @@ import {
   Activity,
   Bot,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Download,
+  Filter,
   History,
   RefreshCw,
   Square,
@@ -227,17 +230,53 @@ export default function AgentPage({ params }: Props) {
   const [inputErrors, setInputErrors] = useState<Record<string, string>>({});
   const [repliedInputs, setRepliedInputs] = useState<Set<string>>(new Set());
 
+  // ql-20260617-002：UI 优化 — 历史记录的状态筛选 + 分页。
+  const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "failed" | "killed">("all");
+  const HISTORY_PAGE_SIZE = 10;
+  const [historyPage, setHistoryPage] = useState(1);
+
   /* ---- Derived ---- */
   const runningRuns = useMemo(
-    () => (runs ?? []).filter((r) => r.status === "running"),
+    () => {
+      const list = (runs ?? []).filter((r) => r.status === "running");
+      // ql-20260617-002：活跃运行按 started_at 升序（先启动的在前），null 兜底用 created_at。
+      return list.sort((a, b) => {
+        const ta = new Date(a.started_at ?? a.created_at).getTime();
+        const tb = new Date(b.started_at ?? b.created_at).getTime();
+        return ta - tb;
+      });
+    },
     [runs],
   );
   const completedRuns = useMemo(
-    () =>
-      (runs ?? []).filter(
+    () => {
+      // ql-20260617-002：按 finished_at 降序（最近结束的在前），started_at 为 null 时
+      // 兜底 created_at，避免 pending run 排到表头。后端按 started_at 排但前端做兜底。
+      const list = (runs ?? []).filter(
         (r) => r.status === "completed" || r.status === "failed" || r.status === "killed",
-      ),
+      );
+      const sorted = list.sort((a, b) => {
+        const ta = new Date(a.finished_at ?? a.started_at ?? a.created_at).getTime();
+        const tb = new Date(b.finished_at ?? b.started_at ?? b.created_at).getTime();
+        return tb - ta;
+      });
+      return sorted;
+    },
     [runs],
+  );
+  const filteredCompletedRuns = useMemo(
+    () => completedRuns.filter((r) => statusFilter === "all" || r.status === statusFilter),
+    [completedRuns, statusFilter],
+  );
+  const totalHistoryPages = Math.max(1, Math.ceil(filteredCompletedRuns.length / HISTORY_PAGE_SIZE));
+  // 过滤条件变化时如果当前页超出范围，重置到第 1 页。
+  const safeHistoryPage = Math.min(historyPage, totalHistoryPages);
+  const pagedCompletedRuns = useMemo(
+    () => filteredCompletedRuns.slice(
+      (safeHistoryPage - 1) * HISTORY_PAGE_SIZE,
+      safeHistoryPage * HISTORY_PAGE_SIZE,
+    ),
+    [filteredCompletedRuns, safeHistoryPage],
   );
 
   const activeToolCalls = useMemo(() => {
@@ -642,38 +681,61 @@ export default function AgentPage({ params }: Props) {
       {/* ---- Completed Runs ---- */}
       {runs !== null && completedRuns.length > 0 && (
         <section className="flex min-w-0 flex-col gap-3">
-          <SectionTitle icon={History} title="历史运行" meta={`${completedRuns.length} 条记录`} />
-          <div className="min-w-0 max-w-full overflow-hidden rounded-md border bg-card">
-            <div className="w-full max-w-full overflow-x-auto">
-            <table className="min-w-[1140px]">
-              <thead>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <SectionTitle icon={History} title="历史运行" meta={`${filteredCompletedRuns.length} / ${completedRuns.length} 条`} />
+            {/* ql-20260617-002：状态过滤，减少长列表视觉负担 */}
+            <div className="flex items-center gap-1 rounded-md border bg-card p-0.5 text-xs">
+              <Filter className="ml-1.5 mr-0.5 h-3 w-3 text-muted-foreground" />
+              {(["all", "completed", "failed", "killed"] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => { setStatusFilter(s); setHistoryPage(1); }}
+                  className={cn(
+                    "rounded px-2 py-1 font-medium transition-colors",
+                    statusFilter === s
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                >
+                  {s === "all" ? "全部" : s === "completed" ? "已完成" : s === "failed" ? "失败" : "已终止"}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="min-w-0 overflow-hidden rounded-md border bg-card">
+            {/* ql-20260617-002：去掉 min-w-[1140px] 硬下限，用 w-full + 自适应列宽，
+                溢出时仅在表格区域滚动，不影响外层布局。 */}
+            <div className="w-full overflow-x-auto">
+            <table className="w-full border-collapse text-left">
+              <thead className="border-b bg-muted/30 text-[11px] uppercase tracking-wide text-muted-foreground">
                 <tr>
-                  <th>运行 ID</th>
-                  <th>类型</th>
-                  <th>Task</th>
-                  <th>状态</th>
-                  <th>结果摘要</th>
-                  <th>时长</th>
-                  <th>费用</th>
-                  <th>词元数</th>
-                  <th>退出码</th>
-                  <th>完成时间</th>
-                  <th className="text-right">操作</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">运行 ID</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">类型</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">Task</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">状态</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">结果摘要</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">时长</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">费用</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">词元数</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">退出码</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">完成时间</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium">操作</th>
                 </tr>
               </thead>
               <tbody>
-                {completedRuns.map((run) => {
+                {pagedCompletedRuns.map((run) => {
                   const sl = runStatusLabel(run);
                   return (
                     <>
-                      <tr key={run.id} className={expandedRunId === run.id ? "bg-muted/20" : undefined}>
-                        <td>
+                      <tr key={run.id} className={cn("border-b transition-colors hover:bg-muted/20", expandedRunId === run.id && "bg-muted/20")}>
+                        <td className="px-3 py-2">
                           <code className="font-mono text-[11px] text-primary">{shortId(run.id)}</code>
                         </td>
-                        <td>
+                        <td className="px-3 py-2">
                           <Badge variant="outline" className="text-[10px]">{run.agent_type}</Badge>
                         </td>
-                        <td className="text-xs">
+                        <td className="px-3 py-2 text-xs">
                           {run.task_id ? (
                             <Link
                               href={`/workspaces/${workspaceId}/changes/-/tasks/${run.task_id}`}
@@ -689,7 +751,7 @@ export default function AgentPage({ params }: Props) {
                             "—"
                           )}
                         </td>
-                        <td>
+                        <td className="px-3 py-2">
                           <div className="flex items-center gap-1.5">
                             <span className={`h-1.5 w-1.5 rounded-full ${sl.dot}`} />
                             <Badge variant={sl.badge}>
@@ -697,7 +759,7 @@ export default function AgentPage({ params }: Props) {
                             </Badge>
                           </div>
                         </td>
-                        <td className="max-w-[200px] truncate text-xs text-muted-foreground">
+                        <td className="max-w-[200px] truncate px-3 py-2 text-xs text-muted-foreground">
                           {expandedLogs && expandedRunId === run.id
                             ? extractRunSummary(expandedLogs)
                             : run.post_scan_status
@@ -706,11 +768,11 @@ export default function AgentPage({ params }: Props) {
                                 ? `恢复 @${run.resumed_from_step ?? "?"}`
                                 : "—"}
                         </td>
-                        <td className="font-mono text-xs">{calcDuration(run)}</td>
-                        <td className="font-mono text-xs">
+                        <td className="whitespace-nowrap px-3 py-2 font-mono text-xs">{calcDuration(run)}</td>
+                        <td className="whitespace-nowrap px-3 py-2 font-mono text-xs">
                           {run.total_cost_usd != null ? `$${run.total_cost_usd.toFixed(4)}` : "—"}
                         </td>
-                        <td className="text-xs text-muted-foreground">
+                        <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">
                           {run.input_tokens != null || run.output_tokens != null ? (
                             <span>
                               {run.input_tokens != null ? `${(run.input_tokens / 1000).toFixed(1)}k` : "—"}
@@ -719,11 +781,11 @@ export default function AgentPage({ params }: Props) {
                             </span>
                           ) : "—"}
                         </td>
-                        <td className="font-mono text-[11px]">{run.exit_code ?? "—"}</td>
-                        <td className="whitespace-nowrap text-xs text-muted-foreground">
+                        <td className="px-3 py-2 font-mono text-[11px]">{run.exit_code ?? "—"}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">
                           {run.finished_at ? formatTime(run.finished_at) : "—"}
                         </td>
-                        <td className="text-right">
+                        <td className="px-3 py-2 text-right">
                           <Button
                             size="sm"
                             variant={expandedRunId === run.id ? "default" : "outline"}
@@ -806,6 +868,35 @@ export default function AgentPage({ params }: Props) {
               </tbody>
             </table>
             </div>
+            {/* ql-20260617-002：分页控件 */}
+            {totalHistoryPages > 1 && (
+              <div className="flex items-center justify-between border-t bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                <span>
+                  第 {(safeHistoryPage - 1) * HISTORY_PAGE_SIZE + 1} - {Math.min(safeHistoryPage * HISTORY_PAGE_SIZE, filteredCompletedRuns.length)} 条 / 共 {filteredCompletedRuns.length} 条
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={safeHistoryPage <= 1}
+                    onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </Button>
+                  <span className="px-2 font-medium text-foreground">
+                    {safeHistoryPage} / {totalHistoryPages}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={safeHistoryPage >= totalHistoryPages}
+                    onClick={() => setHistoryPage((p) => Math.min(totalHistoryPages, p + 1))}
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </section>
       )}

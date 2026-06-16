@@ -1,3 +1,23 @@
+## ql-20260617-001-7a3e | 2026-06-17 00:45:00 | 修复 token 用量不实时累计 + Agent 页面 UI 优化
+
+状态：已完成
+文件：backend/app/modules/daemon/service.py、backend/app/modules/daemon/tests/test_wave5_integration.py、frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx
+依据：用户反馈 /workspaces/<id>/agent 页面"输入词元/输出词元"在执行过程中一直停留在"等待用量"（不再像之前 SERVER 模式那样逐步累积）；同时表格宽度溢出被隐藏、数据排序混乱、没有分页。
+根因：
+1. backend submit_messages 仅在 `content == ""` 时提取 usage（旧 ql-20260616-004 设计假设 daemon 发空 content 的 usage-only message），但 daemon _eventToMessages 实际把 usage 透传到首条带 content 的 message（task-runner.ts:1142-1155），后端永远走不到提取分支。
+2. 前端 `<table class="min-w-[1140px]">` 强制最小宽度，外层 overflow-hidden 导致溢出部分被裁剪。
+3. 后端按 started_at desc 排序，但 SQLite/Postgres 对 null 处理不一致，前端无兜底；活跃/历史两列都没分页。
+结果：
+- service.py: submit_messages 对所有 message 都提取 usage（取 max 防御乱序）+ session_id 实时写回（first non-empty）。
+- test_wave5_integration.py: 新增 2 个测试（test_submit_messages_extracts_usage_from_content_message / test_submit_messages_usage_takes_max_across_batches），74/74 通过。
+- page.tsx:
+  (1) 移除 `min-w-[1140px]`，改用 `w-full` + 自适应列宽 + `overflow-x-auto` 仅在表格内滚动。
+  (2) 加状态过滤（全部/已完成/失败/已终止）。
+  (3) 加分页（10/页）+ 上下文安全的页码 clamp。
+  (4) 历史按 finished_at desc（fallback started_at → created_at），活跃按 started_at asc。
+  (5) 给 thead 加边框/背景，td 加 padding & whitespace-nowrap 防止错位。
+验证：tsc --noEmit 零错误；backend pytest 74/74 通过。
+
 ## ql-20260604-001-progress | 2026-06-04 10:43:13 | 清除 progress.json 残留引用
 
 状态：已完成

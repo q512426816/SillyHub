@@ -315,6 +315,111 @@ class TestSubmitMessagesSync:
         assert agent_run.status == "running"
         assert agent_run.started_at == old_started
 
+    @pytest.mark.asyncio
+    async def test_submit_messages_extracts_usage_from_content_message(
+        self, db_session: AsyncSession
+    ) -> None:
+        """ql-20260617-001：daemon 把 usage 透传到带 content 的首条 message（[ASSISTANT]
+        text 行），backend 必须从这种 message 提取 usage 实时回写 AgentRun。
+        旧实现仅处理 content="" 的 message，导致 token 永远停留在「等待用量」。
+        """
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "usage-tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        # 模拟 task-runner.ts _eventToMessages 真实输出：首条 [ASSISTANT] 带 content
+        # 同时 usage 透传，第二条 tool_call JSON 也带 usage snapshot。
+        await svc.submit_messages(
+            lease.id,
+            "usage-tok",
+            agent_run.id,
+            [
+                {
+                    "event_type": "text",
+                    "channel": "stdout",
+                    "content": "[ASSISTANT] Hello world",
+                    "session_id": "sess-abc-123",
+                    "usage": {"input_tokens": 1500, "output_tokens": 200},
+                },
+                {
+                    "event_type": "tool_use",
+                    "channel": "tool_call",
+                    "content": '{"tool":"Bash","args":{}}',
+                    "usage": {"input_tokens": 1800, "output_tokens": 350},
+                },
+            ],
+        )
+
+        await db_session.refresh(agent_run)
+        # max(1500, 1800) = 1800；max(200, 350) = 350
+        assert agent_run.input_tokens == 1800
+        assert agent_run.output_tokens == 350
+        assert agent_run.session_id == "sess-abc-123"
+
+    @pytest.mark.asyncio
+    async def test_submit_messages_usage_takes_max_across_batches(
+        self, db_session: AsyncSession
+    ) -> None:
+        """多次 submit_messages（assistant 事件流）应单调递增，取最大值。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=120),
+            metadata_={"claim_token": "max-tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        await svc.submit_messages(
+            lease.id,
+            "max-tok",
+            agent_run.id,
+            [
+                {
+                    "channel": "stdout",
+                    "content": "[ASSISTANT] turn 1",
+                    "usage": {"input_tokens": 1000, "output_tokens": 50},
+                }
+            ],
+        )
+        await svc.submit_messages(
+            lease.id,
+            "max-tok",
+            agent_run.id,
+            [
+                {
+                    "channel": "stdout",
+                    "content": "[ASSISTANT] turn 2",
+                    "usage": {"input_tokens": 2500, "output_tokens": 120},
+                }
+            ],
+        )
+
+        await db_session.refresh(agent_run)
+        assert agent_run.input_tokens == 2500
+        assert agent_run.output_tokens == 120
+
 
 # ── Test: Lease expiry and rollback ─────────────────────────────────────────
 

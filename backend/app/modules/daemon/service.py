@@ -598,12 +598,13 @@ class DaemonService:
         now = datetime.now(UTC)
         count = 0
         published_logs: list[dict] = []
-        # ql-20260616-004：daemon 每个 assistant event 在 metadata.usage 带当前累加值
-        # snapshot，取最大值作为本次 submit_messages 的累积值（assistant 事件 usage 是
-        # 单调递增的累加器，取 max 防御乱序；result 事件的最终值由 complete_lease 路径
-        # 再覆盖一次）。实时 UPDATE AgentRun，前端 5s 轮询就能看到，不再等执行完成。
+        # ql-20260617-001：daemon _eventToMessages 把 usage/session_id 透传到首条
+        # message（task-runner.ts:1142-1155），但首条 message 总有 content（[ASSISTANT]/
+        # [TOOL_USE]/[TOOL_RESULT] 等），所以「仅在 content 为空时提取 usage」的旧分支
+        # 永远走不到。现在对所有 message 都提取 usage/session_id（取 max 防御乱序）。
         latest_input_tokens: int | None = None
         latest_output_tokens: int | None = None
+        latest_session_id: str | None = None
         for msg in messages:
             # ql-20260616-003：daemon _eventToMessage 不发 channel/timestamp/log_id，
             # 后端按 event_type 映射 channel（text→stdout, tool_use/tool_result→tool_call,
@@ -611,17 +612,23 @@ class DaemonService:
             event_type = msg.get("event_type") or ""
             channel = msg.get("channel") or _channel_from_event_type(event_type)
             content = msg.get("content", "")
+            # ql-20260617-001：usage / session_id 在每条 message 顶层（daemon 透传），
+            # 与 content 是否为空无关，全部提取。
+            usage = msg.get("usage")
+            if isinstance(usage, dict):
+                in_tok = usage.get("input_tokens")
+                out_tok = usage.get("output_tokens")
+                if isinstance(in_tok, (int, float)):
+                    latest_input_tokens = max(latest_input_tokens or 0, int(in_tok))
+                if isinstance(out_tok, (int, float)):
+                    latest_output_tokens = max(latest_output_tokens or 0, int(out_tok))
+            msg_session_id = msg.get("session_id")
+            if isinstance(msg_session_id, str) and msg_session_id:
+                latest_session_id = msg_session_id
+
             if not content:
-                # ql-20260616-004：tool_use event 的 content 空（只在 metadata 带
-                # tool_name/tool_input/usage），跳过写日志但 usage 仍要提取。
-                usage = msg.get("usage")
-                if isinstance(usage, dict):
-                    in_tok = usage.get("input_tokens")
-                    out_tok = usage.get("output_tokens")
-                    if isinstance(in_tok, (int, float)):
-                        latest_input_tokens = max(latest_input_tokens or 0, int(in_tok))
-                    if isinstance(out_tok, (int, float)):
-                        latest_output_tokens = max(latest_output_tokens or 0, int(out_tok))
+                # 无 content 的 message（理论上 daemon 不产生）跳过日志写入，
+                # 但 usage / session_id 已在上面提取。
                 continue
 
             log_id = uuid.uuid4()
@@ -669,6 +676,10 @@ class DaemonService:
                 agent_run.output_tokens is None or latest_output_tokens > agent_run.output_tokens
             ):
                 agent_run.output_tokens = latest_output_tokens
+                self._session.add(agent_run)
+            # ql-20260617-001：session_id 实时写回（首次拿到就填，complete_lease 仍可覆盖）。
+            if latest_session_id and not agent_run.session_id:
+                agent_run.session_id = latest_session_id
                 self._session.add(agent_run)
 
         if count > 0 or (agent_run is not None and agent_run_status == "running"):

@@ -132,7 +132,7 @@ backend:
   build:
     args:
       CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.158}
-      SILLYSPEC_VERSION: ${SILLYSPEC_VERSION:-3.17.15}
+      SILLYSPEC_VERSION: ${SILLYSPEC_VERSION:-3.18.0}
   env_file:
     - .env
   environment:
