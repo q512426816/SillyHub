@@ -468,6 +468,9 @@ export class TaskRunner {
       outputParts, onSessionId, leaseId, claimToken,
     } = params;
 
+    // 本地终端 echo：开始边界，让用户看到 spawn 命令
+    echoTaskBoundary(leaseId, 'start', { cmdPath, args });
+
     // spawn（stdio 全管道：stdin / stdout / stderr 都需要）
     // Windows 上 .cmd/.bat 包装器必须走 shell（与 detectVersion 的 exec 分支一致），
     // 否则 Node spawn 不带 shell 直接 CreateProcess 这些 wrapper 脚本会 ENOENT。
@@ -649,14 +652,17 @@ export class TaskRunner {
 
     // 计算最终状态
     if (cancelled) {
+      echoTaskBoundary(leaseId, 'end', { status: 'cancelled', exitCode: exitCode || 1, error: 'task cancelled' });
       return { status: 'cancelled', exitCode: exitCode || 1, error: 'task cancelled', stats: lastStats };
     }
     if (timedOut) {
+      echoTaskBoundary(leaseId, 'end', { status: 'timeout', exitCode: exitCode || 1, error: `task timed out after ${timeoutSec}s` });
       return { status: 'timeout', exitCode: exitCode || 1, error: `task timed out after ${timeoutSec}s`, stats: lastStats };
     }
     // spawnErrorRef.current：spawn 错误（'error' 事件异步赋值）。用对象容器
     // 避免 TS 对闭包内赋值的 let 变量做错误 narrowing（详见声明处注释）。
     if (spawnErrorRef.current) {
+      echoTaskBoundary(leaseId, 'end', { status: 'failed', exitCode: exitCode || 127, error: spawnErrorRef.current.message });
       return { status: 'failed', exitCode: exitCode || 127, error: spawnErrorRef.current.message, stats: lastStats };
     }
     if (exitCode !== 0) {
@@ -668,16 +674,19 @@ export class TaskRunner {
         getLastResultInfo?: () => { isError?: boolean } | undefined;
       }).getLastResultInfo?.();
       const businessError = lastInfo?.isError === true;
+      const errMsg = errDetail
+        ? `agent process exited with exit code ${exitCode}: ${errDetail}`
+        : `agent process exited with exit code ${exitCode}`;
+      echoTaskBoundary(leaseId, 'end', { status: 'failed', exitCode: 1, error: errMsg });
       return {
         status: 'failed',
         exitCode: 1, // 统一映射非零退出为 1（对齐 Python 把非零 exit 视为 failed）
-        error: errDetail
-          ? `agent process exited with exit code ${exitCode}: ${errDetail}`
-          : `agent process exited with exit code ${exitCode}`,
+        error: errMsg,
         stats: lastStats,
         businessError,
       };
     }
+    echoTaskBoundary(leaseId, 'end', { status: 'completed', exitCode: 0 });
     return { status: 'completed', exitCode: 0, stats: lastStats };
   }
 
@@ -740,6 +749,10 @@ export class TaskRunner {
     // 累积 output + 提交 submitMessages
     const messages: Record<string, unknown>[] = [];
     for (const ev of events) {
+      // 本地终端 echo（quick-chat 实时观察）：把每个 AgentEvent 渲染成单行打印。
+      // 不受 log_level 控制 —— daemon 是前台进程，stdout 跟着终端/重定向走。
+      // 业务逻辑（submitMessages / output 累积）不受影响。
+      echoAgentEvent(env.leaseId, ev);
       // 提取 sessionId（complete / status 事件可能在 metadata.session_id 带）
       const sid = ev.metadata?.session_id;
       if (typeof sid === 'string' && sid) {
@@ -1044,6 +1057,109 @@ export function isSpawnLevelFailure(
  */
 function _looksLikeControlRequest(line: string): boolean {
   return line.includes('"control_request"') || line.includes("'control_request'");
+}
+
+// ── 本地终端 echo（quick-chat 实时观察 agent 执行过程）──────────────────────────
+
+/** 单条 echo 最大长度（超长截断，避免大 tool_input 刷屏）。 */
+const ECHO_MAX_LEN = 2000;
+
+/**
+ * 把 AgentEvent 渲染成单行文本写入 stdout，供启动 daemon 的本地终端实时观察。
+ *
+ * 设计要点：
+ *   - 用 process.stdout.write 直接写，不走 logger（logger 受 log_level 过滤，
+ *     debug 级别默认不显示，违背「随时能看到」的诉求）。
+ *   - daemon 是前台进程，stdout 跟着终端或重定向目标走，不污染 daemon.log
+ *     （cli.ts 的日志文件目前没有重定向 stdout，echo 只活在终端）。
+ *   - 业务逻辑（outputParts 累积 / submitMessages）与 echo 解耦，互不影响。
+ *   - 单条消息超长截断到 ECHO_MAX_LEN，防止超长 tool_input 刷屏。
+ *
+ * 不是 TaskRunner 成员方法：纯函数 + leaseId 入参，便于单测独立验证。
+ */
+export function echoAgentEvent(leaseId: string, ev: AgentEvent): void {
+  const prefix = `[task ${shortLeaseId(leaseId)}]`;
+  let line: string;
+  switch (ev.type) {
+    case 'text': {
+      const status = typeof ev.metadata?.status === 'string' ? ev.metadata.status : '';
+      line = status ? `${prefix} [${status}] ${ev.content}` : `${prefix} ${ev.content}`;
+      break;
+    }
+    case 'tool_use': {
+      const name = typeof ev.metadata?.tool_name === 'string' ? ev.metadata.tool_name : '<unknown>';
+      const input = ev.content || '';
+      line = `${prefix} [tool_use ${name}] ${input}`;
+      break;
+    }
+    case 'tool_result': {
+      const name = typeof ev.metadata?.tool_name === 'string' ? ev.metadata.tool_name : '';
+      line = `${prefix} [tool_result${name ? ` ${name}` : ''}] ${ev.content}`;
+      break;
+    }
+    case 'error': {
+      const level = typeof ev.metadata?.level === 'string' ? ev.metadata.level : 'error';
+      line = `${prefix} [${level}] ${ev.content}`;
+      break;
+    }
+    case 'complete': {
+      const usage = ev.metadata?.usage;
+      const usageStr = usage && typeof usage === 'object'
+        ? ` usage=${JSON.stringify(usage)}`
+        : '';
+      line = `${prefix} [complete]${usageStr}`;
+      break;
+    }
+    default: {
+      line = `${prefix} [${(ev as { type: string }).type}] ${ev.content}`;
+    }
+  }
+  if (line.length > ECHO_MAX_LEN) {
+    line = line.slice(0, ECHO_MAX_LEN) + '…<truncated>';
+  }
+  try {
+    process.stdout.write(line + '\n');
+  } catch {
+    // stdout 已关闭（极端场景：进程退出中）—— 静默吞掉，不影响业务
+  }
+}
+
+/** leaseId 取短显示（前 8 位），用于 echo 前缀，避免长 UUID 刷屏。 */
+function shortLeaseId(leaseId: string): string {
+  return leaseId.length > 12 ? leaseId.slice(0, 8) : leaseId;
+}
+
+/**
+ * 任务开始/结束的边界 echo（_spawnAndStream 调用）。
+ * start：打印 cmd + args，让用户看到子进程启动。
+ * end：打印 status + exit_code，让用户看到子进程结束。
+ */
+export function echoTaskBoundary(
+  leaseId: string,
+  phase: 'start' | 'end',
+  kv: { cmdPath?: string; args?: string[]; status?: string; exitCode?: number; error?: string },
+): void {
+  const prefix = `[task ${shortLeaseId(leaseId)}]`;
+  if (phase === 'start') {
+    const argStr = (kv.args ?? []).join(' ');
+    const cmd = kv.cmdPath ?? '';
+    try {
+      process.stdout.write(`${prefix} spawn: ${cmd} ${argStr}\n`);
+    } catch {
+      // ignore
+    }
+  } else {
+    const parts = [`status=${kv.status ?? '?'}`, `exit=${kv.exitCode ?? '?'}`];
+    if (kv.error) {
+      const e = kv.error.length > ECHO_MAX_LEN ? kv.error.slice(0, ECHO_MAX_LEN) + '…<truncated>' : kv.error;
+      parts.push(`error=${e}`);
+    }
+    try {
+      process.stdout.write(`${prefix} done: ${parts.join(' ')}\n`);
+    } catch {
+      // ignore
+    }
+  }
 }
 
 /**

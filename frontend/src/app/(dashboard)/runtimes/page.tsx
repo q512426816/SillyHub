@@ -32,7 +32,9 @@ import {
   MIN_VERSIONS,
   PROVIDER_META,
   quickChat,
+  streamQuickChat,
   type DaemonRuntimeRead,
+  type QuickChatStreamMessage,
 } from "@/lib/daemon";
 import { useSession } from "@/stores/session";
 
@@ -364,6 +366,22 @@ function QuickChatPanel({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
   const [sending, setSending] = useState(false);
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 组件卸载时关闭 SSE + 清理兜底 timer
+  useEffect(() => {
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+      if (fallbackTimerRef.current) {
+        clearTimeout(fallbackTimerRef.current);
+        fallbackTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (uniqueProviders.length > 0 && !uniqueProviders.includes(provider)) {
@@ -376,21 +394,153 @@ function QuickChatPanel({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
   }, [messages]);
 
-  const pollResult = async (runId: string) => {
-    const maxAttempts = 60;
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      try {
-        const res = await getQuickChatResult(runId);
-        if (res.status === "completed" || res.status === "failed") {
-          const output = res.output_redacted?.trim();
-          return output || (res.status === "failed" ? "执行失败" : "(无输出)");
+  /**
+   * 把 SSE 收到的 QuickChatStreamMessage 渲染成追加到聊天框的纯文本片段。
+   * 内含多条 agent event，按 event_type 分类格式化：
+   *   - text         → 直接 append content
+   *   - tool_use     → \n🔧 <tool_name>: <input>
+   *   - tool_result  → \n📥 <tool_name>: <output>（截断长输出）
+   *   - error        → \n⚠️ <content>
+   *   - 其他         → 忽略（complete 等无文本事件）
+   */
+  const renderStreamMessage = (msg: QuickChatStreamMessage): string => {
+    const parts: string[] = [];
+    for (const ev of msg.messages ?? []) {
+      const content = (ev.content ?? "").trim();
+      switch (ev.event_type) {
+        case "text":
+          if (content) parts.push(content);
+          break;
+        case "tool_use":
+          parts.push(`\n🔧 ${ev.tool_name ?? "tool"}: ${content}`);
+          break;
+        case "tool_result": {
+          const truncated = content.length > 200 ? `${content.slice(0, 200)}…` : content;
+          parts.push(`\n📥 ${ev.tool_name ?? "tool"}: ${truncated}`);
+          break;
         }
-      } catch {
-        // Keep polling while the daemon result is still settling.
+        case "error":
+          if (content) parts.push(`\n⚠️ ${content}`);
+          break;
+        default:
+          // complete / status 等无文本事件忽略
+          break;
       }
     }
-    return "等待超时";
+    return parts.join("");
+  };
+
+  /**
+   * 启动 SSE 订阅，逐条把 agent 输出 append 到最后一条 agent 消息。
+   * 兜底机制：
+   *   - onDone 触发：写入 lastRunId（若 completed），关闭 SSE
+   *   - 60 秒内没收到任何 message/done → 视为连接异常，回退到 GET 拿最终结果
+   *   - onError 触发：也回退到 GET 拿最终结果（避免连不上时面板卡死）
+   */
+  const streamRun = (runId: string): Promise<void> => {
+    return new Promise((resolve) => {
+      let receivedAny = false;
+      let settled = false;
+
+      const cleanup = () => {
+        if (eventSourceRef.current) {
+          eventSourceRef.current.close();
+          eventSourceRef.current = null;
+        }
+        if (fallbackTimerRef.current) {
+          clearTimeout(fallbackTimerRef.current);
+          fallbackTimerRef.current = null;
+        }
+      };
+
+      const fallbackToGet = async () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        // 轮询 GET 最终结果（最多 60 次 × 2s = 2 分钟）
+        for (let i = 0; i < 60; i++) {
+          await new Promise((r) => setTimeout(r, 2000));
+          try {
+            const res = await getQuickChatResult(runId);
+            if (res.status === "completed" || res.status === "failed") {
+              const output = res.output_redacted?.trim();
+              const finalText =
+                output || (res.status === "failed" ? "执行失败" : "(无输出)");
+              setMessages((prev) => {
+                const updated = [...prev];
+                updated[updated.length - 1] = { role: "agent", content: finalText };
+                return updated;
+              });
+              if (res.status === "completed") setLastRunId(runId);
+              resolve();
+              return;
+            }
+          } catch {
+            // continue polling
+          }
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            role: "agent",
+            content:
+              (updated[updated.length - 1]?.content ?? "") + "\n\n(等待超时)",
+          };
+          return updated;
+        });
+        resolve();
+      };
+
+      // 60s 内没有任何消息/done → 触发回退
+      fallbackTimerRef.current = setTimeout(() => {
+        if (!receivedAny) fallbackToGet();
+      }, 60_000);
+
+      const es = streamQuickChat(
+        runId,
+        (msg) => {
+          receivedAny = true;
+          const text = renderStreamMessage(msg);
+          if (!text) return;
+          setMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            const prevContent = last?.role === "agent" ? last.content : "";
+            updated[updated.length - 1] = {
+              role: "agent",
+              content: prevContent + (prevContent && !prevContent.endsWith("\n") ? "" : "") + text,
+            };
+            return updated;
+          });
+        },
+        async (data) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          if (data.status === "completed") {
+            setLastRunId(runId);
+          } else if (data.status === "failed") {
+            // 如果 agent 一字未吐就 failed，补一句提示
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last?.role === "agent" && (!last.content || last.content === "...")) {
+                updated[updated.length - 1] = { role: "agent", content: "执行失败" };
+              }
+              return updated;
+            });
+          }
+          resolve();
+        },
+        () => {
+          // onError：SSE 连不上 / 401 / 网络中断。给个回退机会拿最终结果。
+          if (!settled && !receivedAny) {
+            fallbackToGet();
+          }
+        },
+      );
+      eventSourceRef.current = es;
+    });
   };
 
   const handleSend = async () => {
@@ -404,20 +554,16 @@ function QuickChatPanel({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
     try {
       const resp = await quickChat(prompt, provider, lastRunId ?? undefined);
       if (resp.status === "completed" || resp.status === "failed") {
+        // daemon 同步完成（极少见，prompt 极短或 daemon 拒绝）：直接读 DB
         const result = await getQuickChatResult(resp.id);
         const output =
           result.output_redacted?.trim() || (resp.status === "failed" ? "执行失败" : "(无输出)");
         setMessages((prev) => [...prev, { role: "agent", content: output }]);
         if (result.status === "completed") setLastRunId(resp.id);
       } else if (resp.status === "pending") {
+        // 占位 agent 消息，streamRun 期间逐步填充
         setMessages((prev) => [...prev, { role: "agent", content: "..." }]);
-        const output = await pollResult(resp.id);
-        setMessages((prev) => {
-          const updated = [...prev];
-          updated[updated.length - 1] = { role: "agent", content: output };
-          return updated;
-        });
-        setLastRunId(resp.id);
+        await streamRun(resp.id);
       }
     } catch (err) {
       setMessages((prev) => [

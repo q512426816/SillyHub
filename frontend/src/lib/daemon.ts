@@ -1,7 +1,8 @@
 /**
  * Daemon runtime API client.
  */
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiBaseUrl } from "@/lib/api";
+import { useSession } from "@/stores/session";
 
 export interface DaemonRuntimeRead {
   id: string;
@@ -56,6 +57,90 @@ export async function getQuickChatResult(
   runId: string,
 ): Promise<QuickChatResult> {
   return apiFetch<QuickChatResult>(`/api/daemon-chat/${runId}`);
+}
+
+/* ---------- Quick chat SSE stream ---------- */
+
+/**
+ * 后端 submit_messages 在 Redis 推送的 message payload 结构。
+ * 对齐 backend/app/modules/daemon/service.py:621-633 submit_messages 发布格式。
+ */
+export interface QuickChatStreamMessage {
+  event: "messages";
+  lease_id: string;
+  count: number;
+  agent_run_status?: string;
+  messages: Array<{
+    event_type: string;
+    content?: string;
+    tool_name?: string;
+    call_id?: string;
+    status?: string;
+    level?: string;
+    session_id?: string;
+  }>;
+}
+
+export interface QuickChatStreamDone {
+  status?: string;
+  exit_code?: number | null;
+}
+
+/**
+ * 订阅 quick-chat 实时消息流（SSE）。
+ *
+ * 浏览器走 nextjs route handler proxy（避免 nextjs rewrite 缓冲 SSE）。
+ * 用 query 传 accessToken —— EventSource 不支持自定义 header。
+ *
+ * onMessage: 每条 Redis pub/sub message 触发一次（含多条 agent event）
+ * onDone:    agent 终态时触发（completed/failed/cancelled/timeout）
+ * onError:   连接异常（含 404/401 等业务错误会通过 onerror 触发）
+ *
+ * 返回 EventSource 句柄，调用方负责 .close()。
+ */
+export function streamQuickChat(
+  runId: string,
+  onMessage: (_msg: QuickChatStreamMessage) => void,
+  onDone: (_data: QuickChatStreamDone) => void,
+  onError?: (_error: Error) => void,
+): EventSource {
+  const base = getApiBaseUrl();
+  const { accessToken } = useSession.getState();
+  const url = new URL(`${base}/api/daemon-chat/${runId}/stream`);
+  if (accessToken) url.searchParams.set("token", accessToken);
+
+  const es = new EventSource(url.toString());
+
+  es.onmessage = (e: MessageEvent<string>) => {
+    try {
+      const parsed = JSON.parse(e.data) as QuickChatStreamMessage;
+      onMessage(parsed);
+    } catch {
+      onError?.(new Error(`Failed to parse SSE data: ${e.data}`));
+    }
+  };
+
+  es.addEventListener("done", (e: MessageEvent<string>) => {
+    es.close();
+    let data: QuickChatStreamDone = {};
+    try {
+      data = JSON.parse(e.data);
+    } catch {
+      // empty done data is valid
+    }
+    onDone(data);
+  });
+
+  es.onerror = () => {
+    // readyState 2 = CLOSED，说明连接已彻底关闭（404/401/网络中断都会到这里）
+    const error = new Error("EventSource connection error");
+    onError?.(error);
+    // 不在这里 close —— 让 onerror 自然触发后浏览器会自动重连。
+    // 业务侧 onDone/onMessage 不来时，调用方应设超时兜底。
+    // 显式 close 在 onDone 已触发；如果只 onerror，让调用方决定。
+  };
+
+  return es;
 }
 
 /* ---------- Provider display metadata ---------- */

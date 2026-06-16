@@ -290,3 +290,8 @@ created_at: 2026-06-03T08:42:04
 根因：Windows 上 npm 全局安装的 claude 同时生成无扩展名 sh wrapper（git-bash 用）和 claude.cmd。agent-detector.ts:188 WINDOWS_EXTS 把 '' 放首位 → findOnPath 返回 sh wrapper；task-runner.ts:472 spawn 没传 shell:true → Windows Node 无法 CreateProcess 无扩展名脚本 → ENOENT，同时 stdin.write 因 stdio 关闭报 EPIPE
 文件：sillyhub-daemon/src/agent-detector.ts, sillyhub-daemon/src/task-runner.ts
 结果：1) WINDOWS_EXTS 把 '' 移到末尾（'.exe', '.cmd', '.bat', '.ps1', ''），优先返回真正可执行的 .cmd；2) task-runner spawn 前 check Windows + /\.(cmd|bat)$/i 命中则传 shell:true，与 detectVersion 的 exec 分支行为对齐；3) daemon rebuild + 重启后 task 执行链路恢复
+
+## ql-20260616-002-f4ce | 2026-06-16 09:35:52 | /runtimes 快速对话本地终端 + 前端流式显示执行过程
+状态：已完成
+文件：sillyhub-daemon/src/task-runner.ts, backend/app/main.py, frontend/src/lib/daemon.ts, frontend/src/app/(dashboard)/runtimes/page.tsx, frontend/src/app/api/daemon-chat/[runId]/stream/route.ts
+结果：1) task-runner.ts 加 echoAgentEvent/echoTaskBoundary 两个纯函数，每个 AgentEvent 实时打印到 daemon 本地 stdout（前缀 [task leaseId前8位]，单条截断 2000 字符），start/end 边界打印 spawn cmd 和 exit status；2) backend main.py 新增 GET /api/daemon-chat/{run_id}/stream，复用 AgentService.stream_run_logs 订阅 Redis agent_run:{run_id} 频道（同 agent router 的 stream_agent_run_logs 模式）；3) 前端新建 nextjs route handler /api/daemon-chat/[runId]/stream/route.ts 透传 SSE 避开 nextjs rewrite 缓冲；4) daemon.ts 新增 streamQuickChat + QuickChatStreamMessage/QuickChatStreamDone 类型，与 streamAgentRunLogs 一致用 query token；5) runtimes/page.tsx QuickChatPanel 改用 streamRun，逐条 SSE message 实时 append 到聊天框（text/tool_use/tool_result/error 分别 emoji 渲染），60s 内没收到任何消息自动回退到 GET 轮询兜底，组件卸载清理 SSE+timer。TS/lint/ruff 全部通过。

@@ -107,3 +107,4 @@ layout.tsx (根布局)
 | 2026-06-09 | ql-20260609-005-d2f7 | Bootstrap 日志区域完全复用共享 AgentLogViewer 组件 |
 | 2026-06-09 | ql-20260609-007-b4c2 | 工作区详情页显示上一次 Bootstrap 运行结果摘要 |
 | 2026-06-09 | ql-20260609-008 | 修复 Bootstrap runs 排序用 finished_at 而非缺失的 created_at |
+| 2026-06-16 | ql-20260616-002-f4ce | /runtimes 快速对话改用 SSE 流式（EventSource 订阅 + nextjs route handler 透传 + 60s 回退 GET 兜底） |

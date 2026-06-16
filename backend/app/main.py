@@ -220,6 +220,73 @@ def create_app() -> FastAPI:
                 raise HTTPException(status_code=404, detail="Run not found")
             return dict(row)
 
+        @qc_router.get("/daemon-chat/{run_id}/stream")
+        async def stream_quick_chat(
+            run_id: str,
+            session: AsyncSession = Depends(get_session),
+            user: User = Depends(require_permission_any(Permission.TASK_READ)),
+        ):
+            """SSE endpoint — stream real-time agent messages for a quick-chat run.
+
+            复用 AgentService.stream_run_logs：按 run_id 订阅 Redis pub/sub，
+            不需要 workspace_id（quick-chat 类型的 AgentRun 无 workspace 关联）。
+            """
+            import json
+            import uuid as _uuid
+
+            from fastapi import HTTPException, StreamingResponse
+            from sqlalchemy import text as sa_text
+
+            from app.modules.agent.service import AgentService
+
+            # 校验 run_id 是合法 UUID + 属于 quick-chat（防止越权读其他类型 run）
+            try:
+                parsed = _uuid.UUID(run_id)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=404, detail="Run not found") from None
+
+            row = (
+                (
+                    await session.execute(
+                        sa_text(
+                            "SELECT id, status FROM agent_runs "
+                            "WHERE id = :id AND spec_strategy = 'quick-chat'"
+                        ),
+                        {"id": parsed},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if row is None:
+                raise HTTPException(status_code=404, detail="Run not found")
+
+            sse_headers = {
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+
+            # 已终态：直接发 done 让前端立即收尾（与 agent router 的 stream_agent_run_logs 对齐）
+            if row["status"] not in ("pending", "running"):
+                done_data = json.dumps({"status": row["status"], "exit_code": None})
+                return StreamingResponse(
+                    iter([f"event: done\ndata: {done_data}\n\n"]),
+                    media_type="text/event-stream",
+                    headers=sse_headers,
+                )
+
+            svc = AgentService(session)
+            run = await svc.get_run(parsed)
+            if run is None:
+                raise HTTPException(status_code=404, detail="Run not found")
+
+            return StreamingResponse(
+                svc.stream_run_logs(parsed, session=session),
+                media_type="text/event-stream",
+                headers=sse_headers,
+            )
+
         app.include_router(qc_router, prefix="/api")
 
     app.include_router(health_router, prefix="/api")
