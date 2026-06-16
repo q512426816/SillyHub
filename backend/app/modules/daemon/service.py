@@ -581,14 +581,20 @@ class DaemonService:
 
         now = datetime.now(UTC)
         count = 0
+        published_logs: list[dict] = []
         for msg in messages:
-            channel = msg.get("channel", "stdout")
+            # ql-20260616-003：daemon _eventToMessage 不发 channel/timestamp/log_id，
+            # 后端按 event_type 映射 channel（text→stdout, tool_use/tool_result→tool_call,
+            # error→stderr），避免前端 SSE 实时流出现 Invalid Date + channel 误判。
+            event_type = msg.get("event_type") or ""
+            channel = msg.get("channel") or _channel_from_event_type(event_type)
             content = msg.get("content", "")
             if not content:
                 continue
 
+            log_id = uuid.uuid4()
             log_entry = AgentRunLog(
-                id=uuid.uuid4(),
+                id=log_id,
                 run_id=agent_run_id,
                 timestamp=now,
                 channel=channel,
@@ -596,6 +602,14 @@ class DaemonService:
             )
             self._session.add(log_entry)
             count += 1
+            published_logs.append(
+                {
+                    "log_id": str(log_id),
+                    "channel": channel,
+                    "content": content[:5000],
+                    "timestamp": now.isoformat().replace("+00:00", "Z"),
+                }
+            )
 
         # Sync AgentRun status: pending -> running on first messages
         agent_run_status: str | None = None
@@ -616,21 +630,23 @@ class DaemonService:
         if count > 0 or (agent_run is not None and agent_run_status == "running"):
             await self._session.commit()
 
-        # Publish to Redis with AgentRun status info
+        # ql-20260616-003：每条已持久化的 log 单独 publish 成扁平 StreamLogEvent
+        # 形态（{channel, content, timestamp, log_id}），前端 SSE onmessage 直接当
+        # StreamLogEvent 用，无需识别 {event:"messages"} 包装。仍保留一条聚合
+        # messages 事件做计数/审计（event 字段区分）。
         try:
             redis = get_redis()
-            payload: dict = {
+            channel_name = f"agent_run:{agent_run_id}"
+            for log_payload in published_logs:
+                await redis.publish(channel_name, json.dumps(log_payload))
+            summary_payload: dict = {
                 "event": "messages",
                 "lease_id": str(lease_id),
                 "count": count,
-                "messages": messages,
             }
             if agent_run_status is not None:
-                payload["agent_run_status"] = agent_run_status
-            await redis.publish(
-                f"agent_run:{agent_run_id}",
-                json.dumps(payload),
-            )
+                summary_payload["agent_run_status"] = agent_run_status
+            await redis.publish(channel_name, json.dumps(summary_payload))
         except Exception:
             log.warning(
                 "daemon_messages_redis_publish_failed",
@@ -1089,3 +1105,28 @@ class DaemonService:
                 details={"lease_id": str(lease_id)},
             )
         return lease
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _channel_from_event_type(event_type: str) -> str:
+    """Map daemon AgentEvent type to AgentRunLog channel.
+
+    ql-20260616-003：daemon 的 _eventToMessage 不发 channel 字段（只发 event_type），
+    后端按事件类型补全 channel，让前端 SSE 实时流能正确渲染 TOOL/WARN/INFO 徽章。
+
+    Args:
+        event_type: daemon AgentEvent.type，5 种取值之一
+            （text / tool_use / tool_result / error / complete）。
+
+    Returns:
+        AgentRunLog channel：tool_call / stderr / stdout 之一。
+    """
+    if event_type in ("tool_use", "tool_result"):
+        return "tool_call"
+    if event_type == "error":
+        return "stderr"
+    return "stdout"

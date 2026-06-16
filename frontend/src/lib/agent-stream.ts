@@ -117,6 +117,10 @@ export class AgentRunStreamClient {
   }
 
   private _emitMessage(event: StreamLogEvent): void {
+    // ql-20260616-003：忽略非 log 类事件（status_changed / messages summary 等）。
+    // 后端 SSE 频道复用，会推 status_changed、done、messages 聚合等事件，它们没
+    // timestamp 字段，emit 给 UI 会渲染成 Invalid Date 行。
+    if (typeof event.timestamp !== "string" || !event.timestamp) return;
     if (event.log_id != null) {
       if (this.seenLogIds.has(event.log_id)) return;
       this.seenLogIds.add(event.log_id);

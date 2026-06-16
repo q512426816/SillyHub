@@ -189,8 +189,11 @@ export function AgentLogRow({
   const inputError = inputControls?.inputErrors[log.id];
   const Icon = meta.Icon;
 
+  // ql-20260616-002：后端 content_redacted 可为 null,所有依赖处统一降级为 ""。
+  const contentSafe = log.content_redacted ?? "";
+
   // Check if stdout is thinking-only content
-  const isThinking = log.channel === "stdout" && isThinkingContent(log.content_redacted);
+  const isThinking = log.channel === "stdout" && isThinkingContent(contentSafe);
 
   return (
     <div
@@ -240,7 +243,7 @@ export function AgentLogRow({
           /* Thinking/System → collapsed */
           <div className="font-mono [overflow-wrap:anywhere]">
             <CollapsibleSection title="Thinking / System">
-              {renderLogLines(log.content_redacted)}
+              {renderLogLines(contentSafe)}
             </CollapsibleSection>
           </div>
         ) : (
@@ -252,10 +255,10 @@ export function AgentLogRow({
             )}
           >
             {(() => {
-              const scanCheck = log.channel === "stdout" ? parseScanCheckOutput(log.content_redacted) : null;
+              const scanCheck = log.channel === "stdout" ? parseScanCheckOutput(contentSafe) : null;
               const filteredContent = log.channel === "stdout"
-                ? filterToolProtocolLines(log.content_redacted)
-                : log.content_redacted;
+                ? filterToolProtocolLines(contentSafe)
+                : contentSafe;
               const hasContent = filteredContent.trim().length > 0;
               return (
                 <>

@@ -175,9 +175,12 @@ type ToolCallEntry = {
   command?: string;
 };
 
-function parseToolCallContent(raw: string): ToolCallEntry | null {
+function parseToolCallContent(raw: string | null | undefined): ToolCallEntry | null {
+  // ql-20260616-002：上游 content_redacted 可为 null（后端 schema str|None）。
+  const safe = raw ?? "";
+  if (!safe) return null;
   try {
-    const obj = JSON.parse(raw);
+    const obj = JSON.parse(safe);
     const args = obj.args ?? obj.arguments ?? "";
     const toolName = obj.tool ?? obj.name ?? "unknown";
     return {

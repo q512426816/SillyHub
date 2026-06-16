@@ -105,14 +105,17 @@ function parseCriteria(content: string | null): Criterion[] {
 }
 
 /* ---- Tool-call description extractor ---- */
-function toolCallDescription(content: string): string {
+function toolCallDescription(content: string | null | undefined): string {
+  // ql-20260616-002：上游 content_redacted 可为 null（后端 schema str|None）。
+  const safe = content ?? "";
+  if (!safe) return "";
   try {
-    const parsed = JSON.parse(content);
+    const parsed = JSON.parse(safe);
     if (parsed.name) return `Tool: ${parsed.name}`;
     if (parsed.tool) return `Tool: ${parsed.tool}`;
-    return content.length > 80 ? content.slice(0, 80) + "..." : content;
+    return safe.length > 80 ? safe.slice(0, 80) + "..." : safe;
   } catch {
-    return content.length > 80 ? content.slice(0, 80) + "..." : content;
+    return safe.length > 80 ? safe.slice(0, 80) + "..." : safe;
   }
 }
 

@@ -23,9 +23,12 @@ function stringifyToolArgs(value: unknown): string {
   }
 }
 
-export function parseToolCallContent(raw: string): ToolCallEntry | null {
+export function parseToolCallContent(raw: string | null | undefined): ToolCallEntry | null {
+  // ql-20260616-002：上游 content_redacted 可为 null（后端 schema str|None），入口降级。
+  const safe = raw ?? "";
+  if (!safe) return null;
   try {
-    const obj = JSON.parse(raw);
+    const obj = JSON.parse(safe);
     const args = obj.args ?? obj.arguments ?? "";
     const toolName = obj.tool ?? obj.name ?? "unknown";
     return {
@@ -199,7 +202,10 @@ export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
 
     if (current.log.channel !== "stdout") continue;
 
-    const content = current.log.content_redacted;
+    // ql-20260616-002：后端 content_redacted 实际可为 null/undefined（schema str|None），
+    // 前端类型声明成 string 是错的。SSE 流式 entry 可能瞬时为空 → 这里降级为 "" 避免
+    // 后续 split/filter(l => l.trim()) 链对 null 抛 TypeError 让整页 Bootstrap Run 崩溃。
+    const content = current.log.content_redacted ?? "";
     const lines = content.split("\n");
     const nonEmpty = lines.filter((l) => l.trim());
     if (nonEmpty.length === 0) continue;

@@ -75,17 +75,19 @@ Claude CLI 交互:
 
 ## 注意事项
 
-1. **Windows 兼容**: `.cmd` 包装文件需解析到实际 `.exe` 路径
-2. **stdin 管理**: Claude CLI 需要stdin 保持打开以接收 control_response，不能过早关闭
-3. **WebSocket 超时**: 必须设置 `open_timeout` 防止阻塞 asyncio 事件循环
-4. **JSON 列变更检测**: SQLAlchemy JSON 列原地修改需 `flag_modified()` 标记
-5. **多 Agent 注册**: 每个 Agent 作为独立 runtime 注册，心跳需逐个发送
-6. **会话恢复**: 通过 `--resume <session_id>` 实现多轮对话上下文延续
+1. **Windows 兼容**: `.cmd` 包装文件需解析到实际可执行扩展名。`agent-detector.ts` 的 `WINDOWS_EXTS` 必须只含真正可执行后缀（`.exe`/`.cmd`/`.bat`/`.ps1`），**不可**保留空字符串 `''`——否则 `findOnPath` 在所有扩展名都找不到时会返回 npm 生成的无扩展名 sh wrapper（裸 `claude`），后续 `task-runner.spawn` 不走 shell 时 CreateProcess ENOENT。
+2. **spawn shell mode**: `task-runner.ts` 的 Windows wrapper 检测正则应为 `/\.(cmd|bat|ps1)$/i`，并对无扩展名路径也启用 `shell: true` 作为兜底，避免裸 sh wrapper ENOENT。
+3. **stdin 管理**: Claude CLI 需要stdin 保持打开以接收 control_response，不能过早关闭
+4. **WebSocket 超时**: 必须设置 `open_timeout` 防止阻塞 asyncio 事件循环
+5. **JSON 列变更检测**: SQLAlchemy JSON 列原地修改需 `flag_modified()` 标记
+6. **多 Agent 注册**: 每个 Agent 作为独立 runtime 注册，心跳需逐个发送
+7. **会话恢复**: 通过 `--resume <session_id>` 实现多轮对话上下文延续
 
 ## 变更索引
 
 - ql-20260611-001-c7a3 | Quick Chat 多轮对话：stream_json backend 支持 --resume，stdin 管理，control_request 自动审批
 - ql-20260615-002-9b4f | 修复 /runtimes 空状态错误的 pip 安装提示（daemon 已重写为 TS），新增 sillyhub-daemon/README.md 安装文档；本机卸载 Python 旧版残留、pnpm install+build、npm link，验证 sillyhub-daemon --version=0.1.0
+- ql-20260616-001-7f3a | 修复 Windows 上 agent-detector 返回裸 claude 路径导致 spawn ENOENT：WINDOWS_EXTS 移除空字符串 ''；task-runner spawn shell mode 正则扩展到 .ps1 + 无扩展名兜底；TRUNCATE daemon_runtimes 清掉 7 条旧记录，重启后注册 3 条干净 .cmd 后缀
 
 ## 人工备注
 

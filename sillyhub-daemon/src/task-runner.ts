@@ -522,15 +522,21 @@ export class TaskRunner {
     };
 
     // spawn（stdio 全管道：stdin / stdout / stderr 都需要）
-    // Windows 上 .cmd/.bat 包装器必须走 shell（与 detectVersion 的 exec 分支一致），
-    // 否则 Node spawn 不带 shell 直接 CreateProcess 这些 wrapper 脚本会 ENOENT。
-    const isWindowsCmdWrapper =
-      process.platform === 'win32' && /\.(cmd|bat)$/i.test(cmdPath);
+    // ql-20260616-001 修复：Windows 上的 npm bin wrapper（.cmd/.bat/.ps1）必须走 shell。
+    // 扩展正则到 .ps1（PowerShell wrapper 也需要 shell），并对无扩展名 sh wrapper
+    // 也启用 shell（cmdPath 是 git-bash 风格脚本，CreateProcess 直跑会 ENOENT）。
+    // 与 detectVersion 的 exec 分支保持一致。
+    const isWindowsWrapper =
+      process.platform === 'win32' &&
+      /\.(cmd|bat|ps1)$/i.test(cmdPath);
+    const isWindowsBareSh =
+      process.platform === 'win32' &&
+      !/\.[a-z0-9]+$/i.test(cmdPath);
     const child = spawn(cmdPath, args, {
       cwd: opts.cwd,
       env: opts.env,
       stdio: ['pipe', 'pipe', 'pipe'],
-      ...(isWindowsCmdWrapper ? { shell: true } : {}),
+      ...(isWindowsWrapper || isWindowsBareSh ? { shell: true } : {}),
     }) as ChildProcess;
 
     let exitCode = 0;

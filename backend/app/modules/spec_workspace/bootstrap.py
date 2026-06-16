@@ -266,7 +266,26 @@ async def _execute_bootstrap_agent_run(
             lease_id = await placement.dispatch_to_daemon(
                 run.id,
                 user_id,
-                provider="claude_code",
+                # ql-20260616-002：daemon 的 provider 注册表里只有 'claude'（不是 'claude_code'）。
+                # 后端 AgentRun.agent_type 保留 'claude_code' 作 adapter 标识（与 placement/context_builder
+                # 一致），但 dispatch_to_daemon 的 provider kwarg 必须是 daemon 协议名 'claude'，
+                # 否则 daemon 端 getBackend() 抛 "Unknown provider: claude_code"。
+                # 同时传 root_path + spec_root 让 lease.metadata 落地，daemon 拉取 execution-context 时
+                # _determine_run_type 能识别为 "scan" 类型（task_id=None + lease_meta 含 root_path/spec_root
+                # 分支），否则抛 ValueError "cannot determine run type" → 400 → bootstrap task failed。
+                # 语义上 bootstrap 等价于首次 scan：对源码目录只读扫描，输出 spec 文档。
+                provider="claude",
+                # ql-20260616-002b：daemon task-runner 的 spawn 用 ctx.prompt ?? '' 作为 claude stdin
+                # 的初始输入；不传 prompt → claude 收到空输入 → 不读 CLAUDE.md，直接回"等指令"，
+                # run exit_code=0 但 sillyspec scan 实际未执行。引导 claude 按 CLAUDE.md 跑 scan。
+                prompt=(
+                    "请按照项目根目录 .claude/CLAUDE.md 中的 stage:scan 工作流执行："
+                    "依次运行 sillyspec init 和 sillyspec run scan 完成对源码目录的扫描，"
+                    "产出 spec 文档。"
+                ),
+                root_path=str(code_root),
+                spec_root=str(spec_root),
+                runtime_root=str(Path(spec_root) / "runtime"),
             )
             if lease_id is None:
                 run.status = "failed"
