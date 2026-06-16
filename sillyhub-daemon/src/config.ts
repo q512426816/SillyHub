@@ -103,6 +103,13 @@ export interface DaemonConfig {
    */
   terminal_observer_enabled: boolean;
   /**
+   * lease 心跳间隔（秒），默认 5。
+   * ql-20260616-006：daemon 在 runLease 内并发跑 heartbeat 循环，
+   * 既续期 lease_expires_at（防 expire_leases 误杀），又检测 backend
+   * cancel_lease 信号（status='cancelled' → 自动 cancel + SIGTERM kill）。
+   */
+  lease_heartbeat_interval: number;
+  /**
    * 观察日志写入模式：
    *   - 'parsed'：只写 echoAgentEvent/echoTaskBoundary 渲染后的可读文本
    *   - 'raw'：只写 Claude 原始 stdout/stderr
@@ -160,6 +167,8 @@ export const DEFAULT_CONFIG: Readonly<DaemonConfig> = Object.freeze({
   terminal_observer_mode: 'parsed',
   terminal_observer_close_on_exit: false,
   terminal_observer_command: null,
+  // ql-20260616-006：lease 心跳间隔（cancel 信号检测 + 续期）
+  lease_heartbeat_interval: 5,
 });
 
 // ── loadConfig（异步加载 + 合并默认 + 自动生成 runtime_id）──────────────────

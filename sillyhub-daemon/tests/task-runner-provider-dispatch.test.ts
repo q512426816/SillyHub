@@ -210,8 +210,9 @@ describe('A-08: spawn env 透传 credential.buildEnv 的 key（对齐 Python tes
 
 describe('A-09: 事件转发 submitMessages 精确参数（对齐 Python test_event_forwarding）', () => {
   // Python 验证 on_event callback 被调 + submit_messages 入参；TS 事件转发是 TaskRunner._handleLine 职责，
-  // stdout 行经 adapter.parse → AgentEvent → _eventToMessage → submitMessages。
-  it('text 事件 → submitMessages(leaseId, claimToken, agentRunId, [{event_type:"text", content:...}])', async () => {
+  // stdout 行经 adapter.parse → AgentEvent → _eventToMessages → submitMessages。
+  it('text 事件 → submitMessages(leaseId, claimToken, agentRunId, [{event_type:"text", content:"[ASSISTANT] ..."}])', async () => {
+    // ql-20260616-005：_eventToMessages 渲染为 [ASSISTANT] 前缀文本（1:1 老格式）
     const fakeChild = createFakeChild();
     driveSpawn(fakeChild);
     const { runner, client } = setupRunner({});
@@ -233,7 +234,7 @@ describe('A-09: 事件转发 submitMessages 精确参数（对齐 Python test_ev
     const messages = callArgs[3] as Record<string, unknown>[];
     expect(messages.length).toBe(1);
     expect(messages[0]!['event_type']).toBe('text');
-    expect(messages[0]!['content']).toBe('hello agent says hi');
+    expect(messages[0]!['content']).toBe('[ASSISTANT] hello agent says hi');
   });
 });
 

@@ -341,18 +341,22 @@ class AgentService:
 
         Daemon-only: ``kill_run`` delegates to
         ``DaemonLeaseService.cancel_lease`` to flip the active lease to
-        ``cancelled``.  It does NOT directly mutate the AgentRun status
-        (AC-09): the AgentRun status is driven asynchronously by the daemon
-        via ``sync_agent_run_status`` once it observes the cancelled lease
-        (single-driver state mapping).  When no active lease exists,
-        ``cancel_lease`` logs a warning and returns, making kill_run idempotent.
+        ``cancelled``.  Dual-path semantics (ql-20260616-006):
+
+        - **Claimed lease**（daemon 在跑）：AgentRun.status 不在此处变更，等 daemon
+          心跳检测到 cancelled 后通过 ``sync_agent_run_status`` 上报 killed
+          （single-driver state mapping, AC-09）。
+        - **Pending lease**（daemon 从未 claim）或 **无 active lease**：
+          ``cancel_lease`` 直接把 AgentRun.status 置为 ``killed``（带 finished_at），
+          否则会永久 pending。这是 daemon-side 检测不会触发的兜底路径。
+
+        When no active lease exists and AgentRun is already terminal, kill is idempotent.
 
         Args:
             run_id: UUID of the AgentRun to cancel.
 
         Returns:
-            The AgentRun record (status unchanged; the daemon reports the
-            terminal state).
+            The AgentRun record (current status after cancel_lease runs).
 
         Raises:
             AgentRunNotFound: run_id does not exist in the database.

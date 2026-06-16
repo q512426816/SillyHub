@@ -350,7 +350,14 @@ describe('AC-02：R-04 stdout 背压（readline 逐行不积压）', () => {
     fakeChild._emitExit(0);
     await p;
 
-    expect(submitCalls).toEqual(['line-0', 'line-1', 'line-2', 'line-3', 'line-4']);
+    // ql-20260616-005：text 事件 content 渲染为 [ASSISTANT] <content>，对齐老格式
+    expect(submitCalls).toEqual([
+      '[ASSISTANT] line-0',
+      '[ASSISTANT] line-1',
+      '[ASSISTANT] line-2',
+      '[ASSISTANT] line-3',
+      '[ASSISTANT] line-4',
+    ]);
   });
 
   it('空 stdout（无事件）→ status=completed, output 空（对齐 Python test_no_progress_when_no_events）', async () => {
@@ -493,6 +500,98 @@ describe('AC-05：取消（AbortSignal）', () => {
     const { runner } = setupRunner({});
     expect(await runner.cancel('nope')).toBe(false);
   });
+
+  // ql-20260616-006：lease heartbeat 检测到 backend cancel 信号 → 自动 cancel + kill
+  it('leaseHeartbeat 返回 status=cancelled → 自动 cancel + SIGTERM kill 子进程', async () => {
+    // 用极短 lease_heartbeat_interval（1s）+ 真实定时器，避免 fake timer 跟
+    // waitForSpawn / spawn 异步交互复杂。1s × 2 次 ≈ 2s 触发 cancel。
+    const fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    const leaseHeartbeat = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 'claimed' })
+      .mockResolvedValueOnce({ status: 'cancelled' });
+    const { runner } = setupRunner({
+      client: { leaseHeartbeat },
+      config: { ...makeNoRetryConfig(), lease_heartbeat_interval: 1 },
+    });
+    const killSpy = vi.spyOn(fakeChild, 'kill');
+
+    const p = runner.runLease(
+      makeLease({ leaseId: 'l-hb-cancel', claimToken: 'tok-hb' }),
+    );
+    await waitForSpawn();
+
+    // 等 2.5s 让 heartbeat 循环跑两次（1s 间隔，第 2 次返 cancelled → cancel）
+    await new Promise((r) => setTimeout(r, 2500));
+
+    expect(leaseHeartbeat).toHaveBeenCalled();
+    expect(killSpy).toHaveBeenCalled();
+    const sig = killSpy.mock.calls[0]?.[0];
+    expect(sig === 'SIGTERM' || sig === undefined).toBe(true);
+    // 让 _spawnAndStream 的 for-await 跳出
+    fakeChild._emitExit(null, 'SIGTERM');
+
+    const result = await p;
+    expect(result.status).toBe('cancelled');
+    expect(result.error).toContain('cancelled');
+    killSpy.mockRestore();
+  }, 10000);
+
+  it('无 claimToken → 跳过 leaseHeartbeat（避免无效请求）', async () => {
+    const fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    const leaseHeartbeat = vi.fn().mockResolvedValue({ status: 'claimed' });
+    const { runner } = setupRunner({ client: { leaseHeartbeat } });
+
+    const p = runner.runLease(
+      makeLease({ leaseId: 'l-no-tok', claimToken: '' }),
+    );
+    await waitForSpawn();
+    fakeChild._emitExit(0);
+    await p;
+
+    // claimToken 空 → leaseHeartbeat 永不被调
+    expect(leaseHeartbeat).not.toHaveBeenCalled();
+  });
+
+  // ql-20260616-006：cancel 时先调 syncStatus("killed") 让 AgentRun 立即终态
+  it('检测到 cancelled 时先调 syncStatus("killed") 再 cancel', async () => {
+    const fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    const leaseHeartbeat = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 'claimed' })
+      .mockResolvedValueOnce({ status: 'cancelled' });
+    const syncStatus = vi.fn().mockResolvedValue({ status: 'killed' });
+    const { runner } = setupRunner({
+      client: { leaseHeartbeat, syncStatus },
+      config: { ...makeNoRetryConfig(), lease_heartbeat_interval: 1 },
+    });
+    const killSpy = vi.spyOn(fakeChild, 'kill');
+
+    const p = runner.runLease(
+      makeLease({ leaseId: 'l-sync-cancel', claimToken: 'tok-sync' }),
+    );
+    await waitForSpawn();
+
+    // 等 2.5s 让 heartbeat 跑两次，第 2 次返 cancelled 触发 syncStatus+cancel
+    await new Promise((r) => setTimeout(r, 2500));
+
+    // syncStatus 被调用，status='killed'，error='cancelled by user'
+    expect(syncStatus).toHaveBeenCalledWith(
+      'l-sync-cancel',
+      'tok-sync',
+      'killed',
+      'cancelled by user',
+    );
+    expect(killSpy).toHaveBeenCalled();
+    fakeChild._emitExit(null, 'SIGTERM');
+
+    const result = await p;
+    expect(result.status).toBe('cancelled');
+    killSpy.mockRestore();
+  }, 10000);
 });
 
 // ── AC-06 超时看门狗（对齐 Python stream_json.py:110-119 + B-19-07）──────────
@@ -819,36 +918,167 @@ describe('output/error 截断（_truncate）', () => {
   });
 });
 
-// ── _eventToMessage（对齐 Python _event_to_message L285-311）──────────────────
+// ── _eventToMessages（ql-20260616-005：1:N 渲染，1:1 复现老 SERVER 路径格式）──
 
-describe('_eventToMessage（对齐 Python _event_to_message）', () => {
-  // 通过 runner 实例的私有方法访问（TS 允许 (runner as any)._eventToMessage）
-  function callEventToMessage(runner: TaskRunner, ev: AgentEvent): Record<string, unknown> | null {
+describe('_eventToMessages（对齐老 _format_conversation_log）', () => {
+  // 通过 runner 实例的私有方法访问（TS 允许 (runner as any)._eventToMessages）
+  function callEventToMessages(
+    runner: TaskRunner,
+    ev: AgentEvent,
+  ): Record<string, unknown>[] | null {
     return (runner as unknown as {
-      _eventToMessage: (ev: AgentEvent) => Record<string, unknown> | null;
-    })._eventToMessage(ev);
+      _eventToMessages: (ev: AgentEvent) => Record<string, unknown>[] | null;
+    })._eventToMessages(ev);
   }
 
-  it('text 事件 → { event_type, content }', () => {
+  it('text 事件 → 1 条 [ASSISTANT] content (stdout)', () => {
     const { runner } = setupRunner({});
-    const msg = callEventToMessage(runner, { type: 'text', content: 'hi' });
-    expect(msg).toEqual({ event_type: 'text', content: 'hi' });
+    const msgs = callEventToMessages(runner, { type: 'text', content: 'hi' });
+    expect(msgs).toEqual([
+      { event_type: 'text', content: '[ASSISTANT] hi', channel: 'stdout' },
+    ]);
   });
 
-  it('tool_use 事件 + metadata → 含 tool_name/call_id', () => {
+  it('text + status=running → 1 条 [SYSTEM:init] session started', () => {
     const { runner } = setupRunner({});
-    const msg = callEventToMessage(runner, {
+    const msgs = callEventToMessages(runner, {
+      type: 'text',
+      content: '',
+      metadata: { status: 'running', session_id: 'sess-1' },
+    });
+    expect(msgs).toEqual([
+      {
+        event_type: 'text',
+        content: '[SYSTEM:init] session started',
+        channel: 'stdout',
+        session_id: 'sess-1',
+      },
+    ]);
+  });
+
+  it('text + thinking=true → 1 条 [THINKING] preview (2000 截断)', () => {
+    const { runner } = setupRunner({});
+    const long = 'x'.repeat(2500);
+    const msgs = callEventToMessages(runner, {
+      type: 'text',
+      content: long,
+      metadata: { thinking: true },
+    });
+    expect(msgs).toHaveLength(1);
+    expect(msgs![0]!.channel).toBe('stdout');
+    expect(msgs![0]!.content).toMatch(/^\[THINKING] x{2000}\.\.\.$/);
+  });
+
+  it('tool_use + input.command → 2 条 (stdout + tool_call JSON)', () => {
+    const { runner } = setupRunner({});
+    const msgs = callEventToMessages(runner, {
       type: 'tool_use',
       content: '',
-      metadata: { tool_name: 'bash', call_id: 'c1' },
+      metadata: {
+        tool_name: 'Bash',
+        call_id: 'call-1',
+        tool_input: { command: 'ls -la', description: 'list' },
+      },
     });
-    expect(msg).toMatchObject({ event_type: 'tool_use', tool_name: 'bash', call_id: 'c1' });
+    expect(msgs).toHaveLength(2);
+    // 第一条 stdout 文本
+    expect(msgs![0]).toMatchObject({
+      event_type: 'tool_use',
+      channel: 'stdout',
+      call_id: 'call-1',
+    });
+    expect(msgs![0]!.content).toBe('[TOOL_USE] Bash: ls -la');
+    // 第二条 tool_call JSON
+    expect(msgs![1]!.channel).toBe('tool_call');
+    const parsed = JSON.parse(msgs![1]!.content as string);
+    expect(parsed).toMatchObject({
+      tool: 'Bash',
+      args: { command: 'ls -la', description: 'list' },
+      status: 'allowed',
+      success: true,
+    });
+    expect(typeof parsed.timestamp).toBe('string');
   });
 
-  it('空 content + 无 tool_name + 无 status → null（丢弃）', () => {
+  it('tool_use 无 input.command → stdout 行 args 为 JSON 字符串', () => {
     const { runner } = setupRunner({});
-    const msg = callEventToMessage(runner, { type: 'text', content: '' });
-    expect(msg).toBeNull();
+    const msgs = callEventToMessages(runner, {
+      type: 'tool_use',
+      content: '',
+      metadata: {
+        tool_name: 'Read',
+        tool_input: { file_path: '/tmp/a.txt' },
+      },
+    });
+    expect(msgs![0]!.content).toBe(
+      '[TOOL_USE] Read: {"file_path":"/tmp/a.txt"}',
+    );
+  });
+
+  it('tool_result → 1 条 [TOOL_RESULT] preview (3000 截断)', () => {
+    const { runner } = setupRunner({});
+    const long = 'y'.repeat(3500);
+    const msgs = callEventToMessages(runner, {
+      type: 'tool_result',
+      content: long,
+    });
+    expect(msgs).toHaveLength(1);
+    expect(msgs![0]!.channel).toBe('stdout');
+    expect(msgs![0]!.content).toBe(`[TOOL_RESULT] ${'y'.repeat(3000)}`);
+  });
+
+  it('error → 1 条 [LEVEL] content (stderr)', () => {
+    const { runner } = setupRunner({});
+    const msgs = callEventToMessages(runner, {
+      type: 'error',
+      content: 'something broke',
+      metadata: { level: 'warn' },
+    });
+    expect(msgs).toEqual([
+      {
+        event_type: 'error',
+        content: '[WARN] something broke',
+        channel: 'stderr',
+      },
+    ]);
+  });
+
+  it('error 无 level → 默认 [ERROR]', () => {
+    const { runner } = setupRunner({});
+    const msgs = callEventToMessages(runner, {
+      type: 'error',
+      content: 'fatal',
+    });
+    expect(msgs![0]!.content).toBe('[ERROR] fatal');
+    expect(msgs![0]!.channel).toBe('stderr');
+  });
+
+  it('complete + stats → 1 条 [RESULT:success] duration/turns', () => {
+    const { runner } = setupRunner({});
+    const msgs = callEventToMessages(runner, {
+      type: 'complete',
+      content: 'all done',
+      metadata: {
+        stats: { total_duration_ms: 12345, num_turns: 7 },
+      },
+    });
+    expect(msgs).toEqual([
+      {
+        event_type: 'complete',
+        content: '[RESULT:success] all done duration=12345ms turns=7',
+        channel: 'stdout',
+      },
+    ]);
+  });
+
+  it('text + usage metadata → usage 透传到首条 message', () => {
+    const { runner } = setupRunner({});
+    const msgs = callEventToMessages(runner, {
+      type: 'text',
+      content: 'hi',
+      metadata: { usage: { input_tokens: 100, output_tokens: 50 } },
+    });
+    expect(msgs![0]!.usage).toEqual({ input_tokens: 100, output_tokens: 50 });
   });
 });
 

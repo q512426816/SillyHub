@@ -288,6 +288,61 @@ def create_app() -> FastAPI:
                 headers=sse_headers,
             )
 
+        @qc_router.post("/daemon-chat/{run_id}/kill")
+        async def kill_quick_chat(
+            run_id: str,
+            session: AsyncSession = Depends(get_session),
+            user: User = Depends(require_permission_any(Permission.TASK_RUN_AGENT)),
+        ) -> dict:
+            """ql-20260616-006：终止 quick-chat 类型的 agent run。
+
+            复用 DaemonLeaseService.cancel_lease：
+              - 若 lease 已被 daemon claim：daemon 心跳检测 cancelled →
+                syncStatus('killed') + complete_lease
+              - 若 lease 还在 pending（daemon 从未 claim）：cancel_lease 直接把
+                agent_run 置为 killed（防止永久 pending）
+
+            与 workspace-scoped kill 对齐：返回 {id, status}，status 反映当前最新状态。
+            """
+            import uuid as _uuid
+
+            from fastapi import HTTPException
+            from sqlalchemy import text as sa_text
+
+            from app.modules.agent.service import AgentService
+
+            try:
+                parsed = _uuid.UUID(run_id)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=404, detail="Run not found") from None
+
+            row = (
+                (
+                    await session.execute(
+                        sa_text(
+                            "SELECT id, status FROM agent_runs "
+                            "WHERE id = :id AND spec_strategy = 'quick-chat'"
+                        ),
+                        {"id": str(parsed)},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if row is None:
+                raise HTTPException(status_code=404, detail="Run not found")
+
+            if row["status"] not in ("pending", "running"):
+                # 已是终态，幂等返回当前状态
+                return {"id": str(parsed), "status": row["status"]}
+
+            svc = AgentService(session)
+            await svc.kill_run(parsed)
+            # kill_run 走 cancel_lease；pending lease → agent_run 立即 killed；
+            # claimed lease → 由 daemon 心跳上报后收尾
+            run = await svc.get_run(parsed)
+            return {"id": str(parsed), "status": run.status if run else "killed"}
+
         app.include_router(qc_router, prefix="/api")
 
     app.include_router(health_router, prefix="/api")

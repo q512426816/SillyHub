@@ -283,7 +283,20 @@ export class StreamJsonAdapter implements ProtocolAdapter {
       }
     }
     // 对照 Python：无 content 或全空 → 返回 None。Node 返回 null（无 event）。
-    return events.length > 0 ? events : null;
+    if (events.length === 0) return null;
+
+    // ql-20260616-004：实时 token 透传 —— 每次 assistant 事件把当前累加 usage snapshot
+    // 注入到每个 event.metadata.usage，让 task-runner → backend submit_messages 收到时
+    // 实时 UPDATE AgentRun.input_tokens/output_tokens。snapshot 必须深拷贝，否则后续
+    // 累加会污染已发出 event 的 metadata（_accumulatedUsage 是 mutable 对象）。
+    const usageSnapshot = {
+      input_tokens: this._accumulatedUsage.input_tokens,
+      output_tokens: this._accumulatedUsage.output_tokens,
+    };
+    for (const ev of events) {
+      ev.metadata = { ...(ev.metadata ?? {}), usage: { ...usageSnapshot } };
+    }
+    return events;
   }
 
   /**

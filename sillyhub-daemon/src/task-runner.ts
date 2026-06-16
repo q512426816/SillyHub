@@ -109,6 +109,16 @@ export interface RunnerHubClient {
     messages: Record<string, unknown>[],
   ): Promise<unknown>;
   leaseHeartbeat?(leaseId: string, claimToken: string): Promise<unknown>;
+  /**
+   * ql-20260616-006：上报 AgentRun 状态（cancel 时报 killed）。
+   * 端点 POST /api/daemon/leases/{leaseId}/sync。
+   */
+  syncStatus?(
+    leaseId: string,
+    claimToken: string,
+    status: string,
+    error?: string,
+  ): Promise<unknown>;
 }
 
 /**
@@ -266,6 +276,10 @@ export class TaskRunner {
     const outputParts: string[] = [];
     let sessionId = '';
 
+    // ql-20260616-006：lease heartbeat 循环控制器（声明在 try 外，便于 finally 清理）
+    let hbStop: AbortController | null = null;
+    let heartbeatPromise: Promise<void> | null = null;
+
     try {
       // 步骤 1：workspace.prepareWorkspace（失败直接抛 → finally 映射 failed）
       // workspaceName 仍保留兜底（task-05 §实现要求 4：保留 ctx.workspaceName ?? 'default'）。
@@ -326,6 +340,18 @@ export class TaskRunner {
       } catch (e) {
         console.warn('task_runner: start_lease_failed', leaseId, e);
       }
+
+      // ql-20260616-006：lease heartbeat 循环（并发检测 backend cancel 信号）
+      // backend cancel_lease 把 lease.status 置 'cancelled'，daemon 侧通过定期
+      // leaseHeartbeat 拉取 status 字段检测；命中立即 this.cancel() 触发 SIGTERM
+      // kill 子进程。同时续期 lease_expires_at（默认 60s），防止 expire_leases 误杀。
+      hbStop = new AbortController();
+      heartbeatPromise = this._runLeaseHeartbeatLoop(
+        leaseId,
+        claimToken,
+        ac.signal,
+        hbStop.signal,
+      );
 
       // 步骤 6：spawn 子进程 + 流式采集（task-10 B3：spawn 级失败自动重试循环）
       const cmdPath = ctx.cmdPath ?? ctx.cmd ?? '';
@@ -432,6 +458,80 @@ export class TaskRunner {
         spawnStatus: 'failed',
         stats: undefined,
         retryCount: 0,
+      });
+    } finally {
+      // ql-20260616-006：停止 lease heartbeat 循环并等其退出，避免泄漏
+      if (hbStop) hbStop.abort();
+      if (heartbeatPromise) await heartbeatPromise.catch(() => {});
+    }
+  }
+
+  // ── ql-20260616-006：lease heartbeat 循环（cancel 信号检测 + 续期）──────────
+
+  /**
+   * 并发跑 lease heartbeat：定期调 backend leaseHeartbeat，拉回的 status 字段
+   * 命中 'cancelled' → 立即 this.cancel(leaseId) 触发 AbortSignal + SIGTERM kill
+   * 子进程。同时续期 lease_expires_at，防止 expire_leases 误杀。
+   *
+   * 并发安全：与 _spawnAndStream 共享 ac.signal（cancel 时一并 abort）。
+   * stopSignal 用于正常退出（spawn 完成）时让循环跳出。
+   *
+   * leaseHeartbeat 是 RunnerHubClient 可选方法（旧 mock client 可能没实现），
+   * 缺失时直接 return（不影响主流程）。
+   */
+  private async _runLeaseHeartbeatLoop(
+    leaseId: string,
+    claimToken: string,
+    parentSignal: AbortSignal,
+    stopSignal: AbortSignal,
+  ): Promise<void> {
+    if (!claimToken) return;
+    if (typeof this.client.leaseHeartbeat !== 'function') return;
+    const intervalMs = Math.max(1, (this.config?.lease_heartbeat_interval ?? 5)) * 1000;
+    while (!parentSignal.aborted && !stopSignal.aborted) {
+      try {
+        const resp = await this.client.leaseHeartbeat(leaseId, claimToken);
+        const status = (resp as { status?: string } | null)?.status;
+        if (status === 'cancelled') {
+          console.warn(
+            `task_runner: lease_cancelled_by_backend lease=${leaseId} — reporting killed + killing child`,
+          );
+          // 先上报 killed 让 AgentRun.status 立即变终态（complete_lease 对 cancelled
+          // lease 会失败，syncStatus 是唯一保证 agent_run 状态更新的路径）
+          if (typeof this.client.syncStatus === 'function') {
+            try {
+              await this.client.syncStatus(
+                leaseId,
+                claimToken,
+                'killed',
+                'cancelled by user',
+              );
+            } catch (syncErr) {
+              console.warn(
+                'task_runner: sync_status_killed_failed',
+                leaseId,
+                syncErr,
+              );
+            }
+          }
+          await this.cancel(leaseId);
+          return;
+        }
+      } catch (e) {
+        // heartbeat 失败不致命（网络抖动 / lease 过期 / token 失效），仅 debug
+        console.warn('task_runner: lease_heartbeat_failed', leaseId, e);
+      }
+      // 可中断 sleep：parent 或 stop 任一 abort 立即跳出
+      // 注意：若信号已 aborted（race），Promise executor 同步 resolve，避免悬挂。
+      if (parentSignal.aborted || stopSignal.aborted) return;
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(resolve, intervalMs);
+        const onAbort = () => {
+          clearTimeout(t);
+          resolve();
+        };
+        parentSignal.addEventListener('abort', onAbort, { once: true });
+        stopSignal.addEventListener('abort', onAbort, { once: true });
       });
     }
   }
@@ -845,9 +945,9 @@ export class TaskRunner {
         }
       }
       // 转 submitMessages 负载
-      const msg = this._eventToMessage(ev);
-      if (msg) {
-        messages.push(msg);
+      const msgs = this._eventToMessages(ev);
+      if (msgs && msgs.length > 0) {
+        messages.push(...msgs);
       }
     }
 
@@ -868,52 +968,192 @@ export class TaskRunner {
   // ── AgentEvent → submitMessages payload（对齐 Python _event_to_message）────
 
   /**
-   * 把 AgentEvent IR 映射为 server submit_messages 的单条 message dict。
+   * 把 AgentEvent IR 渲染成 server submit_messages 的 message dict 列表。
    *
-   * 对照 Python `task_runner.py:285-311`：
-   *   event_type = ev.event_type  → eventType: ev.type
-   *   if ev.content:              → content 仅非空时写
-   *   if ev.tool_name:            → toolName（来自 metadata.tool_name）
-   *   if ev.call_id:              → callId（来自 metadata.call_id）
-   *   if ev.status:               → status（来自 metadata.status）
-   *   if ev.level:                → level（来自 metadata.level）
-   *   if ev.session_id:           → sessionId（来自 metadata.session_id）
+   * ql-20260616-005：1:1 复现老 SERVER 路径 _format_conversation_log 渲染规则
+   * （commit be5448b 删除前 backend/app/modules/agent/adapters/claude_code.py:306-388），
+   * 让前端 normalize.ts / agent-log-viewer.tsx 不动就能解析 [ASSISTANT]/[TOOL_USE]/
+   * [TOOL_RESULT]/[SYSTEM:xxx]/[RESULT:success] 前缀，tool_use 同时产 stdout 文本
+   * 行 + tool_call JSON 两类 message，前端 ToolCallCard 渲染照常工作。
    *
-   * Python 的 event_type 字符串直接保留（如 "assistant"/"tool_use"/"result"）。
-   * Node IR 已收敛为 5 元组（text/tool_use/tool_result/error/complete），
-   * 此处直接用 type 字段值（未做反向还原）。
+   * 1 个 event → 0/1/2 条 message：
+   *   - text + status=running → 1 条 [SYSTEM:init] session started (stdout)
+   *   - text + thinking       → 1 条 [THINKING] <preview 2000> (stdout)
+   *   - text + 其他            → 1 条 [ASSISTANT] <content> (stdout)
+   *   - tool_use              → 2 条：[TOOL_USE] Name: cmd (stdout) + JSON (tool_call)
+   *   - tool_result           → 1 条 [TOOL_RESULT] <preview 3000> (stdout)
+   *   - error                 → 1 条 [LEVEL] <content> (stderr)
+   *   - complete              → 1 条 [RESULT:success] <text> duration=Xms turns=N (stdout)
    *
-   * 全部字段为空（content 空 + 无 metadata）→ 返回 null（丢弃，对齐 Python 仅 event_type 也提交）。
-   * 这里放宽：即使只有 event_type 也提交（与 Python 一致）。
+   * 业务字段（session_id/call_id/usage）注入到首条 message，backend submit_messages
+   * 透传到 AgentRunLog.metadata / AgentRun.input_tokens（usage 实时回写，见 ql-004）。
+   *
+   * 返回 null：未知 event type 或所有 message 都被过滤。
    */
-  private _eventToMessage(ev: AgentEvent): Record<string, unknown> | null {
-    const msg: Record<string, unknown> = {
-      event_type: ev.type,
-    };
-    if (ev.content) {
-      msg.content = ev.content;
-    }
+  private _eventToMessages(ev: AgentEvent): Record<string, unknown>[] | null {
     const md = ev.metadata ?? {};
-    if (typeof md.tool_name === 'string' && md.tool_name) {
-      msg.tool_name = md.tool_name;
+    const rawContent = ev.content ?? '';
+    const messages: Record<string, unknown>[] = [];
+
+    switch (ev.type) {
+      case 'text': {
+        const status = typeof md.status === 'string' ? md.status : '';
+        const thinking = md.thinking === true;
+        // ql-20260616-005：空 content + 非 system/thinking 分支 → 丢弃（对齐老
+        // _eventToMessage L744 「空 content + 无 metadata 业务字段 → 返回 null」语义）
+        if (!rawContent && status !== 'running' && !thinking) {
+          return null;
+        }
+        let line: string;
+        if (status === 'running') {
+          // stream-json.ts parseSystem 产的 status='running' 事件 → [SYSTEM:init]
+          line = '[SYSTEM:init] session started';
+        } else if (thinking) {
+          const preview =
+            rawContent.length > 2000
+              ? rawContent.slice(0, 2000) + '...'
+              : rawContent;
+          line = `[THINKING] ${preview}`;
+        } else {
+          line = `[ASSISTANT] ${rawContent}`;
+        }
+        messages.push({
+          event_type: ev.type,
+          content: line,
+          channel: 'stdout',
+        });
+        break;
+      }
+      case 'tool_use': {
+        const name =
+          typeof md.tool_name === 'string' && md.tool_name
+            ? md.tool_name
+            : 'unknown';
+        const inputObj =
+          md.tool_input &&
+          typeof md.tool_input === 'object' &&
+          !Array.isArray(md.tool_input)
+            ? (md.tool_input as Record<string, unknown>)
+            : {};
+        // stdout 文本行：[TOOL_USE] Name: <command> 或 [TOOL_USE] Name: {json}
+        // 对齐老 _format_conversation_log L333-337
+        const cmd = typeof inputObj.command === 'string' ? inputObj.command : '';
+        let argsLine: string;
+        if (cmd) {
+          argsLine = cmd;
+        } else {
+          try {
+            argsLine = JSON.stringify(inputObj);
+          } catch {
+            argsLine = '';
+          }
+        }
+        const stdoutContent = `[TOOL_USE] ${name}: ${argsLine}`.slice(0, 2000);
+        messages.push({
+          event_type: ev.type,
+          content: stdoutContent,
+          channel: 'stdout',
+        });
+        // 额外发一条 tool_call channel 的 JSON，前端 parseToolCallContent 解析为
+        // ToolCallCard。对齐老 _emit_stdout L749-757 的 tc_content 格式。
+        const ts = new Date().toISOString();
+        let tcContent: string;
+        try {
+          tcContent = JSON.stringify({
+            tool: name,
+            args: inputObj,
+            timestamp: ts,
+            status: 'allowed',
+            success: true,
+          });
+        } catch {
+          tcContent = JSON.stringify({
+            tool: name,
+            args: {},
+            timestamp: ts,
+            status: 'allowed',
+            success: true,
+          });
+        }
+        messages.push({
+          event_type: ev.type,
+          content: tcContent,
+          channel: 'tool_call',
+        });
+        break;
+      }
+      case 'tool_result': {
+        const preview =
+          rawContent.length > 3000 ? rawContent.slice(0, 3000) : rawContent;
+        messages.push({
+          event_type: ev.type,
+          content: `[TOOL_RESULT] ${preview}`,
+          channel: 'stdout',
+        });
+        break;
+      }
+      case 'error': {
+        const level =
+          typeof md.level === 'string' && md.level ? md.level : 'error';
+        messages.push({
+          event_type: ev.type,
+          content: `[${level.toUpperCase()}] ${rawContent}`.slice(0, 5000),
+          channel: 'stderr',
+        });
+        break;
+      }
+      case 'complete': {
+        const stats =
+          md.stats &&
+          typeof md.stats === 'object' &&
+          !Array.isArray(md.stats)
+            ? (md.stats as Record<string, unknown>)
+            : {};
+        const durationMs =
+          typeof stats.total_duration_ms === 'number'
+            ? stats.total_duration_ms
+            : null;
+        const numTurns =
+          typeof stats.num_turns === 'number' ? stats.num_turns : null;
+        let line = '[RESULT:success]';
+        const body = rawContent.trim();
+        if (body) {
+          line += ` ${body.slice(0, 3000)}`;
+        }
+        if (durationMs !== null) line += ` duration=${durationMs}ms`;
+        if (numTurns !== null) line += ` turns=${numTurns}`;
+        messages.push({
+          event_type: ev.type,
+          content: line,
+          channel: 'stdout',
+        });
+        break;
+      }
+      default: {
+        // 未知 event type：丢弃，避免污染日志
+        return null;
+      }
+    }
+
+    if (messages.length === 0) return null;
+
+    // 业务字段透传到首条 message（backend submit_messages 用于 usage 实时回写、
+    // session_id 索引等）。call_id 仅 tool_use 类型有意义，写第一条即可。
+    const first = messages[0]!;
+    if (typeof md.session_id === 'string' && md.session_id) {
+      first.session_id = md.session_id;
     }
     if (typeof md.call_id === 'string' && md.call_id) {
-      msg.call_id = md.call_id;
+      first.call_id = md.call_id;
     }
-    if (typeof md.status === 'string' && md.status) {
-      msg.status = md.status;
+    if (
+      md.usage &&
+      typeof md.usage === 'object' &&
+      !Array.isArray(md.usage)
+    ) {
+      first.usage = { ...(md.usage as Record<string, unknown>) };
     }
-    if (typeof md.level === 'string' && md.level) {
-      msg.level = md.level;
-    }
-    if (typeof md.session_id === 'string' && md.session_id) {
-      msg.session_id = md.session_id;
-    }
-    // 丢弃：空 content + 无任何 metadata 业务字段（避免空 message 污染 server）
-    if (!ev.content && Object.keys(msg).length <= 1) {
-      return null;
-    }
-    return msg;
+    return messages;
   }
 
   // ── 工具：截断（对齐 Python _truncate）─────────────────────────────────────

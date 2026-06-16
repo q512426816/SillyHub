@@ -229,6 +229,13 @@ export class Daemon {
   /** agent provider → server 分配的 runtime_id（register 成功后填入）。 */
   private readonly _registeredRuntimes = new Map<string, string>();
 
+  /**
+   * ql-20260616-006：agent provider → 本机 CLI 可执行文件路径。
+   * server 不持有 daemon 本机的 cmd_path（capabilities.bin_path 仅记录不回传），
+   * claim_lease 返回的 payload.cmdPath 恒 undefined → spawn 前必须由 daemon 注入。
+   */
+  private readonly _agentPaths = new Map<string, string>();
+
   /** 进行中的 lease_id 集合（并发去重，边界 3）。 */
   private readonly _inflightLeases = new Set<string>();
 
@@ -368,6 +375,11 @@ export class Daemon {
       });
       const serverRuntimeId = String(resp.id ?? '');
       this._registeredRuntimes.set(agent.provider, serverRuntimeId);
+      // ql-20260616-006：cmd_path 不来自 server（server 不知 daemon 本机路径），
+      // 由 daemon 自己维护 provider → 本机 path 映射，runLease 前注入到 ctx。
+      if (agent.path) {
+        this._agentPaths.set(agent.provider, agent.path);
+      }
       this._logger.info('registered', {
         provider: agent.provider,
         runtime_id: serverRuntimeId,
@@ -535,8 +547,24 @@ export class Daemon {
 
   private async _handleWsMessage(msg: DaemonMessage): Promise<void> {
     const msgType = msg.type;
-    const payload = (msg.payload ?? {}) as LeasePayload;
-
+    // ql-20260616-006：backend WS 发 snake_case (lease_id/runtime_id/task_id)，
+    // daemon 内部统一用 camelCase (LeasePayload/LeaseCtx)。在分发前做一次归一化，
+    // 让 _executeTask 不再因字段名不匹配而 task_no_lease_id 丢任务。
+    const rawPayload = (msg.payload ?? {}) as Record<string, unknown>;
+    const payload: LeasePayload = {
+      ...((rawPayload as unknown) as LeasePayload),
+      leaseId:
+        (rawPayload.leaseId as string | undefined) ??
+        (rawPayload.lease_id as string | undefined) ??
+        '',
+      runtimeId:
+        (rawPayload.runtimeId as string | undefined) ??
+        (rawPayload.runtime_id as string | undefined) ??
+        this._config.runtime_id,
+      agentRunId:
+        (rawPayload.agentRunId as string | undefined) ??
+        (rawPayload.agent_run_id as string | undefined),
+    };
     switch (msgType) {
       case MSG.TASK_AVAILABLE: {
         this._logger.info('task_available', { lease_id: payload.leaseId });
@@ -614,10 +642,59 @@ export class Daemon {
     // claim_resp.payload 兼容两种形态（daemon.py:306）：
     //   - server 返回 { lease_id, claim_token, payload: {...}, lease_expires_at }
     //   - 或 server 直接返回 payload 字段平铺
-    const nestedPayload = claimResp.payload as LeasePayload | undefined;
-    const execPayload: LeasePayload = nestedPayload
-      ? { ...payload, ...nestedPayload }
-      : { ...payload, ...(claimResp as unknown as LeasePayload) };
+    //
+    // ql-20260616-006：backend claim 返回 snake_case（lease_id/agent_run_id/...），
+    // 必须把 snake_case 归一化为 camelCase LeasePayload，否则 agentRunId/cmdPath 等
+    // 永远 undefined，submitMessages 因 agent_run_id 空字符串触发 422。
+    const nestedPayload = claimResp.payload as Record<string, unknown> | undefined;
+    const flatClaimResp = claimResp as Record<string, unknown>;
+    const rawExec: Record<string, unknown> = nestedPayload
+      ? { ...(nestedPayload as object), ...(flatClaimResp as object) }
+      : { ...(flatClaimResp as object) };
+    const execPayload: LeasePayload = {
+      ...payload,
+      leaseId: (rawExec.leaseId as string | undefined) ?? (rawExec.lease_id as string | undefined) ?? payload.leaseId,
+      runtimeId: (rawExec.runtimeId as string | undefined) ?? (rawExec.runtime_id as string | undefined) ?? runtimeId,
+      agentRunId:
+        (rawExec.agentRunId as string | undefined) ??
+        (rawExec.agent_run_id as string | undefined) ??
+        payload.agentRunId,
+      workspaceName:
+        (rawExec.workspaceName as string | undefined) ??
+        (rawExec.workspace_name as string | undefined) ??
+        payload.workspaceName,
+      repoUrl: (rawExec.repoUrl as string | undefined) ?? (rawExec.repo_url as string | undefined) ?? payload.repoUrl,
+      branch: (rawExec.branch as string | undefined) ?? payload.branch,
+      claudeMd:
+        (rawExec.claudeMd as string | undefined) ??
+        (rawExec.claude_md as string | undefined) ??
+        payload.claudeMd,
+      provider:
+        (rawExec.provider as string | undefined) ??
+        (rawExec.agent_type as string | undefined) ??
+        payload.provider,
+      toolConfig:
+        (rawExec.toolConfig as LeaseCtx['toolConfig'] | undefined) ??
+        (rawExec.tool_config as LeaseCtx['toolConfig'] | undefined) ??
+        payload.toolConfig,
+      resumeSessionId:
+        (rawExec.resumeSessionId as string | undefined) ??
+        (rawExec.resume_session_id as string | undefined) ??
+        payload.resumeSessionId,
+      sessionId:
+        (rawExec.sessionId as string | undefined) ??
+        (rawExec.session_id as string | undefined) ??
+        payload.sessionId,
+      cmdPath: (rawExec.cmdPath as string | undefined) ?? (rawExec.cmd_path as string | undefined) ?? payload.cmdPath,
+      cmd: (rawExec.cmd as string | undefined) ?? payload.cmd,
+      prompt: (rawExec.prompt as string | undefined) ?? payload.prompt,
+      model: (rawExec.model as string | undefined) ?? payload.model,
+      timeout: (rawExec.timeout as number | undefined) ?? payload.timeout,
+      timeoutSeconds:
+        (rawExec.timeoutSeconds as number | undefined) ??
+        (rawExec.timeout_seconds as number | undefined) ??
+        payload.timeoutSeconds,
+    };
 
     // 1.5 FETCH execution-context：claim 成功后、startLease 之前从 server 拉完整 bundle。
     // 当前 ctx 构造字段恒 undefined（claudeMd/repoUrl/branch/toolConfig...），
@@ -651,6 +728,12 @@ export class Daemon {
     // 字段优先级：execCtx（fetch 结果，最新源）?? execPayload（claim payload 兜底）。
     // **prompt 不从 fetch 覆盖**：payload.prompt 是 dispatch 时写入 lease.metadata 的
     // 最终意图，避免 fetch 端点重建 prompt 的潜在差异（task-05 §边界处理 5）。
+    //
+    // ql-20260616-006：cmdPath server 不会下发，daemon 必须从 _agentPaths（注册时
+    // 探测的本机路径）按 provider 注入，否则 task-runner 因 cmdPath 空直接 failed。
+    const resolvedProvider = execCtx?.provider ?? execPayload.provider ?? 'claude';
+    const localCmdPath =
+      execPayload.cmdPath ?? execPayload.cmd ?? this._agentPaths.get(resolvedProvider) ?? '';
     const ctx: LeaseCtx = {
       leaseId,
       runtimeId,
@@ -661,15 +744,15 @@ export class Daemon {
       repoUrl: execCtx?.repo_url ?? execPayload.repoUrl,
       branch: execCtx?.branch ?? execPayload.branch,
       claudeMd: execCtx?.claude_md ?? execPayload.claudeMd,
-      provider: execCtx?.provider ?? execPayload.provider,
+      provider: resolvedProvider,
       // toolConfig：fetch.tool_config 是 snake_case Record，payload.toolConfig 是 camelCase；
       // fetch 优先（端点是 task-03 之后的最新源）
       toolConfig: execCtx?.tool_config ?? execPayload.toolConfig,
       // resumeSessionId 优先用 fetch（端点是最新源）；session_id 兜底
       resumeSessionId: execCtx?.resume_session_id ?? execPayload.resumeSessionId,
       sessionId: execCtx?.session_id ?? execPayload.sessionId,
-      cmdPath: execPayload.cmdPath,
-      cmd: execPayload.cmd,
+      cmdPath: localCmdPath,
+      cmd: execPayload.cmd ?? localCmdPath,
       prompt: execPayload.prompt, // 不从 fetch 覆盖
       model: execPayload.model,
       timeout: execPayload.timeout,

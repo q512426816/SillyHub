@@ -699,6 +699,42 @@ describe('Daemon', () => {
     await daemon.stop();
   });
 
+  // ql-20260616-006：backend WS 发 snake_case，daemon 兼容读取
+  it('ql-20260616-006：task_available 收到 snake_case (lease_id/runtime_id) 也能正常 claim', async () => {
+    const client = createMockClient();
+    client.claimLease.mockResolvedValueOnce({
+      claim_token: 'tok-snake',
+      payload: { prompt: 'hello', provider: 'claude' },
+    });
+    client.startLease.mockResolvedValueOnce({});
+    client.completeLease.mockResolvedValueOnce({});
+    const taskRunner = createMockTaskRunner();
+    taskRunner.runLease.mockResolvedValueOnce({
+      ok: true,
+      patch: '',
+      stats: {},
+      status: 'completed',
+    });
+    const { daemon, wsClientMock } = buildDaemon({ client, taskRunner });
+    track(daemon);
+    await daemon.start();
+
+    // 模拟 backend WS 真实发送的 snake_case payload
+    wsClientMock._injectMessage({
+      type: MSG.TASK_AVAILABLE,
+      payload: {
+        runtime_id: 'srv-rid-snake',
+        task_id: null,
+        lease_id: 'lease-snake-001',
+      },
+    });
+    await sleep(60);
+
+    expect(client.claimLease).toHaveBeenCalledTimes(1);
+    expect(client.claimLease).toHaveBeenCalledWith('lease-snake-001', 'srv-rid-snake');
+    await daemon.stop();
+  });
+
   // AC-09: AbortController 中断
   it('AC-09: stop 时 AbortController 触发 abortableSleep 立即退出', async () => {
     const client = createMockClient();

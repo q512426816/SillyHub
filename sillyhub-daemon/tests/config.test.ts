@@ -35,11 +35,12 @@ describe('config', () => {
   // ── AC-03：字段与默认值对照 Python config.py:22-32 DEFAULTS ──
 
   describe('字段与默认值（AC-03，对照 Python DEFAULTS）', () => {
-    it('DEFAULT_CONFIG 正好 16 字段，键名 1:1（task-10 新增 default_timeout_seconds / max_retries；daemon-api-key 新增 api_key；ql-20260616-003 新增 4 个 terminal_observer_*）', () => {
+    it('DEFAULT_CONFIG 正好 17 字段，键名 1:1（task-10 新增 default_timeout_seconds / max_retries；daemon-api-key 新增 api_key；ql-20260616-003 新增 4 个 terminal_observer_*；ql-20260616-006 新增 lease_heartbeat_interval）', () => {
       expect(Object.keys(DEFAULT_CONFIG).sort()).toEqual([
         'api_key',
         'default_timeout_seconds',
         'heartbeat_interval',
+        'lease_heartbeat_interval',
         'log_level',
         'max_concurrent_tasks',
         'max_retries',
@@ -54,6 +55,10 @@ describe('config', () => {
         'token',
         'workspace_dir',
       ]);
+    });
+
+    it('ql-20260616-006：lease_heartbeat_interval 默认 5 秒', () => {
+      expect(DEFAULT_CONFIG.lease_heartbeat_interval).toBe(5);
     });
 
     it('ql-20260616-003：terminal_observer_* 4 字段默认值', () => {

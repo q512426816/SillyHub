@@ -577,3 +577,42 @@ class TestCompleteLeaseWithResult:
         assert agent_run.output_tokens == 500
         assert agent_run.session_id == "sess-123"
         assert agent_run.exit_code == 0
+
+    @pytest.mark.asyncio
+    async def test_complete_lease_does_not_overwrite_killed_with_cancelled(
+        self, db_session: AsyncSession
+    ) -> None:
+        """ql-20260616-006：AgentRun 已 killed（syncStatus 写入）时，
+        complete_lease 上报 cancelled 不应降级覆盖。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="killed")
+        # 模拟 syncStatus 已写入 finished_at
+        agent_run.finished_at = datetime.now(UTC)
+        db_session.add(agent_run)
+        await db_session.commit()
+
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "kill-tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        # daemon cancel 后会 complete_lease with status='cancelled'
+        result = await svc.complete_lease(
+            lease.id,
+            "kill-tok",
+            {"status": "cancelled", "error": "task cancelled"},
+        )
+
+        assert result.status == "completed"  # lease 标 completed（自身生命周期结束）
+        await db_session.refresh(agent_run)
+        # AgentRun 不应被 cancelled 覆盖（killed 优先级更高）
+        assert agent_run.status == "killed"

@@ -457,10 +457,26 @@ class DaemonService:
             agent_run = await self._session.get(AgentRun, lease.agent_run_id)
             if agent_run is not None:
                 result_status = result.get("status", "completed")
-                agent_run.status = (
-                    result_status if result_status in ("completed", "failed") else "completed"
+                # ql-20260616-006：终态优先级护栏——killed > failed > cancelled > completed
+                # daemon 在 cancel 链路里先调 syncStatus("killed") 把 AgentRun 标 killed，
+                # 再 complete_lease 收尾时上报 status="cancelled"。若直接覆写会让 UI 显示
+                # "cancelled"（用户取消语义弱）而不是 "killed"（实际被 SIGTERM）。
+                # 这里按优先级合并：当前 status 优先级 >= 待写 status 时不动。
+                priority = {"completed": 0, "cancelled": 1, "failed": 2, "killed": 3}
+                current_priority = priority.get(agent_run.status, 0)
+                new_priority = priority.get(
+                    result_status if result_status in priority else "completed",
+                    0,
                 )
-                agent_run.finished_at = now
+                if new_priority >= current_priority:
+                    agent_run.status = (
+                        result_status
+                        if result_status in ("completed", "failed", "cancelled", "killed")
+                        else "completed"
+                    )
+                # finished_at 已被 syncStatus("killed") 写入则保留，否则补 now
+                if agent_run.finished_at is None:
+                    agent_run.finished_at = now
 
                 # Store agent output and error（task-07：redact_output 二次脱敏，
                 # 单一真相源 git_gateway.redact_output，daemon 不移植正则规则）
@@ -582,6 +598,12 @@ class DaemonService:
         now = datetime.now(UTC)
         count = 0
         published_logs: list[dict] = []
+        # ql-20260616-004：daemon 每个 assistant event 在 metadata.usage 带当前累加值
+        # snapshot，取最大值作为本次 submit_messages 的累积值（assistant 事件 usage 是
+        # 单调递增的累加器，取 max 防御乱序；result 事件的最终值由 complete_lease 路径
+        # 再覆盖一次）。实时 UPDATE AgentRun，前端 5s 轮询就能看到，不再等执行完成。
+        latest_input_tokens: int | None = None
+        latest_output_tokens: int | None = None
         for msg in messages:
             # ql-20260616-003：daemon _eventToMessage 不发 channel/timestamp/log_id，
             # 后端按 event_type 映射 channel（text→stdout, tool_use/tool_result→tool_call,
@@ -590,6 +612,16 @@ class DaemonService:
             channel = msg.get("channel") or _channel_from_event_type(event_type)
             content = msg.get("content", "")
             if not content:
+                # ql-20260616-004：tool_use event 的 content 空（只在 metadata 带
+                # tool_name/tool_input/usage），跳过写日志但 usage 仍要提取。
+                usage = msg.get("usage")
+                if isinstance(usage, dict):
+                    in_tok = usage.get("input_tokens")
+                    out_tok = usage.get("output_tokens")
+                    if isinstance(in_tok, (int, float)):
+                        latest_input_tokens = max(latest_input_tokens or 0, int(in_tok))
+                    if isinstance(out_tok, (int, float)):
+                        latest_output_tokens = max(latest_output_tokens or 0, int(out_tok))
                 continue
 
             log_id = uuid.uuid4()
@@ -626,6 +658,18 @@ class DaemonService:
                     agent_run_id=str(agent_run_id),
                     lease_id=str(lease_id),
                 )
+            # ql-20260616-004：实时 token 写回。仅在数值增大时覆盖（防御乱序），
+            # 让前端 5s 轮询拿到中间过程的累积 token，不必等 result 事件汇总。
+            if latest_input_tokens is not None and (
+                agent_run.input_tokens is None or latest_input_tokens > agent_run.input_tokens
+            ):
+                agent_run.input_tokens = latest_input_tokens
+                self._session.add(agent_run)
+            if latest_output_tokens is not None and (
+                agent_run.output_tokens is None or latest_output_tokens > agent_run.output_tokens
+            ):
+                agent_run.output_tokens = latest_output_tokens
+                self._session.add(agent_run)
 
         if count > 0 or (agent_run is not None and agent_run_status == "running"):
             await self._session.commit()

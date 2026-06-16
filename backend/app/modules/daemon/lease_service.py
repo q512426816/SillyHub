@@ -13,6 +13,7 @@ from sqlmodel import col
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.modules.agent.model import AgentRun
 from app.modules.daemon.model import DaemonTaskLease
 
 if TYPE_CHECKING:
@@ -280,8 +281,12 @@ class DaemonLeaseService:
     async def cancel_lease(self, agent_run_id: uuid.UUID) -> None:
         """取消租赁（用户主动取消任务）。
 
-        1. 设置 status='cancelled'
-        2. 发送 WebSocket 取消信号给 daemon（WS 桩）
+        1. 设置 lease status='cancelled'
+        2. 若 lease 为 pending（daemon 从未 claim）：daemon 心跳检测不会触发，
+           立即把 agent_run.status 置为 killed（带 finished_at），否则会永久 pending
+        3. 若 lease 为 claimed（daemon 正在跑）：靠 daemon 心跳轮询感知 cancelled
+           → 上报 killed + SIGTERM 子进程；agent_run.status 由 daemon 通过
+           complete_lease / syncStatus 收尾，此处不动
 
         Args:
             agent_run_id: 要取消的 agent run ID。
@@ -305,8 +310,12 @@ class DaemonLeaseService:
                 "cancel_lease_no_active_lease",
                 agent_run_id=str(agent_run_id),
             )
+            # 即使没有 active lease，agent_run 若仍 pending/running 也要收尾
+            # （可能是 lease 已过期或被清理，但 agent_run 还卡着）
+            await self._mark_agent_run_killed_if_pending(agent_run_id, now)
             return
 
+        prior_status = lease.status
         lease.status = "cancelled"
         lease.updated_at = now
         self._session.add(lease)
@@ -317,10 +326,45 @@ class DaemonLeaseService:
             lease_id=str(lease.id),
             agent_run_id=str(agent_run_id),
             runtime_id=str(lease.runtime_id),
+            prior_status=prior_status,
         )
+
+        # ql-20260616-006：pending lease（daemon 从未 claim）→ daemon 不会触发
+        # 心跳检测，必须在此直接收尾 agent_run，否则永久 pending
+        if prior_status == "pending":
+            await self._mark_agent_run_killed_if_pending(agent_run_id, now)
 
         # WS 取消信号桩 — Wave 2 实现真正的 WS Hub 后替换
         self._ws_cancel_stub(lease)
+
+    async def _mark_agent_run_killed_if_pending(
+        self,
+        agent_run_id: uuid.UUID,
+        now: datetime,
+    ) -> None:
+        """把 agent_run 从 pending/running 置为 killed 并写 finished_at。
+
+        幂等：已是终态（completed/failed/killed/cancelled）则不动。
+        """
+        ar = await self._session.get(AgentRun, agent_run_id)
+        if ar is None:
+            log.warning(
+                "cancel_lease_agent_run_missing",
+                agent_run_id=str(agent_run_id),
+            )
+            return
+        prior_status = ar.status
+        if prior_status in ("completed", "failed", "killed", "cancelled"):
+            return
+        ar.status = "killed"
+        ar.finished_at = now
+        self._session.add(ar)
+        await self._session.commit()
+        log.info(
+            "agent_run_killed_by_cancel",
+            agent_run_id=str(agent_run_id),
+            prior_status=prior_status,
+        )
 
     # ── Validate ───────────────────────────────────────────────────────────
 

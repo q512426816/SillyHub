@@ -189,9 +189,9 @@ afterEach(() => {
 const FIXTURE_ASSISTANT_TEXT =
   '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello world"}]}}';
 
-/** assistant 单 tool_use block。 */
+/** assistant 单 tool_use block。input 用 command 键（对齐真实 claude Bash tool）。 */
 const FIXTURE_TOOL_USE =
-  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"Bash","input":{"cmd":"ls -la"}}]}}';
+  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"Bash","input":{"command":"ls -la"}}]}}';
 
 /** user 消息含 tool_result（claude stream-json 的 user turn 形态）。 */
 const FIXTURE_TOOL_RESULT =
@@ -295,7 +295,8 @@ function parityParse(line: string): AgentEvent[] | null {
 // ============================================================================
 
 describe('A1 daemon-parity: submit_messages payload 与 SERVER _event_to_message 等价', () => {
-  it('assistant text 行 → messages[0].event_type === "text" + content', async () => {
+  it('assistant text 行 → messages[0].event_type === "text" + [ASSISTANT] 前缀', async () => {
+    // ql-20260616-005：_eventToMessages 渲染 1:1 老格式，content = `[ASSISTANT] hello world`
     const fakeChild = createFakeChild();
     mockSpawnReturn(fakeChild);
     const { runner, submitMessages } = setupWithParse(parityParse);
@@ -315,12 +316,14 @@ describe('A1 daemon-parity: submit_messages payload 与 SERVER _event_to_message
 
     const messages = call[3] as Record<string, unknown>[];
     expect(messages.length).toBe(1);
-    // AC-06：每条 message 含 event_type 字段
+    // AC-06：每条 message 含 event_type 字段；content 带 [ASSISTANT] 前缀对齐老格式
     expect(messages[0]).toHaveProperty('event_type', 'text');
-    expect(messages[0]).toHaveProperty('content', 'hello world');
+    expect(messages[0]).toHaveProperty('content', '[ASSISTANT] hello world');
+    expect(messages[0]).toHaveProperty('channel', 'stdout');
   });
 
-  it('tool_use 行 → event_type === "tool_use" + tool_name + call_id', async () => {
+  it('tool_use 行 → 2 条 message（[TOOL_USE] stdout + tool_call JSON）+ call_id', async () => {
+    // ql-20260616-005：tool_use 产 1:N 渲染，stdout 文本 + tool_call channel JSON
     const fakeChild = createFakeChild();
     mockSpawnReturn(fakeChild);
     const { runner, submitMessages } = setupWithParse(parityParse);
@@ -333,16 +336,25 @@ describe('A1 daemon-parity: submit_messages payload 与 SERVER _event_to_message
 
     expect(submitMessages).toHaveBeenCalledTimes(1);
     const messages = submitMessages.mock.calls[0]![3] as Record<string, unknown>[];
-    expect(messages.length).toBe(1);
-    // AC-06：event_type 字段存在
+    // tool_use 1 event → 2 messages（[TOOL_USE] stdout + tool_call JSON）
+    expect(messages.length).toBe(2);
+    // 第一条：stdout 文本 [TOOL_USE] Bash: ls -la，携带 call_id（业务字段注入首条）
     expect(messages[0]).toHaveProperty('event_type', 'tool_use');
-    expect(messages[0]).toHaveProperty('tool_name', 'Bash');
+    expect(messages[0]).toHaveProperty('content', '[TOOL_USE] Bash: ls -la');
+    expect(messages[0]).toHaveProperty('channel', 'stdout');
     expect(messages[0]).toHaveProperty('call_id', 'tu_1');
-    // SERVER _event_to_message 同样带 content（tool input 序列化）
-    expect(messages[0]).toHaveProperty('content');
+    // 第二条：tool_call channel JSON，前端 parseToolCallContent 解析为 ToolCallCard
+    expect(messages[1]).toHaveProperty('event_type', 'tool_use');
+    expect(messages[1]).toHaveProperty('channel', 'tool_call');
+    const tcContent = JSON.parse(messages[1]!.content as string) as Record<string, unknown>;
+    expect(tcContent).toHaveProperty('tool', 'Bash');
+    expect(tcContent).toHaveProperty('args');
+    expect(tcContent).toHaveProperty('status', 'allowed');
+    expect(tcContent).toHaveProperty('success', true);
   });
 
   it('tool_result 行 → event_type === "tool_result" + call_id 关联回 tool_use', async () => {
+    // ql-20260616-005：tool_use 2 msgs + tool_result 1 msg
     const fakeChild = createFakeChild();
     mockSpawnReturn(fakeChild);
     const { runner, submitMessages } = setupWithParse(parityParse);
@@ -359,12 +371,17 @@ describe('A1 daemon-parity: submit_messages payload 与 SERVER _event_to_message
     const toolUseMsgs = submitMessages.mock.calls[0]![3] as Record<string, unknown>[];
     const toolResultMsgs = submitMessages.mock.calls[1]![3] as Record<string, unknown>[];
 
+    // tool_use 第一条 message（stdout 文本）携带 call_id
     expect(toolUseMsgs[0]).toHaveProperty('event_type', 'tool_use');
     expect(toolUseMsgs[0]).toHaveProperty('call_id', 'tu_1');
 
-    // AC-06：tool_result message 也含 event_type
+    // tool_result message 带 [TOOL_RESULT] 前缀
     expect(toolResultMsgs[0]).toHaveProperty('event_type', 'tool_result');
     expect(toolResultMsgs[0]).toHaveProperty('call_id', 'tu_1');
+    expect(toolResultMsgs[0]).toHaveProperty(
+      'content',
+      '[TOOL_RESULT] file.txt\nother.txt',
+    );
     // call_id 关联回 tool_use（语义对齐 SERVER 逐 event publish）
     expect(toolResultMsgs[0]!.call_id).toBe(toolUseMsgs[0]!.call_id);
   });
@@ -388,6 +405,7 @@ describe('A1 daemon-parity: submit_messages payload 与 SERVER _event_to_message
   });
 
   it('assistant 多 content block（text + tool_use）→ 单次 submitMessages 提交多条 messages', async () => {
+    // ql-20260616-005：text 1 msg + tool_use 2 msgs = 3 messages 总数
     const fakeChild = createFakeChild();
     mockSpawnReturn(fakeChild);
     const { runner, submitMessages } = setupWithParse(parityParse);
@@ -398,16 +416,20 @@ describe('A1 daemon-parity: submit_messages payload 与 SERVER _event_to_message
     fakeChild._emitExit(0);
     await p;
 
-    // 单行多 block → 一次 submitMessages，messages 数组含 2 条（batch 语义）
+    // 单行多 block → 一次 submitMessages，messages 数组含 3 条（text 1 + tool_use 2）
     expect(submitMessages).toHaveBeenCalledTimes(1);
     const messages = submitMessages.mock.calls[0]![3] as Record<string, unknown>[];
-    expect(messages.length).toBe(2);
-    // AC-06：每条都含 event_type 字段
+    expect(messages.length).toBe(3);
+    // 第一条：text 事件 → [ASSISTANT] 前缀
     expect(messages[0]).toHaveProperty('event_type', 'text');
-    expect(messages[0]).toHaveProperty('content', 'I will run a command');
+    expect(messages[0]).toHaveProperty('content', '[ASSISTANT] I will run a command');
+    // 第二条：tool_use stdout 文本，携带 call_id（业务字段注入首条 tool_use msg）
     expect(messages[1]).toHaveProperty('event_type', 'tool_use');
-    expect(messages[1]).toHaveProperty('tool_name', 'Read');
+    expect(messages[1]).toHaveProperty('content', '[TOOL_USE] Read: {"file_path":"x.ts"}');
     expect(messages[1]).toHaveProperty('call_id', 'tu_2');
+    // 第三条：tool_use tool_call JSON
+    expect(messages[2]).toHaveProperty('event_type', 'tool_use');
+    expect(messages[2]).toHaveProperty('channel', 'tool_call');
   });
 
   it('documents channel parity: submitMessages 签名含 agentRunId → 路由到 agent_run:{id}', () => {

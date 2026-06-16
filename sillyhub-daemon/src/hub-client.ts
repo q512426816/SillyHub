@@ -384,6 +384,25 @@ export class HubClient {
     );
   }
 
+  /**
+   * ql-20260616-006：上报 AgentRun 状态（cancel 检测时报 killed）。
+   * 端点：POST {REST_PREFIX}/leases/{leaseId}/sync，body `{ claim_token, status, error? }`。
+   */
+  async syncStatus(
+    leaseId: string,
+    claimToken: string,
+    status: string,
+    error?: string,
+  ): Promise<Record<string, unknown>> {
+    const body: Record<string, unknown> = { claim_token: claimToken, status };
+    if (error) body.error = error;
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/leases/${encodeURIComponent(leaseId)}/sync`,
+      body,
+    );
+  }
+
   // -- Execution context 拉取（task-05：fetch bundle 上下文）--
 
   /**

@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from app.modules.agent.model import AgentRun
 from app.modules.daemon.lease_service import (
     DaemonLeaseService,
     LeaseConflict,
@@ -345,6 +346,102 @@ class TestCancelLease:
         svc = DaemonLeaseService(db_session)
         # Should not raise
         await svc.cancel_lease(uuid.uuid4())
+
+    @pytest.mark.asyncio
+    async def test_cancel_pending_lease_marks_agent_run_killed(
+        self, db_session: AsyncSession
+    ) -> None:
+        """ql-20260616-006：cancel pending lease（daemon 从未 claim）→ agent_run 立即 killed。
+
+        没有 daemon 心跳触发，必须由 cancel_lease 直接收尾 agent_run，否则永久 pending。
+        """
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run_id = uuid.uuid4()
+
+        # 创建 agent_run 行（pending）
+        ar = AgentRun(id=agent_run_id, agent_type="claude_code", status="pending")
+        db_session.add(ar)
+        await db_session.commit()
+
+        # 创建 pending lease（daemon 还没 claim）
+        await _create_lease_row(
+            db_session,
+            rt.id,
+            agent_run_id,
+            status="pending",
+        )
+
+        svc = DaemonLeaseService(db_session)
+        await svc.cancel_lease(agent_run_id)
+
+        await db_session.refresh(ar)
+        assert ar.status == "killed"
+        assert ar.finished_at is not None
+
+    @pytest.mark.asyncio
+    async def test_cancel_claimed_lease_does_not_touch_agent_run(
+        self, db_session: AsyncSession
+    ) -> None:
+        """ql-20260616-006：cancel claimed lease 不动 agent_run（靠 daemon 心跳上报）。
+
+        daemon 会通过心跳检测 cancelled → syncStatus('killed') + complete_lease，
+        agent_run 的状态由 daemon 收尾，cancel_lease 不要抢跑。
+        """
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run_id = uuid.uuid4()
+
+        ar = AgentRun(id=agent_run_id, agent_type="claude_code", status="running")
+        db_session.add(ar)
+        await db_session.commit()
+
+        svc = DaemonLeaseService(db_session)
+        lease = await svc.claim_task(rt.id, agent_run_id)
+
+        await svc.cancel_lease(agent_run_id)
+
+        await db_session.refresh(ar)
+        assert ar.status == "running"  # 不动
+        assert ar.finished_at is None
+        await db_session.refresh(lease)
+        assert lease.status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_cancel_when_no_lease_but_agent_run_running_also_killed(
+        self, db_session: AsyncSession
+    ) -> None:
+        """ql-20260616-006：无 active lease 但 agent_run 仍 pending/running → 也置 killed。
+
+        兜底场景：lease 已被清理或过期回收，但 agent_run 还卡着。
+        """
+        agent_run_id = uuid.uuid4()
+        ar = AgentRun(id=agent_run_id, agent_type="claude_code", status="pending")
+        db_session.add(ar)
+        await db_session.commit()
+
+        svc = DaemonLeaseService(db_session)
+        await svc.cancel_lease(agent_run_id)  # 无 lease
+
+        await db_session.refresh(ar)
+        assert ar.status == "killed"
+        assert ar.finished_at is not None
+
+    @pytest.mark.asyncio
+    async def test_cancel_idempotent_when_agent_run_already_terminal(
+        self, db_session: AsyncSession
+    ) -> None:
+        """ql-20260616-006：agent_run 已是终态（completed）→ cancel 不动它。"""
+        agent_run_id = uuid.uuid4()
+        ar = AgentRun(id=agent_run_id, agent_type="claude_code", status="completed")
+        db_session.add(ar)
+        await db_session.commit()
+
+        svc = DaemonLeaseService(db_session)
+        await svc.cancel_lease(agent_run_id)
+
+        await db_session.refresh(ar)
+        assert ar.status == "completed"
 
 
 class TestValidateClaimToken:
