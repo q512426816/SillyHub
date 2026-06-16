@@ -38,10 +38,10 @@ from app.modules.agent.schema import (
     ExecutionContextResponse,
 )
 from app.modules.agent.service import AgentService
-from app.modules.auth.model import User
+from app.modules.auth.model import User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
 from app.modules.daemon.model import DaemonTaskLease
-from app.modules.workspace.model import AgentRunWorkspace, Workspace
+from app.modules.workspace.model import AgentRunWorkspace
 
 log = get_logger(__name__)
 
@@ -72,20 +72,34 @@ def _determine_run_type(agent_run: AgentRun, lease_meta: dict) -> str:
     raise ValueError(msg)
 
 
-async def _user_owns_run(session: AsyncSession, user_id: uuid.UUID, run_id: uuid.UUID) -> bool:
-    """校验 run 归属当前 user（AgentRunWorkspace → Workspace.created_by）。
+async def _user_owns_run(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    run_id: uuid.UUID,
+    *,
+    is_platform_admin: bool = False,
+) -> bool:
+    """校验当前 user 能否访问该 run。
 
-    AgentRun 无 user_id 列（V1），通过 M:N 关联反查 workspace owner。
+    AgentRun 无 user_id 列（V1），通过 ``AgentRunWorkspace → Workspace`` 反查：
+    - platform admin：放行（与 rbac.has_permission 一致；同时兼容 quick-chat
+      这种没有 workspace 关联的 run——admin 创建即可访问）。
+    - 普通用户：必须在该 run 关联的 workspace 里有成员关系
+      （UserWorkspaceRole 行存在即可，不限定 created_by，与 "workspace 成员"
+      语义一致；历史数据 created_by 与 UserWorkspaceRole 不同步时不会被阻塞）。
+    - quick-chat 类无 workspace 关联的 run：仅 admin 能访问（V1 简化）。
     """
+    if is_platform_admin:
+        return True
     stmt = (
-        select(Workspace.id)
+        select(UserWorkspaceRole.workspace_id)
         .join(
             AgentRunWorkspace,
-            AgentRunWorkspace.workspace_id == Workspace.id,
+            AgentRunWorkspace.workspace_id == UserWorkspaceRole.workspace_id,
         )
         .where(
             AgentRunWorkspace.agent_run_id == run_id,
-            Workspace.created_by == user_id,
+            UserWorkspaceRole.user_id == user_id,
         )
         .limit(1)
     )
@@ -150,7 +164,9 @@ async def get_execution_context(
         )
 
     # -- 归属校验（R-02：跨 user 访问 → 403）-------------------------------
-    if not await _user_owns_run(session, user.id, run_id):
+    # platform admin 放行（与 rbac.has_permission 语义一致；老数据残留场景下
+    # workspace.created_by 可能是另一个 admin 账号，不应阻塞 daemon 执行）。
+    if not await _user_owns_run(session, user.id, run_id, is_platform_admin=user.is_platform_admin):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="run not owned by current user",

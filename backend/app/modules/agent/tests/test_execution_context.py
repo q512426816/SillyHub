@@ -74,7 +74,13 @@ async def _make_run(
     run_type: str = "task",
     lease_meta: dict | None = None,
 ) -> uuid.UUID:
-    """创建 task / stage / scan run + workspace + change + lease。"""
+    """创建 task / stage / scan run + workspace + change + lease。
+
+    owner 同时被加为 workspace_owner 成员（UserWorkspaceRole），与生产路径
+    一致——_user_owns_run 现在按 membership 校验，不再看 Workspace.created_by。
+    """
+    from app.modules.auth.model import Role, UserWorkspaceRole
+
     ws_id = uuid.uuid4()
     db_session.add(
         Workspace(
@@ -84,6 +90,25 @@ async def _make_run(
             root_path=str(tmp_path),
             status="active",
             created_by=owner.id,
+        )
+    )
+    # 测试 DB 不跑 alembic，没有 seed 角色；这里手工建一个 workspace_owner role。
+    owner_role_id = uuid.uuid4()
+    db_session.add(
+        Role(
+            id=owner_role_id,
+            key="workspace_owner",
+            name="Workspace Owner",
+            description="test role",
+        )
+    )
+    db_session.add(
+        UserWorkspaceRole(
+            user_id=owner.id,
+            workspace_id=ws_id,
+            role_id=owner_role_id,
+            granted_by=None,
+            granted_at=datetime.now(UTC),
         )
     )
 
@@ -250,9 +275,9 @@ async def test_get_execution_context_scan_run(client, db_session, tmp_path):
 
 
 async def test_get_execution_context_cross_user_403(client, db_session, tmp_path):
-    """R-02：run 属 owner，intruder（也是 admin）访问 → 403（归属校验）。"""
-    owner = await _make_user(db_session)
-    intruder = await _make_user(db_session)
+    """R-02：普通用户访问他人 run → 403（归属校验对非 admin 生效）。"""
+    owner = await _make_user(db_session, is_admin=False)
+    intruder = await _make_user(db_session, is_admin=False)
     run_id = await _make_run(
         db_session, tmp_path, owner, run_type="task", lease_meta={"prompt": "x"}
     )
@@ -261,6 +286,21 @@ async def test_get_execution_context_cross_user_403(client, db_session, tmp_path
         headers=_auth(_token(intruder)),
     )
     assert resp.status_code == 403
+
+
+async def test_get_execution_context_platform_admin_cross_user_200(client, db_session, tmp_path):
+    """platform admin 跨 user 访问 → 200（与 rbac.has_permission 语义一致；
+    daemon 用 admin 签发的 API key 鉴权时不应被 workspace.created_by 残留阻塞）。"""
+    owner = await _make_user(db_session, is_admin=False)
+    admin = await _make_user(db_session, is_admin=True)
+    run_id = await _make_run(
+        db_session, tmp_path, owner, run_type="task", lease_meta={"prompt": "x"}
+    )
+    resp = await client.get(
+        f"/api/agent-runs/{run_id}/execution-context",
+        headers=_auth(_token(admin)),
+    )
+    assert resp.status_code == 200, resp.text
 
 
 async def test_get_execution_context_not_found_404(client, db_session, tmp_path):
