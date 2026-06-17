@@ -25,6 +25,7 @@ from app.core.errors import (
     AuthTokenInvalid,
     AuthTokenMissing,
     AuthUserInactive,
+    AuthUserLoginDisabled,
     PermissionDenied,
 )
 from app.core.security import AccessTokenError, decode_access_token
@@ -74,6 +75,11 @@ async def get_current_user(
     user = await session.get(User, payload.sub)
     if user is None or user.deleted_at is not None or user.status != "active":
         raise AuthUserInactive("User account is no longer active.")
+    if not getattr(user, "login_enabled", True):
+        raise AuthUserLoginDisabled(
+            "Login has been disabled for this account.",
+            details={"user_id": str(user.id)},
+        )
     return user
 
 
