@@ -211,6 +211,84 @@ class InvalidTransition(AppError):
     http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
+# ── Admin (user / organization / role) errors ─────────────────────────────────
+# Mirrors change 2026-06-16-admin-org-role-center task-03 §R-04.
+
+
+class AuthUserLoginDisabled(AppError):
+    code = "HTTP_401_AUTH_USER_LOGIN_DISABLED"
+    http_status = status.HTTP_401_UNAUTHORIZED
+
+
+class RoleInUse(AppError):
+    code = "HTTP_409_ROLE_IN_USE"
+    http_status = status.HTTP_409_CONFLICT
+
+    def __init__(
+        self,
+        message: str = "Role is in use by one or more users.",
+        *,
+        user_count: int = 0,
+    ) -> None:
+        super().__init__(message, details={"user_count": user_count})
+
+
+class RoleSystemProtected(AppError):
+    code = "HTTP_403_ROLE_SYSTEM_PROTECTED"
+    http_status = status.HTTP_403_FORBIDDEN
+
+
+class RoleNotFound(AppError):
+    code = "HTTP_404_ROLE_NOT_FOUND"
+    http_status = status.HTTP_404_NOT_FOUND
+
+
+class RoleKeyDuplicate(AppError):
+    code = "HTTP_409_ROLE_KEY_DUPLICATE"
+    http_status = status.HTTP_409_CONFLICT
+
+
+class OrganizationInUse(AppError):
+    code = "HTTP_409_ORGANIZATION_IN_USE"
+    http_status = status.HTTP_409_CONFLICT
+
+    def __init__(
+        self,
+        message: str = "Organization still has members.",
+        *,
+        member_count: int = 0,
+    ) -> None:
+        super().__init__(message, details={"member_count": member_count})
+
+
+class OrganizationHasChildren(AppError):
+    code = "HTTP_409_ORGANIZATION_HAS_CHILDREN"
+    http_status = status.HTTP_409_CONFLICT
+
+    def __init__(
+        self,
+        message: str = "Organization still has child organizations.",
+        *,
+        children_count: int = 0,
+    ) -> None:
+        super().__init__(message, details={"children_count": children_count})
+
+
+class OrganizationCodeDuplicate(AppError):
+    code = "HTTP_409_ORGANIZATION_CODE_DUPLICATE"
+    http_status = status.HTTP_409_CONFLICT
+
+
+class OrganizationParentNotFound(AppError):
+    code = "HTTP_404_ORGANIZATION_PARENT_NOT_FOUND"
+    http_status = status.HTTP_404_NOT_FOUND
+
+
+class OrganizationNotFound(AppError):
+    code = "HTTP_404_ORGANIZATION_NOT_FOUND"
+    http_status = status.HTTP_404_NOT_FOUND
+
+
 # ── Worktree errors ──
 
 

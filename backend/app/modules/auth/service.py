@@ -29,6 +29,7 @@ from app.core.errors import (
     AuthRefreshReused,
     AuthTokenInvalid,
     AuthUserInactive,
+    AuthUserLoginDisabled,
 )
 from app.core.logging import get_logger
 from app.core.security import (
@@ -70,6 +71,16 @@ class AuthService:
         if user is None or not password_hasher.verify(password, user.password_hash):
             # Constant message: no email enumeration.
             raise AuthInvalidCredentials("Invalid email or password.")
+
+        # Login permission gate (task-06 of 2026-06-16-admin-org-role-center).
+        # Checked AFTER password verify so the error envelope matches
+        # AuthInvalidCredentials — attackers cannot probe account existence
+        # by comparing error codes.
+        if not user.login_enabled:
+            raise AuthUserLoginDisabled(
+                "Login has been disabled for this account.",
+                details={"user_id": str(user.id)},
+            )
 
         pair = await self._issue_token_pair(user, user_agent=user_agent, ip=ip)
         user.last_login_at = _utc_now()
@@ -322,4 +333,70 @@ async def bootstrap_admin_and_seed_rbac(db: AsyncSession, *, settings: Settings)
         workspace_owner_role_id=str(workspace_owner_role.id),
         workspace_roles_seeded=seeded_count,
     )
+    await db.commit()
+
+    # Seed platform_admin role bound to every Permission (task-03). Idempotent:
+    # subsequent boots reuse the existing role + permission bindings.
+    await seed_platform_admin_role(db)
+
+
+async def seed_platform_admin_role(db: AsyncSession) -> None:
+    """Idempotently insert the ``platform_admin`` role + bind all Permissions.
+
+    Mirrors change ``2026-06-16-admin-org-role-center`` task-03 §R-05.
+
+    The role carries ``is_system=True`` so task-04 role handlers reject
+    any modify/disable/delete attempt. Every entry in the
+    :class:`~app.modules.auth.permissions.Permission` enum (36 after
+    task-02) is bound so anyone holding this role short-circuits every
+    RBAC check via
+    :func:`app.modules.auth.rbac.collect_permissions_platform`.
+    """
+    from app.core.logging import get_logger
+    from app.modules.auth.model import Role, RolePermission
+    from app.modules.auth.permissions import Permission
+
+    log = get_logger(__name__)
+
+    existing = (
+        (await db.execute(select(Role).where(col(Role.key) == "platform_admin").limit(1)))
+        .scalars()
+        .first()
+    )
+
+    if existing is None:
+        existing = Role(
+            key="platform_admin",
+            name="Platform Admin",
+            description="System role bound to every Permission (seeded at boot).",
+            is_system=True,
+            is_active=True,
+        )
+        db.add(existing)
+        await db.flush()
+        log.info("auth.seed.platform_admin_created", role_id=str(existing.id))
+
+    bound = {
+        row[0]
+        for row in (
+            await db.execute(
+                select(col(RolePermission.permission)).where(
+                    col(RolePermission.role_id) == existing.id
+                )
+            )
+        ).all()
+    }
+
+    missing = [p.value for p in Permission if p.value not in bound]
+    for perm in missing:
+        db.add(RolePermission(role_id=existing.id, permission=perm))
+
+    if missing:
+        log.info(
+            "auth.seed.platform_admin_permissions_synced",
+            role_id=str(existing.id),
+            added=len(missing),
+            total=len(list(Permission)),
+        )
+
     await db.commit()

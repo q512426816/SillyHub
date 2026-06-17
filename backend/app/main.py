@@ -16,6 +16,7 @@ from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis
 from app.core.telemetry import init_telemetry
+from app.modules.admin.router import router as admin_router
 from app.modules.agent.router import router as agent_router
 from app.modules.archive.router import router as archive_router
 from app.modules.auth.router import router as auth_router
@@ -380,6 +381,7 @@ def create_app() -> FastAPI:
     app.include_router(policy_crud_router, prefix="/api")
     app.include_router(archive_router, prefix="/api")
     app.include_router(settings_router, prefix="/api")
+    app.include_router(admin_router, prefix="/api")
     app.include_router(spec_workspace_router, prefix="/api")
 
     return app

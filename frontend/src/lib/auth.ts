@@ -14,6 +14,7 @@ export interface MeResponse {
     id: string;
     email: string;
     display_name: string | null;
+    is_platform_admin?: boolean;
   };
   workspaces: Array<{
     workspace_id: string;
@@ -38,6 +39,8 @@ export async function login(email: string, password: string) {
     id: me.user.id,
     email: me.user.email,
     displayName: me.user.display_name ?? me.user.email,
+    is_platform_admin: me.user.is_platform_admin ?? false,
+    permissions: [],
   });
 
   return pair;

@@ -8,6 +8,8 @@ export interface SessionUser {
   id: string;
   email: string;
   displayName: string;
+  is_platform_admin?: boolean;
+  permissions?: string[];
 }
 
 export interface SessionTokens {

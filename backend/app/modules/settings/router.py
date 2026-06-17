@@ -1,4 +1,10 @@
-"""``/api/settings`` and ``/api/users`` — platform configuration & user management."""
+"""``/api/settings`` and ``/api/users`` — platform configuration & user management.
+
+``/api/users/*`` handlers forward to :class:`app.modules.admin.users_service.UserService`
+(change ``2026-06-16-admin-org-role-center`` task-06). Signatures, response
+shape, and ``require_platform_admin`` permission are preserved so existing
+clients keep working.
+"""
 
 from __future__ import annotations
 
@@ -30,7 +36,6 @@ from app.modules.settings.schema import (
     UserUpdateRequest,
     UserWorkspaceRead,
 )
-from app.modules.settings.service import UserService
 
 log = get_logger(__name__)
 router = APIRouter(tags=["settings"])
@@ -38,6 +43,20 @@ router = APIRouter(tags=["settings"])
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
 AdminUser = Annotated[User, Depends(require_platform_admin)]
+
+
+def _svc(session: AsyncSession, actor_id: uuid.UUID):
+    """Lazy import to avoid the settings↔admin circular reference at module load."""
+    from app.modules.admin.users_service import UserService
+
+    return UserService(session, actor_id)
+
+
+async def _enrich(session: AsyncSession, user: User) -> UserRead:
+    """Reuse the admin router's relations helper without importing it eagerly."""
+    from app.modules.admin.router import _user_with_relations
+
+    return await _user_with_relations(session, user)
 
 
 # ── Platform settings ──────────────────────────────────────────────────
@@ -85,7 +104,7 @@ async def update_settings(
     return SettingsUpdateResponse(updated=updated)
 
 
-# ── User management ────────────────────────────────────────────────────
+# ── User management — forwarded to admin.users_service ────────────────
 
 
 @router.get("/users", response_model=UserListResponse)
@@ -100,7 +119,7 @@ async def list_users(
     limit: int = Query(20, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> UserListResponse:
-    svc = UserService(session, actor_id=user.id)
+    svc = _svc(session, user.id)
     rows, total = await svc.list_users(
         q=q,
         status=status_filter,
@@ -110,10 +129,8 @@ async def list_users(
         limit=limit,
         offset=offset,
     )
-    return UserListResponse(
-        items=[UserRead.model_validate(u) for u in rows],
-        total=total,
-    )
+    items = [await _enrich(session, u) for u in rows]
+    return UserListResponse(items=items, total=total)
 
 
 @router.post("/users", response_model=UserRead, status_code=status.HTTP_201_CREATED)
@@ -121,14 +138,18 @@ async def create_user(
     payload: UserCreateRequest,
     session: SessionDep,
     user: AdminUser,
-) -> User:
-    svc = UserService(session, actor_id=user.id)
-    return await svc.create_user(
+) -> UserRead:
+    svc = _svc(session, user.id)
+    target = await svc.create_user(
         email=payload.email,
         password=payload.password,
         display_name=payload.display_name,
         is_platform_admin=payload.is_platform_admin,
+        login_enabled=payload.login_enabled,
+        organization_ids=payload.organization_ids or None,
+        role_ids=payload.role_ids or None,
     )
+    return await _enrich(session, target)
 
 
 @router.patch("/users/{user_id}", response_model=UserRead)
@@ -137,14 +158,18 @@ async def update_user(
     payload: UserUpdateRequest,
     session: SessionDep,
     user: AdminUser,
-) -> User:
-    svc = UserService(session, actor_id=user.id)
-    return await svc.update_user(
+) -> UserRead:
+    svc = _svc(session, user.id)
+    target = await svc.update_user(
         uuid.UUID(user_id),
         display_name=payload.display_name,
         is_platform_admin=payload.is_platform_admin,
         status=payload.status,
+        login_enabled=payload.login_enabled,
+        organization_ids=payload.organization_ids,
+        role_ids=payload.role_ids,
     )
+    return await _enrich(session, target)
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -153,7 +178,7 @@ async def delete_user(
     session: SessionDep,
     user: AdminUser,
 ) -> None:
-    svc = UserService(session, actor_id=user.id)
+    svc = _svc(session, user.id)
     await svc.delete_user(uuid.UUID(user_id))
 
 
@@ -166,7 +191,7 @@ async def list_user_sessions(
     session: SessionDep,
     _user: AdminUser,
 ) -> list[UserSessionRead]:
-    svc = UserService(session, actor_id=_user.id)
+    svc = _svc(session, _user.id)
     rows = await svc.list_sessions(uuid.UUID(user_id))
     return [UserSessionRead.model_validate(s) for s in rows]
 
@@ -178,7 +203,7 @@ async def revoke_user_session(
     session: SessionDep,
     _user: AdminUser,
 ) -> None:
-    svc = UserService(session, actor_id=_user.id)
+    svc = _svc(session, _user.id)
     await svc.revoke_session(uuid.UUID(user_id), uuid.UUID(session_id))
 
 
@@ -188,7 +213,7 @@ async def revoke_all_user_sessions(
     session: SessionDep,
     _user: AdminUser,
 ) -> RevokeAllResponse:
-    svc = UserService(session, actor_id=_user.id)
+    svc = _svc(session, _user.id)
     count = await svc.revoke_all_sessions(uuid.UUID(user_id))
     return RevokeAllResponse(revoked_count=count)
 
@@ -199,7 +224,7 @@ async def list_user_audit(
     session: SessionDep,
     _user: AdminUser,
 ) -> list[AuditLogRead]:
-    svc = UserService(session, actor_id=_user.id)
+    svc = _svc(session, _user.id)
     rows = await svc.list_audit_logs(uuid.UUID(user_id))
     return [AuditLogRead.model_validate(a) for a in rows]
 
@@ -210,7 +235,7 @@ async def list_user_workspaces(
     session: SessionDep,
     _user: AdminUser,
 ) -> list[UserWorkspaceRead]:
-    svc = UserService(session, actor_id=_user.id)
+    svc = _svc(session, _user.id)
     return await svc.list_workspaces(uuid.UUID(user_id))
 
 
@@ -221,7 +246,7 @@ async def reset_user_password(
     session: SessionDep,
     _user: AdminUser,
 ) -> ResetPasswordResponse:
-    svc = UserService(session, actor_id=_user.id)
+    svc = _svc(session, _user.id)
     plaintext = await svc.reset_password(
         uuid.UUID(user_id),
         payload.new_password,

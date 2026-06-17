@@ -1,0 +1,100 @@
+"""Permission enum + group resolution tests.
+
+Covers change ``2026-06-16-admin-org-role-center`` task-02 AC-01..AC-12,
+AC-19, AC-20.
+"""
+
+from __future__ import annotations
+
+from enum import StrEnum
+
+import pytest
+
+from app.modules.auth.permissions import Permission, PermissionGroup
+
+
+def test_permission_is_str_enum() -> None:
+    assert issubclass(Permission, StrEnum)
+
+
+def test_permission_group_is_str_enum() -> None:
+    assert issubclass(PermissionGroup, StrEnum)
+
+
+def test_permission_group_has_six_members() -> None:
+    members = list(PermissionGroup)
+    assert len(members) == 6
+    expected = {
+        PermissionGroup.PLATFORM,
+        PermissionGroup.ADMIN,
+        PermissionGroup.WORKSPACE,
+        PermissionGroup.AGENT,
+        PermissionGroup.CHANGE,
+        PermissionGroup.AUDIT,
+    }
+    assert set(members) == expected
+
+
+def test_permission_count_is_36() -> None:
+    """29 historical + 7 new (admin) = 36."""
+    assert len(list(Permission)) == 36
+
+
+@pytest.mark.parametrize(
+    "perm,expected_group",
+    [
+        # New admin group
+        (Permission.USER_READ, PermissionGroup.ADMIN),
+        (Permission.USER_WRITE, PermissionGroup.ADMIN),
+        (Permission.USER_LOGIN_MANAGE, PermissionGroup.ADMIN),
+        (Permission.ORGANIZATION_READ, PermissionGroup.ADMIN),
+        (Permission.ORGANIZATION_WRITE, PermissionGroup.ADMIN),
+        (Permission.ROLE_READ, PermissionGroup.ADMIN),
+        (Permission.ROLE_WRITE, PermissionGroup.ADMIN),
+        # Historical platform — audit special-case
+        (Permission.PLATFORM_AUDIT_READ, PermissionGroup.AUDIT),
+        (Permission.PLATFORM_ADMIN, PermissionGroup.PLATFORM),
+        (Permission.PLATFORM_BILLING, PermissionGroup.PLATFORM),
+        # Workspace
+        (Permission.WORKSPACE_READ, PermissionGroup.WORKSPACE),
+        (Permission.WORKSPACE_ADMIN, PermissionGroup.WORKSPACE),
+        # Change
+        (Permission.CHANGE_CREATE, PermissionGroup.CHANGE),
+        (Permission.CHANGE_ARCHIVE, PermissionGroup.CHANGE),
+        # Agent (task/code/tool/deploy)
+        (Permission.TASK_READ, PermissionGroup.AGENT),
+        (Permission.CODE_REVIEW, PermissionGroup.AGENT),
+        (Permission.TOOL_NETWORK, PermissionGroup.AGENT),
+        (Permission.DEPLOY_PRODUCTION, PermissionGroup.AGENT),
+    ],
+)
+def test_permission_group_resolution(perm: Permission, expected_group: PermissionGroup) -> None:
+    assert perm.group == expected_group
+
+
+def test_every_permission_has_non_default_group() -> None:
+    """All 32 permissions must resolve to a stable group (no KeyError)."""
+    for perm in Permission:
+        group = perm.group
+        assert isinstance(group, PermissionGroup)
+
+
+def test_new_permission_string_values() -> None:
+    """7 new admin permission string values match design §8.4."""
+    assert Permission.USER_READ.value == "user:read"
+    assert Permission.USER_WRITE.value == "user:write"
+    assert Permission.USER_LOGIN_MANAGE.value == "user:login:manage"
+    assert Permission.ORGANIZATION_READ.value == "organization:read"
+    assert Permission.ORGANIZATION_WRITE.value == "organization:write"
+    assert Permission.ROLE_READ.value == "role:read"
+    assert Permission.ROLE_WRITE.value == "role:write"
+
+
+def test_existing_permission_string_values_unchanged() -> None:
+    """Sanity: historical 25 entries retain their original string values."""
+    assert Permission.PLATFORM_ADMIN.value == "platform:admin"
+    assert Permission.WORKSPACE_ADMIN.value == "workspace:admin"
+    assert Permission.CHANGE_CREATE.value == "change:create"
+    assert Permission.TASK_RUN_AGENT.value == "task:run_agent"
+    assert Permission.DEPLOY_ROLLBACK.value == "deploy:rollback"
+    assert Permission.TOOL_SECRET_READ.value == "tool:secret:read"

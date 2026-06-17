@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
+import { hasAdminPermission } from "@/lib/permission";
 import { useSession } from "@/stores/session";
 
 interface NavItem {
@@ -40,6 +41,12 @@ const MANAGEMENT_NAV: NavItem[] = [
 const SYSTEM_NAV: NavItem[] = [
   { href: "/runtimes", icon: "\u{1F5A5}", label: "Daemon 运行时", absolute: true, matchPattern: "/runtimes" },
   { href: "/settings", icon: "⚙️", label: "设置", absolute: true, matchPattern: "/settings" },
+];
+
+const ADMIN_NAV: NavItem[] = [
+  { href: "/admin/users", icon: "\u{1F465}", label: "用户", absolute: true, matchPattern: "/admin/users" },
+  { href: "/admin/organizations", icon: "\u{1F3E2}", label: "组织", absolute: true, matchPattern: "/admin/organizations" },
+  { href: "/admin/roles", icon: "\u{1F511}", label: "角色", absolute: true, matchPattern: "/admin/roles" },
 ];
 
 function useWorkspaceId(): string | null {
@@ -208,6 +215,13 @@ export function AppShell({ children }: { children: ReactNode }) {
 
           {renderGroupTitle("Management")}
           {MANAGEMENT_NAV.map(renderNavLink)}
+
+          {hasAdminPermission(user) && (
+            <>
+              {renderGroupTitle("系统管理")}
+              {ADMIN_NAV.map(renderNavLink)}
+            </>
+          )}
 
           {renderGroupTitle("System")}
           {SYSTEM_NAV.map(renderNavLink)}

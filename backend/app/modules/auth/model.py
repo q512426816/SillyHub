@@ -42,6 +42,12 @@ class User(BaseModel, table=True):
         default=False,
         sa_column=Column(Boolean, nullable=False, default=False),
     )
+    # Independent login permission toggle (admin can disable without deleting).
+    # Mirrors change 2026-06-16-admin-org-role-center task-02.
+    login_enabled: bool = Field(
+        default=True,
+        sa_column=Column(Boolean, nullable=False, default=True),
+    )
     # MFA columns reserved for task-Auth-v2; nullable so V1 inserts skip them.
     mfa_secret: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
     mfa_enabled: bool = Field(
@@ -119,7 +125,17 @@ class Role(BaseModel, table=True):
         default=False,
         sa_column=Column(Boolean, nullable=False, default=False),
     )
+    # Activation toggle for custom roles; system roles always stay active.
+    # Mirrors change 2026-06-16-admin-org-role-center task-02.
+    is_active: bool = Field(
+        default=True,
+        sa_column=Column(Boolean, nullable=False, default=True),
+    )
     created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    updated_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
