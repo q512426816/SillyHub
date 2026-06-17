@@ -499,21 +499,61 @@ export class StreamJsonAdapter implements ProtocolAdapter {
   }
 
   /**
-   * system 消息：累积 sessionId + 产 status event。
+   * system 消息：累积 sessionId + 产 status='system' event。
    * 对照 Python _parse_system L361-366。
    *
-   * status 收敛为 type='text' + metadata.status（AgentEventType 5 元组无 status）。
+   * ql-20260617-008：Claude CLI stream-json 模式下会发多种 subtype 的 system 事件，
+   * 每种都有诊断价值（不能丢）：
+   *   - subtype=init：启动初始化（cwd / model / claude_code_version）
+   *   - subtype=status：状态变化（requesting / ide_connected）
+   *   - subtype=api_retry：API 限流重试（attempt / max_retries / error）
+   *   - 其他未知 subtype：兜底产 event（保留 JSON 关键字段）
+   *
+   * content 编码人类可读摘要，task-runner 渲染成 `[SYSTEM:<subtype>] <摘要>` 一行。
+   * status='system' 与 status='running' 区分：'running' 仍是子类型，仅用于 init 时
+   * 兼容旧前端分组逻辑（isThinkingContent 把 [SYSTEM 开头折叠），但 content 已带
+   * subtype 信息避免重复显示。
    */
   private parseSystem(msg: Record<string, unknown>): AgentEvent[] {
     const sessionId = typeof msg.session_id === 'string' ? msg.session_id : '';
     if (sessionId) {
       this.sessionId = sessionId;
     }
+    const subtype = typeof msg.subtype === 'string' ? msg.subtype : 'unknown';
+    const parts: string[] = [];
+    if (sessionId) parts.push(`session=${sessionId}`);
+    if (subtype === 'init') {
+      const cwd = typeof msg.cwd === 'string' ? msg.cwd : '';
+      const model = typeof msg.model === 'string' ? msg.model : '';
+      const ccVer = typeof msg.claude_code_version === 'string' ? msg.claude_code_version : '';
+      if (cwd) parts.push(`cwd=${cwd}`);
+      if (model) parts.push(`model=${model}`);
+      if (ccVer) parts.push(`cli=${ccVer}`);
+    } else if (subtype === 'status') {
+      const status = typeof msg.status === 'string' ? msg.status : '';
+      if (status) parts.push(`status=${status}`);
+    } else if (subtype === 'api_retry') {
+      const attempt = typeof msg.attempt === 'number' ? msg.attempt : '';
+      const max = typeof msg.max_retries === 'number' ? msg.max_retries : '';
+      const errStatus = typeof msg.error_status === 'number' ? msg.error_status : '';
+      const err = typeof msg.error === 'string' ? msg.error : '';
+      if (attempt !== '' && max !== '') parts.push(`attempt=${attempt}/${max}`);
+      if (errStatus !== '') parts.push(`http=${errStatus}`);
+      if (err) parts.push(`error=${err}`);
+    } else {
+      // 未知 subtype：保留 subtype + 任何顶层标量字段（除 session_id/subtype 本身）
+      for (const [k, v] of Object.entries(msg)) {
+        if (k === 'type' || k === 'subtype' || k === 'session_id') continue;
+        if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+          parts.push(`${k}=${v}`);
+        }
+      }
+    }
     return [
       {
         type: 'text',
-        content: '',
-        metadata: { status: 'running', session_id: sessionId },
+        content: parts.join(' '),
+        metadata: { status: 'system', subtype, session_id: sessionId },
       },
     ];
   }

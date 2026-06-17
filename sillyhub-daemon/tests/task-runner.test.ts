@@ -939,17 +939,52 @@ describe('_eventToMessages（对齐老 _format_conversation_log）', () => {
     ]);
   });
 
-  it('text + status=running → 1 条 [SYSTEM:init] session started', () => {
+  it('ql-20260617-008 text + status=system subtype=init → [SYSTEM:init] <content>', () => {
     const { runner } = setupRunner({});
     const msgs = callEventToMessages(runner, {
       type: 'text',
-      content: '',
-      metadata: { status: 'running', session_id: 'sess-1' },
+      content: 'session=sess-1 cwd=/tmp model=sonnet',
+      metadata: { status: 'system', subtype: 'init', session_id: 'sess-1' },
     });
     expect(msgs).toEqual([
       {
         event_type: 'text',
-        content: '[SYSTEM:init] session started',
+        content: '[SYSTEM:init] session=sess-1 cwd=/tmp model=sonnet',
+        channel: 'stdout',
+        session_id: 'sess-1',
+      },
+    ]);
+  });
+
+  it('ql-20260617-008 text + status=system subtype=status → [SYSTEM:status] <content>', () => {
+    const { runner } = setupRunner({});
+    const msgs = callEventToMessages(runner, {
+      type: 'text',
+      content: 'session=sess-1 status=requesting',
+      metadata: { status: 'system', subtype: 'status', session_id: 'sess-1' },
+    });
+    expect(msgs).toEqual([
+      {
+        event_type: 'text',
+        content: '[SYSTEM:status] session=sess-1 status=requesting',
+        channel: 'stdout',
+        session_id: 'sess-1',
+      },
+    ]);
+  });
+
+  it('ql-20260617-008 text + status=system subtype=api_retry → [SYSTEM:api_retry] <content>', () => {
+    const { runner } = setupRunner({});
+    const msgs = callEventToMessages(runner, {
+      type: 'text',
+      content: 'session=sess-1 attempt=1/10 http=529 error=rate_limit',
+      metadata: { status: 'system', subtype: 'api_retry', session_id: 'sess-1' },
+    });
+    expect(msgs).toEqual([
+      {
+        event_type: 'text',
+        content:
+          '[SYSTEM:api_retry] session=sess-1 attempt=1/10 http=529 error=rate_limit',
         channel: 'stdout',
         session_id: 'sess-1',
       },

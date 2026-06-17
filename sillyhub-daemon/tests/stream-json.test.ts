@@ -52,15 +52,72 @@ describe('parse edge cases (→ null)', () => {
 // ===========================================================================
 
 describe('parse system', () => {
-  it('system → status event + sessionId 累积', () => {
+  it('system subtype=init → status event + sessionId 累积', () => {
     const a = new StreamJsonAdapter('claude');
     const line = firstLine(loadLines('stream-json/claude-system-init.jsonl'));
     const events = a.parse(line);
     expect(events).not.toBeNull();
     expect(events?.[0]?.type).toBe('text');
-    expect(events?.[0]?.metadata?.status).toBe('running');
+    expect(events?.[0]?.metadata?.status).toBe('system');
+    expect(events?.[0]?.metadata?.subtype).toBe('init');
     expect(events?.[0]?.metadata?.session_id).toBe('sess_abc123');
     expect(a.getSessionId()).toBe('sess_abc123');
+  });
+
+  it('ql-20260617-008 system subtype=status → 产 event，content 含 status=<value>', () => {
+    const a = new StreamJsonAdapter('claude');
+    const line = JSON.stringify({
+      type: 'system',
+      subtype: 'status',
+      status: 'requesting',
+      session_id: 'sess_abc123',
+    });
+    const events = a.parse(line) ?? [];
+    expect(events).toHaveLength(1);
+    expect(events[0]!.metadata?.status).toBe('system');
+    expect(events[0]!.metadata?.subtype).toBe('status');
+    expect(events[0]!.content).toContain('status=requesting');
+    expect(events[0]!.content).toContain('session=sess_abc123');
+    expect(a.getSessionId()).toBe('sess_abc123');
+  });
+
+  it('ql-20260617-008 system subtype=api_retry → 产 event，content 含 attempt/error', () => {
+    const a = new StreamJsonAdapter('claude');
+    const line = JSON.stringify({
+      type: 'system',
+      subtype: 'api_retry',
+      attempt: 1,
+      max_retries: 10,
+      error_status: 529,
+      error: 'rate_limit',
+      session_id: 'sess_abc123',
+    });
+    const events = a.parse(line) ?? [];
+    expect(events).toHaveLength(1);
+    expect(events[0]!.metadata?.subtype).toBe('api_retry');
+    expect(events[0]!.content).toContain('attempt=1/10');
+    expect(events[0]!.content).toContain('http=529');
+    expect(events[0]!.content).toContain('error=rate_limit');
+    expect(a.getSessionId()).toBe('sess_abc123');
+  });
+
+  it('ql-20260617-008 system 未知 subtype → 兜底产 event，保留顶层标量字段', () => {
+    const a = new StreamJsonAdapter('claude');
+    const line = JSON.stringify({
+      type: 'system',
+      subtype: 'custom_event',
+      foo: 'bar',
+      count: 42,
+      nested: { x: 1 },
+      session_id: 'sess_xyz',
+    });
+    const events = a.parse(line) ?? [];
+    expect(events).toHaveLength(1);
+    expect(events[0]!.metadata?.subtype).toBe('custom_event');
+    expect(events[0]!.content).toContain('foo=bar');
+    expect(events[0]!.content).toContain('count=42');
+    // 嵌套对象不展开（仅保留标量）
+    expect(events[0]!.content).not.toContain('nested');
   });
 });
 

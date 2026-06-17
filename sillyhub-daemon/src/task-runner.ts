@@ -999,6 +999,7 @@ export class TaskRunner {
       case 'text': {
         const status = typeof md.status === 'string' ? md.status : '';
         const thinking = md.thinking === true;
+        const isLog = md.log === true;
         // ql-20260617-006：stream_event/message_delta 产的 status='usage_update' 事件
         // content 为空但 metadata.usage 有真实累加值。透传给 backend submit_messages
         // 实时更新 AgentRun.input_tokens/output_tokens（不写日志，仅 usage 回写）。
@@ -1010,16 +1011,37 @@ export class TaskRunner {
           });
           break;
         }
+        // ql-20260617-008：parseSystem 把 init / status / api_retry 等所有 subtype 都
+        // 产成 status='system' + content='session=xxx cwd=xxx ...'，渲染成
+        // `[SYSTEM:<subtype>] <content>` 一行。日志完整性优先，不再丢弃任何 subtype。
+        if (status === 'system') {
+          const subtype = typeof md.subtype === 'string' && md.subtype ? md.subtype : 'unknown';
+          messages.push({
+            event_type: ev.type,
+            content: `[SYSTEM:${subtype}] ${rawContent}`.slice(0, 2000),
+            channel: 'stdout',
+          });
+          break;
+        }
+        // ql-20260617-008：parseLog 产 metadata.log=true + level + content=message。
+        // 渲染成 `[LOG:<level>] <message>`，stderr 级别（warn/error）走 stderr channel。
+        if (isLog) {
+          const level = typeof md.level === 'string' && md.level ? md.level : 'info';
+          const isErrLevel = level === 'error' || level === 'warn';
+          messages.push({
+            event_type: ev.type,
+            content: `[LOG:${level}] ${rawContent}`.slice(0, 5000),
+            channel: isErrLevel ? 'stderr' : 'stdout',
+          });
+          break;
+        }
         // ql-20260616-005：空 content + 非 system/thinking 分支 → 丢弃（对齐老
         // _eventToMessage L744 「空 content + 无 metadata 业务字段 → 返回 null」语义）
-        if (!rawContent && status !== 'running' && !thinking) {
+        if (!rawContent && !thinking) {
           return null;
         }
         let line: string;
-        if (status === 'running') {
-          // stream-json.ts parseSystem 产的 status='running' 事件 → [SYSTEM:init]
-          line = '[SYSTEM:init] session started';
-        } else if (thinking) {
+        if (thinking) {
           const preview =
             rawContent.length > 2000
               ? rawContent.slice(0, 2000) + '...'
