@@ -77,6 +77,50 @@ export class StreamJsonAdapter implements ProtocolAdapter {
   };
 
   /**
+   * ql-20260617-006：当前 turn 的实时 usage（来自 stream_event/message_delta）。
+   *
+   * Claude CLI stream-json 模式下，中间 assistant 事件 message.usage 永远是 {0,0}，
+   * 但加 --include-partial-messages 后会额外吐 stream_event 事件流，其中
+   * message_delta 子事件的 event.usage 字段含当前 turn 的**累积** token 数
+   * （不是增量——同一个 turn 内多次 message_delta 的 usage 后到为准）。
+   *
+   * 实时展示策略：
+   *   - 解析 message_delta 时 `_currentTurnUsage = event.usage`（replace 语义）
+   *   - 解析 assistant 事件（turn 结束）时 commit：`_accumulatedUsage += _currentTurnUsage`，
+   *     `_currentTurnUsage = {0,0}`
+   *   - snapshot 取 `_accumulatedUsage + _currentTurnUsage`，让前端在 turn 进行中
+   *     就能看到当前 turn 的累积值，turn 结束后无缝过渡到下一轮累加
+   *
+   * ql-20260617-007：实测 message_delta 每 turn 只在结束时发一次（CLI 硬限制），
+   * 单 turn 短响应下用户在执行过程中看不到 token 变化。补充 content_block_delta
+   * 流式估算：每收到 text_delta 就按 chars/4 粗估 output_tokens 累加到
+   * `_currentTurnUsage.output_tokens`，让前端看到 output tokens 流式增长。
+   * 真 usage 在 message_delta 到达时覆盖估算值。
+   */
+  private _currentTurnUsage: { input_tokens: number; output_tokens: number } = {
+    input_tokens: 0,
+    output_tokens: 0,
+  };
+
+  /**
+   * ql-20260617-007：当前 turn 是否已经收到过 message_delta（真 usage）。
+   *
+   * 用于让 content_block_delta 估算值不要在 message_delta 到达后继续覆盖真值。
+   * 一旦 message_delta 给出了真 usage，本 turn 内后续 delta 不再更新
+   * `_currentTurnUsage.output_tokens`（避免估算值覆盖真值）。
+   */
+  private _currentTurnHasRealUsage = false;
+
+  /**
+   * ql-20260617-007：上次 emit usage_update 时的 output_tokens 快照值。
+   *
+   * content_block_delta 单次 text 通常 1-5 字符 → est=1，单 delta 增量永远 < 20。
+   * 必须跟踪「自上次 emit 以来的累计增量」，每累计 ≥ 20 token 才推一次 event。
+   * resetAccumulator / message_start / commit 时一并清零。
+   */
+  private _lastEmittedOutputTokens = 0;
+
+  /**
    * 子进程 stdin 引用，control_request 回写用。
    * 由 TaskRunner（task-19）在 spawn 后通过 attachStdin 注入。
    * parse 内部识别到 control_request 行时调 writeControlResponse 回写。
@@ -98,6 +142,11 @@ export class StreamJsonAdapter implements ProtocolAdapter {
    */
   resetAccumulator(): void {
     this._accumulatedUsage = { input_tokens: 0, output_tokens: 0 };
+    // ql-20260617-006：连当前 turn 一起清零，防止跨 lease 污染。
+    this._currentTurnUsage = { input_tokens: 0, output_tokens: 0 };
+    // ql-20260617-007：估算状态也清零。
+    this._currentTurnHasRealUsage = false;
+    this._lastEmittedOutputTokens = 0;
   }
 
   /** 读取累积的 session_id（供 TaskRunner 在 lease 结束时上报）。 */
@@ -133,6 +182,10 @@ export class StreamJsonAdapter implements ProtocolAdapter {
       '--input-format', 'stream-json',
       '--verbose',
       '--permission-mode', 'bypassPermissions',
+      // ql-20260617-006：开启后 stream_event 的 message_delta 子事件会带真实 usage
+      // （input_tokens/output_tokens 是当前 turn 的累积值）。不开启时 assistant 事件
+      // 的 message.usage 永远是 {0,0}，只能在最终 result 事件拿到真实值——无法实时累加。
+      '--include-partial-messages',
     ];
     if (opts?.resumeSessionId) {
       args.push('--resume', opts.resumeSessionId);
@@ -215,10 +268,107 @@ export class StreamJsonAdapter implements ProtocolAdapter {
         return this.parseLog(msg);
       case 'control_request':
         return this.handleControlRequest(msg);
+      case 'stream_event':
+        // ql-20260617-006：--include-partial-messages 启用后才有，含真实 message_delta.usage
+        return this.parseStreamEvent(msg);
       default:
         // 未知 type：返回 null（对照 Python L278-279）
         return null;
     }
+  }
+
+  /**
+   * ql-20260617-006 / ql-20260617-007：解析 stream_event 事件（仅 --include-partial-messages 启用）。
+   *
+   * 关键子事件 event.type：
+   *   - message_start：新 turn 开始，reset _currentTurnHasRealUsage（实际 commit 在
+   *     assistant 事件做，这里只是兜底防多 turn 串扰）
+   *   - content_block_delta（text_delta）：流式内容 → 按 chars/3 粗估 output_tokens
+   *     累加（仅在尚未收到真 usage 时），让前端在 turn 进行中就能看到 output 增长
+   *   - message_delta：含 event.usage（当前 turn 累积值）→ 覆盖估算值，更新
+   *     _currentTurnUsage 并产 1 个 status='usage_update' 的 text event（空 content +
+   *     metadata.usage），让 task-runner → submit_messages 实时回写到 AgentRun。
+   *
+   * 节流：仅在累计 usage 真有增长时产 event（避免高频刷屏 backend）。
+   */
+  private parseStreamEvent(msg: Record<string, unknown>): AgentEvent[] | null {
+    const event = msg.event;
+    if (!isRecord(event)) return null;
+    const eventType = typeof event.type === 'string' ? event.type : '';
+
+    if (eventType === 'message_start') {
+      this._currentTurnHasRealUsage = false;
+      // ql-20260617-007：新 turn 开始时清掉 emit 节流状态
+      this._lastEmittedOutputTokens = 0;
+      return null;
+    }
+
+    // content_block_delta：流式 text 估算（仅当本 turn 还没拿到真 usage 时）
+    if (eventType === 'content_block_delta') {
+      if (this._currentTurnHasRealUsage) return null;
+      const delta = event.delta;
+      if (!isRecord(delta)) return null;
+      const deltaType = typeof delta.type === 'string' ? delta.type : '';
+      if (deltaType !== 'text_delta') return null;
+      const text = typeof delta.text === 'string' ? delta.text : '';
+      if (!text) return null;
+
+      // 粗估：~3 chars/token（中英文折中）。这不是精确值——message_delta 到达后
+      // 会被真 usage 覆盖。仅用于让用户在执行过程中看到数字增长。
+      const est = Math.max(1, Math.ceil(text.length / 3));
+      this._currentTurnUsage.output_tokens += est;
+
+      // 节流：累计自上次 emit 增长 ≥ 20 token 才推一次 event（避免每个 delta 都刷 backend）
+      if (this._currentTurnUsage.output_tokens - this._lastEmittedOutputTokens < 20) {
+        return null;
+      }
+      this._lastEmittedOutputTokens = this._currentTurnUsage.output_tokens;
+      return this._buildUsageUpdateEvent();
+    }
+
+    if (eventType !== 'message_delta') return null;
+
+    const usage = event.usage;
+    if (!isRecord(usage)) return null;
+
+    const prevInput = this._currentTurnUsage.input_tokens;
+    const prevOutput = this._currentTurnUsage.output_tokens;
+    if (typeof usage.input_tokens === 'number') {
+      this._currentTurnUsage.input_tokens = usage.input_tokens;
+    }
+    if (typeof usage.output_tokens === 'number') {
+      this._currentTurnUsage.output_tokens = usage.output_tokens;
+    }
+    // 标记本 turn 已拿到真 usage，后续 content_block_delta 不再覆盖
+    this._currentTurnHasRealUsage = true;
+
+    const grew =
+      this._currentTurnUsage.input_tokens > prevInput ||
+      this._currentTurnUsage.output_tokens > prevOutput;
+    if (!grew) return null;
+    return this._buildUsageUpdateEvent();
+  }
+
+  /**
+   * ql-20260617-007：构造 usage_update text event（snapshot = 累计 + 当前 turn）。
+   * 抽出来给 message_delta 和 content_block_delta 共用。
+   */
+  private _buildUsageUpdateEvent(): AgentEvent[] {
+    return [
+      {
+        type: 'text',
+        content: '',
+        metadata: {
+          status: 'usage_update',
+          usage: {
+            input_tokens:
+              this._accumulatedUsage.input_tokens + this._currentTurnUsage.input_tokens,
+            output_tokens:
+              this._accumulatedUsage.output_tokens + this._currentTurnUsage.output_tokens,
+          },
+        },
+      },
+    ];
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -237,15 +387,30 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     const content = message.content;
     if (!Array.isArray(content)) return null;
 
-    // task-06：累加 message.usage（跨 turn 聚合，对齐 SERVER claude_code.py:222-225
-    // _extract_result_metadata 的 fallback 策略）。仅累加 number 类型字段，非 number 跳过。
-    const usage = message.usage;
-    if (isRecord(usage)) {
-      if (typeof usage.input_tokens === 'number') {
-        this._accumulatedUsage.input_tokens += usage.input_tokens;
-      }
-      if (typeof usage.output_tokens === 'number') {
-        this._accumulatedUsage.output_tokens += usage.output_tokens;
+    // ql-20260617-006 / ql-20260617-007：先 commit 当前 turn 的实时 usage（来自
+    // stream_event/message_delta 真 usage 或 content_block_delta 估算值）到
+    // _accumulatedUsage，再处理本 turn 的 assistant content。message_delta 已给出
+    // 真实累积值，比 message.usage 的 {0,0} 可靠；只在 _currentTurnUsage > 0 时 commit
+    // （没有 --include-partial-messages 时 _currentTurnUsage 永远 0，回退到 message.usage
+    // 兜底）。
+    if (this._currentTurnUsage.input_tokens > 0 || this._currentTurnUsage.output_tokens > 0) {
+      this._accumulatedUsage.input_tokens += this._currentTurnUsage.input_tokens;
+      this._accumulatedUsage.output_tokens += this._currentTurnUsage.output_tokens;
+      this._currentTurnUsage = { input_tokens: 0, output_tokens: 0 };
+      // ql-20260617-007：commit 后 reset 估算 flag + emit 节流状态
+      this._currentTurnHasRealUsage = false;
+      this._lastEmittedOutputTokens = 0;
+    } else {
+      // 兜底：未开启 --include-partial-messages 或 CLI 未吐 message_delta 时，
+      // 从 assistant.message.usage 取（通常是 {0,0}，等于无数据但保留 task-06 行为）。
+      const usage = message.usage;
+      if (isRecord(usage)) {
+        if (typeof usage.input_tokens === 'number') {
+          this._accumulatedUsage.input_tokens += usage.input_tokens;
+        }
+        if (typeof usage.output_tokens === 'number') {
+          this._accumulatedUsage.output_tokens += usage.output_tokens;
+        }
       }
     }
 
@@ -285,10 +450,14 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     // 对照 Python：无 content 或全空 → 返回 None。Node 返回 null（无 event）。
     if (events.length === 0) return null;
 
-    // ql-20260616-004：实时 token 透传 —— 每次 assistant 事件把当前累加 usage snapshot
-    // 注入到每个 event.metadata.usage，让 task-runner → backend submit_messages 收到时
-    // 实时 UPDATE AgentRun.input_tokens/output_tokens。snapshot 必须深拷贝，否则后续
-    // 累加会污染已发出 event 的 metadata（_accumulatedUsage 是 mutable 对象）。
+    // ql-20260616-004 + ql-20260617-006：实时 token 透传 —— 每次 assistant 事件把当前
+    // 累加 usage snapshot（含当前 turn 的实时值）注入到每个 event.metadata.usage，
+    // 让 task-runner → backend submit_messages 收到时实时 UPDATE
+    // AgentRun.input_tokens/output_tokens。snapshot 必须深拷贝，否则后续累加会污染已
+    // 发出 event 的 metadata（_accumulatedUsage/_currentTurnUsage 都是 mutable）。
+    //
+    // 注意：本处 commit 已把 _currentTurnUsage 并入 _accumulatedUsage 并清零，所以
+    // snapshot 只取 _accumulatedUsage 即可代表「截止当前 turn 结束」的累积值。
     const usageSnapshot = {
       input_tokens: this._accumulatedUsage.input_tokens,
       output_tokens: this._accumulatedUsage.output_tokens,

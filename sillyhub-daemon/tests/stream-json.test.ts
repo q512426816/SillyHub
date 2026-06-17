@@ -372,3 +372,224 @@ describe('buildArgs / buildInput (spawn 参数 + stdin 输入)', () => {
     }
   });
 });
+
+// ===========================================================================
+// ql-20260617-006 / ql-20260617-007：stream_event 实时 usage 累加测试
+// 覆盖：
+//   - --include-partial-messages 启用的 buildArgs 标志
+//   - message_delta 真 usage → 产 usage_update event + 累加到 _accumulatedUsage
+//   - content_block_delta 流式估算 → output_tokens 增长（节流 20 token）
+//   - message_delta 覆盖估算值（_currentTurnHasRealUsage flag）
+//   - resetAccumulator / message_start 重置状态
+// ===========================================================================
+
+describe('ql-006/007 stream_event 实时 usage 累加', () => {
+  it('buildArgs 含 --include-partial-messages（启用 message_delta 流）', () => {
+    const a = new StreamJsonAdapter('claude');
+    expect(a.buildArgs()).toContain('--include-partial-messages');
+  });
+
+  it('message_delta 真 usage → 产 usage_update event（snapshot = 累计 + 当前 turn）', () => {
+    const a = new StreamJsonAdapter('claude');
+    a.resetAccumulator();
+    const line = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'message_delta',
+        usage: { input_tokens: 100, output_tokens: 50 },
+      },
+    });
+    const events = a.parse(line) ?? [];
+    expect(events).toHaveLength(1);
+    const ev = events[0]!;
+    expect(ev.type).toBe('text');
+    expect(ev.metadata?.status).toBe('usage_update');
+    expect(ev.metadata?.usage).toEqual({
+      input_tokens: 100,
+      output_tokens: 50,
+    });
+  });
+
+  it('message_delta usage 无增长 → 不产 event（节流）', () => {
+    const a = new StreamJsonAdapter('claude');
+    a.resetAccumulator();
+    const line = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'message_delta',
+        usage: { input_tokens: 0, output_tokens: 0 },
+      },
+    });
+    expect(a.parse(line)).toBeNull();
+  });
+
+  it('content_block_delta text_delta → 估算 output_tokens 增长', () => {
+    const a = new StreamJsonAdapter('claude');
+    a.resetAccumulator();
+    // 短 delta（est=1）→ 不到节流阈值，不产 event（但内部累加器仍 +1）
+    const shortLine = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text: 'abc' },
+      },
+    });
+    expect(a.parse(shortLine)).toBeNull();
+
+    // 长 delta（est=20）→ 累计 1+20=21 ≥ 20，产 event
+    const longLine = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text: 'a'.repeat(60) },
+      },
+    });
+    const events = a.parse(longLine) ?? [];
+    expect(events).toHaveLength(1);
+    expect(events[0]!.metadata?.status).toBe('usage_update');
+    // est = 1 (上轮 short) + ceil(60/3)=20 = 21
+    expect(events[0]!.metadata?.usage?.output_tokens).toBe(21);
+    expect(events[0]!.metadata?.usage?.input_tokens).toBe(0);
+  });
+
+  it('content_block_delta 非 text_delta → 跳过（thinking_delta 等）', () => {
+    const a = new StreamJsonAdapter('claude');
+    a.resetAccumulator();
+    const line = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'thinking_delta', thinking: 'a'.repeat(100) },
+      },
+    });
+    expect(a.parse(line)).toBeNull();
+  });
+
+  it('message_delta 覆盖估算值（_currentTurnHasRealUsage 后 delta 不再更新）', () => {
+    const a = new StreamJsonAdapter('claude');
+    a.resetAccumulator();
+
+    // 1) 先发 message_delta 给真 usage
+    const realLine = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'message_delta',
+        usage: { input_tokens: 1000, output_tokens: 100 },
+      },
+    });
+    const realEv = a.parse(realLine) ?? [];
+    expect(realEv[0]!.metadata?.usage?.output_tokens).toBe(100);
+
+    // 2) 后续 content_block_delta 应被忽略（不覆盖真值）
+    const deltaLine = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text: 'a'.repeat(60) },
+      },
+    });
+    expect(a.parse(deltaLine)).toBeNull();
+  });
+
+  it('assistant 事件 commit 后 _currentTurnHasRealUsage 重置（下一 turn 可重新估算）', () => {
+    const a = new StreamJsonAdapter('claude');
+    a.resetAccumulator();
+
+    // turn 1: message_delta + assistant commit
+    const realLine = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'message_delta',
+        usage: { input_tokens: 100, output_tokens: 50 },
+      },
+    });
+    a.parse(realLine);
+
+    const assistantLine = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: 'hi' }],
+        usage: { input_tokens: 0, output_tokens: 0 },
+      },
+    });
+    a.parse(assistantLine);
+
+    // turn 2: message_start 重置 flag → content_block_delta 应该能估算
+    const startLine = JSON.stringify({
+      type: 'stream_event',
+      event: { type: 'message_start' },
+    });
+    a.parse(startLine);
+
+    const deltaLine = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text: 'a'.repeat(60) },
+      },
+    });
+    const events = a.parse(deltaLine) ?? [];
+    expect(events).toHaveLength(1);
+    // 累计值 = turn1 (50) + turn2 估算 (20)
+    expect(events[0]!.metadata?.usage?.output_tokens).toBe(70);
+  });
+
+  it('resetAccumulator 清零所有状态（_currentTurnUsage / flag / emit 节流）', () => {
+    const a = new StreamJsonAdapter('claude');
+    // 先污染状态
+    const realLine = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'message_delta',
+        usage: { input_tokens: 100, output_tokens: 50 },
+      },
+    });
+    a.parse(realLine);
+
+    a.resetAccumulator();
+
+    // 重置后，content_block_delta 应能正常估算
+    const deltaLine = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text: 'a'.repeat(60) },
+      },
+    });
+    const events = a.parse(deltaLine) ?? [];
+    expect(events).toHaveLength(1);
+    expect(events[0]!.metadata?.usage).toEqual({
+      input_tokens: 0,
+      output_tokens: 20,
+    });
+  });
+
+  it('content_block_delta 节流：累计增长不到 20 token 时不 emit', () => {
+    const a = new StreamJsonAdapter('claude');
+    a.resetAccumulator();
+
+    // 多次小 delta 累计 < 20，无 event
+    for (let i = 0; i < 5; i++) {
+      const line = JSON.stringify({
+        type: 'stream_event',
+        event: {
+          type: 'content_block_delta',
+          delta: { type: 'text_delta', text: 'ab' }, // est=1
+        },
+      });
+      expect(a.parse(line)).toBeNull();
+    }
+
+    // 再来一次大 delta，累计 5+20=25，emit
+    const bigLine = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text: 'a'.repeat(60) },
+      },
+    });
+    const events = a.parse(bigLine) ?? [];
+    expect(events).toHaveLength(1);
+    expect(events[0]!.metadata?.usage?.output_tokens).toBe(25);
+  });
+});

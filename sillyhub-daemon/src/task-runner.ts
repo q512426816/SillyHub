@@ -999,6 +999,17 @@ export class TaskRunner {
       case 'text': {
         const status = typeof md.status === 'string' ? md.status : '';
         const thinking = md.thinking === true;
+        // ql-20260617-006：stream_event/message_delta 产的 status='usage_update' 事件
+        // content 为空但 metadata.usage 有真实累加值。透传给 backend submit_messages
+        // 实时更新 AgentRun.input_tokens/output_tokens（不写日志，仅 usage 回写）。
+        if (status === 'usage_update') {
+          messages.push({
+            event_type: ev.type,
+            content: '',
+            channel: 'stdout',
+          });
+          break;
+        }
         // ql-20260616-005：空 content + 非 system/thinking 分支 → 丢弃（对齐老
         // _eventToMessage L744 「空 content + 无 metadata 业务字段 → 返回 null」语义）
         if (!rawContent && status !== 'running' && !thinking) {
