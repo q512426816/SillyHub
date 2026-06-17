@@ -110,4 +110,4 @@ backend/app/modules/auth/
 
 | 日期 | 变更 | 影响 |
 |------|------|------|
-| | | |
+| 2026-06-17 | ql-20260617-005-2682 | 系统角色 name/description 中文化（SYSTEM_ROLES + seed_platform_admin_role + 新 migration 202607010900 UPDATE 存量 roles） |
