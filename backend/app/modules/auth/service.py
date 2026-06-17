@@ -367,8 +367,8 @@ async def seed_platform_admin_role(db: AsyncSession) -> None:
     if existing is None:
         existing = Role(
             key="platform_admin",
-            name="Platform Admin",
-            description="System role bound to every Permission (seeded at boot).",
+            name="平台管理员",
+            description="系统内置角色，绑定全部权限（启动时种子）。",
             is_system=True,
             is_active=True,
         )

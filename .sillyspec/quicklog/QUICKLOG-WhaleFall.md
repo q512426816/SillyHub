@@ -325,3 +325,9 @@ created_at: 2026-06-03T08:42:04
 背景：用户要求"可以选择每页数量，使用 Ant Design 的 Table 组件"，AskUserQuestion 二选一后确认走 antd 路线（不是扩展自定义 Pagination）
 文件：frontend/package.json, frontend/src/app/layout.tsx, frontend/src/components/antd-providers.tsx (新增), frontend/src/app/(dashboard)/admin/roles/page.tsx, frontend/src/app/(dashboard)/admin/users/page.tsx, frontend/src/components/ui/pagination.tsx (删除)
 结果：1) 装 antd 6.4 + @ant-design/nextjs-registry 1.3 + @ant-design/icons 6.2；2) 新建 components/antd-providers.tsx (client)，导出 AntdProviders 包 ConfigProvider（zhCN locale + colorPrimary/borderRadius token + Table headerBg/rowHoverBg），App 组件提供 message/notification context；3) layout.tsx 包 AntdRegistry + AntdProviders 注入 CSS-in-JS；4) roles/page.tsx 原生 table 改 antd Table，columns 用对象数组+render 函数，pagination showSizeChanger + pageSizeOptions [10,20,50,100] + showTotal，pageSize state + onChange(p,s) 同步 setPage/setPageSize；5) users/page.tsx 同上 + scroll.x=max-content 应对操作列宽度；6) 删除 components/ui/pagination.tsx（被 antd Table 内置分页替代）。typecheck/lint/test(75/75)/build 全绿。admin/roles 和 admin/users bundle 从 ~100KB 升到 ~300KB（+200KB 是 antd cost）
+
+## ql-20260617-005-2682 | 2026-06-17 14:50:00 | 系统内置角色名改中文
+状态：已完成
+背景：用户要求"角色的名称和组织的名称都改为中文"。组织无内置种子（用户自己创建），核心是 7 个 is_system=true 的角色（Platform Admin/Workspace Owner 等）目前都是英文
+文件：backend/migrations/versions/202605280900_create_auth_and_rbac.py, backend/app/modules/auth/service.py, backend/migrations/versions/202606170900_rename_system_roles_to_zh.py (新增)
+结果：1) 原 migration SYSTEM_ROLES 7 个 system role name 改中文（平台管理员/工作区所有者/组件负责人/开发者/审核人/测试工程师/访客），description 同步中文化；2) service.py seed_platform_admin_role fallback Role.name 改"平台管理员"，description 中文；3) 新增 migration 202606170900_rename_system_roles_to_zh UPDATE 已有库 system role name（key 不变，因 RBAC 用 key 判定）；4) 组织无内置种子数据，无需修改。ruff/mypy/52 测试通过（1 skipped SQLite 限制）
