@@ -126,7 +126,12 @@ export interface RunnerHubClient {
  * 字段对齐 src/workspace.ts。
  */
 export interface RunnerWorkspaceManager {
-  prepareWorkspace(name: string, repoUrl?: string | null, branch?: string): Promise<string>;
+  prepareWorkspace(
+    name: string,
+    repoUrl?: string | null,
+    branch?: string,
+    options?: { rootPath?: string },
+  ): Promise<string>;
   collectDiff(workspaceDir: string): Promise<{
     patch: string;
     files_changed: number;
@@ -282,16 +287,16 @@ export class TaskRunner {
 
     try {
       // 步骤 1：workspace.prepareWorkspace（失败直接抛 → finally 映射 failed）
-      // workspaceName 仍保留兜底（task-05 §实现要求 4：保留 ctx.workspaceName ?? 'default'）。
-      // repoUrl / branch **退役兜底**（task-05）：让 undefined 透传到 prepareWorkspace，
-      // 后者签名 `prepareWorkspace(name, repoUrl?, branch='main')` 接受 undefined——
-      // repoUrl undefined → 走空目录分支；branch undefined → 触发 prepareWorkspace 默认 'main'。
-      // 退役兜底的语义：fetch execution-context（task-05）填充 ctx 后，
-      // repoUrl/branch 已是 server 的真实意图；旧兜底会掩盖 server 未配置的真实情况。
-      const wsName = ctx.workspaceName ?? 'default';
+      // ql-20260617-009：优先用 ctx.rootPath（真实代码目录，host path）作 cwd，跳过 mirror。
+      // rootPath 不可访问时 prepareWorkspace 内部自动回落到 mirror by slug。
+      // slug 优先于 workspaceName 作 mirror 目录名（slug 唯一稳定）；两者都缺时兜底 'default'
+      // （quick-chat 场景）。repoUrl/branch 退役兜底（task-05）：让 undefined 透传。
+      const wsName = ctx.workspaceSlug ?? ctx.workspaceName ?? 'default';
       const repoUrl = ctx.repoUrl;
       const branch = ctx.branch;
-      const workDir = await this.workspace.prepareWorkspace(wsName, repoUrl, branch);
+      const workDir = await this.workspace.prepareWorkspace(wsName, repoUrl, branch, {
+        rootPath: ctx.rootPath,
+      });
 
       // 步骤 2：claudeMd 非空 → 写 .claude/CLAUDE.md
       if (ctx.claudeMd && ctx.claudeMd.length > 0) {

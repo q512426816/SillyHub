@@ -5,8 +5,9 @@
 // 额外覆盖 task-15 AC-04（GitError 结构化）+ AC-05（Windows rmtree 降级）。
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, mkdir, readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
+import { mkdirSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { existsSync, statSync } from 'node:fs';
@@ -125,6 +126,55 @@ describe('workspace', () => {
       await expect(
         mgr.prepareWorkspace('bad', '/nonexistent/path.git', 'main'),
       ).rejects.toThrow(GitError);
+    });
+  });
+
+  // ── ql-20260617-009：rootPath 优先用作 cwd，跳过 mirror ──
+
+  describe('prepareWorkspace rootPath 分支（ql-20260617-009）', () => {
+    it('rootPath 存在且是目录 → 直接返回，不 clone、不创建 mirror', async () => {
+      const realDir = join(tmpRoot, 'real-code');
+      mkdirSync(realDir, { recursive: true });
+      await writeFile(join(realDir, 'README.md'), 'hello', 'utf8');
+
+      const mgr = new WorkspaceManager(baseDir);
+
+      const ws = await mgr.prepareWorkspace('any-slug', undefined, 'main', {
+        rootPath: realDir,
+      });
+
+      expect(ws).toBe(realDir);
+      // mirror 目录不应被创建
+      expect(existsSync(join(baseDir, 'any-slug'))).toBe(false);
+      // 真实目录里文件还在（未被改动）
+      const content = await readFile(join(ws, 'README.md'), 'utf8');
+      expect(content).toBe('hello');
+    });
+
+    it('rootPath 不存在 → 回落到 mirror 空目录分支', async () => {
+      const mgr = new WorkspaceManager(baseDir);
+
+      const ws = await mgr.prepareWorkspace('fallback-slug', undefined, 'main', {
+        rootPath: join(tmpRoot, 'does-not-exist'),
+      });
+
+      // 返回 mirror 目录路径
+      expect(ws).toBe(join(baseDir, 'fallback-slug'));
+      expect(existsSync(ws)).toBe(true);
+    });
+
+    it('rootPath 是文件不是目录 → 回落到 mirror 空目录分支', async () => {
+      const filePath = join(tmpRoot, 'a-file.txt');
+      await writeFile(filePath, 'not a dir', 'utf8');
+
+      const mgr = new WorkspaceManager(baseDir);
+
+      const ws = await mgr.prepareWorkspace('fallback-slug-2', undefined, 'main', {
+        rootPath: filePath,
+      });
+
+      expect(ws).toBe(join(baseDir, 'fallback-slug-2'));
+      expect(existsSync(ws)).toBe(true);
     });
   });
 

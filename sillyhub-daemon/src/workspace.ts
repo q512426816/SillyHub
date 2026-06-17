@@ -114,21 +114,45 @@ export class WorkspaceManager {
 
   /**
    * 确保 workspace 存在且为最新。
-   * 三分支逻辑对齐 Python prepare_workspace：
-   *   1. 目录已存在 + .git → pull --ff-only
+   * 四分支逻辑：
+   *   0. **rootPath 存在且可访问**（ql-20260617-009）：直接返回真实代码目录，跳过 mirror。
+   *      bootstrap / scan / task 跑在 workspace.root_path（host path），git diff 是真实改动。
+   *   1. mirror 目录已存在 + .git → pull --ff-only
    *   2. 提供了 repoUrl → git clone -b <branch>
    *   3. 无 repoUrl → 创建空目录
    *
-   * @param workspaceName workspace 目录名（相对 baseDir）
+   * @param workspaceName workspace 目录名（相对 baseDir，rootPath 不可用时作 mirror 目录名）
    * @param repoUrl git 远程 URL，首次 clone 必填；已存在则忽略
    * @param branch 分支名，默认 "main"
+   * @param options.rootPath 真实代码目录（host path）；存在且可访问时优先用作 cwd
    * @returns workspace 目录绝对路径
    */
   async prepareWorkspace(
     workspaceName: string,
     repoUrl?: string,
     branch = 'main',
+    options?: { rootPath?: string },
   ): Promise<string> {
+    // 分支 0：真实代码目录可用 → 直接返回，跳过 mirror（ql-20260617-009）
+    if (options?.rootPath) {
+      try {
+        const st = statSync(options.rootPath);
+        if (st.isDirectory()) {
+          logger.info(`workspace_use_real_root path=${options.rootPath}`);
+          return options.rootPath;
+        }
+        logger.warn(
+          `workspace_root_path_not_dir path=${options.rootPath} fallback=mirror`,
+        );
+      } catch (e) {
+        logger.warn(
+          `workspace_root_path_inaccessible path=${options.rootPath} error=${
+            (e as Error).message
+          } fallback=mirror`,
+        );
+      }
+    }
+
     const wsDir = join(this.baseDir, workspaceName);
     const hasGit = existsSync(join(wsDir, '.git'));
 

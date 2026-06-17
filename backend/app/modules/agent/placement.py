@@ -150,6 +150,10 @@ class RunPlacementService:
         root_path: str | None = None,
         spec_root: str | None = None,
         runtime_root: str | None = None,
+        # ql-20260617-009：workspace 标识（daemon 用 root_path 作真实 cwd 时仍需
+        # slug 兜底 mirror，name 仅作日志可读性）。
+        workspace_name: str | None = None,
+        workspace_slug: str | None = None,
     ) -> uuid.UUID | None:
         """Dispatch an AgentRun to the user's daemon.
 
@@ -214,6 +218,11 @@ class RunPlacementService:
             metadata["spec_root"] = spec_root
         if runtime_root:
             metadata["runtime_root"] = runtime_root
+        # ql-20260617-009：workspace 标识透传给 daemon（_build_claim_payload + execution-context 均消费）
+        if workspace_name:
+            metadata["workspace_name"] = workspace_name
+        if workspace_slug:
+            metadata["workspace_slug"] = workspace_slug
 
         await self._session.execute(
             text(

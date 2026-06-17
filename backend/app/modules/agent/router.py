@@ -43,7 +43,7 @@ from app.modules.agent.service import AgentService, submit_run_input
 from app.modules.auth.model import User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
 from app.modules.daemon.model import DaemonTaskLease
-from app.modules.workspace.model import AgentRunWorkspace
+from app.modules.workspace.model import AgentRunWorkspace, Workspace
 
 log = get_logger(__name__)
 
@@ -181,6 +181,11 @@ async def get_execution_context(
 
     workspace_id = await _resolve_workspace_id(session, run_id)
 
+    # ql-20260617-009：加载 Workspace 行，向 daemon 透传真实 root_path / slug。
+    # daemon 收到 root_path 后若本地可访问直接用作 cwd，跳过 mirror clone；
+    # quick-chat 场景 workspace_id 为 None，三字段都 None，daemon 兜底 'default'。
+    ws_row = await session.get(Workspace, workspace_id) if workspace_id else None
+
     # -- run 类型分发 + bundle 构建 ------------------------------------------
     try:
         run_type = _determine_run_type(run, lease_meta)
@@ -236,6 +241,9 @@ async def get_execution_context(
         allowed_paths=lease_meta.get("allowed_paths"),
         tool_config=lease_meta.get("tool_config"),
         session_id=run.session_id,
+        workspace_name=ws_row.name if ws_row else None,
+        workspace_slug=ws_row.slug if ws_row else None,
+        root_path=ws_row.root_path if ws_row else None,
     )
 
 

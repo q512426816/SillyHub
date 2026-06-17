@@ -361,6 +361,17 @@ class DaemonService:
             payload["tool_config"] = lease_meta["tool_config"]  # 覆盖默认 {}
         if lease_meta.get("timeout_seconds") is not None:
             payload["timeout_seconds"] = lease_meta["timeout_seconds"]
+        # ql-20260617-009：workspace 标识 + root_path 透传给 daemon（camelCase + snake_case 双写，
+        # 对齐 daemon.ts:662-665 兜底链；root_path 用于 daemon 直接当 cwd，跳过 mirror）。
+        if lease_meta.get("workspace_name"):
+            payload["workspaceName"] = lease_meta["workspace_name"]
+            payload["workspace_name"] = lease_meta["workspace_name"]
+        if lease_meta.get("workspace_slug"):
+            payload["workspaceSlug"] = lease_meta["workspace_slug"]
+            payload["workspace_slug"] = lease_meta["workspace_slug"]
+        if lease_meta.get("root_path"):
+            payload["rootPath"] = lease_meta["root_path"]
+            payload["root_path"] = lease_meta["root_path"]
 
         # Include runtime capabilities (cmd_path, bin_path, protocol)
         runtime = await self._session.get(DaemonRuntime, lease.runtime_id)

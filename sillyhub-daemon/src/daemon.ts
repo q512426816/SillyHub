@@ -663,6 +663,15 @@ export class Daemon {
         (rawExec.workspaceName as string | undefined) ??
         (rawExec.workspace_name as string | undefined) ??
         payload.workspaceName,
+      // ql-20260617-009：workspace slug + 真实 root_path 透传（root_path 优先作 cwd）。
+      workspaceSlug:
+        (rawExec.workspaceSlug as string | undefined) ??
+        (rawExec.workspace_slug as string | undefined) ??
+        payload.workspaceSlug,
+      rootPath:
+        (rawExec.rootPath as string | undefined) ??
+        (rawExec.root_path as string | undefined) ??
+        payload.rootPath,
       repoUrl: (rawExec.repoUrl as string | undefined) ?? (rawExec.repo_url as string | undefined) ?? payload.repoUrl,
       branch: (rawExec.branch as string | undefined) ?? payload.branch,
       claudeMd:
@@ -740,6 +749,9 @@ export class Daemon {
       claimToken,
       agentRunId: execPayload.agentRunId,
       workspaceName: execPayload.workspaceName,
+      // ql-20260617-009：fetch 是 task-05 之后的最新源，优先覆盖（fetch 失败回落 payload）
+      workspaceSlug: execCtx?.workspace_slug ?? execPayload.workspaceSlug,
+      rootPath: execCtx?.root_path ?? execPayload.rootPath,
       // fetch 覆盖（fetch 失败 execCtx=null 时回落 payload，payload 仍可能 undefined）
       repoUrl: execCtx?.repo_url ?? execPayload.repoUrl,
       branch: execCtx?.branch ?? execPayload.branch,

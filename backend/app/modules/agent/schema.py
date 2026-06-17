@@ -42,6 +42,14 @@ class ExecutionContextResponse(BaseModel):
     allowed_paths: list[str] | None = None
     tool_config: dict | None = None
     session_id: str | None = None
+    # ql-20260617-009：workspace 标识（daemon 用 root_path 作真实 cwd，跳过 mirror clone）。
+    # quick-chat 无 workspace → 全部 None，daemon 兜底 'default'。
+    workspace_name: str | None = None
+    workspace_slug: str | None = None
+    root_path: str | None = Field(
+        default=None,
+        description="真实代码目录（host path）；daemon 收到后若本地可访问直接用作 cwd。",
+    )
 
 
 class QuickChatRequest(BaseModel):

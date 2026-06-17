@@ -69,6 +69,7 @@ interface MockClient {
   submitMessages: ReturnType<typeof vi.fn>;
   completeLease: ReturnType<typeof vi.fn>;
   getPendingLeases: ReturnType<typeof vi.fn>;
+  getExecutionContext: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
 }
 
@@ -84,6 +85,11 @@ function createMockClient(): MockClient {
     submitMessages: vi.fn(async () => ({})),
     completeLease: vi.fn(async () => ({})),
     getPendingLeases: vi.fn(async () => []),
+    // ql-20260617-009：默认 fetch 返回空 bundle（无 workspace 字段）。
+    getExecutionContext: vi.fn(async () => ({
+      agent_run_id: 'run-default',
+      claude_md: '',
+    })),
     close: vi.fn(),
   };
 }
@@ -590,6 +596,38 @@ describe('Daemon', () => {
       leaseId: 'L2',
       claimToken: 't2',
       prompt: 'flat',
+    });
+    await daemon.stop();
+  });
+
+  // ql-20260617-009：execution-context 返回的 workspace_slug/root_path 透传到 ctx
+  it('AC-07f: execution-context 的 workspace_slug/root_path 透传到 LeaseCtx', async () => {
+    const client = createMockClient();
+    client.claimLease.mockResolvedValueOnce({
+      claim_token: 't-rootpath',
+      payload: { agentRunId: 'run-1', provider: 'claude' },
+    });
+    client.getExecutionContext.mockResolvedValueOnce({
+      agent_run_id: 'run-1',
+      claude_md: '# bundle',
+      workspace_slug: 'sillyhub',
+      root_path: 'C:/Users/qinyi/IdeaProjects/multi-agent-platform',
+    });
+    const taskRunner = createMockTaskRunner();
+    const { daemon, wsClientMock } = buildDaemon({ client, taskRunner });
+    track(daemon);
+
+    await daemon.start();
+    wsClientMock._injectMessage({
+      type: MSG.TASK_AVAILABLE,
+      payload: { leaseId: 'Lroot', provider: 'claude' },
+    });
+    await sleep(60);
+    expect(taskRunner.runLease).toHaveBeenCalledOnce();
+    const ctx = taskRunner.runLease.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(ctx).toMatchObject({
+      workspaceSlug: 'sillyhub',
+      rootPath: 'C:/Users/qinyi/IdeaProjects/multi-agent-platform',
     });
     await daemon.stop();
   });

@@ -286,6 +286,9 @@ async def _execute_bootstrap_agent_run(
                 root_path=str(code_root),
                 spec_root=str(spec_root),
                 runtime_root=str(Path(spec_root) / "runtime"),
+                # ql-20260617-009：透传 workspace 标识，daemon 据此把 cwd 指向真实代码目录。
+                workspace_name=workspace.name,
+                workspace_slug=workspace.slug,
             )
             if lease_id is None:
                 run.status = "failed"

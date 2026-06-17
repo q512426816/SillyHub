@@ -211,6 +211,16 @@ export interface LeaseCtx {
   agentRunId?: string;
   /** workspace 名称（本地 mirror 目录名）。Python 默认 "default"。 */
   workspaceName?: string;
+  /**
+   * workspace slug（ql-20260617-009）。
+   * rootPath 不可访问时作为 mirror 目录名兜底；存在时优先于 workspaceName。
+   */
+  workspaceSlug?: string;
+  /**
+   * 真实代码目录（host path，ql-20260617-009）。
+   * 存在且本地可访问时优先用作 cwd，跳过 mirror clone；不可访问时回落到 mirror by slug。
+   */
+  rootPath?: string;
   /** git 仓库 URL。Python 默认 None → null。 */
   repoUrl?: string | null;
   /** git 分支名。Python 默认 "main"。 */
@@ -295,6 +305,10 @@ export interface ExecutionContextPayload {
   tool_config?: Record<string, string>;
   /** 当前会话 id。 */
   session_id?: string;
+  /** ql-20260617-009：workspace 标识 + 真实代码目录（host path）。 */
+  workspace_name?: string;
+  workspace_slug?: string;
+  root_path?: string;
 }
 
 /**

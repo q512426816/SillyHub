@@ -240,7 +240,10 @@ describe('AC-01：runLease 编排链 9 步完整执行', () => {
     // 步骤 2：workspace.prepareWorkspace 被调用
     // task-05 退役兜底：repoUrl/branch 透传 undefined（不再兜底 'main'），
     // 由 prepareWorkspace 内部 branch='main' 默认值兜底（行为不变）。
-    expect(workspace.prepareWorkspace).toHaveBeenCalledWith('test-ws', undefined, undefined);
+    // ql-20260617-009：新增 options.rootPath（ctx.rootPath undefined 时透传 undefined）。
+    expect(workspace.prepareWorkspace).toHaveBeenCalledWith('test-ws', undefined, undefined, {
+      rootPath: undefined,
+    });
 
     // 步骤 4：credential.buildEnv 被调用
     expect(cred.buildEnv).toHaveBeenCalled();
@@ -797,6 +800,57 @@ describe('AC-06：diff 收集', () => {
     expect(result.filesChanged).toBe(1);
     expect(result.insertions).toBe(5);
     expect(result.deletions).toBe(2);
+  });
+});
+
+// ── ql-20260617-009：workspace.root_path 优先用作 cwd，跳过 mirror ────────────
+
+describe('ql-20260617-009：rootPath 优先用作 cwd', () => {
+  it('ctx.rootPath 存在 → prepareWorkspace 收到 options.rootPath', async () => {
+    const fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    const { runner, workspace } = setupRunner({});
+
+    const lease = makeLease({
+      claudeMd: '# Instructions',
+      prompt: 'hello',
+      // 模拟 fetch execution-context 填回的真实 workspace 上下文
+      workspaceSlug: 'my-workspace',
+      rootPath: '/real/host/path/to/code',
+    } as Partial<LeaseCtx>);
+
+    const p = runner.runLease(lease);
+    await waitForSpawn();
+    fakeChild._emitExit(0);
+    await p;
+
+    // workspaceSlug 优先于 workspaceName 作 mirror 目录名兜底
+    expect(workspace.prepareWorkspace).toHaveBeenCalledWith(
+      'my-workspace',
+      undefined,
+      undefined,
+      { rootPath: '/real/host/path/to/code' },
+    );
+  });
+
+  it('ctx.rootPath 缺失 → options.rootPath 透传 undefined（保持现有行为）', async () => {
+    const fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    const { runner, workspace } = setupRunner({});
+
+    const lease = makeLease({ prompt: 'hello' });
+
+    const p = runner.runLease(lease);
+    await waitForSpawn();
+    fakeChild._emitExit(0);
+    await p;
+
+    expect(workspace.prepareWorkspace).toHaveBeenCalledWith(
+      'test-ws',
+      undefined,
+      undefined,
+      { rootPath: undefined },
+    );
   });
 
   it('collectDiff 失败不标记任务失败（对齐 Python non-fatal diff）', async () => {
