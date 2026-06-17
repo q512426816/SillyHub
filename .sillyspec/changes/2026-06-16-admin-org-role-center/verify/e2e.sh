@@ -270,7 +270,7 @@ if [ -n "${BOB_ID:-}" ]; then
     # Verify via DB that revoked_at is null before revoke
     BEFORE=$(docker compose --env-file "$(pwd)/deploy/.env" -f "$(pwd)/deploy/docker-compose.yml" exec -T postgres \
       psql -U platform -d platform -tAc \
-      "SELECT revoked_at FROM auth_sessions WHERE id='$SESSION_ID'" 2>/dev/null | tr -d '[:space:]')
+      "SELECT revoked_at FROM sessions WHERE id='$SESSION_ID'" 2>/dev/null | tr -d '[:space:]')
 
     curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" \
       "$API_BASE/api/admin/users/$BOB_ID/sessions/$SESSION_ID" > /dev/null
@@ -278,7 +278,7 @@ if [ -n "${BOB_ID:-}" ]; then
     # Verify via DB that revoked_at is now set (list_sessions API filters out revoked)
     AFTER=$(docker compose --env-file "$(pwd)/deploy/.env" -f "$(pwd)/deploy/docker-compose.yml" exec -T postgres \
       psql -U platform -d platform -tAc \
-      "SELECT revoked_at FROM auth_sessions WHERE id='$SESSION_ID'" 2>/dev/null | tr -d '[:space:]')
+      "SELECT revoked_at FROM sessions WHERE id='$SESSION_ID'" 2>/dev/null | tr -d '[:space:]')
 
     if [ -z "$BEFORE" ] && [ -n "$AFTER" ]; then
       pass "E2E-06 session revoked"

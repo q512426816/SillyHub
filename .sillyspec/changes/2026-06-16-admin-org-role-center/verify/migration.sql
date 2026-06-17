@@ -56,12 +56,11 @@ WHERE r.key = 'platform_admin';
 -- 期望：32（task-02 扩展后 Permission 全集）
 
 \echo '=== platform_admin permission keys (sample) ==='
-SELECT p.key
+SELECT rp.permission
 FROM role_permissions rp
 JOIN roles r ON rp.role_id = r.id
-JOIN permissions p ON rp.permission_id = p.id
 WHERE r.key = 'platform_admin'
-ORDER BY p.key;
+ORDER BY rp.permission;
 
 \echo '=== Data integrity (counts) ==='
 SELECT
@@ -70,7 +69,6 @@ SELECT
   (SELECT count(*) FROM user_organizations) AS user_orgs_count,
   (SELECT count(*) FROM user_roles) AS user_roles_count,
   (SELECT count(*) FROM roles) AS roles_count,
-  (SELECT count(*) FROM permissions) AS permissions_count,
   (SELECT count(*) FROM role_permissions) AS role_permissions_count;
 
 \echo '=== roles with is_active=false (sample, expect 0 unless manually disabled) ==='
