@@ -163,6 +163,7 @@ class AgentService:
         idempotency_key: str | None = None,
         preferred_backend: str | None = None,
         provider: str | None = None,
+        model: str | None = None,
     ) -> AgentRun:
         """Create an AgentRun record and dispatch it to the daemon.
 
@@ -212,6 +213,12 @@ class AgentService:
         # agent_type string for storage (legacy "claude-code" → "claude_code").
         canonical = "claude_code" if agent_type in ("claude_code", "claude-code") else agent_type
 
+        from app.modules.workspace.model import Workspace
+
+        workspace = await self._session.get(Workspace, workspace_id)
+        resolved_provider = provider or (workspace.default_agent if workspace else None)
+        resolved_model = model or (workspace.default_model if workspace else None)
+
         # -- 4. Build spec bundle -------------------------------------------------
         bundle = await build_spec_bundle(
             self._session,
@@ -230,6 +237,8 @@ class AgentService:
             lease_id=lease_id,
             change_id=task.change_id,
             agent_type=canonical,
+            provider=resolved_provider,
+            model=resolved_model,
             status="pending",
             spec_strategy=bundle.spec_strategy,
             profile_version=bundle.profile_version,
@@ -280,22 +289,15 @@ class AgentService:
         # daemon-only: decide_backend returns the daemon backend or raises.
         # task-03: 通用 bundle 字段（repo_url/branch）从 workspace 取并持久化到
         # lease.metadata，daemon 经 execution-context 重建 bundle。
-        from app.modules.workspace.model import Workspace
-
-        workspace = await self._session.get(Workspace, workspace_id)
         repo_url = workspace.repo_url if workspace else None
         branch = workspace.default_branch if workspace else None
-        # Provider resolution: explicit > workspace.default_agent > None (FR-02,
-        # change 2026-06-14-agent-runtime-selection). Identical expression in all
-        # three dispatch entry points so auto-scheduled runs (which never pass an
-        # explicit provider) inherit the workspace default (R-03).
-        resolved_provider = provider or (workspace.default_agent if workspace else None)
         lease_id_daemon = await placement.dispatch_to_daemon(
             run.id,
             user_id,
             repo_url=repo_url,
             branch=branch,
             provider=resolved_provider,
+            model=resolved_model,
         )
         if lease_id_daemon:
             log.info(
@@ -643,6 +645,7 @@ class AgentService:
         requires_worktree: bool,
         read_only: bool = True,
         provider: str | None = None,
+        model: str | None = None,
     ) -> AgentRun:
         """Create and execute an AgentRun driven by a stage transition.
 
@@ -720,6 +723,12 @@ class AgentService:
                 details={"template": prompt_template},
             )
 
+        from app.modules.workspace.model import Workspace
+
+        workspace = await self._session.get(Workspace, workspace_id)
+        resolved_provider = provider or (workspace.default_agent if workspace else None)
+        resolved_model = model or (workspace.default_model if workspace else None)
+
         # -- 4. Create AgentRun record ----------------------------------------
         run = AgentRun(
             id=uuid.uuid4(),
@@ -727,6 +736,8 @@ class AgentService:
             lease_id=lease.id if lease else None,
             change_id=change_id,
             agent_type="claude_code",
+            provider=resolved_provider,
+            model=resolved_model,
             status="pending",
         )
         self._session.add(run)
@@ -764,16 +775,8 @@ class AgentService:
         # daemon-only: decide_backend returns the daemon backend or raises.
         # task-03 persists stage/read_only/prompt into lease.metadata so the
         # daemon can reconstruct the stage bundle via execution-context.
-        from app.modules.workspace.model import Workspace
-
-        workspace = await self._session.get(Workspace, workspace_id)
         repo_url = workspace.repo_url if workspace else None
         branch = workspace.default_branch if workspace else None
-        # Provider resolution: explicit > workspace.default_agent > None (FR-02,
-        # change 2026-06-14-agent-runtime-selection). Identical expression in all
-        # three dispatch entry points so auto-scheduled runs (which never pass an
-        # explicit provider) inherit the workspace default (R-03).
-        resolved_provider = provider or (workspace.default_agent if workspace else None)
         lease_id_daemon = await placement.dispatch_to_daemon(
             run.id,
             user_id,
@@ -783,6 +786,7 @@ class AgentService:
             repo_url=repo_url,
             branch=branch,
             provider=resolved_provider,
+            model=resolved_model,
         )
         if lease_id_daemon:
             log.info(
@@ -903,6 +907,7 @@ class AgentService:
         root_path: str,
         spec_root: str,
         provider: str | None = None,
+        model: str | None = None,
     ) -> AgentRun:
         """Create and execute a scan-mode AgentRun.
 
@@ -946,6 +951,12 @@ class AgentService:
             run_id=run_id,
         )
 
+        from app.modules.workspace.model import Workspace
+
+        workspace = await self._session.get(Workspace, workspace_id)
+        resolved_provider = provider or (workspace.default_agent if workspace else None)
+        resolved_model = model or (workspace.default_model if workspace else None)
+
         # -- 4. Create AgentRun record --------------------------------------------
         run = AgentRun(
             id=run_id,
@@ -953,6 +964,8 @@ class AgentService:
             change_id=None,
             lease_id=None,
             agent_type="claude_code",
+            provider=resolved_provider,
+            model=resolved_model,
             status="pending",
             spec_strategy="platform-managed",
         )
@@ -989,16 +1002,8 @@ class AgentService:
         # daemon-only: decide_backend returns the daemon backend or raises.
         # task-03 persists root_path/spec_root into lease.metadata so the daemon
         # can reconstruct the scan bundle via execution-context.
-        from app.modules.workspace.model import Workspace
-
-        workspace = await self._session.get(Workspace, workspace_id)
         repo_url = workspace.repo_url if workspace else None
         branch = workspace.default_branch if workspace else None
-        # Provider resolution: explicit > workspace.default_agent > None (FR-02,
-        # change 2026-06-14-agent-runtime-selection). Identical expression in all
-        # three dispatch entry points so auto-scheduled runs (which never pass an
-        # explicit provider) inherit the workspace default (R-03).
-        resolved_provider = provider or (workspace.default_agent if workspace else None)
         lease_id_daemon = await placement.dispatch_to_daemon(
             run.id,
             user_id,
@@ -1007,6 +1012,7 @@ class AgentService:
             repo_url=repo_url,
             branch=branch,
             provider=resolved_provider,
+            model=resolved_model,
         )
         if lease_id_daemon:
             log.info(

@@ -352,6 +352,57 @@ class TestPostScanValidator:
         assert len(result.errors) == 0
         assert result.metadata.get("source_commit") is not None
 
+    def test_non_git_repo_completes_with_warnings(self, tmp_path):
+        """ql-20260617-014：非 git 仓库（rootPath 模式 / 项目尚未 git init）是合法状态，
+        agent 跑完所有步骤 + 产出全部 docs 时不应标记失败，
+        source_commit 失败降级 warning → COMPLETED_WITH_WARNINGS。
+        """
+        source_root = tmp_path / "project"
+        spec_root = tmp_path / "specs"
+        runtime_root = tmp_path / "runtime"
+        source_root.mkdir()
+        spec_root.mkdir()
+        runtime_root.mkdir()
+
+        # 注意：故意不 git init，模拟 rootPath 模式下非 git 仓库
+
+        # Create all expected docs in spec_root
+        scan_dir = spec_root / ".sillyspec" / "docs" / "app" / "scan"
+        scan_dir.mkdir(parents=True)
+        for doc in [
+            "ARCHITECTURE",
+            "CONVENTIONS",
+            "CONCERNS",
+            "INTEGRATIONS",
+            "PROJECT",
+            "STRUCTURE",
+            "TESTING",
+        ]:
+            (scan_dir / f"{doc}.md").write_text(f"# {doc}")
+
+        # Create manifest to avoid unrelated warning
+        manifest_dir = runtime_root / "scan-runs"
+        manifest_dir.mkdir(parents=True)
+        (manifest_dir / "manifest.json").write_text('{"status": "ok"}', encoding="utf-8")
+
+        validator = PostScanValidator(
+            source_root=source_root,
+            spec_root=spec_root,
+            runtime_root=runtime_root,
+            scan_run_id="test-nongit",
+        )
+
+        result = validator.validate(agent_output="", agent_exit_code=0)
+
+        # ql-20260617-014：不应是 FAILED_POST_CHECK，应是 COMPLETED_WITH_WARNINGS
+        assert result.status == ScanRunStatus.COMPLETED_WITH_WARNINGS
+        # source_commit 失败作为 warning，不是 error
+        assert all(e.code != "source_commit_failed" for e in result.errors)
+        assert any(w.code == "source_commit_unavailable" for w in result.warnings)
+        # metadata 仍记录 source_commit=None + error 原因
+        assert result.metadata.get("source_commit") is None
+        assert result.metadata.get("source_commit_error") == "not_git_repo"
+
 
 class TestLocalConfigValidation:
     """Test local.yaml configuration validation."""

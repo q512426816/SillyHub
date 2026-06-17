@@ -66,6 +66,25 @@ export class JsonlAdapter implements ProtocolAdapter {
     finalError: '',
   };
 
+  /**
+   * copilot CLI 启动参数（ql-20260617-008）。
+   *
+   * `--output-format json` 让 copilot stdout 输出 NDJSON 事件流（每行一个 JSON），
+   * 而非默认的 ANSI 着色文本。本 adapter 的 parse 假设输入是合法 JSON 行，
+   * 缺此参数时 copilot 输出文本，parse 会全部走 fallback 返回空数组，lease 看似
+   * 完成但无内容。
+   *
+   * prompt 走 stdin（默认 buildInput `${prompt}\n`），无需在 args 里。
+   */
+  buildArgs(_opts?: {
+    model?: string;
+    sessionId?: string;
+    resumeSessionId?: string;
+    prompt?: string;
+  }): string[] {
+    return ['--output-format', 'json'];
+  }
+
   /** 暴露只读 state 快照，供 TaskRunner（task-19）读取累积 output / session_id。 */
   getState(): Readonly<JsonlState> {
     return this.state;

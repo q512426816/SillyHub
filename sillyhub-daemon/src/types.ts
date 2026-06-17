@@ -293,6 +293,8 @@ export interface ExecutionContextPayload {
   prompt?: string;
   /** agent provider（claude/codex/...）。 */
   provider?: string;
+  /** agent model override. */
+  model?: string;
   /** 续跑用 session id（端点是最新源，优先于 payload）。 */
   resume_session_id?: string;
   /** git 远程 URL。 */

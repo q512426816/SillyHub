@@ -13,6 +13,8 @@ export interface AgentRun {
   task_id: string;
   lease_id: string;
   agent_type: string;
+  provider: string | null;
+  model: string | null;
   status: AgentRunStatus;
   started_at: string | null;
   finished_at: string | null;
@@ -62,6 +64,7 @@ export interface CreateAgentRunInput {
   // Explicit agent provider override; omitted/empty falls through to
   // workspace.default_agent (FR-02, 2026-06-14-agent-runtime-selection).
   provider?: string | null;
+  model?: string | null;
 }
 
 export function createAgentRun(workspaceId: string, input: CreateAgentRunInput) {

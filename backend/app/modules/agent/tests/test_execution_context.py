@@ -194,6 +194,7 @@ async def test_get_execution_context_task_run(client, db_session, tmp_path):
         lease_meta={
             "prompt": "实现 task-02",
             "provider": "claude_code",
+            "model": "claude-sonnet-4",
             "repo_url": "https://github.com/o/r",
             "branch": "dev",
             "allowed_paths": ["src/", "tests/"],
@@ -213,6 +214,7 @@ async def test_get_execution_context_task_run(client, db_session, tmp_path):
     # lease.metadata 全字段回填
     assert body["prompt"] == "实现 task-02"
     assert body["provider"] == "claude_code"
+    assert body["model"] == "claude-sonnet-4"
     assert body["repo_url"] == "https://github.com/o/r"
     assert body["branch"] == "dev"
     assert body["allowed_paths"] == ["src/", "tests/"]

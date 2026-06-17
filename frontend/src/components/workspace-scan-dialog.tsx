@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { AgentModelInput } from "@/components/AgentModelInput";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AgentProviderSelect } from "@/components/AgentProviderSelect";
@@ -31,6 +32,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   const [error, setError] = useState<string | null>(null);
   // 生成项目规范时使用的 agent provider 覆盖（FR-02，2026-06-14-agent-runtime-selection）
   const [scanProvider, setScanProvider] = useState<string | null>(null);
+  const [scanModel, setScanModel] = useState<string | null>(null);
 
   const handleScan = async () => {
     setError(null);
@@ -56,7 +58,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
     setError(null);
     setPhase("creating");
     try {
-      const result = await scanGenerate(scan.root_path, scanProvider);
+      const result = await scanGenerate(scan.root_path, scanProvider, scanModel);
       router.push(`/workspaces/${result.workspace_id}`);
     } catch (err) {
       const msg = err instanceof ApiError ? `${err.code}: ${err.message}` : "生成失败";
@@ -179,6 +181,12 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
               onChange={setScanProvider}
               includeDefault="跟随工作区默认"
             />
+            <div className="mt-2 space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                Agent model
+              </label>
+              <AgentModelInput value={scanModel} onChange={setScanModel} />
+            </div>
           </div>
         )}
 

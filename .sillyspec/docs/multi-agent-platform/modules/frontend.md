@@ -250,6 +250,13 @@ logout() -> 清空 useSession + 跳转 /login
 
 <!-- MANUAL_NOTES_START -->
 
+- 2026-06-17: Agent launch controls expose a free-form per-run model override.
+  Workspace defaults, scan-generate, change dispatch, task run creation, and runtime quick chat
+  now send `model` alongside `provider`; empty model input means the workspace/provider default.
+- 2026-06-17: Runtime quick chat keeps the Agent model override visible even when no daemon is online.
+  Provider selection and send remain disabled until an online daemon is available, but users can still see
+  and prefill the model override on the Daemon runtime page.
+
 <!-- MANUAL_NOTES_END -->
 
 ## Change Index

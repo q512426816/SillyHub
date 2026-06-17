@@ -766,7 +766,7 @@ export class Daemon {
       cmdPath: localCmdPath,
       cmd: execPayload.cmd ?? localCmdPath,
       prompt: execPayload.prompt, // 不从 fetch 覆盖
-      model: execPayload.model,
+      model: execCtx?.model ?? execPayload.model,
       timeout: execPayload.timeout,
     };
 

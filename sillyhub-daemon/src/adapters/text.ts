@@ -42,6 +42,26 @@ export class TextAdapter implements ProtocolAdapter {
   readonly provider = 'antigravity' as const;
 
   /**
+   * antigravity (agy CLI) 启动参数占位（ql-20260617-008）。
+   *
+   * 当前本机无 agy 二进制可用，返回空数组——agent-detector 应已标 offline，
+   * daemon 不会接到 antigravity lease。待 agy CLI 上线后此处补全启动参数。
+   *
+   * 常见 agy 启动模式（参考其他 text-protocol CLI）：
+   *   - `--print` / `-p`：非交互模式
+   *   - `--no-color`：纯文本输出
+   *   - prompt 走 stdin（默认 buildInput `${prompt}\n`）
+   */
+  buildArgs(_opts?: {
+    model?: string;
+    sessionId?: string;
+    resumeSessionId?: string;
+    prompt?: string;
+  }): string[] {
+    return [];
+  }
+
+  /**
    * 解析一行 antigravity stdout。
    *
    * 行为（对齐 Python text.py:85-102 parse_line）：

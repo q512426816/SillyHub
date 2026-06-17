@@ -93,4 +93,9 @@ Claude CLI 交互:
 
 <!-- MANUAL_NOTES_START -->
 
+- 2026-06-17: Model selection is lease-scoped, not daemon-global. `Daemon` prefers
+  execution-context `model` over claim payload `model`, puts it on `LeaseCtx`, and `TaskRunner`
+  passes it into adapter `buildArgs`. Stream-json providers append non-empty models as
+  `--model <name>`; concurrent leases can therefore use independent models in one daemon.
+
 <!-- MANUAL_NOTES_END -->

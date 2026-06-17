@@ -39,6 +39,7 @@ export interface Workspace {
   // Default agent provider for auto-scheduled dispatch (FR-02,
   // 2026-06-14-agent-runtime-selection).
   default_agent: string | null;
+  default_model: string | null;
   tech_stack: string[];
   build_command: string | null;
   test_command: string | null;
@@ -111,10 +112,15 @@ export interface ScanGenerateResponse {
 export async function scanGenerate(
   rootPath: string,
   provider?: string | null,
+  model?: string | null,
 ): Promise<ScanGenerateResponse> {
   return apiFetch<ScanGenerateResponse>("/api/workspaces/scan-generate", {
     method: "POST",
-    json: { root_path: rootPath, ...(provider ? { provider } : {}) },
+    json: {
+      root_path: rootPath,
+      ...(provider ? { provider } : {}),
+      ...(model ? { model } : {}),
+    },
   });
 }
 
@@ -150,6 +156,7 @@ export interface UpdateWorkspaceInput {
   // Default agent provider; omit to keep, null to clear (FR-02,
   // 2026-06-14-agent-runtime-selection).
   default_agent?: string | null;
+  default_model?: string | null;
   tech_stack?: string[];
   build_command?: string | null;
   test_command?: string | null;

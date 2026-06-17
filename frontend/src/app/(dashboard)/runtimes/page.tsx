@@ -11,6 +11,7 @@ import {
   CircleDashed,
   Copy,
   MessageSquareText,
+  Plus,
   RefreshCw,
   Send,
   Server,
@@ -21,11 +22,14 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { AgentModelInput } from "@/components/AgentModelInput";
+import { AgentLogViewer } from "@/components/agent-log-viewer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
+  getQuickChatLogs,
   getQuickChatResult,
   isVersionBelow,
   listDaemonRuntimes,
@@ -36,6 +40,7 @@ import {
   type DaemonRuntimeRead,
   type QuickChatStreamMessage,
 } from "@/lib/daemon";
+import type { AgentRunLogEntry } from "@/lib/agent";
 import { useSession } from "@/stores/session";
 
 type BadgeVariant = "default" | "success" | "outline" | "warning" | "destructive";
@@ -361,13 +366,22 @@ function QuickChatPanel({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
   }, [runtimes]);
 
   const [provider, setProvider] = useState(() => uniqueProviders[0] ?? "claude");
+  const [model, setModel] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
   const [lastRunId, setLastRunId] = useState<string | null>(null);
+  // ql-20260618-001：quick-chat 也展示 agent 日志（与 workspace agent console 同源 AgentLogViewer）
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [runLogs, setRunLogs] = useState<AgentRunLogEntry[] | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const logsPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hasOnlineProvider = uniqueProviders.length > 0;
+  const providerOptions = hasOnlineProvider ? uniqueProviders : [provider];
 
   // 组件卸载时关闭 SSE + 清理兜底 timer
   useEffect(() => {
@@ -380,8 +394,57 @@ function QuickChatPanel({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
         clearTimeout(fallbackTimerRef.current);
         fallbackTimerRef.current = null;
       }
+      if (logsPollRef.current) {
+        clearInterval(logsPollRef.current);
+        logsPollRef.current = null;
+      }
     };
   }, []);
+
+  // ql-20260618-001：activeRunId 变化时拉一次日志，运行中则轮询；终态停轮询。
+  useEffect(() => {
+    if (logsPollRef.current) {
+      clearInterval(logsPollRef.current);
+      logsPollRef.current = null;
+    }
+    if (!activeRunId) {
+      setRunLogs(null);
+      return;
+    }
+
+    let cancelled = false;
+    const fetchLogs = async () => {
+      try {
+        const logs = await getQuickChatLogs(activeRunId);
+        if (!cancelled) {
+          setRunLogs(logs);
+          setLogsLoading(false);
+          // 终态：停止轮询
+          const last = logs[logs.length - 1];
+          const isTerminal = last?.channel === "stdout" &&
+            /^\[SYSTEM:done\]/.test(last.content_redacted ?? "");
+          if (isTerminal && logsPollRef.current) {
+            clearInterval(logsPollRef.current);
+            logsPollRef.current = null;
+          }
+        }
+      } catch {
+        if (!cancelled) setLogsLoading(false);
+      }
+    };
+
+    setLogsLoading(true);
+    void fetchLogs();
+    logsPollRef.current = setInterval(() => void fetchLogs(), 1500);
+
+    return () => {
+      cancelled = true;
+      if (logsPollRef.current) {
+        clearInterval(logsPollRef.current);
+        logsPollRef.current = null;
+      }
+    };
+  }, [activeRunId]);
 
   useEffect(() => {
     if (uniqueProviders.length > 0 && !uniqueProviders.includes(provider)) {
@@ -545,14 +608,18 @@ function QuickChatPanel({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
 
   const handleSend = async () => {
     const prompt = input.trim();
-    if (!prompt || sending) return;
+    if (!prompt || sending || !hasOnlineProvider) return;
 
     setMessages((prev) => [...prev, { role: "user", content: prompt }]);
     setInput("");
     setSending(true);
 
     try {
-      const resp = await quickChat(prompt, provider, lastRunId ?? undefined);
+      const resp = await quickChat(prompt, provider, lastRunId ?? undefined, model);
+      // ql-20260618-001：每次发送都激活新的 run，触发日志拉取
+      setActiveRunId(resp.id);
+      setShowLogs(true);
+      setRunLogs(null);
       if (resp.status === "completed" || resp.status === "failed") {
         // daemon 同步完成（极少见，prompt 极短或 daemon 拒绝）：直接读 DB
         const result = await getQuickChatResult(resp.id);
@@ -578,20 +645,6 @@ function QuickChatPanel({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
     }
   };
 
-  if (uniqueProviders.length === 0) {
-    return (
-      <section className="flex min-h-[360px] flex-col items-center justify-center rounded-md border border-dashed bg-card px-6 text-center">
-        <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted text-muted-foreground">
-          <MessageSquareText className="h-5 w-5" />
-        </div>
-        <h2 className="mt-4 text-sm font-semibold">快速对话</h2>
-        <p className="mt-1 max-w-xs text-xs text-muted-foreground">
-          没有在线运行时，启动守护进程后即可发送给本地代理。
-        </p>
-      </section>
-    );
-  }
-
   const tone = getProviderTone(provider);
 
   return (
@@ -609,30 +662,86 @@ function QuickChatPanel({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
               </p>
             </div>
           </div>
-          <Badge variant="outline">{uniqueProviders.length} 个提供方</Badge>
+          <div className="flex items-center gap-2">
+            {lastRunId && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setLastRunId(null);
+                  setActiveRunId(null);
+                  setMessages([]);
+                  setShowLogs(false);
+                }}
+                className="h-7 gap-1 px-2 text-[11px]"
+                title="清空当前会话，开启新对话"
+              >
+                <Plus className="h-3 w-3" />
+                新建会话
+              </Button>
+            )}
+            <Button
+              variant={showLogs ? "default" : "outline"}
+              size="sm"
+              onClick={() => setShowLogs((v) => !v)}
+              disabled={!activeRunId}
+              className="h-7 gap-1 px-2 text-[11px]"
+              title={showLogs ? "隐藏 Agent 控制台日志" : "显示 Agent 控制台日志"}
+            >
+              <Terminal className="h-3 w-3" />
+              {showLogs ? "隐藏日志" : "查看日志"}
+            </Button>
+            <Badge variant="outline">{hasOnlineProvider ? `${uniqueProviders.length} 个提供方` : "未连接"}</Badge>
+          </div>
         </div>
 
-        <div className="mt-3 flex items-center gap-2">
-          <select
-            value={provider}
-            onChange={(event) => {
-              setProvider(event.target.value);
-              setLastRunId(null);
-            }}
-            className="h-8 min-w-0 flex-1 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none"
-          >
-            {uniqueProviders.map((item) => (
-              <option key={item} value={item}>
-                {getProviderLabel(item)}
-              </option>
-            ))}
-          </select>
+        <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-muted-foreground">Agent provider</label>
+            <select
+              value={provider}
+              onChange={(event) => {
+                setProvider(event.target.value);
+                setLastRunId(null);
+              }}
+              disabled={!hasOnlineProvider}
+              className="h-8 w-full min-w-0 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:bg-muted"
+            >
+              {providerOptions.map((item) => (
+                <option key={item} value={item}>
+                  {getProviderLabel(item)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-muted-foreground">Agent model</label>
+            <AgentModelInput
+              value={model}
+              onChange={(next) => {
+                setModel(next);
+                setLastRunId(null);
+              }}
+              placeholder="model override"
+              className="w-full"
+            />
+          </div>
           <ProviderBadge provider={provider} />
         </div>
       </header>
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto bg-muted/20 px-4 py-4">
-        {messages.length === 0 ? (
+        {!hasOnlineProvider ? (
+          <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
+            <Bot className="h-8 w-8 text-muted-foreground/70" />
+            <p className="mt-3 text-xs font-medium text-foreground">
+              没有在线 Daemon
+            </p>
+            <p className="mt-1 max-w-[280px] text-[11px] text-muted-foreground">
+              这里可以先配置本次快速对话的 model；启动 daemon 后即可发送。
+            </p>
+          </div>
+        ) : messages.length === 0 ? (
           <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
             <Bot className="h-8 w-8 text-muted-foreground/70" />
             <p className="mt-3 text-xs font-medium text-foreground">
@@ -665,6 +774,21 @@ function QuickChatPanel({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
         )}
       </div>
 
+      {showLogs && activeRunId && (
+        <div className="border-t bg-card">
+          <AgentLogViewer
+            title="快速对话 Agent 控制台"
+            runId={activeRunId}
+            logs={runLogs}
+            loading={logsLoading}
+            emptyText="等待 Agent 日志输出..."
+            isLive={sending}
+            maxHeightClass="max-h-[360px]"
+            compact
+          />
+        </div>
+      )}
+
       <footer className="border-t bg-card px-3 py-3">
         <div className="flex items-end gap-2">
           <textarea
@@ -679,11 +803,11 @@ function QuickChatPanel({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
             placeholder="输入提示词..."
             className="min-h-10 flex-1 resize-none rounded border border-input bg-background px-3 py-2 text-sm leading-5 focus:border-ring focus:outline-none"
             rows={2}
-            disabled={sending}
+            disabled={sending || !hasOnlineProvider}
           />
           <Button
             onClick={handleSend}
-            disabled={sending || !input.trim()}
+            disabled={sending || !input.trim() || !hasOnlineProvider}
             className="h-10 w-10 shrink-0 p-0"
             title={sending ? "发送中" : "发送"}
           >
@@ -961,49 +1085,53 @@ export default function RuntimesPage() {
 
       {items === null ? (
         <LoadingState />
-      ) : items.length === 0 ? (
-        <EmptyState />
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <SummaryCard label="总数" value={String(stats.total)} icon={Server} meta={`${stats.providers} 个提供方`} />
-            <SummaryCard label="在线" value={String(stats.online)} icon={CheckCircle2} tone="online" meta={stats.latestHeartbeat} />
-            <SummaryCard label="维护中" value={String(stats.maintenance)} icon={Wrench} tone="warning" />
-            <SummaryCard label="离线" value={String(stats.offline)} icon={WifiOff} tone="offline" />
-          </div>
+          {items.length > 0 && (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <SummaryCard label="总数" value={String(stats.total)} icon={Server} meta={`${stats.providers} 个提供方`} />
+              <SummaryCard label="在线" value={String(stats.online)} icon={CheckCircle2} tone="online" meta={stats.latestHeartbeat} />
+              <SummaryCard label="维护中" value={String(stats.maintenance)} icon={Wrench} tone="warning" />
+              <SummaryCard label="离线" value={String(stats.offline)} icon={WifiOff} tone="offline" />
+            </div>
+          )}
 
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_430px]">
-            <section className="min-w-0 space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <Activity className="h-4 w-4 text-muted-foreground" />
-                    <h2 className="text-sm font-semibold">运行时列表</h2>
-                    <span className="text-[11px] text-muted-foreground">
-                      {stats.online} 个在线 / {stats.total} 条记录
-                    </span>
+            {items.length === 0 ? (
+              <EmptyState />
+            ) : (
+              <section className="min-w-0 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <Activity className="h-4 w-4 text-muted-foreground" />
+                      <h2 className="text-sm font-semibold">运行时列表</h2>
+                      <span className="text-[11px] text-muted-foreground">
+                        {stats.online} 个在线 / {stats.total} 条记录
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      {lastRefreshedAt ? `上次刷新：${formatRefreshTime(lastRefreshedAt)}` : "等待刷新"}
+                    </p>
                   </div>
-                  <p className="mt-0.5 text-[11px] text-muted-foreground">
-                    {lastRefreshedAt ? `上次刷新：${formatRefreshTime(lastRefreshedAt)}` : "等待刷新"}
-                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => void reload({ showFeedback: true })}
+                    disabled={refreshing}
+                  >
+                    <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+                    {refreshing ? "刷新中" : "刷新"}
+                  </Button>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => void reload({ showFeedback: true })}
-                  disabled={refreshing}
-                >
-                  <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
-                  {refreshing ? "刷新中" : "刷新"}
-                </Button>
-              </div>
-              <div className="grid gap-3 lg:grid-cols-2">
-                {displayItems.map((runtime) => (
-                  <RuntimeCard key={runtime.id} runtime={runtime} />
-                ))}
-              </div>
-            </section>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {displayItems.map((runtime) => (
+                    <RuntimeCard key={runtime.id} runtime={runtime} />
+                  ))}
+                </div>
+              </section>
+            )}
 
             <QuickChatPanel runtimes={items} />
           </div>

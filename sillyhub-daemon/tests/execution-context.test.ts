@@ -323,6 +323,7 @@ describe('task-05 execution-context: daemon 编排层', () => {
       repo_url: 'https://github.com/x/y',
       branch: 'dev',
       tool_config: { K: 'V' },
+      model: 'claude-sonnet-4',
     });
     const taskRunner = createMockTaskRunner();
     const { daemon, wsClientMock } = buildDaemon({ client, taskRunner });
@@ -349,6 +350,7 @@ describe('task-05 execution-context: daemon 编排层', () => {
     expect(ctx.repoUrl).toBe('https://github.com/x/y');
     expect(ctx.branch).toBe('dev');
     expect(ctx.toolConfig).toEqual({ K: 'V' });
+    expect(ctx.model).toBe('claude-sonnet-4');
     // prompt 不从 fetch 覆盖（保留 payload 的最终意图）
     expect(ctx.prompt).toBe('do task');
     // claimToken / leaseId / agentRunId 仍正确

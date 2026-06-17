@@ -84,6 +84,7 @@ export type TransitionRequest = {
   reason?: string;
   /** 显式 agent provider（可选）；省略则后端用 workspace.default_agent */
   provider?: string | null;
+  model?: string | null;
 };
 
 /** 反馈提交请求参数 */
@@ -253,10 +254,14 @@ export function executeChange(
   workspaceId: string,
   changeKey: string,
   provider?: string | null,
+  model?: string | null,
 ) {
-  const qs = provider ? `?provider=${encodeURIComponent(provider)}` : "";
+  const searchParams = new URLSearchParams();
+  if (provider) searchParams.set("provider", provider);
+  if (model) searchParams.set("model", model);
+  const qs = searchParams.toString();
   return apiFetch<{ ok: boolean; run_id: string }>(
-    `/api/workspaces/${workspaceId}/changes/${changeKey}/execute${qs}`,
+    `/api/workspaces/${workspaceId}/changes/${changeKey}/execute${qs ? `?${qs}` : ""}`,
     { method: "POST" },
   );
 }
@@ -273,6 +278,7 @@ export function transitionChange(
   targetStage: string,
   reason?: string,
   provider?: string | null,
+  model?: string | null,
 ) {
   const body: TransitionRequest = { target_stage: targetStage };
   if (reason !== undefined) {
@@ -280,6 +286,9 @@ export function transitionChange(
   }
   if (provider !== undefined) {
     body.provider = provider;
+  }
+  if (model !== undefined) {
+    body.model = model;
   }
   return apiFetch<TransitionResponse>(
     `/api/workspaces/${workspaceId}/changes/${changeId}/transition`,
@@ -379,10 +388,14 @@ export function triggerDispatch(
   workspaceId: string,
   changeId: string,
   provider?: string | null,
+  model?: string | null,
 ) {
-  const qs = provider ? `?provider=${encodeURIComponent(provider)}` : "";
+  const searchParams = new URLSearchParams();
+  if (provider) searchParams.set("provider", provider);
+  if (model) searchParams.set("model", model);
+  const qs = searchParams.toString();
   return apiFetch<DispatchResponse>(
-    `/api/workspaces/${workspaceId}/changes/${changeId}/dispatch${qs}`,
+    `/api/workspaces/${workspaceId}/changes/${changeId}/dispatch${qs ? `?${qs}` : ""}`,
     { method: "POST" },
   );
 }

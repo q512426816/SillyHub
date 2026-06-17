@@ -204,6 +204,22 @@ describe('A-08: spawn env 透传 credential.buildEnv 的 key（对齐 Python tes
     const spawnCall = vi.mocked(spawn).mock.calls[0]!;
     expect(spawnCall[0]).toBe('/custom/bin/agent');
   });
+
+  it('adapter.buildArgs receives ctx.model', async () => {
+    const fakeChild = createFakeChild();
+    driveSpawn(fakeChild);
+    const adapter = defaultAdapter();
+    const { runner } = setupRunner({ adapter });
+
+    const p = runner.runLease(makeLease({ model: 'claude-sonnet-4' }));
+    await waitForSpawn();
+    fakeChild._emitExit(0);
+    await p;
+
+    expect(adapter.buildArgs).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'claude-sonnet-4' }),
+    );
+  });
 });
 
 // ── A-09：submitMessages 精确参数（对齐 Python test_event_forwarding）────────────
@@ -286,5 +302,105 @@ describe('A-13: 旧方法 _launch_agent / _stream_output 不存在（对齐 Pyth
     expect(obj['execute_task']).toBeUndefined();
     // 新方法存在
     expect(typeof obj['runLease']).toBe('function');
+  });
+});
+
+// ── ql-20260617-008：codex JSON-RPC 握手集成 ──────────────────────────────
+
+describe('ql-20260617-008: codex 握手序列 + turn/start 延迟触发', () => {
+  it('adapter 实现 buildHandshake 时，spawn 后逐行写到 stdin', async () => {
+    const handshakeLines = [
+      JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' }),
+      JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+      JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'thread/start', params: {} }),
+    ];
+    const fakeAdapter = defaultAdapter({
+      provider: 'codex',
+      buildArgs: vi.fn(() => ['app-server', '--listen', 'stdio://']),
+      buildHandshake: vi.fn(() => handshakeLines),
+      buildTurnStart: vi.fn(
+        (opts: { threadId: string; prompt: string }) =>
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 3,
+            method: 'turn/start',
+            params: { threadId: opts.threadId, input: [{ type: 'text', text: opts.prompt }] },
+          }),
+      ),
+    });
+    // ql-20260617-008-fix：必须通过 setupRunner({ adapter }) 注入，
+    // 否则 setupRunner 内部 mockAdapter = opts.adapter ?? defaultAdapter() 会把 codex adapter 冲掉。
+    const { runner } = setupRunner({ adapter: fakeAdapter });
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValueOnce(child as never);
+
+    const lease = makeLease({ provider: 'codex', prompt: 'hello' });
+    const promise = runner.runLease(lease);
+
+    await waitForSpawn();
+    // 触发 stdout：先发 thread/start response，让 TaskRunner 触发 turn/start
+    child._emitLines([
+      JSON.stringify({
+        id: 2,
+        result: { thread: { id: 'thread-abc-123' } },
+      }),
+    ]);
+    // 发个 turn/completed notification 让 lease 走完
+    child._emitLines([
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'turn/completed',
+        params: { finalStatus: 'completed' },
+      }),
+    ]);
+
+    // 让子进程 exit
+    setImmediate(() => child._emitExit(0));
+
+    await promise;
+
+    // buildHandshake 被调用一次
+    expect(fakeAdapter.buildHandshake).toHaveBeenCalledTimes(1);
+    // buildTurnStart 被调用一次，threadId 来自 response
+    expect(fakeAdapter.buildTurnStart).toHaveBeenCalledTimes(1);
+    const turnStartCall = (
+      fakeAdapter.buildTurnStart as ReturnType<typeof vi.fn>
+    ).mock.calls[0]![0] as { threadId: string; prompt: string };
+    expect(turnStartCall.threadId).toBe('thread-abc-123');
+    expect(turnStartCall.prompt).toBe('hello');
+
+    // stdin 应该收到 4 行：3 条 handshake + 1 条 turn/start
+    const stdinChunks = (child as unknown as { _stdinChunks?: Buffer[] })._stdinChunks ?? [];
+    const stdinContent = stdinChunks.map((c: Buffer) => c.toString('utf8')).join('');
+    const lines = stdinContent.split('\n').filter((l) => l.length > 0);
+    expect(lines.length).toBeGreaterThanOrEqual(4);
+    // handshake 三条按序
+    expect(JSON.parse(lines[0]).method).toBe('initialize');
+    expect(JSON.parse(lines[1]).method).toBe('notifications/initialized');
+    expect(JSON.parse(lines[2]).method).toBe('thread/start');
+    // turn/start 在 thread/start response 之后写
+    expect(JSON.parse(lines[3]).method).toBe('turn/start');
+    expect(JSON.parse(lines[3]!).params.threadId).toBe('thread-abc-123');
+  });
+
+  it('adapter 无 buildHandshake 时（claude），spawn 后只写 buildInput', async () => {
+    // claude adapter 默认无 buildHandshake
+    const fakeAdapter = defaultAdapter({ provider: 'claude' });
+    const { runner } = setupRunner({ adapter: fakeAdapter });
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValueOnce(child as never);
+
+    const lease = makeLease({ provider: 'claude', prompt: 'hi' });
+    const promise = runner.runLease(lease);
+
+    await waitForSpawn();
+    setImmediate(() => child._emitExit(0));
+
+    await promise;
+
+    // claude 只写 prompt\n，无 handshake
+    const stdinChunks = (child as unknown as { _stdinChunks?: Buffer[] })._stdinChunks ?? [];
+    const stdinContent = stdinChunks.map((c: Buffer) => c.toString('utf8')).join('');
+    expect(stdinContent).toBe('hi\n');
   });
 });

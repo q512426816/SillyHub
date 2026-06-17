@@ -61,7 +61,7 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
 
 export function CollapsibleSection({
   title,
-  defaultOpen = false,
+  defaultOpen = true,
   children,
 }: {
   title: string;
@@ -73,7 +73,7 @@ export function CollapsibleSection({
     <div className="mt-1">
       <button
         onClick={() => setOpen(!open)}
-        className="inline-flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300"
+        className="inline-flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-800"
       >
         {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         {title}

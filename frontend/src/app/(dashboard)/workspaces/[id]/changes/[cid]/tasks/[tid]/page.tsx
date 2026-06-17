@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
+import { AgentModelInput } from "@/components/AgentModelInput";
 import { AgentProviderSelect } from "@/components/AgentProviderSelect";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -137,6 +138,7 @@ export default function TaskDetailPage({ params }: Props) {
   const [preferredBackend, setPreferredBackend] = useState<"server" | "daemon">("server");
   // Selected agent provider for this run; null follows workspace.default_agent.
   const [runProvider, setRunProvider] = useState<string | null>(null);
+  const [runModel, setRunModel] = useState<string | null>(null);
   const [runtimesLoading, setRuntimesLoading] = useState(false);
 
   /* ---- Data loading ---- */
@@ -251,6 +253,7 @@ export default function TaskDetailPage({ params }: Props) {
         agent_type: "claude_code",
         preferred_backend: preferredBackend,
         provider: runProvider,
+        model: runModel,
       });
       setShowAgentForm(false);
       // Reload to pick up the new run
@@ -440,6 +443,12 @@ export default function TaskDetailPage({ params }: Props) {
                   onChange={setRunProvider}
                   includeDefault="跟随工作区默认"
                 />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] text-muted-foreground">
+                  Agent model
+                </label>
+                <AgentModelInput value={runModel} onChange={setRunModel} />
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-[11px] text-muted-foreground">

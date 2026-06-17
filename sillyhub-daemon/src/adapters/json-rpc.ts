@@ -73,6 +73,118 @@ export class JsonRpcAdapter implements ProtocolAdapter {
   }
 
   /**
+   * 构造 spawn 子进程参数（不含 cmdPath）。
+   *
+   * ql-20260617-006：四 provider 启动命令差异（对照 Python _PROVIDER_COMMANDS）。
+   *   - codex: `app-server --listen stdio://`（进入 JSON-RPC server 模式）
+   *   - hermes/kimi/kiro: 暂无子命令（直接进入 stdio JSON-RPC）
+   *
+   * 缺失此实现时，task-runner.ts:394 退化为 `[]`，codex 无参数直接进入
+   * 交互式 TUI → 检测到 stdin 非 terminal → 立即 exit 1 报
+   * "Error: stdin is not a terminal"。
+   *
+   * 文档依据：
+   *   - .sillyspec/changes/2026-06-09-daemon-agent-detection/tasks/task-05.md:67
+   *   - .sillyspec/changes/archive/2026-06-14-2026-06-13-daemon-nodejs-rewrite/tasks/task-07.md:461
+   *
+   * @param _opts 预留（model / sessionId / resumeSessionId 当前不影响 codex 启动参数）
+   */
+  buildArgs(_opts?: {
+    model?: string;
+    sessionId?: string;
+    resumeSessionId?: string;
+    prompt?: string;
+  }): string[] {
+    if (this.provider === 'codex') {
+      return ['app-server', '--listen', 'stdio://'];
+    }
+    return [];
+  }
+
+  /**
+   * 构造 codex app-server 协议握手序列（ql-20260617-008）。
+   *
+   * 实测 codex app-server --listen stdio:// 启动后是被动 JSON-RPC 2.0 server，
+   * daemon 必须按序发：
+   *   1. initialize request → server 回 response（含 userAgent）
+   *   2. notifications/initialized notification → server 推 remoteControl/status/changed
+   *   3. thread/start request → server 回 response（含 result.thread.id）
+   *
+   * turn/start 不在本序列，因为它依赖 thread.id，由 buildTurnStart 单独构造，
+   * TaskRunner 收到 thread/start response 后调用。
+   *
+   * 字段名严格按 codex app-server generate-json-schema：
+   *   - initialize.params.clientInfo.{name,version}（不是 client，否则 -32600）
+   *   - thread/start.params.cwd（spawn 工作目录）
+   *
+   * id 用 1/2 固定值（thread/start response 也用 id=2，TaskRunner 据此识别）。
+   *
+   * @param opts cwd / prompt（保留，当前握手不用）/ model（保留）
+   */
+  buildHandshake(opts: {
+    cwd: string;
+    prompt: string;
+    model?: string;
+  }): string[] {
+    return [
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          clientInfo: { name: 'sillyhub-daemon', version: '0.1.0' },
+        },
+      }),
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'notifications/initialized',
+      }),
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'thread/start',
+        params: { cwd: opts.cwd },
+      }),
+    ];
+  }
+
+  /**
+   * 构造 turn/start JSON-RPC request（ql-20260617-008）。
+   *
+   * TaskRunner 在收到 id=2 的 response（thread/start reply）后调用本方法，
+   * 从 response.result.thread.id 提取真实 threadId 注入到 turn/start params。
+   *
+   * 字段名严格按 codex schema：
+   *   - params.threadId（camelCase，不是 thread_id，否则 -32600）
+   *   - params.input: UserInput[]（codex 0.131 实测，ql-20260617-009 修正；旧 instructions 字段被 codex 拒绝）
+   *   - params.model（可选，覆盖 ~/.codex/config.toml）
+   *
+   * @param opts threadId（thread/start response 拿到）/ prompt / model
+   */
+  buildTurnStart(opts: {
+    threadId: string;
+    prompt: string;
+    model?: string;
+  }): string {
+    // ql-20260617-009：codex 0.131.0 turn/start 实测要求 `input` 字段（不是 instructions），
+    // 类型为 UserInput[]，每个元素需 { type: 'text', text: string }。
+    // 旧版用 instructions: [prompt] 会被 codex 拒绝为 -32600 missing field `input`。
+    const params: Record<string, unknown> = {
+      threadId: opts.threadId,
+      input: [{ type: 'text', text: opts.prompt }],
+    };
+    if (opts.model) {
+      params.model = opts.model;
+    }
+    return JSON.stringify({
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'turn/start',
+      params,
+    });
+  }
+
+  /**
    * 解析一行 JSON-RPC 2.0 消息，返回 0..N 个 AgentEvent。
    *
    * 三分支顺序严格对照 Python _handle_line L186-200：

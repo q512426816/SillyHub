@@ -60,10 +60,12 @@ class TestDispatchProviderPropagation:
                 target_stage="propose",
                 user_id=user_id,
                 provider="codex",
+                model="gpt-5-codex",
             )
 
         assert result["dispatched"] is True
         assert mock_start.call_args.kwargs["provider"] == "codex"
+        assert mock_start.call_args.kwargs["model"] == "gpt-5-codex"
 
     async def test_dispatch_defaults_provider_none(self, db_session: AsyncSession, tmp_path: Path):
         ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
@@ -90,6 +92,7 @@ class TestDispatchProviderPropagation:
             )
 
         assert mock_start.call_args.kwargs["provider"] is None
+        assert mock_start.call_args.kwargs["model"] is None
 
 
 @pytest.mark.asyncio
@@ -129,7 +132,9 @@ class TestDispatchNextStepProviderPropagation:
                 user_id=user_id,
                 target_stage="propose",
                 provider="codex",
+                model="gpt-5-codex",
             )
 
         assert result["dispatched"] is True
         assert mock_start.call_args.kwargs["provider"] == "codex"
+        assert mock_start.call_args.kwargs["model"] == "gpt-5-codex"

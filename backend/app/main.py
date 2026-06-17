@@ -127,6 +127,7 @@ def create_app() -> FastAPI:
         async def quick_chat(
             prompt: str = Query(min_length=1, max_length=8000),
             provider: str = Query(default="claude", max_length=30),
+            model: str | None = Query(default=None, max_length=128),
             prev_run_id: str | None = Query(default=None, max_length=50),
             session: AsyncSession = Depends(get_session),
             user: User = Depends(require_permission_any(Permission.TASK_RUN_AGENT)),
@@ -159,10 +160,15 @@ def create_app() -> FastAPI:
             run_id = uuid.uuid4()
             await session.execute(
                 sa_text(
-                    "INSERT INTO agent_runs (id, agent_type, status, spec_strategy) "
-                    "VALUES (:id, :agent_type, 'pending', 'quick-chat')"
+                    "INSERT INTO agent_runs (id, agent_type, provider, model, status, spec_strategy) "
+                    "VALUES (:id, :agent_type, :provider, :model, 'pending', 'quick-chat')"
                 ),
-                {"id": run_id, "agent_type": provider},
+                {
+                    "id": run_id,
+                    "agent_type": provider,
+                    "provider": provider,
+                    "model": model,
+                },
             )
             await session.commit()
 
@@ -172,6 +178,7 @@ def create_app() -> FastAPI:
                     run_id,
                     user.id,
                     provider=provider,
+                    model=model,
                     prompt=prompt,
                     resume_session_id=resume_session_id,
                 )
@@ -197,6 +204,8 @@ def create_app() -> FastAPI:
             return {
                 "id": str(run_id),
                 "agent_type": provider,
+                "provider": provider,
+                "model": model,
                 "status": final_status,
             }
 
@@ -210,7 +219,7 @@ def create_app() -> FastAPI:
 
             result = await session.execute(
                 sa_text(
-                    "SELECT id, status, output_redacted, agent_type, started_at, finished_at "
+                    "SELECT id, status, output_redacted, agent_type, provider, model, started_at, finished_at "
                     "FROM agent_runs WHERE id = :id AND spec_strategy = 'quick-chat'"
                 ),
                 {"id": run_id},
@@ -343,6 +352,51 @@ def create_app() -> FastAPI:
             # claimed lease → 由 daemon 心跳上报后收尾
             run = await svc.get_run(parsed)
             return {"id": str(parsed), "status": run.status if run else "killed"}
+
+        @qc_router.get("/daemon-chat/{run_id}/logs")
+        async def get_quick_chat_logs(
+            run_id: str,
+            session: AsyncSession = Depends(get_session),
+            user: User = Depends(require_permission_any(Permission.TASK_READ)),
+        ):
+            """ql-20260618-001：返回 quick-chat 类型 agent run 的日志列表。
+
+            复用 AgentService.get_run_logs（与 workspace-scoped /agent/runs/{run_id}/logs
+            同源），区别仅在于：本端点不要求 workspace_id（quick-chat 无 workspace 关联），
+            且只允许查询 spec_strategy='quick-chat' 的 run，防止越权读其他类型 run。
+            """
+            import uuid as _uuid
+
+            from fastapi import HTTPException
+            from sqlalchemy import text as sa_text
+
+            from app.modules.agent.schema import AgentRunLogEntry
+            from app.modules.agent.service import AgentService
+
+            try:
+                parsed = _uuid.UUID(run_id)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=404, detail="Run not found") from None
+
+            row = (
+                (
+                    await session.execute(
+                        sa_text(
+                            "SELECT id FROM agent_runs "
+                            "WHERE id = :id AND spec_strategy = 'quick-chat'"
+                        ),
+                        {"id": str(parsed)},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if row is None:
+                raise HTTPException(status_code=404, detail="Run not found")
+
+            svc = AgentService(session)
+            logs = await svc.get_run_logs(parsed)
+            return [AgentRunLogEntry.model_validate(e) for e in logs]
 
         app.include_router(qc_router, prefix="/api")
 

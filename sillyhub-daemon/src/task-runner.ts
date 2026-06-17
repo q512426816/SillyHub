@@ -391,11 +391,13 @@ export class TaskRunner {
           }
         }
         // args 每次重试都重新构建（重试时 effectiveCtx.resumeSessionId 已清空，buildArgs 不带 --resume）
+        // ql-20260617-008：透传 prompt，ndjson 协议把 prompt 作为 args 末尾位置参数
         const args = adapter.buildArgs
           ? adapter.buildArgs({
               model: effectiveCtx.model,
               sessionId: effectiveCtx.sessionId,
               resumeSessionId: effectiveCtx.resumeSessionId,
+              prompt: ctx.prompt ?? '',
             })
           : [];
 
@@ -697,30 +699,69 @@ export class TaskRunner {
     await Promise.resolve();
 
     // 步骤 6b：写 prompt 到 stdin（不立即 end）
-    try {
-      const inputData = adapter.buildInput
-        ? adapter.buildInput(prompt)
-        : `${prompt}\n`;
-      const buf = typeof inputData === 'string' ? Buffer.from(inputData, 'utf-8') : inputData;
-      if (buf.length > 0 && child.stdin && !child.stdin.destroyed) {
-        await new Promise<void>((resolve) => {
-          let done = false;
-          const finish = (): void => { if (!done) { done = true; resolve(); } };
-          const ok = child.stdin!.write(buf, (err?: Error | null) => {
-            if (err) console.warn('task_runner: stdin_write_failed', err);
-            finish();
+    // ql-20260617-008：JSON-RPC 协议（adapter 实现 buildHandshake）的 prompt 走
+    // turn/start 的 instructions 字段（步骤 6c 握手 + _handleLine 触发的 buildTurnStart），
+    // 这里跳过 buildInput，避免 codex stdin 收到非法 JSON 文本导致 -32600。
+    if (!adapter.buildHandshake) {
+      try {
+        const inputData = adapter.buildInput
+          ? adapter.buildInput(prompt)
+          : `${prompt}\n`;
+        const buf = typeof inputData === 'string' ? Buffer.from(inputData, 'utf-8') : inputData;
+        if (buf.length > 0 && child.stdin && !child.stdin.destroyed) {
+          await new Promise<void>((resolve) => {
+            let done = false;
+            const finish = (): void => { if (!done) { done = true; resolve(); } };
+            const ok = child.stdin!.write(buf, (err?: Error | null) => {
+              if (err) console.warn('task_runner: stdin_write_failed', err);
+              finish();
+            });
+            if (!ok) {
+              child.stdin!.once('drain', finish);
+            } else {
+              // ok=true 时 callback 已同步触发或将在 flush 后触发；为保证不悬挂，
+              // 用 setImmediate 兜底 resolve（write 返回 true 表示已接受，无需等 drain）。
+              setImmediate(finish);
+            }
           });
-          if (!ok) {
-            child.stdin!.once('drain', finish);
-          } else {
-            // ok=true 时 callback 已同步触发或将在 flush 后触发；为保证不悬挂，
-            // 用 setImmediate 兜底 resolve（write 返回 true 表示已接受，无需等 drain）。
-            setImmediate(finish);
-          }
-        });
+        }
+      } catch (e) {
+        console.warn('task_runner: stdin_write_exception', e);
       }
-    } catch (e) {
-      console.warn('task_runner: stdin_write_exception', e);
+    }
+
+    // 步骤 6c：json_rpc 协议握手序列（ql-20260617-008）
+    // codex app-server 是被动 server，必须主动发 initialize/initialized/thread.start
+    // 才会开始处理。turn/start 在 TaskRunner._handleLine 检测到 thread/start response
+    //（id=2）后用真实 threadId 触发（adapter.buildTurnStart）。
+    if (adapter.buildHandshake && child.stdin && !child.stdin.destroyed) {
+      try {
+        const handshake = adapter.buildHandshake({
+          cwd: opts.cwd,
+          prompt,
+          model: ctx.model,
+        });
+        for (const line of handshake) {
+          await new Promise<void>((resolve) => {
+            let done = false;
+            const finish = (): void => { if (!done) { done = true; resolve(); } };
+            const ok = child.stdin!.write(line + '\n', (err?: Error | null) => {
+              if (err) console.warn('task_runner: handshake_write_failed', err);
+              finish();
+            });
+            if (!ok) {
+              child.stdin!.once('drain', finish);
+            } else {
+              setImmediate(finish);
+            }
+          });
+          // ql-20260617-009：每条 handshake 之间加 100ms，让 codex 处理完上一条再发下一条。
+          // 实测若三条 initialize/initialized/thread.start 连续 write，codex 偶发只处理前两条。
+          await new Promise<void>((r) => setTimeout(r, 100));
+        }
+      } catch (e) {
+        console.warn('task_runner: handshake_write_exception', e);
+      }
     }
 
     // 超时看门狗（task-10 B2：resolveTimeout 优先级链
@@ -789,6 +830,8 @@ export class TaskRunner {
             onStats: (stats: Record<string, unknown>) => {
               lastStats = stats;
             },
+            prompt,
+            model: ctx.model,
           });
         }
         child.off('exit', exitCloser);
@@ -880,6 +923,8 @@ export class TaskRunner {
       agentRunId: string;
       observer: TerminalObserver;
       onStats?: (stats: Record<string, unknown>) => void;
+      prompt?: string;
+      model?: string;
     },
   ): Promise<void> {
     // R-03：control_request 行优先交给 adapter.onControl 应答
@@ -890,6 +935,48 @@ export class TaskRunner {
         console.warn('task_runner: control_response_failed', e);
       }
       // control_request 行本身不产 submitMessages 事件，但仍允许 parse（多数 adapter 对该行返回 null）
+    }
+
+    // ql-20260617-008：json_rpc thread/start response 监听
+    // codex app-server 收到 thread/start（id=2）后回复含 result.thread.id 的 response。
+    // TaskRunner 检测到此 response 后，用真实 threadId 调 adapter.buildTurnStart 构造
+    // turn/start request 写 stdin，codex 才会开始处理用户 prompt。
+    if (adapter.buildTurnStart && child.stdin && !child.stdin.destroyed) {
+      try {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('{')) {
+          const msg = JSON.parse(trimmed) as {
+            id?: unknown;
+            result?: { thread?: { id?: unknown } };
+          };
+          if (msg.id === 2 && msg.result?.thread?.id) {
+            const threadId = String(msg.result.thread.id);
+            const turnStartLine = adapter.buildTurnStart({
+              threadId,
+              prompt: env.prompt ?? '',
+              model: env.model,
+            });
+            await new Promise<void>((resolve) => {
+              let done = false;
+              const finish = (): void => { if (!done) { done = true; resolve(); } };
+              const ok = child.stdin!.write(turnStartLine + '\n', (err?: Error | null) => {
+                if (err) console.warn('task_runner: turn_start_write_failed', err);
+                finish();
+              });
+              if (!ok) {
+                child.stdin!.once('drain', finish);
+              } else {
+                setImmediate(finish);
+              }
+            });
+          }
+        }
+      } catch (e) {
+        // 非 JSON 行忽略（codex 推送的 notification 也走此路径，正常）
+        if (!(e instanceof SyntaxError)) {
+          console.warn('task_runner: turn_start_trigger_exception', e);
+        }
+      }
     }
 
     // result / system 行：尝试提取 session_id（B-19-09：仅在显式标记 result 时关闭 stdin）

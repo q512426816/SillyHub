@@ -19,6 +19,7 @@ from app.modules.agent.schema import AgentRunCreate
 def test_agent_run_create_provider_defaults_none():
     dto = AgentRunCreate(task_id=uuid.uuid4(), lease_id=uuid.uuid4())
     assert dto.provider is None
+    assert dto.model is None
 
 
 def test_agent_run_create_accepts_provider():
@@ -30,10 +31,28 @@ def test_agent_run_create_accepts_provider():
     assert dto.provider == "codex"
 
 
+def test_agent_run_create_accepts_model():
+    dto = AgentRunCreate(
+        task_id=uuid.uuid4(),
+        lease_id=uuid.uuid4(),
+        model="gpt-5-codex",
+    )
+    assert dto.model == "gpt-5-codex"
+
+
 def test_agent_run_create_rejects_oversized_provider():
     with pytest.raises(ValueError):
         AgentRunCreate(
             task_id=uuid.uuid4(),
             lease_id=uuid.uuid4(),
             provider="x" * 65,
+        )
+
+
+def test_agent_run_create_rejects_oversized_model():
+    with pytest.raises(ValueError):
+        AgentRunCreate(
+            task_id=uuid.uuid4(),
+            lease_id=uuid.uuid4(),
+            model="x" * 129,
         )

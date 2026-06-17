@@ -70,6 +70,14 @@ class AgentRun(BaseModel, table=True):
         ),
     )
     agent_type: str = Field(sa_column=Column(String(30), nullable=False))  # claude_code, etc.
+    provider: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    model: str | None = Field(
+        default=None,
+        sa_column=Column(String(128), nullable=True),
+    )
     status: str = Field(
         default="pending",
         sa_column=Column(String(20), nullable=False, default="pending"),

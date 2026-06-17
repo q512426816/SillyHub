@@ -78,12 +78,14 @@ export interface ProtocolAdapter {
    *
    * 若 adapter 未实现（如 text adapter 可能不需要参数），返回空数组等价 no-op。
    *
-   * @param opts 模型 / 会话 ID / 恢复会话 ID 等透传参数
+   * @param opts 模型 / 会话 ID / 恢复会话 ID / prompt 等透传参数
+   *             （prompt 仅供 ndjson 协议把 prompt 作为 args 位置参数使用）
    */
   buildArgs?(opts: {
     model?: string;
     sessionId?: string;
     resumeSessionId?: string;
+    prompt?: string;
   }): string[];
 
   /**
@@ -99,6 +101,52 @@ export interface ProtocolAdapter {
    * @param prompt 任务 prompt 文本
    */
   buildInput?(prompt: string): string | Buffer;
+
+  /**
+   * 可选：spawn 后需立即写到 stdin 的协议握手 request 序列。
+   *
+   * 仅 json_rpc 协议（codex/hermes/kimi/kiro）需要——这些 CLI 是被动 server，
+   * daemon 必须主动发 initialize/thread.start 等握手 request 才会开始执行。
+   *
+   * stream_json/jsonl/ndjson/text 协议不需要握手（buildInput 写 prompt 即可触发执行）。
+   *
+   * 调用时机（TaskRunner spawn 后）：
+   *   1. adapter.buildInput(prompt) 写到 stdin（若实现）
+   *   2. adapter.buildHandshake(opts) 逐行写到 stdin（每行尾加 \n）
+   *   3. TaskRunner 监听 stdout，检测 thread/start response 后调
+   *      adapter.buildTurnStart(threadId, prompt) 写 turn/start request
+   *
+   * ql-20260617-008：codex app-server 协议要求 initialize/initialized/thread.start
+   * 三条 request 才能进入 turn 处理。thread/start response 含 thread.id，
+   * 后续 turn/start 由 buildTurnStart 单独构造。
+   *
+   * @param opts cwd（spawn 工作目录）/ prompt（用户输入）/ model（可选）
+   * @returns string[] 每元素一行 JSON-RPC request（无尾换行，TaskRunner 加 \n 分隔）
+   *         返回空数组或 undefined 表示无需握手。
+   */
+  buildHandshake?(opts: {
+    cwd: string;
+    prompt: string;
+    model?: string;
+  }): string[];
+
+  /**
+   * 可选：构造 turn/start JSON-RPC request（json_rpc 协议专用）。
+   *
+   * TaskRunner 在收到 thread/start response（含 result.thread.id）后调用本方法，
+   * 用真实 threadId 构造 turn/start request 并 write 到 stdin。
+   *
+   * 与 buildHandshake 分离的原因：threadId 在 spawn 前未知，必须等 thread/start
+   * response 才能拿到。
+   *
+   * @param opts threadId（来自 thread/start response）/ prompt / model
+   * @returns 完整的 turn/start JSON-RPC request 字符串（无尾换行）
+   */
+  buildTurnStart?(opts: {
+    threadId: string;
+    prompt: string;
+    model?: string;
+  }): string;
 }
 
 /**

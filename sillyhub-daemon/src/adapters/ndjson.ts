@@ -112,6 +112,33 @@ export class NdjsonAdapter implements ProtocolAdapter {
     this.provider = provider;
   }
 
+  /**
+   * 三 provider 共享启动参数（ql-20260617-008）。
+   *
+   * 对照 ndjson.ts:23 协议形态：`run --format json --dangerously-skip-permissions <prompt>`。
+   * prompt 作为 args 末尾位置参数传入（不走 stdin），故 buildInput 不会被调用。
+   *
+   * - `run`：opencode/openclaw/pi 都用此子命令触发非交互执行
+   * - `--format json`：stdout 输出 NDJSON 事件流（本 adapter parse 假设的输入格式）
+   * - `--dangerously-skip-permissions`：跳过工具批准（daemon 自动审批）
+   * - `<prompt>`：用户输入（位置参数）
+   *
+   * @param opts.prompt 用户 prompt（必须，作位置参数）
+   */
+  buildArgs(opts?: {
+    model?: string;
+    sessionId?: string;
+    resumeSessionId?: string;
+    prompt?: string;
+  }): string[] {
+    const args = ['run', '--format', 'json', '--dangerously-skip-permissions'];
+    if (opts?.model) {
+      args.push('--model', opts.model);
+    }
+    args.push(opts?.prompt ?? '');
+    return args;
+  }
+
   /** 重置内部状态（新 lease 复用 adapter 实例时调用）。对照 Python _reset_state() L68-70。 */
   resetState(): void {
     this.state = createInitialState();

@@ -122,4 +122,9 @@ ChangeService.transition() -> 状态机校验 -> 更新 stage
 
 <!-- MANUAL_NOTES_START -->
 
+- 2026-06-17: Agent runtime selection now snapshots both `provider` and `model` per `AgentRun`.
+  `Workspace.default_model` is the fallback when a run request omits `model`; task, stage,
+  scan-generate, quick-chat, and change-writer execute dispatch paths pass model through lease
+  metadata and execution-context.
+
 <!-- MANUAL_NOTES_END -->

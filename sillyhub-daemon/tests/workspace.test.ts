@@ -362,32 +362,28 @@ describe('workspace', () => {
   // ── AC-04：GitError 结构化 ── task-15 AC-04
 
   describe('GitError（AC-04 结构化错误）', () => {
-    it('git 不存在的子命令抛 GitError，instanceof / name 正确', async () => {
+    it('prepareWorkspace 错误 repoUrl 抛 GitError，instanceof / name 正确', async () => {
       const mgr = new WorkspaceManager(baseDir);
-      // prepareWorkspace 内部走 runGit，用一个会失败的 git 命令
-      // 通过 collectDiff 在无 .git 目录跑 status 触发 git 失败
-      const emptyWs = join(baseDir, 'no-git-here');
-      await mkdir(emptyWs, { recursive: true });
 
-      // git status 在非 git 仓库目录执行会退出码 128
-      await expect(mgr.collectDiff(emptyWs)).rejects.toMatchObject({
+      // 错误 repoUrl → git clone 失败 → 抛 GitError
+      await expect(
+        mgr.prepareWorkspace('bad-clone', '/nonexistent/path.git', 'main'),
+      ).rejects.toMatchObject({
         name: 'GitError',
       });
     });
 
-    it('GitError 含 args / stderr / code 字段', async () => {
+    it('GitError 含 args / stderr / code 字段（通过 clone 失败触发）', async () => {
       const mgr = new WorkspaceManager(baseDir);
-      const emptyWs = join(baseDir, 'no-git-here2');
-      await mkdir(emptyWs, { recursive: true });
 
       try {
-        await mgr.collectDiff(emptyWs);
+        await mgr.prepareWorkspace('bad-clone-2', '/nonexistent/path.git', 'main');
         expect.unreachable('应抛 GitError');
       } catch (e) {
         expect(e).toBeInstanceOf(GitError);
         const ge = e as GitError;
         expect(ge.name).toBe('GitError');
-        expect(ge.args).toContain('status');
+        expect(ge.args).toContain('clone');
         expect(typeof ge.code).toBe('number');
         expect(ge.stderr).not.toBe('');
         expect(ge.message).toContain('git');
@@ -402,6 +398,43 @@ describe('workspace', () => {
       expect(ge.message).toContain('clone');
       expect(ge.message).toContain('128');
       expect(ge.message).toContain('some error');
+    });
+  });
+
+  // ── ql-20260617-014：非 git 仓库 collectDiff 直接返回 EMPTY_DIFF ──
+
+  describe('collectDiff 非 git 仓库降级（ql-20260617-014）', () => {
+    it('目录无 .git → 直接返回 EMPTY_DIFF，不抛 GitError', async () => {
+      const mgr = new WorkspaceManager(baseDir);
+      const nonGitWs = join(baseDir, 'non-git-ws');
+      await mkdir(nonGitWs, { recursive: true });
+      // 写一个普通文件（无 .git）
+      await writeFile(join(nonGitWs, 'README.md'), 'hello', 'utf8');
+
+      const result = await mgr.collectDiff(nonGitWs);
+
+      expect(result).toEqual({
+        patch: '',
+        files_changed: 0,
+        insertions: 0,
+        deletions: 0,
+        stats: '',
+      });
+    });
+
+    it('目录不存在 → 也返回 EMPTY_DIFF（existsSync false 兜底）', async () => {
+      const mgr = new WorkspaceManager(baseDir);
+      const ghostWs = join(baseDir, 'does-not-exist');
+
+      const result = await mgr.collectDiff(ghostWs);
+
+      expect(result).toEqual({
+        patch: '',
+        files_changed: 0,
+        insertions: 0,
+        deletions: 0,
+        stats: '',
+      });
     });
   });
 

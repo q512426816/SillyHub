@@ -339,6 +339,10 @@ class DaemonService:
         payload["workspace_id"] = str(workspace_id) if workspace_id else None
         payload["session_id"] = agent_run.session_id
         payload["agent_type"] = agent_run.agent_type
+        if agent_run.provider:
+            payload["provider"] = agent_run.provider
+        if agent_run.model:
+            payload["model"] = agent_run.model
         payload["change_id"] = str(agent_run.change_id) if agent_run.change_id else None
         payload["task_id"] = str(agent_run.task_id) if agent_run.task_id else None
 
@@ -348,6 +352,8 @@ class DaemonService:
             payload["prompt"] = lease_meta["prompt"]
         if lease_meta.get("provider"):
             payload["provider"] = lease_meta["provider"]
+        if lease_meta.get("model"):
+            payload["model"] = lease_meta["model"]
         if lease_meta.get("resume_session_id"):
             payload["resume_session_id"] = lease_meta["resume_session_id"]
         # Propagate bundle context fields from lease metadata (task-03 / Phase 2).

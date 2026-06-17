@@ -19,6 +19,9 @@ class AgentRunCreate(BaseModel):
     # through to workspace.default_agent (FR-02, change
     # 2026-06-14-agent-runtime-selection).
     provider: str | None = Field(default=None, max_length=64)
+    # Per-run model override; when None the dispatch layer falls through to
+    # workspace.default_model, then provider/CLI defaults.
+    model: str | None = Field(default=None, max_length=128)
 
 
 class ExecutionContextResponse(BaseModel):
@@ -36,6 +39,7 @@ class ExecutionContextResponse(BaseModel):
     )
     prompt: str | None = None
     provider: str | None = None
+    model: str | None = None
     resume_session_id: str | None = None
     repo_url: str | None = None
     branch: str | None = None
@@ -55,6 +59,7 @@ class ExecutionContextResponse(BaseModel):
 class QuickChatRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
     provider: str = Field(default="claude", max_length=30)
+    model: str | None = Field(default=None, max_length=128)
     workspace_id: uuid.UUID | None = None
 
 
@@ -63,6 +68,8 @@ class AgentRunResponse(BaseModel):
     task_id: uuid.UUID | None
     lease_id: uuid.UUID | None
     agent_type: str
+    provider: str | None = None
+    model: str | None = None
     status: str
     started_at: datetime | None
     finished_at: datetime | None

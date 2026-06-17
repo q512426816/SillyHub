@@ -140,6 +140,7 @@ async def execute_change(
     session: SessionDep,
     user: CurrentUser,
     provider: str | None = Query(None),
+    model: str | None = Query(None),
 ) -> dict:
     """Trigger change execution — dispatch via unified stage dispatch service."""
     from sqlalchemy import select
@@ -177,6 +178,7 @@ async def execute_change(
         user_id=user.id,
         target_stage="execute",
         provider=provider,
+        model=model,
     )
 
     if not result.get("dispatched"):

@@ -391,6 +391,19 @@ describe('buildArgs / buildInput (spawn 参数 + stdin 输入)', () => {
     expect(a.buildArgs({ model: 'sonnet', sessionId: 's1' })).not.toContain('--resume');
   });
 
+  it('buildArgs model 非空时追加 --model <name>', () => {
+    const a = new StreamJsonAdapter('claude');
+    const args = a.buildArgs({ model: 'claude-sonnet-4' });
+    const idx = args.indexOf('--model');
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe('claude-sonnet-4');
+  });
+
+  it('buildArgs model 空白时不追加 --model', () => {
+    const a = new StreamJsonAdapter('claude');
+    expect(a.buildArgs({ model: '   ' })).not.toContain('--model');
+  });
+
   it('buildArgs resumeSessionId 非空时追加 --resume <id>（多轮续跑）', () => {
     const a = new StreamJsonAdapter('claude');
     const args = a.buildArgs({ resumeSessionId: 'sess_resume_123' });

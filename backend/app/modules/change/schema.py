@@ -159,6 +159,9 @@ class TransitionRequest(BaseModel):
     provider: str | None = Field(
         default=None, max_length=64, description="指定 agent provider（可选）"
     )
+    model: str | None = Field(
+        default=None, max_length=128, description="Optional agent model override"
+    )
 
 
 class FeedbackRequest(BaseModel):

@@ -110,6 +110,8 @@ class WorkspaceService:
             existing.name = payload.name
             existing.slug = await self._ensure_unique_slug(slug)
             existing.status = "active"
+            existing.default_agent = payload.default_agent
+            existing.default_model = payload.default_model
             existing.updated_at = now
             existing.last_scanned_at = now
             await self._session.flush()
@@ -153,6 +155,7 @@ class WorkspaceService:
             repo_url=payload.repo_url,
             default_branch=payload.default_branch,
             default_agent=payload.default_agent,
+            default_model=payload.default_model,
             tech_stack=payload.tech_stack,
             build_command=payload.build_command,
             test_command=payload.test_command,
@@ -224,6 +227,7 @@ class WorkspaceService:
         result.repo_url = payload.repo_url
         result.default_branch = payload.default_branch
         result.default_agent = payload.default_agent
+        result.default_model = payload.default_model
         result.tech_stack = payload.tech_stack
         result.build_command = payload.build_command
         result.test_command = payload.test_command
@@ -771,6 +775,7 @@ class WorkspaceService:
         user_id: uuid.UUID,
         agent_service: "AgentService",
         provider: str | None = None,
+        model: str | None = None,
     ) -> tuple[uuid.UUID, uuid.UUID]:
         """Create workspace + spec_workspace and trigger scan agent.
 
@@ -858,6 +863,7 @@ class WorkspaceService:
             root_path=root_path,
             spec_root=spec_root,
             provider=provider,
+            model=model,
         )
 
         # 7. Return

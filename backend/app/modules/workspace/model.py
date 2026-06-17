@@ -85,6 +85,10 @@ class Workspace(BaseModel, table=True):
         default=None,
         sa_column=Column(String(64), nullable=True),
     )
+    default_model: str | None = Field(
+        default=None,
+        sa_column=Column(String(128), nullable=True),
+    )
     tech_stack: list[str] = Field(
         default_factory=list,
         sa_column=Column(JSON, nullable=False, default=list),

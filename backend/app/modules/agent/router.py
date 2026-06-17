@@ -234,7 +234,8 @@ async def get_execution_context(
         agent_run_id=str(run.id),
         claude_md=claude_md,
         prompt=lease_meta.get("prompt"),
-        provider=lease_meta.get("provider"),
+        provider=lease_meta.get("provider") or run.provider,
+        model=lease_meta.get("model") or run.model,
         resume_session_id=lease_meta.get("resume_session_id"),
         repo_url=lease_meta.get("repo_url"),
         branch=lease_meta.get("branch"),
@@ -269,6 +270,7 @@ async def create_agent_run(
         idempotency_key=data.idempotency_key,
         preferred_backend=data.preferred_backend,
         provider=data.provider,
+        model=data.model,
     )
     # If run was returned from idempotency check, return 200 instead of 201
     if data.idempotency_key and run.status not in ("pending", "running"):

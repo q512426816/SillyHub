@@ -391,6 +391,7 @@ async def get_pending_leases(
                 "agent_run_id": str(row["agent_run_id"]) if row["agent_run_id"] else None,
                 "prompt": meta.get("prompt", ""),
                 "provider": meta.get("provider") or row["provider"],
+                "model": meta.get("model"),
                 "cmd_path": caps.get("bin_path", ""),
                 "protocol": caps.get("protocol", ""),
             }

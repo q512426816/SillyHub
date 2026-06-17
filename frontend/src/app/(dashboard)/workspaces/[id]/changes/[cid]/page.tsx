@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { AgentModelInput } from "@/components/AgentModelInput";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AgentProviderSelect } from "@/components/AgentProviderSelect";
@@ -256,6 +257,7 @@ export default function ChangeDetailPage({ params }: Props) {
   const [dispatching, setDispatching] = useState(false);
   // 阶段流转 / 手动派发使用的 agent provider 覆盖（FR-02，2026-06-14-agent-runtime-selection）
   const [stageProvider, setStageProvider] = useState<string | null>(null);
+  const [stageModel, setStageModel] = useState<string | null>(null);
   const [gateComment, setGateComment] = useState("");
 
   // ── Agent Log Stream state ──────────────────────────────────────────
@@ -323,7 +325,14 @@ export default function ChangeDetailPage({ params }: Props) {
     setTransitioning(true);
     setPageError(null);
     try {
-      const result = await transitionChange(workspaceId, changeId, targetStage, undefined, stageProvider);
+      const result = await transitionChange(
+        workspaceId,
+        changeId,
+        targetStage,
+        undefined,
+        stageProvider,
+        stageModel,
+      );
       // Backend returns { change: {...}, agent_dispatch: {...} }
       const changeData = result.change;
       setChange({
@@ -412,7 +421,7 @@ export default function ChangeDetailPage({ params }: Props) {
     setPageError(null);
     setSuccessMsg(null);
     try {
-      const result = await executeChange(workspaceId, change.change_key);
+      const result = await executeChange(workspaceId, change.change_key, stageProvider, stageModel);
       if (result.ok) {
         // Refresh change data after successful execution
         const updated = await getChange(workspaceId, changeId);
@@ -483,7 +492,7 @@ export default function ChangeDetailPage({ params }: Props) {
     setDispatching(true);
     setPageError(null);
     try {
-      const result = await triggerDispatch(workspaceId, changeId, stageProvider);
+      const result = await triggerDispatch(workspaceId, changeId, stageProvider, stageModel);
       setAgentStatus(result);
       setLogsExpanded(true);
 
@@ -734,7 +743,14 @@ export default function ChangeDetailPage({ params }: Props) {
       } else if (action === "archive_confirm") {
         await archiveConfirm(workspaceId, changeId, gateComment || undefined);
       } else if (action === "transition_execute") {
-        await transitionChange(workspaceId, changeId, "execute", undefined, stageProvider);
+        await transitionChange(
+          workspaceId,
+          changeId,
+          "execute",
+          undefined,
+          stageProvider,
+          stageModel,
+        );
       }
       setGateComment("");
       const [updated, updatedMatrix, updatedAgentStatus] = await Promise.all([
@@ -874,6 +890,11 @@ export default function ChangeDetailPage({ params }: Props) {
           value={stageProvider}
           onChange={setStageProvider}
           includeDefault="跟随工作区默认"
+        />
+        <AgentModelInput
+          value={stageModel}
+          onChange={setStageModel}
+          className="w-[260px]"
         />
       </div>
 

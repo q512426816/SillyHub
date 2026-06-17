@@ -135,6 +135,7 @@ class RunPlacementService:
         *,
         # 通用字段（design §7.2）
         provider: str | None = None,
+        model: str | None = None,
         prompt: str | None = None,
         resume_session_id: str | None = None,
         repo_url: str | None = None,
@@ -192,6 +193,8 @@ class RunPlacementService:
             metadata["prompt"] = prompt
         if provider:
             metadata["provider"] = provider
+        if model:
+            metadata["model"] = model
         if resume_session_id:
             metadata["resume_session_id"] = resume_session_id
         if repo_url:

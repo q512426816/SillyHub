@@ -28,11 +28,13 @@ _SPEC_SVC = "app.modules.spec_workspace.service.SpecWorkspaceService"
 def test_scan_generate_request_provider_defaults_none():
     dto = ScanGenerateRequest(root_path="/tmp/proj")
     assert dto.provider is None
+    assert dto.model is None
 
 
 def test_scan_generate_request_accepts_provider():
-    dto = ScanGenerateRequest(root_path="/tmp/proj", provider="codex")
+    dto = ScanGenerateRequest(root_path="/tmp/proj", provider="codex", model="gpt-5-codex")
     assert dto.provider == "codex"
+    assert dto.model == "gpt-5-codex"
 
 
 @pytest.mark.asyncio
@@ -70,9 +72,11 @@ class TestScanGenerateProviderPropagation:
                 user_id=uuid.uuid4(),
                 agent_service=agent_service,
                 provider="codex",
+                model="gpt-5-codex",
             )
 
         assert agent_service.start_scan_dispatch.call_args.kwargs["provider"] == "codex"
+        assert agent_service.start_scan_dispatch.call_args.kwargs["model"] == "gpt-5-codex"
         assert agent_run_id is not None
 
     async def test_scan_generate_provider_defaults_none(
@@ -89,3 +93,4 @@ class TestScanGenerateProviderPropagation:
             )
 
         assert agent_service.start_scan_dispatch.call_args.kwargs["provider"] is None
+        assert agent_service.start_scan_dispatch.call_args.kwargs["model"] is None

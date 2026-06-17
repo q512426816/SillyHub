@@ -187,6 +187,25 @@ async def test_dispatch_to_daemon_backward_compatible_2_args(db_session):
     assert lease.status == "pending"
 
 
+@pytest.mark.asyncio
+async def test_dispatch_to_daemon_writes_provider_model(db_session):
+    user_id = await _create_user(db_session)
+    await _create_runtime(db_session, user_id)
+    run = await _create_agent_run(db_session)
+
+    placement = RunPlacementService(db_session)
+    lease_id = await placement.dispatch_to_daemon(
+        run.id,
+        user_id,
+        provider="codex",
+        model="gpt-5-codex",
+    )
+
+    meta = (await _fetch_lease(db_session, lease_id)).metadata_ or {}
+    assert meta["provider"] == "codex"
+    assert meta["model"] == "gpt-5-codex"
+
+
 # ---- AC-05: _build_claim_payload propagates bundle fields --------------------
 
 
@@ -202,6 +221,7 @@ async def test_build_claim_payload_propagates_bundle_fields(db_session):
         "allowed_paths": ["src/", "tests/"],
         "tool_config": {"max_tokens": 8192},
         "timeout_seconds": 300,
+        "model": "claude-sonnet-4",
     }
     lease = DaemonTaskLease(
         id=uuid.uuid4(),
@@ -220,3 +240,4 @@ async def test_build_claim_payload_propagates_bundle_fields(db_session):
     assert payload["allowed_paths"] == ["src/", "tests/"]
     assert payload["tool_config"] == {"max_tokens": 8192}
     assert payload["timeout_seconds"] == 300
+    assert payload["model"] == "claude-sonnet-4"

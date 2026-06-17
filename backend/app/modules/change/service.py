@@ -429,6 +429,7 @@ class ChangeService:
         reason: str | None = None,
         user_id: uuid.UUID | None = None,
         provider: str | None = None,
+        model: str | None = None,
     ) -> dict:
         """Execute transition and optionally dispatch an agent for the target stage.
 
@@ -459,6 +460,7 @@ class ChangeService:
                         target_stage=target_stage,
                         user_id=user_id,
                         provider=provider,
+                        model=model,
                     )
             except Exception as exc:
                 log.warning(

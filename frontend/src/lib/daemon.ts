@@ -3,6 +3,7 @@
  */
 import { apiFetch, getApiBaseUrl } from "@/lib/api";
 import { useSession } from "@/stores/session";
+import type { AgentRunLogEntry } from "@/lib/agent";
 
 export interface DaemonRuntimeRead {
   id: string;
@@ -29,6 +30,8 @@ export async function getDaemonRuntime(
 export interface QuickChatResponse {
   id: string;
   agent_type: string;
+  provider: string | null;
+  model: string | null;
   status: string;
 }
 
@@ -36,8 +39,12 @@ export async function quickChat(
   prompt: string,
   provider: string,
   prevRunId?: string,
+  model?: string | null,
 ): Promise<QuickChatResponse> {
   let url = `/api/daemon-chat?prompt=${encodeURIComponent(prompt)}&provider=${encodeURIComponent(provider)}`;
+  if (model) {
+    url += `&model=${encodeURIComponent(model)}`;
+  }
   if (prevRunId) {
     url += `&prev_run_id=${encodeURIComponent(prevRunId)}`;
   }
@@ -49,6 +56,8 @@ export interface QuickChatResult {
   status: string;
   output_redacted: string | null;
   agent_type: string | null;
+  provider: string | null;
+  model: string | null;
   started_at: string | null;
   finished_at: string | null;
 }
@@ -57,6 +66,18 @@ export async function getQuickChatResult(
   runId: string,
 ): Promise<QuickChatResult> {
   return apiFetch<QuickChatResult>(`/api/daemon-chat/${runId}`);
+}
+
+/* ---------- Quick chat logs ---------- */
+
+/**
+ * ql-20260618-001：返回 quick-chat agent run 的完整日志条目（AgentRunLogEntry）。
+ * 与 workspace-scoped /agent/runs/{run_id}/logs 同源（同一 service 方法）。
+ */
+export async function getQuickChatLogs(
+  runId: string,
+): Promise<AgentRunLogEntry[]> {
+  return apiFetch<AgentRunLogEntry[]>(`/api/daemon-chat/${runId}/logs`);
 }
 
 /* ---------- Quick chat SSE stream ---------- */

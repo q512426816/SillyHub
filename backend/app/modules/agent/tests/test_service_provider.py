@@ -105,6 +105,7 @@ async def test_start_run_uses_workspace_default_agent():
     task, lease = _run_task_lease(workspace_id)
     ws = MagicMock()
     ws.default_agent = "claude"
+    ws.default_model = None
     session = _make_session(task, lease, ws)
 
     svc = AgentService(session)
@@ -135,6 +136,7 @@ async def test_start_run_explicit_provider_wins():
     task, lease = _run_task_lease(workspace_id)
     ws = MagicMock()
     ws.default_agent = "claude"
+    ws.default_model = None
     session = _make_session(task, lease, ws)
 
     svc = AgentService(session)
@@ -156,6 +158,63 @@ async def test_start_run_explicit_provider_wins():
     assert placement.dispatch_to_daemon.call_args.kwargs["provider"] == "codex"
 
 
+@pytest.mark.asyncio
+async def test_start_run_uses_workspace_default_model():
+    workspace_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    task, lease = _run_task_lease(workspace_id)
+    ws = MagicMock()
+    ws.default_agent = "claude"
+    ws.default_model = "claude-sonnet-4"
+    session = _make_session(task, lease, ws)
+
+    svc = AgentService(session)
+    managers, placement = _patch_run_env(dispatch_return=uuid.uuid4())
+    for m in managers:
+        m.start()
+    try:
+        await svc.start_run(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            task_id=task.id,
+            lease_id=lease.id,
+        )
+    finally:
+        for m in managers:
+            m.stop()
+
+    assert placement.dispatch_to_daemon.call_args.kwargs["model"] == "claude-sonnet-4"
+
+
+@pytest.mark.asyncio
+async def test_start_run_explicit_model_wins():
+    workspace_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    task, lease = _run_task_lease(workspace_id)
+    ws = MagicMock()
+    ws.default_agent = "claude"
+    ws.default_model = "claude-haiku"
+    session = _make_session(task, lease, ws)
+
+    svc = AgentService(session)
+    managers, placement = _patch_run_env(dispatch_return=uuid.uuid4())
+    for m in managers:
+        m.start()
+    try:
+        await svc.start_run(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            task_id=task.id,
+            lease_id=lease.id,
+            model="claude-sonnet-4",
+        )
+    finally:
+        for m in managers:
+            m.stop()
+
+    assert placement.dispatch_to_daemon.call_args.kwargs["model"] == "claude-sonnet-4"
+
+
 # ---- AC-03: None when neither explicit nor default --------------------------
 
 
@@ -166,6 +225,7 @@ async def test_start_run_none_when_unset():
     task, lease = _run_task_lease(workspace_id)
     ws = MagicMock()
     ws.default_agent = None
+    ws.default_model = None
     session = _make_session(task, lease, ws)
 
     svc = AgentService(session)
@@ -205,6 +265,7 @@ async def test_start_stage_dispatch_uses_workspace_default_agent():
     change.affected_components = []
     ws = MagicMock()
     ws.default_agent = "claude"
+    ws.default_model = None
 
     session = MagicMock()
 

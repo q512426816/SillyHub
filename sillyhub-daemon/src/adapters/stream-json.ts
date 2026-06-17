@@ -208,6 +208,7 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     model?: string;
     sessionId?: string;
     resumeSessionId?: string;
+    prompt?: string;
   }): string[] {
     const args = [
       '-p',
@@ -220,6 +221,10 @@ export class StreamJsonAdapter implements ProtocolAdapter {
       // 的 message.usage 永远是 {0,0}，只能在最终 result 事件拿到真实值——无法实时累加。
       '--include-partial-messages',
     ];
+    const model = opts?.model?.trim();
+    if (model) {
+      args.push('--model', model);
+    }
     if (opts?.resumeSessionId) {
       args.push('--resume', opts.resumeSessionId);
     }

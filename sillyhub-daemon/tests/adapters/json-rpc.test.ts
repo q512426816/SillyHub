@@ -298,3 +298,167 @@ describe('PendingServerRequest interface', () => {
     expect(entry.responseTemplate).toBeNull();
   });
 });
+
+// ===========================================================================
+// buildArgs：四 provider 启动参数差异（ql-20260617-006）
+// 对照 Python _PROVIDER_COMMANDS；codex 必须 app-server --listen stdio://，
+// 否则 codex CLI 进入交互式 TUI，stdin 非 terminal 立即 exit 1。
+// 文档：.sillyspec/changes/2026-06-09-daemon-agent-detection/tasks/task-05.md:67
+// ===========================================================================
+
+describe('buildArgs - provider 启动参数（ql-20260617-006）', () => {
+  it('codex 返回 app-server --listen stdio://', () => {
+    const a = new JsonRpcAdapter('codex');
+    expect(a.buildArgs()).toEqual(['app-server', '--listen', 'stdio://']);
+  });
+
+  it('codex buildArgs 不受 opts 影响（model/sessionId 不进启动参数）', () => {
+    const a = new JsonRpcAdapter('codex');
+    const args1 = a.buildArgs({ model: 'gpt-5', sessionId: 's1', resumeSessionId: 'r1' });
+    const args2 = a.buildArgs();
+    expect(args1).toEqual(args2);
+    expect(args1).toEqual(['app-server', '--listen', 'stdio://']);
+  });
+
+  it('hermes 返回空数组（无子命令）', () => {
+    const a = new JsonRpcAdapter('hermes');
+    expect(a.buildArgs()).toEqual([]);
+  });
+
+  it('kimi 返回空数组（无子命令）', () => {
+    const a = new JsonRpcAdapter('kimi');
+    expect(a.buildArgs()).toEqual([]);
+  });
+
+  it('kiro 返回空数组（无子命令）', () => {
+    const a = new JsonRpcAdapter('kiro');
+    expect(a.buildArgs()).toEqual([]);
+  });
+
+  it('JsonRpcAdapter 实现 ProtocolAdapter.buildArgs（类型契约）', () => {
+    const a: ProtocolAdapter = new JsonRpcAdapter('codex');
+    expect(typeof a.buildArgs).toBe('function');
+    expect(a.buildArgs!()).toEqual(['app-server', '--listen', 'stdio://']);
+  });
+});
+
+// ===========================================================================
+// buildHandshake / buildTurnStart：codex JSON-RPC 协议握手（ql-20260617-008）
+// 文档：design.md §方案A / proposal.md
+// 对照实测：codex app-server --listen stdio:// + generate-json-schema
+// ===========================================================================
+
+describe('buildHandshake - codex 协议握手序列（ql-20260617-008）', () => {
+  it('返回 3 行 JSON-RPC 消息（initialize/initialized/thread.start）', () => {
+    const a = new JsonRpcAdapter('codex');
+    const lines = a.buildHandshake!({ cwd: '/tmp/ws', prompt: 'hi' });
+    expect(lines).toHaveLength(3);
+
+    const init = JSON.parse(lines[0]!);
+    expect(init.method).toBe('initialize');
+    expect(init.id).toBe(1);
+    expect(init.params.clientInfo).toEqual({
+      name: 'sillyhub-daemon',
+      version: '0.1.0',
+    });
+
+    const notif = JSON.parse(lines[1]!);
+    expect(notif.method).toBe('notifications/initialized');
+    expect(notif.id).toBeUndefined(); // notification 无 id
+
+    const threadStart = JSON.parse(lines[2]!);
+    expect(threadStart.method).toBe('thread/start');
+    expect(threadStart.id).toBe(2);
+    expect(threadStart.params.cwd).toBe('/tmp/ws');
+  });
+
+  it('initialize 字段名是 clientInfo 不是 client（codex -32600 防御）', () => {
+    const a = new JsonRpcAdapter('codex');
+    const lines = a.buildHandshake!({ cwd: '/tmp', prompt: '' });
+    const init = JSON.parse(lines[0]!);
+    expect(init.params.clientInfo).toBeDefined();
+    expect(init.params.client).toBeUndefined();
+  });
+
+  it('cwd 透传到 thread/start params', () => {
+    const a = new JsonRpcAdapter('codex');
+    const lines = a.buildHandshake!({
+      cwd: 'C:\\Users\\qinyi\\myaaa',
+      prompt: 'scan',
+    });
+    const threadStart = JSON.parse(lines[2]!);
+    expect(threadStart.params.cwd).toBe('C:\\Users\\qinyi\\myaaa');
+  });
+
+  it('所有行是合法 JSON（无尾换行）', () => {
+    const a = new JsonRpcAdapter('codex');
+    const lines = a.buildHandshake!({ cwd: '/tmp', prompt: '' });
+    for (const line of lines) {
+      expect(() => JSON.parse(line)).not.toThrow();
+      expect(line.endsWith('\n')).toBe(false);
+    }
+  });
+
+  it('hermes/kimi/kiro 仍可调用 buildHandshake（共享 codex 协议）', () => {
+    // 文档 backend-json-rpc.md：四 provider 共享 method 名
+    const a = new JsonRpcAdapter('hermes');
+    expect(typeof a.buildHandshake).toBe('function');
+    const lines = a.buildHandshake!({ cwd: '/tmp', prompt: '' });
+    expect(lines).toHaveLength(3);
+  });
+});
+
+describe('buildTurnStart - turn/start request 构造（ql-20260617-008 / ql-20260617-009 input 字段修正）', () => {
+  it('返回 turn/start request，含 threadId + input[{type:text,text:prompt}]（ql-20260617-009 codex 0.131 实测）', () => {
+    const a = new JsonRpcAdapter('codex');
+    const line = a.buildTurnStart!({
+      threadId: '019ed60b-8862-78d0-9299-b99adb9e1dd5',
+      prompt: 'hello world',
+    });
+    const msg = JSON.parse(line);
+    expect(msg.method).toBe('turn/start');
+    expect(msg.id).toBe(3);
+    expect(msg.params.threadId).toBe('019ed60b-8862-78d0-9299-b99adb9e1dd5');
+    // codex 0.131 TurnStartParams schema：input: UserInput[]，UserInput = {type:'text', text:string}
+    expect(msg.params.input).toEqual([{ type: 'text', text: 'hello world' }]);
+    // instructions 字段不应存在（被 codex 拒绝为 -32600 missing field `input`）
+    expect(msg.params.instructions).toBeUndefined();
+  });
+
+  it('字段名是 threadId 不是 thread_id（codex -32600 防御）', () => {
+    const a = new JsonRpcAdapter('codex');
+    const line = a.buildTurnStart!({ threadId: 'tid', prompt: '' });
+    const msg = JSON.parse(line);
+    expect(msg.params.threadId).toBeDefined();
+    expect(msg.params.thread_id).toBeUndefined();
+  });
+
+  it('input 是数组（即使单条 prompt 也包数组），元素结构 {type:text,text}', () => {
+    const a = new JsonRpcAdapter('codex');
+    const line = a.buildTurnStart!({ threadId: 'tid', prompt: 'one' });
+    const msg = JSON.parse(line);
+    expect(Array.isArray(msg.params.input)).toBe(true);
+    expect(msg.params.input).toHaveLength(1);
+    expect(msg.params.input[0].type).toBe('text');
+    expect(msg.params.input[0].text).toBe('one');
+  });
+
+  it('model 非空时进 params.model，空时 params 不含 model', () => {
+    const a = new JsonRpcAdapter('codex');
+    const withModel = JSON.parse(
+      a.buildTurnStart!({ threadId: 'tid', prompt: 'p', model: 'gpt-5' }),
+    );
+    expect(withModel.params.model).toBe('gpt-5');
+
+    const noModel = JSON.parse(
+      a.buildTurnStart!({ threadId: 'tid', prompt: 'p' }),
+    );
+    expect(noModel.params.model).toBeUndefined();
+  });
+
+  it('JsonRpcAdapter 实现 ProtocolAdapter.buildHandshake/buildTurnStart（类型契约）', () => {
+    const a: ProtocolAdapter = new JsonRpcAdapter('codex');
+    expect(typeof a.buildHandshake).toBe('function');
+    expect(typeof a.buildTurnStart).toBe('function');
+  });
+});

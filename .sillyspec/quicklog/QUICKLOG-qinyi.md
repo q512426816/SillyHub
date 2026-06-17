@@ -1,3 +1,21 @@
+## ql-20260618-001-7c3a | 2026-06-18 00:30:00 | Agent 控制台浅色化 + Thinking 默认展开 + Quick chat 接入日志与新建会话 + 清理 codex 调试日志
+
+状态：已完成
+文件：frontend/src/components/agent-log-viewer.tsx、frontend/src/components/agent-log/tool-renderers.tsx、frontend/src/app/(dashboard)/runtimes/page.tsx、frontend/src/lib/daemon.ts、backend/app/main.py、sillyhub-daemon/src/task-runner.ts
+依据：用户报「Agent 控制台黑色风格突兀；thinking 应默认展开；快速对话要能查看日志且支持新建会话；改完提交推送」。同时清理上一轮排查 codex 时留下的 hs_write/hs_cb/stdout_line 调试 console.log。
+结果：
+1. AgentLogViewer 整体浅色化（bg-zinc-950→bg-zinc-50、semanticLineClass 浅色、按钮边框/spinner 浅色）。
+2. CollapsibleSection 默认展开（defaultOpen=false→true），Thinking 段落首次渲染即展开。
+3. 后端新增 `GET /api/daemon-chat/{run_id}/logs`：复用 AgentService.get_run_logs，仅放行 spec_strategy='quick-chat'，避免越权读其他 run。
+4. 前端 QuickChatPanel 加 activeRunId + runLogs 状态，发送即激活并 1.5s 轮询拉日志（终态自动停）；UI 嵌入 AgentLogViewer，"查看日志"/"隐藏日志"切换；"新建会话"按钮同时清空 messages/activeRunId/runLogs/lastRunId。
+5. 清理 task-runner.ts 的 hs_write/hs_cb/stdout_line 临时 console.log，保留 100ms handshake 间隔（codex 实测需要）。
+验证：sillyhub-daemon task-runner/provider-dispatch/json-rpc 三组共 117/117 通过；frontend tsc --noEmit EXIT=0；后端 ast.parse OK。
+
+
+状态：已完成
+文件：sillyhub-daemon/src/adapters/json-rpc.ts、sillyhub-daemon/tests/adapters/json-rpc.test.ts
+依据：用户报「codex 提示 agent process exited with exit code 1: Error: stdin is not a terminal」。根因：task-runner.ts:394 调 adapter.buildArgs 但 JsonRpcAdapter 未实现该方法 → codex spawn 无参数 → 进入交互式 TUI → 检测到 stdin 非 terminal 立即退出。文档 .sillyspec/changes/2026-06-09-daemon-agent-detection/tasks/task-05.md:67 明确 codex 需要 `app-server --listen stdio://` 子命令；archive/2026-06-14.../task-07.md:461 指出此差异由 spawn 层（task-19）处理。修复：JsonRpcAdapter 实现 buildArgs，codex 返回 ['app-server','--listen','stdio://']，其他 provider 返回 []。新增 6 个测试用例，全 35 通过。
+
 ## ql-20260617-005-c1d2 | 2026-06-17 01:35:00 | 恢复 /input 端点 + token 0/0 防御 + cancel 立即 killed + 数据库脏 0 清理
 
 状态：已完成
@@ -10,6 +28,25 @@
   4. **前端文案**：page.tsx pendingMetric 从 "等待用量" 改 "执行中…"（明确告知 CLI 协议限制，不显示伪 0）；input_tokens/output_tokens 显示加 `> 0` 守卫，0/null 一律走 pendingMetric。
   5. **数据库脏 0 清理**：UPDATE agent_runs SET input_tokens=NULL,output_tokens=NULL WHERE input_tokens=0 AND output_tokens=0（3 行历史 0/0 数据，现统一显示 "—"）。
 验证：backend pytest 223/223 通过（agent + daemon 全量）。
+
+## ql-20260617-007-3f8a | 2026-06-17 21:07:25 | Runtime model control visibility
+
+状态：已完成
+文件：frontend/src/app/(dashboard)/runtimes/page.tsx, .sillyspec/docs/multi-agent-platform/modules/frontend.md
+依据：runtime quick chat 的 model 输入不能只在存在在线 provider 时才出现，否则用户在 Daemon 运行时页看不到可配置 model 的位置。
+结果：Quick Chat 面板头部始终显示 Agent provider / Agent model；无在线 daemon 时 provider 和发送禁用，但 model 输入保持可见，可先填写本次对话的 model override。
+
+## ql-20260617-006-9b2d | 2026-06-17 17:20:00 | Daemon per-run model selection
+
+状态：已完成
+文件：backend/app/modules/agent/model.py, backend/app/modules/agent/service.py, backend/app/modules/agent/placement.py, backend/app/modules/agent/router.py, backend/app/modules/daemon/service.py, backend/app/modules/workspace/model.py, backend/app/modules/workspace/service.py, backend/app/modules/change/dispatch.py, backend/app/modules/change/router.py, backend/app/modules/change_writer/router.py, backend/app/main.py, backend/migrations/versions/202607020900_add_agent_run_model_fields.py, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/src/types.ts, sillyhub-daemon/src/adapters/stream-json.ts, frontend/src/components/AgentModelInput.tsx, frontend/src/lib/{agent,daemon,workspaces,changes,workflow}.ts, frontend workspace/change/task/runtime pages
+依据：同一个 daemon 可以并发运行多个 agent；provider/model 必须是每个 AgentRun/lease 的独立执行快照，而不是 daemon 进程级全局设置。
+结果：
+1. AgentRun 增加 provider/model 快照字段；Workspace 增加 default_model；新增 Alembic migration。
+2. task/stage/scan/quick-chat/change-writer execute 等入口都支持显式 model，未指定时按 workspace.default_model 回落。
+3. daemon claim/execution-context/LeaseCtx 透传 model；stream-json adapter 将非空 model 转为 `--model <name>`。
+4. 前端 workspace 默认设置、scan-generate、change dispatch、task run、runtime quick chat 均增加 model 输入；空值保持 provider/CLI 默认。
+5. 补充 backend/daemon 单测与模块文档备注。
 
 ## ql-20260617-001-7a3e | 2026-06-17 00:45:00 | 修复 token 用量不实时累计 + Agent 页面 UI 优化
 

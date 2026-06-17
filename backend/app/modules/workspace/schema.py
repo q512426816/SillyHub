@@ -58,6 +58,9 @@ class ScanGenerateRequest(BaseModel):
     # the dispatch layer falls through to workspace.default_agent (FR-02,
     # change 2026-06-14-agent-runtime-selection).
     provider: str | None = Field(default=None, max_length=64)
+    # Optional per-run model override; when None the dispatch layer falls
+    # through to workspace.default_model.
+    model: str | None = Field(default=None, max_length=128)
 
     @field_validator("root_path", mode="before")
     @classmethod
@@ -92,6 +95,7 @@ class WorkspaceCreate(BaseModel):
     # 2026-06-14-agent-runtime-selection). Applied when an explicit provider
     # is not supplied at dispatch time.
     default_agent: str | None = Field(default=None, max_length=64)
+    default_model: str | None = Field(default=None, max_length=128)
     tech_stack: list[str] = Field(default_factory=list)
     build_command: str | None = Field(default=None)
     test_command: str | None = Field(default=None)
@@ -133,6 +137,8 @@ class WorkspaceUpdate(BaseModel):
     default_branch: str | None = Field(default=None, max_length=100)
     # default_agent: omit to keep, null to clear, string to set (exclude_unset).
     default_agent: str | None = Field(default=None, max_length=64)
+    # default_model: omit to keep, null to clear, string to set (exclude_unset).
+    default_model: str | None = Field(default=None, max_length=128)
     tech_stack: list[str] | None = Field(default=None)
     build_command: str | None = Field(default=None)
     test_command: str | None = Field(default=None)
@@ -167,6 +173,7 @@ class WorkspaceRead(BaseModel):
     repo_url: str | None
     default_branch: str | None
     default_agent: str | None
+    default_model: str | None
     tech_stack: list[str]
     build_command: str | None
     test_command: str | None

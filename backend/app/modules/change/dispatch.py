@@ -498,6 +498,7 @@ async def dispatch(
     target_stage: str,
     user_id: uuid.UUID,
     provider: str | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Dispatch an agent for the given stage transition.
 
@@ -554,6 +555,7 @@ async def dispatch(
             requires_worktree=config.requires_worktree,
             read_only=config.read_only,
             provider=provider,
+            model=model,
         )
         # Update last_dispatch with run_id and status
         stages = change.stages or {}
@@ -651,6 +653,7 @@ class SillySpecStageDispatchService:
         user_id: uuid.UUID,
         target_stage: str,
         provider: str | None = None,
+        model: str | None = None,
     ) -> dict[str, Any]:
         """Dispatch the next step for a change stage.
 
@@ -755,6 +758,7 @@ class SillySpecStageDispatchService:
                 requires_worktree=config.requires_worktree,
                 read_only=config.read_only,
                 provider=provider,
+                model=model,
             )
         except Exception as exc:
             log.warning("agent_start_failed", run_id=str(run.id), error=str(exc))

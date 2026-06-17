@@ -185,8 +185,23 @@ export class WorkspaceManager {
    * 对齐 Python collect_diff：
    *   1. git status --porcelain 为空 → 直接返回零值
    *   2. 否则 git diff --shortstat + git diff 拿完整 patch
+   *
+   * ql-20260617-014：rootPath 模式下 workspace 可能不是 git 仓库（项目未 git init），
+   * 入口先检查 .git 存在性，不存在直接返回 EMPTY_DIFF，避免 runGit 抛 GitError
+   * 在 task-runner 触发 diff_collect_failed 噪声日志（已被 catch 但污染 daemon log）。
    */
   async collectDiff(workspaceDir: string): Promise<WorkspaceResult> {
+    if (!existsSync(join(workspaceDir, '.git'))) {
+      logger.info(`workspace_not_git_repo skip_collect_diff path=${workspaceDir}`);
+      return {
+        patch: '',
+        files_changed: 0,
+        insertions: 0,
+        deletions: 0,
+        stats: '',
+      };
+    }
+
     const status = await runGit(['status', '--porcelain'], workspaceDir, true);
 
     if (!status.trim()) {

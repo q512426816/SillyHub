@@ -54,10 +54,10 @@ function semanticLineClass(line: string): string {
   if (line.startsWith("[TOOL_USE]")) return "text-blue-400";
   if (line.startsWith("[TOOL_RESULT]")) return "text-emerald-400";
   if (line.startsWith("[THINKING]")) return "text-zinc-500";
-  if (line.startsWith("[RESULT")) return "text-sky-300 font-medium";
-  if (line.startsWith("[SYSTEM")) return "text-amber-400";
-  if (line.startsWith("[ASSISTANT]")) return "text-zinc-300";
-  return "text-zinc-400";
+  if (line.startsWith("[RESULT")) return "text-sky-700 font-medium";
+  if (line.startsWith("[SYSTEM")) return "text-amber-700";
+  if (line.startsWith("[ASSISTANT]")) return "text-zinc-800";
+  return "text-zinc-600";
 }
 
 function logChannelMeta(channel: AgentRunLogEntry["channel"]): {
@@ -99,8 +99,8 @@ function logChannelMeta(channel: AgentRunLogEntry["channel"]): {
       return {
         label: "INFO",
         Icon: CircleDot,
-        badgeClass: "border-zinc-700 bg-zinc-900 text-zinc-400",
-        rowClass: "hover:bg-white/[0.03]",
+        badgeClass: "border-zinc-200 bg-white text-zinc-600",
+        rowClass: "hover:bg-zinc-100/60",
       };
   }
 }
@@ -141,7 +141,7 @@ function renderLogLines(content: string) {
 
 function ScanCheckSummaryCard({ result }: { result: ScanCheckResult }) {
   return (
-    <div className="mt-1 rounded-md border border-zinc-700 bg-zinc-900/80 px-2.5 py-2">
+    <div className="mt-1 rounded-md border border-zinc-200 bg-white px-2.5 py-2">
       <div className="flex items-center gap-2 text-[11px] font-semibold">
         {result.passed ? (
           <span className="text-emerald-400">✓ 扫描自检通过</span>
@@ -149,12 +149,12 @@ function ScanCheckSummaryCard({ result }: { result: ScanCheckResult }) {
           <span className="text-red-400">✗ 扫描自检未通过</span>
         )}
       </div>
-      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-zinc-400">
-        <span>文档 <span className="text-zinc-200">{result.scanDocs}</span></span>
-        <span>模块 <span className="text-zinc-200">{result.moduleCount}</span></span>
-        <span>流程 <span className="text-zinc-200">{result.flowCount}</span></span>
+      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-zinc-500">
+        <span>文档 <span className="text-zinc-800">{result.scanDocs}</span></span>
+        <span>模块 <span className="text-zinc-800">{result.moduleCount}</span></span>
+        <span>流程 <span className="text-zinc-800">{result.flowCount}</span></span>
         <span>术语表 <span className={result.glossary ? "text-emerald-400" : "text-red-400"}>{result.glossary ? "✓" : "✗"}</span></span>
-        <span>总文件 <span className="text-zinc-200">{result.totalFiles}</span></span>
+        <span>总文件 <span className="text-zinc-800">{result.totalFiles}</span></span>
       </div>
     </div>
   );
@@ -245,7 +245,7 @@ export function AgentLogRow({
           <div className="font-mono [overflow-wrap:anywhere]">
             {processedLog.mergedThinkingContent != null ? (
               <CollapsibleSection title="Thinking">
-                <div className="whitespace-pre-wrap break-words text-zinc-400">
+                <div className="whitespace-pre-wrap break-words text-zinc-600">
                   {processedLog.mergedThinkingContent}
                 </div>
               </CollapsibleSection>
@@ -260,7 +260,7 @@ export function AgentLogRow({
           <div
             className={cn(
               "min-w-0 max-w-full whitespace-pre-wrap break-words font-mono [overflow-wrap:anywhere]",
-              log.channel === "stderr" ? "text-amber-200" : "text-zinc-300",
+              log.channel === "stderr" ? "text-amber-700" : "text-zinc-700",
             )}
           >
             {(() => {
@@ -304,7 +304,7 @@ export function AgentLogRow({
                       }
                     }}
                     disabled={submitting}
-                    className="h-8 min-w-0 border-zinc-700 bg-zinc-900 text-xs text-zinc-200 placeholder:text-zinc-600"
+                    className="h-8 min-w-0 border-zinc-200 bg-white text-xs text-zinc-800 placeholder:text-zinc-400"
                   />
                   <Button
                     size="sm"
@@ -414,19 +414,19 @@ export function AgentLogViewer({
   return (
     <div
       className={cn(
-        "min-w-0 overflow-hidden bg-zinc-950 text-zinc-300",
+        "min-w-0 overflow-hidden bg-zinc-50 text-zinc-700",
         fullscreen
           ? "fixed inset-0 z-50 flex flex-col"
           : "max-w-full",
-        !fullscreen && variant === "panel" && "rounded-md border border-zinc-800 shadow-sm",
+        !fullscreen && variant === "panel" && "rounded-md border border-zinc-200 shadow-sm",
       )}
     >
       <div className={cn(
-        "flex flex-col gap-2 border-b border-zinc-800 bg-zinc-950 px-4 py-3 sm:flex-row sm:items-center sm:justify-between",
+        "flex flex-col gap-2 border-b border-zinc-200 bg-zinc-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between",
         compact && "px-3 py-2",
       )}>
         <div className="flex min-w-0 items-center gap-2">
-          <span className="text-xs font-medium text-zinc-200">{title}</span>
+          <span className="text-xs font-medium text-zinc-800">{title}</span>
           <code className="truncate font-mono text-[11px] text-zinc-500">{runId.length > 8 ? runId.slice(0, 8) + "..." : runId}</code>
           {isLive && (
             <span className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-300">
@@ -443,8 +443,8 @@ export function AgentLogViewer({
               className={cn(
                 "inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-semibold transition-colors",
                 activeFilters.has(f.key)
-                  ? "border-blue-500/40 bg-blue-500/15 text-blue-300"
-                  : "border-zinc-700 bg-zinc-900 text-zinc-500 hover:text-zinc-300",
+                  ? "border-blue-500/40 bg-blue-500/15 text-blue-700"
+                  : "border-zinc-200 bg-white text-zinc-600 hover:text-zinc-900",
               )}
             >
               {f.label}
@@ -453,7 +453,7 @@ export function AgentLogViewer({
           {activeFilters.size > 0 && (
             <button
               onClick={() => setActiveFilters(new Set())}
-              className="text-[10px] text-zinc-500 hover:text-zinc-300"
+              className="text-[10px] text-zinc-500 hover:text-zinc-800"
             >
               清除
             </button>
@@ -462,7 +462,7 @@ export function AgentLogViewer({
           {actions}
           <button
             onClick={() => setFullscreen(!fullscreen)}
-            className="ml-1 inline-flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+            className="ml-1 inline-flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
             title={fullscreen ? "退出全屏" : "全屏"}
           >
             {fullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
@@ -480,7 +480,7 @@ export function AgentLogViewer({
       >
         {loading ? (
           <div className="flex items-center justify-center gap-2 px-4 py-10 text-xs text-zinc-500">
-            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-300" />
+            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700" />
             加载日志中...
           </div>
         ) : filteredLogs.length === 0 ? (

@@ -521,13 +521,16 @@ class PostScanValidator:
         errors.extend(log_errors)
 
         # 2. Get source_commit (must use git -C)
+        # ql-20260617-014：非 git 仓库（rootPath 模式 / 项目尚未 git init）是合法状态，
+        # source_commit 失败降级 warning，不阻断扫描成功。mirror clone 模式下 git 失败
+        # 会更早在 prepareWorkspace 阶段抛错，能到这里说明 agent 实际跑完了。
         commit, commit_error = _get_source_commit(self.source_root)
         if commit_error:
-            errors.append(
+            warnings.append(
                 ValidationError(
-                    code="source_commit_failed",
-                    severity="error",
-                    message=f"Failed to get source_commit: {commit_error}",
+                    code="source_commit_unavailable",
+                    severity="warning",
+                    message=f"source_commit unavailable: {commit_error}",
                     details={"source_root": str(self.source_root), "error": commit_error},
                 )
             )
@@ -605,10 +608,14 @@ class PostScanValidator:
         Rules:
         - If agent exited with non-zero, always FAILED_POST_CHECK
         - If source_root pollution detected, FAILED_POST_CHECK
-        - If source_commit failed, FAILED_POST_CHECK
         - If any error pattern detected, FAILED_POST_CHECK
-        - If only warnings, COMPLETED_WITH_WARNINGS
+        - If expected docs missing/empty, FAILED_POST_CHECK
+        - If only warnings (incl. source_commit unavailable for non-git projects),
+          COMPLETED_WITH_WARNINGS
         - If clean, SUCCESS
+
+        ql-20260617-014：source_commit 失败不再视为 error（非 git 仓库合法），
+        改在 validate() 中作 warning 处理，本函数不再判 source_commit_failed。
         """
         # Agent exit code non-zero → failed
         if agent_exit_code != 0:
@@ -618,9 +625,6 @@ class PostScanValidator:
         error_codes = {e.code for e in errors}
 
         if "source_root_pollution" in error_codes:
-            return ScanRunStatus.FAILED_POST_CHECK
-
-        if "source_commit_failed" in error_codes:
             return ScanRunStatus.FAILED_POST_CHECK
 
         if "error_pattern_detected" in error_codes:

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import { AgentLogViewer } from "@/components/agent-log-viewer";
+import { AgentModelInput } from "@/components/AgentModelInput";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AgentProviderSelect } from "@/components/AgentProviderSelect";
@@ -130,6 +131,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const [generatingProjects, setGeneratingProjects] = useState(false);
   // workspace 级默认 agent provider 编辑态（FR-01/FR-02，2026-06-14-agent-runtime-selection）
   const [defaultAgent, setDefaultAgent] = useState<string | null>(null);
+  const [defaultModel, setDefaultModel] = useState<string | null>(null);
   const [savingDefaultAgent, setSavingDefaultAgent] = useState(false);
 
   const streamClientRef = useRef<AgentRunStreamClient | null>(null);
@@ -139,7 +141,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
     setSavingDefaultAgent(true);
     setPageError(null);
     try {
-      const updated = await updateWorkspace(workspaceId, { default_agent: defaultAgent });
+      const updated = await updateWorkspace(workspaceId, {
+        default_agent: defaultAgent,
+        default_model: defaultModel,
+      });
       setWorkspace(updated);
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "保存默认 Agent 失败");
@@ -162,6 +167,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
       ]);
       setWorkspace(ws);
       setDefaultAgent(ws.default_agent);
+      setDefaultModel(ws.default_model);
       setSpecWs(sw);
       setComponentCount(comps.total ?? comps.items?.length ?? 0);
       setActiveChanges(active.total ?? active.items?.length ?? 0);
@@ -476,10 +482,22 @@ export default function WorkspaceDetailPage({ params }: Props) {
                 includeDefault="未设置（由 daemon 默认决定）"
               />
             </div>
+            <div className="flex-1 space-y-1">
+              <label className="text-[11px] text-muted-foreground">Agent model</label>
+              <AgentModelInput
+                value={defaultModel}
+                onChange={setDefaultModel}
+                placeholder="provider default"
+              />
+            </div>
             <Button
               size="sm"
               onClick={handleSaveDefaultAgent}
-              disabled={savingDefaultAgent || defaultAgent === workspace.default_agent}
+              disabled={
+                savingDefaultAgent ||
+                (defaultAgent === workspace.default_agent &&
+                  defaultModel === workspace.default_model)
+              }
             >
               {savingDefaultAgent ? "保存中..." : "保存"}
             </Button>
