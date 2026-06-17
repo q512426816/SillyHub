@@ -23,7 +23,9 @@ pointer cannot form a cycle by repointing at itself or its offspring.
 
 from __future__ import annotations
 
+import json
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +45,7 @@ from app.modules.admin.schema import (
     OrganizationRead,
     OrganizationUpdateRequest,
 )
+from app.modules.workflow.model import AuditLog
 
 
 async def _descendant_ids(session: AsyncSession, root_id: uuid.UUID) -> set[uuid.UUID]:
@@ -115,6 +118,37 @@ class OrganizationService:
     def __init__(self, session: AsyncSession, actor_id: uuid.UUID) -> None:
         self._session = session
         self._actor_id = actor_id
+
+    def _audit(
+        self,
+        *,
+        action: str,
+        org: Organization,
+        details: dict | None = None,
+    ) -> None:
+        self._session.info.setdefault(
+            "audit_context",
+            {
+                "actor_id": self._actor_id,
+                "workspace_id": None,
+            },
+        )
+        self._session.add(
+            AuditLog(
+                id=uuid.uuid4(),
+                workspace_id=None,
+                actor_id=self._actor_id,
+                action=action,
+                resource_type="organization",
+                resource_id=org.id,
+                details_json=json.dumps(
+                    {"code": org.code, "name": org.name, **(details or {})},
+                    default=str,
+                    ensure_ascii=False,
+                ),
+                timestamp=datetime.now(UTC),
+            )
+        )
 
     async def list_organizations(
         self,
@@ -199,6 +233,11 @@ class OrganizationService:
             sort_order=payload.sort_order,
         )
         self._session.add(org)
+        self._audit(
+            action="organization.created",
+            org=org,
+            details={"parent_id": str(org.parent_id) if org.parent_id else None},
+        )
         await self._session.commit()
         await self._session.refresh(org)
         return await _to_read(self._session, org)
@@ -261,6 +300,7 @@ class OrganizationService:
             org.sort_order = payload.sort_order
 
         self._session.add(org)
+        self._audit(action="organization.updated", org=org)
         await self._session.commit()
         await self._session.refresh(org)
         return await _to_read(self._session, org)
@@ -271,6 +311,7 @@ class OrganizationService:
             raise OrganizationNotFound(f"Organization {org_id} not found.")
         org.status = "disabled"
         self._session.add(org)
+        self._audit(action="organization.disabled", org=org)
         await self._session.commit()
         await self._session.refresh(org)
         return await _to_read(self._session, org)
@@ -281,6 +322,7 @@ class OrganizationService:
             raise OrganizationNotFound(f"Organization {org_id} not found.")
         org.status = "active"
         self._session.add(org)
+        self._audit(action="organization.enabled", org=org)
         await self._session.commit()
         await self._session.refresh(org)
         return await _to_read(self._session, org)
@@ -296,5 +338,6 @@ class OrganizationService:
         if members > 0:
             raise OrganizationInUse(member_count=members)
 
+        self._audit(action="organization.deleted", org=org)
         await self._session.delete(org)
         await self._session.commit()

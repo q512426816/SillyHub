@@ -166,6 +166,22 @@ class UserService:
             for role_id in role_ids:
                 self.session.add(UserRole(user_id=user.id, role_id=role_id))
 
+        self.session.add(
+            AuditLog(
+                id=uuid.uuid4(),
+                workspace_id=None,
+                actor_id=self.actor_id,
+                action="user.created",
+                resource_type="user",
+                resource_id=user.id,
+                details_json=json.dumps(
+                    {"email": user.email, "is_platform_admin": user.is_platform_admin},
+                    default=str,
+                    ensure_ascii=False,
+                ),
+                timestamp=datetime.now(UTC),
+            )
+        )
         await self.session.commit()
         await self.session.refresh(user)
         log.info("user.created", email=user.email, user_id=str(user.id))
@@ -232,6 +248,27 @@ class UserService:
         if status == "disabled" or login_enabled is False:
             await self._revoke_sessions(target_id)
 
+        self.session.add(
+            AuditLog(
+                id=uuid.uuid4(),
+                workspace_id=None,
+                actor_id=self.actor_id,
+                action="user.updated",
+                resource_type="user",
+                resource_id=target.id,
+                details_json=json.dumps(
+                    {
+                        "display_name": display_name,
+                        "is_platform_admin": is_platform_admin,
+                        "status": status,
+                        "login_enabled": login_enabled,
+                    },
+                    default=str,
+                    ensure_ascii=False,
+                ),
+                timestamp=datetime.now(UTC),
+            )
+        )
         await self.session.commit()
         await self.session.refresh(target)
         return target
@@ -255,6 +292,18 @@ class UserService:
 
         await self._revoke_sessions(target_id)
 
+        self.session.add(
+            AuditLog(
+                id=uuid.uuid4(),
+                workspace_id=None,
+                actor_id=self.actor_id,
+                action="user.deleted",
+                resource_type="user",
+                resource_id=target.id,
+                details_json=json.dumps({"email": target.email}, default=str, ensure_ascii=False),
+                timestamp=datetime.now(UTC),
+            )
+        )
         await self.session.commit()
 
     # ── Org / role bindings ──────────────────────────────────────────────

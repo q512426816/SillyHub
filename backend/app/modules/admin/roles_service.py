@@ -6,14 +6,18 @@ delete is gated on ``user_count == 0`` across both the platform-level
 ``user_roles`` table and the workspace-scoped ``user_workspace_roles``
 table.
 
-Audit logging is delegated to :mod:`app.core.audit_hooks` — every
-Role / RolePermission mutation fires the SQLAlchemy event listeners
-automatically, so this module never writes to ``audit_logs`` itself.
+Audit logging is explicit (create / update / disable / enable / delete
+all emit ``role.*`` rows into ``audit_logs``). The generic SQLAlchemy
+hook in :mod:`app.core.audit_hooks` is not wired into the production
+lifespan, so we mirror the users_service pattern and write AuditLog
+directly.
 """
 
 from __future__ import annotations
 
+import json
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +40,7 @@ from app.modules.auth.model import (
     RolePermission,
     UserWorkspaceRole,
 )
+from app.modules.workflow.model import AuditLog
 
 
 def _user_roles_model() -> type:
@@ -115,6 +120,37 @@ class RoleService:
         self._session = session
         self._actor_id = actor_id
 
+    def _audit(
+        self,
+        *,
+        action: str,
+        role: Role,
+        details: dict | None = None,
+    ) -> None:
+        self._session.info.setdefault(
+            "audit_context",
+            {
+                "actor_id": self._actor_id,
+                "workspace_id": None,
+            },
+        )
+        self._session.add(
+            AuditLog(
+                id=uuid.uuid4(),
+                workspace_id=None,
+                actor_id=self._actor_id,
+                action=action,
+                resource_type="role",
+                resource_id=role.id,
+                details_json=json.dumps(
+                    {"key": role.key, "name": role.name, **(details or {})},
+                    default=str,
+                    ensure_ascii=False,
+                ),
+                timestamp=datetime.now(UTC),
+            )
+        )
+
     async def list(
         self,
         *,
@@ -179,6 +215,11 @@ class RoleService:
 
         for perm in payload.permission_keys:
             self._session.add(RolePermission(role_id=role.id, permission=perm.value))
+        self._audit(
+            action="role.created",
+            role=role,
+            details={"permissions": [p.value for p in payload.permission_keys]},
+        )
         await self._session.commit()
         await self._session.refresh(role)
         return await _to_read(self._session, role)
@@ -210,6 +251,7 @@ class RoleService:
                 self._session.add(RolePermission(role_id=role.id, permission=perm.value))
 
         self._session.add(role)
+        self._audit(action="role.updated", role=role, details={"is_active": role.is_active})
         await self._session.commit()
         await self._session.refresh(role)
         return await _to_read(self._session, role)
@@ -225,6 +267,7 @@ class RoleService:
             )
         role.is_active = False
         self._session.add(role)
+        self._audit(action="role.disabled", role=role)
         await self._session.commit()
         await self._session.refresh(role)
         return await _to_read(self._session, role)
@@ -235,6 +278,7 @@ class RoleService:
             raise RoleNotFound(f"Role {role_id} not found.")
         role.is_active = True
         self._session.add(role)
+        self._audit(action="role.enabled", role=role)
         await self._session.commit()
         await self._session.refresh(role)
         return await _to_read(self._session, role)
@@ -252,6 +296,7 @@ class RoleService:
         if user_count > 0:
             raise RoleInUse(user_count=user_count)
 
+        self._audit(action="role.deleted", role=role)
         await self._session.execute(
             RolePermission.__table__.delete().where(RolePermission.__table__.c.role_id == role.id)
         )

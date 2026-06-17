@@ -267,16 +267,23 @@ if [ -n "${BOB_ID:-}" ]; then
   SESSION_ID=$(echo "$SESSIONS" | JQ "next((s for s in data if not s.get('revoked_at')), {}).get('id','')")
 
   if [ -n "$SESSION_ID" ]; then
+    # Verify via DB that revoked_at is null before revoke
+    BEFORE=$(docker compose --env-file "$(pwd)/deploy/.env" -f "$(pwd)/deploy/docker-compose.yml" exec -T postgres \
+      psql -U platform -d platform -tAc \
+      "SELECT revoked_at FROM auth_sessions WHERE id='$SESSION_ID'" 2>/dev/null | tr -d '[:space:]')
+
     curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" \
       "$API_BASE/api/admin/users/$BOB_ID/sessions/$SESSION_ID" > /dev/null
 
-    SESSIONS2=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
-      "$API_BASE/api/admin/users/$BOB_ID/sessions")
-    REVOKED=$(echo "$SESSIONS2" | JQ "next((s.get('revoked_at') for s in data if s.get('id')=='$SESSION_ID'), '')")
-    if [ -n "$REVOKED" ] && [ "$REVOKED" != "None" ]; then
+    # Verify via DB that revoked_at is now set (list_sessions API filters out revoked)
+    AFTER=$(docker compose --env-file "$(pwd)/deploy/.env" -f "$(pwd)/deploy/docker-compose.yml" exec -T postgres \
+      psql -U platform -d platform -tAc \
+      "SELECT revoked_at FROM auth_sessions WHERE id='$SESSION_ID'" 2>/dev/null | tr -d '[:space:]')
+
+    if [ -z "$BEFORE" ] && [ -n "$AFTER" ]; then
       pass "E2E-06 session revoked"
     else
-      fail "E2E-06 session revoked" "revoked_at is still null"
+      fail "E2E-06 session revoked" "before=$BEFORE after=$AFTER"
     fi
   else
     fail "E2E-06 session revoked" "no active session to revoke"
