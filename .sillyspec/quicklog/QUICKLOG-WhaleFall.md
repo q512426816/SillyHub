@@ -313,3 +313,9 @@ created_at: 2026-06-03T08:42:04
 根因：users/page.tsx 用 listRoles({ size: 200 }) 加载角色，但后端 GET /api/admin/roles 的 size 上限是 le=100，200 直接被 422 拒；Promise.all 是 fail-fast 的，roles 失败连带把 organizations 一起拖死；catch 块又写成了 silent "// ignore — drawer will show empty selects"，错误被吞所以表象就是两个多选都空白
 文件：frontend/src/app/(dashboard)/admin/users/page.tsx
 结果：1) size=200 → size=100 匹配后端 le=100；2) Promise.all → Promise.allSettled 单个失败不连坐，organizations 能正常加载；3) catch 改成 console.error 把错误打到控制台，避免再次 silent。lint/typecheck/test(75/75) 全绿
+
+## ql-20260617-003-3757 | 2026-06-17 14:05:00 | 用户管理/角色管理分页（默认 20 条/页）
+状态：已完成
+根因：users/page.tsx 写死 limit=200 一次性拉全部，roles/page.tsx 走后端默认 size=20 但前端无翻页 UI，超过 20 条直接看不到
+文件：frontend/src/components/ui/pagination.tsx (新增), frontend/src/app/(dashboard)/admin/users/page.tsx, frontend/src/app/(dashboard)/admin/roles/page.tsx
+结果：1) 新增 components/ui/pagination.tsx 通用分页（上一页/下一页 + 共X条·第N/M页）；2) roles/page.tsx 加 page state + listRoles 传 page/size=20 + 搜索变化时 setPage(1)；3) users/page.tsx 删 limit=200 改为 limit=20+offset=(page-1)*20，搜索/状态变化时 setPage(1)；4) 两个页面表格下方挂 Pagination。lint/typecheck/test(75/75) 全绿

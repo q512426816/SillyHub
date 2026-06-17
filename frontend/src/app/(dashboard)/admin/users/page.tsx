@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AdminUserDrawer } from "@/components/admin-user-drawer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Pagination } from "@/components/ui/pagination";
 import { ApiError } from "@/lib/api";
 import {
   createUser,
@@ -41,6 +42,8 @@ interface DrawerState {
 const inputCls =
   "h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none";
 
+const PAGE_SIZE = 20;
+
 export default function AdminUsersPage() {
   const { user: currentUser } = useSession();
   const canWrite = !!currentUser?.is_platform_admin ||
@@ -56,6 +59,7 @@ export default function AdminUsersPage() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [page, setPage] = useState(1);
   const [drawer, setDrawer] = useState<DrawerState>({
     open: false,
     mode: "create",
@@ -76,10 +80,12 @@ export default function AdminUsersPage() {
     setLoading(true);
     setError(null);
     try {
-      const params: Parameters<typeof listUsers>[0] = {};
+      const params: Parameters<typeof listUsers>[0] = {
+        limit: PAGE_SIZE,
+        offset: (page - 1) * PAGE_SIZE,
+      };
       if (search) params.q = search;
       if (statusFilter !== "all") params.status = statusFilter;
-      params.limit = 200;
       const resp = await listUsers(params);
       setUsers(resp.items);
       setTotal(resp.total);
@@ -88,7 +94,7 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter]);
+  }, [search, statusFilter, page]);
 
   useEffect(() => {
     void load();
@@ -121,7 +127,15 @@ export default function AdminUsersPage() {
   const handleSearchInput = (value: string) => {
     setSearchInput(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setSearch(value), 400);
+    debounceRef.current = setTimeout(() => {
+      setSearch(value);
+      setPage(1);
+    }, 400);
+  };
+
+  const handleStatusFilterChange = (value: StatusFilter) => {
+    setStatusFilter(value);
+    setPage(1);
   };
 
   const handleSubmit = async (
@@ -236,7 +250,7 @@ export default function AdminUsersPage() {
             />
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+              onChange={(e) => handleStatusFilterChange(e.target.value as StatusFilter)}
               className={`w-32 ${inputCls}`}
               aria-label="状态筛选"
             >
@@ -378,6 +392,12 @@ export default function AdminUsersPage() {
               </tbody>
             </table>
           </div>
+          <Pagination
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={total}
+            onPageChange={setPage}
+          />
         </>
       )}
 
