@@ -29,7 +29,7 @@ created_at: 2026-06-10T17:00:05
 
 ### 🔴 高严重度
 
-- **Claude Code 版本锁定**: 后端 Dockerfile 硬编码 `claude-code@2.1.158` 和 `sillyspec@3.17.15`，升级需要重新构建镜像。版本不匹配可能导致协议变更失效。
+- **Claude Code 版本锁定**: 后端 Dockerfile 硬编码 `claude-code@2.1.158` 和 `sillyspec@3.18.1`，升级需要重新构建镜像。版本不匹配可能导致协议变更失效。
 - **Anthropic API 代理**: 默认使用 `open.bigmodel.cn/api/anthropic` 作为 API 代理，如果代理服务不稳定或变更，整个 Agent 功能受影响。
 
 ### 🟡 中严重度

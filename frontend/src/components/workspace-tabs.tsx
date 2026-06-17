@@ -34,7 +34,7 @@ export function WorkspaceTabs({
     <>
       <nav
         aria-label="Workspace tabs"
-        className="flex flex-wrap gap-1 border-b border-border"
+        className="flex min-w-0 flex-wrap gap-1 border-b border-border"
       >
         {TABS.map((tab) => {
           const active = isActive(tab.path);
@@ -55,7 +55,7 @@ export function WorkspaceTabs({
           );
         })}
       </nav>
-      <div className="pt-4">{children}</div>
+      <div className="min-w-0 pt-4">{children}</div>
     </>
   );
 }

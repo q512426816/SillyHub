@@ -8,7 +8,7 @@ export default function WorkspaceDetailLayout({
   children: React.ReactNode;
 }) {
   return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-5 px-6 py-8">
+    <main className="mx-auto flex w-full max-w-[1440px] flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
       <WorkspaceTabs workspaceId={params.id}>{children}</WorkspaceTabs>
     </main>
   );

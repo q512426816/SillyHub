@@ -459,7 +459,7 @@ export default function AgentPage({ params }: Props) {
   /* ================================================================ */
 
   return (
-    <div className="flex min-w-0 max-w-full flex-col gap-5 px-4 py-5 sm:px-6">
+    <div className="flex min-w-0 max-w-full flex-col gap-5">
       {/* ---- Header ---- */}
       <header className="flex flex-col gap-4 border-b pb-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0">
@@ -519,7 +519,7 @@ export default function AgentPage({ params }: Props) {
 
       {/* ---- Active Runs ---- */}
       {runs !== null && runningRuns.length > 0 && (
-        <section className="flex flex-col gap-3">
+        <section className="flex min-w-0 flex-col gap-3">
           <SectionTitle icon={Activity} title="活跃运行" meta={`${runningRuns.length} 个`} />
           <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
             {runningRuns.map((run) => (
@@ -699,7 +699,7 @@ export default function AgentPage({ params }: Props) {
                   type="button"
                   onClick={() => { setStatusFilter(s); setHistoryPage(1); }}
                   className={cn(
-                    "rounded px-2 py-1 font-medium transition-colors",
+                    "whitespace-nowrap rounded px-2 py-1 font-medium transition-colors",
                     statusFilter === s
                       ? "bg-primary text-primary-foreground"
                       : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -711,10 +711,8 @@ export default function AgentPage({ params }: Props) {
             </div>
           </div>
           <div className="min-w-0 overflow-hidden rounded-md border bg-card">
-            {/* ql-20260617-002：去掉 min-w-[1140px] 硬下限，用 w-full + 自适应列宽，
-                溢出时仅在表格区域滚动，不影响外层布局。 */}
             <div className="w-full overflow-x-auto">
-            <table className="w-full border-collapse text-left">
+            <table className="w-full min-w-[1220px] border-collapse text-left">
               <thead className="border-b bg-muted/30 text-[11px] uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">运行 ID</th>
@@ -736,13 +734,13 @@ export default function AgentPage({ params }: Props) {
                   return (
                     <>
                       <tr key={run.id} className={cn("border-b transition-colors hover:bg-muted/20", expandedRunId === run.id && "bg-muted/20")}>
-                        <td className="px-3 py-2">
+                        <td className="whitespace-nowrap px-3 py-2">
                           <code className="font-mono text-[11px] text-primary">{shortId(run.id)}</code>
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="whitespace-nowrap px-3 py-2">
                           <Badge variant="outline" className="text-[10px]">{run.agent_type}</Badge>
                         </td>
-                        <td className="px-3 py-2 text-xs">
+                        <td className="whitespace-nowrap px-3 py-2 text-xs">
                           {run.task_id ? (
                             <Link
                               href={`/workspaces/${workspaceId}/changes/-/tasks/${run.task_id}`}
@@ -758,7 +756,7 @@ export default function AgentPage({ params }: Props) {
                             "—"
                           )}
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="whitespace-nowrap px-3 py-2">
                           <div className="flex items-center gap-1.5">
                             <span className={`h-1.5 w-1.5 rounded-full ${sl.dot}`} />
                             <Badge variant={sl.badge}>
@@ -766,7 +764,7 @@ export default function AgentPage({ params }: Props) {
                             </Badge>
                           </div>
                         </td>
-                        <td className="max-w-[200px] truncate px-3 py-2 text-xs text-muted-foreground">
+                        <td className="max-w-[260px] truncate px-3 py-2 text-xs text-muted-foreground">
                           {expandedLogs && expandedRunId === run.id
                             ? extractRunSummary(expandedLogs)
                             : run.post_scan_status
@@ -788,11 +786,11 @@ export default function AgentPage({ params }: Props) {
                             </span>
                           ) : "—"}
                         </td>
-                        <td className="px-3 py-2 font-mono text-[11px]">{run.exit_code ?? "—"}</td>
+                        <td className="whitespace-nowrap px-3 py-2 font-mono text-[11px]">{run.exit_code ?? "—"}</td>
                         <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">
                           {run.finished_at ? formatTime(run.finished_at) : "—"}
                         </td>
-                        <td className="px-3 py-2 text-right">
+                        <td className="whitespace-nowrap px-3 py-2 text-right">
                           <Button
                             size="sm"
                             variant={expandedRunId === run.id ? "default" : "outline"}
