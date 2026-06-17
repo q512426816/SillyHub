@@ -319,3 +319,9 @@ created_at: 2026-06-03T08:42:04
 根因：users/page.tsx 写死 limit=200 一次性拉全部，roles/page.tsx 走后端默认 size=20 但前端无翻页 UI，超过 20 条直接看不到
 文件：frontend/src/components/ui/pagination.tsx (新增), frontend/src/app/(dashboard)/admin/users/page.tsx, frontend/src/app/(dashboard)/admin/roles/page.tsx
 结果：1) 新增 components/ui/pagination.tsx 通用分页（上一页/下一页 + 共X条·第N/M页）；2) roles/page.tsx 加 page state + listRoles 传 page/size=20 + 搜索变化时 setPage(1)；3) users/page.tsx 删 limit=200 改为 limit=20+offset=(page-1)*20，搜索/状态变化时 setPage(1)；4) 两个页面表格下方挂 Pagination。lint/typecheck/test(75/75) 全绿
+
+## ql-20260617-004-02d5 | 2026-06-17 14:15:00 | 角色/用户管理改用 antd Table + 每页数量可选
+状态：已完成
+背景：用户要求"可以选择每页数量，使用 Ant Design 的 Table 组件"，AskUserQuestion 二选一后确认走 antd 路线（不是扩展自定义 Pagination）
+文件：frontend/package.json, frontend/src/app/layout.tsx, frontend/src/components/antd-providers.tsx (新增), frontend/src/app/(dashboard)/admin/roles/page.tsx, frontend/src/app/(dashboard)/admin/users/page.tsx, frontend/src/components/ui/pagination.tsx (删除)
+结果：1) 装 antd 6.4 + @ant-design/nextjs-registry 1.3 + @ant-design/icons 6.2；2) 新建 components/antd-providers.tsx (client)，导出 AntdProviders 包 ConfigProvider（zhCN locale + colorPrimary/borderRadius token + Table headerBg/rowHoverBg），App 组件提供 message/notification context；3) layout.tsx 包 AntdRegistry + AntdProviders 注入 CSS-in-JS；4) roles/page.tsx 原生 table 改 antd Table，columns 用对象数组+render 函数，pagination showSizeChanger + pageSizeOptions [10,20,50,100] + showTotal，pageSize state + onChange(p,s) 同步 setPage/setPageSize；5) users/page.tsx 同上 + scroll.x=max-content 应对操作列宽度；6) 删除 components/ui/pagination.tsx（被 antd Table 内置分页替代）。typecheck/lint/test(75/75)/build 全绿。admin/roles 和 admin/users bundle 从 ~100KB 升到 ~300KB（+200KB 是 antd cost）

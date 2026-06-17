@@ -110,3 +110,4 @@ layout.tsx (根布局)
 | 2026-06-16 | ql-20260616-002-f4ce | /runtimes 快速对话改用 SSE 流式（EventSource 订阅 + nextjs route handler 透传 + 60s 回退 GET 兜底） |
 | 2026-06-17 | ql-20260617-002-21d4 | 用户管理抽屉组织/角色多选"暂无选项"修复：size 200→100 匹配后端 le=100 + Promise.all→allSettled + catch console.error |
 | 2026-06-17 | ql-20260617-003-3757 | 用户/角色管理加分页（默认 20 条/页）：新增 Pagination 组件 + 列表表格下方挂分页 + 搜索/状态变化 setPage(1) |
+| 2026-06-17 | ql-20260617-004-02d5 | 用户/角色管理表格改 antd Table：columns + showSizeChanger + pageSizeOptions [10,20,50,100] + pageSize state，删除原生 table + 自定义 Pagination |

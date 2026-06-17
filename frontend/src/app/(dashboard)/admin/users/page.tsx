@@ -1,11 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Table, type TableProps, Tag } from "antd";
 
 import { AdminUserDrawer } from "@/components/admin-user-drawer";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Pagination } from "@/components/ui/pagination";
 import { ApiError } from "@/lib/api";
 import {
   createUser,
@@ -42,7 +41,8 @@ interface DrawerState {
 const inputCls =
   "h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none";
 
-const PAGE_SIZE = 20;
+const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 export default function AdminUsersPage() {
   const { user: currentUser } = useSession();
@@ -60,6 +60,7 @@ export default function AdminUsersPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [drawer, setDrawer] = useState<DrawerState>({
     open: false,
     mode: "create",
@@ -81,8 +82,8 @@ export default function AdminUsersPage() {
     setError(null);
     try {
       const params: Parameters<typeof listUsers>[0] = {
-        limit: PAGE_SIZE,
-        offset: (page - 1) * PAGE_SIZE,
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
       };
       if (search) params.q = search;
       if (statusFilter !== "all") params.status = statusFilter;
@@ -94,7 +95,7 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter, page]);
+  }, [search, statusFilter, page, pageSize]);
 
   useEffect(() => {
     void load();
@@ -196,6 +197,136 @@ export default function AdminUsersPage() {
     }
   };
 
+  const columns: TableProps<UserRead>["columns"] = [
+    {
+      title: "邮箱",
+      dataIndex: "email",
+      key: "email",
+      render: (_v: unknown, u: UserRead) => {
+        const isSelf = u.id === currentUserId;
+        return (
+          <span className="font-mono">
+            {u.email}
+            {u.is_platform_admin && (
+              <Tag color="success" className="ml-2">超管</Tag>
+            )}
+            {isSelf && (
+              <span className="ml-2 text-[10px] text-amber-600">（自己）</span>
+            )}
+          </span>
+        );
+      },
+    },
+    {
+      title: "显示名",
+      dataIndex: "display_name",
+      key: "display_name",
+      render: (v: string | null) => v ?? "—",
+    },
+    {
+      title: "角色",
+      key: "roles",
+      render: (_v: unknown, u: UserRead) =>
+        u.roles.length === 0 ? (
+          <span className="text-xs text-muted-foreground">—</span>
+        ) : (
+          <div className="flex flex-wrap gap-1">
+            {u.roles.map((r) => (
+              <Tag key={r.id}>{r.name}</Tag>
+            ))}
+          </div>
+        ),
+    },
+    {
+      title: "状态",
+      key: "status",
+      render: (_v: unknown, u: UserRead) => (
+        <div className="flex flex-col gap-1">
+          <Tag color={u.status === "active" ? "success" : "error"}>
+            {u.status === "active" ? "启用" : "禁用"}
+          </Tag>
+          {!u.login_enabled && <Tag>登录已禁</Tag>}
+        </div>
+      ),
+    },
+    {
+      title: "最近登录",
+      dataIndex: "last_login_at",
+      key: "last_login_at",
+      render: (v: string | null) => (
+        <span className="text-xs text-muted-foreground">
+          {v ? fmtDate(v) : "—"}
+        </span>
+      ),
+    },
+    {
+      title: "操作",
+      key: "actions",
+      align: "right",
+      render: (_v: unknown, u: UserRead) => {
+        const isSelf = u.id === currentUserId;
+        return (
+          <div className="flex justify-end gap-1">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!canWrite}
+              onClick={() => setDrawer({ open: true, mode: "edit", user: u })}
+            >
+              编辑
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!canLoginManage || (isSelf && u.login_enabled)}
+              onClick={() => void handleToggleLogin(u)}
+              title={
+                isSelf && u.login_enabled
+                  ? "不能禁用自己的登录"
+                  : !canLoginManage
+                    ? "无 user:login:manage 权限"
+                    : undefined
+              }
+            >
+              {u.login_enabled ? "禁用登录" : "启用登录"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!canLoginManage}
+              onClick={() => setResetTarget(u)}
+            >
+              重置密码
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setSessionsDrawer(u)}
+            >
+              会话
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setAuditDrawer(u)}
+            >
+              审计
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={!canWrite || isSelf}
+              onClick={() => setConfirmDelete(u)}
+              title={isSelf ? "不能删除自己" : undefined}
+            >
+              删除
+            </Button>
+          </div>
+        );
+      },
+    },
+  ];
+
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-5 px-6 py-6">
       <header className="flex items-center justify-between">
@@ -263,140 +394,26 @@ export default function AdminUsersPage() {
             </span>
           </div>
 
-          <div className="overflow-x-auto rounded-md border bg-card">
-            <table className="w-full text-sm">
-              <thead className="border-b bg-muted/30 text-left text-xs">
-                <tr>
-                  <th className="px-3 py-2 font-medium">邮箱</th>
-                  <th className="px-3 py-2 font-medium">显示名</th>
-                  <th className="px-3 py-2 font-medium">角色</th>
-                  <th className="px-3 py-2 font-medium">状态</th>
-                  <th className="px-3 py-2 font-medium">最近登录</th>
-                  <th className="px-3 py-2 text-right font-medium">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan={6} className="px-3 py-10 text-center text-xs text-muted-foreground">
-                      加载中…
-                    </td>
-                  </tr>
-                ) : users.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-3 py-10 text-center text-xs text-muted-foreground">
-                      暂无用户
-                    </td>
-                  </tr>
-                ) : (
-                  users.map((u) => {
-                    const isSelf = u.id === currentUserId;
-                    return (
-                      <tr key={u.id} className="border-b last:border-0 hover:bg-muted/30">
-                        <td className="px-3 py-2 font-mono">
-                          {u.email}
-                          {u.is_platform_admin && (
-                            <Badge variant="success" className="ml-2">超管</Badge>
-                          )}
-                          {isSelf && (
-                            <span className="ml-2 text-[10px] text-amber-600">（自己）</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">{u.display_name ?? "—"}</td>
-                        <td className="px-3 py-2">
-                          {u.roles.length === 0 ? (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          ) : (
-                            <div className="flex flex-wrap gap-1">
-                              {u.roles.map((r) => (
-                                <Badge key={r.id} variant="outline">{r.name}</Badge>
-                              ))}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="flex flex-col gap-1">
-                            <Badge variant={u.status === "active" ? "success" : "destructive"}>
-                              {u.status === "active" ? "启用" : "禁用"}
-                            </Badge>
-                            {!u.login_enabled && (
-                              <Badge variant="outline">登录已禁</Badge>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground">
-                          {u.last_login_at ? fmtDate(u.last_login_at) : "—"}
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={!canWrite}
-                              onClick={() => setDrawer({ open: true, mode: "edit", user: u })}
-                            >
-                              编辑
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={!canLoginManage || (isSelf && u.login_enabled)}
-                              onClick={() => void handleToggleLogin(u)}
-                              title={
-                                isSelf && u.login_enabled
-                                  ? "不能禁用自己的登录"
-                                  : !canLoginManage
-                                    ? "无 user:login:manage 权限"
-                                    : undefined
-                              }
-                            >
-                              {u.login_enabled ? "禁用登录" : "启用登录"}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={!canLoginManage}
-                              onClick={() => setResetTarget(u)}
-                            >
-                              重置密码
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setSessionsDrawer(u)}
-                            >
-                              会话
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setAuditDrawer(u)}
-                            >
-                              审计
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              disabled={!canWrite || isSelf}
-                              onClick={() => setConfirmDelete(u)}
-                              title={isSelf ? "不能删除自己" : undefined}
-                            >
-                              删除
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-          <Pagination
-            page={page}
-            pageSize={PAGE_SIZE}
-            total={total}
-            onPageChange={setPage}
+          <Table<UserRead>
+            rowKey="id"
+            columns={columns}
+            dataSource={users}
+            loading={loading}
+            size="small"
+            scroll={{ x: "max-content" }}
+            pagination={{
+              current: page,
+              pageSize,
+              total,
+              showSizeChanger: true,
+              pageSizeOptions: PAGE_SIZE_OPTIONS,
+              showTotal: (t) => `共 ${t} 个用户`,
+              onChange: (p, s) => {
+                setPage(p);
+                setPageSize(s);
+              },
+            }}
+            locale={{ emptyText: "暂无用户" }}
           />
         </>
       )}

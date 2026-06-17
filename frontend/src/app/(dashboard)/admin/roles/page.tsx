@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Table, type TableProps, Tag } from "antd";
 
 import { AdminRolePermissionPicker } from "@/components/admin-role-permission-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Pagination } from "@/components/ui/pagination";
 import { ApiError } from "@/lib/api";
 import {
   createRole,
@@ -29,7 +29,8 @@ interface DrawerState {
 }
 
 const KEY_PATTERN = /^[a-z][a-z0-9_]*$/;
-const PAGE_SIZE = 20;
+const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const inputCls =
   "h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none";
 const textareaCls =
@@ -47,6 +48,7 @@ export default function AdminRolesPage() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const [drawer, setDrawer] = useState<DrawerState>({ open: false, mode: "create" });
   const [confirmDelete, setConfirmDelete] = useState<RoleRead | null>(null);
@@ -57,7 +59,7 @@ export default function AdminRolesPage() {
     setLoading(true);
     setError(null);
     try {
-      const resp = await listRoles({ search: search || undefined, page, size: PAGE_SIZE });
+      const resp = await listRoles({ search: search || undefined, page, size: pageSize });
       setRoles(resp.items);
       setTotal(resp.total);
     } catch (err) {
@@ -65,7 +67,7 @@ export default function AdminRolesPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, page]);
+  }, [search, page, pageSize]);
 
   useEffect(() => {
     void load();
@@ -121,6 +123,94 @@ export default function AdminRolesPage() {
     }
   };
 
+  const columns: TableProps<RoleRead>["columns"] = [
+    { title: "Key", dataIndex: "key", key: "key", render: (v: string) => <span className="font-mono text-[11px]">{v}</span> },
+    { title: "名称", dataIndex: "name", key: "name" },
+    {
+      title: "类型",
+      dataIndex: "is_system",
+      key: "type",
+      render: (isSystem: boolean) =>
+        isSystem ? <Tag>系统</Tag> : <Tag color="blue">自定义</Tag>,
+    },
+    {
+      title: "状态",
+      dataIndex: "is_active",
+      key: "status",
+      render: (isActive: boolean) =>
+        isActive ? (
+          <Tag color="success">启用</Tag>
+        ) : (
+          <Tag color="error">禁用</Tag>
+        ),
+    },
+    {
+      title: "用户",
+      dataIndex: "user_count",
+      key: "user_count",
+      render: (_v: number, record: RoleRead) => (
+        <button
+          className="text-primary hover:underline"
+          onClick={() => setUsersDrawer(record)}
+          title="查看该角色下的用户"
+        >
+          {record.user_count} 用户
+        </button>
+      ),
+    },
+    {
+      title: "权限",
+      dataIndex: "permissions",
+      key: "permissions",
+      render: (perms: string[]) => renderPermissionsCell(perms),
+    },
+    {
+      title: "操作",
+      key: "actions",
+      align: "right",
+      render: (_v: unknown, record: RoleRead) => (
+        <div className="flex items-center justify-end gap-2">
+          <button
+            className="text-[11px] text-primary hover:underline"
+            onClick={() => setDrawer({ open: true, mode: "edit", role: record })}
+          >
+            编辑
+          </button>
+          <button
+            className="text-[11px] text-primary hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground/40 disabled:no-underline"
+            disabled={!canWrite || record.is_system}
+            title={
+              record.is_system
+                ? "系统角色不可禁用"
+                : !canWrite
+                  ? "无 role:write 权限"
+                  : undefined
+            }
+            onClick={() => void handleToggleActive(record)}
+          >
+            {record.is_active ? "禁用" : "启用"}
+          </button>
+          <button
+            className="text-[11px] text-destructive hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground/40 disabled:no-underline"
+            disabled={!canWrite || record.is_system || record.user_count > 0}
+            title={
+              record.is_system
+                ? "系统角色不可删除"
+                : record.user_count > 0
+                  ? `该角色已分配给 ${record.user_count} 个用户`
+                  : !canWrite
+                    ? "无 role:write 权限"
+                    : undefined
+            }
+            onClick={() => setConfirmDelete(record)}
+          >
+            删除
+          </button>
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
       <header className="flex items-center justify-between">
@@ -172,112 +262,27 @@ export default function AdminRolesPage() {
             重新加载
           </Button>
         </div>
-      ) : loading ? (
-        <p className="py-8 text-center text-xs text-muted-foreground">加载中…</p>
-      ) : roles.length === 0 ? (
-        <div className="rounded border border-dashed bg-card py-12 text-center">
-          <p className="text-xs text-muted-foreground">暂无角色，点击右上角新建</p>
-        </div>
       ) : (
-        <>
-          <div className="rounded-md border bg-card">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b text-left text-[11px] uppercase text-muted-foreground">
-                  <th className="px-3 py-2">Key</th>
-                  <th className="px-3 py-2">名称</th>
-                  <th className="px-3 py-2">类型</th>
-                  <th className="px-3 py-2">状态</th>
-                  <th className="px-3 py-2">用户</th>
-                  <th className="px-3 py-2">权限</th>
-                  <th className="px-3 py-2 text-right">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {roles.map((r) => (
-                  <tr key={r.id} className="border-b last:border-0">
-                    <td className="px-3 py-2 font-mono text-[11px]">{r.key}</td>
-                    <td className="px-3 py-2 text-xs">{r.name}</td>
-                    <td className="px-3 py-2">
-                      {r.is_system ? (
-                        <Badge variant="outline">系统</Badge>
-                      ) : (
-                        <Badge variant="default">自定义</Badge>
-                      )}
-                    </td>
-                    <td className="px-3 py-2">
-                      <Badge variant={r.is_active ? "success" : "destructive"}>
-                        {r.is_active ? "启用" : "禁用"}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-2 text-xs">
-                      <button
-                        className="text-primary hover:underline"
-                        onClick={() => setUsersDrawer(r)}
-                        title="查看该角色下的用户"
-                      >
-                        {r.user_count} 用户
-                      </button>
-                    </td>
-                    <td className="px-3 py-2 text-[11px] text-muted-foreground">
-                      {renderPermissionsCell(r.permissions)}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          className="text-[11px] text-primary hover:underline"
-                          onClick={() =>
-                            setDrawer({ open: true, mode: "edit", role: r })
-                          }
-                        >
-                          编辑
-                        </button>
-                        <button
-                          className="text-[11px] text-primary hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground/40 disabled:no-underline"
-                          disabled={!canWrite || r.is_system}
-                          title={
-                            r.is_system
-                              ? "系统角色不可禁用"
-                              : !canWrite
-                                ? "无 role:write 权限"
-                                : undefined
-                          }
-                          onClick={() => void handleToggleActive(r)}
-                        >
-                          {r.is_active ? "禁用" : "启用"}
-                        </button>
-                        <button
-                          className="text-[11px] text-destructive hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground/40 disabled:no-underline"
-                          disabled={
-                            !canWrite || r.is_system || r.user_count > 0
-                          }
-                          title={
-                            r.is_system
-                              ? "系统角色不可删除"
-                              : r.user_count > 0
-                                ? `该角色已分配给 ${r.user_count} 个用户`
-                                : !canWrite
-                                  ? "无 role:write 权限"
-                                  : undefined
-                          }
-                          onClick={() => setConfirmDelete(r)}
-                        >
-                          删除
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <Pagination
-            page={page}
-            pageSize={PAGE_SIZE}
-            total={total}
-            onPageChange={setPage}
-          />
-        </>
+        <Table<RoleRead>
+          rowKey="id"
+          columns={columns}
+          dataSource={roles}
+          loading={loading}
+          size="small"
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            pageSizeOptions: PAGE_SIZE_OPTIONS,
+            showTotal: (t) => `共 ${t} 个角色`,
+            onChange: (p, s) => {
+              setPage(p);
+              setPageSize(s);
+            },
+          }}
+          locale={{ emptyText: "暂无角色，点击右上角新建" }}
+        />
       )}
 
       {drawer.open && (
