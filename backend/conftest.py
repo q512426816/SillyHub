@@ -69,9 +69,10 @@ def _reset_settings_cache() -> Iterator[None]:
 async def db_engine() -> AsyncIterator[Any]:
     """Create a fresh in-memory async SQLite engine + schema for the test."""
     from app.models.base import BaseModel
-    from app.modules.agent import model as _agent_model  # noqa: F401
 
     # Registering feature models attaches their tables to BaseModel.metadata.
+    from app.modules.admin import model as _admin_model  # noqa: F401
+    from app.modules.agent import model as _agent_model  # noqa: F401
     from app.modules.auth import model as _auth_model  # noqa: F401
     from app.modules.change import model as _change_model  # noqa: F401
     from app.modules.daemon import model as _daemon_model  # noqa: F401

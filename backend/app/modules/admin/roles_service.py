@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,10 +35,13 @@ from app.modules.admin.schema import (
     RoleListResponse,
     RoleRead,
     RoleUpdateRequest,
+    RoleUserListResponse,
+    RoleUserRead,
 )
 from app.modules.auth.model import (
     Role,
     RolePermission,
+    User,
     UserWorkspaceRole,
 )
 from app.modules.workflow.model import AuditLog
@@ -302,3 +306,73 @@ class RoleService:
         )
         await self._session.delete(role)
         await self._session.commit()
+
+    async def list_users(self, role_id: uuid.UUID) -> RoleUserListResponse:
+        """Return every user bound to ``role_id``.
+
+        Mirrors :func:`_count_users`'s dual-table logic so the count
+        shown in the list view stays consistent with the users returned
+        here. Platform-level bindings come from ``user_roles``; workspace
+        bindings from ``user_workspace_roles`` (joined to ``workspaces``
+        for display name). A user bound both ways appears twice — that
+        matches what operators expect when auditing "who has this role".
+        """
+        role = await self._session.get(Role, role_id)
+        if role is None:
+            raise RoleNotFound(f"Role {role_id} not found.")
+
+        items: list[RoleUserRead] = []
+
+        user_role_cls = _user_roles_model()
+        if user_role_cls is not None:
+            platform_rows: list[tuple[Any, Any]] = (
+                await self._session.execute(
+                    select(User, user_role_cls)
+                    .join(User, user_role_cls.user_id == User.id)
+                    .where(user_role_cls.role_id == role_id)
+                    .where(col(User.deleted_at).is_(None))
+                    .order_by(col(User.email).asc())
+                )
+            ).all()
+            for user, _binding in platform_rows:
+                items.append(
+                    RoleUserRead(
+                        id=user.id,
+                        email=user.email,
+                        display_name=user.display_name,
+                        is_platform_admin=user.is_platform_admin,
+                        status=user.status,
+                        login_enabled=getattr(user, "login_enabled", True),
+                        binding_type="platform",
+                    )
+                )
+
+        from app.modules.workspace.model import Workspace
+
+        workspace_rows = (
+            await self._session.execute(
+                select(User, UserWorkspaceRole, Workspace)
+                .join(User, UserWorkspaceRole.user_id == User.id)
+                .join(Workspace, UserWorkspaceRole.workspace_id == Workspace.id)
+                .where(UserWorkspaceRole.role_id == role_id)
+                .where(col(User.deleted_at).is_(None))
+                .where(col(Workspace.deleted_at).is_(None))
+                .order_by(col(User.email).asc())
+            )
+        ).all()
+        for user, _binding, workspace in workspace_rows:
+            items.append(
+                RoleUserRead(
+                    id=user.id,
+                    email=user.email,
+                    display_name=user.display_name,
+                    is_platform_admin=user.is_platform_admin,
+                    status=user.status,
+                    login_enabled=getattr(user, "login_enabled", True),
+                    binding_type="workspace",
+                    workspace_id=workspace.id,
+                    workspace_name=workspace.name,
+                )
+            )
+
+        return RoleUserListResponse(items=items, total=len(items))

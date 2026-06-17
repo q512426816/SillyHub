@@ -37,6 +37,7 @@ from app.modules.admin.schema import (
     RoleListResponse,
     RoleRead,
     RoleUpdateRequest,
+    RoleUserListResponse,
     UserCreateRequest,
     UserListResponse,
     UserRead,
@@ -150,6 +151,19 @@ async def delete_role(
     user: Annotated[User, Depends(get_current_user)],
 ) -> None:
     await RoleService(session, user.id).delete(role_id)
+
+
+@router.get(
+    "/roles/{role_id}/users",
+    response_model=RoleUserListResponse,
+    dependencies=[Depends(require_permission_any(Permission.ROLE_READ))],
+)
+async def list_role_users(
+    role_id: Annotated[uuid.UUID, Path()],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> RoleUserListResponse:
+    return await RoleService(session, user.id).list_users(role_id)
 
 
 # ── Organizations (task-05) ──────────────────────────────────────────────────

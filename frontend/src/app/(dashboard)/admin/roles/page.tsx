@@ -11,11 +11,13 @@ import {
   deleteRole,
   disableRole,
   enableRole,
+  listRoleUsers,
   listRoles,
   updateRole,
   type RoleCreateRequest,
   type RoleRead,
   type RoleUpdateRequest,
+  type RoleUserRead,
 } from "@/lib/admin";
 import { useSession } from "@/stores/session";
 
@@ -44,6 +46,7 @@ export default function AdminRolesPage() {
 
   const [drawer, setDrawer] = useState<DrawerState>({ open: false, mode: "create" });
   const [confirmDelete, setConfirmDelete] = useState<RoleRead | null>(null);
+  const [usersDrawer, setUsersDrawer] = useState<RoleRead | null>(null);
   const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -198,7 +201,15 @@ export default function AdminRolesPage() {
                       {r.is_active ? "启用" : "禁用"}
                     </Badge>
                   </td>
-                  <td className="px-3 py-2 text-xs">{r.user_count} 用户</td>
+                  <td className="px-3 py-2 text-xs">
+                    <button
+                      className="text-primary hover:underline"
+                      onClick={() => setUsersDrawer(r)}
+                      title="查看该角色下的用户"
+                    >
+                      {r.user_count} 用户
+                    </button>
+                  </td>
                   <td className="px-3 py-2 text-[11px] text-muted-foreground">
                     {renderPermissionsCell(r.permissions)}
                   </td>
@@ -272,6 +283,13 @@ export default function AdminRolesPage() {
           role={confirmDelete}
           onCancel={() => setConfirmDelete(null)}
           onConfirm={() => void handleConfirmDelete()}
+        />
+      )}
+
+      {usersDrawer && (
+        <RoleUsersDrawer
+          role={usersDrawer}
+          onClose={() => setUsersDrawer(null)}
         />
       )}
     </div>
@@ -458,5 +476,110 @@ function DeleteConfirm({
         </div>
       </div>
     </div>
+  );
+}
+
+function RoleUsersDrawer({
+  role,
+  onClose,
+}: {
+  role: RoleRead;
+  onClose: () => void;
+}) {
+  const [users, setUsers] = useState<RoleUserRead[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const resp = await listRoleUsers(role.id);
+        if (!cancelled) setUsers(resp.items);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof ApiError ? err.message : "加载失败");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [role.id]);
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
+      <div className="fixed right-0 top-0 z-50 h-full w-[640px] overflow-y-auto border-l bg-background shadow-xl">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <div>
+            <h3 className="text-sm font-medium">
+              角色 <span className="font-mono">{role.key}</span> 下的用户
+            </h3>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              {role.name} · 共 {users.length} 条绑定
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="px-4 py-3">
+          {loading ? (
+            <p className="text-xs text-muted-foreground">加载中…</p>
+          ) : error ? (
+            <p className="text-[11px] text-destructive">{error}</p>
+          ) : users.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              该角色暂无用户绑定（含平台级 + 工作区级）。
+            </p>
+          ) : (
+            <table className="w-full text-left text-xs">
+              <thead className="border-b text-[11px] text-muted-foreground">
+                <tr>
+                  <th className="px-2 py-1.5">邮箱</th>
+                  <th className="px-2 py-1.5">显示名</th>
+                  <th className="px-2 py-1.5">绑定类型</th>
+                  <th className="px-2 py-1.5">工作区</th>
+                  <th className="px-2 py-1.5">状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u, idx) => (
+                  <tr key={`${u.id}-${u.binding_type}-${u.workspace_id ?? ""}-${idx}`} className="border-b last:border-0">
+                    <td className="px-2 py-1.5 font-mono text-[11px]">{u.email}</td>
+                    <td className="px-2 py-1.5">{u.display_name ?? "—"}</td>
+                    <td className="px-2 py-1.5">
+                      <Badge variant={u.binding_type === "platform" ? "default" : "outline"}>
+                        {u.binding_type === "platform" ? "平台级" : "工作区级"}
+                      </Badge>
+                    </td>
+                    <td className="px-2 py-1.5 text-[11px]">
+                      {u.workspace_name ?? "—"}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {u.is_platform_admin ? (
+                        <Badge variant="success">超管</Badge>
+                      ) : u.login_enabled ? (
+                        <Badge variant="success">启用</Badge>
+                      ) : (
+                        <Badge variant="destructive">禁止登录</Badge>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </>
   );
 }

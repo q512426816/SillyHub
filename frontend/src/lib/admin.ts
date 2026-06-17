@@ -448,6 +448,25 @@ export interface RoleListParams {
   size?: number;
 }
 
+export type RoleUserBindingType = "platform" | "workspace";
+
+export interface RoleUserRead {
+  id: string;
+  email: string;
+  display_name: string | null;
+  is_platform_admin: boolean;
+  status: string;
+  login_enabled: boolean;
+  binding_type: RoleUserBindingType;
+  workspace_id: string | null;
+  workspace_name: string | null;
+}
+
+export interface RoleUserListResponse {
+  items: RoleUserRead[];
+  total: number;
+}
+
 export async function listRoles(
   params?: RoleListParams,
 ): Promise<RoleListResponse> {
@@ -493,6 +512,12 @@ export async function enableRole(roleId: string): Promise<RoleRead> {
 
 export async function deleteRole(roleId: string): Promise<void> {
   await apiFetch(`/api/admin/roles/${roleId}`, { method: "DELETE" });
+}
+
+export async function listRoleUsers(
+  roleId: string,
+): Promise<RoleUserListResponse> {
+  return apiFetch<RoleUserListResponse>(`/api/admin/roles/${roleId}/users`);
 }
 
 // ── Permissions catalogue ─────────────────────────────────────────────

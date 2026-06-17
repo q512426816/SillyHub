@@ -76,6 +76,29 @@ class RoleListResponse(BaseModel):
     size: int
 
 
+class RoleUserRead(BaseModel):
+    """User row attached to a role (either platform-level or workspace-scoped)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: str
+    display_name: str | None
+    is_platform_admin: bool
+    status: str
+    login_enabled: bool
+    binding_type: Literal["platform", "workspace"]
+    workspace_id: uuid.UUID | None = None
+    workspace_name: str | None = None
+
+
+class RoleUserListResponse(BaseModel):
+    """Response of ``GET /api/admin/roles/{role_id}/users``."""
+
+    items: list[RoleUserRead]
+    total: int
+
+
 # ── Organization DTOs (task-05) ──────────────────────────────────────────────
 
 
@@ -279,6 +302,8 @@ __all__ = [
     "RoleListResponse",
     "RoleRead",
     "RoleUpdateRequest",
+    "RoleUserListResponse",
+    "RoleUserRead",
     "UserCreateRequest",
     "UserListResponse",
     "UserQueryParams",

@@ -264,6 +264,74 @@ async def test_list_roles_returns_paginated_envelope(client: AsyncClient, auth_h
     assert data["page"] == 1
 
 
+@pytest.mark.asyncio
+async def test_list_role_users_merges_platform_and_workspace(
+    client: AsyncClient, auth_headers, db_session
+):
+    """``GET /api/admin/roles/{id}/users`` returns platform + workspace bindings.
+
+    Platform binding (``user_roles``) → ``binding_type=platform``;
+    workspace binding (``user_workspace_roles``) → ``binding_type=workspace``
+    with ``workspace_name`` populated. A user bound both ways appears twice,
+    keeping the response shape consistent with ``user_count`` in the list view.
+    """
+    from app.modules.admin.model import UserRole
+    from app.modules.workspace.model import Workspace
+
+    ws = Workspace(name="Test WS", slug="test-ws-list-users", root_path="/tmp/test-lu", type="app")
+    db_session.add(ws)
+    role = Role(key="list_users_role", name="List Users Role", is_system=False, is_active=True)
+    db_session.add(role)
+    platform_user = User(
+        email="platform-user@example.com",
+        password_hash=password_hasher.hash("Xx1!abcd"),
+        is_platform_admin=False,
+    )
+    ws_user = User(
+        email="ws-user@example.com",
+        password_hash=password_hasher.hash("Xx1!abcd"),
+        is_platform_admin=False,
+    )
+    db_session.add_all([platform_user, ws_user])
+    await db_session.flush()
+
+    db_session.add(UserRole(user_id=platform_user.id, role_id=role.id))
+    db_session.add(UserWorkspaceRole(user_id=ws_user.id, role_id=role.id, workspace_id=ws.id))
+    await db_session.commit()
+    await db_session.refresh(role)
+
+    resp = await client.get(f"/api/admin/roles/{role.id}/users", headers=auth_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 2
+    by_email = {item["email"]: item for item in data["items"]}
+    assert by_email["platform-user@example.com"]["binding_type"] == "platform"
+    assert by_email["platform-user@example.com"]["workspace_name"] is None
+    assert by_email["ws-user@example.com"]["binding_type"] == "workspace"
+    assert by_email["ws-user@example.com"]["workspace_name"] == "Test WS"
+
+
+@pytest.mark.asyncio
+async def test_list_role_users_empty(client: AsyncClient, auth_headers, db_session):
+    """Role with no bindings returns ``{items: [], total: 0}``."""
+    role = Role(key="empty_role_lu", name="Empty", is_system=False, is_active=True)
+    db_session.add(role)
+    await db_session.commit()
+    await db_session.refresh(role)
+
+    resp = await client.get(f"/api/admin/roles/{role.id}/users", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"items": [], "total": 0}
+
+
+@pytest.mark.asyncio
+async def test_list_role_users_role_not_found(client: AsyncClient, auth_headers):
+    """Unknown role_id → 404 ROLE_NOT_FOUND."""
+    resp = await client.get(f"/api/admin/roles/{uuid.uuid4()}/users", headers=auth_headers)
+    assert resp.status_code == 404
+    assert resp.json()["code"].endswith("ROLE_NOT_FOUND")
+
+
 def func_count():
     """Import-safe alias for ``sqlalchemy.func.count`` to avoid leakage."""
     from sqlalchemy import func
