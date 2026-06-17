@@ -183,6 +183,20 @@ function mergeToolResult(target: ProcessedLog, body: string) {
   }
 }
 
+/**
+ * ql-20260617-011 / ql-20260617-013：从 `[THINKING] <chunk>` 中提取 chunk 原文。
+ *
+ * daemon thinking_delta 节流后（ql-20260617-012），单条 stdout 的 chunk 可含
+ * 换行（80 字符累积 / 120ms 时间窗口内的多个 delta 拼成）。
+ * 去掉首行 `[THINKING] ` 前缀，返回剩余全部内容（含换行），让前端 normalize
+ * 多条 chunk 拼接成完整段落。
+ */
+function extractThinkingText(content: string): string {
+  // 用 [\s\S]* 匹配整段（含 \n），不只匹配首行。
+  const match = content.match(/^\s*\[THINKING\]\s?([\s\S]*)$/);
+  return match ? (match[1] ?? "") : "";
+}
+
 /* ------------------------------------------------------------------ */
 /*  Log normalization                                                  */
 /* ------------------------------------------------------------------ */
@@ -190,6 +204,8 @@ function mergeToolResult(target: ProcessedLog, body: string) {
 export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
   const result: ProcessedLog[] = logs.map((log) => ({ log, hidden: false }));
   let lastToolSourceIdx = -1;
+  // ql-20260617-011：连续 [THINKING]-only stdout 合并到首条（SSE 追加效果）
+  let lastThinkingIdx = -1;
 
   for (let i = 0; i < logs.length; i++) {
     const current = result[i];
@@ -197,10 +213,14 @@ export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
 
     if (current.log.channel === "tool_call") {
       lastToolSourceIdx = i;
+      lastThinkingIdx = -1; // tool 断开 thinking 连续性
       continue;
     }
 
-    if (current.log.channel !== "stdout") continue;
+    if (current.log.channel !== "stdout") {
+      lastThinkingIdx = -1; // 非 stdout 断开
+      continue;
+    }
 
     // ql-20260616-002：后端 content_redacted 实际可为 null/undefined（schema str|None），
     // 前端类型声明成 string 是错的。SSE 流式 entry 可能瞬时为空 → 这里降级为 "" 避免
@@ -209,6 +229,31 @@ export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
     const lines = content.split("\n");
     const nonEmpty = lines.filter((l) => l.trim());
     if (nonEmpty.length === 0) continue;
+
+    // ql-20260617-011：连续 [THINKING]-only stdout 合并到上一条（追加显示）
+    // daemon 每个 thinking_delta 推一条 log，前端不合并会成独立卡片刷屏。
+    // 合并方式：提取每行的 thinking token（去掉 `[THINKING] ` 前缀），按原序
+    // 直接拼接（无分隔符），还原 SSE 累积效果。
+    // 中间出现任何非 [THINKING] 行（[SYSTEM]/[ASSISTANT]/[TOOL_*]/普通 stdout）
+    // 都会断开连续性，下次 [THINKING] 重新起始一个块。
+    if (isThinkingOnly(content)) {
+      const piece = extractThinkingText(content);
+      if (lastThinkingIdx >= 0) {
+        const target = result[lastThinkingIdx];
+        if (target) {
+          const prev = target.mergedThinkingContent
+            ?? extractThinkingText(target.log.content_redacted ?? "");
+          target.mergedThinkingContent = prev + piece;
+        }
+        current.hidden = true;
+        continue;
+      }
+      // 首条 thinking：直接设置 mergedThinkingContent，渲染时跳过 [THINKING] 前缀
+      current.mergedThinkingContent = piece;
+      lastThinkingIdx = i;
+      continue;
+    }
+    lastThinkingIdx = -1;
 
     const hasToolUse = nonEmpty.some((l) => l.trim().startsWith("[TOOL_USE]"));
     const hasToolResult = nonEmpty.some((l) => l.trim().startsWith("[TOOL_RESULT]"));
@@ -276,6 +321,21 @@ export function isThinkingContent(content: string): boolean {
         /^\s*\[ASSISTANT\]/.test(l),
     )
   );
+}
+
+/**
+ * ql-20260617-011 / ql-20260617-013：Check if stdout content is a [THINKING] chunk.
+ *
+ * daemon 推送格式：每条 stdout 的首行必为 `[THINKING] <text>`，但 chunk 内部
+ * 可含换行（80 字符 / 120ms 累积的多个 delta 拼成，含原文换行符）。
+ * 所以只检查首行是否 [THINKING] 前缀即可识别（不再要求每行都是 [THINKING]）。
+ *
+ * 比 isThinkingContent 严格——[SYSTEM]/[ASSISTANT] 行不视为 thinking chunk，
+ * 用于 normalize 合并：只有 [THINKING] chunk 才追加合并到上一条。
+ */
+export function isThinkingOnly(content: string): boolean {
+  const trimmed = content.trimStart();
+  return trimmed.startsWith("[THINKING]");
 }
 
 /** Filter all protocol-prefixed lines from content for default rendering */

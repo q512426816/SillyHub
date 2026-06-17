@@ -42,4 +42,10 @@ export interface ProcessedLog {
   parsedStdoutTool?: ToolCallEntry;
   /** Orphan [TOOL_RESULT] body (no preceding tool source to merge into) */
   parsedToolResult?: string;
+  /**
+   * ql-20260617-011：连续 [THINKING] 行追加合并到首条的累积内容。
+   * daemon 每个 thinking_delta 推一条 log → 前端不合并会成独立卡片刷屏。
+   * 合并后只渲染首条，content 是所有 thinking 行 join("\n")，实现 SSE 风格追加。
+   */
+  mergedThinkingContent?: string;
 }

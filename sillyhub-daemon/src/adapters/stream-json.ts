@@ -121,6 +121,34 @@ export class StreamJsonAdapter implements ProtocolAdapter {
   private _lastEmittedOutputTokens = 0;
 
   /**
+   * ql-20260617-010：本 turn 是否已通过 thinking_delta 流式输出过 thinking。
+   *
+   * parseAssistant 处理完整 thinking block 时若为 true，则跳过（避免与流式输出重复）。
+   * message_start 时 reset；commit（parseAssistant 入口）时一并 reset。
+   * 未开 --include-partial-messages 时永远 false，parseAssistant 正常输出完整 thinking。
+   */
+  private _currentTurnEmittedThinking = false;
+
+  /**
+   * ql-20260617-012：thinking_delta 字符缓冲。
+   *
+   * 每个 thinking_delta 累积到 buffer，达到 THINKING_FLUSH_CHARS 字符或
+   * THINKING_FLUSH_MS 毫秒（自 buffer 起始算）后才 emit 一条 event（一批 chunk）。
+   * 避免每个 token 都触发 HTTP POST + DB commit + Redis publish，让
+   * 长 thinking 推送累积十几秒延迟。
+   *
+   * 残留 buffer 在 parseAssistant 入口（turn 结束 / 完整 message）时 flush，
+   * 保证最后一段不丢。message_start 时清空（多 turn 防御）。
+   *
+   * _thinkingBufStartedAt 仅在 buffer 非空时有效（首次 push 时设置），
+   * 避免 resetAccumulator/message_start 后立即触发时间窗口 flush。
+   */
+  private _thinkingBuf = '';
+  private _thinkingBufStartedAt = 0;
+  private static readonly THINKING_FLUSH_CHARS = 80;
+  private static readonly THINKING_FLUSH_MS = 120;
+
+  /**
    * 子进程 stdin 引用，control_request 回写用。
    * 由 TaskRunner（task-19）在 spawn 后通过 attachStdin 注入。
    * parse 内部识别到 control_request 行时调 writeControlResponse 回写。
@@ -147,6 +175,11 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     // ql-20260617-007：估算状态也清零。
     this._currentTurnHasRealUsage = false;
     this._lastEmittedOutputTokens = 0;
+    // ql-20260617-010：thinking 流式标记也清零。
+    this._currentTurnEmittedThinking = false;
+    // ql-20260617-012：thinking buffer 也清零。
+    this._thinkingBuf = '';
+    this._thinkingBufStartedAt = 0;
   }
 
   /** 读取累积的 session_id（供 TaskRunner 在 lease 结束时上报）。 */
@@ -300,15 +333,46 @@ export class StreamJsonAdapter implements ProtocolAdapter {
       this._currentTurnHasRealUsage = false;
       // ql-20260617-007：新 turn 开始时清掉 emit 节流状态
       this._lastEmittedOutputTokens = 0;
+      // ql-20260617-010：新 turn 开始时清掉 thinking 流式标记
+      this._currentTurnEmittedThinking = false;
+      // ql-20260617-012：新 turn 开始时清掉 thinking buffer（防御多 turn 残留）
+      this._thinkingBuf = '';
+      this._thinkingBufStartedAt = 0;
       return null;
     }
 
     // content_block_delta：流式 text 估算（仅当本 turn 还没拿到真 usage 时）
     if (eventType === 'content_block_delta') {
-      if (this._currentTurnHasRealUsage) return null;
       const delta = event.delta;
       if (!isRecord(delta)) return null;
       const deltaType = typeof delta.type === 'string' ? delta.type : '';
+
+      // ql-20260617-010 / ql-20260617-012：thinking_delta 流式输出 + 字符/时间双节流。
+      //（无 --include-partial-messages 时不会到达此分支，parseAssistant 兜底完整 thinking）。
+      // 标记本 turn 已流式输出，parseAssistant 跳过完整 thinking block 避免重复。
+      //
+      // ql-20260617-012：每个 delta 通常 1-5 字符（一个 token），如果每个都 emit 一条
+      // event → 每个 event 一次 HTTP POST + DB commit + Redis publish + SSE push，
+      // 100 个 token 累积十几秒延迟。节流：累积到 THINKING_FLUSH_CHARS 字符或
+      // THINKING_FLUSH_MS 毫秒才 flush 一次。残留 buffer 在 parseAssistant 入口 flush。
+      if (deltaType === 'thinking_delta') {
+        const thinking = typeof delta.thinking === 'string' ? delta.thinking : '';
+        if (!thinking) return null;
+        if (this._thinkingBuf === '') {
+          this._thinkingBufStartedAt = Date.now();
+        }
+        this._thinkingBuf += thinking;
+        const elapsed = Date.now() - this._thinkingBufStartedAt;
+        if (
+          this._thinkingBuf.length >= StreamJsonAdapter.THINKING_FLUSH_CHARS ||
+          elapsed >= StreamJsonAdapter.THINKING_FLUSH_MS
+        ) {
+          return this._flushThinkingBuf();
+        }
+        return null;
+      }
+
+      if (this._currentTurnHasRealUsage) return null;
       if (deltaType !== 'text_delta') return null;
       const text = typeof delta.text === 'string' ? delta.text : '';
       if (!text) return null;
@@ -347,6 +411,24 @@ export class StreamJsonAdapter implements ProtocolAdapter {
       this._currentTurnUsage.output_tokens > prevOutput;
     if (!grew) return null;
     return this._buildUsageUpdateEvent();
+  }
+
+  /**
+   * ql-20260617-012：flush 累积的 thinking_delta buffer。
+   *
+   * 返回值：
+   *   - null：buffer 为空，无需 emit
+   *   - AgentEvent[]：含 1 条 text event（content=累积的 thinking 全文，metadata.thinking=true）
+   *
+   * 副作用：清空 buffer + 更新 _thinkingBufLastFlushMs + 标记 _currentTurnEmittedThinking。
+   */
+  private _flushThinkingBuf(): AgentEvent[] | null {
+    if (!this._thinkingBuf) return null;
+    const content = this._thinkingBuf;
+    this._thinkingBuf = '';
+    this._thinkingBufStartedAt = 0;
+    this._currentTurnEmittedThinking = true;
+    return [{ type: 'text', content, metadata: { thinking: true } }];
   }
 
   /**
@@ -393,6 +475,14 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     // 真实累积值，比 message.usage 的 {0,0} 可靠；只在 _currentTurnUsage > 0 时 commit
     // （没有 --include-partial-messages 时 _currentTurnUsage 永远 0，回退到 message.usage
     // 兜底）。
+    // ql-20260617-010：capture 本 turn 是否已流式输出 thinking（在 commit/reset 前）。
+    // parseAssistant 处理 thinking block 时用 captured 值决定是否跳过（避免重复）。
+    // ql-20260617-012：thinking_delta 节流后，turn 结束时（收到完整 assistant message）
+    // buffer 可能有未达 flush 阈值的残留，必须先 flush 再继续处理，否则丢失尾部 token。
+    const pendingFlush = this._flushThinkingBuf();
+    const turnEmittedThinking = this._currentTurnEmittedThinking || (pendingFlush !== null);
+    this._currentTurnEmittedThinking = false;
+
     if (this._currentTurnUsage.input_tokens > 0 || this._currentTurnUsage.output_tokens > 0) {
       this._accumulatedUsage.input_tokens += this._currentTurnUsage.input_tokens;
       this._accumulatedUsage.output_tokens += this._currentTurnUsage.output_tokens;
@@ -426,6 +516,10 @@ export class StreamJsonAdapter implements ProtocolAdapter {
         }
       } else if (blockType === 'thinking') {
         // thinking 收敛为 type='text' + metadata.thinking（AgentEventType 5 元组无 thinking）
+        // ql-20260617-010：若本 turn 已通过 thinking_delta 流式输出过 thinking，
+        // 跳过完整 block（避免重复）。未开 --include-partial-messages 时
+        // turnEmittedThinking 恒 false，正常输出完整 thinking（保留兜底）。
+        if (turnEmittedThinking) continue;
         const text = typeof block.text === 'string' ? block.text : '';
         if (text) {
           events.push({ type: 'text', content: text, metadata: { thinking: true } });
@@ -446,6 +540,11 @@ export class StreamJsonAdapter implements ProtocolAdapter {
           },
         });
       }
+    }
+    // ql-20260617-012：parseAssistant 入口 flush 的残留 thinking_delta 事件
+    // 必须排在前面（chronologically 先于完整 message 的 content blocks）。
+    if (pendingFlush !== null) {
+      events.unshift(...pendingFlush);
     }
     // 对照 Python：无 content 或全空 → 返回 None。Node 返回 null（无 event）。
     if (events.length === 0) return null;
@@ -514,12 +613,18 @@ export class StreamJsonAdapter implements ProtocolAdapter {
    * 兼容旧前端分组逻辑（isThinkingContent 把 [SYSTEM 开头折叠），但 content 已带
    * subtype 信息避免重复显示。
    */
-  private parseSystem(msg: Record<string, unknown>): AgentEvent[] {
+  private parseSystem(msg: Record<string, unknown>): AgentEvent[] | null {
     const sessionId = typeof msg.session_id === 'string' ? msg.session_id : '';
     if (sessionId) {
       this.sessionId = sessionId;
     }
     const subtype = typeof msg.subtype === 'string' ? msg.subtype : 'unknown';
+    // ql-20260617-010：status=requesting 是 Claude CLI 等待 API 响应的高频心跳
+    //（每 2-3 秒一次），无信息量且会刷屏淹没真正的 thinking / assistant 内容。
+    // 仍提取 sessionId（上面已 set），但不再产日志 event。
+    if (subtype === 'status' && msg.status === 'requesting') {
+      return null;
+    }
     const parts: string[] = [];
     if (sessionId) parts.push(`session=${sessionId}`);
     if (subtype === 'init') {

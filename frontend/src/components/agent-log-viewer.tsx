@@ -240,11 +240,20 @@ export function AgentLogRow({
             <ToolResultCard body={processedLog.parsedToolResult} />
           </div>
         ) : isThinking ? (
-          /* Thinking/System → collapsed */
+          /* ql-20260617-011：纯 [THINKING] delta 合并后渲染为完整段落，
+             [SYSTEM]/[ASSISTANT]/混合内容另起 System 折叠块，分开显示。 */
           <div className="font-mono [overflow-wrap:anywhere]">
-            <CollapsibleSection title="Thinking / System">
-              {renderLogLines(contentSafe)}
-            </CollapsibleSection>
+            {processedLog.mergedThinkingContent != null ? (
+              <CollapsibleSection title="Thinking">
+                <div className="whitespace-pre-wrap break-words text-zinc-400">
+                  {processedLog.mergedThinkingContent}
+                </div>
+              </CollapsibleSection>
+            ) : (
+              <CollapsibleSection title="System">
+                {renderLogLines(contentSafe)}
+              </CollapsibleSection>
+            )}
           </div>
         ) : (
           /* Default rendering — filter out all protocol lines */

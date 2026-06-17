@@ -64,21 +64,34 @@ describe('parse system', () => {
     expect(a.getSessionId()).toBe('sess_abc123');
   });
 
-  it('ql-20260617-008 system subtype=status → 产 event，content 含 status=<value>', () => {
+  it('ql-20260617-008 system subtype=status 非 requesting → 产 event，content 含 status=<value>', () => {
     const a = new StreamJsonAdapter('claude');
     const line = JSON.stringify({
       type: 'system',
       subtype: 'status',
-      status: 'requesting',
+      status: 'ready',
       session_id: 'sess_abc123',
     });
     const events = a.parse(line) ?? [];
     expect(events).toHaveLength(1);
     expect(events[0]!.metadata?.status).toBe('system');
     expect(events[0]!.metadata?.subtype).toBe('status');
-    expect(events[0]!.content).toContain('status=requesting');
+    expect(events[0]!.content).toContain('status=ready');
     expect(events[0]!.content).toContain('session=sess_abc123');
     expect(a.getSessionId()).toBe('sess_abc123');
+  });
+
+  it('ql-20260617-010 system subtype=status status=requesting → 过滤（高频心跳，仍提取 sessionId）', () => {
+    const a = new StreamJsonAdapter('claude');
+    const line = JSON.stringify({
+      type: 'system',
+      subtype: 'status',
+      status: 'requesting',
+      session_id: 'sess_xyz',
+    });
+    expect(a.parse(line)).toBeNull();
+    // sessionId 仍被提取（parseSystem 副作用）
+    expect(a.getSessionId()).toBe('sess_xyz');
   });
 
   it('ql-20260617-008 system subtype=api_retry → 产 event，content 含 attempt/error', () => {
@@ -509,14 +522,126 @@ describe('ql-006/007 stream_event 实时 usage 累加', () => {
     expect(events[0]!.metadata?.usage?.input_tokens).toBe(0);
   });
 
-  it('content_block_delta 非 text_delta → 跳过（thinking_delta 等）', () => {
+  it('ql-20260617-010 / ql-20260617-012 content_block_delta thinking_delta → 累积到 buffer 不立即 emit（节流）', () => {
     const a = new StreamJsonAdapter('claude');
     a.resetAccumulator();
     const line = JSON.stringify({
       type: 'stream_event',
       event: {
         type: 'content_block_delta',
-        delta: { type: 'thinking_delta', thinking: 'a'.repeat(100) },
+        delta: { type: 'thinking_delta', thinking: 'I should consider...' },
+      },
+    });
+    // 18 字符 < 80 阈值 → 累积，parse 返回 null
+    expect(a.parse(line)).toBeNull();
+  });
+
+  it('ql-20260617-012 thinking_delta 累积达 THINKING_FLUSH_CHARS 字符 → flush emit', () => {
+    const a = new StreamJsonAdapter('claude');
+    a.resetAccumulator();
+
+    // 发 3 段 delta：每段 30 字符，总 90 ≥ 80 阈值
+    const pieces = ['a'.repeat(30), 'b'.repeat(30), 'c'.repeat(30)];
+    let lastEvents: AgentEvent[] | null = null;
+    for (const p of pieces) {
+      lastEvents = a.parse(
+        JSON.stringify({
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'thinking_delta', thinking: p },
+          },
+        }),
+      );
+    }
+    // 最后一段触发 flush（累积 ≥ 80 字符）
+    expect(lastEvents).not.toBeNull();
+    expect(lastEvents).toHaveLength(1);
+    expect(lastEvents![0]!.type).toBe('text');
+    expect(lastEvents![0]!.content).toBe('a'.repeat(30) + 'b'.repeat(30) + 'c'.repeat(30));
+    expect(lastEvents![0]!.metadata?.thinking).toBe(true);
+  });
+
+  it('ql-20260617-012 thinking_delta 累积达 THINKING_FLUSH_MS 时间窗口 → flush emit', () => {
+    vi.useFakeTimers();
+    try {
+      const a = new StreamJsonAdapter('claude');
+      a.resetAccumulator();
+
+      // 第一个 delta 累积（30 字符 < 80 阈值，刚入 buffer）
+      const first = a.parse(
+        JSON.stringify({
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'thinking_delta', thinking: 'thinking chunk 1' },
+          },
+        }),
+      );
+      expect(first).toBeNull();
+
+      // 时间前进 150ms（> 120ms 阈值），第二个 delta 触发时间窗口 flush
+      vi.advanceTimersByTime(150);
+      const second = a.parse(
+        JSON.stringify({
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'thinking_delta', thinking: 'thinking chunk 2' },
+          },
+        }),
+      );
+      expect(second).not.toBeNull();
+      expect(second).toHaveLength(1);
+      expect(second![0]!.content).toBe('thinking chunk 1thinking chunk 2');
+      expect(second![0]!.metadata?.thinking).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ql-20260617-012 thinking_delta 残留 buffer 在 parseAssistant 入口 flush（不丢尾部）', () => {
+    const a = new StreamJsonAdapter('claude');
+    a.resetAccumulator();
+
+    // 1) 单个 thinking_delta 累积到 buffer（< 阈值，不 emit）
+    const deltaLine = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'thinking_delta', thinking: 'streamed thinking content' },
+      },
+    });
+    expect(a.parse(deltaLine)).toBeNull();
+
+    // 2) assistant 消息到达 → 入口 flush 残留 thinking + 处理 content blocks
+    const assistantLine = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'thinking', text: 'streamed thinking content (full)' },
+          { type: 'text', text: 'final answer' },
+        ],
+      },
+    });
+    const events = a.parse(assistantLine) ?? [];
+    // flush 残留 thinking (1) + text block (1) = 2 events
+    // 完整 thinking block 被跳过（turnEmittedThinking=true）
+    expect(events).toHaveLength(2);
+    expect(events[0]!.content).toBe('streamed thinking content');
+    expect(events[0]!.metadata?.thinking).toBe(true);
+    expect(events[1]!.content).toBe('final answer');
+    expect(events[1]!.metadata?.thinking).toBeUndefined();
+  });
+
+  it('content_block_delta 非 text/thinking delta → 跳过（其他 delta 类型）', () => {
+    const a = new StreamJsonAdapter('claude');
+    a.resetAccumulator();
+    const line = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'input_json_delta', partial_json: '{}' },
       },
     });
     expect(a.parse(line)).toBeNull();
