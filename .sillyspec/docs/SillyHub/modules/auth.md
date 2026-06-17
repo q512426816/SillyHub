@@ -110,4 +110,4 @@ backend/app/modules/auth/
 
 | 日期 | 变更 | 影响 |
 |------|------|------|
-| 2026-06-17 | ql-20260617-005-2682 | 7 个 system role name 改中文（key 不变）；同步原 migration SYSTEM_ROLES + service.py fallback + 新增 202606170900 UPDATE migration 兼容已部署库 |
+| | | |

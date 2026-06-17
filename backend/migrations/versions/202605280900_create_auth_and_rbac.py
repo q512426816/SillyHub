@@ -30,14 +30,14 @@ depends_on: str | Sequence[str] | None = None
 SYSTEM_ROLES: list[dict[str, object]] = [
     {
         "key": "platform_admin",
-        "name": "平台管理员",
-        "description": "拥有全部权限，覆盖所有工作区。",
+        "name": "Platform Admin",
+        "description": "Holds every permission across every workspace.",
         "permissions": ["platform:admin"],
     },
     {
         "key": "workspace_owner",
-        "name": "工作区所有者",
-        "description": "对单个工作区拥有完整权限。",
+        "name": "Workspace Owner",
+        "description": "Full control over a single workspace.",
         "permissions": [
             "workspace:read",
             "workspace:write",
@@ -64,8 +64,8 @@ SYSTEM_ROLES: list[dict[str, object]] = [
     },
     {
         "key": "component_lead",
-        "name": "组件负责人",
-        "description": "负责工作区内的一个或多个组件。",
+        "name": "Component Lead",
+        "description": "Owns one or more components inside a workspace.",
         "permissions": [
             "workspace:read",
             "component:read",
@@ -77,8 +77,8 @@ SYSTEM_ROLES: list[dict[str, object]] = [
     },
     {
         "key": "developer",
-        "name": "开发者",
-        "description": "日常参与开发的成员。",
+        "name": "Developer",
+        "description": "Day-to-day contributor.",
         "permissions": [
             "workspace:read",
             "component:read",
@@ -90,8 +90,8 @@ SYSTEM_ROLES: list[dict[str, object]] = [
     },
     {
         "key": "reviewer",
-        "name": "审核人",
-        "description": "可审核代码与变更，但不能写入。",
+        "name": "Reviewer",
+        "description": "Can review code and changes but cannot write.",
         "permissions": [
             "workspace:read",
             "change:read",
@@ -101,8 +101,8 @@ SYSTEM_ROLES: list[dict[str, object]] = [
     },
     {
         "key": "qa",
-        "name": "测试工程师",
-        "description": "质量保障，可发起有限的 Agent 运行。",
+        "name": "QA",
+        "description": "Quality assurance + limited agent runs.",
         "permissions": [
             "workspace:read",
             "change:read",
@@ -112,8 +112,8 @@ SYSTEM_ROLES: list[dict[str, object]] = [
     },
     {
         "key": "viewer",
-        "name": "访客",
-        "description": "对工作区只读访问。",
+        "name": "Viewer",
+        "description": "Read-only across the workspace.",
         "permissions": [
             "workspace:read",
             "component:read",
