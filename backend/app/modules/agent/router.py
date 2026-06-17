@@ -33,11 +33,13 @@ from app.modules.agent.model import AgentRun
 from app.modules.agent.schema import (
     AgentKillResponse,
     AgentRunCreate,
+    AgentRunInputRequest,
+    AgentRunInputResponse,
     AgentRunLogEntry,
     AgentRunResponse,
     ExecutionContextResponse,
 )
-from app.modules.agent.service import AgentService
+from app.modules.agent.service import AgentService, submit_run_input
 from app.modules.auth.model import User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
 from app.modules.daemon.model import DaemonTaskLease
@@ -313,6 +315,32 @@ async def kill_agent_run(
     await svc.kill_run(run_id)
     await session.refresh(run)
     return AgentKillResponse(id=run.id, status=run.status)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/agent/runs/{run_id}/input",
+    response_model=AgentRunInputResponse,
+)
+async def submit_agent_run_input(
+    workspace_id: uuid.UUID,
+    run_id: uuid.UUID,
+    data: AgentRunInputRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+) -> AgentRunInputResponse:
+    """Submit user guidance input to an agent run.
+
+    ql-20260617-005：恢复端点（cf71836 误删）。daemon 模式下 claude.cmd --print
+    无法中途注入 stdin，但持久化 AgentRunLog(channel=user_input) + Redis pub/sub
+    推到 SSE，前端 pending_input 指导框不会 404。
+    """
+    await submit_run_input(
+        session,
+        workspace_id=workspace_id,
+        run_id=run_id,
+        content=data.content,
+    )
+    return AgentRunInputResponse(run_id=run_id, accepted=True)
 
 
 @router.get(

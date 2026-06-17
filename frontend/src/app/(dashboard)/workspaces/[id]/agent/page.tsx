@@ -129,7 +129,10 @@ function isWorkspaceScanRun(run: AgentRun): boolean {
 
 function pendingMetric(run: AgentRun, kind: "cost" | "usage" = "usage"): string {
   if (run.status !== "running") return "—";
-  return kind === "cost" ? "完成后结算" : "等待用量";
+  // ql-20260617-003：Claude CLI stream-json 中间 assistant 事件 usage 永远是 {0, 0}，
+  // 真实 token 数只在最终 result 事件才有。所以执行期间无法显示累加值，明确告知用户
+  // "执行中（完成后统计）"，避免显示假 "0"。
+  return kind === "cost" ? "完成后结算" : "执行中…";
 }
 
 /* ------------------------------------------------------------------ */
@@ -580,10 +583,14 @@ export default function AgentPage({ params }: Props) {
                     ) : pendingMetric(run, "cost")}
                   </MetaItem>
                   <MetaItem label="输入词元">
-                    {run.input_tokens != null ? run.input_tokens.toLocaleString() : pendingMetric(run)}
+                    {run.input_tokens != null && run.input_tokens > 0
+                      ? run.input_tokens.toLocaleString()
+                      : pendingMetric(run)}
                   </MetaItem>
                   <MetaItem label="输出词元">
-                    {run.output_tokens != null ? run.output_tokens.toLocaleString() : pendingMetric(run)}
+                    {run.output_tokens != null && run.output_tokens > 0
+                      ? run.output_tokens.toLocaleString()
+                      : pendingMetric(run)}
                   </MetaItem>
                   <MetaItem label="变更">
                     {run.change_id ? (

@@ -380,13 +380,14 @@ class TestCancelLease:
         assert ar.finished_at is not None
 
     @pytest.mark.asyncio
-    async def test_cancel_claimed_lease_does_not_touch_agent_run(
+    async def test_cancel_claimed_lease_also_marks_agent_run_killed(
         self, db_session: AsyncSession
     ) -> None:
-        """ql-20260616-006：cancel claimed lease 不动 agent_run（靠 daemon 心跳上报）。
+        """ql-20260617-004：cancel claimed lease 立即把 agent_run 标记为 killed。
 
-        daemon 会通过心跳检测 cancelled → syncStatus('killed') + complete_lease，
-        agent_run 的状态由 daemon 收尾，cancel_lease 不要抢跑。
+        之前等 daemon heartbeat 上报，但 daemon 可能通过 complete_lease(cancelled)
+        抢先写 cancelled，导致状态错乱。现在 cancel_lease 立即写 killed，
+        daemon 后续 complete_lease 会被 terminal-priority 守卫拦下（killed > cancelled）。
         """
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)
@@ -402,8 +403,9 @@ class TestCancelLease:
         await svc.cancel_lease(agent_run_id)
 
         await db_session.refresh(ar)
-        assert ar.status == "running"  # 不动
-        assert ar.finished_at is None
+        # ql-20260617-004：立即 killed，给用户即时反馈
+        assert ar.status == "killed"
+        assert ar.finished_at is not None
         await db_session.refresh(lease)
         assert lease.status == "cancelled"
 

@@ -15,6 +15,7 @@ from sqlmodel import col
 
 from app.core.errors import (
     AgentRunNotFound,
+    AgentRunNotRunning,
     AppError,
     TaskNotFound,
     WorktreeLeaseNotFound,
@@ -378,6 +379,99 @@ class AgentService:
 
         log.info("run_kill_requested", run_id=str(run_id))
         return run
+
+    # ------------------------------------------------------------------
+    # User input submission (ql-20260617-005)
+    # ------------------------------------------------------------------
+
+    async def submit_run_input(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        run_id: uuid.UUID,
+        content: str,
+    ) -> AgentRunLog:
+        """Record user guidance input for an AgentRun and push via SSE.
+
+        Validates the run belongs to the workspace and is in an active
+        status, persists a ``AgentRunLog(channel="user_input")``, then
+        publishes the event to the ``agent_run:{run_id}`` Redis Pub/Sub
+        channel so connected SSE clients receive it in real-time.
+
+        Args:
+            workspace_id: Workspace that must be associated with the run.
+            run_id: The AgentRun to attach the input to.
+            content: User guidance text (will be redacted before storage).
+
+        Raises:
+            AgentRunError: Content is blank or exceeds length limit.
+            AgentRunNotFound: Run does not exist or is not linked to workspace.
+            AgentRunNotRunning: Run is in a terminal status.
+        """
+        stripped = content.strip()
+        if not stripped:
+            raise AgentRunError(
+                "Input content must not be empty.",
+                details={"run_id": str(run_id)},
+            )
+        if len(stripped) > MAX_USER_INPUT_CHARS:
+            raise AgentRunError(
+                f"Input content exceeds {MAX_USER_INPUT_CHARS} characters.",
+                details={"run_id": str(run_id), "length": len(stripped)},
+            )
+
+        arw_stmt = select(AgentRunWorkspace).where(
+            col(AgentRunWorkspace.agent_run_id) == run_id,
+            col(AgentRunWorkspace.workspace_id) == workspace_id,
+        )
+        arw = (await self._session.execute(arw_stmt)).scalars().first()
+        if arw is None:
+            raise AgentRunNotFound(
+                f"Run '{run_id}' not found.",
+                details={"run_id": str(run_id)},
+            )
+
+        run = await self._session.get(AgentRun, run_id)
+        if run is None:
+            raise AgentRunNotFound(
+                f"Run '{run_id}' not found.",
+                details={"run_id": str(run_id)},
+            )
+        if run.status not in ("pending", "running"):
+            raise AgentRunNotRunning(
+                f"Run '{run_id}' is not running (status={run.status}).",
+                details={"run_id": str(run_id), "status": run.status},
+            )
+
+        redacted = redact_agent_output(stripped)
+        log_entry = AgentRunLog(
+            id=uuid.uuid4(),
+            run_id=run.id,
+            channel=USER_INPUT_CHANNEL,
+            content_redacted=redacted,
+            timestamp=datetime.now(UTC),
+        )
+        self._session.add(log_entry)
+        await self._session.commit()
+        await self._session.refresh(log_entry)
+
+        try:
+            redis = get_redis()
+            channel_name = f"agent_run:{run_id}"
+            payload = {
+                "log_id": str(log_entry.id),
+                "channel": USER_INPUT_CHANNEL,
+                "content": redacted,
+                "timestamp": log_entry.timestamp.isoformat().replace("+00:00", "Z"),
+            }
+            await redis.publish(channel_name, json.dumps(payload))
+        except Exception:
+            log.warning(
+                "submit_run_input_redis_publish_failed",
+                run_id=str(run_id),
+            )
+
+        return log_entry
 
     # ------------------------------------------------------------------
     # Query helpers
@@ -992,3 +1086,47 @@ def redact_agent_output(text: str) -> str:
     from app.modules.git_gateway.service import redact_output
 
     return redact_output(text)
+
+
+# ql-20260617-005：恢复 user_input 通道，给前端 pending_input 指导框持久化路径。
+# daemon 模式下 claude.cmd 用 --print（一次性 stdin），无法中途注入指导文本，
+# 但至少 (1) 接受前端 POST 不报 404，(2) 把指导写到 AgentRunLog(channel=user_input)
+# 让 SSE 推到日志面板，(3) 留作后续 daemon stream-json 输入模式的回放源。
+USER_INPUT_CHANNEL = "user_input"
+MAX_USER_INPUT_CHARS = 4000
+
+
+async def submit_run_input(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    run_id: uuid.UUID,
+    content: str,
+) -> AgentRunLog:
+    """Record user guidance input for an AgentRun and push via SSE.
+
+    Module-level wrapper that delegates to ``AgentService.submit_run_input``
+    so routers can call it as a plain function (matches the typical FastAPI
+    dependency style where the session is the dep, not the service).
+
+    Validates the run belongs to the workspace and is in an active
+    status, persists a ``AgentRunLog(channel="user_input")``, then
+    publishes the event to the ``agent_run:{run_id}`` Redis Pub/Sub
+    channel so connected SSE clients receive it in real-time.
+
+    Args:
+        session: DB session.
+        workspace_id: Workspace that must be associated with the run.
+        run_id: The AgentRun to attach the input to.
+        content: User guidance text (will be redacted before storage).
+
+    Raises:
+        AgentRunError: Content is blank or exceeds length limit.
+        AgentRunNotFound: Run does not exist or is not linked to workspace.
+        AgentRunNotRunning: Run is in a terminal status.
+    """
+    return await AgentService(session).submit_run_input(
+        workspace_id=workspace_id,
+        run_id=run_id,
+        content=content,
+    )

@@ -370,6 +370,49 @@ class TestSubmitMessagesSync:
         assert agent_run.session_id == "sess-abc-123"
 
     @pytest.mark.asyncio
+    async def test_submit_messages_ignores_zero_usage(self, db_session: AsyncSession) -> None:
+        """ql-20260617-003：Claude CLI 中间 assistant 事件 usage 永远是 {0, 0}（真实
+        值只在最终 result 事件）。daemon 透传 0/0 时，backend 不应把它写回 AgentRun，
+        否则前端会显示 "0" 而不是 "执行中..."，让用户误以为 token 是真实值。
+        """
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "zero-tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        await svc.submit_messages(
+            lease.id,
+            "zero-tok",
+            agent_run.id,
+            [
+                {
+                    "channel": "stdout",
+                    "content": "[ASSISTANT] partial",
+                    "session_id": "sess-xyz",
+                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                }
+            ],
+        )
+
+        await db_session.refresh(agent_run)
+        # 0/0 被忽略，input_tokens / output_tokens 保持 None；session_id 仍写回。
+        assert agent_run.input_tokens is None
+        assert agent_run.output_tokens is None
+        assert agent_run.session_id == "sess-xyz"
+
+    @pytest.mark.asyncio
     async def test_submit_messages_usage_takes_max_across_batches(
         self, db_session: AsyncSession
     ) -> None:

@@ -115,7 +115,8 @@ async def test_kill_run_calls_cancel_lease(db_session, monkeypatch):
 
     assert calls == [run.id]
     assert result.id == run.id
-    # AC-09: kill_run must NOT write killed; status stays as-is until daemon reports.
+    # kill_run 本身不直接写 killed（status 变更由 cancel_lease 负责）；
+    # cancel_lease 被 mock 掉，所以这里 status 仍是 running。
     assert result.status == "running"
 
 
@@ -123,7 +124,9 @@ async def test_kill_run_calls_cancel_lease(db_session, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_kill_run_does_not_write_killed_directly(db_session):
+async def test_kill_run_marks_killed_immediately(db_session):
+    """ql-20260617-004：kill_run 立即把 AgentRun 置为 killed + finished_at，
+    给用户即时反馈（不再依赖 daemon heartbeat 轮询）。lease 同步 cancelled。"""
     user_id = await _create_user(db_session)
     rt = await _create_runtime(db_session, user_id)
     run = await _create_agent_run(db_session, status="running")
@@ -132,7 +135,8 @@ async def test_kill_run_does_not_write_killed_directly(db_session):
     await AgentService(db_session).kill_run(run.id)
 
     refreshed = await db_session.get(AgentRun, run.id)
-    assert refreshed.status == "running"  # NOT killed
+    assert refreshed.status == "killed"  # 立即 killed（用户视觉反馈）
+    assert refreshed.finished_at is not None
     # The lease IS cancelled (cancel_lease actually ran).
     refreshed_lease = await db_session.get(DaemonTaskLease, lease.id)
     assert refreshed_lease.status == "cancelled"

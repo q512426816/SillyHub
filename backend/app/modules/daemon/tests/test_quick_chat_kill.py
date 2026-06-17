@@ -53,8 +53,12 @@ async def test_kill_run_with_pending_lease_marks_killed(db_session: AsyncSession
 
 
 @pytest.mark.asyncio
-async def test_kill_run_with_claimed_lease_defers(db_session: AsyncSession) -> None:
-    """claimed lease + running agent_run → kill_run → status 不动（等 daemon 上报）。"""
+async def test_kill_run_with_claimed_lease_marks_killed(db_session: AsyncSession) -> None:
+    """ql-20260617-004：claimed lease + running agent_run → kill_run → 立即 killed。
+
+    旧逻辑：status 不动等 daemon 上报。新逻辑：用户取消立即看到 killed，
+    daemon complete_lease(cancelled) 会被 priority 守卫拦下（killed > cancelled）。
+    """
     rt = await _seed_runtime(db_session)
     run_id = uuid.uuid4()
     db_session.add(
@@ -70,8 +74,8 @@ async def test_kill_run_with_claimed_lease_defers(db_session: AsyncSession) -> N
 
     ar = await db_session.get(AgentRun, run_id)
     assert ar is not None
-    assert ar.status == "running"  # daemon-side 心跳上报后才会变 killed
-    assert ar.finished_at is None
+    assert ar.status == "killed"  # 立即 killed（用户即时反馈）
+    assert ar.finished_at is not None
 
 
 @pytest.mark.asyncio

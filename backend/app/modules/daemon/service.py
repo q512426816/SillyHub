@@ -602,6 +602,10 @@ class DaemonService:
         # message（task-runner.ts:1142-1155），但首条 message 总有 content（[ASSISTANT]/
         # [TOOL_USE]/[TOOL_RESULT] 等），所以「仅在 content 为空时提取 usage」的旧分支
         # 永远走不到。现在对所有 message 都提取 usage/session_id（取 max 防御乱序）。
+        # ql-20260617-003：Claude CLI stream-json 的中间 assistant 事件 usage 永远是
+        # {input_tokens:0, output_tokens:0}（只在最终 result 事件才有真实值）。
+        # 所以 daemon 透传的 usage 经常是 0/0 —— 我们把它当成"无数据"，不覆盖
+        # AgentRun 已有的非零值（complete_lease 路径会用 result 事件的真实值覆盖）。
         latest_input_tokens: int | None = None
         latest_output_tokens: int | None = None
         latest_session_id: str | None = None
@@ -618,9 +622,9 @@ class DaemonService:
             if isinstance(usage, dict):
                 in_tok = usage.get("input_tokens")
                 out_tok = usage.get("output_tokens")
-                if isinstance(in_tok, (int, float)):
+                if isinstance(in_tok, (int, float)) and int(in_tok) > 0:
                     latest_input_tokens = max(latest_input_tokens or 0, int(in_tok))
-                if isinstance(out_tok, (int, float)):
+                if isinstance(out_tok, (int, float)) and int(out_tok) > 0:
                     latest_output_tokens = max(latest_output_tokens or 0, int(out_tok))
             msg_session_id = msg.get("session_id")
             if isinstance(msg_session_id, str) and msg_session_id:

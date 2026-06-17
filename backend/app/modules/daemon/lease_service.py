@@ -281,12 +281,15 @@ class DaemonLeaseService:
     async def cancel_lease(self, agent_run_id: uuid.UUID) -> None:
         """取消租赁（用户主动取消任务）。
 
+        ql-20260617-004：用户取消时立即把 AgentRun 置为 killed（写 finished_at），
+        给用户即时视觉反馈，不再依赖 daemon heartbeat 轮询。daemon 后续通过
+        complete_lease(status="cancelled") 收尾时，terminal-priority 守卫保证
+        killed 不会被 cancelled 覆盖（priority: killed > cancelled > ...）。
+
         1. 设置 lease status='cancelled'
-        2. 若 lease 为 pending（daemon 从未 claim）：daemon 心跳检测不会触发，
-           立即把 agent_run.status 置为 killed（带 finished_at），否则会永久 pending
-        3. 若 lease 为 claimed（daemon 正在跑）：靠 daemon 心跳轮询感知 cancelled
-           → 上报 killed + SIGTERM 子进程；agent_run.status 由 daemon 通过
-           complete_lease / syncStatus 收尾，此处不动
+        2. agent_run 若非终态 → 立即置 killed + finished_at（用户视角立即生效）
+        3. 若 lease 为 claimed（daemon 正在跑）：daemon 心跳感知到 cancelled
+           → SIGTERM 子进程；syncStatus 上报也会被 priority 守卫拦下
 
         Args:
             agent_run_id: 要取消的 agent run ID。
@@ -311,7 +314,6 @@ class DaemonLeaseService:
                 agent_run_id=str(agent_run_id),
             )
             # 即使没有 active lease，agent_run 若仍 pending/running 也要收尾
-            # （可能是 lease 已过期或被清理，但 agent_run 还卡着）
             await self._mark_agent_run_killed_if_pending(agent_run_id, now)
             return
 
@@ -329,10 +331,10 @@ class DaemonLeaseService:
             prior_status=prior_status,
         )
 
-        # ql-20260616-006：pending lease（daemon 从未 claim）→ daemon 不会触发
-        # 心跳检测，必须在此直接收尾 agent_run，否则永久 pending
-        if prior_status == "pending":
-            await self._mark_agent_run_killed_if_pending(agent_run_id, now)
+        # ql-20260617-004：无论 pending 还是 claimed，立即把 AgentRun 标记为
+        # killed。pending 场景 daemon 不会触发心跳，必须在此收尾；claimed 场景
+        # 立即标记给用户即时反馈，daemon complete_lease(cancelled) 会被 priority 守卫拦下。
+        await self._mark_agent_run_killed_if_pending(agent_run_id, now)
 
         # WS 取消信号桩 — Wave 2 实现真正的 WS Hub 后替换
         self._ws_cancel_stub(lease)

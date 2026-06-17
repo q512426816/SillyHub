@@ -1,3 +1,16 @@
+## ql-20260617-005-c1d2 | 2026-06-17 01:35:00 | 恢复 /input 端点 + token 0/0 防御 + cancel 立即 killed + 数据库脏 0 清理
+
+状态：已完成
+文件：backend/app/modules/agent/router.py、backend/app/modules/agent/service.py、backend/app/modules/agent/tests/test_run_input.py、backend/app/modules/agent/tests/test_kill_and_state_mapping.py、backend/app/modules/daemon/lease_service.py、backend/app/modules/daemon/service.py、backend/app/modules/daemon/tests/test_quick_chat_kill.py、backend/app/modules/daemon/tests/test_wave5_integration.py、frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx
+依据：用户反馈「输入词元 0 输出词元 0 这两个还是不行，现在能显示 0 了，但是不对，应该会变化的才对」+ Stop hook 反馈原始 goal 要求系统性修复 daemon-SERVER parity 缺口（含 /input 端点 cf71836 误删）。直接捕获 claude.cmd stream-json 实测确认：中间 assistant 事件 `message.usage = {input_tokens:0, output_tokens:0}`（CLI 协议限制，只在最终 result 事件才有真实值）。
+结果：
+  1. **submit_run_input 端点恢复**：cf71836 误删的 `POST /workspaces/{ws}/agent/runs/{run}/input` 端点 + service 函数全恢复（service.py 加 AgentRunNotRunning 导入修复 NameError）。test_run_input.py 7 个测试覆盖 happy path / 404 / 422 空 / 422 超长 / 409 终态 / 401 无 auth / Redis 故障不阻塞。
+  2. **token 0/0 防御**：service.py submit_messages 把 daemon 透传的 0/0 usage 当作"无数据"不覆盖 AgentRun 已有非零值（避免 CLI 协议限制导致的伪 0 写回）。
+  3. **cancel 立即 killed**：lease_service.py cancel_lease 无论 pending/claimed 都立即把 AgentRun 标 killed + finished_at（用户即时反馈）；daemon complete_lease(cancelled) 会被 priority 守卫拦下（killed > cancelled）。test_kill_and_state_mapping.py + test_quick_chat_kill.py 两个旧 "defers" 测试改为 "marks_killed_immediately"。
+  4. **前端文案**：page.tsx pendingMetric 从 "等待用量" 改 "执行中…"（明确告知 CLI 协议限制，不显示伪 0）；input_tokens/output_tokens 显示加 `> 0` 守卫，0/null 一律走 pendingMetric。
+  5. **数据库脏 0 清理**：UPDATE agent_runs SET input_tokens=NULL,output_tokens=NULL WHERE input_tokens=0 AND output_tokens=0（3 行历史 0/0 数据，现统一显示 "—"）。
+验证：backend pytest 223/223 通过（agent + daemon 全量）。
+
 ## ql-20260617-001-7a3e | 2026-06-17 00:45:00 | 修复 token 用量不实时累计 + Agent 页面 UI 优化
 
 状态：已完成
