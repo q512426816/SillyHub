@@ -307,3 +307,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：backend/app/modules/admin/schema.py, backend/app/modules/admin/roles_service.py, backend/app/modules/admin/router.py, backend/tests/modules/admin/test_roles_router.py, backend/conftest.py, frontend/src/lib/admin.ts, frontend/src/app/(dashboard)/admin/roles/page.tsx
 结果：1) schema.py 加 RoleUserRead（binding_type=Literal["platform","workspace"] + workspace_id/workspace_name 可选）+ RoleUserListResponse；2) roles_service.py 加 list_users() 方法，user_roles 和 user_workspace_roles 两表分别 JOIN User，绑两种类型则各返回一条；3) router.py 加 GET /api/admin/roles/{role_id}/users（require_permission_any(ROLE_READ)）；4) test 加 3 个用例（平台+工作区合并 / 空角色 / 角色不存在 404）；5) admin.ts 加 RoleUserRead/RoleUserListResponse 类型 + listRoleUsers()；6) roles/page.tsx 把「X 用户」改成可点击按钮 + RoleUsersDrawer 显示邮箱/显示名/绑定类型/工作区/状态表格；7) 顺带修复 conftest.py 漏 import app.modules.admin.model 导致 user_roles 表在 SQLite 测试库不存在（pre-existing test_create_role_success isolation 失败的根因）。ruff/mypy/pytest 13/13/pnpm test 75/75 全绿。
+
+## ql-20260617-002-21d4 | 2026-06-17 13:55:00 | 用户管理抽屉组织/角色多选显示"暂无选项"
+状态：已完成
+根因：users/page.tsx 用 listRoles({ size: 200 }) 加载角色，但后端 GET /api/admin/roles 的 size 上限是 le=100，200 直接被 422 拒；Promise.all 是 fail-fast 的，roles 失败连带把 organizations 一起拖死；catch 块又写成了 silent "// ignore — drawer will show empty selects"，错误被吞所以表象就是两个多选都空白
+文件：frontend/src/app/(dashboard)/admin/users/page.tsx
+结果：1) size=200 → size=100 匹配后端 le=100；2) Promise.all → Promise.allSettled 单个失败不连坐，organizations 能正常加载；3) catch 改成 console.error 把错误打到控制台，避免再次 silent。lint/typecheck/test(75/75) 全绿

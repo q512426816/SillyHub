@@ -96,15 +96,19 @@ export default function AdminUsersPage() {
 
   useEffect(() => {
     void (async () => {
-      try {
-        const [orgs, rolesResp] = await Promise.all([
-          listOrganizations(),
-          listRoles({ size: 200 }),
-        ]);
-        setOrganizations(orgs);
-        setRoles(rolesResp.items);
-      } catch {
-        // ignore — drawer will show empty selects
+      const [orgsResult, rolesResult] = await Promise.allSettled([
+        listOrganizations(),
+        listRoles({ size: 100 }),
+      ]);
+      if (orgsResult.status === "fulfilled") {
+        setOrganizations(orgsResult.value);
+      } else {
+        console.error("[admin/users] load organizations failed", orgsResult.reason);
+      }
+      if (rolesResult.status === "fulfilled") {
+        setRoles(rolesResult.value.items);
+      } else {
+        console.error("[admin/users] load roles failed", rolesResult.reason);
       }
     })();
   }, []);
