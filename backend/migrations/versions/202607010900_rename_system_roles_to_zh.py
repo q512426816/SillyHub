@@ -1,7 +1,7 @@
 """rename system roles to Chinese
 
 Revision ID: 202607010900
-Revises: 202606300900
+Revises: 202606161200
 Create Date: 2026-07-01 09:00:00.000000
 """
 
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "202607010900"
-down_revision: str | None = "202606300900"
+down_revision: str | None = "202606161200"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
