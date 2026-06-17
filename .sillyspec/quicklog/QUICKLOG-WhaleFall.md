@@ -331,4 +331,10 @@ created_at: 2026-06-03T08:42:04
 背景：用户要求"角色的名称和组织的名称都改为中文的"。组织没有系统种子数据，全是用户创建，无需迁移；系统角色在 migration `202605280900_create_auth_and_rbac.py` SYSTEM_ROLES + `service.py:seed_platform_admin_role` fallback 中以英文硬编码，需要中文化。
 坑点：首次尝试新建 migration 用 revision ID `202606170900`，撞上已有的 `202606170900_add_change_workflow_fields.py`，alembic 报 "Revision 202606170900 is present more than once" + "Cycle is detected"，backend 容器无限 Restarting。`git revert HEAD --no-edit` 回滚后，改用 revision ID `202607010900` 重做。
 文件：backend/migrations/versions/202605280900_create_auth_and_rbac.py, backend/app/modules/auth/service.py, backend/migrations/versions/202607010900_rename_system_roles_to_zh.py (新增)
+
+## ql-20260617-006-7c92 | 2026-06-17 15:47:09 | 用户管理抽屉不显示用户已有角色/组织
+状态：已完成
+根因：`router.py:_user_with_relations` 只查 `UserRole`（平台级 `user_roles` 表），但 `bootstrap_admin_and_seed_rbac` 给 admin 用户写的是 `UserWorkspaceRole`（工作区级 `user_workspace_roles` 表）。角色管理 `RoleService.list_users` 双表查所以看得到 admin，用户管理只查 platform 表所以看不到。两端视图数据不一致。
+文件：backend/app/modules/admin/router.py（`_user_with_relations` 合并 UserRole + UserWorkspaceRole 并按 role_id 去重；import 加 `UserWorkspaceRole`）、backend/tests/modules/admin/test_users_router.py（新增 2 个回归测试：detail + list 都验证 workspace-scoped 角色显示）
+结果：1) `_user_with_relations` 改为分别 select Role from `user_roles` 和 `user_workspace_roles`，merged dict 按 role_id 去重，避免同一角色在多 workspace 下重复展示；2) 加测试 `test_user_detail_includes_workspace_scoped_roles` 和 `test_user_list_includes_workspace_scoped_roles`，构造 Workspace + UserWorkspaceRole binding，断言 GET /admin/users/{id} 和 GET /admin/users 返回的 roles 含 custom_role；3) ruff format/check 全绿，本地无 sqlalchemy 跑不了 pytest，等容器重建后在容器内验证。前端 page.tsx 只渲染 r.name Tag 不需改。
 结果：1) SYSTEM_ROLES 七条 name/description 改中文（平台管理员/工作区所有者/组件负责人/开发者/审核人/测试工程师/访客）；2) `seed_platform_admin_role` fallback Role 改中文 name/description；3) 新增 migration `202607010900`（down_revision=202606300900），UPDATE roles SET name/description WHERE key=? AND is_system=TRUE，downgrade 还原英文；4) 修 ruff N806（downgrade 内局部变量改小写）。ruff 通过。DB 当前在 202606161200（之前 cycle 卡住没追上），重建后 alembic 会一路推到 202607010900 并把存量 roles UPDATE 成中文。

@@ -46,7 +46,7 @@ from app.modules.admin.schema import (
     UserWorkspaceRead,
 )
 from app.modules.admin.users_service import UserService
-from app.modules.auth.model import Role, User
+from app.modules.auth.model import Role, User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -269,7 +269,14 @@ async def delete_organization(
 
 
 async def _user_with_relations(session: AsyncSession, user: User) -> UserRead:
-    """Attach org/role briefs to a User row for the UserRead payload."""
+    """Attach org/role briefs to a User row for the UserRead payload.
+
+    Roles merge platform-level bindings (``user_roles``) with workspace-scoped
+    bindings (``user_workspace_roles``), deduped by ``role_id`` — a user bound
+    to ``workspace_owner`` in three workspaces still sees the role once in the
+    admin list. Matches the dual-table read in
+    :func:`app.modules.admin.roles_service.RoleService.list_users`.
+    """
     org_rows = (
         (
             await session.execute(
@@ -284,7 +291,7 @@ async def _user_with_relations(session: AsyncSession, user: User) -> UserRead:
         .scalars()
         .all()
     )
-    role_rows = (
+    platform_role_rows = (
         (
             await session.execute(
                 select(Role)
@@ -295,6 +302,23 @@ async def _user_with_relations(session: AsyncSession, user: User) -> UserRead:
         .scalars()
         .all()
     )
+    workspace_role_rows = (
+        (
+            await session.execute(
+                select(Role)
+                .join(UserWorkspaceRole, UserWorkspaceRole.__table__.c.role_id == Role.id)
+                .where(UserWorkspaceRole.__table__.c.user_id == user.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    merged: dict[uuid.UUID, Role] = {}
+    for r in platform_role_rows:
+        merged[r.id] = r
+    for r in workspace_role_rows:
+        merged.setdefault(r.id, r)
 
     return UserRead(
         id=user.id,
@@ -306,7 +330,7 @@ async def _user_with_relations(session: AsyncSession, user: User) -> UserRead:
         last_login_at=user.last_login_at,
         created_at=user.created_at,
         organizations=[OrganizationBrief(id=o.id, name=o.name, code=o.code) for o in org_rows],
-        roles=[RoleBrief(id=r.id, key=r.key, name=r.name) for r in role_rows],
+        roles=[RoleBrief(id=r.id, key=r.key, name=r.name) for r in merged.values()],
     )
 
 

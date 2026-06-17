@@ -350,3 +350,66 @@ async def test_get_user_detail(client: AsyncClient, auth_headers, target_user):
     assert data["email"] == target_user.email
     assert "organizations" in data
     assert "roles" in data
+
+
+@pytest.mark.asyncio
+async def test_user_detail_includes_workspace_scoped_roles(
+    client: AsyncClient, auth_headers, db_session, target_user, sample_role
+):
+    """Workspace-scoped bindings (user_workspace_roles) also surface in UserRead.roles.
+
+    Regression for ql-20260617-006: bootstrap seeds admin via
+    UserWorkspaceRole, so /admin/users used to show empty roles for admin
+    while /admin/roles/{id}/users correctly listed admin. The two views must
+    agree.
+    """
+    from app.modules.auth.model import UserWorkspaceRole
+    from app.modules.workspace.model import Workspace
+
+    ws = Workspace(name="WS", slug=f"ws-{uuid.uuid4().hex[:6]}")
+    db_session.add(ws)
+    await db_session.flush()
+    db_session.add(
+        UserWorkspaceRole(
+            user_id=target_user.id,
+            workspace_id=ws.id,
+            role_id=sample_role.id,
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.get(f"/api/admin/users/{target_user.id}", headers=auth_headers)
+    assert resp.status_code == 200
+    role_keys = {r["key"] for r in resp.json()["roles"]}
+    assert "custom_role" in role_keys
+
+
+@pytest.mark.asyncio
+async def test_user_list_includes_workspace_scoped_roles(
+    client: AsyncClient, auth_headers, db_session, target_user, sample_role
+):
+    """GET /admin/users (list) also shows workspace-scoped roles per user."""
+    from app.modules.auth.model import UserWorkspaceRole
+    from app.modules.workspace.model import Workspace
+
+    ws = Workspace(name="WS2", slug=f"ws2-{uuid.uuid4().hex[:6]}")
+    db_session.add(ws)
+    await db_session.flush()
+    db_session.add(
+        UserWorkspaceRole(
+            user_id=target_user.id,
+            workspace_id=ws.id,
+            role_id=sample_role.id,
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.get("/api/admin/users", headers=auth_headers)
+    assert resp.status_code == 200
+    target_item = next(
+        (it for it in resp.json()["items"] if it["email"] == target_user.email),
+        None,
+    )
+    assert target_item is not None
+    role_keys = {r["key"] for r in target_item["roles"]}
+    assert "custom_role" in role_keys
