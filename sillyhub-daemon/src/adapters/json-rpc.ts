@@ -257,16 +257,23 @@ export class JsonRpcAdapter implements ProtocolAdapter {
       ];
     }
 
-    // success response：提取 thread.id 作为 session_id
+    // success response：提取 thread.id 作为 session_id（仅 turn/start reply 有用）。
+    // ql-20260618-003：之前把 thread/start response 当作 'complete' 事件，
+    // 会让前端 AgentLogViewer 显示 [complete] 而 task 实际未完成，且触发
+    // stats 收集逻辑（无 stats，无害但语义错）。改为产出 'text' + status:'system'
+    // 携带 session_id，让 TaskRunner 提取 session_id，但不冒充 task 完成。
+    // turn 真正完成由 turn/completed notification 走 parseTurnCompleted。
     const result = (msg.result ?? {}) as Record<string, unknown>;
     const events: AgentEvent[] = [];
 
     const thread = result.thread as Record<string, unknown> | undefined;
     if (thread && typeof thread === 'object' && 'id' in thread) {
       events.push({
-        type: 'complete',
+        type: 'text',
         content: '',
         metadata: {
+          status: 'system',
+          subtype: 'thread_started',
           session_id: String(thread.id),
           source: 'thread_response',
           rpc_id: id,
@@ -280,9 +287,14 @@ export class JsonRpcAdapter implements ProtocolAdapter {
       | undefined;
     if (usage && typeof usage === 'object') {
       events.push({
-        type: 'complete',
+        type: 'text',
         content: '',
-        metadata: { usage, source: 'usage_response', rpc_id: id },
+        metadata: {
+          status: 'usage_update',
+          usage,
+          source: 'usage_response',
+          rpc_id: id,
+        },
       });
     }
 

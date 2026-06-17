@@ -185,14 +185,23 @@ describe('parse server request - pending id 记录与消费', () => {
 // ===========================================================================
 
 describe('parse response', () => {
-  it('thread/start response → complete event with session_id', () => {
+  it('thread/start response → text+system event with session_id（ql-20260618-003：不再产 complete）', () => {
     const a = new JsonRpcAdapter('codex');
     const events = a.parse(P('codex', 'response-thread-start.json'));
     expect(events).not.toBeNull();
+    // ql-20260618-003：thread/start 只是会话创建，不是任务完成。
+    // 改为 text+status=system+subtype=thread_started 承载 session_id，
+    // 避免被 TaskRunner 当成任务终结（complete 事件会触发 stats 收集）。
+    const sys = events!.find(
+      (e) => e.type === 'text' && e.metadata?.status === 'system',
+    );
+    expect(sys).toBeDefined();
+    expect(sys!.metadata?.session_id).toBe('t_abc');
+    expect(sys!.metadata?.source).toBe('thread_response');
+    expect(sys!.metadata?.subtype).toBe('thread_started');
+    // 不应再有 complete 事件（turn 完成由 turn/completed 走 parseTurnCompleted）
     const complete = events!.find((e) => e.type === 'complete');
-    expect(complete).toBeDefined();
-    expect(complete!.metadata?.session_id).toBe('t_abc'); // 源 test L149
-    expect(complete!.metadata?.source).toBe('thread_response');
+    expect(complete).toBeUndefined();
   });
 
   it('initialize response（仅 capabilities，无 thread.id）→ null', () => {

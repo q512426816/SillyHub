@@ -1,3 +1,19 @@
+## ql-20260618-003-a1b2 | 2026-06-18 01:35:00 | 修复 codex quick-chat "无输出"：_looksLikeResult 误命中 thread/start response 提前关 stdin
+
+状态：已完成
+文件：sillyhub-daemon/src/task-runner.ts、sillyhub-daemon/src/adapters/json-rpc.ts
+依据：用户报「快速对话 codex 还是提示无输出」。daemon 日志显示 handshake 三条全部写入成功，stdout 收到 initialize response（id=1）+ remoteControl/status/changed 通知后 codex 立即 exit=0；thread/start response（id=2）从未到达。standalone probe（同 cwd/env/300ms 间隔）则可正常完成 turn，拿到 "hi"。
+根因（3 个互相叠加的 bug）：
+  1. **task-runner.ts `_looksLikeResult` 太宽**：原 `line.includes('"result"')` 兜底分支会命中 codex 的 `{"id":2,"result":{"thread":{...}}}`（thread/start response 也含 "result" key），被误判为 claude 的终结 result 事件 → 提前 `stdin.end()`。
+  2. **codex 是被动 server，单 turn 完成后不会自动 exit**：daemon 唯一的 stdin 关闭路径是 _looksLikeResult，结果在中途错误触发，导致 codex 收到 stdin 关闭也跟着 exit=0；turn/start（id=3）从未写出（write after end 异常）。
+  3. **json-rpc.ts `parseResponse` 把 thread/start response 标为 `complete` 事件**：thread/start response 只是会话创建，不是任务完成；产出 'complete' 让前端误显示 [complete]，且触发 stats 收集逻辑（无 stats 但语义错）。
+结果：
+  1. `_looksLikeResult` 改正则 `/"type"\s*:\s*"result"/`，只匹配 claude stream-json 的 result 事件（容忍冒号两侧空格）。
+  2. 新增 `_looksLikeTurnCompleted` 检测 codex 的 `"method":"turn/completed"` notification；`_handleLine` 命中后 `stdin.end()`，作为 json-rpc 协议的单次 lease 收尾点（与 claude result 等价）。
+  3. `parseResponse` 把 thread/start response 改为 `type:'text' + status:'system' + subtype:'thread_started'`，仅承载 session_id；usage response 改 `status:'usage_update'`。task 真正完成由 `turn/completed` notification 走 `parseTurnCompleted` 产 `complete` 事件。
+  4. 清掉临时 debug 日志（spawn_debug / child_error / child_exit_raw / child_close_raw / hs_start / hs_write_cb / turn_check / turn_start_writing），仅保留 300ms handshake 间隔和有意义的 warn。
+验证：sillyhub-daemon tsc build OK；codex quick-chat 端到端跑通（GET /api/daemon-chat/{id} 返回 status=completed output="Hi"，3 条日志 [SYSTEM:thread_started]/[ASSISTANT] Hi/[RESULT:success]）；claude quick-chat 回归通过（output="OK"，新正则仍命中 `"type":"result"`）。
+
 ## ql-20260618-001-7c3a | 2026-06-18 00:30:00 | Agent 控制台浅色化 + Thinking 默认展开 + Quick chat 接入日志与新建会话 + 清理 codex 调试日志
 
 状态：已完成

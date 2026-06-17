@@ -755,9 +755,10 @@ export class TaskRunner {
               setImmediate(finish);
             }
           });
-          // ql-20260617-009：每条 handshake 之间加 100ms，让 codex 处理完上一条再发下一条。
-          // 实测若三条 initialize/initialized/thread.start 连续 write，codex 偶发只处理前两条。
-          await new Promise<void>((r) => setTimeout(r, 100));
+          // ql-20260618-002：每条 handshake 之间加 300ms，让 codex.cmd 包装层稳定启动 + codex
+          // 主进程处理完上一条再发下一条。实测 100ms 间隔会导致 thread/start 后 codex.cmd
+          // exit 0（cmd.exe 包装层把 stdin 数据弄丢），300ms 是 probe 测试通过的稳定值。
+          await new Promise<void>((r) => setTimeout(r, 300));
         }
       } catch (e) {
         console.warn('task_runner: handshake_write_exception', e);
@@ -984,6 +985,20 @@ export class TaskRunner {
       const sid = _extractSessionId(line);
       if (sid) env.onSessionId(sid);
       // result 行收到 → 安全关闭 stdin（避免子进程继续等待输入，R-03 关键点）
+      try {
+        if (child.stdin && !child.stdin.destroyed) {
+          child.stdin.end();
+        }
+      } catch {
+        /* 已关闭 */
+      }
+    }
+
+    // ql-20260618-003：codex/json-rpc 的 turn/completed → 安全关闭 stdin。
+    // codex 是被动 server，单 turn 完成后不主动退出；daemon 检测到 turn/completed
+    // notification 即关闭 stdin，让 codex 优雅退出，readline 收尾，task 完成。
+    // 与 claude 的 _looksLikeResult 等价的"单次 lease 收尾点"。
+    if (_looksLikeTurnCompleted(line)) {
       try {
         if (child.stdin && !child.stdin.destroyed) {
           child.stdin.end();
@@ -1631,15 +1646,29 @@ export function echoTaskBoundary(
 }
 
 /**
- * 粗判一行是否是 result / 完成 行（含 '"result"' 或 '"type":"result"'）。
- * 用于触发 session_id 提取 + stdin.end。
+ * 粗判一行是否是 claude stream-json 的 result 事件。
+ *
+ * ql-20260618-003：之前用 `line.includes('"result"')` 兜底太宽，会误命中
+ * codex/json-rpc 的 response（`{"id":2,"result":{"thread":...}}` 也含 "result"
+ * key），导致 thread/start response 被误判为终结行 → 提前 stdin.end() →
+ * 后续 turn/start 写触发 ERR_STREAM_WRITE_AFTER_END。
+ *
+ * 修复：用正则只匹配 `"type":"result"`（容忍冒号两侧空格）。codex 的
+ * turn/completed 通过 _looksLikeTurnCompleted 单独检测。
  */
 function _looksLikeResult(line: string): boolean {
-  return (
-    line.includes('"type":"result"') ||
-    line.includes('"type": "result"') ||
-    line.includes('"result"')
-  );
+  return /"type"\s*:\s*"result"/.test(line);
+}
+
+/**
+ * ql-20260618-003：检测 codex/json-rpc 的 turn/completed 通知。
+ *
+ * codex 是被动 server，单 turn 完成后不会自动退出，需要 daemon 主动关闭
+ * stdin 让其收尾。turn/completed notification 标志当前 turn 结束（含
+ * status="completed" / "failed" / "cancelled"），是单次 lease 的安全收尾点。
+ */
+function _looksLikeTurnCompleted(line: string): boolean {
+  return /"method"\s*:\s*"turn\/completed"/.test(line);
 }
 
 /**
