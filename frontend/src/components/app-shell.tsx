@@ -3,51 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
-import { hasAdminPermission } from "@/lib/permission";
+import {
+  MENU_SECTION_LABEL as SECTION_LABEL,
+  MENU_SECTION_ORDER as SECTION_ORDER,
+  type MenuPermissionGroup,
+} from "@/lib/menu-permissions";
 import { useSession } from "@/stores/session";
-
-interface NavItem {
-  href: string;
-  icon: string;
-  label: string;
-  matchPattern?: string;
-  absolute?: boolean;
-}
-
-const OVERVIEW_NAV: NavItem[] = [
-  { href: "/workspaces", icon: "\u{1F3E0}", label: "Workspace 首页", absolute: true },
-  { href: "components", icon: "\u{1F4E6}", label: "项目组组件", matchPattern: "/components" },
-  { href: "components/topology", icon: "\u{1F5FA}", label: "拓扑图", matchPattern: "/components/topology" },
-  { href: "changes", icon: "\u{1F504}", label: "变更中心", matchPattern: "/changes" },
-  { href: "scan-docs", icon: "\u{1F4C4}", label: "扫描文档", matchPattern: "/scan-docs" },
-  { href: "runtime", icon: "\u{26A1}", label: "运行时", matchPattern: "/runtime" },
-  { href: "knowledge", icon: "\u{1F4DA}", label: "知识 & 日志", matchPattern: "/knowledge" },
-  { href: "releases", icon: "\u{1F680}", label: "发布", matchPattern: "/releases" },
-];
-
-const MANAGEMENT_NAV: NavItem[] = [
-  { href: "/settings/git-identities", icon: "\u{1F511}", label: "Git 身份管理", matchPattern: "/settings/git-identities", absolute: true },
-  { href: "/settings/api-keys", icon: "\u{1F4A1}", label: "API Keys", matchPattern: "/settings/api-keys", absolute: true },
-  { href: "agent", icon: "\u{1F916}", label: "Agent 控制台", matchPattern: "/agent" },
-  { href: "approvals", icon: "✅", label: "审批中心", matchPattern: "/approvals" },
-  { href: "audit", icon: "\u{1F4DC}", label: "审计中心", matchPattern: "/audit" },
-  { href: "incidents", icon: "\u{1F6A8}", label: "事件", matchPattern: "/incidents" },
-];
-
-const SYSTEM_NAV: NavItem[] = [
-  { href: "/runtimes", icon: "\u{1F5A5}", label: "Daemon 运行时", absolute: true, matchPattern: "/runtimes" },
-  { href: "/settings", icon: "⚙️", label: "设置", absolute: true, matchPattern: "/settings" },
-];
-
-const ADMIN_NAV: NavItem[] = [
-  { href: "/admin/users", icon: "\u{1F465}", label: "用户", absolute: true, matchPattern: "/admin/users" },
-  { href: "/admin/organizations", icon: "\u{1F3E2}", label: "组织", absolute: true, matchPattern: "/admin/organizations" },
-  { href: "/admin/roles", icon: "\u{1F511}", label: "角色", absolute: true, matchPattern: "/admin/roles" },
-];
+import { visibleMenusBySection } from "@/lib/permission";
 
 function useWorkspaceId(): string | null {
   const pathname = usePathname();
@@ -88,22 +54,22 @@ export function AppShell({ children }: { children: ReactNode }) {
     return user.displayName || user.email;
   }, [user]);
 
-  const resolveHref = (item: NavItem) =>
-    item.absolute
-      ? item.href
+  const resolveHref = (menu: MenuPermissionGroup) =>
+    menu.absolute
+      ? menu.href
       : workspaceId
-        ? `/workspaces/${workspaceId}/${item.href}`
+        ? `/workspaces/${workspaceId}/${menu.href}`
         : "/workspaces";
 
-  const isActive = (item: NavItem) => {
-    if (item.absolute) {
-      if (item.href === "/workspaces") return pathname === "/workspaces";
-      if (item.matchPattern) return pathname.startsWith(item.matchPattern);
-      return pathname === item.href;
+  const isActive = (menu: MenuPermissionGroup) => {
+    if (menu.absolute) {
+      if (menu.href === "/workspaces") return pathname === "/workspaces";
+      if (menu.matchPattern) return pathname.startsWith(menu.matchPattern);
+      return pathname === menu.href;
     }
     if (!workspaceId) return false;
-    if (item.matchPattern) return pathname.includes(item.matchPattern);
-    const full = `/workspaces/${workspaceId}/${item.href}`;
+    if (menu.matchPattern) return pathname.includes(menu.matchPattern);
+    const full = `/workspaces/${workspaceId}/${menu.href}`;
     return pathname === full || pathname.startsWith(full + "/");
   };
 
@@ -125,10 +91,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   };
 
-  const renderNavLink = (item: NavItem) => {
-    const hasWorkspace = !!workspaceId || item.absolute;
-    const active = isActive(item);
-    const href = resolveHref(item);
+  const renderNavLink = (menu: MenuPermissionGroup) => {
+    const hasWorkspace = !!workspaceId || menu.absolute;
+    const active = isActive(menu);
+    const href = resolveHref(menu);
 
     const classes = hasWorkspace
       ? `flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] font-medium transition-colors ${
@@ -140,23 +106,23 @@ export function AppShell({ children }: { children: ReactNode }) {
 
     const icon = (
       <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center text-[15px]">
-        {item.icon}
+        {menu.icon}
       </span>
     );
 
     if (!hasWorkspace) {
       return (
-        <span key={item.href} className={classes} title={collapsed ? item.label : undefined}>
+        <span key={menu.href} className={classes} title={collapsed ? menu.menuLabel : undefined}>
           {icon}
-          {!collapsed && <span className="truncate">{item.label}</span>}
+          {!collapsed && <span className="truncate">{menu.menuLabel}</span>}
         </span>
       );
     }
 
     return (
-      <Link key={item.href} href={href} className={classes} title={collapsed ? item.label : undefined}>
+      <Link key={menu.href} href={href} className={classes} title={collapsed ? menu.menuLabel : undefined}>
         {icon}
-        {!collapsed && <span className="truncate">{item.label}</span>}
+        {!collapsed && <span className="truncate">{menu.menuLabel}</span>}
       </Link>
     );
   };
@@ -202,29 +168,16 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 pt-2 pb-4">
-          <div className="px-2 pt-3 pb-1">
-            <p
-              className={`text-[11px] font-semibold uppercase tracking-wide text-muted-foreground transition-all duration-200 ${
-                collapsed ? "opacity-0 h-0 overflow-hidden" : "opacity-100"
-              }`}
-            >
-              Overview
-            </p>
-          </div>
-          {OVERVIEW_NAV.map(renderNavLink)}
-
-          {renderGroupTitle("Management")}
-          {MANAGEMENT_NAV.map(renderNavLink)}
-
-          {hasAdminPermission(user) && (
-            <>
-              {renderGroupTitle("系统管理")}
-              {ADMIN_NAV.map(renderNavLink)}
-            </>
-          )}
-
-          {renderGroupTitle("System")}
-          {SYSTEM_NAV.map(renderNavLink)}
+          {SECTION_ORDER.map((section) => {
+            const menus = visibleMenusBySection(user, section);
+            if (menus.length === 0) return null;
+            return (
+              <Fragment key={section}>
+                {renderGroupTitle(SECTION_LABEL[section])}
+                {menus.map((menu) => renderNavLink(menu))}
+              </Fragment>
+            );
+          })}
         </nav>
 
         {/* User section at bottom */}
