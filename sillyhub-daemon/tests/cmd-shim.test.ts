@@ -48,6 +48,15 @@ CALL :find_dp0
 "%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"   %*
 `;
 
+/** cursor-agent.cmd 格式（PowerShell -File 包装）。 */
+const CURSOR_CMD = `@echo off
+setlocal enabledelayedexpansion
+set "CURSOR_INVOKED_AS=%~nx0"
+set "SCRIPT_DIR=%~dp0"
+if "%SCRIPT_DIR:~-1%"=="\\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
+%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%\\cursor-agent.ps1" %*
+`;
+
 describe('resolveWindowsCmdShim', () => {
   it('codex.cmd 格式 → 提取 codex.js 路径 + prependArgs=[js_path]', () => {
     const cmdPath = makeCmd('codex.cmd', CODEX_CMD);
@@ -79,6 +88,32 @@ describe('resolveWindowsCmdShim', () => {
       expect(resolved).not.toBeNull();
       expect(resolved!.prependArgs).toEqual([]);
       expect(resolved!.exe).toMatch(/claude\.exe$/);
+    } finally {
+      rmSync(cmdPath, { recursive: true, force: true });
+    }
+  });
+
+  it('cursor-agent.cmd 格式 → 解析 powershell -File cursor-agent.ps1', () => {
+    const cmdPath = makeCmd('cursor-agent.cmd', CURSOR_CMD);
+    try {
+      const resolved = resolveWindowsCmdShim(cmdPath);
+      if (process.platform !== 'win32') {
+        expect(resolved).toBeNull();
+        return;
+      }
+      expect(resolved).not.toBeNull();
+      expect(resolved!.exe).toMatch(/powershell\.exe$/i);
+      expect(resolved!.prependArgs).toEqual(
+        expect.arrayContaining([
+          '-NoProfile',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-File',
+        ]),
+      );
+      const ps1 = resolved!.prependArgs[resolved!.prependArgs.length - 1]!;
+      expect(ps1).toMatch(/cursor-agent\.ps1$/i);
+      expect(ps1).not.toContain('%SCRIPT_DIR%');
     } finally {
       rmSync(cmdPath, { recursive: true, force: true });
     }

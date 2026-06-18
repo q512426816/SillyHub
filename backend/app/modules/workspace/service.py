@@ -73,6 +73,25 @@ def _rewrite_path(root_path: str) -> str:
     return root_path
 
 
+def is_daemon_client_path_source(path_source: str | None) -> bool:
+    """True when root_path lives on a bound daemon machine (backend cannot stat it)."""
+    return path_source == "daemon-client"
+
+
+def resolve_root_path_for_server(
+    root_path: str,
+    path_source: str | None = "server-local",
+) -> str | None:
+    """Map root_path to a path the backend process can access.
+
+    Returns ``None`` for daemon-client workspaces — callers must skip server-side
+    filesystem checks and dispatch to the bound daemon instead.
+    """
+    if is_daemon_client_path_source(path_source):
+        return None
+    return _rewrite_path(root_path)
+
+
 class WorkspaceService:
     """Coordinates filesystem scans and DB persistence for workspaces."""
 
@@ -340,10 +359,21 @@ class WorkspaceService:
         try:
             spec_ws_svc = SpecWorkspaceService(self._session)
             spec_ws = await spec_ws_svc.get(workspace.id)
-            scan_path = (
-                spec_ws.spec_root if spec_ws.strategy == "platform-managed" else workspace.root_path
-            )
+            if workspace.path_source == "daemon-client":
+                # Client root_path is not on the backend host; rescan platform spec only.
+                scan_path = spec_ws.spec_root
+            else:
+                scan_path = (
+                    spec_ws.spec_root
+                    if spec_ws.strategy == "platform-managed"
+                    else workspace.root_path
+                )
         except Exception:
+            if workspace.path_source == "daemon-client":
+                raise WorkspaceNotSillyspec(
+                    "daemon-client workspace has no platform spec to rescan.",
+                    details={"workspace_id": str(workspace.id)},
+                ) from None
             scan_path = workspace.root_path
 
         scan = self.scan(scan_path)
@@ -1137,10 +1167,11 @@ class WorkspaceService:
                     return
         except Exception:
             pass
-        # No spec_workspace or no .sillyspec on platform — try local scan
-        scan = self.scan(workspace.root_path)
-        if scan.is_sillyspec:
-            await self._ensure_spec_workspace(workspace.id, scan.sillyspec_path)
+        # No spec_workspace or no .sillyspec on platform — try local scan (server-local only)
+        if workspace.path_source != "daemon-client":
+            scan = self.scan(workspace.root_path)
+            if scan.is_sillyspec:
+                await self._ensure_spec_workspace(workspace.id, scan.sillyspec_path)
 
     async def _ensure_spec_workspace(
         self,

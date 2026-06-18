@@ -30,12 +30,27 @@ export class AgentRunStreamClient {
     this.runId = runId;
   }
 
-  connect(token: string): void {
+  async connect(token: string): Promise<void> {
     if (this.es) {
       this.es.close();
       this.es = null;
     }
     this._setStatus("connecting");
+
+    // 先拉取已持久化日志，避免 SSE 订阅前发布的行丢失（Bootstrap 恢复 / 晚连场景）。
+    try {
+      const logs = await getAgentRunLogs(this.workspaceId, this.runId);
+      for (const log of logs) {
+        this._emitMessage({
+          channel: log.channel as StreamLogEvent["channel"],
+          content: log.content_redacted ?? "",
+          timestamp: log.timestamp,
+          log_id: log.id,
+        });
+      }
+    } catch {
+      /* prefetch 失败不阻断 SSE */
+    }
 
     const base = getApiBaseUrl();
     const url = new URL(

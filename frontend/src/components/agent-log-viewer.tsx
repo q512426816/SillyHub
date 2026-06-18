@@ -239,9 +239,13 @@ export function AgentLogRow({
           <div className="font-mono [overflow-wrap:anywhere]">
             <ToolResultCard body={processedLog.parsedToolResult} />
           </div>
+        ) : processedLog.mergedAssistantContent != null ? (
+          <div className="min-w-0 max-w-full whitespace-pre-wrap break-words font-mono text-zinc-800 [overflow-wrap:anywhere]">
+            {processedLog.mergedAssistantContent}
+          </div>
         ) : isThinking ? (
-          /* ql-20260617-011：纯 [THINKING] delta 合并后渲染为完整段落，
-             [SYSTEM]/[ASSISTANT]/混合内容另起 System 折叠块，分开显示。 */
+          /* ql-20260617-011：纯 [THINKING] delta 合并后渲染为完整段落；
+             [SYSTEM] 折叠块与 assistant 分开显示。 */
           <div className="font-mono [overflow-wrap:anywhere]">
             {processedLog.mergedThinkingContent != null ? (
               <CollapsibleSection title="Thinking">

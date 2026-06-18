@@ -360,6 +360,8 @@ class DaemonLeaseService:
             return
         ar.status = "killed"
         ar.finished_at = now
+        if ar.exit_code is None:
+            ar.exit_code = -1
         self._session.add(ar)
         await self._session.commit()
         log.info(

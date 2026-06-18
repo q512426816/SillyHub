@@ -244,8 +244,11 @@ async def _execute_bootstrap_agent_run(
                 session.add(run)
                 await session.commit()
 
-            # -- 2. Preflight (code_root sanity, daemon-agnostic) ----------------
-            preflight_error = _run_preflight(Path(code_root))
+            # -- 2. Preflight (server-local only; daemon-client paths live on client) -
+            preflight_error = preflight_workspace_code_root(
+                code_root,
+                path_source=workspace.path_source,
+            )
             if preflight_error is not None:
                 run.status = "failed"
                 run.error_code = "preflight_failed"
@@ -381,6 +384,30 @@ _PROJECT_SIGNATURES = [
 
 # Entries that are not considered meaningful project content
 _PLATFORM_ENTRIES = frozenset({".sillyspec", "worktree", "README.md", ".git"})
+
+
+def preflight_workspace_code_root(
+    code_root: str,
+    *,
+    path_source: str = "server-local",
+) -> str | None:
+    """Validate code_root on the backend host before bootstrap dispatch.
+
+    daemon-client workspaces skip this check — ``code_root`` is only reachable
+    from the bound daemon (FR-06 / D-003@v1). server-local paths are rewritten
+    for Docker bind mounts (``HOST_PATH_PREFIX`` → ``CONTAINER_PATH_PREFIX``).
+    """
+    from app.modules.workspace.service import resolve_root_path_for_server
+
+    server_path = resolve_root_path_for_server(code_root, path_source)
+    if server_path is None:
+        log.info(
+            "spec_bootstrap_preflight_skipped",
+            path_source=path_source,
+            code_root=code_root,
+        )
+        return None
+    return _run_preflight(Path(server_path))
 
 
 def _run_preflight(code_root: Path) -> str | None:

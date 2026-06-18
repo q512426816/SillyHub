@@ -13,10 +13,10 @@ created_at: 2026-06-18 13:54:52
 |---|---|---|---|
 | T1.1 | 数据模型迁移：agent_sessions 表 + lease.kind + agent_runs.agent_session_id | `backend/app/modules/agent/model.py`、`backend/app/modules/daemon/model.py`、alembic 迁移 | FR-01, FR-09 / D-001, D-002, D-005 |
 | T1.2 | 协议契约：新增 WS 控制消息常量 + payload（daemon 与 backend 对端） | `sillyhub-daemon/src/protocol.ts`、`backend/app/modules/daemon/protocol.py` + 契约单测 | FR-02, FR-04, FR-05 / NFR-05 |
-| T1.3 | daemon sessionStore + task-runner session 模式（result 不 end stdin） | `sillyhub-daemon/src/session-store.ts`(新)、`task-runner.ts`、`daemon.ts`(kind 分流) | FR-01, FR-02, FR-09 / D-002 |
-| T1.4 | daemon ws-client 接收控制消息 + 路由到 sessionStore（inject/interrupt/end） | `ws-client.ts`、`daemon.ts` | FR-02, FR-04, FR-05 |
-| T1.5 | backend session REST + service + WS 控制路由（create/inject/interrupt/end） | `backend/.../daemon/router.py`、`service.py`、`ws_hub.py`(send_session_control)、`agent/placement.py` | FR-01, FR-02, FR-04, FR-05 |
-| T1.6 | session 级 SSE 聚合：Redis channel `agent_session:{id}` + stream_session_logs + submit_messages 双 publish | `backend/.../agent/service.py`、`daemon/service.py`、`router.py` | FR-03 / D-005, R-08 |
+| T1.3 | daemon sessionStore 元数据 + turn runner：每 turn 独立 spawn，后续 turn 使用 resume id | `sillyhub-daemon/src/session-store.ts`(新)、`task-runner.ts`、`daemon.ts`(kind 分流) | FR-01, FR-02, FR-09 / D-002@v2 |
+| T1.4 | daemon 接收当前 turn interrupt/end 控制并按 session/currentRun 路由 | `ws-client.ts`、`daemon.ts` | FR-04, FR-05 |
+| T1.5 | backend session REST + service：create/inject 创建 AgentRun 并 dispatch，interrupt/end 控制当前 run/session | `backend/.../daemon/router.py`、`service.py`、`agent/placement.py` | FR-01, FR-02, FR-04, FR-05 |
+| T1.6 | session 级 SSE 聚合：按 agent_session_id 汇总多个 AgentRunLog，Redis channel `agent_session:{id}` 提供连续回显 | `backend/.../agent/service.py`、`daemon/service.py`、`router.py` | FR-03 / D-005, D-002@v2, R-08 |
 | T1.7 | quick-chat 端点升级：首 prompt 创建 AgentSession + interactive lease；后续走 inject | `backend/app/main.py` | FR-01, FR-02 |
 | T1.8 | R-01 端到端铁证验证：claude/codex stream-json 两轮 result（补网关 529 铁证） | 手动验证 + 集成测试 | R-01 / 成功标准 7 |
 | T1.9 | 空闲自动回收（session_idle_timeout_sec，默认 30min） | `session-store.ts`、`service.py`(end_session) | FR-06 / D-004 |
@@ -35,7 +35,7 @@ created_at: 2026-06-18 13:54:52
 | ID | 任务 | 关键文件 | 覆盖 |
 |---|---|---|---|
 | T3.1 | daemon sessionStore 磁盘持久化（sessions.json） | `session-store.ts`(persist/restore) | FR-08 / D-003 |
-| T3.2 | 重启 resume 恢复：claude --resume / codex thread/resume 重 spawn | `session-store.ts`、`task-runner.ts`、`adapters/*` | FR-08 |
+| T3.2 | 重启恢复 session 元数据；currentRun 失败收敛；下一 turn 再通过 claude --resume / codex thread resume 新 spawn | `session-store.ts`、`task-runner.ts`、`adapters/*` | FR-08 / D-002@v2 |
 | T3.3 | reconnecting 状态 + backend 同步 | `model.py`(status 枚举)、`service.py` | FR-08 |
 
 ## Wave 4 — 前端管控台

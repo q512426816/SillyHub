@@ -3,7 +3,7 @@
 // 前端提取 token 文本（去 `[THINKING] ` 前缀），按原序拼接成完整段落。
 // 同一条 message 的 thinking_delta 直接 "" 拼接（delta 已含必要空格）。
 import { describe, it, expect } from "vitest";
-import { normalizeLogs, isThinkingOnly, isThinkingContent } from "../normalize";
+import { normalizeLogs, isThinkingOnly, isThinkingContent, isAssistantOnly, mergeAssistantPiece } from "../normalize";
 import type { AgentRunLogEntry } from "@/lib/agent";
 
 function makeLog(
@@ -44,10 +44,10 @@ describe("isThinkingOnly (ql-20260617-011 / ql-20260617-013)", () => {
 });
 
 describe("isThinkingContent (兼容性回归)", () => {
-  it("[THINKING] / [SYSTEM] / [ASSISTANT] 都视为 thinking content", () => {
+  it("[THINKING] / [SYSTEM] 视为 thinking content；纯 [ASSISTANT] 不算", () => {
     expect(isThinkingContent("[THINKING] x")).toBe(true);
     expect(isThinkingContent("[SYSTEM:init] y")).toBe(true);
-    expect(isThinkingContent("[ASSISTANT] z")).toBe(true);
+    expect(isThinkingContent("[ASSISTANT] z")).toBe(false);
   });
 });
 
@@ -214,5 +214,37 @@ describe("normalizeLogs：连续 [THINKING] 合并 (ql-20260617-011)", () => {
     expect(isThinkingOnly("[SYSTEM:init] x")).toBe(false);
     expect(isThinkingOnly("[ASSISTANT] x")).toBe(false);
     expect(isThinkingOnly("普通 stdout")).toBe(false);
+  });
+});
+
+describe("assistant stream merge (ql-20260618-012)", () => {
+  it("mergeAssistantPiece 追加 delta 并去重 cumulative 全文", () => {
+    expect(mergeAssistantPiece("先", "读取")).toBe("先读取");
+    expect(mergeAssistantPiece("先读取", "先读取完整句子")).toBe("先读取完整句子");
+  });
+
+  it("mergeAssistantPiece 去重重复段落并用换行拼接不同句", () => {
+    const line = "查看项目现有 sillyspec 配置与 CLI 用法。";
+    expect(mergeAssistantPiece(line, line)).toBe(line);
+    const prev = "先读取工作流说明。";
+    expect(mergeAssistantPiece(prev, line)).toBe(`${prev}\n${line}`);
+  });
+
+  it("连续 [ASSISTANT] stdout 合并为一条 mergedAssistantContent", () => {
+    const logs = [
+      makeLog("stdout", "[ASSISTANT] 先", "a1"),
+      makeLog("stdout", "[ASSISTANT] 读取", "a2"),
+      makeLog("stdout", "[ASSISTANT] 项目", "a3"),
+    ];
+    const result = normalizeLogs(logs);
+    expect(result.filter((r) => !r.hidden)).toHaveLength(1);
+    expect(result[0]?.mergedAssistantContent).toBe("先读取项目");
+    expect(result[1]?.hidden).toBe(true);
+    expect(result[2]?.hidden).toBe(true);
+  });
+
+  it("isAssistantOnly 识别 [ASSISTANT] 片段", () => {
+    expect(isAssistantOnly("[ASSISTANT] hello")).toBe(true);
+    expect(isAssistantOnly("[SYSTEM:init] x")).toBe(false);
   });
 });

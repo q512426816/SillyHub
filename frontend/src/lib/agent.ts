@@ -92,6 +92,16 @@ export function getAgentRunLogs(workspaceId: string, runId: string, after?: stri
   );
 }
 
+/** 运行列表/详情展示用：优先 provider+model，回退 agent_type（内部 adapter id）。 */
+export function formatRunProviderLabel(
+  run: Pick<AgentRun, "provider" | "model" | "agent_type">,
+): string {
+  const provider = run.provider?.trim();
+  if (!provider) return run.agent_type;
+  const model = run.model?.trim();
+  return model ? `${provider} · ${model}` : provider;
+}
+
 export interface StreamLogEvent {
   channel: AgentRunLogChannel;
   content: string;

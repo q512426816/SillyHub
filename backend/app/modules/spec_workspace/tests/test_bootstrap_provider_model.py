@@ -175,3 +175,79 @@ async def test_bootstrap_dispatch_uses_run_provider_model(
     assert dispatch["model"] == "gpt-5-codex"
     assert dispatch["root_path"] == workspace.root_path
     assert dispatch["spec_root"] == spec_workspace.spec_root
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_preflight_skipped_for_daemon_client_workspace(
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """daemon-client root_path must not be stat'd on the backend during bootstrap."""
+    user = await _create_user(db_session)
+    workspace, spec_workspace = await _create_workspace_with_spec(
+        db_session,
+        tmp_path,
+    )
+    workspace.path_source = "daemon-client"
+    workspace.daemon_runtime_id = uuid.uuid4()
+    db_session.add(workspace)
+    await db_session.commit()
+
+    run = AgentRun(
+        id=uuid.uuid4(),
+        task_id=None,
+        lease_id=None,
+        agent_type="claude_code",
+        provider="cursor",
+        model=None,
+        status="pending",
+        spec_strategy=spec_workspace.strategy,
+        profile_version=spec_workspace.profile_version,
+    )
+    db_session.add(run)
+    await db_session.commit()
+
+    preflight_calls: list[Path] = []
+    real_preflight = bootstrap_module._run_preflight
+
+    def _track_preflight(path: Path) -> str | None:
+        preflight_calls.append(path)
+        return real_preflight(path)
+
+    def _mock_factory():
+        class _Ctx:
+            async def __aenter__(self):
+                return db_session
+
+            async def __aexit__(self, *args):
+                return None
+
+        return _Ctx()
+
+    class _FakePlacement:
+        def __init__(self, session: AsyncSession) -> None:
+            self.session = session
+
+        async def decide_backend(self, **kwargs):
+            return None
+
+        async def dispatch_to_daemon(self, *args, **kwargs):
+            return uuid.uuid4()
+
+    monkeypatch.setattr("app.core.db.get_session_factory", lambda: _mock_factory)
+    monkeypatch.setattr("app.modules.agent.placement.RunPlacementService", _FakePlacement)
+    monkeypatch.setattr(bootstrap_module, "_run_preflight", _track_preflight)
+
+    await bootstrap_module._execute_bootstrap_agent_run(
+        run_id=run.id,
+        workspace_id=workspace.id,
+        user_id=user.id,
+        spec_root=spec_workspace.spec_root,
+        code_root=r"C:\Users\qinyi\IdeaProjects\happy",
+    )
+
+    assert preflight_calls == []
+    refreshed = await db_session.get(AgentRun, run.id)
+    assert refreshed is not None
+    assert refreshed.error_code != "preflight_failed"

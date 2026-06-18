@@ -947,6 +947,8 @@ class DaemonService:
             agent_run.started_at = now
         if status in ("completed", "failed", "killed") and agent_run.finished_at is None:
             agent_run.finished_at = now
+        if status == "killed" and agent_run.exit_code is None:
+            agent_run.exit_code = -1
         if error is not None and status == "failed":
             agent_run.output_redacted = error
 

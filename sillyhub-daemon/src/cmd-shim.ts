@@ -42,7 +42,28 @@ export function resolveWindowsCmdShim(cmdPath: string): {
   }
 
   const dp0 = dirname(cmdPath);
-  const expand = (s: string): string => s.replace(/%dp0%/gi, dp0);
+  const scriptDir = dp0.replace(/[\\/]+$/, '');
+  const expand = (s: string): string =>
+    s
+      .replace(/%dp0%/gi, dp0)
+      .replace(/%SCRIPT_DIR%/gi, scriptDir);
+
+  const flat = content.replace(/\r?\n/g, ' ');
+
+  // 模式 0：PowerShell -File 包装（cursor-agent.cmd 等自定义安装脚本）。
+  // 例：powershell.exe ... -File "%SCRIPT_DIR%\cursor-agent.ps1" %*
+  const m0 =
+    /powershell(?:\.exe)?[^%]*-File\s+"([^"]+)"\s+%\*/i.exec(flat) ??
+    /-File\s+"([^"]+)"\s+%\*/i.exec(flat);
+  if (m0) {
+    const ps1 = expand(m0[1]!);
+    const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+    const exe = `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+    return {
+      exe,
+      prependArgs: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1],
+    };
+  }
 
   // cmd-shim 的 codex.cmd 用 `endLocal & goto ... & "%_prog%" "..." %*` 单行混合模式，
   // 不能简单按行首关键字跳过。改为：在全文里全局搜索包含 %* 的双引号命令模式。
@@ -61,7 +82,9 @@ export function resolveWindowsCmdShim(cmdPath: string): {
   const m2 = /"([^"]+)"\s+%\*/.exec(content);
   if (m2) {
     const exe = expand(m2[1]!);
-    return { exe, prependArgs: [] };
+    if (!/%[A-Za-z0-9_]+%/.test(exe)) {
+      return { exe, prependArgs: [] };
+    }
   }
 
   return null;

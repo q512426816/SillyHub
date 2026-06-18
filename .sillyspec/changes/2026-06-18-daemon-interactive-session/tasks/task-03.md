@@ -1,332 +1,355 @@
 ---
+author: qinyi
+created_at: 2026-06-18 15:31:03
+change: 2026-06-18-daemon-interactive-session
 id: task-03
-title: daemon session 侧（sessionStore + task-runner session 模式 + ws-client 控制路由 + kind 分流）
-wave: W1
+title: "daemon session 元数据与每 turn spawn + resume 执行链路"
+wave: W3
 priority: P0
 depends_on: [task-02]
-covers: [FR-01, FR-02, FR-04, FR-05, FR-09, D-002]
-created_at: 2026-06-18 14:11:24
-author: qinyi
+blocks: [task-06, task-08, task-09]
+requirement_ids: [FR-01, FR-02, FR-04, FR-05, FR-09]
+decision_ids: [D-002@v2]
+allowed_paths:
+  - sillyhub-daemon/src/session-store.ts
+  - sillyhub-daemon/src/types.ts
+  - sillyhub-daemon/src/task-runner.ts
+  - sillyhub-daemon/src/adapters/protocol-adapter.ts
+  - sillyhub-daemon/src/adapters/json-rpc.ts
+  - sillyhub-daemon/src/ws-client.ts
+  - sillyhub-daemon/src/daemon.ts
+  - sillyhub-daemon/tests/session-store.test.ts
+  - sillyhub-daemon/tests/task-runner-turn.test.ts
+  - sillyhub-daemon/tests/adapters/json-rpc.test.ts
+  - sillyhub-daemon/tests/ws-client-control-route.test.ts
+  - sillyhub-daemon/tests/daemon-kind-dispatch.test.ts
 ---
 
-## 1. 目标
+# daemon session 元数据与每 turn spawn + resume 执行链路
 
-在 daemon 侧落地"长驻会话执行器"，让 `lease.kind=interactive` 走与批处理 (`batch`) 完全分离的执行路径：
+## 1. 目标与硬约束
 
-1. **task-runner session 模式**：spawn 后保持 stdin 开放，`result`/`turn/completed` 事件只标记"当前 turn 完成"（更新 AgentRun、发 SSE turn-done），**不再 end stdin、不再退出 readline**，等待下一次 `session_inject`。
-2. **SessionStore**：内存 `Map<sessionId, SessionState>` 持有 childProcess / stdin / adapter / status / currentRunId，提供 `create / get / inject / interrupt / end` 五个 API（design §7.3）。
-3. **ws-client 控制消息路由**：`_handleMessage` 新增 `SESSION_INJECT / SESSION_INTERRUPT / SESSION_END` 三类 server→daemon 控制消息的分派点（不内嵌业务，仅转交 SessionStore）。
-4. **daemon kind 分流**：`_runLeaseStateMachine` 按 `ctx.kind` 分流 —— `batch` 走原 `TaskRunner.runLease`（零改动），`interactive` 走新 `SessionRunner.runLease`（task-runner 的 session 模式入口）。
+依据 `design.md`、`decisions.md` 的 **D-002@v2** 和 `plan.md` Wave 3，本任务把 daemon 的交互式会话实现为：
 
-**关键差异（vs 批处理模型）**：批处理模型 `result` 后 `child.stdin.end()` + readline 自然结束 + collectDiff + complete（task-runner.ts:929-936, 1047-1058）；session 模式 `result` 后三者都不做，把 stdin 当作"会话输入流"持续开着，等下一轮。
+- `AgentSession` 与 interactive lease 长生命周期存在；
+- 每个 turn 对应一个 `AgentRun`，并调用一次独立的 agent 子进程；
+- 首 turn 普通启动；后续 turn 使用首 turn 返回的 agent 内部会话标识恢复上下文；
+- Claude 后续 turn 使用现有 `StreamJsonAdapter.buildArgs({ resumeSessionId })` 生成 `--resume <session_id>`；
+- Codex 后续 turn 在新 app-server 进程完成 initialize 后调用 `thread/resume { threadId }`，再调用 `turn/start`；
+- 每个 turn 收到 Claude `result` 或 Codex `turn/completed` 后沿用现有逻辑关闭 stdin、等待进程退出并释放 child；
+- `SessionStore` **只保存会话元数据和当前 turn 标识**，不得保存跨 turn 的 `ChildProcess`、stdin、readline 或 adapter 实例。
 
-## 2. 前置依赖
+本任务明确废弃旧蓝图中的“result 后保持 stdin 开放”“同一 child 注入第二条消息”“SessionStore 持有 child/stdin/adapter”方案。spike-01 未提供该方案的端到端证据，禁止实现或保留兼容分支。
 
-- **task-02 协议契约（硬依赖）**：本任务消费 `protocol.ts` 新增的 `MSG.SESSION_INJECT / SESSION_INTERRUPT / SESSION_END` 常量 + 对应 payload 类型（`SessionInjectPayload { session_id, lease_id, run_id, prompt }` / `SessionControlPayload { session_id, lease_id }`）。task-02 必须先合并，daemon / backend 两端契约对齐。
-- **task-01 数据模型（软依赖）**：`LeaseCtx.kind` 字段（`'batch' | 'interactive'`，默认 `'batch'`）+ `LeaseCtx.agentSessionId` 字段。如 task-01 未合并，daemon 侧用 `as LeaseCtx & { kind?: string; agentSessionId?: string }` 兜底访问（duck-typing，对齐 daemon.ts 已有 `workspaceId/specRoot` 兜底模式）。
-- **spike-01（方案可行性硬门）**：claude/codex stream-json stdin 两轮 result 已端到端验证。本任务的"result 后 stdin 不 end"策略依赖此铁证。若 spike-01 未通过则方案降级（伪多轮 resume 链路），本蓝图需重设计。
+## 覆盖来源
 
-## 3. 涉及文件
-
-| 操作 | 文件路径 | 改动概要 |
+| 来源 | 要求/决策 | 本任务落实 |
 |---|---|---|
-| 新增 | `sillyhub-daemon/src/session-store.ts` | SessionStore 类 + SessionState 类型；create/get/inject/interrupt/end API |
-| 修改 | `sillyhub-daemon/src/task-runner.ts` | 抽出 session 模式入口 `runLeaseSession(ctx)`；`_handleLine` 的 result/turn_completed 收尾点按模式分流（batch=end stdin，session=标记 turn 完成）；新增 `injectPrompt / interrupt / end` 方法（操作 sessionStore 内 child.stdin） |
-| 修改 | `sillyhub-daemon/src/ws-client.ts` | `_handleMessage` 新增 SESSION_INJECT/INTERRUPT/END 分派到 `onControlMessage` 回调（不内嵌业务，仅转发） |
-| 修改 | `sillyhub-daemon/src/daemon.ts` | `_runLeaseStateMachine` 按 `ctx.kind` 分流；`_handleWsMessage` 新增 session 控制消息路由到 SessionStore；构造 WsClient 时注入 onControlMessage 回调 |
-| 不改 | `sillyhub-daemon/src/adapters/stream-json.ts` | `buildInput(prompt)` 已存在，session inject 直接复用（写第二条 user message JSON） |
-| 不改 | `sillyhub-daemon/src/adapters/json-rpc.ts` | `buildTurnStart({threadId, prompt, model})` 已存在，session inject 复用（threadId 从 sessionStore 取） |
-| 不改 | `sillyhub-daemon/src/protocol.ts` | SESSION_* 常量由 task-02 添加，本任务仅 import 消费 |
-| 新增 | `sillyhub-daemon/tests/session-store.test.ts` | SessionStore 单测 |
-| 新增 | `sillyhub-daemon/tests/task-runner-session.test.ts` | session 模式 + inject/interrupt/end 单测 |
-| 新增 | `sillyhub-daemon/tests/daemon-kind-dispatch.test.ts` | kind 分流单测 |
-| 新增 | `sillyhub-daemon/tests/ws-client-control-route.test.ts` | 控制消息路由单测 |
+| `plan.md` task-03 | Wave 3 daemon turn runner，覆盖 FR-01、FR-02、FR-04、FR-05、FR-09 / D-002@v2 | 建立 daemon 内存 session 元数据与每 turn spawn + resume 执行链路 |
+| FR-01 / FR-02 | 首 turn 与追问各自对应独立 AgentRun；追问延续同一会话上下文 | `startTurn` 每次接收新 runId；首轮普通启动，后续使用 agentSessionId resume |
+| FR-04 / FR-05 | interrupt 只结束当前 turn；end 才结束 session | `interrupt` 仅 cancel 当前 runner，`end` 标记 ended 并删除内存元数据 |
+| FR-09 | batch lease 行为不变 | kind 缺省仍走现有 `runLease → completeLease`，不进入 SessionStore |
+| D-002@v2 | session/lease 长生命周期，每 turn 独立 spawn + resume，禁止跨 turn child/stdin | SessionStore 仅持有元数据；Claude `--resume`，Codex `thread/resume` |
 
-## 4. 实现步骤
+## 2. 当前源码依据
 
-### 4.1 新增 SessionStore（design §7.3）
+实现前必须再次用 `rg` 确认以下真实接口仍存在；若源码已变化，先更新本任务文档再写代码，不得按旧行号臆造：
 
-新建 `src/session-store.ts`：
+| 事实 | 当前源码锚点 | 本任务使用方式 |
+|---|---|---|
+| 单次执行入口 | `sillyhub-daemon/src/task-runner.ts`：`TaskRunner.runLease(ctx)` | 抽取可复用的 turn 执行核心，新增 `runTurn`；不建立长驻模式 |
+| 子进程终结 | `_handleLine` 对 `_looksLikeResult` / `_looksLikeTurnCompleted` 调 `child.stdin.end()` | 保持不变；它是每 turn 释放进程的必要条件 |
+| Claude resume | `src/adapters/stream-json.ts`：`buildArgs` 已支持 `resumeSessionId` → `--resume` | 后续 Claude turn 直接复用 |
+| Codex 首次启动 | `src/adapters/json-rpc.ts`：`buildHandshake` 发 initialize、initialized、`thread/start` | 首 turn 保持该序列 |
+| Codex turn 启动 | `JsonRpcAdapter.buildTurnStart({ threadId, prompt, model })` | `thread/start` 或 `thread/resume` 的 id=2 response 后均调用 |
+| Codex 恢复协议 | 当前 Codex app-server schema：`thread/resume` 参数至少含 `{ threadId }`，response 含 `thread.id` | 后续 turn 将握手第三条由 `thread/start` 切为 `thread/resume` |
+| turn 取消 | `TaskRunner.cancel(leaseId)` → AbortController → 当前 child SIGTERM/SIGKILL | SessionStore interrupt 仅调用当前 turn 的 cancel |
+| WS 分发 | `src/ws-client.ts`：`WsClientCallbacks.onMessage` + `_handleMessage` | 新增独立 `onControlMessage`，只识别 SESSION_* |
+| lease 状态机 | `src/daemon.ts`：`_runLeaseStateMachine` 构造 `LeaseCtx` 后调用 `runLease` 并 complete | interactive 分支注册 session + 启动首 turn，但不在 turn 完成时 complete lease |
+
+扫描文档仍描述旧 Python daemon，执行时以当前 TypeScript 源码和模块卡为准。
+
+## 3. 修改文件（必填）
+
+| 操作 | 文件 | 责任 |
+|---|---|---|
+| 新增 | `sillyhub-daemon/src/session-store.ts` | 会话元数据、单 turn 并发门、turn 调度、interrupt/end |
+| 修改 | `sillyhub-daemon/src/types.ts` | `LeaseCtx` 增加 `kind`、`agentSessionId`；声明 session/turn 类型（若 task-01/02 已加则复用） |
+| 修改 | `sillyhub-daemon/src/task-runner.ts` | 新增每次必定 spawn/exit 的 `runTurn`；透传 Codex resume 参数 |
+| 修改 | `sillyhub-daemon/src/adapters/protocol-adapter.ts` | `buildHandshake` opts 增加 `resumeSessionId?: string` |
+| 修改 | `sillyhub-daemon/src/adapters/json-rpc.ts` | 首 turn `thread/start`、后续 turn `thread/resume` |
+| 修改 | `sillyhub-daemon/src/ws-client.ts` | SESSION_INJECT/INTERRUPT/END 独立控制回调 |
+| 修改 | `sillyhub-daemon/src/daemon.ts` | interactive kind 分流、SessionStore 注入、控制消息路由 |
+| 新增 | `sillyhub-daemon/tests/session-store.test.ts` | 元数据、串行化、interrupt/end 单测 |
+| 新增 | `sillyhub-daemon/tests/task-runner-turn.test.ts` | 每 turn 新 spawn、Claude/Codex resume 单测 |
+| 修改 | `sillyhub-daemon/tests/adapters/json-rpc.test.ts` | `thread/resume` 握手契约测试 |
+| 修改/新增 | `sillyhub-daemon/tests/ws-client-control-route.test.ts`、`daemon-kind-dispatch.test.ts` | 控制消息与 kind 分流测试 |
+
+不修改 backend、frontend、SSE、permission 业务；分别由 task-04、task-05、task-07/08、task-10/11 负责。
+
+## 4. 实现要求与精确接口
+
+### 4.1 SessionStore：只持有元数据
 
 ```typescript
+export type SessionStatus =
+  | 'active'
+  | 'running'
+  | 'interrupting'
+  | 'ended'
+  | 'failed';
+
 export interface SessionState {
-  sessionId: string;
-  leaseId: string;
-  agentSessionId?: string;     // claude session_id / codex thread_id（首次 turn 后填入，跨 turn 复用）
-  child: ChildProcess;
-  stdin: NodeJS.WritableStream;
-  adapter: ProtocolAdapter;
-  status: 'active' | 'interrupted' | 'ended' | 'failed';
-  currentRunId?: string;       // 当前 turn 的 AgentRun id（每个 inject 更新）
-  provider: string;            // claude / codex，决定 inject 走 buildInput 还是 buildTurnStart
-  model?: string;
+  sessionId: string;                 // AgentSession.id
+  leaseId: string;                   // 长生命周期 interactive lease.id
+  provider: 'claude' | 'codex';
+  agentSessionId?: string;           // Claude session_id / Codex thread_id
+  status: SessionStatus;
+  currentRunId?: string;
   turnCount: number;
-  lastActiveAt: number;        // ms epoch，空闲 30min 回收用（task-06）
+  lastActiveAt: number;
+  config: Record<string, unknown>;
+  baseCtx: LeaseCtx;                 // claimToken/cmd/workspace/model 等不可变执行上下文
+}
+
+export interface StartTurnInput {
+  runId: string;
+  prompt: string;
+}
+
+export interface TurnRunner {
+  runTurn(ctx: LeaseCtx): Promise<TaskRunnerResult>;
+  cancel(leaseId: string): Promise<boolean>;
 }
 
 export class SessionStore {
-  private readonly _sessions = new Map<string, SessionState>();
-  create(state: Omit<SessionState, 'status' | 'turnCount' | 'lastActiveAt'>): void;
-  get(sessionId: string): SessionState | undefined;
-  /** inject 写 stdin：claude=buildInput 第二条 user msg JSON；codex=buildTurnStart 复用 thread */
-  inject(sessionId: string, prompt: string, runId: string): void;
-  /** interrupt 本轮：claude=child.kill('SIGINT')，codex=write turn/interrupt JSON-RPC request */
-  interrupt(sessionId: string): void;
-  /** end 会话：child.kill() + 标 ended + 从 map 移除（不 await exit） */
-  end(sessionId: string): void;
-  get activeCount(): number;
+  constructor(private readonly runner: TurnRunner) {}
+
+  create(input: {
+    sessionId: string;
+    leaseId: string;
+    provider: 'claude' | 'codex';
+    baseCtx: LeaseCtx;
+    config?: Record<string, unknown>;
+  }): SessionState;
+
+  get(sessionId: string): Readonly<SessionState> | undefined;
+  startTurn(sessionId: string, input: StartTurnInput): Promise<TaskRunnerResult>;
+  interrupt(sessionId: string): Promise<boolean>;
+  end(sessionId: string): Promise<boolean>;
+  fail(sessionId: string): void;
 }
 ```
 
-**API 语义要点**：
+实现语义：
 
-- `create`：由 SessionRunner 在 spawn 成功后调用。幂等：同一 sessionId 重复 create 抛错（防双开）。
-- `inject`：先校验 `status === 'active'`，否则抛 `SessionNotActiveError`（design R-02：inject 到已结束 session 返回错误）。写 stdin 用 task-runner 抽出的 `_writeStdinLine(stdin, buf)` 辅助函数（复用 drain + write callback 模式，task-runner.ts:776-790）。
-  - **claude**（adapter.buildInput 实现）：`stdin.write(adapter.buildInput(prompt))` —— 复用现有 buildInput 产出的 `{type:'user', message:{...}}` NDJSON。
-  - **codex**（adapter.buildTurnStart 实现）：`stdin.write(adapter.buildTurnStart({threadId: state.agentSessionId!, prompt, model}) + '\n')` —— threadId 跨 turn 复用（首次 turn 由 _handleLine 检测 thread/start response 提取并写回 sessionStore.agentSessionId）。
-- `interrupt`：
-  - **claude**：`state.child.kill('SIGINT')` —— Claude CLI 收到 SIGINT 停止当前 turn 但保留会话。
-  - **codex**：`stdin.write(JSON.stringify({jsonrpc:'2.0', id:<auto>, method:'turn/interrupt', params:{threadId: state.agentSessionId!}}) + '\n')` —— codex 主动 turn/interrupt，child 不 kill。
-  - 标 `status='interrupted'`，下次 inject 自动回到 `active`（design G2：打断本轮保留会话）。
-- `end`：`child.kill()`（SIGTERM，2s 后 SIGKILL 升级由 task-runner 的 killTimer 复用）+ `status='ended'` + `map.delete(sessionId)`。**不阻塞等 exit**（end 是控制消息路径，不等 agent 自然退出）。
+1. `create` 要求 sessionId、leaseId 唯一；重复注册抛明确错误，初始状态 `active`。
+2. `startTurn` 仅允许 `active` 状态；原子地写入 `running/currentRunId` 后再启动异步执行，阻止两个 inject 同时通过检查。
+3. turn ctx 必须由 `baseCtx` 派生，并覆盖：
+   ```typescript
+   {
+     ...state.baseCtx,
+     agentRunId: input.runId,
+     prompt: input.prompt,
+     resumeSessionId: state.turnCount === 0 ? undefined : state.agentSessionId,
+   }
+   ```
+4. `runner.runTurn` resolve 后，从 `result.sessionId`（或已存在的规范化 metadata session_id）更新 `agentSessionId`。首 turn 若成功但没有得到 agentSessionId，session 标 `failed`，禁止静默启动无上下文的第二 turn。
+5. 正常完成后清空 `currentRunId`、`turnCount += 1`、状态回 `active`；若 `end` 已把状态置 `ended`，finally 不得把它改回 active。
+6. `interrupt` 仅在 `running` 时置 `interrupting` 并调用 `runner.cancel(leaseId)`；当前 turn 收敛后状态回 `active`，保留 `agentSessionId`，后续可 resume 新 spawn。
+7. `end` 先置 `ended`；若当前 turn 在跑则调用 `cancel`，但不等待或复用旧 child；最终从 Map 删除。interactive lease 与 backend session 的数据库收尾由 task-04 的 `end_session` 统一负责。
+8. state 中禁止出现 `child`、`stdin`、`adapter`、`readline`、`WritableStream` 字段。
 
-### 4.2 task-runner 引入 session 模式（核心改造点）
-
-**改造点 1 — 新增 `runLeaseSession(ctx)` 入口**：
-
-`runLeaseSession` 与 `runLease` 共享 1-5 步（workspace / claudeMd / env / adapter / startLease）+ 6 步 spawn，但**不走重试循环、不收 collectDiff、不 completeLease**。spawn 成功后：
-- 把 `{child, stdin, adapter, provider, model, sessionId: ctx.agentSessionId}` 注入 sessionStore.create()；
-- 把 `_spawnAndStream` 的 `mode` 标记为 `'session'`；
-- 让 readline 循环跑着**不返回**（等 sessionStore.end 由外部触发 kill）。
-- 返回的 TaskRunnerResult 仅作"首轮 turn 完成"标记用（status='completed' + sessionId）。
-
-**改造点 2 — `_spawnAndStream` / `_handleLine` 模式分流（最关键）**：
-
-在 `_spawnAndStream` params 增加 `mode: 'batch' | 'session'`（默认 batch，保持现有测试零改动）。`_handleLine` 接收 mode，对 result/turn_completed 收尾点分流：
-
-- **`batch` 模式（现状，零改动）**：
-  - task-runner.ts:1047-1058 `_looksLikeResult` 命中 → `child.stdin.end()`（现状）
-  - task-runner.ts:1061-1073 `_looksLikeTurnCompleted` 命中 → `child.stdin.end()`（现状）
-  - `_spawnAndStream` 末尾 task-runner.ts:929-936 `child.stdin.end()`（现状）
-- **`session` 模式（新）**：
-  - `_looksLikeResult` 命中 → **不 end stdin**，改为调 `onTurnComplete(sessionId, runId)` 回调（session 模式专用，触发 backend 把 AgentRun 标 running→completed + 发 SSE turn-done）；
-  - `_looksLikeTurnCompleted` 命中 → 同上 onTurnComplete；
-  - `_spawnAndStream` 末尾 **不 end stdin、不 collectDiff**；
-  - readline 循环 **不 break**（stdin 不 end → child.stdout 不 close → for-await 自然挂着等下一轮）；
-  - 进程退出（child exit）才跳出 readline → session 模式视为异常（agent 不该自己 exit），标 `status='failed'`。
-
-**改造点 3 — 新增 inject/interrupt/end 公开方法**：
-
-TaskRunner 持有 SessionStore 引用后，暴露 thin wrapper：
+### 4.2 TaskRunner.runTurn：进程边界就是 turn 边界
 
 ```typescript
-injectPrompt(sessionId: string, prompt: string, runId: string): void {
-  this._sessionStore.inject(sessionId, prompt, runId);
+interface InteractiveTurnOptions {
+  /** interactive lease 已由 daemon claim/start；turn 不重复 start/complete lease。 */
+  manageLeaseLifecycle: false;
+  /** resume turn 禁止清空 resumeSessionId 后降级为新会话。 */
+  retrySpawn: false;
 }
-interruptSession(sessionId: string): void {
-  this._sessionStore.interrupt(sessionId);
-}
-endSession(sessionId: string): void {
-  this._sessionStore.end(sessionId);
+
+class TaskRunner {
+  runLease(ctx: LeaseCtx): Promise<TaskRunnerResult>; // batch 行为不变
+  runTurn(ctx: LeaseCtx): Promise<TaskRunnerResult>;  // 新增
 }
 ```
 
-SessionStore 是逻辑持有方，TaskRunner 仅作 daemon → SessionStore 的桥（保持 task-runner 单测可独立 mock SessionStore）。
+`runTurn` 与 `runLease` 共享 workspace、CLAUDE.md、env、adapter、spawn/parse/submit、diff/spec-sync 和 `_finish` 逻辑，但必须满足：
 
-### 4.3 task-runner 现有结构复用清单（最小改动）
+- 不调用 `client.startLease`、不 complete lease；daemon 已在创建 interactive session 时 claim/start，lease 跨 turn 存活；
+- 不启动现有 lease heartbeat（interactive lease `lease_expires_at=NULL`）；
+- 每次调用都 `getBackend(provider)` 创建全新 adapter，并 `spawn` 全新子进程；
+- 保留 `_handleLine` 的 `result` / `turn/completed` → `stdin.end()` 逻辑；不得增加 session mode；
+- 等待 child exit 后才 resolve，确保下一 turn 启动前旧进程已释放；
+- resumed turn 禁用现有“重试时清空 resumeSessionId”的降级行为。第一版直接令 `runTurn` 的 spawn retry 为 0；否则必须能证明重试仍携带相同 resume id 且不会重复业务副作用；
+- `cancel(leaseId)` 只命中当前 runTurn 的 AbortController；顺序 turn 复用 leaseId 是安全的，因为 SessionStore 保证同一 session 同时最多一个 turn。
 
-| 现有函数/位置 | session 模式如何复用 |
-|---|---|
-| `runLease` 步骤 1-5（workspace/claudeMd/env/adapter/startLease） | 抽成 `_prepareRun(ctx)` 内部方法，`runLease` 和 `runLeaseSession` 共用 |
-| `_spawnAndStream` 全部 spawn + readline + handshake 逻辑 | 加 `mode` 参数；session 模式仅跳过末尾 stdin.end + 不触发完整 TaskResult 汇总 |
-| `_handleLine` 的 buildTurnStart 检测（task-runner.ts:1009-1045） | session 模式额外触发：首次拿到 threadId 后写回 sessionStore.agentSessionId（codex 跨 turn 复用） |
-| `_handleLine` 的 sessionId 提取（task-runner.ts:1100-1104） | session 模式额外触发：拿到 sessionId 后写回 sessionStore.agentSessionId（claude） |
-| `getBackend` 工厂（adapters/index.js） | 零改动，sessionStore 直接持有 adapter 实例跨 turn 复用（不复用工厂 new，design R-06） |
-| `buildSpawnEnv`（spawn-env.ts） | 零改动，session 模式首次 spawn 用同一份 env（后续 turn 不重 spawn，无 env 变化） |
+建议把 `runLease` 主体抽为私有 `_run(ctx, { manageLeaseLifecycle, retrySpawn })`，避免复制 9 步流程。batch 调 `_run(..., {true,true})`，interactive turn 调 `_run(..., {false,false})`。
 
-### 4.4 ws-client 控制消息路由
+### 4.3 Claude resume
 
-**`WsClientCallbacks` 增加可选回调**（不破坏现有测试）：
+无需新增协议：
+
+- 首 turn：`ctx.resumeSessionId === undefined`，spawn args 不含 `--resume`；
+- 首 turn 的 `system/result.session_id` 经现有 `onSessionId` 进入 `TaskRunnerResult.sessionId`；
+- 后续 turn：SessionStore 把该值写到 `ctx.resumeSessionId`；
+- `StreamJsonAdapter.buildArgs` 生成 `--resume <id>`；仍由 `buildInput(prompt)` 写本 turn prompt；
+- 每轮 result 后 stdin.end，child exit，不能把 stdin 留到下一轮。
+
+### 4.4 Codex thread resume
+
+扩展真实接口：
 
 ```typescript
-export interface WsClientCallbacks {
-  onMessage?: (msg: DaemonMessage) => void;       // 现有
-  onConnected?: () => void;                        // 现有
-  onDisconnected?: (code: number, reason: string) => void;  // 现有
-  onError?: (err: Error) => void;                  // 现有
-  /** task-03：session 控制消息（server→daemon）。与 RPC 路径同级独立分支。 */
-  onControlMessage?: (msg: DaemonMessage) => void;
-}
+// protocol-adapter.ts
+buildHandshake?(opts: {
+  cwd: string;
+  prompt: string;
+  model?: string;
+  resumeSessionId?: string;
+}): string[];
 ```
 
-**`_handleMessage` 分派扩展**（在现有 RPC 分支后、onMessage 前加）：
+`JsonRpcAdapter.buildHandshake` 的前两条始终为 initialize request 和 `notifications/initialized`；第三条按是否有 resume id 分支：
 
 ```typescript
-// task-03：session 控制消息走独立分支，不进 onMessage（不污染 lease 消息分发）。
-if (
-  msg.type === MSG.SESSION_INJECT ||
-  msg.type === MSG.SESSION_INTERRUPT ||
-  msg.type === MSG.SESSION_END
-) {
-  this._callbacks.onControlMessage?.(msg);
-  return;
-}
-this._callbacks.onMessage?.(msg);
-```
-
-**设计理由**：与 RPC（task-05）同模式 —— 控制消息走独立回调，业务实现由 daemon.ts 消费（转交 SessionStore），ws-client 仅做"识别 type + 转发"，保持单一职责。
-
-### 4.5 daemon.ts kind 分流
-
-**改造点 1 — `_runLeaseStateMachine` 按 kind 分流**：
-
-在构造 `ctx: LeaseCtx` 后（daemon.ts:789-814 之后），增加 kind 判断：
-
-```typescript
-const kind = (ctx as LeaseCtx & { kind?: string }).kind ?? 'batch';
-if (kind === 'interactive') {
-  // session 模式：spawn 后不 await 完成（runLeaseSession 返回首轮 turn 完成信号即返回），
-  // 后续 turn 由 ws 控制消息驱动。completeLease 由 sessionStore.end 触发，不在此调用。
-  const firstTurnResult = await this._taskRunner!.runLeaseSession(ctx);
-  // 首轮完成即上报（让 backend 把 AgentRun 标 completed），不走 completeLease
-  //（interactive lease 在 sessionStore.end 时才 complete，见 §4.6）
-  this._logger.info('session_first_turn_done', {
-    lease_id: leaseId,
-    session_id: firstTurnResult.sessionId,
-  });
-  return;
-}
-// batch 模式：原路径（runLease → collectDiff → completeLease）
-const taskResult: TaskRunnerResult = await this._taskRunner!.runLease(ctx);
-// ... 现有 completeLease 逻辑不变
-```
-
-**改造点 2 — WsClient 构造时注入 onControlMessage**（daemon.ts:513-537 `_wsLoop`）：
-
-```typescript
-this._wsClient = this._wsClientFactory({
-  serverUrl: baseOrigin,
-  runtimeId: this._config.runtime_id,
-  callbacks: {
-    onMessage: (msg) => { void this._handleWsMessage(msg); },
-    onControlMessage: (msg) => { void this._handleSessionControl(msg); },  // 新增
-  },
-});
-```
-
-**改造点 3 — `_handleSessionControl` 路由到 SessionStore**：
-
-```typescript
-private async _handleSessionControl(msg: DaemonMessage): Promise<void> {
-  const payload = (msg.payload ?? {}) as Record<string, unknown>;
-  const sessionId = (payload.session_id ?? payload.sessionId) as string | undefined;
-  if (!sessionId) {
-    this._logger.warn('session_control_no_session_id', { type: msg.type });
-    return;
-  }
-  switch (msg.type) {
-    case MSG.SESSION_INJECT: {
-      const prompt = (payload.prompt as string | undefined) ?? '';
-      const runId = (payload.run_id ?? payload.runId) as string | undefined ?? '';
-      this._taskRunner!.injectPrompt(sessionId, prompt, runId);
-      break;
+const threadRequest = opts.resumeSessionId
+  ? {
+      jsonrpc: '2.0', id: 2,
+      method: 'thread/resume',
+      params: { threadId: opts.resumeSessionId },
     }
-    case MSG.SESSION_INTERRUPT: {
-      this._taskRunner!.interruptSession(sessionId);
-      break;
-    }
-    case MSG.SESSION_END: {
-      this._taskRunner!.endSession(sessionId);
-      // 同步触发 completeLease（status=ended，patch=collectDiff），见 §4.6
-      await this._completeInteractiveLease(sessionId);
-      break;
-    }
-    default:
-      this._logger.warn('unknown_control_message', { type: msg.type });
-  }
-}
+  : {
+      jsonrpc: '2.0', id: 2,
+      method: 'thread/start',
+      params: { cwd: opts.cwd },
+    };
 ```
 
-### 4.6 interactive lease 的 complete 时机
+TaskRunner 调 `buildHandshake` 时必须透传 `ctx.resumeSessionId`。现有 `_handleLine` 已按 `id === 2 && result.thread.id` 触发 `buildTurnStart`，应把注释和测试改成“thread/start 或 thread/resume response”，不要写死仅 thread/start。resume response 返回的 thread id 必须写入 `TaskRunnerResult.sessionId`，并继续用该 id 发 `turn/start({ threadId, input:[...] })`。
 
-**不能在首轮 turn 完成时 completeLease**（否则 lease 立即变 completed，后续 inject 找不到 lease）。三条结束路径合一：
+严禁把 Codex 后续 turn 简化为“新进程直接发 turn/start”：新 app-server 进程必须先 initialize + thread/resume，才能在恢复的 thread 上开始 turn。
 
-1. **手动 end**（`_handleSessionControl` 收到 SESSION_END）：sessionStore.end → completeLease(status=ended, patch=collectDiff from workDir)。
-2. **空闲 30min 回收**（task-06 范围，本任务预留 SessionStore.lastActiveAt 字段 + daemon 定时扫描 hook）。
-3. **agent 异常 exit**（session 模式 child exit）：sessionStore 标 failed → completeLease(status=failed, error='agent exited unexpectedly')。
+### 4.5 daemon / ws-client 路由
 
-本任务实现路径 1 + 3（路径 2 在 task-06）。`_completeInteractiveLease(sessionId)` 统一入口（design §8.5 R-04 修正），避免 lease expiry 与 sessionStore 双重回收。
+`WsClientCallbacks` 增加可选回调：
 
-## 5. 完成标准（AC）
+```typescript
+onControlMessage?: (msg: DaemonMessage) => void;
+```
 
-- **AC-1 [sessionStore API]**：`SessionStore.create/inject/interrupt/end` 五方法按 §4.1 语义实现；重复 create 抛错；inject 到非 active session 抛 `SessionNotActiveError`；end 后 `get` 返回 undefined。
-- **AC-2 [task-runner session 模式]**：`runLeaseSession(ctx)` 启动 spawn + 注入 sessionStore 后，第一轮 result 事件触发后 **child.stdin 未 end**（断言 `child.stdin.destroyed === false`），readline 未退出（断言后续注入 prompt 能写入 stdin 并触发第二轮 result）。
-- **AC-3 [claude inject]**：session 模式跑完第一轮 result 后，调 `sessionStore.inject(sessionId, 'second prompt', runId2)` → 第二条 user message JSON 写入 stdin → claude 输出第二轮 result（spike-01 已证可行）。
-- **AC-4 [codex inject]**：codex 首次 turn 跑通后 sessionStore.agentSessionId 填入 threadId；调 inject → `buildTurnStart({threadId, prompt})` 复用同 thread → codex 输出第二轮 turn/completed（threadId 跨 turn 持有，design R-06）。
-- **AC-5 [claude interrupt]**：跑第一轮中调 `interrupt` → `child.kill('SIGINT')` → claude 停当前 turn + sessionStore.status='interrupted' + child 仍存活；后续 inject 仍可触发新 turn（会话保留）。
-- **AC-6 [codex interrupt]**：调 interrupt → stdin 写 `turn/interrupt` JSON-RPC → codex 停当前 turn + thread 仍可用。
-- **AC-7 [end]**：调 `end` → `child.kill()` + status='ended' + map 移除；后续 inject 抛 SessionNotActiveError。
-- **AC-8 [kind 分流 batch 零变化]**：`ctx.kind='batch'`（默认）走原 `runLease` 路径，task-runner.ts / daemon.ts 现有所有测试零改动通过（兼容硬约束，design §9）。
-- **AC-9 [kind 分流 interactive]**：`ctx.kind='interactive'` 走 `runLeaseSession`，首轮完成后不 completeLease，等 SESSION_END 才 complete。
-- **AC-10 [ws-client 路由]**：注入 SESSION_INJECT/INTERRUPT/END 三类消息到 WsClient，`onControlMessage` 被调用且不触发 `onMessage`（不污染 lease 分发）。
+`_handleMessage` 在 RPC 分支之后识别 `MSG.SESSION_INJECT`、`MSG.SESSION_INTERRUPT`、`MSG.SESSION_END`，调用 `onControlMessage` 并 return；其它消息继续走 `onMessage`，不得破坏 TASK_AVAILABLE/RPC。
 
-## 6. 测试要点（vitest，**daemon 用 pnpm test 非 pytest**）
+daemon 处理规则：
 
-### 6.1 SessionStore 单测（`tests/session-store.test.ts`）
+- claim payload 的 `kind`、`agent_session_id`（兼容 camel/snake case）必须进入 `LeaseCtx`；默认 kind=`batch`；
+- batch：保持 `runLease → completeLease` 原路径；
+- interactive 首次 task_available：claim/start 后 `sessionStore.create(...)`，再 `startTurn(sessionId, {runId:firstRunId,prompt})`；turn 完成不 complete lease；
+- SESSION_INJECT：校验 payload 的 session_id/lease_id 与 store 一致，再 `startTurn`；不得向旧 stdin 写入；
+- SESSION_INTERRUPT：校验 session/lease 后调用 `interrupt`；
+- SESSION_END：校验 session/lease 后调用 `end`；不在 daemon 另写数据库状态机；
+- interactive session 注册需独立于 `_inflightLeases` 的“当前异步任务”集合，避免首 turn resolve 后重复 task_available 再次 create；可新增 `_interactiveSessionsByLease` 索引，end/fail 时清理。
 
-- `create` 后 `get` 返回完整 state；重复 create 抛错。
-- `inject` 到 active session → mock stdin.write 被调用，内容含 prompt（claude）/ threadId（codex）。
-- `inject` 到 ended/failed session → 抛 SessionNotActiveError。
-- `interrupt` claude → mock child.kill 被调用，signal='SIGINT'，status='interrupted'。
-- `interrupt` codex → mock stdin.write 含 `"method":"turn/interrupt"` + threadId。
-- `end` → mock child.kill + status='ended' + get 返回 undefined。
-- `activeCount` 随 create/end 正确变化。
+## 5. 边界条件（至少全部覆盖）
 
-**Mock 模式**：复用 `tests/helpers/fake-child.ts` 的 FakeChild（task-runner.test.ts:38 已在用）；adapter 用真实 StreamJsonAdapter / JsonRpcAdapter 实例（不 mock，验证真实 buildInput/buildTurnStart 输出）。
+1. **并发 inject**：状态从 active 原子切 running；第二个请求在第一个 turn resolve 前返回 `SessionTurnConflictError`，spawn 只发生一次。
+2. **首 turn 无 resume id**：成功结果未提供 Claude session_id/Codex thread_id 时 session 标 failed，第二 turn 不得退化为新上下文。
+3. **resume id 不存在**：后续 turn 在 `agentSessionId` 为空时拒绝执行，不能启动普通 spawn。
+4. **interrupt 空闲 session**：无 currentRun 时返回 false/no-op，不改变 active，不误杀后续进程。
+5. **interrupt 与 turn 完成竞态**：cancel 返回 false 或 turn 已 resolve 均视为幂等；finally 只能在非 ended/failed 时回 active。
+6. **end 与 turn 完成竞态**：end 先置 ended；迟到的 runTurn resolve/reject 不能复活 session；Map 最终删除。
+7. **WS lease_id 不匹配**：控制消息 session_id 存在但 lease_id 不同必须拒绝并记录结构化 warn，不能操作该 session。
+8. **Codex resume 失败**：`thread/resume` 返回 JSON-RPC error 或无 `result.thread.id`，turn 失败且 session 保留明确 failed 状态，不得自动 `thread/start` 新 thread。
+9. **Claude `--resume` spawn 失败**：不得清除 resumeSessionId 后重试为新会话；本 turn failed，旧 agentSessionId 保留供显式重试策略后续处理。
+10. **batch 兼容**：kind 缺失/未知一律按 batch 或明确拒绝未知值；不得让现有 workspace AgentRun 进入 SessionStore。
+11. **不同 session 并发**：可并行 spawn；同一 session 严格串行，不能用全局锁把所有 session 串行化。
+12. **进程资源释放**：每轮测试都断言 child exit 后 stdin destroyed/ended，SessionStore state 不包含 child/stdin 引用。
 
-### 6.2 task-runner session 模式单测（`tests/task-runner-session.test.ts`）
+## 6. TDD 实施顺序
 
-- `runLeaseSession` 启动 → spawn 被调（cmdPath+args 含 `-p --input-format stream-json`）→ FakeChild 推第一轮 result 行 → onTurnComplete 回调被调（断言 sessionId + runId）→ **child.stdin.destroyed === false**（核心 AC-2）。
-- 推第二轮：调 `taskRunner.injectPrompt` → FakeChild stdin 收到第二条 user msg JSON → 推第二轮 result 行 → onTurnComplete 再次被调（turnCount=2）。
-- child 自然 exit（模拟 agent 异常退出）→ runLeaseSession 返回 status='failed' + sessionStore 标 failed。
-- `_handleLine` 检测 thread/start response（id=2 含 thread.id）→ sessionStore.agentSessionId 被填入（codex 跨 turn 复用 R-06）。
+严格按“测试先失败 → 最小实现 → 重构 → 全量回归”执行：
 
-**Mock 模式**：`vi.mock('node:child_process')` 同 task-runner.test.ts:21；client/workspace/credential 用现有 helpers（mock HubClient + 内存 workspace）。
+### Step 1：JsonRpcAdapter resume 契约测试
 
-### 6.3 kind 分流单测（`tests/daemon-kind-dispatch.test.ts`）
+先在 `tests/adapters/json-rpc.test.ts` 增加：
 
-- `ctx.kind='batch'`（默认 / undefined）→ daemon 调 `taskRunner.runLease`（mock taskRunner，断言 runLease 被调，runLeaseSession 未被调）→ completeLease 被调。
-- `ctx.kind='interactive'` → daemon 调 `taskRunner.runLeaseSession`（断言 runLeaseSession 被调，runLease 未被调）→ completeLease **不**被首轮触发。
-- `_handleSessionControl` 收到 SESSION_END → completeInteractiveLease → completeLease 被调（status=ended）。
+- 无 resumeSessionId：第三条仍为 `thread/start`，params.cwd 正确；
+- 有 resumeSessionId：第三条为 `thread/resume`，params 严格为 `{threadId}`；
+- 两种 response 的 id=2 都能触发后续 `turn/start`；
+- `turn/start.params.threadId` 与 resume response 的 `result.thread.id` 相同。
 
-**Mock 模式**：mock TaskRunnerLike（注入 runLease/runLeaseSession 的 mock）+ mock WsClientFactory（手动触发 onControlMessage）。
+测试红后修改 `protocol-adapter.ts`、`json-rpc.ts` 和 TaskRunner handshake 透传。
 
-### 6.4 ws-client 控制路由单测（`tests/ws-client-control-route.test.ts`）
+### Step 2：TaskRunner 每 turn 新进程测试
 
-- 构造 WsClient + 注入 mock WebSocket，触发 'message' 事件传 SESSION_INJECT payload → `onControlMessage` 被调 + `onMessage` **不**被调。
-- SESSION_INTERRUPT / SESSION_END 同上各一条。
-- TASK_AVAILABLE / HEARTBEAT_ACK / RPC 仍走原路径（不进 onControlMessage）。
+用现有 `tests/helpers/fake-child.ts` 和 spawn mock：
 
-## 7. 风险 / 注意
+- 连续调用两次 `runTurn`，spawn 调用次数为 2，两个 FakeChild 对象不同；
+- Claude 首 turn args 不含 `--resume`，第二 turn args 含 `--resume sess-1`；
+- Codex 首 turn handshake 为 thread/start，第二 turn为 thread/resume，且两轮各自收到完成事件后 stdin.end、进程 exit；
+- `runTurn` 不调用 startLease/completeLease/leaseHeartbeat；
+- resumed turn 的 spawn failure 不触发无 resume id 的第二次 spawn。
 
-- **R-01（已降级）**：spike-01 已端到端验证 claude/codex 两轮 result 可行（design §1.2 / §10）。本任务基于此铁证设计"result 后 stdin 不 end"路径。如生产环境复现"第一轮后 agent exit"，回退到伪多轮 resume（design §3 / plan spike-01 不通过后果）。
-- **R-06（codex adapter 跨 turn 持有）**：JsonRpcAdapter 是有状态 adapter（pendingMap / streamedAgentMessageIds / agentMessageBuf），**sessionStore 持有同一 adapter 实例跨 turn**，不复用工厂 `getBackend(provider)` new（task-runner.ts:350 每次 runLease 都 new 一个新实例，session 模式必须打破此模式）。resetAccumulator 不在 turn 间调（保留跨 turn 状态），仅在 create 时调一次。
-- **R-07（并发）**：复用现有 `_inflightLeases` 并发池上限（daemon.ts:649 `max_concurrent_tasks`）。interactive lease 在 sessionStore.end 前不从 `_inflightLeases` 移除（保持占用配额，防止单 daemon 开无限会话）。需在 daemon.ts:657-662 `_executeTask` 调整：interactive lease 在 end 后才 delete（batch lease 在 runLease 完成后 delete，现状）。
-- **测试用 vitest 非 pytest**：daemon 是 TypeScript 项目（package.json scripts.test='vitest run'）。CONVENTIONS.md / local.yaml / scan 文档标的 Python（pip/pytest）已过时，本任务测试全部走 `cd sillyhub-daemon && pnpm test`，全局验收标准 AC-8 同此。
-- **stdin 写入失败处理**：session 模式 stdin 长时间保持开放，agent 可能已退出但 stdin 未 destroyed（race）。inject 前 sessionStore 先校验 `!child.killed && !child.stdin.destroyed`，否则抛 SessionNotActiveError（对齐 ws-client R-02 对策）。
-- **不实现的边界（推后到 task-06+）**：
-  - 空闲 30min 自动回收（task-06，本任务仅留 lastActiveAt 字段）。
-  - 崩溃恢复 resume（Wave 3 task-09）。
-  - 权限暂停往返（Wave 2 task-07/08）。
-  - session 级 SSE 聚合（task-05）。
+测试红后抽取 `_run` 实现 `runTurn`，不改 `_handleLine` 的终结语义。
 
-## 8. 验收对照
+### Step 3：SessionStore 单测
 
-| AC | 验证手段 | 对应 design 章节 |
-|---|---|---|
-| AC-1 ~ AC-7 | vitest 单测 + spike-01 端到端 | §5 Wave1 / §7.3 SessionStore API |
-| AC-8 | 现有 task-runner.test.ts / daemon.test.ts 零改动通过 | §9 兼容策略 |
-| AC-9 | daemon-kind-dispatch.test.ts | §5 Wave1 / D-002 |
-| AC-10 | ws-client-control-route.test.ts | §7.1 WS 控制消息 |
+注入 fake `TurnRunner`，覆盖：create/get、首 turn、resume ctx 派生、agentSessionId 更新、并发冲突、interrupt、end 竞态、failed、跨 session 并发，并用对象 key 断言 state 不含进程/流字段。
 
-全局验收：`cd sillyhub-daemon && pnpm test` 通过（vitest），`pnpm typecheck` 通过（tsc --noEmit）。
+### Step 4：ws-client 与 daemon 分流测试
+
+- SESSION_* 只触发 onControlMessage，不触发 onMessage；TASK_AVAILABLE/RPC 原路不变；
+- kind=batch 调 runLease + completeLease；
+- kind=interactive 调 create/startTurn，首 turn完成不 completeLease；
+- inject 创建新 runTurn，prompt/runId 准确，lease 不匹配被拒绝；
+- interrupt/end 分别只调用 SessionStore 对应方法；
+- 同一 interactive task_available 重放不重复 create/spawn。
+
+### Step 5：回归
+
+```powershell
+Set-Location sillyhub-daemon
+pnpm test -- json-rpc
+pnpm test -- task-runner-turn
+pnpm test -- session-store
+pnpm test -- ws-client-control-route daemon-kind-dispatch
+pnpm typecheck
+pnpm test
+```
+
+## 7. 表格验收标准
+
+| AC | 验收场景 | 可观察证据 | 状态 |
+|---|---|---|---|
+| AC-01 | Claude 首 turn 普通 spawn，第二 turn resume | 首轮结果 session_id 写入 SessionStore；第二轮 args 含同一 id 的 `--resume`；两轮 FakeChild/PID 不同 | [ ] |
+| AC-02 | Codex 首 turn 与后续 turn | 首轮握手为 `thread/start`；第二轮新进程为 `thread/resume {threadId}` 后 `turn/start`；thread id 不变 | [ ] |
+| AC-03 | turn 结束释放进程 | 每个 `result`/`turn/completed` 均关闭 stdin 并等待 child exit；SessionStore 无 child/stdin/adapter 字段 | [ ] |
+| AC-04 | 同 session 并发 inject | 同一 session 最多一个 running turn；两个并发请求只 spawn 一次，另一个得到明确 conflict | [ ] |
+| AC-05 | interrupt 当前 turn | 只取消 currentRun；完成收敛后 session 回 active、agentSessionId 保留，后续可 resume 新 spawn | [ ] |
+| AC-06 | end 与完成竞态 | end 可取消 currentRun 并删除内存 session；迟到的 turn resolve/reject 不复活 session | [ ] |
+| AC-07 | interactive lease 生命周期 | 首 turn和后续 turn完成均不调用 completeLease；数据库结束留给 backend `end_session` | [ ] |
+| AC-08 | WS 控制消息鉴权路由 | inject/interrupt/end 路由正确；session_id/lease_id 不匹配时无任何 session 操作 | [ ] |
+| AC-09 | batch 回归 | kind=batch/缺省仍执行现有 runLease、retry、heartbeat、completeLease；原测试通过 | [ ] |
+| AC-10 | resume 失败闭合 | Claude/Codex resume 失败不会降级为无 resume 新会话；错误可观察，session 状态为 failed | [ ] |
+| AC-11 | daemon 验证 | `pnpm typecheck` 与 daemon 全量 `pnpm test` 退出码为 0 | [ ] |
+
+## 8. 非目标与后续接口
+
+- 不做 session 级 Redis/SSE 聚合（task-05）。
+- 不做 30 分钟 idle 回收和跨 daemon 生命周期联调（task-06；本任务只保留 `lastActiveAt`）。
+- 不做 permission 暂停/批准（task-07、task-08）。
+- 不做磁盘持久化或 daemon 重启恢复（task-09）；本任务内存 state 丢失时不得尝试恢复旧进程。
+- 不做前端（task-10、task-11）。
+- 不扩展 Claude/Codex 以外 provider；interactive session 收到其它 provider 应明确拒绝，batch 仍支持原 provider 集。
+
+## 9. 实现检查清单
+
+- [ ] 写代码前确认 `.claude/CLAUDE.md` 未变化，并重新读取 daemon CONVENTIONS/ARCHITECTURE；扫描文档与 TS 源码冲突时以源码为准并记录。
+- [ ] 用 `rg` 确认所有调用的方法真实存在，尤其 `runLease`、`cancel`、`buildHandshake`、`buildTurnStart`。
+- [ ] 测试先行，至少观察一次目标测试按预期失败。
+- [ ] 未引入跨 turn child/stdin/session mode。
+- [ ] 未复制一份完整 runLease；共享核心由私有方法承载。
+- [ ] batch 测试无语义修改。
+- [ ] 对照 AC-01～AC-11 验收并记录命令结果。

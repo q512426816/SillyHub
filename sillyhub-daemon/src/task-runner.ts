@@ -1126,13 +1126,14 @@ export class TaskRunner {
       return;
     }
 
-    // submitMessages（失败仅 warn，不中断 — 对齐 Python test_submit_messages_failure_does_not_crash）
+    // submitMessages：fire-and-forget，不阻塞 stdout readline（每条 await HTTP
+    // 会让 cursor/codex 执行慢一个数量级；失败仅 warn，对齐容错策略）。
     if (env.claimToken) {
-      try {
-        await this.client.submitMessages(env.leaseId, env.claimToken, env.agentRunId, messages);
-      } catch (e) {
-        console.warn('task_runner: event_forward_failed', env.leaseId, e);
-      }
+      void this.client
+        .submitMessages(env.leaseId, env.claimToken, env.agentRunId, messages)
+        .catch((e) => {
+          console.warn('task_runner: event_forward_failed', env.leaseId, e);
+        });
     }
   }
 

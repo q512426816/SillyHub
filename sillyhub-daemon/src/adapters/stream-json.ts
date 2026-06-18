@@ -149,6 +149,21 @@ export class StreamJsonAdapter implements ProtocolAdapter {
   private static readonly THINKING_FLUSH_MS = 120;
 
   /**
+   * ql-20260618-012：部分 CLI 的 partial assistant 会反复推送「截至当前的累积全文」
+   *（非增量 delta）。若在流式过程中按字符/时间 flush，会：
+   *   1. 同一段落重复出现在运行日志
+   *   2. 每个 flush 一次 HTTP submit → 执行慢一个数量级
+   * 策略对齐 Claude Code：assistant 文本只在完整 message 或 tool 边界 emit；
+   * cursor 不使用 --stream-partial-output，走完整 assistant 事件。
+   */
+  private _assistantBuf = '';
+  private _lastFlushedAssistant = '';
+
+  private _usesPartialAssistantStream(): boolean {
+    return false;
+  }
+
+  /**
    * 子进程 stdin 引用，control_request 回写用。
    * 由 TaskRunner（task-19）在 spawn 后通过 attachStdin 注入。
    * parse 内部识别到 control_request 行时调 writeControlResponse 回写。
@@ -180,6 +195,8 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     // ql-20260617-012：thinking buffer 也清零。
     this._thinkingBuf = '';
     this._thinkingBufStartedAt = 0;
+    this._assistantBuf = '';
+    this._lastFlushedAssistant = '';
   }
 
   /** 读取累积的 session_id（供 TaskRunner 在 lease 结束时上报）。 */
@@ -210,6 +227,32 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     resumeSessionId?: string;
     prompt?: string;
   }): string[] {
+    const model = opts?.model?.trim();
+    const prompt = opts?.prompt?.trim() ?? '';
+
+    if (this.provider === 'cursor') {
+      // cursor-agent CLI 与 claude 参数集不同：无 --input-format / --permission-mode /
+      // --include-partial-messages；prompt 作位置参数，不走 stdin NDJSON。
+      // 不加 --stream-partial-output：partial 会高频重发累积全文，运行日志重复且
+      // 每条都 submit_messages 拖慢执行。完整 assistant message 与 Claude Code 一致。
+      const args = [
+        '-p',
+        '--output-format', 'stream-json',
+        '--force',
+        '--trust',
+      ];
+      if (model) {
+        args.push('--model', model);
+      }
+      if (opts?.resumeSessionId) {
+        args.push('--resume', opts.resumeSessionId);
+      }
+      if (prompt) {
+        args.push(prompt);
+      }
+      return args;
+    }
+
     const args = [
       '-p',
       '--output-format', 'stream-json',
@@ -221,7 +264,6 @@ export class StreamJsonAdapter implements ProtocolAdapter {
       // 的 message.usage 永远是 {0,0}，只能在最终 result 事件拿到真实值——无法实时累加。
       '--include-partial-messages',
     ];
-    const model = opts?.model?.trim();
     if (model) {
       args.push('--model', model);
     }
@@ -240,6 +282,10 @@ export class StreamJsonAdapter implements ProtocolAdapter {
    * 并保持 stdin 开启直到 result 事件（R-03），中途还能回写 control_response。
    */
   buildInput(prompt: string): string {
+    if (this.provider === 'cursor') {
+      // cursor-agent 通过 buildArgs 位置参数传 prompt，stdin 留空。
+      return '';
+    }
     const payload = {
       type: 'user',
       message: {
@@ -300,8 +346,16 @@ export class StreamJsonAdapter implements ProtocolAdapter {
         return this.parseUser(msg);
       case 'system':
         return this.parseSystem(msg);
-      case 'result':
-        return this.parseResult(msg);
+      case 'result': {
+        const events: AgentEvent[] = [];
+        if (this._usesPartialAssistantStream()) {
+          const flushed = this._flushAssistantBuf();
+          if (flushed) events.push(...flushed);
+        }
+        const parsed = this.parseResult(msg);
+        if (parsed) events.push(...parsed);
+        return events.length > 0 ? events : null;
+      }
       case 'log':
         return this.parseLog(msg);
       case 'control_request':
@@ -436,6 +490,40 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     return [{ type: 'text', content, metadata: { thinking: true } }];
   }
 
+  private _appendPartialAssistantText(incoming: string): void {
+    if (!incoming) return;
+    if (!this._assistantBuf) {
+      this._assistantBuf = incoming;
+      return;
+    }
+    const cur = this._assistantBuf;
+    if (incoming === cur) return;
+    if (incoming.startsWith(cur)) {
+      this._assistantBuf = incoming;
+      return;
+    }
+    if (cur.startsWith(incoming)) return;
+    const norm = (s: string) => s.replace(/\s+/g, '');
+    const inNorm = norm(incoming);
+    const curNorm = norm(cur);
+    if (inNorm && curNorm) {
+      if (inNorm.startsWith(curNorm) || curNorm.startsWith(inNorm)) {
+        this._assistantBuf = incoming.length >= cur.length ? incoming : cur;
+        return;
+      }
+    }
+    this._assistantBuf = cur + incoming;
+  }
+
+  private _flushAssistantBuf(): AgentEvent[] | null {
+    if (!this._assistantBuf) return null;
+    const content = this._assistantBuf;
+    this._assistantBuf = '';
+    if (!content || content === this._lastFlushedAssistant) return null;
+    this._lastFlushedAssistant = content;
+    return [{ type: 'text', content }];
+  }
+
   /**
    * ql-20260617-007：构造 usage_update text event（snapshot = 累计 + 当前 turn）。
    * 抽出来给 message_delta 和 content_block_delta 共用。
@@ -516,9 +604,12 @@ export class StreamJsonAdapter implements ProtocolAdapter {
 
       if (blockType === 'text') {
         const text = typeof block.text === 'string' ? block.text : '';
-        if (text) {
-          events.push({ type: 'text', content: text });
+        if (!text) continue;
+        if (this._usesPartialAssistantStream()) {
+          this._appendPartialAssistantText(text);
+          continue;
         }
+        events.push({ type: 'text', content: text });
       } else if (blockType === 'thinking') {
         // thinking 收敛为 type='text' + metadata.thinking（AgentEventType 5 元组无 thinking）
         // ql-20260617-010：若本 turn 已通过 thinking_delta 流式输出过 thinking，
@@ -530,6 +621,10 @@ export class StreamJsonAdapter implements ProtocolAdapter {
           events.push({ type: 'text', content: text, metadata: { thinking: true } });
         }
       } else if (blockType === 'tool_use') {
+        if (this._usesPartialAssistantStream()) {
+          const flushed = this._flushAssistantBuf();
+          if (flushed) events.push(...flushed);
+        }
         // tool_use：对照 Python L323-329
         const name = typeof block.name === 'string' ? block.name : '';
         const id = typeof block.id === 'string' ? block.id : '';
@@ -583,6 +678,10 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     if (!Array.isArray(content)) return null;
 
     const events: AgentEvent[] = [];
+    if (this._usesPartialAssistantStream()) {
+      const flushed = this._flushAssistantBuf();
+      if (flushed) events.push(...flushed);
+    }
     for (const block of content) {
       if (!isRecord(block)) continue;
       if (block.type !== 'tool_result') continue;

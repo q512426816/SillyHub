@@ -1,3 +1,17 @@
+## ql-20260618-011-a8d3 | 2026-06-18 16:05:00 | Workspace 创建：路径规范化 + 默认 daemon 路径 + server-local 需 admin
+
+状态：已完成
+文件：frontend/src/lib/client-path.ts、frontend/src/components/daemon-dir-browser.tsx、frontend/src/components/workspace-scan-dialog.tsx、backend/app/modules/workspace/router.py
+结果：Windows 路径统一反斜杠；添加 Workspace 默认 daemon-client；server-local 仅 workspace:admin 可见且后端校验；去掉 D-001 内部术语文案。
+
+## ql-20260618-010-e7c4 | 2026-06-18 15:43:18 | 修复 daemon WS 用 config.runtime_id 导致 list_dir RPC 504 offline
+
+状态：已完成
+文件：sillyhub-daemon/src/daemon.ts、sillyhub-daemon/tests/daemon-multi-runtime.test.ts、.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
+依据：用户报添加 daemon-client workspace 时 `HTTP_504_DAEMON_RPC_GATEWAY: daemon runtime '8fda3323-...' offline`；HTTP 心跳用 register 返回的 server runtime id，WS 却连 config.runtime_id，hub 无对应连接。
+结果：daemon `_wsLoop` 改为对每个 `_registeredRuntimes` server id 各建一条 WsClient（`_wsClients` Map）；stop 时 `_closeAllWsClients`；新增单测 `ws_uses_server_assigned_runtime_ids`；模块文档补充 WS 须与 heartbeat 一致。
+验证：vitest daemon.test.ts + daemon-multi-runtime.test.ts 37/37 通过；tsc --noEmit 零错误。
+
 ## ql-20260618-009-f3a2 | 2026-06-18 11:45:40 | 修复 agent per-run model 代码 review 发现的 5 个小问题
 
 状态：已完成

@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
+  formatRunProviderLabel,
   getAgentRunLogs,
   killAgentRun,
   listAgentRuns,
@@ -538,7 +539,7 @@ export default function AgentPage({ params }: Props) {
                       <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
                     </span>
                     <code className="truncate font-mono text-xs font-medium">{shortId(run.id)}</code>
-                    <Badge variant="default" className="shrink-0">{run.agent_type}</Badge>
+                    <Badge variant="default" className="shrink-0">{formatRunProviderLabel(run)}</Badge>
                   </div>
                   <div className="flex shrink-0 gap-1.5">
                     <Button
@@ -738,7 +739,7 @@ export default function AgentPage({ params }: Props) {
                           <code className="font-mono text-[11px] text-primary">{shortId(run.id)}</code>
                         </td>
                         <td className="whitespace-nowrap px-3 py-2">
-                          <Badge variant="outline" className="text-[10px]">{run.agent_type}</Badge>
+                          <Badge variant="outline" className="text-[10px]">{formatRunProviderLabel(run)}</Badge>
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 text-xs">
                           {run.task_id ? (

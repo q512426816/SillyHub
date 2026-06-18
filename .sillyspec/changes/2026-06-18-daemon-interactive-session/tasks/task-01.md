@@ -1,72 +1,116 @@
 ---
+author: qinyi
+created_at: 2026-06-18 15:31:03
+change: 2026-06-18-daemon-interactive-session
 id: task-01
-title: 数据模型迁移（agent_sessions 表 + lease.kind + agent_runs.agent_session_id + alembic）
+title: "数据模型迁移：agent_sessions、lease.kind、agent_runs.agent_session_id 与 Alembic"
 wave: W1
 priority: P0
 depends_on: []
-covers: [FR-01, FR-09, D-001, D-002, D-005]
-created_at: 2026-06-18 14:11:24
-author: qinyi
+blocks: [task-02, task-04]
+requirement_ids: [FR-01, FR-09]
+decision_ids: [D-001@v1, D-002@v2, D-005@v1]
+allowed_paths:
+  - backend/app/modules/agent/model.py
+  - backend/app/modules/daemon/model.py
+  - backend/migrations/env.py
+  - backend/migrations/versions/202607040900_create_agent_sessions.py
+  - backend/tests/modules/agent/test_agent_session_model.py
+  - backend/tests/modules/daemon/test_interactive_lease_model.py
+  - backend/tests/migrations/test_create_agent_sessions_migration.py
 ---
 
-# task-01 — 数据模型迁移（agent_sessions 表 + lease.kind + agent_runs.agent_session_id + alembic）
+# task-01 — 交互式会话数据契约与迁移
 
-> 设计依据：`design.md` §8 数据模型（§8.1 agent_sessions 字段、§8.2 lease.kind、§8.3 agent_runs.agent_session_id、§8.4 三元关系、§8.5 interactive lease 过期语义）、§6 文件变更清单、§9 兼容策略；`plan.md` task-01 行；`decisions.md` D-001~D-002/D-005。
+> Wave 1 / 数据地基 / 无前置依赖。依据 `plan.md` 的显式 task-01、`design.md` §8-§9、`decisions.md` D-001@v1、D-002@v2、D-005@v1，以及当前 `AgentRun`、`DaemonTaskLease`、Alembic 迁移链真实实现。
 
-## 目标
+## 1. 目标
 
-新增 `agent_sessions` 表 + `daemon_task_leases.kind` 字段 + `agent_runs.agent_session_id` FK，配套 alembic 迁移，为交互式会话管控奠定数据契约（不改现有 `AgentRun.session_id`，D-001）。
+建立交互式会话的持久化三元关系，同时保持现有批处理执行契约不变：
 
-## 前置依赖
+1. 新增 `AgentSession` / `agent_sessions`，一条记录代表一个跨 turn 会话。
+2. `DaemonTaskLease.kind` 区分 `batch` 与 `interactive`，默认和存量均为 `batch`。
+3. `AgentRun.agent_session_id` 指向会话聚合实体；每个 turn 仍是一条独立 `AgentRun`。
+4. 保留 `AgentRun.session_id` 的既有 agent 内部 resume id 语义，不重命名、不迁移、不复用。
+5. 提供可逆 Alembic 迁移，并让 Alembic metadata 显式加载 daemon 表。
 
-无（Wave1 地基任务，`depends_on: []`）。
+本任务只建立数据契约。spawn + resume、session REST、SSE 聚合和生命周期编排分别由后续任务实现。
 
-## 涉及文件
+## 覆盖来源
 
-| 操作 | 真实路径 | 说明 |
+| 来源 | 要求/决策 | 本任务落实 |
 |---|---|---|
-| 修改 | `backend/app/modules/agent/model.py` | 新增 `AgentSession(BaseModel, table=True)` 类；`AgentRun` 加 `agent_session_id` FK 字段（不改现有 `session_id`） |
-| 修改 | `backend/app/modules/daemon/model.py` | `DaemonTaskLease` 加 `kind` 字段（默认 `batch`，新增 interactive 取值） |
-| 新增 | `backend/migrations/versions/202606180900_create_agent_sessions.py`（命名遵循现有 `YYYYMMDDHHMM_<desc>.py` 格式；与本次变更日期对齐，建议 `down_revision = "202607030900"` 即当前最新 head） | alembic 迁移：建 agent_sessions 表 + 加 lease.kind 列 + 加 agent_runs.agent_session_id 列 + 三类索引 |
-| 校对 | `backend/migrations/env.py` | **可选**：确认 daemon model 的 eager import（当前未显式 import，autogenerate 可能扫不到 daemon 表）。本任务采用**手写迁移**而非 autogenerate，故 env.py 不强制改；若后续依赖 autogen 需补 `from app.modules.daemon import model as _daemon_model  # noqa: F401` |
+| `plan.md` task-01 | Wave 1 数据模型迁移，覆盖 FR-01、FR-09 / D-001@v1、D-002@v2、D-005@v1 | 建立 session/lease/run 数据地基与 batch 兼容默认值 |
+| FR-01 | 创建 `agent_sessions`、interactive lease 与首个 AgentRun 的持久化关系 | 新表、`lease.kind`、run 会话 FK；创建业务逻辑留给 task-04 |
+| FR-09 | 批处理 lease 和 workspace AgentRun 行为不变 | `kind` 默认/回填 `batch`，run FK 默认 NULL，不改 `AgentRun.session_id` |
+| D-001@v1 | 新实体叫 `AgentSession`；FK 叫 `agent_session_id`；旧 `session_id` 保留 | ORM、迁移和守门测试逐项锁定命名与旧字段类型 |
+| D-002@v2 | 1 session = 1 长生命周期 lease；1 session = N 个独立 turn/run | lease 唯一关联 + run N:1 FK；不引入跨 turn 进程字段 |
+| D-005@v1 | interactive lease 不绑定单一 run，三元关系通过 session 表表达 | 保留 nullable `lease.agent_run_id`，新增 `session.lease_id` 和 `run.agent_session_id` |
+| `design.md` §8-§9 | 字段、三元关系、过期语义与 brownfield 兼容 | §4 数据接口、§5 不变量、§6 边界与 §9 验收共同约束 |
 
-> 现有 daemon model 已通过运行时（router/service import 链）注册到 `BaseModel.metadata`，且 `202606270900_create_daemon_tables.py` 即手写迁移，本任务延续手写风格，避免 autogen 噪声。
+## 2. 真实现状与约束
 
-## 数据模型细节
+| 位置 | 当前事实 | 本任务约束 |
+|---|---|---|
+| `backend/app/modules/agent/model.py` | `AgentRun.session_id` 已是 `String(128), nullable=True`，quick-chat 用作 agent resume id；`AgentRun` 尚无会话 FK | 新增字段必须叫 `agent_session_id`，现有 `session_id` 定义保持原样 |
+| `backend/app/modules/daemon/model.py` | `DaemonTaskLease.agent_run_id` 可空且 FK→`agent_runs.id`；无 `kind` | batch 保持现有关联；interactive 的 `agent_run_id=NULL` 由 task-04 业务层保证 |
+| `backend/migrations/env.py` | eager import 了 agent model，但没有 daemon model | 必须显式 import daemon model，确保 `BaseModel.metadata` 可解析新增跨模块 FK |
+| `backend/migrations/versions/202607030900_add_workspace_path_source.py` | 当前迁移链尾 revision 为 `202607030900` | 新迁移使用 revision `202607040900`，执行前再次检查 head；若 head 已变化，先调整 revision/down_revision，禁止制造平行 head |
+| `BaseModel` | 只统一 metadata，不提供审计字段 | `AgentSession` 自行声明时间字段，禁止假设基类自动生成 |
 
-### 1. `agent_sessions` 表（design §8.1 完整字段）
+## 3. 修改文件
 
-| 字段 | 类型 | 约束 | 说明 |
-|---|---|---|---|
-| `id` | Uuid PK | NOT NULL | 主键 |
-| `user_id` | Uuid | NOT NULL, FK→`users.id` ON DELETE CASCADE | 所属用户 |
-| `runtime_id` | Uuid | NULL, FK→`daemon_runtimes.id` ON DELETE CASCADE（design §8.1 标 NULL 可空，与 workspace path_source 语义对齐：daemon 可能下线但 session 记录保留） | 执行该会话的 daemon runtime |
-| `lease_id` | Uuid | NULL, FK→`daemon_task_leases.id` ON DELETE SET NULL（D-002 1:1 长生命周期 lease） | 关联 lease |
-| `provider` | String(30) | NOT NULL | `claude` / `codex` |
-| `status` | String(20) | NOT NULL, server_default `'pending'` | `pending`/`active`/`reconnecting`/`ended`/`failed` |
-| `agent_session_id` | String(255) | NULL | agent 内部会话 id（claude session_id / codex thread_id），供 resume；**注意此字段名是数据库列**，与表名 `agent_sessions.id` 区分 |
-| `config` | JSON | NULL | `{ manual_approval, model, ... }`（Wave2 用 manual_approval） |
-| `turn_count` | Integer | NOT NULL, server_default `0` | 已执行 turn 数 |
-| `created_at` | DateTime(tz) | NOT NULL, server_default `now()` | 创建时间（审计字段，与现有 model 风格一致） |
-| `last_active_at` | DateTime(tz) | NULL | 最近一次 turn 活跃时间（D-004 空闲回收用） |
-| `ended_at` | DateTime(tz) | NULL | 会话结束时间（status=ended/failed 时填） |
+| 操作 | 精确路径 | 改动 |
+|---|---|---|
+| 修改 | `backend/app/modules/agent/model.py` | 新增 `AgentSession`；为 `AgentRun` 增加 nullable FK `agent_session_id` 和索引 |
+| 修改 | `backend/app/modules/daemon/model.py` | 为 `DaemonTaskLease` 增加非空 `kind`，Python/DB 默认均为 `batch`，增加索引 |
+| 修改 | `backend/migrations/env.py` | 增加 `from app.modules.daemon import model as _daemon_model  # noqa: F401` |
+| 新增 | `backend/migrations/versions/202607040900_create_agent_sessions.py` | 建表、加列、加 FK/索引；提供严格逆序 downgrade |
+| 新增 | `backend/tests/modules/agent/test_agent_session_model.py` | `AgentSession` 与 `AgentRun.agent_session_id` 模型契约测试 |
+| 新增 | `backend/tests/modules/daemon/test_interactive_lease_model.py` | lease.kind 默认值、列约束与索引测试 |
+| 新增 | `backend/tests/migrations/test_create_agent_sessions_migration.py` | 迁移 revision、操作序列与 downgrade 对称性测试 |
 
-> 审计字段（`created_at`/`updated_at`）：现有各 model 在类内自定义（BaseModel 仅共享 metadata，无强制钩子）。本表用 `created_at` + `last_active_at` + `ended_at`（无 `updated_at`，用 `last_active_at` 兼作活跃更新戳，对齐 design §8.1 字段列表）。
+不得修改 `schema.py`、service、router、placement、前端或 daemon TypeScript 文件；这些不属于数据模型任务。
 
-### 2. `daemon_task_leases.kind` 字段（design §8.2）
+## 4. 实现要求与接口定义
+
+### 4.1 `AgentSession`
+
+在 `backend/app/modules/agent/model.py` 定义：
 
 ```python
-kind: str = Field(
-    default="batch",
-    sa_column=Column(String(20), nullable=False, server_default=text("batch")),
-)
+class AgentSession(BaseModel, table=True):
+    __tablename__ = "agent_sessions"
 ```
 
-- 取值：`batch`（默认，现有批处理，跑完即结束）| `interactive`（交互式会话，长生命周期，多 turn）。
-- 现有所有 lease 默认 `batch`，行为不变（design §9 兼容策略）。
-- 迁移用 `server_default='batch'` 回填现有行。
+字段契约：
 
-### 3. `agent_runs.agent_session_id` FK（design §8.3）
+| 字段 | SQLAlchemy 类型 | NULL/默认 | FK / 语义 |
+|---|---|---|---|
+| `id` | `Uuid(as_uuid=True)` | NOT NULL；`uuid.uuid4` | PK |
+| `user_id` | `Uuid(as_uuid=True)` | NOT NULL | FK→`users.id`, `ondelete="CASCADE"` |
+| `runtime_id` | `Uuid(as_uuid=True)` | NULL | FK→`daemon_runtimes.id`, `ondelete="SET NULL"`；runtime 删除不抹掉会话历史 |
+| `lease_id` | `Uuid(as_uuid=True)` | NULL | FK→`daemon_task_leases.id`, `ondelete="SET NULL"`；唯一约束保证 session↔lease 最多 1:1 |
+| `provider` | `String(30)` | NOT NULL | 当前支持 `claude` / `codex`；本任务不加 DB enum/check |
+| `status` | `String(20)` | NOT NULL；Python default + server default `pending` | `pending/active/reconnecting/ended/failed` |
+| `agent_session_id` | `String(255)` | NULL | agent 内部 Claude session id / Codex thread id，供后续 resume |
+| `config` | `JSON` | NULL | 会话配置，如 `manual_approval`、`model` |
+| `turn_count` | `Integer` | NOT NULL；Python default 0 + server default `0` | 已创建/执行 turn 计数，递增逻辑不在本任务 |
+| `created_at` | `DateTime(timezone=True)` | NOT NULL；UTC factory + `now()` | 创建时间 |
+| `last_active_at` | `DateTime(timezone=True)` | NULL | 最近活动时间 |
+| `ended_at` | `DateTime(timezone=True)` | NULL | ended/failed 收口时间 |
+
+索引/唯一性必须同时体现在 ORM `__table_args__` 与迁移：
+
+- `idx_agent_sessions_user_id(user_id)`
+- `idx_agent_sessions_runtime_id(runtime_id)`
+- `uq_agent_sessions_lease_id(lease_id)`：unique；PostgreSQL 允许多条 NULL，非 NULL lease 只能关联一个 session
+- `idx_agent_sessions_status(status)`
+- `idx_agent_sessions_agent_session_id(agent_session_id)`，可使用 `WHERE agent_session_id IS NOT NULL`
+
+### 4.2 `AgentRun.agent_session_id`
+
+在现有 `session_id` 后新增：
 
 ```python
 agent_session_id: uuid.UUID | None = Field(
@@ -79,86 +123,122 @@ agent_session_id: uuid.UUID | None = Field(
 )
 ```
 
-- **不改现有 `AgentRun.session_id`（String(128)）**：那是 claude resume id，被 quick-chat-multiturn 在用，术语区分见 D-001。
-- 新增 `agent_session_id` 指向本会话聚合实体（D-005 三元关系）。
-- 批处理 run 的 `agent_session_id = NULL`（默认）。
+并在 `AgentRun.__table_args__` 新增 `ix_agent_runs_agent_session_id`，可采用 `agent_session_id IS NOT NULL` 的 PostgreSQL partial index。该 FK 表达 session↔runs 1:N。禁止改动现有 `session_id: str | None / String(128)`。
 
-### 4. 三元关系（design §8.4 / D-005）
+### 4.3 `DaemonTaskLease.kind`
 
+```python
+kind: str = Field(
+    default="batch",
+    sa_column=Column(
+        String(20),
+        nullable=False,
+        default="batch",
+        server_default="batch",
+    ),
+)
 ```
-daemon_task_leases (kind=interactive)          agent_sessions
-   id ────────────────────────────────────────► lease_id    (1:1, session.lease_id)
-   agent_run_id = NULL  ◄── interactive 不用     id
-                                                   ┌─ agent_session_id (FK) ◄────┐
-                                                   │                             │
-                                               agent_runs (N)                  │
-                                                   agent_session_id ────────────┘  (N:1)
-                                                   session_id (保留,claude resume 用)
+
+在 `DaemonTaskLease.__table_args__` 增加 `idx_daemon_task_leases_kind(kind)`。本任务只定义字符串契约：`batch` 与 `interactive`；不引入 enum/check constraint，避免把后续状态演进锁死。
+
+### 4.4 Alembic 迁移
+
+`backend/migrations/versions/202607040900_create_agent_sessions.py`：
+
+```python
+revision = "202607040900"
+down_revision = "202607030900"
+branch_labels = None
+depends_on = None
 ```
 
-- **interactive lease.agent_run_id = NULL**（不直接关联单个 run，避免与"每 turn 一个 AgentRun"矛盾）；batch lease 保持原 1:1 用法。
-- **session ↔ lease 1:1**：`agent_sessions.lease_id` FK→daemon_task_leases。
-- **session ↔ runs 1:N**：`agent_runs.agent_session_id` FK→agent_sessions，每 turn 一个 run。
+`upgrade()` 固定顺序：
 
-> 本任务**只**建表/字段/约束，不实现"interactive lease.agent_run_id=NULL"的业务逻辑（那是 task-04 placement 的事）；契约层把 FK 留出来即可。
+1. `op.create_table("agent_sessions", ...)`，列与 FK 完全匹配 §4.1。
+2. 创建 `agent_sessions` 的 5 个索引/唯一索引。
+3. `op.add_column("daemon_task_leases", kind)`，`nullable=False, server_default="batch"`，使存量行自动回填。
+4. 创建 `idx_daemon_task_leases_kind`。
+5. `op.add_column("agent_runs", agent_session_id)`，列内 FK→`agent_sessions.id`, `ondelete="SET NULL"`。
+6. 创建 `ix_agent_runs_agent_session_id`。
 
-### 5. interactive lease 过期语义（design §8.5）
+`downgrade()` 必须严格逆序：先删 run 索引/列，再删 lease 索引/列，最后删 session 索引和表。不得触碰 `agent_runs.session_id` 或现有 lease 索引。
 
-本任务**不**实现 `lease_expires_at=NULL` 的业务赋值（task-04 创建 interactive lease 时设置）；契约上 `lease_expires_at` 仍是 nullable DateTime，interactive lease 创建时由 service 层显式传 NULL。`handle_lease_expiry` 跳过 interactive（基于 status 路径）的改动属 service 层（task-04/task-06）。
+## 5. 三元关系不变量
 
-## 实现步骤
+```text
+AgentSession.lease_id ──unique──> DaemonTaskLease.id
+AgentRun.agent_session_id ──N:1──> AgentSession.id
+AgentRun.session_id ─────────────> agent 内部 resume id（旧语义，保持不变）
+```
 
-1. **定义 `AgentSession` model**（`backend/app/modules/agent/model.py`）：
-   - 新增 `class AgentSession(BaseModel, table=True):`，`__tablename__ = "agent_sessions"`；
-   - `__table_args__` 含索引（见步骤 5）；
-   - 按 §1 字段表逐一定义字段，沿用现有 model 的 `Field(sa_column=Column(...))` 风格、`default_factory=uuid.uuid4` / `default_factory=lambda: datetime.now(UTC)` / `server_default=text(...)` 审计戳模式；
-   - FK：`user_id`→`users.id` CASCADE、`runtime_id`→`daemon_runtimes.id` CASCADE（nullable）、`lease_id`→`daemon_task_leases.id` SET NULL（nullable）。
-2. **`AgentRun` 加 `agent_session_id`**（同文件）：按 §3 代码片段加字段，放在 `session_id` 字段**之后**并加注释指明两者语义差异（D-001）。
-3. **`DaemonTaskLease` 加 `kind`**（`backend/app/modules/daemon/model.py`）：按 §2 代码片段加字段，放在 `status` 字段附近；同步在 `__table_args__` 加索引（见步骤 5）。
-4. **手写 alembic 迁移**（`backend/migrations/versions/202606180900_create_agent_sessions.py`）：
-   - `revision = "202606180900"`、`down_revision = "202607030900"`（当前 head）、`branch_labels = None`、`depends_on = None`；
-   - `upgrade()`：
-     - `op.create_table("agent_sessions", ...)` 按 §1 字段表（注意 FK 引用已有表 `users` / `daemon_runtimes` / `daemon_task_leases`）；
-     - `op.add_column("daemon_task_leases", sa.Column("kind", sa.String(20), nullable=False, server_default="batch"))`；
-     - `op.add_column("agent_runs", sa.Column("agent_session_id", sa.Uuid(as_uuid=True), sa.ForeignKey("agent_sessions.id", ondelete="SET NULL"), nullable=True))`；
-   - `downgrade()`：反向 drop（先 drop agent_runs.agent_session_id 列与相关索引 → drop lease.kind 列 → drop agent_sessions 索引 → drop agent_sessions 表），参考 `202606270900_create_daemon_tables.py` 的逆序风格。
-5. **索引**（迁移 + model `__table_args__` 双写）：
-   - `agent_sessions`：`idx_agent_sessions_user_id` (user_id)、`idx_agent_sessions_runtime_id` (runtime_id)、`idx_agent_sessions_lease_id` (lease_id)、`idx_agent_sessions_status` (status)、`idx_agent_sessions_agent_session_id` (agent_session_id, partial WHERE NOT NULL 供 resume 查找)；
-   - `agent_runs.agent_session_id`：`ix_agent_runs_agent_session_id` (agent_session_id, partial WHERE NOT NULL)；
-   - `daemon_task_leases.kind`：`idx_daemon_task_leases_kind` (kind) —— 支持 service 层按 kind 过滤调度（task-04 用）。
-6. **自检**：跑 `cd backend && uv run alembic upgrade head` → `alembic downgrade -1` → `alembic upgrade head` 确认 up/down 可逆无错。
+- interactive lease 的 `agent_run_id` 应为 NULL，但这是 task-04 创建/编排逻辑的责任，本任务不加跨字段 DB check。
+- batch lease 继续使用现有 `agent_run_id`，`kind` 默认 `batch`，不要求调用方立刻显式传值。
+- 一个 session 可有多个按时间顺序创建的 run；本任务不增加“同一时刻最多一个 running run”的 DB 约束，该并发守门属于 task-04/task-06。
 
-## 完成标准
+## 6. 边界与异常场景
 
-- [ ] `agent_sessions` 表创建，字段名/类型/约束 100% 对齐 design §8.1（含 `agent_session_id` String(255) 列、`turn_count` 默认 0、三个时间戳）。
-- [ ] `daemon_task_leases.kind` 列存在，`server_default='batch'`，现有行回填为 batch。
-- [ ] `agent_runs.agent_session_id` FK 列存在，nullable，批处理 run 为 NULL。
-- [ ] **`AgentRun.session_id`（String(128)）字段、语义、值零改动**（D-001 守门，验收时 grep 确认无任何代码改写 session_id 的取值/含义）。
-- [ ] alembic `upgrade head` / `downgrade -1` 可逆执行无错。
-- [ ] 三元关系 FK 链成立：`agent_sessions.lease_id → daemon_task_leases.id`、`agent_runs.agent_session_id → agent_sessions.id`。
-- [ ] 索引齐全（5 个 agent_sessions 索引 + 1 个 agent_runs 索引 + 1 个 lease.kind 索引）。
-- [ ] `AgentSession` 继承 `BaseModel`，被 `BaseModel.metadata` 注册（env.py 经运行时 import 链可达；如需 autogen 则补 daemon eager import，见涉及文件表"校对"行）。
-- [ ] 现有批处理 lease / workspace agent run 行为零变化（兼容，design §9）：`kind` 默认 batch、`agent_session_id` 默认 NULL、现有端点不受影响。
+| # | 场景 | 期望 |
+|---|---|---|
+| 1 | 现有 lease 行在迁移前没有 kind | upgrade 后全部读为 `batch`，列 NOT NULL；批处理调用方不传 kind 仍得到 `batch` |
+| 2 | 普通 batch `AgentRun` 未绑定会话 | `agent_session_id=NULL` 合法，旧流程无行为变化 |
+| 3 | 同一 session 关联多个 turn run | 多条 `agent_runs.agent_session_id` 可指向同一 session |
+| 4 | 两个 session 绑定同一非 NULL lease | 唯一索引拒绝第二条，落实 1 session = 1 lease |
+| 5 | session 尚未分配 runtime/lease 或关联对象被删除 | `runtime_id`/`lease_id` 可为 NULL；`SET NULL` 保留会话历史 |
+| 6 | session 被删除 | 关联 run 的 `agent_session_id` 变为 NULL；run 历史不级联删除 |
+| 7 | agent 内部 id 尚未返回 | `AgentSession.agent_session_id=NULL` 合法，后续 turn 调度必须等待该值，但不由本任务实现 |
+| 8 | `config` 未提供或含 provider 特有字段 | NULL 或任意 JSON 合法；本任务不做配置 schema 校验 |
+| 9 | downgrade 时存在新增数据 | 先移除依赖列/索引再删表，不因 FK 顺序失败；允许丢弃本变更数据 |
+| 10 | 开始实现时 Alembic head 已不再是 `202607030900` | 停止使用写死的 down_revision，重新选顺序 revision；不得提交多 head |
 
-## 测试要点
+## 7. 非目标
 
-- **模型实例化测试**（新增 `backend/app/modules/agent/tests/test_agent_session_model.py`）：
-  - `AgentSession(...)` 能实例化，必填字段（user_id、provider）缺失时按预期报错；
-  - `AgentRun(agent_session_id=<sid>)` 关联可读回；
-  - `DaemonTaskLease(kind='interactive')` / `kind='batch'` 默认值正确。
-- **迁移 up/down 测试**：
-  - `alembic upgrade head` 后 `\d agent_sessions` 字段齐全、FK 成立、索引存在；
-  - `alembic downgrade -1` 干净回滚（表/列/索引全部 drop）；
-  - 二次 `upgrade head` 幂等无错。
-- **契约守门测试**：`session_id` 列在迁移前后定义不变（diff schema dump）。
-- **回归**：现有 `backend/app/modules/agent/tests/*` 与 `backend/app/modules/daemon/tests/*` 全绿（`cd backend && uv run pytest`）。
+- 不实现 session create/inject/interrupt/end REST 或 service。
+- 不实现 interactive lease 创建时 `agent_run_id=NULL`、`lease_expires_at=NULL` 的业务赋值。
+- 不实现 spawn、Claude `--resume`、Codex thread resume 或 sessionStore。
+- 不实现 session 级 Redis/SSE 聚合。
+- 不实现 turn_count、last_active_at、ended_at 的状态更新逻辑。
+- 不新增 ORM relationship 属性；后续查询先使用显式 FK，避免本任务扩大加载策略范围。
+- 不修改/迁移/重解释 `AgentRun.session_id`。
+- 不为 provider/status/kind 增加数据库 enum 或 check constraint。
 
-## 风险/注意
+## 8. TDD 实施顺序
 
-- **数据可清空**（CLAUDE.md 规则 7）：本项目未正式上线，迁移无需保留旧数据兼容，直接 add_column + server_default 回填即可，无需分阶段 online migration。
-- **BaseModel 审计钩子**：`BaseModel`（`backend/app/models/base.py`）仅共享 `metadata`，**无** `created_at`/`updated_at` 自动钩子 —— 各 model 自定义时间戳字段。`AgentSession` 沿用现有手写模式（参考 `DaemonRuntime`/`DaemonTaskLease`），不要假设基类自动填审计戳。
-- **术语碰撞**（R-05/D-001）：表名 `agent_sessions`、列 `agent_sessions.agent_session_id`（agent 内部会话 id）、FK 列 `agent_runs.agent_session_id`（指向本表）三者在数据库层同名易混。代码注释和迁移注释必须写清三者语义；model 字段顺序把"内部 agent_session_id 列"和"FK"放一起并注释区分。
-- **三元关系 FK 方向**（D-005）：interactive lease 不再用 `agent_run_id`（保持 nullable），关系通过 `agent_sessions.lease_id` + `agent_runs.agent_session_id` 表达；**本任务只建 FK，不实现"interactive lease.agent_run_id 留空"的业务约束**（属 task-04 placement），避免 over-engineering。
-- **env.py eager import**：当前 `migrations/env.py` 未显式 import daemon model（依赖运行时链注册），autogen 可能漏扫。本任务手写迁移规避；若后续任务依赖 `alembic revision --autogenerate`，需在 env.py 补 daemon import。
-- **`agent_session_id` 双义**：数据库里 `agent_sessions.agent_session_id` 是 claude/codex 内部会话 id 的缓存列，而 `agent_runs.agent_session_id` 是指向 `agent_sessions.id` 的 FK —— 两者同名但语义截然不同，迁移与 model 必须明确注释（D-001）。
-- **down_revision 选择**：当前 head 为 `202607030900`，如执行本任务期间有其他迁移合入，需先 `alembic heads` 确认；若多 head 需补 merge migration（参考现有 `4d9236aa3abb_merge_heads.py`）。
+1. **Red — 模型测试**
+   - 新建 `test_agent_session_model.py`：断言表名、字段类型/长度/nullability/default/FK/ondelete、lease unique 索引、run FK/索引，以及旧 `AgentRun.session_id` 仍为 `String(128)`。
+   - 新建 `test_interactive_lease_model.py`：断言默认 `batch`、kind 为 `String(20)`、NOT NULL、server default 和索引存在。
+   - 运行定向测试，确认因字段/类不存在而失败。
+2. **Green — ORM 最小实现**
+   - 修改两个 model 和 `migrations/env.py`，只实现 §4 契约。
+   - 运行上述定向测试至通过。
+3. **Red — 迁移测试**
+   - 新建 `test_create_agent_sessions_migration.py`，至少断言 revision 链、upgrade/downgrade callable、操作名称/顺序对称；若测试环境可连接 PostgreSQL，再覆盖真实 up/down。
+4. **Green — 手写迁移**
+   - 按 §4.4 编写 upgrade/downgrade，不使用 autogenerate 产生无关 schema diff。
+5. **Refactor/验证**
+   - `uv run ruff check` / `uv run ruff format --check` 覆盖本任务 Python 文件。
+   - `uv run pytest backend/tests/modules/agent/test_agent_session_model.py backend/tests/modules/daemon/test_interactive_lease_model.py backend/tests/migrations/test_create_agent_sessions_migration.py`（从仓库根执行时按实际 pytest 配置调整路径）。
+   - 在可用 PostgreSQL 上执行 `alembic upgrade head → alembic downgrade -1 → alembic upgrade head`；若本机环境不可用，明确记录为环境阻塞，不得声称已验证。
+   - 运行 backend 全量 `uv run pytest`，确认 batch 回归。
+
+## 9. 验收标准
+
+| AC | 验收项 | 自动化/证据 |
+|---|---|---|
+| AC-01 | `AgentSession` 继承 `BaseModel`，表名为 `agent_sessions`，字段与 §4.1 完全一致 | model metadata 测试 |
+| AC-02 | session↔lease 的 1:1 由非 NULL lease_id 唯一索引落实；session↔run 为 1:N | 索引/FK metadata 测试；PostgreSQL 约束验证 |
+| AC-03 | `AgentRun.agent_session_id` nullable、FK→`agent_sessions.id`、ON DELETE SET NULL | model + migration 测试 |
+| AC-04 | `AgentRun.session_id` 仍为 nullable `String(128)`，没有改名或语义迁移 | 守门测试 + diff 审查 |
+| AC-05 | `DaemonTaskLease.kind` 为 NOT NULL `String(20)`，Python/DB 默认均为 `batch` | lease model 测试 |
+| AC-06 | 迁移把存量 lease 回填为 batch，新增 session/run 关联与全部索引 | PostgreSQL upgrade 后 schema 查询 |
+| AC-07 | downgrade 严格逆序且只撤销本任务对象，随后可再次 upgrade | `downgrade -1` / `upgrade head` |
+| AC-08 | `backend/migrations/env.py` 显式加载 daemon model，跨模块 FK 可由 metadata 解析 | import/metadata 测试或 autogenerate dry-run |
+| AC-09 | batch lease 与未绑定 session 的 AgentRun 可按旧调用方式实例化 | 回归单测 |
+| AC-10 | 没有新增 Alembic 平行 head | 实现时执行 `alembic heads`，输出仅一个 head |
+| AC-11 | 所有改动严格位于 `allowed_paths`，未提前实现后续 Wave | `git diff --name-only` 审查 |
+| AC-12 | backend 定向测试、ruff 和全量 pytest 通过；不可用的外部 DB 验证被明确标注 | 命令输出 |
+
+## 10. 完成定义
+
+- 上述 AC 全部满足，或外部 PostgreSQL 验证有明确、可复现的环境阻塞记录。
+- 迁移链基于实现时的真实单 head，不覆盖其他活跃变更的 migration。
+- diff 中不存在 `AgentRun.session_id` 改动、业务 service 改动或后续 task 的预实现。

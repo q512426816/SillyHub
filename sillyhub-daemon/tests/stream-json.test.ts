@@ -368,7 +368,7 @@ describe('provider 三合一 (claude/gemini/cursor)', () => {
 // ===========================================================================
 
 describe('buildArgs / buildInput (spawn 参数 + stdin 输入)', () => {
-  it('buildArgs 含 -p + stream-json 输入输出格式 + bypassPermissions', () => {
+  it('buildArgs 含 -p + stream-json 输入输出格式 + bypassPermissions（claude/gemini）', () => {
     const a = new StreamJsonAdapter('claude');
     const args = a.buildArgs();
     expect(args).toContain('-p');
@@ -382,6 +382,40 @@ describe('buildArgs / buildInput (spawn 参数 + stdin 输入)', () => {
     expect(args).toContain('--permission-mode');
     idx = args.indexOf('--permission-mode');
     expect(args[idx + 1]).toBe('bypassPermissions');
+  });
+
+  it('buildArgs cursor 使用 cursor-agent 专有参数，prompt 作位置参数', () => {
+    const a = new StreamJsonAdapter('cursor');
+    const args = a.buildArgs({ prompt: 'hello cursor', model: 'sonnet-4' });
+    expect(args).toContain('-p');
+    expect(args).toContain('--output-format');
+    expect(args.indexOf('--output-format')).toBeGreaterThan(-1);
+    expect(args[args.indexOf('--output-format') + 1]).toBe('stream-json');
+    expect(args).not.toContain('--stream-partial-output');
+    expect(args).toContain('--force');
+    expect(args).toContain('--trust');
+    expect(args).not.toContain('--input-format');
+    expect(args).not.toContain('--permission-mode');
+    expect(args).not.toContain('--include-partial-messages');
+    expect(args).toContain('--model');
+    expect(args[args.indexOf('--model') + 1]).toBe('sonnet-4');
+    expect(args[args.length - 1]).toBe('hello cursor');
+  });
+
+  it('cursor 完整 assistant 文本一次 emit（无 partial 拆行）', () => {
+    const a = new StreamJsonAdapter('cursor');
+    const line = JSON.stringify({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '先读取 `.claude/CLAUDE.md` 工作流说明。' }],
+      },
+    });
+    const events = a.parse(line);
+    expect(events).not.toBeNull();
+    const textEvents = events!.filter((e) => e.type === 'text');
+    expect(textEvents).toHaveLength(1);
+    expect(textEvents[0]?.content).toBe('先读取 `.claude/CLAUDE.md` 工作流说明。');
   });
 
   it('buildArgs 无 resume 时不带 --resume', () => {
@@ -451,7 +485,12 @@ describe('buildArgs / buildInput (spawn 参数 + stdin 输入)', () => {
       expect(typeof a.buildArgs).toBe('function');
       expect(typeof a.buildInput).toBe('function');
       expect(a.buildArgs()).toContain('-p');
-      expect(a.buildInput('hi').endsWith('\n')).toBe(true);
+      if (p === 'cursor') {
+        expect(a.buildInput('hi')).toBe('');
+        expect(a.buildArgs({ prompt: 'hi' })).toContain('hi');
+      } else {
+        expect(a.buildInput('hi').endsWith('\n')).toBe(true);
+      }
     }
   });
 });

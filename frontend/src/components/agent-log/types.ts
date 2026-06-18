@@ -48,4 +48,8 @@ export interface ProcessedLog {
    * 合并后只渲染首条，content 是所有 thinking 行 join("\n")，实现 SSE 风格追加。
    */
   mergedThinkingContent?: string;
+  /**
+   * ql-20260618-012：连续 [ASSISTANT] / 流式纯文本 stdout 合并后的 assistant 段落。
+   */
+  mergedAssistantContent?: string;
 }

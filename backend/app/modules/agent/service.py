@@ -931,14 +931,21 @@ class AgentService:
             AgentRunError: If root_path does not exist or is not a directory.
         """
         from app.modules.agent.context_builder import build_scan_bundle
+        from app.modules.workspace.model import Workspace
+        from app.modules.workspace.service import resolve_root_path_for_server
 
-        # -- 1. Validate root_path ------------------------------------------------
-        work_dir = Path(root_path)
-        if not work_dir.exists() or not work_dir.is_dir():
-            raise AgentRunError(
-                f"root_path does not exist or is not a directory: {root_path}",
-                details={"root_path": root_path},
-            )
+        workspace = await self._session.get(Workspace, workspace_id)
+        path_source = workspace.path_source if workspace else "server-local"
+
+        # -- 1. Validate root_path (server-local only; daemon-client on client FS) -
+        server_root = resolve_root_path_for_server(root_path, path_source)
+        if server_root is not None:
+            work_dir = Path(server_root)
+            if not work_dir.exists() or not work_dir.is_dir():
+                raise AgentRunError(
+                    f"root_path does not exist or is not a directory: {root_path}",
+                    details={"root_path": root_path, "server_path": server_root},
+                )
 
         # -- 2. Pre-generate run_id so we can pass it to the bundle builder ------
         run_id = uuid.uuid4()
@@ -952,10 +959,6 @@ class AgentService:
             root_path=root_path,
             run_id=run_id,
         )
-
-        from app.modules.workspace.model import Workspace
-
-        workspace = await self._session.get(Workspace, workspace_id)
         resolved_provider = provider or (workspace.default_agent if workspace else None)
         resolved_model = model or (workspace.default_model if workspace else None)
 

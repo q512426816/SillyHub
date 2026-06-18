@@ -26,7 +26,7 @@ from app.modules.change_writer.markdown_builder import (
     build_master_md,
 )
 from app.modules.workspace.model import Workspace
-from app.modules.workspace.service import _rewrite_path
+from app.modules.workspace.service import _rewrite_path, is_daemon_client_path_source
 from app.modules.worktree.exec_env import ExecEnvBuilder
 from app.modules.worktree.model import WorktreeLease
 
@@ -72,7 +72,7 @@ class ChangeWriterService:
                     "Workspace not found.",
                     details={"workspace_id": str(workspace_id)},
                 )
-            repo_dir = Path(_rewrite_path(workspace.root_path))
+            repo_dir = self._repo_dir_for_workspace(workspace)
 
         # Compute change_key from date + slugified title
         date_prefix = datetime.now(UTC).strftime("%Y-%m-%d")
@@ -272,7 +272,7 @@ class ChangeWriterService:
                     "Workspace not found.",
                     details={"workspace_id": str(workspace_id)},
                 )
-            repo_dir = Path(_rewrite_path(workspace.root_path))
+            repo_dir = self._repo_dir_for_workspace(workspace)
 
         change_dir = repo_dir / change.path
         if not change_dir.is_dir():
@@ -331,6 +331,16 @@ class ChangeWriterService:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _repo_dir_for_workspace(workspace: Workspace) -> Path:
+        """Resolve server-local workspace root for direct file writes."""
+        if is_daemon_client_path_source(workspace.path_source):
+            raise ChangeWriteError(
+                "daemon-client workspace requires an active lease to write changes.",
+                details={"workspace_id": str(workspace.id)},
+            )
+        return Path(_rewrite_path(workspace.root_path))
 
     @staticmethod
     def _ensure_frontmatter(content: str, author: str, created_at: datetime) -> str:

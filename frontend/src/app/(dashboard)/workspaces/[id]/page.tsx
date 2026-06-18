@@ -8,7 +8,9 @@ import { AgentModelInput } from "@/components/AgentModelInput";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AgentProviderSelect } from "@/components/AgentProviderSelect";
+import { WorkspacePathFields } from "@/components/workspace-path-fields";
 import { ApiError } from "@/lib/api";
+import { getDaemonRuntime, type DaemonRuntimeRead } from "@/lib/daemon";
 import {
   listAgentRuns,
   submitAgentRunInput,
@@ -106,6 +108,7 @@ function bsRunStatus(run: AgentRun): { label: string; variant: "success" | "dest
 export default function WorkspaceDetailPage({ params }: Props) {
   const workspaceId = params.id;
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [boundRuntime, setBoundRuntime] = useState<DaemonRuntimeRead | null>(null);
   const [specWs, setSpecWs] = useState<SpecWorkspace | null>(null);
   const [componentCount, setComponentCount] = useState<number>(0);
   const [activeChanges, setActiveChanges] = useState<number>(0);
@@ -168,6 +171,12 @@ export default function WorkspaceDetailPage({ params }: Props) {
       setWorkspace(ws);
       setDefaultAgent(ws.default_agent);
       setDefaultModel(ws.default_model);
+      if (ws.path_source === "daemon-client" && ws.daemon_runtime_id) {
+        const runtime = await getDaemonRuntime(ws.daemon_runtime_id).catch(() => null);
+        setBoundRuntime(runtime);
+      } else {
+        setBoundRuntime(null);
+      }
       setSpecWs(sw);
       setComponentCount(comps.total ?? comps.items?.length ?? 0);
       setActiveChanges(active.total ?? active.items?.length ?? 0);
@@ -283,7 +292,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
 
     const { accessToken } = useSession.getState();
     if (accessToken) {
-      client.connect(accessToken);
+      void client.connect(accessToken);
     } else {
       setBootstrapError("会话已失效，请重新登录后查看实时日志");
       streamClientRef.current = null;
@@ -453,10 +462,11 @@ export default function WorkspaceDetailPage({ params }: Props) {
           <h2 className="text-sm font-medium">基本信息</h2>
         </div>
         <dl className="grid grid-cols-[6rem_1fr] gap-y-1 px-4 py-3 text-xs">
-          <dt className="text-muted-foreground">root_path</dt>
-          <dd className="truncate font-mono" title={workspace.root_path}>
-            {workspace.root_path}
-          </dd>
+          <WorkspacePathFields
+            workspace={workspace}
+            runtime={boundRuntime}
+            linkRuntime
+          />
           <dt className="text-muted-foreground">创建于</dt>
           <dd>{formatTs(workspace.created_at)}</dd>
           <dt className="text-muted-foreground">最后扫描</dt>

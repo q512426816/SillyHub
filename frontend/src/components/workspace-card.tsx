@@ -5,7 +5,13 @@ import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { WorkspacePathFields } from "@/components/workspace-path-fields";
 import { ApiError } from "@/lib/api";
+import type { DaemonRuntimeRead } from "@/lib/daemon";
+import {
+  isDaemonClientWorkspace,
+  workspacePathSourceLabel,
+} from "@/lib/workspace-path";
 import {
   deleteWorkspace,
   rescanWorkspace,
@@ -14,10 +20,11 @@ import {
 
 interface Props {
   workspace: Workspace;
+  boundRuntime?: DaemonRuntimeRead | null;
   onChanged: () => void;
 }
 
-export function WorkspaceCard({ workspace, onChanged }: Props) {
+export function WorkspaceCard({ workspace, boundRuntime, onChanged }: Props) {
   const [busy, setBusy] = useState<"rescan" | "delete" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,6 +68,11 @@ export function WorkspaceCard({ workspace, onChanged }: Props) {
           <p className="truncate font-mono text-[11px] text-muted-foreground">
             {workspace.slug}
           </p>
+          {isDaemonClientWorkspace(workspace) && (
+            <Badge variant="outline" className="mt-1 text-[10px]">
+              {workspacePathSourceLabel(workspace.path_source)}
+            </Badge>
+          )}
         </div>
         <Badge variant={workspace.status === "active" ? "success" : "outline"}>
           {workspace.status}
@@ -68,10 +80,11 @@ export function WorkspaceCard({ workspace, onChanged }: Props) {
       </header>
 
       <dl className="grid grid-cols-[5.5rem_1fr] gap-y-1 px-4 py-3 text-xs">
-        <dt className="text-muted-foreground">root_path</dt>
-        <dd className="truncate font-mono" title={workspace.root_path}>
-          {workspace.root_path}
-        </dd>
+        <WorkspacePathFields
+          workspace={workspace}
+          runtime={boundRuntime}
+          linkRuntime
+        />
         <dt className="text-muted-foreground">最后扫描</dt>
         <dd>{formatTs(workspace.last_scanned_at)}</dd>
         <dt className="text-muted-foreground">创建于</dt>

@@ -20,13 +20,13 @@ created_at: 2026-06-18T13:40:53
 ### 关键探索结论（已验证）
 
 1. **R1 风险已排除**：`claude -p --input-format stream-json` 支持持续 stdin 多轮注入（官方语义 "realtime streaming input" + `--replay-user-messages` + happy 用 SDK `AsyncIterable` 生产验证 + 实验中 claude 成功接受 stdin 多消息流，仅被上游网关 529 临时阻断）。
-2. **架构洞察**：**agent 子进程本身即长驻会话载体**（claude 的 stream-json stdin 流 / codex 的 thread 复用）。daemon **无需自建 happy 那套 worker 进程 + 输入队列**（那是 SDK in-process 才需要）。只需让 task-runner 的 `result` 不再触发 `stdin.end` + 提供 server→daemon 的 WS 控制注入通道。
+2. **spike-01 结论与回退**：未取得 Claude 两轮 `result` 或 Codex 同 thread 两次 turn 完成的端到端铁证，不能把子进程作为跨 turn 长驻载体。采用 D-002@v2：AgentSession/interactive lease 长生命周期保留，但每个 turn 独立 spawn；后续 turn 使用 agent 内部 session/thread id resume。
 3. **现成脚手架**：`protocol.ts:30-36` 与 `backend/app/modules/daemon/protocol.py:19-22` 已定义 `lease_messages`/`lease_claim`/`lease_start`/`lease_complete` 双向 WS 消息类型但从未接线；`ws_hub.py` 已具备 server→daemon 主动 send 能力。
 
 ## 2. 设计目标
 
-- **G1 中途追问/多轮注入**：agent 跑完一轮后，服务端能向正在跑的会话注入新 prompt（claude 第二条 user message JSON / codex turn/start），用户看到第二轮响应。
-- **G2 打断本轮与结束会话分离**：打断本轮 = SIGINT/turn interrupt（保留会话可继续）；结束会话 = kill 进程。
+- **G1 多轮追问**：agent 跑完一轮后，服务端为同一 AgentSession 创建新 AgentRun，并通过 `--resume`/thread resume 启动下一 turn，用户看到第二轮响应。
+- **G2 打断本轮与结束会话分离**：打断本轮 = 终止当前 turn 进程（保留 session 可继续）；结束会话 = 终止当前 turn（如有）并完成 interactive lease。
 - **G3 权限暂停往返**：会话级 `manual_approval` 开关，开启后 `control_request` 暂停 → 推前端 → 远程决定 → 回写 stdin。
 - **G4 resume 持久化 + 崩溃恢复**：daemon 持久化会话状态，重启后通过 `--resume`/`thread/resume` 重 attach。
 - **G5 前端管控台**：演进现有 quick-chat 为交互式会话面板。
@@ -65,31 +65,28 @@ created_at: 2026-06-18T13:40:53
                                           │      Daemon (TS)             │
                                           │  ws-client 接收控制消息       │
                                           │    → sessionStore            │
-                                          │    → task-runner(session模式)│
-                                          │       result 不 end stdin    │
+                                          │    → task-runner(turn 模式)  │
+                                          │       result 后结束进程      │
                                           └──────────────┬───────────────┘
-                                              spawn (长驻, 多turn复用)
+                                              spawn (每 turn 独立)
                                           ┌──────────────▼───────────────┐
                                           │  agent 子进程                 │
-                                          │  claude: stdin 流式多轮       │
-                                          │  codex:  thread 复用+turn/start│
+                                          │  claude: --resume 新 turn     │
+                                          │  codex: thread resume 新 turn │
                                           └──────────────────────────────┘
 ```
 
-**1 AgentSession = 1 长生命周期 DaemonTaskLease**（`kind=interactive`），多 turn 复用同一 spawn 进程；每 turn 一个 AgentRun（复用现有 AgentRunLog/SSE/resume_token 链路）。
+**1 AgentSession = 1 长生命周期 DaemonTaskLease**（`kind=interactive`），每 turn 一个 AgentRun + 一个短生命周期 spawn；后续 turn 通过 `AgentSession.agent_session_id` resume，复用现有 AgentRunLog/SSE 链路（D-002@v2）。
 
 ### Wave 1 — 核心交互层（中途追问/多轮注入）
 
 **数据模型**：新增 `agent_sessions` 表；`daemon_task_leases` 增加 `kind` 字段；`agent_runs` 增加 `agent_session_id` FK。
 
-**task-runner session 模式**：引入 `SessionRunner`（task-runner 扩展，不新建独立模块）。`kind=interactive` 的 lease 走 session 路径：
-- spawn 后保持 stdin 开放；
-- `result` 事件只标记"当前 turn 完成"（更新 AgentRun，发 SSE turn-done），**不** end stdin、**不**退出 readline 循环；
-- 等待下一个 `session_inject` 写 stdin。
+**task-runner turn 模式**：`kind=interactive` 的 lease 由 sessionStore 编排多个 turn；每个 turn 复用现有 TaskRunner spawn/适配器/凭证链路，`result` 后正常结束进程。首 turn 不带 resume，后续 turn 从 sessionStore 读取 agent 内部 session/thread id 并传给适配器 resume 参数。
 
-**daemon sessionStore**：内存 `Map<sessionId, {leaseId, childProcess, stdin, adapter, status, currentRunId}>`，生命周期 = 会话；复用现有 spawn / 适配器 / 凭证 / submitMessages 上报。
+**daemon sessionStore**：内存 `Map<sessionId, {leaseId, provider, agentSessionId, status, currentRunId, config}>`，生命周期 = 会话；不持有跨 turn child/stdin。当前 turn 的进程句柄只归 TaskRunner/turn runner 所有，供 interrupt/end 定向终止。
 
-**WS 控制通道（server→daemon）**：protocol 新增 `daemon:session_inject` / `daemon:session_interrupt` / `daemon:session_end`。ws-client 接收后路由到 sessionStore 对应 session。
+**WS 控制通道（server→daemon）**：protocol 新增 `daemon:session_inject` / `daemon:session_interrupt` / `daemon:session_end`。inject 创建并派发下一 AgentRun；interrupt 终止当前 run；end 结束 session 与 lease。
 
 **进度回显**：复用现有 `submitMessages`(REST) + SSE（`stream_run_logs`），每 turn 输出照常上报到对应 AgentRun 的 AgentRunLog。
 
@@ -106,7 +103,7 @@ codex 侧 `json-rpc.ts` 的 approval 同理升级。
 ### Wave 3 — resume 持久化 + 崩溃恢复
 
 - daemon 侧持久化 sessionStore 到磁盘（`~/.sillyhub/daemon/sessions.json`，类比 happy `persistSession`）：`{sessionId, leaseId, agentSessionId, provider, config}`。
-- daemon 启动时加载，对 `status=active` 的 session 通过 `--resume <agentSessionId>`（claude）/ `thread/resume`（codex）重 spawn 恢复。
+- daemon 启动时加载 active session 元数据；因 turn 本就独立 spawn，不恢复旧进程。若崩溃时存在 currentRun，将该 run 标记失败并把 session 恢复为可继续状态；下一次 inject 再通过 `--resume <agentSessionId>`（Claude）/ thread resume（Codex）启动新 turn。
 - `agent_sessions.status` 增加 `reconnecting` 态。
 
 ### Wave 4 — 前端管控台
@@ -125,7 +122,7 @@ codex 侧 `json-rpc.ts` 的 approval 同理升级。
 | 修改 | `sillyhub-daemon/src/protocol.ts` | 新增 `SESSION_INJECT`/`SESSION_INTERRUPT`/`SESSION_END`/`PERMISSION_REQUEST`/`PERMISSION_RESPONSE` 消息常量 + payload 类型 |
 | 修改 | `sillyhub-daemon/src/ws-client.ts` | `_handleMessage` 分派新控制消息到 onControlMessage 回调 |
 | 修改 | `sillyhub-daemon/src/daemon.ts` | `_executeTask` 按 lease.kind 分流：batch 走原 TaskRunner，interactive 走 SessionRunner；接收 ws 控制消息路由到 sessionStore |
-| 修改 | `sillyhub-daemon/src/task-runner.ts` | 抽出 session 模式：`result` 不 end stdin、不退出 readline；新增 `injectPrompt`/`interrupt`/`end` 方法操作持有 child.stdin |
+| 修改 | `sillyhub-daemon/src/task-runner.ts` | 抽出 interactive turn 执行入口：每 turn 独立 spawn，支持 resume id，暴露当前 run interrupt；`result` 后按原路径结束进程 |
 | 新增 | `sillyhub-daemon/src/session-store.ts` | 内存 Map<sessionId, SessionState> + Wave3 磁盘持久化 |
 | 修改 | `sillyhub-daemon/src/adapters/stream-json.ts` | Wave2: handleControlRequest 支持 manual_approval 暂停往返 |
 | 修改 | `sillyhub-daemon/src/adapters/json-rpc.ts` | Wave2: codex approval 暂停往返 |
@@ -190,13 +187,13 @@ GET  /api/daemon/sessions/{id}/stream      // SSE(session 级聚合,见下)
 
 ```typescript
 class SessionStore {
-  create(sessionId, leaseId, child, stdin, adapter): void;
+  create(sessionId, leaseId, provider, config): void;
   get(sessionId): SessionState | undefined;
-  inject(sessionId, prompt): void;      // 写 stdin(claude user msg / codex turn/start)
-  interrupt(sessionId): void;           // child.kill('SIGINT') 或 codex turn/interrupt
-  end(sessionId): void;                 // child.kill(), 标 ended
-  persist(): Promise<void>;             // Wave3 落盘
-  restore(): Promise<void>;             // Wave3 重启恢复
+  startTurn(sessionId, runId, prompt): Promise<void>; // 每 turn 新 spawn，按需 resume
+  interrupt(sessionId): Promise<void>;                // 仅终止 currentRun
+  end(sessionId): Promise<void>;                      // 结束 currentRun + session + lease
+  persist(): Promise<void>;                           // Wave3 落盘元数据
+  restore(): Promise<void>;                           // Wave3 恢复可继续 session
 }
 ```
 
@@ -255,7 +252,7 @@ daemon_task_leases (kind=interactive)          agent_sessions
 - **interactive lease.agent_run_id = NULL**（不直接关联单个 run）；batch lease 保持原 1:1 用法不变。
 - **session ↔ lease 1:1**：`agent_sessions.lease_id` FK→daemon_task_leases。
 - **session ↔ runs 1:N**：`agent_runs.agent_session_id` FK→agent_sessions，每 turn 一个 run。
-- **进程层**：1 session = 1 长驻 spawn 进程（跨 turn 复用，D-002），与 run 的 N 关系解耦（run 是逻辑记录，进程是物理载体）。
+- **进程层**：1 turn = 1 spawn 进程；1 session = N 个顺序 turn/run，通过 agent 内部 session/thread id 恢复上下文（D-002@v2）。
 
 ### 8.5 interactive lease 的过期语义（Grill 修正 P1）
 
@@ -276,7 +273,7 @@ daemon_task_leases (kind=interactive)          agent_sessions
 
 | 编号 | 风险 | 等级 | 应对策略 |
 |---|---|---|---|
-| R-01 | claude `result` 后 stdin 持续开放时，agent 是否在第一轮就 exit（R1 剩余铁证缺口） | P0 | Wave1 首个任务即端到端验证（网关恢复后跑通两轮 result）；若 exit，回退到每轮新 spawn+resume（伪多轮）保底 |
+| R-01 | 同一长驻进程多轮缺少端到端铁证 | 已关闭 | spike-01 未通过后执行既定回退：每 turn 新 spawn + resume（D-002@v2） |
 | R-02 | WS 双向控制消息乱序/重连丢消息（inject 到已结束 session） | P1 | sessionStore 校验 status，inject 到非 active session 返回错误；WS 重连后 daemon 重放 sessionStore 状态对账 |
 | R-03 | session 状态在 daemon 内存，daemon 重启丢失（Wave1/2） | P1 | Wave1/2 崩溃=会话结束标 failed 提示重开；Wave3 持久化解决 |
 | R-04 | lease 语义从"单次任务"变"会话执行权"，可能破坏现有 lease 状态机/expire 逻辑 | P1 | 用 `kind` 字段隔离：interactive lease 走新路径，不进现有 expire 回收（`handle_lease_expiry` 跳过 kind=interactive） |
@@ -292,7 +289,7 @@ daemon_task_leases (kind=interactive)          agent_sessions
 | 决策 ID | 标题 | 覆盖章节 |
 |---|---|---|
 | D-001@v1 | 交互式会话实体命名 `AgentSession` | §8.1, §8.3, R-05 |
-| D-002@v1 | 1 AgentSession = 1 长生命周期 lease，多 turn 复用 spawn | §5, §8.1, R-04 |
+| D-002@v2 | 1 AgentSession = 1 长生命周期 lease，每 turn 独立 spawn + resume | §5, §8.1, R-01, R-04 |
 | D-003@v1 | Wave1/2 不做崩溃恢复，Wave3 做 resume | §3 非目标, §5 Wave3, R-03 |
 | D-004@v1 | session 空闲 30min 自动结束 | §5 Wave1 sessionStore, §8.5, 验收 |
 | D-005@v1 | session/lease/run 三元关系 + session 级 SSE 聚合（Grill 修正） | §8.4, §7.2, §8.5, R-08 |
@@ -319,7 +316,7 @@ daemon_task_leases (kind=interactive)          agent_sessions
 
 ### 验收标准
 
-1. **[Wave1-核心]** quick-chat 发起会话，agent 跑完第一轮（出 result）后，中途追问能写入 stdin，看到第二轮响应（claude + codex 各一）。
+1. **[Wave1-核心]** quick-chat 发起会话，首 turn 完成后追问会创建新 AgentRun，并以同一 agent 内部 session/thread id resume，看到第二轮响应（Claude + Codex 各一）。
 2. **[Wave1-打断]** 打断本轮：agent 停止当前 turn，会话状态仍 active，可继续追问。
 3. **[Wave1-结束]** 结束会话：进程 kill，agent_sessions.status=ended。
 4. **[Wave1-回显]** 多 turn 的输出均经 SSE 实时回显，历史可在 AgentRunLog 回看。

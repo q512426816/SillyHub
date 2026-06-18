@@ -10,23 +10,23 @@ created_at: 2026-06-18 13:54:52
 | 角色 | 说明 |
 |---|---|
 | 终端用户（开发者） | 通过前端会话面板发起会话、中途追问、打断/结束、批准权限 |
-| Daemon（TS） | spawn 长驻 agent 进程、接收 WS 控制消息注入/打断/结束、sessionStore 内存态管理、Wave3 磁盘持久化 |
+| Daemon（TS） | 每 turn spawn agent 进程、接收 WS 控制消息创建下一 turn/打断/结束、sessionStore 元数据管理、Wave3 磁盘持久化 |
 | Backend（FastAPI） | 创建 AgentSession + interactive lease、WS 控制路由、session 级 SSE 聚合、权限请求路由、状态同步 |
-| Agent 子进程 | claude（stream-json stdin 流）/ codex（thread 复用 + turn/start）—— 长驻会话载体 |
+| Agent 子进程 | Claude/Codex 的单 turn 执行载体；跨 turn 上下文通过 `--resume`/thread resume 续接 |
 
 ## 功能需求（FR）
 
 ### FR-01 创建交互式会话 [Wave1]
 - **Given** 用户在前端会话面板选择 provider（claude/codex）并发起首条 prompt
 - **When** 前端 POST `/api/daemon/sessions`（provider + prompt + 可选 manual_approval/model）
-- **Then** backend 创建 `agent_sessions` 记录（status=pending）+ `kind=interactive` 的 DaemonTaskLease（lease_expires_at=NULL）→ dispatch 到 daemon → daemon spawn 长驻 agent 进程，首 turn 产出经 SSE 回显，session status=active
-- **覆盖**：D-002（1 session=1 lease）、D-005（三元关系）
+- **Then** backend 创建 `agent_sessions` 记录（status=pending）+ `kind=interactive` 的 DaemonTaskLease（lease_expires_at=NULL）→ 创建首个 AgentRun 并 dispatch 到 daemon → daemon 为该 turn spawn agent 进程，产出经 SSE 回显，session status=active
+- **覆盖**：D-002@v2（1 session=1 lease、每 turn 独立 spawn）、D-005（三元关系）
 
-### FR-02 中途追问注入 [Wave1]
+### FR-02 多轮追问（新 turn + resume）[Wave1]
 - **Given** 一个 status=active 的交互式会话，agent 已完成当前 turn（result 已出）
-- **When** 用户发送追问 → POST `/sessions/{id}/inject` → backend 经 WS 发 `daemon:session_inject`
-- **Then** daemon sessionStore 将 prompt 写入 agent stdin（claude：第二条 user message JSON；codex：复用 thread 的 turn/start），新 turn 产出经 session 级 SSE 回显，turn_count+1
-- **覆盖**：D-002（多 turn 复用 spawn）
+- **When** 用户发送追问 → POST `/sessions/{id}/inject`
+- **Then** backend 为该 session 创建新的 AgentRun 并 dispatch；daemon 为新 turn 独立 spawn，Claude 使用 `--resume <agent_session_id>`，Codex 恢复 thread 后启动 turn；产出经 session 级 SSE 回显，turn_count+1
+- **覆盖**：D-002@v2（每 turn 独立 spawn + resume）
 
 ### FR-03 多 turn 进度回显（session 级 SSE） [Wave1]
 - **Given** 一个活跃交互式会话
@@ -36,14 +36,14 @@ created_at: 2026-06-18 13:54:52
 
 ### FR-04 打断本轮 [Wave1]
 - **Given** 会话 status=active 且 agent 正在执行某 turn
-- **When** 用户点"打断本轮" → POST `/sessions/{id}/interrupt` → WS `daemon:session_interrupt`
-- **Then** daemon 对 agent 执行中断（claude：SIGINT；codex：turn/interrupt），agent 停止当前 turn，**会话 status 仍 active**，用户可继续追问
+- **When** 用户点"打断本轮" → POST `/sessions/{id}/interrupt`
+- **Then** backend/daemon 终止当前 AgentRun 对应进程并标记该 run cancelled/failed，**会话 status 仍 active**，用户可继续追问并创建下一 turn
 - **覆盖**：Q4（打断与结束分离）
 
 ### FR-05 结束会话 [Wave1]
 - **Given** 一个活跃交互式会话
 - **When** 用户点"结束会话" → POST `/sessions/{id}/end` → WS `daemon:session_end`
-- **Then** daemon kill agent 进程，sessionStore 清理，backend 更新 `agent_sessions.status=ended` + `daemon_task_leases.status=completed`（经 service.end_session 统一入口）
+- **Then** 如有当前 turn 则先终止其进程，随后清理 sessionStore 元数据，backend 更新 `agent_sessions.status=ended` + `daemon_task_leases.status=completed`（经 service.end_session 统一入口）
 - **覆盖**：D-005（结集中 service.end_session）、Q4
 
 ### FR-06 空闲自动回收 [Wave1]
@@ -62,7 +62,7 @@ created_at: 2026-06-18 13:54:52
 ### FR-08 resume 持久化恢复 [Wave3]
 - **Given** daemon 持有 active 会话且已持久化 sessionStore 到磁盘
 - **When** daemon 重启
-- **Then** daemon 加载磁盘 sessionStore，对 active 会话通过 `--resume <agent_session_id>`（claude）/ `thread/resume`（codex）重新 spawn，status 经 reconnecting → active，历史上下文不丢
+- **Then** daemon 加载磁盘 sessionStore；崩溃时的 currentRun 标记失败，session 从 reconnecting 回到 active/可继续；下一次追问按 `--resume <agent_session_id>`（Claude）/ thread resume（Codex）新 spawn，历史上下文不丢
 - **覆盖**：D-003
 
 ### FR-09 兼容性（批处理 lease 不变） [Wave1]
@@ -90,7 +90,7 @@ created_at: 2026-06-18 13:54:52
 | 决策 | 覆盖 FR | 说明 |
 |---|---|---|
 | D-001 命名 AgentSession | FR-01, FR-09 | 新表 agent_sessions，FK 字段 agent_session_id，不碰现有 session_id |
-| D-002 1 session=1 lease | FR-01, FR-02, FR-09 | kind 隔离两条路径 |
+| D-002@v2 1 session=1 lease、每 turn 独立 spawn + resume | FR-01, FR-02, FR-04, FR-09 | kind 隔离 + 多 AgentRun 聚合 |
 | D-003 Wave1/2 不恢复 | FR-08 | resume 放 Wave3 |
 | D-004 空闲 30min | FR-06 | 默认值可配 |
 | D-005 三元关系+SSE | FR-01, FR-03, FR-05 | lease.agent_run_id=NULL，session 级 channel |

@@ -335,4 +335,42 @@ describe('daemon multi-runtime registration (test_daemon_multi_runtime.py)', () 
     // capabilities.version 透传原始 null（不 fallback，对齐 daemon.ts:362）
     expect(params.capabilities.version).toBeNull();
   });
+
+  it('ws_uses_server_assigned_runtime_ids: 每个 registered runtime 各建一条 WS（非 config.runtime_id）', async () => {
+    const agents = [
+      makeAgent('claude', { version: '2.0.0' }),
+      makeAgent('codex', { version: '0.100.0' }),
+    ];
+    const client = makeClient(
+      vi
+        .fn()
+        .mockResolvedValueOnce({ id: 'srv-rt-claude' })
+        .mockResolvedValueOnce({ id: 'srv-rt-codex' }),
+    );
+    const wsRuntimeIds: string[] = [];
+    const factory = vi.fn(
+      (opts: { runtimeId: string; callbacks: WsClientCallbacks }) => {
+        wsRuntimeIds.push(opts.runtimeId);
+        return {
+          connect: vi.fn(),
+          close: vi.fn(),
+          registerRpcHandler: vi.fn(),
+        };
+      },
+    );
+    const config = { ...baseConfig, runtime_id: 'local-config-id' };
+    const daemon = new Daemon(config, client as never, null, {
+      detector: { detectAgents: vi.fn(async () => agents) } as never,
+      wsClientFactory: factory as never,
+    });
+    daemons.push(daemon);
+
+    await daemon.start();
+    await new Promise((r) => setTimeout(r, 50));
+    await daemon.stop();
+
+    expect(factory).toHaveBeenCalledTimes(2);
+    expect(wsRuntimeIds.sort()).toEqual(['srv-rt-claude', 'srv-rt-codex'].sort());
+    expect(wsRuntimeIds).not.toContain('local-config-id');
+  });
 });

@@ -1,146 +1,88 @@
 ---
 plan_level: full
 author: qinyi
-created_at: 2026-06-18 14:09:51
+created_at: 2026-06-18 15:30:00
 ---
 
-# 实现计划 — 交互式会话管控
+# 实现计划 — 交互式会话管控（spawn + resume 回退）
 
-> 设计依据：`design.md`（方案 A，四 Wave，三元关系 §8.4，8 风险，8 验收）/ `decisions.md`（D-001~D-005 全 accepted）/ `tasks.md`（四 Wave 20 任务，本计划合并精简至 11 task + 1 spike）。
+## 回退锚点
 
-## Spike 前置验证
+spike-01 未获得 Claude 两轮 `result` 或 Codex 同 thread 两次 turn 完成的端到端证据，因此不再实现跨 turn 长驻子进程。采用 D-002@v2：AgentSession 与 interactive lease 保持长生命周期；每个 turn 创建独立 AgentRun 并新 spawn，后续 turn 通过 agent 内部 session/thread id resume。
 
-| Spike | 验证内容 | 通过标准 | 不通过后果 |
-|---|---|---|---|
-| spike-01 | R-01 端到端铁证：`claude -p --input-format stream-json` 持续 stdin 注入两条 user message，验证两轮 `result`（claude）；codex `app-server` thread 复用 + 两次 `turn/start`（codex） | claude/codex 各跑通连续两轮，第二轮响应不含第一轮上下文污染 | Wave1 核心回退为伪多轮（每轮新 spawn + `--resume`），task-03/task-05 重设计（session 模式 → resume 链路） |
+## Wave 1 — 数据契约（无依赖）
 
-> spike-01 在 Wave1 之前执行，是整个方案可行性的硬门。探索阶段已被上游网关 529 阻断（仅证实协议层接受 stdin 流），此处补端到端铁证。
+- [ ] task-01: 数据模型迁移：agent_sessions、lease.kind、agent_runs.agent_session_id 与 Alembic（覆盖：FR-01, FR-09 / D-001@v1, D-002@v2, D-005@v1）
 
-> Wave 按 depends_on 拓扑重排（Step 8），同 Wave 内任务无依赖可并行。功能里程碑标注：Wave1-2 地基（数据模型/协议），Wave3-4 核心交互+权限，Wave5 联调+前端基线，Wave6 resume+前端增强。
+## Wave 2 — 协议与 turn 调度契约（依赖 Wave 1）
 
-## Wave 1 — 数据模型（地基）
+- [ ] task-02: 对齐 daemon/backend session、interrupt、end、permission 消息契约；inject 语义改为“请求创建下一 turn”而非写入长驻 stdin（覆盖：FR-02, FR-04, FR-05, FR-07 / D-002@v2, NFR-05）
 
-- [ ] task-01: 数据模型迁移（agent_sessions 表 + lease.kind + agent_runs.agent_session_id + alembic）（覆盖：FR-01, FR-09 / D-001, D-002, D-005）
+## Wave 3 — 每 turn spawn + resume 核心链路（依赖 Wave 2）
 
-## Wave 2 — 协议契约（依赖 Wave1）
+- [ ] task-03: daemon session 元数据与 turn runner：首 turn 普通 spawn，后续 turn 使用 Claude `--resume` / Codex thread resume，每 turn 结束即释放进程（覆盖：FR-01, FR-02, FR-04, FR-05, FR-09 / D-002@v2）
+- [ ] task-04: backend session REST/service/placement：create 与 inject 各创建 AgentRun 并 dispatch；interrupt 仅终止 currentRun；end 统一结束 session/lease（覆盖：FR-01, FR-02, FR-04, FR-05 / D-002@v2, D-005@v1）
+- [ ] task-07: manual_approval 与 permission_request/response 按当前 turn 往返，默认自动批准行为不变（覆盖：FR-07）
 
-- [ ] task-02: 协议契约（daemon protocol.ts ↔ backend protocol.py 新增 session_inject/interrupt/end + permission_request/response 消息常量 + payload + 契约单测）（覆盖：FR-02, FR-04, FR-05, FR-07 / NFR-05）
+## Wave 4 — 多 Run SSE 聚合与审批暂停（依赖 Wave 3）
 
-## Wave 3 — daemon/backend session 侧 + permission 消息（并行，依赖 Wave2）
+- [ ] task-05: session SSE 聚合：按 agent_session_id 汇总多个 AgentRunLog/Redis 事件，单连接跨 turn 回放与续流（覆盖：FR-03 / D-002@v2, D-005@v1）
+- [ ] task-08: Claude/Codex 当前 turn 的 control_request 暂停、远程批准/拒绝和进程退出收敛（覆盖：FR-07）
 
-- [ ] task-03: daemon session 侧（sessionStore + task-runner session 模式 result 不 end stdin + ws-client 接收控制消息路由 + daemon kind 分流）（覆盖：FR-01, FR-02, FR-04, FR-05, FR-09 / D-002）
-- [ ] task-04: backend session 侧（REST create/inject/interrupt/end + service + ws_hub.send_session_control + placement interactive lease + main.py quick-chat 升级首 prompt 建 session）（覆盖：FR-01, FR-02, FR-04, FR-05）
-- [ ] task-07: manual_approval 开关 + permission_request/response WS 消息两端接通（agent_sessions.config）（覆盖：FR-07 / Q3）
+## Wave 5 — 生命周期联调与前端基础面板（依赖 Wave 4）
 
-## Wave 4 — session SSE 聚合 + control_request 暂停往返（并行，依赖 Wave3）
+- [ ] task-06: spawn + resume 端到端联调、并发 inject 防重、30 分钟空闲回收及 end_session 单一收口（覆盖：FR-01, FR-02, FR-04, FR-05, FR-06 / D-004@v1）
+- [ ] task-10: 会话面板：session SSE、追问创建下一 turn、打断当前 turn、结束 session（覆盖：FR-10）
 
-- [ ] task-05: session 级 SSE 聚合（Redis channel `agent_session:{id}` + stream_session_logs + submit_messages 双 publish）（覆盖：FR-03 / D-005, R-08）
-- [ ] task-08: claude stream-json + codex json-rpc control_request 升级为暂停往返（sessionStore pending permission map）（覆盖：FR-07，验收标准 5-6）
+## Wave 6 — 元数据恢复与历史/审批 UI（依赖 Wave 5）
 
-## Wave 5 — Wave1 联调/空闲回收 + 前端会话面板（并行，依赖 Wave4）
-
-- [ ] task-06: Wave1 端到端联调 + 空闲回收（session_idle_timeout_sec 默认 30min + service.end_session 统一结束入口）（覆盖：FR-06 / D-004，验收标准 1-4,8）
-- [ ] task-10: 会话面板（SSE 进度 + 中途追问输入框 + 打断本轮/结束会话按钮）（runtimes/page.tsx + lib/daemon.ts）（覆盖：FR-10 / Q1）
-
-## Wave 6 — resume 持久化 + 列表/回看/权限弹窗（并行，依赖 Wave5）
-
-- [ ] task-09: daemon sessionStore 磁盘持久化（sessions.json）+ 重启 resume 恢复（claude --resume / codex thread/resume 重 spawn）+ reconnecting 状态同步（覆盖：FR-08 / D-003，验收标准 7）
-- [ ] task-11: 会话列表 + 历史回看 + 权限批准弹窗（覆盖：FR-10，FR-07 前端）
+- [ ] task-09: 持久化 session 元数据；daemon 重启时收敛 in-flight run，下一 turn 通过 resume 新 spawn，不恢复旧进程（覆盖：FR-08 / D-002@v2, D-003@v1）
+- [ ] task-11: 会话列表、跨 AgentRun 历史回看与 permission 审批弹窗（覆盖：FR-07, FR-10 / D-005@v1）
 
 ## 任务总表
 
-| 编号 | 任务 | Wave | 优先级 | 依赖 | 覆盖 FR/D | 说明 |
+| 编号 | 任务 | Wave | 优先级 | 依赖 | 覆盖 FR/D | 模块依赖 |
 |---|---|---|---|---|---|---|
-| spike-01 | R-01 端到端铁证 | 前置 | P0 | — | R-01 | claude/codex stream-json 两轮 result，方案可行性硬门 |
-| task-01 | 数据模型迁移 | W1 | P0 | — | FR-01,FR-09/D-001,D-002,D-005 | agent_sessions 继承 BaseModel；alembic 迁移（migrations/） |
-| task-02 | 协议契约 | W2 | P0 | task-01 | FR-02,FR-04,FR-05,FR-07/NFR-05 | WS 消息两端逐字对齐 + 契约单测 |
-| task-03 | daemon session 侧 | W3 | P0 | task-02 | FR-01,FR-02,FR-04,FR-05,FR-09/D-002 | task-runner session 模式 + sessionStore + ws-client 路由；**daemon 用 pnpm typecheck/test，非 pip/pytest** |
-| task-04 | backend session 侧 | W3 | P0 | task-01,task-02 | FR-01,FR-02,FR-04,FR-05 | REST/service/ws_hub/placement/main.py |
-| task-07 | permission WS 消息 | W3 | P1 | task-02 | FR-07/Q3 | manual_approval 开关 + 两端接通 |
-| task-05 | session 级 SSE 聚合 | W4 | P0 | task-04 | FR-03/D-005,R-08 | Redis channel + stream_session_logs + 双 publish |
-| task-08 | control_request 暂停往返 | W4 | P1 | task-03,task-07 | FR-07 | stream-json + json-rpc 升级 + pending map |
-| task-06 | Wave1 联调+空闲回收 | W5 | P0 | task-03,task-05,spike-01 | FR-06/D-004 | 空闲 30min 回收 + end_session 统一入口 + Wave1 验收 |
-| task-10 | 会话面板 | W5 | P1 | task-04,task-05 | FR-10/Q1 | runtimes/page.tsx + lib/daemon.ts |
-| task-09 | resume 持久化恢复 | W6 | P1 | task-03,task-06 | FR-08/D-003 | 磁盘持久化 + 重启重 spawn + reconnecting |
-| task-11 | 列表/回看/权限弹窗 | W6 | P2 | task-08,task-10 | FR-10,FR-07 | 历史回看 + 权限弹窗 |
+| task-01 | 数据模型迁移 | W1 | P0 | — | FR-01,FR-09 / D-001@v1,D-002@v2,D-005@v1 | backend |
+| task-02 | 协议与 turn 调度契约 | W2 | P0 | task-01 | FR-02,FR-04,FR-05,FR-07 / D-002@v2 | daemon ↔ backend |
+| task-03 | daemon turn runner | W3 | P0 | task-02 | FR-01,FR-02,FR-04,FR-05,FR-09 / D-002@v2 | daemon → backend |
+| task-04 | backend session 编排 | W3 | P0 | task-01,task-02 | FR-01,FR-02,FR-04,FR-05 / D-002@v2,D-005@v1 | backend |
+| task-07 | turn 级 permission 消息 | W3 | P1 | task-02 | FR-07 | daemon ↔ backend |
+| task-05 | 多 Run session SSE 聚合 | W4 | P0 | task-04 | FR-03 / D-002@v2,D-005@v1 | backend → frontend |
+| task-08 | turn 级审批暂停 | W4 | P1 | task-03,task-07 | FR-07 | daemon ↔ backend |
+| task-06 | 生命周期联调与空闲回收 | W5 | P0 | task-03,task-04,task-05 | FR-01,FR-02,FR-04,FR-05,FR-06 / D-004@v1 | daemon ↔ backend |
+| task-10 | 前端会话基础面板 | W5 | P1 | task-04,task-05 | FR-10 | frontend → backend |
+| task-09 | session 元数据恢复 | W6 | P1 | task-03,task-06 | FR-08 / D-002@v2,D-003@v1 | daemon → backend |
+| task-11 | 历史与审批 UI | W6 | P2 | task-08,task-10 | FR-07,FR-10 / D-005@v1 | frontend → backend |
 
 ## 关键路径
 
-`spike-01 → task-01 → task-02 → task-04 → task-05 → task-06 → task-09`（最长依赖链，贯穿 W1→W6，决定整体交付周期）。并行支线：task-03/07（W3）与 task-04 并行；task-08（W4）与 task-05 并行；task-10（W5）与 task-06 并行；task-11（W6）与 task-09 并行。
-
-## 依赖关系图
-
-```mermaid
-graph LR
-  spike[spike-01<br/>R-01 铁证]:::spike
-  t01[task-01<br/>数据模型 W1]:::w1
-  t02[task-02<br/>协议契约 W2]:::w2
-  t03[task-03<br/>daemon session W3]:::w3
-  t04[task-04<br/>backend session W3]:::w3
-  t07[task-07<br/>permission 消息 W3]:::w3
-  t05[task-05<br/>session SSE W4]:::w4
-  t08[task-08<br/>暂停往返 W4]:::w4
-  t06[task-06<br/>联调+空闲回收 W5]:::w5
-  t10[task-10<br/>会话面板 W5]:::w5
-  t09[task-09<br/>resume W6]:::w6
-  t11[task-11<br/>列表/弹窗 W6]:::w6
-
-  spike --> t06
-  t01 --> t02 --> t03
-  t02 --> t04
-  t02 --> t07
-  t04 --> t05
-  t03 --> t08
-  t07 --> t08
-  t03 --> t06
-  t05 --> t06
-  t04 --> t10
-  t05 --> t10
-  t06 --> t09
-  t08 --> t11
-  t10 --> t11
-
-  classDef spike fill:#3d2e00,stroke:#d29922,color:#fff;
-  classDef w1 fill:#0d2818,stroke:#3fb950,color:#fff;
-  classDef w2 fill:#1a2a4a,stroke:#58a6ff,color:#fff;
-  classDef w3 fill:#2a1a4a,stroke:#d2a8ff,color:#fff;
-  classDef w4 fill:#4a1a2a,stroke:#f85149,color:#fff;
-  classDef w5 fill:#1a4a3a,stroke:#3fb950,color:#fff;
-  classDef w6 fill:#4a3a1a,stroke:#d29922,color:#fff;
-```
+`task-01 → task-02 → task-04 → task-05 → task-06 → task-09`
 
 ## 全局验收标准
 
-- [ ] spike-01：claude + codex 各跑通 stream-json stdin 两轮 result（R-01 铁证）
-- [ ] AC-1：agent 跑完第一轮后中途追问写入 stdin，看到第二轮响应（claude + codex）
-- [ ] AC-2：打断本轮 = agent 停当前 turn + 会话仍 active 可继续；结束会话 = kill + status=ended
-- [ ] AC-3：一个 SSE 连接贯穿整个会话，多 turn 输出实时回显 + 历史可在 AgentRunLog 回看
-- [ ] AC-4：manual_approval=false（默认）自动批准不变；=true 时暂停等远程决定
-- [ ] AC-5：daemon 重启后 active 会话 reconnecting → 恢复，上下文不丢（Wave3）
-- [ ] AC-6：现有批处理 lease（workspace agent run）行为零变化（兼容）
-- [ ] daemon 单测：`cd sillyhub-daemon && pnpm test`（vitest）通过
-- [ ] backend 单测：`cd backend && uv run pytest` 通过
-- [ ] frontend 构建：`cd frontend && pnpm build` 通过（Wave4）
+- [ ] 首 turn 生成 AgentRun；追问为同一 AgentSession 生成新的 AgentRun，且两个 turn 使用不同进程。
+- [ ] 第二 turn 使用首 turn 返回的 Claude session id 或 Codex thread id resume，上下文连续。
+- [ ] 任一时刻同一 AgentSession 最多一个 running AgentRun；并发 inject 返回明确冲突，不重复 spawn。
+- [ ] interrupt 只结束 currentRun，session 仍 active；end 才完成 interactive lease 并结束 session。
+- [ ] 一个 session SSE 连接可按顺序回放并实时接收多个 AgentRunLog，事件携带 run_id/turn 标识且可断点续流。
+- [ ] manual_approval=false 行为不变；true 时审批只绑定当前 turn，请求在 turn 结束时清理。
+- [ ] daemon 重启不尝试恢复旧进程；in-flight run 明确失败收敛，后续 inject 可 resume 新 turn。
+- [ ] batch lease 与现有 workspace AgentRun 行为不变。
+- [ ] daemon `pnpm typecheck`、`pnpm test`，backend `uv run pytest`，frontend `pnpm build` 通过。
 
-## 覆盖矩阵（decisions.md）
+## 覆盖矩阵
 
 | ID | 覆盖任务 | 验收证据 |
 |---|---|---|
-| D-001@v1 命名 AgentSession | task-01 | AC-6（不改现有 session_id） |
-| D-002@v1 1 session=1 lease | task-01, task-03, task-04 | AC-1, AC-6 |
-| D-003@v1 Wave1/2 不恢复 | task-09（Wave3 才做） | AC-5 |
-| D-004@v1 空闲 30min | task-06 | FR-06 |
-| D-005@v1 三元关系+SSE | task-01, task-05 | AC-3, AC-6 |
+| D-001@v1 | task-01 | AgentRun.session_id 语义不变，新增 agent_session_id FK |
+| D-002@v2 | task-01,task-02,task-03,task-04,task-05,task-09 | 每 turn 独立 spawn + resume，多 Run SSE 聚合 |
+| D-003@v1 | task-09 | 重启时收敛 currentRun，保留可 resume 的 session 元数据 |
+| D-004@v1 | task-06 | 30 分钟空闲 session 统一结束 |
+| D-005@v1 | task-01,task-04,task-05,task-11 | session/lease/run 三元关系与跨 Run 日志回看 |
 
-## 模块依赖说明
+## execute 协作点
 
-- `sillyhub-daemon` depends_on `backend`：task-03/04 协议契约（task-02）是两端共同基础。
-- `frontend` depends_on `backend`：task-10/11 依赖 task-04（REST）/task-05（SSE）的 backend 端点，故 Wave4 在 Wave1 后。
-- Wave 间通过 `sessionStore` API + WS 消息 + session 级 SSE channel 接口解耦，每 Wave 独立可交付、独立验收。
-- ⚠️ daemon 实际 TypeScript：execute 时 daemon 任务构建/测试用 `pnpm typecheck` / `pnpm test`（vitest），CONVENTIONS.md/local.yaml/scan 标的 Python（pip/pytest）已过时。
-
-## execute 协作点（Step 9 审查记录）
-
-- **W3 同 Wave 同文件**：task-03 与 task-07 都改 `sillyhub-daemon/src/ws-client.ts`，但**职责正交**——task-03 加控制消息**接收**分派（`onControlMessage` 回调 + SESSION_INJECT/INTERRUPT/END），task-07 加 permission **发送**（`sendPermissionRequest`）。execute 并行时用 worktree 隔离或顺序合并；两者改不同方法，无逻辑冲突。用户决策：接受，execute 协调。
-- **`daemon/service.py` end_session 协作**：task-04 建骨架（§5.6 步骤 7 留空）→ task-05 补 `session_ended` publish → task-06 三入口收敛统一入口。按 W3→W4→W5 顺序执行，无冲突。
-- **`session-store.ts` 增强链**：task-03 建（create/get/inject/interrupt/end）→ task-06 加 `last_active_at`+`scanIdle` → task-08 加 `pendingPermissions` map → task-09 加 `persist/restore`。方法名各异，按 Wave 顺序增强。
+- task-03 与 task-07 同改 daemon WS/协议边界：task-03 负责 turn 生命周期，task-07 只负责 permission 上下行。
+- task-04 建立 `end_session` 与 currentRun 规则，task-05 只补 session 级发布/订阅，task-06 做最终收口。
+- task-03 建立 sessionStore 元数据模型，task-06 增加 idle 字段，task-08 增加 pending permission，task-09 增加持久化；按 Wave 顺序增强。

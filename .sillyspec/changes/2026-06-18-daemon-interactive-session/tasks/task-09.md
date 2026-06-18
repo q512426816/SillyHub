@@ -1,290 +1,380 @@
 ---
-id: task-09
-title: sessionStore 磁盘持久化 + 重启 resume 恢复 + reconnecting 状态
-wave: W3
-priority: P1
-depends_on: [task-03, task-06]
-covers: [FR-08, D-003]
-created_at: 2026-06-18 14:11:24
 author: qinyi
+created_at: 2026-06-18 15:31:03
+change: 2026-06-18-daemon-interactive-session
+id: task-09
+title: "session 元数据持久化与 daemon 重启收敛"
+wave: W6
+priority: P1
+estimated_hours: 16
+depends_on: [task-03, task-06]
+blocks: []
+requirement_ids: [FR-08]
+decision_ids: [D-002@v2, D-003@v1]
+allowed_paths:
+  - sillyhub-daemon/src/session-store.ts
+  - sillyhub-daemon/src/session-persistence.ts
+  - sillyhub-daemon/src/daemon.ts
+  - sillyhub-daemon/src/hub-client.ts
+  - sillyhub-daemon/tests/session-persistence.test.ts
+  - sillyhub-daemon/tests/session-store.test.ts
+  - sillyhub-daemon/tests/daemon-session-recovery.test.ts
+  - backend/app/modules/daemon/schema.py
+  - backend/app/modules/daemon/router.py
+  - backend/app/modules/daemon/service.py
+  - backend/app/modules/daemon/tests/test_session_recovery.py
 ---
 
-# task-09 — sessionStore 磁盘持久化 + 重启 resume 恢复 + reconnecting 状态
+# session 元数据持久化与 daemon 重启收敛
 
-> 设计依据：`../design.md` §5 Wave3 / §11 D-003 / FR-08 / §12 验收标准 7
-> 计划依据：`../plan.md` task-09 行（W3 / P1 / 依赖 task-03, task-06）
-> 真实源文件：
->   - `sillyhub-daemon/src/session-store.ts`（task-03 新建，本任务加 persist/restore）
->   - `sillyhub-daemon/src/task-runner.ts`（spawn + buildArgs，L423-430 已透传 resumeSessionId）
->   - `sillyhub-daemon/src/adapters/stream-json.ts`（buildArgs L207-232，L228 已 `--resume`）
->   - `sillyhub-daemon/src/adapters/json-rpc.ts`（codex，需补 thread/resume 路径）
->   - `sillyhub-daemon/src/config.ts`（`~/.sillyhub/daemon/` 目录 + loadConfig/saveConfig 模式）
->   - `backend/app/modules/agent/model.py`（task-01 新建 AgentSession，status 加 reconnecting 态）
-> 参考实现：`C:\Users\qinyi\IdeaProjects\happy\packages\happy-cli\src\persistence.ts:401-441`（PersistedSession + 原子写）、`daemon/run.ts:661`（resumeSession）
+## 1. 目标与硬约束
 
-## 目标
+依据 `plan.md` 显式 task-09、`requirements.md` FR-08、`decisions.md` D-002@v2/D-003@v1，本任务只实现以下恢复语义：
 
-落地 design.md §5 Wave3 / D-003 / FR-08 / 验收标准 7：
+1. daemon 将 active interactive session 的**可恢复元数据**持久化到 `~/.sillyhub/daemon/sessions.json`。
+2. daemon 重启时加载元数据；若记录含 `currentRunId`，先由 backend 将该 in-flight `AgentRun` 收敛为 `failed`，再把 `AgentSession` 从 `reconnecting` 恢复为 `active`。
+3. 重启恢复阶段**不 spawn agent、不 attach 旧进程、不发送空 prompt、不调用 `TaskRunner.runTurn`**。
+4. 恢复后的下一次 `SESSION_INJECT` 才创建并执行新的 AgentRun；task-03 的 `SessionStore.startTurn` 使用持久化的 `agentSessionId`，Claude 新进程走 `--resume`，Codex 新 app-server 进程走 `thread/resume` 后 `turn/start`。
+5. 旧 child/stdin/readline/adapter/AbortController 不可序列化、不可恢复、不可出现在 SessionStore 恢复记录中。
+6. backend 是 session/run/lease 状态真相；daemon 本地文件只是恢复索引。文件记录与 backend 不一致时，以 backend 校验结果为准。
 
-- daemon 重启后内存 `sessionStore` 丢失的现状被打破（R-03）—— 持久化 + 恢复双链路建立。
-- `active` 状态的会话重启后能自动 `reconnecting → 恢复`，claude 走 `--resume <agentSessionId>`、codex 走 `thread/resume`，历史上下文不丢（由 agent 自身会话持久化保证，daemon 仅透传 sessionId）。
-- backend `AgentSession.status` 同步显示 `reconnecting`，前端（task-10）可见恢复进度。
+这取代旧 task-09 的“daemon 启动时立即重 spawn/等待首事件”方案。不得保留兼容分支，也不得新增 `isResume` 后在启动阶段调用 `runLease`/`runTurn`。
 
-**非目标**（不做）：
+## 2. 覆盖来源与当前源码依据
 
-- 不做"断线重连同进程保活"（Wave1/2 已用长驻 spawn 解决，本任务只解决 daemon 进程退出/重启）。
-- 不持久化 stdin 缓冲 / 未消费事件（agent 自身持久化语义负责，daemon 只透传 sessionId）。
-- 不做 backend 侧的崩溃恢复（AgentSession 行在 daemon 重启期间仍是 active，daemon 重连后 backend 据其上报改 reconnecting→active；sessionStore 状态机内部自治）。
-- 不引入加密（happy 的 encryptionKey 是 E2E 中转需要；本项目平台明文，仅持久化 sessionId 等非敏感元数据）。
+- Requirements：FR-08，daemon 重启时加载持久化 metadata、收敛崩溃时 currentRun，并让 session 恢复为可继续状态。
+- Decisions：D-002@v2 固定“每 turn 独立 spawn + resume”；D-003@v1 固定恢复能力属于独立持久化层。
+- Design：§5 Wave 3、§8.1 `reconnecting` 状态、§12 验收标准 7；其中“重 attach”按 D-002@v2 解释为下一 turn 新 spawn + resume，不能恢复旧进程。
+- Plan：Wave 6 task-09；依赖 task-03 的 turn runner 和 task-06 的生命周期/idle 收口。
 
-## 前置依赖
+实现前必须重新用 `rg` 确认接口存在；源码变化时先修本文档，不按旧行号编造调用：
 
-- **task-03**：SessionStore 类已建立（`Map<sessionId, SessionState>`、`create/inject/interrupt/end/get`），child.stdin 长驻、跨 turn 复用、`result` 不 end stdin。本任务在此基础上加 `persist()` / `restore()` 两个方法 + 启动钩子。
-- **task-06**：Wave1 端到端跑通（spike-01 R-01 铁证、空闲回收、end_session 统一入口），session 生命周期闭环已验证。task-09 不在 Wave1 之前介入，避免与核心交互未稳定时耦合。
-- **task-01**：`agent_sessions` 表（含 `status` 字段：pending/active/reconnecting/ended/failed）+ `agent_session_id` 字段已迁移，本任务复用 `reconnecting` 态。
-- **task-04 / task-02**：backend REST + WS 协议通道完备，daemon 重连后能上报 status 翻转。
-
-## 涉及文件
-
-| 操作 | 文件路径 | 改动要点 |
+| 依据 | 当前事实 | 本任务用法 |
 |---|---|---|
-| 修改 | `sillyhub-daemon/src/session-store.ts` | 新增 `persist()` / `restore()` / `_sessionFilePath` / `SessionPersistRecord`；`create/end` 触发 persist；启动调用 restore 重 spawn |
-| 修改 | `sillyhub-daemon/src/daemon.ts` | daemon 启动流程（loadConfig 之后）调 `sessionStore.restore()`；新增 `_respawnSession(record)` 复用 task-runner buildArgs 路径 |
-| 修改 | `sillyhub-daemon/src/adapters/json-rpc.ts` | 新增 `buildResumeHandshake(opts: { threadId, cwd, model })`：`thread/resume` JSON-RPC request（参考 happy `codexAppServerClient.ts:660`），替代 `thread/start` |
-| 修改 | `sillyhub-daemon/src/task-runner.ts` | 重 spawn 走原 `_spawnAndStream` 路径；codex thread/resume 通过 `ctx.resumeSessionId` + adapter `buildResumeHandshake` 钩子分流 |
-| 修改 | `sillyhub-daemon/src/types.ts` | `LeaseCtx` 增加 `isResume?: boolean` 标记（区分首次 spawn vs 重 spawn），仅 daemon 内部用 |
-| 修改 | `backend/app/modules/agent/model.py` | AgentSession.status 枚举补 `reconnecting`（task-01 已规划，本任务消费） |
-| 修改 | `backend/app/modules/daemon/service.py` | daemon 重连上报 status=reconnecting → active 翻转逻辑（`syncSessionStatus`） |
-| 新增 | `sillyhub-daemon/src/session-store.test.ts` | vitest 单测：persist/restore mock fs + fakeChildProcess |
-| 新增 | `sillyhub-daemon/test/fixtures/sessions.sample.json` | 落盘文件 schema 样例（契约测试） |
+| `tasks/task-03.md` | `SessionStore` 仅保存元数据；`startTurn` 派生 `resumeSessionId`；`TaskRunner.runTurn` 每 turn 新 spawn | 恢复只重建 store；下一 inject 原样复用 `startTurn` |
+| `tasks/task-06.md` | store 有 `lastActiveAt` 与 idle end；`end` 是本地唯一删除入口 | persist 覆盖 create/turn/end/idle 变更，不复制 idle 收口 |
+| `sillyhub-daemon/src/config.ts` | `DEFAULT_CONFIG_DIR = ~/.sillyhub/daemon` | sessions 文件放同一目录 |
+| `sillyhub-daemon/src/task-runner.ts` | 真实执行入口为 `runLease(ctx)`；task-03 将新增 `runTurn(ctx)`；现有 cancel 以 leaseId 追踪当前执行 | restore 禁止调用执行入口；新 turn 仍由 task-03 路径执行 |
+| `sillyhub-daemon/src/adapters/stream-json.ts` | `buildArgs({resumeSessionId})` 已生成 `--resume <id>` | 下一 inject 的 Claude 新 spawn 复用 |
+| `sillyhub-daemon/src/adapters/json-rpc.ts` | 当前首 turn 为 initialize → `thread/start` → `turn/start`；task-03 增加 `thread/resume` | 下一 inject 的 Codex 新 spawn 复用 |
+| `sillyhub-daemon/src/hub-client.ts` | `_request` 是 daemon→backend HTTP 唯一封装 | 恢复对账通过 HubClient，不散落 fetch |
+| `backend/app/modules/daemon/service.py` | service 负责 lease/run/session 状态事务 | in-flight run 失败和 session 状态切换只在 service 完成 |
 
-## 数据模型
+扫描模块文档仍混有旧 Python daemon 描述；冲突时以当前 TypeScript 源码、D-002@v2 和本任务硬约束为准。
 
-### 落盘 schema（`~/.sillyhub/daemon/sessions.json`）
+## 3. 涉及文件
 
-```jsonc
-{
-  "version": 1,
-  "savedAt": "2026-06-18T14:11:24Z",
-  "sessions": {
-    "<agentSessionId-uuid>": {
-      "agentSessionId": "<uuid>",
-      "leaseId": "<uuid>",
-      "provider": "claude",
-      "agentInternalSessionId": "<claude session_id 或 codex thread_id>",
-      "config": { "manual_approval": false, "model": "sonnet" },
-      "status": "active",
-      "turnCount": 3,
-      "lastActiveAt": "2026-06-18T14:00:00Z",
-      "savedAt": "2026-06-18T14:11:24Z"
-    }
-  }
+| 操作 | 文件 | 责任 |
+|---|---|---|
+| 修改 | `sillyhub-daemon/src/session-store.ts` | 导出可持久化快照、恢复 metadata、在状态变更后调持久化端口；不持有进程对象 |
+| 新增 | `sillyhub-daemon/src/session-persistence.ts` | schema 校验、原子写、损坏文件隔离、串行化写入 |
+| 修改 | `sillyhub-daemon/src/daemon.ts` | 启动时 restore → backend reconcile → activate；明确禁止 restore 期间 spawn |
+| 修改 | `sillyhub-daemon/src/hub-client.ts` | 新增 daemon 身份的 session recovery 对账调用 |
+| 修改 | `backend/app/modules/daemon/schema.py` | recovery 请求/响应 DTO |
+| 修改 | `backend/app/modules/daemon/router.py` | daemon recovery 内部端点，只做鉴权与 DTO 映射 |
+| 修改 | `backend/app/modules/daemon/service.py` | 锁 session/lease/run，rotate claim token，收敛 currentRun，返回恢复上下文 |
+| 新增 | `sillyhub-daemon/tests/session-persistence.test.ts` | 文件 schema、原子写、串行写、损坏文件测试 |
+| 修改 | `sillyhub-daemon/tests/session-store.test.ts` | restore 后无 spawn、下一 turn resume 测试 |
+| 新增 | `sillyhub-daemon/tests/daemon-session-recovery.test.ts` | 启动恢复顺序和失败隔离测试 |
+| 新增/修改 | `backend/app/modules/daemon/tests/test_session_recovery.py` | 对账事务、所有权、幂等、token rotation 测试 |
+
+不修改 adapter 的 resume 算法、不新增启动期握手、不修改 session SSE/UI/permission；这些分别属于 task-03、task-05/11、task-07/08。
+
+## 4. 持久化数据与接口
+
+### 4.1 磁盘 schema
+
+```typescript
+export const SESSION_FILE_VERSION = 1 as const;
+export const DEFAULT_SESSION_FILE = join(DEFAULT_CONFIG_DIR, 'sessions.json');
+
+export interface PersistedSessionRecord {
+  sessionId: string;          // AgentSession.id
+  leaseId: string;            // interactive lease.id
+  runtimeId: string;          // backend 分配的 provider runtime id
+  provider: 'claude' | 'codex';
+  agentSessionId: string;     // Claude session_id / Codex thread_id
+  currentRunId?: string;      // 崩溃时可能仍在执行的 AgentRun.id
+  turnCount: number;
+  lastActiveAt: number;       // epoch milliseconds
+  config: Record<string, unknown>;
+}
+
+export interface PersistedSessionFile {
+  version: typeof SESSION_FILE_VERSION;
+  savedAt: string;
+  sessions: PersistedSessionRecord[];
 }
 ```
 
-字段说明：
+持久化规则：
 
-- **顶层 `version`**：schema 版本号（类比 happy sessionsFile），未来字段演进用，本任务固定 `1`。
-- **顶层 `savedAt`**：整文件最后写入时间，用于过期清理。
-- **`sessions` 是 Map**（key = agentSessionId）：天然去重 + O(1) 查找，类比 happy `Record<string, PersistedSession>`。
-- **`agentInternalSessionId`**：claude `session_id`（来自 system/result 事件累积）或 codex `thread_id`（来自 thread/start response）。**重 spawn 时透传**，是 resume 的唯一密钥。
-- **不含**：child.stdin 引用、abortController、buffer 等运行时态（无法序列化、也不该跨进程）。
-- **不含**：claimToken / encryptionKey（敏感 + 单次 lease 生命周期，重连走 backend 重新发 lease_start 拿新 token）。
+- 仅写可继续的 `active|running|interrupting` session；序列化时统一记录为 metadata，不把运行态对象写入 JSON。
+- `agentSessionId` 必须存在才可作为可恢复记录；首 turn 尚未取得内部 id 时崩溃，不能伪造 resume，backend 收敛为 failed，文件记录移除。
+- `currentRunId` 仅用于重启对账；恢复成功后必须清空并再次持久化。
+- 禁止写 `claimToken`、API key、credential、prompt、输出、child/stdin/adapter/AbortController。
+- 不按任意 24h TTL 自行删除 active session；有效性由 backend session/lease 真相和 task-06 idle 规则决定。
+- config 只允许 task-03 明确的非敏感白名单（`model`、`manual_approval` 等）；未知或敏感 key 在序列化前过滤。
 
-### 内存态 ↔ 落盘态映射
+### 4.2 持久化端口
 
-| 内存 SessionState 字段 | 落盘 | 备注 |
+```typescript
+export interface SessionSnapshotSource {
+  snapshotPersistable(): PersistedSessionRecord[];
+}
+
+export interface SessionPersistence {
+  load(): Promise<PersistedSessionRecord[]>;
+  save(records: readonly PersistedSessionRecord[]): Promise<void>;
+  quarantine(reason: string): Promise<void>;
+}
+
+export class JsonSessionPersistence implements SessionPersistence {
+  constructor(filePath: string = DEFAULT_SESSION_FILE);
+  load(): Promise<PersistedSessionRecord[]>;
+  save(records: readonly PersistedSessionRecord[]): Promise<void>;
+  quarantine(reason: string): Promise<void>;
+}
+```
+
+`save` 必须使用同目录临时文件、`writeFile`、`rename` 的原子替换，并通过单一 promise queue 串行写；不能用 debounce 丢失最后一次状态变化。写入权限在支持的平台设为 `0o600`。`load` 必须做 version、UUID/字符串、provider、有限数字和 config 形状校验；整文件无法解析时将其重命名为 `sessions.json.corrupt-<timestamp>` 后返回空集合。
+
+### 4.3 SessionStore 恢复接口
+
+task-03 的 `SessionState` 保持不含进程对象，并增加/实现：
+
+```typescript
+export interface RestoredSessionInput {
+  record: PersistedSessionRecord;
+  baseCtx: LeaseCtx;           // backend recovery 返回的新 claimToken/执行上下文
+}
+
+export class SessionStore {
+  restoreMetadata(input: RestoredSessionInput): SessionState;
+  markRecovered(sessionId: string): SessionState;
+  snapshotPersistable(): PersistedSessionRecord[];
+  flush(): Promise<void>;
+}
+```
+
+语义：
+
+1. `restoreMetadata` 新建 `status='reconnecting'` 的内存项，保留 `agentSessionId/turnCount/lastActiveAt`，但 `currentRunId` 清空；它不得调用 runner。
+2. `markRecovered` 只允许 `reconnecting → active`，随后 `flush()`。
+3. `startTurn` 在 reconnecting 时必须拒绝；恢复为 active 后，下一 inject 使用既有 `agentSessionId` 派生 `resumeSessionId`。
+4. create、接受 startTurn、turn 收敛、interrupt 收敛、end/fail/idle end 后都必须排队保存；`end/fail` 要把记录从文件移除。
+5. daemon `stop()` 在取消当前任务后 `await sessionStore.flush()`，但 SIGKILL 仍由上一次原子快照兜底。
+
+## 5. backend 对账接口
+
+### 5.1 HTTP 契约
+
+新增 daemon 内部端点，不复用用户 session REST：
+
+```text
+POST /api/daemon/sessions/{session_id}/recover
+Authorization: daemon 现有认证
+```
+
+```python
+class SessionRecoveryRequest(BaseModel):
+    lease_id: uuid.UUID
+    runtime_id: uuid.UUID
+    interrupted_run_id: uuid.UUID | None = None
+    provider: Literal["claude", "codex"]
+    agent_session_id: str = Field(min_length=1, max_length=255)
+
+class SessionRecoveryResponse(BaseModel):
+    session_id: uuid.UUID
+    lease_id: uuid.UUID
+    runtime_id: uuid.UUID
+    status: Literal["active", "ended", "failed", "rejected"]
+    claim_token: str | None = None
+    execution_context: dict[str, Any] | None = None
+    interrupted_run_status: Literal["failed"] | None = None
+```
+
+HubClient：
+
+```typescript
+export interface SessionRecoveryRequest {
+  lease_id: string;
+  runtime_id: string;
+  interrupted_run_id?: string;
+  provider: 'claude' | 'codex';
+  agent_session_id: string;
+}
+
+export interface SessionRecoveryResponse {
+  session_id: string;
+  lease_id: string;
+  runtime_id: string;
+  status: 'active' | 'ended' | 'failed' | 'rejected';
+  claim_token?: string;
+  execution_context?: Record<string, unknown>;
+  interrupted_run_status?: 'failed';
+}
+
+class HubClient {
+  recoverSession(
+    sessionId: string,
+    body: SessionRecoveryRequest,
+  ): Promise<SessionRecoveryResponse>;
+}
+```
+
+### 5.2 service 事务
+
+```python
+async def recover_session_after_daemon_restart(
+    self,
+    session_id: uuid.UUID,
+    *,
+    runtime_id: uuid.UUID,
+    lease_id: uuid.UUID,
+    interrupted_run_id: uuid.UUID | None,
+    provider: str,
+    agent_session_id: str,
+) -> SessionRecoveryResult: ...
+```
+
+单个数据库事务内必须：
+
+1. `SELECT AgentSession ... FOR UPDATE`，校验 session.runtime_id、lease_id、provider 和 `kind='interactive'` lease 归属。
+2. session 已 ended/failed 时返回对应终态；不复活、不旋转 token，daemon 删除本地记录。
+3. session 可恢复时先置 `reconnecting`。
+4. 若 `interrupted_run_id` 非空，只允许收敛同 session 且处于 `pending|running|pending_approval` 的该 run：写 `status='failed'`、`finished_at=now`、稳定错误码 `daemon_restarted`；已终态则幂等，不修改完成结果。
+5. 若同 session 还存在另一个非终态 run，报 invariant violation，禁止猜测或批量失败。
+6. 为原 interactive lease 旋转 claim token，并返回新的明文 token；数据库仅保存 hash，旧 token 立即失效。不得把 token写磁盘。
+7. 生成 task-03 `baseCtx` 所需的 execution context；成功后将 session 置回 `active` 并 commit。
+8. 返回 active 后 daemon 才 `restoreMetadata`/`markRecovered`；任何校验失败都不建立本地 session。
+
+`reconnecting → active` 可以在同一 service 调用中完成；测试必须在 service 状态写入/事件发布边界证明顺序。若 task-05 已提供 session 状态事件，则依次 publish reconnecting、active；不得新增同义 WS 状态协议。
+
+## 6. daemon 启动顺序
+
+```text
+load config / construct client
+  → sessionPersistence.load()
+  → register runtimes（获得当前 backend runtime ids）
+  → 对每条记录串行或限流 recoverSession()
+      → backend 收敛旧 currentRun + rotate claim token
+      → SessionStore.restoreMetadata(recovery context)
+      → SessionStore.markRecovered()
+  → flush（清除 currentRunId/无效记录）
+  → 启动 WS/poll/heartbeat/idle loops
+```
+
+恢复循环规则：
+
+- 默认限流 4 个 session；单条失败记录结构化 warning 后继续其它记录。
+- 恢复期间不接受该 session 的 inject；backend status 为 reconnecting，REST 应返回明确 409/稍后重试。
+- 记录对应 provider runtime 未注册时不恢复为 active；backend 收敛旧 run 后将 session 置 failed，daemon 删除记录。
+- `recoverSession` 成功只表示元数据可继续，不代表 agent 可 resume。真正的 Claude/Codex resume 成功与否由下一次 inject 的 `runTurn` 结果决定。
+- 下一 inject 失败时沿 task-03/task-06 规则处理，不在 recovery 中回退为首 turn 或自动创建新内部会话。
+
+## 7. 边界条件
+
+| # | 场景 | 必须行为 |
 |---|---|---|
-| sessionId (= agentSessionId) | ✅ agentSessionId | 主键 |
-| leaseId | ✅ leaseId | 重 spawn 用 |
-| provider | ✅ provider | 选 adapter |
-| agentInternalSessionId | ✅ | resume 密钥 |
-| config | ✅ config | manual_approval / model |
-| status | ✅ status | 仅 persist active；ended/failed 不落盘 |
-| turnCount | ✅ turnCount | 统计 |
-| lastActiveAt | ✅ lastActiveAt | 过期清理用 |
-| child / stdin / adapter / abortController | ❌ | 运行时重建 |
+| 1 | daemon 崩溃时存在 running currentRun | backend 仅把记录中的同 session run 标 failed/`daemon_restarted`；session 回 active；启动期 spawn 次数为 0 |
+| 2 | 崩溃时 session 空闲、无 currentRun | 不创建虚假 run；校验并旋转 token后恢复 active；下一 inject 才 spawn |
+| 3 | 下一 inject（Claude） | 新 child args 含持久化 session id 的 `--resume`；不能无 resume 降级 |
+| 4 | 下一 inject（Codex） | 新 app-server 依次 initialize、`thread/resume {threadId}`、`turn/start`；不能启动期预热进程 |
+| 5 | sessions.json 不存在 | 空恢复正常启动，不 warn、不创建 session |
+| 6 | JSON 损坏或 version 不支持 | 隔离损坏文件并空恢复；daemon 不崩溃；不尝试猜测字段 |
+| 7 | session 已 ended/failed | backend 返回终态；daemon 删除记录，不复活 session/lease |
+| 8 | runtime/lease/provider/session 任一不匹配 | recovery rejected；不改其它 run、不旋转 token、不建立本地 session |
+| 9 | interrupted_run_id 指向别的 session | invariant/rejected；绝不按 UUID 直接更新跨 session run |
+| 10 | interrupted run 已 completed/failed | 对账幂等，保留原终态/结果；session 可继续恢复 |
+| 11 | 首 turn 未取得 agentSessionId 就崩溃 | 不可恢复上下文；backend 收敛 currentRun/session 为 failed，记录移除 |
+| 12 | 多个 session 同时恢复，其中一个 HTTP 失败 | 失败隔离；其它 session 继续；失败项不进入 active store |
+| 13 | save 并发与进程退出 | promise queue 保证顺序；stop await 最后一写；文件始终是完整 JSON |
+| 14 | end/idle 与 persist 竞态 | 终态删除写必须排在旧 active 快照后，重启不得复活已结束 session |
+| 15 | 旧 claim token 泄露/重放 | token 不落盘；recovery 旋转后旧 token验证失败，新 token只保存在内存 baseCtx |
+| 16 | batch lease | 不写 sessions.json、不进 recovery endpoint，现有 claim/heartbeat/complete/expiry 行为零变化 |
 
-## 实现步骤
+## 8. TDD 实施顺序
 
-### 步骤 1：SessionStore.persist() — active session 落盘
+严格执行“测试先红 → 最小实现 → 重构 → 回归”，每一步保留失败与通过证据。
 
-文件：`sillyhub-daemon/src/session-store.ts`
+### Step 1：文件 schema 与原子写（Red）
 
-1. 新增常量 `SESSION_FILE_PATH = join(homedir(), '.sillyhub', 'daemon', 'sessions.json')`（沿用 `config.ts:40` `DEFAULT_CONFIG_DIR` 目录约定，复用 `loadConfig` 已确保目录存在）。
-2. 新增 `SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000`（24h，类比 happy `persistence.ts:415` 14d；本项目 daemon 重启频率高，24h 足够）。
-3. 新增方法 `async persist(): Promise<void>`：
-   - 遍历 `this._store`（Map），过滤 `status === 'active'` 的条目（`ended` / `failed` 跳过，类比 happy 不持久化已结束 session）。
-   - 序列化为 `SessionPersistFile` schema。
-   - **原子写**（参考 happy `persistence.ts:436-441`）：先写 `<path>.tmp` → `fs.rename(tmp, path)`（Windows / POSIX 都原子，避免并发写半截文件）。
-   - 异常吞掉 + `console.warn`（持久化失败不阻塞主流程，类比 happy try/catch return）。
-4. `create(sessionId, ...)` 成功后异步触发 `persist()`（不 await，避免阻塞会话创建）。
-5. `end(sessionId)` / 标记 `failed` 后同步触发 `persist()`（让 ended session 立即从磁盘移除，避免重启时误恢复）。
-6. 每次 turn 完成（`result` 事件后）也触发一次 persist（更新 `turnCount` / `lastActiveAt`，类比 happy 在 webhook 时 persist）。
-   - 节流：500ms 内多次 persist 合并为一次（避免高频写盘，用 `setTimeout` debounce）。
+- 写 `session-persistence.test.ts`：不存在文件、合法 v1、非法 version/字段、损坏 JSON 隔离、临时文件 rename、`0o600`、并发 save 顺序。
+- 最小实现 `JsonSessionPersistence`；不得先接 daemon 生命周期。
 
-### 步骤 2：SessionStore.restore() — daemon 启动加载 + 重 spawn
+### Step 2：SessionStore 快照/恢复（Red）
 
-文件：`sillyhub-daemon/src/session-store.ts` + `sillyhub-daemon/src/daemon.ts`
+- 覆盖 active/running/interrupting 快照、ended/failed 删除、敏感字段过滤、`restoreMetadata` 状态门、`markRecovered`。
+- 注入 spy `TurnRunner`，断言 load/restore/markRecovered 全过程 `runTurn` 调用 0 次。
+- 恢复 active 后调用一次 `startTurn`，断言 ctx.resumeSessionId 等于持久化 agentSessionId，才允许 runner 调用 1 次。
 
-1. 新增方法 `async restore(spawner: SessionRespawner): Promise<void>`：
-   - 读 `SESSION_FILE_PATH`（`existsSync` 兜底，文件不存在返回空，类比 happy `readPersistedSessions:417-419`）。
-   - JSON.parse 失败 → warn + 返回空（不抛，类比 happy `return {}`）。
-   - 过滤过期条目（`now - savedAt > SESSION_MAX_AGE_MS` 丢弃，类比 happy L426）。
-   - 对每条 `status === 'active'` 的记录：
-     - 内存 Map 创建占位 SessionState（`status: 'reconnecting'`，无 child/stdin）。
-     - 调 `spawner.respawn(record)` 异步重 spawn（不阻塞 restore 循环，逐个串行避免并发风暴）。
-2. daemon.ts 启动流程（loadConfig 之后、connectWS 之前）：
-   ```ts
-   await this.sessionStore.restore({
-     respawn: (record) => this._respawnSession(record),
-   });
-   ```
-3. daemon.ts 新增 `_respawnSession(record: SessionPersistRecord)`：
-   - 构造 `LeaseCtx`：复用 record.leaseId / provider / config.model / agentInternalSessionId（填到 `resumeSessionId`）/ `isResume: true` 标记。
-   - 调 `taskRunner.runLease(ctx)` —— **复用 Wave1 完全相同的 spawn 路径**（task-runner.ts:288 `runLease`），不新增 spawn 实现。
-   - 重 spawn 成功（子进程 spawn 完成 + claude system 事件 / codex thread/start response 到达）→ 内存 status 改 `active`，backend 上报 active。
-   - 重 spawn 失败（spawn ENOENT / agent crash）→ 内存 status 改 `failed`，backend 上报 failed，从磁盘移除该条目。
-4. **超时保护**：单个 session 重 spawn 等待 `SESSION_RECONNECT_TIMEOUT_MS = 30_000`（30s），未收到首条事件（claude system.init / codex thread/start response）→ 标 failed。
-   - 实现方式：`_respawnSession` 内 `Promise.race([runLease(...), timeoutReject])`，超时 kill child。
+### Step 3：backend 对账事务（Red）
 
-### 步骤 3：claude 重 spawn — `--resume <agentSessionId>` 路径
+- 测试 session/lease/runtime/provider 所有权、currentRun 精确收敛、已终态幂等、多个 active run invariant、token rotation、ended/failed 不复活。
+- 实现 schema/router/service；router 不写 ORM，不捕获后伪造成功。
 
-文件：`sillyhub-daemon/src/task-runner.ts`（无需新增，**完全复用**）+ `stream-json.ts`（无需新增）
+### Step 4：daemon 启动编排（Red）
 
-- task-runner.ts L423-430 已经透传 `effectiveCtx.resumeSessionId` 到 `adapter.buildArgs`。
-- stream-json.ts L228 `if (opts?.resumeSessionId) args.push('--resume', opts.resumeSessionId)`。
-- 重 spawn 时 daemon.ts `_respawnSession` 把 `record.agentInternalSessionId` 填到 `ctx.resumeSessionId`，链路自动打通。
-- **首 prompt 处理**：重 spawn 不需要写新 prompt（claude `--resume` 会恢复对话上下文，等用户下一条 inject）。task-runner.ts:769-795 的 stdin prompt 写入分支需在 `ctx.isResume === true` 时跳过（仅 claude；codex 见步骤 4）。
-  - 修改 `task-runner.ts:769`：`if (!adapter.buildHandshake && !ctx.isResume)` 跳过 prompt 写入。
-- **result 不结束会话**：Wave1 已经做（`result` 不 end stdin），重 spawn 后 agent 收到 `--resume` 后处于等待新输入态，符合预期。
+- fake persistence + fake HubClient + fake SessionStore，验证 register 后 recover、loops 前完成、单项失败隔离、无 spawn。
+- 覆盖恢复成功 flush 清 currentRun、rejected 删除记录、stop await flush。
 
-### 步骤 4：codex 重 spawn — `thread/resume` JSON-RPC 路径
+### Step 5：下一 turn resume 集成（Red）
 
-文件：`sillyhub-daemon/src/adapters/json-rpc.ts` + `sillyhub-daemon/src/task-runner.ts`
+- Claude：恢复期间 spawn=0；模拟 SESSION_INJECT 后 spawn=1 且 args 含 `--resume old-session-id`。
+- Codex：恢复期间 spawn=0；inject 后新进程发 initialize → thread/resume → turn/start。
+- 两者均断言新 run_id 与崩溃 run_id 不同，旧 child 不存在且未 attach。
 
-1. json-rpc.ts 新增方法 `buildResumeHandshake(opts: { threadId, cwd, model? }): string[]`：
-   - 参考 happy `codexAppServerClient.ts:660 resumeThread` + `:687 this.request('thread/resume', params)`。
-   - 序列（替代现有 `buildHandshake` 的 `thread/start`）：
-     ```jsonc
-     // 1. initialize（同首次）
-     { "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": { "clientInfo": {...} } }
-     // 2. notifications/initialized（同首次）
-     { "jsonrpc": "2.0", "method": "notifications/initialized" }
-     // 3. thread/resume（替代 thread/start）
-     { "jsonrpc": "2.0", "id": 2, "method": "thread/resume", "params": { "threadId": "<record.agentInternalSessionId>" } }
-     ```
-   - `thread/resume` response 含 `result.thread.id`（理论上等于传入 threadId），TaskRunner 现有 L1009-1045 检测 `id === 2 && msg.result.thread.id` 后自动触发 `buildTurnStart` —— **但重 spawn 不需要立刻发 turn/start**（等用户下一条 inject）。
-2. task-runner.ts L801 handshake 分支：
-   ```ts
-   const handshake = ctx.isResume && adapter.buildResumeHandshake
-     ? adapter.buildResumeHandshake({ threadId: ctx.resumeSessionId!, cwd: opts.cwd, model: ctx.model })
-     : adapter.buildHandshake({ cwd: opts.cwd, prompt, model: ctx.model });
-   ```
-3. task-runner.ts L1009 turn/start 自动触发分支：`if (!ctx.isResume && adapter.buildTurnStart && ...)` —— 重 spawn 跳过自动 turn/start，等 inject。
-4. codex `thread/resume` 失败（thread 不存在 / 已过期，codex 返回 error response -32600/-32000）→ TaskRunner 现有 `parseResponse` 错误分支（L276-293）产 error event → `_spawnAndStream` 标 failed → 重 spawn 失败路径触发。
+### Step 6：回归
 
-### 步骤 5：AgentSession.status 加 reconnecting 态
+```powershell
+Set-Location sillyhub-daemon
+pnpm test -- session-persistence session-store daemon-session-recovery
+pnpm test -- task-runner-turn json-rpc stream-json
+pnpm typecheck
+pnpm test
 
-文件：`backend/app/modules/agent/model.py`（task-01 已建表，本任务消费 `reconnecting` 值）+ `backend/app/modules/daemon/service.py`
+Set-Location ..
+uv run pytest backend/app/modules/daemon/tests/test_session_recovery.py backend/app/modules/daemon/tests/test_session_service.py
+uv run ruff check backend/app/modules/daemon
+```
 
-1. task-01 的 `AgentSession.status` 字段注释已经包含 `reconnecting`（design.md §8.1 表已列），本任务**不改 schema**，仅消费。
-2. service.py 新增方法 `mark_session_reconnecting(session_id)` / `mark_session_active(session_id)`：
-   - daemon 重连首条 heartbeat / WS 重连事件 → backend 翻所有该 runtime 名下 active session 为 reconnecting。
-   - daemon 重 spawn 成功上报 → 翻回 active。
-3. WS / REST 端点（task-04 已建）：daemon 通过新增 `daemon:session_status` 消息上报 status 翻转，backend 据此 UPDATE。
-   - 协议常量加到 `protocol.ts` MSG 字典（task-02 已留扩展位）。
-4. 前端（task-10）订阅 session SSE 看到 reconnecting → active 状态切换，显示恢复中提示。
+若 `.sillyspec/local.yaml` 定义了替代命令，以该文件为准。PostgreSQL 才能证明 `FOR UPDATE` 并发语义；SQLite 只用于分支单测。
 
-### 步骤 6：backend 同步 reconnecting / active 状态
+## 9. 验收标准
 
-文件：`backend/app/modules/daemon/service.py` + `ws_hub.py`
-
-- daemon 启动 restore 阶段，对每条 reconnecting session：
-  - 上报 `daemon:session_status { session_id, status: 'reconnecting' }` → backend UPDATE。
-- 重 spawn 成功（首条 system/turn 事件到达）：
-  - 上报 `daemon:session_status { session_id, status: 'active' }` → backend UPDATE + publish SSE。
-- 重 spawn 失败：
-  - 上报 `daemon:session_status { session_id, status: 'failed', error: ... }` → backend UPDATE。
-
-## 完成标准（验收 7）
-
-> **daemon 重启后 active 会话 reconnecting → 恢复，历史上下文不丢**。
-
-具体拆解为可测条目（对照 design.md §12 验收 7）：
-
-- [ ] **AC-7.1**：daemon 跑着一个 claude active session（已 ≥1 turn），kill daemon 进程 → 重启 daemon → 30s 内该 session 在 backend `AgentSession.status` 从 active → reconnecting → active 翻转。
-- [ ] **AC-7.2**：重启后通过 quick-chat 注入新 prompt，agent 响应**引用了重启前的对话内容**（claude `--resume` 恢复上下文铁证）。
-- [ ] **AC-7.3**：codex 同理（thread/resume 恢复 thread_id，新 turn/start 引用前文）。
-- [ ] **AC-7.4**：重启前 `ended` / `failed` 的 session 不被恢复（磁盘已移除，restore 跳过）。
-- [ ] **AC-7.5**：超过 24h 的 session 记录（人工改 savedAt 模拟）不被恢复（过期清理）。
-- [ ] **AC-7.6**：磁盘 `sessions.json` 损坏（手工写无效 JSON）→ daemon 启动 warn 但不崩溃，空 sessionStore 继续运行。
-- [ ] **AC-7.7**：并发 persist（debounce 后）+ 重 spawn 不产生半截 JSON（原子 rename 验证）。
-- [ ] **AC-7.8**：现有批处理 lease（kind=batch）行为零变化（兼容，验收 8）。
-
-## 测试要点
-
-### 单元测试（`sillyhub-daemon/src/session-store.test.ts`，vitest）
-
-1. **persist 基本路径**：
-   - mock `fs/promises.writeFile` + `rename`，create 一个 active session → 调 persist → 断言 `.tmp` 写入内容 schema 正确（含 agentSessionId/leaseId/provider/agentInternalSessionId/config）。
-   - 断言 ended / failed session 不进 sessions.json。
-2. **persist 原子性**：
-   - mock rename 抛 EBUSY → persist 不阻塞、warn 一次、原文件不动。
-3. **restore 基本路径**：
-   - mock `fs/promises.readFile` 返回固定 JSON → 调 restore(spawner) → 断言 spawner.respawn 被调用 N 次（N = active session 数），每次传入正确 record。
-4. **restore 过期清理**：
-   - fixture 含 `savedAt = now - 25h` → restore 跳过，spawner 不被调用。
-5. **restore 文件不存在**：
-   - mock existsSync = false → restore 返回 undefined，spawner 不被调用，不抛错。
-6. **restore JSON 损坏**：
-   - mock readFile 返回 `'{invalid'` → restore warn + 返回 undefined，不抛。
-7. **debounce**：
-   - 500ms 内连续 5 次 persist → writeFile 只调用 1 次。
-8. **claude buildArgs --resume**（间接，已有 stream-json.test.ts 覆盖，仅 sanity）：传 resumeSessionId 断言 args 含 `--resume <id>`。
-
-### 集成测试（`sillyhub-daemon/test/integration/resume.test.ts`）
-
-1. **claude resume e2e**：
-   - 启动 daemon + mock HubClient + FakeClaudeChild（吐 system/session_id=abc + result）。
-   - 创建 session、跑一轮 → kill daemon（in-process：stop sessionStore、丢弃 child）。
-   - 重启 daemon（new SessionStore + new TaskRunner，复用同 SESSION_FILE_PATH）。
-   - 断言 restore 触发 respawn，FakeClaudeChild 被以 `--resume abc` spawn。
-   - 模拟 inject 新 prompt → FakeClaudeChild 吐新 result → 通过。
-2. **codex thread/resume e2e**：
-   - 同上，FakeCodexChild 吐 thread/start response（首次）/ 校验 daemon 发 `thread/resume`（重 spawn）。
-3. **超时 failed 路径**：
-   - restore 后 FakeClaudeChild 不吐任何事件 30s → session 标 failed、backend 收到上报。
-
-### backend 测试（`backend/tests/modules/daemon/test_session_status.py`）
-
-1. daemon 上报 `session_status reconnecting` → DB AgentSession.status = 'reconnecting'。
-2. 上报 `session_status active` → DB 翻 active + SSE publish。
-3. 上报 `session_status failed` → DB 翻 failed。
-
-## 风险与注意
-
-| 风险 | 等级 | 应对 |
+| ID | 验证步骤 | 通过标准 |
 |---|---|---|
-| **resume 依赖 agent 自身会话持久化**：claude `--resume <id>` 需要 claude CLI 把 session 存在 `~/.claude/` 或云端；codex thread 持久化在 codex 服务端。daemon 重启后 agent 内部会话已被清理 → resume 失败 | P1 | 重 spawn 失败时（claude exit 非零 / codex thread/resume error response）→ session 标 failed、backend 翻 failed、前端提示"会话已过期，请新建"。**daemon 不负责保活 agent 内部会话**（design.md §3 非目标）。集成测试用 FakeChild 模拟失败路径。 |
-| **磁盘文件并发写**：debounce 合并 + 原子 rename 已经规避大部分；但极端场景（daemon 同时被 SIGKILL 在 rename 中间）→ `.tmp` 残留 | P2 | restore 时 readFile 主路径失败 → 尝试读 `.tmp`（半截但通常 JSON 仍合法）→ 仍失败则 warn + 空启动。daemon 启动时清理残留 `.tmp`。 |
-| **reconnecting 超时**：agent 重 spawn 后 hang（claude 等输入但不吐 system 事件 / codex thread/resume response 漏发）→ 永远 reconnecting | P1 | `SESSION_RECONNECT_TIMEOUT_MS = 30_000` 硬超时（步骤 2）→ 标 failed。claude `--resume` 后实测会立刻吐 system.init 事件，超时基本不会触发；codex thread/resume response 必回。 |
-| **AgentSession 表 lease 状态**：重 spawn 用原 leaseId 还是新申请 lease？原 lease 在 backend 仍是 active（design.md §8.5 interactive lease 不过期），但 daemon 进程已重启 → backend 视角 lease 仍属本 runtime | P1 | **复用原 leaseId**（不新申请），daemon WS 重连后 backend 识别该 lease 仍归属本 runtime_id（task-04 WS 重连逻辑已就绪）。若 backend 检测 lease 已被其他 daemon 抢占（极少见）→ 重 spawn 失败、标 failed。 |
-| **sessionId 术语碰撞**：`agentInternalSessionId`（claude session_id / codex thread_id）vs `AgentSession.id`（本平台 uuid）vs 现有 `AgentRun.session_id`（quick-chat-multiturn 的 claude resume id） | P2 | design.md D-001 / R-05 已规范。落盘字段显式命名 `agentInternalSessionId`，LeaseCtx 仍用 `resumeSessionId`（task-runner 既有字段），不新增混淆。 |
-| **重 spawn 时的 workspace / CLAUDE.md**：task-runner.runLease 会重跑 prepareWorkspace + 写 CLAUDE.md，重 spawn 时这是冗余但无害 | P3 | 接受冗余（prepareWorkspace 已 idempotent，git mirror 已存在则跳过 clone；CLAUDE.md 覆盖写一致）。可在 ctx 透传 `skipWorkspaceInit: true` 跳过（YAGNI，先不做）。 |
-| **持久化隐私**：sessions.json 含 agentSessionId / leaseId（uuid，非敏感）+ provider/model（非敏感）。无 token / encryptionKey | P3 | 文件权限 0600（参考 credential.ts 模式）；不入日志。 |
+| AC-09-01 | active session 完成一轮后检查 sessions.json | v1 JSON 只含白名单元数据；有 agentSessionId；无 token/prompt/child/stdin |
+| AC-09-02 | running turn 中 kill daemon，再启动 | 旧 run=failed 且 error=`daemon_restarted`；session 出现 reconnecting→active；旧 lease 保持 interactive |
+| AC-09-03 | 统计 daemon 启动恢复期间 spawn/runTurn | 两者均为 0；没有 `--resume`、thread/resume、空 prompt 或预热子进程 |
+| AC-09-04 | 恢复后对 Claude 发下一次 inject | 新 AgentRun、新 child；使用旧 agentSessionId 的 `--resume`；历史上下文可引用 |
+| AC-09-05 | 恢复后对 Codex 发下一次 inject | 新 AgentRun、新 app-server；initialize→thread/resume→turn/start；thread id 不变 |
+| AC-09-06 | 对账检查 currentRun | 只收敛持久化 currentRunId；已终态不覆盖；跨 session id 被拒绝 |
+| AC-09-07 | 检查 claim token | 文件无 token；recovery 返回新 token；旧 token失效；新 token支持下一 turn 上报 |
+| AC-09-08 | 损坏/未知版本 sessions.json 启动 | 文件被隔离，daemon 正常启动；不恢复半条记录、不 spawn |
+| AC-09-09 | ended/failed/idle-ended session 残留记录 | backend 拒绝复活，daemon 清记录，session/lease 终态不变 |
+| AC-09-10 | 多 session 恢复且一条失败 | 其它记录正常 active；失败项不进入 store；日志不含 token/prompt |
+| AC-09-11 | 运行 batch 回归 | batch lease 不落盘、不调用 recovery endpoint，原 runLease/claim/complete/expiry 全绿 |
+| AC-09-12 | 运行定向与全量测试 | daemon typecheck/test、backend pytest/ruff 全部通过 |
 
-## 自审
+## 10. 非目标
 
-- ✅ **覆盖 design.md**：§5 Wave3 三条（磁盘持久化 / 重 spawn / reconnecting 态）全部对应步骤 1/2/3-4/5；D-003（Wave1/2 不恢复，Wave3 做）由 depends_on task-03/06 保证前置；FR-08 由 AC-7.1~7.3 覆盖；验收 7 由 AC-7.1~7.8 拆解。
-- ✅ **真实代码依据**：
-  - task-runner.ts:423-430 `buildArgs({ resumeSessionId })` 透传链路真实存在。
-  - stream-json.ts:228 `--resume` 已支持。
-  - json-rpc.ts:159 `buildHandshake` 模式可复用，新增 `buildResumeHandshake` 同构。
-  - config.ts:40 `DEFAULT_CONFIG_DIR` + loadConfig/saveConfig fs/promises 模式可参照。
-  - happy persistence.ts:401-441 `PersistedSession` + 原子写 + 过期清理参考实现完备。
-  - happy daemon/run.ts:661 `resumeSession` 模式（spawnTrackedHappyProcess 复用 spawn）参考。
-- ✅ **YAGNI**：不做加密、不做 backend 崩溃恢复、不做跨 daemon 迁移、不做 stdin 缓冲持久化（agent 自身负责）。
-- ✅ **复用 Wave1**：重 spawn 100% 复用 `taskRunner.runLease` + `_spawnAndStream`，不新增 spawn 实现，仅通过 `ctx.isResume` 标记分支（claude 跳过 prompt、codex 用 thread/resume 替代 thread/start）。
-- ✅ **失败兜底**：重 spawn 失败 → session 标 failed（不卡 reconnecting）；磁盘损坏 → 空启动（不崩）；agent 内部会话过期 → 用户友好提示（不静默）。
-- ✅ **测试可测**：单测 mock fs + fakeChild；集成测试 kill/restart in-process；backend pytest DB 翻转。
+- 不恢复、attach、探测或复用 daemon 崩溃前的 OS 子进程。
+- 不在 daemon 启动时为每个 session spawn 一个等待输入的 agent。
+- 不持久化 stdin 缓冲、permission request、未消费输出或完整 AgentRunLog；日志真相在 backend/task-05。
+- 不跨主机迁移 session，不做多 daemon 抢占；runtime 不匹配直接拒绝。
+- 不修改 Claude/Codex resume 协议；task-03 已提供新 spawn + resume 链路。
+- 不新增后台无限重试。恢复失败可观察并隔离，由用户重试启动或结束 session。
+
+## 11. 实现检查清单
+
+- [ ] 写代码前重读 `.claude/CLAUDE.md`、daemon `CONVENTIONS.md`/`ARCHITECTURE.md`，用 `rg` 确认接口。
+- [ ] 测试先行，至少观察每组目标测试按预期失败一次。
+- [ ] restore 路径没有 `spawn`、`runLease`、`runTurn`、`buildHandshake` 调用。
+- [ ] 下一 inject 严格复用 task-03 的 startTurn/runTurn，不另建第二套 resume runner。
+- [ ] in-flight run 的失败和 session 状态只由 backend service 事务写入。
+- [ ] 原子写串行且终态删除不会被旧快照覆盖。
+- [ ] token/credential/prompt/输出未落盘、未进日志/测试快照。
+- [ ] batch 路径与 task-06 idle/end 单一收口无回归。
+- [ ] 对照 AC-09-01～AC-09-12 记录命令和断言证据。

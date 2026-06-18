@@ -1,167 +1,357 @@
 ---
 id: task-06
-title: Wave1 端到端联调 + 空闲回收（30min + end_session 统一入口）
-wave: W1
+title: spawn + resume 生命周期联调、并发 inject 防重与空闲回收
+wave: W5
 priority: P0
-depends_on: [task-03, task-05, spike-01]
-covers: [FR-06, D-004]
-created_at: 2026-06-18 14:11:24
+depends_on: [task-03, task-04, task-05]
+blocks: [task-09]
+requirement_ids: [FR-01, FR-02, FR-04, FR-05, FR-06]
+decision_ids: [D-002@v2, D-004@v1, D-005@v1]
+allowed_paths:
+  - sillyhub-daemon/src/config.ts
+  - sillyhub-daemon/src/session-store.ts
+  - sillyhub-daemon/src/hub-client.ts
+  - sillyhub-daemon/src/daemon.ts
+  - sillyhub-daemon/tests/config.test.ts
+  - sillyhub-daemon/tests/session-store.test.ts
+  - sillyhub-daemon/tests/daemon-session-idle.test.ts
+  - sillyhub-daemon/tests/hub-client.test.ts
+  - backend/app/modules/daemon/schema.py
+  - backend/app/modules/daemon/router.py
+  - backend/app/modules/daemon/service.py
+  - backend/app/modules/daemon/tests/test_session_service.py
+  - backend/app/modules/daemon/tests/test_interactive_session_lifecycle.py
+  - deploy/.env.example
 author: qinyi
+created_at: 2026-06-18 15:31:03
 ---
 
-# task-06 — Wave1 端到端联调 + 空闲回收（session_idle_timeout_sec 默认 30min + service.end_session 统一结束入口）
+# spawn + resume 生命周期联调、并发 inject 防重与空闲回收
 
-> 设计依据：`../design.md` §5 Wave1（sessionStore + 空闲回收）、§7.3 SessionStore API、§8.4 三元关系、§8.5 interactive lease 过期语义 + 统一结束入口、§10 R-04、§12 验收标准 1-4,8、D-004；`../plan.md` task-06 行 + 全局验收 AC-1/AC-2/AC-3/AC-6；`../decisions.md` D-004@v1（session 空闲 30min 自动结束）。
->
-> 本任务只写蓝图，不写代码。execute 阶段按编号步骤实施。
+## 1. 目标与硬约束
 
-## 1. 目标
+依据 `plan.md` 显式 task-06、`design.md` 的 D-002@v2 / §8.5、`decisions.md` 的 D-004@v1，本任务完成 Wave 5 的生命周期收口：
 
-1. **空闲回收（FR-06 / D-004）**：daemon 侧 SessionStore 每会话维护 `last_active_at`，新增空闲扫描循环按 `session_idle_timeout_sec`（默认 1800s = 30min）扫描 active session，超时自动触发结束，防止交互式 lease 长期占用 daemon 进程槽。
-2. **统一结束入口（§8.5 / R-04）**：`service.end_session(session_id)` 作为唯一的会话终止真相源——手动 `POST /sessions/{id}/end`、空闲超时、daemon 退出通知 **三条路径全部汇聚到此**，原子地更新 `agent_sessions.status=ended` + 关联 `daemon_task_leases.status=completed`，规避 lease expiry 回收逻辑（`handle_lease_expiry` 走 `claimed/pending + expires_at`，interactive lease status 走 `active/completed`，天然不进该路径，但需显式确认）与 sessionStore 双重回收冲突。
-3. **Wave1 端到端联调**：claude + codex 两条适配器链路各跑通完整链路——发起 → 首轮（result）→ 中途追问第二轮 → 打断本轮 → 结束会话，覆盖验收标准 1-4,8。
-4. **批处理兼容验证（AC-6 / 验收 8）**：现有 workspace agent run（`kind=batch`）在 Wave1 全部改动落地后行为零变化。
+1. Claude 与 Codex 各跑通“创建 session → 首 turn 独立 spawn → 第二 turn 新 spawn + resume → interrupt 当前 turn → 后续继续 → end”端到端链路。
+2. backend 与 daemon 两层都阻止同一 AgentSession 的并发 inject；冲突请求不得遗留多余 AgentRun，也不得重复 spawn。
+3. daemon 对 `active` 且空闲达到 `session_idle_timeout_sec`（默认 1800 秒）的会话执行自动回收。
+4. 手动 end、idle timeout、重复/竞态 end 的数据库终态全部调用 `DaemonService.end_session(...)`；不得另写 session/lease 终态更新分支。
+5. `interrupt` 只终止当前 AgentRun 对应的 turn 进程，AgentSession 与 interactive lease 保持可继续；只有 `end_session` 完成 session/lease。
+6. interactive lease 不进入 batch lease expiry；batch lease、run 级 SSE 与现有 workspace AgentRun 行为不变。
 
-## 2. 前置依赖（硬门）
+本任务禁止恢复旧蓝图：不得在 turn 间复用 child/stdin/adapter，不得在 `result` 后保持 stdin 开放，不得要求 spike-01 的长驻进程验证通过。每个 turn 都必须由 task-03 的 `runTurn` 新建进程，后续 turn 只通过 Claude `--resume` 或 Codex `thread/resume` 延续上下文。
 
-| 依赖 | 状态 | 说明 |
-|---|---|---|
-| spike-01 | 必须 PASS | R-01 端到端铁证——claude/codex stream-json stdin 连续两轮 `result`。**spike-01 不通过则 task-06 无法开工**（核心多轮机制不成立，整套 session 模型回退为伪多轮）。 |
-| task-03 | 必须完成 | daemon session 侧——`session-store.ts`（SessionStore 类，task-03 新建）、task-runner session 模式（result 不 end stdin）、ws-client 控制消息路由、daemon `_executeTask` 按 `lease.kind` 分流。本任务在 task-03 的 SessionStore 上加 `last_active_at` 字段 + idle scan。 |
-| task-05 | 必须完成 | session 级 SSE 聚合——Redis channel `agent_session:{id}` + `stream_session_logs` + `submit_messages` 双 publish。本任务联调脚本依赖其跨 turn SSE 连续性。 |
-| task-04 | 间接依赖 | backend `end_session` 落在 task-04 的 `service.py`（`DaemonService.end_session`），本任务负责把空闲超时路径接入并校验三条入口收敛。 |
+## 2. 覆盖范围与前置契约
 
-> 当前快照（2026-06-18）：`sillyhub-daemon/src/session-store.ts` 尚不存在（task-03 待建）；`backend/app/modules/daemon/service.py` 无 `end_session`（task-04/本任务待建）；`backend/app/core/config.py` 无 `session_idle_timeout_sec`（本任务新增）。所有"涉及文件"改动在 task-03/04 完成后才可执行。
+执行前再次用 `rg` 确认接口存在；若 task-03/04/05 实现签名与蓝图不同，先更新本文再写代码，不得猜测方法。
+
+| 来源 | 本任务依赖的契约 |
+|---|---|
+| task-03 | `SessionStore.create/get/startTurn/interrupt/end`；`SessionState.lastActiveAt`；同 session 原子 `active → running`；`TaskRunner.runTurn` 每次新 spawn，结果携带 `sessionId`；Claude/Codex resume 失败不降级新上下文 |
+| task-04 | `DaemonService.create_session/inject_session/interrupt_session/end_session`；session REST；interactive lease `lease_expires_at=NULL`；`end_session` 同步 session、lease、非终态 runs |
+| task-05 | `AgentService.stream_session_logs`；`agent_session:{session_id}` 双 publish；`end_session` publish `session_ended` 并令 SSE 发 done |
+| 当前 daemon | `src/daemon.ts` 用 `_fire` 管理 heartbeat/poll/ws 循环；`src/config.ts` 的 `DaemonConfig`/`DEFAULT_CONFIG` 是本地配置唯一入口 |
+| 当前 backend | `service.py` 的 `expire_leases` 仅处理有 expiry 的 claimed/pending lease；`handle_lease_expiry` 是 batch run 恢复路径，interactive session 不复用 |
+| 当前 REST client | `src/hub-client.ts` 的 `_request` 统一处理 daemon→backend HTTP；本任务新增 idle-end 通知必须复用它，不直接散落 `fetch` |
+
+| ID | 本任务覆盖点 |
+|---|---|
+| FR-01 | 联调 AgentSession、interactive lease 与每 turn AgentRun 的完整创建/执行关系 |
+| FR-02 | inject 原子创建下一 AgentRun，并以新进程 resume；并发请求只允许一个成功 |
+| FR-04 | interrupt 仅终止 currentRun，session 保持 active 且可继续 resume |
+| FR-05 | 手动与自动结束统一收敛 session、lease、非终态 run 和 session SSE |
+| FR-06 / D-004@v1 | daemon 默认 1800 秒 active-idle 检测与自动回收 |
+| D-002@v2 | 每 turn 独立 spawn，Claude `--resume` / Codex `thread/resume`，不跨 turn 保存进程 |
+| D-005@v1 | session/lease/run 三元关系与 `DaemonService.end_session` 单一收口保持一致 |
+
+扫描文档仍包含旧 Python daemon 描述；与当前 TypeScript 源码冲突时，以 `sillyhub-daemon/src/*.ts` 和已确认模块卡为准。
 
 ## 3. 涉及文件
 
-| 操作 | 文件路径 | 当前状态 | 本任务改动 |
-|---|---|---|---|
-| 修改 | `sillyhub-daemon/src/session-store.ts` | task-03 新建 | SessionState 加 `last_active_at: Date` 字段；`create`/`inject`/活动事件触发时更新；新增 `scanIdle(timeoutSec, now): SessionState[]` 纯查询方法（不直接 end，返回候选供调用方决定） |
-| 修改 | `sillyhub-daemon/src/daemon.ts` | 现有三循环（`daemon.ts:321-323`） | 启动时新增第四循环 `_idleScanLoop`（挂载点：line 323 后追加 `this._fire((signal) => this._idleScanLoop(signal));`）；循环体内每 `idle_scan_interval`（建议 60s，硬编码或加 config）扫描 sessionStore，对超时 session 调 `sessionStore.end` + 上报 backend `end_session` |
-| 修改 | `backend/app/modules/daemon/service.py` | task-04 新增 `end_session`（基础版） | 校验/补全 `end_session(session_id, *, reason)` 三入口收敛（手动 / 空闲超时 / daemon 通知），原子更新 `agent_sessions.status=ended + ended_at=now` + `daemon_task_leases.status=completed + updated_at=now`；幂等（已 ended 直接返回）；发布 session 终态 Redis 事件 |
-| 修改 | `backend/app/core/config.py` | 无相关字段 | `Settings` 加 `session_idle_timeout_sec: int = Field(1800, ge=60, le=86400)`（默认 30min，下限 1min 上限 24h，CONVENTIONS 配置集中约定） |
-| 新增 | `sillyhub-daemon/test/session-store.idle.test.ts` | — | vitest 单测：mock 时间，验证 `scanIdle` 阈值边界（边界-1/边界/边界+1）、`last_active_at` 在 create/inject 更新 |
-| 新增 | `sillyhub-daemon/test/daemon.idle-scan.test.ts` | — | vitest 单测：mock `_idleScanLoop` + SessionStore，验证超时触发 end + 上报 |
-| 新增 | `backend/tests/modules/daemon/test_end_session.py` | — | pytest：三入口幂等、lease.status=completed、agent_sessions.status=ended、Redis 事件发布、batch lease 不受影响 |
-| 新增 | `backend/tests/integration/test_session_e2e.py` | — | pytest 集成：claude + codex 全链路（mock adapter）发起→首轮→追问→打断→结束 + 空闲超时自动结束 |
+| 操作 | 文件 | 责任 |
+|---|---|---|
+| 修改 | `sillyhub-daemon/src/config.ts` | 增加 `session_idle_timeout_sec` 与 `session_idle_scan_interval_sec`，默认分别为 1800/60，并做有限值归一化 |
+| 修改 | `sillyhub-daemon/src/session-store.ts` | 明确活动时间刷新规则；新增只返回候选的 `listIdleSessions`；保持 store 不持有进程对象 |
+| 修改 | `sillyhub-daemon/src/hub-client.ts` | 新增 daemon-originated idle end 通知方法，复用 REST_PREFIX、鉴权和统一错误处理 |
+| 修改 | `sillyhub-daemon/src/daemon.ts` | 挂载可取消 idle scan loop；先本地 end，再通知 backend 走统一 `end_session`；单 session 失败不影响扫描其它 session |
+| 修改 | `sillyhub-daemon/tests/config.test.ts` | 配置默认值、非法值回退与 scan interval 上界测试 |
+| 修改 | `backend/app/modules/daemon/schema.py` | 新增 daemon 内部 end 通知 payload（`lease_id`、受限 `reason`），若 task-02 已定义则复用 |
+| 修改 | `backend/app/modules/daemon/router.py` | 增加 daemon-originated end 通知端点；只做鉴权/参数转换并调用 service，不直接改 ORM |
+| 修改 | `backend/app/modules/daemon/service.py` | inject 加数据库行锁与非终态 run 防重；`end_session` 增加 origin/notify_daemon 控制并保持唯一终态收口、幂等与 session SSE 终态发布 |
+| 修改 | `deploy/.env.example` | 记录 daemon 本地配置方式或 backend 对应默认值；不得让两端出现不一致的隐式默认 |
+| 新增/修改 | `sillyhub-daemon/tests/session-store.test.ts` | idle 边界、活动刷新、并发与 end 竞态 |
+| 新增 | `sillyhub-daemon/tests/daemon-session-idle.test.ts` | fake timers 驱动扫描循环与 backend 通知 |
+| 修改 | `sillyhub-daemon/tests/hub-client.test.ts` | idle end 请求路径、body、鉴权、错误透传 |
+| 新增/修改 | `backend/app/modules/daemon/tests/test_session_service.py` | inject 行锁防重、end 单一收口、idle origin、幂等/竞态 |
+| 新增 | `backend/app/modules/daemon/tests/test_interactive_session_lifecycle.py` | Claude/Codex spawn+resume、多 run SSE、interrupt/end/idle 集成 |
 
-## 4. 实现步骤
+不修改前端 UI（task-10/11）、permission 流程（task-07/08）或磁盘恢复（task-09）。
 
-### Step 1 — SessionStore 加 `last_active_at` + `scanIdle`（session-store.ts）
+## 4. 精确接口
 
-1. `SessionState` 接口/类追加字段 `last_active_at: Date`（创建时 = now）。
-2. `create(sessionId, ...)`：初始化 `last_active_at = new Date()`。
-3. `inject(sessionId, prompt)`：写 stdin 成功后 `state.last_active_at = new Date()`（即"用户活动 = 注入新 prompt"算活跃；**注意**：agent 自身跑过程中的流式输出不算用户活动，避免长 turn 永不超时误判——D-004 语义是"用户最后一次交互后 30min 无新输入"）。
-4. 新增纯查询方法 `scanIdle(timeoutSec: number, now: Date = new Date()): SessionState[]`：返回 `status==='active' && (now - last_active_at) >= timeoutSec*1000` 的候选；**不**在此方法内 end，保持单一职责，由 `_idleScanLoop` 决定后续动作。
-5. 显式定义：`interrupt` **不**更新 `last_active_at`（打断本身是用户活动，但若用户连按打断不应反复续命——保守取 inject 算活跃，interrupt 不算。可在 review 阶段调整，需在 decisions 补 D-004 细化）。
+### 4.1 daemon 配置
 
-### Step 2 — daemon 挂载空闲扫描循环（daemon.ts）
+```typescript
+export interface DaemonConfig {
+  // existing fields...
+  session_idle_timeout_sec: number;
+  session_idle_scan_interval_sec: number;
+}
 
-1. 在 `daemon.ts:323` 后追加：`this._fire((signal) => this._idleScanLoop(signal));`（与现有 heartbeat/poll/ws 三循环同模式，复用 `_fire` 的 AbortController + 错误吞掉 + `_loopPromises` 追踪）。
-2. 新增 `private async _idleScanLoop(signal: AbortSignal): Promise<void>`：
-   - 循环：`while (!signal.aborted)` + `await sleep(IDLE_SCAN_INTERVAL_MS, signal)`（建议 `IDLE_SCAN_INTERVAL_MS = 60_000`，常量顶部声明，注释说明可后续 config 化）。
-   - 主体：`const idle = this._sessionStore.scanIdle(timeoutSec)`，`timeoutSec` 从 hub-client 拉取的 runtime config 或硬编码 1800（**优先复用 hub-client 同步下来的 `session_idle_timeout_sec`**，本任务可在 daemon `Config` 加只读字段，由 backend register_runtime/heartbeat 下发，见 Step 4）。
-   - 对每个 idle session：try `this._sessionStore.end(id.id)` → 通过 `hub-client` / `submitMessages` REST 通道上报 backend `end_session(session_id, reason='idle_timeout')`；失败仅 `logger.warn` 不重试（避免雪崩；sessionStore 内存已清，后续 inject 会自然失败提示重开）。
-3. 循环异常按现有 `_heartbeatLoop`/`_pollLoop` 模式：`catch (e) { this._logger.warn('idle_scan_loop_error', { error: e }); }` + 继续下一轮。
+export const DEFAULT_CONFIG = Object.freeze({
+  // existing defaults...
+  session_idle_timeout_sec: 1800,
+  session_idle_scan_interval_sec: 60,
+});
+```
 
-### Step 3 — backend `end_session` 统一结束入口（service.py）
+`loadConfig` 对用户 JSON 做运行时归一化：timeout 必须是有限正数，最小 60 秒；scan interval 必须是有限正数，最小 1 秒且不得大于 timeout。非法值回退默认并记录一次 warn 的位置由 daemon 启动层负责；禁止直接读取 `process.env` 绕过 config。
 
-1. 在 `DaemonService` 加 `async def end_session(self, session_id: UUID, *, reason: str = "manual") -> AgentSession`（task-04 已建基础版时，本步聚焦"三入口收敛 + 幂等 + lease 同步"）。
-2. 加载 `AgentSession`（task-01 新表）；不存在 → 抛 `SessionNotFound`（404）。
-3. **幂等**：若 `status in ('ended','failed')` 直接返回（log info `end_session_already_ended`），避免空闲超时与用户手动 end 并发触发时双重回收（§8.5 R-04 修正核心）。
-4. 原子更新（同一事务）：
-   - `agent_sessions.status = 'ended'`，`ended_at = now`，`updated_at = now`。
-   - 关联 `DaemonTaskLease`（经 `agent_sessions.lease_id`）：`status = 'completed'`，`updated_at = now`（注意 `lease_expires_at` 本就 NULL，不动）。
-5. daemon 通知路径：daemon 侧已先 `sessionStore.end`（kill 进程）再调本端点，本端点无需再回推 WS；手动 end 路径需通过 `ws_hub.send_session_control(runtime_id, SESSION_END)` 通知 daemon 执行 kill（task-04 已接通）。
-6. Redis 事件：`publish("agent_session:{id}", {event: "session_ended", reason, ended_at})` 供前端 SSE 终止 + 前端提示。
-7. 显式 **跳过** `handle_lease_expiry`：该函数按 `status IN ('claimed','pending') + lease_expires_at < now` 扫描（service.py:894-897），interactive lease 走 `active → completed`，天然不在其扫描集，无需改 `handle_lease_expiry`。在 `end_session` 注释中显式说明此隔离（R-04 应对）。
+### 4.2 SessionStore idle 查询
 
-### Step 4 — config 加 `session_idle_timeout_sec`（config.py）
+沿用 task-03 的 camelCase：
 
-1. `Settings` 加字段：
-   ```python
-   # ── Interactive session (task-06 / D-004) ──────────────────────────
-   session_idle_timeout_sec: int = Field(
-       1800, ge=60, le=86400,
-       description="Interactive session idle timeout in seconds (D-004, default 30min). "
-       "Sessions with no user inject for this duration are auto-ended.",
-   )
-   ```
-2. 默认 1800（30min，D-004），下限 60s（防误配为 0 导致刚创建即超时），上限 86400（24h）。
-3. CONVENTIONS 集中配置约定：遵循 `config.py` 顶部 docstring「All runtime configuration MUST live here」，不读 `os.environ`。
-4. 下发链路（execute 时确认）：daemon 需拿到该值——优先在 `register_runtime`/`heartbeat` response 或 capabilities 里下发；若链路未通，daemon 侧硬编码 1800 兜底，并在日志 `idle_scan_using_default_timeout` 标记。
+```typescript
+export interface IdleSessionCandidate {
+  sessionId: string;
+  leaseId: string;
+  lastActiveAt: number;
+}
 
-### Step 5 — Wave1 端到端联调脚本/集成测试
+export class SessionStore {
+  listIdleSessions(nowMs: number, idleTimeoutMs: number): IdleSessionCandidate[];
+}
+```
 
-1. **集成测试** `test_session_e2e.py`（mock adapter，不打真实 claude/codex）：
-   - claude 链路：`POST /sessions`（provider=claude）→ 等 SSE 首轮 result → `POST /inject`（第二轮 prompt）→ 等 result → `POST /interrupt`（断言会话仍 active）→ `POST /end`（断言 status=ended + lease=completed + Redis session_ended 事件）。
-   - codex 链路：同上 provider=codex。
-   - 空闲超时分支：创建 session 后 mock `time.monotonic` 推进 `session_idle_timeout_sec + 10`，触发 daemon idle scan，断言 session 自动 ended、reason=idle_timeout。
-   - 兼容性断言：同一 daemon 同时跑一个 `kind=batch` lease（workspace agent run），验证 session 结束后 batch lease 状态不受影响（AC-6 / 验收 8）。
-2. **手动联调脚本**（可选，列在文档而非代码）：起 backend + daemon + (前端或 curl)，对真实 claude/codex 跑一次完整链路，截图/日志归档到 `tasks/task-06-evidence/`（execute 阶段产物）。spike-01 已对真实 agent 验证过两轮 result，此处聚焦 SSE 回显 + 打断/结束的 UI/状态机联动。
-3. **跨 turn SSE 连续性**（AC-3）：集成测试断言单一 `GET /sessions/{id}/stream` SSE 连接贯穿两轮，事件流携带 `run_id` 区分 turn 边界（依赖 task-05 的 session 级 channel）。
+语义：
 
-## 5. 完成标准（验收）
+- 只返回 `status === 'active'` 的 session；`running`/`interrupting` 不在扫描结果，避免把长 turn 当空闲。
+- 满足 `nowMs - lastActiveAt >= idleTimeoutMs` 才返回；方法纯查询，不改状态、不 cancel、不发 HTTP。
+- `create`、成功接受 `startTurn`、turn 收敛回 active、interrupt 收敛回 active 时更新 `lastActiveAt`。
+- 被拒绝的并发 inject、只读 get、idle scan 本身不刷新时间。
+- `SessionState` 继续禁止 child/stdin/adapter/readline 字段。
 
-对照 `design.md` §12 验收标准 + `plan.md` 全局 AC：
+### 4.3 daemon → backend idle end
 
-- [ ] **验收 1（核心）**：claude + codex 各跑通——首轮 result 后中途追问写入 stdin，看到第二轮响应（集成测试 + 手动联调各一）。
-- [ ] **验收 2（打断）**：`POST /interrupt` 后 agent 停当前 turn，`agent_sessions.status` 仍 `active`，可继续 inject（集成测试覆盖）。
-- [ ] **验收 3（结束）**：`POST /end` 后进程 kill，`agent_sessions.status=ended` + `daemon_task_leases.status=completed`（Step 3 端到端）。
-- [ ] **验收 4（SSE 回显）**：一个 SSE 连接贯穿整个会话，多 turn 输出实时回显，历史可在 AgentRunLog 回看（依赖 task-05，本任务集成测试断言）。
-- [ ] **验收 8（兼容）**：现有批处理 lease（workspace agent run，`kind=batch`）行为零变化——集成测试显式断言 batch lease 在 session 创建/结束全程状态不变。
-- [ ] **FR-06 / D-004（空闲 30min 自动结束）**：`session_idle_timeout_sec` 默认 1800；空闲超时后 session 自动 ended、reason=idle_timeout、lease=completed（vitest mock 时间单测 + pytest 集成测试）。
-- [ ] **R-04 防双重回收**：`handle_lease_expiry` 不会回收 interactive lease（status 路径隔离）；`end_session` 幂等（并发触发仅生效一次）。
-- [ ] **测试通过**：`cd sillyhub-daemon && pnpm test`（vitest，含新增 idle 单测）；`cd backend && uv run pytest`（含 end_session + 集成测试）。
+HubClient 新增：
 
-## 6. 测试要点
+```typescript
+interface SessionEndNoticeBody {
+  lease_id: string;
+  reason: 'idle';
+}
 
-### vitest（daemon 侧，session-store.ts + daemon.ts）
+class HubClient {
+  endSessionFromDaemon(
+    sessionId: string,
+    body: SessionEndNoticeBody,
+  ): Promise<Record<string, unknown>>;
+}
+```
 
-- **`session-store.idle.test.ts`**：
-  - mock 时间（vitest `vi.useFakeTimers()` + `vi.setSystemTime()`）。
-  - `scanIdle` 边界：`last_active_at` 距 now = `timeoutSec*1000 - 1`（不超时）、`= timeoutSec*1000`（超时）、`+1`（超时）。
-  - `last_active_at` 在 `create` 时初始化、`inject` 成功后刷新、`interrupt` 不刷新（按 Step 1 决策）。
-  - `scanIdle` 不动 sessionStore 状态（纯查询），已 ended/failed session 不返回。
-- **`daemon.idle-scan.test.ts`**：
-  - mock SessionStore + hub-client，驱动 `_idleScanLoop` 一次 tick。
-  - 超时 session 触发 `sessionStore.end` + 上报 `end_session(reason='idle_timeout')`。
-  - 上报失败仅 warn 不抛（循环不中断）。
-  - AbortSignal abort 后循环干净退出。
+建议端点：
 
-### pytest（backend 侧，service.py + 集成）
+```text
+POST /api/daemon/sessions/{session_id}/end-notify
+body: {"lease_id":"...","reason":"idle"}
+```
 
-- **`test_end_session.py`**（单测）：
-  - 手动 end：status ended + lease completed + Redis `session_ended` 事件。
-  - 幂等：对已 ended session 再调 `end_session` 不报错、不重复 publish、不重复更新。
-  - 空闲超时路径（reason=idle_timeout）走同一方法，结果与手动一致。
-  - batch lease（kind=batch）调用 end_session 抛错或 no-op（按 task-04 定义，interactive-only）。
-  - `handle_lease_expiry` 对 status=active 的 interactive lease 不动作（隔离验证）。
-- **`test_session_e2e.py`**（集成）：
-  - claude + codex 全链路（mock adapter 注入 fake result/SSE）。
-  - 跨 turn SSE 单连接断言（事件含 run_id）。
-  - 空闲超时自动结束（mock daemon idle scan 触发）。
-  - 批处理 lease 并存不受影响。
+该端点是 daemon 身份调用面，不复用用户手动 end 的请求 schema。router 必须验证 daemon principal，并把 `notify_daemon=False` 传给 service，避免 daemon 已本地 end 后 backend 再发 SESSION_END 形成回环。若现有认证依赖无法区分 daemon API key，则沿用 daemon lease 端点相同的认证依赖，不新增无认证入口。
 
-## 7. 风险与注意
+### 4.4 `DaemonService.inject_session` 防重
 
-| 风险 | 应对 |
-|---|---|
-| **spike-01 未过则 task-06 停工** | spike-01 是硬前置。若 R-01 验证 claude 第一轮后 exit，整个 Wave1 回退伪多轮（每轮新 spawn + `--resume`），task-03/05 重设计，本任务"空闲扫描"语义仍成立（last_active_at 改由每次 inject 续命），但 session 模式 no-op。需在开工前确认 spike-01 PASS。 |
-| **空闲扫描误杀活跃 session** | `last_active_at` 仅 inject 续命（Step 1 决策）；长 turn 中 agent 跑超过 30min 但用户无新输入会触发结束——这是 D-004 预期行为（用户已离开），不算误杀。若 review 认为应"任何 daemon→server 上行（submitMessages）都续命"，则在 sessionStore 暴露 `bumpActivity(sessionId)` 由 ws-client 收到任意 session 事件时调用，并在 decisions 补 D-004 细化。 |
-| **end_session 并发双重回收（R-04）** | Step 3 幂等：先 load 再判 status，已 ended 直接返回。数据库层可选加 `SELECT ... FOR UPDATE`（本项目未上线、并发度低，单事务 + status 判断足够）。 |
-| **idle scan 循环异常导致 session 永不回收** | 循环异常按现有 `_heartbeatLoop` 模式 catch + warn + 继续，不退出循环；单 session end 失败不影响其他 session。 |
-| **daemon 重启丢失 sessionStore（Wave1 R-03）** | Wave1/2 不做崩溃恢复（D-003）：daemon 重启 = 活跃 session 全部标 failed，由 task-03 在启动时清理 + 通知 backend（本任务不涉及，但联调脚本需覆盖"daemon 重启后 active session 被 backend 标 failed"的兼容路径）。 |
-| **timeout 配置下发链路** | daemon 拿 `session_idle_timeout_sec` 优先 backend 下发；兜底硬编码 1800 + 日志标记。execute 时确认下发通道（register_runtime/heartbeat response 字段 vs capabilities），避免两端取值不一致。 |
-| **批处理 lease 受影响** | Step 3 显式 `end_session` 仅处理 interactive（经 `agent_sessions.lease_id` 反查），batch lease 无 agent_sessions 记录，天然不进；集成测试覆盖。 |
-| **测试用真实 claude/codex 的成本** | 单测/集成测试一律 mock adapter；真实 agent 仅在手动联调脚本跑一次（spike-01 已验证协议层），避免 CI 消耗 API 配额。 |
+对 task-04 接口保持兼容，内部增加事务门：
 
-## 8. 不做（YAGNI / 越界）
+```python
+async def inject_session(
+    self,
+    session_id: uuid.UUID,
+    *,
+    prompt: str,
+) -> AgentRun: ...
+```
 
-- ❌ 不做崩溃恢复 / resume 持久化（D-003，Wave3 task-09）。
-- ❌ 不做权限暂停往返（Wave2 task-07/08）。
-- ❌ 不做前端会话面板（Wave4 task-10/11）——本任务后端 + daemon 联调用 curl/集成测试代替前端。
-- ❌ 不改 `handle_lease_expiry` / `expire_leases`（interactive lease 天然不在其扫描集，R-04 靠 status 隔离而非改函数）。
-- ❌ 不改批处理 lease 生命周期（`kind=batch` 路径零改动，AC-6）。
-- ❌ 不做多 daemon 跨主机均衡（非目标 §3）。
+固定顺序：
+
+1. `SELECT AgentSession ... FOR UPDATE` 锁 session 行。
+2. 校验 status=`active`。
+3. 查询该 session 是否存在 `AgentRun.status IN ('pending', 'running')`；存在则抛 `DaemonSessionTurnConflict`（409），不得创建新 run、不得增加 turn_count、不得发 WS。
+4. 创建唯一新 AgentRun，更新 `turn_count`、`last_active_at`，flush/commit。
+5. 发送 SESSION_INJECT。
+6. WS 发送失败保持 task-04 已定义的 pending run 可观察语义；但后续 retry 必须先由明确的失败/补偿路径收敛该 pending run，不能绕过非终态检查再造一个 run。
+
+数据库行锁负责“不产生重复 AgentRun”，task-03 SessionStore 状态门负责“不重复 spawn”；两层均需测试，不能只依赖 fire-and-forget WS 的 daemon 检查。
+
+### 4.5 `DaemonService.end_session` 单一收口
+
+```python
+async def end_session(
+    self,
+    session_id: uuid.UUID,
+    *,
+    reason: Literal["manual", "idle", "failed"] = "manual",
+    notify_daemon: bool = True,
+    expected_lease_id: uuid.UUID | None = None,
+) -> AgentSession: ...
+```
+
+所有结束路径的 ORM 更新只能存在于此方法：
+
+1. `SELECT AgentSession ... FOR UPDATE`。
+2. 不存在抛 404；提供 `expected_lease_id` 且不匹配时抛 409，禁止旧/伪造 daemon 结束别的 session。
+3. 已 `ended` 时幂等返回；不得重复 WS、重复 Redis `session_ended` 或重复改 runs。
+4. `notify_daemon=True`（用户手动 end）时先发 SESSION_END；发送失败只 warn，DB 仍必须收口。
+5. `notify_daemon=False`（idle notice）不回推 WS。
+6. 同一事务把 session 标 ended、`ended_at/updated_at` 写入；interactive lease 标 completed；session 下 pending/running run 标 failed/cancelled（沿 task-04 最终选定状态）；commit。
+7. commit 后沿 task-05 约定 publish 唯一一条 `session_ended`，reason 原样为 `manual|idle|failed`；publish 失败不回滚 DB。
+
+router、idle loop、异常清理不得复制第 6 步的 SQL/ORM 更新。`complete_lease`、`expire_leases`、`handle_lease_expiry` 不作为 interactive session 的结束入口。
+
+### 4.6 idle scan loop
+
+```typescript
+private async _idleSessionLoop(signal: AbortSignal): Promise<void>;
+private async _reclaimIdleSession(candidate: IdleSessionCandidate): Promise<void>;
+```
+
+流程：
+
+1. `start()` 通过现有 `_fire((signal) => ...)` 挂载 loop；`stop()` 复用 AbortController 统一退出。
+2. 每个 interval 读取 `sessionStore.listIdleSessions(Date.now(), timeoutMs)`。
+3. 对每个候选再次按 sessionId 获取状态；仍 active 才调用 `sessionStore.end(sessionId)`，利用 store 自身状态门解决 scan 与 inject 竞态。
+4. 本地 end 成功后调用 `client.endSessionFromDaemon(sessionId, {lease_id, reason:'idle'})`。
+5. 单个通知失败记录结构化 warn（session_id/lease_id/reason，不记录 prompt/token），继续扫描其他 session。失败后的 backend 对账/重试不在本任务引入无限循环；task-09 持久化恢复负责后续崩溃场景。
+
+不得用 `setInterval(async () => ...)` 产生重叠扫描；使用可 await、可 abort 的串行循环。
+
+## 5. 实现方案与端到端联调
+
+### 5.1 Claude
+
+1. 创建 session，首 run 进程 A 的 args 不含 `--resume`。
+2. 首 turn result 提取 `session_id=S1`，进程 A stdin 关闭并 exit。
+3. inject 创建第二 AgentRun，进程 B 与 A 对象/PID 不同，args 含 `--resume S1`。
+4. 单一 session SSE 连接依次收到 run A、run B 的事件，每条含对应 `run_id`。
+5. 第三 turn running 时 interrupt，只终止进程 C；session 回 active，lease 不 completed。
+6. 再 inject 创建进程 D，仍 `--resume S1`；end 后 session ended、lease completed、SSE done。
+
+### 5.2 Codex
+
+与 Claude 同流程，但断言：
+
+- 首进程 initialize → `thread/start` → `turn/start`，得到 `threadId=T1`；
+- 第二/后续进程 initialize → `thread/resume {threadId:T1}` → `turn/start`；
+- 每轮 `turn/completed` 后进程退出；不得在新进程跳过 initialize/resume 直接发 turn/start。
+
+### 5.3 idle
+
+会话完成一个 turn 回 active，fake clock 推进到 timeout 边界；daemon 只回收该 session，本地 store 删除，backend 经 end-notify 调同一 `end_session(reason='idle', notify_daemon=False)`，session SSE 收到唯一 done。旁边 running session 与 batch lease 均不受影响。
+
+## 6. 边界条件
+
+至少覆盖以下边界：
+
+1. **同 session 两个并发 inject**：backend 行锁后只创建一个 AgentRun；另一个 409；daemon 最多 spawn 一次。
+2. **不同 session 并发 inject**：允许并行建 run/spawn，禁止用全局锁串行所有 session。
+3. **inject 与 idle scan 竞态**：只有一个状态转换成功；若 inject 先进入 running，scan 跳过；若 idle end 先成功，inject 返回 409 且不建 run。
+4. **manual end 与 idle notice 竞态**：`end_session` 行锁 + terminal 幂等保证只更新/发布一次，最终 reason 以首个成功收口者为准。
+5. **end 与 turn completion 竞态**：迟到的 runTurn completion 不得把 store/DB session 从 ended 改回 active，也不得把 lease 改回 active。
+6. **timeout 边界**：`elapsed=timeout-1ms` 不回收，`elapsed=timeout` 回收；非法 timeout/interval 归一化，不出现 busy loop。
+7. **running 长 turn**：即使 lastActiveAt 超时也不回收；仅 active 空闲态进入候选。
+8. **idle end HTTP 失败**：daemon 不崩溃、不阻塞其它候选；日志不含 prompt/凭证；不得反复 cancel 已删除的本地 session。
+9. **lease_id 不匹配**：end-notify 返回冲突，backend session/lease/run 不变。
+10. **重复 end-notify**：返回已 ended 状态，不重复 publish SSE done。
+11. **resume 失败**：Claude `--resume` 或 Codex `thread/resume` 失败不得降级普通 spawn；session 进入 task-03 定义的 failed 状态，idle loop 不把 failed 重写 ended。
+12. **首 turn 无内部 session id**：第二 turn 被拒绝，不创建无上下文进程；联调明确暴露错误。
+13. **SSE 断线重连**：task-05 的 DB terminal fallback 仍能对已 ended session立即 done；单 turn done 不关闭 session SSE。
+14. **batch 兼容**：`agent_session_id=NULL` 的 run 不参与 inject 防重/session publish/idle scan；batch lease expiry、heartbeat、complete 路径零变化。
+
+## 7. TDD 实施顺序
+
+必须记录至少一次目标测试按预期失败，再写最小实现。
+
+### Step 1：backend 并发门（先红）
+
+- 写两个并发事务调用 `inject_session` 的测试；断言只一条新增 AgentRun、turn_count 只加一、WS 只发一次、另一请求为稳定 409。
+- 写 active session 已有 pending/running run 的冲突测试。
+- 实现 session 行锁、非终态 run 查询与 `DaemonSessionTurnConflict`。
+
+### Step 2：`end_session` 单一收口（先红）
+
+- 写 manual/idle 并发、重复 idle notice、lease mismatch、daemon offline 测试。
+- 断言 ORM 终态更新只有 service 方法执行；session_ended 只 publish 一次。
+- 实现 `notify_daemon`/`expected_lease_id` 与 end-notify router；保留 task-05 publish 契约。
+
+### Step 3：SessionStore idle 纯函数（先红）
+
+- fake time 覆盖 active/running/interruption/ended/failed 与 timeout 边界。
+- 覆盖 create/start/turn completion/interrupt 的 lastActiveAt 更新。
+- 实现 `listIdleSessions`，不在该方法做 I/O。
+
+### Step 4：daemon loop 与 HubClient（先红）
+
+- fake timers 驱动一个 scan tick；断言本地 end 后发送正确 REST path/body。
+- 覆盖 abort、单候选失败继续、多 tick 不重叠、scan/inject 竞态。
+- 实现 config、HubClient 方法和 `_idleSessionLoop`。
+
+### Step 5：spawn + resume 集成（先红）
+
+- 使用 fake child/fake backend 输出，不调用真实付费 CLI：Claude 两 turn 两 child + `--resume`；Codex 两进程 + thread/resume。
+- 接入 backend fake DB/Redis/WS，断言 AgentSession 1:N AgentRun、session SSE 跨 run 连续、interrupt/end 分离。
+- 再做一次真实 Claude 与 Codex smoke（环境具备凭证时）；真实 smoke 是联调证据，不替代可重复测试。
+
+### Step 6：回归
+
+```powershell
+Set-Location sillyhub-daemon
+pnpm test -- session-store
+pnpm test -- daemon-session-idle hub-client
+pnpm typecheck
+pnpm test
+
+Set-Location ..\backend
+uv run pytest app/modules/daemon/tests/test_session_service.py -q
+uv run pytest app/modules/daemon/tests/test_interactive_session_lifecycle.py -q
+uv run pytest -q
+```
+
+若仓库真实测试路径与上述蓝图不同，以 `rg --files` 查到的现有布局为准，更新文档后执行。
+
+## 8. 验收表
+
+| ID | 验收条件 | 证据 |
+|---|---|---|
+| AC-06.1 | Claude 首 turn 普通 spawn，第二 turn 新进程带同一 `--resume` id；每轮完成后 child exit | fake-child 集成 + 真实 smoke 日志（脱敏） |
+| AC-06.2 | Codex 后续 turn 在新进程 initialize 后 `thread/resume`，再 `turn/start`；thread id 不变 | JSON-RPC transcript 单测/集成 |
+| AC-06.3 | 同 session 并发 inject 只产生一个 AgentRun、一次 WS inject、一次 spawn；冲突返回 HTTP 409 | backend 并发事务测试 + daemon store 测试 |
+| AC-06.4 | 不同 session 可并行执行 | daemon 并发测试 |
+| AC-06.5 | interrupt 只终止 currentRun，session/lease 仍 active，下一 turn 可 resume 新 spawn | 生命周期集成测试 |
+| AC-06.6 | 手动 end、idle timeout、并发重复 end 最终都经 `DaemonService.end_session`；session ended、lease completed、非终态 run 收敛 | service 测试 + SQL 状态断言 |
+| AC-06.7 | 默认 1800 秒；仅 active 空闲 session 被回收；running session 不误杀；边界值准确 | fake timers |
+| AC-06.8 | session SSE 单连接跨多个 run，事件带 run_id；结束只产生一个 session_ended/done | Redis/SSE 集成测试 |
+| AC-06.9 | resume 失败不降级新会话；首 turn 缺内部 id 不允许第二 turn | adapter/runner failure 测试 |
+| AC-06.10 | batch lease、run 级 SSE、workspace AgentRun 的 heartbeat/expiry/complete 行为不变 | daemon/backend 全量回归 |
+| AC-06.11 | daemon `pnpm typecheck`、`pnpm test` 与 backend `uv run pytest` 通过 | 命令输出 |
+
+## 9. 非目标与实现注意
+
+- task-03 已规定 `lastActiveAt` 与 SessionStore 状态机；本任务只增加 idle 查询/循环及联调，不把 store 改成长驻进程容器。
+- task-04 的旧文字若仍写“inject 写 stdin”，执行时必须按 D-002@v2 解释为“创建下一 AgentRun 并触发新 spawn”；不得照旧文字实现。
+- task-05 的 `session_ended.reason` 统一使用 `manual|idle|failed`；不要再引入 `idle_timeout` 同义值。
+- end-notify 是进入统一 service 的 transport，不是第二套收尾业务逻辑。
+- 空闲回收只结束 `active`；running turn 的执行 timeout 仍由 TaskRunner 既有 timeout 负责，两者不可混用。
+- 不做 task-09 的磁盘 persist/restore；daemon 或 backend 重启后的对账不在本任务扩展。
+- 不做 UI、权限审批、多 daemon 亲和或跨主机迁移。
+- 不将真实 Claude/Codex 凭证、prompt、完整输出写入测试快照或联调证据。
+
+## 10. 完成检查清单
+
+- [ ] 写代码前重新读取 `.claude/CLAUDE.md`、daemon/backend CONVENTIONS 与 ARCHITECTURE。
+- [ ] 用 `rg` 确认 task-03/04/05 最终方法、错误类、测试 helper 与 route auth 依赖真实存在。
+- [ ] 测试先红后绿，并保留并发事务测试，不用顺序 mock 冒充并发。
+- [ ] 一个 turn 一个 AgentRun、一个新 child；无跨 turn stdin/adapter 引用。
+- [ ] backend 与 daemon 两层并发门均存在。
+- [ ] 所有 session/lease ORM 终态只在 `DaemonService.end_session` 更新。
+- [ ] idle loop 可 abort、不重叠、单 session 失败隔离。
+- [ ] session SSE done 唯一，run 级 SSE 与 batch 路径不变。
+- [ ] 对照 AC-06.1～AC-06.11 逐项记录证据。

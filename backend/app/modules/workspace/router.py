@@ -17,9 +17,10 @@ from sqlmodel import col
 
 from app.core.auth_deps import require_permission, require_permission_any
 from app.core.db import get_session
+from app.core.errors import PermissionDenied
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
-from app.modules.auth.rbac import allowed_workspace_ids
+from app.modules.auth.rbac import allowed_workspace_ids, has_permission
 from app.modules.workspace.model import Workspace
 from app.modules.workspace.relation_schema import (
     RelationCreate,
@@ -48,6 +49,26 @@ router = APIRouter(prefix="/workspaces", tags=["workspace"])
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
+async def _require_server_local_workspace_admin(
+    session: AsyncSession,
+    user: User,
+) -> None:
+    """server-local 路径会读 backend 宿主机文件系统，需 workspace:admin。"""
+    if user.is_platform_admin:
+        return
+    ok = await has_permission(
+        session,
+        user=user,
+        permission=Permission.WORKSPACE_ADMIN,
+        workspace_id=None,
+    )
+    if not ok:
+        raise PermissionDenied(
+            "server-local workspace path requires workspace:admin permission.",
+            details={"required_permission": Permission.WORKSPACE_ADMIN.value},
+        )
+
+
 def _build_scan_response(result: ScanResult) -> ScanResponse:
     return ScanResponse(
         root_path=result.root_path,
@@ -62,8 +83,9 @@ def _build_scan_response(result: ScanResult) -> ScanResponse:
 async def scan_workspace(
     payload: ScanRequest,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_READ))],
+    user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_WRITE))],
 ) -> ScanResponse:
+    await _require_server_local_workspace_admin(session, user)
     service = WorkspaceService(session)
     return _build_scan_response(service.scan(payload.root_path))
 
@@ -93,6 +115,7 @@ async def scan_generate(
             workspace_id=workspace_id,
             agent_run_id=agent_run_id,
         )
+    await _require_server_local_workspace_admin(session, user)
     workspace_id, agent_run_id = await service.scan_generate(
         root_path=payload.root_path,
         user_id=user.id,
@@ -116,6 +139,8 @@ async def create_workspace(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_WRITE))],
 ) -> WorkspaceRead:
+    if payload.path_source != "daemon-client":
+        await _require_server_local_workspace_admin(session, user)
     service = WorkspaceService(session)
     workspace = await service.create(payload, created_by=user.id)
     return WorkspaceRead.model_validate(workspace)

@@ -38,7 +38,7 @@
 
 import { hostname, platform, arch } from 'node:os';
 import type { DaemonConfig } from './config.js';
-import { MSG, WS_PATH } from './protocol.js';
+import { MSG } from './protocol.js';
 import type {
   DaemonMessage,
   ExecutionContextPayload,
@@ -223,8 +223,8 @@ export class Daemon {
   private readonly _detector: DetectorLike;
   private readonly _logger: Logger;
 
-  /** WS 客户端（_wsLoop 时 lazy 创建）。 */
-  private _wsClient: WsClientLike | null = null;
+  /** server 分配的 runtime_id → WS 客户端（每个 provider runtime 各一条连接）。 */
+  private readonly _wsClients = new Map<string, WsClientLike>();
   private readonly _wsClientFactory: WsClientFactory;
   private readonly _wsReconnectDelay: number;
 
@@ -350,12 +350,7 @@ export class Daemon {
 
     await this._markRegisteredRuntimesOffline();
 
-    // 关闭 WS（真实 WsClient.close 是同步 void；mock 可能是 async，try 包裹）
-    try {
-      this._wsClient?.close();
-    } catch (e) {
-      this._logger.warn('ws_close_failed', { error: e });
-    }
+    this._closeAllWsClients();
     // 关闭 HTTP（真实 HubClient.close 是同步 void no-op）
     try {
       this._client.close();
@@ -504,50 +499,11 @@ export class Daemon {
   // ── WS 循环（daemon.py:219-251，抽象为 WsClient 委托，R4.3）─────────────────
 
   private async _wsLoop(signal: AbortSignal): Promise<void> {
-    const wsUrl = this._buildWsUrl();
-    // 真实 WsClient 构造签名：new WsClient({ serverUrl, runtimeId, callbacks })。
-    // 不是蓝图假设的 new WsClient(wsUrl, { onMessage, onClose })。
-    // WsClient 内部自动管理重连，daemon 只负责：构造 + connect() + 等待 stop。
-    if (!this._wsClient) {
-      const baseOrigin = this._extractOrigin(wsUrl);
-      this._wsClient = this._wsClientFactory({
-        serverUrl: baseOrigin,
-        runtimeId: this._config.runtime_id,
-        callbacks: {
-          onMessage: (msg) => {
-            void this._handleWsMessage(msg);
-          },
-        },
-      });
-
-      // task-05（D-005@v1 / FR-03 / FR-04）：注册 list_dir RPC handler。
-      // 鸭子类型探测 registerRpcHandler——测试 mock 的 WsClient 可不实现（R-5）。
-      // 真实 WsClient 实现该方法，handler 调 file-rpc.listDir，读 config.allowed_roots。
-      const ws = this._wsClient;
-      if (ws && typeof ws.registerRpcHandler === 'function') {
-        ws.registerRpcHandler('list_dir', async (params) => {
-          const path = typeof params.path === 'string' ? params.path : '';
-          return listDir(path, this._config.allowed_roots);
-        });
-      } else {
-        this._logger.warn('ws_no_rpc_support', {
-          runtime_id: this._config.runtime_id,
-        });
-      }
-    }
-
-    // connect 是同步 void（真实 WsClient：connect() 触发异步握手，不返回 Promise）。
-    // daemon 不能 await connect；用 abortableSleep 循环等 stop 信号。
-    try {
-      this._wsClient.connect();
-    } catch (e) {
-      if (e instanceof AbortError) return;
-      this._logger.warn('ws_connect_failed', { error: e });
-    }
-
-    // 等待 stop：每秒检查一次 signal.aborted（轻量，不阻塞事件循环）
+    // 每个 register 返回的 server runtime id 各建一条 WS（与心跳/轮询一致）。
+    // WsClient 内部自动管理重连；daemon 每秒 reconcile 新注册的 runtime。
     while (this._running) {
       try {
+        this._ensureWsClients();
         await abortableSleep(1000, signal);
       } catch (e) {
         if (e instanceof AbortError) break;
@@ -557,33 +513,84 @@ export class Daemon {
     }
   }
 
-  /**
-   * 从 wsUrl 提取 server origin（去掉 ws path 和 query）。
-   * 用于注入真实 WsClient 时按 serverUrl 形态构造。
-   */
-  private _extractOrigin(wsUrl: string): string {
-    // wsUrl 形如 ws://host:port/api/daemon/ws?runtime_id=xxx
-    // 取 protocol://host:port 部分
-    const m = /^(wss?:\/\/[^/]+)\/.*/.exec(wsUrl);
-    if (!m || !m[1]) return this._config.server_url;
-    const wsBase = m[1];
-    return wsBase.startsWith('wss://')
-      ? 'https://' + wsBase.slice('wss://'.length)
-      : 'http://' + wsBase.slice('ws://'.length);
+  /** Hub HTTP origin（WsClient 内部 http→ws / https→wss 转换）。 */
+  private _serverOrigin(): string {
+    return this._config.server_url.replace(/\/+$/, '');
   }
 
-  /** 由 server_url 推导 ws URL（http→ws / https→wss，daemon.py:148-160）。 */
-  private _buildWsUrl(): string {
-    const base = this._config.server_url.replace(/\/+$/, '');
-    let wsBase: string;
-    if (base.startsWith('https://')) {
-      wsBase = 'wss://' + base.slice('https://'.length);
-    } else if (base.startsWith('http://')) {
-      wsBase = 'ws://' + base.slice('http://'.length);
-    } else {
-      wsBase = 'ws://' + base;
+  private _registeredRuntimeIds(): string[] {
+    return [...new Set(this._registeredRuntimes.values())].filter(Boolean);
+  }
+
+  private _firstRegisteredRuntimeId(): string | undefined {
+    return this._registeredRuntimeIds()[0];
+  }
+
+  /** 为每个 server 分配的 runtime id 确保存在 WS 连接。 */
+  private _ensureWsClients(): void {
+    const registeredIds = this._registeredRuntimeIds();
+    if (registeredIds.length === 0) {
+      this._closeAllWsClients();
+      return;
     }
-    return `${wsBase}${WS_PATH}?runtime_id=${encodeURIComponent(this._config.runtime_id)}`;
+
+    for (const rid of [...this._wsClients.keys()]) {
+      if (!registeredIds.includes(rid)) {
+        try {
+          this._wsClients.get(rid)?.close();
+        } catch (e) {
+          this._logger.warn('ws_close_failed', { runtime_id: rid, error: e });
+        }
+        this._wsClients.delete(rid);
+      }
+    }
+
+    const serverUrl = this._serverOrigin();
+    for (const runtimeId of registeredIds) {
+      if (this._wsClients.has(runtimeId)) continue;
+
+      const ws = this._wsClientFactory({
+        serverUrl,
+        runtimeId,
+        callbacks: {
+          onMessage: (msg) => {
+            void this._handleWsMessage(msg);
+          },
+        },
+      });
+      this._registerListDirRpcHandler(ws, runtimeId);
+
+      try {
+        ws.connect();
+      } catch (e) {
+        this._logger.warn('ws_connect_failed', { runtime_id: runtimeId, error: e });
+      }
+
+      this._wsClients.set(runtimeId, ws);
+      this._logger.info('ws_client_created', { runtime_id: runtimeId });
+    }
+  }
+
+  private _registerListDirRpcHandler(ws: WsClientLike, runtimeId: string): void {
+    if (typeof ws.registerRpcHandler !== 'function') {
+      this._logger.warn('ws_no_rpc_support', { runtime_id: runtimeId });
+      return;
+    }
+    ws.registerRpcHandler('list_dir', async (params) => {
+      const path = typeof params.path === 'string' ? params.path : '';
+      return listDir(path, this._config.allowed_roots);
+    });
+  }
+
+  private _closeAllWsClients(): void {
+    for (const [rid, ws] of this._wsClients) {
+      try {
+        ws.close();
+      } catch (e) {
+        this._logger.warn('ws_close_failed', { runtime_id: rid, error: e });
+      }
+    }
+    this._wsClients.clear();
   }
 
   // ── 事件分发（daemon.py:253-267）───────────────────────────────────────────
@@ -603,6 +610,7 @@ export class Daemon {
       runtimeId:
         (rawPayload.runtimeId as string | undefined) ??
         (rawPayload.runtime_id as string | undefined) ??
+        this._firstRegisteredRuntimeId() ??
         this._config.runtime_id,
       agentRunId:
         (rawPayload.agentRunId as string | undefined) ??
@@ -633,7 +641,8 @@ export class Daemon {
 
   private async _executeTask(payload: LeasePayload): Promise<void> {
     const leaseId = payload.leaseId;
-    const runtimeId = payload.runtimeId ?? this._config.runtime_id;
+    const runtimeId =
+      payload.runtimeId ?? this._firstRegisteredRuntimeId() ?? this._config.runtime_id;
 
     if (!leaseId) {
       this._logger.warn('task_no_lease_id', { payload });

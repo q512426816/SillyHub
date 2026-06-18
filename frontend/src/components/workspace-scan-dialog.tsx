@@ -10,13 +10,16 @@ import { AgentProviderSelect } from "@/components/AgentProviderSelect";
 import { Input } from "@/components/ui/input";
 import { DaemonDirBrowser } from "@/components/daemon-dir-browser";
 import { ApiError } from "@/lib/api";
+import { normalizeClientPath } from "@/lib/client-path";
 import { listOnlineRuntimes, type DaemonRuntimeRead } from "@/lib/daemon";
+import { hasAnyPermission } from "@/lib/permission";
 import {
   createWorkspace,
   scanGenerate,
   scanWorkspace,
   type ScanResult,
 } from "@/lib/workspaces";
+import { useSession } from "@/stores/session";
 
 type Phase = "idle" | "scanning" | "ready" | "creating";
 type PathSource = "server-local" | "daemon-client";
@@ -28,20 +31,29 @@ interface Props {
 
 export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   const router = useRouter();
+  const user = useSession((s) => s.user);
+  const canUseServerLocal = hasAnyPermission(user, ["workspace:admin"]);
+
   const [rootPath, setRootPath] = useState("");
   const [name, setName] = useState("");
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
-  // 生成项目规范时使用的 agent provider 覆盖（FR-02，2026-06-14-agent-runtime-selection）
   const [scanProvider, setScanProvider] = useState<string | null>(null);
   const [scanModel, setScanModel] = useState<string | null>(null);
 
-  // task-10：daemon-client 路径来源（FR-01 / FR-03 / D-005@v1）
-  const [pathSource, setPathSource] = useState<PathSource>("server-local");
+  const [pathSource, setPathSource] = useState<PathSource>("daemon-client");
   const [runtimes, setRuntimes] = useState<DaemonRuntimeRead[]>([]);
   const [daemonRuntimeId, setDaemonRuntimeId] = useState<string>("");
   const [daemonRootPath, setDaemonRootPath] = useState("");
+
+  useEffect(() => {
+    if (!canUseServerLocal && pathSource === "server-local") {
+      setPathSource("daemon-client");
+      setRootPath("");
+      setScan(null);
+    }
+  }, [canUseServerLocal, pathSource]);
 
   useEffect(() => {
     if (pathSource !== "daemon-client") return;
@@ -50,14 +62,28 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
       .catch(() => setRuntimes([]));
   }, [pathSource]);
 
+  const handlePathSourceChange = (next: PathSource) => {
+    setPathSource(next);
+    setError(null);
+    if (next === "server-local") {
+      setDaemonRuntimeId("");
+      setDaemonRootPath("");
+    } else {
+      setRootPath("");
+      setScan(null);
+      setPhase("idle");
+    }
+  };
+
   const handleCreateDaemonClient = async () => {
     if (!daemonRuntimeId || !daemonRootPath) return;
+    const normalizedRoot = normalizeClientPath(daemonRootPath);
     setError(null);
     setPhase("creating");
     try {
       await createWorkspace({
-        name: name.trim() || daemonRootPath,
-        root_path: daemonRootPath,
+        name: name.trim() || normalizedRoot.split(/[\\/]/).filter(Boolean).at(-1) || normalizedRoot,
+        root_path: normalizedRoot,
         path_source: "daemon-client",
         daemon_runtime_id: daemonRuntimeId,
       });
@@ -74,10 +100,10 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
     setScan(null);
     setPhase("scanning");
     try {
-      const result = await scanWorkspace(rootPath);
+      const result = await scanWorkspace(normalizeClientPath(rootPath));
       setScan(result);
       if (!name) {
-        const last = rootPath.split(/[\\/]/).filter(Boolean).at(-1);
+        const last = result.root_path.split(/[\\/]/).filter(Boolean).at(-1);
         if (last) setName(last);
       }
       setPhase("ready");
@@ -108,7 +134,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
     setPhase("creating");
     try {
       await createWorkspace({
-        name: name.trim() || rootPath,
+        name: name.trim() || scan.root_path,
         root_path: scan.root_path,
       });
       onCreated();
@@ -119,10 +145,6 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
     }
   };
 
-  const handleCancel = () => {
-    onCancel();
-  };
-
   const sillyspecBadgeVariant = scan?.is_sillyspec ? "success" : "outline";
   const sillyspecBadgeLabel = scan?.is_sillyspec ? "已检测到 .sillyspec" : "未检测到 .sillyspec";
 
@@ -130,36 +152,41 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
     <div className="rounded-md border bg-card">
       <header className="flex items-center justify-between border-b px-4 py-2.5">
         <h3>添加 Workspace</h3>
-        <Button variant="ghost" size="sm" onClick={handleCancel}>
+        <Button variant="ghost" size="sm" onClick={onCancel}>
           取消
         </Button>
       </header>
 
       <div className="space-y-4 p-4">
-        {/* task-10：路径来源选择（FR-01） */}
-        <div className="flex gap-4">
-          <label className="flex items-center gap-1.5 text-xs">
-            <input
-              type="radio"
-              checked={pathSource === "server-local"}
-              onChange={() => setPathSource("server-local")}
-            />
-            服务器本地路径
-          </label>
-          <label className="flex items-center gap-1.5 text-xs">
-            <input
-              type="radio"
-              checked={pathSource === "daemon-client"}
-              onChange={() => setPathSource("daemon-client")}
-            />
-            daemon 客户端路径
-          </label>
-        </div>
+        {canUseServerLocal ? (
+          <div className="flex gap-4">
+            <label className="flex items-center gap-1.5 text-xs">
+              <input
+                type="radio"
+                checked={pathSource === "daemon-client"}
+                onChange={() => handlePathSourceChange("daemon-client")}
+              />
+              本机 daemon 路径
+            </label>
+            <label className="flex items-center gap-1.5 text-xs">
+              <input
+                type="radio"
+                checked={pathSource === "server-local"}
+                onChange={() => handlePathSourceChange("server-local")}
+              />
+              服务器本地路径
+            </label>
+          </div>
+        ) : (
+          <p className="text-[11px] text-muted-foreground">
+            默认使用本机 daemon 上的项目路径。服务器本地路径需 Workspace 管理权限。
+          </p>
+        )}
 
-        {pathSource === "server-local" && (
+        {pathSource === "server-local" && canUseServerLocal && (
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground" htmlFor="root-path">
-              仓库根目录绝对路径
+              仓库根目录绝对路径（backend 宿主机）
             </label>
             <div className="flex gap-2">
               <Input
@@ -178,7 +205,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
               </Button>
             </div>
             <p className="text-[11px] text-muted-foreground">
-              指向项目代码仓库的本地路径，平台探测目录结构和可选的{" "}
+              指向 backend 容器/进程可访问的本地路径，平台探测目录结构和可选的{" "}
               <code>.sillyspec/</code> 目录。
             </p>
           </div>
@@ -188,7 +215,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
           <div className="space-y-3">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">
-                绑定 daemon（在线 runtime，D-001 强绑）
+                在线 Daemon
               </label>
               <select
                 className="w-full rounded border bg-background px-2 py-1.5 text-sm"
@@ -212,7 +239,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
             {daemonRuntimeId && (
               <DaemonDirBrowser
                 runtimeId={daemonRuntimeId}
-                onSelect={setDaemonRootPath}
+                onSelect={(p) => setDaemonRootPath(normalizeClientPath(p))}
                 selectedPath={daemonRootPath}
               />
             )}
@@ -237,7 +264,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
                   onClick={handleCreateDaemonClient}
                   disabled={phase === "creating"}
                 >
-                  {phase === "creating" ? "创建中..." : "创建 daemon-client workspace"}
+                  {phase === "creating" ? "创建中..." : "创建 Workspace"}
                 </Button>
               </div>
             )}
@@ -341,7 +368,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
           <Button
             variant="outline"
             size="sm"
-            onClick={handleCancel}
+            onClick={onCancel}
             disabled={phase === "scanning"}
           >
             取消

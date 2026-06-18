@@ -10,6 +10,11 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api";
+import {
+  joinClientPath,
+  normalizeClientPath,
+  parentClientPath,
+} from "@/lib/client-path";
 import { listDir, type DirEntry } from "@/lib/daemon";
 
 interface Props {
@@ -25,20 +30,21 @@ export function DaemonDirBrowser({
   onSelect,
   selectedPath,
 }: Props) {
-  const [path, setPath] = useState(initialPath);
+  const [path, setPath] = useState(() => normalizeClientPath(initialPath));
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(
     async (p: string) => {
-      if (!p) return;
+      const normalized = normalizeClientPath(p);
+      if (!normalized) return;
       setLoading(true);
       setError(null);
       try {
-        const res = await listDir(runtimeId, p);
+        const res = await listDir(runtimeId, normalized);
         setEntries(res.entries);
-        setPath(p);
+        setPath(normalized);
       } catch (err) {
         const msg = err instanceof ApiError ? `${err.code}: ${err.message}` : "加载失败";
         setError(msg);
@@ -51,27 +57,23 @@ export function DaemonDirBrowser({
   );
 
   useEffect(() => {
-    if (initialPath) void load(initialPath);
+    const normalized = normalizeClientPath(initialPath);
+    if (normalized) void load(normalized);
     // 仅在 initialPath 变化时触发
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialPath]);
 
-  const join = (base: string, name: string): string => {
-    if (!base) return name;
-    const sep = base.endsWith("/") || base.endsWith("\\") ? "" : "/";
-    return `${base}${sep}${name}`;
-  };
-
-  const enter = (name: string) => void load(join(path, name));
+  const enter = (name: string) => void load(joinClientPath(path, name));
 
   const goUp = () => {
     if (!path) return;
-    const norm = path.replace(/\\/g, "/");
-    const leadingSlash = norm.startsWith("/");
-    const parts = norm.split("/").filter(Boolean);
-    parts.pop();
-    const parent = parts.length ? (leadingSlash ? "/" : "") + parts.join("/") : path;
-    void load(parent);
+    const parent = parentClientPath(path);
+    if (parent !== path) void load(parent);
+  };
+
+  const selectCurrent = () => {
+    if (!path) return;
+    onSelect(normalizeClientPath(path));
   };
 
   return (
@@ -104,7 +106,7 @@ export function DaemonDirBrowser({
           <li className="p-2 text-muted-foreground">空目录</li>
         )}
         {entries.map((e) => {
-          const full = join(path, e.name);
+          const full = joinClientPath(path, e.name);
           return (
             <li key={e.name}>
               <button
@@ -128,7 +130,7 @@ export function DaemonDirBrowser({
         <span className="truncate text-[11px] text-muted-foreground">
           当前：{path || "—"}
         </span>
-        <Button size="sm" onClick={() => onSelect(path)} disabled={!path || loading}>
+        <Button size="sm" onClick={selectCurrent} disabled={!path || loading}>
           选定为 root_path
         </Button>
       </div>

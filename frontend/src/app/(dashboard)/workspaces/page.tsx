@@ -6,20 +6,29 @@ import { Button } from "@/components/ui/button";
 import { WorkspaceCard } from "@/components/workspace-card";
 import { WorkspaceScanDialog } from "@/components/workspace-scan-dialog";
 import { ApiError } from "@/lib/api";
+import { listDaemonRuntimes, type DaemonRuntimeRead } from "@/lib/daemon";
 import { listWorkspaces, type Workspace } from "@/lib/workspaces";
 
 export default function WorkspacesPage() {
   const [items, setItems] = useState<Workspace[] | null>(null);
+  const [runtimesById, setRuntimesById] = useState<Map<string, DaemonRuntimeRead>>(
+    () => new Map(),
+  );
   const [error, setError] = useState<string | null>(null);
   const [showDialog, setShowDialog] = useState(false);
 
   const reload = useCallback(async () => {
     setError(null);
     try {
-      const { items: list } = await listWorkspaces();
+      const [{ items: list }, runtimes] = await Promise.all([
+        listWorkspaces(),
+        listDaemonRuntimes().catch(() => [] as DaemonRuntimeRead[]),
+      ]);
       setItems(list);
+      setRuntimesById(new Map(runtimes.map((runtime) => [runtime.id, runtime])));
     } catch (err) {
       setItems([]);
+      setRuntimesById(new Map());
       setError(err instanceof ApiError ? err.message : "加载列表失败");
     }
   }, []);
@@ -71,7 +80,14 @@ export default function WorkspacesPage() {
       ) : (
         <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {items.map((w) => (
-            <WorkspaceCard key={w.id} workspace={w} onChanged={reload} />
+            <WorkspaceCard
+              key={w.id}
+              workspace={w}
+              boundRuntime={
+                w.daemon_runtime_id ? runtimesById.get(w.daemon_runtime_id) : null
+              }
+              onChanged={reload}
+            />
           ))}
         </section>
       )}

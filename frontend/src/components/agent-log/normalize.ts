@@ -197,6 +197,43 @@ function extractThinkingText(content: string): string {
   return match ? (match[1] ?? "") : "";
 }
 
+function extractAssistantText(content: string): string {
+  const match = content.match(/^\s*\[ASSISTANT\]\s?([\s\S]*)$/);
+  return match ? (match[1] ?? "") : "";
+}
+
+/** 合并流式 assistant 片段（支持 delta 追加、cumulative 全文去重、段落去重）。 */
+export function mergeAssistantPiece(prev: string, piece: string): string {
+  if (!prev) return piece;
+  if (!piece) return prev;
+  if (piece === prev) return prev;
+  if (piece.startsWith(prev)) return piece;
+  if (prev.startsWith(piece)) return prev;
+  // 重复段落（partial 累积全文重发时常见）
+  const pieceTrim = piece.trim();
+  if (pieceTrim.length >= 8) {
+    if (prev.includes(piece)) return prev;
+    if (prev.split("\n").some((line) => line.trim() === pieceTrim)) return prev;
+  }
+  if (prev.trim().length >= 8 && piece.includes(prev)) return piece;
+  const norm = (s: string) => s.replace(/\s+/g, "");
+  const pieceNorm = norm(piece);
+  const prevNorm = norm(prev);
+  if (pieceNorm && prevNorm && (pieceNorm.startsWith(prevNorm) || prevNorm.startsWith(pieceNorm))) {
+    return piece.length >= prev.length ? piece : prev;
+  }
+  // 完整句子/段落用换行分隔；短 token delta 直接拼接（cursor partial 已关闭，codex 仍可能走此路径）
+  const looksLikeParagraph = (s: string) => {
+    const t = s.trim();
+    return t.length >= 24 || /[。！？.!?]\s*$/.test(t);
+  };
+  if (looksLikeParagraph(prev) && looksLikeParagraph(piece)) {
+    const joiner = prev.endsWith("\n") ? "" : "\n";
+    return prev + joiner + piece;
+  }
+  return prev + piece;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Log normalization                                                  */
 /* ------------------------------------------------------------------ */
@@ -206,6 +243,8 @@ export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
   let lastToolSourceIdx = -1;
   // ql-20260617-011：连续 [THINKING]-only stdout 合并到首条（SSE 追加效果）
   let lastThinkingIdx = -1;
+  // ql-20260618-012：连续 [ASSISTANT] / 流式纯文本 stdout 合并
+  let lastAssistantIdx = -1;
 
   for (let i = 0; i < logs.length; i++) {
     const current = result[i];
@@ -213,12 +252,14 @@ export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
 
     if (current.log.channel === "tool_call") {
       lastToolSourceIdx = i;
-      lastThinkingIdx = -1; // tool 断开 thinking 连续性
+      lastThinkingIdx = -1;
+      lastAssistantIdx = -1;
       continue;
     }
 
     if (current.log.channel !== "stdout") {
-      lastThinkingIdx = -1; // 非 stdout 断开
+      lastThinkingIdx = -1;
+      lastAssistantIdx = -1;
       continue;
     }
 
@@ -254,6 +295,43 @@ export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
       continue;
     }
     lastThinkingIdx = -1;
+
+    // ql-20260618-012：连续 [ASSISTANT] stdout 合并（cursor partial / 历史日志兜底）
+    if (isAssistantOnly(content)) {
+      const piece = extractAssistantText(content);
+      if (lastAssistantIdx >= 0) {
+        const target = result[lastAssistantIdx];
+        if (target) {
+          const prev = target.mergedAssistantContent
+            ?? extractAssistantText(target.log.content_redacted ?? "");
+          target.mergedAssistantContent = mergeAssistantPiece(prev, piece);
+        }
+        current.hidden = true;
+        continue;
+      }
+      current.mergedAssistantContent = piece;
+      lastAssistantIdx = i;
+      continue;
+    }
+
+    // ql-20260618-012：codex 等 streaming delta（无前缀纯文本）也合并
+    if (isPlainStreamingStdout(content)) {
+      const piece = content;
+      if (lastAssistantIdx >= 0) {
+        const target = result[lastAssistantIdx];
+        if (target) {
+          const prev = target.mergedAssistantContent
+            ?? (target.log.content_redacted ?? "");
+          target.mergedAssistantContent = mergeAssistantPiece(prev, piece);
+        }
+        current.hidden = true;
+        continue;
+      }
+      current.mergedAssistantContent = piece;
+      lastAssistantIdx = i;
+      continue;
+    }
+    lastAssistantIdx = -1;
 
     const hasToolUse = nonEmpty.some((l) => l.trim().startsWith("[TOOL_USE]"));
     const hasToolResult = nonEmpty.some((l) => l.trim().startsWith("[TOOL_RESULT]"));
@@ -309,17 +387,16 @@ export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
   return result;
 }
 
-/** Check if stdout content contains only thinking/system/assistant lines */
+/** Check if stdout content is thinking/system diagnostic lines (不含纯 assistant)。 */
 export function isThinkingContent(content: string): boolean {
   const lines = content.split("\n").filter((l) => l.trim());
-  return (
-    lines.length > 0 &&
-    lines.every(
-      (l) =>
-        /^\s*\[THINKING\]/.test(l) ||
-        /^\s*\[SYSTEM/.test(l) ||
-        /^\s*\[ASSISTANT\]/.test(l),
-    )
+  if (lines.length === 0) return false;
+  if (lines.every((l) => /^\s*\[ASSISTANT\]/.test(l))) return false;
+  return lines.every(
+    (l) =>
+      /^\s*\[THINKING\]/.test(l) ||
+      /^\s*\[SYSTEM/.test(l) ||
+      /^\s*\[ASSISTANT\]/.test(l),
   );
 }
 
@@ -336,6 +413,19 @@ export function isThinkingContent(content: string): boolean {
 export function isThinkingOnly(content: string): boolean {
   const trimmed = content.trimStart();
   return trimmed.startsWith("[THINKING]");
+}
+
+/** ql-20260618-012：单条 stdout 是否仅为 [ASSISTANT] 片段。 */
+export function isAssistantOnly(content: string): boolean {
+  const trimmed = content.trimStart();
+  return trimmed.startsWith("[ASSISTANT]");
+}
+
+/** ql-20260618-012：流式 delta 纯文本（无协议前缀），用于 codex/json-rpc streaming。 */
+export function isPlainStreamingStdout(content: string): boolean {
+  const trimmed = content.trimStart();
+  if (!trimmed) return false;
+  return !/^\[(ASSISTANT|THINKING|TOOL_|SYSTEM|RESULT)/.test(trimmed);
 }
 
 /** Filter all protocol-prefixed lines from content for default rendering */
