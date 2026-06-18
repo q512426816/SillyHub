@@ -15,10 +15,11 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_deps import get_current_user, require_platform_admin
+from app.core.auth_deps import get_current_user, require_permission_any, require_platform_admin
 from app.core.db import get_session
 from app.core.logging import get_logger
 from app.modules.auth.model import User
+from app.modules.auth.permissions import Permission
 from app.modules.settings.model import PlatformSetting
 from app.modules.settings.schema import (
     AuditLogRead,
@@ -43,6 +44,7 @@ router = APIRouter(tags=["settings"])
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
 AdminUser = Annotated[User, Depends(require_platform_admin)]
+SettingsAdminUser = Annotated[User, Depends(require_permission_any(Permission.SETTINGS_ADMIN))]
 
 
 def _svc(session: AsyncSession, actor_id: uuid.UUID):
@@ -65,7 +67,7 @@ async def _enrich(session: AsyncSession, user: User) -> UserRead:
 @router.get("/settings", response_model=SettingsBulkRead)
 async def list_settings(
     session: SessionDep,
-    _user: CurrentUser,
+    _user: SettingsAdminUser,
 ) -> SettingsBulkRead:
     rows = (await session.execute(select(PlatformSetting))).scalars().all()
     return SettingsBulkRead(
@@ -77,7 +79,7 @@ async def list_settings(
 async def update_settings(
     payload: SettingsUpdateRequest,
     session: SessionDep,
-    user: CurrentUser,
+    user: SettingsAdminUser,
 ) -> SettingsUpdateResponse:
     from datetime import UTC, datetime
 

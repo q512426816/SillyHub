@@ -3,18 +3,22 @@
  *
  * 设计依据：
  * - `2026-06-18-menu-driven-permissions/design.md` §5.1（类型定义）+ §5.2（19 菜单权限映射表）
- * - 后端 Permission 枚举：`backend/app/modules/auth/permissions.py`（42 个值，含
- *   2026-06-18 ql-003 新增的 6 个子菜单独立 read 权限）
+ * - 后端 Permission 枚举：`backend/app/modules/auth/permissions.py`（45 个值，含
+ *   2026-06-18 ql-003 新增的 6 个子菜单独立 read 权限 + ql-004 新增的 3 个
+ *   管理子菜单独立 admin 权限 settings:admin / api_key:admin / runtime:admin）
  *
  * 子菜单独立查看权限：每个 overview/management 子菜单有独立 read 权限
  * （component:read / topology:read / scan-docs:read / runtime:read /
  * knowledge:read / incident:read），避免共用 workspace:read 致 picker 冗余展示。
  * 后端各 router 已 require 对应权限。
  *
- * pickerHidden 说明：少数 menu 与其他 menu 共享同一权限（如 git-identities 后端
- * 不强制任何 permission，前端兜底用 platform:admin 与 api-keys/settings 共享）。
- * 这类 menu 设 pickerHidden=true，picker 不渲染该 menu 卡片（避免 platform:admin
- * 在多 menu 重复出现）。canSeeMenu 仍按 permissions 正常判断。
+ * 管理菜单独立权限（ql-004）：settings / api-keys / runtimes 三个 management/system
+ * 子菜单各有独立 admin 权限（settings:admin / api_key:admin / runtime:admin），
+ * 避免共用 platform:admin 致 picker 重复展示。后端 router 各自 require 对应权限。
+ *
+ * pickerHidden 说明：git-identities 后端不强制任何 permission，前端兜底用
+ * platform:admin（无其他 menu 共享），设 pickerHidden=true 仅避免 picker 中显示
+ * 一个"挂名"权限卡片。canSeeMenu 仍按 permissions 正常判断。
  */
 
 export type MenuSection = "overview" | "management" | "admin" | "system";
@@ -168,7 +172,8 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/settings/api-keys",
     absolute: true,
     matchPattern: "/settings/api-keys",
-    permissions: [{ key: "platform:admin", name: "平台超级管理员" }],
+    // 后端 auth/router 3 个 /api-keys 端点 require api_key:admin（platform:admin 自动通过）。
+    permissions: [{ key: "api_key:admin", name: "API Keys 管理" }],
   },
   {
     section: "management",
@@ -281,7 +286,9 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/runtimes",
     absolute: true,
     matchPattern: "/runtimes",
-    permissions: [{ key: "platform:admin", name: "平台超级管理员" }],
+    // 后端 daemon/router 管理 UI 端点（list/get/disable/enable/leases）
+    // require runtime:admin（platform:admin 自动通过）。
+    permissions: [{ key: "runtime:admin", name: "Daemon 运行时管理" }],
   },
   {
     section: "system",
@@ -291,9 +298,9 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/settings",
     absolute: true,
     matchPattern: "/settings",
-    // 后端 settings router 所有端点 require_platform_admin → platform:admin。
-    // platform:billing/user:read 后端不强制，移除以避免 picker 冗余展示。
-    permissions: [{ key: "platform:admin", name: "平台超级管理员" }],
+    // 后端 settings/router 的 GET/PUT /settings require settings:admin
+    // （platform:admin 自动通过）。/users 系列仍 require_platform_admin。
+    permissions: [{ key: "settings:admin", name: "平台设置管理" }],
   },
 ];
 

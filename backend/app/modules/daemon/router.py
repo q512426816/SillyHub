@@ -8,10 +8,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_deps import get_current_principal
+from app.core.auth_deps import get_current_principal, require_permission_any
 from app.core.db import get_session
 from app.core.logging import get_logger
 from app.modules.auth.model import User
+from app.modules.auth.permissions import Permission
 from app.modules.daemon.protocol import DAEMON_MSG_HEARTBEAT
 from app.modules.daemon.schema import (
     DaemonHeartbeatRequest,
@@ -44,6 +45,8 @@ log = get_logger(__name__)
 router = APIRouter(prefix="/daemon", tags=["daemon"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+# 管理 UI 端点用 runtime:admin；daemon 自身的注册/心跳/lease 生命周期仍走 get_current_principal
+RuntimeAdminUser = Annotated[User, Depends(require_permission_any(Permission.RUNTIME_ADMIN))]
 
 
 # ── Runtime registration & heartbeat ────────────────────────────────────────
@@ -99,7 +102,7 @@ async def daemon_heartbeat(
 async def get_runtime(
     runtime_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_principal)],
+    user: RuntimeAdminUser,
 ) -> DaemonRuntimeRead:
     """Get daemon runtime info by ID."""
     svc = DaemonService(session)
@@ -119,7 +122,7 @@ async def get_runtime(
 async def disable_runtime(
     runtime_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_principal)],
+    user: RuntimeAdminUser,
 ) -> DaemonRuntimeRead:
     """Disable a daemon runtime for placement without deleting it."""
     svc = DaemonService(session)
@@ -134,7 +137,7 @@ async def disable_runtime(
 async def enable_runtime(
     runtime_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_principal)],
+    user: RuntimeAdminUser,
 ) -> DaemonRuntimeRead:
     """Enable a daemon runtime, restoring online only when heartbeat is fresh."""
     svc = DaemonService(session)
@@ -163,7 +166,7 @@ async def mark_runtime_offline(
 )
 async def list_runtimes(
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_principal)],
+    user: RuntimeAdminUser,
 ) -> list[DaemonRuntimeRead]:
     """List all daemon runtimes for the current user."""
     svc = DaemonService(session)
@@ -326,7 +329,7 @@ async def get_lease(
 async def list_runtime_leases(
     runtime_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_principal)],
+    user: RuntimeAdminUser,
 ) -> list[DaemonTaskLeaseRead]:
     """List all leases for a given daemon runtime."""
     svc = DaemonService(session)

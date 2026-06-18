@@ -4,13 +4,13 @@ import type { MenuSection } from "../menu-permissions";
 import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
 
 /**
- * 后端 Permission 枚举镜像常量（36 项）。
+ * 后端 Permission 枚举镜像常量（45 项）。
  *
  * 与 `backend/app/modules/auth/permissions.py` 的 `Permission` StrEnum 保持同步。
  * 若后端扩/删枚举，需同时更新本常量；用例 5 会在漂移时失败提示。
  *
  * 分组顺序与后端一致：
- * - Platform (3)
+ * - Platform (6, 含 2026-06-18 ql-004 新增的 3 个管理子菜单独立 admin 权限)
  * - Workspace (4)
  * - Workspace 子菜单独立 read (6, 2026-06-18 ql-003 新增)
  * - Change (5)
@@ -20,13 +20,16 @@ import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
  * - Tool (4)
  * - Admin (7)
  *
- * 合计 3 + 4 + 6 + 5 + 6 + 4 + 3 + 4 + 7 = 42。
+ * 合计 6 + 4 + 6 + 5 + 6 + 4 + 3 + 4 + 7 = 45。
  */
 const BACKEND_PERMISSION_KEYS = [
-  // Platform (3)
+  // Platform (6, ql-004 新增 3 个管理子菜单 admin)
   "platform:admin",
   "platform:billing",
   "platform:audit:read",
+  "settings:admin",
+  "api_key:admin",
+  "runtime:admin",
   // Workspace (4)
   "workspace:read",
   "workspace:write",
@@ -145,19 +148,21 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("pickerHidden menu 与其他 menu 共享 platform:admin（git-identities）", () => {
+  it("pickerHidden menu 用 platform:admin 兜底（git-identities 后端无 require_permission）", () => {
     const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "git-identities");
     expect(g).toBeDefined();
     expect(g!.pickerHidden).toBe(true);
-    // 共享 platform:admin（与 api-keys/settings 相同），无独立权限
+    // 后端 git_identity router 无 require_permission，前端用 platform:admin 兜底；
+    // api-keys/settings/runtimes 已各自独立（ql-004），故 platform:admin 不再与其他
+    // 菜单共享，pickerHidden 仅避免 picker 中显示一个"挂名"权限卡片。
     expect(g!.permissions.map((p) => p.key)).toEqual(["platform:admin"]);
   });
 
-  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 42", () => {
+  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 45", () => {
     const valid = new Set<string>(BACKEND_PERMISSION_KEYS);
     // 镜像常量自身的完整性护栏：若被误删/重复，立即失败
-    expect(BACKEND_PERMISSION_KEYS.length).toBe(42);
-    expect(valid.size).toBe(42);
+    expect(BACKEND_PERMISSION_KEYS.length).toBe(45);
+    expect(valid.size).toBe(45);
 
     MENU_PERMISSION_GROUPS.forEach((g) => {
       g.permissions.forEach((p) => {
@@ -215,11 +220,27 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(g!.permissions.length).toBe(4);
   });
 
-  it("settings 菜单应有 1 个 permission (platform:admin；对齐后端 require_platform_admin)", () => {
+  it("settings 菜单应有 1 个 permission (settings:admin；对齐后端 require_permission_any(SETTINGS_ADMIN))", () => {
     const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "settings");
     expect(g).toBeDefined();
     const keys = g!.permissions.map((p) => p.key).sort();
-    expect(keys).toEqual(["platform:admin"]);
+    expect(keys).toEqual(["settings:admin"]);
+    expect(g!.permissions.length).toBe(1);
+  });
+
+  it("api-keys 菜单应有 1 个 permission (api_key:admin；对齐后端 require_permission_any(API_KEY_ADMIN))", () => {
+    const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "api-keys");
+    expect(g).toBeDefined();
+    const keys = g!.permissions.map((p) => p.key).sort();
+    expect(keys).toEqual(["api_key:admin"]);
+    expect(g!.permissions.length).toBe(1);
+  });
+
+  it("runtimes 菜单应有 1 个 permission (runtime:admin；对齐后端 require_permission_any(RUNTIME_ADMIN))", () => {
+    const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "runtimes");
+    expect(g).toBeDefined();
+    const keys = g!.permissions.map((p) => p.key).sort();
+    expect(keys).toEqual(["runtime:admin"]);
     expect(g!.permissions.length).toBe(1);
   });
 

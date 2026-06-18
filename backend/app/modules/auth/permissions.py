@@ -34,6 +34,14 @@ class Permission(StrEnum):
     PLATFORM_BILLING = "platform:billing"
     PLATFORM_AUDIT_READ = "platform:audit:read"
 
+    # ── Platform 子菜单独立管理权限 ──────────────────────────
+    # 用于前端 menu 显隐粒度化：每个 management/system 子菜单有独立 admin 权限，
+    # 避免 settings / api-keys / runtimes 三个菜单共用 platform:admin 致 picker 重复。
+    # 后端 router 各自 require 对应权限（替换原 require_platform_admin / _require_platform_admin）。
+    SETTINGS_ADMIN = "settings:admin"
+    API_KEY_ADMIN = "api_key:admin"
+    RUNTIME_ADMIN = "runtime:admin"
+
     # ── Workspace ───────────────────────────────────────────
     WORKSPACE_READ = "workspace:read"
     WORKSPACE_WRITE = "workspace:write"
@@ -103,6 +111,12 @@ class Permission(StrEnum):
         """
         if self is Permission.PLATFORM_AUDIT_READ:
             return PermissionGroup.AUDIT
+        # runtime 同时存在 workspace:read（子菜单）与 platform:admin（菜单管理），
+        # 无法仅靠前缀区分，按完整 value 单独判定。
+        if self is Permission.RUNTIME_READ:
+            return PermissionGroup.WORKSPACE
+        if self is Permission.RUNTIME_ADMIN:
+            return PermissionGroup.PLATFORM
         prefix = self.value.split(":", 1)[0]
         if prefix in ("user", "organization", "role"):
             return PermissionGroup.ADMIN
@@ -112,11 +126,11 @@ class Permission(StrEnum):
             "component",
             "topology",
             "scan-docs",
-            "runtime",
             "knowledge",
             "incident",
         ):
             # workspace 子菜单独立 read 权限归类到 WORKSPACE 组
+            # runtime:read 已在上面单独判定，runtime:admin 走默认 PLATFORM
             return PermissionGroup.WORKSPACE
         if prefix == "change":
             return PermissionGroup.CHANGE

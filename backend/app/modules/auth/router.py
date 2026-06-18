@@ -8,10 +8,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_deps import get_current_user
+from app.core.auth_deps import get_current_user, require_permission_any
 from app.core.config import Settings, get_settings
 from app.core.db import get_session
-from app.core.errors import ApiKeyNotFound, PermissionDenied
+from app.core.errors import ApiKeyNotFound
 from app.modules.auth.api_key_schema import (
     ApiKeyCreated,
     ApiKeyCreateRequest,
@@ -20,6 +20,7 @@ from app.modules.auth.api_key_schema import (
 )
 from app.modules.auth.api_key_service import ApiKeyService
 from app.modules.auth.model import User
+from app.modules.auth.permissions import Permission
 from app.modules.auth.rbac import collect_permissions_everywhere, list_user_workspace_roles
 from app.modules.auth.schema import (
     LoginRequest,
@@ -105,15 +106,10 @@ async def me(
     )
 
 
-# ── API Keys (admin-only) ────────────────────────────────────────────────
+# ── API Keys (settings:admin-only) ─────────────────────────────────────
 
 
-def _require_platform_admin(user: User) -> None:
-    if not user.is_platform_admin:
-        raise PermissionDenied(
-            "Platform admin role is required to manage API keys.",
-            details={"required_role": "platform_admin"},
-        )
+ApiKeyAdminUser = Annotated[User, Depends(require_permission_any(Permission.API_KEY_ADMIN))]
 
 
 @router.post(
@@ -125,14 +121,13 @@ async def create_api_key(
     payload: ApiKeyCreateRequest,
     session: SessionDep,
     settings: SettingsDep,
-    user: Annotated[User, Depends(get_current_user)],
+    user: ApiKeyAdminUser,
 ) -> ApiKeyCreated:
     """Issue a new long-lived API key for the daemon.
 
     Plaintext is returned **only** here; subsequent GETs will only expose
-    ``key_prefix``. Admin-only.
+    ``key_prefix``. ``api_key:admin``-gated.
     """
-    _require_platform_admin(user)
     row, plaintext = await ApiKeyService(session, settings=settings).create(
         user_id=user.id,
         name=payload.name,
@@ -154,10 +149,9 @@ async def create_api_key(
 async def list_api_keys(
     session: SessionDep,
     settings: SettingsDep,
-    user: Annotated[User, Depends(get_current_user)],
+    user: ApiKeyAdminUser,
 ) -> ApiKeyListResponse:
     """List the caller's API keys (plaintext never included)."""
-    _require_platform_admin(user)
     rows = await ApiKeyService(session, settings=settings).list_for_user(user_id=user.id)
     return ApiKeyListResponse(items=[ApiKeyRead.model_validate(r) for r in rows])
 
@@ -170,10 +164,9 @@ async def revoke_api_key(
     api_key_id: Annotated[uuid.UUID, Path(...)],
     session: SessionDep,
     settings: SettingsDep,
-    user: Annotated[User, Depends(get_current_user)],
+    user: ApiKeyAdminUser,
 ) -> None:
     """Revoke an API key. Idempotent for unknown / already-revoked ids → 404."""
-    _require_platform_admin(user)
     updated = await ApiKeyService(session, settings=settings).revoke(
         api_key_id=api_key_id,
         user_id=user.id,

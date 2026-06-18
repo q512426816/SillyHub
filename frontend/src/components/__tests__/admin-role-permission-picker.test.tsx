@@ -223,10 +223,10 @@ describe("AdminRolePermissionPicker", () => {
   it("defaults to all menus expanded", () => {
     render(<AdminRolePermissionPicker permissions={[]} onChange={vi.fn()} />);
 
-    // 展开后所有 menu 的 permission checkbox 都可直接通过 aria-label 查到
-    const allKeys = MENU_PERMISSION_GROUPS.flatMap((g) =>
-      g.permissions.map((p) => p.key),
-    );
+    // 展开后所有可见 menu（pickerHidden=false）的 permission checkbox 都可直接通过 aria-label 查到。
+    // pickerHidden menu（如 git-identities 用 platform:admin 兜底）不渲染。
+    const visibleMenus = MENU_PERMISSION_GROUPS.filter((g) => !g.pickerHidden);
+    const allKeys = visibleMenus.flatMap((g) => g.permissions.map((p) => p.key));
     const uniqueKeys = [...new Set(allKeys)];
     uniqueKeys.forEach((key) => {
       // 同一个 key 可能出现在多个 menu（如 workspace:read），用 getAllByLabelText
@@ -320,9 +320,10 @@ describe("AdminRolePermissionPicker", () => {
   it("renders total permission checkbox count equal to unique keys in MENU_PERMISSION_GROUPS", () => {
     render(<AdminRolePermissionPicker permissions={[]} onChange={vi.fn()} />);
 
-    const allKeys = MENU_PERMISSION_GROUPS.flatMap((g) =>
-      g.permissions.map((p) => p.key),
-    );
+    // pickerHidden menu（如 git-identities 用 platform:admin 兜底）不会渲染，
+    // 需从 unique keys 中排除这些 menu 的权限。
+    const visibleMenus = MENU_PERMISSION_GROUPS.filter((g) => !g.pickerHidden);
+    const allKeys = visibleMenus.flatMap((g) => g.permissions.map((p) => p.key));
     const uniqueKeys = [...new Set(allKeys)];
 
     // 每个 unique key 都应能通过 aria-label 查到一个 checkbox
@@ -332,14 +333,16 @@ describe("AdminRolePermissionPicker", () => {
       // 但至少有一个
       expect(inputs.length).toBeGreaterThanOrEqual(1);
     });
+
+    // 反向校验：pickerHidden menu 的权限（platform:admin）应不出现在 picker 中
+    expect(screen.queryAllByLabelText("platform:admin")).toEqual([]);
   });
 
   it("toggling a single permission calls onChange with that key added", () => {
     const onChange = vi.fn();
     render(<AdminRolePermissionPicker permissions={[]} onChange={onChange} />);
 
-    // user:read 出现在 users + git-identities 两个 menu，但都在展开状态；
-    // 取第一个（任意点击）应触发 onChange。
+    // user:read 出现在 users 菜单（pickerHidden=false，正常渲染）
     const userReadInputs = screen.getAllByLabelText("user:read");
     expect(userReadInputs.length).toBeGreaterThanOrEqual(1);
     fireEvent.click(userReadInputs[0]!);

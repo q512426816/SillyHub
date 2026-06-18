@@ -35,9 +35,9 @@ def test_permission_group_has_six_members() -> None:
     assert set(members) == expected
 
 
-def test_permission_count_is_36() -> None:
-    """29 historical + 7 new (admin) = 36."""
-    assert len(list(Permission)) == 36
+def test_permission_count_is_45() -> None:
+    """29 historical + 7 admin + 6 workspace submenu read (ql-003) + 3 platform admin (ql-004) = 45."""
+    assert len(list(Permission)) == 45
 
 
 @pytest.mark.parametrize(
@@ -55,6 +55,17 @@ def test_permission_count_is_36() -> None:
         (Permission.PLATFORM_AUDIT_READ, PermissionGroup.AUDIT),
         (Permission.PLATFORM_ADMIN, PermissionGroup.PLATFORM),
         (Permission.PLATFORM_BILLING, PermissionGroup.PLATFORM),
+        # ql-004: platform management submenu admin perms
+        (Permission.SETTINGS_ADMIN, PermissionGroup.PLATFORM),
+        (Permission.API_KEY_ADMIN, PermissionGroup.PLATFORM),
+        (Permission.RUNTIME_ADMIN, PermissionGroup.PLATFORM),
+        # ql-003: workspace submenu independent read perms
+        (Permission.COMPONENT_READ, PermissionGroup.WORKSPACE),
+        (Permission.TOPOLOGY_READ, PermissionGroup.WORKSPACE),
+        (Permission.SCAN_DOCS_READ, PermissionGroup.WORKSPACE),
+        (Permission.RUNTIME_READ, PermissionGroup.WORKSPACE),
+        (Permission.KNOWLEDGE_READ, PermissionGroup.WORKSPACE),
+        (Permission.INCIDENT_READ, PermissionGroup.WORKSPACE),
         # Workspace
         (Permission.WORKSPACE_READ, PermissionGroup.WORKSPACE),
         (Permission.WORKSPACE_ADMIN, PermissionGroup.WORKSPACE),
@@ -73,7 +84,7 @@ def test_permission_group_resolution(perm: Permission, expected_group: Permissio
 
 
 def test_every_permission_has_non_default_group() -> None:
-    """All 32 permissions must resolve to a stable group (no KeyError)."""
+    """All 45 permissions must resolve to a stable group (no KeyError)."""
     for perm in Permission:
         group = perm.group
         assert isinstance(group, PermissionGroup)
