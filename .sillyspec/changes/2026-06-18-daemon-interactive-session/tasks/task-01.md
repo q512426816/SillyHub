@@ -1,244 +1,267 @@
 ---
 author: qinyi
-created_at: 2026-06-18 15:31:03
-change: 2026-06-18-daemon-interactive-session
+created_at: 2026-06-18T22:41:08
 id: task-01
-title: "数据模型迁移：agent_sessions、lease.kind、agent_runs.agent_session_id 与 Alembic"
-wave: W1
+title: R-exe 补验——显式 pathToClaudeCodeExecutable=系统 claude 跑通最小 query
 priority: P0
+estimated_hours: 2
 depends_on: []
-blocks: [task-02, task-04]
-requirement_ids: [FR-01, FR-09]
-decision_ids: [D-001@v1, D-002@v2, D-005@v1]
+blocks: [task-04]
+requirement_ids: []
+decision_ids: [D-009@v1]
 allowed_paths:
-  - backend/app/modules/agent/model.py
-  - backend/app/modules/daemon/model.py
-  - backend/migrations/env.py
-  - backend/migrations/versions/202607040900_create_agent_sessions.py
-  - backend/tests/modules/agent/test_agent_session_model.py
-  - backend/tests/modules/daemon/test_interactive_lease_model.py
-  - backend/tests/migrations/test_create_agent_sessions_migration.py
+  - C:/Users/qinyi/AppData/Local/Temp/claude-sdk-spike/h1-exe.mjs
+  - C:/Users/qinyi/AppData/Local/Temp/claude-sdk-spike/h1-exe.result.json
+  - sillyhub-daemon/src/agent-detector.ts
+  - sillyhub-daemon/test/agent-detector.system-claude.integ.test.ts
 ---
 
-# task-01 — 交互式会话数据契约与迁移
+# task-01: R-exe 补验——显式 pathToClaudeCodeExecutable=系统 claude 跑通最小 query
 
-> Wave 1 / 数据地基 / 无前置依赖。依据 `plan.md` 的显式 task-01、`design.md` §8-§9、`decisions.md` D-001@v1、D-002@v2、D-005@v1，以及当前 `AgentRun`、`DaemonTaskLease`、Alembic 迁移链真实实现。
+## 定位（先读）
 
-## 1. 目标
+- **Wave 0 / P0 / task-04 硬前置**。这是 spike-02 §3.7 H1 的"显式路径"补验：H1 只验证了 **不传** `pathToClaudeCodeExecutable` 时 SDK 默认用内置 `.pnpm/@anthropic-ai+claude-agent-sdk-win32-x64@0.3.181/claude.exe`（224MB），**没有**验证 D-009@v1 要求的"driver 显式传系统 claude 路径"。
+- **D-009@v1 决策**（decisions.md，status: accepted）：daemon **不带** SDK 平台二进制包（`@anthropic-ai/claude-agent-sdk-win32-x64` 不装），ClaudeSdkDriver **必须显式传 `pathToClaudeCodeExecutable`** 指向 agent-detector 检测的系统 claude（2.1.181）。normalized_requirement 三条——
+  1. daemon `package.json` dependencies 含 `@anthropic-ai/claude-agent-sdk`（主包）；
+  2. ClaudeSdkDriver **必须显式传 `pathToClaudeCodeExecutable`**（来自 agent-detector 检测结果），不依赖 SDK 默认内置 exe；
+  3. **agent-detector 未检测到 claude 时 driver 拒绝启动 interactive session（明确报错）**。
+- **本任务只验证 exe 路径可行性**，不做 driver 完整实现（driver 在 task-04）。验证脚本 + 一项集成对照测试，产物落 sandbox 与 `sillyhub-daemon/test/`，主树零业务代码改动。
+- **背景约束（务必遵守）**：daemon 是 **TypeScript**（sillyhub-daemon/，pnpm / vitest / commander / ws / ESM）；scan 文档把 daemon 标 Python 已过时，**一切按实际 TS 代码**。鉴权经 env 继承：`ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL=https://open.bigmodel.cn/api/anthropic`（智谱中转，模型映射 `glm-5.2[1m]`），即 daemon 真实部署环境。
 
-建立交互式会话的持久化三元关系，同时保持现有批处理执行契约不变：
+## 修改文件（精确路径）
 
-1. 新增 `AgentSession` / `agent_sessions`，一条记录代表一个跨 turn 会话。
-2. `DaemonTaskLease.kind` 区分 `batch` 与 `interactive`，默认和存量均为 `batch`。
-3. `AgentRun.agent_session_id` 指向会话聚合实体；每个 turn 仍是一条独立 `AgentRun`。
-4. 保留 `AgentRun.session_id` 的既有 agent 内部 resume id 语义，不重命名、不迁移、不复用。
-5. 提供可逆 Alembic 迁移，并让 Alembic metadata 显式加载 daemon 表。
+| 操作 | 路径 | 说明 |
+|---|---|---|
+| 新增（sandbox，仓库外） | `C:/Users/qinyi/AppData/Local/Temp/claude-sdk-spike/h1-exe.mjs` | 显式 `pathToClaudeCodeExecutable` 对照脚本：复刻 agent-detector 逻辑给出系统 claude.CMD 路径 → `query({options:{pathToClaudeCodeExecutable}})` → 跑通 `Reply with exactly: PONG`；与 `h1.mjs`（默认内置）产物对照。 |
+| 新增（sandbox 落地证据） | `C:/Users/qinyi/AppData/Local/Temp/claude-sdk-spike/h1-exe.result.json` | h1-exe.mjs 运行结果落盘（`{systemClaudePath, probedRunningPath, result, elapsed_ms, msg_types}`），作为 R-exe 关闭的实证。 |
+| 新增 | `sillyhub-daemon/test/agent-detector.system-claude.integ.test.ts` | vitest 集成测试：调 `new AgentDetector().detectOne('claude')`，断言 `status='available'` 且 `path` 以 `.cmd/.exe/.bat/.ps1` 结尾、`version` 满足 `>=2.0.0`；mock `findOnPath=null` 验证未检测 → `unavailable/not-found`（D-009 拒绝启动判据）。**不真实 spawn claude**，仅验证路径解析形状；真实 spawn 在 sandbox 脚本做。 |
 
-本任务只建立数据契约。spawn + resume、session REST、SSE 聚合和生命周期编排分别由后续任务实现。
+> sandbox 脚本与产物在仓库外（`%TEMP%\claude-sdk-spike\`），主树零业务代码改动；`sillyhub-daemon/src/agent-detector.ts` 本身**不改**（只加它的集成测试）。`sillyhub-daemon/package.json` 加 SDK 依赖是 task-04 的事，本任务用 sandbox 既有依赖验证。
 
 ## 覆盖来源
 
-| 来源 | 要求/决策 | 本任务落实 |
-|---|---|---|
-| `plan.md` task-01 | Wave 1 数据模型迁移，覆盖 FR-01、FR-09 / D-001@v1、D-002@v2、D-005@v1 | 建立 session/lease/run 数据地基与 batch 兼容默认值 |
-| FR-01 | 创建 `agent_sessions`、interactive lease 与首个 AgentRun 的持久化关系 | 新表、`lease.kind`、run 会话 FK；创建业务逻辑留给 task-04 |
-| FR-09 | 批处理 lease 和 workspace AgentRun 行为不变 | `kind` 默认/回填 `batch`，run FK 默认 NULL，不改 `AgentRun.session_id` |
-| D-001@v1 | 新实体叫 `AgentSession`；FK 叫 `agent_session_id`；旧 `session_id` 保留 | ORM、迁移和守门测试逐项锁定命名与旧字段类型 |
-| D-002@v2 | 1 session = 1 长生命周期 lease；1 session = N 个独立 turn/run | lease 唯一关联 + run N:1 FK；不引入跨 turn 进程字段 |
-| D-005@v1 | interactive lease 不绑定单一 run，三元关系通过 session 表表达 | 保留 nullable `lease.agent_run_id`，新增 `session.lease_id` 和 `run.agent_session_id` |
-| `design.md` §8-§9 | 字段、三元关系、过期语义与 brownfield 兼容 | §4 数据接口、§5 不变量、§6 边界与 §9 验收共同约束 |
+- **R-exe（P0，design §10 风险登记）**："显式 `pathToClaudeCodeExecutable`=系统 claude 未单独验证（spike H1 验证的是默认内置 exe）" → 应对："task-03 前置补验：复用 `%TEMP%\claude-sdk-spike` 脚本加 `pathToClaudeCodeExecutable` 对照跑通"。
+- **D-009@v1（decisions.md）**：normalized_requirement 三条（见上"定位"），本任务逐条落实第 2、3 条（第 1 条 package.json 归 task-04）。
+- 关联证据：spike-02 §3.7 H1（默认内置 exe 证据，`h1.mjs`，9.8s 跑通 PONG，probed path = `.pnpm/@anthropic-ai+claude-agent-sdk-win32-x64@0.3.181/.../claude.exe`）、`sillyhub-daemon/src/agent-detector.ts`（系统 claude 检测逻辑）。
 
-## 2. 真实现状与约束
+## 实现要求
 
-| 位置 | 当前事实 | 本任务约束 |
-|---|---|---|
-| `backend/app/modules/agent/model.py` | `AgentRun.session_id` 已是 `String(128), nullable=True`，quick-chat 用作 agent resume id；`AgentRun` 尚无会话 FK | 新增字段必须叫 `agent_session_id`，现有 `session_id` 定义保持原样 |
-| `backend/app/modules/daemon/model.py` | `DaemonTaskLease.agent_run_id` 可空且 FK→`agent_runs.id`；无 `kind` | batch 保持现有关联；interactive 的 `agent_run_id=NULL` 由 task-04 业务层保证 |
-| `backend/migrations/env.py` | eager import 了 agent model，但没有 daemon model | 必须显式 import daemon model，确保 `BaseModel.metadata` 可解析新增跨模块 FK |
-| `backend/migrations/versions/202607030900_add_workspace_path_source.py` | 当前迁移链尾 revision 为 `202607030900` | 新迁移使用 revision `202607040900`，执行前再次检查 head；若 head 已变化，先调整 revision/down_revision，禁止制造平行 head |
-| `BaseModel` | 只统一 metadata，不提供审计字段 | `AgentSession` 自行声明时间字段，禁止假设基类自动生成 |
+### R1. sandbox 对照脚本 `h1-exe.mjs`
 
-## 3. 修改文件
+复用 spike-02 `h1.mjs` 框架（同 node 项目、同 SDK 0.3.181、同 env 鉴权），关键差异是**显式传 `pathToClaudeCodeExecutable`**。路径来源**等价复刻** `AgentDetector.resolveBinPath('claude')`（不直接 import daemon 代码——sandbox 是独立 node 项目；在脚本内重写同一优先级）：
 
-| 操作 | 精确路径 | 改动 |
-|---|---|---|
-| 修改 | `backend/app/modules/agent/model.py` | 新增 `AgentSession`；为 `AgentRun` 增加 nullable FK `agent_session_id` 和索引 |
-| 修改 | `backend/app/modules/daemon/model.py` | 为 `DaemonTaskLease` 增加非空 `kind`，Python/DB 默认均为 `batch`，增加索引 |
-| 修改 | `backend/migrations/env.py` | 增加 `from app.modules.daemon import model as _daemon_model  # noqa: F401` |
-| 新增 | `backend/migrations/versions/202607040900_create_agent_sessions.py` | 建表、加列、加 FK/索引；提供严格逆序 downgrade |
-| 新增 | `backend/tests/modules/agent/test_agent_session_model.py` | `AgentSession` 与 `AgentRun.agent_session_id` 模型契约测试 |
-| 新增 | `backend/tests/modules/daemon/test_interactive_lease_model.py` | lease.kind 默认值、列约束与索引测试 |
-| 新增 | `backend/tests/migrations/test_create_agent_sessions_migration.py` | 迁移 revision、操作序列与 downgrade 对称性测试 |
+1. 解析系统 claude 路径（复刻 `agent-detector.ts:259-296` `resolveBinPath` + `findOnPath`）：
+   - 读 `process.env.SILLYHUB_CLAUDE_PATH`，若 `existsSync` 则用它；
+   - 否则遍历 `process.env.PATH`（Windows 分号分隔），按后缀 `['.exe','.cmd','.bat','.ps1']` 顺序（对齐 `WINDOWS_EXTS`）找首个 `existsSync && statSync().isFile()` 文件，取绝对路径。
+   - 找不到 → 脚本 `console.error('[h1-exe] system claude NOT FOUND → D-009 refuse-to-start')` 并 `process.exit(1)`（对应 D-009 第 3 条的 sandbox 等价物）。
+2. 把解析到的路径作为 `pathToClaudeCodeExecutable` 传入 `query()`：
+   ```js
+   for await (const msg of query({
+     prompt: 'Reply with exactly: PONG',
+     options: { pathToClaudeCodeExecutable: systemClaudePath },  // ← R-exe 核心差异
+   })) { ... }
+   ```
+3. 在 `system/init` 消息时，用 powershell `Get-Process claude | Select -ExpandProperty Path` 取**实际运行中 claude 进程路径**，断言它 == 传入的 `systemClaudePath`（而非 `.pnpm/.../win32-x64/claude.exe`）—— 这是"显式路径生效"的直接证据。
+4. 收集 `result`，断言 `subtype==='success'` 且 `result` 含 `PONG`（与 `h1.mjs` 默认内置结果对照一致）。
+5. 落盘 `h1-exe.result.json`：`{systemClaudePath, probedRunningPath, result:{subtype,is_error,result,session_id,model}, elapsed_ms, msg_types}`。
 
-不得修改 `schema.py`、service、router、placement、前端或 daemon TypeScript 文件；这些不属于数据模型任务。
+### R2. daemon 集成测试 `agent-detector.system-claude.integ.test.ts`
 
-## 4. 实现要求与接口定义
+vitest（`sillyhub-daemon/test/`，ESM，`// @vitest-environment node`）。**不真实 spawn claude 子进程**（避免单测依赖外网中转 + claude.exe），仅验证 agent-detector 给出的路径形状可被 driver 直接当 `pathToClaudeCodeExecutable` 用：
 
-### 4.1 `AgentSession`
+- `it('detects system claude as available with cmd/exe path')`：`const r = await new AgentDetector().detectOne('claude');` 断言 `r.status === 'available'`、`/\.(cmd|exe|bat|ps1)$/i.test(r.path)`、`r.path !== ''`。本机预期 `C:\nvm4w\nodejs\claude.CMD`。
+- `it('resolved version satisfies min 2.0.0')`：解析 `r.version`（实测 `2.1.181`），断言 semver `>=2.0.0`（对齐 `PROVIDER_SPECS.claude.minVersion='2.0.0'`）；若环境 `version===undefined`（无 claude）→ `test.skip`，不 FAIL。
+- `it('returns unavailable/not-found when claude absent (D-009 refuse-to-start predicate)')`：`vi.spyOn(detector, 'findOnPath').mockReturnValue(null)` + `delete process.env.SILLYHUB_CLAUDE_PATH` → `detectOne('claude')` 断言 `{status:'unavailable', reason:'not-found', path:''}`。这是 task-04 driver 启动前 throw 的判据；本任务只验证 detector 输出形状。
 
-在 `backend/app/modules/agent/model.py` 定义：
+测试纳入 `pnpm test`，全部应在本机直接绿（claude 已装 2.1.181）。
 
-```python
-class AgentSession(BaseModel, table=True):
-    __tablename__ = "agent_sessions"
+### R3. 落地证据
+
+把 `h1-exe.result.json` 关键字段（脱敏 session_id 尾部）回填本文件 §验收标准"实测证据"块，作为 R-exe 关闭的实证。
+
+## 接口定义
+
+### sandbox 最小 query 调用（伪代码 / 搬砖级）
+
+```js
+// h1-exe.mjs
+import { query } from '@anthropic-ai/claude-agent-sdk';
+import { existsSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { execSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+
+// —— 复刻 AgentDetector.resolveBinPath('claude')（agent-detector.ts:259-296）——
+function resolveSystemClaude() {
+  const envVal = process.env.SILLYHUB_CLAUDE_PATH;
+  if (envVal && existsSync(envVal)) return envVal;
+  const pathVar = process.env.PATH;
+  if (!pathVar) return null;
+  const exts = process.platform === 'win32' ? ['.exe','.cmd','.bat','.ps1'] : [''];
+  for (const dir of pathVar.split(process.platform === 'win32' ? ';' : ':')) {
+    if (!dir) continue;
+    for (const ext of exts) {
+      const cand = join(dir, 'claude' + ext);
+      try { if (existsSync(cand) && statSync(cand).isFile()) return cand; } catch {}
+    }
+  }
+  return null;
+}
+
+const systemClaudePath = resolveSystemClaude();
+if (!systemClaudePath) {
+  console.error('[h1-exe] system claude NOT FOUND → D-009 refuse-to-start triggered');
+  process.exit(1);
+}
+console.log('[h1-exe] pathToClaudeCodeExecutable =', systemClaudePath);
+
+let resultMsg = null;
+let probed = '(not probed)';
+const seen = [];
+const t0 = Date.now();
+for await (const msg of query({
+  prompt: 'Reply with exactly: PONG',
+  options: { pathToClaudeCodeExecutable: systemClaudePath },  // ← R-exe 核心差异
+})) {
+  seen.push(msg.type + (msg.subtype ? '/' + msg.subtype : ''));
+  if (msg.type === 'system' && msg.subtype === 'init') {
+    try {
+      probed = execSync(
+        'powershell -NoProfile -Command "Get-Process claude -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Path"',
+        { encoding: 'utf8', timeout: 8000 },
+      ).trim();
+    } catch (e) { probed = '(probe failed: ' + String(e.message || e).slice(0, 200) + ')'; }
+    console.log('[init] session_id=' + msg.session_id + ' model=' + (msg.model || '?'));
+    console.log('[claude running path]:', probed);  // 应 == systemClaudePath，非 .pnpm 内置
+  }
+  if (msg.type === 'result') resultMsg = msg;
+}
+
+const elapsed_ms = Date.now() - t0;
+console.log('msg_types:', seen.join(', '));
+console.log('elapsed_ms:', elapsed_ms);
+console.log('result:', JSON.stringify({
+  subtype: resultMsg && resultMsg.subtype,
+  is_error: resultMsg && resultMsg.is_error,
+  result: (resultMsg && resultMsg.result || '').slice(0, 300),
+  session_id: resultMsg && resultMsg.session_id,
+  model: resultMsg && resultMsg.model,
+}));
+
+// 落盘证据
+writeFileSync('h1-exe.result.json', JSON.stringify({
+  systemClaudePath,
+  probedRunningPath: probed,
+  result: resultMsg && {
+    subtype: resultMsg.subtype,
+    is_error: resultMsg.is_error,
+    result: (resultMsg.result || '').slice(0, 300),
+    session_id: resultMsg.session_id,
+    model: resultMsg.model,
+  },
+  elapsed_ms,
+  msg_types: seen,
+}, null, 2));
+
+if (!resultMsg || resultMsg.subtype !== 'success' || !(resultMsg.result || '').includes('PONG')) {
+  console.error('[h1-exe] FAILED: expected success/PONG');
+  process.exit(2);
+}
 ```
 
-字段契约：
+### agent-detector 给出系统 claude 路径（task-04 driver 将这样用，本任务只验 detector 输出形状）
 
-| 字段 | SQLAlchemy 类型 | NULL/默认 | FK / 语义 |
+```ts
+// task-04 ClaudeSdkDriver 启动前（本任务不实现 driver，仅规定接口形状）
+import { AgentDetector } from '../agent-detector.js';
+
+const detected = await new AgentDetector().detectOne('claude');
+if (detected.status !== 'available' || !detected.path) {
+  // D-009 normalized_requirement 第 3 条：拒绝启动
+  throw new Error(`claude not detected on system (status=${detected.status}, reason=${detected.reason || 'n/a'}); cannot start interactive session (D-009)`);
+}
+const opts: ClaudeSdkDriverOptions = {
+  pathToClaudeCodeExecutable: detected.path,  // e.g. 'C:\\nvm4w\\nodejs\\claude.CMD'
+  cwd: sessionCwd,
+  env: { ...process.env },                    // ANTHROPIC_AUTH_TOKEN + BASE_URL（spike H1 env 继承）
+};
+```
+
+## 边界处理（≥5）
+
+| # | 边界场景 | 处理 |
+|---|---|---|
+| B1 | **`.CMD` vs `.exe` 解析**：系统 claude 通常是 npm 全局装的 `claude.CMD` 包装器（实测 `C:\nvm4w\nodejs\claude.CMD`），非真 exe；spike H1 默认内置才是 `.exe`。SDK `pathToClaudeCodeExecutable` 文档未限制扩展名，预期接受 `.cmd`。验证脚本断言 probed 运行路径 == 传入的 `.CMD`；若 SDK 拒绝 `.CMD`（spawn ENOENT/EINVAL），脚本捕获并明确报错 `[h1-exe] SDK rejected .CMD path` → 反推 D-009 调整（预期通过）。注：agent-detector `WINDOWS_EXTS=['.exe','.cmd','.bat','.ps1']` 顺序保证优先 `.exe`，本机无 `claude.exe` 才取 `.CMD`。 |
+| B2 | **agent-detector 未检测到 claude → 拒绝启动**（D-009 normalized_requirement 第 3 条）：sandbox `resolveSystemClaude()` 返回 null 时 `process.exit(1)`；daemon 侧（R2 测试）mock `findOnPath=null` + 无 env → 断言 `detectOne('claude')` 返回 `{status:'unavailable', reason:'not-found', path:''}`。task-04 driver 据此判据 throw。本任务只验判据成立，不实现 throw（throw 在 task-04）。 |
+| B3 | **系统 claude 版本 < 2.0.0**：agent-detector `PROVIDER_SPECS.claude.minVersion='2.0.0'`，`checkMinVersion` 会产非空 `versionWarning`。本机实测 `2.1.181`（达标）。R2 测试断言 `>=2.0.0`；若环境版本低，sandbox 脚本仍跑（验证路径不卡版本），但日志打 `[WARN] claude version < min 2.0.0`，driver（task-04）按 `versionWarning !== null` 决定是否拒绝——本任务不实现拒绝逻辑，仅记录可观测。 |
+| B4 | **中转鉴权失败**（`ANTHROPIC_AUTH_TOKEN` 未设/过期/`BASE_URL` 错）：`query()` 的 `result` 会 `is_error=true`（spike H1 鉴权经 env 继承，缺失即报错）。sandbox 脚本断言 `subtype==='success'`，若 `is_error` 打印完整 `result` 并 `exit(2)`；**区分根因**："路径错"（spawn ENOENT，进程根本没起）vs "鉴权错"（进程起了但 result is_error）——两者都阻断但根因不同，日志明确标注不混淆。 |
+| B5 | **与默认内置 exe 行为对比差异**：`h1.mjs`（默认内置 `.pnpm/.../claude.exe`）与 `h1-exe.mjs`（系统 `claude.CMD`）应在 `result.result`（PONG）、`session_id`（UUID 格式）、`model` 字段上**一致**；差异只在"实际运行进程路径"。对照表写入 §验收标准 AC5。预期行为一致（同一 SDK + 同一后端）；若响应内容/耗时显著偏离（如 `.CMD` 经 cmd.exe 多一层导致 stdout 解析问题），记录为 caveat 上抛，不静默通过。 |
+| B6 | **PATH 上有多个 claude**（如 nvm + 全局 + 某 node_modules/.bin）：agent-detector 按 PATH 顺序取首个 `.exe/.cmd/...`，可能不是用户期望的那个。sandbox 脚本打印解析到的绝对路径供人工核对；`SILLYHUB_CLAUDE_PATH` env 可覆盖（D-009 优先级 env > PATH）。本任务不解决多版本冲突，仅保证解析结果透明可覆盖。 |
+| B7 | **sandbox node/SDK 版本漂移**：sandbox 用 spike-02 既有 `node_modules`（SDK 0.3.181）。若 `pnpm update` 升 SDK 到 0.4+，`pathToClaudeCodeExecutable` option 名/语义可能变（R-SDK0.x）。脚本顶部打印 `require('@anthropic-ai/claude-agent-sdk/package.json').version`，非 0.3.181 打 WARN（不阻断，提示回归）。 |
+
+## 非目标
+
+- ❌ **不做 ClaudeSdkDriver 完整实现**（start/consume/interrupt/canUseTool/result→AgentRun 映射）——那是 task-04。
+- ❌ 不改 `sillyhub-daemon/src/agent-detector.ts` 源码（只加它的集成测试）。
+- ❌ 不改 daemon `package.json` 加 SDK 依赖（那是 task-04；本任务用 sandbox 既有依赖验证）。
+- ❌ 不验证多轮 / interrupt / canUseTool / resume（spike-02 已覆盖 H2/D1/D2/D3）。
+- ❌ 不验证 GLM 工具兼容性（D-008，task-09）。
+- ❌ 不验证 `streamInput` 主动注入（spike S1 留待 driver 阶段）。
+- ❌ 不带 `@anthropic-ai/claude-agent-sdk-win32-x64` 平台二进制包（D-009 明确排除；本任务恰恰验证"不带也能跑"，靠系统 claude.CMD）。
+- ❌ 不动 backend / frontend / protocol（本任务是 daemon 侧前置验证）。
+
+## 参考
+
+- `spike-02-architecture-validation.md` §3.7 H1（默认内置 exe 证据：9.8s 跑通 PONG，probed path = `.pnpm/@anthropic-ai+claude-agent-sdk-win32-x64@0.3.181/.../claude.exe`，不依赖系统 claude.CMD）
+- `sillyhub-daemon/src/agent-detector.ts`：
+  - `PROVIDER_SPECS.claude`（`bin:'claude'`, `envPath:'SILLYHUB_CLAUDE_PATH'`, `minVersion:'2.0.0'`, `versionPattern: /(?:Claude Code\s+)?(\d+\.\d+\.\d+)(?:\s+\(Claude Code\))?/`, `protocol:'stream_json'`）
+  - `WINDOWS_EXTS = ['.exe','.cmd','.bat','.ps1']`（ql-20260616-001 修复：移除空扩展名避免取到 sh wrapper）
+  - `AgentDetector.resolveBinPath`（env → PATH）、`findOnPath`（跨平台后缀尝试）、`detectSingle`（not-found → `unavailable/not-found/path:''`）
+- `decisions.md` D-009@v1（normalized_requirement 三条 + evidence 标注"待验：显式 pathToClaudeCodeExecutable=系统 claude 需 execute 前补验"）
+- `design.md` §7.1 `ClaudeSdkDriverOptions.pathToClaudeCodeExecutable`、§10 R-exe（P0）、§5 Wave1（D-009 用系统 claude.CMD）、§9 兼容策略（D-009 未检测到拒绝启动）
+- sandbox 对照基线：`C:/Users/qinyi/AppData/Local/Temp/claude-sdk-spike/h1.mjs`（默认内置）、`h2.mjs`/`d1-d4.mjs`/`s1.mjs`
+- 实测环境：node v24.15.0 / pnpm 9.6.0 / Windows；`claude --version` = `2.1.181 (Claude Code)`；`which claude` = `/c/nvm4w/nodejs/claude`（sh wrapper，agent-detector `findOnPath` 会取到 `C:\nvm4w\nodejs\claude.CMD`）
+
+## TDD 步骤
+
+1. **先写 R2 集成测试**（红→绿）：建 `sillyhub-daemon/test/agent-detector.system-claude.integ.test.ts`，写三 case（available+.cmd/.exe、version>=2.0.0、unavailable→not-found）。跑 `pnpm test`——前两个在本机应直接绿（claude 2.1.181 已装），第三个需 mock。
+2. **mock `findOnPath`**（D-009 判据）：`const detector = new AgentDetector(); vi.spyOn(detector, 'findOnPath').mockReturnValue(null); delete process.env.SILLYHUB_CLAUDE_PATH;` → 断言 `(await detector.detectOne('claude')).status === 'unavailable'` 且 `reason === 'not-found'` 且 `path === ''`（绿）。**验证 D-009 拒绝启动判据成立**。
+3. **跑 sandbox 对照脚本**（R1）：确保 `ANTHROPIC_AUTH_TOKEN`+`ANTHROPIC_BASE_URL` 已设（同 h1.mjs 环境），`cd %TEMP%\claude-sdk-spike && node h1-exe.mjs`。预期 ~10s 跑通，`result.result` 含 `PONG`，probed 运行路径 = 系统 `claude.CMD`（非 `.pnpm` 内置）。
+4. **对照 h1.mjs**（B5）：跑 `node h1.mjs` 取默认内置结果，与 h1-exe 比 `result.result`/`model`/`session_id`/`elapsed_ms`（填 §验收标准 AC5）。
+5. **落盘证据**（R3）：`h1-exe.result.json` 写入 sandbox，关键字段抄进本文件 §验收标准"实测证据"。
+6. **边界回归**（B2）：临时 `unset SILLYHUB_CLAUDE_PATH` 且 PATH 无 claude 的子集（或在 mock 测试里）→ 验证 `resolveSystemClaude()→null→exit(1)` / detector `unavailable`。
+7. **全绿**：`pnpm test`（daemon，含新集成测试）+ sandbox `h1-exe.mjs`（success/PONG）+ sandbox `h1.mjs`（success/PONG，对照）→ R-exe 关闭。
+
+## 验收标准
+
+| # | 标准 | 通过判据（具体可测） | 证据 |
 |---|---|---|---|
-| `id` | `Uuid(as_uuid=True)` | NOT NULL；`uuid.uuid4` | PK |
-| `user_id` | `Uuid(as_uuid=True)` | NOT NULL | FK→`users.id`, `ondelete="CASCADE"` |
-| `runtime_id` | `Uuid(as_uuid=True)` | NULL | FK→`daemon_runtimes.id`, `ondelete="SET NULL"`；runtime 删除不抹掉会话历史 |
-| `lease_id` | `Uuid(as_uuid=True)` | NULL | FK→`daemon_task_leases.id`, `ondelete="SET NULL"`；唯一约束保证 session↔lease 最多 1:1 |
-| `provider` | `String(30)` | NOT NULL | 当前支持 `claude` / `codex`；本任务不加 DB enum/check |
-| `status` | `String(20)` | NOT NULL；Python default + server default `pending` | `pending/active/reconnecting/ended/failed` |
-| `agent_session_id` | `String(255)` | NULL | agent 内部 Claude session id / Codex thread id，供后续 resume |
-| `config` | `JSON` | NULL | 会话配置，如 `manual_approval`、`model` |
-| `turn_count` | `Integer` | NOT NULL；Python default 0 + server default `0` | 已创建/执行 turn 计数，递增逻辑不在本任务 |
-| `created_at` | `DateTime(timezone=True)` | NOT NULL；UTC factory + `now()` | 创建时间 |
-| `last_active_at` | `DateTime(timezone=True)` | NULL | 最近活动时间 |
-| `ended_at` | `DateTime(timezone=True)` | NULL | ended/failed 收口时间 |
+| AC1 | **显式路径跑通 PONG** | `h1-exe.mjs` 的 `result.subtype==='success'` 且 `result.result` 包含 `PONG`，`is_error===false`，exit code 0 | `h1-exe.result.json`（§实测证据回填） |
+| AC2 | **运行进程路径=系统 claude**（非内置） | probed `Get-Process claude \| Select Path` 输出 == 传入的 `systemClaudePath`（如 `C:\nvm4w\nodejs\claude.CMD`），**不含** `.pnpm/@anthropic-ai+claude-agent-sdk-win32-x64` | `h1-exe.result.json.probedRunningPath` |
+| AC3 | **agent-detector 给出可用路径** | `new AgentDetector().detectOne('claude')` → `{status:'available', path: /\.(cmd\|exe\|bat\|ps1)$/i.test(path)===true, version: '2.1.181'}`；`path !== ''` | `pnpm test agent-detector.system-claude`（绿） |
+| AC4 | **未检测 claude → unavailable/not-found**（D-009 拒绝启动判据） | mock `findOnPath=null` + 无 env → `detectOne('claude')` → `{status:'unavailable', reason:'not-found', path:''}`；sandbox 等价 `resolveSystemClaude()→null→exit(1)` | 集成测试 case 3（绿）+ sandbox 手测 exit code=1 |
+| AC5 | **与默认内置结果一致**（B5 对照） | `h1.mjs`（默认内置）与 `h1-exe.mjs`（系统 .CMD）的 `result.result` 均含 `PONG`、`model` 字段一致、`session_id` 同为 UUID 格式；耗时差 < 2x | h1 vs h1-exe 对照（§实测证据回填 elapsed_ms） |
+| AC6 | **版本达标** | `detectOne('claude').version` semver `>=2.0.0`（实测 2.1.181） | 集成测试 case 2（绿） |
+| AC7 | **主树零业务代码改动** | `git diff --name-only sillyhub-daemon/src/ backend/ frontend/` 为空（仅 `sillyhub-daemon/test/` 新增）；sandbox 改动在 `%TEMP%` 不入 git | `git status` |
 
-索引/唯一性必须同时体现在 ORM `__table_args__` 与迁移：
+### 实测证据（执行后回填）
 
-- `idx_agent_sessions_user_id(user_id)`
-- `idx_agent_sessions_runtime_id(runtime_id)`
-- `uq_agent_sessions_lease_id(lease_id)`：unique；PostgreSQL 允许多条 NULL，非 NULL lease 只能关联一个 session
-- `idx_agent_sessions_status(status)`
-- `idx_agent_sessions_agent_session_id(agent_session_id)`，可使用 `WHERE agent_session_id IS NOT NULL`
+```
+# h1-exe.result.json（执行 task-01 后填实测值）
+systemClaudePath: "C:\\nvm4w\\nodejs\\claude.CMD"        # 待填
+probedRunningPath: "C:\\nvm4w\\nodejs\\claude.CMD"       # 待填（应 == systemClaudePath，AC2）
+result.subtype: "success"                               # 待填（AC1）
+result.is_error: false                                  # 待填
+result.result: "PONG"                                   # 待填（AC1）
+result.model: "glm-5.2[...]"                            # 待填
+result.session_id: "<uuid>"                             # 待填（AC5 UUID 格式）
+elapsed_ms: ___                                         # 待填（AC5 对照）
 
-### 4.2 `AgentRun.agent_session_id`
-
-在现有 `session_id` 后新增：
-
-```python
-agent_session_id: uuid.UUID | None = Field(
-    default=None,
-    sa_column=Column(
-        Uuid(as_uuid=True),
-        ForeignKey("agent_sessions.id", ondelete="SET NULL"),
-        nullable=True,
-    ),
-)
+# 对照 h1.mjs（默认内置 exe，spike-02 §3.7 H1）
+h1.probedRunningPath: "...\\.pnpm\\@anthropic-ai+claude-agent-sdk-win32-x64@0.3.181\\...\\claude.exe"
+h1.result.subtype: "success"
+h1.result.result: "PONG"
+h1.elapsed_ms: ~9800
 ```
 
-并在 `AgentRun.__table_args__` 新增 `ix_agent_runs_agent_session_id`，可采用 `agent_session_id IS NOT NULL` 的 PostgreSQL partial index。该 FK 表达 session↔runs 1:N。禁止改动现有 `session_id: str | None / String(128)`。
-
-### 4.3 `DaemonTaskLease.kind`
-
-```python
-kind: str = Field(
-    default="batch",
-    sa_column=Column(
-        String(20),
-        nullable=False,
-        default="batch",
-        server_default="batch",
-    ),
-)
-```
-
-在 `DaemonTaskLease.__table_args__` 增加 `idx_daemon_task_leases_kind(kind)`。本任务只定义字符串契约：`batch` 与 `interactive`；不引入 enum/check constraint，避免把后续状态演进锁死。
-
-### 4.4 Alembic 迁移
-
-`backend/migrations/versions/202607040900_create_agent_sessions.py`：
-
-```python
-revision = "202607040900"
-down_revision = "202607030900"
-branch_labels = None
-depends_on = None
-```
-
-`upgrade()` 固定顺序：
-
-1. `op.create_table("agent_sessions", ...)`，列与 FK 完全匹配 §4.1。
-2. 创建 `agent_sessions` 的 5 个索引/唯一索引。
-3. `op.add_column("daemon_task_leases", kind)`，`nullable=False, server_default="batch"`，使存量行自动回填。
-4. 创建 `idx_daemon_task_leases_kind`。
-5. `op.add_column("agent_runs", agent_session_id)`，列内 FK→`agent_sessions.id`, `ondelete="SET NULL"`。
-6. 创建 `ix_agent_runs_agent_session_id`。
-
-`downgrade()` 必须严格逆序：先删 run 索引/列，再删 lease 索引/列，最后删 session 索引和表。不得触碰 `agent_runs.session_id` 或现有 lease 索引。
-
-## 5. 三元关系不变量
-
-```text
-AgentSession.lease_id ──unique──> DaemonTaskLease.id
-AgentRun.agent_session_id ──N:1──> AgentSession.id
-AgentRun.session_id ─────────────> agent 内部 resume id（旧语义，保持不变）
-```
-
-- interactive lease 的 `agent_run_id` 应为 NULL，但这是 task-04 创建/编排逻辑的责任，本任务不加跨字段 DB check。
-- batch lease 继续使用现有 `agent_run_id`，`kind` 默认 `batch`，不要求调用方立刻显式传值。
-- 一个 session 可有多个按时间顺序创建的 run；本任务不增加“同一时刻最多一个 running run”的 DB 约束，该并发守门属于 task-04/task-06。
-
-## 6. 边界与异常场景
-
-| # | 场景 | 期望 |
-|---|---|---|
-| 1 | 现有 lease 行在迁移前没有 kind | upgrade 后全部读为 `batch`，列 NOT NULL；批处理调用方不传 kind 仍得到 `batch` |
-| 2 | 普通 batch `AgentRun` 未绑定会话 | `agent_session_id=NULL` 合法，旧流程无行为变化 |
-| 3 | 同一 session 关联多个 turn run | 多条 `agent_runs.agent_session_id` 可指向同一 session |
-| 4 | 两个 session 绑定同一非 NULL lease | 唯一索引拒绝第二条，落实 1 session = 1 lease |
-| 5 | session 尚未分配 runtime/lease 或关联对象被删除 | `runtime_id`/`lease_id` 可为 NULL；`SET NULL` 保留会话历史 |
-| 6 | session 被删除 | 关联 run 的 `agent_session_id` 变为 NULL；run 历史不级联删除 |
-| 7 | agent 内部 id 尚未返回 | `AgentSession.agent_session_id=NULL` 合法，后续 turn 调度必须等待该值，但不由本任务实现 |
-| 8 | `config` 未提供或含 provider 特有字段 | NULL 或任意 JSON 合法；本任务不做配置 schema 校验 |
-| 9 | downgrade 时存在新增数据 | 先移除依赖列/索引再删表，不因 FK 顺序失败；允许丢弃本变更数据 |
-| 10 | 开始实现时 Alembic head 已不再是 `202607030900` | 停止使用写死的 down_revision，重新选顺序 revision；不得提交多 head |
-
-## 7. 非目标
-
-- 不实现 session create/inject/interrupt/end REST 或 service。
-- 不实现 interactive lease 创建时 `agent_run_id=NULL`、`lease_expires_at=NULL` 的业务赋值。
-- 不实现 spawn、Claude `--resume`、Codex thread resume 或 sessionStore。
-- 不实现 session 级 Redis/SSE 聚合。
-- 不实现 turn_count、last_active_at、ended_at 的状态更新逻辑。
-- 不新增 ORM relationship 属性；后续查询先使用显式 FK，避免本任务扩大加载策略范围。
-- 不修改/迁移/重解释 `AgentRun.session_id`。
-- 不为 provider/status/kind 增加数据库 enum 或 check constraint。
-
-## 8. TDD 实施顺序
-
-1. **Red — 模型测试**
-   - 新建 `test_agent_session_model.py`：断言表名、字段类型/长度/nullability/default/FK/ondelete、lease unique 索引、run FK/索引，以及旧 `AgentRun.session_id` 仍为 `String(128)`。
-   - 新建 `test_interactive_lease_model.py`：断言默认 `batch`、kind 为 `String(20)`、NOT NULL、server default 和索引存在。
-   - 运行定向测试，确认因字段/类不存在而失败。
-2. **Green — ORM 最小实现**
-   - 修改两个 model 和 `migrations/env.py`，只实现 §4 契约。
-   - 运行上述定向测试至通过。
-3. **Red — 迁移测试**
-   - 新建 `test_create_agent_sessions_migration.py`，至少断言 revision 链、upgrade/downgrade callable、操作名称/顺序对称；若测试环境可连接 PostgreSQL，再覆盖真实 up/down。
-4. **Green — 手写迁移**
-   - 按 §4.4 编写 upgrade/downgrade，不使用 autogenerate 产生无关 schema diff。
-5. **Refactor/验证**
-   - `uv run ruff check` / `uv run ruff format --check` 覆盖本任务 Python 文件。
-   - `uv run pytest backend/tests/modules/agent/test_agent_session_model.py backend/tests/modules/daemon/test_interactive_lease_model.py backend/tests/migrations/test_create_agent_sessions_migration.py`（从仓库根执行时按实际 pytest 配置调整路径）。
-   - 在可用 PostgreSQL 上执行 `alembic upgrade head → alembic downgrade -1 → alembic upgrade head`；若本机环境不可用，明确记录为环境阻塞，不得声称已验证。
-   - 运行 backend 全量 `uv run pytest`，确认 batch 回归。
-
-## 9. 验收标准
-
-| AC | 验收项 | 自动化/证据 |
-|---|---|---|
-| AC-01 | `AgentSession` 继承 `BaseModel`，表名为 `agent_sessions`，字段与 §4.1 完全一致 | model metadata 测试 |
-| AC-02 | session↔lease 的 1:1 由非 NULL lease_id 唯一索引落实；session↔run 为 1:N | 索引/FK metadata 测试；PostgreSQL 约束验证 |
-| AC-03 | `AgentRun.agent_session_id` nullable、FK→`agent_sessions.id`、ON DELETE SET NULL | model + migration 测试 |
-| AC-04 | `AgentRun.session_id` 仍为 nullable `String(128)`，没有改名或语义迁移 | 守门测试 + diff 审查 |
-| AC-05 | `DaemonTaskLease.kind` 为 NOT NULL `String(20)`，Python/DB 默认均为 `batch` | lease model 测试 |
-| AC-06 | 迁移把存量 lease 回填为 batch，新增 session/run 关联与全部索引 | PostgreSQL upgrade 后 schema 查询 |
-| AC-07 | downgrade 严格逆序且只撤销本任务对象，随后可再次 upgrade | `downgrade -1` / `upgrade head` |
-| AC-08 | `backend/migrations/env.py` 显式加载 daemon model，跨模块 FK 可由 metadata 解析 | import/metadata 测试或 autogenerate dry-run |
-| AC-09 | batch lease 与未绑定 session 的 AgentRun 可按旧调用方式实例化 | 回归单测 |
-| AC-10 | 没有新增 Alembic 平行 head | 实现时执行 `alembic heads`，输出仅一个 head |
-| AC-11 | 所有改动严格位于 `allowed_paths`，未提前实现后续 Wave | `git diff --name-only` 审查 |
-| AC-12 | backend 定向测试、ruff 和全量 pytest 通过；不可用的外部 DB 验证被明确标注 | 命令输出 |
-
-## 10. 完成定义
-
-- 上述 AC 全部满足，或外部 PostgreSQL 验证有明确、可复现的环境阻塞记录。
-- 迁移链基于实现时的真实单 head，不覆盖其他活跃变更的 migration。
-- diff 中不存在 `AgentRun.session_id` 改动、业务 service 改动或后续 task 的预实现。
+> 全部 AC 绿 → **R-exe（P0）关闭，task-04（ClaudeSdkDriver）解锁**。任一 AC 红 → 不解锁 task-04，回 design 评估 D-009（可能需带平台包或换路径策略，但预期通过——SDK 文档未限制 exe 扩展名，系统 claude.CMD 是 npm 标准 wrapper）。

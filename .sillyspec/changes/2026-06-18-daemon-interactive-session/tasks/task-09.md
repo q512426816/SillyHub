@@ -1,380 +1,363 @@
 ---
 author: qinyi
-created_at: 2026-06-18 15:31:03
+created_at: 2026-06-18T22:41:08
 change: 2026-06-18-daemon-interactive-session
 id: task-09
-title: "session 元数据持久化与 daemon 重启收敛"
-wave: W6
+title: "审批暂停/退出收敛 + GLM 错误透传验证（SDK canUseTool 收敛 + tool_result(is_error) 透传）"
+wave: W4
 priority: P1
-estimated_hours: 16
-depends_on: [task-03, task-06]
+estimated_hours: 10
+depends_on: [task-08]
 blocks: []
-requirement_ids: [FR-08]
-decision_ids: [D-002@v2, D-003@v1]
+requirement_ids: [FR-07, FR-08b]
+decision_ids: [D-007@v1, D-008@v1]
 allowed_paths:
-  - sillyhub-daemon/src/session-store.ts
-  - sillyhub-daemon/src/session-persistence.ts
-  - sillyhub-daemon/src/daemon.ts
-  - sillyhub-daemon/src/hub-client.ts
-  - sillyhub-daemon/tests/session-persistence.test.ts
-  - sillyhub-daemon/tests/session-store.test.ts
-  - sillyhub-daemon/tests/daemon-session-recovery.test.ts
-  - backend/app/modules/daemon/schema.py
-  - backend/app/modules/daemon/router.py
-  - backend/app/modules/daemon/service.py
-  - backend/app/modules/daemon/tests/test_session_recovery.py
+  - sillyhub-daemon/src/interactive/claude-sdk-driver.ts
+  - sillyhub-daemon/src/interactive/session-manager.ts
+  - sillyhub-daemon/src/interactive/types.ts
+  - sillyhub-daemon/tests/interactive/claude-sdk-driver-permission.test.ts
+  - sillyhub-daemon/tests/interactive/claude-sdk-driver-glm-passthrough.test.ts
+  - sillyhub-daemon/tests/interactive/session-manager-pending-cleanup.test.ts
+  - backend/app/modules/agent/service.py
+  - backend/app/modules/agent/schemas.py
+  - backend/tests/modules/agent/test_tool_failure_monitor.py
 ---
 
-# session 元数据持久化与 daemon 重启收敛
+# task-09：审批暂停/退出收敛 + GLM 错误透传验证（v3 重做）
+
+> v3 重做。依据 `design.md` §5（Wave2/§7.6 turn 时序）、§7.1 ClaudeSdkDriver `canUseTool`、§9 D-008 兼容策略、§10 R-GLM、`requirements.md` FR-07 / FR-08b、`decisions.md` D-007@v1 / D-008@v1、`spike-02-architecture-validation.md` §3.7 D2（canUseTool await 远程）+ D2 caveat（GLM Write 失败）、`plan.md` task-09（Wave4 P1，depends_on=[task-08]）。
+>
+> **v2→v3 关键差异**：v2（task-09 旧版）在 stream-json/json-rpc adapter 层做 `control_request` 审批收敛 + 跨 turn pending responder 清理；**v3 不改 adapter**（TaskRunner batch 路径零改动），审批收敛完全在新增的 `ClaudeSdkDriver.canUseTool` 回调 + `SessionManager` 内存 pending registry 层完成；GLM 错误透传是 v3 新增主题（spike D2 caveat 落地，D-008 错误透传不预禁工具）。
+>
+> **SDK 事实基础（spike §3.7 D2）**：`canUseTool` 是 async 回调，带 `AbortSignal`，`await` 任意延迟 claude 全程等待不超时（实测 3 次 6s 各 6003ms）；GLM 中转后端 Write 工具调用 3 次均 permission error、文件未创建，**非 SDK 路线阻塞**（D-008 错误透传）。
 
 ## 1. 目标与硬约束
 
-依据 `plan.md` 显式 task-09、`requirements.md` FR-08、`decisions.md` D-002@v2/D-003@v1，本任务只实现以下恢复语义：
+依据 `plan.md` task-09、全局验收第 7/8 条、`requirements.md` FR-07 / FR-08b、`decisions.md` D-007@v1 / D-008@v1、`design.md` §10 R-GLM：
 
-1. daemon 将 active interactive session 的**可恢复元数据**持久化到 `~/.sillyhub/daemon/sessions.json`。
-2. daemon 重启时加载元数据；若记录含 `currentRunId`，先由 backend 将该 in-flight `AgentRun` 收敛为 `failed`，再把 `AgentSession` 从 `reconnecting` 恢复为 `active`。
-3. 重启恢复阶段**不 spawn agent、不 attach 旧进程、不发送空 prompt、不调用 `TaskRunner.runTurn`**。
-4. 恢复后的下一次 `SESSION_INJECT` 才创建并执行新的 AgentRun；task-03 的 `SessionStore.startTurn` 使用持久化的 `agentSessionId`，Claude 新进程走 `--resume`，Codex 新 app-server 进程走 `thread/resume` 后 `turn/start`。
-5. 旧 child/stdin/readline/adapter/AbortController 不可序列化、不可恢复、不可出现在 SessionStore 恢复记录中。
-6. backend 是 session/run/lease 状态真相；daemon 本地文件只是恢复索引。文件记录与 backend 不一致时，以 backend 校验结果为准。
+1. **deny 收敛**：task-08 的 `canUseTool` 回调返回 `{behavior:'deny', message}` 后，SDK 会把 `message` 回喂给 claude；claude 的收敛行为（停止本轮 / 换方法重试 / 告知用户）由模型自决定，daemon **不拦截、不二次决策、不强制结束 turn**。driver/sessionManager 只负责正确构造 deny message 并经 SDK 透传。
+2. **pending 审批退出清理**：审批在途（canUseTool 回调 await 中）时，session 被 `interrupt` / `end` / driver onError / SDK query 自然结束 → 必须 reject 该 turn 所有 pending canUseTool Promise（让 SDK 收到 deny 后退出 await），不得让 callback 永久挂起导致 query 不结束或 zombie promise。
+3. **GLM 错误透传不阻断（D-008，FR-08b）**：ClaudeSdkDriver **不预禁工具**（不传 `allowedTools` 黑名单 / 不在 canUseTool 内对 GLM 特定工具返回 deny）；工具执行失败时 SDK 自身已把 `tool_result(is_error=true)` 经 SDK 返给模型，driver 只需 `consume` 正常遍历（不拦截、不转换、不重写 is_error），让 claude 自处理（重试 / 换方法 / 告知用户）。
+4. **失败率监控（R-GLM）**：backend 落库的 AgentRunLog 已含 tool_use / tool_result；新增按 session 维度统计 tool_result(is_error=true) 占比，超阈值（默认 50%，可配 `glm_tool_failure_rate_threshold`）记结构化 warn 日志（不阻断、不自动降级、不发告警通道，仅可观察）。
+5. 仅限 interactive ClaudeSdkDriver 路径；batch（TaskRunner + adapter）零改动；不修改 protocol.ts 常量（task-03 / task-08 已定义 PERMISSION_*）；不实现前端审批 UI（task-11 / task-12）。
 
-这取代旧 task-09 的“daemon 启动时立即重 spawn/等待首事件”方案。不得保留兼容分支，也不得新增 `isResume` 后在启动阶段调用 `runLease`/`runTurn`。
+## 覆盖来源
 
-## 2. 覆盖来源与当前源码依据
-
-- Requirements：FR-08，daemon 重启时加载持久化 metadata、收敛崩溃时 currentRun，并让 session 恢复为可继续状态。
-- Decisions：D-002@v2 固定“每 turn 独立 spawn + resume”；D-003@v1 固定恢复能力属于独立持久化层。
-- Design：§5 Wave 3、§8.1 `reconnecting` 状态、§12 验收标准 7；其中“重 attach”按 D-002@v2 解释为下一 turn 新 spawn + resume，不能恢复旧进程。
-- Plan：Wave 6 task-09；依赖 task-03 的 turn runner 和 task-06 的生命周期/idle 收口。
-
-实现前必须重新用 `rg` 确认接口存在；源码变化时先修本文档，不按旧行号编造调用：
-
-| 依据 | 当前事实 | 本任务用法 |
+| 来源 | 要求 / 决策 | 本任务落实 |
 |---|---|---|
-| `tasks/task-03.md` | `SessionStore` 仅保存元数据；`startTurn` 派生 `resumeSessionId`；`TaskRunner.runTurn` 每 turn 新 spawn | 恢复只重建 store；下一 inject 原样复用 `startTurn` |
-| `tasks/task-06.md` | store 有 `lastActiveAt` 与 idle end；`end` 是本地唯一删除入口 | persist 覆盖 create/turn/end/idle 变更，不复制 idle 收口 |
-| `sillyhub-daemon/src/config.ts` | `DEFAULT_CONFIG_DIR = ~/.sillyhub/daemon` | sessions 文件放同一目录 |
-| `sillyhub-daemon/src/task-runner.ts` | 真实执行入口为 `runLease(ctx)`；task-03 将新增 `runTurn(ctx)`；现有 cancel 以 leaseId 追踪当前执行 | restore 禁止调用执行入口；新 turn 仍由 task-03 路径执行 |
-| `sillyhub-daemon/src/adapters/stream-json.ts` | `buildArgs({resumeSessionId})` 已生成 `--resume <id>` | 下一 inject 的 Claude 新 spawn 复用 |
-| `sillyhub-daemon/src/adapters/json-rpc.ts` | 当前首 turn 为 initialize → `thread/start` → `turn/start`；task-03 增加 `thread/resume` | 下一 inject 的 Codex 新 spawn 复用 |
-| `sillyhub-daemon/src/hub-client.ts` | `_request` 是 daemon→backend HTTP 唯一封装 | 恢复对账通过 HubClient，不散落 fetch |
-| `backend/app/modules/daemon/service.py` | service 负责 lease/run/session 状态事务 | in-flight run 失败和 session 状态切换只在 service 完成 |
+| `plan.md` task-09 / Wave 4 | depends_on=[task-08]，blocks=[]，P1；覆盖 FR-07 / FR-08b / D-007@v1 / D-008@v1 | deny 收敛 + pending 清理 + GLM 透传 + 失败率监控 |
+| `plan.md` 全局验收第 7/8 条 | canUseTool 触发→前端 allow/deny→driver 继续/中止（第 7）；GLM 工具失败错误透传 session 不崩（第 8） | deny message 经 SDK 回喂；tool_result(is_error) 透传 |
+| `requirements.md` FR-07 | canUseTool 不本地自动批准，发 permission_request → 前端 allow/deny → resolve；5min 超时 deny | deny 收敛逻辑（透传 deny.message，不二次决策） |
+| `requirements.md` FR-08b | GLM 工具失败 tool_result(is_error=true) 原样返模型，不阻断 session、不预禁工具 | driver consume 不拦截 is_error；backend 监控失败率 |
+| `decisions.md` D-007@v1 | canUseTool 回调 await 远程人审（非本地自动放行），5min 超时 deny | pending registry + 退出 reject；deny message 透传 |
+| `decisions.md` D-008@v1 | driver 不做工具预过滤；失败 tool_result 原样（is_error）经 SDK 返模型；不针对 GLM 特殊降级 | 不传 allowedTools 黑名单；consume 不拦截 is_error |
+| `design.md` §10 R-GLM | P1；D-008 错误透传；driver 不假设工具成功；监控 tool 失败率；结论对官方 Anthropic 后端需另证 | backend 失败率统计 + 结构化 warn |
+| `design.md` §7.6 turn 时序 | result 是 AgentRun 干净边界（spike D4）；interrupt result(is_error) → AgentRun=failed（spike D1） | pending 清理挂在 session 终态路径（end/interrupt/onError/result） |
+| `spike-02 §3.7` D2 + caveat | canUseTool await 任意延迟不超时；GLM Write 3 次均 permission error 非阻塞 | deny 透传 + GLM tool 失败监控验证 |
+| task-04 / task-08 接口 | `ClaudeSdkDriver.canUseTool` / `consume` / `SessionManager.{interrupt,end,fail}` / permission WS payload | 本任务消费，不重定义 |
 
-扫描模块文档仍混有旧 Python daemon 描述；冲突时以当前 TypeScript 源码、D-002@v2 和本任务硬约束为准。
-
-## 3. 涉及文件
+## 2. 修改文件
 
 | 操作 | 文件 | 责任 |
 |---|---|---|
-| 修改 | `sillyhub-daemon/src/session-store.ts` | 导出可持久化快照、恢复 metadata、在状态变更后调持久化端口；不持有进程对象 |
-| 新增 | `sillyhub-daemon/src/session-persistence.ts` | schema 校验、原子写、损坏文件隔离、串行化写入 |
-| 修改 | `sillyhub-daemon/src/daemon.ts` | 启动时 restore → backend reconcile → activate；明确禁止 restore 期间 spawn |
-| 修改 | `sillyhub-daemon/src/hub-client.ts` | 新增 daemon 身份的 session recovery 对账调用 |
-| 修改 | `backend/app/modules/daemon/schema.py` | recovery 请求/响应 DTO |
-| 修改 | `backend/app/modules/daemon/router.py` | daemon recovery 内部端点，只做鉴权与 DTO 映射 |
-| 修改 | `backend/app/modules/daemon/service.py` | 锁 session/lease/run，rotate claim token，收敛 currentRun，返回恢复上下文 |
-| 新增 | `sillyhub-daemon/tests/session-persistence.test.ts` | 文件 schema、原子写、串行写、损坏文件测试 |
-| 修改 | `sillyhub-daemon/tests/session-store.test.ts` | restore 后无 spawn、下一 turn resume 测试 |
-| 新增 | `sillyhub-daemon/tests/daemon-session-recovery.test.ts` | 启动恢复顺序和失败隔离测试 |
-| 新增/修改 | `backend/app/modules/daemon/tests/test_session_recovery.py` | 对账事务、所有权、幂等、token rotation 测试 |
+| 修改 | `sillyhub-daemon/src/interactive/claude-sdk-driver.ts` | `canUseTool` 包装器：登记 pending + 退出时 reject 全部 pending；deny message 构造；consume 不拦截 is_error |
+| 修改 | `sillyhub-daemon/src/interactive/session-manager.ts` | interrupt / end / fail / onResult 收尾时调用 driver 的 `cancelAllPending(reason)`，reject 本 session 所有 pending |
+| 修改 | `sillyhub-daemon/src/interactive/types.ts` | `PermissionRegistryHandle`（driver 内部）、`cancelPendingPermissionsResult` 类型 |
+| 新增 | `sillyhub-daemon/tests/interactive/claude-sdk-driver-permission.test.ts` | deny 收敛 + pending 清理矩阵（mock SDK canUseTool） |
+| 新增 | `sillyhub-daemon/tests/interactive/claude-sdk-driver-glm-passthrough.test.ts` | tool_result(is_error=true) 透传不拦截；不预禁工具 |
+| 新增 | `sillyhub-daemon/tests/interactive/session-manager-pending-cleanup.test.ts` | interrupt / end / onError 路径 reject 全部 pending |
+| 修改 | `backend/app/modules/agent/service.py` | `stream_session_logs` 聚合时统计 tool_result(is_error=true) 占比，超阈值记 warn |
+| 修改 | `backend/app/modules/agent/schemas.py` | session 聚合统计 DTO（tool_total / tool_failed / failure_rate） |
+| 新增 | `backend/tests/modules/agent/test_tool_failure_monitor.py` | 失败率统计 + 阈值 warn 单测 |
 
-不修改 adapter 的 resume 算法、不新增启动期握手、不修改 session SSE/UI/permission；这些分别属于 task-03、task-05/11、task-07/08。
+不得修改：`task-runner.ts`、`adapters/*.ts`（batch adapter 零改动）、`protocol.ts`（task-03 已定 PERMISSION_*）、frontend（task-11/12）、`agent_sessions` / `agent_runs` model（task-02 已定）、WS permission 通道与 5min 超时 deny 的真正实现（task-08 负责，本任务只消费其 `resolvePermission` 结果并做收敛/清理）。
 
-## 4. 持久化数据与接口
+## 3. 前置依赖
 
-### 4.1 磁盘 schema
+| 依赖 | 本任务消费的稳定接口 | 未满足时处理 |
+|---|---|---|
+| task-08 | `ClaudeSdkDriver` 已能注入 `canUseTool`；`SessionManager.respondPermission` / WS PERMISSION_RESPONSE 路由已通；5min 超时 deny 已实现 | 阻塞，不在本任务重复实现 permission 通道 |
+| task-04 | `ClaudeSdkDriver.{start,consume,interrupt}` / `SessionManager.{interrupt,end,fail,onResult}` / `SessionState` | 阻塞，driver/sessionManager 不存在则无从收敛 |
+| task-03 | `PERMISSION_REQUEST` / `PERMISSION_RESPONSE` 常量 + payload 类型 | 只 import，不重定义 |
+| task-02 / task-05 | `agent_sessions` / `agent_runs` / AgentRunLog 落库；`stream_session_logs` 入口 | 失败率监控挂在 SSE 聚合路径，无落库则无监控输入 |
 
-```typescript
-export const SESSION_FILE_VERSION = 1 as const;
-export const DEFAULT_SESSION_FILE = join(DEFAULT_CONFIG_DIR, 'sessions.json');
+实现前用 `rg` 确认 task-08 的 `resolvePermission` / `canUseTool` 包装器真实签名，再按已落地签名接入；禁止同时保留两套 permission 路径。
 
-export interface PersistedSessionRecord {
-  sessionId: string;          // AgentSession.id
-  leaseId: string;            // interactive lease.id
-  runtimeId: string;          // backend 分配的 provider runtime id
-  provider: 'claude' | 'codex';
-  agentSessionId: string;     // Claude session_id / Codex thread_id
-  currentRunId?: string;      // 崩溃时可能仍在执行的 AgentRun.id
-  turnCount: number;
-  lastActiveAt: number;       // epoch milliseconds
-  config: Record<string, unknown>;
-}
+## 4. 实现要求（精确）
 
-export interface PersistedSessionFile {
-  version: typeof SESSION_FILE_VERSION;
-  savedAt: string;
-  sessions: PersistedSessionRecord[];
-}
-```
+### 4.1 deny 收敛（FR-07 / D-007@v1）
 
-持久化规则：
-
-- 仅写可继续的 `active|running|interrupting` session；序列化时统一记录为 metadata，不把运行态对象写入 JSON。
-- `agentSessionId` 必须存在才可作为可恢复记录；首 turn 尚未取得内部 id 时崩溃，不能伪造 resume，backend 收敛为 failed，文件记录移除。
-- `currentRunId` 仅用于重启对账；恢复成功后必须清空并再次持久化。
-- 禁止写 `claimToken`、API key、credential、prompt、输出、child/stdin/adapter/AbortController。
-- 不按任意 24h TTL 自行删除 active session；有效性由 backend session/lease 真相和 task-06 idle 规则决定。
-- config 只允许 task-03 明确的非敏感白名单（`model`、`manual_approval` 等）；未知或敏感 key 在序列化前过滤。
-
-### 4.2 持久化端口
+`canUseTool` 回调返回值经 SDK 直接回喂 claude（spike D2 已证），driver 不二次决策：
 
 ```typescript
-export interface SessionSnapshotSource {
-  snapshotPersistable(): PersistedSessionRecord[];
-}
+// claude-sdk-driver.ts 内 canUseTool 包装（task-08 注入；本任务补 deny 收敛语义）
+type CanUseToolDecision =
+  | { behavior: 'allow' }
+  | { behavior: 'deny'; message?: string };
 
-export interface SessionPersistence {
-  load(): Promise<PersistedSessionRecord[]>;
-  save(records: readonly PersistedSessionRecord[]): Promise<void>;
-  quarantine(reason: string): Promise<void>;
-}
-
-export class JsonSessionPersistence implements SessionPersistence {
-  constructor(filePath: string = DEFAULT_SESSION_FILE);
-  load(): Promise<PersistedSessionRecord[]>;
-  save(records: readonly PersistedSessionRecord[]): Promise<void>;
-  quarantine(reason: string): Promise<void>;
+async function wrapCanUseTool(
+  toolName: string,
+  input: Record<string, unknown>,
+  ctx: {
+    sessionId: string;
+    runId: string;
+    requestId: string;
+    registry: PermissionRegistryHandle;
+    resolve: (decision: CanUseToolDecision) => void;
+  },
+  signal: AbortSignal,
+): Promise<CanUseToolDecision> {
+  // 1. 登记 pending（requestId 由 task-08 已生成）
+  ctx.registry.addPending(ctx.requestId, { resolve, reject: () => {} });
+  // 2. await 远程人审（task-08 经 WS permission_response / 5min 超时）
+  const decision = await waitForRemoteDecision(ctx.requestId, signal);
+  // 3. deny 时构造 message（若远程未给则默认），SDK 回喂 claude
+  if (decision.behavior === 'deny') {
+    return {
+      behavior: 'deny',
+      message: decision.message
+        ?? `Tool "${toolName}" denied by reviewer (session=${ctx.sessionId}, run=${ctx.runId})`,
+    };
+  }
+  return decision; // allow 原样返回，不篡改 updatedInput
 }
 ```
 
-`save` 必须使用同目录临时文件、`writeFile`、`rename` 的原子替换，并通过单一 promise queue 串行写；不能用 debounce 丢失最后一次状态变化。写入权限在支持的平台设为 `0o600`。`load` 必须做 version、UUID/字符串、provider、有限数字和 config 形状校验；整文件无法解析时将其重命名为 `sessions.json.corrupt-<timestamp>` 后返回空集合。
+收敛规则（硬约束）：
 
-### 4.3 SessionStore 恢复接口
+1. **deny.message 必须存在且非空字符串**：远程 deny 未带 message 时用默认模板（含 toolName / sessionId / runId），让 claude 拿到可读原因决定下一步；禁止返回空 message 或 `{behavior:'deny'}` 无 message（claude 在无 message 时行为不可控）。
+2. **driver 不强制结束 turn / 不调 q.interrupt**：deny 后是否停止本轮由 claude 自决定（可能换方法重试 / 告知用户 / 结束）；driver 只在 SDK 自然产 `result` 时才收尾 AgentRun。
+3. **allow 不篡改 input**：返回 `{behavior:'allow'}` 时**不**附加 `updatedInput`（task-04 蓝图已约束）；input 原样经 SDK 传给工具。
+4. **5min 超时 deny 已由 task-08 实现**：本任务不重复超时计时器；超时返回的 deny 走同一收敛路径（默认 message 标注 `timeout`）。
 
-task-03 的 `SessionState` 保持不含进程对象，并增加/实现：
+### 4.2 pending 审批退出清理（FR-07 收敛 / D-007@v1）
+
+pending canUseTool Promise 的生命周期严格 ≤ 当前 session 活跃期；任何 session 终态路径都必须 reject 本 session 全部 pending，让 SDK 退出 await 收到 deny 后正常结束 query。
 
 ```typescript
-export interface RestoredSessionInput {
-  record: PersistedSessionRecord;
-  baseCtx: LeaseCtx;           // backend recovery 返回的新 claimToken/执行上下文
-}
-
-export class SessionStore {
-  restoreMetadata(input: RestoredSessionInput): SessionState;
-  markRecovered(sessionId: string): SessionState;
-  snapshotPersistable(): PersistedSessionRecord[];
-  flush(): Promise<void>;
+// claude-sdk-driver.ts
+export interface PermissionRegistryHandle {
+  /** 登记当前 session 一个 pending canUseTool。 */
+  addPending(requestId: string, p: { resolve: (d: CanUseToolDecision) => void; reject: (e: unknown) => void }): void;
+  /** session 终态时调用：reject 全部 pending，返回被取消的 requestId 列表。 */
+  cancelAllPending(reason: 'interrupted' | 'ended' | 'failed' | 'query_exited'): string[];
+  /** 测试观察用（不暴露生产可变 Map）。 */
+  pendingCount(): number;
 }
 ```
 
-语义：
+SessionManager 在以下路径调用 `driver.cancelAllPending`（driver 内部按 session 隔离 registry）：
 
-1. `restoreMetadata` 新建 `status='reconnecting'` 的内存项，保留 `agentSessionId/turnCount/lastActiveAt`，但 `currentRunId` 清空；它不得调用 runner。
-2. `markRecovered` 只允许 `reconnecting → active`，随后 `flush()`。
-3. `startTurn` 在 reconnecting 时必须拒绝；恢复为 active 后，下一 inject 使用既有 `agentSessionId` 派生 `resumeSessionId`。
-4. create、接受 startTurn、turn 收敛、interrupt 收敛、end/fail/idle end 后都必须排队保存；`end/fail` 要把记录从文件移除。
-5. daemon `stop()` 在取消当前任务后 `await sessionStore.flush()`，但 SIGKILL 仍由上一次原子快照兜底。
+| 路径 | reason | 后续 |
+|---|---|---|
+| `interrupt(sessionId)` | `'interrupted'` | SDK 收到 deny → 当前 turn 产 result subtype=error_during_execution（spike D1）→ onResult 收尾 run=failed(interrupted)，session 回 active |
+| `end(sessionId)` | `'ended'` | InputQueue.close + status=ended；SDK 退出 await 后 query 自然结束 |
+| `fail(sessionId)` / driver onError | `'failed'` | status=failed；onSessionEnd(failed) |
+| `consume` for-await 正常结束 / query 异常退出 | `'query_exited'` | 兜底，registry 应已空（防御性 cancel） |
 
-## 5. backend 对账接口
+约束：
 
-### 5.1 HTTP 契约
+1. **cancel 幂等**：同一 requestId 被 reject 两次不抛；cancelAllPending 后 `pendingCount()===0`。
+2. **reject 必须让 SDK 退出 await**：reject 的值由 canUseTool 包装器 catch 后转 `{behavior:'deny', message:'<reason>: session ...'}` 返回（不向上抛，避免 SDK 把异常当 query 失败），SDK 收到 deny 后正常产 result。
+3. **registry 按 session 隔离**：不同 session 并发（task-04 spike H2）互不干扰；cancelAllPending 只清本 session 的 pending。
+4. **不在 SessionState 持久化 pending**：registry 是 driver 内部内存态，daemon 重启即丢（D-003 Wave1/2 不恢复）；SessionState 不新增 pendingPermissions 字段（避免跨 turn 残留，对齐 task-08 §5.5 约束）。
 
-新增 daemon 内部端点，不复用用户 session REST：
+### 4.3 GLM 错误透传不阻断（D-008 / FR-08b）
 
-```text
-POST /api/daemon/sessions/{session_id}/recover
-Authorization: daemon 现有认证
+ClaudeSdkDriver `consume` 不拦截 `tool_result(is_error=true)`：
+
+```typescript
+// claude-sdk-driver.ts consume（task-04 已实现骨架；本任务明确 is_error 透传约束）
+async consume(q: Query, cb: ConsumeCallbacks): Promise<void> {
+  for await (const msg of q) {
+    // 不对 msg 做 is_error 转换 / 重写 / 拦截
+    // tool_result(is_error=true) 由 SDK 内部回喂模型，driver 只做回调转发
+    if (isResultMessage(msg)) {
+      await cb.onResult(msg);   // backend 据 is_error / subtype 标 completed/failed
+    } else if (cb.onMessage) {
+      await cb.onMessage(msg);  // 中间消息 → AgentRunLog
+    }
+  }
+}
 ```
+
+透传规则（硬约束，对齐 D-008 normalized_requirement）：
+
+1. **不传 allowedTools 黑名单**：`ClaudeSdkDriverOptions.allowedTools` 在 GLM 路径下缺省（不传），让 SDK 走全工具集；**禁止**为 GLM 预禁 Write/Edit/Bash 等特定工具。
+2. **canUseTool 不针对 GLM 工具 deny**：canUseTool 只按远程人审决定（allow/deny），不因 `provider===glm` 或 `toolName==='Write'` 自动 deny；spike D2 caveat 的 GLM Write permission error 是工具执行层失败（在 tool_result 阶段，非 canUseTool 阶段），不进人审逻辑。
+3. **不重写 is_error**：consume 收到的 `tool_result` 内容（含 `is_error` / `content`）原样经 `onMessage` 转 AgentRunLog，backend 落库后供失败率统计；driver 不把 is_error=true 转成 is_error=false、不裁剪 content、不补伪造的成功 result。
+4. **不阻断 session**：工具失败后 claude 收到 is_error，由模型自决定下一步（重试 / 换方法 / 告知用户 / 结束 turn）；session 状态不因工具失败而自动 failed（只有 SDK query 抛错 / spawn 失败才 fail session）。
+5. **result.is_error 与 AgentRun 终态**：turn 结束的 `result` 若 `is_error=true` 或 `subtype` 属 error_*，按 task-04 §4.3 `_onResult` 标 AgentRun=failed；但**这不代表工具失败**（工具失败的 tool_result 在 turn 中间，不是 turn result），driver 按 result 自身字段判断 turn 终态，不混淆工具失败与 turn 失败。
+
+### 4.4 失败率监控（R-GLM / backend）
+
+backend 在 `stream_session_logs` 聚合路径（task-06）补统计：
 
 ```python
-class SessionRecoveryRequest(BaseModel):
-    lease_id: uuid.UUID
-    runtime_id: uuid.UUID
-    interrupted_run_id: uuid.UUID | None = None
-    provider: Literal["claude", "codex"]
-    agent_session_id: str = Field(min_length=1, max_length=255)
+# backend/app/modules/agent/service.py（task-06 stream_session_logs 内）
+from dataclasses import dataclass
 
-class SessionRecoveryResponse(BaseModel):
-    session_id: uuid.UUID
-    lease_id: uuid.UUID
-    runtime_id: uuid.UUID
-    status: Literal["active", "ended", "failed", "rejected"]
-    claim_token: str | None = None
-    execution_context: dict[str, Any] | None = None
-    interrupted_run_status: Literal["failed"] | None = None
+@dataclass
+class ToolFailureStats:
+    tool_total: int
+    tool_failed: int
+    failure_rate: float  # tool_failed / tool_total（tool_total=0 时为 0.0）
+
+def _aggregate_tool_failure(logs: list[AgentRunLog]) -> ToolFailureStats:
+    tool_results = [l for l in logs if l.entry_type == 'tool_result']
+    failed = sum(1 for l in tool_results if getattr(l.payload, 'is_error', False))
+    total = len(tool_results)
+    return ToolFailureStats(
+        tool_total=total,
+        tool_failed=failed,
+        failure_rate=(failed / total) if total else 0.0,
+    )
+
+# 在 stream_session_logs 消费日志时调用；超阈值记 warn
+threshold = float(os.getenv('GLM_TOOL_FAILURE_RATE_THRESHOLD', '0.5'))
+stats = _aggregate_tool_failure(session_logs)
+if stats.tool_total >= 4 and stats.failure_rate >= threshold:  # 样本≥4 避免小样本抖动
+    logger.warning(
+        'glm_tool_failure_rate_exceeded',
+        extra={'session_id': session_id, 'tool_total': stats.tool_total,
+               'tool_failed': stats.tool_failed, 'failure_rate': stats.failure_rate,
+               'threshold': threshold},
+    )
 ```
 
-HubClient：
+监控约束：
 
-```typescript
-export interface SessionRecoveryRequest {
-  lease_id: string;
-  runtime_id: string;
-  interrupted_run_id?: string;
-  provider: 'claude' | 'codex';
-  agent_session_id: string;
-}
+1. **不阻断 / 不告警通道**：只 `logger.warning` 结构化日志（便于后续接告警系统），不发 WS / 不改 session status / 不自动切换 provider。
+2. **不针对 GLM 特殊降级**：统计对所有 provider 生效（glm / 官方 anthropic），阈值可配；不为 GLM 写独立分支（D-008 normalized_requirement）。
+3. **样本下限**：tool_total < 4 不告警（小样本失真）；阈值默认 0.5（spike D2 实测 GLM Write 3/3 失败，>50% 是合理告警线）。
+4. **可观察性**：DTO `ToolFailureStats` 可经 session 详情 API 暴露（task-11/12 前端消费），本任务只落库 + warn。
 
-export interface SessionRecoveryResponse {
-  session_id: string;
-  lease_id: string;
-  runtime_id: string;
-  status: 'active' | 'ended' | 'failed' | 'rejected';
-  claim_token?: string;
-  execution_context?: Record<string, unknown>;
-  interrupted_run_status?: 'failed';
-}
-
-class HubClient {
-  recoverSession(
-    sessionId: string,
-    body: SessionRecoveryRequest,
-  ): Promise<SessionRecoveryResponse>;
-}
-```
-
-### 5.2 service 事务
-
-```python
-async def recover_session_after_daemon_restart(
-    self,
-    session_id: uuid.UUID,
-    *,
-    runtime_id: uuid.UUID,
-    lease_id: uuid.UUID,
-    interrupted_run_id: uuid.UUID | None,
-    provider: str,
-    agent_session_id: str,
-) -> SessionRecoveryResult: ...
-```
-
-单个数据库事务内必须：
-
-1. `SELECT AgentSession ... FOR UPDATE`，校验 session.runtime_id、lease_id、provider 和 `kind='interactive'` lease 归属。
-2. session 已 ended/failed 时返回对应终态；不复活、不旋转 token，daemon 删除本地记录。
-3. session 可恢复时先置 `reconnecting`。
-4. 若 `interrupted_run_id` 非空，只允许收敛同 session 且处于 `pending|running|pending_approval` 的该 run：写 `status='failed'`、`finished_at=now`、稳定错误码 `daemon_restarted`；已终态则幂等，不修改完成结果。
-5. 若同 session 还存在另一个非终态 run，报 invariant violation，禁止猜测或批量失败。
-6. 为原 interactive lease 旋转 claim token，并返回新的明文 token；数据库仅保存 hash，旧 token 立即失效。不得把 token写磁盘。
-7. 生成 task-03 `baseCtx` 所需的 execution context；成功后将 session 置回 `active` 并 commit。
-8. 返回 active 后 daemon 才 `restoreMetadata`/`markRecovered`；任何校验失败都不建立本地 session。
-
-`reconnecting → active` 可以在同一 service 调用中完成；测试必须在 service 状态写入/事件发布边界证明顺序。若 task-05 已提供 session 状态事件，则依次 publish reconnecting、active；不得新增同义 WS 状态协议。
-
-## 6. daemon 启动顺序
-
-```text
-load config / construct client
-  → sessionPersistence.load()
-  → register runtimes（获得当前 backend runtime ids）
-  → 对每条记录串行或限流 recoverSession()
-      → backend 收敛旧 currentRun + rotate claim token
-      → SessionStore.restoreMetadata(recovery context)
-      → SessionStore.markRecovered()
-  → flush（清除 currentRunId/无效记录）
-  → 启动 WS/poll/heartbeat/idle loops
-```
-
-恢复循环规则：
-
-- 默认限流 4 个 session；单条失败记录结构化 warning 后继续其它记录。
-- 恢复期间不接受该 session 的 inject；backend status 为 reconnecting，REST 应返回明确 409/稍后重试。
-- 记录对应 provider runtime 未注册时不恢复为 active；backend 收敛旧 run 后将 session 置 failed，daemon 删除记录。
-- `recoverSession` 成功只表示元数据可继续，不代表 agent 可 resume。真正的 Claude/Codex resume 成功与否由下一次 inject 的 `runTurn` 结果决定。
-- 下一 inject 失败时沿 task-03/task-06 规则处理，不在 recovery 中回退为首 turn 或自动创建新内部会话。
-
-## 7. 边界条件
+## 5. 边界处理（≥5，全部上单测）
 
 | # | 场景 | 必须行为 |
 |---|---|---|
-| 1 | daemon 崩溃时存在 running currentRun | backend 仅把记录中的同 session run 标 failed/`daemon_restarted`；session 回 active；启动期 spawn 次数为 0 |
-| 2 | 崩溃时 session 空闲、无 currentRun | 不创建虚假 run；校验并旋转 token后恢复 active；下一 inject 才 spawn |
-| 3 | 下一 inject（Claude） | 新 child args 含持久化 session id 的 `--resume`；不能无 resume 降级 |
-| 4 | 下一 inject（Codex） | 新 app-server 依次 initialize、`thread/resume {threadId}`、`turn/start`；不能启动期预热进程 |
-| 5 | sessions.json 不存在 | 空恢复正常启动，不 warn、不创建 session |
-| 6 | JSON 损坏或 version 不支持 | 隔离损坏文件并空恢复；daemon 不崩溃；不尝试猜测字段 |
-| 7 | session 已 ended/failed | backend 返回终态；daemon 删除记录，不复活 session/lease |
-| 8 | runtime/lease/provider/session 任一不匹配 | recovery rejected；不改其它 run、不旋转 token、不建立本地 session |
-| 9 | interrupted_run_id 指向别的 session | invariant/rejected；绝不按 UUID 直接更新跨 session run |
-| 10 | interrupted run 已 completed/failed | 对账幂等，保留原终态/结果；session 可继续恢复 |
-| 11 | 首 turn 未取得 agentSessionId 就崩溃 | 不可恢复上下文；backend 收敛 currentRun/session 为 failed，记录移除 |
-| 12 | 多个 session 同时恢复，其中一个 HTTP 失败 | 失败隔离；其它 session 继续；失败项不进入 active store |
-| 13 | save 并发与进程退出 | promise queue 保证顺序；stop await 最后一写；文件始终是完整 JSON |
-| 14 | end/idle 与 persist 竞态 | 终态删除写必须排在旧 active 快照后，重启不得复活已结束 session |
-| 15 | 旧 claim token 泄露/重放 | token 不落盘；recovery 旋转后旧 token验证失败，新 token只保存在内存 baseCtx |
-| 16 | batch lease | 不写 sessions.json、不进 recovery endpoint，现有 claim/heartbeat/complete/expiry 行为零变化 |
+| 1 | **deny 后 claude 继续 turn**（换方法重试 / 告知用户） | driver 不调 q.interrupt、不强制结束 turn；deny.message 经 SDK 回喂；turn 继续，后续 tool_use / tool_result 正常经 onMessage 转发；最终 result 由 claude 决定 success/failed |
+| 2 | **deny 后 claude 主动结束 turn** | SDK 自然产 result（subtype 由 claude 决定）；onResult 收尾 AgentRun（按 result 字段标 completed/failed）；session 回 active；driver 无特殊处理（与正常 result 路径一致） |
+| 3 | **pending 审批时 session interrupted** | `interrupt(sessionId)` → `driver.cancelAllPending('interrupted')` → reject 本 session 全部 pending → canUseTool 包装器 catch 后返回 deny → 当前 turn 产 result subtype=error_during_execution（spike D1）→ onResult 标 run=failed(interrupted)，session 回 active；pendingCount 归零 |
+| 4 | **pending 审批时 session ended** | `end(sessionId)` → cancelAllPending('ended') → reject 全部 → deny 返回 → InputQueue.close → query 自然结束 → status=ended；迟到的 permission_response 返回 `session_not_active`（task-08 已校验），不二次 resolve |
+| 5 | **pending 审批时 driver onError / query 异常退出** | SessionManager.fail / consume catch → cancelAllPending('failed') → reject 全部；query 已异常退出时 reject 可能已无 consumer（防御性 cancel，幂等）；status=failed，onSessionEnd(failed) |
+| 6 | **连续工具失败（GLM Write 3 次均 permission error）** | 每次失败的 tool_result(is_error=true) 经 onMessage 落 AgentRunLog；driver 不拦截、不重试、不预禁 Write；claude 收到 3 次 is_error 后自决定（spike D2 实测 result=success，claude 放弃后正常结束 turn）；session 不崩；backend 失败率统计 tool_total=3 failed=3 rate=1.0（< 阈值样本下限 4 不告警，但 DTO 暴露数据） |
+| 7 | **GLM 后端 vs 官方 Anthropic 后端差异** | driver 对两类后端行为一致（不 provider 分支）；失败率统计对所有 provider 生效；spike D2 caveat 明确"结论对官方 Anthropic 后端需另证"——本任务不假设官方后端无失败，监控对两类后端均生效 |
+| 8 | **pending + allow/deny 乱序到达** | 同 turn 多个 pending canUseTool（多个工具并发请求审批）各自独立 resolve；permission_response 按 requestId 匹配，乱序到达各自正确 resolve；cancelAllPending 一次性 reject 全部 |
+| 9 | **deny.message 含特殊字符 / 超长** | message 原样经 SDK 回喂（SDK 负责 message 协议编码）；driver 不转义 / 不截断；超长 message（>4KB）原样透传，claude 行为由 SDK 保证（非 driver 责任） |
+| 10 | **失败率监控阈值边界** | tool_total=4 rate=0.5（=阈值）告警；tool_total=3 rate=1.0（<样本下限）不告警；tool_total=0 rate=0.0 不告警；provider=glm / anthropic 均统计 |
+| 11 | **result.is_error=true（turn 级失败，非工具失败）** | onResult 按 result 字段标 AgentRun=failed；不与 tool_result(is_error) 混淆；失败率统计只计 tool_result，不计 result.is_error |
+| 12 | **canUseTool 包装器自身异常**（registry.addPending 抛 / waitForRemoteDecision 抛） | catch 后返回 deny（带原因 message），不让 SDK 把包装器异常当 query 失败；registry 清理对应 requestId |
+
+## 6. 非目标（本任务不做的事）
+
+- **不实现 canUseTool 远程人审通道 / WS permission_request-response / 5min 超时 deny**：这些属 task-08；本任务只消费 `resolvePermission` 结果做 deny 收敛 + pending 清理。
+- **不预禁工具 / 不做 per-provider 工具黑白名单**：D-008 normalized_requirement 明令；allowedTools 在 GLM 路径缺省；不为 GLM 预禁 Write/Edit/Bash。
+- **不针对 GLM 特殊降级**（自动重试 / 自动换工具 / 自动告知用户）：D-008 normalized_requirement；工具失败由 claude 自处理。
+- **不实现崩溃恢复 / pending 持久化**：D-003 Wave1/2 不恢复；registry 内存态；daemon 重启即清。
+- **不修改 adapter / task-runner.ts**：batch 路径零改动（D-002@v3）；adapter 层审批收敛属 v2 旧蓝图，v3 已转移至 SDK canUseTool。
+- **不实现前端审批 UI / 会话面板**：task-11 / task-12。
+- **不实现告警通道 / 自动 provider 切换**：失败率监控只 logger.warning 结构化日志，可观察但不阻断；接告警系统 / 自动降级属后续运维任务。
+- **不重写 tool_result content / is_error**：driver 只转发，不转换。
+
+## 7. 参考
+
+- `design.md` §5（Wave2/§7.6 turn 时序）、§7.1 ClaudeSdkDriver canUseTool、§9 D-008 兼容策略、§10 R-GLM（P1，监控 tool 失败率）。
+- `requirements.md` FR-07（canUseTool 远程人审，5min 超时 deny）、FR-08b（GLM 工具失败错误透传，不阻断不预禁）。
+- `decisions.md` D-007@v1（canUseTool await 远程人审）、D-008@v1（错误透传，不预禁工具，不针对 GLM 特殊降级）。
+- `spike-02-architecture-validation.md` §3.7 D2（canUseTool await 任意延迟不超时）+ D2 caveat（GLM Write 3 次均 permission error，非 SDK 路线阻塞）+ D1（interrupt turn 级，result subtype=error_during_execution 可续轮）+ D4（result 干净边界）。
+- `plan.md` task-09 / Wave 4（depends_on=[task-08]）+ 全局验收第 7/8 条 + 覆盖矩阵（D-007 / D-008）。
+- task-04 蓝图 §4.2 ClaudeSdkDriver（canUseTool / consume 骨架）、§4.3 SessionManager（interrupt / end / fail / _onResult）。
+- task-08 蓝图 §5.2 deny 构造（behavior:'deny'，不携带伪造 updatedInput）、§5.5 SessionStore.respondPermission 路由。
+- sandbox 脚本（仓库外）`%TEMP%\claude-sdk-spike\d2.mjs`（canUseTool await 6s×3，GLM Write 失败实测）。
 
 ## 8. TDD 实施顺序
 
-严格执行“测试先红 → 最小实现 → 重构 → 回归”，每一步保留失败与通过证据。
+严格"红测试 → 最小实现 → 重构 → 全量回归"。SDK 调用一律 mock（不连真实 bigmodel，避免 CI 依赖网络/鉴权）。
 
-### Step 1：文件 schema 与原子写（Red）
+### Step 1：deny 收敛单测（红）
 
-- 写 `session-persistence.test.ts`：不存在文件、合法 v1、非法 version/字段、损坏 JSON 隔离、临时文件 rename、`0o600`、并发 save 顺序。
-- 最小实现 `JsonSessionPersistence`；不得先接 daemon 生命周期。
+mock SDK canUseTool + permission resolve：
 
-### Step 2：SessionStore 快照/恢复（Red）
+- 远程返回 allow：driver 返回 `{behavior:'allow'}`，不附加 updatedInput；turn 继续。
+- 远程返回 deny（带 message）：driver 返回原 message；claude（mock）继续 turn，后续 tool_use/tool_result 正常转发。
+- 远程返回 deny（无 message）：driver 返回默认 message（含 toolName/sessionId/runId）。
+- 5min 超时 deny（task-08 mock 触发）：默认 message 含 `timeout`，走同一收敛路径。
+- 红后实现 `wrapCanUseTool` deny message 构造。
 
-- 覆盖 active/running/interrupting 快照、ended/failed 删除、敏感字段过滤、`restoreMetadata` 状态门、`markRecovered`。
-- 注入 spy `TurnRunner`，断言 load/restore/markRecovered 全过程 `runTurn` 调用 0 次。
-- 恢复 active 后调用一次 `startTurn`，断言 ctx.resumeSessionId 等于持久化 agentSessionId，才允许 runner 调用 1 次。
+### Step 2：pending 清理矩阵（红）
 
-### Step 3：backend 对账事务（Red）
+注入 mock ClaudeSdkDriver + mock registry：
 
-- 测试 session/lease/runtime/provider 所有权、currentRun 精确收敛、已终态幂等、多个 active run invariant、token rotation、ended/failed 不复活。
-- 实现 schema/router/service；router 不写 ORM，不捕获后伪造成功。
+- pending 时 `interrupt`：cancelAllPending('interrupted') 调用一次，reject 全部 pending；pendingCount 归零；mock SDK 产 result subtype=error_during_execution；onResult 标 run=failed(interrupted)，session 回 active。
+- pending 时 `end`：cancelAllPending('ended')；status=ended；InputQueue.close；query 自然结束。
+- pending 时 `fail`/onError：cancelAllPending('failed')；status=failed；onSessionEnd(failed)。
+- pending 时 consume for-await 自然结束：cancelAllPending('query_exited') 兜底（registry 应已空，幂等）。
+- cancel 幂等：同一 requestId reject 两次不抛；cancelAllPending 后 pendingCount=0。
+- 多 pending（同 turn 多工具并发审批）：cancelAllPending 一次性 reject 全部，乱序到达各自正确。
+- 红后实现 `PermissionRegistryHandle` + SessionManager 各路径调用。
 
-### Step 4：daemon 启动编排（Red）
+### Step 3：GLM 错误透传单测（红）
 
-- fake persistence + fake HubClient + fake SessionStore，验证 register 后 recover、loops 前完成、单项失败隔离、无 spawn。
-- 覆盖恢复成功 flush 清 currentRun、rejected 删除记录、stop await flush。
+mock SDK consume 产 tool_result(is_error=true) × N + result：
 
-### Step 5：下一 turn resume 集成（Red）
+- 工具失败 tool_result 经 onMessage 原样转发（payload.is_error 不被改写、content 不裁剪）。
+- driver 不调 q.interrupt / 不强制结束 turn；后续 tool_use / assistant text 正常转发。
+- Claude（mock）连续收到 3 次 is_error 后产 result（success）；onResult 按 result 字段标 completed（不因工具失败自动 failed）。
+- options.allowedTools 缺省（不传黑名单）；canUseTool 不因 provider=glm / toolName=Write 自动 deny。
+- 红后确认 consume 无 is_error 拦截分支（删除任何 v2 遗留的预禁逻辑）。
 
-- Claude：恢复期间 spawn=0；模拟 SESSION_INJECT 后 spawn=1 且 args 含 `--resume old-session-id`。
-- Codex：恢复期间 spawn=0；inject 后新进程发 initialize → thread/resume → turn/start。
-- 两者均断言新 run_id 与崩溃 run_id 不同，旧 child 不存在且未 attach。
+### Step 4：backend 失败率监控单测（红）
 
-### Step 6：回归
+mock AgentRunLog 列表：
 
-```powershell
-Set-Location sillyhub-daemon
-pnpm test -- session-persistence session-store daemon-session-recovery
-pnpm test -- task-runner-turn json-rpc stream-json
+- tool_total=4 failed=2 rate=0.5（=阈值）→ logger.warning 调用一次，extra 含 session_id / stats / threshold。
+- tool_total=3 failed=3 rate=1.0（<样本下限 4）→ 不告警。
+- tool_total=0 rate=0.0 → 不告警。
+- tool_result 含 is_error=true 计入 failed；is_error=false / 缺失计入 total 不计 failed。
+- 阈值可配（env `GLM_TOOL_FAILURE_RATE_THRESHOLD`）。
+- provider=anthropic 同样统计（不 provider 分支）。
+- 红后实现 `_aggregate_tool_failure` + 阈值判断。
+
+### Step 5：回归
+
+```bash
+cd sillyhub-daemon
+pnpm test -- claude-sdk-driver-permission claude-sdk-driver-glm-passthrough session-manager-pending-cleanup
 pnpm typecheck
-pnpm test
+pnpm test        # 全量回归，batch / task-04~08 测试零失败
 
-Set-Location ..
-uv run pytest backend/app/modules/daemon/tests/test_session_recovery.py backend/app/modules/daemon/tests/test_session_service.py
-uv run ruff check backend/app/modules/daemon
+cd ../backend
+uv run pytest tests/modules/agent/test_tool_failure_monitor.py
+uv run pytest    # 全量回归
 ```
 
-若 `.sillyspec/local.yaml` 定义了替代命令，以该文件为准。PostgreSQL 才能证明 `FOR UPDATE` 并发语义；SQLite 只用于分支单测。
+## 9. 验收表
 
-## 9. 验收标准
-
-| ID | 验证步骤 | 通过标准 |
+| AC | 验收条件 | 证据 |
 |---|---|---|
-| AC-09-01 | active session 完成一轮后检查 sessions.json | v1 JSON 只含白名单元数据；有 agentSessionId；无 token/prompt/child/stdin |
-| AC-09-02 | running turn 中 kill daemon，再启动 | 旧 run=failed 且 error=`daemon_restarted`；session 出现 reconnecting→active；旧 lease 保持 interactive |
-| AC-09-03 | 统计 daemon 启动恢复期间 spawn/runTurn | 两者均为 0；没有 `--resume`、thread/resume、空 prompt 或预热子进程 |
-| AC-09-04 | 恢复后对 Claude 发下一次 inject | 新 AgentRun、新 child；使用旧 agentSessionId 的 `--resume`；历史上下文可引用 |
-| AC-09-05 | 恢复后对 Codex 发下一次 inject | 新 AgentRun、新 app-server；initialize→thread/resume→turn/start；thread id 不变 |
-| AC-09-06 | 对账检查 currentRun | 只收敛持久化 currentRunId；已终态不覆盖；跨 session id 被拒绝 |
-| AC-09-07 | 检查 claim token | 文件无 token；recovery 返回新 token；旧 token失效；新 token支持下一 turn 上报 |
-| AC-09-08 | 损坏/未知版本 sessions.json 启动 | 文件被隔离，daemon 正常启动；不恢复半条记录、不 spawn |
-| AC-09-09 | ended/failed/idle-ended session 残留记录 | backend 拒绝复活，daemon 清记录，session/lease 终态不变 |
-| AC-09-10 | 多 session 恢复且一条失败 | 其它记录正常 active；失败项不进入 store；日志不含 token/prompt |
-| AC-09-11 | 运行 batch 回归 | batch lease 不落盘、不调用 recovery endpoint，原 runLease/claim/complete/expiry 全绿 |
-| AC-09-12 | 运行定向与全量测试 | daemon typecheck/test、backend pytest/ruff 全部通过 |
+| AC-09.1 | deny.message 经 SDK 回喂 claude；driver 不二次决策、不强制结束 turn；allow 不篡改 input | `claude-sdk-driver-permission.test.ts`（allow/deny/带 message/无 message/超时） |
+| AC-09.2 | deny 后 claude 继续 turn 与主动结束 turn 两路径 driver 行为正确（不干预 + 正常 result 收尾） | permission 单测 + consume 集成断言 |
+| AC-09.3 | pending 审批时 interrupt → cancelAllPending('interrupted')，reject 全部，pendingCount=0，run=failed(interrupted)，session 回 active | `session-manager-pending-cleanup.test.ts` |
+| AC-09.4 | pending 时 end → cancelAllPending('ended')，status=ended，query 自然结束，迟到 response 不二次 resolve | 同上 |
+| AC-09.5 | pending 时 fail/onError/query 退出 → cancelAllPending，status=failed/ended，无 zombie promise | 同上 |
+| AC-09.6 | cancelAllPending 幂等；多 pending（乱序）一次性 reject；registry 按 session 隔离 | pending-cleanup 矩阵参数化测试 |
+| AC-09.7 | tool_result(is_error=true) 经 consume/onMessage 原样转发，不拦截不重写不裁剪；session 不因工具失败自动 failed | `claude-sdk-driver-glm-passthrough.test.ts` |
+| AC-09.8 | driver 不传 allowedTools 黑名单；canUseTool 不因 provider/toolName 自动 deny（D-008 不预禁） | GLM 透传单测断言 options + canUseTool 分支 |
+| AC-09.9 | 连续工具失败（GLM Write 3 次）claude 自处理后 turn 正常结束，session 不崩（spike D2 caveat 复现） | GLM 透传单测 mock 3 次 is_error + result |
+| AC-09.10 | backend 按 session 维度统计 tool_result 失败率，超阈值（默认 0.5，样本≥4）记结构化 warn；不阻断不发告警 | `test_tool_failure_monitor.py` |
+| AC-09.11 | 失败率监控对 glm / anthropic 均统计（不 provider 分支）；阈值可配；样本下限生效 | 监控单测参数化 |
+| AC-09.12 | result.is_error 与 tool_result(is_error) 不混淆：失败率只计 tool_result；turn 终态按 result 字段 | 监控单测 + driver onResult 断言 |
+| AC-09.13 | adapter / task-runner.ts / protocol.ts / model 零改动（batch 回归全绿）；diff 只在 allowed_paths | `pnpm test` 全量 + code review |
+| AC-09.14 | daemon `pnpm typecheck && pnpm test` + backend `uv run pytest` 退出码 0 | CI / 本地跑通 |
 
-## 10. 非目标
+## 10. 实现检查清单
 
-- 不恢复、attach、探测或复用 daemon 崩溃前的 OS 子进程。
-- 不在 daemon 启动时为每个 session spawn 一个等待输入的 agent。
-- 不持久化 stdin 缓冲、permission request、未消费输出或完整 AgentRunLog；日志真相在 backend/task-05。
-- 不跨主机迁移 session，不做多 daemon 抢占；runtime 不匹配直接拒绝。
-- 不修改 Claude/Codex resume 协议；task-03 已提供新 spawn + resume 链路。
-- 不新增后台无限重试。恢复失败可观察并隔离，由用户重试启动或结束 session。
-
-## 11. 实现检查清单
-
-- [ ] 写代码前重读 `.claude/CLAUDE.md`、daemon `CONVENTIONS.md`/`ARCHITECTURE.md`，用 `rg` 确认接口。
-- [ ] 测试先行，至少观察每组目标测试按预期失败一次。
-- [ ] restore 路径没有 `spawn`、`runLease`、`runTurn`、`buildHandshake` 调用。
-- [ ] 下一 inject 严格复用 task-03 的 startTurn/runTurn，不另建第二套 resume runner。
-- [ ] in-flight run 的失败和 session 状态只由 backend service 事务写入。
-- [ ] 原子写串行且终态删除不会被旧快照覆盖。
-- [ ] token/credential/prompt/输出未落盘、未进日志/测试快照。
-- [ ] batch 路径与 task-06 idle/end 单一收口无回归。
-- [ ] 对照 AC-09-01～AC-09-12 记录命令和断言证据。
+- [ ] 开工前重读 `.claude/CLAUDE.md` + daemon CONVENTIONS/ARCHITECTURE，用 `rg` 确认 task-08 `resolvePermission` / `canUseTool` 包装器与 task-04 `SessionManager` 最终签名。
+- [ ] 测试先行，保留至少一次预期红测试证据。
+- [ ] deny.message 收敛逻辑正确（带/无 message / 超时），driver 不二次决策不强制结束 turn。
+- [ ] pending registry 按 session 隔离，所有终态路径（interrupt/end/fail/onError/query 退出）调用 cancelAllPending，幂等。
+- [ ] consume 不拦截 tool_result(is_error)；不传 allowedTools 黑名单；canUseTool 不 provider/toolName 分支。
+- [ ] backend 失败率统计 + 阈值 warn，不阻断不告警通道，对两类 provider 均生效。
+- [ ] adapter / task-runner / protocol / model 零改动（batch 回归全绿）。
+- [ ] 对照 AC-09.1~AC-09.14 逐项验收。

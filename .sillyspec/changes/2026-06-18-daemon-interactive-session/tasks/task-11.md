@@ -1,344 +1,420 @@
 ---
 id: task-11
-title: 会话列表、跨 AgentRun 历史回看与 permission 审批弹窗
-wave: W6
-priority: P2
-depends_on: [task-08, task-10]
-blocks: []
-covers: [FR-07, FR-10]
-decision_ids: [D-005@v1]
-created_at: 2026-06-18 15:31:03
-author: qinyi
+title: "前端会话基础面板：演进 quick-chat 为交互式会话窗口（session SSE + inject + interrupt + end）"
 change: 2026-06-18-daemon-interactive-session
+wave: W6
+priority: P1
+estimated_hours: 12
+depends_on: [task-06]
+blocks: [task-12]
+requirement_ids: [FR-10]
+decision_ids: [D-006@v1]
 allowed_paths:
-  - backend/app/modules/daemon/router.py
-  - backend/app/modules/daemon/schema.py
-  - backend/app/modules/daemon/service.py
-  - backend/app/modules/daemon/tests/test_session_history.py
   - frontend/src/lib/daemon.ts
-  - frontend/src/lib/daemon.test.ts
+  - frontend/src/lib/__tests__/daemon-session.test.ts
+  - frontend/src/components/daemon/interactive-session-panel.tsx
+  - frontend/src/components/daemon/__tests__/interactive-session-panel.test.tsx
   - frontend/src/app/(dashboard)/runtimes/page.tsx
-  - frontend/src/app/(dashboard)/runtimes/page.test.tsx
-  - frontend/src/components/permission-approval-dialog.tsx
-  - frontend/src/components/permission-approval-dialog.test.tsx
+  - frontend/src/app/api/daemon/sessions/[sessionId]/stream/route.ts
+  - frontend/src/app/api/daemon/sessions/[sessionId]/stream/__tests__/route.test.ts
+author: qinyi
+created_at: 2026-06-18T22:41:08
 ---
 
-# Task-11：会话列表、跨 AgentRun 历史回看与 permission 审批弹窗
+# task-11：前端会话基础面板（v3，D-002@v3）
 
-## 1. 目标与边界
+> v3 引用更新：把决策引用从 v2 的 `D-002@v2 / D-005@v1` 收敛为 `D-006@v1`（全栈前端范围），driver 层语义对齐 D-002@v3（SDK 同进程多 turn，turn 级串行）。本任务把 `/runtimes` 现有 quick-chat 演进为单交互式会话面板：首条消息 `createSession`；后续追问 `injectSession`（同一 session 下一 turn）；单条 `streamSession` SSE 贯穿整个会话，事件含 `run_id` 区分 turn；`interrupt` 只收敛 currentRun，session 仍 active；`end` 才结束 session。会话列表 / 历史回看 / permission 审批弹窗留给 task-12。
+>
+> v2 task-11（会话列表 / 历史 / 审批弹窗）的内容按 plan.md v3 任务映射整体迁出到 task-12；本任务保留 v2 已固化的接口契约（createSession / injectSession / interruptSession / endSession / streamSession 签名、SSE envelope、状态机不变量），仅更新决策引用与依赖图（depends_on=[task-06], blocks=[task-12]）。
 
-在 task-10 的单会话 live 面板上增量补齐三个能力：
+## 0. 覆盖来源
 
-1. 展示当前用户的 `AgentSession` 列表，并可在 live 会话与只读历史会话间切换。
-2. 按 `agent_runs.agent_session_id` 聚合一个会话下全部 `AgentRunLog`，按 turn/run 可辨识地回看。
-3. 消费 task-07 已发布到 session SSE 的 `permission_request`，以队列式弹窗完成 allow/deny 审批。
+| 来源 | 章节 | 本任务落点 |
+|---|---|---|
+| requirements.md FR-10 | 前端会话面板：session SSE 进度 + 中途追问输入框 + interrupt/end 按钮 | `InteractiveSessionPanel` 组件 + `lib/daemon.ts` API 客户端 |
+| design.md §5 Wave4 | 演进 `runtimes/page.tsx` quick-chat → 会话窗口（订阅 session 级 SSE）+ 输入框（inject）+ interrupt/end 按钮 | 替换 `QuickChatPanel` 会话核心，保留 provider/model/runtime 布局 |
+| design.md §7.4 REST | `POST /api/daemon/sessions` / `{id}/inject` / `{id}/interrupt` / `{id}/end` / `GET {id}/stream` | `createSession` / `injectSession` / `interruptSession` / `endSession` / `streamSession` |
+| design.md §7.5 session SSE | session 级 Redis channel 聚合，事件含 run_id 区分 turn | `streamSession` 按 run_id 路由 |
+| decisions.md D-006@v1 | 全栈一次设计（daemon + backend + frontend 同变更） | frontend 部分，Wave6 |
+| decisions.md D-002@v3 | turn 级串行（spike S1，不支持运行中注入） | UI 在 currentRun 运行中禁用发送 |
+| 现有 task-10.md（v2） | 会话面板 + SSE + inject/interrupt/end 接口契约 | 接口签名直接搬砖，引用从 D-002@v2/D-005@v1 改为 D-006@v1 |
 
-本任务不重写 task-10 的 create/inject/interrupt/end/stream 主链路，不新增 permission WS 协议，不恢复 daemon 进程，不修改 `AgentRun.session_id`。permission 后端闭环必须复用 task-07 的既有 REST 路径与 service；开始实现前用 `rg` 确认最终落地签名，禁止并存第二套端点。
+## 1. 目标与硬约束
 
-## 2. 依据与前置契约
+1. 首条 prompt 调 `POST /api/daemon/sessions`（`createSession`），保存 `session_id` 与首个 `run_id`。
+2. 后续 prompt 调 `POST /api/daemon/sessions/{id}/inject`（`injectSession`）。inject 的业务含义是创建同一 session 的下一 turn（新 AgentRun），不是写入长驻进程 stdin。
+3. 每个 session 只建立一个 `GET /api/daemon/sessions/{id}/stream` EventSource（`streamSession`）；`turn_completed` 不关闭连接，只有 `session_ended`/`done` 关闭。
+4. SSE 事件按 `run_id` 路由到对应 turn；不得把第二 turn 输出追加到第一 turn。
+5. interrupt 调 `POST /sessions/{id}/interrupt`，只进入"正在打断当前 turn"状态；session 保持 active，收到该 run 的 `turn_completed` 后可继续追问。
+6. end 调 `POST /sessions/{id}/end`，收到响应或 `done` 后进入 ended，关闭 SSE；不得把 interrupt 当作 end。
+7. 保留现有 `quickChat`、`streamQuickChat`、`getQuickChatLogs`、`getQuickChatResult`，避免破坏旧调用；新面板不得继续用 `prev_run_id` 伪多轮。
+8. 本任务不实现 permission 弹窗、会话列表、跨会话历史切换、daemon 重启恢复 UI；这些属于 task-12 / task-10（resume）。
 
-| 来源 | 本任务采用的约束 |
-|---|---|
-| `plan.md` task-11 | W6、P2、依赖 task-08/task-10，交付会话列表、跨 AgentRun 历史、permission 弹窗 |
-| `requirements.md` FR-07 | manual approval 需经 daemon → backend → frontend → backend → daemon 完成 allow/deny |
-| `requirements.md` FR-10 | runtimes 页提供实时进度、追问、打断、结束和历史回看；本任务只补后三项 UI 中尚未由 task-10 覆盖的列表/历史/审批 |
-| `decisions.md` D-005@v1 | session↔run 为 1:N；历史必须沿 `agent_runs.agent_session_id` 聚合；实时事件复用 `agent_session:{session_id}` |
-| task-07 | `permission_request` 已发布到 session SSE；响应端点为 `POST /api/daemon/sessions/{session_id}/permissions/{request_id}/response` |
-| task-10 | 已有 `streamSession`、会话 live 状态、create/inject/interrupt/end；本任务扩展而不复制 |
+## 2. 当前源码事实
 
-硬前置：task-01/04/05/07/08/10 已落地并通过各自测试。若实际接口与蓝图不同，以已经合并的实现为准，先更新本任务调用侧契约，不得猜测方法名。
+实现前必须用 `rg` 重新确认符号存在；若 task-05/task-06 尚未落地，以本任务接口为编译契约，不编造别名。
 
-## 3. 变更文件
+| 依据 | 当前事实 | 本任务用法 |
+|---|---|---|
+| `frontend/src/lib/daemon.ts` | 已有 `apiFetch`、`getApiBaseUrl`、`useSession`、`quickChat`/`streamQuickChat` 封装 | 新增 session API + SSE；旧 API 保留 |
+| `frontend/src/lib/agent.ts` | `streamAgentRunLogs` 用命名事件 `done` + `onmessage` | 参考其 token-in-query + route handler proxy 模式 |
+| `frontend/src/app/(dashboard)/runtimes/page.tsx` | `QuickChatPanel` 用 `lastRunId + quickChat + streamQuickChat`，每轮重建 run SSE | 用 `InteractiveSessionPanel` 替换会话核心，页面保留 provider/model/runtime 卡片 |
+| `frontend/src/app/api/daemon-chat/[runId]/stream/route.ts` | Next route handler 代理 SSE，避免 rewrite 缓冲 | 新建 session stream 同型代理，转发 cursor/Last-Event-ID |
+| task-05（backend REST） | create/inject/interrupt/end REST DTO 固定 | 客户端类型逐字段对齐 |
+| task-06（session SSE） | 命名事件 `turn_started`/`log`/`turn_completed`/`session_status`/`session_ended`；log frame 带 cursor `id:` | 必须 `addEventListener`，不能只写 `onmessage` |
+| `frontend/vitest.config.ts` | jsdom + Testing Library 可用 | API、组件和 route handler 测试先行 |
 
-| 文件 | 变更 |
-|---|---|
-| `backend/app/modules/daemon/schema.py` | 增加 session 列表、跨 run 日志响应 schema |
-| `backend/app/modules/daemon/service.py` | 增加 owner-scoped 会话分页查询与跨 run 日志查询 |
-| `backend/app/modules/daemon/router.py` | 增加 `GET /sessions`、`GET /sessions/{id}/logs`；固定路径必须置于参数化路由之前 |
-| `backend/app/modules/daemon/tests/test_session_history.py` | service/router 的权限、分页、排序、聚合测试 |
-| `frontend/src/lib/daemon.ts` | 增加列表/历史 API 类型与函数；扩展 `streamSession` 的 permission 事件分支 |
-| `frontend/src/lib/daemon.test.ts` | API URL、query、响应及 SSE permission 解析测试 |
-| `frontend/src/app/(dashboard)/runtimes/page.tsx` | 左侧会话列表、live/history 状态切换、历史视图、审批队列集成 |
-| `frontend/src/app/(dashboard)/runtimes/page.test.tsx` | 列表选择、历史只读、live 不回归、审批队列测试 |
-| `frontend/src/components/permission-approval-dialog.tsx` | 无新依赖的可访问审批弹窗 |
-| `frontend/src/components/permission-approval-dialog.test.tsx` | allow/deny/cancel/submitting 与敏感内容渲染测试 |
+扫描文档把 daemon 写成旧 Python 实现，与本任务无关；前端以当前 TypeScript 源码及 task-05/task-06 契约为准。
 
-## 4. 完整接口契约
+## 3. 修改文件
 
-### 4.1 Backend schema
+| 操作 | 文件 | 责任 |
+|---|---|---|
+| 修改 | `frontend/src/lib/daemon.ts` | session REST 类型/函数 + SSE envelope/parser/client（`createSession`/`injectSession`/`interruptSession`/`endSession`/`streamSession`） |
+| 新增 | `frontend/src/lib/__tests__/daemon-session.test.ts` | REST path/body/method/编码、命名 SSE 事件、cursor 与 close 行为 |
+| 新增 | `frontend/src/components/daemon/interactive-session-panel.tsx` | 可独立测试的 session 状态机 + 基础 UI（会话窗口 / 输入框 / interrupt / end） |
+| 新增 | `frontend/src/components/daemon/__tests__/interactive-session-panel.test.tsx` | 首 turn / inject / 多 run 路由 / interrupt / end / 错误分支 |
+| 修改 | `frontend/src/app/(dashboard)/runtimes/page.tsx` | 用新面板替换旧伪多轮核心，传入在线 provider/model；保留 runtime 卡片与日志区 |
+| 新增 | `frontend/src/app/api/daemon/sessions/[sessionId]/stream/route.ts` | 无缓冲代理 backend session SSE，转发鉴权 / cursor / Last-Event-ID |
+| 新增 | `frontend/src/app/api/daemon/sessions/[sessionId]/stream/__tests__/route.test.ts` | URL / headers / body / status / abort 代理测试 |
 
-```python
-class AgentSessionRead(BaseModel):
-    id: uuid.UUID
-    runtime_id: uuid.UUID
-    lease_id: uuid.UUID
-    provider: str
-    status: Literal["pending", "active", "reconnecting", "ended", "failed"]
-    agent_session_id: str | None
-    config: dict | None
-    turn_count: int
-    created_at: datetime
-    last_active_at: datetime | None
-    ended_at: datetime | None
+不得修改 backend / daemon / task-06 SSE 格式或 task-05 状态机。若 `QuickChatPanel` 内日志渲染逻辑需要复用，应抽到新组件或纯函数，不复制两份状态机。
 
-    model_config = {"from_attributes": True}
+## 4. 接口定义
 
+### 4.1 lib/daemon.ts API 函数签名
 
-class AgentSessionListResponse(BaseModel):
-    items: list[AgentSessionRead]
-    total: int
-    limit: int
-    offset: int
-```
+对齐 task-05 REST，不得删字段或把 body 改为 query：
 
-历史端点直接复用已存在的 `app.modules.agent.schema.AgentRunLogEntry`，其精确字段为 `id/run_id/timestamp/channel/content_redacted`；不得另建形似但字段漂移的 DTO。若 task-01 的 ORM 字段空值性与上面不同，session schema 必须对齐实际模型，不得为通过序列化而伪造空字符串。
+```typescript
+export type InteractiveProvider = 'claude' | 'codex';
 
-### 4.2 Backend service
-
-```python
-class DaemonService:
-    async def list_agent_sessions(
-        self,
-        user_id: uuid.UUID,
-        *,
-        limit: int,
-        offset: int,
-        status_filter: str | None = None,
-    ) -> tuple[list[AgentSession], int]: ...
-
-    async def get_agent_session_logs(
-        self,
-        session_id: uuid.UUID,
-        user_id: uuid.UUID,
-    ) -> list[AgentRunLog]: ...
-```
-
-查询规则：
-
-- 列表必须在 SQL 层用 `AgentSession.user_id == user_id` 隔离，筛选状态后再 count；排序为 `coalesce(last_active_at, created_at) DESC, id DESC`，保证稳定分页。
-- 日志查询先以 `session_id + user_id` 校验 session 所有权；不存在或非 owner 均沿 task-04 的资源隐藏策略返回同一种 not-found。
-- 日志沿 `AgentRun.agent_session_id == session_id` join `AgentRunLog.run_id == AgentRun.id`；排序为 `AgentRun.created_at ASC, AgentRunLog.timestamp ASC, AgentRunLog.id ASC`，必须稳定且跨 run。
-- service 仅返回 ORM 对象，不依赖 FastAPI；全部使用 `AsyncSession`。
-
-### 4.3 Backend REST
-
-```http
-GET /api/daemon/sessions?limit=20&offset=0&status=active
-Authorization: Bearer <token>
-
-200
-{
-  "items": [AgentSessionRead],
-  "total": 42,
-  "limit": 20,
-  "offset": 0
-}
-```
-
-- `limit`: 1..100，默认 20。
-- `offset`: >=0，默认 0。
-- `status`: 可选，只接受 `pending|active|reconnecting|ended|failed`；非法值返回 422。
-- 鉴权复用 task-04 session 控制端点的 permission dependency。
-
-```http
-GET /api/daemon/sessions/{session_id}/logs
-Authorization: Bearer <token>
-
-200
-[
-  {
-    "id": "...",
-    "run_id": "...",
-    "timestamp": "...",
-    "channel": "stdout",
-    "content_redacted": "..."
-  }
-]
-```
-
-响应字段必须复用实际 `AgentRunLogEntry`，以上仅展示必要字段；非 owner 与不存在统一资源隐藏响应，不能泄露 session 是否存在。
-
-permission 响应不得新建接口，直接消费 task-07：
-
-```http
-POST /api/daemon/sessions/{session_id}/permissions/{request_id}/response
-Content-Type: application/json
-
-{"decision":"allow"}  // 或 "deny"
-```
-
-### 4.4 Frontend API 与 SSE 类型
-
-```ts
-export type AgentSessionStatus =
-  | "pending"
-  | "active"
-  | "reconnecting"
-  | "ended"
-  | "failed";
-
-export interface AgentSessionRead {
-  id: string;
-  runtime_id: string;
-  lease_id: string;
-  provider: string;
-  status: AgentSessionStatus;
-  agent_session_id: string | null;
-  config: { manual_approval?: boolean; model?: string | null } | null;
-  turn_count: number;
-  created_at: string;
-  last_active_at: string | null;
-  ended_at: string | null;
+export interface SessionCreateRequest {
+  provider: InteractiveProvider;
+  prompt: string;
+  model?: string | null;
+  manual_approval?: boolean;
 }
 
-export interface AgentSessionListResponse {
-  items: AgentSessionRead[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
-export interface PermissionRequestEvent {
-  event: "permission_request";
+export interface SessionCreateResponse {
   session_id: string;
   run_id: string;
-  request_id: string;
-  tool_name: string;
-  input: unknown;
+  lease_id: string;
+  status: string;
+  stream_url: string;
 }
 
-export async function listAgentSessions(options?: {
-  limit?: number;
-  offset?: number;
-  status?: AgentSessionStatus;
-}): Promise<AgentSessionListResponse>;
+export interface SessionInjectResponse {
+  session_id: string;
+  run_id: string;
+  status: string;
+}
 
-export async function getAgentSessionLogs(
-  sessionId: string,
-): Promise<AgentRunLogEntry[]>;
+export interface SessionControlResponse {
+  session_id: string;
+  status: string;
+  current_run_id: string | null;
+}
 
-export async function respondToSessionPermission(
+export function createSession(
+  input: SessionCreateRequest,
+): Promise<SessionCreateResponse>;
+
+export function injectSession(
   sessionId: string,
-  requestId: string,
-  decision: "allow" | "deny",
-): Promise<void>;
+  prompt: string,
+): Promise<SessionInjectResponse>;
+
+export function interruptSession(
+  sessionId: string,
+): Promise<SessionControlResponse>;
+
+export function endSession(
+  sessionId: string,
+): Promise<SessionControlResponse>;
 ```
 
-所有 path segment 使用 `encodeURIComponent`；普通 REST 通过 `apiFetch` 的 `json` 选项发送 body，SSE 继续沿 task-10 既有认证与关闭策略。`streamSession` 应增加独立 `onPermission` 回调或判别联合事件，不能把 permission 当日志内容渲染。
+固定请求（与 design.md §7.4 一致）：
 
-### 4.5 UI 状态契约
+```text
+POST /api/daemon/sessions                         JSON create request
+POST /api/daemon/sessions/{sessionId}/inject      JSON {"prompt":"..."}
+POST /api/daemon/sessions/{sessionId}/interrupt   no body
+POST /api/daemon/sessions/{sessionId}/end         no body
+GET  /api/daemon/sessions/{sessionId}/stream      // SSE
+```
 
-```ts
-type SessionViewMode = "new" | "live" | "history";
+- session id 必须 `encodeURIComponent`。
+- REST 统一使用 `apiFetch(..., { method: 'POST', json: ... })` 真实现有签名；实现前用 `rg` 确认 `json` 选项，禁止自行改成不存在的 helper。
+- UI 展示 `ApiError.message`；根据 `code/status` 决定状态，不解析英文 message 猜测。
+- `409 DAEMON_SESSION_TURN_CONFLICT`：保持 session active，移除未被 backend 接受的本地 turn 占位。
+- `409 DAEMON_SESSION_NO_CURRENT_RUN`：只表示当前无可打断 run，session 仍 active。
 
-interface PermissionQueueItem {
-  sessionId: string;
+### 4.2 session SSE 客户端（streamSession）
+
+严格对齐 task-06；所有 data 都用同一形状，字段按事件可空：
+
+```typescript
+export type SessionEventKind =
+  | 'turn_started'
+  | 'log'
+  | 'turn_completed'
+  | 'session_status'
+  | 'session_ended';
+
+export interface SessionStreamEnvelope {
+  event: SessionEventKind;
+  session_id: string;
+  run_id: string | null;
+  turn: number | null;
+  log_id: string | null;
+  timestamp: string | null;
+  channel: string | null;
+  content: string | null;
+  status: string | null;
+  exit_code: number | null;
+  reason: string | null;
+}
+
+export interface SessionStreamHandlers {
+  onTurnStarted(event: SessionStreamEnvelope): void;
+  onLog(event: SessionStreamEnvelope, cursor: string | null): void;
+  onTurnCompleted(event: SessionStreamEnvelope): void;
+  onSessionEnded(event: SessionStreamEnvelope): void;
+  onError(error: Error): void;
+}
+
+export interface SessionStreamConnection {
+  close(): void;
+  getLastEventId(): string | null;
+}
+
+export function streamSession(
+  sessionId: string,
+  handlers: SessionStreamHandlers,
+  options?: { cursor?: string },
+): SessionStreamConnection;
+```
+
+EventSource 行为（参考 `streamQuickChat` + `streamAgentRunLogs`）：
+
+- URL 使用 `/api/daemon/sessions/{id}/stream`（经 Next route handler proxy）；access token 延续现有 SSE query 方案；可选 cursor 仅在首次显式恢复时添加。
+- 分别 `addEventListener('turn_started' | 'log' | 'turn_completed' | 'session_status' | 'session_ended', ...)`；不得依赖 `es.onmessage` 接收命名事件。
+- 每个 listener 先 JSON parse，再校验 `session_id` 与 URL session 一致；`turn_started`/`log`/`turn_completed` 还必须有非空 `run_id`。
+- `log` listener 保存 `MessageEvent.lastEventId`，供浏览器自动重连及测试验证；不得把 turn boundary 当 cursor。
+- `turn_completed` 只调用 `onTurnCompleted`，不 close。
+- `session_ended` 调 `onSessionEnded` 后 close，且回调最多一次。
+- parse/schema 错误调用通用 `onError`，不把原始含敏感内容的 data 拼进错误消息。
+- `onerror` 不立即 close，允许浏览器携 Last-Event-ID 自动重连；组件卸载、切换/新建 session、end 后必须显式 close。
+
+### 4.3 React 组件 props
+
+```typescript
+interface InteractiveSessionPanelProps {
+  providers: string[];             // 在线 provider 列表（来自 runtime cards）
+  defaultProvider: string;         // 首个在线 provider
+  model: string | null;            // model override（受控）
+  onModelChange: (next: string | null) => void;
+  hasOnlineProvider: boolean;
+}
+```
+
+状态模型（不得用单一 `sending` 布尔混合"REST 提交"与"turn 运行"）：
+
+```typescript
+type SessionUiStatus = 'idle' | 'creating' | 'active' | 'ending' | 'ended' | 'failed';
+type TurnUiStatus = 'pending' | 'running' | 'interrupting' | 'completed' | 'failed' | 'killed';
+
+interface SessionTurnView {
   runId: string;
-  requestId: string;
-  toolName: string;
-  input: unknown;
+  turn: number | null;
+  prompt: string;
+  output: string;
+  status: TurnUiStatus;
+}
+
+interface InteractiveSessionView {
+  sessionId: string | null;
+  status: SessionUiStatus;
+  currentRunId: string | null;
+  turns: SessionTurnView[];
 }
 ```
 
-- `active|pending|reconnecting` 选择后进入 `live`；`ended|failed` 进入 `history`。
-- 历史视图只读，隐藏发送、inject、interrupt、end；切回 live 时恢复 task-10 原状态机，不重建已存在的同 session SSE。
-- permission 以 FIFO 队列处理；当前弹窗关闭但未审批时保持请求在队首，不能静默丢弃。允许明确“稍后处理”，但不得调用后端。
-- 收到不属于当前选中 session 的 permission 仍入队并标识 session；审批必须使用事件自身 sessionId，不能误用当前 UI selection。
+状态不变量：
 
-## 5. 实现步骤（强制 TDD）
+- `currentRunId` 只指向 pending/running/interrupting turn；收到相同 run 的 `turn_completed` 后清空。
+- `turn` 以 `run_id` 为 identity，SSE 重连重复 boundary 时更新已有项，不新增重复 turn。
+- create/inject REST 返回 run id 后立即建立本地 turn；若 SSE 的 `turn_started` 先到，也按 run id upsert，解决 REST/SSE 时序竞态。
+- log 只追加到相同 run id；未知 run id 先创建无 prompt 的 turn 再追加，不能丢日志。
+- ended/failed session 禁止 inject；active 且有 currentRun 时禁止再次发送（turn 级串行，D-002@v3 / spike S1），backend 的 409 作为最终防线。
+- interrupt 成功不修改 session status；end 成功进入 ended 并关闭连接。
 
-### Step 1 — Backend Red
+### 4.4 SSE 事件处理矩阵
 
-先创建 `test_session_history.py`，覆盖：owner 列表、状态过滤、稳定分页、跨用户隔离、跨两个 AgentRun 聚合日志、空日志、越权隐藏。运行测试，确认因接口不存在失败。
+| 事件 | run_id 必填 | 处理 |
+|---|---|---|
+| `turn_started` | 是 | upsert turn(pending→running)，设 currentRunId |
+| `log` | 是 | 追加到对应 turn output（按 channel 选样式），记录 lastEventId |
+| `turn_completed` | 是 | 该 turn 终态（status/exit_code 决定 completed/failed/killed），清 currentRunId，**不 close SSE** |
+| `session_status` | 否 | 更新 session status（active/reconnecting） |
+| `session_ended` | 否 | 收口 ended、close SSE、回调幂等 |
 
-### Step 2 — Backend Green/Refactor
+## 5. 实现要求
 
-实现 schema → service → router 的最小代码使测试通过。router 只做参数解析/序列化；查询、所有权和排序全部在 service。完成后运行 daemon 模块测试，确保现有 runtime/lease/session 端点无回归。
+### 5.1 会话窗口组件（InteractiveSessionPanel）
 
-### Step 3 — Frontend API Red/Green
+- idle：provider/model 可编辑，输入框文案"输入首条消息创建会话"。
+- 首次发送：先把用户 prompt 放入待创建 turn（pending）；`createSession` 成功后绑定返回 run id、启动唯一 SSE、状态 active。
+- active 且无 currentRun：输入框文案"继续追问"，发送走 `injectSession`。
+- active 且 currentRun 运行中：发送按钮禁用（D-002@v3 turn 级串行，spike S1 不支持运行中注入）；UI 可提示"等待本轮完成"。
+- inject 成功：新增 turn、更新 currentRunId，**不重建 EventSource**。
 
-先在 `daemon.test.ts` 写 list query、日志 URL、permission response body、permission SSE 解析测试，再实现类型与 API。使用实际 `apiFetch({json: ...})` 约定，不复制 token/错误处理。
+### 5.2 输出渲染
 
-### Step 4 — Dialog Red/Green
+- `stdout` 正常追加；`stderr` 用错误样式；`tool_call` 可复用现有简短工具展示。
+- 保留现有对 `[SYSTEM:*]`/`[RESULT:*]` 技术日志过滤，原始日志仍由 `AgentLogViewer` 查看。
+- 每个 turn 独立显示用户 prompt、agent output、status；React key 使用 run id，不使用数组 index。
+- `turn_completed` 未带最终 log 时仍更新该 turn 状态，不生成伪造输出。
 
-先写组件测试：展示工具名/结构化 input、allow、deny、稍后处理、submitting 禁用与防重复点击。再实现无新增依赖的遮罩弹窗，包含 `role="dialog"`、`aria-modal="true"`、可读标题；不得把 input 写入 console。
+### 5.3 interrupt 按钮
 
-### Step 5 — Page Red/Green
+- 仅当 session active 且 currentRunId 非空启用"打断本轮"。
+- 点击后状态 `interrupting`，禁用重复 interrupt；调用 `interruptSession`。
+- REST 返回的 `current_run_id` 必须等于本地 currentRunId；不一致时显示"运行状态已变化"，等待 SSE，不得把错误 turn 标 killed。
+- interrupt REST 成功后 session 仍 active；最终 turn 状态由 `turn_completed` 的 status 决定。
+- 无 currentRun 的 409 不结束 session，清理本地过期 currentRun 并允许追问。
 
-先写页面测试再扩展 task-10：
+### 5.4 end 按钮
 
-1. 加载列表与空态/错误态。
-2. 选择 ended/failed 拉历史并进入只读模式。
-3. 选择 active/reconnecting 进入 live，复用对应 session SSE。
-4. permission 事件入 FIFO，allow/deny 成功后弹下一条；失败保留当前项并显示错误。
-5. 新建/追问/打断/结束行为保持 task-10 测试不变。
+- active session 始终可点"结束会话"，有无 currentRun 都可。
+- 点击后进入 ending，禁用发送/interrupt/end；调用 `endSession`。
+- REST 成功可立即标 ended 并 close；稍后重复 `session_ended` 必须幂等。若 SSE `session_ended` 先到，同样收口。
+- end 请求失败时：只有后端明确返回 ended 状态才收口；网络错误不得假定数据库已结束，应恢复 active 并显示错误，允许重试。
+- "新建会话"遇 active session 时先要求/执行 end 成功，再清空本地状态；禁止 fire-and-forget end 后立即遗忘 session，避免悬挂 lease。
 
-### Step 6 — Refactor 与全量验证
+### 5.5 页面集成
 
-若 `QuickChatPanel` 继续膨胀，可在同文件内抽纯渲染子组件；除非先更新 allowed_paths，不新增目录。最后执行：
+- `/runtimes` 的在线 provider 过滤、model override、runtime summary 保留。
+- provider/model 在 active/ending session 中锁定；新建会话后才可修改。
+- 当前 turn 的 `activeRunId` 继续驱动 `AgentLogViewer`；历史 turn 日志回看不在本任务。
+- 状态机放进 `InteractiveSessionPanel`，页面只传 providers/default provider/model；不继续膨胀单文件 `page.tsx`。
+
+## 6. 边界处理
+
+| # | 场景 | 必须行为 |
+|---|---|---|
+| 1 | SSE 断线重连（onerror） | 不立即 close，允许浏览器携 Last-Event-ID 自动重连；log 以 `log_id` 去重，已见 log 不重复；turn boundary 幂等 |
+| 2 | inject prompt 为空 / 全空白 / 超 8000 字符 | 前端拒绝发送并保留输入；不调用 REST |
+| 3 | interrupt 时本地无 currentRun | 按钮禁用，不发请求；后端返回 no-current-run 409 时清过期 currentRun，session 仍 active |
+| 4 | end 后 UI 状态 | ended：发送/interrupt/end 全禁用，SSE closed；仅"新建会话"可点；按 Enter 不调 inject |
+| 5 | session 不存在（create/inject/interrupt/end 返回 404） | 不伪造 session/run 终态；显示 ApiError.message；active session 标 failed 并 close SSE，允许新建 |
+| 6 | create 成功但 SSE 尚未连接，首批日志已产生 | task-06 DB replay 补齐；前端按 run id upsert，不丢首日志 |
+| 7 | SSE `turn_started` 先于 create/inject Promise resolve | 创建临时 turn；REST resolve 后合并 prompt/status，不生成重复项 |
+| 8 | 同一 `turn_started`/`log` 因重连重复到达 | boundary 幂等；log 以 `log_id` 去重，输出不重复 |
+| 9 | 第二 turn 日志到达 | 只写第二 run 的 output；第一 turn 内容不变 |
+| 10 | interrupt 返回不同 `current_run_id` | 不篡改任一 turn；提示状态变化并等待 SSE |
+| 11 | inject 返回 turn conflict 409 | 移除未接受占位，保留 prompt 供重试；不重连 SSE |
+| 12 | end 时 daemon/网络不可达 | 不凭网络错误假定 ended；恢复 active、显示错误、允许重试 |
+| 13 | `session_ended` 与 end REST response 竞态 | ended 收口、close、状态更新均幂等，只执行一次 |
+| 14 | 非法 JSON / 错误 session_id / 缺 run_id 的 log | 不写 UI；调用通用 onError；不泄露原始 payload |
+| 15 | 组件卸载或切换新 session | 显式 close 旧 EventSource，旧 listener 不再修改 state |
+| 16 | provider 无在线 runtime | 首发禁用，现有 model 输入可见；不创建 session |
+| 17 | 旧 quick-chat / batch 页面 | `quickChat`/`streamQuickChat` 与 run SSE 行为不变（brownfield 回归） |
+
+## 7. 非目标
+
+- 不做会话列表 / 跨会话切换 / 历史回看（task-12）
+- 不做 permission 审批弹窗 / manual_approval 开关 UI（task-12，依赖 task-08）
+- 不做 daemon 重启 reconnecting UI / resume 恢复（task-10）
+- 不做运行中 prompt 排队（D-002@v3 spike S1，turn 级串行，运行中禁用发送）
+- 不持久化当前 session 到 localStorage
+- 不修改 backend REST / SSE 格式 / daemon driver
+
+## 8. 参考
+
+- `frontend/src/lib/daemon.ts` `streamQuickChat`（run 级 SSE token-in-query + route handler proxy + done close 模式）
+- `frontend/src/lib/agent.ts` `streamAgentRunLogs`（命名事件 `done` + onmessage 过滤）
+- `frontend/src/app/(dashboard)/runtimes/page.tsx` `QuickChatPanel`（provider/model 选择 + AgentLogViewer 集成 + 兜底 fallback）
+- `frontend/src/app/api/daemon-chat/[runId]/stream/route.ts`（Next route handler SSE 代理模板）
+- 现有 task-10.md（v2）—— 接口签名直接搬砖，引用收敛到 D-006@v1
+
+## 9. TDD 实施顺序
+
+严格执行 Red → Green → Refactor，每组测试必须先观察到因接口/行为缺失而失败。
+
+### Step 1：REST 客户端（Red）
+
+- 写 `daemon-session.test.ts`，断言四个 endpoint、method、JSON body、编码 session id、完整响应类型与 ApiError 透传。
+- 最小实现 `createSession`/`injectSession`/`interruptSession`/`endSession`。
+
+### Step 2：SSE parser/client（Red）
+
+- fake EventSource 覆盖命名 `turn_started`/`log`/`turn_completed`/`session_status`/`session_ended`、lastEventId、parse error、session mismatch、turn_completed 不 close、session_ended 幂等 close。
+- 实现 `streamSession`；旧 `streamQuickChat` 测试/代码不改。
+
+### Step 3：SSE route proxy（Red）
+
+- 测试 token/cursor/Last-Event-ID/Accept/signal 转发、错误状态透传、成功流 headers。
+- 参照现有 daemon-chat route 最小实现 session route。
+
+### Step 4：组件 create + 跨 turn（Red）
+
+- 提取并渲染 `InteractiveSessionPanel`；mock API 与 stream。
+- 首发 create；SSE log 写首 turn；turn_completed 后追问 inject；断言 `streamSession` 只调用一次；第二 run 输出不污染第一 run。
+
+### Step 5：interrupt/end（Red）
+
+- 覆盖 interrupt 仅收敛当前 turn 且 session active、run id mismatch、no-current-run、end/session_ended 竞态、end 网络失败可重试、新建前先 end。
+- 最小实现显式状态机，避免散落 boolean。
+
+### Step 6：重连/去重/清理（Red）
+
+- 重复 boundary/log 不重复；unknown run log upsert；unmount close；旧 connection callback 不更新新 session。
+- 抽纯 reducer/helper 后重构，保证 run id 是唯一 identity。
+
+### Step 7：页面集成与回归
+
+- `/runtimes` 接入新组件，保留 provider/model/日志区；`rg` 确认新面板不调用 `quickChat(...prevRun_id)`。
+- 运行定向测试、typecheck、全量 frontend test/build。
+
+## 10. 验收标准
+
+| ID | 验证步骤 | 通过标准 | 覆盖 |
+|---|---|---|---|
+| AC-11-01 | 首次输入 prompt | 仅调用 `createSession`；保存 session/run；建立一个 session SSE | FR-10 / D-006@v1 |
+| AC-11-02 | 首 run 产生 turn_started/log/turn_completed | 独立 turn 实时渲染；turn_completed 后连接仍 open、输入可追问 | FR-10 |
+| AC-11-03 | 发送第二条 prompt（SSE 跨 turn 回显） | 调 `injectSession` 创建新 run；`streamSession` 累计仍只调用一次 | FR-10 / D-002@v3 |
+| AC-11-04 | 第二 run 输出 | 只追加到第二 turn，第一 turn 内容不变；重复 log 不重复 | D-006@v1 |
+| AC-11-05 | 运行中点击打断 | `/interrupt` 一次；session 仍 active；最终只由对应 turn_completed 收敛 currentRun | FR-10 |
+| AC-11-06 | 打断后继续追问 | currentRun 清空后 inject 成功创建下一 run，不新开 SSE | FR-10 |
+| AC-11-07 | 点击结束会话 | `/end` 一次；session_ended/REST 竞态幂等；session ended、SSE closed、发送禁用 | FR-10 |
+| AC-11-08 | SSE 断线重连 | Last-Event-ID/cursor 正确续流；turn_completed 不 close；session_ended 才 close | FR-10 |
+| AC-11-09 | create/inject/interrupt/end 错误 | 409/404/网络错误按边界表处理，不伪造 session/run 终态 | 健壮性 |
+| AC-11-10 | 页面切换/新建 | 旧 EventSource close；active session 必须 end 成功后才清空 | 资源收口 |
+| AC-11-11 | 运行旧 quick-chat/API 测试 | 旧 `quickChat`/`streamQuickChat`、run SSE 和 batch 使用者无回归 | brownfield |
+| AC-11-12 | 运行定向与全量命令 | session 客户端/组件/route 测试、typecheck、test、build 全通过 | 工程约束 |
+
+## 11. 验证命令
+
+先读取 `.sillyspec/local.yaml`。当前 frontend 命令为：
 
 ```powershell
-cd backend
-uv run pytest app/modules/daemon/tests/test_session_history.py -q
-uv run pytest app/modules/daemon/tests -q
-
-cd ..\frontend
-pnpm vitest run src/lib/daemon.test.ts src/components/permission-approval-dialog.test.tsx "src/app/(dashboard)/runtimes/page.test.tsx"
+Set-Location frontend
+pnpm test -- src/lib/__tests__/daemon-session.test.ts src/components/daemon/__tests__/interactive-session-panel.test.tsx
+pnpm typecheck
+pnpm test
 pnpm build
 ```
 
-## 6. 边界与异常场景
+route handler 测试若 Vitest glob 不能随上面定向路径发现，显式追加：
 
-| 编号 | 场景 | 必须行为 |
-|---|---|---|
-| B-01 | 当前用户没有 session | 返回 200 空 items/total=0；UI 展示空态，不显示假会话 |
-| B-02 | `limit=0/101`、负 offset、非法 status | FastAPI 返回 422；service 不执行宽松兜底 |
-| B-03 | 用户 A 查询用户 B 的 session/logs | 列表永不出现；详情日志按资源隐藏策略返回 not-found，不泄露存在性 |
-| B-04 | 一个 session 有 0 个 run 或 run 无日志 | 返回空数组；UI 显示“暂无历史日志”，不报错 |
-| B-05 | 一个 session 有多个 run，日志时间相同 | 以 run 创建时间、log 时间、log id 稳定排序，run_id 完整保留 |
-| B-06 | 切换历史请求时旧请求后返回 | 使用 abort/请求序号丢弃陈旧响应，不能覆盖新选中 session |
-| B-07 | history 会话在加载中被状态刷新为 active/reconnecting | 保持用户当前只读选择，提示状态已变化；仅用户主动切 live，避免隐式启动重复 SSE |
-| B-08 | 同一 permission SSE 重放/重复事件 | 以 `session_id + run_id + request_id` 去重，只入队一次 |
-| B-09 | 两个 session 同时产生 permission | FIFO 保留各自 sessionId；响应发往事件所属 session，不依赖当前 selection |
-| B-10 | permission 响应 409/404/网络失败 | 弹窗保持，显示可重试错误；不得 dequeue、不得自动 allow |
-| B-11 | allow/deny 与用户双击/快速切换竞态 | submitting 时禁用全部决策按钮；每个 request 最多一次 POST |
-| B-12 | session SSE done 时仍有 pending permission | 标记该项失效并移出队列/展示已结束提示；不得向 ended session 继续响应 |
-| B-13 | `manual_approval=false` | 不出现弹窗；task-10 live 行为不变 |
-| B-14 | permission input 含超长 JSON/不可序列化显示值 | 限高滚动并用安全 formatter；渲染失败显示类型摘要，不崩溃、不执行 HTML |
+```powershell
+pnpm test -- "src/app/api/daemon/sessions/[sessionId]/stream/__tests__/route.test.ts"
+```
 
-## 7. 验收表
+联调由 task-06 覆盖真实 create → 首 turn → inject → interrupt → 再 inject → end。task-05/task-06 未合并时只能报告依赖未满足，不得用旧 quick-chat 假装完成 session 链路。
 
-| AC | 验收条件 | 自动证据 | 对齐 |
-|---|---|---|---|
-| AC-11.1 | 仅返回当前用户 session，支持合法状态筛选与稳定分页 | backend router/service tests | FR-10 |
-| AC-11.2 | 历史端点跨至少两个 AgentRun 返回完整日志，保留 run_id 且稳定排序 | `test_session_history.py` | D-005@v1 |
-| AC-11.3 | 越权 session 不出现在列表，日志查询不泄露资源存在性 | backend negative tests | 安全边界 |
-| AC-11.4 | 空列表、空日志、加载失败均有明确 UI 状态 | page tests | FR-10 |
-| AC-11.5 | 选择 ended/failed 进入只读 history，隐藏输入/interrupt/end | page tests | FR-10 |
-| AC-11.6 | 选择 active/reconnecting 回到 live，且 task-10 create/inject/interrupt/end/SSE 用例全绿 | page regression tests | FR-10 |
-| AC-11.7 | permission_request 从 session SSE 进入弹窗，展示 tool_name 与 input | SSE + dialog tests | FR-07 |
-| AC-11.8 | allow/deny 调用 task-07 精确 `/response` 端点和 body，成功后推进队列 | lib/page tests | FR-07 |
-| AC-11.9 | 重放事件去重、双击幂等、失败不丢请求、跨 session 不误审批 | page concurrency tests | FR-07 |
-| AC-11.10 | manual=false 不弹窗，permission 内容不写 console/log | tests + code review | FR-07/安全 |
-| AC-11.11 | backend daemon 模块测试、frontend 定向 vitest、`pnpm build` 全部通过 | 命令输出 | DoD |
+## 12. 完成定义
 
-## 8. 风险与收敛
-
-| 风险 | 等级 | 收敛策略 |
-|---|---|---|
-| task-07/task-10 最终签名与蓝图偏差 | P1 | 开工先 `rg` 真实签名；只适配现有实现，不创建兼容双链路 |
-| 页面组件继续膨胀 | P2 | 先保持状态所有权单一；仅抽无副作用子组件，不引入新状态库 |
-| session 列表轮询与 SSE 状态冲突 | P1 | 列表刷新只更新摘要，不覆盖 live 面板的流状态；selection 以 id 保持 |
-| permission 队列因 SSE 重连重复 | P1 | 复合 key 去重，成功/失效后保留已处理 key 的有界集合 |
-| 历史日志量增长 | P2 | 本任务先完整返回并使用滚动容器；不得私自截断。后续若需分页，另立 API 变更 |
-
-## 9. 完成检查
-
-- [ ] 开工前重读 `.claude/CLAUDE.md` 与 backend/frontend `CONVENTIONS.md`、`ARCHITECTURE.md`。
-- [ ] 用 `rg` 确认 task-07 的 response endpoint、task-10 的 `streamSession` 和 task-01 的 ORM 字段实际存在。
-- [ ] 测试先红后绿；没有测试基础设施时先补测试基础，不以手工验收替代关键状态机测试。
-- [ ] session 列表和日志查询均按 user_id 做数据库级隔离。
-- [ ] 历史日志保留 run_id；UI 可识别不同 turn。
-- [ ] permission 复用 task-07 SSE/REST，不新增第二连接或第二端点。
-- [ ] task-10 live 会话回归测试全部通过。
-- [ ] 仅修改 allowed_paths；不触碰 daemon spawn/resume 实现。
+一个 `/runtimes` 会话面板可用单一 SSE 连接完成多个顺序 turn；用户可以明确打断 currentRun 后继续追问，也可以结束整个 session；所有事件按 run id 隔离，终态和错误分支可由自动化测试证明，且旧 quick-chat/run SSE 无回归。permission 弹窗 / 会话列表 / 历史回看不在本任务（task-12）。

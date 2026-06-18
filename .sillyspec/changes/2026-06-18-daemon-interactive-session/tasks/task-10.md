@@ -1,380 +1,511 @@
 ---
 author: qinyi
-created_at: 2026-06-18 15:31:03
+created_at: 2026-06-18T22:41:08
 change: 2026-06-18-daemon-interactive-session
 id: task-10
-title: "前端会话基础面板：session SSE、下一 turn、打断 currentRun 与结束 session"
+title: "resume 持久化 + 崩溃恢复（SDK 自动持久化 + query({resume}) + reconnecting）"
 wave: W5
 priority: P1
-estimated_hours: 12
+estimated_hours: 14
 depends_on: [task-04, task-05]
-blocks: [task-11]
-requirement_ids: [FR-10]
-decision_ids: [D-002@v2, D-005@v1]
+blocks: []
+requirement_ids: [FR-08]
+decision_ids: [D-003@v1]
 allowed_paths:
-  - frontend/src/lib/daemon.ts
-  - frontend/src/lib/__tests__/daemon-session.test.ts
-  - frontend/src/components/daemon/interactive-session-panel.tsx
-  - frontend/src/components/daemon/__tests__/interactive-session-panel.test.tsx
-  - frontend/src/app/(dashboard)/runtimes/page.tsx
-  - frontend/src/app/api/daemon/sessions/[sessionId]/stream/route.ts
-  - frontend/src/app/api/daemon/sessions/[sessionId]/stream/__tests__/route.test.ts
+  - sillyhub-daemon/src/interactive/session-manager.ts
+  - sillyhub-daemon/src/interactive/session-store-persistence.ts
+  - sillyhub-daemon/src/interactive/types.ts
+  - sillyhub-daemon/src/daemon.ts
+  - sillyhub-daemon/tests/interactive/session-store-persistence.test.ts
+  - sillyhub-daemon/tests/interactive/session-recovery.test.ts
+  - sillyhub-daemon/tests/interactive/daemon-recovery-boot.test.ts
+  - backend/app/modules/daemon/model.py
+  - backend/app/modules/daemon/service.py
 ---
 
-# task-10：前端会话基础面板
+# task-10：resume 持久化 + 崩溃恢复（SDK 自动持久化 + query({resume}) + reconnecting）
 
-> 以 `plan.md` 显式 task-10 为准，不采用 CLI 重编号。本任务把 `/runtimes` 现有 quick-chat 演进为单个交互式会话面板：首条消息创建 session；追问创建同一 session 的下一 turn；一个 session SSE 连接跨多个 AgentRun；interrupt 只打断 currentRun；end 才结束 session。权限审批和历史会话列表留给 task-11。
+> v3 重做。依据 `design.md` §5 Wave3、§8.1 status（reconnecting）、§10 R-cwd / R-03；`requirements.md` FR-08；`decisions.md` D-003@v1；`spike-02-architecture-validation.md` §3.7 D3 实测。
+>
+> **v2→v3 关键差异**：v2（旧 task-09，废弃）每 turn 独立 spawn + `--resume`，崩溃后下一 inject 才重 spawn；**v3 依赖 SDK 自动持久化**——`@anthropic-ai/claude-agent-sdk` 在每个 query 跑完后把 session 落盘到 `~/.claude/projects/<encoded-cwd>/<agent_session_id>.jsonl`（spike D3 实测），daemon 不再自己实现 jsonl 写入，只持久化元数据（session_id / lease_id / agent_session_id / cwd）；崩溃恢复用 `query({ options: { resume: agent_session_id } })` 在**还原的 cwd** 下重建上下文（spike D3 跨进程正确回忆 `ZEBRA-742`）。
+>
+> **D-003@v1 分阶段**：Wave1/2（task-04/07/08）崩溃 = failed（不恢复）；**Wave3（本任务）才接 resume**。本任务为 daemon 侧恢复的唯一业务入口，task-04 的 SessionManager 提供 `agentSessionId` 写入点，task-05 的 backend service 提供崩溃 currentRun 收敛与 reconnecting→active 状态流转，本任务把二者串成完整恢复链路。
 
 ## 1. 目标与硬约束
 
-1. 首条 prompt 调 task-04 的 `POST /api/daemon/sessions`，保存 `session_id` 与首个 `run_id`。
-2. 后续 prompt 调 `POST /api/daemon/sessions/{id}/inject`。inject 的业务含义是创建下一 turn/AgentRun，不是写入长驻进程 stdin。
-3. 每个 session 只建立一个 `GET /api/daemon/sessions/{id}/stream` EventSource；`turn_done` 不关闭连接，只有 `done` 关闭。
-4. SSE 事件按 `run_id` 路由到对应 turn；不得把第二 turn 输出追加到第一 turn。
-5. interrupt 调 `/interrupt`，只进入“正在打断当前 turn”状态；session 保持 active，收到该 run 的 `turn_done` 后可继续追问。
-6. end 调 `/end`，收到 `done` 或成功响应后进入 ended，关闭 SSE；不得把 interrupt 当作 end。
-7. 保留现有 `quickChat`、`streamQuickChat`、run 日志 API，避免破坏旧调用；新面板不得继续用 `prev_run_id` 伪多轮。
-8. 本任务不实现 permission 弹窗、会话列表、跨会话历史切换、daemon 重启恢复 UI；这些属于 task-11/task-09。
+1. 新增 daemon `src/interactive/session-store-persistence.ts`：把 SessionManager 内存 `SessionStore` 中可恢复的 active session 元数据原子持久化到 `~/.sillyhub/daemon/sessions.json`；崩溃后启动时加载并还原。
+2. daemon 启动顺序：load config → `sessionStorePersistence.load()` → 对每条记录向 backend 发 `recover_session_after_daemon_restart`（收敛崩溃 currentRun = failed，session 置 reconnecting）→ `SessionManager.restoreAndReconnect`（用 `query({resume})` 在固定 cwd 重启 driver）→ reconnecting → active。
+3. **恢复期间不 spawn 旧进程、不 attach 旧 Query 句柄**：旧 Query 句柄不可序列化、不可恢复；恢复 = 用持久化 `agent_session_id` 调 `ClaudeSdkDriver.start(input, { resume: agent_session_id, cwd })` 启动**新** Query（spike D3 跨进程 resume）。
+4. **固定 / 还原 cwd**：SessionState 在 task-04 已固定 `cwd`；持久化记录含 cwd；恢复时 driver 必须用记录 cwd，不接受运行时变更（R-cwd，spike D3 按 cwd 分目录，cwd 不一致 SDK 找不到 `~/.claude/projects/<encoded-cwd>/` 下的 jsonl → onError → failed）。
+5. `agent_sessions.status` 增 `reconnecting`（task-02 已建 status 字段，task-05 的 ACTIVE_SESSION_STATUSES 已含 reconnecting）：崩溃时 backend 先写 reconnecting，恢复成功写 active，恢复失败（cwd 不一致 / agent_session_id 缺失 / SDK jsonl 缺失）写 failed。
+6. backend 是 session/run/lease 状态真相；daemon `sessions.json` 只是恢复索引——文件与 backend 不一致时以 backend 为准（rejected → daemon 删记录不复活）。
+7. batch lease 零影响：sessions.json 只写 interactive session；batch lease 不落盘、不进 recovery endpoint（FR-09 守门）。
+8. Wave1/2 行为不变：本任务未合并前，daemon 崩溃 = backend 把 active session 标 failed（task-05 默认路径），不进入本任务的 reconnecting 分支。本任务合并后崩溃才走 reconnecting。
 
-## 2. 当前源码事实
+## 覆盖来源
 
-实现前必须用 `rg` 重新确认符号存在；若依赖 task 尚未落地，以本任务接口为编译契约，不编造别名。
-
-| 依据 | 当前事实 | 本任务用法 |
+| 来源 | 要求 / 决策 | 本任务落实 |
 |---|---|---|
-| `frontend/src/lib/daemon.ts` | 已有 `apiFetch`、`getApiBaseUrl`、`useSession`、quick-chat REST/SSE 封装 | 新增 session API；旧 API 保留 |
-| `frontend/src/app/(dashboard)/runtimes/page.tsx` | `QuickChatPanel` 用 `lastRunId + quickChat + streamQuickChat`，每轮重建 run SSE | 用独立组件替换其会话核心，页面保留 provider/model/runtime 布局 |
-| `frontend/src/app/api/daemon-chat/[runId]/stream/route.ts` | Next route handler 代理 SSE，避免 rewrite 缓冲 | 新建 session stream 同型代理，并转发 cursor/Last-Event-ID |
-| task-04 | create/inject/interrupt/end REST DTO 已固定 | 客户端类型必须逐字段对齐 |
-| task-05 | SSE 使用命名事件 `turn`、`log`、`turn_done`、`done`；仅 log frame 带 cursor `id:` | 必须 `addEventListener`，不能只写 `onmessage` |
-| `frontend/vitest.config.ts` | jsdom + Testing Library 可用 | API、组件和 route handler 测试先行 |
+| `plan.md` task-10 | Wave5 P1，depends_on=[task-04, task-05]，blocks=[]；覆盖 FR-08 / D-003@v1 | SessionStore 持久化 + 启动加载 + query resume |
+| FR-08 | daemon 重启加载元数据；currentRun 标 failed；session reconnecting→active；下次 inject 用 `query({resume:agent_session_id})` 恢复，固定 cwd，上下文不丢 | §4 持久化 schema + §5 启动恢复流程 + §6 resume query |
+| D-003@v1 | Wave1/2 崩溃 = failed；Wave3 新增 persist/restore + agent_sessions.status reconnecting | §8 非目标（Wave1/2 不恢复）+ §5 reconnecting 状态流转 |
+| `design.md` §5 Wave3 | SDK 自动持久化 `~/.claude/projects/<encoded-cwd>/<sid>.jsonl`；daemon SessionStore 持久化元数据；崩溃 currentRun failed、session reconnecting；inject 用 `query({resume})` 恢复（固定 cwd） | §3 文件边界 + §4 schema（元数据不含 SDK jsonl，靠 SDK 自动管理）|
+| `design.md` §8.1 | status: pending/active/reconnecting/ended/failed | §5 状态流转（reconnecting 唯一新增分支）|
+| `design.md` §10 R-cwd | SDK resume 按 cwd 分目录，cwd 不一致 resume 失败 | §4 schema 含 cwd；§6 resume 还原 cwd；§7 边界 1 |
+| `design.md` §10 R-03 | daemon 重启 session 内存丢失（Wave1/2）；Wave3 持久化 | §8 非目标 + §5 持久化 |
+| `spike-02 §3.7 D3` | SDK **自动持久化** session 到 `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`；新 node 进程 `query({options:{resume:sessionId}})` 恢复，正确回忆 `ZEBRA-742`，session_id 匹配；支撑 Wave3（daemon 只需记 session_id + 固定/还原 cwd） | §6 resume query 调用 + §4 daemon 只持久化元数据 |
+| task-04（SessionManager / ClaudeSdkDriver） | SessionState 固定 cwd、driver.start({resume}) 已声明（StartOptions.resume）、agentSessionId 由 onMessage(system/init) 写入 | 本任务接住：启动恢复时调 driver.start({resume:agentSessionId, cwd}) |
+| task-05（backend session service） | `end_session` 单一收口；ACTIVE_SESSION_STATUSES 含 reconnecting | 本任务新增 `recover_session_after_daemon_restart` 入口（独立于 end_session，不复用）|
 
-扫描文档把 daemon 写成旧 Python 实现，与本任务无关；前端以当前 TypeScript 源码及 task-04/task-05 契约为准。
+## 2. 真实现状与约束
 
-## 3. 文件边界
+实现前必须用 `rg` / Read 二次核对，源码变化则先改本任务文档再写代码：
+
+| 事实 | 当前源码锚点 | 本任务用法 |
+|---|---|---|
+| daemon 配置目录常量 | `sillyhub-daemon/src/config.ts`：`DEFAULT_CONFIG_DIR = ~/.sillyhub/daemon`（terminal-observer.ts:31 / cli.ts:60 引用） | sessions.json 放 `join(DEFAULT_CONFIG_DIR, 'sessions.json')` |
+| SessionManager 内存 store | task-04 `src/interactive/session-manager.ts`：`private readonly _store = new Map<string, SessionState>()`；`SessionState` 含 sessionId/leaseId/agentSessionId?/cwd/provider/status/lastActiveAt | 本任务在 SessionManager 加 `snapshot()/restore()/markReconnected()`；不改既有 create/inject/interrupt/end |
+| ClaudeSdkDriver.start resume | task-04 `StartOptions extends ClaudeSdkDriverOptions { resume?: string }`；driver 内 `sdkQuery({ prompt, options: { ..., resume: opts.resume } })` | 恢复时 `driver.start(freshInputQueue, { ...opts, resume: agentSessionId })` |
+| agentSessionId 写入点 | task-04 SessionManager `_onMessage`：识别 `msg.type==='system' && msg.subtype==='init'` 写 `state.agentSessionId` | 持久化必须等 agentSessionId 写入后；首 turn 未拿到 agentSessionId 崩溃不可恢复（边界 2）|
+| backend session service | task-05 `service.py::create_session / inject_session / interrupt_session / end_session`；`ACTIVE_SESSION_STATUSES = {"pending","active","reconnecting"}` | 本任务新增 `recover_session_after_daemon_restart`；不修改既有 4 方法 |
+| backend AgentSession status | task-02 `agent_sessions.status: String(20) default="pending"`；reconnecting 在 design §8.1 已规划，task-05 ACTIVE_SESSION_STATUSES 已含 | 本任务 service 层写 reconnecting（无需迁移，status 是 String 自由值）|
+| daemon WS 控制消息路由 | task-04 `daemon.ts:_handleWsMessage` 已 case `SESSION_INJECT/INTERRUPT/END` | 恢复后 SESSION_INJECT 复用既有路由（resume Query 已在跑，inject push 到 InputQueue 即续轮）|
+| SDK jsonl 自动持久化 | spike D3 实测：`~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`，SDK 自动写，daemon 不管理 | daemon 不读不写该文件；resume 靠 SDK 内部加载 |
+| daemon 启动入口 | `sillyhub-daemon/src/daemon.ts`（main 构造 Daemon、启动三循环） | 在三循环（heartbeat/poll/ws）启动前插入 recovery 编排 |
+
+## 3. 修改文件
 
 | 操作 | 文件 | 责任 |
 |---|---|---|
-| 修改 | `frontend/src/lib/daemon.ts` | session REST 类型/函数、SSE envelope/parser/client |
-| 新增 | `frontend/src/lib/__tests__/daemon-session.test.ts` | REST path/body、命名 SSE 事件、cursor 与 close 行为 |
-| 新增 | `frontend/src/components/daemon/interactive-session-panel.tsx` | 可独立测试的 session 状态机与基础 UI |
-| 新增 | `frontend/src/components/daemon/__tests__/interactive-session-panel.test.tsx` | 首 turn、inject、多 run 路由、interrupt、end、错误分支 |
-| 修改 | `frontend/src/app/(dashboard)/runtimes/page.tsx` | 用新面板替换旧伪多轮核心，传入在线 provider/model；保留 runtime 卡片与日志区 |
-| 新增 | `frontend/src/app/api/daemon/sessions/[sessionId]/stream/route.ts` | 无缓冲代理 backend session SSE，转发鉴权、cursor、Last-Event-ID |
-| 新增 | `frontend/src/app/api/daemon/sessions/[sessionId]/stream/__tests__/route.test.ts` | URL/headers/body/status/abort 代理测试 |
+| 新增 | `sillyhub-daemon/src/interactive/session-store-persistence.ts` | sessions.json schema 校验、原子写、串行化、损坏隔离；load/save/quarantine |
+| 修改 | `sillyhub-daemon/src/interactive/session-manager.ts` | 加 `snapshotPersistable()/restoreAndReconnect()/markReconnected()`；create/inject/interrupt/end/onResult/onMessage 排队 flush；end/fail 删记录 |
+| 修改 | `sillyhub-daemon/src/interactive/types.ts` | `PersistedSessionRecord` / `PersistedSessionFile` / `SessionStorePersistence` 接口 |
+| 修改 | `sillyhub-daemon/src/daemon.ts` | 启动顺序编排：load → recover → restoreAndReconnect → loops；构造 SessionManager 时注入 SessionStorePersistence |
+| 新增 | `sillyhub-daemon/tests/interactive/session-store-persistence.test.ts` | 文件 schema、原子写、串行写、损坏隔离、0o600 |
+| 新增 | `sillyhub-daemon/tests/interactive/session-recovery.test.ts` | snapshot/restore/markReconnected；恢复期 spawn=0；resume query 用 agent_session_id + cwd |
+| 新增 | `sillyhub-daemon/tests/interactive/daemon-recovery-boot.test.ts` | 启动编排顺序、单项失败隔离、backend rejected 删记录、loops 前完成 |
+| 修改 | `backend/app/modules/daemon/service.py` | 新增 `recover_session_after_daemon_restart`（收敛 currentRun、reconnecting→active、token 旋转） |
+| 修改 | `backend/app/modules/daemon/model.py` | 若 task-02 未补则在此确认 status String(20) 可含 reconnecting（无 schema 改动，仅注释/常量） |
 
-不得修改 backend/daemon、task-05 SSE 格式或 task-04 状态机。若 `QuickChatPanel` 内日志渲染逻辑需要复用，应抽到新组件或小纯函数，不复制两份状态机。
+不得修改：task-04 的 `claude-sdk-driver.ts`（StartOptions.resume 已存在）、`input-queue.ts`、task-05 的 4 个 session REST 方法、task-06 的 SSE、task-08 的 canUseTool、`task-runner.ts`、`protocol.ts`、frontend、SDK 自动持久化的 jsonl 文件。
 
-## 4. REST 接口定义
+## 4. 持久化数据与接口（搬砖级）
 
-对齐 task-04，不得删字段或把 body 改为 query：
+### 4.1 磁盘 schema（`interactive/types.ts`）
 
 ```typescript
-export type InteractiveProvider = 'claude' | 'codex';
+export const SESSION_FILE_VERSION = 1 as const;
+export const DEFAULT_SESSION_FILE = join(DEFAULT_CONFIG_DIR, 'sessions.json');
 
-export interface SessionCreateRequest {
-  provider: InteractiveProvider;
-  prompt: string;
-  model?: string | null;
-  manual_approval?: boolean;
+export interface PersistedSessionRecord {
+  sessionId: string;          // agent_sessions.id（backend 实体）
+  leaseId: string;            // interactive lease.id（长生命周期）
+  agentSessionId: string;     // SDK session_id（spike D3 resume 用，必需非空）
+  cwd: string;                // 固定工作目录（resume 按 cwd 分目录，R-cwd）
+  provider: 'claude' | 'codex';
+  currentRunId?: string;      // 崩溃时可能在执行的 AgentRun.id（恢复对账用，恢复成功后清空）
+  turnCount: number;
+  lastActiveAt: number;       // epoch ms
+  model?: string;             // 恢复 driver 用（可空）
+  pathToClaudeCodeExecutable?: string; // 恢复 driver 用（D-009，可空则恢复时重探）
 }
 
-export interface SessionCreateResponse {
-  session_id: string;
-  run_id: string;
-  lease_id: string;
-  status: string;
-  stream_url: string;
+export interface PersistedSessionFile {
+  version: typeof SESSION_FILE_VERSION;
+  savedAt: string;            // ISO 时间戳
+  sessions: PersistedSessionRecord[];
 }
-
-export interface SessionInjectResponse {
-  session_id: string;
-  run_id: string;
-  status: string;
-}
-
-export interface SessionControlResponse {
-  session_id: string;
-  status: string;
-  current_run_id: string | null;
-}
-
-export function createSession(
-  input: SessionCreateRequest,
-): Promise<SessionCreateResponse>;
-
-export function injectSession(
-  sessionId: string,
-  prompt: string,
-): Promise<SessionInjectResponse>;
-
-export function interruptSession(
-  sessionId: string,
-): Promise<SessionControlResponse>;
-
-export function endSession(
-  sessionId: string,
-): Promise<SessionControlResponse>;
 ```
 
-固定请求：
+持久化规则（对齐 FR-08 + spike D3）：
+
+- 仅写可恢复的 `active | running` session；`ended | failed | reconnecting` 不写（reconnecting 是恢复中间态，重启时不应残留）。
+- `agentSessionId` 必须非空才作为可恢复记录（首 turn system/init 未拿到就崩溃 → 不可恢复，backend 收 failed，文件不写该 session）。
+- `currentRunId` 仅重启对账用；恢复成功（reconnecting→active）后必须清空并再次 flush。
+- 禁止写：claim token、API key / credential、prompt 内容、agent 输出、SDK Query 句柄、InputQueue、child/stdin/adapter（均不可序列化且敏感）。
+- `pathToClaudeCodeExecutable` 可空：恢复时若空则重新走 agent-detector 探测（D-009）；非空直接复用。
+- SDK 自动持久化的 `~/.claude/projects/<encoded-cwd>/<sid>.jsonl` **不由 daemon 管理**：daemon 只持久化元数据索引，jsonl 由 SDK 自己写（spike D3）。
+
+### 4.2 持久化端口（`interactive/session-store-persistence.ts`）
+
+```typescript
+export interface SessionStorePersistence {
+  load(): Promise<PersistedSessionRecord[]>;
+  save(records: readonly PersistedSessionRecord[]): Promise<void>;
+  quarantine(reason: string): Promise<void>;
+}
+
+export class JsonSessionPersistence implements SessionStorePersistence {
+  constructor(filePath: string = DEFAULT_SESSION_FILE);
+  load(): Promise<PersistedSessionRecord[]>;
+  save(records: readonly PersistedSessionRecord[]): Promise<void>;
+  quarantine(reason: string): Promise<void>;
+}
+
+export class SessionPersistenceError extends Error {
+  readonly code: 'SESSION_FILE_CORRUPT' | 'SESSION_FILE_VERSION' | 'SESSION_FILE_IO';
+}
+```
+
+实现要点：
+
+- `save` 用同目录临时文件 + `writeFile` + `rename` 原子替换；单一 promise queue 串行写，保证写入顺序与最终一致性（不用 debounce，避免丢最后一次状态变化）。
+- 支持的平台写权限 `0o600`（Windows chmod 无效但保留调用，参照 `credential.ts:55` credentials.json 的 0600 模式）。
+- `load` 做 version / UUID 字符串 / provider 枚举 / 有限数字 / cwd 非空校验；整文件无法 parse 时重命名为 `sessions.json.corrupt-<epoch>` 后返回空集合（不抛、不崩 daemon）。
+- version 不支持 → `quarantine('unsupported_version')` 后返回空集合。
+- 文件不存在 → 空数组（不 warn、不创建文件）。
+
+### 4.3 SessionManager 扩展（`interactive/session-manager.ts`）
+
+在 task-04 既有 create/inject/interrupt/end/fail 基础上加：
+
+```typescript
+export interface SessionManagerDeps {
+  driver: ClaudeSdkDriver;
+  persistence: SessionStorePersistence;   // 本任务新增注入
+  onTurnResult: (sessionId: string, runId: string, result: SDKResultMessage) => void | Promise<void>;
+  onTurnMessage: (sessionId: string, runId: string, msg: SDKMessage) => void | Promise<void>;
+  onSessionEnd: (sessionId: string, status: SessionStatus) => void | Promise<void>;
+}
+
+export class SessionManager {
+  /** 快照可恢复记录（active/running，agentSessionId 非空）。供 flush 持久化。 */
+  snapshotPersistable(): PersistedSessionRecord[];
+
+  /**
+   * 恢复单条记录：用 agentSessionId 调 driver.start({resume}) 在固定 cwd 重启 driver。
+   * 流程：
+   *   1. 构造 fresh InputQueue（新对象，不恢复旧队列）。
+   *   2. state = { sessionId, leaseId, agentSessionId: record.agentSessionId, cwd: record.cwd,
+   *      status:'reconnecting', currentRunId: undefined, inputQueue, lastActiveAt, provider }
+   *      写入 _store。
+   *   3. query = driver.start(inputQueue, {
+   *        pathToClaudeCodeExecutable: record.pathToClaudeCodeExecutable ?? detect(),
+   *        cwd: record.cwd,            // R-cwd：必须用记录 cwd
+   *        env: { ...process.env },    // spike H1
+   *        model: record.model,
+   *        resume: record.agentSessionId,  // spike D3 跨进程 resume
+   *      })。
+   *   4. fire driver.consume(query, { onResult, onMessage, onError })（同 create，长生命周期协程）。
+   *   5. driver.start 抛错（executable 缺失 / cwd 不一致 / SDK jsonl 缺失）→ onError → status=failed，
+   *      onSessionEnd(failed)，记录从 _store 移除。
+   *
+   * 注意：restoreAndReconnect 不 push 任何 SDKUserMessage——driver resume 后 SDK 自身不立即产 turn，
+   * 等下一次 SESSION_INJECT 才 push 首条恢复后 prompt（spike D3：resume query 不带 prompt 时 SDK 空闲）。
+   * 调用方在 backend recover 成功后调 markReconnected 把 status 切 active。
+   */
+  restoreAndReconnect(record: PersistedSessionRecord): Promise<void>;
+
+  /** reconnecting → active；flush。只能在 restoreAndReconnect 之后调。 */
+  markReconnected(sessionId: string): Promise<void>;
+
+  /** 强制把当前内存 store 落盘（daemon stop 用，SIGKILL 兜底靠上次原子快照）。 */
+  flush(): Promise<void>;
+}
+```
+
+排队 flush 时机（复用 task-04 的状态变更点，本任务在每个变更后排队一次 save）：
+
+- `create` 成功 + 首条 system/init 写入 agentSessionId 后 → flush。
+- `inject` push 后（turn 开始）→ flush（含 currentRunId）。
+- `_onResult` 收尾后（currentRunId 清空）→ flush。
+- `interrupt` driver.interrupt 调用后 → flush（currentRunId 仍在，等 result 收尾）。
+- `end` / `fail` → 从记录移除后 flush。
+- `markReconnected` → flush（currentRunId 已清空）。
+
+约束：
+
+- `_store` 仍是 `Map<string, SessionState>` 单例；不同 session 并发跑（spike H2 跨 session 无关）。
+- 恢复后 state 持有的 `query` 是**新** SDK Query（spike D3 跨进程 resume），不引用崩溃前的旧句柄（旧句柄不可恢复）。
+- `restoreAndReconnect` 内 driver.start 必须传 `cwd: record.cwd`，不接受运行时 cwd 变更（R-cwd）。
+
+### 4.4 backend 对账接口（`backend/app/modules/daemon/service.py`）
+
+新增独立方法，不复用 task-05 的 end_session / create_session：
+
+```python
+@dataclass(frozen=True, slots=True)
+class SessionRecoveryResult:
+    session_id: uuid.UUID
+    lease_id: uuid.UUID
+    status: Literal["active", "ended", "failed", "rejected"]
+    interrupted_run_status: Literal["failed"] | None = None  # 崩溃 currentRun 收敛结果
+
+async def recover_session_after_daemon_restart(
+    self,
+    session_id: uuid.UUID,
+    *,
+    runtime_id: uuid.UUID,
+    lease_id: uuid.UUID,
+    provider: str,
+    agent_session_id: str,
+    interrupted_run_id: uuid.UUID | None,
+) -> SessionRecoveryResult: ...
+```
+
+单数据库事务内必须：
+
+1. `SELECT AgentSession ... FOR UPDATE`，校验 `session.runtime_id == runtime_id`、`session.lease_id == lease_id`、`session.provider == provider`、`lease.kind == 'interactive'` 归属。
+2. session 已 `ended | failed` → 返回对应终态（status=ended/failed），不复活、不收敛 run；daemon 据此删本地记录。
+3. session 可恢复（active/reconnecting）→ 先写 `status='reconnecting'`、`last_active_at=now`。
+4. `interrupted_run_id` 非空 → 只收敛同 session 且 `status IN ('pending','running','pending_approval')` 的该 run：写 `status='failed'`、`finished_at=now`、`output_redacted` 含稳定错误码 `daemon_restarted`；已终态则幂等（不改完成结果）。
+5. 同 session 若还存在**另一个**非终态 run（除 interrupted_run_id 外）→ 抛 `DaemonSessionInvariantViolation`（409），禁止猜测或批量失败。
+6. commit `reconnecting` + currentRun failed；返回 `SessionRecoveryResult(status='reconnecting', interrupted_run_status='failed')`。
+7. daemon 收到 reconnecting 响应后调 `SessionManager.restoreAndReconnect` + `markReconnected`，成功后再发**第二次**轻量对账 `confirm_session_reconnected(session_id)` 把 status 写 active（或复用一次 RPC：recover 返回 active 需在事务内 reconnecting→active，由 daemon 侧 driver.start 成功回调触发——本任务采用两段式，driver.start 成功才 active，失败保持 reconnecting→后续 failed）。
+
+> 状态流转不变量：active（崩溃前）→reconnecting（recover 写）→active（restoreAndReconnect + markReconnected 成功）/ failed（driver.start 抛错或 backend rejected）。reconnecting 是恢复中间态，不长期停留；若 daemon 恢复卡死，由 task-07 空闲扫描或人工 end 收口（不在本任务自动化超时，见边界 5）。
+
+HTTP 契约（daemon→backend 内部端点，不复用用户 session REST）：
 
 ```text
-POST /api/daemon/sessions                         JSON create request
-POST /api/daemon/sessions/{sessionId}/inject     JSON {"prompt":"..."}
-POST /api/daemon/sessions/{sessionId}/interrupt  no body
-POST /api/daemon/sessions/{sessionId}/end        no body
+POST /api/daemon/internal/sessions/{session_id}/recover
+Authorization: daemon 现有认证
+Body: { lease_id, runtime_id, provider, agent_session_id, interrupted_run_id? }
+→ { session_id, lease_id, status, interrupted_run_status? }
 ```
 
-- session id 必须 `encodeURIComponent`。
-- REST 统一使用 `apiFetch(..., {method:'POST', json: ...})` 的真实现有签名；实现前用 `rg` 确认 `json` 选项，禁止自行改成不存在的 helper。
-- UI 展示 `ApiError.message`；根据 `code/status` 决定状态，不解析英文 message 猜测。
-- `409 DAEMON_SESSION_TURN_CONFLICT` 保持 session active，移除未被 backend 接受的本地 turn 占位。
-- `409 DAEMON_SESSION_NO_CURRENT_RUN` 只表示当前无可打断 run，session 仍 active。
+- schema DTO 内联在 `router.py`（参照 task-05 模式，不越界改 `daemon/schema.py`）。
+- router 只做 DTO 映射 + 鉴权（daemon 身份），不写 ORM。
+- 此端点不在 `allowed_paths`（属 task-05 router 范围）；本任务只在 service.py 加方法，router 端点由 task-05 接住（task-05 已 blocks task-10）。若 task-05 未覆盖 router，本任务实施时先与 task-05 协商补到 task-05 allowed_paths，不擅自扩本任务 allowed_paths。
 
-## 5. session SSE 接口定义
+## 5. daemon 启动恢复顺序
 
-### 5.1 事件 envelope
+在 `daemon.ts` 三循环（heartbeat/poll/ws）启动**前**插入：
 
-严格对齐 task-05；所有 data 都用同一形状，字段按事件可空：
+```text
+load config / construct SessionManager(注入 persistence) / construct HubClient
+  → persistence.load()
+  → register runtimes（获得当前 backend runtime ids，daemon 启动既有步骤）
+  → 对每条记录串行或限流（默认 4 并发）：
+      1. HubClient.recoverSession(sessionId, { lease_id, runtime_id, provider, agent_session_id, interrupted_run_id })
+         → backend 收敛崩溃 currentRun=failed、session=reconnecting
+      2. 若 backend status ∈ {ended, failed, rejected}：
+            persistence 从记录移除该条；不调 restoreAndReconnect；继续下一条
+      3. 若 backend status == reconnecting：
+            await sessionManager.restoreAndReconnect(record)
+              → driver.start({resume: agentSessionId, cwd}) 跨进程 resume（spike D3）
+            await sessionManager.markReconnected(sessionId)
+              → status: reconnecting → active；flush（清 currentRunId）
+            HubClient.confirmReconnected(sessionId)  → backend status: reconnecting → active
+      4. restoreAndReconnect 抛错（cwd 不一致 / executable 缺失 / SDK jsonl 缺失）：
+            sessionManager.fail(sessionId)  → onSessionEnd(failed)
+            HubClient.markRecoveryFailed(sessionId)  → backend status: reconnecting → failed
+            persistence 从记录移除该条
+  → flush（清除 currentRunId / 无效记录）
+  → 启动 WS/poll/heartbeat/idle loops
+```
+
+恢复循环规则：
+
+- 默认限流 4 个 session 并发；单条失败（backend rejected 或 driver.start 抛错）→ 结构化 warning 后继续其它记录，不崩 daemon。
+- 恢复期间该 session 不接受 SESSION_INJECT（backend status=reconnecting，REST 返回 409 稍后重试，task-05 的 `DaemonSessionNotActive` 自然拦）。
+- 记录对应 runtime 未注册（runtime_id 不在线）→ 不恢复为 active；backend 收敛旧 run 后 session=failed，daemon 删记录。
+- `recoverSession` 成功只表示 backend 元数据可继续，不代表 SDK resume 成功——真正 resume 成功与否由 `driver.start` 是否抛错决定（spike D3 的 jsonl 加载由 SDK 内部完成）。
+- 下一 inject 复用既有 task-04 SESSION_INJECT 路由：resume Query 已在跑，InputQueue.push 首条恢复后 prompt → SDK 在 resume 上下文基础上跑新 turn。
+
+## 6. resume query 调用（spike D3）
+
+`SessionManager.restoreAndReconnect` 内的关键调用（搬砖级）：
 
 ```typescript
-export type SessionEventKind =
-  | 'turn_started'
-  | 'log'
-  | 'turn_completed'
-  | 'session_status'
-  | 'session_ended';
+// 1. 新 InputQueue（不恢复旧队列；spike D3 resume query 不带 prompt）
+const inputQueue = new InputQueue();
 
-export interface SessionStreamEnvelope {
-  event: SessionEventKind;
-  session_id: string;
-  run_id: string | null;
-  turn: number | null;
-  log_id: string | null;
-  timestamp: string | null;
-  channel: string | null;
-  content: string | null;
-  status: string | null;
-  exit_code: number | null;
-  reason: string | null;
-}
+// 2. 写内存 state（reconnecting 中间态，currentRunId 清空）
+const state: SessionState = {
+  sessionId: record.sessionId,
+  leaseId: record.leaseId,
+  agentSessionId: record.agentSessionId,   // 保留，resume 用
+  cwd: record.cwd,                          // R-cwd：固定
+  provider: record.provider,
+  status: 'reconnecting',
+  currentRunId: undefined,                  // 崩溃 currentRun 由 backend 收敛，daemon 不持有
+  inputQueue,
+  lastActiveAt: record.lastActiveAt,
+};
+this._store.set(state.sessionId, state);
 
-export interface SessionStreamHandlers {
-  onTurnStarted(event: SessionStreamEnvelope): void;
-  onLog(event: SessionStreamEnvelope, cursor: string | null): void;
-  onTurnCompleted(event: SessionStreamEnvelope): void;
-  onDone(event: SessionStreamEnvelope): void;
-  onError(error: Error): void;
-}
+// 3. 探测 executable（D-009）
+const exe = record.pathToClaudeCodeExecutable ?? this._detectClaudeExecutable();
+if (!exe) throw new ClaudeExecutableNotFoundError();
 
-export interface SessionStreamConnection {
-  close(): void;
-  getLastEventId(): string | null;
-}
+// 4. driver.start({resume}) —— spike D3 跨进程 resume
+const query = this._deps.driver.start(inputQueue, {
+  pathToClaudeCodeExecutable: exe,
+  cwd: record.cwd,                          // R-cwd：必须用记录 cwd
+  env: { ...process.env },                  // spike H1 env 继承
+  model: record.model,
+  resume: record.agentSessionId,            // spike D3：跨进程恢复 ~/.claude/projects/<encoded-cwd>/<sid>.jsonl
+});
 
-export function streamSession(
-  sessionId: string,
-  handlers: SessionStreamHandlers,
-  options?: { cursor?: string },
-): SessionStreamConnection;
+state.query = query;
+
+// 5. fire consume（同 create，长生命周期协程）
+void this._consumeInBackground(state);
 ```
 
-### 5.2 EventSource 行为
+spike D3 实测证据（§3.7 D3）：SDK 自动持久化到 `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`；新 node 进程 `query({options:{resume:sessionId}})` 正确回忆 `ZEBRA-742`，session_id 匹配。**daemon 不读不写该 jsonl**，完全靠 SDK 内部加载。
 
-- URL 使用 `/api/daemon/sessions/{id}/stream`，access token 延续现有 SSE query 方案；可选 cursor 仅在首次显式恢复时添加。
-- 分别注册 `turn`、`log`、`turn_done`、`done` 命名事件；不得依赖 `es.onmessage` 接收命名事件。
-- 每个 listener 先 JSON parse，再校验 `session_id` 与 URL session 一致；`turn/log/turn_done` 还必须有非空 `run_id`。
-- `log` listener 保存 `MessageEvent.lastEventId`，供浏览器自动重连及测试验证；不得把 turn boundary 当 cursor。
-- `turn_done` 只调用 `onTurnCompleted`，不 close。
-- `done` 调 `onDone` 后 close，且回调最多一次。
-- parse/schema 错误调用通用 `onError`，不把原始含敏感内容的 data 拼进错误消息。
-- `onerror` 不立即 close，允许浏览器携 Last-Event-ID 自动重连；组件卸载、切换/新建 session、end 后必须显式 close。
+> 注意：resume query 启动后 SDK 不会主动产 turn（spike D3 resume 不带 prompt）；driver.consume 协程空转等 InputQueue.push。下一次 SESSION_INJECT 推首条 prompt 时，SDK 在 resume 上下文基础上跑新 turn——上下文连续（ZEBRA-742 可回忆）。
 
-### 5.3 Next route handler
-
-新增 `/api/daemon/sessions/[sessionId]/stream` 代理，避免 Next rewrite 缓冲：
-
-1. backend URL 固定为 `/api/daemon/sessions/{encodedId}/stream`。
-2. 转发 query `token`、`cursor`；转发请求头 `Last-Event-ID` 与 `Accept: text/event-stream`。
-3. 传递 `request.signal` 给 backend fetch，浏览器断开时取消上游。
-4. backend 非 2xx 或无 body 时保留状态码与安全响应体；成功时原样流式返回 body。
-5. response headers 至少包含 `Content-Type: text/event-stream`、`Cache-Control: no-cache, no-transform`、`Connection: keep-alive`、`X-Accel-Buffering: no`。
-
-## 6. 前端状态模型
-
-组件不得用一个 `sending` 布尔值混合“REST 正在提交”和“turn 正在运行”。建议显式状态：
-
-```typescript
-type SessionUiStatus = 'idle' | 'creating' | 'active' | 'ending' | 'ended' | 'failed';
-type TurnUiStatus = 'pending' | 'running' | 'interrupting' | 'completed' | 'failed' | 'killed';
-
-interface SessionTurnView {
-  runId: string;
-  turn: number | null;
-  prompt: string;
-  output: string;
-  status: TurnUiStatus;
-}
-
-interface InteractiveSessionView {
-  sessionId: string | null;
-  status: SessionUiStatus;
-  currentRunId: string | null;
-  turns: SessionTurnView[];
-}
-```
-
-状态不变量：
-
-- `currentRunId` 只指向 pending/running/interrupting turn；收到相同 run 的 `turn_done` 后清空。
-- `turn` 以 `run_id` 为 identity，SSE 重连重复 `turn` boundary 时更新已有项，不新增重复 turn。
-- create/inject REST 返回 run id 后立即建立本地 turn；若 SSE 的 `turn` 先到，也按 run id upsert，解决 REST/SSE 时序竞态。
-- log 只追加到相同 run id；未知 run id 先创建无 prompt 的 turn，再追加，不能丢日志。
-- ended/failed session 禁止 inject；active 且有 currentRun 时禁止再次发送，backend 的 409 仍作为最终防线。
-- interrupt 成功不修改 session status；end 成功进入 ended 并关闭连接。
-
-## 7. UI 与交互
-
-### 7.1 首条消息与追问
-
-- idle：provider/model 可编辑，输入框文案“输入首条消息”。
-- 首次发送：先把用户 prompt 放入待创建 turn；create 成功后绑定返回 run id、启动唯一 SSE、状态 active。
-- active 且无 currentRun：输入框文案“继续追问”，发送走 inject。
-- active 且 currentRun 运行中：发送按钮禁用。本设计不支持把 prompt 排队到运行中 turn 之后；“追问创建下一 turn”必须等 currentRun 终态。
-- inject 成功：新增 turn，更新 currentRunId，但不重建 EventSource。
-
-### 7.2 输出渲染
-
-- `stdout` 正常追加；`stderr` 用错误样式；`tool_call` 可复用现有简短工具展示。
-- 保留现有对 `[SYSTEM:*]`/`[RESULT:*]` 技术日志过滤，但原始日志仍由 `AgentLogViewer` 查看。
-- 每个 turn 独立显示用户 prompt、agent output、status；React key 使用 run id，不使用数组 index。
-- `turn_done` 未带最终 log 时仍更新该 turn 状态，不生成伪造输出。
-
-### 7.3 打断 currentRun
-
-- 仅当 session active 且 currentRunId 非空启用“打断本轮”。
-- 点击后状态 `interrupting`，禁用重复 interrupt；调用 `/interrupt`。
-- REST 返回的 `current_run_id` 必须等于本地 currentRunId；不一致时显示“运行状态已变化”，等待 SSE/刷新，不得把错误 turn 标 killed。
-- interrupt REST 成功后 session 仍 active；最终 turn 状态由 `turn_done` 的 status 决定。
-- 无 currentRun 的 409 不结束 session，清理本地过期 currentRun 并允许追问。
-
-### 7.4 结束 session
-
-- active session 始终可点“结束会话”，有无 currentRun 都可。
-- 点击后进入 ending，禁用发送/interrupt/end；调用 `/end`。
-- REST 成功可立即标 ended 并 close；稍后重复 `done` 必须幂等。若 SSE `done` 先到，同样收口。
-- end 请求失败时：只有后端明确返回 ended 状态才收口；网络错误不得假定数据库已结束，应恢复 active 并显示错误，允许重试。
-- “新建会话”遇 active session 时先要求/执行 end 成功，再清空本地状态；禁止 fire-and-forget end 后立即遗忘 session，避免悬挂 lease。
-
-### 7.5 页面集成
-
-- `/runtimes` 的在线 provider 过滤、model override、runtime summary 保留。
-- provider/model 在 active/ending session 中锁定；新建会话后才可修改。
-- 当前 turn 的 `activeRunId` 继续驱动 `AgentLogViewer`；历史 turn 日志回看不在本任务。
-- 将状态机放进 `InteractiveSessionPanel`，页面只传 providers/default provider/model；不要继续膨胀单文件 `page.tsx`。
-
-## 8. 边界与异常场景
+## 7. 边界处理（至少覆盖以下，全部上单测）
 
 | # | 场景 | 必须行为 |
 |---|---|---|
-| 1 | prompt 为空、全空白或超过 8000 | 前端拒绝发送并保留输入；不调用 REST |
-| 2 | create 成功但 SSE 尚未连接，首批日志已产生 | task-05 DB replay 补齐；前端按 run id upsert，不丢首日志 |
-| 3 | SSE `turn` 先于 create/inject Promise resolve | 创建临时 turn；REST resolve 后合并 prompt/status，不生成重复项 |
-| 4 | 同一 `turn`/`log` 因重连重复到达 | boundary 幂等；log 以 `log_id` 去重，输出不重复 |
-| 5 | 第二 turn 日志到达 | 只写第二 run 的 output；第一 turn 内容不变 |
-| 6 | `turn_done` 到达但 session 仍 active | 清 currentRun，输入重新启用；EventSource 保持 open |
-| 7 | interrupt 时本地无 currentRun | 按钮禁用，不发请求 |
-| 8 | interrupt 返回不同 `current_run_id` | 不篡改任一 turn；提示状态变化并等待 SSE |
-| 9 | interrupt 返回 no-current-run 409 | session 保持 active；清过期 currentRun，可继续 inject |
-| 10 | inject 返回 turn conflict 409 | 移除未接受占位，保留 prompt 供重试；不重连 SSE |
-| 11 | end 时 daemon/网络不可达 | 不凭网络错误假定 ended；恢复 active、显示错误、允许重试 |
-| 12 | `done` 与 end REST response 竞态 | ended 收口、close、状态更新均幂等，只执行一次 |
-| 13 | 非法 JSON、错误 session_id、缺 run_id 的 log | 不写 UI；调用通用 onError；不泄露原始 payload |
-| 14 | EventSource 网络断开后自动重连 | 连接保持由浏览器恢复，Last-Event-ID 续流；已见 log_id 不重复 |
-| 15 | 组件卸载或切换新 session | 显式 close 旧 EventSource，旧 listener 不再修改 state |
-| 16 | session ended/failed 后用户按 Enter | 不调用 inject，输入/发送禁用；可新建会话 |
-| 17 | provider 无在线 runtime | 首发禁用，现有 model 输入可见；不创建 session |
-| 18 | 旧 quick-chat/batch 页面 | `quickChat`/`streamQuickChat` 与 run SSE 行为不变 |
+| 1 | resume 时 cwd 不一致（记录 cwd 与 SDK jsonl 实际目录不匹配） | SDK 在错误 cwd 找不到 `~/.claude/projects/<encoded-cwd>/<sid>.jsonl` → driver.start 抛错或 consume 立即 onError → `SessionManager.fail`；onSessionEnd(failed)；HubClient.markRecoveryFailed；记录移除。R-cwd 兜底（spike D3 caveat） |
+| 2 | agentSessionId 缺失（首 turn system/init 未到就崩溃） | 不写入 sessions.json（snapshotPersistable 过滤 agentSessionId 空）；backend 无对应可恢复记录 → session 由 task-05 默认路径标 failed；不进入恢复分支 |
+| 3 | sessions.json 磁盘损坏 / 非法 JSON / version 不支持 | `quarantine` 重命名为 `sessions.json.corrupt-<epoch>`；load 返回空集合；daemon 正常启动（不崩、不 warn 洪水）；不尝试猜测字段 |
+| 4 | SDK jsonl 缺失（`~/.claude/projects/<encoded-cwd>/<sid>.jsonl` 被删 / 用户清理 ~/.claude） | driver.start({resume}) 时 SDK 找不到 session → onError → fail；daemon 不直接检测 jsonl 存在性（SDK 内部管理），靠 driver 抛错兜底；记录移除 |
+| 5 | reconnecting 超时 / daemon 恢复卡死（driver.start hang） | 本任务**不实现**自动超时（非目标）；reconnecting 长期停留由 task-07 空闲扫描（last_active_at 超 30min）或人工 end 收口；恢复循环对单条记录加保护性 await 超时（默认 30s）→ 当条 fail 继续，不卡整个启动 |
+| 6 | 崩溃时存在 running currentRun | backend `recover_session_after_daemon_restart` 把记录中的同 session run 标 failed / `daemon_restarted`；session 写 reconnecting；daemon 启动恢复期 spawn 旧进程次数 = 0（新 Query 不算 spawn 旧进程）；恢复成功后 currentRunId 清空 |
+| 7 | 崩溃时 session 空闲、无 currentRun | 不创建虚假 run；backend 校验 + 写 reconnecting；daemon restoreAndReconnect → markReconnected → active；下一 inject 才跑新 turn |
+| 8 | session 已 ended/failed（backend 真相） | recover 返回 ended/failed；daemon 删本地记录，不复活 session/lease；不调 restoreAndReconnect |
+| 9 | runtime/lease/provider/session 任一不匹配 | recover 返回 rejected；daemon 删记录；不改其它 run、不旋转 token、不建立本地 session |
+| 10 | interrupted_run_id 指向别的 session | backend invariant violation / rejected；绝不按 UUID 直接更新跨 session run |
+| 11 | interrupted run 已 completed/failed（崩溃前刚好收尾） | 对账幂等，保留原终态/结果；session 仍可继续恢复（reconnecting→active） |
+| 12 | 多个 session 同时恢复，其中一个 driver.start 抛错 | 失败隔离；其它 session 继续 active；失败项不进 active store、从 sessions.json 移除；日志不含 token/prompt |
+| 13 | save 并发与进程退出 | persistence promise queue 保证顺序；daemon stop await 最后一次 flush；SIGKILL 由上一次原子快照兜底；文件始终是完整 JSON |
+| 14 | end/idle 与 persist 竞态 | 终态（end/fail）的"删除记录"写必须排在旧 active 快照后；重启不得复活已结束 session（backend ended 拒绝 → 删记录） |
+| 15 | 旧 claim token 泄露 / 重放 | token 不落盘（sessions.json 禁止写 token）；interactive lease claim token 不在本任务旋转（task-05 管理 lease，本任务只读 lease_id）；恢复后 SESSION_INJECT 复用既有 lease 认证 |
+| 16 | batch lease 混入恢复 | sessions.json 只写 interactive session（provider 过滤 + SessionManager 只管 interactive）；batch lease 不落盘、不进 recover endpoint；FR-09 守门测试全绿 |
+| 17 | 重复 task_available 重放 / WS 重连（恢复后） | 恢复后 session 已在 _store + 已 restoreAndReconnect；task-04 既有 `_interactiveSessionsByLease` 命中跳过重复 create；恢复路径不重复调 driver.start |
+| 18 | Wave1/2 行为（本任务未合并） | daemon 崩溃 → backend task-05 默认把 active session 标 failed（无 reconnecting 分支）；本任务合并后才走 reconnecting。回退路径：删 sessions.json 即回到 Wave1/2 行为 |
 
-## 9. TDD 实施顺序
+## 8. 非目标（本任务不做的事）
 
-严格执行 Red → Green → Refactor，每组测试必须先观察到因接口/行为缺失而失败。
+- **不实现 Wave1/2 崩溃恢复**：本任务未合并前 daemon 崩溃 = failed（D-003@v1 Wave1/2）；只有本任务合并后才走 reconnecting→active。
+- **不管理 SDK jsonl 文件**：`~/.claude/projects/<encoded-cwd>/<sid>.jsonl` 由 SDK 自动写（spike D3）；daemon 不读、不写、不备份、不清理；resume 完全靠 SDK 内部加载。
+- **不持久化不可恢复对象**：SDK Query 句柄、InputQueue 缓冲、child/stdin/adapter/AbortController、permission request、未消费输出、完整 AgentRunLog（日志真相在 backend / Redis）。
+- **不 attach / 探测 / 复用 daemon 崩溃前的 OS 子进程或 SDK Query**：恢复 = 新 Query + resume（spike D3 跨进程语义），旧句柄不可恢复。
+- **不在 daemon 启动时为每条 session 立即跑一个 turn**：resume query 不带 prompt（spike D3），driver.consume 协程空转等下一次 inject；不预热、不发空 prompt。
+- **不实现 reconnecting 自动超时**：单条记录恢复有保护性 await 超时（30s）但不改 session 状态；session 级 reconnecting 长停留由 task-07 空闲扫描 / 人工 end 收口。
+- **不修改 task-04 的 ClaudeSdkDriver / InputQueue**：`StartOptions.resume` 已声明，本任务只消费；create/inject/interrupt/end 既有逻辑不动。
+- **不修改 task-05 的 4 个 session REST 方法**：本任务在 service.py 加 `recover_session_after_daemon_restart` 独立方法；router 内部端点由 task-05 allowed_paths 接住（协商）。
+- **不修改 canUseTool / permission 链路**：task-08 负责；恢复后的 session 若触发 canUseTool 走既有 task-08 路径。
+- **不实现 session 级 SSE 恢复 / 历史回放**：task-06 / task-12 负责；前端 reconnecting 状态展示由 task-11。
+- **不修改 AgentSession model / alembic**：task-02 已建 status String(20)，reconnecting 是自由值无需迁移。
+- **不跨主机迁移 session / 多 daemon 抢占**：runtime_id 不匹配直接 reject。
+- **不读 credentials.json**：env 继承 `process.env`（spike H1，task-04 已落实）。
+- **不实现 CodexAppServerDriver resume**：codex thread/resume 由后续独立任务；本任务 provider 非 claude → 恢复时 throw UnsupportedProviderError（同 task-04 边界）。
 
-### Step 1：REST 客户端（Red）
+## 9. 参考
 
-- 写 `daemon-session.test.ts`，断言四个 endpoint、method、JSON body、编码 session id、完整响应类型与 ApiError 透传。
-- 最小实现 `createSession/injectSession/interruptSession/endSession`。
+- `design.md` §5 Wave3（resume 持久化 + 崩溃恢复：SDK 自动持久化 + daemon 元数据 + query resume + 固定 cwd + reconnecting）、§8.1 status（reconnecting）、§10 R-cwd（resume 按 cwd 分目录）/ R-03（Wave1/2 不恢复，Wave3 持久化）。
+- `requirements.md` FR-08（resume 持久化恢复）。
+- `decisions.md` D-003@v1（Wave1/2 不崩溃恢复，Wave3 resume 持久化）。
+- `spike-02-architecture-validation.md` §3.7 D3（SDK 自动持久化 `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`；新进程 `query({options:{resume:sessionId}})` 正确回忆 `ZEBRA-742`；支撑 Wave3，daemon 只需记 session_id + 固定/还原 cwd）。
+- spike sandbox 脚本（仓库外）：`%TEMP%\claude-sdk-spike\d3.mjs`（resume 实测，可复跑）。
+- task-04（SessionManager / ClaudeSdkDriver / StartOptions.resume / SessionState 固定 cwd / agentSessionId 写入点）。
+- task-05（backend session service / ACTIVE_SESSION_STATUSES 含 reconnecting / end_session 单一收口）。
+- task-02（agent_sessions.status String(20)，reconnecting 自由值）。
+- `sillyhub-daemon/src/config.ts`（DEFAULT_CONFIG_DIR = ~/.sillyhub/daemon）。
+- `sillyhub-daemon/src/credential.ts:31-55`（credentials.json 0600 原子写模式参考）。
+- `backend/app/modules/daemon/service.py`（task-05 `_get_owned_session_for_update` / `_publish_session_event` 容错模式参考）。
 
-### Step 2：SSE parser/client（Red）
+## 10. TDD 实施顺序
 
-- fake EventSource 覆盖命名 `turn/log/turn_done/done`、lastEventId、parse error、session mismatch、turn_done 不 close、done 幂等 close。
-- 实现 `streamSession`；旧 `streamQuickChat` 测试/代码不改。
+严格"测试先红 → 最小实现 → 重构 → 全量回归"。SDK 调用一律 mock（不连真实 bigmodel，避免 CI 依赖网络/鉴权）；spike D3 已在仓库外 sandbox 证毕，本任务测试用 mock SDK 复现 resume 形态。
 
-### Step 3：SSE route proxy（Red）
+### Step 1：文件 schema 与原子写（Red）
 
-- 测试 token/cursor/Last-Event-ID/Accept/signal 转发、错误状态透传、成功流 headers。
-- 参照现有 daemon-chat route 最小实现 session route。
+- 写 `session-store-persistence.test.ts`：
+  - 不存在文件 → load 返回 `[]`（不 warn、不创建）。
+  - 合法 v1（含 1-2 条 PersistedSessionRecord）→ load 返回原结构。
+  - 非法 version（version=2 / 缺 version）→ quarantine + 空集合。
+  - 损坏 JSON（截断 / 非法字符）→ 重命名为 `sessions.json.corrupt-<epoch>` + 空集合。
+  - save 用临时文件 + rename（mock fs.writeFile/rename 验证调用顺序）；并发 save 经 promise queue 串行（最后一条 win）。
+  - save 内容不含 token/prompt/output（白名单过滤断言）。
+  - `0o600` 权限调用（Windows 无效但保留）。
+- 红后实现 `JsonSessionPersistence`；不接 daemon 生命周期。
 
-### Step 4：组件 create + 跨 turn（Red）
+### Step 2：SessionManager snapshot/restore（Red）
 
-- 提取并渲染 `InteractiveSessionPanel`；mock API 与 stream。
-- 首发 create；SSE log 写首 turn；turn_done 后追问 inject；断言 streamSession 只调用一次；第二 run 输出不污染第一 run。
+注入 mock ClaudeSdkDriver + mock SessionStorePersistence（spy load/save）+ mock deps：
 
-### Step 5：interrupt/end（Red）
+- `snapshotPersistable`：active session + agentSessionId 非空 → 在结果中；ended/failed/agentSessionId 空 → 不在。
+- `restoreAndReconnect(record)`：
+  - 构造 fresh InputQueue（mock 验证不恢复旧队列）。
+  - state.status='reconnecting'、currentRunId=undefined、agentSessionId=record.agentSessionId、cwd=record.cwd 写入 _store。
+  - driver.start 调用一次，opts.resume === record.agentSessionId、opts.cwd === record.cwd（R-cwd 断言）。
+  - driver.start 抛 ClaudeExecutableNotFoundError → onError → fail → onSessionEnd(failed)；记录从 _store 移除。
+  - driver.consume fire 后台协程（mock 验证不阻塞 restoreAndReconnect 返回）。
+- `markReconnected`：reconnecting → active；flush 调用一次；非 reconnecting 状态调 → 抛错。
+- `flush`：把 snapshotPersistable 结果调 persistence.save。
+- 恢复期 driver.start 调用次数 = 1（per session），不 push 任何 SDKUserMessage（resume 不带 prompt，spike D3）。
+- 红后实现 session-manager.ts 扩展。
 
-- 覆盖 interrupt 仅收敛当前 turn且 session active、run id mismatch、no-current-run、end/done 竞态、end 网络失败可重试、新建前先 end。
-- 最小实现显式状态机，避免散落 boolean。
+### Step 3：backend recover service（Red）
 
-### Step 6：重连/去重/清理（Red）
+- 写 `test_session_recovery.py`（如 task-05 未覆盖）：
+  - session/lease/runtime/provider 所有权匹配 → status=reconnecting、currentRun failed(daemon_restarted)。
+  - interrupted_run_id 已终态 → 幂等，不改完成结果。
+  - interrupted_run_id 指向别的 session → invariant violation。
+  - 同 session 另一个非终态 run → invariant violation。
+  - session 已 ended/failed → 返回终态，不复活。
+  - runtime/lease/provider 不匹配 → rejected。
+  - PostgreSQL 下并发 recover 同 session → 串行（FOR UPDATE）。
+- 红后实现 `recover_session_after_daemon_restart`；不修改 task-05 既有 4 方法。
 
-- 重复 boundary/log 不重复；unknown run log upsert；unmount close；旧 connection callback 不更新新 session。
-- 抽纯 reducer/helper 后重构，保证 run id 是唯一 identity。
+### Step 4：daemon 启动编排（Red）
 
-### Step 7：页面集成与回归
+mock persistence + mock HubClient + mock SessionManager，在 daemon 启动函数注入：
 
-- `/runtimes` 接入新组件，保留 provider/model/日志区；grep 确认新面板不调用 `quickChat(...prevRunId)`。
-- 运行定向测试、typecheck、全量 frontend test/build。
+- load 返回 2 条记录 → 对每条调 HubClient.recoverSession。
+- backend status=reconnecting → 调 SessionManager.restoreAndReconnect + markReconnected + HubClient.confirmReconnected。
+- backend status=ended/failed/rejected → 不调 restoreAndReconnect；persistence 从记录移除。
+- restoreAndReconnect 抛错 → sessionManager.fail + HubClient.markRecoveryFailed + 移除记录；继续下一条。
+- 全部恢复完成后才启动三循环（heartbeat/poll/ws）——断言 loops 启动在 restoreAndReconnect 之后。
+- 限流 4 并发（5 条记录时第 5 条等前面有 slot）。
+- 红后修改 daemon.ts 启动编排。
 
-## 10. 验收标准
+### Step 5：resume query 集成（Red）
+
+- mock ClaudeSdkDriver：`start(input, opts)` 断言 `opts.resume === record.agentSessionId`、`opts.cwd === record.cwd`、`opts.pathToClaudeCodeExecutable` 非空。
+- 恢复后模拟 SESSION_INJECT：调 `sessionManager.inject(sessionId, prompt, newRunId)` → InputQueue.push 被调（mock 验证）；driver.consume 在恢复后收到 push 跑新 turn（mock SDK 吐 result）→ onTurnResult。
+- 断言新 run_id 与崩溃 run_id 不同；旧 Query 句柄未被引用（_store 中 state.query 是新对象）。
+- cwd 不一致场景：mock driver.start 抛错 → fail → onSessionEnd(failed)；记录移除。
+
+### Step 6：回归
+
+```bash
+cd sillyhub-daemon
+pnpm test -- session-store-persistence session-recovery daemon-recovery-boot
+pnpm test -- claude-sdk-driver session-manager input-queue daemon-kind-dispatch   # task-04 回归
+pnpm typecheck
+pnpm test      # 全量回归，batch 测试零失败
+
+cd ..
+uv run pytest backend/app/modules/daemon/tests/test_session_recovery.py backend/app/modules/daemon/tests/test_session_service.py
+uv run ruff check backend/app/modules/daemon
+```
+
+若 `.sillyspec/local.yaml` 定义了替代命令，以该文件为准。PostgreSQL 才能证明 `FOR UPDATE` 并发语义；SQLite 只用于分支单测。
+
+## 11. 验收标准
 
 | ID | 验证步骤 | 通过标准 | 覆盖 |
 |---|---|---|---|
-| AC-10-01 | 首次输入 prompt | 仅调用 create；保存 session/run；建立一个 session SSE | FR-10 |
-| AC-10-02 | 首 run 产生 turn/log/turn_done | 独立 turn 实时渲染；turn_done 后连接仍 open、输入可追问 | FR-10 / FR-03 |
-| AC-10-03 | 发送第二条 prompt | 调 inject 创建新 run；`streamSession` 累计仍只调用一次 | FR-10 / D-002@v2 |
-| AC-10-04 | 第二 run 输出 | 只追加到第二 turn，第一 turn 内容不变；重复 log 不重复 | D-005@v1 |
-| AC-10-05 | 运行中点击打断 | `/interrupt` 一次；session 仍 active；最终只由对应 turn_done 收敛 currentRun | FR-10 / FR-04 |
-| AC-10-06 | 打断后继续追问 | currentRun 清空后 inject 成功创建下一 run，不新开 SSE | FR-10 |
-| AC-10-07 | 点击结束会话 | `/end` 一次；done/REST 竞态幂等；session ended、SSE closed、发送禁用 | FR-10 / FR-05 |
-| AC-10-08 | SSE 断线重连 | Last-Event-ID/cursor 正确续流；turn_done 不 close；done 才 close | D-005@v1 |
-| AC-10-09 | create/inject/interrupt/end 错误 | 409/404/网络错误按边界表处理，不伪造 session/run 终态 | 健壮性 |
-| AC-10-10 | 页面切换/新建 | 旧 EventSource close；active session 必须 end 成功后才清空 | 资源收口 |
-| AC-10-11 | 运行旧 quick-chat/API 测试 | 旧函数、run SSE 和 batch 使用者无回归 | brownfield |
-| AC-10-12 | 运行定向与全量命令 | session 客户端/组件/route 测试、typecheck、test、build 全通过 | 工程约束 |
+| AC-10-01 | active session 完成一轮（首 turn result + agentSessionId 写入）后查 sessions.json | v1 JSON 只含白名单元数据；有 agentSessionId + cwd；无 token/prompt/output/Query/InputQueue | FR-08 |
+| AC-10-02 | running turn 中 kill daemon，再启动 | 旧 currentRun=failed 且 error=`daemon_restarted`；session 出现 reconnecting→active；启动期 driver.start（新 Query）=1 次，spawn 旧进程 = 0 次 | FR-08 / D-003@v1 |
+| AC-10-03 | 恢复后查 driver.start 参数 | opts.resume === 持久化 agentSessionId；opts.cwd === 持久化 cwd（R-cwd 还原，spike D3） | FR-08 / R-cwd |
+| AC-10-04 | 恢复后对 session 发下一次 inject | 新 AgentRun、新 turn；resume Query 在恢复上下文基础上跑（mock SDK 验证 InputQueue.push → result）；新 run_id 与崩溃 run_id 不同 | FR-08 / spike D3 |
+| AC-10-05 | backend 对账 currentRun | 只收敛持久化 currentRunId；已终态不覆盖；跨 session id 被拒绝（invariant） | FR-08 |
+| AC-10-06 | 损坏 / 未知版本 sessions.json 启动 | 文件被 quarantine（重命名 corrupt-<epoch>）；daemon 正常启动；不恢复半条记录、不 spawn | FR-08 / 健壮性 |
+| AC-10-07 | ended/failed session 残留记录 | backend 拒绝复活（返回 ended/failed）；daemon 清记录；session/lease 终态不变 | FR-08 |
+| AC-10-08 | 多 session 恢复且一条 driver.start 抛错 | 其它记录正常 reconnecting→active；失败项 failed 并移除；日志不含 token/prompt | FR-08 |
+| AC-10-09 | runtime/lease/provider 不匹配 | recover 返回 rejected；daemon 删记录；不旋转 token、不建本地 session | FR-08 |
+| AC-10-10 | resume cwd 不一致 | driver.start 抛错（SDK 找不到 jsonl）→ fail → onSessionEnd(failed)；记录移除；R-cwd 兜底 | R-cwd / spike D3 |
+| AC-10-11 | SDK jsonl 缺失（用户清 ~/.claude） | driver.start({resume}) onError → fail；记录移除；不直接检测 jsonl | spike D3 |
+| AC-10-12 | agentSessionId 缺失（首 turn 前崩溃） | 不写入 sessions.json；backend 默认路径标 failed；不进恢复分支 | D-003@v1 |
+| AC-10-13 | 运行 batch 回归 | batch lease 不落盘、不调 recover endpoint；现有 claim/expire/cancel/TaskRunner 全绿（FR-09 守门） | FR-09 |
+| AC-10-14 | 运行定向与全量测试 | daemon typecheck/test（含 task-04 回归）+ backend pytest/ruff 全通过；diff 只在 allowed_paths 内 | 工程约束 |
+| AC-10-15 | Wave1/2 行为（删 sessions.json） | daemon 崩溃 → backend task-05 标 failed（无 reconnecting 分支）；回退路径成立 | D-003@v1 |
 
-## 11. 验证命令
+## 12. 完成定义
 
-先读取 `.sillyspec/local.yaml`。当前 frontend 命令为：
-
-```powershell
-Set-Location frontend
-pnpm test -- src/lib/__tests__/daemon-session.test.ts src/components/daemon/__tests__/interactive-session-panel.test.tsx
-pnpm typecheck
-pnpm test
-pnpm build
-```
-
-route handler 测试若 Vitest 的 glob 不能随上面定向路径发现，显式追加：
-
-```powershell
-pnpm test -- "src/app/api/daemon/sessions/[sessionId]/stream/__tests__/route.test.ts"
-```
-
-联调由 task-06 覆盖真实 create → 首 turn → inject → interrupt → 再 inject → end。task-04/task-05 未合并时只能报告依赖未满足，不得用旧 quick-chat 假装完成 session 链路。
-
-## 12. 非目标与完成定义
-
-非目标：permission request/response UI、manual approval 开关、session 列表、跨 AgentRun 历史查询、daemon restart reconnecting UI、持久化当前 session 到 localStorage、运行中 prompt 排队。
-
-完成条件：一个 `/runtimes` 会话面板可用单一 SSE 连接完成多个顺序 turn；用户可以明确打断 currentRun 后继续追问，也可以结束整个 session；所有事件按 run id 隔离，终态和错误分支可由自动化测试证明，且旧 quick-chat/run SSE 无回归。
+- D-003@v1（Wave3 resume）在代码与测试中有直接证据：sessions.json 持久化 + 启动加载 + `query({resume:agent_session_id})` 跨进程恢复（spike D3 形态）+ reconnecting 状态流转。
+- spike D3 的"SDK 自动持久化 + 跨进程 resume + 固定 cwd"结论均有对应实现落点：daemon 只持久化元数据、不管理 jsonl；恢复用 driver.start({resume})；cwd 还原（R-cwd）。
+- FR-08 全链路（崩溃 → 持久化加载 → backend 收敛 currentRun → reconnecting → driver resume → active → 下一 inject 上下文连续）由自动化测试证明。
+- AC-10-01 ~ AC-10-15 全部通过；所有异常路径有明确错误码，禁止裸 `try/catch` 吞错。
+- batch 路径（FR-09）与 task-04 SessionManager 既有逻辑零回归。
+- 未越过 allowed_paths：未改 claude-sdk-driver.ts / input-queue.ts / task-runner.ts / protocol.ts / frontend / SDK jsonl 文件 / AgentSession model。

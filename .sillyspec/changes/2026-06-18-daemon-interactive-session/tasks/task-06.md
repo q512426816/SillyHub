@@ -1,357 +1,351 @@
 ---
-id: task-06
-title: spawn + resume 生命周期联调、并发 inject 防重与空闲回收
-wave: W5
-priority: P0
-depends_on: [task-03, task-04, task-05]
-blocks: [task-09]
-requirement_ids: [FR-01, FR-02, FR-04, FR-05, FR-06]
-decision_ids: [D-002@v2, D-004@v1, D-005@v1]
-allowed_paths:
-  - sillyhub-daemon/src/config.ts
-  - sillyhub-daemon/src/session-store.ts
-  - sillyhub-daemon/src/hub-client.ts
-  - sillyhub-daemon/src/daemon.ts
-  - sillyhub-daemon/tests/config.test.ts
-  - sillyhub-daemon/tests/session-store.test.ts
-  - sillyhub-daemon/tests/daemon-session-idle.test.ts
-  - sillyhub-daemon/tests/hub-client.test.ts
-  - backend/app/modules/daemon/schema.py
-  - backend/app/modules/daemon/router.py
-  - backend/app/modules/daemon/service.py
-  - backend/app/modules/daemon/tests/test_session_service.py
-  - backend/app/modules/daemon/tests/test_interactive_session_lifecycle.py
-  - deploy/.env.example
 author: qinyi
-created_at: 2026-06-18 15:31:03
+created_at: 2026-06-18T22:41:08
+change: 2026-06-18-daemon-interactive-session
+id: task-06
+title: "session 级 SSE 聚合：submit_messages 双 publish + stream_session_logs（D-002@v3）"
+wave: W3
+priority: P0
+estimated_hours: 12
+depends_on: [task-02, task-05]
+blocks: [task-11]
+requirement_ids: [FR-03]
+decision_ids: [D-005@v1]
+allowed_paths:
+  - backend/app/modules/agent/service.py
+  - backend/app/modules/daemon/service.py
+  - backend/app/modules/daemon/router.py
 ---
 
-# spawn + resume 生命周期联调、并发 inject 防重与空闲回收
+# task-06 — session 级 SSE 聚合：submit_messages 双 publish + stream_session_logs
 
-## 1. 目标与硬约束
+> 以 `plan.md` v3 显式 task-06 为准（"session 级 SSE 聚合——submit_messages 双 publish + stream_session_logs，覆盖 FR-03 / D-005@v1, R-08"）。本任务保留 v2 蓝图的 SSE 聚合职责与接口设计，并按 v3 更新引用：v2 plan 中"session SSE 聚合"归 task-05；v3 plan 把 SSE 聚合独立成 task-06（W3，depends_on=[task-02, task-05]），task-05 降为 backend session REST/service/placement（create/inject/interrupt/end_session）。依据 `design.md` §7.5（session 级 SSE 聚合）、§8.4（三元关系）、`requirements.md` FR-03、`decisions.md` D-005@v1、风险登记 R-08，以及当前 `stream_run_logs`（`backend/app/modules/agent/service.py:542`）、`submit_messages`（`backend/app/modules/daemon/service.py:733`）与 Redis Pub/Sub 的真实实现。
 
-依据 `plan.md` 显式 task-06、`design.md` 的 D-002@v2 / §8.5、`decisions.md` 的 D-004@v1，本任务完成 Wave 5 的生命周期收口：
+## 1. 目标
 
-1. Claude 与 Codex 各跑通“创建 session → 首 turn 独立 spawn → 第二 turn 新 spawn + resume → interrupt 当前 turn → 后续继续 → end”端到端链路。
-2. backend 与 daemon 两层都阻止同一 AgentSession 的并发 inject；冲突请求不得遗留多余 AgentRun，也不得重复 spawn。
-3. daemon 对 `active` 且空闲达到 `session_idle_timeout_sec`（默认 1800 秒）的会话执行自动回收。
-4. 手动 end、idle timeout、重复/竞态 end 的数据库终态全部调用 `DaemonService.end_session(...)`；不得另写 session/lease 终态更新分支。
-5. `interrupt` 只终止当前 AgentRun 对应的 turn 进程，AgentSession 与 interactive lease 保持可继续；只有 `end_session` 完成 session/lease。
-6. interactive lease 不进入 batch lease expiry；batch lease、run 级 SSE 与现有 workspace AgentRun 行为不变。
+为一个 `AgentSession` 提供一个稳定 SSE 地址，单连接贯穿整个会话生命周期，跨多个 turn（AgentRun）不中断：
 
-本任务禁止恢复旧蓝图：不得在 turn 间复用 child/stdin/adapter，不得在 `result` 后保持 stdin 开放，不得要求 spike-01 的长驻进程验证通过。每个 turn 都必须由 task-03 的 `runTurn` 新建进程，后续 turn 只通过 Claude `--resume` 或 Codex `thread/resume` 延续上下文。
+```http
+GET /api/daemon/sessions/{session_id}/stream
+```
 
-## 2. 覆盖范围与前置契约
+该连接必须满足 FR-03 与 R-08：
 
-执行前再次用 `rg` 确认接口存在；若 task-03/04/05 实现签名与蓝图不同，先更新本文再写代码，不得猜测方法。
+1. backend 订阅 session 级 Redis channel `agent_session:{session_id}`，跨多个 turn 持续推送；前端不再随 run_id 切换而断流。
+2. 每个业务事件携带 `session_id` + `run_id`，前端用 `run_id` 区分 turn 边界（D-005@v1）。
+3. session 结束（status=ended/failed）时关闭连接；单 turn 完成只结束 turn，不关 session SSE。
+4. `submit_messages` 对 interactive run 双 publish：`agent_run:{run_id}`（保留原行为）+ `agent_session:{session_id}`（带 run_id 标记）；batch run 不发 session channel。
+5. 不删除、不改名现有 `stream_run_logs` 与 `agent_run:{run_id}`；batch / quick-chat / workspace AgentRun 路径零回归。
 
-| 来源 | 本任务依赖的契约 |
+本任务覆盖 FR-03、D-005@v1、R-08。数据模型（agent_sessions 表、agent_runs.agent_session_id FK）由 task-02 落地；backend session REST/service（create/inject/interrupt/end_session、`_publish_session_event` helper）由 task-05 落地；前端消费由 task-11 实现。
+
+## 2. 覆盖来源
+
+| 来源 | 本任务依赖 / 覆盖点 |
 |---|---|
-| task-03 | `SessionStore.create/get/startTurn/interrupt/end`；`SessionState.lastActiveAt`；同 session 原子 `active → running`；`TaskRunner.runTurn` 每次新 spawn，结果携带 `sessionId`；Claude/Codex resume 失败不降级新上下文 |
-| task-04 | `DaemonService.create_session/inject_session/interrupt_session/end_session`；session REST；interactive lease `lease_expires_at=NULL`；`end_session` 同步 session、lease、非终态 runs |
-| task-05 | `AgentService.stream_session_logs`；`agent_session:{session_id}` 双 publish；`end_session` publish `session_ended` 并令 SSE 发 done |
-| 当前 daemon | `src/daemon.ts` 用 `_fire` 管理 heartbeat/poll/ws 循环；`src/config.ts` 的 `DaemonConfig`/`DEFAULT_CONFIG` 是本地配置唯一入口 |
-| 当前 backend | `service.py` 的 `expire_leases` 仅处理有 expiry 的 claimed/pending lease；`handle_lease_expiry` 是 batch run 恢复路径，interactive session 不复用 |
-| 当前 REST client | `src/hub-client.ts` 的 `_request` 统一处理 daemon→backend HTTP；本任务新增 idle-end 通知必须复用它，不直接散落 `fetch` |
+| `design.md` §7.5 | session 级 Redis channel `agent_session:{session_id}`；submit_messages 双 publish（run 级保留 + session 级带 run_id 标记）；新增 `stream_session_logs(session_id)` 订阅 session channel |
+| `design.md` §8.4（D-005@v1） | session↔runs 1:N（`agent_runs.agent_session_id`），每 turn（SDK result）一个 run；聚合字段只能用 `AgentRun.agent_session_id`，禁止混用 `AgentRun.session_id`（claude resume 语义） |
+| `requirements.md` FR-03 | 单 SSE 连接贯穿会话直到 ended，事件含 run_id 区分 turn 边界 |
+| `decisions.md` D-005@v1 | (b) 新增 session 级 Redis channel + submit_messages 双 publish + stream_session_logs |
+| `design.md` R-08 | session SSE 跨 turn 聚合（D-005 session 级 channel + 双 publish） |
+| `plan.md` v3 task-06 | W3，depends_on=[task-02, task-05]，blocks=[task-11]；保留 v2 内容更新引用到 D-002@v3 |
+| `backend/app/modules/agent/service.py:542` | 现有 `stream_run_logs`（run 级，订阅 `agent_run:{run_id}`），作为本任务 SSE 生成器与 keepalive/error/finally 资源清理范式参考 |
+| `backend/app/modules/daemon/service.py:733` | 现有 `submit_messages`（已 publish 扁平 log + summary 到 `agent_run:{run_id}`），双 publish 追加点 |
 
-| ID | 本任务覆盖点 |
+## 3. 修改文件
+
+| 文件 | 改动 |
 |---|---|
-| FR-01 | 联调 AgentSession、interactive lease 与每 turn AgentRun 的完整创建/执行关系 |
-| FR-02 | inject 原子创建下一 AgentRun，并以新进程 resume；并发请求只允许一个成功 |
-| FR-04 | interrupt 仅终止 currentRun，session 保持 active 且可继续 resume |
-| FR-05 | 手动与自动结束统一收敛 session、lease、非终态 run 和 session SSE |
-| FR-06 / D-004@v1 | daemon 默认 1800 秒 active-idle 检测与自动回收 |
-| D-002@v2 | 每 turn 独立 spawn，Claude `--resume` / Codex `thread/resume`，不跨 turn 保存进程 |
-| D-005@v1 | session/lease/run 三元关系与 `DaemonService.end_session` 单一收口保持一致 |
+| `backend/app/modules/agent/service.py` | 新增 `stream_session_logs(agent_session_id, *, session)` 异步生成器：DB 历史回放 + Redis session channel 续流；复用现有 SSE frame/keepalive/error/finally 范式 |
+| `backend/app/modules/daemon/service.py` | `submit_messages` 对 interactive run 追加 session channel publish（双 publish）；batch run（`agent_session_id IS NULL`）零变化 |
+| `backend/app/modules/daemon/router.py` | 新增 `GET /sessions/{session_id}/stream` 路由，校验 session 所有权，返回 `StreamingResponse`（`text/event-stream`） |
 
-扫描文档仍包含旧 Python daemon 描述；与当前 TypeScript 源码冲突时，以 `sillyhub-daemon/src/*.ts` 和已确认模块卡为准。
+测试文件不在本任务 `allowed_paths` 内，按项目惯例挂到 `backend/app/modules/agent/tests/` 与 `backend/app/modules/daemon/tests/`（由 execute 阶段在测试目录创建，不违反 allowed_paths 对实现文件的限制）。
 
-## 3. 涉及文件
+## 4. 接口定义（搬砖级）
 
-| 操作 | 文件 | 责任 |
-|---|---|---|
-| 修改 | `sillyhub-daemon/src/config.ts` | 增加 `session_idle_timeout_sec` 与 `session_idle_scan_interval_sec`，默认分别为 1800/60，并做有限值归一化 |
-| 修改 | `sillyhub-daemon/src/session-store.ts` | 明确活动时间刷新规则；新增只返回候选的 `listIdleSessions`；保持 store 不持有进程对象 |
-| 修改 | `sillyhub-daemon/src/hub-client.ts` | 新增 daemon-originated idle end 通知方法，复用 REST_PREFIX、鉴权和统一错误处理 |
-| 修改 | `sillyhub-daemon/src/daemon.ts` | 挂载可取消 idle scan loop；先本地 end，再通知 backend 走统一 `end_session`；单 session 失败不影响扫描其它 session |
-| 修改 | `sillyhub-daemon/tests/config.test.ts` | 配置默认值、非法值回退与 scan interval 上界测试 |
-| 修改 | `backend/app/modules/daemon/schema.py` | 新增 daemon 内部 end 通知 payload（`lease_id`、受限 `reason`），若 task-02 已定义则复用 |
-| 修改 | `backend/app/modules/daemon/router.py` | 增加 daemon-originated end 通知端点；只做鉴权/参数转换并调用 service，不直接改 ORM |
-| 修改 | `backend/app/modules/daemon/service.py` | inject 加数据库行锁与非终态 run 防重；`end_session` 增加 origin/notify_daemon 控制并保持唯一终态收口、幂等与 session SSE 终态发布 |
-| 修改 | `deploy/.env.example` | 记录 daemon 本地配置方式或 backend 对应默认值；不得让两端出现不一致的隐式默认 |
-| 新增/修改 | `sillyhub-daemon/tests/session-store.test.ts` | idle 边界、活动刷新、并发与 end 竞态 |
-| 新增 | `sillyhub-daemon/tests/daemon-session-idle.test.ts` | fake timers 驱动扫描循环与 backend 通知 |
-| 修改 | `sillyhub-daemon/tests/hub-client.test.ts` | idle end 请求路径、body、鉴权、错误透传 |
-| 新增/修改 | `backend/app/modules/daemon/tests/test_session_service.py` | inject 行锁防重、end 单一收口、idle origin、幂等/竞态 |
-| 新增 | `backend/app/modules/daemon/tests/test_interactive_session_lifecycle.py` | Claude/Codex spawn+resume、多 run SSE、interrupt/end/idle 集成 |
-
-不修改前端 UI（task-10/11）、permission 流程（task-07/08）或磁盘恢复（task-09）。
-
-## 4. 精确接口
-
-### 4.1 daemon 配置
-
-```typescript
-export interface DaemonConfig {
-  // existing fields...
-  session_idle_timeout_sec: number;
-  session_idle_scan_interval_sec: number;
-}
-
-export const DEFAULT_CONFIG = Object.freeze({
-  // existing defaults...
-  session_idle_timeout_sec: 1800,
-  session_idle_scan_interval_sec: 60,
-});
-```
-
-`loadConfig` 对用户 JSON 做运行时归一化：timeout 必须是有限正数，最小 60 秒；scan interval 必须是有限正数，最小 1 秒且不得大于 timeout。非法值回退默认并记录一次 warn 的位置由 daemon 启动层负责；禁止直接读取 `process.env` 绕过 config。
-
-### 4.2 SessionStore idle 查询
-
-沿用 task-03 的 camelCase：
-
-```typescript
-export interface IdleSessionCandidate {
-  sessionId: string;
-  leaseId: string;
-  lastActiveAt: number;
-}
-
-export class SessionStore {
-  listIdleSessions(nowMs: number, idleTimeoutMs: number): IdleSessionCandidate[];
-}
-```
-
-语义：
-
-- 只返回 `status === 'active'` 的 session；`running`/`interrupting` 不在扫描结果，避免把长 turn 当空闲。
-- 满足 `nowMs - lastActiveAt >= idleTimeoutMs` 才返回；方法纯查询，不改状态、不 cancel、不发 HTTP。
-- `create`、成功接受 `startTurn`、turn 收敛回 active、interrupt 收敛回 active 时更新 `lastActiveAt`。
-- 被拒绝的并发 inject、只读 get、idle scan 本身不刷新时间。
-- `SessionState` 继续禁止 child/stdin/adapter/readline 字段。
-
-### 4.3 daemon → backend idle end
-
-HubClient 新增：
-
-```typescript
-interface SessionEndNoticeBody {
-  lease_id: string;
-  reason: 'idle';
-}
-
-class HubClient {
-  endSessionFromDaemon(
-    sessionId: string,
-    body: SessionEndNoticeBody,
-  ): Promise<Record<string, unknown>>;
-}
-```
-
-建议端点：
+### 4.1 Redis channel
 
 ```text
-POST /api/daemon/sessions/{session_id}/end-notify
-body: {"lease_id":"...","reason":"idle"}
+agent_run:{run_id}         # 现有，保持不变（run 级实时流）
+agent_session:{session_id} # 新增，session 级聚合实时流
 ```
 
-该端点是 daemon 身份调用面，不复用用户手动 end 的请求 schema。router 必须验证 daemon principal，并把 `notify_daemon=False` 传给 service，避免 daemon 已本地 end 后 backend 再发 SESSION_END 形成回环。若现有认证依赖无法区分 daemon API key，则沿用 daemon lease 端点相同的认证依赖，不新增无认证入口。
+约束：
 
-### 4.4 `DaemonService.inject_session` 防重
+- 只有 `AgentRun.agent_session_id IS NOT NULL`（interactive run）才发布 session channel。
+- batch run（`agent_session_id=NULL`）只走原 `agent_run:{run_id}`，session channel 零发布。
 
-对 task-04 接口保持兼容，内部增加事务门：
+### 4.2 session channel 事件 payload（含 run_id 标记）
+
+session channel 的每条 message 是 JSON，统一携带 `run_id` 区分 turn 边界：
+
+```json
+{
+  "event": "log",
+  "session_id": "uuid",
+  "run_id": "uuid",
+  "log_id": "uuid",
+  "channel": "stdout",
+  "content": "redacted content",
+  "timestamp": "2026-06-18T22:41:08.123456Z"
+}
+```
+
+session/turn 终态事件（由 task-05 的 `_publish_session_event` helper 在 `end_session` / run 收敛点发布，本任务只消费不重复定义）：
+
+```json
+{ "event": "turn_completed", "session_id": "uuid", "run_id": "uuid", "status": "completed", "exit_code": 0 }
+{ "event": "session_ended",   "session_id": "uuid", "run_id": null,  "status": "ended", "reason": "manual" }
+```
+
+约束：
+
+- `log` 事件必须含 `session_id/run_id/log_id/timestamp/channel/content`；`content` 来自 `content_redacted`（已脱敏）。
+- 不把 summary（`submit_messages` 现有 `event:"messages"` 聚合事件）作为 session log 发布——summary 无 `log_id`，不进入 session SSE 的稳定日志序列，session channel 只发布带 `log_id` 的扁平 log。
+- `session_ended` 对应 SSE `event: done`，`run_id=null`；只有 session 终态关闭连接。
+
+### 4.3 `stream_session_logs` 签名（agent/service.py）
 
 ```python
-async def inject_session(
+async def stream_session_logs(
     self,
-    session_id: uuid.UUID,
+    agent_session_id: uuid.UUID,
     *,
-    prompt: str,
-) -> AgentRun: ...
+    session: AsyncSession | None = None,
+) -> AsyncGenerator[str, None]:
+    """Yield SSE formatted events aggregating all AgentRuns of an AgentSession.
+
+    Subscribes to the ``agent_session:{session_id}`` Redis Pub/Sub channel so
+    that a single client connection survives across multiple turns (run_id
+    changes). Emits ``data`` events for each structured log message, a ``done``
+    event when the session reaches a terminal status, and ``: keepalive``
+    comments every ~30 seconds of silence.
+
+    Unlike ``stream_run_logs`` (run-scoped), this generator aggregates every
+    AgentRun whose ``agent_session_id`` matches and surfaces ``run_id`` on each
+    event so the frontend can delineate turn boundaries (D-005@v1).
+    """
 ```
 
-固定顺序：
+固定算法（参考现有 `stream_run_logs:542` 的 SSE/keepalive/error/finally 范式）：
 
-1. `SELECT AgentSession ... FOR UPDATE` 锁 session 行。
-2. 校验 status=`active`。
-3. 查询该 session 是否存在 `AgentRun.status IN ('pending', 'running')`；存在则抛 `DaemonSessionTurnConflict`（409），不得创建新 run、不得增加 turn_count、不得发 WS。
-4. 创建唯一新 AgentRun，更新 `turn_count`、`last_active_at`，flush/commit。
-5. 发送 SESSION_INJECT。
-6. WS 发送失败保持 task-04 已定义的 pending run 可观察语义；但后续 retry 必须先由明确的失败/补偿路径收敛该 pending run，不能绕过非终态检查再造一个 run。
+1. `redis = get_redis(); pubsub = redis.pubsub()`；`yield ": connected\n\n"`。
+2. `await pubsub.subscribe(f"agent_session:{agent_session_id}")`。
+3. **竞态守卫**：subscribe 完成后，若 `session` 提供，查询 `AgentSession.status`：
+   - 若已 `ended/failed`：先发 `event: done`（status/reason），再 return；不得因 session 已终态跳过任何尚未发出的历史（本任务最小实现不强制 DB 历史回放，见 §6 边界 6，但 ended 必须立即 done）。
+   - 若 `active/reconnecting`：进入 Pub/Sub 循环。
+4. Pub/Sub 循环：`asyncio.wait_for(pubsub.get_message(timeout=25), timeout=30)`：
+   - `TimeoutError` → `yield ": keepalive\n\n"`，continue。
+   - 收到 `type=="message"`：`json.loads` 解析 payload：
+     - `payload["event"] == "session_ended"` → 发 `event: done\ndata: {status, reason}\n\n`，break。
+     - 其他结构化事件（`log` / `turn_completed`）→ `yield f"data: {raw_json}\n\n"`（保持原 payload 含 run_id 透传给前端）。
+   - 非 message（None）→ `yield ": keepalive\n\n"`。
+5. `except Exception` → `yield 'event: error\ndata: {"error": "redis connection failed"}\n\n'`（不泄漏敏感异常文本）。
+6. `finally` → `await pubsub.unsubscribe(channel); await pubsub.close()`（资源清理必须执行）。
 
-数据库行锁负责“不产生重复 AgentRun”，task-03 SessionStore 状态门负责“不重复 spawn”；两层均需测试，不能只依赖 fire-and-forget WS 的 daemon 检查。
+每个透传的 `data` 事件天然含 `run_id`，前端按 `run_id` 分 turn；本任务不在 backend 内做 turn_started 边界注入（保持最小实现，与现有 `stream_run_logs` 的扁平 `data` 透传风格一致）。
 
-### 4.5 `DaemonService.end_session` 单一收口
+### 4.4 submit_messages 双 publish（daemon/service.py:733）
+
+在现有 `submit_messages` 的 Redis publish 段（`service.py:845-863`）追加 session channel 发布，**不改动** run channel 的 payload、顺序和 try/except：
 
 ```python
-async def end_session(
-    self,
+# 现有（保持不变）：
+try:
+    redis = get_redis()
+    run_channel = f"agent_run:{agent_run_id}"
+    for log_payload in published_logs:
+        await redis.publish(run_channel, json.dumps(log_payload))
+    summary_payload = {"event": "messages", "lease_id": ..., "count": count, ...}
+    await redis.publish(run_channel, json.dumps(summary_payload))
+except Exception:
+    log.warning("daemon_messages_redis_publish_failed", ...)
+
+# 新增（interactive run 双 publish）：
+# agent_run 在循环前已 self._session.get；此处取其 agent_session_id。
+# batch run agent_session_id IS NULL → 跳过 session channel。
+if agent_run is not None and agent_run.agent_session_id is not None:
+    session_channel = f"agent_session:{agent_run.agent_session_id}"
+    try:
+        for log_payload in published_logs:
+            session_payload = {
+                "event": "log",
+                "session_id": str(agent_run.agent_session_id),
+                "run_id": str(agent_run_id),
+                "log_id": log_payload["log_id"],
+                "channel": log_payload["channel"],
+                "content": log_payload["content"],
+                "timestamp": log_payload["timestamp"],
+            }
+            await redis.publish(session_channel, json.dumps(session_payload))
+    except Exception:
+        log.warning(
+            "daemon_messages_session_redis_publish_failed",
+            lease_id=str(lease_id),
+            agent_run_id=str(agent_run_id),
+            agent_session_id=str(agent_run.agent_session_id),
+        )
+```
+
+约束：
+
+1. 保留现有 DB commit（`service.py:839`）和 `agent_run:{run_id}` 发布顺序/格式/payload 不变。
+2. 从已查询的 `agent_run.agent_session_id` 取 session id；**禁止**用 `AgentRun.session_id`（claude resume 语义，D-001）。
+3. session channel 只发布带 `log_id` 的扁平 log；**不**发布 `summary_payload`（无 log_id，不可作稳定日志序列）。
+4. batch run（`agent_session_id IS NULL`）零 session channel 发布。
+5. run channel 与 session channel **分别 try/except**：session publish 失败不得跳过/破坏现有 run publish，不得回滚已提交的 AgentRunLog。重连后前端从新的 session SSE 连接补齐（Redis Pub/Sub 无历史，丢失的实时事件不影响 DB 真相）。
+
+### 4.5 Router（daemon/router.py）
+
+```python
+@router.get("/sessions/{session_id}/stream")
+async def stream_session_logs(
     session_id: uuid.UUID,
-    *,
-    reason: Literal["manual", "idle", "failed"] = "manual",
-    notify_daemon: bool = True,
-    expected_lease_id: uuid.UUID | None = None,
-) -> AgentSession: ...
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> StreamingResponse:
+    """Stream session-level SSE aggregating all AgentRuns of the session."""
+    ...
 ```
 
-所有结束路径的 ORM 更新只能存在于此方法：
+路由必须：
 
-1. `SELECT AgentSession ... FOR UPDATE`。
-2. 不存在抛 404；提供 `expected_lease_id` 且不匹配时抛 409，禁止旧/伪造 daemon 结束别的 session。
-3. 已 `ended` 时幂等返回；不得重复 WS、重复 Redis `session_ended` 或重复改 runs。
-4. `notify_daemon=True`（用户手动 end）时先发 SESSION_END；发送失败只 warn，DB 仍必须收口。
-5. `notify_daemon=False`（idle notice）不回推 WS。
-6. 同一事务把 session 标 ended、`ended_at/updated_at` 写入；interactive lease 标 completed；session 下 pending/running run 标 failed/cancelled（沿 task-04 最终选定状态）；commit。
-7. commit 后沿 task-05 约定 publish 唯一一条 `session_ended`，reason 原样为 `manual|idle|failed`；publish 失败不回滚 DB。
+- 按 `AgentSession.id == session_id AND AgentSession.user_id == user.id` 查询；不存在或不属于当前用户统一返回 404（`DaemonSessionNotFound` 或等价），不泄漏对象存在性。
+- 查到 session 后调用 `AgentService(session).stream_session_logs(session_id, session=session)`，返回 `StreamingResponse(generator, media_type="text/event-stream")`。
+- Response headers 与现有 run SSE 一致：`Cache-Control: no-cache, no-transform`、`Connection: keep-alive`、`X-Accel-Buffering: no`。
+- 即使 session 已 `ended/failed`，也进入生成器（生成器内部发 done 后 return），不提前在 router 层短路。
+- 路由放在 daemon router 内（`main.py` 已 include，无需新增注册）。
+- 鉴权依赖沿用现有 `get_current_principal`（与 `/leases/{lease_id}/messages` 一致），不新增无认证入口；权限粒度遵循 task-05 的 session 所有权校验，本任务不重写权限模型。
 
-router、idle loop、异常清理不得复制第 6 步的 SQL/ORM 更新。`complete_lease`、`expire_leases`、`handle_lease_expiry` 不作为 interactive session 的结束入口。
+> `AgentSession` ORM、`DaemonSessionNotFound` 等错误类由 task-02 / task-05 提供；本任务消费，不重定义。执行前用 `rg` 确认这些符号真实存在，签名不符先更新本文再写代码。
 
-### 4.6 idle scan loop
+## 5. 实现要求（最小可验证集）
 
-```typescript
-private async _idleSessionLoop(signal: AbortSignal): Promise<void>;
-private async _reclaimIdleSession(candidate: IdleSessionCandidate): Promise<void>;
-```
+1. 在 `agent/service.py` 的 `AgentService` 增加 `stream_session_logs`（§4.3），复用现有 `get_redis()` / pubsub 范式。
+2. 在 `daemon/service.py` 的 `submit_messages` Redis publish 段追加 interactive run 的 session channel 双 publish（§4.4），run channel 段一字不改。
+3. 在 `daemon/router.py` 增加 `GET /sessions/{session_id}/stream` 路由（§4.5）。
+4. 不新增事件表、不引入 Kafka/Redis Streams、不修改 `AgentRunLog` schema（task-02 已完成数据层）。
+5. 不实现前端 EventSource / 日志 UI / 历史列表（task-11）。
+6. 不重新实现 task-05 的 session REST（create/inject/interrupt/end）或 `_publish_session_event`；本任务只消费 task-05 发布的 `session_ended` / `turn_completed` 事件。
 
-流程：
+## 6. 边界与异常场景（≥5）
 
-1. `start()` 通过现有 `_fire((signal) => ...)` 挂载 loop；`stop()` 复用 AbortController 统一退出。
-2. 每个 interval 读取 `sessionStore.listIdleSessions(Date.now(), timeoutMs)`。
-3. 对每个候选再次按 sessionId 获取状态；仍 active 才调用 `sessionStore.end(sessionId)`，利用 store 自身状态门解决 scan 与 inject 竞态。
-4. 本地 end 成功后调用 `client.endSessionFromDaemon(sessionId, {lease_id, reason:'idle'})`。
-5. 单个通知失败记录结构化 warn（session_id/lease_id/reason，不记录 prompt/token），继续扫描其他 session。失败后的 backend 对账/重试不在本任务引入无限循环；task-09 持久化恢复负责后续崩溃场景。
+| # | 场景 | 期望 |
+|---|---|---|
+| 1 | session 无 active run（active 但当前没有正在跑的 turn） | `connected` 后保持连接，周期 `: keepalive`，不产生伪 log；前端 EventSource 不超时断开 |
+| 2 | SSE 断线重连 | 客户端重新 GET `/sessions/{id}/stream` 建立新连接；Redis Pub/Sub 无历史，断线期间的实时事件不可补（本任务最小实现不做 cursor 回放），但重连后后续 turn 正常到达。done 仅在 session 真终态时发，不在每次重连重复发 |
+| 3 | turn 切换 run_id（同一 session 多 turn） | 单连接不断流；每个 `data` 事件含新 `run_id`，前端按 run_id 区分 turn 边界；旧 turn 的 done 不关闭 session SSE |
+| 4 | session ended/failed（手动 end / 空闲回收 / failed） | `submit_messages` 或 task-05 `end_session` 发布 `session_ended` → 生成器发 `event: done` 并 return；router 不提前短路已终态 session |
+| 5 | 并发 publish 顺序 | 同一批多条 log 在 run channel 与 session channel 各自按 `published_logs` 列表顺序串行 publish；不保证跨 publisher 全局顺序，但单批次内顺序稳定（run channel 现有行为不变） |
+| 6 | batch run（`agent_session_id IS NULL`） | session channel 零发布；`stream_session_logs` 不会被 batch run 触发（router 按 session_id 路由）；现有 batch lease / workspace AgentRun / quick-chat SSE 零回归 |
+| 7 | interactive run session publish 失败 | run channel publish 不受影响；AgentRunLog 已 DB commit；`log.warning("daemon_messages_session_redis_publish_failed")`；不抛、不回滚 |
+| 8 | session 属于其他用户 / 不存在 | router 统一 404，不回放、不订阅 Redis、不泄漏存在性 |
+| 9 | Redis 连接在 stream 中断 | 生成器 `except` 发 `event: error`，`finally` 执行 unsubscribe + close；客户端可重连 |
+| 10 | submit_messages 对同一 interactive run 多次调用（多 batch 消息） | 每次都按 published_logs 双 publish；session SSE 连接持续收到该 run_id 的 log，不重复、不丢（依赖 log_id 唯一） |
 
-不得用 `setInterval(async () => ...)` 产生重叠扫描；使用可 await、可 abort 的串行循环。
+## 7. 非目标
 
-## 5. 实现方案与端到端联调
+- 不实现或修改 SDK driver / SessionManager / TaskRunner（task-04 / task-07）。
+- 不实现 session REST（create/inject/interrupt/end_session）、`_publish_session_event`（task-05）。
+- 不实现 permission_request/response（task-08 / task-09）。
+- 不做前端 EventSource、日志 UI、历史列表（task-11 / task-12）。
+- 不删除、不改名 `stream_run_logs` 和 `agent_run:{run_id}`；run 级 SSE 行为零变化。
+- 不实现 DB 历史回放 + cursor（`Last-Event-ID`）的完整断点续流——v2 蓝图的 cursor/envelope 设计不纳入本最小实现；本任务只做 Redis session channel 实时聚合 + ended done，断线期间事件丢失是已知 trade-off（R-08 应对：session 级 channel + 双 publish 已解决跨 turn 断流主问题）。
+- 不引入 Kafka/Redis Streams/新事件表；不修改 `AgentRunLog` schema。
+- 不为非日志状态事件（`turn_completed`）设计独立持久化 cursor；该事件由 task-05 发布，本任务透传。
+- 不把 `summary_payload`（`event:"messages"`）作为 session log 发布（无 log_id）。
+- 不在 backend 内做 turn_started 边界注入；前端用 `data` 中的 `run_id` 自行分 turn。
 
-### 5.1 Claude
+## 8. 参考
 
-1. 创建 session，首 run 进程 A 的 args 不含 `--resume`。
-2. 首 turn result 提取 `session_id=S1`，进程 A stdin 关闭并 exit。
-3. inject 创建第二 AgentRun，进程 B 与 A 对象/PID 不同，args 含 `--resume S1`。
-4. 单一 session SSE 连接依次收到 run A、run B 的事件，每条含对应 `run_id`。
-5. 第三 turn running 时 interrupt，只终止进程 C；session 回 active，lease 不 completed。
-6. 再 inject 创建进程 D，仍 `--resume S1`；end 后 session ended、lease completed、SSE done。
+- `backend/app/modules/agent/service.py:542` — `stream_run_logs`（SSE 生成器 / keepalive / error / finally pubsub 清理范式，直接对照实现 `stream_session_logs`）。
+- `backend/app/modules/daemon/service.py:733` — `submit_messages`（双 publish 追加点：Redis publish 段 `service.py:845-863`）。
+- `backend/app/modules/daemon/router.py:256` — `submit_lease_messages`（router 鉴权依赖 `get_current_principal` + `SessionDep` 范式）。
+- `backend/app/core/redis.py:16` — `get_redis()`（同步返回 `Redis`，`publish` / `pubsub()` 用法）。
+- `.sillyspec/changes/2026-06-18-daemon-interactive-session/design.md` §7.5 / §8.4 / R-08。
+- `.sillyspec/changes/2026-06-18-daemon-interactive-session/decisions.md` D-005@v1 / D-001@v1（agent_session_id vs session_id）。
+- `.sillyspec/changes/2026-06-18-daemon-interactive-session/tasks/task-05.md`（v2 蓝图，本任务 SSE 聚合职责的来源；v3 plan 将其 REST 部分留在 task-05，SSE 部分拆到 task-06）。
 
-### 5.2 Codex
+## 9. TDD 实施顺序
 
-与 Claude 同流程，但断言：
+必须先红后绿，记录至少一次目标测试按预期失败。
 
-- 首进程 initialize → `thread/start` → `turn/start`，得到 `threadId=T1`；
-- 第二/后续进程 initialize → `thread/resume {threadId:T1}` → `turn/start`；
-- 每轮 `turn/completed` 后进程退出；不得在新进程跳过 initialize/resume 直接发 turn/start。
+### Step 1：Red — submit_messages 双 publish
 
-### 5.3 idle
+- 写 `backend/app/modules/daemon/tests/test_session_sse.py`：构造 interactive run（`agent_session_id` 非空），调 `submit_messages`，用 fake Redis（`AsyncMock`，参考 `agent/tests/test_router.py` 的 pubsub 范式）断言：
+  - `agent_run:{run_id}` 收到扁平 log + summary（现有行为不变）。
+  - `agent_session:{agent_session_id}` 收到带 `run_id` 标记的 log 事件，数量 = published_logs 数量。
+  - summary **不**出现在 session channel。
+- 写 batch run（`agent_session_id=None`）测试：session channel 零发布。
+- 写 session publish 失败测试：注入 `redis.publish` 对 session channel 抛异常，断言 run channel publish 仍完成、AgentRunLog 已 commit、不抛出。
 
-会话完成一个 turn 回 active，fake clock 推进到 timeout 边界；daemon 只回收该 session，本地 store 删除，backend 经 end-notify 调同一 `end_session(reason='idle', notify_daemon=False)`，session SSE 收到唯一 done。旁边 running session 与 batch lease 均不受影响。
+### Step 2：Green — 双 publish
 
-## 6. 边界条件
+- 在 `submit_messages` Redis 段追加 §4.4 的 interactive 双 publish；run channel 段不动。定向测试通过。
 
-至少覆盖以下边界：
+### Step 3：Red — stream_session_logs
 
-1. **同 session 两个并发 inject**：backend 行锁后只创建一个 AgentRun；另一个 409；daemon 最多 spawn 一次。
-2. **不同 session 并发 inject**：允许并行建 run/spawn，禁止用全局锁串行所有 session。
-3. **inject 与 idle scan 竞态**：只有一个状态转换成功；若 inject 先进入 running，scan 跳过；若 idle end 先成功，inject 返回 409 且不建 run。
-4. **manual end 与 idle notice 竞态**：`end_session` 行锁 + terminal 幂等保证只更新/发布一次，最终 reason 以首个成功收口者为准。
-5. **end 与 turn completion 竞态**：迟到的 runTurn completion 不得把 store/DB session 从 ended 改回 active，也不得把 lease 改回 active。
-6. **timeout 边界**：`elapsed=timeout-1ms` 不回收，`elapsed=timeout` 回收；非法 timeout/interval 归一化，不出现 busy loop。
-7. **running 长 turn**：即使 lastActiveAt 超时也不回收；仅 active 空闲态进入候选。
-8. **idle end HTTP 失败**：daemon 不崩溃、不阻塞其它候选；日志不含 prompt/凭证；不得反复 cancel 已删除的本地 session。
-9. **lease_id 不匹配**：end-notify 返回冲突，backend session/lease/run 不变。
-10. **重复 end-notify**：返回已 ended 状态，不重复 publish SSE done。
-11. **resume 失败**：Claude `--resume` 或 Codex `thread/resume` 失败不得降级普通 spawn；session 进入 task-03 定义的 failed 状态，idle loop 不把 failed 重写 ended。
-12. **首 turn 无内部 session id**：第二 turn 被拒绝，不创建无上下文进程；联调明确暴露错误。
-13. **SSE 断线重连**：task-05 的 DB terminal fallback 仍能对已 ended session立即 done；单 turn done 不关闭 session SSE。
-14. **batch 兼容**：`agent_session_id=NULL` 的 run 不参与 inject 防重/session publish/idle scan；batch lease expiry、heartbeat、complete 路径零变化。
+- 用 fake pubsub（参考 `stream_run_logs` 测试范式）覆盖：
+  - connected → subscribe `agent_session:{id}`。
+  - 收到 `log` 事件 → 透传 `data:`，含 run_id。
+  - 收到 `session_ended` → 发 `event: done` 并 return。
+  - 超时 → `: keepalive`。
+  - subscribe 后 session 已 ended（session 参数提供）→ 立即 done。
+  - Redis 异常 → `event: error`，finally 执行 unsubscribe + close。
+  - 同一连接收到两个不同 run_id 的事件 → 都透传，不断流。
 
-## 7. TDD 实施顺序
+### Step 4：Green — 生成器
 
-必须记录至少一次目标测试按预期失败，再写最小实现。
+- 实现 `stream_session_logs`（§4.3），定向测试通过。
 
-### Step 1：backend 并发门（先红）
+### Step 5：Red — router
 
-- 写两个并发事务调用 `inject_session` 的测试；断言只一条新增 AgentRun、turn_count 只加一、WS 只发一次、另一请求为稳定 409。
-- 写 active session 已有 pending/running run 的冲突测试。
-- 实现 session 行锁、非终态 run 查询与 `DaemonSessionTurnConflict`。
+- 写 router 测试：session 存在且属于当前用户 → 200 `text/event-stream` + 正确 headers。
+- session 不存在 / 属于他人 → 404，不进入生成器。
+- session 已 ended → 仍 200，生成器内部 done。
 
-### Step 2：`end_session` 单一收口（先红）
+### Step 6：Green — router + 回归
 
-- 写 manual/idle 并发、重复 idle notice、lease mismatch、daemon offline 测试。
-- 断言 ORM 终态更新只有 service 方法执行；session_ended 只 publish 一次。
-- 实现 `notify_daemon`/`expected_lease_id` 与 end-notify router；保留 task-05 publish 契约。
+- 实现 `GET /sessions/{session_id}/stream`。
+- 跑现有 `agent/tests/test_router.py`（run SSE 不回归）、daemon 现有测试、ruff、backend 全量 pytest。
+- `git diff` 确认 `stream_run_logs` / `agent_run:{run_id}` / batch 路径零改动。
 
-### Step 3：SessionStore idle 纯函数（先红）
+## 10. 验收表
 
-- fake time 覆盖 active/running/interruption/ended/failed 与 timeout 边界。
-- 覆盖 create/start/turn completion/interrupt 的 lastActiveAt 更新。
-- 实现 `listIdleSessions`，不在该方法做 I/O。
+| AC | 验收项 | 自动化证据 | 对齐 |
+|---|---|---|---|
+| AC-01 | `submit_messages` 对 interactive run（`agent_session_id` 非空）同时发布 `agent_run:{run_id}` 与 `agent_session:{session_id}`；session channel 事件含 `run_id` 标记 | fake Redis publish 调用断言（双 channel、payload 含 run_id） | FR-03 / D-005@v1 |
+| AC-02 | session channel 只发布带 `log_id` 的扁平 log；`summary_payload`（`event:"messages"`）不出现在 session channel | publish payload 断言（summary 仅在 run channel） | FR-03 |
+| AC-03 | batch run（`agent_session_id IS NULL`）session channel 零发布；run channel 行为不变 | batch run publish 断言 + 现有 run SSE 测试通过 | brownfield |
+| AC-04 | `stream_session_logs` 单连接跨多个 turn（不同 run_id）持续透传 `data` 事件，不断流；每个事件含 run_id | fake pubsub 多 run_id 透传测试 | FR-03 / R-08 |
+| AC-05 | session ended/failed → 生成器发 `event: done` 并 return；单 turn 完成不关 session SSE | session_ended → done 测试 + turn_completed 不关流测试 | FR-03 / D-005@v1 |
+| AC-06 | session publish 失败不影响 run channel publish、不回滚 AgentRunLog、不抛出 | 故障注入测试（session publish raise → run publish 仍完成） | FR-03 |
+| AC-07 | Redis 异常 / 取消时生成器 `finally` 执行 unsubscribe + close，并发 `event: error` | 资源清理测试（fake pubsub.unsubscribe/close 被调用） | 稳定性 |
+| AC-08 | `GET /sessions/{id}/stream` 校验 `AgentSession.user_id == user.id`；越权与不存在均 404，不订阅 Redis | router auth/ownership 测试 | 安全边界 |
+| AC-09 | Response headers 含 `text/event-stream` + `Cache-Control: no-cache, no-transform` + `X-Accel-Buffering: no` | router response headers 断言 | 一致性 |
+| AC-10 | session 无 active run 时保持连接 + 周期 keepalive，不产生伪 log、不超时断开 | fake pubsub timeout → keepalive 测试 | FR-03 |
+| AC-11 | 现有 `stream_run_logs`、`agent_run:{run_id}`、batch lease、quick-chat、workspace AgentRun 路径零回归 | 现有 `agent/tests/test_router.py` + daemon 全量测试 + diff 审查 | brownfield |
+| AC-12 | 改动严格限制在 `allowed_paths`（agent/service.py、daemon/service.py、daemon/router.py） | `git diff --name-only` | 任务边界 |
+| AC-13 | backend 定向测试、ruff check/format、全量 pytest 通过 | 命令输出 | 质量门 |
 
-### Step 4：daemon loop 与 HubClient（先红）
-
-- fake timers 驱动一个 scan tick；断言本地 end 后发送正确 REST path/body。
-- 覆盖 abort、单候选失败继续、多 tick 不重叠、scan/inject 竞态。
-- 实现 config、HubClient 方法和 `_idleSessionLoop`。
-
-### Step 5：spawn + resume 集成（先红）
-
-- 使用 fake child/fake backend 输出，不调用真实付费 CLI：Claude 两 turn 两 child + `--resume`；Codex 两进程 + thread/resume。
-- 接入 backend fake DB/Redis/WS，断言 AgentSession 1:N AgentRun、session SSE 跨 run 连续、interrupt/end 分离。
-- 再做一次真实 Claude 与 Codex smoke（环境具备凭证时）；真实 smoke 是联调证据，不替代可重复测试。
-
-### Step 6：回归
+## 11. 验证命令
 
 ```powershell
-Set-Location sillyhub-daemon
-pnpm test -- session-store
-pnpm test -- daemon-session-idle hub-client
-pnpm typecheck
-pnpm test
-
-Set-Location ..\backend
-uv run pytest app/modules/daemon/tests/test_session_service.py -q
-uv run pytest app/modules/daemon/tests/test_interactive_session_lifecycle.py -q
+cd backend
+uv run pytest app/modules/daemon/tests/test_session_sse.py -q
+uv run pytest app/modules/agent/tests/test_router.py -q
+uv run ruff check app/modules/agent/service.py app/modules/daemon/service.py app/modules/daemon/router.py
+uv run ruff format --check app/modules/agent/service.py app/modules/daemon/service.py app/modules/daemon/router.py
 uv run pytest -q
 ```
 
-若仓库真实测试路径与上述蓝图不同，以 `rg --files` 查到的现有布局为准，更新文档后执行。
+若全量测试因外部 PostgreSQL/Redis 环境不可用，必须记录精确失败命令与错误；定向 fake Redis/SQLite 测试仍须通过，不得把环境阻塞写成已验证。
 
-## 8. 验收表
+## 12. 完成定义
 
-| ID | 验收条件 | 证据 |
-|---|---|---|
-| AC-06.1 | Claude 首 turn 普通 spawn，第二 turn 新进程带同一 `--resume` id；每轮完成后 child exit | fake-child 集成 + 真实 smoke 日志（脱敏） |
-| AC-06.2 | Codex 后续 turn 在新进程 initialize 后 `thread/resume`，再 `turn/start`；thread id 不变 | JSON-RPC transcript 单测/集成 |
-| AC-06.3 | 同 session 并发 inject 只产生一个 AgentRun、一次 WS inject、一次 spawn；冲突返回 HTTP 409 | backend 并发事务测试 + daemon store 测试 |
-| AC-06.4 | 不同 session 可并行执行 | daemon 并发测试 |
-| AC-06.5 | interrupt 只终止 currentRun，session/lease 仍 active，下一 turn 可 resume 新 spawn | 生命周期集成测试 |
-| AC-06.6 | 手动 end、idle timeout、并发重复 end 最终都经 `DaemonService.end_session`；session ended、lease completed、非终态 run 收敛 | service 测试 + SQL 状态断言 |
-| AC-06.7 | 默认 1800 秒；仅 active 空闲 session 被回收；running session 不误杀；边界值准确 | fake timers |
-| AC-06.8 | session SSE 单连接跨多个 run，事件带 run_id；结束只产生一个 session_ended/done | Redis/SSE 集成测试 |
-| AC-06.9 | resume 失败不降级新会话；首 turn 缺内部 id 不允许第二 turn | adapter/runner failure 测试 |
-| AC-06.10 | batch lease、run 级 SSE、workspace AgentRun 的 heartbeat/expiry/complete 行为不变 | daemon/backend 全量回归 |
-| AC-06.11 | daemon `pnpm typecheck`、`pnpm test` 与 backend `uv run pytest` 通过 | 命令输出 |
-
-## 9. 非目标与实现注意
-
-- task-03 已规定 `lastActiveAt` 与 SessionStore 状态机；本任务只增加 idle 查询/循环及联调，不把 store 改成长驻进程容器。
-- task-04 的旧文字若仍写“inject 写 stdin”，执行时必须按 D-002@v2 解释为“创建下一 AgentRun 并触发新 spawn”；不得照旧文字实现。
-- task-05 的 `session_ended.reason` 统一使用 `manual|idle|failed`；不要再引入 `idle_timeout` 同义值。
-- end-notify 是进入统一 service 的 transport，不是第二套收尾业务逻辑。
-- 空闲回收只结束 `active`；running turn 的执行 timeout 仍由 TaskRunner 既有 timeout 负责，两者不可混用。
-- 不做 task-09 的磁盘 persist/restore；daemon 或 backend 重启后的对账不在本任务扩展。
-- 不做 UI、权限审批、多 daemon 亲和或跨主机迁移。
-- 不将真实 Claude/Codex 凭证、prompt、完整输出写入测试快照或联调证据。
-
-## 10. 完成检查清单
-
-- [ ] 写代码前重新读取 `.claude/CLAUDE.md`、daemon/backend CONVENTIONS 与 ARCHITECTURE。
-- [ ] 用 `rg` 确认 task-03/04/05 最终方法、错误类、测试 helper 与 route auth 依赖真实存在。
-- [ ] 测试先红后绿，并保留并发事务测试，不用顺序 mock 冒充并发。
-- [ ] 一个 turn 一个 AgentRun、一个新 child；无跨 turn stdin/adapter 引用。
-- [ ] backend 与 daemon 两层并发门均存在。
-- [ ] 所有 session/lease ORM 终态只在 `DaemonService.end_session` 更新。
-- [ ] idle loop 可 abort、不重叠、单 session 失败隔离。
-- [ ] session SSE done 唯一，run 级 SSE 与 batch 路径不变。
-- [ ] 对照 AC-06.1～AC-06.11 逐项记录证据。
+- 一个 session SSE 连接能够跨多个 turn（不同 run_id）持续看到实时日志，事件含 run_id 区分 turn 边界（FR-03 / R-08）。
+- `submit_messages` 对 interactive run 双 publish，session channel 事件带 run_id 标记；batch run 零变化（D-005@v1）。
+- session ended/failed 时连接发 done 并关闭；单 turn 完成不关 session SSE。
+- run 级 SSE、batch lease、quick-chat、workspace AgentRun 路径零回归。
+- 所有 AC-01~AC-13 满足，且改动未越过 allowed_paths。
