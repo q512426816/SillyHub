@@ -91,21 +91,21 @@ describe("AdminRolePermissionPicker", () => {
     });
   });
 
-  it("management section renders 5 menus (picker 过滤掉 pickerHidden 的 git-identities)", () => {
+  it("management section renders 6 menus (ql-005: git-identities 改用 git_identity:admin 后重新可见)", () => {
     render(<AdminRolePermissionPicker permissions={[]} onChange={vi.fn()} />);
 
-    // picker 不渲染 pickerHidden menu（git-identities 与 api-keys/settings 共享
-    // platform:admin，role 无独立权限可配，卡片冗余）
+    // ql-005: git-identities 改独立权限 git_identity:admin 后，picker 重新渲染该卡片，
+    // management 区现在有 6 个 menu 全部可见。
     const managementMenus = MENU_PERMISSION_GROUPS.filter(
-      (g) => g.section === "management" && !g.pickerHidden,
+      (g) => g.section === "management",
     );
-    expect(managementMenus).toHaveLength(5);
+    expect(managementMenus).toHaveLength(6);
     managementMenus.forEach((g) => {
       expect(screen.getByText(g.menuLabel)).toBeInTheDocument();
     });
 
-    // git-identities 不应出现在 picker 中
-    expect(screen.queryByText("Git 身份管理")).not.toBeInTheDocument();
+    // git-identities 应出现在 picker 中
+    expect(screen.getByText("Git 身份管理")).toBeInTheDocument();
   });
 
   it("admin section renders 3 menus", () => {
@@ -223,10 +223,11 @@ describe("AdminRolePermissionPicker", () => {
   it("defaults to all menus expanded", () => {
     render(<AdminRolePermissionPicker permissions={[]} onChange={vi.fn()} />);
 
-    // 展开后所有可见 menu（pickerHidden=false）的 permission checkbox 都可直接通过 aria-label 查到。
-    // pickerHidden menu（如 git-identities 用 platform:admin 兜底）不渲染。
-    const visibleMenus = MENU_PERMISSION_GROUPS.filter((g) => !g.pickerHidden);
-    const allKeys = visibleMenus.flatMap((g) => g.permissions.map((p) => p.key));
+    // 展开后所有 menu 的 permission checkbox 都可直接通过 aria-label 查到。
+    // ql-005: 全部 menu 都在 picker 中渲染（无 pickerHidden）。
+    const allKeys = MENU_PERMISSION_GROUPS.flatMap((g) =>
+      g.permissions.map((p) => p.key),
+    );
     const uniqueKeys = [...new Set(allKeys)];
     uniqueKeys.forEach((key) => {
       // 同一个 key 可能出现在多个 menu（如 workspace:read），用 getAllByLabelText
@@ -320,10 +321,10 @@ describe("AdminRolePermissionPicker", () => {
   it("renders total permission checkbox count equal to unique keys in MENU_PERMISSION_GROUPS", () => {
     render(<AdminRolePermissionPicker permissions={[]} onChange={vi.fn()} />);
 
-    // pickerHidden menu（如 git-identities 用 platform:admin 兜底）不会渲染，
-    // 需从 unique keys 中排除这些 menu 的权限。
-    const visibleMenus = MENU_PERMISSION_GROUPS.filter((g) => !g.pickerHidden);
-    const allKeys = visibleMenus.flatMap((g) => g.permissions.map((p) => p.key));
+    // ql-005: 全部 menu 都在 picker 中渲染（无 pickerHidden）。
+    const allKeys = MENU_PERMISSION_GROUPS.flatMap((g) =>
+      g.permissions.map((p) => p.key),
+    );
     const uniqueKeys = [...new Set(allKeys)];
 
     // 每个 unique key 都应能通过 aria-label 查到一个 checkbox
@@ -334,7 +335,8 @@ describe("AdminRolePermissionPicker", () => {
       expect(inputs.length).toBeGreaterThanOrEqual(1);
     });
 
-    // 反向校验：pickerHidden menu 的权限（platform:admin）应不出现在 picker 中
+    // platform:admin 已不再被任何 menu 使用（git-identities 改 git_identity:admin，
+    // api-keys/settings/runtimes 各自独立），不应出现在 picker 中。
     expect(screen.queryAllByLabelText("platform:admin")).toEqual([]);
   });
 

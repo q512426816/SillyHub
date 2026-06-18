@@ -7,9 +7,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_deps import get_current_user
+from app.core.auth_deps import require_permission_any
 from app.core.db import get_session
 from app.modules.auth.model import User
+from app.modules.auth.permissions import Permission
 from app.modules.git_identity.schema import (
     AccessCheckRequest,
     AccessCheckResult,
@@ -22,13 +23,15 @@ from app.modules.git_identity.service import GitIdentityService
 router = APIRouter(prefix="/git", tags=["git_identity"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
-CurrentUser = Annotated[User, Depends(get_current_user)]
+GitIdentityAdminUser = Annotated[
+    User, Depends(require_permission_any(Permission.GIT_IDENTITY_ADMIN))
+]
 
 
 @router.get("/identities", response_model=GitIdentityList)
 async def list_identities(
     session: SessionDep,
-    user: CurrentUser,
+    user: GitIdentityAdminUser,
 ) -> GitIdentityList:
     service = GitIdentityService(session)
     items = await service.list_(user.id)
@@ -46,7 +49,7 @@ async def list_identities(
 async def create_identity(
     data: GitIdentityCreate,
     session: SessionDep,
-    user: CurrentUser,
+    user: GitIdentityAdminUser,
 ) -> GitIdentityRead:
     service = GitIdentityService(session)
     row = await service.create(user.id, data)
@@ -57,7 +60,7 @@ async def create_identity(
 async def get_identity(
     identity_id: str,
     session: SessionDep,
-    user: CurrentUser,
+    user: GitIdentityAdminUser,
 ) -> GitIdentityRead:
     import uuid
 
@@ -73,7 +76,7 @@ async def get_identity(
 async def revoke_identity(
     identity_id: str,
     session: SessionDep,
-    user: CurrentUser,
+    user: GitIdentityAdminUser,
 ) -> GitIdentityRead:
     import uuid
 
@@ -86,7 +89,7 @@ async def revoke_identity(
 async def check_access(
     data: AccessCheckRequest,
     session: SessionDep,
-    user: CurrentUser,
+    user: GitIdentityAdminUser,
 ) -> AccessCheckResult:
     service = GitIdentityService(session)
     result = await service.check_access(user.id, data)

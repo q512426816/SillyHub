@@ -35,9 +35,9 @@ def test_permission_group_has_six_members() -> None:
     assert set(members) == expected
 
 
-def test_permission_count_is_45() -> None:
-    """29 historical + 7 admin + 6 workspace submenu read (ql-003) + 3 platform admin (ql-004) = 45."""
-    assert len(list(Permission)) == 45
+def test_permission_count_is_46() -> None:
+    """29 historical + 7 admin + 6 workspace submenu read (ql-003) + 4 platform admin (ql-004/005) = 46."""
+    assert len(list(Permission)) == 46
 
 
 @pytest.mark.parametrize(
@@ -59,6 +59,8 @@ def test_permission_count_is_45() -> None:
         (Permission.SETTINGS_ADMIN, PermissionGroup.PLATFORM),
         (Permission.API_KEY_ADMIN, PermissionGroup.PLATFORM),
         (Permission.RUNTIME_ADMIN, PermissionGroup.PLATFORM),
+        # ql-005: git_identity admin perm
+        (Permission.GIT_IDENTITY_ADMIN, PermissionGroup.PLATFORM),
         # ql-003: workspace submenu independent read perms
         (Permission.COMPONENT_READ, PermissionGroup.WORKSPACE),
         (Permission.TOPOLOGY_READ, PermissionGroup.WORKSPACE),
@@ -84,7 +86,7 @@ def test_permission_group_resolution(perm: Permission, expected_group: Permissio
 
 
 def test_every_permission_has_non_default_group() -> None:
-    """All 45 permissions must resolve to a stable group (no KeyError)."""
+    """All 46 permissions must resolve to a stable group (no KeyError)."""
     for perm in Permission:
         group = perm.group
         assert isinstance(group, PermissionGroup)

@@ -4,13 +4,13 @@ import type { MenuSection } from "../menu-permissions";
 import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
 
 /**
- * 后端 Permission 枚举镜像常量（45 项）。
+ * 后端 Permission 枚举镜像常量（46 项）。
  *
  * 与 `backend/app/modules/auth/permissions.py` 的 `Permission` StrEnum 保持同步。
  * 若后端扩/删枚举，需同时更新本常量；用例 5 会在漂移时失败提示。
  *
  * 分组顺序与后端一致：
- * - Platform (6, 含 2026-06-18 ql-004 新增的 3 个管理子菜单独立 admin 权限)
+ * - Platform (7, 含 2026-06-18 ql-004/005 新增的 4 个管理子菜单独立 admin 权限)
  * - Workspace (4)
  * - Workspace 子菜单独立 read (6, 2026-06-18 ql-003 新增)
  * - Change (5)
@@ -20,16 +20,17 @@ import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
  * - Tool (4)
  * - Admin (7)
  *
- * 合计 6 + 4 + 6 + 5 + 6 + 4 + 3 + 4 + 7 = 45。
+ * 合计 7 + 4 + 6 + 5 + 6 + 4 + 3 + 4 + 7 = 46。
  */
 const BACKEND_PERMISSION_KEYS = [
-  // Platform (6, ql-004 新增 3 个管理子菜单 admin)
+  // Platform (7, ql-004 新增 3 个管理子菜单 admin + ql-005 新增 git_identity:admin)
   "platform:admin",
   "platform:billing",
   "platform:audit:read",
   "settings:admin",
   "api_key:admin",
   "runtime:admin",
+  "git_identity:admin",
   // Workspace (4)
   "workspace:read",
   "workspace:write",
@@ -148,21 +149,28 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("pickerHidden menu 用 platform:admin 兜底（git-identities 后端无 require_permission）", () => {
+  it("git-identities 菜单应有 1 个 permission (git_identity:admin；对齐后端 require_permission_any(GIT_IDENTITY_ADMIN))", () => {
     const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "git-identities");
     expect(g).toBeDefined();
-    expect(g!.pickerHidden).toBe(true);
-    // 后端 git_identity router 无 require_permission，前端用 platform:admin 兜底；
-    // api-keys/settings/runtimes 已各自独立（ql-004），故 platform:admin 不再与其他
-    // 菜单共享，pickerHidden 仅避免 picker 中显示一个"挂名"权限卡片。
-    expect(g!.permissions.map((p) => p.key)).toEqual(["platform:admin"]);
+    const keys = g!.permissions.map((p) => p.key).sort();
+    expect(keys).toEqual(["git_identity:admin"]);
+    expect(g!.permissions.length).toBe(1);
+    // ql-005: 移除 pickerHidden，picker 现在渲染该 menu 卡片
+    expect(g!.pickerHidden).toBeFalsy();
   });
 
-  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 45", () => {
+  it("所有 menu 都不设 pickerHidden（ql-005 移除 git-identities 的 pickerHidden）", () => {
+    // 验证全表无 pickerHidden=true 残留
+    MENU_PERMISSION_GROUPS.forEach((g) => {
+      expect(g.pickerHidden).toBeFalsy();
+    });
+  });
+
+  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 46", () => {
     const valid = new Set<string>(BACKEND_PERMISSION_KEYS);
     // 镜像常量自身的完整性护栏：若被误删/重复，立即失败
-    expect(BACKEND_PERMISSION_KEYS.length).toBe(45);
-    expect(valid.size).toBe(45);
+    expect(BACKEND_PERMISSION_KEYS.length).toBe(46);
+    expect(valid.size).toBe(46);
 
     MENU_PERMISSION_GROUPS.forEach((g) => {
       g.permissions.forEach((p) => {

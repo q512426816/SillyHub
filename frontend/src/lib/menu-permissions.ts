@@ -3,22 +3,18 @@
  *
  * 设计依据：
  * - `2026-06-18-menu-driven-permissions/design.md` §5.1（类型定义）+ §5.2（19 菜单权限映射表）
- * - 后端 Permission 枚举：`backend/app/modules/auth/permissions.py`（45 个值，含
+ * - 后端 Permission 枚举：`backend/app/modules/auth/permissions.py`（46 个值，含
  *   2026-06-18 ql-003 新增的 6 个子菜单独立 read 权限 + ql-004 新增的 3 个
- *   管理子菜单独立 admin 权限 settings:admin / api_key:admin / runtime:admin）
+ *   管理子菜单独立 admin 权限 + ql-005 git_identity:admin）
  *
  * 子菜单独立查看权限：每个 overview/management 子菜单有独立 read 权限
  * （component:read / topology:read / scan-docs:read / runtime:read /
  * knowledge:read / incident:read），避免共用 workspace:read 致 picker 冗余展示。
  * 后端各 router 已 require 对应权限。
  *
- * 管理菜单独立权限（ql-004）：settings / api-keys / runtimes 三个 management/system
- * 子菜单各有独立 admin 权限（settings:admin / api_key:admin / runtime:admin），
- * 避免共用 platform:admin 致 picker 重复展示。后端 router 各自 require 对应权限。
- *
- * pickerHidden 说明：git-identities 后端不强制任何 permission，前端兜底用
- * platform:admin（无其他 menu 共享），设 pickerHidden=true 仅避免 picker 中显示
- * 一个"挂名"权限卡片。canSeeMenu 仍按 permissions 正常判断。
+ * 管理菜单独立权限（ql-004/005）：所有 management/system 子菜单各有独立 admin 权限
+ * （settings:admin / api_key:admin / runtime:admin / git_identity:admin），
+ * 避免共用 platform:admin 致 picker 重复或缺失。后端 router 各自 require 对应权限。
  */
 
 export type MenuSection = "overview" | "management" | "admin" | "system";
@@ -158,11 +154,9 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/settings/git-identities",
     absolute: true,
     matchPattern: "/settings/git-identities",
-    // 后端 git_identity router 无 require_permission，仅 get_current_user。
-    // 前端用 platform:admin 兜底（与 api-keys/settings 共享），让平台管理员可见、
-    // 普通用户不可见。pickerHidden=true 让 picker 不渲染（避免 platform:admin 重复）。
-    permissions: [{ key: "platform:admin", name: "平台超级管理员" }],
-    pickerHidden: true,
+    // 后端 git_identity router 全部端点 require git_identity:admin
+    // （platform:admin 自动通过）。
+    permissions: [{ key: "git_identity:admin", name: "Git 身份访问" }],
   },
   {
     section: "management",

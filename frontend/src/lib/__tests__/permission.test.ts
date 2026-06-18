@@ -143,19 +143,20 @@ describe("canSeeMenu", () => {
     ).toBe(true);
   });
 
-  it("git-identities 配 platform:admin：测试管理账号（无 platform:admin）不可见", () => {
-    // git-identities 与 api-keys/settings 共享 platform:admin（pickerHidden=true），
-    // canSeeMenu 按 permissions 判断 → 无 platform:admin 的用户看不到该菜单
+  it("git-identities 配 git_identity:admin：测试管理账号（无 git_identity:admin）不可见", () => {
+    // ql-005: git-identities 改用独立权限 git_identity:admin（不再用 platform:admin 兜底，
+    // 也不再 pickerHidden），canSeeMenu 按 permissions 判断 → 无 git_identity:admin
+    // 的用户看不到该菜单
     const gitIdentities = MENU_PERMISSION_GROUPS.find(
       (g) => g.menuKey === "git-identities",
     );
     expect(gitIdentities).toBeDefined();
-    expect(gitIdentities!.pickerHidden).toBe(true);
+    expect(gitIdentities!.pickerHidden).toBeFalsy();
     expect(gitIdentities!.permissions.map((p) => p.key)).toEqual([
-      "platform:admin",
+      "git_identity:admin",
     ]);
 
-    // 测试管理账号（user/org/role 域，无 platform:admin）→ 看不到
+    // 测试管理账号（user/org/role 域，无 git_identity:admin）→ 看不到
     expect(
       canSeeMenu(
         mkUser({
@@ -173,7 +174,15 @@ describe("canSeeMenu", () => {
       ),
     ).toBe(false);
 
-    // 平台管理员 → 可见
+    // 即使有 platform:admin 也不可见（权限已分离）
+    expect(
+      canSeeMenu(
+        mkUser({ permissions: ["platform:admin"] }),
+        gitIdentities!,
+      ),
+    ).toBe(false);
+
+    // 平台管理员 → 可见（is_platform_admin 短路）
     expect(
       canSeeMenu(
         mkUser({ is_platform_admin: true, permissions: [] }),
@@ -181,10 +190,10 @@ describe("canSeeMenu", () => {
       ),
     ).toBe(true);
 
-    // 拥有 platform:admin 的非超级管理员 → 可见
+    // 拥有 git_identity:admin 的非超级管理员 → 可见
     expect(
       canSeeMenu(
-        mkUser({ permissions: ["platform:admin"] }),
+        mkUser({ permissions: ["git_identity:admin"] }),
         gitIdentities!,
       ),
     ).toBe(true);
