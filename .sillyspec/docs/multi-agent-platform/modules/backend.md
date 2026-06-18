@@ -119,6 +119,7 @@ ChangeService.transition() -> 状态机校验 -> 更新 stage
 - ql-20260605-005-f2b8 | 修复 Agent Run metadata 持久化 + 参考 Multica 细化 token 采集（on_log 独立 session、modelUsage 解析）
 - ql-20260611-001-c7a3 | Quick Chat 多轮对话：prev_run_id → session_id 查询 → resume_session_id 传入 daemon
 - ql-20260616-002-b8e5 | 修复 Bootstrap dispatch 链路 3 处缺陷：`spec_workspace/bootstrap.py` dispatch_to_daemon 加 root_path/spec_root/runtime_root（让 _determine_run_type 走 scan 分支，避免 execution-context 400）；provider 'claude_code' → 'claude'（daemon 12-provider 注册表只认 'claude'）；加 prompt 引导 claude 按 CLAUDE.md 跑 sillyspec scan（不传 prompt 则 daemon spawn 用空串喂 stdin，claude 不读 CLAUDE.md）
+- ql-20260618-005-c4d2 | spec-bootstrap 创建 Bootstrap AgentRun 和 daemon lease 时使用 workspace 默认 Agent provider/model；未配置默认 provider 时保留历史 Claude fallback。
 - ql-20260618-007-d9c0 | Daemon runtime 状态语义：刷新列表清理 stale online runtime；新增 disable/enable/offline 操作；disabled 不会被 heartbeat 或重新注册自动恢复为 online。
 
 ## 人工备注

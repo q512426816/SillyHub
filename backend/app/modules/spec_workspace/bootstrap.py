@@ -72,6 +72,12 @@ class SpecBootstrapService:
         # 2. Ensure spec_root directory exists
         spec_root.mkdir(parents=True, exist_ok=True)
 
+        # Bootstrap historically defaulted to Claude. Keep that fallback when
+        # no workspace default is configured, but honor explicit workspace
+        # provider/model settings for the run and daemon lease.
+        resolved_provider = workspace.default_agent or "claude"
+        resolved_model = workspace.default_model or None
+
         # 3. Audit: bootstrap started
         self._session.add(
             AuditLog(
@@ -82,7 +88,12 @@ class SpecBootstrapService:
                 resource_type="spec_workspace",
                 resource_id=workspace_id,
                 details_json=json.dumps(
-                    {"spec_root": str(spec_root), "strategy": spec_ws.strategy}
+                    {
+                        "spec_root": str(spec_root),
+                        "strategy": spec_ws.strategy,
+                        "provider": resolved_provider,
+                        "model": resolved_model,
+                    }
                 ),
             )
         )
@@ -94,6 +105,8 @@ class SpecBootstrapService:
             task_id=None,
             lease_id=None,
             agent_type="claude_code",
+            provider=resolved_provider,
+            model=resolved_model,
             status="pending",
             spec_strategy=spec_ws.strategy,
             profile_version=spec_ws.profile_version,
@@ -115,6 +128,8 @@ class SpecBootstrapService:
             "spec_bootstrap.start",
             workspace_id=str(workspace_id),
             agent_run_id=str(run.id),
+            provider=resolved_provider,
+            model=resolved_model,
         )
 
         # 6. Fire-and-forget background execution
@@ -221,6 +236,14 @@ async def _execute_bootstrap_agent_run(
                 await _publish_done_event(run_id, "failed", 1)
                 return
 
+            resolved_provider = run.provider or workspace.default_agent or "claude"
+            resolved_model = run.model or workspace.default_model or None
+            if run.provider != resolved_provider or run.model != resolved_model:
+                run.provider = resolved_provider
+                run.model = resolved_model
+                session.add(run)
+                await session.commit()
+
             # -- 2. Preflight (code_root sanity, daemon-agnostic) ----------------
             preflight_error = _run_preflight(Path(code_root))
             if preflight_error is not None:
@@ -266,15 +289,15 @@ async def _execute_bootstrap_agent_run(
             lease_id = await placement.dispatch_to_daemon(
                 run.id,
                 user_id,
-                # ql-20260616-002：daemon 的 provider 注册表里只有 'claude'（不是 'claude_code'）。
-                # 后端 AgentRun.agent_type 保留 'claude_code' 作 adapter 标识（与 placement/context_builder
-                # 一致），但 dispatch_to_daemon 的 provider kwarg 必须是 daemon 协议名 'claude'，
-                # 否则 daemon 端 getBackend() 抛 "Unknown provider: claude_code"。
+                # AgentRun.agent_type remains the adapter id ("claude_code").
+                # The lease provider/model are daemon runtime settings and are
+                # resolved from the workspace defaults when the run is created.
+                provider=resolved_provider,
+                model=resolved_model,
                 # 同时传 root_path + spec_root 让 lease.metadata 落地，daemon 拉取 execution-context 时
                 # _determine_run_type 能识别为 "scan" 类型（task_id=None + lease_meta 含 root_path/spec_root
                 # 分支），否则抛 ValueError "cannot determine run type" → 400 → bootstrap task failed。
                 # 语义上 bootstrap 等价于首次 scan：对源码目录只读扫描，输出 spec 文档。
-                provider="claude",
                 # ql-20260616-002b：daemon task-runner 的 spawn 用 ctx.prompt ?? '' 作为 claude stdin
                 # 的初始输入；不传 prompt → claude 收到空输入 → 不读 CLAUDE.md，直接回"等指令"，
                 # run exit_code=0 但 sillyspec scan 实际未执行。引导 claude 按 CLAUDE.md 跑 scan。
@@ -306,6 +329,8 @@ async def _execute_bootstrap_agent_run(
                 run_id=str(run_id),
                 workspace_id=str(workspace_id),
                 lease_id=str(lease_id),
+                provider=resolved_provider,
+                model=resolved_model,
             )
 
         except Exception as exc:

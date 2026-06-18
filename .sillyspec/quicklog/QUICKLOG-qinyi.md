@@ -1,3 +1,15 @@
+## ql-20260618-008-b2e1 | 2026-06-18 10:25:00 | 修复 daemon Windows .cmd 包装 spawn 失败导致 codex quick-chat 卡住
+
+状态：已完成
+文件：sillyhub-daemon/src/cmd-shim.ts、sillyhub-daemon/src/task-runner.ts、sillyhub-daemon/tests/cmd-shim.test.ts
+依据：用户报 codex quick-chat daemon 日志只到 `[task xxx] [running]` 后卡住，没继续推 delta（"还是卡了"）。直接 probe `spawn(codex.cmd, [..], {shell:true})` 在 git-bash 下报 ENOENT，PowerShell 下虽能启动但行为不稳定；claude.cmd 是原生 exe 没问题，对比 "claude code 的就没问题"。
+根因：npm/cmd-shim 生成的 codex.cmd 用 `endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%" "...codex.js" %*` 单行混合模式（goto trick），Node `child_process.spawn(cmd.cmd, args, {shell:true})` 在不同 shell 环境下行为不一致。claude.cmd 是原生 exe 模式 (`"...claude.exe" %*`) 不受影响。
+结果：
+  1. 新增 `sillyhub-daemon/src/cmd-shim.ts` `resolveWindowsCmdShim()`：read .cmd 文件，全局 regex 匹配两种模式——node+js 模式返回 `{exe: node.exe, prependArgs: [js_path]}`；原生 exe 模式返回 `{exe, prependArgs: []}`。%dp0% 宏展开到 .cmd 所在目录，node.exe 优先用 `%dp0%\node.exe`（nvm4w 全局目录通常带）fallback `process.execPath`。
+  2. `task-runner.ts` spawn 前先调 resolver，成功则不带 shell；失败回退原 `shell:true`（兼容非 cmd-shim 生成的 .bat/.ps1）。codex → `spawn(node.exe, [codex.js, app-server, --listen, stdio://])`；claude → `spawn(claude.exe, [...])`，均无 shell。
+  3. `tests/cmd-shim.test.ts` 5 个用例：codex.cmd 格式 / claude.cmd 格式 / %dp0% 宏展开 / 读失败→null / 非 .cmd 内容→null。全 5 通过。
+验证：probe 用 daemon 完全相同的 spawn 逻辑跑 codex "hi" → 10 秒内拿到完整事件流（initialize reply / thread:start reply / turn/started / item/started reasoning @ +8.4s / item/agentMessage/delta @ +9.8s / item/completed / turn/completed）。tsc --noEmit 零错误；vitest cmd-shim 5/5 通过。
+
 ## ql-20260618-007-d9c0 | 2026-06-18 10:04:45 | 修复 Daemon runtime 掉线后刷新仍在线并补 Agent 禁用操作
 
 状态：已完成

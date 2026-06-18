@@ -48,12 +48,16 @@ def _load_env(path: Path) -> dict[str, str]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     # ── 1. Read DATABASE_URL from backend/.env ─────────────────────────
     env = _load_env(_ENV_FILE)
     database_url = env.get("DATABASE_URL") or os.environ.get("DATABASE_URL")
     if not database_url:
-        print("ERROR: DATABASE_URL not found in backend/.env or environment.", file=sys.stderr)
+        print(
+            "ERROR: DATABASE_URL not found in backend/.env or environment.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     # Convert asyncpg URL to plain psycopg2/psycopg URL.
@@ -65,10 +69,10 @@ def main() -> None:
         import psycopg2
     except ImportError:
         try:
-            import psycopg as _pg
             # psycopg exposes connect() at top level when installed as psycopg2-binary compat
             # but let's be explicit.
             from psycopg import connect as _psycopg_connect
+
             _connect = _psycopg_connect
         except ImportError:
             print(
@@ -130,9 +134,7 @@ def main() -> None:
             continue
 
         # Count files before copy for stats.
-        source_files = [
-            f for f in source_dir.rglob("*") if f.is_file()
-        ]
+        source_files = [f for f in source_dir.rglob("*") if f.is_file()]
 
         if not source_files:
             print(f"  SKIP  source is empty: {source_dir}")
@@ -157,7 +159,7 @@ def main() -> None:
 
     # ── 4. Summary ─────────────────────────────────────────────────────
     print("\n" + "=" * 60)
-    print(f"Migration complete.")
+    print("Migration complete.")
     print(f"  Workspaces processed: {len(rows)}")
     print(f"  Files copied:         {total_copied}")
     print(f"  Skipped (no key):     {total_skipped}")
