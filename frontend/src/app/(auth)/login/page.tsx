@@ -11,7 +11,7 @@ import { login } from "@/lib/auth";
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("admin@sillyhub.local");
-  const [password, setPassword] = useState("admin12345");
+  const [password, setPassword] = useState("admin123");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
