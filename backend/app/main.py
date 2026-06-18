@@ -165,7 +165,9 @@ def create_app() -> FastAPI:
                 ),
                 {
                     "id": run_id,
-                    "agent_type": provider,
+                    # ql-20260618-009：与 service.py / bootstrap.py / dispatch.py 一致，
+                    # AgentRun.agent_type 永远是 adapter id（"claude_code"），具体 provider 走独立列。
+                    "agent_type": "claude_code",
                     "provider": provider,
                     "model": model,
                 },
@@ -203,7 +205,7 @@ def create_app() -> FastAPI:
 
             return {
                 "id": str(run_id),
-                "agent_type": provider,
+                "agent_type": "claude_code",
                 "provider": provider,
                 "model": model,
                 "status": final_status,

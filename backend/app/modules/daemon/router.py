@@ -13,7 +13,10 @@ from app.core.db import get_session
 from app.core.logging import get_logger
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
-from app.modules.daemon.protocol import DAEMON_MSG_HEARTBEAT
+from app.modules.daemon.protocol import (
+    DAEMON_MSG_HEARTBEAT,
+    DAEMON_MSG_RPC_RESULT,
+)
 from app.modules.daemon.schema import (
     DaemonHeartbeatRequest,
     DaemonHeartbeatResponse,
@@ -32,10 +35,18 @@ from app.modules.daemon.schema import (
     LeaseStartResponse,
     LeaseSyncRequest,
     LeaseSyncResponse,
+    ListDirRequest,
+    ListDirResponse,
 )
 from app.modules.daemon.service import (
     DaemonLeaseNotFound,
+    DaemonRpcForbiddenError,
+    DaemonRpcGatewayError,
+    DaemonRpcRemoteError,
+    DaemonRpcRemoteGatewayError,
+    DaemonRpcTimeout,
     DaemonRuntimeNotFound,
+    DaemonRuntimeOffline,
     DaemonService,
 )
 from app.modules.daemon.ws_hub import get_daemon_ws_hub
@@ -344,6 +355,73 @@ async def list_runtime_leases(
     return [DaemonTaskLeaseRead.model_validate(lease) for lease in leases]
 
 
+@router.post(
+    "/runtimes/{runtime_id}/list-dir",
+    response_model=ListDirResponse,
+)
+async def list_dir(
+    runtime_id: uuid.UUID,
+    data: ListDirRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> ListDirResponse:
+    """Forward a list_dir request to the bound daemon over WS RPC.
+
+    The daemon performs the actual readdir+stat and allowed_roots validation
+    (task-05); backend only owns ownership checks + RPC/HTTP status mapping.
+    """
+    svc = DaemonService(session)
+    # Ownership check: runtime not owned by current user → 404.
+    await svc._get_owned_runtime(runtime_id, user.id)
+
+    hub = get_daemon_ws_hub()
+    try:
+        result = await hub.send_rpc(runtime_id, "list_dir", {"path": data.path})
+    except DaemonRuntimeOffline as exc:
+        raise DaemonRpcGatewayError(
+            f"daemon runtime '{runtime_id}' offline.",
+            details={
+                "runtime_id": str(runtime_id),
+                "path": data.path,
+                "reason": "offline_or_send_failed",
+            },
+        ) from exc
+    except DaemonRpcTimeout as exc:
+        raise DaemonRpcGatewayError(
+            "daemon list_dir rpc timed out.",
+            details={
+                "runtime_id": str(runtime_id),
+                "path": data.path,
+                "rpc_id": exc.details.get("rpc_id") if exc.details else None,
+                "timeout_seconds": exc.details.get("timeout_seconds") if exc.details else None,
+            },
+        ) from exc
+    except DaemonRpcRemoteError as exc:
+        # daemon business error — map forbidden → 403 (FR-04), others → 502.
+        if exc.code == "forbidden":
+            raise DaemonRpcForbiddenError(
+                "daemon refused list_dir: path outside allowed_roots.",
+                details={
+                    "runtime_id": str(runtime_id),
+                    "path": data.path,
+                    "daemon_code": exc.code,
+                    "daemon_message": exc.message,
+                },
+            ) from exc
+        raise DaemonRpcRemoteGatewayError(
+            f"daemon list_dir failed: {exc.code}.",
+            details={
+                "runtime_id": str(runtime_id),
+                "path": data.path,
+                "daemon_code": exc.code,
+                "daemon_message": exc.message,
+            },
+        ) from exc
+
+    entries = result.get("entries", []) if isinstance(result, dict) else []
+    return ListDirResponse(entries=entries)
+
+
 # ── WebSocket endpoint ───────────────────────────────────────────────────────
 
 
@@ -390,6 +468,20 @@ async def daemon_websocket(
             if msg_type == DAEMON_MSG_HEARTBEAT:
                 log.debug("ws_heartbeat_received", runtime_id=str(rid))
                 await hub.send_heartbeat_ack(rid)
+            elif msg_type == DAEMON_MSG_RPC_RESULT:
+                # daemon → server RPC reply. Route to the pending future via the
+                # hub correlation map; struct validation + error mapping lives in
+                # the send_rpc call chain (list-dir endpoint), not here.
+                payload = data.get("payload") or {}
+                rpc_id = payload.get("rpc_id")
+                if not rpc_id:
+                    log.warning(
+                        "ws_rpc_result_missing_id",
+                        runtime_id=str(rid),
+                        msg=data,
+                    )
+                    continue
+                await hub.resolve_rpc(rpc_id, payload)
             else:
                 log.warning(
                     "ws_unknown_message_type",

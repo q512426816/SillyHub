@@ -441,4 +441,95 @@ export class HubClient {
       `/api/agent-runs/${encodeURIComponent(agentRunId)}/execution-context`,
     );
   }
+
+  // -- task-09 / D-006@v1：spec 按需 bundle pull / sync push（FR-05）--
+
+  /**
+   * 拉取 workspace 的 spec bundle（tar 流）。
+   *
+   * 端点：GET /api/workspaces/{wsId}/spec-workspace/bundle（task-06）。
+   * 响应：200 application/x-tar（服务器 spec_root 整树打包，排除 .runtime）。
+   *
+   * **路径前缀**：用 `/api`（spec_workspace router 挂载点），不用 REST_PREFIX
+   *（那是 /api/daemon，daemon module 专用）。与 getExecutionContext 同样的前缀约束。
+   *
+   * **二进制响应**：不走 _request（JSON 专用），单独 fetch + arrayBuffer() → Buffer。
+   * 鉴权头复用 _headers() 的 Bearer / X-API-Key 优先级（apiKey 胜出），但 Content-Type
+   * 不设（GET 无 body），Accept 设 application/x-tar 让 backend 明确期望。
+   *
+   * **失败语义**（对齐 _request）：
+   *   - HTTP 非 2xx → 抛 HubHttpError（含 status/bodyText/url/method）。
+   *   - 404 表示 spec_workspace 不存在或 spec_root 尚未 bootstrap（FR-05 首次执行）。
+   *   - 网络/超时 → 透传 fetch 原始错误（不包装）。
+   *
+   * @returns tar 二进制 Buffer（调用方 _extractTar 负责解包到本地路径）
+   */
+  async getSpecBundle(wsId: string): Promise<Buffer> {
+    const url = `${this.baseUrl}/api/workspaces/${encodeURIComponent(wsId)}/spec-workspace/bundle`;
+    const headers: Record<string, string> = { Accept: 'application/x-tar' };
+    if (this.apiKey) {
+      headers['X-API-Key'] = this.apiKey;
+    } else if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+    const resp = await fetch(url, {
+      method: 'GET',
+      headers,
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+    });
+    if (!resp.ok) {
+      const bodyText = await resp.text();
+      throw new HubHttpError(resp.status, bodyText, url, 'GET');
+    }
+    const ab = await resp.arrayBuffer();
+    return Buffer.from(ab);
+  }
+
+  /**
+   * 回传 daemon 执行后的 spec 整树（tar 流）到服务器。
+   *
+   * 端点：POST /api/workspaces/{wsId}/spec-workspace/sync（task-06）。
+   * 请求：Content-Type: application/x-tar，body=tar Buffer（daemon 本地 spec_root 整树）。
+   * 响应：200 { ok: true, reparsed: number }（reparsed = reparse 后 scan_docs 条数）。
+   *
+   * **路径前缀**：同 getSpecBundle，用 /api。
+   *
+   * **二进制请求**：不走 _request（它会 JSON.stringify body），单独 fetch，body 直接传
+   * Buffer（Node fetch 原生支持 Buffer/Uint8Array 作为 body，自动处理 content-length）。
+   * Content-Type 显式设 application/x-tar（覆盖默认 application/json）。
+   *
+   * **失败语义**（对齐 _request）：
+   *   - HTTP 非 2xx → 抛 HubHttpError。
+   *   - 413 Payload Too Large → spec 树过大（R-02），调用方应 log + 不中断 agent 结果。
+   *   - 网络/超时 → 透传。
+   *
+   * @param wsId workspace id（与 getSpecBundle 同一个 id）
+   * @param tarBuf tar 二进制（由 TaskRunner._packSpecDir 生成）
+   * @returns backend 响应 { ok, reparsed }
+   */
+  async postSpecSync(
+    wsId: string,
+    tarBuf: Buffer,
+  ): Promise<{ ok: boolean; reparsed: number }> {
+    const url = `${this.baseUrl}/api/workspaces/${encodeURIComponent(wsId)}/spec-workspace/sync`;
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/x-tar',
+    };
+    if (this.apiKey) {
+      headers['X-API-Key'] = this.apiKey;
+    } else if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: tarBuf,
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+    });
+    if (!resp.ok) {
+      const bodyText = await resp.text();
+      throw new HubHttpError(resp.status, bodyText, url, 'POST');
+    }
+    return (await resp.json()) as { ok: boolean; reparsed: number };
+  }
 }

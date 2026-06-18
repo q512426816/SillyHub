@@ -12,7 +12,9 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -47,6 +49,13 @@ router = APIRouter(
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
+class SpecSyncResponse(BaseModel):
+    """Response DTO for the spec sync endpoint (FR-05)."""
+
+    ok: bool
+    reparsed: int
+
+
 # ── Spec Workspace ─────────────────────────────────────────────────────────────
 
 
@@ -60,6 +69,29 @@ async def get_spec_workspace(
     service = SpecWorkspaceService(session)
     spec_ws = await service.get(workspace_id)
     return SpecWorkspaceRead.model_validate(spec_ws)
+
+
+@router.get("/spec-workspace/bundle")
+async def download_spec_bundle(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+) -> StreamingResponse:
+    """Stream the server ``spec_root`` as a tar bundle (FR-05 / D-003@v1).
+
+    Used by daemon-client workspaces to borrow the spec tree before an agent
+    run. Excludes ``.runtime/`` (daemon runtime cache, not spec data).
+    """
+    service = SpecWorkspaceService(session)
+    spec_root, tar_stream = await service.build_bundle(workspace_id)
+    return StreamingResponse(
+        tar_stream,
+        media_type="application/x-tar",
+        headers={
+            "Content-Disposition": f'attachment; filename="spec-bundle-{workspace_id}.tar"',
+            "X-Spec-Root": spec_root,
+        },
+    )
 
 
 @router.post(
@@ -84,22 +116,24 @@ async def import_spec_workspace(
 
 @router.post(
     "/spec-workspace/sync",
-    response_model=SpecWorkspaceRead,
+    response_model=SpecSyncResponse,
 )
 async def sync_spec_workspace(
     workspace_id: uuid.UUID,
     session: SessionDep,
     _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
-) -> SpecWorkspaceRead:
-    """Synchronise the platform spec workspace with the repo ``.sillyspec``
-    directory (bidirectional for ``repo-mirrored`` strategy).
+    tar_bytes: Annotated[bytes, Body(media_type="application/x-tar")],
+) -> SpecSyncResponse:
+    """Receive a daemon-uploaded spec tar, overwrite the server ``spec_root``,
+    and reparse scan_docs (FR-05 / D-006@v1).
 
-    This is a stub implementation — the actual sync logic will be added in a
-    later wave.
+    Body is a raw ``application/x-tar`` stream. The whole tree is overwritten
+    (no diff/merge). ``.runtime/`` is preserved. Returns the reparse parsed
+    count.
     """
     service = SpecWorkspaceService(session)
-    spec_ws = await service.sync(workspace_id)
-    return SpecWorkspaceRead.model_validate(spec_ws)
+    reparsed = await service.apply_sync(workspace_id, tar_bytes)
+    return SpecSyncResponse(ok=True, reparsed=reparsed)
 
 
 @router.patch("/spec-workspace", response_model=SpecWorkspaceRead)

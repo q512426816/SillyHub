@@ -294,6 +294,7 @@ class AgentService:
         lease_id_daemon = await placement.dispatch_to_daemon(
             run.id,
             user_id,
+            workspace_id=workspace_id,
             repo_url=repo_url,
             branch=branch,
             provider=resolved_provider,
@@ -780,6 +781,7 @@ class AgentService:
         lease_id_daemon = await placement.dispatch_to_daemon(
             run.id,
             user_id,
+            workspace_id=workspace_id,
             prompt=prompt,
             stage=stage,
             read_only=read_only,
@@ -1007,6 +1009,7 @@ class AgentService:
         lease_id_daemon = await placement.dispatch_to_daemon(
             run.id,
             user_id,
+            workspace_id=workspace_id,
             root_path=root_path,
             spec_root=spec_root,
             repo_url=repo_url,

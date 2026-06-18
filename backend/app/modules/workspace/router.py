@@ -78,6 +78,21 @@ async def scan_generate(
 
     agent_service = AgentService(session)
     service = WorkspaceService(session)
+    # FR-06 / D-003@v1：daemon-client 分支（跳过本地 _guard_path，派 scan 给绑定 daemon）
+    if service._is_daemon_client_payload(payload):
+        assert payload.daemon_runtime_id is not None  # task-01 validator 保证
+        workspace_id, agent_run_id = await service.scan_generate_daemon_client(
+            root_path=payload.root_path,
+            user_id=user.id,
+            daemon_runtime_id=payload.daemon_runtime_id,
+            agent_service=agent_service,
+            provider=payload.provider,
+            model=payload.model,
+        )
+        return ScanGenerateResponse(
+            workspace_id=workspace_id,
+            agent_run_id=agent_run_id,
+        )
     workspace_id, agent_run_id = await service.scan_generate(
         root_path=payload.root_path,
         user_id=user.id,

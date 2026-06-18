@@ -46,7 +46,7 @@ created_at: 2026-06-10T00:00:00
 
 ### 外部依赖
 - **@anthropic-ai/claude-code** 2.1.158 (AI Agent CLI)
-- **sillyspec** 3.18.1 (SillySpec CLI)
+- **sillyspec** 3.18.2 (SillySpec CLI)
 
 ### 容器化
 - **Docker** 多阶段构建（Python 3.12 slim）

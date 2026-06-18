@@ -25,7 +25,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 // ── 路径常量（对齐 Python config.py:15-16）──────────────────────────────────
@@ -127,6 +127,26 @@ export interface DaemonConfig {
    * null 时按平台默认（win32 wt.exe、darwin osascript、linux x-terminal-emulator）。
    */
   terminal_observer_command: string | null;
+  /**
+   * list_dir RPC 允许浏览的根目录白名单（绝对路径数组）。
+   *
+   * 用途（FR-04 / D-002@v1）：前端树形目录浏览请求的 path 必须落在
+   * 某个 allowed_root 之下（含 root 本身），越界由 task-05 file-rpc.ts
+   * 返回 error.code='forbidden'。
+   *
+   * 默认 `[os.homedir()]`：未显式配置时仅允许浏览用户家目录。
+   * 用户可在 ~/.sillyhub/daemon/config.json 中追加项目目录扩展范围。
+   *
+   * 元素约定：
+   *   - 必须为绝对路径（loadConfig 已做规范化，见 normalizeAllowedRoots）。
+   *   - 允许重复项（loadConfig 去重保序）。
+   *   - 大小写：Windows 下盘符保留原样（'C:\\Users\\...'），规范化不做大小写归一
+   *     （由 task-05 比较时按平台决定是否 case-insensitive）。
+   *   - 不展开 shell 风格 `~`（Node path.resolve 不识别 `~`，用户须写真实绝对路径）。
+   *
+   * 字段非 nullable：默认值恒为非空数组（含 homedir），下游消费无需 null 检查。
+   */
+  allowed_roots: string[];
 }
 
 // ── 默认值常量 ───────────────────────────────────────────────────────────────
@@ -169,6 +189,10 @@ export const DEFAULT_CONFIG: Readonly<DaemonConfig> = Object.freeze({
   terminal_observer_command: null,
   // ql-20260616-006：lease 心跳间隔（cancel 信号检测 + 续期）
   lease_heartbeat_interval: 5,
+  // FR-04 / D-002@v1：list_dir 白名单根目录，默认仅允许浏览用户家目录。
+  // 注：用 [homedir()] 而非 homedir() —— 字段类型是数组。
+  // 不在此处做 path.resolve（homedir() 已返回绝对路径），规范化在 loadConfig/normalizeAllowedRoots。
+  allowed_roots: [homedir()],
 });
 
 // ── loadConfig（异步加载 + 合并默认 + 自动生成 runtime_id）──────────────────
@@ -214,6 +238,13 @@ export async function loadConfig(
     Object.assign(data, saved);
   }
 
+  // ── allowed_roots 向后兼容 + 规范化（FR-04 / D-002@v1）──
+  // 浅拷贝 DEFAULT_CONFIG 后 data.allowed_roots 仍指向 DEFAULT 的同一数组引用，
+  // 必须用 normalize 返回的全新数组覆盖，避免后续 mutation 污染 DEFAULT（R-3）。
+  // 规范化幂等：resolve + 去重对已是规范的输入无副作用，因此 round-trip 一致。
+  // 不因规范化立即落盘——与 runtime_id 自动生成路径不同，避免每次启动写盘。
+  data.allowed_roots = normalizeAllowedRoots(data.allowed_roots);
+
   // step 3: runtime_id 为空/null/undefined（边界 R5）→ 生成 uuid 并落盘。
   // 用 `||` 一步覆盖 null / "" / undefined 三种 falsy，对齐 Python
   // `if not self._data.get("runtime_id")` 的语义。
@@ -227,6 +258,53 @@ export async function loadConfig(
   }
 
   return data;
+}
+
+// ── normalizeAllowedRoots（私有纯函数，规范化白名单数组）─────────────────────
+
+/**
+ * 规范化 allowed_roots：处理缺字段/非数组/相对路径/重复项/脏数据/Windows 路径。
+ *
+ * 纯函数，不修改入参，始终返回全新数组（满足 R-3：loadConfig 用返回值覆盖
+ * DEFAULT 浅拷贝共享的数组引用）。
+ *
+ * 边界处理（task-02.md §6）：
+ *   - B1 缺字段 / 非数组 / 空数组 / 过滤后空 → 回填默认 [homedir()]
+ *   - B4 相对路径 → path.resolve（基于 process.cwd()）
+ *   - B5 Windows 路径：path.resolve 在 win32 自动统一反斜杠/盘符；不归一大小写
+ *   - B6 去重保序（首次出现优先，Set）
+ *   - B7 非字符串 / 空串元素被 filter 掉
+ *
+ * @param raw 从 JSON 合并后的原始值（可能 undefined / 非数组 / 含相对路径 / 脏数据）。
+ * @returns 规范化后的非空绝对路径数组（去重保序，全新数组）。
+ */
+function normalizeAllowedRoots(raw: unknown): string[] {
+  // B1：缺字段 / 非数组 / 空数组 → 回填默认 [homedir()]
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return [homedir()];
+  }
+
+  // B7：filter 掉非 string / 空串；B4：resolve 相对路径为绝对路径。
+  // B5：path.resolve 在 win32 自动处理反斜杠/盘符；不归一大小写（交由 task-05）。
+  const resolved = (raw as unknown[])
+    .filter((p): p is string => typeof p === 'string' && p.length > 0)
+    .map((p) => resolve(p));
+
+  // B1 兜底：全部为脏数据（filter 后空）→ 回填默认
+  if (resolved.length === 0) {
+    return [homedir()];
+  }
+
+  // B6：去重保序（首次出现优先，Set 维护插入序）
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const p of resolved) {
+    if (!seen.has(p)) {
+      seen.add(p);
+      deduped.push(p);
+    }
+  }
+  return deduped;
 }
 
 // ── saveConfig（写 JSON + 自动建父目录）─────────────────────────────────────

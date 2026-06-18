@@ -49,6 +49,7 @@ import { AgentDetector } from './agent-detector.js';
 import type { DetectedAgent } from './agent-detector.js';
 import { HubClient } from './hub-client.js';
 import { WsClient } from './ws-client.js';
+import { listDir } from './file-rpc.js';
 import type { TaskRunner, TaskRunnerResult } from './task-runner.js';
 
 // ── 最小日志（design G-05 零依赖，不装 winston/pino）──────────────────────────
@@ -165,6 +166,15 @@ interface TaskRunnerLike {
 interface WsClientLike {
   connect(): void;
   close(): void;
+  /**
+   * task-05：注册 RPC handler（D-005@v1）。鸭子类型可选——测试 mock 的 WsClient
+   * 可不实现（生产路径真实 WsClient 必须实现，否则 list_dir 等方法不可用，R-5）。
+   * daemon 在 _wsLoop 用 `typeof === 'function'` 探测后调用。
+   */
+  registerRpcHandler?: (
+    method: string,
+    handler: (params: Record<string, unknown>) => Promise<unknown> | unknown,
+  ) => void;
 }
 
 /** WsClient 工厂：daemon 在 _wsLoop 用它创建实例（便于测试 mock）。 */
@@ -509,6 +519,21 @@ export class Daemon {
           },
         },
       });
+
+      // task-05（D-005@v1 / FR-03 / FR-04）：注册 list_dir RPC handler。
+      // 鸭子类型探测 registerRpcHandler——测试 mock 的 WsClient 可不实现（R-5）。
+      // 真实 WsClient 实现该方法，handler 调 file-rpc.listDir，读 config.allowed_roots。
+      const ws = this._wsClient;
+      if (ws && typeof ws.registerRpcHandler === 'function') {
+        ws.registerRpcHandler('list_dir', async (params) => {
+          const path = typeof params.path === 'string' ? params.path : '';
+          return listDir(path, this._config.allowed_roots);
+        });
+      } else {
+        this._logger.warn('ws_no_rpc_support', {
+          runtime_id: this._config.runtime_id,
+        });
+      }
     }
 
     // connect 是同步 void（真实 WsClient：connect() 触发异步握手，不返回 Promise）。

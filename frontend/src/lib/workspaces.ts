@@ -29,6 +29,9 @@ export interface Workspace {
   name: string;
   slug: string;
   root_path: string;
+  // task-01 / 2026-06-18-workspace-client-path：路径来源
+  path_source: "server-local" | "daemon-client";
+  daemon_runtime_id: string | null;
   status: WorkspaceStatus;
   // Component metadata fields
   component_key: string | null;
@@ -113,6 +116,8 @@ export async function scanGenerate(
   rootPath: string,
   provider?: string | null,
   model?: string | null,
+  pathSource?: "server-local" | "daemon-client",
+  daemonRuntimeId?: string | null,
 ): Promise<ScanGenerateResponse> {
   return apiFetch<ScanGenerateResponse>("/api/workspaces/scan-generate", {
     method: "POST",
@@ -120,6 +125,8 @@ export async function scanGenerate(
       root_path: rootPath,
       ...(provider ? { provider } : {}),
       ...(model ? { model } : {}),
+      ...(pathSource ? { path_source: pathSource } : {}),
+      ...(daemonRuntimeId ? { daemon_runtime_id: daemonRuntimeId } : {}),
     },
   });
 }
@@ -139,6 +146,9 @@ export interface CreateWorkspaceInput {
   root_path: string;
   slug?: string;
   spec_strategy?: string;
+  // task-10：daemon-client 路径来源（默认 server-local）
+  path_source?: "server-local" | "daemon-client";
+  daemon_runtime_id?: string | null;
 }
 
 export async function createWorkspace(input: CreateWorkspaceInput): Promise<Workspace> {

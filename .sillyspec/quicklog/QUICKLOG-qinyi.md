@@ -1,3 +1,16 @@
+## ql-20260618-009-f3a2 | 2026-06-18 11:45:40 | 修复 agent per-run model 代码 review 发现的 5 个小问题
+
+状态：已完成
+文件：backend/app/main.py、backend/app/modules/daemon/service.py、backend/app/modules/agent/router.py、backend/app/modules/change/router.py、frontend/src/lib/changes.ts
+依据：代码 review ql-20260617-006（Daemon per-run model selection）发现 5 个问题：(1) quick_chat 的 `agent_type=provider` 与全项目 `agent_type="claude_code"` 约定不一致，导致 DB agent_type 字段语义混乱；(2) execution-context payload 中 provider/model 同时从 AgentRun 与 lease_meta 取，lease_meta 会覆盖 AgentRun 快照（违反 source of truth 原则）；(3) `/changes/{id}/dispatch` 路由的 provider/model Query 参数没限制 max_length，schema 限制了但路由没限制；(4) 前端 executeChange 用 `if (model)` 而 transitionChange 用 `if (model !== undefined)`，判断风格不一致；(5) workspace-scan-dialog 的 AgentModelInput placeholder 固定，不展示 workspace.default_model 提示。
+结果：实际修复 4 项（#5 review 误判跳过）——
+  1. **#1 backend/app/main.py:167-171, 207-212**：quick_chat 的 INSERT SQL 和 return dict 中 agent_type 从 `provider` 改为 `"claude_code"`，与 service.py / bootstrap.py / dispatch.py / 30+ 测试约定一致；provider 走独立列。
+  2. **#2 backend/app/modules/daemon/service.py:420-425 + backend/app/modules/agent/router.py:237-240**：把"lease_meta 覆盖 AgentRun"改为"AgentRun 优先 + lease_meta 兜底"——`run.provider or lease_meta.get("provider")`。AgentRun 是持久化快照作 source of truth，避免重 dispatch 时 transport 与快照不一致。daemon 真正消费的 execution-context 端点在 agent/router.py（不是 daemon/service.py 的 _build_claim_payload），两处同步修。
+  3. **#3 backend/app/modules/change/router.py:551-553**：manual_dispatch 的 provider/model Query 加 `max_length=64/128`，与 schema.py TransitionRequest 对齐。
+  4. **#4 frontend/src/lib/changes.ts:287-292**：transitionChange 的 provider/model 判断从 `!== undefined` 改为 truthy（`if (provider)` / `if (model)`），与 executeChange 风格统一。后端 schema default=None，行为等价。
+  5. **#5 跳过**：WorkspaceScanDialog 是新建 workspace 流程，那时 workspace 尚不存在，没有 default_model 可显示。default_model 的编辑入口已经在 workspace 详情页（workspaces/[id]/page.tsx:488）有独立 UI。
+验证：backend pytest 57/57 通过（test_execution_context / test_lease_service / test_bootstrap_provider_model / test_router）；ruff 通过；frontend tsc --noEmit 零错误。
+
 ## ql-20260618-008-b2e1 | 2026-06-18 10:25:00 | 修复 daemon Windows .cmd 包装 spawn 失败导致 codex quick-chat 卡住
 
 状态：已完成

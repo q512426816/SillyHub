@@ -32,6 +32,7 @@ class Workspace(BaseModel, table=True):
     __table_args__ = (
         Index("ix_workspaces_status", "status"),
         Index("ix_workspaces_created_by", "created_by"),
+        Index("ix_workspaces_daemon_runtime_id", "daemon_runtime_id"),
         Index(
             "ux_workspaces_root_path_active",
             "root_path",
@@ -55,6 +56,29 @@ class Workspace(BaseModel, table=True):
     name: str = Field(sa_column=Column(String(200), nullable=False))
     slug: str = Field(sa_column=Column(String(100), nullable=False))
     root_path: str = Field(sa_column=Column(String, nullable=False))
+    # Workspace path source: 'server-local' (root_path reachable from the
+    # backend process) or 'daemon-client' (root_path lives on a bound daemon
+    # client machine). See change 2026-06-18-workspace-client-path (FR-01 /
+    # D-004@v1). server_default backfills existing rows on add-column.
+    path_source: str = Field(
+        default="server-local",
+        sa_column=Column(
+            String(20),
+            nullable=False,
+            server_default="server-local",
+        ),
+    )
+    # Bound daemon runtime when path_source='daemon-client'; NULL for
+    # server-local workspaces. FK RESTRICT (default) blocks deleting a daemon
+    # that still has workspaces — R-06 cascade handling is out of scope.
+    daemon_runtime_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("daemon_runtimes.id"),
+            nullable=True,
+        ),
+    )
     status: str = Field(default="active", sa_column=Column(String(20), nullable=False))
 
     # Component metadata fields (absorbed from ProjectComponent, ADR-07)

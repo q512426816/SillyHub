@@ -54,6 +54,26 @@ class ExecutionContextResponse(BaseModel):
         default=None,
         description="真实代码目录（host path）；daemon 收到后若本地可访问直接用作 cwd。",
     )
+    # task-07 / change 2026-06-18-workspace-client-path（grill X-001）：
+    # workspace_id 顶层透传供 daemon task-runner 调 bundle/sync；
+    # spec_root 按 path_source 条件赋值——daemon-client 留空（backend 路径对 daemon
+    # 不可达，daemon 自决本地 spec_root），server-local scan 维持 lease_meta 来源。
+    workspace_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "run 关联的 workspace 标识。daemon-client 时 daemon task-runner 用它调 "
+            "GET /api/spec-workspaces/{workspace_id}/bundle 与 POST .../sync。"
+            "quick-chat 等无 workspace 关联的 run 返回 None，daemon 兜底不拉 bundle。"
+        ),
+    )
+    spec_root: str | None = Field(
+        default=None,
+        description=(
+            "执行 spec 文档根目录提示。server-local 时透传 lease_meta 的 backend 机器路径"
+            "（与 scan bundle 内一致）；daemon-client 时留空（None）——backend 路径对 "
+            "daemon 不可达，daemon 自行经 bundle 端点拉到本地。grill X-001 修正。"
+        ),
+    )
 
 
 class QuickChatRequest(BaseModel):

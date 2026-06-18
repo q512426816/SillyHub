@@ -37,7 +37,7 @@ created_at: 2026-06-10T17:00:03
 - **API 代理**: 默认通过 `https://open.bigmodel.cn/api/anthropic` 代理
 
 ### SillySpec
-- **版本**: 3.18.1 (Docker 内安装)
+- **版本**: 3.18.2 (Docker 内安装)
 - **用途**: 文档驱动开发工具，管理变更工作流
 - **集成方式**: CLI 调用 + spec 文件系统
 

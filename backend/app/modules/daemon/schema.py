@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -168,3 +169,25 @@ class LeaseSyncResponse(BaseModel):
 
     agent_run_id: uuid.UUID | None
     status: str
+
+
+# ── list-dir (WS RPC forwarding, design §7.2 / task-04) ──────────────────────
+
+
+class DirEntry(BaseModel):
+    """A single directory entry returned by the daemon list_dir RPC."""
+
+    name: str
+    type: Literal["dir", "file"]
+
+
+class ListDirRequest(BaseModel):
+    """Request body for POST /runtimes/{runtime_id}/list-dir."""
+
+    path: str = Field(min_length=1, description="daemon 客户端机器上的绝对路径")
+
+
+class ListDirResponse(BaseModel):
+    """Response body for POST /runtimes/{runtime_id}/list-dir."""
+
+    entries: list[DirEntry]

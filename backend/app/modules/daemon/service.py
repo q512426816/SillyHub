@@ -71,6 +71,67 @@ class PatchConflictError(AppError):
     http_status = 409
 
 
+# ── RPC errors ──────────────────────────────────────────────────────────────
+# task-04: WS RPC channel + list-dir forwarding endpoint. These cover the
+# daemon:rpc / daemon:rpc_result round-trip surface defined in design §7.1/§7.2.
+
+
+class DaemonRuntimeOffline(AppError):
+    """Target daemon runtime has no active WS connection (R-01)."""
+
+    code = "HTTP_504_DAEMON_RUNTIME_OFFLINE"
+    http_status = 504
+
+
+class DaemonRpcTimeout(AppError):
+    """RPC round-trip exceeded the per-call timeout (R-01)."""
+
+    code = "HTTP_504_DAEMON_RPC_TIMEOUT"
+    http_status = 504
+
+
+class DaemonRpcConflict(AppError):
+    """rpc_id collision in the pending map (UUID4 practical impossibility)."""
+
+    code = "HTTP_409_DAEMON_RPC_ID_CONFLICT"
+    http_status = 409
+
+
+class DaemonRpcGatewayError(AppError):
+    """WS channel-layer failure (offline / timeout / send failure) → 504."""
+
+    code = "HTTP_504_DAEMON_RPC_GATEWAY"
+    http_status = 504
+
+
+class DaemonRpcForbiddenError(AppError):
+    """daemon returned error.code=forbidden (allowed_roots violation, FR-04)."""
+
+    code = "HTTP_403_DAEMON_RPC_FORBIDDEN"
+    http_status = 403
+
+
+class DaemonRpcRemoteGatewayError(AppError):
+    """daemon returned a non-forbidden business error → 502."""
+
+    code = "HTTP_502_DAEMON_RPC_REMOTE"
+    http_status = 502
+
+
+class DaemonRpcRemoteError(Exception):
+    """Internal signal carrying a daemon error dict up the send_rpc call chain.
+
+    Deliberately NOT an AppError: the HTTP endpoint re-maps it to
+    DaemonRpcForbiddenError (403) or DaemonRpcRemoteGatewayError (502), so the
+    raw daemon code/message never leaks directly to HTTP status mapping.
+    """
+
+    def __init__(self, error: dict) -> None:
+        self.code = error.get("code", "unknown")
+        self.message = error.get("message", "")
+        super().__init__(f"daemon rpc error: {self.code}: {self.message}")
+
+
 # ── Service ─────────────────────────────────────────────────────────────────
 
 
@@ -417,9 +478,13 @@ class DaemonService:
         lease_meta = lease.metadata_ or {}
         if lease_meta.get("prompt"):
             payload["prompt"] = lease_meta["prompt"]
-        if lease_meta.get("provider"):
+        # ql-20260618-009：AgentRun 是 source of truth（持久化快照），
+        # lease_meta 仅在 AgentRun 字段为空时兜底（如旧测试场景）。
+        # 不再用 lease_meta 覆盖 AgentRun 已固化的值——避免重 dispatch 时 transport
+        # 与快照不一致导致 daemon 拿到错的 provider/model。
+        if not agent_run.provider and lease_meta.get("provider"):
             payload["provider"] = lease_meta["provider"]
-        if lease_meta.get("model"):
+        if not agent_run.model and lease_meta.get("model"):
             payload["model"] = lease_meta["model"]
         if lease_meta.get("resume_session_id"):
             payload["resume_session_id"] = lease_meta["resume_session_id"]

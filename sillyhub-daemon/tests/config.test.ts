@@ -4,9 +4,9 @@
 // 对照 Python: DEFAULTS(config.py:22-32) / _load(config.py:41-51) / save(config.py:53-57)。
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile, stat } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   loadConfig,
   saveConfig,
@@ -35,8 +35,9 @@ describe('config', () => {
   // ── AC-03：字段与默认值对照 Python config.py:22-32 DEFAULTS ──
 
   describe('字段与默认值（AC-03，对照 Python DEFAULTS）', () => {
-    it('DEFAULT_CONFIG 正好 17 字段，键名 1:1（task-10 新增 default_timeout_seconds / max_retries；daemon-api-key 新增 api_key；ql-20260616-003 新增 4 个 terminal_observer_*；ql-20260616-006 新增 lease_heartbeat_interval）', () => {
+    it('DEFAULT_CONFIG 正好 18 字段，键名 1:1（task-10 新增 default_timeout_seconds / max_retries；daemon-api-key 新增 api_key；ql-20260616-003 新增 4 个 terminal_observer_*；ql-20260616-006 新增 lease_heartbeat_interval；2026-06-18-workspace-client-path task-02 新增 allowed_roots）', () => {
       expect(Object.keys(DEFAULT_CONFIG).sort()).toEqual([
+        'allowed_roots',
         'api_key',
         'default_timeout_seconds',
         'heartbeat_interval',
@@ -213,6 +214,243 @@ describe('config', () => {
 
     it('DEFAULT_CONFIG 是 frozen（Object.freeze 双保险）', () => {
       expect(Object.isFrozen(DEFAULT_CONFIG)).toBe(true);
+    });
+  });
+
+  // ── 2026-06-18-workspace-client-path task-02：allowed_roots ──
+  // FR-04 / D-002@v1：list_dir RPC 白名单根目录数组，默认 [homedir()]。
+  // 本组覆盖 T1~T11（见 task-02.md §7）。
+
+  describe('allowed_roots（task-02，FR-04 / D-002@v1）', () => {
+    // ── AC-2：默认值 [homedir()]（T1）──
+    it('T1 DEFAULT_CONFIG.allowed_roots 默认 = [homedir()]', () => {
+      expect(DEFAULT_CONFIG.allowed_roots).toEqual([homedir()]);
+    });
+
+    it('T1 文件不存在时 loadConfig 返回 [homedir()]（默认值兜底）', async () => {
+      const cfg = await loadConfig(configPath);
+      expect(cfg.allowed_roots).toEqual([homedir()]);
+    });
+
+    // ── AC-3：旧 config.json 无此字段 → 回填默认（T2）──
+    it('T2 旧 config.json（含 runtime_id 但无 allowed_roots）→ 回填 [homedir()] 且现有字段不变', async () => {
+      const existing = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          runtime_id: existing,
+          token: 'old-token',
+          poll_interval: 60,
+        }),
+        'utf-8',
+      );
+      const cfg = await loadConfig(configPath);
+      expect(cfg.allowed_roots).toEqual([homedir()]);
+      expect(cfg.runtime_id).toBe(existing);
+      expect(cfg.token).toBe('old-token');
+      expect(cfg.poll_interval).toBe(60);
+    });
+
+    // ── AC-4：显式配置透传 + 规范化（T3）──
+    it('T3 显式 allowed_roots 透传，元素 resolve 为绝对路径', async () => {
+      const existing = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      const dirA = join(tmpDir, 'a');
+      const dirB = join(tmpDir, 'b');
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          runtime_id: existing,
+          allowed_roots: [dirA, dirB],
+        }),
+        'utf-8',
+      );
+      const cfg = await loadConfig(configPath);
+      expect(cfg.allowed_roots).toEqual([resolve(dirA), resolve(dirB)]);
+    });
+
+    // ── AC-4：相对路径规范化（T4）──
+    it('T4 相对路径基于 process.cwd() resolve 为绝对路径', async () => {
+      const existing = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          runtime_id: existing,
+          allowed_roots: ['./repos'],
+        }),
+        'utf-8',
+      );
+      const cfg = await loadConfig(configPath);
+      expect(cfg.allowed_roots).toEqual([resolve('./repos')]);
+    });
+
+    // ── AC-4：Windows 路径分隔符统一（T5，仅 win32 语义对齐）──
+    it('T5 路径 resolve 后为平台原生分隔符（win32 反斜杠 / POSIX 正斜杠）', async () => {
+      const existing = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          runtime_id: existing,
+          allowed_roots: [join(tmpDir, 'sub')],
+        }),
+        'utf-8',
+      );
+      const cfg = await loadConfig(configPath);
+      // resolve 后路径应为平台分隔符，与 join(tmpDir,'sub') resolve 等价
+      expect(cfg.allowed_roots).toEqual([resolve(join(tmpDir, 'sub'))]);
+    });
+
+    // ── AC-4：去重保序（T6）──
+    it('T6 重复项去重，首次出现保序', async () => {
+      const existing = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      const a = resolve(join(tmpDir, 'a'));
+      const b = resolve(join(tmpDir, 'b'));
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          runtime_id: existing,
+          allowed_roots: [a, a, b],
+        }),
+        'utf-8',
+      );
+      const cfg = await loadConfig(configPath);
+      expect(cfg.allowed_roots).toEqual([a, b]);
+    });
+
+    // ── AC-4：非字符串元素过滤（T7）──
+    it('T7 非字符串 / 空串元素被过滤（保留合法项）', async () => {
+      const existing = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      const a = resolve(join(tmpDir, 'a'));
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          runtime_id: existing,
+          allowed_roots: [a, null, 123, ''],
+        }),
+        'utf-8',
+      );
+      const cfg = await loadConfig(configPath);
+      expect(cfg.allowed_roots).toEqual([a]);
+    });
+
+    // ── AC-4：全脏数据回填默认（T8）──
+    it('T8 全部为非字符串/空 → 回填 [homedir()]', async () => {
+      const existing = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          runtime_id: existing,
+          allowed_roots: [null, '', 42],
+        }),
+        'utf-8',
+      );
+      const cfg = await loadConfig(configPath);
+      expect(cfg.allowed_roots).toEqual([homedir()]);
+    });
+
+    // ── AC-4：边界值（非数组 / 空数组 / null）回填默认（B1）──
+    it('B1 allowed_roots 为空数组 → 回填 [homedir()]', async () => {
+      const existing = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      await writeFile(
+        configPath,
+        JSON.stringify({ runtime_id: existing, allowed_roots: [] }),
+        'utf-8',
+      );
+      const cfg = await loadConfig(configPath);
+      expect(cfg.allowed_roots).toEqual([homedir()]);
+    });
+
+    it('B1 allowed_roots 为非数组（字符串）→ 回填 [homedir()]', async () => {
+      const existing = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          runtime_id: existing,
+          allowed_roots: 'not-an-array',
+        }),
+        'utf-8',
+      );
+      const cfg = await loadConfig(configPath);
+      expect(cfg.allowed_roots).toEqual([homedir()]);
+    });
+
+    it('B1 allowed_roots 为 null → 回填 [homedir()]', async () => {
+      const existing = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      await writeFile(
+        configPath,
+        JSON.stringify({ runtime_id: existing, allowed_roots: null }),
+        'utf-8',
+      );
+      const cfg = await loadConfig(configPath);
+      expect(cfg.allowed_roots).toEqual([homedir()]);
+    });
+
+    // ── AC-5：round-trip 一致（T9）──
+    it('T9 save → load → save 两次文件字节一致（normalize 幂等）', async () => {
+      const existing = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      const dirA = resolve(join(tmpDir, 'a'));
+      const dirB = resolve(join(tmpDir, 'b'));
+      const cfg1: DaemonConfig = {
+        ...DEFAULT_CONFIG,
+        runtime_id: existing,
+        allowed_roots: [dirA, dirB, dirA], // 含重复，会被去重
+      };
+      const path1 = join(tmpDir, 'c1.json');
+      await saveConfig(cfg1, path1);
+      const loaded = await loadConfig(path1);
+      expect(loaded.runtime_id).toBe(existing); // 不重生
+      // 第二次 save：用 load 回来的结果（已去重 + resolve）
+      const path2 = join(tmpDir, 'c2.json');
+      await saveConfig(loaded, path2);
+      const raw1 = await readFile(path1, 'utf-8');
+      const raw2 = await readFile(path2, 'utf-8');
+      // parsed 后 allowed_roots 应一致
+      expect(JSON.parse(raw2).allowed_roots).toEqual([dirA, dirB]);
+      // 再次 load（round-trip 三次）字段稳定
+      const loaded2 = await loadConfig(path2);
+      expect(loaded2.allowed_roots).toEqual([dirA, dirB]);
+    });
+
+    // ── T10：DEFAULT_CONFIG freeze 保护 + 不被 loadConfig 污染（R-3）──
+    it('T10 DEFAULT_CONFIG.allowed_roots 是 frozen 数组（浅冻结不足以阻止数组 mutation，但 Object.freeze 仅作用于对象本身）', () => {
+      // DEFAULT_CONFIG 整体 frozen，但数组元素本身未被 frozen。
+      // 关键不变量：DEFAULT_CONFIG.allowed_roots === [homedir()]（值层面恒定）
+      expect(DEFAULT_CONFIG.allowed_roots).toEqual([homedir()]);
+    });
+
+    it('T10/R-3 loadConfig 后修改返回的 cfg.allowed_roots 不影响 DEFAULT_CONFIG', async () => {
+      const cfg = await loadConfig(configPath);
+      // 给返回的 cfg 追加项
+      cfg.allowed_roots.push('/should/not/leak');
+      // DEFAULT_CONFIG 必须仍是 [homedir()]
+      expect(DEFAULT_CONFIG.allowed_roots).toEqual([homedir()]);
+    });
+
+    // ── T11：loadConfig 不因 allowed_roots 规范化而每次落盘（§5.3）──
+    it('T11 旧 config.json 缺 allowed_roots（runtime_id 已存在）→ loadConfig 不改文件 mtime', async () => {
+      const existing = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      await writeFile(
+        configPath,
+        JSON.stringify({ runtime_id: existing }),
+        'utf-8',
+      );
+      const before = await stat(configPath);
+      // 等待 > 1ms 确保 mtime 分辨率可区分（部分 FS 精度仅秒级，多读几次）
+      await new Promise((r) => setTimeout(r, 1100));
+      await loadConfig(configPath);
+      const cfg = await loadConfig(configPath);
+      const after = await stat(configPath);
+      // runtime_id 已存在 → 不触发落盘；allowed_roots 规范化也不落盘
+      expect(cfg.runtime_id).toBe(existing);
+      expect(after.mtimeMs).toBe(before.mtimeMs);
+    });
+
+    // ── saveConfig 透传序列化新字段（AC-5 隐含）──
+    it('saveConfig 写入的 JSON 含 allowed_roots 字段', async () => {
+      const cfg: DaemonConfig = { ...DEFAULT_CONFIG, runtime_id: 'x' };
+      const p = join(tmpDir, 'explicit.json');
+      await saveConfig(cfg, p);
+      const raw = await readFile(p, 'utf-8');
+      expect(JSON.parse(raw).allowed_roots).toEqual([homedir()]);
     });
   });
 });

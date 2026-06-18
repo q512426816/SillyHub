@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<!--
+author: qinyi
+created_at: 2026-06-18T11:25:09
+change: 2026-06-18-workspace-client-path
+purpose: 设计原型 — workspace 支持 daemon 客户端路径
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Workspace 客户端路径 — 设计原型</title>
+<style>
+  :root { --bd:#444; --bg:#f6f6f4; --box:#fff; --acc:#2563eb; --mut:#666; --ok:#16a34a; --wk:#d97706; }
+  * { box-sizing:border-box; }
+  body { font-family: ui-monospace, Menlo, Consolas, monospace; background:var(--bg); color:#222; margin:0; padding:24px; line-height:1.5; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  h2 { font-size:14px; margin:28px 0 10px; border-bottom:2px solid var(--bd); padding-bottom:4px; }
+  .sub { color:var(--mut); font-size:12px; margin-bottom:16px; }
+  .card { background:var(--box); border:1px solid var(--bd); border-radius:6px; padding:16px; margin-bottom:16px; }
+  pre { background:#111; color:#eee; padding:14px; border-radius:6px; overflow:auto; font-size:12px; margin:0; }
+  label { display:block; margin:10px 0 4px; font-size:12px; color:var(--mut); }
+  input[type=text], select { width:100%; padding:8px; border:1px solid var(--bd); border-radius:4px; font-family:inherit; font-size:13px; background:#fff; }
+  .radio-row { display:flex; gap:16px; margin:8px 0; }
+  .radio-row label { display:flex; align-items:center; gap:6px; color:#222; margin:0; cursor:pointer; font-size:13px; }
+  .seg { display:none; margin-top:8px; }
+  .seg.active { display:block; }
+  button { background:var(--acc); color:#fff; border:0; border-radius:4px; padding:8px 16px; font-family:inherit; font-size:13px; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--acc); border:1px solid var(--acc); }
+  .tree { border:1px dashed var(--bd); border-radius:4px; padding:8px; max-height:260px; overflow:auto; font-size:12px; background:#fafafa; }
+  .node { user-select:none; }
+  .node .row { display:flex; align-items:center; gap:6px; padding:3px 4px; border-radius:3px; cursor:pointer; }
+  .node .row:hover { background:#eef; }
+  .node .row.sel { background:#dceaff; outline:1px solid var(--acc); }
+  .children { margin-left:16px; border-left:1px dotted #bbb; padding-left:6px; }
+  .tag { font-size:11px; padding:1px 6px; border-radius:8px; border:1px solid var(--bd); color:var(--mut); }
+  .tag.ok { color:var(--ok); border-color:var(--ok); }
+  .tag.wk { color:var(--wk); border-color:var(--wk); }
+  .note { font-size:11px; color:var(--mut); margin-top:6px; }
+  .flow { display:flex; gap:8px; align-items:stretch; flex-wrap:wrap; }
+  .flow .step { flex:1; min-width:140px; border:1px solid var(--bd); border-radius:5px; padding:10px; font-size:12px; background:#fff; }
+  .flow .arr { align-self:center; color:var(--acc); font-weight:bold; }
+  .legend { font-size:11px; color:var(--mut); margin-top:8px; }
+  .selected-path { background:#eef6ff; border:1px solid var(--acc); border-radius:4px; padding:6px 8px; font-size:12px; margin-top:8px; word-break:break-all; }
+  table { border-collapse:collapse; width:100%; font-size:12px; }
+  th,td { border:1px solid var(--bd); padding:6px 8px; text-align:left; }
+  th { background:#eee; }
+</style>
+</head>
+<body>
+
+<h1>2026-06-18-workspace-client-path — 设计原型</h1>
+<div class="sub">Workspace 支持「daemon 客户端路径」| 线框原型，用于确认设计方向，非最终 UI</div>
+
+<!-- ============ 架构总览 ============ -->
+<h2>① 架构总览</h2>
+<div class="card">
+<pre>  浏览器 (Next.js)                Backend (FastAPI)                 Daemon 客户端 (Node CLI)
+  ─────────────────              ──────────────────                ───────────────────────
+  创建 workspace  ──POST /workspaces──▶  Workspace 表
+   ├ 路径来源                          + path_source                (代码 + .sillyspec 在
+   │  = server-local                   + daemon_runtime_id ◀─强绑────  这台机器，backend 读不到)
+   │  = daemon-client                       │
+   │                                        ├─ list_dir ──WS RPC──▶ readdir+stat
+   │                                        │   POST /runtimes/{id}    ▕ allowed_roots 白名单校验
+   │                                        │   /list-dir              ▕ 越界 → 403
+   │                                        │                          │
+   │                                        │   agent run 路由          │
+   │                                        ├─ dispatch_to_daemon ───▶ 按 workspace.daemon_runtime_id
+   │                                        │   (覆盖 user 级选择)      │ 定向，离线 → fail
+   │                                        │                          │
+   │                                        │   spec 按需下发(方案A)     │
+   │                                        ├─ GET /spec-ws/{id}/bundle▶ 解到 ~/.sillyhub/daemon/specs/{id}
+   │                                        │                          │ 起 agent (spec_root=本地临时区)
+   │                                        │   ◀──POST /spec-ws/{id}/sync── 执行后整树回传
+   │                                        ▼                          │
+   │                                  覆盖服务器 spec_root + 重parse scan_docs (真理源始终在服务器)
+  └─ spec 列表/编辑 (读服务器) ◀──scan_docs/ spec_root──┘</pre>
+  <div class="legend">真理源：服务器 spec_root（A1）。daemon 仅「执行时借阅 spec 到本地临时区」。</div>
+</div>
+
+<!-- ============ 数据模型 ============ -->
+<h2>② 数据模型变更（Workspace 表）</h2>
+<div class="card">
+<table>
+<tr><th>字段</th><th>类型</th><th>含义</th><th>约束</th></tr>
+<tr><td>root_path</td><td>Text</td><td>代码根目录绝对路径</td><td>现有；server-local=backend 可访，daemon-client=daemon 机器路径</td></tr>
+<tr><td><b>path_source</b> ✚</td><td>str(20)</td><td>路径来源</td><td>server-local / daemon-client，默认 server-local</td></tr>
+<tr><td><b>daemon_runtime_id</b> ✚</td><td>UUID?</td><td>绑定 daemon (D-001)</td><td>path_source=daemon-client 时必填</td></tr>
+</table>
+<div class="note">✚ = 新增列。现有 server-local workspace 默认 path_source=server-local、daemon_runtime_id=NULL，行为零变化。</div>
+</div>
+
+<!-- ============ 创建表单原型 ============ -->
+<h2>③ Workspace 创建表单（可交互）</h2>
+<div class="card">
+  <label>Workspace 名称</label>
+  <input type="text" value="multi-agent-platform">
+
+  <label>路径来源</label>
+  <div class="radio-row">
+    <label><input type="radio" name="src" value="server" checked onchange="switchSrc()"> 服务器本地 <span class="tag">现有</span></label>
+    <label><input type="radio" name="src" value="daemon" onchange="switchSrc()"> daemon 客户端 <span class="tag ok">本次新增</span></label>
+  </div>
+
+  <!-- server-local 分支 -->
+  <div id="seg-server" class="seg active">
+    <label>root_path（backend 可访问的本地绝对路径）</label>
+    <input type="text" value="/host-projects/multi-agent-platform">
+    <div class="note">backend 创建时直接 shutil.copytree(root_path/.sillyspec) 扫描 — 现状不变。</div>
+  </div>
+
+  <!-- daemon-client 分支 -->
+  <div id="seg-daemon" class="seg">
+    <label>绑定 daemon（在线 runtime，D-001 强绑）</label>
+    <select id="daemon-select" onchange="onDaemonChange()">
+      <option value="">— 请选择 —</option>
+      <option value="rt-1">qinyi-macbook (claude 2.1, online) <span class="tag ok"></span></option>
+      <option value="rt-2">ci-runner (codex, online)</option>
+      <option value="rt-3" disabled>old-server (offline)</option>
+    </select>
+
+    <label>目录浏览（经 list_dir RPC，受 allowed_roots 白名单限制 D-002）</label>
+    <div id="tree-box" class="tree">请先选择 daemon</div>
+    <div class="note">点击 ▶ 展开/收起；点击「选定为 root_path」确定。允许根：~/Documents、~/IdeaProjects（白名单内）。</div>
+    <div id="selected-path" class="selected-path" style="display:none"></div>
+  </div>
+
+  <div style="margin-top:14px">
+    <button onclick="alert('提交创建（原型）')">创建 workspace</button>
+    <button class="ghost" onclick="alert('扫描派给绑定 daemon 执行（Phase 5）')">扫描并生成规范</button>
+  </div>
+</div>
+
+<!-- ============ 关键流程 ============ -->
+<h2>④ 关键流程</h2>
+
+<div class="card">
+  <b>list_dir 目录浏览（前端交互）</b>
+  <div class="flow" style="margin-top:8px">
+    <div class="step">① 前端点击目录节点</div>
+    <div class="arr">→</div>
+    <div class="step">② POST /api/daemon/runtimes/{id}/list-dir {path}</div>
+    <div class="arr">→</div>
+    <div class="step">③ backend 经 WS 发 RPC 给该 daemon</div>
+    <div class="arr">→</div>
+    <div class="step">④ daemon readdir+stat，校验 allowed_roots</div>
+    <div class="arr">→</div>
+    <div class="step">⑤ WS RPC_RESULT 回传 → 前端渲染子节点</div>
+  </div>
+</div>
+
+<div class="card">
+  <b>agent run + spec 按需下发（方案A）</b>
+  <div class="flow" style="margin-top:8px">
+    <div class="step">① 发起 agent run</div>
+    <div class="arr">→</div>
+    <div class="step">② 按 workspace.daemon_runtime_id 路由（离线则 fail）</div>
+    <div class="arr">→</div>
+    <div class="step">③ daemon GET /spec-ws/{id}/bundle → 解到本地临时 spec_root</div>
+    <div class="arr">→</div>
+    <div class="step">④ 起 agent（cwd=root_path, spec_root=本地临时区）</div>
+    <div class="arr">→</div>
+    <div class="step">⑤ POST /spec-ws/{id}/sync 回传 → 服务器覆盖 + 重parse</div>
+  </div>
+</div>
+
+<div class="card">
+  <b>已确认决策</b>
+  <table>
+    <tr><th>ID</th><th>决策</th><th>来源</th></tr>
+    <tr><td>step6-A1</td><td>spec 服务器平台托管（真理源在 backend spec_root）</td><td>用户</td></tr>
+    <tr><td>step6</td><td>新增 path_source 字段 + daemon_runtime_id 绑定</td><td>用户</td></tr>
+    <tr><td>step6</td><td>daemon 新增 list_dir RPC（前端树形浏览）</td><td>用户</td></tr>
+    <tr><td>D-001</td><td>workspace 强绑单个 daemon；离线即失败提示</td><td>用户 grill</td></tr>
+    <tr><td>D-002</td><td>list_dir 用 allowed_roots 白名单，越界 403</td><td>用户 grill</td></tr>
+    <tr><td>step8-A</td><td>spec 按需下发（bundle pull/sync push），不引入同步引擎</td><td>用户</td></tr>
+  </table>
+</div>
+
+<script>
+// ---- mock 目录树（模拟 daemon list_dir 返回，受 allowed_roots 限制）----
+const TREE = {
+  '/Users/qinyi': {
+    'IdeaProjects': {
+      'multi-agent-platform': { 'backend':{}, 'frontend':{}, 'sillyhub-daemon':{}, '.sillyspec':{} },
+      'other-project': {}
+    },
+    'Documents': { 'notes.md': null, 'invoices': {} }
+  }
+};
+const ALLOWED = ['/Users/qinyi'];
+
+function buildNode(name, children, full) {
+  const wrap = document.createElement('div'); wrap.className='node';
+  const row = document.createElement('div'); row.className='row';
+  const isDir = children && Object.keys(children).length >= 0 && name !== 'undefined';
+  const dir = children !== null;
+  row.innerHTML = `<span class="tw">▶</span>${dir?'📁':'📄'} ${name}`;
+  const selBtn = document.createElement('span');
+  selBtn.className='tag ok'; selBtn.style.cursor='pointer'; selBtn.textContent='选定为 root_path';
+  const wrapChildren = document.createElement('div'); wrapChildren.className='children'; wrapChildren.style.display='none';
+  row.onclick = (e)=>{
+    if(e.target===selBtn) return;
+    if(dir){ const open = wrapChildren.style.display!=='none'; wrapChildren.style.display=open?'block':'none'; row.querySelector('.tw').textContent=open?'▶':'▼'; }
+  };
+  selBtn.onclick = ()=>{ document.querySelectorAll('.row.sel').forEach(r=>r.classList.remove('sel')); row.classList.add('sel');
+    const sp=document.getElementById('selected-path'); sp.style.display='block'; sp.innerHTML='已选 root_path（daemon 机器路径）：<b>'+full+'</b>'; };
+  row.appendChild(selBtn);
+  wrap.appendChild(row); wrap.appendChild(wrapChildren);
+  if(dir){ for(const k in children){ wrapChildren.appendChild(buildNode(k, children[k]===null?null:(children[k]||{}), full+'/'+k)); } }
+  return wrap;
+}
+
+function renderTree(){
+  const box=document.getElementById('tree-box'); box.innerHTML='';
+  for(const root of ALLOWED){ box.appendChild(buildNode(root, TREE[root], root)); }
+}
+
+function switchSrc(){
+  const v=document.querySelector('input[name=src]:checked').value;
+  document.getElementById('seg-server').classList.toggle('active', v==='server');
+  document.getElementById('seg-daemon').classList.toggle('active', v==='daemon');
+}
+
+function onDaemonChange(){
+  const v=document.getElementById('daemon-select').value;
+  const box=document.getElementById('tree-box');
+  if(!v){ box.innerHTML='请先选择 daemon'; return; }
+  if(v==='rt-3'){ box.innerHTML='<span style="color:#d97706">该 daemon 离线，无法浏览（D-001：离线即失败）</span>'; return; }
+  renderTree();
+}
+</script>
+</body>
+</html>

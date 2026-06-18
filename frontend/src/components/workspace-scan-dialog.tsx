@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AgentModelInput } from "@/components/AgentModelInput";
@@ -8,7 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AgentProviderSelect } from "@/components/AgentProviderSelect";
 import { Input } from "@/components/ui/input";
+import { DaemonDirBrowser } from "@/components/daemon-dir-browser";
 import { ApiError } from "@/lib/api";
+import { listOnlineRuntimes, type DaemonRuntimeRead } from "@/lib/daemon";
 import {
   createWorkspace,
   scanGenerate,
@@ -17,6 +19,7 @@ import {
 } from "@/lib/workspaces";
 
 type Phase = "idle" | "scanning" | "ready" | "creating";
+type PathSource = "server-local" | "daemon-client";
 
 interface Props {
   onCreated: () => void;
@@ -33,6 +36,38 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   // 生成项目规范时使用的 agent provider 覆盖（FR-02，2026-06-14-agent-runtime-selection）
   const [scanProvider, setScanProvider] = useState<string | null>(null);
   const [scanModel, setScanModel] = useState<string | null>(null);
+
+  // task-10：daemon-client 路径来源（FR-01 / FR-03 / D-005@v1）
+  const [pathSource, setPathSource] = useState<PathSource>("server-local");
+  const [runtimes, setRuntimes] = useState<DaemonRuntimeRead[]>([]);
+  const [daemonRuntimeId, setDaemonRuntimeId] = useState<string>("");
+  const [daemonRootPath, setDaemonRootPath] = useState("");
+
+  useEffect(() => {
+    if (pathSource !== "daemon-client") return;
+    void listOnlineRuntimes()
+      .then(setRuntimes)
+      .catch(() => setRuntimes([]));
+  }, [pathSource]);
+
+  const handleCreateDaemonClient = async () => {
+    if (!daemonRuntimeId || !daemonRootPath) return;
+    setError(null);
+    setPhase("creating");
+    try {
+      await createWorkspace({
+        name: name.trim() || daemonRootPath,
+        root_path: daemonRootPath,
+        path_source: "daemon-client",
+        daemon_runtime_id: daemonRuntimeId,
+      });
+      onCreated();
+    } catch (err) {
+      const msg = err instanceof ApiError ? `${err.code}: ${err.message}` : "创建失败";
+      setError(msg);
+      setPhase("idle");
+    }
+  };
 
   const handleScan = async () => {
     setError(null);
@@ -101,31 +136,113 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
       </header>
 
       <div className="space-y-4 p-4">
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground" htmlFor="root-path">
-            仓库根目录绝对路径
-          </label>
-          <div className="flex gap-2">
-            <Input
-              id="root-path"
-              value={rootPath}
-              placeholder="C:\\path\\to\\repo  或  /abs/path/to/repo"
-              onChange={(e) => setRootPath(e.target.value)}
-              disabled={phase === "scanning" || phase === "creating"}
+        {/* task-10：路径来源选择（FR-01） */}
+        <div className="flex gap-4">
+          <label className="flex items-center gap-1.5 text-xs">
+            <input
+              type="radio"
+              checked={pathSource === "server-local"}
+              onChange={() => setPathSource("server-local")}
             />
-            <Button
-              size="sm"
-              onClick={handleScan}
-              disabled={!rootPath || phase === "scanning" || phase === "creating"}
-            >
-              {phase === "scanning" ? "扫描中..." : "扫描"}
-            </Button>
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            指向项目代码仓库的本地路径，平台探测目录结构和可选的{" "}
-            <code>.sillyspec/</code> 目录。
-          </p>
+            服务器本地路径
+          </label>
+          <label className="flex items-center gap-1.5 text-xs">
+            <input
+              type="radio"
+              checked={pathSource === "daemon-client"}
+              onChange={() => setPathSource("daemon-client")}
+            />
+            daemon 客户端路径
+          </label>
         </div>
+
+        {pathSource === "server-local" && (
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground" htmlFor="root-path">
+              仓库根目录绝对路径
+            </label>
+            <div className="flex gap-2">
+              <Input
+                id="root-path"
+                value={rootPath}
+                placeholder="C:\\path\\to\\repo  或  /abs/path/to/repo"
+                onChange={(e) => setRootPath(e.target.value)}
+                disabled={phase === "scanning" || phase === "creating"}
+              />
+              <Button
+                size="sm"
+                onClick={handleScan}
+                disabled={!rootPath || phase === "scanning" || phase === "creating"}
+              >
+                {phase === "scanning" ? "扫描中..." : "扫描"}
+              </Button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              指向项目代码仓库的本地路径，平台探测目录结构和可选的{" "}
+              <code>.sillyspec/</code> 目录。
+            </p>
+          </div>
+        )}
+
+        {pathSource === "daemon-client" && (
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">
+                绑定 daemon（在线 runtime，D-001 强绑）
+              </label>
+              <select
+                className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+                value={daemonRuntimeId}
+                onChange={(e) => setDaemonRuntimeId(e.target.value)}
+                disabled={phase === "creating"}
+              >
+                <option value="">— 请选择在线 daemon —</option>
+                {runtimes.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name ?? r.id} ({r.provider ?? "?"})
+                  </option>
+                ))}
+              </select>
+              {runtimes.length === 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  无在线 daemon，请先启动 sillyhub-daemon。
+                </p>
+              )}
+            </div>
+            {daemonRuntimeId && (
+              <DaemonDirBrowser
+                runtimeId={daemonRuntimeId}
+                onSelect={setDaemonRootPath}
+                selectedPath={daemonRootPath}
+              />
+            )}
+            {daemonRootPath && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="ws-name-d">
+                  Workspace 名称
+                </label>
+                <Input
+                  id="ws-name-d"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="my-workspace"
+                  disabled={phase === "creating"}
+                />
+              </div>
+            )}
+            {daemonRootPath && (
+              <div className="flex justify-center">
+                <Button
+                  size="sm"
+                  onClick={handleCreateDaemonClient}
+                  disabled={phase === "creating"}
+                >
+                  {phase === "creating" ? "创建中..." : "创建 daemon-client workspace"}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
 
         {scan && (
           <section className="rounded border bg-muted/30 p-3 text-xs">

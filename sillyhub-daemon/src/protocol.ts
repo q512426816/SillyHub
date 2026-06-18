@@ -34,6 +34,33 @@ export const MSG = {
   LEASE_COMPLETE: 'daemon:lease_complete',
   /** Daemon → Server：lease 执行期间增量上报 agent 消息事件。 */
   LEASE_MESSAGES: 'daemon:lease_messages',
+
+  /**
+   * Server → Daemon：远程过程调用请求（FR-03 / D-005@v1 / design §7.1）。
+   *
+   * payload: `{ rpc_id: string, method: string, params: Record<string, unknown> }`。
+   * rpc_id 由 backend（task-04）生成，daemon 在 `RPC_RESULT` 中**原样回填**，不自己生成。
+   *
+   * 与 backend `DAEMON_MSG_RPC = "daemon:rpc"`（task-04 `protocol.py`）逐字对齐——
+   * 任一字符漂移即 task-03 契约单测失败（design R-02）。
+   */
+  RPC: 'daemon:rpc',
+
+  /**
+   * Daemon → Server：RPC 结果（成功带 `result` / 失败带 `error`，二者互斥）。
+   *
+   * payload 成功：`{ rpc_id: string, result: unknown }`。
+   * payload 失败：`{ rpc_id: string, error: { code: string, message: string } }`。
+   *
+   * `error.code` 取值（task-05 file-rpc/ws-client）：
+   *   - `forbidden`：path 越界 allowed_roots（FR-04 / D-002）
+   *   - `not_found`：path 不存在或不是目录
+   *   - `method_not_found`：未注册的 method
+   *   - `internal`：其他 fs 错误 / handler 未捕获异常
+   *
+   * 与 backend `DAEMON_MSG_RPC_RESULT = "daemon:rpc_result"`（task-04）逐字对齐。
+   */
+  RPC_RESULT: 'daemon:rpc_result',
 } as const;
 
 /** WebSocket 消息类型联合（字面量），用于 DaemonMessage.type。 */

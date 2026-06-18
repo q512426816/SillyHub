@@ -9,11 +9,15 @@
  *   - 收发 DaemonMessage（type 来自 task-03 MSG 常量）
  *   - 断线后 5s 固定退避重连（design §9 + FR-03）
  *   - 对外暴露连接状态 + onDisconnected 回调，供 task-20 Daemon 决定是否启动 HTTP 轮询兜底
+ *   - task-05（D-005@v1）：承担 `daemon:rpc` 分发——收到 RPC 请求后调注册的 handler，
+ *     异步执行后回发 `daemon:rpc_result`。分发层只做 handler 查找/执行/回发，
+ *     业务实现（fs 操作）由 file-rpc.ts 提供，保持本模块单一职责。
  *
  * 不做（design 职责分离）：
  *   - 不发 HTTP 请求（轮询归 task-17 HubClient）
  *   - 不内嵌 lease 状态机（归 task-20 Daemon）
  *   - 不解析 task_available payload 的业务含义（仅透传给 onMessage）
+ *   - 不内嵌 RPC 业务逻辑（list_dir 等由 file-rpc.ts 实现，本模块仅分发）
  *
  * @module ws-client
  */
@@ -81,6 +85,43 @@ export interface WsClientOptions {
   callbacks?: WsClientCallbacks;
 }
 
+// ── RPC 分发类型（task-05 / D-005@v1）─────────────────────────────────────────
+
+/**
+ * RPC handler 签名。由业务层（如 file-rpc.ts 的 listDir）包装后注册到 WsClient。
+ *
+ * 约定：
+ *   - 返回值（任意可 JSON 序列化结构）作为 `RPC_RESULT.result` 回发。
+ *   - 抛 `RpcError` → 其 `code` 原样填入 `RPC_RESULT.error.code`。
+ *   - 抛普通 `Error` → 统一映射为 `error.code='internal'`（见 `_dispatchRpc`）。
+ *
+ * 可同步或异步；`_dispatchRpc` 用 `await` 兼容两种。
+ */
+export type RpcHandler = (
+  params: Record<string, unknown>,
+) => Promise<unknown> | unknown;
+
+/**
+ * WS RPC 错误（带稳定 code，供前端/backend 识别）。
+ *
+ * 已知 code（与 design §7.1 协议约定一致）：
+ *   - `forbidden`：path 越界 allowed_roots（D-002 / FR-04）
+ *   - `not_found`：path 不存在或非目录
+ *   - `method_not_found`：未注册的 RPC method
+ *   - `internal`：权限不足 / 其他 fs 错误 / handler 未捕获异常
+ *
+ * 抛本类实例的 handler → `_dispatchRpc` 原样回填 code；抛普通 Error → code='internal'。
+ */
+export class RpcError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'RpcError';
+  }
+}
+
 // ── 连接状态机 ────────────────────────────────────────────────────────────────
 
 /** WsClient 状态。状态转换见下方伪代码。 */
@@ -108,6 +149,13 @@ export class WsClient {
   private _reconnectTimer: NodeJS.Timeout | null = null;
   /** connect 握手超时定时器。 */
   private _connectTimer: NodeJS.Timeout | null = null;
+
+  /**
+   * task-05：已注册的 RPC method → handler 映射。
+   * daemon 在 `_wsLoop` 构造 WsClient 后调 `registerRpcHandler` 注入业务 handler
+   *（如 list_dir → listDir）。生产路径每个 method 只注册一次。
+   */
+  private readonly _rpcHandlers = new Map<string, RpcHandler>();
 
   constructor(opts: WsClientOptions) {
     this._opts = opts;
@@ -235,6 +283,25 @@ export class WsClient {
     });
   }
 
+  // ── RPC handler 注册（task-05 / D-005@v1）────────────────────────────────
+
+  /**
+   * 注册一个 RPC method handler（daemon 在 `_wsLoop` 构造 WsClient 后调用）。
+   *
+   * 同名 method 重复注册：后者覆盖前者 + 经 `onError` 发 warn
+   *（便于测试覆盖断言；生产路径每个 method 只注册一次）。
+   *
+   * @param method  RPC 方法名（如 `'list_dir'`），与 backend `daemon:rpc.payload.method` 比对。
+   * @param handler RPC handler；收 `params`，返回 result 或抛 RpcError/Error。
+   */
+  registerRpcHandler(method: string, handler: RpcHandler): void {
+    if (this._rpcHandlers.has(method)) {
+      // 覆盖前发 warn（task-05 T21 断言 onError 被调一次）。
+      this._handleError(new Error(`rpc handler overwritten: ${method}`));
+    }
+    this._rpcHandlers.set(method, handler);
+  }
+
   // ── 内部方法 ───────────────────────────────────────────────────────────────
 
   /**
@@ -293,7 +360,81 @@ export class WsClient {
       );
       return;
     }
+    // task-05：RPC 请求走独立分支，不进 onMessage（不污染现有 lease 消息分发）。
+    // void 异步分发——不阻塞 WS 接收下一条；任何异常在 _dispatchRpc 内消化，绝不冒泡。
+    if (msg.type === MSG.RPC) {
+      void this._dispatchRpc(msg);
+      return;
+    }
     this._callbacks.onMessage?.(msg);
+  }
+
+  /**
+   * 分发一条 `daemon:rpc` 消息：取 handler → 执行 → 回发 `daemon:rpc_result`。
+   *
+   * 边界（task-05 §6）：
+   *   - rpc_id 缺失/空串：无法回填，丢弃 + warn（backend 那侧 future 超时 → 504）。
+   *   - 未注册 method：回 `error.code='method_not_found'`。
+   *   - handler 抛 RpcError：原 code 回发。
+   *   - handler 抛普通 Error：code='internal' + 原 message。
+   *   - handler reject 任何值（含非 Error）：统一 internal + 字符串化 message。
+   *
+   * 任何异常都在本方法内 try/catch 消化，**绝不向上冒泡到 WS 接收路径**（design §4.1 3）。
+   */
+  private async _dispatchRpc(msg: DaemonMessage): Promise<void> {
+    const payload = (msg.payload ?? {}) as {
+      rpc_id?: unknown;
+      method?: unknown;
+      params?: unknown;
+    };
+    const rpcId = typeof payload.rpc_id === 'string' ? payload.rpc_id : '';
+    const method = typeof payload.method === 'string' ? payload.method : '';
+    const params: Record<string, unknown> =
+      payload.params && typeof payload.params === 'object'
+        ? (payload.params as Record<string, unknown>)
+        : {};
+
+    // rpc_id 是回填的唯一依据；缺失无法回发，丢弃（B7）。
+    if (!rpcId) {
+      this._handleError(new Error('rpc missing rpc_id, dropping'));
+      return;
+    }
+
+    const handler = this._rpcHandlers.get(method);
+    if (!handler) {
+      this._sendRpcResult(rpcId, undefined, {
+        code: 'method_not_found',
+        message: `unknown rpc method: ${method}`,
+      });
+      return;
+    }
+
+    try {
+      const result = await handler(params);
+      this._sendRpcResult(rpcId, result, undefined);
+    } catch (e) {
+      const code = e instanceof RpcError ? e.code : 'internal';
+      const message = e instanceof Error ? e.message : String(e);
+      this._sendRpcResult(rpcId, undefined, { code, message });
+    }
+  }
+
+  /**
+   * 回发一条 `daemon:rpc_result`。`result` 与 `error` 互斥
+   *（`error` 非空时不写 `result`，对齐 design §7.1 协议约定）。
+   *
+   * 复用现有 `send()`：未连接时 send 返回 false 并丢弃（不抛、不缓冲）。
+   */
+  private _sendRpcResult(
+    rpcId: string,
+    result: unknown,
+    error?: { code: string; message: string },
+  ): void {
+    const out: DaemonMessage = {
+      type: MSG.RPC_RESULT,
+      payload: error ? { rpc_id: rpcId, error } : { rpc_id: rpcId, result },
+    };
+    this.send(out);
   }
 
   private _handleClose(code: number, reason: string): void {

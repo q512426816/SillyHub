@@ -284,10 +284,12 @@ export function transitionChange(
   if (reason !== undefined) {
     body.reason = reason;
   }
-  if (provider !== undefined) {
+  // ql-20260618-009：与 executeChange/triggerDispatch 风格统一，只在真值时附加
+  // （后端 schema default=None，行为与 !== undefined 等价）
+  if (provider) {
     body.provider = provider;
   }
-  if (model !== undefined) {
+  if (model) {
     body.model = model;
   }
   return apiFetch<TransitionResponse>(

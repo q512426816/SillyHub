@@ -40,8 +40,9 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as readline from 'node:readline';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, writeFile, rm, readdir, stat, readFile } from 'node:fs/promises';
+import { join, dirname, relative, isAbsolute, sep as pathSep } from 'node:path';
+import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
 import { getBackend } from './adapters/index.js';
@@ -120,6 +121,20 @@ export interface RunnerHubClient {
     status: string,
     error?: string,
   ): Promise<unknown>;
+  /**
+   * task-09 / D-006@v1：拉取 workspace spec bundle（tar 流）。
+   * 可选方法 —— server-local / 旧 mock client 未实现时，runLease 自动跳过 spec pull。
+   * 实际实现见 HubClient.getSpecBundle。
+   */
+  getSpecBundle?(wsId: string): Promise<Buffer>;
+  /**
+   * task-09 / D-006@v1：回传 spec 整树（tar 流）。
+   * 可选方法 —— 同上，未实现时跳过 sync push。
+   */
+  postSpecSync?(
+    wsId: string,
+    tarBuf: Buffer,
+  ): Promise<{ ok: boolean; reparsed: number }>;
 }
 
 /**
@@ -299,6 +314,18 @@ export class TaskRunner {
         rootPath: ctx.rootPath,
       });
 
+      // 步骤 1.5：daemon-client spec bundle 拉取（task-09 / D-006@v1）。
+      // 仅当 execution-context 透传了 workspace_id 且 spec_root 为空（daemon-client 留空）
+      // 时触发。server-local（无 workspaceId / specRoot 已有值）→ _pullSpecBundle 返回 null。
+      // pull 失败（bundle 404 / 网络错）不致命（FR-05「按需」语义）：agent 仍按 workDir
+      // 自身的 .sillyspec 执行，对齐 design §5 E-01。
+      let specRoot: string | null = null;
+      try {
+        specRoot = await this._pullSpecBundle(ctx);
+      } catch (e) {
+        console.warn('task_runner: spec_bundle_pull_failed', leaseId, e);
+      }
+
       // 步骤 2：claudeMd 非空 → 写 .claude/CLAUDE.md
       if (ctx.claudeMd && ctx.claudeMd.length > 0) {
         try {
@@ -441,6 +468,23 @@ export class TaskRunner {
         diff = d;
       } catch (e) {
         console.warn('task_runner: diff_collect_failed', leaseId, e);
+      }
+
+      // 步骤 8.5：daemon-client spec 整树回传（task-09 / D-006@v1）。
+      // 仅当 specRoot 非空（即步骤 1.5 触发了 pull）时触发。失败不阻塞 agent 结果
+      //（FR-05 + §5 E-02）：sync 失败仅 warn，_finish 仍按 agent 实际 exitCode/status
+      // 汇总 TaskResult，绝不把 success=true 改写为 failed。
+      if (specRoot) {
+        try {
+          const tarBuf = await this._packSpecDir(specRoot);
+          if (typeof this.client.postSpecSync === 'function') {
+            const wsId = (ctx as { workspaceId?: string }).workspaceId!;
+            const resp = await this.client.postSpecSync(wsId, tarBuf);
+            console.info('task_runner: spec_sync_ok', leaseId, resp);
+          }
+        } catch (e) {
+          console.warn('task_runner: spec_sync_failed', leaseId, e);
+        }
       }
 
       // 步骤 9：汇总 TaskResult
@@ -1329,6 +1373,140 @@ export class TaskRunner {
     return messages;
   }
 
+  // ── task-09 / D-006@v1：spec bundle pull / sync push（FR-05）───────────────
+
+  /**
+   * 拉取 workspace spec bundle 并解包到本地（task-09 / D-006@v1）。
+   *
+   * 触发条件：ctx.workspaceId 非空 && ctx.specRoot 为空（execution-context 对
+   * daemon-client 透传空 spec_root，task-07 处理）。
+   * server-local（无 workspaceId 或 specRoot 已有值）→ 返回 null，runLease 不插入 spec 逻辑。
+   *
+   * 解包路径：~/.sillyhub/daemon/specs/{wsId}（路径由 daemon 决定，backend 不传，
+   * 对齐 design §5 Phase4）。已存在则先 rm -rf 整目录再解包，保证覆盖语义
+   *（§5 E-03，避免上次残留文件污染本次）。
+   *
+   * @returns spec_root 绝对路径（解包成功）；null（非 daemon-client / pull 跳过）
+   * @throws HubHttpError（bundle 404 / 5xx）/ 网络/超时 / 解包 IO / 路径穿越（调用方 catch）
+   */
+  private async _pullSpecBundle(ctx: LeaseCtx): Promise<string | null> {
+    // 鸭子类型：task-07 未合并前 workspaceId/specRoot 可能不在 LeaseCtx 类型上，
+    // 用 as 兜底访问；task-07 合并后改为正式字段（本任务非目标，不改 types.ts）。
+    const wsId = (ctx as { workspaceId?: string }).workspaceId;
+    const existingSpecRoot = (ctx as { specRoot?: string }).specRoot;
+    if (!wsId) return null;                    // server-local / 非 daemon-client
+    if (existingSpecRoot) return null;         // execution-context 已带 spec_root（防御）
+    if (typeof this.client.getSpecBundle !== 'function') return null; // mock client 未实现
+
+    // _resolveSpecDir 先做 wsId 路径分隔符校验（§5 E-07），抛错即被 runLease catch。
+    const specDir = this._resolveSpecDir(wsId);
+    const tarBuf = await this.client.getSpecBundle(wsId);
+    // 覆盖语义：先 rm -rf（容忍不存在），再解包（§5 E-03）。
+    // Windows EBUSY 时降级：忽略 rm 错误，仍 mkdir + 解包（容忍残留，agent 侧覆盖读取）。
+    try {
+      await rm(specDir, { recursive: true, force: true });
+    } catch (e) {
+      console.warn('task_runner: spec_dir_rm_failed', specDir, e);
+    }
+    await this._extractTar(tarBuf, specDir);
+    return specDir;
+  }
+
+  /**
+   * 计算 workspace spec 本地解包目录：~/.sillyhub/daemon/specs/{wsId}。
+   * wsId 含路径分隔符（/ \）时拒绝（防御性，正常是 UUID，§5 E-07）。
+   */
+  private _resolveSpecDir(wsId: string): string {
+    if (!wsId || /[\\/]/.test(wsId)) {
+      throw new Error(`invalid workspace_id for spec dir: ${JSON.stringify(wsId)}`);
+    }
+    return join(homedir(), '.sillyhub', 'daemon', 'specs', wsId);
+  }
+
+  /**
+   * 解包 tar Buffer 到目标目录（task-09 / D-006@v1，手工 ustar 实现，零依赖）。
+   *
+   * 路径穿越防护（§5 E-05/E-06，Zip Slip 类）：
+   *   - entry.name 含 '..' 段 → 抛错。
+   *   - entry.name 绝对路径（/ 开头 / win 盘符 `[A-Z]:`）→ 抛错。
+   *   - join 后 path.relative(targetDir, fullPath) 必须不以 '..' 开头。
+   *
+   * 仅支持 regular file（typeflag '0' 或 '\\0'）+ directory（'5'）。
+   * symlink / hardlink / 其他 → 跳过 + warn（daemon spec 树不应含）。
+   *
+   * 调用方负责先 rm -rf（见 _pullSpecBundle，覆盖语义）。
+   */
+  private async _extractTar(tarBuf: Buffer, targetDir: string): Promise<void> {
+    await mkdir(targetDir, { recursive: true });
+    let offset = 0;
+    while (offset + 512 <= tarBuf.length) {
+      const header = tarBuf.subarray(offset, offset + 512);
+      // 结尾 zero block（全 0）→ 结束
+      if (header.every((b) => b === 0)) break;
+
+      const name = _readTarString(header.subarray(0, 100));
+      const sizeOctal = _readTarString(header.subarray(124, 136)).replace(/\0.*$/, '').trim();
+      const size = sizeOctal ? parseInt(sizeOctal, 8) : 0;
+      const typeflag = String.fromCharCode(header[156] ?? 0);
+
+      offset += 512;
+      const data = tarBuf.subarray(offset, offset + size);
+      offset += Math.ceil(size / 512) * 512;
+
+      if (!name) continue;
+
+      // 路径穿越防护（join 前后双重校验）
+      if (name.includes('..') || isAbsolute(name) || /^[A-Za-z]:[\\/]/.test(name)) {
+        throw new Error(`tar path traversal blocked: ${name}`);
+      }
+      const fullPath = join(targetDir, name);
+      const rel = relative(targetDir, fullPath);
+      if (rel.startsWith('..') || isAbsolute(rel)) {
+        throw new Error(`tar path escapes target dir: ${name} -> ${fullPath}`);
+      }
+
+      if (typeflag === '5' || name.endsWith('/')) {
+        await mkdir(fullPath, { recursive: true });
+        continue;
+      }
+      if (typeflag === '0' || typeflag === '\0') {
+        await mkdir(dirname(fullPath), { recursive: true });
+        await writeFile(fullPath, data);
+        continue;
+      }
+      // symlink / 其他 → 跳过 + warn（daemon spec 树不应含）
+      console.warn('task_runner: tar_skip_entry', { name, typeflag });
+    }
+  }
+
+  /**
+   * 把目录整树打包成 tar Buffer（task-09 / D-006@v1，手工 ustar，零依赖）。
+   * 排除 .runtime（与 backend GET bundle 端点约定一致，design §7.2）。
+   * 仅 regular file + directory；symlink 跳过 + warn。
+   */
+  private async _packSpecDir(specDir: string): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    const entries = await _walkDir(specDir);
+    for (const e of entries) {
+      // 排除任意层级的 .runtime 段（POSIX/Windows 分隔符都覆盖）
+      if (e.relPath.split(/[\\/]/).includes('.runtime')) continue;
+      const header = await _buildTarHeader(
+        e.relPath + (e.isDir ? '/' : ''),
+        e.isDir ? 0 : e.size,
+        e.isDir,
+      );
+      chunks.push(header);
+      if (!e.isDir) {
+        const data = await readFile(e.absPath);
+        chunks.push(data);
+        const padLen = (512 - (data.length % 512)) % 512;
+        if (padLen > 0) chunks.push(Buffer.alloc(padLen, 0));
+      }
+    }
+    chunks.push(Buffer.alloc(1024, 0)); // 2×512 zero block 结尾
+    return Buffer.concat(chunks);
+  }
+
   // ── 工具：截断（对齐 Python _truncate）─────────────────────────────────────
 
   /**
@@ -1720,4 +1898,114 @@ function _extractSessionId(line: string): string {
     if (m && m[1]) return m[1];
   }
   return '';
+}
+
+// ── task-09 tar 工具（手工 ustar，零依赖）──────────────────────────────────────
+
+/**
+ * 读取 tar header 中的 NUL 结尾字符串字段（ASCII/UTF-8）。
+ * 找到第一个 NUL 截断；无 NUL 则取整个 buf。
+ */
+function _readTarString(buf: Buffer): string {
+  const nul = buf.indexOf(0);
+  const slice = nul < 0 ? buf : buf.subarray(0, nul);
+  return slice.toString('utf-8');
+}
+
+interface WalkEntry {
+  absPath: string;
+  relPath: string;
+  isDir: boolean;
+  size: number;
+}
+
+/**
+ * 递归遍历目录，收集所有 entry（含目录本身与子目录），相对路径用 POSIX 分隔符 `/`
+ *（tar 标准是 forward slash；Windows 下 join 用 `\`，但 tar entry name 必须是 `/`）。
+ */
+async function _walkDir(root: string): Promise<WalkEntry[]> {
+  const out: WalkEntry[] = [];
+  async function recurse(dir: string): Promise<void> {
+    let names: string[];
+    try {
+      names = await readdir(dir);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      const abs = join(dir, name);
+      let st;
+      try {
+        st = await stat(abs);
+      } catch {
+        continue;
+      }
+      const relToRoot = relative(root, abs).split(pathSep).join('/');
+      if (st.isDirectory()) {
+        out.push({ absPath: abs, relPath: relToRoot, isDir: true, size: 0 });
+        await recurse(abs);
+      } else if (st.isFile()) {
+        out.push({ absPath: abs, relPath: relToRoot, isDir: false, size: st.size });
+      }
+      // symlink / 其他 → 跳过（_packSpecDir 内未过滤，walkDir 不收集即跳过）
+    }
+  }
+  await recurse(root);
+  return out;
+}
+
+/**
+ * 构造一个 512B ustar header（POSIX ustar 格式）。
+ *
+ * 字段布局（POSIX 1003.1）：
+ *   name(100) | mode(8) | uid(8) | gid(8) | size(12) | mtime(12) | chksum(8)
+ *   | typeflag(1) | linkname(100) | magic(6) | version(2) | uname(32) | gname(32)
+ *   | devmajor(8) | devminor(8) | prefix(155) | pad(12)
+ *
+ * checksum：填充其余字段后，按 unsigned byte sum 计算（checksum 字段本身视为 8 个空格），
+ * 写入 6 位 octal + NUL + 空格。
+ */
+async function _buildTarHeader(
+  name: string,
+  size: number,
+  isDir: boolean,
+): Promise<Buffer> {
+  const header = Buffer.alloc(512, 0);
+
+  // name (0-99)
+  header.write(name, 0, 'utf-8');
+  // mode (100-107) — '0000644\0' for file, '0000755\0' for dir
+  header.write(isDir ? '0000755' : '0000644', 100, 'ascii');
+  header[107] = 0;
+  // uid (108-115) — '0000000\0'
+  header.write('0000000', 108, 'ascii');
+  header[115] = 0;
+  // gid (116-123) — '0000000\0'
+  header.write('0000000', 116, 'ascii');
+  header[123] = 0;
+  // size (124-135) — 11 octal digits + NUL
+  header.write(size.toString(8).padStart(11, '0'), 124, 'ascii');
+  header[135] = 0;
+  // mtime (136-147) — 11 octal digits + NUL（固定 0，spec 同步不需要精确时间戳）
+  header.write('00000000000', 136, 'ascii');
+  header[147] = 0;
+  // chksum (148-155) — 先填 8 个空格（计算时视为空格）
+  header.write('        ', 148, 'ascii');
+  // typeflag (156) — '0' regular file / '5' directory
+  header[156] = isDir ? 0x35 : 0x30; // '5' or '0'
+  // linkname (157-256) — 全 0
+  // magic (257-262) — 'ustar\0'
+  header.write('ustar', 257, 'ascii');
+  header[262] = 0;
+  // version (263-264) — '00'
+  header.write('00', 263, 'ascii');
+  // uname/gname/devmajor/devminor/prefix — 全 0（spec 同步不需要）
+
+  // checksum：unsigned byte sum of all 512 bytes（chksum 字段此时是 8 个空格 = 0x20 * 8）
+  let sum = 0;
+  for (let i = 0; i < 512; i++) sum += header[i] ?? 0;
+  // 写入 6 octal digits + NUL + space
+  header.write(sum.toString(8).padStart(6, '0') + '\0 ', 148, 'ascii');
+
+  return header;
 }

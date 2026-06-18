@@ -548,8 +548,9 @@ async def manual_dispatch(
     change_id: uuid.UUID,
     session: SessionDep,
     _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
-    provider: str | None = Query(None),
-    model: str | None = Query(None),
+    # ql-20260618-009：max_length 与 schema.py TransitionRequest 对齐（64/128）
+    provider: str | None = Query(default=None, max_length=64),
+    model: str | None = Query(default=None, max_length=128),
 ) -> DispatchResponse:
     """Manually trigger agent dispatch for the current stage of a change."""
     from app.modules.change.dispatch import dispatch, get_config_for_stage, has_active_run

@@ -21,6 +21,41 @@ export async function listDaemonRuntimes(): Promise<DaemonRuntimeRead[]> {
   return apiFetch<DaemonRuntimeRead[]>("/api/daemon/runtimes");
 }
 
+/**
+ * 在线 daemon runtime 列表（task-10/11，2026-06-18-workspace-client-path）。
+ * 用于 daemon-client workspace 创建时选择目标 daemon。
+ */
+export async function listOnlineRuntimes(): Promise<DaemonRuntimeRead[]> {
+  const all = await listDaemonRuntimes();
+  return all.filter((r) => r.status === "online");
+}
+
+/**
+ * 目录条目（task-11 list_dir RPC 响应，FR-03 / D-005@v1）。
+ */
+export interface DirEntry {
+  name: string;
+  type: "dir" | "file";
+}
+
+export interface ListDirResponse {
+  entries: DirEntry[];
+}
+
+/**
+ * 经 backend 转发的 daemon list_dir RPC（task-04 端点）。
+ * 受 daemon allowed_roots 白名单限制（D-002@v1），越界 403。
+ */
+export async function listDir(
+  runtimeId: string,
+  path: string,
+): Promise<ListDirResponse> {
+  return apiFetch<ListDirResponse>(
+    `/api/daemon/runtimes/${runtimeId}/list-dir`,
+    { method: "POST", json: { path } },
+  );
+}
+
 export async function getDaemonRuntime(
   runtimeId: string,
 ): Promise<DaemonRuntimeRead> {

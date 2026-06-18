@@ -230,12 +230,29 @@ async def get_execution_context(
 
     claude_md = render_bundle_to_claude_md(bundle)
 
+    # task-07 / grill X-001：按 path_source 条件赋值 spec_root。
+    # - daemon-client → None（backend 机器路径不可达，daemon 自行解 bundle 到本地）。
+    # - server-local + scan → lease_meta["spec_root"]（与 scan bundle 内现状 1:1）。
+    # - server-local + task/stage → None（task/stage 无 spec_root 概念）。
+    # 新 path_source 枚举值需在此显式 elif 扩展，避免误落 server-local 兜底分支（E-08）。
+    path_source = ws_row.path_source if ws_row else "server-local"
+
+    if path_source == "daemon-client":
+        response_spec_root: str | None = None
+    elif run_type == "scan":
+        # lease_meta 无 spec_root key 时 ``or None`` 回退（不返回空串，AC-09）。
+        response_spec_root = lease_meta.get("spec_root") or None
+    else:
+        response_spec_root = None
+
     return ExecutionContextResponse(
         agent_run_id=str(run.id),
         claude_md=claude_md,
         prompt=lease_meta.get("prompt"),
-        provider=lease_meta.get("provider") or run.provider,
-        model=lease_meta.get("model") or run.model,
+        # ql-20260618-009：AgentRun 是 source of truth；lease_meta 仅在 AgentRun
+        # 字段为空时兜底（旧测试场景），避免 transport 覆盖快照。
+        provider=run.provider or lease_meta.get("provider"),
+        model=run.model or lease_meta.get("model"),
         resume_session_id=lease_meta.get("resume_session_id"),
         repo_url=lease_meta.get("repo_url"),
         branch=lease_meta.get("branch"),
@@ -245,6 +262,10 @@ async def get_execution_context(
         workspace_name=ws_row.name if ws_row else None,
         workspace_slug=ws_row.slug if ws_row else None,
         root_path=ws_row.root_path if ws_row else None,
+        # task-07 新增：workspace_id 无条件透传（None 时 daemon 兜底）；
+        # spec_root 按上面 path_source / run_type 分支赋值。
+        workspace_id=workspace_id,
+        spec_root=response_spec_root,
     )
 
 

@@ -278,3 +278,4 @@ logout() -> 清空 useSession + 跳转 /login
 | 2026-06-15 | ql-20260615-002-9b4f | 修复 `/runtimes` 空状态 EmptyState 错误的 `pip install -e .` 提示（daemon 已重写为 TS），改为 cd / pnpm install+build / npm link / 复制命令 4 步，加 Python 旧版残留卸载提示，末尾引导用户去 workspace 详情页配置默认 agent |
 | 2026-06-16 | ql-20260616-001-7f3a | 修复 AgentLogViewer/normalize/changes/tasks 页 5 处直接读 `log.content_redacted`（后端可为 null）导致的 Bootstrap 点击崩溃。`agent.ts` 类型改 `string \| null`，5 个使用点统一 `?? ""` 兜底；parseToolCallContent / toolCallDescription 签名扩展接受 null\|undefined。tsc 零错误 |
 | 2026-06-18 | ql-20260618-007-d9c0 | `/runtimes` runtime 卡片新增禁用/启用操作，状态元数据支持 `disabled`，统计区增加禁用数；`daemon.ts` API client 新增 disable/enable 调用。 |
+| 2026-06-18 | ql-20260618-009-f3a2 | `lib/changes.ts` transitionChange 的 provider/model 判断从 `!== undefined` 改为 truthy，与 executeChange 风格统一（后端 schema default=None，行为等价）。 |

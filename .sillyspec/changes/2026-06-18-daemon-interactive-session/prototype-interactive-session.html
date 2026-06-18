@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<!--
+author: qinyi
+created_at: 2026-06-18T13:40:53
+变更: 2026-06-18-daemon-interactive-session
+说明: 交互式会话管控设计原型（线框/ASCII 风格，浏览器直接打开）
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>交互式会话管控 · 设计原型</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px;
+    font-family: 'SF Mono','Cascadia Code','Consolas',monospace;
+    background: #0d1117; color: #c9d1d9; line-height: 1.6;
+  }
+  h1 { color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: 12px; font-size: 22px; }
+  h2 { color: #79c0ff; margin-top: 40px; font-size: 17px; border-left: 3px solid #58a6ff; padding-left: 10px; }
+  h3 { color: #d2a8ff; font-size: 14px; margin: 20px 0 8px; }
+  .meta { color: #8b949e; font-size: 12px; margin-bottom: 24px; }
+  .ascii {
+    background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+    padding: 16px; overflow-x: auto; white-space: pre; font-size: 12.5px; color: #c9d1d9;
+  }
+  .wire {
+    display: grid; grid-template-columns: 200px 1fr 220px; gap: 1px;
+    background: #30363d; border: 1px solid #30363d; border-radius: 6px; overflow: hidden;
+    min-height: 340px;
+  }
+  .panel { background: #0d1117; padding: 14px; font-size: 12px; }
+  .panel-title { color: #79c0ff; font-weight: bold; margin-bottom: 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+  .sess { padding: 8px 10px; border: 1px dashed #30363d; border-radius: 4px; margin-bottom: 6px; cursor: pointer; font-size: 11px; }
+  .sess:hover { border-color: #58a6ff; }
+  .sess.active { border-color: #3fb950; background: #0d2818; }
+  .sess-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; }
+  .dot-active { background: #3fb950; } .dot-idle { background: #d29922; } .dot-ended { background: #6e7681; }
+  .msg { padding: 7px 10px; border-radius: 6px; margin-bottom: 6px; font-size: 11.5px; max-width: 88%; }
+  .msg-user { background: #1f6feb; color: #fff; margin-left: auto; text-align: right; }
+  .msg-agent { background: #21262d; border: 1px solid #30363d; }
+  .msg-tool { background: #231c3a; border: 1px solid #6e40c9; color: #d2a8ff; font-size: 10.5px; }
+  .input-bar { margin-top: 12px; display: flex; gap: 6px; }
+  .input-bar input { flex: 1; background: #161b22; border: 1px solid #30363d; color: #c9d1d9; padding: 8px; border-radius: 4px; font-family: inherit; font-size: 12px; }
+  .btn { padding: 8px 12px; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 11px; }
+  .btn:hover { border-color: #58a6ff; }
+  .btn-warn { border-color: #d29922; color: #d29922; }
+  .btn-danger { border-color: #f85149; color: #f85149; }
+  .state-pill { display: inline-block; padding: 3px 9px; border-radius: 10px; font-size: 10px; font-weight: bold; }
+  .st-pending { background: #3d2e00; color: #d29922; }
+  .st-active { background: #0d2818; color: #3fb950; }
+  .st-ended { background: #2a2a2a; color: #8b949e; }
+  .st-failed { background: #3d1014; color: #f85149; }
+  .kv { font-size: 11px; color: #8b949e; margin: 3px 0; }
+  .kv b { color: #c9d1d9; }
+  .perm-card { background: #3d2e00; border: 1px solid #d29922; border-radius: 6px; padding: 10px; margin-top: 10px; font-size: 11px; }
+  .note { color: #8b949e; font-size: 12px; font-style: italic; margin: 8px 0; }
+  .wave { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+  .wave-card { flex: 1; min-width: 200px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px; font-size: 11.5px; }
+  .wave-card b { color: #79c0ff; }
+  code { background: #161b22; padding: 1px 5px; border-radius: 3px; color: #f0883e; font-size: 12px; }
+  .legend { font-size: 11px; color: #8b949e; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<h1>交互式会话管控 · 设计原型</h1>
+<div class="meta">变更 2026-06-18-daemon-interactive-session · 方案A（WS双向 + 复用 task-runner）· 线框预览</div>
+
+<!-- ============ 架构数据流 ============ -->
+<h2>① 整体架构与数据流</h2>
+<div class="ascii">┌──────────────┐   SSE 回显(已有,复用)      ┌─────────────────────────────────┐
+│   前端/Web    │◄═════════════════════════════│         Backend (FastAPI)        │
+│  会话管控台   │                              │  · agent_sessions 表(新增)        │
+│ (Wave4 升级)  │  ✦ 中途追问                  │  · lease.kind = interactive(新增) │
+│  ✦ 实时进度   │═════════════════════════════►│  · WS 控制路由(新增)              │
+│  ✦ 打断/结束  │  HTTP: /sessions/{id}/inject │  · quick-chat 端点升级            │
+│  ✦ 权限批准   │                              └────────────┬────────────────────┘
+└──────────────┘                                           │ WS 双向(新增控制消息)
+                  ┌────────────────────────────────────────▼──────────────────┐
+                  │                  Daemon (TS)                              │
+                  │  ws-client 接收 ──► sessionStore ──► task-runner(session模式)│
+                  │                         │                    │ result不end  │
+                  │   daemon:session_inject ─┼────► stdin 写第二条 user msg     │
+                  │   daemon:session_interrupt┼────► SIGINT/turn interrupt       │
+                  │   daemon:session_end    ──┼────► kill 进程                   │
+                  │   daemon:permission_req ──┼────► (Wave2)暂停等远程          │
+                  └────────────────────────────────────────┬────────────────────┘
+                                                           │ spawn (长驻, 多turn复用)
+                                                           ▼
+                                                  ┌──────────────────┐
+                                                  │  agent 子进程     │
+                                                  │ claude: stdin流  │
+                                                  │ codex: thread复用│
+                                                  └──────────────────┘
+  关键洞察: agent 子进程本身即长驻会话载体。task-runner 的 result 不再触发 stdin.end
+            + server→daemon 的 WS 控制注入 = 交互式管控。无需自建 worker。</div>
+
+<!-- ============ 会话面板线框 ============ -->
+<h2>② 交互式会话面板线框（Wave4 前端预览）</h2>
+<div class="note">演进现有 runtimes 页 quick-chat。左侧会话列表 / 中间消息流+输入 / 右侧状态与权限。</div>
+<div class="wire">
+  <!-- 左：会话列表 -->
+  <div class="panel">
+    <div class="panel-title">会话列表</div>
+    <div class="sess active"><span class="sess-dot dot-active"></span>claude · 工作区重构</div>
+    <div class="sess"><span class="sess-dot dot-idle"></span>codex · 排查 bug</div>
+    <div class="sess"><span class="sess-dot dot-idle"></span>claude · 写测试</div>
+    <div class="sess"><span class="sess-dot dot-ended"></span>claude · 已结束</div>
+    <div style="margin-top:14px"><button class="btn">+ 新会话</button></div>
+    <div class="kv" style="margin-top:14px">空闲 30min 自动结束</div>
+  </div>
+  <!-- 中：消息流 + 输入 -->
+  <div class="panel">
+    <div class="panel-title">claude · 工作区重构 &nbsp; <span class="state-pill st-active">active</span></div>
+    <div class="msg msg-user">帮我把 task-runner 改成 session 模式</div>
+    <div class="msg msg-tool">[TOOL_USE] Read task-runner.ts</div>
+    <div class="msg msg-agent">已读取 task-runner.ts(1800行)。核心改造点：result 事件不再触发 stdin.end...</div>
+    <div class="msg msg-agent" style="opacity:.7">[正在跑第二轮: 实现注入通道...]</div>
+    <div class="input-bar">
+      <input placeholder="中途追问 / 补充指令..." value="顺便也改下 ws-client">
+      <button class="btn">发送</button>
+      <button class="btn btn-warn">⏸ 打断本轮</button>
+      <button class="btn btn-danger">✕ 结束会话</button>
+    </div>
+  </div>
+  <!-- 右：状态 + 权限 -->
+  <div class="panel">
+    <div class="panel-title">会话状态</div>
+    <div class="kv"><b>session:</b> a3f9...</div>
+    <div class="kv"><b>lease:</b> 1 长生命周期</div>
+    <div class="kv"><b>agent_sid:</b> ab95469d</div>
+    <div class="kv"><b>turn:</b> 第 2 轮</div>
+    <div class="kv"><b>权限模式:</b> <span class="state-pill st-active">自动批准</span></div>
+    <div class="kv" style="margin-top:8px"><label><input type="checkbox"> 手动批准模式</label></div>
+
+    <div class="panel-title" style="margin-top:16px">权限请求(Wave2)</div>
+    <div class="perm-card">
+      请求执行: <b>Bash(git push)</b><br>
+      <div style="margin-top:8px">
+        <button class="btn" style="border-color:#3fb950;color:#3fb950">批准</button>
+        <button class="btn btn-danger">拒绝</button>
+      </div>
+      <div class="note" style="margin:6px 0 0">手动模式下 agent 暂停等决定</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 状态机 ============ -->
+<h2>③ 会话状态机</h2>
+<div class="ascii">        create                 first turn result
+  ┌─────────────┐ ──────► ┌──────────┐ ◄──────────────────┐
+  │   pending   │         │  active  │                     │ inject(下一轮)
+  └─────────────┘         └────┬─────┘                     │
+                               │                           │
+              ┌────────────────┼───────────────┐           │
+   interrupt  │                │ end           │ failed    │
+   (本轮SIGINT)│                │ (kill进程)    │ (崩溃)    │
+              ▼                ▼               ▼           │
+         (仍 active,     ┌──────────┐    ┌──────────┐       │
+          可继续追问)    │  ended   │    │  failed  │       │
+                         └──────────┘    └──────────┘       │
+                              ▲                              │
+                              │ Wave3: resume 持久化后可重连 │
+                              │ daemon 重启 --resume 重建 ───┘</div>
+<div class="legend">打断 vs 结束分离：打断本轮 = SIGINT/turn interrupt（保留会话）；结束会话 = kill 进程（标 ended）</div>
+
+<!-- ============ Wave 路线图 ============ -->
+<h2>④ 实施路线（Wave 分组，execute 分波次推进）</h2>
+<div class="wave">
+  <div class="wave-card"><b>Wave 1 · 核心交互</b><br>agent_sessions 表 + lease.kind + task-runner session 模式(result 不 end) + WS session_inject/interrupt/end + sessionStore + 进度复用 SSE<br><span style="color:#3fb950">→ 中途追问/多轮注入(核心卖点)</span></div>
+  <div class="wave-card"><b>Wave 2 · 权限往返</b><br>manual_approval 开关 + WS permission_request/response + stream-json control_request 升级为暂停等远程<br><span style="color:#d29922">→ 手动批准模式</span></div>
+  <div class="wave-card"><b>Wave 3 · resume</b><br>daemon 磁盘持久化 session 状态 + 重启 --resume 重 spawn(claude)/thread resume(codex)<br><span style="color:#d2a8ff">→ 崩溃恢复</span></div>
+  <div class="wave-card"><b>Wave 4 · 前端管控台</b><br>runtimes 页 quick-chat 升级会话面板 + 历史回看 + 权限弹窗<br><span style="color:#79c0ff">→ 可视化交互</span></div>
+</div>
+
+<div class="note" style="margin-top:32px">本原型为线框预览，重点确认设计方向（架构数据流 / 会话面板 / 状态机 / Wave 分层），非最终 UI。核心改造在 daemon+backend 协议层。</div>
+
+</body>
+</html>

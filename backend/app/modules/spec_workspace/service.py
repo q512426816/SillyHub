@@ -10,7 +10,12 @@ created_at: 2026-05-27
 
 from __future__ import annotations
 
+import io
+import shutil
+import tarfile
+import tempfile
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -18,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.errors import SpecWorkspaceNotFound
+from app.core.errors import AppError, SpecWorkspaceNotFound
 from app.core.logging import get_logger
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.spec_workspace.schema import (
@@ -28,6 +33,20 @@ from app.modules.spec_workspace.schema import (
 )
 
 log = get_logger(__name__)
+
+# Error code for invalid sync tar payloads (path traversal, corrupt tar, etc.).
+# Reused via AppError instances to avoid extending errors.py (task allowed_paths).
+SPEC_BUNDLE_INVALID_CODE = "HTTP_422_SPEC_BUNDLE_INVALID"
+
+
+def _spec_bundle_invalid(message: str, **details: object) -> AppError:
+    """Build a 422 AppError for an invalid sync tar payload."""
+    return AppError(
+        message,
+        code=SPEC_BUNDLE_INVALID_CODE,
+        http_status=422,
+        details=details or None,
+    )
 
 
 class SpecWorkspaceService:
@@ -217,3 +236,163 @@ class SpecWorkspaceService:
             sync_status=payload.sync_status,
         )
         return spec_ws
+
+    # ── Bundle / Sync (daemon-client spec transport) ───────────────────────
+    #
+    # FR-05 / D-003@v1 / D-006@v1: spec 真理源在服务器，daemon 按需借阅 (bundle)
+    # 与整树回传 (sync)。无同步引擎，整树覆盖。
+
+    async def build_bundle(
+        self,
+        workspace_id: uuid.UUID,
+    ) -> tuple[str, Iterator[bytes]]:
+        """Stream the server ``spec_root`` as a tar stream.
+
+        Excludes any ``.runtime/`` directory (top-level or nested) — that is
+        daemon runtime cache, not spec data (R-02 / design §7.2).
+
+        Returns ``(spec_root_abs, tar_byte_chunks)``. The generator yields the
+        tar in chunks so the caller can feed it directly to ``StreamingResponse``
+        without buffering the whole tree in memory.
+        """
+        spec_ws = await self.get(workspace_id)
+        spec_root = Path(spec_ws.spec_root)
+
+        # An absent spec_root is a legal empty bundle (daemon unpacks into an
+        # empty dir). Materialise it so rglob has something to walk.
+        spec_root.mkdir(parents=True, exist_ok=True)
+
+        spec_root_abs = str(spec_root)
+
+        def _stream() -> Iterator[bytes]:
+            buf = io.BytesIO()
+            # ``w|`` is a streaming (non-seekable) tar; we buffer the whole tar
+            # in memory here for simplicity. Spec trees are small (R-02); a
+            # future task can swap to a real chunked pipe if needed.
+            with tarfile.open(fileobj=buf, mode="w") as tar:
+                for path in sorted(spec_root.rglob("*")):
+                    rel = path.relative_to(spec_root)
+                    # Exclude .runtime/ at any depth.
+                    if any(part == ".runtime" for part in rel.parts):
+                        continue
+                    tar.add(path, arcname=str(rel), recursive=False)
+            buf.seek(0)
+            while True:
+                chunk = buf.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+
+        return spec_root_abs, _stream()
+
+    async def apply_sync(
+        self,
+        workspace_id: uuid.UUID,
+        tar_bytes: bytes,
+    ) -> int:
+        """Overwrite the server ``spec_root`` with the uploaded tar, then reparse.
+
+        D-006@v1: whole-tree overwrite, no diff/merge. ``.runtime/`` is
+        preserved (daemon runtime cache, not spec data). Returns the
+        ``reparse`` ``parsed`` count.
+        """
+        spec_ws = await self.get(workspace_id)
+        spec_root = Path(spec_ws.spec_root)
+        spec_root.mkdir(parents=True, exist_ok=True)
+        spec_root_resolved = spec_root.resolve()
+
+        # 1. Open + fully validate every member BEFORE touching disk.
+        # tf is used across the try/finally below; closing in finally is
+        # equivalent to a with-block.
+        try:
+            tf = tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*")  # noqa: SIM115
+        except tarfile.TarError as e:
+            raise _spec_bundle_invalid("Invalid tar payload.", reason=str(e)) from e
+
+        staging = Path(tempfile.mkdtemp(prefix="spec-sync-"))
+        runtime_bak: Path | None = None
+        try:
+            for m in tf.getmembers():
+                name = m.name.replace("\\", "/")
+                # Reject absolute paths and Windows drive letters.
+                if name.startswith("/") or (len(name) > 1 and name[1] == ":"):
+                    raise _spec_bundle_invalid(
+                        "Absolute path in tar is not allowed.",
+                        member=m.name,
+                    )
+                # Reject anything that resolves outside spec_root (Zip/Tar Slip).
+                target = (spec_root / name).resolve()
+                try:
+                    target.relative_to(spec_root_resolved)
+                except ValueError:
+                    raise _spec_bundle_invalid(
+                        "Tar member escapes spec_root.",
+                        member=m.name,
+                    ) from None
+
+            # 2. Materialise the new tree into staging first; only once that
+            # succeeds do we clear the old spec_root (atomic-ish swap).
+            # filter="fully_trusted" is safe here because every member path has
+            # already been validated to stay inside spec_root above.
+            tf.extractall(staging, filter="fully_trusted")
+
+            # Preserve .runtime/ across the overwrite.
+            runtime_dir = spec_root / ".runtime"
+            if runtime_dir.exists():
+                runtime_bak = Path(tempfile.mkdtemp(prefix="runtime-bak-"))
+                shutil.move(str(runtime_dir), str(runtime_bak / ".runtime"))
+
+            # Clear old spec_root (everything except the moved .runtime).
+            for child in spec_root.iterdir():
+                if child.is_dir():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+
+            # Move new tree in.
+            for child in staging.iterdir():
+                shutil.move(str(child), str(spec_root / child.name))
+
+            # Restore .runtime/.
+            if runtime_bak is not None:
+                shutil.move(str(runtime_bak / ".runtime"), str(runtime_dir))
+                shutil.rmtree(runtime_bak, ignore_errors=True)
+                runtime_bak = None
+        finally:
+            tf.close()
+            shutil.rmtree(staging, ignore_errors=True)
+            if runtime_bak is not None:
+                shutil.rmtree(runtime_bak, ignore_errors=True)
+
+        # 3. Stamp sync_status clean + reparse. Reparse failures leave the file
+        # overwrite in place (files are the source of truth) but flip
+        # sync_status back to dirty so the UI shows a refresh is needed.
+        now = datetime.now(UTC)
+        spec_ws.sync_status = "clean"
+        spec_ws.last_synced_at = now
+        spec_ws.updated_at = now
+        await self._session.commit()
+
+        from app.modules.scan_docs.service import ScanDocsService
+
+        scan_svc = ScanDocsService(self._session)
+        try:
+            stats, _ = await scan_svc.reparse(workspace_id)
+        except Exception as e:
+            log.warning(
+                "spec_workspace.sync_reparse_failed",
+                workspace_id=str(workspace_id),
+                error=str(e),
+            )
+            spec_ws.sync_status = "dirty"
+            spec_ws.updated_at = datetime.now(UTC)
+            await self._session.commit()
+            raise
+
+        reparsed = int(stats.get("parsed", 0))
+        log.info(
+            "spec_workspace.sync_applied",
+            workspace_id=str(workspace_id),
+            reparsed=reparsed,
+        )
+        return reparsed

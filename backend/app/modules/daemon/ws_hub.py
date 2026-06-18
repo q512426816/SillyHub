@@ -12,7 +12,14 @@ from fastapi import WebSocket
 from app.core.logging import get_logger
 from app.modules.daemon.protocol import (
     DAEMON_MSG_HEARTBEAT_ACK,
+    DAEMON_MSG_RPC,
     DAEMON_MSG_TASK_AVAILABLE,
+)
+from app.modules.daemon.service import (
+    DaemonRpcConflict,
+    DaemonRpcRemoteError,
+    DaemonRpcTimeout,
+    DaemonRuntimeOffline,
 )
 
 log = get_logger(__name__)
@@ -22,6 +29,11 @@ _DEDUP_WINDOW_SIZE = 128
 
 # Send timeout in seconds — slow connections are evicted.
 _SEND_TIMEOUT = 10.0
+
+# Default RPC round-trip timeout (design §10 R-01). Decoupled from _SEND_TIMEOUT
+# so a daemon that accepts the request promptly but stalls mid-work still fails
+# the caller within 10s rather than hanging on the WS send path.
+RPC_DEFAULT_TIMEOUT = 10.0
 
 
 class DaemonWsHub:
@@ -37,6 +49,10 @@ class DaemonWsHub:
         self._lock = asyncio.Lock()
         # Sliding window of recently-sent wakeup IDs for dedup.
         self._dedup_window: deque[str] = deque(maxlen=_DEDUP_WINDOW_SIZE)
+        # RPC correlation map: rpc_id → pending future awaiting daemon:rpc_result.
+        # The future is resolved with the raw result dict (transparent passthrough
+        # of the daemon payload); send_rpc extracts result/error before returning.
+        self._pending_rpcs: dict[str, asyncio.Future[Any]] = {}
 
     # ── Connection lifecycle ──────────────────────────────────────────────────
 
@@ -72,6 +88,11 @@ class DaemonWsHub:
             removed = self._connections.pop(runtime_id, None)
 
         if removed is not None:
+            # Cancel any pending RPCs so awaiting send_rpc callers fail fast
+            # (DaemonRuntimeOffline) instead of waiting for the full 10s timeout.
+            # rpc_id is not bound to runtime_id, so all pending entries are
+            # cancelled — this is rare and logged for visibility.
+            await self.cancel_all_pending()
             log.info(
                 "ws_daemon_disconnected",
                 runtime_id=str(runtime_id),
@@ -218,6 +239,144 @@ class DaemonWsHub:
             },
         }
         return await self.send_to_runtime(runtime_id, message)
+
+    # ── RPC correlation ──────────────────────────────────────────────────────
+
+    async def send_rpc(
+        self,
+        runtime_id: uuid.UUID,
+        method: str,
+        params: dict[str, Any],
+        *,
+        timeout: float = RPC_DEFAULT_TIMEOUT,
+    ) -> dict[str, Any]:
+        """Send a daemon:rpc request and await the daemon:rpc_result reply.
+
+        Returns the daemon ``result`` dict on success.
+        Raises:
+            DaemonRuntimeOffline: runtime has no active WS connection or send failed.
+            DaemonRpcConflict: rpc_id collision (UUID4 practical impossibility).
+            DaemonRpcTimeout: no reply within ``timeout`` seconds (R-01).
+            DaemonRpcRemoteError: daemon returned an error dict (caller maps to HTTP).
+        """
+        rpc_id = str(uuid.uuid4())
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[Any] = loop.create_future()
+
+        # 1. Register pending future + connectivity check under the lock.
+        async with self._lock:
+            if rpc_id in self._pending_rpcs:
+                # UUID4 collision — treat as code-defect early signal.
+                raise DaemonRpcConflict(
+                    f"rpc_id '{rpc_id}' already pending.",
+                    details={"rpc_id": rpc_id},
+                )
+            if not self.is_connected(runtime_id):
+                raise DaemonRuntimeOffline(
+                    f"daemon runtime '{runtime_id}' is offline (no WS connection).",
+                    details={"runtime_id": str(runtime_id)},
+                )
+            self._pending_rpcs[rpc_id] = future
+
+        # 2. Build and send the daemon:rpc message.
+        message = {
+            "type": DAEMON_MSG_RPC,
+            "payload": {
+                "rpc_id": rpc_id,
+                "method": method,
+                "params": params,
+            },
+        }
+        # send_to_runtime evicts + disconnects on send failure, which in turn
+        # triggers cancel_all_pending (clearing our future). We still clean up
+        # defensively before raising so the map never holds a dangling entry.
+        sent = await self.send_to_runtime(runtime_id, message)
+        if not sent:
+            await self._cancel_rpc(rpc_id)
+            raise DaemonRuntimeOffline(
+                f"daemon runtime '{runtime_id}' WS send failed (offline).",
+                details={"runtime_id": str(runtime_id), "rpc_id": rpc_id},
+            )
+
+        # 3. Await the reply with timeout.
+        try:
+            result_payload = await asyncio.wait_for(future, timeout=timeout)
+        except TimeoutError:
+            await self._cancel_rpc(rpc_id)
+            raise DaemonRpcTimeout(
+                f"daemon rpc '{method}' timed out after {timeout}s.",
+                details={
+                    "runtime_id": str(runtime_id),
+                    "rpc_id": rpc_id,
+                    "timeout_seconds": timeout,
+                },
+            ) from None
+        except asyncio.CancelledError:
+            # future.cancel() — most likely disconnect → cancel_all_pending.
+            # Re-raise as DaemonRuntimeOffline so callers map to 504.
+            raise DaemonRuntimeOffline(
+                f"daemon runtime '{runtime_id}' disconnected mid-rpc.",
+                details={"runtime_id": str(runtime_id), "rpc_id": rpc_id},
+            ) from None
+
+        # 4. Unpack result/error.
+        if isinstance(result_payload, dict) and result_payload.get("error"):
+            raise DaemonRpcRemoteError(result_payload["error"])
+        result = result_payload.get("result") if isinstance(result_payload, dict) else None
+        if result is None:
+            # Malformed daemon reply — treat as gateway failure surface.
+            result = {}
+        return result
+
+    async def resolve_rpc(self, rpc_id: str, payload: dict[str, Any]) -> None:
+        """Resolve a pending RPC future with the daemon's raw result payload.
+
+        Called from the WS receive loop when a ``daemon:rpc_result`` arrives.
+        Unknown / already-cancelled rpc_ids are logged and dropped so a late
+        reply (arriving after timeout cleanup) cannot crash the WS loop.
+        """
+        async with self._lock:
+            future = self._pending_rpcs.get(rpc_id)
+            if future is None:
+                log.warning(
+                    "ws_rpc_unknown_id",
+                    rpc_id=rpc_id,
+                    hint="late reply after timeout or duplicate result",
+                )
+                return
+            if future.done():
+                log.warning(
+                    "ws_rpc_already_resolved",
+                    rpc_id=rpc_id,
+                )
+                return
+            future.set_result(payload)
+            self._pending_rpcs.pop(rpc_id, None)
+
+    async def _cancel_rpc(self, rpc_id: str) -> None:
+        """Cancel and remove a single pending RPC future (if present)."""
+        async with self._lock:
+            future = self._pending_rpcs.pop(rpc_id, None)
+        if future is not None and not future.done():
+            future.cancel()
+
+    async def cancel_all_pending(self) -> None:
+        """Cancel every pending RPC future (called on daemon disconnect).
+
+        rpc_id is not bound to runtime_id, so we cancel the whole map; this is
+        rare and logged for visibility. Awaiters will surface
+        DaemonRuntimeOffline via the CancelledError handler in send_rpc.
+        """
+        async with self._lock:
+            items = list(self._pending_rpcs.items())
+            self._pending_rpcs.clear()
+        for rpc_id, future in items:
+            if not future.done():
+                log.warning(
+                    "ws_rpc_cancelled_on_disconnect",
+                    rpc_id=rpc_id,
+                )
+                future.cancel()
 
     # ── Query helpers ─────────────────────────────────────────────────────────
 

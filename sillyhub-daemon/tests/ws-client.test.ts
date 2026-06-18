@@ -9,6 +9,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import {
   WsClient,
   WsState,
+  RpcError,
+  type RpcHandler,
   RECONNECT_INTERVAL_MS,
   CONNECT_TIMEOUT_MS,
 } from '../src/ws-client.js';
@@ -270,5 +272,203 @@ describe('WsClient — 常量与 Python 对齐', () => {
   });
   it('CONNECT_TIMEOUT_MS === 10000（Python open_timeout=10）', () => {
     expect(CONNECT_TIMEOUT_MS).toBe(10_000);
+  });
+});
+
+// ── task-05：WS RPC 分发（daemon:rpc → handler → daemon:rpc_result）──────────
+// 用例 T14~T21 对齐 task-05.md §7.2。rpc_id 由 backend 生成、daemon 透传。
+
+describe('WsClient — RPC 分发（task-05）', () => {
+  let mock: Awaited<ReturnType<typeof startMockServer>>;
+
+  beforeEach(async () => {
+    mock = await startMockServer();
+  });
+  afterEach(async () => {
+    await new Promise<void>((r) => mock.server.close(() => r()));
+  });
+
+  /** 构造一个已连接的 WsClient 并返回（测试内自行 close）。 */
+  async function connectClient(
+    callbacks: { onError?: (e: Error) => void } = {},
+  ): Promise<WsClient> {
+    const c = new WsClient({
+      serverUrl: mock.url.replace('ws://', 'http://'),
+      runtimeId: 'r1',
+      callbacks,
+    });
+    c.connect();
+    await vi.waitFor(() => expect(c.isConnected).toBe(true));
+    return c;
+  }
+
+  /** Server → Client 推一条 daemon:rpc。 */
+  function pushRpc(
+    rpcId: string,
+    method: string,
+    params: Record<string, unknown>,
+  ): void {
+    const ws = mock.conns[0];
+    if (!ws) throw new Error('no active conn');
+    ws.send(JSON.stringify({ type: MSG.RPC, payload: { rpc_id: rpcId, method, params } }));
+  }
+
+  it('T14: 注册 handler 并收到 daemon:rpc → 回 daemon:rpc_result（rpc_id 回填 + result 透传）', async () => {
+    const c = await connectClient();
+    const handler: RpcHandler = vi.fn(async () => ({ entries: [{ name: 'a', type: 'dir' }] }));
+    c.registerRpcHandler('list_dir', handler);
+
+    pushRpc('rpc-1', 'list_dir', { path: '/x' });
+    await vi.waitFor(() => expect(mock.received.length).toBe(1));
+
+    const out = mock.received[0] as { type: string; payload: Record<string, unknown> };
+    expect(out.type).toBe(MSG.RPC_RESULT);
+    expect(out.payload.rpc_id).toBe('rpc-1');
+    expect(out.payload.result).toEqual({ entries: [{ name: 'a', type: 'dir' }] });
+    expect(out.payload.error).toBeUndefined();
+    expect(handler).toHaveBeenCalledWith({ path: '/x' });
+    c.close();
+  });
+
+  it('T15: handler 抛 RpcError → RPC_RESULT.error.code 为该 code', async () => {
+    const c = await connectClient();
+    c.registerRpcHandler('list_dir', async () => {
+      throw new RpcError('forbidden', 'path outside allowed_roots');
+    });
+
+    pushRpc('rpc-2', 'list_dir', { path: '/etc' });
+    await vi.waitFor(() => expect(mock.received.length).toBe(1));
+    const out = mock.received[0] as { payload: { error: { code: string; message: string } } };
+    expect(out.payload.error.code).toBe('forbidden');
+    expect(out.payload.error.message).toMatch(/outside allowed_roots/);
+    c.close();
+  });
+
+  it('T16: handler 抛普通 Error → error.code="internal"', async () => {
+    const c = await connectClient();
+    c.registerRpcHandler('list_dir', async () => {
+      throw new Error('boom');
+    });
+
+    pushRpc('rpc-3', 'list_dir', { path: '/x' });
+    await vi.waitFor(() => expect(mock.received.length).toBe(1));
+    const out = mock.received[0] as { payload: { error: { code: string; message: string } } };
+    expect(out.payload.error.code).toBe('internal');
+    expect(out.payload.error.message).toBe('boom');
+    c.close();
+  });
+
+  it('T17: 未注册 method → error.code="method_not_found"', async () => {
+    const c = await connectClient();
+    pushRpc('rpc-4', 'read_file', { path: '/x' });
+    await vi.waitFor(() => expect(mock.received.length).toBe(1));
+    const out = mock.received[0] as { payload: { error: { code: string; message: string } } };
+    expect(out.payload.error.code).toBe('method_not_found');
+    expect(out.payload.error.message).toMatch(/read_file/);
+    c.close();
+  });
+
+  it('T18: rpc_id 缺失 → 丢弃，不调 send，触发 onError warn', async () => {
+    const onError = vi.fn();
+    const c = await connectClient({ onError });
+    const ws = mock.conns[0]!;
+    // 无 rpc_id
+    ws.send(JSON.stringify({ type: MSG.RPC, payload: { method: 'list_dir', params: {} } }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(mock.received.length).toBe(0);
+    expect(onError).toHaveBeenCalled();
+    c.close();
+  });
+
+  it('T19: handler 接收 params（含缺失 path 字段场景由业务层处理）', async () => {
+    const c = await connectClient();
+    const seen: Record<string, unknown>[] = [];
+    c.registerRpcHandler('list_dir', async (params) => {
+      seen.push(params);
+      return { entries: [] };
+    });
+    pushRpc('rpc-5', 'list_dir', {}); // 无 path
+    await vi.waitFor(() => expect(mock.received.length).toBe(1));
+    expect(seen[0]).toEqual({});
+    const out = mock.received[0] as { payload: { result: unknown } };
+    expect(out.payload.result).toEqual({ entries: [] });
+    c.close();
+  });
+
+  it('T20: 并发 2 条 RPC，各自回填对应 rpc_id（不阻塞）', async () => {
+    const c = await connectClient();
+    let resolveA!: () => void;
+    let resolveB!: () => void;
+    const pA = new Promise<void>((r) => (resolveA = r));
+    const pB = new Promise<void>((r) => (resolveB = r));
+    c.registerRpcHandler('list_dir', async (params) => {
+      if (params.path === '/a') {
+        await pA;
+        return { entries: [{ name: 'a', type: 'dir' }] };
+      }
+      await pB;
+      return { entries: [{ name: 'b', type: 'dir' }] };
+    });
+
+    pushRpc('rpc-a', 'list_dir', { path: '/a' });
+    pushRpc('rpc-b', 'list_dir', { path: '/b' });
+    await new Promise((r) => setTimeout(r, 30));
+    // 两条都 inflight，尚未回发
+    expect(mock.received.length).toBe(0);
+    // 先放 B（验证不按发送顺序、各自独立）
+    resolveB();
+    await vi.waitFor(() => expect(mock.received.length).toBe(1));
+    let outB = mock.received[0] as { payload: { rpc_id: string; result: unknown } };
+    expect(outB.payload.rpc_id).toBe('rpc-b');
+    resolveA();
+    await vi.waitFor(() => expect(mock.received.length).toBe(2));
+    const outA = mock.received[1] as { payload: { rpc_id: string; result: unknown } };
+    expect(outA.payload.rpc_id).toBe('rpc-a');
+    c.close();
+  });
+
+  it('T21: 同名 method 重复注册 → 后者生效，首次触发 onError warn', async () => {
+    const onError = vi.fn();
+    const c = await connectClient({ onError });
+    const h1: RpcHandler = vi.fn(async () => ({ from: 'h1' }));
+    const h2: RpcHandler = vi.fn(async () => ({ from: 'h2' }));
+    c.registerRpcHandler('list_dir', h1);
+    c.registerRpcHandler('list_dir', h2); // 触发 warn
+    expect(onError).toHaveBeenCalledTimes(1);
+
+    pushRpc('rpc-6', 'list_dir', { path: '/x' });
+    await vi.waitFor(() => expect(mock.received.length).toBe(1));
+    expect(h2).toHaveBeenCalledOnce();
+    expect(h1).not.toHaveBeenCalled();
+    const out = mock.received[0] as { payload: { result: { from: string } } };
+    expect(out.payload.result.from).toBe('h2');
+    c.close();
+  });
+
+  it('daemon:rpc 不进 onMessage（独立分支，不影响现有消息分发）', async () => {
+    const onMessage = vi.fn();
+    const c = new WsClient({
+      serverUrl: mock.url.replace('ws://', 'http://'),
+      runtimeId: 'r1',
+      callbacks: { onMessage },
+    });
+    c.connect();
+    await vi.waitFor(() => expect(c.isConnected).toBe(true));
+
+    pushRpc('rpc-7', 'unknown_method', {});
+    await vi.waitFor(() => expect(mock.received.length).toBe(1));
+    // RPC 走独立分支，不调 onMessage
+    expect(onMessage).not.toHaveBeenCalled();
+    c.close();
+  });
+
+  it('RPC_RESULT 出站消息 type 字面量为 "daemon:rpc_result"', async () => {
+    const c = await connectClient();
+    c.registerRpcHandler('ping', async () => 'pong');
+    pushRpc('rpc-8', 'ping', {});
+    await vi.waitFor(() => expect(mock.received.length).toBe(1));
+    const out = mock.received[0] as { type: string };
+    expect(out.type).toBe('daemon:rpc_result');
+    c.close();
   });
 });
