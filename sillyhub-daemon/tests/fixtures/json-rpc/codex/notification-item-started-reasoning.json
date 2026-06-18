@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"t1","turnId":"tu1","item":{"id":"rs_abc","type":"reasoning","summary":[{"type":"summary_text","text":"Analyzing the user's question"}],"content":[]}}}

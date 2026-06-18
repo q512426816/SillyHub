@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"t1","turnId":"tu1","itemId":"msg_xyz","delta":"Hello"}}

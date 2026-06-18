@@ -79,6 +79,55 @@ describe('parse notification - item/started', () => {
     expect(ev!.metadata?.tool_name).toBe('patch_apply');
     expect(ev!.metadata?.call_id).toBe('i3');
   });
+
+  // ql-20260618-004：reasoning + delta 流式
+  it('item/started reasoning → text + thinking=true + summary 文本', () => {
+    const a = new JsonRpcAdapter('codex');
+    const events = a.parse(P('codex', 'notification-item-started-reasoning.json'));
+    const ev = first(events);
+    expect(ev).not.toBeNull();
+    expect(ev!.type).toBe('text');
+    expect(ev!.metadata?.thinking).toBe(true);
+    expect(ev!.content).toBe("Analyzing the user's question");
+    expect(ev!.metadata?.source).toBe('reasoning_started');
+  });
+
+  it('item/agentMessage/delta → 流式 text event + 标记 itemId', () => {
+    const a = new JsonRpcAdapter('codex');
+    const events = a.parse(P('codex', 'notification-item-agentMessage-delta.json'));
+    const ev = first(events);
+    expect(ev).not.toBeNull();
+    expect(ev!.type).toBe('text');
+    expect(ev!.content).toBe('Hello');
+    expect(ev!.metadata?.source).toBe('agent_message_delta');
+    expect(ev!.metadata?.streaming).toBe(true);
+    expect(ev!.metadata?.call_id).toBe('msg_xyz');
+  });
+
+  it('item/completed(agentMessage) 在 delta 之后跳过，避免重复', () => {
+    const a = new JsonRpcAdapter('codex');
+    // 先发 delta
+    a.parse(P('codex', 'notification-item-agentMessage-delta.json'));
+    // 再发 completed（同 itemId）
+    const line = JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'item/completed',
+      params: {
+        threadId: 't1',
+        item: { id: 'msg_xyz', type: 'agentMessage', text: 'Hello world' },
+      },
+    });
+    expect(a.parse(line)).toBeNull();
+  });
+
+  it('item/completed(agentMessage) 未走 delta → 正常发完整文本', () => {
+    const a = new JsonRpcAdapter('codex');
+    const events = a.parse(P('codex', 'notification-item-completed-agentMessage.json'));
+    const ev = first(events);
+    expect(ev).not.toBeNull();
+    expect(ev!.type).toBe('text');
+    expect(ev!.content).toBe('Hello');
+  });
 });
 
 // ===========================================================================

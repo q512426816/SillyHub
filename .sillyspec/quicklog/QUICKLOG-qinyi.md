@@ -1,3 +1,15 @@
+## ql-20260618-004-9f81 | 2026-06-18 08:50:00 | codex quick-chat 流式输出 reasoning + agentMessage/delta（消除"等 2 分钟"静默）
+
+状态：已完成
+文件：sillyhub-daemon/src/adapters/json-rpc.ts、sillyhub-daemon/tests/adapters/json-rpc.test.ts、sillyhub-daemon/tests/fixtures/json-rpc/codex/notification-item-started-reasoning.json、sillyhub-daemon/tests/fixtures/json-rpc/codex/notification-item-agentMessage-delta.json
+依据：用户报"等两分钟才响应"。DB 查询最近 codex quick-chat 实际都成功，但耗时 96-121 秒（00:36:25→00:38:21 / 00:38:59→00:41:00）。日志只有 3 条：[SYSTEM:thread_started] 间隔近 2 分钟才出 [ASSISTANT]+[RESULT:success]，中间完全静默。原因：codex 默认用推理模型（gpt-5）思考阶段长（reasoning），且生成阶段是逐字流式 delta，但 daemon json-rpc adapter 不处理这两类事件，等 item/completed(agentMessage) 一次性拿到完整文本才 submit，用户体感"卡死"。
+结果：json-rpc adapter 补三类事件处理：
+  1. **item/started reasoning** → 产 `text + metadata.thinking=true + source='reasoning_started'`；item.summary 数组提取 summary_text 拼接成 content（开启 reasoning_summary 时显示思考摘要，未开启时 content 空仅标记 thinking，前端可显示"思考中..."）。
+  2. **item/agentMessage/delta**（method 直匹配）→ 产 `text + content=delta + metadata.streaming=true + source='agent_message_delta'`，让 UI 实时显示 codex 逐字打字。
+  3. **item/completed(agentMessage) 去重**：adapter 新增 `_streamedAgentMessageIds: Set<string>`，delta 处理时记录 itemId；item/completed 命中此集合时跳过（避免与 delta 重复展示完整文本），命中后删除让下一条 message 正常走。
+测试：新增 4 个用例（reasoning summary 提取 / delta 流式 / delta 后 completed 跳过 / 未走 delta 时 completed 正常），全 49/49 通过。
+预期效果：codex 思考期间 UI 显示 thinking，生成期间逐字流式，总耗时不变（受推理模型限制）但体感从"静默 2 分钟"变成"实时进度"。
+
 ## ql-20260618-003-a1b2 | 2026-06-18 01:35:00 | 修复 codex quick-chat "无输出"：_looksLikeResult 误命中 thread/start response 提前关 stdin
 
 状态：已完成

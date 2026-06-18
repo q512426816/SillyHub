@@ -68,6 +68,13 @@ export class JsonRpcAdapter implements ProtocolAdapter {
   /** 待应答 server request（id → 完整条目），task-19 轮询消费。 */
   private readonly pendingMap = new Map<number | string, PendingServerRequest>();
 
+  /**
+   * ql-20260618-004：已通过 item/agentMessage/delta 流式输出过的 agentMessage itemId。
+   * item/completed(agentMessage) 命中此集合时跳过完整文本，避免与 delta 重复。
+   * 单 lease 一个实例（每个 task 一个新 adapter），状态隔离。
+   */
+  private readonly _streamedAgentMessageIds = new Set<string>();
+
   constructor(provider: JsonRpcProvider) {
     this.provider = provider;
   }
@@ -357,6 +364,13 @@ export class JsonRpcAdapter implements ProtocolAdapter {
     if (canonicalMethod === 'item/started') {
       return this.parseItemStarted(params);
     }
+    if (canonicalMethod === 'item/agentMessage/delta') {
+      // ql-20260618-004：codex 流式 delta —— agent message 推送过程中的增量文本。
+      // 让 UI 实时看到 codex 在"打字"，避免推理模型 1-2 分钟思考期完全静默。
+      // 与 item/completed(agentMessage) 配合：delta 先发完，completed 时 itemId 命中
+      // _streamedAgentMessageIds 则跳过（避免重复展示完整文本）。
+      return this.parseAgentMessageDelta(params);
+    }
     if (canonicalMethod === 'turn/started') {
       // IR 收敛：status 合入 text + metadata.status（对齐 task-02/task-06）
       return [
@@ -381,6 +395,12 @@ export class JsonRpcAdapter implements ProtocolAdapter {
     if (itemType === 'agentMessage') {
       const text = typeof item.text === 'string' ? item.text : '';
       if (!text) return null; // 对照 Python L385 if text:
+      // ql-20260618-004：若该 itemId 已通过 item/agentMessage/delta 流式输出，
+      // 跳过 completed 事件，避免 UI 重复展示完整文本（delta 已经实时拼出来了）。
+      if (itemId && this._streamedAgentMessageIds.has(itemId)) {
+        this._streamedAgentMessageIds.delete(itemId); // 清掉，准备下一条 message
+        return null;
+      }
       return [{ type: 'text', content: text, metadata: { call_id: itemId } }];
     }
     if (itemType === 'commandExecution') {
@@ -411,6 +431,32 @@ export class JsonRpcAdapter implements ProtocolAdapter {
     const itemType = typeof item.type === 'string' ? item.type : '';
     const itemId = typeof item.id === 'string' ? item.id : '';
 
+    // ql-20260618-004：codex reasoning item —— 推理模型思考阶段的事件。
+    // item.summary 数组可能含 [{type:'summary_text', text:'...'}]（开启 reasoning_summary 时），
+    // 也可能为空（默认）。无论哪种，发一条 thinking 事件让 UI 显示"思考中..."。
+    // 完整 summary 文本提取后作为 content（空 summary 时 content 空，仅 metadata 标记）。
+    if (itemType === 'reasoning') {
+      const summary = Array.isArray(item.summary) ? item.summary : [];
+      const parts: string[] = [];
+      for (const s of summary) {
+        if (s && typeof s === 'object' && 'text' in s) {
+          const t = (s as Record<string, unknown>).text;
+          if (typeof t === 'string' && t) parts.push(t);
+        }
+      }
+      const content = parts.join('\n');
+      return [
+        {
+          type: 'text',
+          content,
+          metadata: {
+            thinking: true,
+            call_id: itemId,
+            source: 'reasoning_started',
+          },
+        },
+      ];
+    }
     if (itemType === 'commandExecution') {
       const cmd = typeof item.command === 'string' ? item.command : '';
       return [
@@ -431,6 +477,35 @@ export class JsonRpcAdapter implements ProtocolAdapter {
       ];
     }
     return null;
+  }
+
+  /**
+   * ql-20260618-004：解析 codex 流式 delta 通知（method=item/agentMessage/delta）。
+   *
+   * codex 在生成 agentMessage 过程中会逐字推送 delta，让 UI 实时显示"打字"效果。
+   * 完整文本在 item/completed(agentMessage) 时一次性给，但若已通过 delta 发出，
+   * parseItemCompleted 会跳过（避免重复）。
+   *
+   * payload 结构：{ threadId, turnId, itemId, delta: string }
+   */
+  private parseAgentMessageDelta(params: Record<string, unknown>): AgentEvent[] | null {
+    const delta = typeof params.delta === 'string' ? params.delta : '';
+    if (!delta) return null;
+    const itemId = typeof params.itemId === 'string' ? params.itemId : '';
+    if (itemId) {
+      this._streamedAgentMessageIds.add(itemId);
+    }
+    return [
+      {
+        type: 'text',
+        content: delta,
+        metadata: {
+          call_id: itemId,
+          source: 'agent_message_delta',
+          streaming: true,
+        },
+      },
+    ];
   }
 
   private parseTurnCompleted(params: Record<string, unknown>): AgentEvent[] | null {
