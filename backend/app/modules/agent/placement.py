@@ -150,7 +150,7 @@ class RunPlacementService:
         log.info(
             "placement_backend_daemon_client_bound",
             backend="daemon",
-            runtime_id=str(bound_rt["id"]),
+            runtime_id=str(bound_rt["id"]),  # type: ignore[index]
         )
         return ExecutionBackend.DAEMON
 

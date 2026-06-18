@@ -50,7 +50,7 @@ from app.modules.daemon.ws_hub import DaemonWsHub
 def _make_mock_ws() -> AsyncMock:
     """Mock WebSocket that records sent JSON messages."""
     ws = AsyncMock()
-    ws.sent_messages: list[dict[str, Any]] = []  # type: ignore[attr-defined]
+    ws.sent_messages = []  # type: ignore[attr-defined]
 
     async def _send_json(message: dict[str, Any]) -> None:
         ws.sent_messages.append(message)
@@ -351,7 +351,7 @@ class TestListDirEndpoint:
         # reply path (resolve_rpc) without needing a sibling coroutine that
         # would deadlock against the blocking httpx ASGI post call.
         ws = AsyncMock()
-        ws.sent_messages: list[dict[str, Any]] = []  # type: ignore[attr-defined]
+        ws.sent_messages = []  # type: ignore[attr-defined]
         ws.close = AsyncMock()
 
         async def _send_json(message: dict[str, Any]) -> None:
