@@ -82,7 +82,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [ /* 19 条 */ ];
 
 | section | menuKey | menuLabel | permissionAny | 备注 |
 |---|---|---|---|---|
-| overview | workspaces | Workspace 首页 | [workspace:read] | 入口菜单 |
+| overview | workspaces | Workspace 首页 | [workspace:read, workspace:write, workspace:admin, workspace:member:manage] | 入口菜单；含 workspace 全部 4 个权限 |
 | overview | components | 项目组组件 | [workspace:read] | 后端无 component:*，用 workspace:read 兜底 |
 | overview | topology | 拓扑图 | [workspace:read] | 同上 |
 | overview | changes | 变更中心 | [change:create, change:read, change:update, change:approve, change:archive] | 用户列明 |
@@ -92,7 +92,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [ /* 19 条 */ ];
 | overview | releases | 发布 | [deploy:staging, deploy:production, deploy:rollback] | 用户列明 |
 | management | git-identities | Git 身份管理 | [user:read, user:write] | 与用户管理共享权限域 |
 | management | api-keys | API Keys | [platform:admin] | 后端 `_require_platform_admin` 强制 |
-| management | agent | Agent 控制台 | [task:read, task:run_agent, task:cancel, tool:shell_exec, tool:network, tool:database, tool:secret:read] | 用户列明 |
+| management | agent | Agent 控制台 | [task:read, task:create, task:assign, task:run_agent, task:cancel, code:read, code:write, code:review, code:merge, tool:shell_exec, tool:network, tool:database, tool:secret:read] | 用户列明；含 task 全部 6 个 + code 全部 4 个 + tool 全部 4 个权限 |
 | management | approvals | 审批中心 | [task:approve, change:approve] | 跨 task/change 审批 |
 | management | audit | 审计中心 | [platform:audit:read] | 用户列明 |
 | management | incidents | 事件 | [workspace:read] | 后端无 incident:*，兜底 |
@@ -100,7 +100,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [ /* 19 条 */ ];
 | admin | organizations | 组织 | [organization:read, organization:write] | 用户列明 |
 | admin | roles | 角色 | [role:read, role:write] | 用户列明 |
 | system | runtimes | Daemon 运行时 | [platform:admin] | 平台级 |
-| system | settings | 设置 | [platform:admin, user:read] | 入口设置页 |
+| system | settings | 设置 | [platform:admin, platform:billing, user:read] | 入口设置页；含平台级 billing 权限 |
 
 ⚠️ 兜底说明：后端 `Permission` 枚举（`backend/app/modules/auth/permissions.py`）目前不含 `component:*` / `incident:*`。本变更不扩枚举，相关菜单用 `workspace:read` 作为可见性兜底。后端 RBAC 仍按既有接口路径校验（如 `/api/workspaces/{id}/components` 已通过 workspace 成员关系判断）。
 
