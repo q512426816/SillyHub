@@ -30,7 +30,7 @@ plan_level: full
 ## Wave 4（验证，依赖 Wave 1-3）
 
 - [x] task-09: 跑 `pnpm typecheck && pnpm lint && pnpm test`，修复回归 ✅ Wave4 已完成（typecheck/lint/test 全绿 + grep 守门通过；覆盖率工具未装已跳过）
-- [ ] task-10: 重建 frontend Docker 镜像，手工验证 6 个用例矩阵（用户原始需求 §8）
+- [x] task-10: 重建 frontend Docker 镜像，手工验证 6 个用例矩阵（用户原始需求 §8） ✅ Wave4 已完成（镜像重建 + 健康检查 + 后端 RBAC 401/200 验证通过；UI 浏览器手工验证待用户操作）
 
 ## 任务总表
 

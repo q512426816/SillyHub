@@ -82,3 +82,14 @@
 - 必须在 `backend/app/core/auth_deps.py:get_current_user()` 内补一道 `if not getattr(user, "login_enabled", True): raise AuthUserLoginDisabled(...)`，配合 `users_service._revoke_sessions()` 在 disable-login 时把 sessions 全部标记 revoked_at，才能让 token 立即失效。
 - E2E 验证：disable-login 后立刻拿旧 token GET `/api/auth/me`，期望 401；用密码重新登录，期望 401 + `HTTP_401_AUTH_USER_LOGIN_DISABLED`。
 
+## 2026-06-18 — MENU_PERMISSION_GROUPS 跨 menu 重复 permission.key 导致测试 queryByLabelText 失败
+
+- 当 MENU_PERMISSION_GROUPS 中同一个 permission.key 出现在多个 menu（如 `user:read` 在 `git-identities`/`users`/`settings` 三处；`workspace:read` 在 7 个 overview 菜单；`platform:admin` 在 `api-keys`/`runtimes`/`settings`），picker 三级渲染会为每个出现位置生成一个独立 checkbox，aria-label={p.key} 在 DOM 中重复。
+- 后果：React Testing Library 的 `screen.queryByLabelText("user:read")` / `getByLabelText("user:read")` 抛 `getMultipleElementsFoundError`，传统单元素断言失败。
+- 规避（不修改 picker 实现，仅调整测试）：
+  - 全局计数断言：折叠某 menu 前后用 `screen.getAllByLabelText("user:read").length` 比较，期望减少 1（其他 menu 的同 key checkbox 仍在）。
+  - 容器内查询：`within(menuContainer).getByLabelText(p.key)`，需要先通过 menu label 文本定位容器。
+  - 单 menu 单 key 校验：选 only-once 的 key 做断言（如 `organization:read` 只在 organizations menu 出现）。
+- 前端 UI 取舍：是否让 picker 去重展示同一 permission.key？本变更选择不去重（每个 menu 完整显示其 permissions），原因：(1) 管理员能直观看到"该 menu 需要哪些权限"；(2) onChange 已经全局生效，勾选一次即同步所有位置；(3) 去重会让某些 menu 的"权限列表"看似稀疏，破坏 picker 的"权限-菜单映射"信息密度。后续如需去重，建议在 menu 头部加"已勾选 N 项，M 项与其他菜单共享"提示。
+
+
