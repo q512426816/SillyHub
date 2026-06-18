@@ -3,7 +3,7 @@
 // fixture 从 Python _make_rpc_* helper 实际调用处提取（tests/fixtures/json-rpc/）。
 // turn/started 按 IR 收敛规则映射为 type:'text' + metadata.status（对齐 task-02/task-06）。
 
-import { describe, it, expect, expectTypeOf } from 'vitest';
+import { describe, it, expect, expectTypeOf, vi } from 'vitest';
 import { loadFixture } from '../helpers';
 import { JsonRpcAdapter } from '../../src/adapters/json-rpc';
 import type { ProtocolAdapter, PendingServerRequest } from '../../src/adapters/json-rpc';
@@ -92,23 +92,95 @@ describe('parse notification - item/started', () => {
     expect(ev!.metadata?.source).toBe('reasoning_started');
   });
 
-  it('item/agentMessage/delta → 流式 text event + 标记 itemId', () => {
+  it('item/agentMessage/delta 小 delta（< 阈值）→ null，暂存 buffer', () => {
     const a = new JsonRpcAdapter('codex');
+    // "Hello" = 5 字符 < 80 阈值，进 buffer，parse 返回 null
     const events = a.parse(P('codex', 'notification-item-agentMessage-delta.json'));
-    const ev = first(events);
-    expect(ev).not.toBeNull();
-    expect(ev!.type).toBe('text');
-    expect(ev!.content).toBe('Hello');
-    expect(ev!.metadata?.source).toBe('agent_message_delta');
-    expect(ev!.metadata?.streaming).toBe(true);
-    expect(ev!.metadata?.call_id).toBe('msg_xyz');
+    expect(events).toBeNull();
   });
 
-  it('item/completed(agentMessage) 在 delta 之后跳过，避免重复', () => {
+  it('ql-20260618-005 item/agentMessage/delta 累积达 AGENT_MESSAGE_FLUSH_CHARS → flush', () => {
     const a = new JsonRpcAdapter('codex');
-    // 先发 delta
+    // 发 3 段 delta：每段 30 字符，总 90 ≥ 80 阈值
+    const pieces = ['a'.repeat(30), 'b'.repeat(30), 'c'.repeat(30)];
+    let lastEvents: AgentEvent[] | null = null;
+    for (const p of pieces) {
+      lastEvents = a.parse(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'item/agentMessage/delta',
+          params: { threadId: 't1', turnId: 'tu1', itemId: 'msg_xyz', delta: p },
+        }),
+      );
+    }
+    // 最后一段触发 flush（累积 ≥ 80 字符）
+    expect(lastEvents).not.toBeNull();
+    expect(lastEvents).toHaveLength(1);
+    expect(lastEvents![0]!.type).toBe('text');
+    expect(lastEvents![0]!.content).toBe('a'.repeat(30) + 'b'.repeat(30) + 'c'.repeat(30));
+    expect(lastEvents![0]!.metadata?.source).toBe('agent_message_delta');
+    expect(lastEvents![0]!.metadata?.streaming).toBe(true);
+    expect(lastEvents![0]!.metadata?.call_id).toBe('msg_xyz');
+  });
+
+  it('ql-20260618-005 item/agentMessage/delta 累积达 AGENT_MESSAGE_FLUSH_MS 时间窗口 → flush', () => {
+    vi.useFakeTimers();
+    try {
+      const a = new JsonRpcAdapter('codex');
+      // 第一段 delta 入 buffer（5 字符 < 阈值）
+      const first = a.parse(P('codex', 'notification-item-agentMessage-delta.json'));
+      expect(first).toBeNull();
+
+      // 时间前进 150ms（> 120ms 阈值），第二段 delta 触发时间窗口 flush
+      vi.advanceTimersByTime(150);
+      const second = a.parse(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'item/agentMessage/delta',
+          params: { threadId: 't1', turnId: 'tu1', itemId: 'msg_xyz', delta: ' world' },
+        }),
+      );
+      expect(second).not.toBeNull();
+      expect(second).toHaveLength(1);
+      expect(second![0]!.content).toBe('Hello world');
+      expect(second![0]!.metadata?.streaming).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ql-20260618-005 itemId 切换时 flush 旧 buffer（多 message 边界）', () => {
+    const a = new JsonRpcAdapter('codex');
+    // 第一条 message 的 delta（小，未达阈值）
+    expect(
+      a.parse(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'item/agentMessage/delta',
+          params: { threadId: 't1', turnId: 'tu1', itemId: 'msg_a', delta: 'part1' },
+        }),
+      ),
+    ).toBeNull();
+
+    // 第二条 message 的 delta → 应触发旧 buffer flush
+    const events = a.parse(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'item/agentMessage/delta',
+        params: { threadId: 't1', turnId: 'tu1', itemId: 'msg_b', delta: 'part2' },
+      }),
+    );
+    expect(events).not.toBeNull();
+    expect(events).toHaveLength(1);
+    expect(events![0]!.content).toBe('part1');
+    expect(events![0]!.metadata?.call_id).toBe('msg_a');
+  });
+
+  it('ql-20260618-005 item/completed(agentMessage) flush 残留 buffer + 跳过重复文本', () => {
+    const a = new JsonRpcAdapter('codex');
+    // 先发 delta（小，未达阈值，进 buffer）
     a.parse(P('codex', 'notification-item-agentMessage-delta.json'));
-    // 再发 completed（同 itemId）
+    // 再发 completed（同 itemId）→ 应 flush buffer（'Hello'），跳过 completed 文本
     const line = JSON.stringify({
       jsonrpc: '2.0',
       method: 'item/completed',
@@ -117,7 +189,32 @@ describe('parse notification - item/started', () => {
         item: { id: 'msg_xyz', type: 'agentMessage', text: 'Hello world' },
       },
     });
-    expect(a.parse(line)).toBeNull();
+    const events = a.parse(line);
+    expect(events).not.toBeNull();
+    expect(events).toHaveLength(1);
+    expect(events![0]!.content).toBe('Hello');
+    expect(events![0]!.metadata?.source).toBe('agent_message_delta');
+  });
+
+  it('ql-20260618-005 turn/completed flush 残留 buffer（兜底尾部不丢）', () => {
+    const a = new JsonRpcAdapter('codex');
+    // 单段 delta（小，未达阈值）
+    a.parse(P('codex', 'notification-item-agentMessage-delta.json'));
+    // turn/completed（无 item/completed 兜底）→ 应 flush buffer 后再产 complete
+    const events = a.parse(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'turn/completed',
+        params: { turn: { status: 'completed' } },
+      }),
+    );
+    expect(events).not.toBeNull();
+    // 第一条是 flushed delta，最后一条是 complete
+    const flushed = events!.find((e) => e.metadata?.source === 'agent_message_delta');
+    expect(flushed).toBeDefined();
+    expect(flushed!.content).toBe('Hello');
+    const complete = events!.find((e) => e.type === 'complete');
+    expect(complete).toBeDefined();
   });
 
   it('item/completed(agentMessage) 未走 delta → 正常发完整文本', () => {

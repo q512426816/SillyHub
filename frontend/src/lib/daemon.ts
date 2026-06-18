@@ -84,7 +84,21 @@ export async function getQuickChatLogs(
 
 /**
  * 后端 submit_messages 在 Redis 推送的 message payload 结构。
- * 对齐 backend/app/modules/daemon/service.py:621-633 submit_messages 发布格式。
+ * 对齐 backend/app/modules/daemon/service.py:709-725 submit_messages 发布格式。
+ *
+ * ql-20260618-005：backend 实际发**两种** payload，本接口统一识别：
+ *   1. 扁平 StreamLogEvent（每条 AgentRunLog 一条 publish）：
+ *      `{ log_id, channel, content, timestamp }`
+ *   2. 聚合 messages（保留兼容，backend 还会发一条 summary）：
+ *      `{ event:"messages", lease_id, count, agent_run_status?, messages?: [...] }`
+ *
+ * streamQuickChat 内部把扁平形态包装成聚合（messages 数组单元素）传给 onMessage，
+ * 上层调用方无需感知差异，renderStreamMessage 仍按 messages[i].event_type 渲染。
+ *
+ * 扁平 payload 没有 event_type 字段，按 channel 反推：
+ *   - stdout → text
+ *   - stderr → error
+ *   - tool_call → tool_use
  */
 export interface QuickChatStreamMessage {
   event: "messages";
@@ -102,9 +116,29 @@ export interface QuickChatStreamMessage {
   }>;
 }
 
+/** backend 扁平 StreamLogEvent（每条日志单独 publish）。 */
+export interface QuickChatStreamFlatLog {
+  log_id?: string;
+  channel?: string;
+  content?: string;
+  timestamp?: string;
+}
+
 export interface QuickChatStreamDone {
   status?: string;
   exit_code?: number | null;
+}
+
+/** 把 channel 映射回 event_type（与 backend _channel_from_event_type 反向一致）。 */
+function _eventTypeFromChannel(channel: string | undefined): string {
+  switch (channel) {
+    case "stderr":
+      return "error";
+    case "tool_call":
+      return "tool_use";
+    default:
+      return "text";
+  }
 }
 
 /**
@@ -134,8 +168,41 @@ export function streamQuickChat(
 
   es.onmessage = (e: MessageEvent<string>) => {
     try {
-      const parsed = JSON.parse(e.data) as QuickChatStreamMessage;
-      onMessage(parsed);
+      const parsed = JSON.parse(e.data) as Record<string, unknown>;
+      // 扁平 StreamLogEvent：包装成聚合 messages（单元素）
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        "content" in parsed &&
+        !("messages" in parsed)
+      ) {
+        const flat = parsed as unknown as QuickChatStreamFlatLog;
+        // summary payload（event="messages" 但无 content）跳过
+        if (!flat.content) return;
+        onMessage({
+          event: "messages",
+          lease_id: "",
+          count: 1,
+          messages: [
+            {
+              event_type: _eventTypeFromChannel(flat.channel),
+              content: flat.content,
+            },
+          ],
+        });
+        return;
+      }
+      // 聚合 messages payload（旧格式兼容）
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        "messages" in parsed &&
+        Array.isArray((parsed as { messages: unknown }).messages)
+      ) {
+        onMessage(parsed as unknown as QuickChatStreamMessage);
+        return;
+      }
+      // summary payload（仅 event/count，无 messages/content）跳过
     } catch {
       onError?.(new Error(`Failed to parse SSE data: ${e.data}`));
     }

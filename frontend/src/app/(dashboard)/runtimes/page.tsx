@@ -471,9 +471,20 @@ function QuickChatPanel({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
     for (const ev of msg.messages ?? []) {
       const content = (ev.content ?? "").trim();
       switch (ev.event_type) {
-        case "text":
-          if (content) parts.push(content);
+        case "text": {
+          if (!content) break;
+          // ql-20260618-005：跳过 SYSTEM/RESULT 系统消息，避免 chat 面板出现
+          // [SYSTEM:thread_started] / [RESULT:success] 等技术日志。
+          if (/^\[(SYSTEM|RESULT)[^\]]*\]/.test(content)) break;
+          // 剥掉 [ASSISTANT] / [THINKING] 前缀（非流式 message 兜底；
+          // 流式 delta 已在 daemon 端不加前缀）。
+          const stripped = content.replace(
+            /^\[(ASSISTANT|THINKING|LOG:\w+)\]\s?/,
+            "",
+          );
+          if (stripped) parts.push(stripped);
           break;
+        }
         case "tool_use":
           parts.push(`\n🔧 ${ev.tool_name ?? "tool"}: ${content}`);
           break;

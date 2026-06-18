@@ -1107,6 +1107,19 @@ export class TaskRunner {
         const status = typeof md.status === 'string' ? md.status : '';
         const thinking = md.thinking === true;
         const isLog = md.log === true;
+        const isStreaming = md.streaming === true;
+        // ql-20260618-005：codex item/agentMessage/delta 流式 token —— 不加 [ASSISTANT]
+        // 前缀，直接发原始 delta 文本。前端 chat 面板会逐字 append 拼"打字效果"。
+        // 若加 [ASSISTANT] 前缀，每个 delta 都带前缀 → "[ASSISTANT] 我[ASSISTANT]  Cod"。
+        // Agent 控制台日志会按原样展示每条 delta（无前缀），可读性也 OK（每条 = 一次推送）。
+        if (isStreaming && rawContent) {
+          messages.push({
+            event_type: ev.type,
+            content: rawContent,
+            channel: 'stdout',
+          });
+          break;
+        }
         // ql-20260617-006：stream_event/message_delta 产的 status='usage_update' 事件
         // content 为空但 metadata.usage 有真实累加值。透传给 backend submit_messages
         // 实时更新 AgentRun.input_tokens/output_tokens（不写日志，仅 usage 回写）。

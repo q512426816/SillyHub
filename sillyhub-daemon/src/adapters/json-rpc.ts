@@ -75,8 +75,36 @@ export class JsonRpcAdapter implements ProtocolAdapter {
    */
   private readonly _streamedAgentMessageIds = new Set<string>();
 
+  /**
+   * ql-20260618-005：agentMessage/delta 字符缓冲。
+   *
+   * codex 每个 token 通常 1-5 字符，如果每条 delta 都 emit AgentEvent → TaskRunner
+   * 串行 await submitMessages（HTTP POST + DB commit + Redis publish + SSE push），
+   * 长 message 累积十几秒延迟，前端表现为「几个字几个字蹦」。节流：累积到
+   * AGENT_MESSAGE_FLUSH_CHARS 字符或 AGENT_MESSAGE_FLUSH_MS 毫秒才 flush 一次。
+   *
+   * 与 stream-json.ts 的 _thinkingBuf 同模式（task-06 / ql-20260617-012）。
+   * 残留 buffer 在 item/completed(agentMessage) / turn/completed / itemId 切换 时 flush。
+   */
+  private _agentMessageBuf = '';
+  private _agentMessageBufItemId = '';
+  private _agentMessageBufStartedAt = 0;
+  private static readonly AGENT_MESSAGE_FLUSH_CHARS = 80;
+  private static readonly AGENT_MESSAGE_FLUSH_MS = 120;
+
   constructor(provider: JsonRpcProvider) {
     this.provider = provider;
+  }
+
+  /**
+   * ql-20260618-005：重置跨 lease 累积状态（对齐 StreamJsonAdapter.resetAccumulator）。
+   * TaskRunner.runLease 步骤 4 / 重试循环每次 attempt 开始时调用。
+   */
+  resetAccumulator(): void {
+    this._streamedAgentMessageIds.clear();
+    this._agentMessageBuf = '';
+    this._agentMessageBufItemId = '';
+    this._agentMessageBufStartedAt = 0;
   }
 
   /**
@@ -395,11 +423,19 @@ export class JsonRpcAdapter implements ProtocolAdapter {
     if (itemType === 'agentMessage') {
       const text = typeof item.text === 'string' ? item.text : '';
       if (!text) return null; // 对照 Python L385 if text:
+      // ql-20260618-005：先 flush 残留 buffer（item/completed 到达时 delta 可能
+      // 还有未达阈值的尾部，必须先发出去再决定是否跳过 completed 文本）。
+      const pendingFlush = this._flushAgentMessageBuf();
       // ql-20260618-004：若该 itemId 已通过 item/agentMessage/delta 流式输出，
-      // 跳过 completed 事件，避免 UI 重复展示完整文本（delta 已经实时拼出来了）。
+      // 跳过 completed 的完整文本（delta 已实时拼出来，重复展示会刷新整段）。
+      // 但 pendingFlush（残留 buffer）照发，否则丢尾部 token。
       if (itemId && this._streamedAgentMessageIds.has(itemId)) {
         this._streamedAgentMessageIds.delete(itemId); // 清掉，准备下一条 message
-        return null;
+        return pendingFlush; // 可能 null（已全部 flush）或残留尾部
+      }
+      // 未走 delta 流式：返回完整文本（与 flush 一起拼，flush 通常为 null）
+      if (pendingFlush) {
+        return [...pendingFlush, { type: 'text', content: text, metadata: { call_id: itemId } }];
       }
       return [{ type: 'text', content: text, metadata: { call_id: itemId } }];
     }
@@ -480,11 +516,16 @@ export class JsonRpcAdapter implements ProtocolAdapter {
   }
 
   /**
-   * ql-20260618-004：解析 codex 流式 delta 通知（method=item/agentMessage/delta）。
+   * ql-20260618-004 / ql-20260618-005：解析 codex 流式 delta 通知。
    *
    * codex 在生成 agentMessage 过程中会逐字推送 delta，让 UI 实时显示"打字"效果。
    * 完整文本在 item/completed(agentMessage) 时一次性给，但若已通过 delta 发出，
    * parseItemCompleted 会跳过（避免重复）。
+   *
+   * ql-20260618-005：加字符+时间双阈值节流。每个 token 通常 1-5 字符，若每条都
+   * emit → 每条触发 TaskRunner.submitMessages 串行 HTTP POST，累积十几秒延迟。
+   * 改为：累积到 AGENT_MESSAGE_FLUSH_CHARS 字符或 AGENT_MESSAGE_FLUSH_MS 毫秒才
+   * flush 一次。itemId 变化时先 flush 旧 buffer（多 message 边界）。
    *
    * payload 结构：{ threadId, turnId, itemId, delta: string }
    */
@@ -492,13 +533,62 @@ export class JsonRpcAdapter implements ProtocolAdapter {
     const delta = typeof params.delta === 'string' ? params.delta : '';
     if (!delta) return null;
     const itemId = typeof params.itemId === 'string' ? params.itemId : '';
+
+    // itemId 变化 → 先 flush 旧 itemId 的 buffer（避免新旧 message 文本拼在一起）
+    let preFlush: AgentEvent[] | null = null;
+    if (
+      itemId &&
+      this._agentMessageBufItemId &&
+      itemId !== this._agentMessageBufItemId
+    ) {
+      preFlush = this._flushAgentMessageBuf();
+    }
+
+    // 标记本 itemId 已流式输出（item/completed 据此跳过完整文本，避免重复）
     if (itemId) {
       this._streamedAgentMessageIds.add(itemId);
+      // 首次入 buffer：记录 itemId + 起始时间
+      if (this._agentMessageBuf === '') {
+        this._agentMessageBufItemId = itemId;
+        this._agentMessageBufStartedAt = Date.now();
+      }
     }
+
+    this._agentMessageBuf += delta;
+
+    // 阈值检查：字符数或时间窗口任一达标即 flush
+    const elapsed = Date.now() - this._agentMessageBufStartedAt;
+    if (
+      this._agentMessageBuf.length >= JsonRpcAdapter.AGENT_MESSAGE_FLUSH_CHARS ||
+      elapsed >= JsonRpcAdapter.AGENT_MESSAGE_FLUSH_MS
+    ) {
+      const flushed = this._flushAgentMessageBuf();
+      // 拼接 preFlush（旧 itemId 残留）+ 当前 flush
+      if (preFlush && flushed) return [...preFlush, ...flushed];
+      return preFlush ?? flushed;
+    }
+
+    // 未达阈值：仅返回 preFlush（若有），当前 delta 暂存 buffer
+    return preFlush;
+  }
+
+  /**
+   * ql-20260618-005：flush agentMessage/delta 缓冲。
+   *
+   * 返回 1 条 text event（content=累积的 delta 文本，metadata.streaming=true），
+   * 或 null（buffer 为空）。副作用：清空 buffer + 重置 itemId/起始时间。
+   */
+  private _flushAgentMessageBuf(): AgentEvent[] | null {
+    if (!this._agentMessageBuf) return null;
+    const content = this._agentMessageBuf;
+    const itemId = this._agentMessageBufItemId;
+    this._agentMessageBuf = '';
+    this._agentMessageBufItemId = '';
+    this._agentMessageBufStartedAt = 0;
     return [
       {
         type: 'text',
-        content: delta,
+        content,
         metadata: {
           call_id: itemId,
           source: 'agent_message_delta',
@@ -513,6 +603,13 @@ export class JsonRpcAdapter implements ProtocolAdapter {
     if (!turn || typeof turn !== 'object') return null; // B-07-9
     const status = typeof turn.status === 'string' ? turn.status : '';
     const events: AgentEvent[] = [];
+
+    // ql-20260618-005：turn 结束前 flush 残留 delta buffer（codex 异常退出 /
+    // item/completed 漏发时，turn/completed 是最后兜底 flush 点，避免丢尾部）
+    const pendingFlush = this._flushAgentMessageBuf();
+    if (pendingFlush) {
+      events.push(...pendingFlush);
+    }
 
     if (status === 'failed') {
       const errObj = turn.error as Record<string, unknown> | undefined;

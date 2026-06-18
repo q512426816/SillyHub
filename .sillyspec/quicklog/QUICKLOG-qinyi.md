@@ -1,3 +1,30 @@
+## ql-20260618-006-a3f1 | 2026-06-18 09:25:00 | codex quick-chat SSE 扁平 payload + delta 缓冲节流（解决"几个字几个字蹦"）
+
+状态：已完成
+文件：sillyhub-daemon/src/adapters/json-rpc.ts、sillyhub-daemon/tests/adapters/json-rpc.test.ts、sillyhub-daemon/src/task-runner.ts、frontend/src/lib/daemon.ts、frontend/src/app/(dashboard)/runtimes/page.tsx
+依据：用户报 daemon 日志显示 delta 在推但 UI 仍卡住，且「SSE 注意要速度，之前几个字几个字输出慢死了」。两类问题：
+  1. **UI 卡住**：backend Redis pub/sub 推扁平 StreamLogEvent `{log_id, channel, content, timestamp}`，前端 streamQuickChat 解析时按聚合 `QuickChatStreamMessage {messages:[]}` 找字段，所有扁平 payload 被丢弃 → SSE 收到日志但 onMessage 不触发。
+  2. **慢**：daemon json-rpc adapter 每个 codex agentMessage/delta（1-5 字符/token）都立即产 AgentEvent → TaskRunner 串行 await submitMessages（HTTP POST + DB commit + Redis publish + SSE push），长 message 累积十几秒延迟。
+结果：
+  1. **daemon.ts SSE 解析**：识别两种 payload 格式（扁平 + 聚合），扁平按 channel 反推 event_type（stdout→text / stderr→error / tool_call→tool_use），统一包装成聚合 messages 单元素传 onMessage。
+  2. **runtimes/page.tsx renderStreamMessage**：跳过 `[SYSTEM:..]`/`[RESULT:..]` 系统消息，剥掉 `[ASSISTANT]`/`[THINKING]`/`[LOG:..]` 前缀，让 chat 面板只显示纯文本。
+  3. **task-runner.ts _eventToMessages**：codex 流式 delta（metadata.streaming=true）不加 `[ASSISTANT]` 前缀，直接发原始 delta 文本，前端 chat 面板 append 拼"打字效果"（原 [ASSISTANT] 每条带前缀会变成 "[ASSISTANT] 我[ASSISTANT] Cod"）。
+  4. **json-rpc.ts delta 缓冲节流**（对齐 stream-json.ts thinking buffer 模式 ql-20260617-012）：
+     - 加 `_agentMessageBuf` / `_agentMessageBufItemId` / `_agentMessageBufStartedAt` 字段 + 阈值常量 `AGENT_MESSAGE_FLUSH_CHARS=80` / `AGENT_MESSAGE_FLUSH_MS=120`
+     - parseAgentMessageDelta：itemId 切换先 flush 旧 buffer，累积到 80 字符或 120ms 才 emit；否则返回 null（TaskRunner 不调 submitMessages）
+     - parseItemCompleted(agentMessage)：先 flush 残留 buffer（尾部不丢），再按 _streamedAgentMessageIds 跳过 completed 重复文本
+     - parseTurnCompleted：先 flush 残留 buffer（异常退出兜底），再产 complete 事件
+     - 新增 resetAccumulator() 清状态（TaskRunner 跨 lease / 重试调用）
+测试：json-rpc 53/53 通过（新增 6 用例覆盖：小 delta 暂存 / 字符阈值 flush / 时间阈值 flush / itemId 切换 flush / completed flush 残留 / turn_completed flush 兜底）。
+预期效果：codex 生成阶段从"每 token 一次 HTTP POST（慢且卡）"变成"每 80 字符或 120ms 一次（流畅）"，UI 实时显示打字效果不再卡顿。
+
+## ql-20260618-005-c4d2 | 2026-06-18 09:15:49 | 修复 spec-bootstrap 未应用 workspace 默认 Agent provider/model
+
+状态：已完成
+文件：backend/app/modules/spec_workspace/bootstrap.py、backend/app/modules/spec_workspace/tests/test_bootstrap_provider_model.py、AGENTS.md、.sillyspec/docs/multi-agent-platform/modules/backend.md
+依据：.claude/CLAUDE.md；.sillyspec/docs/multi-agent-platform/modules/backend.md；.sillyspec/changes/archive/2026-06-14-2026-06-14-agent-runtime-selection/requirements.md；.sillyspec/changes/archive/2026-06-14-2026-06-14-agent-runtime-selection/tasks/task-03.md
+结果：Bootstrap launch 阶段按 workspace.default_agent/default_model 固化 AgentRun.provider/model；后台 daemon 派发阶段复用该快照写入 lease metadata，未配置默认 provider 时保留 claude fallback；AGENTS.md 改为读取 .claude/CLAUDE.md；backend 模块文档追加本次变更索引。验证：`cd backend; uv run pytest -q app/modules/spec_workspace/tests/test_bootstrap_provider_model.py` 通过，2 passed。
+
 ## ql-20260618-004-9f81 | 2026-06-18 08:50:00 | codex quick-chat 流式输出 reasoning + agentMessage/delta（消除"等 2 分钟"静默）
 
 状态：已完成
