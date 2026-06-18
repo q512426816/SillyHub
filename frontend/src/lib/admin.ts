@@ -8,105 +8,6 @@
  */
 import { apiFetch } from "@/lib/api";
 
-// ── Permissions ───────────────────────────────────────────────────────
-
-export type PermissionGroup =
-  | "PLATFORM"
-  | "ADMIN"
-  | "WORKSPACE"
-  | "AGENT"
-  | "CHANGE"
-  | "AUDIT";
-
-export interface PermissionWithGroup {
-  key: string;
-  name: string;
-  group: PermissionGroup;
-  description?: string;
-}
-
-export const PERMISSION_GROUPS: {
-  group: PermissionGroup;
-  permissions: PermissionWithGroup[];
-}[] = [
-  {
-    group: "PLATFORM",
-    permissions: [
-      { key: "platform:admin", name: "平台超级管理员", group: "PLATFORM" },
-      { key: "platform:billing", name: "平台计费", group: "PLATFORM" },
-      { key: "platform:audit:read", name: "平台审计读取", group: "PLATFORM" },
-    ],
-  },
-  {
-    group: "ADMIN",
-    permissions: [
-      { key: "user:read", name: "用户查看", group: "ADMIN" },
-      { key: "user:write", name: "用户编辑", group: "ADMIN" },
-      { key: "user:login:manage", name: "登录权限管理", group: "ADMIN" },
-      { key: "organization:read", name: "组织查看", group: "ADMIN" },
-      { key: "organization:write", name: "组织编辑", group: "ADMIN" },
-      { key: "role:read", name: "角色查看", group: "ADMIN" },
-      { key: "role:write", name: "角色编辑", group: "ADMIN" },
-    ],
-  },
-  {
-    group: "WORKSPACE",
-    permissions: [
-      { key: "workspace:read", name: "Workspace 查看", group: "WORKSPACE" },
-      { key: "workspace:write", name: "Workspace 编辑", group: "WORKSPACE" },
-      { key: "workspace:admin", name: "Workspace 管理", group: "WORKSPACE" },
-      {
-        key: "workspace:member:manage",
-        name: "Workspace 成员管理",
-        group: "WORKSPACE",
-      },
-    ],
-  },
-  {
-    group: "AGENT",
-    permissions: [
-      { key: "task:read", name: "任务查看", group: "AGENT" },
-      { key: "task:create", name: "任务创建", group: "AGENT" },
-      { key: "task:assign", name: "任务分配", group: "AGENT" },
-      { key: "task:run_agent", name: "任务执行", group: "AGENT" },
-      { key: "task:cancel", name: "任务取消", group: "AGENT" },
-      { key: "task:approve", name: "任务审批", group: "AGENT" },
-      { key: "code:read", name: "代码查看", group: "AGENT" },
-      { key: "code:write", name: "代码编辑", group: "AGENT" },
-      { key: "code:review", name: "代码审查", group: "AGENT" },
-      { key: "code:merge", name: "代码合并", group: "AGENT" },
-      { key: "deploy:staging", name: "预发部署", group: "AGENT" },
-      { key: "deploy:production", name: "生产部署", group: "AGENT" },
-      { key: "deploy:rollback", name: "回滚", group: "AGENT" },
-      { key: "tool:shell_exec", name: "Shell 工具", group: "AGENT" },
-      { key: "tool:network", name: "网络工具", group: "AGENT" },
-      { key: "tool:database", name: "数据库工具", group: "AGENT" },
-      { key: "tool:secret:read", name: "密钥读取", group: "AGENT" },
-    ],
-  },
-  {
-    group: "CHANGE",
-    permissions: [
-      { key: "change:create", name: "变更创建", group: "CHANGE" },
-      { key: "change:read", name: "变更查看", group: "CHANGE" },
-      { key: "change:update", name: "变更更新", group: "CHANGE" },
-      { key: "change:approve", name: "变更审批", group: "CHANGE" },
-      { key: "change:archive", name: "变更归档", group: "CHANGE" },
-    ],
-  },
-  {
-    group: "AUDIT",
-    permissions: [
-      {
-        key: "platform:audit:read",
-        name: "平台审计读取",
-        group: "AUDIT",
-        description: "跨工作空间的平台级审计日志访问",
-      },
-    ],
-  },
-];
-
 // ── Users ─────────────────────────────────────────────────────────────
 
 export interface OrganizationBrief {
@@ -518,10 +419,4 @@ export async function listRoleUsers(
   roleId: string,
 ): Promise<RoleUserListResponse> {
   return apiFetch<RoleUserListResponse>(`/api/admin/roles/${roleId}/users`);
-}
-
-// ── Permissions catalogue ─────────────────────────────────────────────
-
-export async function listPermissions(): Promise<PermissionWithGroup[]> {
-  return PERMISSION_GROUPS.flatMap((g) => g.permissions);
 }

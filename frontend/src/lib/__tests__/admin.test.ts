@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, apiFetch } from "@/lib/api";
 import {
-  PERMISSION_GROUPS,
   createUser,
   createOrganization,
   createRole,
@@ -19,7 +18,6 @@ import {
   getRole,
   getUser,
   listOrganizations,
-  listPermissions,
   listRoles,
   listUserAudit,
   listUserSessions,
@@ -559,37 +557,6 @@ describe("admin API client", () => {
         permission_keys: ["foo:bar" as never],
       }),
     ).rejects.toMatchObject({ status: 422, code: "VALIDATION_ERROR" });
-  });
-
-  it("PERMISSION_GROUPS covers all 6 groups", () => {
-    const groups = PERMISSION_GROUPS.map((g) => g.group);
-    expect(groups).toContain("PLATFORM");
-    expect(groups).toContain("ADMIN");
-    expect(groups).toContain("WORKSPACE");
-    expect(groups).toContain("AGENT");
-    expect(groups).toContain("CHANGE");
-    expect(groups).toContain("AUDIT");
-  });
-
-  it("PERMISSION_GROUPS ADMIN group contains user/organization/role perms", () => {
-    const admin = PERMISSION_GROUPS.find((g) => g.group === "ADMIN");
-    expect(admin).toBeDefined();
-    const keys = admin!.permissions.map((p) => p.key);
-    expect(keys).toContain("user:read");
-    expect(keys).toContain("user:write");
-    expect(keys).toContain("user:login:manage");
-    expect(keys).toContain("organization:read");
-    expect(keys).toContain("organization:write");
-    expect(keys).toContain("role:read");
-    expect(keys).toContain("role:write");
-  });
-
-  it("listPermissions returns flat PermissionWithGroup[] derived from PERMISSION_GROUPS", async () => {
-    const all = await listPermissions();
-    expect(Array.isArray(all)).toBe(true);
-    expect(all.length).toBeGreaterThanOrEqual(7);
-    const adminPerm = all.find((p) => p.key === "user:read");
-    expect(adminPerm?.group).toBe("ADMIN");
   });
 
   it("apiFetch is re-exported and usable (sanity)", async () => {
