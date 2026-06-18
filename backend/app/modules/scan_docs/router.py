@@ -34,7 +34,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 async def list_scan_docs(
     workspace_id: uuid.UUID,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+    _user: Annotated[User, Depends(require_permission(Permission.SCAN_DOCS_READ))],
 ) -> ScanDocList:
     service = ScanDocsService(session)
     items, total = await service.list_(workspace_id)
@@ -52,7 +52,7 @@ async def get_scan_doc(
     workspace_id: uuid.UUID,
     doc_id: uuid.UUID,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+    _user: Annotated[User, Depends(require_permission(Permission.SCAN_DOCS_READ))],
 ) -> ScanDocRead:
     service = ScanDocsService(session)
     doc = await service.get(workspace_id, doc_id)

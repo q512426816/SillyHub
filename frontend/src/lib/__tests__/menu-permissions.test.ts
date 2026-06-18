@@ -12,6 +12,7 @@ import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
  * 分组顺序与后端一致：
  * - Platform (3)
  * - Workspace (4)
+ * - Workspace 子菜单独立 read (6, 2026-06-18 ql-003 新增)
  * - Change (5)
  * - Task (6)
  * - Code (4)
@@ -19,7 +20,7 @@ import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
  * - Tool (4)
  * - Admin (7)
  *
- * 合计 3 + 4 + 5 + 6 + 4 + 3 + 4 + 7 = 36。
+ * 合计 3 + 4 + 6 + 5 + 6 + 4 + 3 + 4 + 7 = 42。
  */
 const BACKEND_PERMISSION_KEYS = [
   // Platform (3)
@@ -31,6 +32,13 @@ const BACKEND_PERMISSION_KEYS = [
   "workspace:write",
   "workspace:admin",
   "workspace:member:manage",
+  // Workspace 子菜单独立 read (6, 2026-06-18 ql-003 新增)
+  "component:read",
+  "topology:read",
+  "scan-docs:read",
+  "runtime:read",
+  "knowledge:read",
+  "incident:read",
   // Change (5)
   "change:create",
   "change:read",
@@ -145,11 +153,11 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(g!.permissions.map((p) => p.key)).toEqual(["platform:admin"]);
   });
 
-  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 36", () => {
+  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 42", () => {
     const valid = new Set<string>(BACKEND_PERMISSION_KEYS);
     // 镜像常量自身的完整性护栏：若被误删/重复，立即失败
-    expect(BACKEND_PERMISSION_KEYS.length).toBe(36);
-    expect(valid.size).toBe(36);
+    expect(BACKEND_PERMISSION_KEYS.length).toBe(42);
+    expect(valid.size).toBe(42);
 
     MENU_PERMISSION_GROUPS.forEach((g) => {
       g.permissions.forEach((p) => {
@@ -158,13 +166,22 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("兜底菜单 components/topology/scan-docs/knowledge/incidents 必须包含 workspace:read", () => {
-    const FALLBACK = ["components", "topology", "scan-docs", "knowledge", "incidents"];
-    FALLBACK.forEach((menuKey) => {
+  it("6 个子菜单有独立 read 权限（不再共用 workspace:read）", () => {
+    const EXPECTED: Record<string, string> = {
+      components: "component:read",
+      topology: "topology:read",
+      "scan-docs": "scan-docs:read",
+      runtime: "runtime:read",
+      knowledge: "knowledge:read",
+      incidents: "incident:read",
+    };
+    Object.entries(EXPECTED).forEach(([menuKey, permKey]) => {
       const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === menuKey);
-      expect(g).toBeDefined();
+      expect(g, `missing menu ${menuKey}`).toBeDefined();
       const keys = g!.permissions.map((p) => p.key);
-      expect(keys).toContain("workspace:read");
+      expect(keys).toContain(permKey);
+      // 不应再用 workspace:read 兜底
+      expect(keys).not.toContain("workspace:read");
     });
   });
 

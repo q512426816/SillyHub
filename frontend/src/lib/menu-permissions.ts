@@ -3,11 +3,13 @@
  *
  * 设计依据：
  * - `2026-06-18-menu-driven-permissions/design.md` §5.1（类型定义）+ §5.2（19 菜单权限映射表）
- * - 后端 Permission 枚举：`backend/app/modules/auth/permissions.py`（36 个值）
+ * - 后端 Permission 枚举：`backend/app/modules/auth/permissions.py`（42 个值，含
+ *   2026-06-18 ql-003 新增的 6 个子菜单独立 read 权限）
  *
- * 兜底说明：后端目前不含 `component:*` / `incident:*` / `scan:*` / `knowledge:*` 权限，
- * 相关菜单统一用 `workspace:read` 作为可见性兜底（理由：对应接口已通过 workspace
- * 成员关系校验，无细粒度 permission）。如需精细控制，后续变更扩后端枚举。
+ * 子菜单独立查看权限：每个 overview/management 子菜单有独立 read 权限
+ * （component:read / topology:read / scan-docs:read / runtime:read /
+ * knowledge:read / incident:read），避免共用 workspace:read 致 picker 冗余展示。
+ * 后端各 router 已 require 对应权限。
  *
  * pickerHidden 说明：少数 menu 与其他 menu 共享同一权限（如 git-identities 后端
  * 不强制任何 permission，前端兜底用 platform:admin 与 api-keys/settings 共享）。
@@ -73,8 +75,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     icon: "\u{1F4E6}",
     href: "components",
     matchPattern: "/components",
-    // 兜底：后端无 component:* 权限，使用 workspace:read
-    permissions: [{ key: "workspace:read", name: "Workspace 查看" }],
+    permissions: [{ key: "component:read", name: "组件查看" }],
   },
   {
     section: "overview",
@@ -83,8 +84,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     icon: "\u{1F5FA}",
     href: "components/topology",
     matchPattern: "/components/topology",
-    // 兜底：后端无 component:* 权限，使用 workspace:read
-    permissions: [{ key: "workspace:read", name: "Workspace 查看" }],
+    permissions: [{ key: "topology:read", name: "拓扑查看" }],
   },
   {
     section: "overview",
@@ -108,8 +108,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     icon: "\u{1F4C4}",
     href: "scan-docs",
     matchPattern: "/scan-docs",
-    // 兜底：后端无 scan:* 权限，使用 workspace:read
-    permissions: [{ key: "workspace:read", name: "Workspace 查看" }],
+    permissions: [{ key: "scan-docs:read", name: "扫描文档查看" }],
   },
   {
     section: "overview",
@@ -119,7 +118,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "runtime",
     matchPattern: "/runtime",
     permissions: [
-      { key: "workspace:read", name: "Workspace 查看" },
+      { key: "runtime:read", name: "运行时查看" },
       { key: "task:read", name: "任务查看" },
     ],
   },
@@ -130,8 +129,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     icon: "\u{1F4DA}",
     href: "knowledge",
     matchPattern: "/knowledge",
-    // 兜底：后端无 knowledge:* 权限，使用 workspace:read
-    permissions: [{ key: "workspace:read", name: "Workspace 查看" }],
+    permissions: [{ key: "knowledge:read", name: "知识查看" }],
   },
   {
     section: "overview",
@@ -229,8 +227,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     icon: "\u{1F6A8}",
     href: "incidents",
     matchPattern: "/incidents",
-    // 兜底：后端无 incident:* 权限，使用 workspace:read
-    permissions: [{ key: "workspace:read", name: "Workspace 查看" }],
+    permissions: [{ key: "incident:read", name: "事件查看" }],
   },
 
   // ── admin（3 条）────────────────────────────────────────────

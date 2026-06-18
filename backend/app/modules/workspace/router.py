@@ -120,7 +120,7 @@ async def activate_workspace(
 @router.get("/topology", response_model=TopologyResponse)
 async def get_topology(
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_READ))],
+    _user: Annotated[User, Depends(require_permission_any(Permission.TOPOLOGY_READ))],
 ) -> TopologyResponse:
     """Return the full workspace topology graph."""
     return await TopologyBuilder.build(session)

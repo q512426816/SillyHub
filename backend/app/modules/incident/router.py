@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_deps import get_current_user, require_permission, require_permission_any
+from app.core.auth_deps import require_permission, require_permission_any
 from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
@@ -48,7 +48,7 @@ async def create_incident(
 )
 async def list_incidents(
     workspace_id: uuid.UUID,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(require_permission(Permission.INCIDENT_READ))],
     session: SessionDep,
     status_filter: str | None = Query(None, alias="status"),
 ) -> list[IncidentResponse]:
@@ -64,7 +64,7 @@ async def list_incidents(
 async def get_incident(
     incident_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(require_permission(Permission.INCIDENT_READ))],
 ) -> IncidentResponse:
     svc = IncidentService(session)
     incident = await svc.get(incident_id)
@@ -109,7 +109,7 @@ async def create_postmortem(
 async def get_postmortem(
     incident_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(require_permission(Permission.INCIDENT_READ))],
 ) -> PostmortemResponse:
     svc = IncidentService(session)
     postmortem = await svc.get_postmortem(incident_id)

@@ -40,6 +40,17 @@ class Permission(StrEnum):
     WORKSPACE_ADMIN = "workspace:admin"
     WORKSPACE_MEMBER_MANAGE = "workspace:member:manage"
 
+    # ── Workspace 子菜单独立查看权限 ────────────────────────
+    # 用于前端 menu 显隐粒度化：每个 overview/management 子菜单有独立 read 权限，
+    # 避免所有菜单共用 workspace:read 致 picker 重复展示。
+    # 后端 router 各自 require 对应权限。
+    COMPONENT_READ = "component:read"
+    TOPOLOGY_READ = "topology:read"
+    SCAN_DOCS_READ = "scan-docs:read"
+    RUNTIME_READ = "runtime:read"
+    KNOWLEDGE_READ = "knowledge:read"
+    INCIDENT_READ = "incident:read"
+
     # ── Change ──────────────────────────────────────────────
     CHANGE_CREATE = "change:create"
     CHANGE_READ = "change:read"
@@ -96,6 +107,16 @@ class Permission(StrEnum):
         if prefix in ("user", "organization", "role"):
             return PermissionGroup.ADMIN
         if prefix == "workspace":
+            return PermissionGroup.WORKSPACE
+        if prefix in (
+            "component",
+            "topology",
+            "scan-docs",
+            "runtime",
+            "knowledge",
+            "incident",
+        ):
+            # workspace 子菜单独立 read 权限归类到 WORKSPACE 组
             return PermissionGroup.WORKSPACE
         if prefix == "change":
             return PermissionGroup.CHANGE

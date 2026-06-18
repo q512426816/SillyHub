@@ -24,7 +24,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 async def list_knowledge(
     workspace_id: uuid.UUID,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+    _user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
 ) -> KnowledgeList:
     service = KnowledgeService(session)
     return await service.list_knowledge(workspace_id)
@@ -35,7 +35,7 @@ async def get_knowledge(
     workspace_id: uuid.UUID,
     filename: str,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+    _user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
 ) -> KnowledgeEntry:
     service = KnowledgeService(session)
     return await service.get_knowledge(workspace_id, filename)
@@ -45,7 +45,7 @@ async def get_knowledge(
 async def list_quicklog(
     workspace_id: uuid.UUID,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+    _user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
 ) -> QuicklogList:
     service = KnowledgeService(session)
     return await service.list_quicklog(workspace_id)
@@ -56,7 +56,7 @@ async def get_quicklog(
     workspace_id: uuid.UUID,
     filename: str,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+    _user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
 ) -> QuicklogEntry:
     service = KnowledgeService(session)
     return await service.get_quicklog(workspace_id, filename)

@@ -25,7 +25,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 async def get_runtime_progress(
     workspace_id: uuid.UUID,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+    _user: Annotated[User, Depends(require_permission(Permission.RUNTIME_READ))],
 ) -> RuntimeProgress | None:
     service = RuntimeService(session)
     return await service.get_progress(workspace_id)
@@ -35,7 +35,7 @@ async def get_runtime_progress(
 async def get_runtime_user_inputs(
     workspace_id: uuid.UUID,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+    _user: Annotated[User, Depends(require_permission(Permission.RUNTIME_READ))],
 ) -> list[UserInputEntry]:
     service = RuntimeService(session)
     return await service.get_user_inputs(workspace_id)
@@ -45,7 +45,7 @@ async def get_runtime_user_inputs(
 async def get_runtime_user_inputs_raw(
     workspace_id: uuid.UUID,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+    _user: Annotated[User, Depends(require_permission(Permission.RUNTIME_READ))],
 ) -> str:
     service = RuntimeService(session)
     return await service.get_user_inputs_raw(workspace_id) or ""
@@ -55,7 +55,7 @@ async def get_runtime_user_inputs_raw(
 async def get_runtime_artifacts(
     workspace_id: uuid.UUID,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+    _user: Annotated[User, Depends(require_permission(Permission.RUNTIME_READ))],
 ) -> list[ArtifactEntry]:
     service = RuntimeService(session)
     return await service.get_artifacts(workspace_id)
@@ -66,7 +66,7 @@ async def get_runtime_artifact_content(
     workspace_id: uuid.UUID,
     filename: str,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+    _user: Annotated[User, Depends(require_permission(Permission.RUNTIME_READ))],
 ) -> str:
     service = RuntimeService(session)
     return await service.get_artifact_content(workspace_id, filename) or ""
