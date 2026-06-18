@@ -142,6 +142,31 @@ describe("canSeeMenu", () => {
       ),
     ).toBe(true);
   });
+
+  it("alwaysVisible menu: 任何登录用户可见，无需任何 permission", () => {
+    // git-identities 后端只 get_current_user，登录即可见
+    const gitIdentities = MENU_PERMISSION_GROUPS.find(
+      (g) => g.menuKey === "git-identities",
+    );
+    expect(gitIdentities).toBeDefined();
+    expect(gitIdentities!.alwaysVisible).toBe(true);
+
+    // 任意登录用户（无任何 permission）都能看到
+    expect(canSeeMenu(mkUser({ permissions: [] }), gitIdentities!)).toBe(true);
+    // 有 permission 的用户也可见
+    expect(
+      canSeeMenu(mkUser({ permissions: ["user:read"] }), gitIdentities!),
+    ).toBe(true);
+    // platform admin 同样可见（短路）
+    expect(
+      canSeeMenu(
+        mkUser({ is_platform_admin: true, permissions: [] }),
+        gitIdentities!,
+      ),
+    ).toBe(true);
+    // null user 不可见（未登录）
+    expect(canSeeMenu(null, gitIdentities!)).toBe(false);
+  });
 });
 
 describe("visibleMenusBySection", () => {

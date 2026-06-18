@@ -157,8 +157,10 @@ export function AdminRolePermissionPicker({
   return (
     <div className={`space-y-4 ${className ?? ""}`}>
       {MENU_SECTION_ORDER.map((section: MenuSection) => {
+        // picker 过滤掉 alwaysVisible menu（这类 menu 后端无 permission 校验，
+        // role 无权限可配，渲染出来只是空卡片）。
         const menus = MENU_PERMISSION_GROUPS.filter(
-          (g) => g.section === section,
+          (g) => g.section === section && !g.alwaysVisible,
         );
         if (menus.length === 0) return null;
         return (

@@ -344,3 +344,10 @@ created_at: 2026-06-03T08:42:04
 文件：backend/app/modules/auth/rbac.py（新增 `collect_permissions_everywhere` 合并 platform + all workspace 权限）、backend/app/modules/auth/schema.py（`MeResponse` 加 `permissions: list[str]` 字段）、backend/app/modules/auth/router.py（`/me` 调用 `collect_permissions_everywhere` 填充 sorted perms）、frontend/src/lib/auth.ts（`MeResponse` 加 permissions；抽出 `fetchMe()` 供复用；login 走 fetchMe 写入 perms）、frontend/src/app/(dashboard)/layout.tsx（mount 时主动 fetchMe 让旧 session 也能拿到 perms）
 结果：1) 后端 me 返回 permissions；2) 前端 login 调 fetchMe 同步 perms；3) dashboard mount 时也 fetchMe 一次，老 session（perms 为空）刷新页面后即可看到菜单；4) typecheck/lint 全绿。后端无 alembic 改动不需要 migration。
 
+
+## ql-20260618-001-a3f2 | 2026-06-18 11:15:00 | 厘清 git-identities/settings menu 与 user:read 的冗余兜底
+状态：已完成
+文件：frontend/src/lib/menu-permissions.ts、frontend/src/lib/permission.ts、frontend/src/components/admin-role-permission-picker.tsx、frontend/src/lib/__tests__/menu-permissions.test.ts、frontend/src/lib/__tests__/permission.test.ts、frontend/src/components/__tests__/admin-role-permission-picker.test.tsx
+背景：用户质疑 picker 中 user:read 同时出现在 git-identities + users + settings 三个 menu。调查后端：git_identity router 无 require_permission（登录即可访问），settings router 全部 require_platform_admin。前端 MENU_PERMISSION_GROUPS 给 git-identities 加 user:read/write、给 settings 加 user:read 均为前端兜底猜测，后端并不强制。
+方案：对齐后端事实。(1) MenuPermissionGroup 加 alwaysVisible?: boolean 字段；(2) git-identities 设 alwaysVisible=true 且 permissions=[]；settings 精简到只 platform:admin；(3) canSeeMenu 加 alwaysVisible 分支：登录用户即可见，无需 permission；(4) picker 过滤 alwaysVisible menu（role 无权限可配不渲染）；(5) 测试调整：menu-permissions.test 加 alwaysVisible 校验 + settings 1 permission、permission.test 加 canSeeMenu alwaysVisible 4 用例、picker.test management 6→5 + 2 个 user:read 折叠测试改用 queryAllByLabelText（user:read 现在 picker 中只出现 1 次，折叠后 0 次 getAll 会抛错）。
+结果：1) typecheck/lint/test 全绿（129 用例，新增 2 个 alwaysVisible 用例）；2) picker 中 user:read 只在「用户」menu 出现一处，不再冗余；3) git-identities 菜单所有登录用户可见（用户自服务语义对齐后端 get_current_user）；4) settings 菜单只 platform:admin 可见。Docker 重建 + UI 手工验证待后续。

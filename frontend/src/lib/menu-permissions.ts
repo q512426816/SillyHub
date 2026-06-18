@@ -8,6 +8,11 @@
  * 兜底说明：后端目前不含 `component:*` / `incident:*` / `scan:*` / `knowledge:*` 权限，
  * 相关菜单统一用 `workspace:read` 作为可见性兜底（理由：对应接口已通过 workspace
  * 成员关系校验，无细粒度 permission）。如需精细控制，后续变更扩后端枚举。
+ *
+ * alwaysVisible 说明：少数 menu 后端只校验登录身份（get_current_user），无任何
+ * Permission 依赖（如 git-identities，用户自服务）。这类 menu 设 alwaysVisible=true，
+ * canSeeMenu 直接返回 true；permissions 为空数组（picker 会过滤掉这类 menu，因为
+ * role 无权限可配）。
  */
 
 export type MenuSection = "overview" | "management" | "admin" | "system";
@@ -36,8 +41,16 @@ export interface MenuPermissionGroup {
   matchPattern?: string;
   /** 是否绝对路径（不拼 workspace 前缀） */
   absolute?: boolean;
-  /** 该菜单可见所需的权限列表（任一命中即可见） */
+  /**
+   * 该菜单可见所需的权限列表（任一命中即可见）。
+   * 当 alwaysVisible=true 时该数组应为空（picker 会过滤掉这类 menu）。
+   */
   permissions: PermissionItem[];
+  /**
+   * 登录即可见标记：后端只校验登录身份（get_current_user）无 Permission 依赖时设 true。
+   * canSeeMenu 会跳过权限检查直接返回 true（user 非 null 时）。
+   */
+  alwaysVisible?: boolean;
 }
 
 export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
@@ -146,10 +159,10 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/settings/git-identities",
     absolute: true,
     matchPattern: "/settings/git-identities",
-    permissions: [
-      { key: "user:read", name: "用户查看" },
-      { key: "user:write", name: "用户编辑" },
-    ],
+    // 后端 git_identity router 无 require_permission，仅 get_current_user；
+    // 这是用户自服务菜单，登录即可见，role 无权限可配。
+    alwaysVisible: true,
+    permissions: [],
   },
   {
     section: "management",
@@ -283,11 +296,9 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/settings",
     absolute: true,
     matchPattern: "/settings",
-    permissions: [
-      { key: "platform:admin", name: "平台超级管理员" },
-      { key: "platform:billing", name: "平台计费" },
-      { key: "user:read", name: "用户查看" },
-    ],
+    // 后端 settings router 所有端点 require_platform_admin → platform:admin。
+    // platform:billing/user:read 后端不强制，移除以避免 picker 冗余展示。
+    permissions: [{ key: "platform:admin", name: "平台超级管理员" }],
   },
 ];
 

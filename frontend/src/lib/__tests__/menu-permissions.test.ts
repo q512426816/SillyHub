@@ -131,10 +131,22 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(counter.system).toBe(2);
   });
 
-  it("每个 menu 至少 1 个 permission", () => {
+  it("每个非 alwaysVisible menu 至少 1 个 permission（alwaysVisible menu 允许空）", () => {
     MENU_PERMISSION_GROUPS.forEach((g) => {
-      expect(g.permissions.length).toBeGreaterThanOrEqual(1);
+      if (g.alwaysVisible) {
+        // 登录即可见的 menu 无权限可配，permissions 必须为空
+        expect(g.permissions).toEqual([]);
+      } else {
+        expect(g.permissions.length).toBeGreaterThanOrEqual(1);
+      }
     });
+  });
+
+  it("alwaysVisible menu 后端无 permission 依赖（用户自服务）：git-identities", () => {
+    const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "git-identities");
+    expect(g).toBeDefined();
+    expect(g!.alwaysVisible).toBe(true);
+    expect(g!.permissions).toEqual([]);
   });
 
   it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 36", () => {
@@ -190,12 +202,12 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(g!.permissions.length).toBe(4);
   });
 
-  it("settings 菜单应有 3 个 permissions (platform:admin/billing + user:read)", () => {
+  it("settings 菜单应有 1 个 permission (platform:admin；对齐后端 require_platform_admin)", () => {
     const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "settings");
     expect(g).toBeDefined();
     const keys = g!.permissions.map((p) => p.key).sort();
-    expect(keys).toEqual(["platform:admin", "platform:billing", "user:read"].sort());
-    expect(g!.permissions.length).toBe(3);
+    expect(keys).toEqual(["platform:admin"]);
+    expect(g!.permissions.length).toBe(1);
   });
 
   it("agent 菜单应有 13 个 permissions (task 5 + code 4 + tool 4)", () => {

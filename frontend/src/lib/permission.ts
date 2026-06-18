@@ -46,14 +46,18 @@ export function hasAnyPermission(
 /**
  * 判断用户是否能看到指定菜单。
  *
- * - user 为 null → false
+ * - user 为 null → false（未登录一律不可见）
  * - user.is_platform_admin === true → true（短路）
+ * - group.alwaysVisible === true → true（登录即可见，后端无 permission 校验）
  * - 否则：group.permissions 中任一 key 在 user.permissions 中 → true
  */
 export function canSeeMenu(
   user: SessionUser | null,
   group: MenuPermissionGroup,
 ): boolean {
+  if (!user) return false;
+  if (user.is_platform_admin) return true;
+  if (group.alwaysVisible) return true;
   return hasAnyPermission(user, group.permissions.map((p) => p.key));
 }
 

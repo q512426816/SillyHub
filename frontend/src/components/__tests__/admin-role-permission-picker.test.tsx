@@ -91,16 +91,21 @@ describe("AdminRolePermissionPicker", () => {
     });
   });
 
-  it("management section renders 6 menus", () => {
+  it("management section renders 5 menus (picker 过滤掉 alwaysVisible 的 git-identities)", () => {
     render(<AdminRolePermissionPicker permissions={[]} onChange={vi.fn()} />);
 
+    // picker 不渲染 alwaysVisible menu（git-identities 后端无 permission 校验，
+    // role 无权限可配）
     const managementMenus = MENU_PERMISSION_GROUPS.filter(
-      (g) => g.section === "management",
+      (g) => g.section === "management" && !g.alwaysVisible,
     );
-    expect(managementMenus).toHaveLength(6);
+    expect(managementMenus).toHaveLength(5);
     managementMenus.forEach((g) => {
       expect(screen.getByText(g.menuLabel)).toBeInTheDocument();
     });
+
+    // git-identities 不应出现在 picker 中
+    expect(screen.queryByText("Git 身份管理")).not.toBeInTheDocument();
   });
 
   it("admin section renders 3 menus", () => {
@@ -240,14 +245,15 @@ describe("AdminRolePermissionPicker", () => {
     ) as HTMLButtonElement;
     expect(toggleBtn).toBeTruthy();
 
-    // user:read 跨 menu 重复（users + git-identities + settings），用 count 校验
+    // user:read 在 picker 中只出现在 users menu（git-identities 被 alwaysVisible 过滤、
+    // settings 移除 user:read），折叠后计数应为 0。用 queryAll 避免抛错。
     const beforeCount = screen.getAllByLabelText("user:read").length;
+    expect(beforeCount).toBeGreaterThanOrEqual(1);
 
     fireEvent.click(toggleBtn);
 
-    // users menu 折叠后 user:read 计数减少 1（git-identities + settings 仍展开）
-    const afterCount = screen.getAllByLabelText("user:read").length;
-    expect(afterCount).toBe(beforeCount - 1);
+    // users menu 折叠后 user:read 不再可见
+    expect(screen.queryAllByLabelText("user:read")).toEqual([]);
   });
 
   it("collapsing users does not collapse organizations", () => {
@@ -275,10 +281,11 @@ describe("AdminRolePermissionPicker", () => {
     ) as HTMLButtonElement;
 
     const baselineCount = screen.getAllByLabelText("user:read").length;
+    expect(baselineCount).toBeGreaterThanOrEqual(1);
 
-    // 折叠：user:read 计数减少 1
+    // 折叠：user:read 计数变 0
     fireEvent.click(toggleBtn);
-    expect(screen.getAllByLabelText("user:read").length).toBe(baselineCount - 1);
+    expect(screen.queryAllByLabelText("user:read")).toEqual([]);
 
     // 再展开：user:read 计数恢复
     fireEvent.click(toggleBtn);
