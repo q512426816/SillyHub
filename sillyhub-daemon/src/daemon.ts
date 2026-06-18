@@ -51,6 +51,11 @@ import { HubClient } from './hub-client.js';
 import { WsClient } from './ws-client.js';
 import { listDir } from './file-rpc.js';
 import type { TaskRunner, TaskRunnerResult } from './task-runner.js';
+import type { SessionManager } from './interactive/session-manager.js';
+import type {
+  PersistedSessionRecord,
+  SessionStorePersistence,
+} from './interactive/types.js';
 
 // ── 最小日志（design G-05 零依赖，不装 winston/pino）──────────────────────────
 
@@ -189,6 +194,51 @@ type WsClientFactory = (opts: {
   };
 }) => WsClientLike;
 
+// ── task-10：daemon 重启恢复编排（鸭子类型端口）──────────────────────────────
+//
+// daemon 启动时按 §5 编排：load → 对每条记录向 backend recover →
+// SessionManager.restoreAndReconnect（query resume）→ reconnecting→active。
+//
+// backend recover/confirm/markFailed 的真实 HTTP 端点属 task-05 router 范围
+//（allowed_paths 限制，不在本任务直接改 HubClient）。daemon 通过此鸭子类型
+// 端口调用；生产路径由 main.ts 注入真实 client（内部走 HubClient 的对应方法），
+// 测试注入 mock。
+
+/** backend recover 响应状态（task-10 §4.4 / §5）。 */
+export type SessionRecoverStatus =
+  | 'reconnecting'
+  | 'ended'
+  | 'failed'
+  | 'rejected';
+
+/**
+ * task-10 §4.4 / §5：daemon→backend 恢复对账端口（鸭子类型）。
+ *
+ * 三个方法对应 backend service.py 的 recover_session_after_daemon_restart /
+ * confirm_session_reconnected / mark_session_recovery_failed。daemon 启动编排
+ * 按序调用；失败隔离（单条 reject/throw 不影响其他 session）。
+ */
+export interface RecoveryCoordinator {
+  /**
+   * 向 backend 收敛崩溃 currentRun + 写 session=reconnecting（或返回终态/rejected）。
+   * daemon 收到 reconnecting 后才调 SessionManager.restoreAndReconnect。
+   */
+  recoverSession(
+    sessionId: string,
+    params: {
+      leaseId: string;
+      runtimeId: string;
+      provider: string;
+      agentSessionId: string;
+      interruptedRunId?: string;
+    },
+  ): Promise<{ status: SessionRecoverStatus }>;
+  /** 恢复成功（reconnecting → active）后向 backend 确认。 */
+  confirmReconnected(sessionId: string): Promise<void>;
+  /** 恢复失败（driver.start 抛错）后向 backend 写 reconnecting → failed。 */
+  markRecoveryFailed(sessionId: string): Promise<void>;
+}
+
 // ── DaemonOptions（便于测试注入 mock detector/wsClientFactory）────────────────
 
 export interface DaemonOptions {
@@ -203,6 +253,26 @@ export interface DaemonOptions {
   wsClientFactory?: WsClientFactory;
   /** WS 重连退避（毫秒），默认 10000（对齐 Python daemon.py:251 `asyncio.sleep(10)`）。 */
   wsReconnectDelay?: number;
+  /**
+   * task-04（D-002@v3）：注入 SessionManager（交互式会话生命周期管理）。
+   * 默认 undefined：kind=interactive lease 记 error 并由 backend 收 failed，不崩 daemon
+   *（生产部署在 main.ts 实例化时传入；本任务默认 null，AC-14 覆盖过渡期）。
+   */
+  sessionManager?: SessionManager | null;
+  /**
+   * task-10（FR-08）：sessions.json 元数据持久化端口。注入后在 daemon.start
+   * 启动时加载可恢复记录 + 状态变更排队 flush。默认 undefined：不持久化
+   *（Wave1/2 内存态行为，回退路径：删 sessions.json 即回到 failed 默认路径）。
+   */
+  persistence?: SessionStorePersistence | null;
+  /**
+   * task-10（FR-08）：daemon→backend 恢复对账端口。注入后 daemon.start 在
+   * 三循环启动前对每条持久化记录调 recoverSession + restoreAndReconnect。
+   * 默认 undefined：不执行恢复编排（Wave1/2 行为）。
+   */
+  recoveryClient?: RecoveryCoordinator | null;
+  /** task-10 §5：恢复并发上限，默认 4。 */
+  recoveryConcurrency?: number;
 }
 
 // ── Daemon class（核心）──────────────────────────────────────────────────────
@@ -222,6 +292,39 @@ export class Daemon {
   private readonly _taskRunner: TaskRunnerLike | null;
   private readonly _detector: DetectorLike;
   private readonly _logger: Logger;
+  /**
+   * task-04（D-002@v3）：交互式会话管理器。null/undefined 时 interactive lease 记 error
+   * 不崩（AC-14 过渡期）。生产路径由 main.ts 在构造 daemon 时传入。
+   */
+  private readonly _sessionManager: SessionManager | null;
+  /**
+   * task-10（FR-08）：sessions.json 元数据持久化端口。
+   * null 时不持久化（Wave1/2 内存态）。
+   */
+  private readonly _persistence: SessionStorePersistence | null;
+  /**
+   * task-10（FR-08）：daemon→backend 恢复对账端口。
+   * null 时不执行启动恢复编排（Wave1/2 行为）。
+   */
+  private readonly _recoveryClient: RecoveryCoordinator | null;
+  /** task-10 §5：恢复并发上限，默认 4。 */
+  private readonly _recoveryConcurrency: number;
+  /**
+   * task-04：interactive lease.id → session_id（防 WS 重放重复 create，AC-09）。
+   * batch lease 不进此 map（走 _inflightLeases 去重）。
+   */
+  private readonly _interactiveSessionsByLease = new Map<string, string>();
+
+  /**
+   * P1-1（2026-06-18）：恢复成功（markReconnected + confirm）后正在 active 运行的
+   * session 集合。用于把恢复后**异步**的 driver onError → SessionManager.fail 路径
+   * 桥接到 backend markRecoveryFailed（否则 backend session 卡 reconnecting）。
+   *
+   * daemon 不持有 SessionManager.deps.onSessionEnd 注入点（SessionManager 从外部
+   * 注入），故暴露 markRecoveredSessionFailed 让 onSessionEnd 注入方在收到 failed
+   * 时调用；daemon 据此集合判定是否走恢复失败通知路径，并清理集合。
+   */
+  private readonly _recoveredSessionIds = new Set<string>();
 
   /** server 分配的 runtime_id → WS 客户端（每个 provider runtime 各一条连接）。 */
   private readonly _wsClients = new Map<string, WsClientLike>();
@@ -268,6 +371,13 @@ export class Daemon {
       options?.wsClientFactory ??
       ((opts) => new WsClient(opts) as unknown as WsClientLike);
     this._wsReconnectDelay = options?.wsReconnectDelay ?? 10_000;
+    this._sessionManager = options?.sessionManager ?? null;
+    this._persistence = options?.persistence ?? null;
+    this._recoveryClient = options?.recoveryClient ?? null;
+    this._recoveryConcurrency =
+      options?.recoveryConcurrency && options.recoveryConcurrency > 0
+        ? Math.floor(options.recoveryConcurrency)
+        : 4;
     this._logger = createLogger(
       this._normalizeLogLevel(config.log_level),
     );
@@ -317,10 +427,25 @@ export class Daemon {
       }
     }
 
+    // task-10（FR-08 / §5）：在三循环启动前执行崩溃恢复编排。
+    // load 持久化记录 → 对每条向 backend recover → restoreAndReconnect
+    //（query resume）→ reconnecting→active。失败隔离 + backend rejected 删记录。
+    // 未注入 persistence/recoveryClient → 跳过（Wave1/2 行为，向后兼容）。
+    await this._recoverSessionsOnBoot();
+
     // 3. 启动三循环
     this._fire((signal) => this._heartbeatLoop(signal));
     this._fire((signal) => this._pollLoop(signal));
     this._fire((signal) => this._wsLoop(signal));
+
+    // task-07（FR-06 / D-004@v1）：启动 SessionManager 空闲扫描定时器。
+    // sessionManager 为 null（task-04 边界 14：未注入）时 ?. 不调；空闲扫描不启动。
+    // batch 路径完全不受影响。
+    try {
+      this._sessionManager?.start();
+    } catch (e) {
+      this._logger.warn('session_manager_start_failed', { error: e });
+    }
 
     // 4. 注册信号 handler（R8）
     this._installSignalHandlers();
@@ -349,6 +474,26 @@ export class Daemon {
     this._loopPromises.clear();
 
     await this._markRegisteredRuntimesOffline();
+
+    // task-07（FR-06 / D-004@v1）：停 SessionManager 空闲扫描定时器。
+    // 顺序在 WS close 之前，避免 shutdown 中途扫描又触发 end→onSessionEnd→WS 已关报错。
+    // sessionManager 为 null 时 ?. 不调。不主动 end 所有 session（避免 shutdown 风暴 backend）；
+    // active session 内存态随进程退出丢失，backend 侧 lease 心跳/WS 失活兜底收口。
+    try {
+      this._sessionManager?.stop();
+    } catch (e) {
+      this._logger.warn('session_manager_stop_failed', { error: e });
+    }
+
+    // task-10（§7 边界 13）：daemon stop 强制 flush 最后一次内存快照
+    //（SIGKILL 兜底靠上一次原子快照）。persistence/sessionManager 为 null 时 no-op。
+    if (this._persistence && this._sessionManager) {
+      try {
+        await this._sessionManager.flush();
+      } catch (e) {
+        this._logger.warn('session_flush_on_stop_failed', { error: e });
+      }
+    }
 
     this._closeAllWsClients();
     // 关闭 HTTP（真实 HubClient.close 是同步 void no-op）
@@ -410,6 +555,252 @@ export class Daemon {
     } catch (e) {
       // 单个 agent 失败不中断其余注册（daemon.py:105-111）
       this._logger.error('register_failed', { provider: agent.provider, error: e });
+    }
+  }
+
+  // ── task-10：daemon 启动崩溃恢复编排（§5）───────────────────────────────────
+
+  /**
+   * 启动恢复编排：load → 限流并发对每条记录 recover+restore → flush → 完成。
+   *
+   * 顺序（§5）：在三循环（heartbeat/poll/ws）启动**前**完成全部恢复。
+   * - 未注入 persistence/recoveryClient/sessionManager → no-op（Wave1/2 行为）。
+   * - load 抛错（不应发生，persistence 内部已隔离）→ 记 warn 不崩。
+   * - 单条记录失败（backend rejected 或 driver.start 抛错）→ 结构化 warn 后
+   *   继续其他记录，不崩 daemon（失败隔离）。
+   * - 全部恢复完成后 flush（清 currentRunId / 无效记录）。
+   */
+  private async _recoverSessionsOnBoot(): Promise<void> {
+    if (!this._persistence || !this._recoveryClient || !this._sessionManager) {
+      // Wave1/2 行为：无持久化 / 无 recovery 端口 / 无 SessionManager → 不恢复。
+      return;
+    }
+    let records: PersistedSessionRecord[];
+    try {
+      records = await this._persistence.load();
+    } catch (e) {
+      this._logger.warn('session_recover_load_failed', { error: e });
+      return;
+    }
+    if (records.length === 0) {
+      this._logger.debug('session_recover_no_records');
+      return;
+    }
+    this._logger.info('session_recover_start', { count: records.length });
+
+    // 限流并发（默认 4）：用 slot 池控制最大并发，单条失败不影响其他。
+    const limit = this._recoveryConcurrency;
+    const recovered = new Set<string>();
+    const failed = new Set<string>();
+    let cursor = 0;
+    const workers: Promise<void>[] = [];
+    const runOne = async (): Promise<void> => {
+      while (cursor < records.length) {
+        const idx = cursor++;
+        const record = records[idx]!;
+        try {
+          const ok = await this._recoverOneSession(record);
+          if (ok) recovered.add(record.sessionId);
+          else failed.add(record.sessionId);
+        } catch (e) {
+          // 不应到此（_recoverOneSession 内已 try/catch），防御性兜底。
+          this._logger.error('session_recover_unexpected_error', {
+            session_id: record.sessionId,
+            error: e,
+          });
+          failed.add(record.sessionId);
+        }
+      }
+    };
+    for (let i = 0; i < Math.min(limit, records.length); i++) {
+      workers.push(runOne());
+    }
+    await Promise.all(workers);
+
+    // 全部完成后 flush：清 currentRunId / 移除失败与 rejected 记录。
+    try {
+      await this._sessionManager.flush();
+    } catch (e) {
+      this._logger.warn('session_recover_flush_failed', { error: e });
+    }
+    this._logger.info('session_recover_done', {
+      total: records.length,
+      recovered: recovered.size,
+      failed: failed.size,
+    });
+  }
+
+  /**
+   * 恢复单条记录（§5 单条流程）。返回 true=恢复成功（reconnecting→active），
+   * false=该记录未恢复（终态/rejected/driver 抛错，已从持久化移除）。
+   *
+   * 失败隔离：本方法不抛错（所有异常内部 catch + 结构化日志），让调用方
+   * 的并发循环继续处理其他记录。
+   */
+  private async _recoverOneSession(record: PersistedSessionRecord): Promise<boolean> {
+    // daemon 注册的 runtime id（恢复对账需要）。取 record 对应 provider 的
+    // 已注册 runtime；未注册 → 不恢复为 active（backend 会 reject）。
+    const runtimeId = this._registeredRuntimes.get(record.provider) ?? '';
+    if (!runtimeId) {
+      this._logger.warn('session_recover_no_runtime', {
+        session_id: record.sessionId,
+        provider: record.provider,
+      });
+      // 仍向 backend 发 recover 让它收敛 currentRun（即使最后 rejected）。
+    }
+
+    let recoverStatus: SessionRecoverStatus;
+    try {
+      const resp = await this._recoveryClient!.recoverSession(record.sessionId, {
+        leaseId: record.leaseId,
+        runtimeId: runtimeId || (this._firstRegisteredRuntimeId() ?? ''),
+        provider: record.provider,
+        agentSessionId: record.agentSessionId,
+        interruptedRunId: record.currentRunId,
+      });
+      recoverStatus = resp.status;
+    } catch (e) {
+      // recover 调用失败（网络等）：当条 fail，删记录，不复活。
+      this._logger.error('session_recover_call_failed', {
+        session_id: record.sessionId,
+        error: e,
+      });
+      await this._markRecordRemoved(record);
+      return false;
+    }
+
+    // backend 终态/rejected → 不调 restoreAndReconnect；删本地记录。
+    if (recoverStatus !== 'reconnecting') {
+      this._logger.info('session_recover_skipped', {
+        session_id: record.sessionId,
+        backend_status: recoverStatus,
+      });
+      await this._markRecordRemoved(record);
+      return false;
+    }
+
+    // backend reconnecting → driver.start({resume}) 跨进程恢复（spike D3）。
+    try {
+      await this._sessionManager!.restoreAndReconnect(record);
+    } catch (e) {
+      // restoreAndReconnect 抛错（cwd 不一致 / executable 缺失 / SDK jsonl 缺失）：
+      // session 已被 SessionManager 从内存 store 移除 + onSessionEnd(failed)。
+      // 这里向 backend 写 reconnecting→failed + 删记录。继续其他记录。
+      this._logger.error('session_restore_failed', {
+        session_id: record.sessionId,
+        error: e,
+      });
+      await this._notifyRecoveryFailed(record);
+      await this._markRecordRemoved(record);
+      return false;
+    }
+
+    // P1-1（2026-06-18）：去掉 stillAlive 短路判断。
+    // 原逻辑用 `sessionManager.get(sessionId) !== undefined` 判断 driver 是否异步
+    // onError 失败，但 driver.start 同步返回且 consume 是 fire-and-forget 协程，
+    // 异步 onError 在本同步点尚未触发 → stillAlive 恒 true，短路判断无效。
+    // 恢复成功只以 markReconnected 成功为准；恢复后**异步**的 driver onError →
+    // SessionManager.fail → onSessionEnd(failed) 由 markRecoveredSessionFailed
+    // 桥接到 backend markRecoveryFailed（见该方法注释）。
+
+    // 恢复成功：reconnecting → active；向 backend confirm。
+    try {
+      await this._sessionManager!.markReconnected(record.sessionId);
+    } catch (e) {
+      this._logger.warn('session_mark_reconnected_failed', {
+        session_id: record.sessionId,
+        error: e,
+      });
+      await this._notifyRecoveryFailed(record);
+      await this._markRecordRemoved(record);
+      return false;
+    }
+    try {
+      await this._recoveryClient!.confirmReconnected(record.sessionId);
+    } catch (e) {
+      // confirm 失败：本地已 active，但 backend 仍 reconnecting。由 task-07
+      // 空闲扫描或人工 end 收口（§7 边界 5）。记 warn 不回滚本地 active。
+      this._logger.warn('session_confirm_reconnected_failed', {
+        session_id: record.sessionId,
+        error: e,
+      });
+    }
+    // P1-1：登记到恢复成功集合，让后续异步 fail 能桥接到 backend markRecoveryFailed。
+    this._recoveredSessionIds.add(record.sessionId);
+    // 恢复成功后 flush（清 currentRunId）。
+    try {
+      await this._sessionManager!.flush();
+    } catch {
+      /* flush 失败不影响 session 运行（恢复索引非运行依赖） */
+    }
+    this._logger.info('session_recovered', { session_id: record.sessionId });
+    return true;
+  }
+
+  /**
+   * P1-1（2026-06-18）：恢复成功后**异步** driver onError → SessionManager.fail
+   * → onSessionEnd(failed) 的桥接入口。
+   *
+   * SessionManager 的 onSessionEnd 回调由外部注入（cli.ts / 测试）。当回调收到
+   * status='failed' 且 sessionId 属于本 daemon 恢复成功的集合时，注入方应调用本
+   * 方法，daemon 据此向 backend 发 markRecoveryFailed（让 reconnecting/active
+   * session 收敛为 failed，不卡在 reconnecting）。
+   *
+   * 非 recovered session（正常创建后 fail）调用本方法是 no-op（集合不含）。
+   * 幂等：集合 delete 重复安全；markRecoveryFailed 失败只记 warn 不抛。
+   */
+  async markRecoveredSessionFailed(sessionId: string): Promise<void> {
+    if (!this._recoveredSessionIds.has(sessionId)) return;
+    this._recoveredSessionIds.delete(sessionId);
+    if (!this._recoveryClient) return;
+    try {
+      await this._recoveryClient.markRecoveryFailed(sessionId);
+    } catch (e) {
+      this._logger.warn('recovered_session_fail_notify_failed', {
+        session_id: sessionId,
+        error: e,
+      });
+    }
+  }
+
+  /** 向 backend 通知恢复失败（reconnecting → failed）。失败本身静默（不复活）。 */
+  private async _notifyRecoveryFailed(record: PersistedSessionRecord): Promise<void> {
+    if (!this._sessionManager || !this._recoveryClient) return;
+    try {
+      // SessionManager.fail 已被 restoreAndReconnect 抛错路径或 onError 路径调用
+      //（onSessionEnd(failed)），这里幂等再调一次（fail 内部幂等）+ 通知 backend。
+      await this._sessionManager.fail(record.sessionId);
+    } catch {
+      /* fail 幂等，session 可能已不在 store */
+    }
+    try {
+      await this._recoveryClient.markRecoveryFailed(record.sessionId);
+    } catch (e) {
+      this._logger.warn('session_mark_recovery_failed_call_failed', {
+        session_id: record.sessionId,
+        error: e,
+      });
+    }
+  }
+
+  /**
+   * 把单条记录从持久化集合移除（终态/rejected/driver 抛错路径）。
+   *
+   * 实现：直接调 persistence.save，写入 SessionManager.snapshotPersistable()
+   * 的结果（已恢复成功的 session 仍在；失败/终态的 session 因不在 _store
+   * 而被自动剔除）。不依赖 SessionManager.flush 的 microtask 去抖，保证启动
+   * 编排路径同步落盘正确的「移除后」状态。
+   */
+  private async _markRecordRemoved(record: PersistedSessionRecord): Promise<void> {
+    if (!this._persistence || !this._sessionManager) return;
+    try {
+      const remaining = this._sessionManager.snapshotPersistable();
+      await this._persistence.save(remaining);
+    } catch (e) {
+      this._logger.warn('session_mark_removed_flush_failed', {
+        session_id: record.sessionId,
+        error: e,
+      });
     }
   }
 
@@ -631,9 +1022,275 @@ export class Daemon {
         this._logger.debug('heartbeat_ack', { payload });
         break;
       }
+      // task-04：交互式会话控制消息（SESSION_INJECT/INTERRUPT/END）路由到 SessionManager。
+      case MSG.SESSION_INJECT:
+      case MSG.SESSION_INTERRUPT:
+      case MSG.SESSION_END: {
+        // 非阻塞分发（同 task_available 风格，不阻塞 WS 接收）。
+        void this._routeSessionControl(msgType, rawPayload).catch((e) => {
+          this._logger.error('session_control_failed', { type: msgType, error: e });
+        });
+        break;
+      }
+      // task-08（D-007@v1 / FR-07）：backend PERMISSION_RESPONSE → resolver.resolve
+      // settle canUseTool 回调。session 不存在 / resolver 不存在 / unknown_request
+      // 只 warn 丢弃（迟到 response，turn 已结束）；不断 WS、不崩。
+      case MSG.PERMISSION_RESPONSE: {
+        void this._routePermissionResponse(rawPayload).catch((e) => {
+          this._logger.error('permission_response_failed', { error: e });
+        });
+        break;
+      }
       default: {
         this._logger.warn('unknown_message_type', { type: msgType });
       }
+    }
+  }
+
+  /**
+   * task-04：路由 SESSION_INJECT/INTERRUPT/END 到 SessionManager。
+   *
+   * 字段名兼容 snake_case（backend WS 发 session_id/lease_id/run_id/prompt）。
+   * 校验：session 存在 + lease_id 与 store 中 state.leaseId 匹配，否则 warn 丢弃
+   *（边界 6）。未注入 sessionManager → warn 不崩（AC-14）。
+   */
+  private async _routeSessionControl(
+    msgType: string,
+    raw: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this._sessionManager) {
+      this._logger.warn('session_control_no_manager', { type: msgType });
+      return;
+    }
+    const sessionId =
+      (raw.session_id as string | undefined) ?? (raw.sessionId as string | undefined) ?? '';
+    const leaseId =
+      (raw.lease_id as string | undefined) ?? (raw.leaseId as string | undefined) ?? '';
+    if (!sessionId) {
+      this._logger.warn('session_control_no_session_id', { type: msgType });
+      return;
+    }
+
+    const state = this._sessionManager.get(sessionId);
+    if (!state) {
+      this._logger.warn('session_control_session_not_found', {
+        type: msgType,
+        session_id: sessionId,
+      });
+      return;
+    }
+    if (state.leaseId !== leaseId) {
+      // 边界 6：lease 不匹配（防误操作他人 session），warn 丢弃不操作。
+      this._logger.warn('session_control_lease_mismatch', {
+        type: msgType,
+        session_id: sessionId,
+        expected_lease_id: state.leaseId,
+        received_lease_id: leaseId,
+      });
+      return;
+    }
+
+    switch (msgType) {
+      case MSG.SESSION_INJECT: {
+        const runId =
+          (raw.run_id as string | undefined) ?? (raw.runId as string | undefined) ?? '';
+        const prompt = (raw.prompt as string | undefined) ?? '';
+        if (!runId || !prompt) {
+          this._logger.warn('session_inject_missing_fields', {
+            session_id: sessionId,
+            run_id: runId,
+            prompt_len: prompt.length,
+          });
+          return;
+        }
+        await this._sessionManager.inject(sessionId, prompt, runId);
+        break;
+      }
+      case MSG.SESSION_INTERRUPT: {
+        await this._sessionManager.interrupt(sessionId);
+        break;
+      }
+      case MSG.SESSION_END: {
+        await this._sessionManager.end(sessionId);
+        this._interactiveSessionsByLease.delete(state.leaseId);
+        break;
+      }
+      default: {
+        this._logger.warn('session_control_unknown_type', { type: msgType });
+      }
+    }
+  }
+
+  /**
+   * task-08（D-007@v1 / FR-07）：路由 backend PERMISSION_RESPONSE 到 SessionManager
+   * 当前 session 的 resolver.resolve，settle 对应 canUseTool 回调的 pending promise。
+   *
+   * 边界：
+   *   - payload 非法（缺 request_id/decision 非 allow|deny）→ warn 丢弃，不抛；
+   *   - session_id 不在 SessionStore → warn（迟到 response，turn 已结束），不抛；
+   *   - resolver 不存在（manual_approval=false 或 session 无 resolver）→ warn 不抛；
+   *   - resolver.resolve 返回 unknown_request / session_mismatch → warn（已记日志）。
+   *
+   * 字段名兼容 snake_case（backend WS 发 session_id/request_id/decision/message?）。
+   */
+  private async _routePermissionResponse(
+    raw: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this._sessionManager) {
+      this._logger.warn('permission_response_no_manager');
+      return;
+    }
+    const sessionId =
+      (raw.session_id as string | undefined) ?? (raw.sessionId as string | undefined) ?? '';
+    const requestId = (raw.request_id as string | undefined) ?? '';
+    const decisionRaw = raw.decision;
+    const message = raw.message as string | undefined;
+
+    // payload schema 非法（缺字段 / decision 非 allow|deny）→ warn 丢弃，不抛。
+    if (!sessionId || !requestId || (decisionRaw !== 'allow' && decisionRaw !== 'deny')) {
+      this._logger.warn('permission_response_invalid_payload', {
+        session_id: sessionId,
+        request_id: requestId,
+        decision: decisionRaw,
+      });
+      return;
+    }
+
+    // session 不在 SessionStore → warn（迟到 response）。
+    const state = this._sessionManager.get(sessionId);
+    if (!state) {
+      this._logger.warn('permission_response_unknown_session', {
+        session_id: sessionId,
+        request_id: requestId,
+      });
+      return;
+    }
+
+    const resolver = this._sessionManager.getPermissionResolver(sessionId);
+    if (!resolver) {
+      // manual_approval=false 或 session 无 resolver（已 end/fail）。
+      this._logger.debug('permission_response_no_resolver', {
+        session_id: sessionId,
+        request_id: requestId,
+      });
+      return;
+    }
+
+    const result = resolver.resolve(
+      {
+        session_id: sessionId,
+        request_id: requestId,
+        decision: decisionRaw,
+        ...(message !== undefined ? { message } : {}),
+      },
+      sessionId,
+    );
+    if (result !== 'resolved') {
+      this._logger.warn('permission_response_not_resolved', {
+        session_id: sessionId,
+        request_id: requestId,
+        result,
+      });
+    } else {
+      this._logger.debug('permission_response_resolved', {
+        session_id: sessionId,
+        request_id: requestId,
+        decision: decisionRaw,
+      });
+    }
+  }
+
+  /**
+   * task-04（D-002@v3）：启动交互式会话。
+   *
+   * 与 batch 路径互斥：不调 startLease/completeLease（backend claim/start 时已处理），
+   * 不调 TaskRunner.runLease。委托 SessionManager.create 建 session + 启动 driver 协程。
+   *
+   * 边界：
+   *   - 未注入 sessionManager（AC-14 过渡期）：记 error 不崩，backend end_session 收 failed。
+   *   - agent-detector 未检测 claude / _agentPaths 无 path（AC-07）：不调 create，
+   *     记 CLAUDE_EXECUTABLE_NOT_FOUND，由 backend onSessionEnd 收 failed。
+   *   - 重复 task_available 同 leaseId（AC-09）：_interactiveSessionsByLease 命中跳过。
+   *   - SessionManager.create 抛错（executable 解析失败等）：记 error，不崩 daemon。
+   */
+  private async _startInteractiveSession(
+    leaseId: string,
+    execPayload: LeasePayload,
+  ): Promise<void> {
+    // AC-09：重复 task_available（WS 重连/重放）→ 跳过，driver 只启动一次。
+    if (this._interactiveSessionsByLease.has(leaseId)) {
+      this._logger.info('interactive_session_already_started', { lease_id: leaseId });
+      return;
+    }
+
+    if (!this._sessionManager) {
+      // AC-14 过渡期：未注入 SessionManager。kind=interactive 无法执行，记 error；
+      // batch 路径完全不受影响。backend 据 lease 超时/WS 失活收 failed。
+      this._logger.error('interactive_no_session_manager', { lease_id: leaseId });
+      return;
+    }
+
+    const sessionId = execPayload.agentSessionId ?? '';
+    const firstRunId = execPayload.agentRunId ?? '';
+    const prompt = execPayload.prompt ?? '';
+    // rootPath 优先作 cwd（与 batch 一致，ql-20260617-009）；无则 workspace_dir 兜底。
+    const cwd = execPayload.rootPath ?? this._config.workspace_dir;
+    const provider = (execPayload.provider ?? 'claude') as 'claude' | 'codex';
+    const pathToClaudeCodeExecutable = this._agentPaths.get('claude') ?? '';
+
+    if (!sessionId || !firstRunId || !prompt) {
+      this._logger.error('interactive_missing_fields', {
+        lease_id: leaseId,
+        has_session_id: !!sessionId,
+        has_run_id: !!firstRunId,
+        has_prompt: !!prompt,
+      });
+      return;
+    }
+
+    if (!pathToClaudeCodeExecutable) {
+      // AC-07：agent-detector 未检测 claude → 拒绝启动（D-009 normalized_requirement 第 3 条）。
+      // 不调 create；backend 据 lease 超时 / onSessionEnd 收 failed。daemon 主循环不崩。
+      this._logger.error('interactive_claude_executable_not_found', {
+        lease_id: leaseId,
+        code: 'CLAUDE_EXECUTABLE_NOT_FOUND',
+      });
+      return;
+    }
+
+    // 先登记 lease→session（即使 create 抛错也登记，防 create 失败后 WS 重放反复重试；
+    // SessionManager.create 抛 SessionAlreadyExistsError 时 store 已无此 session，安全）。
+    this._interactiveSessionsByLease.set(leaseId, sessionId);
+
+    try {
+      await this._sessionManager.create({
+        sessionId,
+        leaseId,
+        firstPrompt: prompt,
+        firstRunId,
+        cwd,
+        provider,
+        pathToClaudeCodeExecutable,
+        model: execPayload.model,
+      });
+      this._logger.info('interactive_session_started', {
+        lease_id: leaseId,
+        session_id: sessionId,
+        run_id: firstRunId,
+      });
+    } catch (e) {
+      // create 抛错（ClaudeExecutableNotFoundError wrapper 解析失败等）：移除登记，
+      // 让 WS 重放可重试；记录错误不崩。SessionManager 已标 failed（onSessionEnd）。
+      this._interactiveSessionsByLease.delete(leaseId);
+      const code =
+        (e as Error & { code?: string })?.code ??
+        (e instanceof Error ? e.name : 'UNKNOWN');
+      this._logger.error('interactive_session_create_failed', {
+        lease_id: leaseId,
+        session_id: sessionId,
+        code,
+        error: e,
+      });
     }
   }
 
@@ -755,7 +1412,25 @@ export class Daemon {
         (rawExec.timeoutSeconds as number | undefined) ??
         (rawExec.timeout_seconds as number | undefined) ??
         payload.timeoutSeconds,
+      // task-04（D-002@v3）：lease.kind 分流 + interactive agent_session_id 透传。
+      // snake_case 兼容（backend claim 响应可能给 agent_session_id）。
+      kind:
+        (rawExec.kind as 'batch' | 'interactive' | undefined) ??
+        (payload.kind as 'batch' | 'interactive' | undefined),
+      agentSessionId:
+        (rawExec.agentSessionId as string | undefined) ??
+        (rawExec.agent_session_id as string | undefined) ??
+        payload.agentSessionId,
     };
+
+    // task-04（D-002@v3）：kind 分流。在 fetch/startLease 之前——interactive 不走
+    // TaskRunner / startLease / completeLease（backend 已 startLease），独立由
+    // SessionManager 接管。缺省/未知 kind 一律按 batch（design §9 兼容）。
+    const kind = execPayload.kind;
+    if (kind === 'interactive') {
+      await this._startInteractiveSession(leaseId, execPayload);
+      return;
+    }
 
     // 1.5 FETCH execution-context：claim 成功后、startLease 之前从 server 拉完整 bundle。
     // 当前 ctx 构造字段恒 undefined（claudeMd/repoUrl/branch/toolConfig...），

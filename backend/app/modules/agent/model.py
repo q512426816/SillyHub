@@ -32,6 +32,10 @@ class AgentRun(BaseModel, table=True):
         Index("ix_agent_runs_lease", "lease_id"),
         Index("ix_agent_runs_change_id", "change_id"),
         Index(
+            "ix_agent_runs_agent_session_id",
+            "agent_session_id",
+        ),
+        Index(
             "ix_agent_runs_idempotency_key",
             "idempotency_key",
             unique=True,
@@ -188,6 +192,17 @@ class AgentRun(BaseModel, table=True):
         default=None,
         sa_column=Column(String(128), nullable=True),
     )
+    agent_session_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_sessions.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    # Points at the interactive AgentSession this run belongs to (D-005@v1,
+    # session<->runs 1:N). Distinct from session_id above, which holds the
+    # claude resume id (D-001@v1) and is left untouched.
     conversation_events: dict | None = Field(
         default=None,
         sa_column=Column(JSON, nullable=True),
@@ -247,3 +262,89 @@ class AgentRunLog(BaseModel, table=True):
         default=None,
         sa_column=Column(Text, nullable=True),
     )
+
+
+class AgentSession(BaseModel, table=True):
+    """An interactive agent session (D-001@v1) backed by the SDK driver.
+
+    Spans multiple AgentRun turns (D-005@v1 session<->runs 1:N) and is bound
+    to a single long-lived DaemonTaskLease with kind="interactive" (D-002@v3).
+    The ``agent_session_id`` column stores the SDK-returned session id used for
+    resume; it is intentionally distinct from AgentRun.session_id (claude
+    resume id, untouched per D-001@v1).
+    """
+
+    __tablename__ = "agent_sessions"
+    __table_args__ = (
+        Index("ix_agent_sessions_user_id", "user_id"),
+        Index("ix_agent_sessions_runtime_id", "runtime_id"),
+        Index("ix_agent_sessions_status", "status"),
+        Index("ix_agent_sessions_lease_id", "lease_id"),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    user_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    runtime_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("daemon_runtimes.id", ondelete="CASCADE"),
+            nullable=True,
+        ),
+    )
+    lease_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("daemon_task_leases.id", ondelete="CASCADE"),
+            nullable=True,
+        ),
+    )
+    provider: str = Field(
+        sa_column=Column(String(30), nullable=False),
+    )
+    status: str = Field(
+        default="pending",
+        sa_column=Column(String(20), nullable=False, default="pending"),
+    )  # pending, active, reconnecting, ended, failed
+    agent_session_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(255), nullable=True),
+    )  # SDK session_id (spike D3); NOT AgentRun.session_id (D-001@v1)
+    config: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )  # { manual_approval, model, ... }
+    turn_count: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, default=0),
+    )
+    cwd: str | None = Field(
+        default=None,
+        sa_column=Column(String, nullable=True),
+    )  # SessionManager working dir for resume (R-cwd, spike D3)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )
+    last_active_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )  # D-004 idle 30min sweep (sweep logic in task-07)
+    ended_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )  # written by service.end_session (task-05)

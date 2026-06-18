@@ -61,10 +61,128 @@ export const MSG = {
    * 与 backend `DAEMON_MSG_RPC_RESULT = "daemon:rpc_result"`（task-04）逐字对齐。
    */
   RPC_RESULT: 'daemon:rpc_result',
+
+  // ── 交互式会话控制（task-03，D-002@v3 SDK driver 层） ───────────────────────
+  // 覆盖 FR-02（多轮追问）/ FR-04（打断本轮）/ FR-05（结束会话）/ FR-07（权限远程人审）。
+  // v3 SDK 语义（非 v2 per-turn spawn + resume）：
+  //   - INJECT: inputQueue.push + SDK query(AsyncIterable) 消费下一 turn（spike H2）
+  //   - INTERRUPT: ClaudeSdkDriver.interrupt(query) → turn 级中断，result(subtype=error_during_execution)（spike D1）
+  //   - END: 清理 SessionStore + backend service.end_session 统一入口
+  //   - PERMISSION_*: canUseTool 回调 → WS 往返（spike D2，D-007）
+  // 与 backend protocol.py DAEMON_MSG_* 逐字对齐（任一字符漂移即双侧契约单测失败）。
+
+  /**
+   * Server → Daemon：注入新 prompt 触发新 turn（FR-02）。
+   *
+   * v3 SDK 语义：backend 已创建新 AgentRun（status=running），
+   * daemon 收到后 SessionManager.inject → inputQueue.push(prompt)，
+   * SDK query(AsyncIterable) 消费下一条跑下一 turn（同进程同 session，
+   * 第二轮含首轮上下文，spike H2）。payload: SessionInjectPayload。
+   */
+  SESSION_INJECT: 'daemon:session_inject',
+
+  /**
+   * Server → Daemon：打断当前 turn（FR-04）。
+   *
+   * v3 SDK 语义：daemon 收到后 ClaudeSdkDriver.interrupt(query)，
+   * SDK 当前 turn 产 result(subtype=error_during_execution)，当前
+   * AgentRun=failed，session 仍 active（spike D1）。仅 turn 级，非 session 级。
+   * payload: SessionControlPayload。
+   */
+  SESSION_INTERRUPT: 'daemon:session_interrupt',
+
+  /**
+   * Server → Daemon：结束会话（FR-05）。
+   *
+   * v3 SDK 语义：如有当前 turn 则先 interrupt，随后清理 SessionStore +
+   * backend service.end_session 统一入口更新 agent_sessions.status=ended +
+   * daemon_task_leases.status=completed。payload: SessionControlPayload。
+   */
+  SESSION_END: 'daemon:session_end',
+
+  /**
+   * Daemon → Server：权限审批请求（FR-07 / D-007）。
+   *
+   * v3 SDK 语义：ClaudeSdkDriver.canUseTool 回调被 SDK 触发时，
+   * daemon 不本地自动批准，发本消息 → backend → 前端弹审批卡。
+   * payload: PermissionRequestPayload。
+   */
+  PERMISSION_REQUEST: 'daemon:permission_request',
+
+  /**
+   * Server → Daemon：权限审批响应（FR-07 / D-007）。
+   *
+   * 用户 allow/deny 后 backend 经本消息回传 daemon，daemon resolve
+   * canUseTool 回调；5min 未响应 backend 自动发 deny。
+   * payload: PermissionResponsePayload。
+   */
+  PERMISSION_RESPONSE: 'daemon:permission_response',
 } as const;
 
 /** WebSocket 消息类型联合（字面量），用于 DaemonMessage.type。 */
 export type MsgType = (typeof MSG)[keyof typeof MSG];
+
+// ── 交互式会话 / 权限控制 payload（task-03，与 backend protocol.py 逐字对齐） ──
+// 字段名 snake_case 双侧一致；方向：
+//   - SessionInjectPayload / SessionControlPayload / PermissionResponsePayload：Server → Daemon
+//   - PermissionRequestPayload：Daemon → Server
+// UUID 字段在 TS 侧为 string（序列化 UUID），Python 侧为 uuid.UUID（自动解析）。
+
+/**
+ * SESSION_INJECT payload（Server → Daemon，FR-02）。
+ * 触发 backend 已创建的新 AgentRun 的执行：daemon inputQueue.push 跑下一 turn。
+ */
+export interface SessionInjectPayload {
+  /** 目标会话 ID（agent_sessions.id，UUID 字符串）。 */
+  session_id: string;
+  /** 该会话绑定的长生命周期 interactive lease ID（校验匹配，防误操作他人 session）。 */
+  lease_id: string;
+  /** 本次 turn 对应的 AgentRun ID（backend 在 inject 时已创建，status=running）。 */
+  run_id: string;
+  /** 用户追问文本（非空字符串，协议层只声明 string，非空校验由 backend service 层做）。 */
+  prompt: string;
+}
+
+/**
+ * SESSION_INTERRUPT / SESSION_END 公共 payload（Server → Daemon，FR-04 / FR-05）。
+ * interrupt 仅 turn 级；end 终止 session + lease。
+ */
+export interface SessionControlPayload {
+  session_id: string;
+  lease_id: string;
+}
+
+/**
+ * PERMISSION_REQUEST payload（Daemon → Server，FR-07 / D-007）。
+ * canUseTool 回调触发，backend 转发前端弹审批卡。
+ */
+export interface PermissionRequestPayload {
+  session_id: string;
+  /** 当前 turn 的 AgentRun ID（定位审批上下文）。 */
+  run_id: string;
+  /** 审批请求唯一标识（daemon 生成，response 原样回填做关联）。 */
+  request_id: string;
+  /** SDK 传来的工具名（如 Write/Bash）。 */
+  tool_name: string;
+  /** 工具调用输入（工具参数 JSON，原样转发）。 */
+  input: Record<string, unknown>;
+  /** 工具调用 ID（可选，SDK tool_use_id，便于追溯）。 */
+  tool_use_id?: string;
+}
+
+/**
+ * PERMISSION_RESPONSE payload（Server → Daemon，FR-07 / D-007）。
+ * 用户 allow/deny 或 5min 超时 deny（由 backend 发）。
+ */
+export interface PermissionResponsePayload {
+  session_id: string;
+  /** 关联 PERMISSION_REQUEST.request_id（原样回填）。 */
+  request_id: string;
+  /** 'allow' | 'deny'（deny 映射 SDK canUseTool deny behavior）。 */
+  decision: 'allow' | 'deny';
+  /** deny 时的原因（可选，透传给模型）。 */
+  message?: string;
+}
 
 // ── Lease 任务状态 ────────────────────────────────────────────────────────────
 // 与 backend lease 状态机字符串值一一对应。

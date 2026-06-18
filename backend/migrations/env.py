@@ -23,6 +23,7 @@ from app.modules.agent import model as _agent_model  # noqa: F401
 # ``BaseModel.metadata`` before autogenerate runs. Add new modules here.
 from app.modules.auth import model as _auth_model  # noqa: F401
 from app.modules.change import model as _change_model  # noqa: F401
+from app.modules.daemon import model as _daemon_model  # noqa: F401
 from app.modules.git_gateway import model as _gg_model  # noqa: F401
 from app.modules.git_identity import model as _gi_model  # noqa: F401
 from app.modules.incident import model as _incident_model  # noqa: F401

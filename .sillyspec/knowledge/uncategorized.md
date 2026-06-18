@@ -92,4 +92,17 @@
   - 单 menu 单 key 校验：选 only-once 的 key 做断言（如 `organization:read` 只在 organizations menu 出现）。
 - 前端 UI 取舍：是否让 picker 去重展示同一 permission.key？本变更选择不去重（每个 menu 完整显示其 permissions），原因：(1) 管理员能直观看到"该 menu 需要哪些权限"；(2) onChange 已经全局生效，勾选一次即同步所有位置；(3) 去重会让某些 menu 的"权限列表"看似稀疏，破坏 picker 的"权限-菜单映射"信息密度。后续如需去重，建议在 menu 头部加"已勾选 N 项，M 项与其他菜单共享"提示。
 
+## 2026-06-19 — alembic.ini 注释含 UTF-8 em-dash 导致 Windows gbk configparser 崩溃 [待确认]
+
+- 现象：Windows 中文 locale 下 `uv run alembic <cmd>` 报 `UnicodeDecodeError: 'gbk' codec can't decode byte 0x94`。根因：`backend/alembic.ini` 注释含 UTF-8 em-dash（`—` = e2 80 94），alembic `compat.read_config_parser` 用 locale 默认编码（Windows zh = gbk/cp936）读 ini 解码失败。
+- `PYTHONUTF8=1` / `python -X utf8 -m alembic` **均无效**（alembic compat 层不走 utf8 mode；直接 `configparser.read()` + `-X utf8` 能读，但 alembic CLI 入口路径不行）。
+- 修复：alembic.ini 注释 em-dash 改 ASCII（`—` → `--`），根除所有 Windows 本地 alembic 操作的编码崩溃。
+- 通用坑：Windows 本地跑 alembic 的项目，alembic.ini / 其他 .ini 注释避免 UTF-8 特殊标点（em-dash/智能引号），用 ASCII。
+
+## 2026-06-19 — 全 Docker 部署项目本地 PG 容器端口未映射 host，host 跑 alembic/pytest 连不上 [待确认]
+
+- 现象：本项目全 Docker 部署（backend + postgres 同 compose 网络），`docker ps` 显示 postgres 容器 `5432/tcp` 但**无 `0.0.0.0:5432->5432` host 映射**；worktree backend 无 `.env`。后果：host 上 `uv run alembic upgrade` / 并发 pytest 连 `localhost:5432` 失败（[WinError 1225] 拒绝连接）。
+- 影响：需 host 连 PG 的验证（alembic online 往返、PostgreSQL 并发证明 AC-04 等）本地受限，只能用 offline SQL + metadata 对比 / SQLite fixture 等效验证，online apply 待 CI/部署补。
+- 通用坑：全 Docker 部署项目，host 上跑需 DB 的命令（alembic / 并发测试）前，先确认 PG 容器端口映射到 host；否则用 `docker exec` 进容器跑，或 SQLite fixture 等效验证 + 标注"PG 并发证明待 CI 补"。
+
 

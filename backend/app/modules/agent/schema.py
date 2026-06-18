@@ -167,3 +167,30 @@ class AgentRunInputResponse(BaseModel):
 
     run_id: uuid.UUID
     accepted: bool
+
+
+# ── task-09 / FR-08b / D-008 / R-GLM：tool failure rate monitoring DTO ────────
+
+
+class ToolFailureStats(BaseModel):
+    """Aggregated tool failure statistics for a session (task-09 §4.4).
+
+    Counts persisted AgentRunLog entries that represent tool_result events.
+    The persisted schema is flat (channel + content_redacted); is_error is
+    inferred from content error markers (daemon does not persist a structured
+    is_error field — see service.aggregate_tool_failure).
+    """
+
+    tool_total: int = Field(
+        default=0,
+        description="Number of tool_result log entries in the session.",
+    )
+    tool_failed: int = Field(
+        default=0,
+        ge=0,
+        description="Subset of tool_total whose content indicates a tool failure.",
+    )
+    failure_rate: float = Field(
+        default=0.0,
+        description="tool_failed / tool_total (0.0 when tool_total == 0).",
+    )

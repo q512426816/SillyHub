@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -22,6 +23,26 @@ DAEMON_MSG_LEASE_START = "daemon:lease_start"
 DAEMON_MSG_LEASE_COMPLETE = "daemon:lease_complete"
 DAEMON_MSG_LEASE_MESSAGES = "daemon:lease_messages"
 DAEMON_MSG_RPC_RESULT = "daemon:rpc_result"  # RPC response (result OR error) keyed by rpc_id
+
+# ── Interactive session / permission control (task-03, D-002@v3 SDK driver) ──
+# Verbatim-aligned with sillyhub-daemon/src/protocol.ts MSG.SESSION_* / PERMISSION_*.
+# Any character drift (case/underscore/colon prefix) → contract test red (NFR-05).
+#
+# v3 SDK turn semantics (NOT v2 per-turn spawn + resume):
+#   - SESSION_INJECT:    inputQueue.push + SDK query(AsyncIterable) next turn (spike H2)
+#   - SESSION_INTERRUPT: ClaudeSdkDriver.interrupt(query) → turn-level abort,
+#                        result(subtype=error_during_execution) (spike D1)
+#   - SESSION_END:       cleanup SessionStore + backend service.end_session single entry
+#   - PERMISSION_*:      canUseTool callback → WS round-trip (spike D2, D-007)
+#
+# Direction:
+#   - SESSION_INJECT / INTERRUPT / END / PERMISSION_RESPONSE: Server → Daemon
+#   - PERMISSION_REQUEST: Daemon → Server
+DAEMON_MSG_SESSION_INJECT = "daemon:session_inject"  # Server → Daemon, FR-02
+DAEMON_MSG_SESSION_INTERRUPT = "daemon:session_interrupt"  # Server → Daemon, FR-04
+DAEMON_MSG_SESSION_END = "daemon:session_end"  # Server → Daemon, FR-05
+DAEMON_MSG_PERMISSION_REQUEST = "daemon:permission_request"  # Daemon → Server, FR-07 / D-007
+DAEMON_MSG_PERMISSION_RESPONSE = "daemon:permission_response"  # Server → Daemon, FR-07 / D-007
 
 
 # ── Message envelope ────────────────────────────────────────────────────────
@@ -96,3 +117,59 @@ class RpcResultPayload(BaseModel):
     rpc_id: str
     result: dict | None = None  # success: list_dir → {"entries":[{"name","type"}]}
     error: dict | None = None  # failure: {"code":"forbidden"|"not_found"|..., "message": str}
+
+
+# ── Interactive session / permission control payloads (task-03) ──────────────
+# Verbatim-aligned with sillyhub-daemon/src/protocol.ts payload interfaces.
+# Field names snake_case on both sides; UUID fields are uuid.UUID here (auto-parsed
+# from string) and string in TS (serialized UUID).
+
+
+class SessionInjectPayload(BaseModel):
+    """SESSION_INJECT payload (Server → Daemon, FR-02).
+
+    Daemon pushes prompt into inputQueue for SDK query(AsyncIterable) to
+    consume the next turn (D-002@v3 SDK in-process multi-turn, spike H2).
+    """
+
+    session_id: uuid.UUID
+    lease_id: uuid.UUID
+    run_id: uuid.UUID
+    prompt: str  # non-empty enforced by task-05 service layer
+
+
+class SessionControlPayload(BaseModel):
+    """SESSION_INTERRUPT / SESSION_END payload (Server → Daemon, FR-04 / FR-05).
+
+    INTERRUPT is turn-level only (session stays active); END terminates the
+    session + lease (clears SessionStore + service.end_session).
+    """
+
+    session_id: uuid.UUID
+    lease_id: uuid.UUID
+
+
+class PermissionRequestPayload(BaseModel):
+    """PERMISSION_REQUEST payload (Daemon → Server, FR-07 / D-007).
+
+    Triggered by SDK canUseTool callback; backend forwards to frontend approval card.
+    """
+
+    session_id: uuid.UUID
+    run_id: uuid.UUID
+    request_id: str  # daemon-generated; response echoes verbatim for correlation
+    tool_name: str
+    input: dict  # tool call args JSON, forwarded as-is
+    tool_use_id: str | None = None
+
+
+class PermissionResponsePayload(BaseModel):
+    """PERMISSION_RESPONSE payload (Server → Daemon, FR-07 / D-007).
+
+    decision='deny' with 5min timeout backend-side (D-007).
+    """
+
+    session_id: uuid.UUID
+    request_id: str
+    decision: Literal["allow", "deny"]
+    message: str | None = None

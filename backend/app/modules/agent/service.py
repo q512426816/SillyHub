@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -24,9 +26,9 @@ from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.modules.agent.context_builder import build_spec_bundle
 from app.modules.agent.coordinator import ExecutionCoordinatorService
-from app.modules.agent.model import AgentRun, AgentRunLog
+from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.agent.placement import NoOnlineDaemonError, RunPlacementService
-from app.modules.agent.schema import AgentRunResponse
+from app.modules.agent.schema import AgentRunResponse, ToolFailureStats
 from app.modules.task.model import Task
 from app.modules.workspace.model import AgentRunWorkspace, TaskWorkspace
 from app.modules.worktree.model import WorktreeLease
@@ -49,6 +51,169 @@ def _apply_run_metadata(run: AgentRun, meta: dict) -> None:
         value = meta.get(field_name)
         if value is not None:
             setattr(run, field_name, value)
+
+
+# ---------------------------------------------------------------------------
+# task-09 / FR-08b / D-008 / R-GLM: tool failure rate monitoring
+# ---------------------------------------------------------------------------
+#
+# Session-level aggregation of tool_result(is_error) for observability (R-GLM).
+# Pure functions + module-level config so they are unit-testable without a DB.
+#
+# **Data model note (task-09 §4.4 vs reality)**: the blueprint's example uses
+# AgentRunLog.entry_type == 'tool_result' / l.payload.is_error, but the actual
+# persisted schema is flat (channel + content_redacted). The daemon serializes
+# tool_result events as content_redacted "[TOOL_RESULT] <preview>" on channel
+# "stdout" (batch) or "tool_call"; is_error is embedded in the preview text
+# (e.g. "permission error", "Error:") rather than a structured field. We
+# therefore infer tool_result entries by the "[TOOL_RESULT]" prefix and failure
+# by a conservative error-marker heuristic on the content. This keeps the
+# monitor robust without requiring schema migrations or daemon changes (both
+# out of scope for task-09).
+#
+# Constraints (task-09 §4.4 监控约束):
+#   - non-blocking / no alert channel: only structlog WARNING, never changes
+#     session status / never switches provider;
+#   - provider-agnostic: glm + anthropic both counted (D-008 normalized);
+#   - sample floor: tool_total < MIN_TOOL_FAILURE_SAMPLE → no warn;
+#   - threshold configurable via env GLM_TOOL_FAILURE_RATE_THRESHOLD (default 0.5).
+
+
+def _failure_threshold() -> float:
+    """Read threshold from env GLM_TOOL_FAILURE_RATE_THRESHOLD (default 0.5).
+
+    Returns 0.5 on parse error / out-of-range values (defensive, never raises).
+    """
+    raw = os.getenv("GLM_TOOL_FAILURE_RATE_THRESHOLD", "0.5")
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return 0.5
+    # Clamp to (0, 1]; nonsensical values fall back to default.
+    if 0.0 < val <= 1.0:
+        return val
+    return 0.5
+
+
+# spike D2 实测 GLM Write 3/3 失败；样本下限 4 避免小样本抖动误告警。
+MIN_TOOL_FAILURE_SAMPLE = 4
+
+# Content error-marker heuristic (case-insensitive substring). Conservative:
+# matches daemon's tool_result preview text for real failures (permission error,
+# command errors). Does NOT match "ok"/"written"/"success" content.
+_TOOL_FAILURE_MARKERS = (
+    "permission error",
+    "permission denied",
+    "permissionerror",
+    "error:",
+    "failed:",
+    "exception:",
+    "traceback",
+    "errno",
+    "command not found",
+    "no such file",
+    "is_error",
+)
+
+
+def _is_tool_result_log(entry: AgentRunLog) -> bool:
+    """True if the log entry represents a tool_result event.
+
+    tool_result entries are serialized as "[TOOL_RESULT] <preview>" on channel
+    "stdout" (batch) or "tool_call". The "[TOOL_RESULT]" prefix is the stable
+    marker across both daemon paths.
+    """
+    content = entry.content_redacted or ""
+    return "[TOOL_RESULT]" in content
+
+
+def _is_tool_failure_content(entry: AgentRunLog) -> bool:
+    """True if a tool_result log entry's content indicates a tool failure."""
+    content = (entry.content_redacted or "").lower()
+    return any(marker in content for marker in _TOOL_FAILURE_MARKERS)
+
+
+def aggregate_tool_failure(logs: list[AgentRunLog]) -> ToolFailureStats:
+    """Aggregate tool_result failure stats from a session's logs (task-09 §4.4).
+
+    Args:
+        logs: AgentRunLog entries for the session (any channel).
+
+    Returns:
+        ToolFailureStats with tool_total / tool_failed / failure_rate.
+        tool_total counts only tool_result entries; non-tool logs (assistant
+        text, system, turn-level result) are ignored. failure_rate is 0.0 when
+        tool_total == 0 (zero-division safe).
+    """
+    tool_results = [log for log in logs if _is_tool_result_log(log)]
+    total = len(tool_results)
+    failed = sum(1 for log in tool_results if _is_tool_failure_content(log))
+    rate = (failed / total) if total else 0.0
+    return ToolFailureStats(
+        tool_total=total,
+        tool_failed=failed,
+        failure_rate=rate,
+    )
+
+
+def should_warn_tool_failure(stats: ToolFailureStats, *, threshold: float) -> bool:
+    """Predicate: emit a structured warn for this session's tool failure rate.
+
+    Fires only when tool_total >= MIN_TOOL_FAILURE_SAMPLE AND failure_rate >=
+    threshold. Provider-agnostic (D-008). Does not mutate session state.
+    """
+    if stats.tool_total < MIN_TOOL_FAILURE_SAMPLE:
+        return False
+    return stats.failure_rate >= threshold
+
+
+async def monitor_session_tool_failures(
+    *,
+    agent_session_id: uuid.UUID,
+    logs: list[AgentRunLog],
+    provider: str | None,
+) -> ToolFailureStats:
+    """Aggregate a session's tool failure rate and emit a structured warn if exceeded.
+
+    Non-blocking observability hook (R-GLM / D-008). Called by the session-log
+    aggregation path (e.g. stream_session_logs on terminal session events) with
+    the persisted AgentRunLog list. Emits at most one structlog WARNING per
+    call when the threshold is exceeded; never raises, never changes session
+    status, never switches provider.
+
+    Args:
+        agent_session_id: AgentSession.id (for log extra).
+        logs: persisted AgentRunLog entries for the session.
+        provider: AgentSession.provider (glm / anthropic / ...) — logged for
+            attribution; does NOT branch behavior (D-008 normalized_requirement).
+
+    Returns:
+        The computed ToolFailureStats (callers / tests can inspect without
+        re-running aggregation).
+    """
+    threshold = _failure_threshold()
+    stats = aggregate_tool_failure(logs)
+    if should_warn_tool_failure(stats, threshold=threshold):
+        # Stdlib logger (not structlog) so the warning propagates through the
+        # stdlib logging tree and is capturable by pytest's caplog / log
+        # aggregators attached to the root logger. Structured fields ride on
+        # LogRecord.extra (via logging.Logger.warning extra=...) for downstream
+        # consumers. This satisfies task-09 §4.4 "only logger.warning structured
+        # log, non-blocking, no alert channel".
+        logging.getLogger(__name__).warning(
+            "glm_tool_failure_rate_exceeded",
+            extra={
+                "event": "glm_tool_failure_rate_exceeded",
+                "session_id": str(agent_session_id),
+                "provider": provider,
+                "tool_total": stats.tool_total,
+                "tool_failed": stats.tool_failed,
+                "failure_rate": stats.failure_rate,
+                "threshold": threshold,
+                "min_sample": MIN_TOOL_FAILURE_SAMPLE,
+            },
+        )
+    return stats
 
 
 class AgentRunError(AppError):
@@ -610,6 +775,81 @@ class AgentService:
                         )
                         yield f"event: done\ndata: {done_data}\n\n"
                         break
+                    yield f"data: {data}\n\n"
+                else:
+                    yield ": keepalive\n\n"
+        except Exception:
+            yield 'event: error\ndata: {"error": "redis connection failed"}\n\n'
+        finally:
+            await pubsub.unsubscribe(channel)
+            await pubsub.close()
+
+    async def stream_session_logs(
+        self,
+        agent_session_id: uuid.UUID,
+        *,
+        session: AsyncSession | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """Yield SSE events aggregating all AgentRuns of an AgentSession.
+
+        Subscribes to the ``agent_session:{session_id}`` Redis Pub/Sub channel
+        so a single client connection survives across multiple turns (run_id
+        changes). Emits ``data`` events for each structured log message, a
+        ``done`` event when the session reaches a terminal status, and
+        ``: keepalive`` comments every ~30 seconds of silence (D-005@v1, FR-03,
+        R-08).
+
+        Unlike ``stream_run_logs`` (run-scoped), this generator aggregates the
+        session-level channel and surfaces ``run_id`` on each event so the
+        frontend can delineate turn boundaries. ``session_ended`` (published by
+        ``DaemonService._publish_session_event`` in task-05) closes the
+        connection; a single turn completing does NOT.
+        """
+        redis = get_redis()
+        pubsub = redis.pubsub()
+        channel = f"agent_session:{agent_session_id}"
+        try:
+            # Flush proxy buffers immediately with an initial comment.
+            yield ": connected\n\n"
+
+            await pubsub.subscribe(channel)
+
+            # Race-condition guard: if the session ended while the client was
+            # connecting, task-05's end_session may have already published
+            # ``session_ended`` (missed by pub/sub). Re-check DB status.
+            if session is not None:
+                ag = await session.get(AgentSession, agent_session_id)
+                if ag is not None and ag.status in ("ended", "failed"):
+                    done_data = json.dumps({"status": ag.status, "reason": "session_terminated"})
+                    yield f"event: done\ndata: {done_data}\n\n"
+                    return
+
+            while True:
+                try:
+                    message = await asyncio.wait_for(
+                        pubsub.get_message(timeout=25),
+                        timeout=30,
+                    )
+                except TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                if message and message["type"] == "message":
+                    data = message["data"]
+                    try:
+                        payload = json.loads(data)
+                    except (json.JSONDecodeError, TypeError):
+                        payload = {}
+                    if payload.get("event") == "session_ended":
+                        done_data = json.dumps(
+                            {
+                                "status": payload.get("status", "ended"),
+                                "reason": payload.get("reason"),
+                            }
+                        )
+                        yield f"event: done\ndata: {done_data}\n\n"
+                        break
+                    # Transparent passthrough: structured log / turn_completed
+                    # events already carry run_id (task-05 / task-06 publish).
                     yield f"data: {data}\n\n"
                 else:
                     yield ": keepalive\n\n"

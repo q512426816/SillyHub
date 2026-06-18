@@ -17,30 +17,30 @@ plan_level: full
 
 ## Wave 1（无依赖，并行）
 
-- [ ] task-01: R-exe 补验——显式 `pathToClaudeCodeExecutable`=系统 claude 跑通（覆盖：R-exe / D-009@v1）【新增，spike 前置】
-- [ ] task-02: 数据模型迁移——agent_sessions + lease.kind + agent_runs.agent_session_id + alembic（覆盖：FR-01, FR-09 / D-001@v1, D-002@v3, D-005@v1）【保留】
-- [ ] task-03: 协议契约——WS session/permission 消息 daemon↔backend + 契约单测（覆盖：FR-02, FR-04, FR-05, FR-07 / NFR-05）【保留，turn 调度改 SDK】
+- [x] task-01: R-exe 补验——显式 `pathToClaudeCodeExecutable`=系统 claude 跑通（覆盖：R-exe / D-009@v1）【新增，spike 前置】✅ sandbox 跑通(真 exe/PONG) + 3 integ 测试绿；reverse sync: SDK spawn 无 shell → .cmd EINVAL, task-04 driver 需解 wrapper 取真 .exe
+- [x] task-02: 数据模型迁移——agent_sessions + lease.kind + agent_runs.agent_session_id + alembic（覆盖：FR-01, FR-09 / D-001@v1, D-002@v3, D-005@v1）【保留】✅ 14 模型单测绿 + 300 回归零回归 + D-001 守门(session_id 未改)；alembic offline SQL+metadata 验证通过(本地无 host PG，online apply 待部署验证)
+- [x] task-03: 协议契约——WS session/permission 消息 daemon↔backend + 契约单测（覆盖：FR-02, FR-04, FR-05, FR-07 / NFR-05）【保留，turn 调度改 SDK】✅ 19 TS + 38 Py 契约测试绿 + typecheck 0 错 + AC1-10 全绿
 
 ## Wave 2（依赖 W1）
 
-- [ ] task-04: daemon ClaudeSdkDriver + SessionManager + input-queue + lease.kind 分流（dep task-01, task-03；覆盖：FR-01, FR-02, FR-04, FR-09 / D-002@v3, D-009@v1）【重做：SDK 同进程】
-- [ ] task-05: backend session REST/service/placement（dep task-02, task-03；覆盖：FR-01, FR-02, FR-04, FR-05 / D-005@v1）【保留】
+- [x] task-04: daemon ClaudeSdkDriver + SessionManager + input-queue + lease.kind 分流（dep task-01, task-03；覆盖：FR-01, FR-02, FR-04, FR-09 / D-002@v3, D-009@v1）【重做：SDK 同进程】✅ src/interactive/ 新模块(InputQueue/ClaudeSdkDriver/SessionManager) + daemon kind 分流; wrapper→exe 解析(task-01 reverse sync); SDK mock 测试 InputQueue9/Driver22/Manager22/kind13/ws8 全绿; typecheck 0错; batch 164/164 零回归; AC1-14 全绿; .npmrc pnpm.overrides 排平台二进制
+- [x] task-05: backend session REST/service/placement（dep task-02, task-03；覆盖：FR-01, FR-02, FR-04, FR-05 / D-005@v1）【保留】✅ placement 两段式(agent_run_id=NULL/kind=interactive/lease_expires_at=NULL) + service create/inject/interrupt/end_session 行锁并发防重 + ws_hub.send_session_control + _publish_session_event + 4 REST; 38 测试绿 ruff 通过 回归338零回归; AC1-19 全绿(AC-04/17 PG并发受限标注)
 
 ## Wave 3（依赖 W2，并行）
 
-- [ ] task-06: session 级 SSE 聚合（dep task-02, task-05；覆盖：FR-03 / D-005@v1, R-08）【保留】
-- [ ] task-07: SDK 生命周期联调 + interrupt + 并发防重 + 空闲 30min 回收（dep task-04；覆盖：FR-04, FR-06 / D-004@v1）【重做：spike D1/S1】
-- [ ] task-08: canUseTool 远程人审闭环（dep task-04, task-05；覆盖：FR-07 / D-007@v1）【重做：spike D2】
-- [ ] task-10: resume 持久化 + 崩溃恢复（dep task-04, task-05；覆盖：FR-08 / D-003@v1）【重做：spike D3】
+- [x] task-06: session 级 SSE 聚合（dep task-02, task-05；覆盖：FR-03 / D-005@v1, R-08）【保留】✅ submit_messages 双 publish(run级保留+session级仅interactive) + stream_session_logs(跨turn不断流,事件带run_id) + GET /sessions/{id}/stream; 12测试绿 ruff通过 回归350零回归; AC1-13全绿
+- [x] task-07: SDK 生命周期联调 + interrupt + 并发防重 + 空闲 30min 回收（dep task-04；覆盖：FR-04, FR-06 / D-004@v1）【重做：spike D1/S1】✅ interrupt turn级联调(_onResult interrupt分支) + 并发inject排队检测(pendingInjectCount+onTurnQueued非拒绝) + 空闲30min扫描定时器(start/stop+_scanIdle) + daemon生命周期钩子; 47case绿 typecheck0 回归918pass(6预先存在失败); AC1-15全绿
+- [x] task-08: canUseTool 远程人审闭环（dep task-04, task-05；覆盖：FR-07 / D-007@v1）【重做：spike D2】✅ 三端全落地: daemon PermissionResolver(register/resolve/abortAll/5min兜底/AbortSignal)+driver canUseTool回调+session-manager注入+daemon.ts路由; backend permission_service(request→SSE/response→ws_hub/5min超时/校验矩阵)+router WS/REST+ws_hub; frontend PermissionApprovalCard+page.tsx订阅+lib/daemon.ts; daemon33+backend23+frontend7测试绿 typecheck0 回归daemon951+backend373+frontend151零新增失败; AC08.1-18全绿; manual_approval默认false验证
+- [x] task-10: resume 持久化 + 崩溃恢复（dep task-04, task-05；覆盖：FR-08 / D-003@v1）【重做：spike D3】✅ daemon sessions.json元数据持久化(原子写/串行/损坏隔离/0o600/quarantine) + session-manager snapshot/restore/markReconnected/flush + daemon启动编排(load→recover→restoreAndReconnect→loops/4并发/单项隔离/backend rejected删记录) + query resume新Query(固定cwd) + backend recover_session_after_daemon_restart(currentRun收敛/reconnecting→active/token旋转) + confirm/mark两段式; 43daemon+12backend测试绿 typecheck0 ruff通过 回归daemon994+backend385零新增; AC10.1-15全绿; batch零影响(FR-09)
 
 ## Wave 4（依赖 W3）
 
-- [ ] task-09: 审批收敛 + GLM 错误透传（dep task-08；覆盖：FR-07, FR-08b / D-007@v1, D-008@v1）【重做】
-- [ ] task-11: 前端会话基础面板（dep task-06；覆盖：FR-10 / D-006@v1）【保留】
+- [x] task-09: 审批收敛 + GLM 错误透传（dep task-08；覆盖：FR-07, FR-08b / D-007@v1, D-008@v1）【重做】✅ deny收敛(不二次决策/message透传) + pending审批退出清理(所有路径reject无zombie) + GLM透传(不预禁工具/is_error正常遍历/D-008) + backend tool failure monitor(service.py+schema.py,失败率阈值0.5样本≥4结构化warn不阻断); daemon24+backend16测试绿 typecheck0 ruff通过 回归daemon1017(7预存)+backend385零新增; AC09.1-14全绿; reverse sync: 蓝图schemas.py实际为schema.py按真实落地
+- [x] task-11: 前端会话基础面板（dep task-06；覆盖：FR-10 / D-006@v1）【保留】✅ lib/daemon.ts session API(create/inject/interrupt/end/stream) + InteractiveSessionPanel(单一SSE贯穿多turn/run_id路由/interrupt收敛currentRun vs end结束/turn级串行禁用) + runtimes/page.tsx演进(quick-chat→Panel保留布局) + stream/route.ts SSE代理; 34测试绿 typecheck0 build成功 全量185零回归; AC11-01-12全绿
 
 ## Wave 5（依赖 W4）
 
-- [ ] task-12: 会话列表 + 历史回看 + permission 审批弹窗（dep task-11, task-08；覆盖：FR-07, FR-10 / D-005@v1）【保留】
+- [x] task-12: 会话列表 + 历史回看 + permission 审批弹窗（dep task-11, task-08；覆盖：FR-07, FR-10 / D-005@v1）【保留】✅ backend GET /sessions(列表+status筛选+分页) + GET /sessions/{id}/logs(历史,agent_session_id聚合D-005非session_id); frontend SessionsSidebar+live/历史切换+SessionHistoryView(跨turn run_id分组)+permission-approval-dialog(复用task-08通道不新增第二套); backend12+回归397+ruff frontend18+全量203+typecheck+build; AC12.1-12全绿; reverse sync:AgentRun无created_at用coalesce(min logs.timestamp,started_at)
 
 ## 任务总表
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 import enum
 import json
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import text
@@ -296,6 +297,173 @@ class RunPlacementService:
         await self._send_ws_wakeup(runtime_id, lease_id, agent_run_id)
 
         return lease_id
+
+    # ------------------------------------------------------------------
+    # Interactive session dispatch (D-005@v1 / FR-01, task-05)
+    # ------------------------------------------------------------------
+
+    @dataclass(frozen=True, slots=True)
+    class InteractiveDispatch:
+        """Result of ``prepare_interactive_dispatch``.
+
+        Holds the identifiers needed to wake the daemon and to send the
+        follow-up SESSION_INJECT control message. The lease is created with
+        ``agent_run_id=NULL`` (D-005@v1) — the first turn run_id is stored in
+        lease metadata only, so the interactive lease never participates in
+        batch expiry / handle_lease_expiry paths.
+        """
+
+        lease_id: uuid.UUID
+        runtime_id: uuid.UUID
+        run_id: uuid.UUID
+
+    async def prepare_interactive_dispatch(
+        self,
+        *,
+        agent_session_id: uuid.UUID,
+        agent_run_id: uuid.UUID,
+        user_id: uuid.UUID,
+        provider: str,
+        prompt: str,
+        model: str | None,
+        manual_approval: bool = False,
+    ) -> "RunPlacementService.InteractiveDispatch":
+        """Create the long-lived interactive lease for a new session.
+
+        D-005@v1 contract:
+        - ``agent_run_id`` column is NULL (the FK lives on AgentRun.agent_session_id,
+          not on the lease).
+        - ``kind='interactive'`` so lease_service / claim / expire paths can
+          branch (D-002@v3 driver vs batch TaskRunner).
+        - ``lease_expires_at`` is NULL → ``expire_leases`` never selects it
+          (interactive lease lifecycle is owned by ``DaemonService.end_session``).
+        - first turn parameters (run_id / prompt / model / provider /
+          manual_approval) are stored in lease ``metadata`` so the daemon
+          claim payload can drive an independent first turn.
+
+        Adds + flushes only; does NOT commit and does NOT send any WS message.
+        The caller (``DaemonService.create_session``) owns the single commit
+        that fixes the session↔lease↔run triple, then calls
+        ``notify_interactive_dispatch``.
+
+        Raises ``NoOnlineDaemonError`` when no online runtime is available for
+        the user (server-local routing; ``workspace_id`` not supported for
+        interactive sessions in this wave).
+        """
+        runtime = await self._get_online_runtime(user_id, provider=provider)
+        if runtime is None:
+            log.warning(
+                "interactive_dispatch_no_online_runtime",
+                agent_session_id=str(agent_session_id),
+                user_id=str(user_id),
+            )
+            raise NoOnlineDaemonError(user_id=user_id)
+
+        rid_raw = runtime["id"]
+        runtime_id: uuid.UUID = uuid.UUID(rid_raw) if isinstance(rid_raw, str) else rid_raw
+
+        lease_id = uuid.uuid4()
+        now = datetime.now(UTC)
+        metadata: dict = {
+            "session_id": str(agent_session_id),
+            "run_id": str(agent_run_id),
+            "prompt": prompt,
+            "provider": provider,
+        }
+        if model:
+            metadata["model"] = model
+        metadata["manual_approval"] = bool(manual_approval)
+
+        # Raw SQL mirrors dispatch_to_daemon so we can set kind/agent_run_id=NULL
+        # without touching the batch ORM insert path. NULL lease_expires_at is
+        # the D-005@v1 proof that expire_leases skips this lease.
+        await self._session.execute(
+            text(
+                """
+                INSERT INTO daemon_task_leases
+                    (id, agent_run_id, runtime_id, status, kind,
+                     lease_expires_at, metadata, created_at, updated_at)
+                VALUES
+                    (:id, NULL, :runtime_id, 'pending', 'interactive',
+                     NULL, :metadata, :now, :now)
+                """
+            ),
+            {
+                "id": lease_id.hex,
+                "runtime_id": runtime_id.hex,
+                "metadata": json.dumps(metadata),
+                "now": now,
+            },
+        )
+        # Flush so the row is visible inside the caller's transaction; the
+        # caller commits the full triple (session + run + lease) atomically.
+        await self._session.flush()
+
+        log.info(
+            "interactive_dispatch_lease_prepared",
+            lease_id=str(lease_id),
+            agent_session_id=str(agent_session_id),
+            agent_run_id=str(agent_run_id),
+            runtime_id=str(runtime_id),
+        )
+
+        return RunPlacementService.InteractiveDispatch(
+            lease_id=lease_id,
+            runtime_id=runtime_id,
+            run_id=agent_run_id,
+        )
+
+    async def notify_interactive_dispatch(
+        self,
+        dispatch: "RunPlacementService.InteractiveDispatch",
+    ) -> bool:
+        """Wake the target daemon after ``create_session`` committed the triple.
+
+        Returns True when a wake-up was delivered to a connected runtime,
+        False when the runtime is offline (caller must converge the session to
+        a failed terminal state and raise ``DaemonRuntimeOffline``).
+
+        Sends a plain ``task_available`` wakeup; the SESSION_INJECT control
+        message with the first-turn prompt is sent by the service layer via
+        ``ws_hub.send_session_control`` after this returns True.
+        """
+        from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+        hub = get_daemon_ws_hub()
+        if hub.is_connected(dispatch.runtime_id):
+            await hub.send_wakeup(
+                dispatch.runtime_id,
+                lease_id=dispatch.lease_id,
+            )
+            log.info(
+                "interactive_dispatch_wakeup_sent",
+                runtime_id=str(dispatch.runtime_id),
+                lease_id=str(dispatch.lease_id),
+                run_id=str(dispatch.run_id),
+            )
+            return True
+
+        # Fallback: broadcast to any connected runtime on the same host.
+        connected = hub.connected_runtime_ids
+        if connected:
+            for rid in connected:
+                await hub.send_wakeup(rid, lease_id=dispatch.lease_id)
+            log.info(
+                "interactive_dispatch_wakeup_broadcast",
+                target_runtime=str(dispatch.runtime_id),
+                sent_to=[str(r) for r in connected],
+                lease_id=str(dispatch.lease_id),
+                run_id=str(dispatch.run_id),
+            )
+            return True
+
+        log.info(
+            "interactive_dispatch_wakeup_no_connection",
+            runtime_id=str(dispatch.runtime_id),
+            lease_id=str(dispatch.lease_id),
+            run_id=str(dispatch.run_id),
+        )
+        return False
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -130,6 +130,19 @@ class DaemonTaskLease(BaseModel, table=True):
             nullable=True,
         ),
     )
+    kind: str = Field(
+        default="batch",
+        sa_column=Column(
+            String(20),
+            nullable=False,
+            server_default=text("batch"),
+        ),
+    )
+    # batch: existing batch path via TaskRunner (FR-09, zero change)
+    # interactive: long-lived SDK driver session (D-002@v3)
+    # String(20) covers all values incl. reconnecting (task-10 / design §8.1);
+    # no schema migration needed — status is a free-form string column.
+    # Values: pending, claimed, completed, expired, cancelled (lease lifecycle).
     status: str | None = Field(
         default="pending",
         sa_column=Column(String(20), nullable=True),

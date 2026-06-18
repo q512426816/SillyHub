@@ -336,3 +336,415 @@ export function isVersionBelow(version: string, minVersion: string): boolean {
   }
   return false; // equal
 }
+
+/* ---------- Session permission approval (task-08 / FR-07 / D-007@v1) ---------- */
+
+/**
+ * task-08：canUseTool 远程人审请求事件（SSE event=permission_request）。
+ * 对齐 backend permission_service.handle_permission_request publish 的 payload。
+ */
+export interface SessionPermissionRequest {
+  session_id: string;
+  run_id: string;
+  request_id: string;
+  tool_name: string;
+  input: Record<string, unknown>;
+  tool_use_id?: string;
+}
+
+/**
+ * task-08：审批已 resolve 事件（SSE event=permission_resolved）。
+ * reason: 'manual'（用户操作） | 'timeout'（5min 超时 deny）。
+ */
+export interface SessionPermissionResolved {
+  session_id: string;
+  request_id: string;
+  decision: "allow" | "deny";
+  reason?: string;
+}
+
+/**
+ * task-08：POST /api/daemon/sessions/{id}/permissions/{request_id}/response。
+ * 用户对一条 permission_request 给 allow/deny，backend 转发 daemon + 取消 5min 定时器。
+ *
+ * 成功返回 {accepted: true}；失败抛 ApiError（404 已超时/未知 / 504 daemon 离线 / 409 manual=false）。
+ */
+export async function respondSessionPermission(
+  sessionId: string,
+  requestId: string,
+  decision: "allow" | "deny",
+  message?: string,
+): Promise<{ accepted: boolean }> {
+  return apiFetch<{ accepted: boolean }>(
+    `/api/daemon/sessions/${sessionId}/permissions/${requestId}/response`,
+    {
+      method: "POST",
+      json: { decision, ...(message !== undefined ? { message } : {}) },
+    },
+  );
+}
+
+/**
+ * task-08：解析 SSE 事件数据为 SessionPermissionRequest / SessionPermissionResolved。
+ *
+ * backend 在 agent_session:{session_id} channel publish 的 payload 形如：
+ *   { event: "permission_request", session_id, run_id, request_id, tool_name, input, tool_use_id? }
+ *   { event: "permission_resolved", session_id, request_id, decision, reason? }
+ *   { event: "session_ended", ... }
+ *
+ * 非 permission_* 事件返回 null（让上层 SSE 订阅按其它事件类型自行处理）。
+ */
+export function parseSessionPermissionEvent(
+  data: unknown,
+): SessionPermissionRequest | SessionPermissionResolved | null {
+  if (!data || typeof data !== "object") return null;
+  const evt = data as Record<string, unknown>;
+  if (evt.event === "permission_request") {
+    return {
+      session_id: String(evt.session_id ?? ""),
+      run_id: String(evt.run_id ?? ""),
+      request_id: String(evt.request_id ?? ""),
+      tool_name: String(evt.tool_name ?? ""),
+      input:
+        evt.input && typeof evt.input === "object"
+          ? (evt.input as Record<string, unknown>)
+          : {},
+      ...(typeof evt.tool_use_id === "string"
+        ? { tool_use_id: evt.tool_use_id }
+        : {}),
+    };
+  }
+  if (evt.event === "permission_resolved") {
+    const decision = evt.decision === "allow" ? "allow" : "deny";
+    return {
+      session_id: String(evt.session_id ?? ""),
+      request_id: String(evt.request_id ?? ""),
+      decision,
+      ...(typeof evt.reason === "string" ? { reason: evt.reason } : {}),
+    };
+  }
+  return null;
+}
+
+/* ---------- Interactive session REST + SSE (task-11 / FR-10 / D-006@v1) ----------
+ *
+ * 接口签名对齐 design.md §7.4 + task-05 REST 契约，签名固化为搬砖契约。
+ * SSE envelope 对齐 task-06 session channel 聚合（事件含 run_id 区分 turn）。
+ */
+
+export type InteractiveProvider = "claude" | "codex";
+
+export interface SessionCreateRequest {
+  provider: InteractiveProvider;
+  prompt: string;
+  model?: string | null;
+  manual_approval?: boolean;
+}
+
+export interface SessionCreateResponse {
+  session_id: string;
+  run_id: string;
+  lease_id: string;
+  status: string;
+  stream_url: string;
+}
+
+export interface SessionInjectResponse {
+  session_id: string;
+  run_id: string;
+  status: string;
+}
+
+export interface SessionControlResponse {
+  session_id: string;
+  status: string;
+  current_run_id: string | null;
+}
+
+/**
+ * POST /api/daemon/sessions — 创建交互式会话（首 turn）。
+ * 对齐 task-05 create_session REST。
+ */
+export async function createSession(
+  input: SessionCreateRequest,
+): Promise<SessionCreateResponse> {
+  const body: Record<string, unknown> = {
+    provider: input.provider,
+    prompt: input.prompt,
+    model: input.model ?? null,
+  };
+  if (input.manual_approval !== undefined) {
+    body.manual_approval = input.manual_approval;
+  }
+  return apiFetch<SessionCreateResponse>("/api/daemon/sessions", {
+    method: "POST",
+    json: body,
+  });
+}
+
+/**
+ * POST /api/daemon/sessions/{id}/inject — 同一 session 下创建下一 turn（新 AgentRun）。
+ * 业务含义是"新一轮追问"，不是写入长驻进程 stdin。
+ */
+export async function injectSession(
+  sessionId: string,
+  prompt: string,
+): Promise<SessionInjectResponse> {
+  return apiFetch<SessionInjectResponse>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/inject`,
+    { method: "POST", json: { prompt } },
+  );
+}
+
+/**
+ * POST /api/daemon/sessions/{id}/interrupt — 只收敛 currentRun，session 保持 active。
+ * 返回 current_run_id（null 表示当前无可打断 run）。
+ */
+export async function interruptSession(
+  sessionId: string,
+): Promise<SessionControlResponse> {
+  return apiFetch<SessionControlResponse>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/interrupt`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * POST /api/daemon/sessions/{id}/end — 结束整个 session。
+ */
+export async function endSession(
+  sessionId: string,
+): Promise<SessionControlResponse> {
+  return apiFetch<SessionControlResponse>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/end`,
+    { method: "POST" },
+  );
+}
+
+/* ---------- session SSE (streamSession) ---------- */
+
+export type SessionEventKind =
+  | "turn_started"
+  | "log"
+  | "turn_completed"
+  | "session_status"
+  | "session_ended";
+
+export interface SessionStreamEnvelope {
+  event: SessionEventKind;
+  session_id: string;
+  run_id: string | null;
+  turn: number | null;
+  log_id: string | null;
+  timestamp: string | null;
+  channel: string | null;
+  content: string | null;
+  status: string | null;
+  exit_code: number | null;
+  reason: string | null;
+}
+
+export interface SessionStreamHandlers {
+  onTurnStarted(event: SessionStreamEnvelope): void;
+  onLog(event: SessionStreamEnvelope, cursor: string | null): void;
+  onTurnCompleted(event: SessionStreamEnvelope): void;
+  onSessionEnded(event: SessionStreamEnvelope): void;
+  onError(error: Error): void;
+}
+
+export interface SessionStreamConnection {
+  close(): void;
+  getLastEventId(): string | null;
+}
+
+/**
+ * 订阅 session 级 SSE（贯穿整个会话多 turn）。
+ *
+ * - URL 走 Next route handler proxy（/api/daemon/sessions/{id}/stream），token 走 query。
+ * - backend 对 turn_started/log/turn_completed/session_status/session_ended/permission_*
+ *   统一发**默认 data 帧**（无 `event:` 行），payload 内 `event` 字段标识类型。
+ *   故前端必须用 `es.onmessage` 接收并按 `parsed.event` dispatch —— 命名事件
+ *   （addEventListener）只会收到带 `event:` 行的 done/error，收不到上述 turn 事件，
+ *   会导致 InteractiveSessionPanel 的 onTurnStarted/onLog/onTurnCompleted 收不到事件。
+ * - 校验 session_id 匹配；turn_started/log/turn_completed 必须有 run_id。
+ * - turn_completed 不 close；session_ended close + 回调幂等。
+ * - onerror 不立即 close，允许浏览器携 Last-Event-ID 自动重连。
+ *
+ * P0-1（2026-06-18）：从 addEventListener(kind) 改为 onmessage 单通道 dispatch，
+ * 与 backend stream_session_logs 的 default data: 帧对齐。done/error 仍走命名事件
+ * （backend 发 `event: done`/`event: error`），permission_request/permission_resolved
+ * 兼容旧 task-08 onmessage 通道，已统一进 onmessage 解析。
+ */
+export function streamSession(
+  sessionId: string,
+  handlers: SessionStreamHandlers,
+  options?: { cursor?: string },
+): SessionStreamConnection {
+  const base = getApiBaseUrl();
+  const { accessToken } = useSession.getState();
+  const url = new URL(
+    `${base}/api/daemon/sessions/${encodeURIComponent(sessionId)}/stream`,
+  );
+  if (accessToken) url.searchParams.set("token", accessToken);
+  if (options?.cursor) url.searchParams.set("cursor", options.cursor);
+
+  const es = new EventSource(url.toString());
+  let lastEventId: string | null = null;
+  let sessionEndedFired = false;
+
+  const dispatch = (raw: { data: string; lastEventId?: string }): void => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw.data);
+    } catch {
+      // 不泄露原始 payload（可能含敏感内容）
+      handlers.onError(new Error("Failed to parse session SSE event"));
+      return;
+    }
+    if (!parsed || typeof parsed !== "object") {
+      handlers.onError(new Error("Invalid session SSE payload"));
+      return;
+    }
+    const env = parsed as Partial<SessionStreamEnvelope>;
+    const kind = env.event;
+    if (!kind) {
+      // 无 event 字段：非 session channel 事件（如 backend summary 帧），忽略。
+      return;
+    }
+    // 校验 session_id（permission_* 等同样携带 session_id，统一校验）
+    if (env.session_id !== undefined && env.session_id !== sessionId) {
+      handlers.onError(new Error(`Session id mismatch on ${kind} event`));
+      return;
+    }
+    // turn 类事件必须有 run_id
+    if (
+      (kind === "turn_started" || kind === "log" || kind === "turn_completed") &&
+      !env.run_id
+    ) {
+      handlers.onError(new Error(`Missing run_id on ${kind} event`));
+      return;
+    }
+    if (kind === "log" && raw.lastEventId) {
+      lastEventId = raw.lastEventId;
+    }
+    const envelope = env as SessionStreamEnvelope;
+    switch (kind) {
+      case "turn_started":
+        handlers.onTurnStarted(envelope);
+        break;
+      case "log":
+        handlers.onLog(envelope, raw.lastEventId ?? null);
+        break;
+      case "turn_completed":
+        handlers.onTurnCompleted(envelope);
+        break;
+      case "session_status":
+        // session_status 不进入专门 handler（无 status 变更时静默），可选扩展。
+        break;
+      case "session_ended":
+        if (!sessionEndedFired) {
+          sessionEndedFired = true;
+          handlers.onSessionEnded(envelope);
+          es.close();
+        }
+        break;
+      default:
+        // permission_request / permission_resolved / done / error 等其它事件：
+        // 这些事件不在本 handlers 契约内（permission 走 task-08 parseSessionPermissionEvent，
+        // done/error 不经 streamSession）。统一忽略，避免误触发 onTurnStarted 等。
+        break;
+    }
+  };
+
+  // backend turn/log/permission_* 走默认 data 帧（无 event: 行）→ 必须用 onmessage 接。
+  es.onmessage = (e: MessageEvent<string>) => {
+    dispatch({ data: e.data, lastEventId: e.lastEventId || undefined });
+  };
+
+  es.onerror = () => {
+    // 不立即 close：浏览器会携 Last-Event-ID 自动重连。
+    // 仅通知组件（可选显示 reconnecting），不收口 session。
+  };
+
+  return {
+    close: () => es.close(),
+    getLastEventId: () => lastEventId,
+  };
+}
+
+/* ---------- Session list + history (task-12 / FR-10 / D-005@v1) ----------
+ *
+ * 只读查询：GET /api/daemon/sessions（当前用户所有会话）+ GET /sessions/{id}/logs
+ * （跨 AgentRun 历史回看，聚合键为 agent_runs.agent_session_id，见后端 service）。
+ * permission 通道复用 task-08（respondSessionPermission / parseSessionPermissionEvent
+ * 已在上方），本文件不新增第二套。
+ */
+
+import { z } from "zod";
+
+export type AgentSessionStatus =
+  | "pending"
+  | "active"
+  | "reconnecting"
+  | "ended"
+  | "failed";
+
+export interface AgentSessionRead {
+  id: string;
+  runtime_id: string | null;
+  lease_id: string | null;
+  provider: string;
+  status: AgentSessionStatus;
+  agent_session_id: string | null;
+  config: { manual_approval?: boolean; model?: string | null } | null;
+  turn_count: number;
+  created_at: string;
+  last_active_at: string | null;
+  ended_at: string | null;
+}
+
+export interface AgentSessionListResponse {
+  items: AgentSessionRead[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/**
+ * GET /api/daemon/sessions — 列出当前用户的会话（active/历史）。
+ * 越权隔离在后端 SQL 层（user_id），前端只展示。
+ */
+export async function listAgentSessions(
+  options?: {
+    limit?: number;
+    offset?: number;
+    status?: AgentSessionStatus;
+  },
+): Promise<AgentSessionListResponse> {
+  const query: Record<string, string | number> = {};
+  if (options?.limit !== undefined) query.limit = options.limit;
+  if (options?.offset !== undefined) query.offset = options.offset;
+  if (options?.status) query.status = options.status;
+  return apiFetch<AgentSessionListResponse>("/api/daemon/sessions", { query });
+}
+
+/**
+ * GET /api/daemon/sessions/{id}/logs — 跨 AgentRun 的只读历史回看。
+ * 日志按 run 分组返回，run_id 完整保留以便前端区分 turn 边界（D-005@v1）。
+ */
+export async function getAgentSessionLogs(
+  sessionId: string,
+): Promise<AgentRunLogEntry[]> {
+  return apiFetch<AgentRunLogEntry[]>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/logs`,
+  );
+}
+
+// 内部 dev-time 校验（不暴露给业务层，避免与 backend DTO 双重维护）。
+export const AgentSessionListResponseSchema = z.object({
+  items: z.array(z.object({}).passthrough()),
+  total: z.number(),
+  limit: z.number(),
+  offset: z.number(),
+});
+

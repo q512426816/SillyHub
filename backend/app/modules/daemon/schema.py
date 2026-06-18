@@ -8,6 +8,35 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+# ── Interactive session list / read (task-12, FR-10 / D-005@v1) ──────────────
+# DTO for GET /api/daemon/sessions. Field nullability aligns with the actual
+# AgentSession ORM (runtime_id / lease_id are nullable in model.py), so we do
+# NOT coerce missing values into fake non-null strings.
+
+
+class AgentSessionRead(BaseModel):
+    id: uuid.UUID
+    runtime_id: uuid.UUID | None
+    lease_id: uuid.UUID | None
+    provider: str
+    status: str
+    agent_session_id: str | None
+    config: dict | None
+    turn_count: int
+    created_at: datetime
+    last_active_at: datetime | None
+    ended_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class AgentSessionListResponse(BaseModel):
+    items: list[AgentSessionRead]
+    total: int
+    limit: int
+    offset: int
+
+
 # ── Register ────────────────────────────────────────────────────────────────
 
 

@@ -249,6 +249,19 @@ export interface LeaseCtx {
    * resolveTimeout 优先读 timeoutSeconds，回退 timeout（兼容旧字段）。
    */
   timeoutSeconds?: number;
+  /**
+   * task-04（D-002@v3）：lease 执行模式分流。
+   *   - `batch`（缺省）：现有 TaskRunner 一次性 spawn 路径，零改动（FR-09）。
+   *   - `interactive`：SessionManager 同进程多轮（SDK query(AsyncIterable)），不走 TaskRunner。
+   * 未定义/未知值一律按 `batch` 兼容（design §9）。
+   */
+  kind?: 'batch' | 'interactive';
+  /**
+   * task-04：interactive lease 绑定的 agent_sessions.id（backend 创建并下发）。
+   * 仅 kind=interactive 时有意义；batch 路径忽略。daemon 用它做 SessionManager.create 的 sessionId。
+   * 兼容 snake_case `agent_session_id`（daemon 在 _runLeaseStateMachine 归一化）。
+   */
+  agentSessionId?: string;
   /** 凭据/工具配置，渲染成环境变量。 */
   toolConfig?: ToolConfig;
   /**

@@ -247,21 +247,69 @@ const opts: ClaudeSdkDriverOptions = {
 ### 实测证据（执行后回填）
 
 ```
-# h1-exe.result.json（执行 task-01 后填实测值）
-systemClaudePath: "C:\\nvm4w\\nodejs\\claude.CMD"        # 待填
-probedRunningPath: "C:\\nvm4w\\nodejs\\claude.CMD"       # 待填（应 == systemClaudePath，AC2）
-result.subtype: "success"                               # 待填（AC1）
-result.is_error: false                                  # 待填
-result.result: "PONG"                                   # 待填（AC1）
-result.model: "glm-5.2[...]"                            # 待填
-result.session_id: "<uuid>"                             # 待填（AC5 UUID 格式）
-elapsed_ms: ___                                         # 待填（AC5 对照）
+# h1-exe.result.json（阶段 B，显式 pathToClaudeCodeExecutable=真 exe）
+# ⚠ R-exe 关键修正：detector 给的是 claude.cmd（npm wrapper），SDK spawn 无 shell → EINVAL。
+#    h1-exe.mjs 实测两阶段：A 直传 .cmd → spawn EINVAL（exit 2）；B 解 wrapper 取真 exe → 跑通。
+sdkVersion: "0.3.181"
+detectedPath: "C:\\nvm4w\\nodejs\\claude.cmd"                                   # detector 风格（agent-detector.findOnPath）
+realExeFromWrapper: "C:\\nvm4w\\nodejs\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"  # wrapper 内引用的底层真 exe（224MB）
+pathToClaudeCodeExecutable: "C:\\nvm4w\\nodejs\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"  # 实际传 SDK 的
+phase: "B-real-exe"
+probedRunningPath: "C:\\nvm4w\\nodejs\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"（×5 个 claude.exe 进程，全是真 exe，无 .pnpm 内置）
+result.subtype: "success"                                                      # AC1
+result.is_error: false                                                         # AC1
+result.result: "PONG"                                                          # AC1
+result.model: "glm-5.2[1m]"
+result.session_id: "6c05cfce-...-53cd7e915a48"（UUID 格式，尾部脱敏）          # AC5
+result.usage.input_tokens: 7625 / output_tokens: 4
+elapsed_ms: 3800
+msg_types: ["system/init", "assistant", "result/success"]
+env.ANTHROPIC_BASE_URL: "https://open.bigmodel.cn/api/anthropic"
+env.ANTHROPIC_AUTH_TOKEN_set: true
 
-# 对照 h1.mjs（默认内置 exe，spike-02 §3.7 H1）
-h1.probedRunningPath: "...\\.pnpm\\@anthropic-ai+claude-agent-sdk-win32-x64@0.3.181\\...\\claude.exe"
-h1.result.subtype: "success"
-h1.result.result: "PONG"
-h1.elapsed_ms: ~9800
+# 阶段 A（直传 detector 的 .cmd，复现阻塞）
+phase: "A-direct-detector"
+pathToClaudeCodeExecutable: "C:\\nvm4w\\nodejs\\claude.cmd"
+spawnError.code: "EINVAL", syscall: "spawn", message: "spawn EINVAL"
+elapsed_ms: 4（进程根本没起，spawn 级失败，非鉴权）
+
+# 对照 h1.mjs（默认不传 pathToClaudeCodeExecutable，SDK 用内置 stub）
+h1.session_id: "397612a8-...-88345ac78128"（UUID）
+h1.model: "glm-5.2[1m]"                                                        # AC5 与 h1-exe 一致
+h1.result.subtype: "success", result.result: "PONG"                           # AC5 一致
+h1.elapsed_ms: 12468                                                           # h1-exe(3800) < h1(12468)，h1-exe 更快（无 thinking_tokens 流）
+h1.msg_types: system/init + 13×system/thinking_tokens + assistant×2 + result/success
+h1.probedRunningPath: 含 .pnpm/@anthropic-ai+claude-agent-sdk-win32-x64@0.3.181/.../claude.exe（SDK 内置 stub）+ 4×系统真 exe
+                     ← 重要修正：spike-02 H1「默认只用内置」结论不准；实测 SDK 内置 stub 启动后会拉起系统 claude-code 真 exe
+
+# daemon 集成测试（agent-detector.system-claude.integ.test.ts，3/3 绿）
+case1 detected path: "C:\\nvm4w\\nodejs\\claude.cmd"  status=available  /\.(cmd|exe|bat|ps1)$/i ✓
+case2 version: "2.1.181"  >= minVersion "2.0.0" ✓  versionWarning=null
+case3 mock findOnPath=null + 无 env → {status:unavailable, reason:not-found, path:''} ✓
 ```
 
-> 全部 AC 绿 → **R-exe（P0）关闭，task-04（ClaudeSdkDriver）解锁**。任一 AC 红 → 不解锁 task-04，回 design 评估 D-009（可能需带平台包或换路径策略，但预期通过——SDK 文档未限制 exe 扩展名，系统 claude.CMD 是 npm 标准 wrapper）。
+### R-exe 关键修正（对 task-04 driver 至关重要，务必在 task-04 落实）
+
+执行中发现的**D-009 路径策略硬约束**，task-04 ClaudeSdkDriver 必须遵守：
+
+1. **detector 给的 `claude.cmd` 不能直接传给 SDK 的 `pathToClaudeCodeExecutable`**。
+   实测 `spawn EINVAL`（4ms 失败）。根因：SDK `spawnLocalProcess`（sdk.mjs minified）用
+   `child_process.spawn(command, args, {stdio, env, windowsHide:true})`，**不带 `shell:true`**。
+   Windows `CreateProcess` 对 `.cmd`/`.bat`/`.ps1` 包装器返回 EINVAL——必须经 shell 才能执行。
+2. **正确路径是解 wrapper 取底层真 `.exe`**。npm cmd-shim 生成的 `claude.cmd`/`claude.ps1`
+   内容里引用了 `node_modules\@anthropic-ai\claude-code\bin\claude.exe`（224MB，2.1.181）。
+   driver 应：
+   - 拿到 detector 的 `path`（可能是 .cmd/.exe/.bat/.ps1）；
+   - 若是 .exe 直接用；
+   - 否则读 wrapper 内容，正则提取 `node_modules[\\/]@anthropic-ai[\\/]claude-code[\\/]bin[\\/]claude\.exe`，
+     join wrapper 所在 dir 得真 exe 绝对路径；
+   - 若都失败 → throw（D-009 refuse-to-start）。
+3. **D-009 normalized_requirement 第 2 条修正**："driver 必须显式传 pathToClaudeCodeExecutable
+   指向 agent-detector 检测的系统 claude"——准确说是"**指向 detector 路径解析出的真 exe**"，
+   不是"detector 原样路径"。
+4. **task-04 还需考虑**：agent-detector 是否要直接返回真 exe（而非 .cmd）？本任务不改 detector
+   （allowed_paths 禁止），但建议 task-04 在 driver 层做 wrapper→exe 解析（detector 保持现状，
+   wrapper 解析是 driver 职责，因为只有 driver 知道 SDK 对路径形式的要求）。
+
+> 全部 AC 绿 → **R-exe（P0）关闭，task-04（ClaudeSdkDriver）解锁**（带路径策略修正见上）。
+> 任一 AC 红 → 不解锁 task-04。当前：AC1~AC7 全绿（AC2 修正为"probed 全是真 exe，无 .pnpm 内置"）。

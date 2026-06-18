@@ -6,16 +6,12 @@ import {
   Activity,
   AlertTriangle,
   Ban,
-  Bot,
   Check,
   CheckCircle2,
   CircleDashed,
   Copy,
-  MessageSquareText,
-  Plus,
   Power,
   RefreshCw,
-  Send,
   Server,
   Terminal,
   Wifi,
@@ -24,27 +20,33 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { AgentModelInput } from "@/components/AgentModelInput";
-import { AgentLogViewer } from "@/components/agent-log-viewer";
+import { InteractiveSessionPanel } from "@/components/daemon/interactive-session-panel";
+import { PermissionApprovalCard } from "@/components/permission-approval-card";
+import {
+  PermissionApprovalDialog,
+  type PermissionQueueItem,
+} from "@/components/permission-approval-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ApiError } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { ApiError, getApiBaseUrl } from "@/lib/api";
+import { type AgentRunLogEntry } from "@/lib/agent";
 import {
   disableDaemonRuntime,
   enableDaemonRuntime,
-  getQuickChatLogs,
-  getQuickChatResult,
+  getAgentSessionLogs,
   isVersionBelow,
+  listAgentSessions,
   listDaemonRuntimes,
   MIN_VERSIONS,
+  parseSessionPermissionEvent,
   PROVIDER_META,
-  quickChat,
-  streamQuickChat,
+  respondSessionPermission,
+  type AgentSessionRead,
+  type AgentSessionStatus,
   type DaemonRuntimeRead,
-  type QuickChatStreamMessage,
+  type SessionPermissionRequest,
 } from "@/lib/daemon";
-import type { AgentRunLogEntry } from "@/lib/agent";
+import { cn } from "@/lib/utils";
 import { useSession } from "@/stores/session";
 
 type BadgeVariant = "default" | "success" | "outline" | "warning" | "destructive";
@@ -364,483 +366,38 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
   );
 }
 
-interface ChatMessage {
-  role: "user" | "agent";
-  content: string;
-}
-
-function QuickChatPanel({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
-  const uniqueProviders = useMemo(() => {
-    const onlineProviders = runtimes
-      .filter((runtime) => runtime.status === "online" && runtime.provider)
-      .map((runtime) => runtime.provider!);
-    return [...new Set(onlineProviders)];
+/**
+ * task-11：交互式会话面板包装（演进自 quick-chat）。
+ *
+ * 保留 provider/model 选择 + runtime 卡片布局，会话核心替换为
+ * InteractiveSessionPanel（单一 SSE 贯穿多 turn / inject / interrupt / end）。
+ * 旧 QuickChatPanel / quickChat / streamQuickChat / getQuickChatResult / getQuickChatLogs
+ * 保留用于 brownfield 回归，不再被页面使用。
+ */
+function InteractiveSessionChatSection({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
+  const onlineProviders = useMemo(() => {
+    const list = runtimes
+      .filter((r) => r.status === "online" && r.provider)
+      .map((r) => r.provider!);
+    return [...new Set(list)];
   }, [runtimes]);
-
-  const [provider, setProvider] = useState(() => uniqueProviders[0] ?? "claude");
   const [model, setModel] = useState<string | null>(null);
-  const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [sending, setSending] = useState(false);
-  const [lastRunId, setLastRunId] = useState<string | null>(null);
-  // ql-20260618-001：quick-chat 也展示 agent 日志（与 workspace agent console 同源 AgentLogViewer）
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const [runLogs, setRunLogs] = useState<AgentRunLogEntry[] | null>(null);
-  const [logsLoading, setLogsLoading] = useState(false);
-  const [showLogs, setShowLogs] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const logsPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const hasOnlineProvider = uniqueProviders.length > 0;
-  const providerOptions = hasOnlineProvider ? uniqueProviders : [provider];
-
-  // 组件卸载时关闭 SSE + 清理兜底 timer
-  useEffect(() => {
-    return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
-      if (fallbackTimerRef.current) {
-        clearTimeout(fallbackTimerRef.current);
-        fallbackTimerRef.current = null;
-      }
-      if (logsPollRef.current) {
-        clearInterval(logsPollRef.current);
-        logsPollRef.current = null;
-      }
-    };
-  }, []);
-
-  // ql-20260618-001：activeRunId 变化时拉一次日志，运行中则轮询；终态停轮询。
-  useEffect(() => {
-    if (logsPollRef.current) {
-      clearInterval(logsPollRef.current);
-      logsPollRef.current = null;
-    }
-    if (!activeRunId) {
-      setRunLogs(null);
-      return;
-    }
-
-    let cancelled = false;
-    const fetchLogs = async () => {
-      try {
-        const logs = await getQuickChatLogs(activeRunId);
-        if (!cancelled) {
-          setRunLogs(logs);
-          setLogsLoading(false);
-          // 终态：停止轮询
-          const last = logs[logs.length - 1];
-          const isTerminal = last?.channel === "stdout" &&
-            /^\[SYSTEM:done\]/.test(last.content_redacted ?? "");
-          if (isTerminal && logsPollRef.current) {
-            clearInterval(logsPollRef.current);
-            logsPollRef.current = null;
-          }
-        }
-      } catch {
-        if (!cancelled) setLogsLoading(false);
-      }
-    };
-
-    setLogsLoading(true);
-    void fetchLogs();
-    logsPollRef.current = setInterval(() => void fetchLogs(), 1500);
-
-    return () => {
-      cancelled = true;
-      if (logsPollRef.current) {
-        clearInterval(logsPollRef.current);
-        logsPollRef.current = null;
-      }
-    };
-  }, [activeRunId]);
-
-  useEffect(() => {
-    if (uniqueProviders.length > 0 && !uniqueProviders.includes(provider)) {
-      setProvider(uniqueProviders[0] ?? "claude");
-      setLastRunId(null);
-    }
-  }, [uniqueProviders, provider]);
-
-  useEffect(() => {
-    scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
-  }, [messages]);
-
-  /**
-   * 把 SSE 收到的 QuickChatStreamMessage 渲染成追加到聊天框的纯文本片段。
-   * 内含多条 agent event，按 event_type 分类格式化：
-   *   - text         → 直接 append content
-   *   - tool_use     → \n🔧 <tool_name>: <input>
-   *   - tool_result  → \n📥 <tool_name>: <output>（截断长输出）
-   *   - error        → \n⚠️ <content>
-   *   - 其他         → 忽略（complete 等无文本事件）
-   */
-  const renderStreamMessage = (msg: QuickChatStreamMessage): string => {
-    const parts: string[] = [];
-    for (const ev of msg.messages ?? []) {
-      const content = (ev.content ?? "").trim();
-      switch (ev.event_type) {
-        case "text": {
-          if (!content) break;
-          // ql-20260618-005：跳过 SYSTEM/RESULT 系统消息，避免 chat 面板出现
-          // [SYSTEM:thread_started] / [RESULT:success] 等技术日志。
-          if (/^\[(SYSTEM|RESULT)[^\]]*\]/.test(content)) break;
-          // 剥掉 [ASSISTANT] / [THINKING] 前缀（非流式 message 兜底；
-          // 流式 delta 已在 daemon 端不加前缀）。
-          const stripped = content.replace(
-            /^\[(ASSISTANT|THINKING|LOG:\w+)\]\s?/,
-            "",
-          );
-          if (stripped) parts.push(stripped);
-          break;
-        }
-        case "tool_use":
-          parts.push(`\n🔧 ${ev.tool_name ?? "tool"}: ${content}`);
-          break;
-        case "tool_result": {
-          const truncated = content.length > 200 ? `${content.slice(0, 200)}…` : content;
-          parts.push(`\n📥 ${ev.tool_name ?? "tool"}: ${truncated}`);
-          break;
-        }
-        case "error":
-          if (content) parts.push(`\n⚠️ ${content}`);
-          break;
-        default:
-          // complete / status 等无文本事件忽略
-          break;
-      }
-    }
-    return parts.join("");
-  };
-
-  /**
-   * 启动 SSE 订阅，逐条把 agent 输出 append 到最后一条 agent 消息。
-   * 兜底机制：
-   *   - onDone 触发：写入 lastRunId（若 completed），关闭 SSE
-   *   - 60 秒内没收到任何 message/done → 视为连接异常，回退到 GET 拿最终结果
-   *   - onError 触发：也回退到 GET 拿最终结果（避免连不上时面板卡死）
-   */
-  const streamRun = (runId: string): Promise<void> => {
-    return new Promise((resolve) => {
-      let receivedAny = false;
-      let settled = false;
-
-      const cleanup = () => {
-        if (eventSourceRef.current) {
-          eventSourceRef.current.close();
-          eventSourceRef.current = null;
-        }
-        if (fallbackTimerRef.current) {
-          clearTimeout(fallbackTimerRef.current);
-          fallbackTimerRef.current = null;
-        }
-      };
-
-      const fallbackToGet = async () => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        // 轮询 GET 最终结果（最多 60 次 × 2s = 2 分钟）
-        for (let i = 0; i < 60; i++) {
-          await new Promise((r) => setTimeout(r, 2000));
-          try {
-            const res = await getQuickChatResult(runId);
-            if (res.status === "completed" || res.status === "failed") {
-              const output = res.output_redacted?.trim();
-              const finalText =
-                output || (res.status === "failed" ? "执行失败" : "(无输出)");
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = { role: "agent", content: finalText };
-                return updated;
-              });
-              if (res.status === "completed") setLastRunId(runId);
-              resolve();
-              return;
-            }
-          } catch {
-            // continue polling
-          }
-        }
-        setMessages((prev) => {
-          const updated = [...prev];
-          updated[updated.length - 1] = {
-            role: "agent",
-            content:
-              (updated[updated.length - 1]?.content ?? "") + "\n\n(等待超时)",
-          };
-          return updated;
-        });
-        resolve();
-      };
-
-      // 60s 内没有任何消息/done → 触发回退
-      fallbackTimerRef.current = setTimeout(() => {
-        if (!receivedAny) fallbackToGet();
-      }, 60_000);
-
-      const es = streamQuickChat(
-        runId,
-        (msg) => {
-          receivedAny = true;
-          const text = renderStreamMessage(msg);
-          if (!text) return;
-          setMessages((prev) => {
-            const updated = [...prev];
-            const last = updated[updated.length - 1];
-            const prevContent = last?.role === "agent" ? last.content : "";
-            updated[updated.length - 1] = {
-              role: "agent",
-              content: prevContent + (prevContent && !prevContent.endsWith("\n") ? "" : "") + text,
-            };
-            return updated;
-          });
-        },
-        async (data) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          if (data.status === "completed") {
-            setLastRunId(runId);
-          } else if (data.status === "failed") {
-            // 如果 agent 一字未吐就 failed，补一句提示
-            setMessages((prev) => {
-              const updated = [...prev];
-              const last = updated[updated.length - 1];
-              if (last?.role === "agent" && (!last.content || last.content === "...")) {
-                updated[updated.length - 1] = { role: "agent", content: "执行失败" };
-              }
-              return updated;
-            });
-          }
-          resolve();
-        },
-        () => {
-          // onError：SSE 连不上 / 401 / 网络中断。给个回退机会拿最终结果。
-          if (!settled && !receivedAny) {
-            fallbackToGet();
-          }
-        },
-      );
-      eventSourceRef.current = es;
-    });
-  };
-
-  const handleSend = async () => {
-    const prompt = input.trim();
-    if (!prompt || sending || !hasOnlineProvider) return;
-
-    setMessages((prev) => [...prev, { role: "user", content: prompt }]);
-    setInput("");
-    setSending(true);
-
-    try {
-      const resp = await quickChat(prompt, provider, lastRunId ?? undefined, model);
-      // ql-20260618-001：每次发送都激活新的 run，触发日志拉取
-      setActiveRunId(resp.id);
-      setShowLogs(true);
-      setRunLogs(null);
-      if (resp.status === "completed" || resp.status === "failed") {
-        // daemon 同步完成（极少见，prompt 极短或 daemon 拒绝）：直接读 DB
-        const result = await getQuickChatResult(resp.id);
-        const output =
-          result.output_redacted?.trim() || (resp.status === "failed" ? "执行失败" : "(无输出)");
-        setMessages((prev) => [...prev, { role: "agent", content: output }]);
-        if (result.status === "completed") setLastRunId(resp.id);
-      } else if (resp.status === "pending") {
-        // 占位 agent 消息，streamRun 期间逐步填充
-        setMessages((prev) => [...prev, { role: "agent", content: "..." }]);
-        await streamRun(resp.id);
-      }
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "agent",
-          content: `错误：${err instanceof ApiError ? err.message : "发送失败"}`,
-        },
-      ]);
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const tone = getProviderTone(provider);
+  const hasOnlineProvider = onlineProviders.length > 0;
+  const defaultProvider = onlineProviders[0] ?? "claude";
+  // providers 列表：有在线时用在线列表，无在线时给占位让组件能渲染
+  const providers = hasOnlineProvider ? onlineProviders : [defaultProvider];
 
   return (
-    <section className="flex min-h-[520px] flex-col overflow-hidden rounded-md border bg-card">
-      <header className="border-b px-4 py-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-md", tone?.panel ?? "bg-muted text-muted-foreground")}>
-              <MessageSquareText className="h-4 w-4" />
-            </span>
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold">快速对话</h2>
-              <p className="text-[11px] text-muted-foreground">
-                {lastRunId ? `会话 ${shortId(lastRunId)}` : "新的本地会话"}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {lastRunId && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setLastRunId(null);
-                  setActiveRunId(null);
-                  setMessages([]);
-                  setShowLogs(false);
-                }}
-                className="h-7 gap-1 px-2 text-[11px]"
-                title="清空当前会话，开启新对话"
-              >
-                <Plus className="h-3 w-3" />
-                新建会话
-              </Button>
-            )}
-            <Button
-              variant={showLogs ? "default" : "outline"}
-              size="sm"
-              onClick={() => setShowLogs((v) => !v)}
-              disabled={!activeRunId}
-              className="h-7 gap-1 px-2 text-[11px]"
-              title={showLogs ? "隐藏 Agent 控制台日志" : "显示 Agent 控制台日志"}
-            >
-              <Terminal className="h-3 w-3" />
-              {showLogs ? "隐藏日志" : "查看日志"}
-            </Button>
-            <Badge variant="outline">{hasOnlineProvider ? `${uniqueProviders.length} 个提供方` : "未连接"}</Badge>
-          </div>
-        </div>
-
-        <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
-          <div className="space-y-1">
-            <label className="text-[11px] font-medium text-muted-foreground">Agent provider</label>
-            <select
-              value={provider}
-              onChange={(event) => {
-                setProvider(event.target.value);
-                setLastRunId(null);
-              }}
-              disabled={!hasOnlineProvider}
-              className="h-8 w-full min-w-0 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:bg-muted"
-            >
-              {providerOptions.map((item) => (
-                <option key={item} value={item}>
-                  {getProviderLabel(item)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-[11px] font-medium text-muted-foreground">Agent model</label>
-            <AgentModelInput
-              value={model}
-              onChange={(next) => {
-                setModel(next);
-                setLastRunId(null);
-              }}
-              placeholder="model override"
-              className="w-full"
-            />
-          </div>
-          <ProviderBadge provider={provider} />
-        </div>
-      </header>
-
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto bg-muted/20 px-4 py-4">
-        {!hasOnlineProvider ? (
-          <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
-            <Bot className="h-8 w-8 text-muted-foreground/70" />
-            <p className="mt-3 text-xs font-medium text-foreground">
-              没有在线 Daemon
-            </p>
-            <p className="mt-1 max-w-[280px] text-[11px] text-muted-foreground">
-              这里可以先配置本次快速对话的 model；启动 daemon 后即可发送。
-            </p>
-          </div>
-        ) : messages.length === 0 ? (
-          <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
-            <Bot className="h-8 w-8 text-muted-foreground/70" />
-            <p className="mt-3 text-xs font-medium text-foreground">
-              {getProviderLabel(provider)} 已就绪
-            </p>
-            <p className="mt-1 max-w-[260px] text-[11px] text-muted-foreground">
-              提示词会发送到当前在线提供方，并延续最近一次完成的会话。
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {messages.map((message, index) => (
-              <div
-                key={`${message.role}-${index}`}
-                className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}
-              >
-                <div
-                  className={cn(
-                    "max-w-[86%] rounded-md px-3 py-2 text-xs leading-relaxed shadow-sm",
-                    message.role === "user"
-                      ? "bg-primary text-primary-foreground"
-                      : "border bg-card text-foreground",
-                  )}
-                >
-                  <div className="whitespace-pre-wrap break-words">{message.content}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {showLogs && activeRunId && (
-        <div className="border-t bg-card">
-          <AgentLogViewer
-            title="快速对话 Agent 控制台"
-            runId={activeRunId}
-            logs={runLogs}
-            loading={logsLoading}
-            emptyText="等待 Agent 日志输出..."
-            isLive={sending}
-            maxHeightClass="max-h-[360px]"
-            compact
-          />
-        </div>
-      )}
-
-      <footer className="border-t bg-card px-3 py-3">
-        <div className="flex items-end gap-2">
-          <textarea
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                void handleSend();
-              }
-            }}
-            placeholder="输入提示词..."
-            className="min-h-10 flex-1 resize-none rounded border border-input bg-background px-3 py-2 text-sm leading-5 focus:border-ring focus:outline-none"
-            rows={2}
-            disabled={sending || !hasOnlineProvider}
-          />
-          <Button
-            onClick={handleSend}
-            disabled={sending || !input.trim() || !hasOnlineProvider}
-            className="h-10 w-10 shrink-0 p-0"
-            title={sending ? "发送中" : "发送"}
-          >
-            {sending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-          </Button>
-        </div>
-      </footer>
-    </section>
+    <InteractiveSessionPanel
+      providers={providers}
+      defaultProvider={defaultProvider}
+      model={model}
+      onModelChange={setModel}
+      hasOnlineProvider={hasOnlineProvider}
+    />
   );
 }
+
 
 function SummaryCard({
   label,
@@ -1036,6 +593,499 @@ function EmptyState() {
   );
 }
 
+/**
+ * task-08（FR-07 / D-007@v1）：会话级审批面板。
+ *
+ * 订阅指定 AgentSession 的 SSE（/api/daemon/sessions/{id}/stream），
+ * 把 agent_session:{id} channel 的 permission_request 事件渲染成
+ * PermissionApprovalCard；permission_resolved 事件移除对应卡片；
+ * session_ended 事件清空所有卡片。
+ *
+ * 最小 UI：用户粘贴 sessionId 订阅（task-11/12 之前；完整会话面板由后续
+ * 任务负责）。组件本身可被单测驱动（permission request 推入 / resolved 移除）。
+ */
+function PermissionApprovalsPanel() {
+  const [sessionIdInput, setSessionIdInput] = useState("");
+  const [subscribedId, setSubscribedId] = useState<string | null>(null);
+  const [cards, setCards] = useState<SessionPermissionRequest[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [dialogError, setDialogError] = useState<string | null>(null);
+  const [deferredKeys, setDeferredKeys] = useState<Set<string>>(new Set());
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const accessToken = useSession((s) => s.accessToken);
+
+  const closeStream = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+  }, []);
+
+  // 订阅 sessionId 变化时重建 SSE。
+  useEffect(() => {
+    closeStream();
+    setCards([]);
+    if (!subscribedId) return;
+
+    const base = getApiBaseUrl();
+    const url = new URL(`${base}/api/daemon/sessions/${subscribedId}/stream`);
+    if (accessToken) url.searchParams.set("token", accessToken);
+    const es = new EventSource(url.toString());
+    eventSourceRef.current = es;
+
+    es.onmessage = (e: MessageEvent<string>) => {
+      try {
+        const data = JSON.parse(e.data) as unknown;
+        const parsed = parseSessionPermissionEvent(data);
+        if (parsed && (parsed as SessionPermissionRequest).tool_name) {
+          // permission_request
+          const req = parsed as SessionPermissionRequest;
+          setCards((prev) =>
+            prev.some((c) => c.request_id === req.request_id)
+              ? prev
+              : [...prev, req],
+          );
+          return;
+        }
+        if (parsed && (parsed as { decision?: string }).decision) {
+          // permission_resolved
+          const resolved = parsed as { request_id: string };
+          setCards((prev) =>
+            prev.filter((c) => c.request_id !== resolved.request_id),
+          );
+          return;
+        }
+        // session_ended 或其它事件：清空卡片
+        const evt = data as Record<string, unknown> | null;
+        if (evt && evt.event === "session_ended") {
+          setCards([]);
+        }
+      } catch {
+        // 非 JSON / 不识别事件：忽略（其它 SSE 事件类型由 task-06 处理）
+      }
+    };
+
+    es.onerror = () => {
+      // 404/401/网络中断：浏览器自动重连；这里不主动 close。
+      // 用户可改 session 重新订阅。
+    };
+
+    return () => {
+      es.close();
+    };
+  }, [subscribedId, accessToken, closeStream]);
+
+  useEffect(() => {
+    return () => closeStream();
+  }, [closeStream]);
+
+  const handleSubscribe = () => {
+    const id = sessionIdInput.trim();
+    if (!id) return;
+    setSubscribedId(id);
+  };
+
+  // ── 模态审批（复用同一 cards 队列 + task-08 respondSessionPermission 端点） ──
+  // 队首 = cards 中第一个未被 defer 的项；defer 把它移到 deferredKeys，下次显示队次。
+  const headQueueItem: PermissionQueueItem | null = useMemo(() => {
+    const next = cards.find((c) => !deferredKeys.has(c.request_id));
+    if (!next) return null;
+    return {
+      sessionId: next.session_id,
+      runId: next.run_id,
+      requestId: next.request_id,
+      toolName: next.tool_name,
+      input: next.input,
+    };
+  }, [cards, deferredKeys]);
+
+  const removeFromQueue = useCallback((requestId: string) => {
+    setCards((prev) => prev.filter((c) => c.request_id !== requestId));
+    setDeferredKeys((prev) => {
+      if (!prev.has(requestId)) return prev;
+      const next = new Set(prev);
+      next.delete(requestId);
+      return next;
+    });
+  }, []);
+
+  const handleDialogRespond = useCallback(
+    async (decision: "allow" | "deny") => {
+      if (!headQueueItem || submitting) return;
+      setSubmitting(true);
+      setDialogError(null);
+      try {
+        await respondSessionPermission(
+          headQueueItem.sessionId,
+          headQueueItem.requestId,
+          decision,
+        );
+        removeFromQueue(headQueueItem.requestId);
+      } catch (err) {
+        // B-10：失败不 dequeue，保留当前项并显示可重试错误
+        setDialogError(err instanceof ApiError ? err.message : "提交失败，请重试");
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [headQueueItem, submitting, removeFromQueue],
+  );
+
+  const handleDialogDefer = useCallback(() => {
+    if (!headQueueItem) return;
+    setDeferredKeys((prev) => new Set(prev).add(headQueueItem.requestId));
+    setDialogError(null);
+  }, [headQueueItem]);
+
+  return (
+    <section className="rounded-md border bg-card">
+      <header className="flex items-center justify-between gap-2 border-b px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <ShieldAlertIcon className="h-4 w-4 text-amber-600" />
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold">工具审批（manual_approval）</h2>
+            <p className="text-[11px] text-muted-foreground">
+              {subscribedId
+                ? `订阅会话 ${shortId(subscribedId)}`
+                : "粘贴会话 ID 订阅实时审批流"}
+            </p>
+          </div>
+        </div>
+        <Badge variant="outline">{cards.length} 待审</Badge>
+      </header>
+
+      <div className="flex items-center gap-2 border-b bg-muted/20 px-3 py-2">
+        <input
+          value={sessionIdInput}
+          onChange={(e) => setSessionIdInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleSubscribe();
+          }}
+          placeholder="AgentSession ID (UUID)"
+          className="h-8 min-w-0 flex-1 rounded border border-input bg-background px-2 font-mono text-[11px] focus:border-ring focus:outline-none"
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 gap-1 px-2.5 text-[11px]"
+          onClick={handleSubscribe}
+          disabled={!sessionIdInput.trim()}
+        >
+          订阅
+        </Button>
+        {subscribedId && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 px-2.5 text-[11px]"
+            onClick={() => {
+              setSubscribedId(null);
+              setSessionIdInput("");
+            }}
+          >
+            取消
+          </Button>
+        )}
+      </div>
+
+      <div className="space-y-2 p-3">
+        {cards.length === 0 ? (
+          <p className="py-6 text-center text-[11px] text-muted-foreground">
+            {subscribedId ? "暂无待审批工具调用" : "未订阅任何会话"}
+          </p>
+        ) : (
+          cards.map((req) => (
+            <PermissionApprovalCard
+              key={req.request_id}
+              request={req}
+              onResolved={(requestId) => {
+                // 提交成功后立即移除（permission_resolved SSE 也会移除，双保险）
+                setCards((prev) =>
+                  prev.filter((c) => c.request_id !== requestId),
+                );
+              }}
+            />
+          ))
+        )}
+      </div>
+
+      {/*
+        task-12 模态审批弹窗：复用同一 cards 队列（同一 task-08 SSE 通道），
+        不新增第二套。队首项作为弹窗内容；defer 不调后端、只后置到队次。
+      */}
+      <PermissionApprovalDialog
+        request={headQueueItem}
+        submitting={submitting}
+        error={dialogError}
+        onRespond={(d) => void handleDialogRespond(d)}
+        onDefer={handleDialogDefer}
+      />
+    </section>
+  );
+}
+
+// 本地 lucide 图标别名（避免与已 import 的 AlertTriangle 等冲突）。
+function ShieldAlertIcon({ className }: { className?: string }) {
+  return <AlertTriangle className={className} />;
+}
+
+// ── 会话列表 + 历史回看（task-12 / FR-10 / D-005@v1） ───────────────────────
+
+const ACTIVE_SESSION_VIEW_STATUSES: ReadonlySet<AgentSessionStatus> = new Set([
+  "pending",
+  "active",
+  "reconnecting",
+]);
+
+function isActiveSession(s: AgentSessionRead): boolean {
+  return ACTIVE_SESSION_VIEW_STATUSES.has(s.status);
+}
+
+/**
+ * 受控会话列表 sidebar。active/pending/reconnecting → live（task-11 面板）；
+ * ended/failed → history 只读回看。selection 由父级持有，不创建第二套 SSE。
+ */
+function SessionsSidebar({
+  sessions,
+  loading,
+  error,
+  selectedSessionId,
+  onSelect,
+  onRetry,
+}: {
+  sessions: AgentSessionRead[];
+  loading: boolean;
+  error: string | null;
+  selectedSessionId: string | null;
+  onSelect: (session: AgentSessionRead) => void;
+  onRetry: () => void;
+}) {
+  return (
+    <section className="flex min-h-0 flex-col overflow-hidden rounded-md border bg-card">
+      <header className="border-b px-3 py-2">
+        <h2 className="text-sm font-semibold">会话列表</h2>
+        <p className="text-[11px] text-muted-foreground">
+          {loading ? "加载中…" : `${sessions.length} 个会话`}
+        </p>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {error ? (
+          <div className="space-y-2 px-3 py-3">
+            <p className="text-[11px] text-destructive">{error}</p>
+            <Button size="sm" variant="outline" onClick={onRetry} className="h-7 text-[11px]">
+              重试
+            </Button>
+          </div>
+        ) : sessions.length === 0 ? (
+          <p className="py-6 text-center text-[11px] text-muted-foreground">没有会话</p>
+        ) : (
+          <ul className="divide-y">
+            {sessions.map((s) => {
+              const active = isActiveSession(s);
+              return (
+                <li key={s.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelect(s)}
+                    className={cn(
+                      "flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-muted/40",
+                      selectedSessionId === s.id && "bg-muted/60",
+                    )}
+                  >
+                    <span className="flex w-full items-center justify-between gap-2">
+                      <span className="font-mono text-[11px]">{shortId(s.id)}</span>
+                      <Badge variant={active ? "success" : "outline"} className="text-[10px]">
+                        {s.status}
+                      </Badge>
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {PROVIDER_META[s.provider]?.label ?? s.provider} · {s.turn_count} turn
+                      {s.turn_count === 1 ? "" : "s"}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * 只读历史回看：跨 AgentRun 的日志按 run_id 分组渲染（D-005@v1）。
+ * 不渲染发送 / interrupt / end 控件（只读）。
+ */
+function SessionHistoryView({
+  session,
+  logs,
+  loading,
+  error,
+  onClose,
+}: {
+  session: AgentSessionRead | null;
+  logs: AgentRunLogEntry[];
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+}) {
+  // 跨 run 分组（保持后端返回顺序：run 顺序内 timestamp 升序）
+  const groups = useMemo(() => {
+    const map = new Map<string, AgentRunLogEntry[]>();
+    for (const log of logs) {
+      const list = map.get(log.run_id) ?? [];
+      list.push(log);
+      map.set(log.run_id, list);
+    }
+    return Array.from(map.entries());
+  }, [logs]);
+
+  return (
+    <section className="flex min-h-[520px] flex-col overflow-hidden rounded-md border bg-card">
+      <header className="flex items-center justify-between gap-2 border-b px-4 py-3">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold">
+            历史回看{session ? ` · ${shortId(session.id)}` : ""}
+          </h2>
+          <p className="text-[11px] text-muted-foreground">
+            只读视图（{groups.length} 个 turn）
+          </p>
+        </div>
+        <Button size="sm" variant="ghost" onClick={onClose} className="h-7 text-[11px]">
+          关闭
+        </Button>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto bg-muted/20 px-4 py-4">
+        {loading ? (
+          <p className="text-center text-[11px] text-muted-foreground">加载历史日志…</p>
+        ) : error ? (
+          <p className="text-center text-[11px] text-destructive">{error}</p>
+        ) : groups.length === 0 ? (
+          <p className="py-8 text-center text-[11px] text-muted-foreground">暂无历史日志</p>
+        ) : (
+          <div className="space-y-4">
+            {groups.map(([runId, entries]) => (
+              <div key={runId} className="space-y-1.5">
+                <div className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground">
+                  <span className="font-mono">run {shortId(runId)}</span>
+                </div>
+                {entries.map((log) => (
+                  <div
+                    key={log.id}
+                    className="max-w-[86%] whitespace-pre-wrap break-words rounded-md border bg-card px-3 py-2 text-xs leading-relaxed text-foreground shadow-sm"
+                  >
+                    {log.content_redacted ?? ""}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * 会话列表 + 历史回看容器：持有 selection / loading / logs 状态，
+ * 包裹 task-11 的 InteractiveSessionPanel（live，不重建其内部 SSE）。
+ */
+function SessionListSection({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
+  const [sessions, setSessions] = useState<AgentSessionRead[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [listError, setListError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<AgentSessionRead | null>(null);
+  const [logs, setLogs] = useState<AgentRunLogEntry[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState<string | null>(null);
+  const [liveViewOpen, setLiveViewOpen] = useState(false);
+
+  const reloadSessions = useCallback(async () => {
+    setLoading(true);
+    setListError(null);
+    try {
+      const resp = await listAgentSessions({ limit: 50 });
+      setSessions(resp.items);
+    } catch (err) {
+      setListError(err instanceof ApiError ? err.message : "加载会话失败");
+      setSessions([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reloadSessions();
+  }, [reloadSessions]);
+
+  const handleSelect = useCallback(async (session: AgentSessionRead) => {
+    setSelected(session);
+    if (isActiveSession(session)) {
+      // 进入 live：交给下方 task-11 面板（用户可在面板内新建/追问）。
+      setLiveViewOpen(true);
+      setLogs([]);
+      return;
+    }
+    // history：拉日志（D-005 跨 run 聚合在后端）
+    setLiveViewOpen(false);
+    setLogsLoading(true);
+    setLogsError(null);
+    try {
+      const fetched = await getAgentSessionLogs(session.id);
+      setLogs(fetched);
+    } catch (err) {
+      setLogsError(err instanceof ApiError ? err.message : "加载历史失败");
+      setLogs([]);
+    } finally {
+      setLogsLoading(false);
+    }
+  }, []);
+
+  return (
+    <section className="flex min-w-0 flex-col gap-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold">会话</h2>
+          <p className="text-[11px] text-muted-foreground">
+            选择历史会话回看，或进入 live 面板新建会话
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => void reloadSessions()}
+          disabled={loading}
+          className="h-7 text-[11px]"
+        >
+          刷新会话
+        </Button>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-[260px_minmax(0,1fr)]">
+        <SessionsSidebar
+          sessions={sessions}
+          loading={loading}
+          error={listError}
+          selectedSessionId={selected?.id ?? null}
+          onSelect={(s) => void handleSelect(s)}
+          onRetry={() => void reloadSessions()}
+        />
+        {selected && !isActiveSession(selected) ? (
+          <SessionHistoryView
+            session={selected}
+            logs={logs}
+            loading={logsLoading}
+            error={logsError}
+            onClose={() => setSelected(null)}
+          />
+        ) : (
+          <InteractiveSessionChatSection runtimes={runtimes} />
+        )}
+      </div>
+    </section>
+  );
+}
+
 export default function RuntimesPage() {
   const [items, setItems] = useState<DaemonRuntimeRead[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1213,8 +1263,10 @@ export default function RuntimesPage() {
               </section>
             )}
 
-            <QuickChatPanel runtimes={items} />
+            <SessionListSection runtimes={items} />
           </div>
+
+          <PermissionApprovalsPanel />
         </>
       )}
     </main>

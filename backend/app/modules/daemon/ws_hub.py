@@ -12,6 +12,7 @@ from fastapi import WebSocket
 from app.core.logging import get_logger
 from app.modules.daemon.protocol import (
     DAEMON_MSG_HEARTBEAT_ACK,
+    DAEMON_MSG_PERMISSION_RESPONSE,
     DAEMON_MSG_RPC,
     DAEMON_MSG_TASK_AVAILABLE,
 )
@@ -238,6 +239,45 @@ class DaemonWsHub:
                 "pending_operations": pending_operations or {},
             },
         }
+        return await self.send_to_runtime(runtime_id, message)
+
+    async def send_session_control(
+        self,
+        runtime_id: uuid.UUID,
+        msg_type: str,
+        payload: dict[str, Any],
+    ) -> bool:
+        """Send an interactive-session control message (task-03 / FR-02/04/05).
+
+        ``msg_type`` is one of ``DAEMON_MSG_SESSION_INJECT`` /
+        ``DAEMON_MSG_SESSION_INTERRUPT`` / ``DAEMON_MSG_SESSION_END`` and
+        ``payload`` carries the matching SessionInjectPayload /
+        SessionControlPayload dict. Internally wraps ``send_to_runtime`` so the
+        caller only needs to know whether the message was delivered.
+
+        Returns True on successful send, False when the runtime is offline or
+        the send timed out / failed (the slow-connection eviction policy is
+        inherited from ``send_to_runtime``). The service layer decides the
+        convergence policy per call site (create/inject → raise runtime_offline,
+        interrupt → raise runtime_offline, end → structured warning only).
+        """
+        message = {"type": msg_type, "payload": payload}
+        return await self.send_to_runtime(runtime_id, message)
+
+    async def send_permission_response(
+        self,
+        runtime_id: uuid.UUID,
+        payload: dict[str, Any],
+    ) -> bool:
+        """Send a PERMISSION_RESPONSE downlink to the daemon (task-08 / FR-07 / D-007@v1).
+
+        Thin wrapper around ``send_to_runtime`` so the caller (permission_service)
+        does not need to assemble the envelope. Returns True on successful send,
+        False when the runtime is offline or the send timed out — the service
+        layer surfaces this as ``DaemonRuntimeOffline`` (504) and relies on the
+        daemon-side fallback timer to fail-closed deny.
+        """
+        message = {"type": DAEMON_MSG_PERMISSION_RESPONSE, "payload": payload}
         return await self.send_to_runtime(runtime_id, message)
 
     # ── RPC correlation ──────────────────────────────────────────────────────
