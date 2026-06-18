@@ -8,6 +8,16 @@ created_at: 2026-06-11T09:05:00+08:00
 
 # sillyhub-daemon
 
+> ⚠️ **卡片整体过时（待 sillyspec scan 重生成）**：本卡片基于旧 Python scan（下文 daemon.py / agent_detector.py / task_runner.py 等描述）。**实际 sillyhub-daemon 是 TypeScript 项目**（`daemon.ts` / `agent-detector.ts` / `task-runner.ts`，pnpm / vitest / ESM）。变更 `2026-06-18-daemon-interactive-session`（D-002@v3）新增 `src/interactive/` SDK driver 层，与 TaskRunner 并存（lease.kind 分流）。下文"契约摘要/关键逻辑"以 Python 描述的部分已不适用。
+
+## 本变更影响（2026-06-18 daemon-interactive-session，D-002@v3 SDK driver 层）
+
+- **新增 `src/interactive/`**：ClaudeSdkDriver（封装 `@anthropic-ai/claude-agent-sdk` query/interrupt/canUseTool，显式 pathToClaudeCodeExecutable 经 wrapper→exe 解析取系统 claude 真 .exe，D-009）、SessionManager（session 生命周期 create/inject/interrupt/end/fail + 内存 SessionStore + 空闲 30min 扫描 D-004 + resume 持久化 D-003）、InputQueue（per-session AsyncIterable，turn 级串行 spike S1）、PermissionResolver（canUseTool 远程人审 pending registry + 5min 兜底 D-007）、session-store-persistence（sessions.json 原子写 + 崩溃恢复）。
+- **daemon.ts**：`_executeTask` 按 `lease.kind` 分流（batch→TaskRunner 零改动；interactive→SessionManager）；`_handleWsMessage` 路由 SESSION_INJECT/INTERRUPT/END/PERMISSION_RESPONSE 控制消息。
+- **protocol.ts**：新增 5 WS 控制消息（SESSION_INJECT/INTERRUPT/END/PERMISSION_REQUEST/PERMISSION_RESPONSE）+ 4 payload，与 backend protocol.py 逐字对齐。
+- **package.json + .npmrc**：加 `@anthropic-ai/claude-agent-sdk@0.3.181`；.npmrc pnpm.overrides 排 win32-x64 平台二进制（D-009 用系统 claude）。
+- **GLM 兼容（D-008）**：错误透传（不预禁工具，tool_result is_error 正常遍历）；backend tool failure monitor 监控失败率。
+
 ## 定位
 本地守护进程，运行在用户机器上，负责检测本地已安装的 Agent（Claude Code、Codex、Cursor 等），注册到 SillyHub 后端，接收任务并委派给对应的 Agent 后端执行。
 

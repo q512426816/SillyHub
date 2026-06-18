@@ -89,10 +89,10 @@ graph TD
 
 ## 全局验收标准
 
-- [ ] 所有单元测试通过（backend `uv run pytest`、daemon `pnpm test`、frontend `pnpm test`）
-- [ ] （brownfield）未配置交互式会话时行为不变：lease.kind 默认 batch，TaskRunner 零改动，现有批处理 lease + quick-chat resume 路径零变化
-- [ ] task-01 R-exe 通过（显式 pathToClaudeCodeExecutable=系统 claude 跑通）
-- [ ] design.md §12 验收标准 1-10 全部满足
+- [x] 所有单元测试通过（backend `uv run pytest`、daemon `pnpm test`、frontend `pnpm test`）✅ verify Step6: backend 398 / daemon 219 / frontend 205 passed（本变更引入全绿；预存失败非本变更）
+- [x] （brownfield）未配置交互式会话时行为不变：lease.kind 默认 batch，TaskRunner 零改动，现有批处理 lease + quick-chat resume 路径零变化 ✅ task-04 kind 默认 batch + 各 task batch 回归全绿（FR-09）
+- [x] task-01 R-exe 通过（显式 pathToClaudeCodeExecutable=系统 claude 跑通）✅ sandbox h1-exe PONG + wrapper→exe 解析（task-01 reverse sync）
+- [x] design.md §12 验收标准 1-10 全部满足 ✅ verify Step4 设计一致 + 9 决策闭环（D-001~D-009）
 
 ## 覆盖矩阵
 

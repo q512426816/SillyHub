@@ -1,7 +1,7 @@
 schema_version: 1
 project: multi-agent-platform
-source_commit: c97bad5
-generated_at: 2026-06-10 16:50:00
+source_commit: 8afff51
+generated_at: 2026-06-19 03:50:00
 generator: sillyspec-scan
 
 modules:
@@ -37,15 +37,15 @@ modules:
     status: active
     doc: modules/sillyhub-daemon.md
     paths: ["sillyhub-daemon/**"]
-    tags: [daemon, cli, python, httpx, websockets]
+    tags: [daemon, cli, typescript, pnpm, vitest, sdk, websockets]
     aliases: [daemon, 守护进程]
-    entrypoints: ["sillyhub-daemon"]
-    main_symbols: ["cli"]
+    entrypoints: ["sillyhub-daemon start"]
+    main_symbols: ["Daemon (daemon.ts)", "ClaudeSdkDriver", "SessionManager", "TaskRunner", "AgentDetector"]
     depends_on: [backend]
     used_by: []
-    needs_review: false
+    needs_review: true
     concerns: []
-    review_reasons: []
+    review_reasons: ["module-card sillyhub-daemon.md 整体基于旧 Python scan（daemon.py/agent_detector.py/task_runner.py），实际是 TypeScript（daemon.ts/agent-detector.ts/task-runner.ts + 本变更新增 src/interactive/* SDK driver 层），需 sillyspec scan 重生成"]
 
   deploy:
     status: active
