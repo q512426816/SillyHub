@@ -337,4 +337,10 @@ created_at: 2026-06-03T08:42:04
 根因：`router.py:_user_with_relations` 只查 `UserRole`（平台级 `user_roles` 表），但 `bootstrap_admin_and_seed_rbac` 给 admin 用户写的是 `UserWorkspaceRole`（工作区级 `user_workspace_roles` 表）。角色管理 `RoleService.list_users` 双表查所以看得到 admin，用户管理只查 platform 表所以看不到。两端视图数据不一致。
 文件：backend/app/modules/admin/router.py（`_user_with_relations` 合并 UserRole + UserWorkspaceRole 并按 role_id 去重；import 加 `UserWorkspaceRole`）、backend/tests/modules/admin/test_users_router.py（新增 2 个回归测试：detail + list 都验证 workspace-scoped 角色显示）
 结果：1) `_user_with_relations` 改为分别 select Role from `user_roles` 和 `user_workspace_roles`，merged dict 按 role_id 去重，避免同一角色在多 workspace 下重复展示；2) 加测试 `test_user_detail_includes_workspace_scoped_roles` 和 `test_user_list_includes_workspace_scoped_roles`，构造 Workspace + UserWorkspaceRole binding，断言 GET /admin/users/{id} 和 GET /admin/users 返回的 roles 含 custom_role；3) ruff format/check 全绿，本地无 sqlalchemy 跑不了 pytest，等容器重建后在容器内验证。前端 page.tsx 只渲染 r.name Tag 不需改。
-结果：1) SYSTEM_ROLES 七条 name/description 改中文（平台管理员/工作区所有者/组件负责人/开发者/审核人/测试工程师/访客）；2) `seed_platform_admin_role` fallback Role 改中文 name/description；3) 新增 migration `202607010900`（down_revision=202606300900），UPDATE roles SET name/description WHERE key=? AND is_system=TRUE，downgrade 还原英文；4) 修 ruff N806（downgrade 内局部变量改小写）。ruff 通过。DB 当前在 202606161200（之前 cycle 卡住没追上），重建后 alembic 会一路推到 202607010900 并把存量 roles UPDATE 成中文。
+
+## ql-20260617-007-4a31 | 2026-06-17 16:27:35 | 非平台管理员看不到「系统管理」菜单
+状态：已完成
+根因：`/api/auth/me` 返回的 `MeResponse` 没有 permissions 字段，前端 `lib/auth.ts:login` 把 `permissions` 写死为 `[]`。所以 `lib/permission.ts:hasAdminPermission` 永远走不到 `perms.some(...)` 分支，只有 `is_platform_admin=true` 才显示菜单。测试管理账号只有 7 个 admin 权限，不是 platform admin，故看不到。
+文件：backend/app/modules/auth/rbac.py（新增 `collect_permissions_everywhere` 合并 platform + all workspace 权限）、backend/app/modules/auth/schema.py（`MeResponse` 加 `permissions: list[str]` 字段）、backend/app/modules/auth/router.py（`/me` 调用 `collect_permissions_everywhere` 填充 sorted perms）、frontend/src/lib/auth.ts（`MeResponse` 加 permissions；抽出 `fetchMe()` 供复用；login 走 fetchMe 写入 perms）、frontend/src/app/(dashboard)/layout.tsx（mount 时主动 fetchMe 让旧 session 也能拿到 perms）
+结果：1) 后端 me 返回 permissions；2) 前端 login 调 fetchMe 同步 perms；3) dashboard mount 时也 fetchMe 一次，老 session（perms 为空）刷新页面后即可看到菜单；4) typecheck/lint 全绿。后端无 alembic 改动不需要 migration。
+

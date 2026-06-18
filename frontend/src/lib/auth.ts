@@ -21,6 +21,19 @@ export interface MeResponse {
     role_key: string;
     role_name: string;
   }>;
+  permissions?: string[];
+}
+
+export async function fetchMe(): Promise<MeResponse> {
+  const me = await apiFetch<MeResponse>("/api/auth/me");
+  useSession.getState().setUser({
+    id: me.user.id,
+    email: me.user.email,
+    displayName: me.user.display_name ?? me.user.email,
+    is_platform_admin: me.user.is_platform_admin ?? false,
+    permissions: me.permissions ?? [],
+  });
+  return me;
 }
 
 export async function login(email: string, password: string) {
@@ -34,14 +47,7 @@ export async function login(email: string, password: string) {
     refreshToken: pair.refresh_token,
   });
 
-  const me = await apiFetch<MeResponse>("/api/auth/me");
-  useSession.getState().setUser({
-    id: me.user.id,
-    email: me.user.email,
-    displayName: me.user.display_name ?? me.user.email,
-    is_platform_admin: me.user.is_platform_admin ?? false,
-    permissions: [],
-  });
+  await fetchMe();
 
   return pair;
 }

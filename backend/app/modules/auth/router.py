@@ -20,7 +20,7 @@ from app.modules.auth.api_key_schema import (
 )
 from app.modules.auth.api_key_service import ApiKeyService
 from app.modules.auth.model import User
-from app.modules.auth.rbac import list_user_workspace_roles
+from app.modules.auth.rbac import collect_permissions_everywhere, list_user_workspace_roles
 from app.modules.auth.schema import (
     LoginRequest,
     MeResponse,
@@ -94,12 +94,14 @@ async def me(
     user: Annotated[User, Depends(get_current_user)],
 ) -> MeResponse:
     rows = await list_user_workspace_roles(session, user_id=user.id)
+    perms = await collect_permissions_everywhere(session, user_id=user.id)
     return MeResponse(
         user=UserRead.model_validate(user),
         workspaces=[
             WorkspaceRoleAssignment(workspace_id=wid, role_key=key, role_name=name)
             for wid, key, name in rows
         ],
+        permissions=sorted(perms),
     )
 
 

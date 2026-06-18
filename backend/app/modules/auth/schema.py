@@ -48,3 +48,4 @@ class WorkspaceRoleAssignment(BaseModel):
 class MeResponse(BaseModel):
     user: UserRead
     workspaces: list[WorkspaceRoleAssignment]
+    permissions: list[str] = Field(default_factory=list)

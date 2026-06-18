@@ -72,6 +72,18 @@ async def collect_permissions_platform(session: AsyncSession, *, user_id: uuid.U
     return set(rows)
 
 
+async def collect_permissions_everywhere(session: AsyncSession, *, user_id: uuid.UUID) -> set[str]:
+    """Union of platform-level + every-workspace permissions for ``user_id``.
+
+    Used by ``GET /api/auth/me`` so the frontend can drive UI gating
+    (e.g. the admin-center menu) off the user's full grant set rather
+    than just ``is_platform_admin``.
+    """
+    platform = await collect_permissions_platform(session, user_id=user_id)
+    workspace = await collect_permissions_all(session, user_id=user_id)
+    return platform | workspace
+
+
 async def has_permission(
     session: AsyncSession,
     *,

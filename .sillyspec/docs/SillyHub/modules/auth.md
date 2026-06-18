@@ -112,3 +112,4 @@ backend/app/modules/auth/
 |------|------|------|
 | 2026-06-17 | ql-20260617-005-2682 | 系统角色 name/description 中文化（SYSTEM_ROLES + seed_platform_admin_role + 新 migration 202607010900 UPDATE 存量 roles） |
 | 2026-06-17 | ql-20260617-006-7c92 | admin/router.py `_user_with_relations` 合并 `user_roles` + `user_workspace_roles`，修复用户管理列表不显示 workspace-scoped 角色（如 bootstrap 给 admin 写的 workspace_owner） |
+| 2026-06-17 | ql-20260617-007-4a31 | `/api/auth/me` 返回 `permissions`（合并 platform + 所有 workspace），前端 `fetchMe` + dashboard mount 时刷新，修复非 platform_admin 用户看不到系统管理菜单 |
