@@ -51,13 +51,13 @@ import type { AgentLogInputControls, ProcessedLog, ScanCheckResult } from "./age
 /* ------------------------------------------------------------------ */
 
 function semanticLineClass(line: string): string {
-  if (line.startsWith("[TOOL_USE]")) return "text-blue-400";
-  if (line.startsWith("[TOOL_RESULT]")) return "text-emerald-400";
-  if (line.startsWith("[THINKING]")) return "text-zinc-500";
-  if (line.startsWith("[RESULT")) return "text-sky-700 font-medium";
-  if (line.startsWith("[SYSTEM")) return "text-amber-700";
-  if (line.startsWith("[ASSISTANT]")) return "text-zinc-800";
-  return "text-zinc-600";
+  if (line.startsWith("[TOOL_USE]")) return "font-medium text-blue-700";
+  if (line.startsWith("[TOOL_RESULT]")) return "font-medium text-emerald-700";
+  if (line.startsWith("[THINKING]")) return "text-zinc-600";
+  if (line.startsWith("[RESULT")) return "font-semibold text-sky-700";
+  if (line.startsWith("[SYSTEM")) return "font-medium text-amber-800";
+  if (line.startsWith("[ASSISTANT]")) return "text-zinc-900";
+  return "text-zinc-800";
 }
 
 function logChannelMeta(channel: AgentRunLogEntry["channel"]): {
@@ -71,29 +71,29 @@ function logChannelMeta(channel: AgentRunLogEntry["channel"]): {
       return {
         label: "TOOL",
         Icon: Wrench,
-        badgeClass: "border-blue-500/30 bg-blue-500/10 text-blue-300",
-        rowClass: "hover:bg-blue-500/[0.04]",
+        badgeClass: "border-blue-200 bg-blue-50 text-blue-700",
+        rowClass: "bg-blue-50/30 hover:bg-blue-50/70",
       };
     case "stderr":
       return {
         label: "WARN",
         Icon: AlertTriangle,
-        badgeClass: "border-amber-500/30 bg-amber-500/10 text-amber-300",
-        rowClass: "bg-amber-500/[0.03] hover:bg-amber-500/[0.07]",
+        badgeClass: "border-amber-200 bg-amber-50 text-amber-800",
+        rowClass: "bg-amber-50/60 hover:bg-amber-50",
       };
     case "pending_input":
       return {
         label: "ASK",
         Icon: MessageSquareText,
-        badgeClass: "border-amber-500/30 bg-amber-500/10 text-amber-300",
-        rowClass: "bg-amber-500/[0.04] hover:bg-amber-500/[0.08]",
+        badgeClass: "border-amber-200 bg-amber-50 text-amber-800",
+        rowClass: "bg-amber-50/60 hover:bg-amber-50",
       };
     case "user_input":
       return {
         label: "REPLY",
         Icon: CornerDownRight,
-        badgeClass: "border-sky-500/30 bg-sky-500/10 text-sky-300",
-        rowClass: "bg-sky-500/[0.03] hover:bg-sky-500/[0.07]",
+        badgeClass: "border-sky-200 bg-sky-50 text-sky-700",
+        rowClass: "bg-sky-50/50 hover:bg-sky-50",
       };
     default:
       return {
@@ -126,7 +126,7 @@ function renderLogLines(content: string) {
         const rest = tsMatch ? line.slice(tsMatch[0].length) : line;
         return (
           <div key={`${i}-${rest.slice(0, 16)}`} className={semanticLineClass(rest)}>
-            {ts && <span className="mr-1 text-zinc-600">[{ts}]</span>}
+            {ts && <span className="mr-1 text-zinc-500">[{ts}]</span>}
             <span>{rest}</span>
           </div>
         );
@@ -144,16 +144,16 @@ function ScanCheckSummaryCard({ result }: { result: ScanCheckResult }) {
     <div className="mt-1 rounded-md border border-zinc-200 bg-white px-2.5 py-2">
       <div className="flex items-center gap-2 text-[11px] font-semibold">
         {result.passed ? (
-          <span className="text-emerald-400">✓ 扫描自检通过</span>
+          <span className="text-emerald-700">✓ 扫描自检通过</span>
         ) : (
-          <span className="text-red-400">✗ 扫描自检未通过</span>
+          <span className="text-red-700">✗ 扫描自检未通过</span>
         )}
       </div>
-      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-zinc-500">
+      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-zinc-600">
         <span>文档 <span className="text-zinc-800">{result.scanDocs}</span></span>
         <span>模块 <span className="text-zinc-800">{result.moduleCount}</span></span>
         <span>流程 <span className="text-zinc-800">{result.flowCount}</span></span>
-        <span>术语表 <span className={result.glossary ? "text-emerald-400" : "text-red-400"}>{result.glossary ? "✓" : "✗"}</span></span>
+        <span>术语表 <span className={result.glossary ? "text-emerald-700" : "text-red-700"}>{result.glossary ? "✓" : "✗"}</span></span>
         <span>总文件 <span className="text-zinc-800">{result.totalFiles}</span></span>
       </div>
     </div>
@@ -201,10 +201,10 @@ export function AgentLogRow({
         "grid min-w-0 max-w-full grid-cols-[58px_74px_minmax(0,1fr)] gap-2 px-3 py-2 transition-colors sm:grid-cols-[76px_84px_minmax(0,1fr)]",
         compact ? "text-[11px] leading-5" : "text-xs leading-5",
         meta.rowClass,
-        isThinking && "opacity-50",
+        isThinking && "opacity-80",
       )}
     >
-      <span className="mt-0.5 flex min-w-0 items-center gap-1 font-mono text-[11px] text-zinc-600">
+      <span className="mt-0.5 flex min-w-0 items-center gap-1 font-mono text-[11px] text-zinc-500">
         <Clock3 className="hidden h-3 w-3 shrink-0 sm:block" />
         <span className="truncate">{formatLogClock(log.timestamp)}</span>
       </span>
@@ -260,7 +260,7 @@ export function AgentLogRow({
           <div
             className={cn(
               "min-w-0 max-w-full whitespace-pre-wrap break-words font-mono [overflow-wrap:anywhere]",
-              log.channel === "stderr" ? "text-amber-700" : "text-zinc-700",
+              log.channel === "stderr" ? "font-medium text-amber-800" : "text-zinc-800",
             )}
           >
             {(() => {
@@ -287,12 +287,12 @@ export function AgentLogRow({
         {log.channel === "pending_input" && (
           <div className="mt-2 min-w-0 max-w-full">
             {isReplied ? (
-              <span className="inline-flex items-center rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[11px] font-medium text-emerald-300">
+              <span className="inline-flex items-center rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700">
                 已回复
               </span>
             ) : canReply ? (
               <>
-                <div className="flex min-w-0 max-w-full flex-col gap-2 rounded-md border border-amber-500/30 bg-amber-950/30 px-2.5 py-2 sm:flex-row">
+                <div className="flex min-w-0 max-w-full flex-col gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 sm:flex-row">
                   <Input
                     placeholder="输入指导文本..."
                     value={value}
@@ -317,11 +317,11 @@ export function AgentLogRow({
                   </Button>
                 </div>
                 {inputError && (
-                  <p className="mt-1 text-xs text-red-300">{inputError}</p>
+                  <p className="mt-1 text-xs text-red-700">{inputError}</p>
                 )}
               </>
             ) : (
-              <span className="inline-flex items-center rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-300">
+              <span className="inline-flex items-center rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-800">
                 等待用户指导
               </span>
             )}
@@ -414,7 +414,7 @@ export function AgentLogViewer({
   return (
     <div
       className={cn(
-        "min-w-0 overflow-hidden bg-zinc-50 text-zinc-700",
+        "min-w-0 overflow-hidden bg-white text-zinc-800",
         fullscreen
           ? "fixed inset-0 z-50 flex flex-col"
           : "max-w-full",
@@ -429,7 +429,7 @@ export function AgentLogViewer({
           <span className="text-xs font-medium text-zinc-800">{title}</span>
           <code className="truncate font-mono text-[11px] text-zinc-500">{runId.length > 8 ? runId.slice(0, 8) + "..." : runId}</code>
           {isLive && (
-            <span className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-300">
+            <span className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
               LIVE
             </span>
@@ -488,7 +488,7 @@ export function AgentLogViewer({
             {visibleLogs.length === 0 ? emptyText : "无匹配日志"}
           </p>
         ) : (
-          <div className="min-w-0 max-w-full divide-y divide-zinc-900/90">
+          <div className="min-w-0 max-w-full divide-y divide-zinc-200">
             {filteredLogs.map((plog) => (
               <AgentLogRow
                 key={plog.log.id}

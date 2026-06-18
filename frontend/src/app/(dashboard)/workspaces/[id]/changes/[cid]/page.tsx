@@ -972,26 +972,26 @@ export default function ChangeDetailPage({ params }: Props) {
             </span>
           </button>
           {logsExpanded && (
-            <div className="max-h-80 overflow-auto px-3 py-2 font-mono text-[11px] leading-relaxed">
+            <div className="max-h-80 overflow-auto bg-white font-mono text-[11px] leading-relaxed text-zinc-800">
               {agentLogs.length === 0 ? (
-                <p className="text-muted-foreground">暂无日志…</p>
+                <p className="px-3 py-4 text-zinc-600">暂无日志…</p>
               ) : (
                 agentLogs.map((log) => (
-                  <div key={log.id} className="flex gap-2 py-0.5">
-                    <span className="shrink-0 text-muted-foreground">
+                  <div key={log.id} className="grid grid-cols-[76px_52px_minmax(0,1fr)] gap-2 border-t border-zinc-200 px-3 py-1.5 first:border-t-0 hover:bg-zinc-50">
+                    <span className="shrink-0 text-zinc-500">
                       {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : ""}
                     </span>
                     <span
-                      className={`shrink-0 rounded px-1 text-[10px] font-semibold ${
+                      className={`inline-flex h-5 shrink-0 items-center justify-center rounded border px-1 text-[10px] font-semibold ${
                         log.channel === "tool_call"
-                          ? "bg-blue-100 text-blue-700"
+                          ? "border-blue-200 bg-blue-50 text-blue-700"
                           : log.channel === "stderr"
-                            ? "bg-amber-100 text-amber-700"
+                            ? "border-amber-200 bg-amber-50 text-amber-800"
                             : log.channel === "pending_input"
-                              ? "bg-amber-100 text-amber-700"
+                              ? "border-amber-200 bg-amber-50 text-amber-800"
                               : log.channel === "user_input"
-                                ? "bg-blue-100 text-blue-700"
-                                : "bg-gray-100 text-gray-600"
+                                ? "border-sky-200 bg-sky-50 text-sky-700"
+                                : "border-zinc-200 bg-zinc-50 text-zinc-700"
                       }`}
                     >
                       {log.channel === "tool_call"
@@ -1004,7 +1004,7 @@ export default function ChangeDetailPage({ params }: Props) {
                               ? "SENT"
                               : "INFO"}
                     </span>
-                    <span className="min-w-0 flex-1 overflow-x-auto whitespace-pre font-mono text-foreground">
+                    <span className="min-w-0 whitespace-pre-wrap break-words font-mono text-zinc-800 [overflow-wrap:anywhere]">
                       {log.channel === "tool_call"
                         ? (() => {
                             const tc = parseToolCallContent(log.content_redacted);
@@ -1022,26 +1022,26 @@ export default function ChangeDetailPage({ params }: Props) {
                               <span className="inline-flex flex-col gap-0.5">
                                 <span className="flex flex-wrap items-center gap-1.5">
                                   {isBash && (
-                                    <span className="rounded bg-zinc-200 px-1 py-0.5 text-[10px] font-semibold text-emerald-700">Bash</span>
+                                    <span className="rounded border border-emerald-200 bg-emerald-50 px-1 py-0.5 text-[10px] font-semibold text-emerald-700">Bash</span>
                                   )}
-                                  <span className="font-semibold text-blue-600">{title}</span>
+                                  <span className="font-semibold text-blue-700">{title}</span>
                                   <span className={`inline-flex items-center rounded border px-1 py-0.5 text-[10px] font-medium ${
                                     tc.status === "pending"
-                                      ? "border-amber-300 bg-amber-50 text-amber-700"
+                                      ? "border-amber-200 bg-amber-50 text-amber-800"
                                       : tc.success
-                                        ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                                        : "border-red-300 bg-red-50 text-red-700"
+                                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                        : "border-red-200 bg-red-50 text-red-700"
                                   }`}>
                                     {tc.status === "pending" ? "待审批" : tc.success ? "已通过" : "失败"}
                                   </span>
                                 </span>
                                 {isBash && cmd && !cmdTooLong && (
-                                  <pre className="whitespace-pre-wrap break-words rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] leading-4 text-zinc-600">
+                                  <pre className="whitespace-pre-wrap break-words rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] leading-4 text-zinc-800">
                                     {cmd}
                                   </pre>
                                 )}
                                 {!isBash && tc.args && (
-                                  <pre className="whitespace-pre-wrap break-words rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] leading-4 text-zinc-600">
+                                  <pre className="whitespace-pre-wrap break-words rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] leading-4 text-zinc-800">
                                     {tc.args}
                                   </pre>
                                 )}

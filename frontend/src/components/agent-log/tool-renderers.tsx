@@ -28,10 +28,10 @@ function StatusBadge({ status, success }: { status: "allowed" | "pending"; succe
       className={cn(
         "inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium",
         status === "pending"
-          ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
+          ? "border-amber-200 bg-amber-50 text-amber-800"
           : success
-            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-            : "border-red-500/30 bg-red-500/10 text-red-300",
+            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+            : "border-red-200 bg-red-50 text-red-700",
       )}
     >
       {status === "pending" ? "待审批" : success ? "已通过" : "失败"}
@@ -50,7 +50,7 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="inline-flex items-center gap-1 rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+      className="inline-flex items-center gap-1 rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950"
       title={label}
     >
       <Copy className="h-2.5 w-2.5" />
@@ -84,7 +84,7 @@ export function CollapsibleSection({
 }
 
 const CODE_CLS =
-  "max-w-full whitespace-pre-wrap break-words rounded-md border border-zinc-800 bg-black/30 px-2 py-1 text-[11px] leading-5 text-zinc-400 [overflow-wrap:anywhere]";
+  "max-w-full whitespace-pre-wrap break-words rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] leading-5 text-zinc-800 [overflow-wrap:anywhere]";
 
 /* ------------------------------------------------------------------ */
 /*  Tool preview props                                                 */
@@ -113,10 +113,10 @@ function WriteToolPreview({ entry, mergedResult }: ToolPreviewProps) {
   return (
     <div className="min-w-0 space-y-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1 rounded bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-violet-300">
+        <span className="inline-flex items-center gap-1 rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">
           <FileText className="h-3 w-3" />Write
         </span>
-        <span className="min-w-0 break-words text-xs font-medium text-zinc-200 [overflow-wrap:anywhere]">
+        <span className="min-w-0 break-words text-xs font-medium text-zinc-900 [overflow-wrap:anywhere]">
           {fileName}
         </span>
         <StatusBadge status={entry.status} success={entry.success} />
@@ -127,17 +127,17 @@ function WriteToolPreview({ entry, mergedResult }: ToolPreviewProps) {
         <span>{byteSize > 1024 ? `${(byteSize / 1024).toFixed(1)} KB` : `${byteSize} B`}</span>
         {firstHeading && (
           <span>
-            标题: <span className="text-zinc-300">{firstHeading}</span>
+            标题: <span className="text-zinc-900">{firstHeading}</span>
           </span>
         )}
       </div>
       {isSpecDoc && (
-        <span className="inline-flex items-center rounded border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-300">
+        <span className="inline-flex items-center rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] text-violet-700">
           规范文档
         </span>
       )}
       {mergedResult && (
-        <div className="text-[11px] text-emerald-400">{mergedResult.slice(0, 200)}</div>
+        <div className="text-[11px] font-medium text-emerald-700">{mergedResult.slice(0, 200)}</div>
       )}
       <CollapsibleSection title={`内容预览 (${lineCount} 行)`}>
         <div className="relative">
@@ -169,23 +169,23 @@ function AgentToolPreview({ entry, mergedResult }: ToolPreviewProps) {
   return (
     <div className="min-w-0 space-y-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1 rounded bg-cyan-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-300">
+        <span className="inline-flex items-center gap-1 rounded border border-cyan-200 bg-cyan-50 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-700">
           <Play className="h-3 w-3" />Agent
         </span>
         {description && (
-          <span className="min-w-0 break-words text-xs text-zinc-200 [overflow-wrap:anywhere]">
+          <span className="min-w-0 break-words text-xs text-zinc-900 [overflow-wrap:anywhere]">
             {description}
           </span>
         )}
         {runInBackground && (
-          <span className="inline-flex items-center rounded border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-0.5 text-[10px] text-cyan-300">
+          <span className="inline-flex items-center rounded border border-cyan-200 bg-cyan-50 px-1.5 py-0.5 text-[10px] text-cyan-700">
             后台运行
           </span>
         )}
         <StatusBadge status={entry.status} success={entry.success} />
       </div>
       {mergedResult && (
-        <div className="text-[11px] text-emerald-400">{mergedResult.slice(0, 300)}</div>
+        <div className="text-[11px] font-medium text-emerald-700">{mergedResult.slice(0, 300)}</div>
       )}
       {prompt && (
         <CollapsibleSection title={`Prompt (${prompt.length} 字符)`}>
@@ -226,10 +226,10 @@ function BashToolPreview({ entry, mergedResult }: ToolPreviewProps) {
   return (
     <div className="min-w-0 space-y-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1 rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-300">
+        <span className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
           <Terminal className="h-3 w-3" />Bash
         </span>
-        <span className="min-w-0 break-words text-xs text-zinc-200 [overflow-wrap:anywhere]">
+        <span className="min-w-0 break-words text-xs font-medium text-zinc-900 [overflow-wrap:anywhere]">
           {title}
         </span>
         <StatusBadge status={entry.status} success={entry.success} />
@@ -247,7 +247,7 @@ function BashToolPreview({ entry, mergedResult }: ToolPreviewProps) {
             </CollapsibleSection>
           ) : (
             <div>
-              <pre className="max-w-full whitespace-pre-wrap break-words rounded-md border border-zinc-800 bg-black/20 px-2 py-1 text-[11px] leading-5 text-zinc-400 [overflow-wrap:anywhere]">
+              <pre className={CODE_CLS}>
                 {cmd}
               </pre>
               <div className="mt-1">
@@ -294,11 +294,11 @@ function SearchToolPreview({ entry, mergedResult }: ToolPreviewProps) {
   return (
     <div className="min-w-0 space-y-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1 rounded bg-teal-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-teal-300">
+        <span className="inline-flex items-center gap-1 rounded border border-teal-200 bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-700">
           {isGrep ? <Search className="h-3 w-3" /> : <FolderSearch className="h-3 w-3" />}
           {isGrep ? "Grep" : "Glob"}
         </span>
-        <code className="min-w-0 break-words text-xs text-amber-300 [overflow-wrap:anywhere]">
+        <code className="min-w-0 break-words text-xs font-medium text-amber-800 [overflow-wrap:anywhere]">
           {pattern}
         </code>
         {searchPath && <span className="text-[10px] text-zinc-500">in {searchPath}</span>}
@@ -307,8 +307,8 @@ function SearchToolPreview({ entry, mergedResult }: ToolPreviewProps) {
         <StatusBadge status={entry.status} success={entry.success} />
       </div>
       {mergedResult && (
-        <div className="text-[10px] text-zinc-400">
-          命中 <span className="font-medium text-zinc-200">{hitCount}</span> 条
+        <div className="text-[10px] text-zinc-600">
+          命中 <span className="font-medium text-zinc-900">{hitCount}</span> 条
         </div>
       )}
       {previewLines.length > 0 && (
@@ -352,10 +352,10 @@ function ReadToolPreview({ entry, mergedResult }: ToolPreviewProps) {
   return (
     <div className="min-w-0 space-y-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1 rounded bg-blue-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-blue-300">
+        <span className="inline-flex items-center gap-1 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
           <FileText className="h-3 w-3" />Read
         </span>
-        <span className="min-w-0 break-words text-xs font-medium text-zinc-200 [overflow-wrap:anywhere]">
+        <span className="min-w-0 break-words text-xs font-medium text-zinc-900 [overflow-wrap:anywhere]">
           {fileName}
         </span>
         {(offset || limit) ? (
@@ -367,7 +367,7 @@ function ReadToolPreview({ entry, mergedResult }: ToolPreviewProps) {
       </div>
       <div className="text-[10px] text-zinc-500">{filePath}</div>
       {mergedResult && (
-        <div className="text-[10px] text-zinc-400">{lineCount} 行内容</div>
+        <div className="text-[10px] text-zinc-600">{lineCount} 行内容</div>
       )}
       <CollapsibleSection title={`文件内容 (${lineCount} 行)`}>
         <div className="relative">
@@ -401,10 +401,10 @@ function EditToolPreview({ entry, mergedResult }: ToolPreviewProps) {
   return (
     <div className="min-w-0 space-y-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1 rounded bg-orange-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-orange-300">
+        <span className="inline-flex items-center gap-1 rounded border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[10px] font-semibold text-orange-700">
           <FileEdit className="h-3 w-3" />Edit
         </span>
-        <span className="min-w-0 break-words text-xs font-medium text-zinc-200 [overflow-wrap:anywhere]">
+        <span className="min-w-0 break-words text-xs font-medium text-zinc-900 [overflow-wrap:anywhere]">
           {fileName}
         </span>
         {replaceAll && <span className="text-[10px] text-zinc-500">全局替换</span>}
@@ -412,16 +412,16 @@ function EditToolPreview({ entry, mergedResult }: ToolPreviewProps) {
       </div>
       <div className="text-[10px] text-zinc-500">{filePath}</div>
       {mergedResult && (
-        <div className="text-[11px] text-emerald-400">{mergedResult.slice(0, 200)}</div>
+        <div className="text-[11px] font-medium text-emerald-700">{mergedResult.slice(0, 200)}</div>
       )}
       <CollapsibleSection title="变更内容">
         <div className="space-y-1.5">
           <div>
-            <div className="mb-0.5 text-[10px] text-red-400">-</div>
+            <div className="mb-0.5 text-[10px] font-semibold text-red-700">-</div>
             <pre className={cn(CODE_CLS, "line-clamp-6")}>{oldStr}</pre>
           </div>
           <div>
-            <div className="mb-0.5 text-[10px] text-emerald-400">+</div>
+            <div className="mb-0.5 text-[10px] font-semibold text-emerald-700">+</div>
             <pre className={cn(CODE_CLS, "line-clamp-6")}>{newStr}</pre>
           </div>
         </div>
@@ -441,7 +441,7 @@ function GenericToolPreview({ entry }: ToolPreviewProps) {
   return (
     <div className="min-w-0 space-y-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="min-w-0 break-words font-semibold text-blue-200 [overflow-wrap:anywhere]">
+        <span className="min-w-0 break-words font-semibold text-blue-700 [overflow-wrap:anywhere]">
           {entry.tool}
         </span>
         <StatusBadge status={entry.status} success={entry.success} />
@@ -545,34 +545,34 @@ function WorkflowSpecResultCard({
   fullText: string;
 }) {
   return (
-    <div className="rounded-md border border-teal-700/40 bg-teal-950/30 px-2.5 py-2">
-      <div className="flex items-center gap-2 text-[11px] font-semibold text-teal-300">
+    <div className="rounded-md border border-teal-200 bg-teal-50 px-2.5 py-2">
+      <div className="flex items-center gap-2 text-[11px] font-semibold text-teal-700">
         Workflow: {summary.name}
       </div>
       {summary.description && (
-        <div className="mt-0.5 text-[10px] text-zinc-400">{summary.description}</div>
+        <div className="mt-0.5 text-[10px] text-zinc-700">{summary.description}</div>
       )}
-      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-zinc-500">
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-zinc-600">
         {summary.specVersion && (
-          <span>版本 <span className="text-zinc-300">{summary.specVersion}</span></span>
+          <span>版本 <span className="text-zinc-900">{summary.specVersion}</span></span>
         )}
-        <span>角色 <span className="text-zinc-300">{summary.roleCount}</span></span>
-        <span>输出 <span className="text-zinc-300">{summary.outputCount}</span></span>
+        <span>角色 <span className="text-zinc-900">{summary.roleCount}</span></span>
+        <span>输出 <span className="text-zinc-900">{summary.outputCount}</span></span>
         {summary.orchestrationMode && (
-          <span>模式 <span className="text-zinc-300">{summary.orchestrationMode}</span></span>
+          <span>模式 <span className="text-zinc-900">{summary.orchestrationMode}</span></span>
         )}
         {summary.maxConcurrent && (
-          <span>并发 <span className="text-zinc-300">{summary.maxConcurrent}</span></span>
+          <span>并发 <span className="text-zinc-900">{summary.maxConcurrent}</span></span>
         )}
         {summary.timeoutPerRole && (
-          <span>超时 <span className="text-zinc-300">{summary.timeoutPerRole}</span></span>
+          <span>超时 <span className="text-zinc-900">{summary.timeoutPerRole}</span></span>
         )}
       </div>
       {summary.roles.length > 0 && (
         <div className="mt-1 space-y-0.5">
           {summary.roles.slice(0, 5).map((r, i) => (
-            <div key={i} className="text-[10px] text-zinc-500">
-              <span className="text-zinc-300">{r.id}</span>: {r.task.slice(0, 60)}
+            <div key={i} className="text-[10px] text-zinc-600">
+              <span className="font-medium text-zinc-900">{r.id}</span>: {r.task.slice(0, 60)}
             </div>
           ))}
         </div>
@@ -597,13 +597,13 @@ export function ToolResultCard({ body }: { body: string }) {
   if (spec) return <WorkflowSpecResultCard summary={spec} fullText={body} />;
 
   return (
-    <div className="rounded-md border border-zinc-700/50 bg-zinc-900/50 px-2.5 py-2">
-      <div className="text-[11px] font-semibold text-emerald-300">Tool Result</div>
+    <div className="rounded-md border border-zinc-200 bg-white px-2.5 py-2">
+      <div className="text-[11px] font-semibold text-emerald-700">Tool Result</div>
       {isLong ? (
         <>
           <div className="mt-1 space-y-0.5">
             {lines.slice(0, 5).map((line, i) => (
-              <div key={i} className="truncate text-[10px] text-zinc-400">
+              <div key={i} className="truncate text-[10px] text-zinc-700">
                 {line}
               </div>
             ))}
@@ -616,7 +616,7 @@ export function ToolResultCard({ body }: { body: string }) {
           </CollapsibleSection>
         </>
       ) : (
-        <pre className="mt-1 max-w-full whitespace-pre-wrap break-words text-[11px] leading-5 text-zinc-400 [overflow-wrap:anywhere]">
+        <pre className="mt-1 max-w-full whitespace-pre-wrap break-words text-[11px] leading-5 text-zinc-800 [overflow-wrap:anywhere]">
           {body}
         </pre>
       )}
