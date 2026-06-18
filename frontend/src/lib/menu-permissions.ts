@@ -9,10 +9,10 @@
  * 相关菜单统一用 `workspace:read` 作为可见性兜底（理由：对应接口已通过 workspace
  * 成员关系校验，无细粒度 permission）。如需精细控制，后续变更扩后端枚举。
  *
- * alwaysVisible 说明：少数 menu 后端只校验登录身份（get_current_user），无任何
- * Permission 依赖（如 git-identities，用户自服务）。这类 menu 设 alwaysVisible=true，
- * canSeeMenu 直接返回 true；permissions 为空数组（picker 会过滤掉这类 menu，因为
- * role 无权限可配）。
+ * pickerHidden 说明：少数 menu 与其他 menu 共享同一权限（如 git-identities 后端
+ * 不强制任何 permission，前端兜底用 platform:admin 与 api-keys/settings 共享）。
+ * 这类 menu 设 pickerHidden=true，picker 不渲染该 menu 卡片（避免 platform:admin
+ * 在多 menu 重复出现）。canSeeMenu 仍按 permissions 正常判断。
  */
 
 export type MenuSection = "overview" | "management" | "admin" | "system";
@@ -41,16 +41,13 @@ export interface MenuPermissionGroup {
   matchPattern?: string;
   /** 是否绝对路径（不拼 workspace 前缀） */
   absolute?: boolean;
-  /**
-   * 该菜单可见所需的权限列表（任一命中即可见）。
-   * 当 alwaysVisible=true 时该数组应为空（picker 会过滤掉这类 menu）。
-   */
+  /** 该菜单可见所需的权限列表（任一命中即可见） */
   permissions: PermissionItem[];
   /**
-   * 登录即可见标记：后端只校验登录身份（get_current_user）无 Permission 依赖时设 true。
-   * canSeeMenu 会跳过权限检查直接返回 true（user 非 null 时）。
+   * picker 隐藏标记：menu 与其他 menu 共享权限（无独立权限可配）时设 true，
+   * AdminRolePermissionPicker 不渲染该 menu 卡片。canSeeMenu 仍按 permissions 判断。
    */
-  alwaysVisible?: boolean;
+  pickerHidden?: boolean;
 }
 
 export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
@@ -159,10 +156,11 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     href: "/settings/git-identities",
     absolute: true,
     matchPattern: "/settings/git-identities",
-    // 后端 git_identity router 无 require_permission，仅 get_current_user；
-    // 这是用户自服务菜单，登录即可见，role 无权限可配。
-    alwaysVisible: true,
-    permissions: [],
+    // 后端 git_identity router 无 require_permission，仅 get_current_user。
+    // 前端用 platform:admin 兜底（与 api-keys/settings 共享），让平台管理员可见、
+    // 普通用户不可见。pickerHidden=true 让 picker 不渲染（避免 platform:admin 重复）。
+    permissions: [{ key: "platform:admin", name: "平台超级管理员" }],
+    pickerHidden: true,
   },
   {
     section: "management",

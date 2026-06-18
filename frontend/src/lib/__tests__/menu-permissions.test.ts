@@ -131,22 +131,18 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(counter.system).toBe(2);
   });
 
-  it("每个非 alwaysVisible menu 至少 1 个 permission（alwaysVisible menu 允许空）", () => {
+  it("每个 menu 至少 1 个 permission", () => {
     MENU_PERMISSION_GROUPS.forEach((g) => {
-      if (g.alwaysVisible) {
-        // 登录即可见的 menu 无权限可配，permissions 必须为空
-        expect(g.permissions).toEqual([]);
-      } else {
-        expect(g.permissions.length).toBeGreaterThanOrEqual(1);
-      }
+      expect(g.permissions.length).toBeGreaterThanOrEqual(1);
     });
   });
 
-  it("alwaysVisible menu 后端无 permission 依赖（用户自服务）：git-identities", () => {
+  it("pickerHidden menu 与其他 menu 共享 platform:admin（git-identities）", () => {
     const g = MENU_PERMISSION_GROUPS.find((x) => x.menuKey === "git-identities");
     expect(g).toBeDefined();
-    expect(g!.alwaysVisible).toBe(true);
-    expect(g!.permissions).toEqual([]);
+    expect(g!.pickerHidden).toBe(true);
+    // 共享 platform:admin（与 api-keys/settings 相同），无独立权限
+    expect(g!.permissions.map((p) => p.key)).toEqual(["platform:admin"]);
   });
 
   it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 36", () => {

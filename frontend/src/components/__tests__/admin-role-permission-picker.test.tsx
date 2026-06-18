@@ -91,13 +91,13 @@ describe("AdminRolePermissionPicker", () => {
     });
   });
 
-  it("management section renders 5 menus (picker 过滤掉 alwaysVisible 的 git-identities)", () => {
+  it("management section renders 5 menus (picker 过滤掉 pickerHidden 的 git-identities)", () => {
     render(<AdminRolePermissionPicker permissions={[]} onChange={vi.fn()} />);
 
-    // picker 不渲染 alwaysVisible menu（git-identities 后端无 permission 校验，
-    // role 无权限可配）
+    // picker 不渲染 pickerHidden menu（git-identities 与 api-keys/settings 共享
+    // platform:admin，role 无独立权限可配，卡片冗余）
     const managementMenus = MENU_PERMISSION_GROUPS.filter(
-      (g) => g.section === "management" && !g.alwaysVisible,
+      (g) => g.section === "management" && !g.pickerHidden,
     );
     expect(managementMenus).toHaveLength(5);
     managementMenus.forEach((g) => {
