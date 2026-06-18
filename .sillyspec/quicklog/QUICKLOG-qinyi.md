@@ -1,3 +1,16 @@
+## ql-20260618-007-d9c0 | 2026-06-18 10:04:45 | 修复 Daemon runtime 掉线后刷新仍在线并补 Agent 禁用操作
+
+状态：已完成
+文件：backend/app/modules/daemon/service.py、backend/app/modules/daemon/router.py、backend/app/modules/daemon/tests/test_lease_service.py、frontend/src/lib/daemon.ts、frontend/src/app/(dashboard)/runtimes/page.tsx、sillyhub-daemon/src/daemon.ts、sillyhub-daemon/src/hub-client.ts、sillyhub-daemon/tests/daemon.test.ts、sillyhub-daemon/tests/hub-client.test.ts、.sillyspec/docs/multi-agent-platform/modules/backend.md、.sillyspec/docs/multi-agent-platform/modules/frontend.md、.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
+依据：.claude/CLAUDE.md；.sillyspec/local.yaml；.sillyspec/docs/multi-agent-platform/modules/backend.md；.sillyspec/docs/multi-agent-platform/modules/frontend.md；.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md；memory: cleanup_stale_runtimes / /api/daemon/runtimes runtime truth
+根因：runtime 列表刷新只依赖 heartbeat 超时清理；daemon 正常退出没有把已注册的 server runtime id 上报 offline；同时后端没有 `disabled` 状态的一等语义，heartbeat 或重新 register 会把禁用项恢复为 online。
+结果：
+  1. 后端新增 runtime `disable` / `enable` / `offline` 操作；`disabled` 状态不会被 heartbeat、重新注册、offline 标记或 stale cleanup 改回 online；启用时按 45s heartbeat 新鲜度恢复为 online/offline。
+  2. `/api/daemon/runtimes` 仍在刷新时执行 stale cleanup，默认阈值从历史 120s 收紧为 45s，且会处理 `last_heartbeat_at IS NULL` 的 online 脏数据。
+  3. daemon stop 路径在停止 heartbeat/poll/ws 循环后，使用 server 分配的各 provider runtime id 批量 POST `/api/daemon/runtimes/{id}/offline`，正常 Ctrl+C/SIGTERM 后刷新即可看到离线；崩溃/强杀由 stale cleanup 兜底。
+  4. `/runtimes` 列表新增 disabled 状态、禁用统计和每个 runtime 的禁用/启用按钮；禁用项不会进入 quick-chat online provider 选择。
+验证：`python -m pytest backend/app/modules/daemon/tests/test_lease_service.py -q`（33 passed）；`pnpm -C sillyhub-daemon test -- tests/daemon.test.ts tests/hub-client.test.ts`（56 passed）。
+
 ## ql-20260618-006-a3f1 | 2026-06-18 09:25:00 | codex quick-chat SSE 扁平 payload + delta 缓冲节流（解决"几个字几个字蹦"）
 
 状态：已完成

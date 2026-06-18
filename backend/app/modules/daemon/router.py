@@ -112,6 +112,51 @@ async def get_runtime(
     return DaemonRuntimeRead.model_validate(runtime)
 
 
+@router.post(
+    "/runtimes/{runtime_id}/disable",
+    response_model=DaemonRuntimeRead,
+)
+async def disable_runtime(
+    runtime_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> DaemonRuntimeRead:
+    """Disable a daemon runtime for placement without deleting it."""
+    svc = DaemonService(session)
+    runtime = await svc.disable_runtime(runtime_id, user.id)
+    return DaemonRuntimeRead.model_validate(runtime)
+
+
+@router.post(
+    "/runtimes/{runtime_id}/enable",
+    response_model=DaemonRuntimeRead,
+)
+async def enable_runtime(
+    runtime_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> DaemonRuntimeRead:
+    """Enable a daemon runtime, restoring online only when heartbeat is fresh."""
+    svc = DaemonService(session)
+    runtime = await svc.enable_runtime(runtime_id, user.id)
+    return DaemonRuntimeRead.model_validate(runtime)
+
+
+@router.post(
+    "/runtimes/{runtime_id}/offline",
+    response_model=DaemonRuntimeRead,
+)
+async def mark_runtime_offline(
+    runtime_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> DaemonRuntimeRead:
+    """Mark a daemon runtime offline during graceful daemon shutdown."""
+    svc = DaemonService(session)
+    runtime = await svc.mark_offline(runtime_id, user.id)
+    return DaemonRuntimeRead.model_validate(runtime)
+
+
 @router.get(
     "/runtimes",
     response_model=list[DaemonRuntimeRead],

@@ -29,6 +29,7 @@ FastAPI 后端服务，负责提供 RESTful API、业务逻辑、数据持久化
 - `/api/workspaces/{workspace_id}/changes` - 变更文档管理
 - `/api/workspaces/{workspace_id}/tasks` - 任务管理
 - `/api/agent` - Agent 运行启停、日志获取、kill
+- `/api/daemon` - 本地 daemon runtime 注册、心跳、禁用/启用、离线标记和 lease 生命周期
 - `/api/git` - Git 身份凭证管理和访问校验
 - `/api/tool_gateway` - 工具调用网关（文件读写、shell、测试、HTTP）
 - `/api/releases` - 发布流程和审批
@@ -105,6 +106,7 @@ ChangeService.transition() -> 状态机校验 -> 更新 stage
 - **软删除**：部分模型（如 Workspace）有 `deleted_at` 字段，查询时需排除
 - **Git worktree 租约**：`WorktreeLease` 模型记录租约，过期需自动释放（WorktreeService.gc_expired_leases）
 - **Agent 流式日志**：通过 SSE 或 stream_run_logs() 获取
+- **Daemon runtime 状态**：`/api/daemon/runtimes` 刷新时会执行 stale heartbeat 清理；`disabled` 状态用于手动禁用 placement，heartbeat、重新注册、offline 上报和 stale cleanup 都不得自动改回 online
 - **CORS 配置**：`CORSMiddleware` 允许所有方法和头，expose `x-request-id`
 - **健康检查**：`/api/health` 检查 DB 连接，`/api/version` 返回 commit sha
 - **配置**：通过 `app.core.config.get_settings()` 获取 Settings 单例
@@ -117,6 +119,7 @@ ChangeService.transition() -> 状态机校验 -> 更新 stage
 - ql-20260605-005-f2b8 | 修复 Agent Run metadata 持久化 + 参考 Multica 细化 token 采集（on_log 独立 session、modelUsage 解析）
 - ql-20260611-001-c7a3 | Quick Chat 多轮对话：prev_run_id → session_id 查询 → resume_session_id 传入 daemon
 - ql-20260616-002-b8e5 | 修复 Bootstrap dispatch 链路 3 处缺陷：`spec_workspace/bootstrap.py` dispatch_to_daemon 加 root_path/spec_root/runtime_root（让 _determine_run_type 走 scan 分支，避免 execution-context 400）；provider 'claude_code' → 'claude'（daemon 12-provider 注册表只认 'claude'）；加 prompt 引导 claude 按 CLAUDE.md 跑 sillyspec scan（不传 prompt 则 daemon spawn 用空串喂 stdin，claude 不读 CLAUDE.md）
+- ql-20260618-007-d9c0 | Daemon runtime 状态语义：刷新列表清理 stale online runtime；新增 disable/enable/offline 操作；disabled 不会被 heartbeat 或重新注册自动恢复为 online。
 
 ## 人工备注
 
@@ -126,5 +129,8 @@ ChangeService.transition() -> 状态机校验 -> 更新 stage
   `Workspace.default_model` is the fallback when a run request omits `model`; task, stage,
   scan-generate, quick-chat, and change-writer execute dispatch paths pass model through lease
   metadata and execution-context.
+- 2026-06-18: Daemon runtime lifecycle uses `online` / `offline` / `maintenance` / `disabled`.
+  Placement should only choose `online`; `disabled` is a manual operator decision and is preserved
+  across heartbeat, re-register, graceful offline, and stale cleanup until explicitly enabled.
 
 <!-- MANUAL_NOTES_END -->

@@ -40,9 +40,9 @@ created_at: 2026-06-11T09:05:00+08:00
 | JsonRpcBackend | json_rpc.py | JSON-RPC 协议 |
 
 ### 与后端通信协议
-- REST: `/api/daemon/runtimes`（注册）、`/api/daemon/heartbeat`、`/api/daemon/leases/claim`、`/api/daemon/leases/complete`
+- REST: `/api/daemon/register`（注册）、`/api/daemon/heartbeat`、`/api/daemon/runtimes/{id}/offline`（优雅停止离线上报）、`/api/daemon/leases/{id}/claim`、`/api/daemon/leases/{id}/complete`
 - WebSocket: `/api/daemon/ws?runtime_id=<id>`（实时任务推送）
-- HTTP 轮询: `/api/daemon/leases/pending`（WS 不可用时的降级方案）
+- HTTP 轮询: `/api/daemon/runtimes/{id}/pending-leases`（WS 不可用时的降级方案）
 
 ## 关键逻辑
 
@@ -54,6 +54,7 @@ created_at: 2026-06-11T09:05:00+08:00
    - _heartbeat_loop: 定期 HTTP 心跳
    - _poll_loop: HTTP 轮询待处理任务
    - _ws_loop: WebSocket 实时接收任务推送
+4. stop(): 停止循环后对每个已注册 server runtime id 调 HubClient.markOffline()
 
 任务执行:
 1. WS/poll 收到 task_available → claim_lease → start_lease
@@ -82,12 +83,14 @@ Claude CLI 交互:
 5. **JSON 列变更检测**: SQLAlchemy JSON 列原地修改需 `flag_modified()` 标记
 6. **多 Agent 注册**: 每个 Agent 作为独立 runtime 注册，心跳需逐个发送
 7. **会话恢复**: 通过 `--resume <session_id>` 实现多轮对话上下文延续
+8. **离线语义**: daemon 正常 Ctrl+C/SIGTERM 停止时应上报各 provider runtime offline；进程崩溃或强杀无法发送 offline，后端 `/api/daemon/runtimes` 刷新时的 stale heartbeat cleanup 负责兜底
 
 ## 变更索引
 
 - ql-20260611-001-c7a3 | Quick Chat 多轮对话：stream_json backend 支持 --resume，stdin 管理，control_request 自动审批
 - ql-20260615-002-9b4f | 修复 /runtimes 空状态错误的 pip 安装提示（daemon 已重写为 TS），新增 sillyhub-daemon/README.md 安装文档；本机卸载 Python 旧版残留、pnpm install+build、npm link，验证 sillyhub-daemon --version=0.1.0
 - ql-20260616-001-7f3a | 修复 Windows 上 agent-detector 返回裸 claude 路径导致 spawn ENOENT：WINDOWS_EXTS 移除空字符串 ''；task-runner spawn shell mode 正则扩展到 .ps1 + 无扩展名兜底；TRUNCATE daemon_runtimes 清掉 7 条旧记录，重启后注册 3 条干净 .cmd 后缀
+- ql-20260618-007-d9c0 | Daemon stop 路径新增 HubClient.markOffline()，优雅停止时使用 server 分配的各 provider runtime id 上报 offline，避免 CLI 退出后刷新仍显示 online
 
 ## 人工备注
 
@@ -97,5 +100,8 @@ Claude CLI 交互:
   execution-context `model` over claim payload `model`, puts it on `LeaseCtx`, and `TaskRunner`
   passes it into adapter `buildArgs`. Stream-json providers append non-empty models as
   `--model <name>`; concurrent leases can therefore use independent models in one daemon.
+- 2026-06-18: Runtime lifecycle is provider-runtime scoped. Heartbeat and graceful offline must
+  iterate `_registeredRuntimes.values()` rather than `config.runtime_id`, because the UI and
+  placement use backend-assigned runtime ids returned by register.
 
 <!-- MANUAL_NOTES_END -->

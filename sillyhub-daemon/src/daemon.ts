@@ -143,6 +143,7 @@ interface ClientLike {
     capabilities?: Record<string, unknown>;
   }): Promise<Record<string, unknown>>;
   heartbeat(runtimeId: string): Promise<unknown>;
+  markOffline?(runtimeId: string): Promise<unknown>;
   claimLease(leaseId: string, runtimeId: string): Promise<Record<string, unknown>>;
   startLease(leaseId: string, claimToken: string): Promise<unknown>;
   completeLease(
@@ -337,6 +338,8 @@ export class Daemon {
     this._controllers.clear();
     this._loopPromises.clear();
 
+    await this._markRegisteredRuntimesOffline();
+
     // 关闭 WS（真实 WsClient.close 是同步 void；mock 可能是 async，try 包裹）
     try {
       this._wsClient?.close();
@@ -354,6 +357,21 @@ export class Daemon {
   }
 
   // ── 内部：register 单个 agent（task-17 HubClient.register）─────────────────
+
+  private async _markRegisteredRuntimesOffline(): Promise<void> {
+    if (!this._client.markOffline) return;
+    const runtimeIds = [...new Set(this._registeredRuntimes.values())].filter(Boolean);
+    await Promise.allSettled(
+      runtimeIds.map(async (rid) => {
+        try {
+          await this._client.markOffline!(rid);
+          this._logger.info('runtime_marked_offline', { runtime_id: rid });
+        } catch (e) {
+          this._logger.warn('runtime_mark_offline_failed', { runtime_id: rid, error: e });
+        }
+      }),
+    );
+  }
 
   private async _registerOne(agent: DetectedAgent): Promise<void> {
     try {

@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import col
@@ -24,6 +24,8 @@ from app.modules.git_gateway.service import redact_output
 from app.modules.workspace.model import AgentRunWorkspace, Workspace
 
 log = get_logger(__name__)
+
+DEFAULT_RUNTIME_STALE_SECONDS = 45
 
 
 # ── Domain errors ────────────────────────────────────────────────────────────
@@ -112,7 +114,8 @@ class DaemonService:
             existing.os = os
             existing.arch = arch
             existing.capabilities = capabilities
-            existing.status = "online"
+            if existing.status != "disabled":
+                existing.status = "online"
             existing.last_heartbeat_at = now
             existing.updated_at = now
             self._session.add(existing)
@@ -162,7 +165,8 @@ class DaemonService:
 
         now = datetime.now(UTC)
         runtime.last_heartbeat_at = now
-        runtime.status = "online"
+        if runtime.status != "disabled":
+            runtime.status = "online"
         runtime.updated_at = now
         self._session.add(runtime)
         await self._session.commit()
@@ -182,28 +186,71 @@ class DaemonService:
         )
         return list((await self._session.execute(stmt)).scalars().all())
 
-    async def mark_offline(self, runtime_id: uuid.UUID) -> DaemonRuntime:
+    async def mark_offline(
+        self,
+        runtime_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+    ) -> DaemonRuntime:
         """Mark a daemon runtime as offline."""
         runtime = await self._session.get(DaemonRuntime, runtime_id)
-        if runtime is None:
+        if runtime is None or (user_id is not None and runtime.user_id != user_id):
             raise DaemonRuntimeNotFound(
                 f"Daemon runtime '{runtime_id}' not found.",
                 details={"runtime_id": str(runtime_id)},
             )
         now = datetime.now(UTC)
-        runtime.status = "offline"
+        if runtime.status != "disabled":
+            runtime.status = "offline"
         runtime.updated_at = now
         self._session.add(runtime)
         await self._session.commit()
         await self._session.refresh(runtime)
         return runtime
 
-    async def cleanup_stale_runtimes(self, max_age_seconds: int = 120) -> int:
+    async def disable_runtime(self, runtime_id: uuid.UUID, user_id: uuid.UUID) -> DaemonRuntime:
+        """Disable a runtime for placement without losing heartbeat freshness."""
+        runtime = await self._get_owned_runtime(runtime_id, user_id)
+        now = datetime.now(UTC)
+        runtime.status = "disabled"
+        runtime.updated_at = now
+        self._session.add(runtime)
+        await self._session.commit()
+        await self._session.refresh(runtime)
+        return runtime
+
+    async def enable_runtime(
+        self,
+        runtime_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        max_age_seconds: int = DEFAULT_RUNTIME_STALE_SECONDS,
+    ) -> DaemonRuntime:
+        """Enable a runtime, restoring online only when its heartbeat is fresh."""
+        runtime = await self._get_owned_runtime(runtime_id, user_id)
+        now = datetime.now(UTC)
+        runtime.status = (
+            "online"
+            if self._is_recent_heartbeat(runtime.last_heartbeat_at, max_age_seconds)
+            else "offline"
+        )
+        runtime.updated_at = now
+        self._session.add(runtime)
+        await self._session.commit()
+        await self._session.refresh(runtime)
+        return runtime
+
+    async def cleanup_stale_runtimes(
+        self,
+        max_age_seconds: int = DEFAULT_RUNTIME_STALE_SECONDS,
+    ) -> int:
         """Mark runtimes as offline if heartbeat is older than max_age_seconds."""
         cutoff = datetime.now(UTC) - timedelta(seconds=max_age_seconds)
         stmt = select(DaemonRuntime).where(
             col(DaemonRuntime.status) == "online",
-            col(DaemonRuntime.last_heartbeat_at) < cutoff,
+            or_(
+                col(DaemonRuntime.last_heartbeat_at).is_(None),
+                col(DaemonRuntime.last_heartbeat_at) < cutoff,
+            ),
         )
         stale = list((await self._session.execute(stmt)).scalars().all())
         now = datetime.now(UTC)
@@ -214,6 +261,26 @@ class DaemonService:
         if stale:
             await self._session.commit()
         return len(stale)
+
+    async def _get_owned_runtime(
+        self,
+        runtime_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> DaemonRuntime:
+        runtime = await self._session.get(DaemonRuntime, runtime_id)
+        if runtime is None or runtime.user_id != user_id:
+            raise DaemonRuntimeNotFound(
+                f"Daemon runtime '{runtime_id}' not found.",
+                details={"runtime_id": str(runtime_id)},
+            )
+        return runtime
+
+    @staticmethod
+    def _is_recent_heartbeat(value: datetime | None, max_age_seconds: int) -> bool:
+        if value is None:
+            return False
+        heartbeat_at = value if value.tzinfo else value.replace(tzinfo=UTC)
+        return heartbeat_at >= datetime.now(UTC) - timedelta(seconds=max_age_seconds)
 
     # ── Lease operations ──────────────────────────────────────────────────
 

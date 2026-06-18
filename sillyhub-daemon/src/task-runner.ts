@@ -47,6 +47,7 @@ import { randomUUID } from 'node:crypto';
 import { getBackend } from './adapters/index.js';
 import type { ProtocolAdapter } from './adapters/protocol-adapter.js';
 import { buildSpawnEnv } from './spawn-env.js';
+import { resolveWindowsCmdShim } from './cmd-shim.js';
 import {
   createTerminalObserver,
   NOOP_TERMINAL_OBSERVER,
@@ -629,21 +630,40 @@ export class TaskRunner {
     };
 
     // spawn（stdio 全管道：stdin / stdout / stderr 都需要）
-    // ql-20260616-001 修复：Windows 上的 npm bin wrapper（.cmd/.bat/.ps1）必须走 shell。
-    // 扩展正则到 .ps1（PowerShell wrapper 也需要 shell），并对无扩展名 sh wrapper
-    // 也启用 shell（cmdPath 是 git-bash 风格脚本，CreateProcess 直跑会 ENOENT）。
-    // 与 detectVersion 的 exec 分支保持一致。
+    // ql-20260616-001：Windows .cmd/.bat/.ps1 npm wrapper 之前依赖 shell:true，
+    // 但实测在不同 shell 父进程下不稳定（git-bash → ENOENT，PowerShell → 可能吞 stdout）。
+    // ql-20260618-007：改用 resolveWindowsCmdShim 解析 .cmd 提取真实命令（node + codex.js
+    // 或 claude.exe），用 spawn(exe, [target, ...args]) 直接调，绕过 cmd.exe 包装层。
+    // 解析失败时回退 shell:true（兼容旧 .ps1 / 自定义 wrapper）。
     const isWindowsWrapper =
       process.platform === 'win32' &&
       /\.(cmd|bat|ps1)$/i.test(cmdPath);
     const isWindowsBareSh =
       process.platform === 'win32' &&
       !/\.[a-z0-9]+$/i.test(cmdPath);
-    const child = spawn(cmdPath, args, {
+
+    let spawnCmdPath = cmdPath;
+    let spawnArgs = args;
+    let useShell = false;
+    if (process.platform === 'win32' && /\.cmd$/i.test(cmdPath)) {
+      const resolved = resolveWindowsCmdShim(cmdPath);
+      if (resolved) {
+        spawnCmdPath = resolved.exe;
+        spawnArgs = [...resolved.prependArgs, ...args];
+      } else {
+        // .cmd 解析失败，回退 shell:true（极少见，保留兜底）
+        useShell = true;
+      }
+    } else if (isWindowsWrapper || isWindowsBareSh) {
+      // .bat / .ps1 / 无扩展名 sh wrapper 仍走 shell（cmd-shim 解析仅覆盖 .cmd）
+      useShell = true;
+    }
+
+    const child = spawn(spawnCmdPath, spawnArgs, {
       cwd: opts.cwd,
       env: opts.env,
       stdio: ['pipe', 'pipe', 'pipe'],
-      ...(isWindowsWrapper || isWindowsBareSh ? { shell: true } : {}),
+      ...(useShell ? { shell: true } : {}),
     }) as ChildProcess;
 
     let exitCode = 0;

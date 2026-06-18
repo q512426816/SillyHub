@@ -567,6 +567,33 @@ class TestRegisterRuntime:
         assert rt2.version == "2.0.0"
 
     @pytest.mark.asyncio
+    async def test_register_runtime_preserves_disabled_status(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Re-registering a disabled runtime updates metadata without enabling placement."""
+        user_id = await _create_user(db_session)
+        svc = DaemonService(db_session)
+
+        rt1 = await svc.register_runtime(
+            user_id,
+            name="my-daemon",
+            provider="claude_code",
+            version="1.0.0",
+        )
+        await svc.disable_runtime(rt1.id, user_id)
+
+        rt2 = await svc.register_runtime(
+            user_id,
+            name="my-daemon",
+            provider="claude_code",
+            version="2.0.0",
+        )
+
+        assert rt1.id == rt2.id
+        assert rt2.version == "2.0.0"
+        assert rt2.status == "disabled"
+
+    @pytest.mark.asyncio
     async def test_register_runtime_different_names_creates_separate(
         self, db_session: AsyncSession
     ) -> None:
@@ -608,6 +635,46 @@ class TestDaemonHeartbeat:
             await svc.heartbeat(uuid.uuid4())
 
     @pytest.mark.asyncio
+    async def test_heartbeat_preserves_disabled_status(self, db_session: AsyncSession) -> None:
+        """Heartbeat keeps disabled runtimes disabled while refreshing freshness."""
+        user_id = await _create_user(db_session)
+        svc = DaemonService(db_session)
+        rt = await svc.register_runtime(user_id, name="disabled-hb", provider="claude_code")
+        disabled = await svc.disable_runtime(rt.id, user_id)
+        old_hb = datetime.now(UTC) - timedelta(seconds=60)
+        disabled.last_heartbeat_at = old_hb
+        db_session.add(disabled)
+        await db_session.commit()
+
+        updated = await svc.heartbeat(rt.id)
+
+        assert updated.status == "disabled"
+        assert updated.last_heartbeat_at is not None
+        updated_hb = updated.last_heartbeat_at
+        if updated_hb.tzinfo is None:
+            updated_hb = updated_hb.replace(tzinfo=UTC)
+        assert updated_hb > old_hb
+
+    @pytest.mark.asyncio
+    async def test_enable_runtime_uses_heartbeat_freshness(self, db_session: AsyncSession) -> None:
+        """Enable restores online only for runtimes with a fresh heartbeat."""
+        user_id = await _create_user(db_session)
+        svc = DaemonService(db_session)
+        rt = await svc.register_runtime(user_id, name="enable-hb", provider="claude_code")
+
+        await svc.disable_runtime(rt.id, user_id)
+        fresh = await svc.enable_runtime(rt.id, user_id, max_age_seconds=45)
+        assert fresh.status == "online"
+
+        fresh.last_heartbeat_at = datetime.now(UTC) - timedelta(seconds=120)
+        db_session.add(fresh)
+        await db_session.commit()
+        await svc.disable_runtime(rt.id, user_id)
+
+        stale = await svc.enable_runtime(rt.id, user_id, max_age_seconds=45)
+        assert stale.status == "offline"
+
+    @pytest.mark.asyncio
     async def test_cleanup_stale_runtimes_marks_old_heartbeats_offline(
         self, db_session: AsyncSession
     ) -> None:
@@ -630,6 +697,25 @@ class TestDaemonHeartbeat:
         await db_session.refresh(fresh)
         assert stale.status == "offline"
         assert fresh.status == "online"
+
+    @pytest.mark.asyncio
+    async def test_cleanup_stale_runtimes_ignores_disabled_runtimes(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Disabled runtimes stay disabled even when their heartbeat is stale."""
+        user_id = await _create_user(db_session)
+        svc = DaemonService(db_session)
+        rt = await svc.register_runtime(user_id, name="disabled-stale", provider="claude")
+        disabled = await svc.disable_runtime(rt.id, user_id)
+        disabled.last_heartbeat_at = datetime.now(UTC) - timedelta(seconds=180)
+        db_session.add(disabled)
+        await db_session.commit()
+
+        count = await svc.cleanup_stale_runtimes(max_age_seconds=45)
+
+        assert count == 0
+        await db_session.refresh(disabled)
+        assert disabled.status == "disabled"
 
 
 class TestCompleteLease:

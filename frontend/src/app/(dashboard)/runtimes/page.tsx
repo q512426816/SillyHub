@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
+  Ban,
   Bot,
   Check,
   CheckCircle2,
@@ -12,6 +13,7 @@ import {
   Copy,
   MessageSquareText,
   Plus,
+  Power,
   RefreshCw,
   Send,
   Server,
@@ -29,6 +31,8 @@ import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
+  disableDaemonRuntime,
+  enableDaemonRuntime,
   getQuickChatLogs,
   getQuickChatResult,
   isVersionBelow,
@@ -140,6 +144,14 @@ function getStatusMeta(status: string | null): StatusMeta {
         dot: "bg-slate-400",
         iconBg: "bg-slate-100 text-slate-600",
         icon: WifiOff,
+      };
+    case "disabled":
+      return {
+        label: "禁用",
+        badge: "destructive",
+        dot: "bg-rose-500",
+        iconBg: "bg-rose-50 text-rose-700",
+        icon: Ban,
       };
     default:
       return {
@@ -841,13 +853,14 @@ function SummaryCard({
   value: string;
   icon: LucideIcon;
   meta?: string;
-  tone?: "neutral" | "online" | "warning" | "offline";
+  tone?: "neutral" | "online" | "warning" | "offline" | "disabled";
 }) {
   const toneClass = {
     neutral: "border-slate-200 bg-white text-slate-700",
     online: "border-emerald-200 bg-emerald-50 text-emerald-700",
     warning: "border-amber-200 bg-amber-50 text-amber-700",
     offline: "border-slate-200 bg-slate-50 text-slate-600",
+    disabled: "border-rose-200 bg-rose-50 text-rose-700",
   }[tone];
 
   return (
@@ -880,13 +893,23 @@ function RuntimeMeta({ label, children }: { label: string; children: ReactNode }
   );
 }
 
-function RuntimeCard({ runtime }: { runtime: DaemonRuntimeRead }) {
+function RuntimeCard({
+  runtime,
+  actioning,
+  onToggleEnabled,
+}: {
+  runtime: DaemonRuntimeRead;
+  actioning: boolean;
+  onToggleEnabled: (runtime: DaemonRuntimeRead) => Promise<void>;
+}) {
   const status = getStatusMeta(runtime.status);
   const StatusIcon = status.icon;
   const capabilityChips = getCapabilityChips(runtime);
   const heartbeat = formatRelativeTime(runtime.last_heartbeat_at);
   const displayVersion = getDisplayVersion(runtime);
   const protocol = getProtocol(runtime);
+  const isDisabled = runtime.status === "disabled";
+  const ActionIcon = isDisabled ? Power : Ban;
 
   return (
     <article className="overflow-hidden rounded-md border bg-card transition-colors hover:border-primary/30">
@@ -932,6 +955,24 @@ function RuntimeCard({ runtime }: { runtime: DaemonRuntimeRead }) {
         <div className="mt-2">
           <AgentsList agents={capabilityChips} compact />
         </div>
+      </div>
+
+      <div className="flex justify-end border-t px-4 py-3">
+        <Button
+          size="sm"
+          variant={isDisabled ? "outline" : "destructive"}
+          className="gap-1.5"
+          disabled={actioning}
+          onClick={() => void onToggleEnabled(runtime)}
+          title={isDisabled ? "启用此 Agent runtime" : "禁用此 Agent runtime"}
+        >
+          {actioning ? (
+            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <ActionIcon className="h-3.5 w-3.5" />
+          )}
+          {actioning ? "处理中" : isDisabled ? "启用" : "禁用"}
+        </Button>
       </div>
     </article>
   );
@@ -999,6 +1040,7 @@ export default function RuntimesPage() {
   const [items, setItems] = useState<DaemonRuntimeRead[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [runtimeActionId, setRuntimeActionId] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
 
   const reload = useCallback(async (options: { showFeedback?: boolean } = {}) => {
@@ -1023,6 +1065,24 @@ export default function RuntimesPage() {
     }
   }, []);
 
+  const handleToggleRuntime = useCallback(async (runtime: DaemonRuntimeRead) => {
+    setError(null);
+    setRuntimeActionId(runtime.id);
+    try {
+      const updated = runtime.status === "disabled"
+        ? await enableDaemonRuntime(runtime.id)
+        : await disableDaemonRuntime(runtime.id);
+      setItems((prev) =>
+        prev ? prev.map((item) => (item.id === updated.id ? updated : item)) : prev,
+      );
+      setLastRefreshedAt(new Date());
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "运行时状态操作失败");
+    } finally {
+      setRuntimeActionId(null);
+    }
+  }, []);
+
   useEffect(() => {
     void reload();
   }, [reload]);
@@ -1038,7 +1098,8 @@ export default function RuntimesPage() {
     const statusRank: Record<string, number> = {
       online: 0,
       maintenance: 1,
-      offline: 2,
+      disabled: 2,
+      offline: 3,
     };
     return [...(items ?? [])].sort((a, b) => {
       const aRank = statusRank[a.status ?? ""] ?? 3;
@@ -1055,6 +1116,7 @@ export default function RuntimesPage() {
     const list = items ?? [];
     const online = list.filter((runtime) => runtime.status === "online").length;
     const maintenance = list.filter((runtime) => runtime.status === "maintenance").length;
+    const disabled = list.filter((runtime) => runtime.status === "disabled").length;
     const offline = list.filter((runtime) => runtime.status === "offline").length;
     const providers = new Set(list.map((runtime) => runtime.provider).filter(Boolean));
     const latestHeartbeat = list
@@ -1066,6 +1128,7 @@ export default function RuntimesPage() {
       total: list.length,
       online,
       maintenance,
+      disabled,
       offline,
       providers: providers.size,
       latestHeartbeat: latestHeartbeat ? formatRelativeTime(latestHeartbeat) : "无心跳",
@@ -1099,10 +1162,11 @@ export default function RuntimesPage() {
       ) : (
         <>
           {items.length > 0 && (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
               <SummaryCard label="总数" value={String(stats.total)} icon={Server} meta={`${stats.providers} 个提供方`} />
               <SummaryCard label="在线" value={String(stats.online)} icon={CheckCircle2} tone="online" meta={stats.latestHeartbeat} />
               <SummaryCard label="维护中" value={String(stats.maintenance)} icon={Wrench} tone="warning" />
+              <SummaryCard label="禁用" value={String(stats.disabled)} icon={Ban} tone="disabled" />
               <SummaryCard label="离线" value={String(stats.offline)} icon={WifiOff} tone="offline" />
             </div>
           )}
@@ -1138,7 +1202,12 @@ export default function RuntimesPage() {
                 </div>
                 <div className="grid gap-3 lg:grid-cols-2">
                   {displayItems.map((runtime) => (
-                    <RuntimeCard key={runtime.id} runtime={runtime} />
+                    <RuntimeCard
+                      key={runtime.id}
+                      runtime={runtime}
+                      actioning={runtimeActionId === runtime.id}
+                      onToggleEnabled={handleToggleRuntime}
+                    />
                   ))}
                 </div>
               </section>

@@ -281,6 +281,17 @@ export class HubClient {
     );
   }
 
+  /**
+   * Mark a runtime offline during graceful daemon shutdown.
+   * Endpoint: POST {REST_PREFIX}/runtimes/{runtimeId}/offline.
+   */
+  async markOffline(runtimeId: string): Promise<Record<string, unknown>> {
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/runtimes/${encodeURIComponent(runtimeId)}/offline`,
+    );
+  }
+
   // -- Lease 生命周期（FR-04 核心）--
 
   /**

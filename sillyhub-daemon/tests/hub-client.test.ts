@@ -152,6 +152,14 @@ describe('HubClient — 6 个 lease/runtime 端点 URL/method/body 契约', () =
     expect(lastCall!.url).toBe(`http://x:8000${REST_PREFIX}/heartbeat`);
     expect(JSON.parse(lastCall!.init.body as string)).toEqual({ runtime_id: 'rt-1' });
   });
+
+  it('markOffline(runtime): POST /runtimes/{id}/offline without body', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.markOffline('rt-1');
+    expect(lastCall!.url).toBe(`http://x:8000${REST_PREFIX}/runtimes/rt-1/offline`);
+    expect(lastCall!.init.method).toBe('POST');
+    expect(lastCall!.init.body).toBeUndefined();
+  });
 });
 
 // ── register 条件 body 拼装（对齐 client.py:55-99 / test_client.py:TestRegister）──

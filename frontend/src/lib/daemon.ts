@@ -10,7 +10,7 @@ export interface DaemonRuntimeRead {
   name: string | null;
   provider: string | null;
   version: string | null;
-  status: string | null; // online, offline, maintenance
+  status: string | null; // online, offline, maintenance, disabled
   last_heartbeat_at: string | null;
   capabilities: Record<string, any> | null;
   created_at: string;
@@ -25,6 +25,24 @@ export async function getDaemonRuntime(
   runtimeId: string,
 ): Promise<DaemonRuntimeRead> {
   return apiFetch<DaemonRuntimeRead>(`/api/daemon/runtimes/${runtimeId}`);
+}
+
+export async function disableDaemonRuntime(
+  runtimeId: string,
+): Promise<DaemonRuntimeRead> {
+  return apiFetch<DaemonRuntimeRead>(
+    `/api/daemon/runtimes/${runtimeId}/disable`,
+    { method: "POST" },
+  );
+}
+
+export async function enableDaemonRuntime(
+  runtimeId: string,
+): Promise<DaemonRuntimeRead> {
+  return apiFetch<DaemonRuntimeRead>(
+    `/api/daemon/runtimes/${runtimeId}/enable`,
+    { method: "POST" },
+  );
 }
 
 export interface QuickChatResponse {

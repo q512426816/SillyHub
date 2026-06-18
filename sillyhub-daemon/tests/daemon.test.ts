@@ -64,6 +64,7 @@ function sleep(ms: number): Promise<void> {
 interface MockClient {
   register: ReturnType<typeof vi.fn>;
   heartbeat: ReturnType<typeof vi.fn>;
+  markOffline: ReturnType<typeof vi.fn>;
   claimLease: ReturnType<typeof vi.fn>;
   startLease: ReturnType<typeof vi.fn>;
   submitMessages: ReturnType<typeof vi.fn>;
@@ -77,6 +78,7 @@ function createMockClient(): MockClient {
   return {
     register: vi.fn(async () => ({ id: 'srv-rid-1' })),
     heartbeat: vi.fn(async () => ({})),
+    markOffline: vi.fn(async () => ({})),
     claimLease: vi.fn(async () => ({
       claim_token: 'token-default',
       payload: { prompt: 'hi', provider: 'claude' },
@@ -501,6 +503,23 @@ describe('Daemon', () => {
     await daemon.start();
     await daemon.stop();
     await expect(daemon.stop()).resolves.not.toThrow();
+  });
+
+  it('AC-05d: stop 将已注册的 server runtime id 标记为离线', async () => {
+    const client = createMockClient();
+    client.register
+      .mockResolvedValueOnce({ id: 'srv-claude' })
+      .mockResolvedValueOnce({ id: 'srv-codex' });
+    const { daemon } = buildDaemon({ client });
+    track(daemon);
+
+    await daemon.start();
+    await daemon.stop();
+
+    expect(client.markOffline).toHaveBeenCalledTimes(2);
+    expect(client.markOffline).toHaveBeenCalledWith('srv-claude');
+    expect(client.markOffline).toHaveBeenCalledWith('srv-codex');
+    expect(client.markOffline).not.toHaveBeenCalledWith(mockConfig.runtime_id);
   });
 
   it('AC-05c: start 幂等（已 running 时直接 return）', async () => {
