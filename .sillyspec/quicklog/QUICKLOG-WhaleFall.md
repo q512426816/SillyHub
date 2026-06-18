@@ -366,6 +366,13 @@ created_at: 2026-06-03T08:42:04
 方案：扩后端枚举（用户三选一推荐方案）。(1) Permission StrEnum 新增 6 个：COMPONENT_READ/TOPOL-GY_READ/SCAN_DOCS_READ/RUNTIME_READ/KNOWLEDGE_READ/INCIDENT_READ；group 映射归到 WORKSPACE 组；(2) 无需 migration（permissions 是 role_permissions 表字符串字段，无独立 permissions 表，新枚举自动可用，platform_admin 用户走 is_platform_admin=True 短路自动生效）；(3) 5 个 router 改 require_permission：knowledge 4 端点 → KNOWLEDGE_READ，runtime 5 端点 → RUNTIME_READ，scan_docs 2 个 GET → SCAN_DOCS_READ（POST reparse 保留 WORKSPACE_WRITE），workspace /topology → TOPOLOGY_READ，incident 列表/详情/postmortem GET → INCIDENT_READ（创建/更新/postmortem 创建保留 DEPLOY_*）；(4) 前端 menu-permissions.ts 6 个 menu 改独立权限（components→component:read 等），runtime menu 保留 task:read 作为第二权限（runtime 涉及任务），头部注释更新；(5) 测试：BACKEND_PERMISSION_KEYS 镜像常量从 36 → 42 项，兜底菜单测试改为「6 个子菜单有独立 read 权限不再共用 workspace:read」校验。
 结果：1) 前端 typecheck/lint/test 全绿（129 用例）；2) 后端 ruff 待重建后跑；3) picker 中每个 menu 显示独立查看权限，不再重复 workspace:read；4) 后端 RBAC 严格校验，无权限访问对应 API 返 401/403。Docker 重建（backend+frontend）+ UI 手工验证待后续。
 
+## ql-20260618-008-9096 | 2026-06-18 15:01:18 | 角色详情 drawer 同用户多工作区折叠 + 状态列改名账号类型
+状态：已完成
+文件：frontend/src/app/(dashboard)/admin/roles/page.tsx
+背景：bootstrap admin 在 4 个 workspace 都绑 workspace_owner，drawer 列出 4 行同账号。状态列名"状态"显示"超管"与绑定关系易混淆。
+方案：(1) drawer 列表按 user.id 折叠：新增 aggregateUsers helper + RoleUsersTable 组件，每用户 1 行；工作区列展示该用户所有绑定工作区名称（去重，竖排）；同时有平台级 + 工作区级绑定时绑定类型显示双徽标（平台级 + 工作区级 ×N），单类型单徽标；(2) 表头"状态"→"账号类型"，"启用"→"普通"，明确语义指 is_platform_admin/login_enabled 而非绑定状态；(3) 副标题"共 N 条绑定" → "共 N 个用户（M 条绑定）"。
+结果：1) 前端 typecheck 全绿；2) 132 tests 全过；3) admin 在 4 workspace 同绑 workspace_owner 时 drawer 显示 1 行 + 工作区列竖排 4 个名称。Docker 重建 frontend 待后续。
+
 ## ql-20260618-007-9c72 | 2026-06-18 14:29:10 | AuthUserLoginDisabled 错误信息改中文
 状态：已完成
 文件：backend/app/core/auth_deps.py, backend/app/modules/auth/service.py

@@ -542,7 +542,7 @@ function RoleUsersDrawer({
               角色 <span className="font-mono">{role.key}</span> 下的用户
             </h3>
             <p className="mt-0.5 text-[11px] text-muted-foreground">
-              {role.name} · 共 {users.length} 条绑定
+              {role.name} · 共 {new Set(users.map((u) => u.id)).size} 个用户（{users.length} 条绑定）
             </p>
           </div>
           <button
@@ -562,45 +562,122 @@ function RoleUsersDrawer({
               该角色暂无用户绑定（含平台级 + 工作区级）。
             </p>
           ) : (
-            <table className="w-full text-left text-xs">
-              <thead className="border-b text-[11px] text-muted-foreground">
-                <tr>
-                  <th className="px-2 py-1.5">邮箱</th>
-                  <th className="px-2 py-1.5">显示名</th>
-                  <th className="px-2 py-1.5">绑定类型</th>
-                  <th className="px-2 py-1.5">工作区</th>
-                  <th className="px-2 py-1.5">状态</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((u, idx) => (
-                  <tr key={`${u.id}-${u.binding_type}-${u.workspace_id ?? ""}-${idx}`} className="border-b last:border-0">
-                    <td className="px-2 py-1.5 font-mono text-[11px]">{u.email}</td>
-                    <td className="px-2 py-1.5">{u.display_name ?? "—"}</td>
-                    <td className="px-2 py-1.5">
-                      <Badge variant={u.binding_type === "platform" ? "default" : "outline"}>
-                        {u.binding_type === "platform" ? "平台级" : "工作区级"}
-                      </Badge>
-                    </td>
-                    <td className="px-2 py-1.5 text-[11px]">
-                      {u.workspace_name ?? "—"}
-                    </td>
-                    <td className="px-2 py-1.5">
-                      {u.is_platform_admin ? (
-                        <Badge variant="success">超管</Badge>
-                      ) : u.login_enabled ? (
-                        <Badge variant="success">启用</Badge>
-                      ) : (
-                        <Badge variant="destructive">禁止登录</Badge>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <RoleUsersTable users={users} />
           )}
         </div>
       </div>
+    </>
+  );
+}
+
+interface AggregatedRoleUser {
+  id: string;
+  email: string;
+  display_name: string | null;
+  is_platform_admin: boolean;
+  status: string;
+  login_enabled: boolean;
+  has_platform: boolean;
+  workspace_names: string[];
+}
+
+function aggregateUsers(users: RoleUserRead[]): AggregatedRoleUser[] {
+  // 按 user.id 折叠：同用户在不同 workspace 的多条绑定合并为一行。
+  const map = new Map<string, AggregatedRoleUser>();
+  for (const u of users) {
+    const existing = map.get(u.id);
+    if (existing) {
+      if (u.binding_type === "platform") existing.has_platform = true;
+      if (u.binding_type === "workspace" && u.workspace_name) {
+        if (!existing.workspace_names.includes(u.workspace_name)) {
+          existing.workspace_names.push(u.workspace_name);
+        }
+      }
+    } else {
+      map.set(u.id, {
+        id: u.id,
+        email: u.email,
+        display_name: u.display_name,
+        is_platform_admin: u.is_platform_admin,
+        status: u.status,
+        login_enabled: u.login_enabled,
+        has_platform: u.binding_type === "platform",
+        workspace_names:
+          u.binding_type === "workspace" && u.workspace_name
+            ? [u.workspace_name]
+            : [],
+      });
+    }
+  }
+  // 按邮箱排序保证稳定顺序
+  return Array.from(map.values()).sort((a, b) => a.email.localeCompare(b.email));
+}
+
+function RoleUsersTable({ users }: { users: RoleUserRead[] }) {
+  const aggregated = aggregateUsers(users);
+  return (
+    <>
+      <table className="w-full text-left text-xs">
+        <thead className="border-b text-[11px] text-muted-foreground">
+          <tr>
+            <th className="px-2 py-1.5">邮箱</th>
+            <th className="px-2 py-1.5">显示名</th>
+            <th className="px-2 py-1.5">绑定类型</th>
+            <th className="px-2 py-1.5">工作区</th>
+            <th className="px-2 py-1.5">账号类型</th>
+          </tr>
+        </thead>
+        <tbody>
+          {aggregated.map((u) => {
+            const wsCount = u.workspace_names.length;
+            // 绑定类型徽标：平台 / 工作区 / 混合
+            const bindingBadge =
+              u.has_platform && wsCount > 0 ? (
+                <div className="flex flex-wrap gap-1">
+                  <Badge variant="default">平台级</Badge>
+                  <Badge variant="outline">工作区级 ×{wsCount}</Badge>
+                </div>
+              ) : u.has_platform ? (
+                <Badge variant="default">平台级</Badge>
+              ) : (
+                <Badge variant="outline">工作区级 ×{wsCount}</Badge>
+              );
+            return (
+              <tr key={u.id} className="border-b last:border-0">
+                <td className="px-2 py-1.5 font-mono text-[11px]">{u.email}</td>
+                <td className="px-2 py-1.5">{u.display_name ?? "—"}</td>
+                <td className="px-2 py-1.5">{bindingBadge}</td>
+                <td className="px-2 py-1.5 text-[11px] align-top">
+                  {wsCount === 0 ? (
+                    <span className="text-muted-foreground">—</span>
+                  ) : (
+                    <div className="flex flex-col gap-0.5">
+                      {u.workspace_names.map((name, idx) => (
+                        <span
+                          key={`${name}-${idx}`}
+                          className="leading-tight"
+                          title={name}
+                        >
+                          {name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </td>
+                <td className="px-2 py-1.5">
+                  {u.is_platform_admin ? (
+                    <Badge variant="success">超管</Badge>
+                  ) : u.login_enabled ? (
+                    <Badge variant="success">普通</Badge>
+                  ) : (
+                    <Badge variant="destructive">禁止登录</Badge>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </>
   );
 }
