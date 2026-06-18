@@ -78,7 +78,7 @@ class AuthService:
         # by comparing error codes.
         if not user.login_enabled:
             raise AuthUserLoginDisabled(
-                "Login has been disabled for this account.",
+                "该账号的登录权限已被禁用。",
                 details={"user_id": str(user.id)},
             )
 

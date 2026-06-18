@@ -77,7 +77,7 @@ async def get_current_user(
         raise AuthUserInactive("User account is no longer active.")
     if not getattr(user, "login_enabled", True):
         raise AuthUserLoginDisabled(
-            "Login has been disabled for this account.",
+            "该账号的登录权限已被禁用。",
             details={"user_id": str(user.id)},
         )
     return user

@@ -366,6 +366,13 @@ created_at: 2026-06-03T08:42:04
 方案：扩后端枚举（用户三选一推荐方案）。(1) Permission StrEnum 新增 6 个：COMPONENT_READ/TOPOL-GY_READ/SCAN_DOCS_READ/RUNTIME_READ/KNOWLEDGE_READ/INCIDENT_READ；group 映射归到 WORKSPACE 组；(2) 无需 migration（permissions 是 role_permissions 表字符串字段，无独立 permissions 表，新枚举自动可用，platform_admin 用户走 is_platform_admin=True 短路自动生效）；(3) 5 个 router 改 require_permission：knowledge 4 端点 → KNOWLEDGE_READ，runtime 5 端点 → RUNTIME_READ，scan_docs 2 个 GET → SCAN_DOCS_READ（POST reparse 保留 WORKSPACE_WRITE），workspace /topology → TOPOLOGY_READ，incident 列表/详情/postmortem GET → INCIDENT_READ（创建/更新/postmortem 创建保留 DEPLOY_*）；(4) 前端 menu-permissions.ts 6 个 menu 改独立权限（components→component:read 等），runtime menu 保留 task:read 作为第二权限（runtime 涉及任务），头部注释更新；(5) 测试：BACKEND_PERMISSION_KEYS 镜像常量从 36 → 42 项，兜底菜单测试改为「6 个子菜单有独立 read 权限不再共用 workspace:read」校验。
 结果：1) 前端 typecheck/lint/test 全绿（129 用例）；2) 后端 ruff 待重建后跑；3) picker 中每个 menu 显示独立查看权限，不再重复 workspace:read；4) 后端 RBAC 严格校验，无权限访问对应 API 返 401/403。Docker 重建（backend+frontend）+ UI 手工验证待后续。
 
+## ql-20260618-007-9c72 | 2026-06-18 14:29:10 | AuthUserLoginDisabled 错误信息改中文
+状态：已完成
+文件：backend/app/core/auth_deps.py, backend/app/modules/auth/service.py
+背景：login_enabled=False 的账号登录时返回 "Login has been disabled for this account."，与平台其他中文 UI 不一致。该错误出现在两处：auth_deps.get_current_user（token 解析时）和 auth.service.login（登录时）。
+方案：两处 "Login has been disabled for this account." → "该账号的登录权限已被禁用。"。
+结果：1) ruff 全绿；2) 55 auth tests 全过（无测试断言原英文文案）；3) Docker 重建 backend 后禁用登录账号将看到中文提示。
+
 ## ql-20260618-006-b11a | 2026-06-18 14:24:01 | login 默认密码 admin12345 错误，应为 admin123
 状态：已完成
 文件：frontend/src/app/(auth)/login/page.tsx
