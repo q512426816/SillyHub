@@ -375,15 +375,27 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
  * 保留用于 brownfield 回归，不再被页面使用。
  */
 function InteractiveSessionChatSection({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
+  // D-002@v3 非目标：交互式会话仅支持 claude（codex 后续），不支持 cursor/openclaw 等。
+  // 过滤 online runtime 的 provider，只保留 claude/codex，避免 createSession 触发
+  // backend SessionCreateRequest.provider Literal["claude","codex"] 422。
   const onlineProviders = useMemo(() => {
+    const SUPPORTED_SESSION_PROVIDERS = ["claude", "codex"];
     const list = runtimes
-      .filter((r) => r.status === "online" && r.provider)
+      .filter(
+        (r) =>
+          r.status === "online" &&
+          r.provider &&
+          SUPPORTED_SESSION_PROVIDERS.includes(r.provider),
+      )
       .map((r) => r.provider!);
     return [...new Set(list)];
   }, [runtimes]);
   const [model, setModel] = useState<string | null>(null);
   const hasOnlineProvider = onlineProviders.length > 0;
-  const defaultProvider = onlineProviders[0] ?? "claude";
+  // 优先 claude（本变更聚焦），其次第一个已支持的 provider
+  const defaultProvider = onlineProviders.includes("claude")
+    ? "claude"
+    : (onlineProviders[0] ?? "claude");
   // providers 列表：有在线时用在线列表，无在线时给占位让组件能渲染
   const providers = hasOnlineProvider ? onlineProviders : [defaultProvider];
 
@@ -1186,7 +1198,7 @@ export default function RuntimesPage() {
   }, [items]);
 
   return (
-    <main className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-6 py-6">
+    <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-5 px-6 py-6">
       <header className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase text-muted-foreground">系统</p>
@@ -1221,7 +1233,7 @@ export default function RuntimesPage() {
             </div>
           )}
 
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_430px]">
+          <div className="space-y-5">
             {items.length === 0 ? (
               <EmptyState />
             ) : (
@@ -1250,7 +1262,7 @@ export default function RuntimesPage() {
                     {refreshing ? "刷新中" : "刷新"}
                   </Button>
                 </div>
-                <div className="grid gap-3 lg:grid-cols-2">
+                <div className="grid gap-3 xl:grid-cols-2">
                   {displayItems.map((runtime) => (
                     <RuntimeCard
                       key={runtime.id}

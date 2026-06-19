@@ -1,107 +1,71 @@
 ---
 author: qinyi
-created_at: 2026-06-10T00:00:00
+created_at: 2026-06-19 12:50:59
+source_commit: 0303536
+updated_at: 2026-06-19T04:50:59Z
+generator: sillyspec-scan
 ---
 
-# Frontend 代码债务 / 风险
+# frontend 关注点 / 技术债
 
-## 🔴 严重
-
-### 1. 未使用 React Query — 数据获取缺少缓存和状态管理
-
-虽然 `package.json` 中安装了 `@tanstack/react-query`，但全部数据获取通过 `useEffect` + `useState` 手动管理。这导致：
-- 页面切换后重新进入时重复请求
-- 无请求去重，同一数据可能并发请求多次
-- 无后台刷新 (stale-while-revalidate)
-- Loading/error 状态在每个组件中重复处理
-
-**涉及**: 所有 23 个页面组件
-
-### 2. 全部 CSR — 未利用 Next.js SSR/RSC 能力
-
-所有页面组件均标记 `"use client"`，导致：
-- 首屏渲染依赖客户端 JS 加载完成
-- SEO 完全不可用（虽然作为管理平台影响较小）
-- 无法利用 Server Components 减少客户端 JS bundle
-- 无 `loading.tsx` / `error.tsx` 内置加载和错误状态
-
-**涉及**: `src/app/` 下所有页面
-
-### 3. 测试覆盖极低 — 仅 3 个 API 单元测试
-
-23 个页面组件、20+ 个 API 客户端模块、1 个 SSE 流客户端、1 个 Zustand store — 仅 `src/lib/__tests__/` 下 3 个测试文件。无组件测试、无集成测试、无 E2E 测试。
-
-**涉及**: 整个前端项目
-
-## 🟡 中等
-
-### 4. 样式拼接不一致 — cn() 定义但未统一使用
-
-`src/lib/utils.ts` 定义了 `cn()` 工具函数 (clsx + tailwind-merge)，但大部分组件直接使用模板字符串拼接 Tailwind 类名。这可能导致：
-- 类名冲突无法自动合并
-- 条件样式逻辑分散，维护成本高
-
-**涉及**: `app-shell.tsx`, `workspace-card.tsx` 等组件
-
-### 5. 页面组件过于庞大 — 缺少抽象
-
-多个页面组件（如 workspaces/[id]/page.tsx, changes/page.tsx）内联了大量业务逻辑（数据获取、状态管理、UI 渲染），未拆分为自定义 hook 和子组件。单个文件可能超过 200 行。
-
-**涉及**: `src/app/(dashboard)/workspaces/[id]/` 下的页面
-
-### 6. API 客户端类型与后端手动同步
-
-前端 `src/lib/*.ts` 中的接口类型（如 `Workspace`, `ChangeRead`）是手动定义的，未从后端 schema 自动生成。前后端类型不同步可能导致运行时错误。
-
-**涉及**: `src/lib/` 下所有 API 文件
-
-### 7. 认证 Token 存储在 localStorage
-
-Zustand persist 默认使用 localStorage 存储 access_token 和 refresh_token。虽然简化了实现，但存在 XSS 攻击风险。
-
-**涉及**: `src/stores/session.ts`
-
-## 🟢 轻微
-
-### 8. Emoji 作为导航图标
-
-`AppShell` 侧边栏使用 emoji 字符作为图标（如 `\u{1F3E0}` 用于 Home），跨平台渲染不一致。
-
-**涉及**: `src/components/app-shell.tsx`
-
-### 9. 未使用 Zod 进行运行时校验
-
-安装了 `zod` 但未在代码中使用。前端接收后端数据后直接 `as T` 类型断言，无运行时校验。
-
-**涉及**: `src/lib/api.ts` 及所有调用方
-
-### 10. 无全局错误边界
-
-缺少 Next.js `error.tsx` 错误边界和 React Error Boundary，未捕获的异常会导致白屏。
-
-**涉及**: `src/app/` 全局
-
-### 11. 未使用 TypeScript 严格索引访问的潜力
-
-配置了 `noUncheckedIndexedAccess: true`，但部分代码仍使用 `any` 类型（如 `capabilities: Record<string, any>`）。
-
-**涉及**: `src/lib/daemon.ts` 等
+> 基于 `frontend/src/` grep 事实，🔴 高 / 🟡 中 / 🟢 低。覆盖旧版文档。
 
 ## 代码质量
 
-- **Lint**: ESLint (eslint-config-next)，运行 `pnpm lint`
-- **类型检查**: TypeScript strict mode (`tsc --noEmit`)
-- **格式化**: 无统一 formatter（无 Prettier 配置）
-- **提交检查**: 无 pre-commit hook
-- **Bundle 分析**: 未配置
-- **代码复杂度**: 多个页面组件超过 200 行，缺少自定义 hook 抽象
+### 🟡 双 UI 组件库并存（Ant Design 6 + shadcn/ui）
+
+- grep 实证：50+ 文件 `from "antd"` / `@ant-design/icons`，同时 `components/ui/{button,badge,input}.tsx` 存在 shadcn 原子件
+- 风险：两套设计系统并存（主题 token、CSS variables、字体、间距），视觉一致性靠人工维护；同一类控件（如 Button）在两栈中各有一份，组件选用边界不清
+- 建议：明确边界（如「业务表单/表格用 antd，原子化营销控件用 shadcn」），或收敛到单栈
+
+### 🟡 React Query 依赖未使用
+
+- grep 实证：`@tanstack/react-query` / `useQuery` / `QueryClient` 在 `src/` 内 0 命中（依赖声明存在）
+- 风险：dead dependency；数据获取/缓存/失效全靠页面 `useEffect` + 手动 refetch，重复请求、loading/error 态散落各页
+- 建议：要么启用 React Query 统一数据层，要么移除依赖减小包体
+
+### 🟡 双 E2E 工具声明但未落地
+
+- grep 实证：依赖含 `@playwright/test ≥1.60` 和 `puppeteer 24`，但 `frontend/{e2e,tests,playwright}/` 目录均不存在（glob 0 命中）
+- 风险：依赖膨胀（puppeteer 体积大）；E2E 缺位，关键流程（登录、工作区创建、agent 执行、daemon 会话）无端到端保护
+- 建议：选定单一工具（推荐 Playwright）并补核心路径 E2E，或移除未用依赖
+
+### 🟢 页面级测试覆盖薄
+
+- 仅 `app/(dashboard)/runtimes/page.test.tsx` 一个页面级测试；27 个页面中大量无测试覆盖
+- 建议：优先补 SSE 消费、表单提交、权限分支等关键页面
+
+### 🟢 已标记弃用代码
+
+- grep 命中 1 处 `@deprecated`：`lib/permission.ts:8`（按功能前缀判断的旧 helper），需评估清理时机
 
 ## 依赖风险
 
-| 依赖 | 风险 | 说明 |
-|------|------|------|
-| `@tanstack/react-query` | 🟡 死依赖 | 已安装未使用，增加 bundle 大小 |
-| `puppeteer` | 🟡 死依赖 | 已安装未使用，体积大 (~300MB) |
-| `@playwright/test` | 🟡 死依赖 | 已安装无测试文件 |
-| `next@14.2.5` | 🟢 版本锁 | App Router 稳定版，无重大 bug |
-| `zustand@4.5` | 🟢 版本锁 | 成熟稳定，API 变更风险低 |
+### 🟡 API 代理 rewrites 仅在 dev / Node runtime 生效
+
+- grep 实证：`lib/api.ts:18` 注释明确「via the Next.js rewrite proxy (/api/* → backend)」
+- 风险：若改纯静态导出（`output: export`）或非 Node 部署，rewrites 失效，前端将无法访问后端；生产依赖 Next server（或反代）兜底
+- 建议：部署文档明确「必须 Node runtime / standalone / 反代」，避免误用静态导出
+
+### 🟡 TS strict + `noUncheckedIndexedAccess`
+
+- grep 实证：`tsconfig.json` 开启（target ES2022）
+- 影响：数组/对象索引访问需显式 narrowing 或兜底默认值，开发体验更严；也意味着代码中常见 `arr[0]!` 或 `?? fallback` 模式
+- 建议：保持开启（正确性收益 > 心智成本），CI 跑 `tsc --noEmit` 守门
+
+### 🟡 双 lockfile
+
+- glob 实证：`frontend/` 同时存在 `pnpm-lock.yaml` 和 `package-lock.json`
+- 风险：两套锁文件可能漂移，CI/本地装包不一致
+- 建议：删除 `package-lock.json`，统一 pnpm
+
+### 🟢 主版本依赖较新
+
+- Ant Design 6.x（主版本）、`@xyflow/react` 12、Next.js 14.2 RSC 生态仍在演进；升级/排错需关注上游 breaking change
+- 建议：锁定 patch，定期跟版
+
+### 🟢 SSE 客户端手写解析
+
+- grep 实证：18 文件 / 120 处手写 `fetch + getReader + TextDecoder` 解析 SSE
+- 风险：解析逻辑分散（`agent-stream.ts` / `daemon.ts` / `agent-log/normalize.ts` 等），边界场景（断帧、心跳、重连）易各自实现
+- 建议：抽取统一 SSE reader util + 自动重连

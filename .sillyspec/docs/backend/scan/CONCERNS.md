@@ -1,89 +1,48 @@
 ---
 author: qinyi
-created_at: 2026-06-10T00:00:00
+created_at: 2026-06-19 12:50:59
+source_commit: 0303536
+updated_at: 2026-06-19T04:50:59Z
+generator: sillyspec-scan
 ---
 
-# Backend 代码债务与风险
+# Backend 关注点与债务（CONCERNS）
+
+> 基于 grep（`TODO|FIXME|XXX|HACK|deprecated`）、`pyproject.toml` 配置、`app/core/*` 摘录的真实债务。按严重程度 🔴 / 🟡 / 🟢 分组。
 
 ## 代码质量
 
-### [RED] Quick Chat 端点内联在 main.py
-- **位置**：`app/main.py:112-195`
-- **问题**：`_register_quick_chat()` 函数包含完整的路由定义、原始 SQL 和业务逻辑，直接写在 `main.py` 中，违反了项目自身的模块化约定
-- **影响**：维护困难，无法单独测试，与 `agent` 模块的架构模式不一致
-- **建议**：抽取到 `modules/agent/quick_chat.py` 或独立模块
+- 🟡 **mypy 实质失效**：`strict = false` 且 `disable_error_code` 显式关闭 9 类（`attr-defined`、`union-attr`、`assignment`、`arg-type`、`valid-type`、`operator`、`call-overload`、`call-arg`、`unused-ignore`），`ignore_missing_imports = true`。类型检查约束极弱，新增代码的类型错误基本不会被拦截。建议逐步收窄 `disable_error_code` 列表。
+- 🟡 **`main.py` 内联 quick-chat 路由（446 行）**：`/api/daemon-chat*` 四个端点（POST/GET/stream/kill/logs）直接定义在 `create_app` 闭包内，用裸 `sa_text` SQL 操作 `agent_runs` 表，绕过了模块四件套（service/model/schema）。维护成本高，SQL 与 ORM 模型易漂移。
+- 🟢 **`spec_profile` 多处 TODO 未实现**（`app/modules/spec_profile/provider.py` 行 76/86/96、`policy.py` 行 61/97）：
+  - `# TODO: implement actual discovery in follow-up task`
+  - `# TODO: implement actual loading in follow-up task`
+  - `# TODO: implement in follow-up task`
+  - `# TODO: implement stage conflict detection`
+  - `# TODO: implement document conflict detection`
+  
+  该模块功能尚未完成，调用方需注意返回值可能是占位。
 
-### [RED] Quick Chat 使用原始 SQL
-- **位置**：`app/main.py:135-166`
-- **问题**：使用 `sqlalchemy.text()` 写原始 INSERT/UPDATE SQL，绕过了 SQLModel ORM 和审计 hooks
-- **影响**：审计日志缺失，SQL 注入风险（虽然使用了参数化查询），与 ORM 模式不一致
-- **建议**：改用 SQLModel ORM 操作
+- 🟢 **已废弃代码仍在仓库**：
+  - `app/modules/workflow/fsm.py::ChangeFSM` 标记 `deprecated`，状态机迁至 `change.model.StageEnum + TRANSITIONS`；`test_fsm.py` 仍在测试 deprecated 路径（`_import_deprecated`）。
+  - `app/modules/agent/coordinator.py` 的 `start_sillyspec_run` 等方法 `.. deprecated::`（行 481/551），日志记 `deprecated_method_called`。
+  - `app/modules/agent/base.py` 行 39/143 含 `.. deprecated::` docstring。
+  
+  本项目未上线、不考虑兼容，可择机删除。
 
-### [YELLOW] Spec Profile 多处 TODO 未实现
-- **位置**：`modules/spec_profile/provider.py:76,86,96` 和 `modules/spec_profile/policy.py:61,97`
-- **问题**：5 个 TODO 标记，涉及 actual discovery、loading、stage conflict detection、document conflict detection
-- **影响**：Spec Profile 功能不完整
-- **建议**：追踪为后续任务，在 design 文档中标记未完成状态
-
-### [YELLOW] AgentAdapter 只有一个实现
-- **位置**：`modules/agent/adapters/claude_code.py`
-- **问题**：抽象基类 `AgentAdapter` 只有一个实现，接口抽象可能过早或与实际需求不匹配
-- **影响**：未来添加新 adapter 时可能需要重构接口
-
-### [YELLOW] 部分模块缺少独立测试
-- **涉及模块**：knowledge, runtime, scan_docs, settings
-- **影响**：这些模块的 bug 不容易被 CI 捕获
-- **建议**：优先补充 settings 和 runtime 测试
+- 🟢 **错误类命名不一致**：抽象基类 `AppError(Exception)`（后缀 `Error`），但大量领域错误按事件命名（`WorkspaceNotFound`、`ChangeNotFound`），ruff 因此关闭 `N818`。属有意约定，但对新人阅读有门槛。
 
 ## 依赖风险
 
-### [RED] Claude Code CLI 依赖
-- **问题**：核心功能依赖 `@anthropic-ai/claude-code` npm 包（版本固定 2.1.158），通过 CLI 子进程调用
-- **风险**：CLI 接口变更可能无声破坏集成；版本升级需要重新测试整个 agent 流程
-- **缓解**：Dockerfile 中固定版本号
-
-### [YELLOW] passlib 兼容性问题
-- **位置**：`core/security.py:41-47`
-- **问题**：代码注释明确说明绕过了 passlib，因为 "local bcrypt wheel is incompatible with passlib's bcrypt backend detection"
-- **影响**：直接使用 bcrypt 库而非 passlib 抽象层，如果未来需要支持其他哈希算法需要额外工作
-- **现状**：已通过自定义 `_PasswordHasher` 类封装，不影响功能
-
-### [YELLOW] mypy 配置过于宽松
-- **位置**：`pyproject.toml [tool.mypy]`
-- **问题**：`strict = false`，禁用了 9 个错误码（attr-defined, union-attr, assignment 等）
-- **影响**：类型安全网较弱，许多类型错误不会被捕获
-- **建议**：逐步收紧，优先启用 assignment 和 arg-type
-
-### [GREEN] OpenTelemetry 为空实现
-- **位置**：`core/telemetry.py`
-- **问题**：仅输出 stub 日志，无实际追踪/指标采集
-- **影响**：生产环境缺乏可观测性
-- **现状**：已预留接口，未来可无缝接入
+- 🟡 **OpenTelemetry 仍是 stub**：`app/core/telemetry.py` 仅 `log.info("telemetry.init", status="stub")`，未真正接入 exporter；若生产依赖链路追踪会落空。需确认是否纳入路线图或移除配置项。
+- 🟡 **Redis 在测试中未真正隔离**：`conftest.py` 设置 `REDIS_URL=redis://localhost:6379/15`，但未提供 fake/in-memory redis fixture；涉及 pub/sub（AgentRun 日志 SSE、daemon WebSocket hub）的测试若触碰真实 Redis 会脆弱或被跳过。
+- 🟡 **生产密钥管理依赖环境变量**：`SECRET_KEY`、`SILLYSPEC_MASTER_KEY`、`PLATFORM_BOOTSTRAP_ADMIN_PASSWORD` 全部走 env / `.env`，无 KMS/Vault 集成；容器编排需自行保证密钥注入与轮转。
+- 🟢 **`psycopg` vs `asyncpg` 切换风险低**：依赖锁死 `asyncpg≥0.29` + `postgresql+asyncpg://` URL，但 `resolved_commit_sha` 在 `subprocess.check_output(["git", ...])` 失败时静默回退 `"unknown"`（生产容器可能无 git），健康端点的 version 字段可能无意义。
+- 🟢 **bcrypt rounds 上限 15**：`auth_bcrypt_rounds: int = Field(12, ge=4, le=15)`，上线后若需提升到 15 以上需改约束。
+- 🟢 **`passlib[bcrypt]` + `passlib-stubs`**：依赖列表里有 `types-passlib`（dev），但 `.venv` 中存在 `passlib-stubs`——类型来源可能重复，需确认一致性。
 
 ## 架构风险
 
-### [YELLOW] 全局单例模式
-- **涉及**：`get_settings()`, `get_redis()`, `get_engine()`, `get_session_factory()`
-- **问题**：通过模块级全局变量 + `@lru_cache` 实现单例，测试中需要手动重置
-- **影响**：测试隔离性受影响
-- **缓解**：`dispose_engine()` 和 `close_redis()` 用于清理
-
-### [YELLOW] 20 个路由模块注册在 main.py
-- **位置**：`app/main.py:197-223`
-- **问题**：所有路由手动 import 和注册，每次新增模块需修改 main.py
-- **建议**：考虑自动发现机制
-
-### [GREEN] Docker 入口脚本
-- **位置**：`docker-entrypoint.sh`
-- **问题**：ruff 配置中排除对该文件的检查，可能存在 shell 兼容性问题
-- **缓解**：Dockerfile 中执行 `sed -i 's/\r$//'` 处理行尾符
-
-## 迁移风险
-
-### [YELLOW] 38 个迁移文件无 merge head 管理
-- **问题**：仅发现一个 merge head 文件（`4d9236aa3abb_merge_heads.py`），多分支并行开发时可能产生冲突
-- **建议**：确保团队协调迁移文件创建顺序
-
-### [GREEN] 迁移文件命名规范
-- 所有迁移按日期时间命名，格式统一
-- 但迁移文件较多，建议定期考虑 squash
+- 🟡 **路由挂载顺序是隐式契约**：`_register_quick_chat(app)` 必须早于 `workspace_router`；`members_router` 必须兄弟挂载（不能 `include_router(prefix=...)`）。新人新增带 `{workspace_id}` 前缀的定长路由时极易踩坑（FastAPI 路由匹配不区分定长/参数优先级）。建议加单元测试断言挂载顺序，或迁移到显式 `include_router(prefix=..., name=...)`。
+- 🟡 **裸 SQL 散落**：除 `main.py` quick-chat 外，需留意其他模块是否也绕过 ORM 直接 `sa_text`（grep 显示 quick-chat 是集中点），SQL 字段名与模型列名耦合，迁移易断裂。
+- 🟢 **审计钩子全局生效**：`audit_hooks.py` 对所有 `BaseModel(table=True)` 生效，高写入表（如 `agent_run_logs`）会产生大量 audit 记录，需确认 `audit_logs` 表容量与清理策略。

@@ -1,94 +1,52 @@
 ---
 author: qinyi
-created_at: 2026-06-10T00:00:00
+created_at: 2026-06-19 12:50:59
+source_commit: 0303536
+updated_at: 2026-06-19T04:50:59Z
+generator: sillyspec-scan
 ---
 
-# Backend 项目概览
+# Backend 项目说明（PROJECT）
+
+> 扫描对象：`backend/`（`multi-agent-platform` 仓库下的 FastAPI 子项目）。
 
 ## 项目简介
 
-**multi-agent-platform-api** 是 SillyHub 多 Agent 协作平台的后端 API 服务。它提供工作空间管理、SillySpec 文档驱动开发流程、AI Agent 调度与执行、守护进程管理、Git 操作网关等核心功能。
+`multi-agent-platform-api` 是多智能体协作平台的**后端 API 服务**，提供基于文档驱动（SillySpec）的多 agent 编排能力：管理项目工作区、变更（change）、任务（task）、工作流（workflow），调度 agent 运行（agent_run）并通过 daemon 租约派发到实际 agent 进程，同时提供 Git 网关、工具网关、扫描文档、发布、事件复盘等完整能力。
 
-该项目是 SillySpec 方法论的实现载体，支持从需求分析到代码实现的完整文档驱动开发流程，通过 AI Agent（Claude Code）自动化执行开发任务。
+核心特征：
 
-### 核心能力
-- **工作空间管理** — 多项目工作空间、拓扑关系、自动扫描
-- **SillySpec 流程** — 变更生命周期管理（brainstorm -> plan -> execute -> verify -> archive）
-- **AI Agent 调度** — Claude Code 集成，支持多种执行策略
-- **守护进程系统** — WebSocket 实时通信，任务租约与分发
-- **Git 操作网关** — 安全的 Git 命令执行与审计
-- **RBAC 权限** — 用户/角色/权限/工作空间级别的细粒度访问控制
-- **工作流状态机** — 变更和任务的有限状态机管理
-- **工具执行网关** — 受控的 shell 命令执行与策略限制
+- **模块化**：24 个业务模块（`app/modules/`），每个遵循 `router / service / model / schema / tests` 五件套约定。
+- **文档驱动闭环**：`change → task → change_writer → workflow → archive`，配套 `change/prompts/*.md` 的 brainstorm/plan/execute/verify/scan/quick 等 SillySpec 阶段 prompt。
+- **多 agent 编排**：`agent` 模块负责运行编排与日志收集，`daemon` 模块负责运行时注册、任务租约与 WebSocket RPC；agent run 日志经 Redis pub/sub → SSE 实时推送。
+- **双路径鉴权**：JWT（浏览器会话）+ API Key（daemon 长凭证），细粒度 RBAC（workspace 维度 + 平台管理员）。
+- **~41 张数据表** + Alembic 迁移 ~55 个 revision；测试用内存 SQLite + httpx ASGI client 完全 hermetic。
+
+入口：`app/main.py::create_app()` → `app = create_app()`。OpenAPI 文档：`/api/docs`（Swagger）、`/api/redoc`。
 
 ## 技术栈
 
-### 运行时
-- **Python 3.12** + **FastAPI** >= 0.115
-- **uvicorn** (async, standard extras)
-- **SQLModel** + **SQLAlchemy** (async, asyncpg driver)
-- **PostgreSQL** (async via asyncpg)
-- **Redis** (async)
-- **structlog** (JSON structured logging)
+- **语言**：Python ≥ 3.12（全量 `from __future__ import annotations` + PEP 604 类型）。
+- **Web**：FastAPI ≥ 0.115 + Uvicorn[standard] ≥ 0.30。
+- **ORM/DB**：SQLModel ≥ 0.0.22 + SQLAlchemy[asyncio] ≥ 2.0 + asyncpg ≥ 0.29 + Alembic ≥ 1.13（PostgreSQL）。
+- **缓存/消息**：Redis ≥ 5.0（`redis.asyncio`，pub/sub）。
+- **认证加密**：python-jose[cryptography] ≥ 3.3（JWT）+ passlib[bcrypt] ≥ 1.7（密码）+ pynacl ≥ 1.5（NaCl SecretBox 密钥加密）。
+- **日志/可观测**：structlog ≥ 24.4 + OpenTelemetry（stub）。
+- **HTTP**：httpx ≥ 0.27（外部调用 + 测试 ASGI client）。
+- **配置**：Pydantic ≥ 2.8 + Pydantic-Settings ≥ 2.4（`Settings` 单例 + `.env`/env 双层覆盖）。
+- **文档解析**：python-frontmatter ≥ 1.1（处理 SillySpec markdown frontmatter）。
+- **测试**：pytest ≥ 8 + pytest-asyncio（asyncio_mode=auto）+ pytest-cov + anyio + aiosqlite（内存 SQLite）。
+- **质量**：ruff ≥ 0.6（line-length=100, py312）+ mypy ≥ 1.11（非严格）+ pre-commit ≥ 4.6（PEP 735 dev 组）。
+- **构建/包管理**：hatchling 构建（wheel packages=`["app"]`）+ uv 运行。
 
-### 认证与安全
-- **python-jose** (JWT HS256)
-- **bcrypt** (密码哈希)
-- **pynacl** (NaCl secretbox 对称加密)
+## 运行与开发
 
-### 开发工具
-- **ruff** (lint + format)
-- **mypy** (类型检查)
-- **pytest** + **pytest-asyncio** + **pytest-cov** (测试)
-- **Alembic** (数据库迁移)
-- **hatchling** (构建)
-- **pre-commit** (Git hooks)
+- 安装依赖：`cd backend && uv sync`（dev 组含 pre-commit/pytest/mypy/ruff/types-passlib/anyio/aiosqlite）。
+- 启动开发服务：`cd backend && uv run uvicorn app.main:app --reload`（需提供 `DATABASE_URL`、`SECRET_KEY` 等环境变量，或 `.env`）。
+- 必填环境变量：`DATABASE_URL`、`SECRET_KEY`（≥16 字符）；常用：`REDIS_URL`、`ENVIRONMENT`、`CORS_ALLOWED_ORIGINS`、`SPEC_DATA_ROOT`、`SILLYSPEC_MASTER_KEY`。
+- 运行测试：`cd backend && uv run pytest`（hermetic，内存 SQLite + httpx ASGI，不需要真实 PG/Redis）。
+- Lint/类型：`cd backend && uv run ruff check .` / `uv run mypy app/`。
 
-### 外部依赖
-- **@anthropic-ai/claude-code** 2.1.158 (AI Agent CLI)
-- **sillyspec** 3.18.2 (SillySpec CLI)
+## 仓库定位
 
-### 容器化
-- **Docker** 多阶段构建（Python 3.12 slim）
-- 集成 Node.js 20 (运行 Claude Code)
-- 非 root 运行，健康检查
-
-## 项目规模
-
-- **源码目录**：`app/` 下 20 个功能模块
-- **数据库表**：33 张
-- **API 端点**：约 130 个（GET/POST/PUT/PATCH/DELETE/WS）
-- **Service 类**：26 个
-- **Alembic 迁移**：38 个
-- **测试文件**：约 40 个
-
-## 启动与运行
-
-```bash
-# 开发环境
-cd backend
-uv sync --all-extras
-cp .env.example .env                  # 配置 DATABASE_URL 等
-uv run alembic upgrade head           # 运行迁移
-uv run uvicorn app.main:app --reload  # 启动服务 (端口 8000)
-
-# Docker
-docker build -t backend .
-docker run -p 8000:8000 backend
-```
-
-## API 文档
-- Swagger UI: `http://localhost:8000/api/docs`
-- ReDoc: `http://localhost:8000/api/redoc`
-- OpenAPI JSON: `http://localhost:8000/api/openapi.json`
-
-## 与前端的关系
-- 前端 Next.js 应用通过 REST API 与后端通信
-- CORS 默认允许 `http://localhost:3000`
-- 认证使用 Bearer JWT token
-- 所有 API 前缀 `/api/`
-
-## 与 Daemon 的关系
-- Daemon（`sillyhub-daemon/`）通过 WebSocket 与后端通信
-- 后端负责任务调度、租约管理、状态追踪
-- Daemon 负责任务执行、心跳上报、结果同步
+`backend/` 是 `multi-agent-platform` 单体仓库的一个子项目（另有前端、daemon 客户端等）。本次扫描严格限定在 `backend/` 目录内，不涉及主项目或其他子项目源码。

@@ -1,102 +1,82 @@
 ---
 author: qinyi
-created_at: 2026-06-10T00:00:00
+created_at: 2026-06-19 12:50:59
+source_commit: 0303536
+updated_at: 2026-06-19T04:50:59Z
+generator: sillyspec-scan
 ---
 
-# Backend 外部集成
+# Backend 外部集成（INTEGRATIONS）
 
-## 数据库：PostgreSQL (asyncpg)
+> 按「数据存储 / 缓存与队列 / 认证与加密 / HTTP 客户端 / 可观测 / 构建」分组，基于 `pyproject.toml` 依赖与 `app/core/*.py`、各模块 grep 摘录。
 
-- **用途**：主数据存储，所有业务数据持久化
-- **连接**：通过 `settings.database_url` 配置，格式 `postgresql+asyncpg://user:pass@host:5432/db`
-- **连接池**：大小 10，溢出 10，超时 30s，回收 1800s，启用 `pool_pre_ping`
-- **迁移**：Alembic 管理，38 个版本化迁移文件
-- **ORM**：SQLModel (SQLModel + SQLAlchemy async)，`expire_on_commit=False`
-- **审计**：SQLAlchemy event hooks 自动捕获 BaseModel 变更写入 `audit_logs` 表
+## 数据存储
 
-## 缓存/消息：Redis
+| 依赖 | 版本 | 用途 | 接入点 |
+| --- | --- | --- | --- |
+| asyncpg | ≥ 0.29 | PostgreSQL 异步驱动（通过 SQLAlchemy URL `postgresql+asyncpg://...`） | `app/core/db.py::create_async_engine` |
+| SQLAlchemy[asyncio] | ≥ 2.0 | 异步 ORM 引擎 + `async_sessionmaker` + 连接池（`pool_pre_ping=True`、可配 size/timeout/recycle） | `app/core/db.py` |
+| SQLModel | ≥ 0.0.22 | 声明式模型基类 `BaseModel(SQLModel)`；所有表 `table=True` + `__tablename__` | `app/models/base.py`、各模块 `model.py` |
+| Alembic | ≥ 1.13 | 数据库迁移；`migrations/env.py` 异步上下文；~55 个 revision | `migrations/` |
+| aiosqlite | ≥ 0.20 | **仅测试**：内存 SQLite 引擎（`sqlite+aiosqlite:///:memory:`）替代 Postgres | `backend/conftest.py::db_engine` |
 
-- **用途**：
-  - Agent 运行状态缓存
-  - Daemon WebSocket 会话管理
-  - 租约状态追踪
-  - 分布式锁（乐观并发控制）
-- **连接**：`settings.redis_url`，默认 `redis://localhost:6379/0`
-- **客户端**：`redis.asyncio.Redis`，单例，`health_check_interval=30`
-- **使用位置**：`agent/adapters/claude_code.py`（运行状态）、`daemon/ws_hub.py`（会话管理）
+**数据表清单**（grep `__tablename__` 命中，~41 张）：
+`organizations`、`user_organizations`、`user_roles`、`workspaces`、`workspace_relations`、`change_workspaces`、`task_workspaces`、`agent_run_workspaces`、`users`、`sessions`、`roles`、`role_permissions`、`api_keys`、`user_workspace_roles`、`changes`、`change_documents`、`tasks`、`change_reviews`、`audit_logs`、`agent_runs`、`agent_run_logs`、`agent_sessions`、`daemon_runtimes`、`daemon_task_leases`、`worktree_leases`、`git_operation_logs`、`git_identities`、`tool_operation_logs`、`tool_policies`、`scan_documents`、`spec_workspaces`、`spec_profile_manifests`、`spec_conflicts`、`releases`、`release_approvals`、`incidents`、`postmortems`、`platform_settings` 等。
 
-## 认证：JWT + bcrypt
+## 缓存与队列
 
-- **JWT 库**：python-jose (cryptography 后端)
-- **算法**：HS256
-- **Access Token**：15 分钟 TTL（可配置 `auth_access_ttl_minutes`）
-- **Refresh Token**：32 字节随机 token，14 天 TTL（可配置 `auth_refresh_ttl_days`），bcrypt 存储
-- **密码**：bcrypt，默认 cost 12（可配置 `auth_bcrypt_rounds`，测试中降到 4）
-- **Payload**：`{sub, email, is_admin, jti, iat, exp, typ}`
+| 依赖 | 版本 | 用途 | 接入点 |
+| --- | --- | --- | --- |
+| redis | ≥ 5.0（`redis.asyncio`） | 缓存 + pub/sub；AgentRun 日志走 pub/sub → SSE 推流；测试库 `REDIS_URL=redis://localhost:6379/15` | `app/core/redis.py::from_url` / `close_redis` |
 
-## 加密：NaCl (libsodium)
+## 认证与加密
 
-- **用途**：Git 凭证对称加密存储
-- **算法**：XChaCha20-Poly1305 (secretbox)
-- **密钥管理**：`SILLYSPEC_MASTER_KEY` 环境变量，格式 `<key_id>:<hex 32-byte key>`
-- **密钥版本**：支持多版本共存，解密时校验 key_id
-- **使用位置**：`git_identity/service.py`
+| 依赖 | 版本 | 用途 | 接入点 |
+| --- | --- | --- | --- |
+| python-jose[cryptography] | ≥ 3.3 | JWT 编解码（access/refresh token） | `app/core/security.py`（`from jose import JWTError, jwt`） |
+| passlib[bcrypt] | ≥ 1.7 | 密码哈希（bcrypt，rounds 可配 4–15，默认 12） | `app/core/security.py::password_hasher`、`auth/service.py` |
+| pynacl | ≥ 1.5 | NaCl SecretBox 主密钥加解密（`v1:` 前缀密文，环境变量 `SILLYSPEC_MASTER_KEY`） | `app/core/crypto.py`（`from nacl import secret, utils`），用于加密 git 凭据等敏感字段 |
 
-## AI Agent：Claude Code
+## HTTP 客户端
 
-- **用途**：AI Agent 执行引擎
-- **集成方式**：CLI 子进程调用 (`claude` 命令)
-- **适配器**：`agent/adapters/claude_code.py`（继承 `AgentAdapter` ABC）
-- **通信**：stdin/stdout 流式读取
-- **上下文注入**：通过 `context_builder.py` 渲染 `CLAUDE.md` 到工作目录
-- **进程管理**：asyncio 子进程，支持 kill/超时
-- **Docker 集成**：Dockerfile 中通过 npm 安装 `@anthropic-ai/claude-code`
+| 依赖 | 版本 | 用途 | 接入点 |
+| --- | --- | --- | --- |
+| httpx | ≥ 0.27（`AsyncClient`） | 外部 HTTP 调用 + 测试 ASGI 客户端 | `git_identity/providers/github.py`（OAuth，`timeout=15`）；测试 `httpx.ASGITransport` 直连 app |
 
-## Daemon 通信：WebSocket
+## 可观测
 
-- **用途**：后端与守护进程的双向实时通信
-- **端点**：`/api/daemon/ws`
-- **协议**：自定义 JSON 消息信封 `DaemonMessage {type, payload}`
-- **消息类型**：
-  - Server→Daemon：`task_available`, `heartbeat`
-  - Daemon→Server：`register`, `heartbeat_ack`, `lease_claim`, `lease_start`, `lease_complete`, `lease_messages`
-- **实现**：`daemon/ws_hub.py`（连接管理、心跳、广播、慢连接驱逐）
-- **租约系统**：`daemon/lease_service.py`（任务分配、心跳续期、超时回收）
+| 依赖 | 版本 | 用途 | 接入点 |
+| --- | --- | --- | --- |
+| structlog | ≥ 24.4 | 结构化事件日志（key=value） | `app/core/logging.py::configure_logging` + `get_logger` |
+| OpenTelemetry（可选） | — | 链路追踪 stub；仅当 `OTEL_ENDPOINT` 设置时初始化 | `app/core/telemetry.py`（当前为 `log.info("telemetry.init", status="stub")` 占位） |
 
-## Git 操作网关
+**请求追踪**：`request_id_middleware` 透传/生成 `x-request-id`，写入 `request.state` 和响应头，错误响应必带 `request_id`。
 
-- **用途**：代理 Git 操作，安全审计
-- **功能**：Git 命令执行、diff 收集、输出脱敏（`redact_output`）
-- **审计**：所有操作记录到 `git_operation_logs` 表
+## 构建 / 工具链
 
-## 工具执行网关
+| 依赖 / 工具 | 版本 | 用途 | 接入点 |
+| --- | --- | --- | --- |
+| hatchling | （build-backend） | 构建后端，wheel packages = `["app"]` | `[build-system]` |
+| uv | — | 包管理与运行（`uv run ruff` / `uv run pytest`） | local.yaml 命令 |
+| ruff | ≥ 0.6 | Lint + format | `[tool.ruff]`、`ruff.toml`（extend） |
+| mypy | ≥ 1.11 | 类型检查（非严格） | `[tool.mypy]` + pydantic 插件 |
+| pre-commit | ≥ 4.6 | 提交前钩子（PEP 735 dependency-groups dev 组） | `[dependency-groups]` |
+| pytest | ≥ 8 | 测试运行 | `[tool.pytest.ini_options]`（asyncio_mode=auto） |
+| pytest-asyncio / pytest-cov / anyio | ≥ 0.23 / ≥ 5 / ≥ 4 | 异步测试 + 覆盖率 + 多线程安全 | `[project.optional-dependencies].dev` |
 
-- **用途**：受控的 shell 命令执行
-- **策略控制**：`tool_policies` 表配置允许/阻止的命令、域名、路径限制
-- **安全**：路径校验、SSRF 防护、速率限制
-- **审计**：操作记录到 `tool_operation_logs` 表
+## 关键环境变量（`app/core/config.py::Settings`）
 
-## HTTP 客户端：httpx
-
-- **用途**：外部 HTTP 请求（如 GitHub API 调用）
-- **使用位置**：`git_identity/providers/github.py`
-
-## 前端解析：python-frontmatter
-
-- **用途**：解析带 YAML frontmatter 的 Markdown 文件
-- **使用位置**：工作空间扫描和文档解析
-
-## CORS 配置
-
-- **允许来源**：`settings.cors_allowed_origins`，默认 `["http://localhost:3000"]`
-- **配置方式**：JSON 数组或逗号分隔字符串
-- **凭证**：允许
-- **暴露头**：`x-request-id`
-
-## Docker 构建
-
-- **多阶段构建**：node-tools (Claude Code + SillySpec) -> builder (Python 依赖) -> runtime
-- **运行时依赖**：curl, ca-certificates, git, libstdc++6
-- **非 root 运行**：`app` 用户
-- **健康检查**：`curl -fsS http://127.0.0.1:8000/api/health`
-- **入口**：`docker-entrypoint.sh` -> `uvicorn app.main:app`
+- `DATABASE_URL`（必填）：异步 PG URL
+- `REDIS_URL`：默认 `redis://localhost:6379/0`
+- `SECRET_KEY`（必填，≥16 字符）：JWT 签名密钥
+- `LOG_LEVEL`：默认 `INFO`
+- `ENVIRONMENT`：`dev` / `test` / `prod`
+- `CORS_ALLOWED_ORIGINS`：JSON 数组或逗号分隔，默认 `["http://localhost:3000"]`
+- `OTEL_ENDPOINT`：可选，OTEL 上报地址
+- `COMMIT_SHA`：可选，否则 `git rev-parse` 探测
+- `AUTH_ACCESS_TTL_MINUTES` / `AUTH_REFRESH_TTL_DAYS` / `AUTH_BCRYPT_ROUNDS`
+- `PLATFORM_BOOTSTRAP_ADMIN_EMAIL/PASSWORD/DISPLAY_NAME`
+- `WORKTREE_BASE_DIR`：worktree 根目录（Windows/Linux 不同默认）
+- `SPEC_DATA_ROOT`：平台托管 spec 存储根目录（默认 `/data/sillyspec-data`）
+- `HOST_PATH_PREFIX` / `CONTAINER_PATH_PREFIX`：Docker 路径映射
+- `SILLYSPEC_MASTER_KEY`：NaCl 主密钥（`v1:` + hex，测试注入）

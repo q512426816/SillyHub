@@ -1,80 +1,75 @@
 ---
 author: qinyi
-created_at: 2026-06-10T00:00:00
+created_at: 2026-06-19 12:50:59
+source_commit: 0303536
+updated_at: 2026-06-19T04:50:59Z
+generator: sillyspec-scan
 ---
 
-# SillyHub Daemon -- 外部集成
+# sillyhub-daemon · 集成
 
-## 上游：SillyHub Server (FastAPI 后端)
+> 按集成对象分组。所有集成均基于 Node.js/TypeScript 实际源码。
 
-### REST API 集成
-- **注册**: `POST /api/daemon/register` -- 注册 runtime（含 provider、protocol、capabilities）
-- **心跳**: `POST /api/daemon/heartbeat` -- 定期上报存活状态（默认 15 秒间隔）
-- **Lease 声明**: `POST /api/daemon/leases/{lease_id}/claim` -- 认领待执行任务
-- **Lease 启动**: `POST /api/daemon/leases/{lease_id}/start` -- 标记任务开始
-- **Lease 心跳**: `POST /api/daemon/leases/{lease_id}/heartbeat` -- 续约
-- **消息上报**: `POST /api/daemon/leases/{lease_id}/messages` -- 流式事件转发
-- **Lease 完成**: `POST /api/daemon/leases/{lease_id}/complete` -- 上报最终结果（含 diff）
+## 1. Claude Agent SDK（Agent 执行核心）
 
-### WebSocket 集成
-- **连接**: `ws(s)://<server>/api/daemon/ws?runtime_id=<id>`
-- **接收**: `daemon:task_available`（任务通知）、`daemon:heartbeat`（心跳确认）
-- **发送**: `daemon:register`、`daemon:heartbeat_ack`、`daemon:lease_claim` 等
-- 协议常量定义在 `protocol.py`，必须与 `backend/app/modules/daemon/protocol.py` 保持同步
+- **依赖**：`@anthropic-ai/claude-agent-sdk` 0.3.181（package.json `dependencies`）
+- **封装位置**：`src/interactive/claude-sdk-driver.ts`
+- **用法**：
+  - `import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk'`，导入类型 `Query` / `CanUseTool` 等。
+  - `ClaudeSdkDriver.start(input, opts)`：调用 `sdkQuery({ prompt: AsyncIterable, options })` 启动同进程多轮（spike H2 签名）。
+  - `options` 按需注入 `canUseTool` / `model` / `allowedTools` / `resume`（字段缺失不写，让 SDK 走默认）。
+  - `ClaudeSdkDriver.interrupt(q)`：turn 级中断，调 `q.interrupt()`（spike D1：当前 turn 产 `error_during_execution` 但 query 不结束，可续轮）；q=null 或抛错 → no-op 返回 false。
+  - `canUseTool` 回调把 SDK 的 tool 权限请求桥接到 backend `PERMISSION_REQUEST/RESPONSE`（见 `permission-resolver.ts`）。
+- **平台分发 hack**：package.json `pnpm.overrides` 把 8 个平台 optional package（win32/linux/darwin × x64/arm64，linux 含 musl）统一解析到主包，规避 win32 等平台 native 二进制分发问题。
+- **错误**：`ClaudeExecutableNotFoundError`（claude 可执行解析失败）。
 
-### 认证
-- Bearer Token 认证，通过 `--token` CLI 选项传入
-- Token 持久化到 `~/.sillyhub/daemon/config.json`
-- HTTP 客户端 `trust_env=False`，绕过系统代理
+## 2. backend（WebSocket + HTTP）
 
-## 下游：本地 Agent CLI (12 种 Provider)
+### 2.1 WebSocket（实时通道）
+- **依赖**：`ws` ^8.18.0
+- **封装**：`src/ws-client.ts`（`WsClient`）
+- **连接**：`protocol.ts` 定义 `WS_PATH = '/api/daemon/ws'`，`new WebSocket(url)` 建连。
+- **事件**：`open` / `message` / `close` / `error`；`_handleMessage` 解析 JSON 为 `DaemonMessage` 后回调 `onMessage`。
+- **内建 RPC**：`_dispatchRpc` 分支处理 RPC 请求/响应（不污染 lease 消息分发），`RpcError`。
+- **心跳**：`send(msg)` 在 OPEN 时发 JSON 字符串。
 
-### Agent 二进制检测
-- 环境变量覆盖：`SILLYHUB_<PROVIDER>_PATH`（如 `SILLYHUB_CLAUDE_PATH`）
-- PATH 查找：`shutil.which()` 作为后备
-- 版本检测：`<binary> --version` + 正则匹配
+### 2.2 HTTP（lease 生命周期 + REST）
+- **依赖**：Node 20 原生 `fetch`（零 HTTP 库）
+- **封装**：`src/hub-client.ts`（`HubClient`）
+- **前缀**：`REST_PREFIX = '/api/daemon'`
+- **端点**：claim_lease / start_lease / lease_heartbeat / submit_messages / complete_lease 等。
+- **约定**：
+  - 无连接池，每次请求独立 fetch，`close()` 为 no-op（API 兼容）。
+  - body 字段 snake_case（runtime_id / claim_token / agent_run_id）对齐 backend Pydantic 模型。
+  - 超时 `AbortSignal.timeout(30_000)`。
+  - 非 2xx 抛 `HubHttpError`；网络/超时错误不包装，透传 fetch 原始异常。
+  - 不读 HTTP_PROXY（fetch 默认行为，等价 Python 旧实现 `trust_env=False`）。
 
-### 支持的 Provider 及协议
+### 2.3 受限文件 RPC
+- **封装**：`src/file-rpc.ts`：经 WS 通道的文件读写 RPC，强制校验目标路径在 `allowed_roots` 内，越界抛 `RpcError('forbidden')`，并防 tar 路径穿越（task-runner.ts）。
 
-| Provider | 二进制名 | 协议 | 最低版本 |
-|----------|----------|------|----------|
-| claude | claude | stream_json | 2.0.0 |
-| codex | codex | json_rpc | 0.100.0 |
-| copilot | copilot | jsonl | 1.0.0 |
-| gemini | gemini | stream_json | - |
-| cursor | cursor-agent | stream_json | - |
-| hermes | hermes | json_rpc | - |
-| kimi | kimi | json_rpc | - |
-| kiro | kiro-cli | json_rpc | - |
-| opencode | opencode | ndjson | - |
-| openclaw | openclaw | ndjson | - |
-| pi | pi | ndjson | - |
-| antigravity | agy | text | - |
+## 3. CLI（commander）
 
-### 子进程交互模式
-- `asyncio.create_subprocess_exec` 创建子进程
-- stdin 写入 prompt（JSON 或纯文本）
-- stdout 逐行读取并解析为结构化事件
-- stderr 后台 drain 防止管道阻塞
-- 超时控制（默认 10 秒）+ 进程 kill 兜底
+- **依赖**：`commander` ^12.1.0
+- **bin**：`sillyhub-daemon` → `./dist/cli.js`（package.json `bin`）
+- **入口**：`src/cli.ts` 的 `createProgram()`（导出为函数，非单例，便于 task-22 多次 parse argv）
+- **命令**：
+  - `start`：`--server` / `--token` / `--api-key`（token 与 api-key 互斥）/ `--workspace-dir` / `--poll-interval` / `--heartbeat-interval` / `--max-concurrent` / `--log-level` + terminal observer 组（`--open-terminal` / `--terminal-mode parsed|raw|both` / `--terminal-close-on-exit` / `--terminal-command`）
+  - `stop`：向运行中 daemon 发 SIGTERM（读 PID 文件）
+  - `status`：输出 State / PID / Runtime ID / Server URL / Config dir
+  - `logs [--tail N]`：查看最后 N 行日志（默认 50）
 
-## 本地文件系统
+## 4. 构建与运行时
 
-### 配置与数据目录
-- `~/.sillyhub/daemon/config.json` -- 守护进程配置
-- `~/.sillyhub/daemon/credentials.json` -- 凭证存储（mode 0600）
-- `~/.sillyhub/daemon/daemon.pid` -- 进程 PID 文件
-- `~/.sillyhub/daemon/daemon.log` -- 运行日志
-- `~/.sillyhub/daemon/workspaces/` -- 工作空间镜像目录
+- **构建**：`tsc`（`tsconfig.json`：NodeNext + strict + noUncheckedIndexedAccess + verbatimModuleSyntax + declaration + sourceMap，`rootDir=src`，`outDir=dist`）
+- **运行**：`node dist/cli.js`（`start` 脚本）
+- **开发**：`tsc --watch`（`dev` 脚本）；`tsc --noEmit`（`typecheck` 脚本）
+- **包管理**：pnpm 9.6.0（`packageManager`），`@types/node` 20.14.0
+- **测试运行**：`vitest run --passWithNoTests`（`test` 脚本，environment=node）
+- **全局链接**：README 指引 `npm link` 让 `sillyhub-daemon` 命令指向本项目（改源码后需 `pnpm build` 重新生成 dist）
 
-### Git 操作
-- `git clone -b <branch> <repo_url> <dir>` -- 首次克隆
-- `git pull --ff-only` -- 更新工作空间
-- `git status --porcelain` -- 检测变更
-- `git diff --shortstat` / `git diff` -- 收集变更统计和补丁
+## 5. 平台 / 外部工具（按需调用）
 
-## 跨平台兼容
-
-- Windows: `_on_rmtree_error` 处理 git objects 的只读文件删除
-- 进程检测: `os.kill(pid, 0)` 跨平台检查
-- PID 文件路径: 使用 `pathlib.Path` 确保 Windows/Linux 兼容
+- **git**：`workspace.ts` 的 WorkspaceManager 调用 git（spec 拉取/推送、状态），失败抛 `GitError`
+- **本机 agent 可执行**：`agent-detector.ts` 探测 claude / codex / gemini 等可执行
+- **系统终端**：`terminal-launcher.ts` 可选为每个 agent 任务开终端窗口 tail 日志（平台相关）

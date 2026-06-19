@@ -1,108 +1,56 @@
 ---
 author: qinyi
-created_at: 2026-06-10T00:00:00
+created_at: 2026-06-19 12:50:59
+source_commit: 0303536
+updated_at: 2026-06-19T04:50:59Z
+generator: sillyspec-scan
 ---
 
-# Frontend 项目概览
+# frontend 项目卡片
+
+> 覆盖旧版文档。基于 `frontend/src/` 事实采集。
 
 ## 项目简介
 
-Multi-Agent Platform Web 前端，是 SillySpec 原生的多 Agent 执行平台管理界面。提供工作空间管理、SillySpec 变更工作流、Agent 运行监控、拓扑可视化、审批中心等功能。
-
-项目名称: `multi-agent-platform-web`
-版本: `0.1.0`
-许可证: 私有项目
+- **名称**：frontend（multi-agent-platform 的 Web 前端子项目）
+- **定位**：SillyHub 多智能体平台的控制台前端，提供工作区管理、agent 执行与日志、daemon 交互式会话、变更（SillySpec）流程、组件拓扑、发布/运行时/成员/知识/事件/审批/审计等全功能 Web UI
+- **用户角色**：登录用户（含 admin / 普通成员），通过 `(dashboard)/admin` 管理组织/用户/角色权限，通过 `(dashboard)/workspaces/[id]/*` 操作工作区
+- **形态**：Next.js App Router 单体应用（RSC + Client Components + Route Handler），独立 `frontend/` 子目录，pnpm 包管理，Docker 镜像部署
+- **后端协作**：所有 API 经 Next.js rewrite 代理 `/api/*` → backend（默认 `http://localhost:8000`），含 REST 与 SSE 流式两类；前端不直接持有 backend host
 
 ## 技术栈
 
-| 分类 | 技术 |
-|------|------|
-| 框架 | Next.js 14 (App Router) |
-| 语言 | TypeScript 5.5 (strict) |
-| UI | React 18 + Tailwind CSS 3.4 + shadcn/ui |
-| 状态 | Zustand 4.5 (persist) |
-| 数据 | 原生 fetch (apiFetch 封装) |
-| 拓扑 | @xyflow/react (React Flow) |
-| 校验 | Zod (已安装，未使用) |
-| 测试 | Vitest + Testing Library |
-| 包管理 | pnpm 9.6 |
+| 类别 | 选型 |
+|---|---|
+| 框架 | Next.js 14.2.5（App Router / RSC, `experimental.typedRoutes`）+ React 18.3.1 |
+| 语言 | TypeScript strict（`noUncheckedIndexedAccess`, target ES2022），路径别名 `@/* → ./src/*` |
+| UI 主库 | Ant Design 6.4.4 + `@ant-design/icons` + `@ant-design/nextjs-registry` |
+| UI 补充 | shadcn/ui（components.json: default / rsc / slate / cssVariables）+ lucide-react |
+| 样式 | Tailwind 3.4.7 + tailwindcss-animate + postcss + autoprefixer；`cn()` 合并工具 |
+| 状态 | Zustand 4.5（`persist` 中间件，session store） |
+| 数据 | 原生 `fetch` + 统一网关 `lib/api.ts`（401 自动刷新）；React Query 依赖未启用 |
+| 流式 | `fetch + getReader + TextDecoder` 消费 SSE；3 个 Route Handler 透传 backend SSE |
+| 可视化 | `@xyflow/react` 12（ReactFlow，组件拓扑图） |
+| Markdown | `@uiw/react-markdown-preview` |
+| 校验 | zod + class-variance-authority + clsx + tailwind-merge |
+| 单测 | vitest 2 + jsdom + @testing-library/react + jest-dom（setup `src/test/setup.ts`） |
+| E2E | `@playwright/test ≥1.60` + `puppeteer 24`（依赖已声明，脚本未落地） |
+| Lint/类型 | eslint 8.57 + eslint-config-next；`tsc --noEmit` |
+| 构建 | `next build`（可选 `NEXT_BUILD_STANDALONE=1` standalone）；`Dockerfile` 生产镜像 |
+| 包管理 | pnpm（`pnpm-lock.yaml`；另有遗留 `package-lock.json`） |
+| 环境变量 | `NEXT_PUBLIC_API_BASE_URL`、`NEXT_PUBLIC_COMMIT_SHA` |
 
-## 功能模块
+## 关键入口
 
-### 认证系统
-- JWT Bearer Token 认证
-- 自动 token refresh + 重试
-- Session 持久化 (localStorage)
+- 根布局：`src/app/layout.tsx`（metadata + antd registry）
+- 主壳层：`src/app/(dashboard)/layout.tsx` + `src/components/app-shell.tsx`
+- 工作区：`src/app/(dashboard)/workspaces/[id]/layout.tsx`（嵌套，承载 12 个子路由）
+- 数据网关：`src/lib/api.ts`
+- 会话 store：`src/stores/session.ts`
+- SSE 透传：`src/app/api/**/stream/route.ts`（3 个）
 
-### 工作空间管理
-- 工作空间扫描、创建、激活、删除
-- 组件列表与详情
-- 拓扑图可视化 (React Flow)
-- 关系管理 (组件间依赖)
+## 命令（根 `local.yaml`）
 
-### 变更工作流 (SillySpec)
-- 变更创建与执行
-- 阶段流转 (brainstorm → propose → plan → execute → verify → archive)
-- 人工审批门禁 (proposal review, plan review, human test, archive confirm)
-- 文档矩阵与内容查看
-- 反馈提交
-
-### Agent 控制台
-- Agent Run 创建与管理
-- 实时日志流 (SSE + EventSource)
-- Agent 输入提交
-- Run 终止
-
-### 运维功能
-- Daemon 运行时管理 (12 个 AI Agent 提供商)
-- 发布管理 (创建/审批/部署/回滚)
-- 事件管理 (创建/更新/复盘)
-- 审计日志
-- 知识库
-- Git 身份管理
-- 审批中心
-
-## 路由结构
-
-| 路径 | 功能 |
-|------|------|
-| `/login` | 登录页 |
-| `/workspaces` | 工作空间列表 |
-| `/workspaces/[id]` | 工作空间首页 |
-| `/workspaces/[id]/changes` | 变更中心 |
-| `/workspaces/[id]/agent` | Agent 控制台 |
-| `/workspaces/[id]/components` | 组件列表 |
-| `/workspaces/[id]/components/topology` | 拓扑图 |
-| `/workspaces/[id]/releases` | 发布管理 |
-| `/workspaces/[id]/incidents` | 事件管理 |
-| `/workspaces/[id]/approvals` | 审批中心 |
-| `/workspaces/[id]/audit` | 审计日志 |
-| `/workspaces/[id]/knowledge` | 知识库 |
-| `/workspaces/[id]/scan-docs` | 扫描文档 |
-| `/workspaces/[id]/runtime` | 运行时 |
-| `/settings` | 系统设置 |
-| `/settings/git-identities` | Git 身份管理 |
-| `/runtimes` | Daemon 运行时 |
-
-## 开发命令
-
-```bash
-pnpm dev          # 启动开发服务器
-pnpm build        # 生产构建
-pnpm start        # 启动生产服务器
-pnpm lint         # ESLint 检查
-pnpm typecheck    # TypeScript 类型检查
-pnpm test         # 运行单元测试
-pnpm test:watch   # 监听模式运行测试
-```
-
-## 代码规模
-
-| 分类 | 文件数 |
-|------|--------|
-| 页面 (page.tsx) | 23 |
-| 布局 (layout.tsx) | 2 |
-| 组件 (.tsx) | 11 |
-| API 客户端 (.ts) | 20+ |
-| Store | 1 |
-| 测试 | 3 |
+- `build`：`cd frontend && pnpm build`
+- `test`：`cd frontend && pnpm test`
+- `lint`：`cd frontend && pnpm lint`

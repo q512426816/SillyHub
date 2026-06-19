@@ -266,6 +266,9 @@ logout() -> 清空 useSession + 跳转 /login
 - 2026-06-18: `/runtimes` treats `disabled` as a first-class daemon runtime state.
   Runtime cards expose disable/enable actions, summary stats include disabled count, and quick chat
   continues to offer only `online` providers.
+- 2026-06-19: `/runtimes` preserves usable runtime-card and interactive-session widths on desktop layouts.
+  The page uses a wider content shell, renders runtime cards in two columns when space allows, and stacks
+  the compound session workspace below the runtime list so its sidebar and detail panel remain readable.
 
 <!-- MANUAL_NOTES_END -->
 
@@ -279,3 +282,4 @@ logout() -> 清空 useSession + 跳转 /login
 | 2026-06-16 | ql-20260616-001-7f3a | 修复 AgentLogViewer/normalize/changes/tasks 页 5 处直接读 `log.content_redacted`（后端可为 null）导致的 Bootstrap 点击崩溃。`agent.ts` 类型改 `string \| null`，5 个使用点统一 `?? ""` 兜底；parseToolCallContent / toolCallDescription 签名扩展接受 null\|undefined。tsc 零错误 |
 | 2026-06-18 | ql-20260618-007-d9c0 | `/runtimes` runtime 卡片新增禁用/启用操作，状态元数据支持 `disabled`，统计区增加禁用数；`daemon.ts` API client 新增 disable/enable 调用。 |
 | 2026-06-18 | ql-20260618-009-f3a2 | `lib/changes.ts` transitionChange 的 provider/model 判断从 `!== undefined` 改为 truthy，与 executeChange 风格统一（后端 schema default=None，行为等价）。 |
+| 2026-06-19 | 2026-06-19-runtimes-layout | 放宽 `/runtimes` 页面容器，将复合会话工作区移到运行时列表下方全宽展示，避免卡片、会话表单和说明文字被多层分栏挤压。 |

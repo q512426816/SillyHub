@@ -1,102 +1,66 @@
 ---
 author: qinyi
-created_at: 2026-06-10T00:00:00
+created_at: 2026-06-19 12:50:59
+source_commit: 0303536
+updated_at: 2026-06-19T04:50:59Z
+generator: sillyspec-scan
 ---
 
-# Frontend 代码约定
+# frontend 代码约定
+
+> 基于 `frontend/src/` grep 摘录，覆盖旧版文档。
 
 ## 框架隐形规则
 
 ### Next.js App Router
 
-- **路由分组**: 使用 `(dashboard)` 和 `(auth)` 路由组控制布局嵌套，不影响 URL。
-- **全部 `"use client"`**: 当前所有页面组件均标记为客户端组件，无 Server Components 使用。
-- **无 `loading.tsx` / `error.tsx`**: 未使用 Next.js 内置的加载和错误边界文件。
-- **Metadata 导出**: 仅在 `src/app/layout.tsx` 中导出静态 metadata，页面级无 metadata。
+- **目录约定**：页面文件名固定 `page.tsx`，嵌套布局用 `layout.tsx`；用路由组 `(auth)` / `(dashboard)` 组织但不出现在 URL 中
+- **Server / Client 边界**：默认 RSC；需交互/状态/hooks 的页面/组件顶部显式 `"use client"`（grep 统计 51 处）
+- **Route Handler**：SSE 透传路由必须声明 `export const runtime = "nodejs"` + `export const dynamic = "force-dynamic"`，导出 `GET`（部分 `POST`），返回 `new Response(stream, { headers: { "Content-Type": "text/event-stream" } })`
+- **路径别名**：`@/*` → `./src/*`（tsconfig paths）
+- **typedRoutes**：`experimental.typedRoutes` 开启，路由类型受控
+- **metadata**：根 layout 用 `export const metadata: Metadata` 导出元信息（RSC 侧）
 
-### TypeScript
+### 数据访问
 
-- **strict 模式**: `strict: true` + `noUncheckedIndexedAccess: true`。
-- **路径别名**: `@/*` 映射到 `./src/*`，在 tsconfig 和 vitest.config 中均配置。
-- **接口命名**: API 响应类型使用 `interface`（如 `Workspace`, `ChangeRead`），复合类型使用 `type`。
-- **命名约定**:
-  - 页面: `export default function XxxPage()`
-  - 组件: `export function Xxx({ ... })`
-  - API 函数: `export async function xxxYyy()`
-  - 类型: PascalCase，后缀 `Input`/`Response`/`List`/`Read`
+- **统一出口**：所有后端调用走 `lib/api.ts` 的 `apiFetch()`，禁止直接 `fetch("/api/...")` 绕过（auth.ts 的 logout 是已知例外）
+- **路径前缀**：前端只调 `/api/*`，由 `next.config.mjs` rewrites 转发到 backend，不直接拼 backend host
+- **Token 刷新**：`apiFetch` 内部捕获 401 → 自动 POST `/api/auth/refresh` → 重放原请求
+- **无 React Query**：虽有 `@tanstack/react-query` 依赖，但 src 内 0 处使用；状态/缓存自管（页面 useEffect 拉数据 + Zustand session）
+
+### 状态
+
+- Zustand store 一律放 `src/stores/`，用 `create<T>()(...)` 签名（中间件用 `persist`）；组件用 `useXxx` selector hook
+
+### 类型
+
+- TypeScript strict + `noUncheckedIndexedAccess`：数组/对象索引访问需显式 narrowing 或兜底
+- 领域类型集中在 `lib/*.ts`（如 `lib/changes.ts` 的 `ChangeSummary` / `ChangeRead` / `ChangeList`），用 `export type` 暴露
+- zod 用于运行时校验（与 `class-variance-authority` + `clsx` + `tailwind-merge` 组合驱动 shadcn variants）
 
 ## 代码风格
 
-### API 调用模式
+### 命名
 
-所有后端调用通过 `apiFetch` 统一封装，每个业务域一个文件：
+- **组件**：PascalCase 文件名（`WorkspaceTabs.tsx`、`AgentModelInput.tsx`），命名空间子目录小写（`agent-log/`、`daemon/`）
+- **函数导出**：组件 `export function X({ ... }: Props)`，页面 `export default function XPage()`
+- **领域 client**：`lib/<domain>.ts` 暴露 `listXxx` / `getXxx` / `createXxx` / `updateXxx` 动词式 API
+- **测试**：`__tests__/` 目录约定（co-locate），文件名 `<name>.test.{ts,tsx}`
 
-```typescript
-// src/lib/workspaces.ts
-export async function listWorkspaces(): Promise<WorkspaceListResponse> {
-  return apiFetch<WorkspaceListResponse>("/api/workspaces");
-}
+### 样式
 
-export async function createWorkspace(input: CreateWorkspaceInput): Promise<Workspace> {
-  return apiFetch<Workspace>("/api/workspaces", {
-    method: "POST",
-    json: input,
-  });
-}
-```
+- 双 UI 库并存：
+  - 业务组件优先 Ant Design（`from "antd"`、`@ant-design/icons`）
+  - 原子/自定义控件用 shadcn `@/components/ui/*`，类名经 `cn()`（`clsx` + `tailwind-merge`）合并
+- Tailwind utility 为主，shadcn 用 CSS variables 主题（`globals.css` 定义）
 
-### 页面组件模式
+### 导出风格
 
-页面组件直接调用 API 函数，使用 `useState` + `useEffect` 管理数据获取：
+- 类型与实现同文件导出（`export type Foo = {...}` 紧邻 `export function useFoo()`）
+- Route Handler 用具名导出 `GET` / `POST`，不写默认导出
 
-```typescript
-"use client";
-import { useState, useEffect } from "react";
+### 测试
 
-export default function SomePage() {
-  const [data, setData] = useState(null);
-  useEffect(() => {
-    fetchData().then(setData);
-  }, []);
-  // ... render
-}
-```
-
-### 状态管理模式
-
-Zustand + persist middleware，store 定义包含接口、状态、actions：
-
-```typescript
-interface SessionState extends SessionTokens {
-  hydrated: boolean;
-  user: SessionUser | null;
-  setUser: (_user: SessionUser | null) => void;
-  setTokens: (_tokens: SessionTokens) => void;
-  clear: () => void;
-}
-
-export const useSession = create<SessionState>()(
-  persist((set) => ({ ... }), { name: "storage-key" })
-);
-```
-
-### 样式约定
-
-- 使用 Tailwind CSS + shadcn/ui CSS Variables 主题系统。
-- 颜色通过 HSL 变量定义：`hsl(var(--primary))`。
-- 条件样式使用模板字符串拼接 Tailwind 类名。
-- 工具函数 `cn()` (clsx + tailwind-merge) 在 `src/lib/utils.ts` 中定义，但当前组件中直接拼接类名居多。
-
-### 组件结构
-
-- shadcn/ui 基础组件放在 `src/components/ui/`，使用 CVA (class-variance-authority)。
-- 业务组件放在 `src/components/`，直接导出命名函数。
-- 复杂组件拆分子模块目录：如 `agent-log/` 下含 `normalize.ts`、`tool-renderers.tsx`、`types.ts`。
-
-## 典型代码模式
-
-1. **API 客户端文件**: `src/lib/xxx.ts` — 定义类型接口 + 导出 async 函数
-2. **页面组件**: `"use client"` + useState/useEffect + API 调用 + JSX 渲染
-3. **布局守卫**: `(dashboard)/layout.tsx` 检查 session → 无 token 重定向
-4. **SSE 流式客户端**: `AgentRunStreamClient` 类封装 EventSource + 自动重连
-5. **导航配置**: `AppShell` 中定义 `NavItem[]` 数组，支持相对/绝对路径解析
+- vitest + jsdom + @testing-library/react
+- setup 在 `src/test/setup.ts`，jest-dom 自定义匹配器
+- 测试与被测同模块 `__tests__/` 下，便于就近维护
