@@ -527,13 +527,28 @@ class DaemonService:
 
     async def _build_claim_payload(self, lease: DaemonTaskLease) -> dict:
         """Build execution context payload for a claimed lease."""
+        lease_meta = dict(lease.metadata_ or {})
         payload: dict = {
             "lease_id": str(lease.id),
             "agent_run_id": None,
             "workspace_id": None,
             "session_id": None,
             "tool_config": {},
+            # gap-5（补丁遗漏）：claim payload 必须带 lease.kind，否则 daemon
+            # execPayload.kind 为 undefined → 走 batch task_runner（422）。
+            "kind": lease.kind,
         }
+        # gap-5：interactive lease agent_run_id=NULL（D-005），不走 agent_run 提取分支，
+        # 从 lease metadata 取首 turn 参数（prepare_interactive_dispatch 写入），
+        # 供 daemon _startInteractiveSession 构造 SessionManager.create 输入。
+        if lease.kind == "interactive":
+            payload["agent_session_id"] = lease_meta.get("session_id")
+            payload["run_id"] = lease_meta.get("run_id")
+            payload["prompt"] = lease_meta.get("prompt")
+            payload["provider"] = lease_meta.get("provider")
+            payload["model"] = lease_meta.get("model")
+            payload["root_path"] = lease_meta.get("cwd") or lease_meta.get("root_path")
+            return payload
 
         if lease.agent_run_id is None:
             return payload
