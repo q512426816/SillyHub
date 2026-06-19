@@ -246,6 +246,7 @@ export class SessionManager {
     const state: SessionState = {
       sessionId: input.sessionId,
       leaseId: input.leaseId,
+      claimToken: input.claimToken,
       inputQueue,
       status: 'running',
       currentRunId: input.firstRunId,
@@ -747,6 +748,12 @@ export class SessionManager {
     const state: SessionState = {
       sessionId: record.sessionId,
       leaseId: record.leaseId,
+      // gap-2：恢复路径的 claimToken 留空——崩溃恢复时 lease.claim_token 已被
+      // backend rotate（recover_session_after_daemon_restart step 7），旧 token 失效。
+      // 恢复后的 inject 由 backend SESSION_INJECT 重新下发新 claim_token；但本任务
+      // 范围（task-01/02/03）不改恢复链路（task-05/10 owns），故占位空串不破坏类型。
+      // 后续 task（恢复路径 token 协商）若需要会经 SESSION_INJECT payload 刷新。
+      claimToken: '',
       agentSessionId: record.agentSessionId,
       inputQueue,
       status: 'reconnecting',

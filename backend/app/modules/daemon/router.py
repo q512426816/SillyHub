@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Depends, Header, Query, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -335,6 +335,76 @@ async def sync_lease_status(
     )
 
 
+# ── Interactive run terminal close (gap-3, design §4) ────────────────────────
+# Daemon uplink: SDK result → close AgentRun. Auth via X-Claim-Token header
+# (lease-scoped, 32-byte random) instead of the body claim_token used by sync.
+# Distinct from sync_agent_run_status: this is for interactive sessions where
+# lease.agent_run_id is NULL (D-005@v1) and the run id comes from the path.
+
+
+class InteractiveRunResultRequest(BaseModel):
+    """Body for POST /leases/{lease_id}/runs/{run_id}/result (gap-3).
+
+    Field names mirror the SDK result message shape (snake_case) so the daemon
+    can forward verbatim without renaming.
+    """
+
+    # SDK result.subtype / top-level status: 'success' | 'error_during_execution' | others
+    status: str = Field(min_length=1, max_length=64)
+    is_error: bool = False
+    # SDK result.subtype (e.g. 'success', 'error_during_execution', 'error_max_turns')
+    subtype: str | None = Field(default=None, max_length=64)
+    # Optional human-readable summary; stored redacted on AgentRun.output_redacted
+    result_summary: str | None = Field(default=None, max_length=20000)
+
+
+class InteractiveRunResultResponse(BaseModel):
+    agent_run_id: uuid.UUID
+    status: str
+
+
+@router.post(
+    "/leases/{lease_id}/runs/{run_id}/result",
+    response_model=InteractiveRunResultResponse,
+)
+async def close_interactive_run(
+    lease_id: uuid.UUID,
+    run_id: uuid.UUID,
+    data: InteractiveRunResultRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+    # gap-3 / design §4: lease-scoped claim token in header (distinct from the
+    # body claim_token of sync/heartbeat). Fastapi Header() is case-insensitive.
+    x_claim_token: Annotated[str, Header(alias="X-Claim-Token", min_length=1)],
+) -> InteractiveRunResultResponse:
+    """Close an interactive AgentRun from a daemon SDK result (gap-3 / design §4).
+
+    Daemon ``SessionManager._onResult`` → ``hubClient.notifyRunResult`` → here.
+    The lease is verified via the ``X-Claim-Token`` header (lease-scoped), and
+    the run is bound to the lease's session to prevent cross-session injection.
+    Idempotent on already-terminal runs.
+
+    Auth: ``get_current_principal`` accepts the daemon's ``X-API-Key`` (long-lived
+    credential issued at register time); ``X-Claim-Token`` authorizes the specific
+    lease. A browser JWT would also pass ``get_current_principal`` but normal
+    callers are daemon-side only.
+    """
+    svc = DaemonService(session)
+    agent_run = await svc.close_interactive_run(
+        lease_id,
+        run_id,
+        x_claim_token,
+        status=data.status,
+        is_error=data.is_error,
+        subtype=data.subtype,
+        result_summary=data.result_summary,
+    )
+    return InteractiveRunResultResponse(
+        agent_run_id=agent_run.id,
+        status=agent_run.status or "failed",
+    )
+
+
 @router.get(
     "/leases/{lease_id}",
     response_model=DaemonTaskLeaseRead,
@@ -503,6 +573,19 @@ class SessionControlResponse(BaseModel):
     current_run_id: uuid.UUID | None = None
 
 
+class SessionEndRequest(BaseModel):
+    """gap-4 (design §5): daemon uplink body for POST /sessions/{id}/end.
+
+    Optional body carried by the daemon ``notifySessionEnd`` call. ``status``
+    is informational (the backend reconciles to ``ended`` regardless — failed
+    sessions are still driven through end_session by the daemon after fail()).
+    ``reason`` is recorded into the ``session_ended`` SSE event for UI context.
+    """
+
+    status: Literal["ended", "failed"] | None = None
+    reason: str | None = Field(default=None, max_length=2000)
+
+
 # ── Interactive session permission approval (task-08, FR-07 / D-007@v1) ──────
 # DTOs inline (per task-08 allowed_paths: schema.py is the batch DTO home).
 # The service is wired via get_permission_service so the request-scoped DB
@@ -656,10 +739,22 @@ async def end_session(
     session: SessionDep,
     user: TaskRunAgentUser,
     reason: str = Query(default="manual"),
+    # gap-4 (design §5): daemon uplink body. Optional so the front-end
+    # (query-only) and the daemon (body) can share this endpoint. When the
+    # body carries a reason it takes precedence over the query param.
+    end_body: SessionEndRequest | None = None,
 ) -> SessionControlResponse:
-    """End an interactive session: single reconciliation of session/lease/run (FR-05)."""
+    """End an interactive session: single reconciliation of session/lease/run (FR-05).
+
+    gap-4 (design §5): daemon uplink. The daemon ``SessionManager.end/fail`` →
+    ``hubClient.notifySessionEnd`` → this endpoint with ``{status, reason}`` in
+    the body and ``X-API-Key`` auth (resolved by ``get_current_principal`` to the
+    runtime owner). The front-end still calls with ``?reason=manual`` (no body);
+    both paths converge on ``service.end_session``. Body reason wins when present.
+    """
+    effective_reason = end_body.reason if (end_body and end_body.reason) else reason
     svc = DaemonService(session)
-    result = await svc.end_session(session_id, user.id, reason=reason)
+    result = await svc.end_session(session_id, user.id, reason=effective_reason)
     return SessionControlResponse(
         session_id=result.agent_session.id,
         status=result.agent_session.status or "ended",

@@ -49,6 +49,8 @@ import { WorkspaceManager } from './workspace.js';
 import { CredentialManager } from './credential.js';
 import { TaskRunner } from './task-runner.js';
 import { Daemon } from './daemon.js';
+import { ClaudeSdkDriver } from './interactive/claude-sdk-driver.js';
+import { SessionManager } from './interactive/session-manager.js';
 
 // ── 路径访问（可测试性：函数返回，task-22 vi.spyOn 可 mock）──────────────────
 
@@ -383,7 +385,33 @@ export async function startAction(opts: StartOptions): Promise<number> {
   // 字段决定是否写日志 + 弹独立终端。之前漏传，导致 config 一直走兜底（observer
   // 字段未生效）。
   const taskRunner = new TaskRunner(client, workspaceMgr, credentialMgr, config);
-  const daemon = new Daemon(config, client, taskRunner);
+
+  // task-04（D-002@v3 补丁 gap-1）：注入 SessionManager + daemon 桥接 deps。
+  //
+  // 组装顺序（design §2 + R1 循环引用）：
+  //   1. new ClaudeSdkDriver() —— interactive session 的 SDK 驱动（与 batch TaskRunner 并存）
+  //   2. new SessionManager({ driver, onTurnResult/onTurnMessage/onSessionEnd 闭包 })
+  //      —— deps 闭包内引用 daemon（daemon 此刻尚未构造，闭包延迟绑定生效）
+  //   3. new Daemon(config, client, taskRunner, { sessionManager })
+  //      —— daemon 构造后赋值，deps 闭包此刻可正确 forward 到 daemon.onTurnResult 等
+  //
+  // 闭包延迟绑定（R1）：deps 引 daemon、daemon 引 sessionManager，用 `let daemon` 先声明，
+  // deps 闭包内 `daemon.onTurnResult(...)` 在 daemon 赋值后调用时才解析（JS 闭包捕获引用）。
+  // 不用 circular import、不用 daemon 构造后回填 deps（避免双段初始化时序问题）。
+  //
+  // 桥接方向（design §6）：
+  //   deps.onTurnResult    → daemon.onTurnResult    → hubClient.notifyRunResult   → backend close_interactive_run
+  //   deps.onTurnMessage   → daemon.onTurnMessage   → hubClient.submitMessages    → backend SSE turn_progress
+  //   deps.onSessionEnd    → daemon.onSessionEnd    → hubClient.notifySessionEnd  → backend end_session
+  const driver = new ClaudeSdkDriver();
+  let daemon: Daemon;
+  const sessionManager = new SessionManager({
+    driver,
+    onTurnResult: (sessionId, runId, result) => daemon.onTurnResult(sessionId, runId, result),
+    onTurnMessage: (sessionId, runId, msg) => daemon.onTurnMessage(sessionId, runId, msg),
+    onSessionEnd: (sessionId, status) => daemon.onSessionEnd(sessionId, status),
+  });
+  daemon = new Daemon(config, client, taskRunner, { sessionManager });
 
   // step 6: 写 PID 文件（对齐 Python __main__.py:106 `_write_pid(os.getpid())`）。
   await writePid(process.pid);

@@ -131,7 +131,11 @@ class TestBatchProtocolNoRegression:
 
 
 class TestSessionInjectPayload:
-    """SESSION_INJECT payload schema (AC-03, AC-05)."""
+    """SESSION_INJECT payload schema (AC-03, AC-05).
+
+    gap-2 (D-002@v3 patch design §3): ``claim_token`` is now a required field
+    so the daemon can store it in SessionState for submitMessages / notifyRunResult.
+    """
 
     def test_valid_with_uuid_strings(self) -> None:
         p = SessionInjectPayload(
@@ -139,11 +143,13 @@ class TestSessionInjectPayload:
             lease_id=LEASE_UUID,
             run_id=RUN_UUID,
             prompt="请把这段代码再优化一下",
+            claim_token="ctoken-abc",
         )
         assert p.session_id == uuid.UUID(SESSION_UUID)
         assert p.lease_id == uuid.UUID(LEASE_UUID)
         assert p.run_id == uuid.UUID(RUN_UUID)
         assert p.prompt == "请把这段代码再优化一下"
+        assert p.claim_token == "ctoken-abc"
 
     def test_valid_with_uuid_objects(self) -> None:
         p = SessionInjectPayload(
@@ -151,6 +157,7 @@ class TestSessionInjectPayload:
             lease_id=uuid.UUID(LEASE_UUID),
             run_id=uuid.UUID(RUN_UUID),
             prompt="hello",
+            claim_token="ctoken",
         )
         assert isinstance(p.session_id, uuid.UUID)
 
@@ -160,11 +167,21 @@ class TestSessionInjectPayload:
                 session_id=SESSION_UUID,
                 lease_id=LEASE_UUID,
                 run_id=RUN_UUID,
+                claim_token="ctoken",
             )
         with pytest.raises(ValidationError):
             SessionInjectPayload(  # type: ignore[call-arg]
                 session_id=SESSION_UUID,
                 lease_id=LEASE_UUID,
+                prompt="p",
+                claim_token="ctoken",
+            )
+        # gap-2: claim_token is now required
+        with pytest.raises(ValidationError):
+            SessionInjectPayload(  # type: ignore[call-arg]
+                session_id=SESSION_UUID,
+                lease_id=LEASE_UUID,
+                run_id=RUN_UUID,
                 prompt="p",
             )
 
@@ -175,6 +192,7 @@ class TestSessionInjectPayload:
                 lease_id=LEASE_UUID,
                 run_id=RUN_UUID,
                 prompt="p",
+                claim_token="ctoken",
             )
 
     def test_prompt_empty_allowed_at_protocol_layer(self) -> None:
@@ -188,6 +206,7 @@ class TestSessionInjectPayload:
             lease_id=LEASE_UUID,
             run_id=RUN_UUID,
             prompt="",
+            claim_token="ctoken",
         )
         assert p.prompt == ""  # 模型层不拒绝空字符串
 

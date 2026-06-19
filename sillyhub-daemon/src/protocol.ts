@@ -141,6 +141,15 @@ export interface SessionInjectPayload {
   run_id: string;
   /** 用户追问文本（非空字符串，协议层只声明 string，非空校验由 backend service 层做）。 */
   prompt: string;
+  /**
+   * gap-2（D-002@v3 补丁 design §3）：lease 级 claim_token。
+   *
+   * backend prepare_interactive_dispatch 时生成写入 lease metadata，首 turn +
+   * 后续 inject SESSION_INJECT 均携带。daemon 存入 SessionState.claimToken，
+   * 供 onTurnMessage → hubClient.submitMessages + gap-3 notifyRunResult 复用
+   *（桥接在 task-04 cli.ts 注入）。
+   */
+  claim_token: string;
 }
 
 /**

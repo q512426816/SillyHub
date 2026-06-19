@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import enum
 import json
+import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -316,6 +317,9 @@ class RunPlacementService:
         lease_id: uuid.UUID
         runtime_id: uuid.UUID
         run_id: uuid.UUID
+        # gap-2（D-002@v3 补丁）：lease 级 claim_token，供 create_session 在首 turn
+        # SESSION_INJECT payload 中直接携带（避免再查一次 lease metadata）。
+        claim_token: str
 
     async def prepare_interactive_dispatch(
         self,
@@ -364,11 +368,17 @@ class RunPlacementService:
 
         lease_id = uuid.uuid4()
         now = datetime.now(UTC)
+        # gap-2（D-002@v3 补丁 design §3 / §6 step 1）：interactive lease 在创建时
+        # 即生成 claim_token 写入 metadata，使首 turn SESSION_INJECT payload 能携带
+        # claim_token 给 daemon（daemon claim 后复用同一 token，claim_lease 不重新生成）。
+        # 与 batch lease 区分：batch lease 无 claim_token，claim_lease 时才生成。
+        claim_token = secrets.token_hex(32)
         metadata: dict = {
             "session_id": str(agent_session_id),
             "run_id": str(agent_run_id),
             "prompt": prompt,
             "provider": provider,
+            "claim_token": claim_token,
         }
         if model:
             metadata["model"] = model
@@ -411,6 +421,7 @@ class RunPlacementService:
             lease_id=lease_id,
             runtime_id=runtime_id,
             run_id=agent_run_id,
+            claim_token=claim_token,
         )
 
     async def notify_interactive_dispatch(

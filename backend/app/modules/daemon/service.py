@@ -487,7 +487,19 @@ class DaemonService:
             )
 
         now = datetime.now(UTC)
-        claim_token = secrets.token_hex(32)
+        metadata = dict(lease.metadata_ or {})
+        # gap-2（D-002@v3 补丁 design §3）：interactive lease 在
+        # prepare_interactive_dispatch 时已生成 claim_token 写入 metadata，这里
+        # 复用同一 token（不重新生成），保证 SESSION_INJECT 下发的 claim_token 与
+        # lease metadata 一致，daemon claim 后持有的 token 对后续 start/heartbeat/
+        # submit_messages/close_interactive_run 验证都有效。batch lease 无预生成
+        # claim_token，走原逻辑生成新 token。
+        existing_token = metadata.get("claim_token")
+        if existing_token:
+            claim_token = existing_token
+        else:
+            claim_token = secrets.token_hex(32)
+            metadata["claim_token"] = claim_token
 
         # Update lease — keep original runtime_id if already set
         lease.status = "claimed"
@@ -495,8 +507,6 @@ class DaemonService:
         lease.lease_expires_at = now + timedelta(seconds=60)
         if not lease.runtime_id:
             lease.runtime_id = runtime_id
-        metadata = dict(lease.metadata_ or {})
-        metadata["claim_token"] = claim_token
         lease.metadata_ = metadata
         flag_modified(lease, "metadata_")
         lease.updated_at = now
@@ -1102,6 +1112,153 @@ class DaemonService:
         )
         return agent_run
 
+    # ── Interactive run terminal close (gap-3, design §4) ──────────────────
+
+    async def close_interactive_run(
+        self,
+        lease_id: uuid.UUID,
+        run_id: uuid.UUID,
+        claim_token: str,
+        *,
+        status: str,
+        is_error: bool,
+        subtype: str | None = None,
+        result_summary: str | None = None,
+    ) -> AgentRun:
+        """Close an interactive AgentRun from daemon SDK result (gap-3 / design §4).
+
+        Daemon ``SessionManager._onResult`` → ``hubClient.notifyRunResult`` → this
+        endpoint. The lease is verified via ``claim_token``; the run is located by
+        ``run_id`` (interactive lease has ``agent_run_id=NULL`` per D-005@v1, so we
+        cannot read it off the lease row) and bound to the lease's session via
+        ``lease.metadata.session_id`` to prevent cross-session run injection.
+
+        Terminal mapping (design §4):
+          - status=success → AgentRun.status='completed'
+          - status=error_during_execution → AgentRun.status='failed'
+            (interrupted semantics; error_code='interactive_interrupted')
+          - any other is_error → AgentRun.status='failed'
+            (error_code='interactive_failed')
+
+        Idempotent: an AgentRun already in TERMINAL_TURN_STATUSES is a no-op
+        (returns the row unchanged) so daemon retries after a transient network
+        blip do not double-write or flip a completed run back to failed.
+
+        Raises ``DaemonAgentRunNotFound`` when the run does not exist or is not
+        bound to the lease's session (resource-hiding 404 — no existence leak).
+        """
+        lease = await self._get_lease_and_verify_token(lease_id, claim_token)
+        lease_meta = lease.metadata_ or {}
+        bound_session_id_raw = lease_meta.get("session_id")
+
+        agent_run = await self._session.get(AgentRun, run_id)
+        if agent_run is None:
+            raise DaemonAgentRunNotFound(
+                f"AgentRun '{run_id}' not found for lease '{lease_id}'.",
+                details={
+                    "lease_id": str(lease_id),
+                    "agent_run_id": str(run_id),
+                },
+            )
+
+        # Bind check: the run must belong to the lease's session. interactive
+        # lease.agent_run_id is NULL (D-005@v1), so session_id is the link.
+        # Missing bound session_id in metadata is treated as invariant failure.
+        if (
+            bound_session_id_raw is None
+            or agent_run.agent_session_id is None
+            or str(agent_run.agent_session_id) != str(bound_session_id_raw)
+        ):
+            raise DaemonAgentRunNotFound(
+                f"AgentRun '{run_id}' is not bound to lease '{lease_id}' session.",
+                details={
+                    "lease_id": str(lease_id),
+                    "agent_run_id": str(run_id),
+                    "lease_session_id": bound_session_id_raw,
+                    "run_session_id": (
+                        str(agent_run.agent_session_id) if agent_run.agent_session_id else None
+                    ),
+                },
+            )
+
+        # Idempotent: already terminal → no-op return (daemon retry safety).
+        if agent_run.status in TERMINAL_TURN_STATUSES:
+            log.info(
+                "interactive_run_close_already_terminal",
+                lease_id=str(lease_id),
+                agent_run_id=str(agent_run.id),
+                status=agent_run.status,
+            )
+            return agent_run
+
+        now = datetime.now(UTC)
+        # Map SDK result → AgentRun terminal status (design §4).
+        if status == "success" and not is_error:
+            agent_run.status = "completed"
+            agent_run.exit_code = 0
+        elif status == "error_during_execution" or is_error:
+            agent_run.status = "failed"
+            agent_run.exit_code = 1
+            # error_during_execution = interrupted turn (spike D1 / SDK abort);
+            # other errors are genuine failures. error_code keeps them distinct.
+            agent_run.error_code = (
+                "interactive_interrupted"
+                if status == "error_during_execution"
+                else "interactive_failed"
+            )
+        else:
+            # Unknown status → conservative failed (never leave a half-state).
+            agent_run.status = "failed"
+            agent_run.exit_code = 1
+            agent_run.error_code = "interactive_unknown_status"
+
+        agent_run.finished_at = now
+        if result_summary:
+            # Redact via git_gateway redact_output to avoid leaking secrets in
+            # the stored summary (mirrors batch completeLease path).
+            try:
+                agent_run.output_redacted = redact_output(result_summary)
+            except Exception:
+                agent_run.output_redacted = result_summary[:4000]
+
+        self._session.add(agent_run)
+        await self._session.commit()
+        await self._session.refresh(agent_run)
+
+        # Publish terminal event so SSE stream (task-06) emits turn_completed.
+        try:
+            redis = get_redis()
+            await redis.publish(
+                f"agent_run:{agent_run.id}",
+                json.dumps(
+                    {
+                        "event": "status_changed",
+                        "status": agent_run.status,
+                        "lease_id": str(lease_id),
+                        "agent_run_id": str(agent_run.id),
+                        "subtype": subtype,
+                    },
+                    default=str,
+                ),
+            )
+        except Exception:
+            log.warning(
+                "interactive_run_close_redis_publish_failed",
+                lease_id=str(lease_id),
+                agent_run_id=str(agent_run.id),
+            )
+
+        log.info(
+            "interactive_run_closed",
+            lease_id=str(lease_id),
+            agent_run_id=str(agent_run.id),
+            status=agent_run.status,
+            sdk_status=status,
+            is_error=is_error,
+            subtype=subtype,
+        )
+        return agent_run
+
     # ── Lease expiry / rollback ────────────────────────────────────────────
 
     async def handle_lease_expiry(self, agent_run_id: UUID) -> None:
@@ -1467,6 +1624,9 @@ class DaemonService:
                 "lease_id": str(dispatch.lease_id),
                 "run_id": str(run.id),
                 "prompt": prompt,
+                # gap-2：首 turn SESSION_INJECT 携带 lease 级 claim_token，
+                # daemon 存入 SessionState.claimToken。
+                "claim_token": dispatch.claim_token,
             },
         )
         if not control_ok:
@@ -1603,6 +1763,12 @@ class DaemonService:
         # Dispatch the new turn control message.
         from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
+        # gap-2：从 lease metadata 取 claim_token（claim 时已写入或 prepare 时预生成），
+        # 后续 turn 的 SESSION_INJECT 仍携带同一 lease 级 claim_token（跨 turn 复用）。
+        lease_row = await self._session.get(DaemonTaskLease, session.lease_id)
+        lease_meta = dict((lease_row.metadata_ if lease_row else None) or {})
+        inject_claim_token = lease_meta.get("claim_token", "")
+
         hub = get_daemon_ws_hub()
         control_ok = await hub.send_session_control(
             session.runtime_id,  # type: ignore[arg-type]
@@ -1612,6 +1778,7 @@ class DaemonService:
                 "lease_id": str(session.lease_id),
                 "run_id": str(run.id),
                 "prompt": prompt,
+                "claim_token": inject_claim_token,
             },
         )
         if not control_ok:

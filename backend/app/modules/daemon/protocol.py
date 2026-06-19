@@ -136,6 +136,10 @@ class SessionInjectPayload(BaseModel):
     lease_id: uuid.UUID
     run_id: uuid.UUID
     prompt: str  # non-empty enforced by task-05 service layer
+    # gap-2（D-002@v3 补丁 design §3）：lease 级 claim_token，daemon 存入
+    # SessionState.claimToken，供 onTurnMessage→submitMessages + gap-3
+    # notifyRunResult 复用。首 turn（create_session）+ 后续 inject_session 均携带。
+    claim_token: str
 
 
 class SessionControlPayload(BaseModel):

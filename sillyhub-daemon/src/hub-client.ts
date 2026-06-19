@@ -414,6 +414,121 @@ export class HubClient {
     );
   }
 
+  // ── gap-3 / gap-4 (D-002@v3 patch design §4 / §5)：daemon → server 反向通知 ──
+
+  /**
+   * gap-3（design §4）：上报 interactive AgentRun 终态（SDK result）。
+   *
+   * 端点：POST {REST_PREFIX}/leases/{leaseId}/runs/{runId}/result
+   * 鉴权：X-Claim-Token header（lease 级，区别于 sync 的 body claim_token）；
+   *       端点本身仍走 _headers() 的 X-API-Key / Bearer（daemon 长期凭证）。
+   *
+   * 调用链：SessionManager._onResult → deps.onTurnResult → daemon 桥接（task-04）
+   * → hubClient.notifyRunResult → backend close_interactive_run。
+   *
+   * body 字段对齐 backend InteractiveRunResultRequest（snake_case）：
+   *   - status: SDK result 顶层状态（'success' | 'error_during_execution' | 其他）
+   *   - is_error: SDK result.is_error
+   *   - subtype: SDK result.subtype（可选）
+   *   - result_summary: 可读摘要（可选，backend redact 后存 output_redacted）
+   *
+   * **鉴权头拼接**：claimToken 不能进 body（backend 用 Header(alias='X-Claim-Token')
+   * 解析），故单独构造 fetch 而非走 _request（_request 只发 _headers() 的标准头）。
+   * 复用 _headers() 的基础鉴权（apiKey/Bearer）+ Content-Type，叠加 X-Claim-Token。
+   *
+   * **失败语义**（对齐 _request）：
+   *   - HTTP 非 2xx → HubHttpError（含 status/bodyText/url/method）；
+   *   - 404 = lease/run 不存在或 run 未绑定到 lease session（resource-hiding）；
+   *   - 401 = X-Claim-Token 不匹配 / api-key 无效；
+   *   - 网络/超时 → 透传 fetch 原始错误。
+   *
+   * @param leaseId  interactive lease.id（SessionState.leaseId）
+   * @param claimToken  lease 级 claim_token（SessionState.claimToken）
+   * @param runId  当前 turn 的 AgentRun.id（SessionState.currentRunId at result time）
+   * @param payload  { status, is_error, subtype?, result_summary? }
+   */
+  async notifyRunResult(
+    leaseId: string,
+    claimToken: string,
+    runId: string,
+    payload: {
+      status: string;
+      is_error: boolean;
+      subtype?: string;
+      result_summary?: string;
+    },
+  ): Promise<Record<string, unknown>> {
+    const path = `${REST_PREFIX}/leases/${encodeURIComponent(
+      leaseId,
+    )}/runs/${encodeURIComponent(runId)}/result`;
+    const url = `${this.baseUrl}${path}`;
+    // _headers() 已含 Content-Type + apiKey/Bearer；追加 lease 级 claim_token。
+    const headers: Record<string, string> = {
+      ...this._headers(),
+      'X-Claim-Token': claimToken,
+    };
+    const body: Record<string, unknown> = {
+      status: payload.status,
+      is_error: payload.is_error,
+    };
+    if (payload.subtype !== undefined) {
+      body.subtype = payload.subtype;
+    }
+    if (payload.result_summary !== undefined) {
+      body.result_summary = payload.result_summary;
+    }
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+    });
+    if (!resp.ok) {
+      const bodyText = await resp.text();
+      throw new HubHttpError(resp.status, bodyText, url, 'POST');
+    }
+    return (await resp.json()) as Record<string, unknown>;
+  }
+
+  /**
+   * gap-4（design §5）：上报 interactive session 终态（end / idle 30min / fail）。
+   *
+   * 端点：POST {REST_PREFIX}/sessions/{sessionId}/end
+   * 鉴权：_headers() 的 X-API-Key（daemon 注册时持有的长期凭证）；backend
+   *       get_current_principal 接受 api-key（区别于前端 user JWT）。body 不带
+   *       claim_token（session 级收口，api-key 即身份证明）。
+   *
+   * 调用链：SessionManager.end/fail → deps.onSessionEnd → daemon 桥接（task-04）
+   * → hubClient.notifySessionEnd → backend end_session（daemon 入口）。
+   *
+   * body 字段：
+   *   - status: 'ended' | 'failed'（对齐 SessionStatus）
+   *   - reason: 可读原因（manual / idle_timeout / driver_error / ...）
+   *
+   * 与前端 POST /sessions/{id}/end（user JWT）共用 backend 端点路径，但鉴权头
+   * 不同：daemon 走 X-API-Key，前端走 Authorization Bearer。backend
+   * get_current_principal 双路径兼容。
+   *
+   * **失败语义**（对齐 _request）：非 2xx → HubHttpError；网络/超时透传。
+   * backend 端幂等（已 ended → no-op），daemon 重试安全。
+   *
+   * @param sessionId  AgentSession.id（SessionState.sessionId）
+   * @param status  'ended'（正常收口 / idle）/ 'failed'（driver error）
+   * @param reason  可读原因，backend 记入 session_ended SSE event
+   */
+  async notifySessionEnd(
+    sessionId: string,
+    status: 'ended' | 'failed',
+    reason: string,
+  ): Promise<Record<string, unknown>> {
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/end`,
+      { status, reason },
+    );
+  }
+
+
   // -- Execution context 拉取（task-05：fetch bundle 上下文）--
 
   /**

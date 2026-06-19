@@ -126,9 +126,11 @@ describe('SessionInjectPayload — 字段对齐 backend SessionInjectPayload', (
       lease_id: '22222222-2222-2222-2222-222222222222',
       run_id: '33333333-3333-3333-3333-333333333333',
       prompt: '请把这段代码再优化一下',
+      claim_token: 'ctoken-abc',
     };
     expect(p.session_id).toBe('11111111-1111-1111-1111-111111111111');
     expect(p.prompt).toBe('请把这段代码再优化一下');
+    expect(p.claim_token).toBe('ctoken-abc');
   });
 
   it('缺必填字段触发 TS 编译错误（@ts-expect-error）', () => {
@@ -138,6 +140,7 @@ describe('SessionInjectPayload — 字段对齐 backend SessionInjectPayload', (
       session_id: 's-1',
       lease_id: 'l-1',
       prompt: 'p',
+      claim_token: 'ct',
     };
     // 缺 prompt
     // @ts-expect-error prompt 缺失应触发类型错误
@@ -145,6 +148,15 @@ describe('SessionInjectPayload — 字段对齐 backend SessionInjectPayload', (
       session_id: 's-1',
       lease_id: 'l-1',
       run_id: 'r-1',
+      claim_token: 'ct',
+    };
+    // gap-2：缺 claim_token 也应触发类型错误
+    // @ts-expect-error claim_token 缺失应触发类型错误
+    const _bad3: SessionInjectPayload = {
+      session_id: 's-1',
+      lease_id: 'l-1',
+      run_id: 'r-1',
+      prompt: 'p',
     };
     expect(true).toBe(true); // 仅类型层断言，无运行时检查
   });

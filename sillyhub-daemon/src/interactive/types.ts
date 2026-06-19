@@ -30,6 +30,16 @@ export interface SessionState {
   sessionId: string;
   /** 长生命周期 interactive lease.id（create 时下发，SESSION_* payload 校验用）。 */
   leaseId: string;
+  /**
+   * gap-2（D-002@v3 补丁）：lease 级 claim_token，跨 turn 复用。
+   *
+   * backend 在 lease 创建时生成（prepare_interactive_dispatch 写入 lease metadata），
+   * daemon claim 后从 claimResp.claim_token 归一化到 execPayload.claimToken，再经
+   * SESSION_INJECT payload（首 turn + 后续 inject）下发。SessionManager.create 时存入
+   * state.claimToken，供 onTurnMessage → hubClient.submitMessages（D-002@v3 task-04 桥接，
+   * task-04 完成）+ gap-3 notifyRunResult（task-04 桥接）复用。
+   */
+  claimToken: string;
   /** SDK 返回的 session_id（首 turn system/init 写入；resume 用，spike D3）。Wave1/2 内存态。 */
   agentSessionId?: string;
   /** SDK Query 句柄，长生命周期跨多 turn（spike H2）。 */
@@ -54,6 +64,11 @@ export interface SessionState {
 export interface CreateSessionInput {
   sessionId: string;
   leaseId: string;
+  /**
+   * gap-2：lease 级 claim_token（必填）。daemon._startInteractiveSession 从
+   * execPayload.claimToken（claimResp 归一化）取，存入 SessionState.claimToken。
+   */
+  claimToken: string;
   firstPrompt: string;
   firstRunId: string;
   cwd: string;

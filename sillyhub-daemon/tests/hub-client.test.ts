@@ -350,3 +350,101 @@ describe('HubClient — API Key 鉴权（X-API-Key）', () => {
     expect(headers['Authorization']).toBe('Bearer legacy-token');
   });
 });
+
+// ── gap-3 / gap-4（D-002@v3 补丁 design §4 / §5）：daemon → server 反向通知 ──
+
+describe('HubClient — gap-3 notifyRunResult + gap-4 notifySessionEnd', () => {
+  beforeEach(() => vi.stubGlobal('fetch', mockFetchOk({ ok: true })));
+
+  it('gap-3 notifyRunResult: POST /leases/{id}/runs/{runId}/result，X-Claim-Token header + body {status,is_error}', async () => {
+    const c = new HubClient('http://x:8000', { apiKey: 'shk_daemon' });
+    await c.notifyRunResult('lease-1', 'ctoken-lease', 'run-9', {
+      status: 'success',
+      is_error: false,
+    });
+    expect(lastCall!.url).toBe(
+      `http://x:8000${REST_PREFIX}/leases/lease-1/runs/run-9/result`,
+    );
+    expect(lastCall!.init.method).toBe('POST');
+    const headers = lastCall!.init.headers as Record<string, string>;
+    // lease 级 claim_token 走 header（design §4），区别于 sync 的 body
+    expect(headers['X-Claim-Token']).toBe('ctoken-lease');
+    // 端点基础鉴权：daemon 长期 api-key（_headers 既有逻辑）
+    expect(headers['X-API-Key']).toBe('shk_daemon');
+    expect(headers['Content-Type']).toBe('application/json');
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body).toEqual({ status: 'success', is_error: false });
+  });
+
+  it('gap-3 notifyRunResult: error_during_execution subtype + result_summary 全字段透传', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.notifyRunResult('lease-1', 'ct', 'run-1', {
+      status: 'error_during_execution',
+      is_error: true,
+      subtype: 'error_max_turns',
+      result_summary: 'turn aborted',
+    });
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body).toEqual({
+      status: 'error_during_execution',
+      is_error: true,
+      subtype: 'error_max_turns',
+      result_summary: 'turn aborted',
+    });
+  });
+
+  it('gap-3 notifyRunResult: 非 2xx → HubHttpError（含 status/bodyText/url/method）', async () => {
+    vi.stubGlobal('fetch', mockFetchStatus(401, 'invalid claim token'));
+    const c = new HubClient('http://x:8000', 't');
+    await expect(
+      c.notifyRunResult('lease-1', 'bad', 'run-1', {
+        status: 'success',
+        is_error: false,
+      }),
+    ).rejects.toMatchObject({
+      name: 'HubHttpError',
+      status: 401,
+      method: 'POST',
+    });
+  });
+
+  it('gap-3 notifyRunResult: url encode leaseId/runId（含特殊字符）', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.notifyRunResult('lease 1', 'ct', 'run/2', {
+      status: 'success',
+      is_error: false,
+    });
+    expect(lastCall!.url).toContain('/leases/lease%201/runs/run%2F2/result');
+  });
+
+  it('gap-4 notifySessionEnd: POST /sessions/{id}/end，body {status,reason}，鉴权走 api-key', async () => {
+    const c = new HubClient('http://x:8000', { apiKey: 'shk_daemon' });
+    await c.notifySessionEnd('sess-1', 'ended', 'idle_timeout');
+    expect(lastCall!.url).toBe(`http://x:8000${REST_PREFIX}/sessions/sess-1/end`);
+    expect(lastCall!.init.method).toBe('POST');
+    const headers = lastCall!.init.headers as Record<string, string>;
+    // session end 走 api-key（无 claim_token header）
+    expect(headers['X-API-Key']).toBe('shk_daemon');
+    expect(headers['X-Claim-Token']).toBeUndefined();
+    expect(JSON.parse(lastCall!.init.body as string)).toEqual({
+      status: 'ended',
+      reason: 'idle_timeout',
+    });
+  });
+
+  it('gap-4 notifySessionEnd: failed status 也透传（driver error 收口）', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.notifySessionEnd('sess-1', 'failed', 'driver_error');
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body).toEqual({ status: 'failed', reason: 'driver_error' });
+  });
+
+  it('gap-4 notifySessionEnd: 非 2xx → HubHttpError', async () => {
+    vi.stubGlobal('fetch', mockFetchStatus(404, 'session not found'));
+    const c = new HubClient('http://x:8000', 't');
+    await expect(
+      c.notifySessionEnd('sess-x', 'ended', 'manual'),
+    ).rejects.toMatchObject({ name: 'HubHttpError', status: 404 });
+  });
+});
+

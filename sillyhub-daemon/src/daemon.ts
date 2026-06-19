@@ -37,6 +37,7 @@
  */
 
 import { hostname, platform, arch } from 'node:os';
+import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { DaemonConfig } from './config.js';
 import { MSG } from './protocol.js';
 import type {
@@ -54,6 +55,7 @@ import type { TaskRunner, TaskRunnerResult } from './task-runner.js';
 import type { SessionManager } from './interactive/session-manager.js';
 import type {
   PersistedSessionRecord,
+  SessionStatus,
   SessionStorePersistence,
 } from './interactive/types.js';
 
@@ -160,6 +162,42 @@ interface ClientLike {
   getPendingLeases(runtimeId: string): Promise<Record<string, unknown>[]>;
   getExecutionContext(agentRunId: string): Promise<ExecutionContextPayload>;
   close(): void;
+  /**
+   * gap-3（design §4）：上报 interactive AgentRun 终态。
+   * SessionManager._onResult → deps.onTurnResult → daemon 桥接 → 此方法
+   * → backend close_interactive_run。W1 已在 hub-client.ts 实现。
+   */
+  notifyRunResult(
+    leaseId: string,
+    claimToken: string,
+    runId: string,
+    payload: {
+      status: string;
+      is_error: boolean;
+      subtype?: string;
+      result_summary?: string;
+    },
+  ): Promise<unknown>;
+  /**
+   * 增量上报 agent 执行消息（流式）。interactive + batch 共用端点，
+   * interactive 路径经 daemon 桥接转发（design §6 step 4）。
+   */
+  submitMessages(
+    leaseId: string,
+    claimToken: string,
+    agentRunId: string,
+    messages: Record<string, unknown>[],
+  ): Promise<unknown>;
+  /**
+   * gap-4（design §5）：上报 interactive session 终态（end / idle / fail）。
+   * SessionManager.end/fail → deps.onSessionEnd → daemon 桥接 → 此方法
+   * → backend end_session。W1 已在 hub-client.ts 实现。
+   */
+  notifySessionEnd(
+    sessionId: string,
+    status: 'ended' | 'failed',
+    reason: string,
+  ): Promise<unknown>;
 }
 
 /** daemon 需要的 TaskRunner 接口子集。 */
@@ -804,6 +842,214 @@ export class Daemon {
     }
   }
 
+  // ── Wave2 task-04 gap-1：interactive session 桥接 deps → hubClient ─────────
+  //
+  // 调用链（design §6）：
+  //   SessionManager._onResult/_onMessage/end/fail
+  //   → deps.onTurnResult/onTurnMessage/onSessionEnd（cli.ts 注入的闭包，延迟绑定 daemon）
+  //   → daemon.onTurnResult/onTurnMessage/onSessionEnd（以下三方法）
+  //   → hubClient.notifyRunResult/submitMessages/notifySessionEnd
+  //   → backend close_interactive_run / submitMessages / end_session
+  //
+  // 边界（R-bridge）：state 不存在 / sessionManager null → warn 不抛（不崩 daemon）。
+  // hubClient 抛错 → warn 不向上抛（SessionManager 调用方不感知 backend 故障，
+  // daemon 主循环 / consume 协程继续运行）。
+
+  /**
+   * gap-3 桥接：上报 interactive AgentRun 终态（SDK result）。
+   *
+   * 查 SessionState（this._sessionManager.get），取 leaseId + claimToken + runId，
+   * 调 hubClient.notifyRunResult → backend close_interactive_run。
+   *
+   * payload 字段对齐 backend InteractiveRunResultRequest：
+   *   - status：SDK result.subtype（'success' | 'error_during_execution' | 其他）
+   *   - is_error：SDK result.is_error
+   *   - subtype：SDK result.subtype（可选）
+   *   - result_summary：可读摘要（可选，SDK result.result 字段截断）
+   *
+   * 边界：
+   *   - sessionManager 为 null（AC-14 过渡期）→ warn 不抛；
+   *   - state 不存在（session 已结束 / 迟到 result）→ warn 不抛，不调 notifyRunResult；
+   *   - state.claimToken 空（恢复路径占位，design §恢复链路）→ warn 不抛；
+   *   - hubClient.notifyRunResult 抛错 → warn 不向上抛。
+   *
+   * @param sessionId  AgentSession.id
+   * @param runId  当前 turn 的 AgentRun.id（SessionManager 已切 active 时由调用方传）
+   * @param result  SDK SDKResultMessage
+   */
+  async onTurnResult(
+    sessionId: string,
+    runId: string,
+    result: SDKResultMessage,
+  ): Promise<void> {
+    if (!this._sessionManager) {
+      this._logger.warn('on_turn_result_no_manager', { session_id: sessionId });
+      return;
+    }
+    const state = this._sessionManager.get(sessionId);
+    if (!state) {
+      this._logger.warn('on_turn_result_session_not_found', {
+        session_id: sessionId,
+      });
+      return;
+    }
+    if (!state.claimToken) {
+      this._logger.warn('on_turn_result_no_claim_token', {
+        session_id: sessionId,
+        lease_id: state.leaseId,
+      });
+      return;
+    }
+    // payload 字段映射（snake_case 对齐 backend InteractiveRunResultRequest）。
+    const resultMeta = result as SDKResultMessage & {
+      subtype?: string;
+      is_error?: boolean;
+      result?: unknown;
+    };
+    const status = resultMeta.subtype ?? 'success';
+    const isError = resultMeta.is_error === true;
+    const payload: {
+      status: string;
+      is_error: boolean;
+      subtype?: string;
+      result_summary?: string;
+    } = {
+      status,
+      is_error: isError,
+    };
+    if (resultMeta.subtype !== undefined) {
+      payload.subtype = resultMeta.subtype;
+    }
+    // 可读摘要：result.result 可能是 string / object，截断后送 backend redact 存储。
+    if (resultMeta.result !== undefined) {
+      const raw =
+        typeof resultMeta.result === 'string'
+          ? resultMeta.result
+          : JSON.stringify(resultMeta.result);
+      payload.result_summary = raw.length > 500 ? `${raw.slice(0, 500)}...` : raw;
+    }
+    try {
+      await this._client.notifyRunResult(
+        state.leaseId,
+        state.claimToken,
+        runId,
+        payload,
+      );
+    } catch (e) {
+      // backend 500 / 422 / 网络 → warn 不向上抛（SessionManager._onResult 不感知，
+      // daemon 主循环继续）。run 关闭失败由 backend 兜底（lease 超时 / SSE 重连）。
+      this._logger.warn('on_turn_result_notify_failed', {
+        session_id: sessionId,
+        lease_id: state.leaseId,
+        run_id: runId,
+        error: e,
+      });
+    }
+  }
+
+  /**
+   * 桥接：增量上报 agent 执行消息（流式）。
+   *
+   * 查 SessionState，调 hubClient.submitMessages(leaseId, claimToken, runId, [msg])
+   * → backend SSE turn_progress。复用既有 submitMessages 端点（interactive + batch 共用）。
+   *
+   * 边界同 onTurnResult：state 不存在 / claimToken 空 / submitMessages 抛错 → warn 不抛。
+   *
+   * @param sessionId  AgentSession.id
+   * @param runId  当前 turn 的 AgentRun.id
+   * @param msg  SDK SDKMessage
+   */
+  async onTurnMessage(
+    sessionId: string,
+    runId: string,
+    msg: SDKMessage,
+  ): Promise<void> {
+    if (!this._sessionManager) {
+      this._logger.warn('on_turn_message_no_manager', { session_id: sessionId });
+      return;
+    }
+    const state = this._sessionManager.get(sessionId);
+    if (!state) {
+      this._logger.warn('on_turn_message_session_not_found', {
+        session_id: sessionId,
+      });
+      return;
+    }
+    if (!state.claimToken) {
+      this._logger.warn('on_turn_message_no_claim_token', {
+        session_id: sessionId,
+        lease_id: state.leaseId,
+      });
+      return;
+    }
+    try {
+      await this._client.submitMessages(
+        state.leaseId,
+        state.claimToken,
+        runId,
+        [msg as unknown as Record<string, unknown>],
+      );
+    } catch (e) {
+      this._logger.warn('on_turn_message_submit_failed', {
+        session_id: sessionId,
+        lease_id: state.leaseId,
+        run_id: runId,
+        error: e,
+      });
+    }
+  }
+
+  /**
+   * gap-4 桥接：上报 interactive session 终态（end / idle 30min / fail）。
+   *
+   * 调 hubClient.notifySessionEnd(sessionId, status, reason) → backend end_session
+   *（daemon 入口，api-key 鉴权，区别前端 user JWT）。backend 端幂等（已 ended → no-op）。
+   *
+   * reason 推导：
+   *   - status='ended'：正常收口（手动 end / idle 30min）。idle 路径在 SessionManager
+   *     _onIdleExpire 走 end → onSessionEnd('ended')，daemon 此处统一 'manual' 占位
+   *     （idle vs manual 的精确区分在 SessionManager 调用方语义，daemon 桥接不感知）。
+   *   - status='failed'：driver onError / 不可恢复异常。reason 含 'error'。
+   *
+   * **幂等**：SessionManager.end/fail 自身幂等（已 ended/failed 不重复调 onSessionEnd），
+   * daemon 此处只在 SessionManager 触发时转发；backend notifySessionEnd 自身幂等
+   *（重复调用安全，design §5 已声明）。
+   *
+   * **不依赖 state**：session 终态时 state 仍在 store（end/fail 不从 store 移除，
+   * task-10 flush 后 snapshotPersistable 过滤掉终态记录），但 notifySessionEnd 是
+   * session 级通知（api-key 鉴权），不需要 claim_token，故不读 state.claimToken。
+   *
+   * 边界：
+   *   - sessionManager null → warn 不抛（仍可调 notifySessionEnd，但 daemon 选择 ?. 兜底
+   *     不调，避免无 sessionManager 上下文时无意义通知；AC-14 过渡期一致）；
+   *   - notifySessionEnd 抛错 → warn 不向上抛。
+   *
+   * @param sessionId  AgentSession.id
+   * @param status  'ended'（正常 / idle）/ 'failed'（driver error）
+   */
+  async onSessionEnd(
+    sessionId: string,
+    status: SessionStatus,
+  ): Promise<void> {
+    // status 收敛：reconnecting 等中间态不应进此路径（SessionManager 仅在 end/fail 调）。
+    // 防御性：非 ended/failed 的 status 视为 ended 兜底（backend 接受 SessionStatus）。
+    const mappedStatus: 'ended' | 'failed' =
+      status === 'failed' ? 'failed' : 'ended';
+    const reason =
+      mappedStatus === 'failed'
+        ? 'driver_error'
+        : 'manual';
+    try {
+      await this._client.notifySessionEnd(sessionId, mappedStatus, reason);
+    } catch (e) {
+      this._logger.warn('on_session_end_notify_failed', {
+        session_id: sessionId,
+        status: mappedStatus,
+        error: e,
+      });
+    }
+  }
+
   // ── 内部：_fire（AbortController 追踪，R7）─────────────────────────────────
 
   /**
@@ -1266,6 +1512,10 @@ export class Daemon {
       await this._sessionManager.create({
         sessionId,
         leaseId,
+        // gap-2：claim_token 从 claimResp 归一化到 execPayload.claimToken，
+        // 透传给 SessionManager 存入 state.claimToken，供 onTurnMessage→submitMessages
+        // + gap-3 notifyRunResult 复用（桥接在 task-04）。
+        claimToken: execPayload.claimToken ?? '',
         firstPrompt: prompt,
         firstRunId,
         cwd,
@@ -1421,6 +1671,11 @@ export class Daemon {
         (rawExec.agentSessionId as string | undefined) ??
         (rawExec.agent_session_id as string | undefined) ??
         payload.agentSessionId,
+      // gap-2：claim_token 归一化到 execPayload.claimToken。
+      // 优先用 claim 阶段拿到的 claimToken（局部变量，来自 claimResp.claim_token）；
+      // 兜底 rawExec.claim_token / rawExec.claimToken（理论上 claimResp 顶层就有，
+      // 这里是防御性）。interactive lease 必须带 claimToken 供 SessionManager 复用。
+      claimToken: claimToken,
     };
 
     // task-04（D-002@v3）：kind 分流。在 fetch/startLease 之前——interactive 不走
