@@ -1,9 +1,9 @@
 schema_version: 1
 project: sillyhub-daemon
-source_commit: 8229b42
-generated_at: 2026-06-14 10:40:45
-generator: sillyspec-archive
-last_change: 2026-06-14-unified-agent-execution (新增 spawn-env 模块；client 新增 getExecutionContext；task-runner 依赖 spawn-env)
+source_commit: 0303536
+generated_at: 2026-06-19 13:25:00
+generator: sillyspec-quick
+last_change: 2026-06-19 quick(ql-20260619-002-703a) 新增 interactive 模块(interactive-session 变更：claude-sdk-driver/session-manager/permission-resolver/input-queue/session-store-persistence/types)；前次 2026-06-14-unified-agent-execution(新增 spawn-env；client 新增 getExecutionContext；task-runner 依赖 spawn-env)
 
 modules:
   cli:
@@ -285,3 +285,17 @@ modules:
     needs_review: false
     concerns: []
     review_reasons: []
+
+  interactive:
+    status: active
+    doc: modules/interactive.md
+    paths: ["sillyhub-daemon/src/interactive/**"]
+    tags: [interactive, session, claude-sdk, agent-driver, permission, persistence]
+    aliases: [interactive-session, session-manager, claude-sdk-driver]
+    entrypoints: [SessionManager, ClaudeSdkDriver]
+    main_symbols: [SessionManager, ClaudeSdkDriver, InputQueue, PermissionResolver, JsonSessionPersistence, SessionState, SessionStatus, CreateSessionInput, InjectResult, SESSION_FILE_VERSION, ClaudeExecutableNotFoundError, resolveClaudeExecutable]
+    depends_on: [client, ws-client, credential, config, protocol]
+    used_by: [daemon, cli]
+    needs_review: true
+    concerns: []
+    review_reasons: ["ql-20260619-002-703a 增量补充；depends_on/used_by 依赖链待全量 scan 核对"]

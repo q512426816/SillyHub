@@ -1,8 +1,9 @@
 schema_version: 1
 project: backend
-source_commit: c97bad5
-generated_at: 2026-06-10 16:45:00
-generator: sillyspec-scan
+source_commit: 0303536
+generated_at: 2026-06-19 13:25:00
+generator: sillyspec-quick
+last_change: 2026-06-19 quick(ql-20260619-002-703a) 元数据刷新至当前 HEAD；backend/app/modules 实际 23 业务目录(admin/agent/archive/auth/change/change_writer/daemon/git_gateway/git_identity/health/incident/knowledge/release/runtime/scan_docs/settings/spec_profile/spec_workspace/task/tool_gateway/workflow/workspace/worktree) vs 索引 19 模块，差异模块待后续全量 scan 补齐
 
 modules:
   # ── core 模块 ──────────────────────────────────────────────

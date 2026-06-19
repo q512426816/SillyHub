@@ -1,14 +1,15 @@
 ---
 author: qinyi
 created_at: 2026-06-03T20:35:00+08:00
-updated_at: 2026-06-10T16:45:00+08:00
+updated_at: 2026-06-19T13:25:00+08:00
 ---
 
 schema_version: 1
 project: frontend
-source_commit: c97bad5
-generated_at: 2026-06-10 16:45:00
-generator: sillyspec-scan
+source_commit: 0303536
+generated_at: 2026-06-19 13:25:00
+generator: sillyspec-quick
+last_change: 2026-06-19 quick(ql-20260619-002-703a) 元数据刷新至当前 HEAD；38 模块索引保留，近期变更(quick-chat/daemon-api-key/menu-driven-permissions/admin-org-role-center)多为修改现有页面/组件，模块结构未大变
 
 modules:
   # ─── App Router Pages (top-level) ──────────────────────────────────

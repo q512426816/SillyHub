@@ -1,7 +1,7 @@
 name: sillyhub-daemon
 path: ./sillyhub-daemon
 status: active
-role: 本地守护进程 - Python 3.12 + httpx + websockets + Click CLI
+role: 本地守护进程 - Node.js ≥20 + TypeScript + Claude Agent SDK + commander + ws（ESM/pnpm，原 Python 版已于 2026-06-14 重写为 Node.js）
 repo: https://github.com/qinyi/multi-agent-platform
 relations:
   - target: backend
