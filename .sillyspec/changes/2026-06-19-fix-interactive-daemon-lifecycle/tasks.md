@@ -21,3 +21,10 @@ created_at: 2026-06-19T05:20:00
 ## 共改文件协调
 - daemon `session-manager.ts`（task-01 SessionState + task-02 _onResult + task-03 end/fail）+ `hub-client.ts`（task-02 notifyRunResult + task-03 notifySessionEnd）：W1 内串行（01→02→03）或合并。
 - backend `router.py`/`service.py`（task-02/03 端点）：W1 内串行。
+
+## W4（gap-8 接通 daemon 重启 session 恢复，依赖 W1-W3）
+- **task-06 backend recovery HTTP 端点（gap-8.1，design §11）**：router 加 POST /sessions/{id}/recover | /confirm-reconnected | /mark-recovery-failed；service 补 confirm_reconnected/mark_recovery_failed 若缺；get_current_principal 鉴权。
+- **task-07 daemon hub-client recovery 方法（gap-8.2，design §11）**：hub-client.ts 加 recoverSession/confirmReconnected/markRecoveryFailed，实现 RecoveryClient 接口(daemon.ts:266)。
+- **task-08 cli.ts 装配 persistence + recoveryClient（gap-8.3，design §11）**：JsonSessionPersistence + RecoveryClient 实现 + 传 Daemon/SessionManager；验证 _recoverSessionsOnBoot 生效。
+- **task-09 claim_token rotate 回流（gap-8.4，design §11）**：SESSION_INJECT 后 SessionState.claimToken 用 rotated token（session-manager.ts:761）。
+- **task-10 真实重启恢复集成测试**：daemon 跑 active session → 重启 daemon → 验证 session 恢复 + turn 不卡（对齐 9s）；restoreAndReconnect 失败收敛。

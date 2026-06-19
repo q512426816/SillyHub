@@ -51,6 +51,7 @@ import { TaskRunner } from './task-runner.js';
 import { Daemon } from './daemon.js';
 import { ClaudeSdkDriver } from './interactive/claude-sdk-driver.js';
 import { SessionManager } from './interactive/session-manager.js';
+import { JsonSessionPersistence } from './interactive/session-store-persistence.js';
 
 // ── 路径访问（可测试性：函数返回，task-22 vi.spyOn 可 mock）──────────────────
 
@@ -404,18 +405,28 @@ export async function startAction(opts: StartOptions): Promise<number> {
   //   deps.onTurnMessage   → daemon.onTurnMessage   → hubClient.submitMessages    → backend SSE turn_progress
   //   deps.onSessionEnd    → daemon.onSessionEnd    → hubClient.notifySessionEnd  → backend end_session
   const driver = new ClaudeSdkDriver();
+  // gap-8.3（design §11）：interactive session 持久化 + daemon 重启恢复。
+  // JsonSessionPersistence 默认写 ~/.sillyhub/daemon/sessions.json；SessionManager
+  // 状态变更排队 flush（_scheduleFlush），daemon 重启时 _recoverSessionsOnBoot
+  // 加载并经 restoreAndReconnect（driver resume）恢复。
+  const persistence = new JsonSessionPersistence();
   let daemon: Daemon;
   const sessionManager = new SessionManager({
     driver,
+    persistence,
     onTurnResult: (sessionId, runId, result) => daemon.onTurnResult(sessionId, runId, result),
     onTurnMessage: (sessionId, runId, msg) => daemon.onTurnMessage(sessionId, runId, msg),
     onSessionEnd: (sessionId, status) => daemon.onSessionEnd(sessionId, status),
   });
   // gap-8（interactive 凭证 parity）：把同一 CredentialManager 传给 Daemon，让
   // interactive 路径经 buildSpawnEnv 读 credentials.json 的 ANTHROPIC token，与 batch 对齐。
+  // gap-8.3：persistence + recoveryClient 接通 daemon 重启恢复。client（HubClient）
+  // 已实现 RecoveryCoordinator（recoverSession/confirmReconnected/markRecoveryFailed）。
   daemon = new Daemon(config, client, taskRunner, {
     sessionManager,
     credentialManager: credentialMgr,
+    persistence,
+    recoveryClient: client,
   });
 
   // step 6: 写 PID 文件（对齐 Python __main__.py:106 `_write_pid(os.getpid())`）。

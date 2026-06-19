@@ -405,6 +405,126 @@ async def close_interactive_run(
     )
 
 
+# ── Daemon-restart session recovery (gap-8.1 / design §11) ─────────────────
+# Daemon calls these on boot, BEFORE its three loops (heartbeat/poll/ws), to
+# reconcile persisted interactive sessions after a restart. Auth:
+# ``get_current_principal`` (daemon X-API-Key). Thin wrappers over
+# recover_session_after_daemon_restart / confirm_session_reconnected /
+# mark_session_recovery_failed (service.py:2071 / 2318 / 2375).
+
+
+class SessionRecoverRequest(BaseModel):
+    """Body for POST /sessions/{session_id}/recover (gap-8.1).
+
+    Fields mirror the persisted record reloaded from JsonSessionPersistence;
+    backend validates ownership via runtime_id / lease_id / provider /
+    lease.kind (never trusts agent_session_id beyond audit).
+    """
+
+    runtime_id: uuid.UUID
+    lease_id: uuid.UUID
+    provider: str = Field(min_length=1, max_length=64)
+    # SDK session_id — audit/log only; backend never trusts it for ownership.
+    agent_session_id: str = Field(default="", max_length=128)
+    interrupted_run_id: uuid.UUID | None = None
+
+
+class SessionRuntimeRequest(BaseModel):
+    """Body for confirm-reconnected / mark-recovery-failed (gap-8.1)."""
+
+    runtime_id: uuid.UUID
+    reason: str | None = Field(default=None, max_length=128)
+
+
+class SessionRecoveryResponse(BaseModel):
+    session_id: uuid.UUID
+    lease_id: uuid.UUID | None = None
+    status: str
+    interrupted_run_status: str | None = None
+
+
+@router.post(
+    "/sessions/{session_id}/recover",
+    response_model=SessionRecoveryResponse,
+)
+async def recover_session(
+    session_id: uuid.UUID,
+    data: SessionRecoverRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> SessionRecoveryResponse:
+    """Reconcile an interactive session after daemon restart (gap-8.1).
+
+    Daemon ``_recoverSessionsOnBoot`` → ``hubClient.recoverSession`` → here,
+    BEFORE ``restoreAndReconnect`` (query resume). Ownership-guarded, idempotent
+    on terminal sessions, rotates the lease ``claim_token``. Returns
+    ``reconnecting`` when recoverable (daemon proceeds to resume) or
+    terminal/rejected otherwise.
+    """
+    svc = DaemonService(session)
+    result = await svc.recover_session_after_daemon_restart(
+        session_id,
+        runtime_id=data.runtime_id,
+        lease_id=data.lease_id,
+        provider=data.provider,
+        agent_session_id=data.agent_session_id,
+        interrupted_run_id=data.interrupted_run_id,
+    )
+    return SessionRecoveryResponse(
+        session_id=result.session_id,
+        lease_id=result.lease_id,
+        status=result.status,
+        interrupted_run_status=result.interrupted_run_status,
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/confirm-reconnected",
+    response_model=SessionRecoveryResponse,
+)
+async def confirm_session_reconnected(
+    session_id: uuid.UUID,
+    data: SessionRuntimeRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> SessionRecoveryResponse:
+    """Flip reconnecting → active after daemon resume succeeds (gap-8.1).
+
+    Two-phase recover step 2: daemon ran recover_session (wrote reconnecting) →
+    restoreAndReconnect (driver.start resume) → on success calls this.
+    """
+    svc = DaemonService(session)
+    result_status = await svc.confirm_session_reconnected(
+        session_id,
+        runtime_id=data.runtime_id,
+    )
+    return SessionRecoveryResponse(session_id=session_id, status=result_status)
+
+
+@router.post(
+    "/sessions/{session_id}/mark-recovery-failed",
+    response_model=SessionRecoveryResponse,
+)
+async def mark_session_recovery_failed(
+    session_id: uuid.UUID,
+    data: SessionRuntimeRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> SessionRecoveryResponse:
+    """Flip reconnecting → failed after daemon resume failed (gap-8.1).
+
+    Daemon calls this when driver.start({resume}) throws (cwd mismatch /
+    executable missing / SDK jsonl missing) — session cannot be restored.
+    """
+    svc = DaemonService(session)
+    result_status = await svc.mark_session_recovery_failed(
+        session_id,
+        runtime_id=data.runtime_id,
+        reason=data.reason or "restore_failed",
+    )
+    return SessionRecoveryResponse(session_id=session_id, status=result_status)
+
+
 @router.get(
     "/leases/{lease_id}",
     response_model=DaemonTaskLeaseRead,

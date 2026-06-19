@@ -447,6 +447,21 @@ export class SessionManager {
    * @throws {SessionNotFoundError}
    * @throws {SessionNotActiveError} status ∈ {ended, failed, reconnecting}
    */
+  /**
+   * gap-8.4（design §11）：刷新 session 的 lease 级 claim_token。
+   *
+   * 恢复路径（restoreAndReconnect）claimToken 占位空串（session-manager.ts:761）；
+   * backend SESSION_INJECT 带 rotated claim_token（recover_session_after_daemon_restart
+   * step 7 rotate），daemon 收到后调此方法刷新，让后续 onTurnMessage（submitMessages）
+   * + onTurnResult（notifyRunResult）能用新 token（否则 warn 不调 → turn 卡）。
+   * session 不存在 / token 空 → 静默 no-op。
+   */
+  async refreshClaimToken(sessionId: string, claimToken: string): Promise<void> {
+    const state = this._store.get(sessionId);
+    if (!state || !claimToken) return;
+    state.claimToken = claimToken;
+  }
+
   async inject(sessionId: string, prompt: string, runId: string): Promise<InjectResult> {
     const state = this._store.get(sessionId);
     if (!state) {

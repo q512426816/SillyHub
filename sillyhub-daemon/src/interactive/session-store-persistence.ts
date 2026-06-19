@@ -33,6 +33,7 @@ import {
   unlink,
   writeFile,
 } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   SESSION_FILE_VERSION,
@@ -44,7 +45,7 @@ import {
 export const DEFAULT_SESSION_FILE = join(
   // 延迟 import 避免与 config.ts 循环（config.ts 仅导出常量，运行时无副作用）。
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  (require('node:os').homedir() as string),
+  homedir(),
   '.sillyhub',
   'daemon',
   'sessions.json',

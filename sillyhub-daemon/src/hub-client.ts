@@ -23,6 +23,7 @@
 
 import { REST_PREFIX } from './protocol.js';
 import type { ExecutionContextPayload } from './types.js';
+import type { SessionRecoverStatus } from './daemon.js';
 
 // ── body 类型（字段名 snake_case 对齐 backend Pydantic 模型）──────────────────
 
@@ -137,6 +138,17 @@ export class HubClient {
   private readonly baseUrl: string;
   private readonly token?: string;
   private readonly apiKey?: string;
+
+  /**
+   * gap-8.2（design §11）：sessionId → runtimeId 映射。
+   *
+   * RecoveryCoordinator.confirmReconnected/markRecoveryFailed 接口只传
+   * sessionId（daemon.ts:277/279），但 backend recovery 端点要 runtime_id
+   * （ownership guard）。recoverSession 时存映射，confirm/markFailed 查表补
+   * runtime_id；调用后删除（一次性）。daemon 活着期间映射有效（重启 = 全新
+   * 恢复流程，映射重建）。
+   */
+  private readonly _recoveryRuntimeBySession = new Map<string, string>();
 
   /**
    * @param serverUrl SillyHub server origin，如 'http://localhost:8000'。尾部斜杠会被去除。
@@ -526,6 +538,80 @@ export class HubClient {
       `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/end`,
       { status, reason },
     );
+  }
+
+  // ── Daemon-restart session recovery (gap-8.2 / design §11) ───────────────
+  // 实现 RecoveryCoordinator（daemon.ts:261）。daemon `_recoverSessionsOnBoot`
+  // 调用序：recoverSession →（reconnecting）→ restoreAndReconnect（driver resume）
+  // → confirmReconnected / markRecoveryFailed。鉴权：_headers() 的 X-API-Key
+  // （backend get_current_principal）。backend 端点 body 要 runtime_id；接口
+  // confirm/markFailed 只传 sessionId → 经 `_recoveryRuntimeBySession` 查表。
+
+  /**
+   * gap-8.2：向 backend 收敛崩溃 currentRun + 写 session=reconnecting。
+   * 端点 POST {REST_PREFIX}/sessions/{sessionId}/recover。
+   * 返回 {status}（reconnecting / ended / failed / rejected），daemon 据此决定
+   * 是否 restoreAndReconnect。同时记录 sessionId→runtimeId 供后续 confirm/markFailed。
+   */
+  async recoverSession(
+    sessionId: string,
+    params: {
+      leaseId: string;
+      runtimeId: string;
+      provider: string;
+      agentSessionId: string;
+      interruptedRunId?: string;
+    },
+  ): Promise<{ status: SessionRecoverStatus }> {
+    const body: Record<string, unknown> = {
+      runtime_id: params.runtimeId,
+      lease_id: params.leaseId,
+      provider: params.provider,
+      agent_session_id: params.agentSessionId,
+    };
+    if (params.interruptedRunId !== undefined) {
+      body.interrupted_run_id = params.interruptedRunId;
+    }
+    const resp = await this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/recover`,
+      body,
+    );
+    this._recoveryRuntimeBySession.set(sessionId, params.runtimeId);
+    return { status: String(resp.status ?? '') as SessionRecoverStatus };
+  }
+
+  /**
+   * gap-8.2：恢复成功（reconnecting → active）后向 backend 确认。
+   * 端点 POST {REST_PREFIX}/sessions/{sessionId}/confirm-reconnected。
+   * runtime_id 经映射查表；无映射（未 recover 过）静默（不误调 backend）。
+   */
+  async confirmReconnected(sessionId: string): Promise<void> {
+    const runtimeId = this._recoveryRuntimeBySession.get(sessionId);
+    if (!runtimeId) return;
+    await this._request(
+      'POST',
+      `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/confirm-reconnected`,
+      { runtime_id: runtimeId },
+    );
+    this._recoveryRuntimeBySession.delete(sessionId);
+  }
+
+  /**
+   * gap-8.2：恢复失败（driver.start 抛错）后向 backend 写 reconnecting → failed。
+   * 端点 POST {REST_PREFIX}/sessions/{sessionId}/mark-recovery-failed。
+   */
+  async markRecoveryFailed(sessionId: string, reason?: string): Promise<void> {
+    const runtimeId = this._recoveryRuntimeBySession.get(sessionId);
+    if (!runtimeId) return;
+    const body: Record<string, unknown> = { runtime_id: runtimeId };
+    if (reason) body.reason = reason;
+    await this._request(
+      'POST',
+      `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/mark-recovery-failed`,
+      body,
+    );
+    this._recoveryRuntimeBySession.delete(sessionId);
   }
 
 

@@ -1385,6 +1385,14 @@ export class Daemon {
           });
           return;
         }
+        // gap-8.4（design §11）：SESSION_INJECT 带 lease 级 claim_token（recover 后
+        // rotated）。刷新 state.claimToken（恢复路径 restoreAndReconnect 占位空串），
+        // 让后续 onTurnMessage（submitMessages）/ onTurnResult（notifyRunResult）能用新 token。
+        const claimToken =
+          (raw.claim_token as string | undefined) ?? (raw.claimToken as string | undefined) ?? '';
+        if (claimToken) {
+          await this._sessionManager.refreshClaimToken(sessionId, claimToken);
+        }
         await this._sessionManager.inject(sessionId, prompt, runId);
         break;
       }
