@@ -491,6 +491,54 @@ async def reconcile_stale_runs(
     return reconciled
 
 
+async def cleanup_orphan_dispatch_runs(
+    session: AsyncSession,
+    change_id: uuid.UUID,
+) -> list[uuid.UUID]:
+    """Mark legacy orphan AgentRuns as killed.
+
+    Orphans were produced by the OLD ``dispatch_next_step`` which pre-created a
+    Run A that ``start_stage_dispatch`` never used. They permanently blocked
+    future dispatches (``has_active_run`` counts ``pending`` as active while
+    ``reconcile_stale_runs`` only cleans ``running``).
+
+    An orphan matches that legacy Run A's precise fingerprint:
+      status='pending' AND task_id IS NULL AND lease_id IS NULL AND
+      provider IS NULL AND model IS NULL AND spec_strategy='sillyspec'.
+
+    Normal pending Runs are NEVER touched — each violates at least one
+    condition: ``start_stage_dispatch`` Runs have ``spec_strategy=NULL``;
+    task-level sillyspec Runs carry ``task_id``; leased Runs carry ``lease_id``;
+    configured Runs carry ``provider``/``model``. Post-Wave0
+    (ql-20260619-001-f6cc) no new orphans are produced because
+    ``dispatch_next_step`` no longer pre-creates a Run.
+
+    Returns the list of cleaned run IDs.
+    """
+    stmt = select(AgentRun).where(
+        col(AgentRun.change_id) == change_id,
+        col(AgentRun.status) == "pending",
+        col(AgentRun.task_id).is_(None),
+        col(AgentRun.lease_id).is_(None),
+        col(AgentRun.provider).is_(None),
+        col(AgentRun.model).is_(None),
+        col(AgentRun.spec_strategy) == "sillyspec",
+    )
+    orphans = list((await session.execute(stmt)).scalars().all())
+    if not orphans:
+        return []
+
+    now = datetime.now(UTC)
+    for run in orphans:
+        run.status = "killed"
+        run.finished_at = now
+        run.exit_code = -1
+        run.output_redacted = "Cleaned as legacy orphan dispatch run (Wave0 ql-20260619-001-f6cc)."
+        session.add(run)
+    await session.commit()
+    return [r.id for r in orphans]
+
+
 async def dispatch(
     session: AsyncSession,
     workspace_id: uuid.UUID,
@@ -526,7 +574,8 @@ async def dispatch(
     if change is None:
         return {"dispatched": False, "reason": "change_not_found"}
 
-    stages = change.stages or {}
+    # dict() copy avoids SQLAlchemy JSON in-place mutation not persisting.
+    stages = dict(change.stages or {})
     stages["last_dispatch"] = {
         "stage": target_stage,
         "user_id": str(user_id),
@@ -557,8 +606,9 @@ async def dispatch(
             provider=provider,
             model=model,
         )
-        # Update last_dispatch with run_id and status
-        stages = change.stages or {}
+        # Update last_dispatch with run_id and status.
+        # dict() copy avoids SQLAlchemy JSON in-place mutation not persisting.
+        stages = dict(change.stages or {})
         stages["last_dispatch"] = {
             **stages.get("last_dispatch", {}),
             "run_id": str(run.id),
@@ -674,7 +724,6 @@ class SillySpecStageDispatchService:
             ChangeNotFound: change_id does not correspond to an existing Change.
         """
         from app.core.errors import ChangeNotFound
-        from app.modules.workspace.model import AgentRunWorkspace
 
         # Step 1: Check STAGE_AGENT_CONFIG
         config = STAGE_AGENT_CONFIG.get(target_stage)
@@ -688,8 +737,11 @@ class SillySpecStageDispatchService:
         if change is None:
             raise ChangeNotFound(f"Change '{change_id}' not found.")
 
-        # Step 3: Check active AgentRun (prevent duplicate dispatch)
+        # Step 3: Clean legacy orphan Runs + check active AgentRun (prevent
+        # duplicate dispatch). cleanup_orphan_dispatch_runs removes legacy Run A
+        # orphans before has_active_run so they no longer permanently block.
         await reconcile_stale_runs(session, change_id)
+        await cleanup_orphan_dispatch_runs(session, change_id)
         if await has_active_run(session, change_id):
             return {"dispatched": False, "reason": "active_run_exists", "stage": target_stage}
 
@@ -705,35 +757,14 @@ class SillySpecStageDispatchService:
             )
             return {"dispatched": False, "reason": "bundle_build_error", "stage": target_stage}
 
-        # Step 5: Create AgentRun record
-        run = AgentRun(
-            id=uuid.uuid4(),
-            task_id=None,  # stage-level dispatch, no task association
-            lease_id=None,  # determined by AgentService based on config
-            change_id=change_id,
-            agent_type="claude_code",
-            status="pending",
-            spec_strategy="sillyspec",
-        )
-        session.add(run)
-
-        # Step 6: Create M:N workspace association
-        session.add(
-            AgentRunWorkspace(
-                agent_run_id=run.id,
-                workspace_id=workspace_id,
-            )
-        )
-        await session.commit()
-        await session.refresh(run)
-
-        # Step 7: Record last_dispatch in change.stages JSON
-        stages = change.stages or {}
+        # Step 5: Record last_dispatch in change.stages JSON (run_id is
+        # backfilled in Step 7 once start_stage_dispatch returns the real Run).
+        # dict() copy avoids SQLAlchemy JSON in-place mutation not persisting.
+        stages = dict(change.stages or {})
         stages["last_dispatch"] = {
             "stage": target_stage,
             "user_id": str(user_id),
             "at": datetime.now(UTC).isoformat(),
-            "run_id": str(run.id),
             "config": {
                 "phase": config.phase,
                 "requires_worktree": config.requires_worktree,
@@ -744,12 +775,16 @@ class SillySpecStageDispatchService:
         session.add(change)
         await session.commit()
 
-        # Step 8: Start Agent execution
+        # Step 6: Start Agent execution. Wave0 (ql-20260619-001-f6cc): the Run
+        # is owned by start_stage_dispatch — dispatch_next_step no longer
+        # pre-creates one. Using the returned Run guarantees exactly one Run per
+        # execution and that the returned id is the one actually dispatched (and
+        # that logs are published under). Mirrors the standalone dispatch().
         try:
             from app.modules.agent.service import AgentService
 
             agent_service = AgentService(session)
-            await agent_service.start_stage_dispatch(
+            run = await agent_service.start_stage_dispatch(
                 workspace_id=workspace_id,
                 change_id=change_id,
                 user_id=user_id,
@@ -761,15 +796,21 @@ class SillySpecStageDispatchService:
                 model=model,
             )
         except Exception as exc:
-            log.warning("agent_start_failed", run_id=str(run.id), error=str(exc))
-            # Mark run as failed, keep record for debugging
-            run.status = "failed"
-            run.output_redacted = f"Agent start failed: {exc}"
-            session.add(run)
-            await session.commit()
+            log.warning("agent_start_failed", change_id=str(change_id), error=str(exc))
             return {"dispatched": False, "reason": "agent_start_error", "stage": target_stage}
 
-        # Step 9: Return success
+        # Step 7: Backfill last_dispatch with the real run_id, then return it.
+        # dict() copy avoids SQLAlchemy JSON in-place mutation not persisting.
+        stages = dict(change.stages or {})
+        stages["last_dispatch"] = {
+            **stages.get("last_dispatch", {}),
+            "run_id": str(run.id),
+            "status": "running",
+        }
+        change.stages = stages
+        session.add(change)
+        await session.commit()
+
         return {
             "dispatched": True,
             "agent_run_id": str(run.id),

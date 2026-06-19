@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -41,6 +42,40 @@ async def _create_workspace(session: AsyncSession) -> uuid.UUID:
     session.add(ws)
     await session.commit()
     return ws.id
+
+
+@contextmanager
+def _patch_stage_dispatch_creates_run(
+    session: AsyncSession,
+    change_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+):
+    """Wave0: mimic real start_stage_dispatch — create a REAL AgentRun +
+    AgentRunWorkspace in DB and return the run (skips daemon dispatch).
+    Post-Wave0 the Run is owned by start_stage_dispatch, not dispatch_next_step."""
+    from app.modules.workspace.model import AgentRunWorkspace
+
+    async def _impl(self, **kwargs):
+        run = AgentRun(
+            id=uuid.uuid4(),
+            task_id=None,
+            lease_id=None,
+            change_id=change_id,
+            agent_type="claude_code",
+            provider="claude",
+            model="claude-sonnet-4",
+            status="running",
+        )
+        session.add(run)
+        session.add(AgentRunWorkspace(agent_run_id=run.id, workspace_id=workspace_id))
+        await session.commit()
+        await session.refresh(run)
+        return run
+
+    with patch(
+        "app.modules.agent.service.AgentService.start_stage_dispatch", new=_impl
+    ) as mock_method:
+        yield mock_method
 
 
 def _create_sillyspec_db(
@@ -160,11 +195,7 @@ async def test_dispatch_complete_sync_auto_dispatch(
     )
 
     # --- Step 1: Dispatch creates AgentRun #1 ---
-    mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
-    with patch("app.modules.agent.service.AgentService") as MockAgentService:
-        mock_svc = MockAgentService.return_value
-        mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
-
+    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
         service = SillySpecStageDispatchService(db_session)
         d1 = await service.dispatch_next_step(
             session=db_session,
@@ -177,10 +208,9 @@ async def test_dispatch_complete_sync_auto_dispatch(
     assert d1["dispatched"] is True
     run1_id = uuid.UUID(d1["agent_run_id"])
 
-    # Verify AgentRun #1 exists in DB
+    # Verify AgentRun #1 exists in DB (Wave0: owned by start_stage_dispatch)
     run1 = await db_session.get(AgentRun, run1_id)
     assert run1 is not None
-    assert run1.status == "pending"
     assert run1.change_id == change.id
 
     # --- Step 2: Complete AgentRun #1 ---
@@ -278,11 +308,7 @@ async def test_dispatch_complete_sync_stage_done_no_auto_dispatch(
     )
 
     # Dispatch
-    mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
-    with patch("app.modules.agent.service.AgentService") as MockAgentService:
-        mock_svc = MockAgentService.return_value
-        mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
-
+    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
         service = SillySpecStageDispatchService(db_session)
         d1 = await service.dispatch_next_step(
             session=db_session,
@@ -354,11 +380,7 @@ async def test_dispatch_complete_sync_no_db_stops_chain(
     await db_session.refresh(change)
 
     # Dispatch (no SpecWorkspace → _resolve_db_path returns None)
-    mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
-    with patch("app.modules.agent.service.AgentService") as MockAgentService:
-        mock_svc = MockAgentService.return_value
-        mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
-
+    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
         service = SillySpecStageDispatchService(db_session)
         d1 = await service.dispatch_next_step(
             session=db_session,

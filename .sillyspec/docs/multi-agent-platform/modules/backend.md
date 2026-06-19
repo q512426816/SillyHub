@@ -122,6 +122,8 @@ ChangeService.transition() -> 状态机校验 -> 更新 stage
 - ql-20260618-005-c4d2 | spec-bootstrap 创建 Bootstrap AgentRun 和 daemon lease 时使用 workspace 默认 Agent provider/model；未配置默认 provider 时保留历史 Claude fallback。
 - ql-20260618-007-d9c0 | Daemon runtime 状态语义：刷新列表清理 stale online runtime；新增 disable/enable/offline 操作；disabled 不会被 heartbeat 或重新注册自动恢复为 online。
 - ql-20260618-009-f3a2 | per-run model review 收尾：quick_chat agent_type 从 provider 改 claude_code（与全项目约定一致）；execution-context 的 provider/model 改为 AgentRun 优先 + lease_meta 兜底（AgentRun 作 source of truth，两处端点同步：agent/router.py ExecutionContextResponse + daemon/service.py _build_claim_payload）；`/changes/{id}/dispatch` 的 provider/model Query 加 max_length=64/128 对齐 schema。
+- ql-20260619-001-f6cc | Wave0：dispatch_next_step 不再预创建 AgentRun（对齐 dispatch()，Run 由 start_stage_dispatch 拥有），一次 execute 单 Run + 返回 id/last_dispatch.run_id/lease.agent_run_id 一致；新增 cleanup_orphan_dispatch_runs 精准清理历史孤儿 pending Run（spec_strategy='sillyspec' 指纹，不动正常 Run）；dict() 修 last_dispatch.run_id 的 JSON in-place mutation 不持久化。
+- ql-20260619-003-0f87 | dispatch()（transition 路径）:579/:611 同类 JSON in-place mutation 修复——两处 `stages = change.stages or {}` 改 `dict(change.stages or {})`，使 last_dispatch.run_id 持久化（前端订阅拿得到真实 run id）。
 
 ## 人工备注
 

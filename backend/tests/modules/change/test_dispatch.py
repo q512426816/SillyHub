@@ -428,17 +428,9 @@ async def test_dispatch_next_step_agent_start_error(db_session: AsyncSession) ->
     assert result["reason"] == "agent_start_error"
     assert result["stage"] == "propose"
 
-    # Verify the AgentRun was marked as failed
-    from sqlalchemy import select as sa_select
-    from sqlmodel import col as sa_col
-
-    stmt = sa_select(AgentRun).where(
-        sa_col(AgentRun.change_id) == change.id,
-        sa_col(AgentRun.status) == "failed",
-    )
-    failed_run = (await db_session.execute(stmt)).scalars().first()
-    assert failed_run is not None
-    assert "Agent start failed" in (failed_run.output_redacted or "")
+    # Wave0 (ql-20260619-001-f6cc): dispatch_next_step no longer pre-creates a
+    # Run, so a start_stage_dispatch failure leaves NO Run behind.
+    assert await _runs_for_change(db_session, change.id) == []
 
 
 async def test_dispatch_next_step_records_last_dispatch(db_session: AsyncSession) -> None:
@@ -476,11 +468,7 @@ async def test_dispatch_next_step_creates_workspace_association(db_session: Asyn
     workspace_id = await _create_workspace(db_session)
     change = await _create_change(db_session, workspace_id=workspace_id)
 
-    mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
-    with patch("app.modules.agent.service.AgentService") as MockAgentService:
-        mock_svc = MockAgentService.return_value
-        mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
-
+    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
         service = SillySpecStageDispatchService(db_session)
         result = await service.dispatch_next_step(
             session=db_session,
@@ -518,11 +506,7 @@ async def test_dispatch_next_step_idempotency(db_session: AsyncSession) -> None:
     change = await _create_change(db_session, workspace_id=workspace_id)
     user_id = uuid.uuid4()
 
-    mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
-    with patch("app.modules.agent.service.AgentService") as MockAgentService:
-        mock_svc = MockAgentService.return_value
-        mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
-
+    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
         service = SillySpecStageDispatchService(db_session)
 
         # First dispatch succeeds
@@ -969,11 +953,7 @@ async def test_dispatch_then_sync_partial_progress(db_session: AsyncSession) -> 
     await db_session.refresh(change)
 
     # --- Phase 1: dispatch_next_step ---
-    mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
-    with patch("app.modules.agent.service.AgentService") as MockAgentService:
-        mock_svc = MockAgentService.return_value
-        mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
-
+    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
         service = SillySpecStageDispatchService(db_session)
         dispatch_result = await service.dispatch_next_step(
             session=db_session,
@@ -986,10 +966,9 @@ async def test_dispatch_then_sync_partial_progress(db_session: AsyncSession) -> 
     assert dispatch_result["dispatched"] is True
     agent_run_id = uuid.UUID(dispatch_result["agent_run_id"])
 
-    # Verify AgentRun exists in DB with status=pending
+    # Verify AgentRun exists in DB (Wave0: owned by start_stage_dispatch)
     agent_run = await db_session.get(AgentRun, agent_run_id)
     assert agent_run is not None
-    assert agent_run.status == "pending"
     assert agent_run.change_id == change.id
 
     # --- Phase 2: Complete the AgentRun, then sync ---
@@ -1055,11 +1034,7 @@ async def test_dispatch_then_sync_all_completed(db_session: AsyncSession) -> Non
     await db_session.refresh(change)
 
     # Create AgentRun via dispatch
-    mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
-    with patch("app.modules.agent.service.AgentService") as MockAgentService:
-        mock_svc = MockAgentService.return_value
-        mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
-
+    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
         service = SillySpecStageDispatchService(db_session)
         dispatch_result = await service.dispatch_next_step(
             session=db_session,
@@ -1181,11 +1156,7 @@ async def test_dispatch_sync_auto_dispatch_chain(db_session: AsyncSession) -> No
     await db_session.refresh(change)
 
     # --- Step 1: First dispatch via SillySpecStageDispatchService ---
-    mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
-    with patch("app.modules.agent.service.AgentService") as MockAgentService:
-        mock_svc = MockAgentService.return_value
-        mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
-
+    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
         service = SillySpecStageDispatchService(db_session)
         d1 = await service.dispatch_next_step(
             session=db_session,
@@ -1241,3 +1212,344 @@ async def test_dispatch_sync_auto_dispatch_chain(db_session: AsyncSession) -> No
     mock_dispatch.assert_called_once()
     call_kwargs = mock_dispatch.call_args
     assert call_kwargs.kwargs.get("target_stage") == "propose"
+
+
+# ===================================================================
+# Wave0 (ql-20260619-001-f6cc): dispatch_next_step single-Run contract
+# ===================================================================
+
+from contextlib import contextmanager
+
+from sqlalchemy import select as sa_select
+from sqlmodel import col as sa_col
+
+
+@contextmanager
+def _patch_stage_dispatch_creates_run(
+    session: AsyncSession,
+    change_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    *,
+    status: str = "running",
+):
+    """Patch ``AgentService.start_stage_dispatch`` to mimic the real method:
+    create a REAL ``AgentRun`` + ``AgentRunWorkspace`` in the DB and return it.
+
+    Post-Wave0 contract: the Run is owned by ``start_stage_dispatch``, NOT by
+    ``dispatch_next_step``. Tests must assert against the actual DB rows the
+    (mocked) ``start_stage_dispatch`` produces — a bare ``FakeRun`` would hide
+    the duplicate-Run regression.
+    """
+    from app.modules.workspace.model import AgentRunWorkspace
+
+    async def _impl(self, **kwargs):
+        run = AgentRun(
+            id=uuid.uuid4(),
+            task_id=None,
+            lease_id=None,
+            change_id=change_id,
+            agent_type="claude_code",
+            provider="claude",
+            model="claude-sonnet-4",
+            status=status,
+        )
+        session.add(run)
+        session.add(AgentRunWorkspace(agent_run_id=run.id, workspace_id=workspace_id))
+        await session.commit()
+        await session.refresh(run)
+        return run
+
+    with patch(
+        "app.modules.agent.service.AgentService.start_stage_dispatch",
+        new=_impl,
+    ) as mock_method:
+        yield mock_method
+
+
+async def _runs_for_change(session: AsyncSession, change_id: uuid.UUID) -> list[AgentRun]:
+    stmt = sa_select(AgentRun).where(sa_col(AgentRun.change_id) == change_id)
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def test_wave0_dispatch_next_step_creates_single_run(db_session: AsyncSession) -> None:
+    """验收#1: 一次 execute 只产生一个 AgentRun（由 start_stage_dispatch 拥有）。
+    回归：旧实现预创建 Run A 且 start_stage_dispatch 又建 Run B，留孤儿。"""
+    workspace_id = await _create_workspace(db_session)
+    change = await _create_change(db_session, workspace_id=workspace_id)
+
+    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
+        service = SillySpecStageDispatchService(db_session)
+        result = await service.dispatch_next_step(
+            session=db_session,
+            workspace_id=workspace_id,
+            change_id=change.id,
+            user_id=uuid.uuid4(),
+            target_stage="propose",
+        )
+
+    assert result["dispatched"] is True
+    assert len(await _runs_for_change(db_session, change.id)) == 1
+
+
+async def test_wave0_dispatch_next_step_ids_consistent(db_session: AsyncSession) -> None:
+    """验收#2/#4: 返回 id == last_dispatch.run_id == 唯一 Run 的 id（SSE/历史日志同 id）。"""
+    workspace_id = await _create_workspace(db_session)
+    change = await _create_change(db_session, workspace_id=workspace_id)
+
+    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
+        service = SillySpecStageDispatchService(db_session)
+        result = await service.dispatch_next_step(
+            session=db_session,
+            workspace_id=workspace_id,
+            change_id=change.id,
+            user_id=uuid.uuid4(),
+            target_stage="propose",
+        )
+
+    returned_id = uuid.UUID(result["agent_run_id"])
+    await db_session.refresh(change)
+    last_dispatch_run_id = uuid.UUID(change.stages["last_dispatch"]["run_id"])
+    runs = await _runs_for_change(db_session, change.id)
+    assert len(runs) == 1
+    assert runs[0].id == returned_id
+    assert last_dispatch_run_id == returned_id
+
+
+async def test_wave0_dispatch_next_step_single_workspace_association(
+    db_session: AsyncSession,
+) -> None:
+    """验收#3: 只有且仅有一条 AgentRunWorkspace，关联到唯一 Run。"""
+    from app.modules.workspace.model import AgentRunWorkspace
+
+    workspace_id = await _create_workspace(db_session)
+    change = await _create_change(db_session, workspace_id=workspace_id)
+
+    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
+        service = SillySpecStageDispatchService(db_session)
+        result = await service.dispatch_next_step(
+            session=db_session,
+            workspace_id=workspace_id,
+            change_id=change.id,
+            user_id=uuid.uuid4(),
+            target_stage="propose",
+        )
+
+    returned_id = uuid.UUID(result["agent_run_id"])
+    stmt = sa_select(AgentRunWorkspace).where(
+        sa_col(AgentRunWorkspace.workspace_id) == workspace_id
+    )
+    assocs = list((await db_session.execute(stmt)).scalars().all())
+    assert len(assocs) == 1
+    assert assocs[0].agent_run_id == returned_id
+
+
+async def test_wave0_dispatch_next_step_start_failure_leaves_no_run(
+    db_session: AsyncSession,
+) -> None:
+    """验收#5: start_stage_dispatch 抛异常时，dispatch_next_step 不遗留任何 Run
+    （不再预创建 Run A）。无孤儿 pending Run。"""
+    workspace_id = await _create_workspace(db_session)
+    change = await _create_change(db_session, workspace_id=workspace_id)
+
+    with patch(
+        "app.modules.agent.service.AgentService.start_stage_dispatch",
+        new=AsyncMock(side_effect=RuntimeError("boom")),
+    ):
+        service = SillySpecStageDispatchService(db_session)
+        result = await service.dispatch_next_step(
+            session=db_session,
+            workspace_id=workspace_id,
+            change_id=change.id,
+            user_id=uuid.uuid4(),
+            target_stage="propose",
+        )
+
+    assert result["dispatched"] is False
+    assert result["reason"] == "agent_start_error"
+    assert await _runs_for_change(db_session, change.id) == []
+
+
+async def test_wave0_dispatch_next_step_clears_legacy_orphan_and_unblocks(
+    db_session: AsyncSession,
+) -> None:
+    """验收#6: 已存在的历史孤儿 Run A（旧 dispatch_next_step 残留）在新 dispatch 时
+    被安全清理，change 不再被永久阻塞。"""
+    workspace_id = await _create_workspace(db_session)
+    change = await _create_change(db_session, workspace_id=workspace_id)
+    orphan = AgentRun(
+        id=uuid.uuid4(),
+        task_id=None,
+        lease_id=None,
+        change_id=change.id,
+        agent_type="claude_code",
+        provider=None,
+        model=None,
+        status="pending",
+        spec_strategy="sillyspec",
+    )
+    db_session.add(orphan)
+    await db_session.commit()
+
+    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
+        service = SillySpecStageDispatchService(db_session)
+        result = await service.dispatch_next_step(
+            session=db_session,
+            workspace_id=workspace_id,
+            change_id=change.id,
+            user_id=uuid.uuid4(),
+            target_stage="propose",
+        )
+
+    assert result["dispatched"] is True  # 不再被孤儿阻塞
+    await db_session.refresh(orphan)
+    assert orphan.status == "killed"  # 孤儿被清理
+    pending = [r for r in await _runs_for_change(db_session, change.id) if r.status == "pending"]
+    assert pending == []  # 无遗留 pending（孤儿 killed，新 run running）
+
+
+# ===================================================================
+# Wave0: orphan dispatch Run cleanup — precise, never touches normal pending
+# ===================================================================
+
+
+async def test_wave0_cleanup_removes_legacy_orphan_only(db_session: AsyncSession) -> None:
+    """孤儿清理精准命中旧 dispatch_next_step Run A 指纹（pending + task_id NULL +
+    lease NULL + provider NULL + model NULL + spec_strategy='sillyspec'）。"""
+    from app.modules.change.dispatch import cleanup_orphan_dispatch_runs
+
+    change = await _create_change(db_session)
+    orphan = AgentRun(
+        id=uuid.uuid4(),
+        task_id=None,
+        lease_id=None,
+        change_id=change.id,
+        agent_type="claude_code",
+        provider=None,
+        model=None,
+        status="pending",
+        spec_strategy="sillyspec",
+    )
+    db_session.add(orphan)
+    await db_session.commit()
+
+    cleaned = await cleanup_orphan_dispatch_runs(db_session, change.id)
+
+    assert cleaned == [orphan.id]
+    await db_session.refresh(orphan)
+    assert orphan.status == "killed"
+
+
+async def test_wave0_cleanup_preserves_all_normal_pending_runs(
+    db_session: AsyncSession,
+) -> None:
+    """正常 pending Run 绝不被清理：Run B(spec=None)/task 级(task_id)/有 lease/
+    有 provider/已完成 的 Run 全部不动。"""
+    from app.modules.change.dispatch import cleanup_orphan_dispatch_runs
+
+    change = await _create_change(db_session)
+    preserved = [
+        # Run B: start_stage_dispatch 产物，spec_strategy=None
+        AgentRun(
+            id=uuid.uuid4(),
+            task_id=None,
+            lease_id=None,
+            change_id=change.id,
+            agent_type="claude_code",
+            provider="claude",
+            model="m",
+            status="pending",
+            spec_strategy=None,
+        ),
+        # task 级 sillyspec run: 有 task_id
+        AgentRun(
+            id=uuid.uuid4(),
+            task_id=uuid.uuid4(),
+            lease_id=None,
+            change_id=change.id,
+            agent_type="claude_code",
+            provider=None,
+            model=None,
+            status="pending",
+            spec_strategy="sillyspec",
+        ),
+        # 有 worktree lease
+        AgentRun(
+            id=uuid.uuid4(),
+            task_id=None,
+            lease_id=uuid.uuid4(),
+            change_id=change.id,
+            agent_type="claude_code",
+            provider=None,
+            model=None,
+            status="pending",
+            spec_strategy="sillyspec",
+        ),
+        # 有 provider
+        AgentRun(
+            id=uuid.uuid4(),
+            task_id=None,
+            lease_id=None,
+            change_id=change.id,
+            agent_type="claude_code",
+            provider="claude",
+            model=None,
+            status="pending",
+            spec_strategy="sillyspec",
+        ),
+        # 已完成（非 pending）
+        AgentRun(
+            id=uuid.uuid4(),
+            task_id=None,
+            lease_id=None,
+            change_id=change.id,
+            agent_type="claude_code",
+            provider=None,
+            model=None,
+            status="completed",
+            spec_strategy="sillyspec",
+        ),
+    ]
+    for r in preserved:
+        db_session.add(r)
+    await db_session.commit()
+    original_statuses = {r.id: r.status for r in preserved}
+
+    cleaned = await cleanup_orphan_dispatch_runs(db_session, change.id)
+
+    assert cleaned == []
+    for r in preserved:
+        await db_session.refresh(r)
+        assert r.status == original_statuses[r.id]
+
+
+# ===================================================================
+# Wave0 ql-20260619-003-0f87: dispatch() last_dispatch.run_id persistence
+# ===================================================================
+
+
+async def test_dispatch_persists_last_dispatch_run_id(db_session: AsyncSession) -> None:
+    """dispatch() 必须持久化 last_dispatch.run_id。回归：JSON in-place mutation
+    (stages = change.stages or {} 在 change.stages 非空时同引用) 导致 run_id 回填
+    不持久化，前端订阅 last_dispatch.run_id 拿不到真实 run id。
+    与 ql-001 dispatch_next_step Step7 同类 bug。"""
+    workspace_id = await _create_workspace(db_session)
+    change = await _create_change(db_session, workspace_id=workspace_id, current_stage="draft")
+
+    mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
+    with patch("app.modules.agent.service.AgentService") as MockAgentService:
+        mock_svc = MockAgentService.return_value
+        mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
+
+        result = await dispatch(
+            session=db_session,
+            workspace_id=change.workspace_id,
+            change_id=change.id,
+            target_stage="propose",
+            user_id=uuid.uuid4(),
+        )
+
+    assert result["dispatched"] is True
+    await db_session.refresh(change)
+    last_dispatch = change.stages.get("last_dispatch")
+    assert last_dispatch is not None
+    assert last_dispatch.get("run_id") == str(mock_run.id)

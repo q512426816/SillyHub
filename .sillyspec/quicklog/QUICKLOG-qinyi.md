@@ -280,3 +280,29 @@
   6. **killed 被 cancelled 覆盖**：daemon cancel 后先 syncStatus('killed') 再 complete_lease(status='cancelled')，后者覆盖前者。`complete_lease` 加终态优先级护栏：killed > failed > cancelled > completed，低优先级不覆盖高优先级。
 测试：backend 213/213 通过（新增 6 cancel 测试 + 1 killed 保留测试）；daemon 27/27 + 95/95（task-runner/config/daemon-parity/provider-dispatch）通过。E2E 验证：pending-kill / running-kill / 正常完成 三条链路均跑通。
 
+---
+
+## ql-20260619-001-f6cc | 2026-06-19 13:22:08 | 修复 dispatch_next_step 重复创建 AgentRun（删除上层预创建 Run，对齐 dispatch() 模式 + 历史孤儿 pending Run 精准清理）
+状态：已完成
+文件：backend/app/modules/change/dispatch.py（新增 cleanup_orphan_dispatch_runs + 重写 dispatch_next_step，未改 start_stage_dispatch）、backend/tests/modules/change/test_dispatch.py / test_dispatch_chain.py / test_e2e_stage_dispatch.py
+结果：根因=dispatch_next_step 与 start_stage_dispatch 两层都有 AgentRun 创建权。修法：(1) dispatch.py 新增 cleanup_orphan_dispatch_runs，精准指纹 pending+task_id NULL+lease_id NULL+provider NULL+model NULL+spec_strategy='sillyspec'，只命中旧 Run A 不动正常 Run（Run B spec_strategy=None / task 级有 task_id / 有 lease / 有 provider·model / 非 pending 全排除）；(2) dispatch_next_step 删 Step5 预创建 Run A 及 AgentRunWorkspace 关联，Step3 加 cleanup 调用（在 has_active_run 前清孤儿解永久阻塞），Step6 改用 run=await start_stage_dispatch(...) 返回值，Step7 用 dict() 拷贝回填 last_dispatch.run_id（修 SQLAlchemy JSON in-place mutation 不持久化的隐藏 bug，验收#2 真实成立），异常对齐 dispatch() 返回 agent_start_error 不再标 Run failed。未给 start_stage_dispatch 加双模式。3 个测试文件 FakeRun mock 全换建真 DB Run 的 _patch_stage_dispatch_creates_run helper（契约变更配套）。
+验证：新增 7 个 wave0 测试锁定六条验收；change 模块 85 全绿（含 e2e+chain+auto_dispatch）+ agent 84 + change_writer/router 11；ruff clean；mypy Success。
+依据：proposal .sillyspec/changes/2026-06-19-multi-agent-orchestration/proposal.md §6（Wave0）；dispatch.py dispatch() 正确模式参考；has_active_run(pending 算 active) + reconcile_stale_runs/_cleanup_stale_runs_impl(都只清 running) 证 Run A 永久阻塞。
+
+
+---
+
+## ql-20260619-002-703a | 2026-06-19 13:23:46 | 修复 scan 发现的 4 项配置/索引过时（local.yaml daemon 命令 / projects role / _module-map 索引 / 根级冗余配置）
+状态：已完成
+文件：.sillyspec/local.yaml(本地/gitignored)、.sillyspec/projects/sillyhub-daemon.yaml、.sillyspec/docs/backend/modules/_module-map.yaml、.sillyspec/docs/frontend/modules/_module-map.yaml、.sillyspec/docs/sillyhub-daemon/modules/_module-map.yaml、.sillyspec/docs/sillyhub-daemon/modules/interactive.md（新建）
+结果：(1) local.yaml daemon 段 pip/python/ruff → pnpm build/test/typecheck；(2) projects/sillyhub-daemon.yaml role 由 Python 改为 Node.js≥20+TypeScript+Claude Agent SDK+commander+ws(ESM/pnpm)；(3) 3 个 _module-map source_commit→0303536 / generator→sillyspec-quick，daemon 补 interactive 模块(claude-sdk-driver/session-manager/permission-resolver/input-queue/session-store-persistence/types，needs_review=true 待全量核对依赖链) + 新建 modules/interactive.md 卡片，backend/frontend 元数据刷新并标注 backend 实际 23 模块目录 vs 索引 19 差异待全量 scan 补齐；(4) SillyHub 冗余：调研发现 100 文件引用 + docs/SillyHub/ 完整 scan+modules，非简单冗余(疑 SillyHub 产品名 vs multi-agent-platform 仓库名)，未擅删，建议作为独立任务处理。验证：纯配置/文档改动无构建步骤，YAML 语法目测正确；无代码改动故未跑测试。
+依据：scan 阶段（change=default）产出 CONCERNS.md 记录 4 项过时：(1) local.yaml daemon 段命令仍为 pip/python/ruff，实际 Node.js 应为 pnpm/tsc/vitest；(2) projects/sillyhub-daemon.yaml role 仍写 "Python 3.12 + httpx + Click CLI"；(3) backend/frontend _module-map source_commit c97bad5 过旧、daemon 索引(8229b42)缺 interactive-session 新增的 interactive/claude-sdk-driver 模块；(4) 根级 SillyHub.yaml 与 multi-agent-platform.yaml 同指 path=. 冗余。
+
+---
+
+## ql-20260619-003-0f87 | 2026-06-19 14:03:08 | 修复 dispatch()（transition 路径）last_dispatch.run_id 的 JSON in-place mutation 不持久化（Wave0 ql-001 附带发现）
+状态：已完成
+文件：backend/app/modules/change/dispatch.py（dispatch() :579/:611 加 dict()）、backend/tests/modules/change/test_dispatch.py（+test_dispatch_persists_last_dispatch_run_id）
+结果：dispatch() transition 路径的 last_dispatch.run_id 因 stages=change.stages or{} 同引用 mutation 不持久化（与 ql-001 dispatch_next_step Step7 同类）。修：:579 首次写 + :611 回填 run_id 两处都改 dict(change.stages or{}) 强制新对象。TDD：先写 test_dispatch_persists_last_dispatch_run_id 验证持久化（红：run_id None），修复后绿。
+验证：test_dispatch.py 48 全绿（含新测试）；ruff clean；mypy Success。
+依据：ql-001 Wave0 修复时发现的附带 bug；dispatch.py dispatch() 函数。

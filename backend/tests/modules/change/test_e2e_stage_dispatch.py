@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -45,6 +46,40 @@ async def _create_workspace(session: AsyncSession) -> uuid.UUID:
     session.add(ws)
     await session.commit()
     return ws.id
+
+
+@contextmanager
+def _patch_stage_dispatch_creates_run(
+    session: AsyncSession,
+    change_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+):
+    """Wave0: mimic real start_stage_dispatch — create a REAL AgentRun +
+    AgentRunWorkspace in DB and return the run (skips daemon dispatch).
+    Post-Wave0 the Run is owned by start_stage_dispatch, not dispatch_next_step."""
+    from app.modules.workspace.model import AgentRunWorkspace
+
+    async def _impl(self, **kwargs):
+        run = AgentRun(
+            id=uuid.uuid4(),
+            task_id=None,
+            lease_id=None,
+            change_id=change_id,
+            agent_type="claude_code",
+            provider="claude",
+            model="claude-sonnet-4",
+            status="running",
+        )
+        session.add(run)
+        session.add(AgentRunWorkspace(agent_run_id=run.id, workspace_id=workspace_id))
+        await session.commit()
+        await session.refresh(run)
+        return run
+
+    with patch(
+        "app.modules.agent.service.AgentService.start_stage_dispatch", new=_impl
+    ) as mock_method:
+        yield mock_method
 
 
 def _create_sillyspec_db(
@@ -229,11 +264,7 @@ async def test_e2e_draft_brainstorm_propose_chain(
     assert change.current_stage == "brainstorm"
 
     # Dispatch agent for brainstorm stage
-    mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
-    with patch("app.modules.agent.service.AgentService") as MockAgentService:
-        mock_svc = MockAgentService.return_value
-        mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
-
+    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
         dispatch_svc = SillySpecStageDispatchService(db_session)
         d1 = await dispatch_svc.dispatch_next_step(
             session=db_session,
@@ -326,10 +357,7 @@ async def test_e2e_draft_brainstorm_propose_chain(
     )
 
     # Dispatch agent for propose stage
-    with patch("app.modules.agent.service.AgentService") as MockAgentService:
-        mock_svc = MockAgentService.return_value
-        mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
-
+    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
         d2 = await dispatch_svc.dispatch_next_step(
             session=db_session,
             workspace_id=workspace_id,
@@ -427,11 +455,7 @@ async def test_e2e_dispatch_prevents_concurrent_runs_across_stages(
     )
 
     # Dispatch for brainstorm — run stays "pending"
-    mock_run = type("FakeRun", (), {"id": uuid.uuid4()})()
-    with patch("app.modules.agent.service.AgentService") as MockAgentService:
-        mock_svc = MockAgentService.return_value
-        mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
-
+    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
         dispatch_svc = SillySpecStageDispatchService(db_session)
         d1 = await dispatch_svc.dispatch_next_step(
             session=db_session,
@@ -452,10 +476,7 @@ async def test_e2e_dispatch_prevents_concurrent_runs_across_stages(
     assert change.current_stage == "propose"
 
     # Dispatch for propose should be blocked — active run exists
-    with patch("app.modules.agent.service.AgentService") as MockAgentService:
-        mock_svc = MockAgentService.return_value
-        mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
-
+    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
         d2 = await dispatch_svc.dispatch_next_step(
             session=db_session,
             workspace_id=workspace_id,
@@ -473,10 +494,7 @@ async def test_e2e_dispatch_prevents_concurrent_runs_across_stages(
     await db_session.commit()
 
     # Dispatch for propose should succeed now
-    with patch("app.modules.agent.service.AgentService") as MockAgentService:
-        mock_svc = MockAgentService.return_value
-        mock_svc.start_stage_dispatch = AsyncMock(return_value=mock_run)
-
+    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
         d3 = await dispatch_svc.dispatch_next_step(
             session=db_session,
             workspace_id=workspace_id,
