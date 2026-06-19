@@ -339,7 +339,7 @@ export class SessionManager {
       if (
         !state ||
         state.status !== 'running' ||
-        state.currentRunId === undefined
+        !state.currentRunId
       ) {
         return { behavior: 'deny', message: 'session not in running turn' };
       }
@@ -904,7 +904,7 @@ export class SessionManager {
         this._pendingInjectCount.set(state.sessionId, 0);
       }
     }
-    if (runId !== undefined) {
+    if (runId) {
       // task-08（AC-08.8）：turn result 完成时 abort 当前 turn 的 pending resolver。
       // spike D4：result 后无孤儿 canUseTool，但防御性 fail-closed——本 turn 的
       // pending 审批（若 canUseTool 回调还没 settle）立即 deny。resolver 实例
@@ -936,7 +936,7 @@ export class SessionManager {
       }
     }
     const runId = state.currentRunId;
-    if (runId !== undefined) {
+    if (runId) {
       await this.deps.onTurnMessage(state.sessionId, runId, msg);
     }
   }

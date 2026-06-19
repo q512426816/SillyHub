@@ -773,3 +773,35 @@ class TestCompleteLease:
         svc = DaemonService(db_session)
         with pytest.raises(DaemonInvalidClaimToken):
             await svc.complete_lease(lease.id, "wrong-token", {"status": "completed"})
+
+
+@pytest.mark.asyncio
+async def test_build_claim_payload_batch_null_agent_run_raises(
+    db_session: AsyncSession,
+) -> None:
+    """ql-004: batch lease（非 interactive）agent_run_id NULL → DaemonLeaseNoAgentRun。
+
+    静默返回 agent_run_id=None 的 payload 会让 daemon 发空 agent_run_id
+    submitMessages → backend 422 风暴 → 连接池耗尽。fail-fast 抛错暴露。
+    """
+    from app.modules.daemon.service import DaemonLeaseNoAgentRun
+
+    user_id = await _create_user(db_session)
+    rt = await _create_runtime(db_session, user_id)
+    lease = DaemonTaskLease(
+        id=uuid.uuid4(),
+        runtime_id=rt.id,
+        agent_run_id=None,  # batch lease NULL — 异常（dispatch 必填）
+        status="claimed",
+        kind="batch",
+        claimed_at=datetime.now(UTC),
+        lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+        metadata_={"claim_token": "tok"},
+    )
+    db_session.add(lease)
+    await db_session.commit()
+    await db_session.refresh(lease)
+
+    svc = DaemonService(db_session)
+    with pytest.raises(DaemonLeaseNoAgentRun):
+        await svc._build_claim_payload(lease)

@@ -213,6 +213,17 @@ describe('Wave2 task-04 gap-1 daemon 桥接 onTurnResult/onTurnMessage/onSession
     );
   });
 
+  // ql-004：空 runId（''/undefined）不发 submitMessages，防空 agent_run_id 422 风暴。
+  it('onTurnMessage(empty runId) → 不调 submitMessages（防 422 风暴 ql-004）', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+    const msg = { type: 'assistant', message: { role: 'assistant' } } as unknown as SDKMessage;
+    await daemon.onTurnMessage('sess-1', '', msg);
+    expect(client.submitMessages).not.toHaveBeenCalled();
+    await daemon.onTurnMessage('sess-1', undefined as unknown as string, msg);
+    expect(client.submitMessages).not.toHaveBeenCalled();
+  });
+
   // ── onSessionEnd → hubClient.notifySessionEnd ─────────────────────────────
 
   it('onSessionEnd(status=ended) → notifySessionEnd(sessionId, ended, reason=manual)', async () => {

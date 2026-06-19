@@ -68,6 +68,18 @@ class DaemonAgentRunNotFound(AppError):
     http_status = 404
 
 
+class DaemonLeaseNoAgentRun(AppError):
+    """Batch lease has no agent_run_id (dispatch always sets it; NULL is a bug).
+
+    Fail-fast instead of silently returning an agent_run_id=None claim payload,
+    which would make the daemon send empty agent_run_id submitMessages → backend
+    422 storm → connection pool exhaustion (ql-004).
+    """
+
+    code = "HTTP_422_DAEMON_LEASE_NO_AGENT_RUN"
+    http_status = 422
+
+
 class PatchApplyError(AppError):
     code = "HTTP_422_PATCH_APPLY_ERROR"
     http_status = 422
@@ -554,7 +566,13 @@ class DaemonService:
             return payload
 
         if lease.agent_run_id is None:
-            return payload
+            # ql-004：batch lease（interactive 已在上方 return）agent_run_id 不应为
+            # NULL。静默返回 agent_run_id=None 的 payload 会让 daemon 发空
+            # agent_run_id → backend 422 风暴 → 连接池耗尽。fail-fast 抛错暴露。
+            raise DaemonLeaseNoAgentRun(
+                f"Batch lease '{lease.id}' has no agent_run_id (kind={lease.kind}).",
+                details={"lease_id": str(lease.id), "kind": lease.kind},
+            )
 
         agent_run = await self._session.get(AgentRun, lease.agent_run_id)
         if agent_run is None:

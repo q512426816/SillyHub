@@ -1128,7 +1128,8 @@ export class TaskRunner {
 
     // submitMessages：fire-and-forget，不阻塞 stdout readline（每条 await HTTP
     // 会让 cursor/codex 执行慢一个数量级；失败仅 warn，对齐容错策略）。
-    if (env.claimToken) {
+    // ql-004：空 agentRunId 不发 submitMessages，防空 agent_run_id 422 风暴。
+    if (env.claimToken && env.agentRunId) {
       void this.client
         .submitMessages(env.leaseId, env.claimToken, env.agentRunId, messages)
         .catch((e) => {

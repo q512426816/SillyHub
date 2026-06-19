@@ -306,3 +306,12 @@
 结果：dispatch() transition 路径的 last_dispatch.run_id 因 stages=change.stages or{} 同引用 mutation 不持久化（与 ql-001 dispatch_next_step Step7 同类）。修：:579 首次写 + :611 回填 run_id 两处都改 dict(change.stages or{}) 强制新对象。TDD：先写 test_dispatch_persists_last_dispatch_run_id 验证持久化（红：run_id None），修复后绿。
 验证：test_dispatch.py 48 全绿（含新测试）；ruff clean；mypy Success。
 依据：ql-001 Wave0 修复时发现的附带 bug；dispatch.py dispatch() 函数。
+
+---
+
+## ql-20260619-004-ae04 | 2026-06-19 15:04:58 | 修复 interactive-session 发空 agent_run_id 致 422 风暴耗尽连接池（plan: lexical-juggling-aurora）
+状态：已完成
+文件：sillyhub-daemon/src/task-runner.ts、daemon.ts、interactive/session-manager.ts、sillyhub-daemon/tests/daemon-interactive-bridge.test.ts、backend/app/modules/daemon/service.py、backend/app/modules/daemon/tests/test_lease_service.py
+结果：Layer 1（daemon 不发空 agent_run_id，防 422 风暴）：task-runner.ts submitMessages 加 env.agentRunId 校验；daemon.ts onTurnMessage 加 runId 校验；session-manager.ts _onMessage/_onResult 改 if(runId)（空串 fail-closed）+ canUseTool 改 !currentRunId。Layer 2（backend fail-fast）：service.py 新增 DaemonLeaseNoAgentRun 错误 + _build_claim_payload batch lease agent_run_id NULL 改抛错（不静默返回 None payload）。
+验证：daemon Layer 1 区域绿（daemon-interactive-bridge 含新 onTurnMessage 空 runId 测试 + session-manager + daemon-parity + stats-passthrough + protocol-session-contract）；backend test_lease_service 34 passed（含新 batch NULL raise 测试）；ruff/mypy clean。daemon 全量 9 failed 是既有环境测试（agent-detector PATH 解析 / cli.test.ts 跑 Python / spec 超时 / terminal-observer），与本次改动无关。
+依据：plan .claude/plans/lexical-juggling-aurora.md；诊断：daemon 对某 lease 高频 POST messages 全 422（agent_run_id 空）→ 风暴 → 每 422 auth 占 session → QueuePool 耗尽。根因：daemon _onMessage `if(runId!==undefined)` 放行空串 currentRunId / batch task-runner 用空 agentRunId 调 submitMessages。Layer 1（daemon 不发空）+ Layer 2（backend batch NULL 抛错）。

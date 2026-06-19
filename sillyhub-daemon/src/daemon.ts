@@ -982,6 +982,15 @@ export class Daemon {
       });
       return;
     }
+    if (!runId) {
+      // ql-004：空 runId（''/undefined）不发 submitMessages，避免空 agent_run_id
+      // 触发 backend 422 风暴（每请求 auth 占连接 → 连接池耗尽）。
+      this._logger.warn('on_turn_message_empty_run_id', {
+        session_id: sessionId,
+        lease_id: state.leaseId,
+      });
+      return;
+    }
     try {
       await this._client.submitMessages(
         state.leaseId,
