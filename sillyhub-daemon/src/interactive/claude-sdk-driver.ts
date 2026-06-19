@@ -106,7 +106,11 @@ export function resolveClaudeExecutable(detectedPath: string): string {
       `wrapper ${detectedPath} does not reference @anthropic-ai/claude-code/bin/claude.exe`,
     );
   }
-  const extracted = m[1];
+  // gap-7：cmd-shim wrapper（claude.cmd）用批处理变量 %~dp0（= wrapper 所在 dir）
+  // 引用真 exe，path.join 不解析 cmd 变量 → 当字面目录名 → join 出无效路径
+  // `wrapperDir\%~dp0%\node_modules\...`。去掉 %~dp0 / %~dp0\ / %dp0% 前缀，
+  // 让 join(dirname(wrapper), extracted) 用 wrapper dir 作正确基目录。
+  const extracted = m[1].replace(/%[~]?dp0%?[\\/]?/gi, '');
 
   // 提取到的可能是相对 wrapper dir 的路径（cmd-shim 内通常写绝对路径，但兼容相对）。
   let realExe: string;

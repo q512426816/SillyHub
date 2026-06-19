@@ -543,6 +543,9 @@ class DaemonService:
         # 供 daemon _startInteractiveSession 构造 SessionManager.create 输入。
         if lease.kind == "interactive":
             payload["agent_session_id"] = lease_meta.get("session_id")
+            # daemon execPayload.agentRunId 读 snake_case `agent_run_id`（不是 run_id），
+            # 把 metadata.run_id 同时映射到 agent_run_id，否则 daemon has_run_id=false
+            payload["agent_run_id"] = lease_meta.get("run_id")
             payload["run_id"] = lease_meta.get("run_id")
             payload["prompt"] = lease_meta.get("prompt")
             payload["provider"] = lease_meta.get("provider")
