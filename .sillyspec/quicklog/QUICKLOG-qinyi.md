@@ -315,3 +315,45 @@
 结果：Layer 1（daemon 不发空 agent_run_id，防 422 风暴）：task-runner.ts submitMessages 加 env.agentRunId 校验；daemon.ts onTurnMessage 加 runId 校验；session-manager.ts _onMessage/_onResult 改 if(runId)（空串 fail-closed）+ canUseTool 改 !currentRunId。Layer 2（backend fail-fast）：service.py 新增 DaemonLeaseNoAgentRun 错误 + _build_claim_payload batch lease agent_run_id NULL 改抛错（不静默返回 None payload）。
 验证：daemon Layer 1 区域绿（daemon-interactive-bridge 含新 onTurnMessage 空 runId 测试 + session-manager + daemon-parity + stats-passthrough + protocol-session-contract）；backend test_lease_service 34 passed（含新 batch NULL raise 测试）；ruff/mypy clean。daemon 全量 9 failed 是既有环境测试（agent-detector PATH 解析 / cli.test.ts 跑 Python / spec 超时 / terminal-observer），与本次改动无关。
 依据：plan .claude/plans/lexical-juggling-aurora.md；诊断：daemon 对某 lease 高频 POST messages 全 422（agent_run_id 空）→ 风暴 → 每 422 auth 占 session → QueuePool 耗尽。根因：daemon _onMessage `if(runId!==undefined)` 放行空串 currentRunId / batch task-runner 用空 agentRunId 调 submitMessages。Layer 1（daemon 不发空）+ Layer 2（backend batch NULL 抛错）。
+
+## ql-20260619-005-c1b9 | 2026-06-19 16:20:00 | 修复 interactive-session 无法交互：cwd 目录不存在致 SDK spawn 秒挂 + 凭证 env 未注入
+
+状态：已完成
+文件：sillyhub-daemon/src/daemon.ts、sillyhub-daemon/src/interactive/types.ts、sillyhub-daemon/src/interactive/session-manager.ts、sillyhub-daemon/src/cli.ts、sillyhub-daemon/tests/daemon-kind-dispatch.test.ts
+依据：用户报"Daemon 运行时一堆问题，无法交互"。真实 daemon + 后端 API 端到端复现交互式会话（POST /api/daemon/sessions）。
+根因（两个交互特有缺口，batch 路径都没有）：
+  1. **cwd 不存在**：daemon-client 交互会话无 workspace → execPayload.rootPath 为空 → `_startInteractiveSession` 的 `cwd = rootPath ?? config.workspace_dir` 回落到 `~/sillyhub_workspaces`（默认，实测不存在）。batch 路径由 TaskRunner 在 spawn 前 mkdir 工作目录，但交互路径（SessionManager→ClaudeSdkDriver）**从不创建 cwd**。SDK 的 child_process.spawn 因 cwd 不存在立即失败（SDK 误报为 "native binary failed to launch / libc mismatch"）→ onError→fail→onSessionEnd，session 在 ~4s 内 ended、agent_session_id 恒 null。探针用存在/不存在目录对照复现确认。
+  2. **凭证 env 未注入**：交互路径 driver.start 用 `env: opts.env ?? {...process.env}`，`SessionManager.create` 原先不传 env；而 batch 路径走 `buildSpawnEnv(credential)` 叠加 credentials.json 的 ANTHROPIC token。用户按设计在 ~/.sillyhub/daemon/credentials.json 配 token 后 batch 能跑、交互仍因无凭证失败（parity 缺口）。
+结果：
+  1. **daemon.ts `_startInteractiveSession`**：create 前 `await mkdir(cwd, {recursive:true})`（失败仅 warn 不阻断，让 SDK 真错经 onError 收口）。新增 import `mkdir`。
+  2. **凭证 parity**：DaemonOptions 新增 `credentialManager`（鸭子类型 get/buildEnv）；`_startInteractiveSession` 用 `buildSpawnEnv({toolConfig: execPayload.toolConfig ?? {}}, {credential})` 构造 env 透传 `SessionManager.create`。types.ts CreateSessionInput/SessionState 加 `env?`；session-manager.ts create 把 `input.env` 写入 state + driverOpts（仅在非 undefined 时覆盖，缺省回退裸 process.env 兼容）。cli.ts 把同一 CredentialManager 传给 Daemon。env 仅内存态，不入 PersistedSessionRecord（白名单已禁密钥）。
+验证：端到端复现——修复前 session 4s 内 ended/agent_session_id=null；修复后 session 持续 active/running、daemon 日志出 `interactive_session_started`、backend 持续 `daemon_messages_submitted`。新增 daemon-kind-dispatch.test.ts 2 个 gap-8 用例（cwd 自动创建 + credentialManager env 注入），该文件 15/15 通过；session-manager/claude-sdk-driver/spawn-env/daemon-session-lifecycle-wiring 69/69 通过；tsc 零错误。
+遗留（非代码、已告知用户）：(a) GLM/智谱上游 `429 rate_limit`（探针实测，SDK 自动重试，账号配额问题，非代码 bug）；(b) daemon 进程需具备 ANTHROPIC 凭证来源（credentials.json 仅认 ANTHROPIC_API_KEY/CLAUDE_OAUTH_TOKEN；GLM 的 ANTHROPIC_AUTH_TOKEN+ANTHROPIC_BASE_URL 目前只能经 daemon 进程 env 或 lease tool_config 注入）。
+
+---
+
+## ql-20260619-007-7b2e | 2026-06-19 22:12:30 | 修复 /runtimes 选中 active 会话不回显历史（active 统一走只读历史回看）
+状态：已完成
+文件：frontend/src/app/(dashboard)/runtimes/page.tsx、frontend/src/app/(dashboard)/runtimes/page.test.tsx
+结果：page.tsx handleSelect 移除 active 特殊分支（之前 setLogs([])+return 走 live 空白分支），所有会话（含 active）统一调 getAgentSessionLogs 只读回看；渲染条件 `selected && !isActiveSession(selected)` → `selected`；删除无用的 liveViewOpen 状态及 handleDelete 残留调用。根因：active 走 live 分支但 InteractiveSessionChatSection 不接收 selected、InteractiveSessionPanel 无「打开已有会话」入口 → 点 active 会话右侧空白；只有 ended/failed 才回看。active 的 live 续看/追问需 LivePanel 支持 resume，属更大重构，单独 task。
+验证：page.test.tsx 5/5 通过（新增 active 会话选中只读回看用例）；eslint 0 error（5 warning 均既存 unused，与本次无关）。
+依据：design .sillyspec/changes/archive/2026-06-18-2026-06-18-daemon-interactive-session/design.md task-12 会话列表+历史回看。
+
+## ql-20260619-006-7d2a | 2026-06-19 22:11:30 | workspace 详情页补充「切换 Daemon」改绑入口
+状态：已完成
+文件：frontend/src/lib/workspaces.ts、frontend/src/components/workspace-path-fields.tsx、frontend/src/app/(dashboard)/workspaces/[id]/page.tsx、frontend/src/lib/workspace-path.ts
+依据：运行 2cac4743（工作区扫描）失败，exit_code=1 + 无日志。根因：workspace happy（daemon-client）绑定的 daemon 6ee56f0a（cursor/offline）离线 → placement daemon-client 强绑路由直接 NoOnlineDaemonError 标失败，从未 spawn claude。backend PATCH /api/workspaces/{id} 已支持 daemon_runtime_id 更新（schema.py WorkspaceUpdate 173-174 + service.py update 414 exclude_unset+setattr），纯前端缺口：UpdateWorkspaceInput 未暴露 daemon_runtime_id；详情页「绑定 Daemon」只读无切换控件。前端已有 listDaemonRuntimes/listOnlineRuntimes（lib/daemon.ts 20-31）+ DaemonRuntimeRead 类型可直接复用。
+结果：1) lib/workspaces.ts UpdateWorkspaceInput 加 daemon_runtime_id?:string|null；2) 新组件 components/workspace-daemon-switcher.tsx（复用 listDaemonRuntimes online 排前 + updateWorkspace({daemon_runtime_id})，当前项标注、offline/disabled badge、失败显错误）；3) workspaces/[id]/page.tsx 基本信息 section daemon-client 时渲染 switcher（onChanged=load 刷新）；4) 组件测试 4 用例。未改 backend（WorkspaceUpdate 已支持）。
+验证：vitest workspace-daemon-switcher 4/4 绿；workspace-path lib 4/4 绿（未破坏）；eslint 改动文件 exit 0。
+
+---
+
+## ql-20260619-008-e4b7 | 2026-06-19 23:25:00 | 修复交互式会话面板高度无限增长（min-h-[520px] → 固定高度，对齐 app-pages 文档「限制 520px 区域内滚动」）
+
+状态：已完成
+文件：frontend/src/components/daemon/interactive-session-panel.tsx
+依据：用户反馈「交互式会话 会话 5335c551… 这个高度不应该无限的，应该固定」。文档 .sillyspec/docs/frontend/modules/app-pages.md:54（MANUAL_NOTES / 2026-06-19-runtimes-layout）：会话列表限制为 520px、超出后在各自区域内滚动。
+根因：interactive-session-panel.tsx:421 `<section className="flex min-h-[520px] flex-col overflow-hidden ...">` 只设最小高度无上限；父容器 runtimes/page.tsx:1121 grid `lg:grid-cols-[260px_minmax(0,1fr)]` 行高随内容撑开无约束 → 消息增多时中间消息区 flex-1 overflow-y-auto（:508）永不收缩、不触发滚动，整个面板被撑到无限高，违背文档「限制 520px 区域内滚动」。
+结果：第 421 行 className 由 `min-h-[520px]` 改为 `h-[520px]`（固定高度）。面板恒定 520px，header（provider/model 选择 + 打断/结束按钮）+ footer（输入框）固定，中间消息区 flex-1 overflow-y-auto 正常滚动；空状态占位（:515 min-h-[260px]）居中。文档 app-pages.md:54 已正确描述限高设计，无需改动；interactive-session-panel.tsx 未命中 frontend _module-map（孤儿组件），故不追加模块变更索引。
+验证：vitest src/components/daemon/__tests__/interactive-session-panel.test.tsx(14) + src/app/(dashboard)/runtimes/page.test.tsx(5) = 19 passed；纯 className 改动无逻辑变更，未新增测试。
+

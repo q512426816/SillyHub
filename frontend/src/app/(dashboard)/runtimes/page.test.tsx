@@ -17,6 +17,7 @@ import { useSession } from "@/stores/session";
 const daemon = vi.hoisted(() => ({
   listDaemonRuntimes: vi.fn(),
   listAgentSessions: vi.fn(),
+  deleteAgentSession: vi.fn(),
   getAgentSessionLogs: vi.fn(),
   respondSessionPermission: vi.fn(),
   parseSessionPermissionEvent: vi.fn(() => null),
@@ -28,6 +29,7 @@ vi.mock("@/lib/daemon", async () => {
     ...actual,
     listDaemonRuntimes: daemon.listDaemonRuntimes,
     listAgentSessions: daemon.listAgentSessions,
+    deleteAgentSession: daemon.deleteAgentSession,
     getAgentSessionLogs: daemon.getAgentSessionLogs,
     respondSessionPermission: daemon.respondSessionPermission,
     parseSessionPermissionEvent: daemon.parseSessionPermissionEvent,
@@ -56,9 +58,11 @@ beforeEach(() => {
   FakeES.instances.length = 0;
   daemon.listDaemonRuntimes.mockResolvedValue([]);
   daemon.listAgentSessions.mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 });
+  daemon.deleteAgentSession.mockResolvedValue(undefined);
   daemon.getAgentSessionLogs.mockResolvedValue([]);
   daemon.respondSessionPermission.mockResolvedValue({ accepted: true });
   daemon.parseSessionPermissionEvent.mockReturnValue(null);
+  vi.stubGlobal("confirm", vi.fn(() => true));
 });
 
 afterEach(() => {
@@ -85,6 +89,8 @@ describe("RuntimesPage session list + history", () => {
     await waitFor(() => expect(screen.getByText("daemon")).toBeInTheDocument());
     // session list empty state visible
     await waitFor(() => expect(screen.getByText(/没有会话/)).toBeInTheDocument());
+    expect(screen.getByTestId("runtime-list-scroll")).toHaveClass("max-h-[680px]");
+    expect(screen.getByTestId("session-list-scroll")).toHaveClass("max-h-[520px]");
   });
 
   it("loads session list and selects a history (ended) session into read-only view", async () => {
@@ -143,5 +149,86 @@ describe("RuntimesPage session list + history", () => {
     render(<RuntimesPage />);
     await waitFor(() => expect(daemon.listAgentSessions).toHaveBeenCalled());
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("confirms and deletes a terminal session from the list", async () => {
+    const session = {
+      id: "sess-ended-1",
+      runtime_id: "r1",
+      lease_id: null,
+      provider: "claude",
+      status: "ended" as const,
+      agent_session_id: null,
+      config: null,
+      turn_count: 2,
+      created_at: "2026-06-18T09:00:00Z",
+      last_active_at: "2026-06-18T09:30:00Z",
+      ended_at: "2026-06-18T09:30:00Z",
+    };
+    daemon.listAgentSessions.mockResolvedValue({
+      items: [session],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    });
+
+    render(<RuntimesPage />);
+    const deleteButton = await screen.findByRole("button", {
+      name: "删除会话 sess-ended-1",
+    });
+    fireEvent.click(deleteButton);
+
+    await waitFor(() => expect(daemon.deleteAgentSession).toHaveBeenCalledWith(session.id));
+    expect(confirm).toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByText(/sess-ended/)).not.toBeInTheDocument());
+  });
+
+  it("loads an active session into read-only history view (ql-20260619-007)", async () => {
+    // ql-007 回归：active 会话选中后不再走 live 空白分支，统一只读回看历史日志。
+    // sid 取 12 字符以内避免 shortId() 截断（>12 会变成「前8…后4」）。
+    const sid = "sess-active1";
+    daemon.listAgentSessions.mockResolvedValue({
+      items: [
+        {
+          id: sid,
+          runtime_id: "r1",
+          lease_id: null,
+          provider: "claude",
+          status: "active",
+          agent_session_id: null,
+          config: null,
+          turn_count: 1,
+          created_at: "2026-06-19T09:00:00Z",
+          last_active_at: "2026-06-19T09:30:00Z",
+          ended_at: null,
+        },
+      ],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    });
+    daemon.getAgentSessionLogs.mockResolvedValue([
+      {
+        id: "l1",
+        run_id: "run-x",
+        timestamp: "2026-06-19T09:10:00Z",
+        channel: "stdout",
+        content_redacted: "active session history output",
+      },
+    ]);
+
+    render(<RuntimesPage />);
+    const item = await screen.findByText(/sess-active1/);
+    fireEvent.click(item);
+
+    // active 会话也调 getAgentSessionLogs 并渲染历史日志（不再空白 live 分支）
+    await waitFor(() =>
+      expect(daemon.getAgentSessionLogs).toHaveBeenCalledWith(sid),
+    );
+    await waitFor(() =>
+      expect(screen.getByText("active session history output")).toBeInTheDocument(),
+    );
+    // 只读视图：无 live 面板的发送控件
+    expect(screen.queryByTitle(/发送/)).not.toBeInTheDocument();
   });
 });

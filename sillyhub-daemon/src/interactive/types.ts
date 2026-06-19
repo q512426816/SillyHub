@@ -58,6 +58,11 @@ export interface SessionState {
   provider: 'claude' | 'codex';
   /** pathToClaudeCodeExecutable（create 时由 daemon._agentPaths 提供）。 */
   pathToClaudeCodeExecutable: string;
+  /**
+   * gap-8（凭证 parity）：claude 子进程 env（含 credentials.json token）。
+   * 仅内存态，**禁止**写入 PersistedSessionRecord（task-10 白名单已禁密钥）。
+   */
+  env?: NodeJS.ProcessEnv;
 }
 
 /** CreateSessionInput（daemon._startInteractiveSession → SessionManager.create）。 */
@@ -77,6 +82,12 @@ export interface CreateSessionInput {
   pathToClaudeCodeExecutable: string;
   model?: string;
   allowedTools?: string[];
+  /**
+   * gap-8（凭证 parity）：claude 子进程 env（daemon 用 buildSpawnEnv 构造，含
+   * credentials.json 的 ANTHROPIC token + tool_config 渲染）。缺省时 driver 回退
+   * 裸 process.env（向后兼容 task-04）。**仅本地内存**，禁止序列化/落盘/回传。
+   */
+  env?: NodeJS.ProcessEnv;
 }
 
 /** inject 返回值（runId 由 backend 在 inject 时已创建）。 */

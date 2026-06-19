@@ -14,6 +14,9 @@
 //   SESSION_* 消息经 onMessage → _handleWsMessage → SessionManager 路由。
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { Daemon } from '../src/daemon.js';
 import type { DaemonConfig } from '../src/config.js';
 import { MSG } from '../src/protocol.js';
@@ -151,6 +154,7 @@ function buildDaemon(opts: {
   sessionManager?: SessionManager | null;
   agentPath?: string; // 注册时填入 _agentPaths['claude']
   config?: Partial<DaemonConfig>;
+  credentialManager?: { get: (k: string) => string | undefined; buildEnv: (c: Record<string, unknown>) => Record<string, string> };
 }) {
   const client = opts.client ?? createMockClient();
   const taskRunner =
@@ -182,6 +186,9 @@ function buildDaemon(opts: {
   // 只在显式传 sessionManager 时注入（含 null：测「未注入」场景）。
   if (opts.sessionManager !== undefined) {
     ctorOpts.sessionManager = sessionManager;
+  }
+  if (opts.credentialManager !== undefined) {
+    ctorOpts.credentialManager = opts.credentialManager;
   }
 
   const daemon = new Daemon(
@@ -482,6 +489,102 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
     const logged = errorSpy.mock.calls.map((c) => String(c.map(String))).join(' ');
     expect(logged.toLowerCase()).toMatch(/session_manager|interactive/);
     errorSpy.mockRestore();
+    await daemon.stop();
+  });
+
+  // ── gap-8：interactive cwd 创建 + 凭证 env 注入 ──────────────────────────────
+
+  it('gap-8: interactive 无 rootPath 时 cwd 回落 workspace_dir 并被自动创建（修复 SDK spawn 因 cwd 不存在秒挂）', async () => {
+    const wsDir = join(tmpdir(), `silly-gap8-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    expect(existsSync(wsDir)).toBe(false);
+
+    const sessionManager = createMockSessionManager();
+    const { daemon, client, wsClientMock } = buildDaemon({
+      sessionManager,
+      config: { workspace_dir: wsDir },
+    });
+    track(daemon);
+
+    try {
+      await daemon.start();
+      client.claimLease.mockResolvedValueOnce({
+        claim_token: 'token-i',
+        // 注意：interactive lease 不带 root_path（daemon-client 会话无 workspace）
+        payload: {
+          kind: 'interactive',
+          prompt: 'hi',
+          provider: 'claude',
+          agent_session_id: 'sess-1',
+          agent_run_id: 'run-1',
+        },
+      });
+
+      wsClientMock._injectMessage({
+        type: MSG.TASK_AVAILABLE,
+        payload: {
+          leaseId: 'lease-int',
+          kind: 'interactive',
+          prompt: 'hi',
+          agentSessionId: 'sess-1',
+          agentRunId: 'run-1',
+        },
+      });
+      await sleep(50);
+
+      // cwd 已被 mkdir 创建
+      expect(existsSync(wsDir)).toBe(true);
+      // create 收到的 cwd 即 workspace_dir
+      const createArg = (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+      expect(createArg.cwd).toBe(wsDir);
+      await daemon.stop();
+    } finally {
+      rmSync(wsDir, { recursive: true, force: true });
+    }
+  });
+
+  it('gap-8: 注入 credentialManager 时 create 收到 buildSpawnEnv 构造的 env（凭证 parity）', async () => {
+    const sessionManager = createMockSessionManager();
+    const credentialManager = {
+      get: vi.fn(() => undefined),
+      buildEnv: vi.fn(() => ({ SILLY_TEST_TOKEN: 'xyz' })),
+    };
+    const { daemon, client, wsClientMock } = buildDaemon({
+      sessionManager,
+      credentialManager,
+    });
+    track(daemon);
+
+    await daemon.start();
+    client.claimLease.mockResolvedValueOnce({
+      claim_token: 'token-i',
+      payload: {
+        kind: 'interactive',
+        prompt: 'hi',
+        provider: 'claude',
+        agent_session_id: 'sess-1',
+        agent_run_id: 'run-1',
+        root_path: tmpdir(),
+      },
+    });
+
+    wsClientMock._injectMessage({
+      type: MSG.TASK_AVAILABLE,
+      payload: {
+        leaseId: 'lease-int',
+        kind: 'interactive',
+        prompt: 'hi',
+        agentSessionId: 'sess-1',
+        agentRunId: 'run-1',
+        rootPath: tmpdir(),
+      },
+    });
+    await sleep(50);
+
+    expect(sessionManager.create).toHaveBeenCalledOnce();
+    const createArg = (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(createArg.env).toBeDefined();
+    // buildSpawnEnv 层1 注入 credential.buildEnv 的结果
+    expect(createArg.env.SILLY_TEST_TOKEN).toBe('xyz');
     await daemon.stop();
   });
 

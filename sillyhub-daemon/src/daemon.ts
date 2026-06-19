@@ -37,6 +37,7 @@
  */
 
 import { hostname, platform, arch } from 'node:os';
+import { mkdir } from 'node:fs/promises';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { DaemonConfig } from './config.js';
 import { MSG } from './protocol.js';
@@ -51,6 +52,7 @@ import type { DetectedAgent } from './agent-detector.js';
 import { HubClient } from './hub-client.js';
 import { WsClient } from './ws-client.js';
 import { listDir } from './file-rpc.js';
+import { buildSpawnEnv } from './spawn-env.js';
 import type { TaskRunner, TaskRunnerResult } from './task-runner.js';
 import type { SessionManager } from './interactive/session-manager.js';
 import type {
@@ -311,6 +313,26 @@ export interface DaemonOptions {
   recoveryClient?: RecoveryCoordinator | null;
   /** task-10 §5：恢复并发上限，默认 4。 */
   recoveryConcurrency?: number;
+  /**
+   * gap-8（interactive 凭证 parity）：本机凭证管理器（鸭子类型，仅用 get/buildEnv）。
+   *
+   * batch 路径经 buildSpawnEnv(credential) 把 credentials.json 的 ANTHROPIC token 注入
+   * claude 子进程；interactive 路径（SessionManager→ClaudeSdkDriver）原先只用裸
+   * process.env，**不读 credentials.json**，导致用户按设计在 ~/.sillyhub/daemon/
+   * credentials.json 配置 token 后 batch 能跑、interactive 仍因无凭证失败。注入后
+   * _startInteractiveSession 用同一 buildSpawnEnv 逻辑构造 env 传给 driver，达成 parity。
+   * 默认 undefined：driver 回退裸 process.env（向后兼容）。
+   */
+  credentialManager?: InteractiveCredentialManager | null;
+}
+
+/**
+ * gap-8：interactive 路径凭证注入所需的 CredentialManager 接口子集（鸭子类型，
+ * 对齐 src/credential.ts 的 get/buildEnv，与 spawn-env.ts 的 SpawnCredentialManager 一致）。
+ */
+export interface InteractiveCredentialManager {
+  get(key: string): string | undefined;
+  buildEnv(config: Record<string, unknown>): Record<string, string>;
 }
 
 // ── Daemon class（核心）──────────────────────────────────────────────────────
@@ -347,6 +369,10 @@ export class Daemon {
   private readonly _recoveryClient: RecoveryCoordinator | null;
   /** task-10 §5：恢复并发上限，默认 4。 */
   private readonly _recoveryConcurrency: number;
+  /**
+   * gap-8：本机凭证管理器（interactive 凭证 parity）。null 时 driver 回退裸 process.env。
+   */
+  private readonly _credentialManager: InteractiveCredentialManager | null;
   /**
    * task-04：interactive lease.id → session_id（防 WS 重放重复 create，AC-09）。
    * batch lease 不进此 map（走 _inflightLeases 去重）。
@@ -410,6 +436,7 @@ export class Daemon {
       ((opts) => new WsClient(opts) as unknown as WsClientLike);
     this._wsReconnectDelay = options?.wsReconnectDelay ?? 10_000;
     this._sessionManager = options?.sessionManager ?? null;
+    this._credentialManager = options?.credentialManager ?? null;
     this._persistence = options?.persistence ?? null;
     this._recoveryClient = options?.recoveryClient ?? null;
     this._recoveryConcurrency =
@@ -1513,6 +1540,36 @@ export class Daemon {
       return;
     }
 
+    // gap-8（interactive cwd 不存在导致 SDK spawn 失败）：daemon-client 交互会话
+    // 没有 workspace → execPayload.rootPath 为空 → cwd 回落到 config.workspace_dir
+    //（默认 ~/sillyhub_workspaces），该目录通常不存在。batch 路径由 TaskRunner 在
+    // spawn 前 mkdir 工作目录（task-runner.ts），但交互路径（SessionManager→
+    // ClaudeSdkDriver）从不创建 cwd，导致 SDK child_process.spawn 因 cwd 不存在
+    // 立即失败（SDK 误报成 "native binary failed to launch"），session 秒挂
+    // onError→fail→onSessionEnd，agent_session_id 永远为 null（实测复现）。
+    // 修复：create 前确保 cwd 存在（与 batch 对齐）。失败仅 warn 不阻断——让 SDK
+    // 的真实错误经 onError 收口，不在此吞掉诊断信息。
+    try {
+      await mkdir(cwd, { recursive: true });
+    } catch (e) {
+      this._logger.warn('interactive_cwd_mkdir_failed', {
+        lease_id: leaseId,
+        cwd,
+        error: (e as Error)?.message ?? String(e),
+      });
+    }
+
+    // gap-8（interactive 凭证 parity）：与 batch 一致用 buildSpawnEnv 构造子进程 env，
+    // 让 driver 能读到 credentials.json 的 ANTHROPIC token（+ lease tool_config 占位符
+    // 渲染）。未注入 credentialManager 时传 undefined，driver 回退裸 process.env（兼容）。
+    let interactiveEnv: NodeJS.ProcessEnv | undefined;
+    if (this._credentialManager) {
+      interactiveEnv = buildSpawnEnv(
+        { toolConfig: execPayload.toolConfig ?? {} },
+        { credential: this._credentialManager },
+      );
+    }
+
     // 先登记 lease→session（即使 create 抛错也登记，防 create 失败后 WS 重放反复重试；
     // SessionManager.create 抛 SessionAlreadyExistsError 时 store 已无此 session，安全）。
     this._interactiveSessionsByLease.set(leaseId, sessionId);
@@ -1521,6 +1578,7 @@ export class Daemon {
       await this._sessionManager.create({
         sessionId,
         leaseId,
+        env: interactiveEnv,
         // gap-2：claim_token 从 claimResp 归一化到 execPayload.claimToken，
         // 透传给 SessionManager 存入 state.claimToken，供 onTurnMessage→submitMessages
         // + gap-3 notifyRunResult 复用（桥接在 task-04）。

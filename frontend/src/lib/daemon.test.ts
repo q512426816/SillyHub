@@ -11,6 +11,7 @@ import { ApiError } from "@/lib/api";
 import { useSession } from "@/stores/session";
 import {
   AgentSessionListResponseSchema,
+  deleteAgentSession,
   getAgentSessionLogs,
   listAgentSessions,
   parseSessionPermissionEvent,
@@ -165,6 +166,32 @@ describe("getAgentSessionLogs", () => {
       },
     });
     await expect(getAgentSessionLogs("any")).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("deleteAgentSession", () => {
+  it("DELETE /sessions/{id} with encoded id", async () => {
+    const h = mockFetch({ status: 204, body: null });
+
+    await deleteAgentSession("sess a/b");
+
+    const url = new URL(h.lastUrl());
+    expect(url.pathname).toBe("/api/daemon/sessions/sess%20a%2Fb");
+    expect(h.lastInit()?.method).toBe("DELETE");
+  });
+
+  it("maps delete conflicts to ApiError", async () => {
+    mockFetch({
+      status: 409,
+      body: {
+        code: "HTTP_409_DAEMON_SESSION_DELETE_CONFLICT",
+        message: "end the active session first",
+        request_id: null,
+        details: null,
+      },
+    });
+
+    await expect(deleteAgentSession("active-session")).rejects.toBeInstanceOf(ApiError);
   });
 });
 

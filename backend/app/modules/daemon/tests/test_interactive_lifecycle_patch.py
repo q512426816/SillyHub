@@ -165,18 +165,29 @@ class TestGap2ClaimTokenPropagation:
         """gap-2 regression: batch lease has no pre-generated token → claim generates one."""
         uid = await _create_user(db_session)
         rt = await _create_runtime(db_session, uid)
-        # batch lease: no claim_token in metadata (mirrors dispatch_to_daemon path)
+        # ql-004 起 batch lease 必须 agent_run_id 非空：_build_claim_payload 对
+        # kind!=interactive 且 agent_run_id IS NULL 的 lease fail-fast 抛
+        # DaemonLeaseNoAgentRun（防 daemon 发空 agent_run_id → backend 422 风暴 →
+        # 连接池耗尽）。故 batch lease fixture 必须挂一个真实 AgentRun，本用例才能
+        # 走完 claim → 验证「无预生成 claim_token 时 claim_lease 生成新 token」。
+        run = AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            provider="claude",
+            status="pending",
+            spec_strategy="oneshot",
+        )
         batch_lease = DaemonTaskLease(
             id=uuid.uuid4(),
             runtime_id=rt.id,
-            agent_run_id=None,
+            agent_run_id=run.id,
             kind="batch",
             status="pending",
             lease_expires_at=None,
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
         )
-        db_session.add(batch_lease)
+        db_session.add_all([run, batch_lease])
         await db_session.commit()
 
         svc = DaemonService(db_session)
@@ -425,10 +436,70 @@ class TestGap3CloseInteractiveRun:
             status="success",
             is_error=False,
         )
-        # Redis publish attempted on the run channel
+        # Redis publish attempted on the run channel（close 还会向
+        # agent_session:{session_id} 发 turn_completed，故不假设末次/顺序）。
         assert mocked_redis.publish.await_count >= 1
-        channel = mocked_redis.publish.await_args.args[0]
-        assert channel == f"agent_run:{run_id}"
+        channels = [call.args[0] for call in mocked_redis.publish.await_args_list]
+        assert f"agent_run:{run_id}" in channels
+
+    @pytest.mark.asyncio
+    async def test_publishes_turn_completed_to_session_channel(
+        self, db_session, mocked_redis
+    ) -> None:
+        """design §6 step3 / §8.2：close 必须往 agent_session:{session_id} 发
+        turn_completed（带 status/exit_code），否则前端 SSE onTurnCompleted 收不
+        到、currentRunId 不清空、输入框永远 disabled —— 即用户报告「turn 在后端
+        已完成但前端卡在运行中、发不了下一条」。契约见 frontend/src/lib/daemon.ts
+        SessionStreamEnvelope（event=turn_completed + status + exit_code）。"""
+        import json as _json
+
+        lease_id, run_id, token = await _seed_active_interactive_session(db_session)
+        svc = DaemonService(db_session)
+        await svc.close_interactive_run(lease_id, run_id, token, status="success", is_error=False)
+
+        run = await db_session.get(AgentRun, run_id)
+        session_id = run.agent_session_id
+        session_pubs = [
+            call.args[1]
+            for call in mocked_redis.publish.await_args_list
+            if call.args[0] == f"agent_session:{session_id}"
+        ]
+        assert session_pubs, "turn_completed 未发到 session channel"
+
+        payload = _json.loads(session_pubs[0])
+        assert payload["event"] == "turn_completed"
+        assert payload["session_id"] == str(session_id)
+        assert payload["run_id"] == str(run_id)
+        assert payload["status"] == "completed"
+        assert payload["exit_code"] == 0
+
+    @pytest.mark.asyncio
+    async def test_publishes_turn_completed_failed_status(self, db_session, mocked_redis) -> None:
+        """turn_completed 在 failed turn 也要发，且 status/exit_code 反映失败
+        （前端据此把 turn 渲染成失败并解锁输入）。"""
+        import json as _json
+
+        lease_id, run_id, token = await _seed_active_interactive_session(db_session)
+        svc = DaemonService(db_session)
+        await svc.close_interactive_run(
+            lease_id,
+            run_id,
+            token,
+            status="error_during_execution",
+            is_error=True,
+        )
+
+        run = await db_session.get(AgentRun, run_id)
+        session_pubs = [
+            call.args[1]
+            for call in mocked_redis.publish.await_args_list
+            if call.args[0] == f"agent_session:{run.agent_session_id}"
+        ]
+        assert session_pubs
+        payload = _json.loads(session_pubs[0])
+        assert payload["event"] == "turn_completed"
+        assert payload["status"] == "failed"
+        assert payload["exit_code"] == 1
 
 
 # ── gap-3: router endpoint contract ──────────────────────────────────────────

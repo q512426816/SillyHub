@@ -387,3 +387,79 @@ class TestSessionLogs:
         resp = await client.get("/api/daemon/sessions", headers=auth_headers)
         assert resp.status_code == 200
         assert resp.json()["total"] >= 1
+
+
+# ── DELETE /sessions/{id} ───────────────────────────────────────────────────
+
+
+class TestDeleteSession:
+    async def test_delete_terminal_session_keeps_runs_and_nulls_reference(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        admin = (
+            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+            .scalars()
+            .first()
+        )
+        assert admin is not None
+        runtime = await _make_runtime(db_session, admin.id)
+        agent_session = await _make_session(db_session, admin.id, runtime.id, status="ended")
+        run = await _make_run(db_session, agent_session.id)
+        agent_session_id = agent_session.id
+        run_id = run.id
+
+        resp = await client.delete(
+            f"/api/daemon/sessions/{agent_session_id}",
+            headers=auth_headers,
+        )
+
+        assert resp.status_code == 204, resp.text
+        db_session.expire_all()
+        assert await db_session.get(AgentSession, agent_session_id) is None
+        preserved_run = await db_session.get(AgentRun, run_id)
+        assert preserved_run is not None
+        assert preserved_run.agent_session_id is None
+
+    async def test_delete_active_session_returns_409(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        admin = (
+            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+            .scalars()
+            .first()
+        )
+        assert admin is not None
+        runtime = await _make_runtime(db_session, admin.id)
+        agent_session = await _make_session(db_session, admin.id, runtime.id, status="active")
+
+        resp = await client.delete(
+            f"/api/daemon/sessions/{agent_session.id}",
+            headers=auth_headers,
+        )
+
+        assert resp.status_code == 409
+        assert (await db_session.get(AgentSession, agent_session.id)) is not None
+
+    async def test_delete_cross_user_session_is_hidden(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        other = await _make_user(db_session, f"other-{uuid.uuid4()}@example.com")
+        runtime = await _make_runtime(db_session, other.id)
+        agent_session = await _make_session(db_session, other.id, runtime.id, status="ended")
+
+        resp = await client.delete(
+            f"/api/daemon/sessions/{agent_session.id}",
+            headers=auth_headers,
+        )
+
+        assert resp.status_code == 404
+        assert (await db_session.get(AgentSession, agent_session.id)) is not None

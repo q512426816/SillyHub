@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import col
@@ -167,6 +167,11 @@ class DaemonSessionNotFound(AppError):
 
 class DaemonSessionNotActive(AppError):
     code = "HTTP_409_DAEMON_SESSION_NOT_ACTIVE"
+    http_status = 409
+
+
+class DaemonSessionDeleteConflict(AppError):
+    code = "HTTP_409_DAEMON_SESSION_DELETE_CONFLICT"
     http_status = 409
 
 
@@ -894,8 +899,25 @@ class DaemonService:
             # 后端按 event_type 映射 channel（text→stdout, tool_use/tool_result→tool_call,
             # error→stderr），避免前端 SSE 实时流出现 Invalid Date + channel 误判。
             event_type = msg.get("event_type") or ""
-            channel = msg.get("channel") or _channel_from_event_type(event_type)
             content = msg.get("content", "")
+            # ql-005：interactive session（SDK driver）的 onTurnMessage 发原始 SDK msg
+            # （{type, message:{content:[ContentBlock]}}），顶层无 content/event_type。
+            # 提取 message.content 的 text blocks 让 message 落地——否则 count=0、
+            # 前端 quick-chat 看不到输出。batch（flat {event_type,content}）不受影响。
+            if not content and not event_type:
+                sdk_type = msg.get("type")
+                if isinstance(sdk_type, str):
+                    event_type = sdk_type
+                    inner = msg.get("message")
+                    if isinstance(inner, dict):
+                        blocks = inner.get("content")
+                        if isinstance(blocks, list):
+                            content = "".join(
+                                str(b.get("text", ""))
+                                for b in blocks
+                                if isinstance(b, dict) and b.get("type") == "text"
+                            )
+            channel = msg.get("channel") or _channel_from_event_type(event_type)
             # ql-20260617-001：usage / session_id 在每条 message 顶层（daemon 透传），
             # 与 content 是否为空无关，全部提取。
             usage = msg.get("usage")
@@ -1283,6 +1305,25 @@ class DaemonService:
                 lease_id=str(lease_id),
                 agent_run_id=str(agent_run.id),
             )
+
+        # design §6 step3 / §8.2：往 session 级 channel 发 turn_completed，让前端
+        # SSE onTurnCompleted 清空 currentRunId、解锁输入框发下一条。否则 turn 在
+        # 后端已完成（status_changed 只发到 agent_run:{run_id}），但前端只订阅
+        # agent_session:{session_id}，收不到结束信号 → UI 永远停在「运行中」、发不
+        # 了下一条（用户报告的现象）。契约见 frontend/src/lib/daemon.ts
+        # SessionStreamEnvelope（event=turn_completed + status + exit_code）。
+        # _publish_session_event 自带 try/except，Redis 抖动不影响已提交的终态行。
+        await self._publish_session_event(
+            agent_run.agent_session_id,
+            {
+                "event": "turn_completed",
+                "session_id": str(agent_run.agent_session_id),
+                "run_id": str(agent_run.id),
+                "status": agent_run.status,
+                "exit_code": agent_run.exit_code,
+                "timestamp": now.isoformat().replace("+00:00", "Z"),
+            },
+        )
 
         log.info(
             "interactive_run_closed",
@@ -2428,6 +2469,44 @@ class DaemonService:
         )
         items = list((await self._session.execute(list_stmt)).scalars().all())
         return items, total
+
+    async def delete_agent_session(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        """Delete an owned terminal session while retaining its run history."""
+        agent_session = (
+            await self._session.execute(
+                select(AgentSession)
+                .where(
+                    AgentSession.id == session_id,
+                    AgentSession.user_id == user_id,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if agent_session is None:
+            raise DaemonSessionNotFound(
+                f"AgentSession '{session_id}' not found.",
+                details={"session_id": str(session_id)},
+            )
+        if agent_session.status in ACTIVE_SESSION_STATUSES:
+            raise DaemonSessionDeleteConflict(
+                "End the active session before deleting it.",
+                details={
+                    "session_id": str(session_id),
+                    "status": agent_session.status,
+                },
+            )
+
+        await self._session.execute(
+            update(AgentRun)
+            .where(AgentRun.agent_session_id == session_id)
+            .values(agent_session_id=None)
+        )
+        await self._session.delete(agent_session)
+        await self._session.commit()
 
     async def get_agent_session_logs(
         self,

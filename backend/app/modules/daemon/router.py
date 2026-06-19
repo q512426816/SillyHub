@@ -762,6 +762,19 @@ async def end_session(
     )
 
 
+@router.delete(
+    "/sessions/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_session(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> None:
+    """Delete an owned terminal session without deleting its run history."""
+    await DaemonService(session).delete_agent_session(session_id, user.id)
+
+
 @router.get("/sessions/{session_id}/stream")
 async def stream_session_logs(
     session_id: uuid.UUID,

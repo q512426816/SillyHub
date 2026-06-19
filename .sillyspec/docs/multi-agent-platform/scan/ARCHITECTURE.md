@@ -21,7 +21,7 @@ created_at: 2026-06-10T17:00:00
 | Daemon CLI | Click + httpx + websockets | Click >=8.0, httpx >=0.27 |
 | 构建工具 | uv (Python), pnpm (Node) | uv 0.4.18, pnpm 9.6.0 |
 | 容器编排 | Docker Compose | v2 |
-| Agent 集成 | Claude Code + SillySpec | claude-code 2.1.158, sillyspec 3.18.2 |
+| Agent 集成 | Claude Code + SillySpec | claude-code 2.1.158, sillyspec 3.18.3 |
 | 语言 | Python 3.12, TypeScript 5.5 | Node >=20 |
 
 ## 架构概览

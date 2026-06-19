@@ -171,6 +171,12 @@ export interface UpdateWorkspaceInput {
   build_command?: string | null;
   test_command?: string | null;
   status?: WorkspaceStatus;
+  // ql-20260619-006：daemon-client workspace 改绑目标 daemon。backend
+  // WorkspaceUpdate 已支持（schema.py WorkspaceUpdate.daemon_runtime_id +
+  // service.update exclude_unset+setattr 通用循环），前端此前未暴露该字段，
+  // 导致详情页无法切换绑定 daemon（绑定 daemon 离线时扫描/派发直接失败）。
+  // 传 string UUID；仅 daemon-client workspace 生效。
+  daemon_runtime_id?: string | null;
 }
 
 export async function updateWorkspace(

@@ -411,7 +411,12 @@ export async function startAction(opts: StartOptions): Promise<number> {
     onTurnMessage: (sessionId, runId, msg) => daemon.onTurnMessage(sessionId, runId, msg),
     onSessionEnd: (sessionId, status) => daemon.onSessionEnd(sessionId, status),
   });
-  daemon = new Daemon(config, client, taskRunner, { sessionManager });
+  // gap-8（interactive 凭证 parity）：把同一 CredentialManager 传给 Daemon，让
+  // interactive 路径经 buildSpawnEnv 读 credentials.json 的 ANTHROPIC token，与 batch 对齐。
+  daemon = new Daemon(config, client, taskRunner, {
+    sessionManager,
+    credentialManager: credentialMgr,
+  });
 
   // step 6: 写 PID 文件（对齐 Python __main__.py:106 `_write_pid(os.getpid())`）。
   await writePid(process.pid);

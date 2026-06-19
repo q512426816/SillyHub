@@ -257,6 +257,7 @@ logout() -> 清空 useSession + 跳转 /login
 
 <!-- MANUAL_NOTES_START -->
 
+- 2026-06-19: `/runtimes` 的运行时列表和会话列表使用固定最大高度与内部滚动；终态会话支持确认后删除。
 - 2026-06-17: Agent launch controls expose a free-form per-run model override.
   Workspace defaults, scan-generate, change dispatch, task run creation, and runtime quick chat
   now send `model` alongside `provider`; empty model input means the workspace/provider default.
@@ -276,6 +277,7 @@ logout() -> 清空 useSession + 跳转 /login
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-06-19 | 2026-06-19-runtimes-layout | `/runtimes` 运行时与会话列表增加最大高度和内部滚动，终态会话增加确认删除入口。 |
 | 2026-06-03 | fix-sse-nextjs-rewrite-buffering | 创建 `app/api/.../stream/route.ts` Route Handler 透传后端 SSE 流，修复 Next.js rewrites 缓冲导致 EventSource 5 秒断开重连 |
 | 2026-06-04 | update-module-card | 基于代码库最新状态更新模块卡片，补充完整 API 客户端导出符号列表 |
 | 2026-06-15 | ql-20260615-002-9b4f | 修复 `/runtimes` 空状态 EmptyState 错误的 `pip install -e .` 提示（daemon 已重写为 TS），改为 cd / pnpm install+build / npm link / 复制命令 4 步，加 Python 旧版残留卸载提示，末尾引导用户去 workspace 详情页配置默认 agent |
@@ -283,3 +285,4 @@ logout() -> 清空 useSession + 跳转 /login
 | 2026-06-18 | ql-20260618-007-d9c0 | `/runtimes` runtime 卡片新增禁用/启用操作，状态元数据支持 `disabled`，统计区增加禁用数；`daemon.ts` API client 新增 disable/enable 调用。 |
 | 2026-06-18 | ql-20260618-009-f3a2 | `lib/changes.ts` transitionChange 的 provider/model 判断从 `!== undefined` 改为 truthy，与 executeChange 风格统一（后端 schema default=None，行为等价）。 |
 | 2026-06-19 | 2026-06-19-runtimes-layout | 放宽 `/runtimes` 页面容器，将复合会话工作区移到运行时列表下方全宽展示，避免卡片、会话表单和说明文字被多层分栏挤压。 |
+| 2026-06-19 | ql-20260619-007-7b2e | 修复 `/runtimes` 选中 active 会话右侧无回显：`handleSelect` 移除 active 空白 live 分支，所有会话（含 active）统一调 `getAgentSessionLogs` 只读回看；渲染条件改 `selected`；删除无用 `liveViewOpen` 状态。 |

@@ -728,6 +728,13 @@ export async function listAgentSessions(
   return apiFetch<AgentSessionListResponse>("/api/daemon/sessions", { query });
 }
 
+/** DELETE /api/daemon/sessions/{id} — 删除已结束的会话记录。 */
+export async function deleteAgentSession(sessionId: string): Promise<void> {
+  await apiFetch(`/api/daemon/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+  });
+}
+
 /**
  * GET /api/daemon/sessions/{id}/logs — 跨 AgentRun 的只读历史回看。
  * 日志按 run 分组返回，run_id 完整保留以便前端区分 turn 边界（D-005@v1）。

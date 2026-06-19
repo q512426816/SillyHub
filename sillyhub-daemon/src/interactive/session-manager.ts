@@ -254,6 +254,7 @@ export class SessionManager {
       cwd: input.cwd,
       provider: input.provider,
       pathToClaudeCodeExecutable: input.pathToClaudeCodeExecutable,
+      env: input.env,
     };
     this._store.set(input.sessionId, state);
 
@@ -271,6 +272,10 @@ export class SessionManager {
         model: input.model,
         allowedTools: input.allowedTools,
       };
+      // gap-8：仅当 daemon 传入 env 时覆盖（缺省让 driver 回退裸 process.env，兼容）。
+      if (input.env !== undefined) {
+        driverOpts.env = input.env;
+      }
       if (
         this._manualApproval &&
         this._permissionResolverFactory &&

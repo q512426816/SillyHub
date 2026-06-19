@@ -33,7 +33,7 @@ env_keys = [
 
 settings = {
     "env": {key: os.environ[key] for key in env_keys if os.environ.get(key)},
-    "model": os.environ.get("CLAUDE_CODE_MODEL", "opus[1m]"),
+    "model": os.environ.get("CLAUDE_CODE_MODEL", "opus"),
     "enabledPlugins": {
         "frontend-design@claude-plugins-official": enabled("CLAUDE_PLUGIN_FRONTEND_DESIGN_ENABLED"),
         "playwright@claude-plugins-official": enabled("CLAUDE_PLUGIN_PLAYWRIGHT_ENABLED"),

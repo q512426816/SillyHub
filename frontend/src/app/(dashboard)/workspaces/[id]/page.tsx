@@ -8,9 +8,11 @@ import { AgentModelInput } from "@/components/AgentModelInput";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AgentProviderSelect } from "@/components/AgentProviderSelect";
+import { WorkspaceDaemonSwitcher } from "@/components/workspace-daemon-switcher";
 import { WorkspacePathFields } from "@/components/workspace-path-fields";
 import { ApiError } from "@/lib/api";
 import { getDaemonRuntime, type DaemonRuntimeRead } from "@/lib/daemon";
+import { isDaemonClientWorkspace } from "@/lib/workspace-path";
 import {
   listAgentRuns,
   submitAgentRunInput,
@@ -472,6 +474,16 @@ export default function WorkspaceDetailPage({ params }: Props) {
           <dt className="text-muted-foreground">最后扫描</dt>
           <dd>{formatTs(workspace.last_scanned_at)}</dd>
         </dl>
+        {/* ql-20260619-006：daemon-client workspace 改绑 daemon 入口 */}
+        {isDaemonClientWorkspace(workspace) && (
+          <div className="border-t px-4 py-2.5">
+            <WorkspaceDaemonSwitcher
+              workspaceId={workspaceId}
+              currentRuntimeId={workspace.daemon_runtime_id}
+              onChanged={() => void load()}
+            />
+          </div>
+        )}
       </section>
 
       {/* Default Agent provider（FR-01/FR-02）*/}

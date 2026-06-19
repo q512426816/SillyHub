@@ -316,6 +316,48 @@ class TestSubmitMessagesSync:
         assert agent_run.started_at == old_started
 
     @pytest.mark.asyncio
+    async def test_submit_messages_extracts_sdk_assistant_content(
+        self, db_session: AsyncSession
+    ) -> None:
+        """ql-005：interactive session（SDK driver）发原始 SDK assistant msg，
+        content nested 在 message.content。backend 必须提取 text 让 message 落地，
+        否则 count=0、quick-chat 无输出。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "sdk-tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        count = await svc.submit_messages(
+            lease.id,
+            "sdk-tok",
+            agent_run.id,
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": "你好，我是 GLM"},
+                            {"type": "text", "text": "，有什么可以帮你"},
+                        ],
+                    },
+                }
+            ],
+        )
+        assert count == 1
+
+    @pytest.mark.asyncio
     async def test_submit_messages_extracts_usage_from_content_message(
         self, db_session: AsyncSession
     ) -> None:

@@ -418,7 +418,7 @@ export function InteractiveSessionPanel({
   }, [view.status, view.currentRunId]);
 
   return (
-    <section className="flex min-h-[520px] flex-col overflow-hidden rounded-md border bg-card">
+    <section className="flex h-[520px] flex-col overflow-hidden rounded-md border bg-card">
       <header className="border-b px-4 py-3">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2.5">

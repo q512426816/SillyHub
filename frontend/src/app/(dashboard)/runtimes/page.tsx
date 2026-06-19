@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Server,
   Terminal,
+  Trash2,
   Wifi,
   WifiOff,
   Wrench,
@@ -31,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { ApiError, getApiBaseUrl } from "@/lib/api";
 import { type AgentRunLogEntry } from "@/lib/agent";
 import {
+  deleteAgentSession,
   disableDaemonRuntime,
   enableDaemonRuntime,
   getAgentSessionLogs,
@@ -862,18 +864,25 @@ function SessionsSidebar({
   loading,
   error,
   selectedSessionId,
+  deletingSessionId,
   onSelect,
+  onDelete,
   onRetry,
 }: {
   sessions: AgentSessionRead[];
   loading: boolean;
   error: string | null;
   selectedSessionId: string | null;
+  deletingSessionId: string | null;
   onSelect: (session: AgentSessionRead) => void;
+  onDelete: (session: AgentSessionRead) => void;
   onRetry: () => void;
 }) {
   return (
-    <section className="flex min-h-0 flex-col overflow-hidden rounded-md border bg-card">
+    <section
+      data-testid="session-list-scroll"
+      className="flex max-h-[520px] min-h-0 flex-col overflow-hidden rounded-md border bg-card"
+    >
       <header className="border-b px-3 py-2">
         <h2 className="text-sm font-semibold">会话列表</h2>
         <p className="text-[11px] text-muted-foreground">
@@ -895,12 +904,12 @@ function SessionsSidebar({
             {sessions.map((s) => {
               const active = isActiveSession(s);
               return (
-                <li key={s.id}>
+                <li key={s.id} className="flex items-stretch">
                   <button
                     type="button"
                     onClick={() => onSelect(s)}
                     className={cn(
-                      "flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-muted/40",
+                      "flex min-w-0 flex-1 flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-muted/40",
                       selectedSessionId === s.id && "bg-muted/60",
                     )}
                   >
@@ -915,6 +924,22 @@ function SessionsSidebar({
                       {s.turn_count === 1 ? "" : "s"}
                     </span>
                   </button>
+                  {!active ? (
+                    <button
+                      type="button"
+                      aria-label={`删除会话 ${s.id}`}
+                      title="删除会话"
+                      disabled={deletingSessionId === s.id}
+                      onClick={() => onDelete(s)}
+                      className="flex w-9 shrink-0 items-center justify-center border-l text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                    >
+                      {deletingSessionId === s.id ? (
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  ) : null}
                 </li>
               );
             })}
@@ -1011,7 +1036,7 @@ function SessionListSection({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
   const [logs, setLogs] = useState<AgentRunLogEntry[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState<string | null>(null);
-  const [liveViewOpen, setLiveViewOpen] = useState(false);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
 
   const reloadSessions = useCallback(async () => {
     setLoading(true);
@@ -1033,14 +1058,11 @@ function SessionListSection({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
 
   const handleSelect = useCallback(async (session: AgentSessionRead) => {
     setSelected(session);
-    if (isActiveSession(session)) {
-      // 进入 live：交给下方 task-11 面板（用户可在面板内新建/追问）。
-      setLiveViewOpen(true);
-      setLogs([]);
-      return;
-    }
-    // history：拉日志（D-005 跨 run 聚合在后端）
-    setLiveViewOpen(false);
+    // 所有会话（含 active）统一只读历史回看：拉跨 run 日志（D-005 聚合在后端）。
+    // ql-20260619-007：之前 active 走 live 空白分支不回显（setLogs([])+return），
+    // 而 InteractiveSessionChatSection 不接收选中 session、InteractiveSessionPanel
+    // 又无「打开已有会话」入口 → 点 active 会话右侧空白。active 的 live 续看/追问
+    // 需 LivePanel 支持 resume，属更大重构，单独 task；当前所有选中会话均进只读视图。
     setLogsLoading(true);
     setLogsError(null);
     try {
@@ -1053,6 +1075,29 @@ function SessionListSection({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
       setLogsLoading(false);
     }
   }, []);
+
+  const handleDelete = useCallback(async (session: AgentSessionRead) => {
+    const confirmed = window.confirm(
+      `确定删除会话 ${shortId(session.id)}？运行记录和日志仍会保留。`,
+    );
+    if (!confirmed) return;
+
+    setDeletingSessionId(session.id);
+    setListError(null);
+    try {
+      await deleteAgentSession(session.id);
+      setSessions((current) => current.filter((item) => item.id !== session.id));
+      if (selected?.id === session.id) {
+        setSelected(null);
+        setLogs([]);
+        setLogsError(null);
+      }
+    } catch (err) {
+      setListError(err instanceof ApiError ? err.message : "删除会话失败");
+    } finally {
+      setDeletingSessionId(null);
+    }
+  }, [selected?.id]);
 
   return (
     <section className="flex min-w-0 flex-col gap-3">
@@ -1079,10 +1124,12 @@ function SessionListSection({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
           loading={loading}
           error={listError}
           selectedSessionId={selected?.id ?? null}
+          deletingSessionId={deletingSessionId}
           onSelect={(s) => void handleSelect(s)}
+          onDelete={(s) => void handleDelete(s)}
           onRetry={() => void reloadSessions()}
         />
-        {selected && !isActiveSession(selected) ? (
+        {selected ? (
           <SessionHistoryView
             session={selected}
             logs={logs}
@@ -1262,15 +1309,20 @@ export default function RuntimesPage() {
                     {refreshing ? "刷新中" : "刷新"}
                   </Button>
                 </div>
-                <div className="grid gap-3 xl:grid-cols-2">
-                  {displayItems.map((runtime) => (
-                    <RuntimeCard
-                      key={runtime.id}
-                      runtime={runtime}
-                      actioning={runtimeActionId === runtime.id}
-                      onToggleEnabled={handleToggleRuntime}
-                    />
-                  ))}
+                <div
+                  data-testid="runtime-list-scroll"
+                  className="max-h-[680px] overflow-y-auto pr-1"
+                >
+                  <div className="grid gap-3 xl:grid-cols-2">
+                    {displayItems.map((runtime) => (
+                      <RuntimeCard
+                        key={runtime.id}
+                        runtime={runtime}
+                        actioning={runtimeActionId === runtime.id}
+                        onToggleEnabled={handleToggleRuntime}
+                      />
+                    ))}
+                  </div>
                 </div>
               </section>
             )}

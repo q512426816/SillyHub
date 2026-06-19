@@ -51,4 +51,7 @@ created_at: 2026-06-10T16:55:00
 
 <!-- MANUAL_NOTES_START -->
 
+- 2026-06-19-runtimes-layout：`/runtimes` 的运行时卡片列表限制为 680px、会话列表限制为 520px，超出后在各自区域内滚动；已结束/失败会话提供带确认的删除入口，活动会话不显示删除按钮。
+- 2026-06-19-ql007：`/runtimes` 会话列表选中任意会话（含 active）均进入只读历史回看（`getAgentSessionLogs` 跨 run 聚合，按 run_id 分组）。此前仅 ended/failed 回看、active 走 live 空白分支导致选中 active 会话右侧无回显；现统一只读回看。active 会话的 live 续看/追问需 LivePanel 支持「打开已有会话」resume，属后续 task。
+
 <!-- MANUAL_NOTES_END -->

@@ -129,6 +129,7 @@ ChangeService.transition() -> 状态机校验 -> 更新 stage
 
 <!-- MANUAL_NOTES_START -->
 
+- 2026-06-19: 终态交互会话支持用户隔离删除；活动态删除返回 409，删除前解除 AgentRun 关联并保留运行日志。
 - 2026-06-17: Agent runtime selection now snapshots both `provider` and `model` per `AgentRun`.
   `Workspace.default_model` is the fallback when a run request omits `model`; task, stage,
   scan-generate, quick-chat, and change-writer execute dispatch paths pass model through lease
