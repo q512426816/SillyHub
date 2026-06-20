@@ -4,7 +4,7 @@ import type { MenuSection } from "../menu-permissions";
 import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
 
 /**
- * 后端 Permission 枚举镜像常量（46 项）。
+ * 后端 Permission 枚举镜像常量（70 项）。
  *
  * 与 `backend/app/modules/auth/permissions.py` 的 `Permission` StrEnum 保持同步。
  * 若后端扩/删枚举，需同时更新本常量；用例 5 会在漂移时失败提示。
@@ -19,8 +19,9 @@ import { MENU_PERMISSION_GROUPS } from "../menu-permissions";
  * - Deploy (3)
  * - Tool (4)
  * - Admin (7)
+ * - PPM (24, change 2026-06-20-ppm-module-migration task-02)
  *
- * 合计 7 + 4 + 6 + 5 + 6 + 4 + 3 + 4 + 7 = 46。
+ * 合计 7 + 4 + 6 + 5 + 6 + 4 + 3 + 4 + 7 + 24 = 70。
  */
 const BACKEND_PERMISSION_KEYS = [
   // Platform (7, ql-004 新增 3 个管理子菜单 admin + ql-005 新增 git_identity:admin)
@@ -78,9 +79,34 @@ const BACKEND_PERMISSION_KEYS = [
   "organization:write",
   "role:read",
   "role:write",
+  // PPM 项目与问题管理 (24, change 2026-06-20-ppm-module-migration task-02)
+  "ppm:project:read",
+  "ppm:project:write",
+  "ppm:project:delete",
+  "ppm:project:export",
+  "ppm:customer:read",
+  "ppm:customer:write",
+  "ppm:customer:delete",
+  "ppm:customer:export",
+  "ppm:plan:read",
+  "ppm:plan:write",
+  "ppm:plan:delete",
+  "ppm:plan:export",
+  "ppm:problem:read",
+  "ppm:problem:write",
+  "ppm:problem:delete",
+  "ppm:task:read",
+  "ppm:task:write",
+  "ppm:task:delete",
+  "ppm:task:export",
+  "ppm:work-hour:read",
+  "ppm:work-hour:write",
+  "ppm:work-hour:stat",
+  "ppm:kanban:view",
+  "ppm:kanban:assign",
 ] as const;
 
-/** 19 个 menuKey 期望集合（FR-02 清单） */
+/** 32 个 menuKey 期望集合（FR-02 19 条 + PPM 13 条，change 2026-06-20-ppm-module-migration task-13） */
 const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "workspaces",
   "components",
@@ -101,6 +127,20 @@ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "roles",
   "runtimes",
   "settings",
+  // PPM 13 条
+  "ppm-projects",
+  "ppm-customers",
+  "ppm-project-members",
+  "ppm-project-stakeholders",
+  "ppm-project-plans",
+  "ppm-plan-nodes",
+  "ppm-milestone-details",
+  "ppm-problem-list",
+  "ppm-problem-changes",
+  "ppm-task-plans",
+  "ppm-work-hours",
+  "ppm-work-hour-statistics",
+  "ppm-kanban",
 ]);
 
 const VALID_SECTIONS: ReadonlySet<string> = new Set([
@@ -108,11 +148,12 @@ const VALID_SECTIONS: ReadonlySet<string> = new Set([
   "management",
   "admin",
   "system",
+  "ppm",
 ]);
 
 describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
-  it("MENU_PERMISSION_GROUPS 长度 === 19", () => {
-    expect(MENU_PERMISSION_GROUPS).toHaveLength(19);
+  it("MENU_PERMISSION_GROUPS 长度 === 32", () => {
+    expect(MENU_PERMISSION_GROUPS).toHaveLength(32);
   });
 
   it("所有 menuKey 互不重复，且严格等于 FR-02 预定义清单", () => {
@@ -127,10 +168,11 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("section 分布：overview 8 / management 6 / admin 3 / system 2", () => {
+  it("section 分布：overview 8 / management 6 / ppm 13 / admin 3 / system 2", () => {
     const counter: Record<MenuSection, number> = {
       overview: 0,
       management: 0,
+      ppm: 0,
       admin: 0,
       system: 0,
     };
@@ -139,6 +181,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
     expect(counter.overview).toBe(8);
     expect(counter.management).toBe(6);
+    expect(counter.ppm).toBe(13);
     expect(counter.admin).toBe(3);
     expect(counter.system).toBe(2);
   });
@@ -166,11 +209,12 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 46", () => {
+  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 70", () => {
     const valid = new Set<string>(BACKEND_PERMISSION_KEYS);
     // 镜像常量自身的完整性护栏：若被误删/重复，立即失败
-    expect(BACKEND_PERMISSION_KEYS.length).toBe(46);
-    expect(valid.size).toBe(46);
+    // 46 (原) + 24 (PPM_*) = 70
+    expect(BACKEND_PERMISSION_KEYS.length).toBe(70);
+    expect(valid.size).toBe(70);
 
     MENU_PERMISSION_GROUPS.forEach((g) => {
       g.permissions.forEach((p) => {
@@ -310,5 +354,43 @@ describe("用户列明菜单的 permissions 精确匹配", () => {
     expect(keysOf("releases")).toEqual(
       ["deploy:production", "deploy:rollback", "deploy:staging"].sort(),
     );
+  });
+
+  it("ppm-projects = ppm:project:read", () => {
+    expect(keysOf("ppm-projects")).toEqual(["ppm:project:read"]);
+  });
+
+  it("ppm-milestone-details = ppm:plan:read", () => {
+    expect(keysOf("ppm-milestone-details")).toEqual(["ppm:plan:read"]);
+  });
+
+  it("ppm-problem-list = ppm:problem:read", () => {
+    expect(keysOf("ppm-problem-list")).toEqual(["ppm:problem:read"]);
+  });
+
+  it("ppm-kanban = ppm:kanban:view", () => {
+    expect(keysOf("ppm-kanban")).toEqual(["ppm:kanban:view"]);
+  });
+
+  it("ppm-work-hour-statistics = ppm:work-hour:stat", () => {
+    expect(keysOf("ppm-work-hour-statistics")).toEqual(["ppm:work-hour:stat"]);
+  });
+
+  it("ppm-project-members = ppm:project:read + ppm:project:write", () => {
+    expect(keysOf("ppm-project-members")).toEqual(
+      ["ppm:project:read", "ppm:project:write"].sort(),
+    );
+  });
+});
+
+describe("PPM 菜单 section 与 absolute 完整性", () => {
+  it("13 个 ppm 菜单全部 section=ppm 且 absolute=true，href 以 /ppm/ 开头", () => {
+    const ppmMenus = MENU_PERMISSION_GROUPS.filter((g) => g.section === "ppm");
+    expect(ppmMenus).toHaveLength(13);
+    ppmMenus.forEach((g) => {
+      expect(g.absolute).toBe(true);
+      expect(g.href.startsWith("/ppm/")).toBe(true);
+      expect(g.matchPattern?.startsWith("/ppm/")).toBe(true);
+    });
   });
 });

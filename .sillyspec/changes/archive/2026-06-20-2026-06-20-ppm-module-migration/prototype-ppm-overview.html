@@ -1,0 +1,77 @@
+<!-- author: qinyi -->
+<!-- created_at: 2026-06-20T14:42:08+0800 -->
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>ppm 迁移设计概览</title>
+<style>
+  body{font:14px/1.7 system-ui,-apple-system,sans-serif;max-width:1000px;margin:24px auto;padding:0 20px;color:#1e293b}
+  h1{font-size:22px}h2{font-size:16px;border-left:4px solid #2563eb;padding-left:10px;margin-top:30px}
+  .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:12px 0}
+  .n{border:1.5px solid #2563eb;border-radius:6px;padding:6px 10px;background:#eff6ff;font-size:13px;white-space:nowrap}
+  .n.ok{background:#dcfce7;border-color:#16a34a}.n.no{background:#fee2e2;border-color:#dc2626}
+  .n.mem{background:#fef9c3;border-color:#ca8a04}.n.mid{background:#ede9fe;border-color:#7c3aed}
+  .a{color:#64748b;padding:0 2px}
+  .wave{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0}
+  .w{border-radius:6px;padding:8px 10px;font-size:12px;flex:1;min-width:130px}
+  .w0{background:#e0e7ff}.w1{background:#dbeafe}.w2{background:#dcfce7}.w3{background:#fef9c3}.w4{background:#ffedd5}.w5{background:#fce7f3}.w6{background:#f3e8ff}
+  pre{background:#f1f5f9;padding:12px;border-radius:6px;font-size:12px;overflow:auto}
+  table{border-collapse:collapse;width:100%;font-size:13px;margin:10px 0}
+  td,th{border:1px solid #e2e8f0;padding:6px 8px;text-align:left}th{background:#f8fafc}
+  .tag{display:inline-block;background:#f1f5f9;border-radius:4px;padding:1px 6px;font-size:12px;margin:2px}
+</style></head>
+<body>
+<h1>ppm 模块迁移设计概览 <span style="font-weight:400;font-size:14px;color:#64748b">· 2026-06-20 · SillyHub</span></h1>
+
+<h2>① 模块架构(平台级,不绑 workspace)</h2>
+<pre>backend/app/modules/ppm/
+├── common/   crud.py · export.py(openpyxl) · fsm.py · perms.py(PPM_*)
+├── project/  pm 子域  → 项目 / 客户 / 成员 / 干系人      (4 表)
+├── plan/     模板+ps  → PlanNode / ProjectPlan / PsPlanNode / PsPlanNodeDetail ... (7 表)
+├── problem/  问题+流  → ProblemList / ProblemChange / ProcessTask / ProcessLog×2 (6 表)
+├── task/     任务工时 → TaskPlan / TaskExecute / WorkHour (3 表)
+└── kanban/   看板聚合 → 人员列 / 拖拽 / 分配 (无新表)
+前端: app/(dashboard)/ppm/&lt;子域&gt;/page.tsx + lib/ppm/&lt;子域&gt;.ts · AntD+shadcn</pre>
+
+<h2>② 问题清单审批流(4 节点状态机)</h2>
+<div class="row">
+  <span class="n">1 已保存</span><span class="a">→</span>
+  <span class="n">2 审核中</span><span class="a">→</span>
+  <span class="n">3 处置中</span><span class="a">→</span>
+  <span class="n">6 待验证</span><span class="a">→</span>
+  <span class="n ok">4 已关闭</span>
+</div>
+<div class="row">
+  <span class="a">驳回:</span><span class="n no">5 已作废</span>
+  <span class="a" style="margin-left:20px">有未关闭变更:</span><span class="n mem">7 变更中(内存态)</span>
+  <span class="a" style="margin-left:20px">bug 类型跳过:</span><span class="n mid">部门经理节点</span>
+</div>
+<p style="font-size:12px;color:#64748b">流程履历写 ProcessLog · 在办写 ProcessTask · 通知走 audit_logs + 前端轮询</p>
+
+<h2>③ 里程碑明细流(状态机 + 变更,弃 silly 三表)</h2>
+<div class="row">
+  <span class="n">草稿</span><span class="a">→</span>
+  <span class="n">审核中</span><span class="a">→</span>
+  <span class="n">审批中</span><span class="a">→</span>
+  <span class="n ok">已完成</span>
+  <span class="a" style="margin-left:20px">+ 驳回 + 变更分支(parent_id 版本链)</span>
+</div>
+
+<h2>④ Wave 推进</h2>
+<div class="wave">
+  <div class="w w0"><b>W0</b> 基础设施:骨架+helper+PPM_*权限+建19表</div>
+  <div class="w w1"><b>W1</b> pm 项目管理 CRUD+导出</div>
+  <div class="w w2"><b>W2</b> plan 模板+ps 计划策划+状态机</div>
+  <div class="w w3"><b>W3</b> problem 问题清单+审批流+变更</div>
+  <div class="w w4"><b>W4</b> task 任务+work-hour 工时统计</div>
+  <div class="w w5"><b>W5</b> kanban 看板(拖拽+分配)</div>
+  <div class="w w6"><b>W6</b> 前端全量 AntD 页面+菜单权限</div>
+</div>
+
+<h2>⑤ 复用 vs 新建</h2>
+<p><b>复用:</b>
+<span class="tag">User/Org/Role (auth+admin)</span><span class="tag">audit_logs</span><span class="tag">settings 字典</span><span class="tag">change.TRANSITIONS 模式</span><span class="tag">apiFetch</span><span class="tag">menu-permissions</span></p>
+<p><b>新建:</b>
+<span class="tag">ppm 模块族</span><span class="tag">2 套状态机</span><span class="tag">openpyxl 导出</span><span class="tag">PPM_* 权限枚举</span></p>
+
+<p style="margin-top:30px;font-size:12px;color:#94a3b8">源参考:后端 /Users/qinyi/work/IdeaProjects/dept_project_back/ppdmq-module-ppm · 前端 /Users/qinyi/work/WebstormProjects/dept_project_front</p>
+</body></html>

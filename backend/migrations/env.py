@@ -27,6 +27,10 @@ from app.modules.daemon import model as _daemon_model  # noqa: F401
 from app.modules.git_gateway import model as _gg_model  # noqa: F401
 from app.modules.git_identity import model as _gi_model  # noqa: F401
 from app.modules.incident import model as _incident_model  # noqa: F401
+from app.modules.ppm.plan import model as _ppm_plan_model  # noqa: F401
+from app.modules.ppm.problem import model as _ppm_problem_model  # noqa: F401
+from app.modules.ppm.project import model as _ppm_project_model  # noqa: F401
+from app.modules.ppm.task import model as _ppm_task_model  # noqa: F401
 from app.modules.release import model as _release_model  # noqa: F401
 from app.modules.scan_docs import model as _scan_model  # noqa: F401
 from app.modules.settings import model as _settings_model  # noqa: F401

@@ -17,7 +17,12 @@
  * 避免共用 platform:admin 致 picker 重复或缺失。后端 router 各自 require 对应权限。
  */
 
-export type MenuSection = "overview" | "management" | "admin" | "system";
+export type MenuSection =
+  | "overview"
+  | "management"
+  | "admin"
+  | "system"
+  | "ppm";
 
 export interface PermissionItem {
   /** 权限标识，必须命中后端 Permission 枚举 */
@@ -296,12 +301,153 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     // （platform:admin 自动通过）。/users 系列仍 require_platform_admin。
     permissions: [{ key: "settings:admin", name: "平台设置管理" }],
   },
+
+  // ── ppm（13 条，平台级项目与问题管理）──────────────────────
+  // change 2026-06-20-ppm-module-migration task-13：13 个 ppm 子域页面登记。
+  // 全部 absolute（平台级，不拼 workspace 前缀），href 指向 /ppm/<页面>。
+  // permissions 映射后端 Permission.PPM_*（task-02 产出），任一命中即可见。
+  // 后端各 router 用 require_permission_any(PPM_*)，写/删操作在 router 内单独 require。
+  {
+    section: "ppm",
+    menuKey: "ppm-projects",
+    menuLabel: "项目",
+    icon: "\u{1F4C1}",
+    href: "/ppm/projects",
+    absolute: true,
+    matchPattern: "/ppm/projects",
+    permissions: [{ key: "ppm:project:read", name: "项目查看" }],
+  },
+  {
+    section: "ppm",
+    menuKey: "ppm-customers",
+    menuLabel: "客户",
+    icon: "\u{1F465}",
+    href: "/ppm/customers",
+    absolute: true,
+    matchPattern: "/ppm/customers",
+    permissions: [{ key: "ppm:customer:read", name: "客户查看" }],
+  },
+  {
+    section: "ppm",
+    menuKey: "ppm-project-members",
+    menuLabel: "项目成员",
+    icon: "\u{1F465}",
+    href: "/ppm/project-members",
+    absolute: true,
+    matchPattern: "/ppm/project-members",
+    // 成员管理复用 project:write（后端 project router 成员端点 require PPM_PROJECT_WRITE）
+    permissions: [
+      { key: "ppm:project:read", name: "项目查看" },
+      { key: "ppm:project:write", name: "项目编辑" },
+    ],
+  },
+  {
+    section: "ppm",
+    menuKey: "ppm-project-stakeholders",
+    menuLabel: "干系人",
+    icon: "\u{1F91D}",
+    href: "/ppm/project-stakeholders",
+    absolute: true,
+    matchPattern: "/ppm/project-stakeholders",
+    permissions: [{ key: "ppm:project:read", name: "项目查看" }],
+  },
+  {
+    section: "ppm",
+    menuKey: "ppm-project-plans",
+    menuLabel: "项目计划",
+    icon: "\u{1F4CB}",
+    href: "/ppm/project-plans",
+    absolute: true,
+    matchPattern: "/ppm/project-plans",
+    permissions: [{ key: "ppm:plan:read", name: "计划查看" }],
+  },
+  {
+    section: "ppm",
+    menuKey: "ppm-plan-nodes",
+    menuLabel: "计划节点",
+    icon: "\u{1F5C2}",
+    href: "/ppm/plan-nodes",
+    absolute: true,
+    matchPattern: "/ppm/plan-nodes",
+    permissions: [{ key: "ppm:plan:read", name: "计划查看" }],
+  },
+  {
+    section: "ppm",
+    menuKey: "ppm-milestone-details",
+    menuLabel: "里程碑明细",
+    icon: "\u{1F3C1}",
+    href: "/ppm/milestone-details",
+    absolute: true,
+    matchPattern: "/ppm/milestone-details",
+    permissions: [{ key: "ppm:plan:read", name: "计划查看" }],
+  },
+  {
+    section: "ppm",
+    menuKey: "ppm-problem-list",
+    menuLabel: "问题清单",
+    icon: "\u{26A0}",
+    href: "/ppm/problem-list",
+    absolute: true,
+    matchPattern: "/ppm/problem-list",
+    permissions: [{ key: "ppm:problem:read", name: "问题查看" }],
+  },
+  {
+    section: "ppm",
+    menuKey: "ppm-problem-changes",
+    menuLabel: "问题变更",
+    icon: "\u{1F504}",
+    href: "/ppm/problem-changes",
+    absolute: true,
+    matchPattern: "/ppm/problem-changes",
+    permissions: [{ key: "ppm:problem:read", name: "问题查看" }],
+  },
+  {
+    section: "ppm",
+    menuKey: "ppm-task-plans",
+    menuLabel: "任务计划",
+    icon: "\u{1F4DD}",
+    href: "/ppm/task-plans",
+    absolute: true,
+    matchPattern: "/ppm/task-plans",
+    permissions: [{ key: "ppm:task:read", name: "任务查看" }],
+  },
+  {
+    section: "ppm",
+    menuKey: "ppm-work-hours",
+    menuLabel: "工时",
+    icon: "\u{23F1}",
+    href: "/ppm/work-hours",
+    absolute: true,
+    matchPattern: "/ppm/work-hours",
+    permissions: [{ key: "ppm:work-hour:read", name: "工时查看" }],
+  },
+  {
+    section: "ppm",
+    menuKey: "ppm-work-hour-statistics",
+    menuLabel: "工时统计",
+    icon: "\u{1F4CA}",
+    href: "/ppm/work-hour-statistics",
+    absolute: true,
+    matchPattern: "/ppm/work-hour-statistics",
+    permissions: [{ key: "ppm:work-hour:stat", name: "工时统计" }],
+  },
+  {
+    section: "ppm",
+    menuKey: "ppm-kanban",
+    menuLabel: "看板",
+    icon: "\u{1F4D4}",
+    href: "/ppm/kanban",
+    absolute: true,
+    matchPattern: "/ppm/kanban",
+    permissions: [{ key: "ppm:kanban:view", name: "看板查看" }],
+  },
 ];
 
 /** section 固定渲染顺序，供 AppShell / Picker 使用 */
 export const MENU_SECTION_ORDER: MenuSection[] = [
   "overview",
   "management",
+  "ppm",
   "admin",
   "system",
 ];
@@ -310,6 +456,7 @@ export const MENU_SECTION_ORDER: MenuSection[] = [
 export const MENU_SECTION_LABEL: Record<MenuSection, string> = {
   overview: "概览",
   management: "管理",
+  ppm: "项目管理",
   admin: "系统管理",
   system: "系统",
 };

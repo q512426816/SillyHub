@@ -106,6 +106,14 @@ modules:
       - backend/app/modules/task/**
     description: 任务管理（Task CRUD 和状态流转）
 
+  ppm:
+    paths:
+      - backend/app/modules/ppm/**
+    description: ppm 项目与问题管理（pm 项目管理/ps 计划策划/plan 计划节点模板/problem 问题清单/task 任务执行/kanban 看板，平台级，21 表，2 套审批流状态机）
+    needs_review: true
+    review_reasons:
+      - 新增模块（2026-06-20-ppm-module-migration 迁入），待 scan 完善卡片细节
+
   tool_gateway:
     paths:
       - backend/app/modules/tool_gateway/**

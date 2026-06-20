@@ -21,9 +21,9 @@ def test_permission_group_is_str_enum() -> None:
     assert issubclass(PermissionGroup, StrEnum)
 
 
-def test_permission_group_has_six_members() -> None:
+def test_permission_group_has_seven_members() -> None:
     members = list(PermissionGroup)
-    assert len(members) == 6
+    assert len(members) == 7
     expected = {
         PermissionGroup.PLATFORM,
         PermissionGroup.ADMIN,
@@ -31,13 +31,14 @@ def test_permission_group_has_six_members() -> None:
         PermissionGroup.AGENT,
         PermissionGroup.CHANGE,
         PermissionGroup.AUDIT,
+        PermissionGroup.PPM,
     }
     assert set(members) == expected
 
 
-def test_permission_count_is_46() -> None:
-    """29 historical + 7 admin + 6 workspace submenu read (ql-003) + 4 platform admin (ql-004/005) = 46."""
-    assert len(list(Permission)) == 46
+def test_permission_count_is_70() -> None:
+    """46 历史 + 24 PPM_* (change 2026-06-20-ppm-module-migration task-02) = 70."""
+    assert len(list(Permission)) == 70
 
 
 @pytest.mark.parametrize(
@@ -86,7 +87,7 @@ def test_permission_group_resolution(perm: Permission, expected_group: Permissio
 
 
 def test_every_permission_has_non_default_group() -> None:
-    """All 46 permissions must resolve to a stable group (no KeyError)."""
+    """All 70 permissions must resolve to a stable group (no KeyError)."""
     for perm in Permission:
         group = perm.group
         assert isinstance(group, PermissionGroup)

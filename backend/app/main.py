@@ -28,6 +28,11 @@ from app.modules.git_identity import git_identity_router
 from app.modules.health import health_router
 from app.modules.incident.router import router as incident_router
 from app.modules.knowledge.router import router as knowledge_router
+from app.modules.ppm.kanban.router import router as ppm_kanban_router
+from app.modules.ppm.plan.router import router as ppm_plan_router
+from app.modules.ppm.problem.router import router as ppm_problem_router
+from app.modules.ppm.project.router import router as ppm_project_router
+from app.modules.ppm.task.router import router as ppm_task_router
 from app.modules.release.router import router as release_router
 from app.modules.runtime.router import router as runtime_router
 from app.modules.scan_docs.router import router as scan_docs_router
@@ -432,6 +437,13 @@ def create_app() -> FastAPI:
     app.include_router(incident_router, prefix="/api")
     app.include_router(knowledge_router, prefix="/api")
     app.include_router(release_router, prefix="/api")
+    # ppm 子域:平台级,统一前缀 /api/ppm (design §7)
+    # 五个 router 自身均不带 prefix,由 main 统一挂载到 /api/ppm
+    app.include_router(ppm_project_router, prefix="/api/ppm")
+    app.include_router(ppm_plan_router, prefix="/api/ppm")
+    app.include_router(ppm_task_router, prefix="/api/ppm")
+    app.include_router(ppm_problem_router, prefix="/api/ppm")
+    app.include_router(ppm_kanban_router, prefix="/api/ppm")
     app.include_router(runtime_router, prefix="/api")
     app.include_router(tool_gateway_router, prefix="/api")
     app.include_router(policy_crud_router, prefix="/api")
