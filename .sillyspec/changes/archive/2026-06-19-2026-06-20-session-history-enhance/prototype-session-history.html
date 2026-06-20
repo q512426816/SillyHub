@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>会话历史回看 - 设计原型（2026-06-20-session-history-enhance）</title>
+<!--
+  线框原型：可视化本次三处 UI 改动方向
+  ① 回看：用户气泡(右,primary) + agent 气泡(左) 按 turn(run) 分组
+  ② 续聊：claude 的 ended/failed 会话显示「继续对话」；codex 无
+  ③ 删除：任意状态会话都显示删除按钮（含 active）
+-->
+<style>
+  :root { --line:#cbd5e1; --muted:#64748b; --primary:#4f46e5; --primary-fg:#fff; --bg:#f8fafc; }
+  * { box-sizing:border-box; font-family: ui-sans-serif, system-ui, "PingFang SC", sans-serif; }
+  body { margin:0; background:#e2e8f0; color:#0f172a; font-size:13px; }
+  .wrap { max-width:980px; margin:20px auto; background:#fff; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .topbar { padding:10px 14px; border-bottom:1px solid var(--line); background:#f1f5f9; display:flex; justify-content:space-between; }
+  .topbar .title { font-weight:600; }
+  .topbar .hint { color:var(--muted); font-size:11px; }
+  .layout { display:grid; grid-template-columns:240px 1fr; min-height:520px; }
+  /* sidebar */
+  .sidebar { border-right:1px solid var(--line); display:flex; flex-direction:column; }
+  .sidebar h3 { margin:0; padding:10px 12px 4px; font-size:12px; color:var(--muted); }
+  .session { display:flex; align-items:stretch; border-bottom:1px solid #eef2f7; cursor:pointer; }
+  .session:hover .meta { background:#f8fafc; }
+  .session.sel .meta { background:#eef2ff; }
+  .meta { flex:1; padding:8px 12px; }
+  .meta .id { font-family:ui-monospace,monospace; font-size:11px; }
+  .meta .st { font-size:10px; color:var(--muted); }
+  .badge { font-size:10px; padding:1px 6px; border-radius:8px; border:1px solid var(--line); }
+  .badge.active { background:#dcfce7; border-color:#86efac; color:#166534; }
+  .badge.ended { background:#f1f5f9; color:#475569; }
+  .badge.failed { background:#fee2e2; border-color:#fca5a5; color:#991b1b; }
+  .del { width:34px; display:flex; align-items:center; justify-content:center; border-left:1px solid #eef2f7; color:var(--muted); cursor:pointer; }
+  .del:hover { background:#fee2e2; color:#b91c1c; }
+  /* main */
+  .main { display:flex; flex-direction:column; }
+  .main-head { padding:10px 14px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
+  .main-head .sub { color:var(--muted); font-size:11px; }
+  .resume-btn { font-size:11px; padding:4px 10px; border:1px solid var(--primary); color:var(--primary); background:#fff; border-radius:6px; cursor:pointer; }
+  .resume-btn:hover { background:var(--primary); color:var(--primary-fg); }
+  .resume-btn.disabled { border-color:#cbd5e1; color:#94a3b8; cursor:not-allowed; background:#f8fafc; }
+  .scroll { flex:1; overflow-y:auto; padding:14px; background:var(--bg); }
+  .turn { margin-bottom:16px; }
+  .turn-tag { font-family:ui-monospace,monospace; font-size:10px; color:var(--muted); margin-bottom:6px; }
+  .bubble { max-width:78%; padding:7px 11px; border-radius:8px; font-size:12px; line-height:1.5; box-shadow:0 1px 1px rgba(0,0,0,.04); }
+  .b-user { margin-left:auto; background:var(--primary); color:var(--primary-fg); }
+  .b-agent { background:#fff; border:1px solid var(--line); }
+  .row-user { display:flex; justify-content:flex-end; }
+  .row-agent { display:flex; justify-content:flex-start; margin-top:5px; }
+  .turnstatus { font-size:10px; color:var(--muted); margin-top:4px; font-family:ui-monospace,monospace; }
+  .legend { padding:8px 14px; border-top:1px solid var(--line); background:#f8fafc; font-size:11px; color:var(--muted); }
+  .legend b { color:#0f172a; }
+  .note { background:#fef9c3; border:1px solid #fde68a; color:#854d0e; padding:6px 10px; border-radius:6px; font-size:11px; margin:10px 14px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="title">/runtimes · 会话历史回看（线框原型）</div>
+    <div class="hint">改动点：①用户/agent 气泡区分 ②续聊按钮 ③任意状态删除</div>
+  </div>
+  <div class="layout">
+    <!-- 左：会话列表（所有会话都有删除按钮） -->
+    <div class="sidebar">
+      <h3>会话列表</h3>
+      <div class="session sel" data-sess="1">
+        <div class="meta"><span class="id">5335c551</span> <span class="badge ended">ended</span><div class="st">claude · 2 turns</div></div>
+        <div class="del" title="删除会话">🗑</div>
+      </div>
+      <div class="session" data-sess="2">
+        <div class="meta"><span class="id">f8a1c920</span> <span class="badge active">active</span><div class="st">claude · 1 turn</div></div>
+        <div class="del" title="删除会话（active 先 end 再删）">🗑</div>
+      </div>
+      <div class="session" data-sess="3">
+        <div class="meta"><span class="id">a1b2c3d4</span> <span class="badge failed">failed</span><div class="st">claude · 1 turn</div></div>
+        <div class="del" title="删除会话">🗑</div>
+      </div>
+      <div class="session" data-sess="4">
+        <div class="meta"><span class="id">9e7f0123</span> <span class="badge ended">ended</span><div class="st">codex · 2 turns</div></div>
+        <div class="del" title="删除会话">🗑</div>
+      </div>
+    </div>
+
+    <!-- 右：历史回看 -->
+    <div class="main">
+      <div class="main-head">
+        <div>
+          <div style="font-weight:600">历史回看 · <span id="curId">5335c551</span></div>
+          <div class="sub" id="curSub">2 个 turn · <span id="resumeNote">claude 已结束，可继续对话</span></div>
+        </div>
+        <button class="resume-btn" id="resumeBtn" onclick="alert('调 POST /sessions/{id}/reopen → daemon restoreAndReconnect(SDK resume) → 切 attach 模式续聊')">继续对话</button>
+      </div>
+
+      <div class="scroll" id="scroll">
+        <!-- turn 1 -->
+        <div class="turn">
+          <div class="turn-tag">run 5335c551 · turn 1</div>
+          <div class="row-user"><div class="bubble b-user">帮我写一个快排函数</div></div>
+          <div class="row-agent"><div class="bubble b-agent">好的，这是用 TypeScript 写的快速排序：<br>function qsort(a){ if(a.length&lt;=1) return a; … }</div></div>
+          <div class="turnstatus">Turn 1 · 已完成</div>
+        </div>
+        <!-- turn 2 -->
+        <div class="turn">
+          <div class="turn-tag">run b7e2f019 · turn 2</div>
+          <div class="row-user"><div class="bubble b-user">再加一个对应的单元测试</div></div>
+          <div class="row-agent"><div class="bubble b-agent">已添加测试用例，覆盖空数组/单元素/已排序/逆序四种情况。</div></div>
+          <div class="turnstatus">Turn 2 · 已完成</div>
+        </div>
+      </div>
+
+      <div class="note" id="oldNote" style="display:none">⚠️ 这是存量旧会话：当时未落库用户消息，只显示 agent 产出（D-005，历史数据不补）。</div>
+      <div class="legend">
+        <b>图例</b>：右对齐紫色 = 用户消息（channel=user）｜ 左对齐白底 = agent 产出｜「继续对话」= reopen 复用 agent_session_id 走 SDK resume（仅 claude）
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // 点不同会话演示不同状态下的右侧视图 + 续聊按钮可用性
+  const data = {
+    1: { id:'5335c551', turns:2, provider:'claude', status:'ended',   resumable:true,  old:false },
+    2: { id:'f8a1c920', turns:1, provider:'claude', status:'active',  resumable:true,  old:false },
+    3: { id:'a1b2c3d4', turns:1, provider:'claude', status:'failed',  resumable:true,  old:false },
+    4: { id:'9e7f0123', turns:2, provider:'codex',  status:'ended',   resumable:false, old:true },
+  };
+  document.querySelectorAll('.session').forEach(el => {
+    el.addEventListener('click', () => {
+      document.querySelectorAll('.session').forEach(s => s.classList.remove('sel'));
+      el.classList.add('sel');
+      const d = data[el.dataset.sess];
+      document.getElementById('curId').textContent = d.id;
+      const btn = document.getElementById('resumeBtn');
+      const note = document.getElementById('resumeNote');
+      const oldNote = document.getElementById('oldNote');
+      if (d.resumable) {
+        btn.classList.remove('disabled');
+        btn.disabled = false;
+        btn.textContent = '继续对话';
+        note.textContent = `${d.provider} ${d.status}，可继续对话`;
+      } else {
+        btn.classList.add('disabled');
+        btn.disabled = true;
+        btn.textContent = '不可续聊（codex 无 resume driver）';
+        note.textContent = `codex 仅支持只读历史回看`;
+      }
+      oldNote.style.display = d.old ? 'block' : 'none';
+    });
+  });
+  document.querySelectorAll('.del').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      const s = el.closest('.session').querySelector('.badge');
+      alert(s && s.classList.contains('active')
+        ? 'active 会话删除：后端先内部 end（关 daemon session + lease 置 completed）再硬删'
+        : '已结束/失败会话：直接硬删，保留 run/logs 历史');
+    });
+  });
+</script>
+</body>
+</html>

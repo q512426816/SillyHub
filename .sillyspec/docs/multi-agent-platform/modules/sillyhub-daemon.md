@@ -94,6 +94,7 @@ Claude CLI 交互:
 6. **多 Agent 注册**: 每个 Agent 作为独立 runtime 注册，心跳需逐个发送
 7. **会话恢复**: 通过 `--resume <session_id>` 实现多轮对话上下文延续
 8. **离线语义**: daemon 正常 Ctrl+C/SIGTERM 停止时应上报各 provider runtime offline；进程崩溃或强杀无法发送 offline，后端 `/api/daemon/runtimes` 刷新时的 stale heartbeat cleanup 负责兜底
+9. **cursor-agent ps1 绕过**: cursor-agent 官方 `cursor-agent.ps1` 版本目录正则 `^\d{4}\.\d{1,2}\.\d{1,2}-[a-f0-9]+$` 不匹配新版目录命名 `YYYY.MM.DD-HH-MM-SS-commit`（`-` 后非纯十六进制）→ ps1 任何调用 `exit 1`，导致 cursor 版本探测为 null（注册 'unknown'→前端版本「待识别」）且 task 启动即崩。`cursor-version.ts` 的 `resolveCursorVersionEntry` 绕过 ps1 直扫 `versions/<latest>/`；`agent-detector.ts` cursor 版本探测 fallback 取目录名作版本；`cmd-shim.ts` 模式0 把 `cursor-agent.ps1` 解析为 version 目录的 `node.exe index.js` 入口让 task-runner 直跑（不依赖坏掉的 ps1）。
 
 ## 变更索引
 
@@ -102,6 +103,8 @@ Claude CLI 交互:
 - ql-20260616-001-7f3a | 修复 Windows 上 agent-detector 返回裸 claude 路径导致 spawn ENOENT：WINDOWS_EXTS 移除空字符串 ''；task-runner spawn shell mode 正则扩展到 .ps1 + 无扩展名兜底；TRUNCATE daemon_runtimes 清掉 7 条旧记录，重启后注册 3 条干净 .cmd 后缀
 - ql-20260618-010-e7c4 | 修复 WS 仅用 config.runtime_id 连接导致 list_dir RPC 504：改为每个 register 返回的 server runtime id 各建一条 WsClient
 - ql-20260618-007-d9c0 | Daemon stop 路径新增 HubClient.markOffline()，优雅停止时使用 server 分配的各 provider runtime id 上报 offline，避免 CLI 退出后刷新仍显示 online
+- ql-20260620-002-f8c1 | 修复 cursor 版本「待识别」+ cursor task 启动即崩：cursor-agent 官方 ps1 版本目录正则不匹配新版目录名(YYYY.MM.DD-HH-MM-SS-commit)→ps1 exit 1；新增 cursor-version.ts resolveCursorVersionEntry 扫描 versions/<latest>/，agent-detector 版本探测 fallback 取目录名 + cmd-shim 模式0 增强(cursor-agent.ps1→version 目录 node.exe index.js 入口)绕过 ps1 直跑
+- 2026-06-20-session-history-enhance | 交互式会话历史回看：用户消息落库回看 + 任意会话 reopen 续聊(仅claude) + 任意状态删除
 
 ## 人工备注
 
