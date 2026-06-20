@@ -39,7 +39,7 @@ export default function ApiKeysSettingsPage() {
   }, [load]);
 
   const handleRevoke = async (k: ApiKeyRead) => {
-    if (!confirm(`确定吊销 API Key "${k.name}"？吊销后使用该 Key 的 daemon 将立即下线。`))
+    if (!confirm(`确定吊销 API 密钥 "${k.name}"？吊销后使用该密钥的守护进程将立即下线。`))
       return;
     try {
       await revokeApiKey(k.id);
@@ -57,15 +57,15 @@ export default function ApiKeysSettingsPage() {
             <Link href="/settings" className="hover:underline">
               设置
             </Link>{" "}
-            / API Keys
+            / API 密钥
           </div>
-          <h1 className="mt-0.5">API Keys</h1>
+          <h1 className="mt-0.5">API 密钥</h1>
           <p className="text-xs text-muted-foreground">
-            长期凭证供 daemon 进程使用。Plaintext 仅在签发时显示一次。
+            长期凭证供守护进程进程使用。明文仅在签发时显示一次。
           </p>
         </div>
         <Button size="sm" onClick={() => setShowCreate(true)}>
-          + 签发 API Key
+          + 签发 API 密钥
         </Button>
       </header>
 
@@ -79,7 +79,7 @@ export default function ApiKeysSettingsPage() {
         <p className="py-8 text-center text-xs text-muted-foreground">加载中…</p>
       ) : keys.length === 0 ? (
         <div className="rounded-md border bg-card p-8 text-center">
-          <p className="text-sm">还没有 API Key</p>
+          <p className="text-sm">还没有 API 密钥</p>
           <p className="mt-1 text-xs text-muted-foreground">
             签发后可在{" "}
             <Link href="/runtimes" className="underline">

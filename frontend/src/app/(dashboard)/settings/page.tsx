@@ -14,8 +14,8 @@ import {
 type Tab = "workspace" | "agent" | "security" | "integrations";
 
 const TABS: { key: Tab; label: string }[] = [
-  { key: "workspace", label: "Workspace 信息" },
-  { key: "agent", label: "Agent 配置" },
+  { key: "workspace", label: "工作区信息" },
+  { key: "agent", label: "智能体配置" },
   { key: "security", label: "安全策略" },
   { key: "integrations", label: "集成" },
 ];
@@ -73,7 +73,7 @@ function WorkspaceTab({ dbStatus }: { dbStatus: HealthResponse | null }) {
         <h3 className="text-xs font-medium text-muted-foreground">基本信息</h3>
         <div className="mt-3 space-y-2.5">
           <div>
-            <label className="text-[11px] text-muted-foreground">Workspace 名称</label>
+            <label className="text-[11px] text-muted-foreground">工作区名称</label>
             <input value={wsName} onChange={(e) => setWsName(e.target.value)} className={`mt-0.5 ${inputCls}`} />
           </div>
           <div>
@@ -101,12 +101,12 @@ function WorkspaceTab({ dbStatus }: { dbStatus: HealthResponse | null }) {
         <h3 className="text-xs font-medium text-muted-foreground">数据库</h3>
         <div className="mt-3">
           <KVRow label="类型" value="PostgreSQL 16" />
-          <KVRow label="Host" value={dbStatus ? "Connected" : "—"} />
+          <KVRow label="主机" value={dbStatus ? "已连接" : "—"} />
           <KVRow label="版本" value={dbStatus?.version ?? "—"} />
           <div className="flex items-center justify-between py-1.5 text-xs">
             <span className="text-muted-foreground">连接状态</span>
             <Badge variant={dbStatus?.db === "ok" ? "success" : "destructive"}>
-              {dbStatus?.db === "ok" ? "Connected" : "Disconnected"}
+              {dbStatus?.db === "ok" ? "已连接" : "未连接"}
             </Badge>
           </div>
         </div>
@@ -162,10 +162,10 @@ function AgentConfigTab() {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <div className="rounded-md border bg-card p-4">
-        <h3 className="text-xs font-medium text-muted-foreground">Agent 运行时配置</h3>
+        <h3 className="text-xs font-medium text-muted-foreground">智能体运行时配置</h3>
         <div className="mt-3 space-y-2.5">
           <div>
-            <label className="text-[11px] text-muted-foreground">默认 Agent</label>
+            <label className="text-[11px] text-muted-foreground">默认智能体</label>
             <select value={defaultAgent} onChange={(e) => setDefaultAgent(e.target.value)} className={`mt-0.5 w-full ${inputCls}`}>
               <option value="claude_code">Claude Code</option>
               <option value="codex">Codex</option>
@@ -174,7 +174,7 @@ function AgentConfigTab() {
             </select>
           </div>
           <div>
-            <label className="text-[11px] text-muted-foreground">最大并发 Agent Run</label>
+            <label className="text-[11px] text-muted-foreground">最大并发智能体运行</label>
             <input type="number" min={1} value={maxConcurrent} onChange={(e) => setMaxConcurrent(Number(e.target.value))} className={`mt-0.5 w-32 ${inputCls}`} />
           </div>
           <div>
@@ -199,15 +199,15 @@ function AgentConfigTab() {
       </div>
 
       <div className="rounded-md border bg-card p-4">
-        <h3 className="text-xs font-medium text-muted-foreground">Spec Profile &amp; Agent 信息</h3>
+        <h3 className="text-xs font-medium text-muted-foreground">Spec Profile 与智能体信息</h3>
         <div className="mt-3">
           <KVRow label="Profile 版本" value="0.1.0" />
-          <KVRow label="默认 Agent 类型" value="claude_code" />
+          <KVRow label="默认智能体类型" value="claude_code" />
           <KVRow label="Spec 策略" value="platform-managed" />
-          <KVRow label="Adapter" value="ClaudeCodeAdapter" />
+          <KVRow label="适配器" value="ClaudeCodeAdapter" />
           <div className="flex items-center justify-between border-b py-1.5 text-xs">
             <span className="text-muted-foreground">Profile 状态</span>
-            <Badge variant="success">Active</Badge>
+            <Badge variant="success">活跃</Badge>
           </div>
         </div>
         <p className="mt-3 text-[11px] text-muted-foreground">

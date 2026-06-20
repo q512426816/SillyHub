@@ -63,9 +63,9 @@ export function ApiKeyCreateDialog({ onCreated, onClose }: Props) {
       <div className="w-full max-w-lg rounded-lg border bg-background p-5 shadow-lg">
         {phase === "form" && (
           <>
-            <h2 className="text-base font-semibold">签发 API Key</h2>
+            <h2 className="text-base font-semibold">签发 API 密钥</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              为 daemon 进程签发长期凭证。Plaintext 仅在签发后显示一次，请妥善保存。
+              为守护进程签发长期凭证。明文仅在签发后显示一次，请妥善保存。
             </p>
 
             <div className="mt-4 space-y-3">
@@ -112,13 +112,13 @@ export function ApiKeyCreateDialog({ onCreated, onClose }: Props) {
 
         {phase === "plaintext" && issued && (
           <>
-            <h2 className="text-base font-semibold">API Key 已签发</h2>
+            <h2 className="text-base font-semibold">API 密钥已签发</h2>
             <div className="mt-3 rounded border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs text-amber-900">
               ⚠️ 这是该 Key 的唯一一次明文显示。关闭后将无法再次查看，请立即复制保存。
             </div>
 
             <div className="mt-3">
-              <label className="text-[11px] text-muted-foreground">Plaintext（一次性）</label>
+              <label className="text-[11px] text-muted-foreground">明文（一次性）</label>
               <div className="mt-1 flex gap-2">
                 <code className="flex-1 overflow-x-auto rounded border bg-muted px-2 py-1.5 text-xs">
                   {issued.plaintext}

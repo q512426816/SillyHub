@@ -152,7 +152,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
       });
       setWorkspace(updated);
     } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "保存默认 Agent 失败");
+      setPageError(err instanceof ApiError ? err.message : "保存默认智能体失败");
     } finally {
       setSavingDefaultAgent(false);
     }
@@ -438,7 +438,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
       <header>
         <p className="text-[11px] text-muted-foreground">
           <Link href="/workspaces" className="hover:underline">
-            &larr; Workspaces
+            &larr; 工作区
           </Link>
         </p>
         <div className="mt-1 flex items-center gap-3">
@@ -489,27 +489,27 @@ export default function WorkspaceDetailPage({ params }: Props) {
       {/* Default Agent provider（FR-01/FR-02）*/}
       <section className="rounded-md border bg-card">
         <div className="border-b px-4 py-2.5">
-          <h2 className="text-sm font-medium">默认 Agent provider</h2>
+          <h2 className="text-sm font-medium">默认智能体提供方</h2>
         </div>
         <div className="space-y-2.5 px-4 py-3">
           <p className="text-xs text-muted-foreground">
-            自动派发（阶段流转、scan-generate）且未显式指定 provider 时使用。留空则由 daemon 默认决定。
+            自动派发（阶段流转、scan-generate）且未显式指定 provider 时使用。留空则由守护进程默认决定。
           </p>
           <div className="flex items-end gap-2">
             <div className="flex-1 space-y-1">
-              <label className="text-[11px] text-muted-foreground">Agent provider</label>
+              <label className="text-[11px] text-muted-foreground">智能体提供方</label>
               <AgentProviderSelect
                 value={defaultAgent}
                 onChange={setDefaultAgent}
-                includeDefault="未设置（由 daemon 默认决定）"
+                includeDefault="未设置（由守护进程默认决定）"
               />
             </div>
             <div className="flex-1 space-y-1">
-              <label className="text-[11px] text-muted-foreground">Agent model</label>
+              <label className="text-[11px] text-muted-foreground">智能体模型</label>
               <AgentModelInput
                 value={defaultModel}
                 onChange={setDefaultModel}
-                placeholder="provider default"
+                placeholder="提供方默认值"
               />
             </div>
             <Button
@@ -550,7 +550,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
       {/* Spec Workspace info */}
       <section className="rounded-md border bg-card">
         <div className="flex items-center justify-between border-b px-4 py-2.5">
-          <h2 className="text-sm font-medium">规范管理 (Spec Workspace)</h2>
+          <h2 className="text-sm font-medium">规范管理（Spec Workspace）</h2>
           {specWs && (
             <div className="flex gap-2">
               {specWs.strategy === "platform-managed" && (
@@ -561,10 +561,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
                   disabled={bootstrapping || !!activeBootstrapRunId || syncing || importing}
                 >
                   {bootstrapping
-                    ? "初始化中..."
+                    ? "初始化进行中…"
                     : activeBootstrapRunId
-                      ? "Bootstrap 运行中..."
-                      : "Bootstrap"}
+                      ? "初始化运行中…"
+                      : "初始化"}
                 </Button>
               )}
               <Button
@@ -573,7 +573,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
                 onClick={handleSync}
                 disabled={syncing || importing || bootstrapping}
               >
-                {syncing ? "同步中..." : "Sync"}
+                {syncing ? "同步中…" : "同步"}
               </Button>
               {!specWs.repo_sillyspec_path && (
                 <Button
@@ -582,7 +582,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
                   onClick={handleImport}
                   disabled={syncing || importing || bootstrapping}
                 >
-                  {importing ? "导入中..." : "Import"}
+                  {importing ? "导入中…" : "导入"}
                 </Button>
               )}
             </div>
@@ -595,8 +595,8 @@ export default function WorkspaceDetailPage({ params }: Props) {
             <p className="font-medium">此工作区使用平台托管策略。</p>
             <p className="mt-0.5 text-blue-600">
               规范文件存储在独立的平台目录中，需要先初始化。点击上方
-              <strong> Bootstrap </strong>按钮使用 SillySpec CLI 初始化规范空间，或点击
-              <strong> Import </strong>从代码仓库导入已有的 .sillyspec。
+              <strong> 初始化 </strong>按钮使用 SillySpec CLI 初始化规范空间，或点击
+              <strong> 导入 </strong>从代码仓库导入已有的 .sillyspec。
             </p>
           </div>
         )}
@@ -606,7 +606,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
             const bs = bsRunStatus(lastBsRun);
             return (
           <div className="mx-4 mt-3 mb-1 flex flex-wrap items-center gap-x-4 gap-y-1 rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs">
-            <span className="text-muted-foreground">上次 Bootstrap</span>
+            <span className="text-muted-foreground">上次初始化</span>
             <Badge variant={bs.variant}>
               {bs.label}
             </Badge>
@@ -639,7 +639,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
         {activeBootstrapRunId && (
           <div className="mx-4 mt-3">
             <AgentLogViewer
-              title="Bootstrap Run"
+              title="初始化运行"
               runId={activeBootstrapRunId}
               logs={bootstrapLogs}
               loading={false}
@@ -717,7 +717,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
           { href: `/workspaces/${workspaceId}/changes`, label: "变更中心" },
           { href: `/workspaces/${workspaceId}/scan-docs`, label: "扫描文档" },
           { href: `/workspaces/${workspaceId}/runtime`, label: "运行时" },
-          { href: `/workspaces/${workspaceId}/agent`, label: "Agent" },
+          { href: `/workspaces/${workspaceId}/agent`, label: "智能体" },
         ].map((item) => (
           <Link
             key={item.href}

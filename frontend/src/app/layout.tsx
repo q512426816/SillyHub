@@ -5,8 +5,8 @@ import { AntdProviders } from "@/components/antd-providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Multi-Agent Platform",
-  description: "SillySpec-native viewer + multi-agent execution platform.",
+  title: "SillyHub",
+  description: "SillySpec 原生查看器 + 多智能体执行平台。",
 };
 
 export default function RootLayout({

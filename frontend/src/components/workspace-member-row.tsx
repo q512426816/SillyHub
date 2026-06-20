@@ -13,9 +13,9 @@ const ROLE_OPTIONS: ReadonlyArray<{
   value: WorkspaceMemberRoleKey;
   label: string;
 }> = [
-  { value: "developer", label: "Developer" },
-  { value: "viewer", label: "Viewer" },
-  { value: "workspace_owner", label: "Workspace Owner" },
+  { value: "developer", label: "开发者" },
+  { value: "viewer", label: "只读成员" },
+  { value: "workspace_owner", label: "工作区所有者" },
 ];
 
 interface Props {
@@ -63,7 +63,7 @@ export function WorkspaceMemberRow({
             {displayName}
             {isCurrentUser && (
               <span className="ml-1 text-[11px] text-muted-foreground">
-                (you)
+                （你）
               </span>
             )}
           </span>
@@ -98,7 +98,7 @@ export function WorkspaceMemberRow({
           </select>
           {isOwner && (
             <Badge variant="default" className="text-[10px]">
-              owner
+              所有者
             </Badge>
           )}
         </div>
@@ -118,7 +118,7 @@ export function WorkspaceMemberRow({
             onClick={onSetOwner}
             disabled={setOwnerDisabled}
           >
-            Set Owner
+            设为所有者
           </Button>
           <Button
             size="sm"
@@ -127,7 +127,7 @@ export function WorkspaceMemberRow({
             disabled={removeDisabled}
             className="text-destructive hover:text-destructive"
           >
-            Remove
+            移除
           </Button>
         </div>
       </td>

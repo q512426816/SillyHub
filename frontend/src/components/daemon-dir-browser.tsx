@@ -82,7 +82,7 @@ export function DaemonDirBrowser({
         <Input
           value={path}
           onChange={(e) => setPath(e.target.value)}
-          placeholder="输入 daemon 机器路径后回车列出"
+          placeholder="输入守护进程机器路径后回车列出"
           onKeyDown={(e) => {
             if (e.key === "Enter") void load(path);
           }}

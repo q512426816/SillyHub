@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import { listAuditLogs, type AuditLogEntry } from "@/lib/audit";
+import { AUDIT_RESOURCE_TYPE_LABELS, labelOf } from "@/lib/status-labels";
 
 interface Props {
   params: { id: string };
@@ -27,18 +28,18 @@ function categorizeAction(action: string): { label: string; variant: "default" |
     return { label: "Git", variant: "default" };
   }
   if (action.includes("tool_") || action.includes("agent_run")) {
-    return { label: "Tool Call", variant: "success" };
+    return { label: "工具调用", variant: "success" };
   }
   if (action.includes("agent")) {
-    return { label: "Agent", variant: "warning" };
+    return { label: "智能体", variant: "warning" };
   }
   if (action.includes("approval") || action.includes("approve") || action.includes("reject")) {
-    return { label: "Approval", variant: "outline" };
+    return { label: "审批", variant: "outline" };
   }
   if (action.includes("credential") || action.includes("token") || action.includes("secret")) {
-    return { label: "Credential", variant: "destructive" };
+    return { label: "凭据", variant: "destructive" };
   }
-  return { label: "Other", variant: "outline" };
+  return { label: "其他", variant: "outline" };
 }
 
 function getResultStatus(entry: AuditLogEntry): { label: string; variant: "success" | "warning" | "destructive" | "outline" } {
@@ -154,11 +155,11 @@ export default function AuditPage({ params }: Props) {
             onChange={(e) => setFilter(e.target.value)}
           >
             <option value="">全部类型</option>
-            <option value="change">Change</option>
-            <option value="task">Task</option>
-            <option value="release">Release</option>
-            <option value="review">Review</option>
-            <option value="agent_run">Agent Run</option>
+            <option value="change">变更</option>
+            <option value="task">任务</option>
+            <option value="release">发布</option>
+            <option value="review">审查</option>
+            <option value="agent_run">智能体运行</option>
           </select>
           <Button size="sm" onClick={() => void reload()}>刷新</Button>
         </div>
@@ -226,7 +227,7 @@ export default function AuditPage({ params }: Props) {
                       </td>
                       <td>
                         <Badge variant={RESOURCE_COLORS[entry.resource_type] ?? "outline"}>
-                          {entry.resource_type}
+                          {labelOf(AUDIT_RESOURCE_TYPE_LABELS, entry.resource_type)}
                         </Badge>
                       </td>
                       <td className="max-w-[160px] truncate font-mono text-[11px]">

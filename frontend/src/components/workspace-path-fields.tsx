@@ -3,6 +3,10 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import type { DaemonRuntimeRead } from "@/lib/daemon";
 import {
+  DAEMON_RUNTIME_STATUS_LABELS,
+  labelOf,
+} from "@/lib/status-labels";
+import {
   daemonRuntimeStatusVariant,
   formatDaemonRuntimeSummary,
   isDaemonClientWorkspace,
@@ -49,7 +53,7 @@ export function WorkspacePathFields({
 
       {daemonClient && (
         <>
-          <dt className="text-muted-foreground">绑定 Daemon</dt>
+          <dt className="text-muted-foreground">绑定守护进程</dt>
           <dd className="min-w-0">
             {linkRuntime && workspace.daemon_runtime_id ? (
               <Link
@@ -69,7 +73,7 @@ export function WorkspacePathFields({
                 variant={daemonRuntimeStatusVariant(runtime)}
                 className="ml-1.5 align-middle text-[10px]"
               >
-                {runtime.status ?? "unknown"}
+                {labelOf(DAEMON_RUNTIME_STATUS_LABELS, runtime.status)}
               </Badge>
             )}
           </dd>

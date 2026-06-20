@@ -125,7 +125,7 @@ export default function TopologyPage({ params }: Props) {
               ← 关系列表
             </Link>
           </p>
-          <h1 className="text-base font-semibold">Workspace 拓扑</h1>
+          <h1 className="text-base font-semibold">工作区拓扑</h1>
         </div>
         <div className="text-[11px] text-muted-foreground">
           {topology ? `${topology.nodes.length} 节点 · ${topology.edges.length} 边` : ""}
@@ -143,12 +143,12 @@ export default function TopologyPage({ params }: Props) {
           </div>
         ) : nodes.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
-            <p>暂无 Workspace 拓扑数据。</p>
+            <p>暂无工作区拓扑数据。</p>
             <Link
               href="/workspaces"
               className="text-primary hover:underline"
             >
-              返回 Workspace 列表
+              返回工作区列表
             </Link>
           </div>
         ) : (

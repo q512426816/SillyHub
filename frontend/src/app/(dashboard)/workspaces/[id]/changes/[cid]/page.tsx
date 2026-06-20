@@ -77,12 +77,12 @@ const GATE_PANELS: Record<string, {
 }> = {
   need_requirement_input: {
     title: "请补充需求",
-    description: "Agent 分析后认为需求不够明确，请补充详细信息",
+    description: "智能体分析后认为需求不够明确，请补充详细信息",
     actions: [{ label: "重新分析需求", variant: "default", action: "redispatch_brainstorm" }],
   },
   need_proposal_review: {
     title: "四件套已生成，请确认",
-    description: "Agent 已生成 proposal / requirements / design / tasks，请审阅后决定",
+    description: "智能体 已生成 proposal / requirements / design / tasks，请审阅后决定",
     actions: [
       { label: "确认通过", variant: "default", action: "proposal_approve" },
       { label: "需要修改", variant: "outline", action: "proposal_revise" },
@@ -91,7 +91,7 @@ const GATE_PANELS: Record<string, {
   },
   need_plan_review: {
     title: "执行计划已生成，请确认",
-    description: "Agent 已生成执行计划，请审阅后决定",
+    description: "智能体 已生成执行计划，请审阅后决定",
     actions: [
       { label: "确认计划", variant: "default", action: "plan_approve" },
       { label: "重新计划", variant: "outline", action: "plan_replan" },
@@ -101,7 +101,7 @@ const GATE_PANELS: Record<string, {
   },
   need_human_test: {
     title: "自动验证通过，请人工测试",
-    description: "Agent 已完成自动验证，请进行人工测试",
+    description: "智能体 已完成自动验证，请进行人工测试",
     actions: [
       { label: "测试通过", variant: "default", action: "test_pass" },
       { label: "发现 BUG", variant: "destructive", action: "test_bug" },
@@ -115,7 +115,7 @@ const GATE_PANELS: Record<string, {
   },
   blocked: {
     title: "需要人工介入",
-    description: "Agent 自动修复达到上限，需要人工处理",
+    description: "智能体自动修复达到上限，需要人工处理",
     actions: [
       { label: "退回执行", variant: "outline", action: "transition_execute" },
     ],
@@ -343,12 +343,12 @@ export default function ChangeDetailPage({ params }: Props) {
       });
       // Show agent dispatch feedback
       if (result.agent_dispatch?.dispatched) {
-        setSuccessMsg(`🤖 Agent 已自动派发 (${result.agent_dispatch.phase ?? targetStage})`);
+        setSuccessMsg(`🤖 智能体 已自动派发 (${result.agent_dispatch.phase ?? targetStage})`);
         setTimeout(() => setSuccessMsg(null), 4000);
       } else if (result.agent_dispatch && !result.agent_dispatch.dispatched) {
         const reason = result.agent_dispatch.reason;
         if (reason === "active_run_exists") {
-          setSuccessMsg("⚠️ Agent 已在运行中，跳过重复派发");
+          setSuccessMsg("⚠️ 智能体 已在运行中，跳过重复派发");
           setTimeout(() => setSuccessMsg(null), 3000);
         }
       }
@@ -426,7 +426,7 @@ export default function ChangeDetailPage({ params }: Props) {
         // Refresh change data after successful execution
         const updated = await getChange(workspaceId, changeId);
         setChange(updated);
-        setSuccessMsg("✅ Agent 执行已启动 (run_id: " + (result.run_id?.slice(0, 8) ?? "unknown") + ")");
+        setSuccessMsg("✅ 智能体执行已启动 (run_id: " + (result.run_id?.slice(0, 8) ?? "unknown") + ")");
         setTimeout(() => setSuccessMsg(null), 5000);
       }
     } catch (err) {
@@ -497,7 +497,7 @@ export default function ChangeDetailPage({ params }: Props) {
       setLogsExpanded(true);
 
       if (result.has_active_run && result.last_dispatch?.run_id) {
-        setSuccessMsg("🤖 Agent 已触发执行");
+        setSuccessMsg("🤖 智能体 已触发执行");
         setTimeout(() => setSuccessMsg(null), 3000);
 
         // Disconnect any existing SSE, then directly connect to new run
@@ -547,7 +547,7 @@ export default function ChangeDetailPage({ params }: Props) {
         eventSourceRef.current = es;
       }
     } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "触发 Agent 失败");
+      setPageError(err instanceof ApiError ? err.message : "触发智能体失败");
     } finally {
       setDispatching(false);
     }
@@ -846,7 +846,7 @@ export default function ChangeDetailPage({ params }: Props) {
           <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
             <div className="h-2 w-2 animate-pulse rounded-full bg-primary" />
             <span className="text-xs text-muted-foreground">
-              Agent 正在执行 {WORKFLOW_STAGE_LABELS[change.current_stage ?? "draft"] ?? change.current_stage} 阶段
+              智能体正在执行 {WORKFLOW_STAGE_LABELS[change.current_stage ?? "draft"] ?? change.current_stage} 阶段
             </span>
           </div>
         )}
@@ -949,7 +949,7 @@ export default function ChangeDetailPage({ params }: Props) {
             }}
           >
             <div className="flex items-center gap-2">
-              <h2 className="text-xs font-medium">Agent 执行日志</h2>
+              <h2 className="text-xs font-medium">智能体执行日志</h2>
               {logStreaming && (
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
@@ -1233,7 +1233,7 @@ export default function ChangeDetailPage({ params }: Props) {
                 </p>
               )
             ) : (
-              <p className="text-xs text-muted-foreground">选择一个 Tab 查看内容。</p>
+              <p className="text-xs text-muted-foreground">选择一个标签页查看内容。</p>
             )}
           </div>
         </section>

@@ -154,7 +154,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               href="/workspaces"
               className="text-[15px] font-bold tracking-tight text-foreground hover:text-primary transition-colors whitespace-nowrap"
             >
-              Multi-Agent Platform
+              SillyHub
             </Link>
             <p
               className={`mt-0.5 text-[11px] text-muted-foreground transition-all duration-200 ${

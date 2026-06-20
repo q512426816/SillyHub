@@ -77,14 +77,14 @@ export default function CreateChangePage({ params }: Props) {
           <label className="text-xs font-medium text-muted-foreground">需求描述 *</label>
           <textarea
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[160px] resize-y focus:border-ring focus:outline-none"
-            placeholder="描述你的需求，Agent 会自动分析影响范围和流程"
+            placeholder="描述你的需求，智能体会自动分析影响范围和流程"
             rows={8}
             maxLength={5000}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
           <p className="text-[11px] text-muted-foreground">
-            Agent 会自动判断变更规模、影响模块和需要走哪些流程
+            智能体会自动判断变更规模、影响模块和需要走哪些流程
           </p>
         </div>
 

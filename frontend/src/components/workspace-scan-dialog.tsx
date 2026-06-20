@@ -151,7 +151,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   return (
     <div className="rounded-md border bg-card">
       <header className="flex items-center justify-between border-b px-4 py-2.5">
-        <h3>添加 Workspace</h3>
+        <h3>添加工作区</h3>
         <Button variant="ghost" size="sm" onClick={onCancel}>
           取消
         </Button>
@@ -166,7 +166,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
                 checked={pathSource === "daemon-client"}
                 onChange={() => handlePathSourceChange("daemon-client")}
               />
-              本机 daemon 路径
+              本机守护进程路径
             </label>
             <label className="flex items-center gap-1.5 text-xs">
               <input
@@ -179,7 +179,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
           </div>
         ) : (
           <p className="text-[11px] text-muted-foreground">
-            默认使用本机 daemon 上的项目路径。服务器本地路径需 Workspace 管理权限。
+            默认使用本机守护进程上的项目路径。服务器本地路径需工作区管理权限。
           </p>
         )}
 
@@ -215,7 +215,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
           <div className="space-y-3">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">
-                在线 Daemon
+                在线守护进程
               </label>
               <select
                 className="w-full rounded border bg-background px-2 py-1.5 text-sm"
@@ -223,7 +223,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
                 onChange={(e) => setDaemonRuntimeId(e.target.value)}
                 disabled={phase === "creating"}
               >
-                <option value="">— 请选择在线 daemon —</option>
+                <option value="">— 请选择在线守护进程 —</option>
                 {runtimes.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.name ?? r.id} ({r.provider ?? "?"})
@@ -232,7 +232,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
               </select>
               {runtimes.length === 0 && (
                 <p className="text-[11px] text-muted-foreground">
-                  无在线 daemon，请先启动 sillyhub-daemon。
+                  无在线守护进程，请先启动 sillyhub-daemon。
                 </p>
               )}
             </div>
@@ -246,7 +246,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
             {daemonRootPath && (
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground" htmlFor="ws-name-d">
-                  Workspace 名称
+                  工作区名称
                 </label>
                 <Input
                   id="ws-name-d"
@@ -264,7 +264,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
                   onClick={handleCreateDaemonClient}
                   disabled={phase === "creating"}
                 >
-                  {phase === "creating" ? "创建中..." : "创建 Workspace"}
+                  {phase === "creating" ? "创建中..." : "创建工作区"}
                 </Button>
               </div>
             )}
@@ -286,13 +286,13 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
               <dd className="break-all font-mono">{scan.root_path}</dd>
               <dt className="text-muted-foreground">.sillyspec</dt>
               <dd className="break-all font-mono">{scan.is_sillyspec ? "✓ 已检测到" : "未找到"}</dd>
-              <dt className="text-muted-foreground">projects</dt>
+              <dt className="text-muted-foreground">项目</dt>
               <dd>{scan.structure.projects_count}</dd>
-              <dt className="text-muted-foreground">active changes</dt>
+              <dt className="text-muted-foreground">进行中变更</dt>
               <dd>{scan.structure.active_changes_count}</dd>
-              <dt className="text-muted-foreground">archived changes</dt>
+              <dt className="text-muted-foreground">已归档变更</dt>
               <dd>{scan.structure.archived_changes_count}</dd>
-              <dt className="text-muted-foreground">docs / runtime / local.yaml</dt>
+              <dt className="text-muted-foreground">文档 / 运行时 / local.yaml</dt>
               <dd>
                 {[
                   scan.structure.has_docs_dir && "docs",
@@ -318,7 +318,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
         {scan && (
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">
-              Agent provider（生成项目规范时生效）
+              智能体提供方（生成项目规范时生效）
             </label>
             <AgentProviderSelect
               value={scanProvider}
@@ -327,7 +327,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
             />
             <div className="mt-2 space-y-1">
               <label className="text-xs font-medium text-muted-foreground">
-                Agent model
+                智能体模型
               </label>
               <AgentModelInput value={scanModel} onChange={setScanModel} />
             </div>
@@ -350,7 +350,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
         {scan && (
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground" htmlFor="ws-name">
-              Workspace 名称
+              工作区名称
             </label>
             <Input
               id="ws-name"

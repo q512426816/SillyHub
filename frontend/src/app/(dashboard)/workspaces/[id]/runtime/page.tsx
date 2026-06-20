@@ -81,7 +81,7 @@ export default function RuntimePage({ params }: Props) {
       <header>
         <p className="text-[11px] text-muted-foreground">
           <Link href={`/workspaces/${workspaceId}`} className="hover:underline">
-            &larr; Workspace
+            &larr; 工作区
           </Link>
         </p>
         <div className="mt-1 flex items-center gap-3">
@@ -103,7 +103,7 @@ export default function RuntimePage({ params }: Props) {
         <p className="py-12 text-center text-xs text-muted-foreground">加载中…</p>
       ) : progress === null && !userInputs && artifacts.length === 0 ? (
         <div className="py-12 text-center text-xs text-muted-foreground">
-          当前 Workspace 没有运行时数据。当 SillySpec 工作流运行后，此处将展示进度、输入记录和步骤产物。
+          当前工作区没有运行时数据。当 SillySpec 工作流运行后，此处将展示进度、输入记录和步骤产物。
         </div>
       ) : (
         <div className="space-y-4">

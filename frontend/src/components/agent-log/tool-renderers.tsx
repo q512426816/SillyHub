@@ -547,7 +547,7 @@ function WorkflowSpecResultCard({
   return (
     <div className="rounded-md border border-teal-200 bg-teal-50 px-2.5 py-2">
       <div className="flex items-center gap-2 text-[11px] font-semibold text-teal-700">
-        Workflow: {summary.name}
+        工作流：{summary.name}
       </div>
       {summary.description && (
         <div className="mt-0.5 text-[10px] text-zinc-700">{summary.description}</div>
@@ -598,7 +598,7 @@ export function ToolResultCard({ body }: { body: string }) {
 
   return (
     <div className="rounded-md border border-zinc-200 bg-white px-2.5 py-2">
-      <div className="text-[11px] font-semibold text-emerald-700">Tool Result</div>
+      <div className="text-[11px] font-semibold text-emerald-700">工具结果</div>
       {isLong ? (
         <>
           <div className="mt-1 space-y-0.5">

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
+import { GIT_IDENTITY_STATUS_LABELS, labelOf } from "@/lib/status-labels";
 import {
   checkGitAccess,
   createGitIdentity,
@@ -32,12 +33,12 @@ type ViewMode = "table" | "cards";
 
 function StatusBadge({ identity }: { identity: GitIdentityRead }) {
   if (identity.revoked_at) {
-    return <Badge variant="destructive">revoked</Badge>;
+    return <Badge variant="destructive">{labelOf(GIT_IDENTITY_STATUS_LABELS, "revoked")}</Badge>;
   }
   if (identity.expires_at && new Date(identity.expires_at) < new Date()) {
-    return <Badge variant="warning">expired</Badge>;
+    return <Badge variant="warning">{labelOf(GIT_IDENTITY_STATUS_LABELS, "expired")}</Badge>;
   }
-  return <Badge variant="success">active</Badge>;
+  return <Badge variant="success">{labelOf(GIT_IDENTITY_STATUS_LABELS, "active")}</Badge>;
 }
 
 export default function GitIdentitiesPage() {
@@ -146,7 +147,7 @@ export default function GitIdentitiesPage() {
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-5 px-6 py-6">
       <header className="flex items-center justify-between">
-        <h1>Git Identities</h1>
+        <h1>Git 身份</h1>
         <div className="flex gap-2">
           {/* View toggle */}
           <div className="flex rounded border border-input">
@@ -164,7 +165,7 @@ export default function GitIdentitiesPage() {
             </button>
           </div>
           <Button size="sm" onClick={() => setShowForm(!showForm)}>
-            {showForm ? "取消" : "+ 添加 Identity"}
+            {showForm ? "取消" : "+ 添加身份"}
           </Button>
         </div>
       </header>
@@ -182,10 +183,10 @@ export default function GitIdentitiesPage() {
 
       {showForm && (
         <form onSubmit={handleCreate} className="space-y-3 rounded-md border bg-card p-4">
-          <h3 className="text-xs font-medium text-muted-foreground">新建 Identity</h3>
+          <h3 className="text-xs font-medium text-muted-foreground">新建身份</h3>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="text-[11px] text-muted-foreground">Provider</label>
+              <label className="text-[11px] text-muted-foreground">提供方</label>
               <select
                 value={formProvider}
                 onChange={(e) => setFormProvider(e.target.value)}
@@ -205,7 +206,7 @@ export default function GitIdentitiesPage() {
               />
             </div>
             <div>
-              <label className="text-[11px] text-muted-foreground">Git Username</label>
+              <label className="text-[11px] text-muted-foreground">Git 用户名</label>
               <input
                 value={formUsername}
                 onChange={(e) => setFormUsername(e.target.value)}
@@ -214,7 +215,7 @@ export default function GitIdentitiesPage() {
               />
             </div>
             <div>
-              <label className="text-[11px] text-muted-foreground">Git Email</label>
+              <label className="text-[11px] text-muted-foreground">Git 邮箱</label>
               <input
                 value={formEmail}
                 onChange={(e) => setFormEmail(e.target.value)}
@@ -225,7 +226,7 @@ export default function GitIdentitiesPage() {
           </div>
           <div>
             <label className="text-[11px] text-muted-foreground">
-              Personal Access Token <span className="text-destructive">*</span>
+              个人访问令牌 <span className="text-destructive">*</span>
             </label>
             <input
               type="password"
@@ -238,7 +239,7 @@ export default function GitIdentitiesPage() {
           </div>
           <div>
             <label className="text-[11px] text-muted-foreground">
-              Allowed Repositories（逗号分隔，留空=全部）
+              允许仓库（逗号分隔，留空=全部）
             </label>
             <input
               value={formRepos}
@@ -255,7 +256,7 @@ export default function GitIdentitiesPage() {
 
       {identities.length === 0 ? (
         <div className="rounded-md border py-12 text-center text-xs text-muted-foreground">
-          暂无 Git Identity。点击 &ldquo;添加 Identity&rdquo; 绑定凭据。
+          暂无 Git 身份。点击 &ldquo;添加身份&rdquo; 绑定凭据。
         </div>
       ) : viewMode === "cards" ? (
         /* Card view */
@@ -269,11 +270,11 @@ export default function GitIdentitiesPage() {
               </div>
               <div className="mt-2.5 space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-muted-foreground">Username</span>
+                  <span className="text-[11px] text-muted-foreground">用户名</span>
                   <span className="text-xs">{id.git_username ?? "---"}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-muted-foreground">Email</span>
+                  <span className="text-[11px] text-muted-foreground">邮箱</span>
                   <span className="text-xs">{id.git_email ?? "---"}</span>
                 </div>
                 <div className="flex items-center justify-between">
@@ -326,11 +327,11 @@ export default function GitIdentitiesPage() {
           <table>
             <thead>
               <tr>
-                <th>Provider</th>
-                <th>Username</th>
-                <th>Email</th>
+                <th>提供方</th>
+                <th>用户名</th>
+                <th>邮箱</th>
                 <th>类型</th>
-                <th>Repos</th>
+                <th>仓库</th>
                 <th>状态</th>
                 <th className="text-right">操作</th>
               </tr>
@@ -367,7 +368,7 @@ export default function GitIdentitiesPage() {
 
       {revokeTarget && (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-3">
-          <p className="text-xs">确定要撤销此 Git Identity 吗？此操作不可恢复。</p>
+          <p className="text-xs">确定要撤销此 Git 身份吗？此操作不可恢复。</p>
           <div className="mt-2 flex gap-2">
             <Button size="sm" variant="destructive" onClick={() => handleRevoke(revokeTarget)}>
               确认撤销
@@ -386,7 +387,7 @@ export default function GitIdentitiesPage() {
           {[
             { label: "加密存储", bg: "bg-blue-50 text-blue-700 border-blue-200" },
             { label: "临时注入", bg: "bg-amber-50 text-amber-700 border-amber-200" },
-            { label: "Agent 执行", bg: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+            { label: "智能体执行", bg: "bg-emerald-50 text-emerald-700 border-emerald-200" },
             { label: "自动清理", bg: "bg-red-50 text-red-700 border-red-200" },
           ].map((step, i) => (
             <div key={step.label} className="flex items-center gap-1">
@@ -409,7 +410,7 @@ export default function GitIdentitiesPage() {
             onChange={(e) => setAccessCheckId(e.target.value)}
             className="h-7 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none"
           >
-            <option value="">选择 Identity</option>
+            <option value="">选择身份</option>
             {identities
               .filter((i) => !i.revoked_at)
               .map((i) => (

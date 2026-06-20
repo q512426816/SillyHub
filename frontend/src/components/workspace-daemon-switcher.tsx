@@ -27,6 +27,7 @@ import {
   type DaemonRuntimeRead,
 } from "@/lib/daemon";
 import { updateWorkspace } from "@/lib/workspaces";
+import { DAEMON_RUNTIME_STATUS_LABELS, labelOf } from "@/lib/status-labels";
 
 interface Props {
   workspaceId: string;
@@ -69,7 +70,7 @@ export function WorkspaceDaemonSwitcher({
       const list = await listDaemonRuntimes();
       setRuntimes(sortRuntimes(list));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "加载 daemon 列表失败");
+      setError(e instanceof ApiError ? e.message : "加载守护进程列表失败");
     } finally {
       setLoading(false);
     }
@@ -110,7 +111,7 @@ export function WorkspaceDaemonSwitcher({
     <div className="space-y-1.5" data-testid="daemon-switcher">
       <div className="flex items-center gap-2">
         <span className="text-[11px] text-muted-foreground">
-          绑定 Daemon 可在此切换（当前绑定的离线/禁用会导致派发失败）
+          绑定守护进程可在此切换（当前绑定的离线/禁用会导致派发失败）
         </span>
         <Button
           size="sm"
@@ -120,7 +121,7 @@ export function WorkspaceDaemonSwitcher({
           disabled={loading && runtimes.length === 0}
           aria-expanded={open}
         >
-          {loading && runtimes.length === 0 ? "加载中…" : "切换 Daemon"}
+          {loading && runtimes.length === 0 ? "加载中…" : "切换守护进程"}
         </Button>
       </div>
 
@@ -138,7 +139,7 @@ export function WorkspaceDaemonSwitcher({
             </p>
           ) : runtimes.length === 0 ? (
             <p className="px-2 py-1.5 text-[11px] text-muted-foreground">
-              暂无 daemon runtime，请先在 /runtimes 启动一个。
+              暂无守护进程运行时，请先在 /runtimes 启动一个。
             </p>
           ) : (
             <ul className="space-y-0.5" data-testid="daemon-switcher-list">
@@ -178,7 +179,7 @@ export function WorkspaceDaemonSwitcher({
                         }
                         className="text-[10px]"
                       >
-                        {status}
+                        {labelOf(DAEMON_RUNTIME_STATUS_LABELS, status)}
                       </Badge>
                     </button>
                   </li>

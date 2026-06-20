@@ -69,13 +69,13 @@ export function ComponentDetailDrawer({
           )}
           {workspace.type && (
             <>
-              <dt className="text-muted-foreground">type</dt>
+              <dt className="text-muted-foreground">类型</dt>
               <dd>{workspace.type}</dd>
             </>
           )}
           {workspace.role && (
             <>
-              <dt className="text-muted-foreground">role</dt>
+              <dt className="text-muted-foreground">角色</dt>
               <dd>{workspace.role}</dd>
             </>
           )}
@@ -95,7 +95,7 @@ export function ComponentDetailDrawer({
           )}
           {workspace.source_yaml_path && (
             <>
-              <dt className="text-muted-foreground">source</dt>
+              <dt className="text-muted-foreground">来源</dt>
               <dd className="break-all font-mono">{workspace.source_yaml_path}</dd>
             </>
           )}
@@ -125,7 +125,7 @@ export function ComponentDetailDrawer({
         <section>
           <h3 className="mb-1.5">关联</h3>
           {outgoing.length === 0 && incoming.length === 0 ? (
-            <p className="text-xs text-muted-foreground">无关联 Workspace。</p>
+            <p className="text-xs text-muted-foreground">无关联工作区。</p>
           ) : (
             <ul className="space-y-0.5 text-xs font-mono">
               {outgoing.map((r) => (

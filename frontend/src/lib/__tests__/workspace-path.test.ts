@@ -10,7 +10,7 @@ import {
 
 describe("workspace-path helpers", () => {
   it("labels path sources", () => {
-    expect(workspacePathSourceLabel("daemon-client")).toBe("本机 daemon 路径");
+    expect(workspacePathSourceLabel("daemon-client")).toBe("本机守护进程路径");
     expect(workspacePathSourceLabel("server-local")).toBe("服务器本地路径");
   });
 
@@ -37,6 +37,6 @@ describe("workspace-path helpers", () => {
       updated_at: "2026-01-01T00:00:00Z",
     };
     expect(formatDaemonRuntimeSummary(runtime)).toBe("cursor v1.2.3（在线）");
-    expect(formatDaemonRuntimeSummary(null)).toBe("未找到绑定 runtime");
+    expect(formatDaemonRuntimeSummary(null)).toBe("未找到绑定运行时");
   });
 });

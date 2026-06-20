@@ -46,14 +46,14 @@ export default function WorkspacesPage() {
     <main className="mx-auto flex max-w-5xl flex-col gap-5 px-6 py-8">
       <header className="flex items-center justify-between">
         <div>
-          <h1>Workspaces</h1>
+          <h1>工作区</h1>
           <p className="mt-0.5 text-xs text-muted-foreground">
             管理已注册的项目工作区
           </p>
         </div>
         {!showDialog && (
           <Button size="sm" onClick={() => setShowDialog(true)}>
-            + 添加 Workspace
+            + 添加工作区
           </Button>
         )}
       </header>
@@ -75,7 +75,7 @@ export default function WorkspacesPage() {
         <p className="py-8 text-center text-xs text-muted-foreground">加载中…</p>
       ) : items.length === 0 ? (
         <section className="rounded-md border border-dashed py-12 text-center text-xs text-muted-foreground">
-          还没有 Workspace。点击右上角&ldquo;添加 Workspace&rdquo;绑定一个项目仓库。
+          还没有工作区。点击右上角&ldquo;添加工作区&rdquo;绑定一个项目仓库。
         </section>
       ) : (
         <section className="grid grid-cols-1 gap-3 md:grid-cols-2">

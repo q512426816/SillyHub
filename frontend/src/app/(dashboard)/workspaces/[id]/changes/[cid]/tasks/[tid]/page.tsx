@@ -17,6 +17,7 @@ import {
   type DaemonRuntime,
 } from "@/lib/agent";
 import { getChange, type ChangeRead } from "@/lib/changes";
+import { STATUS_LABELS, labelOf } from "@/lib/status-labels";
 import { getTask, type TaskRead } from "@/lib/tasks";
 import { transitionTask } from "@/lib/workflow";
 
@@ -167,23 +168,23 @@ export default function TaskDetailPage({ params }: Props) {
         entries.push({
           id: `run-${run.id}`,
           timestamp: run.created_at,
-          badge: "Created",
+          badge: "已创建",
           badgeColor: "default",
-          description: `Agent Run created (${runMeta.join(", ")})`,
+          description: `智能体运行已创建（${runMeta.join(", ")}）`,
         });
 
         if (run.started_at) {
           entries.push({
             id: `run-${run.id}-start`,
             timestamp: run.started_at,
-            badge: "Agent Run",
+            badge: "智能体运行",
             badgeColor:
               run.status === "completed"
                 ? "success"
                 : run.status === "failed"
                   ? "outline"
                   : "warning",
-            description: `Run ${run.status}`,
+            description: `运行 ${labelOf(STATUS_LABELS, run.status)}`,
           });
         }
 
@@ -195,7 +196,7 @@ export default function TaskDetailPage({ params }: Props) {
             entries.push({
               id: tc.id,
               timestamp: tc.timestamp,
-              badge: "Tool Call",
+              badge: "工具调用",
               badgeColor: "outline",
               description: toolCallDescription(tc.content_redacted),
             });
@@ -260,7 +261,7 @@ export default function TaskDetailPage({ params }: Props) {
       await loadTask();
     } catch (err) {
       setPageError(
-        err instanceof ApiError ? err.message : "创建 Agent 运行失败",
+        err instanceof ApiError ? err.message : "创建智能体运行失败",
       );
     } finally {
       setCreatingRun(false);
@@ -363,7 +364,7 @@ export default function TaskDetailPage({ params }: Props) {
             {task.task_key}: {task.title ?? task.task_key}
           </h1>
           <Badge variant={STATUS_COLORS[task.status] ?? "outline"}>
-            {task.status}
+            {labelOf(STATUS_LABELS, task.status)}
           </Badge>
           {task.priority && (
             <Badge variant={PRIORITY_COLORS[task.priority] ?? "outline"}>
@@ -425,7 +426,7 @@ export default function TaskDetailPage({ params }: Props) {
             <div className="flex items-end gap-3">
               <div className="flex flex-col gap-1">
                 <label className="text-[11px] text-muted-foreground">
-                  Agent 类型
+                  智能体类型
                 </label>
                 <select
                   className="h-7 rounded border border-input bg-background px-2 text-xs"
@@ -528,7 +529,7 @@ export default function TaskDetailPage({ params }: Props) {
               <code className="font-mono">{task.task_key}</code>
             </div>
             <div className="flex justify-between border-b py-1.5 text-xs">
-              <span className="text-muted-foreground">所属 Change</span>
+              <span className="text-muted-foreground">所属变更</span>
               <Link
                 href={`/workspaces/${workspaceId}/changes/${changeId}`}
                 className="text-primary hover:underline"
@@ -596,7 +597,7 @@ export default function TaskDetailPage({ params }: Props) {
             {task.allowed_paths.length > 0 && (
               <div>
                 <p className="mb-1 text-[11px] text-muted-foreground">
-                  Allowed Paths
+                  允许的路径
                 </p>
                 <pre className="rounded bg-muted/30 p-2 text-[11px] font-mono leading-4">
                   {task.allowed_paths.join("\n")}
@@ -606,7 +607,7 @@ export default function TaskDetailPage({ params }: Props) {
             {task.path && (
               <div>
                 <p className="mb-1 text-[11px] text-muted-foreground">
-                  File Path
+                  文件路径
                 </p>
                 <pre className="rounded bg-muted/30 p-2 text-[11px] font-mono leading-4">
                   {task.path}
@@ -616,7 +617,7 @@ export default function TaskDetailPage({ params }: Props) {
             {task.content && (
               <div>
                 <p className="mb-1 text-[11px] text-muted-foreground">
-                  Content Preview
+                  内容预览
                 </p>
                 <pre className="max-h-[300px] overflow-auto rounded bg-muted/30 p-2 text-[11px] font-mono leading-4">
                   {task.content}
@@ -669,7 +670,7 @@ export default function TaskDetailPage({ params }: Props) {
               href={`/workspaces/${workspaceId}/changes/${changeId}/tasks`}
               className="text-[11px] text-primary hover:underline"
             >
-              查看 Agent 日志
+              查看智能体日志
             </Link>
           )}
         </div>
@@ -703,7 +704,7 @@ export default function TaskDetailPage({ params }: Props) {
       {agentRuns.length > 0 && (
         <div className="rounded-md border bg-card">
           <div className="mb-2 border-b px-3 py-2 text-xs font-medium">
-            Agent Run 详情
+            智能体运行详情
           </div>
           <div className="px-3 pb-2">
             {agentRuns.map((run) => (
@@ -725,7 +726,7 @@ export default function TaskDetailPage({ params }: Props) {
                           : "outline"
                   }
                 >
-                  {run.status}
+                  {labelOf(STATUS_LABELS, run.status)}
                 </Badge>
                 <Badge variant="outline">{run.agent_type}</Badge>
                 {run.spec_strategy && (

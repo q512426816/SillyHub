@@ -21,9 +21,9 @@ interface Props {
 // FR-08 默认 developer；backend Literal["workspace_owner","developer","viewer"]
 // 不暴露 platform_admin / reviewer / qa / component_lead —— 后端会拒绝
 const ROLE_OPTIONS: ReadonlyArray<{ value: WorkspaceMemberRoleKey; label: string }> = [
-  { value: "developer", label: "Developer" },
-  { value: "viewer", label: "Viewer" },
-  { value: "workspace_owner", label: "Workspace Owner" },
+  { value: "developer", label: "开发者" },
+  { value: "viewer", label: "只读成员" },
+  { value: "workspace_owner", label: "工作区所有者" },
 ];
 
 // 隐性 state machine：6 phase 由 loading / submitting / error / selectedUser 组合表达
@@ -184,7 +184,7 @@ export function WorkspaceMemberAddDialog({ workspaceId, onAdded, onClose }: Prop
                         }
                       >
                         <span>
-                          {hit.display_name ?? "(no display name)"}{" "}
+                          {hit.display_name ?? "（无显示名）"}{" "}
                           <span className="text-muted-foreground">
                             &lt;{hit.email}&gt;
                           </span>
@@ -214,7 +214,7 @@ export function WorkspaceMemberAddDialog({ workspaceId, onAdded, onClose }: Prop
               ))}
             </select>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              workspace_owner 可管理成员；developer 可读写；viewer 只读。
+              工作区所有者可管理成员；开发者可读写；只读成员只读。
             </p>
           </div>
 

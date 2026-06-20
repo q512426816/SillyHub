@@ -6,10 +6,10 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const TABS = [
-  { key: "overview", label: "Overview", path: "" },
-  { key: "components", label: "Components", path: "/components" },
-  { key: "changes", label: "Changes", path: "/changes" },
-  { key: "members", label: "Members", path: "/members" },
+  { key: "overview", label: "概览", path: "" },
+  { key: "components", label: "组件", path: "/components" },
+  { key: "changes", label: "变更", path: "/changes" },
+  { key: "members", label: "成员", path: "/members" },
 ] as const;
 
 export function WorkspaceTabs({
@@ -33,7 +33,7 @@ export function WorkspaceTabs({
   return (
     <>
       <nav
-        aria-label="Workspace tabs"
+        aria-label="工作区标签页"
         className="flex min-w-0 flex-wrap gap-1 border-b border-border"
       >
         {TABS.map((tab) => {

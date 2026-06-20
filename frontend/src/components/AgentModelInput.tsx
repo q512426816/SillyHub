@@ -14,7 +14,7 @@ type AgentModelInputProps = {
 export function AgentModelInput({
   value,
   onChange,
-  placeholder = "provider default",
+  placeholder = "提供方默认值",
   disabled,
   className,
 }: AgentModelInputProps) {

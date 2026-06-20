@@ -17,6 +17,7 @@ import {
   rescanWorkspace,
   type Workspace,
 } from "@/lib/workspaces";
+import { STATUS_LABELS, labelOf } from "@/lib/status-labels";
 
 interface Props {
   workspace: Workspace;
@@ -45,7 +46,7 @@ export function WorkspaceCard({ workspace, boundRuntime, onChanged }: Props) {
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(`确认删除 Workspace "${workspace.name}"？源文件不会被改动。`)) {
+    if (!window.confirm(`确认删除工作区 "${workspace.name}"？源文件不会被改动。`)) {
       return;
     }
     setError(null);
@@ -75,7 +76,7 @@ export function WorkspaceCard({ workspace, boundRuntime, onChanged }: Props) {
           )}
         </div>
         <Badge variant={workspace.status === "active" ? "success" : "outline"}>
-          {workspace.status}
+          {labelOf(STATUS_LABELS, workspace.status)}
         </Badge>
       </header>
 
@@ -119,7 +120,7 @@ export function WorkspaceCard({ workspace, boundRuntime, onChanged }: Props) {
           关系
         </Link>
         <Button size="sm" variant="ghost" onClick={handleRescan} disabled={busy !== null}>
-          {busy === "rescan" ? "扫描中…" : "Re-scan"}
+          {busy === "rescan" ? "扫描中…" : "重新扫描"}
         </Button>
         <Button
           size="sm"

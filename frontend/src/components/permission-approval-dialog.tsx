@@ -125,13 +125,13 @@ export function PermissionApprovalDialog({
             </div>
           )}
           <p className="text-xs text-muted-foreground">
-            Daemon 请求执行工具，请确认是否允许。
+            守护进程请求执行工具，请确认是否允许。
           </p>
           <dl className="mt-2 space-y-1 text-xs">
             <Row label="工具">
               <code className="rounded bg-muted px-1.5 py-0.5">{request.toolName}</code>
             </Row>
-            <Row label="run">
+            <Row label="运行">
               <code className="rounded bg-muted px-1.5 py-0.5">{request.runId.slice(0, 8)}…</code>
             </Row>
           </dl>

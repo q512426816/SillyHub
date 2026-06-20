@@ -8,7 +8,7 @@ export function isDaemonClientWorkspace(workspace: Pick<Workspace, "path_source"
 }
 
 export function workspacePathSourceLabel(pathSource: WorkspacePathSource): string {
-  return pathSource === "daemon-client" ? "本机 daemon 路径" : "服务器本地路径";
+  return pathSource === "daemon-client" ? "本机守护进程路径" : "服务器本地路径";
 }
 
 export function workspaceRootPathLabel(pathSource: WorkspacePathSource): string {
@@ -19,7 +19,7 @@ export function formatDaemonRuntimeSummary(
   runtime: DaemonRuntimeRead | null | undefined,
 ): string {
   if (!runtime) {
-    return "未找到绑定 runtime";
+    return "未找到绑定运行时";
   }
   const label = runtime.name?.trim() || runtime.provider?.trim() || runtime.id.slice(0, 8);
   const version = runtime.version ? ` v${runtime.version}` : "";

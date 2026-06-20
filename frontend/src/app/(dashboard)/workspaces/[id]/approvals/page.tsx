@@ -35,10 +35,10 @@ const RISK_COLORS: Record<
 };
 
 const RISK_LABELS: Record<RiskLevel, string> = {
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  extreme: "Extreme",
+  low: "低",
+  medium: "中",
+  high: "高",
+  extreme: "极高",
 };
 
 const RISK_BG: Record<RiskLevel, string> = {
@@ -50,19 +50,19 @@ const RISK_BG: Record<RiskLevel, string> = {
 
 const RISK_TOOLS: Record<RiskLevel, { label: string; tools: string[] }> = {
   low: {
-    label: "Low Risk",
+    label: "低风险",
     tools: ["file_read", "git_status", "git_diff"],
   },
   medium: {
-    label: "Medium Risk",
+    label: "中风险",
     tools: ["file_write", "shell_exec", "git_commit", "run_tests"],
   },
   high: {
-    label: "High Risk",
+    label: "高风险",
     tools: ["git_push_branch", "create_pr"],
   },
   extreme: {
-    label: "Extreme Risk",
+    label: "极高风险",
     tools: [
       "deploy_production",
       "db_migration",
@@ -100,7 +100,7 @@ export default function ApprovalsPage({ params }: Props) {
       setPending([]);
       setHistory([]);
       setError(
-        err instanceof ApiError ? err.message : "Failed to load approvals",
+        err instanceof ApiError ? err.message : "加载审批列表失败",
       );
     }
   }, [workspaceId]);
@@ -119,7 +119,7 @@ export default function ApprovalsPage({ params }: Props) {
       await reload();
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : "Approval failed",
+        err instanceof ApiError ? err.message : "审批失败",
       );
     } finally {
       setActionLoading(null);
@@ -134,7 +134,7 @@ export default function ApprovalsPage({ params }: Props) {
       await reload();
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : "Rejection failed",
+        err instanceof ApiError ? err.message : "拒绝失败",
       );
     } finally {
       setActionLoading(null);
@@ -153,17 +153,16 @@ export default function ApprovalsPage({ params }: Props) {
               href={`/workspaces/${workspaceId}/components`}
               className="hover:underline"
             >
-              &larr; Workspace
+              &larr; 工作区
             </Link>
           </p>
-          <h1 className="mt-0.5">Approval Center</h1>
+          <h1 className="mt-0.5">审批中心</h1>
           <p className="mt-1 text-xs text-muted-foreground">
-            Review and manage tool-gateway approval requests for agent
-            operations.
+            审阅并管理智能体操作的工具网关审批请求。
           </p>
         </div>
         <Button size="sm" onClick={() => void reload()}>
-          Refresh
+          刷新
         </Button>
       </header>
 
@@ -177,7 +176,7 @@ export default function ApprovalsPage({ params }: Props) {
       {/* ---- risk classification ---- */}
       <section>
         <h2 className="text-xs font-medium text-muted-foreground mb-3">
-          Tool Gateway Risk Classification
+          工具网关风险分级
         </h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {(Object.keys(RISK_TOOLS) as RiskLevel[]).map((level) => (
@@ -191,10 +190,10 @@ export default function ApprovalsPage({ params }: Props) {
                 </Badge>
                 <span className="text-[11px] text-muted-foreground">
                   {level === "low" || level === "medium"
-                    ? "auto-pass"
+                    ? "自动放行"
                     : level === "high"
-                      ? "needs approval"
-                      : "must approve"}
+                      ? "需审批"
+                      : "必须审批"}
                 </span>
               </div>
               <div className="flex flex-wrap gap-1">
@@ -215,7 +214,7 @@ export default function ApprovalsPage({ params }: Props) {
       {/* ---- pending approvals ---- */}
       <section>
         <h2 className="text-xs font-medium text-muted-foreground mb-3">
-          Pending Approvals{" "}
+          待审批{" "}
           {pending !== null && (
             <span className="text-muted-foreground">
               ({pending.length})
@@ -225,11 +224,11 @@ export default function ApprovalsPage({ params }: Props) {
 
         {pending === null ? (
           <div className="rounded-md border bg-card px-3 py-12 text-center text-xs text-muted-foreground">
-            Loading…
+            加载中…
           </div>
         ) : pending.length === 0 ? (
           <div className="rounded-md border bg-card px-3 py-12 text-center text-xs text-muted-foreground">
-            No pending approval requests.
+            暂无待审批请求。
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -256,25 +255,25 @@ export default function ApprovalsPage({ params }: Props) {
                 {/* detail rows */}
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
                   <div>
-                    <span className="text-muted-foreground">Run: </span>
+                    <span className="text-muted-foreground">运行：</span>
                     <span className="font-mono">
                       {req.run_id.slice(0, 8)}…
                     </span>
                   </div>
                   <div>
-                    <span className="text-muted-foreground">Task: </span>
+                    <span className="text-muted-foreground">任务：</span>
                     <span className="font-mono">{req.task_key}</span>
                   </div>
                   <div>
-                    <span className="text-muted-foreground">Agent: </span>
+                    <span className="text-muted-foreground">智能体：</span>
                     <span>{req.agent_name}</span>
                   </div>
                   <div>
-                    <span className="text-muted-foreground">Branch: </span>
+                    <span className="text-muted-foreground">分支：</span>
                     <span className="font-mono">{req.branch}</span>
                   </div>
                   <div className="col-span-2">
-                    <span className="text-muted-foreground">Target: </span>
+                    <span className="text-muted-foreground">目标：</span>
                     <span className="font-mono text-xs">{req.target}</span>
                   </div>
                 </div>
@@ -293,7 +292,7 @@ export default function ApprovalsPage({ params }: Props) {
                     onClick={() => void handleApprove(req.id)}
                     disabled={actionLoading !== null}
                   >
-                    {actionLoading === req.id ? "Processing…" : "Approve"}
+                    {actionLoading === req.id ? "处理中…" : "批准"}
                   </Button>
                   <Button
                     size="sm"
@@ -301,10 +300,10 @@ export default function ApprovalsPage({ params }: Props) {
                     onClick={() => void handleReject(req.id)}
                     disabled={actionLoading !== null}
                   >
-                    Reject
+                    拒绝
                   </Button>
                   <Button size="sm" variant="outline">
-                    View Details
+                    查看详情
                   </Button>
                 </div>
               </div>
@@ -316,28 +315,28 @@ export default function ApprovalsPage({ params }: Props) {
       {/* ---- approval history ---- */}
       <section>
         <h2 className="text-xs font-medium text-muted-foreground mb-3">
-          Approval History
+          审批历史
         </h2>
 
         <div className="rounded-md border bg-card">
           {history === null ? (
             <p className="py-12 text-center text-xs text-muted-foreground">
-              Loading…
+              加载中…
             </p>
           ) : history.length === 0 ? (
             <div className="py-12 text-center text-xs text-muted-foreground">
-              No approval history yet.
+              暂无审批历史。
             </div>
           ) : (
             <table>
               <thead>
                 <tr>
-                  <th>Time</th>
-                  <th>Operation</th>
-                  <th>Risk</th>
-                  <th>Run</th>
-                  <th>Approver</th>
-                  <th>Result</th>
+                  <th>时间</th>
+                  <th>操作</th>
+                  <th>风险</th>
+                  <th>运行</th>
+                  <th>审批人</th>
+                  <th>结果</th>
                 </tr>
               </thead>
               <tbody>
@@ -360,9 +359,9 @@ export default function ApprovalsPage({ params }: Props) {
                     <td className="text-xs">{entry.approver}</td>
                     <td>
                       {entry.status === "approved" ? (
-                        <Badge variant="success">Approved</Badge>
+                        <Badge variant="success">已批准</Badge>
                       ) : (
-                        <Badge variant="destructive">Rejected</Badge>
+                        <Badge variant="destructive">已拒绝</Badge>
                       )}
                     </td>
                   </tr>

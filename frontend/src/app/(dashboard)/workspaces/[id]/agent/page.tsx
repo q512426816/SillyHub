@@ -314,7 +314,7 @@ export default function AgentPage({ params }: Props) {
       setRuns(list);
     } catch (err) {
       setRuns([]);
-      setError(err instanceof ApiError ? err.message : "加载 Agent 运行记录失败");
+      setError(err instanceof ApiError ? err.message : "加载智能体运行记录失败");
     }
   }, [workspaceId]);
 
@@ -355,14 +355,14 @@ export default function AgentPage({ params }: Props) {
   const handleKill = useCallback(
     async (runId: string) => {
       const confirmed = window.confirm(
-        `确认终止 Agent ${shortId(runId)}？\n\n终止会停止当前进程，已产生的费用和词元会尽量保留。`,
+        `确认终止智能体 ${shortId(runId)}？\n\n终止会停止当前进程，已产生的费用和词元会尽量保留。`,
       );
       if (!confirmed) return;
       try {
         await killAgentRun(workspaceId, runId);
         reload();
       } catch (err) {
-        setError(err instanceof ApiError ? err.message : "停止 Agent 失败");
+        setError(err instanceof ApiError ? err.message : "停止智能体失败");
       }
     },
     [workspaceId, reload],
@@ -469,7 +469,7 @@ export default function AgentPage({ params }: Props) {
               <Bot className="h-4 w-4" />
             </span>
             <div className="min-w-0">
-              <h1>Agent 控制台</h1>
+              <h1>智能体控制台</h1>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 当前工作区运行记录、实时日志与人工指导入口
               </p>
@@ -563,7 +563,7 @@ export default function AgentPage({ params }: Props) {
 
                 {/* Metadata grid */}
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-3 md:grid-cols-3">
-                  <MetaItem label="Task">
+                  <MetaItem label="任务">
                     {run.task_id ? (
                       <Link
                         href={`/workspaces/${workspaceId}/changes/-/tasks/${run.task_id}`}
@@ -718,7 +718,7 @@ export default function AgentPage({ params }: Props) {
                 <tr>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">运行 ID</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">类型</th>
-                  <th className="whitespace-nowrap px-3 py-2 font-medium">Task</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">任务</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">状态</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">结果摘要</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">时长</th>
@@ -913,9 +913,9 @@ export default function AgentPage({ params }: Props) {
           <span className="flex h-10 w-10 items-center justify-center rounded-md border bg-muted/40 text-primary">
             <Bot className="h-5 w-5" />
           </span>
-          <p className="text-sm font-medium">暂无 Agent 运行记录</p>
+          <p className="text-sm font-medium">暂无智能体运行记录</p>
           <p className="text-xs text-muted-foreground">
-            在任务详情页启动 Agent 后，运行记录会出现在这里
+            在任务详情页启动智能体后，运行记录会出现在这里
           </p>
         </div>
       )}

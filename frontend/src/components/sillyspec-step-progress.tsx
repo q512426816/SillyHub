@@ -100,7 +100,7 @@ export function SillySpecStepProgress({
     return (
       <section className="rounded-md border bg-card">
         <div className="flex items-center justify-between border-b px-3 py-2">
-          <h2 className="text-xs font-medium">🤖 Agent 运行状态</h2>
+          <h2 className="text-xs font-medium">🤖 智能体运行状态</h2>
           {onRefresh && (
             <button
               onClick={onRefresh}
@@ -114,7 +114,7 @@ export function SillySpecStepProgress({
         <div className="px-3 py-2.5">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="inline-block h-2 w-2 rounded-full bg-gray-300" />
-            <span>当前阶段未配置 Agent</span>
+            <span>当前阶段未配置智能体</span>
           </div>
         </div>
       </section>
@@ -126,7 +126,7 @@ export function SillySpecStepProgress({
     return (
       <section className="rounded-md border bg-card">
         <div className="flex items-center justify-between border-b px-3 py-2">
-          <h2 className="text-xs font-medium">🤖 Agent 运行状态</h2>
+          <h2 className="text-xs font-medium">🤖 智能体运行状态</h2>
           {onRefresh && (
             <button
               onClick={onRefresh}
@@ -145,7 +145,7 @@ export function SillySpecStepProgress({
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
               </span>
-              <span className="font-medium">Agent 运行中…</span>
+              <span className="font-medium">智能体运行中…</span>
             </div>
           ) : lastDispatchStatus === "completed" ? (
             <div className="flex items-center gap-2 text-xs text-emerald-600">
@@ -181,7 +181,7 @@ export function SillySpecStepProgress({
               disabled={dispatching}
               className="inline-flex h-7 items-center rounded bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
-              {dispatching ? "触发中…" : "🤖 触发 Agent 执行"}
+              {dispatching ? "触发中…" : "🤖 触发智能体执行"}
             </button>
           )}
         </div>
@@ -284,7 +284,7 @@ export function SillySpecStepProgress({
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
               <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
             </span>
-            <span className="font-medium">Agent 运行中…</span>
+            <span className="font-medium">智能体运行中…</span>
           </div>
         ) : lastDispatchStatus === "completed" ? (
           <div className="flex items-center gap-2 text-xs text-emerald-600">

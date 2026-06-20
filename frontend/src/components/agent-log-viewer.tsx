@@ -248,13 +248,13 @@ export function AgentLogRow({
              [SYSTEM] 折叠块与 assistant 分开显示。 */
           <div className="font-mono [overflow-wrap:anywhere]">
             {processedLog.mergedThinkingContent != null ? (
-              <CollapsibleSection title="Thinking">
+              <CollapsibleSection title="思考">
                 <div className="whitespace-pre-wrap break-words text-zinc-600">
                   {processedLog.mergedThinkingContent}
                 </div>
               </CollapsibleSection>
             ) : (
-              <CollapsibleSection title="System">
+              <CollapsibleSection title="系统">
                 {renderLogLines(contentSafe)}
               </CollapsibleSection>
             )}

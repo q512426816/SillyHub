@@ -30,7 +30,7 @@ const NAV_ITEMS = [
   { href: "releases", label: "发布" },
   { href: "approvals", label: "审批中心" },
   { href: "audit", label: "审计日志" },
-  { href: "agent", label: "Agent" },
+  { href: "agent", label: "智能体" },
   { href: "incidents", label: "事件" },
   { href: "/settings", label: "设置", absolute: true },
 ] as const;
@@ -131,11 +131,11 @@ export default function ComponentsPage({ params }: Props) {
       <header className="flex items-start justify-between gap-4">
         <div>
           <p className="text-[11px] text-muted-foreground">
-            <Link href="/workspaces" className="hover:underline">← Workspaces</Link>
+            <Link href="/workspaces" className="hover:underline">← 工作区</Link>
           </p>
-          <h1 className="mt-0.5">Workspace 关系</h1>
+          <h1 className="mt-0.5">工作区关系</h1>
           <p className="text-xs text-muted-foreground">
-            查看 Workspace 与其他 Workspace 之间的依赖关系
+            查看工作区与其他工作区之间的依赖关系
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -260,7 +260,7 @@ export default function ComponentsPage({ params }: Props) {
           <table>
             <thead>
               <tr>
-                <th>目标 Workspace</th>
+                <th>目标工作区</th>
                 <th>关系类型</th>
                 <th>描述</th>
               </tr>
@@ -305,7 +305,7 @@ export default function ComponentsPage({ params }: Props) {
           <table>
             <thead>
               <tr>
-                <th>源 Workspace</th>
+                <th>源工作区</th>
                 <th>关系类型</th>
                 <th>描述</th>
               </tr>

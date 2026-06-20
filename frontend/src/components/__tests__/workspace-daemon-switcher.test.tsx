@@ -1,7 +1,7 @@
 // ql-20260619-006：WorkspaceDaemonSwitcher 组件单测。
 //
 // 覆盖：
-//   - 「切换 Daemon」展开列表，online runtime 排前；
+//   - 「切换守护进程」展开列表，online runtime 排前；
 //   - 当前绑定项标注「当前」；
 //   - 点击非当前项 → updateWorkspace({ daemon_runtime_id }) + onChanged；
 //   - 点击当前项 → 仅收起，不重复提交；
@@ -48,9 +48,9 @@ function mkRuntime(
 }
 
 function openList() {
-  // 列表加载完成后按钮文案回到「切换 Daemon」且可点。
-  return waitFor(() => expect(screen.getByText("切换 Daemon")).toBeEnabled()).then(
-    () => fireEvent.click(screen.getByText("切换 Daemon")),
+  // 列表加载完成后按钮文案回到「切换守护进程」且可点。
+  return waitFor(() => expect(screen.getByText("切换守护进程")).toBeEnabled()).then(
+    () => fireEvent.click(screen.getByText("切换守护进程")),
   );
 }
 

@@ -57,15 +57,15 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
   {
     section: "overview",
     menuKey: "workspaces",
-    menuLabel: "Workspace 首页",
+    menuLabel: "工作区首页",
     icon: "\u{1F3E0}",
     href: "/workspaces",
     absolute: true,
     permissions: [
-      { key: "workspace:read", name: "Workspace 查看" },
-      { key: "workspace:write", name: "Workspace 编辑" },
-      { key: "workspace:admin", name: "Workspace 管理" },
-      { key: "workspace:member:manage", name: "Workspace 成员管理" },
+      { key: "workspace:read", name: "工作区查看" },
+      { key: "workspace:write", name: "工作区编辑" },
+      { key: "workspace:admin", name: "工作区管理" },
+      { key: "workspace:member:manage", name: "工作区成员管理" },
     ],
   },
   {
@@ -161,18 +161,18 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
   {
     section: "management",
     menuKey: "api-keys",
-    menuLabel: "API Keys",
+    menuLabel: "API 密钥",
     icon: "\u{1F4A1}",
     href: "/settings/api-keys",
     absolute: true,
     matchPattern: "/settings/api-keys",
     // 后端 auth/router 3 个 /api-keys 端点 require api_key:admin（platform:admin 自动通过）。
-    permissions: [{ key: "api_key:admin", name: "API Keys 管理" }],
+    permissions: [{ key: "api_key:admin", name: "API 密钥管理" }],
   },
   {
     section: "management",
     menuKey: "agent",
-    menuLabel: "Agent 控制台",
+    menuLabel: "智能体控制台",
     icon: "\u{1F916}",
     href: "agent",
     matchPattern: "/agent",
@@ -275,14 +275,14 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
   {
     section: "system",
     menuKey: "runtimes",
-    menuLabel: "Daemon 运行时",
+    menuLabel: "守护进程运行时",
     icon: "\u{1F5A5}",
     href: "/runtimes",
     absolute: true,
     matchPattern: "/runtimes",
     // 后端 daemon/router 管理 UI 端点（list/get/disable/enable/leases）
     // require runtime:admin（platform:admin 自动通过）。
-    permissions: [{ key: "runtime:admin", name: "Daemon 运行时管理" }],
+    permissions: [{ key: "runtime:admin", name: "守护进程运行时管理" }],
   },
   {
     section: "system",
@@ -308,8 +308,8 @@ export const MENU_SECTION_ORDER: MenuSection[] = [
 
 /** section 中文标题，供 AppShell 渲染分组标题使用 */
 export const MENU_SECTION_LABEL: Record<MenuSection, string> = {
-  overview: "Overview",
-  management: "Management",
+  overview: "概览",
+  management: "管理",
   admin: "系统管理",
-  system: "System",
+  system: "系统",
 };
