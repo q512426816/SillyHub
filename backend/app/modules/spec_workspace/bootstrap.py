@@ -29,6 +29,12 @@ from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.workflow.model import AuditLog
 from app.modules.workspace.model import AgentRunWorkspace, Workspace
 
+# Hold strong refs to fire-and-forget bootstrap tasks so asyncio doesn't GC
+# them before they run. asyncio.create_task without a holder is weakly
+# referenced and can be collected mid-flight — the task then silently never
+# executes and the AgentRun stays pending forever.
+_BACKGROUND_BOOTSTRAP_TASKS: set[asyncio.Task[None]] = set()
+
 log = get_logger(__name__)
 
 
@@ -132,9 +138,13 @@ class SpecBootstrapService:
             model=resolved_model,
         )
 
-        # 6. Fire-and-forget background execution
+        # 6. Fire-and-forget background execution.
+        # Hold a strong ref in _BACKGROUND_BOOTSTRAP_TASKS so asyncio doesn't
+        # GC the task before it runs; discard on completion (avoids unbounded
+        # growth). Without the holder the task can be collected silently → run
+        # stuck pending.
         code_root = workspace.root_path
-        asyncio.create_task(
+        task = asyncio.create_task(
             _execute_bootstrap_agent_run(
                 run_id=run.id,
                 workspace_id=workspace_id,
@@ -143,6 +153,8 @@ class SpecBootstrapService:
                 code_root=str(code_root),
             )
         )
+        _BACKGROUND_BOOTSTRAP_TASKS.add(task)
+        task.add_done_callback(_BACKGROUND_BOOTSTRAP_TASKS.discard)
 
         # 7. Return launch contract
         return {
@@ -289,34 +301,127 @@ async def _execute_bootstrap_agent_run(
                 )
                 return
 
-            lease_id = await placement.dispatch_to_daemon(
-                run.id,
-                user_id,
-                # AgentRun.agent_type remains the adapter id ("claude_code").
-                # The lease provider/model are daemon runtime settings and are
-                # resolved from the workspace defaults when the run is created.
+            # scan 真阻塞（改造点 B 修正）：spec_bootstrap 也走 interactive session
+            # （原来走 batch dispatch_to_daemon → agent 用 sillyspec --wait 直接 turn 终止、
+            # 无审批入口）。改走 prepare_scan_interactive_dispatch（kind=interactive lease +
+            # manual_approval/ask_user_only）让 daemon 注入 canUseTool——agent 调 AskUserQuestion
+            # 时真阻塞，approvals 审批中心页出现卡片可答复。复用 build_scan_bundle 的 step_prompt
+            # （含 AskUserQuestion 引导 + 绝对 spec_root 的正确命令模板，避免 agent 自构相对路径）。
+            from app.modules.agent.context_builder import build_scan_bundle
+            from app.modules.agent.model import AgentSession
+            from app.modules.daemon.protocol import DAEMON_MSG_SESSION_INJECT
+            from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+            bundle = await build_scan_bundle(
+                session=session,
+                workspace_id=workspace_id,
+                spec_root=spec_root,
+                root_path=code_root,
+                run_id=run.id,
+            )
+            scan_provider = resolved_provider or "claude_code"
+            now = datetime.now(UTC)
+            session_obj = AgentSession(
+                id=uuid.uuid4(),
+                user_id=user_id,
+                provider=scan_provider,
+                status="pending",
+                config={
+                    "manual_approval": True,
+                    "ask_user_only": True,
+                    "mode": "scan",
+                },
+                turn_count=0,
+                created_at=now,
+            )
+            session.add(session_obj)
+            await session.flush()
+            run.agent_session_id = session_obj.id
+            session.add(run)
+
+            try:
+                dispatch = await placement.prepare_scan_interactive_dispatch(
+                    agent_session_id=session_obj.id,
+                    agent_run_id=run.id,
+                    user_id=user_id,
+                    provider=scan_provider,
+                    prompt=bundle.step_prompt,
+                    model=resolved_model,
+                    root_path=code_root,
+                    spec_root=spec_root,
+                    runtime_root=str(Path(spec_root) / "runtime"),
+                    workspace_id=workspace_id,
+                    workspace_name=workspace.name,
+                    workspace_slug=workspace.slug,
+                )
+            except NoOnlineDaemonError as exc:
+                run.status = "failed"
+                run.error_code = "no_online_daemon"
+                run.output_redacted = exc.message
+                run.finished_at = datetime.now(UTC)
+                run.exit_code = 1
+                session.add(run)
+                await session.commit()
+                await _publish_done_event(run_id, "failed", 1)
+                log.warning(
+                    "spec_bootstrap_no_online_daemon",
+                    run_id=str(run_id),
+                    workspace_id=str(workspace_id),
+                )
+                return
+
+            # backfill triple binding + activate session（参照 create_session）。
+            session_obj.runtime_id = dispatch.runtime_id
+            session_obj.lease_id = dispatch.lease_id
+            session_obj.status = "active"
+            session_obj.turn_count = 1
+            session_obj.last_active_at = now
+            # daemon_task_lease is bound via session_obj.lease_id (FK→daemon_task_leases).
+            # Do NOT assign it to run.lease_id — that column's FK→worktree_leases, so a
+            # daemon lease id here raises ForeignKeyViolation on commit → dispatch fails
+            # → run stuck pending. (Mirror of the service.py scan_interactive fix.)
+            session.add(
+                AgentRunLog(
+                    run_id=run.id,
+                    channel="user_input",
+                    content_redacted=(bundle.step_prompt or "")[:5000],
+                    timestamp=now,
+                )
+            )
+            await session.commit()
+
+            log.info(
+                "spec_bootstrap_dispatched_interactive",
+                run_id=str(run_id),
+                workspace_id=str(workspace_id),
+                session_id=str(session_obj.id),
+                lease_id=str(dispatch.lease_id),
                 provider=resolved_provider,
                 model=resolved_model,
-                # 同时传 root_path + spec_root 让 lease.metadata 落地，daemon 拉取 execution-context 时
-                # _determine_run_type 能识别为 "scan" 类型（task_id=None + lease_meta 含 root_path/spec_root
-                # 分支），否则抛 ValueError "cannot determine run type" → 400 → bootstrap task failed。
-                # 语义上 bootstrap 等价于首次 scan：对源码目录只读扫描，输出 spec 文档。
-                # ql-20260616-002b：daemon task-runner 的 spawn 用 ctx.prompt ?? '' 作为 claude stdin
-                # 的初始输入；不传 prompt → claude 收到空输入 → 不读 CLAUDE.md，直接回"等指令"，
-                # run exit_code=0 但 sillyspec scan 实际未执行。引导 claude 按 CLAUDE.md 跑 scan。
-                prompt=(
-                    "请按照项目根目录 .claude/CLAUDE.md 中的 stage:scan 工作流执行："
-                    "依次运行 sillyspec init 和 sillyspec run scan 完成对源码目录的扫描，"
-                    "产出 spec 文档。"
-                ),
-                root_path=str(code_root),
-                spec_root=str(spec_root),
-                runtime_root=str(Path(spec_root) / "runtime"),
-                # ql-20260617-009：透传 workspace 标识，daemon 据此把 cwd 指向真实代码目录。
-                workspace_name=workspace.name,
-                workspace_slug=workspace.slug,
             )
-            if lease_id is None:
+
+            # notify daemon + SESSION_INJECT 首 turn（interactive 收尾）。
+            delivered = await placement.notify_interactive_dispatch(dispatch)
+            if delivered:
+                hub = get_daemon_ws_hub()
+                await hub.send_session_control(
+                    dispatch.runtime_id,
+                    DAEMON_MSG_SESSION_INJECT,
+                    {
+                        "session_id": str(session_obj.id),
+                        "lease_id": str(dispatch.lease_id),
+                        "run_id": str(run.id),
+                        "prompt": bundle.step_prompt,
+                        "claim_token": dispatch.claim_token,
+                    },
+                )
+                log.info(
+                    "spec_bootstrap_interactive_injected",
+                    run_id=str(run_id),
+                    session_id=str(session_obj.id),
+                )
+            else:
+                # daemon 离线（notify 失败）：收敛 run failed。
                 run.status = "failed"
                 run.error_code = "no_online_daemon"
                 run.output_redacted = "未检测到在线 daemon，请启动 sillyhub-daemon 后重试"
@@ -325,16 +430,6 @@ async def _execute_bootstrap_agent_run(
                 session.add(run)
                 await session.commit()
                 await _publish_done_event(run_id, "failed", 1)
-                return
-
-            log.info(
-                "spec_bootstrap_dispatched_to_daemon",
-                run_id=str(run_id),
-                workspace_id=str(workspace_id),
-                lease_id=str(lease_id),
-                provider=resolved_provider,
-                model=resolved_model,
-            )
 
         except Exception as exc:
             log.exception(

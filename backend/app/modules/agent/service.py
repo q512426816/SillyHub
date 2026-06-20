@@ -1366,7 +1366,10 @@ class AgentService:
         session.status = "active"
         session.turn_count = 1
         session.last_active_at = now
-        run.lease_id = dispatch.lease_id
+        # daemon_task_lease is bound via session.lease_id (FK→daemon_task_leases).
+        # Do NOT assign it to run.lease_id — that column's FK points to
+        # worktree_leases, so a daemon lease id here raises ForeignKeyViolation
+        # on commit, failing dispatch and leaving the run stuck pending.
         # 首 turn 落 user_input log（让历史回看看到首 prompt，与 create_session 一致）。
         self._session.add(
             AgentRunLog(

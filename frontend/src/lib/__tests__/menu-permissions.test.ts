@@ -106,7 +106,7 @@ const BACKEND_PERMISSION_KEYS = [
   "ppm:kanban:assign",
 ] as const;
 
-/** 32 个 menuKey 期望集合（FR-02 19 条 + PPM 13 条，change 2026-06-20-ppm-module-migration task-13） */
+/** 33 个 menuKey 期望集合（FR-02 19 条 + Agent 团队 1 + PPM 13 条） */
 const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "workspaces",
   "components",
@@ -119,6 +119,7 @@ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "git-identities",
   "api-keys",
   "agent",
+  "missions",
   "approvals",
   "audit",
   "incidents",
@@ -152,8 +153,8 @@ const VALID_SECTIONS: ReadonlySet<string> = new Set([
 ]);
 
 describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
-  it("MENU_PERMISSION_GROUPS 长度 === 32", () => {
-    expect(MENU_PERMISSION_GROUPS).toHaveLength(32);
+  it("MENU_PERMISSION_GROUPS 长度 === 33", () => {
+    expect(MENU_PERMISSION_GROUPS).toHaveLength(33);
   });
 
   it("所有 menuKey 互不重复，且严格等于 FR-02 预定义清单", () => {
@@ -168,7 +169,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("section 分布：overview 8 / management 6 / ppm 13 / admin 3 / system 2", () => {
+  it("section 分布：overview 8 / management 7 / ppm 13 / admin 3 / system 2", () => {
     const counter: Record<MenuSection, number> = {
       overview: 0,
       management: 0,
@@ -180,7 +181,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
       counter[g.section] += 1;
     });
     expect(counter.overview).toBe(8);
-    expect(counter.management).toBe(6);
+    expect(counter.management).toBe(7);
     expect(counter.ppm).toBe(13);
     expect(counter.admin).toBe(3);
     expect(counter.system).toBe(2);

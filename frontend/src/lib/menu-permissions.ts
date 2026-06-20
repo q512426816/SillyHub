@@ -199,6 +199,18 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
   },
   {
     section: "management",
+    menuKey: "missions",
+    menuLabel: "Agent 团队",
+    icon: "\u{1F91D}",
+    href: "missions",
+    matchPattern: "/missions",
+    permissions: [
+      { key: "workspace:write", name: "工作区写入" },
+      { key: "task:read", name: "任务查看" },
+    ],
+  },
+  {
+    section: "management",
     menuKey: "approvals",
     menuLabel: "审批中心",
     icon: "✅",

@@ -99,7 +99,7 @@ describe("AdminRolePermissionPicker", () => {
     const managementMenus = MENU_PERMISSION_GROUPS.filter(
       (g) => g.section === "management",
     );
-    expect(managementMenus).toHaveLength(6);
+    expect(managementMenus).toHaveLength(7);
     managementMenus.forEach((g) => {
       expect(screen.getByText(g.menuLabel)).toBeInTheDocument();
     });
@@ -297,9 +297,9 @@ describe("AdminRolePermissionPicker", () => {
   // D. 数据源切换（3 例）— 验证已迁移到 MENU_PERMISSION_GROUPS
   // ────────────────────────────────────────────────────────────────────
 
-  it("MENU_PERMISSION_GROUPS data has all 32 menus across 5 sections", () => {
+  it("MENU_PERMISSION_GROUPS data has all 33 menus across 5 sections", () => {
     // 验证测试期望的数据源本身完整
-    expect(MENU_PERMISSION_GROUPS).toHaveLength(32);
+    expect(MENU_PERMISSION_GROUPS).toHaveLength(33);
     expect(MENU_PERMISSION_GROUPS.map((g) => g.menuKey)).toEqual(
       expect.arrayContaining(["users", "organizations", "roles"]),
     );
@@ -312,7 +312,7 @@ describe("AdminRolePermissionPicker", () => {
     }, {});
     expect(sectionCounts).toEqual({
       overview: 8,
-      management: 6,
+      management: 7,
       admin: 3,
       system: 2,
       ppm: 13,
