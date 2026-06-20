@@ -67,7 +67,13 @@ from app.modules.ppm.task.model import PlanTask, TaskExecute
 # 连接配置
 # ---------------------------------------------------------------------------
 
-SRC = dict(host="127.0.0.1", port=3306, user="root", password="root", database="ruoyi-vue-pro")
+SRC = dict(
+    host=os.environ.get("MIGRATE_SRC_HOST", "127.0.0.1"),
+    port=int(os.environ.get("MIGRATE_SRC_PORT", "3306")),
+    user=os.environ.get("MIGRATE_SRC_USER", "root"),
+    password=os.environ.get("MIGRATE_SRC_PASSWORD", "root"),
+    database=os.environ.get("MIGRATE_SRC_DB", "ruoyi-vue-pro"),
+)
 
 
 def src_conn():
