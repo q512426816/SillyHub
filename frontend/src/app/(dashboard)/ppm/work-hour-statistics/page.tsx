@@ -1,21 +1,21 @@
 "use client";
 
 /**
- * 工时统计页面 (task-12 / FR-06)。
+ * 工时统计页面 (task-12 / FR-06 + task-05 / FR-05 图表升级)。
  *
  * 设计:
- *  - 不引入新 npm 依赖(项目无 ECharts/@ant-design/plots)。
- *  - 用 AntD Table + Progress(水平条)近似柱状图;
- *  - 用纯 CSS conic-gradient 渲染饼图占比(零依赖,够用)。
- *  - 两张表:按用户聚合 / 按项目聚合,来自 stat-by-user / stat-by-project。
+ *  - 表格:按用户聚合 / 按项目聚合,来自 stat-by-user / stat-by-project。
+ *  - 图表:echarts-for-react 柱状图(按维度)+ 饼图(Top5+其他),
+ *    经 next/dynamic ssr:false 加载,见 components/charts/index.ts。
  *  - 支持日期范围筛选。
  *
- * 依赖:lib/ppm/task (stat API) + lib/ppm/project (项目名映射) + lib/admin (用户名映射可选)。
+ * 依赖:lib/ppm/task (stat API) + lib/ppm/project (项目名映射) + components/charts。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Progress, Table, type TableProps, Tag } from "antd";
+import { Table, type TableProps } from "antd";
 
 import { Button } from "@/components/ui/button";
+import { WorkHourBarChart, WorkHourPieChart } from "@/components/charts";
 import { ApiError } from "@/lib/api";
 import {
   statWorkHoursByProject,
@@ -99,7 +99,6 @@ export default function WorkHourStatisticsPage() {
   }, [current, dimension, projects]);
 
   const totalHours = current?.total_hours ?? 0;
-  const maxHours = rows.length > 0 ? (rows[0]?.total_hours ?? 0) : 0;
 
   const columns: TableProps<Row>["columns"] = [
     {
@@ -132,36 +131,10 @@ export default function WorkHourStatisticsPage() {
     {
       title: "占比",
       key: "ratio",
+      align: "right",
       render: (_v, r: Row) => {
         const ratio = totalHours > 0 ? (r.total_hours / totalHours) * 100 : 0;
-        return (
-          <div className="flex items-center gap-2">
-            <Progress
-              percent={Math.round(ratio * 10) / 10}
-              size="small"
-              strokeColor={dimension === "user" ? "#1677ff" : "#52c41a"}
-              style={{ width: 120, marginBottom: 0 }}
-            />
-            <span className="text-xs text-muted-foreground">
-              {ratio.toFixed(1)}%
-            </span>
-          </div>
-        );
-      },
-    },
-    {
-      title: "柱状条",
-      key: "bar",
-      render: (_v, r: Row) => {
-        const pct = maxHours > 0 ? (r.total_hours / maxHours) * 100 : 0;
-        return (
-          <Progress
-            percent={Math.round(pct)}
-            size="small"
-            strokeColor={dimension === "user" ? "#1677ff" : "#52c41a"}
-            style={{ width: 180, marginBottom: 0 }}
-          />
-        );
+        return <span className="font-mono text-xs">{ratio.toFixed(1)}%</span>;
       },
     },
   ];
@@ -245,20 +218,33 @@ export default function WorkHourStatisticsPage() {
           暂无统计数据,请调整筛选条件或先录入工时
         </div>
       ) : (
-        <div className="flex flex-col gap-4 lg:flex-row">
-          <div className="flex-1">
-            <Table<Row>
-              rowKey="key"
-              columns={columns}
-              dataSource={rows}
-              loading={loading}
-              size="small"
-              pagination={{ pageSize: 50, showSizeChanger: false }}
-              locale={{ emptyText: "暂无数据" }}
-            />
-          </div>
-          <div className="w-full lg:w-80">
-            <PiePanel rows={rows} totalHours={totalHours} dimension={dimension} />
+        <div className="flex flex-col gap-4">
+          <Table<Row>
+            rowKey="key"
+            columns={columns}
+            dataSource={rows}
+            loading={loading}
+            size="small"
+            pagination={{ pageSize: 50, showSizeChanger: false }}
+            locale={{ emptyText: "暂无数据" }}
+          />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded border bg-card p-4">
+              <h3 className="mb-2 text-sm font-semibold">
+                {dimension === "user" ? "用户工时分布" : "项目工时分布"}
+              </h3>
+              <WorkHourBarChart
+                rows={rows}
+                color={dimension === "user" ? "#1677ff" : "#52c41a"}
+                loading={loading}
+              />
+            </div>
+            <div className="rounded border bg-card p-4">
+              <h3 className="mb-2 text-sm font-semibold">
+                {dimension === "user" ? "用户工时占比" : "项目工时占比"}
+              </h3>
+              <WorkHourPieChart rows={rows} totalHours={totalHours} />
+            </div>
           </div>
         </div>
       )}
@@ -276,94 +262,4 @@ function resolveName(
   }
   // 用户名前端无统一映射表,展示 ID;后端如返回 user_name 可在 key 旁。
   return key;
-}
-
-/**
- * 零依赖饼图:用 CSS conic-gradient 渲染占比环。
- * 仅展示 Top 5 + 其他聚合,避免颜色爆炸。
- */
-const PIE_COLORS = [
-  "#1677ff",
-  "#52c41a",
-  "#faad14",
-  "#eb2f96",
-  "#722ed1",
-  "#8c8c8c",
-];
-
-function PiePanel({
-  rows,
-  totalHours,
-  dimension,
-}: {
-  rows: Row[];
-  totalHours: number;
-  dimension: Dimension;
-}) {
-  const top = rows.slice(0, 5);
-  const rest = rows.slice(5);
-  const restHours = rest.reduce((s, r) => s + r.total_hours, 0);
-
-  const slices = top.map((r, i) => ({
-    label: r.name || r.key,
-    hours: r.total_hours,
-    color: PIE_COLORS[i] ?? PIE_COLORS[PIE_COLORS.length - 1],
-  }));
-  if (restHours > 0) {
-    slices.push({
-      label: `其他(${rest.length})`,
-      hours: restHours,
-      color: PIE_COLORS[PIE_COLORS.length - 1],
-    });
-  }
-
-  const stops: string[] = [];
-  let acc = 0;
-  for (const s of slices) {
-    const start = totalHours > 0 ? (acc / totalHours) * 100 : 0;
-    acc += s.hours;
-    const end = totalHours > 0 ? (acc / totalHours) * 100 : 0;
-    stops.push(`${s.color} ${start}% ${end}%`);
-  }
-  const gradient =
-    stops.length > 0 ? `conic-gradient(${stops.join(", ")})` : "#e5e7eb";
-
-  return (
-    <div className="rounded border bg-card p-4">
-      <h3 className="text-sm font-semibold">
-        {dimension === "user" ? "用户工时占比" : "项目工时占比"}
-      </h3>
-      <div className="mt-3 flex items-center gap-4">
-        <div
-          className="relative h-32 w-32 shrink-0 rounded-full"
-          style={{ background: gradient }}
-          aria-label="工时占比饼图"
-          role="img"
-        />
-        <div className="flex-1 space-y-1">
-          {slices.length === 0 ? (
-            <span className="text-xs text-muted-foreground">无数据</span>
-          ) : (
-            slices.map((s) => (
-              <div key={s.label} className="flex items-center gap-2 text-xs">
-                <span
-                  className="inline-block h-2.5 w-2.5 rounded-sm"
-                  style={{ background: s.color }}
-                />
-                <span className="flex-1 truncate">{s.label}</span>
-                <span className="font-mono text-muted-foreground">
-                  {s.hours.toFixed(1)}h
-                </span>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-      <div className="mt-3 border-t pt-2">
-        <Tag color="default" className="text-[10px]">
-          零依赖渲染(CSS conic-gradient)
-        </Tag>
-      </div>
-    </div>
-  );
 }

@@ -55,6 +55,73 @@ class TaskReorderReq(BaseModel):
     )
 
 
+# task-01: task CRUD + comment/subtask (FR-01 / D-011)
+
+
+class TaskCreateReq(BaseModel):
+    """看板任务新建请求 (FR-01)。
+
+    最小字段:``content`` 必填;``user_id`` 可选 (不传则未分配);
+    ``kanban_order`` 由 service 自动取该 user 列尾 +1。
+    """
+
+    content: str = Field(..., description="任务内容 (PlanTask.content)")
+    user_id: uuid.UUID | None = Field(default=None, description="负责人 (不传=未分配)")
+    project_id: uuid.UUID | None = Field(default=None, description="所属项目")
+    project_name: str | None = Field(default=None, description="项目名冗余")
+    work_load: str | None = Field(default=None, description="预估工时字符串")
+    end_time: datetime | None = Field(default=None, description="截止时间")
+    file_urls: list[str] = Field(default_factory=list, description="附件 URL 列表")
+
+
+class TaskUpdateReq(BaseModel):
+    """看板任务更新请求 (FR-01)。
+
+    仅更新非空字段;``status`` 接收 ``未开始`` / ``进行中`` / ``已完成``
+    (PlanTask.status 实际枚举,中文;对齐 ``PlanTask.model`` default +
+    ``task/service.execute_plan`` 写入值,前端 ``taskStatusBadge`` 已识别)。
+    """
+
+    task_id: uuid.UUID = Field(..., description="任务 ID")
+    content: str | None = Field(default=None)
+    status: str | None = Field(default=None)
+    work_load: str | None = Field(default=None)
+    end_time: datetime | None = Field(default=None)
+    file_urls: list[str] | None = Field(default=None, description="附件 URL 列表")
+
+
+class CommentCreateReq(BaseModel):
+    """评论新建请求。空内容由 service 层 ``.strip()`` 校验 (422)。"""
+
+    content: str = Field(..., description="评论内容")
+
+
+class SubtaskVO(BaseModel):
+    """子任务 VO (D-011)。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    task_id: uuid.UUID
+    title: str
+    done: bool
+    sort_order: int
+    created_at: datetime
+
+
+class CommentVO(BaseModel):
+    """评论 VO (D-011)。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    task_id: uuid.UUID
+    user_id: uuid.UUID
+    user_name: str | None = None
+    content: str
+    created_at: datetime
+
+
 # ---------------------------------------------------------------------------
 # Response
 # ---------------------------------------------------------------------------
@@ -76,7 +143,7 @@ class UserColumnVO(BaseModel):
     dept_name: str | None = Field(default=None, description="所属组织名")
     task_count: int = Field(default=0, description="该人员当前任务数")
     total_hours: float = Field(default=0, description="该人员任务预估工时合计")
-    saturation: int = Field(default=0, description="饱和度 0-100")
+    saturation: float = Field(default=0.0, description="饱和度 = total_hours/40*100,保留 1 位小数")
     task_ids: list[uuid.UUID] = Field(default_factory=list, description="该人员任务 ID 列表")
 
 
@@ -110,13 +177,21 @@ class TaskCardVO(BaseModel):
         default=None, description="预估工时 (PlanTask.work_load 字符串解析)"
     )
     kanban_order: int = Field(default=0, description="看板排序")
+    file_urls: list[str] = Field(
+        default_factory=list, description="附件 URL 列表 (PlanTask.file_urls)"
+    )
 
 
 __all__ = [
+    "CommentCreateReq",
+    "CommentVO",
     "KanbanQueryReq",
     "OrgGroup",
+    "SubtaskVO",
     "TaskAssignReq",
     "TaskCardVO",
+    "TaskCreateReq",
     "TaskReorderReq",
+    "TaskUpdateReq",
     "UserColumnVO",
 ]

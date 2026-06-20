@@ -19,22 +19,22 @@ brainstorm 已产出 design.md(W1-W6 方案)/requirements.md(FR-01~06)/decisions
 ## Wave 划分(每 Wave 一 task,W2 轻依赖 W1 的 router 模式;W4 复用 W2 的 submitDetail;W5/W6 独立)
 
 ## Wave 1(并行,无依赖)
-- [ ] task-01: 看板任务工作站(覆盖:FR-01, D-011)
+- [x] task-01: 看板任务工作站(覆盖:FR-01, D-011)
 
 ## Wave 2(复用 W1 router/service 模式,逻辑独立)
-- [ ] task-02: 变更流4节点 + submitDetail + nextProcess/rejectProcess + 通知(覆盖:FR-02, D-012)
+- [x] task-02: 变更流4节点 + submitDetail + nextProcess/rejectProcess + 通知(覆盖:FR-02, D-012)
 
 ## Wave 3(并行,无依赖)
-- [ ] task-03: projectplan 三联表 + 成本派生 + 17字段表单(覆盖:FR-03, D-014)
+- [x] task-03: projectplan 三联表 + 成本派生 + 17字段表单(覆盖:FR-03, D-014)
 
 ## Wave 4(依赖 task-02 的 submitDetail 路由骨架)
-- [ ] task-04: psplannone 审批6态表单(覆盖:FR-04)
+- [x] task-04: psplannone 审批6态表单(覆盖:FR-04)
 
 ## Wave 5(并行,无依赖)
-- [ ] task-05: echarts-for-react + work-hour/projectplan 图表(覆盖:FR-05, D-013)
+- [x] task-05: echarts-for-react + work-hour/projectplan 图表(覆盖:FR-05, D-013)
 
 ## Wave 6(并行,收尾)
-- [ ] task-06: 收尾(task-execute 详情 / problemchange 多态 / plannodemodule 独立页 / list-by-date-range)(覆盖:FR-06)
+- [x] task-06: 收尾(task-execute 详情 / problemchange 多态 / plannodemodule 独立页 / list-by-date-range)(覆盖:FR-06)
 
 ## 任务总表
 | 编号 | 任务 | Wave | 优先级 | 依赖 | 覆盖 FR/D | 说明 |

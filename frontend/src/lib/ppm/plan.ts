@@ -34,6 +34,7 @@ import type {
   PlanNodeUpdate,
   PlanProcessActionReq,
   PageReq,
+  ProjectPlanThreeLevel,
   PsPlanNode,
   PsPlanNodeDetail,
   PsPlanNodeDetailCreate,
@@ -195,6 +196,19 @@ export async function updateProjectPlan(
 
 export async function deleteProjectPlan(planId: string): Promise<void> {
   await apiFetch(`/api/ppm/project-plan/${planId}`, { method: "DELETE" });
+}
+
+/**
+ * 三联表查询 (task-03) — plan → node → detail → task 四层嵌套 + 成本派生。
+ *
+ * 单计划完整树,不分页;remaining_* 由后端 service 层派生计算 (D-014@v1)。
+ */
+export async function getProjectPlanThreeLevel(
+  planId: string,
+): Promise<ProjectPlanThreeLevel> {
+  return apiFetch<ProjectPlanThreeLevel>(
+    `/api/ppm/project-plan/${planId}/three-level`,
+  );
 }
 
 // ===========================================================================

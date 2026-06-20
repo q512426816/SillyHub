@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import Select, select
@@ -48,6 +49,13 @@ from app.modules.ppm.plan.model import (
     PsPlanNodeDetailProcess,
     PsProjectPlan,
 )
+from app.modules.ppm.plan.schema import (
+    PlanTaskSimple,
+    ProjectPlanThreeLevelResp,
+    PsPlanNodeDetailWithTasks,
+    PsPlanNodeWithDetail,
+)
+from app.modules.ppm.task.model import PlanTask
 
 log = get_logger(__name__)
 
@@ -68,6 +76,41 @@ class PlanNotFound(AppError):
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _to_decimal(value: str | None) -> Decimal | None:
+    """字符串安全转 Decimal,null / 空串 / 非数值 → None。
+
+    成本字段源为 String (前端直传),计算 remaining 时统一 Decimal 解析,
+    失败返回 None (不抛异常,见 task-03 边界 6)。
+    """
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        return Decimal(str(value).strip())
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _derive_remaining(budget: str | None, actual: str | None) -> str | None:
+    """计算 remaining = budget − actual (D-014@v1)。
+
+    - 任一操作数为 null / 非数值 → None (不 clamp 0)
+    - 允许负值 (超支),如实反映
+    - 结果规整:去掉无意义尾零,保留 Decimal 语义
+    """
+    b = _to_decimal(budget)
+    a = _to_decimal(actual)
+    if b is None or a is None:
+        return None
+    r = b - a
+    # 整数结果去掉尾零 (Decimal("70.00") → "70",Decimal("70") → "70")。
+    # 注意 normalize() 会把 "70" 变 "7E+1",故用 format 规整:
+    # - 若结果为整数,scale 取 0
+    # - 否则保留原 Decimal 精度
+    if r == r.to_integral_value():
+        return format(r.to_integral_value(), "f")
+    return format(r, "f")
 
 
 # ===========================================================================
@@ -314,6 +357,101 @@ class PlanService:
             current = parent
         return chain
 
+    # ---------- 三联表查询 (task-03) ----------
+    async def get_project_plan_three_level(self, plan_id: uuid.UUID) -> ProjectPlanThreeLevelResp:
+        """三联表查询 + 成本派生注入 (task-03 / D-014@v1)。
+
+        4 层嵌套: ``PsProjectPlan → PsPlanNode → PsPlanNodeDetail → PlanTask``。
+        N+1 友好:批量取 nodes / details / tasks,内存组装。
+
+        - 明细层排除 status='archived' (复用 list_details_by_node 过滤,边界 8)
+        - 任务经 ``ps_plan_node_detail_id`` 软关联;孤儿任务不挂载 (边界 4)
+        - plan 上 remaining_available_person_days / remaining_cost 为
+          service 层派生计算值 (不落库)
+
+        Returns:
+            组装好的 :class:`ProjectPlanThreeLevelResp` (含派生 + 嵌套)
+        """
+        plan = await self.get_ps_project_plan(plan_id)
+
+        # 1. 批量取 nodes (按 ps_project_plan_id,字符串 FK)
+        nodes = await self.list_ps_plan_nodes_by_plan(str(plan_id))
+
+        if not nodes:
+            # 无子节点 → 空 nodes,但保留 plan 顶层 + 派生
+            return self._build_three_level_resp(plan, [], [], [])
+
+        node_ids = [str(n.id) for n in nodes]
+
+        # 2. 批量取 details (按 plan_node_id IN,排除 archived)
+        stmt_details = (
+            select(PsPlanNodeDetail)
+            .where(
+                PsPlanNodeDetail.plan_node_id.in_(node_ids),
+                PsPlanNodeDetail.status != PlanNodeDetailStatus.ARCHIVED.value,
+            )
+            .order_by(PsPlanNodeDetail.no)
+        )
+        details = list((await self._session.execute(stmt_details)).scalars().all())
+
+        # 3. 批量取 tasks (按 ps_plan_node_detail_id IN)
+        # detail.id 是 UUID,PlanTask.ps_plan_node_detail_id 也是 UUID
+        tasks: list[PlanTask] = []
+        if details:
+            detail_ids = [d.id for d in details]
+            stmt_tasks = select(PlanTask).where(PlanTask.ps_plan_node_detail_id.in_(detail_ids))
+            tasks = list((await self._session.execute(stmt_tasks)).scalars().all())
+
+        return self._build_three_level_resp(plan, nodes, details, tasks)
+
+    @staticmethod
+    def _build_three_level_resp(
+        plan: PsProjectPlan,
+        nodes: list[PsPlanNode],
+        details: list[PsPlanNodeDetail],
+        tasks: list[PlanTask],
+    ) -> ProjectPlanThreeLevelResp:
+        """把 4 层扁平数据组装为嵌套 ``ProjectPlanThreeLevelResp``。
+
+        - details 按 plan_node_id (字符串) 分组到对应 node
+        - tasks 按 ps_plan_node_detail_id 分组到对应 detail
+        - plan 顶层注入 remaining_* 派生字段 (D-014@v1)
+        """
+        # 分组索引
+        details_by_node: dict[str, list[PsPlanNodeDetail]] = {}
+        for d in details:
+            details_by_node.setdefault(d.plan_node_id, []).append(d)
+
+        tasks_by_detail: dict[uuid.UUID, list[PlanTask]] = {}
+        for t in tasks:
+            if t.ps_plan_node_detail_id is None:
+                continue  # 孤儿任务不挂载 (边界 4)
+            tasks_by_detail.setdefault(t.ps_plan_node_detail_id, []).append(t)
+
+        # 组装嵌套 nodes → details → tasks
+        node_resps: list[PsPlanNodeWithDetail] = []
+        for node in nodes:
+            node_details = details_by_node.get(str(node.id), [])
+            detail_resps: list[PsPlanNodeDetailWithTasks] = []
+            for d in node_details:
+                d_tasks = tasks_by_detail.get(d.id, [])
+                task_simples = [PlanTaskSimple.model_validate(t) for t in d_tasks]
+                detail_resp = PsPlanNodeDetailWithTasks.model_validate(d)
+                detail_resp.tasks = task_simples
+                detail_resps.append(detail_resp)
+            node_resp = PsPlanNodeWithDetail.model_validate(node)
+            node_resp.details = detail_resps
+            node_resps.append(node_resp)
+
+        # 顶层 plan + 派生注入
+        resp = ProjectPlanThreeLevelResp.model_validate(plan)
+        resp.remaining_available_person_days = _derive_remaining(
+            plan.budget_person_days, plan.actual_consumption_person_days
+        )
+        resp.remaining_cost = _derive_remaining(plan.total_cost, plan.labor_cost)
+        resp.nodes = node_resps
+        return resp
+
     # ---------- 流程:状态机驱动 ----------
     async def save_process(
         self,
@@ -505,6 +643,88 @@ class PlanService:
             }
             for r in rows
         ]
+
+    # ---------- submitDetail (task-02):detail JSON 白名单 merge 落库 ----------
+    # 提交明细字段更新 (对照源 PsPlanNodeDetailController.submitDetail):
+    # detail 中非 None 的白名单字段 merge 到明细,未知键忽略 (边界 6)。
+    # 每次提交写一行 PsPlanNodeDetailProcess (node_key="submit_detail"),
+    # 并注入 audit_context 触发 audit_hooks (D-012)。
+    _SUBMIT_DETAIL_FIELDS: tuple[str, ...] = (
+        "task_theme",
+        "task_description",
+        "requirements",
+        "role_name",
+        "achievement",
+        "plan_workload",
+        "plan_begin_time",
+        "plan_complete_time",
+        "execute_user_id",
+        "module_id",
+        "file_urls",
+    )
+
+    async def submit_detail(
+        self,
+        item_id: uuid.UUID,
+        detail: dict[str, object],
+        *,
+        actor_id: str,
+        actor_name: str | None,
+    ) -> PsPlanNodeDetail:
+        """提交明细 detail 字段 (白名单 merge + 写履历 + 审计)。
+
+        - 仅 ``_SUBMIT_DETAIL_FIELDS`` 中的非 None 键落库,其余忽略
+        - 写一行 ``PsPlanNodeDetailProcess`` (node_key="submit_detail")
+        - 注入 ``audit_context`` 触发 audit_hooks 写 audit_logs
+        """
+        detail_obj = await self.get_detail(item_id)
+
+        # 白名单 merge:只落白名单内且非 None 的字段
+        merged = 0
+        for field in self._SUBMIT_DETAIL_FIELDS:
+            if field in detail:
+                val = detail[field]
+                if val is not None:
+                    setattr(detail_obj, field, val)
+                    merged += 1
+        detail_obj.updated_at = _now()
+
+        # 注入审计上下文 (D-012:audit_hooks 自动写 audit_logs)
+        self._session.info["audit_context"] = {
+            "actor_id": self._safe_uuid(actor_id),
+            "workspace_id": None,
+        }
+
+        await self._session.commit()
+        await self._session.refresh(detail_obj)
+
+        # 写一行履历 (node_key="submit_detail")
+        await self._write_process(
+            business_id=str(detail_obj.id),
+            node_key="submit_detail",
+            actor_id=actor_id,
+            actor_name=actor_name,
+            handle_info=f"提交明细字段 ({merged} 项更新)",
+        )
+
+        # 清理审计上下文,避免污染后续同会话操作
+        self._session.info.pop("audit_context", None)
+
+        log.info(
+            "plan_node_detail_submit",
+            detail_id=str(detail_obj.id),
+            merged_fields=merged,
+            actor=actor_id,
+        )
+        return detail_obj
+
+    @staticmethod
+    def _safe_uuid(value: str) -> uuid.UUID | None:
+        """将字符串转 UUID,失败返回 None (audit_context.actor_id 容错)。"""
+        try:
+            return uuid.UUID(value)
+        except (ValueError, AttributeError, TypeError):
+            return None
 
     # ---------- 流程履历查询 ----------
     async def list_processes(self, business_id: str) -> list[PsPlanNodeDetailProcess]:

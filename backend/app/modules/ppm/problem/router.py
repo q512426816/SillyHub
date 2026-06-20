@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Annotated, Any
 
 import anyio
@@ -34,6 +35,8 @@ from app.modules.auth.permissions import Permission
 from app.modules.ppm.common.crud import PageReq
 from app.modules.ppm.common.export import ColumnDef
 from app.modules.ppm.problem.schema import (
+    ChangeNextProcessReq,
+    ChangeRejectProcessReq,
     CloseTaskReq,
     DoneTaskReq,
     NextProcessReq,
@@ -104,6 +107,25 @@ async def create_problem(
     # next_process 用 problem.created_by 作 actor,此处无需传 actor。
     obj = await svc.create_problem(data)
     return ProblemListResp.model_validate(obj)
+
+
+@router.get(
+    "/problem-list/list-by-date-range",
+    response_model=list[ProblemListResp],
+)
+async def list_problems_by_date_range(
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
+    start_date: datetime = Query(..., description="区间起始 ISO datetime"),
+    end_date: datetime = Query(..., description="区间结束 ISO datetime"),
+) -> list[ProblemListResp]:
+    """按 find_time 区间过滤问题清单 (task-06 / FR-06)。
+
+    固定路径前置于 ``/{item_id}``,否则 FastAPI 会把
+    ``list-by-date-range`` 当 item_id 解析返回 422。
+    """
+    items = await ProblemService(session).list_problems_by_date_range(start_date, end_date)
+    return [ProblemListResp.model_validate(i) for i in items]
 
 
 @router.get("/problem-list/{item_id}", response_model=ProblemListResp)
@@ -281,6 +303,59 @@ async def delete_change(
     user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_DELETE))],
 ) -> None:
     await ProblemService(session).delete_change(item_id)
+
+
+# ===========================================================================
+# 变更审批流端点 (task-02:4 节点链 + bug 跳部门经理)
+# ===========================================================================
+
+
+@router.post("/problem-change/{item_id}/next", response_model=ProblemChangeResp)
+async def next_change(
+    item_id: uuid.UUID,
+    body: ChangeNextProcessReq,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_WRITE))],
+) -> ProblemChangeResp:
+    actor_id, actor_name = _actor(user)
+    obj = await ProblemService(session).next_change(
+        item_id, actor_id=actor_id, actor_name=actor_name, comment=body.comment
+    )
+    return ProblemChangeResp.model_validate(obj)
+
+
+@router.post("/problem-change/{item_id}/reject", response_model=ProblemChangeResp)
+async def reject_change(
+    item_id: uuid.UUID,
+    body: ChangeRejectProcessReq,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_WRITE))],
+) -> ProblemChangeResp:
+    actor_id, actor_name = _actor(user)
+    obj = await ProblemService(session).reject_change(
+        item_id, actor_id=actor_id, actor_name=actor_name, comment=body.comment
+    )
+    return ProblemChangeResp.model_validate(obj)
+
+
+@router.get("/problem-change/{item_id}/tasks", response_model=list[ProcessTaskResp])
+async def list_change_tasks(
+    item_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
+) -> list[ProcessTaskResp]:
+    rows = await ProblemService(session).list_change_tasks(str(item_id))
+    return [ProcessTaskResp.model_validate(r) for r in rows]
+
+
+@router.get("/problem-change/{item_id}/logs", response_model=list[ProcessLogResp])
+async def list_change_logs(
+    item_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
+) -> list[ProcessLogResp]:
+    rows = await ProblemService(session).list_change_logs(str(item_id))
+    return [ProcessLogResp.model_validate(r) for r in rows]
 
 
 # ===========================================================================

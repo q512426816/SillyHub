@@ -17,8 +17,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-# 模型注册 (根 conftest 已导 ppm.task,补 project/admin)
+# 模型注册 (根 conftest 已导 ppm.task,补 project/admin + kanban 两新表)
 from app.modules.admin import model as _admin_model  # noqa: F401
+from app.modules.ppm.kanban import model as _kanban_model  # noqa: F401
 from app.modules.ppm.project import model as _project_model  # noqa: F401
 
 

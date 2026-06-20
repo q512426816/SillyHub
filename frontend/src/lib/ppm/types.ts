@@ -509,6 +509,41 @@ export interface PlanChangeProcessReq {
   overrides?: Record<string, unknown>;
 }
 
+// task-03: 三联表 (plan → node → detail → task) + 成本派生
+
+/** 三联表叶子节点 — 任务精简视图。 */
+export interface PlanTaskSimple {
+  id: string;
+  content: string | null;
+  status: string | null;
+  work_load: string | null;
+  time_spent: number | null;
+  user_name: string | null;
+  start_time: string | null;
+  end_time: string | null;
+}
+
+/** ps 里程碑明细 + 其下任务列表。 */
+export interface PsPlanNodeDetailWithTasks extends PsPlanNodeDetail {
+  tasks: PlanTaskSimple[];
+}
+
+/** ps 里程碑节点 + 其下明细 (含任务)。 */
+export interface PsPlanNodeWithDetail extends PsPlanNode {
+  details: PsPlanNodeDetailWithTasks[];
+}
+
+/**
+ * 项目计划三联表响应 (顶层)。
+ *
+ * remaining_* 为后端 service 层派生计算 (D-014@v1),覆盖 PsProjectPlan 同名字段。
+ */
+export interface ProjectPlanThreeLevel extends PsProjectPlan {
+  remaining_available_person_days: string | null;
+  remaining_cost: string | null;
+  nodes: PsPlanNodeWithDetail[];
+}
+
 // ===========================================================================
 // problem 子域 (problem/schema.py)
 // ===========================================================================
@@ -698,6 +733,14 @@ export interface ProblemNextProcessReq {
 }
 
 export interface ProblemRejectProcessReq {
+  comment?: string | null;
+}
+
+export interface ProblemChangeNextProcessReq {
+  comment?: string | null;
+}
+
+export interface ProblemChangeRejectProcessReq {
   comment?: string | null;
 }
 
@@ -1011,6 +1054,8 @@ export interface KanbanTaskCard {
   /** 预估工时 (PlanTask.work_load 字符串解析) */
   estimate_hours: number | null;
   kanban_order: number;
+  /** 附件 URL 列表 (PlanTask.file_urls) */
+  file_urls: string[];
 }
 
 export interface KanbanTaskAssignReq {
@@ -1024,4 +1069,47 @@ export interface KanbanTaskReorderReq {
   user_id: string;
   /** 该列下任务的新顺序 (按数组下标写 kanban_order) */
   task_ids: string[];
+}
+
+// task-01: task CRUD + comment/subtask (FR-01 / D-011)
+
+export interface KanbanTaskCreateReq {
+  content: string;
+  user_id?: string | null;
+  project_id?: string | null;
+  project_name?: string | null;
+  work_load?: string | null;
+  end_time?: string | null;
+  file_urls?: string[];
+}
+
+export interface KanbanTaskUpdateReq {
+  task_id: string;
+  content?: string | null;
+  status?: string | null;
+  work_load?: string | null;
+  end_time?: string | null;
+  file_urls?: string[] | null;
+}
+
+export interface KanbanComment {
+  id: string;
+  task_id: string;
+  user_id: string;
+  user_name: string | null;
+  content: string;
+  created_at: string;
+}
+
+export interface KanbanCommentCreateReq {
+  content: string;
+}
+
+export interface KanbanSubtask {
+  id: string;
+  task_id: string;
+  title: string;
+  done: boolean;
+  sort_order: number;
+  created_at: string;
 }

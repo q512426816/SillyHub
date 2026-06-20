@@ -21,17 +21,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.admin.model import Organization, UserOrganization
+from app.modules.auth.model import User
+from app.modules.ppm.kanban.model import PpmKanbanComment, PpmKanbanSubtask
 from app.modules.ppm.kanban.schema import (
     KanbanQueryReq,
     OrgGroup,
     TaskAssignReq,
     TaskCardVO,
+    TaskCreateReq,
+    TaskUpdateReq,
     UserColumnVO,
 )
 from app.modules.ppm.project.model import PpmProjectMember
 from app.modules.ppm.task.model import PlanTask
 
 log = get_logger(__name__)
+
+# 饱和度可用工时基线:每周 40 小时 (FR-01 MVP 简化,固定常量)。
+DEFAULT_AVAILABLE_HOURS_PER_WEEK = 40
 
 
 class KanbanError(AppError):
@@ -44,6 +51,11 @@ class KanbanError(AppError):
 class TaskNotFound(KanbanError):
     code = "PPM_KANBAN_TASK_NOT_FOUND"
     http_status = 404
+
+
+class CommentEmpty(KanbanError):
+    code = "PPM_KANBAN_COMMENT_EMPTY"
+    http_status = 422
 
 
 def _parse_hours(raw: str | None) -> float:
@@ -102,6 +114,7 @@ class PpdKanbanService:
                     dept_name=org.name if org else None,
                     task_count=stat["count"],
                     total_hours=stat["hours"],
+                    saturation=self._calc_saturation(stat["hours"]),
                     task_ids=stat["task_ids"],
                 )
             )
@@ -148,6 +161,7 @@ class PpdKanbanService:
                     deadline=t.end_time,
                     estimate_hours=_parse_hours(t.work_load),
                     kanban_order=t.kanban_order,
+                    file_urls=list(t.file_urls or []),
                 )
             )
         return cards
@@ -199,6 +213,157 @@ class PpdKanbanService:
                 t.kanban_order = order
         await self._session.commit()
         log.info("kanban_tasks_reordered", user_id=str(user_id), count=len(task_ids))
+
+    # ------------------------------------------------------------------
+    # task CRUD (FR-01)
+    # ------------------------------------------------------------------
+
+    async def create_task(self, req: TaskCreateReq) -> PlanTask:
+        """新建 PlanTask,kanban_order 自动取该 user 列尾 +1。"""
+        kanban_order = await self._next_kanban_order(req.user_id) if req.user_id else 0
+        task = PlanTask(
+            content=req.content,
+            user_id=req.user_id or uuid.uuid4(),
+            user_name=await self._lookup_user_name(req.user_id) if req.user_id else None,
+            status="未开始",
+            project_id=req.project_id,
+            project_name=req.project_name,
+            work_load=req.work_load,
+            end_time=req.end_time,
+            file_urls=list(req.file_urls or []),
+            kanban_order=kanban_order,
+        )
+        self._session.add(task)
+        await self._session.commit()
+        await self._session.refresh(task)
+        log.info("kanban_task_created", task_id=str(task.id))
+        return task
+
+    async def update_task(self, task_id: uuid.UUID, req: TaskUpdateReq) -> PlanTask:
+        """更新 task 非空字段。"""
+        task = await self._session.get(PlanTask, task_id)
+        if task is None:
+            raise TaskNotFound(f"PlanTask '{task_id}' not found.")
+        if req.content is not None:
+            task.content = req.content
+        if req.status is not None:
+            task.status = req.status
+        if req.work_load is not None:
+            task.work_load = req.work_load
+        if req.end_time is not None:
+            task.end_time = req.end_time
+        if req.file_urls is not None:
+            task.file_urls = list(req.file_urls)
+        await self._session.commit()
+        await self._session.refresh(task)
+        log.info("kanban_task_updated", task_id=str(task_id))
+        return task
+
+    async def delete_task(self, task_id: uuid.UUID) -> None:
+        """删除 task,级联删其 comment + subtask。"""
+        task = await self._session.get(PlanTask, task_id)
+        if task is None:
+            raise TaskNotFound(f"PlanTask '{task_id}' not found.")
+        # 级联清理评论 / 子任务(按 task_id 查)
+        comments = await self._session.execute(
+            select(PpmKanbanComment).where(PpmKanbanComment.task_id == task_id)
+        )
+        for c in comments.scalars().all():
+            await self._session.delete(c)
+        subtasks = await self._session.execute(
+            select(PpmKanbanSubtask).where(PpmKanbanSubtask.task_id == task_id)
+        )
+        for s in subtasks.scalars().all():
+            await self._session.delete(s)
+        await self._session.delete(task)
+        await self._session.commit()
+        log.info("kanban_task_deleted", task_id=str(task_id))
+
+    # ------------------------------------------------------------------
+    # comment (D-011)
+    # ------------------------------------------------------------------
+
+    async def list_comments(self, task_id: uuid.UUID) -> list[PpmKanbanComment]:
+        """列评论(按 created_at 升序)。task 不存在 → 404。"""
+        await self._ensure_task(task_id)
+        result = await self._session.execute(
+            select(PpmKanbanComment)
+            .where(PpmKanbanComment.task_id == task_id)
+            .order_by(PpmKanbanComment.created_at.asc())
+        )
+        return list(result.scalars().all())
+
+    async def add_comment(self, task_id: uuid.UUID, user: User, content: str) -> PpmKanbanComment:
+        """新增评论。空内容 → 422;task 不存在 → 404。"""
+        await self._ensure_task(task_id)
+        if not content.strip():
+            raise CommentEmpty("评论内容不能为空")
+        user_name = await self._lookup_user_name(user.id)
+        comment = PpmKanbanComment(
+            task_id=task_id,
+            user_id=user.id,
+            user_name=user_name,
+            content=content.strip(),
+        )
+        self._session.add(comment)
+        await self._session.commit()
+        await self._session.refresh(comment)
+        log.info("kanban_comment_added", task_id=str(task_id), comment_id=str(comment.id))
+        return comment
+
+    # ------------------------------------------------------------------
+    # subtask (D-011)
+    # ------------------------------------------------------------------
+
+    async def list_subtasks(self, task_id: uuid.UUID) -> list[PpmKanbanSubtask]:
+        """列子任务(按 sort_order 升序)。task 不存在 → 404。"""
+        await self._ensure_task(task_id)
+        result = await self._session.execute(
+            select(PpmKanbanSubtask)
+            .where(PpmKanbanSubtask.task_id == task_id)
+            .order_by(PpmKanbanSubtask.sort_order.asc())
+        )
+        return list(result.scalars().all())
+
+    async def toggle_subtask(self, task_id: uuid.UUID, subtask_id: uuid.UUID) -> PpmKanbanSubtask:
+        """翻转子任务 done;subtask 不存在 / task_id 不匹配 → 404。"""
+        subtask = await self._session.get(PpmKanbanSubtask, subtask_id)
+        if subtask is None or subtask.task_id != task_id:
+            raise TaskNotFound(f"PpmKanbanSubtask '{subtask_id}' not found under task '{task_id}'.")
+        subtask.done = not subtask.done
+        await self._session.commit()
+        await self._session.refresh(subtask)
+        log.info("kanban_subtask_toggled", subtask_id=str(subtask_id), done=subtask.done)
+        return subtask
+
+    # ------------------------------------------------------------------
+    # 内部辅助 (task CRUD / comment / subtask)
+    # ------------------------------------------------------------------
+
+    async def _ensure_task(self, task_id: uuid.UUID) -> None:
+        """校验 PlanTask 存在,否则 404。"""
+        task = await self._session.get(PlanTask, task_id)
+        if task is None:
+            raise TaskNotFound(f"PlanTask '{task_id}' not found.")
+
+    async def _next_kanban_order(self, user_id: uuid.UUID) -> int:
+        """取该 user 列尾 kanban_order + 1 (无任务返回 0)。"""
+        result = await self._session.execute(
+            select(PlanTask.kanban_order)
+            .where(PlanTask.user_id == user_id)
+            .order_by(PlanTask.kanban_order.desc())
+            .limit(1)
+        )
+        row = result.first()
+        return (row[0] + 1) if row else 0
+
+    @staticmethod
+    def _calc_saturation(total_hours: float) -> float:
+        """饱和度 = total_hours / 可用工时 * 100,保留 1 位小数;分母为 0 返 0.0。"""
+        available = DEFAULT_AVAILABLE_HOURS_PER_WEEK
+        if available <= 0:
+            return 0.0
+        return round(total_hours / available * 100, 1)
 
     # ------------------------------------------------------------------
     # 搜人
@@ -319,4 +484,4 @@ class PpdKanbanService:
         return row[0] if row else None
 
 
-__all__ = ["KanbanError", "PpdKanbanService", "TaskNotFound"]
+__all__ = ["CommentEmpty", "KanbanError", "PpdKanbanService", "TaskNotFound"]

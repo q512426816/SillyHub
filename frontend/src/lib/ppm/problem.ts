@@ -20,6 +20,8 @@ import type {
   PageReq,
   ProblemChange,
   ProblemChangeCreate,
+  ProblemChangeNextProcessReq,
+  ProblemChangeRejectProcessReq,
   ProblemChangeUpdate,
   ProblemCloseTaskReq,
   ProblemDoneTaskReq,
@@ -56,6 +58,22 @@ export async function listProblems(
 
 export async function getProblem(problemId: string): Promise<ProblemList> {
   return apiFetch<ProblemList>(`/api/ppm/problem-list/${problemId}`);
+}
+
+/**
+ * 按 find_time 区间过滤问题清单 (task-06 / FR-06)。
+ *
+ * 端点固定路径前置于 /{item_id},参数对齐后端 start_date/end_date 命名。
+ * 后端反向区间自动 swap,find_time 为空的 problem 不返回。
+ */
+export async function listProblemsByDateRange(
+  start: string,
+  end: string,
+): Promise<ProblemList[]> {
+  return apiFetch<ProblemList[]>(
+    "/api/ppm/problem-list/list-by-date-range",
+    { query: { start_date: start, end_date: end } },
+  );
 }
 
 export async function createProblem(
@@ -186,4 +204,46 @@ export async function updateProblemChange(
 
 export async function deleteProblemChange(changeId: string): Promise<void> {
   await apiFetch(`/api/ppm/problem-change/${changeId}`, { method: "DELETE" });
+}
+
+// ---------- 变更审批流端点 (task-02:4 节点链) ----------
+
+/** 变更流 nextProcess — 推进到下一节点 (申请→开发经理→项目经理→[非bug部门经理]→结束)。 */
+export async function nextProcessProblemChange(
+  changeId: string,
+  body?: ProblemChangeNextProcessReq,
+): Promise<ProblemChange> {
+  return apiFetch<ProblemChange>(
+    `/api/ppm/problem-change/${changeId}/next`,
+    { method: "POST", json: body ?? {} },
+  );
+}
+
+/** 变更流 rejectProcess — 驳回到已作废 (仅审核节点 20/30/40 可驳回)。 */
+export async function rejectProcessProblemChange(
+  changeId: string,
+  body?: ProblemChangeRejectProcessReq,
+): Promise<ProblemChange> {
+  return apiFetch<ProblemChange>(
+    `/api/ppm/problem-change/${changeId}/reject`,
+    { method: "POST", json: body ?? {} },
+  );
+}
+
+/** 变更流在办任务 — 查询该变更当前未完成的流程任务。 */
+export async function listProblemChangeTasks(
+  changeId: string,
+): Promise<ProblemProcessTask[]> {
+  return apiFetch<ProblemProcessTask[]>(
+    `/api/ppm/problem-change/${changeId}/tasks`,
+  );
+}
+
+/** 变更流流程履历 — 查询该变更的所有流转记录。 */
+export async function listProblemChangeLogs(
+  changeId: string,
+): Promise<ProblemProcessLog[]> {
+  return apiFetch<ProblemProcessLog[]>(
+    `/api/ppm/problem-change/${changeId}/logs`,
+  );
 }

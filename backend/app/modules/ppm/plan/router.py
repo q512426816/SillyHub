@@ -40,6 +40,7 @@ from app.modules.ppm.plan.schema import (
     PlanNodeResp,
     PlanNodeUpdate,
     ProcessActionReq,
+    ProjectPlanThreeLevelResp,
     PsPlanNodeCreate,
     PsPlanNodeDetailCreate,
     PsPlanNodeDetailProcessResp,
@@ -50,6 +51,7 @@ from app.modules.ppm.plan.schema import (
     PsProjectPlanCreate,
     PsProjectPlanResp,
     PsProjectPlanUpdate,
+    SubmitDetailReq,
 )
 from app.modules.ppm.plan.service import PlanService
 
@@ -274,6 +276,23 @@ async def get_ps_project_plan(
     user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
 ) -> PsProjectPlanResp:
     return PsProjectPlanResp.model_validate(await PlanService(session).get_ps_project_plan(item_id))
+
+
+@router.get(
+    "/project-plan/{plan_id}/three-level",
+    response_model=ProjectPlanThreeLevelResp,
+)
+async def get_project_plan_three_level(
+    plan_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
+) -> ProjectPlanThreeLevelResp:
+    """三联表查询 (task-03) — plan → node → detail → task 四层嵌套 + 成本派生。
+
+    service 层组装嵌套结构 + 注入 remaining_* 派生字段 (D-014@v1),
+    单计划完整树,不分页。
+    """
+    return await PlanService(session).get_project_plan_three_level(plan_id)
 
 
 @router.put("/project-plan/{item_id}", response_model=PsProjectPlanResp)
@@ -516,6 +535,36 @@ async def list_processes(
 ) -> list[PsPlanNodeDetailProcessResp]:
     rows = await PlanService(session).list_processes(str(item_id))
     return [PsPlanNodeDetailProcessResp.model_validate(r) for r in rows]
+
+
+@router.post(
+    "/plan-node-detail/{item_id}/submit-detail",
+    response_model=PsPlanNodeDetailResp,
+)
+async def submit_detail(
+    item_id: uuid.UUID,
+    body: SubmitDetailReq,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_WRITE))],
+) -> PsPlanNodeDetailResp:
+    """提交明细 detail JSON (白名单字段 merge 落库)。
+
+    task-02:接收 ``{ detail: dict }``,将 detail 中白名单字段 merge 到
+    ``PsPlanNodeDetail``,未知键忽略;写一行履历 + 审计 (D-012)。
+
+    注:此端点为 problem 变更流 ``submitDetail`` 的对应物。plan 子域前端
+    (milestone-details)当前用 ``updatePsPlanNodeDetail`` + 流程端点
+    ``process/save|reject|change`` 覆盖编辑/审核/变更,本端点保留供 problem
+    变更流或其他客户端使用 (task-02 合约产出,不删除以免破坏验收)。
+    """
+    actor_id, actor_name = _actor(user)
+    obj = await PlanService(session).submit_detail(
+        item_id,
+        body.detail,
+        actor_id=actor_id,
+        actor_name=actor_name,
+    )
+    return PsPlanNodeDetailResp.model_validate(obj)
 
 
 # ===========================================================================

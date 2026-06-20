@@ -12,11 +12,16 @@
  */
 import { apiFetch } from "@/lib/api";
 import type {
+  KanbanComment,
+  KanbanCommentCreateReq,
   KanbanOrgGroup,
   KanbanQueryReq,
+  KanbanSubtask,
   KanbanTaskAssignReq,
   KanbanTaskCard,
+  KanbanTaskCreateReq,
   KanbanTaskReorderReq,
+  KanbanTaskUpdateReq,
   KanbanUserColumn,
 } from "./types";
 
@@ -113,4 +118,79 @@ export async function searchKanbanUsers(keyword: string): Promise<KanbanUserColu
   return apiFetch<KanbanUserColumn[]>("/api/ppm/kanban/search/users", {
     query: { keyword },
   });
+}
+
+// ---------------------------------------------------------------------------
+// task-01: task CRUD + comment/subtask (FR-01 / D-011)
+// ---------------------------------------------------------------------------
+
+/** 新建看板任务。kanban_order 后端自动取该 user 列尾 +1。 */
+export async function createKanbanTask(
+  body: KanbanTaskCreateReq,
+): Promise<KanbanTaskCard> {
+  return apiFetch<KanbanTaskCard>("/api/ppm/kanban/task", {
+    method: "POST",
+    json: body,
+  });
+}
+
+/** 更新任务(非空字段)。 */
+export async function updateKanbanTask(
+  body: KanbanTaskUpdateReq,
+): Promise<KanbanTaskCard> {
+  return apiFetch<KanbanTaskCard>("/api/ppm/kanban/task", {
+    method: "PUT",
+    json: body,
+  });
+}
+
+/** 删除任务(级联删 comment/subtask)。 */
+export async function deleteKanbanTask(taskId: string): Promise<boolean> {
+  await apiFetch<void>(`/api/ppm/kanban/task?task_id=${encodeURIComponent(taskId)}`, {
+    method: "DELETE",
+  });
+  return true;
+}
+
+/** 列任务评论(按 created_at 升序)。 */
+export async function listKanbanComments(
+  taskId: string,
+): Promise<KanbanComment[]> {
+  return apiFetch<KanbanComment[]>(
+    `/api/ppm/kanban/task/${encodeURIComponent(taskId)}/comments`,
+  );
+}
+
+/** 新增评论。 */
+export async function addKanbanComment(
+  taskId: string,
+  body: KanbanCommentCreateReq,
+): Promise<KanbanComment> {
+  return apiFetch<KanbanComment>(
+    `/api/ppm/kanban/task/${encodeURIComponent(taskId)}/comments`,
+    {
+      method: "POST",
+      json: body,
+    },
+  );
+}
+
+/** 列任务子任务(按 sort_order 升序)。 */
+export async function listKanbanSubtasks(
+  taskId: string,
+): Promise<KanbanSubtask[]> {
+  return apiFetch<KanbanSubtask[]>(
+    `/api/ppm/kanban/task/${encodeURIComponent(taskId)}/subtasks`,
+  );
+}
+
+/** 翻转子任务 done 标志。 */
+export async function toggleKanbanSubtask(
+  taskId: string,
+  subtaskId: string,
+): Promise<KanbanSubtask> {
+  return apiFetch<KanbanSubtask>(
+    `/api/ppm/kanban/task/${encodeURIComponent(taskId)}/subtask/${encodeURIComponent(subtaskId)}/toggle`,
+    { method: "PUT" },
+  );
 }

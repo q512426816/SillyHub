@@ -27,14 +27,20 @@ from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.ppm.kanban.schema import (
+    CommentCreateReq,
+    CommentVO,
     KanbanQueryReq,
     OrgGroup,
+    SubtaskVO,
     TaskAssignReq,
     TaskCardVO,
+    TaskCreateReq,
     TaskReorderReq,
+    TaskUpdateReq,
     UserColumnVO,
 )
-from app.modules.ppm.kanban.service import PpdKanbanService
+from app.modules.ppm.kanban.service import PpdKanbanService, _parse_hours
+from app.modules.ppm.task.model import PlanTask
 
 router = APIRouter(tags=["ppm-kanban"])
 
@@ -126,3 +132,110 @@ async def search_users(
 
 
 __all__ = ["router"]
+
+
+# ---------------------------------------------------------------------------
+# task-01: task CRUD + comment/subtask (FR-01 / D-011)
+# ---------------------------------------------------------------------------
+
+
+def _to_card(t: PlanTask) -> TaskCardVO:
+    """PlanTask → TaskCardVO(含 file_urls)。"""
+    return TaskCardVO(
+        id=t.id,
+        title=t.content,
+        status=t.status,
+        project_id=t.project_id,
+        project_name=t.project_name,
+        user_id=t.user_id,
+        user_name=t.user_name,
+        deadline=t.end_time,
+        estimate_hours=_parse_hours(t.work_load),
+        kanban_order=t.kanban_order,
+        file_urls=list(t.file_urls or []),
+    )
+
+
+@router.post("/kanban/task", response_model=TaskCardVO, status_code=201)
+async def create_task(
+    body: TaskCreateReq,
+    session: SessionDep,
+    _user: KanbanAssignUser,
+) -> TaskCardVO:
+    """新建看板任务(PlanTask)。kanban_order 自动取该 user 列尾 +1。"""
+    svc = PpdKanbanService(session)
+    task = await svc.create_task(body)
+    return _to_card(task)
+
+
+@router.put("/kanban/task", response_model=TaskCardVO)
+async def update_task(
+    body: TaskUpdateReq,
+    session: SessionDep,
+    _user: KanbanAssignUser,
+) -> TaskCardVO:
+    """更新 task(content/status/work_load/end_time/file_urls 等非空字段)。"""
+    svc = PpdKanbanService(session)
+    task = await svc.update_task(body.task_id, body)
+    return _to_card(task)
+
+
+@router.delete("/kanban/task", status_code=204)
+async def delete_task(
+    session: SessionDep,
+    _user: KanbanAssignUser,
+    task_id: uuid.UUID = Query(..., description="任务 ID"),
+) -> None:
+    """删除 task,级联删其 comment + subtask。"""
+    svc = PpdKanbanService(session)
+    await svc.delete_task(task_id)
+
+
+@router.get("/kanban/task/{task_id}/comments", response_model=list[CommentVO])
+async def list_comments(
+    task_id: uuid.UUID,
+    session: SessionDep,
+    _user: KanbanViewUser,
+) -> list[CommentVO]:
+    """列任务评论(按 created_at 升序)。"""
+    svc = PpdKanbanService(session)
+    comments = await svc.list_comments(task_id)
+    return [CommentVO.model_validate(c) for c in comments]
+
+
+@router.post("/kanban/task/{task_id}/comments", response_model=CommentVO, status_code=201)
+async def add_comment(
+    task_id: uuid.UUID,
+    body: CommentCreateReq,
+    session: SessionDep,
+    _user: KanbanViewUser,
+) -> CommentVO:
+    """新增评论。空内容 → 422;task 不存在 → 404。"""
+    svc = PpdKanbanService(session)
+    comment = await svc.add_comment(task_id, _user, body.content)
+    return CommentVO.model_validate(comment)
+
+
+@router.get("/kanban/task/{task_id}/subtasks", response_model=list[SubtaskVO])
+async def list_subtasks(
+    task_id: uuid.UUID,
+    session: SessionDep,
+    _user: KanbanViewUser,
+) -> list[SubtaskVO]:
+    """列任务子任务(按 sort_order 升序)。"""
+    svc = PpdKanbanService(session)
+    subtasks = await svc.list_subtasks(task_id)
+    return [SubtaskVO.model_validate(s) for s in subtasks]
+
+
+@router.put("/kanban/task/{task_id}/subtask/{subtask_id}/toggle", response_model=SubtaskVO)
+async def toggle_subtask(
+    task_id: uuid.UUID,
+    subtask_id: uuid.UUID,
+    session: SessionDep,
+    _user: KanbanViewUser,
+) -> SubtaskVO:
+    """翻转子任务 done 标志;subtask 不存在 / task_id 不匹配 → 404。"""
+    svc = PpdKanbanService(session)
+    subtask = await svc.toggle_subtask(task_id, subtask_id)
+    return SubtaskVO.model_validate(subtask)

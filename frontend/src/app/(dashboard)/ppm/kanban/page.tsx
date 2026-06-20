@@ -35,6 +35,7 @@ import type {
   KanbanUserColumn,
 } from "@/lib/ppm/types";
 import { Toast, fmtDay, inputCls, useToast } from "../shared";
+import { TaskDetailDrawer } from "./task-detail-drawer";
 
 interface ColumnData extends KanbanUserColumn {
   tasks: KanbanTaskCard[];
@@ -65,6 +66,9 @@ export default function KanbanPage() {
   const [searchResults, setSearchResults] = useState<KanbanUserColumn[]>([]);
 
   const dragPayloadRef = useRef<DragPayload | null>(null);
+
+  // task-01: 选中的任务卡片(打开 TaskDetailDrawer)
+  const [selectedTask, setSelectedTask] = useState<KanbanTaskCard | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -376,6 +380,7 @@ export default function KanbanPage() {
                     columns={g.members}
                     onDragStart={onDragStart}
                     onDropTo={onDropTo}
+                    onOpenDetail={setSelectedTask}
                   />
                 </section>
               ))}
@@ -385,10 +390,19 @@ export default function KanbanPage() {
               columns={columns}
               onDragStart={onDragStart}
               onDropTo={onDropTo}
+              onOpenDetail={setSelectedTask}
             />
           )}
         </div>
       )}
+
+      <TaskDetailDrawer
+        task={selectedTask}
+        onClose={() => setSelectedTask(null)}
+        onTaskUpdated={(updated) =>
+          setSelectedTask((cur) => (cur ? { ...cur, ...updated } : cur))
+        }
+      />
     </div>
   );
 }
@@ -405,6 +419,7 @@ function ColumnsRow({
   columns,
   onDragStart,
   onDropTo,
+  onOpenDetail,
 }: {
   columns: ColumnData[];
   onDragStart: (_taskId: string, _fromUserId: string) => void;
@@ -412,6 +427,7 @@ function ColumnsRow({
     _targetUserId: string,
     _beforeTaskId: string | null,
   ) => Promise<void>;
+  onOpenDetail: (task: KanbanTaskCard) => void;
 }) {
   return (
     <div className="flex gap-3">
@@ -421,6 +437,7 @@ function ColumnsRow({
           column={col}
           onDragStart={onDragStart}
           onDropTo={onDropTo}
+          onOpenDetail={onOpenDetail}
         />
       ))}
     </div>
@@ -431,6 +448,7 @@ function KanbanColumnView({
   column,
   onDragStart,
   onDropTo,
+  onOpenDetail,
 }: {
   column: ColumnData;
   onDragStart: (_taskId: string, _fromUserId: string) => void;
@@ -438,6 +456,7 @@ function KanbanColumnView({
     _targetUserId: string,
     _beforeTaskId: string | null,
   ) => Promise<void>;
+  onOpenDetail: (task: KanbanTaskCard) => void;
 }) {
   const [dragOver, setDragOver] = useState(false);
 
@@ -521,7 +540,11 @@ function KanbanColumnView({
               void onDropTo(column.user_id, t.id);
             }}
           >
-            <TaskCardView task={t} onDragStart={onDragStart} />
+            <TaskCardView
+              task={t}
+              onDragStart={onDragStart}
+              onOpenDetail={onOpenDetail}
+            />
           </div>
         ))}
         {/* 列尾落点 */}
@@ -543,15 +566,18 @@ function KanbanColumnView({
 function TaskCardView({
   task,
   onDragStart,
+  onOpenDetail,
 }: {
   task: KanbanTaskCard;
   onDragStart: (_taskId: string, _fromUserId: string) => void;
+  onOpenDetail: (task: KanbanTaskCard) => void;
 }) {
   const statusTag = taskStatusBadge(task.status);
   return (
     <div
       draggable
       onDragStart={() => onDragStart(task.id, task.user_id ?? "__unassigned__")}
+      onClick={() => onOpenDetail(task)}
       className="cursor-grab rounded border bg-background px-2.5 py-2 text-xs shadow-sm transition hover:shadow-md active:cursor-grabbing"
     >
       <div className="flex items-start justify-between gap-2">
@@ -583,14 +609,14 @@ function TaskCardView({
 function taskStatusBadge(
   status: string | null,
 ): { text: string; bg: string; fg: string } {
+  // PlanTask.status 实际枚举(中文):未开始 / 进行中 / 已完成
+  // (对齐 backend PlanTask.model default + task/service.execute_plan 写入值)
   switch (status) {
-    case "10":
-      return { text: "待执行", bg: "#f0f0f0", fg: "#595959" };
-    case "20":
-      return { text: "执行中", bg: "#e6f4ff", fg: "#1677ff" };
-    case "30":
-      return { text: "待验证", bg: "#fff7e6", fg: "#d46b08" };
-    case "40":
+    case "未开始":
+      return { text: "未开始", bg: "#f0f0f0", fg: "#595959" };
+    case "进行中":
+      return { text: "进行中", bg: "#e6f4ff", fg: "#1677ff" };
+    case "已完成":
       return { text: "已完成", bg: "#f6ffed", fg: "#389e0d" };
     default:
       return { text: status ?? "未知", bg: "#f0f0f0", fg: "#595959" };

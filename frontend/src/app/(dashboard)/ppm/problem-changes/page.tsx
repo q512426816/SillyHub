@@ -19,9 +19,13 @@ import { ApiError } from "@/lib/api";
 import {
   createProblemChange,
   deleteProblemChange,
+  getProblem,
   listProblemChanges,
+  nextProcessProblemChange,
+  rejectProcessProblemChange,
   updateProblemChange,
   type ProblemChange,
+  type ProblemList,
 } from "@/lib/ppm";
 
 const inputCls =
@@ -32,6 +36,38 @@ const STATUS_COLOR: Record<string, string> = {
   "2": "success",
   "3": "default",
 };
+
+/**
+ * 问题类型 (task-06 多态,对照源 pro_type)。
+ *
+ * 后端 pro_type 当前仅 bug / change 两值;多态纯前端字段显隐,
+ * 不动后端 schema。其他值 (含 undefined) 走「默认」全字段表单。
+ */
+type ProblemType = "bug" | "change" | "demand" | "other";
+
+interface ChangeFieldPolicy {
+  /** 是否显示「变更原因」区段 (bug 隐藏 — bug 修复无业务变更原因)。 */
+  showReason: boolean;
+  /** 变更原因是否必填 (change 显式标星)。 */
+  reasonRequired: boolean;
+  /** 是否显示「需求背景」占位 (demand 场景,当前仅占位提示)。 */
+  showDemandCtx: boolean;
+}
+
+/** pro_type → 字段显隐策略映射 (AC-10)。 */
+const PROBLEM_CHANGE_FIELDS: Record<ProblemType, ChangeFieldPolicy> = {
+  bug: { showReason: false, reasonRequired: false, showDemandCtx: false },
+  change: { showReason: true, reasonRequired: true, showDemandCtx: false },
+  demand: { showReason: true, reasonRequired: false, showDemandCtx: true },
+  other: { showReason: true, reasonRequired: false, showDemandCtx: false },
+};
+
+function resolvePolicy(proType: string | null | undefined): ChangeFieldPolicy {
+  if (proType === "bug") return PROBLEM_CHANGE_FIELDS.bug;
+  if (proType === "change") return PROBLEM_CHANGE_FIELDS.change;
+  if (proType === "demand") return PROBLEM_CHANGE_FIELDS.demand;
+  return PROBLEM_CHANGE_FIELDS.other;
+}
 
 interface DrawerState {
   open: boolean;
@@ -84,6 +120,37 @@ export default function ProblemChangesPage() {
       await load();
     } catch (err) {
       showToast(false, err instanceof ApiError ? err.message : "删除失败");
+    }
+  };
+
+  const handleNext = async (c: ProblemChange) => {
+    if (c.status !== "1") {
+      showToast(false, "仅审核中状态可推进");
+      return;
+    }
+    const comment = window.prompt("推进审批意见 (可留空):", "") ?? "";
+    try {
+      await nextProcessProblemChange(c.id, { comment: comment || null });
+      showToast(true, "已推进到下一节点");
+      await load();
+    } catch (err) {
+      showToast(false, err instanceof ApiError ? err.message : "推进失败");
+    }
+  };
+
+  const handleReject = async (c: ProblemChange) => {
+    if (c.status !== "1") {
+      showToast(false, "仅审核中状态可驳回");
+      return;
+    }
+    const comment = window.prompt("驳回意见 (可留空):", "") ?? "";
+    if (!window.confirm("确认驳回该变更 (置为已作废)?")) return;
+    try {
+      await rejectProcessProblemChange(c.id, { comment: comment || null });
+      showToast(true, "已驳回");
+      await load();
+    } catch (err) {
+      showToast(false, err instanceof ApiError ? err.message : "驳回失败");
     }
   };
 
@@ -144,13 +211,25 @@ export default function ProblemChangesPage() {
             {c.status === "1" ? "编辑" : "详情"}
           </Button>
           {c.status === "1" && (
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={() => void handleDelete(c)}
-            >
-              删除
-            </Button>
+            <>
+              <Button size="sm" onClick={() => void handleNext(c)}>
+                推进
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void handleReject(c)}
+              >
+                驳回
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => void handleDelete(c)}
+              >
+                删除
+              </Button>
+            </>
           )}
         </div>
       ),
@@ -252,10 +331,41 @@ function ChangeDrawer({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // 多态 (task-06):按源 ProblemList.pro_type 切换字段显隐。
+  // 编辑态直接用 change.resource_id 反查;新建态随 resourceId 输入反查。
+  const [sourceProType, setSourceProType] = useState<string | null>(null);
+  const policy = resolvePolicy(sourceProType);
+
+  useEffect(() => {
+    const rid = (change?.resource_id ?? resourceId ?? "").trim();
+    if (!rid) {
+      setSourceProType(null);
+      return;
+    }
+    let cancelled = false;
+    getProblem(rid)
+      .then((p: ProblemList) => {
+        if (!cancelled) setSourceProType(p.pro_type ?? null);
+      })
+      .catch(() => {
+        // 源问题读取失败 (不存在 / 无权限) → 降级走「默认」全字段表单
+        if (!cancelled) setSourceProType(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [change?.resource_id, resourceId]);
+
   const submit = async () => {
     setBusy(true);
     setErr(null);
     try {
+      // 多态校验 (AC-10):change 类型变更原因必填
+      if (policy.reasonRequired && !changeReason.trim()) {
+        setErr("当前问题类型要求填写「变更原因」");
+        setBusy(false);
+        return;
+      }
       const body = {
         pro_desc: proDesc || null,
         change_reason: changeReason || null,
@@ -306,6 +416,16 @@ function ChangeDrawer({
               <input value={resourceId} onChange={(e) => setResourceId(e.target.value)} className={inputCls} />
             </Field>
           )}
+          {sourceProType && (
+            <div className="rounded border border-muted bg-muted/20 px-2 py-1 text-[11px] text-muted-foreground">
+              源问题类型：<span className="font-mono">{sourceProType}</span>
+              {policy.showReason
+                ? policy.reasonRequired
+                  ? "（变更原因必填）"
+                  : ""
+                : "（当前类型隐藏变更原因）"}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <Field label="项目 ID">
               <input value={projectId} onChange={(e) => setProjectId(e.target.value)} disabled={!editable} className={inputCls} />
@@ -317,9 +437,23 @@ function ChangeDrawer({
           <Field label="变更内容">
             <textarea value={proDesc} onChange={(e) => setProDesc(e.target.value)} disabled={!editable} rows={3} className={inputCls} />
           </Field>
-          <Field label="变更原因">
-            <textarea value={changeReason} onChange={(e) => setChangeReason(e.target.value)} disabled={!editable} rows={2} className={inputCls} />
-          </Field>
+          {policy.showReason && (
+            <Field label={policy.reasonRequired ? "变更原因 *" : "变更原因"}>
+              <textarea value={changeReason} onChange={(e) => setChangeReason(e.target.value)} disabled={!editable} rows={2} className={inputCls} />
+            </Field>
+          )}
+          {policy.showDemandCtx && (
+            <Field label="需求背景（可选）">
+              <textarea
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                disabled={!editable}
+                rows={2}
+                placeholder="补充需求背景、来源、验收标准等"
+                className={inputCls}
+              />
+            </Field>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <Field label="责任人 ID">
               <input value={dutyUserId} onChange={(e) => setDutyUserId(e.target.value)} disabled={!editable} className={inputCls} />

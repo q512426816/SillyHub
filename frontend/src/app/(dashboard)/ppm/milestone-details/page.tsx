@@ -21,8 +21,8 @@
  *  - 任意非终态 → 「变更」按钮打开变更表单(change_reason → 生成 parent_id 新版本)
  *
  * AntD Timeline:抽屉底部展示 ps_plan_node_detail_process 履历
- * (listPlanNodeDetailProcesses),按 business_type 染色(normal/reject/change),
- * 人名经 PpmText 解析。
+ * (listPlanNodeDetailProcesses),按 node_key 染色(正常流转=绿 /
+ * 驳回=红 / 变更=橙),人名经 PpmText 解析。
  *
  * task-07 工作日联动:draft 表单 plan_begin_time + plan_workload
  * → addWorkingDaysDate 自动算 plan_complete_time。
@@ -102,6 +102,34 @@ interface DetailDrawerState {
   detail?: PsPlanNodeDetail;
 }
 
+/**
+ * 按明细 status 路由抽屉形态(对照源 6 表单),模块级具名导出供单测断言映射。
+ *
+ * 映射表(对齐 task-04.md「状态 → 表单映射表」):
+ *  - draft / rejected → edit(草稿编辑 / 驳回返工)
+ *  - review            → audit(审核中)
+ *  - approve           → approve(审批中)
+ *  - done / archived   → view(终态只读)
+ *  - 未识别状态        → view(降级只读,边界 1,不报错)
+ */
+export function modeForStatus(status: string): DrawerMode {
+  switch (status) {
+    case "draft":
+    case "rejected":
+      return "edit"; // 草稿 / 驳回返工:回草稿编辑
+    case "review":
+      return "audit";
+    case "approve":
+      return "approve";
+    case "done":
+    case "archived":
+    default:
+      return "view";
+  }
+}
+
+// modeForStatus 已提到模块级具名导出(见上),组件内直接复用,无需闭包转发。
+
 export default function MilestoneDetailsPage() {
   const params = useSearchParams();
   const planId = params.get("plan") ?? "";
@@ -152,22 +180,7 @@ export default function MilestoneDetailsPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  /** 按明细 status 路由抽屉形态(对照源 6 表单)。 */
-  const modeForStatus = (status: string): DrawerMode => {
-    switch (status) {
-      case "draft":
-      case "rejected":
-        return "edit"; // 草稿 / 驳回返工:回草稿编辑
-      case "review":
-        return "audit";
-      case "approve":
-        return "approve";
-      case "done":
-      case "archived":
-      default:
-        return "view";
-    }
-  };
+  // modeForStatus 已提到模块级具名导出,组件内直接复用,无需闭包转发。
 
   /**
    * 流程动作提交(save/reject/change)。表单 body 由调用方提供:
@@ -217,7 +230,18 @@ export default function MilestoneDetailsPage() {
         showToast(true, "已创建变更新版本");
       }
     } catch (err) {
-      showToast(false, err instanceof ApiError ? err.message : "操作失败");
+      // AC-8 并发审批乐观锁:后端 StateMachine 在状态已被他人推进时抛 422/
+      // 状态不匹配(InvalidTransition)。识别到该类错误 → reload 列表拉最新状态
+      // + 友好提示「该明细已被他人处理」,避免用户对着陈旧状态脏写重试。
+      const isConcurrent =
+        err instanceof ApiError &&
+        (err.status === 422 || err.status === 409);
+      if (isConcurrent) {
+        showToast(false, "该明细已被他人处理,列表已刷新,请重试");
+        void reload();
+      } else {
+        showToast(false, err instanceof ApiError ? err.message : "操作失败");
+      }
     }
   };
 
@@ -803,11 +827,20 @@ function fromDate(d: Dayjs | null): string | null {
   return d ? d.format("YYYY-MM-DD") : null;
 }
 
-/** 流程履历 business_type → AntD Timeline 颜色(对齐源 ViewNodeDetailForm)。 */
-function processColor(businessType: string | null | undefined): string {
-  if (businessType === "reject") return "red";
-  if (businessType === "change") return "orange";
-  return "green"; // normal / 默认
+/**
+ * 流程履历 node_key → AntD Timeline 颜色(对齐源 ViewNodeDetailForm)。
+ *
+ * 后端 ``business_type`` 恒为 ``PROCESS_BUSINESS_TYPE`` 常量
+ * (``"ps_plan_node_detail"``),区分信息在 ``node_key``:
+ *  - ``f"{from}->rejected"`` (如 ``review->rejected``) → 驳回,红
+ *  - ``"change"``                          → 变更,橙
+ *  - 其余 ``f"{from}->{to}"`` (如 ``draft->review``) → 正常流转,绿
+ */
+function processColor(nodeKey: string | null | undefined): string {
+  if (!nodeKey) return "green";
+  if (nodeKey.includes("reject")) return "red";
+  if (nodeKey === "change" || nodeKey.includes("change")) return "orange";
+  return "green";
 }
 
 function DetailDrawer({
@@ -1356,7 +1389,7 @@ function DetailDrawer({
           <Timeline
             items={logs.map((l) => ({
               key: l.id,
-              color: processColor(l.business_type),
+              color: processColor(l.node_key),
               children: (
                 <div className="space-y-0.5 text-xs">
                   <div className="flex items-center gap-2">

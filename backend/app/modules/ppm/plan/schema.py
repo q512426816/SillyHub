@@ -286,6 +286,59 @@ class PsPlanNodeDetailResp(PsPlanNodeDetailBase):
     model_config = {"from_attributes": True}
 
 
+# ===========================================================================
+# 三联表 (task-03) — 4 层嵌套 + 成本派生
+# 层级:PsProjectPlan → PsPlanNode → PsPlanNodeDetail → PlanTask
+# PlanTask 经 ps_plan_node_detail_id 软关联到 detail (无 FK 约束)。
+# 派生 remaining_* 由 service 层计算注入,不落库 (D-014@v1)。
+# ===========================================================================
+
+
+class PlanTaskSimple(PydanticModel):
+    """三联表叶子节点 — 任务精简视图。
+
+    仅暴露三联表展示所需字段 (id / 内容 / 状态 / 工时 / 负责人 / 时间区间),
+    其余 PlanTask 字段 (month/week/kanban_order 等) 不进三联表。
+    """
+
+    id: uuid.UUID
+    content: str | None = None
+    status: str | None = None
+    work_load: str | None = None
+    time_spent: float | None = None
+    user_name: str | None = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class PsPlanNodeDetailWithTasks(PsPlanNodeDetailResp):
+    """ps 里程碑明细 + 其下挂载的任务列表 (三联表第 3 层 + 叶子)。"""
+
+    tasks: list[PlanTaskSimple] = Field(default_factory=list)
+
+
+class PsPlanNodeWithDetail(PsPlanNodeResp):
+    """ps 里程碑节点 + 其下挂载的明细 (含任务) (三联表第 2 层)。"""
+
+    details: list[PsPlanNodeDetailWithTasks] = Field(default_factory=list)
+
+
+class ProjectPlanThreeLevelResp(PsProjectPlanResp):
+    """项目计划三联表响应 (顶层)。
+
+    - ``remaining_available_person_days`` / ``remaining_cost``:
+      service 层根据 budget/actual 派生计算 (D-014@v1),覆盖父类同名字段
+      (源 model 为 String 落库值,此处返回计算后的派生字符串)。
+    - ``nodes``:三联表第 2 层起,逐层嵌套明细与任务。
+    """
+
+    remaining_available_person_days: str | None = None
+    remaining_cost: str | None = None
+    nodes: list[PsPlanNodeWithDetail] = Field(default_factory=list)
+
+
 class PsPlanNodeDetailProcessResp(PydanticModel):
     id: uuid.UUID
     business_id: str
@@ -323,6 +376,16 @@ class ChangeProcessReq(PydanticModel):
     overrides: dict[str, object] = Field(default_factory=dict)
 
 
+class SubmitDetailReq(PydanticModel):
+    """submitDetail — 提交明细 detail JSON,白名单字段 merge 落库。
+
+    白名单见 ``PlanService.submit_detail`` 的 ``_SUBMIT_DETAIL_FIELDS``。
+    未知键忽略,不报错 (边界 6)。
+    """
+
+    detail: dict[str, object] = Field(default_factory=dict)
+
+
 __all__ = [
     "ChangeProcessReq",
     "PageQuery",
@@ -338,7 +401,9 @@ __all__ = [
     "PlanNodeModuleUpdate",
     "PlanNodeResp",
     "PlanNodeUpdate",
+    "PlanTaskSimple",
     "ProcessActionReq",
+    "ProjectPlanThreeLevelResp",
     "PsPlanNodeBase",
     "PsPlanNodeCreate",
     "PsPlanNodeDetailBase",
@@ -346,10 +411,13 @@ __all__ = [
     "PsPlanNodeDetailProcessResp",
     "PsPlanNodeDetailResp",
     "PsPlanNodeDetailUpdate",
+    "PsPlanNodeDetailWithTasks",
     "PsPlanNodeResp",
     "PsPlanNodeUpdate",
+    "PsPlanNodeWithDetail",
     "PsProjectPlanBase",
     "PsProjectPlanCreate",
     "PsProjectPlanResp",
     "PsProjectPlanUpdate",
+    "SubmitDetailReq",
 ]

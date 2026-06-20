@@ -223,7 +223,26 @@ class CloseTaskReq(PydanticModel):
     check_result: str = "1"
 
 
+# ===========================================================================
+# 变更流流程动作请求 (task-02)
+# ===========================================================================
+
+
+class ChangeNextProcessReq(PydanticModel):
+    """变更流 nextProcess — 推进到下一节点 (4 节点链)。"""
+
+    comment: str | None = None
+
+
+class ChangeRejectProcessReq(PydanticModel):
+    """变更流 rejectProcess — 驳回到已作废 (仅审核节点)。"""
+
+    comment: str | None = None
+
+
 __all__ = [
+    "ChangeNextProcessReq",
+    "ChangeRejectProcessReq",
     "CloseTaskReq",
     "DoneTaskReq",
     "NextProcessReq",

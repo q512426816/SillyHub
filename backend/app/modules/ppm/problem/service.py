@@ -41,18 +41,22 @@ from app.modules.ppm.common.crud import (
 )
 from app.modules.ppm.common.fsm import assert_transition
 from app.modules.ppm.problem.fsm import (
+    CHANGE_TRANSITIONS,
     NODE_NAMES,
     NODE_TO_ROLE,
     TRANSITIONS,
     ProblemChangeStatus,
     ProblemNode,
     ProblemStatus,
+    compute_change_next_node,
     compute_next_node,
     is_audit_node,
+    is_change_audit_node,
 )
 from app.modules.ppm.problem.model import (
     PpmProblemChange,
     PpmProblemChangeProcessLog,
+    PpmProblemChangeProcessTask,
     PpmProblemList,
     PpmProblemListProcessLog,
     PpmProblemListProcessTask,
@@ -94,6 +98,15 @@ class ProblemPendingAssignment(ProblemError):
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _is_uuid_str(value: str) -> bool:
+    """判断字符串是否为合法 UUID (audit_context.actor_id 需 UUID 或 None)。"""
+    try:
+        uuid.UUID(value)
+    except (ValueError, AttributeError, TypeError):
+        return False
+    return True
 
 
 # ===========================================================================
@@ -210,6 +223,36 @@ class ProblemService:
                 obj.id, actor_id=str(obj.created_by or "system"), actor_name=None
             )
         return obj
+
+    async def list_problems_by_date_range(
+        self,
+        start: datetime,
+        end: datetime,
+    ) -> list[PpmProblemList]:
+        """按 find_time 区间过滤问题清单 (task-06 / FR-06)。
+
+        - 反向区间 (start > end) 内部自动 swap,不报错
+        - find_time 为空的问题不返回 (无发现时间,不纳入区间统计)
+        - 按 find_time 倒序返回
+        - 有未关闭变更的行内存态标记 effective_status=7 变更中 (同 list_problems)
+
+        设计依据:tasks/task-06.md §实现要求 2 + §边界处理 1/2/7。
+        """
+        lo, hi = (start, end) if start <= end else (end, start)
+        stmt = (
+            select(PpmProblemList)
+            .where(PpmProblemList.find_time.is_not(None))
+            .where(PpmProblemList.find_time >= lo)
+            .where(PpmProblemList.find_time <= hi)
+            .order_by(PpmProblemList.find_time.desc())
+        )
+        items = list((await self._session.execute(stmt)).scalars().all())
+        # 变更中标记 (内存态):与 list_problems 一致
+        changing_ids = await self._changing_resource_ids()
+        for item in items:
+            if str(item.id) in changing_ids:
+                object.__setattr__(item, "_effective_status", ProblemStatus.CHANGING.value)
+        return items
 
     async def get_problem(self, item_id: uuid.UUID) -> PpmProblemList:
         return await _Crud(self._session, PpmProblemList).get(item_id)
@@ -619,6 +662,211 @@ class ProblemService:
         )
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def list_change_tasks(self, business_id: str) -> list[PpmProblemChangeProcessTask]:
+        """变更流在办任务查询 (删旧插新模式下,通常 0 或 1 行)。"""
+        stmt = (
+            select(PpmProblemChangeProcessTask)
+            .where(PpmProblemChangeProcessTask.business_id == business_id)
+            .order_by(PpmProblemChangeProcessTask.created_at)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    # ------------------------------------------------------------------
+    # 变更审批流:next_change / reject_change (对应源 ProChangeProcesssExecutor)
+    # ------------------------------------------------------------------
+    # 变更流与问题主流同构 (4 节点链 + bug 跳部门经理),但驱动的是
+    # ``PpmProblemChange`` 而非 ``PpmProblemList``:
+    # - 节点链:申请(10) → 开发经理(20) → 项目经理(30) → 部门经理(40) → 结束
+    # - bug 在 30 直接结束 (跳过 40),复用 ``compute_change_next_node``
+    # - 结束后 status=2 已完成 (ProblemChangeStatus.CLOSED),非问题流的处置中
+    # - reject 仅审核节点 (20/30/40) 可驳回 → status=3 已作废
+
+    async def next_change(
+        self,
+        change_id: uuid.UUID,
+        *,
+        actor_id: str,
+        actor_name: str | None,
+        comment: str | None = None,
+    ) -> PpmProblemChange:
+        """推进变更到下一节点。
+
+        - 终态 (已完成 2 / 已作废 3) 再推进 → ProblemError (边界 5 幂等失败)
+        - 下一节点为 None (结束):status=2 已完成,now_handle_user=验证人 (audit_user_id)
+        - 下一节点对应角色查 ppm_project_member,缺失 → now_handle_user=None +
+          抛 ProblemPendingAssignment (X-003 fallback,now_node 仍推进)
+        - bug 类型在 Node30 直接结束,跳过部门经理 40
+
+        每次推进:写 ChangeProcessLog + 删旧插新 ChangeProcessTask +
+        注入 ``session.info["audit_context"]`` 触发 audit_hooks。
+        """
+        change = await self.get_change(change_id)
+        # 终态保护:已完成 / 已作废不可再推进
+        if change.status != ProblemChangeStatus.AUDITING.value:
+            raise ProblemError(
+                f"变更当前状态 {change.status} 不可推进 (仅审核中 1 可推进)",
+                details={"change_id": str(change.id), "status": change.status},
+            )
+        current_node = change.now_node or ProblemNode.APPLY.value
+        next_node = compute_change_next_node(current_node, change.pro_type)
+        current_node_name = NODE_NAMES.get(current_node, str(current_node))
+
+        # 注入审计上下文 (D-012:audit_hooks 自动写 audit_logs)
+        self._session.info["audit_context"] = {
+            "actor_id": uuid.UUID(actor_id) if _is_uuid_str(actor_id) else None,
+            "workspace_id": None,
+        }
+
+        if next_node is None:
+            # 结束节点 → 已完成 (2)
+            assert_transition(
+                ProblemChangeStatus(change.status),
+                ProblemChangeStatus.CLOSED,
+                CHANGE_TRANSITIONS,
+                entity="problem_change",
+                entity_id=change.id,
+            )
+            next_handle_user = change.audit_user_id
+            next_handle_user_name = change.audit_user_name
+            next_node_name = "已完成"
+            change.status = ProblemChangeStatus.CLOSED.value
+            change.now_node = None
+        else:
+            # 审核节点 → 找该角色成员
+            role = NODE_TO_ROLE.get(next_node)
+            members = await self._find_role_members(change.project_id or "", role or "")
+            next_handle_user = ",".join(str(m.user_id) for m in members) or None
+            next_handle_user_name = ",".join(filter(None, (m.user_name for m in members))) or None
+            next_node_name = NODE_NAMES.get(next_node, str(next_node))
+            change.now_node = next_node
+
+        change.now_handle_user = next_handle_user
+        change.now_handle_user_name = next_handle_user_name
+        change.updated_at = _now()
+        await self._session.commit()
+        await self._session.refresh(change)
+
+        # ChangeProcessTask:删旧插新
+        await self._replace_change_task(
+            business_id=str(change.id),
+            node_key=str(next_node) if next_node is not None else "end",
+            node_name=next_node_name,
+            handle_user=next_handle_user,
+            handle_user_name=next_handle_user_name,
+        )
+
+        # ChangeProcessLog
+        handle_info = self._build_handle_info(
+            "next", actor_name, current_node_name, next_node_name, next_handle_user_name
+        )
+        await self._write_change_log(
+            business_id=str(change.id),
+            node_key=str(current_node),
+            actor_id=actor_id,
+            actor_name=actor_name,
+            handle_info=handle_info,
+            next_user_id=next_handle_user,
+            next_user_name=next_handle_user_name,
+            comment=comment,
+        )
+
+        log.info(
+            "problem_change_next",
+            change_id=str(change.id),
+            from_node=current_node,
+            to_node=next_node,
+            status=change.status,
+            actor=actor_id,
+        )
+
+        # 清理审计上下文,避免污染后续同会话操作
+        self._session.info.pop("audit_context", None)
+
+        # X-003 fallback:推进成功但缺处理人 → 标记待指派
+        if next_node is not None and not next_handle_user:
+            raise ProblemPendingAssignment(
+                f"项目缺少「{NODE_TO_ROLE.get(next_node, '')}」,变更流程已推进到"
+                f"{next_node_name}节点,待指派处理人",
+                details={
+                    "change_id": str(change.id),
+                    "pending_node": next_node,
+                    "pending_role": NODE_TO_ROLE.get(next_node),
+                },
+            )
+        return change
+
+    async def reject_change(
+        self,
+        change_id: uuid.UUID,
+        *,
+        actor_id: str,
+        actor_name: str | None,
+        comment: str | None = None,
+    ) -> PpmProblemChange:
+        """驳回变更 → status=3 已作废。
+
+        仅审核节点 (20/30/40) 可驳回;申请节点 (10) reject 抛 ProblemError。
+        驳回后清空所有在办 ChangeProcessTask。
+        """
+        change = await self.get_change(change_id)
+        current_node = change.now_node or ProblemNode.APPLY.value
+        if not is_change_audit_node(current_node):
+            raise ProblemError(
+                f"当前节点 {current_node} 不可驳回 (仅审核节点 20/30/40 可驳回)",
+                details={"change_id": str(change.id), "current_node": current_node},
+            )
+        assert_transition(
+            ProblemChangeStatus(change.status),
+            ProblemChangeStatus.BACK,
+            CHANGE_TRANSITIONS,
+            entity="problem_change",
+            entity_id=change.id,
+        )
+
+        # 注入审计上下文 (D-012)
+        self._session.info["audit_context"] = {
+            "actor_id": uuid.UUID(actor_id) if _is_uuid_str(actor_id) else None,
+            "workspace_id": None,
+        }
+
+        current_node_name = NODE_NAMES.get(current_node, str(current_node))
+        change.status = ProblemChangeStatus.BACK.value
+        change.now_node = None
+        change.now_handle_user = None
+        change.now_handle_user_name = None
+        change.updated_at = _now()
+        await self._session.commit()
+        await self._session.refresh(change)
+
+        # 清空所有在办任务 (驳回无下一步任务)
+        await self._session.execute(
+            delete(PpmProblemChangeProcessTask).where(
+                PpmProblemChangeProcessTask.business_id == str(change.id)
+            )
+        )
+        await self._session.commit()
+
+        handle_info = self._build_handle_info("reject", actor_name, current_node_name, None, None)
+        await self._write_change_log(
+            business_id=str(change.id),
+            node_key=str(current_node),
+            actor_id=actor_id,
+            actor_name=actor_name,
+            handle_info=handle_info,
+            next_user_id=None,
+            next_user_name=None,
+            comment=comment,
+        )
+
+        self._session.info.pop("audit_context", None)
+        log.info(
+            "problem_change_reject",
+            change_id=str(change.id),
+            from_node=current_node,
+            actor=actor_id,
+        )
+        return change
+
     # ------------------------------------------------------------------
     # 导出
     # ------------------------------------------------------------------
@@ -707,6 +955,64 @@ class ProblemService:
         comment: str | None = None,
     ) -> PpmProblemListProcessLog:
         proc = PpmProblemListProcessLog(
+            id=uuid.uuid4(),
+            business_id=business_id,
+            node_key=node_key,
+            handle_user_id=actor_id,
+            handle_user_name=actor_name,
+            handle_date=_now(),
+            handle_info=handle_info,
+            next_user_id=next_user_id,
+            next_user_name=next_user_name,
+            comment=comment,
+            created_at=_now(),
+        )
+        self._session.add(proc)
+        await self._session.commit()
+        await self._session.refresh(proc)
+        return proc
+
+    async def _replace_change_task(
+        self,
+        *,
+        business_id: str,
+        node_key: str,
+        node_name: str,
+        handle_user: str | None,
+        handle_user_name: str | None,
+    ) -> None:
+        """变更流:删旧在办任务 + 插新在办任务 (原子)。"""
+        await self._session.execute(
+            delete(PpmProblemChangeProcessTask).where(
+                PpmProblemChangeProcessTask.business_id == business_id
+            )
+        )
+        task = PpmProblemChangeProcessTask(
+            id=uuid.uuid4(),
+            business_id=business_id,
+            node_key=node_key,
+            node_name=node_name,
+            now_handle_user=handle_user,
+            now_handle_user_name=handle_user_name,
+            created_at=_now(),
+            updated_at=_now(),
+        )
+        self._session.add(task)
+        await self._session.commit()
+
+    async def _write_change_log(
+        self,
+        *,
+        business_id: str,
+        node_key: str,
+        actor_id: str,
+        actor_name: str | None,
+        handle_info: str | None,
+        next_user_id: str | None,
+        next_user_name: str | None,
+        comment: str | None = None,
+    ) -> PpmProblemChangeProcessLog:
+        proc = PpmProblemChangeProcessLog(
             id=uuid.uuid4(),
             business_id=business_id,
             node_key=node_key,

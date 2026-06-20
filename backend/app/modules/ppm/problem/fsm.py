@@ -148,7 +148,7 @@ def is_audit_node(now_node: int) -> bool:
 
 
 # ===========================================================================
-# 问题变更审批流状态 (源 ProblemChangeDO 常量,简化:不走完整 4 节点)
+# 问题变更审批流状态 (源 ProblemChangeDO 常量)
 # ===========================================================================
 
 
@@ -160,7 +160,7 @@ class ProblemChangeStatus(StrEnum):
     BACK = "3"
 
 
-# 变更状态合法迁移 (简化:审核中 → 已完成 / 已作废)
+# 变更状态合法迁移:审核中 → 已完成 (next 结束) / 已作废 (reject)
 CHANGE_TRANSITIONS: TransitionMap[ProblemChangeStatus] = {
     ProblemChangeStatus.AUDITING: {
         ProblemChangeStatus.CLOSED,
@@ -171,8 +171,54 @@ CHANGE_TRANSITIONS: TransitionMap[ProblemChangeStatus] = {
 }
 
 
+# ===========================================================================
+# 问题变更审批流节点 (task-02:复用 ProblemNode 数值,4 节点链)
+# ===========================================================================
+
+# 变更流与问题主流同构 (申请→开发经理→项目经理→[非bug部门经理]→结束),
+# 节点数值复用 ``ProblemNode`` (10/20/30/40),不单独定义新 IntEnum,
+# 仅提供变更流专用的下一节点计算 helper (内嵌 bug 跳部门经理规则)。
+
+
+# 变更流节点 → 下一节点 (None = 结束);bug 跳部门经理由 compute_change_next_node 处理
+CHANGE_NODE_NEXT: dict[int, int | None] = {
+    ProblemNode.APPLY.value: ProblemNode.DEVELOP_MGR.value,  # 10 → 20
+    ProblemNode.DEVELOP_MGR.value: ProblemNode.PM_MGR.value,  # 20 → 30
+    ProblemNode.PM_MGR.value: ProblemNode.DEPT_MGR.value,  # 30 → 40 (非 bug)
+    ProblemNode.DEPT_MGR.value: None,  # 40 → 结束
+}
+
+
+def compute_change_next_node(now_node: int, pro_type: str | None) -> int | None:
+    """变更流下一节点计算 (内嵌 bug 跳部门经理 40)。
+
+    对照源 ``ProChangeProcesssExecutor``:bug 类型在 Node30 直接结束,
+    跳过部门经理审批 (40)。其余类型走标准 4 节点链。
+
+    Args:
+        now_node: 当前节点 (10/20/30/40)。
+        pro_type: 变更关联的问题类型 (bug / change / 其他)。
+
+    Returns:
+        下一节点序号;``None`` 表示流程结束 (status=2 已完成)。
+    """
+    if now_node == ProblemNode.PM_MGR.value and pro_type == BUG_TYPE:
+        return None
+    return CHANGE_NODE_NEXT.get(now_node)
+
+
+def is_change_audit_node(now_node: int) -> bool:
+    """变更流是否处于审核节点 (20/30/40) —— 这些节点可驳回。"""
+    return now_node in (
+        ProblemNode.DEVELOP_MGR.value,
+        ProblemNode.PM_MGR.value,
+        ProblemNode.DEPT_MGR.value,
+    )
+
+
 __all__ = [
     "BUG_TYPE",
+    "CHANGE_NODE_NEXT",
     "CHANGE_TRANSITIONS",
     "CHANGE_TYPE",
     "NODE_NAMES",
@@ -182,6 +228,8 @@ __all__ = [
     "ProblemChangeStatus",
     "ProblemNode",
     "ProblemStatus",
+    "compute_change_next_node",
     "compute_next_node",
     "is_audit_node",
+    "is_change_audit_node",
 ]

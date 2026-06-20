@@ -18,6 +18,7 @@ from app.modules.ppm.problem.fsm import (
     ProblemChangeStatus,
     ProblemNode,
     ProblemStatus,
+    compute_change_next_node,
     compute_next_node,
 )
 from app.modules.ppm.problem.service import (
@@ -459,3 +460,182 @@ class TestInvalidTransition:
         # 再次 close → 4 是终态,非法
         with pytest.raises(InvalidTransition):
             await svc.close_task(pid, actor_id="audit-001", actor_name="孙验证")
+
+
+# ===========================================================================
+# 问题变更审批流 (task-02:4 节点 + bug 跳部门经理 + reject)
+# ===========================================================================
+
+
+async def _make_change(
+    svc: ProblemService,
+    project_id: str,
+    resource_id: str,
+    *,
+    pro_type: str | None = None,
+    audit_user_id: str = "audit-001",
+    audit_user_name: str = "孙验证",
+) -> object:
+    return await svc.create_change(
+        {
+            "resource_id": resource_id,
+            "project_id": project_id,
+            "pro_type": pro_type,
+            "audit_user_id": audit_user_id,
+            "audit_user_name": audit_user_name,
+        }
+    )
+
+
+class TestChangeFlow:
+    """变更流 4 节点全路径 (task-02 AC-1..AC-5)。"""
+
+    async def test_change_full_flow_non_bug(self, db_session: AsyncSession) -> None:
+        """非 bug:申请(10)→开发经理(20)→项目经理(30)→部门经理(40)→结束(已完成)。"""
+        svc = ProblemService(db_session)
+        proj_id = await _make_project(db_session)
+        p = await _make_problem(svc, proj_id, pro_type="requirement")
+        c = await _make_change(svc, proj_id, str(p.id), pro_type="requirement")
+        cid = c.id
+
+        # 10→20 开发经理审批
+        c = await svc.next_change(cid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+        assert c.status == ProblemChangeStatus.AUDITING.value
+        assert c.now_node == ProblemNode.DEVELOP_MGR.value
+        assert "李开发" in (c.now_handle_user_name or "")
+
+        # 20→30 项目经理审批
+        c = await svc.next_change(cid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+        assert c.now_node == ProblemNode.PM_MGR.value
+        assert "王项目" in (c.now_handle_user_name or "")
+
+        # 30→40 部门经理审批 (非 bug)
+        c = await svc.next_change(cid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+        assert c.now_node == ProblemNode.DEPT_MGR.value
+        assert "赵部门" in (c.now_handle_user_name or "")
+
+        # 40→结束 (已完成)
+        c = await svc.next_change(cid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+        assert c.status == ProblemChangeStatus.CLOSED.value
+        assert c.now_node is None
+        # 结束后处理人 = 验证人 (audit_user_id)
+        assert c.now_handle_user == "audit-001"
+
+    async def test_change_bug_skips_dept(self, db_session: AsyncSession) -> None:
+        """bug:10→20→30→直接结束 (跳过部门经理 40)。"""
+        svc = ProblemService(db_session)
+        proj_id = await _make_project(db_session)
+        p = await _make_problem(svc, proj_id, pro_type="bug")
+        c = await _make_change(svc, proj_id, str(p.id), pro_type="bug")
+        cid = c.id
+
+        await svc.next_change(cid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])  # 10→20
+        await svc.next_change(cid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])  # 20→30
+        c = await svc.next_change(cid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])  # 30→结束
+        assert c.status == ProblemChangeStatus.CLOSED.value
+        assert c.now_node is None  # 未经过 40
+
+    async def test_change_reject_to_back(self, db_session: AsyncSession) -> None:
+        """审核节点 (20) reject → status=3 已作废,清空在办任务。"""
+        svc = ProblemService(db_session)
+        proj_id = await _make_project(db_session)
+        p = await _make_problem(svc, proj_id, pro_type="requirement")
+        c = await _make_change(svc, proj_id, str(p.id), pro_type="requirement")
+        cid = c.id
+
+        # 推到 20 开发经理
+        await svc.next_change(cid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+        # 在 20 节点驳回
+        c = await svc.reject_change(
+            cid, actor_id="dev-001", actor_name="李开发", comment="描述不清"
+        )
+        assert c.status == ProblemChangeStatus.BACK.value
+        assert c.now_node is None
+        assert c.now_handle_user is None
+
+        # 驳回后清空所有在办任务
+        tasks = await svc.list_change_tasks(str(cid))
+        assert len(tasks) == 0
+
+    async def test_change_reject_on_apply_rejected(self, db_session: AsyncSession) -> None:
+        """申请节点 (10) 不可驳回。"""
+        svc = ProblemService(db_session)
+        proj_id = await _make_project(db_session)
+        p = await _make_problem(svc, proj_id)
+        c = await _make_change(svc, proj_id, str(p.id))
+        with pytest.raises(ProblemError):
+            await svc.reject_change(c.id, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+
+    async def test_change_missing_role_pending(self, db_session: AsyncSession) -> None:
+        """项目无项目经理 → next_change 推进到 30 但抛 ProblemPendingAssignment。"""
+        svc = ProblemService(db_session)
+        proj_id = await _make_project(db_session, pm=False)
+        p = await _make_problem(svc, proj_id, pro_type="requirement")
+        c = await _make_change(svc, proj_id, str(p.id), pro_type="requirement")
+        cid = c.id
+
+        # 10→20 (有开发经理)
+        await svc.next_change(cid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+        # 20→30 (无项目经理 → 抛 pending,但 now_node 已推进)
+        with pytest.raises(ProblemPendingAssignment):
+            await svc.next_change(cid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+
+        fresh = await svc.get_change(cid)
+        assert fresh.now_node == ProblemNode.PM_MGR.value  # 节点已推进
+        assert fresh.now_handle_user is None  # 但缺处理人
+        assert fresh.status == ProblemChangeStatus.AUDITING.value
+
+    async def test_change_each_step_writes_log(self, db_session: AsyncSession) -> None:
+        """每次 next_change:写一行 ChangeProcessLog + 删旧插新 ChangeProcessTask。"""
+        svc = ProblemService(db_session)
+        proj_id = await _make_project(db_session)
+        p = await _make_problem(svc, proj_id, pro_type="bug")
+        c = await _make_change(svc, proj_id, str(p.id), pro_type="bug")
+        cid = c.id
+
+        # 3 次推进 (10→20→30→结束)
+        for _ in range(3):
+            await svc.next_change(cid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+
+        logs = await svc.list_change_logs(str(cid))
+        assert len(logs) == 3  # 每次推进一行
+        assert [log.node_key for log in logs] == ["10", "20", "30"]
+
+        # 在办任务:最后一次推进后只剩一条 (当前节点 end/已完成)
+        tasks = await svc.list_change_tasks(str(cid))
+        assert len(tasks) == 1
+        assert tasks[0].node_key == "end"
+
+    async def test_change_next_on_closed_rejected(self, db_session: AsyncSession) -> None:
+        """已完成 (2) / 已作废 (3) 终态再 next → ProblemError。"""
+        svc = ProblemService(db_session)
+        proj_id = await _make_project(db_session)
+        p = await _make_problem(svc, proj_id, pro_type="bug")
+        c = await _make_change(svc, proj_id, str(p.id), pro_type="bug")
+        cid = c.id
+
+        # bug 三次推进到已完成
+        for _ in range(3):
+            await svc.next_change(cid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+
+        # 再次 next → 终态非法
+        with pytest.raises(ProblemError):
+            await svc.next_change(cid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
+
+
+# ===========================================================================
+# 变更流 fsm 纯函数
+# ===========================================================================
+
+
+class TestChangeFsmPure:
+    def test_compute_change_next_node_chain(self) -> None:
+        assert compute_change_next_node(10, "requirement") == 20
+        assert compute_change_next_node(20, "requirement") == 30
+        assert compute_change_next_node(30, "requirement") == 40
+        assert compute_change_next_node(40, "requirement") is None
+
+    def test_compute_change_next_node_bug_skips_40(self) -> None:
+        assert compute_change_next_node(30, "bug") is None
+        assert compute_change_next_node(20, "bug") == 30
+        assert compute_change_next_node(10, "bug") == 20
