@@ -37,6 +37,20 @@ class AgentSessionListResponse(BaseModel):
     offset: int
 
 
+class SessionReopenResponse(BaseModel):
+    """Response body for POST /sessions/{id}/reopen (task-05 / FR-2).
+
+    ``status`` is the backend-side placeholder state immediately after a
+    successful reopen request — the daemon runs the SDK resume asynchronously
+    (task-07 drives the full lease/WS transition, task-08 the daemon SDK
+    resume), so the endpoint never blocks on daemon confirmation (design §4.3.1
+    step 7).
+    """
+
+    session_id: str
+    status: str
+
+
 # ── Register ────────────────────────────────────────────────────────────────
 
 

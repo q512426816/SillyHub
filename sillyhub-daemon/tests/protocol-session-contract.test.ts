@@ -112,8 +112,15 @@ describe('protocol — batch 协议常量值不回归（FR-09 / AC-08）', () =>
     expect(MSG.RPC_RESULT).toBe('daemon:rpc_result');
   });
 
-  it('MSG 总数 = 15（10 旧 + 5 新），互不干扰', () => {
-    expect(Object.keys(MSG)).toHaveLength(15);
+  it('MSG 总数 = 16（10 旧 + 5 session/permission + 1 SESSION_RESUME），互不干扰', () => {
+    expect(Object.keys(MSG)).toHaveLength(16);
+  });
+
+  it('SESSION_RESUME（task-08）字符串值 = daemon:session_resume（待 backend task-06 对齐）', () => {
+    // backend DAEMON_MSG_SESSION_RESUME 尚未合入（reverse-sync 风险，本任务 daemon 侧先落地）。
+    // backend 合入后补双侧逐字对齐断言（同 EXPECTED 表风格）。
+    expect(MSG.SESSION_RESUME).toBe('daemon:session_resume');
+    expect(MSG.SESSION_RESUME.startsWith('daemon:')).toBe(true);
   });
 });
 

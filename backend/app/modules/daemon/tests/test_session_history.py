@@ -423,12 +423,17 @@ class TestDeleteSession:
         assert preserved_run is not None
         assert preserved_run.agent_session_id is None
 
-    async def test_delete_active_session_returns_409(
+    async def test_delete_active_session_now_succeeds_task03(
         self,
         client: AsyncClient,
         auth_headers: dict[str, str],
         db_session: AsyncSession,
     ) -> None:
+        """task-03 / FR-3 / D-003@v1: DELETE an active session no longer 409s —
+        the service first ends the session (best-effort WS + run killed + lease
+        completed) then hard-deletes the row. See test_session_delete_active.py
+        for the full active/pending/reconnecting/ended/offline matrix.
+        """
         admin = (
             (await db_session.execute(select(User).where(User.email == "admin@example.com")))
             .scalars()
@@ -437,14 +442,16 @@ class TestDeleteSession:
         assert admin is not None
         runtime = await _make_runtime(db_session, admin.id)
         agent_session = await _make_session(db_session, admin.id, runtime.id, status="active")
+        agent_session_id = agent_session.id
 
         resp = await client.delete(
-            f"/api/daemon/sessions/{agent_session.id}",
+            f"/api/daemon/sessions/{agent_session_id}",
             headers=auth_headers,
         )
 
-        assert resp.status_code == 409
-        assert (await db_session.get(AgentSession, agent_session.id)) is not None
+        assert resp.status_code == 204, resp.text
+        db_session.expire_all()
+        assert await db_session.get(AgentSession, agent_session_id) is None
 
     async def test_delete_cross_user_session_is_hidden(
         self,

@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   CircleDashed,
   Copy,
+  MessageSquarePlus,
   Power,
   RefreshCw,
   Server,
@@ -21,7 +22,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { InteractiveSessionPanel } from "@/components/daemon/interactive-session-panel";
+import { InteractiveSessionPanel, type SessionTurnView } from "@/components/daemon/interactive-session-panel";
 import { PermissionApprovalCard } from "@/components/permission-approval-card";
 import {
   PermissionApprovalDialog,
@@ -42,6 +43,7 @@ import {
   MIN_VERSIONS,
   parseSessionPermissionEvent,
   PROVIDER_META,
+  reopenSession,
   respondSessionPermission,
   type AgentSessionRead,
   type AgentSessionStatus,
@@ -357,7 +359,7 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
       </div>
       {!useApiKey && (
         <p className="text-[10px] text-amber-600">
-          ⚠️ 当前显示的 --token 是浏览器 access_token（15 分钟过期），daemon 长期运行建议{" "}
+          ⚠️ 当前显示的 --token 是浏览器 access_token（15 分钟过期），守护进程长期运行建议{" "}
           <a href="/settings/api-keys" className="underline">
             签发 API Key
           </a>{" "}
@@ -376,7 +378,22 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
  * 旧 QuickChatPanel / quickChat / streamQuickChat / getQuickChatResult / getQuickChatLogs
  * 保留用于 brownfield 回归，不再被页面使用。
  */
-function InteractiveSessionChatSection({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
+function InteractiveSessionChatSection({
+  runtimes,
+  attachSession,
+  initialTurns,
+  onCloseAttach,
+}: {
+  runtimes: DaemonRuntimeRead[];
+  /**
+   * task-11 attach 模式：传入 attachSession 时面板进入恢复续聊模式
+   * （建 SSE + 预填 initialTurns + 轮询到 active），不再走 idle→create 新建。
+   * onCloseAttach：attach 面板「关闭/返回历史」回调，清外层 attachSession 状态。
+   */
+  attachSession?: AgentSessionRead;
+  initialTurns?: SessionTurnView[];
+  onCloseAttach?: () => void;
+}) {
   // D-002@v3 非目标：交互式会话仅支持 claude（codex 后续），不支持 cursor/openclaw 等。
   // 过滤 online runtime 的 provider，只保留 claude/codex，避免 createSession 触发
   // backend SessionCreateRequest.provider Literal["claude","codex"] 422。
@@ -395,20 +412,38 @@ function InteractiveSessionChatSection({ runtimes }: { runtimes: DaemonRuntimeRe
   const [model, setModel] = useState<string | null>(null);
   const hasOnlineProvider = onlineProviders.length > 0;
   // 优先 claude（本变更聚焦），其次第一个已支持的 provider
-  const defaultProvider = onlineProviders.includes("claude")
+  const defaultProvider = attachSession?.provider ?? (onlineProviders.includes("claude")
     ? "claude"
-    : (onlineProviders[0] ?? "claude");
+    : (onlineProviders[0] ?? "claude"));
   // providers 列表：有在线时用在线列表，无在线时给占位让组件能渲染
   const providers = hasOnlineProvider ? onlineProviders : [defaultProvider];
 
   return (
-    <InteractiveSessionPanel
-      providers={providers}
-      defaultProvider={defaultProvider}
-      model={model}
-      onModelChange={setModel}
-      hasOnlineProvider={hasOnlineProvider}
-    />
+    <div className="flex min-w-0 flex-col gap-2">
+      {attachSession && onCloseAttach && (
+        <div className="flex items-center justify-end">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onCloseAttach}
+            className="h-7 text-[11px]"
+          >
+            返回历史
+          </Button>
+        </div>
+      )}
+      {/* key 强制 attach 切换时重 mount（清旧 SSE/轮询，task-10 unmount close） */}
+      <InteractiveSessionPanel
+        key={attachSession?.id ?? "live"}
+        providers={providers}
+        defaultProvider={defaultProvider}
+        model={model}
+        onModelChange={setModel}
+        hasOnlineProvider={hasOnlineProvider}
+        attachSessionId={attachSession?.id}
+        initialTurns={initialTurns}
+      />
+    </div>
   );
 }
 
@@ -535,7 +570,7 @@ function RuntimeCard({
           className="gap-1.5"
           disabled={actioning}
           onClick={() => void onToggleEnabled(runtime)}
-          title={isDisabled ? "启用此 Agent runtime" : "禁用此 Agent runtime"}
+          title={isDisabled ? "启用此智能体运行时" : "禁用此智能体运行时"}
         >
           {actioning ? (
             <RefreshCw className="h-3.5 w-3.5 animate-spin" />
@@ -570,7 +605,7 @@ function EmptyState() {
         <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted text-muted-foreground">
           <Server className="h-5 w-5" />
         </div>
-        <h2 className="mt-4 text-base font-semibold">尚未注册任何 Daemon 运行时</h2>
+        <h2 className="mt-4 text-base font-semibold">尚未注册任何守护进程运行时</h2>
         <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
           启动本地守护进程后，平台会在这里显示提供方、版本、心跳和可用代理。runtime 上线后，进入 workspace 详情页可在「默认 Agent」下拉里选择本次启动的提供方。
         </p>
@@ -581,7 +616,7 @@ function EmptyState() {
           <h2 className="text-sm font-semibold">启动入口</h2>
         </div>
         <p className="mt-2 text-[11px] text-muted-foreground">
-          Daemon 是 Node.js/TypeScript 实现，需要 Node ≥ 20。如果之前装过 Python 旧版的 <code className="font-mono">sillyhub-daemon</code>（脚本目录里残留 <code className="font-mono">sillyhub-daemon.exe</code>），先用 <code className="font-mono">pip uninstall sillyhub-daemon</code> 卸载，否则会冲突报 <code className="font-mono">ModuleNotFoundError: No module named &#39;sillyhub_daemon.__main__&#39;</code>。
+          守护进程是 Node.js/TypeScript 实现，需要 Node ≥ 20。如果之前装过 Python 旧版的 <code className="font-mono">sillyhub-daemon</code>（脚本目录里残留 <code className="font-mono">sillyhub-daemon.exe</code>），先用 <code className="font-mono">pip uninstall sillyhub-daemon</code> 卸载，否则会冲突报 <code className="font-mono">ModuleNotFoundError: No module named &#39;sillyhub_daemon.__main__&#39;</code>。
         </p>
         <ol className="mt-4 space-y-3 text-xs text-muted-foreground">
           <li className="rounded border bg-muted/30 px-3 py-2 font-mono">
@@ -924,22 +959,22 @@ function SessionsSidebar({
                       {s.turn_count === 1 ? "" : "s"}
                     </span>
                   </button>
-                  {!active ? (
-                    <button
-                      type="button"
-                      aria-label={`删除会话 ${s.id}`}
-                      title="删除会话"
-                      disabled={deletingSessionId === s.id}
-                      onClick={() => onDelete(s)}
-                      className="flex w-9 shrink-0 items-center justify-center border-l text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-                    >
-                      {deletingSessionId === s.id ? (
-                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-3.5 w-3.5" />
-                      )}
-                    </button>
-                  ) : null}
+                  {/* task-04 / FR-3：去掉 {!active} 限制，所有状态都渲染删除按钮。
+                      active 会话删除的后台 end 收口由后端 task-03 处理，前端透明。 */}
+                  <button
+                    type="button"
+                    aria-label={`删除会话 ${s.id}`}
+                    title="删除会话"
+                    disabled={deletingSessionId === s.id}
+                    onClick={() => onDelete(s)}
+                    className="flex w-9 shrink-0 items-center justify-center border-l text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                  >
+                    {deletingSessionId === s.id ? (
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                  </button>
                 </li>
               );
             })}
@@ -948,6 +983,66 @@ function SessionsSidebar({
       </div>
     </section>
   );
+}
+
+/**
+ * task-11 续聊可用性（D-004@v1）：
+ * 仅 claude + 有 agent_session_id + 终态（ended/failed）可恢复。
+ * codex 暂不支持；active 本就活跃（不显示按钮，走只读回看 ql-007）；
+ * 无 agent_session_id（create 失败的 failed）无法恢复。
+ */
+function canResumeSession(session: AgentSessionRead | null): boolean {
+  if (!session) return false;
+  return (
+    session.provider === "claude" &&
+    !!session.agent_session_id &&
+    (session.status === "ended" || session.status === "failed")
+  );
+}
+
+/** 续聊按钮不可用时的 title 提示文案。 */
+function resumeDisabledTitle(session: AgentSessionRead): string {
+  if (session.provider !== "claude") return "codex 暂不支持续聊";
+  if (!session.agent_session_id) return "会话未建立，无法续聊";
+  return "当前会话不支持续聊";
+}
+
+/**
+ * task-11 logsToTurns：把历史日志按 run_id 分组，转成 attach 面板预填的 SessionTurnView。
+ * channel==="user" 的 log → prompt；其余 log → output（拼接，保留换行）。
+ */
+function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
+  const map = new Map<string, AgentRunLogEntry[]>();
+  for (const log of logs) {
+    const list = map.get(log.run_id) ?? [];
+    list.push(log);
+    map.set(log.run_id, list);
+  }
+  const turns: SessionTurnView[] = [];
+  let turnIndex = 0;
+  for (const [, entries] of Array.from(map.entries())) {
+    turnIndex += 1;
+    const prompts: string[] = [];
+    const outputs: string[] = [];
+    for (const entry of entries) {
+      const text = entry.content_redacted ?? "";
+      if (!text) continue;
+      if (entry.channel === "user_input") {
+        prompts.push(text);
+      } else {
+        outputs.push(text);
+      }
+    }
+    turns.push({
+      runId: `__attach_history_${turnIndex}__`,
+      turn: turnIndex,
+      prompt: prompts.join("\n"),
+      output: outputs.join("\n"),
+      status: "completed",
+      seenLogIds: new Set(entries.map((e) => e.id)),
+    });
+  }
+  return turns;
 }
 
 /**
@@ -960,12 +1055,14 @@ function SessionHistoryView({
   loading,
   error,
   onClose,
+  onContinue,
 }: {
   session: AgentSessionRead | null;
   logs: AgentRunLogEntry[];
   loading: boolean;
   error: string | null;
   onClose: () => void;
+  onContinue?: (session: AgentSessionRead) => void;
 }) {
   // 跨 run 分组（保持后端返回顺序：run 顺序内 timestamp 升序）
   const groups = useMemo(() => {
@@ -978,6 +1075,11 @@ function SessionHistoryView({
     return Array.from(map.entries());
   }, [logs]);
 
+  // task-11 D-004：active 不显示续聊按钮（本就活跃走只读回看 ql-007）；
+  // 其余状态显示按钮，canResume 决定是否可点。
+  const showResumeBtn = session != null && session.status !== "active";
+  const resumeEnabled = canResumeSession(session);
+
   return (
     <section className="flex min-h-[520px] flex-col overflow-hidden rounded-md border bg-card">
       <header className="flex items-center justify-between gap-2 border-b px-4 py-3">
@@ -989,9 +1091,26 @@ function SessionHistoryView({
             只读视图（{groups.length} 个 turn）
           </p>
         </div>
-        <Button size="sm" variant="ghost" onClick={onClose} className="h-7 text-[11px]">
-          关闭
-        </Button>
+        <div className="flex items-center gap-2">
+          {showResumeBtn && session && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1 text-[11px]"
+              disabled={!resumeEnabled || !onContinue}
+              title={resumeEnabled ? "恢复会话并续聊" : resumeDisabledTitle(session)}
+              onClick={() => {
+                if (resumeEnabled && onContinue && session) onContinue(session);
+              }}
+            >
+              <MessageSquarePlus className="h-3.5 w-3.5" />
+              继续对话
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={onClose} className="h-7 text-[11px]">
+            关闭
+          </Button>
+        </div>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto bg-muted/20 px-4 py-4">
         {loading ? (
@@ -1007,14 +1126,27 @@ function SessionHistoryView({
                 <div className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground">
                   <span className="font-mono">run {shortId(runId)}</span>
                 </div>
-                {entries.map((log) => (
-                  <div
-                    key={log.id}
-                    className="max-w-[86%] whitespace-pre-wrap break-words rounded-md border bg-card px-3 py-2 text-xs leading-relaxed text-foreground shadow-sm"
-                  >
-                    {log.content_redacted ?? ""}
-                  </div>
-                ))}
+                {entries.map((log) => {
+                  // task-02 / FR-1：按 channel 区分 user / agent 气泡。
+                  // channel === "user_input" → 右对齐 primary 气泡；其余（含缺失）→ 左对齐白底。
+                  const isUser = log.channel === "user_input";
+                  return (
+                    <div
+                      key={log.id}
+                      className={isUser ? "flex justify-end" : "flex justify-start"}
+                    >
+                      <div
+                        className={
+                          isUser
+                            ? "max-w-[86%] whitespace-pre-wrap break-words rounded-md bg-primary px-3 py-2 text-xs leading-relaxed text-primary-foreground shadow-sm"
+                            : "max-w-[86%] whitespace-pre-wrap break-words rounded-md border bg-card px-3 py-2 text-xs leading-relaxed text-foreground shadow-sm"
+                        }
+                      >
+                        {log.content_redacted ?? ""}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </div>
@@ -1037,6 +1169,8 @@ function SessionListSection({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState<string | null>(null);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  // task-11：reopen 成功的会话进入 attach 续聊面板（历史回看↔attach 切换）
+  const [attachSession, setAttachSession] = useState<AgentSessionRead | null>(null);
 
   const reloadSessions = useCallback(async () => {
     setLoading(true);
@@ -1099,6 +1233,19 @@ function SessionListSection({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
     }
   }, [selected?.id]);
 
+  // task-11：续聊 → reopen 恢复会话，成功后右侧切 attach InteractiveSessionPanel。
+  // 失败（409 OFFLINE 等）→ setListError 提示，不切 attach。
+  const handleContinue = useCallback(async (session: AgentSessionRead) => {
+    setListError(null);
+    try {
+      await reopenSession(session.id);
+      // 用当前已加载的 logs 预填 attach panel（handleSelect 已拉取）
+      setAttachSession(session);
+    } catch (err) {
+      setListError(err instanceof ApiError ? err.message : "恢复会话失败");
+    }
+  }, []);
+
   return (
     <section className="flex min-w-0 flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
@@ -1129,13 +1276,22 @@ function SessionListSection({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
           onDelete={(s) => void handleDelete(s)}
           onRetry={() => void reloadSessions()}
         />
-        {selected ? (
+        {attachSession ? (
+          // task-11：reopen 成功 → attach 续聊面板（预填历史 turn + SSE + 轮询）
+          <InteractiveSessionChatSection
+            runtimes={runtimes}
+            attachSession={attachSession}
+            initialTurns={logsToTurns(logs)}
+            onCloseAttach={() => setAttachSession(null)}
+          />
+        ) : selected ? (
           <SessionHistoryView
             session={selected}
             logs={logs}
             loading={logsLoading}
             error={logsError}
             onClose={() => setSelected(null)}
+            onContinue={(s) => void handleContinue(s)}
           />
         ) : (
           <InteractiveSessionChatSection runtimes={runtimes} />
@@ -1249,7 +1405,7 @@ export default function RuntimesPage() {
       <header className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase text-muted-foreground">系统</p>
-          <h1 className="mt-1">Daemon 运行时</h1>
+          <h1 className="mt-1">守护进程运行时</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             本地代理运行时、心跳状态和快速会话控制台。
           </p>

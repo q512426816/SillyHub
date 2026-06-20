@@ -19,6 +19,9 @@ const daemon = vi.hoisted(() => ({
   listAgentSessions: vi.fn(),
   deleteAgentSession: vi.fn(),
   getAgentSessionLogs: vi.fn(),
+  getAgentSession: vi.fn(),
+  reopenSession: vi.fn(),
+  streamSession: vi.fn(),
   respondSessionPermission: vi.fn(),
   parseSessionPermissionEvent: vi.fn(() => null),
 }));
@@ -31,6 +34,9 @@ vi.mock("@/lib/daemon", async () => {
     listAgentSessions: daemon.listAgentSessions,
     deleteAgentSession: daemon.deleteAgentSession,
     getAgentSessionLogs: daemon.getAgentSessionLogs,
+    getAgentSession: daemon.getAgentSession,
+    reopenSession: daemon.reopenSession,
+    streamSession: daemon.streamSession,
     respondSessionPermission: daemon.respondSessionPermission,
     parseSessionPermissionEvent: daemon.parseSessionPermissionEvent,
   };
@@ -60,6 +66,17 @@ beforeEach(() => {
   daemon.listAgentSessions.mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 });
   daemon.deleteAgentSession.mockResolvedValue(undefined);
   daemon.getAgentSessionLogs.mockResolvedValue([]);
+  daemon.reopenSession.mockResolvedValue({ session_id: "stub", status: "reconnecting" });
+  daemon.getAgentSession.mockResolvedValue({
+    id: "stub", runtime_id: null, lease_id: null, provider: "claude",
+    status: "reconnecting", agent_session_id: "ag", config: null,
+    turn_count: 0, created_at: "t", last_active_at: null, ended_at: null,
+  });
+  // task-11 attach panel：streamSession 返回 no-op 连接（避免 EventSource 网络请求）
+  daemon.streamSession.mockImplementation(() => ({
+    close: () => {},
+    getLastEventId: () => null,
+  }));
   daemon.respondSessionPermission.mockResolvedValue({ accepted: true });
   daemon.parseSessionPermissionEvent.mockReturnValue(null);
   vi.stubGlobal("confirm", vi.fn(() => true));
@@ -183,6 +200,143 @@ describe("RuntimesPage session list + history", () => {
     await waitFor(() => expect(screen.queryByText(/sess-ended/)).not.toBeInTheDocument());
   });
 
+  it("renders delete button for active session and deletes it (task-04)", async () => {
+    // task-04：去掉 {!active} 限制，active 会话也渲染删除按钮；点击 → confirm → deleteAgentSession
+    const sid = "sess-active2";
+    daemon.listAgentSessions.mockResolvedValue({
+      items: [
+        {
+          id: sid,
+          runtime_id: "r1",
+          lease_id: null,
+          provider: "claude",
+          status: "active",
+          agent_session_id: null,
+          config: null,
+          turn_count: 1,
+          created_at: "2026-06-19T09:00:00Z",
+          last_active_at: "2026-06-19T09:30:00Z",
+          ended_at: null,
+        },
+      ],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    });
+    daemon.getAgentSessionLogs.mockResolvedValue([]);
+
+    render(<RuntimesPage />);
+    const deleteButton = await screen.findByRole("button", {
+      name: `删除会话 ${sid}`,
+    });
+    expect(deleteButton).toBeInTheDocument();
+
+    fireEvent.click(deleteButton);
+
+    await waitFor(() =>
+      expect(daemon.deleteAgentSession).toHaveBeenCalledWith(sid),
+    );
+    expect(confirm).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.queryByText(/sess-active2/)).not.toBeInTheDocument(),
+    );
+  });
+
+  it("renders user-channel log as right-aligned primary bubble and others as left (task-02)", async () => {
+    const sid = "sess-mixed1";
+    daemon.listAgentSessions.mockResolvedValue({
+      items: [
+        {
+          id: sid,
+          runtime_id: "r1",
+          lease_id: null,
+          provider: "claude",
+          status: "ended",
+          agent_session_id: null,
+          config: null,
+          turn_count: 1,
+          created_at: "2026-06-19T09:00:00Z",
+          last_active_at: "2026-06-19T09:30:00Z",
+          ended_at: "2026-06-19T09:30:00Z",
+        },
+      ],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    });
+    daemon.getAgentSessionLogs.mockResolvedValue([
+      {
+        id: "lu",
+        run_id: "run-a",
+        timestamp: "2026-06-19T09:10:00Z",
+        channel: "user_input",
+        content_redacted: "user prompt here",
+      },
+      {
+        id: "ls",
+        run_id: "run-a",
+        timestamp: "2026-06-19T09:10:05Z",
+        channel: "stdout",
+        content_redacted: "agent reply here",
+      },
+    ]);
+
+    render(<RuntimesPage />);
+    fireEvent.click(await screen.findByText(/sess-mixed1/));
+
+    const userBubble = await screen.findByText("user prompt here");
+    const agentBubble = await screen.findByText("agent reply here");
+    // user → primary 右对齐气泡（内层 max-w div 是文本父级，外层 flex 控制对齐）
+    expect(userBubble.closest("div.bg-primary")).not.toBeNull();
+    expect(userBubble.parentElement).toHaveClass("justify-end");
+    expect(userBubble).toHaveClass("text-primary-foreground");
+    // agent → 左对齐白底气泡（border bg-card，非 primary）
+    expect(agentBubble.closest("div.bg-primary")).toBeNull();
+    expect(agentBubble.parentElement).toHaveClass("justify-start");
+    expect(agentBubble).toHaveClass("bg-card");
+  });
+
+  it("renders agent-only history without user log without crashing (task-02 D-005)", async () => {
+    const sid = "sess-agent1";
+    daemon.listAgentSessions.mockResolvedValue({
+      items: [
+        {
+          id: sid,
+          runtime_id: "r1",
+          lease_id: null,
+          provider: "claude",
+          status: "ended",
+          agent_session_id: null,
+          config: null,
+          turn_count: 1,
+          created_at: "2026-06-19T09:00:00Z",
+          last_active_at: "2026-06-19T09:30:00Z",
+          ended_at: "2026-06-19T09:30:00Z",
+        },
+      ],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    });
+    daemon.getAgentSessionLogs.mockResolvedValue([
+      {
+        id: "lo",
+        run_id: "run-old",
+        timestamp: "2026-06-19T09:10:00Z",
+        channel: "stdout",
+        content_redacted: "legacy agent only",
+      },
+    ]);
+
+    render(<RuntimesPage />);
+    fireEvent.click(await screen.findByText(/sess-agent1/));
+
+    const bubble = await screen.findByText("legacy agent only");
+    // 旧会话无 user log：仅左对齐白底气泡，不报错
+    expect(bubble.closest("div.bg-primary")).toBeNull();
+    expect(bubble.parentElement).toHaveClass("justify-start");
+  });
+
   it("loads an active session into read-only history view (ql-20260619-007)", async () => {
     // ql-007 回归：active 会话选中后不再走 live 空白分支，统一只读回看历史日志。
     // sid 取 12 字符以内避免 shortId() 截断（>12 会变成「前8…后4」）。
@@ -230,5 +384,129 @@ describe("RuntimesPage session list + history", () => {
     );
     // 只读视图：无 live 面板的发送控件
     expect(screen.queryByTitle(/发送/)).not.toBeInTheDocument();
+  });
+
+  /* ---------- task-11：续聊按钮 + attach 切换 ---------- */
+
+  async function renderWithSession(session: Record<string, unknown>) {
+    daemon.listAgentSessions.mockResolvedValue({
+      items: [session],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    });
+    const utils = render(<RuntimesPage />);
+    return utils;
+  }
+
+  function claudeEndedSession(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "sess-resume1",
+      runtime_id: "r1",
+      lease_id: null,
+      provider: "claude",
+      status: "ended",
+      agent_session_id: "ag-123",
+      config: null,
+      turn_count: 3,
+      created_at: "2026-06-19T09:00:00Z",
+      last_active_at: "2026-06-19T09:30:00Z",
+      ended_at: "2026-06-19T09:30:00Z",
+      ...overrides,
+    };
+  }
+
+  it("AC-11-01 ended claude 会话（有 agent_session_id）回看显示可点「继续对话」按钮", async () => {
+    await renderWithSession(claudeEndedSession());
+    // 点选会话进历史回看
+    fireEvent.click(await screen.findByText(/sess-resume1/));
+    const btn = await screen.findByRole("button", { name: /继续对话/ });
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("AC-11-02 codex 会话回看：续聊按钮置灰 + title 提示", async () => {
+    await renderWithSession(claudeEndedSession({ provider: "codex" }));
+    fireEvent.click(await screen.findByText(/sess-resume1/));
+    const btn = await screen.findByRole("button", { name: /继续对话/ });
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    expect(btn.getAttribute("title")).toMatch(/codex 暂不支持续聊/);
+  });
+
+  it("AC-11-03 无 agent_session_id failed：按钮置灰 + title 提示", async () => {
+    await renderWithSession(
+      claudeEndedSession({ status: "failed", agent_session_id: null }),
+    );
+    fireEvent.click(await screen.findByText(/sess-resume1/));
+    const btn = await screen.findByRole("button", { name: /继续对话/ });
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    expect(btn.getAttribute("title")).toMatch(/会话未建立/);
+  });
+
+  it("AC-11-04 active 会话回看：不显示续聊按钮", async () => {
+    await renderWithSession(
+      claudeEndedSession({ status: "active", ended_at: null }),
+    );
+    fireEvent.click(await screen.findByText(/sess-resume1/));
+    // 等待历史视图渲染（logs 加载）
+    await waitFor(() => expect(daemon.getAgentSessionLogs).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: /继续对话/ })).not.toBeInTheDocument();
+  });
+
+  it("AC-11-05 点击续聊：reopenSession → 右侧切 attach panel（建 SSE + 预填历史 turn）", async () => {
+    daemon.getAgentSessionLogs.mockResolvedValue([
+      {
+        id: "lu1", run_id: "run-x", timestamp: "t1",
+        channel: "user_input", content_redacted: "历史用户提问",
+      },
+      {
+        id: "ls1", run_id: "run-x", timestamp: "t2",
+        channel: "stdout", content_redacted: "历史 agent 回答",
+      },
+    ]);
+    await renderWithSession(claudeEndedSession());
+    fireEvent.click(await screen.findByText(/sess-resume1/));
+    // 等历史加载
+    await waitFor(() => expect(screen.getByText(/历史用户提问/)).toBeInTheDocument());
+
+    fireEvent.click(await screen.findByRole("button", { name: /继续对话/ }));
+
+    await waitFor(() =>
+      expect(daemon.reopenSession).toHaveBeenCalledWith("sess-resume1"),
+    );
+    // 右侧切 attach panel：InteractiveSessionPanel header 「交互式会话」可见
+    await waitFor(() =>
+      expect(screen.getByText(/交互式会话/)).toBeInTheDocument(),
+    );
+    // attach panel 建立 SSE（streamSession 以 sess-resume1 调用）
+    await waitFor(() =>
+      expect(daemon.streamSession).toHaveBeenCalledWith(
+        "sess-resume1",
+        expect.anything(),
+      ),
+    );
+  });
+
+  it("AC-11-06 reopen 失败：setListError 提示，不切 attach", async () => {
+    const { ApiError } = await import("@/lib/api");
+    daemon.reopenSession.mockRejectedValue(
+      new ApiError(409, {
+        code: "DAEMON_SESSION_OFFLINE",
+        message: "daemon offline",
+        request_id: null,
+        details: null,
+      }),
+    );
+    await renderWithSession(claudeEndedSession());
+    fireEvent.click(await screen.findByText(/sess-resume1/));
+    fireEvent.click(await screen.findByRole("button", { name: /继续对话/ }));
+
+    await waitFor(() =>
+      expect(daemon.reopenSession).toHaveBeenCalledWith("sess-resume1"),
+    );
+    // 错误提示出现
+    await waitFor(() => expect(screen.getByText(/daemon offline/)).toBeInTheDocument());
+    // 仍在历史回看（未切 attach）
+    expect(screen.getByText(/历史回看/)).toBeInTheDocument();
+    expect(daemon.streamSession).not.toHaveBeenCalled();
   });
 });

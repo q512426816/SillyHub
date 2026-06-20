@@ -1307,7 +1307,8 @@ export class Daemon {
       // task-04：交互式会话控制消息（SESSION_INJECT/INTERRUPT/END）路由到 SessionManager。
       case MSG.SESSION_INJECT:
       case MSG.SESSION_INTERRUPT:
-      case MSG.SESSION_END: {
+      case MSG.SESSION_END:
+      case MSG.SESSION_RESUME: {
         // 非阻塞分发（同 task_available 风格，不阻塞 WS 接收）。
         void this._routeSessionControl(msgType, rawPayload).catch((e) => {
           this._logger.error('session_control_failed', { type: msgType, error: e });
@@ -1342,6 +1343,13 @@ export class Daemon {
   ): Promise<void> {
     if (!this._sessionManager) {
       this._logger.warn('session_control_no_manager', { type: msgType });
+      return;
+    }
+    // task-08（session-history-enhance / FR-2）：SESSION_RESUME 在 session 尚未在
+    // 内存 SessionStore 时到达（用户 reopen 历史 session），不能走下面 get(state)
+    // + leaseId 匹配的 inject/end 校验路径——分流到 resume 分支。
+    if (msgType === MSG.SESSION_RESUME) {
+      await this._routeSessionResume(raw);
       return;
     }
     const sessionId =
@@ -1409,6 +1417,70 @@ export class Daemon {
         this._logger.warn('session_control_unknown_type', { type: msgType });
       }
     }
+  }
+
+  /**
+   * task-08（session-history-enhance / FR-2）：路由 backend SESSION_RESUME。
+   *
+   * 与 INJECT/INTERRUPT/END 不同：resume 时目标 session 尚未在内存 SessionStore
+   *（已 end 或 daemon 进程重启），用 backend 下发的 agent_session_id 调
+   * SessionManager.restoreAndReconnect（driver.start({resume}) 跨进程还原 SDK 上下文，
+   * spike D3）→ 随后 markReconnected 切 active → backend 收 confirm 切 status=active。
+   *
+   * 字段名 snake/camel 双写归一化（与 SESSION_INJECT 同风格，ql-20260616-006）：
+   * backend 发 snake_case（task-07），daemon 入口映射到 PersistedSessionRecord
+   *（camelCase），避免字段名漂移导致丢 resume。
+   *
+   * 边界（task-08.md AC-05）：
+   *   - payload 缺 session_id / agent_session_id → warn 丢弃，不 resume；
+   *   - restoreAndReconnect 抛错（provider≠claude / session 已存在 / driver.start 失败）
+   *     → 由上层 _handleWsMessage 的 void Promise catch 记 error，不崩主循环；
+   *     restoreAndReconnect 内部已收敛 driver.start 抛错（onSessionEnd(failed)）。
+   */
+  private async _routeSessionResume(
+    raw: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this._sessionManager) {
+      // 与 _routeSessionControl 同风格：防御未来其它调用路径 NPE。
+      this._logger.warn('session_resume received but SessionManager unavailable');
+      return;
+    }
+    const sessionId =
+      (raw.session_id as string | undefined) ?? (raw.sessionId as string | undefined) ?? '';
+    const leaseId =
+      (raw.lease_id as string | undefined) ?? (raw.leaseId as string | undefined) ?? '';
+    const agentSessionId =
+      (raw.agent_session_id as string | undefined) ??
+      (raw.agentSessionId as string | undefined) ??
+      '';
+    if (!sessionId || !agentSessionId) {
+      // AC-05：缺 session_id / agent_session_id（无 SDK resume key）→ 拒绝 + warn。
+      this._logger.warn('session_resume_missing_fields', {
+        session_id: sessionId,
+        agent_session_id: agentSessionId,
+        lease_id: leaseId,
+      });
+      return;
+    }
+    const provider =
+      ((raw.provider as string | undefined) ?? 'claude') === 'codex' ? 'codex' : 'claude';
+    const record: PersistedSessionRecord = {
+      sessionId,
+      leaseId,
+      agentSessionId,
+      cwd: (raw.cwd as string | undefined) ?? '',
+      provider,
+      // backend reopen payload 不带 turnCount/lastActiveAt（非恢复必需），
+      // 给合理默认：turnCount=0（新进程无内存计数），lastActiveAt=now。
+      turnCount: 0,
+      lastActiveAt: Date.now(),
+    };
+    // restoreAndReconnect 内部 new InputQueue + driver.start({resume}) + fire
+    // consume 协程；成功返回后调 markReconnected 切 active（resume 是 daemon 主动
+    // 触发的 reopen，无需 backend 二次 confirm）。
+    await this._sessionManager!.restoreAndReconnect(record);
+    await this._sessionManager!.markReconnected(sessionId);
+    this._logger.info('session_resume_ok', { session_id: sessionId, lease_id: leaseId });
   }
 
   /**

@@ -101,6 +101,21 @@ export const MSG = {
   SESSION_END: 'daemon:session_end',
 
   /**
+   * Server → Daemon：恢复已结束/失联的交互式会话（session-history-enhance task-08 / FR-2）。
+   *
+   * backend（task-07）在用户 reopen 历史会话时下发：daemon 此时该 session 尚未在
+   * 内存 SessionStore（已 end 或进程重启），用 payload 里的 agent_session_id 调
+   * SessionManager.restoreAndReconnect（driver.start({resume}) 跨进程还原上下文），
+   * 随后 markReconnected 切 active → 上报 confirm → backend status=active。
+   *
+   * payload（snake_case，与 backend DAEMON_MSG_SESSION_RESUME 同名常量逐字对齐）：
+   *   { session_id, lease_id, agent_session_id, cwd, provider, runtime_id }
+   * daemon 入口归一化为 PersistedSessionRecord（camelCase），与 ql-20260616-006
+   * 同风格的 snake/camel 双写归一化（避免 task_no_lease_id 类丢消息）。
+   */
+  SESSION_RESUME: 'daemon:session_resume',
+
+  /**
    * Daemon → Server：权限审批请求（FR-07 / D-007）。
    *
    * v3 SDK 语义：ClaudeSdkDriver.canUseTool 回调被 SDK 触发时，

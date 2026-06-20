@@ -25,6 +25,7 @@ const sessionApi = vi.hoisted(() => ({
   interruptSession: vi.fn(),
   endSession: vi.fn(),
   streamSession: vi.fn(),
+  getAgentSession: vi.fn(),
 }));
 
 vi.mock("@/lib/daemon", async () => {
@@ -36,6 +37,7 @@ vi.mock("@/lib/daemon", async () => {
     interruptSession: sessionApi.interruptSession,
     endSession: sessionApi.endSession,
     streamSession: sessionApi.streamSession,
+    getAgentSession: sessionApi.getAgentSession,
   };
 });
 
@@ -555,5 +557,209 @@ describe("InteractiveSessionPanel", () => {
     // 仍是「已中止」（终态幂等：killed 不被 completed 覆盖）
     expect(screen.getByText(/已中止/)).toBeInTheDocument();
     expect(screen.queryByText(/已完成/)).not.toBeInTheDocument();
+  });
+
+  /* ---------- task-10：attach 模式 ---------- */
+
+  function makeAttachTurns() {
+    return [
+      {
+        runId: "run-old-1",
+        turn: 1,
+        prompt: "历史提问",
+        output: "历史回答",
+        status: "completed" as const,
+        seenLogIds: new Set<string>(),
+      },
+    ];
+  }
+
+  it("AC-10-01 attach 模式 mount：建 SSE + 预填 initialTurns + status reconnecting", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    // 首次轮询返回 reconnecting（避免立刻转 active）
+    sessionApi.getAgentSession.mockResolvedValue({
+      id: "sess-attach", runtime_id: null, lease_id: null,
+      provider: "claude", status: "reconnecting", agent_session_id: "ag-1",
+      config: null, turn_count: 1, created_at: "t", last_active_at: null, ended_at: null,
+    });
+
+    setupPanel({ attachSessionId: "sess-attach", initialTurns: makeAttachTurns() });
+
+    // 建立 SSE（attachSessionId）
+    await waitFor(() => {
+      expect(sessionApi.streamSession).toHaveBeenCalledTimes(1);
+      expect(sessionApi.streamSession.mock.calls[0]![0]).toBe("sess-attach");
+    });
+    // 预填历史 turn
+    expect(screen.getByText(/历史提问/)).toBeInTheDocument();
+    expect(screen.getByText(/历史回答/)).toBeInTheDocument();
+    // reconnecting → 输入禁用 + placeholder
+    const input = screen.getByPlaceholderText(/恢复会话中/) as HTMLTextAreaElement;
+    expect(input.disabled).toBe(true);
+  });
+
+  it("AC-10-03 轮询到 active → status active + 输入启用 + 清轮询", async () => {
+    vi.useFakeTimers();
+    try {
+      const stream = makeStreamMock();
+      sessionApi.streamSession.mockImplementation(stream.factory);
+      // 第一次轮询 reconnecting，第二次 active
+      sessionApi.getAgentSession
+        .mockResolvedValueOnce({
+          id: "sess-attach", runtime_id: null, lease_id: null,
+          provider: "claude", status: "reconnecting", agent_session_id: "ag-1",
+          config: null, turn_count: 1, created_at: "t", last_active_at: null, ended_at: null,
+        })
+        .mockResolvedValueOnce({
+          id: "sess-attach", runtime_id: null, lease_id: null,
+          provider: "claude", status: "active", agent_session_id: "ag-1",
+          config: null, turn_count: 1, created_at: "t", last_active_at: null, ended_at: null,
+        });
+
+      setupPanel({ attachSessionId: "sess-attach", initialTurns: makeAttachTurns() });
+
+      // 第一次轮询（reconnecting）
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+      expect(sessionApi.getAgentSession).toHaveBeenCalledTimes(1);
+      // 仍 reconnecting，输入禁用
+      expect((screen.getByPlaceholderText(/恢复会话中/) as HTMLTextAreaElement).disabled).toBe(true);
+
+      // 第二次轮询（active）
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+      expect(sessionApi.getAgentSession).toHaveBeenCalledTimes(2);
+
+      // status active → 输入启用 + placeholder 继续追问（fake timers 下 advanceTimersByTimeAsync 已 flush）
+      const activeInput = screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement;
+      expect(activeInput.disabled).toBe(false);
+
+      // 不再轮询（active 已清 interval）
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+      expect(sessionApi.getAgentSession).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("AC-10-04 轮询超时回退 failed（保留只读历史 + 提示）", async () => {
+    vi.useFakeTimers();
+    try {
+      const stream = makeStreamMock();
+      sessionApi.streamSession.mockImplementation(stream.factory);
+      // 一直 reconnecting
+      sessionApi.getAgentSession.mockResolvedValue({
+        id: "sess-attach", runtime_id: null, lease_id: null,
+        provider: "claude", status: "reconnecting", agent_session_id: "ag-1",
+        config: null, turn_count: 1, created_at: "t", last_active_at: null, ended_at: null,
+      });
+
+      setupPanel({ attachSessionId: "sess-attach", initialTurns: makeAttachTurns() });
+
+      // 推进 10 次（1500ms × 10 = 15000ms 触发超时）
+      for (let i = 0; i < 10; i++) {
+        await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+      }
+      // 回退 failed + 提示
+      expect(screen.getByText(/会话恢复失败/)).toBeInTheDocument();
+      // 历史仍保留（只读）
+      expect(screen.getByText(/历史提问/)).toBeInTheDocument();
+      // 输入禁用（failed）
+      const input = screen.getByPlaceholderText(/会话已结束/) as HTMLTextAreaElement;
+      expect(input.disabled).toBe(true);
+      // 轮询已停
+      const callsAfterTimeout = sessionApi.getAgentSession.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+      expect(sessionApi.getAgentSession.mock.calls.length).toBe(callsAfterTimeout);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("AC-10-04b 轮询到 failed → 回退只读", async () => {
+    vi.useFakeTimers();
+    try {
+      const stream = makeStreamMock();
+      sessionApi.streamSession.mockImplementation(stream.factory);
+      sessionApi.getAgentSession.mockResolvedValue({
+        id: "sess-attach", runtime_id: null, lease_id: null,
+        provider: "claude", status: "failed", agent_session_id: "ag-1",
+        config: null, turn_count: 1, created_at: "t", last_active_at: null, ended_at: null,
+      });
+
+      setupPanel({ attachSessionId: "sess-attach", initialTurns: makeAttachTurns() });
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+      expect(screen.getByText(/会话恢复失败/)).toBeInTheDocument();
+      // 轮询停
+      const callsAfterFail = sessionApi.getAgentSession.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+      expect(sessionApi.getAgentSession.mock.calls.length).toBe(callsAfterFail);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("AC-10-06 unmount：清轮询 interval + close SSE", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.getAgentSession.mockResolvedValue({
+      id: "sess-attach", runtime_id: null, lease_id: null,
+      provider: "claude", status: "reconnecting", agent_session_id: "ag-1",
+      config: null, turn_count: 1, created_at: "t", last_active_at: null, ended_at: null,
+    });
+
+    const { unmount } = setupPanel({ attachSessionId: "sess-attach", initialTurns: makeAttachTurns() });
+    const conn = stream.conn;
+    unmount();
+    expect(conn.closeSpy).toHaveBeenCalled();
+  });
+
+  it("AC-10-05 attach active 后发送走 inject", async () => {
+    vi.useFakeTimers();
+    try {
+      const stream = makeStreamMock();
+      sessionApi.streamSession.mockImplementation(stream.factory);
+      sessionApi.getAgentSession.mockResolvedValue({
+        id: "sess-attach", runtime_id: null, lease_id: null,
+        provider: "claude", status: "active", agent_session_id: "ag-1",
+        config: null, turn_count: 1, created_at: "t", last_active_at: null, ended_at: null,
+      });
+      sessionApi.injectSession.mockResolvedValue({
+        session_id: "sess-attach", run_id: "run-new", status: "active",
+      });
+
+      setupPanel({ attachSessionId: "sess-attach", initialTurns: makeAttachTurns() });
+
+      // 等待首次轮询转 active
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+      const input = screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement;
+      expect(input.disabled).toBe(false);
+      fireEvent.change(input, { target: { value: "续聊内容" } });
+      await act(async () => {
+        fireEvent.click(screen.getByTitle("发送"));
+      });
+
+      expect(sessionApi.injectSession).toHaveBeenCalledTimes(1);
+      expect(sessionApi.injectSession).toHaveBeenCalledWith("sess-attach", "续聊内容");
+      // 不调 createSession（attach 不走新建）
+      expect(sessionApi.createSession).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 10000);
+
+  it("无 attachSessionId：不影响现有 idle→create 路径（默认模式）", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+
+    setupPanel(); // 无 attach props
+    // 不应立刻建 SSE / 轮询
+    expect(sessionApi.streamSession).not.toHaveBeenCalled();
+    expect(sessionApi.getAgentSession).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText(/创建会话/)).toBeTruthy();
   });
 });

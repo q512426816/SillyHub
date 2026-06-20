@@ -26,7 +26,9 @@ from app.modules.daemon.protocol import (
     DAEMON_MSG_SESSION_END,
     DAEMON_MSG_SESSION_INJECT,
     DAEMON_MSG_SESSION_INTERRUPT,
+    DAEMON_MSG_SESSION_RESUME,
 )
+from app.modules.daemon.schema import SessionReopenResponse
 from app.modules.git_gateway.service import redact_output
 from app.modules.workspace.model import AgentRunWorkspace, Workspace
 
@@ -170,11 +172,6 @@ class DaemonSessionNotActive(AppError):
     http_status = 409
 
 
-class DaemonSessionDeleteConflict(AppError):
-    code = "HTTP_409_DAEMON_SESSION_DELETE_CONFLICT"
-    http_status = 409
-
-
 class DaemonSessionTurnConflict(AppError):
     code = "HTTP_409_DAEMON_SESSION_TURN_CONFLICT"
     http_status = 409
@@ -187,6 +184,46 @@ class DaemonSessionNoCurrentRun(AppError):
 
 class DaemonSessionInvariantViolation(AppError):
     code = "HTTP_409_DAEMON_SESSION_INVARIANT_VIOLATION"
+    http_status = 409
+
+
+# ── Reopen (resume) errors (task-05 / FR-2 / D-002@v1, D-004@v1) ────────────
+
+
+class DaemonSessionResumeUnsupported(AppError):
+    """Target session provider is not resumable (provider != "claude").
+
+    Only the Claude SDK supports ``--resume <session_id>``; codex/other
+    providers cannot be reopened, so the ended session stays terminal.
+    """
+
+    code = "HTTP_409_DAEMON_SESSION_RESUME_UNSUPPORTED"
+    http_status = 409
+
+
+class DaemonSessionNoAgentSession(AppError):
+    """Session has ``agent_session_id IS NULL`` (D-004@v1).
+
+    A session that never reached a successful create-time SDK handshake (or
+    whose create failed before the SDK returned a session id) has no SDK
+    session to resume — reopen is impossible. The session is NOT mutated.
+    """
+
+    code = "HTTP_409_DAEMON_SESSION_NO_AGENT_SESSION"
+    http_status = 409
+
+
+class DaemonOffline(AppError):
+    """Target runtime has no active WS connection — reopen needs a live daemon.
+
+    Reopen drives an SDK resume ON the owning daemon (task-08), so the daemon
+    must be connected. Distinct from :class:`DaemonRuntimeOffline` (504, used
+    by RPC/inject paths where a stale lease must surface as a gateway fault):
+    reopen is a user-initiated optimistic action, so 409 CONFLICT fits the
+    "try again once the runtime reconnects" semantics better than a 5xx.
+    """
+
+    code = "HTTP_409_DAEMON_OFFLINE"
     http_status = 409
 
 
@@ -1659,6 +1696,21 @@ class DaemonService:
             session.turn_count = 1
             session.last_active_at = now
             self._session.add(session)
+
+            # task-01 / FR-01 / D-005@v1：首 turn 落一条 channel="user_input" 的
+            # AgentRunLog，让历史回看能看到用户发的首 prompt（与 agent 输出
+            # stdout/stderr/tool_call 并列）。prompt 经 content_redacted 脱敏
+            # （与 submit_messages 一致的 ``[:5000]`` 截断），user_input channel
+            # 显式写、不经 _channel_from_event_type（与 agent service 的
+            # USER_INPUT_CHANNEL 标准保持一致）。
+            self._session.add(
+                AgentRunLog(
+                    run_id=run.id,
+                    channel="user_input",
+                    content_redacted=prompt[:5000],
+                    timestamp=now,
+                )
+            )
             await self._session.commit()
             await self._session.refresh(session)
             await self._session.refresh(run)
@@ -1826,6 +1878,17 @@ class DaemonService:
             session.turn_count = (session.turn_count or 0) + 1
             session.last_active_at = now
             self._session.add(session)
+
+            # task-01 / FR-02 / D-005@v1：后续 turn 同样落一条 channel="user_input"
+            # AgentRunLog，挂在新建 run 上（首 turn 在 create_session 已落）。
+            self._session.add(
+                AgentRunLog(
+                    run_id=run.id,
+                    channel="user_input",
+                    content_redacted=prompt[:5000],
+                    timestamp=now,
+                )
+            )
 
             await self._session.commit()
             await self._session.refresh(session)
@@ -2470,12 +2533,209 @@ class DaemonService:
         items = list((await self._session.execute(list_stmt)).scalars().all())
         return items, total
 
+    async def get_agent_session(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> AgentSession:
+        """Return a single owned AgentSession (task-06 / FR-2 / D-002@v1).
+
+        Read-only single-read counterpart to :meth:`list_agent_sessions`.
+        Ownership is enforced by the ``user_id`` filter so a missing OR
+        cross-user session both surface as 404 without leaking existence
+        (mirrors ``_get_owned_session_for_update`` minus the row lock — no
+        write here, so FOR UPDATE would only add contention). Returns the ORM
+        row; the router serializes it via ``AgentSessionRead`` (same mapping
+        the list endpoint uses).
+        """
+        stmt = select(AgentSession).where(
+            AgentSession.id == session_id,
+            AgentSession.user_id == user_id,
+        )
+        session = (await self._session.execute(stmt)).scalar_one_or_none()
+        if session is None:
+            raise DaemonSessionNotFound(
+                f"AgentSession '{session_id}' not found.",
+                details={"session_id": str(session_id)},
+            )
+        return session
+
+    async def reopen_session(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> SessionReopenResponse:
+        """Reopen an ended Claude session for SDK resume (task-05+07 / FR-2).
+
+        Validation (task-05) + full transition (task-07): new interactive lease,
+        ``claim_token`` rotation, SESSION_RESUME WS. The daemon-side SDK resume
+        is task-08. This method:
+
+          1. SELECT AgentSession FOR UPDATE + ownership (user_id mismatch → 404,
+             no existence leak — mirrors :meth:`end_session`).
+          2. Pre-flight checks IN ORDER (first failure wins, see task-05 §边界):
+             - provider != "claude" → :class:`DaemonSessionResumeUnsupported`
+             - agent_session_id is None → :class:`DaemonSessionNoAgentSession`
+               (D-004: create-time handshake never produced an SDK session id)
+             - status in ACTIVE_SESSION_STATUSES → :class:`DaemonSessionNotActive`
+               (caller should use inject, not reopen)
+             - target runtime offline → :class:`DaemonOffline`
+          3. task-07 transition: create a NEW interactive lease (the original
+             ``completed`` lease is preserved untouched, design §6.2) with a
+             fresh ``claim_token``, point ``session.lease_id`` at it, flip
+             ``status="reconnecting"``, commit, then emit a best-effort
+             ``daemon:session_resume`` WS (``agent_session_id`` is the SDK resume
+             key and is preserved verbatim). The method signature + return shape
+             are final.
+
+        ``FOR UPDATE`` serializes concurrent reopen on the same row; a second
+        reopen landing after the first commits is caught by the status check
+        (now ``reconnecting`` ∈ ACTIVE_SESSION_STATUSES → NOT_ACTIVE).
+        """
+        session = await self._get_owned_session_for_update(session_id, user_id)
+
+        # Pre-flight checks (order is load-bearing — see task-05 §边界处理).
+        if session.provider != "claude":
+            raise DaemonSessionResumeUnsupported(
+                f"Session '{session_id}' provider '{session.provider}' does not "
+                f"support resume (only claude).",
+                details={
+                    "session_id": str(session_id),
+                    "provider": session.provider,
+                },
+            )
+        if not session.agent_session_id:
+            raise DaemonSessionNoAgentSession(
+                f"Session '{session_id}' has no agent_session_id to resume.",
+                details={"session_id": str(session_id)},
+            )
+        if session.status in ACTIVE_SESSION_STATUSES:
+            raise DaemonSessionNotActive(
+                f"Session '{session_id}' is still {session.status}; use inject instead of reopen.",
+                details={
+                    "session_id": str(session_id),
+                    "status": session.status,
+                },
+            )
+        # Runtime must be connected so the daemon can run the SDK resume.
+        runtime_id = session.runtime_id
+        if runtime_id is not None:
+            from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+            hub = get_daemon_ws_hub()
+            if not hub.is_connected(runtime_id):
+                raise DaemonOffline(
+                    f"Target runtime '{runtime_id}' is offline; reopen needs a "
+                    f"live daemon to run the SDK resume.",
+                    details={
+                        "session_id": str(session_id),
+                        "runtime_id": str(runtime_id),
+                    },
+                )
+
+        # ── task-07: full reopen transition (design §6.1/§6.2/§6.4/§14) ───────
+        # Do NOT revive the original (completed) lease — design §6.2: the ended
+        # lease stays ``completed`` for audit; a brand-new interactive lease is
+        # created with a fresh ``claim_token`` so a stale pre-reopen claim can
+        # never be replayed against the resumed session (matches
+        # recover_session_after_daemon_restart token rotation, task-10 §7).
+        now = datetime.now(UTC)
+        target_runtime_id = session.runtime_id
+        assert target_runtime_id is not None  # offline check above guarantees online
+
+        new_token = secrets.token_hex(32)
+        new_lease = DaemonTaskLease(
+            runtime_id=target_runtime_id,
+            agent_run_id=None,
+            kind="interactive",
+            status="pending",
+            lease_expires_at=None,  # NULL → expire_leases skips (D-005@v1)
+            attempt_number=1,
+            metadata_={
+                "session_id": str(session.id),
+                "agent_session_id": session.agent_session_id,
+                "provider": session.provider,
+                "claim_token": new_token,
+                "reopened_from_status": session.status,
+            },
+        )
+        self._session.add(new_lease)
+        await self._session.flush()  # populate new_lease.id before FK bind
+
+        # Switch session onto the new lease. agent_session_id stays — it is the
+        # SDK resume key and must never change. runtime_id is only updated if the
+        # caller targets a different daemon (none today; reopen always reuses
+        # session.runtime_id, but the branch is kept symmetric with create).
+        session.lease_id = new_lease.id
+        session.runtime_id = target_runtime_id
+        session.status = "reconnecting"
+        session.last_active_at = now
+        self._session.add(session)
+        await self._session.commit()
+        await self._session.refresh(session)
+        await self._session.refresh(new_lease)
+
+        # ── best-effort daemon:session_resume WS (design §6.4) ────────────────
+        # WS failure does NOT roll back the local reconnecting state — the daemon
+        # will converge on its own (pull/next-poll or recover-on-restart). The
+        # frontend surfaces reconnecting immediately. cwd is forwarded so the
+        # SDK resume runs in the original working directory (R-cwd).
+        resume_payload = {
+            "session_id": str(session.id),
+            "lease_id": str(new_lease.id),
+            "agent_session_id": session.agent_session_id,
+            "cwd": session.cwd,
+            "provider": session.provider,
+            "runtime_id": str(target_runtime_id),
+        }
+        try:
+            from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+            hub = get_daemon_ws_hub()
+            resume_ok = await hub.send_session_control(
+                target_runtime_id,
+                DAEMON_MSG_SESSION_RESUME,
+                resume_payload,
+            )
+            if not resume_ok:
+                log.warning(
+                    "session_resume_control_not_delivered",
+                    session_id=str(session.id),
+                    runtime_id=str(target_runtime_id),
+                    lease_id=str(new_lease.id),
+                )
+        except Exception:
+            # best-effort: any WS error stays a warning, local reconnecting holds.
+            log.warning(
+                "session_resume_control_send_failed",
+                session_id=str(session.id),
+                runtime_id=str(target_runtime_id),
+                lease_id=str(new_lease.id),
+                exc_info=True,
+            )
+
+        return SessionReopenResponse(
+            session_id=str(session.id),
+            status="reconnecting",
+        )
+
     async def delete_agent_session(
         self,
         session_id: uuid.UUID,
         user_id: uuid.UUID,
     ) -> None:
-        """Delete an owned terminal session while retaining its run history."""
+        """Delete an owned session while retaining its run history.
+
+        task-03 / FR-03 / D-003@v1: an active/pending/reconnecting session is no
+        longer rejected with 409 — the service first performs an internal end
+        reconciliation (best-effort SESSION_END WS + currentRun killed +
+        lease completed), mirroring :meth:`end_session`, then executes the
+        existing hard delete (sever ``agent_runs.agent_session_id`` foreign key
+        to preserve run/log history, then drop the session row). ended/failed
+        sessions are hard-deleted directly. Daemon-offline WS failure is a
+        warning only — the local end + delete still succeed so an offline daemon
+        can never strand a deletable active session.
+        """
         agent_session = (
             await self._session.execute(
                 select(AgentSession)
@@ -2491,14 +2751,20 @@ class DaemonService:
                 f"AgentSession '{session_id}' not found.",
                 details={"session_id": str(session_id)},
             )
+
         if agent_session.status in ACTIVE_SESSION_STATUSES:
-            raise DaemonSessionDeleteConflict(
-                "End the active session before deleting it.",
-                details={
-                    "session_id": str(session_id),
-                    "status": agent_session.status,
-                },
-            )
+            # Best-effort end reconciliation. Failures here MUST NOT bubble up:
+            # the caller asked to delete, so we still force the hard delete below
+            # (daemon offline is handled by its own idle-timeout on its side).
+            try:
+                await self._end_session_for_delete(agent_session)
+            except Exception:
+                log.warning(
+                    "session_delete_end_reconciliation_failed",
+                    session_id=str(session_id),
+                    status=agent_session.status,
+                    exc_info=True,
+                )
 
         await self._session.execute(
             update(AgentRun)
@@ -2507,6 +2773,76 @@ class DaemonService:
         )
         await self._session.delete(agent_session)
         await self._session.commit()
+
+    async def _end_session_for_delete(self, session: AgentSession) -> None:
+        """Internal end reconciliation used by delete_agent_session.
+
+        task-03 / D-003@v1: mirrors the core of :meth:`end_session` (WS +
+        run killed + lease completed) but never raises on WS failure and never
+        touches ``session.status`` beyond the converged ``ended`` — the caller
+        (delete) hard-deletes the row right after, so the session status is
+        effectively throwaway; only the run/lease convergence matters for audit.
+        Holds the same session row lock the caller already acquired.
+        """
+        from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+        # Best-effort SESSION_END (kill currentRun + clear SessionStore on daemon).
+        if session.runtime_id is not None:
+            hub = get_daemon_ws_hub()
+            try:
+                end_ok = await hub.send_session_control(
+                    session.runtime_id,
+                    DAEMON_MSG_SESSION_END,
+                    {
+                        "session_id": str(session.id),
+                        "lease_id": str(session.lease_id) if session.lease_id else "",
+                    },
+                )
+                if not end_ok:
+                    log.warning(
+                        "session_delete_end_control_send_failed",
+                        session_id=str(session.id),
+                        runtime_id=str(session.runtime_id),
+                    )
+            except Exception:
+                log.warning(
+                    "session_delete_end_control_send_failed",
+                    session_id=str(session.id),
+                    runtime_id=str(session.runtime_id),
+                    exc_info=True,
+                )
+
+        now = datetime.now(UTC)
+        # Kill the current non-terminal run if any (single-transaction convergence).
+        runs = (
+            (
+                await self._session.execute(
+                    select(AgentRun).where(AgentRun.agent_session_id == session.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for run in runs:
+            if run.status not in TERMINAL_TURN_STATUSES:
+                run.status = "killed"
+                run.finished_at = now
+                run.exit_code = -1
+                self._session.add(run)
+
+        # Complete the bound interactive lease (if any).
+        if session.lease_id is not None:
+            lease = await self._session.get(DaemonTaskLease, session.lease_id)
+            if lease is not None and lease.status not in (
+                "completed",
+                "cancelled",
+                "expired",
+            ):
+                lease.status = "completed"
+                lease.updated_at = now
+                self._session.add(lease)
+
+        await self._session.flush()
 
     async def get_agent_session_logs(
         self,

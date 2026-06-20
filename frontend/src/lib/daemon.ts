@@ -735,6 +735,44 @@ export async function deleteAgentSession(sessionId: string): Promise<void> {
   });
 }
 
+/* ---------- Session reopen + detail (task-09 / FR-2 / D-002@v1) ---------- */
+
+/**
+ * task-09：reopen 返回体。status 通常为 "active"（已恢复）。
+ * 409 业务码（ApiError.code）：
+ *   DAEMON_SESSION_RESUME_UNSUPPORTED / DAEMON_SESSION_NO_AGENT_SESSION
+ *   / DAEMON_SESSION_NOT_ACTIVE / DAEMON_OFFLINE
+ */
+export interface SessionReopenResponse {
+  session_id: string;
+  status: string;
+}
+
+/**
+ * POST /api/daemon/sessions/{id}/reopen — 恢复已结束的会话（task-05/06 端点）。
+ * 错误统一走 apiFetch → ApiError（含 409 业务码）。
+ */
+export async function reopenSession(
+  sessionId: string,
+): Promise<SessionReopenResponse> {
+  return apiFetch<SessionReopenResponse>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/reopen`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * GET /api/daemon/sessions/{id} — 单会话详情（task-06 端点）。
+ * reopen 后用于轮询 status，确认会话已恢复 active。
+ */
+export async function getAgentSession(
+  sessionId: string,
+): Promise<AgentSessionRead> {
+  return apiFetch<AgentSessionRead>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}`,
+  );
+}
+
 /**
  * GET /api/daemon/sessions/{id}/logs — 跨 AgentRun 的只读历史回看。
  * 日志按 run 分组返回，run_id 完整保留以便前端区分 turn 边界（D-005@v1）。

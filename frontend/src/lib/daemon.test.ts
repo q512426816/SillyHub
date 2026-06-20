@@ -12,9 +12,11 @@ import { useSession } from "@/stores/session";
 import {
   AgentSessionListResponseSchema,
   deleteAgentSession,
+  getAgentSession,
   getAgentSessionLogs,
   listAgentSessions,
   parseSessionPermissionEvent,
+  reopenSession,
   respondSessionPermission,
   type AgentSessionStatus,
 } from "@/lib/daemon";
@@ -192,6 +194,83 @@ describe("deleteAgentSession", () => {
     });
 
     await expect(deleteAgentSession("active-session")).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+// ── task-09: reopenSession + getAgentSession ─────────────────────────────────
+
+describe("reopenSession", () => {
+  it("POST /sessions/{id}/reopen with encoded id and returns {session_id, status}", async () => {
+    const h = mockFetch({
+      status: 200,
+      body: { session_id: "s-reopen", status: "active" },
+    });
+
+    const result = await reopenSession("sess a/b");
+
+    expect(result).toEqual({ session_id: "s-reopen", status: "active" });
+    const url = new URL(h.lastUrl());
+    expect(url.pathname).toBe("/api/daemon/sessions/sess%20a%2Fb/reopen");
+    expect(h.lastInit()?.method).toBe("POST");
+  });
+
+  it("maps 409 reopen conflicts to ApiError carrying business code", async () => {
+    mockFetch({
+      status: 409,
+      body: {
+        code: "DAEMON_SESSION_RESUME_UNSUPPORTED",
+        message: "provider does not support resume",
+        request_id: null,
+        details: null,
+      },
+    });
+
+    await expect(reopenSession("any")).rejects.toMatchObject({
+      name: "ApiError",
+      code: "DAEMON_SESSION_RESUME_UNSUPPORTED",
+      status: 409,
+    });
+    await expect(reopenSession("any")).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("getAgentSession", () => {
+  it("GET /sessions/{id} with encoded id and returns AgentSessionRead", async () => {
+    const body = {
+      id: "s1",
+      runtime_id: "r1",
+      lease_id: null,
+      provider: "claude",
+      status: "active",
+      agent_session_id: null,
+      config: { manual_approval: true },
+      turn_count: 2,
+      created_at: "2026-06-18T10:00:00Z",
+      last_active_at: "2026-06-18T10:05:00Z",
+      ended_at: null,
+    };
+    const h = mockFetch({ status: 200, body });
+
+    const result = await getAgentSession("sess a/b");
+
+    expect(result.id).toBe("s1");
+    expect(result.status).toBe("active");
+    const url = new URL(h.lastUrl());
+    expect(url.pathname).toBe("/api/daemon/sessions/sess%20a%2Fb");
+    expect(h.lastInit()?.method ?? "GET").toBe("GET");
+  });
+
+  it("maps 404 to ApiError", async () => {
+    mockFetch({
+      status: 404,
+      body: {
+        code: "HTTP_404_DAEMON_SESSION_NOT_FOUND",
+        message: "not found",
+        request_id: null,
+        details: null,
+      },
+    });
+    await expect(getAgentSession("any")).rejects.toBeInstanceOf(ApiError);
   });
 });
 

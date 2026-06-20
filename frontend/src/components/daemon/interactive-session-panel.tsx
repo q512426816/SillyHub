@@ -41,6 +41,7 @@ import {
   interruptSession,
   endSession,
   streamSession,
+  getAgentSession,
   PROVIDER_META,
   type InteractiveProvider,
   type SessionStreamConnection,
@@ -48,10 +49,10 @@ import {
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
 
-type SessionUiStatus = "idle" | "creating" | "active" | "ending" | "ended" | "failed";
+type SessionUiStatus = "idle" | "creating" | "active" | "ending" | "ended" | "failed" | "reconnecting";
 type TurnUiStatus = "pending" | "running" | "interrupting" | "completed" | "failed" | "killed";
 
-interface SessionTurnView {
+export interface SessionTurnView {
   runId: string;
   turn: number | null;
   prompt: string;
@@ -78,6 +79,11 @@ const INITIAL_VIEW: InteractiveSessionView = {
 
 const MAX_PROMPT_LEN = 8000;
 
+// task-10 attach 模式轮询常量
+const ATTACH_POLL_MS = 1500;
+const ATTACH_POLL_TIMEOUT_MS = 15000;
+const ATTACH_POLL_MAX_ATTEMPTS = Math.ceil(ATTACH_POLL_TIMEOUT_MS / ATTACH_POLL_MS); // 10
+
 function getProviderLabel(provider: string): string {
   return PROVIDER_META[provider]?.label ?? provider;
 }
@@ -99,6 +105,13 @@ export interface InteractiveSessionPanelProps {
   model: string | null;
   onModelChange: (next: string | null) => void;
   hasOnlineProvider: boolean;
+  /**
+   * task-10 attach 模式：给定 attachSessionId 时不走 idle→create 新建，
+   * 而是建 SSE 订阅 + 预填 initialTurns + 轮询 getAgentSession 直到 active。
+   * 成功 active 后续发送走 active 分支（inject）。
+   */
+  attachSessionId?: string;
+  initialTurns?: SessionTurnView[];
 }
 
 export function InteractiveSessionPanel({
@@ -107,12 +120,16 @@ export function InteractiveSessionPanel({
   model,
   onModelChange,
   hasOnlineProvider,
+  attachSessionId,
+  initialTurns,
 }: InteractiveSessionPanelProps) {
   const [provider, setProvider] = useState(defaultProvider);
   const [input, setInput] = useState("");
   const [view, setView] = useState<InteractiveSessionView>(INITIAL_VIEW);
   const scrollRef = useRef<HTMLDivElement>(null);
   const streamConnRef = useRef<SessionStreamConnection | null>(null);
+  // task-10 attach 模式轮询句柄（unmount / 转出 attach 模式时清理）
+  const attachPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // 当在线 provider 变化且当前选中的不再可用，回退到默认。
   useEffect(() => {
@@ -181,9 +198,88 @@ export function InteractiveSessionPanel({
     );
   }, []);
 
-  // unmount / session 切换：显式 close 旧 SSE
+  // task-10 attach 模式：mount / attachSessionId 变化时建 SSE + 预填 turn + 进 reconnecting。
+  // 轮询单独 effect 处理（见下）。
+  useEffect(() => {
+    if (!attachSessionId) return;
+    // 防御：清旧 SSE（重复 attach / props 变化重建）
+    if (streamConnRef.current) {
+      streamConnRef.current.close();
+      streamConnRef.current = null;
+    }
+    establishStream(attachSessionId);
+    setView({
+      sessionId: attachSessionId,
+      status: "reconnecting",
+      currentRunId: null,
+      turns: initialTurns ?? [],
+      errorMsg: null,
+    });
+    // initialTurns 仅在 mount 时读取，避免 props 变更抖动（react-hooks/exhaustive-deps 忽略）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachSessionId, establishStream]);
+
+  // task-10 attach 轮询：每 ATTACH_POLL_MS 调 getAgentSession，
+  // active → 转 active + 清轮询 + 启用输入；failed 或累计超时 → 回退 failed（只读）。
+  useEffect(() => {
+    if (!attachSessionId) return;
+    let attempts = 0;
+    let cancelled = false;
+    const stop = () => {
+      if (attachPollRef.current) {
+        clearInterval(attachPollRef.current);
+        attachPollRef.current = null;
+      }
+    };
+    const tick = async () => {
+      if (cancelled) return;
+      attempts += 1;
+      try {
+        const detail = await getAgentSession(attachSessionId);
+        if (cancelled) return;
+        if (detail.status === "active") {
+          stop();
+          setView((prev) => ({ ...prev, status: "active", errorMsg: null }));
+        } else if (detail.status === "failed") {
+          stop();
+          setView((prev) => ({
+            ...prev,
+            status: "failed",
+            errorMsg: "会话恢复失败，可能上下文已失效",
+          }));
+        }
+        // reconnecting / ended / pending → 继续轮询（由超时兜底）
+      } catch {
+        if (cancelled) return;
+        // 单次网络错误不立刻回退，累计超时会兜底
+      }
+      if (attempts >= ATTACH_POLL_MAX_ATTEMPTS) {
+        stop();
+        setView((prev) =>
+          prev.status === "active"
+            ? prev
+            : {
+                ...prev,
+                status: "failed",
+                errorMsg: "会话恢复失败，可能上下文已失效",
+              },
+        );
+      }
+    };
+    attachPollRef.current = setInterval(() => { void tick(); }, ATTACH_POLL_MS);
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, [attachSessionId]);
+
+  // unmount / session 切换：显式 close 旧 SSE + 清轮询 interval
   useEffect(() => {
     return () => {
+      if (attachPollRef.current) {
+        clearInterval(attachPollRef.current);
+        attachPollRef.current = null;
+      }
       if (streamConnRef.current) {
         streamConnRef.current.close();
         streamConnRef.current = null;
@@ -398,6 +494,7 @@ export function InteractiveSessionPanel({
   const sendingDisabled =
     view.status === "creating" ||
     view.status === "ending" ||
+    view.status === "reconnecting" || // task-10 attach 恢复中
     (view.status === "active" && view.currentRunId !== null) || // turn 级串行
     view.status === "ended" ||
     view.status === "failed" ||
@@ -410,6 +507,7 @@ export function InteractiveSessionPanel({
 
   const placeholder = useMemo(() => {
     if (view.status === "ended" || view.status === "failed") return "会话已结束，请新建会话";
+    if (view.status === "reconnecting") return "恢复会话中…";
     if (view.status === "creating") return "正在创建会话...";
     if (view.status === "ending") return "正在结束会话...";
     if (view.status === "active" && view.currentRunId) return "等待本轮完成...";
@@ -454,7 +552,7 @@ export function InteractiveSessionPanel({
 
         <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
           <div className="space-y-1">
-            <label className="text-[11px] font-medium text-muted-foreground">Agent provider</label>
+            <label className="text-[11px] font-medium text-muted-foreground">智能体提供方</label>
             <select
               value={provider}
               onChange={(e) => setProvider(e.target.value)}
@@ -469,11 +567,11 @@ export function InteractiveSessionPanel({
             </select>
           </div>
           <div className="space-y-1">
-            <label className="text-[11px] font-medium text-muted-foreground">Agent model</label>
+            <label className="text-[11px] font-medium text-muted-foreground">智能体模型</label>
             <AgentModelInput
               value={model}
               onChange={onModelChange}
-              placeholder="model override"
+              placeholder="模型覆盖"
               className="w-full"
               disabled={view.status === "active" || view.status === "ending" || view.status === "creating"}
             />
@@ -516,12 +614,12 @@ export function InteractiveSessionPanel({
             <p className="text-xs font-medium text-foreground">
               {hasOnlineProvider
                 ? `${getProviderLabel(provider)} 已就绪`
-                : "没有在线 Daemon"}
+                : "没有在线守护进程"}
             </p>
             <p className="mt-1 max-w-[260px] text-[11px] text-muted-foreground">
               {hasOnlineProvider
                 ? "首条消息将创建会话；单条 SSE 贯穿整段对话，可中途追问、打断本轮或结束会话。"
-                : "启动 daemon 后即可发送。"}
+                : "启动守护进程后即可发送。"}
             </p>
           </div>
         ) : (
@@ -593,7 +691,7 @@ function TurnStatusBadge({
   turn: number | null;
 }) {
   const label =
-    turn != null ? `Turn ${turn}` : "Turn";
+    turn != null ? `第 ${turn} 轮` : "轮次";
   const statusLabel: Record<TurnUiStatus, string> = {
     pending: "排队中",
     running: "运行中",

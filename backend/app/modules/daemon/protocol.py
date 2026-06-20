@@ -41,6 +41,10 @@ DAEMON_MSG_RPC_RESULT = "daemon:rpc_result"  # RPC response (result OR error) ke
 DAEMON_MSG_SESSION_INJECT = "daemon:session_inject"  # Server → Daemon, FR-02
 DAEMON_MSG_SESSION_INTERRUPT = "daemon:session_interrupt"  # Server → Daemon, FR-04
 DAEMON_MSG_SESSION_END = "daemon:session_end"  # Server → Daemon, FR-05
+# task-06 / FR-2: reopen (resume) an ended claude session on the owning daemon.
+# Daemon side runs SDK resume (task-08); echoed verbatim as
+# `daemon:session_resume` in sillyhub-daemon/src/protocol.ts.
+DAEMON_MSG_SESSION_RESUME = "daemon:session_resume"  # Server → Daemon, FR-2
 DAEMON_MSG_PERMISSION_REQUEST = "daemon:permission_request"  # Daemon → Server, FR-07 / D-007
 DAEMON_MSG_PERMISSION_RESPONSE = "daemon:permission_response"  # Server → Daemon, FR-07 / D-007
 

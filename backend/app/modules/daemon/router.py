@@ -49,6 +49,7 @@ from app.modules.daemon.schema import (
     LeaseSyncResponse,
     ListDirRequest,
     ListDirResponse,
+    SessionReopenResponse,
 )
 from app.modules.daemon.service import (
     DaemonLeaseNotFound,
@@ -781,6 +782,26 @@ async def list_sessions(
     )
 
 
+@router.get(
+    "/sessions/{session_id}",
+    response_model=AgentSessionRead,
+)
+async def get_session_detail(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> AgentSessionRead:
+    """Return a single owned AgentSession (task-06 / FR-2 / D-002@v1).
+
+    Read-only single-read counterpart to ``GET /sessions``. Ownership is
+    enforced inside the service so a missing OR cross-user session both
+    surface as 404 without leaking existence.
+    """
+    svc = DaemonService(session)
+    agent_session = await svc.get_agent_session(session_id, user.id)
+    return AgentSessionRead.model_validate(agent_session)
+
+
 @router.post(
     "/sessions",
     response_model=SessionCreateResponse,
@@ -829,6 +850,26 @@ async def inject_session(
         run_id=result.agent_run.id,
         status=result.agent_run.status or "pending",
     )
+
+
+@router.post(
+    "/sessions/{session_id}/reopen",
+    response_model=SessionReopenResponse,
+)
+async def reopen_session(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> SessionReopenResponse:
+    """Reopen an ended Claude session for SDK resume (task-05 / FR-2).
+
+    Validation + optimistic placeholder only — sets ``status=reconnecting``
+    and returns immediately; the full lease/WS transition is task-07 and the
+    daemon SDK resume is task-08. Never blocks on daemon confirmation
+    (design §4.3.1 step 7).
+    """
+    svc = DaemonService(session)
+    return await svc.reopen_session(session_id, user.id)
 
 
 @router.post(
