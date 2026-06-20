@@ -12,7 +12,7 @@ FROM node:${NODE_VERSION}-slim AS node-tools
 ARG CLAUDE_CODE_VERSION
 ARG SILLYSPEC_VERSION
 
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} sillyspec@${SILLYSPEC_VERSION} \
+RUN npm install --registry=https://registry.npmmirror.com -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} sillyspec@${SILLYSPEC_VERSION} \
  && npm cache clean --force
 
 FROM python:${PYTHON_VERSION}-slim AS builder
@@ -20,7 +20,9 @@ FROM python:${PYTHON_VERSION}-slim AS builder
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    UV_PROJECT_ENVIRONMENT=/opt/venv
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 # uv: single-binary, fast python package manager
 RUN pip install --no-cache-dir --upgrade pip uv==0.4.18

@@ -358,7 +358,9 @@ async def purge_target(db: AsyncSession) -> None:
     )
     await db.execute(Role.__table__.delete().where(Role.is_system.is_(False)))
     # 3) users（CASCADE 会级联残留的 user_roles/user_organizations）
-    await db.execute(User.__table__.delete())
+    #    保留 bootstrap admin(被 SillySpec changes.owner_id 等引用,避免 FK 违反)
+    bootstrap_email = os.environ.get("PLATFORM_BOOTSTRAP_ADMIN_EMAIL", "admin@sillyhub.local")
+    await db.execute(User.__table__.delete().where(User.email != bootstrap_email))
     # 4) organizations（parent_id 自引用 RESTRICT，叶子删除顺序不可控，直接 TRUNCATE CASCADE）
     await db.execute(text("TRUNCATE TABLE organizations RESTART IDENTITY CASCADE"))
     # 5) ppm 业务表全部清空（按依赖 CASCADE，一次 TRUNCATE 搞定）
