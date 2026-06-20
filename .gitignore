@@ -11,6 +11,7 @@ target/
 build/
 out/
 .sillyspec/.runtime/
+**/.sillyspec/.runtime/
 .sillyspec/codebase/SCAN-RAW.md
 .sillyspec/local.yaml
 

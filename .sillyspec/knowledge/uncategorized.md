@@ -106,3 +106,11 @@
 - 通用坑：全 Docker 部署项目，host 上跑需 DB 的命令（alembic / 并发测试）前，先确认 PG 容器端口映射到 host；否则用 `docker exec` 进容器跑，或 SQLite fixture 等效验证 + 标注"PG 并发证明待 CI 补"。
 
 
+
+## 2026-06-20 — cursor-agent 官方 ps1 版本目录正则不匹配新版目录命名，导致 cursor 完全不可用 [已修复]
+
+- 现象：daemon 注册的 cursor runtime 版本显示「待识别」（实际注册 'unknown'），cursor task 启动即崩（exit 1）。其他 provider 正常。daemon 心跳/在线正常（因为 resolveBinPath 找到 cursor-agent.cmd 就算 available，与版本探测是否成功无关）。
+- 根因：cursor-agent 官方安装在 `%LOCALAPPDATA%\cursor-agent\`，`cursor-agent.cmd` → `cursor-agent.ps1`。ps1 用正则 `^\d{4}\.\d{1,2}\.\d{1,2}-[a-f0-9]+$` 找 `versions/` 下最新版本目录，但新版 cursor 的目录名是 `YYYY.MM.DD-HH-MM-SS-commit`（含时分秒、多段 `-`），`-` 后非纯十六进制 → 不匹配 → ps1 `Write-Error "No version directories found"` + `exit 1`。该查找在 `$args` 之前执行、与传参无关，所以 `--version`、task 执行任何调用都崩。
+- 关键事实：`versions/<ver>/` 目录结构完整（`node.exe` + `index.js` + package.json），ps1 的 `node.exe index.js $args` 调法本身正确，只是它自己找不到目录。直接 spawn `versions/<latest>/node.exe index.js <args>` 正常工作（exit 0 + STDOUT 输出目录名作版本号）。
+- 修复（ql-20260620-002-f8c1）：daemon 侧绕过 ps1 —— 新增 `resolveCursorVersionEntry` 扫描 versions 目录取最新；`agent-detector` cursor 版本探测 fallback 取目录名作版本；`cmd-shim` 模式0 把 `cursor-agent.ps1` 解析为 version 目录的 `node.exe index.js` 入口让 task-runner 直跑。
+- 通用坑：第三方 CLI 的启动包装脚本（.ps1/.cmd）若用正则找自更新版本目录，正则可能跟不上自身新版目录命名格式变化。遇到「CLI `--version` / 启动报奇怪错误且 exit 1、但二进制确实存在」时，先检查其包装脚本的版本查找逻辑是否过时，必要时绕过包装层直接调 version 目录的真实入口（node.exe + 入口 js）。
