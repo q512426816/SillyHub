@@ -273,7 +273,10 @@ export interface ProblemActionsProps {
  * - status=1 已保存 (Node10 申请):creator 可 nextProcess 提交进审核。
  * - status=2 审核中 (Node20/30/40):当前处理人(now_handle_user) 可
  *   nextProcess(推进)/ rejectProcess(作废)。
- * - status=3 处置中:责任人(duty_user) doneTask(completed=true → 待验证)。
+ * - status=3 处置中:当前处理人(now_handle_user,fsm.py 在该状态即责任人)
+ *   doneTask(completed=true → 待验证)。对照源 Vue doneTask 按钮的
+ *   `checkUser([dutyUserId])` 语义,我方后端把 status=3 处理人收口到
+ *   now_handle_user,故用 matchAnyUser([now_handle_user]) 判定命中。
  * - status=6 待验证:验证人(audit_user) closeTask(check_result="1" 关闭 / 否则打回)。
  * - status=4/5:终态无操作。
  * - effective_status=7 变更中:展示「变更中」标记,主操作仍按 status 走。
@@ -350,17 +353,21 @@ export function ProblemActions({
       </Button>,
     );
   } else if (status === "3") {
-    // 处置中 — 责任人完成处置 (doneTask completed=true → 待验证)
+    // 处置中 — 命中 now_handle_user 即可处置(对照源 Vue doneTask 按钮的
+    // checkUser([dutyUserId]) 语义;fsm.py 把 status=3 处理人收口到
+    // now_handle_user)。now_handle_user 缺失(X-003)时,若 duty_user_id
+    // 命中当前用户则作为兜底放行,否则禁用并提示待指派。
+    const canHandle = isNowHandler || (!problem.now_handle_user && isDuty);
     buttons.push(
       <Button
         key="done"
         size="sm"
         variant="default"
-        disabled={globalDisabled || !isDuty}
-        title={isDuty ? undefined : "仅责任人可完成处置"}
+        disabled={globalDisabled || !canHandle}
+        title={canHandle ? undefined : "仅当前处理人可处置"}
         onClick={() => onAction(problem.id, "done")}
       >
-        完成处置
+        处置
       </Button>,
     );
   } else if (status === "6") {

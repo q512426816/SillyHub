@@ -18,7 +18,7 @@
  *
  * 设计依据:tasks/task-11.md + backend problem/fsm.py + ppm-status-actions.tsx。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Table, type TableProps, Tag } from "antd";
 
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ import {
   PROBLEM_TYPE_TEXT,
   ProblemActions,
 } from "@/components/ppm-status-actions";
+import { PpmFileUrls } from "@/components/ppm-file-urls";
 import { ApiError } from "@/lib/api";
 import {
   closeTaskProblem,
@@ -43,6 +44,7 @@ import {
   type ProblemDoneTaskReq,
   type ProblemList,
 } from "@/lib/ppm";
+import { addWorkingDaysDate } from "@/lib/ppm/workday";
 import { useSession } from "@/stores/session";
 
 const inputCls =
@@ -120,7 +122,7 @@ export default function ProblemListPage() {
           time_spent: timeStr.trim() ? Number(timeStr) : null,
         };
         await doneTaskProblem(problemId, body);
-        showToast(true, "已完成处置,进入待验证");
+        showToast(true, "已处置完成,进入待验证");
       } else {
         const checkInfo = prompt("验证情况(必填):") ?? "";
         if (!checkInfo.trim()) {
@@ -380,16 +382,27 @@ function ProblemDrawer({
   const [workLoad, setWorkLoad] = useState(problem?.work_load ?? "");
   const [submitNow, setSubmitNow] = useState(false);
   const [fileUrls, setFileUrls] = useState<string[]>(problem?.file_urls ?? []);
-  const [newUrl, setNewUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const addUrl = () => {
-    const u = newUrl.trim();
-    if (!u) return;
-    setFileUrls((prev) => [...prev, u]);
-    setNewUrl("");
-  };
+  // 工作日联动(对照源 ListForm.vue addWorkingDays(planStartTime, workLoad)):
+  // 计划开始 + 工时(人/天)自动推算计划完成(跳过周末)。仅编辑态生效,
+  // 用户手动改过 planEnd 后停止覆盖。
+  const [planEndTouched, setPlanEndTouched] = useState(false);
+  const computedPlanEnd = useMemo(() => {
+    const days = Number(workLoad);
+    if (!planStart || !Number.isFinite(days) || days <= 0) return "";
+    try {
+      return addWorkingDaysDate(planStart, days);
+    } catch {
+      return "";
+    }
+  }, [planStart, workLoad]);
+
+  useEffect(() => {
+    if (!editable || planEndTouched) return;
+    if (computedPlanEnd) setPlanEnd(computedPlanEnd);
+  }, [computedPlanEnd, editable, planEndTouched]);
 
   const submit = async () => {
     setBusy(true);
@@ -514,7 +527,16 @@ function ProblemDrawer({
               <input value={planStart} onChange={(e) => setPlanStart(e.target.value)} placeholder="YYYY-MM-DD" disabled={!editable} className={inputCls} />
             </Field>
             <Field label="计划结束">
-              <input value={planEnd} onChange={(e) => setPlanEnd(e.target.value)} placeholder="YYYY-MM-DD" disabled={!editable} className={inputCls} />
+              <input
+                value={planEnd}
+                onChange={(e) => {
+                  setPlanEndTouched(true);
+                  setPlanEnd(e.target.value);
+                }}
+                placeholder="YYYY-MM-DD(按工时自动算)"
+                disabled={!editable}
+                className={inputCls}
+              />
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -530,28 +552,11 @@ function ProblemDrawer({
           </Field>
 
           <Field label="附件 URL">
-            <div className="space-y-1">
-              {fileUrls.map((u, i) => (
-                <div key={`${u}-${i}`} className="flex items-center gap-1">
-                  <code className="flex-1 truncate rounded bg-muted/30 px-2 py-1 text-[11px]">{u}</code>
-                  {editable && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setFileUrls((prev) => prev.filter((_, idx) => idx !== i))}
-                    >
-                      删除
-                    </Button>
-                  )}
-                </div>
-              ))}
-              {editable && (
-                <div className="flex gap-1">
-                  <input value={newUrl} onChange={(e) => setNewUrl(e.target.value)} placeholder="https://..." className={inputCls} />
-                  <Button size="sm" variant="outline" onClick={addUrl}>添加</Button>
-                </div>
-              )}
-            </div>
+            <PpmFileUrls
+              value={fileUrls}
+              onChange={setFileUrls}
+              disabled={!editable}
+            />
           </Field>
 
           {mode === "create" && (

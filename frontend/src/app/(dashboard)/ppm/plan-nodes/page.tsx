@@ -10,12 +10,29 @@
  * 走 lib/ppm/plan.ts:listPlanNodes / listPlanNodeDetails /
  * listPlanNodeModules + CRUD。AntD Table + 右侧 Tailwind 抽屉子表。
  *
- * 设计依据:tasks/task-11.md。
+ * 明细子表(task-06):对照源 plannode/components/NodeDetailForm.vue,
+ * 采用 PpmSubTable editable 整表行内编辑 + 「+ 新增行」批量加 +
+ * 保存按钮 diff 提交(create/update/delete)。
+ * 模板 project_type(task-06):PpmDictSelect type="project_type"。
+ * 模块责任人 duty_user_id(task-06):PpmUserSelect res="projectMember"。
+ *
+ * 设计依据:tasks/task-06.md。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Table, type TableProps, Tag } from "antd";
 
 import { Button } from "@/components/ui/button";
+import {
+  PpmDictSelect,
+  getPpmDictLabel,
+  type PpmDictType,
+} from "@/components/ppm-dict-select";
+import { PpmUserSelect } from "@/components/ppm-user-select";
+import {
+  PpmSubTable,
+  type PpmSubEditableColumn,
+  type PpmSubTableRow,
+} from "@/components/ppm-sub-table";
 import { ApiError } from "@/lib/api";
 import {
   createPlanNode,
@@ -32,11 +49,15 @@ import {
   updatePlanNodeModule,
   type PlanNode,
   type PlanNodeDetail,
+  type PlanNodeDetailCreate,
+  type PlanNodeDetailUpdate,
   type PlanNodeModule,
 } from "@/lib/ppm";
 
 const inputCls =
   "h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none";
+
+const PROJECT_TYPE_DICT: PpmDictType = "project_type";
 
 interface DrawerState {
   open: boolean;
@@ -132,8 +153,14 @@ export default function PlanNodesPage() {
       title: "项目类型",
       dataIndex: "project_type",
       key: "project_type",
-      render: (v: string | null) =>
-        v ? <Tag>{v}</Tag> : <span className="text-xs text-muted-foreground">—</span>,
+      render: (v: string | null) => {
+        const label = getPpmDictLabel(PROJECT_TYPE_DICT, v);
+        return label ? (
+          <Tag>{label}</Tag>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        );
+      },
     },
     {
       title: "操作",
@@ -260,6 +287,38 @@ function PlanNodeChildren({
   );
 }
 
+// ── 明细子表:整表行内编辑(对齐源 NodeDetailForm.vue) ───────────────────────
+
+/** 草稿行类型:已存在明细带真实 id;新增行用临时 __tempId 作 rowKey。 */
+interface DetailDraftRow extends PpmSubTableRow {
+  id: string; // 已存在=真实 id;新增=`new-${n}` 临时键
+  plan_node_id?: string;
+  detailed_stage: string | null;
+  task_theme: string | null;
+  task_description: string | null;
+  requirements: string | null;
+  role_name: string | null;
+  achievement: string | null;
+  overall_stage: string | null;
+}
+
+/** 明细行内编辑列定义(对齐源 NodeDetailForm 字段顺序)。 */
+const DETAIL_COLUMNS: PpmSubEditableColumn<DetailDraftRow>[] = [
+  { name: "detailed_stage", label: "详细阶段", width: 140, placeholder: "请输入详细阶段" },
+  { name: "task_theme", label: "任务主题", width: 140, placeholder: "请输入任务主题" },
+  {
+    name: "task_description",
+    label: "任务描述",
+    editType: "textarea",
+    width: 280,
+    placeholder: "请输入任务描述",
+  },
+  { name: "requirements", label: "要求与注意事项", width: 160, placeholder: "请输入要求与注意事项" },
+  { name: "role_name", label: "角色名称", width: 120, placeholder: "请输入角色名称" },
+  { name: "achievement", label: "成果", width: 140, placeholder: "请输入成果" },
+  { name: "overall_stage", label: "总体阶段", width: 140, placeholder: "请输入总体阶段" },
+];
+
 function DetailsSubTable({
   node,
   onChanged,
@@ -267,16 +326,32 @@ function DetailsSubTable({
   node: PlanNode;
   onChanged: () => void;
 }) {
-  const [items, setItems] = useState<PlanNodeDetail[]>([]);
+  const [draftRows, setDraftRows] = useState<DetailDraftRow[]>([]);
+  const [original, setOriginal] = useState<DetailDraftRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [editing, setEditing] = useState<PlanNodeDetail | "new" | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [newSeq, setNewSeq] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
     try {
-      setItems(await listPlanNodeDetails(node.id));
+      const list: PlanNodeDetail[] = await listPlanNodeDetails(node.id);
+      const rows: DetailDraftRow[] = list.map((d) => ({
+        id: d.id,
+        plan_node_id: d.plan_node_id,
+        detailed_stage: d.detailed_stage,
+        task_theme: d.task_theme,
+        task_description: d.task_description,
+        requirements: d.requirements,
+        role_name: d.role_name,
+        achievement: d.achievement,
+        overall_stage: d.overall_stage,
+      }));
+      setDraftRows(rows);
+      setOriginal(rows);
+      setNewSeq(0);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "加载失败");
     } finally {
@@ -288,81 +363,129 @@ function DetailsSubTable({
     void load();
   }, [load]);
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("删除该明细模板?")) return;
+  const newRowFactory = useCallback((): DetailDraftRow => {
+    setNewSeq((n) => n + 1);
+    const seq = newSeq + 1;
+    return {
+      id: `new-${seq}-${Date.now()}`,
+      plan_node_id: node.id,
+      detailed_stage: null,
+      task_theme: null,
+      task_description: null,
+      requirements: null,
+      role_name: null,
+      achievement: null,
+      overall_stage: null,
+    };
+  }, [node.id, newSeq]);
+
+  const isDirty = useMemo(() => {
+    if (draftRows.length !== original.length) return true;
+    const origMap = new Map(original.map((r) => [r.id, r]));
+    for (const r of draftRows) {
+      const o = origMap.get(r.id);
+      if (!o) return true;
+      for (const col of DETAIL_COLUMNS) {
+        if ((o[col.name] ?? null) !== (r[col.name] ?? null)) return true;
+      }
+    }
+    return false;
+  }, [draftRows, original]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setErr(null);
     try {
-      await deletePlanNodeDetailTpl(id);
+      const origMap = new Map(original.map((r) => [r.id, r]));
+      const draftIds = new Set(draftRows.map((r) => r.id));
+
+      // 1) 删除:原列表里有,draft 里没有的
+      const toDelete = original.filter((r) => !draftIds.has(r.id));
+      // 2) 更新:有真实 id 且字段有变
+      const toUpdate = draftRows.filter((r) => {
+        if (r.id.startsWith("new-")) return false;
+        const o = origMap.get(r.id);
+        if (!o) return false;
+        return DETAIL_COLUMNS.some(
+          (c) => (o[c.name] ?? null) !== (r[c.name] ?? null),
+        );
+      });
+      // 3) 新增:临时 id
+      const toCreate = draftRows.filter((r) => r.id.startsWith("new-"));
+
+      for (const r of toDelete) {
+        await deletePlanNodeDetailTpl(r.id);
+      }
+      for (const r of toUpdate) {
+        const body: PlanNodeDetailUpdate = {
+          detailed_stage: r.detailed_stage ?? null,
+          task_theme: r.task_theme ?? null,
+          task_description: r.task_description ?? null,
+          requirements: r.requirements ?? null,
+          role_name: r.role_name ?? null,
+          achievement: r.achievement ?? null,
+          overall_stage: r.overall_stage ?? null,
+        };
+        await updatePlanNodeDetailTpl(r.id, body);
+      }
+      for (const r of toCreate) {
+        const body: PlanNodeDetailCreate = {
+          plan_node_id: node.id,
+          detailed_stage: r.detailed_stage ?? null,
+          task_theme: r.task_theme ?? null,
+          task_description: r.task_description ?? null,
+          requirements: r.requirements ?? null,
+          role_name: r.role_name ?? null,
+          achievement: r.achievement ?? null,
+          overall_stage: r.overall_stage ?? null,
+        };
+        await createPlanNodeDetailTpl(body);
+      }
+
       await load();
       onChanged();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "删除失败");
+      setErr(e instanceof ApiError ? e.message : "保存失败");
+    } finally {
+      setSaving(false);
     }
   };
-
-  const columns: TableProps<PlanNodeDetail>["columns"] = [
-    { title: "明细阶段", dataIndex: "detailed_stage", key: "detailed_stage" },
-    { title: "任务主题", dataIndex: "task_theme", key: "task_theme" },
-    {
-      title: "角色",
-      dataIndex: "role_name",
-      key: "role_name",
-      render: (v: string | null) => v ?? "—",
-    },
-    {
-      title: "操作",
-      key: "actions",
-      align: "right",
-      render: (_v: unknown, d: PlanNodeDetail) => (
-        <div className="flex justify-end gap-1">
-          <Button size="sm" variant="outline" onClick={() => setEditing(d)}>
-            编辑
-          </Button>
-          <Button
-            size="sm"
-            variant="destructive"
-            onClick={() => void handleDelete(d.id)}
-          >
-            删除
-          </Button>
-        </div>
-      ),
-    },
-  ];
 
   return (
     <div className="rounded border bg-card p-3">
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-sm font-medium">模板明细</h3>
-        <Button size="sm" onClick={() => setEditing("new")}>
-          + 新增
-        </Button>
+        <div className="flex items-center gap-2">
+          {isDirty && (
+            <span className="text-[11px] text-amber-600">有未保存修改</span>
+          )}
+          <Button
+            size="sm"
+            disabled={saving || !isDirty}
+            onClick={() => void handleSave()}
+          >
+            {saving ? "保存中…" : "保存"}
+          </Button>
+        </div>
       </div>
       {err && <p className="mb-2 text-[11px] text-destructive">{err}</p>}
-      <Table<PlanNodeDetail>
-        rowKey="id"
-        size="small"
-        loading={loading}
-        dataSource={items}
-        columns={columns}
-        pagination={false}
-        locale={{ emptyText: "暂无明细" }}
-        scroll={{ x: "max-content" }}
+      <PpmSubTable<DetailDraftRow>
+        editable
+        masterRows={draftRows}
+        columns={DETAIL_COLUMNS}
+        onChange={setDraftRows}
+        newRowFactory={newRowFactory}
+        canAddRemove
+        tableProps={{ loading }}
       />
-      {editing && (
-        <DetailFormDrawer
-          planNodeId={node.id}
-          detail={editing === "new" ? null : editing}
-          onClose={() => setEditing(null)}
-          onSaved={async () => {
-            setEditing(null);
-            await load();
-            onChanged();
-          }}
-        />
-      )}
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        整表行内编辑,修改后点击「保存」批量提交。
+      </p>
     </div>
   );
 }
+
+// ── 模块子表:抽屉表单 + 责任人 PpmUserSelect ────────────────────────────────
 
 function ModulesSubTable({
   node,
@@ -499,7 +622,7 @@ function NodeFormDrawer({
   }) => void;
 }) {
   const [overallStage, setOverallStage] = useState(node?.overall_stage ?? "");
-  const [projectType, setProjectType] = useState(node?.project_type ?? "");
+  const [projectType, setProjectType] = useState(node?.project_type ?? null);
   const [no, setNo] = useState<string>(node?.no != null ? String(node.no) : "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -510,7 +633,7 @@ function NodeFormDrawer({
     try {
       onSubmit({
         overall_stage: overallStage.trim(),
-        project_type: projectType.trim() || null,
+        project_type: projectType ?? null,
         no: no.trim() ? Number(no) : null,
       });
     } catch (e) {
@@ -540,10 +663,11 @@ function NodeFormDrawer({
             />
           </Field>
           <Field label="项目类型">
-            <input
+            <PpmDictSelect
+              type={PROJECT_TYPE_DICT}
               value={projectType}
-              onChange={(e) => setProjectType(e.target.value)}
-              className={inputCls}
+              onChange={(v) => setProjectType(typeof v === "string" ? v : null)}
+              placeholder="请选择项目类型"
             />
           </Field>
           <Field label="编号">
@@ -573,97 +697,6 @@ function NodeFormDrawer({
   );
 }
 
-function DetailFormDrawer({
-  planNodeId,
-  detail,
-  onClose,
-  onSaved,
-}: {
-  planNodeId: string;
-  detail: PlanNodeDetail | null;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [detailedStage, setDetailedStage] = useState(
-    detail?.detailed_stage ?? "",
-  );
-  const [taskTheme, setTaskTheme] = useState(detail?.task_theme ?? "");
-  const [taskDesc, setTaskDesc] = useState(detail?.task_description ?? "");
-  const [requirements, setRequirements] = useState(detail?.requirements ?? "");
-  const [roleName, setRoleName] = useState(detail?.role_name ?? "");
-  const [achievement, setAchievement] = useState(detail?.achievement ?? "");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  const submit = async () => {
-    setBusy(true);
-    setErr(null);
-    try {
-      const body = {
-        detailed_stage: detailedStage || null,
-        task_theme: taskTheme || null,
-        task_description: taskDesc || null,
-        requirements: requirements || null,
-        role_name: roleName || null,
-        achievement: achievement || null,
-      };
-      if (detail) {
-        await updatePlanNodeDetailTpl(detail.id, body);
-      } else {
-        await createPlanNodeDetailTpl({ plan_node_id: planNodeId, ...body });
-      }
-      onSaved();
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "保存失败");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <div className="fixed right-0 top-0 z-50 flex h-full w-[520px] flex-col border-l bg-background shadow-xl">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <h3 className="text-sm font-medium">
-            {detail ? "编辑模板明细" : "新增模板明细"}
-          </h3>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
-            ✕
-          </button>
-        </div>
-        <div className="flex-1 space-y-3 overflow-y-auto p-4">
-          <Field label="明细阶段">
-            <input value={detailedStage} onChange={(e) => setDetailedStage(e.target.value)} className={inputCls} />
-          </Field>
-          <Field label="任务主题">
-            <input value={taskTheme} onChange={(e) => setTaskTheme(e.target.value)} className={inputCls} />
-          </Field>
-          <Field label="任务描述">
-            <textarea value={taskDesc} onChange={(e) => setTaskDesc(e.target.value)} rows={3} className={inputCls} />
-          </Field>
-          <Field label="要求">
-            <textarea value={requirements} onChange={(e) => setRequirements(e.target.value)} rows={3} className={inputCls} />
-          </Field>
-          <Field label="角色">
-            <input value={roleName} onChange={(e) => setRoleName(e.target.value)} className={inputCls} />
-          </Field>
-          <Field label="成果">
-            <textarea value={achievement} onChange={(e) => setAchievement(e.target.value)} rows={2} className={inputCls} />
-          </Field>
-          {err && <p className="text-[11px] text-destructive">{err}</p>}
-        </div>
-        <div className="sticky bottom-0 flex justify-end gap-2 border-t bg-background px-4 py-3">
-          <Button size="sm" variant="outline" onClick={onClose}>取消</Button>
-          <Button size="sm" disabled={busy} onClick={() => void submit()}>
-            {busy ? "保存中…" : "保存"}
-          </Button>
-        </div>
-      </div>
-    </>
-  );
-}
-
 function ModuleFormDrawer({
   planNodeId,
   module,
@@ -681,7 +714,7 @@ function ModuleFormDrawer({
   const [planComplete, setPlanComplete] = useState(
     module?.plan_complete_time ?? "",
   );
-  const [dutyUserId, setDutyUserId] = useState(module?.duty_user_id ?? "");
+  const [dutyUserId, setDutyUserId] = useState(module?.duty_user_id ?? null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -734,8 +767,15 @@ function ModuleFormDrawer({
           <Field label="计划完成">
             <input value={planComplete} onChange={(e) => setPlanComplete(e.target.value)} placeholder="YYYY-MM-DD" className={inputCls} />
           </Field>
-          <Field label="责任人 ID">
-            <input value={dutyUserId} onChange={(e) => setDutyUserId(e.target.value)} className={inputCls} />
+          <Field label="责任人">
+            <PpmUserSelect
+              res="projectMember"
+              value={dutyUserId}
+              onChange={(v) =>
+                setDutyUserId(typeof v === "string" ? v : null)
+              }
+              placeholder="请选择责任人"
+            />
           </Field>
           {err && <p className="text-[11px] text-destructive">{err}</p>}
         </div>

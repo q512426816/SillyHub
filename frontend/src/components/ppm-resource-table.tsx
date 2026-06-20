@@ -89,6 +89,11 @@ export interface PpmResourceTableProps<
   getRowLabel?: (row: T) => string;
   /** 是否允许写入(隐藏新增/编辑/删除),默认 true */
   canWrite?: boolean;
+  /**
+   * 每行追加额外操作按钮(渲染在内置「编辑/删除」之前)。
+   * 用于跨域入口,如 projects 行的「成员管理」按钮(W1 task-03)。
+   */
+  extraActions?: (row: T) => React.ReactNode;
 
   // ── API ──
   list: (params?: Query) => Promise<T[]>;
@@ -137,6 +142,7 @@ export function PpmResourceTable<
     update,
     remove,
     exportFn,
+    extraActions,
     buildCreateBody,
     buildUpdateBody,
     buildQuery,
@@ -303,9 +309,10 @@ export function PpmResourceTable<
       title: "操作",
       key: "__actions",
       fixed: "right",
-      width: 140,
+      width: extraActions ? 220 : 140,
       render: (_v: unknown, row: T) => (
         <div className="flex justify-end gap-1">
+          {extraActions?.(row)}
           <Button
             size="sm"
             variant="outline"
@@ -326,7 +333,8 @@ export function PpmResourceTable<
       ),
     });
     return cols;
-  }, [fields, asyncOptions, canWrite]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fields, asyncOptions, canWrite, extraActions]);
 
   // ── 分页(前端切片) ──
   const total = rows.length;

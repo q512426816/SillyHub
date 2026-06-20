@@ -12,17 +12,17 @@ change: 2026-06-21-ppm-frontend-alignment
 > Wave 已按 depends_on 拓扑重排(step8),同 Wave 内无依赖可并行。
 
 ## Wave 0(基础组件,无依赖,并行)
-- [ ] task-01: PpmUserSelect + PpmText + PpmDictSelect 基础组件(覆盖:D-009@v1, FR-01)
-- [ ] task-02: 后端 project-member 过滤 + lib + PpmSubTable(覆盖:FR-01)
+- [x] task-01: PpmUserSelect + PpmText + PpmDictSelect 基础组件(覆盖:D-009@v1, FR-01)
+- [x] task-02: 后端 project-member 过滤 + lib + PpmSubTable(覆盖:FR-01)
 
 ## Wave 1(依赖 W0,并行:成员 + 里程碑主子 + 模板 + 细节)
-- [ ] task-03: 项目成员 角色 auth.Role 多选 + 联动 + 入口(覆盖:FR-02, D-009@v1)
-- [ ] task-04: 里程碑 主子 expand + 模块三级(覆盖:FR-03)
-- [ ] task-06: 计划节点模板 行内编辑 + 字典 + 责任人(覆盖:FR-04)
-- [ ] task-07: PpmFileUrls 附件URL + 工作日联动 + 处置按钮(覆盖:FR-05, D-010@v1)
+- [x] task-03: 项目成员 角色 auth.Role 多选 + 联动 + 入口(覆盖:FR-02, D-009@v1)
+- [x] task-04: 里程碑 主子 expand + 模块三级(覆盖:FR-03)
+- [x] task-06: 计划节点模板 行内编辑 + 字典 + 责任人(覆盖:FR-04)
+- [x] task-07: PpmFileUrls 附件URL + 工作日联动 + 处置按钮(覆盖:FR-05, D-010@v1)
 
 ## Wave 2(依赖 W1 task-04)
-- [ ] task-05: 里程碑 审批表单差异化 + Timeline(覆盖:FR-03;依赖 task-04)
+- [x] task-05: 里程碑 审批表单差异化 + Timeline(覆盖:FR-03;依赖 task-04)
 
 ## 任务总表
 | 编号 | 任务 | Wave | 优先级 | 依赖 | 覆盖 |

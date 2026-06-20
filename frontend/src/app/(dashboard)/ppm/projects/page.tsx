@@ -6,9 +6,16 @@
  * 走 lib/ppm/project.ts 的 listProjects/createProject/updateProject/
  * deleteProject/exportProjects。CRUD + 搜索 + 导出 由 PpmResourceTable 通用组件承担。
  *
- * 依据:.sillyspec/changes/2026-06-20-ppm-module-migration/tasks/task-10.md
+ * W1 task-03:项目行新增「成员管理」入口 → 打开抽屉,内嵌按 pm_project_id 过滤的
+ * PpmProjectMembersTable(对照源 ProjectMemberListForm)。
+ *
+ * 依据:.sillyspec/changes/2026-06-21-ppm-frontend-alignment/tasks/task-03.md
  * 参照源:vue views/ppm/projectmaintenance/index.vue
  */
+import { useState } from "react";
+
+import { Button } from "@/components/ui/button";
+import { PpmProjectMembersTable } from "@/components/ppm-project-members-table";
 import { PpmResourceTable, type PpmFieldDef } from "@/components/ppm-resource-table";
 import {
   createProject,
@@ -62,35 +69,89 @@ const fields: PpmFieldDef<Entity>[] = [
 ];
 
 export default function PpmProjectsPage() {
+  const [memberProject, setMemberProject] = useState<ProjectMaintenance | null>(null);
+
   return (
-    <PpmResourceTable<
-      Entity,
-      ProjectMaintenanceCreate,
-      ProjectMaintenanceUpdate,
-      ProjectMaintenancePageReq
-    >
-      title="项目维护"
-      subtitle="项目主数据,被项目成员 / 干系人 / 计划 / 看板引用"
-      entityLabel="项目"
-      exportFilename="project_maintenance.xlsx"
-      fields={fields}
-      searchFieldNames={[
-        "project_name" as FieldName,
-        "project_code" as FieldName,
-        "company_name" as FieldName,
-      ]}
-      getRowLabel={(row) =>
-        row.project_name ?? row.project_code ?? row.id
-      }
-      list={(params) => listProjects(params)}
-      create={(body) => createProject(body)}
-      update={(id, body) => updateProject(id, body)}
-      remove={(id) => deleteProject(id)}
-      exportFn={(params) => exportProjects(params)}
-      buildCreateBody={(form) => stripForm(form) as unknown as ProjectMaintenanceCreate}
-      buildUpdateBody={(form) => stripForm(form) as unknown as ProjectMaintenanceUpdate}
-      buildQuery={(form) => stripQuery(form) as unknown as ProjectMaintenancePageReq}
-    />
+    <>
+      <PpmResourceTable<
+        Entity,
+        ProjectMaintenanceCreate,
+        ProjectMaintenanceUpdate,
+        ProjectMaintenancePageReq
+      >
+        title="项目维护"
+        subtitle="项目主数据,被项目成员 / 干系人 / 计划 / 看板引用"
+        entityLabel="项目"
+        exportFilename="project_maintenance.xlsx"
+        fields={fields}
+        searchFieldNames={[
+          "project_name" as FieldName,
+          "project_code" as FieldName,
+          "company_name" as FieldName,
+        ]}
+        getRowLabel={(row) =>
+          row.project_name ?? row.project_code ?? row.id
+        }
+        extraActions={(row) => (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setMemberProject(row)}
+          >
+            成员管理
+          </Button>
+        )}
+        list={(params) => listProjects(params)}
+        create={(body) => createProject(body)}
+        update={(id, body) => updateProject(id, body)}
+        remove={(id) => deleteProject(id)}
+        exportFn={(params) => exportProjects(params)}
+        buildCreateBody={(form) => stripForm(form) as unknown as ProjectMaintenanceCreate}
+        buildUpdateBody={(form) => stripForm(form) as unknown as ProjectMaintenanceUpdate}
+        buildQuery={(form) => stripQuery(form) as unknown as ProjectMaintenancePageReq}
+      />
+
+      {memberProject && (
+        <ProjectMembersDrawer
+          project={memberProject}
+          onClose={() => setMemberProject(null)}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * 项目→成员管理 抽屉(对照源 ProjectMemberListForm)。
+ * 内嵌 PpmProjectMembersTable,按 pm_project_id 过滤,新增自动绑定当前项目。
+ */
+function ProjectMembersDrawer({
+  project,
+  onClose,
+}: {
+  project: ProjectMaintenance;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
+      <div className="fixed right-0 top-0 z-50 flex h-full w-[760px] flex-col border-l bg-background shadow-xl">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <h3 className="text-sm font-medium">
+            成员管理 · {project.project_name ?? project.project_code}
+          </h3>
+          <button
+            onClick={onClose}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          <PpmProjectMembersTable projectId={project.id} />
+        </div>
+      </div>
+    </>
   );
 }
 
