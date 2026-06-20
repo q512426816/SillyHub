@@ -89,4 +89,5 @@ quote-style = "double"
 [dependency-groups]
 dev = [
     "pre-commit>=4.6.0",
+    "pymysql>=1.2.0",
 ]

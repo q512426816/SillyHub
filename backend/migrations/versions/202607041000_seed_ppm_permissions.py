@@ -85,7 +85,7 @@ def upgrade() -> None:
     """
     role_perms_table = sa.table(
         "role_permissions",
-        sa.column("role_id", sa.String),
+        sa.column("role_id", sa.dialects.postgresql.UUID(as_uuid=True)),
         sa.column("permission", sa.String),
     )
     bind = op.get_bind()

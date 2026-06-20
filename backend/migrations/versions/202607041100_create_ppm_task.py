@@ -64,9 +64,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     )
-    op.create_index(
-        "ix_ppm_plan_task_user_status", "ppm_plan_task", ["user_id", "status"]
-    )
+    op.create_index("ix_ppm_plan_task_user_status", "ppm_plan_task", ["user_id", "status"])
     op.create_index("ix_ppm_plan_task_project", "ppm_plan_task", ["project_id"])
 
     # --- ppm_task_execute ---
@@ -93,9 +91,7 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     )
     op.create_index("ix_ppm_task_execute_plan", "ppm_task_execute", ["plan_task_id"])
-    op.create_index(
-        "ix_ppm_task_execute_problem", "ppm_task_execute", ["problem_task_id"]
-    )
+    op.create_index("ix_ppm_task_execute_problem", "ppm_task_execute", ["problem_task_id"])
 
     # --- ppm_work_hour ---
     op.create_table(
@@ -111,9 +107,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     )
-    op.create_index(
-        "ix_ppm_work_hour_user_date", "ppm_work_hour", ["user_id", "work_date"]
-    )
+    op.create_index("ix_ppm_work_hour_user_date", "ppm_work_hour", ["user_id", "work_date"])
     op.create_index("ix_ppm_work_hour_project", "ppm_work_hour", ["project_id"])
 
 
