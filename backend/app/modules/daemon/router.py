@@ -974,7 +974,7 @@ async def stream_session_logs(
 
     svc = AgentService(session)
     return StreamingResponse(
-        svc.stream_session_logs(session_id, session=session),
+        svc.stream_session_logs(session_id),
         media_type="text/event-stream",
         headers=_SESSION_SSE_HEADERS,
     )

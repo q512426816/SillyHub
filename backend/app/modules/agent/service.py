@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from app.core.db import get_session_factory
 from app.core.errors import (
     AgentRunNotFound,
     AgentRunNotRunning,
@@ -707,8 +708,6 @@ class AgentService:
     async def stream_run_logs(
         self,
         run_id: uuid.UUID,
-        *,
-        session: AsyncSession | None = None,
     ) -> AsyncGenerator[str, None]:
         """Yield SSE formatted events from Redis Pub/Sub for a given run.
 
@@ -717,9 +716,11 @@ class AgentService:
         completion, and ``: keepalive`` comments every ~30 seconds of
         silence to prevent connection timeouts.
 
-        If *session* is provided, re-checks the run status after subscribing
-        to Redis so that runs which completed between the router's status
-        check and this subscription are still detected.
+        DB access uses a short-lived session from ``get_session_factory()``
+        (opened only for the initial status re-check and the final ``done``
+        status lookup) so the connection-pool slot is released immediately
+        instead of being held for the lifetime of this long-lived SSE
+        connection.
         """
         redis = get_redis()
         pubsub = redis.pubsub()
@@ -733,13 +734,15 @@ class AgentService:
             # Race-condition guard: if the agent finished while the client
             # was connecting, the router's status check may have seen
             # "running" but the "done" event was already published (and
-            # missed by pub/sub).  Re-check the DB status.
-            if session is not None:
-                run = await session.get(AgentRun, run_id)
-                if run is not None and run.status not in ("pending", "running"):
-                    done_data = json.dumps({"status": run.status, "exit_code": run.exit_code})
-                    yield f"event: done\ndata: {done_data}\n\n"
-                    return
+            # missed by pub/sub).  Re-check the DB status in a short-lived
+            # session so no pool slot is held for the duration of this SSE
+            # connection.
+            async with get_session_factory()() as db:
+                run = await db.get(AgentRun, run_id)
+            if run is not None and run.status not in ("pending", "running"):
+                done_data = json.dumps({"status": run.status, "exit_code": run.exit_code})
+                yield f"event: done\ndata: {done_data}\n\n"
+                return
 
             while True:
                 try:
@@ -761,9 +764,9 @@ class AgentService:
                         # pub/sub payload, which some publishers leave as null.
                         status_val = payload.get("status")
                         exit_code_val = payload.get("exit_code")
-                        if session is not None and (status_val is None or exit_code_val is None):
-                            session.expire_all()
-                            run = await session.get(AgentRun, run_id)
+                        if status_val is None or exit_code_val is None:
+                            async with get_session_factory()() as db:
+                                run = await db.get(AgentRun, run_id)
                             if run is not None:
                                 status_val = run.status
                                 exit_code_val = run.exit_code
@@ -787,8 +790,6 @@ class AgentService:
     async def stream_session_logs(
         self,
         agent_session_id: uuid.UUID,
-        *,
-        session: AsyncSession | None = None,
     ) -> AsyncGenerator[str, None]:
         """Yield SSE events aggregating all AgentRuns of an AgentSession.
 
@@ -816,13 +817,14 @@ class AgentService:
 
             # Race-condition guard: if the session ended while the client was
             # connecting, task-05's end_session may have already published
-            # ``session_ended`` (missed by pub/sub). Re-check DB status.
-            if session is not None:
-                ag = await session.get(AgentSession, agent_session_id)
-                if ag is not None and ag.status in ("ended", "failed"):
-                    done_data = json.dumps({"status": ag.status, "reason": "session_terminated"})
-                    yield f"event: done\ndata: {done_data}\n\n"
-                    return
+            # ``session_ended`` (missed by pub/sub). Re-check DB status in a
+            # short-lived session (no pool slot held for the SSE lifetime).
+            async with get_session_factory()() as db:
+                ag = await db.get(AgentSession, agent_session_id)
+            if ag is not None and ag.status in ("ended", "failed"):
+                done_data = json.dumps({"status": ag.status, "reason": "session_terminated"})
+                yield f"event: done\ndata: {done_data}\n\n"
+                return
 
             while True:
                 try:

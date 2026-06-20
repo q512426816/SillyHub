@@ -16,6 +16,8 @@ import hashlib
 import secrets
 import uuid
 import warnings
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC
 from pathlib import Path
 
@@ -23,6 +25,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from app.core.db import get_session_factory
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.agent.base import AgentSpecBundle
@@ -536,6 +539,27 @@ class ExecutionCoordinatorService:
         )
         return run
 
+    @asynccontextmanager
+    async def _short_db(self) -> AsyncIterator[AsyncSession]:
+        """Open a short-lived session that returns its pool slot on exit.
+
+        Background tasks must NOT hold the request-scoped ``self.session``
+        across long awaits (e.g. ``subprocess.communicate``): it keeps a
+        connection checked out for the whole run and, because the task
+        outlives the request, the request session may already be closed.
+        Each DB touch in ``_run_sillyspec_background`` opens its own session
+        here instead. The request session's ``audit_context`` is propagated
+        so the audit hooks still fire (``agent_runs`` is audited).
+        """
+        db = get_session_factory()()
+        audit_ctx = self.session.info.get("audit_context")
+        if audit_ctx is not None:
+            db.info["audit_context"] = audit_ctx
+        try:
+            yield db
+        finally:
+            await db.close()
+
     async def _run_sillyspec_background(
         self,
         *,
@@ -560,15 +584,17 @@ class ExecutionCoordinatorService:
 
         from datetime import datetime
 
-        run = await self.session.get(AgentRun, run_id)
-        if run is None:
-            return
-
-        # Mark as running
-        run.status = "running"
-        run.started_at = datetime.now(UTC)
-        self.session.add(run)
-        await self.session.commit()
+        # Load the run and mark it running in a short-lived session, then
+        # release the connection BEFORE spawning the subprocess so the
+        # (potentially minutes-long) child process does not hold a pool slot.
+        async with self._short_db() as db:
+            run = await db.get(AgentRun, run_id)
+            if run is None:
+                return
+            run.status = "running"
+            run.started_at = datetime.now(UTC)
+            db.add(run)
+            await db.commit()
 
         try:
             # Build command
@@ -585,13 +611,17 @@ class ExecutionCoordinatorService:
             )
             stdout, _stderr = await process.communicate()
 
-            # Persist result
-            run.status = "completed" if process.returncode == 0 else "failed"
-            run.finished_at = datetime.now(UTC)
-            run.exit_code = process.returncode
-            run.output_redacted = (stdout or b"").decode("utf-8", errors="replace")[:10000]
-            self.session.add(run)
-            await self.session.commit()
+            # Persist result in a fresh short-lived session (the session used
+            # to mark running above was already closed before the subprocess).
+            async with self._short_db() as db:
+                run = await db.get(AgentRun, run_id)
+                if run is not None:
+                    run.status = "completed" if process.returncode == 0 else "failed"
+                    run.finished_at = datetime.now(UTC)
+                    run.exit_code = process.returncode
+                    run.output_redacted = (stdout or b"").decode("utf-8", errors="replace")[:10000]
+                    db.add(run)
+                    await db.commit()
 
             log.info(
                 "sillyspec_run_completed",
@@ -600,23 +630,27 @@ class ExecutionCoordinatorService:
             )
         except Exception as exc:
             log.error("sillyspec_run_failed", run_id=str(run_id), error=str(exc))
-            run.status = "failed"
-            run.finished_at = datetime.now(UTC)
-            run.exit_code = 1
-            run.output_redacted = str(exc)[:10000]
-            self.session.add(run)
-            await self.session.commit()
+            async with self._short_db() as db:
+                run = await db.get(AgentRun, run_id)
+                if run is not None:
+                    run.status = "failed"
+                    run.finished_at = datetime.now(UTC)
+                    run.exit_code = 1
+                    run.output_redacted = str(exc)[:10000]
+                    db.add(run)
+                    await db.commit()
         finally:
             # Safety net: ensure run is never stuck in "running"
             try:
-                run = await self.session.get(AgentRun, run_id)
-                if run is not None and run.status == "running":
-                    run.status = "failed"
-                    run.finished_at = datetime.now(UTC)
-                    run.exit_code = -1
-                    run.output_redacted = "Force-failed: task lifecycle guard"[:10000]
-                    self.session.add(run)
-                    await self.session.commit()
+                async with self._short_db() as db:
+                    run = await db.get(AgentRun, run_id)
+                    if run is not None and run.status == "running":
+                        run.status = "failed"
+                        run.finished_at = datetime.now(UTC)
+                        run.exit_code = -1
+                        run.output_redacted = "Force-failed: task lifecycle guard"[:10000]
+                        db.add(run)
+                        await db.commit()
             except Exception:
                 log.error(
                     "sillyspec_run_finally_guard_failed",

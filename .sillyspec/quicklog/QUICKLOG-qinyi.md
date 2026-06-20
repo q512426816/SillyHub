@@ -373,3 +373,8 @@
 结果：1) 新增 sillyhub-daemon/src/cursor-version.ts（resolveCursorVersionEntry：扫描 versions/ 兼容 YYYY.MM.DD-commit 旧格式与 YYYY.MM.DD-HH-MM-SS-commit 新格式，按日期降序取最新，返回 node.exe+index.js+目录名）；2) agent-detector.ts detectSingle 加 cursor fallback（--version 返回 null 时取目录名作版本，非 cursor 不触发）；3) cmd-shim.ts 模式0 增强（cursor-agent.ps1 → resolveCursorVersionEntry 成功返回 {exe:nodeExe, prependArgs:[indexJs]} 绕过 ps1，失败回落原 powershell）。daemon.ts/task-runner.ts spawn 链路未改。
 验证：① 单测 cursor-version.test.ts 11/11、agent-detector cursor fallback 4/4、cmd-shim.test.ts 8/8 全绿；typecheck 通过；全量 daemon 测试无新增失败（仅 pre-existing flaky：findOnPath Windows 无扩展名 ×3 / cli 环境敏感 / task-09 spec / terminal-observer，stash 对比确认非本次引入）。② 实测绕过 ps1 直 spawn versions/2026.06.16-20-30-07-a07d3ac/node.exe index.js --version → exit 0 + STDOUT "2026.06.16-20-30-07-a07d3ac"（ps1 原本 exit 1 "No version directories found"）。③ dist 实测 AgentDetector.detectOne('cursor').version = "2026.06.16-20-30-07-a07d3ac"。④ 重启 daemon（全局 sillyhub-daemon 经 npm link = 本项目 dist，build 已生效）后 backend /api/daemon/runtimes cursor.version 由 "unknown" → "2026.06.16-20-30-07-a07d3ac"、status offline→online、session_recover recovered=1 failed=0。前端 getDisplayVersion 不再被 isKnownBadVersion 过滤 → 显示真实版本。cursor 完整 stream-json task 执行未实跑（需 cursor 账号凭证，超出本次「ps1 入口」修复范围）。
 
+
+## ql-20260620-003-d3f4 | 2026-06-20 12:54:36 | 修复 SQLAlchemy 连接池耗尽（SSE 流端点 + 后台任务持有请求级 session 不释放）
+状态：进行中
+文件：backend/app/modules/agent/service.py、backend/app/modules/agent/router.py、backend/app/modules/daemon/router.py、backend/app/modules/agent/coordinator.py
+依据：db.py get_session_factory() 开短命 session（async with 结束即归还连接池）；不改 pool_size/max_overflow

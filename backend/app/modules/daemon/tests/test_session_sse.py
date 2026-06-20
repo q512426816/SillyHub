@@ -382,7 +382,7 @@ class TestStreamSessionLogs:
         svc = AgentService(db_session)
         collected: list[str] = []
         with patch("app.modules.agent.service.get_redis", return_value=redis):
-            async for ev in svc.stream_session_logs(ag.id, session=db_session):
+            async for ev in svc.stream_session_logs(ag.id):
                 collected.append(ev)
 
         assert collected[0] == ": connected\n\n"

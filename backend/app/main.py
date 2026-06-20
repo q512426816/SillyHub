@@ -295,7 +295,7 @@ def create_app() -> FastAPI:
                 raise HTTPException(status_code=404, detail="Run not found")
 
             return StreamingResponse(
-                svc.stream_run_logs(parsed, session=session),
+                svc.stream_run_logs(parsed),
                 media_type="text/event-stream",
                 headers=sse_headers,
             )

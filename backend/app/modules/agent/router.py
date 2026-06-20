@@ -427,7 +427,7 @@ async def stream_agent_run_logs(
             headers=_SSE_HEADERS,
         )
     return StreamingResponse(
-        svc.stream_run_logs(run_id, session=session),
+        svc.stream_run_logs(run_id),
         media_type="text/event-stream",
         headers=_SSE_HEADERS,
     )

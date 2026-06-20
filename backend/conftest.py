@@ -101,6 +101,32 @@ async def db_session(db_engine: Any) -> AsyncIterator[AsyncSession]:
         yield session
 
 
+@pytest.fixture(autouse=True)
+async def _redirect_session_factory(db_engine: Any) -> AsyncIterator[None]:
+    """Point ``get_session_factory()`` at the in-memory test engine.
+
+    Production code opens short-lived sessions through ``get_session_factory()``
+    (SSE generators, background tasks) so connection-pool slots are released as
+    soon as the query finishes instead of being held for the whole request.
+    Those short-lived sessions must land on the same engine ``db_session`` /
+    ``client`` use, otherwise they would try to reach the real Postgres.
+    ``get_session_factory`` reads the module-level ``_SessionFactory`` global,
+    so setting it once redirects every caller regardless of how it imported
+    the function.
+    """
+    import app.core.db as db_module
+
+    factory = async_sessionmaker(
+        bind=db_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
+    )
+    previous = db_module._SessionFactory
+    db_module._SessionFactory = factory
+    try:
+        yield
+    finally:
+        db_module._SessionFactory = previous
+
+
 @pytest.fixture()
 async def client(db_engine: Any) -> AsyncIterator[AsyncClient]:
     """``httpx.AsyncClient`` bound to the app, with DB sessions routed to the test engine."""
