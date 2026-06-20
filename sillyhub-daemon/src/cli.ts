@@ -638,4 +638,16 @@ async function main(): Promise<void> {
 // ESM 入口：直接被 node 执行时（dist/cli.js）启动 main。
 // commander 内部 action async 完成后正常退出；异常时 process.exit。
 // 用 void 忽略返回的 Promise（错误已在 main 内处理）。
+
+// 生产稳定性：三循环（heartbeat/poll/ws）fire-and-forget 的 async 若抛未捕获
+// rejection，Node 默认 --unhandled-rejections=throw 会让 daemon 静默 exit 1（仅留
+// heartbeat_failed 等 warn，无崩溃栈，难定位）。此处兜底记 FATAL 到 stderr。
+process.on('unhandledRejection', (reason) => {
+  process.stderr.write(
+    `[FATAL unhandledRejection] ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}\n`,
+  );
+});
+process.on('uncaughtException', (err) => {
+  process.stderr.write(`[FATAL uncaughtException] ${err.stack ?? err.message}\n`);
+});
 void main();
