@@ -165,6 +165,38 @@ def mget(mapping: dict, key: Any) -> Any:
     return mapping.get(s)
 
 
+# 记录「源值无法映射到目标 UUID」的 FK 字段，用于报告（key=字段名, value=出现过的源值集合）
+_UNMAPPED_FK: dict[str, set[str]] = defaultdict(set)
+
+
+def map_fk(
+    maps: Maps,
+    map_key: str,
+    src_value: Any,
+    field_name: str,
+    *,
+    fallback_keep: bool = True,
+) -> str | None:
+    """把源 ID 映射为目标 UUID 字符串（String FK 字段统一用此函数）。
+
+    - 映射成功：返回 str(uuid)
+    - 映射失败：
+        - fallback_keep=True：保留源字符串值（便于人工排查），并记录到 _UNMAPPED_FK
+        - fallback_keep=False：返回 None
+    - src_value 为空：返回 None
+    """
+    if src_value is None:
+        return None
+    s = str(src_value).strip()
+    if not s or s == "0":
+        return None
+    mapped = mget(maps.get(map_key, {}), src_value)
+    if mapped is not None:
+        return str(mapped)
+    _UNMAPPED_FK[field_name].add(s)
+    return s if fallback_keep else None
+
+
 def to_num(v: Any) -> float | None:
     if v is None or v == "":
         return None
@@ -640,8 +672,11 @@ async def migrate_members(db: AsyncSession, maps: Maps, stats: Stats) -> None:
                 pm_project_id=proj,
                 user_id=user,
                 user_name=clean_str(r["user_name"], 100),
-                depart_id=clean_str(r["depart_id"], 64),
+                # depart_id 目标 String（指向 organization/dept）→ 映射为目标 org UUID 字符串
+                depart_id=map_fk(maps, "dept", r["depart_id"], "project_member.depart_id")
+                or clean_str(r["depart_id"], 64),
                 phone=clean_str(r["phone"], 50),
+                # role_id 是项目角色标识字符串（非 FK），保留源值
                 role_id=clean_str(r["role_id"], 64),
                 role_name=clean_str(r["role_name"], 100),
                 depart_name=clean_str(r["depart_name"], 150),
@@ -740,11 +775,14 @@ async def migrate_plan_node_detail(db: AsyncSession, maps: Maps, stats: Stats) -
         if is_deleted(r):
             stats["ppm_plan_node_detail"]["skipped"] += 1
             continue
-        # 目标 plan_node_id 是 String（保留源 ID 字符串，目标 model 约定）
+        # plan_node_id 目标 String → 映射为目标 plan_node UUID 字符串
         objs.append(
             PlanNodeDetail(
                 id=uuid5_int("plan_node_detail", r["id"]),
-                plan_node_id=str(r["plan_node_id"]) if r["plan_node_id"] else "",
+                plan_node_id=map_fk(
+                    maps, "plan_node", r["plan_node_id"], "plan_node_detail.plan_node_id"
+                )
+                or "",
                 detailed_stage=clean_str(r["detailed_stage"], 64),
                 no=str(r["no"]) if r["no"] is not None else None,
                 task_theme=clean_str(r["task_theme"], 255),
@@ -774,14 +812,21 @@ async def migrate_plan_node_module(db: AsyncSession, maps: Maps, stats: Stats) -
         objs.append(
             PlanNodeModule(
                 id=mid,
-                # 目标 plan_node_id 是 String（保留源 ID，指向 ps_plan_node）
-                plan_node_id=str(r["plan_node_id"]) if r["plan_node_id"] else "",
+                # plan_node_id 目标 String（源表 ppm_ps_plan_node_module，指向 ps_plan_node；
+                # 前端 /plan-node/{id}/modules 也用模板 plan_node 查，两个 map 都尝试）
+                plan_node_id=(
+                    map_fk(maps, "ps_plan_node", r["plan_node_id"], "plan_node_module.plan_node_id")
+                    or map_fk(maps, "plan_node", r["plan_node_id"], "plan_node_module.plan_node_id")
+                    or ""
+                ),
                 module_name=clean_str(r["module_name"], 255),
                 plan_workload=clean_str(r["plan_workload"], 64),
                 plan_begin_time=to_dt(r["plan_begin_time"]),
                 plan_complete_time=to_dt(r["plan_complete_time"]),
-                # 目标 duty_user_id 是 String（保留源 user id 字符串语义）
-                duty_user_id=str(r["duty_user_id"]) if r["duty_user_id"] else None,
+                # duty_user_id 目标 String → 映射为目标 user UUID 字符串
+                duty_user_id=map_fk(
+                    maps, "user", r["duty_user_id"], "plan_node_module.duty_user_id"
+                ),
             )
         )
     db.add_all(objs)
@@ -852,15 +897,21 @@ async def migrate_ps_plan_node(db: AsyncSession, maps: Maps, stats: Stats) -> No
                 id=nid,
                 overall_stage=clean_str(r["overall_stage"], 64),
                 no=str(r["no"]) if r["no"] is not None else None,
-                # ps_project_plan_id 目标 String
-                ps_project_plan_id=str(r["ps_project_plan_id"]) if r["ps_project_plan_id"] else "",
+                # ps_project_plan_id 目标 String → 映射为目标 UUID 字符串（ps_project_plan）
+                ps_project_plan_id=map_fk(
+                    maps,
+                    "ps_project_plan",
+                    r["ps_project_plan_id"],
+                    "ps_plan_node.ps_project_plan_id",
+                )
+                or "",
                 status=clean_str(r["status"], 32) or "draft",
                 task_theme=clean_str(r["task_theme"], 255),
                 plan_workload=clean_str(r["plan_workload"], 64),
                 plan_begin_time=to_dt(r["plan_begin_time"]),
                 plan_complete_time=to_dt(r["plan_complete_time"]),
-                # duty_user_id 目标 String
-                duty_user_id=str(r["duty_user_id"]) if r["duty_user_id"] else None,
+                # duty_user_id 目标 String → 映射为目标 user UUID 字符串
+                duty_user_id=map_fk(maps, "user", r["duty_user_id"], "ps_plan_node.duty_user_id"),
             )
         )
     db.add_all(objs)
@@ -885,8 +936,11 @@ async def migrate_ps_plan_node_detail(db: AsyncSession, maps: Maps, stats: Stats
         objs.append(
             PsPlanNodeDetail(
                 id=did,
-                # plan_node_id 目标 String（指向 ps_plan_node 源 ID 字符串）
-                plan_node_id=str(r["plan_node_id"]) if r["plan_node_id"] else "",
+                # plan_node_id 目标 String（源语义指向 ppm_ps_plan_node）→ 映射为目标 UUID 字符串
+                plan_node_id=map_fk(
+                    maps, "ps_plan_node", r["plan_node_id"], "ps_plan_node_detail.plan_node_id"
+                )
+                or "",
                 detailed_stage=clean_str(r["detailed_stage"], 64),
                 task_theme=clean_str(r["task_theme"], 255),
                 task_description=clean_str(r["task_description"]),
@@ -900,17 +954,23 @@ async def migrate_ps_plan_node_detail(db: AsyncSession, maps: Maps, stats: Stats
                 actual_begin_time=to_dt(r["actual_begin_time"]),
                 actual_complete_time=to_dt(r["actual_complete_time"]),
                 no=str(r["no"]) if r["no"] is not None else None,
-                # execute_user_id 目标 String
-                execute_user_id=clean_str(r["execute_user_id"], 64),
-                # module_id 目标 String（源 bigint → 字符串）
-                module_id=str(r["module_id"]) if r["module_id"] else None,
+                # execute_user_id 目标 String → 映射为目标 user UUID 字符串
+                execute_user_id=map_fk(
+                    maps, "user", r["execute_user_id"], "ps_plan_node_detail.execute_user_id"
+                ),
+                # module_id 目标 String（指向 ppm_ps_plan_node_module）→ 映射为目标 UUID 字符串
+                module_id=map_fk(maps, "module", r["module_id"], "ps_plan_node_detail.module_id"),
                 attach_group_id=clean_str(r["attach_group_id"], 128),
                 status=map_ps_detail_status(r["status"]),
                 parent_id=parent_id,
-                # audit/approve user 均为目标 String
-                audit_user_id=clean_str(r["audit_user_id"], 64),
+                # audit/approve user 均为目标 String → 映射为目标 user UUID 字符串
+                audit_user_id=map_fk(
+                    maps, "user", r["audit_user_id"], "ps_plan_node_detail.audit_user_id"
+                ),
                 audit_user_name=clean_str(r["audit_user_name"], 128),
-                approve_user_id=clean_str(r["approve_user_id"], 64),
+                approve_user_id=map_fk(
+                    maps, "user", r["approve_user_id"], "ps_plan_node_detail.approve_user_id"
+                ),
                 approve_user_name=clean_str(r["approve_user_name"], 128),
                 change_reason=clean_str(r["change_reason"]),
             )
@@ -931,15 +991,22 @@ async def migrate_ps_detail_process(db: AsyncSession, maps: Maps, stats: Stats) 
         objs.append(
             PsPlanNodeDetailProcess(
                 id=uuid5_int("ps_detail_proc", r["id"]),
-                # business_id 目标 String，指向 ps_detail.id；用源 ID 字符串
-                business_id=str(r["business_id"]) if r["business_id"] else "",
+                # business_id 目标 String，指向 ps_detail.id → 映射为目标 UUID 字符串
+                business_id=map_fk(
+                    maps, "ps_detail", r["business_id"], "ps_detail_process.business_id"
+                )
+                or "",
                 business_type=clean_str(r["business_type"], 64) or "ps_plan_node_detail",
                 node_key=clean_str(r["node_key"], 64),
-                handle_user_id=clean_str(r["handle_user_id"], 64),
+                handle_user_id=map_fk(
+                    maps, "user", r["handle_user_id"], "ps_detail_process.handle_user_id"
+                ),
                 handle_user_name=clean_str(r["handle_user_name"], 128),
                 handle_date=to_dt(r["handle_date"]),
                 handle_info=clean_str(r["handle_info"]),
-                next_user_id=clean_str(r["next_user_id"], 64),
+                next_user_id=map_fk(
+                    maps, "user", r["next_user_id"], "ps_detail_process.next_user_id"
+                ),
                 next_user_name=clean_str(r["next_user_name"], 128),
             )
         )
@@ -962,11 +1029,12 @@ async def migrate_problem_list(db: AsyncSession, maps: Maps, stats: Stats) -> No
         objs.append(
             PpmProblemList(
                 id=pid,
-                # project_id 目标 String（保留源字符串）
-                project_id=str(r["project_id"]) if r["project_id"] else "",
+                # project_id 目标 String → 映射为目标 project UUID 字符串
+                project_id=map_fk(maps, "project", r["project_id"], "problem_list.project_id")
+                or "",
                 project_name=clean_str(r["project_name"], 255),
-                # module_id 目标 String（源 bigint → 字符串）
-                module_id=str(r["module_id"]) if r["module_id"] else None,
+                # module_id 目标 String（指向 plan_node_module）→ 映射为目标 UUID 字符串
+                module_id=map_fk(maps, "module", r["module_id"], "problem_list.module_id"),
                 model_name=clean_str(r["model_name"], 255),
                 pro_desc=clean_str(r["pro_desc"]),
                 file_urls=collect_file_urls(r),
@@ -977,13 +1045,15 @@ async def migrate_problem_list(db: AsyncSession, maps: Maps, stats: Stats) -> No
                 find_time=to_dt(r["find_time"]),
                 pro_answer=clean_str(r["pro_answer"]),
                 work_type=clean_str(r["work_type"], 64),
-                # duty_user_id/audit_user_id 目标 String（源字符串保留）
-                duty_user_id=clean_str(r["duty_user_id"], 64),
+                # duty_user_id/audit_user_id 目标 String → 映射为目标 user UUID 字符串
+                duty_user_id=map_fk(maps, "user", r["duty_user_id"], "problem_list.duty_user_id"),
                 duty_user_name=clean_str(r["duty_user_name"], 128),
                 plan_start_time=to_dt(r["plan_start_time"]),
                 plan_end_time=to_dt(r["plan_end_time"]),
                 real_end_time=to_dt(r["real_end_time"]),
-                audit_user_id=clean_str(r["audit_user_id"], 64),
+                audit_user_id=map_fk(
+                    maps, "user", r["audit_user_id"], "problem_list.audit_user_id"
+                ),
                 audit_user_name=clean_str(r["audit_user_name"], 128),
                 audit_time=to_dt(r["audit_time"]),
                 remarks=clean_str(r["remarks"]),
@@ -1008,17 +1078,25 @@ async def migrate_problem_list(db: AsyncSession, maps: Maps, stats: Stats) -> No
 async def migrate_problem_change(db: AsyncSession, maps: Maps, stats: Stats) -> None:
     rows = src_query("SELECT * FROM ppm_problem_change ORDER BY id")
     new_stat("ppm_problem_change", stats, len(rows))
+    maps["problem_change"] = {}
     objs: list[PpmProblemChange] = []
     for r in rows:
         if is_deleted(r):
             stats["ppm_problem_change"]["skipped"] += 1
             continue
+        cid = uuid5_int("problem_change", r["id"])
+        maps["problem_change"][str(r["id"])] = cid
         objs.append(
             PpmProblemChange(
-                id=uuid5_int("problem_change", r["id"]),
-                # resource_id 目标 String（源 problem_list id 字符串）
-                resource_id=str(r["resource_id"]) if r["resource_id"] else "",
-                project_id=clean_str(r["project_id"], 64),
+                id=cid,
+                # resource_id 目标 String（指向 problem_list）→ 映射为目标 problem_list UUID 字符串
+                resource_id=map_fk(
+                    maps, "problem_list", r["resource_id"], "problem_change.resource_id"
+                )
+                or "",
+                # project_id 目标 String → 映射为目标 project UUID 字符串
+                project_id=map_fk(maps, "project", r["project_id"], "problem_change.project_id")
+                or clean_str(r["project_id"], 64),
                 project_name=clean_str(r["project_name"], 255),
                 model_name=clean_str(r["model_name"], 255),
                 pro_desc=clean_str(r["pro_desc"]),
@@ -1029,11 +1107,15 @@ async def migrate_problem_change(db: AsyncSession, maps: Maps, stats: Stats) -> 
                 find_time=to_dt(r["find_time"]),
                 pro_answer=clean_str(r["pro_answer"]),
                 work_type=clean_str(r["work_type"], 64),
-                duty_user_id=clean_str(r["duty_user_id"], 64),
+                duty_user_id=map_fk(maps, "user", r["duty_user_id"], "problem_change.duty_user_id")
+                or clean_str(r["duty_user_id"], 64),
                 duty_user_name=clean_str(r["duty_user_name"], 128),
                 plan_start_time=to_dt(r["plan_start_time"]),
                 plan_end_time=to_dt(r["plan_end_time"]),
-                audit_user_id=clean_str(r["audit_user_id"], 64),
+                audit_user_id=map_fk(
+                    maps, "user", r["audit_user_id"], "problem_change.audit_user_id"
+                )
+                or clean_str(r["audit_user_id"], 64),
                 audit_user_name=clean_str(r["audit_user_name"], 128),
                 audit_time=to_dt(r["audit_time"]),
                 remarks=clean_str(r["remarks"]),
@@ -1053,13 +1135,21 @@ async def migrate_problem_change(db: AsyncSession, maps: Maps, stats: Stats) -> 
 
 async def _migrate_proc_task_log(
     db: AsyncSession,
+    maps: Maps,
     stats: Stats,
     src_table: str,
     stat_key: str,
     uuid_prefix: str,
     task_cls: type,
     log_cls: type,
+    business_map_key: str,
 ) -> None:
+    """problem_list / problem_change 的流程任务 + 履历迁移。
+
+    business_id 目标 String，指向对应业务（problem_list 或 problem_change）→ 映射为目标 UUID；
+    handle_user_id / next_user_id 目标 String → 映射为目标 user UUID。
+    """
+    biz_field = f"{stat_key}.business_id"
     # 流程任务
     trows = src_query(f"SELECT * FROM {src_table}_process_task ORDER BY id")
     new_stat(f"{stat_key}_process_task", stats, len(trows))
@@ -1071,7 +1161,7 @@ async def _migrate_proc_task_log(
         tobjs.append(
             task_cls(
                 id=uuid5_int(f"{uuid_prefix}_ptask", r["id"]),
-                business_id=str(r["business_id"]) if r["business_id"] else "",
+                business_id=map_fk(maps, business_map_key, r["business_id"], biz_field) or "",
                 node_key=clean_str(r["node_key"], 32),
                 node_name=clean_str(r["node_name"], 64),
                 now_handle_user=clean_str(r["now_handle_user"], 255),
@@ -1093,13 +1183,17 @@ async def _migrate_proc_task_log(
         lobjs.append(
             log_cls(
                 id=uuid5_int(f"{uuid_prefix}_plog", r["id"]),
-                business_id=str(r["business_id"]) if r["business_id"] else "",
+                business_id=map_fk(maps, business_map_key, r["business_id"], biz_field) or "",
                 node_key=clean_str(r["node_key"], 32),
-                handle_user_id=clean_str(r["handle_user_id"], 64),
+                handle_user_id=map_fk(
+                    maps, "user", r["handle_user_id"], f"{stat_key}_log.handle_user_id"
+                ),
                 handle_user_name=clean_str(r["handle_user_name"], 128),
                 handle_date=to_dt(r["handle_date"]),
                 handle_info=clean_str(r["handle_info"]),
-                next_user_id=clean_str(r["next_user_id"], 255),
+                next_user_id=map_fk(
+                    maps, "user", r["next_user_id"], f"{stat_key}_log.next_user_id"
+                ),
                 next_user_name=clean_str(r["next_user_name"], 255),
                 comment=clean_str(r["comment"]),
             )
@@ -1314,21 +1408,25 @@ async def main() -> None:
         await migrate_problem_change(db, maps, stats)
         await _migrate_proc_task_log(
             db,
+            maps,
             stats,
             "ppm_problem_list",
             "problem_list",
             "plist_pt",
             PpmProblemListProcessTask,
             PpmProblemListProcessLog,
+            business_map_key="problem_list",
         )
         await _migrate_proc_task_log(
             db,
+            maps,
             stats,
             "ppm_problem_change",
             "problem_change",
             "pchange_pt",
             PpmProblemChangeProcessTask,
             PpmProblemChangeProcessLog,
+            business_map_key="problem_change",
         )
         await db.commit()
 
@@ -1391,6 +1489,14 @@ async def main() -> None:
     print(f"命中的 role_menu 行: {rp.get('src', 0)}")
     print(f"成功映射并写入 role_permissions: {rp.get('inserted', 0)}")
     print(f"映射不上的权限样本（前 30）: {rp.get('_unmapped_samples', [])}")
+
+    print("\n--- String FK 映射覆盖（映射不上、已保留源值）---")
+    if _UNMAPPED_FK:
+        for field, samples in sorted(_UNMAPPED_FK.items()):
+            sample_str = ",".join(sorted(samples)[:8])
+            print(f"  {field}: {len(samples)} 个源值，样本 [{sample_str}]")
+    else:
+        print("  （全部 FK 字段映射成功）")
 
     print("\n完成。")
 
