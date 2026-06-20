@@ -29,6 +29,7 @@ import { execFile, exec } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkMinVersion } from './version.js';
+import { resolveCursorVersionEntry } from './cursor-version.js';
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -369,10 +370,21 @@ export class AgentDetector {
       };
     }
 
-    const version = await this.detectVersion(binPath, spec);
+    let version = await this.detectVersion(binPath, spec);
+    // ql-20260620-002-f8c1：cursor 专属版本 fallback。官方 cursor-agent.ps1:48 的版本目录
+    // 正则 `^\d{4}\.\d{1,2}\.\d{1,2}-[a-f0-9]+$` 不匹配新版目录命名 YYYY.MM.DD-HH-MM-SS-commit
+    // （`-` 后非纯十六进制）→ `cursor-agent --version` 必 exit 1（ps1 "No version directories
+    // found"），detectVersion 拿不到版本。绕过 ps1 直接解析 versions/<latest>/ 目录取目录名作
+    // 版本号（见 cursor-version.ts）。非 cursor provider 或无 versions 目录 → 保持原 null 行为。
+    if (version === null && name === 'cursor') {
+      const entry = resolveCursorVersionEntry(binPath);
+      if (entry) {
+        version = entry.version;
+      }
+    }
     // 注意：checkMinVersion 来自 ./version.js（task-14），传入 provider 名 + 原始版本字符串。
     // version 为 null 时跳过 checkMinVersion（对齐 Python if version is not None），
-    // versionWarning 设为 null（不叠加噪声）。
+    // versionWarning 设为 null（不叠加噪声）。cursor 无 minVersion，目录名作版本时返回 null。
     const versionWarning =
       version !== null ? checkMinVersion(name, version) : null;
 

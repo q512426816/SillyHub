@@ -14,6 +14,9 @@ import {
   type DetectedAgent,
   type ProviderName,
 } from '../src/agent-detector.js';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // ---------------------------------------------------------------------------
 // Test helper：可注入 fake PATH 查找 + fake exec 结果的子类
@@ -407,6 +410,95 @@ describe('AgentDetector.detectOne', () => {
     expect(r?.reason).toBe('not-found');
     expect(r?.path).toBe('');
     expect(r?.version).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cursor 版本探测 fallback（ql-20260620-002-f8c1：绕过坏掉的 cursor-agent.ps1）
+// ---------------------------------------------------------------------------
+
+describe('AgentDetector cursor 版本 fallback', () => {
+  beforeEach(() => clearAllSillyhubEnv());
+  afterEach(() => clearAllSillyhubEnv());
+
+  /** 在临时目录构造 cursor-agent.cmd +（可选）versions/<ver>/{node.exe,index.js}，返回根与 cmd 路径。 */
+  function makeCursorRoot(ver: string | null): { root: string; cmdPath: string } {
+    const root = mkdtempSync(join(tmpdir(), 'cursor-fallback-'));
+    const cmdPath = join(root, 'cursor-agent.cmd');
+    writeFileSync(cmdPath, '@echo off\n');
+    if (ver) {
+      const vDir = join(root, 'versions', ver);
+      mkdirSync(vDir, { recursive: true });
+      writeFileSync(join(vDir, 'node.exe'), '');
+      writeFileSync(join(vDir, 'index.js'), '');
+    }
+    return { root, cmdPath };
+  }
+
+  it('--version 失败 + 存在 versions 目录 → version 取目录名（绕过 ps1）', async () => {
+    const { root, cmdPath } = makeCursorRoot('2026.06.16-20-30-07-a07d3ac');
+    try {
+      const d = new FakeDetector();
+      d.fakeFindOnPath = (bin) => (bin === 'cursor-agent' ? cmdPath : null);
+      // 模拟官方 ps1 坏掉：cursor-agent --version exit 1 → detectVersion 返回 null
+      d.fakeExecResult = { error: new Error('cursor-agent.ps1 exit 1') };
+      const r = await d.detectOne('cursor');
+      expect(r).not.toBeNull();
+      expect(r?.status).toBe('available');
+      expect(r?.version).toBe('2026.06.16-20-30-07-a07d3ac');
+      expect(r?.path).toBe(cmdPath);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('--version 失败 + 无 versions 目录 → version 仍 undefined（回落原行为）', async () => {
+    const { root, cmdPath } = makeCursorRoot(null);
+    try {
+      const d = new FakeDetector();
+      d.fakeFindOnPath = (bin) => (bin === 'cursor-agent' ? cmdPath : null);
+      d.fakeExecResult = { error: new Error('exit 1') };
+      const r = await d.detectOne('cursor');
+      expect(r?.status).toBe('available');
+      expect(r?.version).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('--version 成功 → 不走 fallback，用 --version 结果', async () => {
+    const { root, cmdPath } = makeCursorRoot('2026.06.16-20-30-07-a07d3ac');
+    try {
+      const d = new FakeDetector();
+      d.fakeFindOnPath = (bin) => (bin === 'cursor-agent' ? cmdPath : null);
+      d.fakeExecByProvider = { 'cursor-agent': { stdout: '1.2.3', stderr: '' } };
+      const r = await d.detectOne('cursor');
+      // --version 成功取到 1.2.3，即便有 versions 目录也不回落到目录名
+      expect(r?.version).toBe('1.2.3');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('非 cursor provider --version 失败 + 有 versions 目录 → 不触发 fallback', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cursor-fallback-'));
+    const cmdPath = join(root, 'codex');
+    writeFileSync(cmdPath, '');
+    // 故意在 codex 目录下放 versions，验证 fallback 仅对 cursor 生效
+    const vDir = join(root, 'versions', '2026.06.16-20-30-07-a07d3ac');
+    mkdirSync(vDir, { recursive: true });
+    writeFileSync(join(vDir, 'node.exe'), '');
+    writeFileSync(join(vDir, 'index.js'), '');
+    try {
+      const d = new FakeDetector();
+      d.fakeFindOnPath = (bin) => (bin === 'codex' ? cmdPath : null);
+      d.fakeExecResult = { error: new Error('exit 1') };
+      const r = await d.detectOne('codex');
+      expect(r?.status).toBe('available');
+      expect(r?.version).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

@@ -3,9 +3,9 @@
 // fixture：直接 inline 模拟 cmd-shim 生成的 .cmd 文件内容（codex / claude 两种格式）。
 
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { resolveWindowsCmdShim } from '../src/cmd-shim';
 
 /** 在临时目录创建一个 .cmd 文件，返回完整路径。 */
@@ -114,6 +114,53 @@ describe('resolveWindowsCmdShim', () => {
       const ps1 = resolved!.prependArgs[resolved!.prependArgs.length - 1]!;
       expect(ps1).toMatch(/cursor-agent\.ps1$/i);
       expect(ps1).not.toContain('%SCRIPT_DIR%');
+    } finally {
+      rmSync(cmdPath, { recursive: true, force: true });
+    }
+  });
+
+  // ql-20260620-002-f8c1：cursor-agent.cmd 同目录有 versions 目录 → 绕过坏掉的 ps1，
+  // 直接返回 version 目录的 node.exe + index.js 入口（让 task-runner spawn node index.js）。
+  it('cursor-agent.cmd 同目录有 versions 目录 → 返回 node.exe+index.js 入口（绕过 ps1）', () => {
+    const cmdPath = makeCmd('cursor-agent.cmd', CURSOR_CMD);
+    try {
+      const dir = dirname(cmdPath);
+      const vDir = join(dir, 'versions', '2026.06.16-20-30-07-a07d3ac');
+      mkdirSync(vDir, { recursive: true });
+      writeFileSync(join(vDir, 'node.exe'), '');
+      writeFileSync(join(vDir, 'index.js'), '');
+
+      const resolved = resolveWindowsCmdShim(cmdPath);
+      if (process.platform !== 'win32') {
+        expect(resolved).toBeNull();
+        return;
+      }
+      expect(resolved).not.toBeNull();
+      // exe 是 version 目录里的 node.exe，不是 powershell
+      expect(resolved!.exe).toMatch(
+        /versions[\\/]+2026\.06\.16-20-30-07-a07d3ac[\\/]+node\.exe$/i,
+      );
+      // prependArgs 仅一个：version 目录的 index.js（task-runner 把 adapter args 追加其后）
+      expect(resolved!.prependArgs).toEqual([join(vDir, 'index.js')]);
+    } finally {
+      rmSync(cmdPath, { recursive: true, force: true });
+    }
+  });
+
+  it('cursor-agent.cmd 同目录无 versions 目录 → 回落 powershell（原行为）', () => {
+    const cmdPath = makeCmd('cursor-agent.cmd', CURSOR_CMD);
+    try {
+      const resolved = resolveWindowsCmdShim(cmdPath);
+      if (process.platform !== 'win32') {
+        expect(resolved).toBeNull();
+        return;
+      }
+      // 无 versions 目录 → resolveCursorVersionEntry 返回 null → 回落原 powershell 解析
+      expect(resolved).not.toBeNull();
+      expect(resolved!.exe).toMatch(/powershell\.exe$/i);
+      expect(resolved!.prependArgs).toEqual(
+        expect.arrayContaining(['-File']),
+      );
     } finally {
       rmSync(cmdPath, { recursive: true, force: true });
     }

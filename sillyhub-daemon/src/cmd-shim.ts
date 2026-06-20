@@ -18,6 +18,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { resolveCursorVersionEntry } from './cursor-version.js';
 
 /**
  * 解析 Windows .cmd 包装文件，返回真实可执行命令。
@@ -57,6 +58,19 @@ export function resolveWindowsCmdShim(cmdPath: string): {
     /-File\s+"([^"]+)"\s+%\*/i.exec(flat);
   if (m0) {
     const ps1 = expand(m0[1]!);
+    // ql-20260620-002-f8c1：cursor-agent.cmd 调用的 cursor-agent.ps1 因版本目录正则
+    // （^\d{4}\.\d{1,2}\.\d{1,2}-[a-f0-9]+$）不匹配新版目录命名 YYYY.MM.DD-HH-MM-SS-commit
+    // 而整体 exit 1，spawn ps1 必崩 → cursor task 启动即失败。若 ps1 同目录存在
+    // versions/<latest>/（cursor 自更新结构），直接绕过 ps1 返回 version 目录的 node.exe +
+    // index.js 入口，让 task-runner spawn `node.exe index.js <args>`（ps1 本就这么调，只是
+    // 它自己找不到目录）。无 versions/ 或缺 node.exe/index.js → 回落原 powershell 行为。
+    const cursorEntry = resolveCursorVersionEntry(ps1);
+    if (cursorEntry) {
+      return {
+        exe: cursorEntry.nodeExe,
+        prependArgs: [cursorEntry.indexJs],
+      };
+    }
     const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
     const exe = `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
     return {
