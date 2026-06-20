@@ -239,7 +239,13 @@ export function mergeAssistantPiece(prev: string, piece: string): string {
 /* ------------------------------------------------------------------ */
 
 export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
-  const result: ProcessedLog[] = logs.map((log) => ({ log, hidden: false }));
+  // ql-20260620：过滤 daemon 已知的低价值高频 system 日志（旧 daemon 仍会推送）。
+  const NOISE_PREFIXES = ["[SYSTEM:thinking_tokens]"];
+  const filtered = logs.filter((log) => {
+    const c = log.content_redacted ?? "";
+    return !NOISE_PREFIXES.some((p) => c.startsWith(p));
+  });
+  const result: ProcessedLog[] = filtered.map((log) => ({ log, hidden: false }));
   let lastToolSourceIdx = -1;
   // ql-20260617-011：连续 [THINKING]-only stdout 合并到首条（SSE 追加效果）
   let lastThinkingIdx = -1;

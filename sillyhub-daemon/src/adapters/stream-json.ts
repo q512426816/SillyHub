@@ -729,6 +729,11 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     if (subtype === 'status' && msg.status === 'requesting') {
       return null;
     }
+    // thinking_tokens：Claude CLI extended thinking 时的高频 token 估算事件
+    //（每秒多条），纯内部诊断无展示价值，丢弃避免日志刷屏。
+    if (subtype === 'thinking_tokens') {
+      return null;
+    }
     const parts: string[] = [];
     if (sessionId) parts.push(`session=${sessionId}`);
     if (subtype === 'init') {
