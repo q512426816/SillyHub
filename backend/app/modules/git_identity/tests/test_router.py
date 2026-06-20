@@ -130,6 +130,20 @@ async def test_cross_user_isolation(client, auth_headers: dict[str, str], db_ses
     db_session.add(user_b)
     await db_session.commit()
 
+    # Grant user_b git_identity:admin at platform level (UserRole) so the list
+    # endpoint's require_permission_any admits them; data isolation is then
+    # exercised by the per-user filter asserted below.
+    from app.modules.admin.model import UserRole
+    from app.modules.auth.model import Role, RolePermission
+    from app.modules.auth.permissions import Permission
+
+    role = Role(key=f"git-admin-{uuid.uuid4().hex[:6]}", name="Git Admin (test)")
+    db_session.add(role)
+    await db_session.flush()
+    db_session.add(RolePermission(role_id=role.id, permission=Permission.GIT_IDENTITY_ADMIN.value))
+    db_session.add(UserRole(user_id=user_b.id, role_id=role.id))
+    await db_session.commit()
+
     token_b, _ = create_access_token(
         user_id=user_b.id,
         email=user_b.email,

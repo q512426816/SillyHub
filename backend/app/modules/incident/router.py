@@ -64,7 +64,7 @@ async def list_incidents(
 async def get_incident(
     incident_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission(Permission.INCIDENT_READ))],
+    user: Annotated[User, Depends(require_permission_any(Permission.INCIDENT_READ))],
 ) -> IncidentResponse:
     svc = IncidentService(session)
     incident = await svc.get(incident_id)
@@ -109,7 +109,7 @@ async def create_postmortem(
 async def get_postmortem(
     incident_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission(Permission.INCIDENT_READ))],
+    user: Annotated[User, Depends(require_permission_any(Permission.INCIDENT_READ))],
 ) -> PostmortemResponse:
     svc = IncidentService(session)
     postmortem = await svc.get_postmortem(incident_id)

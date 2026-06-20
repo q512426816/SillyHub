@@ -366,7 +366,8 @@ async def test_user_detail_includes_workspace_scoped_roles(
     from app.modules.auth.model import UserWorkspaceRole
     from app.modules.workspace.model import Workspace
 
-    ws = Workspace(name="WS", slug=f"ws-{uuid.uuid4().hex[:6]}")
+    slug = f"ws-{uuid.uuid4().hex[:6]}"
+    ws = Workspace(name="WS", slug=slug, root_path=f"/tmp/{slug}")
     db_session.add(ws)
     await db_session.flush()
     db_session.add(
@@ -392,7 +393,8 @@ async def test_user_list_includes_workspace_scoped_roles(
     from app.modules.auth.model import UserWorkspaceRole
     from app.modules.workspace.model import Workspace
 
-    ws = Workspace(name="WS2", slug=f"ws2-{uuid.uuid4().hex[:6]}")
+    slug = f"ws2-{uuid.uuid4().hex[:6]}"
+    ws = Workspace(name="WS2", slug=slug, root_path=f"/tmp/{slug}")
     db_session.add(ws)
     await db_session.flush()
     db_session.add(
