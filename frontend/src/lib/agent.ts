@@ -207,3 +207,80 @@ export interface DaemonRuntime {
 export function listDaemonRuntimes() {
   return apiFetch<DaemonRuntime[]>("/api/daemon/runtimes");
 }
+
+/**
+ * scan 真阻塞（改造点 E）：workspace 维度 active AgentSession 列表。
+ * GET /api/workspaces/{id}/agent-sessions?mode=scan。
+ * 供 approvals 审批中心页聚合 scan 歧义 AskUserQuestion 决策（订阅各 session SSE）。
+ */
+export interface WorkspaceAgentSession {
+  id: string;
+  status: string;
+  mode: string | null;
+  provider: string | null;
+}
+
+export function listWorkspaceAgentSessions(
+  workspaceId: string,
+  mode?: string,
+): Promise<WorkspaceAgentSession[]> {
+  const qs = mode ? `?mode=${encodeURIComponent(mode)}` : "";
+  return apiFetch<WorkspaceAgentSession[]>(
+    `/api/workspaces/${workspaceId}/agent-sessions${qs}`,
+  );
+}
+
+/* ================================================================== */
+/*  Mission — multi-agent orchestration (2026-06-19-multi-agent)       */
+/* ================================================================== */
+
+export interface MissionWorkerRun {
+  id: string;
+  role: string | null;
+  objective: string | null;
+  status: AgentRunStatus;
+  total_cost_usd: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface Mission {
+  id: string;
+  workspace_id: string;
+  change_id: string | null;
+  objective: string;
+  status: string; // derived: planning | running | degraded | done | failed | cancelled
+  budget_usd: number | null;
+  cost_so_far: number;
+  constraints: Record<string, unknown> | null;
+  cancelled_at: string | null;
+  created_at: string;
+  workers: MissionWorkerRun[];
+}
+
+export interface CreateMissionInput {
+  objective: string;
+  change_id?: string | null;
+  budget_usd?: number | null;
+  constraints?: Record<string, unknown> | null;
+}
+
+/** Create a Mission: GLM plans Worker delegations, dispatched to a daemon. */
+export function createMission(workspaceId: string, input: CreateMissionInput) {
+  return apiFetch<Mission>(`/api/workspaces/${workspaceId}/missions`, {
+    method: "POST",
+    json: input,
+  });
+}
+
+/** Read a Mission (derived status + workers; lazily reaps completed Artifacts). */
+export function getMission(missionId: string) {
+  return apiFetch<Mission>(`/api/missions/${missionId}`);
+}
+
+/** Cancel a Mission: marks cancelled_at + kills active worker Runs. */
+export function cancelMission(missionId: string) {
+  return apiFetch<Mission>(`/api/missions/${missionId}/cancel`, {
+    method: "POST",
+  });
+}

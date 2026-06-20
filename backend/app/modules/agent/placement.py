@@ -424,6 +424,118 @@ class RunPlacementService:
             claim_token=claim_token,
         )
 
+    async def prepare_scan_interactive_dispatch(
+        self,
+        *,
+        agent_session_id: uuid.UUID,
+        agent_run_id: uuid.UUID,
+        user_id: uuid.UUID,
+        provider: str,
+        prompt: str,
+        model: str | None,
+        root_path: str,
+        spec_root: str,
+        runtime_root: str | None = None,
+        workspace_id: uuid.UUID | None = None,
+        workspace_name: str | None = None,
+        workspace_slug: str | None = None,
+        repo_url: str | None = None,
+        branch: str | None = None,
+    ) -> "RunPlacementService.InteractiveDispatch":
+        """scan 真阻塞（generic-wibbling-whisper.md 改造点 A）：scan 专用 interactive lease。
+
+        与 ``prepare_interactive_dispatch`` 同构（kind='interactive' / lease_expires_at=NULL
+        / agent_run_id 列 NULL），但写入 scan 所需的 lease.metadata（root_path / spec_root
+        / runtime_root / workspace_* / repo_url / branch，daemon 经 execution-context
+        重建 scan bundle）+ 强制 ``manual_approval=True``（注入 canUseTool）+
+        ``ask_user_only=True``（只 AskUserQuestion 阻塞，其他工具 allow-through 让 scan
+        自动跑）。runtime 按 ``_get_online_runtime(user_id)`` 路由（workspace_id 仅进
+        metadata 用于产物/审批关联，不参与 runtime 选择——interactive session 本 wave
+        不支持 workspace 维度路由）。
+        """
+        runtime = await self._get_online_runtime(user_id, provider=provider)
+        if runtime is None:
+            log.warning(
+                "scan_interactive_dispatch_no_online_runtime",
+                agent_session_id=str(agent_session_id),
+                user_id=user_id,
+            )
+            raise NoOnlineDaemonError(user_id=user_id)
+
+        rid_raw = runtime["id"]
+        runtime_id: uuid.UUID = uuid.UUID(rid_raw) if isinstance(rid_raw, str) else rid_raw
+
+        lease_id = uuid.uuid4()
+        now = datetime.now(UTC)
+        claim_token = secrets.token_hex(32)
+        metadata: dict = {
+            "session_id": str(agent_session_id),
+            "run_id": str(agent_run_id),
+            "prompt": prompt,
+            "provider": provider,
+            "claim_token": claim_token,
+            # scan 真阻塞：强制 manual_approval=True（注入 canUseTool）+ ask_user_only=True
+            # （只 AskUserQuestion 阻塞等用户决策，其他工具 allow-through 让 scan 自动推进）。
+            "manual_approval": True,
+            "ask_user_only": True,
+            # scan bundle 重建字段（daemon execution-context fetch 消费）。
+            "root_path": root_path,
+            "spec_root": spec_root,
+            "scan_run_id": str(agent_run_id),
+            "mode": "scan",
+        }
+        if model:
+            metadata["model"] = model
+        if runtime_root:
+            metadata["runtime_root"] = runtime_root
+        if workspace_id:
+            metadata["workspace_id"] = str(workspace_id)
+        if workspace_name:
+            metadata["workspace_name"] = workspace_name
+        if workspace_slug:
+            metadata["workspace_slug"] = workspace_slug
+        if repo_url:
+            metadata["repo_url"] = repo_url
+        if branch:
+            metadata["branch"] = branch
+
+        # Raw SQL 与 prepare_interactive_dispatch 一致：kind='interactive' + NULL
+        # lease_expires_at（scan 长任务永不过期，由 DaemonService.end_session 管生命周期）。
+        await self._session.execute(
+            text(
+                """
+                INSERT INTO daemon_task_leases
+                    (id, agent_run_id, runtime_id, status, kind,
+                     lease_expires_at, metadata, created_at, updated_at)
+                VALUES
+                    (:id, NULL, :runtime_id, 'pending', 'interactive',
+                     NULL, :metadata, :now, :now)
+                """
+            ),
+            {
+                "id": lease_id.hex,
+                "runtime_id": runtime_id.hex,
+                "metadata": json.dumps(metadata),
+                "now": now,
+            },
+        )
+        await self._session.flush()
+
+        log.info(
+            "scan_interactive_dispatch_lease_prepared",
+            lease_id=str(lease_id),
+            agent_session_id=str(agent_session_id),
+            agent_run_id=str(agent_run_id),
+            runtime_id=str(runtime_id),
+        )
+
+        return RunPlacementService.InteractiveDispatch(
+            lease_id=lease_id,
+            runtime_id=runtime_id,
+            run_id=agent_run_id,
+            claim_token=claim_token,
+        )
+
     async def notify_interactive_dispatch(
         self,
         dispatch: "RunPlacementService.InteractiveDispatch",

@@ -83,6 +83,20 @@ export interface CreateSessionInput {
   model?: string;
   allowedTools?: string[];
   /**
+   * scan 真阻塞（per-session，generic-wibbling-whisper.md 改造点 C/B）：
+   * 该 session 是否注入 canUseTool 远程人审。来自 backend lease metadata.manual_approval
+   *（scan=true / chat=false），经 daemon _startInteractiveSession 透传。仅 true 时 driver
+   * 注入 canUseTool（且 AskUserQuestion 才阻塞，其他工具 allow-through）。
+   */
+  manualApproval?: boolean;
+  /**
+   * scan 真阻塞（AskUserQuestion-only 策略，改造点 D）：true 时只 AskUserQuestion
+   * 走远程人审（歧义决策阻塞），其他工具（Read/Bash/sillyspec）allow-through 让 scan 自动跑；
+   * 缺省 false = 全工具人审（task-08 远程审批危险工具，chat 场景）。来自 backend lease
+   * metadata.ask_user_only，经 daemon _startInteractiveSession 透传。
+   */
+  askUserOnly?: boolean;
+  /**
    * gap-8（凭证 parity）：claude 子进程 env（daemon 用 buildSpawnEnv 构造，含
    * credentials.json 的 ANTHROPIC token + tool_config 渲染）。缺省时 driver 回退
    * 裸 process.env（向后兼容 task-04）。**仅本地内存**，禁止序列化/落盘/回传。

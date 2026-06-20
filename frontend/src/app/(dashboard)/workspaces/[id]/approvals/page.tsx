@@ -15,6 +15,8 @@ import {
   type ApprovalRequest,
   type RiskLevel,
 } from "@/lib/approvals";
+import { SessionPermissionPanel } from "@/components/permissions/session-permission-panel";
+import { listWorkspaceAgentSessions } from "@/lib/agent";
 
 /* ------------------------------------------------------------------ */
 /*  Props & constants                                                 */
@@ -84,18 +86,23 @@ export default function ApprovalsPage({ params }: Props) {
   const [history, setHistory] = useState<ApprovalHistoryEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  // scan 真阻塞：workspace 维度 active scan sessions（供实时审批聚合面板订阅）。
+  const [scanSessions, setScanSessions] = useState<string[]>([]);
 
   /* ---- data loading ---- */
 
   const reload = useCallback(async () => {
     setError(null);
     try {
-      const [pendingList, historyList] = await Promise.all([
+      const [pendingList, historyList, scanList] = await Promise.all([
         listPendingApprovals(workspaceId),
         listApprovalHistory(workspaceId),
+        // scan 真阻塞：active scan sessions（失败不阻塞工具网关审批列表）。
+        listWorkspaceAgentSessions(workspaceId, "scan").catch(() => []),
       ]);
       setPending(pendingList);
       setHistory(historyList);
+      setScanSessions(scanList.map((s) => s.id));
     } catch (err) {
       setPending([]);
       setHistory([]);
@@ -165,6 +172,9 @@ export default function ApprovalsPage({ params }: Props) {
           刷新
         </Button>
       </header>
+
+      {/* ---- scan 真阻塞：会话级实时审批聚合（改造点 F）---- */}
+      <SessionPermissionPanel sessionIds={scanSessions} />
 
       {/* ---- error banner ---- */}
       {error && (

@@ -106,7 +106,11 @@ function WriteToolPreview({ entry, mergedResult }: ToolPreviewProps) {
   const fileName = filePath.split("/").pop() ?? filePath;
   const contentLines = content.split("\n");
   const lineCount = contentLines.length;
-  const byteSize = new TextEncoder().encode(content).length;
+  // ql-20260620：超大 content（如 agent Write 巨型文件）做 TextEncoder().encode 会 OOM
+  // 导致标签页崩溃（表现为 client-side exception）。超阈值时退化为按字符长度估算。
+  const byteSize = content.length > 200_000
+    ? content.length
+    : new TextEncoder().encode(content).length;
   const firstHeading = contentLines.find((l) => /^#{1,3}\s+/.test(l))?.replace(/^#+\s*/, "");
   const isSpecDoc = filePath.includes(".sillyspec/docs");
 

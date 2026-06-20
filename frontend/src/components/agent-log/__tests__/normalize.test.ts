@@ -248,3 +248,22 @@ describe("assistant stream merge (ql-20260618-012)", () => {
     expect(isAssistantOnly("[SYSTEM:init] x")).toBe(false);
   });
 });
+
+describe("normalizeLogs：非字符串 content 防御 (ql-20260620)", () => {
+  it("content_redacted 为 number/object/null 时不抛 TypeError，逐条保留", () => {
+    // 后端 schema 声明 str|None，但 SSE 偶发推送 number/object 等非字符串。
+    // 修复前任意一处 .split("\n") 会抛 TypeError 让整页崩成 client-side exception；
+    // 现在入口 asString 归一化（number→String，object→String，null→""）。
+    const logs = [
+      { id: "n1", run_id: "run-1", channel: "stdout", content_redacted: 12345, timestamp: "2026-06-20T00:00:00.000Z", sequence: 0 },
+      { id: "n2", run_id: "run-1", channel: "stdout", content_redacted: { foo: "bar" }, timestamp: "2026-06-20T00:00:01.000Z", sequence: 1 },
+      { id: "n3", run_id: "run-1", channel: "stdout", content_redacted: null, timestamp: "2026-06-20T00:00:02.000Z", sequence: 2 },
+    ] as unknown as AgentRunLogEntry[];
+
+    expect(() => normalizeLogs(logs)).not.toThrow();
+    const result = normalizeLogs(logs);
+    expect(result).toHaveLength(3);
+    // number 被归一化为字符串后仍作为内容保留（不丢失、不抛错）
+    expect(result[0]?.mergedAssistantContent).toContain("12345");
+  });
+});

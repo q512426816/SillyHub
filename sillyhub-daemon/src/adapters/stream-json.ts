@@ -226,6 +226,11 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     sessionId?: string;
     resumeSessionId?: string;
     prompt?: string;
+    toolConfig?: {
+      mode?: string;
+      allowed_tools?: string[];
+      max_turns?: number;
+    };
   }): string[] {
     const model = opts?.model?.trim();
     const prompt = opts?.prompt?.trim() ?? '';
@@ -253,17 +258,27 @@ export class StreamJsonAdapter implements ProtocolAdapter {
       return args;
     }
 
+    // tool_config (from lease) governs Worker execution: mode overrides the
+    // default bypassPermissions, allowed_tools is an explicit whitelist,
+    // max_turns bounds execution (without it Workers ran 6min+ unbounded).
+    const tc = opts?.toolConfig;
     const args = [
       '-p',
       '--output-format', 'stream-json',
       '--input-format', 'stream-json',
       '--verbose',
-      '--permission-mode', 'bypassPermissions',
+      '--permission-mode', tc?.mode || 'bypassPermissions',
       // ql-20260617-006：开启后 stream_event 的 message_delta 子事件会带真实 usage
       // （input_tokens/output_tokens 是当前 turn 的累积值）。不开启时 assistant 事件
       // 的 message.usage 永远是 {0,0}，只能在最终 result 事件拿到真实值——无法实时累加。
       '--include-partial-messages',
     ];
+    if (tc?.allowed_tools && tc.allowed_tools.length > 0) {
+      args.push('--allowedTools', tc.allowed_tools.join(','));
+    }
+    if (tc?.max_turns && tc.max_turns > 0) {
+      args.push('--max-turns', String(tc.max_turns));
+    }
     if (model) {
       args.push('--model', model);
     }

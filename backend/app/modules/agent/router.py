@@ -448,6 +448,33 @@ async def list_workspace_agent_runs(
 
 
 @router.get(
+    "/workspaces/{workspace_id}/agent-sessions",
+)
+async def list_workspace_agent_sessions(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.TASK_READ))],
+    mode: str | None = None,
+) -> list[dict]:
+    """scan 真阻塞（改造点 E）：workspace 维度 active AgentSession 列表。
+
+    供 approvals 审批中心页聚合 scan 歧义决策——前端拿 session_id 列表后订阅各自
+    SSE（permission_request），实现"在审核页看到 scan 待决策 + 反馈续 turn"。
+    """
+    svc = AgentService(session)
+    sessions = await svc.list_workspace_active_sessions(workspace_id, mode=mode)
+    return [
+        {
+            "id": str(s.id),
+            "status": s.status,
+            "mode": (s.config or {}).get("mode"),
+            "provider": s.provider,
+        }
+        for s in sessions
+    ]
+
+
+@router.get(
     "/workspaces/{workspace_id}/tasks/{task_id}/agent/runs",
     response_model=list[AgentRunResponse],
 )
@@ -559,3 +586,119 @@ async def save_agent_run_checkpoint(
         version=new_version,
         created_at=None,
     )
+
+
+# ---------------------------------------------------------------------------
+# Mission endpoints (Wave 5, 2026-06-19-multi-agent-orchestration)
+# End-to-end: POST creates a Mission (GLM plans), creates Worker Runs, and
+# dispatches them to an online daemon. GET reads derived status.
+# ---------------------------------------------------------------------------
+
+from app.modules.agent.control import MissionControlService  # noqa: E402
+from app.modules.agent.delegation import CoordinatorPlanner, GLMConfig  # noqa: E402
+from app.modules.agent.execution import MissionExecutionService  # noqa: E402
+from app.modules.agent.mission import MissionService, derive_status  # noqa: E402
+from app.modules.agent.mission_schema import (  # noqa: E402
+    MissionCreateRequest,
+    MissionResponse,
+    MissionWorkerRunResponse,
+)
+from app.modules.agent.model import AgentMission  # noqa: E402
+
+# Roles that need write tools; everything else is treated read-only at dispatch.
+_WRITE_ROLES = frozenset({"impl"})
+
+
+def _mission_to_response(
+    mission: AgentMission, runs: list[AgentRun], cost: float
+) -> MissionResponse:
+    return MissionResponse(
+        id=mission.id,
+        workspace_id=mission.workspace_id,
+        change_id=mission.change_id,
+        objective=mission.objective,
+        status=derive_status(runs, cancelled=mission.cancelled_at is not None),
+        budget_usd=mission.budget_usd,
+        cost_so_far=cost,
+        constraints=mission.constraints,
+        cancelled_at=mission.cancelled_at,
+        created_at=mission.created_at,
+        workers=[MissionWorkerRunResponse.model_validate(r) for r in runs],
+    )
+
+
+@router.post(
+    "/workspaces/{workspace_id}/missions",
+    response_model=MissionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_mission(
+    workspace_id: uuid.UUID,
+    payload: MissionCreateRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+) -> MissionResponse:
+    """Plan a Mission via GLM, create Worker Runs, dispatch them to a daemon."""
+    cfg = GLMConfig.from_env()
+    if cfg is None:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "GLM endpoint not configured (ANTHROPIC_BASE_URL/AUTH_TOKEN)",
+        )
+    planner = CoordinatorPlanner(cfg)
+    mission, runs = await MissionService(session).start_mission(
+        workspace_id=workspace_id,
+        objective=payload.objective,
+        created_by=user.id,
+        change_id=payload.change_id,
+        constraints=payload.constraints,
+        budget_usd=payload.budget_usd,
+        planner=planner,
+    )
+    exec_svc = MissionExecutionService(session)
+    for run in runs:
+        read_only = run.role not in _WRITE_ROLES
+        try:
+            await exec_svc.dispatch_worker(
+                run, workspace_id=workspace_id, user_id=user.id, read_only=read_only
+            )
+        except Exception as exc:
+            log.warning("mission_worker_dispatch_failed", run_id=str(run.id), error=str(exc))
+    ctrl = MissionControlService(session)
+    fresh = await ctrl.worker_runs(mission.id)
+    cost = await ctrl.cost_so_far(mission.id)
+    return _mission_to_response(mission, fresh, cost)
+
+
+@router.get("/missions/{mission_id}", response_model=MissionResponse)
+async def get_mission(
+    mission_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.TASK_READ))],
+) -> MissionResponse:
+    mission = await session.get(AgentMission, mission_id)
+    if mission is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "mission not found")
+    # NOTE: collect_completed_artifacts is NOT called on every GET — it provoked
+    # connection-pool exhaustion under polling (each GET ran extra queries).
+    # Artifact 回灌 is triggered explicitly (cancel) / via complete_lease hook (todo).
+    ctrl = MissionControlService(session)
+    runs = await ctrl.worker_runs(mission.id)
+    cost = await ctrl.cost_so_far(mission.id)
+    return _mission_to_response(mission, runs, cost)
+
+
+@router.post("/missions/{mission_id}/cancel", response_model=MissionResponse)
+async def cancel_mission(
+    mission_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+) -> MissionResponse:
+    mission = await session.get(AgentMission, mission_id)
+    if mission is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "mission not found")
+    ctrl = MissionControlService(session)
+    await ctrl.cancel(mission)
+    runs = await ctrl.worker_runs(mission.id)
+    cost = await ctrl.cost_so_far(mission.id)
+    return _mission_to_response(mission, runs, cost)

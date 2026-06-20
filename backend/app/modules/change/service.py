@@ -667,7 +667,21 @@ class ChangeService:
 
     async def reparse(self, workspace_id: uuid.UUID) -> tuple[dict[str, int], ChangeParserResult]:
         workspace = await self._workspace_service.get(workspace_id)
+        # 平台托管工作区：从 spec_root 读取（对齐 scan_docs/service.py），
+        # 否则 stage 产物回流会扫不到 spec_root/changes/ 而只看 root_path。
         sillyspec_root = Path(workspace.root_path)
+        try:
+            from app.modules.spec_workspace.service import SpecWorkspaceService
+
+            spec_ws = await SpecWorkspaceService(self._session).get(workspace.id)
+            if spec_ws and spec_ws.strategy == "platform-managed" and spec_ws.spec_root:
+                sillyspec_root = Path(spec_ws.spec_root)
+        except Exception as exc:
+            log.warning(
+                "change.reparse_spec_root_resolve_failed",
+                workspace_id=str(workspace_id),
+                error=str(exc),
+            )
 
         result = self._parser.parse_workspace(sillyspec_root)
         stats = {"parsed": 0, "created": 0, "updated": 0, "deleted": 0, "renamed": 0}

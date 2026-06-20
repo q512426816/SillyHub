@@ -497,7 +497,11 @@ async def build_scan_bundle(
         f"- 文档生成在 {spec_root}/.sillyspec/docs/ 目录下\n"
         f"- 启动 scan 命令必须包含 --spec-root/--runtime-root/--workspace-id/--scan-run-id\n"
         f"- done 命令不需要重复平台参数\n"
-        f"- 每个步骤必须用 done 完成，不要跳过"
+        f"- 每个步骤必须用 done 完成，不要跳过\n"
+        f"- ⚠️ 发现多个潜在子项目（如 frontend + backend 多服务）或扫描策略不明确时，"
+        f"**必须调用 `AskUserQuestion` 工具**询问用户决策（提供清晰选项 + 说明），"
+        f"调用后会**暂停等待**用户选择；**禁止**用 `sillyspec run scan --wait` 或自行假设。"
+        f"用户回答后继续 scan。"
     )
 
     # Step 3 — 组装 AgentSpecBundle
@@ -510,7 +514,7 @@ async def build_scan_bundle(
         allowed_paths=[spec_root, root_path],
         denied_paths=[],
         # 工具
-        available_tools=["sillyspec"],
+        available_tools=["sillyspec", "AskUserQuestion"],
         # 元数据
         platform_metadata={
             "workspace_id": str(workspace_id),

@@ -276,14 +276,23 @@ export class SessionManager {
       if (input.env !== undefined) {
         driverOpts.env = input.env;
       }
+      // scan 真阻塞（per-session，generic-wibbling-whisper.md 改造点 C）：
+      // input.manualApproval 显式控制（chat=false / scan=true，来自 backend lease metadata）；
+      // 未传时回退实例级 manualApproval（兼容现有测试 + cli.ts 实例级能力就绪）。
+      // chat=false 不注入 canUseTool，避免其 AskUserQuestion 被 backend
+      //（config.manual_approval=False）drop → 5min 超时 deny；scan=true 注入，真阻塞等人审。
+      const enableApproval = input.manualApproval ?? this._manualApproval;
       if (
-        this._manualApproval &&
+        enableApproval &&
         this._permissionResolverFactory &&
         this._permissionWsClient
       ) {
         resolver = this._permissionResolverFactory();
         this._resolversBySession.set(input.sessionId, resolver);
-        driverOpts.canUseTool = this._buildCanUseToolCallback(input.sessionId);
+        driverOpts.canUseTool = this._buildCanUseToolCallback(
+          input.sessionId,
+          input.askUserOnly === true,
+        );
       }
       const query = this.deps.driver.start(
         inputQueue,
@@ -333,7 +342,7 @@ export class SessionManager {
    *
    * @param sessionId  bind 给当前 session 的回调（同一 SessionManager 多 session 时各独立）。
    */
-  private _buildCanUseToolCallback(sessionId: string): CanUseTool {
+  private _buildCanUseToolCallback(sessionId: string, askUserOnly: boolean): CanUseTool {
     return async (
       toolName: string,
       toolInput: unknown,
@@ -349,6 +358,13 @@ export class SessionManager {
         return { behavior: 'deny', message: 'session not in running turn' };
       }
       const runId = state.currentRunId;
+      // scan 真阻塞（AskUserQuestion-only 策略，改造点 D）：askUserOnly=true 的 session
+      //（scan）只有 AskUserQuestion（人工决策入口）走远程人审，其他工具 allow-through
+      // 让 scan 自动推进；默认 askUserOnly=false（全工具人审的 chat）所有工具走 register
+      //（task-08 远程审批危险工具语义不变）。
+      if (askUserOnly && toolName !== 'AskUserQuestion') {
+        return { behavior: 'allow' };
+      }
       // task-09：默认 deny message 模板（含 toolName / sessionId / runId），
       // 远程 deny 未带 message 时回填，让 claude 拿到可读原因自决定收敛行为。
       const defaultDenyMessage = `Tool "${toolName}" denied by reviewer (session=${sessionId}, run=${runId})`;

@@ -16,7 +16,7 @@ Run the SillySpec verify workflow to validate the implementation against the des
 
 1. **Start verify**:
    ```bash
-   sillyspec run verify --change {{change_key}}
+   sillyspec run verify --change {{change_key}}{{platform_args}}
    ```
 
 2. **Follow the step prompt** output by the CLI. It will instruct you to perform verification checks. Execute precisely.

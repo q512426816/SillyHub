@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AgentProviderSelect } from "@/components/AgentProviderSelect";
 import { ApiError } from "@/lib/api";
+import { asString } from "@/lib/utils";
 import {
   approveChange,
   executeChange,
@@ -527,7 +528,7 @@ export default function ChangeDetailPage({ params }: Props) {
                   run_id: newRunId,
                   timestamp: evt.timestamp,
                   channel: evt.channel,
-                  content_redacted: evt.content,
+                  content_redacted: asString(evt.content),
                 },
               ];
             });
@@ -603,7 +604,7 @@ export default function ChangeDetailPage({ params }: Props) {
               run_id: activeRunId,
               timestamp: evt.timestamp,
               channel: evt.channel,
-              content_redacted: evt.content,
+              content_redacted: asString(evt.content),
             },
           ];
         });

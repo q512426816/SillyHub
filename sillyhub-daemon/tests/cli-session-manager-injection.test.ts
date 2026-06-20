@@ -27,6 +27,7 @@ const captured: {
   } | null;
   sessionManagerInstances: Array<{
     deps: Record<string, unknown>;
+    opts: Record<string, unknown> | undefined;
   }>;
   driverInstances: unknown[];
   daemonOnTurnResultCalls: Array<unknown[]>;
@@ -78,8 +79,8 @@ vi.mock('../src/daemon.js', () => {
 // SessionManager mock：构造时 capture deps。
 vi.mock('../src/interactive/session-manager.js', () => {
   class SessionManagerMock {
-    constructor(deps) {
-      captured.sessionManagerInstances.push({ deps });
+    constructor(deps, opts) {
+      captured.sessionManagerInstances.push({ deps, opts });
       this.deps = deps;
     }
     async create() {}
@@ -277,5 +278,15 @@ describe('Wave2 task-04 gap-1 cli.startAction 注入 SessionManager', () => {
     expect(ctorArgs).not.toBeNull();
     expect(ctorArgs!.taskRunner).toBeDefined();
     expect(ctorArgs!.taskRunner).not.toBeNull();
+  });
+
+  it('SessionManager 构造传 opts.manualApproval=true + permissionWsClient（scan 真阻塞能力就绪）', async () => {
+    await cli.startAction({ token: 'test-token' });
+    const opts = captured.sessionManagerInstances[0]!.opts;
+    expect(opts).toBeDefined();
+    expect(opts!.manualApproval).toBe(true);
+    expect(opts!.permissionWsClient).toBeDefined();
+    // permissionWsClient.send 是闭包（延迟绑定 daemon.sendToHub），构造时即函数。
+    expect(typeof opts!.permissionWsClient!.send).toBe('function');
   });
 });

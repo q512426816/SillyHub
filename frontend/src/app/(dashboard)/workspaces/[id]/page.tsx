@@ -11,6 +11,7 @@ import { AgentProviderSelect } from "@/components/AgentProviderSelect";
 import { WorkspaceDaemonSwitcher } from "@/components/workspace-daemon-switcher";
 import { WorkspacePathFields } from "@/components/workspace-path-fields";
 import { ApiError } from "@/lib/api";
+import { asString } from "@/lib/utils";
 import { getDaemonRuntime, type DaemonRuntimeRead } from "@/lib/daemon";
 import { isDaemonClientWorkspace } from "@/lib/workspace-path";
 import {
@@ -278,7 +279,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
             run_id: runId,
             timestamp: event.timestamp,
             channel: event.channel,
-            content_redacted: event.content,
+            content_redacted: asString(event.content),
           },
         ];
       });

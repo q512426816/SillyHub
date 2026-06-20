@@ -426,6 +426,9 @@ export class TaskRunner {
               sessionId: effectiveCtx.sessionId,
               resumeSessionId: effectiveCtx.resumeSessionId,
               prompt: ctx.prompt ?? '',
+              toolConfig: ctx.toolConfig as
+                | { mode?: string; allowed_tools?: string[]; max_turns?: number }
+                | undefined,
             })
           : [];
 

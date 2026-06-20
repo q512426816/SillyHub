@@ -701,6 +701,32 @@ class AgentService:
         )
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def list_workspace_active_sessions(
+        self,
+        workspace_id: uuid.UUID,
+        *,
+        mode: str | None = None,
+    ) -> list[AgentSession]:
+        """scan 真阻塞（改造点 E）：workspace 维度的 active AgentSession 列表。
+
+        join AgentSession → AgentRun → AgentRunWorkspace 过滤 workspace；status 限 active
+        系列（pending/active/running/reconnecting）；可选按 ``config['mode']`` 过滤
+        （scan）。供前端 approvals 审批中心页聚合 scan 歧义决策（订阅各 session SSE）。
+        """
+        stmt = (
+            select(AgentSession)
+            .join(AgentRun, AgentRun.agent_session_id == AgentSession.id)
+            .join(AgentRunWorkspace, AgentRunWorkspace.agent_run_id == AgentRun.id)
+            .where(
+                AgentRunWorkspace.workspace_id == workspace_id,
+                AgentSession.status.in_(["pending", "active", "running", "reconnecting"]),
+            )
+        )
+        sessions = list((await self._session.execute(stmt)).scalars().all())
+        if mode:
+            sessions = [s for s in sessions if (s.config or {}).get("mode") == mode]
+        return sessions
+
     # ------------------------------------------------------------------
     # SSE streaming
     # ------------------------------------------------------------------
@@ -950,6 +976,32 @@ class AgentService:
             )
 
         # -- 3. Build prompt --------------------------------------------------
+        # 平台托管工作区：为 stage 命令注入平台参数（--spec-root 等），使
+        # propose/plan/execute/... 进入平台模式、文档产物写 spec_root（对齐 scan
+        # bundle 的 build_scan_bundle）。server-local 工作区 platform_args 为空，
+        # stage 仍写本地 .sillyspec（行为不变）。
+        platform_args = ""
+        try:
+            from app.modules.spec_workspace.service import SpecWorkspaceService
+
+            spec_ws = await SpecWorkspaceService(self._session).get(workspace_id)
+            if spec_ws and spec_ws.strategy == "platform-managed" and spec_ws.spec_root:
+                runtime_root = getattr(spec_ws, "runtime_root", None) or str(
+                    Path(spec_ws.spec_root) / "runtime"
+                )
+                platform_args = (
+                    f" --spec-root {spec_ws.spec_root}"
+                    f" --runtime-root {runtime_root}"
+                    f" --workspace-id {workspace_id}"
+                )
+        except Exception as exc:
+            log.warning(
+                "stage_dispatch_platform_args_resolve_failed",
+                workspace_id=str(workspace_id),
+                stage=stage,
+                error=str(exc),
+            )
+
         prompt_context = {
             "change_title": change.title or "",
             "change_key": change.change_key,
@@ -958,6 +1010,7 @@ class AgentService:
             "change_type": change.change_type or "",
             "affected_components": ", ".join(change.affected_components),
             "workspace_id": str(workspace_id),
+            "platform_args": platform_args,
         }
         prompt = load_prompt_template(prompt_template, prompt_context)
         if not prompt:
@@ -1188,13 +1241,45 @@ class AgentService:
                     f"root_path does not exist or is not a directory: {root_path}",
                     details={"root_path": root_path, "server_path": server_root},
                 )
+            # 1b. 资产保护：源码项目若自身已被 SillySpec 管理（.sillyspec/ 含
+            # changes/ 或 sillyspec.db），禁止发起平台 scan —— sillyspec init 在
+            # 平台模式下会整体删除源码目录的 .sillyspec/，导致资产丢失（见
+            # sillyspec/src/init.js:111-117 的 rmSync）。仅 server-local 可检测；
+            # daemon-client 工作空间需依赖 sillyspec init.js 侧的资产保护补丁。
+            local_ss = work_dir / ".sillyspec"
+            _has_assets = False
+            _changes_dir = local_ss / "changes"
+            if _changes_dir.is_dir():
+                try:
+                    _has_assets = any(_changes_dir.iterdir())
+                except OSError:
+                    _has_assets = True
+            if not _has_assets and (local_ss / "sillyspec.db").exists():
+                _has_assets = True
+            if _has_assets:
+                raise AgentRunError(
+                    f"目标项目已是 SillySpec 管理的项目（{local_ss} 含 changes/ 或 "
+                    f"sillyspec.db）。对其发起平台 scan 会触发 sillyspec init 整体删除"
+                    f" .sillyspec/，导致资产丢失。请先备份/迁移 changes/ 与 "
+                    f"sillyspec.db，或更换 root_path。",
+                    details={"root_path": root_path, "sillyspec_dir": str(local_ss)},
+                )
 
         # -- 2. Pre-generate run_id so we can pass it to the bundle builder ------
         run_id = uuid.uuid4()
 
-        # -- 3. Build scan bundle（daemon 经 execution-context 重建；此处保留调用仅消费
-        #         build_scan_bundle 的 Workspace 存在性校验副作用，返回值不再本地使用）--
-        await build_scan_bundle(
+        # scan 真阻塞（改造点 B）：scan 改走 interactive session（不再 batch），
+        # 让 daemon SessionManager 注入 canUseTool——AskUserQuestion 真阻塞等人审。
+        from datetime import UTC, datetime
+
+        from app.modules.agent.model import AgentRunLog, AgentSession
+        from app.modules.daemon.protocol import DAEMON_MSG_SESSION_INJECT
+        from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+        # -- 3. Build scan bundle（step_prompt 作为 interactive 首 turn 注入）----
+        # daemon 经 execution-context fetch 重建完整 bundle（CLAUDE.md 等）；此处取
+        # step_prompt 作为首 turn 内容（与 batch 时 agent 收到的 scan 指令一致）。
+        bundle = await build_scan_bundle(
             session=self._session,
             workspace_id=workspace_id,
             spec_root=spec_root,
@@ -1203,8 +1288,30 @@ class AgentService:
         )
         resolved_provider = provider or (workspace.default_agent if workspace else None)
         resolved_model = model or (workspace.default_model if workspace else None)
+        scan_provider = resolved_provider or "claude_code"
 
-        # -- 4. Create AgentRun record --------------------------------------------
+        now = datetime.now(UTC)
+        # -- 4. 建 AgentSession（manual_approval=True + ask_user_only=True）------
+        # config 经 lease.metadata → daemon execPayload → SessionManager.create 决定注入
+        # canUseTool；manual_approval=True 是 backend permission_service 放行 PERMISSION_REQUEST
+        # 的硬门控（permission_service.py:163）。ask_user_only=True 让只 AskUserQuestion 阻塞。
+        session = AgentSession(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            provider=scan_provider,
+            status="pending",
+            config={
+                "manual_approval": True,
+                "ask_user_only": True,
+                "mode": "scan",
+            },
+            turn_count=0,
+            created_at=now,
+        )
+        self._session.add(session)
+        await self._session.flush()
+
+        # -- 5. Create AgentRun record（关联 session）----------------------------
         run = AgentRun(
             id=run_id,
             task_id=None,
@@ -1215,69 +1322,95 @@ class AgentService:
             model=resolved_model,
             status="pending",
             spec_strategy="platform-managed",
+            agent_session_id=session.id,
         )
         self._session.add(run)
-        await self._session.commit()
-        await self._session.refresh(run)
 
-        # -- 4. Create M:N workspace association ----------------------------------
+        # -- 6. Create M:N workspace association ----------------------------------
         self._session.add(
             AgentRunWorkspace(
                 agent_run_id=run.id,
                 workspace_id=workspace_id,
             )
         )
-        await self._session.commit()
 
-        # -- 4b. Placement decision (daemon-only) --------------------------------
+        # -- 7. Placement：scan interactive lease（改造点 A）---------------------
         placement = RunPlacementService(self._session)
+        repo_url = workspace.repo_url if workspace else None
+        branch = workspace.default_branch if workspace else None
         try:
-            backend = await placement.decide_backend(
-                workspace_id=workspace_id,
+            dispatch = await placement.prepare_scan_interactive_dispatch(
+                agent_session_id=session.id,
+                agent_run_id=run.id,
                 user_id=user_id,
+                provider=scan_provider,
+                prompt=bundle.step_prompt,
+                model=resolved_model,
+                root_path=root_path,
+                spec_root=spec_root,
+                runtime_root=bundle.runtime_root,
+                workspace_id=workspace_id,
+                workspace_name=workspace.name if workspace else None,
+                workspace_slug=getattr(workspace, "slug", None) if workspace else None,
+                repo_url=repo_url,
+                branch=branch,
             )
         except NoOnlineDaemonError as exc:
+            await self._session.rollback()
             await self._mark_no_online_daemon(run, exc)
             return run
 
+        # backfill triple binding + activate session（参照 create_session）。
+        session.runtime_id = dispatch.runtime_id
+        session.lease_id = dispatch.lease_id
+        session.status = "active"
+        session.turn_count = 1
+        session.last_active_at = now
+        run.lease_id = dispatch.lease_id
+        # 首 turn 落 user_input log（让历史回看看到首 prompt，与 create_session 一致）。
+        self._session.add(
+            AgentRunLog(
+                run_id=run.id,
+                channel="user_input",
+                content_redacted=(bundle.step_prompt or "")[:5000],
+                timestamp=now,
+            )
+        )
+        await self._session.commit()
+        await self._session.refresh(run)
+
         log.info(
-            "start_scan_dispatch_placement",
+            "start_scan_dispatch_interactive_prepared",
             run_id=str(run.id),
-            backend=backend.value,
+            session_id=str(session.id),
+            lease_id=str(dispatch.lease_id),
         )
 
-        # daemon-only: decide_backend returns the daemon backend or raises.
-        # task-03 persists root_path/spec_root into lease.metadata so the daemon
-        # can reconstruct the scan bundle via execution-context.
-        repo_url = workspace.repo_url if workspace else None
-        branch = workspace.default_branch if workspace else None
-        lease_id_daemon = await placement.dispatch_to_daemon(
-            run.id,
-            user_id,
-            workspace_id=workspace_id,
-            root_path=root_path,
-            spec_root=spec_root,
-            repo_url=repo_url,
-            branch=branch,
-            provider=resolved_provider,
-            model=resolved_model,
-        )
-        if lease_id_daemon:
-            log.info(
-                "start_scan_dispatch_dispatched_to_daemon",
-                run_id=str(run.id),
-                daemon_lease_id=str(lease_id_daemon),
+        # -- 8. Wake daemon + SESSION_INJECT 首 turn（参照 create_session 收尾）---
+        delivered = await placement.notify_interactive_dispatch(dispatch)
+        if not delivered:
+            await self._mark_no_online_daemon(
+                run,
+                NoOnlineDaemonError(workspace_id=workspace_id, user_id=user_id),
             )
             return run
 
-        # Race: runtime went offline between decide and dispatch.
-        log.warning(
-            "start_scan_dispatch_dispatch_daemon_returned_none",
-            run_id=str(run.id),
+        hub = get_daemon_ws_hub()
+        await hub.send_session_control(
+            dispatch.runtime_id,
+            DAEMON_MSG_SESSION_INJECT,
+            {
+                "session_id": str(session.id),
+                "lease_id": str(dispatch.lease_id),
+                "run_id": str(run.id),
+                "prompt": bundle.step_prompt,
+                "claim_token": dispatch.claim_token,
+            },
         )
-        await self._mark_no_online_daemon(
-            run,
-            NoOnlineDaemonError(workspace_id=workspace_id, user_id=user_id),
+        log.info(
+            "start_scan_dispatch_interactive_injected",
+            run_id=str(run.id),
+            session_id=str(session.id),
         )
         return run
 

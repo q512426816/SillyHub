@@ -232,6 +232,43 @@ class AgentRun(BaseModel, table=True):
         default=None,
         sa_column=Column(Integer, nullable=True),
     )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )
+    # ── Multi-agent orchestration (2026-06-19-multi-agent-orchestration, Wave 1) ──
+    mission_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_missions.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    parent_run_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_runs.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    role: str | None = Field(
+        default=None,
+        sa_column=Column(String(30), nullable=True),
+    )  # Worker role within a Mission (arch | impl | test | integration | ...)
+    objective: str | None = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
+    )  # what this Run was delegated to achieve
+    attempt: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, default=0),
+    )
 
 
 class AgentRunLog(BaseModel, table=True):
@@ -348,3 +385,141 @@ class AgentSession(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )  # written by service.end_session (task-05)
+
+
+class AgentMission(BaseModel, table=True):
+    """Aggregation root for a multi-agent delegation.
+
+    2026-06-19-multi-agent-orchestration (Wave 1). Status is NOT persisted — it
+    is derived from child AgentRuns (see ``agent.mission.derive_status``). Only
+    intent metadata is stored; the source of truth remains AgentRun + Lease.
+    """
+
+    __tablename__ = "agent_missions"
+    __table_args__ = (
+        Index("ix_agent_missions_workspace", "workspace_id"),
+        Index("ix_agent_missions_change", "change_id"),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    change_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("changes.id", ondelete="CASCADE"),
+            nullable=True,
+        ),
+    )
+    objective: str = Field(sa_column=Column(Text, nullable=False))
+    constraints: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )  # { max_workers, read_only_scope, ... }
+    budget_tokens: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
+    budget_usd: float | None = Field(
+        default=None,
+        sa_column=Column(Float, nullable=True),
+    )
+    created_by: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )
+    cancelled_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+
+
+class AgentRunDependency(BaseModel, table=True):
+    """DAG edge between AgentRuns in a Mission (worker ordering dependencies)."""
+
+    __tablename__ = "agent_run_dependencies"
+    __table_args__ = (
+        Index("ix_agent_run_dep_run", "run_id"),
+        Index("ix_agent_run_dep_depends", "depends_on_run_id"),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    run_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_runs.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    depends_on_run_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True), ForeignKey("agent_runs.id", ondelete="CASCADE"), nullable=False
+        ),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )
+
+
+class AgentArtifact(BaseModel, table=True):
+    """Structured output from a Worker Run (summary / patch / test_result / evidence).
+
+    Raw logs stay in AgentRunLog; only structured artifacts are fed back to the
+    Coordinator (proposal §4 — Coordinator never ingests raw logs).
+    """
+
+    __tablename__ = "agent_artifacts"
+    __table_args__ = (Index("ix_agent_artifacts_run", "run_id"),)
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    run_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_runs.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    kind: str = Field(sa_column=Column(String(30), nullable=False))
+    # summary | patch | test_result | evidence
+    content_ref: str = Field(sa_column=Column(Text, nullable=False))
+    # file path (e.g. .sillyspec/docs/arch.md) or inline structured summary
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )

@@ -36,3 +36,4 @@ Run the SillySpec scan to generate architecture documentation.
 - Use `sillyspec` CLI commands only.
 - Scan writes documents to `.sillyspec/docs/`.
 - Review generated documents for completeness after the scan finishes.
+- ⚠️ 发现多个潜在子项目（如 frontend + backend 多服务）或扫描策略不明确时，**必须调用 `AskUserQuestion` 工具**询问用户决策（提供清晰选项 + 说明），调用后会**暂停等待**用户选择；**禁止**用 `sillyspec run scan --wait` 或自行假设。用户回答后继续 scan。

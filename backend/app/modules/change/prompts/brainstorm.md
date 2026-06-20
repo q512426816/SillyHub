@@ -16,7 +16,7 @@ Run the SillySpec brainstorm workflow for this change. You MUST use the `sillysp
 
 1. **Start brainstorm**:
    ```bash
-   sillyspec run brainstorm --change {{change_key}}
+   sillyspec run brainstorm --change {{change_key}}{{platform_args}}
    ```
 
 2. **Follow the step prompt** output by the CLI. It will tell you exactly what to do for this step. Execute the step instructions precisely.

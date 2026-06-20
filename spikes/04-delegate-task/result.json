@@ -1,0 +1,139 @@
+{
+  "n": 10,
+  "model": "glm-5.1",
+  "h1": 1.0,
+  "h2": 1.0,
+  "modes": {},
+  "results": [
+    {
+      "idx": 0,
+      "parsed": true,
+      "valid": true,
+      "reason": "",
+      "n": 3,
+      "keys": [
+        "summary",
+        "delegations"
+      ],
+      "raw": "{\"summary\": \"扫描 FastAPI 与 Next.js 单体仓库生成架构文档，拆分为后端架构、前端架构及跨端集成三个方向并行分析。\", \"delegations\": [{\"worker_id\": \"backend_arch_analyzer\", \"role\": \"arch\", \"objective\": \"扫描 backend/ 目录，分析 FastAPI 项目结构、路由分层、依赖注入、ORM/数据模型及中间件设计，产出后端架构说明。\", \"expected_artifact\": \"backend_arch.md\", \"read_only\": true}, {\"worker_id\": \"frontend_arch_analyzer\", \"role\": \"arch\", \"objective\": \"扫描 frontend/ 目录，分析 Next.js 项目结构、页面/组件分层、渲染策略（SSR/SSG/CSR）及全局状态管理方案，产出前端架构说明。\", \"expected_artifact\": \"frontend_arch.md\", \"read_only\": true}, {\"worker_id\": \"integration_analyzer\", \"role\": \"integration\", \"objective\": \"分析前后端交互方式，梳理 API 契约、认证流程、CORS 配置及构建/部署依赖关系，产出集成架构说明。\", \"expected_artifact\": \"integration.md\", \"read_only\": true}]}",
+      "task": "扫描一个 Python FastAPI + Next.js 单体仓库（backe"
+    },
+    {
+      "idx": 1,
+      "parsed": true,
+      "valid": true,
+      "reason": "",
+      "n": 5,
+      "keys": [
+        "summary",
+        "delegations"
+      ],
+      "raw": "{\"summary\": \"为支持多Agent编排，在AgentRun模型中增加parent_run_id字段并完成相关的分析、实现、测试与风险评估工作。\", \"delegations\": [{\"worker_id\": \"arch_analyzer\", \"role\": \"arch\", \"objective\": \"分析现有AgentRun模型结构及数据库Schema，设计parent_run_id外键关联方案，并定义父子Agent编排的层级数据流转规范。\", \"expected_artifact\": \"arch_design.md\", \"read_only\": true}, {\"worker_id\": \"risk_assessor\", \"role\": \"risk\", \"objective\": \"评估引入parent_run_id带来的数据库迁移风险、递归查询性能瓶颈以及潜在的层级死锁问题，并给出规避方案。\", \"expected_artifact\": \"risk_report.md\", \"read_only\": true}, {\"worker_id\": \"field_impl\", \"role\": \"impl\", \"objective\": \"在AgentRun模型中添加parent_run_id字段，编写数据库迁移脚本，并更新相关的CRUD逻辑以支持父子关系绑定。\", \"expected_artifact\": \"agent_run_updates.diff\", \"read_only\": false}, {\"worker_id\": \"integration_dev\", \"role\": ",
+      "task": "给一个变更：在 AgentRun 模型增加 parent_run_id 字段以支"
+    },
+    {
+      "idx": 2,
+      "parsed": true,
+      "valid": true,
+      "reason": "",
+      "n": 5,
+      "keys": [
+        "summary",
+        "delegations"
+      ],
+      "raw": "{\"summary\": \"审计 daemon 进程管理的可靠性，聚焦 lease 续约、孤儿清理与崩溃恢复三个核心机制。\", \"delegations\": [{\"worker_id\": \"daemon_arch_auditor\", \"role\": \"arch\", \"objective\": \"梳理 daemon 进程管理的整体架构，分析 lease 续约的生命周期设计、孤儿进程检测与清理机制、以及崩溃恢复的容错策略，识别架构设计层面的薄弱环节。\", \"expected_artifact\": \"daemon_arch_audit.md\", \"read_only\": true}, {\"worker_id\": \"lease_code_reviewer\", \"role\": \"code_style\", \"objective\": \"审查 lease 续约、孤儿清理、崩溃恢复相关模块的代码实现，检查并发控制、异常处理、资源释放等编码质量与潜在缺陷。\", \"expected_artifact\": \"code_review_report.md\", \"read_only\": true}, {\"worker_id\": \"recovery_test_auditor\", \"role\": \"test\", \"objective\": \"评估现有测试用例对 lease 续约超时、孤儿进程残留、崩溃后重启恢复等关键场景的覆盖度，分析边界条件与极端场景的测试缺口。\", \"expected_artifact\": \"test_coverage_analysis.md\", \"read_only\": true}, {\"wor",
+      "task": "审计一个 daemon 进程管理的可靠性：lease 续约、孤儿清理、崩溃恢复。"
+    },
+    {
+      "idx": 3,
+      "parsed": true,
+      "valid": true,
+      "reason": "",
+      "n": 5,
+      "keys": [
+        "summary",
+        "delegations"
+      ],
+      "raw": "{\"summary\": \"为RBAC权限系统补齐端到端测试，覆盖角色与权限的全链路场景，并评估架构风险与最终验证交付。\", \"delegations\": [{\"worker_id\": \"e2e_test_designer\", \"role\": \"test\", \"objective\": \"梳理RBAC权限系统的核心端到端业务场景（如用户分配角色、角色绑定权限、权限校验、越权访问拦截等），输出完整的测试用例矩阵和E2E测试方案\", \"expected_artifact\": \"e2e_test_plan.md\", \"read_only\": true}, {\"worker_id\": \"rbac_e2e_engineer\", \"role\": \"impl\", \"objective\": \"根据E2E测试方案，编写RBAC权限系统的端到端自动化测试脚本，覆盖角色创建、权限分配、资源访问鉴权及越权拒绝等完整链路\", \"expected_artifact\": \"rbac_e2e_tests.spec.js\", \"read_only\": false}, {\"worker_id\": \"rbac_test_runner\", \"role\": \"integration\", \"objective\": \"搭建测试运行环境，执行RBAC端到端测试脚本，捕获执行日志并标记所有失败的测试用例及错误堆栈\", \"expected_artifact\": \"test_execution_report.log\", \"read_only\": false}, {\"worker_id\": \"rbac_risk_reviewer\", \"",
+      "task": "为一个 RBAC 权限系统补齐端到端测试。"
+    },
+    {
+      "idx": 4,
+      "parsed": true,
+      "valid": true,
+      "reason": "",
+      "n": 5,
+      "keys": [
+        "summary",
+        "delegations"
+      ],
+      "raw": "{\"summary\": \"将现有基于同步驱动的REST API重构为基于async/await和asyncpg的异步架构。\", \"delegations\": [{\"worker_id\": \"arch_analyzer\", \"role\": \"arch\", \"objective\": \"分析现有同步REST API架构，梳理请求生命周期、数据库连接池及I/O阻塞点，产出异步改造的整体设计和技术选型方案。\", \"expected_artifact\": \"arch_design.md\", \"read_only\": true}, {\"worker_id\": \"impl_coder\", \"role\": \"impl\", \"objective\": \"根据架构设计，将框架入口、路由层及业务逻辑代码重构为async def，并使用asyncpg替换原有的同步数据库驱动和执行代码。\", \"expected_artifact\": \"async_api_src.tar.gz\", \"read_only\": false}, {\"worker_id\": \"integration_checker\", \"role\": \"integration\", \"objective\": \"检查各模块异步上下文的无缝衔接，确保没有在async函数中调用会引起事件循环阻塞的同步代码，验证asyncpg连接池在应用生命周期中的正确初始化与释放。\", \"expected_artifact\": \"integration_report.md\", \"read_only\": true}, {\"worker_id\": \"risk_manager\"",
+      "task": "把一个 REST API 从同步改为异步（async/await + async"
+    },
+    {
+      "idx": 5,
+      "parsed": true,
+      "valid": true,
+      "reason": "",
+      "n": 4,
+      "keys": [
+        "summary",
+        "delegations"
+      ],
+      "raw": "{\"summary\": \"排查前端订阅 SSE 日志流时无法收到任何日志推送的故障，需从架构链路、后端代码实现、前后端集成及风险点四个方面进行分析定位。\", \"delegations\": [{\"worker_id\": \"arch_analyzer\", \"role\": \"arch\", \"objective\": \"梳理从后端日志产生、SSE 接口推送到前端 EventSource 接收的整体数据流架构，排查链路连通性及中间件（如 Nginx/代理）对 SSE 流式传输的影响。\", \"expected_artifact\": \"arch_analysis.md\", \"read_only\": true}, {\"worker_id\": \"sse_impl_checker\", \"role\": \"impl\", \"objective\": \"审查后端 SSE 接口代码，检查响应头（Content-Type: text/event-stream）、连接保活机制、日志数据 flush 逻辑以及异常断开处理是否符合规范。\", \"expected_artifact\": \"backend_impl_review.md\", \"read_only\": true}, {\"worker_id\": \"integration_checker\", \"role\": \"integration\", \"objective\": \"审查前端 EventSource 或 Fetch 流处理的集成代码，检查鉴权 Header 注入方式、跨域 CORS 配置、事件解析逻辑及连接错误重连机制。\", \"expected_artifact\": ",
+      "task": "排查一个 SSE 日志流前端收不到日志的 bug。"
+    },
+    {
+      "idx": 6,
+      "parsed": true,
+      "valid": true,
+      "reason": "",
+      "n": 3,
+      "keys": [
+        "summary",
+        "delegations"
+      ],
+      "raw": "{\"summary\": \"为知识库模块设计从草稿到废弃（draft→confirmed→verified→promoted→deprecated）的完整生命周期架构。\", \"delegations\": [{\"worker_id\": \"arch_analyzer\", \"role\": \"arch\", \"objective\": \"设计知识库模块生命周期的整体状态机，明确 draft、confirmed、verified、promoted、deprecated 各状态的业务定义、触发条件、流转规则及权限控制矩阵。\", \"expected_artifact\": \"lifecycle_state_machine.md\", \"read_only\": false}, {\"worker_id\": \"risk_assessor\", \"role\": \"risk\", \"objective\": \"评估生命周期中各状态流转环节的潜在风险，特别是状态回退、并发修改、误发布及废弃数据残留等场景的合规与安全风险，并给出缓解建议。\", \"expected_artifact\": \"lifecycle_risk_report.md\", \"read_only\": false}, {\"worker_id\": \"impl_designer\", \"role\": \"impl\", \"objective\": \"基于架构状态机设计，制定知识库生命周期流转的数据库模型字段方案、核心业务逻辑接口设计以及事件通知机制的具体实现方案。\", \"expected_artifact\": \"lifecycle_impl_spec.md\", \"rea",
+      "task": "为一个知识库模块设计生命周期：draft→confirmed→verified→"
+    },
+    {
+      "idx": 7,
+      "parsed": true,
+      "valid": true,
+      "reason": "",
+      "n": 5,
+      "keys": [
+        "summary",
+        "delegations"
+      ],
+      "raw": "{\"summary\": \"对 Git worktree 隔离方案进行全面安全评审，识别权限、并发、残留及边界风险并给出加固建议。\", \"delegations\": [{\"worker_id\": \"arch_analyzer\", \"role\": \"arch\", \"objective\": \"分析 worktree 隔离方案的架构设计，评审目录隔离、依赖隔离与网络隔离的合理性及潜在结构性缺陷\", \"expected_artifact\": \"arch_analysis.md\", \"read_only\": true}, {\"worker_id\": \"perm_auditor\", \"role\": \"risk\", \"objective\": \"审查 worktree 创建与切换流程中的文件系统权限、符号链接逃逸、共享 .git 目录带来的越权读写与敏感信息泄露风险\", \"expected_artifact\": \"risk_report.md\", \"read_only\": true}, {\"worker_id\": \"concurrency_reviewer\", \"role\": \"risk\", \"objective\": \"识别多 worktree 并发使用时的竞态条件、锁文件冲突、进程隔离不足及资源争用引发的安全问题\", \"expected_artifact\": \"concurrency_risk.md\", \"read_only\": true}, {\"worker_id\": \"integration_checker\", \"role\": \"integration\", \"objective\": \"检查",
+      "task": "给一个 Git worktree 隔离方案做安全评审。"
+    },
+    {
+      "idx": 8,
+      "parsed": true,
+      "valid": true,
+      "reason": "",
+      "n": 5,
+      "keys": [
+        "summary",
+        "delegations"
+      ],
+      "raw": "{\"summary\": \"为 LLM 工具调用失败率监控系统设计合理的告警阈值并制定告警通知策略。\", \"delegations\": [{\"worker_id\": \"arch_analyzer\", \"role\": \"arch\", \"objective\": \"梳理监控系统的整体架构，包括数据采集源、时序数据库选型、指标计算引擎和告警分发链路的设计。\", \"expected_artifact\": \"arch_design.md\", \"read_only\": false}, {\"worker_id\": \"metric_designer\", \"role\": \"impl\", \"objective\": \"定义具体的失败率监控指标（如总体失败率、按工具分类失败率、超时率、异常率）及对应的静态与动态告警阈值计算方案。\", \"expected_artifact\": \"metrics_and_thresholds.md\", \"read_only\": false}, {\"worker_id\": \"alert_policy_impl\", \"role\": \"impl\", \"objective\": \"制定详细的告警分级（P0-P3）、防抖策略、聚合规则及告警路由（如邮件、Slack、Webhook、OnCall）的具体实施方案。\", \"expected_artifact\": \"alert_policy.md\", \"read_only\": false}, {\"worker_id\": \"risk_assessor\", \"role\": \"risk\", \"objective\": \"评估阈值设计可能带来的风险，包括",
+      "task": "为一个 LLM 工具调用失败率监控设计阈值与告警。"
+    },
+    {
+      "idx": 9,
+      "parsed": true,
+      "valid": true,
+      "reason": "",
+      "n": 5,
+      "keys": [
+        "summary",
+        "delegations"
+      ],
+      "raw": "{\"summary\": \"重构 dispatch.py，抽出 _cleanup_before_dispatch helper 函数\", \"delegations\": [{\"worker_id\": \"arch_analyzer\", \"role\": \"arch\", \"objective\": \"分析 dispatch.py 中与 cleanup-before-dispatch 相关的逻辑块，定位需要抽出的代码范围、依赖的上下文变量及副作用，确定 helper 的签名与职责边界\", \"expected_artifact\": \"arch.md\", \"read_only\": true}, {\"worker_id\": \"style_checker\", \"role\": \"code_style\", \"objective\": \"审查现有 dispatch.py 的代码风格规范与命名约定，为 _cleanup_before_dispatch helper 的命名、参数风格和文档字符串格式提供建议\", \"expected_artifact\": \"style_review.md\", \"read_only\": true}, {\"worker_id\": \"refactor_impl\", \"role\": \"impl\", \"objective\": \"在 dispatch.py 中执行重构：将清理逻辑抽取为 _cleanup_before_dispatch helper，替换原内联调用，确保逻辑等价且无遗漏\", \"expected_artifact\": \"dispatch.py\", \"read_only\": fa",
+      "task": "重构一个 1000 行的 dispatch.py：抽出 _cleanup_bef"
+    }
+  ]
+}

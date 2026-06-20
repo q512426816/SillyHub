@@ -220,6 +220,12 @@ interface WsClientLike {
     method: string,
     handler: (params: Record<string, unknown>) => Promise<unknown> | unknown,
   ) => void;
+  /**
+   * scan 真阻塞（改造点 C）：发 WS 消息到 backend（PERMISSION_REQUEST）。真实 WsClient
+   *（task-18）实现 send；此处声明供 daemon.sendToHub 调用。返回类型宽松（真实可能
+   * void/boolean），sendToHub 用 try/catch 判定是否成功。
+   */
+  send?: (msg: { type: string; payload: unknown }) => unknown;
 }
 
 /** WsClient 工厂：daemon 在 _wsLoop 用它创建实例（便于测试 mock）。 */
@@ -1199,6 +1205,35 @@ export class Daemon {
     return this._registeredRuntimeIds()[0];
   }
 
+  /**
+   * scan 真阻塞（generic-wibbling-whisper.md 改造点 C）：发 WS 消息（PERMISSION_REQUEST）
+   * 到 backend，供 SessionManager 的 permissionWsClient.send 调用。用首个已注册 runtime 的
+   * WsClient（scan 单 runtime；backend 从 WS 连接识别 runtime_id）。连接未就绪 / 发送异常
+   * → 返回 false（fail-closed，canUseTool 回调 deny，不让工具静默放行）。
+   */
+  sendToHub(msg: { type: string; payload: unknown }): boolean {
+    const rid = this._firstRegisteredRuntimeId();
+    if (!rid) {
+      this._logger.warn('send_to_hub_no_runtime', { msg_type: msg.type });
+      return false;
+    }
+    const ws = this._wsClients.get(rid);
+    if (!ws || typeof ws.send !== 'function') {
+      this._logger.warn('send_to_hub_no_ws', { msg_type: msg.type, runtime_id: rid });
+      return false;
+    }
+    try {
+      ws.send(msg);
+      return true;
+    } catch (e) {
+      this._logger.warn('send_to_hub_failed', {
+        msg_type: msg.type,
+        error: (e as Error)?.message ?? String(e),
+      });
+      return false;
+    }
+  }
+
   /** 为每个 server 分配的 runtime id 确保存在 WS 连接。 */
   private _ensureWsClients(): void {
     const registeredIds = this._registeredRuntimeIds();
@@ -1669,6 +1704,9 @@ export class Daemon {
         provider,
         pathToClaudeCodeExecutable,
         model: execPayload.model,
+        // scan 真阻塞：透传给 SessionManager.create 决定是否注入 canUseTool + 分流策略。
+        manualApproval: execPayload.manualApproval,
+        askUserOnly: execPayload.askUserOnly,
       });
       this._logger.info('interactive_session_started', {
         lease_id: leaseId,
@@ -1823,6 +1861,15 @@ export class Daemon {
       // 兜底 rawExec.claim_token / rawExec.claimToken（理论上 claimResp 顶层就有，
       // 这里是防御性）。interactive lease 必须带 claimToken 供 SessionManager 复用。
       claimToken: claimToken,
+      // scan 真阻塞：lease metadata.manual_approval / ask_user_only 透传（scan=true）。
+      manualApproval:
+        (rawExec.manual_approval as boolean | undefined) ??
+        (rawExec.manualApproval as boolean | undefined) ??
+        payload.manualApproval,
+      askUserOnly:
+        (rawExec.ask_user_only as boolean | undefined) ??
+        (rawExec.askUserOnly as boolean | undefined) ??
+        payload.askUserOnly,
     };
 
     // task-04（D-002@v3）：kind 分流。在 fetch/startLease 之前——interactive 不走

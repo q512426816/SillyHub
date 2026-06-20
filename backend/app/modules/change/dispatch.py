@@ -539,6 +539,75 @@ async def cleanup_orphan_dispatch_runs(
     return [r.id for r in orphans]
 
 
+async def cleanup_stale_pending_runs(
+    session: AsyncSession,
+    change_id: uuid.UUID,
+    max_age_minutes: int = 10,
+) -> list[uuid.UUID]:
+    """Mark stale ``pending`` AgentRuns as killed — the generic orphan backstop.
+
+    ``cleanup_orphan_dispatch_runs`` targets one precise legacy fingerprint
+    with no time window; this catches ANY pending Run stuck longer than
+    ``max_age_minutes`` regardless of origin — e.g. ``start_stage_dispatch``
+    committing a Run then raising before ``dispatch_to_daemon`` lands. Such
+    Runs match neither ``reconcile_stale_runs`` (running only) nor the legacy
+    orphan fingerprint, so without this backstop ``has_active_run`` blocks the
+    change forever.
+
+    The time window protects normal in-flight pending Runs (created seconds
+    ago, about to be dispatched): pending->running is sub-second once a lease
+    is claimed, so anything still pending after minutes is genuinely orphaned.
+    Comparison is done in Python (not SQL) to mirror ``reconcile_stale_runs``
+    timezone handling and stay portable across DB backends.
+
+    Returns the list of cleaned run IDs.
+    """
+    from datetime import timedelta
+
+    threshold = datetime.now(UTC) - timedelta(minutes=max_age_minutes)
+    stmt = select(AgentRun).where(
+        col(AgentRun.change_id) == change_id,
+        col(AgentRun.status) == "pending",
+    )
+    stale: list[AgentRun] = []
+    for run in (await session.execute(stmt)).scalars().all():
+        created = run.created_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+        if created < threshold:
+            stale.append(run)
+
+    if not stale:
+        return []
+
+    now = datetime.now(UTC)
+    for run in stale:
+        run.status = "killed"
+        run.finished_at = now
+        run.exit_code = -1
+        run.output_redacted = f"Cleaned as stale pending orphan (pending > {max_age_minutes}min)."
+        session.add(run)
+    await session.commit()
+    return [r.id for r in stale]
+
+
+async def _cleanup_before_dispatch(
+    session: AsyncSession,
+    change_id: uuid.UUID,
+) -> None:
+    """Pre-dispatch housekeeping shared by ``dispatch`` and ``dispatch_next_step``.
+
+    Reconcile stale running Runs, drop legacy orphan dispatch Runs, and clear
+    any stale pending orphan — all before the ``has_active_run`` gate, so a
+    stuck/orphan Run never permanently blocks a change. Centralized so the two
+    dispatch entry points cannot drift out of sync (``dispatch`` previously
+    only reconciled and skipped orphan cleanup entirely).
+    """
+    await reconcile_stale_runs(session, change_id)
+    await cleanup_orphan_dispatch_runs(session, change_id)
+    await cleanup_stale_pending_runs(session, change_id)
+
+
 async def dispatch(
     session: AsyncSession,
     workspace_id: uuid.UUID,
@@ -557,8 +626,8 @@ async def dispatch(
     if config is None or not config.enabled:
         return {"dispatched": False, "reason": f"no_config_for_stage:{target_stage}"}
 
-    # Reconcile stale runs before checking for active runs
-    await reconcile_stale_runs(session, change_id)
+    # Reconcile stale/orphan Runs before the active-run gate
+    await _cleanup_before_dispatch(session, change_id)
 
     # Check for concurrent runs
     if await has_active_run(session, change_id):
@@ -737,11 +806,11 @@ class SillySpecStageDispatchService:
         if change is None:
             raise ChangeNotFound(f"Change '{change_id}' not found.")
 
-        # Step 3: Clean legacy orphan Runs + check active AgentRun (prevent
-        # duplicate dispatch). cleanup_orphan_dispatch_runs removes legacy Run A
-        # orphans before has_active_run so they no longer permanently block.
-        await reconcile_stale_runs(session, change_id)
-        await cleanup_orphan_dispatch_runs(session, change_id)
+        # Step 3: Clean stale/orphan Runs + check active AgentRun (prevent
+        # duplicate dispatch). _cleanup_before_dispatch reconciles stale running
+        # Runs, drops legacy orphan Runs, and clears any stale pending orphan —
+        # all before has_active_run so none can permanently block the change.
+        await _cleanup_before_dispatch(session, change_id)
         if await has_active_run(session, change_id):
             return {"dispatched": False, "reason": "active_run_exists", "stage": target_stage}
 

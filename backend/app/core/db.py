@@ -23,10 +23,14 @@ from app.core.config import get_settings
 _engine: AsyncEngine | None = None
 _SessionFactory: async_sessionmaker[AsyncSession] | None = None
 
-_POOL_SIZE: Final[int] = 10
-_MAX_OVERFLOW: Final[int] = 10
+# Pool tuned for multi-agent load: daemon websockets + mission polling + worker
+# lease callbacks all share this pool. Larger size/overflow tolerates concurrent
+# callbacks; shorter recycle reclaims leaked/stale slots faster. Complements the
+# c1de949 SSE/background slot-release fix.
+_POOL_SIZE: Final[int] = 20
+_MAX_OVERFLOW: Final[int] = 30
 _POOL_TIMEOUT: Final[float] = 30.0
-_POOL_RECYCLE: Final[int] = 1800  # 30 min — kill stale connections
+_POOL_RECYCLE: Final[int] = 300  # 5 min — reclaim leaked/stale slots faster
 
 
 def get_engine() -> AsyncEngine:

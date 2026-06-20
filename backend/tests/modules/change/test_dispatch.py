@@ -1523,6 +1523,165 @@ async def test_wave0_cleanup_preserves_all_normal_pending_runs(
 
 
 # ===================================================================
+# Wave0: stale pending orphan backstop (ql-20260620-001)
+# Generic, time-windowed — catches pending orphans that match neither
+# reconcile (running only) nor the legacy sillyspec fingerprint.
+# ===================================================================
+
+
+async def test_cleanup_stale_pending_runs_removes_overdue(
+    db_session: AsyncSession,
+) -> None:
+    """超龄 pending 孤儿（任何来源）被清理。模拟 start_stage_dispatch commit Run
+    后、dispatch_to_daemon 前抛异常遗留的 Run：spec_strategy=None（不命中 legacy
+    指纹），created_at 远超阈值。"""
+    from datetime import UTC, datetime, timedelta
+
+    from app.modules.change.dispatch import cleanup_stale_pending_runs
+
+    change = await _create_change(db_session)
+    orphan = AgentRun(
+        id=uuid.uuid4(),
+        task_id=None,
+        lease_id=None,
+        change_id=change.id,
+        agent_type="claude_code",
+        provider=None,
+        model=None,
+        status="pending",
+        spec_strategy=None,
+        created_at=datetime.now(UTC) - timedelta(minutes=30),
+    )
+    db_session.add(orphan)
+    await db_session.commit()
+
+    cleaned = await cleanup_stale_pending_runs(db_session, change.id)
+
+    assert cleaned == [orphan.id]
+    await db_session.refresh(orphan)
+    assert orphan.status == "killed"
+    assert orphan.exit_code == -1
+    assert orphan.finished_at is not None
+
+
+async def test_cleanup_stale_pending_runs_preserves_fresh_pending(
+    db_session: AsyncSession,
+) -> None:
+    """刚创建的 pending Run（正常启动中）绝不被误杀——时间窗保护。"""
+    from app.modules.change.dispatch import cleanup_stale_pending_runs
+
+    change = await _create_change(db_session)
+    fresh = await _create_agent_run(db_session, change_id=change.id, status="pending")
+
+    cleaned = await cleanup_stale_pending_runs(db_session, change.id)
+
+    assert cleaned == []
+    await db_session.refresh(fresh)
+    assert fresh.status == "pending"
+
+
+async def test_cleanup_stale_pending_runs_preserves_non_pending(
+    db_session: AsyncSession,
+) -> None:
+    """running/completed/failed/killed 的超龄 Run 一律不动（pending 专属）。"""
+    from datetime import UTC, datetime, timedelta
+
+    from app.modules.change.dispatch import cleanup_stale_pending_runs
+
+    change = await _create_change(db_session)
+    old = datetime.now(UTC) - timedelta(minutes=30)
+    others = []
+    for status in ("running", "completed", "failed", "killed"):
+        run = AgentRun(
+            id=uuid.uuid4(),
+            change_id=change.id,
+            agent_type="claude_code",
+            status=status,
+            created_at=old,
+        )
+        db_session.add(run)
+        others.append(run)
+    await db_session.commit()
+
+    cleaned = await cleanup_stale_pending_runs(db_session, change.id)
+
+    assert cleaned == []
+    for run in others:
+        await db_session.refresh(run)
+        assert run.status != "pending"
+
+
+async def test_cleanup_stale_pending_runs_ignores_other_changes(
+    db_session: AsyncSession,
+) -> None:
+    """只清理目标 change 的孤儿，不误伤其他 change 的超龄 pending Run。"""
+    from datetime import UTC, datetime, timedelta
+
+    from app.modules.change.dispatch import cleanup_stale_pending_runs
+
+    change_a = await _create_change(db_session)
+    change_b = await _create_change(db_session)
+    other = AgentRun(
+        id=uuid.uuid4(),
+        change_id=change_b.id,
+        agent_type="claude_code",
+        status="pending",
+        created_at=datetime.now(UTC) - timedelta(minutes=30),
+    )
+    db_session.add(other)
+    await db_session.commit()
+
+    cleaned = await cleanup_stale_pending_runs(db_session, change_a.id)
+
+    assert cleaned == []
+    await db_session.refresh(other)
+    assert other.status == "pending"
+
+
+async def test_dispatch_next_step_unblocks_after_stale_pending_orphan(
+    db_session: AsyncSession,
+) -> None:
+    """验收：start_stage_dispatch 内部失败遗留的 pending 孤儿（spec=None，不命中
+    legacy 指纹），经时间窗清理后新 dispatch 不再被永久阻塞。这是 612e71a 之后
+    仍存在的缺口——现有 wave0 测试 mock 整个 start_stage_dispatch 抛异常（Run 未
+    创建），未覆盖 commit-后-抛异常的真实孤儿路径。"""
+    from datetime import UTC, datetime, timedelta
+
+    workspace_id = await _create_workspace(db_session)
+    change = await _create_change(db_session, workspace_id=workspace_id)
+    orphan = AgentRun(
+        id=uuid.uuid4(),
+        task_id=None,
+        lease_id=None,
+        change_id=change.id,
+        agent_type="claude_code",
+        provider=None,
+        model=None,
+        status="pending",
+        spec_strategy=None,
+        created_at=datetime.now(UTC) - timedelta(minutes=30),
+    )
+    db_session.add(orphan)
+    await db_session.commit()
+
+    with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
+        service = SillySpecStageDispatchService(db_session)
+        result = await service.dispatch_next_step(
+            session=db_session,
+            workspace_id=workspace_id,
+            change_id=change.id,
+            user_id=uuid.uuid4(),
+            target_stage="propose",
+        )
+
+    assert result["dispatched"] is True  # 孤儿被时间窗清理，不再阻塞
+    await db_session.refresh(orphan)
+    assert orphan.status == "killed"
+    pending = [r for r in await _runs_for_change(db_session, change.id) if r.status == "pending"]
+    assert pending == []
+
+
+# ===================================================================
 # Wave0 ql-20260619-003-0f87: dispatch() last_dispatch.run_id persistence
 # ===================================================================
 

@@ -16,7 +16,7 @@ Run the SillySpec plan workflow to create a detailed implementation plan.
 
 1. **Start plan**:
    ```bash
-   sillyspec run plan --change {{change_key}}
+   sillyspec run plan --change {{change_key}}{{platform_args}}
    ```
 
 2. **Follow the step prompt** output by the CLI. It will instruct you to read the design documents and create an implementation plan. Execute precisely.

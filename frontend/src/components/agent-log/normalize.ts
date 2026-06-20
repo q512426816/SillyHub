@@ -1,4 +1,5 @@
 import type { AgentRunLogEntry } from "@/lib/agent";
+import { asString } from "@/lib/utils";
 import type { ProcessedLog, ScanCheckResult, ToolCallEntry } from "./types";
 
 /* ------------------------------------------------------------------ */
@@ -24,8 +25,9 @@ function stringifyToolArgs(value: unknown): string {
 }
 
 export function parseToolCallContent(raw: string | null | undefined): ToolCallEntry | null {
-  // ql-20260616-002：上游 content_redacted 可为 null（后端 schema str|None），入口降级。
-  const safe = raw ?? "";
+  // ql-20260616-002 / ql-20260620：上游 content_redacted 可为 null 或偶发非字符串类型，
+  // 入口用 asString 归一化（null/undefined→""，number/object→String），避免下游 split 抛错。
+  const safe = asString(raw);
   if (!safe) return null;
   try {
     const obj = JSON.parse(safe);
@@ -239,10 +241,22 @@ export function mergeAssistantPiece(prev: string, piece: string): string {
 /* ------------------------------------------------------------------ */
 
 export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
+  // ql-20260620：归一化本身若因异常数据抛错，回退为逐条原样渲染，
+  // 保证日志面板不整页崩（client-side exception）。
+  try {
+    return normalizeLogsImpl(logs);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[normalizeLogs] 归一化失败，回退为逐条原样渲染", err);
+    return logs.map((log) => ({ log, hidden: false }));
+  }
+}
+
+function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
   // ql-20260620：过滤 daemon 已知的低价值高频 system 日志（旧 daemon 仍会推送）。
   const NOISE_PREFIXES = ["[SYSTEM:thinking_tokens]"];
   const filtered = logs.filter((log) => {
-    const c = log.content_redacted ?? "";
+    const c = asString(log.content_redacted);
     return !NOISE_PREFIXES.some((p) => c.startsWith(p));
   });
   const result: ProcessedLog[] = filtered.map((log) => ({ log, hidden: false }));
@@ -272,7 +286,7 @@ export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
     // ql-20260616-002：后端 content_redacted 实际可为 null/undefined（schema str|None），
     // 前端类型声明成 string 是错的。SSE 流式 entry 可能瞬时为空 → 这里降级为 "" 避免
     // 后续 split/filter(l => l.trim()) 链对 null 抛 TypeError 让整页 Bootstrap Run 崩溃。
-    const content = current.log.content_redacted ?? "";
+    const content = asString(current.log.content_redacted);
     const lines = content.split("\n");
     const nonEmpty = lines.filter((l) => l.trim());
     if (nonEmpty.length === 0) continue;
@@ -289,7 +303,7 @@ export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
         const target = result[lastThinkingIdx];
         if (target) {
           const prev = target.mergedThinkingContent
-            ?? extractThinkingText(target.log.content_redacted ?? "");
+            ?? extractThinkingText(asString(target.log.content_redacted));
           target.mergedThinkingContent = prev + piece;
         }
         current.hidden = true;
@@ -309,7 +323,7 @@ export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
         const target = result[lastAssistantIdx];
         if (target) {
           const prev = target.mergedAssistantContent
-            ?? extractAssistantText(target.log.content_redacted ?? "");
+            ?? extractAssistantText(asString(target.log.content_redacted));
           target.mergedAssistantContent = mergeAssistantPiece(prev, piece);
         }
         current.hidden = true;
@@ -327,7 +341,7 @@ export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
         const target = result[lastAssistantIdx];
         if (target) {
           const prev = target.mergedAssistantContent
-            ?? (target.log.content_redacted ?? "");
+            ?? asString(target.log.content_redacted);
           target.mergedAssistantContent = mergeAssistantPiece(prev, piece);
         }
         current.hidden = true;

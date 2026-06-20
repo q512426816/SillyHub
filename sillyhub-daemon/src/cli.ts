@@ -411,13 +411,26 @@ export async function startAction(opts: StartOptions): Promise<number> {
   // 加载并经 restoreAndReconnect（driver resume）恢复。
   const persistence = new JsonSessionPersistence();
   let daemon: Daemon;
-  const sessionManager = new SessionManager({
-    driver,
-    persistence,
-    onTurnResult: (sessionId, runId, result) => daemon.onTurnResult(sessionId, runId, result),
-    onTurnMessage: (sessionId, runId, msg) => daemon.onTurnMessage(sessionId, runId, msg),
-    onSessionEnd: (sessionId, status) => daemon.onSessionEnd(sessionId, status),
-  });
+  const sessionManager = new SessionManager(
+    {
+      driver,
+      persistence,
+      onTurnResult: (sessionId, runId, result) => daemon.onTurnResult(sessionId, runId, result),
+      onTurnMessage: (sessionId, runId, msg) => daemon.onTurnMessage(sessionId, runId, msg),
+      onSessionEnd: (sessionId, status) => daemon.onSessionEnd(sessionId, status),
+    },
+    {
+      // scan 真阻塞（改造点 C）：实例级 manualApproval=true 仅表示「能力就绪」
+      //（resolverFactory 自动每 session 一个 + wsClient 注入）；具体 session 是否注入
+      // canUseTool 由 create input.manualApproval 决定（chat=false 不注入，scan=true 注入）。
+      manualApproval: true,
+      permissionWsClient: {
+        // 闭包延迟绑定 daemon（daemon 在下方 new Daemon 后赋值，与 onTurnResult 同模式）；
+        // sendToHub 用首个已注册 runtime 的 WsClient 发 PERMISSION_REQUEST 到 backend。
+        send: (msg) => daemon.sendToHub(msg),
+      },
+    },
+  );
   // gap-8（interactive 凭证 parity）：把同一 CredentialManager 传给 Daemon，让
   // interactive 路径经 buildSpawnEnv 读 credentials.json 的 ANTHROPIC token，与 batch 对齐。
   // gap-8.3：persistence + recoveryClient 接通 daemon 重启恢复。client（HubClient）

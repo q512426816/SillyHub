@@ -21,7 +21,7 @@ import { AgentLogViewer, isPendingReplied, parseToolCallContent, parseScanCheckO
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { asString, cn } from "@/lib/utils";
 import {
   formatRunProviderLabel,
   getAgentRunLogs,
@@ -386,7 +386,7 @@ export default function AgentPage({ params }: Props) {
             run_id: activeRunId,
             timestamp: event.timestamp,
             channel: event.channel,
-            content_redacted: event.content,
+            content_redacted: asString(event.content),
           },
         ]);
       },

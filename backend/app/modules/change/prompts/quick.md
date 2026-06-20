@@ -16,7 +16,7 @@ Run the SillySpec quick workflow for this change.
 
 1. **Start quick**:
    ```bash
-   sillyspec run quick --change {{change_key}}
+   sillyspec run quick --change {{change_key}}{{platform_args}}
    ```
 
 2. **Follow the step prompt** output by the CLI. It will instruct you to read the change description and implement the fix. Execute precisely.

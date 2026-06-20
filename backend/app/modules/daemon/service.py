@@ -896,12 +896,161 @@ class DaemonService:
             except PatchApplyError:
                 raise
 
+        # A2: stage 完成回调 —— stage dispatch（AgentRun.change_id 非空）的 run
+        # 完成后，同步 sillyspec.db 状态并 auto-dispatch 下一阶段。spec sync 已在
+        # daemon _finish 之前完成（task-runner.ts:477），server spec_root 的
+        # sillyspec.db 此时为最新。失败不阻塞 lease 完成（与 reconcile_stale_runs
+        # 容错一致）。scan（change_id=None）不走此路径。
+        if lease.agent_run_id is not None:
+            try:
+                await self._trigger_stage_completion_callback(lease.agent_run_id)
+            except Exception as exc:
+                log.warning(
+                    "complete_lease_stage_callback_failed",
+                    lease_id=str(lease_id),
+                    agent_run_id=str(lease.agent_run_id),
+                    error=str(exc),
+                )
+
+        # C: scan 完成后跑平台侧结构化校验（PostScanValidator）—— 消费 sillyspec
+        # 平台模式产出的 manifest.json / postcheck-result / 源码污染检测 / 7 文档
+        # 齐全等结构化回执。仅 scan run（change_id=None + platform-managed）触发；
+        # 结果写入 lease.metadata['post_scan_validation']，不翻转 scan 成功语义。
+        if lease.agent_run_id is not None:
+            try:
+                await self._run_post_scan_validation(lease)
+            except Exception as exc:
+                log.warning(
+                    "complete_lease_post_scan_validation_failed",
+                    lease_id=str(lease_id),
+                    error=str(exc),
+                )
+
         log.info(
             "daemon_lease_completed",
             lease_id=str(lease_id),
             result_status=result.get("status"),
         )
         return lease
+
+    async def _trigger_stage_completion_callback(self, agent_run_id: uuid.UUID) -> None:
+        """A2: stage dispatch 的 AgentRun 完成后同步 sillyspec.db 并推进下一阶段。
+
+        仅对 stage dispatch（change_id 非空、status=completed）生效；scan
+        （change_id=None）由 spec sync + scan_docs.reparse 单独回流，不走这里。
+        调用范式对齐 reconcile_stale_runs（dispatch.py:466-483）。
+        """
+        from app.modules.change.dispatch import (
+            SillySpecStageDispatchService,
+            auto_dispatch_next_step,
+        )
+        from app.modules.change.model import Change
+
+        agent_run = await self._session.get(AgentRun, agent_run_id)
+        if agent_run is None or agent_run.change_id is None:
+            return
+        if agent_run.status != "completed":
+            return
+
+        change = await self._session.get(Change, agent_run.change_id)
+        if change is None:
+            return
+
+        svc = SillySpecStageDispatchService(self._session)
+        sync_result = await svc.sync_stage_status(self._session, agent_run.change_id, agent_run.id)
+        if not sync_result.synced:
+            log.info(
+                "stage_callback_sync_skipped",
+                agent_run_id=str(agent_run_id),
+                change_id=str(agent_run.change_id),
+                error=sync_result.error,
+            )
+            return
+
+        # user_id：对齐 reconcile_stale_runs 的回退策略（change.owner_id → 零 UUID）。
+        user_id = change.owner_id or uuid.UUID(int=0)
+        await auto_dispatch_next_step(
+            session=self._session,
+            workspace_id=change.workspace_id,
+            change_id=agent_run.change_id,
+            user_id=user_id,
+            sync_result=sync_result,
+        )
+        log.info(
+            "stage_callback_done",
+            agent_run_id=str(agent_run_id),
+            change_id=str(agent_run.change_id),
+        )
+
+    async def _run_post_scan_validation(self, lease: DaemonTaskLease) -> None:
+        """C: scan 完成后跑平台侧结构化校验（PostScanValidator）。
+
+        消费 sillyspec 平台模式产出的结构化回执：manifest.json / platform-scan.json
+        / postcheck-result / 源码污染检测 / 7 份 scan 文档齐全性。仅对 scan run
+        （``AgentRun.change_id`` 为空且 ``spec_strategy == "platform-managed"``）触发；
+        校验结果写入 ``lease.metadata['post_scan_validation']``，**不翻转** scan 的
+        成功语义（避免破坏现有行为，仅做增强校验与留痕）。
+
+        daemon-client 模式下 source_root 可能不在 server 本机，PostScanValidator
+        内部以 ``exists()`` 容错；外层另有 try/except 保证不阻塞 lease 完成。
+        """
+        from app.modules.agent.post_scan_validator import PostScanValidator
+
+        if not lease.agent_run_id:
+            return
+        agent_run = await self._session.get(AgentRun, lease.agent_run_id)
+        if agent_run is None:
+            return
+        # 仅 scan run：无 change_id 且平台托管（stage run 走 _trigger_stage_completion_callback）
+        if agent_run.change_id is not None:
+            return
+        if getattr(agent_run, "spec_strategy", None) != "platform-managed":
+            return
+
+        meta = dict(lease.metadata_ or {})
+        source_root = meta.get("root_path")
+        spec_root = meta.get("spec_root")
+        runtime_root = meta.get("runtime_root") or (
+            str(Path(spec_root) / "runtime") if spec_root else None
+        )
+        if not source_root or not spec_root or not runtime_root:
+            log.info(
+                "post_scan_validation_skipped_no_paths",
+                lease_id=str(lease.id),
+                has_root_path=bool(source_root),
+                has_spec_root=bool(spec_root),
+            )
+            return
+
+        validator = PostScanValidator(source_root, spec_root, runtime_root, str(agent_run.id))
+        result = validator.validate(agent_run.output_redacted or "", agent_run.exit_code or 0)
+        meta["post_scan_validation"] = {
+            "status": str(result.status.value),
+            "has_errors": result.has_errors,
+            "has_warnings": result.has_warnings,
+            "errors": [
+                {"code": e.code, "severity": e.severity, "message": e.message}
+                for e in result.errors
+            ],
+            "warnings": [
+                {"code": w.code, "severity": w.severity, "message": w.message}
+                for w in result.warnings
+            ],
+            "metadata": result.metadata,
+        }
+        lease.metadata_ = meta
+        flag_modified(lease, "metadata_")
+        self._session.add(lease)
+        await self._session.commit()
+
+        log.info(
+            "post_scan_validation_done",
+            lease_id=str(lease.id),
+            agent_run_id=str(agent_run.id),
+            status=str(result.status.value),
+            errors=len(result.errors),
+            warnings=len(result.warnings),
+        )
 
     async def submit_messages(
         self,

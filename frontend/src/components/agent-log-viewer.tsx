@@ -13,9 +13,10 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { ErrorBoundary } from "@/components/error-boundary";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { asString, cn } from "@/lib/utils";
 import type { AgentRunLogEntry } from "@/lib/agent";
 
 // New modules
@@ -115,7 +116,9 @@ function formatLogClock(iso: string): string {
 }
 
 function renderLogLines(content: string) {
-  const lines = content.split("\n").filter((line) => line.trim().length > 0);
+  // ql-20260620：入口归一化，防非字符串 content 让 .split 抛错。
+  const text = asString(content);
+  const lines = text.split("\n").filter((line) => line.trim().length > 0);
   if (lines.length === 0) return <span className="text-zinc-600">空输出</span>;
 
   return (
@@ -189,8 +192,9 @@ export function AgentLogRow({
   const inputError = inputControls?.inputErrors[log.id];
   const Icon = meta.Icon;
 
-  // ql-20260616-002：后端 content_redacted 可为 null,所有依赖处统一降级为 ""。
-  const contentSafe = log.content_redacted ?? "";
+  // ql-20260616-002 / ql-20260620：后端 content_redacted 可为 null 或偶发非字符串，
+  // 用 asString 统一降级（null/undefined→""，number/object→String），避免下游 split 崩。
+  const contentSafe = asString(log.content_redacted);
 
   // Check if stdout is thinking-only content
   const isThinking = log.channel === "stdout" && isThinkingContent(contentSafe);
@@ -494,13 +498,24 @@ export function AgentLogViewer({
         ) : (
           <div className="min-w-0 max-w-full divide-y divide-zinc-200">
             {filteredLogs.map((plog) => (
-              <AgentLogRow
+              // ql-20260620：单条日志渲染异常隔离——某条数据有问题时只显示占位行，
+              // 不再让整页崩成 client-side exception。key 必须在最外层 ErrorBoundary 上。
+              <ErrorBoundary
                 key={plog.log.id}
-                processedLog={plog}
-                allLogs={processedLogs}
-                compact={compact}
-                inputControls={inputControls}
-              />
+                label="agent-log-row"
+                fallback={() => (
+                  <div className="px-3 py-2 text-[11px] text-red-600/70">
+                    该条日志渲染失败
+                  </div>
+                )}
+              >
+                <AgentLogRow
+                  processedLog={plog}
+                  allLogs={processedLogs}
+                  compact={compact}
+                  inputControls={inputControls}
+                />
+              </ErrorBoundary>
             ))}
           </div>
         )}

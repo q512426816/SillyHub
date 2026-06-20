@@ -16,7 +16,7 @@ Run the SillySpec propose workflow to generate the four-piece proposal set (prop
 
 1. **Start propose**:
    ```bash
-   sillyspec run propose --change {{change_key}}
+   sillyspec run propose --change {{change_key}}{{platform_args}}
    ```
 
 2. **Follow the step prompt** output by the CLI. It will instruct you to analyze the brainstorm outputs and create the proposal documents. Execute precisely.

@@ -16,7 +16,7 @@ Run the SillySpec execute workflow to implement the planned tasks.
 
 1. **Start execute**:
    ```bash
-   sillyspec run execute --change {{change_key}}
+   sillyspec run execute --change {{change_key}}{{platform_args}}
    ```
 
 2. **Follow the step prompt** output by the CLI. It will instruct you to implement specific tasks from the plan. Execute precisely — read code, write code, run tests.

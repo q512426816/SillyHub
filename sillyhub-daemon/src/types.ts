@@ -270,6 +270,17 @@ export interface LeaseCtx {
    * submitMessages / startLease / complete 必须携带，对齐 Python claim_token。
    */
   claimToken?: string;
+  /**
+   * scan 真阻塞（generic-wibbling-whisper.md 改造点 C/B）：lease/session 是否启用
+   * canUseTool 人审（来自 backend lease metadata.manual_approval；scan=true/chat=false）。
+   * daemon claim 后透传到 SessionManager.create.manualApproval。
+   */
+  manualApproval?: boolean;
+  /**
+   * scan 真阻塞：AskUserQuestion-only 策略（metadata.ask_user_only）。true 时只
+   * AskUserQuestion 走人审（歧义决策阻塞），其他工具 allow-through 让 scan 自动跑。
+   */
+  askUserOnly?: boolean;
 }
 
 /**
@@ -324,6 +335,10 @@ export interface ExecutionContextPayload {
   workspace_name?: string;
   workspace_slug?: string;
   root_path?: string;
+  /** scan 真阻塞：session 是否启用 canUseTool 人审（scan=true/chat=false）。 */
+  manual_approval?: boolean;
+  /** scan 真阻塞：AskUserQuestion-only 策略。 */
+  ask_user_only?: boolean;
 }
 
 /**

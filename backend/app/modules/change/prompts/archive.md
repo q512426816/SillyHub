@@ -16,7 +16,7 @@ Run the SillySpec archive workflow to finalize and archive the completed change.
 
 1. **Start archive**:
    ```bash
-   sillyspec run archive --change {{change_key}}
+   sillyspec run archive --change {{change_key}}{{platform_args}}
    ```
 
 2. **Follow the step prompt** output by the CLI. It will instruct you to perform archive tasks. Execute precisely.
