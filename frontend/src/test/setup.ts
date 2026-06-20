@@ -4,7 +4,6 @@ import "@testing-library/jest-dom/vitest";
 // daemon/admin 等测试经 zustand persist 依赖 localStorage,补 mock。
 if (!globalThis.localStorage) {
   const store: Record<string, string> = {};
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   globalThis.localStorage = {
     getItem: (k: string) => store[k] ?? null,
     setItem: (k: string, v: string) => {
