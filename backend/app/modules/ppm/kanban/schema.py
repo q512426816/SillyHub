@@ -36,6 +36,14 @@ class KanbanQueryReq(BaseModel):
     project_id: uuid.UUID | None = Field(default=None, description="项目过滤")
     keyword: str | None = Field(default=None, description="任务标题/内容关键词")
     group_by_org: bool = Field(default=False, description="True 时按 Organization 分组返回 (X-001)")
+    start_date: str | None = Field(
+        default=None,
+        description="日期范围起 (YYYY-MM-DD, 按 PlanTask.end_time/截止日期过滤;两重维度之日期维度)",
+    )
+    end_date: str | None = Field(
+        default=None,
+        description="日期范围止 (YYYY-MM-DD, 含当天)",
+    )
 
 
 class TaskAssignReq(BaseModel):

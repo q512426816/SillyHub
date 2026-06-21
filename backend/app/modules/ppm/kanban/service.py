@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from datetime import date, datetime, time
 from typing import Any
 
 from sqlalchemy import select
@@ -70,6 +71,41 @@ def _parse_hours(raw: str | None) -> float:
         return float(raw)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _parse_date_range(
+    start_date: str | None, end_date: str | None
+) -> tuple[datetime | None, datetime | None]:
+    """解析日期范围字符串 (YYYY-MM-DD) → (起 UTC datetime, 止 当天 23:59:59 datetime)。
+
+    用于按 ``PlanTask.end_time`` (截止日期) 过滤;无效输入返回 None。
+    两重维度之日期维度的后端过滤基线。
+    """
+    start_dt: datetime | None = None
+    end_dt: datetime | None = None
+    if start_date:
+        try:
+            d = date.fromisoformat(start_date)
+            start_dt = datetime.combine(d, time.min)
+        except ValueError:
+            start_dt = None
+    if end_date:
+        try:
+            d = date.fromisoformat(end_date)
+            end_dt = datetime.combine(d, time.max)
+        except ValueError:
+            end_dt = None
+    return start_dt, end_dt
+
+
+def _apply_date_filter(stmt: Any, start_date: str | None, end_date: str | None, column: Any) -> Any:
+    """按截止日期区间 [start_date, end_date] 收紧 select stmt (含两端)。"""
+    start_dt, end_dt = _parse_date_range(start_date, end_date)
+    if start_dt is not None:
+        stmt = stmt.where(column >= start_dt)
+    if end_dt is not None:
+        stmt = stmt.where(column <= end_dt)
+    return stmt
 
 
 class PpdKanbanService:
@@ -145,6 +181,8 @@ class PpdKanbanService:
         if req.keyword:
             like = f"%{req.keyword}%"
             stmt = stmt.where(PlanTask.content.like(like))
+        # 日期维度:按截止时间 (end_time) 落在 [start_date, end_date] 过滤
+        stmt = _apply_date_filter(stmt, req.start_date, req.end_date, PlanTask.end_time)
         stmt = stmt.order_by(PlanTask.user_id.asc(), PlanTask.kanban_order.asc())
         result = await self._session.execute(stmt)
         cards: list[TaskCardVO] = []
@@ -444,6 +482,8 @@ class PpdKanbanService:
         if req.keyword:
             like = f"%{req.keyword}%"
             stmt = stmt.where(PlanTask.content.like(like))
+        # 日期维度:与 get_task_cards 同步按 end_time 过滤,保证列统计自洽
+        stmt = _apply_date_filter(stmt, req.start_date, req.end_date, PlanTask.end_time)
         result = await self._session.execute(stmt)
         stats: dict[uuid.UUID, dict[str, Any]] = defaultdict(
             lambda: {"count": 0, "hours": 0.0, "task_ids": []}

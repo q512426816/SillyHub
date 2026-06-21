@@ -16,8 +16,9 @@
  * 注:源用 el-collapse 区分移动端;本仓统一一行 flex-wrap,AntD Select 自带响应式,
  *    移动端会自然换行,够用且简洁。
  */
-import { Button, Input, Select } from "antd";
+import { Button, DatePicker, Input, Select } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
+import dayjs, { type Dayjs } from "dayjs";
 
 import { PpmUserSelect } from "@/components/ppm-user-select";
 import { useKanbanStore } from "@/stores/kanban";
@@ -62,6 +63,25 @@ export function KanbanSearchBar({
   };
 
   const onKeywordChange = (v: string) => setFilters({ keyword: v || undefined });
+
+  // 日期范围筛选 (两重维度之日期维度) — 按 deadline/截止日期过滤
+  const dateValue: [Dayjs | null, Dayjs | null] | null = (() => {
+    if (!filters.start_date && !filters.end_date) return null;
+    return [
+      filters.start_date ? dayjs(filters.start_date) : null,
+      filters.end_date ? dayjs(filters.end_date) : null,
+    ];
+  })();
+
+  const onDateChange = async (
+    range: [Dayjs | null, Dayjs | null] | null,
+  ) => {
+    setFilters({
+      start_date: range?.[0]?.format("YYYY-MM-DD") ?? undefined,
+      end_date: range?.[1]?.format("YYYY-MM-DD") ?? undefined,
+    });
+    await applyAndRefresh();
+  };
 
   const onSearch = async () => {
     await applyAndRefresh();
@@ -112,6 +132,18 @@ export function KanbanSearchBar({
         value={filters.keyword ?? ""}
         onChange={(e) => onKeywordChange(e.target.value)}
         onPressEnter={onSearch}
+      />
+
+      <DatePicker.RangePicker
+        className="w-64"
+        allowClear
+        placeholder={["截止开始", "截止结束"]}
+        value={dateValue ?? undefined}
+        onChange={(range) =>
+          onDateChange(
+            range as [Dayjs | null, Dayjs | null] | null,
+          )
+        }
       />
 
       <Button onClick={onReset}>重置</Button>

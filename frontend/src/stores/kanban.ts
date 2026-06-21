@@ -43,6 +43,10 @@ export interface KanbanFilters {
   project_id?: string;
   keyword?: string;
   group_by_org?: boolean;
+  /** 日期范围起 (YYYY-MM-DD, 按 deadline 过滤;两重维度之日期维度) */
+  start_date?: string;
+  /** 日期范围止 (YYYY-MM-DD, 含当天) */
+  end_date?: string;
 }
 
 interface KanbanState {
@@ -70,6 +74,8 @@ function toQuery(f: KanbanFilters): KanbanQueryReq {
   if (f.project_id) q.project_id = f.project_id;
   if (f.keyword) q.keyword = f.keyword;
   if (f.group_by_org) q.group_by_org = true;
+  if (f.start_date) q.start_date = f.start_date;
+  if (f.end_date) q.end_date = f.end_date;
   return q;
 }
 
@@ -113,6 +119,8 @@ export const useKanbanStore = create<KanbanState>((set, get) => ({
         status: f.status,
         project_id: f.project_id,
         keyword: f.keyword,
+        start_date: f.start_date,
+        end_date: f.end_date,
       });
       set({ tasks });
       return tasks;

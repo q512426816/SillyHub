@@ -63,6 +63,8 @@ async def get_user_columns(
     project_id: str | None = Query(None),
     keyword: str | None = Query(None),
     group_by_org: bool = Query(False, description="True 时按 Organization 分组 (X-001)"),
+    start_date: str | None = Query(None, description="日期范围起 YYYY-MM-DD (按截止日期过滤)"),
+    end_date: str | None = Query(None, description="日期范围止 YYYY-MM-DD (含当天)"),
 ) -> list[UserColumnVO] | list[OrgGroup]:
     """人员列 = 当前用户可见的 project_member (可按 Organization 分组)。"""
     req = KanbanQueryReq(
@@ -71,6 +73,8 @@ async def get_user_columns(
         project_id=uuid.UUID(project_id) if project_id else None,
         keyword=keyword,
         group_by_org=group_by_org,
+        start_date=start_date,
+        end_date=end_date,
     )
     svc = PpdKanbanService(session)
     return await svc.get_user_columns(req)
@@ -84,6 +88,8 @@ async def get_task_cards(
     status: str | None = Query(None),
     project_id: str | None = Query(None),
     keyword: str | None = Query(None),
+    start_date: str | None = Query(None, description="日期范围起 YYYY-MM-DD (按截止日期过滤)"),
+    end_date: str | None = Query(None, description="日期范围止 YYYY-MM-DD (含当天)"),
 ) -> list[TaskCardVO]:
     """任务卡片 (按 kanban_order 排序)。"""
     req = KanbanQueryReq(
@@ -91,6 +97,8 @@ async def get_task_cards(
         status=status,
         project_id=uuid.UUID(project_id) if project_id else None,
         keyword=keyword,
+        start_date=start_date,
+        end_date=end_date,
     )
     svc = PpdKanbanService(session)
     return await svc.get_task_cards(req)

@@ -20,6 +20,7 @@ import { useState } from "react";
 import { CaretDownOutlined } from "@ant-design/icons";
 import { Avatar, Progress } from "antd";
 
+import { groupTasksByDate } from "@/lib/ppm/kanban-grouping";
 import type { KanbanTaskCard, KanbanUserColumn } from "@/lib/ppm/types";
 import { KanbanTaskCard as TaskCardView } from "./kanban-task-card";
 
@@ -125,7 +126,7 @@ export function KanbanColumn({
         </div>
       </div>
 
-      {/* 任务列表 */}
+      {/* 任务列表 — 两重维度之日期维度:列内按截止日期分桶 */}
       {!collapsed && (
         <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-2">
           {tasks.length === 0 && (
@@ -133,23 +134,33 @@ export function KanbanColumn({
               暂无任务,拖拽任务到此
             </div>
           )}
-          {tasks.map((t) => (
-            <div
-              key={t.id}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setDragOver(false);
-                void onDropTo(user.user_id, t.id);
-              }}
-            >
-              <TaskCardView
-                task={t}
-                onDragStart={onDragStart}
-                onContextMenu={onTaskContextMenu}
-                onClick={onTaskClick}
-              />
+          {groupTasksByDate(tasks).map((bucket) => (
+            <div key={bucket.key} className="flex flex-col gap-1.5">
+              {/* 分组标题(视觉分隔,不参与拖拽落点) */}
+              <div className="sticky top-0 z-10 flex items-center gap-1 bg-muted/20 py-0.5 text-[10px] font-medium">
+                <span className={`inline-block h-2 w-0.5 rounded ${bucket.key === "overdue" ? "bg-destructive" : bucket.key === "today" ? "bg-red-500" : bucket.key === "tomorrow" ? "bg-orange-500" : bucket.key === "thisWeek" ? "bg-blue-500" : bucket.key === "nextWeek" ? "bg-cyan-600" : "bg-muted-foreground/40"}`} />
+                <span className={bucket.colorClass}>{bucket.label}</span>
+                <span className="text-muted-foreground">({bucket.tasks.length})</span>
+              </div>
+              {bucket.tasks.map((t) => (
+                <div
+                  key={t.id}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setDragOver(false);
+                    void onDropTo(user.user_id, t.id);
+                  }}
+                >
+                  <TaskCardView
+                    task={t}
+                    onDragStart={onDragStart}
+                    onContextMenu={onTaskContextMenu}
+                    onClick={onTaskClick}
+                  />
+                </div>
+              ))}
             </div>
           ))}
           {/* 列尾落点(对齐源拖到空白处 → 列尾) */}

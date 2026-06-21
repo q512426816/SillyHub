@@ -1026,6 +1026,10 @@ export interface KanbanQueryReq {
   keyword?: string | null;
   /** true 时按 Organization 分组返回 (X-001) */
   group_by_org?: boolean;
+  /** 日期范围起 (YYYY-MM-DD, 按 deadline/截止日期过滤;两重维度之日期维度) */
+  start_date?: string | null;
+  /** 日期范围止 (YYYY-MM-DD, 含当天) */
+  end_date?: string | null;
 }
 
 export interface KanbanUserColumn {

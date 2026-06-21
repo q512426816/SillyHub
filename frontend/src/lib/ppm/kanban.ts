@@ -58,6 +58,12 @@ export async function listKanbanUsers(
     if (params.group_by_org !== undefined) {
       query.push(`group_by_org=${String(params.group_by_org)}`);
     }
+    if (params.start_date !== undefined && params.start_date !== null) {
+      query.push(`start_date=${encodeURIComponent(params.start_date)}`);
+    }
+    if (params.end_date !== undefined && params.end_date !== null) {
+      query.push(`end_date=${encodeURIComponent(params.end_date)}`);
+    }
   }
   if (query.length > 0) {
     path = `${path}?${query.join("&")}`;
@@ -85,6 +91,12 @@ export async function listKanbanTasks(
     }
     if (params.keyword !== undefined && params.keyword !== null) {
       query.push(`keyword=${encodeURIComponent(params.keyword)}`);
+    }
+    if (params.start_date !== undefined && params.start_date !== null) {
+      query.push(`start_date=${encodeURIComponent(params.start_date)}`);
+    }
+    if (params.end_date !== undefined && params.end_date !== null) {
+      query.push(`end_date=${encodeURIComponent(params.end_date)}`);
     }
   }
   if (query.length > 0) {
