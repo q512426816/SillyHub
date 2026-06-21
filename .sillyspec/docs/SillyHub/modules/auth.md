@@ -113,3 +113,4 @@ backend/app/modules/auth/
 | 2026-06-17 | ql-20260617-005-2682 | 系统角色 name/description 中文化（SYSTEM_ROLES + seed_platform_admin_role + 新 migration 202607010900 UPDATE 存量 roles） |
 | 2026-06-17 | ql-20260617-006-7c92 | admin/router.py `_user_with_relations` 合并 `user_roles` + `user_workspace_roles`，修复用户管理列表不显示 workspace-scoped 角色（如 bootstrap 给 admin 写的 workspace_owner） |
 | 2026-06-17 | ql-20260617-007-4a31 | `/api/auth/me` 返回 `permissions`（合并 platform + 所有 workspace），前端 `fetchMe` + dashboard mount 时刷新，修复非 platform_admin 用户看不到系统管理菜单 |
+| 2026-06-22 | 2026-06-22-login-username-platform | 登录支持邮箱/账号双查:User 加 `username` 字段(唯一索引)+alembic 迁移回填 email 前缀去重加序号;LoginRequest `email`→`account`,AuthService.login 双查(含@查email/不含查username);bootstrap_admin 补 username;admin CRUD 加 username;登录页 Segmented 平台选择+按选择跳转 |

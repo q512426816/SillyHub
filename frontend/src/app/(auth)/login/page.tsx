@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Checkbox, Form, Input } from "antd";
+import { Button, Checkbox, Form, Input, Segmented } from "antd";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -11,28 +11,45 @@ import { Card, CardContent } from "@/components/ui/card";
 const REMEMBER_KEY = "sillyhub.login.remember";
 
 interface LoginFormValues {
-  email: string;
+  account: string;
   password: string;
   remember?: boolean;
 }
+
+type LoginPlatform = "sillyhub" | "ppm";
+const PLATFORM_KEY = "sillyhub.login.platform";
+const PLATFORM_OPTIONS = [
+  { label: "SillyHub 主平台", value: "sillyhub" as const },
+  { label: "项目管理平台", value: "ppm" as const },
+];
+const PLATFORM_REDIRECT: Record<LoginPlatform, string> = {
+  sillyhub: "/workspaces",
+  ppm: "/ppm/projects",
+};
 
 export default function LoginPage() {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [platform, setPlatform] = useState<LoginPlatform>("sillyhub");
   const [form] = Form.useForm<LoginFormValues>();
 
-  // 读取"记住我"缓存,回填邮箱(及密码,与源项目一致)
+  // 读取"记住我"缓存,回填账号(及密码)+ 平台选择
   useEffect(() => {
     try {
       const raw = localStorage.getItem(REMEMBER_KEY);
-      if (!raw) return;
-      const cached = JSON.parse(raw) as Partial<LoginFormValues>;
-      form.setFieldsValue({
-        email: cached.email ?? "admin@sillyhub.local",
-        password: cached.password ?? "admin123",
-        remember: true,
-      });
+      if (raw) {
+        const cached = JSON.parse(raw) as Partial<LoginFormValues>;
+        form.setFieldsValue({
+          account: cached.account ?? "admin@sillyhub.local",
+          password: cached.password ?? "admin123",
+          remember: true,
+        });
+      }
+      const savedPlatform = localStorage.getItem(PLATFORM_KEY);
+      if (savedPlatform === "sillyhub" || savedPlatform === "ppm") {
+        setPlatform(savedPlatform);
+      }
     } catch {
       // ignore broken cache
     }
@@ -42,14 +59,14 @@ export default function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await login(values.email, values.password);
+      await login(values.account, values.password);
 
-      // 记住我:存邮箱(密码与源项目行为一致一并缓存,仅本地浏览器)
+      // 记住我:存账号(密码与源项目行为一致一并缓存,仅本地浏览器)
       if (values.remember) {
         localStorage.setItem(
           REMEMBER_KEY,
           JSON.stringify({
-            email: values.email,
+            account: values.account,
             password: values.password,
             remember: true,
           }),
@@ -58,7 +75,9 @@ export default function LoginPage() {
         localStorage.removeItem(REMEMBER_KEY);
       }
 
-      router.replace("/workspaces");
+      // 按平台选择跳转(ppm→/ppm/projects,sillyhub→/workspaces),并持久平台选择
+      localStorage.setItem(PLATFORM_KEY, platform);
+      router.replace(PLATFORM_REDIRECT[platform]);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "登录失败");
     } finally {
@@ -117,7 +136,7 @@ export default function LoginPage() {
               <div className="mb-6">
                 <h1 className="text-2xl font-bold text-slate-900">账号登录</h1>
                 <p className="mt-1 text-sm text-slate-500">
-                  使用管理员账号访问平台
+                  使用邮箱或账号访问平台
                 </p>
               </div>
 
@@ -125,7 +144,7 @@ export default function LoginPage() {
             form={form}
             layout="vertical"
             initialValues={{
-              email: "admin@sillyhub.local",
+              account: "admin@sillyhub.local",
               password: "admin123",
               remember: true,
             }}
@@ -133,16 +152,22 @@ export default function LoginPage() {
             requiredMark={false}
             size="large"
           >
+            <Form.Item label="访问平台" className="mb-4">
+              <Segmented
+                value={platform}
+                onChange={(v) => setPlatform(v as LoginPlatform)}
+                options={PLATFORM_OPTIONS}
+                block
+              />
+            </Form.Item>
+
             <Form.Item
-              label="邮箱"
-              name="email"
-              rules={[
-                { required: true, message: "请输入邮箱" },
-                { type: "email", message: "邮箱格式不正确" },
-              ]}
+              label="邮箱 / 账号"
+              name="account"
+              rules={[{ required: true, message: "请输入邮箱或账号" }]}
             >
               <Input
-                placeholder="请输入邮箱"
+                placeholder="邮箱或账号"
                 autoComplete="username"
                 allowClear
               />

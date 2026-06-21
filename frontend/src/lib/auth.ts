@@ -36,10 +36,10 @@ export async function fetchMe(): Promise<MeResponse> {
   return me;
 }
 
-export async function login(email: string, password: string) {
+export async function login(account: string, password: string) {
   const pair = await apiFetch<TokenPair>("/api/auth/login", {
     method: "POST",
-    json: { email, password },
+    json: { account, password },
   });
 
   useSession.getState().setTokens({
