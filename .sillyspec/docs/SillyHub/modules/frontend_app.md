@@ -4,8 +4,8 @@ created_at: 2026-06-01T12:00:00
 ---
 
 # frontend_app
-> 最后更新：2026-06-09
-> 最近变更：ql-20260609-002（Agent 控制台日志展示优化）
+> 最后更新：2026-06-21
+> 最近变更：ql-20260621-002-a8f3（PPM 看板重写为人员×日期矩阵+工时联动）
 > 模块路径：frontend/src/app/**
 
 ## 职责
@@ -111,3 +111,4 @@ layout.tsx (根布局)
 | 2026-06-17 | ql-20260617-002-21d4 | 用户管理抽屉组织/角色多选"暂无选项"修复：size 200→100 匹配后端 le=100 + Promise.all→allSettled + catch console.error |
 | 2026-06-17 | ql-20260617-003-3757 | 用户/角色管理加分页（默认 20 条/页）：新增 Pagination 组件 + 列表表格下方挂分页 + 搜索/状态变化 setPage(1) |
 | 2026-06-17 | ql-20260617-004-02d5 | 用户/角色管理表格改 antd Table：columns + showSizeChanger + pageSizeOptions [10,20,50,100] + pageSize state，删除原生 table + 自定义 Pagination |
+| 2026-06-21 | ql-20260621-002-a8f3 | /ppm/kanban 看板重写为人员×日期矩阵布局（纵人员行头 avatar+姓名+工时+饱和度进度条 sticky 左，横日期列周六日标绿背景+休标签，单元格=该人该日任务缩略卡）+ 工时图表联动（默认全员柱图 stat-by-user，点人员行切单人项目工时饼图）+ 日期导航上周/本周/下周+RangePicker；新增 kanban-matrix/date-nav/work-hour-chart 三组件 + kanban-grouping 矩阵 helper，删除被取代的 kanban-column/task-card |

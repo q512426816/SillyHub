@@ -93,6 +93,100 @@ function classifyDeadline(deadline: string | null, today: Date): TaskDateBucketK
   return "future";
 }
 
+// ===========================================================================
+// 矩阵专用:人员 × 自然日 二维分组
+// ===========================================================================
+
+/** 自然日(YYYY-MM-DD,本地时区)。 */
+export type DateKey = string;
+
+/** 矩阵单元格:某人员 × 某日期下的任务列表。 */
+export interface MatrixCell {
+  user_id: string;
+  date: DateKey;
+  tasks: KanbanTaskCard[];
+}
+
+/** 取任务的"归属日期"(YYYY-MM-DD)。优先 deadline/end_time;无则 null。 */
+export function taskDateKey(task: KanbanTaskCard): DateKey | null {
+  // KanbanTaskCard.deadline ← PlanTask.end_time;无独立 end_time 字段
+  const raw = task.deadline;
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** 生成 [start, end] 闭区间的连续自然日列表(YYYY-MM-DD)。 */
+export function dateRangeKeys(start: Date, end: Date): DateKey[] {
+  const out: DateKey[] = [];
+  const s = new Date(start);
+  s.setHours(0, 0, 0, 0);
+  const e = new Date(end);
+  e.setHours(0, 0, 0, 0);
+  if (e < s) return out;
+  const cur = new Date(s);
+  while (cur <= e) {
+    const y = cur.getFullYear();
+    const m = String(cur.getMonth() + 1).padStart(2, "0");
+    const d = String(cur.getDate()).padStart(2, "0");
+    out.push(`${y}-${m}-${d}`);
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
+
+/** 周几(中文) + 是否周末。基于本地时区。 */
+export function weekdayMeta(dateKey: DateKey): {
+  label: string;
+  isWeekend: boolean;
+} {
+  const d = new Date(dateKey);
+  // 周日 getDay()=0,周六=6
+  const day = d.getDay();
+  const labels = ["日", "一", "二", "三", "四", "五", "六"];
+  return { label: `周${labels[day] ?? "?"}`, isWeekend: day === 0 || day === 6 };
+}
+
+/**
+ * 把全员任务按 (user_id × date) 分组成二维矩阵。
+ * - user_ids 决定行顺序;行内每个 date 一个 cell(空 cell 也返回,长度=dates.length)
+ * - 没有 deadline / 不在 dates 范围内的任务 → 不进矩阵(由 SearchBar 日期筛选保证)
+ * - cell.tasks 按 kanban_order 升序
+ */
+export function groupByUserAndDate(
+  tasks: KanbanTaskCard[],
+  user_ids: string[],
+  dates: DateKey[],
+): Map<string, Map<DateKey, KanbanTaskCard[]>> {
+  const matrix = new Map<string, Map<DateKey, KanbanTaskCard[]>>();
+  for (const uid of user_ids) {
+    const row = new Map<DateKey, KanbanTaskCard[]>();
+    for (const dk of dates) row.set(dk, []);
+    matrix.set(uid, row);
+  }
+  for (const t of tasks) {
+    const uid = t.user_id;
+    if (!uid) continue;
+    const dk = taskDateKey(t);
+    if (!dk) continue;
+    const row = matrix.get(uid);
+    if (!row) continue;
+    const cell = row.get(dk);
+    if (!cell) continue; // 不在选中日期范围
+    cell.push(t);
+  }
+  for (const row of matrix.values()) {
+    for (const arr of row.values()) {
+      arr.sort((a, b) => a.kanban_order - b.kanban_order);
+    }
+  }
+  return matrix;
+}
+
 /**
  * 把一列任务按截止日期分桶。桶内保持传入顺序(由调用方按 kanban_order 排好)。
  * 空桶不返回。

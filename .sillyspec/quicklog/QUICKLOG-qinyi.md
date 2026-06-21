@@ -385,3 +385,13 @@
 - frontend/src/app/(dashboard)/ppm/work-hours/page.tsx (userId → res=user)
 - frontend/src/app/(dashboard)/ppm/task-plans/page.tsx (userId → res=projectMember + pm_project_id)
 - frontend/src/app/(dashboard)/ppm/problem-changes/page.tsx (dutyUserId → res=projectMember + pm_project_id)
+
+## ql-20260621-002-a8f3 | 2026-06-21 12:10:00 | PPM 看板重写为人员×日期矩阵布局 + 工时图表联动
+状态：已完成
+文件：
+- frontend/src/app/(dashboard)/ppm/kanban/page.tsx (重写为矩阵编排:矩阵+日期导航+工时图两栏)
+- frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-matrix.tsx (新增 矩阵 table 布局)
+- frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-date-nav.tsx (新增 上周/本周/下周+RangePicker)
+- frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-work-hour-chart.tsx (新增 全员柱图+单人项目饼图联动)
+- frontend/src/lib/ppm/kanban-grouping.ts (新增 dateRangeKeys/groupByUserAndDate/weekdayMeta helper)
+- 删除: kanban-column.tsx + kanban-task-card.tsx (被矩阵取代)
