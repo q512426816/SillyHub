@@ -14,8 +14,11 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import { ErrorBoundary } from "@/components/error-boundary";
+import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
+import { PermissionApprovalCard } from "@/components/permission-approval-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import type { SessionPermissionRequest } from "@/lib/daemon";
 import { asString, cn } from "@/lib/utils";
 import type { AgentRunLogEntry } from "@/lib/agent";
 
@@ -358,6 +361,8 @@ export function AgentLogViewer({
   summary,
   actions,
   inputControls,
+  permissionRequests,
+  onPermissionResolved,
 }: {
   title: string;
   runId: string;
@@ -372,6 +377,14 @@ export function AgentLogViewer({
   summary?: React.ReactNode;
   actions?: React.ReactNode;
   inputControls?: AgentLogInputControls;
+  /**
+   * ql-20260621：待决策的 permission_request 列表（Claude Code AskUserQuestion
+   * 触发的远程人审）。父组件订阅 run SSE 的 permission_request / permission_resolved
+   * 事件维护此列表；本组件在 ASK 区渲染审批卡片，卡片内部自调 respondSessionPermission。
+   */
+  permissionRequests?: SessionPermissionRequest[];
+  /** 卡片决策/超时后被父组件移除时触发（同步本地 permissionRequests 状态）。 */
+  onPermissionResolved?: (requestId: string, decision: "allow" | "deny") => void;
 }) {
   const internalRef = useRef<HTMLDivElement>(null);
   const scrollRef = containerRef ?? internalRef;
@@ -386,6 +399,14 @@ export function AgentLogViewer({
   const filteredLogs = activeFilters.size > 0
     ? visibleLogs.filter((p) => activeFilters.has(p.log.channel))
     : visibleLogs;
+
+  // ql-20260621：审批卡片随 ASK 通道展示——无过滤或 ASK(pending_input) 过滤时可见。
+  // 卡片是阻塞 agent 的紧急人审，单卡交互由 PermissionApprovalCard 自洽
+  // （自调 respondSessionPermission + onResolved 回父组件移除）。
+  const hasPermissionCards =
+    !!permissionRequests &&
+    permissionRequests.length > 0 &&
+    (activeFilters.size === 0 || activeFilters.has("pending_input"));
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -491,33 +512,76 @@ export function AgentLogViewer({
             <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700" />
             加载日志中...
           </div>
-        ) : filteredLogs.length === 0 ? (
+        ) : filteredLogs.length === 0 && !hasPermissionCards ? (
           <p className="px-4 py-10 text-center text-xs text-zinc-600">
             {visibleLogs.length === 0 ? emptyText : "无匹配日志"}
           </p>
         ) : (
-          <div className="min-w-0 max-w-full divide-y divide-zinc-200">
-            {filteredLogs.map((plog) => (
-              // ql-20260620：单条日志渲染异常隔离——某条数据有问题时只显示占位行，
-              // 不再让整页崩成 client-side exception。key 必须在最外层 ErrorBoundary 上。
-              <ErrorBoundary
-                key={plog.log.id}
-                label="agent-log-row"
-                fallback={() => (
-                  <div className="px-3 py-2 text-[11px] text-red-600/70">
-                    该条日志渲染失败
-                  </div>
+          <>
+            {/* ql-20260621：ASK 区审批卡片——Claude Code AskUserQuestion 远程人审。
+                无 timestamp 不进日志流，由父组件订阅 permission_request SSE 维护此列表。 */}
+            {hasPermissionCards && permissionRequests && (
+              <div className="sticky top-0 z-10 space-y-2 border-b border-amber-300 bg-amber-50/95 px-3 py-2 backdrop-blur-sm shadow-sm">
+                {permissionRequests.map((req) =>
+                  req.dialog_kind ? (
+                    <ErrorBoundary
+                      key={req.request_id}
+                      label="ask-user-dialog-card"
+                      fallback={() => (
+                        <div className="text-[11px] text-red-600/70">
+                          提问卡片渲染失败
+                        </div>
+                      )}
+                    >
+                      <AskUserDialogCard
+                        request={req}
+                        onResolved={onPermissionResolved}
+                      />
+                    </ErrorBoundary>
+                  ) : (
+                    <ErrorBoundary
+                      key={req.request_id}
+                      label="permission-approval-card"
+                      fallback={() => (
+                        <div className="text-[11px] text-red-600/70">
+                          审批卡片渲染失败
+                        </div>
+                      )}
+                    >
+                      <PermissionApprovalCard
+                        request={req}
+                        onResolved={onPermissionResolved}
+                      />
+                    </ErrorBoundary>
+                  ),
                 )}
-              >
-                <AgentLogRow
-                  processedLog={plog}
-                  allLogs={processedLogs}
-                  compact={compact}
-                  inputControls={inputControls}
-                />
-              </ErrorBoundary>
-            ))}
-          </div>
+              </div>
+            )}
+            {filteredLogs.length > 0 && (
+              <div className="min-w-0 max-w-full divide-y divide-zinc-200">
+                {filteredLogs.map((plog) => (
+                  // ql-20260620：单条日志渲染异常隔离——某条数据有问题时只显示占位行，
+                  // 不再让整页崩成 client-side exception。key 必须在最外层 ErrorBoundary 上。
+                  <ErrorBoundary
+                    key={plog.log.id}
+                    label="agent-log-row"
+                    fallback={() => (
+                      <div className="px-3 py-2 text-[11px] text-red-600/70">
+                        该条日志渲染失败
+                      </div>
+                    )}
+                  >
+                    <AgentLogRow
+                      processedLog={plog}
+                      allLogs={processedLogs}
+                      compact={compact}
+                      inputControls={inputControls}
+                    />
+                  </ErrorBoundary>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

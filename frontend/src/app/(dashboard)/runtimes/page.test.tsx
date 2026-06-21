@@ -18,6 +18,7 @@ const daemon = vi.hoisted(() => ({
   listDaemonRuntimes: vi.fn(),
   listAgentSessions: vi.fn(),
   deleteAgentSession: vi.fn(),
+  deleteDaemonRuntime: vi.fn(),
   getAgentSessionLogs: vi.fn(),
   getAgentSession: vi.fn(),
   reopenSession: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock("@/lib/daemon", async () => {
     listDaemonRuntimes: daemon.listDaemonRuntimes,
     listAgentSessions: daemon.listAgentSessions,
     deleteAgentSession: daemon.deleteAgentSession,
+    deleteDaemonRuntime: daemon.deleteDaemonRuntime,
     getAgentSessionLogs: daemon.getAgentSessionLogs,
     getAgentSession: daemon.getAgentSession,
     reopenSession: daemon.reopenSession,
@@ -65,6 +67,7 @@ beforeEach(() => {
   daemon.listDaemonRuntimes.mockResolvedValue([]);
   daemon.listAgentSessions.mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 });
   daemon.deleteAgentSession.mockResolvedValue(undefined);
+  daemon.deleteDaemonRuntime.mockResolvedValue(undefined);
   daemon.getAgentSessionLogs.mockResolvedValue([]);
   daemon.reopenSession.mockResolvedValue({ session_id: "stub", status: "reconnecting" });
   daemon.getAgentSession.mockResolvedValue({
@@ -162,10 +165,54 @@ describe("RuntimesPage session list + history", () => {
     expect(screen.queryByTitle(/发送/)).not.toBeInTheDocument();
   });
 
-  it("does not render the permission dialog when queue is empty", async () => {
+  it("ql-012 removes a runtime via card 移除 button after confirm", async () => {
+    daemon.listDaemonRuntimes.mockResolvedValue([
+      {
+        id: "rt-del",
+        name: "daemon-to-remove",
+        provider: "claude",
+        version: "1.0.0",
+        status: "online",
+        last_heartbeat_at: "2026-06-18T10:00:00Z",
+        capabilities: { protocol: "ws", agents: ["claude"] },
+        created_at: "2026-06-18T09:00:00Z",
+        updated_at: "2026-06-18T10:00:00Z",
+      },
+    ]);
+
     render(<RuntimesPage />);
-    await waitFor(() => expect(daemon.listAgentSessions).toHaveBeenCalled());
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    const removeBtn = await screen.findByRole("button", { name: /移除/ });
+    fireEvent.click(removeBtn);
+
+    await waitFor(() => expect(daemon.deleteDaemonRuntime).toHaveBeenCalledWith("rt-del"));
+    expect(confirm).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.queryByText("daemon-to-remove")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("ql-012 card 会话 button focuses the runtime in the session section", async () => {
+    daemon.listDaemonRuntimes.mockResolvedValue([
+      {
+        id: "rt-focus",
+        name: "MyClaude",
+        provider: "claude",
+        version: "1.0.0",
+        status: "online",
+        last_heartbeat_at: "2026-06-18T10:00:00Z",
+        capabilities: { protocol: "ws", agents: ["claude"] },
+        created_at: "2026-06-18T09:00:00Z",
+        updated_at: "2026-06-18T10:00:00Z",
+      },
+    ]);
+
+    render(<RuntimesPage />);
+    const sessionBtn = await screen.findByRole("button", { name: /^会话$/ });
+    fireEvent.click(sessionBtn);
+
+    // 聚焦态：会话标题含 runtime 名 + 「显示全部」退出按钮可见
+    await waitFor(() => expect(screen.getByText(/会话 · MyClaude/)).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "显示全部" })).toBeInTheDocument();
   });
 
   it("confirms and deletes a terminal session from the list", async () => {

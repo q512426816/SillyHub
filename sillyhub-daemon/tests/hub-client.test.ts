@@ -417,6 +417,44 @@ describe('HubClient — gap-3 notifyRunResult + gap-4 notifySessionEnd', () => {
     expect(lastCall!.url).toContain('/leases/lease%201/runs/run%2F2/result');
   });
 
+  it('gap-3 notifyRunResult: usage/cost/duration 字段透传到 body', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.notifyRunResult('lease-1', 'ct', 'run-1', {
+      status: 'success',
+      is_error: false,
+      total_cost_usd: 0.0123,
+      num_turns: 3,
+      duration_ms: 4567,
+      duration_api_ms: 3900,
+      input_tokens: 1024,
+      output_tokens: 512,
+    });
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body).toEqual({
+      status: 'success',
+      is_error: false,
+      total_cost_usd: 0.0123,
+      num_turns: 3,
+      duration_ms: 4567,
+      duration_api_ms: 3900,
+      input_tokens: 1024,
+      output_tokens: 512,
+    });
+  });
+
+  it('gap-3 notifyRunResult: undefined 字段不写入 body（不覆盖 backend 原值）', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.notifyRunResult('lease-1', 'ct', 'run-1', {
+      status: 'success',
+      is_error: false,
+      // usage / cost / duration 全 undefined
+    });
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body).toEqual({ status: 'success', is_error: false });
+    expect('total_cost_usd' in body).toBe(false);
+    expect('input_tokens' in body).toBe(false);
+  });
+
   it('gap-4 notifySessionEnd: POST /sessions/{id}/end，body {status,reason}，鉴权走 api-key', async () => {
     const c = new HubClient('http://x:8000', { apiKey: 'shk_daemon' });
     await c.notifySessionEnd('sess-1', 'ended', 'idle_timeout');

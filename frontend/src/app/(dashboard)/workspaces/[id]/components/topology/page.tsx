@@ -19,20 +19,27 @@ import {
   getTopology,
   type TopologyResponse,
 } from "@/lib/workspaces";
+import { tokens } from "@/styles/tokens";
 
 interface Props {
   params: { id: string };
 }
 
+/**
+ * 节点类型 → 边框/手柄色。
+ *
+ * 全部取自 task-01 tokens(blue 色阶 + cyan/emerald + semantic),
+ * 不再使用 Tailwind 默认色阶 hex。设计依据:tasks/task-09.md §topology。
+ */
 const TYPE_COLORS: Record<string, string> = {
-  frontend: "#3b82f6",
-  backend: "#10b981",
-  tooling: "#f59e0b",
-  docs: "#6366f1",
-  test: "#ec4899",
-  library: "#8b5cf6",
-  service: "#06b6d4",
-  monorepo: "#f97316",
+  frontend: tokens.color.blue[500],
+  backend: tokens.color.emerald,
+  tooling: tokens.color.semantic.warning.color,
+  docs: tokens.color.blue[800],
+  test: tokens.color.semantic.error.color,
+  library: tokens.color.blue[700],
+  service: tokens.color.cyan,
+  monorepo: tokens.color.blue[400],
 };
 
 type WorkspaceNodeData = {
@@ -42,7 +49,7 @@ type WorkspaceNodeData = {
 };
 
 function WorkspaceNode({ data }: NodeProps<Node<WorkspaceNodeData>>) {
-  const bg = data.type ? TYPE_COLORS[data.type] ?? "#64748b" : "#64748b";
+  const bg = data.type ? TYPE_COLORS[data.type] ?? tokens.color.slate[500] : tokens.color.slate[500];
   return (
     <div
       className="rounded border bg-card px-3 py-2 text-xs shadow-sm"
@@ -110,8 +117,8 @@ export default function TopologyPage({ params }: Props) {
       target: e.target_id,
       label: e.relation_type,
       animated: true,
-      style: { stroke: "#94a3b8" },
-      labelStyle: { fontSize: 10, fill: "#475569" },
+      style: { stroke: tokens.color.slate[400] },
+      labelStyle: { fontSize: 10, fill: tokens.color.slate[600] },
     }));
     return { nodes, edges };
   }, [topology]);

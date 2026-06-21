@@ -192,6 +192,20 @@ export interface PermissionRequestPayload {
   input: Record<string, unknown>;
   /** 工具调用 ID（可选，SDK tool_use_id，便于追溯）。 */
   tool_use_id?: string;
+  /**
+   * onUserDialog 扩展（可选）：SDK UserDialogRequest.dialogKind。
+   *
+   * 当本字段存在时，表示该 PERMISSION_REQUEST 来自 SDK onUserDialog 回调
+   *（AskUserQuestion 的真实路由路径，非 canUseTool），backend/前端据此渲染
+   * 对话卡并收集用户选择的答案。向后兼容：旧 backend 不识别此字段时按普通
+   * 工具审批处理（allow/deny），daemon 侧 allow 且无 dialog_result 时回 null。
+   */
+  dialog_kind?: string;
+  /**
+   * onUserDialog 扩展（可选）：SDK UserDialogRequest.payload（如 AskUserQuestion
+   * 的 {questions: [...]}）。原样转发给前端渲染。
+   */
+  dialog_payload?: Record<string, unknown>;
 }
 
 /**
@@ -206,6 +220,15 @@ export interface PermissionResponsePayload {
   decision: 'allow' | 'deny';
   /** deny 时的原因（可选，透传给模型）。 */
   message?: string;
+  /**
+   * onUserDialog 扩展（可选）：前端用户在对话卡上选择/填写的答案。
+   *
+   * 仅当对应的 PERMISSION_REQUEST 带 dialog_kind（来自 onUserDialog 回调）时
+   * 才有意义。daemon 收到后透传给 SDK UserDialogResult.result（behavior=
+   * 'completed'）。allow 但缺 dialog_result 时 daemon 回 result=null。
+   * 向后兼容：旧 daemon 不读此字段，按普通 allow 处理。
+   */
+  dialog_result?: unknown;
 }
 
 // ── Lease 任务状态 ────────────────────────────────────────────────────────────

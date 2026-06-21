@@ -61,6 +61,31 @@ const BASE_INPUT = {
   pathToClaudeCodeExecutable: 'C:\\bin\\claude.exe',
 };
 
+/** 构造一个 success result（用于 emitResult 把 status 从 running 切到 active）。 */
+function resultSuccess(): SDKResultMessage {
+  return {
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    result: 'ok',
+    num_turns: 1,
+    duration_ms: 1,
+    duration_api_ms: 1,
+    stop_reason: 'end_turn',
+    total_cost_usd: 0,
+    usage: {
+      input_tokens: 1,
+      output_tokens: 1,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    },
+    modelUsage: {},
+    permission_denials: [],
+    session_id: 'sdk-sess',
+    uuid: 'r1',
+  } as unknown as SDKResultMessage;
+}
+
 const noopDeps = {
   onTurnResult: vi.fn(
     async (_s: string, _r: string, _res: SDKResultMessage) => {},
@@ -187,22 +212,60 @@ describe('canUseTool AskUserQuestion 分流（scan 歧义阻塞）', () => {
 
     const decision = await canUseTool('Bash', { command: 'ls -la' }, { signal: undefined });
 
-    expect(decision).toEqual({ behavior: 'allow' });
+    expect(decision).toEqual({ behavior: 'allow', updatedInput: { command: 'ls -la' } });
     // scan 自动跑：Read/Bash/sillyspec 等不阻塞、不发审批请求。
     expect(sendMock).not.toHaveBeenCalled();
   });
 
-  it('PERMISSION_RESPONSE(allow) → resolve pending promise 为 allow，agent 同 turn 继续', async () => {
+  it('PERMISSION_RESPONSE(allow + dialog_result) → canUseTool deny 回传用户答案（headless 兼容）', async () => {
+    // AskUserQuestion 在 headless SDK 无法 TUI 渲染：canUseTool 拦截 → register
+    // 发 PERMISSION_REQUEST，前端用户答案经 dialog_result 回传 → deny.message
+    // 携带答案回喂 Claude（canUseTool 唯一回传自定义内容给 Claude 的方式）。
     const { canUseTool, sendMock, sm } = await makeApprovalSession();
 
-    const p = canUseTool('AskUserQuestion', { questions: [{ question: 'q' }] }, { signal: undefined });
+    const p = canUseTool(
+      'AskUserQuestion',
+      { questions: [{ question: 'q', options: [{ label: 'A' }, { label: 'B' }] }] },
+      { signal: undefined },
+    );
     expect(await isPending(p)).toBe(true);
 
-    // 从发出的 PERMISSION_REQUEST 拿到 request_id，模拟 backend 回 allow。
+    // 从发出的 PERMISSION_REQUEST 拿到 request_id，模拟 backend 回 allow + dialog_result（答案）。
     const sentMsg = sendMock.mock.calls[0]![0] as { payload: { request_id: string; session_id: string } };
     const resolver = sm.getPermissionResolver(BASE_INPUT.sessionId);
     expect(resolver).toBeDefined();
+    const answers = { answers: [{ question: 0, answer: 'B' }] };
     resolver!.resolve(
+      {
+        session_id: sentMsg.payload.session_id,
+        request_id: sentMsg.payload.request_id,
+        decision: 'allow',
+        dialog_result: answers,
+      },
+      BASE_INPUT.sessionId,
+    );
+
+    const decision = (await p) as { behavior: string; message?: string };
+    // deny 行为：canUseTool 唯一把用户答案回传给 Claude 的方式（allow 会让 SDK 执行失败）。
+    expect(decision.behavior).toBe('deny');
+    // message 携带用户答案，Claude 把它当 tool_result 看到「B」继续工作。
+    expect(decision.message).toContain('User answered:');
+    expect(decision.message).toContain('B');
+    expect(decision.message).toContain(JSON.stringify(answers));
+  });
+
+  it('AskUserQuestion PERMISSION_RESPONSE(allow 无 dialog_result) → deny 回传 fallback 答案', async () => {
+    // 兼容旧 backend 不识别 dialog_result：allow 但无 dialog_result → 仍 deny，
+    // message 携带 fallback「no answer payload」，让 Claude 至少看到用户已回应。
+    const { canUseTool, sendMock, sm } = await makeApprovalSession();
+    const p = canUseTool(
+      'AskUserQuestion',
+      { questions: [{ question: 'q' }] },
+      { signal: undefined },
+    );
+    expect(await isPending(p)).toBe(true);
+    const sentMsg = sendMock.mock.calls[0]![0] as { payload: { request_id: string; session_id: string } };
+    sm.getPermissionResolver(BASE_INPUT.sessionId)!.resolve(
       {
         session_id: sentMsg.payload.session_id,
         request_id: sentMsg.payload.request_id,
@@ -210,7 +273,289 @@ describe('canUseTool AskUserQuestion 分流（scan 歧义阻塞）', () => {
       },
       BASE_INPUT.sessionId,
     );
+    const decision = (await p) as { behavior: string; message?: string };
+    expect(decision.behavior).toBe('deny');
+    expect(decision.message).toContain('User answered:');
+    expect(decision.message).toContain('no answer payload');
+  });
 
-    expect(await p).toEqual({ behavior: 'allow' });
+  it('AskUserQuestion PERMISSION_RESPONSE(deny) → deny 默认 message（用户未作答，Claude 按推荐项继续）', async () => {
+    // 用户在前端拒绝回答 → Claude 拿到「未作答」语义，按推荐项继续，不卡死 scan。
+    const { canUseTool, sendMock, sm } = await makeApprovalSession();
+    const p = canUseTool(
+      'AskUserQuestion',
+      { questions: [{ question: 'q' }] },
+      { signal: undefined },
+    );
+    expect(await isPending(p)).toBe(true);
+    const sentMsg = sendMock.mock.calls[0]![0] as { payload: { request_id: string; session_id: string } };
+    sm.getPermissionResolver(BASE_INPUT.sessionId)!.resolve(
+      {
+        session_id: sentMsg.payload.session_id,
+        request_id: sentMsg.payload.request_id,
+        decision: 'deny',
+        message: 'user cancelled',
+      },
+      BASE_INPUT.sessionId,
+    );
+    const decision = (await p) as { behavior: string; message?: string };
+    expect(decision.behavior).toBe('deny');
+    // message 含「未作答」语义 + 让 Claude 按推荐项继续的提示。
+    expect(decision.message).toContain('did not answer');
+    expect(decision.message).toContain('recommended option');
+  });
+
+  it('AskUserQuestion 5min 超时（resolver 兜底 deny）→ deny 默认 message（让 Claude 按推荐项继续）', async () => {
+    // 用户长时间未响应（5min 兜底）→ 同 deny 收敛路径，Claude 按推荐项继续。
+    const { canUseTool, sendMock, sm } = await makeApprovalSession();
+    const p = canUseTool(
+      'AskUserQuestion',
+      { questions: [{ question: 'q' }] },
+      { signal: undefined },
+    );
+    expect(await isPending(p)).toBe(true);
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    // abortAll 模拟 5min 兜底 deny（resolver 内部 reason「permission request timeout」）。
+    sm.getPermissionResolver(BASE_INPUT.sessionId)!.abortAll(
+      'permission request timeout (5min fallback)',
+    );
+    const decision = (await p) as { behavior: string; message?: string };
+    expect(decision.behavior).toBe('deny');
+    expect(decision.message).toContain('did not answer');
+    expect(decision.message).toContain('timeout');
+  });
+
+  it('AskUserQuestion resolver.register 抛异常 → catch 后 deny（带原因），不向上抛', async () => {
+    // wrapper 自身异常防御：不让 SDK 把 wrapper 异常当 query 失败。
+    const { driver, getOpts } = makeDriverCapturingOpts();
+    const badResolver = {
+      register: vi.fn(() => {
+        throw new Error('resolver internal boom');
+      }),
+    } as unknown as import('../../src/interactive/permission-resolver.js').PermissionResolver;
+    const sm = new SessionManager(
+      { driver, ...noopDeps },
+      {
+        manualApproval: true,
+        permissionResolver: badResolver,
+        permissionWsClient: { send: vi.fn(() => true) },
+      },
+    );
+    await sm.create({ ...BASE_INPUT, manualApproval: true, askUserOnly: true });
+    const canUseTool = getOpts()?.canUseTool;
+    expect(canUseTool).toBeTypeOf('function');
+    const decision = (await canUseTool!(
+      'AskUserQuestion',
+      { questions: [{ question: 'q' }] },
+      { signal: undefined },
+    )) as { behavior: string; message?: string };
+    expect(decision.behavior).toBe('deny');
+    expect(typeof decision.message).toBe('string');
+    expect(decision.message!.length).toBeGreaterThan(0);
+    expect(decision.message).toContain('boom');
+  });
+});
+
+// ── onUserDialog 路由（AskUserQuestion 走对话回调而非 canUseTool）──────────────
+
+describe('onUserDialog 路由（AskUserQuestion → PERMISSION_REQUEST 带 dialog_* → 前端答案回喂）', () => {
+  /**
+   * 构造一个 manualApproval=true + supportedDialogKinds（默认 AskUserQuestion）的
+   * session，返回捕获到的 driver options + wsClient.send mock + resolver 句柄。
+   */
+  async function makeDialogSession(opts?: {
+    supportedDialogKinds?: string[];
+  }) {
+    const { driver, getOpts, emitResult } = makeDriverCapturingOpts();
+    const sendMock = vi.fn(() => true);
+    const sm = new SessionManager(
+      { driver, ...noopDeps },
+      {
+        manualApproval: true,
+        permissionWsClient: { send: sendMock },
+        ...(opts?.supportedDialogKinds !== undefined
+          ? { supportedDialogKinds: opts.supportedDialogKinds }
+          : {}),
+      },
+    );
+    await sm.create({ ...BASE_INPUT, manualApproval: true });
+    return { getOpts, sendMock, emitResult, sm };
+  }
+
+  it('manualApproval=true 默认注入 onUserDialog + supportedDialogKinds=["AskUserQuestion"]', async () => {
+    const { getOpts } = await makeDialogSession();
+    const opts = getOpts()!;
+    expect(typeof opts.onUserDialog).toBe('function');
+    expect(opts.supportedDialogKinds).toEqual(['AskUserQuestion']);
+  });
+
+  it('opts.supportedDialogKinds 显式传 → 原样注入（如多种 dialog kind）', async () => {
+    const { getOpts } = await makeDialogSession({
+      supportedDialogKinds: ['AskUserQuestion', 'OtherKind'],
+    });
+    expect(getOpts()!.supportedDialogKinds).toEqual([
+      'AskUserQuestion',
+      'OtherKind',
+    ]);
+  });
+
+  it('opts.supportedDialogKinds=[]（空）→ 不注入 onUserDialog（显式禁用对话路由）', async () => {
+    const { getOpts } = await makeDialogSession({
+      supportedDialogKinds: [],
+    });
+    const opts = getOpts()!;
+    expect(opts.onUserDialog).toBeUndefined();
+    expect(opts.supportedDialogKinds).toBeUndefined();
+  });
+
+  it('onUserDialog 触发 → 发 PERMISSION_REQUEST 带 dialog_kind/dialog_payload，promise pending', async () => {
+    const { getOpts, sendMock } = await makeDialogSession();
+    const onUserDialog = getOpts()!.onUserDialog!;
+    const questions = [
+      {
+        question: '选 A 还是 B',
+        header: '选择',
+        options: [{ label: 'A' }, { label: 'B' }],
+      },
+    ];
+    const p = onUserDialog(
+      { dialogKind: 'AskUserQuestion', payload: { questions } },
+      { signal: undefined },
+    );
+    // 真阻塞：无 PERMISSION_RESPONSE 时 promise pending。
+    expect(await isPending(p)).toBe(true);
+    // PERMISSION_REQUEST 已发，payload 带对话字段。
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    const sent = sendMock.mock.calls[0]![0] as {
+      type: string;
+      payload: Record<string, unknown>;
+    };
+    expect(sent.type).toBe('daemon:permission_request');
+    expect(sent.payload.dialog_kind).toBe('AskUserQuestion');
+    expect(sent.payload.dialog_payload).toEqual({ questions });
+    // tool_name 仍标 AskUserQuestion（backend 可按工具名分发）。
+    expect(sent.payload.tool_name).toBe('AskUserQuestion');
+    expect(sent.payload.input).toEqual({ questions });
+  });
+
+  it('PERMISSION_RESPONSE(allow + dialog_result) → onUserDialog 回 {behavior:"completed", result: 答案}', async () => {
+    const { getOpts, sendMock, sm } = await makeDialogSession();
+    const onUserDialog = getOpts()!.onUserDialog!;
+    const p = onUserDialog(
+      { dialogKind: 'AskUserQuestion', payload: { questions: [] } },
+      { signal: undefined },
+    );
+    const sent = sendMock.mock.calls[0]![0] as {
+      payload: { request_id: string; session_id: string };
+    };
+    const answers = { answers: [{ question: 0, answer: 'B' }] };
+    sm.getPermissionResolver(BASE_INPUT.sessionId)!.resolve(
+      {
+        session_id: sent.payload.session_id,
+        request_id: sent.payload.request_id,
+        decision: 'allow',
+        dialog_result: answers,
+      },
+      BASE_INPUT.sessionId,
+    );
+    expect(await p).toEqual({ behavior: 'completed', result: answers });
+  });
+
+  it('PERMISSION_RESPONSE(allow 无 dialog_result) → onUserDialog 回 {behavior:"completed", result: null}', async () => {
+    const { getOpts, sendMock, sm } = await makeDialogSession();
+    const onUserDialog = getOpts()!.onUserDialog!;
+    const p = onUserDialog(
+      { dialogKind: 'AskUserQuestion', payload: { questions: [] } },
+      { signal: undefined },
+    );
+    const sent = sendMock.mock.calls[0]![0] as {
+      payload: { request_id: string; session_id: string };
+    };
+    sm.getPermissionResolver(BASE_INPUT.sessionId)!.resolve(
+      {
+        session_id: sent.payload.session_id,
+        request_id: sent.payload.request_id,
+        decision: 'allow',
+      },
+      BASE_INPUT.sessionId,
+    );
+    expect(await p).toEqual({ behavior: 'completed', result: null });
+  });
+
+  it('PERMISSION_RESPONSE(deny) → onUserDialog 回 {behavior:"cancelled"}（fail-closed）', async () => {
+    const { getOpts, sendMock, sm } = await makeDialogSession();
+    const onUserDialog = getOpts()!.onUserDialog!;
+    const p = onUserDialog(
+      { dialogKind: 'AskUserQuestion', payload: { questions: [] } },
+      { signal: undefined },
+    );
+    const sent = sendMock.mock.calls[0]![0] as {
+      payload: { request_id: string; session_id: string };
+    };
+    sm.getPermissionResolver(BASE_INPUT.sessionId)!.resolve(
+      {
+        session_id: sent.payload.session_id,
+        request_id: sent.payload.request_id,
+        decision: 'deny',
+        message: 'user cancelled dialog',
+      },
+      BASE_INPUT.sessionId,
+    );
+    expect(await p).toEqual({ behavior: 'cancelled' });
+  });
+
+  it('5min 超时（resolver 兜底 deny）→ onUserDialog 回 {behavior:"cancelled"}', async () => {
+    const { getOpts, sendMock, sm } = await makeDialogSession();
+    const onUserDialog = getOpts()!.onUserDialog!;
+    const p = onUserDialog(
+      { dialogKind: 'AskUserQuestion', payload: { questions: [] } },
+      { signal: undefined },
+    );
+    const sent = sendMock.mock.calls[0]![0] as {
+      payload: { request_id: string };
+    };
+    // 模拟 resolver 5min 兜底 deny（abortAll 走同一 deny 路径）。
+    sm.getPermissionResolver(BASE_INPUT.sessionId)!.abortAll(
+      'permission request timeout (5min fallback)',
+    );
+    // request_id 仅用于断言已 register，abortAll 不需要 request_id。
+    expect(sent.payload.request_id).toBeDefined();
+    expect(await p).toEqual({ behavior: 'cancelled' });
+  });
+
+  it('turn 结束后 onUserDialog 被触发（state 非 running）→ 立即 {behavior:"cancelled"}', async () => {
+    const { getOpts, emitResult } = await makeDialogSession();
+    const onUserDialog = getOpts()!.onUserDialog!;
+    // 收 result → status: running → active（turn 边界已落）。
+    emitResult(resultSuccess());
+    const r = await onUserDialog(
+      { dialogKind: 'AskUserQuestion', payload: {} },
+      { signal: undefined },
+    );
+    expect(r).toEqual({ behavior: 'cancelled' });
+  });
+
+  it('resolver.register 抛异常 → onUserDialog catch 后回 {behavior:"cancelled"}（不向上抛）', async () => {
+    const { driver, getOpts } = makeDriverCapturingOpts();
+    const badResolver = {
+      register: vi.fn(() => {
+        throw new Error('resolver internal boom');
+      }),
+    } as unknown as import('../../src/interactive/permission-resolver.js').PermissionResolver;
+    const sm = new SessionManager(
+      { driver, ...noopDeps },
+      {
+        manualApproval: true,
+        permissionResolver: badResolver,
+        permissionWsClient: { send: vi.fn(() => true) },
+      },
+    );
+    await sm.create({ ...BASE_INPUT, manualApproval: true });
+    const onUserDialog = getOpts()!.onUserDialog!;
+    const r = await onUserDialog(
+      { dialogKind: 'AskUserQuestion', payload: {} },
+      { signal: undefined },
+    );
+    expect(r).toEqual({ behavior: 'cancelled' });
   });
 });

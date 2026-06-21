@@ -178,6 +178,14 @@ interface ClientLike {
       is_error: boolean;
       subtype?: string;
       result_summary?: string;
+      // SDKResultSuccess 透传字段（usage / cost / duration 等，interactive 路径
+      // 原先丢弃，导致 AgentRun 全 NULL；对齐 batch extractResultStats）。
+      total_cost_usd?: number;
+      num_turns?: number;
+      duration_ms?: number;
+      duration_api_ms?: number;
+      input_tokens?: number;
+      output_tokens?: number;
     },
   ): Promise<unknown>;
   /**
@@ -934,10 +942,19 @@ export class Daemon {
       return;
     }
     // payload 字段映射（snake_case 对齐 backend InteractiveRunResultRequest）。
+    // SDKResultSuccess 含 total_cost_usd / num_turns / duration_ms / duration_api_ms /
+    // usage.{input_tokens,output_tokens}（见 sdk.d.ts SDKResultSuccess 类型）；
+    // interactive 路径原先丢弃这些字段导致 AgentRun 全 NULL（对齐 batch
+    // task-runner extractResultStats）。
     const resultMeta = result as SDKResultMessage & {
       subtype?: string;
       is_error?: boolean;
       result?: unknown;
+      total_cost_usd?: number;
+      num_turns?: number;
+      duration_ms?: number;
+      duration_api_ms?: number;
+      usage?: { input_tokens?: number; output_tokens?: number };
     };
     const status = resultMeta.subtype ?? 'success';
     const isError = resultMeta.is_error === true;
@@ -946,6 +963,12 @@ export class Daemon {
       is_error: boolean;
       subtype?: string;
       result_summary?: string;
+      total_cost_usd?: number;
+      num_turns?: number;
+      duration_ms?: number;
+      duration_api_ms?: number;
+      input_tokens?: number;
+      output_tokens?: number;
     } = {
       status,
       is_error: isError,
@@ -960,6 +983,25 @@ export class Daemon {
           ? resultMeta.result
           : JSON.stringify(resultMeta.result);
       payload.result_summary = raw.length > 500 ? `${raw.slice(0, 500)}...` : raw;
+    }
+    // SDKResultSuccess 透传（undefined 字段不写，保留 backend AgentRun 原值）。
+    if (typeof resultMeta.total_cost_usd === 'number') {
+      payload.total_cost_usd = resultMeta.total_cost_usd;
+    }
+    if (typeof resultMeta.num_turns === 'number') {
+      payload.num_turns = resultMeta.num_turns;
+    }
+    if (typeof resultMeta.duration_ms === 'number') {
+      payload.duration_ms = resultMeta.duration_ms;
+    }
+    if (typeof resultMeta.duration_api_ms === 'number') {
+      payload.duration_api_ms = resultMeta.duration_api_ms;
+    }
+    if (resultMeta.usage && typeof resultMeta.usage.input_tokens === 'number') {
+      payload.input_tokens = resultMeta.usage.input_tokens;
+    }
+    if (resultMeta.usage && typeof resultMeta.usage.output_tokens === 'number') {
+      payload.output_tokens = resultMeta.usage.output_tokens;
     }
     try {
       await this._client.notifyRunResult(
@@ -1025,11 +1067,24 @@ export class Daemon {
       return;
     }
     try {
+      // 实时 token 回写：SDK assistant message 的 usage 在 msg.message.usage 中，
+      // backend submit_messages 提取顶层 msg.usage。这里把 usage 提到顶层，
+      // 让 backend 实时更新 AgentRun.input_tokens / output_tokens（每条 assistant
+      // message 都带累积 usage，不必等 result 事件汇总）。
+      const fwdMsg = msg as unknown as Record<string, unknown>;
+      const msgType = fwdMsg['type'];
+      if (msgType === 'assistant') {
+        const inner = fwdMsg['message'] as Record<string, unknown> | undefined;
+        const usage = inner?.['usage'] as Record<string, unknown> | undefined;
+        if (usage && typeof usage['input_tokens'] === 'number') {
+          fwdMsg['usage'] = usage;
+        }
+      }
       await this._client.submitMessages(
         state.leaseId,
         state.claimToken,
         runId,
-        [msg as unknown as Record<string, unknown>],
+        [fwdMsg],
       );
     } catch (e) {
       this._logger.warn('on_turn_message_submit_failed', {
@@ -1542,6 +1597,11 @@ export class Daemon {
     const requestId = (raw.request_id as string | undefined) ?? '';
     const decisionRaw = raw.decision;
     const message = raw.message as string | undefined;
+    // onUserDialog 扩展：前端用户在对话卡上选择/填写的答案（仅当对应
+    // PERMISSION_REQUEST 带 dialog_kind 时有意义）。透传给 resolver.resolve，
+    // 由 onUserDialog 回调回喂 SDK UserDialogResult.result。
+    const dialogResult =
+      'dialog_result' in raw ? (raw as { dialog_result?: unknown }).dialog_result : undefined;
 
     // payload schema 非法（缺字段 / decision 非 allow|deny）→ warn 丢弃，不抛。
     if (!sessionId || !requestId || (decisionRaw !== 'allow' && decisionRaw !== 'deny')) {
@@ -1579,6 +1639,7 @@ export class Daemon {
         request_id: requestId,
         decision: decisionRaw,
         ...(message !== undefined ? { message } : {}),
+        ...(dialogResult !== undefined ? { dialog_result: dialogResult } : {}),
       },
       sessionId,
     );
@@ -1629,7 +1690,19 @@ export class Daemon {
 
     const sessionId = execPayload.agentSessionId ?? '';
     const firstRunId = execPayload.agentRunId ?? '';
-    const prompt = execPayload.prompt ?? '';
+    let prompt = execPayload.prompt ?? '';
+    // 路径映射：backend 在 Docker 容器内跑，spec_root 用容器内路径（如
+    // /data/spec-workspaces/{id}）；daemon 跑在 Mac mini 上，本地无 /data。
+    // SPEC_ROOT_MAP 环境变量格式 "from:to"，如
+    // "/data/spec-workspaces:/Users/qinyi/spec-workspaces"。
+    // 在 prompt 透传给 SessionManager.create 前，把 from 替换为 to。
+    const specRootMap = process.env.SPEC_ROOT_MAP;
+    if (specRootMap && specRootMap.includes(':')) {
+      const [from, to] = specRootMap.split(':', 2);
+      if (from && to && prompt.includes(from)) {
+        prompt = prompt.replaceAll(from, to);
+      }
+    }
     // rootPath 优先作 cwd（与 batch 一致，ql-20260617-009）；无则 workspace_dir 兜底。
     const cwd = execPayload.rootPath ?? this._config.workspace_dir;
     const provider = (execPayload.provider ?? 'claude') as 'claude' | 'codex';

@@ -30,6 +30,8 @@ describe("workspace-path helpers", () => {
       name: "cursor",
       provider: "cursor",
       version: "1.2.3",
+      os: null,
+      arch: null,
       status: "online",
       last_heartbeat_at: null,
       capabilities: null,

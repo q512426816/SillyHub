@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { safeUUID } from "@/lib/api";
 import {
   Activity,
   Bot,
@@ -382,7 +383,7 @@ export default function AgentPage({ params }: Props) {
         setActiveLogs((prev) => [
           ...(prev ?? []),
           {
-            id: crypto.randomUUID(),
+            id: safeUUID(),
             run_id: activeRunId,
             timestamp: event.timestamp,
             channel: event.channel,

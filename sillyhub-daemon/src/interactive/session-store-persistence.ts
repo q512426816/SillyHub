@@ -11,7 +11,8 @@
  *     下次 load 不再触发损坏路径）。
  *
  * **白名单**：仅写 PersistedSessionRecord（sessionId/leaseId/agentSessionId/cwd/
- * provider/currentRunId?/turnCount/lastActiveAt/model?/pathToClaudeCodeExecutable?）。
+ * provider/currentRunId?/turnCount/lastActiveAt/model?/pathToClaudeCodeExecutable?/
+ * manualApproval?/askUserOnly?）。
  * 禁止写 claim token / API key / credential / prompt 内容 / agent 输出 / Query 句柄 /
  * InputQueue（不可序列化且敏感，见 task-10 §4.1）。
  *
@@ -75,7 +76,7 @@ const VALID_PROVIDERS = new Set(['claude', 'codex']);
  * 不抛错（损坏隔离：单条坏不影响其他条目）。仅校验可恢复必需字段：
  * sessionId / leaseId / agentSessionId（非空）/ cwd（非空）/ provider（枚举）/
  * turnCount（有限数）/ lastActiveAt（有限数）；可选字段 model /
- * pathToClaudeCodeExecutable / currentRunId 仅校验类型。
+ * pathToClaudeCodeExecutable / currentRunId / manualApproval / askUserOnly 仅校验类型。
  */
 function validateRecord(raw: unknown): PersistedSessionRecord | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -115,6 +116,15 @@ function validateRecord(raw: unknown): PersistedSessionRecord | null {
   }
   if (typeof r.pathToClaudeCodeExecutable === 'string' && r.pathToClaudeCodeExecutable) {
     out.pathToClaudeCodeExecutable = r.pathToClaudeCodeExecutable;
+  }
+  // scan 真阻塞（恢复路径用）：manualApproval / askUserOnly 落盘白名单。
+  // manualApproval 仅校验布尔（create 路径只在 true 时写）；askUserOnly 同理
+  //（manualApproval=true 时写 true/false，false 也写以区分 chat vs scan）。
+  if (typeof r.manualApproval === 'boolean') {
+    out.manualApproval = r.manualApproval;
+  }
+  if (typeof r.askUserOnly === 'boolean') {
+    out.askUserOnly = r.askUserOnly;
   }
   return out;
 }

@@ -39,6 +39,8 @@ function mkRuntime(
     name: o.name ?? null,
     provider: o.provider ?? "claude",
     version: o.version ?? null,
+    os: o.os ?? null,
+    arch: o.arch ?? null,
     status: o.status ?? "online",
     last_heartbeat_at: o.last_heartbeat_at ?? null,
     capabilities: o.capabilities ?? null,

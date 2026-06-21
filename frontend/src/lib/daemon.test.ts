@@ -12,6 +12,7 @@ import { useSession } from "@/stores/session";
 import {
   AgentSessionListResponseSchema,
   deleteAgentSession,
+  deleteDaemonRuntime,
   getAgentSession,
   getAgentSessionLogs,
   listAgentSessions,
@@ -194,6 +195,34 @@ describe("deleteAgentSession", () => {
     });
 
     await expect(deleteAgentSession("active-session")).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+// ── ql-012: deleteDaemonRuntime ─────────────────────────────────────────────
+
+describe("deleteDaemonRuntime", () => {
+  it("DELETE /runtimes/{id} with encoded id", async () => {
+    const h = mockFetch({ status: 204, body: null });
+
+    await deleteDaemonRuntime("rt a/b");
+
+    const url = new URL(h.lastUrl());
+    expect(url.pathname).toBe("/api/daemon/runtimes/rt%20a%2Fb");
+    expect(h.lastInit()?.method).toBe("DELETE");
+  });
+
+  it("maps non-2xx to ApiError", async () => {
+    mockFetch({
+      status: 404,
+      body: {
+        code: "HTTP_404_DAEMON_RUNTIME_NOT_FOUND",
+        message: "not found",
+        request_id: null,
+        details: null,
+      },
+    });
+
+    await expect(deleteDaemonRuntime("missing")).rejects.toBeInstanceOf(ApiError);
   });
 });
 

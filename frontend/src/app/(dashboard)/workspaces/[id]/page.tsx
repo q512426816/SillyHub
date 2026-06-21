@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { safeUUID } from "@/lib/api";
 import { useEffect, useRef, useState } from "react";
 
 import { AgentLogViewer } from "@/components/agent-log-viewer";
@@ -12,7 +13,7 @@ import { WorkspaceDaemonSwitcher } from "@/components/workspace-daemon-switcher"
 import { WorkspacePathFields } from "@/components/workspace-path-fields";
 import { ApiError } from "@/lib/api";
 import { asString } from "@/lib/utils";
-import { getDaemonRuntime, type DaemonRuntimeRead } from "@/lib/daemon";
+import { fetchPendingDialogs, getDaemonRuntime, type DaemonRuntimeRead, type SessionPermissionRequest } from "@/lib/daemon";
 import { isDaemonClientWorkspace } from "@/lib/workspace-path";
 import {
   listAgentRuns,
@@ -134,6 +135,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const [bsRepliedInputs, setBsRepliedInputs] = useState<Set<string>>(new Set());
   const [bsInputErrors, setBsInputErrors] = useState<Record<string, string>>({});
   const [bootstrapStreamStatus, setBootstrapStreamStatus] = useState<StreamStatus>("disconnected");
+  // ql-20260621：bootstrap/scan run 的 permission_request 待决策列表
+  // （Claude Code AskUserQuestion 远程人审）。由 AgentRunStreamClient.onPermissionRequest
+  // 维护，传给 AgentLogViewer 渲染审批卡片。
+  const [bootstrapPerms, setBootstrapPerms] = useState<SessionPermissionRequest[]>([]);
   const [generatingProjects, setGeneratingProjects] = useState(false);
   // workspace 级默认 agent provider 编辑态（FR-01/FR-02，2026-06-14-agent-runtime-selection）
   const [defaultAgent, setDefaultAgent] = useState<string | null>(null);
@@ -207,6 +212,24 @@ export default function WorkspaceDetailPage({ params }: Props) {
         setBootstrapStatus(activeRun.status);
         setBootstrapLogs([]);
         connectBootstrapStream(activeRun.id);
+        // 恢复刷新前未回答的 AskUserQuestion 对话（dialog_kind 待答请求）。
+        // SSE 只推送实时新事件，刷新前已 pending 的对话需通过 REST 端点恢复。
+        if (activeRun.session_id) {
+          void fetchPendingDialogs(activeRun.session_id)
+            .then((dialogs) => {
+              setBootstrapPerms((prev) => {
+                const existing = new Set(prev.map((p) => p.request_id));
+                const merged = [...prev];
+                for (const d of dialogs) {
+                  if (!existing.has(d.request_id)) merged.push(d);
+                }
+                return merged;
+              });
+            })
+            .catch(() => {
+              /* 恢复失败不阻断主流程，SSE 仍会补发实时 permission 事件 */
+            });
+        }
       }
 
       // Save last finished Bootstrap run for display.
@@ -249,6 +272,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
     setBsSubmittingInputs({});
     setBsRepliedInputs(new Set());
     setBsInputErrors({});
+    setBootstrapPerms([]);
   }
 
   /**
@@ -275,7 +299,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
         return [
           ...prev,
           {
-            id: event.log_id ?? crypto.randomUUID(),
+            id: event.log_id ?? safeUUID(),
             run_id: runId,
             timestamp: event.timestamp,
             channel: event.channel,
@@ -291,6 +315,20 @@ export default function WorkspaceDetailPage({ params }: Props) {
       }
       client.disconnect();
       void load();
+    });
+
+    // ql-20260621：scan/bootstrap run 中 Claude Code AskUserQuestion 触发的远程人审。
+    // run SSE 已同时订阅 agent_session:{id} 频道，permission_request 到达后渲染审批卡片；
+    // permission_resolved（用户决策 / 5min 超时）后移除对应卡片。
+    client.onPermissionRequest((req) => {
+      setBootstrapPerms((prev) =>
+        prev.some((r) => r.request_id === req.request_id) ? prev : [...prev, req],
+      );
+    });
+    client.onPermissionResolved((resolved) => {
+      setBootstrapPerms((prev) =>
+        prev.filter((r) => r.request_id !== resolved.request_id),
+      );
     });
 
     const { accessToken } = useSession.getState();
@@ -316,6 +354,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
     setBsSubmittingInputs({});
     setBsRepliedInputs(new Set());
     setBsInputErrors({});
+    setBootstrapPerms([]);
 
     try {
       const result = await bootstrapSpecWorkspace(workspaceId);
@@ -362,7 +401,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
       setBootstrapLogs((prev) => [
         ...prev,
         {
-          id: crypto.randomUUID(),
+          id: safeUUID(),
           run_id: activeBootstrapRunId,
           timestamp: new Date().toISOString(),
           channel: "user_input" as const,
@@ -664,6 +703,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
                 onChange: (logId, value) => setBsInputValues((prev) => ({ ...prev, [logId]: value })),
                 onSubmit: handleBsSubmitInput,
               }}
+              permissionRequests={bootstrapPerms}
+              onPermissionResolved={(requestId) =>
+                setBootstrapPerms((prev) => prev.filter((r) => r.request_id !== requestId))
+              }
             />
             {bootstrapError && (
               <p className="mt-2 text-xs text-destructive">{bootstrapError}</p>

@@ -468,6 +468,13 @@ export class HubClient {
       is_error: boolean;
       subtype?: string;
       result_summary?: string;
+      // SDKResultSuccess 透传字段（interactive usage/cost/duration 修复）。
+      total_cost_usd?: number;
+      num_turns?: number;
+      duration_ms?: number;
+      duration_api_ms?: number;
+      input_tokens?: number;
+      output_tokens?: number;
     },
   ): Promise<Record<string, unknown>> {
     const path = `${REST_PREFIX}/leases/${encodeURIComponent(
@@ -488,6 +495,25 @@ export class HubClient {
     }
     if (payload.result_summary !== undefined) {
       body.result_summary = payload.result_summary;
+    }
+    // undefined 字段不写（保留 backend AgentRun 原值，避免覆盖回 None）。
+    if (payload.total_cost_usd !== undefined) {
+      body.total_cost_usd = payload.total_cost_usd;
+    }
+    if (payload.num_turns !== undefined) {
+      body.num_turns = payload.num_turns;
+    }
+    if (payload.duration_ms !== undefined) {
+      body.duration_ms = payload.duration_ms;
+    }
+    if (payload.duration_api_ms !== undefined) {
+      body.duration_api_ms = payload.duration_api_ms;
+    }
+    if (payload.input_tokens !== undefined) {
+      body.input_tokens = payload.input_tokens;
+    }
+    if (payload.output_tokens !== undefined) {
+      body.output_tokens = payload.output_tokens;
     }
     const resp = await fetch(url, {
       method: 'POST',

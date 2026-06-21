@@ -26,6 +26,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 import type {
   CanUseTool,
+  OnUserDialog,
   Query,
   SDKMessage,
   SDKResultMessage,
@@ -147,6 +148,23 @@ export interface ClaudeSdkDriverOptions {
    * task-08 接远程人审（D-007）。
    */
   canUseTool?: CanUseTool;
+  /**
+   * onUserDialog 回调（SDK request_user_dialog / AskUserQuestion 真实路由路径）。
+   *
+   * 当 supportedDialogKinds 非空时，SDK 把声明的 dialog kind（如
+   * 'AskUserQuestion'）经本回调转发而非 canUseTool；daemon 在此发
+   * PERMISSION_REQUEST（带 dialog_kind/dialog_payload）等前端答案。
+   * 缺省 undefined：SDK 不发 dialog request（AskUserQuestion 走默认行为，
+   * 回 'user did not answer'）。由 SessionManager 在 manualApproval=true 时注入。
+   */
+  onUserDialog?: OnUserDialog;
+  /**
+   * 本 consumer 能渲染的 dialog kind 列表（如 ['AskUserQuestion']）。
+   *
+   * SDK 契约：只有声明在此的 kind 才会触发 onUserDialog；非空列表但不传
+   * onUserDialog 在 SDK intake 阶段抛错。缺省 undefined：不发 dialog request。
+   */
+  supportedDialogKinds?: string[];
   /** 模型覆盖；缺省走 ANTHROPIC_DEFAULT_*_MODEL 环境映射（不传进 options，让 SDK 走默认）。 */
   model?: string;
   /** 允许工具白名单；缺省不传（D-008 错误透传，不预禁工具）。 */
@@ -206,6 +224,12 @@ export class ClaudeSdkDriver {
     if (opts.canUseTool !== undefined) {
       options.canUseTool = opts.canUseTool;
     }
+    if (opts.onUserDialog !== undefined) {
+      options.onUserDialog = opts.onUserDialog;
+    }
+    if (opts.supportedDialogKinds !== undefined) {
+      options.supportedDialogKinds = opts.supportedDialogKinds;
+    }
     if (opts.model !== undefined) {
       options.model = opts.model;
     }
@@ -215,6 +239,13 @@ export class ClaudeSdkDriver {
     if (opts.resume !== undefined) {
       options.resume = opts.resume;
     }
+
+    // ql-20260621-partial：开启 SDK 流式 partial 消息推送。SDK 会在每个
+    // Anthropic streaming event（content_block_delta 等）到达时 emit
+    // SDKPartialAssistantMessage（type='stream_event'），让 SessionManager
+    // 能实时缓冲 + 节流 flush 给前端（避免 2 分钟白屏等完整 block）。
+    // SessionManager._onMessage 负责识别并批量推送，不会每 token 一次 HTTP。
+    options.includePartialMessages = true;
 
     return sdkQuery({ prompt: input, options });
   }

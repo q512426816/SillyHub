@@ -180,7 +180,7 @@ describe('SessionManager manualApproval=true（AC-08.1/08.2/08.3）', () => {
       'sess-1',
     );
     const decision = await pending;
-    expect(decision).toEqual({ behavior: 'allow' });
+    expect(decision).toEqual({ behavior: 'allow', updatedInput: { command: 'ls' } });
   });
 
   it('用户 deny + message → 回调返回 {behavior:deny, message}', async () => {

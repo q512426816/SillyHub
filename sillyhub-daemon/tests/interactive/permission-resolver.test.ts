@@ -401,3 +401,132 @@ describe('PermissionResolver 并发多 entry 互不影响（AC-08.6）', () => {
     expect(dc.behavior).toBe('deny');
   });
 });
+
+// ── onUserDialog 扩展（dialog_kind / dialog_payload / dialog_result）──────
+// 验证 PERMISSION_REQUEST payload 携带对话字段，PERMISSION_RESPONSE 把
+// dialog_result 透传到 allow decision，使 SessionManager._buildOnUserDialogCallback
+// 能把用户选择的答案回喂 SDK。
+
+describe('PermissionResolver onUserDialog 扩展（register 带 dialog_*）', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('register 传 dialogKind + dialogPayload → send payload 带 dialog_kind/dialog_payload', () => {
+    const resolver = new PermissionResolver();
+    const send = makeSend(true);
+    resolver.register({
+      sessionId: SESSION_ID,
+      runId: RUN_ID,
+      toolName: 'AskUserQuestion',
+      toolInput: { questions: [{ question: 'q' }] },
+      send,
+      dialogKind: 'AskUserQuestion',
+      dialogPayload: { questions: [{ question: 'q' }] },
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+    const msg = send.mock.calls[0]![0]!;
+    expect(msg.type).toBe(MSG.PERMISSION_REQUEST);
+    const payload = msg.payload as Record<string, unknown>;
+    expect(payload.dialog_kind).toBe('AskUserQuestion');
+    expect(payload.dialog_payload).toEqual({ questions: [{ question: 'q' }] });
+    // 既有字段不变（向后兼容）。
+    expect(payload.tool_name).toBe('AskUserQuestion');
+    expect(payload.input).toEqual({ questions: [{ question: 'q' }] });
+  });
+
+  it('register 不传 dialog_* → send payload 无 dialog_kind/dialog_payload（向后兼容）', () => {
+    const resolver = new PermissionResolver();
+    const send = makeSend(true);
+    resolver.register({
+      sessionId: SESSION_ID,
+      runId: RUN_ID,
+      toolName: 'Bash',
+      toolInput: { command: 'ls' },
+      send,
+    });
+    const payload = send.mock.calls[0]![0]!.payload as Record<string, unknown>;
+    expect(payload).not.toHaveProperty('dialog_kind');
+    expect(payload).not.toHaveProperty('dialog_payload');
+  });
+});
+
+describe('PermissionResolver onUserDialog 扩展（resolve 带 dialog_result）', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('allow + dialog_result → decision.allow 带 dialogResult 透传', async () => {
+    const resolver = new PermissionResolver();
+    const send = makeSend(true);
+    const { requestId, promise } = resolver.register({
+      sessionId: SESSION_ID,
+      runId: RUN_ID,
+      toolName: 'AskUserQuestion',
+      toolInput: {},
+      send,
+      dialogKind: 'AskUserQuestion',
+      dialogPayload: { questions: [] },
+    });
+    const answers = { answers: [{ answer: 'A' }] };
+    resolver.resolve(
+      {
+        session_id: SESSION_ID,
+        request_id: requestId,
+        decision: 'allow',
+        dialog_result: answers,
+      },
+      SESSION_ID,
+    );
+    const decision = await promise;
+    expect(decision).toEqual({ behavior: 'allow', dialogResult: answers });
+  });
+
+  it('allow 但无 dialog_result → 纯 {behavior:allow}（onUserDialog 回调据此回 null）', async () => {
+    const resolver = new PermissionResolver();
+    const send = makeSend(true);
+    const { requestId, promise } = resolver.register({
+      sessionId: SESSION_ID,
+      runId: RUN_ID,
+      toolName: 'AskUserQuestion',
+      toolInput: {},
+      send,
+      dialogKind: 'AskUserQuestion',
+      dialogPayload: { questions: [] },
+    });
+    resolver.resolve(
+      { session_id: SESSION_ID, request_id: requestId, decision: 'allow' },
+      SESSION_ID,
+    );
+    const decision = await promise;
+    expect(decision).toEqual({ behavior: 'allow' });
+    expect((decision as { dialogResult?: unknown }).dialogResult).toBeUndefined();
+  });
+
+  it('deny + message → dialog_result 被忽略（deny 不携带答案）', async () => {
+    const resolver = new PermissionResolver();
+    const send = makeSend(true);
+    const { requestId, promise } = resolver.register({
+      sessionId: SESSION_ID,
+      runId: RUN_ID,
+      toolName: 'AskUserQuestion',
+      toolInput: {},
+      send,
+      dialogKind: 'AskUserQuestion',
+      dialogPayload: {},
+    });
+    resolver.resolve(
+      {
+        session_id: SESSION_ID,
+        request_id: requestId,
+        decision: 'deny',
+        message: 'user rejected',
+        // 即使误带 dialog_result，deny 路径也不透传答案。
+        dialog_result: { answers: ['A'] },
+      },
+      SESSION_ID,
+    );
+    const decision = await promise;
+    expect(decision.behavior).toBe('deny');
+    expect((decision as { message?: string }).message).toBe('user rejected');
+    expect((decision as { dialogResult?: unknown }).dialogResult).toBeUndefined();
+  });
+});

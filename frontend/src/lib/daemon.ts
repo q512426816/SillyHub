@@ -10,6 +10,8 @@ export interface DaemonRuntimeRead {
   name: string | null;
   provider: string | null;
   version: string | null;
+  os: string | null;
+  arch: string | null;
   status: string | null; // online, offline, maintenance, disabled
   last_heartbeat_at: string | null;
   capabilities: Record<string, any> | null;
@@ -78,6 +80,18 @@ export async function enableDaemonRuntime(
     `/api/daemon/runtimes/${runtimeId}/enable`,
     { method: "POST" },
   );
+}
+
+/**
+ * DELETE /api/daemon/runtimes/{id} — 物理删除运行时（ql-20260621-012）。
+ * 级联清除该 runtime 下的 leases / agent_sessions；daemon 下次心跳重新注册。
+ */
+export async function deleteDaemonRuntime(
+  runtimeId: string,
+): Promise<void> {
+  await apiFetch(`/api/daemon/runtimes/${encodeURIComponent(runtimeId)}`, {
+    method: "DELETE",
+  });
 }
 
 export interface QuickChatResponse {
@@ -350,6 +364,18 @@ export interface SessionPermissionRequest {
   tool_name: string;
   input: Record<string, unknown>;
   tool_use_id?: string;
+  /**
+   * AskUserQuestion 对话类型标识（Claude Code canUseTool 远程人审的对话变体）。
+   * 存在时前端渲染 AskUserDialogCard（结构化问答），否则渲染普通
+   * PermissionApprovalCard（allow/deny 二选一）。常见值: "ask_user"。
+   */
+  dialog_kind?: string;
+  /**
+   * AskUserQuestion 对话载荷，含 questions 数组
+   *（question / header / multiSelect / options[{label,description,preview}]）。
+   * 仅当 dialog_kind 存在时有意义。
+   */
+  dialog_payload?: Record<string, unknown>;
 }
 
 /**
@@ -374,12 +400,20 @@ export async function respondSessionPermission(
   requestId: string,
   decision: "allow" | "deny",
   message?: string,
+  /**
+   * AskUserQuestion 对话结果（{answers: [{question, header?, answer}]}）。
+   * 仅当原 request 携带 dialog_kind 时有意义；普通审批不传。
+   */
+  dialog_result?: Record<string, unknown>,
 ): Promise<{ accepted: boolean }> {
+  const body: Record<string, unknown> = { decision };
+  if (message !== undefined) body.message = message;
+  if (dialog_result !== undefined) body.dialog_result = dialog_result;
   return apiFetch<{ accepted: boolean }>(
     `/api/daemon/sessions/${sessionId}/permissions/${requestId}/response`,
     {
       method: "POST",
-      json: { decision, ...(message !== undefined ? { message } : {}) },
+      json: body,
     },
   );
 }
@@ -400,7 +434,7 @@ export function parseSessionPermissionEvent(
   if (!data || typeof data !== "object") return null;
   const evt = data as Record<string, unknown>;
   if (evt.event === "permission_request") {
-    return {
+    const req: SessionPermissionRequest = {
       session_id: String(evt.session_id ?? ""),
       run_id: String(evt.run_id ?? ""),
       request_id: String(evt.request_id ?? ""),
@@ -409,10 +443,18 @@ export function parseSessionPermissionEvent(
         evt.input && typeof evt.input === "object"
           ? (evt.input as Record<string, unknown>)
           : {},
-      ...(typeof evt.tool_use_id === "string"
-        ? { tool_use_id: evt.tool_use_id }
-        : {}),
     };
+    if (typeof evt.tool_use_id === "string") {
+      req.tool_use_id = evt.tool_use_id;
+    }
+    // AskUserQuestion 对话变体：dialog_kind 存在即渲染结构化问答卡。
+    if (typeof evt.dialog_kind === "string") {
+      req.dialog_kind = evt.dialog_kind;
+    }
+    if (evt.dialog_payload && typeof evt.dialog_payload === "object") {
+      req.dialog_payload = evt.dialog_payload as Record<string, unknown>;
+    }
+    return req;
   }
   if (evt.event === "permission_resolved") {
     const decision = evt.decision === "allow" ? "allow" : "deny";
@@ -424,6 +466,24 @@ export function parseSessionPermissionEvent(
     };
   }
   return null;
+}
+
+/**
+ * GET /api/daemon/sessions/{id}/dialogs — 恢复刷新前未回答的 AskUserQuestion
+ * 对话（dialog_kind 待答 permission_request）。
+ *
+ * SSE 只推送实时新事件，页面刷新后已 pending 的对话不会重放，需通过此 REST
+ * 端点恢复。返回的 SessionPermissionRequest[] 与 SSE permission_request 同构，
+ * 父组件可直接合并到现有 permissionRequests 状态（按 request_id 去重）。
+ *
+ * 非 AskUserQuestion 的普通 canUseTool 审批不在此端点返回（它们 5min 自动超时）。
+ */
+export async function fetchPendingDialogs(
+  sessionId: string,
+): Promise<SessionPermissionRequest[]> {
+  return apiFetch<SessionPermissionRequest[]>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/dialogs`,
+  );
 }
 
 /* ---------- Interactive session REST + SSE (task-11 / FR-10 / D-006@v1) ----------
@@ -439,6 +499,7 @@ export interface SessionCreateRequest {
   prompt: string;
   model?: string | null;
   manual_approval?: boolean;
+  ask_user_only?: boolean;
 }
 
 export interface SessionCreateResponse {
@@ -475,6 +536,9 @@ export async function createSession(
   };
   if (input.manual_approval !== undefined) {
     body.manual_approval = input.manual_approval;
+  }
+  if (input.ask_user_only !== undefined) {
+    body.ask_user_only = input.ask_user_only;
   }
   return apiFetch<SessionCreateResponse>("/api/daemon/sessions", {
     method: "POST",
@@ -528,7 +592,8 @@ export type SessionEventKind =
   | "log"
   | "turn_completed"
   | "session_status"
-  | "session_ended";
+  | "session_ended"
+  | "tokens";
 
 export interface SessionStreamEnvelope {
   event: SessionEventKind;
@@ -542,6 +607,12 @@ export interface SessionStreamEnvelope {
   status: string | null;
   exit_code: number | null;
   reason: string | null;
+  /**
+   * ql-20260621：实时 / 终态 token。`tokens` 事件（执行中累积）与
+   * `turn_completed` 事件（终态）都会带这两个字段；其它事件为 null。
+   */
+  input_tokens?: number | null;
+  output_tokens?: number | null;
 }
 
 export interface SessionStreamHandlers {
@@ -550,6 +621,26 @@ export interface SessionStreamHandlers {
   onTurnCompleted(event: SessionStreamEnvelope): void;
   onSessionEnded(event: SessionStreamEnvelope): void;
   onError(error: Error): void;
+  /**
+   * ql-20260621：backend 在每次 submit_messages 时往 session channel 推送的
+   * `tokens` 事件（累积 input_tokens / output_tokens）。父组件据此实时更新
+   * 当前 turn 的 token 显示，无需等 turn_completed 或轮询 DB。
+   */
+  onTokens?(event: SessionStreamEnvelope): void;
+  /**
+   * task-11 / ql-20260621：backend 通过同一 session SSE channel 推送的
+   * permission_request 事件（Claude Code AskUserQuestion 远程人审 / 普通工具审批）。
+   * 当 req.dialog_kind 存在时父组件应渲染 AskUserDialogCard（结构化问答），
+   * 否则渲染普通 PermissionApprovalCard（allow/deny 二选一）。
+   *
+   * 仅监听本回调即可——不必再为 permission_request 建第二条 EventSource。
+   */
+  onPermissionRequest?(request: SessionPermissionRequest): void;
+  /**
+   * task-11 / ql-20260621：permission_resolved 事件——backend 确认请求已收口
+   *（用户操作 manual 或 5min 超时 timeout）。父组件据此移除对应卡片。
+   */
+  onPermissionResolved?(resolved: SessionPermissionResolved): void;
 }
 
 export interface SessionStreamConnection {
@@ -618,7 +709,7 @@ export function streamSession(
     }
     // turn 类事件必须有 run_id
     if (
-      (kind === "turn_started" || kind === "log" || kind === "turn_completed") &&
+      (kind === "turn_started" || kind === "log" || kind === "turn_completed" || kind === "tokens") &&
       !env.run_id
     ) {
       handlers.onError(new Error(`Missing run_id on ${kind} event`));
@@ -638,6 +729,10 @@ export function streamSession(
       case "turn_completed":
         handlers.onTurnCompleted(envelope);
         break;
+      case "tokens":
+        // ql-20260621：实时累积 token（每次 submit_messages 推送）。
+        handlers.onTokens?.(envelope);
+        break;
       case "session_status":
         // session_status 不进入专门 handler（无 status 变更时静默），可选扩展。
         break;
@@ -649,9 +744,32 @@ export function streamSession(
         }
         break;
       default:
-        // permission_request / permission_resolved / done / error 等其它事件：
-        // 这些事件不在本 handlers 契约内（permission 走 task-08 parseSessionPermissionEvent，
-        // done/error 不经 streamSession）。统一忽略，避免误触发 onTurnStarted 等。
+        // permission_request / permission_resolved / done / error 等其它事件。
+        // done/error 不经 streamSession 契约，仍忽略。
+        // permission_request / permission_resolved 在同一 session SSE channel
+        // 推送（task-11 ql-20260621）：通过 parseSessionPermissionEvent 解析后
+        // 分发给 onPermissionRequest / onPermissionResolved，避免父组件再建第二条
+        // EventSource 订阅 permission 通道。
+        // 注意：permission_* 不在 SessionEventKind 里（非 turn 类），运行时经
+        // default 分支；用 String(kind) 做比较避免 TS 在穷尽 switch 后把 kind
+        // 收窄成 undefined 触发 2367。
+        const rawKind = String(kind);
+        if (
+          (rawKind === "permission_request" || rawKind === "permission_resolved") &&
+          (handlers.onPermissionRequest || handlers.onPermissionResolved)
+        ) {
+          const perm = parseSessionPermissionEvent(parsed);
+          if (perm) {
+            // 区分 request / resolved：request 含 tool_name，resolved 含 decision
+            if ((perm as SessionPermissionRequest).tool_name) {
+              handlers.onPermissionRequest?.(perm as SessionPermissionRequest);
+            } else {
+              handlers.onPermissionResolved?.(
+                perm as SessionPermissionResolved,
+              );
+            }
+          }
+        }
         break;
     }
   };

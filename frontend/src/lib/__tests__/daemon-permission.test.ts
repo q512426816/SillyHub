@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   respondSessionPermission,
   parseSessionPermissionEvent,
+  fetchPendingDialogs,
   type SessionPermissionRequest,
   type SessionPermissionResolved,
 } from "../daemon";
@@ -63,6 +64,68 @@ describe("respondSessionPermission", () => {
     expect(body.decision).toBe("deny");
     expect(body.message).toBe("no way");
   });
+
+  it("带 dialog_result 时 body 含 dialog_result（AskUserQuestion 对话）", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify({ accepted: true }), { status: 200 }),
+      );
+    const dialogResult = {
+      answers: [{ question: "选哪个？", answer: "选项A" }],
+    };
+    await respondSessionPermission("s", "r", "allow", undefined, dialogResult);
+    const init = fetchMock.mock.calls[0]![1];
+    const body = JSON.parse(init?.body as string);
+    expect(body.decision).toBe("allow");
+    expect(body.message).toBeUndefined();
+    expect(body.dialog_result).toEqual(dialogResult);
+  });
+});
+
+describe("fetchPendingDialogs", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("GET /sessions/{id}/dialogs 返回 SessionPermissionRequest[]", async () => {
+    const dialogs = [
+      {
+        session_id: "sess-1",
+        run_id: "run-1",
+        request_id: "req-1",
+        tool_name: "AskUserQuestion",
+        input: {},
+        dialog_kind: "ask_user",
+        dialog_payload: { questions: [] },
+      },
+    ];
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify(dialogs), { status: 200 }),
+      );
+
+    const result = await fetchPendingDialogs("sess-1");
+    expect(result).toHaveLength(1);
+    expect(result[0]?.dialog_kind).toBe("ask_user");
+    expect(result[0]?.dialog_payload).toEqual({ questions: [] });
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toContain("/api/daemon/sessions/sess-1/dialogs");
+    expect(init?.method ?? "GET").toBe("GET");
+  });
+
+  it("对含特殊字符的 sessionId 做 URL 编码", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify([]), { status: 200 }),
+      );
+    await fetchPendingDialogs("sess a/b");
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toContain("/api/daemon/sessions/sess%20a%2Fb/dialogs");
+  });
 });
 
 describe("parseSessionPermissionEvent", () => {
@@ -95,6 +158,50 @@ describe("parseSessionPermissionEvent", () => {
       input: { path: "/x" },
     }) as SessionPermissionRequest;
     expect(parsed.tool_use_id).toBeUndefined();
+  });
+
+  it("permission_request 带 dialog_kind/dialog_payload → AskUserQuestion 对话变体", () => {
+    const payload = { questions: [{ question: "选哪个？", options: [] }] };
+    const parsed = parseSessionPermissionEvent({
+      event: "permission_request",
+      session_id: "s",
+      run_id: "r",
+      request_id: "rq",
+      tool_name: "AskUserQuestion",
+      input: {},
+      dialog_kind: "ask_user",
+      dialog_payload: payload,
+    }) as SessionPermissionRequest;
+    expect(parsed.dialog_kind).toBe("ask_user");
+    expect(parsed.dialog_payload).toEqual(payload);
+  });
+
+  it("permission_request 无 dialog_kind → dialog 字段 undefined（普通审批）", () => {
+    const parsed = parseSessionPermissionEvent({
+      event: "permission_request",
+      session_id: "s",
+      run_id: "r",
+      request_id: "rq",
+      tool_name: "Bash",
+      input: {},
+    }) as SessionPermissionRequest;
+    expect(parsed.dialog_kind).toBeUndefined();
+    expect(parsed.dialog_payload).toBeUndefined();
+  });
+
+  it("permission_request dialog_kind 非 string → 忽略（防御）", () => {
+    const parsed = parseSessionPermissionEvent({
+      event: "permission_request",
+      session_id: "s",
+      run_id: "r",
+      request_id: "rq",
+      tool_name: "Bash",
+      input: {},
+      dialog_kind: 123,
+      dialog_payload: "not-an-object",
+    }) as SessionPermissionRequest;
+    expect(parsed.dialog_kind).toBeUndefined();
+    expect(parsed.dialog_payload).toBeUndefined();
   });
 
   it("permission_resolved 事件 → SessionPermissionResolved", () => {

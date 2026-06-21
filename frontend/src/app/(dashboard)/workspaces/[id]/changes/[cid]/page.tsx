@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { safeUUID } from "@/lib/api";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AgentModelInput } from "@/components/AgentModelInput";
@@ -524,7 +525,7 @@ export default function ChangeDetailPage({ params }: Props) {
               return [
                 ...prev,
                 {
-                  id: evt.log_id ?? crypto.randomUUID(),
+                  id: evt.log_id ?? safeUUID(),
                   run_id: newRunId,
                   timestamp: evt.timestamp,
                   channel: evt.channel,
@@ -600,7 +601,7 @@ export default function ChangeDetailPage({ params }: Props) {
           return [
             ...prev,
             {
-              id: evt.log_id ?? crypto.randomUUID(),
+              id: evt.log_id ?? safeUUID(),
               run_id: activeRunId,
               timestamp: evt.timestamp,
               channel: evt.channel,

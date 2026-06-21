@@ -31,11 +31,12 @@ import { MSG } from '../protocol.js';
 import type { PermissionResponsePayload } from '../protocol.js';
 
 /**
- * canUseTool 回调返回类型（与 SDK CanUseTool 签名逐字对齐）。
+ * canUseTool 回调返回类型（与 SDK CanUseTool 签名逐字对齐）+ onUserDialog
+ * 扩展（dialogResult 携带用户答案）。
  * 来源：design.md §7.1 + spike-02 §3.7 D2。
  */
 export type CanUseToolDecision =
-  | { behavior: 'allow' }
+  | { behavior: 'allow'; dialogResult?: unknown }
   | { behavior: 'deny'; message?: string };
 
 /**
@@ -68,6 +69,17 @@ export interface PermissionRegisterInput {
   signal?: AbortSignal;
   /** wsClient.send（注入便于测试）。 */
   send: PermissionSendFn;
+  /**
+   * onUserDialog 扩展（可选）：SDK UserDialogRequest.dialogKind。
+   * 存在时 register 会把 dialog_kind + dialog_payload 写入 PERMISSION_REQUEST
+   * payload，backend/前端据此渲染对话卡。
+   */
+  dialogKind?: string;
+  /**
+   * onUserDialog 扩展（可选）：SDK UserDialogRequest.payload（AskUserQuestion
+   * 的 questions 数组等）。原样转发到 PERMISSION_REQUEST.dialog_payload。
+   */
+  dialogPayload?: Record<string, unknown>;
 }
 
 /** register 返回。 */
@@ -146,6 +158,13 @@ export class PermissionResolver {
         ...(input.toolUseId !== undefined
           ? { tool_use_id: input.toolUseId }
           : {}),
+        // onUserDialog 扩展（向后兼容：不传则 payload 无这两个字段）。
+        ...(input.dialogKind !== undefined
+          ? { dialog_kind: input.dialogKind }
+          : {}),
+        ...(input.dialogPayload !== undefined
+          ? { dialog_payload: input.dialogPayload }
+          : {}),
       } as Record<string, unknown>,
     });
     if (!sent) {
@@ -217,7 +236,14 @@ export class PermissionResolver {
     }
     const decision: CanUseToolDecision =
       payload.decision === 'allow'
-        ? { behavior: 'allow' }
+        ? {
+            behavior: 'allow',
+            // onUserDialog 扩展：透传前端选择的答案（undefined 时省略字段，
+            // 保持与旧 allow decision 形态一致，不破坏 canUseTool 路径）。
+            ...(payload.dialog_result !== undefined
+              ? { dialogResult: payload.dialog_result }
+              : {}),
+          }
         : { behavior: 'deny', ...(payload.message ? { message: payload.message } : {}) };
     this._settle(entry, decision);
     return 'resolved';

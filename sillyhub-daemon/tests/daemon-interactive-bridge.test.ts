@@ -194,6 +194,68 @@ describe('Wave2 task-04 gap-1 daemon 桥接 onTurnResult/onTurnMessage/onSession
     );
   });
 
+  // SDKResultSuccess 透传：usage / cost / duration 字段必须从 result 提取并写进
+  // payload，否则 backend AgentRun 这些列全 NULL（修复 interactive usage bug）。
+  it('onTurnResult 含 SDKResultSuccess usage/cost/duration → payload 全字段透传', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    const result = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'done',
+      total_cost_usd: 0.0123,
+      num_turns: 3,
+      duration_ms: 4567,
+      duration_api_ms: 3900,
+      usage: { input_tokens: 1024, output_tokens: 512 },
+    } as unknown as SDKResultMessage;
+
+    await daemon.onTurnResult('sess-1', 'run-1', result);
+
+    expect(client.notifyRunResult).toHaveBeenCalledWith(
+      'lease-1',
+      'claim-token-1',
+      'run-1',
+      expect.objectContaining({
+        status: 'success',
+        is_error: false,
+        total_cost_usd: 0.0123,
+        num_turns: 3,
+        duration_ms: 4567,
+        duration_api_ms: 3900,
+        input_tokens: 1024,
+        output_tokens: 512,
+      }),
+    );
+  });
+
+  it('onTurnResult 缺 usage/cost/duration → payload 不含这些字段（向后兼容）', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    const result = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      // 无 total_cost_usd / usage / num_turns / duration_ms 等
+    } as unknown as SDKResultMessage;
+
+    await daemon.onTurnResult('sess-1', 'run-1', result);
+
+    const callArgs = client.notifyRunResult.mock.calls[0]!;
+    const payload = callArgs[3] as Record<string, unknown>;
+    expect(payload.status).toBe('success');
+    expect(payload.is_error).toBe(false);
+    // 缺失字段不应出现在 payload（undefined → 不写），避免覆盖 backend AgentRun 原值。
+    expect(payload.total_cost_usd).toBeUndefined();
+    expect(payload.num_turns).toBeUndefined();
+    expect(payload.duration_ms).toBeUndefined();
+    expect(payload.input_tokens).toBeUndefined();
+    expect(payload.output_tokens).toBeUndefined();
+  });
+
   // ── onTurnMessage → hubClient.submitMessages ──────────────────────────────
 
   it('onTurnMessage(state.active) → submitMessages(leaseId, claimToken, runId, [msg])', async () => {

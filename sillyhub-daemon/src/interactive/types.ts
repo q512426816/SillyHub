@@ -63,6 +63,21 @@ export interface SessionState {
    * 仅内存态，**禁止**写入 PersistedSessionRecord（task-10 白名单已禁密钥）。
    */
   env?: NodeJS.ProcessEnv;
+  /**
+   * scan 真阻塞（恢复路径用，generic-wibbling-whisper 改造点 C/B）：当前 session
+   * 是否启用 canUseTool 远程人审。create 时从 input.manualApproval ??
+   * this._manualApproval 求值；restoreAndReconnect 时从 record.manualApproval ??
+   * this._manualApproval 求值。snapshotPersistable 输出到 record.manualApproval
+   *（仅 true 时输出，让恢复路径跨 daemon 重启保留审批能力）。
+   */
+  manualApproval?: boolean;
+  /**
+   * scan 真阻塞（AskUserQuestion-only 策略，恢复路径用，改造点 D）：true 时只
+   * AskUserQuestion 走远程人审，其他工具 allow-through。create 时从
+   * input.askUserOnly===true 求值；restoreAndReconnect 时从 record.askUserOnly ??
+   * true 求值（scan 主用场景）。manualApproval=true 时才随 state 持久化。
+   */
+  askUserOnly?: boolean;
 }
 
 /** CreateSessionInput（daemon._startInteractiveSession → SessionManager.create）。 */
@@ -271,10 +286,23 @@ export interface PersistedSessionRecord {
   turnCount: number;
   /** 最后活动 epoch ms。 */
   lastActiveAt: number;
-  /** 恢复 driver 用（可空，空则恢复时重探 executable，D-009）。 */
+  /** 恢复 driver 用（可空，空则恢复时重探，D-009）。 */
   model?: string;
   /** 恢复 driver 用（可空，空则恢复时重探，D-009）。 */
   pathToClaudeCodeExecutable?: string;
+  /**
+   * scan 真阻塞（恢复路径用，generic-wibbling-whisper 改造点 C/B）：是否启用
+   * canUseTool（create 时存 enableApproval；恢复时 fallback 到实例级
+   * this._manualApproval）。仅 true 时落盘（false 为默认行为，不写）。
+   */
+  manualApproval?: boolean;
+  /**
+   * scan 真阻塞（AskUserQuestion-only 策略，恢复路径用，改造点 D）：true 时只
+   * AskUserQuestion 走远程人审。create 时存 input.askUserOnly===true；恢复时
+   * fallback 到 true（scan 主用场景）。manualApproval=true 时才落盘（false 也写，
+   * 否则恢复 fallback 到 true 会把 chat 误当 scan）。
+   */
+  askUserOnly?: boolean;
 }
 
 /** sessions.json 文件结构。 */

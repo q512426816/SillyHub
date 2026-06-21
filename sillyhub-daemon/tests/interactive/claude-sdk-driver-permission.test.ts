@@ -2,7 +2,7 @@
 // task-09 Step 1：deny 收敛单测（FR-07 / D-007@v1 / AC-09.1~09.2）。
 //
 // 覆盖 task-09 §5 边界 1/2/9/11/12：
-//   - 远程 allow：driver 返回 {behavior:'allow'}，不附加 updatedInput；
+//   - 远程 allow：driver 返回 {behavior:'allow', updatedInput}（透传原始 input，满足 Claude CLI Zod required）；
 //   - 远程 deny 带 message：原 message 透传（不二次决策 / 不强制结束 turn）；
 //   - 远程 deny 无 message：默认 message 必含 toolName / sessionId / runId（非空）；
 //   - 5min 超时 deny：默认 message 含 timeout 标注，走同一收敛路径；
@@ -141,7 +141,7 @@ beforeEach(() => {
 // ── 测试 ─────────────────────────────────────────────────────────────────────
 
 describe('deny 收敛（AC-09.1 / FR-07 / D-007@v1）', () => {
-  it('远程 allow → 返回 {behavior:allow}，不附加 updatedInput', async () => {
+  it('远程 allow → 返回 {behavior:allow}，透传 updatedInput（Claude CLI Zod required）', async () => {
     const d = makeMockDriver();
     const { sm, wsClient } = makeManualSession(d);
     await sm.create(BASE_INPUT);
@@ -156,8 +156,10 @@ describe('deny 收敛（AC-09.1 / FR-07 / D-007@v1）', () => {
     );
     const decision = (await pending) as Record<string, unknown>;
     expect(decision.behavior).toBe('allow');
-    // allow 不篡改 input：不携带 updatedInput / modifiedInput 字段（D-007）。
-    expect(decision.updatedInput).toBeUndefined();
+    // Claude CLI 经 --permission-prompt-tool stdio 对 allow 分支做 Zod 运行时校验，
+    // updatedInput 为 required（record）；SDK 类型虽标 optional 但 CLI 运行时必填，
+    // 缺字段报 ZodError invalid_union → 全量工具调用失败。故透传归一化后的原始 input。
+    expect(decision.updatedInput).toEqual({ command: 'ls' });
     expect(decision.modifiedInput).toBeUndefined();
   });
 

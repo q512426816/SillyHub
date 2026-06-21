@@ -429,6 +429,13 @@ export async function startAction(opts: StartOptions): Promise<number> {
         // sendToHub 用首个已注册 runtime 的 WsClient 发 PERMISSION_REQUEST 到 backend。
         send: (msg) => daemon.sendToHub(msg),
       },
+      // onUserDialog（SDK request_user_dialog / AskUserQuestion 真实路由路径）：
+      // 声明 AskUserQuestion 走对话回调而非 canUseTool——canUseTool 只能 allow/deny
+      // 无法回传用户选择，导致 'user did not answer the questions'。supportedDialogKinds
+      // 非空 + onUserDialog 注入（SessionManager.create 在 manualApproval=true 时自动注入）
+      // 后，AskUserQuestion 的 questions 经 PERMISSION_REQUEST（带 dialog_kind/dialog_payload）
+      // 发到前端，用户选择的答案经 PERMISSION_RESPONSE.dialog_result 回喂 SDK。
+      supportedDialogKinds: ['AskUserQuestion'],
     },
   );
   // gap-8（interactive 凭证 parity）：把同一 CredentialManager 传给 Daemon，让

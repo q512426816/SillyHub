@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   CircleDashed,
   Copy,
+  Cpu,
+  MessageSquare,
   MessageSquarePlus,
   Power,
   RefreshCw,
@@ -23,17 +25,13 @@ import {
 } from "lucide-react";
 
 import { InteractiveSessionPanel, type SessionTurnView } from "@/components/daemon/interactive-session-panel";
-import { PermissionApprovalCard } from "@/components/permission-approval-card";
-import {
-  PermissionApprovalDialog,
-  type PermissionQueueItem,
-} from "@/components/permission-approval-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ApiError, getApiBaseUrl } from "@/lib/api";
+import { ApiError } from "@/lib/api";
 import { type AgentRunLogEntry } from "@/lib/agent";
 import {
   deleteAgentSession,
+  deleteDaemonRuntime,
   disableDaemonRuntime,
   enableDaemonRuntime,
   getAgentSessionLogs,
@@ -41,14 +39,11 @@ import {
   listAgentSessions,
   listDaemonRuntimes,
   MIN_VERSIONS,
-  parseSessionPermissionEvent,
   PROVIDER_META,
   reopenSession,
-  respondSessionPermission,
   type AgentSessionRead,
   type AgentSessionStatus,
   type DaemonRuntimeRead,
-  type SessionPermissionRequest,
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/stores/session";
@@ -383,16 +378,14 @@ function InteractiveSessionChatSection({
   attachSession,
   initialTurns,
   onCloseAttach,
+  focusProvider,
 }: {
   runtimes: DaemonRuntimeRead[];
-  /**
-   * task-11 attach 模式：传入 attachSession 时面板进入恢复续聊模式
-   * （建 SSE + 预填 initialTurns + 轮询到 active），不再走 idle→create 新建。
-   * onCloseAttach：attach 面板「关闭/返回历史」回调，清外层 attachSession 状态。
-   */
   attachSession?: AgentSessionRead;
   initialTurns?: SessionTurnView[];
   onCloseAttach?: () => void;
+  /** ql-012：runtime 卡片「会话」聚焦时钦定的 provider（覆盖默认 claude 优先）。 */
+  focusProvider?: string;
 }) {
   // D-002@v3 非目标：交互式会话仅支持 claude（codex 后续），不支持 cursor/openclaw 等。
   // 过滤 online runtime 的 provider，只保留 claude/codex，避免 createSession 触发
@@ -411,10 +404,10 @@ function InteractiveSessionChatSection({
   }, [runtimes]);
   const [model, setModel] = useState<string | null>(null);
   const hasOnlineProvider = onlineProviders.length > 0;
-  // 优先 claude（本变更聚焦），其次第一个已支持的 provider
-  const defaultProvider = attachSession?.provider ?? (onlineProviders.includes("claude")
-    ? "claude"
-    : (onlineProviders[0] ?? "claude"));
+  // ql-012：runtime 卡片聚焦时用 focusProvider 钦定；否则优先 claude，再退首个在线 provider。
+  const defaultProvider = focusProvider
+    ?? attachSession?.provider
+    ?? (onlineProviders.includes("claude") ? "claude" : (onlineProviders[0] ?? "claude"));
   // providers 列表：有在线时用在线列表，无在线时给占位让组件能渲染
   const providers = hasOnlineProvider ? onlineProviders : [defaultProvider];
 
@@ -502,11 +495,17 @@ function RuntimeMeta({ label, children }: { label: string; children: ReactNode }
 function RuntimeCard({
   runtime,
   actioning,
+  sessionStats,
   onToggleEnabled,
+  onOpenSession,
+  onDelete,
 }: {
   runtime: DaemonRuntimeRead;
   actioning: boolean;
+  sessionStats: { total: number; active: number };
   onToggleEnabled: (runtime: DaemonRuntimeRead) => Promise<void>;
+  onOpenSession: (runtime: DaemonRuntimeRead) => void;
+  onDelete: (runtime: DaemonRuntimeRead) => Promise<void>;
 }) {
   const status = getStatusMeta(runtime.status);
   const StatusIcon = status.icon;
@@ -516,6 +515,15 @@ function RuntimeCard({
   const protocol = getProtocol(runtime);
   const isDisabled = runtime.status === "disabled";
   const ActionIcon = isDisabled ? Power : Ban;
+  const binPath =
+    typeof runtime.capabilities?.bin_path === "string" && runtime.capabilities.bin_path
+      ? runtime.capabilities.bin_path
+      : null;
+  const envLabel = [runtime.os, runtime.arch].filter(Boolean).join(" · ") || null;
+  const createdLabel = formatRelativeTime(runtime.created_at);
+  const canOpenSession =
+    runtime.status === "online" &&
+    (runtime.provider === "claude" || runtime.provider === "codex");
 
   return (
     <article className="overflow-hidden rounded-md border bg-card transition-colors hover:border-primary/30">
@@ -533,7 +541,7 @@ function RuntimeCard({
               {runtime.name ?? "未命名运行时"}
             </h3>
             <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
-              {shortId(runtime.id)}
+              {shortId(runtime.id)} · 注册 {createdLabel}
             </p>
           </div>
         </div>
@@ -541,8 +549,16 @@ function RuntimeCard({
       </header>
 
       <div className="grid grid-cols-2 gap-4 px-4 py-3">
-        <RuntimeMeta label="代理">{getProviderLabel(runtime.provider)}</RuntimeMeta>
-        <RuntimeMeta label="协议">{protocol}</RuntimeMeta>
+        <RuntimeMeta label="运行环境">
+          {envLabel ? (
+            <span className="inline-flex items-center gap-1.5">
+              <Cpu className="h-3 w-3 shrink-0 text-muted-foreground" />
+              {envLabel}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">未上报</span>
+          )}
+        </RuntimeMeta>
         <RuntimeMeta label="心跳">{heartbeat}</RuntimeMeta>
         <RuntimeMeta label="版本">
           {displayVersion ? (
@@ -550,6 +566,23 @@ function RuntimeCard({
           ) : (
             <span className="text-muted-foreground">待识别</span>
           )}
+        </RuntimeMeta>
+        <RuntimeMeta label="协议">{protocol}</RuntimeMeta>
+        {binPath && (
+          <RuntimeMeta label="可执行路径">
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <Terminal className="h-3 w-3 shrink-0 text-muted-foreground" />
+              <span className="truncate font-mono">{binPath}</span>
+            </span>
+          </RuntimeMeta>
+        )}
+        <RuntimeMeta label="会话">
+          <span className="inline-flex items-center gap-1">
+            {sessionStats.total}
+            {sessionStats.active > 0 && (
+              <span className="text-emerald-600">（{sessionStats.active} 活跃）</span>
+            )}
+          </span>
         </RuntimeMeta>
       </div>
 
@@ -563,7 +596,18 @@ function RuntimeCard({
         </div>
       </div>
 
-      <div className="flex justify-end border-t px-4 py-3">
+      <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-3">
+        {canOpenSession && (
+          <Button
+            size="sm"
+            className="gap-1.5"
+            onClick={() => onOpenSession(runtime)}
+            title="打开该运行时的会话窗口"
+          >
+            <MessageSquare className="h-3.5 w-3.5" />
+            会话
+          </Button>
+        )}
         <Button
           size="sm"
           variant={isDisabled ? "outline" : "destructive"}
@@ -578,6 +622,17 @@ function RuntimeCard({
             <ActionIcon className="h-3.5 w-3.5" />
           )}
           {actioning ? "处理中" : isDisabled ? "启用" : "禁用"}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+          disabled={actioning}
+          onClick={() => void onDelete(runtime)}
+          title="移除此运行时记录（连带清除其下会话与任务记录）"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          移除
         </Button>
       </div>
     </article>
@@ -640,242 +695,6 @@ function EmptyState() {
       </div>
     </section>
   );
-}
-
-/**
- * task-08（FR-07 / D-007@v1）：会话级审批面板。
- *
- * 订阅指定 AgentSession 的 SSE（/api/daemon/sessions/{id}/stream），
- * 把 agent_session:{id} channel 的 permission_request 事件渲染成
- * PermissionApprovalCard；permission_resolved 事件移除对应卡片；
- * session_ended 事件清空所有卡片。
- *
- * 最小 UI：用户粘贴 sessionId 订阅（task-11/12 之前；完整会话面板由后续
- * 任务负责）。组件本身可被单测驱动（permission request 推入 / resolved 移除）。
- */
-function PermissionApprovalsPanel() {
-  const [sessionIdInput, setSessionIdInput] = useState("");
-  const [subscribedId, setSubscribedId] = useState<string | null>(null);
-  const [cards, setCards] = useState<SessionPermissionRequest[]>([]);
-  const [submitting, setSubmitting] = useState(false);
-  const [dialogError, setDialogError] = useState<string | null>(null);
-  const [deferredKeys, setDeferredKeys] = useState<Set<string>>(new Set());
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const accessToken = useSession((s) => s.accessToken);
-
-  const closeStream = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
-  }, []);
-
-  // 订阅 sessionId 变化时重建 SSE。
-  useEffect(() => {
-    closeStream();
-    setCards([]);
-    if (!subscribedId) return;
-
-    const base = getApiBaseUrl();
-    const url = new URL(`${base}/api/daemon/sessions/${subscribedId}/stream`);
-    if (accessToken) url.searchParams.set("token", accessToken);
-    const es = new EventSource(url.toString());
-    eventSourceRef.current = es;
-
-    es.onmessage = (e: MessageEvent<string>) => {
-      try {
-        const data = JSON.parse(e.data) as unknown;
-        const parsed = parseSessionPermissionEvent(data);
-        if (parsed && (parsed as SessionPermissionRequest).tool_name) {
-          // permission_request
-          const req = parsed as SessionPermissionRequest;
-          setCards((prev) =>
-            prev.some((c) => c.request_id === req.request_id)
-              ? prev
-              : [...prev, req],
-          );
-          return;
-        }
-        if (parsed && (parsed as { decision?: string }).decision) {
-          // permission_resolved
-          const resolved = parsed as { request_id: string };
-          setCards((prev) =>
-            prev.filter((c) => c.request_id !== resolved.request_id),
-          );
-          return;
-        }
-        // session_ended 或其它事件：清空卡片
-        const evt = data as Record<string, unknown> | null;
-        if (evt && evt.event === "session_ended") {
-          setCards([]);
-        }
-      } catch {
-        // 非 JSON / 不识别事件：忽略（其它 SSE 事件类型由 task-06 处理）
-      }
-    };
-
-    es.onerror = () => {
-      // 404/401/网络中断：浏览器自动重连；这里不主动 close。
-      // 用户可改 session 重新订阅。
-    };
-
-    return () => {
-      es.close();
-    };
-  }, [subscribedId, accessToken, closeStream]);
-
-  useEffect(() => {
-    return () => closeStream();
-  }, [closeStream]);
-
-  const handleSubscribe = () => {
-    const id = sessionIdInput.trim();
-    if (!id) return;
-    setSubscribedId(id);
-  };
-
-  // ── 模态审批（复用同一 cards 队列 + task-08 respondSessionPermission 端点） ──
-  // 队首 = cards 中第一个未被 defer 的项；defer 把它移到 deferredKeys，下次显示队次。
-  const headQueueItem: PermissionQueueItem | null = useMemo(() => {
-    const next = cards.find((c) => !deferredKeys.has(c.request_id));
-    if (!next) return null;
-    return {
-      sessionId: next.session_id,
-      runId: next.run_id,
-      requestId: next.request_id,
-      toolName: next.tool_name,
-      input: next.input,
-    };
-  }, [cards, deferredKeys]);
-
-  const removeFromQueue = useCallback((requestId: string) => {
-    setCards((prev) => prev.filter((c) => c.request_id !== requestId));
-    setDeferredKeys((prev) => {
-      if (!prev.has(requestId)) return prev;
-      const next = new Set(prev);
-      next.delete(requestId);
-      return next;
-    });
-  }, []);
-
-  const handleDialogRespond = useCallback(
-    async (decision: "allow" | "deny") => {
-      if (!headQueueItem || submitting) return;
-      setSubmitting(true);
-      setDialogError(null);
-      try {
-        await respondSessionPermission(
-          headQueueItem.sessionId,
-          headQueueItem.requestId,
-          decision,
-        );
-        removeFromQueue(headQueueItem.requestId);
-      } catch (err) {
-        // B-10：失败不 dequeue，保留当前项并显示可重试错误
-        setDialogError(err instanceof ApiError ? err.message : "提交失败，请重试");
-      } finally {
-        setSubmitting(false);
-      }
-    },
-    [headQueueItem, submitting, removeFromQueue],
-  );
-
-  const handleDialogDefer = useCallback(() => {
-    if (!headQueueItem) return;
-    setDeferredKeys((prev) => new Set(prev).add(headQueueItem.requestId));
-    setDialogError(null);
-  }, [headQueueItem]);
-
-  return (
-    <section className="rounded-md border bg-card">
-      <header className="flex items-center justify-between gap-2 border-b px-4 py-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <ShieldAlertIcon className="h-4 w-4 text-amber-600" />
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold">工具审批（manual_approval）</h2>
-            <p className="text-[11px] text-muted-foreground">
-              {subscribedId
-                ? `订阅会话 ${shortId(subscribedId)}`
-                : "粘贴会话 ID 订阅实时审批流"}
-            </p>
-          </div>
-        </div>
-        <Badge variant="outline">{cards.length} 待审</Badge>
-      </header>
-
-      <div className="flex items-center gap-2 border-b bg-muted/20 px-3 py-2">
-        <input
-          value={sessionIdInput}
-          onChange={(e) => setSessionIdInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") handleSubscribe();
-          }}
-          placeholder="AgentSession ID (UUID)"
-          className="h-8 min-w-0 flex-1 rounded border border-input bg-background px-2 font-mono text-[11px] focus:border-ring focus:outline-none"
-        />
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 gap-1 px-2.5 text-[11px]"
-          onClick={handleSubscribe}
-          disabled={!sessionIdInput.trim()}
-        >
-          订阅
-        </Button>
-        {subscribedId && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-8 px-2.5 text-[11px]"
-            onClick={() => {
-              setSubscribedId(null);
-              setSessionIdInput("");
-            }}
-          >
-            取消
-          </Button>
-        )}
-      </div>
-
-      <div className="space-y-2 p-3">
-        {cards.length === 0 ? (
-          <p className="py-6 text-center text-[11px] text-muted-foreground">
-            {subscribedId ? "暂无待审批工具调用" : "未订阅任何会话"}
-          </p>
-        ) : (
-          cards.map((req) => (
-            <PermissionApprovalCard
-              key={req.request_id}
-              request={req}
-              onResolved={(requestId) => {
-                // 提交成功后立即移除（permission_resolved SSE 也会移除，双保险）
-                setCards((prev) =>
-                  prev.filter((c) => c.request_id !== requestId),
-                );
-              }}
-            />
-          ))
-        )}
-      </div>
-
-      {/*
-        task-12 模态审批弹窗：复用同一 cards 队列（同一 task-08 SSE 通道），
-        不新增第二套。队首项作为弹窗内容；defer 不调后端、只后置到队次。
-      */}
-      <PermissionApprovalDialog
-        request={headQueueItem}
-        submitting={submitting}
-        error={dialogError}
-        onRespond={(d) => void handleDialogRespond(d)}
-        onDefer={handleDialogDefer}
-      />
-    </section>
-  );
-}
-
-// 本地 lucide 图标别名（避免与已 import 的 AlertTriangle 等冲突）。
-function ShieldAlertIcon({ className }: { className?: string }) {
-  return <AlertTriangle className={className} />;
 }
 
 // ── 会话列表 + 历史回看（task-12 / FR-10 / D-005@v1） ───────────────────────
@@ -1040,6 +859,10 @@ function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
       output: outputs.join("\n"),
       status: "completed",
       seenLogIds: new Set(entries.map((e) => e.id)),
+      // ql-20260621：历史回看无实时 token（logs 接口不含 token），置 null。
+      // 若后续 logs 接口补 token 字段可在此填充。
+      inputTokens: null,
+      outputTokens: null,
     });
   }
   return turns;
@@ -1160,7 +983,16 @@ function SessionHistoryView({
  * 会话列表 + 历史回看容器：持有 selection / loading / logs 状态，
  * 包裹 task-11 的 InteractiveSessionPanel（live，不重建其内部 SSE）。
  */
-function SessionListSection({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
+function SessionListSection({
+  runtimes,
+  focusRuntime,
+  onClearFocus,
+}: {
+  runtimes: DaemonRuntimeRead[];
+  /** ql-012：从 runtime 卡片「会话」聚焦的运行时；null/undefined 走全局会话视图。 */
+  focusRuntime?: DaemonRuntimeRead | null;
+  onClearFocus?: () => void;
+}) {
   const [sessions, setSessions] = useState<AgentSessionRead[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -1171,6 +1003,11 @@ function SessionListSection({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   // task-11：reopen 成功的会话进入 attach 续聊面板（历史回看↔attach 切换）
   const [attachSession, setAttachSession] = useState<AgentSessionRead | null>(null);
+  // ql-012：聚焦 runtime 时，sidebar 仅显示该 runtime 的历史会话。
+  const visibleSessions = useMemo(
+    () => (focusRuntime ? sessions.filter((s) => s.runtime_id === focusRuntime.id) : sessions),
+    [sessions, focusRuntime],
+  );
 
   const reloadSessions = useCallback(async () => {
     setLoading(true);
@@ -1250,24 +1087,40 @@ function SessionListSection({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
     <section className="flex min-w-0 flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold">会话</h2>
+          <h2 className="text-sm font-semibold">
+            会话{focusRuntime ? ` · ${focusRuntime.name ?? getProviderLabel(focusRuntime.provider)}` : ""}
+          </h2>
           <p className="text-[11px] text-muted-foreground">
-            选择历史会话回看，或进入 live 面板新建会话
+            {focusRuntime
+              ? "已聚焦该运行时：历史仅显示其会话，新建会话使用此提供方"
+              : "选择历史会话回看，或进入 live 面板新建会话"}
           </p>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void reloadSessions()}
-          disabled={loading}
-          className="h-7 text-[11px]"
-        >
-          刷新会话
-        </Button>
+        <div className="flex items-center gap-2">
+          {focusRuntime && onClearFocus && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onClearFocus}
+              className="h-7 text-[11px]"
+            >
+              显示全部
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void reloadSessions()}
+            disabled={loading}
+            className="h-7 text-[11px]"
+          >
+            刷新会话
+          </Button>
+        </div>
       </div>
       <div className="grid gap-3 lg:grid-cols-[260px_minmax(0,1fr)]">
         <SessionsSidebar
-          sessions={sessions}
+          sessions={visibleSessions}
           loading={loading}
           error={listError}
           selectedSessionId={selected?.id ?? null}
@@ -1294,7 +1147,11 @@ function SessionListSection({ runtimes }: { runtimes: DaemonRuntimeRead[] }) {
             onContinue={(s) => void handleContinue(s)}
           />
         ) : (
-          <InteractiveSessionChatSection runtimes={runtimes} />
+          <InteractiveSessionChatSection
+            key={focusRuntime?.id ?? "global"}
+            runtimes={runtimes}
+            focusProvider={focusRuntime?.provider ?? undefined}
+          />
         )}
       </div>
     </section>
@@ -1307,6 +1164,9 @@ export default function RuntimesPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [runtimeActionId, setRuntimeActionId] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
+  const [sessions, setSessions] = useState<AgentSessionRead[]>([]);
+  const [focusedRuntime, setFocusedRuntime] = useState<DaemonRuntimeRead | null>(null);
+  const sessionSectionRef = useRef<HTMLDivElement>(null);
 
   const reload = useCallback(async (options: { showFeedback?: boolean } = {}) => {
     setError(null);
@@ -1314,13 +1174,15 @@ export default function RuntimesPage() {
     if (showFeedback) setRefreshing(true);
     const startedAt = Date.now();
     try {
-      const [list] = await Promise.all([
+      const [list, sessionsResp] = await Promise.all([
         listDaemonRuntimes(),
+        listAgentSessions({ limit: 100 }).catch(() => null),
         showFeedback
           ? new Promise((resolve) => setTimeout(resolve, Math.max(0, 500 - (Date.now() - startedAt))))
           : Promise.resolve(),
       ]);
       setItems(list);
+      setSessions(sessionsResp?.items ?? []);
       setLastRefreshedAt(new Date());
     } catch (err) {
       setItems([]);
@@ -1346,6 +1208,35 @@ export default function RuntimesPage() {
     } finally {
       setRuntimeActionId(null);
     }
+  }, []);
+
+  // ql-012：移除运行时（物理删除，级联清会话/lease）。
+  const handleDeleteRuntime = useCallback(async (runtime: DaemonRuntimeRead) => {
+    const confirmed = window.confirm(
+      `确定移除运行时「${runtime.name ?? getProviderLabel(runtime.provider)}」？\n将同时清除该运行时下的会话与任务记录，且不可恢复。daemon 下次心跳会重新注册。`,
+    );
+    if (!confirmed) return;
+    setError(null);
+    setRuntimeActionId(runtime.id);
+    try {
+      await deleteDaemonRuntime(runtime.id);
+      setItems((prev) => (prev ? prev.filter((item) => item.id !== runtime.id) : prev));
+      setSessions((prev) => prev.filter((s) => s.runtime_id !== runtime.id));
+      if (focusedRuntime?.id === runtime.id) setFocusedRuntime(null);
+      setLastRefreshedAt(new Date());
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "移除运行时失败");
+    } finally {
+      setRuntimeActionId(null);
+    }
+  }, [focusedRuntime?.id]);
+
+  // ql-012：卡片「会话」→ 聚焦该 runtime + 滚动到会话区。
+  const handleOpenSession = useCallback((runtime: DaemonRuntimeRead) => {
+    setFocusedRuntime(runtime);
+    setTimeout(() => {
+      sessionSectionRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    }, 0);
   }, []);
 
   useEffect(() => {
@@ -1399,6 +1290,19 @@ export default function RuntimesPage() {
       latestHeartbeat: latestHeartbeat ? formatRelativeTime(latestHeartbeat) : "无心跳",
     };
   }, [items]);
+
+  // ql-012：按 runtime_id 聚合会话数（卡片展示）。
+  const sessionStatsByRuntime = useMemo(() => {
+    const map = new Map<string, { total: number; active: number }>();
+    for (const s of sessions) {
+      if (!s.runtime_id) continue;
+      const cur = map.get(s.runtime_id) ?? { total: 0, active: 0 };
+      cur.total += 1;
+      if (isActiveSession(s)) cur.active += 1;
+      map.set(s.runtime_id, cur);
+    }
+    return map;
+  }, [sessions]);
 
   return (
     <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-5 px-6 py-6">
@@ -1475,7 +1379,10 @@ export default function RuntimesPage() {
                         key={runtime.id}
                         runtime={runtime}
                         actioning={runtimeActionId === runtime.id}
+                        sessionStats={sessionStatsByRuntime.get(runtime.id) ?? { total: 0, active: 0 }}
                         onToggleEnabled={handleToggleRuntime}
+                        onOpenSession={handleOpenSession}
+                        onDelete={handleDeleteRuntime}
                       />
                     ))}
                   </div>
@@ -1483,10 +1390,14 @@ export default function RuntimesPage() {
               </section>
             )}
 
-            <SessionListSection runtimes={items} />
+            <div ref={sessionSectionRef} className="scroll-mt-6">
+              <SessionListSection
+                runtimes={items}
+                focusRuntime={focusedRuntime}
+                onClearFocus={() => setFocusedRuntime(null)}
+              />
+            </div>
           </div>
-
-          <PermissionApprovalsPanel />
         </>
       )}
     </main>

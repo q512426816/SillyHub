@@ -26,9 +26,11 @@
 
 import type {
   CanUseTool,
+  OnUserDialog,
   SDKMessage,
   SDKResultMessage,
   SDKUserMessage,
+  UserDialogResult,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeSdkDriver } from './claude-sdk-driver.js';
 import { InputQueue } from './input-queue.js';
@@ -89,6 +91,16 @@ export interface SessionManagerOptions {
    * 仅 manualApproval=true 时必需。
    */
   permissionWsClient?: PermissionWsSender;
+  /**
+   * onUserDialog（SDK request_user_dialog / AskUserQuestion 真实路由）能渲染的
+   * dialog kind 列表。manualApproval=true 时缺省 ['AskUserQuestion']。
+   *
+   * SDK 契约：supportedDialogKinds 非空且 onUserDialog 注入时，AskUserQuestion 等
+   * 声明的 kind 经 onUserDialog 回调（发 PERMISSION_REQUEST 带 dialog_kind/
+   * dialog_payload 等前端答案），而非 canUseTool（canUseTool 只能 allow/deny
+   * 无法回传用户选择）。manualApproval=false 时本字段无意义（不注入 onUserDialog）。
+   */
+  supportedDialogKinds?: string[];
 }
 
 /**
@@ -109,6 +121,34 @@ interface SessionManagerDepsWithQueued extends SessionManagerDeps {
   onTurnQueued?: OnTurnQueuedCallback;
 }
 
+/**
+ * ql-20260621-partial：per-session partial 消息缓冲（streaming delta 节流）。
+ *
+ * includePartialMessages=true 后 SDK 会高频 emit SDKPartialAssistantMessage
+ *（type='stream_event'，每个 content_block_delta 一条，通常 1-5 字符/token）
+ * 和 SDKThinkingTokensMessage（type='system', subtype='thinking_tokens'）。
+ * 若每条都直接 onTurnMessage → submitMessages → HTTP POST + DB commit +
+ * Redis publish + SSE push，100 个 token 累积十几秒延迟（卡顿）。
+ *
+ * 策略：累积 delta 到 buffer，500ms 定时器批量 flush 为 [THINKING] /
+ * [ASSISTANT] / [SYSTEM:thinking_tokens] stdout 消息（对齐 task-runner
+ * _eventToMessages 格式 + 前端 normalize.ts [THINKING] 合并逻辑
+ * ql-20260617-012）。完整 assistant message 到达时清空 buffer（delta 是
+ * 完整内容的子集，避免重复）。session end/fail 时销毁 timer。
+ */
+interface PartialFlushBuffer {
+  /** 累积的 thinking_delta.thinking 内容（待 flush）。 */
+  thinking: string;
+  /** 累积的 text_delta.text 内容（待 flush）。 */
+  assistant: string;
+  /** 最后一次 thinking_tokens.estimated_tokens（running total，非增量）。 */
+  lastTokens: number;
+  /** 上次已 flush 的 tokens 值（去重，仅在变化时 emit）。 */
+  flushedTokens: number;
+  /** 500ms flush 定时器句柄（null = idle，无 pending 内容）。 */
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
 /** 默认空闲阈值（秒）= 30min（FR-06 / D-004@v1）。 */
 const DEFAULT_IDLE_TIMEOUT_SEC = 1800;
 /** 默认扫描周期（秒）。 */
@@ -126,6 +166,16 @@ export class SessionManager {
    * _onResult 收尾时递减（min 0）。
    */
   private readonly _pendingInjectCount = new Map<string, number>();
+
+  /**
+   * ql-20260621-partial：per-session partial 消息缓冲（streaming delta 节流）。
+   * key = sessionId，value = PartialFlushBuffer（thinking/text delta 累积 +
+   * 500ms flush 定时器）。create 时按需懒建，end/fail 时销毁。
+   */
+  private readonly _partialBuffers = new Map<string, PartialFlushBuffer>();
+
+  /** partial flush 节流间隔（ms）。累积 delta 到此窗口后批量推送一次。 */
+  private static readonly PARTIAL_FLUSH_MS = 500;
 
   /**
    * task-07（FR-06 / D-004@v1）：空闲扫描定时器。start() 启动、stop() 清理。
@@ -156,6 +206,12 @@ export class SessionManager {
   private readonly _permissionWsClient: PermissionWsSender | undefined;
   /** sessionId → 当前 session 的 resolver（manualApproval=true 时维护）。 */
   private readonly _resolversBySession = new Map<string, PermissionResolver>();
+  /**
+   * onUserDialog 支持的 dialog kind 列表（manualApproval=true 时注入到 driver
+   * options.supportedDialogKinds，缺省 ['AskUserQuestion']）。manualApproval=false
+   * 时不读（不注入 onUserDialog）。
+   */
+  private readonly _supportedDialogKinds: string[] | undefined;
 
   constructor(
     private readonly deps: SessionManagerDeps,
@@ -190,6 +246,11 @@ export class SessionManager {
       this._permissionResolverFactory = undefined;
     }
     this._permissionWsClient = opts.permissionWsClient;
+    // onUserDialog 支持的 dialog kind：manualApproval=true 时缺省 ['AskUserQuestion']，
+    // 调用方可显式覆盖（如 cli.ts 传不同列表或空数组禁用对话路由）。
+    this._supportedDialogKinds =
+      opts.supportedDialogKinds ??
+      (this._manualApproval ? ['AskUserQuestion'] : undefined);
     if (this._manualApproval) {
       if (!this._permissionResolverFactory) {
         throw new Error(
@@ -243,6 +304,11 @@ export class SessionManager {
     inputQueue.push(firstMsg);
 
     // 2. 写 SessionState（status=running，首 turn 的 currentRunId=firstRunId）。
+    // scan 真阻塞（generic-wibbling-whisper 改造点 C/B/D）：求值 effective
+    // manualApproval / askUserOnly 并写入 state，供 snapshotPersistable 落盘 +
+    // restoreAndReconnect 跨 daemon 重启恢复审批能力。
+    const enableApproval = input.manualApproval ?? this._manualApproval;
+    const effectiveAskUserOnly = input.askUserOnly === true;
     const state: SessionState = {
       sessionId: input.sessionId,
       leaseId: input.leaseId,
@@ -255,6 +321,8 @@ export class SessionManager {
       provider: input.provider,
       pathToClaudeCodeExecutable: input.pathToClaudeCodeExecutable,
       env: input.env,
+      manualApproval: enableApproval,
+      askUserOnly: effectiveAskUserOnly,
     };
     this._store.set(input.sessionId, state);
 
@@ -281,7 +349,7 @@ export class SessionManager {
       // 未传时回退实例级 manualApproval（兼容现有测试 + cli.ts 实例级能力就绪）。
       // chat=false 不注入 canUseTool，避免其 AskUserQuestion 被 backend
       //（config.manual_approval=False）drop → 5min 超时 deny；scan=true 注入，真阻塞等人审。
-      const enableApproval = input.manualApproval ?? this._manualApproval;
+      // enableApproval 已在 state 构造前求值（见上），此处复用。
       if (
         enableApproval &&
         this._permissionResolverFactory &&
@@ -291,8 +359,21 @@ export class SessionManager {
         this._resolversBySession.set(input.sessionId, resolver);
         driverOpts.canUseTool = this._buildCanUseToolCallback(
           input.sessionId,
-          input.askUserOnly === true,
+          effectiveAskUserOnly,
         );
+        // onUserDialog 路由（SDK request_user_dialog 路径）：
+        // supportedDialogKinds 非空才注入——SDK 契约「声明在此的 kind 才经
+        // onUserDialog」。⚠️ 注意：AskUserQuestion 在 SDK headless 模式下实际
+        // **不走** onUserDialog（它经 canUseTool 拦截，详见 _buildCanUseToolCallback
+        // 的 askUserOnly 分支）；此处 supportedDialogKinds 仅对 SDK 真正发出
+        // request_user_dialog 的其他 dialog kind 生效。默认 ['AskUserQuestion']：
+        // 历史值，保留向后兼容（即便 AskUserQuestion 实际不路由到这里也不破坏其他 kind）。
+        if (this._supportedDialogKinds && this._supportedDialogKinds.length > 0) {
+          driverOpts.onUserDialog = this._buildOnUserDialogCallback(
+            input.sessionId,
+          );
+          driverOpts.supportedDialogKinds = this._supportedDialogKinds;
+        }
       }
       const query = this.deps.driver.start(
         inputQueue,
@@ -334,7 +415,8 @@ export class SessionManager {
    *   - 远程 deny 未带 message 时用默认模板（含 toolName / sessionId / runId），
    *     让 claude 拿到可读原因决定下一步；禁止返回空 message；
    *   - driver 不二次决策、不强制结束 turn；deny.message 原样经 SDK 回喂；
-   *   - allow 不篡改 input（不附加 updatedInput）。
+   *   - allow 不篡改 input：updatedInput 透传原始 toolInput（Claude CLI Zod 校验
+   *     allow 分支 updatedInput required，缺字段报 ZodError；类型虽 optional 但运行时必填）；
    *
    * **task-09 边界 12（wrapper 自身异常）**：
    *   resolver.register 抛 / await 抛 → catch 后返回 deny（带原因 message），
@@ -358,12 +440,92 @@ export class SessionManager {
         return { behavior: 'deny', message: 'session not in running turn' };
       }
       const runId = state.currentRunId;
+      // Claude CLI 经 --permission-prompt-tool stdio 对 allow 分支做 Zod 运行时校验，
+      // updatedInput 为 required（record）；SDK 类型虽标 optional 但 CLI 运行时必填，
+      // 缺字段会报 ZodError invalid_union → 全量工具调用失败（scan 阻塞根因）。
+      // toolInput 形态是 unknown，归一化为 record（非 object 包装成 { value }），
+      // 既满足 Zod record 校验又给 resolver / allow 透传同一份。
+      const updatedInput: Record<string, unknown> =
+        toolInput && typeof toolInput === 'object'
+          ? (toolInput as Record<string, unknown>)
+          : { value: toolInput };
+      // AskUserQuestion 拦截（所有模式共享，提到 askUserOnly 判断之前）：
+      // AskUserQuestion 是 Claude Code 内置工具，在 TUI 模式通过 setToolJSX 渲染，
+      // SDK headless 模式无法渲染 → allow 后 SDK 执行必失败 → 立即返回空结果
+      //（"The user did not answer the questions"）。
+      // 故不 allow：拦截 AskUserQuestion，经 resolver 发 PERMISSION_REQUEST 到前端
+      //（前端据 tool_name=AskUserQuestion 渲染选项卡片），await 用户回答后把答案作为
+      // deny message 回传给 Claude——canUseTool 唯一回传自定义内容给 Claude 的方式
+      //（deny 语义虽不完美，但 Claude 把 deny.message 当 tool_result 看到答案继续工作）。
+      // 此拦截对所有模式（askUserOnly true/false）生效：askUserOnly=true（scan）原本就
+      // 拦截；askUserOnly=false（chat 交互式）现在也拦截，确保前端弹对话卡。
+      // 超时 / abort / wrapper 异常 → deny 默认 message（让 Claude 按推荐项继续）。
+      if (toolName === 'AskUserQuestion') {
+        const askDefaultMsg =
+          'User did not respond to the question. Proceed with the recommended option.';
+        // resolver/wsClient 在 manualApproval=true 时已校验存在
+        //（_buildCanUseToolCallback 仅在 enableApproval=true 分支内注入 driver，
+        // 调用时一定存在）。防御性取值便于单测 / 边界容错。
+        const askResolver = this._resolversBySession.get(sessionId);
+        const askWsClient = this._permissionWsClient;
+        if (!askResolver || !askWsClient) {
+          return { behavior: 'deny', message: askDefaultMsg };
+        }
+        try {
+          const { promise } = askResolver.register({
+            sessionId,
+            runId,
+            toolName,
+            toolInput: updatedInput,
+            signal: options?.signal,
+            send: (msg) => askWsClient.send(msg),
+            // 标记为 dialog（AskUserQuestion 不是普通审批，是对话）：
+            // backend handle_permission_request 见 dialog_kind 走 dialog 路径
+            //（持久化 session_dialog_requests + 不 arm 5min 超时 + SSE 携带
+            // dialog_kind/dialog_payload 让前端渲染问答卡而非 allow/deny 审批卡）。
+            dialogKind: 'AskUserQuestion',
+            dialogPayload: updatedInput,
+          });
+          const decision = await promise;
+          if (decision.behavior === 'allow') {
+            // 用户回答了。优先取 dialogResult（前端用户选择回传字段），
+            // 否则 fallback 到兜底文案（兼容旧 backend 不识别 dialog_result 的 allow）。
+            const dialogResult = (decision as { dialogResult?: unknown })
+              .dialogResult;
+            const answer =
+              dialogResult !== undefined && dialogResult !== null
+                ? dialogResult
+                : 'no answer payload';
+            return {
+              behavior: 'deny',
+              message: `User answered: ${JSON.stringify(answer)}`,
+            };
+          }
+          // deny / 超时 / abort：让 Claude 按推荐项继续，不卡死 scan。
+          return {
+            behavior: 'deny',
+            message:
+              decision.message && decision.message.length > 0
+                ? `User did not answer the question (${decision.message}). Proceed with the recommended option.`
+                : askDefaultMsg,
+          };
+        } catch (err) {
+          const reason =
+            err instanceof Error ? err.message : String(err ?? 'unknown error');
+          return {
+            behavior: 'deny',
+            message: `Failed to get user response (${reason}). Proceed with the recommended option.`,
+          };
+        }
+      }
       // scan 真阻塞（AskUserQuestion-only 策略，改造点 D）：askUserOnly=true 的 session
-      //（scan）只有 AskUserQuestion（人工决策入口）走远程人审，其他工具 allow-through
-      // 让 scan 自动推进；默认 askUserOnly=false（全工具人审的 chat）所有工具走 register
+      //（scan）AskUserQuestion 已在上方拦截，其他工具 allow-through 让 scan 自动推进；
+      // 默认 askUserOnly=false（全工具人审的 chat）其他工具走 register
       //（task-08 远程审批危险工具语义不变）。
-      if (askUserOnly && toolName !== 'AskUserQuestion') {
-        return { behavior: 'allow' };
+      if (askUserOnly) {
+        // 其他工具正常 allow-through：透传归一化后的 updatedInput（不篡改语义，
+        // 仅满足 Zod record 要求），让 scan 自动推进。
+        return { behavior: 'allow', updatedInput };
       }
       // task-09：默认 deny message 模板（含 toolName / sessionId / runId），
       // 远程 deny 未带 message 时回填，让 claude 拿到可读原因自决定收敛行为。
@@ -381,10 +543,7 @@ export class SessionManager {
           sessionId,
           runId,
           toolName,
-          toolInput:
-            toolInput && typeof toolInput === 'object'
-              ? (toolInput as Record<string, unknown>)
-              : { value: toolInput },
+          toolInput: updatedInput,
           signal: options?.signal,
           send: (msg) => wsClient.send(msg),
         });
@@ -397,7 +556,9 @@ export class SessionManager {
             message: decision.message ?? defaultDenyMessage,
           };
         }
-        return { behavior: 'allow' };
+        // 远程审批 allow：透传归一化后的 updatedInput（resolver 决策不携带 input 修改语义，
+        // 不篡改；updatedInput 仅满足 Claude CLI Zod record 校验）。
+        return { behavior: 'allow', updatedInput };
       } catch (err) {
         // task-09 边界 12：wrapper 自身异常（register 抛 / promise reject 非正常路径）
         // → catch 后返回 deny（带原因），不向上抛让 SDK 把它当 query 失败。
@@ -407,6 +568,95 @@ export class SessionManager {
           behavior: 'deny',
           message: `${defaultDenyMessage}: wrapper error (${reason})`,
         };
+      }
+    };
+  }
+
+  /**
+   * onUserDialog 回调（SDK request_user_dialog 路由）。
+   *
+   * ⚠️ AskUserQuestion **不走此路径**：AskUserQuestion 是 Claude Code 内置工具，在
+   * SDK headless 模式下不会触发 SDK 的 request_user_dialog（它在 TUI 模式经 setToolJSX
+   * 渲染，headless 模式 SDK 直接当普通工具调 canUseTool）。故 AskUserQuestion 的真实
+   * 路由是 `_buildCanUseToolCallback` 的 askUserOnly 分支（拦截 → register → 答案经
+   * deny.message 回喂 Claude）。
+   *
+   * 此回调仅对 SDK 真正发出 request_user_dialog 的其他 dialog kind 生效（保留能力，
+   * 不影响其他 dialog 路由）。与 _buildCanUseToolCallback 同构但走 SDK 对话协议
+   *（返回 {behavior:'completed', result} | {behavior:'cancelled'}），关键差异：
+   *   - 走 PERMISSION_REQUEST 时 payload 额外带 dialog_kind + dialog_payload
+   *     （backend/前端据此渲染对话卡而非普通审批卡）；
+   *   - PERMISSION_RESPONSE.allow 带 dialog_result → 返回 {behavior:'completed',
+   *     result: dialog_result}（前端用户选择的答案原样回喂 SDK）；
+   *   - allow 但无 dialog_result → {behavior:'completed', result: null}（兼容
+   *     旧 backend 不识别 dialog_result 的 allow，不让 SDK 因缺答案报错）；
+   *   - deny / 超时 / abort / wrapper 异常 → {behavior:'cancelled'}（SDK 对
+   *     cancelled 应用 dialog 默认行为；fail-closed，不本地编造答案）。
+   *
+   * state 非 running turn / 无 currentRunId / 无 resolver/wsClient → cancelled
+   *（防 interrupt 后 SDK 仍触发回调，与 canUseTool 同 fail-closed 语义）。
+   *
+   * @param sessionId  bind 给当前 session 的回调（同一 SessionManager 多 session 时各独立）。
+   */
+  private _buildOnUserDialogCallback(sessionId: string): OnUserDialog {
+    return async (
+      request: {
+        dialogKind: string;
+        payload: Record<string, unknown>;
+        toolUseID?: string;
+      },
+      options?: { signal?: AbortSignal },
+    ): Promise<UserDialogResult> => {
+      const state = this._store.get(sessionId);
+      // state 不存在 / 非 running turn / 无 currentRunId → fail-closed cancelled。
+      if (
+        !state ||
+        state.status !== 'running' ||
+        !state.currentRunId
+      ) {
+        return { behavior: 'cancelled' };
+      }
+      const runId = state.currentRunId;
+      const resolver = this._resolversBySession.get(sessionId);
+      const wsClient = this._permissionWsClient;
+      if (!resolver || !wsClient) {
+        // 不应发生（create 时已建 resolver）；防御性 cancelled。
+        return { behavior: 'cancelled' };
+      }
+      try {
+        const { promise } = resolver.register({
+          sessionId,
+          runId,
+          // toolName 标记 AskUserQuestion 便于 backend/前端按工具名分发；
+          // 实际对话内容由 dialog_kind/dialog_payload 携带。
+          toolName: 'AskUserQuestion',
+          // toolInput 用 dialog payload（兼容既有的 input 字段，backend 侧若
+          // 不读 dialog_payload 仍可从 input 渲染）。
+          toolInput: request.payload,
+          ...(request.toolUseID !== undefined
+            ? { toolUseId: request.toolUseID }
+            : {}),
+          signal: options?.signal,
+          send: (msg) => wsClient.send(msg),
+          dialogKind: request.dialogKind,
+          dialogPayload: request.payload,
+        });
+        const decision = await promise;
+        if (decision.behavior === 'deny') {
+          // deny / 超时 / abort：SDK cancelled 应用 dialog 默认行为。
+          return { behavior: 'cancelled' };
+        }
+        // allow：dialog_result 存在则原样回喂，否则 null（不本地编造）。
+        const dialogResult = (decision as { dialogResult?: unknown })
+          .dialogResult;
+        return {
+          behavior: 'completed',
+          result: dialogResult !== undefined ? dialogResult : null,
+        };
+      } catch {
+        // wrapper 自身异常（register 抛 / await reject 非正常路径）→ cancelled，
+        // 不向上抛让 SDK 把它当 query 失败。
+        return { behavior: 'cancelled' };
       }
     };
   }
@@ -607,6 +857,11 @@ export class SessionManager {
       clearInterval(this._idleTimer);
       this._idleTimer = null;
     }
+    // ql-20260621-partial：daemon shutdown 时销毁所有 partial buffer 的 timer，
+    // 防止 unref'd timer 在进程退出途中 fire 触发已销毁 store 的访问。
+    for (const sid of Array.from(this._partialBuffers.keys())) {
+      this._destroyPartialBuffer(sid);
+    }
   }
 
   /**
@@ -675,6 +930,9 @@ export class SessionManager {
     // task-08（AC-08.7）：session 终态时 abortAll 当前 session 的 pending 审批
     // + 移除 resolver（session 不再可 inject，resolver 无存在意义）。
     this._abortPermissionResolver(sessionId, 'session_ended');
+    // ql-20260621-partial：销毁 partial buffer（含 timer），防止 end 后定时器
+    // 仍 fire 推送到已结束 session。
+    this._destroyPartialBuffer(sessionId);
     try {
       state.inputQueue.close();
     } catch {
@@ -693,6 +951,8 @@ export class SessionManager {
     state.status = 'failed';
     // task-08：failed 时同样 abortAll + 移除 resolver。
     this._abortPermissionResolver(sessionId, 'session_failed');
+    // ql-20260621-partial：销毁 partial buffer（含 timer），同 end。
+    this._destroyPartialBuffer(sessionId);
     try {
       state.inputQueue.close();
     } catch {
@@ -751,6 +1011,14 @@ export class SessionManager {
       if (state.pathToClaudeCodeExecutable) {
         rec.pathToClaudeCodeExecutable = state.pathToClaudeCodeExecutable;
       }
+      // scan 真阻塞（恢复路径用，generic-wibbling-whisper 改造点 C/B/D）：
+      // manualApproval=true 时把审批标志 + askUserOnly 落盘，让 restoreAndReconnect
+      // 跨 daemon 重启恢复审批能力。askUserOnly 即便 false 也写（否则恢复 fallback
+      // 到 true 会把 chat 误当 scan）；manualApproval=false 不写（默认行为）。
+      if (state.manualApproval === true) {
+        rec.manualApproval = true;
+        rec.askUserOnly = state.askUserOnly === true;
+      }
       out.push(rec);
     }
     return out;
@@ -781,6 +1049,12 @@ export class SessionManager {
     }
 
     const inputQueue = new InputQueue();
+    // scan 真阻塞（恢复路径用，generic-wibbling-whisper 改造点 C/B/D）：
+    // record 持久化字段优先，fallback 到实例级 _manualApproval / true（scan 主用场景）。
+    // 旧 sessions.json（无 manualApproval/askUserOnly 字段）→ fallback 兼容。
+    const restoreManualApproval =
+      record.manualApproval ?? this._manualApproval;
+    const restoreAskUserOnly = record.askUserOnly ?? true;
     const state: SessionState = {
       sessionId: record.sessionId,
       leaseId: record.leaseId,
@@ -798,6 +1072,8 @@ export class SessionManager {
       cwd: record.cwd,
       provider: record.provider,
       pathToClaudeCodeExecutable: record.pathToClaudeCodeExecutable ?? '',
+      manualApproval: restoreManualApproval,
+      askUserOnly: restoreAskUserOnly,
     };
     this._store.set(state.sessionId, state);
 
@@ -814,9 +1090,34 @@ export class SessionManager {
       if (record.model) {
         driverOpts.model = record.model;
       }
-      // task-08：恢复路径不重建 permission resolver（canUseTool 由 daemon 在
-      // manualApproval=true 时按 session 重建；恢复后 session 若触发 canUseTool
-      // 由 task-08 既有路径接住。本任务 manualApproval 默认 false，不注入 canUseTool）。
+      // 恢复路径注入 canUseTool（与 create 对齐，generic-wibbling-whisper 改造点 C/D）：
+      // manualApproval=true 时按 session 建独立 resolver + 注入远程人审回调 +
+      // onUserDialog，让 daemon 重启后恢复的 session 保留审批能力（否则 SDK 走内置
+      // 默认策略，AskUserQuestion 无阻塞 → scan 无法等人审）。
+      if (
+        restoreManualApproval &&
+        this._permissionResolverFactory &&
+        this._permissionWsClient
+      ) {
+        const resolver = this._permissionResolverFactory();
+        this._resolversBySession.set(record.sessionId, resolver);
+        driverOpts.canUseTool = this._buildCanUseToolCallback(
+          record.sessionId,
+          restoreAskUserOnly,
+        );
+        // onUserDialog 路由（SDK request_user_dialog 路径）：supportedDialogKinds
+        // 非空才注入——SDK 契约「声明在此的 kind 才经 onUserDialog」。与 create
+        // 对齐：默认 ['AskUserQuestion']，保留向后兼容。
+        if (
+          this._supportedDialogKinds &&
+          this._supportedDialogKinds.length > 0
+        ) {
+          driverOpts.onUserDialog = this._buildOnUserDialogCallback(
+            record.sessionId,
+          );
+          driverOpts.supportedDialogKinds = this._supportedDialogKinds;
+        }
+      }
       const query = this.deps.driver.start(
         inputQueue,
         driverOpts as unknown as Parameters<ClaudeSdkDriver['start']>[1],
@@ -956,6 +1257,14 @@ export class SessionManager {
 
   /**
    * onMessage：system/init 写 agentSessionId（只写一次）；其余转发 onTurnMessage。
+   *
+   * ql-20260621-partial：识别 SDKPartialAssistantMessage（type='stream_event'）
+   * 与 SDKThinkingTokensMessage（type='system', subtype='thinking_tokens'），
+   * 累积到 per-session PartialFlushBuffer，由 500ms 定时器批量 flush 为
+   * [THINKING]/[ASSISTANT]/[SYSTEM:thinking_tokens] stdout 消息（不直接转发，
+   * 避免每 token 一次 HTTP）。完整 assistant message（type='assistant'）到达
+   * 时清空 buffer（delta 是完整内容子集，backend _extract_sdk_messages 会展开
+   * 完整 message 为全文 [THINKING]/[ASSISTANT]，partial delta 必须丢弃避免重复）。
    */
   private async _onMessage(state: SessionState, msg: SDKMessage): Promise<void> {
     if (
@@ -971,9 +1280,201 @@ export class SessionManager {
         this._scheduleFlush();
       }
     }
+
+    // ql-20260621-partial：partial 事件缓冲节流（不直接转发）。
+    const msgType = msg && typeof msg === 'object'
+      ? (msg as { type?: string }).type
+      : undefined;
+    const msgSubtype = msg && typeof msg === 'object'
+      ? (msg as { subtype?: string }).subtype
+      : undefined;
+    if (
+      msgType === 'stream_event' ||
+      (msgType === 'system' && msgSubtype === 'thinking_tokens')
+    ) {
+      this._bufferPartial(state, msg);
+      return; // 不直接转发；由 500ms 定时器批量 flush
+    }
+
+    // 完整 assistant message 到达 → 清空 partial buffer 的未 flush 尾部，
+    // 避免与完整 message（backend 展开为全文）重复。
+    if (msgType === 'assistant') {
+      this._clearPartialBuffer(state.sessionId);
+    }
+
     const runId = state.currentRunId;
     if (runId) {
       await this.deps.onTurnMessage(state.sessionId, runId, msg);
     }
+  }
+
+  // ── ql-20260621-partial：streaming delta 缓冲节流 ──────────────────────────
+
+  /**
+   * 把一条 partial 事件（SDKPartialAssistantMessage / SDKThinkingTokensMessage）
+   * 累积到 per-session buffer，并按需启动 500ms flush 定时器。
+   *
+   * content_block_delta.thinking_delta → buf.thinking += delta.thinking
+   * content_block_delta.text_delta     → buf.assistant += delta.text
+   * system/thinking_tokens             → buf.lastTokens = estimated_tokens
+   * 其余 stream_event（message_start / content_block_start / message_delta 等）
+   * 无显示内容，跳过（timer 可能空转一次，flush 时空 buffer no-op）。
+   */
+  private _bufferPartial(state: SessionState, msg: SDKMessage): void {
+    const sessionId = state.sessionId;
+    let buf = this._partialBuffers.get(sessionId);
+    if (!buf) {
+      buf = {
+        thinking: '',
+        assistant: '',
+        lastTokens: 0,
+        flushedTokens: 0,
+        timer: null,
+      };
+      this._partialBuffers.set(sessionId, buf);
+    }
+
+    const msgType = (msg as { type?: string }).type;
+    if (msgType === 'stream_event') {
+      const event = (msg as { event?: unknown }).event;
+      if (event && typeof event === 'object') {
+        const ev = event as {
+          type?: string;
+          delta?: { type?: string; thinking?: string; text?: string };
+        };
+        // content_block_start 带 content_block.type==='thinking' 仅是开始标记，
+        // thinking_delta 会跟随，无需特殊处理（避免 emit 空消息）。
+        if (ev.type === 'content_block_delta' && ev.delta) {
+          const delta = ev.delta;
+          if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+            buf.thinking += delta.thinking;
+          } else if (delta.type === 'text_delta' && typeof delta.text === 'string') {
+            buf.assistant += delta.text;
+          }
+        }
+      }
+    } else if (msgType === 'system') {
+      // SDKThinkingTokensMessage：estimated_tokens 是 running total（非增量）。
+      const tokens = (msg as { estimated_tokens?: number }).estimated_tokens;
+      if (typeof tokens === 'number') {
+        buf.lastTokens = tokens;
+      }
+    }
+
+    // 启动 500ms 定时器（若未在跑）。首次 partial 触发，后续 partial 复用同一 timer
+    // 直到 flush 清 timer；flush 后若仍有 partial 到达会重建 timer（自然节流）。
+    if (buf.timer === null) {
+      buf.timer = setTimeout(() => {
+        this._flushPartial(sessionId).catch((err) => {
+          // flush 失败不崩 session 运行；记日志后继续（buffer 清空，下次 partial 重建）。
+          // eslint-disable-next-line no-console
+          console.error('[session-manager] partial flush failed', err);
+        });
+      }, SessionManager.PARTIAL_FLUSH_MS);
+      // unref 不阻止 node 退出（与 _idleTimer 同策略）。
+      const t = buf.timer as unknown as { unref?: () => void };
+      if (typeof t.unref === 'function') {
+        t.unref();
+      }
+    }
+  }
+
+  /**
+   * flush 一个 session 的 partial buffer：把累积的 thinking/text/tokens
+   * 格式化为 [THINKING]/[ASSISTANT]/[SYSTEM:thinking_tokens] stdout 消息，
+   * 调 onTurnMessage 推送（与 task-runner _eventToMessages 同格式，前端
+   * normalize.ts 自动合并连续 [THINKING] delta）。
+   *
+   * 清空 buffer 内容 + timer 引用（idle）。无 currentRunId / session 不存在
+   * 时丢弃（不推到已结束的 turn）。
+   */
+  private async _flushPartial(sessionId: string): Promise<void> {
+    const buf = this._partialBuffers.get(sessionId);
+    if (!buf) return;
+    // 先清 timer 引用，让下次 partial 能重建（自然节流）。
+    buf.timer = null;
+
+    const state = this._store.get(sessionId);
+    if (!state) {
+      // session 已不存在（end/fail 已销毁 buffer，但定时器可能已 in-flight）。
+      this._partialBuffers.delete(sessionId);
+      return;
+    }
+    const runId = state.currentRunId;
+    if (!runId) {
+      // 无 active turn（turn 边界已过）→ 丢弃残留 buffer，不推到旧/空 runId。
+      buf.thinking = '';
+      buf.assistant = '';
+      return;
+    }
+
+    // 快照累积内容后清空，允许 flush 期间（async await）继续累积到下个窗口。
+    const thinking = buf.thinking;
+    const assistant = buf.assistant;
+    const tokens = buf.lastTokens;
+    buf.thinking = '';
+    buf.assistant = '';
+
+    if (thinking) {
+      const formatted = {
+        event_type: 'text',
+        content: `[THINKING] ${thinking}`,
+        channel: 'stdout',
+      } as unknown as SDKMessage;
+      await this.deps.onTurnMessage(sessionId, runId, formatted);
+    }
+    if (assistant) {
+      const formatted = {
+        event_type: 'text',
+        content: `[ASSISTANT] ${assistant}`,
+        channel: 'stdout',
+      } as unknown as SDKMessage;
+      await this.deps.onTurnMessage(sessionId, runId, formatted);
+    }
+    // thinking_tokens 仅在值变化时 emit（running total，去重）。
+    if (tokens && tokens !== buf.flushedTokens) {
+      buf.flushedTokens = tokens;
+      const formatted = {
+        event_type: 'text',
+        content: `[SYSTEM:thinking_tokens] ${tokens}`,
+        channel: 'stdout',
+      } as unknown as SDKMessage;
+      await this.deps.onTurnMessage(sessionId, runId, formatted);
+    }
+  }
+
+  /**
+   * 清空 partial buffer 内容 + 取消 pending timer（保留 buffer entry，
+   * session 仍 active，下个 turn 的 partial 会复用）。
+   *
+   * 完整 assistant message 到达时调用：delta 是完整内容子集，backend 会展开
+   * 完整 message 为全文 [THINKING]/[ASSISTANT]，未 flush 的 partial 尾部
+   * 必须丢弃避免重复。
+   */
+  private _clearPartialBuffer(sessionId: string): void {
+    const buf = this._partialBuffers.get(sessionId);
+    if (!buf) return;
+    if (buf.timer) {
+      clearTimeout(buf.timer);
+      buf.timer = null;
+    }
+    buf.thinking = '';
+    buf.assistant = '';
+    buf.lastTokens = 0;
+    buf.flushedTokens = 0;
+  }
+
+  /**
+   * 销毁 partial buffer（含 timer）+ 从 Map 移除。
+   * session end/fail/daemon shutdown 时调用，防止 timer 泄漏。
+   */
+  private _destroyPartialBuffer(sessionId: string): void {
+    const buf = this._partialBuffers.get(sessionId);
+    if (!buf) return;
+    if (buf.timer) {
+      clearTimeout(buf.timer);
+      buf.timer = null;
+    }
+    this._partialBuffers.delete(sessionId);
   }
 }
