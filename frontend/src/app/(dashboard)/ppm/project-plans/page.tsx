@@ -20,7 +20,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Button as AntButton,
   DatePicker,
   Form,
   Input,
@@ -30,6 +29,13 @@ import {
 import type { Dayjs } from "dayjs";
 
 import { Button } from "@/components/ui/button";
+import {
+  DataTable,
+  PageContainer,
+  PageHeader,
+  SearchBar,
+  SectionCard,
+} from "@/components/layout";
 import { PpmProjectPlanDetail } from "@/components/ppm-project-plan-detail";
 import { PpmProjectPlanForm } from "@/components/ppm-project-plan-form";
 import { matchAnyUser } from "@/components/ppm-status-actions";
@@ -308,39 +314,38 @@ export default function ProjectPlansPage() {
           matchAnyUser([p.project_manager_id], currentUserId);
         return (
           <div className="flex gap-1">
-            <AntButton
-              size="small"
-              type="link"
+            <Button
+              size="sm"
+              variant="ghost"
               onClick={() => setDetail({ open: true, planId: p.id })}
             >
               详情
-            </AntButton>
-            <AntButton
-              size="small"
-              type="link"
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
               onClick={() => goToMilestones(p.id)}
             >
               里程碑
-            </AntButton>
-            <AntButton
-              size="small"
-              type="link"
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
               disabled={!isManager}
               title={isManager ? undefined : "仅项目经理可编辑"}
               onClick={() => setDrawer({ open: true, mode: "edit", plan: p })}
             >
               编辑
-            </AntButton>
-            <AntButton
-              size="small"
-              type="link"
-              danger
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
               disabled={!isManager}
               title={isManager ? undefined : "仅项目经理可删除"}
               onClick={() => void handleDelete(p)}
             >
               删除
-            </AntButton>
+            </Button>
           </div>
         );
       },
@@ -348,95 +353,104 @@ export default function ProjectPlansPage() {
   ];
 
   return (
-    <div className="mx-auto flex max-w-[1400px] flex-col gap-4 px-6 py-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="mt-0.5">项目计划</h1>
-          <p className="text-xs text-muted-foreground">
-            ps_project_plan — 项目维度的计划主表
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <AntButton
-            loading={exporting}
-            onClick={() => void handleExport()}
-          >
-            导出
-          </AntButton>
-          <Button
-            size="sm"
-            onClick={() => setDrawer({ open: true, mode: "create" })}
-          >
-            + 新建项目计划
-          </Button>
-        </div>
-      </header>
+    <PageContainer>
+      <PageHeader
+        title="项目计划"
+        subtitle="ps_project_plan — 项目维度的计划主表"
+        actions={
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={exporting}
+              onClick={() => void handleExport()}
+            >
+              {exporting ? "导出中…" : "导出"}
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => setDrawer({ open: true, mode: "create" })}
+            >
+              + 新建项目计划
+            </Button>
+          </>
+        }
+      />
 
       {/* 搜索栏 */}
-      <div className="rounded border bg-card p-3">
-        <Form<SearchForm> form={search} layout="inline">
-          <Form.Item label="项目名称" name="projectName">
-            <Input
-              placeholder="请输入项目名称"
-              allowClear
-              style={{ width: 220 }}
-              onPressEnter={() => handleSearch()}
-            />
-          </Form.Item>
-          <Form.Item label="合同名称" name="contractName">
-            <Input
-              placeholder="请输入合同名称"
-              allowClear
-              style={{ width: 220 }}
-              onPressEnter={() => handleSearch()}
-            />
-          </Form.Item>
-          <Form.Item>
-            <AntButton type="primary" onClick={() => handleSearch()}>
-              搜索
-            </AntButton>
-            <AntButton className="ml-2" onClick={() => handleReset()}>
-              重置
-            </AntButton>
-            <AntButton
-              className="ml-2"
-              onClick={() => setExpanded((v) => !v)}
-            >
-              {expanded ? "收起" : "展开"}
-            </AntButton>
-          </Form.Item>
-          {expanded && (
-            <div className="mt-2 flex w-full flex-wrap gap-3">
-              <Form.Item label="公司名称" name="companyName">
-                <Input
-                  placeholder="请输入公司名称"
-                  allowClear
-                  style={{ width: 220 }}
-                  onPressEnter={() => handleSearch()}
-                />
-              </Form.Item>
-              <Form.Item
-                label="合同签订时间范围"
-                name="contractSignTimeRange"
+      <SectionCard>
+        <SearchBar>
+          <Form<SearchForm> form={search} layout="inline" className="w-full">
+            <Form.Item label="项目名称" name="projectName">
+              <Input
+                placeholder="请输入项目名称"
+                allowClear
+                className="w-[220px]"
+                onPressEnter={() => handleSearch()}
+              />
+            </Form.Item>
+            <Form.Item label="合同名称" name="contractName">
+              <Input
+                placeholder="请输入合同名称"
+                allowClear
+                className="w-[220px]"
+                onPressEnter={() => handleSearch()}
+              />
+            </Form.Item>
+            <Form.Item>
+              <Button size="sm" onClick={() => handleSearch()}>
+                搜索
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-2"
+                onClick={() => handleReset()}
               >
-                <RangePicker style={{ width: 240 }} />
-              </Form.Item>
-              <Form.Item
-                label="项目开始时间范围"
-                name="projectStartTimeRange"
+                重置
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-2"
+                onClick={() => setExpanded((v) => !v)}
               >
-                <RangePicker style={{ width: 240 }} />
-              </Form.Item>
-              <Form.Item
-                label="预计验收时间范围"
-                name="projectPlanEndTimeRange"
-              >
-                <RangePicker style={{ width: 240 }} />
-              </Form.Item>
-            </div>
-          )}
-        </Form>
-      </div>
+                {expanded ? "收起" : "展开"}
+              </Button>
+            </Form.Item>
+            {expanded && (
+              <div className="mt-2 flex w-full flex-wrap gap-3">
+                <Form.Item label="公司名称" name="companyName">
+                  <Input
+                    placeholder="请输入公司名称"
+                    allowClear
+                    className="w-[220px]"
+                    onPressEnter={() => handleSearch()}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label="合同签订时间范围"
+                  name="contractSignTimeRange"
+                >
+                  <RangePicker className="w-[240px]" />
+                </Form.Item>
+                <Form.Item
+                  label="项目开始时间范围"
+                  name="projectStartTimeRange"
+                >
+                  <RangePicker className="w-[240px]" />
+                </Form.Item>
+                <Form.Item
+                  label="预计验收时间范围"
+                  name="projectPlanEndTimeRange"
+                >
+                  <RangePicker className="w-[240px]" />
+                </Form.Item>
+              </div>
+            )}
+          </Form>
+        </SearchBar>
+      </SectionCard>
 
       {toast && (
         <div
@@ -463,7 +477,7 @@ export default function ProjectPlansPage() {
           </Button>
         </div>
       ) : (
-        <Table<PsProjectPlan>
+        <DataTable<PsProjectPlan>
           rowKey="id"
           columns={columns}
           dataSource={plans}
@@ -471,7 +485,7 @@ export default function ProjectPlansPage() {
           size="small"
           scroll={{ x: "max-content" }}
           pagination={false}
-          locale={{ emptyText: "暂无项目计划" }}
+          emptyText="暂无项目计划"
           summary={() => (
             <Table.Summary fixed>
               <Table.Summary.Row>
@@ -520,6 +534,6 @@ export default function ProjectPlansPage() {
         planId={detail.planId}
         onClose={() => setDetail({ open: false, planId: null })}
       />
-    </div>
+    </PageContainer>
   );
 }

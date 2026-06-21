@@ -21,6 +21,7 @@ import type {
   PlanTaskUpdate,
   TaskExecute,
   TaskExecuteCreate,
+  TaskExecuteWithPlan,
   TaskExecutePageReq,
   TaskExecuteUpdate,
   WorkHour,
@@ -180,6 +181,29 @@ export async function listTaskExecutesByDateRange(
   return apiFetch<TaskExecute[]>(
     "/api/ppm/task-execute/list-by-date-range",
     { query: { start, end, execute_user_id: executeUserId } },
+  );
+}
+
+/** 按日期区间查任务执行 + 关联计划任务(看板「实际」tab,展示任务名/项目)。 */
+export async function listTaskExecutesWithPlanByDateRange(
+  start: string,
+  end: string,
+  opts?: { projectId?: string; executeUserIds?: string[] },
+): Promise<TaskExecuteWithPlan[]> {
+  const query: string[] = [
+    `start=${encodeURIComponent(start)}`,
+    `end=${encodeURIComponent(end)}`,
+  ];
+  if (opts?.projectId) {
+    query.push(`project_id=${encodeURIComponent(opts.projectId)}`);
+  }
+  if (opts?.executeUserIds) {
+    for (const uid of opts.executeUserIds) {
+      query.push(`execute_user_ids=${encodeURIComponent(uid)}`);
+    }
+  }
+  return apiFetch<TaskExecuteWithPlan[]>(
+    `/api/ppm/task-execute/list-by-date-range-with-plan?${query.join("&")}`,
   );
 }
 

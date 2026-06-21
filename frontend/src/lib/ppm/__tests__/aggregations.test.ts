@@ -98,17 +98,17 @@ describe("toBarSeries", () => {
       { name: "bob", total_hours: 5 },
       { name: "carol", total_hours: 2 },
     ];
-    const option = toBarSeries(rows, "#1677ff");
+    const option = toBarSeries(rows, CHART_COLORS.user);
     const s = seriesOf(option);
     expect(xAxisData(option)).toEqual(["alice", "bob", "carol"]);
     expect(s).toHaveLength(1);
     expect(s[0]!.type).toBe("bar");
     expect(s[0]!.data).toEqual([10, 5, 2]);
-    expect(s[0]!.itemStyle!.color).toBe("#1677ff");
+    expect(s[0]!.itemStyle!.color).toBe(CHART_COLORS.user);
   });
 
   it("空数组返回合法 option 不抛错", () => {
-    const option = toBarSeries([], "#1677ff");
+    const option = toBarSeries([], CHART_COLORS.user);
     expect(xAxisData(option)).toEqual([]);
     expect(seriesOf(option)[0]!.data).toEqual([]);
   });
@@ -118,7 +118,7 @@ describe("toBarSeries", () => {
       name: `u${i}`,
       total_hours: 1,
     }));
-    const option = toBarSeries(rows, "#1677ff");
+    const option = toBarSeries(rows, CHART_COLORS.user);
     const opt = option as unknown as OptionLike;
     expect(opt.dataZoom).toBeDefined();
     expect((opt.dataZoom as unknown[]).length).toBeGreaterThan(0);

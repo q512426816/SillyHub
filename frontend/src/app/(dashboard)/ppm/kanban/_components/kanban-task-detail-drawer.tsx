@@ -17,7 +17,7 @@
  * PlanTask.file_urls 字符串数组(对齐 task-01 设计)。
  */
 import { useCallback, useEffect, useState } from "react";
-import { Button, Checkbox, Drawer, Input, Modal, Select, Spin, Tabs, Tag, message } from "antd";
+import { Button, Checkbox, Drawer, Input, Modal, Progress, Select, Spin, Tabs, Tag, message } from "antd";
 
 import { PpmFileUrls } from "@/components/ppm-file-urls";
 import { ApiError } from "@/lib/api";
@@ -233,6 +233,32 @@ export function KanbanTaskDetailDrawer({
             <Row label="负责人">{task.user_name ?? "未分配"}</Row>
             <Row label="截止日期">{task.deadline ? fmtDay(task.deadline) : "—"}</Row>
             <Row label="预估工时">{task.estimate_hours ?? "—"}h</Row>
+            <Row label="优先级">
+              <Tag
+                color={
+                  task.priority === 1
+                    ? "red"
+                    : task.priority === 2
+                      ? "blue"
+                      : task.priority === 3
+                        ? "green"
+                        : "default"
+                }
+              >
+                {task.priority === 1
+                  ? "逾期"
+                  : task.priority === 2
+                    ? "进行中"
+                    : task.priority === 3
+                      ? "已完成"
+                      : "—"}
+              </Tag>
+            </Row>
+            <Row label="进度">
+              <Progress percent={task.progress ?? 0} size="small" />
+            </Row>
+            <Row label="创建时间">{task.create_time ? fmtDay(task.create_time) : "—"}</Row>
+            <Row label="更新时间">{task.update_time ? fmtDay(task.update_time) : "—"}</Row>
           </div>
         </section>
 

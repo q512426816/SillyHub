@@ -42,7 +42,6 @@ import {
   InputNumber,
   message,
   Select,
-  Table,
   type TableProps,
   Tag,
   Timeline,
@@ -50,6 +49,13 @@ import {
 import dayjs, { type Dayjs } from "dayjs";
 
 import { Button } from "@/components/ui/button";
+import {
+  DataTable,
+  PageContainer,
+  PageHeader,
+  SearchBar,
+  SectionCard,
+} from "@/components/layout";
 import { PpmSubTable } from "@/components/ppm-sub-table";
 import { PpmUserSelect } from "@/components/ppm-user-select";
 import { PpmFileUrls } from "@/components/ppm-file-urls";
@@ -62,6 +68,8 @@ import {
 } from "@/components/ppm-status-actions";
 import { ApiError } from "@/lib/api";
 import {
+  fmtDate,
+  fmtDateTime,
   changePlanNodeDetailProcess,
   createPlanNodeModule,
   createPsPlanNodeDetail,
@@ -380,7 +388,6 @@ export default function MilestoneDetailsPage() {
               disabled
               allowClear={false}
               placeholder="未指派"
-              style={{ width: "100%" }}
             />
           ) : (
             <span className="text-xs text-muted-foreground">{v ?? "未指派"}</span>
@@ -398,14 +405,14 @@ export default function MilestoneDetailsPage() {
         dataIndex: "plan_begin_time",
         key: "plan_begin_time",
         width: 130,
-        render: (v: string | null) => v ?? "—",
+        render: (v: string | null) => fmtDate(v),
       },
       {
         title: "计划结束",
         dataIndex: "plan_complete_time",
         key: "plan_complete_time",
         width: 130,
-        render: (v: string | null) => v ?? "—",
+        render: (v: string | null) => fmtDate(v),
       },
       {
         title: "操作",
@@ -522,93 +529,90 @@ export default function MilestoneDetailsPage() {
 
   if (!planId) {
     return (
-      <div className="mx-auto max-w-7xl px-6 py-10 text-center text-sm text-muted-foreground">
-        请从「项目计划」页选择一条计划进入里程碑明细。
-      </div>
+      <PageContainer>
+        <p className="py-10 text-center text-sm text-muted-foreground">
+          请从「项目计划」页选择一条计划进入里程碑明细。
+        </p>
+      </PageContainer>
     );
   }
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-5 px-6 py-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="mt-0.5">里程碑明细</h1>
-          <p className="text-xs text-muted-foreground">
+    <PageContainer>
+      <PageHeader
+        title="里程碑明细"
+        subtitle={
+          <>
             计划 {planId}
             {projectId ? ` · 项目 ${projectId}` : ""} · 实施阶段三级(里程碑→模块→明细),其他阶段二级
             {readOnly && " · 只读模式(非项目经理)"}
-          </p>
-        </div>
-        <div className="flex gap-2">
+          </>
+        }
+        actions={
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={exporting}
+              onClick={() => void handleExport()}
+            >
+              {exporting ? "导出中…" : "导出"}
+            </Button>
+            <Button
+              size="sm"
+              disabled={readOnly}
+              title={readOnly ? "只读模式(非项目经理)" : undefined}
+              onClick={() => setMasterDrawer({ open: true, mode: "create" })}
+            >
+              + 新建里程碑
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => void reload()}>
+              刷新
+            </Button>
+          </>
+        }
+      />
+
+      {/* plan 内前端过滤(后端无对应过滤参数) */}
+      <SectionCard>
+        <SearchBar>
+          <Input
+            allowClear
+            className="w-[200px]"
+            placeholder="总体阶段"
+            value={overallStageFilter}
+            onChange={(e) => setOverallStageFilter(e.target.value)}
+          />
+          <Input
+            allowClear
+            className="w-[200px]"
+            placeholder="明细阶段"
+            value={detailedStageFilter}
+            onChange={(e) => setDetailedStageFilter(e.target.value)}
+          />
+          <Input
+            allowClear
+            className="w-[220px]"
+            placeholder="任务主题"
+            value={taskThemeFilter}
+            onChange={(e) => setTaskThemeFilter(e.target.value)}
+          />
           <Button
             size="sm"
             variant="outline"
-            disabled={exporting}
-            onClick={() => void handleExport()}
+            onClick={() => {
+              setOverallStageFilter("");
+              setDetailedStageFilter("");
+              setTaskThemeFilter("");
+            }}
           >
-            {exporting ? "导出中…" : "导出"}
+            清除
           </Button>
-          <Button
-            size="sm"
-            disabled={readOnly}
-            title={readOnly ? "只读模式(非项目经理)" : undefined}
-            onClick={() => setMasterDrawer({ open: true, mode: "create" })}
-          >
-            + 新建里程碑
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => void reload()}>
-            刷新
-          </Button>
-        </div>
-      </header>
-
-      {/* plan 内前端过滤(后端无对应过滤参数) */}
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 8,
-          alignItems: "center",
-        }}
-      >
-        <Input
-          allowClear
-          style={{ width: 200 }}
-          placeholder="总体阶段"
-          value={overallStageFilter}
-          onChange={(e) => setOverallStageFilter(e.target.value)}
-        />
-        <Input
-          allowClear
-          style={{ width: 200 }}
-          placeholder="明细阶段"
-          value={detailedStageFilter}
-          onChange={(e) => setDetailedStageFilter(e.target.value)}
-        />
-        <Input
-          allowClear
-          style={{ width: 220 }}
-          placeholder="任务主题"
-          value={taskThemeFilter}
-          onChange={(e) => setTaskThemeFilter(e.target.value)}
-        />
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            setOverallStageFilter("");
-            setDetailedStageFilter("");
-            setTaskThemeFilter("");
-          }}
-        >
-          清除
-        </Button>
-        <span
-          style={{ marginLeft: "auto", fontSize: 12, color: "rgba(0,0,0,0.45)" }}
-        >
-          注:明细阶段/任务主题过滤在展开明细行内生效
-        </span>
-      </div>
+          <span className="ml-auto text-xs text-muted-foreground">
+            注:明细阶段/任务主题过滤在展开明细行内生效
+          </span>
+        </SearchBar>
+      </SectionCard>
 
       {toast && (
         <div
@@ -665,7 +669,7 @@ export default function MilestoneDetailsPage() {
           void reload();
         }}
       />
-    </div>
+    </PageContainer>
   );
 }
 
@@ -792,7 +796,6 @@ function ModuleLevelTable({
               disabled
               allowClear={false}
               placeholder="未指派"
-              style={{ width: "100%" }}
             />
           ) : (
             <span className="text-xs text-muted-foreground">
@@ -812,14 +815,14 @@ function ModuleLevelTable({
         dataIndex: "plan_begin_time",
         key: "plan_begin_time",
         width: 130,
-        render: (v: string | null) => v ?? "—",
+        render: (v: string | null) => fmtDate(v),
       },
       {
         title: "计划结束",
         dataIndex: "plan_complete_time",
         key: "plan_complete_time",
         width: 130,
-        render: (v: string | null) => v ?? "—",
+        render: (v: string | null) => fmtDate(v),
       },
       {
         title: "操作",
@@ -1020,13 +1023,13 @@ function ModuleFormDrawer({
             step={0.5}
             precision={1}
             min={0}
-            style={{ width: "100%" }}
+            className="w-full"
           />
         </Form.Item>
         <div className="grid grid-cols-2 gap-3">
           <Form.Item label="计划开始时间">
             <DatePicker
-              style={{ width: "100%" }}
+              className="w-full"
               format="YYYY-MM-DD"
               value={toDay(form.getFieldValue("plan_begin_time"))}
               onChange={(d) =>
@@ -1036,7 +1039,7 @@ function ModuleFormDrawer({
           </Form.Item>
           <Form.Item label="计划完成时间">
             <DatePicker
-              style={{ width: "100%" }}
+              className="w-full"
               format="YYYY-MM-DD"
               value={toDay(form.getFieldValue("plan_complete_time"))}
               onChange={(d) =>
@@ -1052,7 +1055,6 @@ function ModuleFormDrawer({
               searchData={{ pm_project_id: projectId }}
               allowClear
               placeholder="选择责任人(项目成员)"
-              style={{ width: "100%" }}
             />
           ) : (
             <Input placeholder="需要先选择项目" disabled />
@@ -1288,7 +1290,7 @@ function DetailLevelTable({
           {error}
         </div>
       ) : (
-        <Table<PsPlanNodeDetail>
+        <DataTable<PsPlanNodeDetail>
           rowKey="id"
           columns={columns}
           dataSource={visibleDetails}
@@ -1296,7 +1298,7 @@ function DetailLevelTable({
           size="small"
           pagination={false}
           scroll={{ x: "max-content" }}
-          locale={{ emptyText: moduleId ? "该模块暂无明细" : "暂无明细" }}
+          emptyText={moduleId ? "该模块暂无明细" : "暂无明细"}
         />
       )}
     </div>
@@ -1369,6 +1371,30 @@ function DetailDrawer({
   ) => void;
 }) {
   const [form] = Form.useForm<FormVals>();
+
+  // 所属模块下拉选项:按 planNodeId 自取当前里程碑下的模块列表(plan_node_module)。
+  // DetailDrawer 在主组件渲染、模块数据在 ModuleLevelTable 子组件,跨层级透传别扭,
+  // 故明细抽屉按自身 planNodeId 直接拉取,自包含且选项始终与当前里程碑一致。
+  const [modules, setModules] = useState<PlanNodeModule[]>([]);
+  useEffect(() => {
+    if (!planNodeId) {
+      setModules([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const list = await listPlanNodeModules(planNodeId);
+        if (!cancelled) setModules(list);
+      } catch {
+        // 模块列表加载失败不阻塞,降级为空下拉
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [planNodeId]);
+
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [logs, setLogs] = useState<PsPlanNodeDetailProcess[]>([]);
@@ -1712,7 +1738,7 @@ function DetailDrawer({
                 step={0.5}
                 precision={1}
                 min={0}
-                style={{ width: "100%" }}
+                className="w-full"
               />
             </Form.Item>
           </div>
@@ -1720,7 +1746,7 @@ function DetailDrawer({
             <Form.Item label="计划开始时间">
               <DatePicker
                 disabled={!baseEditable}
-                style={{ width: "100%" }}
+                className="w-full"
                 format="YYYY-MM-DD"
                 value={toDay(form.getFieldValue("plan_begin_time"))}
                 onChange={(d) => {
@@ -1733,7 +1759,7 @@ function DetailDrawer({
             <Form.Item label="计划完成时间">
               <DatePicker
                 disabled={!baseEditable}
-                style={{ width: "100%" }}
+                className="w-full"
                 format="YYYY-MM-DD"
                 value={toDay(form.getFieldValue("plan_complete_time"))}
                 onChange={(d) =>
@@ -1744,11 +1770,24 @@ function DetailDrawer({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Form.Item
-              label="所属模块 ID"
+              label="所属模块"
               name="module_id"
-              tooltip="实施阶段三级用,其他阶段可空"
+              tooltip="实施阶段三级用,其他阶段可空;选项来自当前里程碑的模块列表"
             >
-              <Input disabled={!baseEditable} placeholder="可空" />
+              <Select
+                disabled={!baseEditable}
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                placeholder="选择所属模块(可空)"
+                notFoundContent={
+                  modules.length === 0 ? "该里程碑暂无模块" : undefined
+                }
+                options={modules.map((m) => ({
+                  value: m.id,
+                  label: m.module_name ?? m.id,
+                }))}
+              />
             </Form.Item>
             <Form.Item label="执行人" name="execute_user_id">
               {projectId ? (
@@ -2009,7 +2048,7 @@ function DetailDrawer({
                     <div className="text-muted-foreground">{l.handle_info}</div>
                   )}
                   <div className="text-[10px] text-muted-foreground">
-                    {l.handle_date ?? l.created_at}
+                    {fmtDateTime(l.handle_date ?? l.created_at)}
                     {l.next_user_name
                       ? ` → 下一处理人:${l.next_user_name}`
                       : null}
@@ -2202,7 +2241,7 @@ function PsPlanNodeDrawer({
               step={0.5}
               precision={1}
               min={0}
-              style={{ width: "100%" }}
+              className="w-full"
             />
           </Form.Item>
         </div>
@@ -2213,7 +2252,7 @@ function PsPlanNodeDrawer({
             rules={[{ required: true, message: "请选择计划开始时间" }]}
           >
             <DatePicker
-              style={{ width: "100%" }}
+              className="w-full"
               format="YYYY-MM-DD"
               value={toDay(form.getFieldValue("plan_begin_time"))}
               onChange={(d) =>
@@ -2227,7 +2266,7 @@ function PsPlanNodeDrawer({
             rules={[{ required: true, message: "请选择计划完成时间" }]}
           >
             <DatePicker
-              style={{ width: "100%" }}
+              className="w-full"
               format="YYYY-MM-DD"
               value={toDay(form.getFieldValue("plan_complete_time"))}
               onChange={(d) =>

@@ -114,10 +114,43 @@ export function taskDateKey(task: KanbanTaskCard): DateKey | null {
   if (!raw) return null;
   const d = new Date(raw);
   if (Number.isNaN(d.getTime())) return null;
+  return formatDateKey(d);
+}
+
+/** Date → YYYY-MM-DD(本地时区)。 */
+function formatDateKey(d: Date): DateKey {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+/**
+ * 取任务的"归属日期"集合(跨天连续):start_time~deadline 区间每一天(YYYY-MM-DD)。
+ * - 无 deadline(end_time):返回 [](不进矩阵)
+ * - 有 deadline 无 start_time:返回 [deadline] 单日(兼容旧行为)
+ * - 有 start_time+deadline:start~deadline 每一天(限 366 天防异常长区间)
+ */
+export function taskDateKeys(task: KanbanTaskCard): DateKey[] {
+  const endRaw = task.deadline;
+  if (!endRaw) return [];
+  const end = new Date(endRaw);
+  if (Number.isNaN(end.getTime())) return [];
+  const endKey = formatDateKey(end);
+  if (!task.start_time) return [endKey];
+  const start = new Date(task.start_time);
+  if (Number.isNaN(start.getTime())) return [endKey];
+  const cur = startOfDay(start);
+  const last = startOfDay(end);
+  if (last < cur) return [endKey]; // start>end 异常,退化为截止日
+  const keys: DateKey[] = [];
+  let guard = 0;
+  while (cur <= last && guard < 366) {
+    keys.push(formatDateKey(cur));
+    cur.setDate(cur.getDate() + 1);
+    guard += 1;
+  }
+  return keys.length > 0 ? keys : [endKey];
 }
 
 /** 生成 [start, end] 闭区间的连续自然日列表(YYYY-MM-DD)。 */
@@ -154,7 +187,8 @@ export function weekdayMeta(dateKey: DateKey): {
 /**
  * 把全员任务按 (user_id × date) 分组成二维矩阵。
  * - user_ids 决定行顺序;行内每个 date 一个 cell(空 cell 也返回,长度=dates.length)
- * - 没有 deadline / 不在 dates 范围内的任务 → 不进矩阵(由 SearchBar 日期筛选保证)
+ * - 任务按 start_time~deadline 跨天连续落 cell:区间内每一天都进对应 cell
+ *   (仅选中 dates 范围内的天有 cell,范围外的天跳过);无 deadline 不进矩阵
  * - cell.tasks 按 kanban_order 升序
  */
 export function groupByUserAndDate(
@@ -171,18 +205,65 @@ export function groupByUserAndDate(
   for (const t of tasks) {
     const uid = t.user_id;
     if (!uid) continue;
-    const dk = taskDateKey(t);
-    if (!dk) continue;
     const row = matrix.get(uid);
     if (!row) continue;
-    const cell = row.get(dk);
-    if (!cell) continue; // 不在选中日期范围
-    cell.push(t);
+    // 跨天连续:任务在 start_time~deadline 区间的每一天都落 cell(范围外的 dk 无 cell 自动跳过)
+    for (const dk of taskDateKeys(t)) {
+      const cell = row.get(dk);
+      if (cell) cell.push(t);
+    }
   }
   for (const row of matrix.values()) {
     for (const arr of row.values()) {
       arr.sort((a, b) => a.kanban_order - b.kanban_order);
     }
+  }
+  return matrix;
+}
+
+// ===========================================================================
+// 实际工作表专用:任务执行(TaskExecute)按 actual_start_time 单点落 cell
+// ===========================================================================
+
+/** 取任务执行的归属日期(actual_start_time 单点,YYYY-MM-DD;不跨天,对齐源 WorkCard)。 */
+export function executeDateKey(execute: {
+  actual_start_time: string | null;
+}): DateKey | null {
+  if (!execute.actual_start_time) return null;
+  const d = new Date(execute.actual_start_time);
+  if (Number.isNaN(d.getTime())) return null;
+  return formatDateKey(d);
+}
+
+/**
+ * 把任务执行按 (execute_user_id × date) 分组成二维矩阵(团队实际工作表)。
+ * - execute 按 actual_start_time 单点落 cell(不跨天)
+ * - 无 actual_start_time / 不在 dates 范围的不进矩阵
+ * - cell 顺序按 execute 原序(调用方可再排)
+ */
+export function groupByUserAndExecuteDate<T extends {
+  execute_user_id: string | null;
+  actual_start_time: string | null;
+}>(
+  executes: T[],
+  user_ids: string[],
+  dates: DateKey[],
+): Map<string, Map<DateKey, T[]>> {
+  const matrix = new Map<string, Map<DateKey, T[]>>();
+  for (const uid of user_ids) {
+    const row = new Map<DateKey, T[]>();
+    for (const dk of dates) row.set(dk, []);
+    matrix.set(uid, row);
+  }
+  for (const e of executes) {
+    const uid = e.execute_user_id;
+    if (!uid) continue;
+    const row = matrix.get(uid);
+    if (!row) continue;
+    const dk = executeDateKey(e);
+    if (!dk) continue;
+    const cell = row.get(dk);
+    if (cell) cell.push(e);
   }
   return matrix;
 }

@@ -15,11 +15,19 @@
  *       components/ppm-user-select (成员选择) + components/charts。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { message, Table, Tabs, type TableProps } from "antd";
+import { message, Tabs, type TableProps } from "antd";
 
 import { Button } from "@/components/ui/button";
+import {
+  DataTable,
+  PageContainer,
+  PageHeader,
+  SearchBar,
+  SectionCard,
+} from "@/components/layout";
 import { PpmUserSelect, type PpmSelectOption } from "@/components/ppm-user-select";
 import { WorkHourBarChart, WorkHourPieChart } from "@/components/charts";
+import { tokens } from "@/styles/tokens";
 import { ApiError } from "@/lib/api";
 import {
   listWorkHours,
@@ -259,97 +267,96 @@ export default function WorkHourStatisticsPage() {
   ];
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-5 px-6 py-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="mt-0.5">工时统计</h1>
-          <p className="text-xs text-muted-foreground">
-            按成员 / 按项目选择具体对象 + 时间段,查看工时明细
-          </p>
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            window.location.href = "/ppm/work-hours";
-          }}
-        >
-          ← 返回工时录入
-        </Button>
-      </header>
+    <PageContainer>
+      <PageHeader
+        title="工时统计"
+        subtitle="按成员 / 按项目选择具体对象 + 时间段,查看工时明细"
+        actions={
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              window.location.href = "/ppm/work-hours";
+            }}
+          >
+            ← 返回工时录入
+          </Button>
+        }
+      />
 
       <Toast toast={toast} />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <select
-          value={dimension}
-          onChange={(e) => setDimension(e.target.value as Dimension)}
-          className={`w-32 ${inputCls}`}
-          aria-label="统计维度"
-        >
-          <option value="user">按成员</option>
-          <option value="project">按项目</option>
-        </select>
-        {dimension === "user" ? (
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-muted-foreground">成员</span>
-            <PpmUserSelect
-              res="user"
-              value={userId || null}
-              onChange={(v) => setUserId((v as string | null) ?? "")}
-              placeholder="请选择成员"
-              allowClear
-              style={{ width: 200 }}
-              onLoadedOptions={setUserOptions}
-            />
-          </div>
-        ) : (
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-muted-foreground">项目</span>
-            <select
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
-              className={`w-56 ${inputCls}`}
-              aria-label="项目选择"
-            >
-              <option value="">请选择项目</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.project_name ?? p.id}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        <input
-          type="date"
-          value={startDate}
-          onChange={(e) => setStartDate(e.target.value)}
-          className={`${inputCls} w-40`}
-          aria-label="开始日期"
-        />
-        <span className="text-xs text-muted-foreground">至</span>
-        <input
-          type="date"
-          value={endDate}
-          onChange={(e) => setEndDate(e.target.value)}
-          className={`${inputCls} w-40`}
-          aria-label="结束日期"
-        />
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            setStartDate("");
-            setEndDate("");
-          }}
-        >
-          清除范围
-        </Button>
-        <span className="ml-auto text-xs text-muted-foreground">
-          合计 {(totalHours ?? 0).toFixed(1)}h · 明细 {details.length} 条
-        </span>
-      </div>
+      <SectionCard>
+        <SearchBar>
+          <select
+            value={dimension}
+            onChange={(e) => setDimension(e.target.value as Dimension)}
+            className={`w-32 ${inputCls}`}
+            aria-label="统计维度"
+          >
+            <option value="user">按成员</option>
+            <option value="project">按项目</option>
+          </select>
+          {dimension === "user" ? (
+            <div className="flex w-[200px] items-center gap-1">
+              <span className="text-xs text-muted-foreground">成员</span>
+              <PpmUserSelect
+                res="user"
+                value={userId || null}
+                onChange={(v) => setUserId((v as string | null) ?? "")}
+                placeholder="请选择成员"
+                allowClear
+                onLoadedOptions={setUserOptions}
+              />
+            </div>
+          ) : (
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-muted-foreground">项目</span>
+              <select
+                value={projectId}
+                onChange={(e) => setProjectId(e.target.value)}
+                className={`w-56 ${inputCls}`}
+                aria-label="项目选择"
+              >
+                <option value="">请选择项目</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.project_name ?? p.id}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            className={`${inputCls} w-40`}
+            aria-label="开始日期"
+          />
+          <span className="text-xs text-muted-foreground">至</span>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            className={`${inputCls} w-40`}
+            aria-label="结束日期"
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setStartDate("");
+              setEndDate("");
+            }}
+          >
+            清除范围
+          </Button>
+          <span className="ml-auto text-xs text-muted-foreground">
+            合计 {(totalHours ?? 0).toFixed(1)}h · 明细 {details.length} 条
+          </span>
+        </SearchBar>
+      </SectionCard>
 
       {!objectSelected ? (
         <div className="rounded border bg-muted/20 px-3 py-10 text-center text-xs text-muted-foreground">
@@ -382,32 +389,38 @@ export default function WorkHourStatisticsPage() {
                   </div>
                 ) : (
                   <div className="flex flex-col gap-4">
-                    <Table<Row>
+                    <DataTable<Row>
                       rowKey="key"
                       columns={columns}
                       dataSource={rows}
                       loading={loading}
                       size="small"
                       pagination={{ pageSize: 50, showSizeChanger: false }}
-                      locale={{ emptyText: "暂无数据" }}
+                      emptyText="暂无数据"
                     />
                     <div className="grid gap-4 lg:grid-cols-2">
-                      <div className="rounded border bg-card p-4">
-                        <h3 className="mb-2 text-sm font-semibold">
-                          {dimension === "user" ? "用户工时分布" : "项目工时分布"}
-                        </h3>
+                      <SectionCard
+                        title={
+                          dimension === "user" ? "用户工时分布" : "项目工时分布"
+                        }
+                      >
                         <WorkHourBarChart
                           rows={rows}
-                          color={dimension === "user" ? "#1677ff" : "#52c41a"}
+                          color={
+                            dimension === "user"
+                              ? tokens.color.blue[600]
+                              : tokens.color.emerald
+                          }
                           loading={loading}
                         />
-                      </div>
-                      <div className="rounded border bg-card p-4">
-                        <h3 className="mb-2 text-sm font-semibold">
-                          {dimension === "user" ? "用户工时占比" : "项目工时占比"}
-                        </h3>
+                      </SectionCard>
+                      <SectionCard
+                        title={
+                          dimension === "user" ? "用户工时占比" : "项目工时占比"
+                        }
+                      >
                         <WorkHourPieChart rows={rows} totalHours={totalHours} />
-                      </div>
+                      </SectionCard>
                     </div>
                   </div>
                 ),
@@ -416,7 +429,7 @@ export default function WorkHourStatisticsPage() {
               key: "detail",
               label: `明细记录 (${details.length})`,
               children: (
-                <Table<WorkHour>
+                <DataTable<WorkHour>
                   rowKey="id"
                   columns={detailColumns}
                   dataSource={details}
@@ -424,14 +437,14 @@ export default function WorkHourStatisticsPage() {
                   size="small"
                   scroll={{ x: "max-content" }}
                   pagination={{ pageSize: 50, showSizeChanger: false }}
-                  locale={{ emptyText: "该对象在所选范围内暂无工时明细" }}
+                  emptyText="该对象在所选范围内暂无工时明细"
                 />
               ),
             },
           ]}
         />
       )}
-    </div>
+    </PageContainer>
   );
 }
 

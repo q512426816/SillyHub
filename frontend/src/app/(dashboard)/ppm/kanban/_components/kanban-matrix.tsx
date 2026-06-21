@@ -31,6 +31,7 @@ import {
   weekdayMeta,
   type DateKey,
 } from "@/lib/ppm/kanban-grouping";
+import { tokens } from "@/styles";
 
 export interface KanbanMatrixProps {
   users: KanbanUserColumn[];
@@ -47,18 +48,7 @@ export interface KanbanMatrixProps {
   projectColorMap: Map<string, string>;
 }
 
-const PALETTE = [
-  "#1677ff",
-  "#52c41a",
-  "#faad14",
-  "#eb2f96",
-  "#722ed1",
-  "#13c2c2",
-  "#fa8c16",
-  "#f5222d",
-];
-
-/** 计算人员在该范围内的总预估工时(从 tasks 累加)。 */
+/** 计算人员在该范围内的总预估工时(从 tasks 累加,round 1 位小数避免浮点精度)。 */
 function userTotalHours(
   userId: string,
   tasks: KanbanTaskCard[],
@@ -67,13 +57,14 @@ function userTotalHours(
   for (const t of tasks) {
     if (t.user_id === userId) sum += t.estimate_hours ?? 0;
   }
-  return sum;
+  return Math.round(sum * 10) / 10;
 }
 
+/** 饱和度色(任务-09):走 tokens 语义色,error/warning/success 三档。 */
 function saturationColor(v: number): string {
-  if (v >= 80) return "#f5222d";
-  if (v >= 60) return "#faad14";
-  return "#52c41a";
+  if (v >= 80) return tokens.color.semantic.error.color;
+  if (v >= 60) return tokens.color.semantic.warning.color;
+  return tokens.color.semantic.success.color;
 }
 
 const COL_WIDTH = 168; // 日期列宽 px(留出多卡空间)
@@ -147,9 +138,9 @@ export function KanbanMatrix({
                     style={{
                       width: COL_WIDTH,
                       minWidth: COL_WIDTH,
-                      // 周六日表头标绿(对齐源项目)
+                      // 周六日表头标绿(emerald token 派生半透明)
                       backgroundColor: meta.isWeekend
-                        ? "rgba(82, 196, 26, 0.12)"
+                        ? `color-mix(in srgb, ${tokens.color.emerald} 12%, transparent)`
                         : undefined,
                     }}
                   >
@@ -243,9 +234,9 @@ export function KanbanMatrix({
                           width: COL_WIDTH,
                           minWidth: COL_WIDTH,
                           backgroundColor: meta.isWeekend
-                            ? "rgba(82, 196, 26, 0.05)"
+                            ? `color-mix(in srgb, ${tokens.color.emerald} 5%, transparent)`
                             : cellTasks.length === 0
-                              ? "rgba(0,0,0,0.015)"
+                              ? `color-mix(in srgb, ${tokens.color.slate[500]} 1.5%, transparent)`
                               : undefined,
                         }}
                       >
@@ -262,8 +253,8 @@ export function KanbanMatrix({
                                 color={
                                   t.project_id
                                     ? (projectColorMap.get(t.project_id) ??
-                                      "#8c8c8c")
-                                    : "#8c8c8c"
+                                      tokens.color.slate[400])
+                                    : tokens.color.slate[400]
                                 }
                                 onTaskClick={onTaskClick}
                                 onTaskContextMenu={onTaskContextMenu}

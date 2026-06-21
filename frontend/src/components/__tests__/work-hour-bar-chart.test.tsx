@@ -36,7 +36,7 @@ describe("WorkHourBarChart", () => {
     const { container } = render(
       <WorkHourBarChart
         rows={[{ name: "a", total_hours: 1 }]}
-        color="#52c41a"
+        color="#10b981"
         height={200}
       />,
     );

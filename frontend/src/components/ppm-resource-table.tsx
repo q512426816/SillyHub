@@ -14,9 +14,16 @@
  * 复用样板:frontend/src/app/(dashboard)/admin/users/page.tsx
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Table, Tag, type TableProps } from "antd";
+import { Tag, type TableProps } from "antd";
 
 import { Button } from "@/components/ui/button";
+import {
+  DataTable,
+  PageContainer,
+  PageHeader,
+  SearchBar,
+  SectionCard,
+} from "@/components/layout";
 import { ApiError } from "@/lib/api";
 
 // ── 字段配置 ────────────────────────────────────────────────────────────
@@ -183,6 +190,8 @@ export interface PpmPageResp<T> {
   page_size?: number;
 }
 
+// 输入框样式走 shadcn 语义类(border-input/bg-background 基于 CSS 变量,
+// 对齐 D-006@v1 边界,task-09 §ppm-resource-table)。非硬编码 hex。
 const inputCls =
   "h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none";
 const textareaCls =
@@ -442,7 +451,7 @@ export function PpmResourceTable<
           {extraActions?.(row)}
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             disabled={!canWrite}
             onClick={() => setDrawer({ open: true, mode: "edit", row })}
           >
@@ -471,35 +480,33 @@ export function PpmResourceTable<
   }, [rows, page, pageSize, serverSidePagination]);
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-5 px-6 py-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="mt-0.5">{title}</h1>
-          {subtitle && (
-            <p className="text-xs text-muted-foreground">{subtitle}</p>
-          )}
-        </div>
-        <div className="flex gap-2">
-          {exportFn && (
+    <PageContainer>
+      <PageHeader
+        title={title}
+        subtitle={subtitle}
+        actions={
+          <>
+            {exportFn && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={exporting}
+                onClick={() => void handleExport()}
+                title={exportFilename}
+              >
+                {exporting ? "导出中…" : "导出"}
+              </Button>
+            )}
             <Button
               size="sm"
-              variant="outline"
-              disabled={exporting}
-              onClick={() => void handleExport()}
-              title={exportFilename}
+              disabled={!canWrite}
+              onClick={() => setDrawer({ open: true, mode: "create" })}
             >
-              {exporting ? "导出中…" : "导出"}
+              + 新增{entityLabel}
             </Button>
-          )}
-          <Button
-            size="sm"
-            disabled={!canWrite}
-            onClick={() => setDrawer({ open: true, mode: "create" })}
-          >
-            + 新增{entityLabel}
-          </Button>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       {toast && (
         <div
@@ -528,39 +535,41 @@ export function PpmResourceTable<
       ) : (
         <>
           {searchFields.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2">
-              {searchFields.map((f) => (
-                <input
-                  key={f.name as string}
-                  value={searchInput[f.name as string] ?? ""}
-                  onChange={(e) =>
-                    handleSearchInput(f.name as string, e.target.value)
-                  }
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      if (debounceRef.current) clearTimeout(debounceRef.current);
-                      setSearchCommitted((prev) => ({
-                        ...prev,
-                        [f.name as string]: searchInput[f.name as string] ?? "",
-                      }));
-                      setPage(1);
+            <SectionCard>
+              <SearchBar>
+                {searchFields.map((f) => (
+                  <input
+                    key={f.name as string}
+                    value={searchInput[f.name as string] ?? ""}
+                    onChange={(e) =>
+                      handleSearchInput(f.name as string, e.target.value)
                     }
-                  }}
-                  placeholder={f.placeholder ?? `搜索${f.label}…`}
-                  className={`w-56 ${inputCls}`}
-                  aria-label={f.label}
-                />
-              ))}
-              <Button size="sm" variant="outline" onClick={handleReset}>
-                重置
-              </Button>
-              <span className="ml-auto text-xs text-muted-foreground">
-                共 {total} 条
-              </span>
-            </div>
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        if (debounceRef.current) clearTimeout(debounceRef.current);
+                        setSearchCommitted((prev) => ({
+                          ...prev,
+                          [f.name as string]: searchInput[f.name as string] ?? "",
+                        }));
+                        setPage(1);
+                      }
+                    }}
+                    placeholder={f.placeholder ?? `搜索${f.label}…`}
+                    className={`w-56 ${inputCls}`}
+                    aria-label={f.label}
+                  />
+                ))}
+                <Button size="sm" variant="outline" onClick={handleReset}>
+                  重置
+                </Button>
+                <span className="ml-auto text-xs text-muted-foreground">
+                  共 {total} 条
+                </span>
+              </SearchBar>
+            </SectionCard>
           )}
 
-          <Table<T>
+          <DataTable<T>
             rowKey={(row: T) => getRowId(row)}
             columns={columns}
             dataSource={pagedRows}
@@ -585,7 +594,7 @@ export function PpmResourceTable<
                 setPageSize(s);
               },
             }}
-            locale={{ emptyText: `暂无${entityLabel}` }}
+            emptyText={`暂无${entityLabel}`}
           />
         </>
       )}
@@ -611,7 +620,7 @@ export function PpmResourceTable<
           onConfirm={() => void handleConfirmDelete()}
         />
       )}
-    </div>
+    </PageContainer>
   );
 }
 

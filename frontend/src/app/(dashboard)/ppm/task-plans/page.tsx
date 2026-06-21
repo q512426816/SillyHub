@@ -12,10 +12,17 @@
  * 依赖:lib/ppm/task (API) + lib/ppm/project (项目下拉) + stores/session。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { DatePicker, Input, message, Select, Table, type TableProps, Tag } from "antd";
+import { DatePicker, Input, message, Select, type TableProps, Tag } from "antd";
 import type { Dayjs } from "dayjs";
 
 import { Button } from "@/components/ui/button";
+import {
+  DataTable,
+  PageContainer,
+  PageHeader,
+  SearchBar,
+  SectionCard,
+} from "@/components/layout";
 import {
   PpmUserSelect,
   type PpmSelectOption,
@@ -331,7 +338,7 @@ export default function TaskPlansPage() {
             <div className="flex justify-end gap-1">
               <Button
                 size="sm"
-                variant="outline"
+                variant="ghost"
                 onClick={() =>
                   setExecute({
                     task: t,
@@ -345,7 +352,7 @@ export default function TaskPlansPage() {
               </Button>
               <Button
                 size="sm"
-                variant="outline"
+                variant="ghost"
                 disabled={!canEdit}
                 title={
                   canEdit
@@ -376,40 +383,38 @@ export default function TaskPlansPage() {
   );
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-5 px-6 py-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="mt-0.5">任务计划</h1>
-          <p className="text-xs text-muted-foreground">
-            任务计划制定 / 执行推进 / 工时预估
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <select
-            value={view}
-            onChange={(e) => {
-              setView(e.target.value as ViewMode);
-              setPage(1);
-            }}
-            className={`w-32 ${inputCls}`}
-            aria-label="视图切换"
-          >
-            <option value="all">全部任务</option>
-            <option value="personal">我的任务</option>
-          </select>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={exporting}
-            onClick={() => void handleExport()}
-          >
-            {exporting ? "导出中…" : "导出"}
-          </Button>
-          <Button size="sm" onClick={() => setDrawer({ open: true, mode: "create" })}>
-            + 新建任务
-          </Button>
-        </div>
-      </header>
+    <PageContainer>
+      <PageHeader
+        title="任务计划"
+        subtitle="任务计划制定 / 执行推进 / 工时预估"
+        actions={
+          <>
+            <select
+              value={view}
+              onChange={(e) => {
+                setView(e.target.value as ViewMode);
+                setPage(1);
+              }}
+              className={`w-32 ${inputCls}`}
+              aria-label="视图切换"
+            >
+              <option value="all">全部任务</option>
+              <option value="personal">我的任务</option>
+            </select>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={exporting}
+              onClick={() => void handleExport()}
+            >
+              {exporting ? "导出中…" : "导出"}
+            </Button>
+            <Button size="sm" onClick={() => setDrawer({ open: true, mode: "create" })}>
+              + 新建任务
+            </Button>
+          </>
+        }
+      />
 
       <Toast toast={toast} />
 
@@ -433,81 +438,83 @@ export default function TaskPlansPage() {
         </div>
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-2">
-            <Select<string[]>
-              mode="multiple"
-              allowClear
-              style={{ minWidth: 180 }}
-              placeholder="状态(可多选)"
-              value={statusFilterList}
-              onChange={(v) => {
-                setStatusFilterList(v as string[]);
-                setPage(1);
-              }}
-              options={STATUS_CODE_OPTIONS}
-            />
-            <input
-              type="month"
-              value={monthFilter}
-              onChange={(e) => {
-                setMonthFilter(e.target.value);
-                setPage(1);
-              }}
-              className={`${inputCls} w-40`}
-              aria-label="月份筛选"
-            />
-            <select
-              value={projectFilter}
-              onChange={(e) => {
-                setProjectFilter(e.target.value);
-                setPage(1);
-              }}
-              className={`w-48 ${inputCls}`}
-              aria-label="项目筛选"
-            >
-              <option value="">全部项目</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.project_name ?? p.id}
-                </option>
-              ))}
-            </select>
-            <div className={`${inputCls} flex h-8 w-48 items-center px-1`}>
-              <PpmUserSelect
-                res="user"
+          <SectionCard>
+            <SearchBar>
+              <Select<string[]>
+                mode="multiple"
                 allowClear
-                placeholder="负责人"
-                value={userFilter}
+                className="min-w-[180px]"
+                placeholder="状态(可多选)"
+                value={statusFilterList}
                 onChange={(v) => {
-                  setUserFilter((v as string | null) ?? null);
+                  setStatusFilterList(v as string[]);
                   setPage(1);
                 }}
+                options={STATUS_CODE_OPTIONS}
               />
-            </div>
-            <RangePicker
-              size="middle"
-              value={dateRange as [Dayjs, Dayjs] | null}
-              onChange={(v) =>
-                setDateRange(v as [Dayjs | null, Dayjs | null] | null)
-              }
-              placeholder={["开始", "结束"]}
-            />
-            <Input
-              allowClear
-              style={{ width: 140 }}
-              placeholder="配合人员"
-              value={workPartnerFilter}
-              onChange={(e) => setWorkPartnerFilter(e.target.value)}
-            />
-            <Button size="sm" variant="outline" onClick={resetFilters}>
-              清除筛选
-            </Button>
-            <span className="ml-auto text-xs text-muted-foreground">
-              共 {visibleRows.length} 条 / 总 {total}
-            </span>
-          </div>
+              <input
+                type="month"
+                value={monthFilter}
+                onChange={(e) => {
+                  setMonthFilter(e.target.value);
+                  setPage(1);
+                }}
+                className={`${inputCls} w-40`}
+                aria-label="月份筛选"
+              />
+              <select
+                value={projectFilter}
+                onChange={(e) => {
+                  setProjectFilter(e.target.value);
+                  setPage(1);
+                }}
+                className={`w-48 ${inputCls}`}
+                aria-label="项目筛选"
+              >
+                <option value="">全部项目</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.project_name ?? p.id}
+                  </option>
+                ))}
+              </select>
+              <div className={`${inputCls} flex h-8 w-48 items-center px-1`}>
+                <PpmUserSelect
+                  res="user"
+                  allowClear
+                  placeholder="负责人"
+                  value={userFilter}
+                  onChange={(v) => {
+                    setUserFilter((v as string | null) ?? null);
+                    setPage(1);
+                  }}
+                />
+              </div>
+              <RangePicker
+                size="middle"
+                value={dateRange as [Dayjs, Dayjs] | null}
+                onChange={(v) =>
+                  setDateRange(v as [Dayjs | null, Dayjs | null] | null)
+                }
+                placeholder={["开始", "结束"]}
+              />
+              <Input
+                allowClear
+                className="w-[140px]"
+                placeholder="配合人员"
+                value={workPartnerFilter}
+                onChange={(e) => setWorkPartnerFilter(e.target.value)}
+              />
+              <Button size="sm" variant="outline" onClick={resetFilters}>
+                清除筛选
+              </Button>
+              <span className="ml-auto text-xs text-muted-foreground">
+                共 {visibleRows.length} 条 / 总 {total}
+              </span>
+            </SearchBar>
+          </SectionCard>
 
-          <Table<PlanTask>
+          <DataTable<PlanTask>
             rowKey="id"
             columns={columns}
             dataSource={visibleRows}
@@ -526,7 +533,7 @@ export default function TaskPlansPage() {
                 setPageSize(s);
               },
             }}
-            locale={{ emptyText: "暂无任务计划" }}
+            emptyText="暂无任务计划"
           />
         </>
       )}
@@ -560,7 +567,7 @@ export default function TaskPlansPage() {
           onConfirm={() => void handleDelete()}
         />
       )}
-    </div>
+    </PageContainer>
   );
 }
 

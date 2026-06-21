@@ -923,6 +923,19 @@ export interface TaskExecute {
   updated_at: string;
 }
 
+/** 计划任务摘要(供 TaskExecute 关联展示任务名/项目)。 */
+export interface PlanTaskBrief {
+  id: string;
+  content: string | null;
+  project_id: string | null;
+  project_name: string | null;
+}
+
+/** 任务执行 + 关联计划任务(看板「实际」tab 用)。 */
+export interface TaskExecuteWithPlan extends TaskExecute {
+  plan_task: PlanTaskBrief | null;
+}
+
 export interface TaskExecuteCreate {
   plan_task_id?: string | null;
   problem_task_id?: string | null;
@@ -1077,6 +1090,16 @@ export interface KanbanTaskCard {
   user_name: string | null;
   /** 截止时间 (PlanTask.end_time) */
   deadline: string | null;
+  /** 开始时间 (PlanTask.start_time, 看板跨天连续展示用) */
+  start_time: string | null;
+  /** 优先级 1逾期/2活跃/3已完成 (派生) */
+  priority: number | null;
+  /** 进度 0/50/100 (派生) */
+  progress: number | null;
+  /** 创建时间 (PlanTask.created_at) */
+  create_time: string | null;
+  /** 更新时间 (PlanTask.updated_at) */
+  update_time: string | null;
   /** 预估工时 (PlanTask.work_load 字符串解析) */
   estimate_hours: number | null;
   kanban_order: number;

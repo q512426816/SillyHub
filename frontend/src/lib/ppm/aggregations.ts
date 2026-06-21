@@ -8,17 +8,25 @@
  */
 import type { EChartsOption } from "echarts";
 
+import { tokens } from "@/styles";
 import type { PsProjectPlan } from "./types";
 
 /** 图表配色:集中管理,柱/饼/成本三图共用。 */
 export const CHART_COLORS = {
-  user: "#1677ff",
-  project: "#52c41a",
-  budget: "#1677ff",
-  actual: "#faad14",
-  remaining: "#52c41a",
-  negative: "#ff4d4f",
-  pie: ["#1677ff", "#52c41a", "#faad14", "#eb2f96", "#722ed1", "#8c8c8c"],
+  user: tokens.color.blue[600],
+  project: tokens.color.emerald,
+  budget: tokens.color.blue[600],
+  actual: tokens.color.semantic.warning.color,
+  remaining: tokens.color.emerald,
+  negative: tokens.color.semantic.error.color,
+  pie: [
+    tokens.color.blue[600],
+    tokens.color.cyan,
+    tokens.color.emerald,
+    tokens.color.semantic.warning.color,
+    tokens.color.semantic.error.color,
+    tokens.color.semantic.neutral.color,
+  ],
 } as const;
 
 /** 后端 Decimal → JSON 字符串,前端需 Number() 兜底,null/undefined → 0。 */

@@ -37,6 +37,7 @@ import {
 } from "@/components/ppm-sub-table";
 import { ApiError } from "@/lib/api";
 import {
+  fmtDate,
   createPlanNode,
   createPlanNodeDetailTpl,
   createPlanNodeModule,
@@ -521,14 +522,14 @@ function ModulesSubTable({
       dataIndex: "plan_begin_time",
       key: "plan_begin_time",
       width: 120,
-      render: (v: string | null) => v ?? "—",
+      render: (v: string | null) => fmtDate(v),
     },
     {
       title: "计划完成",
       dataIndex: "plan_complete_time",
       key: "plan_complete_time",
       width: 120,
-      render: (v: string | null) => v ?? "—",
+      render: (v: string | null) => fmtDate(v),
     },
     {
       title: "操作",

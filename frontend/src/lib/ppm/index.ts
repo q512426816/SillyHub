@@ -11,6 +11,7 @@
  * - kanban   看板人员列/任务卡片/分配/排序/搜人
  */
 export * from "./types";
+export * from "./format";
 export * from "./project";
 export * from "./plan";
 export * from "./problem";
