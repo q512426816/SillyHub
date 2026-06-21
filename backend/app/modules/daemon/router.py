@@ -20,6 +20,7 @@ from app.modules.auth.permissions import Permission
 from app.modules.daemon.permission_service import (
     DaemonPermissionService,
     PermissionResponseRead,
+    SessionDialogRead,
 )
 from app.modules.daemon.protocol import (
     DAEMON_MSG_HEARTBEAT,
@@ -63,7 +64,6 @@ from app.modules.daemon.service import (
     DaemonService,
     DaemonSessionNotFound,
 )
-from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
 log = get_logger(__name__)
 
@@ -177,6 +177,25 @@ async def enable_runtime(
     svc = DaemonService(session)
     runtime = await svc.enable_runtime(runtime_id, user.id)
     return DaemonRuntimeRead.model_validate(runtime)
+
+
+@router.delete(
+    "/runtimes/{runtime_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_runtime(
+    runtime_id: uuid.UUID,
+    session: SessionDep,
+    user: RuntimeAdminUser,
+) -> None:
+    """Delete a daemon runtime and its bound leases/sessions (ql-20260621-012).
+
+    Physical delete; DB ``ondelete=CASCADE`` clears ``daemon_task_leases`` and
+    ``agent_sessions`` bound to this runtime. The daemon re-registers as a new
+    runtime on next heartbeat.
+    """
+    svc = DaemonService(session)
+    await svc.delete_runtime(runtime_id, user.id)
 
 
 @router.post(
@@ -357,6 +376,15 @@ class InteractiveRunResultRequest(BaseModel):
     subtype: str | None = Field(default=None, max_length=64)
     # Optional human-readable summary; stored redacted on AgentRun.output_redacted
     result_summary: str | None = Field(default=None, max_length=20000)
+    # ── SDKResultSuccess usage / cost / duration 透传（全部可选，daemon 可能不传，
+    # 对应 AgentRun.{total_cost_usd,num_turns,duration_ms,duration_api_ms,
+    # input_tokens,output_tokens}，原先 interactive 路径全 NULL）。
+    total_cost_usd: float | None = None
+    num_turns: int | None = None
+    duration_ms: int | None = None
+    duration_api_ms: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 class InteractiveRunResultResponse(BaseModel):
@@ -399,6 +427,12 @@ async def close_interactive_run(
         is_error=data.is_error,
         subtype=data.subtype,
         result_summary=data.result_summary,
+        total_cost_usd=data.total_cost_usd,
+        num_turns=data.num_turns,
+        duration_ms=data.duration_ms,
+        duration_api_ms=data.duration_api_ms,
+        input_tokens=data.input_tokens,
+        output_tokens=data.output_tokens,
     )
     return InteractiveRunResultResponse(
         agent_run_id=agent_run.id,
@@ -587,6 +621,12 @@ async def list_dir(
     # Ownership check: runtime not owned by current user → 404.
     await svc._get_owned_runtime(runtime_id, user.id)
 
+    # Lazy import (matches placement.py / agent.service.py): the ws_hub
+    # singleton accessor is patched per-test via ws_hub.get_daemon_ws_hub, and a
+    # module-top `from ... import` would bind a stale/mock ref if this module
+    # were first imported while such a patch was active.
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
     hub = get_daemon_ws_hub()
     try:
         result = await hub.send_rpc(runtime_id, "list_dir", {"path": data.path})
@@ -656,6 +696,12 @@ def get_permission_service(
     consistent with other endpoints.
     """
     svc = DaemonService(session)
+    # Lazy import (matches placement.py / agent.service.py): the ws_hub
+    # singleton accessor is patched per-test via ws_hub.get_daemon_ws_hub, and a
+    # module-top `from ... import` would bind a stale/mock ref if this module
+    # were first imported while such a patch was active.
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
     hub = get_daemon_ws_hub()
     return DaemonPermissionService(svc, hub)
 
@@ -668,6 +714,7 @@ class SessionCreateRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
     model: str | None = Field(default=None, max_length=128)
     manual_approval: bool = False
+    ask_user_only: bool = False
 
 
 class SessionCreateResponse(BaseModel):
@@ -717,6 +764,10 @@ class SessionEndRequest(BaseModel):
 class PermissionResponseRequest(BaseModel):
     decision: Literal["allow", "deny"]
     message: str | None = Field(default=None, max_length=2000)
+    # AskUserQuestion dialog answer. Present iff the originating request was a
+    # dialog (the service also detects this via the persisted DB row, so the
+    # field is optional and ignored for plain canUseTool approvals).
+    dialog_result: dict | None = None
 
 
 @router.post(
@@ -732,10 +783,14 @@ async def respond_session_permission(
 ) -> PermissionResponseRead:
     """User allow/deny for a session permission_request (FR-07 / D-007@v1).
 
-    Sends PERMISSION_RESPONSE downlink to the daemon, cancels the 5min timeout
-    timer, and publishes permission_resolved SSE. 404 when the request has
-    already timed out / never existed; 504 when the daemon runtime is offline;
-    409 when manual_approval is disabled for the session.
+    Handles both plain canUseTool approvals and AskUserQuestion dialogs:
+      - plain approval: cancels the 5min timeout timer, publishes
+        permission_resolved SSE. 404 when the request has already timed out /
+        never existed; 504 when the daemon runtime is offline; 409 when
+        manual_approval is disabled.
+      - dialog: flips the persisted session_dialog_requests row to answered,
+        forwards ``dialog_result`` to the daemon. 404 when the row is
+        missing/cancelled; 409 when already answered; 504 when offline.
     """
     return await service.respond_permission(
         user_id=user.id,
@@ -743,7 +798,32 @@ async def respond_session_permission(
         request_id=request_id,
         decision=body.decision,
         message=body.message,
+        dialog_result=body.dialog_result,
     )
+
+
+# ── Pending dialog recovery (dialog extension) ──────────────────────────────
+# Page-refresh recovery: returns the session's still-pending AskUserQuestion
+# dialogs so the frontend can re-render the cards after a reconnect. Ownership
+# is enforced inside the service (404 on cross-user, no existence leak).
+
+
+@router.get(
+    "/sessions/{session_id}/dialogs",
+    response_model=list[SessionDialogRead],
+)
+async def list_pending_dialogs(
+    session_id: uuid.UUID,
+    user: TaskRunAgentUser,
+    service: PermissionServiceDep,
+) -> list[SessionDialogRead]:
+    """Return the session's pending AskUserQuestion dialogs (dialog extension).
+
+    Used by the frontend after a page refresh to recover dialogs the user has
+    not yet answered. Returns only ``status=pending`` rows, oldest first.
+    Cross-user sessions surface as 404 (ownership enforced in the service).
+    """
+    return await service.list_pending_dialogs(user.id, session_id)
 
 
 # ── Session list + history (task-12, FR-10 / D-005@v1) ───────────────────────
@@ -820,6 +900,7 @@ async def create_session(
         prompt=data.prompt,
         model=data.model,
         manual_approval=data.manual_approval,
+        ask_user_only=data.ask_user_only,
     )
     s = result.agent_session
     return SessionCreateResponse(
@@ -1027,6 +1108,12 @@ async def daemon_websocket(
         return
 
     await websocket.accept()
+
+    # Lazy import (matches placement.py / agent.service.py): the ws_hub
+    # singleton accessor is patched per-test via ws_hub.get_daemon_ws_hub, and a
+    # module-top `from ... import` would bind a stale/mock ref if this module
+    # were first imported while such a patch was active.
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
     hub = get_daemon_ws_hub()
     await hub.connect(rid, websocket)

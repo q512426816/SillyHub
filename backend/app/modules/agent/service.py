@@ -737,7 +737,14 @@ class AgentService:
     ) -> AsyncGenerator[str, None]:
         """Yield SSE formatted events from Redis Pub/Sub for a given run.
 
-        Subscribes to the ``agent_run:{run_id}`` channel.  Emits ``data``
+        Subscribes to the ``agent_run:{run_id}`` channel (run-scoped logs and
+        the ``done`` signal) and, for interactive runs that carry an
+        ``agent_session_id``, also to the ``agent_session:{session_id}``
+        channel so ``permission_request`` / ``permission_resolved`` events
+        (published by ``DaemonPermissionService._publish_session_event``) and
+        other session-level events (``turn_completed`` / ``session_closed``)
+        reach the frontend's AskUserQuestion approval card. Batch runs have no
+        session and skip the second subscription.  Emits ``data``
         events for each message, a ``done`` event when the agent signals
         completion, and ``: keepalive`` comments every ~30 seconds of
         silence to prevent connection timeouts.
@@ -751,6 +758,9 @@ class AgentService:
         redis = get_redis()
         pubsub = redis.pubsub()
         channel = f"agent_run:{run_id}"
+        # Session channel is subscribed separately once we know the run's
+        # ``agent_session_id`` (interactive runs only; batch runs have None).
+        session_channel: str | None = None
         try:
             # Flush proxy buffers immediately with an initial comment.
             yield ": connected\n\n"
@@ -769,6 +779,17 @@ class AgentService:
                 done_data = json.dumps({"status": run.status, "exit_code": run.exit_code})
                 yield f"event: done\ndata: {done_data}\n\n"
                 return
+
+            # Subscribe to the session channel so permission_request /
+            # permission_resolved events (published by DaemonPermissionService
+            # via ``_publish_session_event`` on ``agent_session:{id}``) reach
+            # the frontend's AskUserQuestion approval card, alongside any
+            # turn_completed / session_closed events. Batch runs have no
+            # agent_session_id and are skipped. redis-py pubsub multiplexes
+            # multiple subscribed channels onto one ``get_message`` stream.
+            if run is not None and run.agent_session_id is not None:
+                session_channel = f"agent_session:{run.agent_session_id}"
+                await pubsub.subscribe(session_channel)
 
             while True:
                 try:
@@ -810,6 +831,8 @@ class AgentService:
         except Exception:
             yield 'event: error\ndata: {"error": "redis connection failed"}\n\n'
         finally:
+            if session_channel is not None:
+                await pubsub.unsubscribe(session_channel)
             await pubsub.unsubscribe(channel)
             await pubsub.close()
 

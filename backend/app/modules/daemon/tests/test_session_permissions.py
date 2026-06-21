@@ -119,6 +119,10 @@ def mocked_redis():
         yield redis
 
 
+# _permission_timers isolation is handled globally by the
+# `_isolate_permission_timers` autouse fixture in backend/conftest.py.
+
+
 def _make_request_payload(
     session: AgentSession, run: AgentRun, *, request_id: str = "req-1"
 ) -> PermissionRequestPayload:
@@ -128,6 +132,31 @@ def _make_request_payload(
         request_id=request_id,
         tool_name="Bash",
         input={"command": "ls"},
+    )
+
+
+def _make_dialog_payload(
+    session: AgentSession,
+    run: AgentRun,
+    *,
+    request_id: str = "dlg-1",
+    dialog_kind: str = "ask_user_question",
+) -> PermissionRequestPayload:
+    """AskUserQuestion-style payload: dialog_kind set + question/options blob."""
+    return PermissionRequestPayload(
+        session_id=session.id,
+        run_id=run.id,
+        request_id=request_id,
+        tool_name="AskUserQuestion",
+        input={},
+        dialog_kind=dialog_kind,
+        dialog_payload={
+            "question": "Which approach do you prefer?",
+            "options": [
+                {"label": "A", "description": "do thing A"},
+                {"label": "B", "description": "do thing B"},
+            ],
+        },
     )
 
 
@@ -156,8 +185,15 @@ class TestHandlePermissionRequest:
         ), f"expected permission_request publish, got: {[c.args for c in calls]}"
         # Timer armed
         assert "req-1" in perm._timers
-        # Cleanup
-        perm._timers["req-1"].cancel()
+        # Cleanup — cancel AND await so the timeout task is reaped before loop
+        # shutdown (the conftest `_isolate_permission_timers` fixture also does
+        # this defensively, but each test should clean up its own tasks).
+        _task = perm._timers["req-1"]
+        _task.cancel()
+        try:
+            await _task
+        except asyncio.CancelledError:
+            pass
 
     @pytest.mark.asyncio
     async def test_manual_false_drops_without_publishing(self, db_session, mocked_redis) -> None:

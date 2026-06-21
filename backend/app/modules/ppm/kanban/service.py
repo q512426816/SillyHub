@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time
 from typing import Any
 
 from sqlalchemy import select
@@ -108,6 +108,26 @@ def _apply_date_filter(stmt: Any, start_date: str | None, end_date: str | None, 
     return stmt
 
 
+def _derive_priority(status: str | None, end_time: datetime | None) -> int:
+    """对齐源 TaskPlanMapper.xml:147-150。1=逾期,2=活跃,3=已完成/其他。"""
+    if status == "已完成":
+        return 3
+    if end_time is not None and end_time.date() < datetime.now(UTC).date():
+        return 1  # 逾期:截止 < 今天 且 未完成
+    if status in ("进行中", "未开始"):
+        return 2
+    return 3
+
+
+def _derive_progress(status: str | None) -> int:
+    """对齐源 TaskPlanMapper.xml:160-164。已完成 100/进行中 50/其他 0。"""
+    if status == "已完成":
+        return 100
+    if status == "进行中":
+        return 50
+    return 0
+
+
 class PpdKanbanService:
     """看板聚合 service (无状态,复用传入 session)。"""
 
@@ -197,6 +217,11 @@ class PpdKanbanService:
                     user_id=t.user_id,
                     user_name=t.user_name,
                     deadline=t.end_time,
+                    start_time=t.start_time,
+                    priority=_derive_priority(t.status, t.end_time),
+                    progress=_derive_progress(t.status),
+                    create_time=t.created_at,
+                    update_time=t.updated_at,
                     estimate_hours=_parse_hours(t.work_load),
                     kanban_order=t.kanban_order,
                     file_urls=list(t.file_urls or []),

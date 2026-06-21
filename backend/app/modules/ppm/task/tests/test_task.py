@@ -379,6 +379,19 @@ async def test_personal_filter_by_user(db_session):
         assert item.user_id == user_a
 
 
+async def test_page_invalid_uuid_query_tolerated(db_session):
+    """前端传占位符/非法值 (如 "-"、空串、"not-a-uuid") 时 service 层 try-parse
+    为 None → 不过滤,返回全量 (不抛异常 / 不 422)。"""
+    user_id = uuid.uuid4()
+    await _seed_plan(db_session, user_id)
+    await _seed_plan(db_session, user_id)
+    svc = PlanTaskService(db_session)
+
+    for invalid in ("-", "", "not-a-uuid", None):
+        page = await svc.page(PlanTaskPageReq(user_id=invalid))
+        assert page.total == 2, f"user_id={invalid!r} 应视为不过滤"
+
+
 async def test_personal_list_by_date_range(db_session):
     user_id = uuid.uuid4()
     svc = PlanTaskService(db_session)
@@ -501,6 +514,29 @@ async def test_work_hour_stat_endpoints(client, auth_headers):
     )
     assert resp.status_code == 200
     assert resp.json()["total_hours"] == 10.0
+
+
+async def test_page_endpoints_tolerate_invalid_uuid_query(client, auth_headers):
+    """前端传占位符 "-" / 空串 / 非法字符串到 page/stat 端点 → 200 (不过滤),不 422。"""
+    invalid_values = ["-", "", "not-a-uuid"]
+    endpoints = [
+        "/api/ppm/task-plan/page",
+        "/api/ppm/task-execute/page",
+        "/api/ppm/work-hour/page",
+        "/api/ppm/work-hour/stat-by-user",
+        "/api/ppm/work-hour/stat-by-project",
+        "/api/ppm/personal-task-plan/page",
+    ]
+    for ep in endpoints:
+        for val in invalid_values:
+            resp = await client.get(
+                ep,
+                params={"user_id": val, "project_id": val},
+                headers=auth_headers,
+            )
+            assert resp.status_code == 200, (
+                f"{ep}?user_id={val!r} 应容错返回 200,实际 {resp.status_code}: {resp.text}"
+            )
 
 
 async def test_personal_task_plan_only_returns_current_user(client, db_session, auth_headers):

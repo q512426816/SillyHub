@@ -181,6 +181,15 @@ class TaskCardVO(BaseModel):
     user_id: uuid.UUID | None = Field(default=None, description="负责人 ID")
     user_name: str | None = Field(default=None, description="负责人名")
     deadline: datetime | None = Field(default=None, description="截止时间 (PlanTask.end_time)")
+    start_time: datetime | None = Field(
+        default=None, description="开始时间 (PlanTask.start_time, 供看板跨天连续展示)"
+    )
+    priority: int | None = Field(
+        default=None, description="优先级 1逾期/2活跃/3已完成 (对齐源 SQL 派生)"
+    )
+    progress: int | None = Field(default=None, description="进度 0/50/100 (对齐源 SQL 派生)")
+    create_time: datetime | None = Field(default=None, description="创建时间 (PlanTask.created_at)")
+    update_time: datetime | None = Field(default=None, description="更新时间 (PlanTask.updated_at)")
     estimate_hours: float | None = Field(
         default=None, description="预估工时 (PlanTask.work_load 字符串解析)"
     )

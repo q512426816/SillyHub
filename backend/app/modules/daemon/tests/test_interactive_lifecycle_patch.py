@@ -426,6 +426,69 @@ class TestGap3CloseInteractiveRun:
         assert run.output_redacted == "Task completed with output"
 
     @pytest.mark.asyncio
+    async def test_usage_cost_duration_persisted(self, db_session, mocked_redis) -> None:
+        """SDKResultSuccess 透传字段（total_cost_usd/num_turns/duration_ms/
+        duration_api_ms/input_tokens/output_tokens）必须写入 AgentRun，
+        否则 interactive 路径这些列全 NULL（对齐 batch completeLease）。"""
+        lease_id, run_id, token = await _seed_active_interactive_session(db_session)
+        svc = DaemonService(db_session)
+        run = await svc.close_interactive_run(
+            lease_id,
+            run_id,
+            token,
+            status="success",
+            is_error=False,
+            total_cost_usd=0.0123,
+            num_turns=3,
+            duration_ms=4567,
+            duration_api_ms=3900,
+            input_tokens=1024,
+            output_tokens=512,
+        )
+        assert run.total_cost_usd == pytest.approx(0.0123)
+        assert run.num_turns == 3
+        assert run.duration_ms == 4567
+        assert run.duration_api_ms == 3900
+        assert run.input_tokens == 1024
+        assert run.output_tokens == 512
+        # reload from db to be sure commit stuck
+        reloaded = await db_session.get(AgentRun, run_id)
+        assert reloaded is not None
+        assert reloaded.total_cost_usd == pytest.approx(0.0123)
+        assert reloaded.input_tokens == 1024
+        assert reloaded.output_tokens == 512
+        assert reloaded.num_turns == 3
+        assert reloaded.duration_ms == 4567
+        assert reloaded.duration_api_ms == 3900
+
+    @pytest.mark.asyncio
+    async def test_usage_cost_duration_none_leaves_row_unchanged(
+        self, db_session, mocked_redis
+    ) -> None:
+        """Daemon 未传 usage 字段（None）时不应覆盖 AgentRun 既有值（向后兼容）。"""
+        lease_id, run_id, token = await _seed_active_interactive_session(db_session)
+        # Pre-set some values to ensure None args don't clobber them.
+        run = await db_session.get(AgentRun, run_id)
+        assert run is not None
+        run.total_cost_usd = 0.05
+        run.input_tokens = 999
+        run.output_tokens = 888
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        run2 = await svc.close_interactive_run(
+            lease_id,
+            run_id,
+            token,
+            status="success",
+            is_error=False,
+            # all usage/cost/duration fields omitted (default None)
+        )
+        assert run2.total_cost_usd == pytest.approx(0.05)
+        assert run2.input_tokens == 999
+        assert run2.output_tokens == 888
+
+    @pytest.mark.asyncio
     async def test_publishes_terminal_redis_event(self, db_session, mocked_redis) -> None:
         lease_id, run_id, token = await _seed_active_interactive_session(db_session)
         svc = DaemonService(db_session)

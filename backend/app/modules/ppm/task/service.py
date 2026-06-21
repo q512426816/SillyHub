@@ -58,6 +58,22 @@ EXECUTE_SORT_FIELDS = frozenset({"created_at", "updated_at", "actual_start_time"
 WORKHOUR_SORT_FIELDS = frozenset({"created_at", "updated_at", "work_date", "hours"})
 
 
+def _parse_uuid_optional(value: str | uuid.UUID | None) -> uuid.UUID | None:
+    """把查询参数容错规整为 UUID。
+
+    前端可能传占位符(如 "-"、"")或非法字符串,这里 try-parse:
+    能解析则返回 UUID,否则返回 None(等价于不过滤),避免 422 / SQLAlchemy 异常。
+    """
+    if value is None:
+        return None
+    if isinstance(value, uuid.UUID):
+        return value
+    try:
+        return uuid.UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
 class TaskError(AppError):
     """task 子域业务错误基类。"""
 
@@ -144,10 +160,12 @@ class PlanTaskService:
         """分页查询 (支持 user/project/status/month/year 过滤)。"""
         page_req = _page_req_from(req.page, req.page_size, req.order_by, req.order)
         stmt = select(PlanTask)
-        if req.user_id is not None:
-            stmt = stmt.where(PlanTask.user_id == req.user_id)
-        if req.project_id is not None:
-            stmt = stmt.where(PlanTask.project_id == req.project_id)
+        user_id = _parse_uuid_optional(req.user_id)
+        project_id = _parse_uuid_optional(req.project_id)
+        if user_id is not None:
+            stmt = stmt.where(PlanTask.user_id == user_id)
+        if project_id is not None:
+            stmt = stmt.where(PlanTask.project_id == project_id)
         if req.status is not None:
             stmt = stmt.where(PlanTask.status == req.status)
         if req.month is not None:
@@ -317,12 +335,14 @@ class TaskExecuteService:
     async def page(self, req: TaskExecutePageReq) -> Page[TaskExecute]:
         page_req = _page_req_from(req.page, req.page_size, req.order_by, req.order)
         stmt = select(TaskExecute)
-        if req.plan_task_id is not None:
-            stmt = stmt.where(TaskExecute.plan_task_id == req.plan_task_id)
+        plan_task_id = _parse_uuid_optional(req.plan_task_id)
+        execute_user_id = _parse_uuid_optional(req.execute_user_id)
+        if plan_task_id is not None:
+            stmt = stmt.where(TaskExecute.plan_task_id == plan_task_id)
         if req.status is not None:
             stmt = stmt.where(TaskExecute.status == req.status)
-        if req.execute_user_id is not None:
-            stmt = stmt.where(TaskExecute.execute_user_id == req.execute_user_id)
+        if execute_user_id is not None:
+            stmt = stmt.where(TaskExecute.execute_user_id == execute_user_id)
         stmt = apply_sort(stmt, TaskExecute, req.order_by, EXECUTE_SORT_FIELDS, req.order)
         total = await count_total(self._session, stmt)
         stmt = apply_pagination(stmt, page_req)
@@ -334,7 +354,7 @@ class TaskExecuteService:
         self,
         start: datetime,
         end: datetime,
-        execute_user_id: uuid.UUID | None = None,
+        execute_user_id: str | uuid.UUID | None = None,
     ) -> list[TaskExecute]:
         """按 actual_start_time 区间查询任务执行。"""
         stmt = (
@@ -342,11 +362,50 @@ class TaskExecuteService:
             .where(TaskExecute.actual_start_time >= start)
             .where(TaskExecute.actual_start_time <= end)
         )
-        if execute_user_id is not None:
-            stmt = stmt.where(TaskExecute.execute_user_id == execute_user_id)
+        uid = _parse_uuid_optional(execute_user_id)
+        if uid is not None:
+            stmt = stmt.where(TaskExecute.execute_user_id == uid)
         stmt = stmt.order_by(TaskExecute.actual_start_time.asc())
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_by_date_range_with_plan(
+        self,
+        start: datetime,
+        end: datetime,
+        execute_user_ids: list[str] | list[uuid.UUID] | None = None,
+        project_id: str | uuid.UUID | None = None,
+    ) -> list[tuple[TaskExecute, PlanTask | None]]:
+        """按 actual_start_time 区间查询任务执行,可选多用户 + 项目过滤,
+        并批量补关联 PlanTask(任务名/项目,避免 N+1;TaskExecute 无 relationship)。
+        返回 (execute, plan_task) 对。
+        """
+        stmt = (
+            select(TaskExecute)
+            .where(TaskExecute.actual_start_time >= start)
+            .where(TaskExecute.actual_start_time <= end)
+        )
+        parsed_uids = (
+            [_parse_uuid_optional(u) for u in execute_user_ids] if execute_user_ids else []
+        )
+        valid_uids = [u for u in parsed_uids if u is not None]
+        if valid_uids:
+            stmt = stmt.where(TaskExecute.execute_user_id.in_(valid_uids))
+        pid = _parse_uuid_optional(project_id)
+        if pid is not None:
+            # join PlanTask 按项目过滤(无 plan_task_id 的 problem 执行被排除,对齐源)
+            stmt = stmt.join(PlanTask, PlanTask.id == TaskExecute.plan_task_id).where(
+                PlanTask.project_id == pid
+            )
+        stmt = stmt.order_by(TaskExecute.actual_start_time.asc())
+        result = await self._session.execute(stmt)
+        executes = list(result.scalars().all())
+        plan_ids = {e.plan_task_id for e in executes if e.plan_task_id is not None}
+        plan_map: dict[uuid.UUID, PlanTask] = {}
+        if plan_ids:
+            plans = await self._session.execute(select(PlanTask).where(PlanTask.id.in_(plan_ids)))
+            plan_map = {p.id: p for p in plans.scalars().all()}
+        return [(e, plan_map.get(e.plan_task_id)) for e in executes]
 
 
 class WorkHourService:
@@ -388,10 +447,12 @@ class WorkHourService:
     async def page(self, req: WorkHourPageReq) -> Page[WorkHour]:
         page_req = _page_req_from(req.page, req.page_size, req.order_by, req.order)
         stmt = select(WorkHour)
-        if req.user_id is not None:
-            stmt = stmt.where(WorkHour.user_id == req.user_id)
-        if req.project_id is not None:
-            stmt = stmt.where(WorkHour.project_id == req.project_id)
+        user_id = _parse_uuid_optional(req.user_id)
+        project_id = _parse_uuid_optional(req.project_id)
+        if user_id is not None:
+            stmt = stmt.where(WorkHour.user_id == user_id)
+        if project_id is not None:
+            stmt = stmt.where(WorkHour.project_id == project_id)
         if req.type is not None:
             stmt = stmt.where(WorkHour.type == req.type)
         if req.work_date_start is not None:
@@ -410,10 +471,12 @@ class WorkHourService:
     async def list_for_export(self, req: WorkHourPageReq, limit: int = 5000) -> list[WorkHour]:
         """导出用:忽略分页,返回过滤后全量 (硬上限 limit 防内存爆)。"""
         stmt = select(WorkHour)
-        if req.user_id is not None:
-            stmt = stmt.where(WorkHour.user_id == req.user_id)
-        if req.project_id is not None:
-            stmt = stmt.where(WorkHour.project_id == req.project_id)
+        user_id = _parse_uuid_optional(req.user_id)
+        project_id = _parse_uuid_optional(req.project_id)
+        if user_id is not None:
+            stmt = stmt.where(WorkHour.user_id == user_id)
+        if project_id is not None:
+            stmt = stmt.where(WorkHour.project_id == project_id)
         if req.type is not None:
             stmt = stmt.where(WorkHour.type == req.type)
         if req.work_date_start is not None:
@@ -431,7 +494,7 @@ class WorkHourService:
         self,
         start: date | None,
         end: date | None,
-        user_id: uuid.UUID | None = None,
+        user_id: str | uuid.UUID | None = None,
     ) -> list[dict[str, Any]]:
         """按 execute_user_id 聚合工时 (数据源:``ppm_task_execute.time_spent``)。
 
@@ -450,8 +513,9 @@ class WorkHourService:
             .group_by(group_col)
             .order_by(func.sum(TaskExecute.time_spent).desc())
         )
-        if user_id is not None:
-            stmt = stmt.where(group_col == user_id)
+        uid = _parse_uuid_optional(user_id)
+        if uid is not None:
+            stmt = stmt.where(group_col == uid)
         start_dt, end_dt = _stat_date_range(start, end)
         if start_dt is not None:
             stmt = stmt.where(TaskExecute.actual_start_time >= start_dt)
@@ -463,7 +527,7 @@ class WorkHourService:
         self,
         start: date | None,
         end: date | None,
-        project_id: uuid.UUID | None = None,
+        project_id: str | uuid.UUID | None = None,
     ) -> list[dict[str, Any]]:
         """按 project_id 聚合工时。
 
@@ -482,8 +546,9 @@ class WorkHourService:
             .group_by(group_col)
             .order_by(func.sum(TaskExecute.time_spent).desc())
         )
-        if project_id is not None:
-            stmt = stmt.where(group_col == project_id)
+        pid = _parse_uuid_optional(project_id)
+        if pid is not None:
+            stmt = stmt.where(group_col == pid)
         start_dt, end_dt = _stat_date_range(start, end)
         if start_dt is not None:
             stmt = stmt.where(TaskExecute.actual_start_time >= start_dt)

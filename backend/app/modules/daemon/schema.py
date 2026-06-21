@@ -72,6 +72,8 @@ class DaemonRuntimeRead(BaseModel):
     name: str | None
     provider: str | None
     version: str | None
+    os: str | None
+    arch: str | None
     status: str | None
     last_heartbeat_at: datetime | None
     capabilities: dict | None
@@ -113,7 +115,7 @@ class LeaseClaimResponse(BaseModel):
     lease_id: uuid.UUID
     claim_token: str
     payload: dict  # execution context
-    lease_expires_at: datetime
+    lease_expires_at: datetime | None  # None for interactive leases (no expiry)
 
 
 # ── Lease lifecycle ─────────────────────────────────────────────────────────

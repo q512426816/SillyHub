@@ -607,6 +607,35 @@ class TestRegisterRuntime:
         assert rt1.id != rt2.id
 
 
+class TestDeleteRuntime:
+    """Tests for DaemonService.delete_runtime (ql-012)."""
+
+    @pytest.mark.asyncio
+    async def test_delete_runtime_removes_row(self, db_session: AsyncSession) -> None:
+        """delete_runtime physically removes the runtime row."""
+        user_id = await _create_user(db_session)
+        svc = DaemonService(db_session)
+        rt = await svc.register_runtime(user_id, name="to-delete", provider="claude_code")
+
+        await svc.delete_runtime(rt.id, user_id)
+
+        assert await svc.get_runtime(rt.id) is None
+
+    @pytest.mark.asyncio
+    async def test_delete_runtime_other_owner_not_found(self, db_session: AsyncSession) -> None:
+        """Cross-user delete surfaces as DaemonRuntimeNotFound (no existence leak)."""
+        owner = await _create_user(db_session)
+        intruder = await _create_user(db_session)
+        svc = DaemonService(db_session)
+        rt = await svc.register_runtime(owner, name="owned", provider="claude_code")
+
+        with pytest.raises(DaemonRuntimeNotFound):
+            await svc.delete_runtime(rt.id, intruder)
+
+        # 归属者的 runtime 未被越权删除
+        assert await svc.get_runtime(rt.id) is not None
+
+
 class TestDaemonHeartbeat:
     """Tests for DaemonService.heartbeat."""
 

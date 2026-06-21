@@ -161,6 +161,12 @@ class PermissionRequestPayload(BaseModel):
     """PERMISSION_REQUEST payload (Daemon → Server, FR-07 / D-007).
 
     Triggered by SDK canUseTool callback; backend forwards to frontend approval card.
+
+    Dialog extension (AskUserQuestion-style): when ``dialog_kind`` is set the
+    request is *not* a tool approval but a user-facing question that may wait
+    indefinitely (no 5min auto-deny). ``dialog_kind`` is a stable discriminator
+    (e.g. ``"ask_user_question"``); ``dialog_payload`` carries the full
+    question+options blob, forwarded verbatim to the frontend card.
     """
 
     session_id: uuid.UUID
@@ -169,15 +175,29 @@ class PermissionRequestPayload(BaseModel):
     tool_name: str
     input: dict  # tool call args JSON, forwarded as-is
     tool_use_id: str | None = None
+    # AskUserQuestion dialog extension. None → ordinary canUseTool approval
+    # (5min timeout, ephemeral, no DB row). Set → long-lived dialog request
+    # persisted in session_dialog_requests so it survives frontend refresh.
+    dialog_kind: str | None = None
+    dialog_payload: dict | None = None
 
 
 class PermissionResponsePayload(BaseModel):
     """PERMISSION_RESPONSE payload (Server → Daemon, FR-07 / D-007).
 
     decision='deny' with 5min timeout backend-side (D-007).
+
+    Dialog extension: for AskUserQuestion requests ``dialog_result`` carries
+    the user's answer (selected option / free text / …) instead of an
+    allow/deny decision; ``decision`` is still echoed as ``allow`` for
+    contract uniformity on the daemon side.
     """
 
     session_id: uuid.UUID
     request_id: str
     decision: Literal["allow", "deny"]
     message: str | None = None
+    # AskUserQuestion answer blob. Mirrors ``dialog_kind`` on the request side:
+    # present iff the originating request was a dialog, absent for plain
+    # canUseTool approvals.
+    dialog_result: dict | None = None

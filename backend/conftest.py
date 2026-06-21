@@ -10,6 +10,7 @@ Tests must not require a live Postgres / Redis. ``conftest`` therefore:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 from collections.abc import AsyncIterator, Iterator
@@ -197,3 +198,29 @@ async def auth_admin_token(db_session: AsyncSession) -> str:
 @pytest.fixture()
 def auth_headers(auth_admin_token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {auth_admin_token}"}
+
+
+@pytest.fixture(autouse=True)
+async def _isolate_permission_timers() -> AsyncIterator[None]:
+    """Deterministically reap + clear the module-level ``_permission_timers``
+    singleton around every async test.
+
+    ``_permission_timers`` is shared across all DaemonPermissionService
+    instances (WS uplink + REST downlink) — see permission_service.py. A test
+    that arms a timeout task must not leave a dangling, never-awaited task:
+    under pytest-asyncio's function-scoped event loop the cancellation is only
+    reaped during loop shutdown, whose timing is non-deterministic and
+    occasionally lets a cancelled task leak into a later test's
+    ``len(_timers) == 0`` assertion. Cancelling + awaiting here reaps every
+    task *before* the loop closes, removing that window.
+    """
+    from app.modules.daemon.permission_service import _permission_timers
+
+    _permission_timers.clear()
+    yield
+    pending = list(_permission_timers.values())
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+    _permission_timers.clear()

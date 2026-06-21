@@ -7,6 +7,7 @@ conflicts, status sync, and lease expiry with automatic rollback.
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -15,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from app.modules.agent.model import AgentRun
+from app.modules.agent.model import AgentRun, AgentRunLog
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.service import (
     DaemonInvalidClaimToken,
@@ -319,9 +320,10 @@ class TestSubmitMessagesSync:
     async def test_submit_messages_extracts_sdk_assistant_content(
         self, db_session: AsyncSession
     ) -> None:
-        """ql-005：interactive session（SDK driver）发原始 SDK assistant msg，
-        content nested 在 message.content。backend 必须提取 text 让 message 落地，
-        否则 count=0、quick-chat 无输出。"""
+        """ql-006：interactive session（SDK driver）发原始 SDK assistant msg，content
+        nested 在 message.content。backend 必须按 block 展开——每个 text block 一条
+        [ASSISTANT] 日志——否则 count=0、quick-chat 无输出。旧实现拼接成 1 条，现在
+        每块独立落库（与 batch mode task-runner._eventToMessages 对齐）。"""
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)
         agent_run = await _create_agent_run(db_session, status="running")
@@ -355,7 +357,278 @@ class TestSubmitMessagesSync:
                 }
             ],
         )
+        # 每个 text block 一条日志（不再拼接）
+        assert count == 2
+
+        stmt = (
+            select(AgentRunLog)
+            .where(col(AgentRunLog.run_id) == agent_run.id)
+            .order_by(col(AgentRunLog.timestamp))
+        )
+        logs = (await db_session.execute(stmt)).scalars().all()
+        assert [lg.channel for lg in logs] == ["stdout", "stdout"]
+        assert logs[0].content_redacted == "[ASSISTANT] 你好，我是 GLM"
+        assert logs[1].content_redacted == "[ASSISTANT] ，有什么可以帮你"
+
+    @pytest.mark.asyncio
+    async def test_submit_messages_sdk_thinking_block(self, db_session: AsyncSession) -> None:
+        """ql-006：assistant message 的 thinking block 必须落成 [THINKING] 日志，
+        不再被丢弃。超 2000 字截断并加 '...' 后缀（对齐 task-runner L1043-1048）。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "think-tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        long_text = "x" * 2500
+        svc = DaemonService(db_session)
+        count = await svc.submit_messages(
+            lease.id,
+            "think-tok",
+            agent_run.id,
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "thinking", "thinking": long_text},
+                        ],
+                    },
+                }
+            ],
+        )
         assert count == 1
+        stmt = select(AgentRunLog).where(col(AgentRunLog.run_id) == agent_run.id)
+        lg = (await db_session.execute(stmt)).scalars().first()
+        assert lg is not None
+        assert lg.channel == "stdout"
+        # [THINKING] (9) + 2000 个 x + "..." (3) = 2012
+        assert lg.content_redacted == "[THINKING] " + ("x" * 2000) + "..."
+
+    @pytest.mark.asyncio
+    async def test_submit_messages_sdk_tool_use_block(self, db_session: AsyncSession) -> None:
+        """ql-006：assistant message 的 tool_use block 必须落 2 条日志——
+        stdout [TOOL_USE] Name: cmd + tool_call JSON（前端 ToolCallCard 渲染）。
+        旧实现整条丢弃，导致前端看不到任何工具调用。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "tu-tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        count = await svc.submit_messages(
+            lease.id,
+            "tu-tok",
+            agent_run.id,
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_01",
+                                "name": "Bash",
+                                "input": {"command": "ls -la"},
+                            }
+                        ],
+                    },
+                }
+            ],
+        )
+        assert count == 2
+        stmt = (
+            select(AgentRunLog)
+            .where(col(AgentRunLog.run_id) == agent_run.id)
+            .order_by(col(AgentRunLog.timestamp))
+        )
+        logs = (await db_session.execute(stmt)).scalars().all()
+        # 第一条：stdout 文本行
+        assert logs[0].channel == "stdout"
+        assert logs[0].content_redacted == "[TOOL_USE] Bash: ls -la"
+        # 第二条：tool_call JSON
+        assert logs[1].channel == "tool_call"
+        assert logs[1].content_redacted is not None
+        tc = json.loads(logs[1].content_redacted)
+        assert tc["tool"] == "Bash"
+        assert tc["args"] == {"command": "ls -la"}
+        assert tc["status"] == "allowed"
+        assert tc["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_submit_messages_sdk_tool_result_block(self, db_session: AsyncSession) -> None:
+        """ql-006：user message（role=user）的 tool_result block 必须落成
+        [TOOL_RESULT] 日志。content 可能是 str 或 [{type:text,text:...}]。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "tr-tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        count = await svc.submit_messages(
+            lease.id,
+            "tr-tok",
+            agent_run.id,
+            [
+                {
+                    "type": "user",
+                    "message": {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "toolu_01",
+                                "content": [
+                                    {"type": "text", "text": "total 0\ndrwxr-xr-x src"},
+                                ],
+                            }
+                        ],
+                    },
+                }
+            ],
+        )
+        assert count == 1
+        stmt = select(AgentRunLog).where(col(AgentRunLog.run_id) == agent_run.id)
+        lg = (await db_session.execute(stmt)).scalars().first()
+        assert lg is not None
+        assert lg.channel == "stdout"
+        assert lg.content_redacted == "[TOOL_RESULT] total 0\ndrwxr-xr-x src"
+
+    @pytest.mark.asyncio
+    async def test_submit_messages_sdk_mixed_assistant_message(
+        self, db_session: AsyncSession
+    ) -> None:
+        """ql-006：一条 assistant message 同时含 thinking + text + tool_use 时，
+        必须展开成 4 条日志（1 thinking + 1 text + 2 tool_use），全部保留。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "mix-tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        count = await svc.submit_messages(
+            lease.id,
+            "mix-tok",
+            agent_run.id,
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "thinking", "thinking": "让我想想"},
+                            {"type": "text", "text": "我来执行 ls"},
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_02",
+                                "name": "Bash",
+                                "input": {"command": "ls"},
+                            },
+                        ],
+                    },
+                }
+            ],
+        )
+        # thinking(1) + text(1) + tool_use stdout(1) + tool_use tool_call(1) = 4
+        assert count == 4
+        stmt = (
+            select(AgentRunLog)
+            .where(col(AgentRunLog.run_id) == agent_run.id)
+            .order_by(col(AgentRunLog.timestamp))
+        )
+        logs = (await db_session.execute(stmt)).scalars().all()
+        assert [lg.channel for lg in logs] == [
+            "stdout",
+            "stdout",
+            "stdout",
+            "tool_call",
+        ]
+        assert logs[0].content_redacted == "[THINKING] 让我想想"
+        assert logs[1].content_redacted == "[ASSISTANT] 我来执行 ls"
+        assert logs[2].content_redacted == "[TOOL_USE] Bash: ls"
+
+    @pytest.mark.asyncio
+    async def test_submit_messages_sdk_extracts_inner_usage(self, db_session: AsyncSession) -> None:
+        """ql-006：真实 SDK assistant message 的 usage 在 message.usage（不在顶层），
+        _extract_sdk_messages 必须把它透传到 flat record，让 submit_messages 实时
+        回写 AgentRun.input_tokens/output_tokens。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "u-tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        await svc.submit_messages(
+            lease.id,
+            "u-tok",
+            agent_run.id,
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "hi"}],
+                        "usage": {"input_tokens": 42, "output_tokens": 7},
+                    },
+                    "session_id": "sess-inner-001",
+                }
+            ],
+        )
+        await db_session.refresh(agent_run)
+        assert agent_run.input_tokens == 42
+        assert agent_run.output_tokens == 7
+        assert agent_run.session_id == "sess-inner-001"
 
     @pytest.mark.asyncio
     async def test_submit_messages_extracts_usage_from_content_message(

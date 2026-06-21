@@ -95,6 +95,97 @@ class DaemonRuntime(BaseModel, table=True):
     )
 
 
+class SessionDialogRequest(BaseModel, table=True):
+    """Persisted AskUserQuestion-style dialog request (dialog extension).
+
+    Ordinary canUseTool approvals stay ephemeral (in-memory ``_permission_timers``
+    + 5min timeout). AskUserQuestion-style requests, in contrast, may wait
+    indefinitely for a human answer and must survive frontend refresh — hence
+    this table. One row per ``request_id``; lifecycle::
+
+        pending   → row written by handle_permission_request (dialog_kind set)
+        answered  → respond_permission recorded the user's ``answer``
+        cancelled → session ended / run aborted before the user replied
+
+    ``dialog_payload`` mirrors ``PermissionRequestPayload.dialog_payload``
+    (the full question+options blob, JSON); ``answer`` mirrors
+    ``PermissionResponsePayload.dialog_result``.
+    """
+
+    __tablename__ = "session_dialog_requests"
+    __table_args__ = (
+        Index("idx_session_dialog_requests_session_id", "session_id"),
+        Index("idx_session_dialog_requests_run_id", "run_id"),
+        Index("idx_session_dialog_requests_status", "status"),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    session_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_sessions.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    run_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_runs.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    # Daemon-generated; unique per session so a replay/bug can't fork a dialog.
+    request_id: str = Field(
+        sa_column=Column(String(128), nullable=False, unique=True),
+    )
+    tool_name: str = Field(
+        sa_column=Column(String(128), nullable=False),
+    )
+    dialog_kind: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    dialog_payload: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    status: str = Field(
+        default="pending",
+        sa_column=Column(
+            String(20),
+            nullable=False,
+            server_default=text("pending"),
+        ),
+    )
+    answer: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    answered_by: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )
+    answered_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+
+
 class DaemonTaskLease(BaseModel, table=True):
     """A task lease claimed by a daemon runtime for execution."""
 

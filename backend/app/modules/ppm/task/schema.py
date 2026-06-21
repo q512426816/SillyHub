@@ -126,8 +126,9 @@ class PlanTaskPageReq(PydanticModel):
 
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=200)
-    user_id: uuid.UUID | None = None
-    project_id: uuid.UUID | None = None
+    # UUID 字段容错为 str,service 层 try-parse (前端可能传 "-" / 空串占位)
+    user_id: str | uuid.UUID | None = None
+    project_id: str | uuid.UUID | None = None
     status: str | None = None
     month: str | None = None
     year: str | None = None
@@ -233,14 +234,32 @@ class TaskExecuteResponse(PydanticModel):
     model_config = {"from_attributes": True}
 
 
+class PlanTaskBrief(PydanticModel):
+    """计划任务摘要(供 TaskExecute 关联展示任务名/项目)。"""
+
+    id: uuid.UUID
+    content: str | None = None
+    project_id: uuid.UUID | None = None
+    project_name: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class TaskExecuteWithPlanResponse(TaskExecuteResponse):
+    """任务执行 + 关联计划任务(看板「实际」tab 展示任务名/项目)。"""
+
+    plan_task: PlanTaskBrief | None = None
+
+
 class TaskExecutePageReq(PydanticModel):
     """任务执行分页查询参数。"""
 
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=200)
-    plan_task_id: uuid.UUID | None = None
+    # UUID 字段容错为 str,service 层 try-parse (前端可能传 "-" / 空串占位)
+    plan_task_id: str | uuid.UUID | None = None
     status: str | None = None
-    execute_user_id: uuid.UUID | None = None
+    execute_user_id: str | uuid.UUID | None = None
     order_by: str | None = None
     order: str = "desc"
 
@@ -296,8 +315,9 @@ class WorkHourPageReq(PydanticModel):
 
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=200)
-    user_id: uuid.UUID | None = None
-    project_id: uuid.UUID | None = None
+    # UUID 字段容错为 str,service 层 try-parse (前端可能传 "-" / 空串占位)
+    user_id: str | uuid.UUID | None = None
+    project_id: str | uuid.UUID | None = None
     work_date_start: date | None = None
     work_date_end: date | None = None
     type: int | None = None

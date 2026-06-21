@@ -418,6 +418,21 @@ class DaemonService:
         await self._session.refresh(runtime)
         return runtime
 
+    async def delete_runtime(
+        self,
+        runtime_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        """Physically delete an owned runtime (ql-20260621-012).
+
+        DB ondelete=CASCADE removes bound ``daemon_task_leases`` and
+        ``agent_sessions`` rows automatically. The daemon re-registers as a
+        fresh runtime on its next heartbeat.
+        """
+        runtime = await self._get_owned_runtime(runtime_id, user_id)
+        await self._session.delete(runtime)
+        await self._session.commit()
+
     async def enable_runtime(
         self,
         runtime_id: uuid.UUID,
@@ -1098,29 +1113,29 @@ class DaemonService:
         latest_input_tokens: int | None = None
         latest_output_tokens: int | None = None
         latest_session_id: str | None = None
+        # ql-006：interactive session（SDK driver）的 onTurnMessage 发原始 SDK msg
+        # （{type:"assistant"|"user", message:{content:[ContentBlock]}}），顶层无
+        # content/event_type。旧代码只拼 text blocks、丢弃 thinking/tool_use/tool_result，
+        # 导致 agent_run_logs 只有纯文本 stdout。这里先把每条 SDK msg 用
+        # _extract_sdk_messages 展开成 0..N 条 flat {event_type, content, channel}
+        # （对齐 task-runner _eventToMessages），再统一进入下面的写入循环。
+        # batch mode（已 flat）原样透传，行为不变。
+        flat_messages: list[dict] = []
         for msg in messages:
+            event_type = msg.get("event_type") or ""
+            content = msg.get("content", "")
+            if event_type or content:
+                flat_messages.append(msg)
+                continue
+            # 顶层无 event_type/content → 当作 SDK 原始格式展开
+            flat_messages.extend(_extract_sdk_messages(msg))
+
+        for msg in flat_messages:
             # ql-20260616-003：daemon _eventToMessage 不发 channel/timestamp/log_id，
             # 后端按 event_type 映射 channel（text→stdout, tool_use/tool_result→tool_call,
             # error→stderr），避免前端 SSE 实时流出现 Invalid Date + channel 误判。
             event_type = msg.get("event_type") or ""
             content = msg.get("content", "")
-            # ql-005：interactive session（SDK driver）的 onTurnMessage 发原始 SDK msg
-            # （{type, message:{content:[ContentBlock]}}），顶层无 content/event_type。
-            # 提取 message.content 的 text blocks 让 message 落地——否则 count=0、
-            # 前端 quick-chat 看不到输出。batch（flat {event_type,content}）不受影响。
-            if not content and not event_type:
-                sdk_type = msg.get("type")
-                if isinstance(sdk_type, str):
-                    event_type = sdk_type
-                    inner = msg.get("message")
-                    if isinstance(inner, dict):
-                        blocks = inner.get("content")
-                        if isinstance(blocks, list):
-                            content = "".join(
-                                str(b.get("text", ""))
-                                for b in blocks
-                                if isinstance(b, dict) and b.get("type") == "text"
-                            )
             channel = msg.get("channel") or _channel_from_event_type(event_type)
             # ql-20260617-001：usage / session_id 在每条 message 顶层（daemon 透传），
             # 与 content 是否为空无关，全部提取。
@@ -1211,6 +1226,14 @@ class DaemonService:
             }
             if agent_run_status is not None:
                 summary_payload["agent_run_status"] = agent_run_status
+            # ql-20260621：实时 token 透传到 run channel summary（与下方 session
+            # channel 的 tokens 事件同源）。订阅 agent_run:{run_id} 的 SSE 客户端
+            # 也能拿到累积 token，不必等 close。
+            if agent_run is not None:
+                if agent_run.input_tokens is not None:
+                    summary_payload["input_tokens"] = agent_run.input_tokens
+                if agent_run.output_tokens is not None:
+                    summary_payload["output_tokens"] = agent_run.output_tokens
             await redis.publish(channel_name, json.dumps(summary_payload))
         except Exception:
             log.warning(
@@ -1241,6 +1264,23 @@ class DaemonService:
                         "timestamp": log_payload["timestamp"],
                     }
                     await redis.publish(session_channel, json.dumps(session_payload))
+                # ql-20260621：实时 token 透传到 session channel。DB 里 AgentRun
+                # 的 input_tokens/output_tokens 在上方（1180-1189）已按「仅增不减」
+                # 更新并 commit，这里把它推给前端 SSE onTokens，让 UI 执行过程中
+                # 实时显示累积输入/输出词元，不必等 turn_completed / close 才有值。
+                # 与 run channel 的 summary_payload 同源（同一个 agent_run 对象）。
+                if agent_run.input_tokens is not None or agent_run.output_tokens is not None:
+                    token_payload: dict = {
+                        "event": "tokens",
+                        "session_id": str(agent_run.agent_session_id),
+                        "run_id": str(agent_run_id),
+                        "timestamp": now.isoformat().replace("+00:00", "Z"),
+                    }
+                    if agent_run.input_tokens is not None:
+                        token_payload["input_tokens"] = agent_run.input_tokens
+                    if agent_run.output_tokens is not None:
+                        token_payload["output_tokens"] = agent_run.output_tokens
+                    await redis.publish(session_channel, json.dumps(token_payload, default=str))
             except Exception:
                 log.warning(
                     "daemon_messages_session_redis_publish_failed",
@@ -1386,6 +1426,16 @@ class DaemonService:
         is_error: bool,
         subtype: str | None = None,
         result_summary: str | None = None,
+        # ── SDKResultSuccess usage / cost / duration 透传（修复 interactive 路径
+        # AgentRun.{total_cost_usd,num_turns,duration_ms,duration_api_ms,
+        # input_tokens,output_tokens} 全 NULL 问题）。None 表示 daemon 未传，
+        # 保留 AgentRun 原值不覆盖。
+        total_cost_usd: float | None = None,
+        num_turns: int | None = None,
+        duration_ms: int | None = None,
+        duration_api_ms: int | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
     ) -> AgentRun:
         """Close an interactive AgentRun from daemon SDK result (gap-3 / design §4).
 
@@ -1475,6 +1525,22 @@ class DaemonService:
             agent_run.error_code = "interactive_unknown_status"
 
         agent_run.finished_at = now
+        # SDKResultSuccess 透传：usage / cost / duration（None 不覆盖 AgentRun 原值，
+        # daemon 老版本不传这些字段时保持兼容）。对应 AgentRun.{total_cost_usd,
+        # num_turns,duration_ms,duration_api_ms,input_tokens,output_tokens}，
+        # 这几个列在 model.py 已存在（interactive 路径原先没写，导致全 NULL）。
+        if total_cost_usd is not None:
+            agent_run.total_cost_usd = total_cost_usd
+        if num_turns is not None:
+            agent_run.num_turns = num_turns
+        if duration_ms is not None:
+            agent_run.duration_ms = duration_ms
+        if duration_api_ms is not None:
+            agent_run.duration_api_ms = duration_api_ms
+        if input_tokens is not None:
+            agent_run.input_tokens = input_tokens
+        if output_tokens is not None:
+            agent_run.output_tokens = output_tokens
         if result_summary:
             # Redact via git_gateway redact_output to avoid leaking secrets in
             # the stored summary (mirrors batch completeLease path).
@@ -1525,6 +1591,11 @@ class DaemonService:
                 "run_id": str(agent_run.id),
                 "status": agent_run.status,
                 "exit_code": agent_run.exit_code,
+                # ql-20260621：终态 token 一并推送，前端 onTurnCompleted 收敛时
+                # 同步显示最终输入/输出词元（与执行中 onTokens 推送的累积值一致，
+                # 覆盖 daemon 老版本不实时推 token 的情形）。
+                "input_tokens": agent_run.input_tokens,
+                "output_tokens": agent_run.output_tokens,
                 "timestamp": now.isoformat().replace("+00:00", "Z"),
             },
         )
@@ -1796,6 +1867,7 @@ class DaemonService:
         prompt: str,
         model: str | None = None,
         manual_approval: bool = False,
+        ask_user_only: bool = False,
     ) -> SessionDispatchResult:
         """Create an interactive session + first-turn run + interactive lease.
 
@@ -1854,6 +1926,7 @@ class DaemonService:
                 prompt=prompt,
                 model=model,
                 manual_approval=manual_approval,
+                ask_user_only=ask_user_only,
             )
 
             # Backfill the triple binding fields + activate the session.
@@ -3251,6 +3324,168 @@ class DaemonService:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _extract_sdk_messages(msg: dict) -> list[dict]:
+    """Expand a raw SDK driver message (interactive mode) into one or more flat
+    log messages ``{event_type, content, channel, ...}``.
+
+    ql-006：interactive session（SDK driver）的 ``onTurnMessage`` 把 *原始* SDK
+    message 直接发给后端，形状为 ``{type:"assistant"|"user", message:{role,
+    content:[ContentBlock]}}``。与 batch mode 不同（task-runner ``_eventToMessages``
+    已把每个 content block 拆成 [ASSISTANT]/[THINKING]/[TOOL_USE]/[TOOL_RESULT]
+    行），interactive mode 把整块 block 数组交给后端。旧实现只拼 ``type=="text"``
+    的 blocks，丢弃 thinking/tool_use/tool_result，导致 ``agent_run_logs`` 只有纯
+    文本 stdout，前端 ToolCallCard / thinking 面板永不渲染。
+
+    本函数 1:1 复现 ``sillyhub-daemon/dist/task-runner.js`` 的 ``_eventToMessages``
+    （L980-1126）规则，让 interactive-mode 日志与 batch-mode 字节兼容：
+
+      assistant.content:
+        - ``text``       → 1× ``[ASSISTANT] <text>`` (stdout)
+        - ``thinking``   → 1× ``[THINKING] <text[:2000]>`` (stdout)
+        - ``tool_use``   → 2×: ``[TOOL_USE] <name>: <args>`` (stdout)
+                           + ``{tool,args,timestamp,status,success}`` (tool_call)
+      user.content:
+        - ``tool_result`` → 1× ``[TOOL_RESULT] <content[:3000]>`` (stdout)
+
+    usage / session_id（真实 SDK 形态在 ``message.usage``，daemon 也可能透传到顶层）
+    只注入到产出的*第一条* flat record，避免同一 SDK message 的多个 sibling block
+    重复累加 usage。返回 ``[]`` 表示不可识别的形状（调用方视作跳过）。
+    """
+    sdk_type = msg.get("type")
+    inner = msg.get("message")
+    if not isinstance(sdk_type, str) or not isinstance(inner, dict):
+        return []
+    blocks = inner.get("content")
+    if not isinstance(blocks, list):
+        return []
+
+    # Carried fields injected onto the FIRST produced record only.
+    base: dict = {}
+    inner_usage = inner.get("usage")
+    if isinstance(inner_usage, dict):
+        base["usage"] = inner_usage
+    top_usage = msg.get("usage")
+    if isinstance(top_usage, dict) and "usage" not in base:
+        base["usage"] = top_usage
+    session_id = msg.get("session_id") or inner.get("session_id")
+    if isinstance(session_id, str) and session_id:
+        base["session_id"] = session_id
+
+    out: list[dict] = []
+    stamped = False
+
+    def stamp(rec: dict) -> dict:
+        nonlocal stamped
+        if not stamped and base:
+            rec.update(base)
+            stamped = True
+        return rec
+
+    for b in blocks:
+        if not isinstance(b, dict):
+            continue
+        btype = b.get("type")
+
+        if btype == "text":
+            text = str(b.get("text", "") or "")
+            if text:
+                out.append(
+                    stamp(
+                        {
+                            "event_type": "text",
+                            "content": f"[ASSISTANT] {text}",
+                            "channel": "stdout",
+                        }
+                    )
+                )
+
+        elif btype == "thinking":
+            text = str(b.get("thinking", b.get("text", "")) or "")
+            if text:
+                preview = text[:2000] + ("..." if len(text) > 2000 else "")
+                out.append(
+                    stamp(
+                        {
+                            "event_type": "text",
+                            "content": f"[THINKING] {preview}",
+                            "channel": "stdout",
+                        }
+                    )
+                )
+
+        elif btype == "tool_use":
+            name = str(b.get("name", "") or "unknown") or "unknown"
+            raw_input = b.get("input")
+            input_obj = raw_input if isinstance(raw_input, dict) else {}
+            # stdout text line：command 优先，否则整体 JSON（对齐 task-runner L1068-1083）
+            cmd = str(input_obj.get("command", "") or "")
+            if cmd:
+                args_line = cmd
+            else:
+                try:
+                    args_line = json.dumps(input_obj)
+                except (TypeError, ValueError):
+                    args_line = ""
+            stdout_content = f"[TOOL_USE] {name}: {args_line}"[:2000]
+            out.append(
+                stamp(
+                    {
+                        "event_type": "tool_use",
+                        "content": stdout_content,
+                        "channel": "stdout",
+                    }
+                )
+            )
+            # 第二条：tool_call channel 的 JSON，前端 parseToolCallContent 渲染
+            # ToolCallCard（对齐 task-runner.js L1091-1115 的 tc_content 格式）。
+            ts = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+            tc_payload = {
+                "tool": name,
+                "args": input_obj,
+                "timestamp": ts,
+                "status": "allowed",
+                "success": True,
+            }
+            try:
+                tc_json = json.dumps(tc_payload)
+            except (TypeError, ValueError):
+                tc_payload["args"] = {}
+                tc_json = json.dumps(tc_payload)
+            out.append(
+                {
+                    "event_type": "tool_use",
+                    "content": tc_json,
+                    "channel": "tool_call",
+                }
+            )
+
+        elif btype == "tool_result":
+            # tool_result content 可能是 str 或 [{type:"text",text:...}] blocks
+            raw = b.get("content")
+            if isinstance(raw, list):
+                parts = []
+                for rb in raw:
+                    if isinstance(rb, dict):
+                        parts.append(str(rb.get("text", "")))
+                    else:
+                        parts.append(str(rb))
+                text = "".join(parts)
+            else:
+                text = str(raw or "")
+            if text:
+                out.append(
+                    stamp(
+                        {
+                            "event_type": "tool_result",
+                            "content": f"[TOOL_RESULT] {text[:3000]}",
+                            "channel": "stdout",
+                        }
+                    )
+                )
+
+    return out
 
 
 def _channel_from_event_type(event_type: str) -> str:

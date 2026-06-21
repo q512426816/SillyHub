@@ -331,6 +331,7 @@ class RunPlacementService:
         prompt: str,
         model: str | None,
         manual_approval: bool = False,
+        ask_user_only: bool = False,
     ) -> "RunPlacementService.InteractiveDispatch":
         """Create the long-lived interactive lease for a new session.
 
@@ -383,6 +384,7 @@ class RunPlacementService:
         if model:
             metadata["model"] = model
         metadata["manual_approval"] = bool(manual_approval)
+        metadata["ask_user_only"] = bool(ask_user_only)
 
         # Raw SQL mirrors dispatch_to_daemon so we can set kind/agent_run_id=NULL
         # without touching the batch ORM insert path. NULL lease_expires_at is

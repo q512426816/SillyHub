@@ -302,8 +302,10 @@ export default function ProjectPlansPage() {
       fixed: "right",
       width: 300,
       render: (_v: unknown, p: PsProjectPlan) => {
-        // RBAC:编辑/删除按 project_manager_id 归属(无 create_user_id 字段)。
-        const isManager = matchAnyUser([p.project_manager_id], currentUserId);
+        // RBAC:平台超管 bypass,否则按 project_manager_id 归属(无 create_user_id 字段)。
+        const isManager =
+          !!currentUser?.is_platform_admin ||
+          matchAnyUser([p.project_manager_id], currentUserId);
         return (
           <div className="flex gap-1">
             <AntButton

@@ -1,13 +1,18 @@
 """Session-level canUseTool permission orchestration (task-08 / FR-07 / D-007@v1).
 
 This service lives between the daemon WS uplink (PERMISSION_REQUEST) and the
-daemon WS downlink (PERMISSION_RESPONSE), with a 5-minute timeout enforcer that
-auto-denies any request the user never answered. It is **stateless across
-process restarts** — the in-memory ``_timers`` dict tracks pending requests
-only for the lifetime of this process; the daemon-side ``PermissionResolver``
-fallback timer + SDK AbortSignal are the final fail-closed safety net
-(D-007@v1). No permission DB table is introduced: approvals are ephemeral and
-the daemon resolver is the source of truth for whether a tool call proceeded.
+daemon WS downlink (PERMISSION_RESPONSE). It handles two flavors of request:
+
+* **Ordinary canUseTool approval** (``dialog_kind is None``): ephemeral, in-memory
+  ``_timers`` registry + a 5-minute timeout enforcer that auto-denies any
+  request the user never answered. Stateless across process restarts — the
+  daemon-side ``PermissionResolver`` fallback timer + SDK AbortSignal are the
+  final fail-closed safety net (D-007@v1). No DB row is written for this path.
+
+* **AskUserQuestion dialog** (``dialog_kind`` set): long-lived, user-facing
+  question that may wait indefinitely. Persisted in ``session_dialog_requests``
+  so it survives a frontend page refresh; the 5min timeout is *not* armed. The
+  REST ``GET /sessions/{id}/dialogs`` endpoint replays pending rows.
 
 Reuses DaemonService helpers verbatim (task-05):
   - ``_publish_session_event(session_id, payload)`` → ``agent_session:{id}`` Redis
@@ -20,10 +25,14 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, Literal
+
+from sqlalchemy import select
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.modules.daemon.model import SessionDialogRequest
 from app.modules.daemon.protocol import (
     PermissionRequestPayload,
 )
@@ -69,6 +78,25 @@ class DaemonPermissionManualDisabled(AppError):
     http_status = 409
 
 
+class DaemonDialogNotFound(AppError):
+    """REST response arrived for a dialog request_id that has no pending DB row.
+
+    Distinct from ``DaemonPermissionNotFound`` (ephemeral timer miss): dialogs
+    are persisted, so this fires only when the row was already answered,
+    cancelled, or never existed (client race / stale card after refresh).
+    """
+
+    code = "HTTP_404_DAEMON_DIALOG_NOT_FOUND"
+    http_status = 404
+
+
+class DaemonDialogAlreadyResolved(AppError):
+    """REST response arrived for a dialog request that was already answered."""
+
+    code = "HTTP_409_DAEMON_DIALOG_ALREADY_RESOLVED"
+    http_status = 409
+
+
 @dataclass(frozen=True, slots=True)
 class PermissionResponseRead:
     """REST response body for POST /sessions/{id}/permissions/{req}/response."""
@@ -79,11 +107,54 @@ class PermissionResponseRead:
     accepted: bool
 
 
+@dataclass(frozen=True, slots=True)
+class SessionDialogRead:
+    """REST DTO for a persisted dialog request (GET /sessions/{id}/dialogs)."""
+
+    id: uuid.UUID
+    session_id: uuid.UUID
+    run_id: uuid.UUID
+    request_id: str
+    tool_name: str
+    dialog_kind: str | None
+    dialog_payload: dict | None
+    status: str
+    answer: dict | None
+    created_at: datetime
+    answered_at: datetime | None
+
+    @classmethod
+    def from_model(cls, row: SessionDialogRequest) -> "SessionDialogRead":
+        return cls(
+            id=row.id,
+            session_id=row.session_id,
+            run_id=row.run_id,
+            request_id=row.request_id,
+            tool_name=row.tool_name,
+            dialog_kind=row.dialog_kind,
+            dialog_payload=row.dialog_payload,
+            status=row.status or "pending",
+            answer=row.answer,
+            created_at=row.created_at,
+            answered_at=row.answered_at,
+        )
+
+
 # ── Service ──────────────────────────────────────────────────────────────────
+
+# Module-level shared timer registry: per-request DaemonPermissionService instances
+# must share the same dict so handle_permission_request (WS uplink) and
+# respond_permission (REST downlink) see the same timers. Process restart clears it.
+_permission_timers: dict[str, asyncio.Task[None]] = {}
 
 
 class DaemonPermissionService:
     """Session-level canUseTool approval orchestration (task-08 / D-007@v1)."""
+
+    @property
+    def _timers(self) -> dict[str, asyncio.Task[None]]:
+        """Delegate to module-level shared registry (not per-instance)."""
+        return _permission_timers
 
     def __init__(
         self,
@@ -97,9 +168,6 @@ class DaemonPermissionService:
         # Per-instance timeout override (tests inject short values to bypass
         # the real 5min sleep; production uses PERMISSION_TIMEOUT_SEC).
         self._timeout_sec = timeout_sec
-        # request_id → asyncio.Task (5min timeout enforcer). In-memory only;
-        # process restart clears it; daemon resolver is the fail-closed net.
-        self._timers: dict[str, asyncio.Task[None]] = {}
 
     # ── WS uplink: PERMISSION_REQUEST (daemon → server) ──────────────────────
 
@@ -108,7 +176,7 @@ class DaemonPermissionService:
         runtime_id: uuid.UUID,
         payload: PermissionRequestPayload,
     ) -> None:
-        """WS PERMISSION_REQUEST handler: validate + publish SSE + arm 5min timer.
+        """WS PERMISSION_REQUEST handler: validate + publish SSE + (maybe) arm timer.
 
         Validation (fail-soft: warn + drop, never close the WS — task-03 NFR-05):
           1. session exists (read-only; lock lives in the REST response endpoint)
@@ -118,16 +186,22 @@ class DaemonPermissionService:
           5. current run exists, status ∈ ACTIVE_TURN_STATUSES,
              and run.id == payload.run_id
 
-        On success: publish ``permission_request`` SSE + arm 5min timer.
+        On success:
+          - **dialog** (``payload.dialog_kind`` set): persist a
+            ``session_dialog_requests`` row (status=pending), publish a
+            ``permission_request`` SSE carrying ``dialog_kind`` +
+            ``dialog_payload``. The 5min timeout is **not** armed — dialogs
+            may wait indefinitely for a human answer.
+          - **plain approval**: publish ``permission_request`` SSE + arm the
+            5min auto-deny timer (unchanged D-007@v1 behavior).
         """
         session_id = payload.session_id
         run_id = payload.run_id
         request_id = payload.request_id
+        is_dialog = payload.dialog_kind is not None
 
         # Reuse DaemonService's read-only current-run lookup; session fetch is
         # also read-only here — write-side locking is the REST response path's job.
-        from sqlalchemy import select
-
         from app.modules.agent.model import AgentSession
 
         session_obj = (
@@ -188,21 +262,42 @@ class DaemonPermissionService:
             )
             return
 
-        # Publish permission_request SSE for the frontend approval card.
+        # Publish permission_request SSE for the frontend approval card. For
+        # dialogs the event carries dialog_kind + dialog_payload so the card
+        # can render the question+options instead of an allow/deny prompt.
+        sse_payload: dict[str, object] = {
+            "event": "permission_request",
+            "session_id": str(session_id),
+            "run_id": str(run_id),
+            "request_id": request_id,
+            "tool_name": payload.tool_name,
+            "input": payload.input,
+        }
+        if payload.tool_use_id:
+            sse_payload["tool_use_id"] = payload.tool_use_id
+        if is_dialog:
+            sse_payload["dialog_kind"] = payload.dialog_kind
+            sse_payload["dialog_payload"] = payload.dialog_payload
         await self._svc._publish_session_event(  # type: ignore[attr-defined]
-            session_id,
-            {
-                "event": "permission_request",
-                "session_id": str(session_id),
-                "run_id": str(run_id),
-                "request_id": request_id,
-                "tool_name": payload.tool_name,
-                "input": payload.input,
-                **({"tool_use_id": payload.tool_use_id} if payload.tool_use_id else {}),
-            },
+            session_id, sse_payload
         )
 
-        # Arm 5min timeout. Use a fresh task so a daemon disconnect can't cancel it.
+        if is_dialog:
+            # Persist the dialog so it survives a frontend refresh. Idempotent
+            # on request_id (unique) — a daemon replay upserts the same row
+            # instead of forking a second pending card.
+            await self._upsert_dialog_row(payload)
+            log.info(
+                "permission_request_accepted_dialog",
+                session_id=str(session_id),
+                request_id=request_id,
+                tool_name=payload.tool_name,
+                dialog_kind=payload.dialog_kind,
+            )
+            return
+
+        # Plain canUseTool approval: arm 5min timeout. Use a fresh task so a
+        # daemon disconnect can't cancel it.
         if request_id in self._timers:
             # Duplicate request_id (UUID collision / daemon replay): replace.
             self._timers[request_id].cancel()
@@ -216,6 +311,84 @@ class DaemonPermissionService:
             tool_name=payload.tool_name,
         )
 
+    # ── Dialog persistence helper ────────────────────────────────────────────
+
+    async def _upsert_dialog_row(self, payload: PermissionRequestPayload) -> SessionDialogRequest:
+        """Idempotently persist a pending dialog row keyed by ``request_id``.
+
+        A daemon replay (same request_id sent twice) must not fork a second
+        pending card, so we look up by the unique ``request_id`` first and
+        refresh the mutable fields in place rather than inserting a duplicate.
+        The row is committed immediately so a concurrent REST ``response``
+        call (different request, same DB session) sees it.
+        """
+        assert payload.dialog_kind is not None  # caller guarantees this
+        session = self._svc._session  # type: ignore[attr-defined]
+        existing = (
+            await session.execute(
+                select(SessionDialogRequest).where(
+                    SessionDialogRequest.request_id == payload.request_id
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            # Refresh mutable fields in case the daemon re-sent with updated
+            # payload; keep status/answer untouched (a pending replay must not
+            # clobber an in-flight or already-answered row).
+            existing.dialog_payload = payload.dialog_payload
+            existing.run_id = payload.run_id
+            existing.session_id = payload.session_id
+            existing.tool_name = payload.tool_name
+            existing.dialog_kind = payload.dialog_kind
+            await session.commit()
+            await session.refresh(existing)
+            return existing
+        row = SessionDialogRequest(
+            session_id=payload.session_id,
+            run_id=payload.run_id,
+            request_id=payload.request_id,
+            tool_name=payload.tool_name,
+            dialog_kind=payload.dialog_kind,
+            dialog_payload=payload.dialog_payload,
+            status="pending",
+        )
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+        return row
+
+    async def list_pending_dialogs(
+        self,
+        user_id: uuid.UUID,
+        session_id: uuid.UUID,
+    ) -> list[SessionDialogRead]:
+        """Return pending dialog requests for a session (page-refresh recovery).
+
+        Ownership is enforced via ``_get_owned_session_for_update`` so a
+        cross-user session surfaces as 404 without existence leak, mirroring
+        the rest of the daemon REST surface.
+        """
+        # Read-only ownership check (the lock is harmless for a GET and keeps
+        # the helper self-contained; we commit immediately to release it).
+        await self._svc._get_owned_session_for_update(session_id, user_id)  # type: ignore[attr-defined]
+        await self._svc._session.commit()  # type: ignore[attr-defined]
+
+        rows = (
+            (
+                await self._svc._session.execute(  # type: ignore[attr-defined]
+                    select(SessionDialogRequest)
+                    .where(
+                        SessionDialogRequest.session_id == session_id,
+                        SessionDialogRequest.status == "pending",
+                    )
+                    .order_by(SessionDialogRequest.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [SessionDialogRead.from_model(r) for r in rows]
+
     # ── REST downlink: POST .../permissions/{request_id}/response ────────────
 
     async def respond_permission(
@@ -225,18 +398,27 @@ class DaemonPermissionService:
         request_id: str,
         decision: Literal["allow", "deny"],
         message: str | None = None,
+        dialog_result: dict | None = None,
     ) -> PermissionResponseRead:
         """REST response from the user: send PERMISSION_RESPONSE to the daemon.
 
-        Validation order:
+        Two paths share this entry point (the REST surface is uniform so the
+        frontend does not need to know which kind of card it is dismissing):
+
+        * **Dialog** (``dialog_result`` is not None, or ``request_id`` matches a
+          ``session_dialog_requests`` row): look up the persisted row, flip it
+          to ``answered`` (404 if missing/unknown, 409 if already answered),
+          send PERMISSION_RESPONSE carrying ``dialog_result``. No timer to
+          cancel — dialogs are not timeout-enforced.
+
+        * **Plain canUseTool approval**: the existing timer-based path.
+
+        Validation order (shared):
           1. session owned by user (404 if not, no existence leak);
           2. session.status active; session.config.manual_approval is True;
           3. current run exists;
-          4. request_id has a pending timer (404 if missing → already timed out
-             or never existed; 409 already_resolved is not raised here because
-             timers are cancelled atomically);
-          5. cancel the timer, send WS downlink (504 if runtime offline),
-             publish permission_resolved SSE.
+          4. resolve request_id → dialog row OR pending timer (404 otherwise);
+          5. send WS downlink (504 if runtime offline), publish permission_resolved SSE.
         """
         session_obj = await self._svc._get_owned_session_for_update(  # type: ignore[attr-defined]
             session_id, user_id
@@ -262,7 +444,26 @@ class DaemonPermissionService:
                 details={"session_id": str(session_id)},
             )
 
-        # request_id lifecycle: cancel timer under no lock (single-event-loop access).
+        # ── Resolve request_id → dialog row OR plain-approval timer ────────
+        # A dialog response is signalled either by the caller passing
+        # ``dialog_result`` explicitly, or by a matching pending DB row. We
+        # check the DB first because dialogs are the persistent case; a plain
+        # approval has no row and falls through to the timer lookup.
+        dialog_row = (
+            await self._svc._session.execute(  # type: ignore[attr-defined]
+                select(SessionDialogRequest).where(SessionDialogRequest.request_id == request_id)
+            )
+        ).scalar_one_or_none()
+        if dialog_row is not None:
+            return await self._respond_dialog(
+                session_obj=session_obj,
+                dialog_row=dialog_row,
+                decision=decision,
+                message=message,
+                dialog_result=dialog_result,
+            )
+
+        # Plain canUseTool approval: request_id lifecycle via the in-memory timer.
         timer = self._timers.pop(request_id, None)
         if timer is None:
             # Either already resolved/timeout, or daemon never sent a matching
@@ -327,6 +528,96 @@ class DaemonPermissionService:
             session_id=str(session_id),
             request_id=request_id,
             decision=decision,
+        )
+        return PermissionResponseRead(
+            session_id=session_id,
+            request_id=request_id,
+            decision=decision,
+            accepted=True,
+        )
+
+    async def _respond_dialog(
+        self,
+        *,
+        session_obj: Any,
+        dialog_row: SessionDialogRequest,
+        decision: Literal["allow", "deny"],
+        message: str | None,
+        dialog_result: dict | None,
+    ) -> PermissionResponseRead:
+        """Dialog branch of ``respond_permission`` (persisted, no timer)."""
+        session_id = dialog_row.session_id
+        request_id = dialog_row.request_id
+
+        if dialog_row.status == "answered":
+            raise DaemonDialogAlreadyResolved(
+                f"Dialog request '{request_id}' was already answered.",
+                details={"session_id": str(session_id), "request_id": request_id},
+            )
+        if dialog_row.status == "cancelled":
+            raise DaemonDialogNotFound(
+                f"Dialog request '{request_id}' was cancelled.",
+                details={"session_id": str(session_id), "request_id": request_id},
+            )
+        if session_obj.runtime_id is None:
+            raise DaemonSessionNotActive(
+                f"AgentSession '{session_id}' has no runtime binding.",
+                details={"session_id": str(session_id)},
+            )
+
+        ws_payload: dict[str, object] = {
+            "session_id": str(session_id),
+            "request_id": request_id,
+            "decision": decision,
+        }
+        if message is not None:
+            ws_payload["message"] = message
+        if dialog_result is not None:
+            ws_payload["dialog_result"] = dialog_result
+
+        sent = await self._hub.send_permission_response(session_obj.runtime_id, ws_payload)
+        if not sent:
+            # Dialogs have no backend timeout to re-arm; surface 504 so the
+            # frontend can retry. The DB row stays pending (untouched below)
+            # so a retry against the same request_id is idempotent.
+            raise DaemonRuntimeOffline(
+                f"daemon runtime '{session_obj.runtime_id}' offline; "
+                f"dialog response could not be delivered.",
+                details={
+                    "runtime_id": str(session_obj.runtime_id),
+                    "session_id": str(session_id),
+                    "request_id": request_id,
+                },
+            )
+
+        # Flip the row to answered only after the WS send succeeded — a 504
+        # must leave the dialog pending so the user can retry.
+        dialog_row.status = "answered"
+        dialog_row.answer = dialog_result
+        dialog_row.answered_at = datetime.now(UTC)
+        # answered_by is set by the caller via the user_id; threaded through
+        # session_obj would require an extra param, so we read it off the
+        # owned session's user_id (already validated upstream).
+        dialog_row.answered_by = session_obj.user_id
+        await self._svc._session.commit()  # type: ignore[attr-defined]
+
+        await self._svc._publish_session_event(  # type: ignore[attr-defined]
+            session_id,
+            {
+                "event": "permission_resolved",
+                "session_id": str(session_id),
+                "request_id": request_id,
+                "decision": decision,
+                "reason": "manual",
+                "dialog_kind": dialog_row.dialog_kind,
+            },
+        )
+        log.info(
+            "dialog_response_sent",
+            session_id=str(session_id),
+            request_id=request_id,
+            decision=decision,
+            dialog_kind=dialog_row.dialog_kind,
         )
         return PermissionResponseRead(
             session_id=session_id,

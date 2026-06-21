@@ -25,6 +25,7 @@ from app.modules.ppm.common.crud import Page
 from app.modules.ppm.common.export import ColumnDef, excel_response, rows_to_workbook
 from app.modules.ppm.task.schema import (
     ExecutePlanReq,
+    PlanTaskBrief,
     PlanTaskCreate,
     PlanTaskPageReq,
     PlanTaskResponse,
@@ -33,6 +34,7 @@ from app.modules.ppm.task.schema import (
     TaskExecutePageReq,
     TaskExecuteResponse,
     TaskExecuteUpdate,
+    TaskExecuteWithPlanResponse,
     WorkHourCreate,
     WorkHourPageReq,
     WorkHourResponse,
@@ -139,8 +141,8 @@ async def page_plan_task(
     user: TaskReadUser,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
-    user_id: uuid.UUID | None = Query(None),
-    project_id: uuid.UUID | None = Query(None),
+    user_id: str | None = Query(None),
+    project_id: str | None = Query(None),
     plan_status: str | None = Query(None, alias="status"),
     month: str | None = Query(None),
     year: str | None = Query(None),
@@ -179,8 +181,8 @@ async def execute_plan_task(
 async def export_plan_task_excel(
     session: SessionDep,
     user: TaskExportUser,
-    user_id: uuid.UUID | None = Query(None),
-    project_id: uuid.UUID | None = Query(None),
+    user_id: str | None = Query(None),
+    project_id: str | None = Query(None),
     plan_status: str | None = Query(None, alias="status"),
     month: str | None = Query(None),
     year: str | None = Query(None),
@@ -230,7 +232,7 @@ async def personal_plan_task_page(
     user: CurrentUser,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
-    project_id: uuid.UUID | None = Query(None),
+    project_id: str | None = Query(None),
     plan_status: str | None = Query(None, alias="status"),
     month: str | None = Query(None),
     year: str | None = Query(None),
@@ -326,9 +328,9 @@ async def page_task_execute(
     user: TaskReadUser,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
-    plan_task_id: uuid.UUID | None = Query(None),
+    plan_task_id: str | None = Query(None),
     execute_status: str | None = Query(None, alias="status"),
-    execute_user_id: uuid.UUID | None = Query(None),
+    execute_user_id: str | None = Query(None),
     order_by: str | None = Query(None),
     order: str = Query("desc"),
 ) -> Page[TaskExecuteResponse]:
@@ -352,11 +354,39 @@ async def task_execute_by_date_range(
     user: CurrentUser,
     start: datetime = Query(...),
     end: datetime = Query(...),
-    execute_user_id: uuid.UUID | None = Query(None),
+    execute_user_id: str | None = Query(None),
 ) -> list[TaskExecuteResponse]:
     svc = TaskExecuteService(session)
     items = await svc.list_by_date_range(start, end, execute_user_id)
     return [TaskExecuteResponse.model_validate(e) for e in items]
+
+
+@router.get(
+    "/task-execute/list-by-date-range-with-plan",
+    response_model=list[TaskExecuteWithPlanResponse],
+)
+async def task_execute_with_plan_by_date_range(
+    session: SessionDep,
+    user: CurrentUser,
+    start: datetime = Query(...),
+    end: datetime = Query(...),
+    project_id: str | None = Query(None),
+    execute_user_ids: list[str] | None = Query(None),
+) -> list[TaskExecuteWithPlanResponse]:
+    """任务执行 + 关联计划任务(看板「团队实际工作表」展示任务名/项目)。
+
+    按 actual_start_time 区间 + 可选多用户 + 可选项目过滤;
+    批量 join PlanTask 供前端展示任务标题/项目名。
+    """
+    svc = TaskExecuteService(session)
+    pairs = await svc.list_by_date_range_with_plan(start, end, execute_user_ids, project_id)
+    return [
+        TaskExecuteWithPlanResponse(
+            **TaskExecuteResponse.model_validate(e).model_dump(),
+            plan_task=PlanTaskBrief.model_validate(p) if p is not None else None,
+        )
+        for e, p in pairs
+    ]
 
 
 # ===========================================================================
@@ -418,8 +448,8 @@ async def page_work_hour(
     user: WorkHourReadUser,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
-    filter_user_id: uuid.UUID | None = Query(None, alias="user_id"),
-    filter_project_id: uuid.UUID | None = Query(None, alias="project_id"),
+    filter_user_id: str | None = Query(None, alias="user_id"),
+    filter_project_id: str | None = Query(None, alias="project_id"),
     work_date_start: date | None = Query(None),
     work_date_end: date | None = Query(None),
     filter_type: int | None = Query(None, alias="type"),
@@ -448,7 +478,7 @@ async def stat_work_hour_by_user(
     user: WorkHourStatUser,
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
-    filter_user_id: uuid.UUID | None = Query(None, alias="user_id"),
+    filter_user_id: str | None = Query(None, alias="user_id"),
 ) -> WorkHourStatResponse:
     svc = WorkHourService(session)
     rows = await svc.stat_by_user(start_date, end_date, filter_user_id)
@@ -469,7 +499,7 @@ async def stat_work_hour_by_project(
     user: WorkHourStatUser,
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
-    filter_project_id: uuid.UUID | None = Query(None, alias="project_id"),
+    filter_project_id: str | None = Query(None, alias="project_id"),
 ) -> WorkHourStatResponse:
     svc = WorkHourService(session)
     rows = await svc.stat_by_project(start_date, end_date, filter_project_id)
@@ -488,8 +518,8 @@ async def stat_work_hour_by_project(
 async def export_work_hour_excel(
     session: SessionDep,
     user: WorkHourReadUser,
-    filter_user_id: uuid.UUID | None = Query(None, alias="user_id"),
-    filter_project_id: uuid.UUID | None = Query(None, alias="project_id"),
+    filter_user_id: str | None = Query(None, alias="user_id"),
+    filter_project_id: str | None = Query(None, alias="project_id"),
     work_date_start: date | None = Query(None),
     work_date_end: date | None = Query(None),
     filter_type: int | None = Query(None, alias="type"),

@@ -850,8 +850,15 @@ async def migrate_ps_project_plan(db: AsyncSession, maps: Maps, stats: Stats) ->
         objs.append(
             PsProjectPlan(
                 id=ppid,
-                # 目标 project_id 是 String（源字符串，可能是 project id 或名字）
-                project_id=str(r["project_id"]) if r["project_id"] else "",
+                # project_id 目标 UUID FK → 映射为目标 project UUID（源 ppm_project_maintenance.id）；
+                # fallback_keep=False：未映射返回 None（列已是 uuid，不保留源 Long ID 防 ALTER/插入失败）
+                project_id=map_fk(
+                    maps,
+                    "project",
+                    r["project_id"],
+                    "ps_project_plan.project_id",
+                    fallback_keep=False,
+                ),
                 project_name=clean_str(r["project_name"], 255),
                 # project_manager_id 目标 String，保留源字符串
                 project_manager_id=clean_str(r["project_manager_id"], 64),
@@ -1398,9 +1405,11 @@ async def main() -> None:
         print("==> [8] ppm plan 模板簇 + ps 计划簇")
         await migrate_plan_node(db, maps, stats)
         await migrate_plan_node_detail(db, maps, stats)
-        await migrate_plan_node_module(db, maps, stats)
         await migrate_ps_project_plan(db, maps, stats)
         await migrate_ps_plan_node(db, maps, stats)
+        # module.plan_node_id 实际指向 ps_plan_node(里程碑),须在 migrate_ps_plan_node 之后
+        # 执行,否则 maps["ps_plan_node"] 未构建 → map_fk 全失败 → 孤儿(QL ql-20260621-004)
+        await migrate_plan_node_module(db, maps, stats)
         await migrate_ps_plan_node_detail(db, maps, stats)
         await migrate_ps_detail_process(db, maps, stats)
         await db.commit()
