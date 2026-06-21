@@ -378,3 +378,10 @@
 状态：进行中
 文件：backend/app/modules/agent/service.py、backend/app/modules/agent/router.py、backend/app/modules/daemon/router.py、backend/app/modules/agent/coordinator.py
 依据：db.py get_session_factory() 开短命 session（async with 结束即归还连接池）；不改 pool_size/max_overflow
+
+## ql-20260621-001-5c9e | 2026-06-21 11:30:00 | ppm 所有人员字段改 PpmUserSelect 下拉(责任人/验证人/执行人按源范围过滤)
+状态：已完成
+文件：
+- frontend/src/app/(dashboard)/ppm/work-hours/page.tsx (userId → res=user)
+- frontend/src/app/(dashboard)/ppm/task-plans/page.tsx (userId → res=projectMember + pm_project_id)
+- frontend/src/app/(dashboard)/ppm/problem-changes/page.tsx (dutyUserId → res=projectMember + pm_project_id)

@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Table, type TableProps } from "antd";
 
 import { Button } from "@/components/ui/button";
+import { PpmUserSelect } from "@/components/ppm-user-select";
 import { ApiError } from "@/lib/api";
 import {
   createWorkHour,
@@ -493,13 +494,16 @@ function WorkHourDrawer({
               ))}
             </select>
           </div>
-          <div>
-            <label className="text-[11px] text-muted-foreground">录入人 ID</label>
-            <input
-              value={userId}
-              onChange={(e) => setUserId(e.target.value)}
-              className={`mt-0.5 ${inputCls}`}
-            />
+          <div className="col-span-2">
+            <label className="text-[11px] text-muted-foreground">录入人</label>
+            <div className="mt-0.5">
+              <PpmUserSelect
+                res="user"
+                value={userId}
+                onChange={(v) => setUserId((v as string | null) ?? "")}
+                placeholder="请选择录入人"
+              />
+            </div>
           </div>
           <div className="col-span-2">
             <label className="text-[11px] text-muted-foreground">说明</label>

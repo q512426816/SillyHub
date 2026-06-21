@@ -15,6 +15,10 @@ import { Table, type TableProps, Tag } from "antd";
 
 import { Button } from "@/components/ui/button";
 import { PROBLEM_CHANGE_STATUS_TEXT } from "@/components/ppm-status-actions";
+import {
+  PpmUserSelect,
+  type PpmSelectOption,
+} from "@/components/ppm-user-select";
 import { ApiError } from "@/lib/api";
 import {
   createProblemChange,
@@ -454,14 +458,31 @@ function ChangeDrawer({
               />
             </Field>
           )}
-          <div className="grid grid-cols-2 gap-2">
-            <Field label="责任人 ID">
-              <input value={dutyUserId} onChange={(e) => setDutyUserId(e.target.value)} disabled={!editable} className={inputCls} />
-            </Field>
-            <Field label="责任人名">
-              <input value={dutyUserName} onChange={(e) => setDutyUserName(e.target.value)} disabled={!editable} className={inputCls} />
-            </Field>
-          </div>
+          <Field label="责任人">
+            <div className="-mt-0.5">
+              <PpmUserSelect
+                res="projectMember"
+                searchData={{ pm_project_id: projectId || null }}
+                value={dutyUserId}
+                disabled={!editable}
+                onChange={(v) => {
+                  setDutyUserId((v as string | null) ?? "");
+                  if (!v) setDutyUserName("");
+                }}
+                onLoadedOptions={(opts: PpmSelectOption[]) => {
+                  const cur = dutyUserId;
+                  if (!cur) return;
+                  const hit = opts.find((o) => o.value === cur);
+                  if (hit && hit.label && hit.label !== dutyUserName) {
+                    setDutyUserName(String(hit.label));
+                  }
+                }}
+                placeholder={
+                  projectId ? "请选择责任人" : "请先选择项目"
+                }
+              />
+            </div>
+          </Field>
           <div className="grid grid-cols-2 gap-2">
             <Field label="计划开始">
               <input value={planStart} onChange={(e) => setPlanStart(e.target.value)} placeholder="YYYY-MM-DD" disabled={!editable} className={inputCls} />

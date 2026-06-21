@@ -15,6 +15,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Table, type TableProps, Tag } from "antd";
 
 import { Button } from "@/components/ui/button";
+import {
+  PpmUserSelect,
+  type PpmSelectOption,
+} from "@/components/ppm-user-select";
 import { ApiError } from "@/lib/api";
 import {
   createPlanTask,
@@ -508,21 +512,31 @@ function TaskDrawer({
               className={`mt-0.5 w-full rounded border border-input bg-background px-2.5 py-1.5 text-sm focus:border-ring focus:outline-none`}
             />
           </div>
-          <div>
+          <div className="col-span-2">
             <label className="text-[11px] text-muted-foreground">负责人</label>
-            <input
-              value={userName}
-              onChange={(e) => setUserName(e.target.value)}
-              className={`mt-0.5 ${inputCls}`}
-            />
-          </div>
-          <div>
-            <label className="text-[11px] text-muted-foreground">负责人 ID</label>
-            <input
-              value={userId}
-              onChange={(e) => setUserId(e.target.value)}
-              className={`mt-0.5 ${inputCls}`}
-            />
+            <div className="mt-0.5">
+              <PpmUserSelect
+                res={projectId ? "projectMember" : "user"}
+                searchData={
+                  projectId ? { pm_project_id: projectId } : undefined
+                }
+                value={userId}
+                onChange={(v) => {
+                  setUserId((v as string | null) ?? "");
+                  // userName 留空,提交时由后端 user_id 反查;若有选项则回填 label
+                  if (!v) setUserName("");
+                }}
+                onLoadedOptions={(opts: PpmSelectOption[]) => {
+                  const cur = userId;
+                  if (!cur) return;
+                  const hit = opts.find((o) => o.value === cur);
+                  if (hit && hit.label && hit.label !== userName) {
+                    setUserName(String(hit.label));
+                  }
+                }}
+                placeholder="请选择负责人"
+              />
+            </div>
           </div>
           <div className="col-span-2">
             <label className="text-[11px] text-muted-foreground">所属项目</label>
