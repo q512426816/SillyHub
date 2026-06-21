@@ -168,7 +168,13 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 pt-2 pb-4">
-          {SECTION_ORDER.map((section) => {
+          {SECTION_ORDER.filter((section) => {
+            // 菜单隔离：进入 /ppm/* 只渲染 ppm section，
+            // 其它路径只渲染非 ppm section（overview/management/admin/system）。
+            // 设计依据：用户要求 ppm 与主平台菜单完全隔离、互不可见。
+            const inPpm = pathname.startsWith("/ppm");
+            return inPpm ? section === "ppm" : section !== "ppm";
+          }).map((section) => {
             const menus = visibleMenusBySection(user, section);
             if (menus.length === 0) return null;
             return (
