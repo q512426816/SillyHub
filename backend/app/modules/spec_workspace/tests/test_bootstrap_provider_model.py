@@ -85,10 +85,15 @@ async def test_bootstrap_persists_workspace_default_provider_model(
 
     scheduled = []
 
+    class _FakeTask:
+        # bootstrap holds the task ref and calls add_done_callback on it.
+        def add_done_callback(self, _fn: object) -> None:
+            pass
+
     def _fake_create_task(coro):
         scheduled.append(coro)
         coro.close()
-        return object()
+        return _FakeTask()
 
     monkeypatch.setattr(bootstrap_module.asyncio, "create_task", _fake_create_task)
 
@@ -156,6 +161,21 @@ async def test_bootstrap_dispatch_uses_run_provider_model(
             captured["user_id"] = user_id
             captured["dispatch"] = kwargs
             return uuid.uuid4()
+
+        async def prepare_scan_interactive_dispatch(self, **kwargs):
+            # Post scan-interactive refactor, bootstrap dispatches via this
+            # method (not dispatch_to_daemon). Capture kwargs (provider/model/
+            # root_path/spec_root are asserted) and return an object exposing
+            # lease_id + runtime_id for the triple-binding backfill.
+            captured["agent_run_id"] = kwargs.get("agent_run_id")
+            captured["user_id"] = kwargs.get("user_id")
+            captured["dispatch"] = kwargs
+
+            class _Dispatch:
+                lease_id = uuid.uuid4()
+                runtime_id = uuid.uuid4()
+
+            return _Dispatch()
 
     monkeypatch.setattr("app.core.db.get_session_factory", lambda: _mock_factory)
     monkeypatch.setattr("app.modules.agent.placement.RunPlacementService", _FakePlacement)
