@@ -53,7 +53,7 @@ async def login(
 ) -> TokenPair:
     ua, ip = _client_metadata(request)
     _, pair = await AuthService(session, settings=settings).login(
-        email=payload.email, password=payload.password, user_agent=ua, ip=ip
+        account=payload.account, password=payload.password, user_agent=ua, ip=ip
     )
     return pair
 

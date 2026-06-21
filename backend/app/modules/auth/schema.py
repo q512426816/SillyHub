@@ -9,7 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class LoginRequest(BaseModel):
-    email: str = Field(min_length=3)
+    # 登录账号:邮箱或 username(含 @ 走 email 查,否则走 username 查)。
+    account: str = Field(min_length=3)
     password: str = Field(min_length=1)
 
 
@@ -32,6 +33,7 @@ class UserRead(BaseModel):
 
     id: uuid.UUID
     email: str
+    username: str | None
     display_name: str | None
     status: str
     is_platform_admin: bool

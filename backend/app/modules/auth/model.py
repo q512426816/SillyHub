@@ -28,13 +28,20 @@ class User(BaseModel, table=True):
     """A platform account."""
 
     __tablename__ = "users"
-    __table_args__ = (Index("ux_users_email_active", "email", unique=True),)
+    __table_args__ = (
+        Index("ux_users_email_active", "email", unique=True),
+        Index("ux_users_username", "username", unique=True),
+    )
 
     id: uuid.UUID = Field(
         default_factory=uuid.uuid4,
         sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
     )
     email: str = Field(sa_column=Column(String(255), nullable=False))
+    # 登录账号:支持邮箱或账号登录。ORM 层允许 NULL 仅为兼容测试 fixture(多 NULL
+    # 不参与唯一索引);生产由迁移 NOT NULL + bootstrap/create_user 保证非空,
+    # 留空时自动取 email 本地部分(@ 前) + 去重加序号。
+    username: str | None = Field(default=None, sa_column=Column(String(100), nullable=True))
     password_hash: str = Field(sa_column=Column(String(255), nullable=False))
     display_name: str | None = Field(default=None, sa_column=Column(String(100), nullable=True))
     status: str = Field(default="active", sa_column=Column(String(20), nullable=False))

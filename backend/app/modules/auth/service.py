@@ -62,12 +62,17 @@ class AuthService:
     async def login(
         self,
         *,
-        email: str,
+        account: str,
         password: str,
         user_agent: str | None,
         ip: str | None,
     ) -> tuple[User, TokenPair]:
-        user = await self._lookup_active_user_by_email(email)
+        # 邮箱或账号登录:含 @ 走 email,否则走 username;统一小写处理。
+        normalized = account.strip().lower()
+        if "@" in normalized:
+            user = await self._lookup_active_user_by_email(normalized)
+        else:
+            user = await self._lookup_active_user_by_username(normalized)
         if user is None or not password_hasher.verify(password, user.password_hash):
             # Constant message: no email enumeration.
             raise AuthInvalidCredentials("Invalid email or password.")
@@ -140,6 +145,16 @@ class AuthService:
         stmt = (
             select(User)
             .where(col(User.email) == email.lower())
+            .where(col(User.deleted_at).is_(None))
+            .where(col(User.status) == "active")
+            .limit(1)
+        )
+        return (await self._db.execute(stmt)).scalars().first()
+
+    async def _lookup_active_user_by_username(self, username: str) -> User | None:
+        stmt = (
+            select(User)
+            .where(col(User.username) == username.lower())
             .where(col(User.deleted_at).is_(None))
             .where(col(User.status) == "active")
             .limit(1)
@@ -260,6 +275,7 @@ async def bootstrap_admin_and_seed_rbac(db: AsyncSession, *, settings: Settings)
         existing = User(
             id=admin_id,
             email=admin_email,
+            username=admin_email.split("@", 1)[0],
             password_hash=password_hash,
             display_name=settings.platform_bootstrap_admin_display_name
             or admin_email.split("@", 1)[0],

@@ -323,6 +323,7 @@ async def _user_with_relations(session: AsyncSession, user: User) -> UserRead:
     return UserRead(
         id=user.id,
         email=user.email,
+        username=user.username,
         display_name=user.display_name,
         status=user.status,
         is_platform_admin=user.is_platform_admin,
@@ -393,6 +394,7 @@ async def create_user(
     target = await svc.create_user(
         email=payload.email,
         password=payload.password,
+        username=payload.username,
         display_name=payload.display_name,
         is_platform_admin=payload.is_platform_admin,
         login_enabled=payload.login_enabled,

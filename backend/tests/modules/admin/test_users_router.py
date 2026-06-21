@@ -323,10 +323,59 @@ async def test_login_blocked_when_disabled(
 
     resp = await client.post(
         "/api/auth/login",
-        json={"email": target_user.email, "password": "Xx1!abcd"},
+        json={"account": target_user.email, "password": "Xx1!abcd"},
     )
     assert resp.status_code == 401
     assert resp.json()["code"].endswith("AUTH_USER_LOGIN_DISABLED")
+
+
+@pytest.mark.asyncio
+async def test_login_by_email_or_username(client: AsyncClient, db_session):
+    """FR-2: 邮箱或账号都能登录同一用户,大小写不敏感,失败防枚举。"""
+    settings = get_settings()
+    password_hasher.configure(settings.auth_bcrypt_rounds)
+    user = User(
+        email="alice@example.com",
+        username="alice",
+        password_hash=password_hasher.hash("Xx1!abcd"),
+        is_platform_admin=False,
+        login_enabled=True,
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    # 邮箱登录
+    r1 = await client.post(
+        "/api/auth/login",
+        json={"account": "alice@example.com", "password": "Xx1!abcd"},
+    )
+    assert r1.status_code == 200
+
+    # 账号登录
+    r2 = await client.post(
+        "/api/auth/login",
+        json={"account": "alice", "password": "Xx1!abcd"},
+    )
+    assert r2.status_code == 200
+
+    # 账号大小写不敏感
+    r3 = await client.post(
+        "/api/auth/login",
+        json={"account": "ALICE", "password": "Xx1!abcd"},
+    )
+    assert r3.status_code == 200
+
+    # 不存在的账号 / 错误密码 → 401(防枚举统一报错)
+    r4 = await client.post(
+        "/api/auth/login",
+        json={"account": "alice", "password": "wrong"},
+    )
+    assert r4.status_code == 401
+    r5 = await client.post(
+        "/api/auth/login",
+        json={"account": "ghost", "password": "Xx1!abcd"},
+    )
+    assert r5.status_code == 401
 
 
 @pytest.mark.asyncio

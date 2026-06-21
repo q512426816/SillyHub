@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { ApiError } from "@/lib/api";
 import { login } from "@/lib/auth";
+import { Card, CardContent } from "@/components/ui/card";
 
 const REMEMBER_KEY = "sillyhub.login.remember";
 
@@ -66,22 +67,22 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="relative flex min-h-screen w-full overflow-hidden bg-[#0f1b4c] text-white">
-      {/* 左侧:品牌区 + 渐变背景 + 欢迎语(复刻源 Login.vue __left) */}
+    <main className="relative flex min-h-screen w-full overflow-hidden bg-slate-50 text-slate-800">
+      {/* 左侧:品牌区 + 明亮蓝同色系渐变 + 欢迎语 */}
       <section className="relative hidden flex-1 flex-col overflow-hidden lg:flex">
-        {/* 蓝紫渐变背景,模拟源 login-bg.svg 视觉 */}
+        {/* 蓝同色系柔和渐变(blue-600 → blue-500 → cyan-500) */}
         <div
           aria-hidden
-          className="absolute inset-0 bg-gradient-to-br from-[#1a2a6c] via-[#2d4ea8] to-[#5b7ed8]"
+          className="absolute inset-0 bg-gradient-to-br from-blue-600 via-blue-500 to-cyan-500"
         />
-        {/* 装饰性柔光球 */}
+        {/* 装饰性柔光球(同色系透明球) */}
         <div
           aria-hidden
-          className="absolute -left-24 top-24 h-72 w-72 rounded-full bg-white/10 blur-3xl"
+          className="absolute -left-24 top-24 h-72 w-72 rounded-full bg-white/20 blur-3xl"
         />
         <div
           aria-hidden
-          className="absolute bottom-[-6rem] right-[-4rem] h-80 w-80 rounded-full bg-[#84a9ff]/30 blur-3xl"
+          className="absolute bottom-[-6rem] right-[-4rem] h-80 w-80 rounded-full bg-cyan-300/30 blur-3xl"
         />
 
         {/* 左上角 logo + 系统标题 */}
@@ -102,23 +103,25 @@ export default function LoginPage() {
         </div>
       </section>
 
-      {/* 右侧:表单区(复刻源 __right + LoginForm 卡片) */}
-      <section className="relative flex flex-1 items-center justify-center overflow-y-auto bg-white p-6 text-neutral-800 dark:bg-[var(--login-bg-color)] sm:p-10">
+      {/* 右侧:表单区(shadcn Card 包裹 antd Form) */}
+      <section className="relative flex flex-1 items-center justify-center overflow-y-auto bg-slate-50 p-6 text-slate-800 sm:p-10">
         <div className="w-full max-w-[420px]">
           {/* 移动端(无左侧)时显示 logo */}
           <div className="mb-8 flex items-center justify-center gap-3 lg:hidden">
             <LogoMark />
-            <span className="text-xl font-bold text-neutral-900">SillyHub</span>
+            <span className="text-xl font-bold text-slate-900">SillyHub</span>
           </div>
 
-          <div className="mb-6">
-            <h1 className="text-2xl font-bold text-neutral-900">账号登录</h1>
-            <p className="mt-1 text-sm text-neutral-500">
-              使用管理员账号访问平台
-            </p>
-          </div>
+          <Card className="border-slate-200 shadow-sm">
+            <CardContent className="p-6 sm:p-8">
+              <div className="mb-6">
+                <h1 className="text-2xl font-bold text-slate-900">账号登录</h1>
+                <p className="mt-1 text-sm text-slate-500">
+                  使用管理员账号访问平台
+                </p>
+              </div>
 
-          <Form<LoginFormValues>
+              <Form<LoginFormValues>
             form={form}
             layout="vertical"
             initialValues={{
@@ -176,17 +179,19 @@ export default function LoginPage() {
                 {submitting ? "登录中…" : "登录"}
               </Button>
             </Form.Item>
-          </Form>
+              </Form>
+            </CardContent>
+          </Card>
         </div>
       </section>
     </main>
   );
 }
 
-/** 左上角 logo:圆角方块 + 字母 S,与项目品牌呼应 */
+/** 左上角 logo:圆角方块 + 字母 S,与项目品牌呼应(适配明亮 hero 底) */
 function LogoMark() {
   return (
-    <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/15 text-2xl font-bold text-white ring-1 ring-white/30 backdrop-blur">
+    <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/20 text-2xl font-bold text-white ring-1 ring-white/40 backdrop-blur">
       S
     </span>
   );
@@ -215,10 +220,18 @@ function IllustrationPlaceholder() {
       />
       <rect x="60" y="90" width="200" height="14" rx="7" fill="white" opacity="0.45" />
       <rect x="60" y="116" width="150" height="14" rx="7" fill="white" opacity="0.35" />
-      <circle cx="90" cy="160" r="14" fill="#ffbd00" />
-      <circle cx="130" cy="160" r="14" fill="#84a9ff" />
-      <circle cx="170" cy="160" r="14" fill="#ff654f" />
-      <circle cx="210" cy="160" r="14" fill="#5bd17f" />
+      <g className="text-blue-200">
+        <circle cx="90" cy="160" r="14" fill="currentColor" />
+      </g>
+      <g className="text-cyan-200">
+        <circle cx="130" cy="160" r="14" fill="currentColor" />
+      </g>
+      <g className="text-sky-200">
+        <circle cx="170" cy="160" r="14" fill="currentColor" />
+      </g>
+      <g className="text-indigo-200">
+        <circle cx="210" cy="160" r="14" fill="currentColor" />
+      </g>
       <rect
         x="120"
         y="20"

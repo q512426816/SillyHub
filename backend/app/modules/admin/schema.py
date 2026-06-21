@@ -191,6 +191,7 @@ class UserCreateRequest(BaseModel):
 
     email: str = Field(min_length=3)
     password: str = Field(min_length=8)
+    username: str | None = None
     display_name: str | None = None
     is_platform_admin: bool = False
     login_enabled: bool = True
@@ -222,6 +223,7 @@ class UserRead(BaseModel):
 
     id: uuid.UUID
     email: str
+    username: str | None
     display_name: str | None
     status: str
     is_platform_admin: bool

@@ -137,15 +137,18 @@ class UserService:
         display_name: str | None = None,
         is_platform_admin: bool = False,
         login_enabled: bool = True,
+        username: str | None = None,
         organization_ids: list[uuid.UUID] | None = None,
         role_ids: list[uuid.UUID] | None = None,
     ) -> User:
         self._set_audit_context()
         pw_hash = password_hasher.hash(password)
         now = datetime.now(UTC)
+        resolved_username = await self._resolve_username(username, email)
         user = User(
             id=uuid.uuid4(),
             email=email.lower().strip(),
+            username=resolved_username,
             password_hash=pw_hash,
             display_name=display_name or email.split("@", 1)[0],
             status="active",
@@ -186,6 +189,23 @@ class UserService:
         await self.session.refresh(user)
         log.info("user.created", email=user.email, user_id=str(user.id))
         return user
+
+    async def _resolve_username(self, username: str | None, email: str) -> str:
+        """username 留空则取 email 本地部分(@ 前)小写;前缀重复自动加序号(a/a2/a3…)。
+
+        与旧用户迁移规则统一(D-001@V1)。
+        """
+        base = (username or email.split("@", 1)[0]).strip().lower()
+        candidate = base
+        suffix = 2
+        while True:
+            exists = await self.session.execute(
+                select(User.id).where(User.username == candidate).limit(1)
+            )
+            if exists.scalars().first() is None:
+                return candidate
+            candidate = f"{base}{suffix}"
+            suffix += 1
 
     async def update_user(
         self,
