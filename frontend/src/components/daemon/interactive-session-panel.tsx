@@ -32,11 +32,14 @@ import {
 } from "lucide-react";
 
 import { AgentModelInput } from "@/components/AgentModelInput";
+import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import {
   createSession,
+  fetchPendingDialogs,
   injectSession,
   interruptSession,
   endSession,
@@ -44,6 +47,8 @@ import {
   getAgentSession,
   PROVIDER_META,
   type InteractiveProvider,
+  type SessionPermissionRequest,
+  type SessionPermissionResolved,
   type SessionStreamConnection,
   type SessionStreamEnvelope,
 } from "@/lib/daemon";
@@ -59,6 +64,12 @@ export interface SessionTurnView {
   output: string;
   status: TurnUiStatus;
   seenLogIds: Set<string>;
+  /**
+   * ql-20260621：实时累积 token。由 SSE `tokens` 事件（执行中）与
+   * `turn_completed` 事件（终态）写入；null 表示尚未收到。
+   */
+  inputTokens: number | null;
+  outputTokens: number | null;
 }
 
 interface InteractiveSessionView {
@@ -126,6 +137,10 @@ export function InteractiveSessionPanel({
   const [provider, setProvider] = useState(defaultProvider);
   const [input, setInput] = useState("");
   const [view, setView] = useState<InteractiveSessionView>(INITIAL_VIEW);
+  // ql-20260621：AskUserQuestion / 普通 permission_request 待答卡片队列。
+  // 仅渲染 dialog_kind 存在的（AskUserDialogCard）；普通工具审批卡在本面板不展示
+  //（/runtimes 页的 PermissionApprovalsPanel 负责普通 allow/deny）。
+  const [pendingRequests, setPendingRequests] = useState<SessionPermissionRequest[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const streamConnRef = useRef<SessionStreamConnection | null>(null);
   // task-10 attach 模式轮询句柄（unmount / 转出 attach 模式时清理）
@@ -180,7 +195,20 @@ export function InteractiveSessionPanel({
             // turn_completed 收敛到终态。无论 prior 是 running 还是 interrupting，
             // 都收敛到 deriveTurnTerminalStatus 推导的真实终态（completed/failed/killed）。
             status: terminal,
+            // ql-20260621：终态 token 同步写入（backend turn_completed payload 带
+            // input_tokens/output_tokens）。null 不覆盖执行中已收到的累积值。
+            inputTokens: env.input_tokens ?? turn.inputTokens,
+            outputTokens: env.output_tokens ?? turn.outputTokens,
           }), { clearCurrentRun: env.run_id! }));
+        },
+        onTokens: (env) => {
+          // ql-20260621：执行中实时累积 token。每次 submit_messages 都推一条，
+          // 前端按 run_id upsert 到对应 turn，UI 立刻刷新输入/输出词元计数。
+          setView((prev) => upsertTurn(prev, env, (turn) => ({
+            ...turn,
+            inputTokens: env.input_tokens ?? turn.inputTokens,
+            outputTokens: env.output_tokens ?? turn.outputTokens,
+          }), {}));
         },
         onSessionEnded: () => {
           // 收口 ended + close（streamSession 内部已 close）
@@ -189,13 +217,53 @@ export function InteractiveSessionPanel({
             status: "ended",
             currentRunId: null,
           }));
+          // session 结束 → 清空待答卡片（AskUserQuestion 不会再有回答机会）
+          setPendingRequests([]);
           streamConnRef.current = null;
         },
         onError: () => {
           // 不伪造 session/run 终态；浏览器自动重连。可选记录但不阻塞 UI。
         },
+        // ql-20260621：同 SSE channel 的 permission 事件分发（见 daemon.ts
+        // streamSession 的 default 分支）。AskUserQuestion 卡片渲染 + 用户提交
+        // 后由 backend 回 permission_resolved，或 5min 超时 backend 自收口。
+        onPermissionRequest: (req) => {
+          // 按 request_id 去重；只保留 dialog_kind（AskUserDialogCard）类型的卡，
+          // 普通工具审批（无 dialog_kind）交给 /runtimes 审批面板。
+          if (!req.dialog_kind) return;
+          setPendingRequests((prev) =>
+            prev.some((r) => r.request_id === req.request_id)
+              ? prev
+              : [...prev, req],
+          );
+        },
+        onPermissionResolved: (resolved) => {
+          setPendingRequests((prev) =>
+            prev.filter((r) => r.request_id !== resolved.request_id),
+          );
+        },
       },
     );
+    // ql-20260621：SSE 只推送实时新 permission_request，页面刷新 / attach
+    // 已 pending 的 AskUserQuestion 对话需通过 REST 恢复（与 SSE 合并按
+    // request_id 去重）。新建会话通常返回空，attach 模式必备。
+    void fetchPendingDialogs(sessionId)
+      .then((dialogs) => {
+        if (!dialogs || dialogs.length === 0) return;
+        setPendingRequests((prev) => {
+          const existing = new Set(prev.map((r) => r.request_id));
+          const merged = [...prev];
+          for (const d of dialogs) {
+            if (d.dialog_kind && !existing.has(d.request_id)) {
+              merged.push(d);
+            }
+          }
+          return merged.length === prev.length ? prev : merged;
+        });
+      })
+      .catch(() => {
+        // 恢复失败不阻塞：SSE 仍会推送后续新事件
+      });
   }, []);
 
   // task-10 attach 模式：mount / attachSessionId 变化时建 SSE + 预填 turn + 进 reconnecting。
@@ -321,7 +389,7 @@ export function InteractiveSessionPanel({
         ...INITIAL_VIEW,
         status: "creating",
         turns: [
-          { runId: "__pending_create__", turn: null, prompt, output: "", status: "pending", seenLogIds: new Set() },
+          { runId: "__pending_create__", turn: null, prompt, output: "", status: "pending", seenLogIds: new Set(), inputTokens: null, outputTokens: null },
         ],
       });
       try {
@@ -329,6 +397,8 @@ export function InteractiveSessionPanel({
           provider: provider as InteractiveProvider,
           prompt,
           model,
+          manual_approval: true,
+          ask_user_only: true,
         });
         // 用返回 run id 替换 pending 占位 + 启动唯一 SSE
         setView((prev) => ({
@@ -364,7 +434,7 @@ export function InteractiveSessionPanel({
         currentRunId: placeholderId,
         turns: [
           ...prev.turns,
-          { runId: placeholderId, turn: null, prompt, output: "", status: "pending", seenLogIds: new Set() },
+          { runId: placeholderId, turn: null, prompt, output: "", status: "pending", seenLogIds: new Set(), inputTokens: null, outputTokens: null },
         ],
       }));
       try {
@@ -488,7 +558,17 @@ export function InteractiveSessionPanel({
     closeStream();
     setView(INITIAL_VIEW);
     setInput("");
+    setPendingRequests([]);
   }, [view.status, closeStream, handleEnd]);
+
+  // ql-20260621：用户在 AskUserDialogCard 提交回答后，AskUserDialogCard 内部
+  // 已 POST respondSessionPermission；这里立即移除卡片（permission_resolved
+  // SSE 到达后也会再次过滤，双保险）。
+  const handleDialogResolved = useCallback((requestId: string) => {
+    setPendingRequests((prev) =>
+      prev.filter((r) => r.request_id !== requestId),
+    );
+  }, []);
 
   // 输入框 / 发送按钮状态
   const sendingDisabled =
@@ -609,6 +689,29 @@ export function InteractiveSessionPanel({
             {view.errorMsg}
           </div>
         )}
+        {/* ql-20260621：AskUserQuestion 对话卡（permission_request.dialog_kind）。
+            sticky top-0 让用户在长日志滚动时仍可见、可作答；提交 / SSE resolved
+            后自动移除。普通工具审批（无 dialog_kind）不在本面板展示。 */}
+        {pendingRequests.length > 0 && (
+          <div className="sticky top-0 z-10 mb-3 space-y-2 border-b border-indigo-300 bg-indigo-50/95 px-3 py-2 shadow-sm backdrop-blur-sm">
+            {pendingRequests.map((req) => (
+              <ErrorBoundary
+                key={req.request_id}
+                label="ask-user-dialog-card"
+                fallback={() => (
+                  <div className="text-[11px] text-red-600/70">
+                    提问卡片渲染失败
+                  </div>
+                )}
+              >
+                <AskUserDialogCard
+                  request={req}
+                  onResolved={handleDialogResolved}
+                />
+              </ErrorBoundary>
+            ))}
+          </div>
+        )}
         {view.turns.length === 0 ? (
           <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
             <p className="text-xs font-medium text-foreground">
@@ -639,7 +742,12 @@ export function InteractiveSessionPanel({
                   </div>
                 )}
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                  <TurnStatusBadge status={turn.status} turn={turn.turn} />
+                  <TurnStatusBadge
+                    status={turn.status}
+                    turn={turn.turn}
+                    inputTokens={turn.inputTokens}
+                    outputTokens={turn.outputTokens}
+                  />
                 </div>
               </div>
             ))}
@@ -686,9 +794,13 @@ export function InteractiveSessionPanel({
 function TurnStatusBadge({
   status,
   turn,
+  inputTokens,
+  outputTokens,
 }: {
   status: TurnUiStatus;
   turn: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
 }) {
   const label =
     turn != null ? `第 ${turn} 轮` : "轮次";
@@ -708,9 +820,28 @@ function TurnStatusBadge({
     failed: "text-destructive",
     killed: "text-amber-600",
   };
+  // ql-20260621：token 显示。执行中（running/pending）有累积值时显示「输入 N…」
+  // 表明实时统计进行中；终态显示完整「↑in ↓out」。两者皆 null 时不渲染。
+  // 规范化 undefined → null，防御上游 env.input_tokens / turn.inputTokens 缺失。
+  const inTokens = inputTokens ?? null;
+  const outTokens = outputTokens ?? null;
+  const showTokens = inTokens !== null || outTokens !== null;
+  const isLive = status === "running" || status === "pending" || status === "interrupting";
   return (
     <span className={cn("font-mono", tone[status])}>
       {label} · {statusLabel[status]}
+      {showTokens && (
+        <span className="ml-1.5 text-muted-foreground/80">
+          {" · "}
+          {inTokens !== null ? `↑${inTokens.toLocaleString()}` : "↑0"}
+          {" "}
+          {outTokens !== null
+            ? `↓${outTokens.toLocaleString()}`
+            : isLive
+              ? "↓执行中…"
+              : "↓0"}
+        </span>
+      )}
     </span>
   );
 }
@@ -719,6 +850,14 @@ function TurnStatusBadge({
 function renderLogContent(env: SessionStreamEnvelope): string {
   const content = (env.content ?? "").trim();
   if (!content) return "";
+  // 过滤 AskUserQuestion 相关的原始 JSON 日志：
+  // 这些内容已由 AskUserDialogCard 卡片展示，不应再以原始 tool_call/tool_result
+  // 形式混入聊天窗口。覆盖三类行：
+  //   [TOOL_USE] AskUserQuestion: {...}
+  //   🔧 {"tool": "AskUserQuestion", ...}      （含 "AskUserQuestion" 字样）
+  //   [TOOL_RESULT] User answered: {...}        （AskUserQuestion 的回答结果）
+  if (content.includes("AskUserQuestion")) return "";
+  if (/^\[TOOL_RESULT\]\s*User answered/.test(content)) return "";
   // 过滤技术日志
   if (/^\[(SYSTEM|RESULT)[^\]]*\]/.test(content)) return "";
   const channel = env.channel;
@@ -770,6 +909,8 @@ function upsertTurn(
       output: "",
       status: "running",
       seenLogIds: new Set(),
+      inputTokens: env.input_tokens ?? null,
+      outputTokens: env.output_tokens ?? null,
     };
     turns = [...prev.turns, apply(newTurn)];
   } else {
