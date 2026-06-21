@@ -377,7 +377,7 @@ function EditableSubTable<T extends PpmSubTableRow>(
           control = (
             <Input.TextArea
               size="small"
-              rows={2}
+              autoSize={{ minRows: 1, maxRows: 3 }}
               value={value === null || value === undefined ? "" : String(value)}
               placeholder={colDef.placeholder}
               onChange={(e) =>

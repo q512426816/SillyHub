@@ -282,21 +282,22 @@ interface DetailDraftRow extends PpmSubTableRow {
   overall_stage: string | null;
 }
 
-/** 明细行内编辑列定义(对齐源 NodeDetailForm 字段顺序)。 */
+/** 明细行内编辑列定义(对齐源 NodeDetailForm 字段顺序)。
+ * 列宽总和控制在容器宽度内,避免 textarea 撑高/水平滚动导致布局错乱。 */
 const DETAIL_COLUMNS: PpmSubEditableColumn<DetailDraftRow>[] = [
-  { name: "detailed_stage", label: "详细阶段", width: 140, placeholder: "请输入详细阶段" },
-  { name: "task_theme", label: "任务主题", width: 140, placeholder: "请输入任务主题" },
+  { name: "detailed_stage", label: "详细阶段", width: 120, placeholder: "详细阶段" },
+  { name: "task_theme", label: "任务主题", width: 120, placeholder: "任务主题" },
   {
     name: "task_description",
     label: "任务描述",
     editType: "textarea",
-    width: 280,
-    placeholder: "请输入任务描述",
+    width: 180,
+    placeholder: "任务描述",
   },
-  { name: "requirements", label: "要求与注意事项", width: 160, placeholder: "请输入要求与注意事项" },
-  { name: "role_name", label: "角色名称", width: 120, placeholder: "请输入角色名称" },
-  { name: "achievement", label: "成果", width: 140, placeholder: "请输入成果" },
-  { name: "overall_stage", label: "总体阶段", width: 140, placeholder: "请输入总体阶段" },
+  { name: "requirements", label: "要求与注意事项", width: 160, placeholder: "要求与注意事项" },
+  { name: "role_name", label: "角色名称", width: 100, placeholder: "角色名称" },
+  { name: "achievement", label: "成果", width: 120, placeholder: "成果" },
+  { name: "overall_stage", label: "总体阶段", width: 120, placeholder: "总体阶段" },
 ];
 
 function DetailsSubTable({
@@ -512,18 +513,21 @@ function ModulesSubTable({
       title: "计划工时",
       dataIndex: "plan_workload",
       key: "plan_workload",
+      width: 110,
       render: (v: string | null) => v ?? "—",
     },
     {
       title: "计划开始",
       dataIndex: "plan_begin_time",
       key: "plan_begin_time",
+      width: 120,
       render: (v: string | null) => v ?? "—",
     },
     {
       title: "计划完成",
       dataIndex: "plan_complete_time",
       key: "plan_complete_time",
+      width: 120,
       render: (v: string | null) => v ?? "—",
     },
     {
