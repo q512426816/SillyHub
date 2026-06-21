@@ -27,8 +27,18 @@ created_at: 2026-06-20T15:35:00+0800
 - 通知走 audit_logs(**无独立站内信**),附件用 `file_urls` JSON(**无上传服务**)
 - silly 动态表单已弃(状态机替代),多租户 tenant_id 丢弃
 - 工时统计 stat-by-user/project;看板 reorder 持久化 kanban_order
+- 看板 matrix(人员×日期)任务**跨天连续展示**(ql-007):`TaskCardVO` 返回 `start_time`,前端 `taskDateKeys` 按 `start_time~deadline` 区间每一天落 cell(限 366 天);DateNav 仅控展示列不参与任务拉取过滤(对齐源 selectKanbanCards 无日期过滤)
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 迁移自 dept_project_back/ppdmq-module-ppm + dept_project_front(变更 2026-06-20-ppm-module-migration)。源 ~120 接口/22 表/2 套审批流。e2e 动态验证待运行环境。
 <!-- MANUAL_NOTES_END -->
+
+## 变更索引
+- ql-20260621-004-f2a1 | migrate_from_ruoyi module 顺序 bug + resync 重同步模块数据(78 条)
+- ql-20260621-005-7c3e | 看板任务卡片缺失(DateNav→filters 移除,任务默认全量对齐源)
+- ql-20260621-006-b4d8 | ps_project_plan.project_id 全 NULL 修复(migrate 漏 map_fk + resync)
+- ql-20260621-007-c5e9 | 看板 matrix 任务跨天连续展示(start_time~deadline 每一天)
+- ql-20260621-008-d6f2 | milestone 详情抽屉 isValid 报错(DatePicker Form.Item name + 显式 value 冲突,去 name)
+- ql-20260621-009-e8a1 | 看板任务详情对齐源 TaskDetailDrawer(补优先级/进度/创建/更新时间)
+- ql-20260621-010-a1b2 | hotfix 看板 API 500(service _derive_priority 用未 import 的 UTC)

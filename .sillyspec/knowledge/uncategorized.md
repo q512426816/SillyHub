@@ -114,3 +114,17 @@
 - 关键事实：`versions/<ver>/` 目录结构完整（`node.exe` + `index.js` + package.json），ps1 的 `node.exe index.js $args` 调法本身正确，只是它自己找不到目录。直接 spawn `versions/<latest>/node.exe index.js <args>` 正常工作（exit 0 + STDOUT 输出目录名作版本号）。
 - 修复（ql-20260620-002-f8c1）：daemon 侧绕过 ps1 —— 新增 `resolveCursorVersionEntry` 扫描 versions 目录取最新；`agent-detector` cursor 版本探测 fallback 取目录名作版本；`cmd-shim` 模式0 把 `cursor-agent.ps1` 解析为 version 目录的 `node.exe index.js` 入口让 task-runner 直跑。
 - 通用坑：第三方 CLI 的启动包装脚本（.ps1/.cmd）若用正则找自更新版本目录，正则可能跟不上自身新版目录命名格式变化。遇到「CLI `--version` / 启动报奇怪错误且 exit 1、但二进制确实存在」时，先检查其包装脚本的版本查找逻辑是否过时，必要时绕过包装层直接调 version 目录的真实入口（node.exe + 入口 js）。
+
+## 2026-06-21 — ETL 迁移函数执行顺序依赖 maps 构建时机，ppm 模块整表成孤儿
+
+- `backend/scripts/migrate_from_ruoyi.py` 的 `migrate_plan_node_module.plan_node_id` 实际指向 `ps_plan_node`（里程碑，非 plan_node 模板），但原 main() 把它排在 `migrate_ps_plan_node`（构建 `maps["ps_plan_node"]`）之前 → `map_fk` 全失败 → `fallback_keep=True` 保留源数字 ID → 被 `202607220900` ALTER varchar→uuid 迁移（`CASE WHEN uuid 正则`）丢弃为 NULL → 模块成孤儿，里程碑详情页"模块"子表全空。
+- 排查线索：对照组 `migrate_ps_plan_node_detail`（排在 ps_plan_node 之后）正常映射 1702 条，唯独 module 全军覆没；"子表全空"时优先查 FK 列 NULL 比例即可定位，别只盯前端。
+- 修复（ql-20260621-004-f2a1）：main() 顺序调整，module 移到 ps_plan_node 之后、ps_plan_node_detail 之前（detail 的 module_id 也依赖 `maps["module"]`）；已落地的孤儿用 `backend/scripts/resync_modules.py`（复用 ETL 辅助函数，幂等 DELETE+INSERT，id 用确定性 uuid5）重同步。
+- 通用坑：ETL 脚本里各 `migrate_*` 函数依赖前序函数构建的 maps dict，新增/调整迁移函数时务必确认其 `map_fk` 依赖的 map_key 已由排在前面的函数构建。
+
+## 2026-06-22 — antd v5 DatePicker 周几/日历表头显示英文，仅 ConfigProvider locale 不够
+
+- 现象：ppm 里程碑明细的 DatePicker 日历表头星期显示英文（Su/Mo/Tu…），即便 `antd-providers.tsx` 已配 `ConfigProvider locale={zhCN}`。
+- 根因：antd v5 DatePicker 内部用 dayjs 渲染日历表头（一二三四五六日）、月份名、周起始日，这些取自 **dayjs 全局 locale**，而非 antd ConfigProvider 的 locale。`ConfigProvider locale={zhCN}` 只影响 antd 自有文案（「今天」按钮、placeholder、空状态），管不到日历表头星期。
+- 修复（ql-20260621-004-c4a1）：`antd-providers.tsx` 补 `import 'dayjs/locale/zh-cn'; dayjs.locale('zh-cn');`，与 ConfigProvider locale 双保险。
+- 通用坑：antd v5 全家桶（DatePicker / RangePicker / Calendar / TimePicker）的日历本地化 = `ConfigProvider locale`（antd 文案）+ `dayjs.locale`（日历表头/边界/月份）**缺一不可**。配了 ConfigProvider 仍显示英文星期，第一时间查 `dayjs.locale` 是否全局设过——项目里多处 `import dayjs` 用 `.format()` 不报错，易误以为 locale 已就绪。

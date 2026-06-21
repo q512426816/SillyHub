@@ -105,3 +105,5 @@ AgentLogViewer（被 agent 控制台页、workspace 详情页共用）
 | 2026-06-17 | ql-20260617-003-3757 | 新增 Pagination 通用分页组件（上一页/下一页 + 共X条·第N/M页），用户/角色管理共用 |
 | 2026-06-17 | ql-20260617-004-02d5 | 引入 antd 6.4，新增 AntdProviders（ConfigProvider + zhCN locale + Table token），删除 ui/pagination.tsx 由 antd Table 内置分页替代 |
 | 2026-06-21 | ql-20260621-003-menu-isolation | AppShell 侧边栏按路径隔离菜单：`/ppm/*` 仅渲染 ppm section，其它路径仅渲染非 ppm section（overview/management/admin/system），ppm 与主平台菜单互不可见 |
+| 2026-06-21 | ql-20260621-013-b2e5 | AskUserDialogCard 改常驻手动输入框：每问选项下方常驻输入框（填写即以此作答，覆盖选项），移除"选 Other 才出框"的两步操作 |
+| 2026-06-21 | ql-20260621-004-c4a1 | AntdProviders 全局补 dayjs locale zh-cn：antd v5 DatePicker 日历表头星期/月份/边界取自 dayjs 全局 locale，仅 ConfigProvider locale={zhCN} 不够（只管 antd 自有文案），需 dayjs.locale('zh-cn') 双保险，否则日历显示英文星期 |

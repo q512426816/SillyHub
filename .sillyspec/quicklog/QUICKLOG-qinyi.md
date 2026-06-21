@@ -1,3 +1,57 @@
+## ql-20260621-011-f3c7 | 2026-06-21 16:50:00 | 看板加「计划/实际」两 tab（对齐源 Home ScheduleCard/WorkCard，全对齐含编辑+displayMode）
+
+状态：已完成
+文件：后端 task/schema.py+service.py+router.py；前端 types.ts+task.ts+kanban-grouping.ts+kanban-actual-matrix.tsx(新)+kanban-actual-cell.tsx(新)+page.tsx
+依据：源 Home/Index.vue 有团队计划排程表(ScheduleCard,PlanTask)+团队实际工作表(WorkCard,TaskExecute)两 tab。SillyHub kanban 原只有计划(ql-007 跨天)。本次加实际 tab:后端新增 /task-execute/list-by-date-range-with-plan(join PlanTask + project_id/execute_user_ids 过滤,返回 TaskExecuteWithPlanResponse 含 plan_task);前端 KanbanActualMatrix(团队×日期,actual_start_time 单点落 cell 不跨天)+KanbanActualCell(任务名/工时/状态/日工作量条+双击编辑改 actual_time)+page Tabs+displayMode(task/problem/both)。验证:后端 API 实测 2128 条含 plan_task 无 500;前端 tsc 通过;重建生效新代码进容器。EnterPlanMode 规划批准后执行。
+
+## ql-20260621-010-a1b2 | 2026-06-21 16:10:00 | hotfix 看板 API 500（service _derive_priority 用了未 import 的 UTC）
+
+状态：已完成
+文件：backend/app/modules/ppm/kanban/service.py
+依据：ql-009 在 kanban/service.py 加 `_derive_priority` 用 `datetime.now(UTC)`，但该文件 L16 `from datetime import date, datetime, time` **没有 UTC**（误以为有——那其实是 migrate_from_ruoyi.py 的 import）。导致 `get_task_cards` → API `/api/ppm/kanban/tasks` 抛 `NameError: name 'UTC' is not defined` → 500 → 看板数据彻底看不到。修复：service.py import 加 UTC。验证：`_derive_priority`/`_derive_progress` 单测（已完成3/逾期1/活跃2；progress 100/50/0）全对无 NameError；API 实测返回 621 条任务 + priority/progress/start_time/create_time/update_time 字段。
+
+## ql-20260621-009-e8a1 | 2026-06-21 15:55:00 | 看板任务详情对齐源 TaskDetailDrawer（补优先级/进度/创建/更新时间）
+
+状态：已完成
+文件：backend/app/modules/ppm/kanban/schema.py、backend/app/modules/ppm/kanban/service.py、frontend/src/lib/ppm/types.ts、frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-task-detail-drawer.tsx
+依据：源 TaskDetailDrawer 展示 11 字段（标题/描述/优先级/状态/项目/负责人/截止/工时/进度/创建时间/更新时间）+ 3 tabs；当前 kanban-task-detail-drawer 只 7 字段，缺优先级/进度/创建时间/更新时间。PlanTask 有 created_at(L118)/updated_at(L122) + status/end_time 可派生 priority/progress（对齐源 TaskPlanMapper.xml SQL：priority 逾期1/活跃2/已完成3；progress 已完成100/进行中50/其他0）。修复：(1) TaskCardVO/KanbanTaskCard 加 priority/progress/create_time/update_time；(2) service 派生 + 返回 created_at/updated_at；(3) drawer 展示 4 字段（优先级 Tag + 进度 Progress 条 + 创建/更新时间）。
+结果：schema TaskCardVO 加 priority/progress/create_time/update_time；service 加 _derive_priority（逾期1/活跃2/已完成3，对齐源 SQL L147-150）+ _derive_progress（100/50/0，对齐源 L160-164）helper，get_task_cards 返回派生值 + t.created_at/updated_at；types KanbanTaskCard 加 4 字段；drawer 展示优先级 Tag（逾期红/进行中蓝/已完成绿）+ Progress 进度条 + 创建/更新时间。验证 npx tsc --noEmit 通过；backend TaskCardVO 含 priority/progress/create_time。需重建 frontend+backend 生效。
+
+## ql-20260621-008-d6f2 | 2026-06-21 15:40:00 | 修复 milestone 详情抽屉 isValid 报错（Form.Item name + DatePicker value 冲突）
+
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
+依据：DetailDrawer（L1714/1727）+ ModuleFormDrawer（L1023/1033）的 DatePicker 同时有 `<Form.Item name="plan_begin_time">` + 显式 `value={toDay(...)}`。Form.Item name 通过 cloneElement 注入 form 的 string value 覆盖显式 dayjs value，rc-picker 收到 string，内部 `generateConfig.isValid(string)` → `string.isValid()` 报错「isValid is not a function」。DatePicker 已用 form.getFieldValue/setFieldValue 手动受控，Form.Item name 多余且造成冲突。修复：去掉 4 个 DatePicker 的 Form.Item name（label 保留），form 字段仍通过 setFieldValue/setFieldsValue 管理，submit getFieldsValue 仍含。
+结果：page.tsx 去掉 4 个 DatePicker 的 Form.Item name（plan_begin_time ×2 + plan_complete_time ×2，DetailDrawer + ModuleFormDrawer）。DatePicker 纯手动受控（value=toDay(form.getFieldValue) + onChange form.setFieldValue），form 字段经 setFieldsValue/setFieldValue 管理，submit getFieldsValue 仍含。验证 npx tsc --noEmit 通过。需重建 frontend 生效。
+
+## ql-20260621-007-c5e9 | 2026-06-21 15:25:00 | 看板 matrix 任务跨天连续展示（start_time~end_time 每一天）
+
+状态：已完成
+文件：backend/app/modules/ppm/kanban/schema.py、backend/app/modules/ppm/kanban/service.py、frontend/src/lib/ppm/types.ts、frontend/src/lib/ppm/kanban-grouping.ts
+依据：当前 matrix 把任务只放在 deadline(end_time) 单日（kanban-grouping `taskDateKey` 只用 task.deadline）。用户要求跨天连续展示——任务在 start_time~end_time 区间的每一天都显示。PlanTask 有 start_time(model L68)+end_time(L71)，但 TaskCardVO/KanbanTaskCard 只返回 deadline，taskDateKey 单日。修复：(1) schema TaskCardVO + service get_task_cards 加返回 start_time；(2) KanbanTaskCard 加 start_time；(3) kanban-grouping 新增 taskDateKeys 返回 start~end 跨天日期数组，groupByUserAndDate 把任务分配到区间内每个 cell（限 366 天防异常区间）。
+结果：5 处改动——schema TaskCardVO.start_time、service get_task_cards start_time=t.start_time、types KanbanTaskCard.start_time、kanban-grouping 新增 formatDateKey+taskDateKeys（跨天，限 366 天）、groupByUserAndDate 任务落区间内每个 cell。验证：npx tsc --noEmit 通过；backend TaskCardVO.model_fields 含 start_time=True。需重建 frontend+backend 生效。
+
+## ql-20260621-006-b4d8 | 2026-06-21 15:12:30 | 修复 ps_project_plan.project_id 全 NULL（milestone 责任人裸 UUID 根因）
+
+状态：已完成
+文件：backend/scripts/migrate_from_ruoyi.py、backend/scripts/resync_ps_project_plan.py（新增）
+依据：migrate_ps_project_plan（migrate_from_ruoyi.py:854）project_id 直接 `str(r["project_id"])` 保留源 Long ID（没用 map_fk，注释误判"可能是 id 或名字"），被 ALTER 迁移 202607220900 的 uuid 正则过滤丢弃为 NULL → 18 条 plan 的 project_id 全 NULL → milestone-details 页 projectId 空 → 责任人列 PpmUserSelect 回退 `<span>` 显示裸 UUID。源库 18 个 project_id 全可映射（matched=18，目标 ppm_project_maintenance 18 条）。修复：(1) migrate_from_ruoyi.py project_id 改用 `map_fk(maps,"project",...)`；(2) 新增 resync_ps_project_plan.py 从源库重同步 project_id（源id→uuid5("project",源id)）。
+结果：migrate_from_ruoyi.py project_id 改用 map_fk(fallback_keep=False) + 新增 resync_ps_project_plan.py。运行 resync：18 条 plan project_id 全部有值（NULL=0，未映射=0）。验证：ef114cfd 里程碑 plan project_id=e3a5387d（非 NULL），该 project 5 成员。前端刷新 milestone-details projectId 非空 → PpmUserSelect res=projectMember 拉成员 → 责任人显示用户名。
+
+## ql-20260621-005-7c3e | 2026-06-21 14:56:41 | 修复看板任务卡片缺失（DateNav→filters 致按本周过滤）
+
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/kanban/page.tsx
+依据：page.tsx:123-128 把 KanbanDateNav 的 dateRange（默认本周）写入 store.filters.start_date/end_date → 后端 get_task_cards 按 PlanTask.end_time 本周区间过滤 → 无截止日期/已逾期/截止在其他周的任务全不显示。源 selectKanbanCards（dept_project_back TaskPlanMapper.xml:142-196）查询无任何日期过滤，任务全量 + ORDER BY kanban_order,start_time,id。修复：移除 DateRange→setFilters useEffect，dateRange 退回纯展示（KanbanMatrix 列范围 L190-191 + 工时图 L201-202），任务默认全量对齐源；SearchBar 截止范围（kanban-search-bar.tsx onDateChange）保留可选过滤（用户手动选才触发）；同步更新 page.tsx L16-19 注释。后端 service.py 日期过滤能力保留供 SearchBar 可选用。
+结果：page.tsx 3 处改动——移除 DateRange→setFilters useEffect(L121-128) + 不再使用的 setFilters 声明(L78) + 更新 L16-19 注释。任务默认全量拉取对齐源 selectKanbanCards；dateRange 退回纯展示(matrix/工时图列范围)；SearchBar 截止范围保留可选过滤。验证 npx tsc --noEmit 通过(TSC_OK)。
+
+## ql-20260621-004-f2a1 | 2026-06-21 14:15:33 | 修复 migrate_from_ruoyi 迁移顺序 bug 并重同步 ppm_plan_node_module 模块数据
+
+状态：已完成
+文件：backend/scripts/migrate_from_ruoyi.py、backend/scripts/resync_modules.py（新增）
+依据：迁移 main() 执行顺序 migrate_plan_node_module(L1401) 在 migrate_ps_plan_node(L1403) 之前，module 跑时 maps["ps_plan_node"] 未构建 → map_fk 全失败 → plan_node_id 保留源数字 ID → ALTER varchar→uuid 迁移(202607220900)丢弃为 NULL → 78 条模块成孤儿 → 里程碑详情页模块子表"暂无数据"。源若依库 mysql 容器 ruoyi-vue-pro 仍在线（90 条模块、17 个里程碑引用全部存在）。
+结果：顺序修复（migrate_plan_node_module 移到 migrate_ps_plan_node 之后、migrate_ps_plan_node_detail 之前，既满足 module 依赖 maps[ps_plan_node]，又供 detail 的 module_id 映射）+ 新增 resync_modules.py 复用迁移辅助函数（src_query/uuid5_int/map_fk 等）幂等重同步（DELETE+INSERT，id 用确定性 uuid5）。运行：78 条模块全部正确映射（plan_node_id/duty_user_id 未映射=0，NULL=0）。实施阶段里程碑 ef114cfd 恢复 5 模块（生产模块/对接岛式工作台/看板驾驶舱/现场实施/物流模块），责任人 JOIN 用户名（覃艺）。前端刷新即生效，无需重建容器。
+
 ## ql-20260620-001-7b2e | 2026-06-20 00:06:10 | 前端 UI 文案中文化（品牌→SillyHub、约160条英文文案 + 枚举状态映射表）
 
 状态：已完成
@@ -406,3 +460,25 @@
 - backend/app/modules/ppm/problem/router.py (新增导出端点)
 - backend/app/modules/ppm/plan/router.py (新增导出端点)
 - 列格式化细节修复(projects/customers 等)
+
+## ql-20260621-012-7d4a | 2026-06-21 23:10:00 | 运行时列表：移除功能+会话入口下沉卡片+精简工具审批+卡片信息丰富
+状态：已完成
+依据：/Users/qinyi/.claude/plans/velvet-wobbling-donut.md（已批准方案）
+结果：tsc通过；前端38测试(含deleteDaemonRuntime/卡片移除/会话聚焦)+后端36 service测试(含delete_runtime归属+删除)passed；后端模块import+DELETE路由注册+os/arch字段已确认。docker后端跑旧镜像需rebuild才能实测端点(单测已覆盖逻辑)。
+文件：
+- backend/app/modules/daemon/schema.py (DaemonRuntimeRead 增 os/arch)
+- backend/app/modules/daemon/service.py (新增 delete_runtime)
+- backend/app/modules/daemon/router.py (新增 DELETE /runtimes/{id})
+- frontend/src/lib/daemon.ts (DaemonRuntimeRead 增 os/arch + deleteDaemonRuntime)
+- frontend/src/app/(dashboard)/runtimes/page.tsx (删 PermissionApprovalsPanel + 卡片重设计+操作区+会话聚焦)
+- frontend/src/lib/daemon.test.ts (deleteDaemonRuntime 用例)
+- frontend/src/app/(dashboard)/runtimes/page.test.tsx (删 permission dialog 用例 + 补移除/会话聚焦用例)
+- backend/app/modules/daemon/tests/ (DELETE 端点用例)
+
+## ql-20260621-013-b2e5 | 2026-06-21 23:26:37 | AskUserDialogCard 改常驻手动输入框(移除选 Other 才出框的两步操作)
+状态：已完成
+依据：用户反馈 AskUserQuestion 卡片找不到手动填写入口(只看到选项)
+结果：tsc通过+16测试passed。每问常驻"或手动输入"框(填写即以此作答覆盖选项)，移除自动Other追加+isCustomOption/CUSTOM_KEYWORDS。
+文件：
+- frontend/src/components/ask-user-dialog-card.tsx (移除自动 Other 追加 + 每问常驻"或手动输入"框 + computeAnswer 输入优先)
+- frontend/src/components/ask-user-dialog-card.test.tsx (更新输入框/Other 相关用例)

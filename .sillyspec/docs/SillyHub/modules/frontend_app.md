@@ -108,8 +108,11 @@ layout.tsx (根布局)
 | 2026-06-09 | ql-20260609-007-b4c2 | 工作区详情页显示上一次 Bootstrap 运行结果摘要 |
 | 2026-06-09 | ql-20260609-008 | 修复 Bootstrap runs 排序用 finished_at 而非缺失的 created_at |
 | 2026-06-16 | ql-20260616-002-f4ce | /runtimes 快速对话改用 SSE 流式（EventSource 订阅 + nextjs route handler 透传 + 60s 回退 GET 兜底） |
+| 2026-06-21 | ql-20260621-012-7d4a | /runtimes 卡片加移除/会话按钮+运行环境/可执行路径/会话数；删工具审批面板；会话入口下沉卡片触发聚焦 |
 | 2026-06-17 | ql-20260617-002-21d4 | 用户管理抽屉组织/角色多选"暂无选项"修复：size 200→100 匹配后端 le=100 + Promise.all→allSettled + catch console.error |
 | 2026-06-17 | ql-20260617-003-3757 | 用户/角色管理加分页（默认 20 条/页）：新增 Pagination 组件 + 列表表格下方挂分页 + 搜索/状态变化 setPage(1) |
 | 2026-06-17 | ql-20260617-004-02d5 | 用户/角色管理表格改 antd Table：columns + showSizeChanger + pageSizeOptions [10,20,50,100] + pageSize state，删除原生 table + 自定义 Pagination |
 | 2026-06-21 | ql-20260621-002-a8f3 | /ppm/kanban 看板重写为人员×日期矩阵布局（纵人员行头 avatar+姓名+工时+饱和度进度条 sticky 左，横日期列周六日标绿背景+休标签，单元格=该人该日任务缩略卡）+ 工时图表联动（默认全员柱图 stat-by-user，点人员行切单人项目工时饼图）+ 日期导航上周/本周/下周+RangePicker；新增 kanban-matrix/date-nav/work-hour-chart 三组件 + kanban-grouping 矩阵 helper，删除被取代的 kanban-column/task-card |
 | 2026-06-21 | ql-20260621-003-menu-isolation | 新建 /ppm 首页（`(dashboard)/ppm/page.tsx`，redirect 到 `/ppm/projects`）；配合 AppShell 路径过滤实现 ppm 与主平台菜单完全隔离，ppm 作为独立入口 |
+| 2026-06-21 | ql-20260621-004-c4a1 | 里程碑明细：明细表单 module_id 由 Input 改 Select（按 planNodeId 自取 listPlanNodeModules 做下拉，非父级透传）；所有日期列 render 原样输出 ISO → fmtDate(YYYY-MM-DD)；流程履历 → fmtDateTime；plan-nodes 两列同步修复 |
+| 2026-06-22 | 2026-06-21-frontend-style-system | 前端样式系统统一（现代明亮活力）：Design Token 单一源（主色 #2563EB）+ antd ConfigProvider 全面定制 + shadcn 视觉组件 + 共享布局（PageContainer/PageHeader/SectionCard/DataTable）+ AppShell lucide 图标 + 新增顶栏 + 登录页同色系重做；各页统一容器/配色/Inter 字体，消除散落老色板与内联 width |
