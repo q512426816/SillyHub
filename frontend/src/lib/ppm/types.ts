@@ -506,6 +506,19 @@ export interface PlanProcessActionReq {
   handle_info?: string | null;
   next_user_id?: string | null;
   next_user_name?: string | null;
+  /**
+   * 变更审批独有字段(对照源 ChangeApproveNodeDetailForm)。
+   *
+   * status=change_pending 时,审批人填写:
+   *  - change_approve_back_flag: "0" 同意 / "1" 驳回
+   *  - change_approve_opinion:   审批意见
+   *
+   * 后端 plan/fsm.py 当前状态机无 change_pending(变更直接生成 draft 新版本
+   * + 旧版本 archived),该字段为前端预留;若后端后续引入变更审批中间态,
+   * savePlanNodeDetailProcess / rejectPlanNodeDetailProcess 直接透传即可。
+   */
+  change_approve_back_flag?: string | null;
+  change_approve_opinion?: string | null;
 }
 
 export interface PlanChangeProcessReq {

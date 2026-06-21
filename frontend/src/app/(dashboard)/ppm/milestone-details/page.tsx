@@ -62,7 +62,9 @@ import { ApiError } from "@/lib/api";
 import {
   changePlanNodeDetailProcess,
   createPsPlanNodeDetail,
+  createPsPlanNode,
   deletePsPlanNodeDetail,
+  deletePsPlanNode,
   getProjectPlan,
   listPlanNodeDetailProcesses,
   listPlanNodeModules,
@@ -72,6 +74,7 @@ import {
   rejectPlanNodeDetailProcess,
   savePlanNodeDetailProcess,
   updatePsPlanNodeDetail,
+  updatePsPlanNode,
   type PlanProcessActionReq,
   type PlanChangeProcessReq,
   type PlanNodeModule,
@@ -85,13 +88,14 @@ import { useSession } from "@/stores/session";
 /** 实施阶段标识(对齐源 overallStage === '实施阶段' 判定)。 */
 const IMPLEMENT_STAGE = "实施阶段";
 
-/** 抽屉形态(对照源 6 Vue 表单)。 */
+/** 抽屉形态(对照源 6 Vue 表单 + P0-8 变更审批)。 */
 type DrawerMode =
   | "create" // 草稿新增(AddNodeDetailForm)
   | "edit" // 草稿编辑(NodeDetailForm,draft/rejected 返工)
   | "audit" // 审核中(AuditNodeDetailForm)
   | "approve" // 审批中(ApproveNodeDetailForm)
   | "change" // 变更原因录入(ChangeNodeDetailForm)
+  | "changeApprove" // 变更审批(ChangeApproveNodeDetailForm,status=change_pending)
   | "view"; // 只读(ViewNodeDetailForm,done/archived)
 
 interface DetailDrawerState {
@@ -103,14 +107,18 @@ interface DetailDrawerState {
 }
 
 /**
- * 按明细 status 路由抽屉形态(对照源 6 表单),模块级具名导出供单测断言映射。
+ * 按明细 status 路由抽屉形态(对照源 6 表单 + P0-8 变更审批),模块级具名导出供单测断言映射。
  *
  * 映射表(对齐 task-04.md「状态 → 表单映射表」):
  *  - draft / rejected → edit(草稿编辑 / 驳回返工)
  *  - review            → audit(审核中)
  *  - approve           → approve(审批中)
+ *  - change_pending    → changeApprove(变更审批,对照源 status='5' ChangeApproveNodeDetailForm)
  *  - done / archived   → view(终态只读)
  *  - 未识别状态        → view(降级只读,边界 1,不报错)
+ *
+ * 注:backend/app/modules/ppm/plan/fsm.py 当前状态机无 change_pending
+ * (变更直接生成 draft 新版本 + 旧版本 archived),此分支为前端预留。
  */
 export function modeForStatus(status: string): DrawerMode {
   switch (status) {
@@ -121,6 +129,8 @@ export function modeForStatus(status: string): DrawerMode {
       return "audit";
     case "approve":
       return "approve";
+    case "change_pending":
+      return "changeApprove";
     case "done":
     case "archived":
     default:
@@ -144,6 +154,12 @@ export default function MilestoneDetailsPage() {
     open: false,
     mode: "view",
   });
+  // P0-7:里程碑主表(PsPlanNode)CRUD 抽屉状态。
+  const [masterDrawer, setMasterDrawer] = useState<{
+    open: boolean;
+    mode: "create" | "edit";
+    node?: PsPlanNode;
+  }>({ open: false, mode: "create" });
   const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(
     null,
   );
@@ -180,12 +196,29 @@ export default function MilestoneDetailsPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
+  // P0-7:里程碑主表删除(对照源 OpenPlanNodeForm.handleDelete)。
+  const handleDeleteNode = useCallback(
+    async (n: PsPlanNode) => {
+      if (!confirm(`删除里程碑「${n.task_theme ?? n.no ?? n.id}」及其所有明细?`))
+        return;
+      try {
+        await deletePsPlanNode(n.id);
+        showToast(true, "已删除里程碑");
+        await reload();
+      } catch (err) {
+        showToast(false, err instanceof ApiError ? err.message : "删除里程碑失败");
+      }
+    },
+    [reload],
+  );
+
   // modeForStatus 已提到模块级具名导出,组件内直接复用,无需闭包转发。
 
   /**
    * 流程动作提交(save/reject/change)。表单 body 由调用方提供:
    *  - audit/approve 表单:handle_info(意见)
    *  - change 表单:change_reason
+   *  - changeApprove 表单(P0-8):change_approve_back_flag + change_approve_opinion
    * 列表行内 PlanDetailActions 不带 body 时走 prompt 兜底(保留旧行为)。
    */
   const handleSubmit = async (
@@ -194,6 +227,8 @@ export default function MilestoneDetailsPage() {
     body?: {
       handleInfo?: string;
       changeReason?: string;
+      changeApproveBackFlag?: string;
+      changeApproveOpinion?: string;
     },
   ) => {
     let rejectBody: PlanProcessActionReq | undefined;
@@ -202,6 +237,11 @@ export default function MilestoneDetailsPage() {
       const handleInfo =
         body?.handleInfo ?? (prompt("驳回意见(可选):") ?? "");
       rejectBody = { handle_info: handleInfo || null };
+      // P0-8:变更审批驳回透传 change_approve_* 字段(对照源 ChangeApproveNodeDetailForm)。
+      if (body?.changeApproveBackFlag) {
+        rejectBody.change_approve_back_flag = body.changeApproveBackFlag;
+        rejectBody.change_approve_opinion = body.changeApproveOpinion ?? null;
+      }
     } else if (action === "change") {
       const changeReason =
         body?.changeReason ?? (prompt("变更原因(必填):") ?? "");
@@ -218,6 +258,15 @@ export default function MilestoneDetailsPage() {
       action === "save" && body?.handleInfo
         ? { handle_info: body.handleInfo }
         : undefined;
+    // P0-8:变更审批同意透传 change_approve_* 字段。
+    if (
+      action === "save" &&
+      saveBody &&
+      body?.changeApproveBackFlag
+    ) {
+      saveBody.change_approve_back_flag = body.changeApproveBackFlag;
+      saveBody.change_approve_opinion = body.changeApproveOpinion ?? null;
+    }
     try {
       if (action === "save") {
         await savePlanNodeDetailProcess(detailId, saveBody);
@@ -322,26 +371,44 @@ export default function MilestoneDetailsPage() {
         title: "操作",
         key: "actions",
         align: "right",
-        width: 120,
+        width: 280,
         render: (_v: unknown, n: PsPlanNode) => (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() =>
-              setDrawer({
-                open: true,
-                mode: "create",
-                planNodeId: n.id,
-                moduleId: n.overall_stage === IMPLEMENT_STAGE ? null : null,
-              })
-            }
-          >
-            + 新建明细
-          </Button>
+          <div className="flex flex-wrap justify-end gap-1">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                setDrawer({
+                  open: true,
+                  mode: "create",
+                  planNodeId: n.id,
+                  moduleId: n.overall_stage === IMPLEMENT_STAGE ? null : null,
+                })
+              }
+            >
+              + 新建明细
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() =>
+                setMasterDrawer({ open: true, mode: "edit", node: n })
+              }
+            >
+              编辑里程碑
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => void handleDeleteNode(n)}
+            >
+              删除里程碑
+            </Button>
+          </div>
         ),
       },
     ],
-    [projectId],
+    [projectId, handleDeleteNode],
   );
 
   /** 打开明细抽屉,mode 默认按 status 路由,可显式覆盖(change/view)。 */
@@ -419,9 +486,17 @@ export default function MilestoneDetailsPage() {
             {projectId ? ` · 项目 ${projectId}` : ""} · 实施阶段三级(里程碑→模块→明细),其他阶段二级
           </p>
         </div>
-        <Button size="sm" variant="outline" onClick={() => void reload()}>
-          刷新
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            onClick={() => setMasterDrawer({ open: true, mode: "create" })}
+          >
+            + 新建里程碑
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => void reload()}>
+            刷新
+          </Button>
+        </div>
       </header>
 
       {toast && (
@@ -464,6 +539,21 @@ export default function MilestoneDetailsPage() {
           onSubmit={handleSubmit}
         />
       )}
+
+      {/* P0-7:里程碑主表(PsPlanNode)CRUD 抽屉,对照源 PsPlanNodeForm 7 字段。 */}
+      <PsPlanNodeDrawer
+        open={masterDrawer.open}
+        mode={masterDrawer.mode}
+        node={masterDrawer.node}
+        planId={planId}
+        projectId={projectId}
+        nextNo={String(psNodes.length + 1)}
+        onClose={() => setMasterDrawer({ open: false, mode: "create" })}
+        onSaved={() => {
+          setMasterDrawer({ open: false, mode: "create" });
+          void reload();
+        }}
+      />
     </div>
   );
 }
@@ -480,7 +570,12 @@ interface ModuleLevelProps {
   onSubmitDetail: (
     detailId: string,
     action: "save" | "reject" | "change",
-    body?: { handleInfo?: string; changeReason?: string },
+    body?: {
+      handleInfo?: string;
+      changeReason?: string;
+      changeApproveBackFlag?: string;
+      changeApproveOpinion?: string;
+    },
   ) => void;
   currentUserId: string;
 }
@@ -622,7 +717,12 @@ interface DetailLevelProps {
   onSubmitDetail: (
     detailId: string,
     action: "save" | "reject" | "change",
-    body?: { handleInfo?: string; changeReason?: string },
+    body?: {
+      handleInfo?: string;
+      changeReason?: string;
+      changeApproveBackFlag?: string;
+      changeApproveOpinion?: string;
+    },
   ) => void;
   currentUserId: string;
 }
@@ -865,7 +965,12 @@ function DetailDrawer({
   onSubmit: (
     detailId: string,
     action: "save" | "reject" | "change",
-    body?: { handleInfo?: string; changeReason?: string },
+    body?: {
+      handleInfo?: string;
+      changeReason?: string;
+      changeApproveBackFlag?: string;
+      changeApproveOpinion?: string;
+    },
   ) => void;
 }) {
   const [form] = Form.useForm<FormVals>();
@@ -885,6 +990,13 @@ function DetailDrawer({
   // 审批意见块可编辑:approve 模式 + 当前用户是审批人。
   const approveEditable =
     mode === "approve" &&
+    !!detail?.approve_user_id &&
+    matchAnyUser([detail.approve_user_id], currentUserId);
+  // P0-8:变更审批意见块可编辑:changeApprove 模式 + 当前用户是审批人
+  // (对照源 ChangeApproveNodeDetailForm:status=change_pending 时由审批人
+  // 填 changeApproveBackFlag/changeApproveOpinion)。
+  const changeApproveEditable =
+    mode === "changeApprove" &&
     !!detail?.approve_user_id &&
     matchAnyUser([detail.approve_user_id], currentUserId);
   // 变更原因块仅在 change 模式渲染,进入即默认可编辑,无需额外 disabled 计算。
@@ -911,6 +1023,11 @@ function DetailDrawer({
       audit_opinion: detail?.status === "review" ? "同意" : undefined,
       approve_back_flag: detail?.status === "approve" ? "0" : undefined,
       approve_opinion: detail?.status === "approve" ? "同意" : undefined,
+      // P0-8:变更审批块默认值(对齐源 ChangeApproveNodeDetailForm:同意)。
+      change_approve_back_flag:
+        detail?.status === "change_pending" ? "0" : undefined,
+      change_approve_opinion:
+        detail?.status === "change_pending" ? "同意" : undefined,
       change_reason: "",
     }),
     [detail, moduleId],
@@ -1030,6 +1147,28 @@ function DetailDrawer({
         await onSubmit(detail.id, "change", { changeReason: reason });
         return;
       }
+
+      if (mode === "changeApprove") {
+        // P0-8:对照源 ChangeApproveNodeDetailForm.submitForm:
+        // backFlag==='0' → saveProcess(同意);backFlag==='1' → rejectProcess(驳回)。
+        const backFlag = (vals.change_approve_back_flag as string) ?? "0";
+        const opinion = (vals.change_approve_opinion as string) ?? "";
+        onClose();
+        if (backFlag === "1") {
+          await onSubmit(detail.id, "reject", {
+            handleInfo: opinion,
+            changeApproveBackFlag: "1",
+            changeApproveOpinion: opinion,
+          });
+        } else {
+          await onSubmit(detail.id, "save", {
+            handleInfo: opinion,
+            changeApproveBackFlag: "0",
+            changeApproveOpinion: opinion,
+          });
+        }
+        return;
+      }
       // view 模式无提交
     } catch (e) {
       if (e instanceof ApiError) {
@@ -1056,6 +1195,8 @@ function DetailDrawer({
         return "审批明细";
       case "change":
         return "计划变更";
+      case "changeApprove":
+        return "变更审批";
       default:
         return `明细详情${detail ? ` · ${PLAN_DETAIL_STATUS_TEXT[detail.status] ?? detail.status}` : ""}`;
     }
@@ -1066,6 +1207,7 @@ function DetailDrawer({
     if (mode === "create" || mode === "edit") return "保存";
     if (mode === "audit" || mode === "approve") return "提交";
     if (mode === "change") return "提交变更";
+    if (mode === "changeApprove") return "提交审批";
     return "";
   }, [mode]);
 
@@ -1259,10 +1401,11 @@ function DetailDrawer({
           </Form.Item>
         </FormSection>
 
-        {/* 审核信息块:audit/edit/view 可见,审批/变更阶段也展示(只读) */}
+        {/* 审核信息块:audit/edit/view 可见,审批/变更/变更审批阶段也展示(只读) */}
         {(mode === "audit" ||
           mode === "approve" ||
           mode === "change" ||
+          mode === "changeApprove" ||
           mode === "view") &&
           detail?.audit_user_id && (
             <FormSection title="审核信息">
@@ -1303,7 +1446,10 @@ function DetailDrawer({
           )}
 
         {/* 审批信息块 */}
-        {(mode === "approve" || mode === "change" || mode === "view") &&
+        {(mode === "approve" ||
+          mode === "change" ||
+          mode === "changeApprove" ||
+          mode === "view") &&
           detail?.approve_user_id && (
             <FormSection title="审批信息">
               <div className="grid grid-cols-2 gap-3">
@@ -1356,6 +1502,59 @@ function DetailDrawer({
               />
             </Form.Item>
           </FormSection>
+        )}
+
+        {/* P0-8:变更审批块(对照源 ChangeApproveNodeDetailForm)。
+            status=change_pending 时由审批人填写 changeApproveBackFlag/
+            changeApproveOpinion,提交走 save(同意)/reject(驳回)。
+            同时只读展示变更原因(detail.change_reason)。 */}
+        {mode === "changeApprove" && (
+          <>
+            {detail?.change_reason && (
+              <FormSection title="变更原因(只读)">
+                <Form.Item label="变更原因">
+                  <Input.TextArea
+                    value={detail.change_reason}
+                    disabled
+                    rows={3}
+                  />
+                </Form.Item>
+              </FormSection>
+            )}
+            <FormSection title="变更审批">
+              <Form.Item label="审批人">
+                <PpmText
+                  res="user"
+                  value={detail?.approve_user_id}
+                  name={detail?.approve_user_name}
+                />
+              </Form.Item>
+              <Form.Item
+                label="是否驳回"
+                name="change_approve_back_flag"
+                rules={[{ required: true, message: "请选择" }]}
+              >
+                <Select
+                  disabled={!changeApproveEditable}
+                  options={[
+                    { value: "0", label: "否" },
+                    { value: "1", label: "是" },
+                  ]}
+                />
+              </Form.Item>
+              <Form.Item
+                label="意见"
+                name="change_approve_opinion"
+                rules={[{ required: true, message: "请输入意见" }]}
+              >
+                <Input.TextArea
+                  disabled={!changeApproveEditable}
+                  rows={2}
+                  placeholder="请输入意见"
+                />
+              </Form.Item>
+            </FormSection>
+          </>
         )}
 
         {/* 变更版本链 */}
@@ -1438,5 +1637,195 @@ function FormSection({
       </div>
       {children}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// P0-7:里程碑主表(PsPlanNode)CRUD 抽屉,对照源 PsPlanNodeForm.vue 7 字段
+// (no / overallStage / dutyUserId / taskTheme / planWorkload /
+//  planBeginTime / planCompleteTime)。
+// ---------------------------------------------------------------------------
+
+interface PsPlanNodeVals {
+  no?: string | null;
+  overall_stage?: string | null;
+  duty_user_id?: string | null;
+  task_theme?: string | null;
+  plan_workload?: string | null;
+  plan_begin_time?: string | null;
+  plan_complete_time?: string | null;
+}
+
+function PsPlanNodeDrawer({
+  open,
+  mode,
+  node,
+  planId,
+  projectId,
+  nextNo,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  mode: "create" | "edit";
+  node?: PsPlanNode;
+  planId: string;
+  projectId: string | null;
+  nextNo: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form] = Form.useForm<PsPlanNodeVals>();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const initialValues = useMemo<PsPlanNodeVals>(
+    () => ({
+      no: node?.no ?? (mode === "create" ? nextNo : ""),
+      overall_stage: node?.overall_stage ?? "",
+      duty_user_id: node?.duty_user_id ?? "",
+      task_theme: node?.task_theme ?? "",
+      plan_workload: node?.plan_workload ?? "",
+      plan_begin_time: node?.plan_begin_time ?? "",
+      plan_complete_time: node?.plan_complete_time ?? "",
+    }),
+    [node, mode, nextNo],
+  );
+
+  useEffect(() => {
+    if (open) form.setFieldsValue(initialValues);
+  }, [form, initialValues, open]);
+
+  const submit = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const vals = await form.validateFields();
+      const body = {
+        no: (vals.no as string) || null,
+        overall_stage: (vals.overall_stage as string) || null,
+        duty_user_id: (vals.duty_user_id as string) || null,
+        task_theme: (vals.task_theme as string) || null,
+        plan_workload: (vals.plan_workload as string) || null,
+        plan_begin_time: (vals.plan_begin_time as string) || null,
+        plan_complete_time: (vals.plan_complete_time as string) || null,
+      };
+      if (mode === "create") {
+        await createPsPlanNode({ ps_project_plan_id: planId, ...body });
+      } else if (node) {
+        await updatePsPlanNode(node.id, body);
+      }
+      onSaved();
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setErr(e.message);
+      } else if (e && typeof e === "object" && "errorFields" in e) {
+        // AntD 校验失败,字段下已提示
+      } else {
+        setErr("保存失败");
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Drawer
+      title={mode === "create" ? "新建里程碑" : "编辑里程碑"}
+      open={open}
+      onClose={onClose}
+      width={640}
+      destroyOnClose
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button size="sm" variant="outline" onClick={onClose}>
+            关闭
+          </Button>
+          <Button size="sm" disabled={busy} onClick={() => void submit()}>
+            {busy ? "保存中…" : "保存"}
+          </Button>
+        </div>
+      }
+    >
+      <Form<PsPlanNodeVals>
+        form={form}
+        layout="vertical"
+        initialValues={initialValues}
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <Form.Item
+            label="序号"
+            name="no"
+            rules={[{ required: true, message: "请输入序号" }]}
+          >
+            <Input placeholder="如 1" />
+          </Form.Item>
+          <Form.Item
+            label="总体阶段"
+            name="overall_stage"
+            rules={[{ required: true, message: "请输入总体阶段" }]}
+          >
+            <Input placeholder="如 实施阶段" />
+          </Form.Item>
+        </div>
+        <Form.Item
+          label="责任人"
+          name="duty_user_id"
+          rules={[{ required: true, message: "请选择责任人" }]}
+        >
+          {projectId ? (
+            <PpmUserSelect
+              res="projectMember"
+              searchData={{ pm_project_id: projectId }}
+              allowClear
+              placeholder="选择责任人"
+            />
+          ) : (
+            <Input placeholder="责任人 ID" />
+          )}
+        </Form.Item>
+        <div className="grid grid-cols-2 gap-3">
+          <Form.Item label="任务主题" name="task_theme">
+            <Input placeholder="请输入任务主题" />
+          </Form.Item>
+          <Form.Item
+            label="预计工作量"
+            name="plan_workload"
+            rules={[{ required: true, message: "请输入预计工作量" }]}
+          >
+            <Input placeholder="如 5(工作日)" />
+          </Form.Item>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Form.Item
+            label="计划开始时间"
+            name="plan_begin_time"
+            rules={[{ required: true, message: "请选择计划开始时间" }]}
+          >
+            <DatePicker
+              style={{ width: "100%" }}
+              value={toDay(form.getFieldValue("plan_begin_time"))}
+              onChange={(d) =>
+                form.setFieldValue("plan_begin_time", fromDate(d))
+              }
+            />
+          </Form.Item>
+          <Form.Item
+            label="计划完成时间"
+            name="plan_complete_time"
+            rules={[{ required: true, message: "请选择计划完成时间" }]}
+          >
+            <DatePicker
+              style={{ width: "100%" }}
+              value={toDay(form.getFieldValue("plan_complete_time"))}
+              onChange={(d) =>
+                form.setFieldValue("plan_complete_time", fromDate(d))
+              }
+            />
+          </Form.Item>
+        </div>
+      </Form>
+      {err && <p className="mt-2 text-[11px] text-destructive">{err}</p>}
+    </Drawer>
   );
 }

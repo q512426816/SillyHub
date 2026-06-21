@@ -18,6 +18,7 @@
  * 设计依据:tasks/task-03.md + 源 index.vue。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Button as AntButton,
   DatePicker,
@@ -76,6 +77,7 @@ function fmtDate(v: string | null | undefined): string {
 }
 
 export default function ProjectPlansPage() {
+  const router = useRouter();
   const [plans, setPlans] = useState<PsProjectPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -92,6 +94,11 @@ export default function ProjectPlansPage() {
   );
   const [search] = Form.useForm<SearchForm>();
   const [expanded, setExpanded] = useState(false);
+
+  // P0-6:跳转里程碑管理页(对照源 OpenPlanNodeForm 入口)。
+  const goToMilestones = (planId: string) => {
+    router.push(`/ppm/milestone-details?plan=${planId}`);
+  };
 
   const load = useCallback(
     async (params?: Record<string, string | undefined>) => {
@@ -275,7 +282,7 @@ export default function ProjectPlansPage() {
       title: "操作",
       key: "actions",
       fixed: "right",
-      width: 240,
+      width: 300,
       render: (_v: unknown, p: PsProjectPlan) => (
         <div className="flex gap-1">
           <AntButton
@@ -284,6 +291,13 @@ export default function ProjectPlansPage() {
             onClick={() => setDetail({ open: true, planId: p.id })}
           >
             详情
+          </AntButton>
+          <AntButton
+            size="small"
+            type="link"
+            onClick={() => goToMilestones(p.id)}
+          >
+            里程碑
           </AntButton>
           <AntButton
             size="small"
