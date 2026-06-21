@@ -242,9 +242,9 @@ export default function ProblemListPage() {
                 审核
               </Button>
             )}
-            {/* 变更:status=3 + creator/duty(源 openChangeForm) */}
+            {/* 变更:status=3 + creator/duty(源 openChangeForm → 新建 ProblemChange) */}
             {p.status === "3" && (isCreator || isDuty) && (
-              <Button size="small" onClick={() => openDrawer("edit", p)}>
+              <Button size="small" onClick={() => openDrawer("change", p)}>
                 变更
               </Button>
             )}

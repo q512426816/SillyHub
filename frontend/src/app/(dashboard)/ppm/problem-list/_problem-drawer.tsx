@@ -1,15 +1,16 @@
 "use client";
 
 /**
- * 问题清单 Drawer 分发器 — 按 mode 渲染对应 6 态表单。
+ * 问题清单 Drawer 分发器 — 按 mode 渲染对应 6 态表单 + 变更创建。
  *
- * mode 对照源 6 个 .vue:
+ * mode 对照源 6 个 .vue + 变更表单:
  *  - create / edit   → ProblemCreateForm   (ListForm.vue)
  *  - start           → ProblemStartForm    (ListStartForm.vue,status=3)
  *  - audit           → ProblemAuditForm    (ListAuditForm.vue,status=2)
  *  - done            → ProblemDoneForm     (ListDoneForm.vue,status=3)
  *  - close           → ProblemCloseForm    (ListCloseForm.vue,status=6)
  *  - detail          → ProblemDetailForm   (ListDetailForm.vue,任意)
+ *  - change          → ChangeCreateForm    (problemchange/ChangeForm.vue,从源问题回填)
  */
 import { useEffect, useState } from "react";
 import { Drawer } from "antd";
@@ -19,6 +20,7 @@ import {
 } from "@/components/ppm-status-actions";
 import { listProblemLogs } from "@/lib/ppm";
 import type { ProblemList, ProblemProcessLog } from "@/lib/ppm";
+import { ChangeCreateForm } from "../problem-changes/_forms";
 import {
   ProblemAuditForm,
   ProblemCloseForm,
@@ -35,7 +37,8 @@ export type ProblemDrawerMode =
   | "audit"
   | "done"
   | "close"
-  | "detail";
+  | "detail"
+  | "change";
 
 export interface ProblemDrawerProps {
   open: boolean;
@@ -53,6 +56,7 @@ const TITLE: Record<ProblemDrawerMode, string> = {
   done: "完成处置",
   close: "验证并关闭",
   detail: "问题详情",
+  change: "申请变更",
 };
 
 export function ProblemDrawer({
@@ -155,6 +159,13 @@ export function ProblemDrawer({
           problem={problem}
           logs={logs}
           loadingLogs={loadingLogs}
+          onCancel={onClose}
+        />
+      )}
+      {mode === "change" && problem && (
+        <ChangeCreateForm
+          sourceProblemId={String(problem.id)}
+          onSuccess={onSaved}
           onCancel={onClose}
         />
       )}
