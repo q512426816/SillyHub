@@ -148,6 +148,7 @@ export default function MilestoneDetailsPage() {
 
   const [psNodes, setPsNodes] = useState<PsPlanNode[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectManagerId, setProjectManagerId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<DetailDrawerState>({
@@ -164,6 +165,11 @@ export default function MilestoneDetailsPage() {
     null,
   );
 
+  // plan 内前端过滤(overallStage/detailedStage/taskTheme):后端无对应过滤参数。
+  const [overallStageFilter, setOverallStageFilter] = useState<string>("");
+  const [detailedStageFilter, setDetailedStageFilter] = useState<string>("");
+  const [taskThemeFilter, setTaskThemeFilter] = useState<string>("");
+
   // 里程碑列表 + 项目 ID(供 PpmUserSelect 的 searchData.pm_project_id)
   useEffect(() => {
     if (!planId) return;
@@ -173,6 +179,7 @@ export default function MilestoneDetailsPage() {
       try {
         const plan = await getProjectPlan(planId);
         setProjectId(plan.project_id ?? null);
+        setProjectManagerId(plan.project_manager_id ?? null);
         const list = await listPsPlanNodes(planId);
         setPsNodes(list);
       } catch (err) {
@@ -182,6 +189,18 @@ export default function MilestoneDetailsPage() {
       }
     })();
   }, [planId]);
+
+  // readOnlyFlag:非项目经理(无 create_user_id 字段,退化为 project_manager_id)→ 只读
+  const readOnly = !matchAnyUser([projectManagerId], currentUserId);
+
+  // 主表前端过滤:总体阶段(plan 内)
+  const filteredNodes = useMemo(() => {
+    const kw = overallStageFilter.trim().toLowerCase();
+    if (!kw) return psNodes;
+    return psNodes.filter((n) =>
+      (n.overall_stage ?? "").toLowerCase().includes(kw),
+    );
+  }, [psNodes, overallStageFilter]);
 
   const reload = useCallback(async () => {
     try {
@@ -377,6 +396,8 @@ export default function MilestoneDetailsPage() {
             <Button
               size="sm"
               variant="outline"
+              disabled={readOnly}
+              title={readOnly ? "只读模式(非项目经理)" : undefined}
               onClick={() =>
                 setDrawer({
                   open: true,
@@ -391,6 +412,8 @@ export default function MilestoneDetailsPage() {
             <Button
               size="sm"
               variant="ghost"
+              disabled={readOnly}
+              title={readOnly ? "只读模式(非项目经理)" : undefined}
               onClick={() =>
                 setMasterDrawer({ open: true, mode: "edit", node: n })
               }
@@ -400,6 +423,8 @@ export default function MilestoneDetailsPage() {
             <Button
               size="sm"
               variant="destructive"
+              disabled={readOnly}
+              title={readOnly ? "只读模式(非项目经理)" : undefined}
               onClick={() => void handleDeleteNode(n)}
             >
               删除里程碑
@@ -408,7 +433,7 @@ export default function MilestoneDetailsPage() {
         ),
       },
     ],
-    [projectId, handleDeleteNode],
+    [projectId, handleDeleteNode, readOnly],
   );
 
   /** 打开明细抽屉,mode 默认按 status 路由,可显式覆盖(change/view)。 */
@@ -444,6 +469,9 @@ export default function MilestoneDetailsPage() {
             onOpenDetail={(d, mode) => openDetail(node.id, d, mode)}
             onSubmitDetail={handleSubmit}
             currentUserId={currentUserId}
+            detailedStageFilter={detailedStageFilter}
+            taskThemeFilter={taskThemeFilter}
+            readOnly={readOnly}
           />
         );
       }
@@ -462,10 +490,13 @@ export default function MilestoneDetailsPage() {
           onOpenDetail={(d, mode) => openDetail(node.id, d, mode)}
           onSubmitDetail={handleSubmit}
           currentUserId={currentUserId}
+          detailedStageFilter={detailedStageFilter}
+          taskThemeFilter={taskThemeFilter}
+          readOnly={readOnly}
         />
       );
     },
-    [projectId, currentUserId, openDetail],
+    [projectId, currentUserId, openDetail, detailedStageFilter, taskThemeFilter, readOnly],
   );
 
   if (!planId) {
@@ -484,11 +515,14 @@ export default function MilestoneDetailsPage() {
           <p className="text-xs text-muted-foreground">
             计划 {planId}
             {projectId ? ` · 项目 ${projectId}` : ""} · 实施阶段三级(里程碑→模块→明细),其他阶段二级
+            {readOnly && " · 只读模式(非项目经理)"}
           </p>
         </div>
         <div className="flex gap-2">
           <Button
             size="sm"
+            disabled={readOnly}
+            title={readOnly ? "只读模式(非项目经理)" : undefined}
             onClick={() => setMasterDrawer({ open: true, mode: "create" })}
           >
             + 新建里程碑
@@ -498,6 +532,54 @@ export default function MilestoneDetailsPage() {
           </Button>
         </div>
       </header>
+
+      {/* plan 内前端过滤(后端无对应过滤参数) */}
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 8,
+          alignItems: "center",
+        }}
+      >
+        <Input
+          allowClear
+          style={{ width: 200 }}
+          placeholder="总体阶段"
+          value={overallStageFilter}
+          onChange={(e) => setOverallStageFilter(e.target.value)}
+        />
+        <Input
+          allowClear
+          style={{ width: 200 }}
+          placeholder="明细阶段"
+          value={detailedStageFilter}
+          onChange={(e) => setDetailedStageFilter(e.target.value)}
+        />
+        <Input
+          allowClear
+          style={{ width: 220 }}
+          placeholder="任务主题"
+          value={taskThemeFilter}
+          onChange={(e) => setTaskThemeFilter(e.target.value)}
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            setOverallStageFilter("");
+            setDetailedStageFilter("");
+            setTaskThemeFilter("");
+          }}
+        >
+          清除
+        </Button>
+        <span
+          style={{ marginLeft: "auto", fontSize: 12, color: "rgba(0,0,0,0.45)" }}
+        >
+          注:明细阶段/任务主题过滤在展开明细行内生效
+        </span>
+      </div>
 
       {toast && (
         <div
@@ -517,7 +599,7 @@ export default function MilestoneDetailsPage() {
         </div>
       ) : (
         <PpmSubTable<PsPlanNode>
-          masterRows={psNodes}
+          masterRows={filteredNodes}
           masterColumns={masterColumns}
           expandRender={expandRender}
           expandableTriggerField="id"
@@ -578,6 +660,12 @@ interface ModuleLevelProps {
     },
   ) => void;
   currentUserId: string;
+  /** plan 内前端过滤:明细阶段。 */
+  detailedStageFilter?: string;
+  /** plan 内前端过滤:任务主题。 */
+  taskThemeFilter?: string;
+  /** 只读模式(非项目经理):禁用写入按钮。 */
+  readOnly?: boolean;
 }
 
 function ModuleLevelTable({
@@ -587,6 +675,9 @@ function ModuleLevelTable({
   onOpenDetail,
   onSubmitDetail,
   currentUserId,
+  detailedStageFilter,
+  taskThemeFilter,
+  readOnly,
 }: ModuleLevelProps) {
   const [modules, setModules] = useState<PlanNodeModule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -666,6 +757,8 @@ function ModuleLevelTable({
           <Button
             size="sm"
             variant="outline"
+            disabled={readOnly}
+            title={readOnly ? "只读模式(非项目经理)" : undefined}
             onClick={() => onAddDetail(m.id)}
           >
             + 新建明细
@@ -673,7 +766,7 @@ function ModuleLevelTable({
         ),
       },
     ],
-    [projectId, onAddDetail],
+    [projectId, onAddDetail, readOnly],
   );
 
   const moduleExpandRender = useCallback(
@@ -685,9 +778,21 @@ function ModuleLevelTable({
         onOpenDetail={onOpenDetail}
         onSubmitDetail={onSubmitDetail}
         currentUserId={currentUserId}
+        detailedStageFilter={detailedStageFilter}
+        taskThemeFilter={taskThemeFilter}
+        readOnly={readOnly}
       />
     ),
-    [planNodeId, onAddDetail, onOpenDetail, onSubmitDetail, currentUserId],
+    [
+      planNodeId,
+      onAddDetail,
+      onOpenDetail,
+      onSubmitDetail,
+      currentUserId,
+      detailedStageFilter,
+      taskThemeFilter,
+      readOnly,
+    ],
   );
 
   return (
@@ -725,6 +830,12 @@ interface DetailLevelProps {
     },
   ) => void;
   currentUserId: string;
+  /** plan 内前端过滤:明细阶段。 */
+  detailedStageFilter?: string;
+  /** plan 内前端过滤:任务主题。 */
+  taskThemeFilter?: string;
+  /** 只读模式(非项目经理):禁用写入按钮。 */
+  readOnly?: boolean;
 }
 
 function DetailLevelTable({
@@ -734,6 +845,9 @@ function DetailLevelTable({
   onOpenDetail,
   onSubmitDetail,
   currentUserId,
+  detailedStageFilter,
+  taskThemeFilter,
+  readOnly,
 }: DetailLevelProps) {
   const [details, setDetails] = useState<PsPlanNodeDetail[]>([]);
   const [loading, setLoading] = useState(true);
@@ -759,6 +873,22 @@ function DetailLevelTable({
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // plan 内前端过滤:明细阶段 / 任务主题
+  const visibleDetails = useMemo(() => {
+    const ds = detailedStageFilter?.trim().toLowerCase() ?? "";
+    const tt = taskThemeFilter?.trim().toLowerCase() ?? "";
+    if (!ds && !tt) return details;
+    return details.filter((d) => {
+      if (ds && !(d.detailed_stage ?? "").toLowerCase().includes(ds)) {
+        return false;
+      }
+      if (tt && !(d.task_theme ?? "").toLowerCase().includes(tt)) {
+        return false;
+      }
+      return true;
+    });
+  }, [details, detailedStageFilter, taskThemeFilter]);
 
   const handleDelete = async (d: PsPlanNodeDetail) => {
     if (d.status !== "draft") return;
@@ -852,6 +982,7 @@ function DetailLevelTable({
             <PlanDetailActions
               detail={d}
               currentUserId={currentUserId}
+              disabled={readOnly}
               onSubmit={(id, action) => {
                 // change 动作:打开变更原因录入抽屉(对齐源 ChangeNodeDetailForm),
                 // 其余动作(save/reject)在抽屉内填意见后提交,此处直接走 prompt 兜底。
@@ -866,6 +997,8 @@ function DetailLevelTable({
               <Button
                 size="sm"
                 variant="destructive"
+                disabled={readOnly}
+                title={readOnly ? "只读模式(非项目经理)" : undefined}
                 onClick={() => void handleDelete(d)}
               >
                 删除
@@ -875,7 +1008,7 @@ function DetailLevelTable({
         ),
       },
     ],
-    [currentUserId, onOpenDetail, onSubmitDetail],
+    [currentUserId, onOpenDetail, onSubmitDetail, readOnly],
   );
 
   return (
@@ -884,7 +1017,13 @@ function DetailLevelTable({
         <span className="text-sm font-medium">
           明细{moduleId ? ` · 模块 ${moduleId}` : ""}
         </span>
-        <Button size="sm" variant="outline" onClick={onAddDetail}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={readOnly}
+          title={readOnly ? "只读模式(非项目经理)" : undefined}
+          onClick={onAddDetail}
+        >
           + 新建明细
         </Button>
       </div>
@@ -896,7 +1035,7 @@ function DetailLevelTable({
         <Table<PsPlanNodeDetail>
           rowKey="id"
           columns={columns}
-          dataSource={details}
+          dataSource={visibleDetails}
           loading={loading}
           size="small"
           pagination={false}

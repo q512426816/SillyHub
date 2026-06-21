@@ -34,18 +34,20 @@ type FieldName = keyof Entity & string;
 
 const fields: PpmFieldDef<Entity>[] = [
   { name: "company_name" as FieldName, label: "公司名称", required: true },
-  { name: "contact" as FieldName, label: "联系人" },
+  { name: "contact" as FieldName, label: "联系人", required: true },
   {
     name: "phone_no" as FieldName,
     label: "手机号",
+    required: true,
     placeholder: "11 位手机号",
     pattern: /^1\d{10}$/,
     patternMessage: "请输入 11 位手机号(以 1 开头)",
   },
-  { name: "dept_name" as FieldName, label: "部门" },
+  { name: "dept_name" as FieldName, label: "部门", required: true },
   {
     name: "level" as FieldName,
     label: "级别",
+    required: true,
     type: "select",
     options: LEVEL_OPTIONS,
   },
@@ -68,6 +70,7 @@ export default function PpmCustomersPage() {
       searchFieldNames={[
         "company_name" as FieldName,
         "contact" as FieldName,
+        "level" as FieldName,
       ]}
       getRowLabel={(row) => row.company_name ?? row.contact ?? row.id}
       list={(params) => pageCustomers(params)}

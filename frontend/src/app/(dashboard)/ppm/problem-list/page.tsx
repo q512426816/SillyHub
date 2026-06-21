@@ -16,8 +16,19 @@
  * 设计依据:.sillyspec/changes/2026-06-21-ppm-frontend-alignment/design.md §7
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Table, type TableProps, Tag } from "antd";
+import {
+  Button,
+  DatePicker,
+  Input,
+  Select,
+  Space,
+  Table,
+  type TableProps,
+  Tag,
+} from "antd";
+import type { Dayjs } from "dayjs";
 
+import { PpmUserSelect } from "@/components/ppm-user-select";
 import { matchAnyUser } from "@/components/ppm-status-actions";
 import {
   PROBLEM_STATUS_COLOR,
@@ -25,10 +36,34 @@ import {
   PROBLEM_TYPE_TEXT,
 } from "@/components/ppm-status-actions";
 import { ApiError } from "@/lib/api";
-import { deleteProblem, listProblems } from "@/lib/ppm";
+import { deleteProblem, exportProblems, listProblems } from "@/lib/ppm";
 import type { ProblemList } from "@/lib/ppm";
 import { useSession } from "@/stores/session";
 import { ProblemDrawer, type ProblemDrawerMode } from "./_problem-drawer";
+
+const { RangePicker } = DatePicker;
+
+const STATUS_OPTIONS = [
+  { label: PROBLEM_STATUS_TEXT["1"] ?? "已保存", value: "1" },
+  { label: PROBLEM_STATUS_TEXT["2"] ?? "审核中", value: "2" },
+  { label: PROBLEM_STATUS_TEXT["3"] ?? "处置中", value: "3" },
+  { label: PROBLEM_STATUS_TEXT["6"] ?? "待验证", value: "6" },
+  { label: PROBLEM_STATUS_TEXT["4"] ?? "已关闭", value: "4" },
+  { label: PROBLEM_STATUS_TEXT["5"] ?? "已作废", value: "5" },
+  { label: PROBLEM_STATUS_TEXT["7"] ?? "变更中", value: "7" },
+];
+
+const PRO_TYPE_OPTIONS = [
+  { label: "全部类型", value: "" },
+  { label: PROBLEM_TYPE_TEXT.bug, value: "bug" },
+  { label: PROBLEM_TYPE_TEXT.change, value: "change" },
+];
+
+const IS_URGENT_OPTIONS = [
+  { label: "全部", value: "" },
+  { label: "急", value: "1" },
+  { label: "否", value: "0" },
+];
 
 export default function ProblemListPage() {
   const { user: currentUser } = useSession();
@@ -38,7 +73,7 @@ export default function ProblemListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 搜索栏(对照源 queryParams,本仓后端未全支持复杂过滤,仅做关键字本地过滤)
+  // 搜索栏(对照源 queryParams,本仓后端仅支持分页,复杂字段本地过滤)
   const [keyword, setKeyword] = useState("");
   const [statusFilter, setStatusFilter] = useState<string[]>([
     "1",
@@ -46,6 +81,13 @@ export default function ProblemListPage() {
     "3",
     "6",
   ]);
+  const [projectFilter, setProjectFilter] = useState<string | null>(null);
+  const [proTypeFilter, setProTypeFilter] = useState<string>("");
+  const [isUrgentFilter, setIsUrgentFilter] = useState<string>("");
+  const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(
+    null,
+  );
+  const [exporting, setExporting] = useState(false);
 
   const [drawer, setDrawer] = useState<{
     open: boolean;
@@ -57,7 +99,7 @@ export default function ProblemListPage() {
     setLoading(true);
     setError(null);
     try {
-      setItems(await listProblems({ page: 1, page_size: 100 }));
+      setItems(await listProblems({ page: 1, page_size: 200 }));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "加载失败");
     } finally {
@@ -71,9 +113,26 @@ export default function ProblemListPage() {
 
   const filtered = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
+    const [rangeStart, rangeEnd] = dateRange ?? [null, null];
     return items.filter((p) => {
       if (statusFilter.length > 0 && !statusFilter.includes(p.status)) {
         return false;
+      }
+      if (projectFilter && p.project_id !== projectFilter) {
+        return false;
+      }
+      if (proTypeFilter && p.pro_type !== proTypeFilter) {
+        return false;
+      }
+      if (isUrgentFilter) {
+        const urgent = p.is_urgent === "1" || p.is_urgent === "是" ? "1" : "0";
+        if (urgent !== isUrgentFilter) return false;
+      }
+      if (rangeStart && rangeEnd && p.find_time) {
+        const t = new Date(p.find_time);
+        if (Number.isNaN(t.getTime())) return false;
+        if (t < rangeStart.startOf("day").toDate()) return false;
+        if (t > rangeEnd.endOf("day").toDate()) return false;
       }
       if (!kw) return true;
       const hay = [
@@ -89,7 +148,35 @@ export default function ProblemListPage() {
         .toLowerCase();
       return hay.includes(kw);
     });
-  }, [items, keyword, statusFilter]);
+  }, [
+    items,
+    keyword,
+    statusFilter,
+    projectFilter,
+    proTypeFilter,
+    isUrgentFilter,
+    dateRange,
+  ]);
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      await exportProblems();
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : "导出失败");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const resetFilters = () => {
+    setKeyword("");
+    setStatusFilter(["1", "2", "3", "6"]);
+    setProjectFilter(null);
+    setProTypeFilter("");
+    setIsUrgentFilter("");
+    setDateRange(null);
+  };
 
   const openDrawer = (
     mode: ProblemDrawerMode,
@@ -304,12 +391,17 @@ export default function ProblemListPage() {
             问题审批流:已保存→审核中→处置中→待验证→已关闭;bug 跳过部门经理
           </p>
         </div>
-        <Button type="primary" onClick={() => openDrawer("create")}>
-          + 新建问题
-        </Button>
+        <Space>
+          <Button loading={exporting} onClick={() => void handleExport()}>
+            导出
+          </Button>
+          <Button type="primary" onClick={() => openDrawer("create")}>
+            + 新建问题
+          </Button>
+        </Space>
       </header>
 
-      {/* 搜索栏(对照源 index.vue queryParams) */}
+      {/* 搜索栏(对照源 index.vue queryParams,本仓后端仅分页,复杂字段本地过滤) */}
       <div
         style={{
           display: "flex",
@@ -318,31 +410,57 @@ export default function ProblemListPage() {
           alignItems: "center",
         }}
       >
-        <input
-          className="h-8 min-w-[200px] rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
+        <Input
+          allowClear
+          style={{ width: 240 }}
           placeholder="项目/模块/描述/功能/责任人/发现人"
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
         />
-        <select
-          className="h-8 rounded border border-input bg-background px-2 text-sm"
-          multiple={false}
-          value={statusFilter.length === 1 ? statusFilter[0] : ""}
-          onChange={(e) => {
-            const v = e.target.value;
-            setStatusFilter(v ? [v] : []);
-          }}
+        <Select<string[]>
+          mode="multiple"
+          allowClear
+          style={{ minWidth: 200 }}
+          placeholder="状态(可多选)"
+          value={statusFilter}
+          onChange={(v) => setStatusFilter(v as string[])}
+          options={STATUS_OPTIONS}
+        />
+        <PpmUserSelect
+          res="project"
+          allowClear
+          style={{ width: 200 }}
+          placeholder="项目"
+          value={projectFilter}
+          onChange={(v) => setProjectFilter((v as string | null) ?? null)}
+        />
+        <Select<string>
+          style={{ width: 130 }}
+          placeholder="问题类型"
+          value={proTypeFilter || undefined}
+          onChange={(v) => setProTypeFilter(v ?? "")}
+          options={PRO_TYPE_OPTIONS}
+        />
+        <Select<string>
+          style={{ width: 110 }}
+          placeholder="是否紧急"
+          value={isUrgentFilter || undefined}
+          onChange={(v) => setIsUrgentFilter(v ?? "")}
+          options={IS_URGENT_OPTIONS}
+        />
+        <RangePicker
+          value={dateRange as [Dayjs, Dayjs] | null}
+          onChange={(v) =>
+            setDateRange(v as [Dayjs | null, Dayjs | null] | null)
+          }
+          placeholder={["发现开始", "发现结束"]}
+        />
+        <Button onClick={resetFilters}>重置</Button>
+        <span
+          style={{ marginLeft: "auto", fontSize: 12, color: "rgba(0,0,0,0.45)" }}
         >
-          <option value="">全部状态</option>
-          {(["1", "2", "3", "6", "4", "5", "7"] as const).map((s) => (
-            <option key={s} value={s}>
-              {PROBLEM_STATUS_TEXT[s] ?? s}
-            </option>
-          ))}
-        </select>
-        <Button onClick={() => setKeyword("")}>
-          重置
-        </Button>
+          共 {filtered.length} 条
+        </span>
       </div>
 
       {error ? (

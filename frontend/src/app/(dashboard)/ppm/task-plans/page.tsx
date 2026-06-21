@@ -12,7 +12,8 @@
  * 依赖:lib/ppm/task (API) + lib/ppm/project (项目下拉) + stores/session。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Table, type TableProps, Tag } from "antd";
+import { DatePicker, Input, Select, Table, type TableProps, Tag } from "antd";
+import type { Dayjs } from "dayjs";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -24,6 +25,7 @@ import {
   createPlanTask,
   deletePlanTask,
   executePlanTask,
+  exportPlanTasks,
   listPersonalPlanTasks,
   listPlanTasks,
   updatePlanTask,
@@ -47,7 +49,17 @@ import {
   useToast,
 } from "../shared";
 
+const { RangePicker } = DatePicker;
+
 type ViewMode = "all" | "personal";
+
+const STATUS_CODE_OPTIONS = [
+  { label: "待执行", value: "10" },
+  { label: "执行中", value: "20" },
+  { label: "待验证", value: "30" },
+  { label: "已完成", value: "40" },
+  { label: "已关闭", value: "50" },
+];
 
 interface DrawerState {
   open: boolean;
@@ -75,10 +87,17 @@ export default function TaskPlansPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
-  // 筛选
-  const [statusFilter, setStatusFilter] = useState<string>("");
+  // 筛选(后端 PlanTaskPageReq 支持:user_id/project_id/status/month/year)
+  // status 多选 / dateRange / workPartner 后端不支持,前端本地过滤
+  const [statusFilterList, setStatusFilterList] = useState<string[]>([]);
   const [monthFilter, setMonthFilter] = useState<string>("");
   const [projectFilter, setProjectFilter] = useState<string>("");
+  const [userFilter, setUserFilter] = useState<string | null>(null);
+  const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(
+    null,
+  );
+  const [workPartnerFilter, setWorkPartnerFilter] = useState<string>("");
+  const [exporting, setExporting] = useState(false);
 
   const [projects, setProjects] = useState<ProjectSimpleItem[]>([]);
 
@@ -108,9 +127,11 @@ export default function TaskPlansPage() {
         page,
         page_size: pageSize,
       };
-      if (statusFilter) params.status = statusFilter;
+      // status 后端单值:多选时只传第一个,其余前端本地过滤。
+      if (statusFilterList.length === 1) params.status = statusFilterList[0];
       if (monthFilter) params.month = monthFilter;
       if (projectFilter) params.project_id = projectFilter;
+      if (userFilter) params.user_id = userFilter;
       const resp =
         view === "personal"
           ? await listPersonalPlanTasks(params)
@@ -122,17 +143,66 @@ export default function TaskPlansPage() {
     } finally {
       setLoading(false);
     }
-  }, [view, page, pageSize, statusFilter, monthFilter, projectFilter]);
+  }, [
+    view,
+    page,
+    pageSize,
+    statusFilterList,
+    monthFilter,
+    projectFilter,
+    userFilter,
+  ]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  // 本地过滤:status 多选 (>1) / dateRange / workPartner (后端不支持)
+  const visibleRows = useMemo(() => {
+    const [rangeStart, rangeEnd] = dateRange ?? [null, null];
+    const wp = workPartnerFilter.trim().toLowerCase();
+    const multiStatus =
+      statusFilterList.length > 1 ? new Set(statusFilterList) : null;
+    return rows.filter((t) => {
+      if (multiStatus && !multiStatus.has(t.status)) return false;
+      if (rangeStart && rangeEnd) {
+        const s = t.start_time ? new Date(t.start_time) : null;
+        if (s && !Number.isNaN(s.getTime())) {
+          if (s < rangeStart.startOf("day").toDate()) return false;
+          if (s > rangeEnd.endOf("day").toDate()) return false;
+        }
+      }
+      if (wp && !(t.work_partner ?? "").toLowerCase().includes(wp)) {
+        return false;
+      }
+      return true;
+    });
+  }, [rows, statusFilterList, dateRange, workPartnerFilter]);
+
   const resetFilters = () => {
-    setStatusFilter("");
+    setStatusFilterList([]);
     setMonthFilter("");
     setProjectFilter("");
+    setUserFilter(null);
+    setDateRange(null);
+    setWorkPartnerFilter("");
     setPage(1);
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const params: PlanTaskPageReq = { page: 1, page_size: 1000 };
+      if (statusFilterList.length === 1) params.status = statusFilterList[0];
+      if (monthFilter) params.month = monthFilter;
+      if (projectFilter) params.project_id = projectFilter;
+      if (userFilter) params.user_id = userFilter;
+      await exportPlanTasks(params);
+    } catch (err) {
+      showToast(false, err instanceof ApiError ? err.message : "导出失败");
+    } finally {
+      setExporting(false);
+    }
   };
 
   const handleSave = async (body: PlanTaskCreate | PlanTaskUpdate) => {
@@ -215,6 +285,12 @@ export default function TaskPlansPage() {
         render: (v: string | null) => v ?? "—",
       },
       {
+        title: "配合人员",
+        dataIndex: "work_partner",
+        key: "work_partner",
+        render: (v: string | null) => v ?? "—",
+      },
+      {
         title: "状态",
         dataIndex: "status",
         key: "status",
@@ -243,41 +319,58 @@ export default function TaskPlansPage() {
         title: "操作",
         key: "actions",
         align: "right",
-        render: (_v, t: PlanTask) => (
-          <div className="flex justify-end gap-1">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                setExecute({
-                  task: t,
-                  executeInfo: "",
-                  timeSpent: t.time_spent ? String(t.time_spent) : "",
-                  submit: false,
-                })
-              }
-            >
-              执行
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setDrawer({ open: true, mode: "edit", task: t })}
-            >
-              编辑
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={() => setConfirmDelete(t)}
-            >
-              删除
-            </Button>
-          </div>
-        ),
+        render: (_v, t: PlanTask) => {
+          const isOwner = currentUser?.id === t.user_id;
+          // 编辑:status=10 (未开始/未提交) + user_id 归属
+          const canEdit = t.status === "10" && isOwner;
+          // 删除:user_id 归属(对齐源 handleDelete checkUser)
+          const canDelete = isOwner;
+          return (
+            <div className="flex justify-end gap-1">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setExecute({
+                    task: t,
+                    executeInfo: "",
+                    timeSpent: t.time_spent ? String(t.time_spent) : "",
+                    submit: false,
+                  })
+                }
+              >
+                执行
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!canEdit}
+                title={
+                  canEdit
+                    ? undefined
+                    : t.status !== "10"
+                      ? "仅未开始状态可编辑"
+                      : "仅负责人可编辑"
+                }
+                onClick={() => setDrawer({ open: true, mode: "edit", task: t })}
+              >
+                编辑
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={!canDelete}
+                title={canDelete ? undefined : "仅负责人可删除"}
+                onClick={() => setConfirmDelete(t)}
+              >
+                删除
+              </Button>
+            </div>
+          );
+        },
       },
     ],
-    [],
+    [currentUser?.id],
   );
 
   return (
@@ -302,6 +395,14 @@ export default function TaskPlansPage() {
             <option value="all">全部任务</option>
             <option value="personal">我的任务</option>
           </select>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={exporting}
+            onClick={() => void handleExport()}
+          >
+            {exporting ? "导出中…" : "导出"}
+          </Button>
           <Button size="sm" onClick={() => setDrawer({ open: true, mode: "create" })}>
             + 新建任务
           </Button>
@@ -331,22 +432,18 @@ export default function TaskPlansPage() {
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={statusFilter}
-              onChange={(e) => {
-                setStatusFilter(e.target.value);
+            <Select<string[]>
+              mode="multiple"
+              allowClear
+              style={{ minWidth: 180 }}
+              placeholder="状态(可多选)"
+              value={statusFilterList}
+              onChange={(v) => {
+                setStatusFilterList(v as string[]);
                 setPage(1);
               }}
-              className={`w-32 ${inputCls}`}
-              aria-label="状态筛选"
-            >
-              <option value="">全部状态</option>
-              <option value="10">待执行</option>
-              <option value="20">执行中</option>
-              <option value="30">待验证</option>
-              <option value="40">已完成</option>
-              <option value="50">已关闭</option>
-            </select>
+              options={STATUS_CODE_OPTIONS}
+            />
             <input
               type="month"
               value={monthFilter}
@@ -373,18 +470,45 @@ export default function TaskPlansPage() {
                 </option>
               ))}
             </select>
+            <div className={`${inputCls} flex h-8 w-48 items-center px-1`}>
+              <PpmUserSelect
+                res="user"
+                allowClear
+                placeholder="负责人"
+                value={userFilter}
+                onChange={(v) => {
+                  setUserFilter((v as string | null) ?? null);
+                  setPage(1);
+                }}
+              />
+            </div>
+            <RangePicker
+              size="middle"
+              value={dateRange as [Dayjs, Dayjs] | null}
+              onChange={(v) =>
+                setDateRange(v as [Dayjs | null, Dayjs | null] | null)
+              }
+              placeholder={["开始", "结束"]}
+            />
+            <Input
+              allowClear
+              style={{ width: 140 }}
+              placeholder="配合人员"
+              value={workPartnerFilter}
+              onChange={(e) => setWorkPartnerFilter(e.target.value)}
+            />
             <Button size="sm" variant="outline" onClick={resetFilters}>
               清除筛选
             </Button>
             <span className="ml-auto text-xs text-muted-foreground">
-              共 {total} 条
+              共 {visibleRows.length} 条 / 总 {total}
             </span>
           </div>
 
           <Table<PlanTask>
             rowKey="id"
             columns={columns}
-            dataSource={rows}
+            dataSource={visibleRows}
             loading={loading}
             size="small"
             scroll={{ x: "max-content" }}
@@ -460,16 +584,32 @@ function TaskDrawer({
     editing?.user_name ?? currentUserName ?? "",
   );
   const [projectId, setProjectId] = useState(editing?.project_id ?? "");
+  const [projectName, setProjectName] = useState(
+    editing?.project_name ?? "",
+  );
+  const [moduleId, setModuleId] = useState(editing?.module_id ?? "");
+  const [moduleName, setModuleName] = useState(editing?.module_name ?? "");
   const [startTime, setStartTime] = useState(editing?.start_time ?? "");
   const [endTime, setEndTime] = useState(editing?.end_time ?? "");
   const [workLoad, setWorkLoad] = useState(editing?.work_load ?? "");
+  const [addWork, setAddWork] = useState(editing?.add_work ?? "");
+  const [workPartner, setWorkPartner] = useState(editing?.work_partner ?? "");
   const [remarks, setRemarks] = useState(editing?.remarks ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const submit = async () => {
-    if (!content.trim()) {
-      setErr("请填写任务内容");
+    // 必填校验(对齐源 PlanForm.vue formRules)
+    const missing: string[] = [];
+    if (!content.trim()) missing.push("任务内容");
+    if (!userId) missing.push("负责人");
+    if (!startTime) missing.push("开始时间");
+    if (!endTime) missing.push("结束时间");
+    if (!projectName.trim() && !projectId) missing.push("所属项目");
+    if (!moduleId.trim()) missing.push("模块");
+    if (!workLoad.trim()) missing.push("工作量");
+    if (missing.length > 0) {
+      setErr(`请填写:${missing.join("、")}`);
       return;
     }
     setBusy(true);
@@ -480,9 +620,14 @@ function TaskDrawer({
         user_id: userId,
         user_name: userName,
         project_id: projectId || null,
+        project_name: projectName || null,
+        module_id: moduleId.trim() || null,
+        module_name: moduleName.trim() || null,
         start_time: startTime || null,
         end_time: endTime || null,
         work_load: workLoad || null,
+        add_work: addWork || null,
+        work_partner: workPartner || null,
         remarks: remarks || null,
       };
       if (state.mode === "create") {
@@ -498,7 +643,7 @@ function TaskDrawer({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-      <div className="w-[520px] rounded-md border bg-background p-5 shadow-lg">
+      <div className="w-[560px] rounded-md border bg-background p-5 shadow-lg">
         <h3 className="text-sm font-semibold">
           {state.mode === "create" ? "新建任务计划" : "编辑任务计划"}
         </h3>
@@ -513,7 +658,7 @@ function TaskDrawer({
             />
           </div>
           <div className="col-span-2">
-            <label className="text-[11px] text-muted-foreground">负责人</label>
+            <label className="text-[11px] text-muted-foreground">负责人 *</label>
             <div className="mt-0.5">
               <PpmUserSelect
                 res={projectId ? "projectMember" : "user"}
@@ -539,10 +684,17 @@ function TaskDrawer({
             </div>
           </div>
           <div className="col-span-2">
-            <label className="text-[11px] text-muted-foreground">所属项目</label>
+            <label className="text-[11px] text-muted-foreground">
+              所属项目 *
+            </label>
             <select
               value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setProjectId(v);
+                const hit = projects.find((p) => p.id === v);
+                setProjectName(hit?.project_name ?? "");
+              }}
               className={`mt-0.5 ${inputCls}`}
             >
               <option value="">无</option>
@@ -554,7 +706,25 @@ function TaskDrawer({
             </select>
           </div>
           <div>
-            <label className="text-[11px] text-muted-foreground">开始时间</label>
+            <label className="text-[11px] text-muted-foreground">模块 *</label>
+            <input
+              value={moduleId}
+              onChange={(e) => setModuleId(e.target.value)}
+              placeholder="模块 ID"
+              className={`mt-0.5 ${inputCls}`}
+            />
+          </div>
+          <div>
+            <label className="text-[11px] text-muted-foreground">模块名称</label>
+            <input
+              value={moduleName}
+              onChange={(e) => setModuleName(e.target.value)}
+              placeholder="模块名称(可选)"
+              className={`mt-0.5 ${inputCls}`}
+            />
+          </div>
+          <div>
+            <label className="text-[11px] text-muted-foreground">开始时间 *</label>
             <input
               type="date"
               value={startTime ? startTime.slice(0, 10) : ""}
@@ -563,7 +733,7 @@ function TaskDrawer({
             />
           </div>
           <div>
-            <label className="text-[11px] text-muted-foreground">结束时间</label>
+            <label className="text-[11px] text-muted-foreground">结束时间 *</label>
             <input
               type="date"
               value={endTime ? endTime.slice(0, 10) : ""}
@@ -572,11 +742,31 @@ function TaskDrawer({
             />
           </div>
           <div>
-            <label className="text-[11px] text-muted-foreground">预估工时</label>
+            <label className="text-[11px] text-muted-foreground">
+              工作量(人天)*
+            </label>
             <input
               value={workLoad}
               onChange={(e) => setWorkLoad(e.target.value)}
-              placeholder="如 8 / 0.5d"
+              placeholder="如 8 / 0.5"
+              className={`mt-0.5 ${inputCls}`}
+            />
+          </div>
+          <div>
+            <label className="text-[11px] text-muted-foreground">加班</label>
+            <input
+              value={addWork}
+              onChange={(e) => setAddWork(e.target.value)}
+              placeholder="加班(可选)"
+              className={`mt-0.5 ${inputCls}`}
+            />
+          </div>
+          <div className="col-span-2">
+            <label className="text-[11px] text-muted-foreground">配合人员</label>
+            <input
+              value={workPartner}
+              onChange={(e) => setWorkPartner(e.target.value)}
+              placeholder="配合人员(可选)"
               className={`mt-0.5 ${inputCls}`}
             />
           </div>
@@ -634,7 +824,7 @@ function ExecuteDialog({
         <div className="mt-3 space-y-3">
           <div>
             <label className="text-[11px] text-muted-foreground">
-              本次耗时（小时）
+              本次耗时(人天)
             </label>
             <input
               type="number"

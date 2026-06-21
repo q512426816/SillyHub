@@ -44,6 +44,7 @@ import {
   closeTaskProblem,
   createProblem,
   doneTaskProblem,
+  listProblemLogs,
   nextProcessProblem,
   rejectProcessProblem,
   updateProblem,
@@ -117,6 +118,82 @@ function notifyOk(text: string) {
 function notifyErr(err: unknown, fallback: string) {
   if (err instanceof ApiError) message.error(err.message || fallback);
   else message.error(fallback);
+}
+
+// ── 流程履历 Timeline(对照源 el-timeline processList) ───────────────────────
+
+/**
+ * 审批/处置/关闭/详情各态表单复用的流程履历 Timeline。
+ * logs 由父组件从 listProblemLogs 异步拉取。
+ */
+function ProcessTimeline({
+  logs,
+  loading,
+}: {
+  logs: ProblemProcessLog[];
+  loading: boolean;
+}) {
+  return (
+    <>
+      <Divider>流程履历</Divider>
+      {loading ? (
+        <Spin />
+      ) : logs.length === 0 ? (
+        <Text type="secondary">暂无流程履历</Text>
+      ) : (
+        <Timeline
+          items={logs.map((log) => ({
+            children: (
+              <div>
+                <div>{log.handle_info || log.node_key || "流转"}</div>
+                <div
+                  style={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}
+                >
+                  {log.handle_user_name ?? log.handle_user_id ?? "—"} ·{" "}
+                  {log.created_at
+                    ? dayjs(log.created_at).format("YYYY-MM-DD HH:mm:ss")
+                    : "—"}
+                </div>
+                {log.comment && (
+                  <div style={{ fontSize: 12 }}>备注:{log.comment}</div>
+                )}
+              </div>
+            ),
+          }))}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * 在表单组件内 lazy 加载流程履历(listProblemLogs)。
+ * 返回 [logs, loading]。
+ */
+function useProblemLogs(
+  problemId: string | undefined,
+): [ProblemProcessLog[], boolean] {
+  const [logs, setLogs] = useState<ProblemProcessLog[]>([]);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!problemId) return;
+    let cancelled = false;
+    setLoading(true);
+    listProblemLogs(problemId)
+      .then((data) => {
+        if (!cancelled) setLogs(data);
+      })
+      .catch(() => {
+        if (!cancelled) setLogs([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [problemId]);
+  return [logs, loading];
 }
 
 // ===========================================================================
@@ -575,6 +652,7 @@ export function ProblemAuditForm({
   const [isBack, setIsBack] = useState<"0" | "1">("0");
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
+  const [logs, loadingLogs] = useProblemLogs(problem.id);
 
   const submit = async () => {
     if (isBack === "1" && !comment.trim()) {
@@ -603,7 +681,8 @@ export function ProblemAuditForm({
   return (
     <div>
       <ProblemDescriptions problem={problem} />
-      <Divider />
+      <ProcessTimeline logs={logs} loading={loadingLogs} />
+      <Divider>审核</Divider>
       <Form layout="vertical">
         <Form.Item label="是否驳回(对照源 isBack)">
           <Radio.Group
@@ -646,7 +725,9 @@ export function ProblemDoneForm({
   const [timeSpent, setTimeSpent] = useState<number | null>(
     problem.time_spent ?? null,
   );
+  const [attachUrls, setAttachUrls] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [logs, loadingLogs] = useProblemLogs(problem.id);
 
   const submit = async (submit: boolean, completed: boolean) => {
     if (submit && !handleInfo.trim()) {
@@ -677,7 +758,8 @@ export function ProblemDoneForm({
   return (
     <div>
       <ProblemDescriptions problem={problem} />
-      <Divider />
+      <ProcessTimeline logs={logs} loading={loadingLogs} />
+      <Divider>处置</Divider>
       <Form layout="vertical">
         <Form.Item label="本次耗时(对照源 timeSpent)">
           <InputNumber
@@ -697,6 +779,12 @@ export function ProblemDoneForm({
             onChange={(e) => setHandleInfo(e.target.value)}
             placeholder="请输入处置情况"
           />
+        </Form.Item>
+        <Form.Item
+          label="处置附件(对照源 attachGroupId)"
+          extra="当前后端 DoneTask 未持久化附件,仅本次会话保留"
+        >
+          <PpmFileUrls value={attachUrls} onChange={setAttachUrls} />
         </Form.Item>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Button onClick={onCancel}>取消</Button>
@@ -745,6 +833,7 @@ export function ProblemCloseForm({
   const [checkResult, setCheckResult] = useState<"1" | "0">("1");
   const [checkInfo, setCheckInfo] = useState("通过");
   const [busy, setBusy] = useState(false);
+  const [logs, loadingLogs] = useProblemLogs(problem.id);
 
   const submit = async () => {
     if (!checkInfo.trim()) {
@@ -753,6 +842,8 @@ export function ProblemCloseForm({
     }
     setBusy(true);
     try {
+      // 注:后端 CloseTaskReq 当前不接收 check_time;前端保留 UI 供后续接入。
+      void checkTime;
       const body: ProblemCloseTaskReq = {
         check_info: checkInfo,
         check_result: checkResult,
@@ -770,9 +861,13 @@ export function ProblemCloseForm({
   return (
     <div>
       <ProblemDescriptions problem={problem} />
-      <Divider />
+      <ProcessTimeline logs={logs} loading={loadingLogs} />
+      <Divider>验证关闭</Divider>
       <Form layout="vertical">
-        <Form.Item label="验证时间(对照源 checkTime)">
+        <Form.Item
+          label="验证时间(对照源 checkTime)"
+          extra="当前后端 CloseTask 未持久化验证时间,仅本次会话保留"
+        >
           <DatePicker
             showTime
             value={checkTime}
@@ -828,33 +923,7 @@ export function ProblemDetailForm({
   return (
     <div>
       <ProblemDescriptions problem={problem} />
-      <Divider>流程履历</Divider>
-      {loadingLogs ? (
-        <Spin />
-      ) : logs.length === 0 ? (
-        <Text type="secondary">暂无流程履历</Text>
-      ) : (
-        <Timeline
-          items={logs.map((log) => ({
-            children: (
-              <div>
-                <div>{log.handle_info || log.node_key || "流转"}</div>
-                <div
-                  style={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}
-                >
-                  {log.handle_user_name ?? log.handle_user_id ?? "—"} ·{" "}
-                  {log.created_at ? dayjs(log.created_at).format("YYYY-MM-DD HH:mm:ss") : "—"}
-                </div>
-                {log.comment && (
-                  <div style={{ fontSize: 12 }}>
-                    备注:{log.comment}
-                  </div>
-                )}
-              </div>
-            ),
-          }))}
-        />
-      )}
+      <ProcessTimeline logs={logs} loading={loadingLogs} />
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
         <Button onClick={onCancel}>关闭</Button>
       </div>

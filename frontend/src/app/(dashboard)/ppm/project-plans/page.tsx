@@ -32,12 +32,14 @@ import type { Dayjs } from "dayjs";
 import { Button } from "@/components/ui/button";
 import { PpmProjectPlanDetail } from "@/components/ppm-project-plan-detail";
 import { PpmProjectPlanForm } from "@/components/ppm-project-plan-form";
+import { matchAnyUser } from "@/components/ppm-status-actions";
 import { ApiError } from "@/lib/api";
 import {
   deleteProjectPlan,
   listProjectPlans,
   type PsProjectPlan,
 } from "@/lib/ppm";
+import { useSession } from "@/stores/session";
 
 const { RangePicker } = DatePicker;
 
@@ -78,6 +80,8 @@ function fmtDate(v: string | null | undefined): string {
 
 export default function ProjectPlansPage() {
   const router = useRouter();
+  const { user: currentUser } = useSession();
+  const currentUserId = currentUser?.id ?? "";
   const [plans, setPlans] = useState<PsProjectPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -283,39 +287,47 @@ export default function ProjectPlansPage() {
       key: "actions",
       fixed: "right",
       width: 300,
-      render: (_v: unknown, p: PsProjectPlan) => (
-        <div className="flex gap-1">
-          <AntButton
-            size="small"
-            type="link"
-            onClick={() => setDetail({ open: true, planId: p.id })}
-          >
-            详情
-          </AntButton>
-          <AntButton
-            size="small"
-            type="link"
-            onClick={() => goToMilestones(p.id)}
-          >
-            里程碑
-          </AntButton>
-          <AntButton
-            size="small"
-            type="link"
-            onClick={() => setDrawer({ open: true, mode: "edit", plan: p })}
-          >
-            编辑
-          </AntButton>
-          <AntButton
-            size="small"
-            type="link"
-            danger
-            onClick={() => void handleDelete(p)}
-          >
-            删除
-          </AntButton>
-        </div>
-      ),
+      render: (_v: unknown, p: PsProjectPlan) => {
+        // RBAC:编辑/删除按 project_manager_id 归属(无 create_user_id 字段)。
+        const isManager = matchAnyUser([p.project_manager_id], currentUserId);
+        return (
+          <div className="flex gap-1">
+            <AntButton
+              size="small"
+              type="link"
+              onClick={() => setDetail({ open: true, planId: p.id })}
+            >
+              详情
+            </AntButton>
+            <AntButton
+              size="small"
+              type="link"
+              onClick={() => goToMilestones(p.id)}
+            >
+              里程碑
+            </AntButton>
+            <AntButton
+              size="small"
+              type="link"
+              disabled={!isManager}
+              title={isManager ? undefined : "仅项目经理可编辑"}
+              onClick={() => setDrawer({ open: true, mode: "edit", plan: p })}
+            >
+              编辑
+            </AntButton>
+            <AntButton
+              size="small"
+              type="link"
+              danger
+              disabled={!isManager}
+              title={isManager ? undefined : "仅项目经理可删除"}
+              onClick={() => void handleDelete(p)}
+            >
+              删除
+            </AntButton>
+          </div>
+        );
+      },
     },
   ];
 
