@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { PageContainer, PageHeader } from "@/components/layout";
 import { WorkspaceCard } from "@/components/workspace-card";
 import { WorkspaceScanDialog } from "@/components/workspace-scan-dialog";
 import { ApiError } from "@/lib/api";
@@ -43,20 +44,18 @@ export default function WorkspacesPage() {
   };
 
   return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-5 px-6 py-8">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1>工作区</h1>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            管理已注册的项目工作区
-          </p>
-        </div>
-        {!showDialog && (
-          <Button size="sm" onClick={() => setShowDialog(true)}>
-            + 添加工作区
-          </Button>
-        )}
-      </header>
+    <PageContainer>
+      <PageHeader
+        title="工作区"
+        subtitle="管理已注册的项目工作区"
+        actions={
+          !showDialog && (
+            <Button size="sm" onClick={() => setShowDialog(true)}>
+              + 添加工作区
+            </Button>
+          )
+        }
+      />
 
       {showDialog && (
         <WorkspaceScanDialog
@@ -74,11 +73,11 @@ export default function WorkspacesPage() {
       {items === null ? (
         <p className="py-8 text-center text-xs text-muted-foreground">加载中…</p>
       ) : items.length === 0 ? (
-        <section className="rounded-md border border-dashed py-12 text-center text-xs text-muted-foreground">
+        <div className="rounded-md border border-dashed py-12 text-center text-xs text-muted-foreground">
           还没有工作区。点击右上角&ldquo;添加工作区&rdquo;绑定一个项目仓库。
-        </section>
+        </div>
       ) : (
-        <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {items.map((w) => (
             <WorkspaceCard
               key={w.id}
@@ -89,8 +88,8 @@ export default function WorkspacesPage() {
               onChanged={reload}
             />
           ))}
-        </section>
+        </div>
       )}
-    </main>
+    </PageContainer>
   );
 }

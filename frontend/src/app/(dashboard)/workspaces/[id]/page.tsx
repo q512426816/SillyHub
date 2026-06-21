@@ -8,6 +8,7 @@ import { AgentLogViewer } from "@/components/agent-log-viewer";
 import { AgentModelInput } from "@/components/AgentModelInput";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { AgentProviderSelect } from "@/components/AgentProviderSelect";
 import { WorkspaceDaemonSwitcher } from "@/components/workspace-daemon-switcher";
 import { WorkspacePathFields } from "@/components/workspace-path-fields";
@@ -457,40 +458,40 @@ export default function WorkspaceDetailPage({ params }: Props) {
 
   if (loading) {
     return (
-      <div className="mx-auto flex max-w-5xl flex-col gap-5 px-6 py-8">
+      <PageContainer size="full">
         <p className="py-12 text-center text-xs text-muted-foreground">加载中...</p>
-      </div>
+      </PageContainer>
     );
   }
 
   if (!workspace) {
     return (
-      <div className="mx-auto flex max-w-5xl flex-col gap-5 px-6 py-8">
+      <PageContainer size="full">
         <p className="py-12 text-center text-xs text-destructive">
           工作区不存在或加载失败。
         </p>
-      </div>
+      </PageContainer>
     );
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <header>
-        <p className="text-[11px] text-muted-foreground">
-          <Link href="/workspaces" className="hover:underline">
+    <PageContainer size="full">
+      <PageHeader
+        title={
+          <span className="flex items-center gap-3">
+            {workspace.name}
+            <Badge variant={workspace.status === "active" ? "success" : "outline"}>
+              {workspace.status}
+            </Badge>
+          </span>
+        }
+        subtitle={<span className="font-mono">{workspace.slug}</span>}
+        actions={
+          <Link href="/workspaces" className="text-[11px] text-muted-foreground hover:underline">
             &larr; 工作区
           </Link>
-        </p>
-        <div className="mt-1 flex items-center gap-3">
-          <h1>{workspace.name}</h1>
-          <Badge variant={workspace.status === "active" ? "success" : "outline"}>
-            {workspace.status}
-          </Badge>
-        </div>
-        <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
-          {workspace.slug}
-        </p>
-      </header>
+        }
+      />
 
       {pageError && (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
@@ -499,11 +500,8 @@ export default function WorkspaceDetailPage({ params }: Props) {
       )}
 
       {/* Workspace basic info */}
-      <section className="rounded-md border bg-card">
-        <div className="border-b px-4 py-2.5">
-          <h2 className="text-sm font-medium">基本信息</h2>
-        </div>
-        <dl className="grid grid-cols-[6rem_1fr] gap-y-1 px-4 py-3 text-xs">
+      <SectionCard title="基本信息">
+        <dl className="grid grid-cols-[6rem_1fr] gap-y-1 text-xs">
           <WorkspacePathFields
             workspace={workspace}
             runtime={boundRuntime}
@@ -516,7 +514,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
         </dl>
         {/* ql-20260619-006：daemon-client workspace 改绑 daemon 入口 */}
         {isDaemonClientWorkspace(workspace) && (
-          <div className="border-t px-4 py-2.5">
+          <div className="mt-3 border-t pt-2.5">
             <WorkspaceDaemonSwitcher
               workspaceId={workspaceId}
               currentRuntimeId={workspace.daemon_runtime_id}
@@ -524,14 +522,11 @@ export default function WorkspaceDetailPage({ params }: Props) {
             />
           </div>
         )}
-      </section>
+      </SectionCard>
 
       {/* Default Agent provider（FR-01/FR-02）*/}
-      <section className="rounded-md border bg-card">
-        <div className="border-b px-4 py-2.5">
-          <h2 className="text-sm font-medium">默认智能体提供方</h2>
-        </div>
-        <div className="space-y-2.5 px-4 py-3">
+      <SectionCard title="默认智能体提供方">
+        <div className="space-y-2.5">
           <p className="text-xs text-muted-foreground">
             自动派发（阶段流转、scan-generate）且未显式指定 provider 时使用。留空则由守护进程默认决定。
           </p>
@@ -565,7 +560,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
             </Button>
           </div>
         </div>
-      </section>
+      </SectionCard>
 
       {/* Overview cards */}
       <section className="grid grid-cols-2 gap-px rounded-md border bg-border lg:grid-cols-4">
@@ -588,10 +583,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
       </section>
 
       {/* Spec Workspace info */}
-      <section className="rounded-md border bg-card">
-        <div className="flex items-center justify-between border-b px-4 py-2.5">
-          <h2 className="text-sm font-medium">规范管理（Spec Workspace）</h2>
-          {specWs && (
+      <SectionCard
+        title="规范管理（Spec Workspace）"
+        extra={
+          specWs ? (
             <div className="flex gap-2">
               {specWs.strategy === "platform-managed" && (
                 <Button
@@ -626,12 +621,12 @@ export default function WorkspaceDetailPage({ params }: Props) {
                 </Button>
               )}
             </div>
-          )}
-        </div>
-
+          ) : undefined
+        }
+      >
         {/* Bootstrap guidance for empty platform-managed spec roots */}
         {specWs && specWs.strategy === "platform-managed" && !bootstrapping && !activeBootstrapRunId && (
-          <div className="mx-4 mt-3 mb-1 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+          <div className="mb-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
             <p className="font-medium">此工作区使用平台托管策略。</p>
             <p className="mt-0.5 text-blue-600">
               规范文件存储在独立的平台目录中，需要先初始化。点击上方
@@ -645,7 +640,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
         {!activeBootstrapRunId && lastBsRun && (() => {
             const bs = bsRunStatus(lastBsRun);
             return (
-          <div className="mx-4 mt-3 mb-1 flex flex-wrap items-center gap-x-4 gap-y-1 rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs">
+          <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs">
             <span className="text-muted-foreground">上次初始化</span>
             <Badge variant={bs.variant}>
               {bs.label}
@@ -677,7 +672,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
 
         {/* Bootstrap SSE log panel — uses shared AgentLogViewer */}
         {activeBootstrapRunId && (
-          <div className="mx-4 mt-3">
+          <div className="mb-3">
             <AgentLogViewer
               title="初始化运行"
               runId={activeBootstrapRunId}
@@ -715,7 +710,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
         )}
 
         {specWs ? (
-          <dl className="grid grid-cols-[8rem_1fr] gap-y-1 px-4 py-3 text-xs">
+          <dl className="grid grid-cols-[8rem_1fr] gap-y-1 text-xs">
             <dt className="text-muted-foreground">策略</dt>
             <dd>
               <Badge variant="default">
@@ -748,11 +743,11 @@ export default function WorkspaceDetailPage({ params }: Props) {
             <dd>{formatTs(specWs.created_at)}</dd>
           </dl>
         ) : (
-          <div className="px-4 py-6 text-center text-xs text-muted-foreground">
+          <div className="py-6 text-center text-xs text-muted-foreground">
             当前工作区尚未关联 Spec Workspace。请通过创建流程设置规范策略。
           </div>
         )}
-      </section>
+      </SectionCard>
 
       {/* Quick nav */}
       <section className="flex flex-wrap gap-2">
@@ -772,6 +767,6 @@ export default function WorkspaceDetailPage({ params }: Props) {
           </Link>
         ))}
       </section>
-    </div>
+    </PageContainer>
   );
 }

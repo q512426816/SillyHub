@@ -23,8 +23,8 @@ export interface SectionCardProps
   title?: React.ReactNode;
   /** 标题右侧 slot(操作按钮/计数等)。 */
   extra?: React.ReactNode;
-  /** 正文 padding,默认 p-4,可传 p-5。 */
-  bodyPadding?: "p-4" | "p-5";
+  /** 正文 padding,默认 p-4;可传 p-0/p-2/p-4/p-5/p-8(表格/列表类用 p-0)。 */
+  bodyPadding?: "p-0" | "p-2" | "p-4" | "p-5" | "p-8";
   /** 悬浮效果,默认 none。lift 追加阴影/位移过渡。 */
   hover?: SectionCardHover;
   children?: React.ReactNode;

@@ -2,16 +2,22 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { type TableProps } from "antd";
 
 import { ComponentDetailDrawer } from "@/components/component-detail-drawer";
-import { Badge } from "@/components/ui/badge";
+import {
+  DataTable,
+  PageContainer,
+  PageHeader,
+  SectionCard,
+} from "@/components/layout";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api";
 import {
-  getWorkspaceRelations,
   getWorkspace,
+  getWorkspaceRelations,
   listWorkspaces,
-  rescanWorkspace,
   reparseWorkspace,
   type Workspace,
   type WorkspaceRelation,
@@ -74,9 +80,7 @@ export default function ComponentsPage({ params }: Props) {
         ),
       );
     } catch (err) {
-      setPageError(
-        err instanceof ApiError ? err.message : "加载关系失败",
-      );
+      setPageError(err instanceof ApiError ? err.message : "加载关系失败");
     } finally {
       setLoading(false);
     }
@@ -100,9 +104,7 @@ export default function ComponentsPage({ params }: Props) {
       const ws = await getWorkspace(workspaceId);
       setWorkspace(ws);
     } catch (err) {
-      setPageError(
-        err instanceof ApiError ? err.message : "重新扫描失败",
-      );
+      setPageError(err instanceof ApiError ? err.message : "重新扫描失败");
     } finally {
       setReparsing(false);
     }
@@ -126,39 +128,139 @@ export default function ComponentsPage({ params }: Props) {
     return ids;
   }, [allRelations]);
 
+  const filteredOutgoing = useMemo(() => {
+    if (!searchQuery.trim()) return outgoing;
+    const q = searchQuery.toLowerCase();
+    return outgoing.filter((r) => {
+      const targetName = wsMap.get(r.target_id)?.name ?? "";
+      return (
+        targetName.toLowerCase().includes(q) ||
+        r.relation_type.toLowerCase().includes(q) ||
+        (r.description ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [outgoing, searchQuery, wsMap]);
+
+  const outgoingColumns: TableProps<WorkspaceRelation>["columns"] = [
+    {
+      title: "目标工作区",
+      dataIndex: "target_id",
+      key: "target_id",
+      render: (id: string) => {
+        const name = wsMap.get(id)?.name ?? id.slice(0, 8);
+        const ck = wsMap.get(id)?.component_key;
+        return (
+          <Link
+            href={`/workspaces/${id}`}
+            className="text-xs text-primary hover:underline"
+          >
+            {name}
+            {ck ? (
+              <span className="ml-1 text-muted-foreground">({ck})</span>
+            ) : null}
+          </Link>
+        );
+      },
+    },
+    {
+      title: "关系类型",
+      dataIndex: "relation_type",
+      key: "relation_type",
+      render: (v: string) => (
+        <StatusBadge kind="neutral">{v}</StatusBadge>
+      ),
+    },
+    {
+      title: "描述",
+      dataIndex: "description",
+      key: "description",
+      render: (v: string | null) => (
+        <span className="text-xs text-muted-foreground">{v ?? "—"}</span>
+      ),
+    },
+  ];
+
+  const incomingColumns: TableProps<WorkspaceRelation>["columns"] = [
+    {
+      title: "源工作区",
+      dataIndex: "source_id",
+      key: "source_id",
+      render: (id: string) => {
+        const name = wsMap.get(id)?.name ?? id.slice(0, 8);
+        const ck = wsMap.get(id)?.component_key;
+        return (
+          <Link
+            href={`/workspaces/${id}`}
+            className="text-xs text-primary hover:underline"
+          >
+            {name}
+            {ck ? (
+              <span className="ml-1 text-muted-foreground">({ck})</span>
+            ) : null}
+          </Link>
+        );
+      },
+    },
+    {
+      title: "关系类型",
+      dataIndex: "relation_type",
+      key: "relation_type",
+      render: (v: string) => (
+        <StatusBadge kind="neutral">{v}</StatusBadge>
+      ),
+    },
+    {
+      title: "描述",
+      dataIndex: "description",
+      key: "description",
+      render: (v: string | null) => (
+        <span className="text-xs text-muted-foreground">{v ?? "—"}</span>
+      ),
+    },
+  ];
+
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-[11px] text-muted-foreground">
-            <Link href="/workspaces" className="hover:underline">← 工作区</Link>
-          </p>
-          <h1 className="mt-0.5">工作区关系</h1>
-          <p className="text-xs text-muted-foreground">
-            查看工作区与其他工作区之间的依赖关系
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {NAV_ITEMS.map((item) => (
+    <PageContainer>
+      <PageHeader
+        title={
+          <span className="flex flex-col gap-0.5">
+            <span>工作区关系</span>
             <Link
-              key={item.href}
-              href={"absolute" in item && item.absolute ? item.href : `/workspaces/${workspaceId}/${item.href}`}
-              className="inline-flex h-7 items-center rounded border border-border px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+              href="/workspaces"
+              className="text-[11px] font-normal text-muted-foreground hover:underline"
             >
-              {item.label}
+              ← 工作区
             </Link>
-          ))}
-          <input
-            className="h-7 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none"
-            placeholder="搜索关系..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-          <Button size="sm" onClick={handleRescan} disabled={reparsing}>
-            {reparsing ? "扫描中…" : "重新扫描"}
-          </Button>
-        </div>
-      </header>
+          </span>
+        }
+        subtitle="查看工作区与其他工作区之间的依赖关系"
+        actions={
+          <div className="flex flex-wrap items-center gap-1.5">
+            {NAV_ITEMS.map((item) => (
+              <Link
+                key={item.href}
+                href={
+                  "absolute" in item && item.absolute
+                    ? item.href
+                    : `/workspaces/${workspaceId}/${item.href}`
+                }
+                className="inline-flex h-7 items-center rounded border border-border px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                {item.label}
+              </Link>
+            ))}
+            <input
+              className="h-7 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none"
+              placeholder="搜索关系..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            <Button size="sm" onClick={handleRescan} disabled={reparsing}>
+              {reparsing ? "扫描中…" : "重新扫描"}
+            </Button>
+          </div>
+        }
+      />
 
       {pageError && (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
@@ -168,14 +270,14 @@ export default function ComponentsPage({ params }: Props) {
 
       {/* Workspace metadata card */}
       {workspace && (
-        <section className="rounded-md border bg-card p-3">
+        <SectionCard>
           <div className="mb-2 flex items-center gap-2">
             <span className="text-sm font-semibold">{workspace.name}</span>
-            <Badge variant={workspace.status === "active" ? "success" : "outline"}>
+            <StatusBadge kind={workspace.status === "active" ? "success" : "neutral"}>
               {workspace.status}
-            </Badge>
+            </StatusBadge>
             {workspace.type && (
-              <Badge variant="outline">{workspace.type}</Badge>
+              <StatusBadge kind="neutral">{workspace.type}</StatusBadge>
             )}
           </div>
           <dl className="grid grid-cols-[5.5rem_1fr] gap-y-1 text-xs">
@@ -198,45 +300,60 @@ export default function ComponentsPage({ params }: Props) {
                 <dt className="text-muted-foreground">技术栈</dt>
                 <dd className="flex flex-wrap gap-1">
                   {workspace.tech_stack.map((t) => (
-                    <Badge key={t} variant="outline" className="text-[10px]">{t}</Badge>
+                    <StatusBadge key={t} kind="neutral">
+                      {t}
+                    </StatusBadge>
                   ))}
                 </dd>
               </>
             )}
           </dl>
-        </section>
+        </SectionCard>
       )}
 
       {/* 子组件列表 */}
-      <section className="rounded-md border bg-card">
-        <div className="border-b px-3 py-2">
-          <h3 className="text-sm font-medium">
-            子组件 · {children.length} 个
-          </h3>
-        </div>
+      <SectionCard title={`子组件 · ${children.length} 个`} bodyPadding="p-0">
         {children.length === 0 ? (
-          <p className="py-6 text-center text-xs text-muted-foreground">无子组件</p>
+          <p className="py-6 text-center text-xs text-muted-foreground">
+            无子组件
+          </p>
         ) : (
           <div className="divide-y">
             {children.map((child) => (
-              <div key={child.id} className="flex items-center justify-between px-3 py-2">
+              <div
+                key={child.id}
+                className="flex items-center justify-between px-3 py-2"
+              >
                 <div className="flex items-center gap-2">
-                  <Badge variant={child.status === "active" ? "success" : "outline"}>
+                  <StatusBadge
+                    kind={child.status === "active" ? "success" : "neutral"}
+                  >
                     {child.status}
-                  </Badge>
-                  <Link href={`/workspaces/${child.id}/components`} className="text-sm font-medium text-primary hover:underline">
+                  </StatusBadge>
+                  <Link
+                    href={`/workspaces/${child.id}/components`}
+                    className="text-sm font-medium text-primary hover:underline"
+                  >
                     {child.name}
                   </Link>
                   {child.component_key && (
-                    <span className="font-mono text-[11px] text-muted-foreground">{child.component_key}</span>
+                    <span className="font-mono text-[11px] text-muted-foreground">
+                      {child.component_key}
+                    </span>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  {child.role && <span className="text-xs text-muted-foreground">{child.role}</span>}
+                  {child.role && (
+                    <span className="text-xs text-muted-foreground">
+                      {child.role}
+                    </span>
+                  )}
                   {child.tech_stack.length > 0 && (
                     <div className="flex gap-1">
                       {child.tech_stack.map((t) => (
-                        <Badge key={t} variant="outline" className="text-[10px]">{t}</Badge>
+                        <StatusBadge key={t} kind="neutral">
+                          {t}
+                        </StatusBadge>
                       ))}
                     </div>
                   )}
@@ -245,97 +362,39 @@ export default function ComponentsPage({ params }: Props) {
             ))}
           </div>
         )}
-      </section>
+      </SectionCard>
 
       {/* Outgoing relations */}
-      <section className="rounded-md border bg-card">
-        <div className="border-b px-3 py-2">
-          <h3 className="text-sm font-medium">
-            出边（当前 → 目标） · {outgoing.length} 条
-          </h3>
-        </div>
-        {outgoing.length === 0 ? (
-          <p className="py-6 text-center text-xs text-muted-foreground">无出边关系</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>目标工作区</th>
-                <th>关系类型</th>
-                <th>描述</th>
-              </tr>
-            </thead>
-            <tbody>
-              {outgoing.map((r) => (
-                <tr key={r.id}>
-                  <td className="text-xs">
-                    <Link
-                      href={`/workspaces/${r.target_id}`}
-                      className="text-primary hover:underline"
-                    >
-                      {wsMap.get(r.target_id)?.name ?? r.target_id.slice(0, 8)}
-                      {wsMap.get(r.target_id)?.component_key ? (
-                        <span className="ml-1 text-muted-foreground">({wsMap.get(r.target_id)!.component_key})</span>
-                      ) : null}
-                    </Link>
-                  </td>
-                  <td>
-                    <Badge variant="outline">{r.relation_type}</Badge>
-                  </td>
-                  <td className="text-xs text-muted-foreground">
-                    {r.description ?? "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+      <SectionCard
+        title={`出边（当前 → 目标） · ${outgoing.length} 条`}
+        bodyPadding="p-0"
+      >
+        <DataTable<WorkspaceRelation>
+          rowKey="id"
+          columns={outgoingColumns}
+          dataSource={filteredOutgoing}
+          loading={loading}
+          size="small"
+          pagination={false}
+          emptyText="无出边关系"
+        />
+      </SectionCard>
 
       {/* Incoming relations */}
-      <section className="rounded-md border bg-card">
-        <div className="border-b px-3 py-2">
-          <h3 className="text-sm font-medium">
-            入边（源 → 当前） · {incoming.length} 条
-          </h3>
-        </div>
-        {incoming.length === 0 ? (
-          <p className="py-6 text-center text-xs text-muted-foreground">无入边关系</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>源工作区</th>
-                <th>关系类型</th>
-                <th>描述</th>
-              </tr>
-            </thead>
-            <tbody>
-              {incoming.map((r) => (
-                <tr key={r.id}>
-                  <td className="text-xs">
-                    <Link
-                      href={`/workspaces/${r.source_id}`}
-                      className="text-primary hover:underline"
-                    >
-                      {wsMap.get(r.source_id)?.name ?? r.source_id.slice(0, 8)}
-                      {wsMap.get(r.source_id)?.component_key ? (
-                        <span className="ml-1 text-muted-foreground">({wsMap.get(r.source_id)!.component_key})</span>
-                      ) : null}
-                    </Link>
-                  </td>
-                  <td>
-                    <Badge variant="outline">{r.relation_type}</Badge>
-                  </td>
-                  <td className="text-xs text-muted-foreground">
-                    {r.description ?? "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-    </div>
+      <SectionCard
+        title={`入边（源 → 当前） · ${incoming.length} 条`}
+        bodyPadding="p-0"
+      >
+        <DataTable<WorkspaceRelation>
+          rowKey="id"
+          columns={incomingColumns}
+          dataSource={incoming}
+          loading={loading}
+          size="small"
+          pagination={false}
+          emptyText="无入边关系"
+        />
+      </SectionCard>
+    </PageContainer>
   );
 }

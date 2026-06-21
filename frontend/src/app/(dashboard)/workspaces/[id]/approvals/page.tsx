@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { ApiError } from "@/lib/api";
 import {
   approveRequest,
@@ -151,27 +152,27 @@ export default function ApprovalsPage({ params }: Props) {
   /* ---- render ---- */
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
+    <PageContainer size="full">
       {/* ---- header ---- */}
-      <header className="flex items-center justify-between">
-        <div>
-          <p className="text-[11px] text-muted-foreground">
+      <PageHeader
+        title={
+          <span>
             <Link
               href={`/workspaces/${workspaceId}/components`}
-              className="hover:underline"
+              className="text-[11px] font-normal text-muted-foreground hover:underline"
             >
               &larr; 工作区
             </Link>
-          </p>
-          <h1 className="mt-0.5">审批中心</h1>
-          <p className="mt-1 text-xs text-muted-foreground">
-            审阅并管理智能体操作的工具网关审批请求。
-          </p>
-        </div>
-        <Button size="sm" onClick={() => void reload()}>
-          刷新
-        </Button>
-      </header>
+            <span className="mt-0.5 block">审批中心</span>
+          </span>
+        }
+        subtitle="审阅并管理智能体操作的工具网关审批请求。"
+        actions={
+          <Button size="sm" onClick={() => void reload()}>
+            刷新
+          </Button>
+        }
+      />
 
       {/* ---- scan 真阻塞：会话级实时审批聚合（改造点 F）---- */}
       <SessionPermissionPanel sessionIds={scanSessions} />
@@ -328,7 +329,7 @@ export default function ApprovalsPage({ params }: Props) {
           审批历史
         </h2>
 
-        <div className="rounded-md border bg-card">
+        <SectionCard bodyPadding="p-0">
           {history === null ? (
             <p className="py-12 text-center text-xs text-muted-foreground">
               加载中…
@@ -379,8 +380,8 @@ export default function ApprovalsPage({ params }: Props) {
               </tbody>
             </table>
           )}
-        </div>
+        </SectionCard>
       </section>
-    </div>
+    </PageContainer>
   );
 }

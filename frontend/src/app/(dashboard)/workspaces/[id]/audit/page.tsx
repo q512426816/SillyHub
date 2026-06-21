@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageContainer, PageHeader, SearchBar, SectionCard } from "@/components/layout";
 import { ApiError } from "@/lib/api";
 import { listAuditLogs, type AuditLogEntry } from "@/lib/audit";
 import { AUDIT_RESOURCE_TYPE_LABELS, labelOf } from "@/lib/status-labels";
@@ -131,39 +132,42 @@ export default function AuditPage({ params }: Props) {
   const pageEnd = Math.min(offset + PAGE_SIZE, totalCount);
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <p className="text-[11px] text-muted-foreground">
-            <Link href={`/workspaces/${workspaceId}/components`} className="hover:underline">
+    <PageContainer size="full">
+      <PageHeader
+        title={
+          <span>
+            <Link
+              href={`/workspaces/${workspaceId}/components`}
+              className="text-[11px] font-normal text-muted-foreground hover:underline"
+            >
               ← 组件列表
             </Link>
-          </p>
-          <h1 className="mt-0.5">审计日志</h1>
-        </div>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            placeholder="搜索操作或资源 ID..."
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            className="h-7 w-48 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none"
-          />
-          <select
-            className="h-7 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          >
-            <option value="">全部类型</option>
-            <option value="change">变更</option>
-            <option value="task">任务</option>
-            <option value="release">发布</option>
-            <option value="review">审查</option>
-            <option value="agent_run">智能体运行</option>
-          </select>
-          <Button size="sm" onClick={() => void reload()}>刷新</Button>
-        </div>
-      </header>
+            <span className="mt-0.5 block">审计日志</span>
+          </span>
+        }
+      />
+      <SearchBar>
+        <input
+          type="text"
+          placeholder="搜索操作或资源 ID..."
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          className="h-7 w-48 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none"
+        />
+        <select
+          className="h-7 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        >
+          <option value="">全部类型</option>
+          <option value="change">变更</option>
+          <option value="task">任务</option>
+          <option value="release">发布</option>
+          <option value="review">审查</option>
+          <option value="agent_run">智能体运行</option>
+        </select>
+        <Button size="sm" onClick={() => void reload()}>刷新</Button>
+      </SearchBar>
 
       {error && (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
@@ -172,26 +176,28 @@ export default function AuditPage({ params }: Props) {
       )}
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <div className="rounded-md border bg-card p-2.5 text-center">
-          <div className="text-[11px] text-muted-foreground">今日审计事件</div>
-          <div className="text-base font-medium">{stats.total}</div>
+      <SectionCard bodyPadding="p-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="rounded-md border bg-card p-2.5 text-center">
+            <div className="text-[11px] text-muted-foreground">今日审计事件</div>
+            <div className="text-base font-medium">{stats.total}</div>
+          </div>
+          <div className="rounded-md border bg-card p-2.5 text-center">
+            <div className="text-[11px] text-muted-foreground">Git 操作</div>
+            <div className="text-base font-medium">{stats.git}</div>
+          </div>
+          <div className="rounded-md border bg-card p-2.5 text-center">
+            <div className="text-[11px] text-muted-foreground">工具调用</div>
+            <div className="text-base font-medium">{stats.toolCalls}</div>
+          </div>
+          <div className="rounded-md border bg-card p-2.5 text-center">
+            <div className="text-[11px] text-muted-foreground">异常事件</div>
+            <div className="text-base font-medium text-destructive">{stats.anomalies}</div>
+          </div>
         </div>
-        <div className="rounded-md border bg-card p-2.5 text-center">
-          <div className="text-[11px] text-muted-foreground">Git 操作</div>
-          <div className="text-base font-medium">{stats.git}</div>
-        </div>
-        <div className="rounded-md border bg-card p-2.5 text-center">
-          <div className="text-[11px] text-muted-foreground">工具调用</div>
-          <div className="text-base font-medium">{stats.toolCalls}</div>
-        </div>
-        <div className="rounded-md border bg-card p-2.5 text-center">
-          <div className="text-[11px] text-muted-foreground">异常事件</div>
-          <div className="text-base font-medium text-destructive">{stats.anomalies}</div>
-        </div>
-      </div>
+      </SectionCard>
 
-      <section className="rounded-md border bg-card">
+      <SectionCard bodyPadding="p-0">
         {filteredItems === null ? (
           <p className="py-12 text-center text-xs text-muted-foreground">加载中...</p>
         ) : filteredItems.length === 0 ? (
@@ -273,7 +279,7 @@ export default function AuditPage({ params }: Props) {
             </div>
           </>
         )}
-      </section>
-    </div>
+      </SectionCard>
+    </PageContainer>
   );
 }

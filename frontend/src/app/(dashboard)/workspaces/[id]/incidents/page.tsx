@@ -2,9 +2,16 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { type TableProps } from "antd";
 
-import { Badge } from "@/components/ui/badge";
+import {
+  DataTable,
+  PageContainer,
+  PageHeader,
+  SectionCard,
+} from "@/components/layout";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api";
 import {
   createIncident,
@@ -18,8 +25,11 @@ interface Props {
   params: { id: string };
 }
 
-const STATUS_COLORS: Record<string, "default" | "success" | "warning" | "destructive" | "outline"> = {
-  open: "destructive",
+const STATUS_KIND: Record<
+  string,
+  "neutral" | "success" | "warning" | "error"
+> = {
+  open: "error",
   investigating: "warning",
   mitigated: "warning",
   resolved: "success",
@@ -32,11 +42,14 @@ const STATUS_LABELS: Record<string, string> = {
   resolved: "已解决",
 };
 
-const SEVERITY_COLORS: Record<string, "default" | "success" | "warning" | "destructive" | "outline"> = {
-  low: "outline",
+const SEVERITY_KIND: Record<
+  string,
+  "neutral" | "success" | "warning" | "error"
+> = {
+  low: "neutral",
   medium: "warning",
-  high: "destructive",
-  critical: "destructive",
+  high: "error",
+  critical: "error",
 };
 
 const SEVERITY_LABELS: Record<string, string> = {
@@ -110,25 +123,115 @@ export default function IncidentsPage({ params }: Props) {
     }
   };
 
+  const columns: TableProps<Incident>["columns"] = [
+    {
+      title: "标题",
+      dataIndex: "title",
+      key: "title",
+      render: (v: string, inc: Incident) => (
+        <Link
+          href={`/workspaces/${workspaceId}/incidents/${inc.id}`}
+          className="text-xs font-medium hover:underline"
+        >
+          {v}
+        </Link>
+      ),
+    },
+    {
+      title: "严重度",
+      dataIndex: "severity",
+      key: "severity",
+      render: (v: string) => (
+        <StatusBadge kind={SEVERITY_KIND[v] ?? "neutral"}>
+          {SEVERITY_LABELS[v] ?? v}
+        </StatusBadge>
+      ),
+    },
+    {
+      title: "状态",
+      dataIndex: "status",
+      key: "status",
+      render: (v: string) => (
+        <StatusBadge kind={STATUS_KIND[v] ?? "neutral"}>
+          {STATUS_LABELS[v] ?? v}
+        </StatusBadge>
+      ),
+    },
+    {
+      title: "创建时间",
+      dataIndex: "created_at",
+      key: "created_at",
+      align: "right",
+      render: (v: string) => (
+        <span className="text-[11px] text-muted-foreground">
+          {new Date(v).toLocaleDateString()}
+        </span>
+      ),
+    },
+    {
+      title: "操作",
+      key: "actions",
+      align: "right",
+      render: (_v: unknown, inc: Incident) => (
+        <span className="inline-flex justify-end">
+          {inc.status === "open" && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handleTransition(inc.id, "investigating")}
+              disabled={actionLoading !== null}
+            >
+              开始调查
+            </Button>
+          )}
+          {inc.status === "investigating" && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handleTransition(inc.id, "mitigated")}
+              disabled={actionLoading !== null}
+            >
+              已缓解
+            </Button>
+          )}
+          {inc.status === "mitigated" && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handleTransition(inc.id, "resolved")}
+              disabled={actionLoading !== null}
+            >
+              已解决
+            </Button>
+          )}
+        </span>
+      ),
+    },
+  ];
+
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <p className="text-[11px] text-muted-foreground">
-            <Link href={`/workspaces/${workspaceId}/changes`} className="hover:underline">
-              ← 变更中心
-            </Link>
-          </p>
-          <h1 className="mt-0.5">事件管理</h1>
-        </div>
-        {!showCreate && (
-          <Button size="sm" onClick={() => setShowCreate(true)}>+ 报告事件</Button>
-        )}
-      </header>
+    <PageContainer>
+      <PageHeader
+        title="事件管理"
+        subtitle={
+          <Link
+            href={`/workspaces/${workspaceId}/changes`}
+            className="hover:underline"
+          >
+            ← 变更中心
+          </Link>
+        }
+        actions={
+          !showCreate ? (
+            <Button size="sm" onClick={() => setShowCreate(true)}>
+              + 报告事件
+            </Button>
+          ) : undefined
+        }
+      />
 
       {showCreate && (
-        <section className="space-y-3 rounded-md border bg-card p-4">
-          <h3 className="text-xs font-medium text-muted-foreground">报告新事件</h3>
+        <SectionCard title="报告新事件">
           <div className="flex flex-col gap-2">
             <input
               className="h-8 rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
@@ -156,7 +259,7 @@ export default function IncidentsPage({ params }: Props) {
               onChange={(e) => setDescription(e.target.value)}
             />
           </div>
-          <div className="flex gap-2">
+          <div className="mt-3 flex gap-2">
             <Button
               size="sm"
               onClick={handleCreate}
@@ -168,7 +271,7 @@ export default function IncidentsPage({ params }: Props) {
               取消
             </Button>
           </div>
-        </section>
+        </SectionCard>
       )}
 
       {error && (
@@ -177,102 +280,32 @@ export default function IncidentsPage({ params }: Props) {
         </div>
       )}
 
-      <div className="flex gap-1.5">
-        {["", "open", "investigating", "mitigated", "resolved"].map((s) => (
-          <button
-            key={s}
-            onClick={() => setStatusFilter(s)}
-            className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
-              statusFilter === s
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted/60 text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {s === "" ? "全部" : STATUS_LABELS[s]}
-          </button>
-        ))}
-      </div>
-
-      <section className="rounded-md border bg-card">
-        {items === null ? (
-          <p className="py-12 text-center text-xs text-muted-foreground">加载中…</p>
-        ) : items.length === 0 ? (
-          <div className="py-12 text-center text-xs text-muted-foreground">
-            暂无事件记录。
-          </div>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>标题</th>
-                <th>严重度</th>
-                <th>状态</th>
-                <th className="text-right">创建时间</th>
-                <th className="text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((inc) => (
-                <tr key={inc.id}>
-                  <td>
-                    <Link
-                      href={`/workspaces/${workspaceId}/incidents/${inc.id}`}
-                      className="text-xs font-medium hover:underline"
-                    >
-                      {inc.title}
-                    </Link>
-                  </td>
-                  <td>
-                    <Badge variant={SEVERITY_COLORS[inc.severity] ?? "outline"}>
-                      {SEVERITY_LABELS[inc.severity] ?? inc.severity}
-                    </Badge>
-                  </td>
-                  <td>
-                    <Badge variant={STATUS_COLORS[inc.status] ?? "outline"}>
-                      {STATUS_LABELS[inc.status] ?? inc.status}
-                    </Badge>
-                  </td>
-                  <td className="text-right text-[11px] text-muted-foreground">
-                    {new Date(inc.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="text-right space-x-1">
-                    {inc.status === "open" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleTransition(inc.id, "investigating")}
-                        disabled={actionLoading !== null}
-                      >
-                        开始调查
-                      </Button>
-                    )}
-                    {inc.status === "investigating" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleTransition(inc.id, "mitigated")}
-                        disabled={actionLoading !== null}
-                      >
-                        已缓解
-                      </Button>
-                    )}
-                    {inc.status === "mitigated" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleTransition(inc.id, "resolved")}
-                        disabled={actionLoading !== null}
-                      >
-                        已解决
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-    </div>
+      <SectionCard bodyPadding="p-0">
+        <div className="flex gap-1.5 border-b px-3 py-2">
+          {["", "open", "investigating", "mitigated", "resolved"].map((s) => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s)}
+              className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                statusFilter === s
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted/60 text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {s === "" ? "全部" : STATUS_LABELS[s]}
+            </button>
+          ))}
+        </div>
+        <DataTable<Incident>
+          rowKey="id"
+          columns={columns}
+          dataSource={items ?? []}
+          loading={items === null}
+          size="small"
+          pagination={false}
+          emptyText="暂无事件记录。"
+        />
+      </SectionCard>
+    </PageContainer>
   );
 }

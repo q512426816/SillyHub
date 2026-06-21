@@ -7,6 +7,10 @@ import { AgentModelInput } from "@/components/AgentModelInput";
 import { AgentProviderSelect } from "@/components/AgentProviderSelect";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  PageContainer,
+  PageHeader,
+} from "@/components/layout";
 import { ApiError } from "@/lib/api";
 import {
   createAgentRun,
@@ -271,16 +275,16 @@ export default function TaskDetailPage({ params }: Props) {
   /* ---- Loading state ---- */
   if (loading) {
     return (
-      <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
+      <PageContainer className="gap-5">
         <p className="text-xs text-muted-foreground">加载中...</p>
-      </div>
+      </PageContainer>
     );
   }
 
   /* ---- Error / not-found state ---- */
   if (pageError || !task) {
     return (
-      <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
+      <PageContainer className="gap-5">
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {pageError ?? "任务未找到"}
         </div>
@@ -290,7 +294,7 @@ export default function TaskDetailPage({ params }: Props) {
         >
           &larr; 任务看板
         </Link>
-      </div>
+      </PageContainer>
     );
   }
 
@@ -323,7 +327,7 @@ export default function TaskDetailPage({ params }: Props) {
   };
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
+    <PageContainer className="gap-5">
       {/* ---- Breadcrumb ---- */}
       <nav className="flex items-center gap-1 text-[11px] text-muted-foreground">
         <Link
@@ -358,63 +362,67 @@ export default function TaskDetailPage({ params }: Props) {
       )}
 
       {/* ---- Header ---- */}
-      <header className="flex items-start justify-between gap-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="truncate text-base font-semibold">
-            {task.task_key}: {task.title ?? task.task_key}
-          </h1>
-          <Badge variant={STATUS_COLORS[task.status] ?? "outline"}>
-            {labelOf(STATUS_LABELS, task.status)}
-          </Badge>
-          {task.priority && (
-            <Badge variant={PRIORITY_COLORS[task.priority] ?? "outline"}>
-              {task.priority}
+      <PageHeader
+        title={
+          <span className="flex flex-wrap items-center gap-2 text-base font-semibold">
+            <span className="truncate">
+              {task.task_key}: {task.title ?? task.task_key}
+            </span>
+            <Badge variant={STATUS_COLORS[task.status] ?? "outline"}>
+              {labelOf(STATUS_LABELS, task.status)}
             </Badge>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {availableTransitions.map((t) => (
-            <Button
-              key={t.target}
-              size="sm"
-              onClick={() => void handleTransition(t.target)}
-              disabled={transitioning}
+            {task.priority && (
+              <Badge variant={PRIORITY_COLORS[task.priority] ?? "outline"}>
+                {task.priority}
+              </Badge>
+            )}
+          </span>
+        }
+        actions={
+          <>
+            {availableTransitions.map((t) => (
+              <Button
+                key={t.target}
+                size="sm"
+                onClick={() => void handleTransition(t.target)}
+                disabled={transitioning}
+              >
+                {t.label}
+              </Button>
+            ))}
+            <Link
+              href={`/workspaces/${workspaceId}/changes/${changeId}`}
+              className="inline-flex"
             >
-              {t.label}
+              <Button size="sm" variant="outline">
+                查看文件
+              </Button>
+            </Link>
+            <Button
+              size="sm"
+              onClick={() => {
+                setShowAgentForm(!showAgentForm);
+                if (!showAgentForm) {
+                  setRuntimesLoading(true);
+                  listDaemonRuntimes()
+                    .then((runtimes) => {
+                      setDaemonRuntimes(runtimes);
+                      const hasOnline = runtimes.some((r) => r.status === "online");
+                      setPreferredBackend(hasOnline ? "daemon" : "server");
+                    })
+                    .catch(() => {
+                      setDaemonRuntimes([]);
+                      setPreferredBackend("server");
+                    })
+                    .finally(() => setRuntimesLoading(false));
+                }
+              }}
+            >
+              分配给 Agent
             </Button>
-          ))}
-          <Link
-            href={`/workspaces/${workspaceId}/changes/${changeId}`}
-            className="inline-flex"
-          >
-            <Button size="sm" variant="outline">
-              查看文件
-            </Button>
-          </Link>
-          <Button
-            size="sm"
-            onClick={() => {
-              setShowAgentForm(!showAgentForm);
-              if (!showAgentForm) {
-                setRuntimesLoading(true);
-                listDaemonRuntimes()
-                  .then((runtimes) => {
-                    setDaemonRuntimes(runtimes);
-                    const hasOnline = runtimes.some((r) => r.status === "online");
-                    setPreferredBackend(hasOnline ? "daemon" : "server");
-                  })
-                  .catch(() => {
-                    setDaemonRuntimes([]);
-                    setPreferredBackend("server");
-                  })
-                  .finally(() => setRuntimesLoading(false));
-              }
-            }}
-          >
-            分配给 Agent
-          </Button>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       {/* ---- Agent assignment form ---- */}
       {showAgentForm && (
@@ -750,6 +758,6 @@ export default function TaskDetailPage({ params }: Props) {
           </div>
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 }

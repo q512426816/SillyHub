@@ -19,8 +19,10 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AgentLogViewer, isPendingReplied, parseToolCallContent, parseScanCheckOutput, type ToolCallEntry } from "@/components/agent-log-viewer";
+import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api";
 import { asString, cn } from "@/lib/utils";
 import {
@@ -123,6 +125,22 @@ function postScanVariant(status: string): "success" | "destructive" | "warning" 
   if (status === "success") return "success";
   if (status === "failed_post_check") return "destructive";
   return "warning";
+}
+
+function postScanKind(status: string): "success" | "error" | "warning" {
+  if (status === "success") return "success";
+  if (status === "failed_post_check") return "error";
+  return "warning";
+}
+
+function runStatusKind(run: AgentRun): "success" | "error" | "warning" | "neutral" {
+  if (run.status === "completed" && run.post_scan_status === "failed_post_check") {
+    return "warning";
+  }
+  if (run.status === "completed") return "success";
+  if (run.status === "failed") return "error";
+  if (run.status === "killed") return "warning";
+  return "neutral";
 }
 
 function isWorkspaceScanRun(run: AgentRun): boolean {
@@ -461,38 +479,36 @@ export default function AgentPage({ params }: Props) {
   /* ================================================================ */
 
   return (
-    <div className="flex min-w-0 max-w-full flex-col gap-5">
+    <PageContainer>
       {/* ---- Header ---- */}
-      <header className="flex flex-col gap-4 border-b pb-4 lg:flex-row lg:items-end lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2.5">
+      <PageHeader
+        title={
+          <span className="flex items-center gap-2.5">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-card text-primary">
               <Bot className="h-4 w-4" />
             </span>
-            <div className="min-w-0">
-              <h1>智能体控制台</h1>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                当前工作区运行记录、实时日志与人工指导入口
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {runningRuns.length > 0 && (
-            <div className="flex h-8 items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-xs font-medium text-emerald-700">
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-pulse rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-              </span>
-              {runningRuns.length} 个运行中
-            </div>
-          )}
-          <Button size="sm" variant="outline" onClick={() => void reload()}>
-            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-            刷新
-          </Button>
-        </div>
-      </header>
+            <span>智能体控制台</span>
+          </span>
+        }
+        subtitle="当前工作区运行记录、实时日志与人工指导入口"
+        actions={
+          <>
+            {runningRuns.length > 0 && (
+              <div className="flex h-8 items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-xs font-medium text-emerald-700">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-pulse rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                </span>
+                {runningRuns.length} 个运行中
+              </div>
+            )}
+            <Button size="sm" variant="outline" onClick={() => void reload()}>
+              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+              刷新
+            </Button>
+          </>
+        }
+      />
 
       {/* ---- Stats bar ---- */}
       {runs !== null && runs.length > 0 && (
@@ -610,9 +626,9 @@ export default function AgentPage({ params }: Props) {
                   </MetaItem>
                   {run.post_scan_status && (
                     <MetaItem label="后置校验">
-                      <Badge variant={postScanVariant(run.post_scan_status)}>
+                      <StatusBadge kind={postScanKind(run.post_scan_status)}>
                         {postScanLabel[run.post_scan_status] ?? run.post_scan_status}
-                      </Badge>
+                      </StatusBadge>
                     </MetaItem>
                   )}
                   {run.is_resume && (
@@ -645,16 +661,16 @@ export default function AgentPage({ params }: Props) {
             summary={
               <>
                 {toolSummary.success > 0 && (
-                  <Badge variant="success">{toolSummary.success} 成功</Badge>
+                  <StatusBadge kind="success">{toolSummary.success} 成功</StatusBadge>
                 )}
                 {toolSummary.failed > 0 && (
-                  <Badge variant="destructive">{toolSummary.failed} 失败</Badge>
+                  <StatusBadge kind="error">{toolSummary.failed} 失败</StatusBadge>
                 )}
                 {toolSummary.pending > 0 && (
-                  <Badge variant="warning">{toolSummary.pending} 待审批</Badge>
+                  <StatusBadge kind="warning">{toolSummary.pending} 待审批</StatusBadge>
                 )}
                 {toolSummary.pendingGuidance > 0 && (
-                  <Badge variant="warning">{toolSummary.pendingGuidance} 待指导</Badge>
+                  <StatusBadge kind="warning">{toolSummary.pendingGuidance} 待指导</StatusBadge>
                 )}
               </>
             }
@@ -761,9 +777,9 @@ export default function AgentPage({ params }: Props) {
                         <td className="whitespace-nowrap px-3 py-2">
                           <div className="flex items-center gap-1.5">
                             <span className={`h-1.5 w-1.5 rounded-full ${sl.dot}`} />
-                            <Badge variant={sl.badge}>
+                            <StatusBadge kind={runStatusKind(run)}>
                               {sl.label}
-                            </Badge>
+                            </StatusBadge>
                           </div>
                         </td>
                         <td className="max-w-[260px] truncate px-3 py-2 text-xs text-muted-foreground">
@@ -910,16 +926,18 @@ export default function AgentPage({ params }: Props) {
 
       {/* ---- Empty state ---- */}
       {runs !== null && runs.length === 0 && (
-        <div className="flex flex-col items-center gap-3 rounded-md border bg-card py-16">
-          <span className="flex h-10 w-10 items-center justify-center rounded-md border bg-muted/40 text-primary">
-            <Bot className="h-5 w-5" />
-          </span>
-          <p className="text-sm font-medium">暂无智能体运行记录</p>
-          <p className="text-xs text-muted-foreground">
-            在任务详情页启动智能体后，运行记录会出现在这里
-          </p>
-        </div>
+        <SectionCard>
+          <div className="flex flex-col items-center gap-3 py-12">
+            <span className="flex h-10 w-10 items-center justify-center rounded-md border bg-muted/40 text-primary">
+              <Bot className="h-5 w-5" />
+            </span>
+            <p className="text-sm font-medium">暂无智能体运行记录</p>
+            <p className="text-xs text-muted-foreground">
+              在任务详情页启动智能体后，运行记录会出现在这里
+            </p>
+          </div>
+        </SectionCard>
       )}
-    </div>
+    </PageContainer>
   );
 }

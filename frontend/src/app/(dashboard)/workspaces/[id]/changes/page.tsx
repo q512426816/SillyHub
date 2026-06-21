@@ -1,10 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { type TableProps } from "antd";
 
-import { Badge } from "@/components/ui/badge";
+import {
+  DataTable,
+  PageContainer,
+  PageHeader,
+  SectionCard,
+} from "@/components/layout";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api";
 import {
   listChanges,
@@ -23,16 +31,16 @@ const TABS = [
   { key: "archive", label: "已归档" },
 ] as const;
 
-const GATE_LABELS: Record<string, { label: string; color: "warning" | "destructive" }> = {
-  need_proposal_review: { label: "待提案审核", color: "warning" },
-  need_plan_review: { label: "待计划审核", color: "warning" },
-  need_human_test: { label: "待人工测试", color: "warning" },
-  need_archive_confirm: { label: "待归档确认", color: "warning" },
-  blocked: { label: "阻塞中", color: "destructive" },
+const GATE_LABELS: Record<string, { label: string; kind: "warning" | "error" }> = {
+  need_proposal_review: { label: "待提案审核", kind: "warning" },
+  need_plan_review: { label: "待计划审核", kind: "warning" },
+  need_human_test: { label: "待人工测试", kind: "warning" },
+  need_archive_confirm: { label: "待归档确认", kind: "warning" },
+  blocked: { label: "阻塞中", kind: "error" },
 };
 
-const TYPE_COLORS: Record<string, "default" | "warning" | "success"> = {
-  feature: "default",
+const TYPE_KIND: Record<string, "neutral" | "warning" | "success"> = {
+  feature: "neutral",
   quick: "warning",
   prototype: "success",
 };
@@ -43,18 +51,18 @@ const TYPE_LABEL: Record<string, string> = {
   prototype: "原型",
 };
 
-const STAGE_VARIANT: Record<string, "outline" | "default" | "warning" | "destructive" | "success"> = {
-  draft: "outline",
-  scan: "default",
+const STAGE_KIND: Record<string, StatusKind> = {
+  draft: "neutral",
+  scan: "info",
   brainstorm: "warning",
   propose: "warning",
-  plan: "default",
-  execute: "default",
+  plan: "info",
+  execute: "info",
   verify: "success",
-  rework_required: "destructive",
+  rework_required: "error",
   accepted: "success",
-  archive: "outline",
-  quick: "default",
+  archive: "neutral",
+  quick: "info",
 };
 
 const STAGE_LABEL: Record<string, string> = {
@@ -86,8 +94,11 @@ const STAGE_OPTIONS = [
   { value: "quick", label: "快速" },
 ] as const;
 
+type StatusKind = "info" | "success" | "warning" | "error" | "neutral";
+
 export default function ChangesPage({ params }: Props) {
   const workspaceId = params.id;
+  const router = useRouter();
   const [tab, setTab] = useState<"active" | "archive">("active");
   const [searchQuery, setSearchQuery] = useState("");
   const [stageFilter, setStageFilter] = useState("");
@@ -155,47 +166,141 @@ export default function ChangesPage({ params }: Props) {
     }
   };
 
+  const columns: TableProps<ChangeSummary>["columns"] = [
+    {
+      title: "变更 Key",
+      dataIndex: "change_key",
+      key: "change_key",
+      render: (v: string, c: ChangeSummary) => (
+        <Link
+          href={`/workspaces/${workspaceId}/changes/${c.id}`}
+          className="font-mono text-[11px] text-primary hover:underline"
+        >
+          {v}
+        </Link>
+      ),
+    },
+    {
+      title: "标题",
+      dataIndex: "title",
+      key: "title",
+      render: (v: string | null) => (
+        <span className="font-medium">{v ?? "—"}</span>
+      ),
+    },
+    {
+      title: "类型",
+      dataIndex: "change_type",
+      key: "change_type",
+      width: 80,
+      render: (v: string | null) =>
+        v ? (
+          <StatusBadge kind={TYPE_KIND[v] ?? "neutral"}>
+            {TYPE_LABEL[v] ?? v}
+          </StatusBadge>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
+    },
+    {
+      title: "状态",
+      key: "status",
+      width: 110,
+      render: (_v: unknown, c: ChangeSummary) => {
+        const gate = GATE_LABELS[c.human_gate ?? ""];
+        if (gate) {
+          return <StatusBadge kind={gate.kind}>{gate.label}</StatusBadge>;
+        }
+        if (c.current_stage === "accepted") {
+          return <StatusBadge kind="success">已完成</StatusBadge>;
+        }
+        if (c.current_stage && c.current_stage !== "draft") {
+          return <StatusBadge kind="info">进行中</StatusBadge>;
+        }
+        return <StatusBadge kind="neutral">空闲</StatusBadge>;
+      },
+    },
+    {
+      title: "阶段",
+      key: "stage",
+      width: 96,
+      render: (_v: unknown, c: ChangeSummary) => (
+        <StatusBadge kind={STAGE_KIND[c.current_stage ?? "draft"] ?? "neutral"}>
+          {STAGE_LABEL[c.current_stage ?? "draft"] ?? c.current_stage ?? "draft"}
+        </StatusBadge>
+      ),
+    },
+    {
+      title: "影响组件",
+      key: "affected_components",
+      render: (c: ChangeSummary) => (
+        <span className="text-[11px]">
+          {c.affected_components.length > 0
+            ? c.affected_components.join(", ")
+            : "—"}
+        </span>
+      ),
+    },
+    {
+      title: "更新时间",
+      dataIndex: "updated_at",
+      key: "updated_at",
+      align: "right",
+      render: (v: string) => (
+        <span className="text-[11px] text-muted-foreground">
+          {new Date(v).toLocaleDateString()}
+        </span>
+      ),
+    },
+  ];
+
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <p className="text-[11px] text-muted-foreground">
-            <Link href={`/workspaces/${workspaceId}/components`} className="hover:underline">
-              ← 组件列表
-            </Link>
-          </p>
-          <h1 className="mt-0.5">变更中心</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            placeholder="搜索 Key / 标题 / 组件…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-7 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none"
-          />
-          <select
-            value={stageFilter}
-            onChange={(e) => setStageFilter(e.target.value)}
-            className="h-7 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none"
-          >
-            {STAGE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
+    <PageContainer>
+      <PageHeader
+        title="变更中心"
+        subtitle={
           <Link
-            href={`/workspaces/${workspaceId}/create-change`}
-            className="inline-flex h-7 items-center rounded border border-border px-2 text-xs text-foreground hover:bg-muted"
+            href={`/workspaces/${workspaceId}/components`}
+            className="hover:underline"
           >
-            + 新建变更
+            ← 组件列表
           </Link>
-          <Button size="sm" onClick={handleReparse} disabled={reparsing}>
-            {reparsing ? "解析中…" : "重新扫描"}
-          </Button>
-        </div>
-      </header>
+        }
+        actions={
+          <>
+            <input
+              type="text"
+              placeholder="搜索 Key / 标题 / 组件…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-8 rounded border border-input bg-background px-2.5 text-xs focus:border-ring focus:outline-none"
+            />
+            <select
+              value={stageFilter}
+              onChange={(e) => setStageFilter(e.target.value)}
+              className="h-8 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none"
+            >
+              {STAGE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                router.push(`/workspaces/${workspaceId}/create-change`)
+              }
+            >
+              + 新建变更
+            </Button>
+            <Button size="sm" onClick={handleReparse} disabled={reparsing}>
+              {reparsing ? "解析中…" : "重新扫描"}
+            </Button>
+          </>
+        }
+      />
 
       {pageError && (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
@@ -212,8 +317,7 @@ export default function ChangesPage({ params }: Props) {
       )}
 
       {warnings.length > 0 && (
-        <section className="rounded-md border bg-card p-3">
-          <h3 className="mb-1.5">解析警告</h3>
+        <SectionCard title="解析警告">
           <ul className="list-disc space-y-0.5 pl-4 text-xs text-amber-600">
             {warnings.map((w, i) => (
               <li key={i}>
@@ -222,108 +326,51 @@ export default function ChangesPage({ params }: Props) {
               </li>
             ))}
           </ul>
-        </section>
+        </SectionCard>
       )}
 
-      <div className="flex gap-4 border-b">
-        {TABS.map((t) => {
-          const count = t.key === "active" ? activeItems.length : archiveItems.length;
-          return (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key as "active" | "archive")}
-              className={`border-b-2 pb-1.5 text-xs font-medium transition-colors ${
-                tab === t.key
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {t.label} ({count})
-            </button>
-          );
-        })}
-      </div>
-
-      <section className="rounded-md border bg-card">
-        {loading ? (
-          <p className="py-12 text-center text-xs text-muted-foreground">加载中…</p>
-        ) : filtered.length === 0 ? (
-          <div className="py-12 text-center text-xs text-muted-foreground">
-            {items.length === 0
-              ? `当前没有${tab === "active" ? "进行中" : "已归档"}的变更。`
-              : "没有匹配的变更。"}
+      <SectionCard
+        bodyPadding="p-0"
+        extra={
+          <div className="flex gap-1">
+            {TABS.map((t) => {
+              const count =
+                t.key === "active"
+                  ? activeItems.length
+                  : archiveItems.length;
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => setTab(t.key as "active" | "archive")}
+                  className={`border-b-2 pb-1.5 text-xs font-medium transition-colors ${
+                    tab === t.key
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  } mr-3 last:mr-0`}
+                >
+                  {t.label} ({count})
+                </button>
+              );
+            })}
           </div>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th className="whitespace-nowrap">变更 Key</th>
-                <th>标题</th>
-                <th className="whitespace-nowrap w-20">类型</th>
-                <th className="whitespace-nowrap w-24">状态</th>
-                <th className="whitespace-nowrap w-20">阶段</th>
-                <th>影响组件</th>
-                <th className="text-right whitespace-nowrap">更新时间</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((c) => (
-                <tr key={c.id}>
-                  <td>
-                    <Link
-                      href={`/workspaces/${workspaceId}/changes/${c.id}`}
-                      className="font-mono text-[11px] text-primary hover:underline"
-                    >
-                      {c.change_key}
-                    </Link>
-                  </td>
-                  <td className="font-medium">{c.title ?? "—"}</td>
-                  <td>
-                    {c.change_type ? (
-                      <Badge variant={TYPE_COLORS[c.change_type] ?? "outline"}>
-                        {TYPE_LABEL[c.change_type] ?? c.change_type}
-                      </Badge>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    )}
-                  </td>
-                  <td>
-                    {(() => {
-                      const gate = GATE_LABELS[c.human_gate ?? ""];
-                      if (gate) {
-                        return <Badge variant={gate.color}>{gate.label}</Badge>;
-                      }
-                      if (c.current_stage === "accepted") {
-                        return <Badge variant="success">已完成</Badge>;
-                      }
-                      if (c.current_stage && c.current_stage !== "draft") {
-                        return <Badge variant="success">进行中</Badge>;
-                      }
-                      return <Badge variant="outline">空闲</Badge>;
-                    })()}
-                  </td>
-                  <td>
-                    <Badge variant={STAGE_VARIANT[c.current_stage ?? "draft"] ?? "outline"}>
-                      {STAGE_LABEL[c.current_stage ?? "draft"] ?? c.current_stage ?? "draft"}
-                    </Badge>
-                  </td>
-                  <td className="text-[11px]">
-                    {c.affected_components.length > 0
-                      ? c.affected_components.join(", ")
-                      : "—"}
-                  </td>
-                  <td className="text-right text-[11px] text-muted-foreground">
-                    {new Date(c.updated_at).toLocaleDateString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+        }
+      >
+        <DataTable<ChangeSummary>
+          rowKey="id"
+          columns={columns}
+          dataSource={filtered}
+          loading={loading}
+          size="small"
+          pagination={false}
+          emptyText={
+            items.length === 0
+              ? `当前没有${tab === "active" ? "进行中" : "已归档"}的变更。`
+              : "没有匹配的变更。"
+          }
+        />
+      </SectionCard>
 
-      <section className="rounded-md border bg-card px-6 py-4">
-        <h3 className="mb-3 text-xs font-medium text-muted-foreground">变更生命周期</h3>
+      <SectionCard title="变更生命周期">
         <div className="flex items-center justify-center gap-0">
           {[
             "需求输入",
@@ -343,7 +390,7 @@ export default function ChangesPage({ params }: Props) {
             </div>
           ))}
         </div>
-      </section>
-    </div>
+      </SectionCard>
+    </PageContainer>
   );
 }

@@ -4,6 +4,11 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  PageContainer,
+  PageHeader,
+} from "@/components/layout";
 import { ApiError } from "@/lib/api";
 import {
   getTaskBoard,
@@ -117,41 +122,41 @@ export default function TaskBoardPage({ params }: Props) {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-[1400px] px-6 py-6">
+      <PageContainer>
         <p className="text-xs text-muted-foreground">加载中…</p>
-      </div>
+      </PageContainer>
     );
   }
 
   if (pageError && !board) {
     return (
-      <div className="mx-auto max-w-[1400px] px-6 py-6">
+      <PageContainer>
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {pageError}
         </div>
-      </div>
+      </PageContainer>
     );
   }
 
   return (
-    <div className="mx-auto flex max-w-[1400px] flex-col gap-5 px-6 py-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <p className="text-[11px] text-muted-foreground">
-            <Link href={`/workspaces/${workspaceId}/changes/${changeId}`} className="hover:underline">
-              ← 变更详情
-            </Link>
-          </p>
-          <h1 className="mt-0.5">任务看板</h1>
-        </div>
-        <button
-          onClick={handleReparse}
-          disabled={reparsing}
-          className="inline-flex h-7 items-center rounded bg-primary px-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-        >
-          {reparsing ? "解析中…" : "重新解析"}
-        </button>
-      </header>
+    <PageContainer className="gap-5">
+      <p className="text-[11px] text-muted-foreground">
+        <Link href={`/workspaces/${workspaceId}/changes/${changeId}`} className="hover:underline">
+          ← 变更详情
+        </Link>
+      </p>
+      <PageHeader
+        title="任务看板"
+        actions={
+          <Button
+            size="sm"
+            onClick={() => void handleReparse()}
+            disabled={reparsing}
+          >
+            {reparsing ? "解析中…" : "重新解析"}
+          </Button>
+        }
+      />
 
       {reparseResult && (
         <div className="rounded border bg-muted/40 px-3 py-2 text-xs">
@@ -198,6 +203,6 @@ export default function TaskBoardPage({ params }: Props) {
           暂无任务。点击&ldquo;重新解析&rdquo;从文件系统加载。
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 }

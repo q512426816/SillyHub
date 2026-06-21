@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { ApiError } from "@/lib/api";
 import {
   getKnowledge,
@@ -76,15 +77,20 @@ export default function KnowledgePage({ params }: Props) {
   const currentItems = tab === "knowledge" ? knowledgeItems : quicklogItems;
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
-      <header>
-        <p className="text-[11px] text-muted-foreground">
-          <Link href={`/workspaces/${workspaceId}/components`} className="hover:underline">
-            ← 组件列表
-          </Link>
-        </p>
-        <h1 className="mt-0.5">知识 & 日志</h1>
-      </header>
+    <PageContainer size="full">
+      <PageHeader
+        title={
+          <span>
+            <Link
+              href={`/workspaces/${workspaceId}/components`}
+              className="text-[11px] font-normal text-muted-foreground hover:underline"
+            >
+              ← 组件列表
+            </Link>
+            <span className="mt-0.5 block">知识 & 日志</span>
+          </span>
+        }
+      />
 
       {pageError && (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
@@ -119,7 +125,8 @@ export default function KnowledgePage({ params }: Props) {
         </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
-          <nav className="space-y-0.5 rounded-md border bg-card p-2">
+          <SectionCard bodyPadding="p-2">
+            <nav className="space-y-0.5">
             {currentItems.map((item) => (
               <button
                 key={item.filename}
@@ -145,24 +152,25 @@ export default function KnowledgePage({ params }: Props) {
                 )}
               </button>
             ))}
-          </nav>
+            </nav>
+          </SectionCard>
 
-          <section className="rounded-md border bg-card">
+          <SectionCard>
             {selectedContent === null ? (
               <div className="py-12 text-center text-xs text-muted-foreground">
                 选择左侧文档查看内容。
               </div>
             ) : (
-              <div className="p-3">
+              <div>
                 <h3 className="mb-2 text-xs font-medium">{selectedTitle}</h3>
                 <pre className="max-h-[560px] overflow-auto whitespace-pre-wrap break-words rounded border bg-muted/30 p-3 text-[11px] leading-4">
                   {selectedContent}
                 </pre>
               </div>
             )}
-          </section>
+          </SectionCard>
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 }

@@ -8,6 +8,10 @@ import { AgentModelInput } from "@/components/AgentModelInput";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AgentProviderSelect } from "@/components/AgentProviderSelect";
+import {
+  PageContainer,
+  PageHeader,
+} from "@/components/layout";
 import { ApiError } from "@/lib/api";
 import { asString } from "@/lib/utils";
 import {
@@ -693,15 +697,15 @@ export default function ChangeDetailPage({ params }: Props) {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-6xl px-6 py-6">
+      <PageContainer>
         <p className="text-xs text-muted-foreground">加载中…</p>
-      </div>
+      </PageContainer>
     );
   }
 
   if (loadError || !change) {
     return (
-      <div className="mx-auto max-w-6xl px-6 py-6">
+      <PageContainer>
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {loadError ?? "变更未找到"}
         </div>
@@ -711,7 +715,7 @@ export default function ChangeDetailPage({ params }: Props) {
         >
           ← 变更列表
         </Link>
-      </div>
+      </PageContainer>
     );
   }
 
@@ -771,26 +775,30 @@ export default function ChangeDetailPage({ params }: Props) {
   };
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
-      <header>
-        <p className="text-[11px] text-muted-foreground">
-          <Link href={`/workspaces/${workspaceId}/changes`} className="hover:underline">
-            ← 变更列表
-          </Link>
-        </p>
-        <div className="mt-0.5 flex items-center gap-2">
-          <h1 className="truncate">{change.title ?? change.change_key}</h1>
-          <Badge variant={WORKFLOW_STAGE_COLORS[change.current_stage ?? "draft"] ?? "outline"}>
-            {WORKFLOW_STAGE_LABELS[change.current_stage ?? "draft"] ?? change.current_stage ?? "未知"}
-          </Badge>
-        </div>
-        <div className="mt-1 flex flex-wrap gap-x-5 gap-y-0.5 text-xs text-muted-foreground">
-          <span>Key: <code className="font-mono">{change.change_key}</code></span>
-          <span>类型: {change.change_type ?? "—"}</span>
-          <span>位置: {change.location}</span>
-          <span>影响: {change.affected_components.length > 0 ? change.affected_components.join(", ") : "—"}</span>
-        </div>
-      </header>
+    <PageContainer className="gap-5">
+      <p className="text-[11px] text-muted-foreground">
+        <Link href={`/workspaces/${workspaceId}/changes`} className="hover:underline">
+          ← 变更列表
+        </Link>
+      </p>
+      <PageHeader
+        title={
+          <span className="flex items-center gap-2">
+            <span className="truncate">{change.title ?? change.change_key}</span>
+            <Badge variant={WORKFLOW_STAGE_COLORS[change.current_stage ?? "draft"] ?? "outline"}>
+              {WORKFLOW_STAGE_LABELS[change.current_stage ?? "draft"] ?? change.current_stage ?? "未知"}
+            </Badge>
+          </span>
+        }
+        subtitle={
+          <span className="flex flex-wrap gap-x-5 gap-y-0.5">
+            <span>Key: <code className="font-mono">{change.change_key}</code></span>
+            <span>类型: {change.change_type ?? "—"}</span>
+            <span>位置: {change.location}</span>
+            <span>影响: {change.affected_components.length > 0 ? change.affected_components.join(", ") : "—"}</span>
+          </span>
+        }
+      />
 
       {change.current_stage && (() => {
         const currentIndex = WORKFLOW_STAGES.indexOf(change.current_stage as typeof WORKFLOW_STAGES[number]);
@@ -1480,6 +1488,6 @@ export default function ChangeDetailPage({ params }: Props) {
           )}
         </aside>
       </div>
-    </div>
+    </PageContainer>
   );
 }

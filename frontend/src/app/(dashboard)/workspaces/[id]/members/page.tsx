@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { WorkspaceMemberAddDialog } from "@/components/workspace-member-add-dialog";
 import { WorkspaceMemberRow } from "@/components/workspace-member-row";
 import { ApiError } from "@/lib/api";
@@ -141,18 +142,16 @@ export default function MembersPage({ params }: Props) {
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      <header className="flex items-center justify-between">
-        <div>
-          <h2 className="text-sm font-medium">成员管理</h2>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            管理 workspace 成员：添加、修改角色、移除、传递所有权。
-          </p>
-        </div>
-        <Button size="sm" onClick={handleAddClicked} disabled={actionLoading}>
-          + Add Member
-        </Button>
-      </header>
+    <PageContainer size="full">
+      <PageHeader
+        title="成员管理"
+        subtitle="管理 workspace 成员：添加、修改角色、移除、传递所有权。"
+        actions={
+          <Button size="sm" onClick={handleAddClicked} disabled={actionLoading}>
+            + Add Member
+          </Button>
+        }
+      />
 
       {error && (
         <div className="flex items-center justify-between gap-3 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
@@ -173,14 +172,17 @@ export default function MembersPage({ params }: Props) {
           加载中…
         </p>
       ) : !members || members.length === 0 ? (
-        <div className="rounded-md border bg-card p-8 text-center">
-          <p className="text-sm">暂无成员</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            workspace 至少应有一个 workspace_owner；如出现空列表，请检查权限或联系平台管理员。
-          </p>
-        </div>
+        <SectionCard bodyPadding="p-8">
+          <div className="text-center">
+            <p className="text-sm">暂无成员</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              workspace 至少应有一个 workspace_owner；如出现空列表，请检查权限或联系平台管理员。
+            </p>
+          </div>
+        </SectionCard>
       ) : (
-        <div className="overflow-x-auto rounded-md border bg-card">
+        <SectionCard bodyPadding="p-0">
+          <div className="overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>
               <tr className="border-b bg-muted/30">
@@ -218,7 +220,8 @@ export default function MembersPage({ params }: Props) {
               ))}
             </tbody>
           </table>
-        </div>
+          </div>
+        </SectionCard>
       )}
 
       {showAddDialog && (
@@ -230,6 +233,6 @@ export default function MembersPage({ params }: Props) {
           onClose={() => setShowAddDialog(false)}
         />
       )}
-    </div>
+    </PageContainer>
   );
 }

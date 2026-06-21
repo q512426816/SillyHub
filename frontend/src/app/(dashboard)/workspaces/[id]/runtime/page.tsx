@@ -2,8 +2,15 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { type TableProps } from "antd";
 
-import { Badge } from "@/components/ui/badge";
+import {
+  DataTable,
+  PageContainer,
+  PageHeader,
+  SectionCard,
+} from "@/components/layout";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api";
 import {
   getRuntimeProgress,
@@ -11,6 +18,7 @@ import {
   getRuntimeArtifacts,
   getRuntimeArtifactContent,
   type RuntimeProgress,
+  type StageProgress,
   type ArtifactEntry,
 } from "@/lib/runtime";
 
@@ -18,11 +26,11 @@ interface Props {
   params: { id: string };
 }
 
-const STATUS_COLORS: Record<string, "success" | "outline" | "destructive" | "default"> = {
+const STATUS_KIND: Record<string, "success" | "neutral" | "error" | "info"> = {
   completed: "success",
-  in_progress: "default",
-  pending: "outline",
-  failed: "destructive",
+  in_progress: "info",
+  pending: "neutral",
+  failed: "error",
 };
 
 function formatBytes(bytes: number): string {
@@ -76,22 +84,82 @@ export default function RuntimePage({ params }: Props) {
     setArtifactContent(content);
   };
 
+  const stageColumns: TableProps<[string, StageProgress]>["columns"] = [
+    {
+      title: "阶段",
+      key: "name",
+      render: (_v: unknown, [name]: [string, StageProgress]) => (
+        <span className="font-mono text-[11px]">{name}</span>
+      ),
+    },
+    {
+      title: "状态",
+      key: "status",
+      render: (_v: unknown, [, stage]: [string, StageProgress]) => (
+        <StatusBadge kind={STATUS_KIND[stage.status] ?? "neutral"}>
+          {stage.status}
+        </StatusBadge>
+      ),
+    },
+    {
+      title: "步骤数",
+      key: "steps",
+      render: (_v: unknown, [, stage]: [string, StageProgress]) => (
+        <span className="text-xs">{stage.steps.length}</span>
+      ),
+    },
+    {
+      title: "开始时间",
+      key: "started_at",
+      render: (_v: unknown, [, stage]: [string, StageProgress]) => (
+        <span className="text-[11px] text-muted-foreground">
+          {stage.started_at ? new Date(stage.started_at).toLocaleString() : "—"}
+        </span>
+      ),
+    },
+    {
+      title: "完成时间",
+      key: "completed_at",
+      align: "right",
+      render: (_v: unknown, [, stage]: [string, StageProgress]) => (
+        <span className="text-[11px] text-muted-foreground">
+          {stage.completed_at
+            ? new Date(stage.completed_at).toLocaleString()
+            : "—"}
+        </span>
+      ),
+    },
+  ];
+
+  const stageRows = toStageEntries(progress);
+
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
-      <header>
-        <p className="text-[11px] text-muted-foreground">
-          <Link href={`/workspaces/${workspaceId}`} className="hover:underline">
-            &larr; 工作区
-          </Link>
-        </p>
-        <div className="mt-1 flex items-center gap-3">
-          <h1>运行时状态</h1>
-          <Badge variant="outline" className="text-[10px]">本地运行态</Badge>
-        </div>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          读取 <code className="rounded bg-muted px-1 text-[11px]">.sillyspec/.runtime/</code> 展示当前工作流状态。此数据为本地运行态，不作为长期事实源。
-        </p>
-      </header>
+    <PageContainer>
+      <PageHeader
+        title={
+          <span className="flex items-center gap-3">
+            <span>运行时状态</span>
+            <StatusBadge kind="neutral">本地运行态</StatusBadge>
+          </span>
+        }
+        subtitle={
+          <>
+            <Link
+              href={`/workspaces/${workspaceId}`}
+              className="hover:underline"
+            >
+              ← 工作区
+            </Link>
+            <span className="ml-2">
+              读取{" "}
+              <code className="rounded bg-muted px-1 text-[11px]">
+                .sillyspec/.runtime/
+              </code>{" "}
+              展示当前工作流状态。此数据为本地运行态，不作为长期事实源。
+            </span>
+          </>
+        }
+      />
 
       {pageError && (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
@@ -100,88 +168,64 @@ export default function RuntimePage({ params }: Props) {
       )}
 
       {loading ? (
-        <p className="py-12 text-center text-xs text-muted-foreground">加载中…</p>
+        <p className="py-12 text-center text-xs text-muted-foreground">
+          加载中…
+        </p>
       ) : progress === null && !userInputs && artifacts.length === 0 ? (
         <div className="py-12 text-center text-xs text-muted-foreground">
           当前工作区没有运行时数据。当 SillySpec 工作流运行后，此处将展示进度、输入记录和步骤产物。
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="flex flex-col gap-4">
           {/* Summary cards */}
           {progress && (
             <>
-              <section className="grid grid-cols-2 gap-px rounded-md border bg-border lg:grid-cols-4">
-                {[
-                  ["项目", progress.project ?? "—"],
-                  ["当前阶段", progress.current_stage ?? "—"],
-                  ["当前变更", progress.current_change ?? "—"],
-                  ["最后活动", progress.last_active ? new Date(progress.last_active).toLocaleString() : "—"],
-                ].map(([label, value]) => (
-                  <div key={label} className="bg-card px-3 py-2.5">
-                    <p className="text-[11px] text-muted-foreground">{label}</p>
-                    <p className="text-xs font-medium">{value}</p>
-                  </div>
-                ))}
-              </section>
-
-              <section className="rounded-md border bg-card">
-                <div className="border-b px-3 py-2">
-                  <h3 className="text-xs font-medium">流水线阶段</h3>
+              <SectionCard bodyPadding="p-0">
+                <div className="grid grid-cols-2 gap-px bg-border lg:grid-cols-4">
+                  {[
+                    ["项目", progress.project ?? "—"],
+                    ["当前阶段", progress.current_stage ?? "—"],
+                    ["当前变更", progress.current_change ?? "—"],
+                    [
+                      "最后活动",
+                      progress.last_active
+                        ? new Date(progress.last_active).toLocaleString()
+                        : "—",
+                    ],
+                  ].map(([label, value]) => (
+                    <div key={label} className="bg-card px-3 py-2.5">
+                      <p className="text-[11px] text-muted-foreground">{label}</p>
+                      <p className="text-xs font-medium">{value}</p>
+                    </div>
+                  ))}
                 </div>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>阶段</th>
-                      <th>状态</th>
-                      <th>步骤数</th>
-                      <th>开始时间</th>
-                      <th className="text-right">完成时间</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(progress.stages).map(([name, stage]) => (
-                      <tr key={name}>
-                        <td className="font-mono text-[11px]">{name}</td>
-                        <td>
-                          <Badge variant={STATUS_COLORS[stage.status] ?? "outline"}>
-                            {stage.status}
-                          </Badge>
-                        </td>
-                        <td className="text-xs">{stage.steps.length}</td>
-                        <td className="text-[11px] text-muted-foreground">
-                          {stage.started_at ? new Date(stage.started_at).toLocaleString() : "—"}
-                        </td>
-                        <td className="text-right text-[11px] text-muted-foreground">
-                          {stage.completed_at ? new Date(stage.completed_at).toLocaleString() : "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </section>
+              </SectionCard>
+
+              <SectionCard title="流水线阶段" bodyPadding="p-0">
+                <DataTable<[string, StageProgress]>
+                  rowKey={([name]) => name}
+                  columns={stageColumns}
+                  dataSource={stageRows}
+                  size="small"
+                  pagination={false}
+                  emptyText="暂无阶段数据"
+                />
+              </SectionCard>
             </>
           )}
 
           {/* User Inputs */}
           {userInputs && (
-            <section className="rounded-md border bg-card">
-              <div className="border-b px-3 py-2">
-                <h3 className="text-xs font-medium">用户输入记录</h3>
-              </div>
-              <div className="px-3 py-2">
-                <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
-                  {userInputs}
-                </pre>
-              </div>
-            </section>
+            <SectionCard title="用户输入记录">
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
+                {userInputs}
+              </pre>
+            </SectionCard>
           )}
 
           {/* Artifacts */}
           {artifacts.length > 0 && (
-            <section className="rounded-md border bg-card">
-              <div className="border-b px-3 py-2">
-                <h3 className="text-xs font-medium">步骤产物 ({artifacts.length})</h3>
-              </div>
+            <SectionCard title={`步骤产物 (${artifacts.length})`} bodyPadding="p-0">
               <div className="divide-y">
                 {artifacts.map((art) => (
                   <div key={art.filename}>
@@ -209,10 +253,15 @@ export default function RuntimePage({ params }: Props) {
                   </div>
                 ))}
               </div>
-            </section>
+            </SectionCard>
           )}
         </div>
       )}
-    </div>
+    </PageContainer>
   );
+}
+
+function toStageEntries(progress: RuntimeProgress | null): [string, StageProgress][] {
+  if (!progress) return [];
+  return Object.entries(progress.stages);
 }
