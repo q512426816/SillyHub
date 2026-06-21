@@ -21,6 +21,7 @@ from app.modules.health.schema import (
     DependencyStatus,
     HealthResponse,
     OverallStatus,
+    SystemStatusResponse,
     VersionResponse,
 )
 
@@ -73,4 +74,53 @@ async def version() -> VersionResponse:
         version=__version__,
         commit_sha=settings.resolved_commit_sha,
         environment=settings.environment,
+    )
+
+
+@router.get("/system-status", response_model=SystemStatusResponse)
+async def system_status() -> SystemStatusResponse:
+    """服务器性能(psutil,丢线程池) + 业务统计(首页运行状态看板)。
+
+    公开端点(同 /health),不要求登录,首页看板用。
+    """
+    import anyio
+    import psutil
+    from sqlalchemy import func, select
+
+    from app.modules.auth.model import User
+    from app.modules.ppm.plan.model import PsPlanNode
+    from app.modules.ppm.project.model import PpmProjectMaintenance
+    from app.modules.ppm.task.model import PlanTask
+
+    def _perf() -> dict[str, float]:
+        vm = psutil.virtual_memory()
+        du = psutil.disk_usage("/")
+        return {
+            "cpu_percent": psutil.cpu_percent(interval=None),
+            "memory_percent": vm.percent,
+            "memory_used_mb": round(vm.used / 1024 / 1024, 1),
+            "memory_total_mb": round(vm.total / 1024 / 1024, 1),
+            "disk_percent": du.percent,
+            "disk_used_gb": round(du.used / 1024 / 1024 / 1024, 1),
+            "disk_total_gb": round(du.total / 1024 / 1024 / 1024, 1),
+        }
+
+    perf = await anyio.to_thread.run_sync(_perf)
+    factory = get_session_factory()
+    async with factory() as session:
+        tasks = (await session.execute(select(func.count()).select_from(PlanTask))).scalar() or 0
+        projects = (
+            await session.execute(select(func.count()).select_from(PpmProjectMaintenance))
+        ).scalar() or 0
+        milestones = (
+            await session.execute(select(func.count()).select_from(PsPlanNode))
+        ).scalar() or 0
+        users = (await session.execute(select(func.count()).select_from(User))).scalar() or 0
+    return SystemStatusResponse(
+        server_time=datetime.now(tz=UTC),
+        **perf,
+        tasks=tasks,
+        projects=projects,
+        milestones=milestones,
+        users=users,
     )

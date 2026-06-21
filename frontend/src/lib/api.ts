@@ -73,11 +73,16 @@ export class ApiError extends Error {
   }
 }
 
-function generateRequestId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+/** Safe UUID generator — crypto.randomUUID is only available in secure contexts (HTTPS/localhost). */
+export function safeUUID(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
-  return `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return `id-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function generateRequestId(): string {
+  return safeUUID();
 }
 
 export interface ApiRequestOptions extends Omit<RequestInit, "headers" | "body"> {
