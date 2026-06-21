@@ -5,8 +5,41 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  Activity,
+  AlertTriangle,
+  BarChart3,
+  Boxes,
+  ClipboardList,
+  Circle,
+  Clock,
+  ChevronsLeft,
+  ChevronsRight,
+  Cog,
+  FileText,
+  Flag,
+  Folder,
+  GitBranch,
+  Home,
+  KeyRound,
+  LayoutDashboard,
+  ListChecks,
+  ListTodo,
+  LogOut,
+  type LucideIcon,
+  Network,
+  Package,
+  ScrollText,
+  Settings,
+  ShieldCheck,
+  Siren,
+  Terminal,
+  Users,
+  Workflow,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { TopBar } from "@/components/top-bar";
 import {
   MENU_SECTION_LABEL as SECTION_LABEL,
   MENU_SECTION_ORDER as SECTION_ORDER,
@@ -14,6 +47,56 @@ import {
 } from "@/lib/menu-permissions";
 import { useSession } from "@/stores/session";
 import { visibleMenusBySection } from "@/lib/permission";
+
+/**
+ * 菜单图标映射表：key 用 menu.href 的标识段。
+ * 命中渲染对应 lucide 图标，未命中 fallback Circle。
+ * 新增/改菜单图标只改这一处。
+ */
+const MENU_ICON_MAP: Record<string, LucideIcon> = {
+  // overview / management（相对 href，workspace 前缀）
+  components: Boxes,
+  "components/topology": Network,
+  changes: GitBranch,
+  "scan-docs": FileText,
+  runtime: Activity,
+  knowledge: ScrollText,
+  releases: Package,
+  "git-identities": KeyRound,
+  "api-keys": Cog,
+  agent: Terminal,
+  missions: Workflow,
+  approvals: ShieldCheck,
+  audit: ScrollText,
+  incidents: Siren,
+  // admin / system（absolute href）
+  "/admin/users": Users,
+  "/admin/organizations": Folder,
+  "/admin/roles": KeyRound,
+  "/runtimes": Activity,
+  "/settings": Settings,
+  "/workspaces": Home,
+  // ppm（absolute href /ppm/*）
+  "/ppm/projects": ClipboardList,
+  "/ppm/customers": Users,
+  "/ppm/project-members": Users,
+  "/ppm/project-stakeholders": Users,
+  "/ppm/project-plans": ClipboardList,
+  "/ppm/plan-nodes": ListChecks,
+  "/ppm/milestone-details": Flag,
+  "/ppm/problem-list": AlertTriangle,
+  "/ppm/problem-changes": GitBranch,
+  "/ppm/task-plans": ListTodo,
+  "/ppm/work-hours": Clock,
+  "/ppm/work-hour-statistics": BarChart3,
+  "/ppm/kanban": LayoutDashboard,
+};
+
+const FallbackIcon = Circle;
+
+function resolveMenuIcon(menu: MenuPermissionGroup): LucideIcon {
+  return MENU_ICON_MAP[menu.href] ?? FallbackIcon;
+}
 
 function useWorkspaceId(): string | null {
   const pathname = usePathname();
@@ -95,24 +178,33 @@ export function AppShell({ children }: { children: ReactNode }) {
     const hasWorkspace = !!workspaceId || menu.absolute;
     const active = isActive(menu);
     const href = resolveHref(menu);
+    const Icon = resolveMenuIcon(menu);
 
+    const base =
+      "flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] font-medium transition-colors";
     const classes = hasWorkspace
-      ? `flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] font-medium transition-colors ${
+      ? `${base} ${
           active
-            ? "bg-primary/10 text-primary"
+            ? "relative bg-blue-50 text-blue-700"
             : "text-muted-foreground hover:bg-muted hover:text-foreground"
         }`
-      : "flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] font-medium text-muted-foreground/40 cursor-not-allowed";
+      : `${base} text-muted-foreground/40 cursor-not-allowed`;
+
+    const indicator = active ? (
+      <span
+        className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-blue-600"
+        aria-hidden
+      />
+    ) : null;
 
     const icon = (
-      <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center text-[15px]">
-        {menu.icon}
-      </span>
+      <Icon className="h-[18px] w-[18px] shrink-0" />
     );
 
     if (!hasWorkspace) {
       return (
         <span key={menu.href} className={classes} title={collapsed ? menu.menuLabel : undefined}>
+          {indicator}
           {icon}
           {!collapsed && <span className="truncate">{menu.menuLabel}</span>}
         </span>
@@ -121,6 +213,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
     return (
       <Link key={menu.href} href={href} className={classes} title={collapsed ? menu.menuLabel : undefined}>
+        {indicator}
         {icon}
         {!collapsed && <span className="truncate">{menu.menuLabel}</span>}
       </Link>
@@ -201,9 +294,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               size="sm"
               onClick={onLogout}
               title="退出登录"
-              className="shrink-0"
+              className="shrink-0 gap-1.5"
             >
-              {collapsed ? "🚪" : "退出"}
+              <LogOut className="h-4 w-4" />
+              {!collapsed && <span>退出</span>}
             </Button>
           </div>
         </div>
@@ -213,10 +307,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           onClick={toggleCollapsed}
           className="flex items-center justify-center border-t py-2.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           title={collapsed ? "展开侧边栏" : "收缩侧边栏"}
+          aria-label={collapsed ? "展开侧边栏" : "收缩侧边栏"}
         >
-          <span className="text-sm">
-            {collapsed ? "→" : "←"}
-          </span>
+          {collapsed ? (
+            <ChevronsRight className="h-4 w-4" />
+          ) : (
+            <ChevronsLeft className="h-4 w-4" />
+          )}
         </button>
       </aside>
 
@@ -226,6 +323,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           collapsed ? "ml-[60px]" : "ml-[260px]"
         }`}
       >
+        <TopBar onLogout={onLogout} displayName={displayName} />
         <div className="min-w-0 flex-1">{children}</div>
       </div>
     </div>

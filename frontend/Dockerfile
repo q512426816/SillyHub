@@ -4,7 +4,7 @@
 
 ARG NODE_VERSION=20
 
-FROM node:${NODE_VERSION}-alpine AS deps
+FROM node:${NODE_VERSION}-slim AS deps
 
 RUN corepack enable pnpm
 WORKDIR /app
@@ -18,7 +18,7 @@ RUN if [ -f pnpm-lock.yaml ]; then \
     fi
 
 
-FROM node:${NODE_VERSION}-alpine AS builder
+FROM node:${NODE_VERSION}-slim AS builder
 
 RUN corepack enable pnpm
 WORKDIR /app
@@ -39,7 +39,7 @@ ENV NEXT_TELEMETRY_DISABLED=1 \
 RUN pnpm build
 
 
-FROM node:${NODE_VERSION}-alpine AS runtime
+FROM node:${NODE_VERSION}-slim AS runtime
 
 WORKDIR /app
 

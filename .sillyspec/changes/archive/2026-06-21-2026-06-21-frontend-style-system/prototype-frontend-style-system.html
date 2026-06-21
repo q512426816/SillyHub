@@ -1,0 +1,411 @@
+<!-- author: qinyi -->
+<!-- created_at: 2026-06-22T00:01:02 -->
+<!-- prototype: SillyHub 前端样式系统重设计 · 现代明亮活力风 mockup -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SillyHub 样式系统 · 现代明亮活力 · 原型</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --blue-50:#eff6ff;--blue-100:#dbeafe;--blue-600:#2563eb;--blue-700:#1d4ed8;--blue-900:#1e3a8a;
+    --cyan-500:#06b6d4;--cyan-50:#ecfeff;
+    --emerald-50:#ecfdf5;--emerald-500:#10b981;--emerald-600:#059669;--emerald-700:#047857;
+    --amber-50:#fffbeb;--amber-500:#f59e0b;--amber-600:#d97706;--amber-700:#b45309;
+    --red-50:#fef2f2;--red-500:#ef4444;--red-600:#dc2626;--red-700:#b91c1c;
+    --slate-50:#f8fafc;--slate-100:#f1f5f9;--slate-200:#e2e8f0;--slate-300:#cbd5e1;
+    --slate-400:#94a3b8;--slate-500:#64748b;--slate-600:#475569;--slate-700:#334155;--slate-800:#1e293b;--slate-900:#0f172a;
+    --r-sm:6px;--r-md:8px;--r-lg:12px;--r-xl:16px;
+    --sh-sm:0 1px 2px 0 rgb(15 23 42/.05);
+    --sh-md:0 4px 6px -1px rgb(15 23 42/.07),0 2px 4px -2px rgb(15 23 42/.05);
+    --sh-lg:0 10px 15px -3px rgb(15 23 42/.08),0 4px 6px -4px rgb(15 23 42/.05);
+    --font:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--slate-100);color:var(--slate-800);font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1280px;margin:0 auto;padding:24px}
+  .label{font-size:11px;font-weight:600;color:var(--slate-400);text-transform:uppercase;letter-spacing:.08em;margin:28px 0 10px}
+
+  /* ===== App Shell mockup ===== */
+  .app{display:flex;min-height:640px;background:var(--slate-50);border:1px solid var(--slate-200);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--sh-lg)}
+  .sidebar{width:232px;background:#fff;border-right:1px solid var(--slate-200);padding:16px 12px;display:flex;flex-direction:column;flex-shrink:0}
+  .brand{display:flex;align-items:center;gap:10px;padding:6px 8px 16px}
+  .brand-logo{width:32px;height:32px;border-radius:var(--r-md);background:linear-gradient(135deg,var(--blue-600),var(--cyan-500));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:15px;box-shadow:var(--sh-sm)}
+  .brand-name{font-weight:700;font-size:15px;color:var(--slate-900)}
+  .nav-group-title{font-size:11px;font-weight:600;color:var(--slate-400);text-transform:uppercase;letter-spacing:.06em;padding:14px 10px 6px}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:var(--r-md);color:var(--slate-600);font-size:13.5px;font-weight:500;cursor:pointer;position:relative;transition:all .15s}
+  .nav-item:hover{background:var(--slate-100);color:var(--slate-900)}
+  .nav-item.active{background:var(--blue-50);color:var(--blue-700);font-weight:600}
+  .nav-item.active::before{content:"";position:absolute;left:-12px;top:7px;bottom:7px;width:3px;border-radius:2px;background:var(--blue-600)}
+  .nav-item svg{width:18px;height:18px;flex-shrink:0}
+  .nav-spacer{flex:1}
+  .user-chip{display:flex;align-items:center;gap:10px;padding:10px;border-radius:var(--r-md);border:1px solid var(--slate-200)}
+  .avatar{width:30px;height:30px;border-radius:50%;background:var(--blue-600);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:12px;flex-shrink:0}
+  .user-meta{font-size:12px;line-height:1.3}
+  .user-meta b{color:var(--slate-800)}
+  .user-meta span{color:var(--slate-400);font-size:11px}
+
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .topbar{height:56px;background:#fff;border-bottom:1px solid var(--slate-200);display:flex;align-items:center;gap:16px;padding:0 20px;flex-shrink:0}
+  .crumb{font-size:13px;color:var(--slate-500)}
+  .crumb b{color:var(--slate-800);font-weight:600}
+  .crumb .sep{margin:0 6px;color:var(--slate-300)}
+  .topbar-spacer{flex:1}
+  .search-box{display:flex;align-items:center;gap:8px;background:var(--slate-100);border:1px solid transparent;border-radius:var(--r-md);padding:7px 12px;width:220px;color:var(--slate-500);font-size:13px}
+  .search-box svg{width:15px;height:15px}
+  .icon-btn{width:34px;height:34px;border-radius:var(--r-md);border:1px solid var(--slate-200);background:#fff;display:flex;align-items:center;justify-content:center;color:var(--slate-500);cursor:pointer;position:relative}
+  .icon-btn svg{width:17px;height:17px}
+  .icon-btn .dot{position:absolute;top:7px;right:8px;width:7px;height:7px;border-radius:50%;background:var(--red-500);border:1.5px solid #fff}
+
+  .content{padding:22px 24px;overflow:auto}
+  .page-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px}
+  .page-head h1{font-size:22px;font-weight:700;color:var(--slate-900);letter-spacing:-.01em}
+  .page-head p{font-size:13px;color:var(--slate-500);margin-top:3px}
+  .head-actions{display:flex;gap:10px}
+
+  .btn{display:inline-flex;align-items:center;gap:7px;padding:8px 14px;border-radius:var(--r-md);font-size:13px;font-weight:600;cursor:pointer;border:1px solid transparent;transition:all .15s;font-family:var(--font)}
+  .btn svg{width:15px;height:15px}
+  .btn-primary{background:var(--blue-600);color:#fff;box-shadow:var(--sh-sm)}
+  .btn-primary:hover{background:var(--blue-700)}
+  .btn-outline{background:#fff;color:var(--slate-700);border-color:var(--slate-300)}
+  .btn-outline:hover{background:var(--slate-50);border-color:var(--slate-400)}
+  .btn-ghost{background:transparent;color:var(--slate-600)}
+  .btn-ghost:hover{background:var(--slate-100)}
+
+  .card{background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-lg);box-shadow:var(--sh-sm)}
+
+  /* search bar */
+  .searchbar{display:flex;align-items:center;gap:12px;padding:14px 16px;margin-bottom:16px;flex-wrap:wrap}
+  .field{display:flex;flex-direction:column;gap:4px}
+  .field label{font-size:11px;color:var(--slate-500);font-weight:500}
+  .input,.select{height:34px;border:1px solid var(--slate-300);border-radius:var(--r-md);padding:0 11px;font-size:13px;color:var(--slate-800);background:#fff;font-family:var(--font);min-width:150px;display:flex;align-items:center;justify-content:space-between}
+  .input{min-width:200px}
+  .select svg{width:14px;height:14px;color:var(--slate-400)}
+  .searchbar .btns{display:flex;gap:8px;margin-left:auto}
+
+  /* table */
+  .table-card{overflow:hidden}
+  table{width:100%;border-collapse:collapse}
+  thead th{background:var(--slate-50);color:var(--slate-600);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;text-align:left;padding:11px 16px;border-bottom:1px solid var(--slate-200)}
+  tbody td{padding:13px 16px;border-bottom:1px solid var(--slate-100);font-size:13.5px;color:var(--slate-700)}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:var(--slate-50)}
+  .proj-name{font-weight:600;color:var(--slate-900)}
+  .proj-sub{font-size:11.5px;color:var(--slate-400)}
+
+  /* status badge */
+  .badge{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
+  .badge .dot{width:6px;height:6px;border-radius:50%}
+  .badge.blue{background:var(--blue-50);color:var(--blue-700)} .badge.blue .dot{background:var(--blue-600)}
+  .badge.emerald{background:var(--emerald-50);color:var(--emerald-700)} .badge.emerald .dot{background:var(--emerald-600)}
+  .badge.amber{background:var(--amber-50);color:var(--amber-700)} .badge.amber .dot{background:var(--amber-500)}
+  .badge.red{background:var(--red-50);color:var(--red-700)} .badge.red .dot{background:var(--red-600)}
+  .badge.slate{background:var(--slate-100);color:var(--slate-600)} .badge.slate .dot{background:var(--slate-400)}
+
+  /* progress */
+  .prog{display:flex;align-items:center;gap:8px}
+  .prog-track{flex:1;height:6px;background:var(--slate-100);border-radius:999px;overflow:hidden;min-width:80px}
+  .prog-fill{height:100%;border-radius:999px;background:var(--blue-600)}
+  .prog-fill.ok{background:var(--emerald-500)}
+  .prog-fill.warn{background:var(--red-500)}
+  .prog span{font-size:12px;color:var(--slate-500);font-variant-numeric:tabular-nums;min-width:32px}
+
+  .row-actions{display:flex;gap:4px}
+  .row-actions .btn{padding:5px 8px;font-size:12px}
+
+  /* pagination */
+  .pager{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-top:1px solid var(--slate-100)}
+  .pager-info{font-size:12.5px;color:var(--slate-500)}
+  .pager-nums{display:flex;gap:4px}
+  .pg{min-width:30px;height:30px;border-radius:var(--r-md);border:1px solid var(--slate-200);background:#fff;font-size:12.5px;color:var(--slate-600);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 8px}
+  .pg.active{background:var(--blue-600);color:#fff;border-color:var(--blue-600)}
+
+  /* ===== Token reference board ===== */
+  .board{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-top:8px}
+  .panel{background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-lg);padding:16px;box-shadow:var(--sh-sm)}
+  .panel h3{font-size:13px;font-weight:700;color:var(--slate-700);margin-bottom:12px}
+  .swatches{display:flex;gap:6px;flex-wrap:wrap}
+  .sw{width:54px;height:54px;border-radius:var(--r-md);display:flex;align-items:flex-end;padding:5px;font-size:9px;font-weight:600;color:#fff;box-shadow:var(--sh-sm)}
+  .sw.dark{color:var(--slate-700)}
+  .sw-row{display:flex;gap:0;border-radius:var(--r-md);overflow:hidden;box-shadow:var(--sh-sm)}
+  .sw-row .sw{border-radius:0;box-shadow:none;width:40px}
+  .status-grid{display:flex;flex-direction:column;gap:8px}
+  .radii{display:flex;align-items:flex-end;gap:14px}
+  .rbox{width:54px;height:54px;background:var(--blue-100);border:1px solid var(--blue-600);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--blue-700);font-weight:600}
+  .shadows{display:flex;gap:18px;align-items:center;padding:10px 0}
+  .shbox{width:74px;height:54px;background:#fff;border-radius:var(--r-md);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--slate-500)}
+  .type-sample p{margin-bottom:6px}
+  .ts-h1{font-size:22px;font-weight:700;color:var(--slate-900);letter-spacing:-.01em}
+  .ts-h2{font-size:16px;font-weight:600;color:var(--slate-800)}
+  .ts-body{font-size:14px;color:var(--slate-600)}
+  .ts-cap{font-size:12px;color:var(--slate-400)}
+  .btn-grid{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .foot{margin-top:24px;padding:14px 0;text-align:center;color:var(--slate-400);font-size:12px;border-top:1px solid var(--slate-200)}
+  .legend{display:inline-flex;align-items:center;gap:6px;margin-left:12px;color:var(--slate-500);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ============ 主 mockup: PPM 项目计划页 ============ -->
+  <div class="label">① 主视觉 · PPM 项目计划页(AppShell + 顶栏 + 页面)</div>
+  <div class="app">
+    <!-- 侧边栏 -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">S</div>
+        <div class="brand-name">SillyHub</div>
+      </div>
+
+      <div class="nav-group-title">项目管理</div>
+      <div class="nav-item active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        项目计划
+      </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2h6a2 2 0 0 1 2 2v1h2a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2V4a2 2 0 0 1 2-2z"/><path d="M9 14l2 2 4-4"/></svg>
+        任务计划
+      </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M3 6h18M3 18h18"/><circle cx="9" cy="6" r="1.5" fill="currentColor"/><circle cx="15" cy="12" r="1.5" fill="currentColor"/><circle cx="7" cy="18" r="1.5" fill="currentColor"/></svg>
+        里程碑
+      </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="18" y1="20" x2="18" y2="14"/></svg>
+        工时统计
+      </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+        看板
+      </div>
+
+      <div class="nav-group-title">主平台</div>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        工作区
+      </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        设置
+      </div>
+
+      <div class="nav-spacer"></div>
+      <div class="user-chip">
+        <div class="avatar">秦</div>
+        <div class="user-meta"><b>秦工</b><br><span>项目管理员</span></div>
+      </div>
+    </aside>
+
+    <!-- 主区 -->
+    <div class="main">
+      <header class="topbar">
+        <div class="crumb">项目管理<span class="sep">/</span><b>项目计划</b></div>
+        <div class="topbar-spacer"></div>
+        <div class="search-box">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          全局搜索…
+        </div>
+        <div class="icon-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span class="dot"></span>
+        </div>
+        <div class="avatar">秦</div>
+      </header>
+
+      <div class="content">
+        <div class="page-head">
+          <div>
+            <h1>项目计划</h1>
+            <p>管理所有项目的计划节点、进度与里程碑</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn btn-outline">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              导出
+            </button>
+            <button class="btn btn-primary">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              新建项目
+            </button>
+          </div>
+        </div>
+
+        <!-- 搜索栏 -->
+        <div class="card searchbar">
+          <div class="field"><label>项目名称</label><div class="input" style="color:var(--slate-400)">输入项目名搜索…</div></div>
+          <div class="field"><label>状态</label><div class="select">全部<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></div></div>
+          <div class="field"><label>计划日期</label><div class="select" style="min-width:180px">2026-06-01 ~ 2026-06-30</div></div>
+          <div class="btns">
+            <button class="btn btn-primary">查询</button>
+            <button class="btn btn-outline">重置</button>
+          </div>
+        </div>
+
+        <!-- 表格 -->
+        <div class="card table-card">
+          <table>
+            <thead>
+              <tr>
+                <th>项目名称</th><th>状态</th><th>负责人</th><th>进度</th><th>计划周期</th><th style="text-align:right">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><div class="proj-name">智能客服系统 V2</div><div class="proj-sub">CRM-2026-001</div></td>
+                <td><span class="badge blue"><span class="dot"></span>进行中</span></td>
+                <td>张明</td>
+                <td><div class="prog"><div class="prog-track"><div class="prog-fill" style="width:68%"></div></div><span>68%</span></div></td>
+                <td>06-01 → 08-15</td>
+                <td style="text-align:right"><div class="row-actions" style="justify-content:flex-end"><button class="btn btn-ghost">详情</button><button class="btn btn-ghost">里程碑</button></div></td>
+              </tr>
+              <tr>
+                <td><div class="proj-name">数据中台迁移</div><div class="proj-sub">INFRA-2026-014</div></td>
+                <td><span class="badge emerald"><span class="dot"></span>已完成</span></td>
+                <td>李华</td>
+                <td><div class="prog"><div class="prog-track"><div class="prog-fill ok" style="width:100%"></div></div><span>100%</span></div></td>
+                <td>05-10 → 06-18</td>
+                <td style="text-align:right"><div class="row-actions" style="justify-content:flex-end"><button class="btn btn-ghost">详情</button><button class="btn btn-ghost">里程碑</button></div></td>
+              </tr>
+              <tr>
+                <td><div class="proj-name">移动端 App 重构</div><div class="proj-sub">APP-2026-007</div></td>
+                <td><span class="badge red"><span class="dot"></span>已延期</span></td>
+                <td>王芳</td>
+                <td><div class="prog"><div class="prog-track"><div class="prog-fill warn" style="width:32%"></div></div><span>32%</span></div></td>
+                <td>04-20 → 06-10</td>
+                <td style="text-align:right"><div class="row-actions" style="justify-content:flex-end"><button class="btn btn-ghost">详情</button><button class="btn btn-ghost">里程碑</button></div></td>
+              </tr>
+              <tr>
+                <td><div class="proj-name">权限中心升级</div><div class="proj-sub">SEC-2026-003</div></td>
+                <td><span class="badge amber"><span class="dot"></span>待验收</span></td>
+                <td>赵磊</td>
+                <td><div class="prog"><div class="prog-track"><div class="prog-fill" style="width:92%"></div></div><span>92%</span></div></td>
+                <td>05-25 → 06-25</td>
+                <td style="text-align:right"><div class="row-actions" style="justify-content:flex-end"><button class="btn btn-ghost">详情</button><button class="btn btn-ghost">里程碑</button></div></td>
+              </tr>
+              <tr>
+                <td><div class="proj-name">监控告警体系</div><div class="proj-sub">OPS-2026-021</div></td>
+                <td><span class="badge slate"><span class="dot"></span>未开始</span></td>
+                <td>陈静</td>
+                <td><div class="prog"><div class="prog-track"><div class="prog-fill" style="width:0%"></div></div><span>0%</span></div></td>
+                <td>07-01 → 09-01</td>
+                <td style="text-align:right"><div class="row-actions" style="justify-content:flex-end"><button class="btn btn-ghost">详情</button><button class="btn btn-ghost">里程碑</button></div></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="pager">
+            <div class="pager-info">共 48 条 · 第 1/5 页</div>
+            <div class="pager-nums">
+              <div class="pg">‹</div>
+              <div class="pg active">1</div><div class="pg">2</div><div class="pg">3</div><div class="pg">4</div><div class="pg">5</div>
+              <div class="pg">›</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Token 参考板 ============ -->
+  <div class="label">② 设计 Token 参考板 · 配色 / 状态 / 圆角 / 阴影 / 字体 / 组件<span class="legend">（现代明亮活力 · Tailwind v3 默认色板，落地零调色成本）</span></div>
+  <div class="board">
+    <div class="panel">
+      <h3>主色 · blue（含完整色阶，替代三套蓝）</h3>
+      <div class="sw-row">
+        <div class="sw dark" style="background:#eff6ff">50</div>
+        <div class="sw dark" style="background:#dbeafe">100</div>
+        <div class="sw" style="background:#93c5fd">300</div>
+        <div class="sw" style="background:#3b82f6">500</div>
+        <div class="sw" style="background:#2563eb">600</div>
+        <div class="sw" style="background:#1d4ed8">700</div>
+        <div class="sw" style="background:#1e3a8a">900</div>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--slate-500)">主操作色 <b style="color:var(--blue-700)">#2563EB</b> · 激活态 · 链接 · 进度</div>
+    </div>
+
+    <div class="panel">
+      <h3>辅色 · cyan / emerald</h3>
+      <div class="swatches">
+        <div class="sw" style="background:#06b6d4">cyan-500</div>
+        <div class="sw" style="background:#10b981">emerald-500</div>
+        <div class="sw dark" style="background:#ecfeff">cyan-50</div>
+        <div class="sw dark" style="background:#ecfdf5">emerald-50</div>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--slate-500)">图表 / 强调 / 成功态辅助</div>
+    </div>
+
+    <div class="panel">
+      <h3>状态语义色（统一 token，Tag 与 Badge 共享）</h3>
+      <div class="status-grid">
+        <span class="badge blue"><span class="dot"></span>info / 进行中 · blue-600</span>
+        <span class="badge emerald"><span class="dot"></span>success / 完成 · emerald-600</span>
+        <span class="badge amber"><span class="dot"></span>warning / 待验收 · amber-500</span>
+        <span class="badge red"><span class="dot"></span>error / 延期 · red-600</span>
+        <span class="badge slate"><span class="dot"></span>neutral / 未开始 · slate-500</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>中性色 · slate（背景/卡片/边框/文字）</h3>
+      <div class="sw-row">
+        <div class="sw dark" style="background:#f8fafc">50 背景</div>
+        <div class="sw dark" style="background:#f1f5f9">100</div>
+        <div class="sw dark" style="background:#e2e8f0">200 边框</div>
+        <div class="sw dark" style="background:#94a3b8">400</div>
+        <div class="sw" style="background:#64748b">500 副文</div>
+        <div class="sw" style="background:#334155">700 正文</div>
+        <div class="sw" style="background:#0f172a">900 标题</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>圆角 scale</h3>
+      <div class="radii">
+        <div><div class="rbox" style="border-radius:6px">6</div><div style="text-align:center;font-size:10px;color:var(--slate-400);margin-top:5px">sm 控件</div></div>
+        <div><div class="rbox" style="border-radius:8px">8</div><div style="text-align:center;font-size:10px;color:var(--slate-400);margin-top:5px">md 按钮</div></div>
+        <div><div class="rbox" style="border-radius:12px">12</div><div style="text-align:center;font-size:10px;color:var(--slate-400);margin-top:5px">lg 卡片默认</div></div>
+        <div><div class="rbox" style="border-radius:16px">16</div><div style="text-align:center;font-size:10px;color:var(--slate-400);margin-top:5px">xl 大容器</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>阴影 scale（卡片柔和阴影）</h3>
+      <div class="shadows">
+        <div><div class="shbox" style="box-shadow:var(--sh-sm)">sm</div></div>
+        <div><div class="shbox" style="box-shadow:var(--sh-md)">md</div></div>
+        <div><div class="shbox" style="box-shadow:var(--sh-lg)">lg</div></div>
+      </div>
+      <div style="font-size:11px;color:var(--slate-500);margin-top:4px">卡片 hover 提升 md→lg，营造层次</div>
+    </div>
+
+    <div class="panel">
+      <h3>字体 · Inter + 中文降级</h3>
+      <div class="type-sample">
+        <p class="ts-h1">页面主标题 H1</p>
+        <p class="ts-h2">区块标题 H2</p>
+        <p class="ts-body">正文内容 Body — 专业高效，长时间阅读不累</p>
+        <p class="ts-cap">辅助说明 caption · 时间戳 · 元信息</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Button 组件变体（shadcn 风格）</h3>
+      <div class="btn-grid">
+        <button class="btn btn-primary">主操作</button>
+        <button class="btn btn-outline">次操作</button>
+        <button class="btn btn-ghost">幽灵</button>
+        <span class="badge blue"><span class="dot"></span>Badge</span>
+        <span class="badge emerald"><span class="dot"></span>Badge</span>
+      </div>
+      <div style="font-size:11px;color:var(--slate-500);margin-top:12px">统一 rounded-md 8px · 主按钮带 shadow-sm</div>
+    </div>
+  </div>
+
+  <div class="foot">
+    SillyHub 前端样式系统 · 变更 2026-06-21-frontend-style-system · 方案 B（Token 单一源 + shadcn 视觉组件 + antd 业务组件）· 单文件原型，浏览器直接预览
+  </div>
+</div>
+</body>
+</html>
