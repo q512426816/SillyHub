@@ -558,7 +558,12 @@ class DaemonService:
         # Update lease — keep original runtime_id if already set
         lease.status = "claimed"
         lease.claimed_at = now
-        lease.lease_expires_at = now + timedelta(seconds=60)
+        # interactive lease 永不过期（生命周期由 end_session 管，design §D-005）；
+        # batch lease 用 60s claim 窗口（claim→start 间隔超时回收）。
+        # **修复 Bug**：原无条件设 60s 覆盖了 prepare_*_interactive_dispatch 写的 NULL，
+        # 导致 scan 长任务中途 lease 过期。
+        if lease.kind != "interactive":
+            lease.lease_expires_at = now + timedelta(seconds=60)
         if not lease.runtime_id:
             lease.runtime_id = runtime_id
         lease.metadata_ = metadata
@@ -605,6 +610,16 @@ class DaemonService:
             payload["provider"] = lease_meta.get("provider")
             payload["model"] = lease_meta.get("model")
             payload["root_path"] = lease_meta.get("cwd") or lease_meta.get("root_path")
+            # scan 真阻塞：透传 manual_approval / ask_user_only（prepare_scan_interactive_dispatch
+            # 写入 lease metadata）→ daemon execPayload 归一化 → SessionManager.create input：
+            #   - manual_approval 决定是否注入 canUseTool（per-session，chat=false 不注入）
+            #   - ask_user_only=true 时只 AskUserQuestion 走人审、Bash 等放行让 scan 自动跑。
+            # **修复 Bug**：原 interactive 分支漏传这两个字段 → askUserOnly=undefined → gate
+            # 不触发 → 所有工具（含 sillyspec 的 Bash）都走人审 → 5min 超时死循环。
+            if lease_meta.get("manual_approval") is not None:
+                payload["manual_approval"] = lease_meta["manual_approval"]
+            if lease_meta.get("ask_user_only") is not None:
+                payload["ask_user_only"] = lease_meta["ask_user_only"]
             return payload
 
         if lease.agent_run_id is None:
@@ -706,7 +721,10 @@ class DaemonService:
         # Lease status stays "claimed" — running status is tracked in AgentRun
         now = datetime.now(UTC)
         lease.updated_at = now
-        lease.lease_expires_at = now + timedelta(seconds=60)
+        # interactive lease 保持 NULL（永不过期）；batch lease 续 60s（running 期间
+        # 心跳续期，超时回收）。
+        if lease.kind != "interactive":
+            lease.lease_expires_at = now + timedelta(seconds=60)
         self._session.add(lease)
 
         # Also update AgentRun to running if it exists
