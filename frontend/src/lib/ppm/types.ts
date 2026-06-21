@@ -609,6 +609,9 @@ export interface ProblemListCreate {
   remarks?: string | null;
   is_delay_plan?: string | null;
   work_load?: string | null;
+  /** 验证人 ID (对照源 ListForm.vue auditUserId;后端 fsm 推进时据此指派)。 */
+  audit_user_id?: string | null;
+  audit_user_name?: string | null;
   /** submit=true 则创建后自动进 Node20 审核中 */
   submit?: boolean;
 }
@@ -633,6 +636,8 @@ export interface ProblemListUpdate {
   remarks?: string | null;
   is_delay_plan?: string | null;
   work_load?: string | null;
+  audit_user_id?: string | null;
+  audit_user_name?: string | null;
 }
 
 export interface ProblemChange {
