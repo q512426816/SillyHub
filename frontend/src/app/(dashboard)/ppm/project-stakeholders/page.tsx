@@ -13,8 +13,8 @@ import { PpmResourceTable, type PpmFieldDef, type PpmFieldOption } from "@/compo
 import {
   createProjectStakeholder,
   deleteProjectStakeholder,
-  listProjectStakeholders,
   listSimpleProjects,
+  pageProjectStakeholders,
   updateProjectStakeholder,
 } from "@/lib/ppm/project";
 import type {
@@ -26,11 +26,11 @@ import type {
 
 // 干系人角色枚举(参照源 vue 字典 pm_stakeholder_role)
 const STAKEHOLDER_ROLE_OPTIONS: PpmFieldOption[] = [
-  { label: "决策者", value: "decision_maker" },
-  { label: "赞助者", value: "sponsor" },
-  { label: "执行者", value: "executor" },
-  { label: "影响者", value: "influencer" },
-  { label: "使用者", value: "user" },
+  { label: "决策者", value: "decision_maker", color: "red" },
+  { label: "赞助者", value: "sponsor", color: "volcano" },
+  { label: "执行者", value: "executor", color: "blue" },
+  { label: "影响者", value: "influencer", color: "purple" },
+  { label: "使用者", value: "user", color: "green" },
 ];
 
 type Entity = ProjectStakeholder;
@@ -57,8 +57,14 @@ const fields: PpmFieldDef<Entity>[] = [
     type: "select",
     options: STAKEHOLDER_ROLE_OPTIONS,
   },
-  { name: "phone" as FieldName, label: "联系方式" },
-  { name: "create_name" as FieldName, label: "创建人" },
+  {
+    name: "phone" as FieldName,
+    label: "联系方式",
+    placeholder: "11 位手机号(选填)",
+    pattern: /^1\d{10}$/,
+    patternMessage: "请输入 11 位手机号(以 1 开头)",
+  },
+  { name: "create_name" as FieldName, label: "创建人", hideInForm: true },
 ];
 
 export default function PpmProjectStakeholdersPage() {
@@ -78,7 +84,7 @@ export default function PpmProjectStakeholdersPage() {
         "stakeholder" as FieldName,
       ]}
       getRowLabel={(row) => row.stakeholder ?? row.id}
-      list={(params) => listProjectStakeholders(params)}
+      list={(params) => pageProjectStakeholders(params)}
       create={(body) => createProjectStakeholder(body)}
       update={(id, body) => updateProjectStakeholder(id, body)}
       remove={(id) => deleteProjectStakeholder(id)}

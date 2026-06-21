@@ -21,7 +21,7 @@ import {
   createProject,
   deleteProject,
   exportProjects,
-  listProjects,
+  pageProjects,
   updateProject,
 } from "@/lib/ppm/project";
 import type {
@@ -33,14 +33,14 @@ import type {
 
 // 项目类型 / 状态枚举(参照源 vue 字典 pm_project_type / pm_project_status)
 const PROJECT_TYPE_OPTIONS = [
-  { label: "研发项目", value: "research" },
-  { label: "实施项目", value: "implementation" },
-  { label: "运维项目", value: "maintenance" },
+  { label: "研发项目", value: "research", color: "blue" },
+  { label: "实施项目", value: "implementation", color: "cyan" },
+  { label: "运维项目", value: "maintenance", color: "geekblue" },
 ];
 const PROJECT_STATUS_OPTIONS = [
-  { label: "进行中", value: "ongoing" },
-  { label: "已完成", value: "completed" },
-  { label: "已暂停", value: "paused" },
+  { label: "进行中", value: "ongoing", color: "processing" },
+  { label: "已完成", value: "completed", color: "success" },
+  { label: "已暂停", value: "paused", color: "warning" },
 ];
 
 type Entity = ProjectMaintenance;
@@ -50,7 +50,7 @@ const fields: PpmFieldDef<Entity>[] = [
   { name: "project_code" as FieldName, label: "项目编号", required: true, readOnlyOnEdit: true, placeholder: "项目唯一编号" },
   { name: "project_name" as FieldName, label: "项目名称", required: true },
   { name: "company_name" as FieldName, label: "公司名称" },
-  { name: "create_name" as FieldName, label: "创建人", hideInTable: false },
+  { name: "create_name" as FieldName, label: "创建人", hideInForm: true },
   {
     name: "project_type" as FieldName,
     label: "项目类型",
@@ -101,7 +101,7 @@ export default function PpmProjectsPage() {
             成员管理
           </Button>
         )}
-        list={(params) => listProjects(params)}
+        list={(params) => pageProjects(params)}
         create={(body) => createProject(body)}
         update={(id, body) => updateProject(id, body)}
         remove={(id) => deleteProject(id)}

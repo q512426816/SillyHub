@@ -16,6 +16,7 @@ import type {
   CustomerMaintenanceCreate,
   CustomerMaintenancePageReq,
   CustomerMaintenanceUpdate,
+  PageResp,
   ProjectMaintenance,
   ProjectMaintenanceCreate,
   ProjectMaintenancePageReq,
@@ -35,12 +36,30 @@ import type {
 // 项目维护 /project-maintenance
 // ===========================================================================
 
+/**
+ * 项目维护列表(真分页):后端返回 PageResp(items+total)。
+ * PpmResourceTable serverSidePagination 模式直接调它。
+ */
+export async function pageProjects(
+  params?: ProjectMaintenancePageReq,
+): Promise<PageResp<ProjectMaintenance>> {
+  return apiFetch<PageResp<ProjectMaintenance>>(
+    "/api/ppm/project-maintenance",
+    {
+      query: params as Record<string, string | number | undefined> | undefined,
+    },
+  );
+}
+
+/**
+ * 项目维护列表(向后兼容):返回 T[],内部取 pageProjects 第一页 items。
+ * 注意:不传 page_size 时后端默认 20 条,大表请改用 pageProjects。
+ */
 export async function listProjects(
   params?: ProjectMaintenancePageReq,
 ): Promise<ProjectMaintenance[]> {
-  return apiFetch<ProjectMaintenance[]>("/api/ppm/project-maintenance", {
-    query: params as Record<string, string | number | undefined> | undefined,
-  });
+  const resp = await pageProjects(params);
+  return resp.items;
 }
 
 export async function getProject(projectId: string): Promise<ProjectMaintenance> {
@@ -90,12 +109,22 @@ export async function exportProjects(
 // 客户维护 /customer-maintenance
 // ===========================================================================
 
+export async function pageCustomers(
+  params?: CustomerMaintenancePageReq,
+): Promise<PageResp<CustomerMaintenance>> {
+  return apiFetch<PageResp<CustomerMaintenance>>(
+    "/api/ppm/customer-maintenance",
+    {
+      query: params as Record<string, string | number | undefined> | undefined,
+    },
+  );
+}
+
 export async function listCustomers(
   params?: CustomerMaintenancePageReq,
 ): Promise<CustomerMaintenance[]> {
-  return apiFetch<CustomerMaintenance[]>("/api/ppm/customer-maintenance", {
-    query: params as Record<string, string | number | undefined> | undefined,
-  });
+  const resp = await pageCustomers(params);
+  return resp.items;
 }
 
 export async function getCustomer(customerId: string): Promise<CustomerMaintenance> {
@@ -139,12 +168,19 @@ export async function exportCustomers(
 // 项目成员 /project-member
 // ===========================================================================
 
+export async function pageProjectMembers(
+  params?: ProjectMemberPageReq,
+): Promise<PageResp<ProjectMember>> {
+  return apiFetch<PageResp<ProjectMember>>("/api/ppm/project-member", {
+    query: params as Record<string, string | number | undefined> | undefined,
+  });
+}
+
 export async function listProjectMembers(
   params?: ProjectMemberPageReq,
 ): Promise<ProjectMember[]> {
-  return apiFetch<ProjectMember[]>("/api/ppm/project-member", {
-    query: params as Record<string, string | number | undefined> | undefined,
-  });
+  const resp = await pageProjectMembers(params);
+  return resp.items;
 }
 
 export async function getProjectMember(memberId: string): Promise<ProjectMember> {
@@ -178,12 +214,22 @@ export async function deleteProjectMember(memberId: string): Promise<void> {
 // 项目干系人 /project-stakeholder
 // ===========================================================================
 
+export async function pageProjectStakeholders(
+  params?: ProjectStakeholderPageReq,
+): Promise<PageResp<ProjectStakeholder>> {
+  return apiFetch<PageResp<ProjectStakeholder>>(
+    "/api/ppm/project-stakeholder",
+    {
+      query: params as Record<string, string | number | undefined> | undefined,
+    },
+  );
+}
+
 export async function listProjectStakeholders(
   params?: ProjectStakeholderPageReq,
 ): Promise<ProjectStakeholder[]> {
-  return apiFetch<ProjectStakeholder[]>("/api/ppm/project-stakeholder", {
-    query: params as Record<string, string | number | undefined> | undefined,
-  });
+  const resp = await pageProjectStakeholders(params);
+  return resp.items;
 }
 
 export async function getProjectStakeholder(

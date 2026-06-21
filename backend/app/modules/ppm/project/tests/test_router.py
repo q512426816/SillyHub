@@ -96,8 +96,9 @@ async def test_project_http_crud(client: AsyncClient, auth_headers: dict):
     resp = await client.get(f"{base}?project_name=HTTP", headers=auth_headers)
     assert resp.status_code == 200
     body = resp.json()
-    assert isinstance(body, list)
-    assert len(body) == 1
+    assert isinstance(body, dict)
+    assert {"items", "total"}.issubset(body.keys())
+    assert len(body["items"]) == 1
 
     # simple-list
     resp = await client.get(f"{base}/simple-list", headers=auth_headers)
@@ -173,7 +174,7 @@ async def test_customer_http_crud_and_export(client: AsyncClient, auth_headers: 
 
     resp = await client.get(f"{base}?level=VIP", headers=auth_headers)
     assert resp.status_code == 200
-    assert len(resp.json()) == 1
+    assert len(resp.json()["items"]) == 1
 
     # export
     resp = await client.get(f"{base}/export-excel", headers=auth_headers)
@@ -230,7 +231,7 @@ async def test_member_http_crud(client: AsyncClient, auth_headers: dict):
     # page by project
     resp = await client.get(f"{base}?pm_project_id={pid}", headers=auth_headers)
     assert resp.status_code == 200
-    assert len(resp.json()) == 1
+    assert len(resp.json()["items"]) == 1
 
     resp = await client.delete(f"{base}/{mid}", headers=auth_headers)
     assert resp.status_code == 204
@@ -268,7 +269,7 @@ async def test_stakeholder_http_crud(client: AsyncClient, auth_headers: dict):
 
     resp = await client.get(f"{base}?pm_project_id={pid}", headers=auth_headers)
     assert resp.status_code == 200
-    assert len(resp.json()) == 1
+    assert len(resp.json()["items"]) == 1
 
     resp = await client.delete(f"{base}/{sid}", headers=auth_headers)
     assert resp.status_code == 204

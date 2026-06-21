@@ -13,7 +13,7 @@ import {
   createCustomer,
   deleteCustomer,
   exportCustomers,
-  listCustomers,
+  pageCustomers,
   updateCustomer,
 } from "@/lib/ppm/project";
 import type {
@@ -24,9 +24,9 @@ import type {
 } from "@/lib/ppm/types";
 
 const LEVEL_OPTIONS = [
-  { label: "战略客户", value: "strategic" },
-  { label: "重要客户", value: "important" },
-  { label: "普通客户", value: "normal" },
+  { label: "战略客户", value: "strategic", color: "red" },
+  { label: "重要客户", value: "important", color: "orange" },
+  { label: "普通客户", value: "normal", color: "blue" },
 ];
 
 type Entity = CustomerMaintenance;
@@ -35,7 +35,13 @@ type FieldName = keyof Entity & string;
 const fields: PpmFieldDef<Entity>[] = [
   { name: "company_name" as FieldName, label: "公司名称", required: true },
   { name: "contact" as FieldName, label: "联系人" },
-  { name: "phone_no" as FieldName, label: "手机号" },
+  {
+    name: "phone_no" as FieldName,
+    label: "手机号",
+    placeholder: "11 位手机号",
+    pattern: /^1\d{10}$/,
+    patternMessage: "请输入 11 位手机号(以 1 开头)",
+  },
   { name: "dept_name" as FieldName, label: "部门" },
   {
     name: "level" as FieldName,
@@ -43,7 +49,7 @@ const fields: PpmFieldDef<Entity>[] = [
     type: "select",
     options: LEVEL_OPTIONS,
   },
-  { name: "create_name" as FieldName, label: "创建人" },
+  { name: "create_name" as FieldName, label: "创建人", hideInForm: true },
 ];
 
 export default function PpmCustomersPage() {
@@ -64,7 +70,7 @@ export default function PpmCustomersPage() {
         "contact" as FieldName,
       ]}
       getRowLabel={(row) => row.company_name ?? row.contact ?? row.id}
-      list={(params) => listCustomers(params)}
+      list={(params) => pageCustomers(params)}
       create={(body) => createCustomer(body)}
       update={(id, body) => updateCustomer(id, body)}
       remove={(id) => deleteCustomer(id)}

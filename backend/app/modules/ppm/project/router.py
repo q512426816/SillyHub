@@ -26,6 +26,7 @@ from app.core.auth_deps import require_permission_any
 from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
+from app.modules.ppm.common.crud import Page, PageReq
 from app.modules.ppm.common.export import (
     ColumnDef,
     excel_response,
@@ -136,7 +137,7 @@ async def delete_project_maintenance(
 
 @router.get(
     "/project-maintenance",
-    response_model=list[ProjectMaintenanceResp],
+    response_model=Page[ProjectMaintenanceResp],
 )
 async def page_project_maintenance(
     session: SessionDep,
@@ -149,7 +150,7 @@ async def page_project_maintenance(
     project_code: str | None = Query(None),
     project_status: str | None = Query(None),
     project_type: str | None = Query(None),
-) -> list[ProjectMaintenanceResp]:
+) -> Page[ProjectMaintenanceResp]:
     req = ProjectMaintenancePageReq(
         page=page,
         page_size=page_size,
@@ -162,7 +163,11 @@ async def page_project_maintenance(
     )
     s = svc.ProjectMaintenanceService(session)
     result = await s.page(req)
-    return [ProjectMaintenanceResp.model_validate(item) for item in result.items]
+    return Page.build(
+        items=[ProjectMaintenanceResp.model_validate(item) for item in result.items],
+        total=result.total,
+        req=PageReq(page=page, page_size=page_size, order_by=order_by, order=order),
+    )
 
 
 @router.get(
@@ -293,7 +298,7 @@ async def delete_customer_maintenance(
 
 @router.get(
     "/customer-maintenance",
-    response_model=list[CustomerMaintenanceResp],
+    response_model=Page[CustomerMaintenanceResp],
 )
 async def page_customer_maintenance(
     session: SessionDep,
@@ -305,7 +310,7 @@ async def page_customer_maintenance(
     company_name: str | None = Query(None),
     contact: str | None = Query(None),
     level: str | None = Query(None),
-) -> list[CustomerMaintenanceResp]:
+) -> Page[CustomerMaintenanceResp]:
     req = CustomerMaintenancePageReq(
         page=page,
         page_size=page_size,
@@ -317,7 +322,11 @@ async def page_customer_maintenance(
     )
     s = svc.CustomerMaintenanceService(session)
     result = await s.page(req)
-    return [CustomerMaintenanceResp.model_validate(item) for item in result.items]
+    return Page.build(
+        items=[CustomerMaintenanceResp.model_validate(item) for item in result.items],
+        total=result.total,
+        req=PageReq(page=page, page_size=page_size, order_by=order_by, order=order),
+    )
 
 
 @router.get("/customer-maintenance/export-excel")
@@ -438,7 +447,7 @@ async def get_project_member(
 
 @router.get(
     "/project-member",
-    response_model=list[ProjectMemberResp],
+    response_model=Page[ProjectMemberResp],
 )
 async def page_project_member(
     session: SessionDep,
@@ -450,7 +459,7 @@ async def page_project_member(
     pm_project_id: uuid.UUID | None = Query(None),
     user_id: uuid.UUID | None = Query(None),
     role_name: str | None = Query(None),
-) -> list[ProjectMemberResp]:
+) -> Page[ProjectMemberResp]:
     req = ProjectMemberPageReq(
         page=page,
         page_size=page_size,
@@ -462,7 +471,11 @@ async def page_project_member(
     )
     s = svc.ProjectMemberService(session)
     result = await s.page(req)
-    return [ProjectMemberResp.model_validate(item) for item in result.items]
+    return Page.build(
+        items=[ProjectMemberResp.model_validate(item) for item in result.items],
+        total=result.total,
+        req=PageReq(page=page, page_size=page_size, order_by=order_by, order=order),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -529,7 +542,7 @@ async def get_project_stakeholder(
 
 @router.get(
     "/project-stakeholder",
-    response_model=list[ProjectStakeholderResp],
+    response_model=Page[ProjectStakeholderResp],
 )
 async def page_project_stakeholder(
     session: SessionDep,
@@ -541,7 +554,7 @@ async def page_project_stakeholder(
     pm_project_id: uuid.UUID | None = Query(None),
     stakeholder: str | None = Query(None),
     stakeholder_role: str | None = Query(None),
-) -> list[ProjectStakeholderResp]:
+) -> Page[ProjectStakeholderResp]:
     req = ProjectStakeholderPageReq(
         page=page,
         page_size=page_size,
@@ -553,7 +566,11 @@ async def page_project_stakeholder(
     )
     s = svc.ProjectStakeholderService(session)
     result = await s.page(req)
-    return [ProjectStakeholderResp.model_validate(item) for item in result.items]
+    return Page.build(
+        items=[ProjectStakeholderResp.model_validate(item) for item in result.items],
+        total=result.total,
+        req=PageReq(page=page, page_size=page_size, order_by=order_by, order=order),
+    )
 
 
 __all__ = ["router"]

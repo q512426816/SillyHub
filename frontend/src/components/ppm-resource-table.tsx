@@ -14,18 +14,47 @@
  * 复用样板:frontend/src/app/(dashboard)/admin/users/page.tsx
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Table, type TableProps } from "antd";
+import { Table, Tag, type TableProps } from "antd";
 
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 
 // ── 字段配置 ────────────────────────────────────────────────────────────
 
-export type PpmFieldType = "text" | "number" | "select" | "date" | "textarea";
+export type PpmFieldType =
+  | "text"
+  | "number"
+  | "select"
+  | "date"
+  | "datetime"
+  | "textarea";
 
 export interface PpmFieldOption {
   label: string;
   value: string;
+  /**
+   * 列表 dict-tag 颜色(AntD Tag color,如 "blue"/"green"/"red"/"#f50")。
+   * 对照源 vue dict-tag,select 字段在表格列里渲染带颜色的 Tag。
+   */
+  color?: string;
+}
+
+/**
+ * 把 ISO 字符串格式化为 YYYY-MM-DD 或 YYYY-MM-DD HH:mm。
+ * 非 ISO / 已格式化字符串原样返回。空值返回 ""。
+ */
+function formatDate(value: unknown, withTime: boolean): string {
+  if (value === null || value === undefined || value === "") return "";
+  const s = String(value);
+  // 兼容已有 "YYYY-MM-DD HH:mm" / "YYYY-MM-DD" 文本
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.exec(s);
+  if (dateOnly) return withTime ? `${s} 00:00` : s;
+  const full = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(s);
+  if (full && full[1]) {
+    return withTime ? `${full[1]} ${full[2] ?? "00:00"}` : full[1];
+  }
+  // 退化:截前 10/16 字符
+  return withTime ? s.slice(0, 16) : s.slice(0, 10);
 }
 
 export interface PpmFieldDef<
@@ -52,10 +81,19 @@ export interface PpmFieldDef<
   defaultValue?: T[K];
   /** 在 Table 列里隐藏(只用于表单,如外键/创建人) */
   hideInTable?: boolean;
+  /** 在 Drawer Form 里隐藏(只用于列表,如创建人/时间) */
+  hideInForm?: boolean;
   /** 自定义 Table 列宽 */
   width?: number | string;
   /** 自定义渲染(列表单元格) */
   render?: (value: unknown, row: T) => React.ReactNode;
+  /**
+   * 正则校验(Form.Item pattern,如 phone 11 位数字)。
+   * 字符串会被转 RegExp;直接传 RegExp 亦可。
+   */
+  pattern?: string | RegExp;
+  /** 校验失败提示(配合 pattern) */
+  patternMessage?: string;
   /**
    * 异步加载选项(给 select 用,如 users/projects 下拉)。
    * 组件挂载时调用一次,结果塞进 options。
@@ -90,13 +128,32 @@ export interface PpmResourceTableProps<
   /** 是否允许写入(隐藏新增/编辑/删除),默认 true */
   canWrite?: boolean;
   /**
+   * 首列序号(跨页连续:page*pageSize+index+1)。默认 true。
+   * 对照源 vue scope.$index + (pageNo-1)*pageSize + 1。
+   */
+  showIndex?: boolean;
+  /**
+   * 后端真分页:默认 true。
+   *  - true:list 必须返回 { items, total }(PpmPageResp 形态),Table total 接
+   *    后端 total,page/pageSize 变化时调 list(params 含 page/page_size) 重拉。
+   *  - false:list 返回 T[],前端切片(向后兼容老调用)。
+   */
+  serverSidePagination?: boolean;
+  /**
    * 每行追加额外操作按钮(渲染在内置「编辑/删除」之前)。
    * 用于跨域入口,如 projects 行的「成员管理」按钮(W1 task-03)。
    */
   extraActions?: (row: T) => React.ReactNode;
 
   // ── API ──
-  list: (params?: Query) => Promise<T[]>;
+  /**
+   * 列表加载。
+   *  - serverSidePagination=true 时返回 { items, total }(组件会注入 page/page_size)。
+   *  - serverSidePagination=false 时返回 T[](全量,前端切片)。
+   */
+  list: (
+    params?: Query,
+  ) => Promise<T[] | PpmPageResp<T>>;
   create: (body: CreateBody) => Promise<T>;
   update: (id: string, body: UpdateBody) => Promise<T>;
   remove: (id: string) => Promise<void>;
@@ -111,6 +168,14 @@ export interface PpmResourceTableProps<
   buildUpdateBody?: (form: Partial<T>) => UpdateBody;
   /** 把搜索栏状态组装成 query params。默认只挑 searchFieldNames 中非空字段。 */
   buildQuery?: (form: Partial<Record<keyof T & string, string>>) => Query;
+}
+
+/** 后端真分页响应信封(对应后端 Page[T]:{items,total,page,page_size})。 */
+export interface PpmPageResp<T> {
+  items: T[];
+  total: number;
+  page?: number;
+  page_size?: number;
 }
 
 const inputCls =
@@ -137,6 +202,8 @@ export function PpmResourceTable<
     getRowId = (row) => row.id,
     getRowLabel = (row) => String(row.id),
     canWrite = true,
+    showIndex = true,
+    serverSidePagination = true,
     list,
     create,
     update,
@@ -149,6 +216,7 @@ export function PpmResourceTable<
   } = props;
 
   const [rows, setRows] = useState<T[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -203,19 +271,40 @@ export function PpmResourceTable<
     setLoading(true);
     setError(null);
     try {
-      const query = (buildQuery
+      const baseQuery = (buildQuery
         ? buildQuery(searchCommitted as Partial<Record<keyof T & string, string>>)
         : (searchCommitted as unknown as Query)) as Query | undefined;
+      // 真分页模式注入 page/page_size(覆盖调用方可能传的同名 key)。
+      const query =
+        serverSidePagination && baseQuery
+          ? ({ ...(baseQuery as object), page, page_size: pageSize } as Query)
+          : serverSidePagination
+            ? ({ page, page_size: pageSize } as Query)
+            : (baseQuery as Query | undefined);
       const result = await list(
         Object.keys(query ?? {}).length > 0 ? query : undefined,
       );
-      setRows(result);
+      if (serverSidePagination) {
+        // 真分页:list 返回 {items,total} 或兼容性返回 T[]
+        if (Array.isArray(result)) {
+          setRows(result);
+          setTotal(result.length);
+        } else {
+          setRows(result.items ?? []);
+          setTotal(result.total ?? result.items?.length ?? 0);
+        }
+      } else {
+        // 前端切片模式:list 返回 T[](也兼容误返回 {items})
+        const arr = Array.isArray(result) ? result : (result.items ?? []);
+        setRows(arr);
+        setTotal(arr.length);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "加载失败");
     } finally {
       setLoading(false);
     }
-  }, [list, buildQuery, searchCommitted]);
+  }, [list, buildQuery, searchCommitted, serverSidePagination, page, pageSize]);
 
   useEffect(() => {
     void load();
@@ -286,25 +375,57 @@ export function PpmResourceTable<
   // ── Table 列 ──
   const columns: TableProps<T>["columns"] = useMemo(() => {
     const visible = fields.filter((f) => !f.hideInTable);
-    const cols: NonNullable<TableProps<T>["columns"]> = visible.map((f) => ({
-      title: f.label,
-      dataIndex: f.name as string,
-      key: f.name as string,
-      width: f.width,
-      sorter: f.type === "number",
-      render: (value: unknown, row: T) => {
-        if (f.render) return f.render(value, row);
-        if (f.type === "select") {
-          const opts = asyncOptions[f.name] ?? f.options ?? [];
-          const hit = opts.find((o) => o.value === String(value ?? ""));
-          if (hit) return hit.label;
-        }
-        if (value === null || value === undefined || value === "") {
-          return <span className="text-xs text-muted-foreground">—</span>;
-        }
-        return String(value);
-      },
-    }));
+    const cols: NonNullable<TableProps<T>["columns"]> = [];
+    // 首列序号(跨页连续):page*pageSize+index+1,对照源 scope.$index 计算。
+    if (showIndex) {
+      cols.push({
+        title: "#",
+        key: "__index",
+        width: 56,
+        fixed: "left",
+        render: (_v: unknown, _row: T, index?: number) =>
+          (page - 1) * pageSize + (index ?? 0) + 1,
+      });
+    }
+    for (const f of visible) {
+      cols.push({
+        title: f.label,
+        dataIndex: f.name as string,
+        key: f.name as string,
+        width: f.width,
+        sorter: f.type === "number",
+        render: (value: unknown, row: T) => {
+          if (f.render) return f.render(value, row);
+          // date/datetime 格式化
+          if (f.type === "date" || f.type === "datetime") {
+            const text = formatDate(value, f.type === "datetime");
+            if (!text) {
+              return <span className="text-xs text-muted-foreground">—</span>;
+            }
+            return text;
+          }
+          // select 渲染 dict-tag(带颜色);无 color 退化为纯文本
+          if (f.type === "select") {
+            const opts = asyncOptions[f.name] ?? f.options ?? [];
+            const hit = opts.find((o) => o.value === String(value ?? ""));
+            if (!hit) {
+              if (value === null || value === undefined || value === "") {
+                return <span className="text-xs text-muted-foreground">—</span>;
+              }
+              return String(value);
+            }
+            if (hit.color) {
+              return <Tag color={hit.color}>{hit.label}</Tag>;
+            }
+            return hit.label;
+          }
+          if (value === null || value === undefined || value === "") {
+            return <span className="text-xs text-muted-foreground">—</span>;
+          }
+          return String(value);
+        },
+      });
+    }
     cols.push({
       title: "操作",
       key: "__actions",
@@ -334,14 +455,14 @@ export function PpmResourceTable<
     });
     return cols;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fields, asyncOptions, canWrite, extraActions]);
+  }, [fields, asyncOptions, canWrite, extraActions, showIndex, page, pageSize]);
 
-  // ── 分页(前端切片) ──
-  const total = rows.length;
+  // ── 数据源:真分页=后端已切,前端切片=本地切 ──
   const pagedRows = useMemo(() => {
+    if (serverSidePagination) return rows;
     const start = (page - 1) * pageSize;
     return rows.slice(start, start + pageSize);
-  }, [rows, page, pageSize]);
+  }, [rows, page, pageSize, serverSidePagination]);
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-5 px-6 py-6">
@@ -529,16 +650,35 @@ function PpmResourceDrawer<T extends { id: string }>({
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  // 表单内显示的字段(默认全部,可由 fields[].hideInTable 控制;这里所有字段都显示)
-  const visibleFields = fields;
+  // 表单内显示的字段:默认全部,hideInForm=true 的字段(如创建人/时间)不在表单显示。
+  const visibleFields = useMemo(
+    () => fields.filter((f) => !f.hideInForm),
+    [fields],
+  );
 
-  const requiredMissing = visibleFields
-    .filter((f) => f.required)
-    .some((f) => {
+  // 必填校验 + pattern 正则校验
+  const fieldErrors = useMemo<Record<string, string>>(() => {
+    const errs: Record<string, string> = {};
+    for (const f of visibleFields) {
       const v = form[f.name as string];
-      return v === null || v === undefined || v === "";
-    });
-  const formValid = !requiredMissing;
+      if (f.required && (v === null || v === undefined || v === "")) {
+        errs[f.name as string] = `${f.label}为必填项`;
+        continue;
+      }
+      if (f.pattern && v !== null && v !== undefined && v !== "") {
+        const re =
+          f.pattern instanceof RegExp
+            ? f.pattern
+            : new RegExp(f.pattern);
+        if (!re.test(String(v))) {
+          errs[f.name as string] =
+            f.patternMessage ?? `${f.label}格式不正确`;
+        }
+      }
+    }
+    return errs;
+  }, [visibleFields, form]);
+  const formValid = Object.keys(fieldErrors).length === 0;
 
   const submit = async () => {
     if (!formValid || !canWrite || saving) return;
@@ -575,6 +715,17 @@ function PpmResourceDrawer<T extends { id: string }>({
             const value = form[name] ?? "";
             const readOnly = mode === "edit" && f.readOnlyOnEdit;
             const opts = asyncOptions[name] ?? f.options ?? [];
+            const errMsg = fieldErrors[name];
+            // date/datetime 表单用原生 input;后端存 ISO 字符串,取前 10 / 16 位。
+            const isDate = f.type === "date";
+            const isDateTime = f.type === "datetime";
+            const inputType = isDate
+              ? "date"
+              : isDateTime
+                ? "datetime-local"
+                : f.type === "number"
+                  ? "number"
+                  : "text";
             return (
               <div key={name}>
                 <label className="text-[11px] text-muted-foreground">
@@ -605,8 +756,8 @@ function PpmResourceDrawer<T extends { id: string }>({
                   </select>
                 ) : (
                   <input
-                    type={f.type === "number" ? "number" : "text"}
-                    value={String(value ?? "")}
+                    type={inputType}
+                    value={isDate || isDateTime ? String(value ?? "").slice(0, isDateTime ? 16 : 10) : String(value ?? "")}
                     onChange={(e) => {
                       const v =
                         f.type === "number"
@@ -620,6 +771,9 @@ function PpmResourceDrawer<T extends { id: string }>({
                     placeholder={f.placeholder}
                     className={`mt-0.5 ${inputCls}`}
                   />
+                )}
+                {errMsg && (
+                  <p className="mt-0.5 text-[11px] text-destructive">{errMsg}</p>
                 )}
               </div>
             );
