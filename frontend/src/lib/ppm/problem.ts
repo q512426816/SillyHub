@@ -167,6 +167,15 @@ export async function exportProblems(): Promise<void> {
   await downloadExcel("/api/ppm/problem-list/export-excel", undefined, "problem_list.xlsx");
 }
 
+/** P2-3:导出问题变更 (problemchange)。 */
+export async function exportProblemChanges(): Promise<void> {
+  await downloadExcel(
+    "/api/ppm/problem-change/export-excel",
+    undefined,
+    "problem_changes.xlsx",
+  );
+}
+
 // ===========================================================================
 // 问题变更 /problem-change
 // ===========================================================================

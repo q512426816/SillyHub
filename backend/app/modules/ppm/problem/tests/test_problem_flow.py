@@ -437,6 +437,10 @@ class TestProblemChange:
         by_resource = await svc.list_changes_by_resource(str(p.id))
         assert len(by_resource) == 1
 
+        # P2-3:导出行 (list_changes_for_export)
+        rows = await svc.list_changes_for_export()
+        assert any(r["change_reason"] == "重新变更" for r in rows)
+
         await svc.delete_change(c.id)
         with pytest.raises(ProblemNotFound):
             await svc.get_change(c.id)

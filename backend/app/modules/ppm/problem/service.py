@@ -906,6 +906,26 @@ class ProblemService:
             for r in rows
         ]
 
+    async def list_changes_for_export(self) -> list[dict[str, Any]]:
+        """返回问题变更全量行 (dict),供 Excel 导出 (P2-3)。
+
+        对照源 problemchange 导出列:项目名 / 变更内容 / 变更原因 /
+        责任人 / 当前处理人 / 状态。
+        """
+        rows = (await self._session.execute(select(PpmProblemChange))).scalars().all()
+        return [
+            {
+                "project_name": r.project_name,
+                "pro_desc": r.pro_desc,
+                "change_reason": r.change_reason,
+                "duty_user_name": r.duty_user_name,
+                "now_handle_user_name": r.now_handle_user_name,
+                "status": r.status,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+
     # ==================================================================
     # 内部 helper
     # ==================================================================

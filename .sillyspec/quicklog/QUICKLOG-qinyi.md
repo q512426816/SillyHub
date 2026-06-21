@@ -395,3 +395,14 @@
 - frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-work-hour-chart.tsx (新增 全员柱图+单人项目饼图联动)
 - frontend/src/lib/ppm/kanban-grouping.ts (新增 dateRangeKeys/groupByUserAndDate/weekdayMeta helper)
 - 删除: kanban-column.tsx + kanban-task-card.tsx (被矩阵取代)
+
+## ql-20260621-003-7b2e | 2026-06-21 12:51:30 | 修完 ppm 所有 P2 剩余细节(InputNumber/模块CRUD/导出端点/列格式化)
+状态：进行中
+文件：
+- frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx (InputNumber step + Module CRUD)
+- frontend/src/app/(dashboard)/ppm/problem-changes/page.tsx (导出按钮)
+- frontend/src/app/(dashboard)/ppm/project-plans/page.tsx (导出按钮)
+- frontend/src/lib/ppm/*.ts (新增导出 API 函数)
+- backend/app/modules/ppm/problem/router.py (新增导出端点)
+- backend/app/modules/ppm/plan/router.py (新增导出端点)
+- 列格式化细节修复(projects/customers 等)

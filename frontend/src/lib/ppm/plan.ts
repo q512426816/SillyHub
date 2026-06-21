@@ -93,6 +93,24 @@ export async function exportPlanNodes(): Promise<void> {
   await downloadExcel("/api/ppm/plan-node/export-excel", undefined, "plan_nodes.xlsx");
 }
 
+/** P2-3:导出项目计划 (projectplan)。 */
+export async function exportProjectPlans(): Promise<void> {
+  await downloadExcel(
+    "/api/ppm/project-plan/export-excel",
+    undefined,
+    "project_plans.xlsx",
+  );
+}
+
+/** P2-3:导出里程碑明细 (psplannodedetail,仅非 archived)。 */
+export async function exportMilestoneDetails(): Promise<void> {
+  await downloadExcel(
+    "/api/ppm/plan-node-detail/export-excel",
+    undefined,
+    "plan_node_details.xlsx",
+  );
+}
+
 // ===========================================================================
 // 模板明细 /plan-node-detail-tpl + /plan-node/{id}/details
 // ===========================================================================

@@ -112,6 +112,20 @@ class TestPsProjectPlan:
         await svc.delete_ps_plan_node(node.id)
         assert await svc.list_ps_plan_nodes_by_plan(str(plan.id)) == []
 
+    async def test_export_rows(self, db_session: AsyncSession) -> None:
+        """P2-3:ps_project_plan 导出行 dict。"""
+        svc = PlanService(db_session)
+        await svc.create_ps_project_plan(
+            {
+                "project_id": str(uuid.uuid4()),
+                "project_name": "导出计划",
+                "contract_name": "合同X",
+            }
+        )
+        rows = await svc.list_ps_project_plans_for_export()
+        assert any(r["project_name"] == "导出计划" for r in rows)
+        assert any(r["contract_name"] == "合同X" for r in rows)
+
 
 # ===========================================================================
 # 状态机流程
@@ -127,6 +141,16 @@ async def _create_detail(svc: PlanService, plan_node_id: str | None = None) -> P
             "plan_workload": "5",
         }
     )
+
+
+async def test_list_plan_node_details_for_export(db_session: AsyncSession) -> None:
+    """P2-3:里程碑明细导出行(仅非 archived)。"""
+    svc = PlanService(db_session)
+    await _create_detail(svc)
+    rows = await svc.list_plan_node_details_for_export()
+    assert any(r["task_theme"] == "里程碑明细1" for r in rows)
+    # 全部行都不是 archived
+    assert all(r["status"] != "archived" for r in rows)
 
 
 class TestSaveProcess:

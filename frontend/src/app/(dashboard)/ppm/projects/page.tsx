@@ -63,8 +63,29 @@ const fields: PpmFieldDef<Entity>[] = [
     type: "select",
     options: PROJECT_STATUS_OPTIONS,
   },
-  { name: "project_effective_start_time" as FieldName, label: "生效开始时间", type: "date" },
-  { name: "project_effective_end_time" as FieldName, label: "生效结束时间", type: "date" },
+  {
+    name: "project_effective_start_time" as FieldName,
+    label: "项目有效期",
+    type: "date",
+    // P2-5:对照源 projectmaintenance/index.vue effectTimeFormate,
+    // 把 start + end 合并为一格展示:start - end。
+    hideInForm: false,
+    render: (_v: unknown, row: Entity) => {
+      const start = (row.project_effective_start_time ?? "").slice(0, 10);
+      const end = (row.project_effective_end_time ?? "").slice(0, 10);
+      if (!start && !end) {
+        return <span className="text-xs text-muted-foreground">—</span>;
+      }
+      return `${start || "—"} - ${end || "—"}`;
+    },
+  },
+  // 表单需要单独编辑生效起止,用 hideInTable 隐藏的两列承载表单字段。
+  {
+    name: "project_effective_end_time" as FieldName,
+    label: "生效结束时间",
+    type: "date",
+    hideInTable: true,
+  },
   { name: "project_maintenance_end_time" as FieldName, label: "维保结束时间", type: "date" },
 ];
 

@@ -66,6 +66,7 @@ export default function PpmCustomersPage() {
       subtitle="客户主数据,被项目维护关联"
       entityLabel="客户"
       exportFilename="customer_maintenance.xlsx"
+      striped
       fields={fields}
       searchFieldNames={[
         "company_name" as FieldName,

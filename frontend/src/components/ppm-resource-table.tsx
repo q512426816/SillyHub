@@ -133,6 +133,11 @@ export interface PpmResourceTableProps<
    */
   showIndex?: boolean;
   /**
+   * 斑马纹(对照源 el-table :stripe="true")。默认 false。
+   * customers 页源开启,P2-5 复刻。
+   */
+  striped?: boolean;
+  /**
    * 后端真分页:默认 true。
    *  - true:list 必须返回 { items, total }(PpmPageResp 形态),Table total 接
    *    后端 total,page/pageSize 变化时调 list(params 含 page/page_size) 重拉。
@@ -203,6 +208,7 @@ export function PpmResourceTable<
     getRowLabel = (row) => String(row.id),
     canWrite = true,
     showIndex = true,
+    striped = false,
     serverSidePagination = true,
     list,
     create,
@@ -560,6 +566,12 @@ export function PpmResourceTable<
             dataSource={pagedRows}
             loading={loading}
             size="small"
+            rowClassName={
+              striped
+                ? (_row: T, idx: number) =>
+                    idx % 2 === 1 ? "bg-muted/40" : ""
+                : undefined
+            }
             scroll={{ x: "max-content" }}
             pagination={{
               current: page,

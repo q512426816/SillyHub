@@ -39,6 +39,7 @@ import {
   Drawer,
   Form,
   Input,
+  InputNumber,
   Select,
   Table,
   type TableProps,
@@ -61,10 +62,13 @@ import {
 import { ApiError } from "@/lib/api";
 import {
   changePlanNodeDetailProcess,
+  createPlanNodeModule,
   createPsPlanNodeDetail,
   createPsPlanNode,
+  deletePlanNodeModule,
   deletePsPlanNodeDetail,
   deletePsPlanNode,
+  exportMilestoneDetails,
   getProjectPlan,
   listPlanNodeDetailProcesses,
   listPlanNodeModules,
@@ -73,6 +77,7 @@ import {
   listPsPlanNodes,
   rejectPlanNodeDetailProcess,
   savePlanNodeDetailProcess,
+  updatePlanNodeModule,
   updatePsPlanNodeDetail,
   updatePsPlanNode,
   type PlanProcessActionReq,
@@ -150,6 +155,7 @@ export default function MilestoneDetailsPage() {
   const [projectId, setProjectId] = useState<string | null>(null);
   const [projectManagerId, setProjectManagerId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<DetailDrawerState>({
     open: false,
@@ -213,6 +219,19 @@ export default function MilestoneDetailsPage() {
   const showToast = (ok: boolean, text: string) => {
     setToast({ ok, text });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  // P2-3:里程碑明细导出(对照源 psplannodedetail 导出)。
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      await exportMilestoneDetails();
+      showToast(true, "导出已开始");
+    } catch (err) {
+      showToast(false, err instanceof ApiError ? err.message : "导出失败");
+    } finally {
+      setExporting(false);
+    }
   };
 
   // P0-7:里程碑主表删除(对照源 OpenPlanNodeForm.handleDelete)。
@@ -521,6 +540,14 @@ export default function MilestoneDetailsPage() {
         <div className="flex gap-2">
           <Button
             size="sm"
+            variant="outline"
+            disabled={exporting}
+            onClick={() => void handleExport()}
+          >
+            {exporting ? "导出中…" : "导出"}
+          </Button>
+          <Button
+            size="sm"
             disabled={readOnly}
             title={readOnly ? "只读模式(非项目经理)" : undefined}
             onClick={() => setMasterDrawer({ open: true, mode: "create" })}
@@ -681,6 +708,13 @@ function ModuleLevelTable({
 }: ModuleLevelProps) {
   const [modules, setModules] = useState<PlanNodeModule[]>([]);
   const [loading, setLoading] = useState(true);
+  // P2-2:模块 CRUD 抽屉状态
+  const [moduleDrawer, setModuleDrawer] = useState<{
+    open: boolean;
+    mode: "create" | "edit";
+    module?: PlanNodeModule;
+  }>({ open: false, mode: "create" });
+  const [moduleSaving, setModuleSaving] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -696,6 +730,41 @@ function ModuleLevelTable({
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // P2-2:模块 CRUD(对照源 PlanNodeModuleTable.vue)
+  const handleSaveModule = async (
+    vals: Pick<
+      PlanNodeModule,
+      | "module_name"
+      | "plan_workload"
+      | "plan_begin_time"
+      | "plan_complete_time"
+      | "duty_user_id"
+    >,
+  ) => {
+    setModuleSaving(true);
+    try {
+      if (moduleDrawer.mode === "edit" && moduleDrawer.module) {
+        await updatePlanNodeModule(moduleDrawer.module.id, vals);
+      } else {
+        await createPlanNodeModule({ ...vals, plan_node_id: planNodeId });
+      }
+      setModuleDrawer({ open: false, mode: "create" });
+      await reload();
+    } finally {
+      setModuleSaving(false);
+    }
+  };
+
+  const handleDeleteModule = async (m: PlanNodeModule) => {
+    if (!confirm(`删除模块「${m.module_name ?? m.id}」?`)) return;
+    try {
+      await deletePlanNodeModule(m.id);
+      await reload();
+    } catch {
+      // 静默(外层无 toast 通道,此处简化)
+    }
+  };
 
   const moduleColumns = useMemo<TableProps<PlanNodeModule>["columns"]>(
     () => [
@@ -752,21 +821,43 @@ function ModuleLevelTable({
         title: "操作",
         key: "actions",
         align: "right",
-        width: 120,
+        width: 260,
         render: (_v: unknown, m: PlanNodeModule) => (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={readOnly}
-            title={readOnly ? "只读模式(非项目经理)" : undefined}
-            onClick={() => onAddDetail(m.id)}
-          >
-            + 新建明细
-          </Button>
+          <div className="flex justify-end gap-1">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={readOnly}
+              title={readOnly ? "只读模式(非项目经理)" : undefined}
+              onClick={() => onAddDetail(m.id)}
+            >
+              + 新建明细
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={readOnly}
+              title={readOnly ? "只读模式(非项目经理)" : undefined}
+              onClick={() =>
+                setModuleDrawer({ open: true, mode: "edit", module: m })
+              }
+            >
+              编辑
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={readOnly}
+              title={readOnly ? "只读模式(非项目经理)" : undefined}
+              onClick={() => void handleDeleteModule(m)}
+            >
+              删除
+            </Button>
+          </div>
         ),
       },
     ],
-    [projectId, onAddDetail, readOnly],
+    [projectId, onAddDetail, readOnly, handleDeleteModule],
   );
 
   const moduleExpandRender = useCallback(
@@ -797,15 +888,174 @@ function ModuleLevelTable({
 
   return (
     <div className="rounded border border-dashed bg-muted/20 p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-sm font-medium text-foreground">
+          模块(实施阶段)
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={readOnly}
+          title={readOnly ? "只读模式(非项目经理)" : undefined}
+          onClick={() => setModuleDrawer({ open: true, mode: "create" })}
+        >
+          + 新建模块
+        </Button>
+      </div>
       <PpmSubTable<PlanNodeModule>
-        title="模块(实施阶段)"
         masterRows={modules}
         masterColumns={moduleColumns}
         expandRender={moduleExpandRender}
         expandableTriggerField="id"
         tableProps={{ loading, pagination: false, scroll: { x: "max-content" } }}
       />
+      <ModuleFormDrawer
+        open={moduleDrawer.open}
+        mode={moduleDrawer.mode}
+        module={moduleDrawer.module}
+        projectId={projectId}
+        saving={moduleSaving}
+        onClose={() => setModuleDrawer({ open: false, mode: "create" })}
+        onSave={(vals) => void handleSaveModule(vals)}
+      />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// P2-2:模块 CRUD 抽屉(对照源 PlanNodeModuleForm.vue)
+// 字段:moduleName / planWorkload(InputNumber step=0.5)/ planBeginTime /
+//       planCompleteTime(DatePicker YYYY-MM-DD)/ dutyUserId(PpmUserSelect)
+// ---------------------------------------------------------------------------
+
+interface ModuleFormDrawerProps {
+  open: boolean;
+  mode: "create" | "edit";
+  module?: PlanNodeModule;
+  projectId: string | null;
+  saving: boolean;
+  onClose: () => void;
+  onSave: (vals: {
+    module_name: string | null;
+    plan_workload: string | null;
+    plan_begin_time: string | null;
+    plan_complete_time: string | null;
+    duty_user_id: string | null;
+  }) => void;
+}
+
+function ModuleFormDrawer({
+  open,
+  mode,
+  module: moduleRow,
+  projectId,
+  saving,
+  onClose,
+  onSave,
+}: ModuleFormDrawerProps) {
+  const [form] = Form.useForm<{
+    module_name: string;
+    plan_workload: string;
+    plan_begin_time: string;
+    plan_complete_time: string;
+    duty_user_id: string;
+  }>();
+
+  useEffect(() => {
+    if (!open) return;
+    form.setFieldsValue({
+      module_name: moduleRow?.module_name ?? "",
+      plan_workload: moduleRow?.plan_workload ?? "",
+      plan_begin_time: moduleRow?.plan_begin_time ?? "",
+      plan_complete_time: moduleRow?.plan_complete_time ?? "",
+      duty_user_id: moduleRow?.duty_user_id ?? "",
+    });
+  }, [open, moduleRow, form]);
+
+  const submit = async () => {
+    const vals = await form.validateFields();
+    onSave({
+      module_name: vals.module_name || null,
+      plan_workload: vals.plan_workload ?? null,
+      plan_begin_time: vals.plan_begin_time || null,
+      plan_complete_time: vals.plan_complete_time || null,
+      duty_user_id: vals.duty_user_id || null,
+    });
+  };
+
+  return (
+    <Drawer
+      open={open}
+      title={mode === "create" ? "新建模块" : "编辑模块"}
+      width={520}
+      onClose={onClose}
+      destroyOnClose
+      maskClosable={false}
+      extra={
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={onClose}>
+            取消
+          </Button>
+          <Button size="sm" disabled={saving} onClick={() => void submit()}>
+            {saving ? "保存中…" : "保存"}
+          </Button>
+        </div>
+      }
+    >
+      <Form form={form} layout="vertical">
+        <Form.Item
+          label="模块名称"
+          name="module_name"
+          rules={[{ required: true, message: "请输入模块名称" }]}
+        >
+          <Input placeholder="如:需求分析模块" />
+        </Form.Item>
+        <Form.Item label="计划工作量(工作日)" name="plan_workload">
+          <InputNumber
+            placeholder="如 5"
+            step={0.5}
+            precision={1}
+            min={0}
+            style={{ width: "100%" }}
+          />
+        </Form.Item>
+        <div className="grid grid-cols-2 gap-3">
+          <Form.Item label="计划开始时间" name="plan_begin_time">
+            <DatePicker
+              style={{ width: "100%" }}
+              format="YYYY-MM-DD"
+              value={toDay(form.getFieldValue("plan_begin_time"))}
+              onChange={(d) =>
+                form.setFieldValue("plan_begin_time", fromDate(d))
+              }
+            />
+          </Form.Item>
+          <Form.Item label="计划完成时间" name="plan_complete_time">
+            <DatePicker
+              style={{ width: "100%" }}
+              format="YYYY-MM-DD"
+              value={toDay(form.getFieldValue("plan_complete_time"))}
+              onChange={(d) =>
+                form.setFieldValue("plan_complete_time", fromDate(d))
+              }
+            />
+          </Form.Item>
+        </div>
+        <Form.Item label="责任人" name="duty_user_id">
+          {projectId ? (
+            <PpmUserSelect
+              res="projectMember"
+              searchData={{ pm_project_id: projectId }}
+              allowClear
+              placeholder="选择责任人(项目成员)"
+              style={{ width: "100%" }}
+            />
+          ) : (
+            <Input placeholder="需要先选择项目" disabled />
+          )}
+        </Form.Item>
+      </Form>
+    </Drawer>
   );
 }
 
@@ -1450,7 +1700,14 @@ function DetailDrawer({
               name="plan_workload"
               tooltip="填数字。修改后将按工作日自动推算计划完成时间。"
             >
-              <Input disabled={!baseEditable} placeholder="如 5" />
+              <InputNumber
+                disabled={!baseEditable}
+                placeholder="如 5"
+                step={0.5}
+                precision={1}
+                min={0}
+                style={{ width: "100%" }}
+              />
             </Form.Item>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -1458,6 +1715,7 @@ function DetailDrawer({
               <DatePicker
                 disabled={!baseEditable}
                 style={{ width: "100%" }}
+                format="YYYY-MM-DD"
                 value={toDay(form.getFieldValue("plan_begin_time"))}
                 onChange={(d) => {
                   const v = fromDate(d);
@@ -1470,6 +1728,7 @@ function DetailDrawer({
               <DatePicker
                 disabled={!baseEditable}
                 style={{ width: "100%" }}
+                format="YYYY-MM-DD"
                 value={toDay(form.getFieldValue("plan_complete_time"))}
                 onChange={(d) =>
                   form.setFieldValue("plan_complete_time", fromDate(d))
@@ -1932,7 +2191,13 @@ function PsPlanNodeDrawer({
             name="plan_workload"
             rules={[{ required: true, message: "请输入预计工作量" }]}
           >
-            <Input placeholder="如 5(工作日)" />
+            <InputNumber
+              placeholder="如 5(工作日)"
+              step={0.5}
+              precision={1}
+              min={0}
+              style={{ width: "100%" }}
+            />
           </Form.Item>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -1943,6 +2208,7 @@ function PsPlanNodeDrawer({
           >
             <DatePicker
               style={{ width: "100%" }}
+              format="YYYY-MM-DD"
               value={toDay(form.getFieldValue("plan_begin_time"))}
               onChange={(d) =>
                 form.setFieldValue("plan_begin_time", fromDate(d))
@@ -1956,6 +2222,7 @@ function PsPlanNodeDrawer({
           >
             <DatePicker
               style={{ width: "100%" }}
+              format="YYYY-MM-DD"
               value={toDay(form.getFieldValue("plan_complete_time"))}
               onChange={(d) =>
                 form.setFieldValue("plan_complete_time", fromDate(d))

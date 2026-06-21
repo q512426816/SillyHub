@@ -597,14 +597,80 @@ async def export_plan_nodes(
     )
 
 
+# P2-3:项目计划导出 (对照源 projectplan/index.vue handleExport)
+_PROJECT_PLAN_COLUMNS = [
+    ColumnDef(field="project_name", header="项目名称", width=24),
+    ColumnDef(field="project_manager_name", header="项目经理", width=16),
+    ColumnDef(field="contract_name", header="合同名称", width=24),
+    ColumnDef(field="contract_amount", header="合同金额", width=16),
+    ColumnDef(field="profit_margin", header="公司既定利润率(%)", width=16),
+    ColumnDef(field="profit_amount", header="公司既定利润金额", width=16),
+    ColumnDef(field="remaining_available_person_days", header="剩余可用人天", width=14),
+    ColumnDef(field="total_cost", header="总成本", width=14),
+    ColumnDef(field="remaining_cost", header="剩余成本", width=14),
+    ColumnDef(field="contract_sign_time", header="合同签订时间", width=20),
+    ColumnDef(field="project_start_time", header="项目开始时间", width=20),
+    ColumnDef(field="project_plan_end_time", header="预计验收时间", width=20),
+]
+
+
+@router.get("/project-plan/export-excel")
+async def export_project_plans(
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_EXPORT))],
+) -> Any:
+    """导出项目计划为 Excel (P2-3, X-002)。"""
+    rows = await PlanService(session).list_ps_project_plans_for_export()
+    columns = _PROJECT_PLAN_COLUMNS
+    return await anyio.to_thread.run_sync(
+        lambda: _build_excel_response(columns, rows, "项目计划", filename="project_plans.xlsx")
+    )
+
+
+# P2-3:里程碑明细导出 (对照源 psplannodedetail 列表)
+_PLAN_NODE_DETAIL_COLUMNS = [
+    ColumnDef(field="overall_stage", header="总体阶段", width=16),
+    ColumnDef(field="detailed_stage", header="明细阶段", width=16),
+    ColumnDef(field="task_theme", header="任务主题", width=28),
+    ColumnDef(field="plan_workload", header="计划工作量", width=12),
+    ColumnDef(field="plan_begin_time", header="计划开始", width=20),
+    ColumnDef(field="plan_complete_time", header="计划完成", width=20),
+    ColumnDef(field="role_name", header="角色", width=16),
+    ColumnDef(field="achievement", header="成果", width=28),
+    ColumnDef(field="status", header="状态", width=10),
+]
+
+
+@router.get("/plan-node-detail/export-excel")
+async def export_plan_node_details(
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_EXPORT))],
+) -> Any:
+    """导出里程碑明细为 Excel (P2-3, X-002)。
+
+    仅导出非 archived (当前有效版本) 的明细。
+    """
+    rows = await PlanService(session).list_plan_node_details_for_export()
+    columns = _PLAN_NODE_DETAIL_COLUMNS
+    return await anyio.to_thread.run_sync(
+        lambda: _build_excel_response(
+            columns, rows, "里程碑明细", filename="plan_node_details.xlsx"
+        )
+    )
+
+
 def _build_excel_response(
-    columns: list[ColumnDef], rows: list[dict[str, Any]], sheet_name: str
+    columns: list[ColumnDef],
+    rows: list[dict[str, Any]],
+    sheet_name: str,
+    *,
+    filename: str = "plan_nodes.xlsx",
 ) -> Any:
     """线程池内构造 Excel 下载响应 (X-002)。"""
     from app.modules.ppm.common.export import excel_response, rows_to_workbook
 
     content = rows_to_workbook(columns, rows, sheet_name=sheet_name)
-    return excel_response(content, filename="plan_nodes.xlsx")
+    return excel_response(content, filename=filename)
 
 
 __all__ = ["router"]

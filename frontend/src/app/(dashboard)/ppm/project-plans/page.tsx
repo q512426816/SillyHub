@@ -36,6 +36,7 @@ import { matchAnyUser } from "@/components/ppm-status-actions";
 import { ApiError } from "@/lib/api";
 import {
   deleteProjectPlan,
+  exportProjectPlans,
   listProjectPlans,
   type PsProjectPlan,
 } from "@/lib/ppm";
@@ -84,6 +85,7 @@ export default function ProjectPlansPage() {
   const currentUserId = currentUser?.id ?? "";
   const [plans, setPlans] = useState<PsProjectPlan[]>([]);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<DrawerState>({
     open: false,
@@ -168,6 +170,18 @@ export default function ProjectPlansPage() {
       await load();
     } catch (err) {
       showToast(false, err instanceof ApiError ? err.message : "删除失败");
+    }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      await exportProjectPlans();
+      showToast(true, "导出已开始");
+    } catch (err) {
+      showToast(false, err instanceof ApiError ? err.message : "导出失败");
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -340,12 +354,20 @@ export default function ProjectPlansPage() {
             ps_project_plan — 项目维度的计划主表
           </p>
         </div>
-        <Button
-          size="sm"
-          onClick={() => setDrawer({ open: true, mode: "create" })}
-        >
-          + 新建项目计划
-        </Button>
+        <div className="flex gap-2">
+          <AntButton
+            loading={exporting}
+            onClick={() => void handleExport()}
+          >
+            导出
+          </AntButton>
+          <Button
+            size="sm"
+            onClick={() => setDrawer({ open: true, mode: "create" })}
+          >
+            + 新建项目计划
+          </Button>
+        </div>
       </header>
 
       {/* 搜索栏 */}

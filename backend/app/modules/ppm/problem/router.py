@@ -384,14 +384,42 @@ async def export_problems(
     return await anyio.to_thread.run_sync(lambda: _build_excel_response(columns, rows, "问题清单"))
 
 
+# P2-3:问题变更导出 (对照源 problemchange/index.vue handleExport)
+_PROBLEM_CHANGE_COLUMNS = [
+    ColumnDef(field="project_name", header="项目名称", width=24),
+    ColumnDef(field="pro_desc", header="变更内容", width=40),
+    ColumnDef(field="change_reason", header="变更原因", width=30),
+    ColumnDef(field="duty_user_name", header="责任人", width=16),
+    ColumnDef(field="now_handle_user_name", header="当前处理人", width=16),
+    ColumnDef(field="status", header="状态", width=10),
+    ColumnDef(field="created_at", header="创建时间", width=20),
+]
+
+
+@router.get("/problem-change/export-excel")
+async def export_problem_changes(
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
+) -> Any:
+    """导出问题变更为 Excel (P2-3, X-002)。"""
+    rows = await ProblemService(session).list_changes_for_export()
+    columns = _PROBLEM_CHANGE_COLUMNS
+    return await anyio.to_thread.run_sync(
+        lambda: _build_excel_response(columns, rows, "问题变更", "problem_changes.xlsx")
+    )
+
+
 def _build_excel_response(
-    columns: list[ColumnDef], rows: list[dict[str, Any]], sheet_name: str
+    columns: list[ColumnDef],
+    rows: list[dict[str, Any]],
+    sheet_name: str,
+    filename: str = "problem_list.xlsx",
 ) -> Any:
     """线程池内构造 Excel 下载响应 (X-002)。"""
     from app.modules.ppm.common.export import excel_response, rows_to_workbook
 
     content = rows_to_workbook(columns, rows, sheet_name=sheet_name)
-    return excel_response(content, filename="problem_list.xlsx")
+    return excel_response(content, filename=filename)
 
 
 __all__ = ["router"]

@@ -38,6 +38,7 @@ import {
 import { ApiError } from "@/lib/api";
 import {
   deleteProblemChange,
+  exportProblemChanges,
   listProblemChanges,
   type ProblemChange,
 } from "@/lib/ppm";
@@ -73,6 +74,7 @@ export default function ProblemChangesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<DrawerMode | null>(null);
+  const [exporting, setExporting] = useState(false);
   const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(
     null,
   );
@@ -146,6 +148,18 @@ export default function ProblemChangesPage() {
       await load();
     } catch (err) {
       showToast(false, err instanceof ApiError ? err.message : "删除失败");
+    }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      await exportProblemChanges();
+      showToast(true, "导出已开始");
+    } catch (err) {
+      showToast(false, err instanceof ApiError ? err.message : "导出失败");
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -251,6 +265,9 @@ export default function ProblemChangesPage() {
             问题清单的变更申请:审核中 → 已完成 / 已作废
           </p>
         </div>
+        <Button onClick={() => void handleExport()} loading={exporting}>
+          导出
+        </Button>
       </header>
 
       {/* 搜索栏(对照源 index.vue queryParams) */}

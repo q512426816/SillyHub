@@ -644,6 +644,65 @@ class PlanService:
             for r in rows
         ]
 
+    async def list_ps_project_plans_for_export(self) -> list[dict[str, Any]]:
+        """返回项目计划全量行 (dict),供 Excel 导出 (P2-3)。
+
+        对照源 projectplan/index.vue 导出列:项目名称 / 项目经理 /
+        合同名称 / 合同金额 / 公司既定利润率 / 公司既定利润金额 /
+        剩余可用人天 / 总成本 / 剩余成本 / 合同签订时间 / 项目开始时间 /
+        预计验收时间。
+        """
+        rows = (await self._session.execute(select(PsProjectPlan))).scalars().all()
+        return [
+            {
+                "project_name": r.project_name,
+                "project_manager_name": r.project_manager_name,
+                "contract_name": r.contract_name,
+                "contract_amount": r.contract_amount,
+                "profit_margin": r.profit_margin,
+                "profit_amount": r.profit_amount,
+                "remaining_available_person_days": r.remaining_available_person_days,
+                "total_cost": r.total_cost,
+                "remaining_cost": r.remaining_cost,
+                "contract_sign_time": (
+                    r.contract_sign_time.isoformat() if r.contract_sign_time else None
+                ),
+                "project_start_time": (
+                    r.project_start_time.isoformat() if r.project_start_time else None
+                ),
+                "project_plan_end_time": (
+                    r.project_plan_end_time.isoformat() if r.project_plan_end_time else None
+                ),
+            }
+            for r in rows
+        ]
+
+    async def list_plan_node_details_for_export(self) -> list[dict[str, Any]]:
+        """返回里程碑明细全量行 (dict),供 Excel 导出 (P2-3)。
+
+        仅导出非 archived (当前有效版本) 的明细。对照源 psplannodedetail
+        列表列:总体阶段 / 明细阶段 / 任务主题 / 计划工作量 / 计划开始 /
+        计划完成 / 角色 / 成果 / 状态。
+        """
+        stmt = select(PsPlanNodeDetail).where(PsPlanNodeDetail.status != "archived")
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [
+            {
+                "overall_stage": r.overall_stage,
+                "detailed_stage": r.detailed_stage,
+                "task_theme": r.task_theme,
+                "plan_workload": r.plan_workload,
+                "plan_begin_time": (r.plan_begin_time.isoformat() if r.plan_begin_time else None),
+                "plan_complete_time": (
+                    r.plan_complete_time.isoformat() if r.plan_complete_time else None
+                ),
+                "role_name": r.role_name,
+                "achievement": r.achievement,
+                "status": r.status,
+            }
+            for r in rows
+        ]
+
     # ---------- submitDetail (task-02):detail JSON 白名单 merge 落库 ----------
     # 提交明细字段更新 (对照源 PsPlanNodeDetailController.submitDetail):
     # detail 中非 None 的白名单字段 merge 到明细,未知键忽略 (边界 6)。
