@@ -433,8 +433,31 @@ class WorkHourService:
         end: date | None,
         user_id: uuid.UUID | None = None,
     ) -> list[dict[str, Any]]:
-        """按 user_id 聚合工时。"""
-        return await self._stat(WorkHour.user_id, start, end, user_id)
+        """按 execute_user_id 聚合工时 (数据源:``ppm_task_execute.time_spent``)。
+
+        注意:源 ``ppm_work_hour`` 表当前为空 (历史未录入),实际工时数据落在
+        任务执行表 ``time_spent`` 字段,故统计改查此表以保证页面有数据。
+        ``start`` / ``end`` 过滤 ``actual_start_time`` / ``actual_end_time``。
+        """
+        group_col = TaskExecute.execute_user_id
+        stmt = (
+            select(
+                group_col.label("key"),
+                func.sum(TaskExecute.time_spent).label("total_hours"),
+                func.count(TaskExecute.id).label("count"),
+            )
+            .where(group_col.is_not(None))
+            .group_by(group_col)
+            .order_by(func.sum(TaskExecute.time_spent).desc())
+        )
+        if user_id is not None:
+            stmt = stmt.where(group_col == user_id)
+        start_dt, end_dt = _stat_date_range(start, end)
+        if start_dt is not None:
+            stmt = stmt.where(TaskExecute.actual_start_time >= start_dt)
+        if end_dt is not None:
+            stmt = stmt.where(TaskExecute.actual_end_time < end_dt)
+        return await self._fetch_stat_rows(stmt)
 
     async def stat_by_project(
         self,
@@ -442,40 +465,43 @@ class WorkHourService:
         end: date | None,
         project_id: uuid.UUID | None = None,
     ) -> list[dict[str, Any]]:
-        """按 project_id 聚合工时。"""
-        return await self._stat(WorkHour.project_id, start, end, project_id)
+        """按 project_id 聚合工时。
 
-    async def _stat(
-        self,
-        group_col: Any,
-        start: date | None,
-        end: date | None,
-        filter_id: uuid.UUID | None,
-    ) -> list[dict[str, Any]]:
-        """通用聚合:SELECT group_col, SUM(hours), COUNT(*) ... GROUP BY group_col。"""
+        数据源:``ppm_task_execute`` JOIN ``ppm_plan_task``
+        (ON task_execute.plan_task_id = plan_task.id),SUM(time_spent)。
+        """
+        group_col = PlanTask.project_id
         stmt = (
             select(
                 group_col.label("key"),
-                func.sum(WorkHour.hours).label("total_hours"),
-                func.count(WorkHour.id).label("count"),
+                func.sum(TaskExecute.time_spent).label("total_hours"),
+                func.count(TaskExecute.id).label("count"),
             )
+            .join(PlanTask, TaskExecute.plan_task_id == PlanTask.id)
+            .where(group_col.is_not(None))
             .group_by(group_col)
-            .order_by(func.sum(WorkHour.hours).desc())
+            .order_by(func.sum(TaskExecute.time_spent).desc())
         )
-        if filter_id is not None:
-            stmt = stmt.where(group_col == filter_id)
-        if start is not None:
-            stmt = stmt.where(WorkHour.work_date >= _date_to_datetime(start))
-        if end is not None:
-            stmt = stmt.where(WorkHour.work_date < _date_to_datetime(end) + timedelta(days=1))
+        if project_id is not None:
+            stmt = stmt.where(group_col == project_id)
+        start_dt, end_dt = _stat_date_range(start, end)
+        if start_dt is not None:
+            stmt = stmt.where(TaskExecute.actual_start_time >= start_dt)
+        if end_dt is not None:
+            stmt = stmt.where(TaskExecute.actual_end_time < end_dt)
+        return await self._fetch_stat_rows(stmt)
+
+    async def _fetch_stat_rows(self, stmt: Any) -> list[dict[str, Any]]:
+        """执行聚合 SQL,返回 [{key, total_hours, count}] 列表。"""
         result = await self._session.execute(stmt)
         rows: list[dict[str, Any]] = []
         for row in result.all():
+            count_val: Any = row.count
             rows.append(
                 {
                     "key": row.key,
                     "total_hours": float(row.total_hours or 0),
-                    "count": int(row.count or 0),
+                    "count": int(count_val or 0),
                 }
             )
         return rows
@@ -484,6 +510,15 @@ class WorkHourService:
 def _date_to_datetime(d: date) -> datetime:
     """date → UTC 0 点 datetime (统一存储时区感知)。"""
     return datetime(d.year, d.month, d.day, tzinfo=UTC)
+
+
+def _stat_date_range(
+    start: date | None, end: date | None
+) -> tuple[datetime | None, datetime | None]:
+    """stat 端点统一日期范围:[start 00:00, end+1day 00:00)。"""
+    start_dt = _date_to_datetime(start) if start is not None else None
+    end_dt = _date_to_datetime(end) + timedelta(days=1) if end is not None else None
+    return start_dt, end_dt
 
 
 __all__ = [

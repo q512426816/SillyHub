@@ -83,6 +83,46 @@ async def _seed_work_hour(
     return wh.id
 
 
+async def _seed_task_execute(
+    db_session,
+    user_id: uuid.UUID,
+    *,
+    time_spent: float,
+    project_id: uuid.UUID | None = None,
+    day_offset: int = 0,
+) -> uuid.UUID:
+    """构造一条 TaskExecute + 关联 PlanTask (可选 project_id) 供 stat 测试用。"""
+    plan_svc = PlanTaskService(db_session)
+    plan = await plan_svc.create(
+        PlanTaskCreate(
+            user_id=user_id,
+            user_name="张三",
+            status="进行中",
+            project_id=project_id or uuid.uuid4(),
+            project_name="P1",
+            content="写单测",
+            work_load="1",
+            start_time=datetime(2026, 6, 20, 9, tzinfo=UTC),
+            end_time=datetime(2026, 6, 20, 18, tzinfo=UTC),
+            month="2026-06",
+            year="2026",
+        )
+    )
+    exc_svc = TaskExecuteService(db_session)
+    base = datetime(2026, 6, 1, tzinfo=UTC) + timedelta(days=day_offset)
+    exc = await exc_svc.create(
+        TaskExecuteCreate(
+            plan_task_id=plan.id,
+            execute_user_id=user_id,
+            time_spent=time_spent,
+            actual_start_time=base,
+            actual_end_time=base + timedelta(hours=8),
+            status="30",
+        )
+    )
+    return exc.id
+
+
 # ---------------------------------------------------------------------------
 # PlanTask CRUD
 # ---------------------------------------------------------------------------
@@ -261,12 +301,12 @@ async def test_work_hour_crud(db_session):
 
 
 async def test_work_hour_stat_by_user_aggregation(db_session):
+    """stat_by_user 数据源为 ppm_task_execute.time_spent (work_hour 表为空)。"""
     user_a = uuid.uuid4()
     user_b = uuid.uuid4()
-    project_id = uuid.uuid4()
-    await _seed_work_hour(db_session, user_a, project_id, 8.0, day_offset=0)
-    await _seed_work_hour(db_session, user_a, project_id, 4.0, day_offset=1)
-    await _seed_work_hour(db_session, user_b, project_id, 6.0, day_offset=0)
+    await _seed_task_execute(db_session, user_a, time_spent=8.0, day_offset=0)
+    await _seed_task_execute(db_session, user_a, time_spent=4.0, day_offset=1)
+    await _seed_task_execute(db_session, user_b, time_spent=6.0, day_offset=0)
 
     svc = WorkHourService(db_session)
     rows = await svc.stat_by_user(start=None, end=None)
@@ -282,12 +322,13 @@ async def test_work_hour_stat_by_user_aggregation(db_session):
 
 
 async def test_work_hour_stat_by_project_aggregation(db_session):
+    """stat_by_project JOIN ppm_plan_task,按 project_id 聚合 time_spent。"""
     user_id = uuid.uuid4()
     proj_a = uuid.uuid4()
     proj_b = uuid.uuid4()
-    await _seed_work_hour(db_session, user_id, proj_a, 5.0)
-    await _seed_work_hour(db_session, user_id, proj_a, 3.0)
-    await _seed_work_hour(db_session, user_id, proj_b, 2.0)
+    await _seed_task_execute(db_session, user_id, project_id=proj_a, time_spent=5.0)
+    await _seed_task_execute(db_session, user_id, project_id=proj_a, time_spent=3.0)
+    await _seed_task_execute(db_session, user_id, project_id=proj_b, time_spent=2.0)
 
     svc = WorkHourService(db_session)
     rows = await svc.stat_by_project(start=None, end=None)
@@ -408,22 +449,37 @@ async def test_plan_task_http_crud(client, auth_headers):
 
 
 async def test_work_hour_stat_endpoints(client, auth_headers):
+    """stat 端点数据源为 task_execute.time_spent (work_hour 表空)。"""
     user_id = str(uuid.uuid4())
     project_id = str(uuid.uuid4())
-    # 创建两条工时
+    # 建计划 + execute_plan 写入两条 time_spent
     for hours in (4.0, 6.0):
         resp = await client.post(
-            "/api/ppm/work-hour/create",
+            "/api/ppm/task-plan/create",
             json={
                 "user_id": user_id,
                 "project_id": project_id,
-                "work_date": "2026-06-01",
-                "hours": hours,
-                "type": 1,
+                "content": "执行",
+                "start_time": "2026-06-01T09:00:00Z",
+                "end_time": "2026-06-01T18:00:00Z",
             },
             headers=auth_headers,
         )
         assert resp.status_code == 201, resp.text
+        plan_id = resp.json()["id"]
+        resp = await client.put(
+            "/api/ppm/task-plan/execute",
+            json={
+                "plan_task_id": plan_id,
+                "execute_user_id": user_id,
+                "time_spent": hours,
+                "actual_start_time": "2026-06-01T09:00:00Z",
+                "actual_end_time": "2026-06-01T18:00:00Z",
+                "submit": True,
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
 
     # stat-by-user
     resp = await client.get(
