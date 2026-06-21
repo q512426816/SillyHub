@@ -109,11 +109,13 @@ export function PpmProjectPlanForm({
   const [form] = Form.useForm<FormValues>();
   const [messageApi, contextHolder] = message.useMessage();
 
-  // 项目经理 searchData 依赖 projectId;未选项目时传 '-' 拉空,对齐源 '请配置此项目[项目经理]'。
+  // 项目经理 searchData 依赖 projectId;未选项目时不传 pm_project_id
+  // (后端对 '-' 会 422;PpmUserSelect 也不渲染 projectMember 选项,
+  // 直接用 user fallback,见下方 res 切换)。
   const projectId = Form.useWatch("project_id", form);
   const managerSearchData = useMemo(
     () => ({
-      pm_project_id: projectId || "-",
+      pm_project_id: projectId || undefined,
       role_name: "项目经理",
     }),
     [projectId],
@@ -306,8 +308,10 @@ export function PpmProjectPlanForm({
               rules={[{ required: true, message: "请选择项目经理" }]}
             >
               <PpmUserSelect
-                res="projectMember"
-                placeholder="请选择项目经理"
+                res={projectId ? "projectMember" : "user"}
+                placeholder={
+                  projectId ? "请选择项目经理" : "请先选择项目,再选择项目经理"
+                }
                 searchData={managerSearchData}
                 onLoadedOptions={(opts) => (memberOptsRef.current = opts)}
                 onChange={(value) =>

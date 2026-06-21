@@ -98,6 +98,23 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _parse_uuid_optional(value: str | uuid.UUID | None) -> uuid.UUID | None:
+    """把查询参数容错规整为 UUID。
+
+    前端可能传占位符(如 "-"、"")或非法字符串(已选项目前传 "-" 拉空),
+    这里 try-parse:能解析则返回 UUID,否则返回 None(等价于不过滤),
+    避免 SQLAlchemy 比较 / 422。
+    """
+    if value is None:
+        return None
+    if isinstance(value, uuid.UUID):
+        return value
+    try:
+        return uuid.UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
 def _to_page_req(page_req: Any) -> PageReq:
     """把 Pydantic ``XxxPageReq`` 转成通用 ``PageReq`` dataclass。"""
     return PageReq(
@@ -426,10 +443,12 @@ class ProjectMemberService:
 
     async def page(self, req: ProjectMemberPageReq) -> Page[PpmProjectMember]:
         stmt = select(PpmProjectMember)
-        if req.pm_project_id is not None:
-            stmt = stmt.where(PpmProjectMember.pm_project_id == req.pm_project_id)
-        if req.user_id is not None:
-            stmt = stmt.where(PpmProjectMember.user_id == req.user_id)
+        pm_project_id = _parse_uuid_optional(req.pm_project_id)
+        if pm_project_id is not None:
+            stmt = stmt.where(PpmProjectMember.pm_project_id == pm_project_id)
+        user_id = _parse_uuid_optional(req.user_id)
+        if user_id is not None:
+            stmt = stmt.where(PpmProjectMember.user_id == user_id)
         if req.role_name:
             stmt = stmt.where(PpmProjectMember.role_name == req.role_name)
         total = await count_total(self._session, stmt)
@@ -546,8 +565,9 @@ class ProjectStakeholderService:
         req: ProjectStakeholderPageReq,
     ) -> Page[PpmProjectStakeholder]:
         stmt = select(PpmProjectStakeholder)
-        if req.pm_project_id is not None:
-            stmt = stmt.where(PpmProjectStakeholder.pm_project_id == req.pm_project_id)
+        pm_project_id = _parse_uuid_optional(req.pm_project_id)
+        if pm_project_id is not None:
+            stmt = stmt.where(PpmProjectStakeholder.pm_project_id == pm_project_id)
         if req.stakeholder:
             stmt = stmt.where(PpmProjectStakeholder.stakeholder.like(f"%{req.stakeholder}%"))
         if req.stakeholder_role:

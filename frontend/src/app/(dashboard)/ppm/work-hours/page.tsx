@@ -11,7 +11,7 @@
  * 依赖:lib/ppm/task (work-hour API) + lib/ppm/project (项目下拉) + stores/session。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Table, type TableProps } from "antd";
+import { message, Table, type TableProps } from "antd";
 
 import { Button } from "@/components/ui/button";
 import { PpmUserSelect, type PpmSelectOption } from "@/components/ppm-user-select";
@@ -94,7 +94,9 @@ export default function WorkHoursPage() {
         const list = await listSimpleProjects();
         setProjects(list ?? []);
       } catch (e) {
-        console.error("[ppm/work-hours] load projects failed", e);
+        message.error(
+          e instanceof Error ? e.message : "加载项目列表失败",
+        );
       }
     })();
   }, []);
@@ -144,7 +146,9 @@ export default function WorkHoursPage() {
         });
         setPlanTasks(resp.items ?? []);
       } catch (e) {
-        console.error("[ppm/work-hours] load plan tasks failed", e);
+        message.error(
+          e instanceof Error ? e.message : "加载任务列表失败",
+        );
         setPlanTasks([]);
       }
     })();
@@ -523,7 +527,9 @@ function WorkHourDrawer({
         });
         setTaskOptions(resp.items ?? []);
       } catch (e) {
-        console.error("[ppm/work-hours] load task options failed", e);
+        message.error(
+          e instanceof Error ? e.message : "加载任务选项失败",
+        );
         setTaskOptions([]);
       }
     })();

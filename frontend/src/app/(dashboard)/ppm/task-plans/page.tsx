@@ -12,7 +12,7 @@
  * 依赖:lib/ppm/task (API) + lib/ppm/project (项目下拉) + stores/session。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { DatePicker, Input, Select, Table, type TableProps, Tag } from "antd";
+import { DatePicker, Input, message, Select, Table, type TableProps, Tag } from "antd";
 import type { Dayjs } from "dayjs";
 
 import { Button } from "@/components/ui/button";
@@ -114,7 +114,9 @@ export default function TaskPlansPage() {
         const list = await listSimpleProjects();
         setProjects(list ?? []);
       } catch (e) {
-        console.error("[ppm/task-plans] load projects failed", e);
+        message.error(
+          e instanceof Error ? e.message : "加载项目列表失败",
+        );
       }
     })();
   }, []);

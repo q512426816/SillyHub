@@ -15,7 +15,7 @@
  *       components/ppm-user-select (成员选择) + components/charts。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Table, Tabs, type TableProps } from "antd";
+import { message, Table, Tabs, type TableProps } from "antd";
 
 import { Button } from "@/components/ui/button";
 import { PpmUserSelect, type PpmSelectOption } from "@/components/ppm-user-select";
@@ -69,7 +69,9 @@ export default function WorkHourStatisticsPage() {
       try {
         setProjects((await listSimpleProjects()) ?? []);
       } catch (e) {
-        console.error("[ppm/work-hour-statistics] load projects failed", e);
+        message.error(
+          e instanceof Error ? e.message : "加载项目列表失败",
+        );
       }
     })();
   }, []);

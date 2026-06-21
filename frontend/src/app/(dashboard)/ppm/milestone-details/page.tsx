@@ -40,6 +40,7 @@ import {
   Form,
   Input,
   InputNumber,
+  message,
   Select,
   Table,
   type TableProps,
@@ -196,8 +197,9 @@ export default function MilestoneDetailsPage() {
     })();
   }, [planId]);
 
-  // readOnlyFlag:非项目经理(无 create_user_id 字段,退化为 project_manager_id)→ 只读
-  const readOnly = !matchAnyUser([projectManagerId], currentUserId);
+  // readOnlyFlag:平台超管 bypass,否则非项目经理(无 create_user_id,退化为 project_manager_id)→ 只读
+  const readOnly =
+    !currentUser?.is_platform_admin && !matchAnyUser([projectManagerId], currentUserId);
 
   // 主表前端过滤:总体阶段(plan 内)
   const filteredNodes = useMemo(() => {
@@ -761,8 +763,10 @@ function ModuleLevelTable({
     try {
       await deletePlanNodeModule(m.id);
       await reload();
-    } catch {
-      // 静默(外层无 toast 通道,此处简化)
+    } catch (err) {
+      message.error(
+        err instanceof Error ? err.message : "删除模块失败",
+      );
     }
   };
 
@@ -1020,7 +1024,7 @@ function ModuleFormDrawer({
           />
         </Form.Item>
         <div className="grid grid-cols-2 gap-3">
-          <Form.Item label="计划开始时间" name="plan_begin_time">
+          <Form.Item label="计划开始时间">
             <DatePicker
               style={{ width: "100%" }}
               format="YYYY-MM-DD"
@@ -1030,7 +1034,7 @@ function ModuleFormDrawer({
               }
             />
           </Form.Item>
-          <Form.Item label="计划完成时间" name="plan_complete_time">
+          <Form.Item label="计划完成时间">
             <DatePicker
               style={{ width: "100%" }}
               format="YYYY-MM-DD"
@@ -1146,8 +1150,10 @@ function DetailLevelTable({
     try {
       await deletePsPlanNodeDetail(d.id);
       await reload();
-    } catch {
-      // 静默
+    } catch (err) {
+      message.error(
+        err instanceof Error ? err.message : "删除里程碑明细失败",
+      );
     }
   };
 
@@ -1711,7 +1717,7 @@ function DetailDrawer({
             </Form.Item>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Form.Item label="计划开始时间" name="plan_begin_time">
+            <Form.Item label="计划开始时间">
               <DatePicker
                 disabled={!baseEditable}
                 style={{ width: "100%" }}
@@ -1724,7 +1730,7 @@ function DetailDrawer({
                 }}
               />
             </Form.Item>
-            <Form.Item label="计划完成时间" name="plan_complete_time">
+            <Form.Item label="计划完成时间">
               <DatePicker
                 disabled={!baseEditable}
                 style={{ width: "100%" }}

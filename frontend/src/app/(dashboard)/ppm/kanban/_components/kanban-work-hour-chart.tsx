@@ -17,7 +17,7 @@
  * ECharts 组件经 components/charts/ 动态包装(ssr:false)。
  */
 import { useEffect, useMemo, useState } from "react";
-import { Button, Empty, Spin } from "antd";
+import { Button, Empty, message, Spin } from "antd";
 
 import { statWorkHoursByUser } from "@/lib/ppm/task";
 import type {
@@ -67,8 +67,13 @@ export function KanbanWorkHourChart({
       .then((r) => {
         if (!cancelled) setByUser(r);
       })
-      .catch(() => {
-        if (!cancelled) setByUser(null);
+      .catch((err) => {
+        if (!cancelled) {
+          setByUser(null);
+          message.error(
+            err instanceof Error ? err.message : "加载工时统计失败",
+          );
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

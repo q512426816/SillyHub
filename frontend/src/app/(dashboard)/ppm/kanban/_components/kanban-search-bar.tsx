@@ -42,8 +42,9 @@ export function KanbanSearchBar({
   const fetchTasks = useKanbanStore((s) => s.fetchTasks);
 
   // 任一筛选变化 → 更新 store + 重新拉数据(对齐源 applyFilters + refreshData)
+  // 失败时 store 内已 message.error,这里吞掉避免 unhandled rejection。
   const applyAndRefresh = async () => {
-    await Promise.all([fetchUsers(), fetchTasks()]);
+    await Promise.all([fetchUsers(), fetchTasks()]).catch(() => {});
   };
 
   const onUsersChange = async (v: string | string[] | null) => {
@@ -89,7 +90,7 @@ export function KanbanSearchBar({
 
   const onReset = async () => {
     resetFilters();
-    await Promise.all([fetchUsers(), fetchTasks()]);
+    await Promise.all([fetchUsers(), fetchTasks()]).catch(() => {});
   };
 
   return (

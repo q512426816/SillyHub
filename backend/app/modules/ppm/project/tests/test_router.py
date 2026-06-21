@@ -275,6 +275,30 @@ async def test_stakeholder_http_crud(client: AsyncClient, auth_headers: dict):
     assert resp.status_code == 204
 
 
+async def test_project_member_page_invalid_pm_project_id_tolerant(
+    client: AsyncClient, auth_headers: dict
+):
+    """前端未选项目时传占位 '-' (非合法 UUID) 不应 422。
+
+    回归:旧实现 query 参数为 ``uuid.UUID | None``,FastAPI 对 '-' 直接
+    返回 422;容错后改为 ``str | None`` + service 层 try-parse,非法值
+    等价于不过滤。
+    """
+    base = "/api/ppm/project-member"
+    resp = await client.get(f"{base}?pm_project_id=-&role_name=项目经理", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    # 非法值视为不过滤,应返回全部(>=0)
+    assert "items" in resp.json()
+
+    # 空 / 脏字符串同样容错
+    resp = await client.get(f"{base}?pm_project_id=not-a-uuid", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+
+    # stakeholder 同样容错
+    resp = await client.get("/api/ppm/project-stakeholder?pm_project_id=-", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+
+
 # ---------------------------------------------------------------------------
 # 权限:无 PPM_* 权限的用户 → 403
 # ---------------------------------------------------------------------------

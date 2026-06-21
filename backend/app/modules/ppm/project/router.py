@@ -456,8 +456,10 @@ async def page_project_member(
     page_size: int = Query(20, ge=1, le=200),
     order_by: str | None = Query(None),
     order: str = Query("desc"),
-    pm_project_id: uuid.UUID | None = Query(None),
-    user_id: uuid.UUID | None = Query(None),
+    # 容错:str | None,非法值(前端占位 "-")由 service 层规整为 None。
+    # 不在 query 层强校验 UUID,避免 422 直接拒绝请求。
+    pm_project_id: str | None = Query(None),
+    user_id: str | None = Query(None),
     role_name: str | None = Query(None),
 ) -> Page[ProjectMemberResp]:
     req = ProjectMemberPageReq(
@@ -551,7 +553,8 @@ async def page_project_stakeholder(
     page_size: int = Query(20, ge=1, le=200),
     order_by: str | None = Query(None),
     order: str = Query("desc"),
-    pm_project_id: uuid.UUID | None = Query(None),
+    # 容错:同 project-member。
+    pm_project_id: str | None = Query(None),
     stakeholder: str | None = Query(None),
     stakeholder_role: str | None = Query(None),
 ) -> Page[ProjectStakeholderResp]:

@@ -26,7 +26,7 @@
  *           .sillyspec/changes/2026-06-21-ppm-frontend-alignment/tasks/task-01.md
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Select, Spin, Tag } from "antd";
+import { message, Select, Spin, Tag } from "antd";
 import type { DefaultOptionType } from "antd/es/select";
 
 import { ApiError } from "@/lib/api";
@@ -270,9 +270,10 @@ export function PpmUserSelect(props: PpmUserSelectProps) {
         );
         setPage(nextPage);
       } catch (err) {
-        // 静默:ApiError 由全局处理;下拉显示空即可,避免表单整体崩溃。
-        if (err instanceof ApiError) {
-          // no-op
+        // 下拉数据加载失败:提示用户(避免静默 console.error),下拉显示空。
+        // 关键字搜索/翻页的失败不刷屏:仅在首屏重置时提示。
+        if (reset && err instanceof ApiError) {
+          message.error(err.message || "加载选项失败");
         }
       } finally {
         if (myReqId === reqIdRef.current) setLoading(false);

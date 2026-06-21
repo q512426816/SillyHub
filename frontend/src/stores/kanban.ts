@@ -18,7 +18,9 @@
  *    表达同一语义(SearchBar 多选人员 → 过滤可见列)。
  */
 import { create } from "zustand";
+import { message } from "antd";
 
+import { ApiError } from "@/lib/api";
 import {
   assignKanbanTask,
   createKanbanTask,
@@ -105,6 +107,10 @@ export const useKanbanStore = create<KanbanState>((set, get) => ({
       const users = flattenUsers(resp);
       set({ users });
       return users;
+    } catch (err) {
+      // 列表加载失败:提示用户(避免静默),并向上抛让调用方可选地处理。
+      message.error(errMessage(err, "加载人员列表失败"));
+      throw err;
     } finally {
       set({ loading: false });
     }
@@ -124,6 +130,9 @@ export const useKanbanStore = create<KanbanState>((set, get) => ({
       });
       set({ tasks });
       return tasks;
+    } catch (err) {
+      message.error(errMessage(err, "加载任务列表失败"));
+      throw err;
     } finally {
       set({ loading: false });
     }
@@ -135,7 +144,13 @@ export const useKanbanStore = create<KanbanState>((set, get) => ({
   },
 
   async reorderTasks(req) {
-    await reorderKanbanTasks(req);
+    // 拖拽排序失败必须提示用户(否则用户以为改了但实际没改)。
+    try {
+      await reorderKanbanTasks(req);
+    } catch (err) {
+      message.error(errMessage(err, "任务排序失败"));
+      throw err;
+    }
     await get().fetchTasks();
   },
 
@@ -161,3 +176,10 @@ export const useKanbanStore = create<KanbanState>((set, get) => ({
     set({ users: [], tasks: [], filters: {}, loading: false });
   },
 }));
+
+/** 统一错误文案:ApiError 用后端 message,其它用 fallback。 */
+function errMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) return err.message || fallback;
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}

@@ -199,8 +199,10 @@ class ProjectMemberPageReq(PydanticModel):
     order_by: str | None = Field(default=None)
     order: str = Field(default="desc")
 
-    pm_project_id: uuid.UUID | None = None
-    user_id: uuid.UUID | None = None
+    # 容错:str | None,非法值(如前端 "-" 占位)在 service 层被规整为 None
+    # (不强校验 uuid 类型,避免 FastAPI 422 直接拒绝请求)。
+    pm_project_id: str | uuid.UUID | None = None
+    user_id: str | uuid.UUID | None = None
     role_name: str | None = None
 
 
@@ -245,7 +247,8 @@ class ProjectStakeholderPageReq(PydanticModel):
     order_by: str | None = Field(default=None)
     order: str = Field(default="desc")
 
-    pm_project_id: uuid.UUID | None = None
+    # 容错:同 ProjectMemberPageReq。
+    pm_project_id: str | uuid.UUID | None = None
     stakeholder: str | None = None
     stakeholder_role: str | None = None
 
