@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,7 +27,9 @@ from app.modules.ppm.plan.model import (
 )
 from app.modules.ppm.plan.service import PlanError, PlanNotFound, PlanService
 
-_ACTOR = ("actor-001", "张三")
+# FK 字段已改为 uuid.UUID (migration 202607220900),测试用合法 UUID 字符串。
+_ACTOR = ("00000000-0000-0000-0000-000000000001", "张三")
+_AUDIT_USER_ID = "00000000-0000-0000-0000-000000000003"
 
 
 # ===========================================================================
@@ -70,7 +74,7 @@ class TestPlanNodeCrud:
 class TestSubTables:
     async def test_detail_and_module_by_node(self, db_session: AsyncSession) -> None:
         svc = PlanService(db_session)
-        node_id = "tpl-node-1"
+        node_id = str(uuid.uuid4())
         await svc.create_plan_node_detail(
             {"plan_node_id": node_id, "no": "1", "task_theme": "需求调研"}
         )
@@ -90,8 +94,9 @@ class TestSubTables:
 class TestPsProjectPlan:
     async def test_crud(self, db_session: AsyncSession) -> None:
         svc = PlanService(db_session)
+        proj_id = str(uuid.uuid4())
         plan = await svc.create_ps_project_plan(
-            {"project_id": "P1", "project_name": "项目甲", "status": "draft"}
+            {"project_id": proj_id, "project_name": "项目甲", "status": "draft"}
         )
         got = await svc.get_ps_project_plan(plan.id)
         assert got.project_name == "项目甲"
@@ -99,13 +104,13 @@ class TestPsProjectPlan:
         assert updated.project_name == "项目乙"
         # 里程碑子表
         node = await svc.create_ps_plan_node(
-            {"ps_project_plan_id": "P1", "no": "1", "task_theme": "里程碑1"}
+            {"ps_project_plan_id": str(plan.id), "no": "1", "task_theme": "里程碑1"}
         )
-        nodes = await svc.list_ps_plan_nodes_by_plan("P1")
+        nodes = await svc.list_ps_plan_nodes_by_plan(str(plan.id))
         assert len(nodes) == 1
         assert nodes[0].id == node.id
         await svc.delete_ps_plan_node(node.id)
-        assert await svc.list_ps_plan_nodes_by_plan("P1") == []
+        assert await svc.list_ps_plan_nodes_by_plan(str(plan.id)) == []
 
 
 # ===========================================================================
@@ -113,10 +118,10 @@ class TestPsProjectPlan:
 # ===========================================================================
 
 
-async def _create_detail(svc: PlanService, plan_node_id: str = "ms-1") -> PsPlanNodeDetail:
+async def _create_detail(svc: PlanService, plan_node_id: str | None = None) -> PsPlanNodeDetail:
     return await svc.create_detail(
         {
-            "plan_node_id": plan_node_id,
+            "plan_node_id": plan_node_id or str(uuid.uuid4()),
             "no": "1",
             "task_theme": "里程碑明细1",
             "plan_workload": "5",
@@ -152,11 +157,11 @@ class TestSaveProcess:
             detail.id,
             actor_id=_ACTOR[0],
             actor_name=_ACTOR[1],
-            next_user_id="audit-1",
+            next_user_id=_AUDIT_USER_ID,
             next_user_name="审核员",
         )
         got = await svc.get_detail(detail.id)
-        assert got.audit_user_id == "audit-1"
+        assert got.audit_user_id == uuid.UUID(_AUDIT_USER_ID)
         assert got.audit_user_name == "审核员"
 
     async def test_process_log_inserted_each_step(self, db_session: AsyncSession) -> None:

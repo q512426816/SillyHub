@@ -58,7 +58,7 @@ class PlanNodeResp(PlanNodeBase):
 
 
 class PlanNodeDetailBase(PydanticModel):
-    plan_node_id: str
+    plan_node_id: uuid.UUID
     detailed_stage: str | None = None
     no: str | None = None
     task_theme: str | None = None
@@ -93,12 +93,12 @@ class PlanNodeDetailResp(PlanNodeDetailBase):
 
 
 class PlanNodeModuleBase(PydanticModel):
-    plan_node_id: str
+    plan_node_id: uuid.UUID
     module_name: str | None = None
     plan_workload: str | None = None
     plan_begin_time: datetime | None = None
     plan_complete_time: datetime | None = None
-    duty_user_id: str | None = None
+    duty_user_id: uuid.UUID | None = None
 
 
 class PlanNodeModuleCreate(PlanNodeModuleBase):
@@ -110,7 +110,7 @@ class PlanNodeModuleUpdate(PydanticModel):
     plan_workload: str | None = None
     plan_begin_time: datetime | None = None
     plan_complete_time: datetime | None = None
-    duty_user_id: str | None = None
+    duty_user_id: uuid.UUID | None = None
 
 
 class PlanNodeModuleResp(PlanNodeModuleBase):
@@ -127,9 +127,9 @@ class PlanNodeModuleResp(PlanNodeModuleBase):
 
 
 class PsProjectPlanBase(PydanticModel):
-    project_id: str
+    project_id: uuid.UUID
     project_name: str | None = None
-    project_manager_id: str | None = None
+    project_manager_id: uuid.UUID | None = None
     project_manager_name: str | None = None
     project_start_time: datetime | None = None
     project_plan_end_time: datetime | None = None
@@ -159,7 +159,7 @@ class PsProjectPlanCreate(PsProjectPlanBase):
 
 class PsProjectPlanUpdate(PydanticModel):
     project_name: str | None = None
-    project_manager_id: str | None = None
+    project_manager_id: uuid.UUID | None = None
     project_manager_name: str | None = None
     project_start_time: datetime | None = None
     project_plan_end_time: datetime | None = None
@@ -194,13 +194,13 @@ class PsProjectPlanResp(PsProjectPlanBase):
 class PsPlanNodeBase(PydanticModel):
     overall_stage: str | None = None
     no: str | None = None
-    ps_project_plan_id: str
+    ps_project_plan_id: uuid.UUID
     status: str = "draft"
     task_theme: str | None = None
     plan_workload: str | None = None
     plan_begin_time: datetime | None = None
     plan_complete_time: datetime | None = None
-    duty_user_id: str | None = None
+    duty_user_id: uuid.UUID | None = None
 
 
 class PsPlanNodeCreate(PsPlanNodeBase):
@@ -215,7 +215,7 @@ class PsPlanNodeUpdate(PydanticModel):
     plan_workload: str | None = None
     plan_begin_time: datetime | None = None
     plan_complete_time: datetime | None = None
-    duty_user_id: str | None = None
+    duty_user_id: uuid.UUID | None = None
 
 
 class PsPlanNodeResp(PsPlanNodeBase):
@@ -227,7 +227,7 @@ class PsPlanNodeResp(PsPlanNodeBase):
 
 
 class PsPlanNodeDetailBase(PydanticModel):
-    plan_node_id: str
+    plan_node_id: uuid.UUID
     detailed_stage: str | None = None
     task_theme: str | None = None
     task_description: str | None = None
@@ -241,8 +241,8 @@ class PsPlanNodeDetailBase(PydanticModel):
     actual_begin_time: datetime | None = None
     actual_complete_time: datetime | None = None
     no: str | None = None
-    execute_user_id: str | None = None
-    module_id: str | None = None
+    execute_user_id: uuid.UUID | None = None
+    module_id: uuid.UUID | None = None
     attach_group_id: str | None = None
     file_urls: list[str] = Field(default_factory=list)
 
@@ -265,8 +265,8 @@ class PsPlanNodeDetailUpdate(PydanticModel):
     actual_begin_time: datetime | None = None
     actual_complete_time: datetime | None = None
     no: str | None = None
-    execute_user_id: str | None = None
-    module_id: str | None = None
+    execute_user_id: uuid.UUID | None = None
+    module_id: uuid.UUID | None = None
     attach_group_id: str | None = None
     file_urls: list[str] | None = None
 
@@ -275,9 +275,9 @@ class PsPlanNodeDetailResp(PsPlanNodeDetailBase):
     id: uuid.UUID
     status: str
     parent_id: uuid.UUID | None = None
-    audit_user_id: str | None = None
+    audit_user_id: uuid.UUID | None = None
     audit_user_name: str | None = None
-    approve_user_id: str | None = None
+    approve_user_id: uuid.UUID | None = None
     approve_user_name: str | None = None
     change_reason: str | None = None
     created_at: datetime
@@ -341,14 +341,14 @@ class ProjectPlanThreeLevelResp(PsProjectPlanResp):
 
 class PsPlanNodeDetailProcessResp(PydanticModel):
     id: uuid.UUID
-    business_id: str
+    business_id: uuid.UUID
     business_type: str
     node_key: str | None = None
-    handle_user_id: str | None = None
+    handle_user_id: uuid.UUID | None = None
     handle_user_name: str | None = None
     handle_date: datetime | None = None
     handle_info: str | None = None
-    next_user_id: str | None = None
+    next_user_id: uuid.UUID | None = None
     next_user_name: str | None = None
     created_at: datetime
 
@@ -364,7 +364,7 @@ class ProcessActionReq(PydanticModel):
     """流程动作请求 — save(下一步)/reject(驳回) 通用载体。"""
 
     handle_info: str | None = None
-    next_user_id: str | None = None
+    next_user_id: uuid.UUID | None = None
     next_user_name: str | None = None
 
 

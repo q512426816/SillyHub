@@ -240,7 +240,7 @@ class PlanService:
     async def list_plan_node_details_by_node(self, plan_node_id: str) -> list[PlanNodeDetail]:
         stmt = (
             select(PlanNodeDetail)
-            .where(PlanNodeDetail.plan_node_id == plan_node_id)
+            .where(PlanNodeDetail.plan_node_id == self._safe_uuid(plan_node_id))
             .order_by(PlanNodeDetail.no)
         )
         return list((await self._session.execute(stmt)).scalars().all())
@@ -260,7 +260,7 @@ class PlanService:
     async def list_modules_by_node(self, plan_node_id: str) -> list[PlanNodeModule]:
         stmt = (
             select(PlanNodeModule)
-            .where(PlanNodeModule.plan_node_id == plan_node_id)
+            .where(PlanNodeModule.plan_node_id == self._safe_uuid(plan_node_id))
             .order_by(PlanNodeModule.created_at)
         )
         return list((await self._session.execute(stmt)).scalars().all())
@@ -298,7 +298,7 @@ class PlanService:
     async def list_ps_plan_nodes_by_plan(self, ps_project_plan_id: str) -> list[PsPlanNode]:
         stmt = (
             select(PsPlanNode)
-            .where(PsPlanNode.ps_project_plan_id == ps_project_plan_id)
+            .where(PsPlanNode.ps_project_plan_id == self._safe_uuid(ps_project_plan_id))
             .order_by(PsPlanNode.no)
         )
         return list((await self._session.execute(stmt)).scalars().all())
@@ -321,7 +321,7 @@ class PlanService:
         stmt = (
             select(PsPlanNodeDetail)
             .where(
-                PsPlanNodeDetail.plan_node_id == plan_node_id,
+                PsPlanNodeDetail.plan_node_id == self._safe_uuid(plan_node_id),
                 PsPlanNodeDetail.status != PlanNodeDetailStatus.ARCHIVED.value,
             )
             .order_by(PsPlanNodeDetail.no)
@@ -381,7 +381,7 @@ class PlanService:
             # 无子节点 → 空 nodes,但保留 plan 顶层 + 派生
             return self._build_three_level_resp(plan, [], [], [])
 
-        node_ids = [str(n.id) for n in nodes]
+        node_ids = [n.id for n in nodes]
 
         # 2. 批量取 details (按 plan_node_id IN,排除 archived)
         stmt_details = (
@@ -417,8 +417,8 @@ class PlanService:
         - tasks 按 ps_plan_node_detail_id 分组到对应 detail
         - plan 顶层注入 remaining_* 派生字段 (D-014@v1)
         """
-        # 分组索引
-        details_by_node: dict[str, list[PsPlanNodeDetail]] = {}
+        # 分组索引 — plan_node_id 已是 UUID (migration 202607220900),key 统一用 UUID。
+        details_by_node: dict[uuid.UUID, list[PsPlanNodeDetail]] = {}
         for d in details:
             details_by_node.setdefault(d.plan_node_id, []).append(d)
 
@@ -431,7 +431,7 @@ class PlanService:
         # 组装嵌套 nodes → details → tasks
         node_resps: list[PsPlanNodeWithDetail] = []
         for node in nodes:
-            node_details = details_by_node.get(str(node.id), [])
+            node_details = details_by_node.get(node.id, [])
             detail_resps: list[PsPlanNodeDetailWithTasks] = []
             for d in node_details:
                 d_tasks = tasks_by_detail.get(d.id, [])
@@ -521,15 +521,15 @@ class PlanService:
         detail.updated_at = _now()
         # 记录审核/审批人
         if target is PlanNodeDetailStatus.REVIEW:
-            detail.audit_user_id = next_user_id or actor_id
+            detail.audit_user_id = self._safe_uuid(next_user_id) or self._safe_uuid(actor_id)
             detail.audit_user_name = next_user_name or actor_name
         elif target is PlanNodeDetailStatus.APPROVE:
-            detail.approve_user_id = next_user_id or actor_id
+            detail.approve_user_id = self._safe_uuid(next_user_id) or self._safe_uuid(actor_id)
             detail.approve_user_name = next_user_name or actor_name
         await self._session.commit()
         await self._session.refresh(detail)
         await self._write_process(
-            business_id=str(detail.id),
+            business_id=detail.id,
             node_key=f"{current.value}->{target.value}",
             actor_id=actor_id,
             actor_name=actor_name,
@@ -617,7 +617,7 @@ class PlanService:
 
         # 3. 履历
         await self._write_process(
-            business_id=str(new.id),
+            business_id=new.id,
             node_key="change",
             actor_id=actor_id,
             actor_name=actor_name,
@@ -700,7 +700,7 @@ class PlanService:
 
         # 写一行履历 (node_key="submit_detail")
         await self._write_process(
-            business_id=str(detail_obj.id),
+            business_id=detail_obj.id,
             node_key="submit_detail",
             actor_id=actor_id,
             actor_name=actor_name,
@@ -719,8 +719,16 @@ class PlanService:
         return detail_obj
 
     @staticmethod
-    def _safe_uuid(value: str) -> uuid.UUID | None:
-        """将字符串转 UUID,失败返回 None (audit_context.actor_id 容错)。"""
+    def _safe_uuid(value: str | uuid.UUID | None) -> uuid.UUID | None:
+        """将字符串/UUID 转 uuid.UUID,失败返回 None。
+
+        接受 str (合法 UUID 字符串)、uuid.UUID 原值、None。
+        用于 audit_context.actor_id 容错 + FK 字段 (已是 UUID) 查询参数适配。
+        """
+        if value is None:
+            return None
+        if isinstance(value, uuid.UUID):
+            return value
         try:
             return uuid.UUID(value)
         except (ValueError, AttributeError, TypeError):
@@ -731,7 +739,7 @@ class PlanService:
         stmt = (
             select(PsPlanNodeDetailProcess)
             .where(
-                PsPlanNodeDetailProcess.business_id == business_id,
+                PsPlanNodeDetailProcess.business_id == self._safe_uuid(business_id),
                 PsPlanNodeDetailProcess.business_type == PROCESS_BUSINESS_TYPE,
             )
             .order_by(PsPlanNodeDetailProcess.created_at)
@@ -742,7 +750,7 @@ class PlanService:
     async def _write_process(
         self,
         *,
-        business_id: str,
+        business_id: uuid.UUID,
         node_key: str,
         actor_id: str,
         actor_name: str | None,
@@ -755,11 +763,11 @@ class PlanService:
             business_id=business_id,
             business_type=PROCESS_BUSINESS_TYPE,
             node_key=node_key,
-            handle_user_id=actor_id,
+            handle_user_id=self._safe_uuid(actor_id),
             handle_user_name=actor_name,
             handle_date=_now(),
             handle_info=handle_info,
-            next_user_id=next_user_id,
+            next_user_id=self._safe_uuid(next_user_id) if next_user_id else None,
             next_user_name=next_user_name,
             created_at=_now(),
         )

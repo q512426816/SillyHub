@@ -49,15 +49,17 @@ async def _make_problem_with_find_time(
     find_time: datetime | None,
     pro_desc: str = "一个问题",
 ) -> object:
+    # duty/audit_user_id 字段已改为 uuid.UUID (migration 202607220900),
+    # 传合法 UUID 字符串 (SQLModel init 时 pydantic 自动 coerce)。
     return await svc.create_problem(
         {
             "project_id": project_id,
             "project_name": "项目甲",
             "pro_desc": pro_desc,
             "pro_type": "bug",
-            "duty_user_id": "duty-001",
+            "duty_user_id": "00000000-0000-0000-0000-000000000002",
             "duty_user_name": "钱责任",
-            "audit_user_id": "audit-001",
+            "audit_user_id": "00000000-0000-0000-0000-000000000003",
             "audit_user_name": "孙验证",
             "find_time": find_time,
         }

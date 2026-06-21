@@ -38,6 +38,7 @@ from sqlalchemy import (
 from sqlmodel import Field
 
 from app.models.base import BaseModel
+from app.modules.ppm.common.uuid_type import UuidCoercing
 
 
 def _now() -> datetime:
@@ -69,10 +70,10 @@ class PpmProblemList(BaseModel, table=True):
         default_factory=uuid.uuid4,
         sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
     )
-    # 源 Long projectId → 保留字符串语义 (运行时绑定,源 ID 不迁移)
-    project_id: str = Field(sa_column=Column(String(64), nullable=False))
+    # 源 Long projectId → DB 列已 ALTER 为 uuid (migration 202607220900)
+    project_id: uuid.UUID = Field(sa_column=Column(UuidCoercing, nullable=False))
     project_name: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
-    module_id: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
+    module_id: uuid.UUID | None = Field(default=None, sa_column=Column(UuidCoercing, nullable=True))
     model_name: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
     pro_desc: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     # 附件 URL 列表 (D-007@v1,弃源 fileUrl1-9 九字段)
@@ -90,7 +91,9 @@ class PpmProblemList(BaseModel, table=True):
     )
     pro_answer: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     work_type: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
-    duty_user_id: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
+    duty_user_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     duty_user_name: str | None = Field(default=None, sa_column=Column(String(128), nullable=True))
     plan_start_time: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
@@ -101,8 +104,10 @@ class PpmProblemList(BaseModel, table=True):
     real_end_time: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
-    # 验证人 (源 auditUserId/Name/Time)
-    audit_user_id: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
+    # 验证人 (源 auditUserId/Name/Time,DB 列 ALTER 为 uuid)
+    audit_user_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     audit_user_name: str | None = Field(default=None, sa_column=Column(String(128), nullable=True))
     audit_time: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
@@ -175,9 +180,11 @@ class PpmProblemChange(BaseModel, table=True):
         default_factory=uuid.uuid4,
         sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
     )
-    # 关联源问题清单 ID (字符串化,源 problem_list.id)
-    resource_id: str = Field(sa_column=Column(String(64), nullable=False))
-    project_id: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
+    # 关联源问题清单 ID (DB 列已 ALTER 为 uuid,migration 202607220900)
+    resource_id: uuid.UUID = Field(sa_column=Column(UuidCoercing, nullable=False))
+    project_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     project_name: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
     model_name: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
     pro_desc: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
@@ -190,7 +197,9 @@ class PpmProblemChange(BaseModel, table=True):
     )
     pro_answer: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     work_type: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
-    duty_user_id: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
+    duty_user_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     duty_user_name: str | None = Field(default=None, sa_column=Column(String(128), nullable=True))
     plan_start_time: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
@@ -198,7 +207,9 @@ class PpmProblemChange(BaseModel, table=True):
     plan_end_time: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
-    audit_user_id: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
+    audit_user_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     audit_user_name: str | None = Field(default=None, sa_column=Column(String(128), nullable=True))
     audit_time: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
@@ -244,8 +255,8 @@ class PpmProblemListProcessTask(BaseModel, table=True):
         default_factory=uuid.uuid4,
         sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
     )
-    # 关联单据表 ID (源 problem_list.id 字符串化)
-    business_id: str = Field(sa_column=Column(String(64), nullable=False))
+    # 关联单据表 ID (DB 列已 ALTER 为 uuid,migration 202607220900)
+    business_id: uuid.UUID = Field(sa_column=Column(UuidCoercing, nullable=False))
     # 节点信息 (10/20/30/40)
     node_key: str | None = Field(default=None, sa_column=Column(String(32), nullable=True))
     node_name: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
@@ -309,15 +320,19 @@ class PpmProblemListProcessLog(BaseModel, table=True):
         default_factory=uuid.uuid4,
         sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
     )
-    business_id: str = Field(sa_column=Column(String(64), nullable=False))
+    business_id: uuid.UUID = Field(sa_column=Column(UuidCoercing, nullable=False))
     node_key: str | None = Field(default=None, sa_column=Column(String(32), nullable=True))
-    handle_user_id: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
+    handle_user_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     handle_user_name: str | None = Field(default=None, sa_column=Column(String(128), nullable=True))
     handle_date: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
     handle_info: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
-    next_user_id: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
+    next_user_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     next_user_name: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
     # 审批/驳回意见
     comment: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
@@ -342,13 +357,17 @@ class PpmProblemChangeProcessLog(BaseModel, table=True):
     )
     business_id: str = Field(sa_column=Column(String(64), nullable=False))
     node_key: str | None = Field(default=None, sa_column=Column(String(32), nullable=True))
-    handle_user_id: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
+    handle_user_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     handle_user_name: str | None = Field(default=None, sa_column=Column(String(128), nullable=True))
     handle_date: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
     handle_info: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
-    next_user_id: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
+    next_user_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     next_user_name: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
     comment: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     created_at: datetime = Field(

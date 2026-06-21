@@ -109,6 +109,22 @@ def _is_uuid_str(value: str) -> bool:
     return True
 
 
+def _safe_uuid(value: str | uuid.UUID | None) -> uuid.UUID | None:
+    """字符串/UUID → uuid.UUID,失败返回 None。
+
+    用于把外部传入的 actor_id / next_user_id (可能是逗号列表等脏值,
+    migration 202607220900 已把这些残留降级为 NULL) 容错转成 ORM 的 UUID 字段。
+    """
+    if value is None:
+        return None
+    if isinstance(value, uuid.UUID):
+        return value
+    try:
+        return uuid.UUID(value)
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
 # ===========================================================================
 # 通用 CRUD helper (字段差异大但形状一致,抽出复用)
 # ===========================================================================
@@ -289,7 +305,7 @@ class ProblemService:
         """列出某问题清单的全部变更 (按创建时间)。"""
         stmt = (
             select(PpmProblemChange)
-            .where(PpmProblemChange.resource_id == resource_id)
+            .where(PpmProblemChange.resource_id == _safe_uuid(resource_id))
             .order_by(PpmProblemChange.created_at)
         )
         return list((await self._session.execute(stmt)).scalars().all())
@@ -331,7 +347,9 @@ class ProblemService:
                 entity="problem_list",
                 entity_id=problem.id,
             )
-            next_handle_user = problem.duty_user_id
+            # now_handle_user 字段是 String (逗号列表),duty_user_id 已是 UUID,
+            # 赋值前 str() 化以匹配 String 列的 bind processor。
+            next_handle_user = str(problem.duty_user_id) if problem.duty_user_id else None
             next_handle_user_name = problem.duty_user_name
             next_node_name = "处置"
             problem.status = ProblemStatus.DOING.value
@@ -371,7 +389,7 @@ class ProblemService:
 
         # ProcessTask:删旧插新
         await self._replace_list_task(
-            business_id=str(problem.id),
+            business_id=problem.id,
             node_key=str(next_node) if next_node is not None else "end",
             node_name=next_node_name,
             handle_user=next_handle_user,
@@ -383,7 +401,7 @@ class ProblemService:
             "next", actor_name, current_node_name, next_node_name, next_handle_user_name
         )
         await self._write_list_log(
-            business_id=str(problem.id),
+            business_id=problem.id,
             node_key=str(current_node),
             actor_id=actor_id,
             actor_name=actor_name,
@@ -454,14 +472,14 @@ class ProblemService:
         # 删所有在办任务 (驳回无下一步任务)
         await self._session.execute(
             delete(PpmProblemListProcessTask).where(
-                PpmProblemListProcessTask.business_id == str(problem.id)
+                PpmProblemListProcessTask.business_id == problem.id
             )
         )
         await self._session.commit()
 
         handle_info = self._build_handle_info("reject", actor_name, current_node_name, None, None)
         await self._write_list_log(
-            business_id=str(problem.id),
+            business_id=problem.id,
             node_key=str(current_node),
             actor_id=actor_id,
             actor_name=actor_name,
@@ -507,7 +525,8 @@ class ProblemService:
             problem.status = ProblemStatus.WAIT_CHECK.value
             problem.real_end_time = _now()
             # 待验证处理人 = 验证人 (audit_user_id);未预设则置空 (待指派)
-            problem.now_handle_user = problem.audit_user_id
+            # now_handle_user 是 String 列,audit_user_id 是 UUID,str() 化。
+            problem.now_handle_user = str(problem.audit_user_id) if problem.audit_user_id else None
             problem.now_handle_user_name = problem.audit_user_name
             target_node_name = "待验证"
         else:
@@ -536,7 +555,7 @@ class ProblemService:
         # ProcessTask 更新
         node_key = "wait_check" if completed else "doing"
         await self._replace_list_task(
-            business_id=str(problem.id),
+            business_id=problem.id,
             node_key=node_key,
             node_name=target_node_name,
             handle_user=problem.now_handle_user,
@@ -544,7 +563,7 @@ class ProblemService:
         )
 
         await self._write_list_log(
-            business_id=str(problem.id),
+            business_id=problem.id,
             node_key=node_key,
             actor_id=actor_id,
             actor_name=actor_name,
@@ -600,7 +619,7 @@ class ProblemService:
             node_name = "已关闭"
         else:
             # 打回责任人
-            problem.now_handle_user = problem.duty_user_id
+            problem.now_handle_user = str(problem.duty_user_id) if problem.duty_user_id else None
             problem.now_handle_user_name = problem.duty_user_name
             node_key = "doing"
             node_name = "处置中"
@@ -609,14 +628,14 @@ class ProblemService:
         await self._session.refresh(problem)
 
         await self._replace_list_task(
-            business_id=str(problem.id),
+            business_id=problem.id,
             node_key=node_key,
             node_name=node_name,
             handle_user=problem.now_handle_user,
             handle_user_name=problem.now_handle_user_name,
         )
         await self._write_list_log(
-            business_id=str(problem.id),
+            business_id=problem.id,
             node_key=node_key,
             actor_id=actor_id,
             actor_name=actor_name,
@@ -641,7 +660,7 @@ class ProblemService:
     async def list_list_tasks(self, business_id: str) -> list[PpmProblemListProcessTask]:
         stmt = (
             select(PpmProblemListProcessTask)
-            .where(PpmProblemListProcessTask.business_id == business_id)
+            .where(PpmProblemListProcessTask.business_id == _safe_uuid(business_id))
             .order_by(PpmProblemListProcessTask.created_at)
         )
         return list((await self._session.execute(stmt)).scalars().all())
@@ -649,7 +668,7 @@ class ProblemService:
     async def list_list_logs(self, business_id: str) -> list[PpmProblemListProcessLog]:
         stmt = (
             select(PpmProblemListProcessLog)
-            .where(PpmProblemListProcessLog.business_id == business_id)
+            .where(PpmProblemListProcessLog.business_id == _safe_uuid(business_id))
             .order_by(PpmProblemListProcessLog.created_at)
         )
         return list((await self._session.execute(stmt)).scalars().all())
@@ -726,7 +745,8 @@ class ProblemService:
                 entity="problem_change",
                 entity_id=change.id,
             )
-            next_handle_user = change.audit_user_id
+            # now_handle_user 是 String 列,audit_user_id 已是 UUID,str() 化。
+            next_handle_user = str(change.audit_user_id) if change.audit_user_id else None
             next_handle_user_name = change.audit_user_name
             next_node_name = "已完成"
             change.status = ProblemChangeStatus.CLOSED.value
@@ -903,8 +923,11 @@ class ProblemService:
             PpmProjectMember.role_name == role,
         )
         all_members = list((await self._session.execute(stmt)).scalars().all())
-        # 按 project_id 字符串相等过滤 (pm_project_id UUID vs project_id 字符串)
-        return [m for m in all_members if str(m.pm_project_id) == project_id]
+        # 按 project_id 字符串相等过滤 (pm_project_id UUID vs project_id 入参)
+        # project_id 可能是 str 或 uuid.UUID (model 字段已 ALTER 为 UUID),
+        # 统一 str() 后比较。
+        pid_str = str(project_id)
+        return [m for m in all_members if str(m.pm_project_id) == pid_str]
 
     async def _changing_resource_ids(self) -> set[str]:
         """有未关闭变更 (status != 2) 的 problem_list.id 集合 (字符串化)。"""
@@ -917,7 +940,7 @@ class ProblemService:
     async def _replace_list_task(
         self,
         *,
-        business_id: str,
+        business_id: uuid.UUID,
         node_key: str,
         node_name: str,
         handle_user: str | None,
@@ -945,7 +968,7 @@ class ProblemService:
     async def _write_list_log(
         self,
         *,
-        business_id: str,
+        business_id: uuid.UUID,
         node_key: str,
         actor_id: str,
         actor_name: str | None,
@@ -958,11 +981,11 @@ class ProblemService:
             id=uuid.uuid4(),
             business_id=business_id,
             node_key=node_key,
-            handle_user_id=actor_id,
+            handle_user_id=_safe_uuid(actor_id),
             handle_user_name=actor_name,
             handle_date=_now(),
             handle_info=handle_info,
-            next_user_id=next_user_id,
+            next_user_id=_safe_uuid(next_user_id) if next_user_id else None,
             next_user_name=next_user_name,
             comment=comment,
             created_at=_now(),
@@ -1016,11 +1039,11 @@ class ProblemService:
             id=uuid.uuid4(),
             business_id=business_id,
             node_key=node_key,
-            handle_user_id=actor_id,
+            handle_user_id=_safe_uuid(actor_id),
             handle_user_name=actor_name,
             handle_date=_now(),
             handle_info=handle_info,
-            next_user_id=next_user_id,
+            next_user_id=_safe_uuid(next_user_id) if next_user_id else None,
             next_user_name=next_user_name,
             comment=comment,
             created_at=_now(),

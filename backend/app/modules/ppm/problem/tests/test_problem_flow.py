@@ -29,7 +29,12 @@ from app.modules.ppm.problem.service import (
 )
 from app.modules.ppm.project.model import PpmProjectMember
 
-_ACTOR = ("actor-001", "张三")
+# 合法 UUID 字符串 — model FK 字段已改为 uuid.UUID (migration 202607220900),
+# 这些常量供 _safe_uuid 转换成功 + 断言时做对象比较。
+_ACTOR = ("00000000-0000-0000-0000-000000000001", "张三")
+_DUTY_USER_ID = "00000000-0000-0000-0000-000000000002"
+_AUDIT_USER_ID = "00000000-0000-0000-0000-000000000003"
+_DEV_USER_ID = "00000000-0000-0000-0000-000000000004"
 
 
 # ===========================================================================
@@ -80,9 +85,9 @@ async def _make_problem(
     project_id: str,
     *,
     pro_type: str | None = None,
-    duty_user_id: str = "duty-001",
+    duty_user_id: str = _DUTY_USER_ID,
     duty_user_name: str = "钱责任",
-    audit_user_id: str | None = "audit-001",
+    audit_user_id: str | None = _AUDIT_USER_ID,
     audit_user_name: str | None = "孙验证",
 ) -> object:
     return await svc.create_problem(
@@ -174,19 +179,23 @@ class TestFullFlow:
         assert p.status == ProblemStatus.DOING.value
         assert p.now_node is None
         # 处置人 = 责任人
-        assert p.now_handle_user == "duty-001"
+        assert p.now_handle_user == _DUTY_USER_ID
 
         # doneTask completed → 待验证
         p = await svc.done_task(
-            pid, actor_id="duty-001", actor_name="钱责任", handle_info="已修复", completed=True
+            pid, actor_id=_DUTY_USER_ID, actor_name="钱责任", handle_info="已修复", completed=True
         )
         assert p.status == ProblemStatus.WAIT_CHECK.value
-        assert p.now_handle_user == "audit-001"  # 切到验证人
+        assert p.now_handle_user == _AUDIT_USER_ID  # 切到验证人
         assert p.real_end_time is not None
 
         # closeTask check_result=1 → 已关闭
         p = await svc.close_task(
-            pid, actor_id="audit-001", actor_name="孙验证", check_result="1", check_info="验证通过"
+            pid,
+            actor_id=_AUDIT_USER_ID,
+            actor_name="孙验证",
+            check_result="1",
+            check_info="验证通过",
         )
         assert p.status == ProblemStatus.CLOSED.value
         assert p.now_handle_user is None
@@ -221,7 +230,7 @@ class TestFullFlow:
         await svc.next_process(pid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
         # 在 20 节点驳回
         p = await svc.reject_process(
-            pid, actor_id="dev-001", actor_name="李开发", comment="描述不清"
+            pid, actor_id=_DEV_USER_ID, actor_name="李开发", comment="描述不清"
         )
         assert p.status == ProblemStatus.BACK.value
         assert p.now_node is None
@@ -240,13 +249,13 @@ class TestFullFlow:
         await svc.next_process(pid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
         assert p.status == ProblemStatus.DOING.value
         # doneTask → 待验证
-        await svc.done_task(pid, actor_id="duty-001", actor_name="钱责任", completed=True)
+        await svc.done_task(pid, actor_id=_DUTY_USER_ID, actor_name="钱责任", completed=True)
         # closeTask 打回 (check_result=0)
         p = await svc.close_task(
-            pid, actor_id="audit-001", actor_name="孙验证", check_result="0", check_info="未修复"
+            pid, actor_id=_AUDIT_USER_ID, actor_name="孙验证", check_result="0", check_info="未修复"
         )
         assert p.status == ProblemStatus.DOING.value
-        assert p.now_handle_user == "duty-001"  # 切回责任人
+        assert p.now_handle_user == _DUTY_USER_ID  # 切回责任人
 
 
 # ===========================================================================
@@ -333,7 +342,7 @@ class TestProcessAudit:
         tasks = await svc.list_list_tasks(str(pid))
         assert len(tasks) == 1
 
-        await svc.reject_process(pid, actor_id="dev-001", actor_name="李开发")
+        await svc.reject_process(pid, actor_id=_DEV_USER_ID, actor_name="李开发")
         tasks = await svc.list_list_tasks(str(pid))
         assert len(tasks) == 0
 
@@ -351,7 +360,7 @@ class TestProcessAudit:
         # 第一次 done (completed=false,追加处置情况 + 累加工时)
         p = await svc.done_task(
             pid,
-            actor_id="duty-001",
+            actor_id=_DUTY_USER_ID,
             actor_name="钱责任",
             handle_info="排查中",
             time_spent=1.5,
@@ -364,7 +373,7 @@ class TestProcessAudit:
         # 第二次 done (completed=true,再次累加)
         p = await svc.done_task(
             pid,
-            actor_id="duty-001",
+            actor_id=_DUTY_USER_ID,
             actor_name="钱责任",
             handle_info="已修复",
             time_spent=0.5,
@@ -445,7 +454,7 @@ class TestInvalidTransition:
         proj_id = await _make_project(db_session)
         p = await _make_problem(svc, proj_id)  # status=1 已保存
         with pytest.raises(InvalidTransition):
-            await svc.done_task(p.id, actor_id="duty-001", actor_name="钱责任", completed=True)
+            await svc.done_task(p.id, actor_id=_DUTY_USER_ID, actor_name="钱责任", completed=True)
 
     async def test_close_on_closed_rejected(self, db_session: AsyncSession) -> None:
         """已关闭不可再 close。"""
@@ -455,11 +464,11 @@ class TestInvalidTransition:
         pid = p.id
         for _ in range(3):
             await svc.next_process(pid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
-        await svc.done_task(pid, actor_id="duty-001", actor_name="钱责任", completed=True)
-        await svc.close_task(pid, actor_id="audit-001", actor_name="孙验证")
+        await svc.done_task(pid, actor_id=_DUTY_USER_ID, actor_name="钱责任", completed=True)
+        await svc.close_task(pid, actor_id=_AUDIT_USER_ID, actor_name="孙验证")
         # 再次 close → 4 是终态,非法
         with pytest.raises(InvalidTransition):
-            await svc.close_task(pid, actor_id="audit-001", actor_name="孙验证")
+            await svc.close_task(pid, actor_id=_AUDIT_USER_ID, actor_name="孙验证")
 
 
 # ===========================================================================
@@ -473,7 +482,7 @@ async def _make_change(
     resource_id: str,
     *,
     pro_type: str | None = None,
-    audit_user_id: str = "audit-001",
+    audit_user_id: str = _AUDIT_USER_ID,
     audit_user_name: str = "孙验证",
 ) -> object:
     return await svc.create_change(
@@ -519,7 +528,7 @@ class TestChangeFlow:
         assert c.status == ProblemChangeStatus.CLOSED.value
         assert c.now_node is None
         # 结束后处理人 = 验证人 (audit_user_id)
-        assert c.now_handle_user == "audit-001"
+        assert c.now_handle_user == _AUDIT_USER_ID
 
     async def test_change_bug_skips_dept(self, db_session: AsyncSession) -> None:
         """bug:10→20→30→直接结束 (跳过部门经理 40)。"""
@@ -547,7 +556,7 @@ class TestChangeFlow:
         await svc.next_change(cid, actor_id=_ACTOR[0], actor_name=_ACTOR[1])
         # 在 20 节点驳回
         c = await svc.reject_change(
-            cid, actor_id="dev-001", actor_name="李开发", comment="描述不清"
+            cid, actor_id=_DEV_USER_ID, actor_name="李开发", comment="描述不清"
         )
         assert c.status == ProblemChangeStatus.BACK.value
         assert c.now_node is None

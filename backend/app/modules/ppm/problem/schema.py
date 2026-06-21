@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime
 
 from pydantic import BaseModel as PydanticModel
-from pydantic import Field
+from pydantic import Field, field_validator
 
 # ===========================================================================
 # 问题清单 DTO
@@ -20,9 +20,9 @@ from pydantic import Field
 
 
 class ProblemListBase(PydanticModel):
-    project_id: str
+    project_id: uuid.UUID
     project_name: str | None = None
-    module_id: str | None = None
+    module_id: uuid.UUID | None = None
     model_name: str | None = None
     pro_desc: str | None = None
     file_urls: list[str] = Field(default_factory=list)
@@ -33,12 +33,12 @@ class ProblemListBase(PydanticModel):
     find_time: datetime | None = None
     pro_answer: str | None = None
     work_type: str | None = None
-    duty_user_id: str | None = None
+    duty_user_id: uuid.UUID | None = None
     duty_user_name: str | None = None
     plan_start_time: datetime | None = None
     plan_end_time: datetime | None = None
     real_end_time: datetime | None = None
-    audit_user_id: str | None = None
+    audit_user_id: uuid.UUID | None = None
     audit_user_name: str | None = None
     audit_time: datetime | None = None
     remarks: str | None = None
@@ -53,7 +53,7 @@ class ProblemListCreate(ProblemListBase):
 
 class ProblemListUpdate(PydanticModel):
     project_name: str | None = None
-    module_id: str | None = None
+    module_id: uuid.UUID | None = None
     model_name: str | None = None
     pro_desc: str | None = None
     file_urls: list[str] | None = None
@@ -64,7 +64,7 @@ class ProblemListUpdate(PydanticModel):
     find_time: datetime | None = None
     pro_answer: str | None = None
     work_type: str | None = None
-    duty_user_id: str | None = None
+    duty_user_id: uuid.UUID | None = None
     duty_user_name: str | None = None
     plan_start_time: datetime | None = None
     plan_end_time: datetime | None = None
@@ -98,8 +98,8 @@ class ProblemListResp(ProblemListBase):
 
 
 class ProblemChangeBase(PydanticModel):
-    resource_id: str
-    project_id: str | None = None
+    resource_id: uuid.UUID
+    project_id: uuid.UUID | None = None
     project_name: str | None = None
     model_name: str | None = None
     pro_desc: str | None = None
@@ -110,7 +110,7 @@ class ProblemChangeBase(PydanticModel):
     find_time: datetime | None = None
     pro_answer: str | None = None
     work_type: str | None = None
-    duty_user_id: str | None = None
+    duty_user_id: uuid.UUID | None = None
     duty_user_name: str | None = None
     plan_start_time: datetime | None = None
     plan_end_time: datetime | None = None
@@ -128,7 +128,7 @@ class ProblemChangeUpdate(PydanticModel):
     pro_desc: str | None = None
     pro_type: str | None = None
     is_urgent: str | None = None
-    duty_user_id: str | None = None
+    duty_user_id: uuid.UUID | None = None
     duty_user_name: str | None = None
     plan_start_time: datetime | None = None
     plan_end_time: datetime | None = None
@@ -143,7 +143,7 @@ class ProblemChangeResp(ProblemChangeBase):
     now_node: int | None = None
     now_handle_user: str | None = None
     now_handle_user_name: str | None = None
-    audit_user_id: str | None = None
+    audit_user_id: uuid.UUID | None = None
     audit_user_name: str | None = None
     audit_time: datetime | None = None
     created_at: datetime
@@ -159,6 +159,8 @@ class ProblemChangeResp(ProblemChangeBase):
 
 class ProcessTaskResp(PydanticModel):
     id: uuid.UUID
+    # business_id 在 List 表是 uuid,在 Change 表是 varchar (源 Long 残留,
+    # migration 202607220900 排除)。统一以 str 暴露给前端,validator 兼容两种输入。
     business_id: str
     node_key: str | None = None
     node_name: str | None = None
@@ -168,19 +170,29 @@ class ProcessTaskResp(PydanticModel):
 
     model_config = {"from_attributes": True}
 
+    @field_validator("business_id", mode="before")
+    @classmethod
+    def _coerce_business_id(cls, v: object) -> str | None:
+        return str(v) if v is not None else None
+
 
 class ProcessLogResp(PydanticModel):
     id: uuid.UUID
     business_id: str
     node_key: str | None = None
-    handle_user_id: str | None = None
+    handle_user_id: uuid.UUID | None = None
     handle_user_name: str | None = None
     handle_date: datetime | None = None
     handle_info: str | None = None
-    next_user_id: str | None = None
+    next_user_id: uuid.UUID | None = None
     next_user_name: str | None = None
     comment: str | None = None
     created_at: datetime
+
+    @field_validator("business_id", mode="before")
+    @classmethod
+    def _coerce_business_id(cls, v: object) -> str | None:
+        return str(v) if v is not None else None
 
     model_config = {"from_attributes": True}
 

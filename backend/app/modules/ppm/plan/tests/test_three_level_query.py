@@ -43,7 +43,7 @@ async def _seed_plan(
 ) -> PsProjectPlan:
     plan = PsProjectPlan(
         id=uuid.uuid4(),
-        project_id="proj-001",
+        project_id=uuid.uuid4(),
         project_name="测试项目",
         budget_person_days=budget_person_days,
         actual_consumption_person_days=actual_consumption_person_days,
@@ -62,7 +62,7 @@ async def _seed_plan(
 async def _seed_node(session: AsyncSession, plan_id: uuid.UUID, no: str = "1") -> PsPlanNode:
     node = PsPlanNode(
         id=uuid.uuid4(),
-        ps_project_plan_id=str(plan_id),
+        ps_project_plan_id=plan_id,
         overall_stage="阶段一",
         no=no,
         status="draft",
@@ -77,7 +77,7 @@ async def _seed_node(session: AsyncSession, plan_id: uuid.UUID, no: str = "1") -
 
 async def _seed_detail(
     session: AsyncSession,
-    plan_node_id: str,
+    plan_node_id: uuid.UUID,
     *,
     no: str = "1",
     status: str = "draft",
@@ -129,8 +129,8 @@ class TestThreeLevelStructure:
         """AC-1: plan.nodes[*].details[*].tasks[*] 四层嵌套正确。"""
         plan = await _seed_plan(db_session)
         node = await _seed_node(db_session, plan.id)
-        d1 = await _seed_detail(db_session, str(node.id), no="1")
-        d2 = await _seed_detail(db_session, str(node.id), no="2")
+        d1 = await _seed_detail(db_session, node.id, no="1")
+        d2 = await _seed_detail(db_session, node.id, no="2")
         t1 = await _seed_task(db_session, detail_id=d1.id, content="任务A")
         t2 = await _seed_task(db_session, detail_id=d1.id, content="任务B")
         t3 = await _seed_task(db_session, detail_id=d2.id, content="任务C")
@@ -160,8 +160,8 @@ class TestThreeLevelStructure:
         """AC-6:status='archived' 的明细不出现在 details。"""
         plan = await _seed_plan(db_session)
         node = await _seed_node(db_session, plan.id)
-        archived = await _seed_detail(db_session, str(node.id), no="1", status="archived")
-        active = await _seed_detail(db_session, str(node.id), no="2", status="draft")
+        archived = await _seed_detail(db_session, node.id, no="1", status="archived")
+        active = await _seed_detail(db_session, node.id, no="2", status="draft")
 
         resp = await PlanService(db_session).get_project_plan_three_level(plan.id)
 
@@ -173,7 +173,7 @@ class TestThreeLevelStructure:
         """边界 4:ps_plan_node_detail_id 指向不存在 detail → 不挂载。"""
         plan = await _seed_plan(db_session)
         node = await _seed_node(db_session, plan.id)
-        await _seed_detail(db_session, str(node.id))
+        await _seed_detail(db_session, node.id)
         # 指向不存在的 detail id
         await _seed_task(db_session, detail_id=uuid.uuid4(), content="孤儿任务")
 

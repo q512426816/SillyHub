@@ -8,16 +8,21 @@
 
 from __future__ import annotations
 
+import uuid
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.ppm.plan.fsm import PROCESS_BUSINESS_TYPE
 from app.modules.ppm.plan.service import PlanService
 
-_ACTOR = ("actor-001", "张三")
+# FK 字段已改为 uuid.UUID (migration 202607220900),测试用合法 UUID。
+_ACTOR = ("00000000-0000-0000-0000-000000000001", "张三")
 
 
-async def _make_detail(svc: PlanService, plan_node_id: str = "ms-1") -> object:
-    return await svc.create_detail({"plan_node_id": plan_node_id, "task_theme": "初稿"})
+async def _make_detail(svc: PlanService, plan_node_id: str | None = None) -> object:
+    return await svc.create_detail(
+        {"plan_node_id": plan_node_id or str(uuid.uuid4()), "task_theme": "初稿"}
+    )
 
 
 class TestSubmitDetail:
@@ -86,4 +91,4 @@ class TestSubmitDetail:
             if p.business_type == PROCESS_BUSINESS_TYPE and p.node_key == "submit_detail"
         ]
         assert len(submit_procs) == 1
-        assert submit_procs[0].handle_user_id == _ACTOR[0]
+        assert submit_procs[0].handle_user_id == uuid.UUID(_ACTOR[0])

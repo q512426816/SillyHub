@@ -37,6 +37,7 @@ from sqlalchemy import (
 from sqlmodel import Field
 
 from app.models.base import BaseModel
+from app.modules.ppm.common.uuid_type import UuidCoercing
 
 
 def _now() -> datetime:
@@ -87,8 +88,8 @@ class PlanNodeDetail(BaseModel, table=True):
         default_factory=uuid.uuid4,
         sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
     )
-    # 源 String 外键 → 本表保留字符串 (源 ID 不迁移,运行时生成)
-    plan_node_id: str = Field(sa_column=Column(String(64), nullable=False))
+    # 源 String 外键,DB 列已 ALTER 为 uuid (migration 202607220900)
+    plan_node_id: uuid.UUID = Field(sa_column=Column(UuidCoercing, nullable=False))
     detailed_stage: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
     no: str | None = Field(default=None, sa_column=Column(String(32), nullable=True))
     task_theme: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
@@ -118,7 +119,7 @@ class PlanNodeModule(BaseModel, table=True):
         default_factory=uuid.uuid4,
         sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
     )
-    plan_node_id: str = Field(sa_column=Column(String(64), nullable=False))
+    plan_node_id: uuid.UUID = Field(sa_column=Column(UuidCoercing, nullable=False))
     module_name: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
     plan_workload: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
     plan_begin_time: datetime | None = Field(
@@ -127,8 +128,10 @@ class PlanNodeModule(BaseModel, table=True):
     plan_complete_time: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
-    # 责任人 ID (源 Long,保留字符串语义)
-    duty_user_id: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
+    # 责任人 ID (DB 列已 ALTER 为 uuid,migration 202607220900)
+    duty_user_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     created_at: datetime = Field(
         default_factory=_now, sa_column=Column(DateTime(timezone=True), nullable=False)
     )
@@ -160,10 +163,10 @@ class PsProjectPlan(BaseModel, table=True):
         default_factory=uuid.uuid4,
         sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
     )
-    project_id: str = Field(sa_column=Column(String(64), nullable=False))
+    project_id: uuid.UUID = Field(sa_column=Column(UuidCoercing, nullable=False))
     project_name: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
-    project_manager_id: str | None = Field(
-        default=None, sa_column=Column(String(64), nullable=True)
+    project_manager_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
     )
     project_manager_name: str | None = Field(
         default=None, sa_column=Column(String(128), nullable=True)
@@ -229,7 +232,7 @@ class PsPlanNode(BaseModel, table=True):
     )
     overall_stage: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
     no: str | None = Field(default=None, sa_column=Column(String(32), nullable=True))
-    ps_project_plan_id: str = Field(sa_column=Column(String(64), nullable=False))
+    ps_project_plan_id: uuid.UUID = Field(sa_column=Column(UuidCoercing, nullable=False))
     # 里程碑状态 (源 String)
     status: str = Field(
         default="draft",
@@ -243,7 +246,9 @@ class PsPlanNode(BaseModel, table=True):
     plan_complete_time: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
-    duty_user_id: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
+    duty_user_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     created_at: datetime = Field(
         default_factory=_now, sa_column=Column(DateTime(timezone=True), nullable=False)
     )
@@ -277,8 +282,8 @@ class PsPlanNodeDetail(BaseModel, table=True):
         default_factory=uuid.uuid4,
         sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
     )
-    # 所属里程碑 (源 String,本表保留字符串外键语义)
-    plan_node_id: str = Field(sa_column=Column(String(64), nullable=False))
+    # 所属里程碑 (DB 列已 ALTER 为 uuid,migration 202607220900)
+    plan_node_id: uuid.UUID = Field(sa_column=Column(UuidCoercing, nullable=False))
     detailed_stage: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
     task_theme: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
     task_description: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
@@ -300,8 +305,10 @@ class PsPlanNodeDetail(BaseModel, table=True):
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
     no: str | None = Field(default=None, sa_column=Column(String(32), nullable=True))
-    execute_user_id: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
-    module_id: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
+    execute_user_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
+    module_id: uuid.UUID | None = Field(default=None, sa_column=Column(UuidCoercing, nullable=True))
     # 附件组 ID (源 attachGroupId 字符串约定)
     attach_group_id: str | None = Field(default=None, sa_column=Column(String(128), nullable=True))
     # 附件 URL 列表 (design.md §8 附件统一约定,弃源 9 个 fileUrl 字段)
@@ -321,10 +328,14 @@ class PsPlanNodeDetail(BaseModel, table=True):
             Uuid(as_uuid=True), ForeignKey("ppm_ps_plan_node_detail.id"), nullable=True
         ),
     )
-    # ── 审计/审批人员 (源 auditUserId/approveUserId 等) ──
-    audit_user_id: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
+    # ── 审计/审批人员 (源 auditUserId/approveUserId 等,DB 列 ALTER 为 uuid) ──
+    audit_user_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     audit_user_name: str | None = Field(default=None, sa_column=Column(String(128), nullable=True))
-    approve_user_id: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
+    approve_user_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     approve_user_name: str | None = Field(
         default=None, sa_column=Column(String(128), nullable=True)
     )
@@ -352,16 +363,20 @@ class PsPlanNodeDetailProcess(BaseModel, table=True):
         default_factory=uuid.uuid4,
         sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
     )
-    business_id: str = Field(sa_column=Column(String(64), nullable=False))
+    business_id: uuid.UUID = Field(sa_column=Column(UuidCoercing, nullable=False))
     business_type: str = Field(sa_column=Column(String(64), nullable=False))
     node_key: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
-    handle_user_id: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
+    handle_user_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     handle_user_name: str | None = Field(default=None, sa_column=Column(String(128), nullable=True))
     handle_date: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
     handle_info: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
-    next_user_id: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
+    next_user_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     next_user_name: str | None = Field(default=None, sa_column=Column(String(128), nullable=True))
     created_at: datetime = Field(
         default_factory=_now, sa_column=Column(DateTime(timezone=True), nullable=False)
