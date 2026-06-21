@@ -1,22 +1,24 @@
 "use client";
 
 /**
- * 计划节点模板 (PlanNode) 页面。
+ * 计划节点模板 (PlanNode) 页面 — 三层嵌套 (模板 → 明细 → 模块)。
  *
- * 模板是里程碑的「目录」:overall_stage + project_type + no。
- * 选中一个模板后,右侧展示其模板明细 (PlanNodeDetail) 与模块
- * (PlanNodeModule) 子表。
+ * 数据模型 (对齐源 dept_project_front plannode):
+ *   PlanNode (模板) ─┬─ PlanNodeDetail (模板明细)
+ *                    └─ PlanNodeModule (执行模块,plan_node_id 指向 PlanNode)
+ *
+ * UI 结构 (AntD Table expand 嵌套):
+ *   第 1 层 模板列表 — overall_stage / project_type / no,行内可编辑
+ *   第 2 层 expand 模板行 → 明细子表 (整表行内编辑,PpmSubTable)
+ *   第 3 层 expand 模板行 → 模块子表 (抽屉表单 + 责任人 PpmUserSelect)
+ *
+ * 模块在数据层挂在 PlanNode 下 (非 PlanNodeDetail),
+ * 故"明细"和"模块"作为同一模板展开区内的两个并列子表呈现。
  *
  * 走 lib/ppm/plan.ts:listPlanNodes / listPlanNodeDetails /
- * listPlanNodeModules + CRUD。AntD Table + 右侧 Tailwind 抽屉子表。
- *
- * 明细子表(task-06):对照源 plannode/components/NodeDetailForm.vue,
- * 采用 PpmSubTable editable 整表行内编辑 + 「+ 新增行」批量加 +
- * 保存按钮 diff 提交(create/update/delete)。
- * 模板 project_type(task-06):PpmDictSelect type="project_type"。
- * 模块责任人 duty_user_id(task-06):PpmUserSelect res="projectMember"。
- *
- * 设计依据:tasks/task-06.md。
+ * listPlanNodeModules + CRUD。设计依据:tasks/task-06.md + 源
+ * views/ppm/plannode/index.vue (主表 expand NodeDetailList) +
+ * components/NodeDetailList.vue。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Table, type TableProps, Tag } from "antd";
@@ -69,7 +71,6 @@ export default function PlanNodesPage() {
   const [nodes, setNodes] = useState<PlanNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<DrawerState>({
     open: false,
     mode: "create",
@@ -78,21 +79,17 @@ export default function PlanNodesPage() {
     null,
   );
 
-  const selected = nodes.find((n) => n.id === selectedId) ?? null;
-
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const list = await listPlanNodes({ page: 1, page_size: 200 });
-      setNodes(list);
-      if (!selectedId && list.length > 0) setSelectedId(list[0]?.id ?? "");
+      setNodes(await listPlanNodes({ page: 1, page_size: 200 }));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "加载失败");
     } finally {
       setLoading(false);
     }
-  }, [selectedId]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -111,7 +108,6 @@ export default function PlanNodesPage() {
     if (drawer.mode === "create") {
       const created = await createPlanNode(form);
       showToast(true, `模板 ${created.overall_stage} 已创建`);
-      setSelectedId(created.id);
     } else if (drawer.node) {
       await updatePlanNode(drawer.node.id, form);
       showToast(true, "模板已更新");
@@ -125,7 +121,6 @@ export default function PlanNodesPage() {
     try {
       await deletePlanNode(node.id);
       showToast(true, "已删除");
-      if (selectedId === node.id) setSelectedId(null);
       await load();
     } catch (err) {
       showToast(false, err instanceof ApiError ? err.message : "删除失败");
@@ -138,16 +133,7 @@ export default function PlanNodesPage() {
       title: "总阶段",
       dataIndex: "overall_stage",
       key: "overall_stage",
-      render: (v: string, n: PlanNode) => (
-        <button
-          className={`text-left font-medium hover:underline ${
-            selectedId === n.id ? "text-primary" : ""
-          }`}
-          onClick={() => setSelectedId(n.id)}
-        >
-          {v}
-        </button>
-      ),
+      render: (v: string) => <span className="font-medium">{v}</span>,
     },
     {
       title: "项目类型",
@@ -193,7 +179,7 @@ export default function PlanNodesPage() {
         <div>
           <h1 className="mt-0.5">计划节点模板</h1>
           <p className="text-xs text-muted-foreground">
-            里程碑目录 + 模板明细 + 模块,供项目计划实例化引用
+            模板 → 模板明细 → 执行模块(展开行查看明细与模块)
           </p>
         </div>
         <Button
@@ -229,31 +215,25 @@ export default function PlanNodesPage() {
           </Button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1.2fr]">
-          <Table<PlanNode>
-            rowKey="id"
-            columns={columns}
-            dataSource={nodes}
-            loading={loading}
-            size="small"
-            pagination={false}
-            locale={{ emptyText: "暂无模板" }}
-            scroll={{ x: "max-content" }}
-          />
-          <div>
-            {selected ? (
+        <Table<PlanNode>
+          rowKey="id"
+          columns={columns}
+          dataSource={nodes}
+          loading={loading}
+          size="small"
+          pagination={false}
+          locale={{ emptyText: "暂无模板" }}
+          scroll={{ x: "max-content" }}
+          expandable={{
+            expandedRowRender: (node) => (
               <PlanNodeChildren
-                key={selected.id}
-                node={selected}
+                key={node.id}
+                node={node}
                 onChanged={() => void load()}
               />
-            ) : (
-              <div className="rounded border border-dashed bg-card p-8 text-center text-xs text-muted-foreground">
-                选择左侧模板查看明细与模块
-              </div>
-            )}
-          </div>
-        </div>
+            ),
+          }}
+        />
       )}
 
       {drawer.open && (
@@ -269,7 +249,7 @@ export default function PlanNodesPage() {
 }
 
 // ---------------------------------------------------------------------------
-// 模板明细 + 模块 子表
+// 模板展开区:明细子表 (第 2 层) + 模块子表 (第 3 层)
 // ---------------------------------------------------------------------------
 
 function PlanNodeChildren({
@@ -280,7 +260,7 @@ function PlanNodeChildren({
   onChanged: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 bg-muted/20 p-3">
       <DetailsSubTable node={node} onChanged={onChanged} />
       <ModulesSubTable node={node} onChanged={onChanged} />
     </div>
@@ -292,7 +272,7 @@ function PlanNodeChildren({
 /** 草稿行类型:已存在明细带真实 id;新增行用临时 __tempId 作 rowKey。 */
 interface DetailDraftRow extends PpmSubTableRow {
   id: string; // 已存在=真实 id;新增=`new-${n}` 临时键
-  plan_node_id?: string;
+  plan_node_id?: string | null;
   detailed_stage: string | null;
   task_theme: string | null;
   task_description: string | null;

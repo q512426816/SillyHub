@@ -226,7 +226,8 @@ export interface PlanNodeUpdate {
 
 export interface PlanNodeDetail {
   id: string;
-  plan_node_id: string;
+  // 后端已放宽为 Optional (历史残留 Long ID 降级 NULL,见 schema.py D-fix@plan500)
+  plan_node_id: string | null;
   detailed_stage: string | null;
   no: string | null;
   task_theme: string | null;
@@ -264,7 +265,8 @@ export interface PlanNodeDetailUpdate {
 
 export interface PlanNodeModule {
   id: string;
-  plan_node_id: string;
+  // 同 PlanNodeDetail.plan_node_id (D-fix@plan500)
+  plan_node_id: string | null;
   module_name: string | null;
   plan_workload: string | null;
   plan_begin_time: string | null;
@@ -293,7 +295,8 @@ export interface PlanNodeModuleUpdate {
 
 export interface PsProjectPlan {
   id: string;
-  project_id: string;
+  // 同上 (D-fix@plan500)
+  project_id: string | null;
   project_name: string | null;
   project_manager_id: string | null;
   project_manager_name: string | null;
@@ -414,7 +417,8 @@ export interface PsPlanNodeUpdate {
 
 export interface PsPlanNodeDetail {
   id: string;
-  plan_node_id: string;
+  // 同上 (D-fix@plan500)
+  plan_node_id: string | null;
   detailed_stage: string | null;
   task_theme: string | null;
   task_description: string | null;

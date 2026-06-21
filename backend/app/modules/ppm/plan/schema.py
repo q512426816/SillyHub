@@ -58,7 +58,9 @@ class PlanNodeResp(PlanNodeBase):
 
 
 class PlanNodeDetailBase(PydanticModel):
-    plan_node_id: uuid.UUID
+    # ALTER 迁移 (commit 2e9e76b) 把源残留 Long ID 降级为 NULL,
+    # 故放宽为 Optional 以兼容历史数据 (D-fix@plan500)。
+    plan_node_id: uuid.UUID | None = None
     detailed_stage: str | None = None
     no: str | None = None
     task_theme: str | None = None
@@ -93,7 +95,8 @@ class PlanNodeDetailResp(PlanNodeDetailBase):
 
 
 class PlanNodeModuleBase(PydanticModel):
-    plan_node_id: uuid.UUID
+    # 同上 (D-fix@plan500)
+    plan_node_id: uuid.UUID | None = None
     module_name: str | None = None
     plan_workload: str | None = None
     plan_begin_time: datetime | None = None
@@ -127,7 +130,8 @@ class PlanNodeModuleResp(PlanNodeModuleBase):
 
 
 class PsProjectPlanBase(PydanticModel):
-    project_id: uuid.UUID
+    # 同上 (D-fix@plan500)
+    project_id: uuid.UUID | None = None
     project_name: str | None = None
     project_manager_id: uuid.UUID | None = None
     project_manager_name: str | None = None
@@ -227,7 +231,8 @@ class PsPlanNodeResp(PsPlanNodeBase):
 
 
 class PsPlanNodeDetailBase(PydanticModel):
-    plan_node_id: uuid.UUID
+    # 同上 (D-fix@plan500)
+    plan_node_id: uuid.UUID | None = None
     detailed_stage: str | None = None
     task_theme: str | None = None
     task_description: str | None = None

@@ -88,8 +88,12 @@ class PlanNodeDetail(BaseModel, table=True):
         default_factory=uuid.uuid4,
         sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
     )
-    # 源 String 外键,DB 列已 ALTER 为 uuid (migration 202607220900)
-    plan_node_id: uuid.UUID = Field(sa_column=Column(UuidCoercing, nullable=False))
+    # 源 String 外键,DB 列已 ALTER 为 uuid (migration 202607220900)。
+    # ALTER 迁移 (commit 2e9e76b) 把源残留 Long ID 降级为 NULL,
+    # 故 nullable=True 以兼容历史数据 (D-fix@plan500)。
+    plan_node_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     detailed_stage: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
     no: str | None = Field(default=None, sa_column=Column(String(32), nullable=True))
     task_theme: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
@@ -119,7 +123,9 @@ class PlanNodeModule(BaseModel, table=True):
         default_factory=uuid.uuid4,
         sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
     )
-    plan_node_id: uuid.UUID = Field(sa_column=Column(UuidCoercing, nullable=False))
+    plan_node_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     module_name: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
     plan_workload: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
     plan_begin_time: datetime | None = Field(
@@ -163,7 +169,9 @@ class PsProjectPlan(BaseModel, table=True):
         default_factory=uuid.uuid4,
         sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
     )
-    project_id: uuid.UUID = Field(sa_column=Column(UuidCoercing, nullable=False))
+    project_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     project_name: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
     project_manager_id: uuid.UUID | None = Field(
         default=None, sa_column=Column(UuidCoercing, nullable=True)
@@ -282,8 +290,12 @@ class PsPlanNodeDetail(BaseModel, table=True):
         default_factory=uuid.uuid4,
         sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
     )
-    # 所属里程碑 (DB 列已 ALTER 为 uuid,migration 202607220900)
-    plan_node_id: uuid.UUID = Field(sa_column=Column(UuidCoercing, nullable=False))
+    # 所属里程碑 (DB 列已 ALTER 为 uuid,migration 202607220900)。
+    # ALTER 迁移 (commit 2e9e76b) 把源残留 Long ID 降级为 NULL,
+    # 故 nullable=True (D-fix@plan500)。
+    plan_node_id: uuid.UUID | None = Field(
+        default=None, sa_column=Column(UuidCoercing, nullable=True)
+    )
     detailed_stage: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
     task_theme: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
     task_description: str | None = Field(default=None, sa_column=Column(Text, nullable=True))

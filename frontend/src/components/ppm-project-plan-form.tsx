@@ -128,7 +128,7 @@ export function PpmProjectPlanForm({
     if (!open) return;
     if (mode === "edit" && plan) {
       form.setFieldsValue({
-        project_id: plan.project_id,
+        project_id: plan.project_id ?? undefined,
         project_name: plan.project_name,
         project_manager_id: plan.project_manager_id,
         project_manager_name: plan.project_manager_name,
