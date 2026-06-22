@@ -831,6 +831,9 @@ async def test_build_claim_payload_batch_null_agent_run_raises(
     await db_session.commit()
     await db_session.refresh(lease)
 
-    svc = DaemonService(db_session)
+    # task-06：_build_claim_payload 已从 DaemonService 迁出为
+    # app.modules.daemon.lease.context.build_claim_payload 模块级函数。
+    from app.modules.daemon.lease.context import build_claim_payload
+
     with pytest.raises(DaemonLeaseNoAgentRun):
-        await svc._build_claim_payload(lease)
+        await build_claim_payload(db_session, lease)

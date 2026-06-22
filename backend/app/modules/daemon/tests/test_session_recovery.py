@@ -75,7 +75,7 @@ def _mock_redis() -> AsyncMock:
 @pytest.fixture()
 def mocked_redis():
     redis = _mock_redis()
-    with patch("app.modules.daemon.service.get_redis", return_value=redis):
+    with patch("app.modules.daemon.session.service.get_redis", return_value=redis):
         yield redis
 
 

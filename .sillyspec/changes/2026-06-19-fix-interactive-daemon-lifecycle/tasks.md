@@ -24,6 +24,7 @@ created_at: 2026-06-19T05:20:00
 
 ## W4（gap-8 接通 daemon 重启 session 恢复，依赖 W1-W3）
 - **task-06 backend recovery HTTP 端点（gap-8.1，design §11）**：router 加 POST /sessions/{id}/recover | /confirm-reconnected | /mark-recovery-failed；service 补 confirm_reconnected/mark_recovery_failed 若缺；get_current_principal 鉴权。
+  <!-- 2026-06-22-daemon-service-split task-05 通知（design §10 R3 协调）：recover_session_after_daemon_restart / confirm_session_reconnected / mark_session_recovery_failed 已从 service.py 迁至 backend/app/modules/daemon/session/service.py（SessionService.recover_* / confirm_session_reconnected / mark_session_recovery_failed）。facade DaemonService 保留同名委托，router 仍调 DaemonService.recover_*，W4 router 改动零调整；三个方法实现已存在于 session/service.py，W4 无需在 service.py 重新补实现，直接经 facade 委托使用即可。 -->
 - **task-07 daemon hub-client recovery 方法（gap-8.2，design §11）**：hub-client.ts 加 recoverSession/confirmReconnected/markRecoveryFailed，实现 RecoveryClient 接口(daemon.ts:266)。
 - **task-08 cli.ts 装配 persistence + recoveryClient（gap-8.3，design §11）**：JsonSessionPersistence + RecoveryClient 实现 + 传 Daemon/SessionManager；验证 _recoverSessionsOnBoot 生效。
 - **task-09 claim_token rotate 回流（gap-8.4，design §11）**：SESSION_INJECT 后 SessionState.claimToken 用 rotated token（session-manager.ts:761）。
