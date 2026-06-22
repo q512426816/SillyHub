@@ -1,69 +1,77 @@
 ---
+source_commit: fcbf3fa7
+updated_at: 2026-06-22T17:56:21Z
+generator: sillyspec-scan
 author: qinyi
-created_at: 2026-06-10T17:00:05
+created_at: 2026-06-23 01:56:21
 ---
 
-# 代码债务与风险 — multi-agent-platform
+# multi-agent-platform — 关注点 / 风险
 
 ## 代码质量
 
+通过 `grep -rn "TODO|FIXME|HACK|XXX"` 扫描三个子项目源码（已排除 `node_modules` / `.venv` / `dist` / `.next`）：
+
+| 子项目 | 扫描路径 | TODO/FIXME/HACK/XXX 数量 |
+| --- | --- | --- |
+| backend | `backend/app` | 5（全部为 `TODO`，集中在 `app/modules/spec_profile/`） |
+| frontend | `frontend/src` | 0 |
+| sillyhub-daemon | `sillyhub-daemon/src` | 0 |
+
+backend 的 5 处 `TODO` 具体位置：
+
+- `backend/app/modules/spec_profile/policy.py:61` — `# TODO: implement stage conflict detection`
+- `backend/app/modules/spec_profile/policy.py:97` — `# TODO: implement document conflict detection`
+- `backend/app/modules/spec_profile/provider.py:76` — `# TODO: implement actual discovery in follow-up task`
+- `backend/app/modules/spec_profile/provider.py:86` — `# TODO: implement actual loading in follow-up task`
+- `backend/app/modules/spec_profile/provider.py:96` — `# TODO: implement in follow-up task`
+
+> 说明：`sillyhub-daemon/src/credential.ts` 中出现的 `XXX` 是占位符 `{{USER_XXX}}` 文本，非标记，不计入。
+
+项目约定（`.claude/CLAUDE.md`）：禁止无文档改代码、禁止先写代码再补文档；新功能走 SillySpec 完整流程；hook 拦截禁止跳过。
+
 ### 🔴 高严重度
 
-- **Agent service.py 过大**: `backend/app/modules/agent/service.py` 约 71KB，职责过重，包含 Agent Run 的全部业务逻辑。应拆分为多个服务类。
-- **前端页面组件过大**: `frontend/src/app/(dashboard)/settings/page.tsx` 约 23KB、`runtimes/page.tsx` 约 14KB，单个文件承担过多 UI 逻辑，应提取子组件。
-- **Claude Code Adapter 过大**: `backend/app/modules/agent/adapters/claude_code.py` 约 37KB，Agent 适配器包含大量协议解析逻辑。
+- **spec_profile 模块未完成实现**：上述 5 处 `TODO` 集中在 `spec_profile` 的 policy（阶段冲突、文档冲突检测）与 provider（发现、加载）逻辑，均为 `follow-up task`，意味着该模块当前为骨架，关键校验逻辑缺失。
 
 ### 🟡 中严重度
 
-- **测试覆盖不均**: 后端覆盖率门槛仅 60%，前端组件测试几乎为空。Daemon 测试最好（17 个文件），但 agent/adapters 层只有 adapter_isolation 测试。
-- **跳过的测试**: `backend/app/modules/agent/tests/test_run_input_service.py.skip` 存在被跳过的测试文件，需要修复或移除。
-- **硬编码路径**: `deploy/docker-compose.yml` 中 `HOST_PATH_PREFIX` 默认值为 `C:/Users/qinyi/IdeaProjects`，需要用户手动修改。
-- **mypy 严格度不足**: `strict=false`，且 disable 了 9 个 error_code，类型安全性偏弱。
+- **根 `package.json` 为纯占位**：根无脚本聚合，所有命令须进子项目或走 `Makefile`，新开发者容易在根目录直接 `npm test` 触发占位失败。
 
 ### 🟢 低严重度
 
-- **Ruff ignore 规则偏多**: 忽略了 14 条 lint 规则，部分合理（如 B008 FastAPI 模式），但应定期审视是否可以逐步收紧。
-- **前端 node_modules 提交风险**: pnpm-lock.yaml 存在但 `node_modules` 在根目录下，确保 `.gitignore` 正确配置。
+- frontend 与 sillyhub-daemon 源码当前无 TODO/FIXME 标记，代码层面无明显遗留注释。
 
 ## 依赖风险
 
 ### 🔴 高严重度
 
-- **Claude Code 版本锁定**: 后端 Dockerfile 硬编码 `claude-code@2.1.158` 和 `sillyspec@3.18.3`，升级需要重新构建镜像。版本不匹配可能导致协议变更失效。
-- **Anthropic API 代理**: 默认使用 `open.bigmodel.cn/api/anthropic` 作为 API 代理，如果代理服务不稳定或变更，整个 Agent 功能受影响。
+- **sillyhub-daemon pnpm overrides 绑定 Claude Agent SDK 多平台子包到 `npm:@anthropic-ai/claude-agent-sdk@0.3.181`**（`sillyhub-daemon/package.json` 的 `pnpm.overrides`，覆盖 win32/linux/darwin 的 x64/arm64/musl 共 8 个平台子包）。版本硬钉死，升级需同步改 8 条 override，存在与 SDK 新版本不兼容的隐藏风险。
 
 ### 🟡 中严重度
 
-- **uv.lock 与 pyproject.toml 同步**: 后端使用 `uv.lock` 但 Dockerfile 中使用 `uv pip install -e .` (无 lock)，注释说 "Lock-less install is acceptable for V1"，生产环境应改为 `uv sync --frozen`。
-- **PostgreSQL 版本**: 使用 16-alpine，需关注主要版本升级的兼容性。
-- **Redis 持久化**: AOF 模式已启用，但无备份策略，volume 丢失即数据丢失。
+- **frontend 同时引入 antd 6 + Tailwind 3.4 + Radix UI**，样式体系混合，类名/优先级冲突需持续维护。
+- **frontend 同时声明 `@playwright/test`(1.60) 与 `puppeteer`(24.43) 两套浏览器自动化依赖**，职责重叠，体积与维护负担偏大。
+- **backend 同时依赖 `asyncpg` 与（dev）`aiosqlite`**，测试与生产走不同 async 驱动，存在方言差异风险。
 
-### 🟢 低严重度
+## 已知问题清单（按严重度分组）
 
-- **Python 3.12**: 较新版本，部分第三方库兼容性需要关注。
-- **Next.js 14**: App Router 仍在快速发展中，升级可能带来 breaking changes。
+### 🔴 高（阻塞 / 待 execute）
 
-## 架构风险
+- 🔴 **agent-run 链路日志丢失**：`AgentRunLog` 模型无 `metadata` 列；三层日志的 `metadata` 在 `submit_messages` 丢失。端到端 scan 联调待环境。（来源：项目记忆 `agent-run-pipeline-fix-status`）
+- 🔴 **daemon turn 卡死**：根因是 `cli.ts` 漏传 `persistence` / `recoveryClient`，导致交互式 turn 无法恢复。修复方案见 `fix-interactive-daemon-lifecycle` design §11 / tasks W4，**execute 待办**。（来源：项目记忆 `daemon-restart-session-recovery-fix`）
+- 🔴 **daemon 重启 session 恢复修复尚未 execute**：同上，design 与 tasks 已就绪但代码未落地。
 
-### 🟡 中严重度
+### 🟡 中（待联调 / 待 verify / 运维注意）
 
-- **单 Agent Adapter**: 目前只有 `claude_code.py` 一个适配器，如果要支持其他 Agent (如 GPT Code Interpreter) 需要抽象更大的 Adapter 接口。
-- **Daemon 多协议复杂度**: 5 种协议后端 (json_rpc, jsonl, ndjson, stream_json, text) 增加了维护负担，每个后端都需要独立测试和维护。
-- **Host 路径映射**: 容器内外路径映射 (`HOST_PATH_PREFIX` / `CONTAINER_PATH_PREFIX`) 是潜在的故障点，尤其在跨平台场景。
+- 🟡 **agent-run 调度 scan 链路 CONDITIONAL_PASS**：单元测试通过，但端到端联调待环境验证。（来源：`agent-run-pipeline-fix-status`）
+- 🟡 **多 Agent 编排 `delegate_task` spike 待运行时验证**：Wave0 已修 + 通用兜底已落地，但 delegate_task 的运行时行为尚未实测。（来源：`multi-agent-orchestration-status`）
+- 🟡 **daemon-service-split 已 merge，遗留项待 verify**：D-005（facade lazy import）、D-006（跨域 `_facade` 引用）尚未 verify。（来源：`daemon-service-split-status`）
+- 🟡 **多个 daemon 实例并存**：本地（`daemon-start.bat`）与远程（手动 cmd）两类实例同时存在，停 daemon 时必须按 `--server` 区分，避免误杀。（来源：`multi-daemon-instances`）
+- 🟡 **commit hook 可被复合命令绕过**：`git add && git commit` 复合命令以 `git add` 开头，会绕过 claude PreToolUse 层（仅触发 git pre-commit 的 ruff，不触发 mypy + 前端全量检查）。（来源：`pre-commit-ci-check-hook`）
+- 🟡 **claude.exe 孤儿进程**：禁止 `taskkill /IM` 通杀（会自杀当前会话），必须按 PID 精确杀并排除当前会话。（来源：`claude-exe-orphan-cleanup`）
 
-### 🟢 低严重度
+### 🟢 低（已知限制 / 增强）
 
-- **SillySpec 工作区数据**: spec 数据存储在 Docker volume 中，无导出/备份机制。
-- **Bootstrap Admin**: 明文密码在环境变量中，虽然只在初始化时使用，但仍然不理想。
-
-## 安全风险
-
-### 🟡 中严重度
-
-- **SECRET_KEY 默认值**: `.env.example` 中 SECRET_KEY 为 `change-me-to-a-random-48-char-string`，存在用户忘记修改的风险。
-- **CORS 配置**: 开发环境允许 `localhost:3000`，生产部署时需要严格限制。
-- **SCAN_DENIED_WRITE_PATHS**: Claude Code hook 依赖环境变量控制写入权限，如果变量未设置则不生效。
-
-### 🟢 低严重度
-
-- **JWT token 存储**: 前端将 access_token 存在 localStorage，存在 XSS 攻击风险。当前项目未上线，风险可控。
+- 🟢 **daemon 无自动拉起机制**：daemon 挂掉后不会自动重启，需手动启动。（来源：`multi-daemon-instances`）
+- 🟢 **根 package.json 为纯占位**：根无脚本聚合，所有命令须进子项目或走 `Makefile`。

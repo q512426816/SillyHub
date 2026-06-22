@@ -1,114 +1,96 @@
 ---
+source_commit: fcbf3fa7
+updated_at: 2026-06-22T17:56:21Z
+generator: sillyspec-scan
 author: qinyi
-created_at: 2026-06-10T17:00:03
+created_at: 2026-06-23 01:56:21
 ---
 
-# 外部集成 — multi-agent-platform
+# multi-agent-platform — 外部集成（根 monorepo）
 
-## 数据库与存储
+> 本文档由 `sillyspec-scan` 在 `fcbf3fa7` 处扫描根 monorepo 生成。
+> 按「类型」分组列出 monorepo 依赖的外部系统、SDK 与运行时，并标注它在哪个子项目被使用。
+> 信息来源：`deploy/docker-compose.yml`、`deploy/docker-compose.dev.yml`、
+> `backend/pyproject.toml`、`frontend/package.json`、`sillyhub-daemon/package.json`，
+> 以及对源码的 `grep` 结果。
 
-### PostgreSQL 16
-- **用途**: 主数据存储，所有业务表
-- **连接方式**: asyncpg (异步驱动)，通过 `postgresql+asyncpg://` URL
-- **连接池**: SQLAlchemy async engine，在 lifespan 中初始化/销毁
-- **迁移管理**: Alembic，20 个迁移版本
-- **Docker**: postgres:16-alpine，持久化到 pgdata volume
+## 1. 数据库：PostgreSQL
 
-### Redis 7
-- **用途**: 缓存、会话存储
-- **连接方式**: `redis://` URL，通过 `core/redis.py` 管理
-- **Docker**: redis:7-alpine，AOF 持久化，redisdata volume
+- **角色**：主数据持久化（用户、会话、Agent 运行记录、SillySpec 元数据等）。
+- **版本**：`postgres:16-alpine`（见 `deploy/docker-compose.yml`）。
+- **服务名 / 端口**：`postgres` 服务，容器内 `5432`，宿主机端口默认 `${POSTGRES_PORT:-5432}`。
+- **连接串**（注入到 backend 容器）：
+  `postgresql+asyncpg://${POSTGRES_USER:-platform}:${POSTGRES_PASSWORD:-platform}@postgres:5432/${POSTGRES_DB:-platform}`。
+- **客户端依赖**（backend）：`sqlmodel>=0.0.22`、`sqlalchemy[asyncio]>=2.0`、`asyncpg>=0.29`、`alembic>=1.13`。
+- **健康检查**：`pg_isready -U <user> -d <db>`。
+- **数据卷**：`pgdata`（命名卷）。
 
-### 文件系统
-- **Host Mount**: 宿主机项目目录挂载到容器 `/host-projects`
-- **Worktree Volume**: `worktree-data` -> `/data/sillyspec-workspaces`
-- **Spec Volume**: `spec-data` -> `/data/spec-workspaces`
-- **Claude Data**: `claude-data` -> `/app/.claude`
+## 2. 缓存 / 消息：Redis
 
-## AI Agent 集成
+- **角色**：缓存与进程间消息传递；后端用于 Pub/Sub 与 SSE 事件桥接。
+- **版本**：`redis:7-alpine`（见 `deploy/docker-compose.yml` / `dev.yml`）。
+- **服务名 / 端口**：`redis` 服务，dev 编排暴露宿主 `${REDIS_PORT:-6379}`，连接串注入为 `redis://redis:6379/0`。
+- **客户端依赖**（backend）：`redis>=5.0`（见 `backend/pyproject.toml`）。
+- **代码引用**：`backend/app/core/redis.py`（客户端封装），以及
+  `backend/app/modules/daemon/session/service.py`、`agent/service.py`、`spec_workspace/bootstrap.py`、`health/router.py` 等多处使用 redis / pub-sub / `EventSourceResponse`（grep 命中 26 文件）。
 
-### Claude Code (Anthropic)
-- **版本**: 2.1.158 (Docker 内安装)
-- **用途**: 核心代码生成 Agent，通过 CLI 子进程调用
-- **集成方式**: `backend/app/modules/agent/adapters/claude_code.py` (~37KB)
-- **通信协议**: JSON-RPC over stdin/stdout (通过 Daemon backends)
-- **认证**: ANTHROPIC_AUTH_TOKEN 环境变量
-- **模型配置**: 支持配置 base URL、不同层级模型
-- **API 代理**: 默认通过 `https://open.bigmodel.cn/api/anthropic` 代理
+## 3. LLM API：Claude（Anthropic）
 
-### SillySpec
-- **版本**: 3.18.3 (Docker 内安装)
-- **用途**: 文档驱动开发工具，管理变更工作流
-- **集成方式**: CLI 调用 + spec 文件系统
+- **角色**：实际的大模型推理与 Agent 执行后端。
+- **接入方式**：
+  - **直接调用**：backend 不直接 import Anthropic / OpenAI SDK；仅通过环境变量 `ANTHROPIC_*` 传递配置（`backend/app/modules/agent/delegation.py` 中 `Build from ANTHROPIC_* env`）。
+  - **间接调用（主路径）**：由 `sillyhub-daemon` 通过 `@anthropic-ai/claude-agent-sdk`（见下节）驱动 Claude 进程，backend 通过 daemon 协议与之交互。
+- **凭证流**：`sillyhub-daemon/src/credential.ts` / `spawn-env.ts` 负责把宿主机凭证注入子进程环境；Docker 部署下由 `deploy/.env` 注入 backend 容器，避免宿主环境变量覆盖。
 
-### Daemon Agent Detector
-- **用途**: 自动检测本地已安装的 AI Agent 运行时
-- **支持的 Provider**: 12 个，包括 Claude Code、Cursor、Windsurf、Cline、Aider、Continue、Copilot 等
-- **实现**: `sillyhub-daemon/sillyhub_daemon/agent_detector.py`
+## 4. 本地进程编排：Claude Agent SDK
 
-## 认证与安全
+- **承载子项目**：`sillyhub-daemon`（Node ≥20 ESM 单进程）。
+- **核心依赖**：`@anthropic-ai/claude-agent-sdk@0.3.181`（见 `sillyhub-daemon/package.json`，并对 win32/linux/darwin 多平台二进制做了 pnpm overrides 统一指向主包）。
+- **使用点**（grep 命中）：
+  - `src/interactive/claude-sdk-driver.ts`：`import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk'`（驱动交互式会话）。
+  - `src/interactive/session-manager.ts`、`src/interactive/input-queue.ts`、`src/interactive/types.ts`：导入 `Query` / `SDKMessage` / `SDKResultMessage` / `SDKUserMessage` 等类型。
+  - `src/daemon.ts`：导入 `SDKMessage` / `SDKResultMessage` 类型做消息路由。
+- **本地进程 / spawn**：`grep spawn|execa|child_process|dockerode` 命中 21 文件，关键实现：
+  - `src/spawn-env.ts`、`src/cmd-shim.ts`：子进程环境与命令封装。
+  - `src/agent-detector.ts`、`src/cursor-version.ts`：宿主环境探测。
+  - `src/terminal-launcher.ts`、`src/terminal-observer.ts`：终端观察/启动。
+  - `src/workspace.ts`：工作目录解析与隔离。
+  - `src/adapters/*.ts`：多种输出协议适配（stream-json / json-rpc / jsonl / ndjson）。
 
-### JWT 认证
-- **库**: python-jose (cryptography) + passlib (bcrypt)
-- **流程**: 登录 -> access_token + refresh_token
-- **加密**: PyNaCl (NaCl/libsodium)
-- **前端存储**: Zustand persist -> localStorage
+## 5. 文件系统：workspace / worktree / 隔离
 
-### Bootstrap Admin
-- 环境变量配置初始管理员账户
-- `PLATFORM_BOOTSTRAP_ADMIN_EMAIL/PASSWORD/DISPLAY_NAME`
+- **monorepo 工作区**：根 `package.json` 聚合 `backend` / `frontend` / `sillyhub-daemon` 三个子项目；各子项目各自 `pnpm@9.6.0`。
+- **SillySpec 工作区**：`.sillyspec/`（changes / docs / knowledge / projects / quicklog / workflows / `sillyspec.db`）。
+- **spec-workspaces 隔离**（Docker 部署）：backend 容器通过 bind mount 共享 `SPEC_DATA_HOST_DIR`（默认 `C:/data/spec-workspaces`）→ `/data/spec-workspaces`；并设 `SPEC_DATA_ROOT=/data/spec-workspaces`，以便宿主 daemon 与容器后端共享 spec 文档。
+- **worktree 数据**：命名卷 `worktree-data` → `/data/sillyspec-workspaces`，设 `WORKTREE_BASE_DIR=/data/sillyspec-workspaces`。
+- **宿主项目挂载**：`HOST_PROJECTS_DIR`（默认 `C:/Users/qinyi/IdeaProjects`）→ `/host-projects`，并通过 `HOST_PATH_PREFIX` / `CONTAINER_PATH_PREFIX` 做路径重写，使扫描器能在容器内读取宿主 `.sillyspec` 树。
+- **scripts**：`scripts/migrate_scan_docs.py` 处理 scan 文档迁移（含 workspace 路径处理）。
+- **spikes 中的隔离验证**：`spikes/01-git-isolation/`（run.sh / run.ps1）、`spikes/02-workspace-scan/`（scan.py + fixture）、`spikes/04-delegate-task/`、`spikes/05-mission-e2e/` 均涉及 worktree / workspace / isolation 概念。
 
-### RBAC
-- 角色 + 权限 + 工作区级别角色绑定
-- User -> UserWorkspaceRole -> Role -> RolePermission
+## 6. Docker / 容器编排
 
-## 前端依赖
+### 6.1 全栈 `deploy/docker-compose.yml`（name: `multi-agent-platform`）
+| 服务 | 镜像 / 来源 | 端口 | 依赖 | 说明 |
+| --- | --- | --- | --- | --- |
+| `postgres` | `postgres:16-alpine` | `5432` | — | 见 §1 |
+| `redis` | `redis:7-alpine` | （未对外，仅容器内） | — | 见 §2，appendonly 持久化 |
+| `backend` | `build context=../backend`（Dockerfile） | `8000` | `postgres`(healthy) / `redis`(healthy) | 启动命令 `alembic upgrade head && uvicorn app.main:app`；构建参数 `CLAUDE_CODE_VERSION` / `SILLYSPEC_VERSION` |
+| `frontend` | `build context=../frontend`（Dockerfile） | `3000` | `backend` | 构建期注入 `INTERNAL_API_BASE_URL`（默认 `http://backend:8000`）/ `NEXT_PUBLIC_API_BASE_URL`（默认 `http://localhost:8000`） |
 
-### UI 框架
-- **Next.js 14**: App Router, standalone 输出, API rewrites
-- **React 18**: 函数组件 + hooks
-- **Tailwind CSS 3.4**: 原子化 CSS
-- **shadcn/ui**: 组件库 (通过 components.json 配置)
-- **Lucide React**: 图标库
+命名卷：`pgdata`、`redisdata`、`worktree-data`、`claude-data`；外加 bind mount：宿主项目目录、`SPEC_DATA_HOST_DIR`。
 
-### 数据管理
-- **@tanstack/react-query 5**: 服务端状态管理
-- **Zustand 4**: 客户端状态管理
-- **Zod**: Schema 验证
+### 6.2 开发 `deploy/docker-compose.dev.yml`（name: `multi-agent-platform-dev`）
+仅起依赖服务，backend / frontend 在宿主机以热重载方式运行（`uvicorn --reload` / `next dev`）：
+- `postgres:16-alpine`，暴露 `${POSTGRES_PORT:-5432}`。
+- `redis:7-alpine`，暴露 `${REDIS_PORT:-6379}`。
 
-### 可视化
-- **@xyflow/react**: 流程图/拓扑图 (用于工作区组件拓扑)
-- **@uiw/react-markdown-preview**: Markdown 渲染
+> 注：当前 `deploy/` 下**没有** `sillyhub-daemon` 的 compose 服务——daemon 始终在宿主机本地运行（通过 `daemon-start.bat` 等本地脚本拉起），与 backend 通过本地协议/网络交互。
 
-## 通信协议
+## 7. 前端运行时集成（frontend/package.json 摘要）
 
-### REST API
-- 后端暴露 RESTful API (FastAPI)
-- 前端通过 Next.js rewrites 代理 `/api/*` -> `http://backend:8000/api/*`
-- 内部通信: `INTERNAL_API_BASE_URL` (SSR/ISR)
-
-### WebSocket
-- Agent Run 日志流: `streamAgentRunLogs` (前端 SSE)
-- Daemon <-> Backend: websockets 库
-
-### Daemon 协议后端
-- **JSON-RPC**: Claude Code 标准协议
-- **JSONL**: JSON Lines 流式输出
-- **NDJSON**: 换行分隔 JSON
-- **Stream JSON**: 流式 JSON 输出
-- **Text**: 纯文本输出
-
-## DevOps
-
-### Docker Compose
-- 全栈: `deploy/docker-compose.yml` (4 services + 5 volumes)
-- 开发: `deploy/docker-compose.dev.yml` (仅 postgres + redis)
-
-### 监控
-- OpenTelemetry: `OTEL_ENDPOINT` 配置
-- 结构化日志: structlog
-- 健康检查: `/api/health` 端点 + Docker HEALTHCHECK
-
-### CI/CD Hooks
-- Pre-commit: ruff-format + ruff-check
-- Claude Code Hooks: `scan_write_guard.py` 阻止扫描期间的非法写入
+- 框架：`next@14.2.5`、`react@18.3.1`、`react-dom@18.3.1`。
+- UI：`antd@^6.4.4`、`@ant-design/icons`、`@ant-design/nextjs-registry`、`@radix-ui/*`、`lucide-react`、`tailwindcss@3.4.7` + `tailwindcss-animate`、`class-variance-authority` / `clsx` / `tailwind-merge`。
+- 数据/状态：`@tanstack/react-query@^5.51`、`zustand@^4.5`、`zod@^3.23`。
+- 可视化/流程：`@xyflow/react@^12.10`（节点流程图）、`echarts@^6.1` + `echarts-for-react`（图表）、`@uiw/react-markdown-preview`。
+- 测试/E2E：`vitest`、`@testing-library/react`、`@playwright/test`、`puppeteer`、`jsdom`。
+- 构建约定：`node>=20`，`packageManager=pnpm@9.6.0`。

@@ -1,9 +1,9 @@
 ---
-author: qinyi
-created_at: 2026-06-19 12:50:59
-source_commit: 0303536
-updated_at: 2026-06-19T04:50:59Z
+source_commit: fcbf3fa7
+updated_at: 2026-06-22T18:12:48Z
 generator: sillyspec-scan
+author: qinyi
+created_at: 2026-06-23 02:12:48
 ---
 
 # sillyhub-daemon · 项目
@@ -33,7 +33,7 @@ generator: sillyspec-scan
 - **测试**：`vitest` ^2.0.0
 - **构建**：`tsc`（`rootDir=src` / `outDir=dist`）
 
-> 历史说明：本项目曾用 Python 3.12 + httpx + websockets + Click 实现，已于 task-21 整体重写为 Node.js/TypeScript。旧的 `sillyhub_daemon/` Python 包目录为历史残留，不再使用。
+> 历史说明：本项目曾用 Python 3.12 + httpx + websockets + Click 实现，已于 task-21 整体重写为 Node.js/TypeScript。旧的 `sillyhub_daemon/` Python 包目录为历史残留，不再使用；源码中仍保留少量"对齐 Python xxx"映射注释，属于重写期对照说明。
 
 ## 在 monorepo 中的位置
 

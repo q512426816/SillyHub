@@ -1,118 +1,70 @@
 ---
+source_commit: fcbf3fa7
+updated_at: 2026-06-22T17:56:21Z
+generator: sillyspec-scan
 author: qinyi
-created_at: 2026-06-10T17:00:01
+created_at: 2026-06-23 01:56:21
 ---
 
-# 代码约定 — multi-agent-platform
+# multi-agent-platform 代码约定
 
-## 代码风格
-
-### 后端 (Python)
-
-- **格式化工具**: Ruff (line-length=100, quote-style=double)
-- **Lint 规则**: E, F, I, B, UP, N, SIM, RUF, BLE
-- **类型检查**: mypy (strict=false, ignore_missing_imports=true)
-- **Pre-commit hooks**: ruff-format + ruff-check --fix
-- **包管理**: uv (pyproject.toml + uv.lock)
-- **构建系统**: hatchling
-
-**关键 lint ignore**:
-- E501: 行长度由 formatter 管理
-- BLE001: 允许 bare Exception (async 错误处理常用)
-- B008: FastAPI Query() 参数默认值是标准模式
-- RUF012: Pydantic model 可变类属性
-
-### 前端 (TypeScript)
-
-- **包管理**: pnpm (packageManager: pnpm@9.6.0)
-- **构建**: Next.js standalone 模式
-- **测试**: vitest + @testing-library/react
-- **Lint**: eslint-config-next
-- **类型**: TypeScript strict (tsconfig.json)
-- **CSS**: Tailwind CSS + tailwind-merge + class-variance-authority
-
-### Daemon (Python)
-
-- **CLI 框架**: Click
-- **构建**: hatchling
-- **测试**: pytest
+monorepo 根项目（path=.），含三个子项目：backend（FastAPI + Python 3.12）、frontend（Next.js 14 + Antd 6）、sillyhub-daemon（Node ≥ 20 ESM）。本文件由 SillySpec scan 扫描子代理基于 `.claude/CLAUDE.md` 与各子项目配置生成，作为后续变更/生成的输入参考。
 
 ## 框架隐形规则
 
-### 1. 后端模块注册模式
+1. **文档驱动开发是硬性规则，不可跳过**：禁止无文档改代码、禁止先写代码再补文档。每次改动代码前必须说明所依据的文档路径，完成后对照文档验收。
+2. **执行顺序固定**：`文档 → 读现有代码 → 写测试 → 写实现 → 跑测试 → 验收`。后端测试放在 `tests/` 与 `app/` 内（pyproject `testpaths = ["tests", "app"]`，`python_files = ["test_*.py"]`）。
+3. **流程分两条**：新功能 / 大改动走完整链路 `sillyspec run brainstorm → plan → execute → verify`；小修复 / 小调整走 `sillyspec run quick`。不要为新功能跳过 brainstorm 直接 execute。
+4. **数据可清空**：项目未正式上线，无需考虑版本迭代兼容，schema/migration 可直接重置。
+5. **提交流程被 hook 拦截时禁止跳过**：必须解决问题再提交，不得用 `--no-verify` 绕过。
+6. **回答风格**：禁止阿谀奉承式回复（如"你说得对"）。
 
-每个新模块必须在 `app/main.py` 中 import 并注册 router：
-```python
-from app.modules.xxx.router import router as xxx_router
-app.include_router(xxx_router, prefix="/api/xxx", tags=["xxx"])
-```
+## 代码风格
 
-### 2. BaseModel 继承 + 审计钩子
+### backend（Python 3.12，pyproject.toml）
+- 工具：ruff（format + lint）+ mypy。`line-length = 100`，`target-version = "py312"`，格式化 `quote-style = "double"`。
+- ruff lint `select = ["E","F","I","B","UP","N","SIM","RUF","BLE"]`；显式 ignore 一批：E501（交给 formatter）、N818（异常命名按事件而非 Error 后缀）、RUF001/002/003（中文注释/字符串）、BLE001（async 常裸 catch）、SIM105/SIM117、B008（FastAPI Query 默认值）、RUF012（Pydantic 可变类属性）、RUF006（fire-and-forget）、RUF005、UP037。
+- per-file-ignores：`tests/*` 与 `**/tests/*` 放宽 N802/N803/N806/E402/B017；`migrations/versions/*` 放宽 UP035。
+- mypy：`python_version = "3.12"`，非 strict，启用 `warn_unused_ignores`/`warn_redundant_casts`/`ignore_missing_imports`，加载 `pydantic.mypy` 插件；大量 error_code 被 disable（attr-defined/union-attr/assignment/arg-type/valid-type/operator/call-overload/call-arg/unused-ignore）。
+- 运行：`uv run ruff format`、`uv run ruff check --fix`、`uv run mypy`。
 
-所有数据库模型必须继承 `models.base.BaseModel`（而非直接继承 SQLModel）。BaseModel 配合 `core/audit_hooks.py` 自动捕获所有 `table=True` 的模型变更并写入 AuditLog。
+### frontend（Next.js 14，eslint 8 + next/core-web-vitals）
+- lint script：`next lint`（`.eslintrc.json` 继承 `next/core-web-vitals`）。
+- 规则：`no-unused-vars` 设为 warn，`argsIgnorePattern`/`varsIgnorePattern = "^_"`（下划线前缀变量/参数允许未使用）。
+- typecheck：`tsc --noEmit`；测试：vitest（`vitest run`）。
+- packageManager：`pnpm@9.6.0`，engines `node >= 20.0.0`。
 
-### 3. 配置集中管理
+### sillyhub-daemon（Node ≥ 20，ESM，`"type": "module"`）
+- 目前 `package.json` 未声明 `lint` script，无独立 eslint 配置文件；类型与正确性靠 `tsc --noEmit` typecheck 守护，测试 `vitest run --passWithNoTests`。
+- pnpm overrides 将 claude-agent-sdk 各平台二进制统一重定向到 `@anthropic-ai/claude-agent-sdk@0.3.181`。
 
-所有运行时配置通过 `core/config.py` 的 `Settings` 类管理，使用 pydantic-settings。禁止在业务代码中直接读取 `os.environ`。配置优先级：环境变量 > `.env` 文件 > 默认值。
+## 提交规范
 
-### 4. 前端 API 层
+- **双层 hook 拦截**：
+  - claude `PreToolUse`（`.claude/settings.json`）：matcher `Bash`，`if: Bash(git commit*)` / `Bash(git push*)` 触发 `node .claude/hooks/pre-commit-ci-check.cjs`（全量 mypy + frontend 检查，timeout 300s）。
+  - git `pre-commit`（`.git/hooks/pre-commit` → `backend/.pre-commit-config.yaml`）：`uv run ruff format` + `uv run ruff check --fix`。
+- **已知陷阱：复合命令绕过 claude 层**。claude 层按命令前缀匹配 `Bash(git commit*)`，因此 `git add ... && git commit ...` 这类复合命令以 `git add` 开头会绕过 claude 的 mypy/frontend 检查，仅触发 git 层 ruff。要跑全量检查须单独执行 `git commit`。
+- **commit message 风格**（取自最近 git log）：Conventional Commits，`<type>(<scope>): <subject>`。
+  - 常用 type：`fix` / `feat` / `refactor` / `style` / `chore`。
+  - scope 多为子域：`agent-run` / `ppm` / `frontend` / `daemon` / `spec`。
+  - subject 中文为主，可含破折号补充（如 `fix(agent-run): 修复调度 sillyspec scan 链路 + 优化前端日志展示`）。
+  - 复杂提交用 `Merge sillyspec/<date>-<change>: ...` 格式合入 SillySpec 变更分支。
 
-每个后端模块对应一个 `lib/*.ts` 文件，导出类型安全的 API 函数。所有请求通过 `lib/api.ts` 的 `apiFetch()` 统一处理，包括认证 token 注入和错误处理。
+## 目录约定
 
-### 5. Zustand persist
+- `.claude/CLAUDE.md`：项目级硬性规则与执行顺序（本扫描文档的来源）。
+- `.claude/settings.json`：claude PreToolUse hook 配置（CI gate）。
+- `.claude/hooks/pre-commit-ci-check.cjs`：claude 层 CI 检查脚本。
+- `.sillyspec/changes/<change>/`：SillySpec 变更工作区（proposal / design / plan / tasks / progress）。
+- `.sillyspec/docs/<project>/scan/`：扫描文档（本文件所在位置）。
+- `docs/`：项目级设计文档。
+- `backend/`：FastAPI 应用（`app/` + `tests/` + `migrations/versions/` + `.pre-commit-config.yaml` + `pyproject.toml`）。
+- `frontend/`：Next.js 14 应用。
+- `sillyhub-daemon/`：Node ESM daemon。
 
-前端 session 状态通过 Zustand persist middleware 持久化到 localStorage，key 为 `multi-agent-platform.session`。使用 `hydrated` 标记避免 hydration 不匹配。
+## 已知陷阱
 
-## 典型代码模式
-
-### 模式 1: 后端模块结构 (router -> service -> model)
-
-```python
-# router.py
-@router.get("/")
-async def list_items(user: User = Depends(require_auth)):
-    return await service.list_(user.id)
-
-# service.py
-class ItemService:
-    async def list_(self, user_id: UUID) -> list[Item]:
-        async with self._session() as session:
-            result = await session.exec(select(Item).where(...))
-            return list(result.all())
-```
-
-### 模式 2: 错误体系
-
-```python
-# core/errors.py
-class AppError(Exception):
-    status_code: int = 500
-    detail: str = "Internal error"
-
-class WorkspaceNotFound(AppError):
-    status_code = 404
-    detail = "Workspace not found"
-```
-
-### 模式 3: 前端 API 函数
-
-```typescript
-export async function listWorkspaces() {
-  return apiFetch<WorkspaceList>("/api/workspaces");
-}
-```
-
-### 模式 4: Daemon Backend 注册
-
-```python
-# backends/__init__.py — 每个 backend 通过 registry 注册
-BACKEND_REGISTRY: dict[str, type[AgentBackend]] = {
-    "json_rpc": JsonRpcBackend,
-    "jsonl": JsonlBackend,
-    ...
-}
-```
-
-### 模式 5: Docker Compose 多阶段构建
-
-后端 Dockerfile 使用三阶段：node-tools (安装 claude-code/sillyspec) -> builder (uv 安装 Python 依赖) -> runtime (slim 运行时)。前端使用 deps -> builder -> runtime 三阶段构建 standalone Next.js。
+- **claude.exe 孤儿进程**：清理时禁止 `taskkill /IM` 通杀（会杀掉当前会话自身），必须按 PID 精确终止并排除当前会话 PID。
+- **daemon 多实例**：本机可能同时存在"连本地"（`daemon-start.bat`）与"连远程"（手动 cmd）两类 daemon；停止 daemon 时须按 `--server` 区分，避免误杀另一类。无自动拉起机制。
+- **复合 git 命令绕过 hook**：见上文提交规范。`git add && git commit` 复合命令以 `git add` 开头，绕过 claude 层 mypy/frontend，仅剩 ruff。
+- **daemon 重启 session 恢复**：turn 卡死的真因是 `cli.ts` 漏传 `persistence/recoveryClient`（见 fix-interactive-daemon-lifecycle design §11 / tasks W4，execute 待办）。

@@ -1,18 +1,33 @@
+# 模块映射（自动生成，可手动修改）
+# author: qinyi
+# created_at: 2026-06-23 01:57:30
+# 根 monorepo 视角：模块 = 顶层子项目 + 辅助目录。子项目内部细粒度模块见各自 docs/<project>/modules/_module-map.yaml。
+
 schema_version: 1
 project: multi-agent-platform
-source_commit: 8afff51
-generated_at: 2026-06-19 03:50:00
+source_commit: fcbf3fa7
+generated_at: 2026-06-23 01:57:30
 generator: sillyspec-scan
 
 modules:
+  # ── 核心子项目 ──────────────────────────────────────────────
+
   backend:
     status: active
     doc: modules/backend.md
-    paths: ["backend/**"]
-    tags: [fastapi, python, api, postgresql, redis]
-    aliases: [api, server, 后端]
-    entrypoints: ["uvicorn app.main:app"]
-    main_symbols: ["FastAPI app"]
+    paths:
+      - backend/**
+    tags: [fastapi, python, sqlmodel, postgresql, redis, api, rest, sse, websocket, uv]
+    aliases: [api-server, 后端, server]
+    entrypoints:
+      - uvicorn app.main:app (backend/app/main.py:87)
+      - /api/* routers (workspace / members / auth / health / qc)
+    main_symbols:
+      - app (FastAPI)
+      - workspace_router
+      - members_router
+      - auth_router
+      - health_router
     depends_on: []
     used_by: [frontend, sillyhub-daemon]
     needs_review: false
@@ -22,11 +37,18 @@ modules:
   frontend:
     status: active
     doc: modules/frontend.md
-    paths: ["frontend/**"]
-    tags: [nextjs, react, typescript, tailwind]
-    aliases: [web, ui, 前端]
-    entrypoints: ["next dev", "next start"]
-    main_symbols: ["Next.js app"]
+    paths:
+      - frontend/**
+    tags: [nextjs, react, typescript, tailwind, app-router, web, vitest]
+    aliases: [web, 前端, ui]
+    entrypoints:
+      - frontend/src/app/page.tsx (root)
+      - frontend/src/app/(auth)/login
+      - frontend/src/app/(dashboard)/* (workspaces / runtimes / settings)
+      - frontend/src/app/api/* (route handlers)
+    main_symbols:
+      - RootLayout
+      - HomePage
     depends_on: [backend]
     used_by: []
     needs_review: false
@@ -36,26 +58,42 @@ modules:
   sillyhub-daemon:
     status: active
     doc: modules/sillyhub-daemon.md
-    paths: ["sillyhub-daemon/**"]
-    tags: [daemon, cli, typescript, pnpm, vitest, sdk, websockets]
-    aliases: [daemon, 守护进程]
-    entrypoints: ["sillyhub-daemon start"]
-    main_symbols: ["Daemon (daemon.ts)", "ClaudeSdkDriver", "SessionManager", "TaskRunner", "AgentDetector"]
+    paths:
+      - sillyhub-daemon/**
+    tags: [node, typescript, daemon, claude-agent-sdk, commander, esm, pnpm, vitest]
+    aliases: [daemon, 守护进程, local-agent]
+    entrypoints:
+      - sillyhub-daemon/src/cli.ts (commander createProgram / stopAction)
+      - HTTP/WebSocket server（与 backend 通信）
+    main_symbols:
+      - createProgram
+      - stopAction
+      - getPidFile
+      - getLogFile
+      - readPid
+      - isProcessAlive
+      - writePid
+      - removePid
     depends_on: [backend]
     used_by: []
-    needs_review: true
+    needs_review: false
     concerns: []
-    review_reasons: ["module-card sillyhub-daemon.md 整体基于旧 Python scan（daemon.py/agent_detector.py/task_runner.py），实际是 TypeScript（daemon.ts/agent-detector.ts/task-runner.ts + 本变更新增 src/interactive/* SDK driver 层），需 sillyspec scan 重生成"]
+    review_reasons: []
+
+  # ── 辅助目录 ────────────────────────────────────────────────
 
   deploy:
     status: active
     doc: modules/deploy.md
-    paths: ["deploy/**"]
-    tags: [docker, compose, deployment]
-    aliases: [docker, 部署]
-    entrypoints: ["docker-compose up"]
+    paths:
+      - deploy/**
+    tags: [docker, docker-compose, deployment, infra]
+    aliases: [docker, compose, 部署]
+    entrypoints:
+      - deploy/docker-compose.yml
+      - deploy/docker-compose.dev.yml
     main_symbols: []
-    depends_on: [backend, frontend]
+    depends_on: [backend, frontend, sillyhub-daemon]
     used_by: []
     needs_review: false
     concerns: []
@@ -64,10 +102,28 @@ modules:
   docs:
     status: active
     doc: modules/docs.md
-    paths: ["docs/**"]
-    tags: [documentation, markdown]
-    aliases: [文档]
-    entrypoints: []
+    paths:
+      - docs/**
+    tags: [documentation, design, spec]
+    aliases: [文档, design-docs]
+    entrypoints:
+      - docs/README.md
+    main_symbols: []
+    depends_on: []
+    used_by: [backend, frontend, sillyhub-daemon]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  scripts:
+    status: active
+    doc: modules/scripts.md
+    paths:
+      - scripts/**
+    tags: [scripts, tooling, ops]
+    aliases: [工具脚本]
+    entrypoints:
+      - scripts/*.{sh,ts,js,py}
     main_symbols: []
     depends_on: []
     used_by: []

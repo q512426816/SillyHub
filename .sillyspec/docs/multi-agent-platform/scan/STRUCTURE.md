@@ -1,160 +1,98 @@
 ---
+source_commit: fcbf3fa7
+updated_at: 2026-06-22T17:56:21Z
+generator: sillyspec-scan
 author: qinyi
-created_at: 2026-06-10T17:00:02
+created_at: 2026-06-23 01:56:21
 ---
 
-# 目录结构 — multi-agent-platform
+# multi-agent-platform — 项目结构（根 monorepo）
 
-## 根目录
+> 本文档由 `sillyspec-scan` 在 `fcbf3fa7` 处自动扫描根 monorepo 生成。
+> path = `.`（仓库根），包含 backend / frontend / sillyhub-daemon 三个子项目。
 
-```
-multi-agent-platform/           # Monorepo 根
-+-- Makefile                    # 统一开发命令入口 (dev-up, test, lint, up, down)
-+-- README.md                   # 项目说明
-+-- backend/                    # FastAPI 后端
-+-- frontend/                   # Next.js 前端
-+-- sillyhub-daemon/            # Daemon CLI 工具
-+-- deploy/                     # Docker Compose 编排
-+-- scripts/                    # 运维脚本
-+-- spikes/                     # 技术调研 / PoC
-+-- docs/                       # 项目文档
-+-- .claude/                    # Claude Code 配置 + skills
-+-- .sillyspec/                 # SillySpec 文档系统
-```
-
-## backend/ — FastAPI 后端
+## 1. 顶层布局
 
 ```
-backend/
-+-- app/
-|   +-- main.py                 # FastAPI 入口，注册所有模块路由 + lifespan
-|   +-- __init__.py             # 版本号
-|   +-- core/                   # 基础设施
-|   |   +-- config.py           # Settings (pydantic-settings)
-|   |   +-- db.py               # AsyncPG 引擎 + session 工厂
-|   |   +-- redis.py            # Redis 连接
-|   |   +-- auth_deps.py        # 认证依赖注入
-|   |   +-- security.py         # JWT + 密码哈希
-|   |   +-- crypto.py           # 加密工具
-|   |   +-- errors.py           # 统一错误体系 (AppError + 子类)
-|   |   +-- audit_hooks.py      # SQLAlchemy 事件钩子 -> AuditLog
-|   |   +-- logging.py          # structlog 配置
-|   |   +-- telemetry.py        # OpenTelemetry 初始化
-|   |   +-- paths.py            # 路径解析
-|   |   +-- spec_paths.py       # SillySpec 路径工具
-|   |   +-- layout_migration.py # 数据布局迁移
-|   +-- models/
-|   |   +-- base.py             # BaseModel(SQLModel) — 所有表模型基类
-|   +-- modules/                # 22 个业务模块
-|       +-- agent/              # AI Agent 运行管理 (最大模块, ~71KB service.py)
-|       |   +-- adapters/       # Agent 适配器 (claude_code.py)
-|       |   +-- tests/          # 模块内测试
-|       +-- auth/               # 认证与 RBAC
-|       +-- workspace/          # 工作区管理
-|       +-- change/             # 变更管理
-|       +-- change_writer/      # 变更写入
-|       +-- daemon/             # Daemon 运行时管理
-|       +-- scan_docs/          # 扫描文档
-|       +-- spec_workspace/     # SillySpec 工作区
-|       +-- spec_profile/       # Spec Profile
-|       +-- task/               # 任务管理
-|       +-- workflow/           # 工作流 (审批/审计)
-|       +-- release/            # 发布管理
-|       +-- incident/           # 事件管理
-|       +-- knowledge/          # 知识库
-|       +-- git_identity/       # Git 身份管理
-|       +-- git_gateway/        # Git 操作网关
-|       +-- tool_gateway/       # 工具网关 + 策略
-|       +-- runtime/            # 运行时管理
-|       +-- archive/            # 归档
-|       +-- health/             # 健康检查
-|       +-- settings/           # 平台设置 + 用户管理
-|       +-- worktree/           # Worktree 租约管理
-+-- migrations/                 # Alembic 迁移 (20 个版本)
-+-- tests/                      # 集成测试套件
-+-- hooks/                      # Claude Code hooks (scan_write_guard)
-+-- conftest.py                 # Pytest fixtures
-+-- docker-entrypoint.sh        # Docker 入口脚本
-+-- Dockerfile                  # 多阶段构建
-+-- pyproject.toml              # 项目依赖 + 工具配置
-+-- ruff.toml                   # Ruff 扩展配置
-+-- alembic.ini                 # Alembic 配置
-+-- .pre-commit-config.yaml     # Pre-commit hooks
+multi-agent-platform/                # monorepo 根
+├── .claude/                          # 项目约定：CLAUDE.md + hooks + skills + worktrees
+├── .sillyspec/                       # SillySpec 变更 / 扫描文档 / 知识库 / 工作流
+├── backend/                          # FastAPI + Python 3.12 + SQLModel 后端 API
+├── frontend/                         # Next.js 14 + React 18 + TS Web 前端
+├── sillyhub-daemon/                  # 本地守护进程（Node ≥20 ESM），管 Claude Agent SDK 进程
+├── deploy/                           # Docker Compose 编排（full + dev）
+├── scripts/                          # 辅助脚本（如 migrate_scan_docs.py）
+├── docs/                             # 项目级设计文档 / QA / 参考资料
+├── spikes/                           # 技术探针（01-git-isolation ~ 05-mission-e2e）
+├── Makefile                          # 常用命令（make up / test / lint 等）
+├── README.md                         # 项目总览
+├── AGENTS.md                         # Agent 行为约定
+├── package.json                      # 根 package（仅声明子项目聚合）
+├── .env                              # 本地环境变量
+├── .editorconfig / .gitignore
+└── .github/                          # CI 配置
 ```
 
-## frontend/ — Next.js 前端
+## 2. 各顶层目录职责
 
+| 目录 | 角色 | 关键内容 |
+| --- | --- | --- |
+| `backend/` | **API 后端**：FastAPI 应用、领域模块、迁移、测试 | `app/`（含 modules/agent、modules/daemon、modules/spec_workspace、modules/workspace、modules/health 等子模块）、`migrations/`（alembic）、`pyproject.toml`（Python 3.12）、`Dockerfile`、`docker-entrypoint.sh`、`hooks/`、`tests/`、`create_tables.py` |
+| `frontend/` | **Web 前端**：Next.js 14 App Router + React 18 + Ant Design + Tailwind | `src/`（页面/组件）、`public/`、`next.config.mjs`、`tailwind.config.ts`、`tsconfig.json`、`vitest.config.ts`、`Dockerfile`、`package.json`（pnpm@9.6.0） |
+| `sillyhub-daemon/` | **本地守护进程**：Node ≥20 ESM 单进程，通过 `@anthropic-ai/claude-agent-sdk` 驱动 Claude 子进程，提供交互式会话与任务执行 | `src/`（daemon.ts、cli.ts、interactive/、adapters/、spawn-env.ts、workspace.ts）、`dist/`、`tests/`、`tsconfig.json`、`vitest.config.ts`、`package.json` |
+| `deploy/` | **Docker 编排**：全栈与服务依赖声明 | `docker-compose.yml`（postgres + redis + backend + frontend）、`docker-compose.dev.yml`（仅 postgres + redis） |
+| `scripts/` | **辅助脚本**：一次性维护工具 | `migrate_scan_docs.py`（scan 文档迁移） |
+| `docs/` | **项目级设计文档**：跨子项目的方案与参考资料 | `change-center-redesign.md`、`claude-loop-v1-p0.md`、`execution-plan-v2-v5.md`、`spec-alignment.md`、`agent-sillyspec-stage-execution-analysis.md`、`sillyspec-tool-side-requirements.md`、`qa/`、`sillyhub_refs/` |
+| `spikes/` | **技术探针**：独立可行性验证（每个 spike 一个目录） | `01-git-isolation/`、`02-workspace-scan/`、`03-claude-code/`、`04-delegate-task/`、`05-mission-e2e/`、`README.md`、`REPORT.md` |
+| `.sillyspec/` | **SillySpec 工作区**：变更生命周期与产物 | `changes/`（变更目录）、`docs/`（scan/模块文档）、`knowledge/`、`projects/`、`quicklog/`、`workflows/`、`sillyspec.db` |
+| `.claude/` | **项目约定与技能**：Claude Code 行为配置 | `CLAUDE.md`（硬性规则）、`hooks/`、`settings.json`、`skills/`、`worktrees/` |
+
+## 3. 子项目顶层速览
+
+### 3.1 backend/
 ```
-frontend/
-+-- src/
-|   +-- app/                    # Next.js App Router
-|   |   +-- layout.tsx          # 根布局
-|   |   +-- page.tsx            # 首页
-|   |   +-- globals.css         # 全局样式
-|   |   +-- (auth)/login/       # 登录页
-|   |   +-- (dashboard)/        # 仪表盘路由组
-|   |       +-- layout.tsx      # Dashboard 布局
-|   |       +-- workspaces/     # 工作区列表 + 详情
-|   |       +-- settings/       # 设置页 + git-identities
-|   |       +-- runtimes/       # Daemon 运行时管理
-|   +-- lib/                    # API 客户端 + 工具函数 (~27 个模块)
-|   |   +-- api.ts              # 通用 apiFetch + base URL
-|   |   +-- auth.ts             # 登录/登出/刷新 token
-|   |   +-- agent.ts            # Agent Run CRUD + 流式日志
-|   |   +-- workspaces.ts       # 工作区 API
-|   |   +-- changes.ts          # 变更管理 API
-|   |   +-- daemon.ts           # Daemon 运行时 API
-|   |   +-- ...                 # 其余模块 API
-|   |   +-- __tests__/          # lib 层单元测试
-|   +-- components/             # 共享组件
-|   |   +-- ui/                 # shadcn/ui 基础组件
-|   |   +-- agent-log/          # Agent 日志组件
-|   |   +-- app-shell.tsx       # 应用外壳 (导航)
-|   |   +-- workspace-card.tsx  # 工作区卡片
-|   |   +-- ...                 # 其他业务组件
-|   +-- stores/
-|   |   +-- session.ts          # Zustand session store
-|   +-- test/
-|       +-- setup.ts            # Vitest setup
-+-- Dockerfile                  # 多阶段 standalone 构建
-+-- package.json                # 依赖 + 脚本
-+-- next.config.mjs             # API rewrites + standalone 模式
-+-- tailwind.config.ts          # Tailwind 配置
-+-- vitest.config.ts            # 测试配置
+app/                # 应用主体（core/ + modules/<domain>/）
+migrations/         # alembic 版本
+hooks/              # git / CI hook 资源
+scripts/            # 后端内部脚本
+tests/              # 顶层集成测试
+pyproject.toml      # Python 3.12 依赖（fastapi/sqlmodel/asyncpg/redis/alembic/...）
+alembic.ini         # 迁移配置
+Dockerfile          # 生产镜像
+docker-entrypoint.sh
+create_tables.py    # 建表工具
 ```
 
-## sillyhub-daemon/ — Daemon CLI
-
+### 3.2 frontend/
 ```
-sillyhub-daemon/
-+-- sillyhub_daemon/
-|   +-- __main__.py             # Click CLI 入口
-|   +-- daemon.py               # Daemon 核心 (生命周期/心跳)
-|   +-- agent_detector.py       # 检测 12 个 AI Agent provider
-|   +-- task_runner.py          # 任务执行引擎
-|   +-- client.py               # Backend HTTP/WS 客户端
-|   +-- config.py               # Daemon 配置
-|   +-- credential.py           # 凭证管理
-|   +-- workspace.py            # 工作区管理
-|   +-- protocol.py             # 通信协议定义
-|   +-- version.py              # 版本信息
-|   +-- backends/               # Agent 协议后端
-|       +-- __init__.py         # Backend registry
-|       +-- json_rpc.py         # JSON-RPC 协议
-|       +-- jsonl.py            # JSON Lines 协议
-|       +-- ndjson.py           # NDJSON 协议
-|       +-- stream_json.py      # Streaming JSON 协议
-|       +-- text.py             # 纯文本协议
-+-- tests/                      # 17 个测试文件
-+-- pyproject.toml
+src/                # 页面与组件（App Router）
+public/             # 静态资源
+next.config.mjs     # Next.js 配置（含后端代理 INTERNAL_API_BASE_URL）
+tailwind.config.ts
+tsconfig.json
+vitest.config.ts
+Dockerfile          # 构建时注入 API base url
+package.json        # next 14.2.5 / react 18.3.1 / antd 6 / @tanstack/react-query / @xyflow/react / echarts
 ```
 
-## deploy/ — 编排
+### 3.3 sillyhub-daemon/
+```
+src/                # TypeScript 源
+  ├── daemon.ts          # 守护进程主循环（ws + SDK 消息驱动）
+  ├── cli.ts             # 命令行入口
+  ├── interactive/       # 交互式 Claude 会话（session-manager / claude-sdk-driver / input-queue / types）
+  ├── adapters/          # 协议适配（stream-json / json-rpc / jsonl / ndjson / protocol-adapter）
+  ├── task-runner.ts     # 一次性任务执行
+  ├── workspace.ts       # 工作目录解析
+  └── spawn-env.ts       # 子进程环境构建
+dist/               # 编译产物
+tests/              # vitest 套件
+package.json        # ESM / pnpm / @anthropic-ai/claude-agent-sdk@0.3.181 / ws / commander
+tsconfig.json
+```
 
-```
-deploy/
-+-- docker-compose.yml          # 全栈编排 (postgres + redis + backend + frontend)
-+-- docker-compose.dev.yml      # 开发依赖 (仅 postgres + redis)
-+-- .env.example                # 环境变量模板
-+-- .env                        # 本地环境变量 (gitignored)
-```
+## 4. 模块映射（根级 → 文档位置）
+
+- 本根 monorepo 的 scan 文档输出到：`.sillyspec/docs/multi-agent-platform/scan/`
+- 各子项目（backend / frontend / sillyhub-daemon）的 scan 文档输出到对应 `.sillyspec/docs/<project>/scan/`。
+- 跨子项目的协调与变更流程参见 `.sillyspec/changes/` 与根 `AGENTS.md`、`.claude/CLAUDE.md`。

@@ -1,156 +1,82 @@
-# SillyHub 技术关注点文档
-
+---
+source_commit: fcbf3fa7
+updated_at: 2026-06-22T18:12:59Z
+generator: sillyspec-scan
 author: qinyi
-created_at: 2026-06-03T12:00:05
+created_at: 2026-06-23 02:12:59
+---
+
+# SillyHub — 关注点 / 风险
+
+> 基于对三个子项目源码的 `grep`（TODO/FIXME/HACK/XXX）扫描、`.claude/CLAUDE.md` 硬性规则、
+> 以及项目记忆（`.claude/.../memory/MEMORY.md`）中的真实已知问题汇总。
 
 ## 代码质量
 
-- **大文件**: agent/service.py (71KB), claude_code adapter (37KB), settings/page.tsx (23KB) 需拆分
-- **测试覆盖不均**: Daemon 最充分(17文件)，后端约30文件，前端仅3个lib测试，E2E为零
-- **死依赖**: 前端 @tanstack/react-query、puppeteer、@playwright/test 已安装未使用
-- **Lint**: 后端 Ruff 配置完善，前端 ESLint 基础配置
-- **类型安全**: 后端 mypy strict=false, 前端 TypeScript strict
+通过 `grep -rn "TODO|FIXME|HACK|XXX"` 扫描三个子项目源码（已排除 `node_modules` / `.venv` / `dist` / `.next`）：
+
+| 子项目 | 扫描路径 | TODO/FIXME/HACK/XXX 数量 |
+| --- | --- | --- |
+| backend | `backend/app` | 5（全部为 `TODO`，集中在 `app/modules/spec_profile/`） |
+| frontend | `frontend/src` | 0 |
+| sillyhub-daemon | `sillyhub-daemon/src` | 0 |
+
+backend 的 5 处 `TODO` 具体位置：
+
+- `backend/app/modules/spec_profile/policy.py:61` — `# TODO: implement stage conflict detection`
+- `backend/app/modules/spec_profile/policy.py:97` — `# TODO: implement document conflict detection`
+- `backend/app/modules/spec_profile/provider.py:76` — `# TODO: implement actual discovery in follow-up task`
+- `backend/app/modules/spec_profile/provider.py:86` — `# TODO: implement actual loading in follow-up task`
+- `backend/app/modules/spec_profile/provider.py:96` — `# TODO: implement in follow-up task`
+
+> 说明：`sillyhub-daemon/src/credential.ts` 中出现的 `XXX` 是占位符 `{{USER_XXX}}` 文本，非标记，不计入。
+
+项目约定（`.claude/CLAUDE.md`）：禁止无文档改代码、禁止先写代码再补文档；新功能走 SillySpec 完整流程；hook 拦截禁止跳过。
+
+### 🔴 高严重度
+
+- **spec_profile 模块未完成实现**：上述 5 处 `TODO` 集中在 `spec_profile` 的 policy（阶段冲突、文档冲突检测）与 provider（发现、加载）逻辑，均为 `follow-up task`，意味着该模块当前为骨架，关键校验逻辑缺失。
+
+### 🟡 中严重度
+
+- **根 `package.json` 为纯占位**：根无脚本聚合，所有命令须进子项目或走 `Makefile`，新开发者容易在根目录直接 `npm test` 触发占位失败。
+
+### 🟢 低严重度
+
+- frontend 与 sillyhub-daemon 源码当前无 TODO/FIXME 标记，代码层面无明显遗留注释。
 
 ## 依赖风险
 
-- **Claude Code 版本硬编码**: Dockerfile 中 CLAUDE_CODE_VERSION 固定，升级需手动改
-- **Anthropic API 代理**: 核心功能依赖外部 API，无降级方案
-- **Python 3.12 绑定**: 后端和 Daemon 均要求 >=3.12，部署环境受限
-- **Next.js 14 版本锁**: App Router 稳定版，升级 15 需评估破坏性变更
+### 🔴 高严重度
 
-## 1. 安全关注点
+- **sillyhub-daemon pnpm overrides 绑定 Claude Agent SDK 多平台子包到 `npm:@anthropic-ai/claude-agent-sdk@0.3.181`**（`sillyhub-daemon/package.json` 的 `pnpm.overrides`，覆盖 win32/linux/darwin 的 x64/arm64/musl 共 8 个平台子包）。版本硬钉死，升级需同步改 8 条 override，存在与 SDK 新版本不兼容的隐藏风险。
 
-### 1.1 密钥管理
+### 🟡 中严重度
 
-- **SECRET_KEY**：JWT 签名密钥，通过环境变量注入，生产环境必须设置
-- **SILLYSPEC_MASTER_KEY**：SillySpec CLI 主密钥，生产环境必须设置
-- **风险**：`.env` 文件不应提交到版本控制（已在 `.gitignore` 中）
-- **建议**：考虑使用 HashiCorp Vault 或云密钥管理服务替代环境变量
+- **frontend 同时引入 antd 6 + Tailwind 3.4 + Radix UI**，样式体系混合，类名 / 优先级冲突需持续维护。
+- **frontend 同时声明 `@playwright/test`(1.60) 与 `puppeteer`(24.43) 两套浏览器自动化依赖**，职责重叠，体积与维护负担偏大。
+- **backend 同时依赖 `asyncpg` 与（dev）`aiosqlite`**，测试与生产走不同 async 驱动，存在方言差异风险。
 
-### 1.2 Claude Code 权限
+## 已知问题清单（按严重度分组）
 
-- Claude Code 以 `--permission-mode bypassPermissions` 运行，跳过所有交互式权限确认
-- Agent 可以执行任意 shell 命令、写入任意文件
-- **缓解措施**：通过 `allowed_paths` / `denied_paths` 限制工作目录范围
-- **风险**：如果 Worktree 租约路径未正确隔离，Agent 可能访问宿主机文件
+> 来源：项目记忆 `.claude/.../memory/MEMORY.md` 索引项。
 
-### 1.3 Git 凭证安全
+### 🔴 高（阻塞 / 待 execute）
 
-- Git Identity 凭证使用 NaCl 加密存储在数据库中
-- 加密密钥通过 `GIT_IDENTITY_ENCRYPTION_KEY` 环境变量传入
-- **风险**：加密密钥泄露将暴露所有存储的 Git 凭证
+- 🔴 **agent-run 链路日志丢失**：`AgentRunLog` 模型无 `metadata` 列；三层日志的 `metadata` 在 `submit_messages` 丢失。端到端 scan 联调待环境。（来源：项目记忆 `agent-run-pipeline-fix-status`）
+- 🔴 **daemon turn 卡死**：根因是 `cli.ts` 漏传 `persistence` / `recoveryClient`，导致交互式 turn 无法恢复。修复方案见 `fix-interactive-daemon-lifecycle` design §11 / tasks W4，**execute 待办**。（来源：项目记忆 `daemon-restart-session-recovery-fix`）
+- 🔴 **daemon 重启 session 恢复修复尚未 execute**：同上，design 与 tasks 已就绪但代码未落地。
 
-### 1.4 Refresh Token 安全
+### 🟡 中（待联调 / 待 verify / 运维注意）
 
-- Refresh token 存储为 bcrypt 哈希，防止数据库泄露后直接使用
-- 实现了重放检测（`AuthRefreshReused`），重用 token 将使所有 session 失效
-- **建议**：考虑添加 refresh token 轮换策略（每次刷新生成新的 refresh token）
+- 🟡 **agent-run 调度 scan 链路 CONDITIONAL_PASS**：单元测试通过，但端到端联调待环境验证。（来源：`agent-run-pipeline-fix-status`）
+- 🟡 **多 Agent 编排 `delegate_task` spike 待运行时验证**：Wave0 已修 + 通用兜底已落地，但 delegate_task 的运行时行为尚未实测。（来源：`multi-agent-orchestration-status`）
+- 🟡 **daemon-service-split 已 merge，遗留项待 verify**：D-005（facade lazy import）、D-006（跨域 `_facade` 引用）尚未 verify。（来源：`daemon-service-split-status`）
+- 🟡 **多个 daemon 实例并存**：本地（`daemon-start.bat`）与远程（手动 cmd）两类实例同时存在，停 daemon 时必须按 `--server` 区分，避免误杀。（来源：`multi-daemon-instances`）
+- 🟡 **commit hook 可被复合命令绕过**：`git add && git commit` 复合命令以 `git add` 开头，会绕过 claude PreToolUse 层（仅触发 git pre-commit 的 ruff，不触发 mypy + 前端全量检查）。（来源：`pre-commit-ci-check-hook`）
+- 🟡 **claude.exe 孤儿进程**：禁止 `taskkill /IM` 通杀（会自杀当前会话），必须按 PID 精确杀并排除当前会话。（来源：`claude-exe-orphan-cleanup`）
 
-### 1.5 CORS 配置
+### 🟢 低（已知限制 / 增强）
 
-- `cors_allowed_origins` 通过环境变量配置
-- 开发环境通常允许 `http://localhost:3000`
-- **风险**：生产环境必须严格配置允许的 origin 列表
-
-### 1.6 Agent 子进程隔离
-
-- Claude Code 作为子进程运行在宿主机上（Docker 环境中在容器内）
-- **建议**：考虑使用沙箱（如 gVisor / Firecracker）进一步隔离 Agent 执行环境
-
-## 2. 性能关注点
-
-### 2.1 数据库连接池
-
-- 连接池配置：pool_size=10, max_overflow=10
-- **风险**：高并发场景下 20 个连接可能不足
-- **建议**：监控连接池使用率，根据负载调整
-
-### 2.2 内存 SQLite 测试限制
-
-- 测试使用 SQLite 内存数据库，与生产 PostgreSQL 存在语法和类型差异
-- **风险**：某些 PostgreSQL 特有功能（如 JSONB 操作、partial unique index）可能在 SQLite 测试中被忽略
-- **建议**：关键业务逻辑添加 PostgreSQL 集成测试
-
-### 2.3 Agent 执行超时
-
-- Agent 子进程默认超时 600 秒（10 分钟）
-- stdout 读取使用 `wait_for(timeout)` 逐行读取
-- **风险**：长时间运行的 Agent 可能触发超时，stdout 缓冲可能溢出（10 MB 限制）
-
-### 2.4 Redis 单节点
-
-- Redis 作为单节点运行，无集群或哨兵配置
-- **风险**：Redis 故障将导致 Agent 实时日志推送中断
-- **建议**：生产环境考虑 Redis Sentinel 或 Cluster
-
-### 2.5 SQLAlchemy 审计钩子
-
-- 所有 BaseModel 子类的 insert/update/delete 都触发审计日志写入
-- **风险**：高写入频率场景下审计日志表可能成为瓶颈
-- **建议**：考虑异步审计（如写入消息队列再批量入库）
-
-### 2.6 Docker 卷 I/O
-
-- 后端容器挂载 `host-projects`、`worktree-data`、`spec-data` 等卷
-- **风险**：大量文件扫描和 Agent 操作可能导致 I/O 瓶颈
-
-## 3. 技术债务关注点
-
-### 3.1 已废弃的 API
-
-- `ClaudeCodeAdapter.run()`（legacy 接口）标记为 deprecated，应使用 `run_with_bundle()`
-- `TaskContext` dataclass 标记为 deprecated，应使用 `AgentSpecBundle`
-- `ChangeFSM`（`workflow/fsm.py`）标记为 deprecated，应使用 `StageEnum + TRANSITIONS`
-- `ExecutionCoordinatorService.start_sillyspec_run()` 标记为 deprecated
-
-### 3.2 迁移文件数量
-
-- 当前有 38 个 Alembic 迁移文件，且包含一次合并迁移（`4d9236aa3abb_merge_heads.py`）
-- **风险**：随着项目演进，迁移链可能变得复杂且难以管理
-- **建议**：定期执行 squash migration，合并历史迁移
-
-### 3.3 部分模块缺少测试
-
-- `auth` 模块无测试文件（认证逻辑通过 conftest 的 auth_admin_token 间接覆盖）
-- `health`、`settings` 模块无测试文件
-- 部分模块仅有 1-2 个测试文件，覆盖面较窄
-
-### 3.4 Mypy 配置宽松
-
-```ini
-strict = false
-disable_error_code = ["attr-defined", "union-attr", "assignment", "arg-type", ...]
-```
-禁用了大量类型检查错误码，类型安全性较弱。
-
-### 3.5 前端测试覆盖不足
-
-- 前端仅有 3 个测试文件（api.test.ts, agent.test.ts, spec-workspaces.test.ts）
-- 页面组件无测试
-- 状态管理无测试
-
-### 3.6 Telemetry 仅为 Stub
-
-- `telemetry.py` 仅包含 no-op 实现，当 `OTEL_ENDPOINT` 为空时跳过
-- **影响**：生产环境缺乏链路追踪和指标采集
-
-### 3.7 dispatch 模块中的 sqlite3 导入
-
-- `change/dispatch.py` 顶部导入了 `sqlite3` 标准库
-- **风险**：可能是历史遗留代码，生产环境不应使用 SQLite
-
-### 3.8 硬编码的调度链限制
-
-- `auto_dispatch_next_step` 限制连续自动调度最多 10 次（`_DISPATCH_CHAIN_LIMIT = 10`）
-- **风险**：复杂变更可能超过此限制导致调度中断
-
-### 3.9 conftest 中的数据库 URL
-
-- `conftest.py` 硬编码了 `DATABASE_URL` 默认值为 `postgresql+asyncpg://...`
-- 实际测试使用内存 SQLite（`db_engine` fixture 覆盖）
-- **风险**：Settings 加载时仍会尝试解析 PostgreSQL URL（虽不影响测试，但语义混乱）
-
-### 3.10 前端 API 客户端文件数量
-
-- `src/lib/` 包含 20+ 个 API 客户端文件，每个文件对应一个后端模块
-- **建议**：考虑使用 OpenAPI code generator 自动生成 TypeScript 类型
+- 🟢 **daemon 无自动拉起机制**：daemon 挂掉后不会自动重启，需手动启动。（来源：`multi-daemon-instances`）
+- 🟢 **根 package.json 为纯占位**：根无脚本聚合，所有命令须进子项目或走 `Makefile`。

@@ -1,56 +1,59 @@
 ---
-author: qinyi
-created_at: 2026-06-19 12:50:59
-source_commit: 0303536
-updated_at: 2026-06-19T04:50:59Z
+source_commit: fcbf3fa7
+updated_at: 2026-06-22T18:12:36Z
 generator: sillyspec-scan
+author: qinyi
+created_at: 2026-06-23 02:12:36
 ---
 
-# frontend 项目卡片
+# frontend 项目
 
-> 覆盖旧版文档。基于 `frontend/src/` 事实采集。
+> multi-agent-platform 的 Web 控制台前端。包名 `multi-agent-platform-web`，独立子项目，与 backend（FastAPI）+ sillyhub-daemon 协同。基于 `frontend/src/` 事实采集，覆盖旧版文档。
 
 ## 项目简介
 
-- **名称**：frontend（multi-agent-platform 的 Web 前端子项目）
-- **定位**：SillyHub 多智能体平台的控制台前端，提供工作区管理、agent 执行与日志、daemon 交互式会话、变更（SillySpec）流程、组件拓扑、发布/运行时/成员/知识/事件/审批/审计等全功能 Web UI
-- **用户角色**：登录用户（含 admin / 普通成员），通过 `(dashboard)/admin` 管理组织/用户/角色权限，通过 `(dashboard)/workspaces/[id]/*` 操作工作区
-- **形态**：Next.js App Router 单体应用（RSC + Client Components + Route Handler），独立 `frontend/` 子目录，pnpm 包管理，Docker 镜像部署
-- **后端协作**：所有 API 经 Next.js rewrite 代理 `/api/*` → backend（默认 `http://localhost:8000`），含 REST 与 SSE 流式两类；前端不直接持有 backend host
+frontend 是平台面向用户的统一 Web 控制台，承担以下职责：
+
+- **工作区（workspace）管理**：daemon 工作区、成员、宿主路径、daemon 切换（`workspace-daemon-switcher`、`workspace-path-fields`、`workspace-scan-dialog`）。
+- **Agent Run 面板**：触发后台 agent 调度，通过 SSE 实时流式展示执行日志 / 工具调用 / 待审批权限 / pending_input（用户提问）。核心组件 `agent-run-panel.tsx` + hook `useAgentRunStream`。
+- **交互式 daemon 会话**：daemon-chat 聊天式会话面板（`components/daemon/interactive-session-panel.tsx`），支持流式回复与权限交互。
+- **PPM（项目管理系统）**：项目 / 计划 / 里程碑 / 任务 / 问题 / 变更 / 看板 / 工时统计的完整 CRUD 与图表（`app/(dashboard)/ppm/*`，最大业务模块）。
+- **管理后台**：组织 / 用户 / 角色权限树（`app/(dashboard)/admin/*`）。
+- **设置**：API Key、Git 身份管理（`app/(dashboard)/settings/*`）。
+- **运行时（Runtimes）**：后端服务健康、组件状态展示（`app/(dashboard)/runtimes`）。
+
+它本身**不包含业务逻辑**，所有数据通过 REST API（`/api/*`，由 Next.js rewrites 代理到 backend）+ SSE（日志流）与后端通信。前端是 thin client。
+
+- **用户角色**：登录用户（admin / 普通成员），由 `stores/session.ts` 持有会话与 token。
+- **形态**：Next.js App Router 单体应用（Server + Client Components 混合 + Route Handler），独立 `frontend/` 子目录，pnpm 包管理，Docker 镜像部署。
 
 ## 技术栈
 
 | 类别 | 选型 |
 |---|---|
-| 框架 | Next.js 14.2.5（App Router / RSC, `experimental.typedRoutes`）+ React 18.3.1 |
-| 语言 | TypeScript strict（`noUncheckedIndexedAccess`, target ES2022），路径别名 `@/* → ./src/*` |
+| 框架 | Next.js 14.2.5（App Router，`experimental.typedRoutes`，`reactStrictMode`）+ React 18.3.1 |
+| 语言 | TypeScript 5.5.4（`strict` + `noUncheckedIndexedAccess`，target ES2022），路径别名 `@/* → ./src/*` |
 | UI 主库 | Ant Design 6.4.4 + `@ant-design/icons` + `@ant-design/nextjs-registry` |
-| UI 补充 | shadcn/ui（components.json: default / rsc / slate / cssVariables）+ lucide-react |
-| 样式 | Tailwind 3.4.7 + tailwindcss-animate + postcss + autoprefixer；`cn()` 合并工具 |
-| 状态 | Zustand 4.5（`persist` 中间件，session store） |
-| 数据 | 原生 `fetch` + 统一网关 `lib/api.ts`（401 自动刷新）；React Query 依赖未启用 |
-| 流式 | `fetch + getReader + TextDecoder` 消费 SSE；3 个 Route Handler 透传 backend SSE |
-| 可视化 | `@xyflow/react` 12（ReactFlow，组件拓扑图） |
+| UI 补充 | shadcn/ui + Radix（`@radix-ui/react-{avatar,dialog,dropdown-menu,tooltip}`）+ lucide-react |
+| 样式 | Tailwind 3.4.7 + tailwindcss-animate + postcss；`darkMode: ["class"]`，HSL CSS 变量语义色 |
+| 客户端状态 | Zustand 4.5（`stores/session.ts`、`stores/kanban.ts`） |
+| 服务端数据 | TanStack React Query 5.51 |
+| 流式 | `EventSource`（`AgentRunStreamClient`）消费 SSE；3 个 Route Handler 透传 backend SSE |
+| 可视化 | ECharts 6（`echarts` + `echarts-for-react`）、`@xyflow/react` 12（流程图） |
 | Markdown | `@uiw/react-markdown-preview` |
-| 校验 | zod + class-variance-authority + clsx + tailwind-merge |
+| 校验/组合 | zod 3 + class-variance-authority + clsx + tailwind-merge |
+| 日期 | dayjs |
 | 单测 | vitest 2 + jsdom + @testing-library/react + jest-dom（setup `src/test/setup.ts`） |
 | E2E | `@playwright/test ≥1.60` + `puppeteer 24`（依赖已声明，脚本未落地） |
 | Lint/类型 | eslint 8.57 + eslint-config-next；`tsc --noEmit` |
 | 构建 | `next build`（可选 `NEXT_BUILD_STANDALONE=1` standalone）；`Dockerfile` 生产镜像 |
-| 包管理 | pnpm（`pnpm-lock.yaml`；另有遗留 `package-lock.json`） |
-| 环境变量 | `NEXT_PUBLIC_API_BASE_URL`、`NEXT_PUBLIC_COMMIT_SHA` |
+| 包管理 | pnpm 9.6.0（`pnpm-lock.yaml`；另有遗留 `package-lock.json`） |
+| 环境变量 | `NEXT_PUBLIC_API_BASE_URL`、`INTERNAL_API_BASE_URL`、`NEXT_BUILD_STANDALONE` |
 
-## 关键入口
+## 关键命令
 
-- 根布局：`src/app/layout.tsx`（metadata + antd registry）
-- 主壳层：`src/app/(dashboard)/layout.tsx` + `src/components/app-shell.tsx`
-- 工作区：`src/app/(dashboard)/workspaces/[id]/layout.tsx`（嵌套，承载 12 个子路由）
-- 数据网关：`src/lib/api.ts`
-- 会话 store：`src/stores/session.ts`
-- SSE 透传：`src/app/api/**/stream/route.ts`（3 个）
+- `pnpm dev` / `pnpm build` / `pnpm start`：开发 / 构建 / 生产启动
+- `pnpm lint`（ESLint）/ `pnpm typecheck`（`tsc --noEmit`）
+- `pnpm test`（`vitest run`）/ `pnpm test:watch`
 
-## 命令（根 `local.yaml`）
-
-- `build`：`cd frontend && pnpm build`
-- `test`：`cd frontend && pnpm test`
-- `lint`：`cd frontend && pnpm lint`
+> 根 `local.yaml` 通过 `cd frontend && pnpm <cmd>` 调用。

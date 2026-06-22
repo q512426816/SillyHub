@@ -1,89 +1,59 @@
 ---
+source_commit: fcbf3fa7
+updated_at: 2026-06-22T17:56:21Z
+generator: sillyspec-scan
 author: qinyi
-created_at: 2026-06-10T17:00:06
+created_at: 2026-06-23 01:56:21
 ---
 
-# 项目概览 — multi-agent-platform
+# multi-agent-platform — 项目说明
 
 ## 项目简介
 
-**multi-agent-platform** 是一个多 Agent 协作平台，旨在为团队提供统一的 AI Agent 管理和编排能力。平台包含以下核心能力：
+`multi-agent-platform` 是一个 monorepo 根项目，**根目录本身不包含任何应用源码**。
+根 `package.json` 仅为占位（无依赖、`test` 脚本是默认 `echo "Error: no test specified" && exit 1`），
+根目录的职责仅限于：
 
-- **工作区管理**: 注册和管理多个项目工作区，支持工作区间的组件关系拓扑
-- **AI Agent 编排**: 通过 Claude Code 等 Agent 执行代码生成、扫描、变更等任务
-- **文档驱动开发**: 集成 SillySpec，支持文档驱动的变更管理流程
-- **Daemon 运行时**: 本地 Daemon 进程支持远程任务执行，自动检测本地 AI Agent
-- **变更管理**: 完整的变更生命周期管理（创建、审批、发布、归档）
-- **RBAC 权限**: 基于角色的访问控制，支持工作区级别的权限绑定
+- 编排 3 个子项目的开发与构建流程（通过 `Makefile` 暴露统一入口）
+- 管理 docker compose 编排（`deploy/docker-compose.yml` 与 `deploy/docker-compose.dev.yml`）
+- 沉淀跨子项目的文档（`docs/`、`.sillyspec/`、`AGENTS.md`、`README.md`）
+- 通过 `.claude/CLAUDE.md` 约定 SillySpec 文档驱动开发流程
 
-项目目前处于 **V1 开发阶段**，未正式上线，不考虑版本兼容问题。
+项目整体定位是**多 Agent 协作平台**：通过 `sillyhub-daemon` 编排本地 Claude（及兼容 Agent）进程，
+`frontend` 提供任务管理 / 会话 / 监控 UI，`backend` 提供 REST/WebSocket API 与持久化（PostgreSQL + Redis）。
 
 ## 技术栈
 
-| 子项目 | 核心技术 | 语言 |
-|--------|---------|------|
-| **Backend** | FastAPI + SQLModel + asyncpg + Redis | Python 3.12 |
-| **Frontend** | Next.js 14 + React 18 + Tailwind CSS + Zustand | TypeScript 5.5 |
-| **Daemon** | Click + httpx + websockets | Python 3.12 |
-| **基础设施** | Docker Compose (PostgreSQL 16 + Redis 7) | YAML |
-| **Agent 集成** | Claude Code CLI + SillySpec CLI | Node.js |
+| 层 | 子项目 | 技术栈 |
+| --- | --- | --- |
+| 根 | `.` | Makefile 编排 + docker-compose + SillySpec 文档驱动（`.sillyspec/`） |
+| 后端 API | `backend/` | Python 3.12 + FastAPI + SQLModel + SQLAlchemy(async) + asyncpg + Alembic + Redis + structlog |
+| 前端 | `frontend/` | Next.js 14.2 + React 18 + TypeScript 5.5 + Tailwind 3.4 + Ant Design 6 + Zustand + TanStack Query + ECharts |
+| 本地守护 | `sillyhub-daemon/` | Node ≥20 + TypeScript 5.5 + ESM(`type: module`) + Claude Agent SDK + commander + ws |
 
-## 项目结构
+通用工具链：pnpm（前端 / daemon）、uv（backend）、ruff/mypy（backend lint）、eslint（前端 lint）、
+docker compose（编排 postgres + redis + 三服务）、SillySpec（文档驱动开发流程）。
 
-Monorepo 结构，包含 3 个子项目 + 1 个编排目录：
+## 子项目索引
 
-- `backend/` — FastAPI REST API，22 个业务模块，33 个数据库表
-- `frontend/` — Next.js SPA，App Router 架构
-- `sillyhub-daemon/` — 独立 CLI 工具，5 种协议后端，12 个 Agent Provider 检测
-- `deploy/` — Docker Compose 编排
+| 子项目 | 路径 | 技术栈 | 职责 | 构建文件 | 包管理 |
+| --- | --- | --- | --- | --- | --- |
+| backend | `backend/` | FastAPI + SQLModel + PostgreSQL + Redis | REST/WebSocket API、鉴权、持久化、agent-run 调度入口、模块化业务（`backend/app/modules/*`） | `backend/pyproject.toml` + `backend/alembic.ini` + `backend/Dockerfile` | uv（`backend/uv.lock`） |
+| frontend | `frontend/` | Next.js 14 + React 18 + TypeScript | Web UI：任务 / 会话 / PPM / 工作流 / 监控 | `frontend/package.json` + `frontend/next.config.*` | pnpm 9.6 |
+| sillyhub-daemon | `sillyhub-daemon/` | Node + TypeScript + Claude Agent SDK + ws | 本地 Agent 守护进程：拉起 / 交互式会话 / SSE 流 / 权限 / spec 同步 | `sillyhub-daemon/package.json` + `sillyhub-daemon/tsconfig.json` | pnpm 9.6 |
 
-## 开发流程
+## 开发入口（根 Makefile）
 
-项目使用 **SillySpec 文档驱动开发**，流程为：
+根 `Makefile` 提供跨子项目统一入口（在根目录执行）：
 
-1. `sillyspec brainstorm` — 需求分析和方案设计
-2. `sillyspec plan` — 拆解实现计划
-3. `sillyspec execute` — 代码实现
-4. `sillyspec verify` — 验收验证
+- `make dev-up` / `make dev-down`：docker compose 起 / 停 postgres + redis
+- `make backend-test` / `make frontend-test`：分别跑各子项目测试
+- `make up` / `make down`：docker compose 起停完整服务栈
+- `make test` / `make lint`：聚合跑 backend + frontend 的测试与 lint
 
-小修复使用 `sillyspec quick` 快速通道。
+详见 `Makefile`（约 30 个 target，Linux/macOS/Git Bash 通用）。
 
-## 关键模块
+## 备注
 
-| 模块 | 说明 | 复杂度 |
-|------|------|--------|
-| agent | AI Agent 运行管理，含 Claude Code 适配器 | 高 (71KB service) |
-| daemon | Daemon 运行时注册和任务租约 | 中 |
-| workspace | 工作区注册/拓扑/关系管理 | 中 |
-| change | 变更生命周期管理 | 中 |
-| spec_workspace | SillySpec 工作区数据管理 | 低 |
-| auth | JWT 认证 + RBAC 权限 | 中 |
-| workflow | 审批流 + 审计日志 | 低 |
-
-## 部署方式
-
-```bash
-# 全栈 Docker Compose 部署
-cd deploy
-cp .env.example .env  # 编辑 .env 配置
-docker compose up --build
-
-# 或使用 Makefile
-make up
-```
-
-服务端口：
-- Frontend: 3000
-- Backend: 8000
-- PostgreSQL: 5432
-- Redis: 6379
-
-## 数据统计
-
-- 后端模块: 22 个
-- 数据库表: 33 个
-- Alembic 迁移: 20 个版本
-- 后端测试文件: ~30 个
-- 前端测试文件: 3 个
-- Daemon 测试文件: 17 个
-- 前端 API 模块: ~27 个 lib 文件
+- 本项目未正式上线，按 `.claude/CLAUDE.md` 约定不需要考虑版本迭代兼容问题，数据可清空。
+- 新功能 / 大改动必须走 SillySpec 完整流程：`sillyspec run brainstorm` → plan → execute → verify。
