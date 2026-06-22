@@ -116,3 +116,4 @@ layout.tsx (根布局)
 | 2026-06-21 | ql-20260621-003-menu-isolation | 新建 /ppm 首页（`(dashboard)/ppm/page.tsx`，redirect 到 `/ppm/projects`）；配合 AppShell 路径过滤实现 ppm 与主平台菜单完全隔离，ppm 作为独立入口 |
 | 2026-06-21 | ql-20260621-004-c4a1 | 里程碑明细：明细表单 module_id 由 Input 改 Select（按 planNodeId 自取 listPlanNodeModules 做下拉，非父级透传）；所有日期列 render 原样输出 ISO → fmtDate(YYYY-MM-DD)；流程履历 → fmtDateTime；plan-nodes 两列同步修复 |
 | 2026-06-22 | 2026-06-21-frontend-style-system | 前端样式系统统一（现代明亮活力）：Design Token 单一源（主色 #2563EB）+ antd ConfigProvider 全面定制 + shadcn 视觉组件 + 共享布局（PageContainer/PageHeader/SectionCard/DataTable）+ AppShell lucide 图标 + 新增顶栏 + 登录页同色系重做；各页统一容器/配色/Inter 字体，消除散落老色板与内联 width |
+| 2026-06-22 | ql-20260622-028-5f1c | /ppm/problem-list 列表页样式与 project-plans 对齐：PageContainer size="full" + 顶部按钮右对齐(重置|分隔|导出/新建) + grid-cols-4 垂直 Field 查询表单 + Table bordered/scroll.y/showTotal + antd Button 全部换 ui Button(size="sm" + variant) |

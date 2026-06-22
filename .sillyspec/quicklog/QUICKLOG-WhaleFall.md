@@ -648,3 +648,21 @@ created_at: 2026-06-03T08:42:04
   1. backend export_project_maintenance filename 改 f"项目维护_{datetime.now():%Y%m%d_%H%M%S}.xlsx";export_customer_maintenance 改"客户维护_..."
   2. frontend PpmResourceTable:handleSearchInput 去掉 setTimeout debounce,只 setSearchInput;Input onPressEnter 调 handleSearchCommit flush;Select onChange 保持立即 commit
 结果：1）typecheck 通过；2）ruff check/format 通过；3）363/363 vitest 全过。Docker backend + frontend 待重建。
+
+## ql-20260622-028-5f1c | 2026-06-22 15:19:59 | problem-list 样式对齐 project-plans
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/problem-list/page.tsx
+背景：problem-list 用裸 div+max-w-[1400px]+flex 布局,查询栏内联 style,Table 无 bordered 无 scroll.y。与 project-plans/projects 三页风格不一致。
+方案:
+  1. 外壳改 PageContainer size="full" + PageHeader + SectionCard bodyPadding="p-2"
+  2. SectionCard 内右上按钮行(导出/新建),下方 grid-cols-4 垂直 Field 查询表单(支持展开/收起)
+  3. Table 加 bordered + scroll y="calc(100vh - 430px)"
+  4. 查询条件 Input 用防抖去掉(对齐 ql-027:Enter/按钮触发,Select/RangePicker 选中即查)
+结果：
+  - 顶部按钮行右对齐(重置 | 分隔 | 导出 / 新建)
+  - 查询条件 grid-cols-4 垂直 Field 布局,onChange 实时本地过滤
+  - Table bordered + scroll y=calc(100vh - 430px) + 默认 pageSize=20 + showTotal
+  - PageContainer size="full" 占满宽度
+  - antd Button 全部替换为本仓 ui Button(size="sm" + variant)
+  - 移除未使用的 expanded state
+  - typecheck 通过,363/363 测试通过

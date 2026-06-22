@@ -15,19 +15,23 @@
  *
  * 设计依据:.sillyspec/changes/2026-06-21-ppm-frontend-alignment/design.md §7
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  Button,
   DatePicker,
   Input,
   Select,
-  Space,
   Table,
   type TableProps,
   Tag,
 } from "antd";
 import type { Dayjs } from "dayjs";
 
+import { Button } from "@/components/ui/button";
+import {
+  PageContainer,
+  PageHeader,
+  SectionCard,
+} from "@/components/layout";
 import { PpmUserSelect } from "@/components/ppm-user-select";
 import { matchAnyUser } from "@/components/ppm-status-actions";
 import {
@@ -322,29 +326,30 @@ export default function ProblemListPage() {
         const isDuty = matchAnyUser([p.duty_user_id], currentUserId);
         const isAuditor = matchAnyUser([p.audit_user_id], currentUserId);
         return (
-          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 4 }}>
+          <div className="flex flex-wrap justify-end gap-1">
             {/* 审核:status=2 + now_handle_user(源 openAuditForm) */}
             {p.status === "2" && isNowHandler && (
-              <Button size="small" type="primary" onClick={() => openDrawer("audit", p)}>
+              <Button size="sm" onClick={() => openDrawer("audit", p)}>
                 审核
               </Button>
             )}
             {/* 变更:status=3 + creator/duty(源 openChangeForm → 新建 ProblemChange) */}
             {p.status === "3" && (isCreator || isDuty) && (
-              <Button size="small" onClick={() => openDrawer("change", p)}>
+              <Button size="sm" variant="outline" onClick={() => openDrawer("change", p)}>
                 变更
               </Button>
             )}
             {/* 编辑:status=1 + creator(源 openForm update) */}
             {p.status === "1" && isCreator && (
-              <Button size="small" type="primary" onClick={() => openDrawer("edit", p)}>
+              <Button size="sm" onClick={() => openDrawer("edit", p)}>
                 编辑
               </Button>
             )}
             {/* 开始处置:status=3 + duty(源 startTask) */}
             {p.status === "3" && isDuty && !p.handle_info && (
               <Button
-                size="small"
+                size="sm"
+                variant="outline"
                 onClick={() => openDrawer("start", p)}
               >
                 开始
@@ -353,8 +358,7 @@ export default function ProblemListPage() {
             {/* 完成处置:status=3 + duty(源 doneTask) */}
             {p.status === "3" && isDuty && !!p.handle_info && (
               <Button
-                size="small"
-                type="primary"
+                size="sm"
                 onClick={() => openDrawer("done", p)}
               >
                 处置
@@ -362,17 +366,17 @@ export default function ProblemListPage() {
             )}
             {/* 验证关闭:status=6 + audit_user(源 closeTask) */}
             {p.status === "6" && isAuditor && (
-              <Button size="small" type="primary" onClick={() => openDrawer("close", p)}>
+              <Button size="sm" onClick={() => openDrawer("close", p)}>
                 验证并关闭
               </Button>
             )}
             {/* 详情:任意(源 openDetailForm) */}
-            <Button size="small" onClick={() => openDrawer("detail", p)}>
+            <Button size="sm" variant="outline" onClick={() => openDrawer("detail", p)}>
               详情
             </Button>
             {/* 删除:status=1 + creator(源 handleDelete) */}
             {p.status === "1" && isCreator && (
-              <Button size="small" danger onClick={() => void handleDelete(p)}>
+              <Button size="sm" variant="destructive" onClick={() => void handleDelete(p)}>
                 删除
               </Button>
             )}
@@ -383,91 +387,103 @@ export default function ProblemListPage() {
   ];
 
   return (
-    <div className="mx-auto flex max-w-[1400px] flex-col gap-4 px-6 py-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="mt-0.5">问题清单</h1>
-          <p className="text-xs text-muted-foreground">
-            问题审批流:已保存→审核中→处置中→待验证→已关闭;bug 跳过部门经理
-          </p>
-        </div>
-        <Space>
-          <Button loading={exporting} onClick={() => void handleExport()}>
-            导出
+    <PageContainer size="full">
+      <PageHeader
+        title="问题清单"
+        subtitle="问题审批流:已保存→审核中→处置中→待验证→已关闭;bug 跳过部门经理"
+      />
+
+      <SectionCard bodyPadding="p-2">
+        {/* 顶部按钮行:右对齐(重置 | 分隔 | 导出 / 新建) */}
+        <div className="mb-2 flex items-center justify-end gap-2">
+          <Button size="sm" variant="outline" onClick={resetFilters}>
+            重置
           </Button>
-          <Button type="primary" onClick={() => openDrawer("create")}>
+          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={exporting}
+            onClick={() => void handleExport()}
+          >
+            {exporting ? "导出中…" : "导出"}
+          </Button>
+          <Button size="sm" onClick={() => openDrawer("create")}>
             + 新建问题
           </Button>
-        </Space>
-      </header>
+        </div>
 
-      {/* 搜索栏(对照源 index.vue queryParams,本仓后端仅分页,复杂字段本地过滤) */}
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 8,
-          alignItems: "center",
-        }}
-      >
-        <Input
-          allowClear
-          style={{ width: 240 }}
-          placeholder="项目/模块/描述/功能/责任人/发现人"
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-        />
-        <Select<string[]>
-          mode="multiple"
-          allowClear
-          style={{ minWidth: 200 }}
-          placeholder="状态(可多选)"
-          value={statusFilter}
-          onChange={(v) => setStatusFilter(v as string[])}
-          options={STATUS_OPTIONS}
-        />
-        <PpmUserSelect
-          res="project"
-          allowClear
-          style={{ width: 200 }}
-          placeholder="项目"
-          value={projectFilter}
-          onChange={(v) => setProjectFilter((v as string | null) ?? null)}
-        />
-        <Select<string>
-          style={{ width: 130 }}
-          placeholder="问题类型"
-          value={proTypeFilter || undefined}
-          onChange={(v) => setProTypeFilter(v ?? "")}
-          options={PRO_TYPE_OPTIONS}
-        />
-        <Select<string>
-          style={{ width: 110 }}
-          placeholder="是否紧急"
-          value={isUrgentFilter || undefined}
-          onChange={(v) => setIsUrgentFilter(v ?? "")}
-          options={IS_URGENT_OPTIONS}
-        />
-        <RangePicker
-          value={dateRange as [Dayjs, Dayjs] | null}
-          onChange={(v) =>
-            setDateRange(v as [Dayjs | null, Dayjs | null] | null)
-          }
-          placeholder={["发现开始", "发现结束"]}
-        />
-        <Button onClick={resetFilters}>重置</Button>
-        <span
-          style={{ marginLeft: "auto", fontSize: 12, color: "rgba(0,0,0,0.45)" }}
-        >
-          共 {filtered.length} 条
-        </span>
-      </div>
+        {/* 查询条件:垂直 grid-cols-4(本地过滤,onChange 实时生效) */}
+        <div className="grid w-full grid-cols-4 gap-3">
+          <Field label="关键字">
+            <Input
+              allowClear
+              placeholder="项目/模块/描述/功能/责任人/发现人"
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+            />
+          </Field>
+          <Field label="状态">
+            <Select<string[]>
+              mode="multiple"
+              allowClear
+              className="w-full"
+              placeholder="状态(可多选)"
+              value={statusFilter}
+              onChange={(v) => setStatusFilter(v as string[])}
+              options={STATUS_OPTIONS}
+            />
+          </Field>
+          <Field label="项目">
+            <PpmUserSelect
+              res="project"
+              allowClear
+              style={{ width: "100%" }}
+              placeholder="选择项目"
+              value={projectFilter}
+              onChange={(v) => setProjectFilter((v as string | null) ?? null)}
+            />
+          </Field>
+          <Field label="问题类型">
+            <Select<string>
+              className="w-full"
+              placeholder="全部类型"
+              value={proTypeFilter || undefined}
+              onChange={(v) => setProTypeFilter(v ?? "")}
+              options={PRO_TYPE_OPTIONS}
+            />
+          </Field>
+          <Field label="是否紧急">
+            <Select<string>
+              className="w-full"
+              placeholder="全部"
+              value={isUrgentFilter || undefined}
+              onChange={(v) => setIsUrgentFilter(v ?? "")}
+              options={IS_URGENT_OPTIONS}
+            />
+          </Field>
+          <Field label="发现时间">
+            <RangePicker
+              className="w-full"
+              value={dateRange as [Dayjs, Dayjs] | null}
+              onChange={(v) =>
+                setDateRange(v as [Dayjs | null, Dayjs | null] | null)
+              }
+              placeholder={["发现开始", "发现结束"]}
+            />
+          </Field>
+          <div className="col-span-2 self-end text-right text-xs text-muted-foreground">
+            共 {filtered.length} 条
+          </div>
+        </div>
+      </SectionCard>
 
       {error ? (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {error}
           <Button
-            size="small"
+            size="sm"
+            variant="outline"
             className="ml-3"
             onClick={() => void load()}
           >
@@ -481,8 +497,14 @@ export default function ProblemListPage() {
           dataSource={filtered}
           loading={loading}
           size="small"
-          scroll={{ x: "max-content" }}
-          pagination={{ pageSize: 10, showSizeChanger: false }}
+          bordered
+          scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
+          pagination={{
+            pageSize: 20,
+            showSizeChanger: true,
+            pageSizeOptions: ["10", "20", "50", "100"],
+            showTotal: (t: number) => `共 ${t} 条`,
+          }}
           locale={{ emptyText: "暂无问题" }}
         />
       )}
@@ -497,6 +519,24 @@ export default function ProblemListPage() {
           void load();
         }}
       />
+    </PageContainer>
+  );
+}
+
+/**
+ * 查询条件外壳:垂直布局(标题在上,控件在下),对齐 project-plans 风格。
+ */
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex w-full flex-col gap-1">
+      <span className="text-xs leading-4 text-muted-foreground">{label}</span>
+      {children}
     </div>
   );
 }
