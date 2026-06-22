@@ -1,0 +1,188 @@
+"use client";
+
+import * as React from "react";
+import { AlertTriangle, X } from "lucide-react";
+
+import { AgentLogViewer } from "@/components/agent-log-viewer";
+import type { AgentLogInputControls } from "@/components/agent-log/types";
+import { Button } from "@/components/ui/button";
+import { useAgentRunStream } from "@/lib/use-agent-run-stream";
+import type { AgentRunInputStream } from "@/lib/use-agent-run-stream";
+
+// ────────────────────────────────────────────────────────────────────────────
+// AgentRunPanel — AgentRunStream 的统一面板组件
+//
+// 依据：
+//   .sillyspec/changes/2026-06-22-unify-agent-run-sse-hook/design.md §7.2
+//   .sillyspec/changes/2026-06-22-unify-agent-run-sse-hook/tasks/task-03.md
+//
+// 职责（D-002@v1：hook + 面板组件）：
+//   1. 内部调 useAgentRunStream（task-01）拿 logs/perms/input/loading/error；
+//   2. 把 AgentRunInputStream 字段映射到 AgentLogInputControls 契约（X-002）；
+//   3. onPermissionResolved 仅本地 dismissPerm，不调 respondSessionPermission（D-003）；
+//   4. 其余 AgentLogViewer 定制 prop 显式透传（D-002 显式列）。
+//
+// 不做（非目标）：
+//   - 不改 AgentLogViewer / hook / 卡片；
+//   - 不接管已完成 run 历史展开；
+//   - 不调任何后端 API（hook / 卡片负责）。
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface AgentRunPanelProps {
+  /** 工作区 ID（hook + API 请求路径用） */
+  workspaceId: string;
+  /** agent run ID；null 表示未选定 run（hook 不连 SSE，展示 emptyText） */
+  runId: string | null;
+  /** run 状态 pending/running → 连 SSE；否则仅 prefetch 历史（D-001） */
+  isActive: boolean;
+
+  // —— AgentLogViewer 定制（显式列，D-002）——
+  /** 日志面板标题（透传 viewer.title，必填） */
+  title: string;
+  /** 空态文案，默认 "暂无日志" */
+  emptyText?: string;
+  /** 头部右侧摘要节点（透传 viewer.summary） */
+  summary?: React.ReactNode;
+  /**
+   * 头部右侧操作节点（透传 viewer.actions）。
+   * 若同时传 onClose，panel 自动追加一个"关闭"按钮到 actions 末尾。
+   */
+  actions?: React.ReactNode;
+  /** 紧凑模式（透传 viewer.compact） */
+  compact?: boolean;
+  /** 面板/嵌入样式（透传 viewer.variant），默认 "panel" */
+  variant?: "panel" | "embedded";
+  /** 日志区最大高度 class（透传 viewer.maxHeightClass） */
+  maxHeightClass?: string;
+  /** LIVE 徽标（透传 viewer.isLive），活跃 run 建议传 true */
+  isLive?: boolean;
+
+  // —— 生命周期回调 ——
+  /** run 结束（done 事件）通知父组件（透传 hook onDone） */
+  onDone?: (status: string) => void;
+  /** 关闭面板回调；传入后 panel 自动在 actions 区追加关闭按钮 */
+  onClose?: () => void;
+}
+
+/**
+ * 把 hook 返回的 AgentRunInputStream 字段映射到 AgentLogViewer 期望的
+ * AgentLogInputControls 契约（design §7.2 / §13 X-002）。
+ *
+ * 字段映射表：
+ *   hook.values      → viewer.inputValues
+ *   hook.submitting  → viewer.submittingInputs
+ *   hook.errors      → viewer.inputErrors
+ *   hook.replied     → viewer.repliedInputs
+ *   hook.set         → viewer.onChange
+ *   hook.submit      → viewer.onSubmit（Promise → void，吞返回值）
+ *
+ * 注：AgentLogInputControls.onSubmit 类型为 `(_logId) => void`（非 Promise），
+ *     hook.submit 返回 Promise<void>，适配用 `void input.submit(logId)` 吞掉。
+ */
+function adaptInputControls(input: AgentRunInputStream): AgentLogInputControls {
+  return {
+    inputValues: input.values,
+    submittingInputs: input.submitting,
+    inputErrors: input.errors,
+    repliedInputs: input.replied,
+    onChange: (logId, value) => input.set(logId, value),
+    onSubmit: (logId) => {
+      void input.submit(logId);
+    },
+  };
+}
+
+export function AgentRunPanel({
+  workspaceId,
+  runId,
+  isActive,
+  title,
+  emptyText,
+  summary,
+  actions,
+  compact,
+  variant,
+  maxHeightClass,
+  isLive,
+  onDone,
+  onClose,
+}: AgentRunPanelProps) {
+  const { logs, loading, error, perms, dismissPerm, input } = useAgentRunStream(
+    workspaceId,
+    runId,
+    { isActive, onDone },
+  );
+
+  // X-002：input 适配，依赖 [input] 稳定引用（hook 每次 render 都返回新 input 对象，
+  // 但内部字段引用稳定；此处依赖 input 整体引用，hook 未 memo，panel 适配对象每次
+  // 新建——与原 page.tsx inline 传 inputControls 行为一致，不影响正确性）。
+  const inputControls = React.useMemo(
+    () => adaptInputControls(input),
+    [input],
+  );
+
+  // D-003：卡片已自调 respondSessionPermission + onResolved 回调本处。
+  // panel 只做本地 perms 移除（与决策方向无关，忽略 decision 参数）。
+  const handlePermissionResolved = React.useCallback(
+    (_requestId: string, _decision: "allow" | "deny") => {
+      dismissPerm(_requestId);
+    },
+    [dismissPerm],
+  );
+
+  // onClose 便利注入：传入 onClose 时在 actions 末尾追加关闭按钮。
+  const composedActions = React.useMemo(() => {
+    if (!onClose) return actions;
+    const closeBtn = (
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onClose}
+        className="h-6 gap-1 px-2 text-[11px] text-zinc-500 hover:text-zinc-800"
+        title="关闭面板"
+      >
+        <X className="h-3 w-3" />
+        关闭
+      </Button>
+    );
+    return actions ? (
+      <>
+        {actions}
+        {closeBtn}
+      </>
+    ) : (
+      closeBtn
+    );
+  }, [actions, onClose]);
+
+  return (
+    <div className="min-w-0">
+      {/* error 横幅（bootstrapError 风格）：hook setError 后展示，不阻断 viewer */}
+      {error && (
+        <div
+          role="alert"
+          className="mb-2 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
+        >
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 break-words">{error}</span>
+        </div>
+      )}
+      <AgentLogViewer
+        title={title}
+        runId={runId ?? ""}
+        logs={logs}
+        loading={loading}
+        emptyText={emptyText ?? "暂无日志"}
+        maxHeightClass={maxHeightClass}
+        compact={compact}
+        variant={variant}
+        isLive={isLive}
+        summary={summary}
+        actions={composedActions}
+        inputControls={inputControls}
+        permissionRequests={perms}
+        onPermissionResolved={handlePermissionResolved}
+      />
+    </div>
+  );
+}

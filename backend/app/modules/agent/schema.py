@@ -110,6 +110,9 @@ class AgentRunResponse(BaseModel):
     duration_api_ms: int | None = None
     num_turns: int | None = None
     session_id: str | None = None
+    agent_session_id: uuid.UUID | None = (
+        None  # AgentSession 表 id（区别于 session_id=daemon 内部 id）
+    )
     input_tokens: int | None = None
     output_tokens: int | None = None
     # Post-scan validation fields

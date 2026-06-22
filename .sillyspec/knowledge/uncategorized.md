@@ -128,3 +128,10 @@
 - 根因：antd v5 DatePicker 内部用 dayjs 渲染日历表头（一二三四五六日）、月份名、周起始日，这些取自 **dayjs 全局 locale**，而非 antd ConfigProvider 的 locale。`ConfigProvider locale={zhCN}` 只影响 antd 自有文案（「今天」按钮、placeholder、空状态），管不到日历表头星期。
 - 修复（ql-20260621-004-c4a1）：`antd-providers.tsx` 补 `import 'dayjs/locale/zh-cn'; dayjs.locale('zh-cn');`，与 ConfigProvider locale 双保险。
 - 通用坑：antd v5 全家桶（DatePicker / RangePicker / Calendar / TimePicker）的日历本地化 = `ConfigProvider locale`（antd 文案）+ `dayjs.locale`（日历表头/边界/月份）**缺一不可**。配了 ConfigProvider 仍显示英文星期，第一时间查 `dayjs.locale` 是否全局设过——项目里多处 `import dayjs` 用 `.format()` 不报错，易误以为 locale 已就绪。
+
+## 2026-06-22 — sillyspec execute worktree 内跑 pnpm 后 Bash cwd 持久，致 sillyspec 命令在子项目上下文重置 [待确认]
+
+- 现象：execute Wave 验证时 `cd {worktree}/frontend && pnpm typecheck/test`，之后 `sillyspec run execute --done` 在 worktree/frontend 子目录运行，CLI 检测到 frontend 子项目，**重新初始化 execute**（project 由 multi-agent-platform 变 frontend、steps 从 14 变 12、从 Step 1 重开），主仓库 progress 未记录该 Wave 完成（progress show 显示 Wave ⬜）。
+- 根因：Bash 工具 cwd 在调用间持久；sillyspec 命令对 cwd 敏感——在 worktree/frontend（子项目根）跑会切到该子项目上下文，而非主仓库的 multi-agent-platform 变更。
+- 规避：worktree 内只跑 `pnpm`/`rg`/`git`（测试/验证），**所有 sillyspec 命令（`run`/`--done`/`progress`）必须在主仓库根 cwd 跑**；每次 `cd {worktree}/frontend` 后，下一条 sillyspec 命令前显式 `cd 主仓库根`。
+- 排查：progress show 发现 Wave 未记录 + CLI 输出 project 字段变化（frontend 而非 multi-agent-platform）即为此坑；补救：回主仓库 cwd 重跑该 Wave 的 `--done`。

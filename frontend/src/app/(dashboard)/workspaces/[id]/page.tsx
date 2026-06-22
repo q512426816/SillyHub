@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { safeUUID } from "@/lib/api";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-import { AgentLogViewer } from "@/components/agent-log-viewer";
+import { AgentRunPanel } from "@/components/agent-run-panel";
 import { AgentModelInput } from "@/components/AgentModelInput";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,17 +12,13 @@ import { AgentProviderSelect } from "@/components/AgentProviderSelect";
 import { WorkspaceDaemonSwitcher } from "@/components/workspace-daemon-switcher";
 import { WorkspacePathFields } from "@/components/workspace-path-fields";
 import { ApiError } from "@/lib/api";
-import { asString } from "@/lib/utils";
-import { fetchPendingDialogs, getDaemonRuntime, type DaemonRuntimeRead, type SessionPermissionRequest } from "@/lib/daemon";
+import { getDaemonRuntime, type DaemonRuntimeRead } from "@/lib/daemon";
 import { isDaemonClientWorkspace } from "@/lib/workspace-path";
 import {
   listAgentRuns,
-  submitAgentRunInput,
   type AgentRun,
-  type AgentRunLogEntry,
   type AgentRunStatus,
 } from "@/lib/agent";
-import { AgentRunStreamClient, type StreamStatus } from "@/lib/agent-stream";
 import { listComponents } from "@/lib/components";
 import { listChanges } from "@/lib/changes";
 import {
@@ -35,7 +30,6 @@ import {
   type SpecWorkspace,
 } from "@/lib/spec-workspaces";
 import { getRuntimeProgress } from "@/lib/runtime";
-import { useSession } from "@/stores/session";
 import {
   getWorkspace,
   updateWorkspace,
@@ -125,28 +119,16 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const [bootstrapping, setBootstrapping] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
 
-  // Bootstrap SSE state
+  // Bootstrap state（panel runId / status / error 来源；SSE 连接由 AgentRunPanel 内部 hook 管理）
   const [activeBootstrapRunId, setActiveBootstrapRunId] = useState<string | null>(null);
   const [lastBsRun, setLastBsRun] = useState<AgentRun | null>(null);
-  const [bootstrapLogs, setBootstrapLogs] = useState<AgentRunLogEntry[]>([]);
   const [bootstrapStatus, setBootstrapStatus] = useState<AgentRunStatus | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
-  const [bsInputValues, setBsInputValues] = useState<Record<string, string>>({});
-  const [bsSubmittingInputs, setBsSubmittingInputs] = useState<Record<string, boolean>>({});
-  const [bsRepliedInputs, setBsRepliedInputs] = useState<Set<string>>(new Set());
-  const [bsInputErrors, setBsInputErrors] = useState<Record<string, string>>({});
-  const [bootstrapStreamStatus, setBootstrapStreamStatus] = useState<StreamStatus>("disconnected");
-  // ql-20260621：bootstrap/scan run 的 permission_request 待决策列表
-  // （Claude Code AskUserQuestion 远程人审）。由 AgentRunStreamClient.onPermissionRequest
-  // 维护，传给 AgentLogViewer 渲染审批卡片。
-  const [bootstrapPerms, setBootstrapPerms] = useState<SessionPermissionRequest[]>([]);
   const [generatingProjects, setGeneratingProjects] = useState(false);
   // workspace 级默认 agent provider 编辑态（FR-01/FR-02，2026-06-14-agent-runtime-selection）
   const [defaultAgent, setDefaultAgent] = useState<string | null>(null);
   const [defaultModel, setDefaultModel] = useState<string | null>(null);
   const [savingDefaultAgent, setSavingDefaultAgent] = useState(false);
-
-  const streamClientRef = useRef<AgentRunStreamClient | null>(null);
 
   const handleSaveDefaultAgent = async () => {
     if (!workspace) return;
@@ -193,6 +175,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
       setCurrentStage(rt?.current_stage ?? null);
 
       // Recover an in-progress Bootstrap/scan run (change_id == null) if any.
+      // 仅设状态：SSE 连接与 dialog 恢复由 <AgentRunPanel> 内部 hook 处理（FR-01 / FR-07）。
       const runs = await listAgentRuns(workspaceId).catch(() => [] as AgentRun[]);
       const bsRuns = runs
         .filter((r) => r.change_id == null)
@@ -206,31 +189,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
       if (
         activeRun &&
         (activeRun.status === "pending" || activeRun.status === "running") &&
-        !streamClientRef.current &&
         activeBootstrapRunId !== activeRun.id
       ) {
         setActiveBootstrapRunId(activeRun.id);
         setBootstrapStatus(activeRun.status);
-        setBootstrapLogs([]);
-        connectBootstrapStream(activeRun.id);
-        // 恢复刷新前未回答的 AskUserQuestion 对话（dialog_kind 待答请求）。
-        // SSE 只推送实时新事件，刷新前已 pending 的对话需通过 REST 端点恢复。
-        if (activeRun.session_id) {
-          void fetchPendingDialogs(activeRun.session_id)
-            .then((dialogs) => {
-              setBootstrapPerms((prev) => {
-                const existing = new Set(prev.map((p) => p.request_id));
-                const merged = [...prev];
-                for (const d of dialogs) {
-                  if (!existing.has(d.request_id)) merged.push(d);
-                }
-                return merged;
-              });
-            })
-            .catch(() => {
-              /* 恢复失败不阻断主流程，SSE 仍会补发实时 permission 事件 */
-            });
-        }
       }
 
       // Save last finished Bootstrap run for display.
@@ -247,121 +209,40 @@ export default function WorkspaceDetailPage({ params }: Props) {
 
   useEffect(() => {
     void load();
-    return () => {
-      // Cleanup: close stream client on unmount
-      streamClientRef.current?.disconnect();
-      streamClientRef.current = null;
-    };
+    // Bootstrap SSE 连接的生命周期由 <AgentRunPanel> 内部 hook 管理（R-01）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId]);
 
-  /* ---- SSE helpers ---- */
+  /* ---- Bootstrap panel callbacks ---- */
 
-  function closeBootstrapStream() {
-    streamClientRef.current?.disconnect();
-    streamClientRef.current = null;
-  }
-
-  function closeBootstrapPanel() {
-    closeBootstrapStream();
+  // 关闭面板：只清状态，panel 卸载 → hook cleanup → disconnect（R-01）。
+  const closeBootstrapPanel = useCallback(() => {
     setActiveBootstrapRunId(null);
-    setBootstrapLogs([]);
     setBootstrapStatus(null);
     setBootstrapError(null);
-    setBootstrapStreamStatus("disconnected");
-    setBsInputValues({});
-    setBsSubmittingInputs({});
-    setBsRepliedInputs(new Set());
-    setBsInputErrors({});
-    setBootstrapPerms([]);
-  }
+  }, []);
 
-  /**
-   * Establish (or re-establish) the SSE stream for a Bootstrap/scan run.
-   * Shared by handleBootstrap (fresh run) and load (recover in-progress run).
-   * Always closes any existing connection first to guarantee a single stream.
-   */
-  function connectBootstrapStream(runId: string) {
-    closeBootstrapStream();
-
-    const client = new AgentRunStreamClient(workspaceId, runId);
-    streamClientRef.current = client;
-
-    client.onStatusChange((status: StreamStatus) => {
-      setBootstrapStreamStatus(status);
-      if (status === "error") {
-        setBootstrapError("连接失败，请重试");
-      }
-    });
-
-    client.onMessage((event) => {
-      setBootstrapLogs((prev) => {
-        if (event.log_id != null && prev.some((l) => l.id === event.log_id)) return prev;
-        return [
-          ...prev,
-          {
-            id: event.log_id ?? safeUUID(),
-            run_id: runId,
-            timestamp: event.timestamp,
-            channel: event.channel,
-            content_redacted: asString(event.content),
-          },
-        ];
-      });
-    });
-
-    client.onDone((data) => {
-      if (data.status) {
-        setBootstrapStatus(data.status as AgentRunStatus);
-      }
-      client.disconnect();
-      void load();
-    });
-
-    // ql-20260621：scan/bootstrap run 中 Claude Code AskUserQuestion 触发的远程人审。
-    // run SSE 已同时订阅 agent_session:{id} 频道，permission_request 到达后渲染审批卡片；
-    // permission_resolved（用户决策 / 5min 超时）后移除对应卡片。
-    client.onPermissionRequest((req) => {
-      setBootstrapPerms((prev) =>
-        prev.some((r) => r.request_id === req.request_id) ? prev : [...prev, req],
-      );
-    });
-    client.onPermissionResolved((resolved) => {
-      setBootstrapPerms((prev) =>
-        prev.filter((r) => r.request_id !== resolved.request_id),
-      );
-    });
-
-    const { accessToken } = useSession.getState();
-    if (accessToken) {
-      void client.connect(accessToken);
-    } else {
-      setBootstrapError("会话已失效，请重新登录后查看实时日志");
-      streamClientRef.current = null;
-    }
-  }
+  // run 结束回调：onDone 是 hook useEffect deps，必须 useCallback 稳定引用（R-01 / task-01 提醒）。
+  const handleBootstrapRunDone = useCallback((status: string) => {
+    setBootstrapStatus(status as AgentRunStatus);
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId]);
 
   /* ---- Bootstrap handler ---- */
 
   async function handleBootstrap() {
     setBootstrapping(true);
     setPageError(null);
-    closeBootstrapStream();
     setActiveBootstrapRunId(null);
-    setBootstrapLogs([]);
     setBootstrapStatus(null);
     setBootstrapError(null);
-    setBsInputValues({});
-    setBsSubmittingInputs({});
-    setBsRepliedInputs(new Set());
-    setBsInputErrors({});
-    setBootstrapPerms([]);
 
     try {
       const result = await bootstrapSpecWorkspace(workspaceId);
       setActiveBootstrapRunId(result.agent_run_id);
       setBootstrapStatus(result.status);
-      connectBootstrapStream(result.agent_run_id);
+      // SSE 连接由 <AgentRunPanel runId={result.agent_run_id} isActive> 自动建立（D-002）。
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "初始化失败");
     } finally {
@@ -385,43 +266,6 @@ export default function WorkspaceDetailPage({ params }: Props) {
       setPageError(err instanceof ApiError ? err.message : "生成项目组件失败");
     } finally {
       setGeneratingProjects(false);
-    }
-  }
-
-  /* ---- User input submission ---- */
-
-  async function handleBsSubmitInput(logId: string) {
-    if (!activeBootstrapRunId) return;
-    const value = bsInputValues[logId]?.trim();
-    if (!value) return;
-    setBsSubmittingInputs((prev) => ({ ...prev, [logId]: true }));
-    try {
-      await submitAgentRunInput(workspaceId, activeBootstrapRunId, {
-        content: value,
-      });
-      setBootstrapLogs((prev) => [
-        ...prev,
-        {
-          id: safeUUID(),
-          run_id: activeBootstrapRunId,
-          timestamp: new Date().toISOString(),
-          channel: "user_input" as const,
-          content_redacted: value,
-        },
-      ]);
-      setBsRepliedInputs((prev) => new Set(prev).add(logId));
-      setBsInputValues((prev) => {
-        const next = { ...prev };
-        delete next[logId];
-        return next;
-      });
-    } catch (err) {
-      setBsInputErrors((prev) => ({
-        ...prev,
-        [logId]: err instanceof ApiError ? err.message : "提交输入失败",
-      }));
-    } finally {
-      setBsSubmittingInputs((prev) => ({ ...prev, [logId]: false }));
     }
   }
 
@@ -670,38 +514,23 @@ export default function WorkspaceDetailPage({ params }: Props) {
             );
           })()}
 
-        {/* Bootstrap SSE log panel — uses shared AgentLogViewer */}
+        {/* Bootstrap run panel — 统一 AgentRunPanel（FR-01，hook + 面板组件 D-002） */}
         {activeBootstrapRunId && (
           <div className="mb-3">
-            <AgentLogViewer
-              title="初始化运行"
+            <AgentRunPanel
+              workspaceId={workspaceId}
               runId={activeBootstrapRunId}
-              logs={bootstrapLogs}
-              loading={false}
+              isActive={bootstrapStatus === "running" || bootstrapStatus === "pending"}
+              title="初始化运行"
               emptyText="等待日志输出..."
               isLive={bootstrapStatus === "running" || bootstrapStatus === "pending"}
               summary={
                 <Badge variant={statusToVariant(bootstrapStatus)}>
-                  {bootstrapStatus ?? bootstrapStreamStatus}
+                  {bootstrapStatus ?? "等待中"}
                 </Badge>
               }
-              actions={
-                <Button size="sm" variant="ghost" onClick={closeBootstrapPanel}>
-                  关闭
-                </Button>
-              }
-              inputControls={{
-                inputValues: bsInputValues,
-                submittingInputs: bsSubmittingInputs,
-                inputErrors: bsInputErrors,
-                repliedInputs: bsRepliedInputs,
-                onChange: (logId, value) => setBsInputValues((prev) => ({ ...prev, [logId]: value })),
-                onSubmit: handleBsSubmitInput,
-              }}
-              permissionRequests={bootstrapPerms}
-              onPermissionResolved={(requestId) =>
-                setBootstrapPerms((prev) => prev.filter((r) => r.request_id !== requestId))
-              }
+              onClose={closeBootstrapPanel}
+              onDone={handleBootstrapRunDone}
             />
             {bootstrapError && (
               <p className="mt-2 text-xs text-destructive">{bootstrapError}</p>

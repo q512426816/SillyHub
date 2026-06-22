@@ -1,0 +1,169 @@
+<!--
+author: qinyi
+created_at: 2026-06-22T11:04:57+08:00
+change: 2026-06-22-unify-agent-run-sse-hook
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>统一 Agent Run SSE 客户端 — 架构对比</title>
+<style>
+  :root { --line:#475569; --bg:#0f172a; --panel:#1e293b; --txt:#e2e8f0; --mut:#94a3b8; --acc:#38bdf8; --bad:#f87171; --good:#34d399; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; font-size:13px; line-height:1.55; padding:24px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  h2 { font-size:14px; margin:28px 0 10px; color:var(--acc); border-left:3px solid var(--acc); padding-left:8px; }
+  .meta { color:var(--mut); font-size:11px; margin-bottom:16px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .box { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:12px 14px; }
+  .box h3 { margin:0 0 8px; font-size:12px; letter-spacing:.5px; text-transform:uppercase; color:var(--mut); }
+  pre { margin:0; white-space:pre; overflow-x:auto; font-size:12px; }
+  .tag { display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; margin-right:4px; }
+  .bad { background:rgba(248,113,113,.15); color:var(--bad); border:1px solid rgba(248,113,113,.4); }
+  .good { background:rgba(52,211,153,.15); color:var(--good); border:1px solid rgba(52,211,153,.4); }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mut); font-weight:normal; }
+  .flow { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+  .node { background:var(--panel); border:1px solid var(--line); padding:5px 9px; border-radius:4px; }
+  .node.acc { border-color:var(--acc); color:var(--acc); }
+  .node.brk { border-color:var(--bad); color:var(--bad); text-decoration:line-through; }
+  .arr { color:var(--mut); }
+  .note { color:var(--mut); font-size:11px; margin-top:6px; }
+  code { background:#0b1220; padding:1px 4px; border-radius:3px; color:var(--acc); font-size:11px; }
+</style>
+</head>
+<body>
+
+<h1>统一 Agent Run SSE 客户端</h1>
+<div class="meta">change: 2026-06-22-unify-agent-run-sse-hook · author: qinyi · 2026-06-22 · 方案B：hook + 面板组件</div>
+
+<h2>① 现状 vs 目标（组件树）</h2>
+<div class="grid">
+  <div class="box">
+    <h3><span class="tag bad">BEFORE</span> 两套 SSE 客户端 + 4 处重复状态</h3>
+<pre>根 page.tsx (Bootstrap run)
+ └─ <b>AgentRunStreamClient</b> (class) ✅有permission
+     └─ bootstrapLogs / bootstrapPerms
+     └─ bsInputValues / bsSubmitting / bsInputErrors / bsReplied
+     └─ connectBootstrapStream()
+
+agent/page.tsx (活跃 run)
+ └─ <b>streamAgentRunLogs()</b> (函数) ❌丢permission
+     └─ activeLogs
+     └─ inputValues / submittingInputs / inputErrors / repliedInputs
+     └─ handleSubmitInput()
+
+changes/[cid]/page.tsx (×2 触发点)
+ └─ <b>streamAgentRunLogs()</b> ❌丢permission
+     └─ agentLogs
+     └─ eventSourceRef / dispatchOwnsSseRef
+     └─ loadHistoryLogs() / connectLogStream()</pre>
+    <div class="note">3 处 onMessage 回调体几乎一字不差；3 套 input 状态管理重复。</div>
+  </div>
+  <div class="box">
+    <h3><span class="tag good">AFTER</span> 单一 hook + 面板组件</h3>
+<pre>所有 4 调用点
+ └─ &lt;<b>AgentRunPanel</b>&gt;  (components/agent-run-panel.tsx)
+     └─ <b>useAgentRunStream</b>()  (lib/use-agent-run-stream.ts)
+         └─ <b>AgentRunStreamClient</b> (class, 复用现有)
+             ├─ logs / status / streaming / error
+             ├─ perms (permission_request/resolved + dialog恢复)
+             └─ input {values,submitting,errors,replied,set,submit}
+     └─ &lt;AgentLogViewer&gt; (现有, props 由 panel 注入)
+         ├─ permissionRequests = perms
+         ├─ onPermissionResolved = resolvePermission
+         └─ inputControls = input</pre>
+    <div class="note">调用点一行 JSX；状态/SSE/input 全收敛到 hook。删除 streamAgentRunLogs。</div>
+  </div>
+</div>
+
+<h2>② 数据流 — permission 卡片（bug 修复点）</h2>
+<div class="box">
+  <div class="flow">
+    <span class="node">AskUserQuestion<br/>(canUseTool 远程人审)</span>
+    <span class="arr">→</span>
+    <span class="node">daemon PermissionResolver<br/>publish permission_request</span>
+    <span class="arr">→</span>
+    <span class="node">backend stream_run_logs<br/>订阅 agent_session:{id}<br/>透传 SSE data</span>
+    <span class="arr">→</span>
+    <span class="node brk">/agent 页 streamAgentRunLogs<br/>agent.ts:137 丢无timestamp事件</span>
+    <span class="arr">⇒</span>
+    <span class="node">5min daemon 兜底超时</span>
+  </div>
+  <div class="flow" style="margin-top:10px;">
+    <span class="node acc">修复后</span>
+    <span class="arr">→</span>
+    <span class="node acc">AgentRunStreamClient<br/>parseSessionPermissionEvent</span>
+    <span class="arr">→</span>
+    <span class="node acc">useAgentRunStream.perms</span>
+    <span class="arr">→</span>
+    <span class="node acc">AgentRunPanel → AgentLogViewer<br/>渲染审批卡片</span>
+    <span class="arr">→</span>
+    <span class="node acc">用户决策 respondSessionPermission</span>
+  </div>
+  <div class="note">同样的链路也修好 changes/[cid] 页（task 执行中的 AskUserQuestion）。</div>
+</div>
+
+<h2>③ 调用点改造对照</h2>
+<table>
+  <tr><th>调用点</th><th>BEFORE</th><th>AFTER</th><th>说明</th></tr>
+  <tr>
+    <td>根 page.tsx<br/>(Bootstrap/scan run)</td>
+    <td>connectBootstrapStream + 6 个 useState + bsInput*</td>
+    <td><code>&lt;AgentRunPanel isActive onClose onDone&gt;</code></td>
+    <td>删除整个 Bootstrap 流胶水</td>
+  </tr>
+  <tr>
+    <td>agent/page.tsx<br/>(活跃 run)</td>
+    <td>streamAgentRunLogs + activeLogs + input*</td>
+    <td><code>&lt;AgentRunPanel isActive&gt;</code></td>
+    <td>补齐 permission 卡片（修 bug）</td>
+  </tr>
+  <tr>
+    <td>agent/page.tsx<br/>(历史展开)</td>
+    <td>getAgentRunLogs + AgentLogViewer</td>
+    <td><b>保持不变</b></td>
+    <td>纯历史非流式 + 下载按钮定制，不套 panel</td>
+  </tr>
+  <tr>
+    <td>changes/[cid]/page.tsx<br/>(dispatch + connect)</td>
+    <td>2× streamAgentRunLogs + eventSourceRef + dispatchOwnsSseRef</td>
+    <td><code>&lt;AgentRunPanel isActive={isRunActive} runId={activeRunId}&gt;</code></td>
+    <td>两触发点合并为单实例；补齐 permission</td>
+  </tr>
+</table>
+
+<h2>④ 删除 / 新增清单</h2>
+<div class="grid">
+  <div class="box">
+    <h3><span class="tag bad">删除</span></h3>
+<pre>frontend/src/lib/agent.ts:117
+  └─ streamAgentRunLogs()
+3 处 import (agent/page, changes/[cid]×2)
+调用点胶水:
+  connectBootstrapStream / eventSourceRef
+  dispatchOwnsSseRef / loadHistoryLogs
+  connectLogStream + 重复 useState</pre>
+  </div>
+  <div class="box">
+    <h3><span class="tag good">新增</span></h3>
+<pre>frontend/src/lib/use-agent-run-stream.ts
+  └─ useAgentRunStream(workspaceId, runId, {isActive})
+frontend/src/components/agent-run-panel.tsx
+  └─ &lt;AgentRunPanel ... /&gt;
+frontend/src/lib/__tests__/
+  use-agent-run-stream.test.ts(x)
+frontend/src/components/
+  agent-run-panel.test.tsx</pre>
+  </div>
+</div>
+
+<div class="note" style="margin-top:24px;">
+  决策记录：D-001 非活跃 run 边界（isActive=false 仅 prefetch 历史、不连 SSE）· D-002 抽象层次（hook + 面板组件）。后端 backend / sillyhub-daemon / AgentLogViewer 均不改。
+</div>
+
+</body>
+</html>

@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { safeUUID } from "@/lib/api";
 import {
   Activity,
   Bot,
@@ -18,20 +17,19 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { AgentLogViewer, isPendingReplied, parseToolCallContent, parseScanCheckOutput, type ToolCallEntry } from "@/components/agent-log-viewer";
+import { AgentLogViewer, parseToolCallContent, parseScanCheckOutput, type ToolCallEntry } from "@/components/agent-log-viewer";
+import { AgentRunPanel } from "@/components/agent-run-panel";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api";
-import { asString, cn } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import {
   formatRunProviderLabel,
   getAgentRunLogs,
   killAgentRun,
   listAgentRuns,
-  streamAgentRunLogs,
-  submitAgentRunInput,
   type AgentRun,
   type AgentRunLogEntry,
 } from "@/lib/agent";
@@ -242,16 +240,9 @@ export default function AgentPage({ params }: Props) {
   const [runs, setRuns] = useState<AgentRun[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const [activeLogs, setActiveLogs] = useState<AgentRunLogEntry[] | null>(null);
-  const [logsLoading, setLogsLoading] = useState(false);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [expandedLogs, setExpandedLogs] = useState<AgentRunLogEntry[] | null>(null);
   const [expandedLogsLoading, setExpandedLogsLoading] = useState(false);
-
-  const [inputValues, setInputValues] = useState<Record<string, string>>({});
-  const [submittingInputs, setSubmittingInputs] = useState<Record<string, boolean>>({});
-  const [inputErrors, setInputErrors] = useState<Record<string, string>>({});
-  const [repliedInputs, setRepliedInputs] = useState<Set<string>>(new Set());
 
   // ql-20260617-002：UI 优化 — 历史记录的状态筛选 + 分页。
   const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "failed" | "killed">("all");
@@ -302,29 +293,6 @@ export default function AgentPage({ params }: Props) {
     [filteredCompletedRuns, safeHistoryPage],
   );
 
-  const activeToolCalls = useMemo(() => {
-    if (!activeLogs) return [];
-    return activeLogs
-      .filter((l) => l.channel === "tool_call")
-      .map((l) => parseToolCallContent(l.content_redacted))
-      .filter(Boolean) as ToolCallEntry[];
-  }, [activeLogs]);
-
-  const toolSummary = useMemo(() => {
-    const success = activeToolCalls.filter((t) => t.success && t.status === "allowed").length;
-    const failed = activeToolCalls.filter((t) => !t.success).length;
-    const pending = activeToolCalls.filter((t) => t.status === "pending").length;
-    const pendingGuidance = activeLogs
-      ? activeLogs.filter(
-          (l) =>
-            l.channel === "pending_input" &&
-            !isPendingReplied(l.timestamp, activeLogs) &&
-            !repliedInputs.has(l.id),
-        ).length
-      : 0;
-    return { success, failed, pending, pendingGuidance };
-  }, [activeToolCalls, activeLogs, repliedInputs]);
-
   /* ---- Load runs ---- */
   const reload = useCallback(async () => {
     setError(null);
@@ -348,27 +316,19 @@ export default function AgentPage({ params }: Props) {
     return () => clearInterval(timer);
   }, [runningRuns.length, reload]);
 
-  /* ---- Load active run logs ---- */
+  /* ---- Load active run logs ----
+   * task-06：活跃 run 日志流 + 历史 prefetch 由 <AgentRunPanel> 内的
+   * useAgentRunStream 接管；此处仅切换 activeRunId，panel 自动挂载并连 SSE。
+   */
   const handleSelectActive = useCallback(
-    async (runId: string) => {
+    (runId: string) => {
       if (activeRunId === runId) {
         setActiveRunId(null);
-        setActiveLogs(null);
         return;
       }
       setActiveRunId(runId);
-      setLogsLoading(true);
-      setActiveLogs(null);
-      try {
-        const logs = await getAgentRunLogs(workspaceId, runId);
-        setActiveLogs(logs);
-      } catch (err) {
-        setError(err instanceof ApiError ? err.message : "加载日志失败");
-      } finally {
-        setLogsLoading(false);
-      }
     },
-    [activeRunId, workspaceId],
+    [activeRunId],
   );
 
   const handleKill = useCallback(
@@ -387,36 +347,27 @@ export default function AgentPage({ params }: Props) {
     [workspaceId, reload],
   );
 
-  /* ---- Stream active logs via SSE (running) ---- */
-  useEffect(() => {
-    if (!activeRunId) return;
+  /* ---- Active run state ----
+   * task-06：原活跃 run SSE useEffect 已删，活跃 run 日志流由
+   * <AgentRunPanel> 内的 useAgentRunStream hook 接管（design §5.1 分层）。
+   */
+  const isActiveRun = useMemo(
+    () => {
+      if (!activeRunId) return false;
+      const run = runs?.find((r) => r.id === activeRunId);
+      return run?.status === "running" ?? false;
+    },
+    [activeRunId, runs],
+  );
 
-    const run = runs?.find((r) => r.id === activeRunId);
-    if (!run || run.status !== "running") return;
-
-    const es = streamAgentRunLogs(
-      workspaceId,
-      activeRunId,
-      (event) => {
-        setActiveLogs((prev) => [
-          ...(prev ?? []),
-          {
-            id: safeUUID(),
-            run_id: activeRunId,
-            timestamp: event.timestamp,
-            channel: event.channel,
-            content_redacted: asString(event.content),
-          },
-        ]);
-      },
-      () => {
-        void reload();
-        window.setTimeout(() => void reload(), 1_500);
-      },
-    );
-
-    return () => es.close();
-  }, [activeRunId, workspaceId, runs, reload]);
+  // task-06：done 回调等价原 :412-415（reload 两次）；用 useCallback 避免触发 panel 重连（R-01）。
+  const handleActiveRunDone = useCallback(
+    (_status: string) => {
+      void reload();
+      window.setTimeout(() => void reload(), 1_500);
+    },
+    [reload],
+  );
 
   /* ---- Expand completed run logs ---- */
   const handleExpandLogs = useCallback(
@@ -439,39 +390,6 @@ export default function AgentPage({ params }: Props) {
       }
     },
     [expandedRunId, workspaceId],
-  );
-
-  /* ---- Submit user guidance for pending_input ---- */
-  const handleSubmitInput = useCallback(
-    async (pendingLogId: string, runId: string) => {
-      const content = inputValues[pendingLogId]?.trim();
-      if (!content) return;
-
-      setSubmittingInputs((prev) => ({ ...prev, [pendingLogId]: true }));
-      setInputErrors((prev) => {
-        const next = { ...prev };
-        delete next[pendingLogId];
-        return next;
-      });
-
-      try {
-        const result = await submitAgentRunInput(workspaceId, runId, { content });
-        if (result.accepted) {
-          setRepliedInputs((prev) => new Set(prev).add(pendingLogId));
-          setInputValues((prev) => {
-            const next = { ...prev };
-            delete next[pendingLogId];
-            return next;
-          });
-        }
-      } catch (err) {
-        const msg = err instanceof ApiError ? err.message : "提交失败";
-        setInputErrors((prev) => ({ ...prev, [pendingLogId]: msg }));
-      } finally {
-        setSubmittingInputs((prev) => ({ ...prev, [pendingLogId]: false }));
-      }
-    },
-    [workspaceId, inputValues],
   );
 
   /* ================================================================ */
@@ -648,57 +566,21 @@ export default function AgentPage({ params }: Props) {
         </section>
       )}
 
-      {/* ---- Tool Call Stream / Log Viewer (active run selected) ---- */}
+      {/* ---- Tool Call Stream / Log Viewer (active run selected) ----
+       * task-06：活跃 run 日志 + input + 权限卡片统一由 <AgentRunPanel> 承担
+       * （panel 内部 useAgentRunStream hook 连 SSE / prefetch 历史 / 管 input）。
+       */}
       {activeRunId && (
         <section className="min-w-0">
-          <AgentLogViewer
-            title="实时日志"
+          <AgentRunPanel
+            workspaceId={workspaceId}
             runId={activeRunId}
-            logs={activeLogs}
-            loading={logsLoading}
+            isActive={isActiveRun}
+            title="实时日志"
             emptyText="暂无日志输出"
             isLive
-            summary={
-              <>
-                {toolSummary.success > 0 && (
-                  <StatusBadge kind="success">{toolSummary.success} 成功</StatusBadge>
-                )}
-                {toolSummary.failed > 0 && (
-                  <StatusBadge kind="error">{toolSummary.failed} 失败</StatusBadge>
-                )}
-                {toolSummary.pending > 0 && (
-                  <StatusBadge kind="warning">{toolSummary.pending} 待审批</StatusBadge>
-                )}
-                {toolSummary.pendingGuidance > 0 && (
-                  <StatusBadge kind="warning">{toolSummary.pendingGuidance} 待指导</StatusBadge>
-                )}
-              </>
-            }
-            actions={
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
-                onClick={() => {
-                  setActiveRunId(null);
-                  setActiveLogs(null);
-                }}
-              >
-                关闭
-              </Button>
-            }
-            inputControls={{
-              inputValues,
-              submittingInputs,
-              inputErrors,
-              repliedInputs,
-              onChange: (logId, value) =>
-                setInputValues((prev) => ({
-                  ...prev,
-                  [logId]: value,
-                })),
-              onSubmit: (logId) => void handleSubmitInput(logId, activeRunId),
-            }}
+            onDone={handleActiveRunDone}
+            onClose={() => setActiveRunId(null)}
           />
         </section>
       )}

@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { safeUUID } from "@/lib/api";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { AgentModelInput } from "@/components/AgentModelInput";
+import { AgentRunPanel } from "@/components/agent-run-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AgentProviderSelect } from "@/components/AgentProviderSelect";
@@ -13,7 +13,6 @@ import {
   PageHeader,
 } from "@/components/layout";
 import { ApiError } from "@/lib/api";
-import { asString } from "@/lib/utils";
 import {
   approveChange,
   executeChange,
@@ -37,12 +36,6 @@ import {
   type HumanGate,
 } from "@/lib/changes";
 import { SillySpecStepProgress, type StepInfo } from "@/components/sillyspec-step-progress";
-import {
-  streamAgentRunLogs,
-  getAgentRunLogs,
-  type AgentRunLogEntry,
-  type StreamLogEvent,
-} from "@/lib/agent";
 import { getTaskBoard, type TaskBoard } from "@/lib/tasks";
 import {
   listReviews,
@@ -173,40 +166,6 @@ const OPTIONAL_DOCS = [
   "references",
 ] as const;
 
-type ToolCallEntry = {
-  tool: string;
-  args: string;
-  status: "allowed" | "pending";
-  success: boolean;
-  description?: string;
-  command?: string;
-};
-
-function parseToolCallContent(raw: string | null | undefined): ToolCallEntry | null {
-  // ql-20260616-002：上游 content_redacted 可为 null（后端 schema str|None）。
-  const safe = raw ?? "";
-  if (!safe) return null;
-  try {
-    const obj = JSON.parse(safe);
-    const args = obj.args ?? obj.arguments ?? "";
-    const toolName = obj.tool ?? obj.name ?? "unknown";
-    return {
-      tool: toolName,
-      args: (() => {
-        if (args == null || args === "") return "";
-        if (typeof args === "string") return args;
-        try { return JSON.stringify(args, null, 2); } catch { return String(args); }
-      })(),
-      status: obj.requires_approval ? "pending" : "allowed",
-      success: obj.success !== false,
-      description: typeof args === "object" && args !== null ? args.description : undefined,
-      command: typeof args === "object" && args !== null ? args.command : undefined,
-    };
-  } catch {
-    return null;
-  }
-}
-
 const COMPONENT_EMOJI: Record<string, string> = {
   frontend: "🌐",
   web: "🌐",
@@ -267,8 +226,11 @@ export default function ChangeDetailPage({ params }: Props) {
   const [gateComment, setGateComment] = useState("");
 
   // ── Agent Log Stream state ──────────────────────────────────────────
-  const [agentLogs, setAgentLogs] = useState<AgentRunLogEntry[]>([]);
   const [logsExpanded, setLogsExpanded] = useState(false);
+
+  // R-06 localRunId 兜底：dispatch 成功后立即指向新 run，不等 refresh；
+  // refreshAgentStatus 完成后清空让派生 activeRunId 接管。
+  const [localRunId, setLocalRunId] = useState<string | null>(null);
 
   // Auto-expand logs when agent becomes active or has last_dispatch
   useEffect(() => {
@@ -276,10 +238,6 @@ export default function ChangeDetailPage({ params }: Props) {
       setLogsExpanded(true);
     }
   }, [agentStatus?.has_active_run, agentStatus?.last_dispatch]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [logStreaming, setLogStreaming] = useState(false);
-  const logEndRef = useRef<HTMLDivElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const dispatchOwnsSseRef = useRef(false);
 
   useEffect(() => {
     const load = async () => {
@@ -484,15 +442,18 @@ export default function ChangeDetailPage({ params }: Props) {
   };
 
   // ── Agent Dispatch handler ─────────────────────────────────────────
-  const refreshAgentStatus = async () => {
+  const refreshAgentStatus = useCallback(async () => {
     setLoadingAgentStatus(true);
     try {
       const as = await getAgentStatus(workspaceId, changeId);
       setAgentStatus(as);
+      // R-06：refresh 完成，activeRunId 已追上 localRunId（同值），清空让派生值接管，
+      // 避免 localRunId 永久卡住导致 isRunActive=false 时 panelIsActive 仍 true。
+      setLocalRunId(null);
     } catch { /* silent */ } finally {
       setLoadingAgentStatus(false);
     }
-  };
+  }, [workspaceId, changeId]);
 
   const handleDispatch = async () => {
     setDispatching(true);
@@ -505,53 +466,13 @@ export default function ChangeDetailPage({ params }: Props) {
       if (result.has_active_run && result.last_dispatch?.run_id) {
         setSuccessMsg("🤖 智能体 已触发执行");
         setTimeout(() => setSuccessMsg(null), 3000);
-
-        // Disconnect any existing SSE, then directly connect to new run
-        dispatchOwnsSseRef.current = true;
-        if (eventSourceRef.current) {
-          eventSourceRef.current.close();
-          eventSourceRef.current = null;
-        }
-        const newRunId = result.last_dispatch.run_id;
-        setAgentLogs([]);
-        setLogStreaming(true);
-        // Load history (fire-and-forget)
-        getAgentRunLogs(workspaceId, newRunId)
-          .then((logs) => setAgentLogs(logs))
-          .catch(() => {});
-        // Connect SSE
-        const es = streamAgentRunLogs(
-          workspaceId,
-          newRunId,
-          (evt: StreamLogEvent) => {
-            setAgentLogs((prev) => {
-              if (evt.log_id && prev.some((l) => l.id === evt.log_id)) return prev;
-              return [
-                ...prev,
-                {
-                  id: evt.log_id ?? safeUUID(),
-                  run_id: newRunId,
-                  timestamp: evt.timestamp,
-                  channel: evt.channel,
-                  content_redacted: asString(evt.content),
-                },
-              ];
-            });
-          },
-          () => {
-            setLogStreaming(false);
-            eventSourceRef.current = null;
-            dispatchOwnsSseRef.current = false;
-            void refreshAgentStatus();
-          },
-          () => {
-            setLogStreaming(false);
-            eventSourceRef.current = null;
-            dispatchOwnsSseRef.current = false;
-          },
-        );
-        eventSourceRef.current = es;
+        // R-06：立即 setLocalRunId → panelRunId 立即指向新 run → panel 内 hook
+        // useEffect（runId 变化）触发重连，不等 refreshAgentStatus。
+        // 对照原 :515-553 立即触发 SSE 连接(newRunId) 的语义。
+        setLocalRunId(result.last_dispatch.run_id);
       }
+      // 异步 refresh（不阻塞 UI），完成后 localRunId 清空、activeRunId 接管
+      void refreshAgentStatus();
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "触发智能体失败");
     } finally {
@@ -574,85 +495,19 @@ export default function ChangeDetailPage({ params }: Props) {
     }
   };
 
-  // ── Agent Log Stream ────────────────────────────────────────────────
+  // ── Agent Log Stream（R-06 localRunId 兜底派生）─────────────────────
   const activeRunId = agentStatus?.last_dispatch?.run_id ?? null;
   const isRunActive = agentStatus?.has_active_run ?? false;
+  // R-06：localRunId 优先（dispatch 立即值），回落到 refresh 后的 activeRunId
+  const panelRunId = localRunId ?? activeRunId;
+  // R-06：localRunId 非 null = 刚 dispatch 必活跃，强制连 SSE；否则回退 isRunActive（D-001）
+  const panelIsActive = localRunId !== null ? true : isRunActive;
 
-  const loadHistoryLogs = useCallback(() => {
-    if (!activeRunId || !workspaceId) return;
-    getAgentRunLogs(workspaceId, activeRunId)
-      .then((logs) => setAgentLogs(logs))
-      .catch(() => {});
-  }, [activeRunId, workspaceId]);
-
-  const connectLogStream = useCallback(() => {
-    if (!activeRunId || !workspaceId || eventSourceRef.current) return;
-    if (!isRunActive) {
-      // Not running — just load history
-      loadHistoryLogs();
-      return;
-    }
-    setLogStreaming(true);
-    // Load historical logs first
-    loadHistoryLogs();
-    // Connect SSE for real-time updates
-    const es = streamAgentRunLogs(
-      workspaceId,
-      activeRunId,
-      (evt: StreamLogEvent) => {
-        setAgentLogs((prev) => {
-          if (evt.log_id && prev.some((l) => l.id === evt.log_id)) return prev;
-          return [
-            ...prev,
-            {
-              id: evt.log_id ?? safeUUID(),
-              run_id: activeRunId,
-              timestamp: evt.timestamp,
-              channel: evt.channel,
-              content_redacted: asString(evt.content),
-            },
-          ];
-        });
-      },
-      () => {
-        setLogStreaming(false);
-        eventSourceRef.current = null;
-        void refreshAgentStatus();
-      },
-      () => {
-        setLogStreaming(false);
-        eventSourceRef.current = null;
-      },
-    );
-    eventSourceRef.current = es;
-  }, [activeRunId, workspaceId, isRunActive, loadHistoryLogs]);
-
-  // Connect when logs expanded
-  useEffect(() => {
-    if (dispatchOwnsSseRef.current) {
-      // handleDispatch is managing SSE — do not interfere
-      return () => {};
-    }
-    if (logsExpanded && activeRunId && !eventSourceRef.current) {
-      connectLogStream();
-    }
-    if (!activeRunId && eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-      setLogStreaming(false);
-    }
-    return () => {
-      if (eventSourceRef.current && !dispatchOwnsSseRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
-    };
-  }, [logsExpanded, activeRunId, connectLogStream]);
-
-  // Auto-scroll logs
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [agentLogs]);
+  // R-01：onDone 稳定引用 useCallback，run 结束触发 refresh（内含 setLocalRunId(null)）
+  const handleChangesRunDone = useCallback(() => {
+    setLocalRunId(null);
+    void refreshAgentStatus();
+  }, [refreshAgentStatus]);
 
   // ── Manual refresh: agent-status + documents + change ────────────
   const refreshAll = useCallback(async () => {
@@ -945,35 +800,16 @@ export default function ChangeDetailPage({ params }: Props) {
         stageLabels={WORKFLOW_STAGE_LABELS}
       />
 
-      {/* ── Agent Log Viewer ────────────────────────────────────── */}
-      {activeRunId && (
-        <section className="rounded-md border bg-card">
+      {/* ── Agent 执行日志（AgentRunPanel 接管 SSE + 审批 + input，FR-01/FR-04）── */}
+      {panelRunId && (
+        <div className="rounded-md border bg-card">
           <button
             className="flex w-full items-center justify-between border-b px-3 py-2 text-left"
-            onClick={() => {
-              const next = !logsExpanded;
-              setLogsExpanded(next);
-              if (next && !agentLogs.length) {
-                void loadHistoryLogs();
-              }
-            }}
+            onClick={() => setLogsExpanded(!logsExpanded)}
           >
             <div className="flex items-center gap-2">
               <h2 className="text-xs font-medium">智能体执行日志</h2>
-              {logStreaming && (
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                </span>
-              )}
-              {!logStreaming && agentStatus?.last_dispatch?.status === "failed" && (
-                <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
-              )}
-              {!logStreaming && agentStatus?.last_dispatch?.status === "completed" && (
-                <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-              )}
               <span className="text-[11px] text-muted-foreground">
-                {agentLogs.length > 0 ? `${agentLogs.length} 条` : ""}
                 {agentStatus?.last_dispatch?.status ? ` · ${agentStatus.last_dispatch.status}` : ""}
               </span>
             </div>
@@ -982,91 +818,23 @@ export default function ChangeDetailPage({ params }: Props) {
             </span>
           </button>
           {logsExpanded && (
-            <div className="max-h-80 overflow-auto bg-white font-mono text-[11px] leading-relaxed text-zinc-800">
-              {agentLogs.length === 0 ? (
-                <p className="px-3 py-4 text-zinc-600">暂无日志…</p>
-              ) : (
-                agentLogs.map((log) => (
-                  <div key={log.id} className="grid grid-cols-[76px_52px_minmax(0,1fr)] gap-2 border-t border-zinc-200 px-3 py-1.5 first:border-t-0 hover:bg-zinc-50">
-                    <span className="shrink-0 text-zinc-500">
-                      {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : ""}
-                    </span>
-                    <span
-                      className={`inline-flex h-5 shrink-0 items-center justify-center rounded border px-1 text-[10px] font-semibold ${
-                        log.channel === "tool_call"
-                          ? "border-blue-200 bg-blue-50 text-blue-700"
-                          : log.channel === "stderr"
-                            ? "border-amber-200 bg-amber-50 text-amber-800"
-                            : log.channel === "pending_input"
-                              ? "border-amber-200 bg-amber-50 text-amber-800"
-                              : log.channel === "user_input"
-                                ? "border-sky-200 bg-sky-50 text-sky-700"
-                                : "border-zinc-200 bg-zinc-50 text-zinc-700"
-                      }`}
-                    >
-                      {log.channel === "tool_call"
-                        ? "TOOL"
-                        : log.channel === "stderr"
-                          ? "WARN"
-                          : log.channel === "pending_input"
-                            ? "INPUT"
-                            : log.channel === "user_input"
-                              ? "SENT"
-                              : "INFO"}
-                    </span>
-                    <span className="min-w-0 whitespace-pre-wrap break-words font-mono text-zinc-800 [overflow-wrap:anywhere]">
-                      {log.channel === "tool_call"
-                        ? (() => {
-                            const tc = parseToolCallContent(log.content_redacted);
-                            if (!tc) return log.content_redacted;
-                            const isBash = tc.tool === "Bash" || tc.tool === "bash";
-                            const desc = tc.description;
-                            const cmd = tc.command ?? "";
-                            const cmdLines = cmd.split("\n");
-                            const firstLine = cmdLines[0] ?? "";
-                            const cmdTooLong = cmdLines.length > 5 || cmd.length > 500;
-                            const title = isBash
-                              ? (desc || (cmd ? firstLine.slice(0, 80) + (firstLine.length > 80 ? "..." : "") : tc.tool))
-                              : tc.tool;
-                            return (
-                              <span className="inline-flex flex-col gap-0.5">
-                                <span className="flex flex-wrap items-center gap-1.5">
-                                  {isBash && (
-                                    <span className="rounded border border-emerald-200 bg-emerald-50 px-1 py-0.5 text-[10px] font-semibold text-emerald-700">Bash</span>
-                                  )}
-                                  <span className="font-semibold text-blue-700">{title}</span>
-                                  <span className={`inline-flex items-center rounded border px-1 py-0.5 text-[10px] font-medium ${
-                                    tc.status === "pending"
-                                      ? "border-amber-200 bg-amber-50 text-amber-800"
-                                      : tc.success
-                                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                        : "border-red-200 bg-red-50 text-red-700"
-                                  }`}>
-                                    {tc.status === "pending" ? "待审批" : tc.success ? "已通过" : "失败"}
-                                  </span>
-                                </span>
-                                {isBash && cmd && !cmdTooLong && (
-                                  <pre className="whitespace-pre-wrap break-words rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] leading-4 text-zinc-800">
-                                    {cmd}
-                                  </pre>
-                                )}
-                                {!isBash && tc.args && (
-                                  <pre className="whitespace-pre-wrap break-words rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] leading-4 text-zinc-800">
-                                    {tc.args}
-                                  </pre>
-                                )}
-                              </span>
-                            );
-                          })()
-                        : log.content_redacted}
-                    </span>
-                  </div>
-                ))
-              )}
-              <div ref={logEndRef} />
+            <div className="p-2">
+              <AgentRunPanel
+                workspaceId={workspaceId}
+                runId={panelRunId}
+                isActive={panelIsActive}
+                title="智能体执行日志"
+                isLive={panelIsActive}
+                summary={
+                  <span className="text-[11px] text-muted-foreground">
+                    {agentStatus?.last_dispatch?.status ? ` · ${agentStatus.last_dispatch.status}` : ""}
+                  </span>
+                }
+                onDone={handleChangesRunDone}
+              />
             </div>
           )}
-        </section>
+        </div>
       )}
 
       {pageError && (

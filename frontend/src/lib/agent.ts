@@ -1,5 +1,4 @@
-import { apiFetch, getApiBaseUrl } from "./api";
-import { useSession } from "@/stores/session";
+import { apiFetch } from "./api";
 
 export type AgentRunStatus =
   | "pending"
@@ -30,6 +29,8 @@ export interface AgentRun {
   duration_api_ms: number | null;
   num_turns: number | null;
   session_id: string | null;
+  // AgentSession 表 id（fetchPendingDialogs 用它，区别于 session_id=daemon 内部 id）
+  agent_session_id: string | null;
   input_tokens: number | null;
   output_tokens: number | null;
   // Post-scan validation fields
@@ -112,53 +113,6 @@ export interface StreamLogEvent {
 export interface DoneEventData {
   status?: string;
   exit_code?: number | null;
-}
-
-export function streamAgentRunLogs(
-  workspaceId: string,
-  runId: string,
-  onMessage: (_event: StreamLogEvent) => void,
-  onDone: (_data: DoneEventData) => void,
-  onError?: (_error: Error) => void,
-): EventSource {
-  // Use Next.js Route Handler proxy (avoids CORS + auth issues with direct backend access)
-  const base = getApiBaseUrl();
-  const { accessToken } = useSession.getState();
-  const url = new URL(`${base}/api/workspaces/${workspaceId}/agent/runs/${runId}/stream`);
-  if (accessToken) url.searchParams.set("token", accessToken);
-  const es = new EventSource(url.toString());
-
-  es.onmessage = (e: MessageEvent<string>) => {
-    try {
-      const parsed: StreamLogEvent = JSON.parse(e.data);
-      // ql-20260616-003：忽略非 log 类事件（status_changed / messages summary 等）。
-      // 后端 SSE 频道复用，会推 status_changed、done、messages 聚合等非 log 事件，
-      // 它们没 timestamp 字段，强转 StreamLogEvent 会变成 Invalid Date 行。
-      if (typeof parsed.timestamp !== "string" || !parsed.timestamp) return;
-      onMessage(parsed);
-    } catch {
-      onError?.(new Error(`Failed to parse SSE data: ${e.data}`));
-    }
-  };
-
-  es.addEventListener("done", (e: MessageEvent<string>) => {
-    es.close();
-    let data: DoneEventData = {};
-    try {
-      data = JSON.parse(e.data);
-    } catch {
-      // empty done data is valid
-    }
-    onDone(data);
-  });
-
-  es.onerror = () => {
-    const error = new Error("EventSource connection error");
-    onError?.(error);
-    es.close();
-  };
-
-  return es;
 }
 
 // ── Agent Run User Input ──
