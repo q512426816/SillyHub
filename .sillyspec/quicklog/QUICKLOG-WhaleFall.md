@@ -599,3 +599,12 @@ created_at: 2026-06-03T08:42:04
   1. downloadExcel 新增 parseFilenameFromContentDisposition helper,优先解析 RFC 5987 filename*=UTF-8''<percent-encoded>(中文);回退 filename="..."(ASCII);都没有才用调用方 fallback
   2. exportProjectPlans 等调用方暂不改 fallback(留作后端兜底失败时用)
 结果：1）typecheck 通过；2）329/329 vitest 全过；3）下载文件名与服务端一致(形如 项目计划_20260622_140000.xlsx)。Docker 重建 frontend 待后续。
+
+## ql-20260622-023-3e8a | 2026-06-22 14:29:27 | 项目计划详情抽屉状态字段改中文
+状态：已完成
+文件：frontend/src/lib/ppm/status-label.ts(新增)、frontend/src/lib/ppm/index.ts、frontend/src/components/ppm-project-plan-detail.tsx
+背景：详情抽屉 4 处显示状态(plan/node/detail/task 的 status),前 3 个用英文枚举(draft/review/approve/done/rejected/archived),task 原本就是中文(未开始/进行中...)。用户要求详情里的状态都改中文。
+方案:
+  1. 新增 frontend/src/lib/ppm/status-label.ts,提供 STATUS_LABELS 映射 + statusLabel(value) helper,未知值原样返回
+  2. ppm-project-plan-detail.tsx 在 4 处 status 渲染处套 statusLabel(plan.status/node.status/detail.status/task.status)
+结果：1）typecheck 通过；2）329/329 vitest 全过；3）4 处状态显示中文(草稿/审核中/审批中/已完成/已驳回/已归档),task 中文原样保留。Docker frontend 待重建。

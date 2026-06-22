@@ -23,6 +23,7 @@ import {
 } from "@/components/ppm-sub-table";
 import {
   getProjectPlanThreeLevel,
+  statusLabel,
   type PlanTaskSimple,
   type ProjectPlanThreeLevel,
   type PsPlanNodeDetailWithTasks,
@@ -164,7 +165,7 @@ function PlanSummary({ plan }: { plan: ProjectPlanThreeLevel }) {
           label="项目经理"
           value={plan.project_manager_name ?? null}
         />
-        <SummaryItem label="状态" value={plan.status} />
+        <SummaryItem label="状态" value={statusLabel(plan.status)} />
         <SummaryItem
           label="预算人天"
           value={plan.budget_person_days ?? null}
@@ -224,7 +225,13 @@ function NodesSection({ nodes }: { nodes: PsPlanNodeWithDetail[] }) {
   const nodeColumns: PpmSubMasterColumns<PsPlanNodeWithDetail> = [
     { title: "里程碑", dataIndex: "overall_stage", key: "overall_stage" },
     { title: "序号", dataIndex: "no", key: "no", width: 80 },
-    { title: "状态", dataIndex: "status", key: "status", width: 100 },
+    {
+      title: "状态",
+      dataIndex: "status",
+      key: "status",
+      width: 100,
+      render: (v: unknown) => statusLabel(v as string | null | undefined) ?? "—",
+    },
     {
       title: "明细数",
       key: "detail_count",
@@ -257,7 +264,13 @@ function DetailsSection({
   const detailColumns: PpmSubMasterColumns<PsPlanNodeDetailWithTasks> = [
     { title: "明细阶段", dataIndex: "detailed_stage", key: "detailed_stage" },
     { title: "主题", dataIndex: "task_theme", key: "task_theme" },
-    { title: "状态", dataIndex: "status", key: "status", width: 100 },
+    {
+      title: "状态",
+      dataIndex: "status",
+      key: "status",
+      width: 100,
+      render: (v: unknown) => statusLabel(v as string | null | undefined) ?? "—",
+    },
     {
       title: "任务数",
       key: "task_count",
@@ -288,7 +301,13 @@ function TasksTable({ tasks }: { tasks: PlanTaskSimple[] }) {
     { title: "任务内容", dataIndex: "content", key: "content" },
     { title: "负责人", dataIndex: "user_name", key: "user_name", width: 100 },
     { title: "工时", dataIndex: "work_load", key: "work_load", width: 80 },
-    { title: "状态", dataIndex: "status", key: "status", width: 100 },
+    {
+      title: "状态",
+      dataIndex: "status",
+      key: "status",
+      width: 100,
+      render: (v: unknown) => statusLabel(v as string | null | undefined) ?? "—",
+    },
   ];
   const tableProps: Partial<TableProps<PlanTaskSimple>> = { pagination: false };
   return (
