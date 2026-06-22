@@ -723,3 +723,18 @@ created_at: 2026-06-03T08:42:04
   - params 数组用 searchParams.append 多值编码(与 apiFetch 一致,支持导出带 status 多值)
   - typecheck 通过,363/363 测试通过
 
+## ql-20260622-032-c4d2 | 2026-06-22 17:10:00 | problem-list 操作列改自适应宽度
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/problem-list/page.tsx
+背景:操作列 width=200,但每行按钮数不同(1~6 个),固定宽度导致按钮少时大片留白。用户要求自适应。
+方案:
+  1. width 改为 'max-content'(antd 5.x 接受 string,CSS 表格列宽算法按实际内容算)
+  2. fixed:'right' 保留(滚动时不丢操作列)
+  3. 操作按钮容器加 whitespace-nowrap(单行排列,不被换行)
+结果:
+  - 操作列 width 200 → 'max-content',antd 按每行实际按钮数算宽
+  - 按钮 flex-wrap 删除,改 whitespace-nowrap 单行排列
+  - fixed:'right' 保留,align:'right' 保留
+  - typecheck 通过,363/363 测试通过
+
+

@@ -120,3 +120,4 @@ layout.tsx (根布局)
 | 2026-06-22 | ql-20260622-029-a1b7 | /ppm/problem-list 关键字 Input 输入不要自动查询：拆分 keywordInput/keyword 双 state,onChange 只改输入态,Enter/查询按钮同步到过滤态,allowClear 清空立即同步,顶部按钮行新增"查询"按钮 |
 | 2026-06-22 | ql-20260622-030-7e2a | /ppm/problem-list 查询走接口：后端 /problem-list 加 7 个 Query 参数(keyword/status多值/project_id/pro_type/is_urgent/find_time_start/end)+ response 改 Page[ProblemListResp];前端 apiFetch query 支持 string[],listProblems 返 PageResp,page.tsx 改服务端分页,去掉本地 useMemo;操作列 width 280→200 |
 | 2026-06-22 | ql-20260622-031-b3f9 | downloadExcel 裸 fetch 无 401 自动刷新：token 过期导出 401 AUTH_TOKEN_EXPIRED。复刻 apiFetch 逻辑:401 时调 /api/auth/refresh,刷新成功 setTokens + 用新 token 重试一次,重试仍 401 则清 session + 跳 /login;顺便支持 params 多值数组(与 apiFetch 一致) |
+| 2026-06-22 | ql-20260622-032-c4d2 | /ppm/problem-list 操作列 width 200 → 'max-content'(每行按钮数 1~6 个,固定宽度留白);按钮容器 flex-wrap → whitespace-nowrap 单行排列;fixed:'right' 保留 |

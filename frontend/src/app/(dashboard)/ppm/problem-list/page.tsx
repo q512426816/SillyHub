@@ -308,7 +308,7 @@ export default function ProblemListPage() {
       title: "操作",
       key: "actions",
       align: "right",
-      width: 200,
+      width: "max-content",
       fixed: "right",
       render: (_v: unknown, p: ProblemList) => {
         const isNowHandler = matchAnyUser(
@@ -322,7 +322,7 @@ export default function ProblemListPage() {
         const isDuty = matchAnyUser([p.duty_user_id], currentUserId);
         const isAuditor = matchAnyUser([p.audit_user_id], currentUserId);
         return (
-          <div className="flex flex-wrap justify-end gap-1">
+          <div className="flex whitespace-nowrap justify-end gap-1">
             {/* 审核:status=2 + now_handle_user(源 openAuditForm) */}
             {p.status === "2" && isNowHandler && (
               <Button size="sm" onClick={() => openDrawer("audit", p)}>
