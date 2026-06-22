@@ -394,6 +394,12 @@ created_at: 2026-06-03T08:42:04
 方案：新增 git_identity:admin 独立权限（沿用 ql-003/ql-004 模式）。(1) backend permissions.py 新增 GIT_IDENTITY_ADMIN="git_identity:admin"，PLATFORM 组；(2) backend git_identity/router 5 个端点（list/create/get/revoke/check-access）改 GitIdentityAdminUser=require_permission_any(GIT_IDENTITY_ADMIN)；(3) frontend menu-permissions.ts git-identities 改 [{key:"git_identity:admin", name:"Git 身份访问"}]，移除 pickerHidden；(4) BACKEND_PERMISSION_KEYS 镜像 45→46；test_permissions.py 改 46 用例 + 新增 GIT_IDENTITY_ADMIN 组判定；picker 测试改"6 个 management menu 全部可见（含 git-identities）"。
 结果：1) 前端 typecheck 全绿 + 132 tests 全过；2) 后端 ruff/mypy 全绿 + 55 auth tests 全过；3) 123@163.com 持续可见 git-identities 的根因 = 其 test 角色持有 platform:admin（has_permission 短路），管理员需手动从 test 角色移除 platform:admin（或仅授予需要的子权限）；4) picker 现在渲染 git-identities 卡片，管理员可显式授予 git_identity:admin。Docker 重建（backend+frontend）+ UI 手工验证待后续。
 
+## ql-20260622-002-21c3 | 2026-06-22 09:04:28 | 修复 admin 三页双重 AppShell 嵌套
+状态：已完成
+背景：上一轮 ql-001 删了 admin 三页内 `<header>` 后用户反馈仍有两层左侧菜单 + 两层头部面包屑。排查 layout 嵌套发现：`(dashboard)/layout.tsx` 已渲染 `<AppShell>{children}</AppShell>`，`(dashboard)/admin/layout.tsx` 又渲染了一次 `<AppShell>{children}</AppShell>` → Next.js App Router 嵌套 layout 累加 AppShell，左侧菜单和 TopBar 各渲染两次。
+文件：frontend/src/app/(dashboard)/admin/layout.tsx
+结果：admin/layout.tsx 移除 AppShell import 与 `<AppShell>` 包裹，return 改为 `<>{children}</>`；权限 gate（hasAdminPermission 校验 + denied → redirect /）保持不变。父 dashboard layout 提供唯一 AppShell 实例。typecheck 通过 + 329 测试全过。
+
 ## ql-20260622-001-0f84 | 2026-06-22 08:49:14 | 系统管理三个页面去掉冗余头部导航信息栏
 状态：已完成
 背景：AppShell 已经渲染全局 TopBar（面包屑"系统管理 / 用户" + 搜索 + 通知 + 用户菜单），admin/users/organizations/roles 三个页面又各自渲染 `<header>`（h1 标题 + 描述 + 操作按钮），与 TopBar 形成两层重复的头部信息栏。
