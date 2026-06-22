@@ -590,3 +590,12 @@ created_at: 2026-06-03T08:42:04
 方案:
   1. router.py export_project_plans 的 filename="project_plans.xlsx" → f"项目计划_{datetime.now():%Y%m%d_%H%M%S}.xlsx"(datetime 之前已 import 用于 query)
 结果：1）ruff format/check 通过；2）下载文件名形如 "项目计划_20260622_135800.xlsx"。Docker 重建 backend 待后续。
+
+## ql-20260622-022-6a1f | 2026-06-22 14:07:00 | 前端取后端 Content-Disposition 文件名下载
+状态：已完成
+文件：frontend/src/lib/ppm/export.ts
+背景：ql-021 后端文件名改"项目计划_YYYYMMDD_HHmmss.xlsx",但前端实际下载仍是 project_plans.xlsx。根因:前端 downloadExcel 硬编码用调用方传入的 filename(exportProjectPlans 传 "project_plans.xlsx"),完全忽略后端 Content-Disposition 头。
+方案:
+  1. downloadExcel 新增 parseFilenameFromContentDisposition helper,优先解析 RFC 5987 filename*=UTF-8''<percent-encoded>(中文);回退 filename="..."(ASCII);都没有才用调用方 fallback
+  2. exportProjectPlans 等调用方暂不改 fallback(留作后端兜底失败时用)
+结果：1）typecheck 通过；2）329/329 vitest 全过；3）下载文件名与服务端一致(形如 项目计划_20260622_140000.xlsx)。Docker 重建 frontend 待后续。
