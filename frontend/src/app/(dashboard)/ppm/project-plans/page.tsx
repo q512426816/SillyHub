@@ -1,21 +1,14 @@
 "use client";
 
 /**
- * 项目计划 (PsProjectPlan) 列表页 — 对齐源 dept_project_front
- * src/views/ppm/projectplan/index.vue。
+ * 项目计划 (PsProjectPlan) 列表页 — 左侧分组树 + 顶部搜索 + 右侧表格。
  *
- * 功能:
- *  - 搜索栏:项目名称 / 合同名称 / 公司名称 + 展开时间范围搜索。
- *  - 列表 Table(字段对齐源 index.vue):
- *      项目名称 / 项目经理 / 合同名称 / 合同金额(¥) / 公司既定利润率(%) /
- *      公司既定利润金额(¥) / 剩余可用人天(天) / 总成本(¥) / 剩余成本(¥) /
- *      合同签订时间 / 项目开始时间 / 预计验收时间 + 合计行。
- *  - 操作列:详情(三联表) / 编辑 / 删除。
- *  - 新建按钮:打开 17 字段表单抽屉 (PpmProjectPlanForm)。
+ * 布局参考:典型后台"顶部搜索/操作 + 左侧分组树 + 右侧数据表"结构。
+ *  - 顶部:标题 + 搜索表单(项目名称 / 合同名称 / 公司名称 + 展开时间范围) + 主操作按钮(导出 / 新建)。
+ *  - 左侧:antd Tree 按项目经理分组,展示数量,点击节点客户端过滤右侧表格。
+ *  - 右侧:DataTable 字段对齐源 dept_project_front index.vue(12 列 + 操作 + 合计行)。
  *
  * 走 lib/ppm/plan.ts:listProjectPlans + CRUD。apiFetch。
- *
- * 设计依据:tasks/task-03.md + 源 index.vue。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -24,7 +17,9 @@ import {
   Form,
   Input,
   Table,
+  Tree,
   type TableProps,
+  type TreeDataNode,
 } from "antd";
 import type { Dayjs } from "dayjs";
 
@@ -34,6 +29,7 @@ import {
   PageContainer,
   PageHeader,
   SearchBar,
+  SearchBarActions,
   SectionCard,
 } from "@/components/layout";
 import { PpmProjectPlanDetail } from "@/components/ppm-project-plan-detail";
@@ -106,6 +102,7 @@ export default function ProjectPlansPage() {
   );
   const [search] = Form.useForm<SearchForm>();
   const [expanded, setExpanded] = useState(false);
+  const [selectedManager, setSelectedManager] = useState<string>("all");
 
   // P0-6:跳转里程碑管理页(对照源 OpenPlanNodeForm 入口)。
   const goToMilestones = (planId: string) => {
@@ -191,10 +188,58 @@ export default function ProjectPlansPage() {
     }
   };
 
+  // 左侧分组树:按项目经理分组,显示数量,点击节点客户端过滤右侧表格。
+  // key 约定:"all" = 全部;"manager:<id|unknown>" = 单个项目经理。
+  const managerTreeData = useMemo<TreeDataNode[]>(() => {
+    const groups = new Map<string, { name: string; count: number }>();
+    for (const p of plans) {
+      const key = p.project_manager_id ?? "unknown";
+      const name = p.project_manager_name?.trim() || "未分配";
+      const prev = groups.get(key);
+      if (prev) prev.count += 1;
+      else groups.set(key, { name, count: 1 });
+    }
+    const children: TreeDataNode[] = Array.from(groups.entries())
+      .sort((a, b) => b[1].count - a[1].count)
+      .map(([id, { name, count }]) => ({
+        title: (
+          <span className="flex items-center justify-between gap-2">
+            <span className="truncate">{name}</span>
+            <span className="text-xs text-muted-foreground">{count}</span>
+          </span>
+        ),
+        key: `manager:${id}`,
+        isLeaf: true,
+      }));
+    return [
+      {
+        title: (
+          <span className="flex items-center justify-between gap-2 font-medium">
+            <span>全部项目</span>
+            <span className="text-xs text-muted-foreground">{plans.length}</span>
+          </span>
+        ),
+        key: "all",
+        children,
+      },
+    ];
+  }, [plans]);
+
+  // 客户端按所选树节点过滤 plans(选中"all"或空值时不过滤)。
+  const filteredPlans = useMemo(() => {
+    if (!selectedManager || selectedManager === "all") return plans;
+    if (selectedManager.startsWith("manager:")) {
+      const id = selectedManager.slice("manager:".length);
+      return plans.filter((p) => (p.project_manager_id ?? "unknown") === id);
+    }
+    return plans;
+  }, [plans, selectedManager]);
+
   // 合计行(对齐源 getSummaries):合同金额 / 利润金额 / 剩余人天 / 总成本 / 剩余成本。
+  // 基于左侧树过滤后的 plans(选中"全部"时等同 plans)。
   const summaryRow = useMemo(() => {
     const sum = (sel: (p: PsProjectPlan) => number) =>
-      plans.reduce((acc, p) => acc + sel(p), 0);
+      filteredPlans.reduce((acc, p) => acc + sel(p), 0);
     return {
       contractAmount: sum((p) => Number(p.contract_amount ?? 0)),
       profitAmount: sum((p) => Number(p.profit_amount ?? 0)),
@@ -202,7 +247,7 @@ export default function ProjectPlansPage() {
       totalCost: sum((p) => Number(p.total_cost ?? 0)),
       remainingCost: sum((p) => Number(p.remaining_cost ?? 0)),
     };
-  }, [plans]);
+  }, [filteredPlans]);
 
   const columns: TableProps<PsProjectPlan>["columns"] = [
     {
@@ -353,12 +398,82 @@ export default function ProjectPlansPage() {
   ];
 
   return (
-    <PageContainer>
+    <PageContainer size="full">
       <PageHeader
         title="项目计划"
         subtitle="ps_project_plan — 项目维度的计划主表"
-        actions={
-          <>
+      />
+
+      {/* 顶部:搜索 + 主操作合并到一行 */}
+      <SectionCard bodyPadding="p-2">
+        <SearchBar>
+          <Form<SearchForm> form={search} layout="inline" className="w-full">
+            <Form.Item label="项目名称" name="projectName">
+              <Input
+                placeholder="请输入项目名称"
+                allowClear
+                className="w-[200px]"
+                onPressEnter={() => handleSearch()}
+              />
+            </Form.Item>
+            <Form.Item label="合同名称" name="contractName">
+              <Input
+                placeholder="请输入合同名称"
+                allowClear
+                className="w-[200px]"
+                onPressEnter={() => handleSearch()}
+              />
+            </Form.Item>
+            {expanded && (
+              <>
+                <Form.Item label="公司名称" name="companyName">
+                  <Input
+                    placeholder="请输入公司名称"
+                    allowClear
+                    className="w-[200px]"
+                    onPressEnter={() => handleSearch()}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label="合同签订时间"
+                  name="contractSignTimeRange"
+                >
+                  <RangePicker className="w-[240px]" />
+                </Form.Item>
+                <Form.Item
+                  label="项目开始时间"
+                  name="projectStartTimeRange"
+                >
+                  <RangePicker className="w-[240px]" />
+                </Form.Item>
+                <Form.Item
+                  label="预计验收时间"
+                  name="projectPlanEndTimeRange"
+                >
+                  <RangePicker className="w-[240px]" />
+                </Form.Item>
+              </>
+            )}
+          </Form>
+          <SearchBarActions>
+            <Button size="sm" onClick={() => handleSearch()}>
+              搜索
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handleReset()}
+            >
+              重置
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setExpanded((v) => !v)}
+            >
+              {expanded ? "收起" : "展开"}
+            </Button>
+            <span className="mx-1 h-6 w-px bg-border" aria-hidden />
             <Button
               size="sm"
               variant="outline"
@@ -373,82 +488,7 @@ export default function ProjectPlansPage() {
             >
               + 新建项目计划
             </Button>
-          </>
-        }
-      />
-
-      {/* 搜索栏 */}
-      <SectionCard>
-        <SearchBar>
-          <Form<SearchForm> form={search} layout="inline" className="w-full">
-            <Form.Item label="项目名称" name="projectName">
-              <Input
-                placeholder="请输入项目名称"
-                allowClear
-                className="w-[220px]"
-                onPressEnter={() => handleSearch()}
-              />
-            </Form.Item>
-            <Form.Item label="合同名称" name="contractName">
-              <Input
-                placeholder="请输入合同名称"
-                allowClear
-                className="w-[220px]"
-                onPressEnter={() => handleSearch()}
-              />
-            </Form.Item>
-            <Form.Item>
-              <Button size="sm" onClick={() => handleSearch()}>
-                搜索
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="ml-2"
-                onClick={() => handleReset()}
-              >
-                重置
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="ml-2"
-                onClick={() => setExpanded((v) => !v)}
-              >
-                {expanded ? "收起" : "展开"}
-              </Button>
-            </Form.Item>
-            {expanded && (
-              <div className="mt-2 flex w-full flex-wrap gap-3">
-                <Form.Item label="公司名称" name="companyName">
-                  <Input
-                    placeholder="请输入公司名称"
-                    allowClear
-                    className="w-[220px]"
-                    onPressEnter={() => handleSearch()}
-                  />
-                </Form.Item>
-                <Form.Item
-                  label="合同签订时间范围"
-                  name="contractSignTimeRange"
-                >
-                  <RangePicker className="w-[240px]" />
-                </Form.Item>
-                <Form.Item
-                  label="项目开始时间范围"
-                  name="projectStartTimeRange"
-                >
-                  <RangePicker className="w-[240px]" />
-                </Form.Item>
-                <Form.Item
-                  label="预计验收时间范围"
-                  name="projectPlanEndTimeRange"
-                >
-                  <RangePicker className="w-[240px]" />
-                </Form.Item>
-              </div>
-            )}
-          </Form>
+          </SearchBarActions>
         </SearchBar>
       </SectionCard>
 
@@ -464,59 +504,82 @@ export default function ProjectPlansPage() {
         </div>
       )}
 
-      {error ? (
-        <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
-          {error}
-          <Button
-            size="sm"
-            variant="outline"
-            className="ml-3"
-            onClick={() => void load()}
+      {/* 主体:左侧分组树 + 右侧数据表 */}
+      <div className="flex gap-4">
+        <aside className="w-56 shrink-0">
+          <SectionCard
+            title="按项目经理"
+            bodyPadding="p-2"
           >
-            重新加载
-          </Button>
-        </div>
-      ) : (
-        <DataTable<PsProjectPlan>
-          rowKey="id"
-          columns={columns}
-          dataSource={plans}
-          loading={loading}
-          size="small"
-          scroll={{ x: "max-content" }}
-          pagination={false}
-          emptyText="暂无项目计划"
-          summary={() => (
-            <Table.Summary fixed>
-              <Table.Summary.Row>
-                <Table.Summary.Cell index={0}>合计</Table.Summary.Cell>
-                <Table.Summary.Cell index={1} />
-                <Table.Summary.Cell index={2} />
-                <Table.Summary.Cell index={3} align="right">
-                  ¥ {formatMoney(String(summaryRow.contractAmount))}
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={4} />
-                <Table.Summary.Cell index={5} align="right">
-                  ¥ {formatMoney(String(summaryRow.profitAmount))}
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={6} align="right">
-                  {summaryRow.remainingDays} 天
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={7} align="right">
-                  ¥ {formatMoney(String(summaryRow.totalCost))}
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={8} align="right">
-                  ¥ {formatMoney(String(summaryRow.remainingCost))}
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={9} />
-                <Table.Summary.Cell index={10} />
-                <Table.Summary.Cell index={11} />
-                <Table.Summary.Cell index={12} />
-              </Table.Summary.Row>
-            </Table.Summary>
+            <Tree
+              blockNode
+              defaultExpandAll
+              treeData={managerTreeData}
+              selectedKeys={[selectedManager]}
+              onSelect={(keys) => {
+                const k = keys[0] as string | undefined;
+                setSelectedManager(k ?? "all");
+              }}
+            />
+          </SectionCard>
+        </aside>
+
+        <div className="min-w-0 flex-1">
+          {error ? (
+            <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
+              {error}
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-3"
+                onClick={() => void load()}
+              >
+                重新加载
+              </Button>
+            </div>
+          ) : (
+            <DataTable<PsProjectPlan>
+              rowKey="id"
+              columns={columns}
+              dataSource={filteredPlans}
+              loading={loading}
+              size="small"
+              scroll={{ x: "max-content" }}
+              pagination={false}
+              emptyText="暂无项目计划"
+              summary={() => (
+                <Table.Summary fixed>
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0}>合计</Table.Summary.Cell>
+                    <Table.Summary.Cell index={1} />
+                    <Table.Summary.Cell index={2} />
+                    <Table.Summary.Cell index={3} align="right">
+                      ¥ {formatMoney(String(summaryRow.contractAmount))}
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={4} />
+                    <Table.Summary.Cell index={5} align="right">
+                      ¥ {formatMoney(String(summaryRow.profitAmount))}
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={6} align="right">
+                      {summaryRow.remainingDays} 天
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={7} align="right">
+                      ¥ {formatMoney(String(summaryRow.totalCost))}
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={8} align="right">
+                      ¥ {formatMoney(String(summaryRow.remainingCost))}
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={9} />
+                    <Table.Summary.Cell index={10} />
+                    <Table.Summary.Cell index={11} />
+                    <Table.Summary.Cell index={12} />
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
+            />
           )}
-        />
-      )}
+        </div>
+      </div>
 
       <PpmProjectPlanForm
         open={drawer.open}
