@@ -637,3 +637,14 @@ created_at: 2026-06-03T08:42:04
   2. handleReset 调 form.resetFields() 清 Form 内部状态
   3. 将 form 实例传给 <Form form={form}>
 结果：1）typecheck 通过；2）点重置后输入框/下拉视觉值清空。Docker frontend 待重建。
+
+## ql-20260622-027-1c3d | 2026-06-22 15:09:30 | projects 导出文件名 + Input 不要 debounce 自动查
+状态：已完成
+文件：backend/app/modules/ppm/project/router.py、frontend/src/components/ppm-resource-table.tsx
+背景:
+  1) projects/customers 导出文件名仍为 project_maintenance.xlsx/customer_maintenance.xlsx,需对齐 ql-021 风格
+  2) PpmResourceTable Input onChange 触发 handleSearchInput,内部 setTimeout 400ms debounce 自动 commit,用户每输入一个字符都触发查询;用户要求 Input 不自动查,只有 Enter / 搜索按钮 / Select 选中才查
+方案:
+  1. backend export_project_maintenance filename 改 f"项目维护_{datetime.now():%Y%m%d_%H%M%S}.xlsx";export_customer_maintenance 改"客户维护_..."
+  2. frontend PpmResourceTable:handleSearchInput 去掉 setTimeout debounce,只 setSearchInput;Input onPressEnter 调 handleSearchCommit flush;Select onChange 保持立即 commit
+结果：1）typecheck 通过；2）ruff check/format 通过；3）363/363 vitest 全过。Docker backend + frontend 待重建。

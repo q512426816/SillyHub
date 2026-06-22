@@ -329,13 +329,11 @@ export function PpmResourceTable<
     void load();
   }, [load]);
 
+  // 仅更新输入框视觉值,不自动触发查询。
+  // 查询只在:(1) 用户按回车 (2) 点击"搜索"按钮 (3) Select 选中时触发。
+  // 用户明确要求不要每个字符变化都查。
   const handleSearchInput = (name: string, value: string) => {
     setSearchInput((prev) => ({ ...prev, [name]: value }));
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      setSearchCommitted((prev) => ({ ...prev, [name]: value }));
-      setPage(1);
-    }, 400);
   };
 
   const handleReset = () => {
@@ -613,15 +611,7 @@ export function PpmResourceTable<
                             onChange={(e) =>
                               handleSearchInput(name, e.target.value)
                             }
-                            onPressEnter={() => {
-                              if (debounceRef.current)
-                                clearTimeout(debounceRef.current);
-                              setSearchCommitted((prev) => ({
-                                ...prev,
-                                [name]: searchInput[name] ?? "",
-                              }));
-                              setPage(1);
-                            }}
+                            onPressEnter={() => handleSearchCommit()}
                           />
                         )}
                       </Form.Item>
