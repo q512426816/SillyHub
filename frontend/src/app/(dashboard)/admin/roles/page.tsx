@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Table, type TableProps, Tag } from "antd";
 
 import { AdminRolePermissionPicker } from "@/components/admin-role-permission-picker";
@@ -213,21 +213,6 @@ export default function AdminRolesPage() {
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="mt-0.5">角色管理</h1>
-          <p className="text-xs text-muted-foreground">系统角色、自定义角色、权限分配</p>
-        </div>
-        <Button
-          size="sm"
-          disabled={!canWrite}
-          onClick={() => setDrawer({ open: true, mode: "create" })}
-          title={!canWrite ? "无 role:write 权限" : undefined}
-        >
-          + 新建角色
-        </Button>
-      </header>
-
       {toast && (
         <div
           className={`rounded border px-3 py-2 text-xs ${
@@ -240,14 +225,24 @@ export default function AdminRolesPage() {
         </div>
       )}
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <input
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
           placeholder="搜索 key / 名称…"
           className={`w-72 ${inputCls}`}
         />
-        <span className="text-xs text-muted-foreground">{total} 个角色</span>
+        <div className="ml-auto flex items-center gap-3">
+          <span className="text-xs text-muted-foreground">{total} 个角色</span>
+          <Button
+            size="sm"
+            disabled={!canWrite}
+            onClick={() => setDrawer({ open: true, mode: "create" })}
+            title={!canWrite ? "无 role:write 权限" : undefined}
+          >
+            + 新建角色
+          </Button>
+        </div>
       </div>
 
       {error ? (

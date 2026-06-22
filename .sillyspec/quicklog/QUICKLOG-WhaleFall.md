@@ -394,6 +394,12 @@ created_at: 2026-06-03T08:42:04
 方案：新增 git_identity:admin 独立权限（沿用 ql-003/ql-004 模式）。(1) backend permissions.py 新增 GIT_IDENTITY_ADMIN="git_identity:admin"，PLATFORM 组；(2) backend git_identity/router 5 个端点（list/create/get/revoke/check-access）改 GitIdentityAdminUser=require_permission_any(GIT_IDENTITY_ADMIN)；(3) frontend menu-permissions.ts git-identities 改 [{key:"git_identity:admin", name:"Git 身份访问"}]，移除 pickerHidden；(4) BACKEND_PERMISSION_KEYS 镜像 45→46；test_permissions.py 改 46 用例 + 新增 GIT_IDENTITY_ADMIN 组判定；picker 测试改"6 个 management menu 全部可见（含 git-identities）"。
 结果：1) 前端 typecheck 全绿 + 132 tests 全过；2) 后端 ruff/mypy 全绿 + 55 auth tests 全过；3) 123@163.com 持续可见 git-identities 的根因 = 其 test 角色持有 platform:admin（has_permission 短路），管理员需手动从 test 角色移除 platform:admin（或仅授予需要的子权限）；4) picker 现在渲染 git-identities 卡片，管理员可显式授予 git_identity:admin。Docker 重建（backend+frontend）+ UI 手工验证待后续。
 
+## ql-20260622-001-0f84 | 2026-06-22 08:49:14 | 系统管理三个页面去掉冗余头部导航信息栏
+状态：已完成
+背景：AppShell 已经渲染全局 TopBar（面包屑"系统管理 / 用户" + 搜索 + 通知 + 用户菜单），admin/users/organizations/roles 三个页面又各自渲染 `<header>`（h1 标题 + 描述 + 操作按钮），与 TopBar 形成两层重复的头部信息栏。
+文件：frontend/src/app/(dashboard)/admin/users/page.tsx, frontend/src/app/(dashboard)/admin/organizations/page.tsx, frontend/src/app/(dashboard)/admin/roles/page.tsx
+结果：1) users 删除 `<header>`，"+ 新建用户" 按钮挪到搜索筛选条右侧（"共 X 个用户" 文字 + 按钮组成 ml-auto flex 行）；2) organizations 删除 `<header>`，"+ 新建" 按钮挪到 aside 搜索框右侧（搜索框 flex-1 + 按钮同行）；3) roles 删除 `<header>`，"+ 新建角色" 按钮挪到搜索条右侧（同 users 模式）；4) typecheck 仅报预存在的 dayjs/echarts/radix-ui 依赖缺失，与本次改动无关；5) vitest 293 测试全过无新增失败。Docker 重建 frontend 待后续。
+
 ## ql-20260618-004-9e2a | 2026-06-18 13:50:00 | Daemon 运行时/设置/API Keys 共用 platform:admin 致 picker 重复，需各自独立
 状态：已完成
 文件：backend/app/modules/auth/permissions.py, backend/app/modules/auth/router.py, backend/app/modules/daemon/router.py, backend/app/modules/settings/router.py, backend/tests/modules/auth/test_permissions.py, frontend/src/lib/menu-permissions.ts, frontend/src/lib/__tests__/menu-permissions.test.ts, frontend/src/components/__tests__/admin-role-permission-picker.test.tsx

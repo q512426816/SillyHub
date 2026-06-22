@@ -140,23 +140,6 @@ export default function AdminOrganizationsPage() {
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="mt-0.5">组织管理</h1>
-          <p className="text-xs text-muted-foreground">树形组织结构、成员归属</p>
-        </div>
-        <Button
-          size="sm"
-          disabled={!canWrite}
-          onClick={() =>
-            setDrawer({ open: true, mode: "create", parentId: null })
-          }
-          title={!canWrite ? "无 organization:write 权限" : undefined}
-        >
-          + 新建顶级组织
-        </Button>
-      </header>
-
       {toast && (
         <div
           className={`rounded border px-3 py-2 text-xs ${
@@ -184,13 +167,23 @@ export default function AdminOrganizationsPage() {
       ) : (
         <div className="grid gap-4 md:grid-cols-[2fr_3fr]">
           <aside className="rounded-md border bg-card">
-            <div className="border-b px-3 py-2">
+            <div className="flex items-center gap-2 border-b px-3 py-2">
               <input
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 placeholder="搜索 name / code…"
-                className={inputCls}
+                className={`flex-1 ${inputCls}`}
               />
+              <Button
+                size="sm"
+                disabled={!canWrite}
+                onClick={() =>
+                  setDrawer({ open: true, mode: "create", parentId: null })
+                }
+                title={!canWrite ? "无 organization:write 权限" : undefined}
+              >
+                + 新建
+              </Button>
             </div>
             {loading ? (
               <p className="px-3 py-8 text-center text-xs text-muted-foreground">

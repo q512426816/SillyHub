@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Table, type TableProps, Tag } from "antd";
 
 import { AdminUserDrawer } from "@/components/admin-user-drawer";
@@ -329,23 +329,6 @@ export default function AdminUsersPage() {
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-5 px-6 py-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="mt-0.5">用户管理</h1>
-          <p className="text-xs text-muted-foreground">
-            平台用户、登录权限、会话与审计
-          </p>
-        </div>
-        <Button
-          size="sm"
-          disabled={!canWrite}
-          onClick={() => setDrawer({ open: true, mode: "create" })}
-          title={!canWrite ? "无 user:write 权限" : undefined}
-        >
-          + 新建用户
-        </Button>
-      </header>
-
       {toast && (
         <div
           className={`rounded border px-3 py-2 text-xs ${
@@ -389,9 +372,19 @@ export default function AdminUsersPage() {
               <option value="active">启用</option>
               <option value="disabled">禁用</option>
             </select>
-            <span className="ml-auto text-xs text-muted-foreground">
-              共 {total} 个用户
-            </span>
+            <div className="ml-auto flex items-center gap-3">
+              <span className="text-xs text-muted-foreground">
+                共 {total} 个用户
+              </span>
+              <Button
+                size="sm"
+                disabled={!canWrite}
+                onClick={() => setDrawer({ open: true, mode: "create" })}
+                title={!canWrite ? "无 user:write 权限" : undefined}
+              >
+                + 新建用户
+              </Button>
+            </div>
           </div>
 
           <Table<UserRead>
