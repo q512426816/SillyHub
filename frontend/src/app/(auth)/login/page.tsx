@@ -3,6 +3,7 @@
 import { Button, Checkbox, Form, Input, Segmented } from "antd";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 
 import { ApiError } from "@/lib/api";
 import { login } from "@/lib/auth";
@@ -104,10 +105,9 @@ export default function LoginPage() {
           className="absolute bottom-[-6rem] right-[-4rem] h-80 w-80 rounded-full bg-cyan-300/30 blur-3xl"
         />
 
-        {/* 左上角 logo + 系统标题 */}
+        {/* 左上角 LOGO（深色 hero 底，白字清晰） */}
         <div className="relative z-10 flex items-center gap-3 p-8">
           <LogoMark />
-          <span className="text-xl font-bold tracking-wide">SillyHub</span>
         </div>
 
         {/* 中部欢迎语 + 插画占位 */}
@@ -125,10 +125,11 @@ export default function LoginPage() {
       {/* 右侧:表单区(shadcn Card 包裹 antd Form) */}
       <section className="relative flex flex-1 items-center justify-center overflow-y-auto bg-slate-50 p-6 text-slate-800 sm:p-10">
         <div className="w-full max-w-[420px]">
-          {/* 移动端(无左侧)时显示 logo */}
-          <div className="mb-8 flex items-center justify-center gap-3 lg:hidden">
-            <LogoMark />
-            <span className="text-xl font-bold text-slate-900">SillyHub</span>
+          {/* 移动端(无左侧)时显示 LOGO（浅底,加深色衬底保证白字可见） */}
+          <div className="mb-8 flex items-center justify-center lg:hidden">
+            <span className="inline-flex items-center justify-center rounded-xl bg-slate-900/90 p-2 shadow-sm">
+              <LogoMark className="h-10" />
+            </span>
           </div>
 
           <Card className="border-slate-200 shadow-sm">
@@ -213,12 +214,18 @@ export default function LoginPage() {
   );
 }
 
-/** 左上角 logo:圆角方块 + 字母 S,与项目品牌呼应(适配明亮 hero 底) */
-function LogoMark() {
+/** 品牌 LOGO:public/logo.png(紫色渐变方块 + SILLYHUB 文字,透明背景)。
+ *  整张含文字,调用处不再重复渲染 "SillyHub" 文本。 */
+function LogoMark({ className }: { className?: string }) {
   return (
-    <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/20 text-2xl font-bold text-white ring-1 ring-white/40 backdrop-blur">
-      S
-    </span>
+    <Image
+      src="/logo.png"
+      alt="SillyHub"
+      width={690}
+      height={788}
+      priority
+      className={["h-14 w-auto select-none", className].filter(Boolean).join(" ")}
+    />
   );
 }
 

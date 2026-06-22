@@ -488,3 +488,13 @@
 结果：frontend/Dockerfile HEALTHCHECK 由 wget 改 node -e fetch（零依赖，slim/alpine 通用）。重建 frontend 镜像 force-recreate，验证 Status=healthy FailingStreak=0、容器内探针=node fetch、连续3次探测 ExitCode=0、/api/health 200。回归已修复。
 文件：
 - frontend/Dockerfile (HEALTHCHECK 改用 node -e fetch，零依赖)
+
+## ql-20260622-002-ce1c | 2026-06-22 10:01:42 | 替换项目 favicon 和 LOGO（favicon 用 jo7dg-bbu51-001.ico，LOGO 用 sillyhub_logo_transparent.png）
+状态：已完成
+结果：favicon.ico→app/favicon.ico(Next 约定自动生效,HTTP 200 image/x-icon)；logo.png(690x788 RGBA 透明)→public/logo.png。login/page.tsx 的 LogoMark 由手绘"圆角方块+S"改 next/image 整张 logo(h-14)、移除重复 SillyHub 文字、移动端(slate-50 浅底)加 bg-slate-900/90 chip 衬底(h-10)保证白字可见。app-shell.tsx 侧边栏 Brand 由纯文字改 logo(展开 h-9 / 折叠 h-8 居中)、import next/image。重建 frontend 镜像 next build 通过、容器 healthy。playwright 验证 logo img loaded=true、natural 345x394、display 49x56(hero)/0x0(移动端桌面视口隐藏)、src 走 _next/image 优化。
+文件：
+- frontend/src/app/favicon.ico (新增,复制桌面 ico)
+- frontend/public/logo.png (新增,复制桌面 png)
+- frontend/src/app/(auth)/login/page.tsx (LogoMark 改 next/image + 移动端 chip)
+- frontend/src/components/app-shell.tsx (Brand 用 logo + import next/image)
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md (Change Index)

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { Fragment, useEffect, useMemo, useState } from "react";
@@ -240,23 +241,26 @@ export function AppShell({ children }: { children: ReactNode }) {
           collapsed ? "w-[60px]" : "w-[260px]"
         }`}
       >
-        {/* Brand */}
-        <div className="border-b px-5 pt-5 pb-4 flex items-center justify-between">
-          <div className="overflow-hidden transition-all duration-200">
-            <Link
-              href="/workspaces"
-              className="text-[15px] font-bold tracking-tight text-foreground hover:text-primary transition-colors whitespace-nowrap"
-            >
-              SillyHub
-            </Link>
-            <p
-              className={`mt-0.5 text-[11px] text-muted-foreground transition-all duration-200 ${
-                collapsed ? "opacity-0 h-0" : "opacity-100"
-              }`}
-            >
-              SillySpec Native
-            </p>
-          </div>
+        {/* Brand：项目 LOGO（public/logo.png，含 SILLYHUB 文字） */}
+        <div
+          className={`border-b flex items-center py-4 transition-all duration-200 ${
+            collapsed ? "justify-center px-2" : "px-5"
+          }`}
+        >
+          <Link
+            href="/workspaces"
+            className="flex items-center overflow-hidden transition-all duration-200 hover:opacity-80"
+            title="SillyHub"
+          >
+            <Image
+              src="/logo.png"
+              alt="SillyHub"
+              width={690}
+              height={788}
+              priority
+              className={collapsed ? "h-8 w-auto" : "h-9 w-auto"}
+            />
+          </Link>
         </div>
 
         {/* Navigation */}
