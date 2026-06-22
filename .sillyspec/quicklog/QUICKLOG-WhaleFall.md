@@ -468,6 +468,14 @@ created_at: 2026-06-03T08:42:04
 方案：1) Form `layout` 由 `"inline"` 改为 `"vertical"`，让 `<form>` 回到 `display: block`，`grid-cols-4` 才能生效（Form.Item 用 `noStyle` 不渲染 wrapper，layout 不影响实际渲染）；2) 前 4 个 Field（项目名称/合同名称/公司名称/合同签订时间）总是渲染，后 2 个 Field（项目开始时间/预计验收时间）仅 `expanded=true` 时渲染；3）展开按钮因总数 6 > 4 始终显示，文案 `expanded ? "收起" : "展开"` 保持不变。
 结果：1）typecheck 通过；2）329/329 vitest 全过；3）收起时第一行 4 个查询条件（项目名称/合同名称/公司名称/合同签订时间）等宽对齐；4）展开时第一行 4 个 + 第二行 2 个（项目开始时间/预计验收时间）占左两列。Docker 重建 frontend 待后续。
 
+## ql-20260622-010-4d84 | 2026-06-22 10:54:54 | 缩窄操作列宽度消除右侧空白
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx
+背景：操作列 `width: 300`，但实际 4 个 `Button size="sm" variant="ghost"`（详情/里程碑/编辑/删除）+ `gap-1` 总宽度约 232px，右侧留约 60-70px 空白。
+方案：操作列 `width` 由 `300` 缩到 `240`（实际内容 232 + 8 buffer）。
+结果：1）typecheck 通过；2）329/329 vitest 全过；3）操作列宽度贴合 4 个按钮实际宽度，无右侧空白。Docker 重建 frontend 待后续。
+
+
 
 
 

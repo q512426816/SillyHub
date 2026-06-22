@@ -369,7 +369,7 @@ export default function ProjectPlansPage() {
       title: "操作",
       key: "actions",
       fixed: "right",
-      width: 300,
+      width: 240,
       render: (_v: unknown, p: PsProjectPlan) => {
         // RBAC:平台超管 bypass,否则按 project_manager_id 归属(无 create_user_id 字段)。
         const isManager =
