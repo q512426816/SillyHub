@@ -234,13 +234,12 @@ export default function ProblemChangesPage() {
     {
       title: "操作",
       key: "actions",
-      align: "right",
       width: "max-content",
       fixed: "right",
       render: (_v: unknown, c: ProblemChange) => {
         const isHandler = matchAnyUser([c.now_handle_user], currentUserId);
         return (
-          <div className="flex whitespace-nowrap justify-end gap-1">
+          <div className="flex whitespace-nowrap gap-1">
             <Button
               size="sm"
               variant="outline"

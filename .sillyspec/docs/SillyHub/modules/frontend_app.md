@@ -123,3 +123,4 @@ layout.tsx (根布局)
 | 2026-06-22 | ql-20260622-032-c4d2 | /ppm/problem-list 操作列 width 200 → 'max-content'(每行按钮数 1~6 个,固定宽度留白);按钮容器 flex-wrap → whitespace-nowrap 单行排列;fixed:'right' 保留 |
 | 2026-06-22 | ql-20260622-034-c3a7 | /ppm/problem-list 顶部"查询"按钮 → "搜索" 去掉 variant=outline(回退 primary);与 /ppm/project-plans 搜索按钮样式对齐 |
 | 2026-06-22 | ql-20260622-035-a1e9 | /ppm/problem-changes 整体重写对齐 project-plans:PageContainer size=full + PageHeader + SectionCard;顶部右对齐 ui Button(搜索 primary + 重置 outline + 分隔 + 导出 outline);grid-cols-4 垂直 Field 查询条件;Table bordered + scroll y calc(100vh-430px) + showTotal/showSizeChanger + 客户端分页 20/页;操作列 width=max-content + whitespace-nowrap + fixed=right + ui Button(size=sm + variant);移除 antd Button/Space + toast;关键字双 state 回车提交 |
+| 2026-06-22 | ql-20260622-036-b8f2 | /ppm/problem-changes 操作列去 align=right + 去 justify-end,按钮自然左对齐(默认 flex-start),单按钮(详情)行不再居右留白;width=max-content + whitespace-nowrap + fixed=right 保留 |

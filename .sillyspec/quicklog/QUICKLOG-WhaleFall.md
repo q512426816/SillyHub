@@ -783,3 +783,17 @@ created_at: 2026-06-03T08:42:04
   - 整文件 Write 重写
   - frontend pnpm typecheck 通过
 
+## ql-20260622-036-b8f2 | 2026-06-22 21:17:44 | problem-changes 操作列自适应不留白
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/problem-changes/page.tsx
+背景:problem-changes 每行操作按钮数 1~3 不等(status!=1 仅"详情";status=1 详情+审核+删除),antd Table width=max-content 取所有行最大宽度(3 按钮 ~220px),单按钮行因 align:right + justify-end 居右,左侧空白与状态列之间出现大片留白。
+方案:
+  1. 操作列去 align:"right"(默认 left)
+  2. 按钮 container div 去 justify-end(默认 flex-start)
+  3. width:"max-content" + whitespace-nowrap + fixed:"right" 保留
+结果:
+  - 按钮在单元格内左对齐,单元格宽度按按钮最多那行算
+  - 单按钮(详情)行右侧虽仍有空白,但与 fixed:right 状态列紧邻,视觉上不再有"详情+大片空白+状态"的割裂感
+  - frontend pnpm typecheck 通过
+
+
