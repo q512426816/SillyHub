@@ -555,3 +555,13 @@ created_at: 2026-06-03T08:42:04
   2. <Table.Summary fixed="bottom"> → <Table.Summary> (无 y 时吸底无意义;表格本身不滚动 summary 始终是最后一行)
   3. 上版 ql-013 加的 y:500 是当时无分页时的滚动兜底,现在已有分页(每页 ≤20 条)不需要固定高度
 结果：1）typecheck 通过；2）329/329 vitest 全过；3）表格按数据行数自动撑高,无纵向滚动条。Docker 重建 frontend 待后续。
+
+## ql-20260622-018-9d2c | 2026-06-22 13:42:00 | 项目计划表格高度按视窗自适应 + summary 吸底
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx
+背景：上一版 ql-017 误解了用户意图,把 scroll.y 完全去掉改成按行数撑高。用户澄清:不是按行数自适应,是按窗口高度自适应(如 calc(100vh - 300px)),并且 summary 还是要底部吸附。
+方案:
+  1. scroll.y 改为 "calc(100vh - 300px)" 字符串(antd Table 接受 CSS 高度字符串)
+  2. <Table.Summary> 重新加 fixed="bottom"(有 scroll.y 时吸底生效)
+  3. 表格数据超出视窗高度时纵向滚动,summary 始终吸底可见
+结果：1）typecheck 通过；2）329/329 vitest 全过；3）表格按视窗高度自适应,summary 吸底。Docker 重建 frontend 待后续。
