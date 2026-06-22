@@ -524,3 +524,13 @@ created_at: 2026-06-03T08:42:04
   3. 前端 page.tsx: 新增 page/pageSize/total state + lastSearchRef；pagination 受控 (current/pageSize/total/onChange)；onChange 调 setPage/setPageSize 触发 useEffect 自动 load(lastSearchRef.current)；handleSearch/handleReset 先更新 lastSearchRef 再 setPage(1)（page已是1时手动 load）
   4. 左侧 managerTree "全部项目" count 改用 total（避免当前页 N 条歧义），children/summaryRow 接受基于当前页（语义弱化，后续可加聚合接口）
 结果：1）typecheck 通过；2）329/329 vitest 全过；3）翻页/改 pageSize/查询条件变化都触发服务端请求，showTotal 显示真实 total。Docker 重建前后端待后续。
+
+## ql-20260622-015-7e2a | 2026-06-22 13:04:00 | 项目计划默认 20 条/页 + 左侧项目经理树默认展开
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx
+背景：用户要求两个调整：1) 默认每页 20 条（当前初始 pageSize state = 10）；2) 左侧"按项目经理"树默认展开（当前 antd Tree 用 defaultExpandAll，但 treeData 初始为空，首次渲染不展开；plans 异步加载后 defaultExpandAll 不再触发）。
+方案：
+  1. pageSize useState(10) → useState(20)
+  2. pageSizeOptions ["10","20","50","100"] 不变（20 已在列）
+  3. antd Tree 改受控:新增 allTreeKeys useMemo(["all", "manager:..."])，传 expandedKeys 强制全展开（移除 defaultExpandAll）
+结果：1）typecheck 通过；2）329/329 vitest 全过；3）默认进页面拉 20 条/页，左侧 manager 树加载后自动展开。Docker 重建 frontend 待后续。

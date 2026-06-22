@@ -43,3 +43,4 @@ created_at: 2026-06-20T15:35:00+0800
 - ql-20260621-009-e8a1 | 看板任务详情对齐源 TaskDetailDrawer(补优先级/进度/创建/更新时间)
 - ql-20260621-010-a1b2 | hotfix 看板 API 500(service _derive_priority 用未 import 的 UTC)
 - ql-20260622-014-c8f3 | /project-plan GET 改 response_model=Page[T] 返回 total(原 list 丢 total),前端 listProjectPlans 返 PageResp + page.tsx 受控分页 (page/pageSize/total + onChange 重查 + 查询回到 page=1)
+- ql-20260622-015-7e2a | project-plans 页面默认 pageSize 10→20 + 左侧项目经理树改受控 expandedKeys 强制全展开(defaultExpandAll 异步 treeData 不可靠)

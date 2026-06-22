@@ -106,7 +106,7 @@ export default function ProjectPlansPage() {
   const [plans, setPlans] = useState<PsProjectPlan[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(20);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -272,6 +272,18 @@ export default function ProjectPlansPage() {
       },
     ];
   }, [plans, total]);
+
+  // 计算所有树节点 key(根 + 全部 manager children),用于 antd Tree 受控 expandedKeys。
+  // 之前用 defaultExpandAll 在异步 treeData 场景下不可靠(首次渲染 treeData 为空,
+  // plans 加载完后不再触发 default expand),改受控强制全展开。
+  const allTreeKeys = useMemo<string[]>(() => {
+    const keys: string[] = ["all"];
+    for (const p of plans) {
+      const k = p.project_manager_id ?? "unknown";
+      if (!keys.includes(`manager:${k}`)) keys.push(`manager:${k}`);
+    }
+    return keys;
+  }, [plans]);
 
   // 客户端按所选树节点过滤 plans(选中"all"或空值时不过滤)。
   const filteredPlans = useMemo(() => {
@@ -568,8 +580,8 @@ export default function ProjectPlansPage() {
           >
             <Tree
               blockNode
-              defaultExpandAll
               treeData={managerTreeData}
+              expandedKeys={allTreeKeys}
               selectedKeys={[selectedManager]}
               onSelect={(keys) => {
                 const k = keys[0] as string | undefined;
