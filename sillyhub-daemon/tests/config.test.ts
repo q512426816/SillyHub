@@ -35,7 +35,7 @@ describe('config', () => {
   // ── AC-03：字段与默认值对照 Python config.py:22-32 DEFAULTS ──
 
   describe('字段与默认值（AC-03，对照 Python DEFAULTS）', () => {
-    it('DEFAULT_CONFIG 正好 18 字段，键名 1:1（task-10 新增 default_timeout_seconds / max_retries；daemon-api-key 新增 api_key；ql-20260616-003 新增 4 个 terminal_observer_*；ql-20260616-006 新增 lease_heartbeat_interval；2026-06-18-workspace-client-path task-02 新增 allowed_roots）', () => {
+    it('DEFAULT_CONFIG 正好 19 字段，键名 1:1（task-10 新增 default_timeout_seconds / max_retries；daemon-api-key 新增 api_key；ql-20260616-003 新增 4 个 terminal_observer_*；ql-20260616-006 新增 lease_heartbeat_interval；2026-06-18-workspace-client-path task-02 新增 allowed_roots；2026-06-22-agent-run-pipeline-fix task-02 新增 spec_root_map）', () => {
       expect(Object.keys(DEFAULT_CONFIG).sort()).toEqual([
         'allowed_roots',
         'api_key',
@@ -49,6 +49,7 @@ describe('config', () => {
         'profile',
         'runtime_id',
         'server_url',
+        'spec_root_map',
         'terminal_observer_close_on_exit',
         'terminal_observer_command',
         'terminal_observer_enabled',
@@ -56,6 +57,10 @@ describe('config', () => {
         'token',
         'workspace_dir',
       ]);
+    });
+
+    it('2026-06-22-agent-run-pipeline-fix task-02：spec_root_map 默认空串（向后兼容旧 daemon，SPEC_ROOT_MAP 未设）', () => {
+      expect(DEFAULT_CONFIG.spec_root_map).toBe('');
     });
 
     it('ql-20260616-006：lease_heartbeat_interval 默认 5 秒', () => {
@@ -451,6 +456,90 @@ describe('config', () => {
       await saveConfig(cfg, p);
       const raw = await readFile(p, 'utf-8');
       expect(JSON.parse(raw).allowed_roots).toEqual([homedir()]);
+    });
+  });
+
+  // ── 2026-06-22-agent-run-pipeline-fix task-02：spec_root_map ──
+  // FR-01 / D-001@v1：prompt 路径翻译映射 "from:to"，env SPEC_ROOT_MAP 注入，
+  // env 优先于 config.json 落盘值；空串默认（向后兼容旧 daemon）。
+  // 对照 design §4.1 A1 第 2 层（daemon 激活 SPEC_ROOT_MAP 翻译器）。
+
+  describe('spec_root_map（task-02，FR-01 / D-001@v1）', () => {
+    /** 保存/恢复 SPEC_ROOT_MAP，防止跨测试污染（config.test.ts 其他组依赖 env 干净）。 */
+    let prevEnv: string | undefined;
+
+    beforeEach(() => {
+      prevEnv = process.env.SPEC_ROOT_MAP;
+      delete process.env.SPEC_ROOT_MAP;
+    });
+
+    afterEach(() => {
+      if (prevEnv === undefined) {
+        delete process.env.SPEC_ROOT_MAP;
+      } else {
+        process.env.SPEC_ROOT_MAP = prevEnv;
+      }
+    });
+
+    // ── AC-01：env 设完整映射，loadConfig 读到并覆盖到 spec_root_map ──
+    it('AC-01 env SPEC_ROOT_MAP="/data/spec-workspaces:C:/data/spec-workspaces" → cfg.spec_root_map 等于该值', async () => {
+      process.env.SPEC_ROOT_MAP = '/data/spec-workspaces:C:/data/spec-workspaces';
+      const cfg = await loadConfig(configPath);
+      expect(cfg.spec_root_map).toBe('/data/spec-workspaces:C:/data/spec-workspaces');
+    });
+
+    // ── AC-04：env 未设 → 默认空串，不报错（向后兼容旧 daemon）──
+    it('AC-04 env 未设 SPEC_ROOT_MAP → cfg.spec_root_map 为空串（默认值，向后兼容）', async () => {
+      const cfg = await loadConfig(configPath);
+      expect(cfg.spec_root_map).toBe('');
+    });
+
+    // ── 边界 1：env 设空串 → 覆盖为空串（翻译器会跳过）──
+    it('env 设空串 SPEC_ROOT_MAP="" → cfg.spec_root_map 为空串（空串覆盖，翻译器跳过）', async () => {
+      process.env.SPEC_ROOT_MAP = '';
+      const cfg = await loadConfig(configPath);
+      expect(cfg.spec_root_map).toBe('');
+    });
+
+    // ── env 优先于 config.json 落盘值（避免脏 config.json 把翻译关掉）──
+    it('env 优先于 config.json 的 spec_root_map（脏 config.json 不影响翻译）', async () => {
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          runtime_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+          spec_root_map: '/stale:/path',
+        }),
+        'utf-8',
+      );
+      process.env.SPEC_ROOT_MAP = '/data/spec-workspaces:C:/data/spec-workspaces';
+      const cfg = await loadConfig(configPath);
+      expect(cfg.spec_root_map).toBe('/data/spec-workspaces:C:/data/spec-workspaces');
+    });
+
+    // ── env 未设时 config.json 的 spec_root_map 透传（用户显式落盘场景）──
+    it('env 未设且 config.json 含 spec_root_map → 透传 config.json 值', async () => {
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          runtime_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+          spec_root_map: '/from:/to',
+        }),
+        'utf-8',
+      );
+      const cfg = await loadConfig(configPath);
+      expect(cfg.spec_root_map).toBe('/from:/to');
+    });
+
+    // ── 不落盘：env 注入值不被 saveConfig 序列化到 config.json ──
+    // （design §4.1：避免 host 路径被序列化到 config.json，跨机器冲突）
+    it('env 注入的 spec_root_map 不落盘（saveConfig 不写 env 值，除非用户显式改 cfg 后 save）', async () => {
+      process.env.SPEC_ROOT_MAP = '/data/spec-workspaces:C:/data/spec-workspaces';
+      const cfg = await loadConfig(configPath);
+      // loadConfig 触发 runtime_id 自动生成会落盘一次，此时 spec_root_map 不应被写入
+      const raw = await readFile(configPath, 'utf-8');
+      const parsed = JSON.parse(raw);
+      // 关键断言：落盘的 JSON 不含 env 注入的 spec_root_map（loadConfig 不主动 save env 值）
+      expect(parsed.spec_root_map).not.toBe('/data/spec-workspaces:C:/data/spec-workspaces');
     });
   });
 });

@@ -52,7 +52,11 @@ services:
       # Adjust the left side to match your local path.
       - ${HOST_PROJECTS_DIR:-C:/Users/qinyi/IdeaProjects}:/host-projects
       - worktree-data:/data/sillyspec-workspaces
-      - spec-data:/data/spec-workspaces
+      # spec-workspaces: bind mount so the host daemon (Windows) and the backend
+      # container share the same physical directory; otherwise the agent cannot
+      # see spec documents written by the backend. Override host path via
+      # SPEC_DATA_HOST_DIR in .env (see deploy/.env.example).
+      - "${SPEC_DATA_HOST_DIR:-C:/data/spec-workspaces}:/data/spec-workspaces"
       - claude-data:/app/.claude
     environment:
       # Prefix that rewrites host-style paths into container mount paths.
@@ -107,6 +111,5 @@ services:
 volumes:
   pgdata:
   redisdata:
-  spec-data:
   worktree-data:
   claude-data:

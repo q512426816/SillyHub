@@ -837,3 +837,237 @@ async def test_build_claim_payload_batch_null_agent_run_raises(
 
     with pytest.raises(DaemonLeaseNoAgentRun):
         await build_claim_payload(db_session, lease)
+
+
+# ── task-03（2026-06-22-agent-run-pipeline-fix）interactive claim payload 透传 specRoot ──
+
+
+async def _create_interactive_lease(
+    session: AsyncSession,
+    runtime_id: uuid.UUID,
+    *,
+    metadata: dict,
+) -> DaemonTaskLease:
+    """构造 interactive lease 行（kind='interactive', agent_run_id=NULL）。"""
+    now = datetime.now(UTC)
+    lease = DaemonTaskLease(
+        id=uuid.uuid4(),
+        runtime_id=runtime_id,
+        agent_run_id=None,  # D-005: interactive lease agent_run_id 列恒为 NULL
+        status="claimed",
+        kind="interactive",
+        claimed_at=now,
+        lease_expires_at=None,  # interactive lease 不过期
+        metadata_=metadata,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(lease)
+    await session.commit()
+    await session.refresh(lease)
+    return lease
+
+
+class TestBuildClaimPayloadInteractiveSpecRoot:
+    """task-03：interactive claim payload 透传 specRoot/runtimeRoot 给 daemon。
+
+    覆盖 design.md §4.1 A1 第 3 层（backend 防御性透传）：
+    - AC-01: lease_meta.spec_root 存在 → payload 双写 specRoot / spec_root
+    - AC-02: lease_meta.spec_root 缺、workspace_id 存在 + SpecWorkspace.spec_root 存在 → 查 DB 回填
+    - AC-03: lease_meta 既无 spec_root 也无 workspace_id → payload 不含 specRoot（向后兼容）
+    - AC-04: batch lease payload 不含 specRoot（batch 分支未污染）
+    """
+
+    @pytest.mark.asyncio
+    async def test_interactive_spec_root_from_meta(self, db_session: AsyncSession) -> None:
+        """AC-01: lease_meta.spec_root 存在 → payload.specRoot = lease_meta.spec_root。"""
+        from app.modules.daemon.lease.context import build_claim_payload
+
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease = await _create_interactive_lease(
+            db_session,
+            rt.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(uuid.uuid4()),
+                "prompt": "hello",
+                "provider": "claude_code",
+                "claim_token": "tok",
+                "spec_root": "/data/spec-workspaces/abc-123",
+                "runtime_root": "/data/spec-workspaces/abc-123/runtime",
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        # camelCase + snake_case 双写（对齐既有 rootPath/root_path 模式）
+        assert payload["specRoot"] == "/data/spec-workspaces/abc-123"
+        assert payload["spec_root"] == "/data/spec-workspaces/abc-123"
+        assert payload["runtimeRoot"] == "/data/spec-workspaces/abc-123/runtime"
+        assert payload["runtime_root"] == "/data/spec-workspaces/abc-123/runtime"
+
+    @pytest.mark.asyncio
+    async def test_interactive_spec_root_from_workspace_lookup(
+        self, db_session: AsyncSession
+    ) -> None:
+        """AC-02: lease_meta 无 spec_root，含 workspace_id；SpecWorkspace.spec_root 回填。"""
+        from app.modules.daemon.lease.context import build_claim_payload
+        from app.modules.spec_workspace.model import SpecWorkspace
+        from app.modules.workspace.model import Workspace
+
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+
+        # 建真实 Workspace + SpecWorkspace 行
+        ws_id = uuid.uuid4()
+        ws = Workspace(
+            id=ws_id,
+            name="test-ws",
+            slug="test-ws",
+            root_path="/repos/test",
+            status="active",
+        )
+        db_session.add(ws)
+        spec_ws = SpecWorkspace(
+            id=uuid.uuid4(),
+            workspace_id=ws_id,
+            spec_root="/data/spec-workspaces/from-db-xyz",
+            strategy="platform-managed",
+        )
+        db_session.add(spec_ws)
+        await db_session.commit()
+
+        lease = await _create_interactive_lease(
+            db_session,
+            rt.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(uuid.uuid4()),
+                "prompt": "scan me",
+                "provider": "claude_code",
+                "claim_token": "tok",
+                "workspace_id": str(ws_id),  # 字符串形式（对齐 placement.py:494）
+                # 故意不写 spec_root，走 DB 回填路径
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        assert payload["specRoot"] == "/data/spec-workspaces/from-db-xyz"
+        assert payload["spec_root"] == "/data/spec-workspaces/from-db-xyz"
+        # lease_meta 没有 runtime_root → runtimeRoot 不应出现
+        assert "runtimeRoot" not in payload
+        assert "runtime_root" not in payload
+
+    @pytest.mark.asyncio
+    async def test_interactive_no_spec_root_no_workspace_id(self, db_session: AsyncSession) -> None:
+        """AC-03: quick-chat 场景 lease_meta 无 spec_root 无 workspace_id → 不透传。
+
+        向后兼容：旧 daemon 收到不含 specRoot 的 payload → 完全回退 prompt 翻译。
+        """
+        from app.modules.daemon.lease.context import build_claim_payload
+
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease = await _create_interactive_lease(
+            db_session,
+            rt.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(uuid.uuid4()),
+                "prompt": "quick chat",
+                "provider": "claude_code",
+                "claim_token": "tok",
+                # 无 spec_root，无 workspace_id（quick-chat 路径）
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        # 向后兼容：字段不存在（不是 None），daemon execPayload.specRoot === undefined
+        assert "specRoot" not in payload
+        assert "spec_root" not in payload
+        assert "runtimeRoot" not in payload
+        assert "runtime_root" not in payload
+        # 其它字段照常
+        assert payload["kind"] == "interactive"
+        assert payload["prompt"] == "quick chat"
+
+    @pytest.mark.asyncio
+    async def test_interactive_spec_root_missing_workspace_id_present_but_no_spec_ws(
+        self, db_session: AsyncSession
+    ) -> None:
+        """AC-03 变体：lease_meta 有 workspace_id 但 SpecWorkspace 行不存在 → 不报错，不透传。
+
+        边界 #3：SpecWorkspace 查不到 → spec_root 保持 None → payload 不含键。
+        """
+        from app.modules.daemon.lease.context import build_claim_payload
+
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        # workspace_id 指向一个不存在的 workspace（无 SpecWorkspace 行）
+        lease = await _create_interactive_lease(
+            db_session,
+            rt.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(uuid.uuid4()),
+                "prompt": "x",
+                "provider": "claude_code",
+                "claim_token": "tok",
+                "workspace_id": str(uuid.uuid4()),
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        assert "specRoot" not in payload
+        assert "spec_root" not in payload
+
+    @pytest.mark.asyncio
+    async def test_batch_payload_has_no_spec_root(self, db_session: AsyncSession) -> None:
+        """AC-04: batch lease payload 不含 specRoot（batch 分支未污染）。
+
+        即使 lease_meta 写了 spec_root（dispatch_to_daemon 的 scan 字段），
+        batch 分支也不透传——batch 不走 interactive prompt 翻译路径。
+        """
+        from app.modules.daemon.lease.context import build_claim_payload
+
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+
+        # 建 AgentRun 行（batch 分支要求 agent_run_id 非 NULL）
+        agent_run_id = uuid.uuid4()
+        ar = AgentRun(id=agent_run_id, agent_type="claude_code", status="pending")
+        db_session.add(ar)
+        await db_session.commit()
+
+        now = datetime.now(UTC)
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run_id,
+            status="claimed",
+            kind="batch",
+            claimed_at=now,
+            lease_expires_at=now + timedelta(seconds=60),
+            metadata_={
+                "claim_token": "tok",
+                # 故意写 spec_root，验证 batch 分支不会把它加进 payload
+                "spec_root": "/data/spec-workspaces/should-not-leak",
+                "runtime_root": "/data/spec-workspaces/should-not-leak/runtime",
+            },
+        )
+        db_session.add(lease)
+        await db_session.commit()
+        await db_session.refresh(lease)
+
+        payload = await build_claim_payload(db_session, lease)
+
+        # batch 分支不透传 specRoot（task-03 实现要求 §4）
+        assert "specRoot" not in payload
+        assert "spec_root" not in payload
+        assert "runtimeRoot" not in payload
+        assert "runtime_root" not in payload
+        assert payload["kind"] == "batch"

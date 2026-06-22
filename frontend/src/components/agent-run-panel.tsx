@@ -6,6 +6,8 @@ import { AlertTriangle, X } from "lucide-react";
 import { AgentLogViewer } from "@/components/agent-log-viewer";
 import type { AgentLogInputControls } from "@/components/agent-log/types";
 import { Button } from "@/components/ui/button";
+import { getAgentRun } from "@/lib/agent";
+import { formatTokenCount } from "@/lib/format-token";
 import { useAgentRunStream } from "@/lib/use-agent-run-stream";
 import type { AgentRunInputStream } from "@/lib/use-agent-run-stream";
 
@@ -92,6 +94,32 @@ function adaptInputControls(input: AgentRunInputStream): AgentLogInputControls {
   };
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// TokenUsageBadge — run 累计 input/output token 展示徽标
+//
+// task-16 / FR-11 / design.md §5.5。
+// 显示规则：↓ {input} | ↑ {output}，数字走 formatTokenCount 格式化。
+// null / undefined → "—"；0 → "0"（与 null 区分）。
+// ────────────────────────────────────────────────────────────────────────────
+function TokenUsageBadge({
+  input,
+  output,
+}: {
+  input: number | null;
+  output: number | null;
+}) {
+  return (
+    <span
+      data-testid="token-usage-badge"
+      className="inline-flex items-center gap-1 rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] font-mono text-zinc-600"
+    >
+      <span title="输入 tokens">↓ {formatTokenCount(input)}</span>
+      <span className="text-zinc-300">|</span>
+      <span title="输出 tokens">↑ {formatTokenCount(output)}</span>
+    </span>
+  );
+}
+
 export function AgentRunPanel({
   workspaceId,
   runId,
@@ -107,10 +135,97 @@ export function AgentRunPanel({
   onDone,
   onClose,
 }: AgentRunPanelProps) {
+  // ──────────────────────────────────────────────────────────────────────────
+  // task-16 / FR-11：run 累计 input/output token 状态 + 5s 轮询刷新。
+  //
+  // 方案 A（task-16 选）：panel 内部 getAgentRun 轮询拉取 AgentRun.input/output_tokens
+  // （daemon.ts:1070-1080 每 assistant message 实时回写），延迟 ≤ 5s。
+  // 不改 use-agent-run-stream.ts（不在 allowed_paths）。
+  //
+  // 生命周期：
+  //   - runId=null → tokenUsage=null，不渲染徽标（边界 4）
+  //   - runId 变化 → cleanup 清旧 interval + cancelled flag 防 stale set（边界 4）
+  //   - isActive=true → 每 5s 轮询；isActive=false 只 fetch 一次（非活跃 run 无需轮询）
+  //   - getAgentRun 失败 → catch 静默，不阻断面板（边界 6）
+  // ──────────────────────────────────────────────────────────────────────
+  const [tokenUsage, setTokenUsage] = React.useState<{
+    input: number | null;
+    output: number | null;
+  } | null>(null);
+
+  // fetchUsage 通过 ref 暴露给 handleDone：handleDone 闭包在 useAgentRunStream 内部
+  // 注册一次（依赖 onDone 变化重连），如直接闭包 fetchUsage 会拿到 stale 值。
+  // ref 永远指向最新 fetchUsage 实现，handleDone 回调内通过 ref 调用。
+  const fetchUsageRef = React.useRef<(() => void) | null>(null);
+
+  // task-16：onDone 包装器，稳定引用（useCallback）防止 hook 死循环重连 SSE。
+  // 透传外部 onDone + 触发 fetchUsage 取终态 token（避免等下次 5s 轮询）。
+  // 必须声明在 useAgentRunStream 调用之前（透传给其 options.onDone）。
+  const handleDone = React.useCallback(
+    (status: string) => {
+      onDone?.(status);
+      fetchUsageRef.current?.();
+    },
+    [onDone],
+  );
+
   const { logs, loading, error, perms, dismissPerm, input } = useAgentRunStream(
     workspaceId,
     runId,
-    { isActive, onDone },
+    {
+      isActive,
+      onDone: handleDone,
+    },
+  );
+
+  React.useEffect(() => {
+    if (!runId) {
+      setTokenUsage(null);
+      fetchUsageRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    const fetchUsage = () => {
+      getAgentRun(workspaceId, runId)
+        .then((run) => {
+          if (!cancelled) {
+            setTokenUsage({
+              input: run.input_tokens,
+              output: run.output_tokens,
+            });
+          }
+        })
+        .catch(() => {
+          /* 静默：token 拉取失败不阻断面板（边界 6） */
+        });
+    };
+    fetchUsageRef.current = fetchUsage;
+    fetchUsage();
+    // 活跃 run 每 5s 轮询刷新（streaming 期间 token 累积，FR-11 实时增长）
+    const interval = isActive ? setInterval(fetchUsage, 5000) : null;
+    return () => {
+      cancelled = true;
+      if (interval) clearInterval(interval);
+      if (fetchUsageRef.current === fetchUsage) {
+        fetchUsageRef.current = null;
+      }
+    };
+  }, [workspaceId, runId, isActive]);
+
+  // 合并 token 徽标 + 外部传入的 summary 节点（边界 8：每个 panel 实例独立）
+  const composedSummary = React.useMemo(
+    () => (
+      <>
+        {tokenUsage && (
+          <TokenUsageBadge
+            input={tokenUsage.input}
+            output={tokenUsage.output}
+          />
+        )}
+        {summary}
+      </>
+    ),
+    [tokenUsage, summary],
   );
 
   // X-002：input 适配，依赖 [input] 稳定引用（hook 每次 render 都返回新 input 对象，
@@ -177,7 +292,7 @@ export function AgentRunPanel({
         compact={compact}
         variant={variant}
         isLive={isLive}
-        summary={summary}
+        summary={composedSummary}
         actions={composedActions}
         inputControls={inputControls}
         permissionRequests={perms}

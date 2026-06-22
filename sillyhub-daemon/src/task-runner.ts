@@ -1257,6 +1257,20 @@ export class TaskRunner {
           !Array.isArray(md.tool_input)
             ? (md.tool_input as Record<string, unknown>)
             : {};
+        // task-13 / D-002@v1：提取 tool_use_id（SDK tool_use block 的 id，toolu_xxx）。
+        // stream-json.ts:645-654 把 block.id 存到 metadata.call_id（命名待后续修正），
+        // 这里兼容三种字段名：
+        //   1. md.tool_use_id（未来 adapter 命名修正后的标准字段）
+        //   2. md.id（直接透传 SDK content_block.id）
+        //   3. md.call_id（当前 stream-json.ts 实际存储位置，旧字段名）
+        // 任一非空字符串即采用；全空 → ''（退化，前端 normalize 回退 ±3 窗口）。
+        // 注：只把 id 注入 tool_call JSON（submit_messages 仅存 content/channel/usage，
+        // 不保留 metadata 字段，故 stdout 不带 metadata，避免无效写入）。
+        const toolUseId =
+          (typeof md.tool_use_id === 'string' && md.tool_use_id) ||
+          (typeof md.id === 'string' && md.id) ||
+          (typeof md.call_id === 'string' && md.call_id) ||
+          '';
         // stdout 文本行：[TOOL_USE] Name: <command> 或 [TOOL_USE] Name: {json}
         // 对齐老 _format_conversation_log L333-337
         const cmd = typeof inputObj.command === 'string' ? inputObj.command : '';
@@ -1278,11 +1292,16 @@ export class TaskRunner {
         });
         // 额外发一条 tool_call channel 的 JSON，前端 parseToolCallContent 解析为
         // ToolCallCard。对齐老 _emit_stdout L749-757 的 tc_content 格式。
+        // task-13：补 tool_use_id 字段（snake_case，对齐 Anthropic API 命名 + 与
+        // backend run_sync/service.py 一致），让前端 normalize 全局配对（task-14）。
         const ts = new Date().toISOString();
         let tcContent: string;
         try {
           tcContent = JSON.stringify({
             tool: name,
+            // tool_use_id 仅非空时携带（省略 vs null 均可让前端 hasOwnProperty
+            // 判断"无 id"分支）。这里用条件展开省略字段，退化路径保持原形状。
+            ...(toolUseId ? { tool_use_id: toolUseId } : {}),
             args: inputObj,
             timestamp: ts,
             status: 'allowed',
@@ -1291,6 +1310,7 @@ export class TaskRunner {
         } catch {
           tcContent = JSON.stringify({
             tool: name,
+            ...(toolUseId ? { tool_use_id: toolUseId } : {}),
             args: {},
             timestamp: ts,
             status: 'allowed',

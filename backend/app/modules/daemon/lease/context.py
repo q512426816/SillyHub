@@ -9,6 +9,8 @@ workspace_*/root_path 等）、runtime capabilities（cmd_path/protocol）。
 
 from __future__ import annotations
 
+import uuid
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -76,6 +78,42 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
             payload["manual_approval"] = lease_meta["manual_approval"]
         if lease_meta.get("ask_user_only") is not None:
             payload["ask_user_only"] = lease_meta["ask_user_only"]
+        # task-03（2026-06-22-agent-run-pipeline-fix）：interactive 分支透传 spec_root
+        # 给 daemon，与 prompt 内 SPEC_ROOT_MAP 翻译双保险——daemon 收到后：
+        #   - 若 prompt 仍含容器 /data/ 路径（SPEC_ROOT_MAP 未配 / 翻译漏）→ 记 warn
+        #     让用户检查配置（daemon 无宿主路径信息无法独立翻译，真翻译仍靠 SPEC_ROOT_MAP）。
+        #   - 字段为可观测 + 未来扩展口（如 daemon RPC 问 backend 宿主路径）。
+        # 来源优先级：lease_meta.spec_root > SpecWorkspace.spec_root（用 workspace_id 查 DB）。
+        # 注意：普通 prepare_interactive_dispatch（quick-chat）不写 spec_root/workspace_id
+        # 到 metadata，spec_root 保持 None → 不透传 → daemon 完全回退 prompt 翻译（向后兼容）。
+        spec_root: str | None = lease_meta.get("spec_root")
+        if not spec_root:
+            ws_id_raw = lease_meta.get("workspace_id")
+            if ws_id_raw:
+                # placement.py:494 把 uuid str 化后写入 metadata；SpecWorkspace 的
+                # workspace_id 列是 Uuid，SQLAlchemy 接受 str/uuid.UUID 绑定参数。
+                try:
+                    ws_id = uuid.UUID(ws_id_raw) if isinstance(ws_id_raw, str) else ws_id_raw
+                except (ValueError, AttributeError, TypeError):
+                    ws_id = None
+                if ws_id is not None:
+                    from app.modules.spec_workspace.model import SpecWorkspace
+
+                    # SpecWorkspace 主键是 id，workspace_id 是 unique index 列，
+                    # 不能用 session.get(SpecWorkspace, ws_id)（那是按主键查）。
+                    # 用 select 按 workspace_id 查（对齐 change/dispatch.py:1192 模式）。
+                    ws_stmt = select(SpecWorkspace).where(col(SpecWorkspace.workspace_id) == ws_id)
+                    spec_ws = (await session.execute(ws_stmt)).scalars().first()
+                    if spec_ws is not None:
+                        # SpecWorkspace.spec_root 是 nullable=False（model.py:59），必有值。
+                        spec_root = spec_ws.spec_root
+        if spec_root:
+            payload["specRoot"] = spec_root  # camelCase（daemon execPayload 消费）
+            payload["spec_root"] = spec_root  # snake_case 双写（对齐 rootPath/root_path 模式）
+            runtime_root = lease_meta.get("runtime_root")
+            if runtime_root:
+                payload["runtimeRoot"] = runtime_root
+                payload["runtime_root"] = runtime_root
         return payload
 
     if lease.agent_run_id is None:

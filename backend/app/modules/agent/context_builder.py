@@ -460,9 +460,15 @@ async def build_scan_bundle(
     ws_id = str(workspace_id)
     run_id_str = str(run_id)
     # 完整命令行（单行，避免 LLM 忽略续行）
-    # --dir 指向源码目录（root_path），sillyspec 用它定位项目代码并创建 .sillyspec/
+    # --dir 指向源码目录（root_path），sillyspec 用它定位项目代码
     # --spec-root 指向平台托管 spec 目录，sillyspec 将文档写入此路径
-    init_cmd = f"sillyspec init --dir {root_path}"
+    # task-08（C1）：平台模式（spec_root 非空）跳过 init 步骤 ——
+    # 平台模式文档写 spec-root，源码目录不需要 .sillyspec，否则触发 sillyspec
+    # 源码保护"拒绝删除源码目录的 .sillyspec：检测到真实资产"。
+    is_platform_mode = bool(spec_root)
+    init_cmd: str | None = None
+    if not is_platform_mode:
+        init_cmd = f"sillyspec init --dir {root_path}"
     scan_start_cmd = (
         f"sillyspec run scan"
         f" --dir {root_path}"
@@ -475,34 +481,62 @@ async def build_scan_bundle(
         f"sillyspec run scan --done --change default --dir {root_path}"
         f' --input "步骤描述" --output "步骤摘要"'
     )
-    step_prompt = (
-        f"你是一个项目分析 agent。请对项目目录 {root_path} 执行 sillyspec scan。\n\n"
-        f"## ⚠️ 命令模板（严格复制，不要省略任何参数）\n\n"
-        f"**第 1 步 — 初始化（仅一次）：**\n"
-        f"```\n{init_cmd}\n```\n\n"
-        f"**第 2 步 — 启动 scan（仅一次，必须包含全部平台参数）：**\n"
-        f"```\n{scan_start_cmd}\n```\n\n"
-        f"**第 3-N 步 — 逐步推进（每次完成后执行）：**\n"
-        f"```\n{scan_done_cmd}\n"
-        f"```\n\n"
-        f"## 执行流程\n"
-        f"1. 执行 init 命令（--dir 指向源码目录 {root_path}）\n"
-        f"2. 执行 scan 启动命令（包含全部平台参数，文档输出到 {spec_root}）\n"
-        f"3. CLI 输出 step prompt → 执行扫描操作 → 用 done 命令推进\n"
-        f"4. 重复 step 3 直到 10/10 步全部完成\n\n"
-        f"## 规则\n"
-        f"- --dir 必须指向源码目录 {root_path}（不是 spec_root）\n"
-        f"- 对 {root_path} 目录中的源码只读，不要修改项目文件\n"
-        f"- .sillyspec/ 目录会在源码目录下创建（由 --dir 决定）\n"
-        f"- 文档生成在 {spec_root}/.sillyspec/docs/ 目录下\n"
-        f"- 启动 scan 命令必须包含 --spec-root/--runtime-root/--workspace-id/--scan-run-id\n"
-        f"- done 命令不需要重复平台参数\n"
-        f"- 每个步骤必须用 done 完成，不要跳过\n"
-        f"- ⚠️ 发现多个潜在子项目（如 frontend + backend 多服务）或扫描策略不明确时，"
-        f"**必须调用 `AskUserQuestion` 工具**询问用户决策（提供清晰选项 + 说明），"
-        f"调用后会**暂停等待**用户选择；**禁止**用 `sillyspec run scan --wait` 或自行假设。"
-        f"用户回答后继续 scan。"
-    )
+    if is_platform_mode:
+        step_prompt = (
+            f"你是一个项目分析 agent。请对项目目录 {root_path} 执行 sillyspec scan。\n\n"
+            f"## ⚠️ 命令模板（严格复制，不要省略任何参数）\n\n"
+            f"**第 1 步 — 启动 scan（仅一次，必须包含全部平台参数）：**\n"
+            f"```\n{scan_start_cmd}\n```\n\n"
+            f"**第 2-N 步 — 逐步推进（每次完成后执行）：**\n"
+            f"```\n{scan_done_cmd}\n"
+            f"```\n\n"
+            f"## 执行流程\n"
+            f"1. 执行 scan 启动命令（包含全部平台参数，文档输出到 {spec_root}）\n"
+            f"2. CLI 输出 step prompt → 执行扫描操作 → 用 done 命令推进\n"
+            f"3. 重复 step 2 直到 10/10 步全部完成\n\n"
+            f"## 规则\n"
+            f"- --dir 必须指向源码目录 {root_path}（不是 spec_root）\n"
+            f"- 对 {root_path} 目录中的源码只读，不要修改项目文件\n"
+            f"- 文档生成在 {spec_root}/ 下，源码目录保持只读，不会创建 .sillyspec/\n"
+            f"- ⚠️ 平台模式禁止执行 sillyspec init（会在源码目录创建 .sillyspec 并触发源码保护）\n"
+            f"- 文档生成在 {spec_root}/.sillyspec/docs/ 目录下\n"
+            f"- 启动 scan 命令必须包含 --spec-root/--runtime-root/--workspace-id/--scan-run-id\n"
+            f"- done 命令不需要重复平台参数\n"
+            f"- 每个步骤必须用 done 完成，不要跳过\n"
+            f"- ⚠️ 发现多个潜在子项目（如 frontend + backend 多服务）或扫描策略不明确时，"
+            f"**必须调用 `AskUserQuestion` 工具**询问用户决策（提供清晰选项 + 说明），"
+            f"调用后会**暂停等待**用户选择；**禁止**用 `sillyspec run scan --wait` 或自行假设。"
+            f"用户回答后继续 scan。"
+        )
+    else:
+        step_prompt = (
+            f"你是一个项目分析 agent。请对项目目录 {root_path} 执行 sillyspec scan。\n\n"
+            f"## ⚠️ 命令模板（严格复制，不要省略任何参数）\n\n"
+            f"**第 1 步 — 初始化（仅一次）：**\n"
+            f"```\n{init_cmd}\n```\n\n"
+            f"**第 2 步 — 启动 scan（仅一次，必须包含全部平台参数）：**\n"
+            f"```\n{scan_start_cmd}\n```\n\n"
+            f"**第 3-N 步 — 逐步推进（每次完成后执行）：**\n"
+            f"```\n{scan_done_cmd}\n"
+            f"```\n\n"
+            f"## 执行流程\n"
+            f"1. 执行 init 命令（--dir 指向源码目录 {root_path}）\n"
+            f"2. 执行 scan 启动命令（包含全部平台参数，文档输出到 {spec_root}）\n"
+            f"3. CLI 输出 step prompt → 执行扫描操作 → 用 done 命令推进\n"
+            f"4. 重复 step 3 直到 10/10 步全部完成\n\n"
+            f"## 规则\n"
+            f"- --dir 必须指向源码目录 {root_path}（不是 spec_root）\n"
+            f"- 对 {root_path} 目录中的源码只读，不要修改项目文件\n"
+            f"- .sillyspec/ 目录会在源码目录下创建（由 --dir 决定）\n"
+            f"- 文档生成在 {spec_root}/.sillyspec/docs/ 目录下\n"
+            f"- 启动 scan 命令必须包含 --spec-root/--runtime-root/--workspace-id/--scan-run-id\n"
+            f"- done 命令不需要重复平台参数\n"
+            f"- 每个步骤必须用 done 完成，不要跳过\n"
+            f"- ⚠️ 发现多个潜在子项目（如 frontend + backend 多服务）或扫描策略不明确时，"
+            f"**必须调用 `AskUserQuestion` 工具**询问用户决策（提供清晰选项 + 说明），"
+            f"调用后会**暂停等待**用户选择；**禁止**用 `sillyspec run scan --wait` 或自行假设。"
+            f"用户回答后继续 scan。"
+        )
 
     # Step 3 — 组装 AgentSpecBundle
     bundle = AgentSpecBundle(

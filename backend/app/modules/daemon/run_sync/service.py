@@ -90,6 +90,21 @@ class RunSyncService:
             # 顶层无 event_type/content → 当作 SDK 原始格式展开
             flat_messages.extend(_extract_sdk_messages(msg))
 
+        # task-12 / D-002@v1 / FR-07 FR-08：本次 submit_messages 调用内"已完成"
+        # thinking segment 集合。来源：(1) [THINKING_OVERRIDE] 信号声明的 segment；
+        # (2) 完整 thinking 行（_extract_sdk_messages 产出 isComplete=true 的 record）
+        # 落库后登记的 segment。同 segment 的 partial 到达时若已在集合内，跳过 INSERT
+        # （丢弃重复）。跨调用去重交给前端 normalize 覆盖（task-14 范围，design §5.3
+        # 修复1 简化方案 / 实现要求 6 优先简化）。
+        completed_segments: set[str] = set()
+        # task-12：partial 先到、完整后到（daemon 真实流式顺序，最常见场景）——
+        # 同 segment 的 partial 已 session.add 进 pending（未 commit），完整行到达
+        # 时必须回退旧 partial（从 session 删除 + 从 published_logs 移除），让 DB /
+        # SSE 只剩完整行（验收点："只落库完整行"）。AgentRunLog 无 metadata 列，无法
+        # 软删标记；commit 前 pending 对象还在 identity map，session.delete 直接撤销
+        # 即可，无额外 SQL 开销。
+        flushed_partials: dict[str, AgentRunLog] = {}
+
         for msg in flat_messages:
             # ql-20260616-003：daemon _eventToMessage 不发 channel/timestamp/log_id，
             # 后端按 event_type 映射 channel（text→stdout, tool_use/tool_result→tool_call,
@@ -97,6 +112,38 @@ class RunSyncService:
             event_type = msg.get("event_type") or ""
             content = msg.get("content", "")
             channel = msg.get("channel") or _channel_from_event_type(event_type)
+
+            # task-12 / D-002@v1 / FR-07 FR-08：thinking 按 segmentId 去重。
+            # daemon task-11 在 partial message 的 metadata 加 segmentId + isPartial，
+            # 并在完整 message 到达后 emit [THINKING_OVERRIDE] <segmentId> 信号。
+            # _extract_sdk_messages 完整 thinking 行带 metadata.segmentId + isComplete。
+            # 这里解析 segmentId / 是否 partial，并识别 override 信号做单次调用内去重。
+            metadata = msg.get("metadata") if isinstance(msg, dict) else None
+            segment_id = metadata.get("segmentId") if isinstance(metadata, dict) else None
+            is_partial = bool(metadata.get("isPartial")) if isinstance(metadata, dict) else False
+
+            # 识别 [THINKING_OVERRIDE] <segmentId> 信号 —— daemon → backend 的"该
+            # segment 已被完整 message 覆盖"通知。信号本身不落库（continue 跳过
+            # INSERT + publish），仅把 segmentId 加入 completed_segments，让后续同
+            # segment 的 partial 被丢弃。design §5.3 D1/D2 / task-11 契约。
+            if (
+                isinstance(content, str)
+                and content.startswith("[THINKING_OVERRIDE] ")
+                and segment_id
+            ):
+                completed_segments.add(segment_id)
+                # 若同 segment 的 partial 已落库（罕见：override 早于 partial flush），
+                # 一并回退，保持 DB 真相一致。
+                stale = flushed_partials.pop(segment_id, None)
+                if stale is not None:
+                    # 对象仅 session.add（pending，未 flush），用 expunge 撤销待插入
+                    # 即可（不会写库）。session.delete 要求对象已 persisted，会抛
+                    # InvalidRequestError。
+                    self._session.expunge(stale)
+                    count -= 1
+                    published_logs = [p for p in published_logs if p["log_id"] != str(stale.id)]
+                continue
+
             # ql-20260617-001：usage / session_id 在每条 message 顶层（daemon 透传），
             # 与 content 是否为空无关，全部提取。
             usage = msg.get("usage")
@@ -114,6 +161,24 @@ class RunSyncService:
             if not content:
                 # 无 content 的 message（理论上 daemon 不产生）跳过日志写入，
                 # 但 usage / session_id 已在上面提取。
+                continue
+
+            # task-12 去重判定 1：完整行到达时，若同 segment 的 partial 已落库，
+            # 回退旧 partial（撤销 pending INSERT + 从 published_logs 移除），然后
+            # 照常 INSERT 完整行。对应验收点"partial + 完整同 segment 时只落库完整
+            # 行"。仅 thinking 完整行（is_partial=False 且有 segment_id）触发。
+            if segment_id and not is_partial and segment_id in flushed_partials:
+                stale = flushed_partials.pop(segment_id)
+                # 对象仅 session.add（pending，未 flush），expunge 撤销待插入即可
+                # （不写库）。session.delete 要求对象已 persisted 会抛错，故走 expunge。
+                self._session.expunge(stale)
+                count -= 1
+                published_logs = [p for p in published_logs if p["log_id"] != str(stale.id)]
+
+            # task-12 去重判定 2：partial 到达时，若同 segment 已见完整行 / override
+            # 信号（completed_segments 命中），直接跳过 INSERT + publish（late partial
+            # 场景，乱序兜底）。
+            if segment_id and is_partial and segment_id in completed_segments:
                 continue
 
             log_id = uuid.uuid4()
@@ -134,6 +199,15 @@ class RunSyncService:
                     "timestamp": now.isoformat().replace("+00:00", "Z"),
                 }
             )
+
+            # 登记本 segment 的状态：
+            # - partial 行：记入 flushed_partials，等完整行到达时回退。
+            # - 完整行：加入 completed_segments，让本调用内后到的同 segment partial
+            #   被跳过（完整先到、partial 后到的乱序兜底）。
+            if segment_id and is_partial:
+                flushed_partials[segment_id] = log_entry
+            elif segment_id and not is_partial:
+                completed_segments.add(segment_id)
 
         # Sync AgentRun status: pending -> running on first messages
         agent_run_status: str | None = None
@@ -745,7 +819,17 @@ def _extract_sdk_messages(msg: dict) -> list[dict]:
             stamped = True
         return rec
 
-    for b in blocks:
+    # task-12 / D-002@v1 / FR-07 FR-08：thinking segmentId 去重 —— 完整 message
+    # 展开时给每个 thinking block 标记 segmentId = ${msg.id}:${block_index}，让上层
+    # submit_messages 能识别"同 segment 的 partial 已 flush"并跳过重复行。msg.id
+    # 来自 SDK message_start 事件（Anthropic 标准 assistant message id），同 turn
+    # 内稳定；block_index 是 content 数组下标，同一 message 内多个 thinking block
+    # 各自独立 segment。msg.id 缺失时退化为 "unknown:<idx>"（仍可去重，只是跨 turn
+    # 可能撞 id，前端 normalize 兜底覆盖）。design §5.3 D1/D2 / task-11 契约。
+    inner_msg_id = inner.get("id")
+    msg_id = inner_msg_id if isinstance(inner_msg_id, str) and inner_msg_id else "unknown"
+
+    for idx, b in enumerate(blocks):
         if not isinstance(b, dict):
             continue
         btype = b.get("type")
@@ -773,6 +857,13 @@ def _extract_sdk_messages(msg: dict) -> list[dict]:
                             "event_type": "text",
                             "content": f"[THINKING] {preview}",
                             "channel": "stdout",
+                            # task-12：完整 thinking 行标记 segmentId + isComplete，
+                            # 让 submit_messages 单次调用内丢弃同 segment 的 partial。
+                            "metadata": {
+                                "thinking": True,
+                                "segmentId": f"{msg_id}:{idx}",
+                                "isComplete": True,
+                            },
                         }
                     )
                 )
@@ -781,6 +872,12 @@ def _extract_sdk_messages(msg: dict) -> list[dict]:
             name = str(b.get("name", "") or "unknown") or "unknown"
             raw_input = b.get("input")
             input_obj = raw_input if isinstance(raw_input, dict) else {}
+            # task-13 / D-002@v1：提取 tool_use_id（SDK tool_use block 的 id，toolu_xxx）。
+            # Anthropic API 标准 assistant message content block 在 type=tool_use 时带
+            # id 字段（如 "toolu_01abc..."）。仅非空字符串才采用；缺失 → ""
+            # （退化，前端 normalize 回退 ±3 窗口，task-14 范围）。
+            raw_id = b.get("id")
+            tool_use_id = raw_id if isinstance(raw_id, str) and raw_id else ""
             # stdout text line：command 优先，否则整体 JSON（对齐 task-runner L1068-1083）
             cmd = str(input_obj.get("command", "") or "")
             if cmd:
@@ -802,14 +899,20 @@ def _extract_sdk_messages(msg: dict) -> list[dict]:
             )
             # 第二条：tool_call channel 的 JSON，前端 parseToolCallContent 渲染
             # ToolCallCard（对齐 task-runner.js L1091-1115 的 tc_content 格式）。
+            # task-13：补 tool_use_id 字段（snake_case，对齐 Anthropic API 命名 +
+            # task-runner 一致），让前端 normalize 全局配对（task-14）。
             ts = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-            tc_payload = {
+            tc_payload: dict = {
                 "tool": name,
                 "args": input_obj,
                 "timestamp": ts,
                 "status": "allowed",
                 "success": True,
             }
+            # tool_use_id 仅非空时携带（省略 vs null 均可让前端 hasOwnProperty 判断
+            # "无 id" 分支）。用条件注入省略字段，退化路径保持原形状。
+            if tool_use_id:
+                tc_payload["tool_use_id"] = tool_use_id
             try:
                 tc_json = json.dumps(tc_payload)
             except (TypeError, ValueError):

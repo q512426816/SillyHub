@@ -147,6 +147,20 @@ export interface DaemonConfig {
    * 字段非 nullable：默认值恒为非空数组（含 homedir），下游消费无需 null 检查。
    */
   allowed_roots: string[];
+  /**
+   * prompt 路径翻译映射，格式 "from:to"，如 "/data/spec-workspaces:C:/data/spec-workspaces"。
+   * daemon 在 prompt 透传给 SessionManager.create 前，把 from 替换为 to。
+   * 来自 process.env.SPEC_ROOT_MAP（daemon 启动脚本注入），env 优先于 config.json 落盘值。
+   * 空串表示不翻译（向后兼容旧 daemon，SPEC_ROOT_MAP 未设）。
+   *
+   * 背景：backend 在 Docker 容器内按 /data/spec-workspaces 拼 spec_root，daemon 跑在
+   * Windows 宿主机见 C:/data/spec-workspaces，二者物理同一目录（bind mount 共享）。
+   * 不翻译则 prompt 里 /data/... 字面落到 Claude Code Bash → Git Bash MSYS 转成
+   * C:\Program Files\Git\data\... → EPERM。
+   *
+   * 详见 design 2026-06-22-agent-run-pipeline-fix §4.1 A1。
+   */
+  spec_root_map: string;
 }
 
 // ── 默认值常量 ───────────────────────────────────────────────────────────────
@@ -193,6 +207,8 @@ export const DEFAULT_CONFIG: Readonly<DaemonConfig> = Object.freeze({
   // 注：用 [homedir()] 而非 homedir() —— 字段类型是数组。
   // 不在此处做 path.resolve（homedir() 已返回绝对路径），规范化在 loadConfig/normalizeAllowedRoots。
   allowed_roots: [homedir()],
+  // 2026-06-22-agent-run-pipeline-fix task-02：prompt 路径翻译映射，默认空串（向后兼容）。
+  spec_root_map: '',
 });
 
 // ── loadConfig（异步加载 + 合并默认 + 自动生成 runtime_id）──────────────────
@@ -255,6 +271,16 @@ export async function loadConfig(
     data.runtime_id = randomUUID();
     // 对齐 Python config.py:51 `self.save()`：自动生成后立即落盘。
     await saveConfig(data, path);
+  }
+
+  // ── spec_root_map env 覆盖（2026-06-22-agent-run-pipeline-fix task-02）──
+  // daemon 启动脚本（daemon-start.bat 等）注入 SPEC_ROOT_MAP，优先于 config.json。
+  // 不落盘（避免 host 路径被序列化到 config.json，跨机器冲突）。
+  // env !== undefined 即覆盖（含空串，空串 = 显式关闭翻译）。
+  // 详见 design §4.1 A1 第 2 层、§9 兼容策略。
+  const envSpecRootMap = process.env.SPEC_ROOT_MAP;
+  if (envSpecRootMap !== undefined) {
+    data.spec_root_map = envSpecRootMap;
   }
 
   return data;

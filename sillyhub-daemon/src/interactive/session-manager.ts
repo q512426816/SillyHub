@@ -147,6 +147,28 @@ interface PartialFlushBuffer {
   flushedTokens: number;
   /** 500ms flush 定时器句柄（null = idle，无 pending 内容）。 */
   timer: ReturnType<typeof setTimeout> | null;
+  /**
+   * task-11（FR-07/FR-08，design §5.3 D1/D2）：当前 turn 的 SDK message.id
+   *（来自 message_start 事件，用于拼 segmentId = `${messageId}:${blockIndex}`）。
+   * null = 尚未收到 message_start，退化方案用 currentRunId。
+   */
+  currentMessageId: string | null;
+  /**
+   * task-11：当前累积中的 thinking segment 的 segmentId（`messageId:index` 或
+   * 退化 `runId:thinking`）。null = 当前 buffer 非 thinking 或尚未收到 delta。
+   */
+  currentSegmentId: string | null;
+  /**
+   * task-11：本 turn 已 flush 的 thinking partial segment 列表（供 _clearPartialBuffer
+   * 在完整 message 到达时 emit [THINKING_OVERRIDE] 覆盖信号）。turn 边界
+   *（_clearPartialBuffer）清空。
+   */
+  flushedSegments: Array<{ segmentId: string; logTimestamp: string }>;
+  /**
+   * task-11：本 turn 已到达完整 message 的 thinking segmentId 集合（late partial
+   * 守卫：同 segment 的后续 partial 直接丢弃）。_clearPartialBuffer 后清空（turn 边界）。
+   */
+  completedSegments: Set<string>;
 }
 
 /** 默认空闲阈值（秒）= 30min（FR-06 / D-004@v1）。 */
@@ -1253,6 +1275,12 @@ export class SessionManager {
     }
     // task-10：turn result 收尾后排队 flush（currentRunId 已清空）。
     this._scheduleFlush();
+    // task-11（边界 7）：turn 边界重置 completedSegments —— 新 turn 的 segmentId
+    // 空间独立，避免跨 turn 误判 late partial。buffer 不销毁（session 仍 active）。
+    const buf = this._partialBuffers.get(state.sessionId);
+    if (buf) {
+      buf.completedSegments = new Set<string>();
+    }
   }
 
   /**
@@ -1299,7 +1327,31 @@ export class SessionManager {
     // 完整 assistant message 到达 → 清空 partial buffer 的未 flush 尾部，
     // 避免与完整 message（backend 展开为全文）重复。
     if (msgType === 'assistant') {
-      this._clearPartialBuffer(state.sessionId);
+      // task-11（design §5.3 D1/D2）：先抓已 flush partial 快照（sync 清理前），
+      // 再 sync 清 buffer + 记 completedSegments，转发完整 message，最后异步 emit
+      // [THINKING_OVERRIDE] 覆盖信号（必须在完整 message 之后，语义"完整行覆盖
+      // partial 行"）。driver 的 onMessage 回调不 await _onMessage 返回值，故 override
+      // 异步 emit 不影响转发时序。
+      const completed = this._extractCompletedSegments(state, msg);
+      const buf = this._partialBuffers.get(state.sessionId);
+      const flushedSnapshot = buf
+        ? buf.flushedSegments.slice()
+        : [];
+      // 第一阶段：sync 清 buffer + 记录 completedSegments（late partial 守卫立即生效）。
+      this._clearPartialBufferSync(state.sessionId, completed);
+      // 转发完整 message（保持原有 await onTurnMessage 语义）。
+      const runId = state.currentRunId;
+      if (runId) {
+        await this.deps.onTurnMessage(state.sessionId, runId, msg);
+      }
+      // 第二阶段：异步 emit override 信号（fire-and-forget，不阻塞下一事件；
+      // 失败仅记日志，不影响 turn 主流程）。
+      this._emitOverrideSignals(state.sessionId, runId, completed, flushedSnapshot)
+        .catch((err) => {
+          // eslint-disable-next-line no-console
+          console.error('[session-manager] thinking override emit failed', err);
+        });
+      return;
     }
 
     const runId = state.currentRunId;
@@ -1309,6 +1361,60 @@ export class SessionManager {
   }
 
   // ── ql-20260621-partial：streaming delta 缓冲节流 ──────────────────────────
+
+  /**
+   * task-11（design §5.3 D1/D2）：拼 thinking segment 的稳定 segmentId。
+   *
+   * 优先方案：`${messageId}:${blockIndex}`（同 assistant message 内 content block
+   * 数组下标稳定，跨 turn 用 messageId 隔离）。退化方案：message.id 缺失时退化为
+   * `${runId}:thinking`（同 turn 所有 thinking 共享一个 segmentId，边界 6 接受精度损失）。
+   *
+   * @param buf 当前 PartialFlushBuffer（读 currentMessageId）
+   * @param blockIndex content_block_delta 事件的 index 字段（缺失用 'thinking'）
+   */
+  private _resolveSegmentId(
+    state: SessionState,
+    buf: PartialFlushBuffer,
+    blockIndex: number | undefined,
+    messageIdHint?: string,
+  ): string {
+    const mid = messageIdHint ?? buf.currentMessageId;
+    const idx = typeof blockIndex === 'number' ? String(blockIndex) : 'thinking';
+    if (mid) {
+      return `${mid}:${idx}`;
+    }
+    // 退化：同 turn 共享 segmentId（接受合并精度损失，边界 6）。
+    const runKey = state.currentRunId ?? 'unknown';
+    return `${runKey}:thinking`;
+  }
+
+  /**
+   * task-11：从完整 assistant message 提取所有 thinking block 的 segmentId。
+   *
+   * 遍历 `msg.message.content` 数组，对 `type==='thinking'` 的 block 用其数组下标
+   * 拼 segmentId（与 partial 的 `messageId:blockIndex` 对齐）。messageId 优先用
+   * `msg.message.id`；缺失时退化到 currentRunId:thinking（同 _resolveSegmentId 策略）。
+   */
+  private _extractCompletedSegments(
+    state: SessionState,
+    msg: SDKMessage,
+  ): Set<string> {
+    const segments = new Set<string>();
+    const message = (msg as { message?: { id?: string; content?: unknown } }).message;
+    if (!message || typeof message !== 'object') return segments;
+    const mid =
+      typeof message.id === 'string' && message.id ? message.id : null;
+    const runKey = state.currentRunId ?? 'unknown';
+    const content = message.content;
+    if (!Array.isArray(content)) return segments;
+    for (let i = 0; i < content.length; i++) {
+      const block = content[i] as { type?: string } | null;
+      if (block && block.type === 'thinking') {
+        segments.add(mid ? `${mid}:${i}` : `${runKey}:thinking`);
+      }
+    }
+    return segments;
+  }
 
   /**
    * 把一条 partial 事件（SDKPartialAssistantMessage / SDKThinkingTokensMessage）
@@ -1330,6 +1436,10 @@ export class SessionManager {
         lastTokens: 0,
         flushedTokens: 0,
         timer: null,
+        currentMessageId: null,
+        currentSegmentId: null,
+        flushedSegments: [],
+        completedSegments: new Set<string>(),
       };
       this._partialBuffers.set(sessionId, buf);
     }
@@ -1340,13 +1450,41 @@ export class SessionManager {
       if (event && typeof event === 'object') {
         const ev = event as {
           type?: string;
+          index?: number;
           delta?: { type?: string; thinking?: string; text?: string };
+          message?: { id?: string };
         };
+        // task-11：message_start 提取 message.id（segmentId 拼接用，跨 message 隔离）。
+        // SDK 实测 message_start 带 message.id（Anthropic Messages API 标准）；若缺失
+        //（退化方案）后续 segmentId 回退到 currentRunId。
+        if (ev.type === 'message_start' && ev.message) {
+          const mid = ev.message.id;
+          if (typeof mid === 'string' && mid) {
+            buf.currentMessageId = mid;
+          }
+        }
         // content_block_start 带 content_block.type==='thinking' 仅是开始标记，
         // thinking_delta 会跟随，无需特殊处理（避免 emit 空消息）。
         if (ev.type === 'content_block_delta' && ev.delta) {
           const delta = ev.delta;
           if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+            // task-11（边界 5，late partial 守卫）：完整 message 已覆盖该 segment
+            // → 后到的 partial 直接丢弃（网络重排，罕见）。不累积、不重启 timer。
+            // messageIdHint 从当前 msg 顶层提取（late partial 场景 buf.currentMessageId
+            // 可能已被 _clearPartialBuffer 重置，但 late delta 仍带 message.id）。
+            const msgMid = (msg as { message?: { id?: string } }).message?.id;
+            const midHint =
+              typeof msgMid === 'string' && msgMid ? msgMid : undefined;
+            const segId = this._resolveSegmentId(
+              state,
+              buf,
+              ev.index,
+              midHint,
+            );
+            if (buf.completedSegments.has(segId)) {
+              return;
+            }
+            buf.currentSegmentId = segId;
             buf.thinking += delta.thinking;
           } else if (delta.type === 'text_delta' && typeof delta.text === 'string') {
             buf.assistant += delta.text;
@@ -1416,12 +1554,20 @@ export class SessionManager {
     buf.assistant = '';
 
     if (thinking) {
+      // task-11（FR-07/FR-08）：partial 行携带 segmentId + isPartial，
+      // 供 backend（task-12）+ 前端 normalize 识别「该 segment 已有完整行时丢弃」。
+      const segmentId = buf.currentSegmentId ?? this._resolveSegmentId(state, buf, undefined);
       const formatted = {
         event_type: 'text',
         content: `[THINKING] ${thinking}`,
         channel: 'stdout',
+        metadata: { thinking: true, segmentId, isPartial: true },
       } as unknown as SDKMessage;
+      // 记录已 flush 的 segment（完整 message 到达时据此 emit override 信号）。
+      buf.flushedSegments.push({ segmentId, logTimestamp: new Date().toISOString() });
       await this.deps.onTurnMessage(sessionId, runId, formatted);
+      // 清空 currentSegmentId（下批 delta 会重新解析；text_delta 不污染）。
+      buf.currentSegmentId = null;
     }
     if (assistant) {
       const formatted = {
@@ -1450,8 +1596,15 @@ export class SessionManager {
    * 完整 assistant message 到达时调用：delta 是完整内容子集，backend 会展开
    * 完整 message 为全文 [THINKING]/[ASSISTANT]，未 flush 的 partial 尾部
    * 必须丢弃避免重复。
+   *
+   * task-11（design §5.3 D1/D2）：sync 部分只清 buffer + 记录 completedSegments
+   *（late partial 守卫立即生效）；override 信号由 _emitOverrideSignals 异步发
+   *（在完整 message 转发之后，语义上"完整行覆盖 partial 行"）。
    */
-  private _clearPartialBuffer(sessionId: string): void {
+  private _clearPartialBufferSync(
+    sessionId: string,
+    completedSegments: ReadonlySet<string> = new Set(),
+  ): void {
     const buf = this._partialBuffers.get(sessionId);
     if (!buf) return;
     if (buf.timer) {
@@ -1462,6 +1615,52 @@ export class SessionManager {
     buf.assistant = '';
     buf.lastTokens = 0;
     buf.flushedTokens = 0;
+
+    // task-11：记录已完成 segment（late partial 守卫用）。
+    for (const segId of completedSegments) {
+      buf.completedSegments.add(segId);
+    }
+
+    // flushedSegments 清空（override 已在 _emitOverrideSignals 里消费）。
+    // 注意 completedSegments 不在此清——完整 message 到达 ≠ turn 结束，late partial
+    // 守卫需在本 turn 内持续生效；turn 真正结束由 _onResult 收尾时清。
+    buf.flushedSegments = [];
+    buf.currentSegmentId = null;
+    buf.currentMessageId = null;
+  }
+
+  /**
+   * task-11：对「已 flush 过 + 完整 message 已覆盖」的 segment emit
+   * [THINKING_OVERRIDE] <segmentId> 覆盖信号。
+   *
+   * daemon 无法召回已发给 backend 的 partial 行（HTTP 已发、可能已落库 + SSE push），
+   * 只能 emit 信号通知 backend（task-12 据此丢弃同 segmentId 的 partial 落库行）+
+   * 前端 normalize（据此覆盖展示）。在完整 message 转发之后异步调用，不阻塞主流程。
+   *
+   * @param flushedSnapshot 调用方（_onMessage）在 _clearPartialBufferSync 清空
+   *   flushedSegments 之前抓的快照（sync 清理后 buf.flushedSegments 已空）。
+   */
+  private async _emitOverrideSignals(
+    sessionId: string,
+    runId: string | undefined,
+    completedSegments: ReadonlySet<string>,
+    flushedSnapshot: Array<{ segmentId: string; logTimestamp: string }>,
+  ): Promise<void> {
+    if (completedSegments.size === 0 || !runId) return;
+    const overrides = flushedSnapshot.filter((s) =>
+      completedSegments.has(s.segmentId),
+    );
+    if (overrides.length === 0) return;
+    await Promise.all(
+      overrides.map((s) =>
+        this.deps.onTurnMessage(sessionId, runId, {
+          event_type: 'text',
+          content: `[THINKING_OVERRIDE] ${s.segmentId}`,
+          channel: 'stdout',
+          metadata: { thinking: true, segmentId: s.segmentId, stale: true },
+        } as unknown as SDKMessage),
+      ),
+    );
   }
 
   /**

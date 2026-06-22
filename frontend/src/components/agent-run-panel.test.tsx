@@ -23,6 +23,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentRunPanel } from "@/components/agent-run-panel";
+import { getAgentRun } from "@/lib/agent";
 import type { SessionPermissionRequest } from "@/lib/daemon";
 import {
   useAgentRunStream,
@@ -42,6 +43,17 @@ vi.mock("@/stores/session", () => ({
     getState: () => ({ accessToken: "test-token" }),
   },
 }));
+
+// task-16：mock getAgentRun 避免 panel 内部 token 轮询触发真实 fetch，
+// 干扰其他用例对 fetch 调用次数的断言。工厂里只声明 vi.fn() 占位，
+// 实际实现由 beforeEach 重新 set（因 vi.restoreAllMocks 会清空 implementation）。
+vi.mock("@/lib/agent", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/agent")>("@/lib/agent");
+  return {
+    ...actual,
+    getAgentRun: vi.fn(),
+  };
+});
 
 // ──────────────────────────────────────────────────────────────────────────
 // Fixtures
@@ -131,6 +143,14 @@ describe("AgentRunPanel", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.mocked(useAgentRunStream).mockReset();
+    // task-16：restoreAllMocks 会清空 vi.fn() 的 implementation，需重设 getAgentRun
+    // 返回空 usage（默认场景），避免 panel token 轮询触发真实 fetch。
+    vi.mocked(getAgentRun).mockImplementation(() =>
+      Promise.resolve({
+        input_tokens: null,
+        output_tokens: null,
+      } as Awaited<ReturnType<typeof getAgentRun>>),
+    );
   });
 
   afterEach(() => {

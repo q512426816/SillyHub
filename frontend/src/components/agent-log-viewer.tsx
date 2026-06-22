@@ -54,6 +54,17 @@ import type { AgentLogInputControls, ProcessedLog, ScanCheckResult } from "./age
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * task-15 / FR-10 / D-002@v1：channel 着色强化（参照 prototype:32-38 着色方案）。
+ *
+ * - user_input 紫（紫边框 + 紫文字）—— 现有 sky 改 violet，强化"用户回合边界"语义
+ * - thinking 灰（保持 zinc-600）
+ * - assistant 亮黑（保持 zinc-900）
+ * - tool 蓝（保持 blue-700）
+ * - 成功 result 绿（保持 emerald-700）
+ * - 失败 result 红（新增——TOOL_RESULT 行需根据 success 切色；renderLogLines 是纯文本
+ *   无 success 信息，保持 emerald；AgentLogRow 的 tool 卡片徽标已单独处理失败红）
+ */
 function semanticLineClass(line: string): string {
   if (line.startsWith("[TOOL_USE]")) return "font-medium text-blue-700";
   if (line.startsWith("[TOOL_RESULT]")) return "font-medium text-emerald-700";
@@ -96,8 +107,8 @@ function logChannelMeta(channel: AgentRunLogEntry["channel"]): {
       return {
         label: "REPLY",
         Icon: CornerDownRight,
-        badgeClass: "border-sky-200 bg-sky-50 text-sky-700",
-        rowClass: "bg-sky-50/50 hover:bg-sky-50",
+        badgeClass: "border-violet-200 bg-violet-50 text-violet-700",
+        rowClass: "bg-violet-50/50 hover:bg-violet-50",
       };
     default:
       return {
@@ -107,6 +118,105 @@ function logChannelMeta(channel: AgentRunLogEntry["channel"]): {
         rowClass: "hover:bg-zinc-100/60",
       };
   }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Turn grouping + tool duration (task-15 / FR-10)                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * task-15 / FR-10 / D-002@v1：按 user_input / 完整 assistant 消息边界切分 turn。
+ *
+ * 一个 turn = [user_input?] + thinking段 + assistant 文本 + 其触发的 tool_use/result 集合。
+ *
+ * 切分规则（design.md §5.4 第 2 点）：
+ * - 遇到 channel=user_input → 开启新 turn（用户发言边界）
+ * - 遇到 mergedAssistantContent 非空（完整 assistant 消息，normalize 已合并流式 delta）：
+ *   - 当前 turn 还没有 assistant 内容（通常紧跟 user_input）→ 归入当前 turn
+ *     （构成 user_input + assistant + 其后 tool 的完整回合）
+ *   - 当前 turn 已有 assistant 内容 → 开启新 turn（agent 自述新回合，无 user_input）
+ * - tool_call / parsedStdoutTool / parsedToolResult / mergedToolResult / mergedThinkingContent
+ *   → 归入当前 turn（assistant 触发的工具调用与思考）
+ * - 其他 stdout / stderr / pending_input → 归入当前 turn（回合内的过程日志）
+ *
+ * 边界（task-15 边界 1/7）：
+ * - 空 filteredLogs（用户过滤后无日志）→ 返回 []，由上层空态分支兜底
+ * - 过滤后无边界（如只剩 tool_call）→ 全部归 1 个 turn（task-15 边界 7）
+ */
+export function groupIntoTurns(logs: ProcessedLog[]): ProcessedLog[][] {
+  const turns: ProcessedLog[][] = [];
+  let current: ProcessedLog[] = [];
+  let currentHasAssistant = false;
+  for (const p of logs) {
+    const isUserInput = p.log.channel === "user_input";
+    const isAssistantMsg = p.mergedAssistantContent != null
+      && p.mergedAssistantContent.trim().length > 0;
+    // user_input 总是开新 turn；assistant 仅在当前 turn 已有 assistant 时才开新 turn
+    const isTurnBoundary = (isUserInput || (isAssistantMsg && currentHasAssistant))
+      && current.length > 0;
+    if (isTurnBoundary) {
+      turns.push(current);
+      current = [];
+      currentHasAssistant = false;
+    }
+    if (isAssistantMsg) currentHasAssistant = true;
+    current.push(p);
+  }
+  if (current.length > 0) turns.push(current);
+  return turns;
+}
+
+/**
+ * task-15 / FR-10：计算 tool 卡片耗时（tool_use→tool_result 时间戳差）。
+ *
+ * 耗时来源（task-15 实现要求 §3）：
+ * - tool_use 卡片的 ProcessedLog.mergedToolResult 由 normalize 从后续 [TOOL_RESULT] stdout 合并而来
+ * - 但 result 的时间戳不在 mergedToolResult（只是 body 文本），需在 allLogs 中回查
+ * - 策略：找 tool 卡片之后首条 channel=stdout 且含 [TOOL_RESULT] 的 log，取其 timestamp
+ *
+ * 退化（task-15 边界 8）：result 缺失（tool 进行中）或 timestamp 解析失败 → 返回 undefined，
+ * StatusBadge 只显示状态图标不显示秒数。
+ */
+function computeToolDurationMs(
+  processedLog: ProcessedLog,
+  allLogs: ProcessedLog[],
+): number | undefined {
+  const startIso = processedLog.log.timestamp;
+  if (!startIso) return undefined;
+  const startTime = new Date(startIso).getTime();
+  if (Number.isNaN(startTime)) return undefined;
+  const startIdx = allLogs.indexOf(processedLog);
+  const searchStart = startIdx >= 0 ? startIdx + 1 : 0;
+  for (let i = searchStart; i < allLogs.length; i++) {
+    const candidate = allLogs[i];
+    if (!candidate) continue;
+    // task-15：hidden=true 的 log（如被 normalize 合并到 tool 卡片的 [TOOL_RESULT] stdout）
+    // 仍提供时间戳——hidden 只控制渲染，不影响耗时计算。
+    if (candidate.log.channel !== "stdout") continue;
+    const content = asString(candidate.log.content_redacted);
+    if (/\[TOOL_RESULT\]/.test(content)) {
+      const endIso = candidate.log.timestamp;
+      if (!endIso) return undefined;
+      const endTime = new Date(endIso).getTime();
+      if (Number.isNaN(endTime)) return undefined;
+      return Math.max(0, endTime - startTime);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * task-15 / FR-10：thinking 折叠摘要（单行截断）。
+ *
+ * 参照 prototype:66 `.thinking-summary` 的 `text-overflow: ellipsis`：折叠态只展示
+ * 首 60 字符（去换行 + trim）+"..."。展开后 CollapsibleSection 渲染 children 完整内容。
+ *
+ * 边界（task-15 边界 2）：超长截断；短内容（< 60）原样返回不带 "..."。
+ */
+function thinkingSummary(content: string): string {
+  const flat = content.replace(/\s+/g, " ").trim();
+  if (flat.length <= 60) return flat;
+  return flat.slice(0, 60) + "...";
 }
 
 function formatLogClock(iso: string): string {
@@ -202,6 +312,11 @@ export function AgentLogRow({
   // Check if stdout is thinking-only content
   const isThinking = log.channel === "stdout" && isThinkingContent(contentSafe);
 
+  // task-15 / FR-10：tool 卡片耗时（tool_use→result 时间戳差）。
+  // 仅 tool_call / parsedStdoutTool 卡片计算，其他 channel 不需要。
+  const isToolCard = Boolean(toolCall || processedLog.parsedStdoutTool);
+  const toolDurationMs = isToolCard ? computeToolDurationMs(processedLog, allLogs) : undefined;
+
   return (
     <div
       className={cn(
@@ -231,6 +346,7 @@ export function AgentLogRow({
             <ToolCallPreview
               entry={toolCall}
               mergedResult={processedLog.mergedToolResult}
+              durationMs={toolDurationMs}
             />
           </div>
         ) : processedLog.parsedStdoutTool ? (
@@ -239,6 +355,7 @@ export function AgentLogRow({
             <ToolCallPreview
               entry={processedLog.parsedStdoutTool}
               mergedResult={processedLog.mergedToolResult}
+              durationMs={toolDurationMs}
             />
           </div>
         ) : processedLog.parsedToolResult ? (
@@ -251,11 +368,17 @@ export function AgentLogRow({
             {processedLog.mergedAssistantContent}
           </div>
         ) : isThinking ? (
-          /* ql-20260617-011：纯 [THINKING] delta 合并后渲染为完整段落；
-             [SYSTEM] 折叠块与 assistant 分开显示。 */
+          /* ql-20260617-011 + task-15 / FR-10：纯 [THINKING] delta 合并后渲染为完整段落。
+             task-15：thinking 默认折叠成单行摘要（60 字符 + "..."），点击展开全文。
+             参照 prototype:62-69 `.thinking-toggle/.thinking-summary`。
+             [SYSTEM] 折叠块保持原样（defaultOpen=true，非 thinking 内容）。 */
           <div className="font-mono [overflow-wrap:anywhere]">
             {processedLog.mergedThinkingContent != null ? (
-              <CollapsibleSection title="思考">
+              <CollapsibleSection
+                title="思考"
+                defaultOpen={false}
+                summary={thinkingSummary(processedLog.mergedThinkingContent)}
+              >
                 <div className="whitespace-pre-wrap break-words text-zinc-600">
                   {processedLog.mergedThinkingContent}
                 </div>
@@ -338,6 +461,98 @@ export function AgentLogRow({
             )}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  TurnBlock (task-15 / FR-10)                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * task-15 / FR-10 / D-002@v1：单个 turn 的渲染容器。
+ *
+ * - turn-head：Turn N + 时间范围（turn 内首末时间戳 "HH:MM:SS → HH:MM:SS"），
+ *   参照 prototype:151-155 `.turn-head/.turn-num/.turn-ts`。
+ * - turn-body：按顺序渲染各 AgentLogRow（thinking 折叠、tool 卡片、assistant、user_input）。
+ *
+ * 兼容（task-15 实现要求 §4）：
+ * - compact：turn-head 简化（不显示时间范围，只 Turn N）
+ * - embedded（variant="embedded"）：turn 边框弱化（无 border，仅底部 divider）
+ */
+function TurnBlock({
+  turnLogs,
+  turnIdx,
+  compact,
+  embedded,
+  inputControls,
+  allLogs,
+}: {
+  turnLogs: ProcessedLog[];
+  turnIdx: number;
+  compact?: boolean;
+  embedded?: boolean;
+  inputControls?: AgentLogInputControls;
+  allLogs: ProcessedLog[];
+}): JSX.Element {
+  if (turnLogs.length === 0) return <></>;
+
+  const timestamps = turnLogs
+    .map((p) => p.log.timestamp)
+    .filter((ts): ts is string => Boolean(ts));
+  const firstTs = timestamps[0];
+  const lastTs = timestamps[timestamps.length - 1];
+  const showTimeRange = !compact && firstTs && lastTs && firstTs !== lastTs;
+  const timeRangeText = showTimeRange
+    ? `${formatLogClock(firstTs!)} → ${formatLogClock(lastTs!)}`
+    : firstTs && !compact
+      ? formatLogClock(firstTs)
+      : null;
+
+  return (
+    <div
+      className={cn(
+        "min-w-0",
+        embedded
+          ? "border-b border-zinc-100 last:border-b-0"
+          : "rounded-md border border-zinc-200 bg-white",
+      )}
+    >
+      <div
+        className={cn(
+          "flex items-center gap-2 px-3 py-1.5",
+          embedded ? "bg-transparent" : "border-b border-zinc-100 bg-zinc-50/70",
+        )}
+      >
+        <span className="inline-flex items-center rounded bg-zinc-200/70 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600">
+          Turn {turnIdx + 1}
+        </span>
+        {timeRangeText && (
+          <span className="text-[10px] text-zinc-400">{timeRangeText}</span>
+        )}
+      </div>
+      <div className="min-w-0 divide-y divide-zinc-100">
+        {turnLogs.map((plog) => (
+          // 保留单条 AgentLogRow 的 ErrorBoundary 隔离（task-15 边界 5 双层隔离）：
+          // 某条日志渲染失败不影响同 turn 其他条目。
+          <ErrorBoundary
+            key={plog.log.id}
+            label="agent-log-row"
+            fallback={() => (
+              <div className="px-3 py-2 text-[11px] text-red-600/70">
+                该条日志渲染失败
+              </div>
+            )}
+          >
+            <AgentLogRow
+              processedLog={plog}
+              allLogs={allLogs}
+              compact={compact}
+              inputControls={inputControls}
+            />
+          </ErrorBoundary>
+        ))}
       </div>
     </div>
   );
@@ -558,24 +773,26 @@ export function AgentLogViewer({
               </div>
             )}
             {filteredLogs.length > 0 && (
-              <div className="min-w-0 max-w-full divide-y divide-zinc-200">
-                {filteredLogs.map((plog) => (
-                  // ql-20260620：单条日志渲染异常隔离——某条数据有问题时只显示占位行，
-                  // 不再让整页崩成 client-side exception。key 必须在最外层 ErrorBoundary 上。
+              <div className="min-w-0 max-w-full space-y-2 p-2">
+                {groupIntoTurns(filteredLogs).map((turnLogs, turnIdx) => (
+                  // task-15 / FR-10：turn 分组渲染——单 turn 渲染失败不影响其他 turn
+                  // （ErrorBoundary 双层隔离：外层 turn 级，内层 row 级见 TurnBlock）。
                   <ErrorBoundary
-                    key={plog.log.id}
-                    label="agent-log-row"
+                    key={`turn-${turnIdx}`}
+                    label="agent-log-turn"
                     fallback={() => (
                       <div className="px-3 py-2 text-[11px] text-red-600/70">
-                        该条日志渲染失败
+                        该 turn 渲染失败
                       </div>
                     )}
                   >
-                    <AgentLogRow
-                      processedLog={plog}
-                      allLogs={processedLogs}
+                    <TurnBlock
+                      turnLogs={turnLogs}
+                      turnIdx={turnIdx}
                       compact={compact}
+                      embedded={variant === "embedded"}
                       inputControls={inputControls}
+                      allLogs={processedLogs}
                     />
                   </ErrorBoundary>
                 ))}

@@ -477,6 +477,129 @@ class TestSubmitMessagesSync:
         assert tc["success"] is True
 
     @pytest.mark.asyncio
+    async def test_submit_messages_sdk_tool_use_block_carries_tool_use_id(
+        self, db_session: AsyncSession
+    ) -> None:
+        """task-13 / D-002@v1：interactive 模式（_extract_sdk_messages 展开完整
+        SDK assistant message）必须把 tool_use block 的 id（toolu_xxx）透传到
+        tool_call JSON 的 tool_use_id 字段，让前端 normalize 全局配对（task-14）。
+
+        batch 模式（task-runner.ts）已对齐，本测试覆盖 interactive 模式。
+        两路径必须一致（边界5）。
+        """
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "tui-tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        count = await svc.submit_messages(
+            lease.id,
+            "tui-tok",
+            agent_run.id,
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_test456",
+                                "name": "Read",
+                                "input": {"file_path": "/x"},
+                            }
+                        ],
+                    },
+                }
+            ],
+        )
+        assert count == 2
+        stmt = (
+            select(AgentRunLog)
+            .where(col(AgentRunLog.run_id) == agent_run.id)
+            .order_by(col(AgentRunLog.timestamp))
+        )
+        logs = (await db_session.execute(stmt)).scalars().all()
+        # 第一条 stdout 文本
+        assert logs[0].channel == "stdout"
+        assert logs[0].content_redacted == '[TOOL_USE] Read: {"file_path": "/x"}'
+        # 第二条 tool_call JSON 含 tool_use_id（snake_case）
+        assert logs[1].channel == "tool_call"
+        tc = json.loads(logs[1].content_redacted)
+        assert tc["tool"] == "Read"
+        assert tc["tool_use_id"] == "toolu_test456"
+        assert tc["args"] == {"file_path": "/x"}
+        assert tc["status"] == "allowed"
+        assert tc["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_submit_messages_sdk_tool_use_block_no_id_omits_field(
+        self, db_session: AsyncSession
+    ) -> None:
+        """task-13 退化：SDK tool_use block 无 id 字段时，tool_call JSON 应省略
+        tool_use_id（不崩、不报错），前端 normalize 回退 ±3 窗口（task-14）。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "noid-tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        count = await svc.submit_messages(
+            lease.id,
+            "noid-tok",
+            agent_run.id,
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                # 故意省略 id
+                                "name": "Bash",
+                                "input": {"command": "echo hi"},
+                            }
+                        ],
+                    },
+                }
+            ],
+        )
+        assert count == 2
+        stmt = (
+            select(AgentRunLog)
+            .where(col(AgentRunLog.run_id) == agent_run.id)
+            .order_by(col(AgentRunLog.timestamp))
+        )
+        logs = (await db_session.execute(stmt)).scalars().all()
+        tc = json.loads(logs[1].content_redacted)
+        # 无 id → 省略字段（前端 hasOwnProperty 判断走退化分支）
+        assert "tool_use_id" not in tc
+        assert tc["tool"] == "Bash"
+        assert tc["args"] == {"command": "echo hi"}
+
+    @pytest.mark.asyncio
     async def test_submit_messages_sdk_tool_result_block(self, db_session: AsyncSession) -> None:
         """ql-006：user message（role=user）的 tool_result block 必须落成
         [TOOL_RESULT] 日志。content 可能是 str 或 [{type:text,text:...}]。"""
@@ -587,6 +710,379 @@ class TestSubmitMessagesSync:
         assert logs[0].content_redacted == "[THINKING] 让我想想"
         assert logs[1].content_redacted == "[ASSISTANT] 我来执行 ls"
         assert logs[2].content_redacted == "[TOOL_USE] Bash: ls"
+
+    # ── task-12 / D-002@v1 / FR-07 FR-08：thinking 按 segmentId 去重 ─────────
+    #
+    # partial（daemon 节流 flush 的增量 thinking 片段）与完整 assistant message
+    # 的 [THINKING] 展开行重复（design §5.3 D1/D2）。task-11 daemon 端给 partial
+    # message 加 metadata.segmentId + isPartial:true，并紧跟 [THINKING_OVERRIDE]
+    # <segmentId> 信号；完整 message 的 thinking block segmentId = ${msg.id}:${idx}。
+    # 本组测试验证 backend submit_messages 单次调用内按 segmentId 去重 —— 完整优先，
+    # 同 segment partial 被丢弃；override 信号不落库。
+
+    @pytest.mark.asyncio
+    async def test_submit_messages_thinking_same_segment_partial_then_complete_dedup(
+        self, db_session: AsyncSession
+    ) -> None:
+        """task-12：同一次 submit_messages 调用里，partial（segmentId=msg_a:0）
+        先到、完整 message（thinking block index=0 → segmentId=msg_a:0）后到 ——
+        AgentRunLog 只剩完整 thinking 行，partial 被丢弃。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "dedup-tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        count = await svc.submit_messages(
+            lease.id,
+            "dedup-tok",
+            agent_run.id,
+            [
+                # 1) partial 增量片段（daemon 节流 flush）
+                {
+                    "event_type": "text",
+                    "content": "[THINKING] 正在想",
+                    "channel": "stdout",
+                    "metadata": {"thinking": True, "segmentId": "msg_a:0", "isPartial": True},
+                },
+                # 2) 完整 assistant message —— _extract_sdk_messages 展开为
+                #    [THINKING] 完整内容，segmentId = msg_a:0
+                {
+                    "type": "assistant",
+                    "message": {
+                        "id": "msg_a",
+                        "role": "assistant",
+                        "content": [
+                            {"type": "thinking", "thinking": "正在想完整版"},
+                        ],
+                    },
+                },
+            ],
+        )
+        # partial(0) + 完整 thinking(1) = 1（partial 被去重跳过）
+        assert count == 1
+        stmt = (
+            select(AgentRunLog)
+            .where(col(AgentRunLog.run_id) == agent_run.id)
+            .order_by(col(AgentRunLog.timestamp))
+        )
+        logs = (await db_session.execute(stmt)).scalars().all()
+        assert len(logs) == 1
+        assert logs[0].channel == "stdout"
+        # 只剩完整行（内容是完整版的 [THINKING]）
+        assert logs[0].content_redacted == "[THINKING] 正在想完整版"
+
+    @pytest.mark.asyncio
+    async def test_submit_messages_thinking_override_signal_not_persisted(
+        self, db_session: AsyncSession
+    ) -> None:
+        """task-12：[THINKING_OVERRIDE] <segmentId> 信号 message 不落库（仅是
+        daemon→backend 的"已覆盖"通知），且信号声明的 segment 被加入 completed
+        集合，后续同 segment partial 被跳过。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "ov-tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        count = await svc.submit_messages(
+            lease.id,
+            "ov-tok",
+            agent_run.id,
+            [
+                # 1) override 信号（完整 message 已到达，daemon 通知"该 segment 已覆盖"）
+                {
+                    "event_type": "text",
+                    "content": "[THINKING_OVERRIDE] msg_b:0",
+                    "channel": "stdout",
+                    "metadata": {
+                        "thinking": True,
+                        "segmentId": "msg_b:0",
+                        "stale": True,
+                    },
+                },
+                # 2) 迟到的同 segment partial —— 应被跳过
+                {
+                    "event_type": "text",
+                    "content": "[THINKING] 迟到的片段",
+                    "channel": "stdout",
+                    "metadata": {
+                        "thinking": True,
+                        "segmentId": "msg_b:0",
+                        "isPartial": True,
+                    },
+                },
+            ],
+        )
+        # override 信号不落库 + late partial 被去重 → 0
+        assert count == 0
+        stmt = select(AgentRunLog).where(col(AgentRunLog.run_id) == agent_run.id)
+        logs = (await db_session.execute(stmt)).scalars().all()
+        assert len(logs) == 0
+
+    @pytest.mark.asyncio
+    async def test_submit_messages_thinking_complete_then_override_skips_late_partial(
+        self, db_session: AsyncSession
+    ) -> None:
+        """task-12：完整 thinking 行先落库（_extract_sdk_messages 产出
+        segmentId=msg_c:0 isComplete=true），随后 [THINKING_OVERRIDE] 信号到达，
+        再后到的同 segment partial 被跳过 —— 覆盖完整先到、partial 后到的乱序场景。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "late-tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        count = await svc.submit_messages(
+            lease.id,
+            "late-tok",
+            agent_run.id,
+            [
+                # 1) 完整 message 先到（thinking block index=0 → segmentId=msg_c:0）
+                {
+                    "type": "assistant",
+                    "message": {
+                        "id": "msg_c",
+                        "role": "assistant",
+                        "content": [
+                            {"type": "thinking", "thinking": "完整版C"},
+                        ],
+                    },
+                },
+                # 2) override 信号（声明 msg_c:0 已覆盖）
+                {
+                    "event_type": "text",
+                    "content": "[THINKING_OVERRIDE] msg_c:0",
+                    "channel": "stdout",
+                    "metadata": {"thinking": True, "segmentId": "msg_c:0", "stale": True},
+                },
+                # 3) 迟到的同 segment partial —— 应被跳过
+                {
+                    "event_type": "text",
+                    "content": "[THINKING] 迟到C",
+                    "channel": "stdout",
+                    "metadata": {
+                        "thinking": True,
+                        "segmentId": "msg_c:0",
+                        "isPartial": True,
+                    },
+                },
+            ],
+        )
+        # 完整(1) + override 不落库 + late partial 跳过 = 1
+        assert count == 1
+        stmt = (
+            select(AgentRunLog)
+            .where(col(AgentRunLog.run_id) == agent_run.id)
+            .order_by(col(AgentRunLog.timestamp))
+        )
+        logs = (await db_session.execute(stmt)).scalars().all()
+        assert len(logs) == 1
+        assert logs[0].content_redacted == "[THINKING] 完整版C"
+
+    @pytest.mark.asyncio
+    async def test_submit_messages_thinking_different_segments_kept(
+        self, db_session: AsyncSession
+    ) -> None:
+        """task-12：不同 segmentId 的 partial 互不影响 —— segment_a:0 被完整覆盖，
+        但 segment_b:0 的 partial 没有 override / 完整行，照常落库。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "diff-tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        count = await svc.submit_messages(
+            lease.id,
+            "diff-tok",
+            agent_run.id,
+            [
+                # segment_a:0 partial + override（被覆盖）
+                {
+                    "event_type": "text",
+                    "content": "[THINKING] 片段A",
+                    "channel": "stdout",
+                    "metadata": {
+                        "thinking": True,
+                        "segmentId": "seg_a:0",
+                        "isPartial": True,
+                    },
+                },
+                {
+                    "event_type": "text",
+                    "content": "[THINKING_OVERRIDE] seg_a:0",
+                    "channel": "stdout",
+                    "metadata": {"thinking": True, "segmentId": "seg_a:0", "stale": True},
+                },
+                # segment_b:0 partial（无 override、无完整行）→ 保留
+                {
+                    "event_type": "text",
+                    "content": "[THINKING] 片段B",
+                    "channel": "stdout",
+                    "metadata": {
+                        "thinking": True,
+                        "segmentId": "seg_b:0",
+                        "isPartial": True,
+                    },
+                },
+            ],
+        )
+        # seg_a partial(跳过) + override(不落库) + seg_b partial(保留) = 1
+        assert count == 1
+        stmt = (
+            select(AgentRunLog)
+            .where(col(AgentRunLog.run_id) == agent_run.id)
+            .order_by(col(AgentRunLog.timestamp))
+        )
+        logs = (await db_session.execute(stmt)).scalars().all()
+        assert len(logs) == 1
+        assert logs[0].content_redacted == "[THINKING] 片段B"
+
+    @pytest.mark.asyncio
+    async def test_submit_messages_thinking_no_segment_id_backward_compat(
+        self, db_session: AsyncSession
+    ) -> None:
+        """task-12：无 segmentId 的老格式 message（daemon 未升级到 task-11）行为不变 ——
+        每条 partial / 完整行都照常落库，不做去重判断（没有 segmentId 无法识别同段）。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "compat-tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        count = await svc.submit_messages(
+            lease.id,
+            "compat-tok",
+            agent_run.id,
+            [
+                # 无 metadata / segmentId —— 老格式，行为不变（两条都落库，不去重）
+                {
+                    "event_type": "text",
+                    "content": "[THINKING] 老格式片段A",
+                    "channel": "stdout",
+                },
+                {
+                    "event_type": "text",
+                    "content": "[THINKING] 老格式片段B",
+                    "channel": "stdout",
+                },
+            ],
+        )
+        # 老格式无 segmentId → 两条都落库（无去重）
+        assert count == 2
+        stmt = (
+            select(AgentRunLog)
+            .where(col(AgentRunLog.run_id) == agent_run.id)
+            .order_by(col(AgentRunLog.timestamp))
+        )
+        logs = (await db_session.execute(stmt)).scalars().all()
+        assert len(logs) == 2
+        assert logs[0].content_redacted == "[THINKING] 老格式片段A"
+        assert logs[1].content_redacted == "[THINKING] 老格式片段B"
+
+    @pytest.mark.asyncio
+    async def test_extract_sdk_messages_thinking_carries_segment_id(self) -> None:
+        """task-12：_extract_sdk_messages 完整 assistant message 的 thinking block
+        展开行必须带 metadata.segmentId（${msg.id}:${block_idx}）+ isComplete=True，
+        让 submit_messages 去重逻辑生效。"""
+        from app.modules.daemon.run_sync.service import _extract_sdk_messages
+
+        msg = {
+            "type": "assistant",
+            "message": {
+                "id": "msg_d",
+                "role": "assistant",
+                "content": [
+                    {"type": "thinking", "thinking": "完整思考D"},
+                ],
+            },
+        }
+        out = _extract_sdk_messages(msg)
+        assert len(out) == 1
+        rec = out[0]
+        assert rec["content"] == "[THINKING] 完整思考D"
+        assert rec["channel"] == "stdout"
+        # 关键：segmentId + isComplete 标记
+        md = rec.get("metadata")
+        assert isinstance(md, dict)
+        assert md.get("segmentId") == "msg_d:0"
+        assert md.get("isComplete") is True
+
+    @pytest.mark.asyncio
+    async def test_extract_sdk_messages_thinking_segment_id_uses_block_index(self) -> None:
+        """task-12：同一 message 内多个 thinking block 必须用 block index 区分
+        segmentId（msg:0 / msg:1），不能共享同一 id（design §5.3 边界2）。"""
+        from app.modules.daemon.run_sync.service import _extract_sdk_messages
+
+        msg = {
+            "type": "assistant",
+            "message": {
+                "id": "msg_e",
+                "role": "assistant",
+                "content": [
+                    {"type": "thinking", "thinking": "第一段"},
+                    {"type": "text", "text": "中间文本"},
+                    {"type": "thinking", "thinking": "第二段"},
+                ],
+            },
+        }
+        out = _extract_sdk_messages(msg)
+        # 2 thinking + 1 text
+        assert len(out) == 3
+        thinking_recs = [r for r in out if r["content"].startswith("[THINKING]")]
+        assert len(thinking_recs) == 2
+        seg_ids = {r["metadata"]["segmentId"] for r in thinking_recs}
+        assert seg_ids == {"msg_e:0", "msg_e:2"}
 
     @pytest.mark.asyncio
     async def test_submit_messages_sdk_extracts_inner_usage(self, db_session: AsyncSession) -> None:

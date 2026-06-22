@@ -33,6 +33,10 @@ export function parseToolCallContent(raw: string | null | undefined): ToolCallEn
     const obj = JSON.parse(safe);
     const args = obj.args ?? obj.arguments ?? "";
     const toolName = obj.tool ?? obj.name ?? "unknown";
+    // task-14 / FR-09：提取 tool_use_id（task-13 emit 的 snake_case 字段）。
+    // 兼容 camelCase toolUseId（防御性，当前 daemon 用 snake_case）。
+    const rawToolUseId = obj.tool_use_id ?? obj.toolUseId ?? obj.id;
+    const toolUseId = typeof rawToolUseId === "string" && rawToolUseId ? rawToolUseId : undefined;
     return {
       timestamp: obj.timestamp ?? "",
       tool: toolName,
@@ -42,6 +46,7 @@ export function parseToolCallContent(raw: string | null | undefined): ToolCallEn
       description: typeof args === "object" && args !== null ? args.description : undefined,
       command: typeof args === "object" && args !== null ? args.command : undefined,
       rawArgs: args,
+      toolUseId,
     };
   } catch {
     return null;
@@ -236,6 +241,48 @@ export function mergeAssistantPiece(prev: string, piece: string): string {
   return prev + piece;
 }
 
+/**
+ * task-14 / D1-D2 / FR-09：合并流式 thinking 片段。
+ *
+ * 场景（design.md §5.3 根因）：thinking 有两条独立 emit 路径。
+ * - 路径 A（partial 增量）：daemon thinking_delta 节流切片 flush，每条 `[THINKING] <chunk>`。
+ * - 路径 B（完整累积）：完整 assistant message 到达，backend `_extract_sdk_messages`
+ *   展开全文 `[THINKING]`。路径 B 到达时，路径 A 的 partial 已 flush，导致同一 segment
+ *   内容双份显示（partial 累积 + 完整段重发）。
+ *
+ * 归并规则（参照 mergeAssistantPiece:208-237，对 thinking 做同样防御）：
+ * 1. piece === prev → 返回 prev（完全相同去重）
+ * 2. piece.startsWith(prev) 且 piece 明显更长（完整段重发，D2 场景）→ 返回 piece。
+ *    "明显更长"判定：piece 长度 > prev 长度，且 piece 含换行或去空白后多出 ≥ 4 字符，
+ *    避免把短 delta（如 "实质" vs "实质2"）误判为前缀包含去重。
+ * 3. prev.startsWith(piece) 且 prev 明显更长 → 返回 prev（对称场景）
+ * 4. 其余按原序拼接（保留现有 delta 累积行为，ql-20260617-011）
+ *
+ * 与 mergeAssistantPiece 的差异：thinking delta 多为短 token 直接拼接（无换行分隔），
+ * 短片段的 startsWith 是常见误判源（如 "实质" 是 "实质2" 的前缀但两者是独立 delta），
+ * 故加"明显更长"阈值；只在真正完整段重发时去重。
+ */
+export function mergeThinkingPiece(prev: string, piece: string): string {
+  if (!prev) return piece;
+  if (!piece) return prev;
+  if (piece === prev) return prev;
+  // "明显更长"判定：piece 比 prev 长，且额外内容含换行或去空白后多出 ≥ 4 字符。
+  // 短 delta（"实质" vs "实质2"差 1 字符）不触发，保留直接拼接。
+  const looksLikeFullSegment = (longer: string, shorter: string): boolean => {
+    if (longer.length <= shorter.length) return false;
+    const norm = (s: string) => s.replace(/\s+/g, "");
+    const longerNorm = norm(longer);
+    const shorterNorm = norm(shorter);
+    const extra = longerNorm.length - shorterNorm.length;
+    if (extra >= 8) return true; // 明显更长（完整段覆盖多 partial）
+    return longer.includes("\n") && extra >= 2; // 含换行 + 至少多 2 字符
+  };
+  if (piece.startsWith(prev) && looksLikeFullSegment(piece, prev)) return piece;
+  if (prev.startsWith(piece) && looksLikeFullSegment(prev, piece)) return prev;
+  // 增量 delta（无前缀关系或短片段）按原序直接拼接，还原 SSE 累积效果
+  return prev + piece;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Log normalization                                                  */
 /* ------------------------------------------------------------------ */
@@ -266,11 +313,53 @@ function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
   // ql-20260618-012：连续 [ASSISTANT] / 流式纯文本 stdout 合并
   let lastAssistantIdx = -1;
 
+  // task-14 / FR-09 / D-002@v1：tool_use_id 全局配对索引。
+  // task-13 在 tool_call JSON emit 时注入 tool_use_id（snake_case，非空时携带）。
+  // stdout [TOOL_USE] 文本不带 id（submit_messages 不保留 metadata），故前端靠
+  // "tool 名匹配 + 扩大窗口"把 stdout 合并到最近的带 id 的 tool_call JSON。
+  //
+  // 策略（两步）：
+  // 1. 预扫描所有**带 tool_use_id**的 tool_call JSON：建 Map<toolUseId, idx>（按 id 去重）+
+  //    Map<toolName, idx[]>（按名记录带 id 的 tool_call 位置，供 stdout 回查）。
+  // 2. 单遍处理时，stdout [TOOL_USE] 在 result 数组中双向扫描最近的同 tool 名
+  //    **带 id** tool_call（窗口 ±TOOL_PAIR_WINDOW），找到则合并。
+  //
+  // 退化（id 缺失 / 无带 id 的同 tool 名 tool_call）：保留原 ±3 窗口启发式
+  // （lastToolSourceIdx），向后兼容旧 daemon 日志。
+  const TOOL_PAIR_WINDOW = 20; // 扩大窗口上限，覆盖穿插多条 [ASSISTANT] 的场景
+  const toolUseIdIndex = new Map<string, number>(); // tool_use_id → 首个 tool_call idx
+  const toolNameIndex = new Map<string, number[]>(); // tool 名 → 带 id 的 tool_call idx
+  for (let i = 0; i < logs.length; i++) {
+    const log = logs[i]!;
+    if (log.channel !== "tool_call") continue;
+    const parsed = parseToolCallContent(log.content_redacted);
+    if (!parsed?.toolUseId) continue; // 只收录带 id 的（退化场景走 ±3）
+    if (!toolUseIdIndex.has(parsed.toolUseId)) {
+      toolUseIdIndex.set(parsed.toolUseId, i);
+      const list = toolNameIndex.get(parsed.tool) ?? [];
+      list.push(i);
+      toolNameIndex.set(parsed.tool, list);
+    }
+  }
+
   for (let i = 0; i < logs.length; i++) {
     const current = result[i];
     if (!current) continue;
 
     if (current.log.channel === "tool_call") {
+      // task-14 / FR-09：解析 tool_use_id（task-13 注入），记入 ProcessedLog
+      // 供 task-15 渲染层读取。同 id 重复 emit（daemon 重试/重放）时合并到首张。
+      const parsed = parseToolCallContent(current.log.content_redacted);
+      if (parsed?.toolUseId) {
+        current.toolUseId = parsed.toolUseId;
+        const firstIdx = toolUseIdIndex.get(parsed.toolUseId);
+        if (firstIdx !== undefined && firstIdx !== i) {
+          // 同 tool_use_id 已有首张 → 当前条 hidden（mergedToolResult 已由预扫描
+          // 保证首张为准，后续重复条不渲染）。防御性合并 result body（若有）。
+          current.hidden = true;
+          continue;
+        }
+      }
       lastToolSourceIdx = i;
       lastThinkingIdx = -1;
       lastAssistantIdx = -1;
@@ -304,7 +393,9 @@ function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
         if (target) {
           const prev = target.mergedThinkingContent
             ?? extractThinkingText(asString(target.log.content_redacted));
-          target.mergedThinkingContent = prev + piece;
+          // task-14 / D2：用 mergeThinkingPiece 归并（前缀包含去重），避免完整段
+          // 重发时与 partial 累积双份拼接（旧 prev + piece 直接拼接的 bug）。
+          target.mergedThinkingContent = mergeThinkingPiece(prev, piece);
         }
         current.hidden = true;
         continue;
@@ -358,6 +449,46 @@ function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
 
     // ── [TOOL_USE] handling ──
     if (hasToolUse) {
+      // task-14 / FR-09：先尝试全局配对（tool 名匹配 + 扩大窗口）。
+      // task-13 emit 顺序：stdout [TOOL_USE] 在前、tool_call JSON 紧随（相邻），
+      // 但 daemon 中间穿插其他日志（[ASSISTANT]/[SYSTEM]）时距离可能 > 3。
+      // 故用 toolNameIndex 双向扫描最近的同 tool 名 tool_call，窗口扩大到 TOOL_PAIR_WINDOW。
+      const parsedStdout = parseStdoutToolUse(content, current.log.timestamp);
+      const stdoutToolName = parsedStdout?.tool;
+
+      // 查找匹配的 tool_call idx（带 id 优先，其次同 tool 名最近邻）
+      let matchedToolCallIdx = -1;
+      if (stdoutToolName) {
+        const candidates = toolNameIndex.get(stdoutToolName) ?? [];
+        // 双向找距离 i 最近的 tool_call idx，且距离 ≤ TOOL_PAIR_WINDOW
+        let bestDist = Infinity;
+        for (const candIdx of candidates) {
+          const dist = Math.abs(candIdx - i);
+          if (dist <= TOOL_PAIR_WINDOW && dist < bestDist) {
+            bestDist = dist;
+            matchedToolCallIdx = candIdx;
+          }
+        }
+      }
+
+      if (matchedToolCallIdx >= 0 && matchedToolCallIdx !== i) {
+        // 合并到匹配的 tool_call 卡片
+        const tc = result[matchedToolCallIdx];
+        if (tc) {
+          // 把 tool_use_id 透传给卡片（若 tool_call 解析时已设则不覆盖）
+          if (!tc.toolUseId && tc.log.channel === "tool_call") {
+            const parsedTc = parseToolCallContent(tc.log.content_redacted);
+            if (parsedTc?.toolUseId) tc.toolUseId = parsedTc.toolUseId;
+          }
+          if (hasToolResult) {
+            mergeToolResult(tc, extractToolResultBody(content));
+          }
+        }
+        current.hidden = true;
+        continue;
+      }
+
+      // 退化：原 ±3 窗口启发式（task_use_id 缺失 / 无同 tool 名 tool_call 时兜底）
       const nearToolCall = lastToolSourceIdx >= 0
         && result[lastToolSourceIdx]?.log.channel === "tool_call"
         && i > lastToolSourceIdx
@@ -374,9 +505,8 @@ function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
         continue;
       }
 
-      const parsed = parseStdoutToolUse(content, current.log.timestamp);
-      if (parsed) {
-        current.parsedStdoutTool = parsed;
+      if (parsedStdout) {
+        current.parsedStdoutTool = parsedStdout;
         lastToolSourceIdx = i;
         if (hasToolResult) {
           mergeToolResult(current, extractToolResultBody(content));

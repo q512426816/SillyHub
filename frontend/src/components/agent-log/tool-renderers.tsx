@@ -22,19 +22,46 @@ import { COMMAND_COLLAPSE_CHARS, COMMAND_COLLAPSE_LINES } from "./normalize";
 /*  Shared sub-components                                              */
 /* ------------------------------------------------------------------ */
 
-function StatusBadge({ status, success }: { status: "allowed" | "pending"; success: boolean }) {
+/**
+ * task-15 / FR-10 / D-002@v1：tool 卡片状态徽标 + 耗时。
+ *
+ * - pending：⏳ 琥珀色，"待审批"（无耗时——进行中/等待人审）
+ * - 成功：✓ emerald + "N.Ns"（耗时由 tool_use→tool_result 时间戳差算出，AgentLogRow 传入）
+ * - 失败：✗ red + "N.Ns"（参照 prototype:179/218 `.tool-status.st-ok/.st-err`）
+ *
+ * durationMs 缺失（result 未到 / timestamp 解析失败 / 退化场景）→ 只显示状态图标，不显示秒数。
+ */
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function StatusBadge({
+  status,
+  success,
+  durationMs,
+}: {
+  status: "allowed" | "pending";
+  success: boolean;
+  durationMs?: number;
+}) {
+  const isPending = status === "pending";
+  const hasDuration = typeof durationMs === "number" && !Number.isNaN(durationMs) && durationMs >= 0;
+  const icon = isPending ? "⏳" : success ? "✓" : "✗";
+  const label = isPending ? "待审批" : hasDuration ? formatDuration(durationMs!) : success ? "已通过" : "失败";
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium",
-        status === "pending"
+        "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium",
+        isPending
           ? "border-amber-200 bg-amber-50 text-amber-800"
           : success
             ? "border-emerald-200 bg-emerald-50 text-emerald-700"
             : "border-red-200 bg-red-50 text-red-700",
       )}
     >
-      {status === "pending" ? "待审批" : success ? "已通过" : "失败"}
+      <span aria-hidden>{icon}</span>
+      {label}
     </span>
   );
 }
@@ -59,13 +86,23 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
+/**
+ * task-15 / FR-10：通用折叠块。
+ *
+ * - defaultOpen：默认展开/折叠（tool 卡片参数默认展开，thinking 默认折叠）
+ * - summary：折叠态在标题右侧显示的单行摘要（如 thinking 前 60 字符 + "..."）。
+ *   仅折叠态显示，展开后隐藏（内容已在 children 中完整展示）。
+ *   参照 prototype:66 `.thinking-summary` 的 `text-overflow: ellipsis` 单行截断。
+ */
 export function CollapsibleSection({
   title,
   defaultOpen = true,
+  summary,
   children,
 }: {
   title: string;
   defaultOpen?: boolean;
+  summary?: string;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -73,10 +110,15 @@ export function CollapsibleSection({
     <div className="mt-1">
       <button
         onClick={() => setOpen(!open)}
-        className="inline-flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-800"
+        className="inline-flex min-w-0 max-w-full items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-800"
       >
-        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        {title}
+        {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+        <span className="shrink-0">{title}</span>
+        {!open && summary && (
+          <span className="ml-1 min-w-0 truncate text-zinc-400 italic">
+            {summary}
+          </span>
+        )}
       </button>
       {open && <div className="mt-1">{children}</div>}
     </div>
@@ -90,16 +132,21 @@ const CODE_CLS =
 /*  Tool preview props                                                 */
 /* ------------------------------------------------------------------ */
 
+/**
+ * task-15 / FR-10：tool 卡片预览 props。
+ * durationMs 新增：tool_use→tool_result 时间戳差，由 AgentLogRow 计算后透传。
+ */
 interface ToolPreviewProps {
   entry: ToolCallEntry;
   mergedResult?: string;
+  durationMs?: number;
 }
 
 /* ------------------------------------------------------------------ */
 /*  Write                                                              */
 /* ------------------------------------------------------------------ */
 
-function WriteToolPreview({ entry, mergedResult }: ToolPreviewProps) {
+function WriteToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps) {
   const rawArgs = entry.rawArgs as Record<string, unknown> | null;
   const filePath = String(rawArgs?.file_path ?? "");
   const content = typeof rawArgs?.content === "string" ? rawArgs.content : "";
@@ -123,7 +170,7 @@ function WriteToolPreview({ entry, mergedResult }: ToolPreviewProps) {
         <span className="min-w-0 break-words text-xs font-medium text-zinc-900 [overflow-wrap:anywhere]">
           {fileName}
         </span>
-        <StatusBadge status={entry.status} success={entry.success} />
+        <StatusBadge status={entry.status} success={entry.success} durationMs={durationMs} />
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-zinc-500">
         <span className="max-w-full break-all">{filePath}</span>
@@ -164,7 +211,7 @@ function WriteToolPreview({ entry, mergedResult }: ToolPreviewProps) {
 /*  Agent                                                              */
 /* ------------------------------------------------------------------ */
 
-function AgentToolPreview({ entry, mergedResult }: ToolPreviewProps) {
+function AgentToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps) {
   const rawArgs = entry.rawArgs as Record<string, unknown> | null;
   const description = String(rawArgs?.description ?? "");
   const prompt = typeof rawArgs?.prompt === "string" ? rawArgs.prompt : "";
@@ -186,7 +233,7 @@ function AgentToolPreview({ entry, mergedResult }: ToolPreviewProps) {
             后台运行
           </span>
         )}
-        <StatusBadge status={entry.status} success={entry.success} />
+        <StatusBadge status={entry.status} success={entry.success} durationMs={durationMs} />
       </div>
       {mergedResult && (
         <div className="text-[11px] font-medium text-emerald-700">{mergedResult.slice(0, 300)}</div>
@@ -214,7 +261,7 @@ function AgentToolPreview({ entry, mergedResult }: ToolPreviewProps) {
 /*  Bash                                                               */
 /* ------------------------------------------------------------------ */
 
-function BashToolPreview({ entry, mergedResult }: ToolPreviewProps) {
+function BashToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps) {
   const desc = entry.description;
   const cmd = entry.command ?? "";
   const cmdLines = cmd.split("\n");
@@ -236,7 +283,7 @@ function BashToolPreview({ entry, mergedResult }: ToolPreviewProps) {
         <span className="min-w-0 break-words text-xs font-medium text-zinc-900 [overflow-wrap:anywhere]">
           {title}
         </span>
-        <StatusBadge status={entry.status} success={entry.success} />
+        <StatusBadge status={entry.status} success={entry.success} durationMs={durationMs} />
       </div>
       {cmd && (
         <div>
@@ -280,7 +327,7 @@ function BashToolPreview({ entry, mergedResult }: ToolPreviewProps) {
 /*  Grep / Glob                                                        */
 /* ------------------------------------------------------------------ */
 
-function SearchToolPreview({ entry, mergedResult }: ToolPreviewProps) {
+function SearchToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps) {
   const rawArgs = entry.rawArgs as Record<string, unknown> | null;
   const isGrep = /^grep$/i.test(entry.tool);
   const pattern = String(rawArgs?.pattern ?? "");
@@ -308,7 +355,7 @@ function SearchToolPreview({ entry, mergedResult }: ToolPreviewProps) {
         {searchPath && <span className="text-[10px] text-zinc-500">in {searchPath}</span>}
         {glob && <span className="text-[10px] text-zinc-500">glob: {glob}</span>}
         {fileType && <span className="text-[10px] text-zinc-500">type: {fileType}</span>}
-        <StatusBadge status={entry.status} success={entry.success} />
+        <StatusBadge status={entry.status} success={entry.success} durationMs={durationMs} />
       </div>
       {mergedResult && (
         <div className="text-[10px] text-zinc-600">
@@ -343,7 +390,7 @@ function SearchToolPreview({ entry, mergedResult }: ToolPreviewProps) {
 /*  Read                                                               */
 /* ------------------------------------------------------------------ */
 
-function ReadToolPreview({ entry, mergedResult }: ToolPreviewProps) {
+function ReadToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps) {
   const rawArgs = entry.rawArgs as Record<string, unknown> | null;
   const filePath = String(rawArgs?.file_path ?? "");
   const offset = Number(rawArgs?.offset ?? 0);
@@ -367,7 +414,7 @@ function ReadToolPreview({ entry, mergedResult }: ToolPreviewProps) {
             行 {offset ? `${offset}–${offset + limit}` : `1–${limit}`}
           </span>
         ) : null}
-        <StatusBadge status={entry.status} success={entry.success} />
+        <StatusBadge status={entry.status} success={entry.success} durationMs={durationMs} />
       </div>
       <div className="text-[10px] text-zinc-500">{filePath}</div>
       {mergedResult && (
@@ -394,7 +441,7 @@ function ReadToolPreview({ entry, mergedResult }: ToolPreviewProps) {
 /*  Edit                                                               */
 /* ------------------------------------------------------------------ */
 
-function EditToolPreview({ entry, mergedResult }: ToolPreviewProps) {
+function EditToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps) {
   const rawArgs = entry.rawArgs as Record<string, unknown> | null;
   const filePath = String(rawArgs?.file_path ?? "");
   const fileName = filePath.split("/").pop() ?? filePath;
@@ -412,7 +459,7 @@ function EditToolPreview({ entry, mergedResult }: ToolPreviewProps) {
           {fileName}
         </span>
         {replaceAll && <span className="text-[10px] text-zinc-500">全局替换</span>}
-        <StatusBadge status={entry.status} success={entry.success} />
+        <StatusBadge status={entry.status} success={entry.success} durationMs={durationMs} />
       </div>
       <div className="text-[10px] text-zinc-500">{filePath}</div>
       {mergedResult && (
@@ -441,14 +488,14 @@ function EditToolPreview({ entry, mergedResult }: ToolPreviewProps) {
 /*  Generic fallback                                                   */
 /* ------------------------------------------------------------------ */
 
-function GenericToolPreview({ entry }: ToolPreviewProps) {
+function GenericToolPreview({ entry, durationMs }: ToolPreviewProps) {
   return (
     <div className="min-w-0 space-y-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span className="min-w-0 break-words font-semibold text-blue-700 [overflow-wrap:anywhere]">
           {entry.tool}
         </span>
-        <StatusBadge status={entry.status} success={entry.success} />
+        <StatusBadge status={entry.status} success={entry.success} durationMs={durationMs} />
       </div>
       {entry.args && (
         <CollapsibleSection title="参数" defaultOpen={entry.args.length < 300}>
@@ -463,24 +510,24 @@ function GenericToolPreview({ entry }: ToolPreviewProps) {
 /*  Router                                                             */
 /* ------------------------------------------------------------------ */
 
-export function ToolCallPreview({ entry, mergedResult }: ToolPreviewProps) {
+export function ToolCallPreview({ entry, mergedResult, durationMs }: ToolPreviewProps) {
   const tool = entry.tool.toLowerCase();
   switch (tool) {
     case "write":
-      return <WriteToolPreview entry={entry} mergedResult={mergedResult} />;
+      return <WriteToolPreview entry={entry} mergedResult={mergedResult} durationMs={durationMs} />;
     case "agent":
-      return <AgentToolPreview entry={entry} mergedResult={mergedResult} />;
+      return <AgentToolPreview entry={entry} mergedResult={mergedResult} durationMs={durationMs} />;
     case "bash":
-      return <BashToolPreview entry={entry} mergedResult={mergedResult} />;
+      return <BashToolPreview entry={entry} mergedResult={mergedResult} durationMs={durationMs} />;
     case "grep":
     case "glob":
-      return <SearchToolPreview entry={entry} mergedResult={mergedResult} />;
+      return <SearchToolPreview entry={entry} mergedResult={mergedResult} durationMs={durationMs} />;
     case "read":
-      return <ReadToolPreview entry={entry} mergedResult={mergedResult} />;
+      return <ReadToolPreview entry={entry} mergedResult={mergedResult} durationMs={durationMs} />;
     case "edit":
-      return <EditToolPreview entry={entry} mergedResult={mergedResult} />;
+      return <EditToolPreview entry={entry} mergedResult={mergedResult} durationMs={durationMs} />;
     default:
-      return <GenericToolPreview entry={entry} />;
+      return <GenericToolPreview entry={entry} durationMs={durationMs} />;
   }
 }
 

@@ -11,6 +11,13 @@ export type ToolCallEntry = {
   description?: string;
   command?: string;
   rawArgs: unknown;
+  /**
+   * task-14 / FR-09 / D-002@v1：tool_use block 的稳定 id（toolu_xxx）。
+   * 来自 task-13 在 tool_call JSON（task-runner.ts / run_sync/service.py）注入的
+   * `tool_use_id` 字段（snake_case，对齐 Anthropic API）。前端用它做全局配对，
+   * 替代原 ±3 索引窗口（normalize.ts:359-386）。缺失时前端退化到启发式。
+   */
+  toolUseId?: string;
 };
 
 export type ScanCheckResult = {
@@ -52,4 +59,25 @@ export interface ProcessedLog {
    * ql-20260618-012：连续 [ASSISTANT] / 流式纯文本 stdout 合并后的 assistant 段落。
    */
   mergedAssistantContent?: string;
+  /**
+   * task-14 / FR-09：tool_use_id 全局关联字段。
+   *
+   * 来源：task-13 在 tool_call JSON emit 时注入 `tool_use_id`（snake_case）。
+   * 前端 normalize 用它做全局配对（Map<toolUseId, idx>），替代原 ±3 索引窗口
+   * （normalize.ts:359-386），让同一调用的 stdout [TOOL_USE] 与 tool_call JSON
+   * 即使距离 > 3 也能合并为单张卡片。
+   *
+   * 退化：tool_use_id 缺失（旧 daemon / SDK 不提供 stable id）→ 回退 ±3 窗口
+   * 启发式（tool 名匹配 + 时间戳邻近）。
+   */
+  toolUseId?: string;
+  /**
+   * task-14 / D1-D2：thinking segment 稳定 id（预留字段）。
+   *
+   * 预期来源：daemon stream-json.ts 的 thinking_delta 事件携带（task-11/12 信号）。
+   * 同一 segmentId 的 partial 行（增量）与完整行（累积全文）按 mergeThinkingPiece
+   * 归并规则去重。当前 daemon 未完全接通 segment_id，故本字段为预留，task-15
+   * 渲染层可读取做 turn 分组。
+   */
+  segmentId?: string;
 }

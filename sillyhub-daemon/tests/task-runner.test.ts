@@ -1104,6 +1104,101 @@ describe('_eventToMessages（对齐老 _format_conversation_log）', () => {
     );
   });
 
+  // ── task-13 / D-002@v1：tool_use_id 补到 tool_call JSON + stdout metadata ──
+
+  it('task-13 tool_use 携带 call_id(toolu_xxx) → tool_call JSON 含 tool_use_id', () => {
+    // stream-json.ts:645-654 把 SDK tool_use block.id（toolu_xxx）存到 md.call_id。
+    // task-runner 从 md.call_id 提取并注入 tool_use_id（snake_case，对齐 Anthropic API
+    // + backend run_sync/service.py）。前端 normalize（task-14）据此全局配对。
+    const { runner } = setupRunner({});
+    const msgs = callEventToMessages(runner, {
+      type: 'tool_use',
+      content: '',
+      metadata: {
+        tool_name: 'Bash',
+        call_id: 'toolu_test123',
+        tool_input: { command: 'ls -la' },
+      },
+    });
+    expect(msgs).toHaveLength(2);
+    // 第一条 stdout：原格式不变（id 只进 tool_call JSON，避免 submit_messages 丢 metadata）
+    expect(msgs![0]!).toMatchObject({
+      event_type: 'tool_use',
+      channel: 'stdout',
+      call_id: 'toolu_test123',
+    });
+    expect(msgs![0]!.content).toBe('[TOOL_USE] Bash: ls -la');
+    // 第二条 tool_call JSON：含 tool_use_id 字段（snake_case，对齐 Anthropic API）
+    expect(msgs![1]!.channel).toBe('tool_call');
+    const parsed = JSON.parse(msgs![1]!.content as string);
+    expect(parsed).toMatchObject({
+      tool: 'Bash',
+      tool_use_id: 'toolu_test123',
+      args: { command: 'ls -la' },
+      status: 'allowed',
+      success: true,
+    });
+  });
+
+  it('task-13 tool_use md.tool_use_id 优先于 md.call_id（兼容 adapter 改造后路径）', () => {
+    // 未来若 adapter 把 block.id 改存到 md.tool_use_id（命名修正），task-runner 应优先取它。
+    const { runner } = setupRunner({});
+    const msgs = callEventToMessages(runner, {
+      type: 'tool_use',
+      content: '',
+      metadata: {
+        tool_name: 'Read',
+        tool_use_id: 'toolu_primary',
+        call_id: 'toolu_fallback',
+        tool_input: { file_path: '/a' },
+      },
+    });
+    const parsed = JSON.parse(msgs![1]!.content as string);
+    expect(parsed.tool_use_id).toBe('toolu_primary');
+  });
+
+  it('task-13 tool_use 无 id（退化）→ tool_call JSON 不含 tool_use_id 字段', () => {
+    // SDK 不给 stable id 的退化路径：toolUseId='' → tool_call JSON 省略字段，
+    // 前端 normalize 回退 ±3 窗口（task-14 范围）。
+    const { runner } = setupRunner({});
+    const msgs = callEventToMessages(runner, {
+      type: 'tool_use',
+      content: '',
+      metadata: {
+        tool_name: 'Bash',
+        tool_input: { command: 'echo hi' },
+      },
+    });
+    expect(msgs).toHaveLength(2);
+    // tool_call JSON：不含 tool_use_id 字段
+    const parsed = JSON.parse(msgs![1]!.content as string);
+    expect(parsed).not.toHaveProperty('tool_use_id');
+    expect(parsed).toMatchObject({
+      tool: 'Bash',
+      args: { command: 'echo hi' },
+      status: 'allowed',
+      success: true,
+    });
+  });
+
+  it('task-13 tool_use 携带 id 时 stdout 文本仍为 [TOOL_USE] Name: <args>（不超长）', () => {
+    // 边界8：id 只进 tool_call JSON，不污染 stdout 文本，slice(0,2000) 仍对原文本生效
+    const { runner } = setupRunner({});
+    const longCmd = 'x'.repeat(2100);
+    const msgs = callEventToMessages(runner, {
+      type: 'tool_use',
+      content: '',
+      metadata: {
+        tool_name: 'Bash',
+        call_id: 'toolu_len',
+        tool_input: { command: longCmd },
+      },
+    });
+    // stdout content 长度受 2000 截断
+    expect((msgs![0]!.content as string).length).toBe(2000);
+    expect((msgs![0]!.content as string).startsWith('[TOOL_USE] Bash: ')).toBe(true);
+  });
+
   it('tool_result → 1 条 [TOOL_RESULT] preview (3000 截断)', () => {
     const { runner } = setupRunner({});
     const long = 'y'.repeat(3500);

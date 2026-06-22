@@ -134,6 +134,43 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+// ── translateSpecRoot（prompt 路径翻译纯函数）─────────────────────────────────
+// 2026-06-22-agent-run-pipeline-fix task-02：SPEC_ROOT_MAP 翻译器。
+// design §4.1 A1 第 2 层：daemon 在 prompt 透传给 SessionManager.create 前，
+// 按 spec_root_map（"from:to"）把容器内路径翻译成宿主机路径，避免 Windows
+// Git Bash 把 /data/... 转成 C:\Program Files\Git\data\... 导致 EPERM。
+//
+// 关键修正（task-02 边界 3 / AC-07）：旧实现 `split(':', 2)` 在 Windows 盘符
+// 场景会把 to 截断成 'C'。改用 indexOf(':') + slice 按首个 ':' 分割，
+// to 含盘符冒号（如 C:/data/spec-workspaces）。
+//
+// 纯函数导出便于单测（daemon-spec-root-map.test.ts）。
+
+/**
+ * 按 specRootMap（"from:to"）翻译 prompt 中的路径。
+ *
+ * 语义（task-02 §接口定义）：
+ *   - specRootMap 空串 → 不翻译，返回原 prompt
+ *   - specRootMap 不含 ':' → 返回原 prompt（调用方负责 warn 日志）
+ *   - 按**首个** ':' 分割为 from/to（容忍 to 含 ':'，如 Windows 盘符路径）
+ *   - from 或 to 为空 → 返回原 prompt
+ *   - prompt.includes(from) → replaceAll(from, to)；否则原样返回
+ *
+ * @param prompt       原始 prompt
+ * @param specRootMap  映射 "from:to"（来自 config.spec_root_map 或 env SPEC_ROOT_MAP）
+ * @returns            翻译后 prompt（新字符串；不变时返回原引用）
+ */
+export function translateSpecRoot(prompt: string, specRootMap: string): string {
+  if (!specRootMap) return prompt;
+  const colonIdx = specRootMap.indexOf(':');
+  if (colonIdx < 0) return prompt;
+  const from = specRootMap.slice(0, colonIdx);
+  const to = specRootMap.slice(colonIdx + 1);
+  if (!from || !to) return prompt;
+  if (!prompt.includes(from)) return prompt;
+  return prompt.replaceAll(from, to);
+}
+
 // ── 依赖契约（鸭子类型，避免硬耦合具体类）─────────────────────────────────────
 
 /** daemon 需要的 AgentDetector 接口子集。 */
@@ -1692,17 +1729,48 @@ export class Daemon {
     const firstRunId = execPayload.agentRunId ?? '';
     let prompt = execPayload.prompt ?? '';
     // 路径映射：backend 在 Docker 容器内跑，spec_root 用容器内路径（如
-    // /data/spec-workspaces/{id}）；daemon 跑在 Mac mini 上，本地无 /data。
-    // SPEC_ROOT_MAP 环境变量格式 "from:to"，如
-    // "/data/spec-workspaces:/Users/qinyi/spec-workspaces"。
+    // /data/spec-workspaces/{id}）；daemon 跑在宿主机上（Windows/Mac），本地无 /data。
+    // spec_root_map 格式 "from:to"，如 "/data/spec-workspaces:C:/data/spec-workspaces"。
     // 在 prompt 透传给 SessionManager.create 前，把 from 替换为 to。
-    const specRootMap = process.env.SPEC_ROOT_MAP;
-    if (specRootMap && specRootMap.includes(':')) {
-      const [from, to] = specRootMap.split(':', 2);
-      if (from && to && prompt.includes(from)) {
-        prompt = prompt.replaceAll(from, to);
+    //
+    // 数据源（task-02）：优先读 config.spec_root_map（loadConfig 已从 env SPEC_ROOT_MAP
+    // 覆盖到 config），env 兜底（双保险）。详见 design §4.1 A1 第 2 层。
+    //
+    // 翻译逻辑抽为纯函数 translateSpecRoot（按首个 ':' 分割，避免 split(':',2)
+    // 在 Windows 盘符场景把 to 截断成 'C'，见 task-02 边界 3 / AC-07）。
+    const specRootMap = this._config.spec_root_map || process.env.SPEC_ROOT_MAP || '';
+    if (specRootMap) {
+      const colonIdx = specRootMap.indexOf(':');
+      if (colonIdx < 0) {
+        // AC-06：specRootMap 无冒号 → 跳过，记 warn（配置可能写错）
+        this._logger.warn('interactive_spec_root_map_invalid', {
+          lease_id: leaseId,
+          spec_root_map: specRootMap,
+        });
+      } else {
+        const from = specRootMap.slice(0, colonIdx);
+        const to = specRootMap.slice(colonIdx + 1);
+        const translated = translateSpecRoot(prompt, specRootMap);
+        if (translated !== prompt) {
+          // AC-02：翻译生效，记 info（含 from/to + prompt 摘要前 200 字符）
+          this._logger.info('interactive_spec_root_translated', {
+            lease_id: leaseId,
+            from,
+            to,
+            prompt_before_snippet: prompt.slice(0, 200),
+          });
+          prompt = translated;
+        } else if (from && to) {
+          // 边界 2：prompt 不含 from → 跳过，记 debug（避免每次 interactive 刷 info）
+          this._logger.debug('interactive_spec_root_not_matched', {
+            lease_id: leaseId,
+            from,
+          });
+        }
+        // from/to 为空（specRootMap=':' 或 'from:' 或 ':to'）→ 静默跳过（不刷日志）
       }
     }
+    // specRootMap 空串 → 完全跳过（向后兼容旧 daemon，AC-04）
     // rootPath 优先作 cwd（与 batch 一致，ql-20260617-009）；无则 workspace_dir 兜底。
     const cwd = execPayload.rootPath ?? this._config.workspace_dir;
     const provider = (execPayload.provider ?? 'claude') as 'claude' | 'codex';

@@ -1,0 +1,271 @@
+<!--
+  Prototype: agent-run 日志展示优化
+  变更: 2026-06-22-agent-run-pipeline-fix (P1-4)
+  author: qinyi
+  目的: 可视化对比"现状(碎片化+重复)" vs "优化后(timeline turn 分组)"
+  数据: 取自 agent-run-7142b6cb.log 真实片段
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Agent-Run 日志展示优化原型</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #0d1117; color: #c9d1d9; padding: 24px; }
+  h1 { font-size: 18px; color: #f0f6fc; margin-bottom: 6px; }
+  .sub { color: #8b949e; font-size: 13px; margin-bottom: 20px; }
+  .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 1100px) { .panels { grid-template-columns: 1fr; } }
+  .panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }
+  .panel-head { padding: 12px 16px; border-bottom: 1px solid #30363d; display: flex; align-items: center; gap: 8px; }
+  .panel-head .tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+  .tag-bad { background: #3d1f1f; color: #f85149; }
+  .tag-good { background: #1a3a2a; color: #3fb950; }
+  .panel-head h2 { font-size: 14px; font-weight: 600; }
+  .panel-body { padding: 12px; font-family: "Cascadia Code", "Consolas", monospace; font-size: 12.5px; line-height: 1.7; max-height: 720px; overflow-y: auto; }
+
+  /* === 现状: 原始逐行 === */
+  .raw-line { padding: 1px 8px; white-space: pre-wrap; word-break: break-all; }
+  .raw-ts { color: #6e7681; }
+  .raw-tag { font-weight: 600; }
+  .raw-thinking .raw-tag { color: #8b949e; }       /* THINKING 灰 */
+  .raw-system .raw-tag { color: #d29922; }          /* SYSTEM 琥珀 */
+  .raw-tooluse .raw-tag { color: #58a6ff; }         /* TOOL_USE 蓝 */
+  .raw-toolresult .raw-tag { color: #3fb950; }      /* TOOL_RESULT 绿 */
+  .raw-assistant .raw-tag { color: #f0f6fc; }       /* ASSISTANT 黑/亮 */
+  .raw-userinput { background: #1c2128; border-left: 3px solid #bc8cff; }
+  .raw-userinput .raw-tag { color: #bc8cff; }       /* user_input 紫 */
+  .raw-dup { opacity: 0.45; }                        /* 标记重复行 */
+  .raw-frag { background: rgba(210,153,34,0.08); }   /* 标记碎片 */
+  .raw-toolcall-json { color: #7d8590; border-left: 2px solid #30363d; margin-left: 8px; }
+  .dup-marker { color: #f85149; font-size: 10px; margin-left: 6px; }
+
+  /* === 优化后: timeline turn 分组 === */
+  .turn { border: 1px solid #30363d; border-radius: 6px; margin-bottom: 10px; background: #0d1117; }
+  .turn-head { padding: 8px 12px; background: #161b22; border-bottom: 1px solid #30363d; display: flex; align-items: center; gap: 8px; cursor: default; }
+  .turn-num { font-size: 11px; color: #8b949e; background: #21262d; padding: 1px 7px; border-radius: 8px; }
+  .turn-ts { font-size: 11px; color: #6e7681; }
+  .turn-body { padding: 10px 12px; }
+
+  .block { margin-bottom: 8px; }
+  .block:last-child { margin-bottom: 0; }
+
+  /* user input */
+  .blk-user { background: rgba(188,140,255,0.08); border-left: 3px solid #bc8cff; padding: 8px 10px; border-radius: 0 4px 4px 0; color: #d2a8ff; font-family: inherit; white-space: pre-wrap; }
+
+  /* assistant */
+  .blk-assistant { color: #f0f6fc; padding: 4px 8px; white-space: pre-wrap; }
+
+  /* thinking: 折叠摘要 */
+  .blk-thinking { }
+  .thinking-toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; color: #8b949e; font-size: 12px; user-select: none; padding: 4px 8px; border-radius: 4px; }
+  .thinking-toggle:hover { background: #21262d; }
+  .thinking-toggle .chevron { transition: transform .15s; font-size: 10px; }
+  .thinking-toggle.open .chevron { transform: rotate(90deg); }
+  .thinking-summary { color: #8b949e; font-style: italic; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .thinking-count { font-size: 10px; color: #6e7681; background: #21262d; padding: 0 6px; border-radius: 8px; }
+  .thinking-full { display: none; color: #8b949e; padding: 6px 8px 6px 24px; border-left: 2px solid #30363d; margin-left: 8px; white-space: pre-wrap; }
+  .thinking-toggle.open + .thinking-full { display: block; }
+
+  /* tool 卡片 */
+  .tool-card { border: 1px solid #30363d; border-radius: 6px; overflow: hidden; }
+  .tool-card-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; }
+  .tool-card-head:hover { background: #161b22; }
+  .tool-icon { font-size: 11px; padding: 1px 7px; border-radius: 4px; font-weight: 600; }
+  .tool-bash { background: rgba(88,166,255,0.15); color: #58a6ff; }
+  .tool-grep { background: rgba(63,185,80,0.15); color: #3fb950; }
+  .tool-name { color: #c9d1d9; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: inherit; }
+  .tool-status { font-size: 11px; padding: 1px 6px; border-radius: 4px; }
+  .st-ok { background: rgba(63,185,80,0.15); color: #3fb950; }
+  .st-err { background: rgba(248,81,73,0.15); color: #f85149; }
+  .tool-detail { display: none; border-top: 1px solid #30363d; padding: 8px 10px; background: #0d1117; }
+  .tool-card.open .tool-detail { display: block; }
+  .detail-label { font-size: 10px; color: #6e7681; text-transform: uppercase; margin-bottom: 2px; letter-spacing: .5px; }
+  .detail-cmd { color: #79c0ff; word-break: break-all; }
+  .detail-result { color: #3fb950; white-space: pre-wrap; }
+  .detail-result.err { color: #f85149; }
+
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; font-size: 11px; color: #8b949e; }
+  .legend span { display: inline-flex; align-items: center; gap: 4px; }
+  .dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+</style>
+</head>
+<body>
+
+<h1>Agent-Run 日志展示优化原型</h1>
+<div class="sub">变更 2026-06-22-agent-run-pipeline-fix · P1-4 · 数据取自 agent-run-7142b6cb.log 真实片段 · 点击 thinking / tool 卡片可展开</div>
+
+<div class="legend">
+  <span><i class="dot" style="background:#bc8cff"></i>用户输入</span>
+  <span><i class="dot" style="background:#8b949e"></i>思考(折叠)</span>
+  <span><i class="dot" style="background:#f0f6fc"></i>助手输出</span>
+  <span><i class="dot" style="background:#58a6ff"></i>工具调用</span>
+  <span><i class="dot" style="background:#3fb950"></i>成功</span>
+  <span><i class="dot" style="background:#f85149"></i>失败</span>
+</div>
+
+<div class="panels">
+
+  <!-- ============ 现状 ============ -->
+  <div class="panel">
+    <div class="panel-head">
+      <span class="tag tag-bad">现状</span>
+      <h2>原始逐行 · 8588 行噪音</h2>
+    </div>
+    <div class="panel-body" id="before">
+      <div class="raw-line raw-userinput"><span class="raw-ts">06:24:04</span> <span class="raw-tag">[user_input]</span> 你是一个项目分析 agent。请对项目目录 ...myaaa 执行 sillyspec scan。</div>
+
+      <div class="raw-line raw-thinking raw-frag"><span class="raw-ts">06:24:11</span> <span class="raw-tag">[THINKING]</span> 用户要求我执行 sillyspec scan</div>
+      <div class="raw-line raw-system"><span class="raw-ts">06:24:11</span> <span class="raw-tag">[SYSTEM:thinking_tokens]</span> 51</div>
+      <div class="raw-line raw-thinking raw-frag"><span class="raw-ts">06:24:12</span> <span class="raw-tag">[THINKING]</span> 程序来分析项目 ...myaaa。</div>
+      <div class="raw-line raw-system"><span class="raw-ts">06:24:12</span> <span class="raw-tag">[SYSTEM:thinking_tokens]</span> 59</div>
+      <div class="raw-line raw-thinking raw-frag"><span class="raw-ts">06:24:12</span> <span class="raw-tag">[THINKING]</span> 启动命令（包含所有平台参数）</div>
+      <div class="raw-line raw-thinking raw-dup"><span class="raw-ts">06:24:13</span> <span class="raw-tag">[THINKING]</span> 用户要求我执行 sillyspec scan 流程来分析项目...（完整版重发）<span class="dup-marker">⮕ 重复</span></div>
+
+      <div class="raw-line raw-assistant"><span class="raw-ts">06:24:14</span> <span class="raw-tag">[ASSISTANT]</span> 我将帮你执行 sillyspec scan 流程来分析项目。</div>
+      <div class="raw-line raw-tooluse"><span class="raw-ts">06:24:15</span> <span class="raw-tag">[TOOL_USE]</span> Bash: sillyspec init --dir "...myaaa"</div>
+      <div class="raw-line raw-toolcall-json"><span class="raw-ts">06:24:15</span> [tool_call] {"tool":"Bash","args":{"command":"sillyspec init --dir ..."},...} <span class="dup-marker">⮕ 同一调用第二份</span></div>
+      <div class="raw-line raw-toolresult"><span class="raw-ts">06:24:20</span> <span class="raw-tag">[TOOL_RESULT]</span> ✅ 已创建全局状态文件 (SQLite) · SillySpec v3.18.5 安装完成</div>
+
+      <div class="raw-line raw-tooluse"><span class="raw-ts">06:24:28</span> <span class="raw-tag">[TOOL_USE]</span> Bash: sillyspec run scan --spec-root /data/spec-workspaces/4864e091...</div>
+      <div class="raw-line raw-toolresult" style="color:#f85149"><span class="raw-ts">06:24:31</span> <span class="raw-tag">[TOOL_RESULT]</span> Exit code 1 — Error: EPERM mkdir 'C:\Program Files\Git\data\spec-workspaces...'</div>
+
+      <div class="raw-line raw-thinking raw-frag"><span class="raw-ts">06:24:35</span> <span class="raw-tag">[THINKING]</span> 错误。看起来有几个问题：</div>
+      <div class="raw-line raw-thinking raw-frag"><span class="raw-ts">06:24:35</span> <span class="raw-tag">[THINKING]</span> 1. 路径被解析为 C:\Program Files\</div>
+      <div class="raw-line raw-thinking raw-frag"><span class="raw-ts">06:24:35</span> <span class="raw-tag">[THINKING]</span> Git\data\... 这是因为</div>
+      <div class="raw-line raw-thinking raw-frag"><span class="raw-ts">06:24:36</span> <span class="raw-tag">[THINKING]</span> Git Bash 在 Windows 上会解析 /data/ 为 Git 安装根...</div>
+      <div style="color:#6e7681;font-size:11px;padding:8px;text-align:center">… 其余 8570 行 …</div>
+    </div>
+  </div>
+
+  <!-- ============ 优化后 ============ -->
+  <div class="panel">
+    <div class="panel-head">
+      <span class="tag tag-good">优化后</span>
+      <h2>Timeline · Turn 分组 · 去重折叠</h2>
+    </div>
+    <div class="panel-body" id="after">
+
+      <!-- Turn 1 -->
+      <div class="turn">
+        <div class="turn-head">
+          <span class="turn-num">Turn 1</span>
+          <span class="turn-ts">06:24:04 → 06:24:20</span>
+        </div>
+        <div class="turn-body">
+          <div class="block blk-user">你是一个项目分析 agent。请对项目目录 ...myaaa 执行 sillyspec scan。</div>
+
+          <div class="block blk-thinking">
+            <div class="thinking-toggle" onclick="this.classList.toggle('open')">
+              <span class="chevron">▶</span>
+              <span class="thinking-summary">规划 sillyspec scan 流程：init → scan 启动 → 逐步推进…</span>
+              <span class="thinking-count">6 段 → 合并 1 条</span>
+            </div>
+            <div class="thinking-full">用户要求执行 sillyspec scan 流程分析项目 myaaa。
+1. init 初始化
+2. scan 启动（含全部平台参数）
+3. 按 step prompt 逐步推进，done 推进下一步
+（原 6 个碎片 + 1 个完整重发 → 已去重合并）</div>
+          </div>
+
+          <div class="block blk-assistant">我将帮你执行 sillyspec scan 流程来分析项目。</div>
+
+          <div class="block">
+            <div class="tool-card" onclick="this.classList.toggle('open')">
+              <div class="tool-card-head">
+                <span class="tool-icon tool-bash">Bash</span>
+                <span class="tool-name">sillyspec init --dir "...myaaa"</span>
+                <span class="tool-status st-ok">✓ 5.7s</span>
+              </div>
+              <div class="tool-detail">
+                <div class="detail-label">命令</div>
+                <div class="detail-cmd">sillyspec init --dir "C:\Users\qinyi\IdeaProjects\myaaa"</div>
+                <div class="detail-label" style="margin-top:8px">结果</div>
+                <div class="detail-result">✅ 已创建全局状态文件 (SQLite)
+✓ Claude Code skills 已同步 (19 个)
+✅ SillySpec v3.18.5 安装完成</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Turn 2 -->
+      <div class="turn">
+        <div class="turn-head">
+          <span class="turn-num">Turn 2</span>
+          <span class="turn-ts">06:24:28 → 06:24:36</span>
+        </div>
+        <div class="turn-body">
+          <div class="block blk-thinking">
+            <div class="thinking-toggle" onclick="this.classList.toggle('open')">
+              <span class="chevron">▶</span>
+              <span class="thinking-summary">诊断 EPERM：/data/ 被 Git Bash MSYS 转成 C:\Program Files\Git\data\…</span>
+              <span class="thinking-count">4 段 → 合并 1 条</span>
+            </div>
+            <div class="thinking-full">错误分析：路径被解析为 C:\Program Files\Git\data\...
+原因是 Git Bash 在 Windows 上把 /data/ 解析为 Git 安装根目录。
+C:\Program Files\ 是系统保护目录 → mkdir EPERM。
+（原 4 个碎片 thinking → 已去重合并）</div>
+          </div>
+
+          <div class="block">
+            <div class="tool-card" onclick="this.classList.toggle('open')">
+              <div class="tool-card-head">
+                <span class="tool-icon tool-bash">Bash</span>
+                <span class="tool-name">sillyspec run scan --spec-root /data/spec-workspaces/4864e091…</span>
+                <span class="tool-status st-err">✗ Exit 1</span>
+              </div>
+              <div class="tool-detail">
+                <div class="detail-label">命令</div>
+                <div class="detail-cmd">sillyspec run scan --dir "..." --spec-root /data/spec-workspaces/4864e091-... --workspace-id ... --scan-run-id ...</div>
+                <div class="detail-label" style="margin-top:8px">结果</div>
+                <div class="detail-result err">Exit code 1
+Error: EPERM: operation not permitted, mkdir 'C:\Program Files\Git\data\spec-workspaces\4864e091-...\.runtime'</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Turn 3 -->
+      <div class="turn">
+        <div class="turn-head">
+          <span class="turn-num">Turn 3</span>
+          <span class="turn-ts">06:25:05 → …</span>
+        </div>
+        <div class="turn-body">
+          <div class="block blk-thinking">
+            <div class="thinking-toggle" onclick="this.classList.toggle('open')">
+              <span class="chevron">▶</span>
+              <span class="thinking-summary">平台参数是 Linux/Docker 路径，Windows 下需检查环境…</span>
+              <span class="thinking-count">3 段 → 合并 1 条</span>
+            </div>
+            <div class="thinking-full">平台参数 --spec-root 是 Linux/Docker 格式，但当前是 Windows 环境。
+检查：1) 用户需在 Docker/WSL 跑？ 2) 本地跑（不带平台参数）？ 3) 平台连接状态？</div>
+          </div>
+
+          <div class="block">
+            <div class="tool-card" onclick="this.classList.toggle('open')">
+              <div class="tool-card-head">
+                <span class="tool-icon tool-grep">Grep</span>
+                <span class="tool-name">搜索 HTTPException|status_code|error --include="*.py"</span>
+                <span class="tool-status st-ok">✓ 23 行</span>
+              </div>
+              <div class="tool-detail">
+                <div class="detail-label">模式</div>
+                <div class="detail-cmd">HTTPException|status_code|error (glob *.py)</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
