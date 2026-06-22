@@ -379,21 +379,23 @@ export default function ProjectPlansPage() {
           <div className="flex gap-1">
             <Button
               size="sm"
-              variant="ghost"
+              variant="default"
+              className="bg-blue-500 text-white hover:bg-blue-600"
               onClick={() => setDetail({ open: true, planId: p.id })}
             >
               详情
             </Button>
             <Button
               size="sm"
-              variant="ghost"
+              variant="default"
+              className="bg-amber-500 text-white hover:bg-amber-600"
               onClick={() => goToMilestones(p.id)}
             >
               里程碑
             </Button>
             <Button
               size="sm"
-              variant="ghost"
+              variant="default"
               disabled={!isManager}
               title={isManager ? undefined : "仅项目经理可编辑"}
               onClick={() => setDrawer({ open: true, mode: "edit", plan: p })}

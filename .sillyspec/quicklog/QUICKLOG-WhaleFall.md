@@ -475,6 +475,19 @@ created_at: 2026-06-03T08:42:04
 方案：操作列 `width` 由 `300` 缩到 `240`（实际内容 232 + 8 buffer）。
 结果：1）typecheck 通过；2）329/329 vitest 全过；3）操作列宽度贴合 4 个按钮实际宽度，无右侧空白。Docker 重建 frontend 待后续。
 
+## ql-20260622-011-0449 | 2026-06-22 11:06:45 | 操作列按钮统一切换为实心彩色样式
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx
+背景：操作列 4 个按钮原本仅"删除"是实心（variant="destructive" 红色），其余 3 个（详情/里程碑/编辑）是 variant="ghost" 幽灵按钮（透明背景+文字色）。用户要求所有按钮统一按删除按钮的实心样式，颜色由我搭配。
+方案：4 个按钮全部改为实心，按功能语义搭配颜色：
+  - **详情** variant `ghost`→`default` + className `bg-blue-500 text-white hover:bg-blue-600`（蓝色/查看语义）
+  - **里程碑** variant `ghost`→`default` + className `bg-amber-500 text-white hover:bg-amber-600`（琥珀色/任务里程碑语义）
+  - **编辑** variant `ghost`→`default` 保持平台 primary 主色
+  - **删除** variant `destructive` 不变（红色/危险语义）
+机制：Button 用 cva 生成 className，外部传入的 className 会覆盖 cva 内部 className（Tailwind 后写优先），所以 variant=default + className bg-blue-500 能覆盖默认 bg-primary。
+结果：1）typecheck 通过；2）329/329 vitest 全过；3）4 个按钮视觉统一为彩色实心，颜色按功能区分（蓝/琥珀/主色/红）。Docker 重建 frontend 待后续。
+
+
 
 
 
