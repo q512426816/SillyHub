@@ -79,10 +79,11 @@ function fmtDate(v: string | null | undefined): string {
   return v.length >= 10 ? v.slice(0, 10) : v;
 }
 
-// 单个查询条件的外壳:垂直布局(标题在上,控件在下),宽度统一 w-[200px]。
+// 单个查询条件的外壳:垂直布局(标题在上,控件在下)。
 // 使用 Form.Item noStyle 让 antd 不渲染外层 label/wrapper,
 // 标题和宽度完全由我们自定义的 div 控制,避免 antd inline 布局
 // 给 RangePicker 留不足宽度导致内部换行。
+// 外层 Form 用 grid-cols-4 强制一行最多 4 列,Field 用 w-full 占满网格列。
 function Field({
   label,
   children,
@@ -91,7 +92,7 @@ function Field({
   children: ReactNode;
 }) {
   return (
-    <div className="flex w-[200px] flex-col gap-1">
+    <div className="flex w-full flex-col gap-1">
       <span className="text-xs leading-4 text-muted-foreground">{label}</span>
       {children}
     </div>
@@ -460,8 +461,7 @@ export default function ProjectPlansPage() {
         <Form<SearchForm>
           form={search}
           layout="inline"
-          className="w-full"
-          style={{ rowGap: 12, columnGap: 12 }}
+          className="grid w-full grid-cols-4 gap-3"
         >
           <Field label="项目名称">
             <Form.Item name="projectName" noStyle>

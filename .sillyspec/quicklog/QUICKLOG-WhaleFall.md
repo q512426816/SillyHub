@@ -454,6 +454,14 @@ created_at: 2026-06-03T08:42:04
   5) 删除不再使用的 `fieldLabel` helper；6) 引入 `type ReactNode` from "react" 替代 React.ReactNode。
 结果：1) typecheck 通过；2) 329/329 vitest 全过；3) 6 个查询条件视觉完全统一：标题（text-xs 灰）在上、控件在下，宽度均 200px；4) RangePicker 在 200px 内单行展示双日期+separator+日历图标（无 clear 图标）。Docker 重建 frontend 待后续。
 
+## ql-20260622-008-de04 | 2026-06-22 10:27:09 | 查询条件一行最多 4 个
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx
+背景：ql-007 改垂直布局后，Field 用 w-[200px]，外层 Form 用 flex-wrap，容器宽度决定一行能放几个（宽屏可能放 5-6 个）。用户要求一行最多 4 个。
+方案：CSS Grid 强制 4 列。1) Form className 由 `w-full` + style rowGap/columnGap 改为 `grid w-full grid-cols-4 gap-3`；2) Field 内部 div 由 `w-[200px]` 改为 `w-full` 占满网格列；3) Form 移除 style（grid 的 gap-3 已覆盖 rowGap/columnGap）。
+结果：1) typecheck 通过；2) 329/329 vitest 全过；3) 展开 6 个条件时第一行 4 个（项目名称/合同名称/公司名称/合同签订时间），第二行 2 个占左两列（项目开始时间/预计验收时间）；4) 收起时只显示 2 个（项目名称/合同名称）占左两列。Docker 重建 frontend 待后续。
+
+
 
 
 
