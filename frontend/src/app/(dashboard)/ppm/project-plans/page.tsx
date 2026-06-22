@@ -80,8 +80,11 @@ function fmtDate(v: string | null | undefined): string {
 }
 
 // 统一 label 宽度,让所有 Form.Item 视觉对齐(4 字/6 字 label 均占 88px)。
+// whitespace-nowrap 防止 6 字 label 在 antd label 包装层因 padding 触发换行。
 const fieldLabel = (text: string) => (
-  <span className="inline-block w-[88px] text-right text-sm">{text}</span>
+  <span className="inline-block w-[88px] whitespace-nowrap text-right text-sm">
+    {text}
+  </span>
 );
 
 export default function ProjectPlansPage() {
@@ -452,7 +455,7 @@ export default function ProjectPlansPage() {
           <Form.Item
             label={fieldLabel("项目名称")}
             colon={false}
-            className="w-[300px]"
+            className="w-[340px]"
             name="projectName"
           >
             <Input
@@ -465,7 +468,7 @@ export default function ProjectPlansPage() {
           <Form.Item
             label={fieldLabel("合同名称")}
             colon={false}
-            className="w-[300px]"
+            className="w-[340px]"
             name="contractName"
           >
             <Input

@@ -434,5 +434,14 @@ created_at: 2026-06-03T08:42:04
 方案：新增 module-level helper `fieldLabel(text)` 返回 `<span className="inline-block w-[88px] text-right text-sm">{text}</span>` 统一 label 视觉宽度；6 个 Form.Item 全部重构：1) `label={fieldLabel("xxx")}`；2) `colon={false}` 去掉冒号（冒号会让 control 起始位置偏移）；3) `className="w-[300px]"` 整体宽度统一；4) 内部 Input/RangePicker 改为 `className="w-full"` 填满 control 区域。
 结果：1) typecheck 通过；2) 329/329 vitest 全过；3) 6 个 Form.Item 视觉宽度完全对齐（整体 300px / label 88px / control ~212px），4 字与 6 字 label 起始/结束位置一致，Input 和 RangePicker 宽度一致。Docker 重建 frontend 待后续。
 
+## ql-20260622-006-fa76 | 2026-06-22 10:12:31 | 修复时间查询条件标题/选择框双行换行
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx
+背景：ql-005 把 Form.Item 统一到 w-[300px] / label w-[88px] 后，3 个时间 RangePicker 项（合同签订时间/项目开始时间/预计验收时间）的标题和选择框都变成两行。
+根因：(1) Form.Item w-[300px] 减去 label w-[88px] 与 label-control 间距 8px，control 实际可用仅 204px，而 antd RangePicker 标准布局（两个日期 input + separator + allowClear 图标）最小需要 ~220px，不够就内部换行；(2) fieldLabel span 缺 whitespace-nowrap，6 字 label 在 antd `<label>` 包装层因 padding 触发文字换行。
+方案：1) fieldLabel span 加 `whitespace-nowrap` 强制单行展示；2) 6 个 Form.Item className 由 `w-[300px]` 全部加宽到 `w-[340px]`（control 可用宽度 204→244px，给 RangePicker 留足空间）。
+结果：1) typecheck 通过；2) 329/329 vitest 全过；3) 时间项 label 单行展示，RangePicker 单行展示双日期+separator+图标；4) 6 个 Form.Item 整体宽度统一对齐（340px）。Docker 重建 frontend 待后续。
+
+
 
 
