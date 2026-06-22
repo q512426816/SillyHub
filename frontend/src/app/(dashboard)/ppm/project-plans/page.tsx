@@ -10,7 +10,7 @@
  *
  * 走 lib/ppm/plan.ts:listProjectPlans + CRUD。apiFetch。
  */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   DatePicker,
@@ -104,6 +104,9 @@ export default function ProjectPlansPage() {
   const { user: currentUser } = useSession();
   const currentUserId = currentUser?.id ?? "";
   const [plans, setPlans] = useState<PsProjectPlan[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -127,24 +130,38 @@ export default function ProjectPlansPage() {
     router.push(`/ppm/milestone-details?plan=${planId}`);
   };
 
+  // 服务端分页查询:每次调用都带当前 page/pageSize,查询参数由 lastSearchRef 缓存,
+  // 这样翻页/改 pageSize 不需要重新构造查询参数。
+  const lastSearchRef = useRef<Record<string, string | undefined>>({});
+
   const load = useCallback(
-    async (params?: Record<string, string | undefined>) => {
+    async (
+      params?: Record<string, string | undefined>,
+      opts?: { page?: number; pageSize?: number },
+    ) => {
+      const p = opts?.page ?? page;
+      const ps = opts?.pageSize ?? pageSize;
+      if (params) lastSearchRef.current = params;
       setLoading(true);
       setError(null);
       try {
-        setPlans(await listProjectPlans({ page: 1, page_size: 100, ...params }));
+        const resp = await listProjectPlans({ page: p, page_size: ps, ...params });
+        setPlans(resp.items);
+        setTotal(resp.total);
       } catch (err) {
         setError(err instanceof ApiError ? err.message : "加载失败");
       } finally {
         setLoading(false);
       }
     },
-    [],
+    [page, pageSize],
   );
 
+  // 翻页 / 改 pageSize 时自动重新请求(用 lastSearchRef 保留的查询条件)。
   useEffect(() => {
-    void load();
-  }, [load]);
+    void load(lastSearchRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, pageSize]);
 
   const showToast = (ok: boolean, text: string) => {
     setToast({ ok, text });
@@ -153,7 +170,7 @@ export default function ProjectPlansPage() {
 
   const handleSearch = () => {
     const v = search.getFieldsValue();
-    void load({
+    const params = {
       project_name: v.projectName?.trim() || undefined,
       contract_name: v.contractName?.trim() || undefined,
       company_name: v.companyName?.trim() || undefined,
@@ -175,12 +192,24 @@ export default function ProjectPlansPage() {
       project_plan_end_time_end: v.projectPlanEndTimeRange?.[1]?.format(
         "YYYY-MM-DD",
       ),
-    });
+    };
+    // 查询条件变化时回到第 1 页(避免空页),用 opts.page=1 覆盖 state 中的 page。
+    lastSearchRef.current = params;
+    if (page !== 1) {
+      setPage(1);
+    } else {
+      void load(params, { page: 1 });
+    }
   };
 
   const handleReset = () => {
     search.resetFields();
-    void load();
+    lastSearchRef.current = {};
+    if (page !== 1) {
+      setPage(1);
+    } else {
+      void load({}, { page: 1 });
+    }
   };
 
   const handleDelete = async (p: PsProjectPlan) => {
@@ -206,8 +235,9 @@ export default function ProjectPlansPage() {
     }
   };
 
-  // 左侧分组树:按项目经理分组,显示数量,点击节点客户端过滤右侧表格。
-  // key 约定:"all" = 全部;"manager:<id|unknown>" = 单个项目经理。
+  // 左侧分组树:按项目经理分组(仅基于当前页,服务端分页下不做全量聚合)。
+  // "全部项目" 数量显示服务端真实 total,避免显示当前页条数造成歧义。
+  // key 约定:"all" = 全部;"manager:<id|unknown>" = 单个项目经理(当前页过滤)。
   const managerTreeData = useMemo<TreeDataNode[]>(() => {
     const groups = new Map<string, { name: string; count: number }>();
     for (const p of plans) {
@@ -234,14 +264,14 @@ export default function ProjectPlansPage() {
         title: (
           <span className="flex items-center justify-between gap-2 font-medium">
             <span>全部项目</span>
-            <span className="text-xs text-muted-foreground">{plans.length}</span>
+            <span className="text-xs text-muted-foreground">{total}</span>
           </span>
         ),
         key: "all",
         children,
       },
     ];
-  }, [plans]);
+  }, [plans, total]);
 
   // 客户端按所选树节点过滤 plans(选中"all"或空值时不过滤)。
   const filteredPlans = useMemo(() => {
@@ -572,10 +602,16 @@ export default function ProjectPlansPage() {
               bordered
               scroll={{ x: "max-content", y: 500 }}
               pagination={{
-                defaultPageSize: 10,
-                pageSizeOptions: ["10", "20", "50", "100"],
+                current: page,
+                pageSize,
+                total,
                 showSizeChanger: true,
-                showTotal: (total) => `共 ${total} 条`,
+                pageSizeOptions: ["10", "20", "50", "100"],
+                showTotal: (t) => `共 ${t} 条`,
+                onChange: (p, ps) => {
+                  setPage(p);
+                  setPageSize(ps);
+                },
               }}
               emptyText="暂无项目计划"
               summary={() => (

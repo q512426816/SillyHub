@@ -513,3 +513,14 @@ created_at: 2026-06-03T08:42:04
   2. <Table.Summary fixed> → <Table.Summary fixed="bottom">（吸底）
   3. scroll={{ x: "max-content" }} → scroll={{ x: "max-content", y: 500 }}（启用纵向滚动+吸底固定）
 结果：1）typecheck 通过；2）329/329 vitest 全过；3）表格底部出现分页器（默认 10 条/页，可切换 10/20/50/100，显示总条数），合计行作为 fixed=bottom 总结栏在滚动时吸底固定。Docker 重建 frontend 待后续。
+
+## ql-20260622-014-c8f3 | 2026-06-22 11:56:00 | 项目计划分页与查询接口联动（服务端分页）
+状态：已完成
+文件：backend/app/modules/ppm/plan/router.py、frontend/src/lib/ppm/plan.ts、frontend/src/app/(dashboard)/ppm/project-plans/page.tsx
+背景：上一版 ql-013 加的前端 antd 分页是纯客户端切片（page_size:100 一次拉全部再前端分），翻页/查询都不重新请求接口。用户要求"分页和查询接口要联动"——真正的服务端分页。后端 router `/api/ppm/project-plan` 当前 response_model=list[PsProjectPlanResp]，丢弃了 service 返回的 Page 中的 total；前端 listProjectPlans 也只返回数组。
+方案：
+  1. 后端 plan/router.py `/project-plan` GET: response_model 从 list[PsProjectPlanResp] 改为 Page[PsProjectPlanResp]，import Page，return Page(items=..., total=..., page=..., page_size=...)
+  2. 前端 lib/ppm/plan.ts: listProjectPlans 返回 PageResp<PsProjectPlan> (复用 types.ts 已有的 PageResp<T>)
+  3. 前端 page.tsx: 新增 page/pageSize/total state + lastSearchRef；pagination 受控 (current/pageSize/total/onChange)；onChange 调 setPage/setPageSize 触发 useEffect 自动 load(lastSearchRef.current)；handleSearch/handleReset 先更新 lastSearchRef 再 setPage(1)（page已是1时手动 load）
+  4. 左侧 managerTree "全部项目" count 改用 total（避免当前页 N 条歧义），children/summaryRow 接受基于当前页（语义弱化，后续可加聚合接口）
+结果：1）typecheck 通过；2）329/329 vitest 全过；3）翻页/改 pageSize/查询条件变化都触发服务端请求，showTotal 显示真实 total。Docker 重建前后端待后续。

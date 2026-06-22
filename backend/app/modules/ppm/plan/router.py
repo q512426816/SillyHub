@@ -26,7 +26,7 @@ from app.core.auth_deps import get_current_user, require_permission_any
 from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
-from app.modules.ppm.common.crud import PageReq
+from app.modules.ppm.common.crud import Page, PageReq
 from app.modules.ppm.common.export import ColumnDef
 from app.modules.ppm.plan.schema import (
     ChangeProcessReq,
@@ -243,14 +243,19 @@ async def delete_module(
 # ===========================================================================
 
 
-@router.get("/project-plan", response_model=list[PsProjectPlanResp])
+@router.get("/project-plan", response_model=Page[PsProjectPlanResp])
 async def list_ps_project_plans(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
     req: PageReqDep,
-) -> list[PsProjectPlanResp]:
+) -> Page[PsProjectPlanResp]:
     page = await PlanService(session).list_ps_project_plans(req)
-    return [PsProjectPlanResp.model_validate(i) for i in page.items]
+    return Page[PsProjectPlanResp](
+        items=[PsProjectPlanResp.model_validate(i) for i in page.items],
+        total=page.total,
+        page=page.page,
+        page_size=page.page_size,
+    )
 
 
 @router.post(

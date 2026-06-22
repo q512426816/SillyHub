@@ -34,6 +34,7 @@ import type {
   PlanNodeUpdate,
   PlanProcessActionReq,
   PageReq,
+  PageResp,
   ProjectPlanThreeLevel,
   PsPlanNode,
   PsPlanNodeDetail,
@@ -185,8 +186,11 @@ export async function deletePlanNodeModule(moduleId: string): Promise<void> {
 
 export async function listProjectPlans(
   params?: PageReq,
-): Promise<PsProjectPlan[]> {
-  return apiFetch<PsProjectPlan[]>("/api/ppm/project-plan", pageQuery(params));
+): Promise<PageResp<PsProjectPlan>> {
+  return apiFetch<PageResp<PsProjectPlan>>(
+    "/api/ppm/project-plan",
+    pageQuery(params),
+  );
 }
 
 export async function getProjectPlan(planId: string): Promise<PsProjectPlan> {
