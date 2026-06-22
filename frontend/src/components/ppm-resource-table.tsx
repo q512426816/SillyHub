@@ -13,15 +13,14 @@
  * 设计依据:.sillyspec/changes/2026-06-20-ppm-module-migration/tasks/task-10.md
  * 复用样板:frontend/src/app/(dashboard)/admin/users/page.tsx
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Tag, type TableProps } from "antd";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Form, Input, Select, Tag, type TableProps } from "antd";
 
 import { Button } from "@/components/ui/button";
 import {
   DataTable,
   PageContainer,
   PageHeader,
-  SearchBar,
   SectionCard,
 } from "@/components/layout";
 import { ApiError } from "@/lib/api";
@@ -255,6 +254,8 @@ export function PpmResourceTable<
   }>({ open: false, mode: "create" });
   const [confirmDelete, setConfirmDelete] = useState<T | null>(null);
   const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null);
+  // 查询区展开/收起:超过 4 个字段时显示切换按钮(对齐 project-plans 风格)。
+  const [expanded, setExpanded] = useState(false);
 
   // select 字段异步选项缓存
   const [asyncOptions, setAsyncOptions] = useState<Record<string, PpmFieldOption[]>>({});
@@ -337,6 +338,13 @@ export function PpmResourceTable<
   const handleReset = () => {
     setSearchInput({});
     setSearchCommitted({});
+    setPage(1);
+  };
+
+  // 顶部"搜索"按钮:把 searchInput 立刻 flush 到 searchCommitted(覆盖原 debounce)。
+  const handleSearchCommit = () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setSearchCommitted({ ...searchInput });
     setPage(1);
   };
 
@@ -479,33 +487,26 @@ export function PpmResourceTable<
     return rows.slice(start, start + pageSize);
   }, [rows, page, pageSize, serverSidePagination]);
 
+  // 查询区前 N 行可见字段:collapsed 时取前 4 个,expanded 取全部。
+  // 字段 ≤ 4 时不显示"展开"按钮(无需切换)。
+  const visibleSearchFields = useMemo(() => {
+    if (expanded || searchFields.length <= 4) return searchFields;
+    return searchFields.slice(0, 4);
+  }, [searchFields, expanded]);
+  const showExpandToggle = searchFields.length > 4;
+
+  // 立即触发查询(用于 select/date 选中即查)。
+  const commitSearchField = (name: string, value: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setSearchCommitted((prev) => ({ ...prev, [name]: value }));
+    setPage(1);
+  };
+
   return (
     <PageContainer>
       <PageHeader
         title={title}
         subtitle={subtitle}
-        actions={
-          <>
-            {exportFn && (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={exporting}
-                onClick={() => void handleExport()}
-                title={exportFilename}
-              >
-                {exporting ? "导出中…" : "导出"}
-              </Button>
-            )}
-            <Button
-              size="sm"
-              disabled={!canWrite}
-              onClick={() => setDrawer({ open: true, mode: "create" })}
-            >
-              + 新增{entityLabel}
-            </Button>
-          </>
-        }
       />
 
       {toast && (
@@ -534,40 +535,97 @@ export function PpmResourceTable<
         </div>
       ) : (
         <>
-          {searchFields.length > 0 && (
-            <SectionCard>
-              <SearchBar>
-                {searchFields.map((f) => (
-                  <input
-                    key={f.name as string}
-                    value={searchInput[f.name as string] ?? ""}
-                    onChange={(e) =>
-                      handleSearchInput(f.name as string, e.target.value)
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        if (debounceRef.current) clearTimeout(debounceRef.current);
-                        setSearchCommitted((prev) => ({
-                          ...prev,
-                          [f.name as string]: searchInput[f.name as string] ?? "",
-                        }));
-                        setPage(1);
-                      }
-                    }}
-                    placeholder={f.placeholder ?? `搜索${f.label}…`}
-                    className={`w-56 ${inputCls}`}
-                    aria-label={f.label}
-                  />
-                ))}
-                <Button size="sm" variant="outline" onClick={handleReset}>
-                  重置
+          <SectionCard bodyPadding="p-2">
+            {/* 顶部按钮行:搜索/重置/(展开) | 分隔 | 导出/新增 */}
+            <div className="mb-2 flex items-center justify-end gap-2">
+              <Button size="sm" onClick={() => handleSearchCommit()}>
+                搜索
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleReset}>
+                重置
+              </Button>
+              {showExpandToggle && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setExpanded((v) => !v)}
+                >
+                  {expanded ? "收起" : "展开"}
                 </Button>
-                <span className="ml-auto text-xs text-muted-foreground">
-                  共 {total} 条
-                </span>
-              </SearchBar>
-            </SectionCard>
-          )}
+              )}
+              <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+              {exportFn && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={exporting}
+                  onClick={() => void handleExport()}
+                  title={exportFilename}
+                >
+                  {exporting ? "导出中…" : "导出"}
+                </Button>
+              )}
+              <Button
+                size="sm"
+                disabled={!canWrite}
+                onClick={() => setDrawer({ open: true, mode: "create" })}
+              >
+                + 新增{entityLabel}
+              </Button>
+            </div>
+
+            {searchFields.length > 0 && (
+              <Form layout="vertical" className="grid w-full grid-cols-4 gap-3">
+                {visibleSearchFields.map((f) => {
+                  const name = f.name as string;
+                  const isSelect = f.type === "select";
+                  const opts = asyncOptions[name] ?? f.options ?? [];
+                  return (
+                    <Field key={name} label={f.label}>
+                      <Form.Item name={name} noStyle>
+                        {isSelect ? (
+                          <Select
+                            allowClear
+                            showSearch
+                            optionFilterProp="label"
+                            placeholder={f.placeholder ?? `请选择${f.label}`}
+                            options={opts.map((o) => ({
+                              label: o.label,
+                              value: o.value,
+                            }))}
+                            onChange={(v: string | undefined) => {
+                              setSearchInput((prev) => ({
+                                ...prev,
+                                [name]: v ?? "",
+                              }));
+                              commitSearchField(name, v ?? "");
+                            }}
+                          />
+                        ) : (
+                          <Input
+                            allowClear
+                            placeholder={f.placeholder ?? `请输入${f.label}`}
+                            onChange={(e) =>
+                              handleSearchInput(name, e.target.value)
+                            }
+                            onPressEnter={() => {
+                              if (debounceRef.current)
+                                clearTimeout(debounceRef.current);
+                              setSearchCommitted((prev) => ({
+                                ...prev,
+                                [name]: searchInput[name] ?? "",
+                              }));
+                              setPage(1);
+                            }}
+                          />
+                        )}
+                      </Form.Item>
+                    </Field>
+                  );
+                })}
+              </Form>
+            )}
+          </SectionCard>
 
           <DataTable<T>
             rowKey={(row: T) => getRowId(row)}
@@ -575,13 +633,14 @@ export function PpmResourceTable<
             dataSource={pagedRows}
             loading={loading}
             size="small"
+            bordered
             rowClassName={
               striped
                 ? (_row: T, idx: number) =>
                     idx % 2 === 1 ? "bg-muted/40" : ""
                 : undefined
             }
-            scroll={{ x: "max-content" }}
+            scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
             pagination={{
               current: page,
               pageSize,
@@ -621,6 +680,25 @@ export function PpmResourceTable<
         />
       )}
     </PageContainer>
+  );
+}
+
+/**
+ * 查询条件外壳:垂直布局(标题在上,控件在下)。
+ * 借鉴 project-plans page.tsx 的 Field,让搜索区视觉一致。
+ */
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex w-full flex-col gap-1">
+      <span className="text-xs leading-4 text-muted-foreground">{label}</span>
+      {children}
+    </div>
   );
 }
 

@@ -109,6 +109,8 @@ export default function PpmProjectsPage() {
           "project_name" as FieldName,
           "project_code" as FieldName,
           "company_name" as FieldName,
+          "project_type" as FieldName,
+          "project_status" as FieldName,
         ]}
         getRowLabel={(row) =>
           row.project_name ?? row.project_code ?? row.id

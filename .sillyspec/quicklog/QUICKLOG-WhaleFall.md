@@ -608,3 +608,14 @@ created_at: 2026-06-03T08:42:04
   1. 新增 frontend/src/lib/ppm/status-label.ts,提供 STATUS_LABELS 映射 + statusLabel(value) helper,未知值原样返回
   2. ppm-project-plan-detail.tsx 在 4 处 status 渲染处套 statusLabel(plan.status/node.status/detail.status/task.status)
 结果：1）typecheck 通过；2）329/329 vitest 全过；3）4 处状态显示中文(草稿/审核中/审批中/已完成/已驳回/已归档),task 中文原样保留。Docker frontend 待重建。
+
+## ql-20260622-024-7b2c | 2026-06-22 14:42:30 | projects 等 PpmResourceTable 三页样式对齐 project-plans
+状态：已完成
+文件：frontend/src/components/ppm-resource-table.tsx、frontend/src/app/(dashboard)/ppm/projects/page.tsx、frontend/src/app/(dashboard)/ppm/project-stakeholders/page.tsx
+背景：projects/customers/project-stakeholders 三页用通用 PpmResourceTable,顶部查询区只支持横向原生 input,无法支持 select/date/range;表格无 bordered 无 scroll.y,与 project-plans 风格不一致。用户要求参照 project-plans 调整查询条件+列表样式。
+方案:
+  1. 改 PpmResourceTable 顶部:PageHeader 不再承载 actions,改在 SectionCard 右上角放按钮行(搜索/重置/展开|分隔|导出/新增)
+  2. 查询区改 antd Form layout=vertical + grid-cols-4 垂直布局;按 fields 中字段 type 渲染 Input/Select,支持回车查询、select 选中即查、防抖
+  3. 表格默认 bordered + scroll y="calc(100vh - 430px)"
+  4. projects searchFieldNames 增加 project_type/project_status(后端 PageReq 已支持);customers/project-stakeholders 无字段改动自动受益
+结果：1）typecheck 通过；2）363/363 vitest 全过；3）三页查询区垂直 grid-cols-4 + 右上操作行,表格 bordered + 高度自适应。Docker frontend 待重建。

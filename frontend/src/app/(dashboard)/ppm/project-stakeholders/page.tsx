@@ -82,6 +82,7 @@ export default function PpmProjectStakeholdersPage() {
       searchFieldNames={[
         "pm_project_id" as FieldName,
         "stakeholder" as FieldName,
+        "stakeholder_role" as FieldName,
       ]}
       getRowLabel={(row) => row.stakeholder ?? row.id}
       list={(params) => pageProjectStakeholders(params)}
