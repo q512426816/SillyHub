@@ -34,6 +34,9 @@ function parseFilenameFromContentDisposition(header: string | null): string | nu
 /**
  * 下载指定导出端点为 Excel 文件。
  *
+ * 401 时复刻 apiFetch 的 refresh+retry 一次逻辑(裸 fetch 不会自动刷新,
+ * 否则 token 过期导出直接 401 AUTH_TOKEN_EXPIDED 抛出)。
+ *
  * @param path 以 /api/ppm 开头的相对路径(走 next rewrite 或 SSR origin)
  * @param params 查询参数(过滤/分页条件)
  * @param filename 后端未返回 Content-Disposition 时的回退文件名
@@ -47,19 +50,67 @@ export async function downloadExcel(
   if (params) {
     for (const [k, v] of Object.entries(params)) {
       if (v === undefined || v === null) continue;
-      url.searchParams.set(k, String(v));
+      if (Array.isArray(v)) {
+        // 数组用重复 key 编码:?k=a&k=b (与 apiFetch 多值语义一致)
+        if (v.length === 0) continue;
+        url.searchParams.delete(k);
+        for (const item of v) url.searchParams.append(k, String(item));
+      } else {
+        url.searchParams.set(k, String(v));
+      }
     }
   }
-  const { accessToken } = useSession.getState();
-  const resp = await fetch(url.toString(), {
-    headers: {
+
+  const doFetch = async (token: string | null): Promise<Response> => {
+    const headers: Record<string, string> = {
       accept: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-    },
-  });
+    };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return fetch(url.toString(), { headers });
+  };
+
+  let { accessToken } = useSession.getState();
+  let resp = await doFetch(accessToken);
+
+  // 401 → refresh + retry once(apiFetch 行为对齐)
+  if (resp.status === 401) {
+    const { refreshToken, setTokens, hydrated } = useSession.getState();
+    if (refreshToken && hydrated) {
+      const refreshResp = await fetch(`${url.origin}/api/auth/refresh`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      if (refreshResp.ok) {
+        const refreshPayload = (await refreshResp.json().catch(() => null)) as {
+          access_token?: string | null;
+          refresh_token?: string | null;
+        } | null;
+        if (refreshPayload?.access_token) {
+          setTokens({
+            accessToken: refreshPayload.access_token,
+            refreshToken: refreshPayload.refresh_token ?? null,
+          });
+          // 用新 token 重试一次
+          resp = await doFetch(refreshPayload.access_token);
+        }
+      }
+    }
+
+    // 仍然 401 → 清 session 跳 /login,与 apiFetch 行为对齐
+    if (resp.status === 401) {
+      useSession.getState().clear();
+      if (typeof window !== "undefined") {
+        window.location.href = "/login";
+      }
+      throw new Error("导出失败:登录已过期,请重新登录");
+    }
+  }
+
   if (!resp.ok) {
     throw new Error(`导出失败:HTTP ${resp.status}`);
   }
+
   // 优先用服务端 Content-Disposition 里的文件名(支持中文+时间戳),
   // 解析失败才回退到调用方传入的 filename。
   const finalName =

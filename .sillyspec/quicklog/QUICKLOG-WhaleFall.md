@@ -707,3 +707,19 @@ created_at: 2026-06-03T08:42:04
   - 操作列 width 280 → 200
   - 前端 typecheck 通过,363/363 测试通过
   - 后端 ppm/problem/tests 35/35 通过;test_export.py 2 项失败为 stash 前后均存在的预先问题(与本次无关)
+
+## ql-20260622-031-b3f9 | 2026-06-22 16:04:04 | ppm 导出 401 token 过期不刷新
+状态：已完成
+文件：frontend/src/lib/ppm/export.ts
+背景：downloadExcel 用裸 fetch + Authorization header,没有 401 自动 refresh 逻辑(apiFetch 有)。token 过期时 apiFetch 自动刷新重试,downloadExcel 直接抛 401 AUTH_TOKEN_EXPIRED,用户看到导出失败。
+方案:
+  1. downloadExcel 在 fetch 拿到 401 时,先调 /api/auth/refresh 拿新 token
+  2. 刷新成功 → setTokens + 用新 token 重试一次原请求
+  3. 刷新失败 → 清 session 跳 /login,与 apiFetch 行为对齐
+  4. 顺便支持 params 多值数组(apiFetch 已支持,保持一致)
+结果：
+  - downloadExcel 提取 doFetch 内部函数,401 时调 /api/auth/refresh,刷新成功后用新 token 重试一次
+  - 重试后仍 401 → 清 session + 跳 /login
+  - params 数组用 searchParams.append 多值编码(与 apiFetch 一致,支持导出带 status 多值)
+  - typecheck 通过,363/363 测试通过
+
