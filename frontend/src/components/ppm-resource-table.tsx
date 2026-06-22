@@ -256,6 +256,9 @@ export function PpmResourceTable<
   const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null);
   // 查询区展开/收起:超过 4 个字段时显示切换按钮(对齐 project-plans 风格)。
   const [expanded, setExpanded] = useState(false);
+  // antd Form 实例:查询条件内部值由 Form.Item name 管理,
+  // 重置时需调 form.resetFields() 才能清空输入框/下拉的视觉值。
+  const [searchForm] = Form.useForm();
 
   // select 字段异步选项缓存
   const [asyncOptions, setAsyncOptions] = useState<Record<string, PpmFieldOption[]>>({});
@@ -339,6 +342,8 @@ export function PpmResourceTable<
     setSearchInput({});
     setSearchCommitted({});
     setPage(1);
+    // 同步清空 antd Form 内部状态(否则输入框/下拉视觉值还在)
+    searchForm.resetFields();
   };
 
   // 顶部"搜索"按钮:把 searchInput 立刻 flush 到 searchCommitted(覆盖原 debounce)。
@@ -575,7 +580,7 @@ export function PpmResourceTable<
             </div>
 
             {searchFields.length > 0 && (
-              <Form layout="vertical" className="grid w-full grid-cols-4 gap-3">
+              <Form form={searchForm} layout="vertical" className="grid w-full grid-cols-4 gap-3">
                 {visibleSearchFields.map((f) => {
                   const name = f.name as string;
                   const isSelect = f.type === "select";

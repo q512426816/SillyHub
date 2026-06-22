@@ -627,3 +627,13 @@ created_at: 2026-06-03T08:42:04
 方案:
   1. PpmResourceTable 的 <PageContainer> 加 size="full"
 结果：1）typecheck 通过；2）三页宽度占满屏幕。Docker frontend 待重建。
+
+## ql-20260622-026-4e2a | 2026-06-22 15:00:43 | PpmResourceTable 重置按钮不清 antd Form 内部状态
+状态：已完成
+文件：frontend/src/components/ppm-resource-table.tsx
+背景：ql-024 把查询区改成 antd Form + Form.Item name=...,Input/Select 内部值由 antd Form 管理。但 handleReset 只清了组件级 searchInput/searchCommitted state,未调 form.resetFields(),所以用户看到的输入框/下拉值还在。查询虽然生效(因 buildQuery 从 searchCommitted 读),但视觉上没清空,体验差。
+方案:
+  1. Form.useForm() 拿 form instance
+  2. handleReset 调 form.resetFields() 清 Form 内部状态
+  3. 将 form 实例传给 <Form form={form}>
+结果：1）typecheck 通过；2）点重置后输入框/下拉视觉值清空。Docker frontend 待重建。
