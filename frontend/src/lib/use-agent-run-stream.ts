@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AgentRunStreamClient,
   type StreamStatus,
@@ -26,6 +26,18 @@ import { useSession } from "@/stores/session";
 //   - FR-07：isActive=true 时 getAgentRun → session_id → fetchPendingDialogs 恢复。
 //   - D-003：dismissPerm 仅本地移除 perms，决策 API 由卡片自调。
 // ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * AgentRunStatus 运行时白名单：done 事件的 status 是裸 string，
+ * setStatus 前校验，避免后端脏值污染 status state（P3.2）。
+ */
+const AGENT_RUN_STATUSES: ReadonlySet<AgentRunStatus> = new Set([
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "killed",
+]);
 
 export interface UseAgentRunStreamOptions {
   /** run 状态 pending/running → 连 SSE；否则仅 prefetch 历史（D-001） */
@@ -162,12 +174,17 @@ export function useAgentRunStream(
     setError(null);
     setLoading(true);
 
+    // P2.1 cancelled flag：unmount / 依赖变化后旧 effect 闭包不再写 state，
+    // 防止 SSE 回调与 prefetch / FR-07 的 async 写入落到已卸载组件（StrictMode 双调用）。
+    let cancelled = false;
+
     // 构造底层客户端（每次 runId/isActive 变化都 new 新实例）
     const client = new AgentRunStreamClient(workspaceId, runId);
     clientRef.current = client;
 
     // (a) status：connected/connecting → streaming=true；error → setError
     client.onStatusChange((s: StreamStatus) => {
+      if (cancelled) return;
       setStreaming(s === "connecting" || s === "connected");
       if (s === "error") setError("连接失败，请重试");
       if (s === "connected") setLoading(false);
@@ -175,6 +192,7 @@ export function useAgentRunStream(
 
     // (b) message：log 追加（按 log_id 去重；client 已去重，hook 侧再保险）
     client.onMessage((event) => {
+      if (cancelled) return;
       setLogs((prev) => {
         if (event.log_id != null && prev.some((l) => l.id === event.log_id)) {
           return prev;
@@ -194,6 +212,7 @@ export function useAgentRunStream(
 
     // (c) permission_request：perms 增（按 request_id 去重，FR-04）
     client.onPermissionRequest((req) => {
+      if (cancelled) return;
       setPerms((prev) =>
         prev.some((r) => r.request_id === req.request_id)
           ? prev
@@ -203,12 +222,20 @@ export function useAgentRunStream(
 
     // (d) permission_resolved：dismissPerm（D-003，与卡片 onResolved 收敛）
     client.onPermissionResolved((resolved) => {
+      if (cancelled) return;
       dismissPerm(resolved.request_id);
     });
 
     // (e) done：终态 status + 通知父 + disconnect
     client.onDone((data) => {
-      if (data.status) setStatus(data.status as AgentRunStatus);
+      if (cancelled) return;
+      // P3.2：status 是裸 string，按白名单校验后再入库，过滤后端脏值。
+      const statusStr = typeof data.status === "string" ? data.status : "";
+      if (statusStr && AGENT_RUN_STATUSES.has(statusStr as AgentRunStatus)) {
+        setStatus(statusStr as AgentRunStatus);
+      }
+      // P2.2：显式置 false，不依赖 disconnect → onStatusChange("disconnected") 间接链路。
+      setStreaming(false);
       onDone?.(data.status ?? "");
       client.disconnect();
     });
@@ -219,10 +246,12 @@ export function useAgentRunStream(
       // callbacks 仍注册（防御性，实际 isActive=false 不连不会被触发）。
       getAgentRunLogs(workspaceId, runId)
         .then((history) => {
+          if (cancelled) return;
           setLogs(history);
           setLoading(false);
         })
         .catch(() => {
+          if (cancelled) return;
           // prefetch 失败不阻断 UI，清 loading 让面板展示空态
           setLoading(false);
         });
@@ -235,11 +264,12 @@ export function useAgentRunStream(
     // fetchPendingDialogs 查 agent_sessions/session_dialog_requests 表，需 AgentSession.id。
     getAgentRun(workspaceId, runId)
       .then((run) => {
+        if (cancelled) return undefined;
         if (!run.agent_session_id) return undefined;
         return fetchPendingDialogs(run.agent_session_id);
       })
       .then((dialogs) => {
-        if (!dialogs || dialogs.length === 0) return;
+        if (cancelled || !dialogs || dialogs.length === 0) return;
         setPerms((prev) => {
           const existing = new Set(prev.map((r) => r.request_id));
           const merged = [...prev];
@@ -261,6 +291,7 @@ export function useAgentRunStream(
 
     // cleanup：runId/isActive/workspaceId 变化或组件卸载时 disconnect（R-01）
     return () => {
+      cancelled = true;
       client.disconnect();
       clientRef.current = null;
     };
@@ -268,14 +299,20 @@ export function useAgentRunStream(
   }, [workspaceId, runId, isActive, onDone, dismissPerm]);
 
   // —— 返回值组装 ——
-  const input: AgentRunInputStream = {
-    values: inputValues,
-    submitting: submittingInputs,
-    errors: inputErrors,
-    replied: repliedInputs,
-    set: setInputValue,
-    submit: submitInput,
-  };
+  // P2.3：input 用 useMemo 稳定引用，set/submit 已 useCallback 稳定，
+  // 仅在底层 values/submitting/errors/replied 变化时才产生新对象，
+  // 避免消费 input 的子组件（AgentRunPanel）每次 render 都拿到新引用而失效 memo。
+  const input = useMemo<AgentRunInputStream>(
+    () => ({
+      values: inputValues,
+      submitting: submittingInputs,
+      errors: inputErrors,
+      replied: repliedInputs,
+      set: setInputValue,
+      submit: submitInput,
+    }),
+    [inputValues, submittingInputs, inputErrors, repliedInputs, setInputValue, submitInput],
+  );
 
   return {
     logs,

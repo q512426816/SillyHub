@@ -110,11 +110,6 @@ export interface StreamLogEvent {
   log_id: string | null;
 }
 
-export interface DoneEventData {
-  status?: string;
-  exit_code?: number | null;
-}
-
 // ── Agent Run User Input ──
 
 export interface AgentRunInputRequest {

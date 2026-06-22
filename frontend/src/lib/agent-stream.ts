@@ -44,6 +44,11 @@ export class AgentRunStreamClient {
   }
 
   async connect(token: string): Promise<void> {
+    // P1 race guard：并发重入直接跳过。hook 每次 effect new 新实例，正常不触发；
+    // 防御 _doReconnect 重连与外部 connect 的并发竞态。
+    // 注：不挡 "connected" —— _doReconnect(agent-stream.ts:_doReconnect) 在 onerror 后
+    // 重连时 status 仍是 connected，挡了会让重连失效。
+    if (this.status === "connecting") return;
     if (this.es) {
       this.es.close();
       this.es = null;
@@ -53,6 +58,13 @@ export class AgentRunStreamClient {
     // 先拉取已持久化日志，避免 SSE 订阅前发布的行丢失（Bootstrap 恢复 / 晚连场景）。
     try {
       const logs = await getAgentRunLogs(this.workspaceId, this.runId);
+      // P1 race guard：await 期间若已被 disconnect()（status→disconnected），
+      // 不再继续创建 EventSource —— 否则 StrictMode 双调用 / 快速重连会产生
+      // 无人持有的孤儿 EventSource（cleanup 已 disconnect，但 connect 的后半段
+      // 仍 new EventSource 并注册 onmessage/ondone）。
+      // 注：`as StreamStatus` 绕过入口 guard 的控制流窄化 —— TS 不跨 _setStatus
+      // 方法重置对 this.status 的窄化，断言恢复完整联合类型以允许此比较。
+      if ((this.status as StreamStatus) !== "connecting") return;
       for (const log of logs) {
         this._emitMessage({
           channel: log.channel as StreamLogEvent["channel"],
@@ -64,6 +76,9 @@ export class AgentRunStreamClient {
     } catch {
       /* prefetch 失败不阻断 SSE */
     }
+
+    // 二次复查：emit 链路同步，status 理论不变；防御性再次确认未被外部 abort。
+    if ((this.status as StreamStatus) !== "connecting") return;
 
     const base = getApiBaseUrl();
     const url = new URL(
