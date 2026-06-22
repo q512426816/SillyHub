@@ -582,3 +582,11 @@ created_at: 2026-06-03T08:42:04
   1. 把 `/project-plan/export-excel` 路由(连同 _PROJECT_PLAN_COLUMNS 常量)从行 642-669 移到 `/project-plan/{item_id}` GET (行 314) 之前,保证字面量路径优先于路径参数匹配
   2. 加注释警示后续不要重排
 结果：1）ruff format/check 通过；2）Python ast 解析通过；3）export-excel 不再被 {item_id} 拦截。Docker 重建 backend 待后续。
+
+## ql-20260622-021-2e7d | 2026-06-22 13:58:00 | project-plan 导出文件名改 中文名+时间戳
+状态：已完成
+文件：backend/app/modules/ppm/plan/router.py
+背景：导出文件名 project_plans.xlsx 不够直观,用户要求调整。已澄清改为 "项目计划_YYYYMMDD_HHmmss.xlsx"。
+方案:
+  1. router.py export_project_plans 的 filename="project_plans.xlsx" → f"项目计划_{datetime.now():%Y%m%d_%H%M%S}.xlsx"(datetime 之前已 import 用于 query)
+结果：1）ruff format/check 通过；2）下载文件名形如 "项目计划_20260622_135800.xlsx"。Docker 重建 backend 待后续。

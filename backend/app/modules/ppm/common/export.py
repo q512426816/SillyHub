@@ -17,6 +17,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Any
+from urllib.parse import quote
 
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
@@ -119,10 +120,20 @@ def excel_response(
     def _iter() -> Iterable[bytes]:
         yield content
 
+    # Content-Disposition 头是 latin-1 编码,中文字符超范围 → UnicodeEncodeError。
+    # 用 RFC 5987 的 filename*=UTF-8''<percent-encoded> 格式,主流浏览器
+    # (Chrome/Edge/Firefox)优先用 filename* 解码 UTF-8 原文,filename 作
+    # ASCII 回退 (旧浏览器/curl 等场景可读但乱码)。
+    ascii_fallback = filename.encode("ascii", "ignore").decode("ascii") or "export.xlsx"
+    encoded = quote(filename, safe="")
     return StreamingResponse(
         _iter(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded}"
+            )
+        },
     )
 
 

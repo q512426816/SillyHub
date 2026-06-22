@@ -338,8 +338,9 @@ async def export_project_plans(
     """导出项目计划为 Excel (P2-3, X-002)。"""
     rows = await PlanService(session).list_ps_project_plans_for_export()
     columns = _PROJECT_PLAN_COLUMNS
+    filename = f"项目计划_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
     return await anyio.to_thread.run_sync(
-        lambda: _build_excel_response(columns, rows, "项目计划", filename="project_plans.xlsx")
+        lambda: _build_excel_response(columns, rows, "项目计划", filename=filename)
     )
 
 
