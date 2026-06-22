@@ -619,3 +619,11 @@ created_at: 2026-06-03T08:42:04
   3. 表格默认 bordered + scroll y="calc(100vh - 430px)"
   4. projects searchFieldNames 增加 project_type/project_status(后端 PageReq 已支持);customers/project-stakeholders 无字段改动自动受益
 结果：1）typecheck 通过；2）363/363 vitest 全过；3）三页查询区垂直 grid-cols-4 + 右上操作行,表格 bordered + 高度自适应。Docker frontend 待重建。
+
+## ql-20260622-025-9d4f | 2026-06-22 14:53:40 | PpmResourceTable 三页 PageContainer 改 size=full 占满宽度
+状态：已完成
+文件：frontend/src/components/ppm-resource-table.tsx
+背景：PpmResourceTable 默认 <PageContainer>(size="default" max-w-[1400px]),projects/customers/project-stakeholders 三页两侧留白;project-plans 用 size="full" 占满。用户要求对齐。
+方案:
+  1. PpmResourceTable 的 <PageContainer> 加 size="full"
+结果：1）typecheck 通过；2）三页宽度占满屏幕。Docker frontend 待重建。

@@ -503,7 +503,7 @@ export function PpmResourceTable<
   };
 
   return (
-    <PageContainer>
+    <PageContainer size="full">
       <PageHeader
         title={title}
         subtitle={subtitle}
