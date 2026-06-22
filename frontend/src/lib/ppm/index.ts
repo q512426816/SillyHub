@@ -18,3 +18,4 @@ export * from "./problem";
 export * from "./task";
 export * from "./kanban";
 export { downloadExcel } from "./export";
+export { statusLabel } from "./status-label";

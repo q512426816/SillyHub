@@ -50,3 +50,6 @@ created_at: 2026-06-20T15:35:00+0800
 - ql-20260622-019-5b6c | project-plans 表格高度预留 300→430px
 - ql-20260622-020-8c1a | /project-plan/export-excel 422 修复:FastAPI 路由按注册顺序匹配,字面量路径 export-excel 被 {item_id} 路径参数拦截当 UUID 解析失败 → 把 export 路由移到 {item_id} 之前
 - ql-20260622-022-6a1f | 前端 downloadExcel 忽略后端 Content-Disposition 文件名 → 新增 parseFilenameFromContentDisposition 解析 RFC 5987 filename*=UTF-8'' header,优先用服务端文件名(项目计划_YYYYMMDD_HHmmss.xlsx)
+- ql-20260622-030-7e2a | /problem-list GET 加过滤 Query(keyword/status多值/project_id/pro_type/is_urgent/find_time_start/end) + response_model 改 Page[ProblemListResp] 返 total;service.list_problems 构造 where_clauses(keyword 跨 6 字段 ilike / status in / 其余精确 / find_time 区间);apiFetch query 支持 string[] append 多值编码
+- ql-20260622-033-d5e8 | /problem-list/export-excel 422 修复:FastAPI 按注册顺序匹配,字面量路径 export-excel 被 {item_id} 参数化路由拦截当 UUID 解析 → 把 export_problems / export_problem_changes(及对应 _COLUMNS)从文件末尾移到各自 list 端点紧邻之后、{item_id} GET 之前(同 ql-020 project-plan 同款问题)
+- ql-20260622-034-c3a7 | problem-list 按钮/导出对齐 project-plans:前端 "查询"→"搜索" 去掉 outline(回退 primary);后端 export_problems / export_problem_changes 文件名改时间戳格式 `问题清单_YYYYMMDD_HHmmss.xlsx` / `问题变更_YYYYMMDD_HHmmss.xlsx`(对齐 ql-022-6a1f project-plan)

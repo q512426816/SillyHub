@@ -599,3 +599,187 @@ created_at: 2026-06-03T08:42:04
   1. downloadExcel 新增 parseFilenameFromContentDisposition helper,优先解析 RFC 5987 filename*=UTF-8''<percent-encoded>(中文);回退 filename="..."(ASCII);都没有才用调用方 fallback
   2. exportProjectPlans 等调用方暂不改 fallback(留作后端兜底失败时用)
 结果：1）typecheck 通过；2）329/329 vitest 全过；3）下载文件名与服务端一致(形如 项目计划_20260622_140000.xlsx)。Docker 重建 frontend 待后续。
+
+## ql-20260622-023-3e8a | 2026-06-22 14:29:27 | 项目计划详情抽屉状态字段改中文
+状态：已完成
+文件：frontend/src/lib/ppm/status-label.ts(新增)、frontend/src/lib/ppm/index.ts、frontend/src/components/ppm-project-plan-detail.tsx
+背景：详情抽屉 4 处显示状态(plan/node/detail/task 的 status),前 3 个用英文枚举(draft/review/approve/done/rejected/archived),task 原本就是中文(未开始/进行中...)。用户要求详情里的状态都改中文。
+方案:
+  1. 新增 frontend/src/lib/ppm/status-label.ts,提供 STATUS_LABELS 映射 + statusLabel(value) helper,未知值原样返回
+  2. ppm-project-plan-detail.tsx 在 4 处 status 渲染处套 statusLabel(plan.status/node.status/detail.status/task.status)
+结果：1）typecheck 通过；2）329/329 vitest 全过；3）4 处状态显示中文(草稿/审核中/审批中/已完成/已驳回/已归档),task 中文原样保留。Docker frontend 待重建。
+
+## ql-20260622-024-7b2c | 2026-06-22 14:42:30 | projects 等 PpmResourceTable 三页样式对齐 project-plans
+状态：已完成
+文件：frontend/src/components/ppm-resource-table.tsx、frontend/src/app/(dashboard)/ppm/projects/page.tsx、frontend/src/app/(dashboard)/ppm/project-stakeholders/page.tsx
+背景：projects/customers/project-stakeholders 三页用通用 PpmResourceTable,顶部查询区只支持横向原生 input,无法支持 select/date/range;表格无 bordered 无 scroll.y,与 project-plans 风格不一致。用户要求参照 project-plans 调整查询条件+列表样式。
+方案:
+  1. 改 PpmResourceTable 顶部:PageHeader 不再承载 actions,改在 SectionCard 右上角放按钮行(搜索/重置/展开|分隔|导出/新增)
+  2. 查询区改 antd Form layout=vertical + grid-cols-4 垂直布局;按 fields 中字段 type 渲染 Input/Select,支持回车查询、select 选中即查、防抖
+  3. 表格默认 bordered + scroll y="calc(100vh - 430px)"
+  4. projects searchFieldNames 增加 project_type/project_status(后端 PageReq 已支持);customers/project-stakeholders 无字段改动自动受益
+结果：1）typecheck 通过；2）363/363 vitest 全过；3）三页查询区垂直 grid-cols-4 + 右上操作行,表格 bordered + 高度自适应。Docker frontend 待重建。
+
+## ql-20260622-025-9d4f | 2026-06-22 14:53:40 | PpmResourceTable 三页 PageContainer 改 size=full 占满宽度
+状态：已完成
+文件：frontend/src/components/ppm-resource-table.tsx
+背景：PpmResourceTable 默认 <PageContainer>(size="default" max-w-[1400px]),projects/customers/project-stakeholders 三页两侧留白;project-plans 用 size="full" 占满。用户要求对齐。
+方案:
+  1. PpmResourceTable 的 <PageContainer> 加 size="full"
+结果：1）typecheck 通过；2）三页宽度占满屏幕。Docker frontend 待重建。
+
+## ql-20260622-026-4e2a | 2026-06-22 15:00:43 | PpmResourceTable 重置按钮不清 antd Form 内部状态
+状态：已完成
+文件：frontend/src/components/ppm-resource-table.tsx
+背景：ql-024 把查询区改成 antd Form + Form.Item name=...,Input/Select 内部值由 antd Form 管理。但 handleReset 只清了组件级 searchInput/searchCommitted state,未调 form.resetFields(),所以用户看到的输入框/下拉值还在。查询虽然生效(因 buildQuery 从 searchCommitted 读),但视觉上没清空,体验差。
+方案:
+  1. Form.useForm() 拿 form instance
+  2. handleReset 调 form.resetFields() 清 Form 内部状态
+  3. 将 form 实例传给 <Form form={form}>
+结果：1）typecheck 通过；2）点重置后输入框/下拉视觉值清空。Docker frontend 待重建。
+
+## ql-20260622-027-1c3d | 2026-06-22 15:09:30 | projects 导出文件名 + Input 不要 debounce 自动查
+状态：已完成
+文件：backend/app/modules/ppm/project/router.py、frontend/src/components/ppm-resource-table.tsx
+背景:
+  1) projects/customers 导出文件名仍为 project_maintenance.xlsx/customer_maintenance.xlsx,需对齐 ql-021 风格
+  2) PpmResourceTable Input onChange 触发 handleSearchInput,内部 setTimeout 400ms debounce 自动 commit,用户每输入一个字符都触发查询;用户要求 Input 不自动查,只有 Enter / 搜索按钮 / Select 选中才查
+方案:
+  1. backend export_project_maintenance filename 改 f"项目维护_{datetime.now():%Y%m%d_%H%M%S}.xlsx";export_customer_maintenance 改"客户维护_..."
+  2. frontend PpmResourceTable:handleSearchInput 去掉 setTimeout debounce,只 setSearchInput;Input onPressEnter 调 handleSearchCommit flush;Select onChange 保持立即 commit
+结果：1）typecheck 通过；2）ruff check/format 通过；3）363/363 vitest 全过。Docker backend + frontend 待重建。
+
+## ql-20260622-028-5f1c | 2026-06-22 15:19:59 | problem-list 样式对齐 project-plans
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/problem-list/page.tsx
+背景：problem-list 用裸 div+max-w-[1400px]+flex 布局,查询栏内联 style,Table 无 bordered 无 scroll.y。与 project-plans/projects 三页风格不一致。
+方案:
+  1. 外壳改 PageContainer size="full" + PageHeader + SectionCard bodyPadding="p-2"
+  2. SectionCard 内右上按钮行(导出/新建),下方 grid-cols-4 垂直 Field 查询表单(支持展开/收起)
+  3. Table 加 bordered + scroll y="calc(100vh - 430px)"
+  4. 查询条件 Input 用防抖去掉(对齐 ql-027:Enter/按钮触发,Select/RangePicker 选中即查)
+结果：
+  - 顶部按钮行右对齐(重置 | 分隔 | 导出 / 新建)
+  - 查询条件 grid-cols-4 垂直 Field 布局,onChange 实时本地过滤
+  - Table bordered + scroll y=calc(100vh - 430px) + 默认 pageSize=20 + showTotal
+  - PageContainer size="full" 占满宽度
+  - antd Button 全部替换为本仓 ui Button(size="sm" + variant)
+  - 移除未使用的 expanded state
+  - typecheck 通过,363/363 测试通过
+
+## ql-20260622-029-a1b7 | 2026-06-22 15:30:55 | problem-list 关键字输入不要自动查询
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/problem-list/page.tsx
+背景：problem-list 顶部关键字 Input onChange 直接改 keyword state,而 keyword 实时参与 useMemo filtered 过滤,导致输入即过滤。用户要求输入时不要自动查询。
+方案:
+  1. 拆分两个 state:keywordInput(输入框受控值)/ keyword(实际过滤用)
+  2. Input onChange 只改 keywordInput,不影响 filtered
+  3. Input onPressEnter / 添加"查询"按钮 把 keywordInput 同步到 keyword
+  4. 重置按钮同时清空 keywordInput 和 keyword
+结果：
+  - 拆分 keywordInput / keyword 两个 state
+  - Input onChange 仅改 keywordInput;onPressEnter 或点击"查询"按钮同步到 keyword 触发过滤
+  - allowClear 点 x 清空时立即同步到 keyword(显式清空 ≠ 输入过程)
+  - 顶部按钮行新增"查询"按钮(位于"重置"左侧)
+  - 重置按钮同时清空 keywordInput 和 keyword
+  - typecheck 通过,363/363 测试通过
+
+## ql-20260622-030-7e2a | 2026-06-22 15:39:47 | problem-list 查询走接口 + 操作列宽度收窄
+状态：已完成
+文件：backend/app/modules/ppm/problem/router.py, backend/app/modules/ppm/problem/service.py, frontend/src/lib/api.ts, frontend/src/lib/ppm/problem.ts, frontend/src/lib/ppm/types.ts, frontend/src/app/(dashboard)/ppm/problem-list/page.tsx
+背景：problem-list 当前查询条件全部本地 useMemo 过滤,数据量大会卡;同时后端 /problem-list 只支持分页,无任何过滤参数。操作列 width=280 但按钮少时大片留白。
+方案:
+  后端:
+    1. router.list_problems 增加 Query:keyword / status(多值)/ project_id / pro_type / is_urgent / find_time_start / find_time_end
+    2. service.list_problems 接受过滤参数,构造 where_clauses 传给 list_paged
+    3. response_model 改为 Page[ProblemListResp],返回 total
+  前端:
+    4. lib/ppm/problem.ts listProblems 返回 Page 结构 {items,total,page,page_size}
+    5. types.ts 加 ProblemListPageReq
+    6. page.tsx 去掉本地 useMemo filtered,加 pagination state {current,pageSize,total},Select/RangePicker 选中即触发 load({page:1}),Table pagination onChange 调 load({page,page_size})
+    7. 操作列宽度 280 → 200
+结果：
+  - 后端 router.list_problems 加 7 个 Query 参数 + response 改 Page[ProblemListResp]
+  - service.list_problems 增加同名 kwargs,where_clauses:keyword 跨 6 字段 ilike,status in,project_id/pro_type/is_urgent 精确,find_time 区间
+  - apiFetch query 类型支持 string[],数组用 searchParams.append 多值编码(?status=1&status=2)
+  - lib/ppm/problem.ts listProblems 改返 PageResp<ProblemList>,types.ts 加 ProblemListPageReq
+  - page.tsx 改服务端分页,去掉本地 useMemo filtered,共 N 条显示 total 而非 filtered.length
+  - 操作列 width 280 → 200
+  - 前端 typecheck 通过,363/363 测试通过
+  - 后端 ppm/problem/tests 35/35 通过;test_export.py 2 项失败为 stash 前后均存在的预先问题(与本次无关)
+
+## ql-20260622-031-b3f9 | 2026-06-22 16:04:04 | ppm 导出 401 token 过期不刷新
+状态：已完成
+文件：frontend/src/lib/ppm/export.ts
+背景：downloadExcel 用裸 fetch + Authorization header,没有 401 自动 refresh 逻辑(apiFetch 有)。token 过期时 apiFetch 自动刷新重试,downloadExcel 直接抛 401 AUTH_TOKEN_EXPIRED,用户看到导出失败。
+方案:
+  1. downloadExcel 在 fetch 拿到 401 时,先调 /api/auth/refresh 拿新 token
+  2. 刷新成功 → setTokens + 用新 token 重试一次原请求
+  3. 刷新失败 → 清 session 跳 /login,与 apiFetch 行为对齐
+  4. 顺便支持 params 多值数组(apiFetch 已支持,保持一致)
+结果：
+  - downloadExcel 提取 doFetch 内部函数,401 时调 /api/auth/refresh,刷新成功后用新 token 重试一次
+  - 重试后仍 401 → 清 session + 跳 /login
+  - params 数组用 searchParams.append 多值编码(与 apiFetch 一致,支持导出带 status 多值)
+  - typecheck 通过,363/363 测试通过
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/problem-list/page.tsx
+背景:操作列 width=200,但每行按钮数不同(1~6 个),固定宽度导致按钮少时大片留白。用户要求自适应。
+方案:
+  1. width 改为 'max-content'(antd 5.x 接受 string,CSS 表格列宽算法按实际内容算)
+  2. fixed:'right' 保留(滚动时不丢操作列)
+  3. 操作按钮容器加 whitespace-nowrap(单行排列,不被换行)
+结果:
+  - 操作列 width 200 → 'max-content',antd 按每行实际按钮数算宽
+  - 按钮 flex-wrap 删除,改 whitespace-nowrap 单行排列
+  - fixed:'right' 保留,align:'right' 保留
+  - typecheck 通过,363/363 测试通过
+
+## ql-20260622-033-d5e8 | 2026-06-22 18:55:00 | problem-list/export-excel 路由顺序修复
+状态：已完成
+文件：backend/app/modules/ppm/problem/router.py
+背景:GET /api/ppm/problem-list/export-excel 返回 422 uuid_parsing — `export-excel` 被参数化路由 `/problem-list/{item_id}` 拦截当 UUID 解析。同 ql-020 已为 project-plan 修过的同款问题。FastAPI 路由按注册顺序匹配,字面量路径必须前置于参数化路由。
+方案:
+  1. 把 export_problems 函数(及对应 _PROBLEM_COLUMNS)从文件末尾移到 list_problems 之后、get_problem({item_id}) 之前
+  2. 把 export_problem_changes(及 _PROBLEM_CHANGE_COLUMNS)从文件末尾移到 list_changes 之后、get_change({item_id}) 之前
+  3. _build_excel_response 辅助函数可留在文件末尾(模块加载完所有名字都在 global,Python 函数调用时才解析名字,装饰器执行只注册路由)
+结果:
+  - export_problems + _PROBLEM_COLUMNS 已移到 list_problems 紧邻之后(line 113)
+  - export_problem_changes + _PROBLEM_CHANGE_COLUMNS 已移到 list_changes 紧邻之后(line 307)
+  - _build_excel_response 留在文件末尾,旁边加注释说明路由顺序约束
+  - grep @router.* 确认两个 export-excel 都在 {item_id} GET 之前
+  - ppm/problem/tests 35/35 通过
+
+## ql-20260622-034-c3a7 | 2026-06-22 19:30:00 | problem-list 按钮/导出文件名对齐 project-plans
+状态：已完成
+文件：backend/app/modules/ppm/problem/router.py + frontend/src/app/(dashboard)/ppm/problem-list/page.tsx
+背景:/ppm/problem-list 顶部按钮(查询/重置)样式 + 导出 Excel 文件名格式与 /ppm/project-plans 不一致:查询按钮带 outline(浅色)而 project-plans 搜索按钮是 primary;问题清单/问题变更导出文件名是固定字符串 "problem_list.xlsx" / "problem_changes.xlsx" 而 project-plans 是带时间戳的 `项目计划_YYYYMMDD_HHmmss.xlsx`(ql-022-6a1f)。
+方案:
+  1. 前端 page.tsx: 查询按钮文案 "查询" → "搜索",去掉 variant="outline"(回退默认 primary),与 project-plans 搜索按钮一致
+  2. 后端 router.py export_problems: 加 filename = f"问题清单_{datetime.now():%Y%m%d_%H%M%S}.xlsx",传给 _build_excel_response(filename=...)
+  3. 后端 router.py export_problem_changes: 加 filename = f"问题变更_{datetime.now():%Y%m%d_%H%M%S}.xlsx",传给 _build_excel_response(filename=...);同时去掉旧的固定 "problem_changes.xlsx" 字面量
+  4. _build_excel_response 默认 filename 参数兜底保留(不传时回退)
+结果:
+  - frontend page.tsx 查询→搜索, primary; 重置保留 outline; 导出保留 outline
+  - backend router.py 两处导出 filename 改时间戳格式 (datetime 已在 file 顶部 import)
+  - frontend pnpm typecheck 通过
+  - backend pytest app/modules/ppm/problem/tests 35/35 通过
+
+## ql-20260622-035-a1e9 | 2026-06-22 20:23:47 | problem-changes 整体对齐 project-plans 布局
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/problem-changes/page.tsx
+背景:/ppm/problem-changes 仍是老布局(max-w-7xl + antd Button + inline flex 平铺搜索 + Table 无 bordered/无 scrollY/无分页/操作列 antd Button size=small),与 project-plans 及已对齐的 problem-list 视觉割裂。
+方案:
+  1. 容器:max-w-7xl + 自写 header → PageContainer size=full + PageHeader + SectionCard bodyPadding=p-2
+  2. 顶部按钮行右对齐:搜索(primary size=sm 无 variant) + 重置(outline) + 分隔 + 导出(outline),全部 ui Button
+  3. 查询条件: inline flex 平铺 → grid w-full grid-cols-4 gap-3 垂直 Field(标题在上,控件在下)
+  4. 关键字输入:keywordInput/keyword 双 state(回车/搜索按钮才同步,allowClear 清空立即同步)
+  5. Table: 加 bordered + scroll {x:max-content, y:calc(100vh-430px)} + pagination(current/pageSize/total/showSizeChanger/showTotal) + 客户端分页 20/页(后端 list_changes 无过滤 Query,拉 200 条本地过滤 + slice 分页)
+  6. 列: 源问题 width=200 / 变更原因 width=200 / 责任人 width=120 / 当前处理人 width=120 / 状态 width=100 fixed=right / 操作 width=max-content fixed=right + whitespace-nowrap + justify-end
+  7. 操作按钮: antd Button (size=small type=primary danger) → ui Button (size=sm + variant:详情 outline / 审核 primary / 删除 destructive)
+  8. 错误状态: antd Button 重新加载 → ui Button variant=outline size=sm
+  9. 删除 toast 改 alert(与 problem-list 一致)
+结果:
+  - 整文件 Write 重写
+  - frontend pnpm typecheck 通过
+

@@ -12,22 +12,27 @@
  *  - 任意:详情(ListDetailForm)
  *
  * 列表字段 + 操作按钮显隐规则逐条对齐源 index.vue 操作列 v-if。
+ * 查询条件全部走后端 GET /problem-list (服务端过滤 + 分页)。
  *
  * 设计依据:.sillyspec/changes/2026-06-21-ppm-frontend-alignment/design.md §7
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
-  Button,
   DatePicker,
   Input,
   Select,
-  Space,
   Table,
   type TableProps,
   Tag,
 } from "antd";
 import type { Dayjs } from "dayjs";
 
+import { Button } from "@/components/ui/button";
+import {
+  PageContainer,
+  PageHeader,
+  SectionCard,
+} from "@/components/layout";
 import { PpmUserSelect } from "@/components/ppm-user-select";
 import { matchAnyUser } from "@/components/ppm-status-actions";
 import {
@@ -70,10 +75,16 @@ export default function ProblemListPage() {
   const currentUserId = currentUser?.id ?? "";
 
   const [items, setItems] = useState<ProblemList[]>([]);
+  const [total, setTotal] = useState(0);
+  const [current, setCurrent] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 搜索栏(对照源 queryParams,本仓后端仅支持分页,复杂字段本地过滤)
+  // 搜索栏(对照源 queryParams,服务端过滤)。
+  // keywordInput 仅受控输入框显示值,输入过程不触发查询;
+  // 按 Enter 或点击"查询"按钮时同步到 keyword(实际查询用)。
+  const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [statusFilter, setStatusFilter] = useState<string[]>([
     "1",
@@ -95,68 +106,52 @@ export default function ProblemListPage() {
     problem?: ProblemList;
   }>({ open: false, mode: "create" });
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setItems(await listProblems({ page: 1, page_size: 200 }));
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "加载失败");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const load = useCallback(
+    async (opts: { page?: number; page_size?: number } = {}) => {
+      const page = opts.page ?? current;
+      const page_size = opts.page_size ?? pageSize;
+      setLoading(true);
+      setError(null);
+      try {
+        const resp = await listProblems({
+          page,
+          page_size,
+          keyword: keyword || undefined,
+          status: statusFilter.length > 0 ? statusFilter : undefined,
+          project_id: projectFilter ?? undefined,
+          pro_type: proTypeFilter || undefined,
+          is_urgent: isUrgentFilter || undefined,
+          find_time_start: dateRange?.[0]?.startOf("day")?.toISOString(),
+          find_time_end: dateRange?.[1]?.endOf("day")?.toISOString(),
+        });
+        setItems(resp.items);
+        setTotal(resp.total);
+        setCurrent(page);
+        setPageSize(page_size);
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "加载失败");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [
+      current,
+      pageSize,
+      keyword,
+      statusFilter,
+      projectFilter,
+      proTypeFilter,
+      isUrgentFilter,
+      dateRange,
+    ],
+  );
 
+  // 首屏 + 过滤条件变化 → 回到第 1 页重拉。
+  // keywordInput 不触发(只在 commit 时改 keyword)。
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  const filtered = useMemo(() => {
-    const kw = keyword.trim().toLowerCase();
-    const [rangeStart, rangeEnd] = dateRange ?? [null, null];
-    return items.filter((p) => {
-      if (statusFilter.length > 0 && !statusFilter.includes(p.status)) {
-        return false;
-      }
-      if (projectFilter && p.project_id !== projectFilter) {
-        return false;
-      }
-      if (proTypeFilter && p.pro_type !== proTypeFilter) {
-        return false;
-      }
-      if (isUrgentFilter) {
-        const urgent = p.is_urgent === "1" || p.is_urgent === "是" ? "1" : "0";
-        if (urgent !== isUrgentFilter) return false;
-      }
-      if (rangeStart && rangeEnd && p.find_time) {
-        const t = new Date(p.find_time);
-        if (Number.isNaN(t.getTime())) return false;
-        if (t < rangeStart.startOf("day").toDate()) return false;
-        if (t > rangeEnd.endOf("day").toDate()) return false;
-      }
-      if (!kw) return true;
-      const hay = [
-        p.project_name,
-        p.model_name,
-        p.pro_desc,
-        p.func_name,
-        p.duty_user_name,
-        p.find_by,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return hay.includes(kw);
-    });
-  }, [
-    items,
-    keyword,
-    statusFilter,
-    projectFilter,
-    proTypeFilter,
-    isUrgentFilter,
-    dateRange,
-  ]);
+    void load({ page: 1 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keyword, statusFilter, projectFilter, proTypeFilter, isUrgentFilter, dateRange]);
 
   const handleExport = async () => {
     setExporting(true);
@@ -170,12 +165,17 @@ export default function ProblemListPage() {
   };
 
   const resetFilters = () => {
+    setKeywordInput("");
     setKeyword("");
     setStatusFilter(["1", "2", "3", "6"]);
     setProjectFilter(null);
     setProTypeFilter("");
     setIsUrgentFilter("");
     setDateRange(null);
+  };
+
+  const commitKeyword = () => {
+    setKeyword(keywordInput);
   };
 
   const openDrawer = (
@@ -308,7 +308,7 @@ export default function ProblemListPage() {
       title: "操作",
       key: "actions",
       align: "right",
-      width: 280,
+      width: "max-content",
       fixed: "right",
       render: (_v: unknown, p: ProblemList) => {
         const isNowHandler = matchAnyUser(
@@ -322,29 +322,30 @@ export default function ProblemListPage() {
         const isDuty = matchAnyUser([p.duty_user_id], currentUserId);
         const isAuditor = matchAnyUser([p.audit_user_id], currentUserId);
         return (
-          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 4 }}>
+          <div className="flex whitespace-nowrap justify-end gap-1">
             {/* 审核:status=2 + now_handle_user(源 openAuditForm) */}
             {p.status === "2" && isNowHandler && (
-              <Button size="small" type="primary" onClick={() => openDrawer("audit", p)}>
+              <Button size="sm" onClick={() => openDrawer("audit", p)}>
                 审核
               </Button>
             )}
             {/* 变更:status=3 + creator/duty(源 openChangeForm → 新建 ProblemChange) */}
             {p.status === "3" && (isCreator || isDuty) && (
-              <Button size="small" onClick={() => openDrawer("change", p)}>
+              <Button size="sm" variant="outline" onClick={() => openDrawer("change", p)}>
                 变更
               </Button>
             )}
             {/* 编辑:status=1 + creator(源 openForm update) */}
             {p.status === "1" && isCreator && (
-              <Button size="small" type="primary" onClick={() => openDrawer("edit", p)}>
+              <Button size="sm" onClick={() => openDrawer("edit", p)}>
                 编辑
               </Button>
             )}
             {/* 开始处置:status=3 + duty(源 startTask) */}
             {p.status === "3" && isDuty && !p.handle_info && (
               <Button
-                size="small"
+                size="sm"
+                variant="outline"
                 onClick={() => openDrawer("start", p)}
               >
                 开始
@@ -353,8 +354,7 @@ export default function ProblemListPage() {
             {/* 完成处置:status=3 + duty(源 doneTask) */}
             {p.status === "3" && isDuty && !!p.handle_info && (
               <Button
-                size="small"
-                type="primary"
+                size="sm"
                 onClick={() => openDrawer("done", p)}
               >
                 处置
@@ -362,17 +362,17 @@ export default function ProblemListPage() {
             )}
             {/* 验证关闭:status=6 + audit_user(源 closeTask) */}
             {p.status === "6" && isAuditor && (
-              <Button size="small" type="primary" onClick={() => openDrawer("close", p)}>
+              <Button size="sm" onClick={() => openDrawer("close", p)}>
                 验证并关闭
               </Button>
             )}
             {/* 详情:任意(源 openDetailForm) */}
-            <Button size="small" onClick={() => openDrawer("detail", p)}>
+            <Button size="sm" variant="outline" onClick={() => openDrawer("detail", p)}>
               详情
             </Button>
             {/* 删除:status=1 + creator(源 handleDelete) */}
             {p.status === "1" && isCreator && (
-              <Button size="small" danger onClick={() => void handleDelete(p)}>
+              <Button size="sm" variant="destructive" onClick={() => void handleDelete(p)}>
                 删除
               </Button>
             )}
@@ -383,91 +383,112 @@ export default function ProblemListPage() {
   ];
 
   return (
-    <div className="mx-auto flex max-w-[1400px] flex-col gap-4 px-6 py-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="mt-0.5">问题清单</h1>
-          <p className="text-xs text-muted-foreground">
-            问题审批流:已保存→审核中→处置中→待验证→已关闭;bug 跳过部门经理
-          </p>
-        </div>
-        <Space>
-          <Button loading={exporting} onClick={() => void handleExport()}>
-            导出
+    <PageContainer size="full">
+      <PageHeader
+        title="问题清单"
+        subtitle="问题审批流:已保存→审核中→处置中→待验证→已关闭;bug 跳过部门经理"
+      />
+
+      <SectionCard bodyPadding="p-2">
+        {/* 顶部按钮行:右对齐(查询 | 重置 | 分隔 | 导出 / 新建) */}
+        <div className="mb-2 flex items-center justify-end gap-2">
+          <Button size="sm" onClick={commitKeyword}>
+            搜索
           </Button>
-          <Button type="primary" onClick={() => openDrawer("create")}>
+          <Button size="sm" variant="outline" onClick={resetFilters}>
+            重置
+          </Button>
+          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={exporting}
+            onClick={() => void handleExport()}
+          >
+            {exporting ? "导出中…" : "导出"}
+          </Button>
+          <Button size="sm" onClick={() => openDrawer("create")}>
             + 新建问题
           </Button>
-        </Space>
-      </header>
+        </div>
 
-      {/* 搜索栏(对照源 index.vue queryParams,本仓后端仅分页,复杂字段本地过滤) */}
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 8,
-          alignItems: "center",
-        }}
-      >
-        <Input
-          allowClear
-          style={{ width: 240 }}
-          placeholder="项目/模块/描述/功能/责任人/发现人"
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-        />
-        <Select<string[]>
-          mode="multiple"
-          allowClear
-          style={{ minWidth: 200 }}
-          placeholder="状态(可多选)"
-          value={statusFilter}
-          onChange={(v) => setStatusFilter(v as string[])}
-          options={STATUS_OPTIONS}
-        />
-        <PpmUserSelect
-          res="project"
-          allowClear
-          style={{ width: 200 }}
-          placeholder="项目"
-          value={projectFilter}
-          onChange={(v) => setProjectFilter((v as string | null) ?? null)}
-        />
-        <Select<string>
-          style={{ width: 130 }}
-          placeholder="问题类型"
-          value={proTypeFilter || undefined}
-          onChange={(v) => setProTypeFilter(v ?? "")}
-          options={PRO_TYPE_OPTIONS}
-        />
-        <Select<string>
-          style={{ width: 110 }}
-          placeholder="是否紧急"
-          value={isUrgentFilter || undefined}
-          onChange={(v) => setIsUrgentFilter(v ?? "")}
-          options={IS_URGENT_OPTIONS}
-        />
-        <RangePicker
-          value={dateRange as [Dayjs, Dayjs] | null}
-          onChange={(v) =>
-            setDateRange(v as [Dayjs | null, Dayjs | null] | null)
-          }
-          placeholder={["发现开始", "发现结束"]}
-        />
-        <Button onClick={resetFilters}>重置</Button>
-        <span
-          style={{ marginLeft: "auto", fontSize: 12, color: "rgba(0,0,0,0.45)" }}
-        >
-          共 {filtered.length} 条
-        </span>
-      </div>
+        {/* 查询条件:垂直 grid-cols-4(服务端过滤,Select/RangePicker 选中即查) */}
+        <div className="grid w-full grid-cols-4 gap-3">
+          <Field label="关键字">
+            <Input
+              allowClear
+              placeholder="项目/模块/描述/功能/责任人/发现人(回车查询)"
+              value={keywordInput}
+              onChange={(e) => {
+                const v = e.target.value;
+                setKeywordInput(v);
+                // allowClear 点 x 清空时立即同步(显式清空动作 ≠ 输入过程)
+                if (!v) setKeyword("");
+              }}
+              onPressEnter={commitKeyword}
+            />
+          </Field>
+          <Field label="状态">
+            <Select<string[]>
+              mode="multiple"
+              allowClear
+              className="w-full"
+              placeholder="状态(可多选)"
+              value={statusFilter}
+              onChange={(v) => setStatusFilter(v as string[])}
+              options={STATUS_OPTIONS}
+            />
+          </Field>
+          <Field label="项目">
+            <PpmUserSelect
+              res="project"
+              allowClear
+              style={{ width: "100%" }}
+              placeholder="选择项目"
+              value={projectFilter}
+              onChange={(v) => setProjectFilter((v as string | null) ?? null)}
+            />
+          </Field>
+          <Field label="问题类型">
+            <Select<string>
+              className="w-full"
+              placeholder="全部类型"
+              value={proTypeFilter || undefined}
+              onChange={(v) => setProTypeFilter(v ?? "")}
+              options={PRO_TYPE_OPTIONS}
+            />
+          </Field>
+          <Field label="是否紧急">
+            <Select<string>
+              className="w-full"
+              placeholder="全部"
+              value={isUrgentFilter || undefined}
+              onChange={(v) => setIsUrgentFilter(v ?? "")}
+              options={IS_URGENT_OPTIONS}
+            />
+          </Field>
+          <Field label="发现时间">
+            <RangePicker
+              className="w-full"
+              value={dateRange as [Dayjs, Dayjs] | null}
+              onChange={(v) =>
+                setDateRange(v as [Dayjs | null, Dayjs | null] | null)
+              }
+              placeholder={["发现开始", "发现结束"]}
+            />
+          </Field>
+          <div className="col-span-2 self-end text-right text-xs text-muted-foreground">
+            共 {total} 条
+          </div>
+        </div>
+      </SectionCard>
 
       {error ? (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {error}
           <Button
-            size="small"
+            size="sm"
+            variant="outline"
             className="ml-3"
             onClick={() => void load()}
           >
@@ -478,11 +499,20 @@ export default function ProblemListPage() {
         <Table<ProblemList>
           rowKey="id"
           columns={columns}
-          dataSource={filtered}
+          dataSource={items}
           loading={loading}
           size="small"
-          scroll={{ x: "max-content" }}
-          pagination={{ pageSize: 10, showSizeChanger: false }}
+          bordered
+          scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
+          pagination={{
+            current,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            pageSizeOptions: ["10", "20", "50", "100"],
+            showTotal: (t: number) => `共 ${t} 条`,
+            onChange: (page: number, size: number) => void load({ page, page_size: size }),
+          }}
           locale={{ emptyText: "暂无问题" }}
         />
       )}
@@ -497,6 +527,24 @@ export default function ProblemListPage() {
           void load();
         }}
       />
+    </PageContainer>
+  );
+}
+
+/**
+ * 查询条件外壳:垂直布局(标题在上,控件在下),对齐 project-plans 风格。
+ */
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex w-full flex-col gap-1">
+      <span className="text-xs leading-4 text-muted-foreground">{label}</span>
+      {children}
     </div>
   );
 }

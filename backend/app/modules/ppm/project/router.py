@@ -16,6 +16,7 @@ member/stakeholder 复用 PROJECT_* 权限 (design §7)。导出端点为同步 
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
@@ -228,7 +229,7 @@ async def export_project_maintenance(
     content = await anyio.to_thread.run_sync(
         lambda: _build_workbook_bytes(columns, rows, "项目维护")
     )
-    return _excel_stream(content, "project_maintenance.xlsx")
+    return _excel_stream(content, f"项目维护_{datetime.now():%Y%m%d_%H%M%S}.xlsx")
 
 
 @router.get(
@@ -366,7 +367,7 @@ async def export_customer_maintenance(
     content = await anyio.to_thread.run_sync(
         lambda: _build_workbook_bytes(columns, rows, "客户维护")
     )
-    return _excel_stream(content, "customer_maintenance.xlsx")
+    return _excel_stream(content, f"客户维护_{datetime.now():%Y%m%d_%H%M%S}.xlsx")
 
 
 @router.get(

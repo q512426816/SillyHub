@@ -32,7 +32,7 @@ from app.core.auth_deps import get_current_user, require_permission_any
 from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
-from app.modules.ppm.common.crud import PageReq
+from app.modules.ppm.common.crud import Page, PageReq
 from app.modules.ppm.common.export import ColumnDef
 from app.modules.ppm.problem.schema import (
     ChangeNextProcessReq,
@@ -81,14 +81,60 @@ def _actor(user: User) -> tuple[str, str | None]:
 # ===========================================================================
 
 
-@router.get("/problem-list", response_model=list[ProblemListResp])
+@router.get("/problem-list", response_model=Page[ProblemListResp])
 async def list_problems(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
     req: PageReqDep,
-) -> list[ProblemListResp]:
-    page = await ProblemService(session).list_problems(req)
-    return [ProblemListResp.model_validate(i) for i in page.items]
+    keyword: str | None = Query(None, description="项目/模块/描述/功能/责任人/发现人 模糊匹配"),
+    status: list[str] | None = Query(None, description="状态(可多值)"),
+    project_id: uuid.UUID | None = Query(None),
+    pro_type: str | None = Query(None),
+    is_urgent: str | None = Query(None, description="'1' 急 / '0' 否"),
+    find_time_start: datetime | None = Query(None),
+    find_time_end: datetime | None = Query(None),
+) -> Page[ProblemListResp]:
+    page = await ProblemService(session).list_problems(
+        req,
+        keyword=keyword,
+        status_list=status,
+        project_id=project_id,
+        pro_type=pro_type,
+        is_urgent=is_urgent,
+        find_time_start=find_time_start,
+        find_time_end=find_time_end,
+    )
+    return Page.build(
+        items=[ProblemListResp.model_validate(i) for i in page.items],
+        total=page.total,
+        req=req,
+    )
+
+
+# export-excel 必须前置于 /{item_id} 参数化路由,否则 FastAPI 按注册顺序
+# 把 "export-excel" 当 item_id 解析为 UUID 失败返回 422 (同 ql-020)。
+_PROBLEM_COLUMNS = [
+    ColumnDef(field="project_name", header="项目名称", width=24),
+    ColumnDef(field="pro_desc", header="问题描述", width=40),
+    ColumnDef(field="pro_type", header="问题类型", width=12),
+    ColumnDef(field="status", header="状态", width=10),
+    ColumnDef(field="duty_user_name", header="责任人", width=16),
+    ColumnDef(field="find_time", header="发现时间", width=20),
+]
+
+
+@router.get("/problem-list/export-excel")
+async def export_problems(
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
+) -> Any:
+    """导出问题清单为 Excel (X-002)。"""
+    rows = await ProblemService(session).list_problems_for_export()
+    columns = _PROBLEM_COLUMNS
+    filename = f"问题清单_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
+    return await anyio.to_thread.run_sync(
+        lambda: _build_excel_response(columns, rows, "问题清单", filename=filename)
+    )
 
 
 @router.post(
@@ -262,6 +308,32 @@ async def list_changes(
     return [ProblemChangeResp.model_validate(i) for i in page.items]
 
 
+# export-excel 必须前置于 /{item_id} 参数化路由 (同 problem-list/export-excel 注释)。
+_PROBLEM_CHANGE_COLUMNS = [
+    ColumnDef(field="project_name", header="项目名称", width=24),
+    ColumnDef(field="pro_desc", header="变更内容", width=40),
+    ColumnDef(field="change_reason", header="变更原因", width=30),
+    ColumnDef(field="duty_user_name", header="责任人", width=16),
+    ColumnDef(field="now_handle_user_name", header="当前处理人", width=16),
+    ColumnDef(field="status", header="状态", width=10),
+    ColumnDef(field="created_at", header="创建时间", width=20),
+]
+
+
+@router.get("/problem-change/export-excel")
+async def export_problem_changes(
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
+) -> Any:
+    """导出问题变更为 Excel (P2-3, X-002)。"""
+    rows = await ProblemService(session).list_changes_for_export()
+    columns = _PROBLEM_CHANGE_COLUMNS
+    filename = f"问题变更_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
+    return await anyio.to_thread.run_sync(
+        lambda: _build_excel_response(columns, rows, "问题变更", filename=filename)
+    )
+
+
 @router.post(
     "/problem-change",
     response_model=ProblemChangeResp,
@@ -358,55 +430,13 @@ async def list_change_logs(
     return [ProcessLogResp.model_validate(r) for r in rows]
 
 
-# ===========================================================================
-# 导出 (X-002:openpyxl 同步丢线程池)
-# ===========================================================================
-
-
-_PROBLEM_COLUMNS = [
-    ColumnDef(field="project_name", header="项目名称", width=24),
-    ColumnDef(field="pro_desc", header="问题描述", width=40),
-    ColumnDef(field="pro_type", header="问题类型", width=12),
-    ColumnDef(field="status", header="状态", width=10),
-    ColumnDef(field="duty_user_name", header="责任人", width=16),
-    ColumnDef(field="find_time", header="发现时间", width=20),
-]
-
-
-@router.get("/problem-list/export-excel")
-async def export_problems(
-    session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
-) -> Any:
-    """导出问题清单为 Excel (X-002)。"""
-    rows = await ProblemService(session).list_problems_for_export()
-    columns = _PROBLEM_COLUMNS
-    return await anyio.to_thread.run_sync(lambda: _build_excel_response(columns, rows, "问题清单"))
-
-
-# P2-3:问题变更导出 (对照源 problemchange/index.vue handleExport)
-_PROBLEM_CHANGE_COLUMNS = [
-    ColumnDef(field="project_name", header="项目名称", width=24),
-    ColumnDef(field="pro_desc", header="变更内容", width=40),
-    ColumnDef(field="change_reason", header="变更原因", width=30),
-    ColumnDef(field="duty_user_name", header="责任人", width=16),
-    ColumnDef(field="now_handle_user_name", header="当前处理人", width=16),
-    ColumnDef(field="status", header="状态", width=10),
-    ColumnDef(field="created_at", header="创建时间", width=20),
-]
-
-
-@router.get("/problem-change/export-excel")
-async def export_problem_changes(
-    session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
-) -> Any:
-    """导出问题变更为 Excel (P2-3, X-002)。"""
-    rows = await ProblemService(session).list_changes_for_export()
-    columns = _PROBLEM_CHANGE_COLUMNS
-    return await anyio.to_thread.run_sync(
-        lambda: _build_excel_response(columns, rows, "问题变更", "problem_changes.xlsx")
-    )
+# ---------------------------------------------------------------------------
+# 导出辅助 (X-002:openpyxl 同步丢线程池)
+# 注意:字面量路径 /problem-list/export-excel 与 /problem-change/export-excel
+# 必须前置于 /{item_id} 参数化路由,否则 FastAPI 按注册顺序匹配时会被当 UUID
+# 解析返回 422(同 ql-020 project-plan 修过的同款问题)。export_problems /
+# export_problem_changes 实际声明位置见各自 list 端点紧邻之后。
+# ---------------------------------------------------------------------------
 
 
 def _build_excel_response(
