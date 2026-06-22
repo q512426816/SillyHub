@@ -79,7 +79,12 @@ class TestExcelResponse:
         assert (
             resp.media_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-        assert resp.headers["Content-Disposition"] == 'attachment; filename="demo.xlsx"'
+        # RFC 5987: filename*=UTF-8''<encoded> 承载中文文件名(utf-8),filename 作 ASCII 回退。
+        # 与 export.py::excel_response 对齐;前端 parseFilenameFromContentDisposition 依赖此契约。
+        assert (
+            resp.headers["Content-Disposition"]
+            == "attachment; filename=\"demo.xlsx\"; filename*=UTF-8''demo.xlsx"
+        )
 
     def test_export_to_response_one_shot(self) -> None:
         resp = export_to_response(
@@ -88,7 +93,11 @@ class TestExcelResponse:
             filename="one.xlsx",
         )
         assert isinstance(resp, StreamingResponse)
-        assert resp.headers["Content-Disposition"] == 'attachment; filename="one.xlsx"'
+        # 同 test_response_shape:RFC 5987 filename* + ASCII 回退
+        assert (
+            resp.headers["Content-Disposition"]
+            == "attachment; filename=\"one.xlsx\"; filename*=UTF-8''one.xlsx"
+        )
 
 
 if __name__ == "__main__":

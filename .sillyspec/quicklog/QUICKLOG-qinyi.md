@@ -1,3 +1,10 @@
+## ql-20260622-038-7b3e | 2026-06-22 23:35:12 | 修复 ppm excel 导出 2 个失败测试断言（跟上源码 RFC 5987 filename* 格式，改测试不改源码）
+
+状态：已完成
+文件：backend/app/modules/ppm/common/tests/test_export.py
+结果：`TestExcelResponse::test_response_shape` / `test_export_to_response_one_shot` 两处断言改为 RFC 5987 完整格式 `"attachment; filename=\"x.xlsx\"; filename*=UTF-8''x.xlsx"`(双引号外层避免 `''` 字面量拼接陷阱,对齐源码 export.py:134) + 注释契约依据。源码未动。验证 `pytest app/modules/ppm/common/tests/test_export.py` 6/6 passed;原全量 1836 passed/2 failed 中此 2 项已修。
+依据：源码 `app/modules/ppm/common/export.py::excel_response` 有意用 RFC 5987 `filename*=UTF-8''<encoded>` + `filename` ASCII 回退（注释 L123-137 说明中文文件名超 latin-1 范围）；前端 `parseFilenameFromContentDisposition` 主动解析此契约（ql-20260622-022-6a1f），ppm 导出文件名为中文时间戳（ql-20260622-034-c3a7）。故源码正确，是 test_export.py 的 `TestExcelResponse` 两处断言只期望旧式 `attachment; filename="x.xlsx"` 未含 `filename*` 段而失败。修复：断言改为匹配 `attachment; filename="demo.xlsx"; filename*=UTF-8''demo.xlsx`。
+
 ## ql-20260621-011-f3c7 | 2026-06-21 16:50:00 | 看板加「计划/实际」两 tab（对齐源 Home ScheduleCard/WorkCard，全对齐含编辑+displayMode）
 
 状态：已完成
