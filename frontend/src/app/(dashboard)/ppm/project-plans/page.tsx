@@ -460,7 +460,7 @@ export default function ProjectPlansPage() {
         </div>
         <Form<SearchForm>
           form={search}
-          layout="inline"
+          layout="vertical"
           className="grid w-full grid-cols-4 gap-3"
         >
           <Field label="项目名称">
@@ -483,23 +483,23 @@ export default function ProjectPlansPage() {
               />
             </Form.Item>
           </Field>
+          <Field label="公司名称">
+            <Form.Item name="companyName" noStyle>
+              <Input
+                placeholder="请输入公司名称"
+                allowClear
+                className="w-full"
+                onPressEnter={() => handleSearch()}
+              />
+            </Form.Item>
+          </Field>
+          <Field label="合同签订时间">
+            <Form.Item name="contractSignTimeRange" noStyle>
+              <RangePicker allowClear={false} className="w-full" />
+            </Form.Item>
+          </Field>
           {expanded && (
             <>
-              <Field label="公司名称">
-                <Form.Item name="companyName" noStyle>
-                  <Input
-                    placeholder="请输入公司名称"
-                    allowClear
-                    className="w-full"
-                    onPressEnter={() => handleSearch()}
-                  />
-                </Form.Item>
-              </Field>
-              <Field label="合同签订时间">
-                <Form.Item name="contractSignTimeRange" noStyle>
-                  <RangePicker allowClear={false} className="w-full" />
-                </Form.Item>
-              </Field>
               <Field label="项目开始时间">
                 <Form.Item name="projectStartTimeRange" noStyle>
                   <RangePicker allowClear={false} className="w-full" />

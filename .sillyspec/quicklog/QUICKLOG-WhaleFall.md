@@ -459,7 +459,15 @@ created_at: 2026-06-03T08:42:04
 文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx
 背景：ql-007 改垂直布局后，Field 用 w-[200px]，外层 Form 用 flex-wrap，容器宽度决定一行能放几个（宽屏可能放 5-6 个）。用户要求一行最多 4 个。
 方案：CSS Grid 强制 4 列。1) Form className 由 `w-full` + style rowGap/columnGap 改为 `grid w-full grid-cols-4 gap-3`；2) Field 内部 div 由 `w-[200px]` 改为 `w-full` 占满网格列；3) Form 移除 style（grid 的 gap-3 已覆盖 rowGap/columnGap）。
-结果：1) typecheck 通过；2) 329/329 vitest 全过；3) 展开 6 个条件时第一行 4 个（项目名称/合同名称/公司名称/合同签订时间），第二行 2 个占左两列（项目开始时间/预计验收时间）；4) 收起时只显示 2 个（项目名称/合同名称）占左两列。Docker 重建 frontend 待后续。
+结果：1) typecheck 通过；2) 329/329 vitest 全过；3) 展开 6 个条件时第一行 4 个（项目名称/合同名称/公司名称/合同签订时间），第二行 2 个占左两列（项目开始时间/预计验收时间）；4）收起时只显示 2 个（项目名称/合同名称）占左两列。Docker 重建 frontend 待后续。
+
+## ql-20260622-009-3ebf | 2026-06-22 10:33:41 | 修复 grid 一行一个 + 收起时显示前 4 个
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx
+背景：ql-008 改 grid-cols-4 后用户反馈一行只有一个查询条件。根因：antd Form `layout="inline"` 给 `<form>` 加 `display: inline-flex; flex-wrap: wrap` 内部样式，覆盖了我们的 `grid-cols-4`，Field 被作为 inline-flex item 排列，宽度由内容决定而非网格列。同时用户重申期望：默认显示一行 4 个，展开显示全部。
+方案：1) Form `layout` 由 `"inline"` 改为 `"vertical"`，让 `<form>` 回到 `display: block`，`grid-cols-4` 才能生效（Form.Item 用 `noStyle` 不渲染 wrapper，layout 不影响实际渲染）；2) 前 4 个 Field（项目名称/合同名称/公司名称/合同签订时间）总是渲染，后 2 个 Field（项目开始时间/预计验收时间）仅 `expanded=true` 时渲染；3）展开按钮因总数 6 > 4 始终显示，文案 `expanded ? "收起" : "展开"` 保持不变。
+结果：1）typecheck 通过；2）329/329 vitest 全过；3）收起时第一行 4 个查询条件（项目名称/合同名称/公司名称/合同签订时间）等宽对齐；4）展开时第一行 4 个 + 第二行 2 个（项目开始时间/预计验收时间）占左两列。Docker 重建 frontend 待后续。
+
 
 
 
