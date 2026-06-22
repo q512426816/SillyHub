@@ -650,6 +650,17 @@ export interface ProblemListPageReq extends PageReq {
   find_time_end?: string;
 }
 
+/** 问题变更查询参数(对齐后端 GET /problem-change Query)。 */
+export interface ProblemChangePageReq extends PageReq {
+  /** 关键字:项目/模块/变更内容/变更原因 模糊匹配 */
+  keyword?: string;
+  /** 状态(可多值)。后端用 status=1&status=2 重复 query 接收。 */
+  status?: string[];
+  /** created_at ISO 起止(闭区间) */
+  created_at_start?: string;
+  created_at_end?: string;
+}
+
 export interface ProblemListUpdate {
   project_name?: string | null;
   module_id?: string | null;

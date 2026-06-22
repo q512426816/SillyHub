@@ -15,13 +15,7 @@
  * 后端 GET /problem-change 仅分页(无筛选 Query),本页拉 200 条做本地过滤
  * + 客户端分页展示。查询条件变化回到第 1 页,关键字按 Enter/搜索按钮提交。
  */
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   DatePicker,
   Drawer,
@@ -77,14 +71,13 @@ export default function ProblemChangesPage() {
   const currentUserId = currentUser?.id ?? "";
 
   const [items, setItems] = useState<ProblemChange[]>([]);
+  const [total, setTotal] = useState(0);
+  const [current, setCurrent] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<DrawerMode | null>(null);
   const [exporting, setExporting] = useState(false);
-
-  // 分页(客户端分页,本地切片)
-  const [current, setCurrent] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
 
   // 搜索栏:keywordInput 仅受控显示,回车/搜索按钮才同步到 keyword 触发查询
   const [keywordInput, setKeywordInput] = useState("");
@@ -94,54 +87,45 @@ export default function ProblemChangesPage() {
     null,
   );
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setItems(await listProblemChanges({ page: 1, page_size: 200 }));
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "加载失败");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const filtered = useMemo(() => {
-    const kw = keyword.trim().toLowerCase();
-    const [rangeStart, rangeEnd] = dateRange ?? [null, null];
-    return items.filter((c) => {
-      if (statusFilter.length > 0 && !statusFilter.includes(c.status)) {
-        return false;
+  const load = useCallback(
+    async (opts: { page?: number; page_size?: number } = {}) => {
+      const page = opts.page ?? current;
+      const page_size = opts.page_size ?? pageSize;
+      setLoading(true);
+      setError(null);
+      try {
+        const resp = await listProblemChanges({
+          page,
+          page_size,
+          keyword: keyword || undefined,
+          status: statusFilter.length > 0 ? statusFilter : undefined,
+          created_at_start: dateRange?.[0]?.startOf("day")?.toISOString(),
+          created_at_end: dateRange?.[1]?.endOf("day")?.toISOString(),
+        });
+        setItems(resp.items);
+        setTotal(resp.total);
+        setCurrent(page);
+        setPageSize(page_size);
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "加载失败");
+      } finally {
+        setLoading(false);
       }
-      if (rangeStart && rangeEnd && c.created_at) {
-        const t = new Date(c.created_at);
-        if (!Number.isNaN(t.getTime())) {
-          if (t < rangeStart.startOf("day").toDate()) return false;
-          if (t > rangeEnd.endOf("day").toDate()) return false;
-        }
-      }
-      if (!kw) return true;
-      const hay = [c.project_name, c.pro_desc, c.change_reason, c.model_name]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return hay.includes(kw);
-    });
-  }, [items, keyword, statusFilter, dateRange]);
+    },
+    [
+      current,
+      pageSize,
+      keyword,
+      statusFilter,
+      dateRange,
+    ],
+  );
 
-  const total = filtered.length;
-  const paged = useMemo(() => {
-    const start = (current - 1) * pageSize;
-    return filtered.slice(start, start + pageSize);
-  }, [filtered, current, pageSize]);
-
-  // 过滤条件变化 → 回到第 1 页
+  // 首屏 + 过滤条件变化 → 回到第 1 页重拉。
+  // keywordInput 不触发(只在 commit 时改 keyword)。
   useEffect(() => {
-    setCurrent(1);
+    void load({ page: 1 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keyword, statusFilter, dateRange]);
 
   const commitKeyword = () => setKeyword(keywordInput);
@@ -359,7 +343,7 @@ export default function ProblemChangesPage() {
         <Table<ProblemChange>
           rowKey="id"
           columns={columns}
-          dataSource={paged}
+          dataSource={items}
           loading={loading}
           size="small"
           bordered
@@ -371,10 +355,7 @@ export default function ProblemChangesPage() {
             showSizeChanger: true,
             pageSizeOptions: ["10", "20", "50", "100"],
             showTotal: (t: number) => `共 ${t} 条`,
-            onChange: (page: number, size: number) => {
-              setCurrent(page);
-              setPageSize(size);
-            },
+            onChange: (page: number, size: number) => void load({ page, page_size: size }),
           }}
           locale={{ emptyText: "暂无问题变更" }}
         />

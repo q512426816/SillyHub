@@ -33,11 +33,12 @@ import type {
   ProblemNextProcessReq,
   ProblemProcessLog,
   ProblemProcessTask,
+  ProblemChangePageReq,
   ProblemRejectProcessReq,
 } from "./types";
 
 function pageQuery(
-  params?: ProblemListPageReq | PageReq,
+  params?: ProblemListPageReq | ProblemChangePageReq | PageReq,
 ): { query: Record<string, string | number | string[] | undefined> } | undefined {
   if (!params) return undefined;
   const q: Record<string, string | number | string[] | undefined> = {};
@@ -183,9 +184,9 @@ export async function exportProblemChanges(): Promise<void> {
 // ===========================================================================
 
 export async function listProblemChanges(
-  params?: PageReq,
-): Promise<ProblemChange[]> {
-  return apiFetch<ProblemChange[]>("/api/ppm/problem-change", pageQuery(params));
+  params?: ProblemChangePageReq,
+): Promise<PageResp<ProblemChange>> {
+  return apiFetch<PageResp<ProblemChange>>("/api/ppm/problem-change", pageQuery(params));
 }
 
 export async function getProblemChange(

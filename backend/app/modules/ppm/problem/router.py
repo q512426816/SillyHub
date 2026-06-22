@@ -298,14 +298,28 @@ async def list_logs(
 # ===========================================================================
 
 
-@router.get("/problem-change", response_model=list[ProblemChangeResp])
+@router.get("/problem-change", response_model=Page[ProblemChangeResp])
 async def list_changes(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
     req: PageReqDep,
-) -> list[ProblemChangeResp]:
-    page = await ProblemService(session).list_changes(req)
-    return [ProblemChangeResp.model_validate(i) for i in page.items]
+    keyword: str | None = Query(None, description="项目/模块/变更内容/变更原因 模糊匹配"),
+    status: list[str] | None = Query(None, description="状态(可多值)"),
+    created_at_start: datetime | None = Query(None),
+    created_at_end: datetime | None = Query(None),
+) -> Page[ProblemChangeResp]:
+    page = await ProblemService(session).list_changes(
+        req,
+        keyword=keyword,
+        status_list=status,
+        created_at_start=created_at_start,
+        created_at_end=created_at_end,
+    )
+    return Page.build(
+        items=[ProblemChangeResp.model_validate(i) for i in page.items],
+        total=page.total,
+        req=req,
+    )
 
 
 # export-excel 必须前置于 /{item_id} 参数化路由 (同 problem-list/export-excel 注释)。

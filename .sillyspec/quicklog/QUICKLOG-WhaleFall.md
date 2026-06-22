@@ -796,4 +796,18 @@ created_at: 2026-06-03T08:42:04
   - 单按钮(详情)行右侧虽仍有空白,但与 fixed:right 状态列紧邻,视觉上不再有"详情+大片空白+状态"的割裂感
   - frontend pnpm typecheck 通过
 
+## ql-20260622-037-d4c1 | 2026-06-22 22:05:00 | problem-changes 查询走接口(服务端过滤+分页)
+状态：已完成
+文件：backend/app/modules/ppm/problem/router.py + service.py + frontend/src/lib/ppm/problem.ts + types.ts + frontend/src/app/(dashboard)/ppm/problem-changes/page.tsx
+背景:/problem-change GET 返 list[ProblemChangeResp] 无 Query 过滤,前端拉 200 条本地 filter+slice。与 problem-list(ql-030 已服务端化)不对齐,数据量大时本地切片会丢数据。
+方案:
+  1. 后端 service.list_changes 加 keyword/status_list/created_at_start/created_at_end 4 个可选参数,构造 where_clauses(or_ ilike 跨 project_name/model_name/pro_desc/change_reason / status in / created_at 闭区间),传 _Crud.list_paged(where_clauses=...)
+  2. 后端 router.list_changes 加 4 个 Query 参数 + response_model 改 Page[ProblemChangeResp] + Page.build(items, total, req) 返 total
+  3. 前端 types.ts 新增 ProblemChangePageReq extends PageReq(keyword/status string[]/created_at_start/created_at_end)
+  4. 前端 problem.ts pageQuery 接受 ProblemChangePageReq 联合类型;listProblemChanges 签名改 (params?: ProblemChangePageReq) => Promise<PageResp<ProblemChange>>
+  5. 前端 page.tsx 删本地 filter/slice/useMemo,改 current/pageSize/total state + load({page,page_size}) 调服务端,onChange 重查,过滤条件变化 useEffect 回 page=1
+结果:
+  - frontend pnpm typecheck 通过
+  - backend pytest app/modules/ppm/problem/tests 35/35 通过
+
 

@@ -330,9 +330,43 @@ class ProblemService:
     # 问题变更 CRUD
     # ------------------------------------------------------------------
 
-    async def list_changes(self, req: PageReq) -> Page[PpmProblemChange]:
+    async def list_changes(
+        self,
+        req: PageReq,
+        *,
+        keyword: str | None = None,
+        status_list: list[str] | None = None,
+        created_at_start: datetime | None = None,
+        created_at_end: datetime | None = None,
+    ) -> Page[PpmProblemChange]:
+        """分页列表(支持服务端过滤)。
+
+        过滤参数(全部可选,AND 组合):
+        - keyword:模糊匹配 project_name/model_name/pro_desc/change_reason
+        - status_list:status in (...)
+        - created_at_start/created_at_end:created_at 闭区间
+        """
+        clauses: list[Any] = []
+        if keyword:
+            kw = f"%{keyword}%"
+            clauses.append(
+                or_(
+                    PpmProblemChange.project_name.ilike(kw),
+                    PpmProblemChange.model_name.ilike(kw),
+                    PpmProblemChange.pro_desc.ilike(kw),
+                    PpmProblemChange.change_reason.ilike(kw),
+                )
+            )
+        if status_list:
+            clauses.append(PpmProblemChange.status.in_(status_list))
+        if created_at_start:
+            clauses.append(PpmProblemChange.created_at >= created_at_start)
+        if created_at_end:
+            clauses.append(PpmProblemChange.created_at <= created_at_end)
         return await _Crud(self._session, PpmProblemChange).list_paged(
-            req=req, allowed_sort={"created_at", "status"}
+            req=req,
+            allowed_sort={"created_at", "status"},
+            where_clauses=clauses or None,
         )
 
     async def create_change(self, data: dict[str, Any]) -> PpmProblemChange:
