@@ -722,8 +722,6 @@ created_at: 2026-06-03T08:42:04
   - 重试后仍 401 → 清 session + 跳 /login
   - params 数组用 searchParams.append 多值编码(与 apiFetch 一致,支持导出带 status 多值)
   - typecheck 通过,363/363 测试通过
-
-## ql-20260622-032-c4d2 | 2026-06-22 17:10:00 | problem-list 操作列改自适应宽度
 状态：已完成
 文件：frontend/src/app/(dashboard)/ppm/problem-list/page.tsx
 背景:操作列 width=200,但每行按钮数不同(1~6 个),固定宽度导致按钮少时大片留白。用户要求自适应。
@@ -736,5 +734,21 @@ created_at: 2026-06-03T08:42:04
   - 按钮 flex-wrap 删除,改 whitespace-nowrap 单行排列
   - fixed:'right' 保留,align:'right' 保留
   - typecheck 通过,363/363 测试通过
+
+## ql-20260622-033-d5e8 | 2026-06-22 18:55:00 | problem-list/export-excel 路由顺序修复
+状态：已完成
+文件：backend/app/modules/ppm/problem/router.py
+背景:GET /api/ppm/problem-list/export-excel 返回 422 uuid_parsing — `export-excel` 被参数化路由 `/problem-list/{item_id}` 拦截当 UUID 解析。同 ql-020 已为 project-plan 修过的同款问题。FastAPI 路由按注册顺序匹配,字面量路径必须前置于参数化路由。
+方案:
+  1. 把 export_problems 函数(及对应 _PROBLEM_COLUMNS)从文件末尾移到 list_problems 之后、get_problem({item_id}) 之前
+  2. 把 export_problem_changes(及 _PROBLEM_CHANGE_COLUMNS)从文件末尾移到 list_changes 之后、get_change({item_id}) 之前
+  3. _build_excel_response 辅助函数可留在文件末尾(模块加载完所有名字都在 global,Python 函数调用时才解析名字,装饰器执行只注册路由)
+结果:
+  - export_problems + _PROBLEM_COLUMNS 已移到 list_problems 紧邻之后(line 113)
+  - export_problem_changes + _PROBLEM_CHANGE_COLUMNS 已移到 list_changes 紧邻之后(line 307)
+  - _build_excel_response 留在文件末尾,旁边加注释说明路由顺序约束
+  - grep @router.* 确认两个 export-excel 都在 {item_id} GET 之前
+  - ppm/problem/tests 35/35 通过
+
 
 
