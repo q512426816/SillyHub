@@ -10,7 +10,7 @@
  *
  * 走 lib/ppm/plan.ts:listProjectPlans + CRUD。apiFetch。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   DatePicker,
@@ -79,13 +79,24 @@ function fmtDate(v: string | null | undefined): string {
   return v.length >= 10 ? v.slice(0, 10) : v;
 }
 
-// 统一 label 宽度,让所有 Form.Item 视觉对齐(4 字/6 字 label 均占 88px)。
-// whitespace-nowrap 防止 6 字 label 在 antd label 包装层因 padding 触发换行。
-const fieldLabel = (text: string) => (
-  <span className="inline-block w-[88px] whitespace-nowrap text-right text-sm">
-    {text}
-  </span>
-);
+// 单个查询条件的外壳:垂直布局(标题在上,控件在下),宽度统一 w-[200px]。
+// 使用 Form.Item noStyle 让 antd 不渲染外层 label/wrapper,
+// 标题和宽度完全由我们自定义的 div 控制,避免 antd inline 布局
+// 给 RangePicker 留不足宽度导致内部换行。
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex w-[200px] flex-col gap-1">
+      <span className="text-xs leading-4 text-muted-foreground">{label}</span>
+      {children}
+    </div>
+  );
+}
 
 export default function ProjectPlansPage() {
   const router = useRouter();
@@ -450,73 +461,55 @@ export default function ProjectPlansPage() {
           form={search}
           layout="inline"
           className="w-full"
-          style={{ rowGap: 8 }}
+          style={{ rowGap: 12, columnGap: 12 }}
         >
-          <Form.Item
-            label={fieldLabel("项目名称")}
-            colon={false}
-            className="w-[340px]"
-            name="projectName"
-          >
-            <Input
-              placeholder="请输入项目名称"
-              allowClear
-              className="w-full"
-              onPressEnter={() => handleSearch()}
-            />
-          </Form.Item>
-          <Form.Item
-            label={fieldLabel("合同名称")}
-            colon={false}
-            className="w-[340px]"
-            name="contractName"
-          >
-            <Input
-              placeholder="请输入合同名称"
-              allowClear
-              className="w-full"
-              onPressEnter={() => handleSearch()}
-            />
-          </Form.Item>
+          <Field label="项目名称">
+            <Form.Item name="projectName" noStyle>
+              <Input
+                placeholder="请输入项目名称"
+                allowClear
+                className="w-full"
+                onPressEnter={() => handleSearch()}
+              />
+            </Form.Item>
+          </Field>
+          <Field label="合同名称">
+            <Form.Item name="contractName" noStyle>
+              <Input
+                placeholder="请输入合同名称"
+                allowClear
+                className="w-full"
+                onPressEnter={() => handleSearch()}
+              />
+            </Form.Item>
+          </Field>
           {expanded && (
             <>
-              <Form.Item
-                label={fieldLabel("公司名称")}
-                colon={false}
-                className="w-[300px]"
-                name="companyName"
-              >
-                <Input
-                  placeholder="请输入公司名称"
-                  allowClear
-                  className="w-full"
-                  onPressEnter={() => handleSearch()}
-                />
-              </Form.Item>
-              <Form.Item
-                label={fieldLabel("合同签订时间")}
-                colon={false}
-                className="w-[300px]"
-                name="contractSignTimeRange"
-              >
-                <RangePicker className="w-full" />
-              </Form.Item>
-              <Form.Item
-                label={fieldLabel("项目开始时间")}
-                colon={false}
-                className="w-[300px]"
-                name="projectStartTimeRange"
-              >
-                <RangePicker className="w-full" />
-              </Form.Item>
-              <Form.Item
-                label={fieldLabel("预计验收时间")}
-                colon={false}
-                className="w-[300px]"
-                name="projectPlanEndTimeRange"
-              >
-                <RangePicker className="w-full" />
-              </Form.Item>
+              <Field label="公司名称">
+                <Form.Item name="companyName" noStyle>
+                  <Input
+                    placeholder="请输入公司名称"
+                    allowClear
+                    className="w-full"
+                    onPressEnter={() => handleSearch()}
+                  />
+                </Form.Item>
+              </Field>
+              <Field label="合同签订时间">
+                <Form.Item name="contractSignTimeRange" noStyle>
+                  <RangePicker allowClear={false} className="w-full" />
+                </Form.Item>
+              </Field>
+              <Field label="项目开始时间">
+                <Form.Item name="projectStartTimeRange" noStyle>
+                  <RangePicker allowClear={false} className="w-full" />
+                </Form.Item>
+              </Field>
+              <Field label="预计验收时间">
+                <Form.Item name="projectPlanEndTimeRange" noStyle>
+                  <RangePicker allowClear={false} className="w-full" />
+                </Form.Item>
+              </Field>
             </>
           )}
         </Form>

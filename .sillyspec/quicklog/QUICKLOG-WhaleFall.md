@@ -442,6 +442,19 @@ created_at: 2026-06-03T08:42:04
 方案：1) fieldLabel span 加 `whitespace-nowrap` 强制单行展示；2) 6 个 Form.Item className 由 `w-[300px]` 全部加宽到 `w-[340px]`（control 可用宽度 204→244px，给 RangePicker 留足空间）。
 结果：1) typecheck 通过；2) 329/329 vitest 全过；3) 时间项 label 单行展示，RangePicker 单行展示双日期+separator+图标；4) 6 个 Form.Item 整体宽度统一对齐（340px）。Docker 重建 frontend 待后续。
 
+## ql-20260622-007-9ab3 | 2026-06-22 10:20:43 | 查询条件改垂直布局彻底解决时间项换行
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx
+背景：ql-006 把 Form.Item 加宽到 w-[340px] 并给 label 加 whitespace-nowrap 后，用户反馈时间项（合同签订时间/项目开始时间/预计验收时间）的标题和 RangePicker 仍然不在同一行。w-[340px] − label w-[88px] − gap 8px = control 实际 ~244px，但 antd RangePicker 标准布局需要 ~260-280px 才能稳定单行，继续加宽会让 Form.Item 过大、布局失衡。用户给了备选方案："或者把其他的输入框的查询条件也按上面标题下面输入框去调整"。
+方案：采纳用户 fallback，所有 6 个查询条件统一改为垂直布局（标题在上、控件在下）。
+  1) 新增 `Field({ label, children })` helper：外层 `<div className="flex w-[200px] flex-col gap-1">`，顶部 `<span className="text-xs leading-4 text-muted-foreground">{label}</span>`，下方 children；
+  2) 6 个 Form.Item 全部改为 `noStyle`（不渲染 antd label 和外层 wrapper），由 Field 完全接管样式；
+  3) 3 个时间 RangePicker 加 `allowClear={false}` 移除 clear 图标，避免 200px 内部换行；
+  4) Form `style={{ rowGap: 12, columnGap: 12 }}` 替代之前的 `rowGap: 8`；
+  5) 删除不再使用的 `fieldLabel` helper；6) 引入 `type ReactNode` from "react" 替代 React.ReactNode。
+结果：1) typecheck 通过；2) 329/329 vitest 全过；3) 6 个查询条件视觉完全统一：标题（text-xs 灰）在上、控件在下，宽度均 200px；4) RangePicker 在 200px 内单行展示双日期+separator+日历图标（无 clear 图标）。Docker 重建 frontend 待后续。
+
+
 
 
 
