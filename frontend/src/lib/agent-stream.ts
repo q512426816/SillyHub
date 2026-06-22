@@ -89,6 +89,14 @@ export class AgentRunStreamClient {
 
     this.es = new EventSource(url.toString());
 
+    // ql-20260622：onopen 标记 connected —— 后端 SSE 只发 `: connected`/`: keepalive`
+    // 注释行（浏览器忽略，不触发 onmessage），agent 挂起等待 askuser 时无新 data
+    // 消息，导致 status 永远停在 "connecting"，hook 的 loading 永远 true（刷新卡住）。
+    // onopen 在 TCP+HTTP 连接建立后立即触发，保证 loading 及时清除。
+    this.es.onopen = () => {
+      if (this.status === "connecting") this._setStatus("connected");
+    };
+
     this.es.onmessage = (e: MessageEvent<string>) => {
       try {
         // ql-20260621：run SSE 已同时订阅 agent_session:{id} 频道，permission_*
