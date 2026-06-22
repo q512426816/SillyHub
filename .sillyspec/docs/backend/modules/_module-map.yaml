@@ -3,7 +3,7 @@ project: backend
 source_commit: 0303536
 generated_at: 2026-06-19 13:25:00
 generator: sillyspec-quick
-last_change: 2026-06-19 quick(ql-20260619-002-703a) 元数据刷新至当前 HEAD；backend/app/modules 实际 23 业务目录(admin/agent/archive/auth/change/change_writer/daemon/git_gateway/git_identity/health/incident/knowledge/release/runtime/scan_docs/settings/spec_profile/spec_workspace/task/tool_gateway/workflow/workspace/worktree) vs 索引 19 模块，差异模块待后续全量 scan 补齐
+last_change: 2026-06-22 archive(2026-06-22-daemon-service-split) daemon 模块 main_symbols 补 5 子域 service（RuntimeService/LeaseService/RunSyncService/SessionService/PatchService，DaemonService 退化为 facade 委托）；paths/entrypoints 不变（router 零改动）；backend/app/modules 实际 23 业务目录 vs 索引 19 模块，差异模块待后续全量 scan 补齐
 
 modules:
   # ── core 模块 ──────────────────────────────────────────────
@@ -328,11 +328,17 @@ modules:
       - /api/daemon
       - /api/daemon/ws
     main_symbols:
-      - DaemonService
-      - DaemonLeaseService
+      - DaemonService  # facade（2026-06-22-daemon-service-split 拆分后委托 5 子 service，签名不变）
+      - DaemonLeaseService  # 独立活 service（lease_service.py），cancel_lease 被 agent 跨模块调用，原位保留
       - DaemonRuntime
       - DaemonTaskLease
       - daemon_router
+      # 5 子域子包 service（2026-06-22-daemon-service-split，由 DaemonService facade 委托）：
+      - RuntimeService
+      - LeaseService
+      - RunSyncService
+      - SessionService
+      - PatchService
     depends_on:
       - core
       - models

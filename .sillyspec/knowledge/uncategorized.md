@@ -135,3 +135,15 @@
 - 根因：Bash 工具 cwd 在调用间持久；sillyspec 命令对 cwd 敏感——在 worktree/frontend（子项目根）跑会切到该子项目上下文，而非主仓库的 multi-agent-platform 变更。
 - 规避：worktree 内只跑 `pnpm`/`rg`/`git`（测试/验证），**所有 sillyspec 命令（`run`/`--done`/`progress`）必须在主仓库根 cwd 跑**；每次 `cd {worktree}/frontend` 后，下一条 sillyspec 命令前显式 `cd 主仓库根`。
 - 排查：progress show 发现 Wave 未记录 + CLI 输出 project 字段变化（frontend 而非 multi-agent-platform）即为此坑；补救：回主仓库 cwd 重跑该 Wave 的 `--done`。
+
+## 2026-06-22 — 单类巨石拆 facade+子包的 import 策略（避免 module-level 循环 / 跨域调用 / 测试 patch 跟随） [待确认]
+
+> 来源：2026-06-22-daemon-service-split（DaemonService 3324 行拆 runtime/lease/run_sync/session/patch 5 子包）。decisions.md D-005/D-006。
+
+- **循环 import 坑**：facade 顶部模块级 `from .subpackage.service import SubService` + 子 service 顶部 `from .service import SomeError`（异常类暂留 facade）= 双向模块级循环，import 即 `ImportError: cannot import name ... (partially initialized module)`。facade 冒烟能过**仅因子包当时是空壳**；子包一旦顶层 import facade 符号就爆。task-01 蓝图"顶部单向 import"的假设在子包 import 异常类时破产。
+- **解法（D-005）**：facade `__init__` 内**函数级 lazy import** 子 service 类（router.py:624 同款模式），子 service 顶层 import facade 异常类。依赖单向（子→facade），循环解除。
+- **跨域调用（D-006）**：子 service 调未迁/跨域方法（W4 时 `_get_lease_and_verify_token` 还在 facade）持 `self._facade` 引用——facade `__init__` 构造子 service 后注入 `self._x._facade = self`，方法体 `self._facade.cross_domain_method()`。`TYPE_CHECKING` import facade 类型避免运行时循环。全部子域迁完后 facade 保留委托，引用继续兼容，**不耦合 Wave 顺序**。
+- **测试 patch 跟随**：模块级符号（如 `get_redis`）从 facade 迁子 service 后，测试 `patch("...daemon.service.get_redis")` 失效，patch 目标必须跟随到子包模块（`...daemon.run_sync.service.get_redis`）。源码 API 零变化，仅 patch 物理位置变。迁移含 get_redis/redis 调用的方法时必查测试 patch 目标。
+- **grep 调用点范围**：迁移方法时 grep 调用点必须搜 `router.py` + 全 `backend/app/` + `tests/`，不能只搜当前文件——router 可能直接调 service 私有方法（如 `svc._get_owned_runtime`，task-02 曾漏 router.py:622 致 ws_rpc 6 用例 AttributeError 回归）。私有辅助删 facade 前必全 grep。
+- **异常类最终归位**：收尾阶段把异常类从 facade 迁各子包定义 + facade re-export（显式列出禁 `import *`），子包改子包直引（不再 import facade），此时 facade 可模块级 re-export 子包符号（子包不反向 import facade，单向无循环）。
+- **通用**：任何"单类拆子包 + facade 兼容（签名不变/router 零改动）"的重构适用此 import 策略组合。
