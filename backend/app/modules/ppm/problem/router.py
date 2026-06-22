@@ -131,7 +131,10 @@ async def export_problems(
     """导出问题清单为 Excel (X-002)。"""
     rows = await ProblemService(session).list_problems_for_export()
     columns = _PROBLEM_COLUMNS
-    return await anyio.to_thread.run_sync(lambda: _build_excel_response(columns, rows, "问题清单"))
+    filename = f"问题清单_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
+    return await anyio.to_thread.run_sync(
+        lambda: _build_excel_response(columns, rows, "问题清单", filename=filename)
+    )
 
 
 @router.post(
@@ -325,8 +328,9 @@ async def export_problem_changes(
     """导出问题变更为 Excel (P2-3, X-002)。"""
     rows = await ProblemService(session).list_changes_for_export()
     columns = _PROBLEM_CHANGE_COLUMNS
+    filename = f"问题变更_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
     return await anyio.to_thread.run_sync(
-        lambda: _build_excel_response(columns, rows, "问题变更", "problem_changes.xlsx")
+        lambda: _build_excel_response(columns, rows, "问题变更", filename=filename)
     )
 
 

@@ -392,8 +392,8 @@ export default function ProblemListPage() {
       <SectionCard bodyPadding="p-2">
         {/* 顶部按钮行:右对齐(查询 | 重置 | 分隔 | 导出 / 新建) */}
         <div className="mb-2 flex items-center justify-end gap-2">
-          <Button size="sm" variant="outline" onClick={commitKeyword}>
-            查询
+          <Button size="sm" onClick={commitKeyword}>
+            搜索
           </Button>
           <Button size="sm" variant="outline" onClick={resetFilters}>
             重置

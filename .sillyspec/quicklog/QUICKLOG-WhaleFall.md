@@ -750,5 +750,17 @@ created_at: 2026-06-03T08:42:04
   - grep @router.* 确认两个 export-excel 都在 {item_id} GET 之前
   - ppm/problem/tests 35/35 通过
 
-
-
+## ql-20260622-034-c3a7 | 2026-06-22 19:30:00 | problem-list 按钮/导出文件名对齐 project-plans
+状态：已完成
+文件：backend/app/modules/ppm/problem/router.py + frontend/src/app/(dashboard)/ppm/problem-list/page.tsx
+背景:/ppm/problem-list 顶部按钮(查询/重置)样式 + 导出 Excel 文件名格式与 /ppm/project-plans 不一致:查询按钮带 outline(浅色)而 project-plans 搜索按钮是 primary;问题清单/问题变更导出文件名是固定字符串 "problem_list.xlsx" / "problem_changes.xlsx" 而 project-plans 是带时间戳的 `项目计划_YYYYMMDD_HHmmss.xlsx`(ql-022-6a1f)。
+方案:
+  1. 前端 page.tsx: 查询按钮文案 "查询" → "搜索",去掉 variant="outline"(回退默认 primary),与 project-plans 搜索按钮一致
+  2. 后端 router.py export_problems: 加 filename = f"问题清单_{datetime.now():%Y%m%d_%H%M%S}.xlsx",传给 _build_excel_response(filename=...)
+  3. 后端 router.py export_problem_changes: 加 filename = f"问题变更_{datetime.now():%Y%m%d_%H%M%S}.xlsx",传给 _build_excel_response(filename=...);同时去掉旧的固定 "problem_changes.xlsx" 字面量
+  4. _build_excel_response 默认 filename 参数兜底保留(不传时回退)
+结果:
+  - frontend page.tsx 查询→搜索, primary; 重置保留 outline; 导出保留 outline
+  - backend router.py 两处导出 filename 改时间戳格式 (datetime 已在 file 顶部 import)
+  - frontend pnpm typecheck 通过
+  - backend pytest app/modules/ppm/problem/tests 35/35 通过
