@@ -6,12 +6,16 @@ ARG NODE_VERSION=20
 
 FROM node:${NODE_VERSION}-slim AS deps
 
+# 国内镜像规避 build 时 corepack 拉 pnpm tarball TLS 失败 (ECONNRESET)。
+ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
 RUN corepack enable pnpm
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml* ./
 # When pnpm-lock.yaml is missing (first bootstrap) we fall back to a regular install.
-RUN if [ -f pnpm-lock.yaml ]; then \
+# pnpm install 也走 npmmirror, 加速依赖下载。
+RUN npm config set registry https://registry.npmmirror.com && \
+    if [ -f pnpm-lock.yaml ]; then \
       pnpm install --frozen-lockfile; \
     else \
       pnpm install --no-frozen-lockfile; \
@@ -20,6 +24,7 @@ RUN if [ -f pnpm-lock.yaml ]; then \
 
 FROM node:${NODE_VERSION}-slim AS builder
 
+ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
 RUN corepack enable pnpm
 WORKDIR /app
 
