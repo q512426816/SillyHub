@@ -67,6 +67,16 @@ class Settings(BaseSettings):
         "Relative paths are resolved against the repo root, not CWD.",
     )
 
+    # ── Spec data host dir (host filesystem path for daemon/agent prompts) ─
+    # 方案 B（D-001@v1 调整）：backend 生成 scan/stage prompt 时用此宿主路径，
+    # daemon 零客户端配置（不依赖 SPEC_ROOT_MAP）。SPEC_DATA_ROOT 是容器内路径，
+    # 通过 docker bind mount 映射到此宿主路径（物理同一目录）。
+    spec_data_host_dir: str = Field(
+        default=("C:/data/spec-workspaces" if sys.platform == "win32" else "/data/spec-workspaces"),
+        description="Host filesystem path for spec storage, passed to daemon/agent in scan/stage "
+        "prompts. SPEC_DATA_ROOT is the in-container path bind-mounted to this host path.",
+    )
+
     @field_validator("spec_data_root", mode="before")
     @classmethod
     def _resolve_spec_data_root(cls, raw: object) -> object:

@@ -1009,12 +1009,16 @@ class AgentService:
 
             spec_ws = await SpecWorkspaceService(self._session).get(workspace_id)
             if spec_ws and spec_ws.strategy == "platform-managed" and spec_ws.spec_root:
-                runtime_root = getattr(spec_ws, "runtime_root", None) or str(
-                    Path(spec_ws.spec_root) / "runtime"
-                )
+                # 方案 B（D-001@v1 调整）：prompt 用宿主路径（SPEC_DATA_HOST_DIR/{ws}），
+                # daemon 零客户端配置。spec_ws.spec_root（容器路径）保留供 backend 内部访问。
+                from app.core.config import get_settings
+
+                settings = get_settings()
+                host_spec_root = f"{settings.spec_data_host_dir}/{workspace_id}"
+                host_runtime_root = f"{host_spec_root}/runtime"
                 platform_args = (
-                    f" --spec-root {spec_ws.spec_root}"
-                    f" --runtime-root {runtime_root}"
+                    f" --spec-root {host_spec_root}"
+                    f" --runtime-root {host_runtime_root}"
                     f" --workspace-id {workspace_id}"
                 )
         except Exception as exc:

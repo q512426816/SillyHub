@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from app.core.config import get_settings
 from app.core.errors import ChangeNotFound, WorkspaceNotFound
 from app.core.logging import get_logger
 from app.modules.agent.base import AgentSpecBundle, TaskContext, WorkspaceSpecSummary
@@ -459,9 +460,16 @@ async def build_scan_bundle(
     # Step 2 — 构建 scan 执行指令（分步交互式，含平台参数）
     ws_id = str(workspace_id)
     run_id_str = str(run_id)
+    # 方案 B（D-001@v1 调整）：prompt 用宿主路径（SPEC_DATA_HOST_DIR/{ws}），
+    # daemon 零客户端配置（不依赖 SPEC_ROOT_MAP）。spec_root/runtime_root
+    # 参数（容器路径 /data/{ws}）保留供 backend 内部访问（post-check/scan_sync
+    # 在容器内跑，bind mount 保证 host 与容器是同一物理目录）。
+    settings = get_settings()
+    host_spec_root = f"{settings.spec_data_host_dir}/{ws_id}"
+    host_runtime_root = f"{host_spec_root}/runtime"
     # 完整命令行（单行，避免 LLM 忽略续行）
     # --dir 指向源码目录（root_path），sillyspec 用它定位项目代码
-    # --spec-root 指向平台托管 spec 目录，sillyspec 将文档写入此路径
+    # --spec-root 指向平台托管 spec 目录（宿主路径），sillyspec 将文档写入此路径
     # task-08（C1）：平台模式（spec_root 非空）跳过 init 步骤 ——
     # 平台模式文档写 spec-root，源码目录不需要 .sillyspec，否则触发 sillyspec
     # 源码保护"拒绝删除源码目录的 .sillyspec：检测到真实资产"。
@@ -472,8 +480,8 @@ async def build_scan_bundle(
     scan_start_cmd = (
         f"sillyspec run scan"
         f" --dir {root_path}"
-        f" --spec-root {spec_root}"
-        f" --runtime-root {runtime_root}"
+        f" --spec-root {host_spec_root}"
+        f" --runtime-root {host_runtime_root}"
         f" --workspace-id {ws_id}"
         f" --scan-run-id {run_id_str}"
     )
@@ -491,15 +499,15 @@ async def build_scan_bundle(
             f"```\n{scan_done_cmd}\n"
             f"```\n\n"
             f"## 执行流程\n"
-            f"1. 执行 scan 启动命令（包含全部平台参数，文档输出到 {spec_root}）\n"
+            f"1. 执行 scan 启动命令（包含全部平台参数，文档输出到 {host_spec_root}）\n"
             f"2. CLI 输出 step prompt → 执行扫描操作 → 用 done 命令推进\n"
             f"3. 重复 step 2 直到 10/10 步全部完成\n\n"
             f"## 规则\n"
             f"- --dir 必须指向源码目录 {root_path}（不是 spec_root）\n"
             f"- 对 {root_path} 目录中的源码只读，不要修改项目文件\n"
-            f"- 文档生成在 {spec_root}/ 下，源码目录保持只读，不会创建 .sillyspec/\n"
+            f"- 文档生成在 {host_spec_root}/ 下，源码目录保持只读，不会创建 .sillyspec/\n"
             f"- ⚠️ 平台模式禁止执行 sillyspec init（会在源码目录创建 .sillyspec 并触发源码保护）\n"
-            f"- 文档生成在 {spec_root}/.sillyspec/docs/ 目录下\n"
+            f"- 文档生成在 {host_spec_root}/.sillyspec/docs/ 目录下\n"
             f"- 启动 scan 命令必须包含 --spec-root/--runtime-root/--workspace-id/--scan-run-id\n"
             f"- done 命令不需要重复平台参数\n"
             f"- 每个步骤必须用 done 完成，不要跳过\n"
