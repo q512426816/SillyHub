@@ -47,3 +47,5 @@ created_at: 2026-06-20T15:35:00+0800
 - ql-20260622-016-3b9d | /project-plan GET 加 PsProjectPlanListReq 过滤(原 PageReq 丢过滤参数 → 前端过滤失效);service ilike+时间区间;前端 RangePicker onChange 选中即查
 - ql-20260622-017-4a1f | project-plans 表格 scroll.y:500 去掉(自适应高度);Table.Summary 移除 fixed="bottom"(无 y 时吸底无意义);已有分页每页≤20 不需要固定高度兜底
 - ql-20260622-018-9d2c | project-plans 表格 scroll.y 改 "calc(100vh - 300px)" 按视窗自适应(撤回 ql-017 误解);Table.Summary 恢复 fixed="bottom" 吸底
+- ql-20260622-019-5b6c | project-plans 表格高度预留 300→430px
+- ql-20260622-020-8c1a | /project-plan/export-excel 422 修复:FastAPI 路由按注册顺序匹配,字面量路径 export-excel 被 {item_id} 路径参数拦截当 UUID 解析失败 → 把 export 路由移到 {item_id} 之前

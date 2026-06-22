@@ -573,3 +573,12 @@ created_at: 2026-06-03T08:42:04
 方案:
   1. scroll.y 字符串 "calc(100vh - 300px)" → "calc(100vh - 430px)"
 结果：1）typecheck 通过；2）表格高度按 100vh-430px 自适应。Docker 重建 frontend 待后续。
+
+## ql-20260622-020-8c1a | 2026-06-22 13:50:00 | 修复 project-plan/export-excel 422 (路由顺序)
+状态：已完成
+文件：backend/app/modules/ppm/plan/router.py
+背景：用户点导出按钮报 422,错误显示 path.item_id 接到 "export-excel" 当成 UUID 解析失败。根因 FastAPI 路由按注册顺序匹配:router.py 行 314 `/project-plan/{item_id}` GET 注册在 行 659 `/project-plan/export-excel` GET 之前,export-excel 字面量路径被 {item_id} 路径参数路由拦截,把 "export-excel" 当作 item_id UUID 解析失败。
+方案:
+  1. 把 `/project-plan/export-excel` 路由(连同 _PROJECT_PLAN_COLUMNS 常量)从行 642-669 移到 `/project-plan/{item_id}` GET (行 314) 之前,保证字面量路径优先于路径参数匹配
+  2. 加注释警示后续不要重排
+结果：1）ruff format/check 通过；2）Python ast 解析通过；3）export-excel 不再被 {item_id} 拦截。Docker 重建 backend 待后续。

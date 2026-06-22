@@ -311,6 +311,38 @@ async def create_ps_project_plan(
     return PsProjectPlanResp.model_validate(obj)
 
 
+# P2-3:项目计划导出 (对照源 projectplan/index.vue handleExport)
+# ⚠ 必须放在 /project-plan/{item_id} 之前注册,否则字面量路径 export-excel
+#   会被 {item_id} 路径参数拦截当 UUID 解析失败 (422)。
+_PROJECT_PLAN_COLUMNS = [
+    ColumnDef(field="project_name", header="项目名称", width=24),
+    ColumnDef(field="project_manager_name", header="项目经理", width=16),
+    ColumnDef(field="contract_name", header="合同名称", width=24),
+    ColumnDef(field="contract_amount", header="合同金额", width=16),
+    ColumnDef(field="profit_margin", header="公司既定利润率(%)", width=16),
+    ColumnDef(field="profit_amount", header="公司既定利润金额", width=16),
+    ColumnDef(field="remaining_available_person_days", header="剩余可用人天", width=14),
+    ColumnDef(field="total_cost", header="总成本", width=14),
+    ColumnDef(field="remaining_cost", header="剩余成本", width=14),
+    ColumnDef(field="contract_sign_time", header="合同签订时间", width=20),
+    ColumnDef(field="project_start_time", header="项目开始时间", width=20),
+    ColumnDef(field="project_plan_end_time", header="预计验收时间", width=20),
+]
+
+
+@router.get("/project-plan/export-excel")
+async def export_project_plans(
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_EXPORT))],
+) -> Any:
+    """导出项目计划为 Excel (P2-3, X-002)。"""
+    rows = await PlanService(session).list_ps_project_plans_for_export()
+    columns = _PROJECT_PLAN_COLUMNS
+    return await anyio.to_thread.run_sync(
+        lambda: _build_excel_response(columns, rows, "项目计划", filename="project_plans.xlsx")
+    )
+
+
 @router.get("/project-plan/{item_id}", response_model=PsProjectPlanResp)
 async def get_ps_project_plan(
     item_id: uuid.UUID,
@@ -636,36 +668,6 @@ async def export_plan_nodes(
     # openpyxl 序列化丢线程池,X-002
     return await anyio.to_thread.run_sync(
         lambda: _build_excel_response(columns, rows, "计划节点模板")
-    )
-
-
-# P2-3:项目计划导出 (对照源 projectplan/index.vue handleExport)
-_PROJECT_PLAN_COLUMNS = [
-    ColumnDef(field="project_name", header="项目名称", width=24),
-    ColumnDef(field="project_manager_name", header="项目经理", width=16),
-    ColumnDef(field="contract_name", header="合同名称", width=24),
-    ColumnDef(field="contract_amount", header="合同金额", width=16),
-    ColumnDef(field="profit_margin", header="公司既定利润率(%)", width=16),
-    ColumnDef(field="profit_amount", header="公司既定利润金额", width=16),
-    ColumnDef(field="remaining_available_person_days", header="剩余可用人天", width=14),
-    ColumnDef(field="total_cost", header="总成本", width=14),
-    ColumnDef(field="remaining_cost", header="剩余成本", width=14),
-    ColumnDef(field="contract_sign_time", header="合同签订时间", width=20),
-    ColumnDef(field="project_start_time", header="项目开始时间", width=20),
-    ColumnDef(field="project_plan_end_time", header="预计验收时间", width=20),
-]
-
-
-@router.get("/project-plan/export-excel")
-async def export_project_plans(
-    session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_EXPORT))],
-) -> Any:
-    """导出项目计划为 Excel (P2-3, X-002)。"""
-    rows = await PlanService(session).list_ps_project_plans_for_export()
-    columns = _PROJECT_PLAN_COLUMNS
-    return await anyio.to_thread.run_sync(
-        lambda: _build_excel_response(columns, rows, "项目计划", filename="project_plans.xlsx")
     )
 
 
