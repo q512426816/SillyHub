@@ -187,6 +187,33 @@ class PsProjectPlanUpdate(PydanticModel):
     create_name: str | None = None
 
 
+class PsProjectPlanListReq(PageQuery):
+    """项目计划列表查询请求 (PageQuery + 过滤)。
+
+    字符串字段 (project_name/contract_name/company_name) 走 ilike 模糊匹配;
+    时间字段 (contract_sign_time/project_start_time/project_plan_end_time)
+    各有 _start/_end 闭区间过滤;全部可选,缺省不过滤。
+    对齐前端 /ppm/project-plans 顶部搜索表单。
+
+    补 ``offset`` property 以兼容 common.crud.apply_pagination(原本只在
+    dataclass PageReq 上定义,Pydantic PageQuery 没有)。
+    """
+
+    project_name: str | None = None
+    contract_name: str | None = None
+    company_name: str | None = None
+    contract_sign_time_start: datetime | None = None
+    contract_sign_time_end: datetime | None = None
+    project_start_time_start: datetime | None = None
+    project_start_time_end: datetime | None = None
+    project_plan_end_time_start: datetime | None = None
+    project_plan_end_time_end: datetime | None = None
+
+    @property
+    def offset(self) -> int:
+        return (self.page - 1) * self.page_size
+
+
 class PsProjectPlanResp(PsProjectPlanBase):
     id: uuid.UUID
     created_at: datetime
@@ -422,6 +449,7 @@ __all__ = [
     "PsPlanNodeWithDetail",
     "PsProjectPlanBase",
     "PsProjectPlanCreate",
+    "PsProjectPlanListReq",
     "PsProjectPlanResp",
     "PsProjectPlanUpdate",
     "SubmitDetailReq",

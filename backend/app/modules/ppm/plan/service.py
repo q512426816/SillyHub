@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -54,6 +54,7 @@ from app.modules.ppm.plan.schema import (
     ProjectPlanThreeLevelResp,
     PsPlanNodeDetailWithTasks,
     PsPlanNodeWithDetail,
+    PsProjectPlanListReq,
 )
 from app.modules.ppm.task.model import PlanTask
 
@@ -275,9 +276,41 @@ class PlanService:
         await _Crud(self._session, PlanNodeModule).delete(item_id)
 
     # ---------- ps 项目计划 CRUD ----------
-    async def list_ps_project_plans(self, req: PageReq) -> Page[PsProjectPlan]:
+    async def list_ps_project_plans(self, req: PsProjectPlanListReq) -> Page[PsProjectPlan]:
+        # 过滤条件:字符串字段 ilike 模糊匹配,时间字段闭区间 [start, end_next_day)。
+        # 前端传 YYYY-MM-DD → datetime 是 00:00:00;end 加 1 天用 < 比较保证含当日。
+        where_clauses: list[Any] = []
+        if req.project_name:
+            where_clauses.append(PsProjectPlan.project_name.ilike(f"%{req.project_name}%"))
+        if req.contract_name:
+            where_clauses.append(PsProjectPlan.contract_name.ilike(f"%{req.contract_name}%"))
+        if req.company_name:
+            where_clauses.append(PsProjectPlan.company_name.ilike(f"%{req.company_name}%"))
+        if req.contract_sign_time_start:
+            where_clauses.append(PsProjectPlan.contract_sign_time >= req.contract_sign_time_start)
+        if req.contract_sign_time_end:
+            where_clauses.append(
+                PsProjectPlan.contract_sign_time < req.contract_sign_time_end + timedelta(days=1)
+            )
+        if req.project_start_time_start:
+            where_clauses.append(PsProjectPlan.project_start_time >= req.project_start_time_start)
+        if req.project_start_time_end:
+            where_clauses.append(
+                PsProjectPlan.project_start_time < req.project_start_time_end + timedelta(days=1)
+            )
+        if req.project_plan_end_time_start:
+            where_clauses.append(
+                PsProjectPlan.project_plan_end_time >= req.project_plan_end_time_start
+            )
+        if req.project_plan_end_time_end:
+            where_clauses.append(
+                PsProjectPlan.project_plan_end_time
+                < req.project_plan_end_time_end + timedelta(days=1)
+            )
         return await _Crud(self._session, PsProjectPlan).list_paged(
-            req=req, allowed_sort={"created_at", "project_name", "status"}
+            req=req,
+            allowed_sort={"created_at", "project_name", "status"},
+            where_clauses=where_clauses,
         )
 
     async def create_ps_project_plan(self, data: dict[str, Any]) -> PsProjectPlan:

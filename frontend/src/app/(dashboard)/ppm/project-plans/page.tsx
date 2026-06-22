@@ -539,19 +539,31 @@ export default function ProjectPlansPage() {
           </Field>
           <Field label="合同签订时间">
             <Form.Item name="contractSignTimeRange" noStyle>
-              <RangePicker allowClear={false} className="w-full" />
+              <RangePicker
+                allowClear={false}
+                className="w-full"
+                onChange={() => setTimeout(() => handleSearch(), 0)}
+              />
             </Form.Item>
           </Field>
           {expanded && (
             <>
               <Field label="项目开始时间">
                 <Form.Item name="projectStartTimeRange" noStyle>
-                  <RangePicker allowClear={false} className="w-full" />
+                  <RangePicker
+                    allowClear={false}
+                    className="w-full"
+                    onChange={() => setTimeout(() => handleSearch(), 0)}
+                  />
                 </Form.Item>
               </Field>
               <Field label="预计验收时间">
                 <Form.Item name="projectPlanEndTimeRange" noStyle>
-                  <RangePicker allowClear={false} className="w-full" />
+                  <RangePicker
+                    allowClear={false}
+                    className="w-full"
+                    onChange={() => setTimeout(() => handleSearch(), 0)}
+                  />
                 </Form.Item>
               </Field>
             </>

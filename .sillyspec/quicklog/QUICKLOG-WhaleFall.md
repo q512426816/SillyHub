@@ -534,3 +534,14 @@ created_at: 2026-06-03T08:42:04
   2. pageSizeOptions ["10","20","50","100"] 不变（20 已在列）
   3. antd Tree 改受控:新增 allTreeKeys useMemo(["all", "manager:..."])，传 expandedKeys 强制全展开（移除 defaultExpandAll）
 结果：1）typecheck 通过；2）329/329 vitest 全过；3）默认进页面拉 20 条/页，左侧 manager 树加载后自动展开。Docker 重建 frontend 待后续。
+
+## ql-20260622-016-3b9d | 2026-06-22 13:14:00 | project-plans 查询过滤生效 + RangePicker 选中即查
+状态：已完成
+文件：backend/app/modules/ppm/plan/router.py、backend/app/modules/ppm/plan/service.py、backend/app/modules/ppm/plan/schema.py、frontend/src/app/(dashboard)/ppm/project-plans/page.tsx
+背景：用户反馈两点：1) 非输入框的查询条件（合同签订时间、项目开始时间、预计验收时间 三个 RangePicker）选中后应自动触发查询，不应等用户点搜索按钮；2) 目前查询条件完全没生效。排查根因：后端 list_ps_project_plans 只接收 PageReq（page/page_size/order_by/order），完全不处理前端的 project_name/contract_name/company_name/时间范围参数 —— 前端传了被丢弃，等于没生效。
+方案：
+  1. 后端 schema 新增 PsProjectPlanListReq(继承 PageQuery),9 个可选过滤字段:project_name/contract_name/company_name + 6 个时间区间(开始/结束 × 3 个时间字段)
+  2. 后端 router 新增 _project_plan_list_req dep(Query 解析 datetime),用 ProjectPlanListReqDep 替代 PageReqDep
+  3. 后端 service list_ps_project_plans 接收 PsProjectPlanListReq,字符串字段 ilike 模糊匹配,时间字段用 [start, end+1day) 半开区间(前端传 YYYY-MM-DD → 当日 00:00,end 加一天保证含当日)
+  4. 前端 3 个 RangePicker 加 onChange → setTimeout 0 调 handleSearch(antd Form 在 onChange 触发时已 commit form value,setTimeout 0 保证下一 tick 拿到新值)
+结果：1）typecheck 通过；2）329/329 vitest 全过；3）后端语法检查通过(本地 Python 3.11 不支持 PEP 695 泛型 _Crud[T] 是误报,容器 3.13 OK)。Docker 重建前后端待后续。

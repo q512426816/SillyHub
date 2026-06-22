@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Annotated, Any
 
 import anyio
@@ -49,6 +50,7 @@ from app.modules.ppm.plan.schema import (
     PsPlanNodeResp,
     PsPlanNodeUpdate,
     PsProjectPlanCreate,
+    PsProjectPlanListReq,
     PsProjectPlanResp,
     PsProjectPlanUpdate,
     SubmitDetailReq,
@@ -71,6 +73,41 @@ def _req(
 
 
 PageReqDep = Annotated[PageReq, Depends(_req)]
+
+
+def _project_plan_list_req(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    order_by: str | None = Query(None),
+    order: str = Query("desc"),
+    project_name: str | None = Query(None),
+    contract_name: str | None = Query(None),
+    company_name: str | None = Query(None),
+    contract_sign_time_start: datetime | None = Query(None),
+    contract_sign_time_end: datetime | None = Query(None),
+    project_start_time_start: datetime | None = Query(None),
+    project_start_time_end: datetime | None = Query(None),
+    project_plan_end_time_start: datetime | None = Query(None),
+    project_plan_end_time_end: datetime | None = Query(None),
+) -> PsProjectPlanListReq:
+    return PsProjectPlanListReq(
+        page=page,
+        page_size=page_size,
+        order_by=order_by,
+        order=order,
+        project_name=project_name,
+        contract_name=contract_name,
+        company_name=company_name,
+        contract_sign_time_start=contract_sign_time_start,
+        contract_sign_time_end=contract_sign_time_end,
+        project_start_time_start=project_start_time_start,
+        project_start_time_end=project_start_time_end,
+        project_plan_end_time_start=project_plan_end_time_start,
+        project_plan_end_time_end=project_plan_end_time_end,
+    )
+
+
+ProjectPlanListReqDep = Annotated[PsProjectPlanListReq, Depends(_project_plan_list_req)]
 
 
 def _actor(user: User) -> tuple[str, str | None]:
@@ -247,7 +284,7 @@ async def delete_module(
 async def list_ps_project_plans(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission_any(Permission.PPM_PLAN_READ))],
-    req: PageReqDep,
+    req: ProjectPlanListReqDep,
 ) -> Page[PsProjectPlanResp]:
     page = await PlanService(session).list_ps_project_plans(req)
     return Page[PsProjectPlanResp](
