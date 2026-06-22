@@ -78,6 +78,9 @@ export default function ProblemListPage() {
   const [error, setError] = useState<string | null>(null);
 
   // 搜索栏(对照源 queryParams,本仓后端仅支持分页,复杂字段本地过滤)
+  // keywordInput 仅受控输入框显示值,输入过程不触发过滤;
+  // 按 Enter 或点击"查询"按钮时同步到 keyword(实际过滤用)。
+  const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [statusFilter, setStatusFilter] = useState<string[]>([
     "1",
@@ -174,12 +177,17 @@ export default function ProblemListPage() {
   };
 
   const resetFilters = () => {
+    setKeywordInput("");
     setKeyword("");
     setStatusFilter(["1", "2", "3", "6"]);
     setProjectFilter(null);
     setProTypeFilter("");
     setIsUrgentFilter("");
     setDateRange(null);
+  };
+
+  const commitKeyword = () => {
+    setKeyword(keywordInput);
   };
 
   const openDrawer = (
@@ -394,8 +402,11 @@ export default function ProblemListPage() {
       />
 
       <SectionCard bodyPadding="p-2">
-        {/* 顶部按钮行:右对齐(重置 | 分隔 | 导出 / 新建) */}
+        {/* 顶部按钮行:右对齐(查询 | 重置 | 分隔 | 导出 / 新建) */}
         <div className="mb-2 flex items-center justify-end gap-2">
+          <Button size="sm" variant="outline" onClick={commitKeyword}>
+            查询
+          </Button>
           <Button size="sm" variant="outline" onClick={resetFilters}>
             重置
           </Button>
@@ -418,9 +429,15 @@ export default function ProblemListPage() {
           <Field label="关键字">
             <Input
               allowClear
-              placeholder="项目/模块/描述/功能/责任人/发现人"
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
+              placeholder="项目/模块/描述/功能/责任人/发现人(回车查询)"
+              value={keywordInput}
+              onChange={(e) => {
+                const v = e.target.value;
+                setKeywordInput(v);
+                // allowClear 点 x 清空时立即同步(显式清空动作 ≠ 输入过程)
+                if (!v) setKeyword("");
+              }}
+              onPressEnter={commitKeyword}
             />
           </Field>
           <Field label="状态">

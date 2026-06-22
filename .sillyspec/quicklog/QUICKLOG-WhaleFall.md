@@ -666,3 +666,20 @@ created_at: 2026-06-03T08:42:04
   - antd Button 全部替换为本仓 ui Button(size="sm" + variant)
   - 移除未使用的 expanded state
   - typecheck 通过,363/363 测试通过
+
+## ql-20260622-029-a1b7 | 2026-06-22 15:30:55 | problem-list 关键字输入不要自动查询
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/problem-list/page.tsx
+背景：problem-list 顶部关键字 Input onChange 直接改 keyword state,而 keyword 实时参与 useMemo filtered 过滤,导致输入即过滤。用户要求输入时不要自动查询。
+方案:
+  1. 拆分两个 state:keywordInput(输入框受控值)/ keyword(实际过滤用)
+  2. Input onChange 只改 keywordInput,不影响 filtered
+  3. Input onPressEnter / 添加"查询"按钮 把 keywordInput 同步到 keyword
+  4. 重置按钮同时清空 keywordInput 和 keyword
+结果：
+  - 拆分 keywordInput / keyword 两个 state
+  - Input onChange 仅改 keywordInput;onPressEnter 或点击"查询"按钮同步到 keyword 触发过滤
+  - allowClear 点 x 清空时立即同步到 keyword(显式清空 ≠ 输入过程)
+  - 顶部按钮行新增"查询"按钮(位于"重置"左侧)
+  - 重置按钮同时清空 keywordInput 和 keyword
+  - typecheck 通过,363/363 测试通过
