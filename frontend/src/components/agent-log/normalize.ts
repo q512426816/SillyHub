@@ -181,12 +181,43 @@ function extractToolResultBody(content: string): string {
   return bodyLines.join("\n").trim();
 }
 
-function mergeToolResult(target: ProcessedLog, body: string) {
+/** ql-20260622-003 / P1-2：两 log 时间戳毫秒差（end−start，负数归 0）。无效/缺失返回 undefined。 */
+function diffLogMs(startLog: AgentRunLogEntry, endLog: AgentRunLogEntry): number | undefined {
+  const startIso = startLog.timestamp;
+  const endIso = endLog.timestamp;
+  if (!startIso || !endIso) return undefined;
+  const start = new Date(startIso).getTime();
+  const end = new Date(endIso).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end)) return undefined;
+  return Math.max(0, end - start);
+}
+
+/**
+ * 合并 [TOOL_RESULT] body 到 tool 卡片，并预算 toolDurationMs。
+ *
+ * ql-20260622-003 / P1-2：耗时计算从 render 期（AgentLogRow.computeToolDurationMs 回查
+ * allLogs，N×M）迁移至此。tool_use_id / tool 名 + 窗口配对已由主循环完成，sourceLog 是
+ * 被合并的 result stdout log。守卫：
+ * - sourceLog 非自身（[TOOL_USE]+[TOOL_RESULT] 同条 stdout 自合并保持 undefined，
+ *   与原「找后续 result」行为一致）
+ * - 首次设置（同卡多 result 取首条，对齐原「首条 result」语义）
+ * - 仅 tool 卡片（channel=tool_call 或 parsedStdoutTool）
+ */
+function mergeToolResult(target: ProcessedLog, body: string, sourceLog?: AgentRunLogEntry) {
   if (!body) return;
   if (target.mergedToolResult) {
     target.mergedToolResult += "\n" + body;
   } else {
     target.mergedToolResult = body;
+  }
+  if (
+    sourceLog &&
+    sourceLog !== target.log &&
+    target.toolDurationMs === undefined &&
+    (target.log.channel === "tool_call" || target.parsedStdoutTool != null)
+  ) {
+    const duration = diffLogMs(target.log, sourceLog);
+    if (duration !== undefined) target.toolDurationMs = duration;
   }
 }
 
@@ -253,7 +284,7 @@ export function mergeAssistantPiece(prev: string, piece: string): string {
  * 归并规则（参照 mergeAssistantPiece:208-237，对 thinking 做同样防御）：
  * 1. piece === prev → 返回 prev（完全相同去重）
  * 2. piece.startsWith(prev) 且 piece 明显更长（完整段重发，D2 场景）→ 返回 piece。
- *    "明显更长"判定：piece 长度 > prev 长度，且 piece 含换行或去空白后多出 ≥ 4 字符，
+ *    "明显更长"判定：piece 长度 > prev 长度，且 piece 含换行或去空白后多出 ≥ 8 字符，
  *    避免把短 delta（如 "实质" vs "实质2"）误判为前缀包含去重。
  * 3. prev.startsWith(piece) 且 prev 明显更长 → 返回 prev（对称场景）
  * 4. 其余按原序拼接（保留现有 delta 累积行为，ql-20260617-011）
@@ -266,7 +297,7 @@ export function mergeThinkingPiece(prev: string, piece: string): string {
   if (!prev) return piece;
   if (!piece) return prev;
   if (piece === prev) return prev;
-  // "明显更长"判定：piece 比 prev 长，且额外内容含换行或去空白后多出 ≥ 4 字符。
+  // "明显更长"判定：piece 比 prev 长，且额外内容含换行或去空白后多出 ≥ 8 字符。
   // 短 delta（"实质" vs "实质2"差 1 字符）不触发，保留直接拼接。
   const looksLikeFullSegment = (longer: string, shorter: string): boolean => {
     if (longer.length <= shorter.length) return false;
@@ -481,7 +512,7 @@ function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
             if (parsedTc?.toolUseId) tc.toolUseId = parsedTc.toolUseId;
           }
           if (hasToolResult) {
-            mergeToolResult(tc, extractToolResultBody(content));
+            mergeToolResult(tc, extractToolResultBody(content), current.log);
           }
         }
         current.hidden = true;
@@ -499,7 +530,7 @@ function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
         if (hasToolResult) {
           const body = extractToolResultBody(content);
           const tc = result[lastToolSourceIdx];
-          if (tc) mergeToolResult(tc, body);
+          if (tc) mergeToolResult(tc, body, current.log);
         }
         current.hidden = true;
         continue;
@@ -509,7 +540,7 @@ function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
         current.parsedStdoutTool = parsedStdout;
         lastToolSourceIdx = i;
         if (hasToolResult) {
-          mergeToolResult(current, extractToolResultBody(content));
+          mergeToolResult(current, extractToolResultBody(content), current.log);
         }
         continue;
       }
@@ -522,7 +553,7 @@ function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
       if (lastToolSourceIdx >= 0) {
         // Merge into previous tool source
         const tc = result[lastToolSourceIdx];
-        if (tc) mergeToolResult(tc, body);
+        if (tc) mergeToolResult(tc, body, current.log);
         current.hidden = true;
       } else {
         // Orphan TOOL_RESULT — standalone rendering

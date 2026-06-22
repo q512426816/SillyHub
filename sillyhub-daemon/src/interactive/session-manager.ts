@@ -1376,9 +1376,14 @@ export class SessionManager {
     state: SessionState,
     buf: PartialFlushBuffer,
     blockIndex: number | undefined,
-    messageIdHint?: string,
   ): string {
-    const mid = messageIdHint ?? buf.currentMessageId;
+    // P1 修复：messageId 单一数据源 = buf.currentMessageId（由 message_start 事件
+    // event.message.id 设置）。真实 SDK 的 content_block_delta 事件自身不带
+    // message.id（SDKPartialAssistantMessage 也没有顶层 message 字段），旧实现的
+    // 「从 delta 顶层读 message.id 作 hint」永远拿到 undefined，形同虚设；保留它
+    // 反而掩盖了「currentMessageId 被 _clearPartialBufferSync 清空 → late delta
+    // 退化为 runId:thinking」的真问题。故移除 hint，只信 currentMessageId。
+    const mid = buf.currentMessageId;
     const idx = typeof blockIndex === 'number' ? String(blockIndex) : 'thinking';
     if (mid) {
       return `${mid}:${idx}`;
@@ -1468,19 +1473,20 @@ export class SessionManager {
         if (ev.type === 'content_block_delta' && ev.delta) {
           const delta = ev.delta;
           if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
-            // task-11（边界 5，late partial 守卫）：完整 message 已覆盖该 segment
-            // → 后到的 partial 直接丢弃（网络重排，罕见）。不累积、不重启 timer。
-            // messageIdHint 从当前 msg 顶层提取（late partial 场景 buf.currentMessageId
-            // 可能已被 _clearPartialBuffer 重置，但 late delta 仍带 message.id）。
-            const msgMid = (msg as { message?: { id?: string } }).message?.id;
-            const midHint =
-              typeof msgMid === 'string' && msgMid ? msgMid : undefined;
-            const segId = this._resolveSegmentId(
-              state,
-              buf,
-              ev.index,
-              midHint,
-            );
+            // task-11（边界 5，late partial 守卫）+ P1 修复：完整 message 已覆盖
+            // 该 segment → 后到的 partial 直接丢弃（网络重排，罕见）。不累积、
+            // 不重启 timer。
+            //
+            // segmentId 复用 buf.currentMessageId（由 message_start 的
+            // event.message.id 设置）。真实 SDK 的 content_block_delta 事件自身
+            // 不带 message.id（SDKPartialAssistantMessage 也没有顶层 message 字段）
+            // ——旧实现读 msg.message?.id 永远是 undefined，且 _clearPartialBufferSync
+            // 把 currentMessageId 清成 null，导致 late delta 退化为 runId:thinking，
+            // 与 completedSegments 里的 messageId:index 对不上 → 守卫失效，late
+            // partial 被放行。现状：_clearPartialBufferSync 不再清 currentMessageId
+            //（完整 message 与 message_start 共享同一 id，下一条 message_start 自然
+            // 覆盖），late delta 解析出与原 partial 相同的 segmentId → 守卫正确拦截。
+            const segId = this._resolveSegmentId(state, buf, ev.index);
             if (buf.completedSegments.has(segId)) {
               return;
             }
@@ -1626,7 +1632,11 @@ export class SessionManager {
     // 守卫需在本 turn 内持续生效；turn 真正结束由 _onResult 收尾时清。
     buf.flushedSegments = [];
     buf.currentSegmentId = null;
-    buf.currentMessageId = null;
+    // P1 修复：保留 currentMessageId。完整 assistant message 与 message_start
+    // 共享同一 message.id，late partial delta（content_block_delta 自身不带 id）
+    // 必须据此解析 segmentId 才能与 completedSegments 对齐 → 守卫才能拦截。
+    // 下一条 message_start 会自然覆盖；在此清空会让 late delta 退化为
+    // runId:thinking → 守卫失效。
   }
 
   /**

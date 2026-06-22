@@ -70,11 +70,18 @@ function makeManager(): {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const priv = (sm: SessionManager): any => sm as any;
 
-/** 构造 content_block_delta(thinking_delta) stream_event。 */
+/**
+ * 构造 content_block_delta(thinking_delta) stream_event。
+ *
+ * P1 修复：按真实 SDK 形状构造——SDKPartialAssistantMessage（type='stream_event'）
+ * 没有「顶层 message 字段」，content_block_delta 事件自身也不带 message.id。
+ * message.id 由前序 message_start 事件的 event.message.id 提供（见 messageStart），
+ * _bufferPartial 据此写入 buf.currentMessageId，thinking_delta 解析 segmentId 时复用。
+ * 旧 helper 凭空加顶层 message:{id} 让真实场景失效的守卫在测试里假绿，已移除。
+ */
 function thinkingDelta(
   index: number,
   text: string,
-  messageId = 'msg-abc',
 ): Record<string, unknown> {
   return {
     type: 'stream_event',
@@ -83,7 +90,6 @@ function thinkingDelta(
       index,
       delta: { type: 'thinking_delta', thinking: text },
     },
-    message: { id: messageId },
   };
 }
 
@@ -122,6 +128,47 @@ function assistantMessage(
   };
 }
 
+/**
+ * P1 回归用：构造「全量真实 SDK 形状」的 SDKPartialAssistantMessage。
+ *
+ * 与 messageStart/blockStart/thinkingDelta 的最小构造不同——这里带上真实 SDK 必有
+ * 的 parent_tool_use_id / uuid / session_id 字段（@anthropic-ai/claude-agent-sdk
+ * sdk.d.ts:3720），且 event 内 message.id 只出现在 message_start 的 event.message
+ * 里，content_block_delta 的 event 自身绝无 message.id。用最忠实的形状跑 late
+ * partial 守卫，确保修复不依赖任何最小 helper 的「巧合」。
+ */
+let sdkPartialUuidSeq = 0;
+function sdkPartial(event: Record<string, unknown>): Record<string, unknown> {
+  return {
+    type: 'stream_event',
+    event,
+    parent_tool_use_id: null,
+    uuid: `real-uuid-${++sdkPartialUuidSeq}`,
+    session_id: SID,
+  };
+}
+
+/** P1 回归用：全量真实 SDK 形状的 SDKAssistantMessage（含 uuid/session_id）。 */
+function sdkAssistantMessage(
+  messageId: string,
+  thinkingBlocks: Array<{ index: number; text: string }>,
+): Record<string, unknown> {
+  const content: Array<Record<string, unknown>> = [];
+  for (const b of thinkingBlocks) {
+    content[b.index] = { type: 'thinking', thinking: b.text };
+  }
+  for (let i = 0; i < content.length; i++) {
+    if (!content[i]) content[i] = { type: 'text', text: '' };
+  }
+  return {
+    type: 'assistant',
+    message: { id: messageId, role: 'assistant', content },
+    parent_tool_use_id: null,
+    uuid: `asst-uuid-${++sdkPartialUuidSeq}`,
+    session_id: SID,
+  };
+}
+
 // ── 测试用例 ────────────────────────────────────────────────────────────────
 
 describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
@@ -139,7 +186,7 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     p._onMessage(state, blockStart(0));
     // thinking_delta 累积（>80 字符触发 flush 阈值——但 _bufferPartial 只启动 timer，
     // flush 由 _flushPartial 触发；此处手动 flush 立即验证 metadata）。
-    p._onMessage(state, thinkingDelta(0, 'x'.repeat(90), 'msg-abc'));
+    p._onMessage(state, thinkingDelta(0, 'x'.repeat(90)));
 
     // 手动 flush（绕过 timer 等待）。
     await p._flushPartial(SID);
@@ -162,7 +209,7 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     // 1. partial flush 一条 thinking（segmentId = msg-abc:0）。
     p._onMessage(state, messageStart('msg-abc'));
     p._onMessage(state, blockStart(0));
-    p._onMessage(state, thinkingDelta(0, 'x'.repeat(90), 'msg-abc'));
+    p._onMessage(state, thinkingDelta(0, 'x'.repeat(90)));
     await p._flushPartial(SID);
     expect(onTurnMessage).toHaveBeenCalledTimes(1);
 
@@ -201,10 +248,10 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     p._onMessage(state, messageStart('msg-multi'));
     // 两个 thinking block：index=0 和 index=2（中间夹 tool_use 用 index=1）。
     p._onMessage(state, blockStart(0));
-    p._onMessage(state, thinkingDelta(0, 'x'.repeat(90), 'msg-multi'));
+    p._onMessage(state, thinkingDelta(0, 'x'.repeat(90)));
     await p._flushPartial(SID);
     p._onMessage(state, blockStart(2));
-    p._onMessage(state, thinkingDelta(2, 'y'.repeat(90), 'msg-multi'));
+    p._onMessage(state, thinkingDelta(2, 'y'.repeat(90)));
     await p._flushPartial(SID);
 
     // 完整 message 含两个 thinking block。
@@ -240,7 +287,7 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     // 1. 先 flush 一条 partial（segmentId = msg-late:0）。
     p._onMessage(state, messageStart('msg-late'));
     p._onMessage(state, blockStart(0));
-    p._onMessage(state, thinkingDelta(0, 'x'.repeat(90), 'msg-late'));
+    p._onMessage(state, thinkingDelta(0, 'x'.repeat(90)));
     await p._flushPartial(SID);
 
     // 2. 完整 message 到达（标记 completedSegments）。
@@ -252,7 +299,7 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     const callsBefore = onTurnMessage.mock.calls.length;
 
     // 3. 网络重排：late thinking_delta 到达（同 segmentId）。
-    p._onMessage(state, thinkingDelta(0, '迟到的增量', 'msg-late'));
+    p._onMessage(state, thinkingDelta(0, '迟到的增量'));
     await p._flushPartial(SID);
 
     // late partial 被丢弃，没有新 emit（只可能有残留 timer 空 flush no-op）。
@@ -324,7 +371,7 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
 
     p._onMessage(state, messageStart('msg-reset'));
     p._onMessage(state, blockStart(0));
-    p._onMessage(state, thinkingDelta(0, 'x'.repeat(90), 'msg-reset'));
+    p._onMessage(state, thinkingDelta(0, 'x'.repeat(90)));
     await p._flushPartial(SID);
     await p._onMessage(
       state,
@@ -352,7 +399,7 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     // partial 累积但未 flush。
     p._onMessage(state, messageStart('msg-orig'));
     p._onMessage(state, blockStart(0));
-    p._onMessage(state, thinkingDelta(0, '未flush的增量', 'msg-orig'));
+    p._onMessage(state, thinkingDelta(0, '未flush的增量'));
     const callsBefore = onTurnMessage.mock.calls.length;
 
     // 完整 message 到达，但 buffer 里只有未 flush 的内容（flushedSegments 为空）。

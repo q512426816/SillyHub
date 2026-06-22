@@ -11,7 +11,7 @@ import {
   Send,
   Wrench,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ErrorBoundary } from "@/components/error-boundary";
 import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
@@ -167,45 +167,6 @@ export function groupIntoTurns(logs: ProcessedLog[]): ProcessedLog[][] {
 }
 
 /**
- * task-15 / FR-10：计算 tool 卡片耗时（tool_use→tool_result 时间戳差）。
- *
- * 耗时来源（task-15 实现要求 §3）：
- * - tool_use 卡片的 ProcessedLog.mergedToolResult 由 normalize 从后续 [TOOL_RESULT] stdout 合并而来
- * - 但 result 的时间戳不在 mergedToolResult（只是 body 文本），需在 allLogs 中回查
- * - 策略：找 tool 卡片之后首条 channel=stdout 且含 [TOOL_RESULT] 的 log，取其 timestamp
- *
- * 退化（task-15 边界 8）：result 缺失（tool 进行中）或 timestamp 解析失败 → 返回 undefined，
- * StatusBadge 只显示状态图标不显示秒数。
- */
-function computeToolDurationMs(
-  processedLog: ProcessedLog,
-  allLogs: ProcessedLog[],
-): number | undefined {
-  const startIso = processedLog.log.timestamp;
-  if (!startIso) return undefined;
-  const startTime = new Date(startIso).getTime();
-  if (Number.isNaN(startTime)) return undefined;
-  const startIdx = allLogs.indexOf(processedLog);
-  const searchStart = startIdx >= 0 ? startIdx + 1 : 0;
-  for (let i = searchStart; i < allLogs.length; i++) {
-    const candidate = allLogs[i];
-    if (!candidate) continue;
-    // task-15：hidden=true 的 log（如被 normalize 合并到 tool 卡片的 [TOOL_RESULT] stdout）
-    // 仍提供时间戳——hidden 只控制渲染，不影响耗时计算。
-    if (candidate.log.channel !== "stdout") continue;
-    const content = asString(candidate.log.content_redacted);
-    if (/\[TOOL_RESULT\]/.test(content)) {
-      const endIso = candidate.log.timestamp;
-      if (!endIso) return undefined;
-      const endTime = new Date(endIso).getTime();
-      if (Number.isNaN(endTime)) return undefined;
-      return Math.max(0, endTime - startTime);
-    }
-  }
-  return undefined;
-}
-
-/**
  * task-15 / FR-10：thinking 折叠摘要（单行截断）。
  *
  * 参照 prototype:66 `.thinking-summary` 的 `text-overflow: ellipsis`：折叠态只展示
@@ -315,7 +276,9 @@ export function AgentLogRow({
   // task-15 / FR-10：tool 卡片耗时（tool_use→result 时间戳差）。
   // 仅 tool_call / parsedStdoutTool 卡片计算，其他 channel 不需要。
   const isToolCard = Boolean(toolCall || processedLog.parsedStdoutTool);
-  const toolDurationMs = isToolCard ? computeToolDurationMs(processedLog, allLogs) : undefined;
+  // ql-20260622-003 / P1-2：耗时由 normalize 阶段预算（见 normalize.ts mergeToolResult），
+  // render 直接读 processedLog.toolDurationMs，去掉 render 期 allLogs 回查（原 N×M）。
+  const toolDurationMs = isToolCard ? processedLog.toolDurationMs : undefined;
 
   return (
     <div
@@ -606,14 +569,20 @@ export function AgentLogViewer({
   const [fullscreen, setFullscreen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
 
-  // Normalize raw logs → ProcessedLog[]
-  const processedLogs = normalizeLogs(logs ?? []);
-
-  // Apply channel filter to normalized (non-hidden) entries
-  const visibleLogs = processedLogs.filter((p) => !p.hidden);
-  const filteredLogs = activeFilters.size > 0
-    ? visibleLogs.filter((p) => activeFilters.has(p.log.channel))
-    : visibleLogs;
+  // ql-20260622-003 / P1-1：normalize + 过滤 + turn 分组全部 memo，依赖 logs 引用 /
+  // activeFilters，避免大日志列表每次 render 全量重算（normalize O(N)、turn 分组 O(N)）。
+  const processedLogs = useMemo(() => normalizeLogs(logs ?? []), [logs]);
+  const visibleLogs = useMemo(
+    () => processedLogs.filter((p) => !p.hidden),
+    [processedLogs],
+  );
+  const filteredLogs = useMemo(
+    () => activeFilters.size > 0
+      ? visibleLogs.filter((p) => activeFilters.has(p.log.channel))
+      : visibleLogs,
+    [visibleLogs, activeFilters],
+  );
+  const turns = useMemo(() => groupIntoTurns(filteredLogs), [filteredLogs]);
 
   // ql-20260621：审批卡片随 ASK 通道展示——无过滤或 ASK(pending_input) 过滤时可见。
   // 卡片是阻塞 agent 的紧急人审，单卡交互由 PermissionApprovalCard 自洽
@@ -774,7 +743,7 @@ export function AgentLogViewer({
             )}
             {filteredLogs.length > 0 && (
               <div className="min-w-0 max-w-full space-y-2 p-2">
-                {groupIntoTurns(filteredLogs).map((turnLogs, turnIdx) => (
+                {turns.map((turnLogs, turnIdx) => (
                   // task-15 / FR-10：turn 分组渲染——单 turn 渲染失败不影响其他 turn
                   // （ErrorBoundary 双层隔离：外层 turn 级，内层 row 级见 TurnBlock）。
                   <ErrorBoundary

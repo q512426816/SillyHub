@@ -72,6 +72,19 @@ export interface ProcessedLog {
    */
   toolUseId?: string;
   /**
+   * ql-20260622-003 / P1-2：tool 卡片执行耗时（tool_call emit → [TOOL_RESULT] emit 毫秒差）。
+   *
+   * 迁移自 render 期 computeToolDurationMs（原在 AgentLogRow 每次 render 回查 allLogs，
+   * N×M 复杂度）。normalize 阶段在 mergeToolResult 配对 [TOOL_RESULT] 时基于
+   * tool_use_id / tool 名配对结果预算：start=卡片 log.timestamp，end=被合并 result
+   * stdout 的 log.timestamp，存 Math.max(0, end-start)。首次配对设置（同卡多 result
+   * 取首条，与原"首条 result"语义一致）。
+   *
+   * 退化：自合并（[TOOL_USE]+[TOOL_RESULT] 同条 stdout）/ 进行中（无 result）/
+   * 时间戳缺失 → undefined，StatusBadge 只显示状态图标不显示秒数。
+   */
+  toolDurationMs?: number;
+  /**
    * task-14 / D1-D2：thinking segment 稳定 id（预留字段）。
    *
    * 预期来源：daemon stream-json.ts 的 thinking_delta 事件携带（task-11/12 信号）。
