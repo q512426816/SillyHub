@@ -565,3 +565,11 @@ created_at: 2026-06-03T08:42:04
   2. <Table.Summary> 重新加 fixed="bottom"(有 scroll.y 时吸底生效)
   3. 表格数据超出视窗高度时纵向滚动,summary 始终吸底可见
 结果：1）typecheck 通过；2）329/329 vitest 全过；3）表格按视窗高度自适应,summary 吸底。Docker 重建 frontend 待后续。
+
+## ql-20260622-019-5b6c | 2026-06-22 13:46:00 | 项目计划表格高度 100vh-300→100vh-430
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx
+背景：用户实测后调整预留高度,顶部搜索栏+页头+分页器+其他元素总高度比 300px 大,改为 430px 预留。
+方案:
+  1. scroll.y 字符串 "calc(100vh - 300px)" → "calc(100vh - 430px)"
+结果：1）typecheck 通过；2）表格高度按 100vh-430px 自适应。Docker 重建 frontend 待后续。

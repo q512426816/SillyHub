@@ -624,7 +624,7 @@ export default function ProjectPlansPage() {
               loading={loading}
               size="small"
               bordered
-              scroll={{ x: "max-content", y: "calc(100vh - 300px)" }}
+              scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
               pagination={{
                 current: page,
                 pageSize,
