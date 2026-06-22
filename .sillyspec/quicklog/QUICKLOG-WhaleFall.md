@@ -503,3 +503,13 @@ created_at: 2026-06-03T08:42:04
 
 
 
+
+## ql-20260622-013-a204 | 2026-06-22 11:30:00 | 项目计划表格添加分页+合计总结栏固定
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx
+背景：/ppm/project-plans DataTable 当前 pagination={false} 一次性渲染全部计划，数据多时性能差、体验差；Table.Summary fixed 写法不正确（应该是 fixed="bottom"），且未配合 scroll.y 启用吸底固定。用户要求：1）添加分页；2）合计行作为总结栏；3）总结栏吸底固定。
+方案：
+  1. pagination={false} → antd pagination 配置（defaultPageSize: 10, pageSizeOptions: [10/20/50/100], showSizeChanger, showTotal 显示总条数）
+  2. <Table.Summary fixed> → <Table.Summary fixed="bottom">（吸底）
+  3. scroll={{ x: "max-content" }} → scroll={{ x: "max-content", y: 500 }}（启用纵向滚动+吸底固定）
+结果：1）typecheck 通过；2）329/329 vitest 全过；3）表格底部出现分页器（默认 10 条/页，可切换 10/20/50/100，显示总条数），合计行作为 fixed=bottom 总结栏在滚动时吸底固定。Docker 重建 frontend 待后续。

@@ -570,11 +570,16 @@ export default function ProjectPlansPage() {
               loading={loading}
               size="small"
               bordered
-              scroll={{ x: "max-content" }}
-              pagination={false}
+              scroll={{ x: "max-content", y: 500 }}
+              pagination={{
+                defaultPageSize: 10,
+                pageSizeOptions: ["10", "20", "50", "100"],
+                showSizeChanger: true,
+                showTotal: (total) => `共 ${total} 条`,
+              }}
               emptyText="暂无项目计划"
               summary={() => (
-                <Table.Summary fixed>
+                <Table.Summary fixed="bottom">
                   <Table.Summary.Row>
                     <Table.Summary.Cell index={0}>合计</Table.Summary.Cell>
                     <Table.Summary.Cell index={1} />
