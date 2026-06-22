@@ -26,6 +26,7 @@ const sessionApi = vi.hoisted(() => ({
   endSession: vi.fn(),
   streamSession: vi.fn(),
   getAgentSession: vi.fn(),
+  fetchPendingDialogs: vi.fn(),
 }));
 
 vi.mock("@/lib/daemon", async () => {
@@ -38,6 +39,7 @@ vi.mock("@/lib/daemon", async () => {
     endSession: sessionApi.endSession,
     streamSession: sessionApi.streamSession,
     getAgentSession: sessionApi.getAgentSession,
+    fetchPendingDialogs: sessionApi.fetchPendingDialogs,
   };
 });
 
@@ -128,6 +130,8 @@ function setupPanel(overrides: Record<string, any> = {}) {
 describe("InteractiveSessionPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // 默认无 pending dialog（改动二：fetchPendingDialogs 独立 effect）
+    sessionApi.fetchPendingDialogs.mockResolvedValue([]);
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -761,5 +765,166 @@ describe("InteractiveSessionPanel", () => {
     expect(sessionApi.streamSession).not.toHaveBeenCalled();
     expect(sessionApi.getAgentSession).not.toHaveBeenCalled();
     expect(screen.getByPlaceholderText(/创建会话/)).toBeTruthy();
+  });
+
+  /* ---------- ql-20260623：URL 恢复配套（改动一/二/三） ---------- */
+
+  it("改动一：createSession 成功后调 onSessionCreated 上报 session_id", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-url-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+    const onSessionCreated = vi.fn();
+
+    setupPanel({ onSessionCreated });
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hello" } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() =>
+      expect(onSessionCreated).toHaveBeenCalledWith("sess-url-1"),
+    );
+  });
+
+  it("改动一：新建会话（idle 重置）调 onSessionReset", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+    sessionApi.endSession.mockResolvedValue({
+      session_id: "sess-1", status: "ended", current_run_id: null,
+    });
+    const onSessionReset = vi.fn();
+
+    setupPanel({ onSessionReset });
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hi" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+    // 结束会话 → ended
+    fireEvent.click(await screen.findByTitle(/结束整个会话/));
+    await waitFor(() => expect(sessionApi.endSession).toHaveBeenCalled());
+    // ended 后点新建会话 → 重置回 idle → onSessionReset
+    fireEvent.click(screen.getByTitle(/新建会话/));
+    expect(onSessionReset).toHaveBeenCalledTimes(1);
+  });
+
+  it("改动二：createSession 成功后独立 effect 触发 fetchPendingDialogs", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+
+    setupPanel();
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hi" } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() =>
+      expect(sessionApi.fetchPendingDialogs).toHaveBeenCalledWith("sess-1"),
+    );
+  });
+
+  it("改动二：attach 模式 mount 也触发 fetchPendingDialogs", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.getAgentSession.mockResolvedValue({
+      id: "sess-attach", runtime_id: null, lease_id: null,
+      provider: "claude", status: "reconnecting", agent_session_id: "ag-1",
+      config: null, turn_count: 1, created_at: "t", last_active_at: null, ended_at: null,
+    });
+
+    setupPanel({ attachSessionId: "sess-attach", initialTurns: makeAttachTurns() });
+
+    await waitFor(() =>
+      expect(sessionApi.fetchPendingDialogs).toHaveBeenCalledWith("sess-attach"),
+    );
+  });
+
+  it("改动二+三：fetchPendingDialogs 返回的 dialog 卡片在 active 会话渲染", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+    sessionApi.fetchPendingDialogs.mockResolvedValue([
+      {
+        session_id: "sess-1",
+        run_id: "run-1",
+        request_id: "req-1",
+        tool_name: "AskUserQuestion",
+        input: {},
+        dialog_kind: "ask_user",
+        dialog_payload: {
+          questions: [{
+            question: "选择哪个？",
+            header: "选项",
+            options: [{ label: "A", description: "a" }],
+          }],
+        },
+      },
+    ]);
+
+    setupPanel();
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hi" } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    // dialog 卡片渲染（AskUserQuestion 文案可见）
+    await waitFor(() =>
+      expect(screen.getByText(/选择哪个？/)).toBeInTheDocument(),
+    );
+  });
+
+  it("改动三：ended 会话不渲染 pending dialog 卡片（死卡防护）", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+    sessionApi.endSession.mockResolvedValue({
+      session_id: "sess-1", status: "ended", current_run_id: null,
+    });
+    // 返回一个 pending dialog
+    sessionApi.fetchPendingDialogs.mockResolvedValue([
+      {
+        session_id: "sess-1",
+        run_id: "run-1",
+        request_id: "req-dead",
+        tool_name: "AskUserQuestion",
+        input: {},
+        dialog_kind: "ask_user",
+        dialog_payload: {
+          questions: [{
+            question: "死卡问题",
+            header: "选项",
+            options: [{ label: "A", description: "a" }],
+          }],
+        },
+      },
+    ]);
+
+    setupPanel();
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hi" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    // 等待 dialog 出现
+    await waitFor(() => expect(screen.getByText(/死卡问题/)).toBeInTheDocument());
+
+    // 结束会话 → ended → onSessionEnded 清空 + render gate 不渲染
+    fireEvent.click(await screen.findByTitle(/结束整个会话/));
+    await waitFor(() => expect(sessionApi.endSession).toHaveBeenCalled());
+    // 卡片消失
+    await waitFor(() =>
+      expect(screen.queryByText(/死卡问题/)).not.toBeInTheDocument(),
+    );
   });
 });

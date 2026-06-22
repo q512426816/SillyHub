@@ -12,6 +12,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RuntimesPage from "@/app/(dashboard)/runtimes/page";
 import { useSession } from "@/stores/session";
 
+// ── next/navigation mock（ql-20260623 改动一：page 现使用 useSearchParams/useRouter） ──
+
+const nav = vi.hoisted(() => ({
+  searchParams: new URLSearchParams(),
+  replace: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => nav.searchParams,
+  useRouter: () => ({ replace: nav.replace, push: vi.fn(), refresh: vi.fn() }),
+}));
+
 // ── mocks ────────────────────────────────────────────────────────────────────
 
 const daemon = vi.hoisted(() => ({
@@ -64,6 +76,9 @@ beforeEach(() => {
   useSession.setState({ accessToken: "tok", hydrated: true } as never);
   vi.stubGlobal("EventSource", FakeES);
   FakeES.instances.length = 0;
+  // ql-20260623：重置 next/navigation mock 状态
+  nav.searchParams = new URLSearchParams();
+  nav.replace = vi.fn();
   daemon.listDaemonRuntimes.mockResolvedValue([]);
   daemon.listAgentSessions.mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 });
   daemon.deleteAgentSession.mockResolvedValue(undefined);
@@ -554,6 +569,77 @@ describe("RuntimesPage session list + history", () => {
     await waitFor(() => expect(screen.getByText(/daemon offline/)).toBeInTheDocument());
     // 仍在历史回看（未切 attach）
     expect(screen.getByText(/历史回看/)).toBeInTheDocument();
+    expect(daemon.streamSession).not.toHaveBeenCalled();
+  });
+
+  /* ---------- ql-20260623 改动一：URL ?session= 恢复 ---------- */
+
+  it("改动一-4：URL ?session=<active> mount 时自动 attach（建 SSE）", async () => {
+    const sid = "sess-url-active";
+    daemon.listAgentSessions.mockResolvedValue({
+      items: [
+        {
+          id: sid, runtime_id: "r1", lease_id: null, provider: "claude",
+          status: "active", agent_session_id: "ag-1", config: null,
+          turn_count: 1, created_at: "t", last_active_at: null, ended_at: null,
+        },
+      ],
+      total: 1, limit: 50, offset: 0,
+    });
+    nav.searchParams = new URLSearchParams("session=sess-url-active");
+
+    render(<RuntimesPage />);
+    // URL 里的 active 会话 → 自动进入 attach 链路（建 SSE）
+    await waitFor(() =>
+      expect(daemon.streamSession).toHaveBeenCalledWith(
+        "sess-url-active",
+        expect.anything(),
+      ),
+    );
+    // 「交互式会话」面板 header 可见（attach panel 渲染）
+    await waitFor(() =>
+      expect(screen.getByText(/交互式会话/)).toBeInTheDocument(),
+    );
+  });
+
+  it("改动一-6：URL ?session=<ended> → 降级 idle + 清 param（不卡死）", async () => {
+    const sid = "sess-url-ended";
+    daemon.listAgentSessions.mockResolvedValue({
+      items: [
+        {
+          id: sid, runtime_id: "r1", lease_id: null, provider: "claude",
+          status: "ended", agent_session_id: null, config: null,
+          turn_count: 1, created_at: "t", last_active_at: null, ended_at: "t2",
+        },
+      ],
+      total: 1, limit: 50, offset: 0,
+    });
+    nav.searchParams = new URLSearchParams("session=sess-url-ended");
+
+    render(<RuntimesPage />);
+    // ended → 不 attach（不建 SSE），降级回 idle（live panel）
+    await waitFor(() => expect(screen.getByText(/交互式会话/)).toBeInTheDocument());
+    expect(daemon.streamSession).not.toHaveBeenCalled();
+    // 清 param（router.replace 被调用）
+    await waitFor(() => expect(nav.replace).toHaveBeenCalled());
+  });
+
+  it("改动一-6：URL ?session=<不存在/已删> → getAgentSession 兜底失败 → 清 param", async () => {
+    daemon.listAgentSessions.mockResolvedValue({
+      items: [], total: 0, limit: 50, offset: 0,
+    });
+    const { ApiError } = await import("@/lib/api");
+    daemon.getAgentSession.mockRejectedValue(
+      new ApiError(404, {
+        code: "NOT_FOUND", message: "gone", request_id: null, details: null,
+      }),
+    );
+    nav.searchParams = new URLSearchParams("session=sess-gone");
+
+    render(<RuntimesPage />);
+    // getAgentSession 兜底查 → 404 → 降级 idle + 清 param
+    await waitFor(() => expect(daemon.getAgentSession).toHaveBeenCalledWith("sess-gone"));
+    await waitFor(() => expect(nav.replace).toHaveBeenCalled());
     expect(daemon.streamSession).not.toHaveBeenCalled();
   });
 });

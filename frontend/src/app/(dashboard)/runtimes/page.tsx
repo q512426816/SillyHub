@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import {
   Activity,
   AlertTriangle,
@@ -34,6 +35,7 @@ import {
   deleteDaemonRuntime,
   disableDaemonRuntime,
   enableDaemonRuntime,
+  getAgentSession,
   getAgentSessionLogs,
   isVersionBelow,
   listAgentSessions,
@@ -387,6 +389,11 @@ function InteractiveSessionChatSection({
   /** ql-012：runtime 卡片「会话」聚焦时钦定的 provider（覆盖默认 claude 优先）。 */
   focusProvider?: string;
 }) {
+  // ql-20260623（改动一）：用 ?session=<id> 在 URL 中承载当前活跃会话 id，
+  // 刷新后从 URL 恢复。router.replace 不进历史栈。
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   // D-002@v3 非目标：交互式会话仅支持 claude（codex 后续），不支持 cursor/openclaw 等。
   // 过滤 online runtime 的 provider，只保留 claude/codex，避免 createSession 触发
   // backend SessionCreateRequest.provider Literal["claude","codex"] 422。
@@ -410,6 +417,22 @@ function InteractiveSessionChatSection({
     ?? (onlineProviders.includes("claude") ? "claude" : (onlineProviders[0] ?? "claude"));
   // providers 列表：有在线时用在线列表，无在线时给占位让组件能渲染
   const providers = hasOnlineProvider ? onlineProviders : [defaultProvider];
+
+  // ql-20260623（改动一）：createSession 成功 → 写 ?session=<id>（保留其它 query param）
+  const handleSessionCreated = useCallback((sessionId: string) => {
+    const next = new URLSearchParams(searchParams.toString());
+    next.set("session", sessionId);
+    router.replace(`?${next.toString()}`, { scroll: false });
+  }, [router, searchParams]);
+
+  // ql-20260623（改动一）：新建会话（重置回 idle）→ 清除 ?session= param
+  const handleSessionReset = useCallback(() => {
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("session");
+    const qs = next.toString();
+    const target = qs ? `?${qs}` : window.location.pathname;
+    router.replace(target, { scroll: false });
+  }, [router, searchParams]);
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
@@ -435,6 +458,8 @@ function InteractiveSessionChatSection({
         hasOnlineProvider={hasOnlineProvider}
         attachSessionId={attachSession?.id}
         initialTurns={initialTurns}
+        onSessionCreated={handleSessionCreated}
+        onSessionReset={handleSessionReset}
       />
     </div>
   );
@@ -1003,6 +1028,11 @@ function SessionListSection({
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   // task-11：reopen 成功的会话进入 attach 续聊面板（历史回看↔attach 切换）
   const [attachSession, setAttachSession] = useState<AgentSessionRead | null>(null);
+  // ql-20260623（改动一）：URL ?session= 恢复。router.replace 不进历史栈。
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // 防御：URL 恢复只执行一次（避免 sessions 重载时重复触发）
+  const urlRestoreDoneRef = useRef(false);
   // ql-012：聚焦 runtime 时，sidebar 仅显示该 runtime 的历史会话。
   const visibleSessions = useMemo(
     () => (focusRuntime ? sessions.filter((s) => s.runtime_id === focusRuntime.id) : sessions),
@@ -1026,6 +1056,53 @@ function SessionListSection({
   useEffect(() => {
     void reloadSessions();
   }, [reloadSessions]);
+
+  // ql-20260623（改动一）：写 / 清 URL ?session= param 的 helper。
+  const writeSessionParam = useCallback((sessionId: string) => {
+    const next = new URLSearchParams(searchParams.toString());
+    next.set("session", sessionId);
+    router.replace(`?${next.toString()}`, { scroll: false });
+  }, [router, searchParams]);
+
+  const clearSessionParam = useCallback(() => {
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("session");
+    const qs = next.toString();
+    const target = qs ? `?${qs}` : window.location.pathname;
+    router.replace(target, { scroll: false });
+  }, [router, searchParams]);
+
+  // ql-20260623（改动一）：mount 时读 ?session= param，存在则恢复。
+  // 从已加载 sessions 列表匹配（或 getAgentSession 兜底），active/reconnecting/pending
+  // → 自动 setAttachSession 进入 attach 链路；ended/failed/已删/不属于本用户 → 降级
+  // 回 idle 并清 param（边界 6，不能卡死）。
+  useEffect(() => {
+    if (urlRestoreDoneRef.current) return;
+    const sessionId = searchParams.get("session");
+    if (!sessionId) return;
+    // 等 sessions 加载完成（reloadSessions 的 finally 设 loading=false）
+    if (loading) return;
+    urlRestoreDoneRef.current = true;
+    void (async () => {
+      let session: AgentSessionRead | null =
+        sessions.find((s) => s.id === sessionId) ?? null;
+      if (!session) {
+        // 兜底：列表未包含（分页外 / 刚创建）→ 直接查详情
+        try {
+          session = await getAgentSession(sessionId);
+        } catch {
+          // 不属于本用户 / 已删 / 网络错误 → 降级 idle + 清 param
+          session = null;
+        }
+      }
+      if (session && isActiveSession(session)) {
+        setAttachSession(session);
+      } else {
+        // ended / failed / 不存在 → 降级 idle + 清 param
+        clearSessionParam();
+      }
+    })();
+  }, [searchParams, loading, sessions, clearSessionParam]);
 
   const handleSelect = useCallback(async (session: AgentSessionRead) => {
     setSelected(session);
@@ -1072,16 +1149,18 @@ function SessionListSection({
 
   // task-11：续聊 → reopen 恢复会话，成功后右侧切 attach InteractiveSessionPanel。
   // 失败（409 OFFLINE 等）→ setListError 提示，不切 attach。
+  // ql-20260623（改动一）：续聊成功后也把 session_id 写入 URL（刷新恢复）。
   const handleContinue = useCallback(async (session: AgentSessionRead) => {
     setListError(null);
     try {
       await reopenSession(session.id);
       // 用当前已加载的 logs 预填 attach panel（handleSelect 已拉取）
       setAttachSession(session);
+      writeSessionParam(session.id);
     } catch (err) {
       setListError(err instanceof ApiError ? err.message : "恢复会话失败");
     }
-  }, []);
+  }, [writeSessionParam]);
 
   return (
     <section className="flex min-w-0 flex-col gap-3">
@@ -1135,7 +1214,11 @@ function SessionListSection({
             runtimes={runtimes}
             attachSession={attachSession}
             initialTurns={logsToTurns(logs)}
-            onCloseAttach={() => setAttachSession(null)}
+            // ql-20260623（改动一）：返回历史时清除 URL ?session= param
+            onCloseAttach={() => {
+              setAttachSession(null);
+              clearSessionParam();
+            }}
           />
         ) : selected ? (
           <SessionHistoryView

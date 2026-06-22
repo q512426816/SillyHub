@@ -123,6 +123,16 @@ export interface InteractiveSessionPanelProps {
    */
   attachSessionId?: string;
   initialTurns?: SessionTurnView[];
+  /**
+   * ql-20260623：createSession 成功后上报新建 session_id 给父级，
+   * 父级可据此把 `?session=<id>` 写入 URL（刷新恢复用）。
+   */
+  onSessionCreated?: (sessionId: string) => void;
+  /**
+   * ql-20260623：面板重置回 idle（新建会话）时通知父级，
+   * 父级据此清除 URL `?session=` param。
+   */
+  onSessionReset?: () => void;
 }
 
 export function InteractiveSessionPanel({
@@ -133,6 +143,8 @@ export function InteractiveSessionPanel({
   hasOnlineProvider,
   attachSessionId,
   initialTurns,
+  onSessionCreated,
+  onSessionReset,
 }: InteractiveSessionPanelProps) {
   const [provider, setProvider] = useState(defaultProvider);
   const [input, setInput] = useState("");
@@ -244,26 +256,8 @@ export function InteractiveSessionPanel({
         },
       },
     );
-    // ql-20260621：SSE 只推送实时新 permission_request，页面刷新 / attach
-    // 已 pending 的 AskUserQuestion 对话需通过 REST 恢复（与 SSE 合并按
-    // request_id 去重）。新建会话通常返回空，attach 模式必备。
-    void fetchPendingDialogs(sessionId)
-      .then((dialogs) => {
-        if (!dialogs || dialogs.length === 0) return;
-        setPendingRequests((prev) => {
-          const existing = new Set(prev.map((r) => r.request_id));
-          const merged = [...prev];
-          for (const d of dialogs) {
-            if (d.dialog_kind && !existing.has(d.request_id)) {
-              merged.push(d);
-            }
-          }
-          return merged.length === prev.length ? prev : merged;
-        });
-      })
-      .catch(() => {
-        // 恢复失败不阻塞：SSE 仍会推送后续新事件
-      });
+    // ql-20260623：fetchPendingDialogs 从 establishStream 解耦为独立 effect
+    //（见下方 [view.sessionId] effect），避免恢复链路与建流链路绑定。
   }, []);
 
   // task-10 attach 模式：mount / attachSessionId 变化时建 SSE + 预填 turn + 进 reconnecting。
@@ -341,6 +335,37 @@ export function InteractiveSessionPanel({
     };
   }, [attachSessionId]);
 
+  // ql-20260623（改动二）：fetchPendingDialogs 从 establishStream 解耦为独立
+  // effect。只要有有效 sessionId（来自 createSession / attach / URL 恢复）就
+  // 触发一次 pending dialog 拉取，与建流链路解耦。
+  // SSE 只推送实时新 permission_request，页面刷新 / attach 已 pending 的
+  // AskUserQuestion 对话需通过此 REST 恢复（与 SSE 合并按 request_id 去重）。
+  useEffect(() => {
+    if (!view.sessionId) return;
+    const sessionId = view.sessionId;
+    let cancelled = false;
+    void fetchPendingDialogs(sessionId)
+      .then((dialogs) => {
+        if (cancelled || !dialogs || dialogs.length === 0) return;
+        setPendingRequests((prev) => {
+          const existing = new Set(prev.map((r) => r.request_id));
+          const merged = [...prev];
+          for (const d of dialogs) {
+            if (d.dialog_kind && !existing.has(d.request_id)) {
+              merged.push(d);
+            }
+          }
+          return merged.length === prev.length ? prev : merged;
+        });
+      })
+      .catch(() => {
+        // 恢复失败不阻塞：SSE 仍会推送后续新事件
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view.sessionId]);
+
   // unmount / session 切换：显式 close 旧 SSE + 清轮询 interval
   useEffect(() => {
     return () => {
@@ -414,6 +439,8 @@ export function InteractiveSessionPanel({
           ),
         }));
         establishStream(resp.session_id);
+        // ql-20260623（改动一）：上报 session_id 给父级写 URL（刷新恢复）
+        onSessionCreated?.(resp.session_id);
       } catch (err) {
         const msg = err instanceof ApiError ? err.message : "创建会话失败";
         setView({
@@ -468,7 +495,7 @@ export function InteractiveSessionPanel({
         }
       }
     }
-  }, [input, hasOnlineProvider, view, provider, model, establishStream]);
+  }, [input, hasOnlineProvider, view, provider, model, establishStream, onSessionCreated]);
 
   // interrupt：只收敛 currentRun
   const handleInterrupt = useCallback(async () => {
@@ -559,7 +586,9 @@ export function InteractiveSessionPanel({
     setView(INITIAL_VIEW);
     setInput("");
     setPendingRequests([]);
-  }, [view.status, closeStream, handleEnd]);
+    // ql-20260623（改动一）：重置回 idle 时通知父级清除 URL ?session= param
+    onSessionReset?.();
+  }, [view.status, closeStream, handleEnd, onSessionReset]);
 
   // ql-20260621：用户在 AskUserDialogCard 提交回答后，AskUserDialogCard 内部
   // 已 POST respondSessionPermission；这里立即移除卡片（permission_resolved
@@ -691,8 +720,10 @@ export function InteractiveSessionPanel({
         )}
         {/* ql-20260621：AskUserQuestion 对话卡（permission_request.dialog_kind）。
             sticky top-0 让用户在长日志滚动时仍可见、可作答；提交 / SSE resolved
-            后自动移除。普通工具审批（无 dialog_kind）不在本面板展示。 */}
-        {pendingRequests.length > 0 && (
+            后自动移除。普通工具审批（无 dialog_kind）不在本面板展示。
+            ql-20260623（改动三）：ended/failed 会话不回显 pending dialog 卡片
+           （session 已终止，残留 pending 行为死卡；onSessionEnded 也会清空）。 */}
+        {pendingRequests.length > 0 && view.status !== "ended" && view.status !== "failed" && (
           <div className="sticky top-0 z-10 mb-3 space-y-2 border-b border-indigo-300 bg-indigo-50/95 px-3 py-2 shadow-sm backdrop-blur-sm">
             {pendingRequests.map((req) => (
               <ErrorBoundary
