@@ -88,7 +88,7 @@ function generateRequestId(): string {
 export interface ApiRequestOptions extends Omit<RequestInit, "headers" | "body"> {
   headers?: Record<string, string>;
   json?: unknown;
-  query?: Record<string, string | number | boolean | undefined | null>;
+  query?: Record<string, string | number | boolean | undefined | null | string[]>;
 }
 
 export async function apiFetch<T = unknown>(
@@ -100,8 +100,15 @@ export async function apiFetch<T = unknown>(
   const url = resolveUrl(path);
   if (query) {
     for (const [k, v] of Object.entries(query)) {
-      if (v === undefined || v === null) continue;
-      url.searchParams.set(k, String(v));
+      if (v === undefined || v === null || v === "") continue;
+      if (Array.isArray(v)) {
+        // 数组用重复 key 编码:?k=a&k=b (FastAPI Query(list[...]) 默认接收)
+        if (v.length === 0) continue;
+        url.searchParams.delete(k);
+        for (const item of v) url.searchParams.append(k, String(item));
+      } else {
+        url.searchParams.set(k, String(v));
+      }
     }
   }
 

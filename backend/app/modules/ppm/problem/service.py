@@ -27,7 +27,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Select, delete, select
+from sqlalchemy import Select, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -210,10 +210,57 @@ class ProblemService:
     # 问题清单 CRUD
     # ------------------------------------------------------------------
 
-    async def list_problems(self, req: PageReq) -> Page[PpmProblemList]:
-        """分页列表。有未关闭变更的行内存态标记 status=7 变更中。"""
+    async def list_problems(
+        self,
+        req: PageReq,
+        *,
+        keyword: str | None = None,
+        status_list: list[str] | None = None,
+        project_id: uuid.UUID | None = None,
+        pro_type: str | None = None,
+        is_urgent: str | None = None,
+        find_time_start: datetime | None = None,
+        find_time_end: datetime | None = None,
+    ) -> Page[PpmProblemList]:
+        """分页列表(支持服务端过滤)。有未关闭变更的行内存态标记 status=7 变更中。
+
+        过滤参数(全部可选,AND 组合):
+        - keyword:模糊匹配 project_name/model_name/pro_desc/func_name/duty_user_name/find_by
+        - status_list:status in (...)
+        - project_id:精确匹配
+        - pro_type:精确匹配 (bug/change/...)
+        - is_urgent:精确匹配 ("1"/"0")
+        - find_time_start/find_time_time:find_time 闭区间
+        """
+        clauses: list[Any] = []
+        if keyword:
+            kw = f"%{keyword}%"
+            clauses.append(
+                or_(
+                    PpmProblemList.project_name.ilike(kw),
+                    PpmProblemList.model_name.ilike(kw),
+                    PpmProblemList.pro_desc.ilike(kw),
+                    PpmProblemList.func_name.ilike(kw),
+                    PpmProblemList.duty_user_name.ilike(kw),
+                    PpmProblemList.find_by.ilike(kw),
+                )
+            )
+        if status_list:
+            clauses.append(PpmProblemList.status.in_(status_list))
+        if project_id:
+            clauses.append(PpmProblemList.project_id == project_id)
+        if pro_type:
+            clauses.append(PpmProblemList.pro_type == pro_type)
+        if is_urgent:
+            clauses.append(PpmProblemList.is_urgent == is_urgent)
+        if find_time_start:
+            clauses.append(PpmProblemList.find_time >= find_time_start)
+        if find_time_end:
+            clauses.append(PpmProblemList.find_time <= find_time_end)
         page = await _Crud(self._session, PpmProblemList).list_paged(
-            req=req, allowed_sort={"created_at", "find_time", "status"}
+            req=req,
+            allowed_sort={"created_at", "find_time", "status"},
+            where_clauses=clauses or None,
         )
         # 变更中标记 (内存态):查所有有未关闭变更的 resource_id 集合,
         # 命中的行用 object.__setattr__ 设置 _effective_status="7" (非持久化,

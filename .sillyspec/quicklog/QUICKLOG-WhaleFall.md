@@ -683,3 +683,27 @@ created_at: 2026-06-03T08:42:04
   - 顶部按钮行新增"查询"按钮(位于"重置"左侧)
   - 重置按钮同时清空 keywordInput 和 keyword
   - typecheck 通过,363/363 测试通过
+
+## ql-20260622-030-7e2a | 2026-06-22 15:39:47 | problem-list 查询走接口 + 操作列宽度收窄
+状态：已完成
+文件：backend/app/modules/ppm/problem/router.py, backend/app/modules/ppm/problem/service.py, frontend/src/lib/api.ts, frontend/src/lib/ppm/problem.ts, frontend/src/lib/ppm/types.ts, frontend/src/app/(dashboard)/ppm/problem-list/page.tsx
+背景：problem-list 当前查询条件全部本地 useMemo 过滤,数据量大会卡;同时后端 /problem-list 只支持分页,无任何过滤参数。操作列 width=280 但按钮少时大片留白。
+方案:
+  后端:
+    1. router.list_problems 增加 Query:keyword / status(多值)/ project_id / pro_type / is_urgent / find_time_start / find_time_end
+    2. service.list_problems 接受过滤参数,构造 where_clauses 传给 list_paged
+    3. response_model 改为 Page[ProblemListResp],返回 total
+  前端:
+    4. lib/ppm/problem.ts listProblems 返回 Page 结构 {items,total,page,page_size}
+    5. types.ts 加 ProblemListPageReq
+    6. page.tsx 去掉本地 useMemo filtered,加 pagination state {current,pageSize,total},Select/RangePicker 选中即触发 load({page:1}),Table pagination onChange 调 load({page,page_size})
+    7. 操作列宽度 280 → 200
+结果：
+  - 后端 router.list_problems 加 7 个 Query 参数 + response 改 Page[ProblemListResp]
+  - service.list_problems 增加同名 kwargs,where_clauses:keyword 跨 6 字段 ilike,status in,project_id/pro_type/is_urgent 精确,find_time 区间
+  - apiFetch query 类型支持 string[],数组用 searchParams.append 多值编码(?status=1&status=2)
+  - lib/ppm/problem.ts listProblems 改返 PageResp<ProblemList>,types.ts 加 ProblemListPageReq
+  - page.tsx 改服务端分页,去掉本地 useMemo filtered,共 N 条显示 total 而非 filtered.length
+  - 操作列 width 280 → 200
+  - 前端 typecheck 通过,363/363 测试通过
+  - 后端 ppm/problem/tests 35/35 通过;test_export.py 2 项失败为 stash 前后均存在的预先问题(与本次无关)

@@ -32,7 +32,7 @@ from app.core.auth_deps import get_current_user, require_permission_any
 from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
-from app.modules.ppm.common.crud import PageReq
+from app.modules.ppm.common.crud import Page, PageReq
 from app.modules.ppm.common.export import ColumnDef
 from app.modules.ppm.problem.schema import (
     ChangeNextProcessReq,
@@ -81,14 +81,34 @@ def _actor(user: User) -> tuple[str, str | None]:
 # ===========================================================================
 
 
-@router.get("/problem-list", response_model=list[ProblemListResp])
+@router.get("/problem-list", response_model=Page[ProblemListResp])
 async def list_problems(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission_any(Permission.PPM_PROBLEM_READ))],
     req: PageReqDep,
-) -> list[ProblemListResp]:
-    page = await ProblemService(session).list_problems(req)
-    return [ProblemListResp.model_validate(i) for i in page.items]
+    keyword: str | None = Query(None, description="项目/模块/描述/功能/责任人/发现人 模糊匹配"),
+    status: list[str] | None = Query(None, description="状态(可多值)"),
+    project_id: uuid.UUID | None = Query(None),
+    pro_type: str | None = Query(None),
+    is_urgent: str | None = Query(None, description="'1' 急 / '0' 否"),
+    find_time_start: datetime | None = Query(None),
+    find_time_end: datetime | None = Query(None),
+) -> Page[ProblemListResp]:
+    page = await ProblemService(session).list_problems(
+        req,
+        keyword=keyword,
+        status_list=status,
+        project_id=project_id,
+        pro_type=pro_type,
+        is_urgent=is_urgent,
+        find_time_start=find_time_start,
+        find_time_end=find_time_end,
+    )
+    return Page.build(
+        items=[ProblemListResp.model_validate(i) for i in page.items],
+        total=page.total,
+        req=req,
+    )
 
 
 @router.post(

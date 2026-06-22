@@ -633,6 +633,23 @@ export interface ProblemListCreate {
   submit?: boolean;
 }
 
+/** 问题清单查询参数(对齐后端 GET /problem-list Query)。 */
+export interface ProblemListPageReq extends PageReq {
+  /** 关键字:项目/模块/描述/功能/责任人/发现人 模糊匹配 */
+  keyword?: string;
+  /** 状态(可多值)。后端用 status=1&status=2 重复 query 接收。 */
+  status?: string[];
+  /** 项目 id 精确匹配 */
+  project_id?: string;
+  /** 问题类型:bug / change */
+  pro_type?: string;
+  /** '1' 急 / '0' 否 */
+  is_urgent?: string;
+  /** find_time ISO 起止(闭区间) */
+  find_time_start?: string;
+  find_time_end?: string;
+}
+
 export interface ProblemListUpdate {
   project_name?: string | null;
   module_id?: string | null;

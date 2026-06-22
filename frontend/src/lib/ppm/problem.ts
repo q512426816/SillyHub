@@ -18,6 +18,7 @@ import { apiFetch } from "@/lib/api";
 import { downloadExcel } from "./export";
 import type {
   PageReq,
+  PageResp,
   ProblemChange,
   ProblemChangeCreate,
   ProblemChangeNextProcessReq,
@@ -27,6 +28,7 @@ import type {
   ProblemDoneTaskReq,
   ProblemList,
   ProblemListCreate,
+  ProblemListPageReq,
   ProblemListUpdate,
   ProblemNextProcessReq,
   ProblemProcessLog,
@@ -35,13 +37,13 @@ import type {
 } from "./types";
 
 function pageQuery(
-  params?: PageReq,
-): { query: Record<string, string | number | undefined> } | undefined {
+  params?: ProblemListPageReq | PageReq,
+): { query: Record<string, string | number | string[] | undefined> } | undefined {
   if (!params) return undefined;
-  const q: Record<string, string | number | undefined> = {};
+  const q: Record<string, string | number | string[] | undefined> = {};
   for (const [k, v] of Object.entries(params)) {
-    if (v === undefined || v === null) continue;
-    q[k] = v;
+    if (v === undefined || v === null || v === "") continue;
+    q[k] = v as string | number | string[] | undefined;
   }
   return { query: q };
 }
@@ -51,9 +53,9 @@ function pageQuery(
 // ===========================================================================
 
 export async function listProblems(
-  params?: PageReq,
-): Promise<ProblemList[]> {
-  return apiFetch<ProblemList[]>("/api/ppm/problem-list", pageQuery(params));
+  params?: ProblemListPageReq,
+): Promise<PageResp<ProblemList>> {
+  return apiFetch<PageResp<ProblemList>>("/api/ppm/problem-list", pageQuery(params));
 }
 
 export async function getProblem(problemId: string): Promise<ProblemList> {

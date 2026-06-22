@@ -12,10 +12,11 @@
  *  - 任意:详情(ListDetailForm)
  *
  * 列表字段 + 操作按钮显隐规则逐条对齐源 index.vue 操作列 v-if。
+ * 查询条件全部走后端 GET /problem-list (服务端过滤 + 分页)。
  *
  * 设计依据:.sillyspec/changes/2026-06-21-ppm-frontend-alignment/design.md §7
  */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   DatePicker,
   Input,
@@ -74,12 +75,15 @@ export default function ProblemListPage() {
   const currentUserId = currentUser?.id ?? "";
 
   const [items, setItems] = useState<ProblemList[]>([]);
+  const [total, setTotal] = useState(0);
+  const [current, setCurrent] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 搜索栏(对照源 queryParams,本仓后端仅支持分页,复杂字段本地过滤)
-  // keywordInput 仅受控输入框显示值,输入过程不触发过滤;
-  // 按 Enter 或点击"查询"按钮时同步到 keyword(实际过滤用)。
+  // 搜索栏(对照源 queryParams,服务端过滤)。
+  // keywordInput 仅受控输入框显示值,输入过程不触发查询;
+  // 按 Enter 或点击"查询"按钮时同步到 keyword(实际查询用)。
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [statusFilter, setStatusFilter] = useState<string[]>([
@@ -102,68 +106,52 @@ export default function ProblemListPage() {
     problem?: ProblemList;
   }>({ open: false, mode: "create" });
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setItems(await listProblems({ page: 1, page_size: 200 }));
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "加载失败");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const load = useCallback(
+    async (opts: { page?: number; page_size?: number } = {}) => {
+      const page = opts.page ?? current;
+      const page_size = opts.page_size ?? pageSize;
+      setLoading(true);
+      setError(null);
+      try {
+        const resp = await listProblems({
+          page,
+          page_size,
+          keyword: keyword || undefined,
+          status: statusFilter.length > 0 ? statusFilter : undefined,
+          project_id: projectFilter ?? undefined,
+          pro_type: proTypeFilter || undefined,
+          is_urgent: isUrgentFilter || undefined,
+          find_time_start: dateRange?.[0]?.startOf("day")?.toISOString(),
+          find_time_end: dateRange?.[1]?.endOf("day")?.toISOString(),
+        });
+        setItems(resp.items);
+        setTotal(resp.total);
+        setCurrent(page);
+        setPageSize(page_size);
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "加载失败");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [
+      current,
+      pageSize,
+      keyword,
+      statusFilter,
+      projectFilter,
+      proTypeFilter,
+      isUrgentFilter,
+      dateRange,
+    ],
+  );
 
+  // 首屏 + 过滤条件变化 → 回到第 1 页重拉。
+  // keywordInput 不触发(只在 commit 时改 keyword)。
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  const filtered = useMemo(() => {
-    const kw = keyword.trim().toLowerCase();
-    const [rangeStart, rangeEnd] = dateRange ?? [null, null];
-    return items.filter((p) => {
-      if (statusFilter.length > 0 && !statusFilter.includes(p.status)) {
-        return false;
-      }
-      if (projectFilter && p.project_id !== projectFilter) {
-        return false;
-      }
-      if (proTypeFilter && p.pro_type !== proTypeFilter) {
-        return false;
-      }
-      if (isUrgentFilter) {
-        const urgent = p.is_urgent === "1" || p.is_urgent === "是" ? "1" : "0";
-        if (urgent !== isUrgentFilter) return false;
-      }
-      if (rangeStart && rangeEnd && p.find_time) {
-        const t = new Date(p.find_time);
-        if (Number.isNaN(t.getTime())) return false;
-        if (t < rangeStart.startOf("day").toDate()) return false;
-        if (t > rangeEnd.endOf("day").toDate()) return false;
-      }
-      if (!kw) return true;
-      const hay = [
-        p.project_name,
-        p.model_name,
-        p.pro_desc,
-        p.func_name,
-        p.duty_user_name,
-        p.find_by,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return hay.includes(kw);
-    });
-  }, [
-    items,
-    keyword,
-    statusFilter,
-    projectFilter,
-    proTypeFilter,
-    isUrgentFilter,
-    dateRange,
-  ]);
+    void load({ page: 1 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keyword, statusFilter, projectFilter, proTypeFilter, isUrgentFilter, dateRange]);
 
   const handleExport = async () => {
     setExporting(true);
@@ -320,7 +308,7 @@ export default function ProblemListPage() {
       title: "操作",
       key: "actions",
       align: "right",
-      width: 280,
+      width: 200,
       fixed: "right",
       render: (_v: unknown, p: ProblemList) => {
         const isNowHandler = matchAnyUser(
@@ -424,7 +412,7 @@ export default function ProblemListPage() {
           </Button>
         </div>
 
-        {/* 查询条件:垂直 grid-cols-4(本地过滤,onChange 实时生效) */}
+        {/* 查询条件:垂直 grid-cols-4(服务端过滤,Select/RangePicker 选中即查) */}
         <div className="grid w-full grid-cols-4 gap-3">
           <Field label="关键字">
             <Input
@@ -490,7 +478,7 @@ export default function ProblemListPage() {
             />
           </Field>
           <div className="col-span-2 self-end text-right text-xs text-muted-foreground">
-            共 {filtered.length} 条
+            共 {total} 条
           </div>
         </div>
       </SectionCard>
@@ -511,16 +499,19 @@ export default function ProblemListPage() {
         <Table<ProblemList>
           rowKey="id"
           columns={columns}
-          dataSource={filtered}
+          dataSource={items}
           loading={loading}
           size="small"
           bordered
           scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
           pagination={{
-            pageSize: 20,
+            current,
+            pageSize,
+            total,
             showSizeChanger: true,
             pageSizeOptions: ["10", "20", "50", "100"],
             showTotal: (t: number) => `共 ${t} 条`,
+            onChange: (page: number, size: number) => void load({ page, page_size: size }),
           }}
           locale={{ emptyText: "暂无问题" }}
         />
