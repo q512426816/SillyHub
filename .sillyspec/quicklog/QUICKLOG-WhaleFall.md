@@ -427,4 +427,12 @@ created_at: 2026-06-03T08:42:04
 方案：1) SectionCard 内结构改为上下两段：顶部 `<div className="mb-2 flex items-center justify-end gap-2">` 放按钮组，下方 `<Form layout="inline" className="w-full" style={{ rowGap: 8 }}>` 放字段；2) Form 加 style={{ rowGap: 8 }} 让 antd inline-flex wrap 换行时有 8px 垂直间距；3) 删除 SearchBar/SearchBarActions 包装（原本是横向容器，与新的上下排列冲突）；4) 移除未使用的 import SearchBar/SearchBarActions。
 结果：1) typecheck 通过；2) 329/329 vitest 全过；3) 展开后字段超过容器宽度自动换行，行间 8px 间距；4) 按钮组始终位于 Form 上方右对齐，不再受字段数量影响。Docker 重建 frontend 待后续。
 
+## ql-20260622-005-2a58 | 2026-06-22 10:04:36 | /ppm/project-plans 查询条件宽度统一对齐
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx
+背景：6 个 Form.Item 中 Input 用 w-[200px]、RangePicker 用 w-[240px] 宽度不一，label 文字长度不同（4 字 "项目名称" vs 6 字 "合同签订时间"）进一步让 control 起始位置错乱。
+方案：新增 module-level helper `fieldLabel(text)` 返回 `<span className="inline-block w-[88px] text-right text-sm">{text}</span>` 统一 label 视觉宽度；6 个 Form.Item 全部重构：1) `label={fieldLabel("xxx")}`；2) `colon={false}` 去掉冒号（冒号会让 control 起始位置偏移）；3) `className="w-[300px]"` 整体宽度统一；4) 内部 Input/RangePicker 改为 `className="w-full"` 填满 control 区域。
+结果：1) typecheck 通过；2) 329/329 vitest 全过；3) 6 个 Form.Item 视觉宽度完全对齐（整体 300px / label 88px / control ~212px），4 字与 6 字 label 起始/结束位置一致，Input 和 RangePicker 宽度一致。Docker 重建 frontend 待后续。
+
+
 

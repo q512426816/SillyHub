@@ -79,6 +79,11 @@ function fmtDate(v: string | null | undefined): string {
   return v.length >= 10 ? v.slice(0, 10) : v;
 }
 
+// 统一 label 宽度,让所有 Form.Item 视觉对齐(4 字/6 字 label 均占 88px)。
+const fieldLabel = (text: string) => (
+  <span className="inline-block w-[88px] text-right text-sm">{text}</span>
+);
+
 export default function ProjectPlansPage() {
   const router = useRouter();
   const { user: currentUser } = useSession();
@@ -444,49 +449,70 @@ export default function ProjectPlansPage() {
           className="w-full"
           style={{ rowGap: 8 }}
         >
-          <Form.Item label="项目名称" name="projectName">
+          <Form.Item
+            label={fieldLabel("项目名称")}
+            colon={false}
+            className="w-[300px]"
+            name="projectName"
+          >
             <Input
               placeholder="请输入项目名称"
               allowClear
-              className="w-[200px]"
+              className="w-full"
               onPressEnter={() => handleSearch()}
             />
           </Form.Item>
-          <Form.Item label="合同名称" name="contractName">
+          <Form.Item
+            label={fieldLabel("合同名称")}
+            colon={false}
+            className="w-[300px]"
+            name="contractName"
+          >
             <Input
               placeholder="请输入合同名称"
               allowClear
-              className="w-[200px]"
+              className="w-full"
               onPressEnter={() => handleSearch()}
             />
           </Form.Item>
           {expanded && (
             <>
-              <Form.Item label="公司名称" name="companyName">
+              <Form.Item
+                label={fieldLabel("公司名称")}
+                colon={false}
+                className="w-[300px]"
+                name="companyName"
+              >
                 <Input
                   placeholder="请输入公司名称"
                   allowClear
-                  className="w-[200px]"
+                  className="w-full"
                   onPressEnter={() => handleSearch()}
                 />
               </Form.Item>
               <Form.Item
-                label="合同签订时间"
+                label={fieldLabel("合同签订时间")}
+                colon={false}
+                className="w-[300px]"
                 name="contractSignTimeRange"
               >
-                <RangePicker className="w-[240px]" />
+                <RangePicker className="w-full" />
               </Form.Item>
               <Form.Item
-                label="项目开始时间"
+                label={fieldLabel("项目开始时间")}
+                colon={false}
+                className="w-[300px]"
                 name="projectStartTimeRange"
               >
-                <RangePicker className="w-[240px]" />
+                <RangePicker className="w-full" />
               </Form.Item>
               <Form.Item
-                label="预计验收时间"
+                label={fieldLabel("预计验收时间")}
+                colon={false}
+                className="w-[300px]"
                 name="projectPlanEndTimeRange"
               >
-                <RangePicker className="w-[240px]" />
+                <RangePicker className="w-full" />
               </Form.Item>
             </>
           )}
