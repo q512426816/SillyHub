@@ -487,6 +487,14 @@ created_at: 2026-06-03T08:42:04
 机制：Button 用 cva 生成 className，外部传入的 className 会覆盖 cva 内部 className（Tailwind 后写优先），所以 variant=default + className bg-blue-500 能覆盖默认 bg-primary。
 结果：1）typecheck 通过；2）329/329 vitest 全过；3）4 个按钮视觉统一为彩色实心，颜色按功能区分（蓝/琥珀/主色/红）。Docker 重建 frontend 待后续。
 
+## ql-20260622-012-b29d | 2026-06-22 11:19:33 | 项目计划表格添加边框线
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx
+背景：/ppm/project-plans 的 DataTable（antd Table）默认无外边框/单元格边框，用户要求加边框线。
+方案：在 DataTable 调用处加 antd 原生 `bordered` prop，antd Table 自动给表头/单元格/外框加细边框，仅本页生效不影响其他页面。
+结果：1）typecheck 通过；2）329/329 vitest 全过；3）表格表头/单元格/外框均显示边框线。Docker 重建 frontend 待后续。
+
+
 
 
 

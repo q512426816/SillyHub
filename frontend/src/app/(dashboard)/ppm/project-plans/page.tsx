@@ -569,6 +569,7 @@ export default function ProjectPlansPage() {
               dataSource={filteredPlans}
               loading={loading}
               size="small"
+              bordered
               scroll={{ x: "max-content" }}
               pagination={false}
               emptyText="暂无项目计划"
