@@ -420,3 +420,11 @@ created_at: 2026-06-03T08:42:04
 方案：只调结构不动色。1) PageContainer size="full" 容纳左右分栏；2) 顶部 SectionCard p-2 把搜索表单（项目名称/合同名称 + 展开的公司名/三个时间范围）和 SearchBarActions（搜索/重置/展开 + 分隔符 + 导出/+新建项目计划）合并到同一行；3) 主体 `<div className="flex gap-4">` 左右分栏：左侧 `<aside className="w-56 shrink-0">` 放 SectionCard + antd Tree（按 project_manager_id 分组，title 显示项目经理名+数量，defaultExpandAll，selectedKeys 受控），右侧 `<div className="min-w-0 flex-1">` 放 DataTable；4) 新增 selectedManager state（"all" | "manager:<id>"），filteredPlans useMemo 客户端过滤；5) summaryRow useMemo 改为基于 filteredPlans 求和，与表格视图保持一致；6) 修复 hooks 时序：filteredPlans 必须先于 summaryRow 声明，避免 TDZ。
 结果：1) typecheck 通过；2) 329/329 vitest 用例全过（无新增失败）；3) lint 无新增告警（仅预存 unused-args）；4) 点击树节点（如"张三 (3)"）右侧表格只显示该 manager 名下项目，合计行同步刷新。Docker 重建 frontend 待后续。
 
+## ql-20260622-004-e80a | 2026-06-22 09:56:32 | /ppm/project-plans 查询条件换行加间距 + 按钮移到顶部
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx
+背景：ql-003 把顶部搜索+操作合到一行后，两个问题：(1) Form layout=inline 字段换行后行间无垂直间距，紧贴；(2) 按钮组（搜索/重置/展开/导出/+新建）原本通过 SearchBarActions ml-auto 推到 Form 末尾右侧，展开多行后按钮被挤到最后一行底部，用户希望按钮在查询条件顶部。
+方案：1) SectionCard 内结构改为上下两段：顶部 `<div className="mb-2 flex items-center justify-end gap-2">` 放按钮组，下方 `<Form layout="inline" className="w-full" style={{ rowGap: 8 }}>` 放字段；2) Form 加 style={{ rowGap: 8 }} 让 antd inline-flex wrap 换行时有 8px 垂直间距；3) 删除 SearchBar/SearchBarActions 包装（原本是横向容器，与新的上下排列冲突）；4) 移除未使用的 import SearchBar/SearchBarActions。
+结果：1) typecheck 通过；2) 329/329 vitest 全过；3) 展开后字段超过容器宽度自动换行，行间 8px 间距；4) 按钮组始终位于 Form 上方右对齐，不再受字段数量影响。Docker 重建 frontend 待后续。
+
+

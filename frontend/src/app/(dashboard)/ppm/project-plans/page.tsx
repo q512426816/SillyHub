@@ -28,8 +28,6 @@ import {
   DataTable,
   PageContainer,
   PageHeader,
-  SearchBar,
-  SearchBarActions,
   SectionCard,
 } from "@/components/layout";
 import { PpmProjectPlanDetail } from "@/components/ppm-project-plan-detail";
@@ -404,92 +402,95 @@ export default function ProjectPlansPage() {
         subtitle="ps_project_plan — 项目维度的计划主表"
       />
 
-      {/* 顶部:搜索 + 主操作合并到一行 */}
+      {/* 顶部:主操作按钮行 + 搜索表单(换行时行间有间距) */}
       <SectionCard bodyPadding="p-2">
-        <SearchBar>
-          <Form<SearchForm> form={search} layout="inline" className="w-full">
-            <Form.Item label="项目名称" name="projectName">
-              <Input
-                placeholder="请输入项目名称"
-                allowClear
-                className="w-[200px]"
-                onPressEnter={() => handleSearch()}
-              />
-            </Form.Item>
-            <Form.Item label="合同名称" name="contractName">
-              <Input
-                placeholder="请输入合同名称"
-                allowClear
-                className="w-[200px]"
-                onPressEnter={() => handleSearch()}
-              />
-            </Form.Item>
-            {expanded && (
-              <>
-                <Form.Item label="公司名称" name="companyName">
-                  <Input
-                    placeholder="请输入公司名称"
-                    allowClear
-                    className="w-[200px]"
-                    onPressEnter={() => handleSearch()}
-                  />
-                </Form.Item>
-                <Form.Item
-                  label="合同签订时间"
-                  name="contractSignTimeRange"
-                >
-                  <RangePicker className="w-[240px]" />
-                </Form.Item>
-                <Form.Item
-                  label="项目开始时间"
-                  name="projectStartTimeRange"
-                >
-                  <RangePicker className="w-[240px]" />
-                </Form.Item>
-                <Form.Item
-                  label="预计验收时间"
-                  name="projectPlanEndTimeRange"
-                >
-                  <RangePicker className="w-[240px]" />
-                </Form.Item>
-              </>
-            )}
-          </Form>
-          <SearchBarActions>
-            <Button size="sm" onClick={() => handleSearch()}>
-              搜索
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => handleReset()}
-            >
-              重置
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setExpanded((v) => !v)}
-            >
-              {expanded ? "收起" : "展开"}
-            </Button>
-            <span className="mx-1 h-6 w-px bg-border" aria-hidden />
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={exporting}
-              onClick={() => void handleExport()}
-            >
-              {exporting ? "导出中…" : "导出"}
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => setDrawer({ open: true, mode: "create" })}
-            >
-              + 新建项目计划
-            </Button>
-          </SearchBarActions>
-        </SearchBar>
+        <div className="mb-2 flex items-center justify-end gap-2">
+          <Button size="sm" onClick={() => handleSearch()}>
+            搜索
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => handleReset()}
+          >
+            重置
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? "收起" : "展开"}
+          </Button>
+          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={exporting}
+            onClick={() => void handleExport()}
+          >
+            {exporting ? "导出中…" : "导出"}
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => setDrawer({ open: true, mode: "create" })}
+          >
+            + 新建项目计划
+          </Button>
+        </div>
+        <Form<SearchForm>
+          form={search}
+          layout="inline"
+          className="w-full"
+          style={{ rowGap: 8 }}
+        >
+          <Form.Item label="项目名称" name="projectName">
+            <Input
+              placeholder="请输入项目名称"
+              allowClear
+              className="w-[200px]"
+              onPressEnter={() => handleSearch()}
+            />
+          </Form.Item>
+          <Form.Item label="合同名称" name="contractName">
+            <Input
+              placeholder="请输入合同名称"
+              allowClear
+              className="w-[200px]"
+              onPressEnter={() => handleSearch()}
+            />
+          </Form.Item>
+          {expanded && (
+            <>
+              <Form.Item label="公司名称" name="companyName">
+                <Input
+                  placeholder="请输入公司名称"
+                  allowClear
+                  className="w-[200px]"
+                  onPressEnter={() => handleSearch()}
+                />
+              </Form.Item>
+              <Form.Item
+                label="合同签订时间"
+                name="contractSignTimeRange"
+              >
+                <RangePicker className="w-[240px]" />
+              </Form.Item>
+              <Form.Item
+                label="项目开始时间"
+                name="projectStartTimeRange"
+              >
+                <RangePicker className="w-[240px]" />
+              </Form.Item>
+              <Form.Item
+                label="预计验收时间"
+                name="projectPlanEndTimeRange"
+              >
+                <RangePicker className="w-[240px]" />
+              </Form.Item>
+            </>
+          )}
+        </Form>
       </SectionCard>
 
       {toast && (
