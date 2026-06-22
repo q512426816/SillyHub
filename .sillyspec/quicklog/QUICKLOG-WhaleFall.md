@@ -764,3 +764,22 @@ created_at: 2026-06-03T08:42:04
   - backend router.py 两处导出 filename 改时间戳格式 (datetime 已在 file 顶部 import)
   - frontend pnpm typecheck 通过
   - backend pytest app/modules/ppm/problem/tests 35/35 通过
+
+## ql-20260622-035-a1e9 | 2026-06-22 20:23:47 | problem-changes 整体对齐 project-plans 布局
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/problem-changes/page.tsx
+背景:/ppm/problem-changes 仍是老布局(max-w-7xl + antd Button + inline flex 平铺搜索 + Table 无 bordered/无 scrollY/无分页/操作列 antd Button size=small),与 project-plans 及已对齐的 problem-list 视觉割裂。
+方案:
+  1. 容器:max-w-7xl + 自写 header → PageContainer size=full + PageHeader + SectionCard bodyPadding=p-2
+  2. 顶部按钮行右对齐:搜索(primary size=sm 无 variant) + 重置(outline) + 分隔 + 导出(outline),全部 ui Button
+  3. 查询条件: inline flex 平铺 → grid w-full grid-cols-4 gap-3 垂直 Field(标题在上,控件在下)
+  4. 关键字输入:keywordInput/keyword 双 state(回车/搜索按钮才同步,allowClear 清空立即同步)
+  5. Table: 加 bordered + scroll {x:max-content, y:calc(100vh-430px)} + pagination(current/pageSize/total/showSizeChanger/showTotal) + 客户端分页 20/页(后端 list_changes 无过滤 Query,拉 200 条本地过滤 + slice 分页)
+  6. 列: 源问题 width=200 / 变更原因 width=200 / 责任人 width=120 / 当前处理人 width=120 / 状态 width=100 fixed=right / 操作 width=max-content fixed=right + whitespace-nowrap + justify-end
+  7. 操作按钮: antd Button (size=small type=primary danger) → ui Button (size=sm + variant:详情 outline / 审核 primary / 删除 destructive)
+  8. 错误状态: antd Button 重新加载 → ui Button variant=outline size=sm
+  9. 删除 toast 改 alert(与 problem-list 一致)
+结果:
+  - 整文件 Write 重写
+  - frontend pnpm typecheck 通过
+

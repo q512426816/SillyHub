@@ -1,36 +1,40 @@
 "use client";
 
 /**
- * 问题变更 (ProblemChange) 列表页。
+ * 问题变更 (ProblemChange) 列表页 — 对齐 project-plans 风格。
  *
- * 问题变更状态 (简化,不走完整 4 节点):
- * - status=1 审核中
- * - status=2 已完成(变更生效,源问题清单标记变更中解除)
- * - status=3 已作废
+ * 状态:
+ *  - status=1 审核中
+ *  - status=2 已完成
+ *  - status=3 已作废
  *
- * 操作(对齐源 problemchange/index.vue):
- * - status=1 + now_handle_user 归属:审核(ChangeAuditForm)/ 删除
- * - 任意:详情(ChangeDetailForm)
+ * 操作:
+ *  - status=1 + now_handle_user 归属:审核 / 删除
+ *  - 任意:详情
  *
- * 搜索栏(对照源 queryParams,本仓后端仅分页,复杂字段本地过滤):
- *  - 项目关键字 + 状态(多选)+ 创建时间区间
- *
- * 设计依据:.sillyspec/changes/2026-06-21-ppm-frontend-alignment/design.md §7
+ * 后端 GET /problem-change 仅分页(无筛选 Query),本页拉 200 条做本地过滤
+ * + 客户端分页展示。查询条件变化回到第 1 页,关键字按 Enter/搜索按钮提交。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Button,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+import {
   DatePicker,
   Drawer,
   Input,
   Select,
-  Space,
   Table,
   type TableProps,
   Tag,
 } from "antd";
 import type { Dayjs } from "dayjs";
 
+import { Button } from "@/components/ui/button";
+import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import {
   matchAnyUser,
   PROBLEM_CHANGE_STATUS_TEXT,
@@ -43,10 +47,7 @@ import {
   type ProblemChange,
 } from "@/lib/ppm";
 import { useSession } from "@/stores/session";
-import {
-  ChangeAuditForm,
-  ChangeDetailForm,
-} from "./_forms";
+import { ChangeAuditForm, ChangeDetailForm } from "./_forms";
 
 const { RangePicker } = DatePicker;
 
@@ -66,6 +67,11 @@ type DrawerMode =
   | { kind: "detail"; change: ProblemChange }
   | { kind: "audit"; change: ProblemChange };
 
+const DRAWER_TITLE: Record<DrawerMode["kind"], string> = {
+  detail: "问题变更详情",
+  audit: "审核问题变更",
+};
+
 export default function ProblemChangesPage() {
   const { user: currentUser } = useSession();
   const currentUserId = currentUser?.id ?? "";
@@ -75,11 +81,13 @@ export default function ProblemChangesPage() {
   const [error, setError] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<DrawerMode | null>(null);
   const [exporting, setExporting] = useState(false);
-  const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(
-    null,
-  );
 
-  // 搜索栏(对照源 index.vue queryParams,本仓后端仅分页,本地过滤)
+  // 分页(客户端分页,本地切片)
+  const [current, setCurrent] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  // 搜索栏:keywordInput 仅受控显示,回车/搜索按钮才同步到 keyword 触发查询
+  const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(
@@ -101,11 +109,6 @@ export default function ProblemChangesPage() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  const showToast = (ok: boolean, text: string) => {
-    setToast({ ok, text });
-    setTimeout(() => setToast(null), 3000);
-  };
 
   const filtered = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
@@ -130,36 +133,45 @@ export default function ProblemChangesPage() {
     });
   }, [items, keyword, statusFilter, dateRange]);
 
+  const total = filtered.length;
+  const paged = useMemo(() => {
+    const start = (current - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, current, pageSize]);
+
+  // 过滤条件变化 → 回到第 1 页
+  useEffect(() => {
+    setCurrent(1);
+  }, [keyword, statusFilter, dateRange]);
+
+  const commitKeyword = () => setKeyword(keywordInput);
+
   const resetFilters = () => {
+    setKeywordInput("");
     setKeyword("");
     setStatusFilter([]);
     setDateRange(null);
-  };
-
-  const handleDelete = async (c: ProblemChange) => {
-    if (c.status !== "1") {
-      showToast(false, "仅审核中状态可删除");
-      return;
-    }
-    if (!confirm("删除该问题变更?")) return;
-    try {
-      await deleteProblemChange(c.id);
-      showToast(true, "已删除");
-      await load();
-    } catch (err) {
-      showToast(false, err instanceof ApiError ? err.message : "删除失败");
-    }
   };
 
   const handleExport = async () => {
     setExporting(true);
     try {
       await exportProblemChanges();
-      showToast(true, "导出已开始");
     } catch (err) {
-      showToast(false, err instanceof ApiError ? err.message : "导出失败");
+      alert(err instanceof ApiError ? err.message : "导出失败");
     } finally {
       setExporting(false);
+    }
+  };
+
+  const handleDelete = async (c: ProblemChange) => {
+    if (c.status !== "1") return;
+    if (!confirm("删除该问题变更?")) return;
+    try {
+      await deleteProblemChange(c.id);
+      await load();
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : "删除失败");
     }
   };
 
@@ -168,6 +180,7 @@ export default function ProblemChangesPage() {
       title: "源问题",
       dataIndex: "resource_id",
       key: "resource_id",
+      width: 200,
       render: (v: string, c: ProblemChange) => (
         <div className="text-xs">
           <div className="font-mono">{v}</div>
@@ -187,12 +200,14 @@ export default function ProblemChangesPage() {
       title: "变更原因",
       dataIndex: "change_reason",
       key: "change_reason",
+      width: 200,
       render: (v: string | null) => v ?? "—",
     },
     {
       title: "责任人",
       dataIndex: "duty_user_name",
       key: "duty_user_name",
+      width: 120,
       render: (v: string | null, c: ProblemChange) =>
         v ?? (c.duty_user_id ? c.duty_user_id : "待指派"),
     },
@@ -200,6 +215,7 @@ export default function ProblemChangesPage() {
       title: "当前处理人",
       dataIndex: "now_handle_user_name",
       key: "now_handle_user_name",
+      width: 120,
       render: (v: string | null, c: ProblemChange) =>
         v ?? (c.now_handle_user ? c.now_handle_user : "—"),
     },
@@ -207,6 +223,8 @@ export default function ProblemChangesPage() {
       title: "状态",
       dataIndex: "status",
       key: "status",
+      width: 100,
+      fixed: "right",
       render: (v: string) => (
         <Tag color={STATUS_COLOR[v] ?? "default"}>
           {PROBLEM_CHANGE_STATUS_TEXT[v] ?? v}
@@ -217,13 +235,15 @@ export default function ProblemChangesPage() {
       title: "操作",
       key: "actions",
       align: "right",
+      width: "max-content",
+      fixed: "right",
       render: (_v: unknown, c: ProblemChange) => {
-        // 源 index.vue:checkUser(scope.row.nowHandleUser?.split(',')) && status==='1'
         const isHandler = matchAnyUser([c.now_handle_user], currentUserId);
         return (
-          <div className="flex justify-end gap-1">
+          <div className="flex whitespace-nowrap justify-end gap-1">
             <Button
-              size="small"
+              size="sm"
+              variant="outline"
               onClick={() => setDrawer({ kind: "detail", change: c })}
             >
               详情
@@ -231,8 +251,7 @@ export default function ProblemChangesPage() {
             {c.status === "1" && (
               <>
                 <Button
-                  size="small"
-                  type="primary"
+                  size="sm"
                   disabled={!isHandler}
                   title={isHandler ? undefined : "仅当前处理人可审核"}
                   onClick={() => setDrawer({ kind: "audit", change: c })}
@@ -240,8 +259,8 @@ export default function ProblemChangesPage() {
                   审核
                 </Button>
                 <Button
-                  size="small"
-                  danger
+                  size="sm"
+                  variant="destructive"
                   disabled={!isHandler}
                   title={isHandler ? undefined : "仅当前处理人可删除"}
                   onClick={() => void handleDelete(c)}
@@ -257,76 +276,80 @@ export default function ProblemChangesPage() {
   ];
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-5 px-6 py-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="mt-0.5">问题变更</h1>
-          <p className="text-xs text-muted-foreground">
-            问题清单的变更申请:审核中 → 已完成 / 已作废
-          </p>
-        </div>
-        <Button onClick={() => void handleExport()} loading={exporting}>
-          导出
-        </Button>
-      </header>
+    <PageContainer size="full">
+      <PageHeader
+        title="问题变更"
+        subtitle="问题清单的变更申请:审核中 → 已完成 / 已作废"
+      />
 
-      {/* 搜索栏(对照源 index.vue queryParams) */}
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 8,
-          alignItems: "center",
-        }}
-      >
-        <Input
-          allowClear
-          style={{ width: 240 }}
-          placeholder="项目/模块/变更内容/原因"
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-        />
-        <Select<string[]>
-          mode="multiple"
-          allowClear
-          style={{ minWidth: 180 }}
-          placeholder="状态(可多选)"
-          value={statusFilter}
-          onChange={(v) => setStatusFilter(v as string[])}
-          options={STATUS_OPTIONS}
-        />
-        <RangePicker
-          value={dateRange as [Dayjs, Dayjs] | null}
-          onChange={(v) =>
-            setDateRange(v as [Dayjs | null, Dayjs | null] | null)
-          }
-          placeholder={["创建开始", "创建结束"]}
-        />
-        <Button onClick={resetFilters}>重置</Button>
-        <span
-          style={{ marginLeft: "auto", fontSize: 12, color: "rgba(0,0,0,0.45)" }}
-        >
-          共 {filtered.length} 条
-        </span>
-      </div>
-
-      {toast && (
-        <div
-          className={`rounded border px-3 py-2 text-xs ${
-            toast.ok
-              ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-              : "border-destructive/30 bg-red-50 text-destructive"
-          }`}
-        >
-          {toast.text}
+      <SectionCard bodyPadding="p-2">
+        {/* 顶部按钮行:右对齐(搜索 | 重置 | 分隔 | 导出) */}
+        <div className="mb-2 flex items-center justify-end gap-2">
+          <Button size="sm" onClick={commitKeyword}>
+            搜索
+          </Button>
+          <Button size="sm" variant="outline" onClick={resetFilters}>
+            重置
+          </Button>
+          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={exporting}
+            onClick={() => void handleExport()}
+          >
+            {exporting ? "导出中…" : "导出"}
+          </Button>
         </div>
-      )}
+
+        {/* 查询条件:垂直 grid-cols-4 */}
+        <div className="grid w-full grid-cols-4 gap-3">
+          <Field label="关键字">
+            <Input
+              allowClear
+              placeholder="项目/模块/变更内容/原因(回车查询)"
+              value={keywordInput}
+              onChange={(e) => {
+                const v = e.target.value;
+                setKeywordInput(v);
+                if (!v) setKeyword("");
+              }}
+              onPressEnter={commitKeyword}
+            />
+          </Field>
+          <Field label="状态">
+            <Select<string[]>
+              mode="multiple"
+              allowClear
+              className="w-full"
+              placeholder="状态(可多选)"
+              value={statusFilter}
+              onChange={(v) => setStatusFilter(v as string[])}
+              options={STATUS_OPTIONS}
+            />
+          </Field>
+          <Field label="创建时间">
+            <RangePicker
+              className="w-full"
+              value={dateRange as [Dayjs, Dayjs] | null}
+              onChange={(v) =>
+                setDateRange(v as [Dayjs | null, Dayjs | null] | null)
+              }
+              placeholder={["创建开始", "创建结束"]}
+            />
+          </Field>
+          <div className="self-end text-right text-xs text-muted-foreground">
+            共 {total} 条
+          </div>
+        </div>
+      </SectionCard>
 
       {error ? (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {error}
           <Button
-            size="small"
+            size="sm"
+            variant="outline"
             className="ml-3"
             onClick={() => void load()}
           >
@@ -337,11 +360,23 @@ export default function ProblemChangesPage() {
         <Table<ProblemChange>
           rowKey="id"
           columns={columns}
-          dataSource={filtered}
+          dataSource={paged}
           loading={loading}
           size="small"
-          pagination={false}
-          scroll={{ x: "max-content" }}
+          bordered
+          scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
+          pagination={{
+            current,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            pageSizeOptions: ["10", "20", "50", "100"],
+            showTotal: (t: number) => `共 ${t} 条`,
+            onChange: (page: number, size: number) => {
+              setCurrent(page);
+              setPageSize(size);
+            },
+          }}
           locale={{ emptyText: "暂无问题变更" }}
         />
       )}
@@ -371,11 +406,24 @@ export default function ProblemChangesPage() {
           />
         )}
       </Drawer>
-    </div>
+    </PageContainer>
   );
 }
 
-const DRAWER_TITLE: Record<DrawerMode["kind"], string> = {
-  detail: "问题变更详情",
-  audit: "审核问题变更",
-};
+/**
+ * 查询条件外壳:垂直布局(标题在上,控件在下),对齐 project-plans 风格。
+ */
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex w-full flex-col gap-1">
+      <span className="text-xs leading-4 text-muted-foreground">{label}</span>
+      {children}
+    </div>
+  );
+}
