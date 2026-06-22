@@ -100,7 +100,15 @@ def mocked_hub():
 @pytest.fixture()
 def mocked_redis():
     redis = _mock_redis()
-    with patch("app.modules.daemon.service.get_redis", return_value=redis):
+    # facade + run_sync + session 子 service 都需 patch：
+    # close_interactive_run / submit_messages 已迁 RunSyncService（task-04）；
+    # _publish_session_event 已迁 SessionService（task-05）。get_redis 从各自
+    # 子包模块取，patch 必须跟随；session/lease 路径仍走 facade。三处指向同一 mock。
+    with (
+        patch("app.modules.daemon.session.service.get_redis", return_value=redis),
+        patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis),
+        patch("app.modules.daemon.session.service.get_redis", return_value=redis),
+    ):
         yield redis
 
 

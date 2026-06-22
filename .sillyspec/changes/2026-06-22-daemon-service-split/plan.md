@@ -18,26 +18,26 @@ plan_level: full
 | 子包 lazy import / 持有引用避免循环（session↔lease↔run_sync） | task-01（W1 建骨架后跑全测） | 调整子 service 构造期引用注入策略，重做 W1 |
 
 ## Wave 1（无依赖 — 安全网）
-- [ ] task-01: 新建 5 子包空壳 + DaemonService 改为持有 5 子 service 引用的 facade（方法体暂保留原逻辑直接委托），跑 daemon 全测确认行为不变（覆盖：FR-01, FR-02, D-002）
+- [x] task-01: 新建 5 子包空壳 + DaemonService 改为持有 5 子 service 引用的 facade（方法体暂保留原逻辑直接委托），跑 daemon 全测确认行为不变（覆盖：FR-01, FR-02, D-002）
 
 ## Wave 2（依赖 W1 — 最小最独立子域）
-- [ ] task-02: runtime 方法迁入 `runtime/service.py`（RuntimeService），facade 改委托（覆盖：FR-02, D-004）
+- [x] task-02: runtime 方法迁入 `runtime/service.py`（RuntimeService），facade 改委托（覆盖：FR-02, D-004）
 
 ## Wave 3（依赖 W1 — 小子域）
-- [ ] task-03: patch 方法迁入 `patch/service.py`（PatchService），facade 改委托（覆盖：FR-02）
+- [x] task-03: patch 方法迁入 `patch/service.py`（PatchService），facade 改委托（覆盖：FR-02）
 
 ## Wave 4（依赖 W1 — AgentRun 状态机）
-- [ ] task-04: run_sync 方法迁入 `run_sync/service.py`（RunSyncService），facade 改委托（覆盖：FR-02, FR-04）
+- [x] task-04: run_sync 方法迁入 `run_sync/service.py`（RunSyncService），facade 改委托（覆盖：FR-02, FR-04）
 
 ## Wave 5（依赖 W1 — 最大子域，单独 Wave 便于回滚）
-- [ ] task-05: session 方法迁入 `session/service.py`（SessionService），facade 改委托；通知 `fix-interactive-lifecycle` 更新 W4 方法定位（覆盖：FR-02, FR-04）
+- [x] task-05: session 方法迁入 `session/service.py`（SessionService），facade 改委托；通知 `fix-interactive-lifecycle` 更新 W4 方法定位（覆盖：FR-02, FR-04）
 
 ## Wave 6（依赖 W1 — lease，DaemonLeaseService 不动）
-- [ ] task-06: `DaemonService.lease_*` 迁入 `lease/service.py`（LeaseService）+ `_build_claim_payload` 迁入 `lease/context.py`；`lease_service.py` 原位不动（覆盖：FR-02, FR-03, D-003）
+- [x] task-06: `DaemonService.lease_*` 迁入 `lease/service.py`（LeaseService）+ `_build_claim_payload` 迁入 `lease/context.py`；`lease_service.py` 原位不动（覆盖：FR-02, FR-03, D-003）
 
 ## 收尾 Wave（依赖 W2-W6 全部完成）
-- [ ] task-07: 异常类定义迁入对应子包，facade `service.py` 集中 re-export（按 `grep -rn "from app.modules.daemon.service import"` 全量收集）（覆盖：FR-05, D-002）
-- [ ] task-08: 更新 `daemon.md` 模块文档 + 全量验收（覆盖：FR-01, FR-04）
+- [x] task-07: 异常类定义迁入对应子包，facade `service.py` 集中 re-export（按 `grep -rn "from app.modules.daemon.service import"` 全量收集）（覆盖：FR-05, D-002）
+- [x] task-08: 更新 `daemon.md` 模块文档 + 全量验收（覆盖：FR-01, FR-04）
 
 > **执行顺序建议**：W2→W3→W4→W5→W6 串行（每次只迁一个子域，facade 逐步瘦身，避免并发改 `service.py` 冲突）。逻辑上 W2-W6 均只依赖 W1，但串行提交保证 git 历史清晰、单 Wave 可独立 `git revert`。
 

@@ -27,8 +27,8 @@ import pytest
 from app.modules.agent.model import AgentRun
 from app.modules.agent.placement import RunPlacementService
 from app.modules.auth.model import User
+from app.modules.daemon.lease.context import build_claim_payload
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
-from app.modules.daemon.service import DaemonService
 
 # ---- Test helpers ------------------------------------------------------------
 
@@ -233,7 +233,7 @@ async def test_build_claim_payload_propagates_bundle_fields(db_session):
     db_session.add(lease)
     await db_session.commit()
 
-    payload = await DaemonService(db_session)._build_claim_payload(lease)
+    payload = await build_claim_payload(db_session, lease)
 
     assert payload["repo_url"] == "https://github.com/acme/repo.git"
     assert payload["branch"] == "main"

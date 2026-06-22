@@ -169,7 +169,7 @@ class TestSubmitMessagesDualPublish:
         )
 
         redis = AsyncMock()
-        with patch("app.modules.daemon.service.get_redis", return_value=redis):
+        with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
             svc = DaemonService(db_session)
             count = await svc.submit_messages(lease.id, "tok", run.id, _messages("a", "b"))
 
@@ -207,7 +207,7 @@ class TestSubmitMessagesDualPublish:
         run, lease = await _make_batch_run(db_session, runtime_id=rt.id)
 
         redis = AsyncMock()
-        with patch("app.modules.daemon.service.get_redis", return_value=redis):
+        with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
             svc = DaemonService(db_session)
             await svc.submit_messages(lease.id, "tok", run.id, _messages("x"))
 
@@ -247,7 +247,7 @@ class TestSubmitMessagesDualPublish:
 
         redis = AsyncMock()
         redis.publish = AsyncMock(side_effect=flaky_publish)
-        with patch("app.modules.daemon.service.get_redis", return_value=redis):
+        with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
             svc = DaemonService(db_session)
             # Must not raise
             count = await svc.submit_messages(lease.id, "tok", run.id, _messages("a", "b"))

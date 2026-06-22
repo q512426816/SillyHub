@@ -115,7 +115,13 @@ def _mock_redis() -> AsyncMock:
 @pytest.fixture()
 def mocked_redis():
     redis = _mock_redis()
-    with patch("app.modules.daemon.service.get_redis", return_value=redis):
+    # task-05：_publish_session_event 已迁入 SessionService，get_redis 从
+    # session.service 模块取；permission_service 经 facade._publish_session_event
+    # 委托到 SessionService，patch 必须跟随到 session 子包模块。
+    with (
+        patch("app.modules.daemon.session.service.get_redis", return_value=redis),
+        patch("app.modules.daemon.session.service.get_redis", return_value=redis),
+    ):
         yield redis
 
 
