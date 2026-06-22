@@ -482,3 +482,9 @@
 文件：
 - frontend/src/components/ask-user-dialog-card.tsx (移除自动 Other 追加 + 每问常驻"或手动输入"框 + computeAnswer 输入优先)
 - frontend/src/components/ask-user-dialog-card.test.tsx (更新输入框/Other 相关用例)
+
+## ql-20260622-001-a169 | 2026-06-22 09:03:56 | 修复 frontend Docker healthcheck 误报 unhealthy（base image alpine→slim 后 wget 缺失，HEALTHCHECK 改用 node 内置 fetch）
+状态：已完成
+结果：frontend/Dockerfile HEALTHCHECK 由 wget 改 node -e fetch（零依赖，slim/alpine 通用）。重建 frontend 镜像 force-recreate，验证 Status=healthy FailingStreak=0、容器内探针=node fetch、连续3次探测 ExitCode=0、/api/health 200。回归已修复。
+文件：
+- frontend/Dockerfile (HEALTHCHECK 改用 node -e fetch，零依赖)

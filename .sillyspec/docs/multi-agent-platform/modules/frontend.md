@@ -253,6 +253,8 @@ logout() -> 清空 useSession + 跳转 /login
    - `NEXT_PUBLIC_API_BASE_URL`：后端 API 地址（生产环境必填）
    - `INTERNAL_API_BASE_URL`：SSR 时使用的后端地址
 
+8. **容器健康检查**：`frontend/Dockerfile` 的 HEALTHCHECK 使用 node20 内置 `fetch` 探测 `:3000`（零依赖），不再依赖 `wget`/`curl`。切换 base image（alpine↔slim）时无需额外安装工具。
+
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->
@@ -288,3 +290,4 @@ logout() -> 清空 useSession + 跳转 /login
 | 2026-06-19 | ql-20260619-007-7b2e | 修复 `/runtimes` 选中 active 会话右侧无回显：`handleSelect` 移除 active 空白 live 分支，所有会话（含 active）统一调 `getAgentSessionLogs` 只读回看；渲染条件改 `selected`；删除无用 `liveViewOpen` 状态。 |
 | 2026-06-20 | ql-20260620-001-7b2e | 前端 UI 文案中文化：新增 `lib/status-labels.ts`（枚举状态中文映射 + labelOf 兜底）；改约35个前端文件，品牌 Multi-Agent Platform→SillyHub、Daemon→守护进程、Agent→智能体、Workspaces→工作区、Overview→概览/Management→管理/System→系统 等；技术标识符（日志频道/Claude 工具名/数据字段名/Bootstrap/Git/commit/PAT）保留英文；后端枚举状态值走 status-labels 映射。tsc/lint exit0，vitest 213/213 通过。 |
 | 2026-06-20 | 2026-06-20-session-history-enhance | 交互式会话历史回看：用户消息落库回看 + 任意会话 reopen 续聊(仅claude) + 任意状态删除 |
+| 2026-06-22 | ql-20260622-001-a169 | `frontend/Dockerfile` HEALTHCHECK 由 wget 改 node20 内置 fetch：base image 从 alpine 切 slim 后 wget 缺失导致探针恒失败、容器 unhealthy（服务正常），改用零依赖 node fetch，重建后 Status=healthy。 |
