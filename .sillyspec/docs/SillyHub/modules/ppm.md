@@ -45,3 +45,4 @@ created_at: 2026-06-20T15:35:00+0800
 - ql-20260622-014-c8f3 | /project-plan GET 改 response_model=Page[T] 返回 total(原 list 丢 total),前端 listProjectPlans 返 PageResp + page.tsx 受控分页 (page/pageSize/total + onChange 重查 + 查询回到 page=1)
 - ql-20260622-015-7e2a | project-plans 页面默认 pageSize 10→20 + 左侧项目经理树改受控 expandedKeys 强制全展开(defaultExpandAll 异步 treeData 不可靠)
 - ql-20260622-016-3b9d | /project-plan GET 加 PsProjectPlanListReq 过滤(原 PageReq 丢过滤参数 → 前端过滤失效);service ilike+时间区间;前端 RangePicker onChange 选中即查
+- ql-20260622-017-4a1f | project-plans 表格 scroll.y:500 去掉(自适应高度);Table.Summary 移除 fixed="bottom"(无 y 时吸底无意义);已有分页每页≤20 不需要固定高度兜底

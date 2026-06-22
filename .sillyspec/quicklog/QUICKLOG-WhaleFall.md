@@ -545,3 +545,13 @@ created_at: 2026-06-03T08:42:04
   3. 后端 service list_ps_project_plans 接收 PsProjectPlanListReq,字符串字段 ilike 模糊匹配,时间字段用 [start, end+1day) 半开区间(前端传 YYYY-MM-DD → 当日 00:00,end 加一天保证含当日)
   4. 前端 3 个 RangePicker 加 onChange → setTimeout 0 调 handleSearch(antd Form 在 onChange 触发时已 commit form value,setTimeout 0 保证下一 tick 拿到新值)
 结果：1）typecheck 通过；2）329/329 vitest 全过；3）后端语法检查通过(本地 Python 3.11 不支持 PEP 695 泛型 _Crud[T] 是误报,容器 3.13 OK)。Docker 重建前后端待后续。
+
+## ql-20260622-017-4a1f | 2026-06-22 13:34:00 | 项目计划表格高度自适应
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/project-plans/page.tsx
+背景：当前 scroll y:500 是固定高度,数据多时纵向滚动条,数据少时下方留白。用户要求"列表高度改为自适应"——根据内容自动撑开。
+方案:
+  1. 移除 scroll.y (保留 x: "max-content" 横向滚动),让 antd Table 按数据行数自动撑高
+  2. <Table.Summary fixed="bottom"> → <Table.Summary> (无 y 时吸底无意义;表格本身不滚动 summary 始终是最后一行)
+  3. 上版 ql-013 加的 y:500 是当时无分页时的滚动兜底,现在已有分页(每页 ≤20 条)不需要固定高度
+结果：1）typecheck 通过；2）329/329 vitest 全过；3）表格按数据行数自动撑高,无纵向滚动条。Docker 重建 frontend 待后续。

@@ -624,7 +624,7 @@ export default function ProjectPlansPage() {
               loading={loading}
               size="small"
               bordered
-              scroll={{ x: "max-content", y: 500 }}
+              scroll={{ x: "max-content" }}
               pagination={{
                 current: page,
                 pageSize,
@@ -639,7 +639,7 @@ export default function ProjectPlansPage() {
               }}
               emptyText="暂无项目计划"
               summary={() => (
-                <Table.Summary fixed="bottom">
+                <Table.Summary>
                   <Table.Summary.Row>
                     <Table.Summary.Cell index={0}>合计</Table.Summary.Cell>
                     <Table.Summary.Cell index={1} />
