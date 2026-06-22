@@ -1023,4 +1023,55 @@ describe("useAgentRunStream — 边界", () => {
       seenUrls.some((u) => u.endsWith("/sessions/sess-active/dialogs")),
     ).toBe(true);
   });
+
+  // ql-20260623：FR-07 dialog 恢复不再受 isActive 门控——即使 isActive=false
+  // （D-001 prefetch 路径），pending askuser 对话仍需恢复，否则刷新后用户无法回答。
+  it("FR-07 isActive=false → 仍恢复 pending dialogs（D-001 路径）", async () => {
+    const seenUrls: string[] = [];
+    installFetchMock((url) => {
+      seenUrls.push(url.pathname);
+      if (url.pathname.endsWith("/agent/runs/run-1")) {
+        return jsonResponse({ id: "run-1", agent_session_id: "sess-active" });
+      }
+      if (url.pathname.endsWith("/sessions/sess-active/dialogs")) {
+        return jsonResponse([
+          makePermRequest({
+            request_id: "pending-d001",
+            session_id: "sess-active",
+            dialog_kind: "ask_user",
+          }),
+        ]);
+      }
+      if (url.pathname.endsWith("/logs")) {
+        return jsonResponse([]);
+      }
+      return jsonResponse({ id: "run-1", session_id: null });
+    });
+
+    const { result } = renderHook(
+      ({ workspaceId, runId, isActive }) =>
+        useAgentRunStream(workspaceId, runId, { isActive }),
+      {
+        initialProps: {
+          workspaceId: "ws-1",
+          runId: "run-1",
+          isActive: false,
+        },
+      },
+    );
+
+    // D-001：isActive=false 不连 SSE
+    await waitFor(() => expect(currentFake).not.toBeNull());
+    expect(currentFake!.connect).not.toHaveBeenCalled();
+
+    // 但 FR-07 dialog 恢复仍执行
+    await waitFor(() => {
+      expect(
+        result.current.perms.some((p) => p.request_id === "pending-d001"),
+      ).toBe(true);
+    });
+    expect(
+      seenUrls.some((u) => u.endsWith("/sessions/sess-active/dialogs")),
+    ).toBe(true);
+  });
 });

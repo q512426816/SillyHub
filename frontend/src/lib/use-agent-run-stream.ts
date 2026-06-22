@@ -240,26 +240,12 @@ export function useAgentRunStream(
       client.disconnect();
     });
 
-    // D-001 分叉：isActive=false 只 prefetch 历史、不连 SSE
-    if (!isActive) {
-      // 底层 connect 会建 EventSource，违背 D-001 —— 改为手动调 getAgentRunLogs。
-      // callbacks 仍注册（防御性，实际 isActive=false 不连不会被触发）。
-      getAgentRunLogs(workspaceId, runId)
-        .then((history) => {
-          if (cancelled) return;
-          setLogs(history);
-          setLoading(false);
-        })
-        .catch(() => {
-          if (cancelled) return;
-          // prefetch 失败不阻断 UI，清 loading 让面板展示空态
-          setLoading(false);
-        });
-      return; // ← 不调 client.connect
-    }
-
-    // FR-07：isActive=true，getAgentRun 取 agent_session_id → fetchPendingDialogs
-    // 恢复未答 dialog，合并进 perms（按 request_id 去重）。失败静默，不阻断 SSE 连接。
+    // FR-07：getAgentRun → agent_session_id → fetchPendingDialogs 恢复未答 dialog，
+    // 合并进 perms（按 request_id 去重）。失败静默，不阻断主流程。
+    //
+    // ql-20260623：无论 isActive 与否都执行——askuser pending 的 run 可能因
+    // status 轮询延迟或边界情况导致 isActive=false（走下方 D-001 prefetch），
+    // 此时仍需恢复审批卡片让用户能回答。dialog 恢复走 REST，不依赖 SSE 连接。
     // ⚠️ 用 agent_session_id（AgentSession 表 id），非 session_id（daemon 内部 id）——
     // fetchPendingDialogs 查 agent_sessions/session_dialog_requests 表，需 AgentSession.id。
     getAgentRun(workspaceId, runId)
@@ -285,6 +271,24 @@ export function useAgentRunStream(
       .catch(() => {
         /* FR-07 失败不影响主流程 */
       });
+
+    // D-001 分叉：isActive=false 只 prefetch 历史、不连 SSE
+    if (!isActive) {
+      // 底层 connect 会建 EventSource，违背 D-001 —— 改为手动调 getAgentRunLogs。
+      // callbacks 仍注册（防御性，实际 isActive=false 不连不会被触发）。
+      getAgentRunLogs(workspaceId, runId)
+        .then((history) => {
+          if (cancelled) return;
+          setLogs(history);
+          setLoading(false);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          // prefetch 失败不阻断 UI，清 loading 让面板展示空态
+          setLoading(false);
+        });
+      return; // ← 不调 client.connect
+    }
 
     // 连 SSE（非阻塞，底层内部已先 prefetch 再建 EventSource）
     void client.connect(accessToken);
