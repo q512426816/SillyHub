@@ -844,3 +844,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
 结果:去掉 PpmUserSelect 外层 `<div className={inputCls + "flex h-8 w-full items-center px-1"}>` 包裹(造成 antd Select 自带边框外又多一层 input 边框 → 框中框),改为直接 `<PpmUserSelect style={{width:100%}} ...>`,对齐 problem-list / work-hours 标准用法。前端 typecheck 通过。
+
+
+## ql-20260623-005-c3e1 | 2026-06-23 10:05:00 | task-plans 月份/项目/视图 查询条件改 antd 统一风格
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
+结果:月份 `<input type=month>` → antd `DatePicker.MonthPicker`(value Dayjs/monthFilter string 互转 via dayjs());项目原生 `<select>` → antd `Select`(options projects.map);视图原生 `<select>` → antd `Select`(options 全部任务/我的任务)。新增 dayjs 默认 import 用作 string↔Dayjs 转换。inputCls import 保留(TaskDrawer 还在用)。前端 typecheck 通过。

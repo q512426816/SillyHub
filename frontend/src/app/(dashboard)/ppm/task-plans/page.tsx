@@ -14,7 +14,7 @@
  */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { DatePicker, Input, Select, Table, type TableProps, Tag } from "antd";
-import type { Dayjs } from "dayjs";
+import dayjs, { type Dayjs } from "dayjs";
 
 import { Button } from "@/components/ui/button";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
@@ -464,28 +464,27 @@ export default function TaskPlansPage() {
             />
           </Field>
           <Field label="月份">
-            <input
-              type="month"
-              value={monthFilter}
-              onChange={(e) => setMonthFilter(e.target.value)}
-              className={`${inputCls} w-full`}
-              aria-label="月份筛选"
+            <DatePicker.MonthPicker
+              className="w-full"
+              placeholder="选择月份"
+              value={monthFilter ? dayjs(monthFilter, "YYYY-MM") : null}
+              onChange={(d) =>
+                setMonthFilter(d ? d.format("YYYY-MM") : "")
+              }
             />
           </Field>
           <Field label="项目">
-            <select
-              value={projectFilter}
-              onChange={(e) => setProjectFilter(e.target.value)}
-              className={`${inputCls} w-full`}
-              aria-label="项目筛选"
-            >
-              <option value="">全部项目</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.project_name ?? p.id}
-                </option>
-              ))}
-            </select>
+            <Select<string>
+              className="w-full"
+              placeholder="全部项目"
+              allowClear
+              value={projectFilter || undefined}
+              onChange={(v) => setProjectFilter(v ?? "")}
+              options={projects.map((p) => ({
+                label: p.project_name ?? p.id,
+                value: p.id,
+              }))}
+            />
           </Field>
           <Field label="负责人">
             <PpmUserSelect
@@ -519,15 +518,15 @@ export default function TaskPlansPage() {
             />
           </Field>
           <Field label="视图">
-            <select
+            <Select<ViewMode>
+              className="w-full"
               value={view}
-              onChange={(e) => setView(e.target.value as ViewMode)}
-              className={`${inputCls} w-full`}
-              aria-label="视图切换"
-            >
-              <option value="all">全部任务</option>
-              <option value="personal">我的任务</option>
-            </select>
+              onChange={(v) => setView(v as ViewMode)}
+              options={[
+                { label: "全部任务", value: "all" },
+                { label: "我的任务", value: "personal" },
+              ]}
+            />
           </Field>
           <div className="self-end text-right text-xs text-muted-foreground">
             共 {total} 条
