@@ -402,8 +402,14 @@ class DaemonService:
         user_id: uuid.UUID,
         *,
         reason: str = "manual",
+        actor_runtime_owner_id: uuid.UUID | None = None,
     ) -> SessionControlResult:
-        return await self._sess.end_session(session_id, user_id, reason=reason)
+        return await self._sess.end_session(
+            session_id,
+            user_id,
+            reason=reason,
+            actor_runtime_owner_id=actor_runtime_owner_id,
+        )
 
     # ── Daemon-restart recovery (task-10, FR-08 / D-003@v1) ──────────────────
 

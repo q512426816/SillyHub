@@ -475,6 +475,117 @@ class TestEndSession:
         assert session.status == "active"
         assert batch_lease.status == "pending"
 
+    @pytest.mark.asyncio
+    async def test_end_daemon_actor_by_runtime_owner_success(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """ql-20260623-004: daemon 身份（X-API-Key owner=runtime owner）能 end
+        绑定到自己 runtime 的 session——admin 共享 runtime 场景 creator≠owner。
+
+        复现 404 根因：session 创建者 creator ≠ runtime/api-key owner。修复前
+        end_session(session_id, owner) 走 user_id 校验
+        （AgentSession.user_id==creator）→ 404；修复后 actor_runtime_owner_id=owner
+        走 runtime 归属校验（session.runtime.user_id==owner）→ 成功收口。
+        """
+        creator = await _create_user(db_session)
+        owner = await _create_user(db_session)
+        rt = await _create_runtime(db_session, owner)  # runtime 归属 owner
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=None,
+            kind="interactive",
+            status="pending",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        session = AgentSession(
+            id=uuid.uuid4(),
+            user_id=creator,  # 创建者 ≠ runtime owner
+            runtime_id=rt.id,
+            lease_id=lease.id,
+            provider="claude",
+            status="active",
+            turn_count=1,
+        )
+        db_session.add_all([lease, session])
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        result = await svc.end_session(session.id, owner, actor_runtime_owner_id=owner)
+        assert result.agent_session.status == "ended"
+        await db_session.refresh(session)
+        assert session.status == "ended"
+
+    @pytest.mark.asyncio
+    async def test_end_daemon_actor_wrong_owner_404(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """ql-20260623-004: daemon api-key owner ≠ runtime owner → 404，session 不变。"""
+        creator = await _create_user(db_session)
+        owner = await _create_user(db_session)
+        intruder = await _create_user(db_session)
+        rt = await _create_runtime(db_session, owner)
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=None,
+            kind="interactive",
+            status="pending",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        session = AgentSession(
+            id=uuid.uuid4(),
+            user_id=creator,
+            runtime_id=rt.id,
+            lease_id=lease.id,
+            provider="claude",
+            status="active",
+            turn_count=1,
+        )
+        db_session.add_all([lease, session])
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        # intruder 不是 runtime owner（rt.user_id=owner≠intruder）→ 404
+        with pytest.raises(DaemonSessionNotFound):
+            await svc.end_session(session.id, intruder, actor_runtime_owner_id=intruder)
+        await db_session.refresh(session)
+        assert session.status == "active"  # 未被改动
+
+    @pytest.mark.asyncio
+    async def test_end_frontend_actor_path_unchanged(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """ql-20260623-004 回归：前端身份（不传 actor_runtime_owner_id）仍走 user_id 校验。"""
+        creator = await _create_user(db_session)
+        rt = await _create_runtime(db_session, creator)
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=None,
+            kind="interactive",
+            status="pending",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        session = AgentSession(
+            id=uuid.uuid4(),
+            user_id=creator,
+            runtime_id=rt.id,
+            lease_id=lease.id,
+            provider="claude",
+            status="active",
+            turn_count=1,
+        )
+        db_session.add_all([lease, session])
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        result = await svc.end_session(session.id, creator)
+        assert result.agent_session.status == "ended"
+
 
 # ── currentRun invariant ─────────────────────────────────────────────────────
 

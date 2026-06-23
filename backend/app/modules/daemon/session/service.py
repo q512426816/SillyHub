@@ -197,6 +197,42 @@ class SessionService:
             )
         return session
 
+    async def _get_session_by_runtime_owner_for_update(
+        self,
+        session_id: uuid.UUID,
+        owner_user_id: uuid.UUID,
+    ) -> AgentSession:
+        """Lock and return a session whose bound runtime is owned by ``owner_user_id``.
+
+        daemon 身份（X-API-Key）专用（ql-20260623-004）：api-key 解析出的
+        ``user`` 是 runtime owner，**不等于** session 创建者
+        （``AgentSession.user_id``）。ownership 改为「目标 session 绑定的
+        runtime 归属于 api-key owner」（``DaemonRuntime.user_id``），否则
+        admin 共享 runtime 场景（creator≠runtime owner）下的
+        ``notifySessionEnd`` 会因 ``AgentSession.user_id`` 不匹配误判 404。
+
+        join ``daemon_runtimes``；缺失 / 跨 owner → 404，不泄露存在性
+        （与 :meth:`_get_owned_session_for_update` 一致）。
+        """
+        from app.modules.daemon.model import DaemonRuntime
+
+        stmt = (
+            select(AgentSession)
+            .join(DaemonRuntime, AgentSession.runtime_id == DaemonRuntime.id)
+            .where(
+                AgentSession.id == session_id,
+                DaemonRuntime.user_id == owner_user_id,
+            )
+            .with_for_update()
+        )
+        session = (await self._session.execute(stmt)).scalar_one_or_none()
+        if session is None:
+            raise DaemonSessionNotFound(
+                f"AgentSession '{session_id}' not found.",
+                details={"session_id": str(session_id)},
+            )
+        return session
+
     async def _get_current_run(
         self,
         session_id: uuid.UUID,
@@ -659,6 +695,7 @@ class SessionService:
         user_id: uuid.UUID,
         *,
         reason: str = "manual",
+        actor_runtime_owner_id: uuid.UUID | None = None,
     ) -> SessionControlResult:
         """Single reconciliation of session/lease/currentRun (FR-05 / §8.5).
 
@@ -667,9 +704,26 @@ class SessionService:
         killed, session ended, lease completed. Idempotent on already-ended
         sessions. WS failure is a warning only — the local reconciliation
         still succeeds so a daemon offline never strands an active session.
+
+        gap-4 修复（ql-20260623-004）：两种调用方共由此端点，按 ``actor`` 区分
+        session 定位方式——
+          * 前端（Bearer JWT，``actor_runtime_owner_id is None``）：保持
+            :meth:`_get_owned_session_for_update` 的 ``AgentSession.user_id``
+            校验；
+          * daemon（X-API-Key，router 传入 ``actor_runtime_owner_id``）：api-key
+            owner 是 runtime owner，不等于 session 创建者，改走
+            :meth:`_get_session_by_runtime_owner_for_update` 按 runtime 归属校验，
+            否则 admin 共享 runtime 场景（creator≠owner）必 404。
+        其余收口逻辑（lease 校验 / run killed / lease completed / SSE）两种身份
+        完全一致。
         """
         try:
-            session = await self._get_owned_session_for_update(session_id, user_id)
+            if actor_runtime_owner_id is not None:
+                session = await self._get_session_by_runtime_owner_for_update(
+                    session_id, actor_runtime_owner_id
+                )
+            else:
+                session = await self._get_owned_session_for_update(session_id, user_id)
 
             # Idempotent: already ended → no-op return.
             if session.status == "ended":

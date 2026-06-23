@@ -125,6 +125,7 @@ ChangeService.transition() -> 状态机校验 -> 更新 stage
 - ql-20260619-001-f6cc | Wave0：dispatch_next_step 不再预创建 AgentRun（对齐 dispatch()，Run 由 start_stage_dispatch 拥有），一次 execute 单 Run + 返回 id/last_dispatch.run_id/lease.agent_run_id 一致；新增 cleanup_orphan_dispatch_runs 精准清理历史孤儿 pending Run（spec_strategy='sillyspec' 指纹，不动正常 Run）；dict() 修 last_dispatch.run_id 的 JSON in-place mutation 不持久化。
 - ql-20260619-003-0f87 | dispatch()（transition 路径）:579/:611 同类 JSON in-place mutation 修复——两处 `stages = change.stages or {}` 改 `dict(change.stages or {})`，使 last_dispatch.run_id 持久化（前端订阅拿得到真实 run id）。
 - 2026-06-20-session-history-enhance | 交互式会话历史回看：用户消息落库回看 + 任意会话 reopen 续聊(仅claude) + 任意状态删除
+- ql-20260623-004-8f2c | 修复 daemon notifySessionEnd 调 /sessions/{id}/end 返回 404：daemon 身份（X-API-Key）改用 runtime 归属校验（session.runtime.user_id==api-key owner），前端 Bearer JWT 保持 user_id 校验；end_session 加 actor_runtime_owner_id 分流 + _get_session_by_runtime_owner_for_update（join DaemonRuntime）
 
 ## 人工备注
 

@@ -5,7 +5,16 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Header, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -1015,6 +1024,7 @@ async def interrupt_session(
 )
 async def end_session(
     session_id: uuid.UUID,
+    request: Request,
     session: SessionDep,
     user: TaskRunAgentUser,
     reason: str = Query(default="manual"),
@@ -1030,10 +1040,23 @@ async def end_session(
     the body and ``X-API-Key`` auth (resolved by ``get_current_principal`` to the
     runtime owner). The front-end still calls with ``?reason=manual`` (no body);
     both paths converge on ``service.end_session``. Body reason wins when present.
+
+    ql-20260623-004: 区分调用方定 session 归属——daemon（无 Bearer，仅
+    ``X-API-Key``）传 ``actor_runtime_owner_id``，service 走 runtime 归属校验
+    （api-key owner = runtime owner，不查 ``AgentSession.user_id``，否则 admin
+    共享 runtime 场景 creator≠owner 必 404）；前端（Bearer JWT）保持 user_id 校验。
     """
     effective_reason = end_body.reason if (end_body and end_body.reason) else reason
+    # 无 Authorization: Bearer 即 daemon 身份（X-API-Key）：api-key owner 是
+    # runtime owner，走 runtime 归属校验；否则前端 Bearer JWT 走 user_id 校验。
+    has_bearer = (request.headers.get("authorization") or "").lower().startswith("bearer ")
     svc = DaemonService(session)
-    result = await svc.end_session(session_id, user.id, reason=effective_reason)
+    result = await svc.end_session(
+        session_id,
+        user.id,
+        reason=effective_reason,
+        actor_runtime_owner_id=None if has_bearer else user.id,
+    )
     return SessionControlResponse(
         session_id=result.agent_session.id,
         status=result.agent_session.status or "ended",
