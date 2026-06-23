@@ -157,7 +157,7 @@ class PlanTaskService:
         log.info("plan_task_deleted", plan_task_id=str(plan_id))
 
     async def page(self, req: PlanTaskPageReq) -> Page[PlanTask]:
-        """分页查询 (支持 user/project/status/month/year 过滤)。"""
+        """分页查询 (支持 user/project/status多值/month/year/起止区间/work_partner 过滤)。"""
         page_req = _page_req_from(req.page, req.page_size, req.order_by, req.order)
         stmt = select(PlanTask)
         user_id = _parse_uuid_optional(req.user_id)
@@ -166,12 +166,18 @@ class PlanTaskService:
             stmt = stmt.where(PlanTask.user_id == user_id)
         if project_id is not None:
             stmt = stmt.where(PlanTask.project_id == project_id)
-        if req.status is not None:
-            stmt = stmt.where(PlanTask.status == req.status)
+        if req.status:
+            stmt = stmt.where(PlanTask.status.in_(req.status))
         if req.month is not None:
             stmt = stmt.where(PlanTask.month == req.month)
         if req.year is not None:
             stmt = stmt.where(PlanTask.year == req.year)
+        if req.start_time is not None:
+            stmt = stmt.where(PlanTask.start_time >= req.start_time)
+        if req.end_time is not None:
+            stmt = stmt.where(PlanTask.start_time <= req.end_time)
+        if req.work_partner:
+            stmt = stmt.where(PlanTask.work_partner.ilike(f"%{req.work_partner}%"))
         stmt = apply_sort(stmt, PlanTask, req.order_by, PLAN_SORT_FIELDS, req.order)
         total = await count_total(self._session, stmt)
         stmt = apply_pagination(stmt, page_req)

@@ -143,9 +143,12 @@ async def page_plan_task(
     page_size: int = Query(20, ge=1, le=200),
     user_id: str | None = Query(None),
     project_id: str | None = Query(None),
-    plan_status: str | None = Query(None, alias="status"),
+    plan_status: list[str] | None = Query(None, alias="status", description="状态(可多值)"),
     month: str | None = Query(None),
     year: str | None = Query(None),
+    start_time: datetime | None = Query(None, description="start_time 区间起(闭)"),
+    end_time: datetime | None = Query(None, description="start_time 区间止(闭)"),
+    work_partner: str | None = Query(None, description="配合人员模糊匹配"),
     order_by: str | None = Query(None),
     order: str = Query("desc"),
 ) -> Page[PlanTaskResponse]:
@@ -157,6 +160,9 @@ async def page_plan_task(
         status=plan_status,
         month=month,
         year=year,
+        start_time=start_time,
+        end_time=end_time,
+        work_partner=work_partner,
         order_by=order_by,
         order=order,
     )
@@ -183,9 +189,12 @@ async def export_plan_task_excel(
     user: TaskExportUser,
     user_id: str | None = Query(None),
     project_id: str | None = Query(None),
-    plan_status: str | None = Query(None, alias="status"),
+    plan_status: list[str] | None = Query(None, alias="status", description="状态(可多值)"),
     month: str | None = Query(None),
     year: str | None = Query(None),
+    start_time: datetime | None = Query(None),
+    end_time: datetime | None = Query(None),
+    work_partner: str | None = Query(None),
     order_by: str | None = Query(None),
     order: str = Query("desc"),
 ) -> StreamingResponse:
@@ -200,6 +209,9 @@ async def export_plan_task_excel(
         status=plan_status,
         month=month,
         year=year,
+        start_time=start_time,
+        end_time=end_time,
+        work_partner=work_partner,
         order_by=order_by,
         order=order,
     )
@@ -218,7 +230,8 @@ async def export_plan_task_excel(
     ]
     rows = [PlanTaskResponse.model_validate(p).model_dump(mode="json") for p in result.items]
     content = await anyio.to_thread.run_sync(_build_workbook_bytes, columns, rows, "任务计划")
-    return excel_response(content, filename="task_plan.xlsx")
+    filename = f"任务计划_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
+    return excel_response(content, filename=filename)
 
 
 # ===========================================================================
@@ -233,9 +246,12 @@ async def personal_plan_task_page(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     project_id: str | None = Query(None),
-    plan_status: str | None = Query(None, alias="status"),
+    plan_status: list[str] | None = Query(None, alias="status", description="状态(可多值)"),
     month: str | None = Query(None),
     year: str | None = Query(None),
+    start_time: datetime | None = Query(None),
+    end_time: datetime | None = Query(None),
+    work_partner: str | None = Query(None),
     order_by: str | None = Query(None),
     order: str = Query("desc"),
 ) -> Page[PlanTaskResponse]:
@@ -248,6 +264,9 @@ async def personal_plan_task_page(
         status=plan_status,
         month=month,
         year=year,
+        start_time=start_time,
+        end_time=end_time,
+        work_partner=work_partner,
         order_by=order_by,
         order=order,
     )

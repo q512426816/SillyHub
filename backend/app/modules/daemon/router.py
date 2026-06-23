@@ -82,8 +82,8 @@ class DaemonVersionResponse(BaseModel):
     """GET /api/daemon/version 响应：daemon 分发元数据（公开端点）。"""
 
     latest: str = Field(description="最新发布版本号")
-    minRequired: str = Field(description="最低兼容版本号（低于则需升级）")
-    downloadUrl: str = Field(description="单文件 bundle 下载地址（相对站内路径）")
+    minRequired: str = Field(description="最低兼容版本号（低于则需升级）")  # noqa: N815
+    downloadUrl: str = Field(description="单文件 bundle 下载地址（相对站内路径）")  # noqa: N815
 
 
 # SSE response headers shared with the run-scoped stream endpoint

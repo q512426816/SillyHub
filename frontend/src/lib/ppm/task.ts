@@ -33,14 +33,14 @@ import type {
 
 function queryOf(
   params?: Record<string, unknown>,
-): Record<string, string | number | boolean | undefined> | undefined {
+): { query: Record<string, string | number | boolean | string[] | undefined> } | undefined {
   if (!params) return undefined;
-  const out: Record<string, string | number | boolean | undefined> = {};
+  const out: Record<string, string | number | boolean | string[] | undefined> = {};
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === null) continue;
-    out[k] = v as string | number | boolean;
+    out[k] = v as string | number | boolean | string[];
   }
-  return out;
+  return { query: out };
 }
 
 // ===========================================================================
@@ -50,9 +50,10 @@ function queryOf(
 export async function listPlanTasks(
   params?: PlanTaskPageReq,
 ): Promise<PageResp<PlanTask>> {
-  return apiFetch<PageResp<PlanTask>>("/api/ppm/task-plan/page", {
-    query: queryOf(params as Record<string, unknown> | undefined),
-  });
+  return apiFetch<PageResp<PlanTask>>(
+    "/api/ppm/task-plan/page",
+    queryOf(params as Record<string, unknown> | undefined),
+  );
 }
 
 export async function getPlanTask(planTaskId: string): Promise<PlanTask> {
@@ -100,7 +101,7 @@ export async function exportPlanTasks(
   await downloadExcel(
     "/api/ppm/task-plan/export-excel",
     params as Record<string, unknown> | undefined,
-    "task_plan.xlsx",
+    "任务计划.xlsx",
   );
 }
 
@@ -111,9 +112,10 @@ export async function exportPlanTasks(
 export async function listPersonalPlanTasks(
   params?: Omit<PlanTaskPageReq, "user_id">,
 ): Promise<PageResp<PlanTask>> {
-  return apiFetch<PageResp<PlanTask>>("/api/ppm/personal-task-plan/page", {
-    query: queryOf(params as Record<string, unknown> | undefined),
-  });
+  return apiFetch<PageResp<PlanTask>>(
+    "/api/ppm/personal-task-plan/page",
+    queryOf(params as Record<string, unknown> | undefined),
+  );
 }
 
 /** 当前登录用户在 [start, end] 区间的任务计划。 */
@@ -134,9 +136,10 @@ export async function listPersonalPlanTasksByDateRange(
 export async function listTaskExecutes(
   params?: TaskExecutePageReq,
 ): Promise<PageResp<TaskExecute>> {
-  return apiFetch<PageResp<TaskExecute>>("/api/ppm/task-execute/page", {
-    query: queryOf(params as Record<string, unknown> | undefined),
-  });
+  return apiFetch<PageResp<TaskExecute>>(
+    "/api/ppm/task-execute/page",
+    queryOf(params as Record<string, unknown> | undefined),
+  );
 }
 
 export async function getTaskExecute(executeId: string): Promise<TaskExecute> {
@@ -214,9 +217,10 @@ export async function listTaskExecutesWithPlanByDateRange(
 export async function listWorkHours(
   params?: WorkHourPageReq,
 ): Promise<PageResp<WorkHour>> {
-  return apiFetch<PageResp<WorkHour>>("/api/ppm/work-hour/page", {
-    query: queryOf(params as Record<string, unknown> | undefined),
-  });
+  return apiFetch<PageResp<WorkHour>>(
+    "/api/ppm/work-hour/page",
+    queryOf(params as Record<string, unknown> | undefined),
+  );
 }
 
 export async function getWorkHour(workHourId: string): Promise<WorkHour> {
@@ -256,9 +260,10 @@ export async function statWorkHoursByUser(params?: {
   end_date?: string;
   user_id?: string;
 }): Promise<WorkHourStatResponse> {
-  return apiFetch<WorkHourStatResponse>("/api/ppm/work-hour/stat-by-user", {
-    query: queryOf(params as Record<string, unknown> | undefined),
-  });
+  return apiFetch<WorkHourStatResponse>(
+    "/api/ppm/work-hour/stat-by-user",
+    queryOf(params as Record<string, unknown> | undefined),
+  );
 }
 
 /** 工时统计 — 按项目聚合 (ECharts/AntD Chart 友好)。 */
@@ -267,9 +272,10 @@ export async function statWorkHoursByProject(params?: {
   end_date?: string;
   project_id?: string;
 }): Promise<WorkHourStatResponse> {
-  return apiFetch<WorkHourStatResponse>("/api/ppm/work-hour/stat-by-project", {
-    query: queryOf(params as Record<string, unknown> | undefined),
-  });
+  return apiFetch<WorkHourStatResponse>(
+    "/api/ppm/work-hour/stat-by-project",
+    queryOf(params as Record<string, unknown> | undefined),
+  );
 }
 
 export async function exportWorkHours(

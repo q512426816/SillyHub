@@ -172,7 +172,7 @@ async def test_plan_task_page_filter_by_project_and_status(db_session):
 
     by_project = await svc.page(PlanTaskPageReq(project_id=pid_a))
     assert by_project.total == 2
-    by_status = await svc.page(PlanTaskPageReq(project_id=pid_a, status="进行中"))
+    by_status = await svc.page(PlanTaskPageReq(project_id=pid_a, status=["进行中"]))
     assert by_status.total == 1
     assert by_status.items[0].content == "b"
 

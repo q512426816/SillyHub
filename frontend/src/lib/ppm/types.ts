@@ -910,10 +910,15 @@ export interface PlanTaskUpdate {
 export interface PlanTaskPageReq extends PageReq {
   user_id?: string | null;
   project_id?: string | null;
-  /** 后端 alias=status */
-  status?: string | null;
+  /** 状态(可多值)。后端 alias=status */
+  status?: string[];
   month?: string | null;
   year?: string | null;
+  /** 计划起止区间(按 start_time 闭区间过滤) */
+  start_time?: string;
+  end_time?: string;
+  /** 配合人员模糊匹配 */
+  work_partner?: string;
 }
 
 export interface ExecutePlanReq {

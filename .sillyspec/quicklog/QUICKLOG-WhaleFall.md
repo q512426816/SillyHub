@@ -824,5 +824,11 @@ created_at: 2026-06-03T08:42:04
   - 条件变化时仍然由 keyword/status/dateRange 触发(行为不变)
   - frontend pnpm typecheck 通过
 
+## ql-20260623-002-f3b8 | 2026-06-23 09:30:00 | task-plans 对齐 project-plans + 服务端过滤 + 导出文件名时间戳
+状态：已完成
+文件：backend/app/modules/ppm/task/{router,service,schema,tests/test_task}.py + frontend/src/lib/ppm/{task.ts,types.ts} + frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
+结果：后端 PlanTaskPageReq 扩展 status:list[str] + start_time/end_time/work_partner 字段;router 的 task-plan/page、personal-task-plan/page、task-plan/export-excel 3 端点加 Query 参数 + 导出文件名带时间戳 (任务计划_YYYYMMDD_HHMMSS.xlsx);service.page 加 IN/区间/ilike 过滤;test 修正 status='进行中' → ['进行中'] 契合新签名 (18/18 通过)。前端 PlanTaskPageReq 类型同步;task.ts 修 queryOf 嵌套 4 处;task-plans/page.tsx 重写:顶部按钮右对齐(搜索+重置+分隔+导出+视图+新建)、grid-cols-4 Field 垂直布局、antd Table bordered + 固定操作列、searchNonce 兜底搜索、移除本地 useMemo 过滤、personal 视图不传 user_id;前端 pnpm typecheck 通过。
+
+
 
 

@@ -129,9 +129,15 @@ class PlanTaskPageReq(PydanticModel):
     # UUID 字段容错为 str,service 层 try-parse (前端可能传 "-" / 空串占位)
     user_id: str | uuid.UUID | None = None
     project_id: str | uuid.UUID | None = None
-    status: str | None = None
+    # 状态多值(可多选,status=10&status=20 编码);空表示不过滤
+    status: list[str] | None = None
     month: str | None = None
     year: str | None = None
+    # 计划起止区间(闭区间,按 start_time 过滤)
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    # 配合人员模糊匹配(work_partner)
+    work_partner: str | None = None
     order_by: str | None = None
     order: str = "desc"
 

@@ -1,28 +1,23 @@
 "use client";
 
 /**
- * 任务计划页面 (task-12 / FR-05)。
+ * 任务计划页面 (task-12 / FR-05) — 对齐 project-plans 风格。
  *
  * 功能:
- *  - 列表分页 (task-plan/page),状态/月份/项目筛选。
+ *  - 列表分页 (task-plan/page),状态/月份/项目/负责人/时间区间/配合人员服务端过滤。
  *  - 个人视图切换 (personal-task-plan/page,仅当前登录用户的任务)。
  *  - 新建/编辑/删除任务计划。
  *  - 执行任务 (task-plan/execute) — 联动生成/推进 TaskExecute。
+ *  - 导出 Excel (后端生成 `任务计划_YYYYMMDD_HHMMSS.xlsx`)。
  *
  * 依赖:lib/ppm/task (API) + lib/ppm/project (项目下拉) + stores/session。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { DatePicker, Input, message, Select, type TableProps, Tag } from "antd";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { DatePicker, Input, Select, Table, type TableProps, Tag } from "antd";
 import type { Dayjs } from "dayjs";
 
 import { Button } from "@/components/ui/button";
-import {
-  DataTable,
-  PageContainer,
-  PageHeader,
-  SearchBar,
-  SectionCard,
-} from "@/components/layout";
+import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import {
   PpmUserSelect,
   type PpmSelectOption,
@@ -81,6 +76,22 @@ interface ExecuteState {
   submit: boolean;
 }
 
+// 查询条件外壳:垂直布局(标题在上,控件在下),对齐 project-plans 风格。
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex w-full flex-col gap-1">
+      <span className="text-xs leading-4 text-muted-foreground">{label}</span>
+      {children}
+    </div>
+  );
+}
+
 export default function TaskPlansPage() {
   const { user: currentUser } = useSession();
   const { toast, showToast } = useToast();
@@ -88,14 +99,12 @@ export default function TaskPlansPage() {
   const [view, setView] = useState<ViewMode>("all");
   const [rows, setRows] = useState<PlanTask[]>([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-
-  // 筛选(后端 PlanTaskPageReq 支持:user_id/project_id/status/month/year)
-  // status 多选 / dateRange / workPartner 后端不支持,前端本地过滤
+  // 筛选(全部走服务端 PlanTaskPageReq)
   const [statusFilterList, setStatusFilterList] = useState<string[]>([]);
   const [monthFilter, setMonthFilter] = useState<string>("");
   const [projectFilter, setProjectFilter] = useState<string>("");
@@ -104,8 +113,10 @@ export default function TaskPlansPage() {
     null,
   );
   const [workPartnerFilter, setWorkPartnerFilter] = useState<string>("");
-  const [exporting, setExporting] = useState(false);
+  // 搜索触发计数器:点搜索按钮强制触发查询(即使条件未变)
+  const [searchNonce, setSearchNonce] = useState(0);
 
+  const [exporting, setExporting] = useState(false);
   const [projects, setProjects] = useState<ProjectSimpleItem[]>([]);
 
   const [drawer, setDrawer] = useState<DrawerState>({
@@ -121,72 +132,90 @@ export default function TaskPlansPage() {
         const list = await listSimpleProjects();
         setProjects(list ?? []);
       } catch (e) {
-        message.error(
-          e instanceof Error ? e.message : "加载项目列表失败",
-        );
+        showToast(false, e instanceof Error ? e.message : "加载项目列表失败");
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params: PlanTaskPageReq = {
-        page,
-        page_size: pageSize,
-      };
-      // status 后端单值:多选时只传第一个,其余前端本地过滤。
-      if (statusFilterList.length === 1) params.status = statusFilterList[0];
-      if (monthFilter) params.month = monthFilter;
-      if (projectFilter) params.project_id = projectFilter;
-      if (userFilter) params.user_id = userFilter;
-      const resp =
-        view === "personal"
-          ? await listPersonalPlanTasks(params)
-          : await listPlanTasks(params);
-      setRows(resp.items);
-      setTotal(resp.total);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "加载失败");
-    } finally {
-      setLoading(false);
+  const buildParams = (
+    p: number,
+    ps: number,
+    opts: { includeUserId: boolean },
+  ): PlanTaskPageReq => {
+    const params: PlanTaskPageReq = { page: p, page_size: ps };
+    if (statusFilterList.length > 0) params.status = statusFilterList;
+    if (monthFilter) params.month = monthFilter;
+    if (projectFilter) params.project_id = projectFilter;
+    if (opts.includeUserId && userFilter) params.user_id = userFilter;
+    if (dateRange?.[0]) {
+      params.start_time = dateRange[0].startOf("day").toISOString();
     }
+    if (dateRange?.[1]) {
+      params.end_time = dateRange[1].endOf("day").toISOString();
+    }
+    if (workPartnerFilter.trim()) {
+      params.work_partner = workPartnerFilter.trim();
+    }
+    return params;
+  };
+
+  const load = useCallback(
+    async (opts: { page?: number; page_size?: number } = {}) => {
+      const p = opts.page ?? page;
+      const ps = opts.page_size ?? pageSize;
+      setLoading(true);
+      setError(null);
+      try {
+        // personal 视图:user_id 由后端从 token 注入,前端不传
+        const params = buildParams(p, ps, { includeUserId: view !== "personal" });
+        const resp =
+          view === "personal"
+            ? await listPersonalPlanTasks(
+                params as Omit<PlanTaskPageReq, "user_id">,
+              )
+            : await listPlanTasks(params);
+        setRows(resp.items);
+        setTotal(resp.total);
+        setPage(p);
+        setPageSize(ps);
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "加载失败");
+      } finally {
+        setLoading(false);
+      }
+    },
+    // buildParams 内部读取的 state 全列入 dep,确保筛选条件变化时 load 引用变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      view,
+      page,
+      pageSize,
+      statusFilterList,
+      monthFilter,
+      projectFilter,
+      userFilter,
+      dateRange,
+      workPartnerFilter,
+    ],
+  );
+
+  // 首屏 + 条件变化 + 搜索按钮(searchNonce 兜底)→ 回第 1 页重拉
+  useEffect(() => {
+    void load({ page: 1 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     view,
-    page,
-    pageSize,
     statusFilterList,
     monthFilter,
     projectFilter,
     userFilter,
+    dateRange,
+    workPartnerFilter,
+    searchNonce,
   ]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  // 本地过滤:status 多选 (>1) / dateRange / workPartner (后端不支持)
-  const visibleRows = useMemo(() => {
-    const [rangeStart, rangeEnd] = dateRange ?? [null, null];
-    const wp = workPartnerFilter.trim().toLowerCase();
-    const multiStatus =
-      statusFilterList.length > 1 ? new Set(statusFilterList) : null;
-    return rows.filter((t) => {
-      if (multiStatus && !multiStatus.has(t.status)) return false;
-      if (rangeStart && rangeEnd) {
-        const s = t.start_time ? new Date(t.start_time) : null;
-        if (s && !Number.isNaN(s.getTime())) {
-          if (s < rangeStart.startOf("day").toDate()) return false;
-          if (s > rangeEnd.endOf("day").toDate()) return false;
-        }
-      }
-      if (wp && !(t.work_partner ?? "").toLowerCase().includes(wp)) {
-        return false;
-      }
-      return true;
-    });
-  }, [rows, statusFilterList, dateRange, workPartnerFilter]);
+  const commitSearch = () => setSearchNonce((n) => n + 1);
 
   const resetFilters = () => {
     setStatusFilterList([]);
@@ -195,17 +224,13 @@ export default function TaskPlansPage() {
     setUserFilter(null);
     setDateRange(null);
     setWorkPartnerFilter("");
-    setPage(1);
+    setSearchNonce((n) => n + 1);
   };
 
   const handleExport = async () => {
     setExporting(true);
     try {
-      const params: PlanTaskPageReq = { page: 1, page_size: 1000 };
-      if (statusFilterList.length === 1) params.status = statusFilterList[0];
-      if (monthFilter) params.month = monthFilter;
-      if (projectFilter) params.project_id = projectFilter;
-      if (userFilter) params.user_id = userFilter;
+      const params = buildParams(1, 1000, { includeUserId: view !== "personal" });
       await exportPlanTasks(params);
     } catch (err) {
       showToast(false, err instanceof ApiError ? err.message : "导出失败");
@@ -263,157 +288,135 @@ export default function TaskPlansPage() {
     }
   };
 
-  const columns: TableProps<PlanTask>["columns"] = useMemo(
-    () => [
-      {
-        title: "任务内容",
-        dataIndex: "content",
-        key: "content",
-        ellipsis: true,
-        render: (v: string | null, t: PlanTask) => (
-          <div className="flex flex-col">
-            <span className="text-sm">{v ?? "（未填写）"}</span>
-            {t.remarks && (
-              <span className="text-[10px] text-muted-foreground">
-                {t.remarks}
-              </span>
-            )}
+  const columns: TableProps<PlanTask>["columns"] = [
+    {
+      title: "任务内容",
+      dataIndex: "content",
+      key: "content",
+      width: 280,
+      ellipsis: true,
+      render: (v: string | null, t: PlanTask) => (
+        <div className="flex flex-col">
+          <span className="text-sm">{v ?? "（未填写）"}</span>
+          {t.remarks && (
+            <span className="text-[10px] text-muted-foreground">
+              {t.remarks}
+            </span>
+          )}
+        </div>
+      ),
+    },
+    {
+      title: "项目",
+      dataIndex: "project_name",
+      key: "project_name",
+      width: 140,
+      render: (v: string | null) => v ?? "—",
+    },
+    {
+      title: "负责人",
+      dataIndex: "user_name",
+      key: "user_name",
+      width: 100,
+      render: (v: string | null) => v ?? "—",
+    },
+    {
+      title: "配合人员",
+      dataIndex: "work_partner",
+      key: "work_partner",
+      width: 120,
+      render: (v: string | null) => v ?? "—",
+    },
+    {
+      title: "状态",
+      dataIndex: "status",
+      key: "status",
+      width: 90,
+      render: (v: string) => {
+        const tag = taskStatusTag(v);
+        return <Tag color={tag.color}>{tag.text}</Tag>;
+      },
+    },
+    {
+      title: "计划时间",
+      key: "time",
+      width: 200,
+      render: (_v, t: PlanTask) => (
+        <span className="text-xs text-muted-foreground">
+          {t.start_time ? fmtDay(t.start_time) : "—"} ~{" "}
+          {t.end_time ? fmtDay(t.end_time) : "—"}
+        </span>
+      ),
+    },
+    {
+      title: "预估工时",
+      dataIndex: "work_load",
+      key: "work_load",
+      width: 90,
+      render: (v: string | null) => v ?? "—",
+    },
+    {
+      title: "操作",
+      key: "actions",
+      width: "max-content",
+      fixed: "right",
+      render: (_v, t: PlanTask) => {
+        const isOwner = currentUser?.id === t.user_id;
+        // 编辑:status=10 (未开始/未提交) + user_id 归属
+        const canEdit = t.status === "10" && isOwner;
+        // 删除:user_id 归属(对齐源 handleDelete checkUser)
+        const canDelete = isOwner;
+        return (
+          <div className="flex whitespace-nowrap gap-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() =>
+                setExecute({
+                  task: t,
+                  executeInfo: "",
+                  timeSpent: t.time_spent ? String(t.time_spent) : "",
+                  submit: false,
+                })
+              }
+            >
+              执行
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!canEdit}
+              title={
+                canEdit
+                  ? undefined
+                  : t.status !== "10"
+                    ? "仅未开始状态可编辑"
+                    : "仅负责人可编辑"
+              }
+              onClick={() => setDrawer({ open: true, mode: "edit", task: t })}
+            >
+              编辑
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={!canDelete}
+              title={canDelete ? undefined : "仅负责人可删除"}
+              onClick={() => setConfirmDelete(t)}
+            >
+              删除
+            </Button>
           </div>
-        ),
+        );
       },
-      {
-        title: "项目",
-        dataIndex: "project_name",
-        key: "project_name",
-        render: (v: string | null) => v ?? "—",
-      },
-      {
-        title: "负责人",
-        dataIndex: "user_name",
-        key: "user_name",
-        render: (v: string | null) => v ?? "—",
-      },
-      {
-        title: "配合人员",
-        dataIndex: "work_partner",
-        key: "work_partner",
-        render: (v: string | null) => v ?? "—",
-      },
-      {
-        title: "状态",
-        dataIndex: "status",
-        key: "status",
-        render: (v: string) => {
-          const tag = taskStatusTag(v);
-          return <Tag color={tag.color}>{tag.text}</Tag>;
-        },
-      },
-      {
-        title: "计划时间",
-        key: "time",
-        render: (_v, t: PlanTask) => (
-          <span className="text-xs text-muted-foreground">
-            {t.start_time ? fmtDay(t.start_time) : "—"} ~{" "}
-            {t.end_time ? fmtDay(t.end_time) : "—"}
-          </span>
-        ),
-      },
-      {
-        title: "预估工时",
-        dataIndex: "work_load",
-        key: "work_load",
-        render: (v: string | null) => v ?? "—",
-      },
-      {
-        title: "操作",
-        key: "actions",
-        align: "right",
-        render: (_v, t: PlanTask) => {
-          const isOwner = currentUser?.id === t.user_id;
-          // 编辑:status=10 (未开始/未提交) + user_id 归属
-          const canEdit = t.status === "10" && isOwner;
-          // 删除:user_id 归属(对齐源 handleDelete checkUser)
-          const canDelete = isOwner;
-          return (
-            <div className="flex justify-end gap-1">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() =>
-                  setExecute({
-                    task: t,
-                    executeInfo: "",
-                    timeSpent: t.time_spent ? String(t.time_spent) : "",
-                    submit: false,
-                  })
-                }
-              >
-                执行
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={!canEdit}
-                title={
-                  canEdit
-                    ? undefined
-                    : t.status !== "10"
-                      ? "仅未开始状态可编辑"
-                      : "仅负责人可编辑"
-                }
-                onClick={() => setDrawer({ open: true, mode: "edit", task: t })}
-              >
-                编辑
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                disabled={!canDelete}
-                title={canDelete ? undefined : "仅负责人可删除"}
-                onClick={() => setConfirmDelete(t)}
-              >
-                删除
-              </Button>
-            </div>
-          );
-        },
-      },
-    ],
-    [currentUser?.id],
-  );
+    },
+  ];
 
   return (
-    <PageContainer>
+    <PageContainer size="full">
       <PageHeader
         title="任务计划"
         subtitle="任务计划制定 / 执行推进 / 工时预估"
-        actions={
-          <>
-            <select
-              value={view}
-              onChange={(e) => {
-                setView(e.target.value as ViewMode);
-                setPage(1);
-              }}
-              className={`w-32 ${inputCls}`}
-              aria-label="视图切换"
-            >
-              <option value="all">全部任务</option>
-              <option value="personal">我的任务</option>
-            </select>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={exporting}
-              onClick={() => void handleExport()}
-            >
-              {exporting ? "导出中…" : "导出"}
-            </Button>
-            <Button size="sm" onClick={() => setDrawer({ open: true, mode: "create" })}>
-              + 新建任务
-            </Button>
-          </>
-        }
       />
 
       <Toast toast={toast} />
@@ -423,6 +426,113 @@ export default function TaskPlansPage() {
           当前为「我的任务」视图:仅显示 {currentUser.displayName || currentUser.email}
         </div>
       )}
+
+      <SectionCard bodyPadding="p-2">
+        {/* 顶部按钮行:右对齐(搜索 | 重置 | 分隔 | 导出 | 视图切换 | 新建) */}
+        <div className="mb-2 flex items-center justify-end gap-2">
+          <Button size="sm" onClick={commitSearch}>
+            搜索
+          </Button>
+          <Button size="sm" variant="outline" onClick={resetFilters}>
+            重置
+          </Button>
+          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={exporting}
+            onClick={() => void handleExport()}
+          >
+            {exporting ? "导出中…" : "导出"}
+          </Button>
+          <select
+            value={view}
+            onChange={(e) => setView(e.target.value as ViewMode)}
+            className={`w-32 ${inputCls}`}
+            aria-label="视图切换"
+          >
+            <option value="all">全部任务</option>
+            <option value="personal">我的任务</option>
+          </select>
+          <Button size="sm" onClick={() => setDrawer({ open: true, mode: "create" })}>
+            + 新建任务
+          </Button>
+        </div>
+
+        {/* 查询条件:垂直 grid-cols-4 */}
+        <div className="grid w-full grid-cols-4 gap-3">
+          <Field label="状态">
+            <Select<string[]>
+              mode="multiple"
+              allowClear
+              className="w-full"
+              placeholder="状态(可多选)"
+              value={statusFilterList}
+              onChange={(v) => setStatusFilterList(v as string[])}
+              options={STATUS_CODE_OPTIONS}
+            />
+          </Field>
+          <Field label="月份">
+            <input
+              type="month"
+              value={monthFilter}
+              onChange={(e) => setMonthFilter(e.target.value)}
+              className={`${inputCls} w-full`}
+              aria-label="月份筛选"
+            />
+          </Field>
+          <Field label="项目">
+            <select
+              value={projectFilter}
+              onChange={(e) => setProjectFilter(e.target.value)}
+              className={`${inputCls} w-full`}
+              aria-label="项目筛选"
+            >
+              <option value="">全部项目</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.project_name ?? p.id}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="负责人">
+            <div className={`${inputCls} flex h-8 w-full items-center px-1`}>
+              <PpmUserSelect
+                res="user"
+                allowClear
+                placeholder="负责人"
+                value={userFilter}
+                onChange={(v) => setUserFilter((v as string | null) ?? null)}
+              />
+            </div>
+          </Field>
+          <Field label="计划时间区间">
+            <RangePicker
+              className="w-full"
+              size="middle"
+              value={dateRange as [Dayjs, Dayjs] | null}
+              onChange={(v) =>
+                setDateRange(v as [Dayjs | null, Dayjs | null] | null)
+              }
+              placeholder={["开始", "结束"]}
+            />
+          </Field>
+          <Field label="配合人员">
+            <Input
+              allowClear
+              className="w-full"
+              placeholder="配合人员(回车查询)"
+              value={workPartnerFilter}
+              onChange={(e) => setWorkPartnerFilter(e.target.value)}
+              onPressEnter={commitSearch}
+            />
+          </Field>
+          <div className="self-end text-right text-xs text-muted-foreground">
+            共 {total} 条
+          </div>
+        </div>
+      </SectionCard>
 
       {error ? (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
@@ -437,105 +547,25 @@ export default function TaskPlansPage() {
           </Button>
         </div>
       ) : (
-        <>
-          <SectionCard>
-            <SearchBar>
-              <Select<string[]>
-                mode="multiple"
-                allowClear
-                className="min-w-[180px]"
-                placeholder="状态(可多选)"
-                value={statusFilterList}
-                onChange={(v) => {
-                  setStatusFilterList(v as string[]);
-                  setPage(1);
-                }}
-                options={STATUS_CODE_OPTIONS}
-              />
-              <input
-                type="month"
-                value={monthFilter}
-                onChange={(e) => {
-                  setMonthFilter(e.target.value);
-                  setPage(1);
-                }}
-                className={`${inputCls} w-40`}
-                aria-label="月份筛选"
-              />
-              <select
-                value={projectFilter}
-                onChange={(e) => {
-                  setProjectFilter(e.target.value);
-                  setPage(1);
-                }}
-                className={`w-48 ${inputCls}`}
-                aria-label="项目筛选"
-              >
-                <option value="">全部项目</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.project_name ?? p.id}
-                  </option>
-                ))}
-              </select>
-              <div className={`${inputCls} flex h-8 w-48 items-center px-1`}>
-                <PpmUserSelect
-                  res="user"
-                  allowClear
-                  placeholder="负责人"
-                  value={userFilter}
-                  onChange={(v) => {
-                    setUserFilter((v as string | null) ?? null);
-                    setPage(1);
-                  }}
-                />
-              </div>
-              <RangePicker
-                size="middle"
-                value={dateRange as [Dayjs, Dayjs] | null}
-                onChange={(v) =>
-                  setDateRange(v as [Dayjs | null, Dayjs | null] | null)
-                }
-                placeholder={["开始", "结束"]}
-              />
-              <Input
-                allowClear
-                className="w-[140px]"
-                placeholder="配合人员"
-                value={workPartnerFilter}
-                onChange={(e) => setWorkPartnerFilter(e.target.value)}
-              />
-              <Button size="sm" variant="outline" onClick={resetFilters}>
-                清除筛选
-              </Button>
-              <span className="ml-auto text-xs text-muted-foreground">
-                共 {visibleRows.length} 条 / 总 {total}
-              </span>
-            </SearchBar>
-          </SectionCard>
-
-          <DataTable<PlanTask>
-            rowKey="id"
-            columns={columns}
-            dataSource={visibleRows}
-            loading={loading}
-            size="small"
-            scroll={{ x: "max-content" }}
-            pagination={{
-              current: page,
-              pageSize,
-              total,
-              showSizeChanger: true,
-              pageSizeOptions: PAGE_SIZE_OPTIONS,
-              showTotal: (t) => `共 ${t} 条`,
-              onChange: (p, s) => {
-                setPage(p);
-                setPageSize(s);
-              },
-            }}
-            emptyText="暂无任务计划"
-          />
-        </>
+        <Table<PlanTask>
+          rowKey="id"
+          columns={columns}
+          dataSource={rows}
+          loading={loading}
+          size="small"
+          bordered
+          scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            pageSizeOptions: PAGE_SIZE_OPTIONS,
+            showTotal: (t) => `共 ${t} 条`,
+            onChange: (p, s) => void load({ page: p, page_size: s }),
+          }}
+          locale={{ emptyText: "暂无任务计划" }}
+        />
       )}
 
       {drawer.open && (
