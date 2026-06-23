@@ -922,3 +922,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
 结果:PageContainer 加 size=full;PageHeader 去 actions(标题副标题独立);SectionCard bodyPadding=p-2 内 mb-2 右对齐按钮行(重置 outline + 分隔 + 导出 outline + 新建里程碑 primary + 刷新 outline)+ grid-cols-4 Field 3 个 Input(总体阶段/明细阶段/任务主题)+ 第 4 格放过滤作用范围提示文本;PpmSubTable tableProps 加 bordered + scroll y calc(100vh-430px);新增 Field 组件(垂直 label+控件);删除 SearchBar 未用 import。保留前端实时过滤行为(无搜索按钮,输入即生效)。前端 typecheck 通过。
+
+
+## ql-20260623-018-d2f7 | 2026-06-23 14:50:00 | milestone-details 子表(模块中间层 + 明细三级)加 bordered
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
+结果:milestone-details 两处子表加 bordered — (1) 模块中间层 PpmSubTable<PlanNodeModule> tableProps 加 bordered=true;(2) 明细三级 DataTable<PsPlanNodeDetail> 加 bordered prop。对齐主表(ql-017 已加 bordered)风格,3 层表(主表/模块/明细)边框一致。前端 typecheck 通过。

@@ -926,7 +926,12 @@ function ModuleLevelTable({
         masterColumns={moduleColumns}
         expandRender={moduleExpandRender}
         expandableTriggerField="id"
-        tableProps={{ loading, pagination: false, scroll: { x: "max-content" } }}
+        tableProps={{
+          loading,
+          pagination: false,
+          bordered: true,
+          scroll: { x: "max-content" },
+        }}
       />
       <ModuleFormDrawer
         open={moduleDrawer.open}
@@ -1308,6 +1313,7 @@ function DetailLevelTable({
           dataSource={visibleDetails}
           loading={loading}
           size="small"
+          bordered
           pagination={false}
           scroll={{ x: "max-content" }}
           emptyText={moduleId ? "该模块暂无明细" : "暂无明细"}

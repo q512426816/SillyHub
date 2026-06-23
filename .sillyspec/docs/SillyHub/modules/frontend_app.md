@@ -5,7 +5,7 @@ created_at: 2026-06-01T12:00:00
 
 # frontend_app
 > 最后更新：2026-06-21
-> 最近变更：ql-20260623-017-c9e5（/ppm/milestone-details 对齐 project-plans 风格）
+> 最近变更：ql-20260623-018-d2f7（milestone-details 子表加 bordered 对齐主表）
 > 模块路径：frontend/src/app/**
 
 ## 职责
@@ -141,3 +141,4 @@ layout.tsx (根布局)
 | 2026-06-23 | ql-20260623-015-a7c3 | /ppm/project-members 对齐 project-plans:page.tsx 改 PageContainer size=full + PageHeader;PpmProjectMembersTable 组件按 showToolbar 双模式渲染(页面=SectionCard bodyPadding=p-2 包裹 + Table bordered + scroll y calc(100vh-430px),抽屉=原 flex div 不变以兼容 projects 抽屉);顶部按钮去左侧'共 X 条'文本(Table 分页 showTotal 保留);操作列去 justify-end 改 whitespace-nowrap(fixed=right 自然左对齐) |
 | 2026-06-23 | ql-20260623-016-b8d4 | /ppm/plan-nodes 对齐 project-plans:div max-w-7xl + header → PageContainer size=full + PageHeader + SectionCard(bodyPadding=p-2) 包裹 toolbar+Table;顶部按钮右对齐(+ 新建模板);主 Table 加 bordered + scroll y calc(100vh-430px);模板主表 + 模块子表两处操作列去 align=right + justify-end,改 whitespace-nowrap + width 140 自然左对齐。无查询条件(模板树形展开 pagination=false),不加 search/grid |
 | 2026-06-23 | ql-20260623-017-c9e5 | /ppm/milestone-details 对齐 project-plans:PageContainer 加 size=full;PageHeader 去 actions;SectionCard bodyPadding=p-2 内顶部右对齐按钮行(重置/分隔/导出/+新建里程碑/刷新)+ grid-cols-4 Field(总体阶段/明细阶段/任务主题 + 第 4 格提示文本);PpmSubTable tableProps 加 bordered + scroll y calc(100vh-430px);新增 Field 组件 + 删 SearchBar 未用 import。保留前端实时过滤(无搜索按钮) |
+| 2026-06-23 | ql-20260623-018-d2f7 | /ppm/milestone-details 两处子表加 bordered 对齐主表:模块中间层 PpmSubTable<PlanNodeModule> tableProps 加 bordered;明细三级 DataTable<PsPlanNodeDetail> 加 bordered prop。3 层表(主表/模块/明细)边框风格一致 |
