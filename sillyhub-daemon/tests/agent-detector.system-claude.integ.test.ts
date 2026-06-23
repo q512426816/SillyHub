@@ -72,9 +72,12 @@ describe('task-01 agent-detector system-claude integration', () => {
     }
 
     // D-009 driver 直接拿 detected.path 当 pathToClaudeCodeExecutable。
-    // 必须是真正可 spawn 的扩展名（.exe/.cmd/.bat/.ps1），不能是空或 sh wrapper。
+    // Windows 下 findOnPath 只返回 .exe/.cmd/.bat/.ps1；posix 下可执行文件无扩展名
+    // （homebrew/apt 安装的 claude 即 /opt/homebrew/bin/claude），断言按平台分支。
     expect(r!.path).not.toBe('');
-    expect(/\.(cmd|exe|bat|ps1)$/i.test(r!.path)).toBe(true);
+    if (process.platform === 'win32') {
+      expect(/\.(cmd|exe|bat|ps1)$/i.test(r!.path)).toBe(true);
+    }
     console.log('[task-01 integ] detected path =', r!.path);
 
     // protocol 来自 PROVIDER_SPECS，固定 stream_json。

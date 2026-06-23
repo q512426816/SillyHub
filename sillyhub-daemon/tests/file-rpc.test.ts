@@ -288,17 +288,25 @@ describe('listDir — 符号链接与权限（task-05 T9/T10）', () => {
     expect(result.entries.length).toBeGreaterThanOrEqual(3);
   }, 10_000);
 
-  it('T10: 子项权限不足 → 该项降级 file，整体不中断（POSIX only）', async () => {
+  it('T10: 子项 stat EACCES（穿越无权限父目录）→ 兜底 file（POSIX only）', async () => {
     if (!canChmod()) return; // Windows 或 root 跳过
-    // 父目录可读；建一个无权限子项（chmod 000 → stat EACCES → 兜底 file）
-    await mkdir(tmpAbs('noaccess'));
-    await chmod(tmpAbs('noaccess'), 0o000);
+    // 直接子项 chmod 000 不能让 stat 失败（POSIX stat 只需父目录 x 权限，不检查目标
+    // 自身权限）。构造 symlink 指向「无权限父目录下的文件」：stat(symlink) 跟随 →
+    // 穿越无 x 的 noaccess → EACCES → 兜底 file（§5.3 step4 try/catch）。
+    try {
+      await mkdir(tmpAbs('noaccess'));
+      await writeFile(tmpAbs('noaccess/secret'), 'x');
+      await chmod(tmpAbs('noaccess'), 0o000);
+      await symlink(tmpAbs('noaccess/secret'), tmpAbs('locked-link'), 'file');
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'EPERM') return; // 不支持创建 symlink
+      throw e;
+    }
     try {
       const result = await listDir(tmpRoot, [tmpRoot]);
       const byName = new Map(result.entries.map((e) => [e.name, e.type]));
-      // noaccess 目录本身 stat 不到真实类型 → 兜底 file（按 §5.3 step4 try/catch）
-      expect(byName.get('noaccess')).toBe('file');
-      // 整体未 reject
+      // stat 穿越无权限目录 → EACCES → 兜底 file，整体不中断
+      expect(byName.get('locked-link')).toBe('file');
       expect(result.entries.length).toBeGreaterThanOrEqual(1);
     } finally {
       // 恢复权限以便 rm 清理

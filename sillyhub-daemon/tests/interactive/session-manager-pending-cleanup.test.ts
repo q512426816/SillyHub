@@ -349,10 +349,15 @@ describe('pending 审批多并发 + 乱序到达（AC-09.6 / 边界 8）', () =>
     // p3 仍 pending。
     expect(resolver.pendingCount).toBe(1);
 
-    const d1 = (await p1) as { behavior: string };
-    const d2 = (await p2) as { behavior: string };
+    const d1 = (await p1) as { behavior: string; message?: string };
+    const d2 = (await p2) as { behavior: string; message?: string };
+    // AskUserQuestion 拦截语义（_buildCanUseToolCallback L798-819）：allow/deny 统一回
+    // deny——用户答案经 deny.message 回传 Claude（canUseTool 唯一回传内容的方式）。
+    // 故用 message 区分乱序路由：rid2→p2=allow（已答）/ rid1→p1=deny（未答）。
     expect(d1.behavior).toBe('deny');
-    expect(d2.behavior).toBe('allow');
+    expect(d1.message).toMatch(/did not answer/i);
+    expect(d2.behavior).toBe('deny');
+    expect(d2.message).toMatch(/User answered/i);
 
     // cancelAllPending 一次性 reject 剩余（p3）。
     expect(resolver.abortAll('ended')).toBe(1);

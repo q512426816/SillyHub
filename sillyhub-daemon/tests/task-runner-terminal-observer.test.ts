@@ -147,7 +147,23 @@ function makeConfig(overrides: Partial<import('../src/config.js').DaemonConfig> 
 async function readObserverLog(leaseId: string): Promise<string> {
   const { readFile } = await import('node:fs/promises');
   const path = join(configMod.DEFAULT_CONFIG_DIR, 'runs', leaseId, 'terminal.log');
-  return readFile(path, 'utf-8');
+  // observer 写入是 fire-and-forget appendFile（terminal-observer.ts L126 `void appendFile`），
+  // runLease resolve 不等其 IO 落盘 → emitExit 后的 end 边界（done:/[stderr]）可能晚于
+  // `await p` 落盘，直接读存在竞态（pre-existing flaky）。轮询直到内容连续两轮相同
+  // （表示 fire-and-forget IO 已追平）或超时，消除时序脆弱性。
+  let prev = '';
+  for (let i = 0; i < 60; i++) {
+    let log = '';
+    try {
+      log = await readFile(path, 'utf-8');
+    } catch {
+      log = ''; // observer header 尚未落盘
+    }
+    if (log.length > 0 && log === prev) return log;
+    prev = log;
+    await new Promise<void>((r) => setTimeout(r, 10));
+  }
+  return prev;
 }
 
 /**

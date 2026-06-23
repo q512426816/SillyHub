@@ -79,10 +79,27 @@ describe('terminal-observer', () => {
     await cleanupDir(tmpDir);
   });
 
-  /** 读 observer 日志全文。 */
+  /**
+   * 读 observer 日志全文。
+   * observer 写入是 fire-and-forget appendFile（terminal-observer.ts L126），
+   * writeParsed/close 后立即读存在竞态（pre-existing flaky，全量并发下尤其明显）。
+   * 轮询直到内容连续两轮相同（IO 已追平）或超时。
+   */
   async function readLog(leaseId: string): Promise<string> {
     const path = join(configMod.DEFAULT_CONFIG_DIR, 'runs', leaseId, 'terminal.log');
-    return readFile(path, 'utf-8');
+    let prev = '';
+    for (let i = 0; i < 60; i++) {
+      let log = '';
+      try {
+        log = await readFile(path, 'utf-8');
+      } catch {
+        log = ''; // header 尚未落盘
+      }
+      if (log.length > 0 && log === prev) return log;
+      prev = log;
+      await new Promise<void>((r) => setTimeout(r, 10));
+    }
+    return prev;
   }
 
   /**
