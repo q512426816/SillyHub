@@ -1,76 +1,37 @@
 ---
+schema_version: 1
+doc_type: module-card
+module_id: models
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-01T12:00:00
+created_at: 2026-06-24T01:16:33
 ---
-
 # models
-> 最后更新：2026-06-01
-> 最近变更：scan（初始生成）
-> 模块路径：backend/app/models/**
 
-## 职责
+## 定位
+后端数据模型基类层，只提供 `BaseModel` 与 SQLModel 元数据容器。所有业务表的 ORM 模型都继承自它，从而统一纳入审计钩子、共享 metadata、UUID 主键等约定。本身不定义任何业务表。
 
-定义全局 ORM 基类，为所有业务模型提供统一的 SQLModel 元数据对象。所有业务模型必须继承 `BaseModel` 而非直接继承 `SQLModel`。
+## 契约摘要
+- `BaseModel(SQLModel)`：应用层所有持久化模型的基类。业务模型应继承 `BaseModel` 而非直接继承 `SQLModel`。
+- `SQLModel.metadata`：全局共享的表元数据，`create_all` 与迁移基于此生成表结构。
+- 业务模型再 `table=True` 声明为表，主键统一用 `uuid.UUID`（`id`），审计字段由各业务模型自行声明或经 `core.audit_hooks` 写入 audit_log。
 
-- 提供 `BaseModel` 基类，统一 metadata 对象
-- 通过 `__init__.py` 导出 `BaseModel` 供各模块引用
-
-## 当前设计
-
-### 文件结构
-
+## 关键逻辑
 ```
-backend/app/models/
-├── __init__.py    # 导出 BaseModel
-└── base.py        # BaseModel 定义
+# 约定的模型定义范式（各业务模块 model.py 遵循）
+class XxxModel(BaseModel, table=True):
+    id: uuid.UUID = Field(primary_key=True, default=uuid4)
+    ...业务字段...
+# 所有表挂同一 SQLModel.metadata
+# 继承 BaseModel → after_insert/update/delete 钩子识别实例并写 audit_log
 ```
-
-### 关键类
-
-| 类名 | 文件 | 说明 |
-|------|------|------|
-| `BaseModel` | base.py | 应用基础模型类，继承自 SQLModel，所有业务模型必须继承此类 |
-
-### BaseModel 设计
-
-- 继承 `SQLModel`
-- 确保所有子模型共享同一个 `metadata` 对象（SQLAlchemy 表注册）
-- 项目约定：禁止直接继承 `SQLModel`，统一使用 `BaseModel`
-
-## 对外接口
-
-| 导出 | 类型 | 说明 |
-|------|------|------|
-| `BaseModel` | 类 | 应用基础模型类，所有业务模型的父类 |
-
-## 关键数据流
-
-1. **模型定义流**：业务模块定义 Model → 继承 BaseModel → SQLAlchemy 自动注册到 metadata → Alembic 生成迁移
-2. **导入流**：各模块 `from app.models.base import BaseModel`
-
-## 设计决策
-
-| 决策 | 原因 | 替代方案 |
-|------|------|----------|
-| 单一 BaseModel 基类 | 统一 metadata，避免多基类导致表注册分散 | 各模块直接使用 SQLModel |
-| 独立 models 包 | 集中管理基类，各模块只引用 | 在各模块内定义基类 |
-
-## 依赖关系
-
-### 内部依赖
-- 无（这是最底层的包）
-
-### 外部库
-- sqlmodel — SQLModel ORM 基类
 
 ## 注意事项
+- 全应用唯一的数据模型基类入口；新增表必须 `BaseModel, table=True`，不要另立基类。
+- 本模块仅含基类，不承载业务表；业务表定义分散在各业务模块的 `model.py`（如 `incident/model.py`、`git_identity/model.py`）。
+- 改动基类（增删字段、调整 mixin）影响全部业务表，需全量回归与迁移评估。
+- 本项目未正式上线，数据可清空，schema 变更无需考虑历史数据兼容。
 
-- 所有新增业务模型必须继承 `BaseModel`，不可直接继承 `SQLModel`
-- 如果需要为 BaseModel 添加通用字段（如 id / created_at / updated_at），应在此处修改，影响全局
-- `__init__.py` 仅导出 `BaseModel`，不导出具体业务模型
-
-## 变更索引
-
-| 日期 | 变更 | 影响 |
-|------|------|------|
-| | | |
+## 人工备注
+<!-- MANUAL_NOTES_START -->
+<!-- MANUAL_NOTES_END -->

@@ -1,9 +1,14 @@
 schema_version: 1
 project: sillyhub-daemon
-source_commit: 0303536
-generated_at: 2026-06-19 13:25:00
-generator: sillyspec-quick
-last_change: 2026-06-19 quick(ql-20260619-002-703a) 新增 interactive 模块(interactive-session 变更：claude-sdk-driver/session-manager/permission-resolver/input-queue/session-store-persistence/types)；前次 2026-06-14-unified-agent-execution(新增 spawn-env；client 新增 getExecutionContext；task-runner 依赖 spawn-env)
+source_commit: ba87eec
+generated_at: 2026-06-24 00:46:11
+generator: sillyspec-scan
+
+# 全量重扫（2026-06-24）：修正旧 map 误写的 backends/ → 实际目录 adapters/；
+# 新增 7 个此前漏登的源码文件：daemon-version / spec-sync / cursor-version /
+# file-rpc / cmd-shim / terminal-launcher / terminal-observer。
+# agent-detector 实测 12 种 provider：claude/codex/copilot/opencode/openclaw/
+# hermes/gemini/pi/cursor/kimi/kiro/antigravity。
 
 modules:
   cli:
@@ -12,9 +17,9 @@ modules:
     paths: ["sillyhub-daemon/src/cli.ts"]
     tags: [cli, entrypoint]
     aliases: [__main__]
-    entrypoints: [createProgram, stopAction]
-    main_symbols: [getPidFile, getLogFile, readPid, isProcessAlive, createProgram, stopAction]
-    depends_on: [config]
+    entrypoints: [createProgram, startAction, stopAction, statusAction, logsAction]
+    main_symbols: [getPidFile, getLogFile, readPid, writePid, removePid, isProcessAlive, loadConfigFn, saveConfigFn, createProgram, startAction, stopAction, statusAction, logsAction]
+    depends_on: [config, daemon-version]
     used_by: []
     needs_review: false
     concerns: []
@@ -27,9 +32,9 @@ modules:
     tags: [config, infra]
     aliases: []
     entrypoints: []
-    main_symbols: [DaemonConfig, DEFAULT_CONFIG, DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_PATH]
+    main_symbols: [DaemonConfig, DEFAULT_CONFIG, DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_PATH, loadConfig]
     depends_on: []
-    used_by: [cli, daemon]
+    used_by: [cli, daemon, terminal-observer]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -55,9 +60,9 @@ modules:
     tags: [http, api-client]
     aliases: [hub-client]
     entrypoints: []
-    main_symbols: [HubClient, HubHttpError, RegisterBody, ClaimLeaseBody, StartLeaseBody, LeaseHeartbeatBody, SubmitMessagesBody, CompleteLeaseBody, HeartbeatBody]
+    main_symbols: [HubClient, HubHttpError, HubClientAuth, RegisterBody, ClaimLeaseBody, StartLeaseBody, LeaseHeartbeatBody, SubmitMessagesBody, CompleteLeaseBody, HeartbeatBody]
     depends_on: []
-    used_by: [cli, daemon, task-runner]
+    used_by: [cli, daemon, task-runner, spec-sync, interactive]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -71,7 +76,7 @@ modules:
     entrypoints: []
     main_symbols: [CredentialManager, DEFAULT_CREDENTIALS_PATH]
     depends_on: []
-    used_by: [cli, spawn-env, task-runner]
+    used_by: [cli, spawn-env, task-runner, interactive]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -126,11 +131,12 @@ modules:
     aliases: [detector]
     entrypoints: []
     main_symbols: [AgentProtocol, AgentProviderSpec, DetectedAgent, PROVIDER_SPECS, ProviderName, AgentDetector]
-    depends_on: [version]
-    used_by: [daemon]
+    depends_on: [version, cursor-version]
+    used_by: [daemon, task-runner]
     needs_review: false
     concerns: []
     review_reasons: []
+    notes: "PROVIDER_SPECS 实测 12 provider: claude/codex/copilot/opencode/openclaw/hermes/gemini/pi/cursor/kimi/kiro/antigravity"
 
   task-runner:
     status: active
@@ -139,8 +145,8 @@ modules:
     tags: [task, execution]
     aliases: [runner]
     entrypoints: []
-    main_symbols: [TaskStatus, RunnerHubClient, RunnerWorkspaceManager, RunnerCredentialManager, TaskRunner, TaskRunnerResult]
-    depends_on: [backends, client, credential, spawn-env, workspace]
+    main_symbols: [TaskStatus, LeaseCtx, RunnerHubClient, RunnerWorkspaceManager, RunnerCredentialManager, TaskRunner, TaskRunnerResult, resolveTimeout, resolveMaxRetries, isSpawnLevelFailure, renderAgentEvent, echoAgentEvent, renderTaskBoundary, echoTaskBoundary]
+    depends_on: [adapters, client, credential, spawn-env, workspace, spec-sync, cmd-shim, terminal-observer]
     used_by: [cli, daemon]
     needs_review: false
     concerns: []
@@ -153,92 +159,93 @@ modules:
     tags: [daemon, websocket, core]
     aliases: []
     entrypoints: []
-    main_symbols: [Daemon, DaemonOptions]
-    depends_on: [agent-detector, client, config, protocol, ws-client]
+    main_symbols: [Daemon, DaemonOptions, RecoveryCoordinator, InteractiveCredentialManager, SessionRecoverStatus, translateSpecRoot]
+    depends_on: [agent-detector, client, config, protocol, ws-client, spec-sync, file-rpc, adapters, interactive]
     used_by: [cli]
     needs_review: false
     concerns: []
     review_reasons: []
 
-  backends:
+  # ---- adapters（协议适配层；旧 map 误写 backends/，实际目录为 adapters/）----
+  adapters:
     status: active
-    doc: modules/backends.md
+    doc: modules/adapters.md
     paths: ["sillyhub-daemon/src/adapters/index.ts", "sillyhub-daemon/src/adapters/protocol-adapter.ts"]
     tags: [backend, abstraction, factory, adapter]
-    aliases: [agent-backend, adapters, protocol-adapter]
+    aliases: [backends, agent-backend, protocol-adapter]
     entrypoints: [getBackend]
     main_symbols: [ProtocolAdapter, AgentEvent, AgentEventType, getBackend, PROTOCOL_PROVIDERS]
     depends_on: [types]
-    used_by: [task-runner, backend-stream-json, backend-json-rpc, backend-jsonl, backend-ndjson, backend-text]
+    used_by: [task-runner, daemon, adapter-stream-json, adapter-json-rpc, adapter-jsonl, adapter-ndjson, adapter-text]
     needs_review: false
     concerns: []
     review_reasons: []
 
-  backend-stream-json:
+  adapter-stream-json:
     status: active
-    doc: modules/backend-stream-json.md
+    doc: modules/adapter-stream-json.md
     paths: ["sillyhub-daemon/src/adapters/stream-json.ts"]
-    tags: [backend, protocol, stream-json]
-    aliases: [stream-json-backend, stream-json-adapter]
+    tags: [backend, protocol, stream-json, adapter]
+    aliases: [backend-stream-json, stream-json-adapter]
     entrypoints: []
     main_symbols: [StreamJsonAdapter]
-    depends_on: [backends]
+    depends_on: [adapters]
     used_by: []
     needs_review: false
     concerns: []
     review_reasons: []
 
-  backend-json-rpc:
+  adapter-json-rpc:
     status: active
-    doc: modules/backend-json-rpc.md
+    doc: modules/adapter-json-rpc.md
     paths: ["sillyhub-daemon/src/adapters/json-rpc.ts"]
-    tags: [backend, protocol, json-rpc]
-    aliases: [json-rpc-backend, json-rpc-adapter]
+    tags: [backend, protocol, json-rpc, adapter]
+    aliases: [backend-json-rpc, json-rpc-adapter]
     entrypoints: []
     main_symbols: [JsonRpcAdapter]
-    depends_on: [backends]
+    depends_on: [adapters, daemon-version]
     used_by: []
     needs_review: false
     concerns: []
     review_reasons: []
 
-  backend-jsonl:
+  adapter-jsonl:
     status: active
-    doc: modules/backend-jsonl.md
+    doc: modules/adapter-jsonl.md
     paths: ["sillyhub-daemon/src/adapters/jsonl.ts"]
-    tags: [backend, protocol, jsonl]
-    aliases: [jsonl-backend, jsonl-adapter]
+    tags: [backend, protocol, jsonl, adapter]
+    aliases: [backend-jsonl, jsonl-adapter]
     entrypoints: []
     main_symbols: [JsonlAdapter]
-    depends_on: [backends]
+    depends_on: [adapters]
     used_by: []
     needs_review: false
     concerns: []
     review_reasons: []
 
-  backend-ndjson:
+  adapter-ndjson:
     status: active
-    doc: modules/backend-ndjson.md
+    doc: modules/adapter-ndjson.md
     paths: ["sillyhub-daemon/src/adapters/ndjson.ts"]
-    tags: [backend, protocol, ndjson]
-    aliases: [ndjson-backend, ndjson-adapter]
+    tags: [backend, protocol, ndjson, adapter]
+    aliases: [backend-ndjson, ndjson-adapter]
     entrypoints: []
     main_symbols: [NdjsonAdapter]
-    depends_on: [backends]
+    depends_on: [adapters]
     used_by: []
     needs_review: false
     concerns: []
     review_reasons: []
 
-  backend-text:
+  adapter-text:
     status: active
-    doc: modules/backend-text.md
+    doc: modules/adapter-text.md
     paths: ["sillyhub-daemon/src/adapters/text.ts"]
-    tags: [backend, protocol, text]
-    aliases: [text-backend, text-adapter]
+    tags: [backend, protocol, text, adapter]
+    aliases: [backend-text, text-adapter]
     entrypoints: []
     main_symbols: [TextAdapter]
-    depends_on: [backends]
+    depends_on: [adapters]
     used_by: []
     needs_review: false
     concerns: []
@@ -267,7 +274,7 @@ modules:
     entrypoints: []
     main_symbols: [AgentEvent, AgentEventType, TaskResult, BackendTaskResult, TaskState, DaemonMessage, LeasePayload]
     depends_on: []
-    used_by: [backends, task-runner, daemon, client]
+    used_by: [adapters, task-runner, daemon, client]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -279,9 +286,9 @@ modules:
     tags: [websocket, transport, core]
     aliases: []
     entrypoints: []
-    main_symbols: [WsClient, WsState, WsClientCallbacks, WsClientOptions, RECONNECT_INTERVAL_MS, RECONNECT_MAX_INTERVAL_MS, CONNECT_TIMEOUT_MS, CLOSE_TIMEOUT_MS]
+    main_symbols: [WsClient, WsState, WsClientCallbacks, WsClientOptions, RpcError, RECONNECT_INTERVAL_MS, RECONNECT_MAX_INTERVAL_MS, CONNECT_TIMEOUT_MS, CLOSE_TIMEOUT_MS]
     depends_on: [protocol]
-    used_by: [daemon]
+    used_by: [daemon, file-rpc, interactive]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -289,13 +296,118 @@ modules:
   interactive:
     status: active
     doc: modules/interactive.md
-    paths: ["sillyhub-daemon/src/interactive/**"]
+    paths:
+      - "sillyhub-daemon/src/interactive/session-manager.ts"
+      - "sillyhub-daemon/src/interactive/claude-sdk-driver.ts"
+      - "sillyhub-daemon/src/interactive/input-queue.ts"
+      - "sillyhub-daemon/src/interactive/permission-resolver.ts"
+      - "sillyhub-daemon/src/interactive/session-store-persistence.ts"
+      - "sillyhub-daemon/src/interactive/types.ts"
     tags: [interactive, session, claude-sdk, agent-driver, permission, persistence]
     aliases: [interactive-session, session-manager, claude-sdk-driver]
     entrypoints: [SessionManager, ClaudeSdkDriver]
-    main_symbols: [SessionManager, ClaudeSdkDriver, InputQueue, PermissionResolver, JsonSessionPersistence, SessionState, SessionStatus, CreateSessionInput, InjectResult, SESSION_FILE_VERSION, ClaudeExecutableNotFoundError, resolveClaudeExecutable]
-    depends_on: [client, ws-client, credential, config, protocol]
+    main_symbols: [SessionManager, ClaudeSdkDriver, ClaudeExecutableNotFoundError, resolveClaudeExecutable, InputQueue, SessionQueueClosedError, PermissionResolver, PERMISSION_FALLBACK_TIMEOUT_MS, JsonSessionPersistence, SessionPersistenceError, SessionState, SessionStatus, CreateSessionInput, InjectResult, SessionManagerDeps, SessionNotFoundError, UnsupportedProviderError]
+    depends_on: [client, ws-client, credential, config, protocol, cmd-shim]
     used_by: [daemon, cli]
-    needs_review: true
+    needs_review: false
     concerns: []
-    review_reasons: ["ql-20260619-002-703a 增量补充；depends_on/used_by 依赖链待全量 scan 核对"]
+    review_reasons: []
+
+  # ---- 本次新增（此前漏登的源码文件）----
+  daemon-version:
+    status: active
+    doc: modules/daemon-version.md
+    paths: ["sillyhub-daemon/src/daemon-version.ts"]
+    tags: [version, metadata, package]
+    aliases: []
+    entrypoints: []
+    main_symbols: [DAEMON_VERSION, DAEMON_NAME]
+    depends_on: []
+    used_by: [cli, adapter-json-rpc]
+    needs_review: false
+    concerns: ["modules/daemon-version.md 尚未创建"]
+    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+
+  spec-sync:
+    status: active
+    doc: modules/spec-sync.md
+    paths: ["sillyhub-daemon/src/spec-sync.ts"]
+    tags: [spec, sync, fs, bundle]
+    aliases: [spec-bundle]
+    entrypoints: []
+    main_symbols: [resolveSpecDir, PullSpecBundleOptions, pullSpecBundle, postSpecSync, packSpecDir]
+    depends_on: [client]
+    used_by: [task-runner, daemon]
+    needs_review: false
+    concerns: ["modules/spec-sync.md 尚未创建"]
+    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+
+  cursor-version:
+    status: active
+    doc: modules/cursor-version.md
+    paths: ["sillyhub-daemon/src/cursor-version.ts"]
+    tags: [detection, version, cursor]
+    aliases: []
+    entrypoints: []
+    main_symbols: [CursorVersionEntry, resolveCursorVersionEntry]
+    depends_on: []
+    used_by: [agent-detector, cmd-shim]
+    needs_review: false
+    concerns: ["modules/cursor-version.md 尚未创建"]
+    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+
+  file-rpc:
+    status: active
+    doc: modules/file-rpc.md
+    paths: ["sillyhub-daemon/src/file-rpc.ts"]
+    tags: [fs, rpc, security, sandbox]
+    aliases: [file-listing]
+    entrypoints: []
+    main_symbols: [DirEntry, ListDirResult, assertWithinAllowedRoots, listDir]
+    depends_on: [ws-client]
+    used_by: [daemon]
+    needs_review: false
+    concerns: ["modules/file-rpc.md 尚未创建"]
+    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+
+  cmd-shim:
+    status: active
+    doc: modules/cmd-shim.md
+    paths: ["sillyhub-daemon/src/cmd-shim.ts"]
+    tags: [windows, shim, cross-platform]
+    aliases: [windows-cmd-shim]
+    entrypoints: []
+    main_symbols: [resolveWindowsCmdShim]
+    depends_on: [cursor-version]
+    used_by: [task-runner, interactive]
+    needs_review: false
+    concerns: ["modules/cmd-shim.md 尚未创建"]
+    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+
+  terminal-launcher:
+    status: active
+    doc: modules/terminal-launcher.md
+    paths: ["sillyhub-daemon/src/terminal-launcher.ts"]
+    tags: [terminal, spawn, observability]
+    aliases: []
+    entrypoints: []
+    main_symbols: [LaunchTerminalOptions, launchTerminal]
+    depends_on: []
+    used_by: [terminal-observer]
+    needs_review: false
+    concerns: ["modules/terminal-launcher.md 尚未创建"]
+    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]
+
+  terminal-observer:
+    status: active
+    doc: modules/terminal-observer.md
+    paths: ["sillyhub-daemon/src/terminal-observer.ts"]
+    tags: [terminal, observer, logging, observability]
+    aliases: []
+    entrypoints: []
+    main_symbols: [TerminalObserver, CreateTerminalObserverOptions, NOOP_TERMINAL_OBSERVER]
+    depends_on: [config, terminal-launcher]
+    used_by: [task-runner]
+    needs_review: false
+    concerns: ["modules/terminal-observer.md 尚未创建"]
+    review_reasons: ["本轮 scan 新发现源码文件，对应模块文档待补"]

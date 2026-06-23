@@ -2,35 +2,41 @@
 schema_version: 1
 doc_type: module-card
 module_id: lib-agent
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-10T16:55:00
+created_at: 2026-06-24T01:01:57+08:00
 ---
-
 # lib-agent
 
 ## 定位
-Agent Run API 客户端。封装 Agent 运行管理的所有操作，包括创建、查询、日志获取、流式订阅、杀死运行、提交用户输入。
+Agent Run 领域 API 客户端（`frontend/src/lib/agent.ts`，约 235 行）。封装 Agent 运行的创建、查询、日志拉取（含游标）、流式订阅封装、杀死、用户输入提交，以及 daemon runtime 列表与 mission（任务会话）相关接口。是 `lib-agent-stream` / `lib-use-agent-run-stream` 与 daemon 面板的底层依赖。
 
 ## 契约摘要
-- `createAgentRun(workspaceId, input)` — 创建运行；`CreateAgentRunInput` 增 `provider` 字段（2026-06-14，覆盖默认 agent）
-- `getAgentRun`、`listAgentRuns` — 查询运行
-- `getAgentRunLogs(workspaceId, runId, after?)` — 获取日志（支持 after 游标）
-- `streamAgentRunLogs(workspaceId, runId, onMessage, onDone, onError?)` — SSE 流式订阅
-- `killAgentRun(workspaceId, runId)` — 杀死运行
-- `submitAgentRunInput(workspaceId, runId, input)` — 提交用户输入
-- `listDaemonRuntimes()` — 列出 Daemon 运行时（复用此模块）
-- 类型：AgentRun、AgentRunLogEntry、StreamLogEvent、CreateAgentRunInput
+- 运行管理：`createAgentRun(workspaceId, input)`（input 含 `provider` 覆盖默认 agent）、`getAgentRun`、`listAgentRuns(workspaceId, taskId?)`、`killAgentRun`。
+- 日志：`getAgentRunLogs(workspaceId, runId, after?)` 支持游标增量拉取；`StreamLogEvent` 为 SSE 单条事件结构。
+- 输入：`submitAgentRunInput(workspaceId, runId, { content })` 提交用户对 pending_input 的回复。
+- Daemon：`listDaemonRuntimes()` 列运行时（供 provider 选择）。
+- 会话：`listWorkspaceAgentSessions`、`createMission` / `getMission` / `cancelMission`（mission 任务会话）。
+- 关键类型：`AgentRun`（含 `agent_session_id` 与 `session_id` 两个易混 id、`total_cost_usd`、token 计数、`is_resume`）、`AgentRunStatus`（pending/running/completed/failed/killed）、`AgentRunLogEntry`、`DaemonRuntime`、`Mission`。
 
 ## 关键逻辑
-- SSE 连接使用 Next.js Route Handler 代理（token 通过 query 参数传递）
-- streamAgentRunLogs 返回 EventSource 实例，调用方负责关闭
-- AgentRunStatus: pending / running / completed / failed / killed
+```
+getAgentRunLogs(ws, runId, after?):
+  GET /api/workspaces/{ws}/agent/runs/{runId}/logs?after={after} → AgentRunLogEntry[]
+createAgentRun(ws, input):
+  POST /api/workspaces/{ws}/agent/runs { task_id, provider, ... } → AgentRun
+submitAgentRunInput(ws, runId, { content }):
+  POST .../runs/{runId}/input { content } → AgentRunInputResponse
+listDaemonRuntimes(): GET /api/daemon/runtimes → DaemonRuntime[]
+```
 
 ## 注意事项
-- listDaemonRuntimes 实际调用的是 `/api/daemon/runtimes`，与 lib/daemon.ts 中有重复定义
+- `AgentRun.agent_session_id`（AgentSession 表 id）与 `session_id`（daemon 内部会话 id）是两个不同概念：`fetchPendingDialogs` 等查 agent_sessions 表的接口必须用 `agent_session_id`，用错会查不到数据。
+- `getAgentRunLogs` 的 `after` 游标用日志 id，配合 SSE 的 `lastLogId` 实现断线补帧。
+- `createAgentRun` 的 `provider` 参数覆盖工作区 `default_agent`，不传走默认；`AgentProviderSelect` 组件用 `listDaemonRuntimes` 填充下拉。
+- `streamAgentRunLogs` 仅是 SSE 订阅的轻封装，真正的流式客户端逻辑在 `lib-agent-stream`（重连/去重/权限事件分流）。
+- mission 系列接口（createMission 等）服务于"任务会话"场景，与单次 AgentRun 不同。
 
 ## 人工备注
-
 <!-- MANUAL_NOTES_START -->
-- 2026-06-14-agent-runtime-selection：`CreateAgentRunInput` 增 `provider` 字段，`createAgentRun` 透传后端 `AgentRunCreate.provider`，覆盖 workspace 默认 agent。`listDaemonRuntimes` 被新增的 `AgentProviderSelect` 组件复用填充下拉。
 <!-- MANUAL_NOTES_END -->

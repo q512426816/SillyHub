@@ -2,77 +2,40 @@
 schema_version: 1
 doc_type: module-card
 module_id: docs
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-04T10:30:00+08:00
+created_at: 2026-06-24T01:16:42
 ---
-
 # docs
 
 ## 定位
 
-**docs 模块是 SillyHub 平台的设计决策、技术分析和参考资料集合。**
+multi-agent-platform 的持久化设计文档与参考资料集合，位于仓库根 `docs/`。承载跨变更共享的设计决策、执行规划、规范对齐分析、外部技术参考整理与功能验收 QA 报告。是纯静态知识库，无运行时代码、无 API，供开发者在各阶段查阅与追溯。与 `.sillyspec/changes/`（单变更临时工作文件）互补：docs 是永久参考，changes 是执行日志。
 
-负责：
-- 存放项目设计文档（变更方案、执行计划、规范对齐）
-- 沉淀技术参考文章（Harness Runtime、知识库、Agent 模型等外部素材整理）
-- 记录功能体验测试报告（QA 问题追踪）
-
-不负责：
-- 不存放运行时代码或配置（这些属于 backend/frontend 模块）
-- 不替代 .sillyspec/changes/ 中的变更流程文档（docs 是持久化参考，changes 是临时工作文件）
-- 不提供 API 接口（纯静态文档，供开发者查阅）
+技术栈：纯 Markdown，无构建。
 
 ## 契约摘要
 
-**核心能力：**
-- 存档项目关键设计决策（如变更中心改造、Agent 与 SillySpec 对接方案）
-- 整理外部技术参考（Harness Engineering、知识库设计、云端 Runner 等）
-- 记录 QA 测试结论与问题清单（作为验收和追溯依据）
+入口：`docs/README.md`（索引）。内容按类型分目录：
 
-**主要文档分类：**
-- 设计类：`change-center-redesign.md`、`spec-alignment.md`、`agent-sillyspec-stage-execution-analysis.md`
-- 规划类：`execution-plan-v2-v5.md`、`claude-loop-v1-p0.md`
-- 参考类：`sillyhub_refs/ref-*.md`（9 篇参考文章整理）
-- 测试类：`qa/sillyhub-functional-review-*.md`
+- **设计/规划类**（根）：execution-plan-v2-v5.md、claude-loop-v1-p0.md、change-center-redesign.md、spec-alignment.md、agent-sillyspec-stage-execution-analysis.md、sillyspec-tool-side-requirements.md。
+- **参考资料**：`docs/sillyhub_refs/`（README + ref-01~05 等外部素材整理，如 Harness Runtime、知识护城河、反虚拟公司 Agent、Take Root Harness、云端 Claude Code Runner、综合设计）。
+- **QA 验收**：`docs/qa/`（如 sillyhub-functional-review-*.md，按日期记录功能体验测试结论与问题清单）。
 
 ## 关键逻辑
 
-```
-docs/ 模块本质是知识库，无运行时逻辑。
-
-输入：
-- 设计讨论、外部文章、QA 测试报告
--> 整理、归档、索引
-输出：
-- .md 文件树，供跨阶段查阅
-
-与 .sillyspec/changes/ 的关系：
-- docs/：永久参考，跨变更共享，风格偏"决策记录"
-- changes/：临时工作区，单变更专用，风格偏"执行日志"
-
-与 sillyspec scan 的关系：
-- scan 会自动扫描 docs/，提取模块边界和约定
-- 但 docs/ 本身不是被扫描的"代码模块"，而是"设计输入"
-```
+- **定位边界**：docs 是"决策记录与外部参考沉淀"，不是被 scan 当作代码模块扫描的对象，而是设计输入。
+- **与 sillyspec scan 的关系**：scan 可能扫到 docs/，但 docs 本身不参与模块依赖图，仅作为背景知识。
+- **与 changes 的关系**：changes 中验证通过的设计若具备长期价值，应蒸馏进 docs；docs 不随单变更归档删除。
+- **命名约定**：QA 报告按日期命名便于按时间线回顾；参考文章保持与原文的映射便于追溯源头。
 
 ## 注意事项
 
-**维护提醒：**
-- 设计文档过期后应归档到 `docs/archive/`，避免混淆
-- 参考文章（`sillyhub_refs/`）应保持与原文的映射关系，便于追溯源头
-- QA 报告建议按日期命名，便于按时间线回顾问题演变
-
-**已知限制：**
-- 文档之间可能存在内容重叠（如执行计划与变更方案），需手动维护一致性
-- 参考文章是人工整理的摘要，不等同于原文完整内容
-- 文档没有版本化管理，依赖 git 历史追溯变更
-
-**修改时需同步检查的模块：**
-- 修改设计文档时，需检查 `.sillyspec/changes/` 中是否有正在进行的变更受影响
-- 参考文章更新时，需确认 backend/frontend 实现是否仍与文档一致
+- 文档之间可能存在内容重叠（执行计划 vs 变更方案），需手动维护一致性。
+- 参考文章是人工整理摘要，不等同原文完整内容，引用前应核对源头。
+- 过期设计文档建议归档到 `docs/archive/`，避免与现行方案混淆。
+- 改 docs 不需要跑测试，但应保证 markdown 格式正确、链接可达。
 
 ## 人工备注
-
 <!-- MANUAL_NOTES_START -->
-
 <!-- MANUAL_NOTES_END -->

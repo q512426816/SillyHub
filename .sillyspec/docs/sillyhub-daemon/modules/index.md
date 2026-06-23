@@ -2,43 +2,30 @@
 schema_version: 1
 doc_type: module-card
 module_id: index
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-14T10:40:45+08:00
+created_at: 2026-06-24T01:10:50
 ---
-
 # index
 
 ## 定位
-sillyhub-daemon 包的入口聚合文件 `src/index.ts`。通过 ESM re-export 把各核心模块的公开 API 暴露为单一包入口，供 `sillyhub-daemon` 作为 npm 包被外部消费（例如 daemon CLI、测试、未来嵌入其他 runtime）。本文件不实现逻辑。
+sillyhub-daemon 源码入口占位文件（`src/index.ts`）。当前仅 `export {}`，不含业务逻辑。最早为 W0 阶段让 tsc 有输入、避免空 include 触发 TS18003（"No inputs were found in config file"）而存在。
 
 ## 契约摘要
-- 重新导出：`Daemon`、`HubClient`、`DaemonConfig`、`TaskRunner`、`CredentialManager`、`WorkspaceManager`、`AgentDetector`、`getBackend`、`ProtocolAdapter`、`MSG` / `LEASE_STATE`、`AgentEvent` / `TaskResult` / `DaemonMessage` / `LeasePayload` 等
-- 子路径 import（`sillyhub-daemon/adapters/stream-json` 等）仍可用（Node ESM exports）
+- 无导出符号（`export {}`）。
+- 不被任何模块 import，无对外接口。
 
 ## 关键逻辑
 ```
-// 仅 re-export，无副作用
-export * from "./config"
-export * from "./client"
-export * from "./credential"
-export * from "./workspace"
-export * from "./version"
-export * from "./agent-detector"
-export * from "./task-runner"
-export * from "./daemon"
-export * from "./protocol"
-export * from "./types"
-export * from "./adapters/index"
+export {};
 ```
+文件内注释说明：后续业务模块（types.ts / protocol.ts / ... / cli.ts）在 src/ 增量补齐；如需聚合导出可在此扩展，当前保持空。
 
 ## 注意事项
-- 不在 index.ts 中放任何运行时逻辑，避免循环依赖与初始化顺序问题
-- 新增对外公开的模块需在此 re-export，否则包消费者看不到
-- 延迟加载或可选依赖（如 adapter 的动态 import）不应在 index 顶层触发
-- 被 npm 包入口 `package.json.exports["."]` 指向
+- 实际入口是 `cli.ts`（package.json bin 指向 dist/cli.js），不是 index.ts。
+- 该文件存在的唯一原因是 tsc 编译占位；删除会导致 include 为空时报 TS18003。
+- 修改本文件无业务影响，除非确实需要 barrel re-export。
 
 ## 人工备注
-
 <!-- MANUAL_NOTES_START -->
-
 <!-- MANUAL_NOTES_END -->

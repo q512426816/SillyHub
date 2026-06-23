@@ -2,33 +2,41 @@
 schema_version: 1
 doc_type: module-card
 module_id: components-agent-log
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-10T16:55:00
+created_at: 2026-06-24T01:02:00
 ---
-
 # components-agent-log
 
 ## 定位
-Agent 运行日志查看器和相关子模块。负责展示 Agent 执行过程中的实时日志流、工具调用结果、用户输入交互。
+Agent / 运行时日志的渲染引擎（`agent-log-viewer.tsx` + `agent-log/*`）。把后端 SSE 推来的原始日志流归一化、按"轮次(turn)"分组、识别思考/工具调用/工具结果/待回复 input 等语义，渲染成带折叠、复制、工具预览的交互式日志视图。是 AgentPage / 运行时会话查看历史的核心展示层。
 
 ## 契约摘要
-- `agent-log-viewer.tsx` — 日志查看器主组件：展示 AgentRun 日志流、支持全屏/内嵌模式、待输入回复、工具调用渲染
-- `agent-log/types.ts` — 类型定义：ToolCallEntry、ScanCheckResult、ProcessedLog 等
-- `agent-log/tool-renderers.tsx` — 工具调用结果渲染器：针对不同工具类型的专用渲染
-- `agent-log/normalize.ts` — 日志规范化：解析和标准化日志条目
+- `AgentLogViewer`（`agent-log-viewer.tsx`）：主组件，`useMemo(() => normalizeLogs(logs??[]))` 归一化后按 turn 分组渲染。
+- `normalizeLogs(logs)`（`agent-log/normalize.ts`）：原始日志 → `ProcessedLog[]`，处理 redaction、时间戳等。
+- `parseToolCallContent(raw)`（normalize.ts）：从日志 content 解析出工具调用条目（`ToolCallEntry | null`）。
+- `isThinkingContent(content)` / `isPendingReplied(timestamp, allLogs)`：语义判定（思考块 / 该 input 是否已被后续回复）。
+- `groupIntoTurns(logs: ProcessedLog[])`：按轮次分组成 `ProcessedLog[][]`。
+- `AgentLogRow`：单行渲染，按 log 类型分流（工具调用 → `ToolCallPreview`、结果 → `ToolResultCard`、思考块 → 折叠、待回复 → 高亮）。
+- 辅助展示：`ToolCallPreview` / `ToolResultCard` / `CopyButton` / `CollapsibleSection`。
+- 常量：`COMMAND_COLLAPSE_LINES=5` / `COMMAND_COLLAPSE_CHARS=500`（长命令折叠阈值）、`EMPTY_REPLIED_INPUTS`。
+- 类型：`ProcessedLog`（`agent-log/types.ts`）。
 
 ## 关键逻辑
-- 实时日志通过 SSE（EventSource）接收，自动去重（seenLogIds）
-- 工具调用内容通过 parseToolCallContent 解析，检测结果通过 parseScanCheckOutput 解析
-- 支持用户输入（pending_input channel）的回复功能
-- 日志行折叠控制：COMMAND_COLLAPSE_LINES / COMMAND_COLLAPSE_CHARS
+- 归一化 + 分组流水线：
+  ```
+  const processed = useMemo(() => normalizeLogs(logs ?? []), [logs])
+  const turns = groupIntoTurns(processed)
+  // 渲染：turns.map(turn => turn.map(log => <AgentLogRow log={log} allLogs={processed} .../>))
+  ```
+- AgentLogRow 语义分流：工具调用走 `parseToolCallContent`；待回复 input 用 `isPendingReplied` 判断是否已被回复（`repliedInputs.has(log.id)` 或时间戳推断）；stdout + `isThinkingContent` 判为思考块。
 
 ## 注意事项
-- 组件依赖 `@/lib/agent` 的类型定义和 API 函数
-- 工具调用渲染器需要随 Agent 工具集扩展而更新
+- 日志量可能很大，归一化与分组都用 `useMemo` 缓存，避免每次渲染重算；改 logs 引用时要保证数组 identity 稳定才有效。
+- `isPendingReplied` 既查显式 `repliedInputs` 集合也按时间戳兜底推断，逻辑较细，改动需配套测试（`agent-log/__tests__`）。
+- 长命令/长输出靠 `COMMAND_COLLAPSE_*` 折叠，改阈值影响默认展开体验。
+- content_redacted 是后端脱敏后的字段，前端不要再尝试还原敏感内容。
 
 ## 人工备注
-
 <!-- MANUAL_NOTES_START -->
-
 <!-- MANUAL_NOTES_END -->

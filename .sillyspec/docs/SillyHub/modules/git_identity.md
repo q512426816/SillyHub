@@ -1,132 +1,39 @@
 ---
+schema_version: 1
+doc_type: module-card
+module_id: git_identity
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-01T12:00:00
+created_at: 2026-06-24T01:16:33
 ---
-
 # git_identity
-> 最后更新：2026-06-01
-> 最近变更：scan（初始生成）
-> 模块路径：backend/app/modules/git_identity/**
 
-## 职责
+## 定位
+后端「Git 身份与凭证管理」功能域：管理用户的 git 提交身份（name/email）与 PAT 等访问凭证，凭证经 `core.crypto` 对称加密落库；通过 provider 校验凭证对目标仓库的访问权限。为 git_gateway 署名、worktree 拉取私有仓库提供身份与凭证来源。
 
-git_identity 管理 Git 身份凭证，负责：
+## 契约摘要
+- API（prefix=/git, tag=git_identity）：身份 CRUD（list/get/create/revoke）、访问校验 `POST /git/identities/{id}/check-access`。
+- `GitIdentityService`：`list_/get/create/revoke`、`check_access(identity_id, repo_url)`（调 provider 校验 PAT）、`_assert_usable`（未吊销/未过期）、`_default_cipher`（CredentialCipher）。
+- `GitIdentity(BaseModel, table=True)`：name/email + 加密的 PAT（带 key_id）+ provider 类型 + 状态/过期。
+- providers：`GitProvider`（基类，`check_pat_access(token, repo_url) → AccessResult`）、`GitHubProvider`（解析 owner/repo 调 GitHub API 校验）。扩展其他平台（GitLab 等）新增 provider 子类。
+- 错误：`IdentityNotFound` / `IdentityRevoked` / `IdentityExpired`。
+- 依赖 core.crypto（加密）、workspace（归属）。
 
-- **凭证管理**：创建、查看、吊销 Git 身份（PAT、SSH Key 等）
-- **凭证加密存储**：使用 AES-GCM 对凭证进行加密，密钥通过环境变量管理
-- **Provider 访问检查**：通过 GitHub Provider 等验证 PAT 是否有指定仓库的访问权限
-- **凭证生命周期**：支持过期时间设置、吊销标记
-
-## 当前设计
-
+## 关键逻辑
 ```
-router.py              HTTP 入口，5 个端点
-  |
-service.py             GitIdentityService — 核心业务逻辑
-  |                      - create()       创建身份（加密凭证）
-  |                      - list_()        列出用户身份
-  |                      - get()          获取单个身份
-  |                      - revoke()       吊销身份
-  |                      - check_access() 检查 PAT 仓库访问权限
-  |
-model.py               GitIdentity (SQLModel 表)
-schema.py              请求/响应 schema
-providers/
-  ├── base.py          GitProvider 抽象基类 + AccessResult
-  ├── github.py        GitHubProvider — 调用 GitHub API 验证 PAT
-  └── __init__.py      PROVIDERS 注册表
+# 凭证加解密
+create(name,email,pat,provider) → CredentialCipher.encrypt(pat) → 落库密文+key_id
+check_access → _assert_usable → 解密 PAT → provider.check_pat_access(token, repo_url)
+# 署名消费（git_gateway）
+_resolve_git_identity(user_id) → 取 GitIdentity.name/email 注入 git env
 ```
-
-### 加密体系
-
-- 使用 `app.core.crypto.CredentialCipher` 进行 AES-GCM 加密
-- Master Key 从环境变量加载（`GIT_IDENTITY_MASTER_KEY`）
-- 每次加密使用随机 nonce，密文存储在 `encrypted_credential` 字段
-- `key_id` 字段用于密钥轮换追踪
-
-### Provider 架构
-
-- `GitProvider` 抽象基类定义 `check_pat_access(token, repo_url)` 接口
-- `GitHubProvider` 实现通过 GitHub API (`/repos/{owner}/{repo}`) 验证 PAT 权限
-- `PROVIDERS` 字典注册所有 provider，支持按 `provider` 字段名查找
-
-### 状态管理
-
-身份有三种不可用状态：
-- `IdentityNotFound` — 身份不存在
-- `IdentityRevoked` — 已被吊销（`revoked_at` 非空）
-- `IdentityExpired` — 已过期（`expires_at` 早于当前时间）
-
-## 对外接口
-
-| 方法 | 路径 | 说明 | 认证 |
-|------|------|------|------|
-| GET | `/git/identities` | 列出当前用户所有 Git 身份 | get_current_user |
-| POST | `/git/identities` | 创建新 Git 身份（加密存储凭证） | get_current_user |
-| GET | `/git/identities/{identity_id}` | 获取单个身份详情 | get_current_user |
-| DELETE | `/git/identities/{identity_id}` | 吊销身份（软删除） | get_current_user |
-| POST | `/git/check-access` | 检查 PAT 对指定仓库的访问权限 | get_current_user |
-
-## 关键数据流
-
-### 创建身份
-
-```
-Client → POST /git/identities
-  → GitIdentityCreate 验证
-  → cipher.encrypt(credential)           # AES-GCM 加密
-  → GitIdentity 写入数据库（含 encrypted_credential, key_id）
-  → 返回 GitIdentityRead（不含原始凭证）
-```
-
-### 访问检查
-
-```
-Client → POST /git/check-access
-  → AccessCheckRequest(provider, token, repo_url)
-  → GitIdentityService.check_access()
-  → PROVIDERS[provider].check_pat_access(token, repo_url)
-  → GitHubProvider: GET https://api.github.com/repos/{owner}/{repo}
-  → 返回 AccessCheckResult(accessible, error?)
-```
-
-## 设计决策
-
-| 决策 | 原因 |
-|------|------|
-| AES-GCM 而非 AES-CBC | 提供认证加密，防止密文篡改 |
-| 环境变量管理 Master Key | 避免硬编码密钥，支持不同环境使用不同密钥 |
-| Provider 注册表模式 | 支持扩展其他 Git 托管平台（GitLab、Bitbucket 等） |
-| 软删除（revoked_at）而非硬删除 | 审计追踪需要保留历史记录 |
-| 响应中不返回原始凭证 | 安全原则——凭证一旦加密存储，API 永不返回明文 |
-
-## 依赖关系
-
-### 内部依赖
-
-- `app.core.auth_deps` — get_current_user
-- `app.core.crypto` — CredentialCipher, get_cipher
-- `app.core.db` — get_session
-- `app.core.errors` — AppError, PermissionDenied
-- `app.core.logging` — get_logger
-- `app.models.base` — BaseModel
-- `app.modules.auth.model` — User
-- `app.modules.auth.permissions` — Permission
-
-### 外部依赖
-
-- httpx（GitHub Provider 调用 GitHub API）
 
 ## 注意事项
+- PAT 仅以加密形态落库，密文带 key_id 与 master key 匹配；明文永不出库（check_access 时内存解密即用即弃）。
+- `_assert_usable` 在使用前拦截已吊销/已过期身份，避免用失效凭证。
+- 新增代码托管平台只需实现 `GitProvider.check_pat_access`，在 service 按 provider 类型分发。
+- 吊销（revoke）是软删除，保留审计痕迹。
 
-- 凭证类型当前支持 `pat`，可通过 `credential_type` 字段扩展 SSH Key 等
-- `allowed_repositories` 为 JSON 数组，限制身份可用的仓库范围
-- 所有身份操作都按 `user_id` 隔离，用户只能管理自己的身份
-- `key_id` 字段用于密钥轮换，当 Master Key 更换后可追踪哪些凭证需要重新加密
-- git_gateway 模块在执行 Git 命令时会读取 git_identity 获取用户名/邮箱
-
-## 变更索引
-
-| 日期 | 变更 | 摘要 |
-|------|------|------|
-| | | （初始生成，暂无变更记录） |
+## 人工备注
+<!-- MANUAL_NOTES_START -->
+<!-- MANUAL_NOTES_END -->

@@ -2,32 +2,43 @@
 schema_version: 1
 doc_type: module-card
 module_id: app-workspace-pages
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-10T16:55:00
+created_at: 2026-06-24T01:02:00
 ---
-
 # app-workspace-pages
 
 ## 定位
-`/workspaces/[id]/*` 路径下的所有子页面。这些页面共享工作空间上下文，通过 URL 参数获取 workspaceId。是 app-pages 的子集，但因为共享工作空间上下文而独立归类。
+工作区作用域页面集合，挂在 `/workspaces/[id]/**` 下，是产品功能最密集的路由组：涵盖变更(SillySpec)、任务看板、Agent 运行、组件拓扑、扫描文档、知识库、运行时进度、发布、审批、审计、故障、任务、成员等近 20 个页面。页面以 `[id]` / `[cid]` / `[tid]` / `[iid]` 等动态段取参，组合对应 lib-* 客户端拉数据，复杂交互（流式日志、权限卡片）下沉到 components-agent-log / components-daemon / components-shared。
 
 ## 契约摘要
-- 工作空间详情、变更管理、Agent 控制、组件拓扑、知识库、发布、审批、审计、事件、运行时、扫描文档、创建变更
-- 所有页面通过 `useParams()` 获取 `id`（workspaceId）参数
-- 共享 AppShell 侧边栏导航中的工作空间相关链接
+- `WorkspaceDetailPage`（`/workspaces/[id]`）：并行 `getWorkspace` + active/archive 两份 `listChanges`（各自 `.catch` 兜底空），渲染工作区概览与变更分区。
+- `ChangesPage` / `ChangeDetailPage`：`listChanges(location:active|archive)` + `reparseChanges`；详情页聚合文档/审批/进度。
+- `TaskBoardPage` / `TaskDetailPage`：`getTaskBoard` + `transitionTask`，任务流转。
+- `CreateChangePage`：表单 → `createChange(workspaceId, input)`，可续调 `generateDocs` / `batchGenerateDocuments`。
+- `AgentPage`：活跃 run 日志流 + 历史 prefetch + input + 权限卡片统一由 `<AgentRunPanel>`（内含 `useAgentRunStream` 连 SSE）承担，页面只切 `activeRunId`。
+- `ComponentsPage` / `TopologyPage`：`listComponents` / `getTopology`，拓扑用 @xyflow/react。
+- `RuntimePage`：`getRuntimeProgress` + `getRuntimeUserInputsRaw` + `getRuntimeArtifacts` 三路并行拉运行时进度。
+- 其余：`ScanDocsPage`、`KnowledgePage`、`ReleasesPage`、`ApprovalsPage`、`AuditPage`、`IncidentsPage`/`IncidentDetailPage`、`MissionsPage`、`MembersPage`，各自对接同名 lib-* 客户端。
 
 ## 关键逻辑
-- 页面加载时通过 `getWorkspace(id)` 获取工作空间元数据
-- 子资源操作（变更、任务、Agent Run）均以 workspaceId 作为路径前缀
-- 侧边栏导航由 AppShell 根据当前 workspaceId 动态生成链接
-- 默认 Agent 下拉（2026-06-14）：设置页 `workspaces/[id]/page.tsx` 用 `AgentProviderSelect` 设 workspace.default_agent（PATCH 保存）；三处触发面板（`tasks/[tid]` task 触发 / `changes/[cid]` stage 手动 dispatch+scan / `workspace-scan-dialog`）接入同组件选 provider，默认跟随 workspace.default_agent
+- 动态段取参：`export default function XPage({ params }: { params: { id: string; cid?: string } })`，页面内 `const workspaceId = params.id`。
+- 并行加载兜底模式：
+  ```
+  const [ws, active, archive] = await Promise.all([
+    getWorkspace(id),
+    listChanges(id, {location:'active'}).catch(() => ({items:[],total:0})),
+    listChanges(id, {location:'archive'}).catch(() => ({items:[],total:0})),
+  ])
+  ```
+- AgentPage 分层：页面只持有 `activeRunId`，SSE 连接/历史 prefetch/input 提交/权限响应全部在 `AgentRunPanel` → `useAgentRunStream` 内闭环。
 
 ## 注意事项
-- workspaceId 为空或不存在时，侧边栏中的工作空间相对链接会显示为禁用状态
-- 新增工作空间子页面需要在 AppShell 的 OVERVIEW_NAV 或 MANAGEMENT_NAV 中添加导航项
+- 大量 UI 内联在页面组件中，单文件普遍偏长；改 Agent/Runtime/Change 详情时优先确认逻辑是否已下沉到 panel/hook，避免重复实现 SSE。
+- `location: active|archive` 是变更分区的核心参数，漏传会拿到混合列表。
+- 动态段在 Next 14 仍为对象（非 Promise），直接解构即可；升级 Next 版本时需关注 params 异步化变更。
+- 任务/发布/审批等流转操作成功后需手动触发对应列表刷新（无全局缓存自动失效）。
 
 ## 人工备注
-
 <!-- MANUAL_NOTES_START -->
-- 2026-06-14-agent-runtime-selection：设置页接入默认 agent 下拉（PATCH workspace.default_agent）；task 触发 / stage 手动 dispatch / scan-generate 三处触发面板接入 provider 下拉；均使用共享组件 `AgentProviderSelect`（components-shared）。
 <!-- MANUAL_NOTES_END -->

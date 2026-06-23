@@ -1,162 +1,81 @@
 ---
+schema_version: 1
+doc_type: module-card
+module_id: task
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-01T12:00:00
+created_at: 2026-06-24T01:16:36
 ---
-
 # task
-> 最后更新：2026-06-01
-> 最近变更：scan（初始生成）
-> 模块路径：backend/app/modules/task/**
 
-## 职责
+## 定位
+SillySpec 工作流中「任务」的解析与生命周期管理服务。任务（Task）是变更（Change）下的可执行单元，对应 `.sillyspec/changes/<change-key>/tasks/<task-key>.md`。负责从 markdown 解析任务定义、CRUD、看板视图、与 workspace 的多对多关联同步。是 spec 文档管理链路的「任务索引层」。
 
-Task 模块负责 SillySpec 工作流中任务（Task）的生命周期管理：从文件系统解析任务定义、CRUD 操作、任务看板（board）视图、到与 Change 的关联管理。任务是变更（Change）下的可执行单元，对应 `.sillyspec/changes/<change-key>/tasks/` 目录中的 Markdown 文件。
+产品视角：任务是 spec 工作流「计划→执行」的承载体。用户在变更详情页看到任务列表与看板，workflow 模块驱动任务状态流转，agent 执行时取任务上下文。任务定义写在 markdown frontmatter（含依赖/阻塞/优先级/影响组件），文件是 source of truth，本模块把它解析落库供快速查询与编排。
 
-核心能力包括：
-- 任务的解析与同步（从 .sillyspec 目录解析 Markdown 任务文件）
-- 任务 CRUD（list、get）
-- 任务看板视图（按状态/阶段分组的 board 布局）
-- 任务与 Workspace 的多对多关联
-- 任务与 Change 的归属关系
+## 契约摘要
+- 路由：`APIRouter prefix=/workspaces/{workspace_id} tag=task`
+  - `GET /changes/{change_id}/tasks` 列表（支持 status 过滤，返回 `TaskList`）
+  - `GET /tasks/{task_id}` 详情（返回 `TaskRead`，含 workspace_ids）
+  - `GET /changes/{change_id}/tasks/board` 看板（按 status 分组的 `TaskBoard` → `list[TaskBoardColumn]`）
+  - `POST /changes/{change_id}/tasks/reparse` 重解析
+- 数据：`Task`（task_key / title / status 默认 draft / phase / priority / owner_key / estimated_hours / depends_on / blocks / affected_components / allowed_paths / path / content）
+- 中间表：`TaskWorkspace`（Task ↔ Workspace 多对多）
+- 解析产物：`ParsedTask` / `TaskParseWarning` / `TaskParserResult`
+- 依赖：`core`、`models`、`workspace`（Workspace/TaskWorkspace）、`change`（ChangeService 查 change）；被 `workflow.transition_task` 驱动状态、`agent` 取任务上下文（build_task_context）
+- 跨组件协作：前端 `lib/tasks.ts` + 变更详情页任务标签 + 看板视图；workflow 用 TaskFSM 校验状态迁移
 
-## 当前设计
-
-模块结构：
-
+## 关键逻辑
+重解析与看板（`TaskService`）：
 ```
-router.py    → HTTP 接口层（4 个端点）
-service.py   → 业务逻辑层（TaskService）
-parser.py    → 文件解析器（TaskParser）
-model.py     → 数据模型（Task）
-schema.py    → Pydantic 请求/响应 schema
-tests/       → 测试（router, parser）
+parsed = TaskParser.parse_tasks(change_dir)   # 读 tasks/*.md frontmatter
+existing = _fetch_existing_tasks(change_id)   # 按 path 对账
+for p in parsed: upsert Task + _apply_parsed
+_sync_task_workspaces(task, parsed.workspaces) # M2M 关联同步
+board: query tasks → 按 status 分组成 TaskBoardColumn[]
 ```
+- 文件系统是 source of truth，reparse 幂等 upsert
+- depends_on/blocks 存 task_key 字符串列表（非 UUID），运行时解析，文件定义阶段 ID 尚未生成
+- `_extract_h1` 从 markdown 提取 H1 作为 title，缺失回退 frontmatter
+- `_sync_task_workspaces` 维护 Task ↔ Workspace 多对多关联
+- board 视图查全部任务按 status 分组，适配看板式 UI
 
-### 关键类
-
-| 类 | 文件 | 说明 |
-|---|---|---|
-| `Task` | model.py | 任务主表（SQLModel ORM），含 task_key、title、status、phase、priority、depends_on、blocks 等字段 |
-| `TaskService` | service.py | 核心业务服务 |
-| `TaskParser` | parser.py | 文件解析器，从 .sillyspec 目录解析任务定义 |
-| `ParsedTask` | parser.py | 解析后的任务数据 |
-| `TaskParseWarning` | parser.py | 解析警告 |
-| `TaskParserResult` | parser.py | 解析结果（tasks + warnings） |
-
-### Task 模型字段
-
-| 字段 | 说明 |
-|---|---|
-| id | UUID 主键 |
-| workspace_id | 所属 workspace |
-| change_id | 所属 change |
-| task_key | 任务唯一标识（来自文件名） |
-| title | 任务标题 |
-| status | 任务状态（默认 draft） |
-| phase | 阶段 |
-| priority | 优先级 |
-| owner_key | 负责人标识 |
-| estimated_hours | 预估工时 |
-| affected_components | 影响的组件列表 |
-| allowed_paths | 允许操作的路径列表 |
-| depends_on | 依赖的任务列表 |
-| blocks | 阻塞的任务列表 |
-| path | 文件路径 |
-| content | 文件内容 |
-
-### TaskService 方法
-
-| 方法 | 说明 |
-|---|---|
-| `list_(workspace_id, change_id, status)` | 列出任务（支持按状态过滤） |
-| `get(workspace_id, task_id)` | 获取任务详情 |
-| `get_board(workspace_id, change_id)` | 获取任务看板视图 |
-| `reparse(workspace_id, change_id)` | 重新解析任务（从文件系统同步） |
-| `enrich_with_workspace_ids(task)` | 填充 workspace_ids |
-| `enrich_summaries(tasks)` | 批量填充 workspace_ids |
-
-## 对外接口（表格）
-
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/workspaces/{workspace_id}/changes/{change_id}/tasks` | 列出任务列表（支持 status 过滤） |
-| GET | `/workspaces/{workspace_id}/tasks/{task_id}` | 获取任务详情 |
-| GET | `/workspaces/{workspace_id}/changes/{change_id}/tasks/board` | 获取任务看板 |
-| POST | `/workspaces/{workspace_id}/changes/{change_id}/tasks/reparse` | 重新解析任务 |
-
-## 关键数据流
-
-```
-文件系统 .sillyspec/changes/<change-key>/tasks/<task-key>.md
-  → TaskParser.parse_tasks()
-    → ParsedTask（frontmatter: title/status/phase/priority/depends_on/blocks 等）
-      → TaskService.reparse()
-        → _fetch_existing_tasks() 查询已有记录
-        → _build_task() / _apply_parsed() 构建/更新 Task
-        → _sync_task_workspaces() 多对多关联同步
-        → upsert Task 记录
-```
-
-```
-用户 → router.list_tasks
-  → TaskService.list_()
-    → 按条件查询 Task
-    → enrich_summaries() 填充 workspace_ids
-    → 返回 TaskList
-```
-
-```
-用户 → router.get_task_board
-  → TaskService.get_board()
-    → 查询所有 tasks
-    → 按 status 分组为 TaskBoardColumn
-    → 返回 TaskBoard
-```
-
-## 设计决策（表格）
-
-| 决策 | 原因 | 备注 |
-|---|---|---|
-| 文件系统作为 Source of Truth | 与 Change 一致，任务定义在 .sillyspec 目录 | reparse 用于同步 |
-| 任务归属 Change | 一个 Change 下有多个 Task | 通过 change_id 外键关联 |
-| 多对多 Task-Workspace | 一个 Task 可关联多个 Workspace | TaskWorkspace 中间表 |
-| Board 视图按 status 分组 | 适配看板式 UI 展示 | TaskBoard → list[TaskBoardColumn] |
-| 解析器独立（TaskParser） | 解析逻辑复杂，与业务逻辑解耦 | 便于单独测试 |
-| frontmatter 字段丰富 | depends_on/blocks/priority/phase 支持复杂任务编排 | 从 Markdown frontmatter 解析 |
-| 依赖和阻塞使用 task_key 而非 ID | 文件定义阶段 ID 尚未生成 | depends_on/blocks 存储的是 key 字符串列表 |
-
-## 依赖关系
-
-### 内部依赖（被本模块使用）
-
-| 依赖模块 | 用途 |
-|---|---|
-| `app.core.auth_deps` | 权限校验（require_permission） |
-| `app.core.db` | 数据库会话 |
-| `app.core.errors` | 错误类型（TaskNotFound） |
-| `app.core.logging` | 日志 |
-| `app.modules.auth` | User 模型、Permission 权限 |
-| `app.modules.change` | ChangeService（查询 Change 信息） |
-| `app.modules.workspace` | Workspace、TaskWorkspace 中间表、WorkspaceService |
-| `app.models.base` | BaseModel 基类 |
-
-### 被依赖（其他模块使用本模块）
-
-| 使用方模块 | 用途 |
-|---|---|
-| `agent` | Task 模型用于上下文构建（build_task_context） |
-| `change` | Task 概念上属于 Change 的子资源 |
-| `change_writer` | 测试中使用 Task 模型 |
+### Parser 解析细节
+`TaskParser` 从 `.sillyspec/changes/<change-key>/tasks/*.md` 解析：
+- `parse_tasks(change_dir)` 遍历 tasks 目录，对每个 `.md` 调 `_parse_task_file`
+- `_parse_task_file` 读 frontmatter（YAML）提取 title/status/phase/priority/depends_on/blocks/owner_key/estimated_hours/affected_components/allowed_paths
+- `_extract_h1` 取首个 H1 作 title 兜底
+- `TaskParseWarning` 记录解析问题（缺字段/格式错），随 result.warnings 返回
+- task_key 取文件名（去 .md），作为跨文件引用键
 
 ## 注意事项
+- reparse 会软删磁盘上消失的任务文件对应行，保持 DB 与文件一致
+- `enrich_with_workspace_ids` / `enrich_summaries` 填充响应中的 workspace_ids 列表
+- board 视图加载全部任务再分组，任务量大时可能需分页优化
+- depends_on/blocks 是 key 引用，非 ID，跨 change 不解析，运行时需解析映射
+- 每个任务必须归属一个 change（change_id 必填），change 删除需级联处理
+- 任务状态默认 draft，经 workflow.transition_task 流转（draft→ready→in_progress→review→done，含 blocked/cancelled）
+- frontmatter 字段丰富（priority/phase/depends_on/blocks）支持复杂任务编排
+- TaskParser 独立于 service，便于单独测试解析逻辑
+- `_build_task` 构造新 Task 行，`_apply_parsed` 刷已有行字段，二者保证 upsert
+- `_fetch_existing_tasks` 按 change_id 查已有行，供 reparse 对账
+- list_ 支持 change_id + status 过滤，返回 TaskSummary 列表
+- get 返回 TaskRead，enrich_with_workspace_ids 填 workspace_ids
+- board 的 TaskBoardColumn 按 status 分组，每列含任务卡片列表
+- reparse 同步 TaskWorkspace 关联表，保证多对多关系最新
+- task_key 由文件名派生，是 frontmatter 中 depends_on/blocks 的引用键
+- list_ 的 status 过滤可选，不传返回全部状态任务
+- get 返回完整 content 字段，供详情页展示 markdown 原文
+- board 的 TaskBoardColumn 列序按状态流转顺序排
+- enrich_summaries 批量填 workspace_ids，避免 N+1 查询
+- Task 与 change 是多对一，change 删除时需级联处理其下 task
+- 前端 lib/tasks.ts 四函数与后端端点一一对应
+- task 的 estimated_hours 供工时统计
+- affected_components 列表影响模块影响分析
+- allowed_paths 限定 task 可操作的代码路径
+- TaskParser.parse_tasks 对空 tasks 目录返回空 result
+- board 按状态流转顺序排列列，便于看板推进
 
-1. **reparse 幂等性**：多次调用 reparse 应产生相同结果（upsert 逻辑）。
-2. **depends_on/blocks 是 key 引用**：存储的是 task_key 字符串列表，不是 UUID，运行时需要解析。
-3. **change_id 必填**：每个 Task 必须归属一个 Change。
-4. **Board 视图性能**：当任务量大时，board 视图需要加载所有任务再分组，可能需要分页优化。
-5. **workspace 多对多**：enrich_with_workspace_ids 用于填充响应中的 workspace_ids 列表。
-
-## 变更索引（表格，初始为空）
-
-| 变更 ID | 类型 | 简述 | 日期 |
-|---|---|---|---|
+## 人工备注
+<!-- MANUAL_NOTES_START -->
+<!-- MANUAL_NOTES_END -->

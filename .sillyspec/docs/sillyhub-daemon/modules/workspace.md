@@ -2,48 +2,50 @@
 schema_version: 1
 doc_type: module-card
 module_id: workspace
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-10T16:55:00
+created_at: 2026-06-24T01:10:13
 ---
-
 # workspace
 
 ## 定位
-本地 workspace 镜像管理（Strategy A: mirror workspace）。负责 git clone/pull 确保本地目录与远程仓库同步，任务执行后收集 git diff 作为产出物。不负责 git 认证（依赖宿主机的 git credential 配置）。
+本地 workspace 镜像管理（Strategy A: mirror workspace）。负责 git clone/pull 确保本地目录与远程同步，任务执行后收集 git diff 作为产出物。承载 R-06（git 子进程错误 + Windows rmtree）。不负责 git 认证（依赖宿主机 git credential）。1:1 迁移自 Python `workspace.py`。
 
 ## 契约摘要
-- `WorkspaceManager(baseDir)` — 初始化，自动创建 baseDir
-- `GitError` — git 子进程失败时抛出的错误类型（含 stderr）
-- `WorkspaceResult` — diff 收集结果类型（patch/filesChanged/insertions/deletions/stats）
-- `prepareWorkspace(workspaceName, repoUrl?, branch?) -> Promise<string>` — clone 或 pull，返回工作目录路径
-- `collectDiff(workspacePath) -> Promise<WorkspaceResult>` — 收集 unified diff
-- `cleanWorkspace(workspaceName) -> Promise<void>` — 完整删除 workspace 目录
-- `getWorkspacePath(workspaceName) -> string` — 返回预期路径（不保证存在）
-- `parseShortstat(text) -> {filesChanged, insertions, deletions}` — 解析 `git diff --shortstat` 文本（导出供测试/复用）
+- `WorkspaceManager(baseDir)`：构造即 mkdirSync baseDir。
+- `GitError(args, stderr, code)`：git 子进程失败错误类型。
+- `WorkspaceResult`：`{ patch, filesChanged, insertions, deletions, stats }`。
+- `MAX_PATCH_CHARS = 50_000`：patch 字符上限（超长截断）。
+- `prepareWorkspace(name, repoUrl?, branch='main', options?): Promise<string>`：返回工作目录绝对路径。options.rootPath 指定真实代码目录。
+- `collectDiff(workspaceDir): Promise<WorkspaceResult>`：收集 unified diff + shortstat。
+- `cleanWorkspace(name): Promise<void>`：删除 workspace 目录（rmtreeWindowsSafe）。
+- `getWorkspacePath(name): string`：返回预期路径（不保证存在）。
+- `parseShortstat(text)`：解析 `git diff --shortstat`（导出供测试/复用）。
 
 ## 关键逻辑
 ```
-prepareWorkspace(name, repoUrl, branch)
-  if dir exists and has .git → git pull --ff-only
-  elif repoUrl → git clone -b branch repoUrl dir
-  else → mkdir empty dir
+prepareWorkspace(name, repoUrl, branch, options):
+  if options.rootPath 可访问且是目录 → 直接返回（跳过 mirror，ql-202617-009）
+  wsDir = join(baseDir, name)
+  if exists(wsDir) && has .git → git pull --ff-only
+  else if repoUrl → git clone -b branch repoUrl wsDir
+  else → mkdir 空目录
+  return wsDir
 
-collectDiff(path)
-  git status --porcelain → if empty return zeros
-  git diff --shortstat → parseShortstat(text)
-  git diff → full patch text
-  return { patch, filesChanged, insertions, deletions, stats }
+collectDiff(dir):
+  git status --porcelain → 空 → 返回零值
+  git diff --shortstat → parseShortstat
+  git diff → patch（截断 MAX_PATCH_CHARS）
 ```
 
 ## 注意事项
-- git 子进程通过 `child_process.spawn` 同步包装执行，超时 60 秒，大仓库 pull 可能不够
-- cleanWorkspace 删除失败时内联处理（不再有独立的 `_onRmtreeError` 方法）
-- `parseShortstat` 解析 git diff --shortstat 文本格式，依赖 git 输出格式稳定性
-- git 操作捕获 stderr 用于 `GitError` 诊断
-- 被 cli 和 task-runner 使用
+- git 子进程用 `execFile`（promisify），超时 60s，大仓库 pull 可能不够。
+- `cleanWorkspace` 用 `rmtreeWindowsSafe`（fs.rm maxRetries + chmod 降级）替代 Python shutil onexc，处理 Windows 文件占用。
+- rootPath 模式下 workspace 可能不是 git 仓库（项目未 git init），collectDiff 需容忍非 git 目录（ql-202617-014）。
+- `parseShortstat` 依赖 git 输出格式稳定性，git 版本升级需回归。
+- patch 超 `MAX_PATCH_CHARS` 截断，server 端按截断 patch 处理。
+- 被 cli、task-runner 使用。
 
 ## 人工备注
-
 <!-- MANUAL_NOTES_START -->
-
 <!-- MANUAL_NOTES_END -->

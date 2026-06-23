@@ -2,52 +2,36 @@
 schema_version: 1
 doc_type: module-card
 module_id: types
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-14T10:40:45+08:00
+created_at: 2026-06-24T01:10:50
 ---
-
 # types
 
 ## 定位
-统一中间表示（Intermediate Representation, IR）层。定义 daemon 内部跨模块共享的类型——AgentEvent / TaskResult / DaemonMessage / LeasePayload 等。是 Python 版散落在 backends.py 内的 `AgentEvent`/`TaskResult` 的归并升级：Node 版独立成 `types.ts`，被 adapters / task-runner / daemon / hub-client 共同引用，避免重复定义。
+sillyhub-daemon 共享类型定义中枢（`src/types.ts`）。仅导出 type/interface，无运行时代码。字段名与 Python dataclass 1:1 对应（保留 snake/camel 原名以便对照调试，与 server JSON 契约一致），是 adapters / task-runner / daemon / client 共用的中间表示（IR）与传输 DTO。
 
 ## 契约摘要
-- `AgentEventType` — 事件类型字面量联合：`"text" | "tool_use" | "tool_result" | "error" | "complete"`
-- `AgentEvent` — adapter 解析产出的标准事件
-  - `type: AgentEventType`
-  - `content?: string` — 文本内容（text/error）
-  - `toolName?: string` — 工具名（tool_use/tool_result）
-  - `callId?: string` — 工具调用 ID
-  - `toolInput?: unknown` — 工具入参（tool_use）
-  - `toolOutput?: unknown` — 工具出参（tool_result）
-  - `level?: "info" | "warning" | "error" | "thinking" | "status"` — 事件级别
-  - `sessionId?: string`
-- `TaskState` — 任务状态字面量联合（与 lease 状态对齐）
-- `BackendTaskResult` — adapter 层产出的执行结果（含 events 数组）
-- `TaskResult` — daemon 对外提交的执行结果（含 patch/filesChanged 等字段）
-- `DaemonMessage` — submitMessages 提交到 server 的单条消息体（过滤空字段后的 AgentEvent 投影）
-- `LeasePayload` — lease 相关消息载荷类型（task_available 推送 + lease claim/start/complete 参数）
+- **Agent 事件 IR**：`AgentEventType`（5 元组 text/tool_use/tool_result/error/complete）、`AgentEvent`（type + content + 可选 metadata）。所有协议 adapter 的 parse() 产出此结构；Python 原 6 类收敛掉 status/thinking（合入 text + metadata）。
+- **Backend 结果**：`TaskResultStatus`（completed/failed/timeout/aborted）、`BackendTaskResult`（adapter 子进程返回）。
+- **TaskRunner 终态**：`TaskResult`（success/exitCode/patch/filesChanged/insertions/deletions/output/error/durationMs/metadata），序列化为 `LeaseCompleteResult` 提交 server。
+- **任务状态**：`TaskState`（pending/running/completed/failed/cancelled）。
+- **WS 消息**：`DaemonMessage<T extends MsgType>`（type + payload unknown，使用点收窄）、`TaskAvailablePayload`。
+- **Lease 上下文**：`LeaseCtx`（leaseId/runtimeId/agentRunId/workspaceName/workspaceSlug/rootPath/repoUrl/branch/claudeMd/provider/cmdPath/cmd/prompt/model/sessionId/resumeSessionId/timeout/timeoutSeconds/kind/agentSessionId/toolConfig/claimToken/manualApproval/askUserOnly）、`LeasePayload = LeaseCtx`、`ExecutionContextPayload`（snake_case，GET execution-context 响应）、`LeaseClaimResult`、`LeaseMessage`（submit_messages 单条）、`ToolConfig = Record<string,string>`。
 
 ## 关键逻辑
-```
-// 纯类型定义模块，编译后不产生运行时逻辑
-// AgentEvent.type 值域：
-//   text       - 普通文本输出 / thinking / status（通过 level 区分）
-//   tool_use   - 工具调用开始
-//   tool_result - 工具调用结果
-//   error      - 错误输出
-//   complete   - 任务结束标记（携带 final status / usage）
-```
+纯类型聚合，逻辑即字段映射约定：
+- IR 收敛：Python 6 类事件 → Node 5 类（thinking/status 入 metadata）。
+- LeaseCtx 双字段兼容：`cmdPath`（Python cmd_path）与 `cmd`（design 命名）二选一；`timeout`（旧）与 `timeoutSeconds`（新，优先级最高）并存，resolveTimeout 在使用点裁决。
+- ExecutionContextPayload（snake_case）→ LeaseCtx（camelCase）映射，但 prompt 不从 fetch 覆盖（保留 payload.prompt 作最终意图）。
+- `kind: 'batch' | 'interactive'` 决定 lease 走 TaskRunner 还是 SessionManager；未定义一律按 batch 兼容。
 
 ## 注意事项
-- 修改 AgentEvent 字段需同时检查：5 个 adapter、task-runner（eventToMessage）、daemon
-- `AgentEvent.type` 值域比 Python 版收敛：thinking/status 不再是独立 type，而是 text + level
-- 本模块只导出类型与必要的常量（如枚举字符串集合），不放可执行函数
-- 被 backends、task-runner、daemon、client 引用（IR 层）
-- 修改对外类型形状需评估是否破坏 G-02 对外契约（DaemonMessage/LeasePayload 影响通信）
+- 仅 type-only import `MsgType` from protocol.js，不引入运行时依赖。
+- 字段命名有意不统一为纯 camelCase：与 Python dataclass / server schema 对齐优先，便于联调。
+- `DaemonMessage.payload` 是 unknown，各 handler 必须在使用点用类型守卫/断言收窄，编译期不保证形状。
+- 改动任一接口字段需同步：adapters 产出端、task-runner/daemon 消费端、server JSON 契约、Python 对照源。
 
 ## 人工备注
-
 <!-- MANUAL_NOTES_START -->
-
 <!-- MANUAL_NOTES_END -->

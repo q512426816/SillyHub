@@ -2,142 +2,45 @@
 schema_version: 1
 doc_type: module-card
 module_id: backend
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-04T10:30:00+08:00
+created_at: 2026-06-24T01:16:42
 ---
-
 # backend
 
 ## 定位
-FastAPI 后端服务，负责提供 RESTful API、业务逻辑、数据持久化和 Agent 运行时协调。不负责前端渲染、任务编排细节（由 Agent/Workflow 模块负责）、Git 命令原生执行（由 git_gateway 模块封装）。
+
+multi-agent-platform 的核心 API 服务，monorepo 的"大脑"。以 FastAPI 提供 REST/SSE/WebSocket 接口，承载多智能体协作平台全部领域逻辑：工作区管理、SillySpec 变更编排、Agent 运行时调度、PPM 项目管理、知识库、发布、权限治理等。是 frontend 与 sillyhub-daemon 的唯一数据后端，二者均通过 HTTP/WebSocket 调用它。
+
+技术栈：Python 3.12+、FastAPI、SQLModel、Alembic（迁移）、PostgreSQL、Redis（缓存/会话）、httpx、uvicorn、uv（包管理）、pytest。代码组织为"核心 core + 按领域分 modules"两层结构。
 
 ## 契约摘要
 
-### 核心能力
+对外契约是 `/api` 前缀的 HTTP 路由树。`app/main.py` 聚合 30+ 个领域路由，统一挂在 `/api` 下：
 
-- **HTTP API 服务**：21 个路由模块，统一挂载在 `/api` 前缀下，包括认证、工作区、变更、任务、Agent、Git 网关、知识库、发布、事件等
-- **数据库访问**：PostgreSQL + SQLModel 异步 ORM，带审计钩子、软删除、租户隔离
-- **认证授权**：JWT access/refresh token 双 token 机制，RBAC 权限模型，支持工作区级角色
-- **Agent 协调**：AgentService 管理运行生命周期，ExecutionCoordinatorService 支持检查点、恢复、kill、审批
-- **工作区扫描**：WorkspaceScanner 扫描 .sillyspec 目录结构，支持 scan_generate（一键扫描+生成）
-- **安全控制**：工具网关（ToolGatewayService）对敏感命令进行策略校验，凭据加密存储
+- 基础：health、auth、members、workspace、admin、settings、scan_docs
+- SillySpec 编排：change、change_writer、task、workflow、archive、spec_workspace、release、knowledge、incident
+- Agent/运行时：agent、runtime、daemon（守护进程接入）、lease（租约）、tool_gateway、policy（权限策略）
+- Git：git_identity、git_gateway、worktree
+- PPM 子树（统一前缀 `/api/ppm`）：project、plan、task、problem、kanban
 
-### 主要路由模块
-
-- `/api/auth` - 登录/刷新/登出/me
-- `/api/workspaces` - 工作区 CRUD、扫描（scan/rescan/scan_generate）、拓扑、关系
-- `/api/workspaces/{workspace_id}/changes` - 变更文档管理
-- `/api/workspaces/{workspace_id}/tasks` - 任务管理
-- `/api/agent` - Agent 运行启停、日志获取、kill
-- `/api/daemon` - 本地 daemon runtime 注册、心跳、禁用/启用、离线标记和 lease 生命周期
-- `/api/git` - Git 身份凭证管理和访问校验
-- `/api/tool_gateway` - 工具调用网关（文件读写、shell、测试、HTTP）
-- `/api/releases` - 发布流程和审批
-- `/api/incidents` - 事件管理和 Postmortem
-- `/api/runtime` - 运行时进度、用户输入、产物读取
-- `/api/knowledge` - 知识库/quicklog 读取
-- `/api/scan-docs` - 扫描文档管理
-- `/api/settings` - 平台设置和用户管理
-- `/api/worktree` - Git worktree 租约管理
-- `/api/archive` - 归档已验证完成的变更
-- `/api/spec-workspace` - 规范工作空间管理
+启动入口 `uvicorn app.main:app`，带 `lifespan` 钩子（初始化/释放 DB 引擎、Redis、遥测）。`app = FastAPI(...)` 实例在 `main.py` 构建，装配 CORS 中间件与全局异常处理器（`core/errors.register_exception_handlers`）。
 
 ## 关键逻辑
 
-### 应用启动流程
-
-```
-lifespan() -> configure_logging()
-            -> init_telemetry()
-            -> bootstrap_admin_and_seed_rbac()
-            -> yield (serve requests)
-            -> dispose_engine()
-            -> close_redis()
-```
-
-### 认证依赖链
-
-```
-Bearer Token -> decode_access_token() -> TokenPayload
-                                    -> get_current_user() -> User
-                                                        -> require_permission() -> check RBAC
-```
-
-### Agent 运行协调
-
-```
-AgentService.start_run() -> ExecutionCoordinatorService.start_sillyspec_run()
-                          -> _run_sillyspec_background()
-                          -> stream_run_logs()
-                          -> kill()/resume()/approve()
-```
-
-### 工作区扫描
-
-```
-WorkspaceService.scan_generate() -> 调用 Agent 启动扫描
-                                -> WorkspaceScanner.scan(root)
-                                -> 扫描 .sillyspec/ 目录结构
-                                -> 生成 ScanResult
-```
-
-### 工具调用网关
-
-```
-ToolGatewayService.execute()
-  -> _dispatch(tool_type)
-  -> _handle_file_read/_handle_shell_exec/_handle_run_tests 等
-  -> 执行并返回结果
-```
-
-### 变更流转
-
-```
-ChangeService.transition() -> 状态机校验 -> 更新 stage
-                          -> 可选触发 AgentService.start_stage_dispatch()
-```
+- **分层结构**：`app/core/`（config/db/redis/security/crypto/logging/telemetry/audit_hooks/spec_paths 等横切关注）+ `app/models/base.py`（SQLModel 基类）+ `app/modules/<域>/`（每域含 `router.py` + 业务/service + tests）。
+- **领域模块清单**：admin、agent、archive、auth、change、change_writer、daemon、git_gateway、git_identity、health、incident、knowledge、ppm(5 子域)、release、runtime、scan_docs、settings、spec_profile、spec_workspace、task、tool_gateway、workflow、workspace、worktree。
+- **Daemon 接入**：daemon 模块与 lease 模块共同支撑本地守护进程注册、领租约、心跳、消息回传的在线交互模型。
+- **迁移与建表**：Alembic（`migrations/`）+ `create_tables.py` 兜底；`core/layout_migration.py` 处理 SillySpec Native Layout 演进。
+- **测试**：`backend/tests/` + 各模块内 `tests/`；CI 要求 `--cov-fail-under=60`。
 
 ## 注意事项
 
-- **数据库迁移**：使用 Alembic，迁移文件在 `backend/migrations/versions/`
-- **审计日志**：`audit_hooks.py` 自动记录 insert/update/delete，需配合 `get_session()` 注入 audit_user_id
-- **凭据加密**：`CredentialCipher` 使用 PyNaCl secret box，master key 从环境 `MASTER_KEY` 或文件加载
-- **租户隔离**：Workspace/Change/Task 模型都有 `workspace_id` 字段，查询时需注意过滤
-- **软删除**：部分模型（如 Workspace）有 `deleted_at` 字段，查询时需排除
-- **Git worktree 租约**：`WorktreeLease` 模型记录租约，过期需自动释放（WorktreeService.gc_expired_leases）
-- **Agent 流式日志**：通过 SSE 或 stream_run_logs() 获取
-- **Daemon runtime 状态**：`/api/daemon/runtimes` 刷新时会执行 stale heartbeat 清理；`disabled` 状态用于手动禁用 placement，heartbeat、重新注册、offline 上报和 stale cleanup 都不得自动改回 online
-- **CORS 配置**：`CORSMiddleware` 允许所有方法和头，expose `x-request-id`
-- **健康检查**：`/api/health` 检查 DB 连接，`/api/version` 返回 commit sha
-- **配置**：通过 `app.core.config.get_settings()` 获取 Settings 单例
-- **Redis**：通过 `app.core.redis.get_redis()` 获取 Redis 客户端
-- **错误处理**：使用 `AppError`（app.core.errors）统一错误处理
-
-## 变更索引
-
-- ql-20260604-001-progress | 移除 progress.json fallback，改用 SQLite sillyspec.db
-- ql-20260605-005-f2b8 | 修复 Agent Run metadata 持久化 + 参考 Multica 细化 token 采集（on_log 独立 session、modelUsage 解析）
-- ql-20260611-001-c7a3 | Quick Chat 多轮对话：prev_run_id → session_id 查询 → resume_session_id 传入 daemon
-- ql-20260616-002-b8e5 | 修复 Bootstrap dispatch 链路 3 处缺陷：`spec_workspace/bootstrap.py` dispatch_to_daemon 加 root_path/spec_root/runtime_root（让 _determine_run_type 走 scan 分支，避免 execution-context 400）；provider 'claude_code' → 'claude'（daemon 12-provider 注册表只认 'claude'）；加 prompt 引导 claude 按 CLAUDE.md 跑 sillyspec scan（不传 prompt 则 daemon spawn 用空串喂 stdin，claude 不读 CLAUDE.md）
-- ql-20260618-005-c4d2 | spec-bootstrap 创建 Bootstrap AgentRun 和 daemon lease 时使用 workspace 默认 Agent provider/model；未配置默认 provider 时保留历史 Claude fallback。
-- ql-20260618-007-d9c0 | Daemon runtime 状态语义：刷新列表清理 stale online runtime；新增 disable/enable/offline 操作；disabled 不会被 heartbeat 或重新注册自动恢复为 online。
-- ql-20260618-009-f3a2 | per-run model review 收尾：quick_chat agent_type 从 provider 改 claude_code（与全项目约定一致）；execution-context 的 provider/model 改为 AgentRun 优先 + lease_meta 兜底（AgentRun 作 source of truth，两处端点同步：agent/router.py ExecutionContextResponse + daemon/service.py _build_claim_payload）；`/changes/{id}/dispatch` 的 provider/model Query 加 max_length=64/128 对齐 schema。
-- ql-20260619-001-f6cc | Wave0：dispatch_next_step 不再预创建 AgentRun（对齐 dispatch()，Run 由 start_stage_dispatch 拥有），一次 execute 单 Run + 返回 id/last_dispatch.run_id/lease.agent_run_id 一致；新增 cleanup_orphan_dispatch_runs 精准清理历史孤儿 pending Run（spec_strategy='sillyspec' 指纹，不动正常 Run）；dict() 修 last_dispatch.run_id 的 JSON in-place mutation 不持久化。
-- ql-20260619-003-0f87 | dispatch()（transition 路径）:579/:611 同类 JSON in-place mutation 修复——两处 `stages = change.stages or {}` 改 `dict(change.stages or {})`，使 last_dispatch.run_id 持久化（前端订阅拿得到真实 run id）。
-- 2026-06-20-session-history-enhance | 交互式会话历史回看：用户消息落库回看 + 任意会话 reopen 续聊(仅claude) + 任意状态删除
-- ql-20260623-004-8f2c | 修复 daemon notifySessionEnd 调 /sessions/{id}/end 返回 404：daemon 身份（X-API-Key）改用 runtime 归属校验（session.runtime.user_id==api-key owner），前端 Bearer JWT 保持 user_id 校验；end_session 加 actor_runtime_owner_id 分流 + _get_session_by_runtime_owner_for_update（join DaemonRuntime）
+- 改动 backend 必须实测 API（curl 打端点），不能只靠 tsc/mypy，历史上出现过运行时未导入符号导致 500 的案例。
+- Docker 部署时 backend 容器跑镜像内代码、不热重载，改源码后需 rebuild 镜像再验。
+- 路由前缀约定：绝大多数在 `/api`，PPM 走 `/api/ppm`；新增模块要在 `main.py` 显式 `include_router`。
+- 提交前需跑 `backend/.venv/bin/ruff format` 处理 staged 文件，否则 pre-commit hook 拦截。
 
 ## 人工备注
-
 <!-- MANUAL_NOTES_START -->
-
-- 2026-06-19: 终态交互会话支持用户隔离删除；活动态删除返回 409，删除前解除 AgentRun 关联并保留运行日志。
-- 2026-06-17: Agent runtime selection now snapshots both `provider` and `model` per `AgentRun`.
-  `Workspace.default_model` is the fallback when a run request omits `model`; task, stage,
-  scan-generate, quick-chat, and change-writer execute dispatch paths pass model through lease
-  metadata and execution-context.
-- 2026-06-18: Daemon runtime lifecycle uses `online` / `offline` / `maintenance` / `disabled`.
-  Placement should only choose `online`; `disabled` is a manual operator decision and is preserved
-  across heartbeat, re-register, graceful offline, and stale cleanup until explicitly enabled.
-
 <!-- MANUAL_NOTES_END -->

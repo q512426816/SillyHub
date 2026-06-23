@@ -154,3 +154,21 @@
 - 解法：PowerShell `New-Item -ItemType Junction` 把主仓库 `frontend/node_modules` 链到 `worktree/frontend/node_modules`（junction 免管理员，比 `cmd mklink /J` 引号嵌套更稳）。
 - Agent 子代理 cwd 可能**不随父 session 的 EnterWorktree 切换**（本次 task-01 子代理把产物写到了主仓库而非 worktree）。解法：子代理 prompt 显式给 worktree 绝对路径前缀；审查用 `git status` + `ls worktree` 确认落点，错位则 `cp` 统一到 worktree + 主仓库 `git checkout` 恢复。
 - Radix Dialog 测试：`DialogContent` role=dialog 可 `getByRole`；但标题含 `·`（middle dot）字符，`getByText` 正则易因字符/文本节点分割失败，改 `within(dialog).getAllByText(/runtime名/)` 限定作用域更稳。
+
+## 2026-06-23 — /runtimes Codex 对话不能走 interactive SessionManager [已被 2026-06-23-codex-interactive-session 覆盖]
+
+> 本条是历史记录。codex-runtime-conversation-fix 临时降级时记录的"Codex 不能走 interactive"已过时——本变更已把 Codex 纳入 provider driver interactive 路径，Codex runtime 会话改回 `InteractiveSessionChatSection` 主路径。
+
+- **已被覆盖**：Codex 现已走 provider driver interactive 路径。daemon `SessionManager` 通过 `_getDriver(provider)` 选 `ClaudeSdkDriver` 或 `CodexAppServerDriver`，`create(provider="codex")` 不再抛 `UnsupportedProviderError`；backend `SessionService.reopen_session()` provider gate 放开为 `{claude, codex}`；frontend `RuntimeSessionDialog` Codex 走 `InteractiveSessionChatSection`，`QuickChatSessionSection` 降级为非 /runtimes 主路径（全局能力保留）。
+- 历史降级路径（仅供回溯）：codex-runtime-conversation-fix 临时把 Codex 分流到 `/api/daemon-chat` quick-chat SSE（`quickChat` 创建 run、`streamQuickChat` 订阅、下一轮用 `prev_run_id` 接 `session_id`），规避 daemon `UnsupportedProviderError`。该降级已被本变更覆盖，不要据此把 Codex 混入 quick-chat 面板或拒绝 interactive provider。
+
+## 2026-06-24 — Codex Interactive Session 沉淀的通用经验
+
+> 来源：2026-06-23-codex-interactive-session（D-001@v1 ~ D-010@v1）。把单一 provider 的 interactive session 控制层抽象成 provider-neutral driver 的实践。
+
+- **Provider driver 抽象（D-001@v1, D-009@v1）**：把 SessionManager 从「只驱动单一 provider SDK」改为「按 provider 选 driver」。`SessionManagerDeps.drivers: Partial<Record<'claude' | 'codex', InteractiveDriver>>`，driver 契约 provider-neutral（`start`/`consume`/`interrupt`），driver 内部各自做 provider 协议 ↔ provider-neutral `UserTurnInput` 转换。session 生命周期层（create/inject/interrupt/end/reopen/recovery）不依赖具体 SDK 类型；`InputQueue` 队列元素也放宽为 provider-neutral。好处：新增 provider 只加 driver，不触碰 SessionManager 控制面。
+- **Codex app-server stdio JSON-RPC 长驻 driver（D-002@v1, D-004@v1）**：`codex app-server --listen stdio://` 作为长驻子进程，driver 内做 `initialize` → `notifications/initialized` → `thread/start` → 串行 `turn/start`（一次只一个 running turn，`turn/completed` 后才消费下一条，避免 app-server 内并发 turn）；`thread/resume(threadId)` 支持 reopen/recovery；`turn/started` 保存 `turnId` 供 `turn/interrupt` 打断；消息映射成 flat message（`event_type`+`content`+`metadata`+`session_id=threadId`）上报 backend，不把 app-server schema 泄漏到 backend。`adapters/json-rpc.ts` 既有 batch 解析能力可抽取复用——但注意 interactive 与 batch 是**两套审批策略隔离点**（batch 走 TaskRunner 执行协议，interactive 走 SessionManager 的 PermissionResolver/dialog hook），别共用审批状态。
+- **Fail-closed 审批策略（D-006@v1, D-008@v1）**：provider-neutral server request 默认走 `PermissionResolver`，backend send 失败/超时/session 已结束/driver 被 interrupt 时返回 deny/cancel，**绝不无条件自动 accept**（否则 Codex 行为比 Claude 更危险）。`manual_approval+ask_user_only=true` 时普通 command/file/permission request allow-through（只记录 metadata），仅阻塞 `request_user_input`/可归一化 MCP elicitation；`ask_user_only=false` 时普通 request 走前端审批卡。权限 deny 时返回**空 profile**（不扩权），而非按请求 granted。
+- **MCP elicitation 复杂场景如实标注（D-008@v1, D-010@v1）**：可归一化成现有 `AskUserDialogCard` question/options UI 的简单 form/url 才阻塞等待用户；不支持的复杂 schema fail-closed 并上报 error log 说明「暂不支持」，**不写成「全面支持 MCP elicitation」**。文档与代码须一致，避免夸大未实现能力。
+- **AgentRunLog 无 metadata 列对 flat message 的影响**：Codex flat message 的 `metadata`（如 tool_use 的工具名/参数、turn id）若要完整展示，需确认 `AgentRunLog` 是否有 metadata 列承载；无列时只能塞进 `content` 或丢失细节。落地 Codex driver 前先核对 `AgentRunLog` 表结构与 `RunSyncService.submit_messages()` 落库字段，避免 flat message 的 metadata 静默丢失。
+- **缺 thread id 的 Codex session 不能伪造（D-007@v1）**：ended/failed Codex session 若缺 `agent_session_id`/threadId，不能可靠 reopen，应显示失败且**不伪造新 thread**（避免历史串线）。daemon recovery 同理：session store 缺 threadId 标 recovery failed，不伪造。

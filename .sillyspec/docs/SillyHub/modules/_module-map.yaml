@@ -1,168 +1,631 @@
 # 模块映射（自动生成，可手动修改）
 # author: qinyi
-# created_at: 2026-06-01T12:00:00
+# 由 sillyspec-scan 全量扫描源码后覆盖生成
 # 用于 archive 阶段识别变更影响的模块
+
+schema_version: 1
+project: SillyHub
+source_commit: ba87eec
+generated_at: 2026-06-24 00:45:06
+generator: sillyspec-scan
 
 modules:
   # === Backend 核心基础设施 ===
   core:
+    status: active
+    doc: modules/core.md
     paths:
       - backend/app/core/**
-    description: 核心基础设施（配置、数据库、安全、日志、遥测）
+    tags: [backend, infrastructure]
+    aliases: [infra, core-config]
+    entrypoints: []
+    main_symbols:
+      - core.config (Settings)
+      - core.db (get_session)
+      - core.security (JWT/密码哈希)
+      - core.auth_deps (认证依赖)
+      - core.errors (AppError)
+      - core.audit_hooks
+      - core.crypto
+      - core.redis
+      - core.telemetry
+      - core.spec_paths
+    depends_on: []
+    used_by: [models, auth, agent, daemon, runtime, workflow, workspace, change, task, ppm, 全部业务模块]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   models:
+    status: active
+    doc: modules/models.md
     paths:
       - backend/app/models/**
-    description: 数据模型基类和共享模型定义
+    tags: [backend, data-model]
+    aliases: [base-models]
+    entrypoints: []
+    main_symbols:
+      - models.base (TimestampModel 基类)
+    depends_on: [core]
+    used_by: [agent, daemon, archive, change, git_gateway, git_identity, incident, knowledge, release, settings, spec_workspace, task, tool_gateway, workspace, worktree, ppm]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   # === Backend 业务模块 ===
   agent:
+    status: active
+    doc: modules/agent.md
     paths:
       - backend/app/modules/agent/**
-    description: Agent 管理和运行（AgentRun CRUD、Agent 配置）
-
-  daemon:
-    paths:
-      - backend/app/modules/daemon/**
-    description: Daemon 运行时管理（daemon 注册/心跳、任务 lease 生命周期、complete_lease 写回 AgentRun + 状态映射）
-
-  archive:
-    paths:
-      - backend/app/modules/archive/**
-    description: 变更归档（已完成变更的归档管理）
+    tags: [backend, agent, execution]
+    aliases: [agent-run]
+    entrypoints:
+      - API tag=agent (POST /api/agent/runs, quick-chat, kill 等)
+    main_symbols:
+      - agent.service.AgentService
+      - agent.coordinator.ExecutionCoordinatorService
+      - agent.execution.MissionExecutionService
+      - agent.mission.MissionService
+      - agent.control.MissionControlService
+      - agent.router
+    depends_on: [core, models, daemon, runtime, workspace, task, change, tool_gateway]
+    used_by: [daemon, workflow, frontend_components]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   auth:
+    status: active
+    doc: modules/auth.md
     paths:
       - backend/app/modules/auth/**
-    description: 认证授权（JWT、用户登录、Token 刷新）
+    tags: [backend, auth, rbac]
+    aliases: [authentication, jwt]
+    entrypoints:
+      - APIRouter prefix=/auth (POST /api/auth/login, refresh, me)
+      - APIRouter prefix=/auth (api-key 管理)
+    main_symbols:
+      - auth.service (AuthService)
+      - auth.api_key_service (ApiKeyService)
+      - auth.permissions (Permission, PermissionGroup)
+      - auth.rbac
+    depends_on: [core, models]
+    used_by: [全部受保护端点, admin, workspace-members]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  daemon:
+    status: active
+    doc: modules/daemon.md
+    paths:
+      - backend/app/modules/daemon/**
+      - sillyhub-daemon/src/**
+    tags: [backend, daemon, runtime]
+    aliases: [daemon-runtime, daemon-session]
+    entrypoints:
+      - APIRouter prefix=/daemon (注册/心跳/session 端点)
+      - sillyhub-daemon CLI (cli.ts: createProgram/start/stop/status/logs)
+      - Daemon class (sillyhub-daemon/src/daemon.ts)
+    main_symbols:
+      - daemon.service.DaemonService
+      - daemon.lease_service (LeaseService)
+      - daemon.permission_service
+      - daemon.session.service.DaemonSessionService
+      - daemon.ws_hub.WSHub
+      - daemon.protocol
+      - sillyhub-daemon: Daemon, RecoveryCoordinator, task-runner, hub-client, ws-client
+      - sillyhub-daemon/interactive
+    depends_on: [core, models, agent, runtime, worktree]
+    used_by: [agent, workflow, frontend_components]
+    needs_review: false
+    concerns: [交互式会话生命周期(2026-06-23-codex-interactive-session)]
+    review_reasons: []
+
+  archive:
+    status: active
+    doc: modules/archive.md
+    paths:
+      - backend/app/modules/archive/**
+    tags: [backend, spec, archive]
+    aliases: [spec-archive]
+    entrypoints:
+      - API tag=archive (POST /api/.../archive, distill-knowledge)
+    main_symbols:
+      - archive.service.ArchiveService
+      - archive.router
+    depends_on: [core, models, change, knowledge]
+    used_by: [workflow, change_writer]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   change:
+    status: active
+    doc: modules/change.md
     paths:
       - backend/app/modules/change/**
-    description: 变更管理（Change CRUD、状态机、阶段流转）
+    tags: [backend, spec, change]
+    aliases: [spec-change]
+    entrypoints:
+      - APIRouter prefix=/workspaces/{workspace_id} tag=change (变更 CRUD/解析/文档矩阵)
+    main_symbols:
+      - change.service (ChangeService)
+      - change.parser (变更目录解析)
+      - change.dispatch
+      - change.router
+    depends_on: [core, models, workspace, change_writer]
+    used_by: [workflow, archive, change_writer, task]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   change_writer:
+    status: active
+    doc: modules/change_writer.md
     paths:
       - backend/app/modules/change_writer/**
-    description: 变更文档写入（将产出写入变更目录）
+    tags: [backend, spec, change-writer]
+    aliases: [markdown-writer]
+    entrypoints:
+      - APIRouter (变更创建/markdown 生成/批量生成)
+    main_symbols:
+      - change_writer.service.ChangeWriterService
+      - change_writer.markdown_builder
+      - change_writer.router
+    depends_on: [core, models, change, workspace]
+    used_by: [change, workflow]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   git_gateway:
+    status: active
+    doc: modules/git_gateway.md
     paths:
       - backend/app/modules/git_gateway/**
-    description: Git 网关（Worktree 操作、Git 命令代理）
+    tags: [backend, git]
+    aliases: [git-operation]
+    entrypoints:
+      - API tag=git_gateway (POST /api/.../git 操作/日志)
+    main_symbols:
+      - git_gateway.service (GitGatewayService)
+      - git_gateway.model.GitOperationLog
+      - git_gateway.router
+    depends_on: [core, models, workspace, git_identity]
+    used_by: [worktree, agent]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   git_identity:
+    status: active
+    doc: modules/git_identity.md
     paths:
       - backend/app/modules/git_identity/**
-    description: Git 身份管理（用户 Git 配置）
+    tags: [backend, git, identity]
+    aliases: [git-credential]
+    entrypoints:
+      - APIRouter prefix=/git tag=git_identity (身份 CRUD/访问校验)
+    main_symbols:
+      - git_identity.service.GitIdentityService
+      - git_identity.model.GitIdentity
+      - git_identity.providers.base.GitProvider
+      - git_identity.providers.github.GitHubProvider
+      - git_identity.router
+    depends_on: [core, models, workspace]
+    used_by: [git_gateway, worktree]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   health:
+    status: active
+    doc: modules/health.md
     paths:
       - backend/app/modules/health/**
-    description: 健康检查（应用和依赖状态检查）
+    tags: [backend, health, ops]
+    aliases: [healthcheck]
+    entrypoints:
+      - API tag=health (GET /api/health)
+    main_symbols:
+      - health.router
+      - health.schema
+    depends_on: [core]
+    used_by: [frontend_app, daemon]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   incident:
+    status: active
+    doc: modules/incident.md
     paths:
       - backend/app/modules/incident/**
-    description: 事件管理（运行时事件记录和查询）
+    tags: [backend, ops, incident]
+    aliases: [postmortem]
+    entrypoints:
+      - API tag=incidents (事件 CRUD/复盘 postmortem)
+    main_symbols:
+      - incident.service.IncidentService
+      - incident.model.Incident/Postmortem
+      - incident.router
+    depends_on: [core, models]
+    used_by: [frontend_app]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   knowledge:
+    status: active
+    doc: modules/knowledge.md
     paths:
       - backend/app/modules/knowledge/**
-    description: 知识库（知识条目 CRUD）
+    tags: [backend, spec, knowledge]
+    aliases: [quicklog]
+    entrypoints:
+      - APIRouter prefix=/workspaces/{workspace_id} tag=knowledge (知识/quicklog)
+    main_symbols:
+      - knowledge.service.KnowledgeService
+      - knowledge.parser.KnowledgeParser
+      - knowledge.router
+    depends_on: [core, models, workspace]
+    used_by: [archive, frontend_app]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   release:
+    status: active
+    doc: modules/release.md
     paths:
       - backend/app/modules/release/**
-    description: 版本发布（Release 管理）
+    tags: [backend, release, ops]
+    aliases: [releases]
+    entrypoints:
+      - API tag=releases (Release + 审批)
+    main_symbols:
+      - release.service.ReleaseService
+      - release.model.Release/ReleaseApproval
+      - release.router
+    depends_on: [core, models, workspace]
+    used_by: [frontend_app, workflow]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   runtime:
+    status: active
+    doc: modules/runtime.md
     paths:
       - backend/app/modules/runtime/**
-    description: 运行时管理（子进程管理、Claude Code 集成）
+    tags: [backend, runtime, spec]
+    aliases: [runtime-progress]
+    entrypoints:
+      - APIRouter prefix=/workspaces/{workspace_id} tag=runtime (阶段进度/用户输入/产出物)
+    main_symbols:
+      - runtime.service.RuntimeService
+      - runtime.router
+    depends_on: [core, models, workspace]
+    used_by: [daemon, agent, workflow, frontend_components]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   scan_docs:
+    status: active
+    doc: modules/scan_docs.md
     paths:
       - backend/app/modules/scan_docs/**
-    description: 扫描文档（架构扫描结果管理）
+    tags: [backend, spec, scan]
+    aliases: [scan-doc]
+    entrypoints:
+      - APIRouter prefix=/workspaces/{workspace_id} tag=scan-docs (扫描文档 CRUD/重解析)
+    main_symbols:
+      - scan_docs.service.ScanDocService
+      - scan_docs.parser (ParsedDoc/ParseWarning)
+      - scan_docs.router
+    depends_on: [core, models, workspace]
+    used_by: [workspace, frontend_app]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   settings:
+    status: active
+    doc: modules/settings.md
     paths:
       - backend/app/modules/settings/**
-    description: 设置管理（用户/项目配置）
+    tags: [backend, settings, config]
+    aliases: [platform-setting]
+    entrypoints:
+      - API tag=settings (平台设置 CRUD/批量更新)
+    main_symbols:
+      - settings.service.SettingsService
+      - settings.model.PlatformSetting
+      - settings.router
+    depends_on: [core, models]
+    used_by: [frontend_app]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   spec_profile:
+    status: active
+    doc: modules/spec_profile.md
     paths:
       - backend/app/modules/spec_profile/**
-    description: Spec Profile（规范配置模板）
+    tags: [backend, spec, profile]
+    aliases: [spec-config]
+    entrypoints: []
+    main_symbols:
+      - spec_profile.policy
+      - spec_profile.provider
+      - spec_profile.model
+    depends_on: [core, models]
+    used_by: [spec_workspace]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   spec_workspace:
+    status: active
+    doc: modules/spec_workspace.md
     paths:
       - backend/app/modules/spec_workspace/**
-    description: Spec Workspace（工作区规范管理）
+    tags: [backend, spec, workspace]
+    aliases: [spec-sync]
+    entrypoints:
+      - APIRouter tag=spec-workspace (获取/下载 bundle/import/sync/bootstrap/conflict)
+    main_symbols:
+      - spec_workspace.service.SpecWorkspaceService
+      - spec_workspace.bootstrap
+      - spec_workspace.validator
+      - spec_workspace.model.SpecWorkspace
+      - spec_workspace.router
+    depends_on: [core, models, workspace, spec_profile]
+    used_by: [frontend_app, daemon]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   task:
+    status: active
+    doc: modules/task.md
     paths:
       - backend/app/modules/task/**
-    description: 任务管理（Task CRUD 和状态流转）
-
-  ppm:
-    paths:
-      - backend/app/modules/ppm/**
-    description: ppm 项目与问题管理（pm 项目管理/ps 计划策划/plan 计划节点模板/problem 问题清单/task 任务执行/kanban 看板含评论/子任务，平台级，23 表，2 套审批流状态机 + problem 变更流4节点 + plan 三联表查询）
-    needs_review: true
-    review_reasons:
-      - 新增模块（2026-06-20-ppm-module-migration 迁入），待 scan 完善卡片细节
-      - 2026-06-21-ppm-full-alignment 全模块对齐源已落地（W1-W6），卡片仍待 scan 补充看板工作站/变更流/三联表/审批6态/图表细节
+    tags: [backend, spec, task]
+    aliases: [spec-task]
+    entrypoints:
+      - APIRouter prefix=/workspaces/{workspace_id} tag=task (任务 CRUD/看板/重解析)
+    main_symbols:
+      - task.service.TaskService
+      - task.parser (TaskParseWarning)
+      - task.router
+    depends_on: [core, models, workspace, change]
+    used_by: [workflow, change, frontend_app]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   tool_gateway:
+    status: active
+    doc: modules/tool_gateway.md
     paths:
       - backend/app/modules/tool_gateway/**
-    description: 工具网关（MCP 工具调用代理）
+    tags: [backend, tool, mcp, approval]
+    aliases: [tool-policy]
+    entrypoints:
+      - API tag=tool_gateway (execute/pending-approvals/history/approve/reject)
+      - API tag=tool_policy (policy CRUD via policy_router)
+    main_symbols:
+      - tool_gateway.service
+      - tool_gateway.tool_policy.ToolPolicyService/PolicyLimits
+      - tool_gateway.model.ToolOperationLog
+      - tool_gateway.policy_router
+      - tool_gateway.router
+    depends_on: [core, models, workspace]
+    used_by: [agent, daemon]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   workflow:
+    status: active
+    doc: modules/workflow.md
     paths:
       - backend/app/modules/workflow/**
-    description: 工作流（阶段调度、brainstorm/plan/execute/verify 流程）
+    tags: [backend, spec, workflow, fsm]
+    aliases: [stage-flow]
+    entrypoints:
+      - API tag=workflow (transition_change/submit_review/list_audit_logs/transition_task)
+    main_symbols:
+      - workflow.service
+      - workflow.fsm.FSM/TransitionError
+      - workflow.spec_guardian
+      - workflow.router
+    depends_on: [core, models, change, task, release]
+    used_by: [frontend_app, change]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   workspace:
+    status: active
+    doc: modules/workspace.md
     paths:
       - backend/app/modules/workspace/**
-    description: 工作区管理（Workspace CRUD）
+    tags: [backend, workspace]
+    aliases: [workspace-topology]
+    entrypoints:
+      - APIRouter prefix=/workspaces tag=workspace (scan/create/list/relations/topology)
+      - members_router (workspace 成员管理)
+    main_symbols:
+      - workspace.service
+      - workspace.scanner
+      - workspace.topology
+      - workspace.members_service
+      - workspace.relation_service
+      - workspace.router
+    depends_on: [core, models, scan_docs, auth]
+    used_by: [change, task, knowledge, scan_docs, runtime, spec_workspace, worktree, agent, daemon, git_gateway, git_identity]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   worktree:
+    status: active
+    doc: modules/worktree.md
     paths:
       - backend/app/modules/worktree/**
-    description: Worktree 管理（Git Worktree 生命周期）
+    tags: [backend, git, worktree]
+    aliases: [git-worktree]
+    entrypoints:
+      - APIRouter prefix=/workspaces/{workspace_id} tag=worktree (acquire/list/get/release/extend)
+      - lease_router tag=worktree
+    main_symbols:
+      - worktree.service
+      - worktree.git_runner.GitRunner
+      - worktree.exec_env.ExecEnvBuilder
+      - worktree.model.WorktreeLease
+      - worktree.router
+    depends_on: [core, models, workspace, git_gateway, git_identity]
+    used_by: [agent, daemon]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  ppm:
+    status: active
+    doc: modules/ppm.md
+    paths:
+      - backend/app/modules/ppm/**
+      - frontend/src/lib/ppm/**
+      - frontend/src/app/(dashboard)/ppm/**
+      - frontend/src/components/ppm-*.tsx
+    tags: [backend, frontend, ppm, project-management]
+    aliases: [ppm-project, ppm-plan, ppm-task, ppm-problem, ppm-kanban]
+    entrypoints:
+      - APIRouter tag=ppm-project prefix=/api/ppm (项目管理)
+      - APIRouter tag=ppm-plan prefix=/api/ppm (计划节点/三联表)
+      - APIRouter tag=ppm-task prefix=/api/ppm (任务执行)
+      - APIRouter tag=ppm-problem prefix=/api/ppm (问题/变更流4节点)
+      - APIRouter tag=ppm-kanban prefix=/api/ppm (看板+评论+子任务)
+    main_symbols:
+      - ppm.project.service / router / model
+      - ppm.plan.service / fsm / router / model
+      - ppm.task.service / router / model
+      - ppm.problem.service / fsm / router / model
+      - ppm.kanban.service / router / model
+      - ppm.common (crud/export/fsm/uuid_type)
+    depends_on: [core, models, auth]
+    used_by: [frontend_app, frontend_components]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  admin:
+    status: active
+    doc: modules/admin.md
+    paths:
+      - backend/app/modules/admin/**
+      - frontend/src/app/(dashboard)/admin/**
+      - frontend/src/components/admin-*.tsx
+      - frontend/src/lib/admin.ts
+    tags: [backend, frontend, admin, rbac]
+    aliases: [organization, admin-panel]
+    entrypoints:
+      - APIRouter prefix=/admin tag=admin (用户/角色/组织管理)
+    main_symbols:
+      - admin.router
+      - admin.users_service
+      - admin.roles_service
+      - admin.organizations_service.OrganizationService
+      - admin.model
+    depends_on: [core, models, auth]
+    used_by: [frontend_app, frontend_components]
+    needs_review: false
+    concerns: [modules/admin.md 文档不存在]
+    review_reasons:
+      - 后端 admin 模块已实现（router/services/model），但 modules 目录无对应 admin.md 文档，需补充
 
   # === Frontend 模块 ===
   frontend_app:
+    status: active
+    doc: modules/frontend_app.md
     paths:
       - frontend/src/app/**
-    description: Next.js App Router 页面和布局
+    tags: [frontend, nextjs, app-router]
+    aliases: [nextjs-pages]
+    entrypoints:
+      - Next.js App Router (layout.tsx/page.tsx)
+      - 路由组: (auth)/login, (dashboard)/{admin,ppm,runtimes,settings,workspaces}, api/
+    main_symbols:
+      - app/layout.tsx (RootLayout)
+      - app/(dashboard)/* 页面组件
+    depends_on: [frontend_components, frontend_lib, frontend_stores]
+    used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   frontend_components:
+    status: active
+    doc: modules/frontend_components.md
     paths:
       - frontend/src/components/**
-    description: React UI 组件库
+    tags: [frontend, react, ui]
+    aliases: [ui-components]
+    entrypoints: []
+    main_symbols:
+      - components/app-shell.tsx
+      - components/top-bar.tsx
+      - components/agent-run-panel / mission-console / agent-log-viewer
+      - components/daemon/*
+      - components/workspace-* / ppm-*
+      - components/permission-approval-dialog
+      - components/antd-providers.tsx
+      - components/ui/*
+      - components/charts/*
+    depends_on: [frontend_lib, frontend_stores]
+    used_by: [frontend_app]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   frontend_lib:
+    status: active
+    doc: modules/frontend_lib.md
     paths:
       - frontend/src/lib/**
-    description: 前端工具库（API 封装、类型定义、工具函数）
+    tags: [frontend, api, types]
+    aliases: [api-client]
+    entrypoints: []
+    main_symbols:
+      - lib/api.ts (fetch 封装)
+      - lib/{agent,auth,daemon,runtime,changes,workflow,tasks,workspaces,ppm/*,...}.ts
+      - lib/agent-stream / use-agent-run-stream
+      - lib/format-token / status-labels / utils
+    depends_on: []
+    used_by: [frontend_app, frontend_components, frontend_stores]
+    needs_review: false
+    concerns: []
+    review_reasons: []
 
   frontend_stores:
+    status: active
+    doc: modules/frontend_stores.md
     paths:
       - frontend/src/stores/**
-    description: Zustand 状态管理（全局状态 Store）
-
-  # === 基础设施 ===
-  deploy:
-    paths:
-      - deploy/**
-    description: 部署配置（Docker Compose、Nginx）
-
-  docs:
-    paths:
-      - docs/**
-    description: 项目文档
+    tags: [frontend, zustand, state]
+    aliases: [zustand-store]
+    entrypoints: []
+    main_symbols:
+      - stores/session.ts
+      - stores/kanban.ts
+    depends_on: [frontend_lib]
+    used_by: [frontend_app, frontend_components]
+    needs_review: false
+    concerns: []
+    review_reasons: []

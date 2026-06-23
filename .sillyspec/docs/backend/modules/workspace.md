@@ -1,116 +1,39 @@
 ---
+schema_version: 1
+doc_type: module-card
+module_id: workspace
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-05-31T23:30:00
+created_at: 2026-06-24T01:08:51
 ---
-
 # workspace
-
-> 最后更新：2026-06-14
-> 最近变更：2026-06-14-agent-runtime-selection（新增 `default_agent` 列 + scan-generate provider 覆盖）
-> 模块路径：`app/modules/workspace/**`
-
-## 职责
-
-管理 SillySpec 工作区的注册、扫描、更新、软删除/复活，以及工作区间的拓扑关系（WorkspaceRelation）和 M:N 关联表（change_workspaces、task_workspaces、agent_run_workspaces）。
-
-## 当前设计
-
-### 架构
-
+## 定位
+工作区（项目/代码仓库）的注册、扫描、拓扑、关系（relation）与软删除管理。是变更/任务/agent 等模块的挂载根，workspace_id 作为这些实体的归属键。
+## 契约摘要
+- `POST /api/workspaces/scan` → ScanResponse：扫描本地目录，返回解析结果（不下库）。
+- `POST /api/workspaces/scan-generate` → ScanGenerateResponse：扫描 + 落库建 workspace（含 daemon-client 子流）。
+- `POST /api/workspaces` → WorkspaceRead：直接创建。
+- `POST /api/workspaces/{id}/activate`：激活；`POST /{id}/rescan`：重扫；`POST /{id}/reparse`：重解析文档；`POST /{id}/generate-projects`：生成子项目。
+- `GET /api/workspaces` / `GET /{id}` / `PATCH /{id}` / `DELETE /{id}`：CRUD（删除走软删）。
+- `GET /api/workspaces/topology`：全局拓扑；`GET/POST/DELETE /{id}/relations`：workspace 间关系。
+- `WorkspaceService`：scan/create/list_/get/rescan/soft_delete/update/generate_projects/reparse/activate/scan_generate(_daemon_client)。
+- `RelationService`（relation_service.py）：关系 CRUD（自环/重复校验）。
+- `members_router.py` / `members_service.py`：工作区成员（RBAC 角色绑定）。
+- 模型：Workspace / WorkspaceRelation / ChangeWorkspace / TaskWorkspace / AgentRunWorkspace（多对多关联表）。
+## 关键逻辑
 ```
-WorkspaceService（编排层）
-  ├── WorkspaceScanner（扫描器）— 文件系统探测 .sillyspec 结构
-  ├── WorkspaceParser（解析器）— 解析 projects/*.yaml 生成子工作区
-  ├── RelationService（关系服务）— WorkspaceRelation CRUD
-  ├── TopologyBuilder（拓扑构建）— 全局工作区关系图
-  └── _rewrite_path() — Docker 容器内外路径映射
+scan_generate:
+  scanner.scan(root_path) → ParsedWorkspace
+  create(): slug 去重 + 路径校验(_guard_path) → INSERT Workspace
+  _ensure_spec_workspace(): 同步建 spec_workspace
+  返回 workspace + scan 结果
+rescan: 复用 scanner，差异更新
 ```
-
-### 关键逻辑
-
-1. **创建即扫描**：`create()` 先调用 `scan()` 确认 root_path 是合法 SillySpec 工作区，再写入 DB
-2. **软删除 + 复活**：`deleted_at IS NULL` 部分唯一索引允许同路径新记录；创建时先查找同路径墓碑行并复活
-3. **Reparse 子工作区**：解析 `projects/*.yaml`，UPSERT 子 Workspace + WorkspaceRelation，移除已消失的子项
-4. **路径映射**：Docker 环境下 `host_path_prefix → container_path_prefix` 自动重写
-5. **IntegrityError 翻译**：Postgres UNIQUE 违例映射为 `WorkspacePathDuplicate` / `WorkspaceSlugDuplicate`
-6. **默认 Agent 持久化**（2026-06-14）：`Workspace.default_agent VARCHAR(64) NULL` 列（migration 202606280900）；`WorkspaceCreate/Update/Read` 增 `default_agent` 可选字段，Update 走 `exclude_unset`（传 null=清空，省略=不变）。供 agent 模块三入口解析 provider（显式 > default_agent > None，见 agent.md）。
-
-## 对外接口
-
-| 接口 | 方法 | 说明 | 调用方 |
-|------|------|------|--------|
-| `POST /workspaces/scan` | `scan_workspace()` | 干跑扫描（不写 DB） | 前端 |
-| `POST /workspaces` | `create_workspace()` | 注册新工作区（自动扫描+复活检测） | 前端 |
-| `GET /workspaces` | `list_workspaces()` | 列表（管理员看全部，普通用户按 RBAC 过滤） | 前端 |
-| `GET /workspaces/topology` | `get_topology()` | 全局拓扑关系图 | 前端 |
-| `GET /workspaces/{id}` | `get_workspace()` | 获取单个工作区 | 前端 |
-| `PATCH /workspaces/{id}` | `update_workspace()` | 更新字段（exclude_unset）；**2026-06-14 起** 支持传 `default_agent`（传 null=清空，省略=不变） | 前端 |
-| `DELETE /workspaces/{id}` | `delete_workspace()` | 软删除（status → deleted） | 前端 |
-| `POST /workspaces/{id}/rescan` | `rescan_workspace()` | 重新扫描文件系统 | 前端 |
-| `POST /workspaces/{id}/scan-generate` | `scan_generate()` | **2026-06-14 起** 支持 `?provider=` 覆盖 workspace 默认 agent，透传 `start_scan_dispatch(provider=)` | 前端 |
-| `POST /workspaces/{id}/reparse` | `reparse_workspace()` | 重新解析子工作区+关系 | 前端 |
-| `GET /workspaces/{id}/relations` | `list_relations()` | 列出出入关系 | 前端 |
-| `POST /workspaces/{id}/relations` | `create_relation()` | 创建关系 | 前端 |
-| `DELETE /workspaces/relations/{id}` | `delete_relation()` | 删除关系 | 前端 |
-
-## 关键数据流
-
-```
-POST /workspaces → WorkspaceService.create()
-  → _rewrite_path()                  # Docker 路径映射
-  → scan(root_path)                  # WorkspaceScanner 探测
-  → _guard_path()                    # 文件系统校验
-  → _resurrect_soft_deleted()        # 查找墓碑行
-  → INSERT Workspace                 # flush + IntegrityError 翻译
-  → return Workspace
-```
-
-```
-POST /workspaces/{id}/reparse → WorkspaceService.reparse()
-  → get(workspace_id)               # 校验父工作区
-  → WorkspaceParser.parse()         # 解析 projects/*.yaml
-  → UPSERT 子 Workspace             # 按 source_yaml_path 匹配
-  → 软删除消失的子项
-  → 删除旧关系 → 创建新关系（内存去重）
-  → COMMIT
-```
-
-## 设计决策
-
-| 决策 | 理由 | 来源 |
-|------|------|------|
-| 部分唯一索引（`deleted_at IS NULL`） | 软删除后同路径可重新注册 | migration 202605261000 |
-| 创建时自动复活墓碑行 | 用户预期"删了想恢复"而非报重复 | service.py `_resurrect_soft_deleted` |
-| 子工作区 root_path 拼接 | 有 path 用 `parent/path`，无 path 用 `parent/component_key` | service.py `_build_child_root_path` |
-| 关系三元组唯一 `(source, target, type)` | 防止重复关系 | model.py `ux_workspace_relations_triplet` |
-| Reuse attack 检测不在此模块 | 归 auth 模块管理 | auth/service.py |
-| created_by 暂无 FK 约束 | users 表后于 workspaces 上线，预留字段 | model.py docstring |
-
-## 依赖关系
-
-### 依赖本模块
-- `change/service.py`：ChangeService 依赖 WorkspaceService 验证 workspace 存在
-- `task/service.py`：TaskService 依赖 WorkspaceService
-- `worktree/service.py`：获取 workspace.repo_url
-- `auth/service.py`：bootstrap 时 seed workspace_owner 角色
-
-### 本模块依赖
-- `core/config`：路径映射配置 `host_path_prefix` / `container_path_prefix`
-- `core/errors`：7 种 Workspace 相关 AppError
-- `workspace/scanner`：文件系统扫描器
-- `workspace/parser`：projects/*.yaml 解析器
-- `workspace/topology`：TopologyBuilder
-
 ## 注意事项
-
-- `list_()` 的 count 查询使用全表扫描（V1 规模可接受，后续需优化）
-- Reparse 会硬删除 `WorkspaceRelation`（非软删除），不可恢复
-- 路径映射只在 Docker 环境生效，本地开发 `host_path_prefix` 为空时跳过
-- `component_key`、`type`、`role` 等字段吸收自 ProjectComponent（ADR-07）
-
-## 变更索引
-
-| 日期 | 变更 | 摘要 |
-|------|------|------|
-| 2026-06-14 | 2026-06-14-agent-runtime-selection | 新增 `default_agent` 列（migration 202606280900）+ Create/Update/Read schema 字段（exclude_unset）；scan-generate 端点增 `?provider=` 覆盖透传 start_scan_dispatch |
-| 2026-05-31 | 初始归档 | 从代码逆向生成模块文档 |
+- 路径安全：`_guard_path` 拦截越界/不可读路径；daemon-client 路径有专门 `_rewrite_path`。
+- 软删除：`soft_delete` 仅置标记，`_resurrect_soft_deleted` 在相同 root_path 重建时复活记录。
+- slug 唯一性靠 `_ensure_unique_slug` 追加后缀，非 DB 唯一约束兜底。
+- change/task/agent 的 workspace 关联通过 *_workspace 关联表，删除 workspace 需考虑级联。
+## 人工备注
+<!-- MANUAL_NOTES_START -->
+<!-- MANUAL_NOTES_END -->

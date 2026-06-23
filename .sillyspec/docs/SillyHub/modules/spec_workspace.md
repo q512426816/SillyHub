@@ -1,95 +1,80 @@
 ---
+schema_version: 1
+doc_type: module-card
+module_id: spec_workspace
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-01T12:00:00
+created_at: 2026-06-24T01:16:36
 ---
-
 # spec_workspace
-> 最后更新：2026-06-01
-> 最近变更：scan（初始生成）
-> 模块路径：backend/app/modules/spec_workspace/**
 
-## 职责
+## 定位
+连接 workspace 与 SillySpec 文件系统的桥梁。管理 workspace 与 spec 规范空间的 1:1 关联（spec_root 目录、同步策略、验证、bootstrap 初始化）。把工作区变成「可被 spec 工作流驱动的规范空间」：决定 spec 文件存哪、怎么同步、是否合法、如何用 agent 初始化。
 
-管理 workspace 与 SillySpec 规范空间的关联（spec_root 目录、同步策略、验证、bootstrap 初始化）。是连接 workspace 模块与 SillySpec 文件系统的桥梁。
+产品视角：这是把「一个代码目录」变成「一个 spec 工作流实例」的转换器。用户扫描工作区后，本模块为其挂载 spec 空间，决定 spec 文件落在平台托管目录还是 repo 内；bootstrap 用 agent 智能填充默认 spec 文件，让空工作区快速具备规范骨架；validator 守住文档质量门禁。三种同步策略适配不同项目管理方式。
 
-## 当前设计
+## 契约摘要
+- 路由：`APIRouter prefix=/workspaces/{workspace_id} tag=spec-workspace`
+  - `GET /spec-workspace` 取信息（`SpecWorkspaceRead`）、`GET /spec-workspace/bundle` 流式下载打包、`PATCH /spec-workspace` 更新配置
+  - `POST /spec-workspace/import` 从 repo 导入、`POST /spec-workspace/sync` 触发同步、`POST /spec-workspace/bootstrap` 初始化（返回 dict 含 ok/run_id）
+  - `GET /spec-conflicts` 列冲突（`SpecConflictListResponse`）、`POST /spec-conflicts/{id}/resolve` 解决
+- 数据：`SpecWorkspace`（workspace_id 唯一索引 1:1、strategy / spec_root / sync_status / last_synced_at）
+- 三种 strategy：`platform-managed`（spec 仅在 spec_root，默认）、`repo-mirrored`（spec_root 与 repo 双向同步）、`repo-native`（repo `.sillyspec` 为真源，spec_root 作缓存）
+- sync_status 状态机：`clean` / `dirty` / `conflicted` 跟踪同步健康度
+- 依赖：`core`、`models`、`workspace`、`spec_profile`（SpecConflict）、`agent`（bootstrap 调 ClaudeCodeAdapter）、`workflow`（AuditLog）
+- 跨组件协作：scan_docs.reparse 读 spec_root、daemon 通过 spec bundle 获取规范、前端 spec-workspaces.ts 客户端
 
+## 关键逻辑
+bootstrap 初始化（`SpecBootstrapService.bootstrap`）：
 ```
-router.py     ── HTTP 入口，挂载到 /workspaces/{workspace_id}/spec-workspace
-service.py    ── SpecWorkspaceService，CRUD + import/sync
-bootstrap.py  ── SpecBootstrapService，初始化 spec 目录（调用 agent）
-validator.py  ── SpecValidator，验证 spec 目录结构、YAML schema、引用完整性
-model.py      ── SpecWorkspace (SQLModel table)
-schema.py     ── Pydantic DTOs（SpecWorkspaceCreate / Read / Update / SyncStatusUpdate）
-tests/        ── test_bootstrap.py / test_validator.py
+ws = get_workspace(workspace_id); spec_ws = get_spec_workspace(workspace_id)
+report = SpecValidator.validate(spec_root)   # 三级检查：目录结构/YAML schema/引用
+if report.errors: 写 SpecConflict + sync_status=dirty; return
+run = _execute_bootstrap_agent_run(ws, spec_ws, user)  # 调 agent 填默认文件
+记录 AgentRun/AgentRunLog/AuditLog → 返回 {ok, run_id, ...}
 ```
+- `import_from_repo` / `sync` 当前为 stub：只更新 sync_status=clean + last_synced_at，不做实际文件搬运
+- `build_bundle` 用流式 generator（`_stream`）打包 spec 目录供下载，避免大目录占内存
+- `preflight_workspace_code_root` 在 bootstrap 前预检代码根，`_run_preflight` 返回告警字符串
+- `_execute_bootstrap_agent_run` 调 agent 填默认 spec 文件，全程记录 AgentRun/AgentRunLog
+- `_publish_log_event` / `_publish_done_event` 通过事件流推送 bootstrap 进度给前端
+- validator 三级检查：`_check_directory_structure` → `_check_yaml_schema` → `_check_references`
 
-三种策略（strategy）：
-- `platform-managed`：spec 仅存在于 spec_root（默认）
-- `repo-mirrored`：spec_root 与 repo 内 `.sillyspec` 双向同步
-- `repo-native`：repo 自身 `.sillyspec` 为 source of truth，spec_root 作为缓存
-
-## 对外接口（表格）
-
-| 方法 | 路径 | 说明 | 返回类型 |
-|------|------|------|----------|
-| GET | `/workspaces/{workspace_id}/spec-workspace` | 获取 spec workspace 信息 | `SpecWorkspaceRead` |
-| POST | `/workspaces/{workspace_id}/spec-workspace/import` | 从 repo 导入 spec | `SpecWorkspaceRead` |
-| POST | `/workspaces/{workspace_id}/spec-workspace/sync` | 触发双向同步 | `SpecWorkspaceRead` |
-| PATCH | `/workspaces/{workspace_id}/spec-workspace` | 更新 spec workspace 配置 | `SpecWorkspaceRead` |
-| POST | `/workspaces/{workspace_id}/spec-workspace/bootstrap` | 执行 bootstrap 初始化 | `dict` |
-| GET | `/workspaces/{workspace_id}/spec-conflicts` | 列出 spec 冲突 | `SpecConflictListResponse` |
-| POST | `/workspaces/{workspace_id}/spec-conflicts/{conflict_id}/resolve` | 解决冲突 | `dict` |
-
-所有端点需要认证 + `require_permission`。
-
-## 关键数据流
-
-1. **create**：创建 SpecWorkspace 行，自动生成 spec_root 路径
-2. **import_from_repo**：从 repo 的 `.sillyspec` 目录读取文件到 spec_root
-3. **sync**：根据 strategy 执行双向/单向同步，更新 `sync_status` 和 `last_synced_at`
-4. **bootstrap**：
-   - 获取 workspace + spec_workspace
-   - 调用 `SpecValidator.validate()` 验证目录
-   - 调用 `ClaudeCodeAdapter` agent 执行初始化
-   - 验证失败时创建 `SpecConflict` 记录并设置 `sync_status=dirty`
-   - 记录 `AgentRun` / `AgentRunLog` / `AuditLog`
-5. **validator**：三级检查（目录结构 -> YAML schema 字段 -> 引用完整性），输出 `ValidationReport`
-
-## 设计决策（表格）
-
-| 决策 | 原因 |
-|------|------|
-| 三种策略模式 | 不同项目有不同的 spec 管理方式 |
-| workspace_id 唯一索引 | 每个 workspace 只有一个 spec_workspace（1:1） |
-| Bootstrap 使用 agent | 初始化需要智能填充默认文件 |
-| 验证失败不阻断 | 记录冲突，允许后续手动解决 |
-| sync_status 状态机 | clean/dirty/conflicted 跟踪同步健康度 |
-
-## 依赖关系
-
-- `app.core.auth_deps` — require_permission
-- `app.core.config` — get_settings
-- `app.core.db` — get_session
-- `app.core.errors` — SpecWorkspaceNotFound, SpecConflictNotFound
-- `app.core.logging` — get_logger
-- `app.modules.agent.adapters.claude_code` — ClaudeCodeAdapter
-- `app.modules.agent.base` — AgentSpecBundle
-- `app.modules.agent.model` — AgentRun, AgentRunLog
-- `app.modules.auth.model` — User
-- `app.modules.auth.permissions` — Permission
-- `app.modules.spec_profile.model` — SpecConflict
-- `app.modules.spec_profile.schema` — SpecConflictListResponse
-- `app.modules.workflow.model` — AuditLog
-- `app.modules.workspace.model` — Workspace
+### Validator 校验细节
+`SpecValidator.validate(spec_root)` 返回 `ValidationReport`：
+- `ValidationIssue`（level/message/path）区分 error 与 warning
+- `_check_directory_structure`：校验 docs/changes/ 等必需目录存在
+- `_check_yaml_schema`：校验 frontmatter 必填字段、类型
+- `_check_references`：校验文档间引用（change→task、module→component）可达
+- errors 非空时 bootstrap 写 SpecConflict + sync_status=dirty，不阻断但记录
 
 ## 注意事项
+- bootstrap 异步且调 agent，耗时长，前端走 SSE 看日志（复用 AgentLogViewer）
+- `SpecValidator` 是纯同步文件系统检查，可脱离 DB 独立使用/测试
+- import/sync 是 stub，真正双向同步逻辑待后续 wave，改动勿当已实现
+- 冲突解决后不自动重验，需再次 bootstrap
+- sync_status 状态机（clean/dirty/conflicted）跟踪同步健康度
+- 验证失败不阻断流程，记录 SpecConflict + sync_status=dirty 允许后续手动解决
+- bootstrap 的 AgentRun 失败时通过 `_write_run_log` 落盘日志便于排查
+- bundle 下载是流式响应，前端需按 blob 处理
+- workspace_id 与 SpecWorkspace 是 1:1，创建工作区时由 `_ensure_spec_workspace` 自动连带建
+- `_ensure_spec_workspace_from_platform` 为平台托管工作区初始化默认 spec 空间
+- `update_sync_status` 单独更新同步状态，供 import/sync/bootstrap 复用
+- `apply_sync` 应用同步结果到 SpecWorkspace 行（stub 实现）
+- `get_by_id` 按 spec_workspace_id 直查（区别于按 workspace_id 的 get）
+- bootstrap 的 run_log 落盘路径由 `_write_run_log` 管理，便于失败排查
+- bundle 流式响应需前端按 blob 接收，大目录不占服务端内存
+- SpecValidator 的 ValidationReport.errors/warnings 区分严重度
+- import_from_repo/sync 的 stub 实现只改状态不搬文件，勿当已实现
+- strategy 决定 spec 文件物理位置与同步方向，创建后不宜频繁切换
+- bootstrap 失败的 AgentRun 经 _write_run_log 落盘，便于排查
+- spec-conflicts 端点读 SpecConflict 表（由 spec_profile 写入）
+- _publish_log_event/_publish_done_event 推 bootstrap 进度给前端 SSE
+- workspace 与 SpecWorkspace 1:1，由 _ensure_spec_workspace 连带建
+- SpecValidator 可独立实例化，传入 spec_root 即用
+- bootstrap 的 agent run 类型为 spec-bootstrap
+- sync_status=conflicted 表示有未解决冲突
 
-- Bootstrap 是异步操作，涉及 agent 调用，耗时较长
-- `SpecValidator` 是纯同步文件系统检查，可在无数据库环境下独立使用
-- 冲突解决后不会自动重新验证，需要再次调用 bootstrap
-
-## 变更索引（表格，初始为空）
-
-| 变更ID | 日期 | 改动摘要 |
-|--------|------|----------|
+## 人工备注
+<!-- MANUAL_NOTES_START -->
+<!-- MANUAL_NOTES_END -->

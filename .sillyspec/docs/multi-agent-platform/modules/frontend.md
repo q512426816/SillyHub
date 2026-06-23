@@ -2,305 +2,40 @@
 schema_version: 1
 doc_type: module-card
 module_id: frontend
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-04T09:01:45+08:00
+created_at: 2026-06-24T01:16:42
 ---
-
 # frontend
 
 ## 定位
 
-Next.js 14 前端应用，负责 Web 用户界面和交互体验。提供工作区管理、变更生命周期、任务看板、Agent 运行时监控、知识库查询等功能的页面组件。不负责业务逻辑和数据持久化，所有数据操作通过调用后端 RESTful API 完成。
+multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口。基于 Next.js 14 App Router + React 18 + TypeScript 构建，向用户呈现工作区、运行时会话、SillySpec 变更中心、PPM 项目管理、Agent 运行面板、权限审批、健康状态等功能。运行时依赖 backend 的 `/api` 接口；daemon 相关交互经 frontend 的 `/api/daemon*` route handler 与后端/守护进程协调。
+
+技术栈：Next.js 14.2、React 18、TypeScript、Tailwind CSS 3.4、Ant Design 6 + @ant-design/icons、Radix UI、TanStack React Query（数据层）、Zustand（状态）、Zod（校验）、ECharts（图表）、@xyflow/react（流程图）、Vitest（单测）、Playwright/Puppeteer（E2E）、pnpm。
 
 ## 契约摘要
 
-### 核心能力
+对外契约是浏览器渲染的页面与少量 BFF route：
 
-- **页面路由**：Next.js App Router，包含 `(dashboard)`、`(auth)` 两个路由组，约 20 个页面组件
-- **API 客户端层**：统一的 fetch 封装，自动认证、错误处理、token 刷新
-- **状态管理**：Zustand + persist 实现的客户端会话存储
-- **实时通信**：SSE 流客户端用于 Agent 运行日志实时推送
-- **UI 组件**：基于 Tailwind CSS + shadcn/ui 的组件库
-
-### 主要导出符号（按分类）
-
-#### API 客户端 (src/lib/*.ts)
-
-- `apiFetch<T>(path, options)`：统一请求封装，自动注入 Bearer Token，401 自动刷新重试
-- `getApiBaseUrl()` / `getDirectApiBaseUrl()`：获取后端 URL（后者用于 SSE 直连）
-- `ApiError`：标准错误类，包含 code/message/details
-
-**认证** (auth.ts)：
-- `login(email, password) -> TokenPair`
-- `refreshTokens() -> SessionTokens`
-- `logout() -> void`
-
-**工作区** (workspaces.ts)：
-- `listWorkspaces() -> WorkspaceListResponse`
-- `createWorkspace(input) -> Workspace`
-- `getWorkspace(id) -> Workspace`
-- `scanWorkspace(rootPath) -> ScanResult`
-- `rescanWorkspace(id) -> ScanResult`
-- `activateWorkspace(id) -> Workspace`
-- `deleteWorkspace(id) -> Workspace`
-- `getWorkspaceRelations(id) -> RelationListResponse`
-- `createRelation(data) -> WorkspaceRelation`
-- `deleteRelation(id) -> void`
-- `getTopology() -> TopologyResponse`
-
-**变更** (changes.ts)：
-- `listChanges(workspaceId, params) -> ChangeList`
-- `getChange(workspaceId, changeId) -> ChangeRead`
-- `getChangeDocMatrix(workspaceId, changeId) -> ChangeDocMatrix`
-- `getChangeDocContent(workspaceId, changeId, docType) -> ChangeDocContent`
-- `transitionChange(workspaceId, changeId, request) -> TransitionResponse`
-- `submitReview(workspaceId, changeId, data) -> TransitionResponse`
-
-**任务** (tasks.ts)：
-- `listTasks(workspaceId, changeId) -> TaskList`
-- `getTask(workspaceId, taskId) -> TaskRead`
-- `getTaskBoard(workspaceId, changeId) -> TaskBoard`
-- `transitionTask(workspaceId, taskId, request) -> TransitionResponse`
-- `reparseTasks(workspaceId, changeId) -> TaskReparseResponse`
-
-**Agent** (agent.ts)：
-- `createAgentRun(workspaceId, input) -> AgentRun`
-- `getAgentRun(workspaceId, runId) -> AgentRun`
-- `listAgentRuns(workspaceId, taskId?) -> AgentRun[]`
-- `getAgentRunLogs(workspaceId, runId, after?) -> AgentRunLogEntry[]`
-- `killAgentRun(workspaceId, runId) -> AgentRun`
-- `submitAgentRunInput(workspaceId, runId, input) -> AgentRunInputResponse`
-
-**Agent Run 流统一层**（2026-06-22-unify-agent-run-sse-hook 起）：
-- `useAgentRunStream(workspaceId, runId, {isActive})` hook（`lib/use-agent-run-stream.ts`）：封装 SSE 连接/重连/日志去重/permission（dialog 恢复）/pending_input 回复，4 调用点（根/agent/changes 页）共用
-- `AgentRunPanel` 组件（`components/agent-run-panel.tsx`）：hook + `AgentLogViewer` 的面板封装，调用点渲染一行 JSX
-- `AgentRunStreamClient` 类（`lib/agent-stream.ts`）：底层 SSE 客户端（重连退避/日志预取/permission 解析/`log_id` 去重），hook 的引擎
-- 注：`streamAgentRunLogs`（旧函数式客户端，丢弃无 timestamp 的 permission 事件）已删除，`AgentRunStreamClient` 为唯一底层
-
-**组件** (components.ts)：
-- `listComponents(workspaceId) -> Component[]`
-- `getComponent(workspaceId, componentKey) -> Component`
-- `reparseComponents(workspaceId) -> ReparseResponse`
-- `getTopology(workspaceId) -> TopologyResponse`
-
-**扫描文档** (scan-docs.ts)：
-- `listScanDocs(workspaceId) -> ScanDocList`
-- `getScanDoc(workspaceId, docId) -> ScanDocRead`
-- `reparseScanDocs(workspaceId) -> ScanDocReparseResponse`
-
-**SillySpec 工作区** (spec-workspaces.ts)：
-- `getSpecWorkspace(workspaceId) -> SpecWorkspace`
-- `importSpecWorkspace(workspaceId) -> SpecWorkspace`
-- `syncSpecWorkspace(workspaceId) -> SpecWorkspace`
-- `bootstrapSpecWorkspace(workspaceId) -> BootstrapResult`
-- `updateSpecWorkspace(workspaceId, input) -> SpecWorkspace`
-- `listSpecConflicts(workspaceId) -> SpecConflictListResponse`
-- `resolveSpecConflict(workspaceId, conflictId, input) -> SpecConflictRead`
-
-**运行时** (runtime.ts)：
-- `getRuntimeProgress(workspaceId, changeId) -> RuntimeProgress`
-- `getRuntimeUserInputsRaw(workspaceId, changeId) -> ArtifactEntry[]`
-- `getRuntimeArtifacts(workspaceId, changeId) -> ArtifactEntry[]`
-- `getRuntimeArtifactContent(workspaceId, changeId, path) -> string`
-
-**Daemon** (daemon.ts)：
-- `listDaemonRuntimes() -> DaemonRuntimeRead[]`
-- `disableDaemonRuntime(runtimeId) -> DaemonRuntimeRead`
-- `enableDaemonRuntime(runtimeId) -> DaemonRuntimeRead`
-- `quickChat(prompt, provider, prevRunId?, model?) -> QuickChatResponse`
-- `streamQuickChat(runId, onMessage, onDone, onError?) -> EventSource`
-
-**发布** (releases.ts)：
-- `listReleases(workspaceId, status?) -> Release[]`
-- `createRelease(workspaceId, input) -> Release`
-- `approveRelease(releaseId, input) -> Release`
-- `deployRelease(releaseId) -> Release`
-- `promoteRelease(releaseId) -> Release`
-- `rollbackRelease(releaseId) -> Release`
-
-**Git 网关** (git-gateway.ts)：
-- `executeGitOperation(request) -> GitOperationResponse`
-
-**Worktree** (worktree.ts)：
-- `acquireWorktree(workspaceId, request) -> WorktreeLeaseRead`
-- `listWorktrees(workspaceId) -> WorktreeLeaseList`
-- `getWorktree(leaseId) -> WorktreeLeaseRead`
-- `releaseWorktree(leaseId) -> WorktreeLeaseRead`
-- `extendWorktree(leaseId, request) -> WorktreeLeaseRead`
-
-**归档** (archive.ts)：
-- `archiveChange(workspaceId, changeId) -> ArchivedChange`
-- `distillChange(workspaceId, changeId) -> ArchivedChange`
-
-**知识库** (knowledge.ts)：
-- `listKnowledge(workspaceId, query?) -> KnowledgeList`
-- `getKnowledge(workspaceId, entryId) -> KnowledgeEntry`
-- `listQuicklog(workspaceId) -> QuicklogList`
-- `getQuicklog(workspaceId, entryId) -> QuicklogEntry`
-
-**审批** (approvals.ts)：
-- `listPendingApprovals(workspaceId) -> ApprovalRequest[]`
-- `listApprovalHistory(workspaceId) -> ApprovalHistoryEntry[]`
-- `approveRequest(workspaceId, requestId) -> ApprovalRequest`
-- `rejectRequest(workspaceId, requestId) -> ApprovalRequest`
-
-**事件** (incidents.ts)：
-- `listIncidents(workspaceId, status?) -> Incident[]`
-- `createIncident(workspaceId, input) -> Incident`
-- `getIncident(incidentId) -> Incident`
-- `updateIncident(incidentId, input) -> Incident`
-- `createPostmortem(incidentId, input) -> Postmortem`
-- `getPostmortem(incidentId) -> Postmortem`
-
-**审计** (audit.ts)：
-- `listAuditLogs(workspaceId, params) -> AuditLogEntry[]`
-
-**设置** (settings.ts)：
-- `listSettings() -> SettingsBulkRead`
-- `updateSettings(updates) -> SettingsUpdateResponse`
-- `listUsers(params?) -> UserListResponse`
-- `createUser(data) -> UserRead`
-- `updateUser(userId, data) -> UserRead`
-- `deleteUser(userId) -> void`
-
-**Git 身份** (git-identities.ts)：
-- `listGitIdentities() -> GitIdentityList`
-- `createGitIdentity(data) -> GitIdentityRead`
-- `getGitIdentity(identityId) -> GitIdentityRead`
-- `revokeGitIdentity(identityId) -> void`
-- `checkGitAccess(data) -> AccessCheckResult`
-
-**变更创建** (change-writer.ts)：
-- `createChange(workspaceId, input) -> CreateChangeResponse`
-- `generateDocs(workspaceId, changeId, input) -> GenerateDocsInput`
-- `batchGenerateDocuments(workspaceId, changeId) -> BatchGenerateResponse`
-
-**健康检查** (health.ts)：
-- `getHealth() -> HealthResponse`
-
-**工具网关** (tool-gateway.ts)：
-- `executeTool(workspaceId, request) -> ToolExecuteResponse`
-
-#### 状态管理 (src/stores/session.ts)
-
-- `useSession`：Zustand store，包含 user/accessToken/refreshToken/hydrated
-- 方法：setUser/setTokens/clear/markHydrated
-
-#### React 组件 (src/components/*)
-
-- `AppShell`：主布局，侧边栏导航、认证检查
-- `HealthCard`：健康状态卡片
-- `WorkspaceCard`：工作区卡片
-- `ComponentDetailDrawer`：组件详情抽屉
-- `SillySpecStepProgress`：SillySpec 步骤进度条
-- `WorkspaceScanDialog`：工作区扫描对话框
+- **页面路由**（App Router）：根 `page.tsx`；`(auth)/login` 登录；`(dashboard)/` 下含 workspaces、runtimes、settings、admin、ppm 五大功能区，各自带 `layout.tsx`。
+- **BFF route handlers**：`src/app/api/` 下 daemon、daemon-chat、workspaces，承接需要服务端代理的 daemon 通信与 SSE/WS 转发。
+- **后端依赖**：所有领域数据来自 backend `/api/*`；daemon 实时会话走 WebSocket/SSE。
+- **构建产物**：`next build` 产出独立 Node 服务，Docker 中以独立容器运行，端口对 backend 反代或直连。
 
 ## 关键逻辑
 
-### 请求流程
-
-```
-页面组件 -> lib/*.ts -> apiFetch() -> 后端 API
-   - resolveUrl() 根据环境决定 URL（浏览器用相对路径走 Next.js rewrite，SSR 用绝对 URL）
-   - 自动注入 Authorization: Bearer <token>
-   - 401 响应：自动刷新 token 并重试（带 x-auth-retry 标记防重入）
-   - 失败抛 ApiError(code/message/details)
-```
-
-### SSE 实时流
-
-```
-AgentRunStreamClient.connect()
-   -> 使用 getDirectApiBaseUrl() 绕过 Next.js rewrite 避免缓冲
-   -> 建立 EventSource 连接 /api/.../stream
-   -> onMessage 回调处理 StreamLogEvent / DoneEventData
-   -> 断线：指数退避重连（最多 5 次）
-   -> 重连前：用 getAgentRunLogs(after=<lastLogId>) 补齐缺失日志
-```
-
-**调用层**（2026-06-22-unify-agent-run-sse-hook 起）：页面不再直接用 `AgentRunStreamClient`，
-而是渲染 `<AgentRunPanel>` → 内部 `useAgentRunStream` hook → `AgentRunStreamClient`。
-hook 额外处理：`isActive=false` 仅 prefetch 历史、不连 SSE（D-001）；
-`permission_request`/`permission_resolved`（卡片自调 `respondSessionPermission` + hook `dismissPerm` 本地移除，D-003）；
-`fetchPendingDialogs` 恢复刷新前未答的 AskUserQuestion（FR-07）；pending_input 回复（`submitAgentRunInput`）。
-
-### 路由守卫
-
-```
-dashboard/layout.tsx
-   - 检查 useSession().accessToken，未登录重定向到 /login
-   - 等待 hydrated === true 再渲染，避免 Zustand persist 导致的闪屏
-```
-
-### 会话管理
-
-```
-login() -> 存储到 useSession + localStorage (persist 中间件)
-refreshTokens() -> 401 时自动调用
-logout() -> 清空 useSession + 跳转 /login
-```
+- **目录组织**：`src/app`（路由）、`src/components`（40+ 业务组件，含 daemon/、agent-log/、layout/、charts/、permissions/、ui/ 子树及大量 ppm-/workspace-/admin- 前缀组件）、`src/lib`（工具/API 封装）、`src/stores`（Zustand）、`src/styles`、`src/test`。
+- **核心组件**：app-shell（外壳布局）、top-bar、workspace-tabs、mission-console（任务控制台）、agent-run-panel、agent-log-viewer、runtime-session-dialog、permission-approval-dialog、ask-user-dialog-card、health-card、server-status-card、sillyspec-step-progress。
+- **数据层**：React Query 管理服务端状态，Zustand 管 UI/会话状态；daemon 聊天与权限流为长连接交互。
+- **脚本**：dev/build/start/lint/typecheck/test，CI 跑 lint+typecheck+test+build 全链路。
 
 ## 注意事项
 
-1. **API 代理策略**：普通 HTTP 请求走 Next.js rewrite (`/api/* -> backend`)，SSE 流直连后端（需设置 `NEXT_PUBLIC_API_BASE_URL` 环境变量）
-
-2. **Token 刷新机制**：`apiFetch` 内置 401 自动刷新，非 auth 端点失败后会尝试刷新一次；刷新失败则清除会话并跳转登录页
-
-3. **测试覆盖**：当前测试覆盖极低（仅 `api.test.ts`、`agent.test.ts`、`spec-workspaces.test.ts`），新增 API 客户端时应补充 vitest 用例
-
-4. **依赖关系**：frontend -> backend（通过 HTTP API），不直接依赖其他模块
-
-5. **修改影响面**：
-   - 修改 API 客户端签名会影响所有调用页面
-   - 修改 session store 结构会影响认证流程和路由守卫
-   - 修改 `apiFetch` 错误处理逻辑会影响全局请求行为
-
-6. **TypeScript 严格模式**：项目启用了严格类型检查，新增 API 客户端时应正确定义请求/响应类型
-
-7. **环境变量**：
-   - `NEXT_PUBLIC_API_BASE_URL`：后端 API 地址（生产环境必填）
-   - `INTERNAL_API_BASE_URL`：SSR 时使用的后端地址
-
-8. **容器健康检查**：`frontend/Dockerfile` 的 HEALTHCHECK 使用 node20 内置 `fetch` 探测 `:3000`（零依赖），不再依赖 `wget`/`curl`。切换 base image（alpine↔slim）时无需额外安装工具。
+- UI 文案与文档尽量用中文（项目硬性规则），仅专业术语保留英文。
+- frontend 容器 healthcheck 曾因 busybox wget 走 Docker 注入代理误报 unhealthy，属探针问题非服务故障；当前 Dockerfile 用 node20 内置 fetch 零依赖探测。
+- 改 daemon 交互类组件（runtime-session-dialog 等）要同步看 backend daemon 模块与 sillyhub-daemon protocol 的契约一致性。
 
 ## 人工备注
-
 <!-- MANUAL_NOTES_START -->
-
-- 2026-06-19: `/runtimes` 的运行时列表和会话列表使用固定最大高度与内部滚动；终态会话支持确认后删除。
-- 2026-06-17: Agent launch controls expose a free-form per-run model override.
-  Workspace defaults, scan-generate, change dispatch, task run creation, and runtime quick chat
-  now send `model` alongside `provider`; empty model input means the workspace/provider default.
-- 2026-06-17: Runtime quick chat keeps the Agent model override visible even when no daemon is online.
-  Provider selection and send remain disabled until an online daemon is available, but users can still see
-  and prefill the model override on the Daemon runtime page.
-- 2026-06-18: `/runtimes` treats `disabled` as a first-class daemon runtime state.
-  Runtime cards expose disable/enable actions, summary stats include disabled count, and quick chat
-  continues to offer only `online` providers.
-- 2026-06-19: `/runtimes` preserves usable runtime-card and interactive-session widths on desktop layouts.
-  The page uses a wider content shell, renders runtime cards in two columns when space allows, and stacks
-  the compound session workspace below the runtime list so its sidebar and detail panel remain readable.
-- 2026-06-23: TopBar 用户菜单新增「切换平台」（SillyHub↔项目管理平台，按 pathname `/ppm` 前缀判断，复用 app-shell 菜单隔离逻辑；`resolvePlatformSwitch` 纯函数导出于 `top-bar.tsx`）；退出登录（TopBar 菜单项 + 侧边栏底部按钮）统一改为 `LogoutConfirmDialog`（`components/logout-confirm-dialog.tsx`，基于 `ui/dialog`）二次确认后才登出，`app-shell.tsx` 拆 `requestLogout`/`performLogout`；侧边栏 Brand 区 LOGO 旁显示当前平台名称标签（SillyHub 蓝 / 项目管理平台紫，折叠时隐藏），LOGO 链接随平台指向 `/workspaces` 或 `/ppm`。
-
 <!-- MANUAL_NOTES_END -->
-
-## Change Index
-
-| Date | Change | Summary |
-|---|---|---|
-| 2026-06-19 | 2026-06-19-runtimes-layout | `/runtimes` 运行时与会话列表增加最大高度和内部滚动，终态会话增加确认删除入口。 |
-| 2026-06-03 | fix-sse-nextjs-rewrite-buffering | 创建 `app/api/.../stream/route.ts` Route Handler 透传后端 SSE 流，修复 Next.js rewrites 缓冲导致 EventSource 5 秒断开重连 |
-| 2026-06-04 | update-module-card | 基于代码库最新状态更新模块卡片，补充完整 API 客户端导出符号列表 |
-| 2026-06-15 | ql-20260615-002-9b4f | 修复 `/runtimes` 空状态 EmptyState 错误的 `pip install -e .` 提示（daemon 已重写为 TS），改为 cd / pnpm install+build / npm link / 复制命令 4 步，加 Python 旧版残留卸载提示，末尾引导用户去 workspace 详情页配置默认 agent |
-| 2026-06-16 | ql-20260616-001-7f3a | 修复 AgentLogViewer/normalize/changes/tasks 页 5 处直接读 `log.content_redacted`（后端可为 null）导致的 Bootstrap 点击崩溃。`agent.ts` 类型改 `string \| null`，5 个使用点统一 `?? ""` 兜底；parseToolCallContent / toolCallDescription 签名扩展接受 null\|undefined。tsc 零错误 |
-| 2026-06-18 | ql-20260618-007-d9c0 | `/runtimes` runtime 卡片新增禁用/启用操作，状态元数据支持 `disabled`，统计区增加禁用数；`daemon.ts` API client 新增 disable/enable 调用。 |
-| 2026-06-18 | ql-20260618-009-f3a2 | `lib/changes.ts` transitionChange 的 provider/model 判断从 `!== undefined` 改为 truthy，与 executeChange 风格统一（后端 schema default=None，行为等价）。 |
-| 2026-06-19 | 2026-06-19-runtimes-layout | 放宽 `/runtimes` 页面容器，将复合会话工作区移到运行时列表下方全宽展示，避免卡片、会话表单和说明文字被多层分栏挤压。 |
-| 2026-06-19 | ql-20260619-007-7b2e | 修复 `/runtimes` 选中 active 会话右侧无回显：`handleSelect` 移除 active 空白 live 分支，所有会话（含 active）统一调 `getAgentSessionLogs` 只读回看；渲染条件改 `selected`；删除无用 `liveViewOpen` 状态。 |
-| 2026-06-20 | ql-20260620-001-7b2e | 前端 UI 文案中文化：新增 `lib/status-labels.ts`（枚举状态中文映射 + labelOf 兜底）；改约35个前端文件，品牌 Multi-Agent Platform→SillyHub、Daemon→守护进程、Agent→智能体、Workspaces→工作区、Overview→概览/Management→管理/System→系统 等；技术标识符（日志频道/Claude 工具名/数据字段名/Bootstrap/Git/commit/PAT）保留英文；后端枚举状态值走 status-labels 映射。tsc/lint exit0，vitest 213/213 通过。 |
-| 2026-06-20 | 2026-06-20-session-history-enhance | 交互式会话历史回看：用户消息落库回看 + 任意会话 reopen 续聊(仅claude) + 任意状态删除 |
-| 2026-06-22 | ql-20260622-001-a169 | `frontend/Dockerfile` HEALTHCHECK 由 wget 改 node20 内置 fetch：base image 从 alpine 切 slim 后 wget 缺失导致探针恒失败、容器 unhealthy（服务正常），改用零依赖 node fetch，重建后 Status=healthy。 |
-| 2026-06-22 | ql-20260622-002-ce1c | 替换项目 favicon 和 LOGO：favicon.ico→`app/favicon.ico`（Next 约定自动生效）；logo.png（690x788）→`public/logo.png`；`login/page.tsx` 的 LogoMark 由手绘改 next/image 整张 logo、移动端加 bg-slate-900/90 chip 衬底（浅底保证白字可见）；`app-shell.tsx` 侧边栏 Brand 由纯文字改 logo（展开 h-9 / 折叠 h-8 居中）。重建镜像验证 logo 加载正常。 |
-| 2026-06-22 | 2026-06-22-unify-agent-run-sse-hook | 合并前端两套 Agent Run SSE 客户端为 `useAgentRunStream` hook + `AgentRunPanel` 面板；4 调用点（根/agent/changes 页）统一为 `<AgentRunPanel>`；删除 `streamAgentRunLogs`（`AgentRunStreamClient` 成唯一底层）；pending_input 三处 UI 统一。修复 `/agent` 与 `changes/[cid]` 页 AskUserQuestion 审批卡片不弹出导致 daemon 5min 兜底超时（根因：`streamAgentRunLogs` 丢弃无 timestamp 的 permission 事件）。后端/daemon/`AgentLogViewer` 零改动；typecheck + 30 文件/363 用例全过。 |
-| 2026-06-22 | 2026-06-22-fix-dialog-recovery-session-field | 修复 AskUserQuestion 卡片刷新后无法恢复：`useAgentRunStream` 的 `fetchPendingDialogs` 改用 `run.agent_session_id`（AgentSession 表 id），非 `run.session_id`（daemon 内部 id）。`AgentRun` 类型 + 后端 `AgentRunRead` schema 暴露 `agent_session_id`。根因：session 双字段语义（session_id=daemon 内部 / agent_session_id=AgentSession.id），刷新恢复查 `agent_sessions`/`session_dialog_requests` 表需后者。 |
-| 2026-06-23 | ql-20260623-003-7c2e | TopBar 用户菜单新增「切换平台」（SillyHub↔项目管理平台，`resolvePlatformSwitch` 纯函数）+ 退出登录二次确认（`LogoutConfirmDialog`，TopBar 菜单项与侧边栏底部按钮统一接确认）+ 侧边栏 Brand 区 LOGO 旁显示当前平台名称。 |

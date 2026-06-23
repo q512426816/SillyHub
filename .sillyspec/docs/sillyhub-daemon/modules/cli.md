@@ -2,53 +2,51 @@
 schema_version: 1
 doc_type: module-card
 module_id: cli
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-10T16:55:00
+created_at: 2026-06-24T01:10:13
 ---
-
 # cli
 
 ## 定位
-命令行入口点。基于 commander 提供 start / stop / status / logs 四个子命令。通过 `node` 直接执行 `dist/cli.js`（或 `npm`/`pnpm` bin `sillyhub-daemon`）调用。负责组装所有组件并启动 daemon 主循环。
+sillyhub-daemon 的 commander 命令行入口（`#!/usr/bin/env node`）。解析 4 个子命令（start/stop/status/logs）、组装 Daemon 运行所需依赖、管理 PID/日志文件生命周期。1:1 迁移自 Python `__main__.py`（click → commander）。是全局安装后 `sillyhub-daemon start` 的实际入口。
 
 ## 契约摘要
-- `createProgram()` — commander Program，顶层命令组
-- `start --server? --token?` — 启动 daemon 进程（前台阻塞）
-- `stop` — 读取 PID 文件并发送 SIGTERM 停止 daemon
-- `status` — 显示运行状态、PID、runtime_id、server_url
-- `logs --tail=50` — 显示 daemon 日志尾部
-- PID 文件路径辅助：`getPidFile()` → `~/.sillyhub/daemon/daemon.pid`
-- 日志文件路径辅助：`getLogFile()` → `~/.sillyhub/daemon/daemon.log`
-- 进程辅助：`readPid()` 读 PID 文件、`isProcessAlive(pid)` 跨平台存活检测
-- `stopAction()` — commander 的 stop 子命令处理函数（供其他流程复用）
+- 子命令（语义）：
+  - `start`：可选 `--server/--token/--api-key/--workspace-dir/--poll-interval/--heartbeat-interval/--max-concurrent/--log-level/--open-terminal/--terminal-mode/--terminal-close-on-exit/--terminal-command`，构建 Daemon 后阻塞运行。
+  - `stop`：读 PID 文件并向进程发 SIGTERM，按存活与否返回退出码 1/0。
+  - `status`：读 PID 文件并校验进程存活，打印 State/PID/Runtime ID/Server URL/Config dir。
+  - `logs --tail <n>`：读日志文件尾部 N 行（默认 50）。
+- 可测试性注入点（均封装为函数供 `vi.spyOn`）：`getPidFile()`、`getLogFile()`、`loadConfigFn(path)`、`saveConfigFn`。
+- PID/日志路径：`~/.sillyhub/daemon/daemon.pid`、`~/.sillyhub/daemon/daemon.log`。
+- 进程管理：`readPid/writePid/removePid/isProcessAlive`。
+- `createProgram()` 返回 commander Program。
 
 ## 关键逻辑
 ```
-start(server, token)
-  DaemonConfig() → 更新 server_url/token → save()
-  HubClient(config.server_url, token)
-  WorkspaceManager(baseDir=DEFAULT_CONFIG_DIR/"workspaces")
-  CredentialManager()
-  TaskRunner(client, workspaceMgr, credentialMgr)
-  Daemon({ config, client, taskRunner })
-  writePidFile(process.pid)
-  await daemon.start() + 循环 until stopped
-  finally: removePidFile()
+startAction(opts):
+  config = { ...loadConfigFn(DEFAULT_CONFIG_PATH), ...optsOverrides }
+  saveConfigFn(config)
+  client    = new HubClient(server_url, api_key ?? token)
+  workspace = new WorkspaceManager(workspaces/)
+  credential= new CredentialManager()
+  runner    = new TaskRunner(client, workspace, credential, config)
+  session   = new SessionManager(...)            # interactive 会话
+  daemon    = new Daemon({ client, workspace, runner, sessionManager, config, ... })
+  writePid(process.pid)
+  await daemon.start()           # register + 三循环 + WS
+  finally: removePid()           # 与 Python finally:_remove_pid() 一致
 
-stopAction / stop
-  pid = readPid() → isProcessAlive(pid) → process.kill(pid, SIGTERM)
+stopAction(): pid=readPid() → 不存活 return 1 → process.kill(pid) → return 0
 ```
 
 ## 注意事项
-- start 命令必须提供 `--token`，否则直接退出（错误提示引导到 web UI）
-- workspace 目录默认在 `~/.sillyhub/daemon/workspaces`
-- stop 通过 SIGTERM 信号停止，Windows 上 SIGTERM 行为与 Linux 不同
-- `isProcessAlive` 通过 `process.kill(pid, 0)` 检测存活（跨平台）
-- 子命令内部按需 `await import()` 延迟加载，保持启动速度
-- 依赖 config 模块
+- 信号 handler 划分：Daemon 内部已注册 SIGINT/SIGTERM 调 `daemon.stop()` 并自注销，CLI 层**不重复注册**，避免双重 stop。
+- `--token`（短期 Bearer，15min）与 `--api-key`（长期 X-API-Key）互斥；api_key 优先作 `HubClientAuth`。
+- 退出码与 Python 逐字对齐（status/stop 的 0/1），cli.test.ts 有逐字断言，改动需同步。
+- TaskRunner 真实构造是 3 位置参数 + config（非 options 对象），与蓝图旧假设不同。
+- start 失败时错误消息输出到 stderr。
 
 ## 人工备注
-
 <!-- MANUAL_NOTES_START -->
-
 <!-- MANUAL_NOTES_END -->

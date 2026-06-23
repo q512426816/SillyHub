@@ -35,3 +35,27 @@ created_at: 2026-06-23 10:09:12
 文件：
 - sillyhub-daemon/src/interactive/session-manager.ts（_scanIdle guard：active-only，running 跳过 + 注释）
 - sillyhub-daemon/tests/（idle 跳过 running 用例 + active 超阈值仍回收回归）
+
+## ql-20260624-001-c4d9 | 2026-06-24 07:28:40 | 修复 sillyhub-daemon 6 文件 pre-existing vitest 失败（5 文件 7 用例 + 额外 terminal-observer flaky；本次 codex 改动未引入回归，已 stash 到 HEAD 验证同样失败）
+背景：跑全量测试时发现 daemon 有 7 个失败，逐一 stash 到 HEAD（ba87eec）重跑确认全部 pre-existing（与本次 codex interactive 改动无关）。后端 pytest 1883 passed、frontend 66 passed 均已全绿，本次只动 sillyhub-daemon。用户选「逐个修复全部 pre-existing」。
+文件（预估）：
+- sillyhub-daemon/tests/interactive/claude-sdk-driver.test.ts（Windows wrapper：mac 上 normalize 无法规整反斜杠，mock 裸字符串比对失败 → 加 normalize/平台守卫）
+- sillyhub-daemon/tests/interactive/session-manager-pending-cleanup.test.ts 或 src/interactive/session-manager.ts（同 turn 多 pending 并发审批 allow/deny 边界）
+- sillyhub-daemon/tests/task-runner-terminal-observer.test.ts 或相关源码（observer 日志 flaky 时序：3 次跑挂不同用例）
+- sillyhub-daemon/tests/file-rpc.test.ts 或 src/file-rpc（listDir POSIX 权限不足子项降级 dir→file）
+- sillyhub-daemon/tests/agent-detector.system-claude.integ.test.ts 或 src/agent-detector（已装 /opt/homebrew/bin/claude 但 detector 未识别）
+状态：已完成
+结果：6 文件全修，全量 vitest 1285 passed ×3（flaky 消除），tsc --noEmit 无错误；后端 pytest 1883 / frontend 66 未动仍全绿。逐项根因 + 修法（全部为测试缺陷/假设错误，未改任何 src 源码）：
+1. claude-sdk-driver.test.ts（测试缺陷）：Windows wrapper 用例在 posix 上 path.normalize 不规整反斜杠，mock 裸字符串比对失配 → 加 norm helper（反斜杠→正斜杠 + normalize）统一 mock 比对与断言。
+2. file-rpc.test.ts T10（测试前提错误）：chmod 000 子目录不会让 stat 失败（POSIX stat 只需父目录 x 权限，不检查目标自身）→ 改用 symlink 指向无权限父目录下文件，stat 跟随穿越无 x 目录 → EACCES → 兜底 file（真实可复现，与 T9 dangling/ENOENT 不同 errno）。
+3. agent-detector.system-claude.integ.test.ts（平台假设错误）：扩展名断言 /\.(cmd|exe|bat|ps1)$/ 是 Windows-only，posix claude 无扩展名 → win32 才断言扩展名，posix 仅断言 path 非空。
+4. session-manager-pending-cleanup.test.ts（断言违背实现语义）：AskUserQuestion 拦截（session-manager L798-819）allow/deny 统一回 deny、答案经 deny.message 回传 Claude；原断言期望 allow → 改用 message 区分乱序路由（allow→User answered / deny→did not answer）。
+5. task-runner-terminal-observer.test.ts（flaky 时序）：observer 写入 fire-and-forget appendFile（terminal-observer.ts L126），runLease resolve 不等 IO 落盘 → readObserverLog 轮询直到内容连续两轮相同。
+6. terminal-observer.test.ts（flaky 时序，全量并发下偶发，额外发现）：同根因；2 用例漏调 flushAsyncWrites + 固定 30ms 并发下不够 → readLog 同样轮询稳定。
+实际改动文件（仅测试，未改 src）：
+- sillyhub-daemon/tests/interactive/claude-sdk-driver.test.ts
+- sillyhub-daemon/tests/file-rpc.test.ts
+- sillyhub-daemon/tests/agent-detector.system-claude.integ.test.ts
+- sillyhub-daemon/tests/interactive/session-manager-pending-cleanup.test.ts
+- sillyhub-daemon/tests/task-runner-terminal-observer.test.ts
+- sillyhub-daemon/tests/terminal-observer.test.ts

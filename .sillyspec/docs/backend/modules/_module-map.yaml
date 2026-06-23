@@ -1,9 +1,9 @@
 schema_version: 1
 project: backend
-source_commit: 0303536
-generated_at: 2026-06-19 13:25:00
-generator: sillyspec-quick
-last_change: 2026-06-22 archive(2026-06-22-daemon-service-split) daemon 模块 main_symbols 补 5 子域 service（RuntimeService/LeaseService/RunSyncService/SessionService/PatchService，DaemonService 退化为 facade 委托）；paths/entrypoints 不变（router 零改动）；backend/app/modules 实际 23 业务目录 vs 索引 19 模块，差异模块待后续全量 scan 补齐
+source_commit: ba87eec
+generated_at: 2026-06-24 00:45:16
+generator: sillyspec-scan
+last_change: 2026-06-24 全量 scan 覆盖更新。backend/app/modules 实际 23 业务目录（admin / agent / archive / auth / change / change_writer / daemon / git_gateway / git_identity / health / incident / knowledge / ppm / release / runtime / scan_docs / settings / spec_profile / spec_workspace / task / tool_gateway / workflow / workspace / worktree），旧索引漏 admin、ppm 两模块；本次补齐并核对 entrypoints/main_symbols/depends_on（settings→admin、auth↔admin 双向、agent↔daemon 双向、daemon→workspace 等跨模块引用全部以 rg 验证）。
 
 modules:
   # ── core 模块 ──────────────────────────────────────────────
@@ -49,15 +49,16 @@ modules:
       - resolve_spec_data_root
     depends_on: []
     used_by:
-      - workspace
       - auth
+      - workspace
       - change
       - task
       - agent
       - daemon
       - worktree
-      - git_gateway
       - git_identity
+      - git_gateway
+      - change_writer
       - tool_gateway
       - scan_docs
       - release
@@ -69,8 +70,8 @@ modules:
       - health
       - spec_profile
       - spec_workspace
-      - change_writer
       - archive
+      - admin
     needs_review: false
     concerns: []
     review_reasons: []
@@ -88,8 +89,8 @@ modules:
       - BaseModel
     depends_on: []
     used_by:
-      - workspace
       - auth
+      - workspace
       - change
       - task
       - agent
@@ -97,6 +98,7 @@ modules:
       - worktree
       - git_identity
       - git_gateway
+      - change_writer
       - tool_gateway
       - scan_docs
       - incident
@@ -106,6 +108,7 @@ modules:
       - workflow
       - knowledge
       - settings
+      - admin
     needs_review: false
     concerns: []
     review_reasons: []
@@ -138,7 +141,7 @@ modules:
     doc: modules/auth.md
     paths:
       - app/modules/auth/**
-    tags: [auth, jwt, rbac, login, token]
+    tags: [auth, jwt, rbac, login, token, api-key]
     aliases: [authentication]
     entrypoints:
       - /api/auth/login
@@ -147,16 +150,19 @@ modules:
       - /api/auth/me
     main_symbols:
       - AuthService
+      - ApiKeyService
       - User
       - Session
       - Role
       - RolePermission
+      - ApiKey
       - UserWorkspaceRole
       - Permission
       - auth_router
     depends_on:
       - core
       - models
+      - admin  # rbac.collect_permissions_everywhere 延迟 import admin.model.UserRole
     used_by:
       - workspace
       - change
@@ -164,8 +170,9 @@ modules:
       - agent
       - daemon
       - worktree
-      - git_gateway
       - git_identity
+      - git_gateway
+      - change_writer
       - tool_gateway
       - scan_docs
       - release
@@ -175,8 +182,9 @@ modules:
       - runtime
       - settings
       - spec_workspace
-      - change_writer
       - archive
+      - admin
+      - ppm
     needs_review: false
     concerns: []
     review_reasons: []
@@ -186,19 +194,24 @@ modules:
     doc: modules/workspace.md
     paths:
       - app/modules/workspace/**
-    tags: [workspace, crud, scan, topology]
+    tags: [workspace, crud, scan, topology, relation]
     aliases: [workspaces]
     entrypoints:
       - /api/workspaces
+      - /api/workspaces/{workspace_id}/members
     main_symbols:
       - WorkspaceService
       - RelationService
       - Workspace
       - WorkspaceRelation
+      - ChangeWorkspace
+      - TaskWorkspace
+      - AgentRunWorkspace
       - WorkspaceScanner
       - TopologyBuilder
       - slugify
       - workspace_router
+      - members_router
     depends_on:
       - core
       - models
@@ -224,7 +237,7 @@ modules:
     doc: modules/change.md
     paths:
       - app/modules/change/**
-    tags: [change, proposal, design]
+    tags: [change, proposal, design, stage]
     aliases: [changes]
     entrypoints:
       - /api/workspaces/{workspace_id}/changes
@@ -285,7 +298,7 @@ modules:
     doc: modules/agent.md
     paths:
       - app/modules/agent/**
-    tags: [agent, claude-code, execution, coordinator, daemon-only]
+    tags: [agent, claude-code, execution, coordinator, mission, daemon-only]
     aliases: [agents, ai]
     entrypoints:
       - /api/workspaces/{workspace_id}/agents
@@ -294,10 +307,16 @@ modules:
       - AgentService
       - ExecutionCoordinatorService
       - RunPlacementService
+      - MissionService
+      - MissionControlService
+      - MissionExecutionService
       - NoOnlineDaemonError
       - AgentRun
       - AgentRunLog
-      - AgentAdapter
+      - AgentSession
+      - AgentMission
+      - AgentRunDependency
+      - AgentArtifact
       - AgentSpecBundle
       - ExecutionContextResponse
       - build_spec_bundle
@@ -310,6 +329,7 @@ modules:
       - workspace
       - task
       - worktree
+      - daemon  # router import daemon.model.DaemonTaskLease
     used_by:
       - daemon
       - spec_workspace
@@ -322,30 +342,33 @@ modules:
     doc: modules/daemon.md
     paths:
       - app/modules/daemon/**
-    tags: [daemon, runtime, heartbeat, lease, websocket]
+    tags: [daemon, runtime, heartbeat, lease, websocket, session]
     aliases: [daemons]
     entrypoints:
       - /api/daemon
       - /api/daemon/ws
     main_symbols:
-      - DaemonService  # facade（2026-06-22-daemon-service-split 拆分后委托 5 子 service，签名不变）
-      - DaemonLeaseService  # 独立活 service（lease_service.py），cancel_lease 被 agent 跨模块调用，原位保留
+      - DaemonService  # facade（2026-06-22-daemon-service-split 拆分后委托 5 子 service）
+      - DaemonLeaseService  # lease_service.py 独立活 service，cancel_lease 被 agent 跨模块调用
+      - DaemonPermissionService  # permission_service.py
       - DaemonRuntime
+      - SessionDialogRequest
       - DaemonTaskLease
       - daemon_router
-      # 5 子域子包 service（2026-06-22-daemon-service-split，由 DaemonService facade 委托）：
-      - RuntimeService
-      - LeaseService
-      - RunSyncService
-      - SessionService
-      - PatchService
+      # 5 子域子包 service（由 DaemonService facade 委托）：
+      - RuntimeService  # daemon/runtime/service.py
+      - LeaseService  # daemon/lease/service.py
+      - RunSyncService  # daemon/run_sync/service.py
+      - SessionService  # daemon/session/service.py
+      - PatchService  # daemon/patch/service.py
     depends_on:
       - core
       - models
       - auth
-      - workspace
+      - workspace  # lease/patch import workspace.model.{AgentRunWorkspace,Workspace}
       - agent
-    used_by: []
+    used_by:
+      - agent  # agent↔daemon 双向引用
     needs_review: false
     concerns: []
     review_reasons: []
@@ -455,7 +478,7 @@ modules:
 
   git_gateway:
     status: active
-    doc: modules/git_identity.md
+    doc: modules/git_gateway.md
     paths:
       - app/modules/git_gateway/**
     tags: [git, gateway, audit, proxy]
@@ -465,6 +488,7 @@ modules:
     main_symbols:
       - GitGatewayService
       - GitOperationLog
+      - redact_output
       - git_gateway_router
     depends_on:
       - core
@@ -489,6 +513,10 @@ modules:
       - /api/workspaces/{workspace_id}/change-writer
     main_symbols:
       - ChangeWriterService
+      - ChangeCreateRequest
+      - ChangeCreateResponse
+      - MarkdownGenerateRequest
+      - MarkdownGenerateResponse
       - change_writer_router
     depends_on:
       - core
@@ -513,9 +541,8 @@ modules:
       - /api/workspaces/{workspace_id}/workflow
     main_symbols:
       - WorkflowService
-      - TaskFSM
-      - AuditLog
       - ChangeReview
+      - AuditLog
       - run_guard
       - workflow_router
     depends_on:
@@ -526,6 +553,7 @@ modules:
       - task
     used_by:
       - tool_gateway
+      - admin  # organizations_service 写 AuditLog
     needs_review: false
     concerns: []
     review_reasons: []
@@ -615,6 +643,7 @@ modules:
     main_symbols:
       - ToolGatewayService
       - ToolPolicyService
+      - ToolPolicy
       - ToolOperationLog
       - tool_gateway_router
       - policy_crud_router
@@ -671,6 +700,7 @@ modules:
       - core
       - models
       - auth
+      - admin  # service import admin.users_service.UserService; schema import admin.schema
     used_by: []
     needs_review: false
     concerns: []
@@ -715,8 +745,8 @@ modules:
     aliases: [spec-profile]
     entrypoints: []
     main_symbols:
+      - SpecProfileManifest
       - SpecConflict
-      - SpecProfilePolicy
     depends_on:
       - core
       - models
@@ -725,6 +755,103 @@ modules:
     needs_review: false
     concerns: []
     review_reasons: []
+
+  # ── 新增模块（旧索引漏列，本次补齐）────────────────────────
+
+  admin:
+    status: active
+    doc: modules/admin.md
+    paths:
+      - app/modules/admin/**
+    tags: [admin, organization, role, user-management]
+    aliases: [administration]
+    entrypoints:
+      - /api/admin
+    main_symbols:
+      - OrganizationService
+      - UserService
+      - RoleService
+      - Organization
+      - UserOrganization
+      - UserRole
+      - admin_router
+    depends_on:
+      - core
+      - models
+      - auth
+      - workflow  # organizations_service 写 AuditLog
+    used_by:
+      - auth  # rbac 延迟 import UserRole
+      - settings  # service/schema import admin
+    needs_review: false
+    concerns: []
+    review_reasons:
+      - modules/admin.md 文档尚未创建，需补文档
+
+  ppm:
+    status: active
+    doc: modules/ppm.md
+    paths:
+      - app/modules/ppm/**
+    tags: [ppm, project, problem, plan, task-execute, kanban, migration]
+    aliases: [project-problem-management, ppdmq]
+    entrypoints:
+      - /api/ppm  # app.main 以 prefix=/api/ppm 统一挂载 5 子域 router
+      - /api/ppm/projects  # project 子域
+      - /api/ppm/plans  # plan 子域
+      - /api/ppm/tasks  # task 子域
+      - /api/ppm/problems  # problem 子域
+      - /api/ppm/kanban  # kanban 子域
+    main_symbols:
+      # project
+      - ProjectMaintenanceService
+      - CustomerMaintenanceService
+      - ProjectMemberService
+      - ProjectStakeholderService
+      # plan
+      - PlanService
+      - PlanNode
+      - PlanNodeDetail
+      - PlanNodeModule
+      - PsProjectPlan
+      - PsPlanNode
+      - PsPlanNodeDetail
+      - PsPlanNodeDetailProcess
+      # task
+      - PlanTaskService
+      - TaskExecuteService
+      - WorkHourService
+      - PlanTask
+      - TaskExecute
+      - WorkHour
+      # problem
+      - ProblemService
+      - PpmProblemList
+      - PpmProblemChange
+      - PpmProblemListProcessTask
+      - PpmProblemChangeProcessTask
+      - PpmProblemListProcessLog
+      # kanban
+      - PpdKanbanService
+      - PpmKanbanComment
+      - PpmKanbanSubtask
+      # routers（各子域独立 router，无聚合）
+      - ppm_project_router
+      - ppm_plan_router
+      - ppm_task_router
+      - ppm_problem_router
+      - ppm_kanban_router
+    depends_on:
+      - core
+      - models
+      - auth  # 5 子域 router/service 均用 auth.model.User / permissions
+    used_by:
+      - health  # health.router 延迟 import ppm.plan/project model
+    needs_review: false
+    concerns: [missing-doc, large-domain]
+    review_reasons:
+      - modules/ppm.md 文档尚未创建，需补文档
+      - 对齐源 ppdmq-module-ppm (Java/Spring Boot) 6 子域（pm/plan/ps/problem/task/kanban），规模最大
 
   # ── infra 模块 ─────────────────────────────────────────────
 

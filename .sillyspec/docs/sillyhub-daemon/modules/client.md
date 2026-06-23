@@ -2,49 +2,46 @@
 schema_version: 1
 doc_type: module-card
 module_id: client
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-10T16:55:00
+created_at: 2026-06-24T01:10:13
 ---
-
 # client
 
 ## 定位
-基于原生 `fetch` 的 REST HTTP 客户端，封装 daemon 与 SillyHub server 之间所有 REST API 调用。文件名 Node 版改名为 `hub-client.ts`（模块 id `client` 保持不变）。只负责 HTTP 通信，不负责 WebSocket（WebSocket 由独立 ws-client 模块处理）。
+daemon ↔ SillyHub backend 的 REST HTTP 客户端（`hub-client.ts`）。基于 Node 20 原生 fetch（零 HTTP 库依赖），覆盖 runtime 生命周期（register/heartbeat/markOffline）、lease 生命周期（claim/start/leaseHeartbeat/submitMessages/complete）、WS 断线兜底（getPendingLeases）、spec 同步（getSpecBundle/postSpecSync）、session 恢复（recoverSession/confirmReconnected/markRecoveryFailed）、执行上下文拉取（getExecutionContext）。WebSocket 不在此类（归 ws-client）。1:1 迁移自 Python `client.py`。
 
 ## 契约摘要
-- `HubClient(serverUrl, token?)` — 初始化，自动构建 Bearer 认证头
-- `register(body: RegisterBody)` — POST `/api/daemon/register`
-- `heartbeat(body: HeartbeatBody)` — POST `/api/daemon/heartbeat`
-- `claimLease(leaseId, body: ClaimLeaseBody)` — POST `/api/daemon/leases/{id}/claim`
-- `startLease(leaseId, body: StartLeaseBody)` — POST `/api/daemon/leases/{id}/start`
-- `leaseHeartbeat(leaseId, body: LeaseHeartbeatBody)` — POST `/api/daemon/leases/{id}/heartbeat`
-- `submitMessages(leaseId, body: SubmitMessagesBody)` — POST `/api/daemon/leases/{id}/messages`
-- `completeLease(leaseId, body: CompleteLeaseBody)` — POST `/api/daemon/leases/{id}/complete`
-- `getExecutionContext(agentRunId): Promise<ExecutionContextPayload>` — GET `/api/agent-runs/{id}/execution-context`（2026-06-14-unified-agent-execution / task-05 新增：claim 后 fetch bundle 上下文，填充 LeaseCtx 的 claudeMd/repoUrl/branch/allowedPaths/toolConfig）
-- 请求体类型：`RegisterBody` / `ClaimLeaseBody` / `StartLeaseBody` / `LeaseHeartbeatBody` / `SubmitMessagesBody` / `CompleteLeaseBody` / `HeartbeatBody`
-- `HubHttpError` — 非 2xx 响应抛出的错误类型（含 status / body）
+- `HubClient(serverUrl, authOrToken?)`：构造器去尾斜杠、存鉴权信息。
+- `HubClientAuth`：`{ type: 'bearer'|'api-key', token }` 或裸 token 字符串。
+- `HubHttpError`：包装非 2xx 响应（status + body）。
+- runtime：`register(params)`、`heartbeat(runtimeId)`、`markOffline(runtimeId)`。
+- lease：`claimLease`、`startLease(leaseId, claimToken)`、`leaseHeartbeat`、`submitMessages`、`completeLease`、`getPendingLeases(runtimeId)`（唯一 GET）。
+- session：`notifyRunResult`、`notifySessionEnd`、`recoverSession`、`confirmReconnected`、`markRecoveryFailed`。
+- 其他：`syncStatus`、`getExecutionContext(agentRunId)`、`getSpecBundle(wsId): Buffer`、`postSpecSync`。
+- `close()`：no-op（fetch 无连接池，仅 API 兼容）。
 
 ## 关键逻辑
 ```
-new HubClient(serverUrl, token)
-  → 保存 baseUrl、Authorization: `Bearer ${token}`
-  → 所有方法：fetch(baseUrl + path, { method: 'POST', headers, body: JSON.stringify(body) })
-    → !resp.ok → throw new HubHttpError(resp.status, await resp.text())
-    → return await resp.json()
+// 所有请求统一前缀 REST_PREFIX、统一 30s 超时、统一鉴权头
+headers = this._authHeaders()              // Bearer 或 X-API-Key，或无
+resp = await fetch(`${base}${REST_PREFIX}/...`, {
+  method, headers, body: JSON.stringify(payload),
+  signal: AbortSignal.timeout(30_000),
+})
+if (!resp.ok) throw new HubHttpError(resp.status, body)
+return resp.json()
+// trust_env=False 等价：Node fetch 默认不读 HTTP_PROXY
 ```
 
 ## 注意事项
-- 使用 Node ≥ 20 内置全局 `fetch`，不依赖 httpx / axios
-- 不读取系统代理环境变量（daemon 直连本地 server）
-- timeout 硬编码（通过 AbortController 实现），大文件上传场景可能不够
-- 所有方法在 HTTP 错误时直接 throw HubHttpError，调用方需 try/catch
-- 修改 API 路径时需同步检查 server 端 router 定义
-- 对外 REST 端点路径与 Python 版完全相同（G-02 不变）
-- 被 cli、daemon、task-runner 三个模块使用
-- `getExecutionContext` 返回的 bundle 含 proposal/design 上下文，按 server 端 `_user_owns_run` 做归属校验，跨 user 访问 → 403（2026-06-14-unified-agent-execution）
+- body 字段全部 snake_case（runtime_id/claim_token/agent_run_id）对齐 backend Pydantic，改字段名会直接 422。
+- 30s 超时来自 Python httpx，改超时需评估长任务接口（getSpecBundle 可能较大）。
+- `getSpecBundle` 返回 Buffer（tar 包），不走 JSON 解析路径。
+- `getExecutionContext` 按 server 端 `_user_owns_run` 做归属校验，跨 user 访问 → 403。
+- close() 无实际作用但保留（cli/daemon 调用链期望显式释放），勿删。
+- fetch 默认不读系统代理，与 Python `trust_env=False` 天然等价，无需额外配置。
 
 ## 人工备注
-
 <!-- MANUAL_NOTES_START -->
-
 <!-- MANUAL_NOTES_END -->

@@ -1,33 +1,36 @@
 ---
 author: qinyi
-created_at: 2026-06-03T09:50:00
+created_at: 2026-06-24T01:50:01
+source_commit: ba87eec
 ---
 
 # agent-execution
 
 ## 目标
-通过 Claude Code CLI 执行自动化任务（扫描、代码生成、验证等）。
+通过 Agent（claude-agent-sdk）执行自动化任务（扫描、代码生成、验证、交互式会话等）。
 
 ## 参与模块
-- **agent**: 管理 AgentRun 生命周期，调用 Claude Code CLI
-- **tool_gateway**: 工具调用策略和审计
-- **worktree**: Git worktree 隔离管理
-- **git_gateway**: Git 操作（commit、push 等）
+- **backend/agent**：管理 AgentRun 生命周期、`execution-context` 派发
+- **backend/worktree**：`acquire`/`release` Git 工作树租约隔离
+- **backend/tool_gateway**：工具调用策略和审计
+- **backend/runtime**：SSE 流推送进度到前端
+- **sillyhub-daemon**：`SessionManager` 调用 `@anthropic-ai/claude-agent-sdk` 实际执行，`ws-client`/`hub-client` 回传
 
 ## 流程摘要
 ```text
-创建 AgentRun (status=pending)
-  → 分配 worktree（隔离工作空间）
-  → 调用 Claude Code CLI（subprocess）
-  → 实时捕获 stdout/stderr
-  → SSE 流推送日志到前端
-  → AgentRun 完成 (status=completed/failed)
-  → 审计日志记录到 tool_gateway
+[backend/agent]   创建 AgentRun (pending) + WorktreeLease
+      │ GET /agent-runs/{id}/execution-context
+      ▼
+[sillyhub-daemon] claude-agent-sdk 执行
+      ├─→ [ws-client] 实时 stdout/tool_call → [backend/runtime] SSE → [frontend]
+      └─→ [hub-client] notifyRunResult → AgentRun completed/failed
+[backend/worktree] release 租约
 ```
 
 ## 失败回滚
 | 失败点 | 处理 |
 |--------|------|
-| Claude Code CLI 崩溃 | AgentRun 标记 failed，记录错误日志 |
-| worktree 冲突 | 自动清理后重试 |
-| 超时 | 标记 timeout，允许用户取消 |
+| claude-agent-sdk 启动失败 | SessionManager.fail，AgentRun=failed |
+| 工作树冲突 | acquire 报错，人工解决 |
+| 执行崩溃 | 标 failed，保留已收集日志/产物 |
+| 超时 | missions/{id}/cancel 强制终止 |

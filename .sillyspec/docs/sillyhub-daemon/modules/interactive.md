@@ -1,48 +1,48 @@
 ---
-author: qinyi
-created_at: 2026-06-19 13:25:00
-source_commit: 0303536
-updated_at: 2026-06-19T05:25:00Z
-generator: sillyspec-quick
 schema_version: 1
 doc_type: module-card
 module_id: interactive
+source_commit: ba87eec
+author: qinyi
+created_at: 2026-06-24T01:10:50
 ---
-
 # interactive
 
-> 由 ql-20260619-002-703a 增量补充（interactive-session 变更落地后补入索引）。依赖链 `depends_on`/`used_by` 待全量 scan 核对。
-
 ## 定位
-交互式（多轮）会话管控模块，基于 **Claude Agent SDK driver 层**实现。负责会话生命周期、用户输入注入、工具权限裁决与会话持久化。前身是 task-runner 的一次性执行模型；本模块把它升级为有状态、可中断、可恢复的交互式会话。
-
-不负责：与 backend 的传输层（归 `ws-client`/`client`）、凭据管理（归 `credential`）、一次性任务执行（归 `task-runner`）。
+交互式会话子系统（`src/interactive/`，task-04 起 + task-07/08/10 增强）。基于 @anthropic-ai/claude-agent-sdk 的同进程多轮会话，区别于 batch lease 的一次性 TaskRunner spawn。6 个文件分工：session-manager（生命周期）、claude-sdk-driver（SDK 封装）、input-queue（输入队列）、permission-resolver（远程人审）、session-store-persistence（元数据持久化）、types（局部类型）。
 
 ## 契约摘要
-（具体导出符号以 `_module-map.yaml` 的 entrypoints/main_symbols 为准）
-- **SessionManager** — 会话生命周期：创建/恢复/注入用户消息/取消；持有 `SessionState`。
-- **ClaudeSdkDriver** — Claude Agent SDK 驱动：`query({prompt, options})` 流式消费、`interrupt`、`canUseTool` 权限回调、`resume`；无状态，由 SessionManager 编排。
-- **InputQueue** — `AsyncIterable<SDKUserMessage>` 用户输入队列，支持多轮注入。
-- **PermissionResolver** — 工具调用权限裁决（注册/解析/超时回退 `PERMISSION_FALLBACK_TIMEOUT_MS`）。
-- **JsonSessionPersistence** — 会话状态 JSON 持久化（`DEFAULT_SESSION_FILE`，`SESSION_FILE_VERSION`）。
+- **SessionManager**（核心入口）：`create(input)`/`inject(sessionId,prompt,runId)`/`interrupt(sessionId)`/`end(sessionId)`/`fail(sessionId)`/`refreshClaimToken`/`getPendingInjectCount`/`start()`/`stop()`/`scanOnce()`/`snapshotPersistable`/`restoreAndReconnect`/`markReconnected`/`flush`。内存 Map<sessionId, SessionState>。
+- **ClaudeSdkDriver**：`start(input,opts): Query`（SDK query({prompt:AsyncIterable,options})）/`consume(q,cb)`（for-await 遍历 result 边界）/`interrupt(q)`（turn 级）。`resolveClaudeExecutable(detectedPath)` 把 Windows cmd-shim wrapper 解析到底层真 .exe。
+- **InputQueue**：per-session AsyncIterable<SDKUserMessage>，单订阅、close 后 push 抛 SessionQueueClosedError。
+- **PermissionResolver**：canUseTool 远程人审 pending 注册表，register/resolve/abortAll，5min 兜底超时 deny，fail-closed。
+- **JsonSessionPersistence**：sessions.json 元数据原子写（0600 + tmp rename），损坏 quarantine。
+- 类型：SessionStatus(active/running/reconnecting/ended/failed)、SessionState、CreateSessionInput、InjectResult、SessionManagerDeps、PersistedSessionRecord、PersistedSessionFile、SESSION_FILE_VERSION=1。错误类：SessionNotFoundError/SessionAlreadyExistsError/SessionNotActiveError/UnsupportedProviderError/ClaudeExecutableNotFoundError/SessionQueueClosedError。
 
 ## 关键逻辑
 ```
-SessionManager.create(CreateSessionInput) → SessionState(active)
-  → ClaudeSdkDriver.consume(ConsumeCallbacks) 驱动 SDK query
-  → InputQueue 注入用户消息(SDKUserMessage) → SDK 流式产出
-  → 工具调用经 PermissionResolver.canUseTool 裁决 → 允许/拒绝/待确认
-  → 状态经 JsonSessionPersistence 落盘 → 可 resume 恢复
+create: 建 InputQueue + push 首 SDKUserMessage → driver.start → fire consume 协程
+inject: push 追问（turn 级串行，SDK 在当前 turn result 后消费）；
+  status=running 时 pendingInjectCount++ + onTurnQueued 回调（排队检测非拒绝）
+interrupt: driver.interrupt（turn 级，session 仍 active）；终态由 _onResult 按 SDK result 收尾
+end: InputQueue.close → query 自然结束 → status=ended → onSessionEnd（统一收口）
+fail: driver onError → status=failed → onSessionEnd
+空闲扫描: start()/stop() 启停定时器（FR-06/D-004@v1）；_scanIdle → _onIdleExpire → end
+持久化: snapshotPersistable → JsonSessionPersistence.save（原子写）；
+  restoreAndReconnect 从 sessions.json 恢复 + resume SDK jsonl
+permission: canUseTool 回调 → PermissionResolver.register 生成 request_id + 发 PERMISSION_REQUEST
+  → await Promise；PERMISSION_RESPONSE 到达 resolve() settle；interrupt 时 signal abort deny
 ```
 
 ## 注意事项
-- 来自 `2026-06-18-daemon-interactive-session` 变更（SDK driver 层方案 v3）。
-- 权限链路与 backend WS（`PermissionWsSender`）耦合，修改时同步检查 `ws-client` 与 backend daemon 模块。
-- 会话持久化格式受 `SESSION_FILE_VERSION` 控制，升级需迁移。
-- 本卡片为增量补充，模块边界与依赖链建议在下一次全量 scan 复核。
+- **R-exe 关键修正（task-01）**：agent-detector 给的 claude 路径常是 npm cmd-shim wrapper（claude.cmd），SDK spawn 不带 shell 在 Windows CreateProcess 对 .cmd 返回 EINVAL。driver.start 前必须 resolveClaudeExecutable 转 wrapper→真 .exe。
+- **turn 级语义**：InputQueue 只保证 push 顺序 yield，「同一 turn 不接受第二条」由 SDK 自身保证（未 result 的 push 排到下一 turn，spike S1）。
+- **InputQueue 单订阅**：第二次 [Symbol.asyncIterator] 抛 SessionQueueDoubleSubscribeError；close 前已 push 的消息必须全部 yield 完才结束。
+- **PermissionResolver fail-closed 铁律**：send 失败/signal aborted/5min 超时/abortAll 全部 deny，绝不本地 allow；每个 promise 只 settle 一次；listener settle 时移除防泄漏；resolver 只活在当前 turn 协程内不跨 turn。
+- **持久化白名单**：仅写 PersistedSessionRecord（sessionId/leaseId/agentSessionId/cwd/provider 等），禁止写 claim token/API key/credential/prompt 内容/agent 输出/Query 句柄/InputQueue（不可序列化且敏感）。SDK 自动持久化 ~/.claude/projects/<encoded-cwd>/<sid>.jsonl，daemon 不读不写。
+- claimToken 跨 turn 复用（gap-2 D-002@v3）：create 时存入 state.claimToken，供 submitMessages + notifyRunResult 复用。
+- claim token / API key / credential 一律不进持久化白名单（task-10 §4.1）。
 
 ## 人工备注
-
 <!-- MANUAL_NOTES_START -->
-
 <!-- MANUAL_NOTES_END -->

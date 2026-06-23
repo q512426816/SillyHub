@@ -2,82 +2,43 @@
 schema_version: 1
 doc_type: module-card
 module_id: deploy
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-04T10:30:00+08:00
+created_at: 2026-06-24T01:16:42
 ---
-
 # deploy
 
 ## 定位
-负责 Docker Compose 容器化部署配置，不负责应用代码实现。
 
-提供两种部署模式：
-- **dev-only** (docker-compose.dev.yml): 仅启动 Postgres + Redis，应用代码在宿主机运行，适合开发迭代
-- **full-stack** (docker-compose.yml): 启动完整栈 (db + redis + backend + frontend)，适合演示/生产
+multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 backend、frontend、PostgreSQL、Redis 拉成一套可运行的服务栈。是开发联调与（未来）生产部署的统一入口，定义了各组件的容器化方式、网络、端口、数据卷、健康检查与环境配置。聚合依赖 backend、frontend（也间接含 sillyhub-daemon 的分发物），被 ci/build 引用。
 
-边界：
-- 包含：容器编排、服务依赖、健康检查、数据卷、环境变量注入
-- 不包含：Docker 镜像构建逻辑（在 backend/Dockerfile 和 frontend/Dockerfile）
-- 不包含：数据库迁移脚本（在 backend/alembic/）
+技术栈：Docker、Docker Compose、PostgreSQL 16-alpine、Redis 7-alpine；各子项目自带 Dockerfile（backend/Dockerfile、frontend/Dockerfile）。
 
 ## 契约摘要
 
-### Compose 文件
-| 文件 | 用途 | 服务 |
-|------|------|------|
-| docker-compose.yml | 完整部署 | postgres, redis, backend, frontend |
-| docker-compose.dev.yml | 开发依赖 | postgres, redis |
-
-### 环境变量模板
-`.env.example`: 所有容器的环境变量模板，包含 Postgres/Redis/Backend/Frontend 配置项
-
-### 核心服务配置
-- **Postgres**: 16-alpine，健康检查 pg_isready，数据卷 pgdata
-- **Redis**: 7-alpine，AOF 持久化，健康检查 redis-cli ping，数据卷 redisdata
-- **Backend**: 构建自 backend/Dockerfile，依赖 postgres/redis 健康后启动，挂载项目目录供 Agent 扫描
-- **Frontend**: 构建自 frontend/Dockerfile，依赖 backend 启动，端口 3000
-
-### 数据卷
-- pgdata, redisdata, spec-data, worktree-data, claude-data
+- **核心产物**：`docker-compose.yml`（主编排）+ `docker-compose.dev.yml`（开发覆写，仅 postgres/redis）+ `.env`/`.env.example`（环境变量模板）。
+- **服务定义**（主 compose）：
+  - `postgres`（postgres:16-alpine，healthcheck pg_isready，卷 pgdata）
+  - `redis`（redis:7-alpine，appendonly 持久化，healthcheck redis-cli ping，卷 redisdata）
+  - `backend`（build 自 backend/Dockerfile，env_file 加载，depends_on postgres/redis，暴露端口，自定义 command）
+  - `frontend`（build 自 frontend/Dockerfile，depends_on backend，env_file，端口 3000）
+  - 命名卷：pgdata、redisdata、worktree-data、claude-data。
+- **健康检查**：postgres/redis 用原生探测；backend/frontend 容器自带 healthcheck（frontend 用 node20 内置 fetch 零依赖）。
 
 ## 关键逻辑
 
-```
-启动流程:
-1. postgres/redis 并发启动
-2. 等待 healthcheck 通过 (pg_isready / redis-cli ping)
-3. backend 构建 -> 依赖 db 健康启动 -> 执行 alembic upgrade head -> 启动 uvicorn
-4. frontend 构建 -> 依赖 backend 启动 -> 启动 Next.js
-
-开发模式:
-1. 仅启动 postgres/redis (暴露 5432/6379 到宿主机)
-2. Backend 在宿主机运行 (make backend-run) 连接本地 5432/6379
-3. Frontend 在宿主机运行 (make frontend-run) 连接本地 8000
-
-环境变量注入:
-- .env 通过 env_file 注入到 backend/frontend
-- 容器内 DATABASE_URL/REDIS_URL 覆盖宿主机连接串
-```
+- **依赖拓扑**：backend 等 postgres/redis 健康；frontend 等 backend；数据用命名卷持久化，重建容器不丢数据（项目允许清空）。
+- **环境分离**：`.env.example` 是变量清单（DB/Redis 连接、密钥、daemon 相关、端口映射、HOST_PROJECTS_DIR/HOST_PATH_PREFIX 等），`.env` 为实际值；dev compose 覆写开发态配置。
+- **数据卷语义**：worktree-data 给 worktree 隔离用，claude-data 给 Agent SDK 运行时数据用。
+- **挂载模型**：backend 容器挂载宿主项目目录供 Agent 扫描，路径需与 HOST_PROJECTS_DIR/HOST_PATH_PREFIX 对齐。
 
 ## 注意事项
 
-1. **路径挂载**: `HOST_PROJECTS_DIR` 和 `HOST_PATH_PREFIX` 必须匹配宿主路径，否则 Agent 扫描失败
-2. **健康检查超时**: 默认 5s interval / 3s timeout / 20 retries，适应冷启动慢的网络环境
-3. **数据持久化**: 删除容器后数据仍保留在卷中，执行 `docker compose down -v` 才会清空
-4. **端口冲突**: 默认端口 (3000/5432/6379/8000) 可能与宿主机冲突，需通过 .env 调整
-5. **密钥管理**: .env.example 中的占位密钥不可用于生产，SECRET_KEY 和 SILLYSPEC_MASTER_KEY 必须替换
-6. **前端 API 地址**: `NEXT_PUBLIC_API_BASE_URL` 决定浏览器向哪里发请求，`INTERNAL_API_BASE_URL` 决定容器内 SSR 向哪里发请求
-
-## 变更索引
-
-- ql-20260611-001-c7a3 | Quick Chat 多轮对话：deploy 配置更新（env example、compose args）
-
-### 同步检查模块
-- 修改端口/环境变量时需检查: `backend/app/main.py` (CORS), `frontend/next.config.js` (rewrites)
-- 修改挂载路径时需检查: `backend/app/modules/agent/scanner.py` (路径重写逻辑)
+- backend 容器跑镜像内代码、不挂载源码、不热重载，改后端源码必须 rebuild backend 镜像再验新端点。
+- frontend 容器 healthcheck 曾因 busybox wget 走 Docker 注入 http_proxy 误报 unhealthy（忽略 no_proxy），现已改 node fetch，服务正常即应判 healthy。
+- 局域网访问需在 compose 端口映射与防火墙上放开，并配置 workspace 指向项目路径。
+- `.env.example` 占位密钥不可直接用于生产，SECRET_KEY/SILLYSPEC_MASTER_KEY 必须替换。
 
 ## 人工备注
-
 <!-- MANUAL_NOTES_START -->
-
 <!-- MANUAL_NOTES_END -->

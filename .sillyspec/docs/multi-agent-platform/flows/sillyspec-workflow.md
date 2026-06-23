@@ -1,108 +1,65 @@
 ---
 author: qinyi
-created_at: 2026-06-04T10:00:00+08:00
+created_at: 2026-06-24T01:50:01
+source_commit: ba87eec
 ---
 
 # SillySpec 变更工作流
 
 ## 目标
-文档驱动的完整变更生命周期，从需求到归档的全流程管理。
+文档驱动的完整变更生命周期：草稿 → SillySpec 主线（scan/brainstorm/propose/plan/execute/verify）→ 归档。
 
 ## 参与模块
-- **backend/change**：变更状态机、阶段转换、文档管理
-- **backend/workflow**：状态转换验证、审计日志
-- **backend/agent**：各阶段 Agent 自动调度
-- **backend/change_writer**：文档写入操作
-- **frontend**：变更详情、阶段按钮、进度展示
-- **sillyspec**：CLI 触发、进度同步、知识库沉淀
+- **backend/change**：状态机（`StageEnum` + `TRANSITION` map，`app/modules/change/model.py`）
+- **backend/workflow**：转换权限（agent/reviewer/system）、`spec_guardian` 文档校验、审计
+- **backend/agent**：阶段转换后自动触发 AgentRun
+- **backend/change_writer / task**：文档写入、Wave/Task 追踪
+- **backend/knowledge / archive**：归档时知识库沉淀
+- **sillyspec (CLI)**：`brainstorm/plan/execute/verify/quick/archive` 触发与进度同步
+- **frontend**：变更详情、阶段按钮、`useSillySpec` 流程驱动
 
 ## 流程摘要
-
 ```text
-┌──────────────┐
-│    DRAFT      │ ← Hub 业务阶段（手动创建）
-│   (草稿)      │
-└──────┬───────┘
-       │
-       ├─→ PROPOSE ─┐
-       │  (提案)     │
-       │            │
-       └─→ QUICK ───┤  ← SillySpec 入口
-                   (快速通道)    │
-       ┌─→ SCAN ────┘   (扫描)
-       │  (扫描)
-       ▼
-┌──────────────┐
-│  BRAINSTORM  │
-│  (头脑风暴)  │
-└──────┬───────┘
-       │ Agent 生成 proposal.md
-       ▼
-┌──────────────┐
-│   PROPOSE    │
-│   (提案)      │
-└──────┬───────┘
-       │ 人工审核 / Agent 审核通过
-       ▼
-┌──────────────┐
-│    PLAN      │
-│   (计划)      │
-└──────┬───────┘
-       │ Agent 生成 plan.md (Wave + Task)
-       ▼
-┌──────────────┐
-│   EXECUTE    │
-│   (执行)      │
-└──────┬───────┘
-       │ Agent 按 plan 逐步实现
-       │ (可能多次 progress updates)
-       ▼
-┌──────────────┐
-│   VERIFY     │
-│   (验证)      │
-└──────┬───────┘
-       │ 对照 design/plan 验收
-       ▼
-┌──────────────┐      ┌─────────────────┐
-│   ACCEPTED   │ ←─── │  REWORK_REQUIRED │
-│   (已接受)    │      │   (需返工)        │
-└──────┬───────┘      └────────┬─────────┘
-       │                        │ (返工后回到 EXECUTE)
-       ▼
-┌──────────────┐
-│   ARCHIVE    │
-│   (归档)      │
-└──────┬───────┘
-       │ 模块影响分析 + 知识库沉淀
-       ▼
-    ┌─────────┐
-    │  DONE   │
-    └─────────┘
+[backend/change]          [sillyspec CLI]
+    DRAFT ────────────  propose / scan / brainstorm 入口
+      │ transition: DRAFT→{SCAN,BRAINSTORM}  [agent]
+      ▼
+    SCAN ──agent──► BRAINSTORM ──agent──► PROPOSE
+                                         │ reviewer/agent 通过→PLAN
+                                         │ reviewer 否决→BRAINSTORM
+                                         ▼
+    PLAN ──reviewer/agent──► EXECUTE ──agent──► VERIFY
+      ▲ (reviewer 回退)                       │ agent 通过→ARCHIVE
+      │                                       │ reviewer 否决→PROPOSE (doc_mismatch)
+      │                                       │ agent 阻塞→BLOCKED
+      └──────── BLOCKED ◄─────────────────────┘
+                       │ reviewer 解封→{PROPOSE,PLAN,EXECUTE}
+    ARCHIVE ──system──► ARCHIVED (终态)
+
+  QUICK 旁路入口: ─► VERIFY ─► {QUICK,BLOCKED} (SillySpec 快速通道)
 ```
 
 ## 各阶段产物
-
-| 阶段 | 产物文档 | Agent 角色 |
-|------|----------|------------|
-| SCAN | ARCHITECTURE.md, CONVENTIONS.md, _module-map.yaml | 扫描项目 |
-| BRAINSTORM | proposal.md（初始） | 分析需求、提出方案 |
-| PROPOSE | proposal.md（最终） | 审核补充方案 |
-| PLAN | plan.md（Wave + Task 列表） | 拆解任务 |
-| EXECUTE | 代码实现、进度更新 | 执行编码 |
-| VERIFY | 验收报告 | 对照文档检查 |
-| ARCHIVE | module-impact.md, 知识库条目 | 影响分析、沉淀知识 |
+| 阶段 | 产物 | 转换触发角色 |
+|------|------|--------------|
+| SCAN | ARCHITECTURE.md / CONVENTIONS.md / module-map | agent |
+| BRAINSTORM | proposal.md（初稿） | agent |
+| PROPOSE | proposal.md（终稿） | reviewer/agent |
+| PLAN | plan.md（Wave+Task） | reviewer/agent |
+| EXECUTE | 代码实现、task 进度 | agent |
+| VERIFY | 验收报告 | reviewer/agent |
+| ARCHIVE | module-impact、知识库条目 | system |
 
 ## 失败回滚
-
 | 失败点 | 处理 |
 |--------|------|
-| PROPOSE 审核不通过 | → BRAINSTORM（补充方案） |
-| PLAN 审核不通过 | → PROPOSE（方案调整） |
-| VERIFY 验收失败 | → REWORK_REQUIRED → EXECUTE（返工） |
-| Agent 执行崩溃 | 手动介入，可继续当前阶段或回退 |
+| 文档不完整 | workflow.spec_guardian 拦截转换 |
+| propose/plan 审核不通过 | reviewer 回退（PROPOSE→BRAINSTORM / PLAN→PROPOSE） |
+| verify 验收失败 | VERIFY → BLOCKED，reviewer 决定回退阶段 |
+| doc_mismatch | VERIFY → PROPOSE（人工测试回退） |
+| Agent 崩溃 | AgentRun failed，手动重新调度 |
 
 ## 关键术语
-- **Change**：变更实体，包含阶段、文档、任务
-- **Stage**：工作流阶段（SillySpec 8 主阶段 + Hub 3 扩展）
-- **Worktree**：Git 工作树，隔离式分支开发
-- **AgentDispatch**：阶段转换后自动触发 Agent 执行
+- **StageEnum**：DRAFT/SCAN/BRAINSTORM/PROPOSE/PLAN/EXECUTE/VERIFY/ARCHIVE/QUICK/BLOCKED/ARCHIVED
+- **TRANSITION map**：阶段→{目标阶段:[允许角色]} 的转换表
+- **spec_guardian**：转换前校验目标阶段所需文档是否齐备

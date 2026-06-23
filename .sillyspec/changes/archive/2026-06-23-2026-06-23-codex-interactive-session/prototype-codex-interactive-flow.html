@@ -1,0 +1,196 @@
+<!--
+author: qinyi
+created_at: 2026-06-23 21:28:13
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Codex Interactive Session Flow</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --line: #d8dee9;
+      --text: #18202f;
+      --muted: #647086;
+      --accent: #2563eb;
+      --codex: #16a34a;
+      --claude: #7c3aed;
+      --warn: #d97706;
+      --danger: #dc2626;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px 24px 36px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+    .sub { margin: 0 0 24px; color: var(--muted); }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 16px;
+    }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 17px;
+      letter-spacing: 0;
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(130px, 1fr));
+      gap: 10px;
+      align-items: stretch;
+    }
+    .node {
+      min-height: 96px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      background: #fbfcff;
+    }
+    .node strong { display: block; margin-bottom: 6px; }
+    .node small { color: var(--muted); }
+    .arrow {
+      text-align: center;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      margin: 8px 0;
+    }
+    .lane {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 10px;
+      padding: 10px 0;
+      border-top: 1px solid var(--line);
+    }
+    .lane:first-of-type { border-top: 0; padding-top: 0; }
+    .label {
+      font-weight: 700;
+      color: var(--muted);
+    }
+    .timeline {
+      display: grid;
+      gap: 8px;
+    }
+    .step {
+      border-left: 3px solid var(--accent);
+      padding: 8px 10px;
+      background: #f4f7ff;
+      border-radius: 6px;
+    }
+    .step.codex { border-left-color: var(--codex); background: #f0fdf4; }
+    .step.claude { border-left-color: var(--claude); background: #f5f3ff; }
+    .step.warn { border-left-color: var(--warn); background: #fff7ed; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      background: #eef2f7;
+      padding: 1px 4px;
+      border-radius: 4px;
+    }
+    .states {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+    }
+    .state {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      min-height: 76px;
+      background: #fff;
+    }
+    .state b { display: block; margin-bottom: 4px; }
+    .state.active { border-color: var(--codex); }
+    .state.failed { border-color: var(--danger); }
+    ul { margin: 8px 0 0 18px; padding: 0; }
+    .full { grid-column: 1 / -1; }
+    @media (max-width: 900px) {
+      .grid, .flow, .states { grid-template-columns: 1fr; }
+      .lane { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Codex Interactive Session Flow</h1>
+    <p class="sub">目标：让 /runtimes 的 Codex 会话复用 AgentSession 生命周期，达到 Claude Code 同等级的多轮、打断、结束、历史与恢复能力。</p>
+
+    <div class="grid">
+      <section class="full">
+        <h2>端到端链路</h2>
+        <div class="flow">
+          <div class="node"><strong>Frontend</strong><small>RuntimeSessionDialog / InteractiveSessionPanel</small></div>
+          <div class="node"><strong>Backend</strong><small>AgentSession + AgentRun + interactive lease</small></div>
+          <div class="node"><strong>Daemon</strong><small>SessionManager provider driver</small></div>
+          <div class="node"><strong>Codex Driver</strong><small>app-server stdio JSON-RPC v2</small></div>
+          <div class="node"><strong>Codex CLI</strong><small>thread + turn runtime</small></div>
+        </div>
+        <div class="arrow">create / inject / interrupt / end / reopen / recover 走同一条 session 控制链</div>
+      </section>
+
+      <section>
+        <h2>Provider Driver 分层</h2>
+        <div class="lane">
+          <div class="label">Claude</div>
+          <div class="timeline">
+            <div class="step claude"><code>ClaudeSdkDriver</code> 保持现有 SDK query / interrupt / resume 行为。</div>
+            <div class="step claude">现有消息映射、AskUserQuestion、partial streaming 不改。</div>
+          </div>
+        </div>
+        <div class="lane">
+          <div class="label">Codex</div>
+          <div class="timeline">
+            <div class="step codex"><code>CodexAppServerDriver</code> 长驻 app-server 进程。</div>
+            <div class="step codex"><code>thread/start</code> 建 thread，<code>turn/start</code> 发首轮和后续轮。</div>
+            <div class="step codex"><code>turn/interrupt</code> 打断当前 turn，<code>thread/resume</code> 恢复历史 thread。</div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>会话状态</h2>
+        <div class="states">
+          <div class="state"><b>pending</b>后端已建 session/run/lease</div>
+          <div class="state active"><b>active</b>可接收下一轮 inject</div>
+          <div class="state active"><b>running</b>当前 turn 执行中，可 interrupt</div>
+          <div class="state"><b>reconnecting</b>daemon 恢复 / reopen 中</div>
+          <div class="state failed"><b>ended/failed</b>终态，可历史回看；支持 reopen</div>
+        </div>
+      </section>
+
+      <section class="full">
+        <h2>关键验收</h2>
+        <ul>
+          <li>Codex runtime 会话按钮进入 interactive session 面板，不再走 quick-chat。</li>
+          <li>同一 Codex AgentSession 可连续 inject 多轮，历史按 run_id 分 turn 展示。</li>
+          <li>运行中可点击打断，当前 turn 收敛后 session 仍可继续。</li>
+          <li>结束 session 后可回看历史；reopen 使用 Codex threadId 恢复。</li>
+          <li>Claude Code 现有 create/inject/interrupt/end/reopen/recovery 测试保持通过。</li>
+        </ul>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

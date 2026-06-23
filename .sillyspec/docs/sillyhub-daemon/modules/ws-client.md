@@ -2,58 +2,47 @@
 schema_version: 1
 doc_type: module-card
 module_id: ws-client
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-14T10:40:45+08:00
+created_at: 2026-06-24T01:10:50
 ---
-
 # ws-client
 
 ## 定位
-WebSocket 客户端，从 Python 版 `daemon.py` 内联的 WS 循环拆出的独立模块。基于 `ws` 库建立与 SillyHub server 的长连接，处理注册 → 心跳 → task_available 消息分发 → 断线 5 秒自动重连。WS 不可用时降级为 HTTP 轮询兜底。daemon 持有一个 WsClient 实例并通过回调消费消息。
+daemon ↔ backend 的 WebSocket 传输层（`src/ws-client.ts`）。封装连接生命周期、心跳、自动重连、消息收发，并内嵌 RPC 分发（task-05 / D-005@v1）。只负责收发与分发，不内嵌 fs 业务逻辑（listDir 等业务层由 daemon 包装成 RpcHandler 注册进来）。
 
 ## 契约摘要
-- `WsState` — 连接状态字面量联合：`connecting | connected | reconnecting | closed`
-- `WsClientCallbacks` — 回调接口
-  - `onTaskAvailable?(payload: LeasePayload): void`
-  - `onHeartbeatAck?(): void`
-  - `onClose?(code, reason): void`
-  - `onError?(err: Error): void`
-  - `onStateChange?(state: WsState): void`
-- `WsClientOptions` — 构造参数：`url`（http(s) 会自动转 ws(s)）、`runtimeId`、`callbacks`、`serverUrl`（HTTP 轮询兜底用）
-- `WsClient` — 客户端类
-  - `start(): Promise<void>` — 建立连接并启动心跳与重连守卫
-  - `stop(): Promise<void>` — 主动关闭并停止重连
-  - `send(type: string, payload?: unknown): void` — 发送消息（注册 / heartbeat_ack / lease_*）
-- 重连常量
-  - `RECONNECT_INTERVAL_MS = 5000` — 初始重连间隔
-  - `RECONNECT_MAX_INTERVAL_MS` — 退避上限
-  - `CONNECT_TIMEOUT_MS = 10000` — 建连超时
-  - `CLOSE_TIMEOUT_MS = 5000` — 关闭超时
+- 常量：`RECONNECT_INTERVAL_MS=5000`、`RECONNECT_MAX_INTERVAL_MS=5000`、`CONNECT_TIMEOUT_MS=10000`、`CLOSE_TIMEOUT_MS=5000`。
+- `WsClientCallbacks`（onMessage/onConnected/onDisconnected/onError）。
+- `WsClientOptions`（runtimeId/url/token 等 + callbacks）。
+- `RpcHandler = (params) => unknown | Promise<unknown>`。
+- `RpcError(code, message)` ——带稳定 code 的 Error（forbidden/not_found/method_not_found/internal）。
+- `WsState` 枚举（Idle/Connecting/Connected/Reconnecting）。
+- `WsClient`：`connect()`/`close()`/`send(msg): boolean`/`sendHeartbeatAck()`/`registerRpcHandler(method, handler)`/`state`/`isConnected`。
 
 ## 关键逻辑
 ```
-start()
-  ws = new WebSocket(deriveWsUrl(serverUrl))  // http→ws, https→wss
-  send(MSG.register, { runtimeId, agents })
-  on("open") → state=connected, 启动心跳定时器
-  on("message") → parse →
-    MSG.task_available → callbacks.onTaskAvailable(payload)
-    MSG.heartbeat       → 回 heartbeat_ack
-  on("close"/"error") → state=reconnecting → 5s 后重连
-                         WS 持续失败 → 切换 HTTP 轮询兜底
+connect: 幂等（Connecting/Connected 直接返回）；_running=true；建 socket；
+  开 CONNECT_TIMEOUT 握手定时器；绑定 open/message/close/error
+close: _running=false；清定时器；ws.close(1000)；CLOSE_TIMEOUT 后强制 terminate
+send: readyState!==OPEN → 返回 false 丢弃（不缓冲不抛）；否则 JSON.stringify 发出
+_handleMessage: JSON.parse → msg.type 非字符串 warn 不断连；
+  type===RPC → _dispatchRpc（独立分支，不污染 lease 分发）；否则 onMessage
+_dispatchRpc: 取 rpc_id/method/params；
+  rpc_id 缺失 → 丢弃 warn；method 未注册 → 回 method_not_found；
+  handler 抛 RpcError → 原码回填；抛普通 Error → internal；任何异常内部消化不冒泡
+重连: close 后若 _running=true → 定时 RECONNECT_INTERVAL_MS 重连
 ```
 
 ## 注意事项
-- URL 推导：`serverUrl` 的 `http://` → `ws://`、`https://` → `wss://`，路径拼接 `WS_PATH`
-- 连接超时 10 秒（`CONNECT_TIMEOUT_MS`），关闭超时 5 秒（`CLOSE_TIMEOUT_MS`）
-- 重连初始间隔 5 秒（`RECONNECT_INTERVAL_MS`），带退避但不超过 `RECONNECT_MAX_INTERVAL_MS`
-- 消息类型与 server 端 `backend/app/modules/daemon/protocol.py` 必须一致（G-02 不变）
-- 不在本模块处理 lease claim/start/complete——这些是 daemon 收到 task_available 后通过 REST 走 HubClient 完成
-- 依赖 protocol 模块（MSG 常量）
-- 被 daemon 模块使用
+- **RPC 与 lease 分发隔离**：daemon:rpc 走 `_dispatchRpc` 独立分支，不进 onMessage（不污染现有 lease 消息分发）。
+- `rpc_id` 是回填唯一依据，缺失无法回发 → 丢弃（backend 那侧 future 超时 → 504）。
+- send 未连接直接丢弃不缓冲（对齐 Python 无缓冲语义）；非法 JSON 仅 warn 不断连。
+- 同名 RPC method 重复注册：后者覆盖前者 + 经 onError 发 warn（便于测试断言）。
+- `_running` 语义：已 start 未 stop；false 时禁止重连（对齐 Python `if self._running`）。
+- URL 构造 1:1 对齐 Python _build_ws_url：http→ws、https→wss、其它兜底补 ws://。
+- 业务层（file-rpc 的 listDir）由 daemon 在 `_wsLoop` 构造 WsClient 后调 registerRpcHandler 注入，ws-client 自身不含 fs 逻辑。
 
 ## 人工备注
-
 <!-- MANUAL_NOTES_START -->
-
 <!-- MANUAL_NOTES_END -->

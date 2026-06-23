@@ -1,96 +1,77 @@
 ---
-source_commit: fcbf3fa7
-updated_at: 2026-06-22T17:56:21Z
-generator: sillyspec-scan
+source_commit: ba87eec
+updated_at: 2026-06-23T16:35:25Z
+created_at: 2026-06-24T00:35:25
 author: qinyi
-created_at: 2026-06-23 01:56:21
+generator: sillyspec-scan
 ---
 
-# multi-agent-platform — 外部集成（根 monorepo）
+# multi-agent-platform — 组件间集成（根 monorepo，组件边界视角）
 
-> 本文档由 `sillyspec-scan` 在 `fcbf3fa7` 处扫描根 monorepo 生成。
-> 按「类型」分组列出 monorepo 依赖的外部系统、SDK 与运行时，并标注它在哪个子项目被使用。
-> 信息来源：`deploy/docker-compose.yml`、`deploy/docker-compose.dev.yml`、
-> `backend/pyproject.toml`、`frontend/package.json`、`sillyhub-daemon/package.json`，
-> 以及对源码的 `grep` 结果。
+> 由 `sillyspec-scan` 在 `ba87eec` 处扫描根 monorepo 生成。
+> 与 SillyHub 功能视角互补：本文聚焦**组件边界**上的集成点、协议、用途与关键文件。
+> 来源：`deploy/docker-compose*.yml`、`backend/app/main.py`、各 `router.py`、daemon `ws-client.ts`/`hub-client.ts`、`sillyhub-daemon/package.json`，以及对源码的 grep 结果。
 
-## 1. 数据库：PostgreSQL
+## 1. frontend ↔ backend（REST + SSE）
 
-- **角色**：主数据持久化（用户、会话、Agent 运行记录、SillySpec 元数据等）。
-- **版本**：`postgres:16-alpine`（见 `deploy/docker-compose.yml`）。
-- **服务名 / 端口**：`postgres` 服务，容器内 `5432`，宿主机端口默认 `${POSTGRES_PORT:-5432}`。
-- **连接串**（注入到 backend 容器）：
-  `postgresql+asyncpg://${POSTGRES_USER:-platform}:${POSTGRES_PASSWORD:-platform}@postgres:5432/${POSTGRES_DB:-platform}`。
-- **客户端依赖**（backend）：`sqlmodel>=0.0.22`、`sqlalchemy[asyncio]>=2.0`、`asyncpg>=0.29`、`alembic>=1.13`。
-- **健康检查**：`pg_isready -U <user> -d <db>`。
-- **数据卷**：`pgdata`（命名卷）。
+- **协议**：HTTP REST（前端通过 Next.js `/api` 代理或 `NEXT_PUBLIC_API_BASE_URL` 直连）+ SSE 实时流。
+- **集成点**：
+  - 前端统一封装 `apiFetch`（`frontend/src/lib/api.ts`），401 自动 refresh；401/403/404/400 透传为 `ApiError`。
+  - backend 所有路由统一挂 `/api` 前缀（`backend/app/main.py` 聚合 ~18 个 `include_router(..., prefix="/api")`）：auth / workspace(+members) / change / scan_docs / task / git_identity / agent / daemon / worktree / lease / git_gateway / change_writer / workflow / incident / health 等。
+- **典型调用方**（grep 命中）：
+  - `frontend/src/lib/auth.ts` → `/api/auth/login`、`/api/auth/refresh`、`/api/auth/me`、`/api/auth/logout`。
+  - `frontend/src/lib/changes.ts` → `/api/workspaces/{wid}/changes`、`/changes/{cid}/documents[/{docType}]`、`/changes/{cid}/reparse`。
+  - `frontend/src/lib/workspace-members.ts` → `/api/workspaces/{wid}/members/*`（6 个函数 1:1 端点）。
+- **SSE 实时流**：backend `StreamingResponse`（`text/event-stream`）见 `backend/app/modules/ppm/task/router.py`；daemon run 日志聚合发布到 Redis channel `agent_run:{run_id}` / `agent_session:{session_id}`，由 SSE 转发前端（`backend/app/modules/daemon/run_sync/service.py`：`{channel, content, timestamp, log_id}` 行级发布，turn_completed / onTokens 终端事件）。
+- **前端消费组件**：`frontend/src/components/daemon/`（`runtime-session-dialog.tsx`、`interactive-session-panel.tsx`）、`agent-log/`、`agent-run-panel.tsx`。
 
-## 2. 缓存 / 消息：Redis
+## 2. daemon ↔ backend（WebSocket 实时通道 + REST 注册/心跳/lease）
 
-- **角色**：缓存与进程间消息传递；后端用于 Pub/Sub 与 SSE 事件桥接。
-- **版本**：`redis:7-alpine`（见 `deploy/docker-compose.yml` / `dev.yml`）。
-- **服务名 / 端口**：`redis` 服务，dev 编排暴露宿主 `${REDIS_PORT:-6379}`，连接串注入为 `redis://redis:6379/0`。
-- **客户端依赖**（backend）：`redis>=5.0`（见 `backend/pyproject.toml`）。
-- **代码引用**：`backend/app/core/redis.py`（客户端封装），以及
-  `backend/app/modules/daemon/session/service.py`、`agent/service.py`、`spec_workspace/bootstrap.py`、`health/router.py` 等多处使用 redis / pub-sub / `EventSourceResponse`（grep 命中 26 文件）。
+- **WebSocket 通道**（daemon → backend）：
+  - backend 端点：`backend/app/modules/daemon/router.py` 中 `@router.websocket("/ws")`（路由前缀 `/api/daemon`，即 `/api/daemon/ws`），按 `runtime_id` 接入 `DaemonWsHub`（`hub.connect(rid, websocket)`），receive_json 驱动；无效 runtime 关闭码 4001。
+  - daemon 侧：`sillyhub-daemon/src/ws-client.ts`（`import WebSocket from 'ws'`），内部把 http(s) URL 转 `ws://`/`wss://`，与 backend `_build_ws_url` 1:1；交互式会话远程人审（manualApproval）依赖该通道回传 resolver 信号（`interactive/session-manager.ts`）。
+- **REST 注册/心跳**（daemon → backend，启动时与兜底）：
+  - `/api/daemon/register`（`router.py:136`）：daemon 启动时在三个循环（heartbeat/poll/ws）前注册 runtime。
+  - `/api/daemon/heartbeat`（`router.py:168`）：HTTP 心跳，作为 WebSocket 不可用时的兜底。
+  - lease 相关：`backend/app/modules/daemon/lease_service.py` 维护租约与取消信号（注释表明 WS Hub 取消信号在 Wave 2 接入）。
+- **daemon 侧心跳循环**：
+  - `config.ts`：`heartbeat_interval=15`、`lease_heartbeat_interval=5`。
+  - `task-runner.ts`：在 `runLease` 内并发跑 lease heartbeat 循环（`_runLeaseHeartbeatLoop`，检测 backend cancel 信号 + 续期），`finally` 停止循环避免泄漏。
+- **backend 内部桥接**：`daemon/session/service.py` 用 Redis `publish` 把会话事件转发给 SSE 客户端；`health/router.py` 探测 redis ping。
 
-## 3. LLM API：Claude（Anthropic）
+## 3. backend ↔ 存储（PostgreSQL + Redis）
 
-- **角色**：实际的大模型推理与 Agent 执行后端。
-- **接入方式**：
-  - **直接调用**：backend 不直接 import Anthropic / OpenAI SDK；仅通过环境变量 `ANTHROPIC_*` 传递配置（`backend/app/modules/agent/delegation.py` 中 `Build from ANTHROPIC_* env`）。
-  - **间接调用（主路径）**：由 `sillyhub-daemon` 通过 `@anthropic-ai/claude-agent-sdk`（见下节）驱动 Claude 进程，backend 通过 daemon 协议与之交互。
-- **凭证流**：`sillyhub-daemon/src/credential.ts` / `spawn-env.ts` 负责把宿主机凭证注入子进程环境；Docker 部署下由 `deploy/.env` 注入 backend 容器，避免宿主环境变量覆盖。
+- **PostgreSQL**：
+  - 镜像 `postgres:16-alpine`（`deploy/docker-compose.yml`），命名卷 `pgdata`，健康检查 `pg_isready`。
+  - 连接串（注入 backend 容器）：`postgresql+asyncpg://${POSTGRES_USER:-platform}:${POSTGRES_PASSWORD:-platform}@postgres:5432/${POSTGRES_DB:-platform}`。
+  - 客户端依赖：`sqlmodel>=0.0.22`、`sqlalchemy[asyncio]>=2.0`、`asyncpg>=0.29`、`alembic>=1.13`（`backend/pyproject.toml`）；容器启动先 `alembic upgrade head` 再 `uvicorn`。
+- **Redis**：
+  - 镜像 `redis:7-alpine`（`--appendonly yes`），命名卷 `redisdata`，连接 `redis://redis:6379/0`。
+  - 客户端依赖：`redis>=5.0`；封装见 `backend/app/core/redis.py`（`get_redis`）。
+  - 用途：缓存 + Pub/Sub（daemon session/run 事件桥接 SSE）+ 健康检查。grep 命中 `health/router.py`、`daemon/session/service.py`、`daemon/run_sync/service.py` 等多处。
 
-## 4. 本地进程编排：Claude Agent SDK
+## 4. daemon ↔ Claude Agent SDK（本地子进程编排）
 
-- **承载子项目**：`sillyhub-daemon`（Node ≥20 ESM 单进程）。
-- **核心依赖**：`@anthropic-ai/claude-agent-sdk@0.3.181`（见 `sillyhub-daemon/package.json`，并对 win32/linux/darwin 多平台二进制做了 pnpm overrides 统一指向主包）。
-- **使用点**（grep 命中）：
-  - `src/interactive/claude-sdk-driver.ts`：`import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk'`（驱动交互式会话）。
-  - `src/interactive/session-manager.ts`、`src/interactive/input-queue.ts`、`src/interactive/types.ts`：导入 `Query` / `SDKMessage` / `SDKResultMessage` / `SDKUserMessage` 等类型。
-  - `src/daemon.ts`：导入 `SDKMessage` / `SDKResultMessage` 类型做消息路由。
-- **本地进程 / spawn**：`grep spawn|execa|child_process|dockerode` 命中 21 文件，关键实现：
-  - `src/spawn-env.ts`、`src/cmd-shim.ts`：子进程环境与命令封装。
-  - `src/agent-detector.ts`、`src/cursor-version.ts`：宿主环境探测。
-  - `src/terminal-launcher.ts`、`src/terminal-observer.ts`：终端观察/启动。
-  - `src/workspace.ts`：工作目录解析与隔离。
-  - `src/adapters/*.ts`：多种输出协议适配（stream-json / json-rpc / jsonl / ndjson）。
+- **承载**：`sillyhub-daemon`（Node ≥20 ESM 单进程）。
+- **依赖**：`@anthropic-ai/claude-agent-sdk@0.3.181`（`sillyhub-daemon/package.json`，pnpm overrides 对 win32/linux/darwin 多平台二进制统一指向主包）。
+- **使用点**（type/value import，grep 命中）：
+  - `src/interactive/claude-sdk-driver.ts`：`import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk'`，驱动交互式会话；启动前解析 wrapper 到底层 `@anthropic-ai/claude-code/bin/claude(.exe)`。
+  - `src/interactive/session-manager.ts`、`src/interactive/types.ts`：复用 `Query` / `SDKMessage` / `SDKResultMessage` / `SDKUserMessage` 类型。
+- **凭证 / 子进程环境**：`src/credential.ts`、`src/spawn-env.ts` 把宿主凭证注入子进程；Docker 部署下由 `deploy/.env` 注入 backend 容器。
+- **协议适配**：`src/adapters/`（stream-json / json-rpc / jsonl / ndjson）统一 SDK 输出协议。
 
-## 5. 文件系统：workspace / worktree / 隔离
+## 5. deploy docker 编排（组件拓扑）
 
-- **monorepo 工作区**：根 `package.json` 聚合 `backend` / `frontend` / `sillyhub-daemon` 三个子项目；各子项目各自 `pnpm@9.6.0`。
-- **SillySpec 工作区**：`.sillyspec/`（changes / docs / knowledge / projects / quicklog / workflows / `sillyspec.db`）。
-- **spec-workspaces 隔离**（Docker 部署）：backend 容器通过 bind mount 共享 `SPEC_DATA_HOST_DIR`（默认 `C:/data/spec-workspaces`）→ `/data/spec-workspaces`；并设 `SPEC_DATA_ROOT=/data/spec-workspaces`，以便宿主 daemon 与容器后端共享 spec 文档。
-- **worktree 数据**：命名卷 `worktree-data` → `/data/sillyspec-workspaces`，设 `WORKTREE_BASE_DIR=/data/sillyspec-workspaces`。
-- **宿主项目挂载**：`HOST_PROJECTS_DIR`（默认 `C:/Users/qinyi/IdeaProjects`）→ `/host-projects`，并通过 `HOST_PATH_PREFIX` / `CONTAINER_PATH_PREFIX` 做路径重写，使扫描器能在容器内读取宿主 `.sillyspec` 树。
-- **scripts**：`scripts/migrate_scan_docs.py` 处理 scan 文档迁移（含 workspace 路径处理）。
-- **spikes 中的隔离验证**：`spikes/01-git-isolation/`（run.sh / run.ps1）、`spikes/02-workspace-scan/`（scan.py + fixture）、`spikes/04-delegate-task/`、`spikes/05-mission-e2e/` 均涉及 worktree / workspace / isolation 概念。
+- **全栈**（`deploy/docker-compose.yml`，name `multi-agent-platform`）：
+  - `postgres`(5432) ← `backend`(8000，依赖 pg+redis healthy) ← `frontend`(3000，依赖 backend)。
+  - backend 构建参数注入 `CLAUDE_CODE_VERSION`(默认 2.1.158) / `SILLYSPEC_VERSION`(默认 3.19.1)；frontend 构建期注入 `INTERNAL_API_BASE_URL`(默认 `http://backend:8000`) + `NEXT_PUBLIC_API_BASE_URL`(默认 `http://localhost:8000`)。
+  - 卷：`pgdata`、`redisdata`、`worktree-data`(`/data/sillyspec-workspaces`)、`claude-data`(`/app/.claude`) + bind mount `HOST_PROJECTS_DIR`→`/host-projects`、`SPEC_DATA_HOST_DIR`→`/data/spec-workspaces`（宿主 daemon 与容器 backend 共享 spec 文档物理目录）。
+- **dev**（`deploy/docker-compose.dev.yml`）：仅 pg + redis，backend/frontend 宿主热重载。
+- **daemon 不入容器**：始终宿主机本地运行，通过 WebSocket/HTTP 连 backend（backend 端口对宿主开放 `${BACKEND_PORT:-8000}`）。
 
-## 6. Docker / 容器编排
+## 6. 跨组件文件系统共享（spec workspace / worktree）
 
-### 6.1 全栈 `deploy/docker-compose.yml`（name: `multi-agent-platform`）
-| 服务 | 镜像 / 来源 | 端口 | 依赖 | 说明 |
-| --- | --- | --- | --- | --- |
-| `postgres` | `postgres:16-alpine` | `5432` | — | 见 §1 |
-| `redis` | `redis:7-alpine` | （未对外，仅容器内） | — | 见 §2，appendonly 持久化 |
-| `backend` | `build context=../backend`（Dockerfile） | `8000` | `postgres`(healthy) / `redis`(healthy) | 启动命令 `alembic upgrade head && uvicorn app.main:app`；构建参数 `CLAUDE_CODE_VERSION` / `SILLYSPEC_VERSION` |
-| `frontend` | `build context=../frontend`（Dockerfile） | `3000` | `backend` | 构建期注入 `INTERNAL_API_BASE_URL`（默认 `http://backend:8000`）/ `NEXT_PUBLIC_API_BASE_URL`（默认 `http://localhost:8000`） |
-
-命名卷：`pgdata`、`redisdata`、`worktree-data`、`claude-data`；外加 bind mount：宿主项目目录、`SPEC_DATA_HOST_DIR`。
-
-### 6.2 开发 `deploy/docker-compose.dev.yml`（name: `multi-agent-platform-dev`）
-仅起依赖服务，backend / frontend 在宿主机以热重载方式运行（`uvicorn --reload` / `next dev`）：
-- `postgres:16-alpine`，暴露 `${POSTGRES_PORT:-5432}`。
-- `redis:7-alpine`，暴露 `${REDIS_PORT:-6379}`。
-
-> 注：当前 `deploy/` 下**没有** `sillyhub-daemon` 的 compose 服务——daemon 始终在宿主机本地运行（通过 `daemon-start.bat` 等本地脚本拉起），与 backend 通过本地协议/网络交互。
-
-## 7. 前端运行时集成（frontend/package.json 摘要）
-
-- 框架：`next@14.2.5`、`react@18.3.1`、`react-dom@18.3.1`。
-- UI：`antd@^6.4.4`、`@ant-design/icons`、`@ant-design/nextjs-registry`、`@radix-ui/*`、`lucide-react`、`tailwindcss@3.4.7` + `tailwindcss-animate`、`class-variance-authority` / `clsx` / `tailwind-merge`。
-- 数据/状态：`@tanstack/react-query@^5.51`、`zustand@^4.5`、`zod@^3.23`。
-- 可视化/流程：`@xyflow/react@^12.10`（节点流程图）、`echarts@^6.1` + `echarts-for-react`（图表）、`@uiw/react-markdown-preview`。
-- 测试/E2E：`vitest`、`@testing-library/react`、`@playwright/test`、`puppeteer`、`jsdom`。
-- 构建约定：`node>=20`，`packageManager=pnpm@9.6.0`。
+- **spec-workspaces 隔离**：backend 容器 bind mount `SPEC_DATA_HOST_DIR`→`/data/spec-workspaces`，设 `SPEC_DATA_ROOT`，宿主 daemon 与容器 backend 共享同一物理目录，否则 agent 看不到 backend 写入的 spec 文档。
+- **宿主项目挂载**：`HOST_PROJECTS_DIR`→`/host-projects`，配 `HOST_PATH_PREFIX`/`CONTAINER_PATH_PREFIX` 路径重写，使扫描器在容器内读宿主 `.sillyspec` 树。
+- **worktree**：命名卷 `worktree-data`→`/data/sillyspec-workspaces`，设 `WORKTREE_BASE_DIR`。
+- **本地数据**：仓库内 `data/spec-storage/`（本地 spec 数据）、`backups/`（DB 备份 SQL）。

@@ -1,12 +1,12 @@
 # 模块映射（自动生成，可手动修改）
 # author: qinyi
 # created_at: 2026-06-23 01:57:30
-# 根 monorepo 视角：模块 = 顶层子项目 + 辅助目录。子项目内部细粒度模块见各自 docs/<project>/modules/_module-map.yaml。
+# 根 monorepo 视角：模块 = 顶层子项目 + 辅助组件/目录。子项目内部细粒度模块见各自 docs/<project>/modules/_module-map.yaml。
 
 schema_version: 1
 project: multi-agent-platform
-source_commit: fcbf3fa7
-generated_at: 2026-06-23 01:57:30
+source_commit: ba87eec
+generated_at: 2026-06-24 00:48:23
 generator: sillyspec-scan
 
 modules:
@@ -17,11 +17,11 @@ modules:
     doc: modules/backend.md
     paths:
       - backend/**
-    tags: [fastapi, python, sqlmodel, postgresql, redis, api, rest, sse, websocket, uv]
+    tags: [fastapi, python, sqlmodel, postgresql, redis, api, rest, sse, websocket, uv, alembic]
     aliases: [api-server, 后端, server]
     entrypoints:
-      - uvicorn app.main:app (backend/app/main.py:87)
-      - /api/* routers (workspace / members / auth / health / qc)
+      - uvicorn app.main:app (backend/app/main.py)
+      - /api/* routers (workspace / members / auth / health / qc / runtimes / sessions)
     main_symbols:
       - app (FastAPI)
       - workspace_router
@@ -29,7 +29,7 @@ modules:
       - auth_router
       - health_router
     depends_on: []
-    used_by: [frontend, sillyhub-daemon]
+    used_by: [frontend, sillyhub-daemon, deploy, ci, build]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -39,7 +39,7 @@ modules:
     doc: modules/frontend.md
     paths:
       - frontend/**
-    tags: [nextjs, react, typescript, tailwind, app-router, web, vitest]
+    tags: [nextjs, react, typescript, tailwind, app-router, web, vitest, pnpm]
     aliases: [web, 前端, ui]
     entrypoints:
       - frontend/src/app/page.tsx (root)
@@ -50,7 +50,7 @@ modules:
       - RootLayout
       - HomePage
     depends_on: [backend]
-    used_by: []
+    used_by: [deploy, ci, build]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -75,36 +75,78 @@ modules:
       - writePid
       - removePid
     depends_on: [backend]
-    used_by: []
+    used_by: [deploy]
     needs_review: false
     concerns: []
     review_reasons: []
 
-  # ── 辅助目录 ────────────────────────────────────────────────
+  # ── 部署 / 构建 / 持续集成 ───────────────────────────────────
 
   deploy:
     status: active
     doc: modules/deploy.md
     paths:
       - deploy/**
-    tags: [docker, docker-compose, deployment, infra]
+    tags: [docker, docker-compose, deployment, infra, postgresql, redis]
     aliases: [docker, compose, 部署]
     entrypoints:
       - deploy/docker-compose.yml
       - deploy/docker-compose.dev.yml
     main_symbols: []
     depends_on: [backend, frontend, sillyhub-daemon]
+    used_by: [ci, build]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  build:
+    status: active
+    doc: modules/build.md
+    paths:
+      - Makefile
+      - backend/pyproject.toml
+      - frontend/package.json
+      - sillyhub-daemon/package.json
+      - deploy/docker-compose.yml
+    tags: [make, build, tooling, uv, pnpm, docker]
+    aliases: [makefile, 构建, build-system]
+    entrypoints:
+      - Makefile (dev-up / dev-down / dev-reset)
+      - Makefile backend-install / backend-run / backend-test / backend-lint / backend-format / backend-migrate
+      - Makefile frontend-install / frontend-run / frontend-test / frontend-lint / frontend-typecheck / frontend-build
+      - Makefile test / lint / up / down / logs
+    main_symbols: []
+    depends_on: [backend, frontend, sillyhub-daemon, deploy]
+    used_by: [ci]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  ci:
+    status: active
+    doc: modules/ci.md
+    paths:
+      - .github/workflows/**
+    tags: [ci, github-actions, automation, testing, linting]
+    aliases: [github-actions, 持续集成]
+    entrypoints:
+      - .github/workflows/backend-ci.yml
+      - .github/workflows/frontend-ci.yml
+    main_symbols: []
+    depends_on: [backend, frontend, build]
     used_by: []
     needs_review: false
     concerns: []
     review_reasons: []
+
+  # ── 文档 / 规范 / 原型 / 调研 ─────────────────────────────────
 
   docs:
     status: active
     doc: modules/docs.md
     paths:
       - docs/**
-    tags: [documentation, design, spec]
+    tags: [documentation, design, spec, adr]
     aliases: [文档, design-docs]
     entrypoints:
       - docs/README.md
@@ -115,18 +157,60 @@ modules:
     concerns: []
     review_reasons: []
 
-  scripts:
+  prototype:
     status: active
-    doc: modules/scripts.md
+    doc: modules/prototype.md
     paths:
-      - scripts/**
-    tags: [scripts, tooling, ops]
-    aliases: [工具脚本]
+      - .sillyspec/changes/*/prototype-*.html
+    tags: [prototype, html, ui-design, mockup]
+    aliases: [原型, mockup]
     entrypoints:
-      - scripts/*.{sh,ts,js,py}
+      - .sillyspec/changes/2026-06-09-local-daemon/prototype-local-daemon.html
+      - .sillyspec/changes/2026-06-16-admin-org-role-center/prototype-admin-center.html
+      - .sillyspec/changes/2026-06-16-daemon-api-key/prototype-api-keys.html
+      - .sillyspec/changes/2026-06-22-agent-run-pipeline-fix/prototype-agent-log-viewer.html
+      - .sillyspec/changes/2026-06-23-codex-interactive-session/prototype-codex-interactive-flow.html
+      - .sillyspec/changes/2026-06-23-runtimes-session-dialog/prototype-runtimes-session-dialog.html
+      - .sillyspec/changes/agent-driven-change-center/prototype-change-detail.html
     main_symbols: []
     depends_on: []
-    used_by: []
+    used_by: [frontend]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  sillyspec:
+    status: active
+    doc: modules/sillyspec.md
+    paths:
+      - .sillyspec/**
+    tags: [sillyspec, spec, workflow, change-management, roadmap]
+    aliases: [spec, 规范流程]
+    entrypoints:
+      - .sillyspec/local.yaml
+      - .sillyspec/changes/**
+      - .sillyspec/docs/**
+      - .sillyspec/workflows/**
+    main_symbols: []
+    depends_on: []
+    used_by: [backend, frontend, sillyhub-daemon]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  spikes:
+    status: active
+    doc: modules/spikes.md
+    paths:
+      - spikes/**
+    tags: [spike, research, poc, exploration]
+    aliases: [调研, 探索, poc]
+    entrypoints:
+      - spikes/README.md
+      - spikes/REPORT.md
+    main_symbols: []
+    depends_on: []
+    used_by: [backend, sillyhub-daemon]
     needs_review: false
     concerns: []
     review_reasons: []

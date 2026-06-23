@@ -2,57 +2,39 @@
 schema_version: 1
 doc_type: module-card
 module_id: app-pages
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-10T16:55:00
+created_at: 2026-06-24T01:02:00
 ---
-
 # app-pages
 
 ## 定位
-所有 Next.js App Router 页面组件。负责 UI 渲染和用户交互，是整个前端的视图层入口。不包含业务逻辑——所有数据获取通过 `lib/*` API 客户端完成。
+顶层路由页面集合，覆盖未鉴权落地页与登录（`/`、`/login`），以及 dashboard 区下的工作区列表、运行时列表、个人设置三类全局页面。每个文件即一个 Next.js App Router 路由入口，负责数据拉取 + 页面交互编排，UI 主要下沉到 components-* 组件。
 
 ## 契约摘要
-- `/` — 首页（健康检查 + 入口链接）
-- `/login` — 登录页（表单提交 → lib/auth.login）
-- `/workspaces` — 工作空间列表页（扫描、创建、删除）
-- `/workspaces/[id]` — 工作空间详情页
-- `/workspaces/[id]/changes` — 变更列表页
-- `/workspaces/[id]/changes/[cid]` — 变更详情页（含文档查看、阶段流转、人工审批）
-- `/workspaces/[id]/changes/[cid]/tasks` — 任务看板页
-- `/workspaces/[id]/changes/[cid]/tasks/[tid]` — 任务详情页
-- `/workspaces/[id]/agent` — Agent 控制台
-- `/workspaces/[id]/components` — 组件列表页
-- `/workspaces/[id]/components/topology` — 拓扑图页
-- `/workspaces/[id]/scan-docs` — 扫描文档页
-- `/workspaces/[id]/runtime` — 运行时进度页
-- `/workspaces/[id]/knowledge` — 知识库 & Quicklog 页
-- `/workspaces/[id]/releases` — 发布管理页
-- `/workspaces/[id]/approvals` — 审批中心页
-- `/workspaces/[id]/audit` — 审计日志页
-- `/workspaces/[id]/incidents` — 事件列表页
-- `/workspaces/[id]/incidents/[iid]` — 事件详情页
-- `/workspaces/[id]/create-change` — 创建变更页
-- `/settings` — 平台设置页（Settings + Users 管理）
-- `/settings/git-identities` — Git 身份管理页
-- `/runtimes` — Daemon 运行时页
+- `HomePage`（`/`）：服务端组件，未登录态展示落地信息，登录态通常重定向到 dashboard（无重业务）。
+- `LoginPage`（`/login`）：表单提交 → 调 `login(account, password)` → 成功后 `router.push` 进 dashboard；本地 `localStorage` 记忆"记住账号/平台"偏好（`sillyhub.login.remember` / `sillyhub.login.platform`）。
+- `WorkspacesPage`（`/workspaces`）：`listWorkspaces()` + 批量取 daemon runtime 绑定信息，渲染 `WorkspaceCard` 列表；提供扫描对话框入口。
+- `RuntimesPage`（`/runtimes`）：`listDaemonRuntimes()` 列表 + 会话列表，点击某 runtime 打开 `RuntimeSessionDialog`（带 `key={runtime.id}` 强制重 mount 清旧态）；页面层只管列表/刷新，不直接 attach SSE。
+- `SettingsPage`（`/settings`）：`listSettings()` / `updateSettings()` 增删改个人偏好（多 Tab 分区）。
+- `GitIdentitiesPage`（`/settings/git-identities`）：`listGitIdentities/createGitIdentity/checkGitAccess` 管理 git 凭证，含创建表单（provider/username/email/token/repos）与连通性校验。
+- `ApiKeysPage`（`/settings/api-keys`）：`listApiKeys/revokeApiKey` 管理个人 API Key。
 
 ## 关键逻辑
-- 所有页面均为 `"use client"` 组件
-- 数据获取模式统一使用 `useEffect` + `useState`（非 SWR/React Query）
-- 路由参数通过 Next.js `useParams()` 或路径参数获取
-- 错误处理统一使用 `ApiError` 类型区分网络错误和业务错误
+- 列表页通用模式（WorkspacesPage / RuntimesPage）：
+  ```
+  useEffect(() => { (async () => {
+    setItems(await listX()); setError(null);
+  })().catch(e => setError(String(e))).finally(() => setRefreshing(false)); }, [reload])
+  ```
+- LoginPage onFinish：`await login(values.account, values.password)` 成功后路由跳转，失败 message 报错并保留输入。
+- RuntimeSessionDialog 由页面用 `dialogRuntime` state 驱动开关，`key` 绑 runtime.id 保证切换 runtime 时内部状态全清。
 
 ## 注意事项
-- 页面数量多（23+），维护时注意 lib 层接口变更对页面的影响
-- 新增页面需遵循现有的 useEffect + useState 数据获取模式
-- workspace 子页面均嵌套在 `(dashboard)` 路由组下，需要 accessToken 才能访问
+- 登录态鉴权由 `(dashboard)` 布局统一兜底，单页不重复实现。
+- RuntimesPage 文件较长（600+ 行），含若干内联子组件（Key 复制、ServerUrl 设置等），改动时注意区分主页面与内联组件。
+- ApiKeysPage 的 key 明文只在创建瞬间返回，列表不回显，UI 需提示一次性。
 
 ## 人工备注
-
 <!-- MANUAL_NOTES_START -->
-
-- 2026-06-19-runtimes-layout：`/runtimes` 的运行时卡片列表限制为 680px、会话列表限制为 520px，超出后在各自区域内滚动；已结束/失败会话提供带确认的删除入口，活动会话不显示删除按钮。
-- 2026-06-19-ql007：`/runtimes` 会话列表选中任意会话（含 active）均进入只读历史回看（`getAgentSessionLogs` 跨 run 聚合，按 run_id 分组）。此前仅 ended/failed 回看、active 走 live 空白分支导致选中 active 会话右侧无回显；现统一只读回看。active 会话的 live 续看/追问需 LivePanel 支持「打开已有会话」resume，属后续 task。
-- 2026-06-20-session-history-enhance：/runtimes 历史回看按 channel 渲染用户/agent 气泡；ended/failed claude 会话可「继续对话」(reopen+SDK resume)，codex 只读；任意状态会话可删除（active 先 end 再删）
-
 <!-- MANUAL_NOTES_END -->

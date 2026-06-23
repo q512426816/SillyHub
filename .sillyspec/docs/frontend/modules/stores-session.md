@@ -2,33 +2,49 @@
 schema_version: 1
 doc_type: module-card
 module_id: stores-session
+source_commit: ba87eec
 author: qinyi
-created_at: 2026-06-10T16:55:00
+created_at: 2026-06-24T01:02:04
 ---
-
 # stores-session
 
 ## 定位
-客户端 Session Store。使用 Zustand + persist 中间件管理用户认证状态，是整个前端认证体系的核心状态源。
+客户端会话状态的全局 store（基于 zustand + persist 中间件）。持有当前登录用户信息、access/refresh token、hydration 标记，作为整个前端唯一的会话真相来源，被 `lib-api`（取 token/刷新）、`lib-auth`、`lib-permission`、布局与各页面订阅。持久化到 localStorage，刷新页面后恢复。
 
 ## 契约摘要
-- State: `hydrated`（是否已从 localStorage 恢复）、`user`（SessionUser | null）、`accessToken`、`refreshToken`
-- Actions: `setUser(user)`、`setTokens(tokens)`、`clear()`、`markHydrated()`
-- Hook: `useSession` — Zustand hook
-- 类型：SessionUser（id/email/displayName）、SessionTokens（accessToken/refreshToken）
+- `useSession` — zustand store hook（`create<SessionState>()(persist(...))`），组件内 `useSession(s => s.user)` 订阅；非组件场景用 `useSession.getState()`。
+- `SessionUser`：`{ id, email, displayName, is_platform_admin?, permissions?: string[] }`。
+- `SessionTokens`：`{ accessToken: string | null, refreshToken: string | null }`。
+- `SessionState` 方法：`setUser(user | null)`、`setTokens({accessToken, refreshToken})`、`clear()`（登出清空）、`markHydrated()`。
+- 状态字段：`user`、`accessToken`、`refreshToken`、`hydrated`（persist 恢复完成标记）。
 
 ## 关键逻辑
-- 使用 `zustand/middleware/persist` 持久化到 localStorage（key: `multi-agent-platform.session`）
-- `hydrated` 标志在 persist 的 `onRehydrateStorage` 回调中设置，用于解决水合时序问题
-- `partialize` 确保只有指定字段被持久化
-- Dashboard 布局等待 `hydrated === true` 后才做认证判断
+persist + 确定性 hydration：
+```
+useSession = create(persist(
+  (set) => ({
+    hydrated:false, accessToken:null, refreshToken:null, user:null,
+    setUser/setTokens/clear/markHydrated: set(...),
+  }),
+  {
+    name: "<session-storage-key>",
+    onRehydrateStorage: () => (state) => {
+      // zustand persist 的 hydration 是异步的；
+      // 这里在恢复完成后调 markHydrated，让守卫逻辑确定性判断
+      if (state) state.markHydrated();
+    },
+  },
+))
+```
+非组件读取（`lib-api` 等）：`const { accessToken, refreshToken } = useSession.getState()`，避免 hook 规则限制。
 
 ## 注意事项
-- 此 store 被 lib-api 直接引用（读取 accessToken、执行 token 刷新），是跨模块耦合点
-- persist 版本为 1，未来如果修改 state 结构需要升级版本号
+- **`hydrated` 是关键守卫标记**：persist 恢复是异步的，路由守卫/权限判定必须先等 `hydrated === true` 再读 user/token，否则首屏会闪现未登录态或丢失鉴权。
+- token 通过 `getState()` 在 `apiFetch` / `downloadExcel` 等非组件场景读取，401 时用 refreshToken 刷新后 `setTokens` 回写。
+- `clear()` 用于登出：必须同时清 user + token + 触发跳转，避免残留态。
+- `is_platform_admin` 与 `permissions` 是 `lib-permission` 判定的输入，超管短路依赖前者。
+- store key 写死在 persist 配置，改名会导致旧用户态丢失（本项目未上线可清数据，但仍需注意）。
 
 ## 人工备注
-
 <!-- MANUAL_NOTES_START -->
-
 <!-- MANUAL_NOTES_END -->
