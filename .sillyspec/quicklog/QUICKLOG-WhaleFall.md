@@ -850,3 +850,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
 结果:月份 `<input type=month>` → antd `DatePicker.MonthPicker`(value Dayjs/monthFilter string 互转 via dayjs());项目原生 `<select>` → antd `Select`(options projects.map);视图原生 `<select>` → antd `Select`(options 全部任务/我的任务)。新增 dayjs 默认 import 用作 string↔Dayjs 转换。inputCls import 保留(TaskDrawer 还在用)。前端 typecheck 通过。
+
+
+## ql-20260623-006-d4a9 | 2026-06-23 10:15:00 | task-plans 查询条件变化不自动查询(只点搜索/回车触发)
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
+结果:useEffect deps 从 [view, statusFilterList, monthFilter, projectFilter, userFilter, dateRange, workPartnerFilter, searchNonce] 精简为 [searchNonce]。任意 filter state 变化只 setState 不触发查询;搜索按钮/回车(commitSearch)/重置(resetFilters)都走 setSearchNonce 触发查询;翻页/改 pageSize 走 pagination.onChange 直接调 load 绕过 useEffect。前端 typecheck 通过。

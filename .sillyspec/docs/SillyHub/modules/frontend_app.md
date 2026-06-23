@@ -130,3 +130,4 @@ layout.tsx (根布局)
 | 2026-06-23 | ql-20260623-003-a9c4 | /ppm/task-plans 视图切换(全部/我的任务)从顶部按钮行移到查询条件 grid 配合人员 Field 之后,顶部按钮行精简为 搜索/重置/分隔/导出/新建;视图切换作为 Field label='视图' 与其他查询条件布局对齐 |
 | 2026-06-23 | ql-20260623-004-b7d2 | /ppm/task-plans 负责人 PpmUserSelect 去掉外层 inputCls + flex/h-8/items-center/px-1 div(框中框),改直接 style={{width:100%}},对齐 problem-list/work-hours 用法 |
 | 2026-06-23 | ql-20260623-005-c3e1 | /ppm/task-plans 月份/项目/视图 查询条件改 antd 组件统一风格:月份 `<input type=month>` → DatePicker.MonthPicker,项目/视图原生 `<select>` → antd Select(与其他 Field 控件风格对齐) |
+| 2026-06-23 | ql-20260623-006-d4a9 | /ppm/task-plans 查询条件变化不自动查询:useEffect deps 从所有 filter state + searchNonce 精简为只 [searchNonce];任意条件变化只 setState 不查,搜索按钮/回车/重置走 setSearchNonce 触发,翻页走 pagination.onChange 直接调 load |

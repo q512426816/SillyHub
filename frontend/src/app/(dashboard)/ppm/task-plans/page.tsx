@@ -200,20 +200,13 @@ export default function TaskPlansPage() {
     ],
   );
 
-  // 首屏 + 条件变化 + 搜索按钮(searchNonce 兜底)→ 回第 1 页重拉
+  // 首屏 + 搜索按钮/回车(searchNonce)→ 回第 1 页重拉。
+  // 注意:不监听 filter state — 用户改条件不会自动查询,必须点搜索/回车才生效。
+  // 翻页/改 pageSize 走 pagination.onChange 直接调 load,绕过此 effect。
   useEffect(() => {
     void load({ page: 1 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    view,
-    statusFilterList,
-    monthFilter,
-    projectFilter,
-    userFilter,
-    dateRange,
-    workPartnerFilter,
-    searchNonce,
-  ]);
+  }, [searchNonce]);
 
   const commitSearch = () => setSearchNonce((n) => n + 1);
 
