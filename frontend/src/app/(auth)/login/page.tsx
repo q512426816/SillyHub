@@ -141,68 +141,68 @@ export default function LoginPage() {
                 </p>
               </div>
 
-              Form<LoginFormValues>
-            form={form}
-            layout="vertical"
-            initialValues={{
-              remember: true,
-            }}
-            onFinish={onFinish}
-            requiredMark={false}
-            size="large"
-          >
-            <Form.Item label="访问平台" className="mb-4">
+              <Form<LoginFormValues>
+                form={form}
+                layout="vertical"
+                initialValues={{
+                  remember: true,
+                }}
+                onFinish={onFinish}
+                requiredMark={false}
+                size="large"
+              >
+                <Form.Item label="访问平台" className="mb-4">
               <Segmented
                 value={platform}
                 onChange={(v) => setPlatform(v as LoginPlatform)}
                 options={PLATFORM_OPTIONS}
                 block
               />
-            </Form.Item>
+                </Form.Item>
 
-            <Form.Item
-              label="邮箱 / 账号"
-              name="account"
-              rules={[{ required: true, message: "请输入邮箱或账号" }]}
-            >
-              <Input
-                placeholder="邮箱或账号"
-                autoComplete="username"
-                allowClear
-              />
-            </Form.Item>
+                <Form.Item
+                  label="邮箱 / 账号"
+                  name="account"
+                  rules={[{ required: true, message: "请输入邮箱或账号" }]}
+                >
+                  <Input
+                    placeholder="邮箱或账号"
+                    autoComplete="username"
+                    allowClear
+                  />
+                </Form.Item>
 
-            <Form.Item
-              label="密码"
-              name="password"
-              rules={[{ required: true, message: "请输入密码" }]}
-            >
-              <Input.Password
-                placeholder="请输入密码"
-                autoComplete="current-password"
-              />
-            </Form.Item>
+                <Form.Item
+                  label="密码"
+                  name="password"
+                  rules={[{ required: true, message: "请输入密码" }]}
+                >
+                  <Input.Password
+                    placeholder="请输入密码"
+                    autoComplete="current-password"
+                  />
+                </Form.Item>
 
-            <Form.Item className="mb-3" name="remember" valuePropName="checked">
-              <Checkbox>记住密码</Checkbox>
-            </Form.Item>
+                <Form.Item className="mb-3" name="remember" valuePropName="checked">
+                  <Checkbox>记住密码</Checkbox>
+                </Form.Item>
 
-            {error && (
-              <div className="mb-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-600">
-                {error}
-              </div>
-            )}
+                {error && (
+                  <div className="mb-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-600">
+                    {error}
+                  </div>
+                )}
 
-            <Form.Item className="mb-0">
-              <Button
-                type="primary"
-                htmlType="submit"
-                loading={submitting}
-                block
-              >
-                {submitting ? "登录中…" : "登录"}
-              </Button>
-            </Form.Item>
+                <Form.Item className="mb-0">
+                  <Button
+                    type="primary"
+                    htmlType="submit"
+                    loading={submitting}
+                    block
+                  >
+                    {submitting ? "登录中…" : "登录"}
+                  </Button>
+                </Form.Item>
               </Form>
             </CardContent>
           </Card>
