@@ -77,12 +77,36 @@ class Settings(BaseSettings):
         "prompts. SPEC_DATA_ROOT is the in-container path bind-mounted to this host path.",
     )
 
+    # ── Spec transport (global switch, NOT persisted to DB — D-001@v1) ────────
+    # D-002@v1: 全局环境变量 SPEC_TRANSPORT=shared|tar，默认 shared 向后兼容同机部署。
+    # shared: 同机 bind mount，prompt 用宿主路径，不 pull 不回传（D-004 现状）。
+    # tar:    异机，backend 独占真理源，daemon pull 缓存 + lease 终态整树回传。
+    spec_transport: Literal["shared", "tar"] = Field(
+        default="shared",
+        description="Global spec transport mode. 'shared' = same-host bind mount (legacy, "
+        "zero-change); 'tar' = cross-host, backend is source of truth with daemon pull+sync. "
+        "Read from SPEC_TRANSPORT env. Orthogonal to SpecWorkspace.strategy, NOT persisted (D-001).",
+    )
+
     @field_validator("spec_data_root", mode="before")
     @classmethod
     def _resolve_spec_data_root(cls, raw: object) -> object:
         """Resolve relative paths against the repo root."""
         if isinstance(raw, str):
             return resolve_spec_data_root(raw)
+        return raw
+
+    @field_validator("spec_transport", mode="before")
+    @classmethod
+    def _normalize_spec_transport(cls, raw: object) -> object:
+        """Normalize SPEC_TRANSPORT: strip + lower-case before Literal enum check.
+
+        Invalid values (e.g. 'http', 'ftp', 'SHARED ' trailing junk after strip)
+        fall through to Pydantic Literal validation which raises a clear
+        ValidationError listing allowed values.
+        """
+        if isinstance(raw, str):
+            return raw.strip().lower()
         return raw
 
     # ── Docker path mapping ────────────────────────────────────────────

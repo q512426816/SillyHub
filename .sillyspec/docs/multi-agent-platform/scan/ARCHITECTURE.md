@@ -1,6 +1,6 @@
 ---
 source_commit: fcbf3fa7
-updated_at: 2026-06-22T17:56:21Z
+updated_at: 2026-06-23T00:00:00Z
 generator: sillyspec-scan
 author: qinyi
 created_at: 2026-06-23 01:56:21
@@ -91,6 +91,26 @@ backend 关键挂载与配置：
 - 启动命令：`alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000`
 - 必填 env：`SECRET_KEY`、`SILLYSPEC_MASTER_KEY`
 - CORS 默认放行 `http://localhost:3001`、`http://127.0.0.1:3001`
+
+#### spec 文档 transport 双模式（`SPEC_TRANSPORT`）
+
+scan / propose / plan / execute 等 spec 写盘 stage 生成的 spec 文档在 daemon 与 backend 间的同步路径由全局环境变量 `SPEC_TRANSPORT` 决定（D-001: 正交于 `SpecWorkspace.strategy`；D-002: 不入库，走 backend `Settings.spec_transport`）：
+
+- **`shared`（默认，同机拓扑）**：依赖本段上方描述的 bind mount（`${SPEC_DATA_HOST_DIR}:/data/spec-workspaces`，见行 88）。daemon 把 spec 写到宿主路径 `spec_data_host_dir/{ws}`，backend 经 bind mount 看到同一物理目录 reparse 入库。无 pull / 无回传，零额外机制。向后兼容现有同机部署（D-004），未配置 `SPEC_TRANSPORT` 时行为不变（SC-1）。
+
+- **`tar`（异机拓扑，daemon 与 backend 两台独立设备无共享盘）**：bind mount 失效，走整树 tar 回传（D-003 双向同步），六步机制严格对照 design §5.2：
+  1. lease interactive claim：backend `build_claim_payload` 不透传 `spec_root`，透传 `workspace_id` + transport。
+  2. daemon `_startInteractiveSession`：session 创建后 `pullSpecBundle` 拉 backend spec bundle 解到本地 `~/.sillyhub/daemon/specs/{ws}`（缓存，首次 404 容错为空目录）。
+  3. prompt `--spec-root` 用 daemon 本地路径；agent 跑 scan/stage 文档写本地缓存。
+  4. daemon `onSessionEnd`：session 终态回调 `postSpecSync` 打 tar 整树回传 backend。
+  5. backend `apply_sync`：解 tar 到权威源容器 `/data/{ws}` + reparse 入库。
+  6. daemon 本地缓存保留（D-003），下次 lease 覆盖。
+
+  batch task-runner 流程（stage 写盘场景）在步骤 1.5（claim 后 pull）/ 8.5（complete 前 sync）插入对等的 pull/postSpecSync 调用，与 interactive 共用同一套 tar 回传机制（D-008）。
+
+backend 是唯一真理源（G2）：shared 靠 bind mount 天然一致，tar 靠 `apply_sync` 整树覆盖（whole-tree overwrite）保证 `/data/{ws}` 为权威副本。
+
+**已知约束**：全局单一 transport，同一 backend 不能同时服务同机 + 异机 daemon（R-04 / N1；未来需升级为 per-daemon transport 才能混部）。
 
 ### 开发 — `deploy/docker-compose.dev.yml`（`name: multi-agent-platform-dev`）
 仅起 `postgres:16-alpine` + `redis:7-alpine`，backend / frontend 在宿主以 `uvicorn --reload`、`next dev` 运行，保证迭代速度。

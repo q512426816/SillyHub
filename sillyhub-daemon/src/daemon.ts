@@ -55,6 +55,10 @@ import { listDir } from './file-rpc.js';
 import { buildSpawnEnv } from './spawn-env.js';
 import type { TaskRunner, TaskRunnerResult } from './task-runner.js';
 import type { SessionManager } from './interactive/session-manager.js';
+// task-06（D-007@v1）：spec bundle 同步共享 utility（task-04 抽出），interactive
+// 路径接入 pull（session 开始）+ sync（session end）。纯函数 + client 参数注入，
+// interactive 无 TaskRunner 实例也能直接调用。
+import { pullSpecBundle, postSpecSync, resolveSpecDir } from './spec-sync.js';
 import type {
   PersistedSessionRecord,
   SessionStatus,
@@ -245,6 +249,19 @@ interface ClientLike {
     status: 'ended' | 'failed',
     reason: string,
   ): Promise<unknown>;
+  /**
+   * task-06（D-003@v1 tar 模式 pull）：GET spec bundle（tar Buffer）。
+   * 与 hub-client.ts:694 实现对齐。interactive 路径经 pullSpecBundle 调用。
+   */
+  getSpecBundle(wsId: string): Promise<Buffer>;
+  /**
+   * task-06（D-003@v1 tar 模式 sync）：POST spec 整树回传（tar Buffer）。
+   * 与 hub-client.ts:737 实现对齐。interactive 路径经 postSpecSync 调用。
+   */
+  postSpecSync(
+    wsId: string,
+    tarBuf: Buffer,
+  ): Promise<{ ok: boolean; reparsed: number }>;
 }
 
 /** daemon 需要的 TaskRunner 接口子集。 */
@@ -429,6 +446,17 @@ export class Daemon {
    * batch lease 不进此 map（走 _inflightLeases 去重）。
    */
   private readonly _interactiveSessionsByLease = new Map<string, string>();
+  /**
+   * task-06（D-003@v1 tar 模式）：interactive lease.id → spec 同步上下文。
+   * _startInteractiveSession tar 模式 pull 时 set(leaseId, {workspaceId})；
+   * onSessionEnd 经 sessionId→sessionManager.get→leaseId 反查本 map 取 workspaceId，
+   * postSpecSync 回传整树后 finally delete（幂等，AC-09 / AC-12）。
+   * shared 模式（transport!=='tar'）不 set → onSessionEnd 查不到 ctx 跳过（D-004 现状）。
+   */
+  private readonly _interactiveSpecSyncCtx = new Map<
+    string,
+    { workspaceId: string }
+  >();
 
   /**
    * P1-1（2026-06-18）：恢复成功（markReconnected + confirm）后正在 active 运行的
@@ -1182,6 +1210,67 @@ export class Daemon {
         error: e,
       });
     }
+
+    // task-06（D-003@v1 tar 模式 sync / R-07 时序）：在 notifySessionEnd **之后**触发。
+    // session 须真正结束（driver 已退出、SessionManager 已 end/fail）后才回传，避免
+    // 回传时 sillyspec 还在写文件导致 tar 不完整。即便 notifySessionEnd 失败（warn），
+    // 仍继续尝试 sync——sync 尽力而为，失败也仅 warn（R-03）。shared 模式无 specSyncCtx →
+    // 跳过（D-004）。
+    await this._postInteractiveSpecSync(sessionId);
+  }
+
+  /**
+   * task-06：onSessionEnd 后置 spec 整树回传（tar 模式）。
+   *
+   * 反查路径：sessionId → sessionManager.get(sessionId).leaseId → _interactiveSpecSyncCtx
+   * 取 workspaceId → postSpecSync。非 tar 模式 / pull 未登记 / sessionManager null → 跳过。
+   *
+   * 容错（R-03）：sync 失败仅 warn，不阻塞、不改写 session 终态（notifySessionEnd 已先行
+   * 上报）；finally 内 delete specSyncCtx 保证 onSessionEnd 幂等（AC-09）。
+   */
+  private async _postInteractiveSpecSync(sessionId: string): Promise<void> {
+    if (!this._sessionManager) return; // AC-14 过渡期
+    let leaseId: string | undefined;
+    try {
+      const state = this._sessionManager.get(sessionId);
+      leaseId = state?.leaseId;
+    } catch (e) {
+      this._logger.warn('interactive_spec_sync_state_lookup_failed', {
+        session_id: sessionId,
+        error: (e as Error)?.message ?? String(e),
+      });
+      return;
+    }
+    if (!leaseId) return; // 边界 10：state 查不到 / 无 leaseId
+    const ctx = this._interactiveSpecSyncCtx.get(leaseId);
+    if (!ctx) return; // 非 tar 模式 / pull 未登记 → 跳过（D-004 shared 现状）
+
+    try {
+      // `as never`：见 _startInteractiveSession pull 处同款说明（ClientLike → HubClient）。
+      const resp = await postSpecSync(
+        this._client as never,
+        ctx.workspaceId,
+        resolveSpecDir(ctx.workspaceId),
+      );
+      this._logger.info('interactive_spec_sync_ok', {
+        session_id: sessionId,
+        lease_id: leaseId,
+        workspace_id: ctx.workspaceId,
+        resp,
+      });
+    } catch (e) {
+      // R-03 容错：sync 失败仅 warn，不阻塞、不改写 session 终态。
+      //（notifySessionEnd 已上报，sync 失败 backend 标 sync_status=dirty 由 UI 提示重试）
+      this._logger.warn('interactive_spec_sync_failed', {
+        session_id: sessionId,
+        lease_id: leaseId,
+        workspace_id: ctx.workspaceId,
+        error: (e as Error)?.message ?? String(e),
+      });
+    } finally {
+      // 幂等：二次 onSessionEnd 查不到 ctx 直接 return（AC-09 / 边界 9）。
+      this._interactiveSpecSyncCtx.delete(leaseId);
+    }
   }
 
   // ── 内部：_fire（AbortController 追踪，R7）─────────────────────────────────
@@ -1829,6 +1918,58 @@ export class Daemon {
     // 先登记 lease→session（即使 create 抛错也登记，防 create 失败后 WS 重放反复重试；
     // SessionManager.create 抛 SessionAlreadyExistsError 时 store 已无此 session，安全）。
     this._interactiveSessionsByLease.set(leaseId, sessionId);
+
+    // task-06（D-003@v1 tar 模式 pull / R-07 时序）：在 _sessionManager.create（driver
+    // spawn）**之前** await 完成。ClaudeSdkDriver 一旦 spawn 即开始跑 sillyspec scan/stage，
+    // 读 --spec-root 指向的本地缓存目录（~/.sillyhub/daemon/specs/{ws}）——pull 须先完成才有
+    // 内容可读。shared 模式（transport!=='tar'）跳过，bind mount 共享现状不变（D-004）。
+    //
+    // transport/workspaceId 读取：camelCase 优先 + snake_case 兜底，与 _runLeaseStateMachine
+    // 归一化风格一致（types.ts 字段由 task-03 透传，此处只读，类型用 as 断言兼容未定义期）。
+    const transport =
+      (execPayload as { transport?: string }).transport ??
+      (execPayload as { transport_mode?: string }).transport_mode ??
+      'shared';
+    const workspaceId =
+      (execPayload as { workspaceId?: string }).workspaceId ??
+      (execPayload as { workspace_id?: string }).workspace_id;
+
+    if (transport === 'tar') {
+      if (!workspaceId) {
+        // 边界 5：transport=tar 但 workspaceId 缺失 → task-03 透传链路异常，warn 不阻塞。
+        this._logger.warn('interactive_spec_pull_no_workspace', {
+          lease_id: leaseId,
+        });
+      } else {
+        try {
+          // `as never`：ClientLike 是 daemon 内部鸭子类型，spec-sync utility 期望 HubClient
+          // 具体类型；ClientLike 已声明 getSpecBundle/postSpecSync 签名（additive），运行时
+          // 真实 _client 为 HubClient 实例（main.ts 注入），duck-type 安全（task-06 §4.1/边界 11）。
+          const specDir = await pullSpecBundle(
+            this._client as never,
+            workspaceId,
+          );
+          // 404 容错（首次 scan backend 无 bundle）：utility 内已 mkdir 空目录返回路径非 null。
+          // 登记_specSyncCtx 保证后续 onSessionEnd 触发 sync（即使 pull 拿到空目录也回传）。
+          this._interactiveSpecSyncCtx.set(leaseId, { workspaceId });
+          this._logger.info('interactive_spec_pulled', {
+            lease_id: leaseId,
+            workspace_id: workspaceId,
+            spec_dir: specDir,
+          });
+        } catch (e) {
+          // R-03 容错：pull 失败（5xx/网络，404 已被 utility 容错）不阻塞 session 启动。
+          // agent 仍可跑（读不到缓存则 sillyspec 生成新文档），不 set specSyncCtx
+          //（保守：pull 失败不回传残缺目录）。
+          this._logger.warn('interactive_spec_pull_failed', {
+            lease_id: leaseId,
+            workspace_id: workspaceId,
+            error: (e as Error)?.message ?? String(e),
+          });
+        }
+      }
+    }
+    // transport !== 'tar'（shared）→ 跳过 pull + 不 set specSyncCtx（onSessionEnd 自然跳过 sync）。
 
     try {
       await this._sessionManager.create({

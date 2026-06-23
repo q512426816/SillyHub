@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.errors import ChangeNotFound, WorkspaceNotFound
 from app.core.logging import get_logger
 from app.modules.agent.base import AgentSpecBundle, TaskContext, WorkspaceSpecSummary
@@ -420,6 +420,50 @@ async def build_stage_bundle(
 # ---------------------------------------------------------------------------
 
 
+def resolve_prompt_spec_root(
+    transport: str,
+    ws_id: str,
+    settings: Settings,
+) -> str:
+    """按 transport 决定塞进 prompt 的 ``--spec-root`` 路径。
+
+    用于 scan / stage dispatch 生成 sillyspec 命令时，选择 daemon 机器上能访问到的
+    spec 目录路径。**只影响 prompt 文本**，不影响 ``bundle.spec_root`` /
+    ``platform_metadata.spec_root``（后者始终为 backend 入参容器路径，见 D-006 双轨）。
+
+    分支（design §5.0 表 + §7.1）：
+
+    - ``shared``（默认，D-004 向后兼容）：返回宿主路径
+      ``{settings.spec_data_host_dir}/{ws_id}``（逐字符同改动前 ``build_scan_bundle``
+      原 ``host_spec_root`` 拼接）。daemon 与 backend 同机 + Docker bind mount 共享
+      同一物理盘，backend 经容器路径 ``/data/{ws}`` 看到同一物理目录。
+    - ``tar``（异机，D-003/D-007）：返回 daemon 本地约定路径
+      ``~/.sillyhub/daemon/specs/{ws_id}``。与 daemon ``spec-sync.resolveSpecDir(wsId)``
+      输出一致（task-04）；tilde 由 daemon SessionManager spawn 环境 HOME 展开
+      （design §10 R-01，daemon task-06 确认/兜底）。
+    - 非法值（非 'shared'/'tar'）：回退 shared 分支（保守默认，避免 prompt 拼出非法
+      路径导致 sillyspec 写盘失败；task-01 field_validator 已在 Settings 层规范化，
+      此处仅作防御性兜底，记 warn 日志）。
+
+    Args:
+        transport: transport 模式，取自 ``settings.spec_transport``（task-01 定义）。
+        ws_id: workspace ID 字符串（调用方应先 ``str(workspace_id)``）。
+        settings: 全局 Settings 实例（``get_settings()``），读取 ``spec_data_host_dir``。
+
+    Returns:
+        塞入 prompt 的 ``--spec-root`` 路径字符串。**不展开 tilde**（tar 分支返回
+        字面量 ``~``，展开在 daemon 侧）。
+    """
+    if transport == "tar":
+        return f"~/.sillyhub/daemon/specs/{ws_id}"
+    if transport != "shared":
+        log.warning(
+            "prompt_spec_root_unknown_transport_fallback_shared",
+            transport=transport,
+        )
+    return f"{settings.spec_data_host_dir}/{ws_id}"
+
+
 async def build_scan_bundle(
     session: AsyncSession,
     workspace_id: uuid.UUID,
@@ -464,8 +508,13 @@ async def build_scan_bundle(
     # daemon 零客户端配置（不依赖 SPEC_ROOT_MAP）。spec_root/runtime_root
     # 参数（容器路径 /data/{ws}）保留供 backend 内部访问（post-check/scan_sync
     # 在容器内跑，bind mount 保证 host 与容器是同一物理目录）。
+    # task-02（2026-06-23-spec-transport-tar-sync）：按 transport 分支决定塞入
+    # prompt 的路径（design §5.0 表 + §7.1 helper）。shared（D-004 向后兼容）逐字符
+    # 同原拼接；tar（D-003/D-007 异机）用 daemon 本地约定路径 ~/.sillyhub/daemon/specs/{ws}。
+    # 注意：host_spec_root 仅用于 prompt 文本（daemon 机器跑 sillyspec 时访问的路径），
+    # bundle.spec_root / platform_metadata.spec_root 仍用入参容器路径（D-006 双轨）。
     settings = get_settings()
-    host_spec_root = f"{settings.spec_data_host_dir}/{ws_id}"
+    host_spec_root = resolve_prompt_spec_root(settings.spec_transport, ws_id, settings)
     host_runtime_root = f"{host_spec_root}/runtime"
     # 完整命令行（单行，避免 LLM 忽略续行）
     # --dir 指向源码目录（root_path），sillyspec 用它定位项目代码

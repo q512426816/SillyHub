@@ -1012,9 +1012,20 @@ class AgentService:
                 # 方案 B（D-001@v1 调整）：prompt 用宿主路径（SPEC_DATA_HOST_DIR/{ws}），
                 # daemon 零客户端配置。spec_ws.spec_root（容器路径）保留供 backend 内部访问。
                 from app.core.config import get_settings
+                from app.modules.agent.context_builder import resolve_prompt_spec_root
 
                 settings = get_settings()
-                host_spec_root = f"{settings.spec_data_host_dir}/{workspace_id}"
+                # 按 transport 分支决定塞入 stage prompt 的 --spec-root 路径（design §5.0 表）。
+                # 与 build_scan_bundle（context_builder.build_scan_bundle）复用同一 helper，保证
+                # scan 与 stage 链路在 tar 模式下路径一致（task-02）。
+                # 注意：host_spec_root 仅用于 prompt 文本（daemon 机器跑 sillyspec 时访问的路径）；
+                # spec_ws.spec_root（容器路径权威源）的读取不受影响，仅用于 platform-managed 策略
+                # 判断。stage 经 dispatch_to_daemon → interactive lease，tar 模式下 daemon
+                # _startInteractiveSession pull + onSessionEnd sync 自动复用 Wave1（task-06），
+                # 本处无需任何 daemon 改动（D-007）。
+                host_spec_root = resolve_prompt_spec_root(
+                    settings.spec_transport, str(workspace_id), settings
+                )
                 host_runtime_root = f"{host_spec_root}/runtime"
                 platform_args = (
                     f" --spec-root {host_spec_root}"

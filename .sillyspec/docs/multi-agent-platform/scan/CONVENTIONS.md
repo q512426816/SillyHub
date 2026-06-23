@@ -1,6 +1,6 @@
 ---
 source_commit: fcbf3fa7
-updated_at: 2026-06-22T17:56:21Z
+updated_at: 2026-06-23T00:00:00Z
 generator: sillyspec-scan
 author: qinyi
 created_at: 2026-06-23 01:56:21
@@ -61,6 +61,15 @@ monorepo 根项目（path=.），含三个子项目：backend（FastAPI + Python
 - `backend/`：FastAPI 应用（`app/` + `tests/` + `migrations/versions/` + `.pre-commit-config.yaml` + `pyproject.toml`）。
 - `frontend/`：Next.js 14 应用。
 - `sillyhub-daemon/`：Node ESM daemon。
+
+### 环境变量约定
+
+- **`SPEC_TRANSPORT`**（enum `shared|tar`，默认 `shared`）：spec 文档在 daemon 与 backend 间的同步模式（D-001: 正交于 `SpecWorkspace.strategy`，不入库；D-002: 全局开关）。读自 backend `Settings.spec_transport`，`field_validator` 规范化（小写 + 枚举校验）。
+  - `shared`（默认）：同机部署，靠 Docker bind mount 共享物理盘（`SPEC_DATA_HOST_DIR` ↔ 容器 `/data/spec-workspaces`），向后兼容现有拓扑。未配置 `SPEC_TRANSPORT` 时回退此模式（SC-1 不变性）。
+  - `tar`：异机部署，daemon 与 backend 两台独立设备无共享盘时，spec 文档整树 tar 回传到 backend 权威源 `/data/{ws}`。daemon 侧改用本地 `~/.sillyhub/daemon/specs/{ws}` 缓存，session 终态 `postSpecSync` 回传 + backend `apply_sync` 整树覆盖（D-003 双向同步）。
+  - **transport 不入库**（D-001）：不新增表字段、不写 `SpecWorkspace` 列；纯运行时全局开关，避免 spec 数据模型因部署拓扑耦合。对应 design §8 无表结构变更。
+  - 切换 transport 不做历史 spec 数据迁移（CLAUDE.md 规则7，数据可清；D-005）：清空 `SPEC_TRANSPORT`（回退 shared）+ 重新 scan 即可。
+  - 与 `SPEC_DATA_HOST_DIR` 关系：shared 模式下两者配合（host dir ↔ 容器 bind mount）；tar 模式下 `SPEC_DATA_HOST_DIR` 仍指向 backend 权威源宿主路径，但 daemon 侧不再依赖它（改用本地缓存）。
 
 ## 已知陷阱
 

@@ -295,6 +295,11 @@ class SpecWorkspaceService:
         D-006@v1: whole-tree overwrite, no diff/merge. ``.runtime/`` is
         preserved (daemon runtime cache, not spec data). Returns the
         ``reparse`` ``parsed`` count.
+
+        Rollback (D-005@v1, 2026-06-23-spec-transport-tar-sync): tar 模式出问题时，
+        清空 ``SPEC_TRANSPORT`` 回退 shared 默认 + 重新 scan 即可；数据可清，无迁移逻辑。
+        本方法对 shared/tar 两种 transport 均适用（端点 ``/spec-workspace/sync`` 权限
+        WORKSPACE_WRITE 不读 strategy，platform-managed/repo-* 天然放行）。
         """
         spec_ws = await self.get(workspace_id)
         spec_root = Path(spec_ws.spec_root)
