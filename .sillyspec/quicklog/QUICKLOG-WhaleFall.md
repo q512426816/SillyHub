@@ -874,3 +874,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
 结果:编辑按钮从 variant=default 改为 variant=outline(白底描边)。原因:default variant = bg-primary,在该项目 theme 下 --primary 与执行按钮 bg-blue-500 都是蓝色,造成执行/编辑同色。改 outline 后形成三种视觉层级:执行蓝实 / 编辑描边 / 删除红实。前端 typecheck 通过。
+
+
+## ql-20260623-010-b6e2 | 2026-06-23 11:15:00 | work-hours 页对齐 project-plans 风格
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/work-hours/page.tsx
+结果:/ppm/work-hours 整体重写对齐 project-plans:PageContainer size=full + PageHeader + SectionCard(bodyPadding=p-2);顶部按钮右对齐 ui Button(搜索 primary + 重置 outline + 分隔 + 工时统计→ outline + 导出 outline + 录入工时 primary);grid-cols-4 垂直 Field 查询条件(工作日期 RangePicker + 项目 antd Select + 类型 antd Select<number> + 录入人 PpmUserSelect style width 100%);Table bordered + scroll y calc(100vh-430px) + showTotal/showSizeChanger + 服务端分页 + searchNonce 兜底搜索(条件变化不自动查,点搜索/回车/重置触发);操作列 width 120 + whitespace-nowrap + fixed=right + ui Button(编辑 outline + 删除 destructive);移除 antd message 与本地 useMemo 过滤;buildParams(p,ps) 抽取过滤→WorkHourPageReq 映射;WorkHourDrawer 子组件保留原实现未动。前端 typecheck 通过。
