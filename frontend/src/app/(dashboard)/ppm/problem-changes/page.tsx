@@ -330,9 +330,6 @@ export default function ProblemChangesPage() {
               placeholder={["创建开始", "创建结束"]}
             />
           </Field>
-          <div className="self-end text-right text-xs text-muted-foreground">
-            共 {total} 条
-          </div>
         </div>
       </SectionCard>
 

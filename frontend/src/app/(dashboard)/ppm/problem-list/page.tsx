@@ -101,6 +101,8 @@ export default function ProblemListPage() {
   // 搜索触发计数器:点搜索/回车就 +1,即使 keyword 没变也强制 useEffect 触发查询
   const [searchNonce, setSearchNonce] = useState(0);
   const [exporting, setExporting] = useState(false);
+  // 查询条件展开/收起:默认只显示 4 个,展开后追加 2 个(是否紧急/发现时间)
+  const [expanded, setExpanded] = useState(false);
 
   const [drawer, setDrawer] = useState<{
     open: boolean;
@@ -403,6 +405,13 @@ export default function ProblemListPage() {
           <Button size="sm" variant="outline" onClick={resetFilters}>
             重置
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? "收起" : "展开"}
+          </Button>
           <span className="mx-1 h-6 w-px bg-border" aria-hidden />
           <Button
             size="sm"
@@ -472,31 +481,32 @@ export default function ProblemListPage() {
               options={PRO_TYPE_OPTIONS}
             />
           </Field>
-          <Field label="是否紧急">
-            <Select<string>
-              className="w-full"
-              placeholder="全部"
-              value={isUrgentFilter || undefined}
-              onChange={(v) => {
-                setIsUrgentFilter(v ?? "");
-                setSearchNonce((n) => n + 1);
-              }}
-              options={IS_URGENT_OPTIONS}
-            />
-          </Field>
-          <Field label="发现时间">
-            <RangePicker
-              className="w-full"
-              value={dateRange as [Dayjs, Dayjs] | null}
-              onChange={(v) =>
-                setDateRange(v as [Dayjs | null, Dayjs | null] | null)
-              }
-              placeholder={["发现开始", "发现结束"]}
-            />
-          </Field>
-          <div className="col-span-2 self-end text-right text-xs text-muted-foreground">
-            共 {total} 条
-          </div>
+          {expanded && (
+            <>
+              <Field label="是否紧急">
+                <Select<string>
+                  className="w-full"
+                  placeholder="全部"
+                  value={isUrgentFilter || undefined}
+                  onChange={(v) => {
+                    setIsUrgentFilter(v ?? "");
+                    setSearchNonce((n) => n + 1);
+                  }}
+                  options={IS_URGENT_OPTIONS}
+                />
+              </Field>
+              <Field label="发现时间">
+                <RangePicker
+                  className="w-full"
+                  value={dateRange as [Dayjs, Dayjs] | null}
+                  onChange={(v) =>
+                    setDateRange(v as [Dayjs | null, Dayjs | null] | null)
+                  }
+                  placeholder={["发现开始", "发现结束"]}
+                />
+              </Field>
+            </>
+          )}
         </div>
       </SectionCard>
 

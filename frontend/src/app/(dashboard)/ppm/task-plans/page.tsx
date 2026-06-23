@@ -548,9 +548,6 @@ export default function TaskPlansPage() {
               </Field>
             </>
           )}
-          <div className="self-end text-right text-xs text-muted-foreground">
-            共 {total} 条
-          </div>
         </div>
       </SectionCard>
 

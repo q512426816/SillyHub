@@ -5,7 +5,7 @@ created_at: 2026-06-01T12:00:00
 
 # frontend_app
 > 最后更新：2026-06-21
-> 最近变更：ql-20260623-011-c3d1（4 个 ppm 列表页选择型查询条件选中即触发查询）
+> 最近变更：ql-20260623-012-d4e8（problem-list 加展开收起 + ppm 列表页删搜索条件区共多少条）
 > 模块路径：frontend/src/app/**
 
 ## 职责
@@ -136,3 +136,4 @@ layout.tsx (根布局)
 | 2026-06-23 | ql-20260623-009-a8b4 | /ppm/task-plans 编辑按钮从 default 改 outline variant;原因 default=bg-primary 与执行 bg-blue-500 在 theme 下都是蓝造成同色;改后形成三种视觉层级:执行蓝实/编辑描边/删除红实 |
 | 2026-06-23 | ql-20260623-010-b6e2 | /ppm/work-hours 整体重写对齐 project-plans:PageContainer size=full + PageHeader + SectionCard(bodyPadding=p-2);顶部按钮右对齐 ui Button(搜索 primary + 重置 outline + 分隔 + 工时统计→ outline + 导出 outline + 录入工时 primary);grid-cols-4 垂直 Field(工作日期 RangePicker + 项目 antd Select + 类型 antd Select + 录入人 PpmUserSelect style width 100%);Table bordered + scroll y calc(100vh-430px) + showTotal/showSizeChanger + 服务端分页 + searchNonce 兜底搜索;操作列 width 120 + whitespace-nowrap + fixed=right + 编辑 outline + 删除 destructive;移除 antd message 与本地 useMemo 过滤;buildParams(p,ps) 抽取过滤→WorkHourPageReq 映射;WorkHourDrawer 子组件保留原实现 |
 | 2026-06-23 | ql-20260623-011-c3d1 | 4 个走 searchNonce 模式的页面(work-hours/task-plans/problem-list/problem-changes)所有 Select/PpmUserSelect/MonthPicker 选择型查询条件 onChange 追加 setSearchNonce((n)=>n+1),选中即触发查询,无需点搜索按钮;文本输入型(Input 关键字、配合人员、RangePicker 日期区间)保持原样走 commitSearch/回车提交;React 18 batch 保证 setState+setSearchNonce 同帧合并,useEffect [searchNonce] 只触发 1 次重查 |
+| 2026-06-23 | ql-20260623-012-d4e8 | problem-list 加展开收起按钮(默认 4 个 Field:关键字/状态/项目/问题类型,展开追加 2 个:是否紧急/发现时间,放重置后分隔前);删除 problem-list/problem-changes/task-plans 搜索条件 grid 末尾'共 X 条'浮动 div(Table 分页 showTotal 保留);total state 仍用于 Table pagination |

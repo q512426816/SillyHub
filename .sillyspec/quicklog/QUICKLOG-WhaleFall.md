@@ -886,3 +886,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/app/(dashboard)/ppm/work-hours/page.tsx, frontend/src/app/(dashboard)/ppm/task-plans/page.tsx, frontend/src/app/(dashboard)/ppm/problem-list/page.tsx, frontend/src/app/(dashboard)/ppm/problem-changes/page.tsx
 结果:在 4 个走 searchNonce 模式的页面所有 Select/PpmUserSelect/MonthPicker 选择型查询条件 onChange 里追加 setSearchNonce((n)=>n+1) — 选中即触发查询,无需点搜索按钮。work-hours 3 处(项目/类型/录入人);task-plans 5 处(状态/月份/项目/负责人/视图);problem-list 4 处(状态/项目/问题类型/是否紧急);problem-changes 1 处(状态多选)。文本输入型(Input 关键字、配合人员、RangePicker 日期区间)保持原样 — 仍走 commitSearch/回车提交。React 18 batch 保证 setState+setSearchNonce 同帧合并,useEffect [searchNonce] 只触发 1 次重查,不会双查。前端 typecheck 通过。
+
+
+## ql-20260623-012-d4e8 | 2026-06-23 13:30:00 | problem-list 加展开收起 + ppm 列表页删除搜索条件区"共 X 条"浮动文本
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/problem-list/page.tsx, frontend/src/app/(dashboard)/ppm/problem-changes/page.tsx, frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
+结果:(1) problem-list 加 expanded state + 顶部按钮行展开↔收起按钮(放在重置后、分隔前),默认 4 个 Field(关键字/状态/项目/问题类型),展开追加 2 个(是否紧急/发现时间)用 {expanded && (<>...</>)} 包裹;(2) 删除 problem-list/problem-changes/task-plans 搜索条件 grid 末尾的'共 X 条'浮动 div,Table 分页的 showTotal 保留(antd 分页标准展示)。total state 仍用于 Table pagination total,无未使用变量。前端 typecheck 通过。
