@@ -5,7 +5,7 @@ created_at: 2026-06-01T12:00:00
 
 # frontend_app
 > 最后更新：2026-06-23
-> 最近变更：ql-20260623-023-c4d1（milestone-details 页头 subtitle 去计划/项目 UUID,改显项目名）
+> 最近变更：ql-20260623-024-d5e8（work-hour-statistics 整页对齐 project-plans 风格）
 > 模块路径：frontend/src/app/**
 
 ## 职责
@@ -146,3 +146,4 @@ layout.tsx (根布局)
 | 2026-06-23 | ql-20260623-021-a7e3 | /ppm/milestone-details 主表 PpmSubTable tableProps.scroll 去掉 y(ql-017 为对齐 project-plans 所加),仅保留 x:"max-content"。根因:固定 scroll.y 让主表 .ant-table-body 成固定高度视窗,展开的明细子表嵌在内 → 表头被 sticky header 压住、末行超出视窗底部,首尾被"切割"(静态截图内容完整,动态查看被切,矛盾源于主表 body 视窗限制)。去 y 后主表随里程碑行数 + 展开子表自然撑高、整页滚动,明细子表表头不再被压、末行不再超视窗,首尾完整可见。不动 DataTable 的 overflow-hidden(经分析非裁切源) |
 | 2026-06-23 | ql-20260623-022-b3c9 | /ppm/milestone-details 实施阶段模块行展开的明细子表标题 `明细 · 模块 <UUID>` 改显示模块名称:DetailLevelProps 加 moduleName?:string|null;ModuleLevelTable.moduleExpandRender 透传 moduleName={m.module_name};标题 `模块 ${moduleId}` → `模块 ${moduleName || "(未命名模块)"}`(不回退 UUID,空兜底对齐 moduleColumns) |
 | 2026-06-23 | ql-20260623-023-c4d1 | /ppm/milestone-details 页头 PageHeader subtitle「计划 {planId} · 项目 {projectId}」两处 UUID 改显项目名:PsProjectPlan 无独立计划名(用 project_name 标识,types.ts:300);加 projectName state + getProjectPlan 后 setProjectName(plan.project_name);subtitle 去「计划/项目 UUID」改 `{projectName ? 项目 ${projectName} · : ""}实施阶段三级...`(空值无前导点)。projectId/planId state 保留(PpmUserSelect searchData/listPsPlanNodes 仍用) |
+| 2026-06-23 | ql-20260623-024-d5e8 | /ppm/work-hour-statistics 整页对齐 project-plans 风格(业务保留:维度切换/选对象即查实时查询/Tabs 聚合+图表/明细):PageContainer size=full + PageHeader 去 actions(返回按钮移顶部按钮行) + SectionCard bodyPadding=p-2 + 顶部按钮右对齐(清除范围、分隔、返回工时录入) + grid-cols-4 垂直 Field(统计维度 antd Select / 成员 PpmUserSelect style w-full / 项目 antd Select showSearch / 时间范围 RangePicker / 合计文本第4格);原生 select + 两 input[type=date] → antd Select + RangePicker(dayjs 转换 startDate/endDate string,保留 state 不破坏 load);两个 DataTable 加 bordered;去 SearchBar/inputCls import 和 showToast 解构,加 Field helper + dayjs/Dayjs/Select/DatePicker import |

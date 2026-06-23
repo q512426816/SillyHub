@@ -11,18 +11,23 @@
  *      · 聚合统计:柱状图 + 饼图 + 聚合表 (保留)。
  *      · 明细记录:listWorkHours 带 user_id/project_id + 时间段,展示工时明细记录。
  *
+ * 外壳对齐 project-plans 风格 (ql-024):PageContainer size=full + PageHeader 去
+ * actions + SectionCard bodyPadding=p-2 + 顶部按钮右对齐 + grid-cols-4 垂直 Field
+ * 查询条件(原生 select/input → antd Select/RangePicker) + DataTable bordered。
+ * 业务逻辑保留:维度切换、选对象即查的实时查询、Tabs、图表。
+ *
  * 依赖:lib/ppm/task (stat + page API) + lib/ppm/project (项目名映射) +
  *       components/ppm-user-select (成员选择) + components/charts。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { message, Tabs, type TableProps } from "antd";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { DatePicker, message, Select, Tabs, type TableProps } from "antd";
+import dayjs, { type Dayjs } from "dayjs";
 
 import { Button } from "@/components/ui/button";
 import {
   DataTable,
   PageContainer,
   PageHeader,
-  SearchBar,
   SectionCard,
 } from "@/components/layout";
 import { PpmUserSelect, type PpmSelectOption } from "@/components/ppm-user-select";
@@ -42,7 +47,9 @@ import type {
   WorkHourStatItem,
   WorkHourStatResponse,
 } from "@/lib/ppm/types";
-import { Toast, fmtDay, inputCls, useToast } from "../shared";
+import { Toast, fmtDay, useToast } from "../shared";
+
+const { RangePicker } = DatePicker;
 
 type Dimension = "user" | "project";
 type StatTab = "summary" | "detail";
@@ -51,8 +58,24 @@ interface Row extends WorkHourStatItem {
   name: string;
 }
 
+// 查询条件外壳:垂直布局(标题在上,控件在下),对齐 project-plans 风格。
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex w-full flex-col gap-1">
+      <span className="text-xs leading-4 text-muted-foreground">{label}</span>
+      {children}
+    </div>
+  );
+}
+
 export default function WorkHourStatisticsPage() {
-  const { toast, showToast } = useToast();
+  const { toast } = useToast();
 
   const [dimension, setDimension] = useState<Dimension>("user");
   const [userId, setUserId] = useState<string>("");
@@ -177,6 +200,20 @@ export default function WorkHourStatisticsPage() {
     [userOptions],
   );
 
+  // 时间范围 RangePicker 值:startDate/endDate(string) ↔ [Dayjs,Dayjs]。
+  const dateRange: [Dayjs | null, Dayjs | null] | null =
+    startDate || endDate
+      ? [
+          startDate ? dayjs(startDate) : null,
+          endDate ? dayjs(endDate) : null,
+        ]
+      : null;
+
+  const handleClearRange = () => {
+    setStartDate("");
+    setEndDate("");
+  };
+
   const detailColumns: TableProps<WorkHour>["columns"] = useMemo(
     () => [
       {
@@ -267,11 +304,21 @@ export default function WorkHourStatisticsPage() {
   ];
 
   return (
-    <PageContainer>
+    <PageContainer size="full">
       <PageHeader
         title="工时统计"
         subtitle="按成员 / 按项目选择具体对象 + 时间段,查看工时明细"
-        actions={
+      />
+
+      <Toast toast={toast} />
+
+      <SectionCard bodyPadding="p-2">
+        {/* 顶部按钮行:右对齐(清除范围 | 分隔 | 返回工时录入) */}
+        <div className="mb-2 flex items-center justify-end gap-2">
+          <Button size="sm" variant="outline" onClick={handleClearRange}>
+            清除范围
+          </Button>
+          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
           <Button
             size="sm"
             variant="outline"
@@ -281,25 +328,23 @@ export default function WorkHourStatisticsPage() {
           >
             ← 返回工时录入
           </Button>
-        }
-      />
+        </div>
 
-      <Toast toast={toast} />
-
-      <SectionCard>
-        <SearchBar>
-          <select
-            value={dimension}
-            onChange={(e) => setDimension(e.target.value as Dimension)}
-            className={`w-32 ${inputCls}`}
-            aria-label="统计维度"
-          >
-            <option value="user">按成员</option>
-            <option value="project">按项目</option>
-          </select>
+        {/* 查询条件:垂直 grid-cols-4(选对象/范围即查,保留实时查询语义) */}
+        <div className="grid w-full grid-cols-4 gap-3">
+          <Field label="统计维度">
+            <Select
+              value={dimension}
+              onChange={(v) => setDimension(v)}
+              options={[
+                { value: "user", label: "按成员" },
+                { value: "project", label: "按项目" },
+              ]}
+              className="w-full"
+            />
+          </Field>
           {dimension === "user" ? (
-            <div className="flex w-[200px] items-center gap-1">
-              <span className="text-xs text-muted-foreground">成员</span>
+            <Field label="成员">
               <PpmUserSelect
                 res="user"
                 value={userId || null}
@@ -307,55 +352,41 @@ export default function WorkHourStatisticsPage() {
                 placeholder="请选择成员"
                 allowClear
                 onLoadedOptions={setUserOptions}
+                style={{ width: "100%" }}
               />
-            </div>
+            </Field>
           ) : (
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-muted-foreground">项目</span>
-              <select
-                value={projectId}
-                onChange={(e) => setProjectId(e.target.value)}
-                className={`w-56 ${inputCls}`}
-                aria-label="项目选择"
-              >
-                <option value="">请选择项目</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.project_name ?? p.id}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <Field label="项目">
+              <Select
+                value={projectId || undefined}
+                onChange={(v) => setProjectId(v ?? "")}
+                placeholder="请选择项目"
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                options={projects.map((p) => ({
+                  value: p.id,
+                  label: p.project_name ?? p.id,
+                }))}
+                className="w-full"
+              />
+            </Field>
           )}
-          <input
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            className={`${inputCls} w-40`}
-            aria-label="开始日期"
-          />
-          <span className="text-xs text-muted-foreground">至</span>
-          <input
-            type="date"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            className={`${inputCls} w-40`}
-            aria-label="结束日期"
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              setStartDate("");
-              setEndDate("");
-            }}
-          >
-            清除范围
-          </Button>
-          <span className="ml-auto text-xs text-muted-foreground">
+          <Field label="时间范围">
+            <RangePicker
+              value={dateRange}
+              onChange={(dates) => {
+                const [s, e] = dates ?? [null, null];
+                setStartDate(s ? s.format("YYYY-MM-DD") : "");
+                setEndDate(e ? e.format("YYYY-MM-DD") : "");
+              }}
+              className="w-full"
+            />
+          </Field>
+          <div className="self-end text-right text-xs text-muted-foreground">
             合计 {(totalHours ?? 0).toFixed(1)}h · 明细 {details.length} 条
-          </span>
-        </SearchBar>
+          </div>
+        </div>
       </SectionCard>
 
       {!objectSelected ? (
@@ -395,6 +426,7 @@ export default function WorkHourStatisticsPage() {
                       dataSource={rows}
                       loading={loading}
                       size="small"
+                      bordered
                       pagination={{ pageSize: 50, showSizeChanger: false }}
                       emptyText="暂无数据"
                     />
@@ -435,6 +467,7 @@ export default function WorkHourStatisticsPage() {
                   dataSource={details}
                   loading={loading}
                   size="small"
+                  bordered
                   scroll={{ x: "max-content" }}
                   pagination={{ pageSize: 50, showSizeChanger: false }}
                   emptyText="该对象在所选范围内暂无工时明细"
