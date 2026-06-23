@@ -368,6 +368,75 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
 }
 
 /**
+ * InstallDaemonBlock —— 「首次安装 daemon」折叠区块。
+ *
+ * 显示一键安装命令 `curl -fsSL <server>/daemon/install.sh | bash`，由 nginx 托管
+ * 的 install.sh 执行（下载 ncc 单文件 bundle + 写 wrapper + 加 PATH）。
+ *
+ * serverUrl 从 window.location.origin 推导（:3001 前端 → :8001 后端/nginx），
+ * 不硬编码 IP。用 mounted state 避免服务端/客户端 hydration 不一致。
+ */
+function InstallDaemonBlock() {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [serverUrl, setServerUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const frontendUrl = window.location.origin;
+    // 前端 :3001 → 后端/nginx :8001，与 CopyDaemonCommand 的 serverUrl 推导一致。
+    setServerUrl(frontendUrl.replace(/:3001$/, ":8001"));
+  }, []);
+
+  const cmd = serverUrl
+    ? `curl -fsSL ${serverUrl}/daemon/install.sh | bash -s -- --server-url ${serverUrl}`
+    : "";
+
+  const handleCopy = async () => {
+    if (!cmd) return;
+    await navigator.clipboard.writeText(cmd);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="rounded-md border border-dashed border-border/70 bg-muted/30">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left"
+      >
+        <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="text-[11px] font-medium text-foreground">首次安装 daemon（新机器）</span>
+        <span className="ml-auto text-[10px] text-muted-foreground">
+          {open ? "收起" : "展开"}
+        </span>
+      </button>
+      {open && (
+        <div className="flex min-w-0 items-center gap-2 border-t border-border/70 px-2.5 py-1.5">
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 shadow-sm">
+            <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <code className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+              {cmd || "curl -fsSL <server>/daemon/install.sh | bash"}
+            </code>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 shrink-0 gap-1.5 px-2.5"
+            onClick={handleCopy}
+            disabled={!cmd}
+            title={copied ? "已复制" : "复制安装命令"}
+          >
+            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            <span className="hidden sm:inline">{copied ? "已复制" : "复制"}</span>
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * task-11：交互式会话面板包装（演进自 quick-chat）。
  *
  * 保留 provider/model 选择 + runtime 卡片布局，会话核心替换为
@@ -1397,7 +1466,8 @@ export default function RuntimesPage() {
             本地代理运行时、心跳状态和快速会话控制台。
           </p>
         </div>
-        <div className="w-full lg:max-w-xl">
+        <div className="flex w-full flex-col gap-2 lg:max-w-xl">
+          <InstallDaemonBlock />
           <CopyDaemonCommand compact />
         </div>
       </header>

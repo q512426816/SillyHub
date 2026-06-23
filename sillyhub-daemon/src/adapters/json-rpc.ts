@@ -37,6 +37,7 @@
 
 import type { AgentEvent } from '../types.js';
 import type { ProtocolAdapter } from './protocol-adapter.js';
+import { DAEMON_VERSION } from '../daemon-version.js';
 
 /** JSON-RPC 2.0 四 provider 联合（工厂 task-11 会做 narrowing）。 */
 export type JsonRpcProvider = 'codex' | 'hermes' | 'kimi' | 'kiro';
@@ -167,7 +168,7 @@ export class JsonRpcAdapter implements ProtocolAdapter {
         id: 1,
         method: 'initialize',
         params: {
-          clientInfo: { name: 'sillyhub-daemon', version: '0.1.0' },
+          clientInfo: { name: 'sillyhub-daemon', version: DAEMON_VERSION },
         },
       }),
       JSON.stringify({

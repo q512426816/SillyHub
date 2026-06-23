@@ -68,6 +68,24 @@ from app.modules.daemon.service import (
 log = get_logger(__name__)
 
 
+# ── Daemon distribution metadata (public, no auth) ───────────────────────────
+# GET /api/daemon/version —— 供前端安装区块 / install.sh 拉取最新版本号与下载地址。
+# 当前硬编码；后续可改为读 nginx 托管的 latest.json 或配置中心。
+# latest.json（install.sh 消费）字段：version / downloadUrl；本端点多返回 minRequired
+# 供前端做版本门槛提示。
+DAEMON_LATEST_VERSION = "0.1.0"
+DAEMON_MIN_REQUIRED_VERSION = "0.1.0"
+DAEMON_DOWNLOAD_URL = "/daemon/latest/sillyhub-daemon.js"
+
+
+class DaemonVersionResponse(BaseModel):
+    """GET /api/daemon/version 响应：daemon 分发元数据（公开端点）。"""
+
+    latest: str = Field(description="最新发布版本号")
+    minRequired: str = Field(description="最低兼容版本号（低于则需升级）")
+    downloadUrl: str = Field(description="单文件 bundle 下载地址（相对站内路径）")
+
+
 # SSE response headers shared with the run-scoped stream endpoint
 # (app/modules/agent/router.py). Proxies/buffers must not hold SSE frames.
 _SESSION_SSE_HEADERS = {
@@ -81,6 +99,25 @@ router = APIRouter(prefix="/daemon", tags=["daemon"])
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 # 管理 UI 端点用 runtime:admin；daemon 自身的注册/心跳/lease 生命周期仍走 get_current_principal
 RuntimeAdminUser = Annotated[User, Depends(require_permission_any(Permission.RUNTIME_ADMIN))]
+
+
+# ── Daemon distribution metadata (public, no auth) ───────────────────────────
+@router.get(
+    "/version",
+    response_model=DaemonVersionResponse,
+)
+async def get_daemon_version() -> DaemonVersionResponse:
+    """公开端点：返回 daemon 最新版本 / 最低要求版本 / 下载地址。
+
+    无需认证——前端「首次安装」区块与 install.sh 都需要匿名拉取该元数据。
+    downloadUrl 为相对路径（如 ``/daemon/latest/sillyhub-daemon.js``），由 nginx
+    静态托管；调用方（前端/脚本）按自身已知的服务端 base URL 拼接。
+    """
+    return DaemonVersionResponse(
+        latest=DAEMON_LATEST_VERSION,
+        minRequired=DAEMON_MIN_REQUIRED_VERSION,
+        downloadUrl=DAEMON_DOWNLOAD_URL,
+    )
 
 
 # ── Runtime registration & heartbeat ────────────────────────────────────────

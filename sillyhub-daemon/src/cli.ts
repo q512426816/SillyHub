@@ -52,6 +52,7 @@ import { Daemon } from './daemon.js';
 import { ClaudeSdkDriver } from './interactive/claude-sdk-driver.js';
 import { SessionManager } from './interactive/session-manager.js';
 import { JsonSessionPersistence } from './interactive/session-store-persistence.js';
+import { DAEMON_VERSION } from './daemon-version.js';
 
 // ── 路径访问（可测试性：函数返回，task-22 vi.spyOn 可 mock）──────────────────
 
@@ -181,7 +182,7 @@ export function createProgram(): Command {
   program
     .name('sillyhub-daemon')
     .description('SillyHub Daemon - local task execution daemon.')
-    .version('0.1.0');
+    .version(DAEMON_VERSION);
 
   // ── start ────────────────────────────────────────────────────────────────
 
