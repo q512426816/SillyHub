@@ -280,6 +280,7 @@ logout() -> 清空 useSession + 跳转 /login
 - 2026-06-19: `/runtimes` preserves usable runtime-card and interactive-session widths on desktop layouts.
   The page uses a wider content shell, renders runtime cards in two columns when space allows, and stacks
   the compound session workspace below the runtime list so its sidebar and detail panel remain readable.
+- 2026-06-23: TopBar 用户菜单新增「切换平台」（SillyHub↔项目管理平台，按 pathname `/ppm` 前缀判断，复用 app-shell 菜单隔离逻辑；`resolvePlatformSwitch` 纯函数导出于 `top-bar.tsx`）；退出登录（TopBar 菜单项 + 侧边栏底部按钮）统一改为 `LogoutConfirmDialog`（`components/logout-confirm-dialog.tsx`，基于 `ui/dialog`）二次确认后才登出，`app-shell.tsx` 拆 `requestLogout`/`performLogout`；侧边栏 Brand 区 LOGO 旁显示当前平台名称标签（SillyHub 蓝 / 项目管理平台紫，折叠时隐藏），LOGO 链接随平台指向 `/workspaces` 或 `/ppm`。
 
 <!-- MANUAL_NOTES_END -->
 
@@ -302,3 +303,4 @@ logout() -> 清空 useSession + 跳转 /login
 | 2026-06-22 | ql-20260622-002-ce1c | 替换项目 favicon 和 LOGO：favicon.ico→`app/favicon.ico`（Next 约定自动生效）；logo.png（690x788）→`public/logo.png`；`login/page.tsx` 的 LogoMark 由手绘改 next/image 整张 logo、移动端加 bg-slate-900/90 chip 衬底（浅底保证白字可见）；`app-shell.tsx` 侧边栏 Brand 由纯文字改 logo（展开 h-9 / 折叠 h-8 居中）。重建镜像验证 logo 加载正常。 |
 | 2026-06-22 | 2026-06-22-unify-agent-run-sse-hook | 合并前端两套 Agent Run SSE 客户端为 `useAgentRunStream` hook + `AgentRunPanel` 面板；4 调用点（根/agent/changes 页）统一为 `<AgentRunPanel>`；删除 `streamAgentRunLogs`（`AgentRunStreamClient` 成唯一底层）；pending_input 三处 UI 统一。修复 `/agent` 与 `changes/[cid]` 页 AskUserQuestion 审批卡片不弹出导致 daemon 5min 兜底超时（根因：`streamAgentRunLogs` 丢弃无 timestamp 的 permission 事件）。后端/daemon/`AgentLogViewer` 零改动；typecheck + 30 文件/363 用例全过。 |
 | 2026-06-22 | 2026-06-22-fix-dialog-recovery-session-field | 修复 AskUserQuestion 卡片刷新后无法恢复：`useAgentRunStream` 的 `fetchPendingDialogs` 改用 `run.agent_session_id`（AgentSession 表 id），非 `run.session_id`（daemon 内部 id）。`AgentRun` 类型 + 后端 `AgentRunRead` schema 暴露 `agent_session_id`。根因：session 双字段语义（session_id=daemon 内部 / agent_session_id=AgentSession.id），刷新恢复查 `agent_sessions`/`session_dialog_requests` 表需后者。 |
+| 2026-06-23 | ql-20260623-003-7c2e | TopBar 用户菜单新增「切换平台」（SillyHub↔项目管理平台，`resolvePlatformSwitch` 纯函数）+ 退出登录二次确认（`LogoutConfirmDialog`，TopBar 菜单项与侧边栏底部按钮统一接确认）+ 侧边栏 Brand 区 LOGO 旁显示当前平台名称。 |

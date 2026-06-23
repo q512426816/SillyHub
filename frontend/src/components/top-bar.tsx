@@ -1,7 +1,7 @@
 "use client";
 
-import { usePathname } from "next/navigation";
-import { Bell, ChevronRight, Search } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { ArrowLeftRight, Bell, ChevronRight, LogOut, Search } from "lucide-react";
 
 import {
   Avatar,
@@ -57,6 +57,23 @@ function buildBreadcrumbs(pathname: string): string[] {
   return segments.map((s) => SEGMENT_LABEL[s] ?? s);
 }
 
+/**
+ * ql-20260623-003-7c2e：解析当前平台，给出「切换平台」菜单项的文案与目标路径。
+ *
+ * 平台判断与 app-shell 菜单隔离一致：pathname 以 /ppm 开头 = 项目管理平台，
+ * 否则 = SillyHub（主平台）。当前在 ppm → 提示切回 SillyHub；否则 → 提示切到项目管理平台。
+ * 抽成纯函数便于单测（不依赖 radix DropdownMenu 的渲染时机）。
+ */
+export function resolvePlatformSwitch(pathname: string): {
+  label: string;
+  href: string;
+} {
+  const inPpm = pathname.startsWith("/ppm");
+  return inPpm
+    ? { label: "切换到 SillyHub", href: "/workspaces" }
+    : { label: "切换到项目管理平台", href: "/ppm" };
+}
+
 export interface TopBarProps {
   displayName: string;
   onLogout: () => void;
@@ -64,8 +81,10 @@ export interface TopBarProps {
 
 export function TopBar({ displayName, onLogout }: TopBarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const crumbs = buildBreadcrumbs(pathname);
   const initial = (displayName?.trim()?.[0] ?? "?").toUpperCase();
+  const { label: switchLabel, href: switchHref } = resolvePlatformSwitch(pathname);
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-4 shadow-sm">
@@ -130,12 +149,19 @@ export function TopBar({ displayName, onLogout }: TopBarProps) {
               </span>
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuLabel className="truncate">{displayName}</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem>个人设置</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onLogout}>退出登录</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push(switchHref)}>
+              <ArrowLeftRight className="mr-2 h-4 w-4" />
+              {switchLabel}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onLogout}>
+              <LogOut className="mr-2 h-4 w-4" />
+              退出登录
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

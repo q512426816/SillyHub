@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { LogoutConfirmDialog } from "@/components/logout-confirm-dialog";
 import { TopBar } from "@/components/top-bar";
 import {
   MENU_SECTION_LABEL as SECTION_LABEL,
@@ -123,6 +124,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   });
 
+  // 退出二次确认弹窗状态（ql-20260623-003-7c2e）：两处退出入口统一请求打开本弹窗。
+  const [logoutOpen, setLogoutOpen] = useState(false);
+
+  // 当前平台：/ppm 前缀=项目管理平台，否则=SillyHub。用于侧边栏 Brand 区平台名称展示，
+  // 与 TopBar 切换平台 / 菜单 section 隔离保持一致。
+  const inPpm = pathname.startsWith("/ppm");
+  const platformName = inPpm ? "项目管理平台" : "SillyHub";
+
   useEffect(() => {
     try {
       localStorage.setItem(COLLAPSED_KEY, String(collapsed));
@@ -157,7 +166,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     return pathname === full || pathname.startsWith(full + "/");
   };
 
-  const onLogout = async () => {
+  // 用户点退出（TopBar 菜单 / 侧边栏底部）→ 先弹确认，确认后才执行真正登出。
+  const requestLogout = () => setLogoutOpen(true);
+
+  const performLogout = async () => {
+    setLogoutOpen(false);
     try {
       if (refreshToken) {
         await fetch("/api/auth/logout", {
@@ -243,24 +256,35 @@ export function AppShell({ children }: { children: ReactNode }) {
       >
         {/* Brand：项目 LOGO（public/logo.png，含 SILLYHUB 文字） */}
         <div
-          className={`border-b flex items-center py-4 transition-all duration-200 ${
+          className={`border-b flex items-center gap-2 py-4 transition-all duration-200 ${
             collapsed ? "justify-center px-2" : "px-5"
           }`}
         >
           <Link
-            href="/workspaces"
+            href={inPpm ? "/ppm" : "/workspaces"}
             className="flex items-center overflow-hidden transition-all duration-200 hover:opacity-80"
-            title="SillyHub"
+            title={platformName}
           >
             <Image
               src="/logo.png"
-              alt="SillyHub"
+              alt={platformName}
               width={690}
               height={788}
               priority
               className={collapsed ? "h-8 w-auto" : "h-9 w-auto"}
             />
           </Link>
+          {!collapsed && (
+            <span
+              className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${
+                inPpm
+                  ? "bg-violet-50 text-violet-700"
+                  : "bg-blue-50 text-blue-700"
+              }`}
+            >
+              {platformName}
+            </span>
+          )}
         </div>
 
         {/* Navigation */}
@@ -296,7 +320,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Button
               variant="ghost"
               size="sm"
-              onClick={onLogout}
+              onClick={requestLogout}
               title="退出登录"
               className="shrink-0 gap-1.5"
             >
@@ -327,8 +351,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           collapsed ? "ml-[60px]" : "ml-[260px]"
         }`}
       >
-        <TopBar onLogout={onLogout} displayName={displayName} />
+        <TopBar onLogout={requestLogout} displayName={displayName} />
         <div className="min-w-0 flex-1">{children}</div>
+        <LogoutConfirmDialog
+          open={logoutOpen}
+          onOpenChange={setLogoutOpen}
+          onConfirm={performLogout}
+        />
       </div>
     </div>
   );
