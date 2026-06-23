@@ -93,7 +93,7 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(20);
 
   const [drawer, setDrawer] = useState<{
     open: boolean;

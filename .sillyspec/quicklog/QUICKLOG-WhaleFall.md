@@ -965,3 +965,10 @@ created_at: 2026-06-03T08:42:04
 文件：frontend/src/app/(dashboard)/ppm/work-hour-statistics/page.tsx
 背景:用户要求按 project-plans 风格调整 work-hour-statistics 整页。
 结果:PageContainer 加 size=full;PageHeader 去 actions(返回按钮移顶部按钮行);SectionCard bodyPadding=p-2 + 顶部按钮右对齐(清除范围|分隔|返回工时录入) + grid-cols-4 垂直 Field(统计维度 antd Select/成员 PpmUserSelect style w-full/项目 antd Select showSearch/时间范围 RangePicker/合计文本第4格);原生 select + 两 input[type=date] → antd Select + RangePicker(dayjs 转换 startDate/endDate string,保留 state 不破坏 load);两个 DataTable 加 bordered;去 SearchBar/inputCls import 和 showToast 解构,加 Field helper + dayjs/Dayjs/Select/DatePicker import。业务逻辑全保留(维度切换/选对象即查的实时查询/Tabs 聚合+图表/明细/resolveName)。typecheck 通过(无 work-hour-statistics 专属测试)。Docker frontend 待重建部署。
+
+## ql-20260623-025-e6f9 | 2026-06-23 17:25:00 | ppm 所有列表页默认查 20 条
+状态：已完成
+文件：frontend/src/components/ppm-project-members-table.tsx, frontend/src/app/(dashboard)/ppm/work-hour-statistics/page.tsx
+背景:用户要求项目管理(ppm)下所有列表页默认查 20 条。
+排查:DEFAULT_PAGE_SIZE=20(shared.tsx),project-plans/problem-list/problem-changes/task-plans/task-execute/work-hours + PpmResourceTable(projects/customers/project-stakeholders) 已都 20;plan-nodes/milestone-details/kanban pagination=false(树形/主子表/矩阵,非分页列表)保留。
+结果:改 2 文件 3 处 — ppm-project-members-table.tsx pageSize useState(10)→20;work-hour-statistics/page.tsx 两处 pagination pageSize 50→20(聚合表+明细表)。typecheck 通过。Docker frontend 待重建部署。

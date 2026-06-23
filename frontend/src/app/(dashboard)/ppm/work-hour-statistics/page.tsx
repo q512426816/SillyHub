@@ -427,7 +427,7 @@ export default function WorkHourStatisticsPage() {
                       loading={loading}
                       size="small"
                       bordered
-                      pagination={{ pageSize: 50, showSizeChanger: false }}
+                      pagination={{ pageSize: 20, showSizeChanger: false }}
                       emptyText="暂无数据"
                     />
                     <div className="grid gap-4 lg:grid-cols-2">
@@ -469,7 +469,7 @@ export default function WorkHourStatisticsPage() {
                   size="small"
                   bordered
                   scroll={{ x: "max-content" }}
-                  pagination={{ pageSize: 50, showSizeChanger: false }}
+                  pagination={{ pageSize: 20, showSizeChanger: false }}
                   emptyText="该对象在所选范围内暂无工时明细"
                 />
               ),

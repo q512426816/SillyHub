@@ -5,7 +5,7 @@ created_at: 2026-06-01T12:00:00
 
 # frontend_components
 > 最后更新：2026-06-23
-> 最近变更：ql-20260623-019-3a8c（PpmSubTable 移除展开列表头文字 + PlanDetailActions/ProblemActions 无按钮兜底改 null）
+> 最近变更：ql-20260623-025-e6f9（ppm-project-members-table 默认 pageSize 10→20,对齐 ppm 列表页统一 20 条）
 > 模块路径：frontend/src/components/**
 
 ## 职责
@@ -104,6 +104,7 @@ AgentLogViewer（被 agent 控制台页、workspace 详情页共用）
 | 2026-06-09 | ql-20260609-015-d4e9 | stdout [TOOL_RESULT] 归一化 + ToolResultCard + WorkflowSpecResultCard |
 | 2026-06-17 | ql-20260617-003-3757 | 新增 Pagination 通用分页组件（上一页/下一页 + 共X条·第N/M页），用户/角色管理共用 |
 | 2026-06-17 | ql-20260617-004-02d5 | 引入 antd 6.4，新增 AntdProviders（ConfigProvider + zhCN locale + Table token），删除 ui/pagination.tsx 由 antd Table 内置分页替代 |
+| 2026-06-23 | ql-20260623-025-e6f9 | ppm-project-members-table.tsx pageSize useState(10)→20(对齐 ppm 所有列表页默认 20 条);work-hour-statistics 聚合+明细表 pageSize 50→20 见 frontend_app |
 | 2026-06-23 | ql-20260623-019-3a8c | PpmSubTable 移除 expandable.columnTitle='展开'（默认 expand 列无表头文字，与其他列表头高度一致）；ppm-status-actions.tsx PlanDetailActions + ProblemActions 在 buttons.length===0 时兜底从 `<span>—</span>` 改为 null，避免 done/archived 状态明细行操作列出现破折号（详情按钮仍在，只去掉多余 —） |
 | 2026-06-21 | ql-20260621-003-menu-isolation | AppShell 侧边栏按路径隔离菜单：`/ppm/*` 仅渲染 ppm section，其它路径仅渲染非 ppm section（overview/management/admin/system），ppm 与主平台菜单互不可见 |
 | 2026-06-21 | ql-20260621-013-b2e5 | AskUserDialogCard 改常驻手动输入框：每问选项下方常驻输入框（填写即以此作答，覆盖选项），移除"选 Other 才出框"的两步操作 |
