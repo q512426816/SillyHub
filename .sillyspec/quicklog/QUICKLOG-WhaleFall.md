@@ -934,3 +934,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/components/ppm-status-actions.tsx, frontend/src/components/ppm-sub-table.tsx
 结果:(1) ppm-status-actions.tsx line 240 + 399 两处 buttons.length===0 兜底从 `<span>—</span>` 改为 null — PlanDetailActions(done/archived 状态无动作按钮) + ProblemActions 同步修复,避免 done/archived 明细行的操作列里在「详情」按钮旁出现破折号;(2) ppm-sub-table.tsx 移除 expandable.columnTitle='展开'(原 expandableTriggerField?'展开':undefined),默认 expand 列无表头文字,与其他列表头高度一致,避免 48px 宽展开列内 2 字符文字撑高表头。前端 typecheck 通过。
+
+
+## ql-20260623-020-d2a1 | 2026-06-23 15:56:53 | milestone-details 子表 dashed 双框视觉切割感修复
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
+结果:milestone-details 两处展开区容器(模块层 line 909 + 明细层 line 1290)移除 `border border-dashed`,统一改为 `rounded bg-muted/20 p-3`(明细层原 bg-card/40 同步统一为 bg-muted/20),对齐 plan-nodes line 268 展开区风格。消除 ql-018 加内层 bordered 后「虚线外框 + 实线表框」叠加形成的双框视觉切割感,内层 bordered 表格成为唯一可视边框。前端 typecheck 通过。

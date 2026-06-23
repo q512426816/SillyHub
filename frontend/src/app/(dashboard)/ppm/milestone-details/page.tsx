@@ -906,7 +906,7 @@ function ModuleLevelTable({
   );
 
   return (
-    <div className="rounded border border-dashed bg-muted/20 p-3">
+    <div className="rounded bg-muted/20 p-3">
       <div className="mb-2 flex items-center justify-between">
         <div className="text-sm font-medium text-foreground">
           模块(实施阶段)
@@ -1287,7 +1287,7 @@ function DetailLevelTable({
   );
 
   return (
-    <div className="rounded border border-dashed bg-card/40 p-3">
+    <div className="rounded bg-muted/20 p-3">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-sm font-medium">
           明细{moduleId ? ` · 模块 ${moduleId}` : ""}
