@@ -1,0 +1,257 @@
+<!--
+  author: qinyi
+  created_at: 2026-06-23T00:00:00+08:00
+  desc: 2026-06-23-runtimes-session-dialog 线框交互原型
+        展示 /runtimes 页面精简 + 会话弹窗化 + active 续聊交互。
+        单文件，纯 CSS/JS，浏览器直接打开。
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>/runtimes 会话弹窗化 — 线框原型</title>
+<style>
+  :root { --bd:#d1d5db; --bg:#fff; --mut:#6b7280; --pri:#4f46e5; --em:#10b981; --am:#f59e0b; --ro:#ef4444; --slate:#94a3b8; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:13px/1.5 -apple-system,"Segoe UI",sans-serif; color:#111827; background:#f3f4f6; }
+  .wrap { max-width:1100px; margin:0 auto; padding:24px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--mut); margin:0 0 16px; }
+  .hint { background:#eef2ff; border:1px dashed var(--pri); color:#3730a3; padding:8px 12px; border-radius:6px; font-size:12px; margin:0 0 20px; }
+  /* 摘要卡 */
+  .stats { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:20px; }
+  .stat { border:1px solid var(--bd); background:#fff; border-radius:6px; padding:12px; }
+  .stat .l { font-size:10px; text-transform:uppercase; color:var(--mut); }
+  .stat .v { font-size:22px; font-weight:600; }
+  .stat.online { border-color:#a7f3d0; background:#ecfdf5; }
+  .stat.warn { border-color:#fcd34d; background:#fffbeb; }
+  .stat.off { border-color:#cbd5e1; background:#f8fafc; }
+  .stat.dis { border-color:#fecaca; background:#fef2f2; }
+  /* runtime 卡片 */
+  .cards { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .card { border:1px solid var(--bd); background:#fff; border-radius:8px; overflow:hidden; }
+  .card .hd { display:flex; align-items:center; gap:8px; padding:12px; border-bottom:1px solid #eef0f3; background:#fafbfc; }
+  .chip { font-size:11px; border:1px solid var(--bd); border-radius:4px; padding:1px 6px; }
+  .chip.claude { color:#6d28d9; border-color:#ddd6fe; background:#f5f3ff; }
+  .chip.codex { color:#047857; border-color:#a7f3d0; background:#ecfdf5; }
+  .b-online { font-size:11px; color:var(--em); border:1px solid #a7f3d0; background:#ecfdf5; border-radius:4px; padding:1px 6px; }
+  .card .nm { font-weight:600; margin:10px 12px 2px; font-family:ui-monospace,monospace; }
+  .card .mt { color:var(--mut); font-size:11px; margin:0 12px; }
+  .card .meta { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; padding:12px; font-size:11px; }
+  .card .meta b { display:block; color:var(--mut); font-weight:400; }
+  .card .acts { display:flex; gap:8px; justify-content:flex-end; padding:10px 12px; border-top:1px solid #eef0f3; }
+  .btn { font-size:12px; border:1px solid var(--bd); background:#fff; border-radius:5px; padding:5px 10px; cursor:pointer; }
+  .btn:hover { background:#f3f4f6; }
+  .btn.pri { background:var(--pri); color:#fff; border-color:var(--pri); }
+  .btn.danger { color:var(--ro); }
+  .page-bottom-note { margin-top:24px; padding:14px; border:1px dashed var(--slate); border-radius:6px; color:var(--mut); font-size:12px; text-align:center; }
+  /* Dialog */
+  .overlay { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; z-index:50; }
+  .overlay.show { display:flex; }
+  .dialog { width:min(880px,94vw); height:min(560px,88vh); background:#fff; border-radius:10px; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 20px 50px rgba(0,0,0,.3); }
+  .dialog .dhd { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid #eef0f3; }
+  .dialog .dhd .t { font-weight:600; }
+  .dialog .dhd .t small { color:var(--mut); font-weight:400; }
+  .x { cursor:pointer; color:var(--mut); border:none; background:none; font-size:18px; }
+  .dialog .dbody { display:grid; grid-template-columns:240px 1fr; flex:1; min-height:0; }
+  /* 会话列表 */
+  .slist { border-right:1px solid #eef0f3; display:flex; flex-direction:column; min-height:0; }
+  .slist .sh { padding:10px 12px; border-bottom:1px solid #eef0f3; }
+  .slist .sh b { font-size:12px; }
+  .slist .sh small { color:var(--mut); }
+  .slist .items { overflow-y:auto; flex:1; }
+  .sitem { display:block; width:100%; text-align:left; border:none; border-bottom:1px solid #f3f4f6; background:#fff; padding:8px 12px; cursor:pointer; }
+  .sitem:hover, .sitem.sel { background:#f3f4f6; }
+  .sitem .top { display:flex; justify-content:space-between; align-items:center; }
+  .sitem .id { font-family:ui-monospace,monospace; font-size:11px; }
+  .dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:4px; }
+  .dot.active { background:var(--em); }
+  .dot.ended { background:var(--slate); }
+  .stag { font-size:10px; border:1px solid var(--bd); border-radius:3px; padding:0 4px; }
+  .stag.active { color:var(--em); border-color:#a7f3d0; background:#ecfdf5; }
+  .sitem .meta2 { color:var(--mut); font-size:10px; }
+  .newbtn { margin:8px 10px; }
+  /* 会话区 */
+  .spanel { display:flex; flex-direction:column; min-height:0; }
+  .msgs { flex:1; overflow-y:auto; padding:16px; background:#fafbfc; }
+  .row { display:flex; margin-bottom:10px; }
+  .row.u { justify-content:flex-end; }
+  .bubble { max-width:80%; padding:8px 12px; border-radius:8px; font-size:12px; }
+  .bubble.u { background:var(--pri); color:#fff; }
+  .bubble.a { background:#fff; border:1px solid var(--bd); }
+  .turn-tag { color:var(--mut); font-size:10px; margin:2px 0 12px; }
+  .sfoot { border-top:1px solid #eef0f3; padding:12px; background:#fff; }
+  .input-row { display:flex; gap:8px; align-items:flex-end; }
+  textarea { flex:1; border:1px solid var(--bd); border-radius:6px; padding:8px; font-size:13px; resize:none; height:48px; }
+  .readonly-bar { display:flex; gap:8px; align-items:center; justify-content:space-between; }
+  .resumebtn { font-size:12px; border:1px solid var(--pri); color:var(--pri); background:#fff; border-radius:5px; padding:6px 10px; cursor:pointer; }
+  .resumebtn[disabled] { border-color:var(--bd); color:var(--mut); cursor:not-allowed; }
+  .legend { margin-top:14px; font-size:11px; color:var(--mut); }
+  .legend code { background:#eef; padding:1px 4px; border-radius:3px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>守护进程运行时</h1>
+  <p class="sub">本地代理运行时、心跳状态和会话控制台 · <b>页面主体精简，会话全部走弹窗</b></p>
+  <div class="hint">💡 演示：点击下方 runtime 卡片的「会话」按钮 → 弹出该 runtime 专属会话工作台。在弹窗内点击不同状态的会话项，观察 active 可续聊 / ended 只读可继续对话。</div>
+
+  <!-- 摘要卡 -->
+  <div class="stats">
+    <div class="stat"><div class="l">总数</div><div class="v">2</div></div>
+    <div class="stat online"><div class="l">在线</div><div class="v">2</div></div>
+    <div class="stat warn"><div class="l">维护中</div><div class="v">0</div></div>
+    <div class="stat dis"><div class="l">禁用</div><div class="v">0</div></div>
+    <div class="stat off"><div class="l">离线</div><div class="v">0</div></div>
+  </div>
+
+  <!-- runtime 卡片列表 -->
+  <div class="cards">
+    <div class="card">
+      <div class="hd">
+        <span class="chip claude">● claude</span>
+        <span class="b-online">在线</span>
+      </div>
+      <div class="nm">claude-runtime</div>
+      <div class="mt">a1b2c3d4 · 注册 2 小时前</div>
+      <div class="meta">
+        <div><b>运行环境</b>darwin · arm64</div>
+        <div><b>心跳</b>刚刚</div>
+        <div><b>会话</b>5 <span style="color:var(--em)">(1 活跃)</span></div>
+      </div>
+      <div class="acts">
+        <button class="btn pri" onclick="openDialog('claude-runtime','claude')">会话</button>
+        <button class="btn">禁用</button>
+        <button class="btn danger">移除</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="hd">
+        <span class="chip codex">● codex</span>
+        <span class="b-online">在线</span>
+      </div>
+      <div class="nm">codex-runtime</div>
+      <div class="mt">e5f6g7h8 · 注册 1 小时前</div>
+      <div class="meta">
+        <div><b>运行环境</b>linux · x64</div>
+        <div><b>心跳</b>12 秒前</div>
+        <div><b>会话</b>2</div>
+      </div>
+      <div class="acts">
+        <button class="btn pri" onclick="openDialog('codex-runtime','codex')">会话</button>
+        <button class="btn">禁用</button>
+        <button class="btn danger">移除</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="page-bottom-note">⟂ 此处不再有底部常驻会话区（原 SessionListSection 已移除）<br>会话全部通过卡片「会话」按钮以弹窗打开</div>
+
+  <div class="legend">状态说明：<code>active</code>=进行中可续聊（attach SSE 接续）｜ <code>ended/failed</code>=只读回看，claude 可点「继续对话」reopen｜ codex 不支持续聊</div>
+</div>
+
+<!-- Dialog -->
+<div class="overlay" id="overlay" onclick="if(event.target===this)closeDialog()">
+  <div class="dialog">
+    <div class="dhd">
+      <div class="t">会话 · <span id="dlgRuntime">claude-runtime</span> <small>· runtime 专属会话工作台</small></div>
+      <button class="x" onclick="closeDialog()">✕</button>
+    </div>
+    <div class="dbody">
+      <!-- 会话列表 -->
+      <div class="slist">
+        <div class="sh"><b>历史会话</b> <small>· 5 个</small></div>
+        <div class="items">
+          <button class="sitem sel" data-st="active" onclick="selectSession(this,'active')">
+            <div class="top"><span class="id"><span class="dot active"></span>abc12345</span><span class="stag active">active</span></div>
+            <div class="meta2">claude · 3 turns</div>
+          </button>
+          <button class="sitem" data-st="ended" onclick="selectSession(this,'ended')">
+            <div class="top"><span class="id"><span class="dot ended"></span>def67890</span><span class="stag">ended</span></div>
+            <div class="meta2">claude · 8 turns</div>
+          </button>
+          <button class="sitem" data-st="ended" onclick="selectSession(this,'ended')">
+            <div class="top"><span class="id"><span class="dot ended"></span>ghi13579</span><span class="stag">ended</span></div>
+            <div class="meta2">claude · 2 turns</div>
+          </button>
+          <button class="sitem" data-st="ended" onclick="selectSession(this,'ended-codex')">
+            <div class="top"><span class="id"><span class="dot ended"></span>jkl24680</span><span class="stag">ended</span></div>
+            <div class="meta2">codex · 1 turn</div>
+          </button>
+        </div>
+        <button class="btn newbtn" onclick="selectNew()">+ 新建会话</button>
+      </div>
+      <!-- 会话区 -->
+      <div class="spanel" id="spanel">
+        <div class="msgs" id="msgs">
+          <div class="row u"><div class="bubble u">帮我看下 daemon 注册逻辑</div></div>
+          <div class="turn-tag">第 1 轮 · 已完成 · ↑320 ↓1280</div>
+          <div class="row"><div class="bubble a">daemon 通过 ws 上报心跳和能力，backend 在 /runtimes 登记…</div></div>
+          <div class="row u"><div class="bubble u">那离线检测怎么做的？</div></div>
+          <div class="turn-tag" id="curTag">第 3 轮 · 运行中 · ↑640 ↓执行中…</div>
+          <div class="row"><div class="bubble a">心跳超时阈值 60s，超时标记 offline…</div></div>
+        </div>
+        <div class="sfoot" id="sfoot">
+          <!-- 默认 active：可续聊 -->
+          <div class="input-row">
+            <textarea placeholder="继续追问…（会话 active，可直接发送）"></textarea>
+            <button class="btn pri" style="height:48px;width:48px">↑</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const state = { runtime:'', provider:'claude' };
+  function openDialog(name, provider){
+    state.runtime=name; state.provider=provider;
+    document.getElementById('dlgRuntime').textContent=name;
+    document.getElementById('overlay').classList.add('show');
+    // 默认选中首个 active（D-002：有活跃则 attach 最近活跃）
+    const first=document.querySelector('.sitem'); if(first) first.click();
+  }
+  function closeDialog(){ document.getElementById('overlay').classList.remove('show'); }
+
+  function renderActive(){
+    document.getElementById('curTag').textContent='第 3 轮 · 运行中 · ↑640 ↓执行中…';
+    document.getElementById('sfoot').innerHTML=`
+      <div class="input-row">
+        <textarea placeholder="继续追问…（会话 active，可直接发送）"></textarea>
+        <button class="btn pri" style="height:48px;width:48px">↑</button>
+      </div>`;
+  }
+  function renderEnded(codex){
+    document.getElementById('curTag').textContent='第 8 轮 · 已完成 · ↑2.1k ↓9.8k';
+    document.getElementById('sfoot').innerHTML=`
+      <div class="readonly-bar">
+        <span style="color:var(--mut);font-size:12px">只读回看（会话已结束）</span>
+        <button class="resumebtn" ${codex?'disabled':''} title="${codex?'codex 暂不支持续聊':'恢复会话并续聊'}">继续对话</button>
+      </div>`;
+  }
+  function renderNew(){
+    document.getElementById('curTag').textContent='';
+    document.getElementById('sfoot').innerHTML=`
+      <div class="input-row">
+        <textarea placeholder="输入首条消息创建会话"></textarea>
+        <button class="btn pri" style="height:48px;width:48px">↑</button>
+      </div>`;
+  }
+
+  function selectSession(el, st){
+    document.querySelectorAll('.sitem').forEach(i=>i.classList.remove('sel'));
+    el.classList.add('sel');
+    if(st==='active') renderActive();
+    else if(st==='ended-codex') renderEnded(true);
+    else renderEnded(false);
+  }
+  function selectNew(){
+    document.querySelectorAll('.sitem').forEach(i=>i.classList.remove('sel'));
+    renderNew();
+  }
+</script>
+</body>
+</html>

@@ -13,7 +13,6 @@ import {
   Copy,
   Cpu,
   MessageSquare,
-  MessageSquarePlus,
   Power,
   RefreshCw,
   Server,
@@ -25,26 +24,25 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { InteractiveSessionPanel, type SessionTurnView } from "@/components/daemon/interactive-session-panel";
+import {
+  isActiveSession,
+  shortId,
+} from "@/components/daemon/runtime-session-helpers";
+import { RuntimeSessionDialog } from "@/components/daemon/runtime-session-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
-import { type AgentRunLogEntry } from "@/lib/agent";
 import {
-  deleteAgentSession,
   deleteDaemonRuntime,
   disableDaemonRuntime,
   enableDaemonRuntime,
   getAgentSession,
-  getAgentSessionLogs,
   isVersionBelow,
   listAgentSessions,
   listDaemonRuntimes,
   MIN_VERSIONS,
   PROVIDER_META,
-  reopenSession,
   type AgentSessionRead,
-  type AgentSessionStatus,
   type DaemonRuntimeRead,
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
@@ -223,10 +221,6 @@ function formatRelativeTime(iso: string | null): string {
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
   return `${Math.floor(diff / 86_400_000)} 天前`;
-}
-
-function shortId(id: string): string {
-  return id.length > 12 ? `${id.slice(0, 8)}...${id.slice(-4)}` : id;
 }
 
 function ProviderBadge({ provider }: { provider: string | null }) {
@@ -435,105 +429,6 @@ function InstallDaemonBlock() {
     </div>
   );
 }
-
-/**
- * task-11：交互式会话面板包装（演进自 quick-chat）。
- *
- * 保留 provider/model 选择 + runtime 卡片布局，会话核心替换为
- * InteractiveSessionPanel（单一 SSE 贯穿多 turn / inject / interrupt / end）。
- * 旧 QuickChatPanel / quickChat / streamQuickChat / getQuickChatResult / getQuickChatLogs
- * 保留用于 brownfield 回归，不再被页面使用。
- */
-function InteractiveSessionChatSection({
-  runtimes,
-  attachSession,
-  initialTurns,
-  onCloseAttach,
-  focusProvider,
-}: {
-  runtimes: DaemonRuntimeRead[];
-  attachSession?: AgentSessionRead;
-  initialTurns?: SessionTurnView[];
-  onCloseAttach?: () => void;
-  /** ql-012：runtime 卡片「会话」聚焦时钦定的 provider（覆盖默认 claude 优先）。 */
-  focusProvider?: string;
-}) {
-  // ql-20260623（改动一）：用 ?session=<id> 在 URL 中承载当前活跃会话 id，
-  // 刷新后从 URL 恢复。router.replace 不进历史栈。
-  const router = useRouter();
-  const searchParams = useSearchParams();
-
-  // D-002@v3 非目标：交互式会话仅支持 claude（codex 后续），不支持 cursor/openclaw 等。
-  // 过滤 online runtime 的 provider，只保留 claude/codex，避免 createSession 触发
-  // backend SessionCreateRequest.provider Literal["claude","codex"] 422。
-  const onlineProviders = useMemo(() => {
-    const SUPPORTED_SESSION_PROVIDERS = ["claude", "codex"];
-    const list = runtimes
-      .filter(
-        (r) =>
-          r.status === "online" &&
-          r.provider &&
-          SUPPORTED_SESSION_PROVIDERS.includes(r.provider),
-      )
-      .map((r) => r.provider!);
-    return [...new Set(list)];
-  }, [runtimes]);
-  const [model, setModel] = useState<string | null>(null);
-  const hasOnlineProvider = onlineProviders.length > 0;
-  // ql-012：runtime 卡片聚焦时用 focusProvider 钦定；否则优先 claude，再退首个在线 provider。
-  const defaultProvider = focusProvider
-    ?? attachSession?.provider
-    ?? (onlineProviders.includes("claude") ? "claude" : (onlineProviders[0] ?? "claude"));
-  // providers 列表：有在线时用在线列表，无在线时给占位让组件能渲染
-  const providers = hasOnlineProvider ? onlineProviders : [defaultProvider];
-
-  // ql-20260623（改动一）：createSession 成功 → 写 ?session=<id>（保留其它 query param）
-  const handleSessionCreated = useCallback((sessionId: string) => {
-    const next = new URLSearchParams(searchParams.toString());
-    next.set("session", sessionId);
-    router.replace(`?${next.toString()}`, { scroll: false });
-  }, [router, searchParams]);
-
-  // ql-20260623（改动一）：新建会话（重置回 idle）→ 清除 ?session= param
-  const handleSessionReset = useCallback(() => {
-    const next = new URLSearchParams(searchParams.toString());
-    next.delete("session");
-    const qs = next.toString();
-    const target = qs ? `?${qs}` : window.location.pathname;
-    router.replace(target, { scroll: false });
-  }, [router, searchParams]);
-
-  return (
-    <div className="flex min-w-0 flex-col gap-2">
-      {attachSession && onCloseAttach && (
-        <div className="flex items-center justify-end">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={onCloseAttach}
-            className="h-7 text-[11px]"
-          >
-            返回历史
-          </Button>
-        </div>
-      )}
-      {/* key 强制 attach 切换时重 mount（清旧 SSE/轮询，task-10 unmount close） */}
-      <InteractiveSessionPanel
-        key={attachSession?.id ?? "live"}
-        providers={providers}
-        defaultProvider={defaultProvider}
-        model={model}
-        onModelChange={setModel}
-        hasOnlineProvider={hasOnlineProvider}
-        attachSessionId={attachSession?.id}
-        initialTurns={initialTurns}
-        onSessionCreated={handleSessionCreated}
-        onSessionReset={handleSessionReset}
-      />
-    </div>
-  );
-}
-
 
 function SummaryCard({
   label,
@@ -791,348 +686,25 @@ function EmptyState() {
   );
 }
 
-// ── 会话列表 + 历史回看（task-12 / FR-10 / D-005@v1） ───────────────────────
-
-const ACTIVE_SESSION_VIEW_STATUSES: ReadonlySet<AgentSessionStatus> = new Set([
-  "pending",
-  "active",
-  "reconnecting",
-]);
-
-function isActiveSession(s: AgentSessionRead): boolean {
-  return ACTIVE_SESSION_VIEW_STATUSES.has(s.status);
-}
-
-/**
- * 受控会话列表 sidebar。active/pending/reconnecting → live（task-11 面板）；
- * ended/failed → history 只读回看。selection 由父级持有，不创建第二套 SSE。
- */
-function SessionsSidebar({
-  sessions,
-  loading,
-  error,
-  selectedSessionId,
-  deletingSessionId,
-  onSelect,
-  onDelete,
-  onRetry,
-}: {
-  sessions: AgentSessionRead[];
-  loading: boolean;
-  error: string | null;
-  selectedSessionId: string | null;
-  deletingSessionId: string | null;
-  onSelect: (session: AgentSessionRead) => void;
-  onDelete: (session: AgentSessionRead) => void;
-  onRetry: () => void;
-}) {
-  return (
-    <section
-      data-testid="session-list-scroll"
-      className="flex max-h-[520px] min-h-0 flex-col overflow-hidden rounded-md border bg-card"
-    >
-      <header className="border-b px-3 py-2">
-        <h2 className="text-sm font-semibold">会话列表</h2>
-        <p className="text-[11px] text-muted-foreground">
-          {loading ? "加载中…" : `${sessions.length} 个会话`}
-        </p>
-      </header>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {error ? (
-          <div className="space-y-2 px-3 py-3">
-            <p className="text-[11px] text-destructive">{error}</p>
-            <Button size="sm" variant="outline" onClick={onRetry} className="h-7 text-[11px]">
-              重试
-            </Button>
-          </div>
-        ) : sessions.length === 0 ? (
-          <p className="py-6 text-center text-[11px] text-muted-foreground">没有会话</p>
-        ) : (
-          <ul className="divide-y">
-            {sessions.map((s) => {
-              const active = isActiveSession(s);
-              return (
-                <li key={s.id} className="flex items-stretch">
-                  <button
-                    type="button"
-                    onClick={() => onSelect(s)}
-                    className={cn(
-                      "flex min-w-0 flex-1 flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-muted/40",
-                      selectedSessionId === s.id && "bg-muted/60",
-                    )}
-                  >
-                    <span className="flex w-full items-center justify-between gap-2">
-                      <span className="font-mono text-[11px]">{shortId(s.id)}</span>
-                      <Badge variant={active ? "success" : "outline"} className="text-[10px]">
-                        {s.status}
-                      </Badge>
-                    </span>
-                    <span className="text-[10px] text-muted-foreground">
-                      {PROVIDER_META[s.provider]?.label ?? s.provider} · {s.turn_count} turn
-                      {s.turn_count === 1 ? "" : "s"}
-                    </span>
-                  </button>
-                  {/* task-04 / FR-3：去掉 {!active} 限制，所有状态都渲染删除按钮。
-                      active 会话删除的后台 end 收口由后端 task-03 处理，前端透明。 */}
-                  <button
-                    type="button"
-                    aria-label={`删除会话 ${s.id}`}
-                    title="删除会话"
-                    disabled={deletingSessionId === s.id}
-                    onClick={() => onDelete(s)}
-                    className="flex w-9 shrink-0 items-center justify-center border-l text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-                  >
-                    {deletingSessionId === s.id ? (
-                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
-    </section>
-  );
-}
-
-/**
- * task-11 续聊可用性（D-004@v1）：
- * 仅 claude + 有 agent_session_id + 终态（ended/failed）可恢复。
- * codex 暂不支持；active 本就活跃（不显示按钮，走只读回看 ql-007）；
- * 无 agent_session_id（create 失败的 failed）无法恢复。
- */
-function canResumeSession(session: AgentSessionRead | null): boolean {
-  if (!session) return false;
-  return (
-    session.provider === "claude" &&
-    !!session.agent_session_id &&
-    (session.status === "ended" || session.status === "failed")
-  );
-}
-
-/** 续聊按钮不可用时的 title 提示文案。 */
-function resumeDisabledTitle(session: AgentSessionRead): string {
-  if (session.provider !== "claude") return "codex 暂不支持续聊";
-  if (!session.agent_session_id) return "会话未建立，无法续聊";
-  return "当前会话不支持续聊";
-}
-
-/**
- * task-11 logsToTurns：把历史日志按 run_id 分组，转成 attach 面板预填的 SessionTurnView。
- * channel==="user" 的 log → prompt；其余 log → output（拼接，保留换行）。
- */
-function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
-  const map = new Map<string, AgentRunLogEntry[]>();
-  for (const log of logs) {
-    const list = map.get(log.run_id) ?? [];
-    list.push(log);
-    map.set(log.run_id, list);
-  }
-  const turns: SessionTurnView[] = [];
-  let turnIndex = 0;
-  for (const [, entries] of Array.from(map.entries())) {
-    turnIndex += 1;
-    const prompts: string[] = [];
-    const outputs: string[] = [];
-    for (const entry of entries) {
-      const text = entry.content_redacted ?? "";
-      if (!text) continue;
-      if (entry.channel === "user_input") {
-        prompts.push(text);
-      } else {
-        outputs.push(text);
-      }
-    }
-    turns.push({
-      runId: `__attach_history_${turnIndex}__`,
-      turn: turnIndex,
-      prompt: prompts.join("\n"),
-      output: outputs.join("\n"),
-      status: "completed",
-      seenLogIds: new Set(entries.map((e) => e.id)),
-      // ql-20260621：历史回看无实时 token（logs 接口不含 token），置 null。
-      // 若后续 logs 接口补 token 字段可在此填充。
-      inputTokens: null,
-      outputTokens: null,
-    });
-  }
-  return turns;
-}
-
-/**
- * 只读历史回看：跨 AgentRun 的日志按 run_id 分组渲染（D-005@v1）。
- * 不渲染发送 / interrupt / end 控件（只读）。
- */
-function SessionHistoryView({
-  session,
-  logs,
-  loading,
-  error,
-  onClose,
-  onContinue,
-}: {
-  session: AgentSessionRead | null;
-  logs: AgentRunLogEntry[];
-  loading: boolean;
-  error: string | null;
-  onClose: () => void;
-  onContinue?: (session: AgentSessionRead) => void;
-}) {
-  // 跨 run 分组（保持后端返回顺序：run 顺序内 timestamp 升序）
-  const groups = useMemo(() => {
-    const map = new Map<string, AgentRunLogEntry[]>();
-    for (const log of logs) {
-      const list = map.get(log.run_id) ?? [];
-      list.push(log);
-      map.set(log.run_id, list);
-    }
-    return Array.from(map.entries());
-  }, [logs]);
-
-  // task-11 D-004：active 不显示续聊按钮（本就活跃走只读回看 ql-007）；
-  // 其余状态显示按钮，canResume 决定是否可点。
-  const showResumeBtn = session != null && session.status !== "active";
-  const resumeEnabled = canResumeSession(session);
-
-  return (
-    <section className="flex min-h-[520px] flex-col overflow-hidden rounded-md border bg-card">
-      <header className="flex items-center justify-between gap-2 border-b px-4 py-3">
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold">
-            历史回看{session ? ` · ${shortId(session.id)}` : ""}
-          </h2>
-          <p className="text-[11px] text-muted-foreground">
-            只读视图（{groups.length} 个 turn）
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {showResumeBtn && session && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 gap-1 text-[11px]"
-              disabled={!resumeEnabled || !onContinue}
-              title={resumeEnabled ? "恢复会话并续聊" : resumeDisabledTitle(session)}
-              onClick={() => {
-                if (resumeEnabled && onContinue && session) onContinue(session);
-              }}
-            >
-              <MessageSquarePlus className="h-3.5 w-3.5" />
-              继续对话
-            </Button>
-          )}
-          <Button size="sm" variant="ghost" onClick={onClose} className="h-7 text-[11px]">
-            关闭
-          </Button>
-        </div>
-      </header>
-      <div className="min-h-0 flex-1 overflow-y-auto bg-muted/20 px-4 py-4">
-        {loading ? (
-          <p className="text-center text-[11px] text-muted-foreground">加载历史日志…</p>
-        ) : error ? (
-          <p className="text-center text-[11px] text-destructive">{error}</p>
-        ) : groups.length === 0 ? (
-          <p className="py-8 text-center text-[11px] text-muted-foreground">暂无历史日志</p>
-        ) : (
-          <div className="space-y-4">
-            {groups.map(([runId, entries]) => (
-              <div key={runId} className="space-y-1.5">
-                <div className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground">
-                  <span className="font-mono">run {shortId(runId)}</span>
-                </div>
-                {entries.map((log) => {
-                  // task-02 / FR-1：按 channel 区分 user / agent 气泡。
-                  // channel === "user_input" → 右对齐 primary 气泡；其余（含缺失）→ 左对齐白底。
-                  const isUser = log.channel === "user_input";
-                  return (
-                    <div
-                      key={log.id}
-                      className={isUser ? "flex justify-end" : "flex justify-start"}
-                    >
-                      <div
-                        className={
-                          isUser
-                            ? "max-w-[86%] whitespace-pre-wrap break-words rounded-md bg-primary px-3 py-2 text-xs leading-relaxed text-primary-foreground shadow-sm"
-                            : "max-w-[86%] whitespace-pre-wrap break-words rounded-md border bg-card px-3 py-2 text-xs leading-relaxed text-foreground shadow-sm"
-                        }
-                      >
-                        {log.content_redacted ?? ""}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
-/**
- * 会话列表 + 历史回看容器：持有 selection / loading / logs 状态，
- * 包裹 task-11 的 InteractiveSessionPanel（live，不重建其内部 SSE）。
- */
-function SessionListSection({
-  runtimes,
-  focusRuntime,
-  onClearFocus,
-}: {
-  runtimes: DaemonRuntimeRead[];
-  /** ql-012：从 runtime 卡片「会话」聚焦的运行时；null/undefined 走全局会话视图。 */
-  focusRuntime?: DaemonRuntimeRead | null;
-  onClearFocus?: () => void;
-}) {
+export default function RuntimesPage() {
+  const [items, setItems] = useState<DaemonRuntimeRead[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [runtimeActionId, setRuntimeActionId] = useState<string | null>(null);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
   const [sessions, setSessions] = useState<AgentSessionRead[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [listError, setListError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<AgentSessionRead | null>(null);
-  const [logs, setLogs] = useState<AgentRunLogEntry[]>([]);
-  const [logsLoading, setLogsLoading] = useState(false);
-  const [logsError, setLogsError] = useState<string | null>(null);
-  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
-  // task-11：reopen 成功的会话进入 attach 续聊面板（历史回看↔attach 切换）
-  const [attachSession, setAttachSession] = useState<AgentSessionRead | null>(null);
-  // ql-20260623（改动一）：URL ?session= 恢复。router.replace 不进历史栈。
+  // task-04 / D-001：单例弹窗 runtime（null=关闭）。切换 runtime 即替换 dialogRuntime，
+  // RuntimeSessionDialog 内部 key 随 runtime.id 重 mount 清旧状态。
+  const [dialogRuntime, setDialogRuntime] = useState<DaemonRuntimeRead | null>(null);
+  // task-04 / D-003：URL ?session= 恢复点，仅 URL 恢复时传入弹窗默认态 attach。
+  const [initialSessionId, setInitialSessionId] = useState<string | null>(null);
+
+  // task-04 / D-003：URL 恢复编排（从原 SessionListSection 上移到 page）
   const router = useRouter();
   const searchParams = useSearchParams();
-  // 防御：URL 恢复只执行一次（避免 sessions 重载时重复触发）
   const urlRestoreDoneRef = useRef(false);
-  // ql-012：聚焦 runtime 时，sidebar 仅显示该 runtime 的历史会话。
-  const visibleSessions = useMemo(
-    () => (focusRuntime ? sessions.filter((s) => s.runtime_id === focusRuntime.id) : sessions),
-    [sessions, focusRuntime],
-  );
 
-  const reloadSessions = useCallback(async () => {
-    setLoading(true);
-    setListError(null);
-    try {
-      const resp = await listAgentSessions({ limit: 50 });
-      setSessions(resp.items);
-    } catch (err) {
-      setListError(err instanceof ApiError ? err.message : "加载会话失败");
-      setSessions([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void reloadSessions();
-  }, [reloadSessions]);
-
-  // ql-20260623（改动一）：写 / 清 URL ?session= param 的 helper。
-  const writeSessionParam = useCallback((sessionId: string) => {
-    const next = new URLSearchParams(searchParams.toString());
-    next.set("session", sessionId);
-    router.replace(`?${next.toString()}`, { scroll: false });
-  }, [router, searchParams]);
-
+  // task-04 / D-003：清 URL ?session= param（onClose 时序 C-3 + 降级共用）
   const clearSessionParam = useCallback(() => {
     const next = new URLSearchParams(searchParams.toString());
     next.delete("session");
@@ -1141,184 +713,13 @@ function SessionListSection({
     router.replace(target, { scroll: false });
   }, [router, searchParams]);
 
-  // ql-20260623（改动一）：mount 时读 ?session= param，存在则恢复。
-  // 从已加载 sessions 列表匹配（或 getAgentSession 兜底），active/reconnecting/pending
-  // → 自动 setAttachSession 进入 attach 链路；ended/failed/已删/不属于本用户 → 降级
-  // 回 idle 并清 param（边界 6，不能卡死）。
-  useEffect(() => {
-    if (urlRestoreDoneRef.current) return;
-    const sessionId = searchParams.get("session");
-    if (!sessionId) return;
-    // 等 sessions 加载完成（reloadSessions 的 finally 设 loading=false）
-    if (loading) return;
-    urlRestoreDoneRef.current = true;
-    void (async () => {
-      let session: AgentSessionRead | null =
-        sessions.find((s) => s.id === sessionId) ?? null;
-      if (!session) {
-        // 兜底：列表未包含（分页外 / 刚创建）→ 直接查详情
-        try {
-          session = await getAgentSession(sessionId);
-        } catch {
-          // 不属于本用户 / 已删 / 网络错误 → 降级 idle + 清 param
-          session = null;
-        }
-      }
-      if (session && isActiveSession(session)) {
-        setAttachSession(session);
-      } else {
-        // ended / failed / 不存在 → 降级 idle + 清 param
-        clearSessionParam();
-      }
-    })();
-  }, [searchParams, loading, sessions, clearSessionParam]);
-
-  const handleSelect = useCallback(async (session: AgentSessionRead) => {
-    setSelected(session);
-    // 所有会话（含 active）统一只读历史回看：拉跨 run 日志（D-005 聚合在后端）。
-    // ql-20260619-007：之前 active 走 live 空白分支不回显（setLogs([])+return），
-    // 而 InteractiveSessionChatSection 不接收选中 session、InteractiveSessionPanel
-    // 又无「打开已有会话」入口 → 点 active 会话右侧空白。active 的 live 续看/追问
-    // 需 LivePanel 支持 resume，属更大重构，单独 task；当前所有选中会话均进只读视图。
-    setLogsLoading(true);
-    setLogsError(null);
-    try {
-      const fetched = await getAgentSessionLogs(session.id);
-      setLogs(fetched);
-    } catch (err) {
-      setLogsError(err instanceof ApiError ? err.message : "加载历史失败");
-      setLogs([]);
-    } finally {
-      setLogsLoading(false);
-    }
-  }, []);
-
-  const handleDelete = useCallback(async (session: AgentSessionRead) => {
-    const confirmed = window.confirm(
-      `确定删除会话 ${shortId(session.id)}？运行记录和日志仍会保留。`,
-    );
-    if (!confirmed) return;
-
-    setDeletingSessionId(session.id);
-    setListError(null);
-    try {
-      await deleteAgentSession(session.id);
-      setSessions((current) => current.filter((item) => item.id !== session.id));
-      if (selected?.id === session.id) {
-        setSelected(null);
-        setLogs([]);
-        setLogsError(null);
-      }
-    } catch (err) {
-      setListError(err instanceof ApiError ? err.message : "删除会话失败");
-    } finally {
-      setDeletingSessionId(null);
-    }
-  }, [selected?.id]);
-
-  // task-11：续聊 → reopen 恢复会话，成功后右侧切 attach InteractiveSessionPanel。
-  // 失败（409 OFFLINE 等）→ setListError 提示，不切 attach。
-  // ql-20260623（改动一）：续聊成功后也把 session_id 写入 URL（刷新恢复）。
-  const handleContinue = useCallback(async (session: AgentSessionRead) => {
-    setListError(null);
-    try {
-      await reopenSession(session.id);
-      // 用当前已加载的 logs 预填 attach panel（handleSelect 已拉取）
-      setAttachSession(session);
-      writeSessionParam(session.id);
-    } catch (err) {
-      setListError(err instanceof ApiError ? err.message : "恢复会话失败");
-    }
-  }, [writeSessionParam]);
-
-  return (
-    <section className="flex min-w-0 flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold">
-            会话{focusRuntime ? ` · ${focusRuntime.name ?? getProviderLabel(focusRuntime.provider)}` : ""}
-          </h2>
-          <p className="text-[11px] text-muted-foreground">
-            {focusRuntime
-              ? "已聚焦该运行时：历史仅显示其会话，新建会话使用此提供方"
-              : "选择历史会话回看，或进入 live 面板新建会话"}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {focusRuntime && onClearFocus && (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={onClearFocus}
-              className="h-7 text-[11px]"
-            >
-              显示全部
-            </Button>
-          )}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => void reloadSessions()}
-            disabled={loading}
-            className="h-7 text-[11px]"
-          >
-            刷新会话
-          </Button>
-        </div>
-      </div>
-      <div className="grid gap-3 lg:grid-cols-[260px_minmax(0,1fr)]">
-        <SessionsSidebar
-          sessions={visibleSessions}
-          loading={loading}
-          error={listError}
-          selectedSessionId={selected?.id ?? null}
-          deletingSessionId={deletingSessionId}
-          onSelect={(s) => void handleSelect(s)}
-          onDelete={(s) => void handleDelete(s)}
-          onRetry={() => void reloadSessions()}
-        />
-        {attachSession ? (
-          // task-11：reopen 成功 → attach 续聊面板（预填历史 turn + SSE + 轮询）
-          <InteractiveSessionChatSection
-            runtimes={runtimes}
-            attachSession={attachSession}
-            initialTurns={logsToTurns(logs)}
-            // ql-20260623（改动一）：返回历史时清除 URL ?session= param
-            onCloseAttach={() => {
-              setAttachSession(null);
-              clearSessionParam();
-            }}
-          />
-        ) : selected ? (
-          <SessionHistoryView
-            session={selected}
-            logs={logs}
-            loading={logsLoading}
-            error={logsError}
-            onClose={() => setSelected(null)}
-            onContinue={(s) => void handleContinue(s)}
-          />
-        ) : (
-          <InteractiveSessionChatSection
-            key={focusRuntime?.id ?? "global"}
-            runtimes={runtimes}
-            focusProvider={focusRuntime?.provider ?? undefined}
-          />
-        )}
-      </div>
-    </section>
-  );
-}
-
-export default function RuntimesPage() {
-  const [items, setItems] = useState<DaemonRuntimeRead[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [runtimeActionId, setRuntimeActionId] = useState<string | null>(null);
-  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
-  const [sessions, setSessions] = useState<AgentSessionRead[]>([]);
-  const [focusedRuntime, setFocusedRuntime] = useState<DaemonRuntimeRead | null>(null);
-  const sessionSectionRef = useRef<HTMLDivElement>(null);
+  // task-04 / D-003 C-3：用户主动关闭 = 放弃恢复点。先清 state（关弹窗触发 dialog
+  // 内部 SSE/轮询 cleanup，FR-05 / R-02），再清 param（刷新不再自动弹出）。
+  const handleCloseDialog = useCallback(() => {
+    setDialogRuntime(null);
+    setInitialSessionId(null);
+    clearSessionParam();
+  }, [clearSessionParam]);
 
   const reload = useCallback(async (options: { showFeedback?: boolean } = {}) => {
     setError(null);
@@ -1374,21 +775,19 @@ export default function RuntimesPage() {
       await deleteDaemonRuntime(runtime.id);
       setItems((prev) => (prev ? prev.filter((item) => item.id !== runtime.id) : prev));
       setSessions((prev) => prev.filter((s) => s.runtime_id !== runtime.id));
-      if (focusedRuntime?.id === runtime.id) setFocusedRuntime(null);
+      if (dialogRuntime?.id === runtime.id) setDialogRuntime(null);
       setLastRefreshedAt(new Date());
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "移除运行时失败");
     } finally {
       setRuntimeActionId(null);
     }
-  }, [focusedRuntime?.id]);
+  }, [dialogRuntime?.id]);
 
-  // ql-012：卡片「会话」→ 聚焦该 runtime + 滚动到会话区。
+  // task-04 / D-001：卡片「会话」→ 打开单例弹窗。不再 scrollIntoView（无底部常驻会话区）。
   const handleOpenSession = useCallback((runtime: DaemonRuntimeRead) => {
-    setFocusedRuntime(runtime);
-    setTimeout(() => {
-      sessionSectionRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-    }, 0);
+    setInitialSessionId(null);
+    setDialogRuntime(runtime);
   }, []);
 
   useEffect(() => {
@@ -1401,6 +800,45 @@ export default function RuntimesPage() {
     }, 15_000);
     return () => window.clearInterval(timer);
   }, [reload]);
+
+  // task-04 / FR-06 / D-003：mount 读 ?session=<id> → 查 status，活跃 → 开对应 runtime
+  // 弹窗（initialSessionId 接弹窗默认态 attach）；ended/failed/不存在/已删 → 清 param
+  // 降级不开。urlRestoreDoneRef 保证只执行一次（避免 items/sessions 重载重复触发）。
+  // page 不直接 attach，attach 由 RuntimeSessionDialog D-002 默认态接管。
+  useEffect(() => {
+    if (urlRestoreDoneRef.current) return;
+    const sessionId = searchParams.get("session");
+    if (!sessionId) return;
+    // 等 items 加载完成（reload 的 finally setItems）
+    if (items === null) return;
+    urlRestoreDoneRef.current = true;
+    void (async () => {
+      let session: AgentSessionRead | null =
+        sessions.find((s) => s.id === sessionId) ?? null;
+      if (!session) {
+        try {
+          session = await getAgentSession(sessionId);
+        } catch {
+          // 不属于本用户 / 已删 / 网络错误 → 降级
+          session = null;
+        }
+      }
+      if (session && isActiveSession(session)) {
+        const matched = (items ?? []).find((r) => r.id === session!.runtime_id) ?? null;
+        if (matched) {
+          // 活跃 + runtime 在列 → 开弹窗，initialSessionId 接弹窗默认态 attach
+          setInitialSessionId(session.id);
+          setDialogRuntime(matched);
+        } else {
+          // runtime 已离线/删除 → 降级清 param（R-03 兜底）
+          clearSessionParam();
+        }
+      } else {
+        // ended / failed / 不存在 → 降级清 param
+        clearSessionParam();
+      }
+    })();
+  }, [searchParams, items, sessions, clearSessionParam]);
 
   const displayItems = useMemo(() => {
     const statusRank: Record<string, number> = {
@@ -1524,9 +962,9 @@ export default function RuntimesPage() {
                 </div>
                 <div
                   data-testid="runtime-list-scroll"
-                  className="max-h-[680px] overflow-y-auto pr-1"
+                  className="pr-1"
                 >
-                  <div className="grid gap-3 xl:grid-cols-2">
+                  <div className="grid gap-4 xl:grid-cols-2">
                     {displayItems.map((runtime) => (
                       <RuntimeCard
                         key={runtime.id}
@@ -1542,17 +980,18 @@ export default function RuntimesPage() {
                 </div>
               </section>
             )}
-
-            <div ref={sessionSectionRef} className="scroll-mt-6">
-              <SessionListSection
-                runtimes={items}
-                focusRuntime={focusedRuntime}
-                onClearFocus={() => setFocusedRuntime(null)}
-              />
-            </div>
           </div>
         </>
       )}
+
+      <RuntimeSessionDialog
+        key={dialogRuntime?.id ?? "closed"}
+        runtime={dialogRuntime}
+        open={dialogRuntime !== null}
+        onClose={handleCloseDialog}
+        runtimes={items ?? []}
+        initialSessionId={initialSessionId ?? undefined}
+      />
     </main>
   );
 }
