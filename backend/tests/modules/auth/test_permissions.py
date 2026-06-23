@@ -36,9 +36,9 @@ def test_permission_group_has_seven_members() -> None:
     assert set(members) == expected
 
 
-def test_permission_count_is_70() -> None:
-    """46 历史 + 24 PPM_* (change 2026-06-20-ppm-module-migration task-02) = 70."""
-    assert len(list(Permission)) == 70
+def test_permission_count_is_71() -> None:
+    """46 历史 + 25 PPM_* (含 problem:export,对齐 customer/plan/task) = 71."""
+    assert len(list(Permission)) == 71
 
 
 @pytest.mark.parametrize(
@@ -87,7 +87,7 @@ def test_permission_group_resolution(perm: Permission, expected_group: Permissio
 
 
 def test_every_permission_has_non_default_group() -> None:
-    """All 70 permissions must resolve to a stable group (no KeyError)."""
+    """All 71 permissions must resolve to a stable group (no KeyError)."""
     for perm in Permission:
         group = perm.group
         assert isinstance(group, PermissionGroup)

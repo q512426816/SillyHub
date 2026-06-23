@@ -363,8 +363,8 @@ async def seed_platform_admin_role(db: AsyncSession) -> None:
 
     The role carries ``is_system=True`` so task-04 role handlers reject
     any modify/disable/delete attempt. Every entry in the
-    :class:`~app.modules.auth.permissions.Permission` enum (36 after
-    task-02) is bound so anyone holding this role short-circuits every
+    :class:`~app.modules.auth.permissions.Permission` enum (37 after
+    task-02 + problem:export 对齐) is bound so anyone holding this role short-circuits every
     RBAC check via
     :func:`app.modules.auth.rbac.collect_permissions_platform`.
     """

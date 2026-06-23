@@ -130,6 +130,7 @@ class Permission(StrEnum):
     PPM_PROBLEM_READ = "ppm:problem:read"
     PPM_PROBLEM_WRITE = "ppm:problem:write"
     PPM_PROBLEM_DELETE = "ppm:problem:delete"
+    PPM_PROBLEM_EXPORT = "ppm:problem:export"
     # 任务:task:plan:* + ppm:personal-task-plan:* + ppm:task-execute:*
     PPM_TASK_READ = "ppm:task:read"
     PPM_TASK_WRITE = "ppm:task:write"

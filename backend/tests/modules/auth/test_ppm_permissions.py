@@ -19,7 +19,9 @@ from app.modules.auth.model import Role, RolePermission
 from app.modules.auth.permissions import Permission, PermissionGroup
 from app.modules.auth.service import seed_platform_admin_role
 
-# task-02 design §6 指定的 24 个 PPM_* 成员
+# task-02 design §6 指定的 25 个 PPM_* 成员(problem 补 export 与
+# customer/plan/task 对齐,见 references/16-rbac.md §2 / migrate_from_ruoyi
+# problem:change-process-log:export → ppm:problem:export 归并)
 EXPECTED_PPM_PERMISSIONS: dict[str, str] = {
     # 项目(pm:project-maintenance:* + pm:project-member:*)
     "PPM_PROJECT_READ": "ppm:project:read",
@@ -40,6 +42,7 @@ EXPECTED_PPM_PERMISSIONS: dict[str, str] = {
     "PPM_PROBLEM_READ": "ppm:problem:read",
     "PPM_PROBLEM_WRITE": "ppm:problem:write",
     "PPM_PROBLEM_DELETE": "ppm:problem:delete",
+    "PPM_PROBLEM_EXPORT": "ppm:problem:export",
     # 任务(task:plan:* + ppm:personal-task-plan:* + ppm:task-execute:*)
     "PPM_TASK_READ": "ppm:task:read",
     "PPM_TASK_WRITE": "ppm:task:write",
@@ -55,9 +58,9 @@ EXPECTED_PPM_PERMISSIONS: dict[str, str] = {
 }
 
 
-def test_ppm_permission_member_count_is_24() -> None:
-    """task-02 design §6 共 24 个 PPM_* 成员。"""
-    assert len(EXPECTED_PPM_PERMISSIONS) == 24
+def test_ppm_permission_member_count_is_25() -> None:
+    """task-02 design §6 共 25 个 PPM_* 成员(problem 含 export)。"""
+    assert len(EXPECTED_PPM_PERMISSIONS) == 25
 
 
 @pytest.mark.parametrize("name,value", list(EXPECTED_PPM_PERMISSIONS.items()))

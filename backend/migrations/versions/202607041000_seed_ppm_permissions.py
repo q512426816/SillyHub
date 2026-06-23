@@ -61,6 +61,7 @@ PPM_PERMISSIONS: list[str] = [
     "ppm:problem:read",
     "ppm:problem:write",
     "ppm:problem:delete",
+    "ppm:problem:export",
     # 任务
     "ppm:task:read",
     "ppm:task:write",
