@@ -838,3 +838,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
 结果：顶部按钮行移除视图切换 select(保留 搜索/重置/分隔/导出/新建);视图切换作为 Field label='视图' 加入查询 grid 配合人员 Field 之后,inputCls 改 w-full 适配 Field 列宽。前端 typecheck 通过。
+
+
+## ql-20260623-004-b7d2 | 2026-06-23 09:55:00 | task-plans 负责人下拉选样式修正(去掉 inputCls 外层框中框)
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
+结果:去掉 PpmUserSelect 外层 `<div className={inputCls + "flex h-8 w-full items-center px-1"}>` 包裹(造成 antd Select 自带边框外又多一层 input 边框 → 框中框),改为直接 `<PpmUserSelect style={{width:100%}} ...>`,对齐 problem-list / work-hours 标准用法。前端 typecheck 通过。

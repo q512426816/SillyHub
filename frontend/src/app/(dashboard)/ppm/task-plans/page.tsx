@@ -488,15 +488,14 @@ export default function TaskPlansPage() {
             </select>
           </Field>
           <Field label="负责人">
-            <div className={`${inputCls} flex h-8 w-full items-center px-1`}>
-              <PpmUserSelect
-                res="user"
-                allowClear
-                placeholder="负责人"
-                value={userFilter}
-                onChange={(v) => setUserFilter((v as string | null) ?? null)}
-              />
-            </div>
+            <PpmUserSelect
+              res="user"
+              allowClear
+              style={{ width: "100%" }}
+              placeholder="负责人"
+              value={userFilter}
+              onChange={(v) => setUserFilter((v as string | null) ?? null)}
+            />
           </Field>
           <Field label="计划时间区间">
             <RangePicker
