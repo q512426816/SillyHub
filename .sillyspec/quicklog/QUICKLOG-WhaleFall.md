@@ -810,4 +810,19 @@ created_at: 2026-06-03T08:42:04
   - frontend pnpm typecheck 通过
   - backend pytest app/modules/ppm/problem/tests 35/35 通过
 
+## ql-20260623-001-e7a2 | 2026-06-23 08:30:00 | 搜索按钮条件没变时点击也要触发查询
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/problem-list/page.tsx + frontend/src/app/(dashboard)/ppm/problem-changes/page.tsx
+背景:problem-list 和 problem-changes 的 commitKeyword 只做 setKeyword(keywordInput)。若 keywordInput === keyword (例如已经搜过 "abc" 又点搜索 / 直接回车),React 检测不到 state 变化,useEffect [keyword, ...] 不触发 → 查询请求不发出去,用户感觉"搜索按钮没反应"。
+方案:
+  1. 两页各加 searchNonce state (number, 初值 0)
+  2. commitKeyword 改成:setKeyword(keywordInput) + setSearchNonce((n) => n + 1)
+  3. 查询触发 useEffect 的 deps 数组追加 searchNonce
+  4. React 18 automatic batching:setKeyword + setSearchNonce 在同一事件回调内自动 batch → 只触发 1 次 re-render → useEffect 只跑 1 次(不会双查)
+结果:
+  - 搜索按钮/回车即使条件未变也会强制重新查询
+  - 条件变化时仍然由 keyword/status/dateRange 触发(行为不变)
+  - frontend pnpm typecheck 通过
+
+
 

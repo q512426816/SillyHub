@@ -86,6 +86,8 @@ export default function ProblemChangesPage() {
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(
     null,
   );
+  // 搜索触发计数器:点搜索/回车就 +1,即使 keyword 没变也强制 useEffect 触发查询
+  const [searchNonce, setSearchNonce] = useState(0);
 
   const load = useCallback(
     async (opts: { page?: number; page_size?: number } = {}) => {
@@ -121,14 +123,18 @@ export default function ProblemChangesPage() {
     ],
   );
 
-  // 首屏 + 过滤条件变化 → 回到第 1 页重拉。
-  // keywordInput 不触发(只在 commit 时改 keyword)。
+  // 首屏 + 过滤条件变化 + 搜索按钮点击 → 回到第 1 页重拉。
+  // keywordInput 不触发(只在 commit 时改 keyword + bump searchNonce)。
+  // searchNonce 兜底:keyword 未变(如条件没动直接点搜索)也能强制触发查询。
   useEffect(() => {
     void load({ page: 1 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keyword, statusFilter, dateRange]);
+  }, [keyword, statusFilter, dateRange, searchNonce]);
 
-  const commitKeyword = () => setKeyword(keywordInput);
+  const commitKeyword = () => {
+    setKeyword(keywordInput);
+    setSearchNonce((n) => n + 1);
+  };
 
   const resetFilters = () => {
     setKeywordInput("");

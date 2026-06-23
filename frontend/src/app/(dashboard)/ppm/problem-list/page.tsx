@@ -98,6 +98,8 @@ export default function ProblemListPage() {
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(
     null,
   );
+  // 搜索触发计数器:点搜索/回车就 +1,即使 keyword 没变也强制 useEffect 触发查询
+  const [searchNonce, setSearchNonce] = useState(0);
   const [exporting, setExporting] = useState(false);
 
   const [drawer, setDrawer] = useState<{
@@ -146,12 +148,13 @@ export default function ProblemListPage() {
     ],
   );
 
-  // 首屏 + 过滤条件变化 → 回到第 1 页重拉。
-  // keywordInput 不触发(只在 commit 时改 keyword)。
+  // 首屏 + 过滤条件变化 + 搜索按钮点击 → 回到第 1 页重拉。
+  // keywordInput 不触发(只在 commit 时改 keyword + bump searchNonce)。
+  // searchNonce 兜底:keyword 未变(如条件没动直接点搜索)也能强制触发查询。
   useEffect(() => {
     void load({ page: 1 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keyword, statusFilter, projectFilter, proTypeFilter, isUrgentFilter, dateRange]);
+  }, [keyword, statusFilter, projectFilter, proTypeFilter, isUrgentFilter, dateRange, searchNonce]);
 
   const handleExport = async () => {
     setExporting(true);
@@ -176,6 +179,8 @@ export default function ProblemListPage() {
 
   const commitKeyword = () => {
     setKeyword(keywordInput);
+    // 即使 keyword 未变也强制触发查询(用户点搜索/回车 = 显式意图)
+    setSearchNonce((n) => n + 1);
   };
 
   const openDrawer = (
