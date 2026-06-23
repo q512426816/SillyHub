@@ -284,6 +284,6 @@ export async function exportWorkHours(
   await downloadExcel(
     "/api/ppm/work-hour/export-excel",
     params as Record<string, unknown> | undefined,
-    "work_hour.xlsx",
+    "工时记录.xlsx",
   );
 }

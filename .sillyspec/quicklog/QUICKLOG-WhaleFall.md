@@ -898,3 +898,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/app/(dashboard)/ppm/work-hours/page.tsx, frontend/src/app/(dashboard)/ppm/work-hour-statistics/page.tsx
 结果:后端 ppm 所有分页接口 page_size Query 限制 ge=1 le=200。前端 4 处违规调用全部夹到 200 — work-hours/page.tsx:191(任务列下拉 listPlanTasks,原 500) + :558(WorkHourDrawer taskOptions,原 500);work-hour-statistics/page.tsx:111(按用户明细 listWorkHours,原 1000) + :133(按项目明细,原 1000)。plan-nodes 已用 200 合规不改。grep frontend/src 复核无残留 >200 调用。前端 typecheck 通过。注:200 条上限对超大数据量下拉不完整,本次只解 422 不做分页拉取改造。
+
+
+## ql-20260623-014-f6a9 | 2026-06-23 13:50:00 | work-hours 导出文件名对齐 task-plan 模式(中文+时间戳)
+状态：已完成
+文件：backend/app/modules/ppm/task/router.py, frontend/src/lib/ppm/task.ts
+结果:后端 router.py:573-575 改 filename = f'工时记录_{datetime.now():%Y%m%d_%H%M%S}.xlsx'(datetime 已 import,替换原硬编码 'work_hour.xlsx');前端 task.ts:104 fallback 改 '工时记录.xlsx'(Content-Disposition 失败兜底)。对齐 task-plan('任务计划_{时间戳}.xlsx')/problem-list('问题清单_{时间戳}.xlsx')/problem-changes('问题变更_{时间戳}.xlsx')模式。前端 typecheck 通过 + 后端 ast 解析通过。

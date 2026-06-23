@@ -571,7 +571,8 @@ async def export_work_hour_excel(
         ColumnDef("description", "工作内容", width=40),
     ]
     content = await anyio.to_thread.run_sync(_build_workbook_bytes, columns, rows, "工时")
-    return excel_response(content, filename="work_hour.xlsx")
+    filename = f"工时记录_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
+    return excel_response(content, filename=filename)
 
 
 __all__ = ["router"]
