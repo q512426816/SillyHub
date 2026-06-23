@@ -892,3 +892,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/app/(dashboard)/ppm/problem-list/page.tsx, frontend/src/app/(dashboard)/ppm/problem-changes/page.tsx, frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
 结果:(1) problem-list 加 expanded state + 顶部按钮行展开↔收起按钮(放在重置后、分隔前),默认 4 个 Field(关键字/状态/项目/问题类型),展开追加 2 个(是否紧急/发现时间)用 {expanded && (<>...</>)} 包裹;(2) 删除 problem-list/problem-changes/task-plans 搜索条件 grid 末尾的'共 X 条'浮动 div,Table 分页的 showTotal 保留(antd 分页标准展示)。total state 仍用于 Table pagination total,无未使用变量。前端 typecheck 通过。
+
+
+## ql-20260623-013-e5f2 | 2026-06-23 13:40:00 | 前端 page_size>200 调用全部夹到 200(后端 le=200)
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/work-hours/page.tsx, frontend/src/app/(dashboard)/ppm/work-hour-statistics/page.tsx
+结果:后端 ppm 所有分页接口 page_size Query 限制 ge=1 le=200。前端 4 处违规调用全部夹到 200 — work-hours/page.tsx:191(任务列下拉 listPlanTasks,原 500) + :558(WorkHourDrawer taskOptions,原 500);work-hour-statistics/page.tsx:111(按用户明细 listWorkHours,原 1000) + :133(按项目明细,原 1000)。plan-nodes 已用 200 合规不改。grep frontend/src 复核无残留 >200 调用。前端 typecheck 通过。注:200 条上限对超大数据量下拉不完整,本次只解 422 不做分页拉取改造。

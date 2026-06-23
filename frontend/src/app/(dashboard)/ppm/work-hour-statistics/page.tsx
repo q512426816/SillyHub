@@ -108,7 +108,7 @@ export default function WorkHourStatisticsPage() {
         // 明细:listWorkHours 带 user_id
         const detailParams: WorkHourPageReq = {
           page: 1,
-          page_size: 1000,
+          page_size: 200,
           user_id: userId,
         };
         if (startDate) detailParams.work_date_start = startDate;
@@ -130,7 +130,7 @@ export default function WorkHourStatisticsPage() {
         setByProject(resp);
         const detailParams: WorkHourPageReq = {
           page: 1,
-          page_size: 1000,
+          page_size: 200,
           project_id: projectId,
         };
         if (startDate) detailParams.work_date_start = startDate;

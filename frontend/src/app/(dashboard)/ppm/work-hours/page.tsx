@@ -188,7 +188,7 @@ export default function WorkHoursPage() {
       try {
         const resp = await listPlanTasks({
           page: 1,
-          page_size: 500,
+          page_size: 200,
           project_id: projectFilter || undefined,
         });
         setPlanTasks(resp.items ?? []);
@@ -555,7 +555,7 @@ function WorkHourDrawer({
       try {
         const resp = await listPlanTasks({
           page: 1,
-          page_size: 500,
+          page_size: 200,
           project_id: projectId,
         });
         setTaskOptions(resp.items ?? []);
