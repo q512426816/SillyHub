@@ -115,6 +115,8 @@ export default function TaskPlansPage() {
   const [workPartnerFilter, setWorkPartnerFilter] = useState<string>("");
   // 搜索触发计数器:点搜索按钮强制触发查询(即使条件未变)
   const [searchNonce, setSearchNonce] = useState(0);
+  // 查询条件展开/收起:默认只显示 4 个,展开后追加 3 个(参考 project-plans)
+  const [expanded, setExpanded] = useState(false);
 
   const [exporting, setExporting] = useState(false);
   const [projects, setProjects] = useState<ProjectSimpleItem[]>([]);
@@ -363,7 +365,8 @@ export default function TaskPlansPage() {
           <div className="flex whitespace-nowrap gap-1">
             <Button
               size="sm"
-              variant="ghost"
+              variant="default"
+              className="bg-blue-500 text-white hover:bg-blue-600"
               onClick={() =>
                 setExecute({
                   task: t,
@@ -377,7 +380,7 @@ export default function TaskPlansPage() {
             </Button>
             <Button
               size="sm"
-              variant="ghost"
+              variant="default"
               disabled={!canEdit}
               title={
                 canEdit
@@ -428,6 +431,13 @@ export default function TaskPlansPage() {
           </Button>
           <Button size="sm" variant="outline" onClick={resetFilters}>
             重置
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? "收起" : "展开"}
           </Button>
           <span className="mx-1 h-6 w-px bg-border" aria-hidden />
           <Button
@@ -489,38 +499,42 @@ export default function TaskPlansPage() {
               onChange={(v) => setUserFilter((v as string | null) ?? null)}
             />
           </Field>
-          <Field label="计划时间区间">
-            <RangePicker
-              className="w-full"
-              size="middle"
-              value={dateRange as [Dayjs, Dayjs] | null}
-              onChange={(v) =>
-                setDateRange(v as [Dayjs | null, Dayjs | null] | null)
-              }
-              placeholder={["开始", "结束"]}
-            />
-          </Field>
-          <Field label="配合人员">
-            <Input
-              allowClear
-              className="w-full"
-              placeholder="配合人员(回车查询)"
-              value={workPartnerFilter}
-              onChange={(e) => setWorkPartnerFilter(e.target.value)}
-              onPressEnter={commitSearch}
-            />
-          </Field>
-          <Field label="视图">
-            <Select<ViewMode>
-              className="w-full"
-              value={view}
-              onChange={(v) => setView(v as ViewMode)}
-              options={[
-                { label: "全部任务", value: "all" },
-                { label: "我的任务", value: "personal" },
-              ]}
-            />
-          </Field>
+          {expanded && (
+            <>
+              <Field label="计划时间区间">
+                <RangePicker
+                  className="w-full"
+                  size="middle"
+                  value={dateRange as [Dayjs, Dayjs] | null}
+                  onChange={(v) =>
+                    setDateRange(v as [Dayjs | null, Dayjs | null] | null)
+                  }
+                  placeholder={["开始", "结束"]}
+                />
+              </Field>
+              <Field label="配合人员">
+                <Input
+                  allowClear
+                  className="w-full"
+                  placeholder="配合人员(回车查询)"
+                  value={workPartnerFilter}
+                  onChange={(e) => setWorkPartnerFilter(e.target.value)}
+                  onPressEnter={commitSearch}
+                />
+              </Field>
+              <Field label="视图">
+                <Select<ViewMode>
+                  className="w-full"
+                  value={view}
+                  onChange={(v) => setView(v as ViewMode)}
+                  options={[
+                    { label: "全部任务", value: "all" },
+                    { label: "我的任务", value: "personal" },
+                  ]}
+                />
+              </Field>
+            </>
+          )}
           <div className="self-end text-right text-xs text-muted-foreground">
             共 {total} 条
           </div>

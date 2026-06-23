@@ -856,3 +856,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
 结果:useEffect deps 从 [view, statusFilterList, monthFilter, projectFilter, userFilter, dateRange, workPartnerFilter, searchNonce] 精简为 [searchNonce]。任意 filter state 变化只 setState 不触发查询;搜索按钮/回车(commitSearch)/重置(resetFilters)都走 setSearchNonce 触发查询;翻页/改 pageSize 走 pagination.onChange 直接调 load 绕过 useEffect。前端 typecheck 通过。
+
+
+## ql-20260623-007-e5f1 | 2026-06-23 10:25:00 | task-plans 操作列自适应宽度+按钮样式对齐 project-plans + 查询条件加展开收起
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
+结果:1) 新增 expanded state,顶部按钮行插入展开/收起切换(在重置和分隔之间);2) 查询 grid 默认 4 个 Field(状态/月份/项目/负责人),expanded && 包裹后 3 个(计划时间区间/配合人员/视图),共条数 div 永远显示;3) 操作列按钮从 ghost 改 default:执行 bg-blue-500 hover:bg-blue-600、编辑默认色、删除 destructive(完全对齐 project-plans 颜色方案)。width=max-content + whitespace-nowrap + fixed=right 保留。前端 typecheck 通过。
