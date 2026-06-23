@@ -241,13 +241,19 @@ class TestReopenSession:
         ).scalar_one_or_none()
         assert status_row == "reconnecting"
 
-    async def test_reopen_codex_provider_409_resume_unsupported(
+    async def test_reopen_codex_session_returns_reconnecting(
         self,
         client: AsyncClient,
         auth_headers: dict[str, str],
         db_session: AsyncSession,
         monkeypatch,
     ) -> None:
+        """task-07 / FR-06：Codex ended session 现在可 reopen（provider gate 放开）.
+
+        旧反向用例（断言 codex reopen 返回 409 RESUME_UNSUPPORTED）已被翻转：
+        backend ``reopen_session`` 的 provider gate 从 ``!= "claude"`` 放开为
+        ``not in {"claude", "codex"}``，codex threadId 作为 resume key 原样保留。
+        """
         from app.modules.daemon import ws_hub
 
         admin = await _admin(db_session)
@@ -263,13 +269,24 @@ class TestReopenSession:
 
         hub = ws_hub.get_daemon_ws_hub()
         monkeypatch.setattr(hub, "is_connected", lambda _rid: True)
+        monkeypatch.setattr(hub, "send_session_control", lambda *a, **k: _async_true())
 
         resp = await client.post(
             f"/api/daemon/sessions/{sess.id}/reopen",
             headers=auth_headers,
         )
-        assert resp.status_code == 409
-        assert "RESUME_UNSUPPORTED" in resp.json()["code"]
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["session_id"] == str(sess.id)
+        assert body["status"] == "reconnecting"
+
+        # agent_session_id (Codex threadId) 原样保留作为 resume key。
+        agent_sid = (
+            await db_session.execute(
+                select(AgentSession.agent_session_id).where(AgentSession.id == sess.id)
+            )
+        ).scalar_one()
+        assert agent_sid == "codex-1"
 
     async def test_reopen_null_agent_session_id_409(
         self,

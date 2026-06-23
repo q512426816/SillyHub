@@ -72,10 +72,11 @@ class DaemonSessionInvariantViolation(AppError):
 
 
 class DaemonSessionResumeUnsupported(AppError):
-    """Target session provider is not resumable (provider != "claude").
+    """Target session provider is not resumable (provider not in {claude, codex}).
 
-    Only the Claude SDK supports ``--resume <session_id>``; codex/other
-    providers cannot be reopened, so the ended session stays terminal.
+    Claude SDK ``--resume <session_id>`` and Codex app-server
+    ``thread/resume(threadId)`` both support resume; other providers
+    cannot be reopened, so the ended session stays terminal.
     """
 
     code = "HTTP_409_DAEMON_SESSION_RESUME_UNSUPPORTED"
@@ -1249,7 +1250,7 @@ class SessionService:
         session_id: uuid.UUID,
         user_id: uuid.UUID,
     ) -> SessionReopenResponse:
-        """Reopen an ended Claude session for SDK resume (task-05+07 / FR-2).
+        """Reopen an ended Claude/Codex session for resume (task-05+07 / FR-06).
 
         Validation (task-05) + full transition (task-07): new interactive lease,
         ``claim_token`` rotation, SESSION_RESUME WS. The daemon-side SDK resume
@@ -1258,7 +1259,7 @@ class SessionService:
           1. SELECT AgentSession FOR UPDATE + ownership (user_id mismatch → 404,
              no existence leak — mirrors :meth:`end_session`).
           2. Pre-flight checks IN ORDER (first failure wins, see task-05 §边界):
-             - provider != "claude" → :class:`DaemonSessionResumeUnsupported`
+             - provider not in {claude, codex} → :class:`DaemonSessionResumeUnsupported`
              - agent_session_id is None → :class:`DaemonSessionNoAgentSession`
                (D-004: create-time handshake never produced an SDK session id)
              - status in ACTIVE_SESSION_STATUSES → :class:`DaemonSessionNotActive`
@@ -1279,10 +1280,10 @@ class SessionService:
         session = await self._get_owned_session_for_update(session_id, user_id)
 
         # Pre-flight checks (order is load-bearing — see task-05 §边界处理).
-        if session.provider != "claude":
+        if session.provider not in {"claude", "codex"}:
             raise DaemonSessionResumeUnsupported(
                 f"Session '{session_id}' provider '{session.provider}' does not "
-                f"support resume (only claude).",
+                f"support resume (only claude/codex).",
                 details={
                     "session_id": str(session_id),
                     "provider": session.provider,

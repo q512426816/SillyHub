@@ -24,12 +24,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.agent.model import AgentRun, AgentSession
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.service import (
+    DaemonOffline,
     DaemonRuntimeOffline,
     DaemonService,
     DaemonSessionInvariantViolation,
+    DaemonSessionNoAgentSession,
     DaemonSessionNoCurrentRun,
     DaemonSessionNotActive,
     DaemonSessionNotFound,
+    DaemonSessionResumeUnsupported,
     DaemonSessionTurnConflict,
 )
 
@@ -624,3 +627,214 @@ class TestCurrentRunInvariant:
         svc = DaemonService(db_session)
         with pytest.raises(DaemonSessionInvariantViolation):
             await svc.interrupt_session(session.id, uid)
+
+
+# ── task-07 (codex reopen parity, design §5.6 / FR-06 / D-003@v1 / D-007@v1) ──
+
+
+async def _make_ended_session(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    runtime_id: uuid.UUID,
+    *,
+    provider: str = "codex",
+    agent_session_id: str | None = "codex-thread-abc",
+    status: str = "ended",
+) -> tuple[AgentSession, DaemonTaskLease]:
+    """Create a terminal AgentSession bound to a completed interactive lease.
+
+    Mirrors the pre-reopen state: the original ``completed`` lease (design
+    §6.2) must stay untouched; reopen creates a brand-new pending lease.
+    """
+    now = datetime.now(UTC)
+    lease = DaemonTaskLease(
+        id=uuid.uuid4(),
+        runtime_id=runtime_id,
+        agent_run_id=None,
+        kind="interactive",
+        status="completed",
+        claimed_at=now,
+        lease_expires_at=None,
+        attempt_number=1,
+        metadata_={
+            "session_id": agent_session_id or "",
+            "provider": provider,
+            "claim_token": "old-codex-token-deadbeef",
+        },
+        created_at=now,
+        updated_at=now,
+    )
+    sess = AgentSession(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        runtime_id=runtime_id,
+        lease_id=lease.id,
+        provider=provider,
+        status=status,
+        agent_session_id=agent_session_id,
+        config={"model": "gpt-5"},
+        turn_count=1,
+        cwd="/workspace/codex-proj",
+        created_at=now,
+        last_active_at=now,
+        ended_at=now if status in ("ended", "failed") else None,
+    )
+    session.add_all([lease, sess])
+    await session.commit()
+    await session.refresh(lease)
+    await session.refresh(sess)
+    return sess, lease
+
+
+class TestReopenCodexSession:
+    """task-07 / design §5.6: backend 放开 Codex reopen (provider gate {claude,codex}).
+
+    D-003@v1 复用 backend session 控制面；D-007@v1 agent_session_id 即 Codex
+    threadId，原样作为 resume key 保留，不伪造。
+    """
+
+    @pytest.mark.asyncio
+    async def test_reopen_ended_codex_session_returns_reconnecting(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, _old_lease = await _make_ended_session(db_session, uid, rt.id)
+
+        svc = DaemonService(db_session)
+        result = await svc.reopen_session(sess.id, uid)
+
+        assert result.session_id == str(sess.id)
+        assert result.status == "reconnecting"
+
+        # DB-level via column projection (bypass identity-map copy written by
+        # the service's own session).
+        status_row = (
+            await db_session.execute(select(AgentSession.status).where(AgentSession.id == sess.id))
+        ).scalar_one()
+        assert status_row == "reconnecting"
+
+    @pytest.mark.asyncio
+    async def test_reopen_codex_creates_new_lease_preserves_threadid(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, old_lease = await _make_ended_session(
+            db_session, uid, rt.id, agent_session_id="codex-thread-xyz"
+        )
+
+        svc = DaemonService(db_session)
+        await svc.reopen_session(sess.id, uid)
+
+        sess_row = (
+            await db_session.execute(
+                select(
+                    AgentSession.status,
+                    AgentSession.agent_session_id,
+                    AgentSession.lease_id,
+                    AgentSession.runtime_id,
+                ).where(AgentSession.id == sess.id)
+            )
+        ).one()
+        assert sess_row.status == "reconnecting"
+        # D-007@v1: threadId preserved verbatim as the resume key.
+        assert sess_row.agent_session_id == "codex-thread-xyz"
+        assert sess_row.lease_id is not None
+        new_lease_id = sess_row.lease_id
+        assert new_lease_id != old_lease.id
+
+        new_lease = (
+            await db_session.execute(
+                select(
+                    DaemonTaskLease.kind,
+                    DaemonTaskLease.status,
+                    DaemonTaskLease.metadata_,
+                ).where(DaemonTaskLease.id == new_lease_id)
+            )
+        ).one()
+        assert new_lease.kind == "interactive"
+        assert new_lease.status == "pending"
+        meta = new_lease.metadata_ or {}
+        # lease metadata 四字段齐 (design §5.6.3)。
+        assert meta["session_id"] == str(sess.id)
+        assert meta["agent_session_id"] == "codex-thread-xyz"
+        assert meta["provider"] == "codex"
+        new_token = meta["claim_token"]
+        assert isinstance(new_token, str) and len(new_token) >= 32
+        assert new_token != "old-codex-token-deadbeef"
+
+        # design §6.2: 旧 completed lease 不动。
+        old_status = (
+            await db_session.execute(
+                select(DaemonTaskLease.status).where(DaemonTaskLease.id == old_lease.id)
+            )
+        ).scalar_one()
+        assert old_status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_reopen_unsupported_provider_still_409(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        # 非 {claude, codex} provider（如 cursor/openclaw/gemini）仍拦截。
+        sess, _lease = await _make_ended_session(
+            db_session, uid, rt.id, provider="gemini", agent_session_id="g-1"
+        )
+
+        svc = DaemonService(db_session)
+        with pytest.raises(DaemonSessionResumeUnsupported) as exc_info:
+            await svc.reopen_session(sess.id, uid)
+        # 文案锁：only claude/codex（design §5.6.2）。
+        assert "claude/codex" in str(exc_info.value)
+        assert exc_info.value.code == "HTTP_409_DAEMON_SESSION_RESUME_UNSUPPORTED"
+        # session 未被 mutate（pre-flight 第一道即拦）。
+        status_row = (
+            await db_session.execute(select(AgentSession.status).where(AgentSession.id == sess.id))
+        ).scalar_one()
+        assert status_row == "ended"
+
+    @pytest.mark.asyncio
+    async def test_reopen_codex_null_agent_session_id_409(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """D-007@v1: Codex ended 但 threadId=NULL 不得伪造，仍 NO_AGENT_SESSION。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, _lease = await _make_ended_session(db_session, uid, rt.id, agent_session_id=None)
+
+        svc = DaemonService(db_session)
+        with pytest.raises(DaemonSessionNoAgentSession):
+            await svc.reopen_session(sess.id, uid)
+        status_row = (
+            await db_session.execute(select(AgentSession.status).where(AgentSession.id == sess.id))
+        ).scalar_one()
+        assert status_row == "ended"
+
+    @pytest.mark.asyncio
+    async def test_reopen_codex_active_session_409_not_active(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """状态机一致：codex active session reopen → NOT_ACTIVE（应走 inject）。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, _lease = await _make_ended_session(db_session, uid, rt.id, status="active")
+
+        svc = DaemonService(db_session)
+        with pytest.raises(DaemonSessionNotActive):
+            await svc.reopen_session(sess.id, uid)
+
+    @pytest.mark.asyncio
+    async def test_reopen_codex_offline_runtime_409(self, db_session, mocked_redis) -> None:
+        """FR-06 边界：codex runtime 未连 WS → DaemonOffline（409 OFFLINE）。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, _lease = await _make_ended_session(db_session, uid, rt.id)
+
+        # offline hub: is_connected False.
+        hub = _mock_hub(connected=False)
+        with patch("app.modules.daemon.ws_hub.get_daemon_ws_hub", return_value=hub):
+            svc = DaemonService(db_session)
+            with pytest.raises(DaemonOffline):
+                await svc.reopen_session(sess.id, uid)

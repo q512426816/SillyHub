@@ -76,14 +76,15 @@ async def _create_session(
     *,
     manual_approval: bool = True,
     status: str = "active",
+    provider: str = "claude",
 ) -> tuple[AgentSession, AgentRun]:
     """Create a manual_approval AgentSession + running AgentRun + active lease."""
     sess = AgentSession(
         id=uuid.uuid4(),
         user_id=user_id,
-        provider="claude",
+        provider=provider,
         status=status,
-        config={"manual_approval": manual_approval, "model": "claude"},
+        config={"manual_approval": manual_approval, "model": provider},
         turn_count=1,
         runtime_id=runtime_id,
         lease_id=uuid.uuid4(),
@@ -93,8 +94,8 @@ async def _create_session(
     await session.flush()
     run = AgentRun(
         id=uuid.uuid4(),
-        agent_type="claude_code",
-        provider="claude",
+        agent_type="claude_code" if provider == "claude" else "codex",
+        provider=provider,
         status="running",
         spec_strategy="interactive",
         agent_session_id=sess.id,
@@ -533,3 +534,178 @@ class TestWsHubSendPermissionResponse:
         assert ok is True
         assert ws.sent[0]["type"] == "daemon:permission_response"
         assert ws.sent[0]["payload"] == payload
+
+
+# ── task-07 / FR-08 / D-006@v1 / D-008@v1: Codex permission/dialog parity ───
+
+
+class TestCodexPermissionParity:
+    """Backend 层 permission/dialog 通道 provider-neutral（FR-08/FR-09, D-006/D-008）.
+
+    D-008@v1：``handle_permission_request`` / ``respond_permission`` 不依赖
+    provider == claude；codex session 走相同 DaemonPermissionService 路径，
+    策略（manual_approval / ask_user_only / timeout fail-closed）行为一致。
+    """
+
+    @pytest.mark.asyncio
+    async def test_codex_handle_publishes_sse_and_arms_timer(
+        self, db_session, mocked_redis
+    ) -> None:
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, run = await _create_session(db_session, uid, rt.id, provider="codex")
+
+        svc = DaemonService(db_session)
+        hub = MagicMock()
+        hub.send_permission_response = AsyncMock(return_value=True)
+        perm = DaemonPermissionService(svc, hub, timeout_sec=30.0)
+
+        payload = _make_request_payload(sess, run, request_id="codex-req-1")
+        await perm.handle_permission_request(rt.id, payload)
+
+        # SSE permission_request published on the codex session channel.
+        assert any(
+            c.args[0] == f"agent_session:{sess.id}" and "permission_request" in c.args[1]
+            for c in mocked_redis.publish.await_args_list
+        )
+        assert "codex-req-1" in perm._timers
+        _task = perm._timers["codex-req-1"]
+        _task.cancel()
+        try:
+            await _task
+        except asyncio.CancelledError:
+            pass
+
+    @pytest.mark.asyncio
+    async def test_codex_manual_false_drops_without_publishing(
+        self, db_session, mocked_redis
+    ) -> None:
+        """FR-08：codex manual_approval=false 时 permission request 静默丢弃。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, run = await _create_session(
+            db_session, uid, rt.id, provider="codex", manual_approval=False
+        )
+
+        svc = DaemonService(db_session)
+        perm = DaemonPermissionService(svc, MagicMock(), timeout_sec=30.0)
+        await perm.handle_permission_request(
+            rt.id, _make_request_payload(sess, run, request_id="codex-req-2")
+        )
+
+        assert all(
+            "permission_request" not in c.args[1] for c in mocked_redis.publish.await_args_list
+        )
+        assert len(perm._timers) == 0
+
+    @pytest.mark.asyncio
+    async def test_codex_respond_allow_sends_ws_and_cancels_timer(
+        self, db_session, mocked_redis
+    ) -> None:
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, run = await _create_session(db_session, uid, rt.id, provider="codex")
+
+        svc = DaemonService(db_session)
+        hub = MagicMock()
+        hub.send_permission_response = AsyncMock(return_value=True)
+        perm = DaemonPermissionService(svc, hub, timeout_sec=30.0)
+        await perm.handle_permission_request(
+            rt.id, _make_request_payload(sess, run, request_id="codex-req-3")
+        )
+        assert "codex-req-3" in perm._timers
+
+        result = await perm.respond_permission(
+            user_id=uid,
+            session_id=sess.id,
+            request_id="codex-req-3",
+            decision="allow",
+        )
+        assert result.accepted is True
+        assert result.decision == "allow"
+        hub.send_permission_response.assert_awaited_once()
+        ws_arg = hub.send_permission_response.await_args
+        assert ws_arg.args[0] == rt.id
+        assert ws_arg.args[1]["decision"] == "allow"
+        assert ws_arg.args[1]["request_id"] == "codex-req-3"
+        assert "codex-req-3" not in perm._timers
+
+    @pytest.mark.asyncio
+    async def test_codex_timeout_fail_closed_deny(self, db_session, mocked_redis) -> None:
+        """FR-08/D-006：codex permission timeout → fail-closed deny（不自动 accept）。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, run = await _create_session(db_session, uid, rt.id, provider="codex")
+
+        svc = DaemonService(db_session)
+        hub = MagicMock()
+        hub.send_permission_response = AsyncMock(return_value=True)
+        perm = DaemonPermissionService(svc, hub, timeout_sec=30.0)
+        await perm.handle_permission_request(
+            rt.id, _make_request_payload(sess, run, request_id="codex-req-4")
+        )
+
+        task = perm._timers["codex-req-4"]
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        perm._timers.pop("codex-req-4", None)
+        await perm._on_timeout(sess.id, run.id, "codex-req-4", rt.id)
+
+        ws_calls = hub.send_permission_response.await_args_list
+        assert any(
+            c.args[1]["decision"] == "deny" and c.args[1]["request_id"] == "codex-req-4"
+            for c in ws_calls
+        )
+        assert any(
+            "permission_resolved" in c.args[1] and "timeout" in c.args[1]
+            for c in mocked_redis.publish.await_args_list
+        )
+
+    @pytest.mark.asyncio
+    async def test_codex_dialog_request_treated_provider_neutral(
+        self, db_session, mocked_redis
+    ) -> None:
+        """FR-09/D-008：codex 的 dialog_kind/payload 走同一 permission 通道。
+
+        daemon 侧会把 Codex ``item/tool/requestUserInput`` 归一化为
+        dialog_kind 后发到 backend；backend 不因 provider=codex 回退。dialog
+        走 long-lived 路径（不 arm 5min timer），断言 SSE 发布 + 持久化 row。
+        """
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, run = await _create_session(db_session, uid, rt.id, provider="codex")
+
+        svc = DaemonService(db_session)
+        hub = MagicMock()
+        hub.send_permission_response = AsyncMock(return_value=True)
+        perm = DaemonPermissionService(svc, hub, timeout_sec=30.0)
+
+        payload = _make_dialog_payload(
+            sess,
+            run,
+            request_id="codex-dlg-1",
+            dialog_kind="codex_request_user_input",
+        )
+        await perm.handle_permission_request(rt.id, payload)
+
+        # dialog permission_request SSE published on the codex session channel.
+        published = [
+            c.args[1]
+            for c in mocked_redis.publish.await_args_list
+            if c.args[0] == f"agent_session:{sess.id}" and "permission_request" in c.args[1]
+        ]
+        assert published, "expected permission_request SSE for codex dialog"
+        # dialog_kind + dialog_payload 透传（provider-neutral）。
+        assert any("codex_request_user_input" in p for p in published)
+
+        # dialog 持久化为 pending row（不走 5min timer）。
+        pending = await perm.list_pending_dialogs(uid, sess.id)
+        assert any(
+            d.request_id == "codex-dlg-1" and d.dialog_kind == "codex_request_user_input"
+            for d in pending
+        )
+        # dialogs 不 arm timer（long-lived）。
+        assert "codex-dlg-1" not in perm._timers
