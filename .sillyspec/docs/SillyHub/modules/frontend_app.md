@@ -133,3 +133,4 @@ layout.tsx (根布局)
 | 2026-06-23 | ql-20260623-006-d4a9 | /ppm/task-plans 查询条件变化不自动查询:useEffect deps 从所有 filter state + searchNonce 精简为只 [searchNonce];任意条件变化只 setState 不查,搜索按钮/回车/重置走 setSearchNonce 触发,翻页走 pagination.onChange 直接调 load |
 | 2026-06-23 | ql-20260623-007-e5f1 | /ppm/task-plans 操作列+查询区对齐 project-plans:操作按钮从 ghost 改 default(执行 bg-blue-500/编辑默认/删除 destructive,同色方案);查询条件加展开/收起按钮,默认 4 个 Field(状态/月份/项目/负责人),展开后追加 3 个(计划时间/配合人员/视图) |
 | 2026-06-23 | ql-20260623-008-f2c3 | /ppm/task-plans 操作列 width 从 'max-content'(antd Table fixed+scroll.x 下不可靠)改具体数字 180px,真正收紧列宽消除留白 |
+| 2026-06-23 | ql-20260623-009-a8b4 | /ppm/task-plans 编辑按钮从 default 改 outline variant;原因 default=bg-primary 与执行 bg-blue-500 在 theme 下都是蓝造成同色;改后形成三种视觉层级:执行蓝实/编辑描边/删除红实 |

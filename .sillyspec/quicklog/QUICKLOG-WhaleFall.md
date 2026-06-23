@@ -868,3 +868,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
 结果:操作列 width 从 'max-content'(antd Table fixed+scroll.x 模式下不可靠,实际给默认较宽值造成留白)改为具体数字 180px(3 个 sm Button + gap-1 实际占 ~156px,留 24px 缓冲)。前端 typecheck 通过。
+
+
+## ql-20260623-009-a8b4 | 2026-06-23 11:05:00 | task-plans 操作按钮颜色区分(执行蓝实/编辑描边/删除红实)
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
+结果:编辑按钮从 variant=default 改为 variant=outline(白底描边)。原因:default variant = bg-primary,在该项目 theme 下 --primary 与执行按钮 bg-blue-500 都是蓝色,造成执行/编辑同色。改 outline 后形成三种视觉层级:执行蓝实 / 编辑描边 / 删除红实。前端 typecheck 通过。

@@ -380,7 +380,7 @@ export default function TaskPlansPage() {
             </Button>
             <Button
               size="sm"
-              variant="default"
+              variant="outline"
               disabled={!canEdit}
               title={
                 canEdit
