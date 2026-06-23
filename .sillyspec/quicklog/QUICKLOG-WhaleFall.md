@@ -910,3 +910,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/app/(dashboard)/ppm/project-members/page.tsx, frontend/src/components/ppm-project-members-table.tsx
 结果:page.tsx 改 PageContainer size=full + PageHeader(替代 div mx-auto max-w-7xl + header)。组件:1) 页面模式(showToolbar=true)用 SectionCard(bodyPadding=p-2) 包裹,抽屉模式(showToolbar=false)保留原 flex div 布局(projects 抽屉不受影响);2) Table 加 bordered + scroll y calc(100vh-430px)(仅页面模式);3) 顶部按钮去左侧'共 X 条'浮动文本(Table 分页 showTotal 保留);4) 操作列去 justify-end 改 whitespace-nowrap(fixed=right 自然左对齐),width 140 保留。前端 typecheck 通过。
+
+
+## ql-20260623-016-b8d4 | 2026-06-23 14:25:00 | /ppm/plan-nodes 对齐 project-plans 风格
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/plan-nodes/page.tsx
+结果:容器 div mx-auto max-w-7xl + header → PageContainer size=full + PageHeader(标题/副标题独立) + SectionCard(bodyPadding=p-2) 包裹 toolbar+Table;顶部按钮右对齐 mb-2 flex justify-end(+ 新建模板);主 Table 加 bordered + scroll y calc(100vh-430px);两处操作列(模板主表 + 模块子表)去 align=right + justify-end,改 whitespace-nowrap + width 140 自然左对齐。NodeFormDrawer/ModuleFormDrawer 等子组件保留原实现。前端 typecheck 通过。

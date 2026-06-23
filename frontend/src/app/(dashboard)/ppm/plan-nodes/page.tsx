@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Table, type TableProps, Tag } from "antd";
 
 import { Button } from "@/components/ui/button";
+import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import {
   PpmDictSelect,
   getPpmDictLabel,
@@ -152,9 +153,9 @@ export default function PlanNodesPage() {
     {
       title: "操作",
       key: "actions",
-      align: "right",
+      width: 140,
       render: (_v: unknown, n: PlanNode) => (
-        <div className="flex justify-end gap-1">
+        <div className="flex whitespace-nowrap gap-1">
           <Button
             size="sm"
             variant="outline"
@@ -175,21 +176,11 @@ export default function PlanNodesPage() {
   ];
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-5 px-6 py-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="mt-0.5">计划节点模板</h1>
-          <p className="text-xs text-muted-foreground">
-            模板 → 模板明细 → 执行模块(展开行查看明细与模块)
-          </p>
-        </div>
-        <Button
-          size="sm"
-          onClick={() => setDrawer({ open: true, mode: "create" })}
-        >
-          + 新建模板
-        </Button>
-      </header>
+    <PageContainer size="full">
+      <PageHeader
+        title="计划节点模板"
+        subtitle="模板 → 模板明细 → 执行模块(展开行查看明细与模块)"
+      />
 
       {toast && (
         <div
@@ -203,39 +194,52 @@ export default function PlanNodesPage() {
         </div>
       )}
 
-      {error ? (
-        <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
-          {error}
+      <SectionCard bodyPadding="p-2">
+        {/* 顶部按钮行:右对齐(新建模板) */}
+        <div className="mb-2 flex items-center justify-end gap-2">
           <Button
             size="sm"
-            variant="outline"
-            className="ml-3"
-            onClick={() => void load()}
+            onClick={() => setDrawer({ open: true, mode: "create" })}
           >
-            重新加载
+            + 新建模板
           </Button>
         </div>
-      ) : (
-        <Table<PlanNode>
-          rowKey="id"
-          columns={columns}
-          dataSource={nodes}
-          loading={loading}
-          size="small"
-          pagination={false}
-          locale={{ emptyText: "暂无模板" }}
-          scroll={{ x: "max-content" }}
-          expandable={{
-            expandedRowRender: (node) => (
-              <PlanNodeChildren
-                key={node.id}
-                node={node}
-                onChanged={() => void load()}
-              />
-            ),
-          }}
-        />
-      )}
+
+        {error ? (
+          <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
+            {error}
+            <Button
+              size="sm"
+              variant="outline"
+              className="ml-3"
+              onClick={() => void load()}
+            >
+              重新加载
+            </Button>
+          </div>
+        ) : (
+          <Table<PlanNode>
+            rowKey="id"
+            columns={columns}
+            dataSource={nodes}
+            loading={loading}
+            size="small"
+            bordered
+            pagination={false}
+            locale={{ emptyText: "暂无模板" }}
+            scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
+            expandable={{
+              expandedRowRender: (node) => (
+                <PlanNodeChildren
+                  key={node.id}
+                  node={node}
+                  onChanged={() => void load()}
+                />
+              ),
+            }}
+          />
+        )}
+      </SectionCard>
 
       {drawer.open && (
         <NodeFormDrawer
@@ -245,7 +249,7 @@ export default function PlanNodesPage() {
           onSubmit={(v) => void handleSaveNode(v)}
         />
       )}
-    </div>
+    </PageContainer>
   );
 }
 
@@ -534,9 +538,9 @@ function ModulesSubTable({
     {
       title: "操作",
       key: "actions",
-      align: "right",
+      width: 140,
       render: (_v: unknown, m: PlanNodeModule) => (
-        <div className="flex justify-end gap-1">
+        <div className="flex whitespace-nowrap gap-1">
           <Button size="sm" variant="outline" onClick={() => setEditing(m)}>
             编辑
           </Button>

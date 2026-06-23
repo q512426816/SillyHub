@@ -5,7 +5,7 @@ created_at: 2026-06-01T12:00:00
 
 # frontend_app
 > 最后更新：2026-06-21
-> 最近变更：ql-20260623-015-a7c3（/ppm/project-members 对齐 project-plans 风格）
+> 最近变更：ql-20260623-016-b8d4（/ppm/plan-nodes 对齐 project-plans 风格）
 > 模块路径：frontend/src/app/**
 
 ## 职责
@@ -139,3 +139,4 @@ layout.tsx (根布局)
 | 2026-06-23 | ql-20260623-012-d4e8 | problem-list 加展开收起按钮(默认 4 个 Field:关键字/状态/项目/问题类型,展开追加 2 个:是否紧急/发现时间,放重置后分隔前);删除 problem-list/problem-changes/task-plans 搜索条件 grid 末尾'共 X 条'浮动 div(Table 分页 showTotal 保留);total state 仍用于 Table pagination |
 | 2026-06-23 | ql-20260623-013-e5f2 | 前端 page_size>200 调用全部夹到 200(对齐后端 ppm Query ge=1 le=200 硬限制):work-hours/page.tsx 两处 listPlanTasks(任务列下拉/抽屉 taskOptions,原 500→200);work-hour-statistics/page.tsx 两处 listWorkHours 明细(原 1000→200)。plan-nodes 已用 200 不动。解决 /api/ppm/task-plan/page?page_size=500 的 422 |
 | 2026-06-23 | ql-20260623-015-a7c3 | /ppm/project-members 对齐 project-plans:page.tsx 改 PageContainer size=full + PageHeader;PpmProjectMembersTable 组件按 showToolbar 双模式渲染(页面=SectionCard bodyPadding=p-2 包裹 + Table bordered + scroll y calc(100vh-430px),抽屉=原 flex div 不变以兼容 projects 抽屉);顶部按钮去左侧'共 X 条'文本(Table 分页 showTotal 保留);操作列去 justify-end 改 whitespace-nowrap(fixed=right 自然左对齐) |
+| 2026-06-23 | ql-20260623-016-b8d4 | /ppm/plan-nodes 对齐 project-plans:div max-w-7xl + header → PageContainer size=full + PageHeader + SectionCard(bodyPadding=p-2) 包裹 toolbar+Table;顶部按钮右对齐(+ 新建模板);主 Table 加 bordered + scroll y calc(100vh-430px);模板主表 + 模块子表两处操作列去 align=right + justify-end,改 whitespace-nowrap + width 140 自然左对齐。无查询条件(模板树形展开 pagination=false),不加 search/grid |
