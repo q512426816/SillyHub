@@ -916,3 +916,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/app/(dashboard)/ppm/plan-nodes/page.tsx
 结果:容器 div mx-auto max-w-7xl + header → PageContainer size=full + PageHeader(标题/副标题独立) + SectionCard(bodyPadding=p-2) 包裹 toolbar+Table;顶部按钮右对齐 mb-2 flex justify-end(+ 新建模板);主 Table 加 bordered + scroll y calc(100vh-430px);两处操作列(模板主表 + 模块子表)去 align=right + justify-end,改 whitespace-nowrap + width 140 自然左对齐。NodeFormDrawer/ModuleFormDrawer 等子组件保留原实现。前端 typecheck 通过。
+
+
+## ql-20260623-017-c9e5 | 2026-06-23 14:40:00 | /ppm/milestone-details 对齐 project-plans 风格
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
+结果:PageContainer 加 size=full;PageHeader 去 actions(标题副标题独立);SectionCard bodyPadding=p-2 内 mb-2 右对齐按钮行(重置 outline + 分隔 + 导出 outline + 新建里程碑 primary + 刷新 outline)+ grid-cols-4 Field 3 个 Input(总体阶段/明细阶段/任务主题)+ 第 4 格放过滤作用范围提示文本;PpmSubTable tableProps 加 bordered + scroll y calc(100vh-430px);新增 Field 组件(垂直 label+控件);删除 SearchBar 未用 import。保留前端实时过滤行为(无搜索按钮,输入即生效)。前端 typecheck 通过。

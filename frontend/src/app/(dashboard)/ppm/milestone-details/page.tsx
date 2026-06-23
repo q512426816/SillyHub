@@ -53,7 +53,6 @@ import {
   DataTable,
   PageContainer,
   PageHeader,
-  SearchBar,
   SectionCard,
 } from "@/components/layout";
 import { PpmSubTable } from "@/components/ppm-sub-table";
@@ -538,7 +537,7 @@ export default function MilestoneDetailsPage() {
   }
 
   return (
-    <PageContainer>
+    <PageContainer size="full">
       <PageHeader
         title="里程碑明细"
         subtitle={
@@ -548,55 +547,12 @@ export default function MilestoneDetailsPage() {
             {readOnly && " · 只读模式(非项目经理)"}
           </>
         }
-        actions={
-          <>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={exporting}
-              onClick={() => void handleExport()}
-            >
-              {exporting ? "导出中…" : "导出"}
-            </Button>
-            <Button
-              size="sm"
-              disabled={readOnly}
-              title={readOnly ? "只读模式(非项目经理)" : undefined}
-              onClick={() => setMasterDrawer({ open: true, mode: "create" })}
-            >
-              + 新建里程碑
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => void reload()}>
-              刷新
-            </Button>
-          </>
-        }
       />
 
       {/* plan 内前端过滤(后端无对应过滤参数) */}
-      <SectionCard>
-        <SearchBar>
-          <Input
-            allowClear
-            className="w-[200px]"
-            placeholder="总体阶段"
-            value={overallStageFilter}
-            onChange={(e) => setOverallStageFilter(e.target.value)}
-          />
-          <Input
-            allowClear
-            className="w-[200px]"
-            placeholder="明细阶段"
-            value={detailedStageFilter}
-            onChange={(e) => setDetailedStageFilter(e.target.value)}
-          />
-          <Input
-            allowClear
-            className="w-[220px]"
-            placeholder="任务主题"
-            value={taskThemeFilter}
-            onChange={(e) => setTaskThemeFilter(e.target.value)}
-          />
+      <SectionCard bodyPadding="p-2">
+        {/* 顶部按钮行:右对齐(重置 | 分隔 | 导出 | 新建里程碑 | 刷新) */}
+        <div className="mb-2 flex items-center justify-end gap-2">
           <Button
             size="sm"
             variant="outline"
@@ -606,12 +562,63 @@ export default function MilestoneDetailsPage() {
               setTaskThemeFilter("");
             }}
           >
-            清除
+            重置
           </Button>
-          <span className="ml-auto text-xs text-muted-foreground">
+          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={exporting}
+            onClick={() => void handleExport()}
+          >
+            {exporting ? "导出中…" : "导出"}
+          </Button>
+          <Button
+            size="sm"
+            disabled={readOnly}
+            title={readOnly ? "只读模式(非项目经理)" : undefined}
+            onClick={() => setMasterDrawer({ open: true, mode: "create" })}
+          >
+            + 新建里程碑
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => void reload()}>
+            刷新
+          </Button>
+        </div>
+
+        {/* 查询条件:垂直 grid-cols-4(前端实时过滤,输入即生效) */}
+        <div className="grid w-full grid-cols-4 gap-3">
+          <Field label="总体阶段">
+            <Input
+              allowClear
+              className="w-full"
+              placeholder="总体阶段"
+              value={overallStageFilter}
+              onChange={(e) => setOverallStageFilter(e.target.value)}
+            />
+          </Field>
+          <Field label="明细阶段">
+            <Input
+              allowClear
+              className="w-full"
+              placeholder="明细阶段"
+              value={detailedStageFilter}
+              onChange={(e) => setDetailedStageFilter(e.target.value)}
+            />
+          </Field>
+          <Field label="任务主题">
+            <Input
+              allowClear
+              className="w-full"
+              placeholder="任务主题"
+              value={taskThemeFilter}
+              onChange={(e) => setTaskThemeFilter(e.target.value)}
+            />
+          </Field>
+          <div className="self-end text-right text-xs text-muted-foreground">
             注:明细阶段/任务主题过滤在展开明细行内生效
-          </span>
-        </SearchBar>
+          </div>
+        </div>
       </SectionCard>
 
       {toast && (
@@ -636,7 +643,12 @@ export default function MilestoneDetailsPage() {
           masterColumns={masterColumns}
           expandRender={expandRender}
           expandableTriggerField="id"
-          tableProps={{ loading, pagination: false, scroll: { x: "max-content" } }}
+          tableProps={{
+            loading,
+            pagination: false,
+            bordered: true,
+            scroll: { x: "max-content", y: "calc(100vh - 430px)" },
+          }}
         />
       )}
 
@@ -1317,6 +1329,22 @@ function toDay(v: string | null | undefined): Dayjs | null {
   if (!v) return null;
   const d = dayjs(v);
   return d.isValid() ? d : null;
+}
+
+/** 查询条件外壳:垂直布局(标题在上,控件在下),对齐 project-plans 风格。 */
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex w-full flex-col gap-1">
+      <span className="text-xs leading-4 text-muted-foreground">{label}</span>
+      {children}
+    </div>
+  );
 }
 
 /** Dayjs → 'YYYY-MM-DD' 或 null。 */
