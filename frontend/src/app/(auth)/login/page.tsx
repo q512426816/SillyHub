@@ -141,12 +141,10 @@ export default function LoginPage() {
                 </p>
               </div>
 
-              <Form<LoginFormValues>
+              Form<LoginFormValues>
             form={form}
             layout="vertical"
             initialValues={{
-              account: "admin@sillyhub.local",
-              password: "admin123",
               remember: true,
             }}
             onFinish={onFinish}
