@@ -36,3 +36,4 @@ created_at: 2026-06-19T19:40:00+08:00
 
 - 2026-06-19-runtimes-layout：增加终态会话安全删除能力及所有权、状态冲突和运行历史保留测试。
 - 2026-06-22-daemon-service-split：将 `DaemonService` 巨石（~3500 行/51 方法）按生命周期拆为 `runtime/lease/run_sync/session/patch` 5 子域子包，`DaemonService` 退化为 facade（方法签名不变、`router.py` 零改动、行为不变）；异常类按子域迁入子包 + facade re-export 保持 import 路径兼容；`DaemonLeaseService` 原位不动（D-003）。跨子域调用经 facade 引用注入（D-006），子 service import 经 `__init__` 内 lazy import 避免 module-level 循环（D-005）。
+- ql-20260623-001-85ac | 修复 ruff N815：`DaemonVersionResponse` 的 `minRequired`/`downloadUrl` camelCase 字段（对外公开端点 GET /api/daemon/version 的 JSON 契约，router.py:72-75 注释，install.sh/前端消费）加 `# noqa: N815` 行内豁免，不改 snake_case（改了会破坏 install.sh/前端）；验证 `cd backend && uv run ruff check .` 通过。
