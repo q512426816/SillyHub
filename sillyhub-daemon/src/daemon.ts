@@ -41,6 +41,12 @@ import { mkdir } from 'node:fs/promises';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { DaemonConfig } from './config.js';
 import { MSG } from './protocol.js';
+// task-06（design §5.4.4）：onTurnMessage/onTurnResult 参数类型从 Claude SDK 专属类型
+// 放宽为 provider-neutral 联合，支持 Codex flat message/result 透传。
+import type {
+  InteractiveDriverMessage,
+  InteractiveDriverResult,
+} from './interactive/driver.js';
 import type {
   DaemonMessage,
   ExecutionContextPayload,
@@ -986,7 +992,11 @@ export class Daemon {
   async onTurnResult(
     sessionId: string,
     runId: string,
-    result: SDKResultMessage,
+    // task-06（design §5.4.4）：放宽为 provider-neutral 联合。Claude driver 传
+    // SDKResultMessage；Codex driver 传 InteractiveDriverResult（flat：subtype/is_error/
+    // total_cost_usd/usage）。下方字段提取用 `as SDKResultMessage & {...}` duck-typing，
+    // 两种 provider 都兼容（字段不存在则 undefined，不写 payload）。
+    result: SDKResultMessage | InteractiveDriverResult,
   ): Promise<void> {
     if (!this._sessionManager) {
       this._logger.warn('on_turn_result_no_manager', { session_id: sessionId });
@@ -1102,7 +1112,11 @@ export class Daemon {
   async onTurnMessage(
     sessionId: string,
     runId: string,
-    msg: SDKMessage,
+    // task-06（design §5.4.4）：放宽为 provider-neutral 联合。Claude driver 传
+    // SDKMessage（{type:'assistant'|'user'|..., message:{usage}}）；Codex driver 传
+    // InteractiveDriverMessage（= Record<string,unknown>，flat：{event_type, content,
+    // metadata, session_id}）。下方 duck-typing 按 type/event_type 分流提取。
+    msg: SDKMessage | InteractiveDriverMessage,
   ): Promise<void> {
     if (!this._sessionManager) {
       this._logger.warn('on_turn_message_no_manager', { session_id: sessionId });
@@ -1132,13 +1146,32 @@ export class Daemon {
       return;
     }
     try {
-      // 实时 token 回写：SDK assistant message 的 usage 在 msg.message.usage 中，
-      // backend submit_messages 提取顶层 msg.usage。这里把 usage 提到顶层，
-      // 让 backend 实时更新 AgentRun.input_tokens / output_tokens（每条 assistant
-      // message 都带累积 usage，不必等 result 事件汇总）。
       const fwdMsg = msg as unknown as Record<string, unknown>;
       const msgType = fwdMsg['type'];
-      if (msgType === 'assistant') {
+      // task-06（Reverse Sync / design §5.3 第 6 点）：Codex flat message 的
+      // thread_started 事件携带 session_id=threadId。daemon 提取并记日志，便于
+      // 追踪 Codex thread 与 AgentSession 的绑定；flat message 原样 submitMessages
+      // 透传，backend submit_messages 现有逻辑据 message.session_id 写回
+      // AgentRun.session_id（ql-20260617-001）。AgentSession.agent_session_id 的对齐
+      // 由 session-manager _onMessage 写 state.agentSessionId（供落盘/恢复）。
+      const eventType = fwdMsg['event_type'];
+      if (typeof eventType === 'string' && eventType !== undefined) {
+        const metadata = fwdMsg['metadata'] as Record<string, unknown> | undefined;
+        const subtype = metadata?.['subtype'];
+        const flatSessionId = fwdMsg['session_id'];
+        if (subtype === 'thread_started' && typeof flatSessionId === 'string' && flatSessionId) {
+          this._logger.info('interactive_codex_thread_started', {
+            session_id: sessionId,
+            lease_id: state.leaseId,
+            thread_id: flatSessionId,
+            provider: state.provider,
+          });
+        }
+      } else if (msgType === 'assistant') {
+        // 实时 token 回写（Claude SDK）：assistant message 的 usage 在 msg.message.usage，
+        // backend submit_messages 提取顶层 msg.usage。这里把 usage 提到顶层，让 backend
+        // 实时更新 AgentRun.input_tokens / output_tokens（每条 assistant message 都带
+        // 累积 usage，不必等 result 事件汇总）。
         const inner = fwdMsg['message'] as Record<string, unknown> | undefined;
         const usage = inner?.['usage'] as Record<string, unknown> | undefined;
         if (usage && typeof usage['input_tokens'] === 'number') {
@@ -1680,12 +1713,22 @@ export class Daemon {
     }
     const provider =
       ((raw.provider as string | undefined) ?? 'claude') === 'codex' ? 'codex' : 'claude';
+    // backend reopen payload 不带 exe path；按归一化后的 provider 从 _agentPaths
+    //（agent-detector 注册：create 时 _agentPaths.set(provider, path)）补齐，否则
+    // restoreAndReconnect 内 exe = record.pathToAgentExecutable ??
+    // pathToClaudeCodeExecutable ?? '' 拿到空串 → Codex driver start() 抛
+    // CodexExecutableNotFoundError → reopen 失败（design §11 Codex reopen 验收）。
+    // 字段同时填 pathToAgentExecutable（Codex driver 读）+ pathToClaudeCodeExecutable
+    //（兼容名，SessionManager.restoreAndReconnect fallback）。
+    const exePath = this._agentPaths.get(provider) ?? '';
     const record: PersistedSessionRecord = {
       sessionId,
       leaseId,
       agentSessionId,
       cwd: (raw.cwd as string | undefined) ?? '',
       provider,
+      pathToClaudeCodeExecutable: exePath,
+      pathToAgentExecutable: exePath,
       // backend reopen payload 不带 turnCount/lastActiveAt（非恢复必需），
       // 给合理默认：turnCount=0（新进程无内存计数），lastActiveAt=now。
       turnCount: 0,
@@ -1863,7 +1906,11 @@ export class Daemon {
     // rootPath 优先作 cwd（与 batch 一致，ql-20260617-009）；无则 workspace_dir 兜底。
     const cwd = execPayload.rootPath ?? this._config.workspace_dir;
     const provider = (execPayload.provider ?? 'claude') as 'claude' | 'codex';
-    const pathToClaudeCodeExecutable = this._agentPaths.get('claude') ?? '';
+    // task-06（D-002@v1）：executable path 按 provider 取。claude → claude CLI path；
+    // codex → codex app-server path（agent-detector 探测后 _agentPaths.set('codex', path)）。
+    // 字段名保留 pathToClaudeCodeExecutable（CreateSessionInput 兼容名，语义=provider
+    // executable path；SessionManager.create 内部 fallback 到 pathToAgentExecutable）。
+    const pathToClaudeCodeExecutable = this._agentPaths.get(provider) ?? '';
 
     if (!sessionId || !firstRunId || !prompt) {
       this._logger.error('interactive_missing_fields', {
@@ -1876,11 +1923,14 @@ export class Daemon {
     }
 
     if (!pathToClaudeCodeExecutable) {
-      // AC-07：agent-detector 未检测 claude → 拒绝启动（D-009 normalized_requirement 第 3 条）。
-      // 不调 create；backend 据 lease 超时 / onSessionEnd 收 failed。daemon 主循环不崩。
-      this._logger.error('interactive_claude_executable_not_found', {
+      // task-06（FR-05 / D-002@v1）：provider 的 executable 缺失 → 拒绝启动。
+      // 错误码 provider-specific（interactive_${provider}_executable_not_found），
+      // 让日志/监控能区分 claude vs codex 缺失。不调 create；backend 据 lease 超时 /
+      // WS 失活 / onSessionEnd 收 failed（与 Claude AC-07 同路径）。daemon 主循环不崩。
+      this._logger.error(`interactive_${provider}_executable_not_found`, {
         lease_id: leaseId,
-        code: 'CLAUDE_EXECUTABLE_NOT_FOUND',
+        provider,
+        code: `${provider.toUpperCase()}_EXECUTABLE_NOT_FOUND`,
       });
       return;
     }

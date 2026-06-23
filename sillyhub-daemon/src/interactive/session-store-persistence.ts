@@ -12,7 +12,7 @@
  *
  * **白名单**：仅写 PersistedSessionRecord（sessionId/leaseId/agentSessionId/cwd/
  * provider/currentRunId?/turnCount/lastActiveAt/model?/pathToClaudeCodeExecutable?/
- * manualApproval?/askUserOnly?）。
+ * pathToAgentExecutable?/manualApproval?/askUserOnly?）。
  * 禁止写 claim token / API key / credential / prompt 内容 / agent 输出 / Query 句柄 /
  * InputQueue（不可序列化且敏感，见 task-10 §4.1）。
  *
@@ -77,6 +77,14 @@ const VALID_PROVIDERS = new Set(['claude', 'codex']);
  * sessionId / leaseId / agentSessionId（非空）/ cwd（非空）/ provider（枚举）/
  * turnCount（有限数）/ lastActiveAt（有限数）；可选字段 model /
  * pathToClaudeCodeExecutable / currentRunId / manualApproval / askUserOnly 仅校验类型。
+ *
+ * task-06（D-007@v1）Codex 语义说明（不新增列，字段复用）：
+ *   - provider='codex' 时 agentSessionId 即 Codex thread id（resume key）。
+ *     缺失（空串）→ validateRecord 返回 null 丢弃，不伪造新 thread（D-007）。
+ *   - pathToClaudeCodeExecutable 对 codex 即 codex app-server 可执行路径（兼容名，
+ *     SessionManager.restoreAndReconnect 内 fallback 到 pathToAgentExecutable）；
+ *     codex session 落盘时优先写 pathToAgentExecutable（task-02 snapshotPersistable）。
+ *   - provider 枚举含 'codex'（VALID_PROVIDERS），codex record 正常通过校验。
  */
 function validateRecord(raw: unknown): PersistedSessionRecord | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -116,6 +124,11 @@ function validateRecord(raw: unknown): PersistedSessionRecord | null {
   }
   if (typeof r.pathToClaudeCodeExecutable === 'string' && r.pathToClaudeCodeExecutable) {
     out.pathToClaudeCodeExecutable = r.pathToClaudeCodeExecutable;
+  }
+  // task-02 R8（D-002）：provider-neutral executable path（codex path 恢复用）。
+  // 与 pathToClaudeCodeExecutable 并存；仅校验非空字符串才写入，其余丢弃（向后兼容旧文件）。
+  if (typeof r.pathToAgentExecutable === 'string' && r.pathToAgentExecutable) {
+    out.pathToAgentExecutable = r.pathToAgentExecutable;
   }
   // scan 真阻塞（恢复路径用）：manualApproval / askUserOnly 落盘白名单。
   // manualApproval 仅校验布尔（create 路径只在 true 时写）；askUserOnly 同理

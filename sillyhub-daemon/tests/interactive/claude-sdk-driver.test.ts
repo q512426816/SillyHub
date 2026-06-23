@@ -19,6 +19,7 @@ import type {
   SDKResultMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
+import type { UserTurnInput } from '../../src/interactive/driver.js';
 
 // ── mock node:fs：existsSync / readFileSync 由测试逐 case 配置。 ───────────────
 // 用 vi.hoisted + vi.mock 让 mock 模块在 import 前 hoist；node:fs 的导出在 ESM 不可
@@ -80,7 +81,9 @@ import {
   ClaudeSdkDriver,
   ClaudeExecutableNotFoundError,
   resolveClaudeExecutable,
+  mapUserTurnInputToSdk,
 } from '../../src/interactive/claude-sdk-driver.js';
+import type { ClaudeDriverHandle } from '../../src/interactive/claude-sdk-driver.js';
 
 // ── 辅助：构造伪造 SDK 消息（按 spike H2 两轮形态）──────────────────────────────
 
@@ -251,12 +254,15 @@ describe('resolveClaudeExecutable（wrapper→exe 解析，task-01 R-exe）', ()
       'claude.exe',
     );
     // wrapper 内写相对路径（cmd-shim 某些生成方式，相对 wrapper 所在 dir）。
-    // 用 .\node_modules\... 避免路径上跳造成比对不一致。
     const wrapperContent = `node .\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`;
-    fsExists.mockImplementation((p) => String(p) === wrapperPath || String(p) === realExe);
+    // 跨平台：posix 上 path.normalize 不规整反斜杠，resolveClaudeExecutable 解析出的
+    // 路径保留 Windows 反斜杠 + .\ 前缀。mock 比对与断言统一做「反斜杠→正斜杠 + normalize」，
+    // 否则非 Windows 平台裸字符串比对必然失配（pre-existing 缺陷）。
+    const norm = (p: string) => path.normalize(String(p).replace(/\\/g, '/'));
+    fsExists.mockImplementation((p) => norm(p) === norm(wrapperPath) || norm(p) === norm(realExe));
     fsRead.mockReturnValue(wrapperContent as unknown as Buffer);
     const resolved = resolveClaudeExecutable(wrapperPath);
-    expect(path.normalize(resolved)).toBe(path.normalize(realExe));
+    expect(norm(resolved)).toBe(norm(realExe));
   });
 });
 
@@ -266,14 +272,14 @@ describe('ClaudeSdkDriver.start', () => {
   it('传给 sdkQuery 的 options 含 pathToClaudeCodeExecutable / cwd / env', async () => {
     const realExe = 'C:\\bin\\claude.exe';
     fsExists.mockReturnValue(true);
-    const input: AsyncIterable<SDKUserMessage> = {
+    const input: AsyncIterable<UserTurnInput> = {
       [Symbol.asyncIterator]: () =>
         (async function* () {
           /* empty */
         })(),
     };
     const driver = new ClaudeSdkDriver();
-    driver.start(input, {
+    await driver.start(input, {
       pathToClaudeCodeExecutable: realExe,
       cwd: 'C:\\work',
       env: { ANTHROPIC_AUTH_TOKEN: 'tok', ANTHROPIC_BASE_URL: 'http://x' },
@@ -284,7 +290,9 @@ describe('ClaudeSdkDriver.start', () => {
       prompt: unknown;
       options?: Record<string, unknown>;
     };
-    expect(call.prompt).toBe(input);
+    // task-03（D-009@v1）：prompt 是 mapUserTurnInputToSdk 转换后的 AsyncIterable，
+    // 不再是原 input 引用（SDK 类型隔离在 driver 内部）。
+    expect(call.prompt).not.toBe(input);
     expect(call.options).toMatchObject({
       pathToClaudeCodeExecutable: realExe,
       cwd: 'C:\\work',
@@ -292,14 +300,14 @@ describe('ClaudeSdkDriver.start', () => {
     });
   });
 
-  it('executable 为空串 → start 抛 ClaudeExecutableNotFoundError，不调 sdkQuery', () => {
+  it('executable 为空串 → start 抛 ClaudeExecutableNotFoundError，不调 sdkQuery', async () => {
     const driver = new ClaudeSdkDriver();
-    expect(() =>
+    await expect(
       driver.start(
         { [Symbol.asyncIterator]: () => (async function* () {})() },
         { pathToClaudeCodeExecutable: '', cwd: 'C:\\work' },
       ),
-    ).toThrow(ClaudeExecutableNotFoundError);
+    ).rejects.toBeInstanceOf(ClaudeExecutableNotFoundError);
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
@@ -307,7 +315,7 @@ describe('ClaudeSdkDriver.start', () => {
     const realExe = 'C:\\bin\\claude.exe';
     fsExists.mockReturnValue(true);
     const driver = new ClaudeSdkDriver();
-    driver.start(
+    await driver.start(
       { [Symbol.asyncIterator]: () => (async function* () {})() },
       { pathToClaudeCodeExecutable: realExe, cwd: 'C:\\work' },
     );
@@ -322,11 +330,11 @@ describe('ClaudeSdkDriver.start', () => {
     );
   });
 
-  it('未传 model/allowedTools 时 options 不含这些 key（让 SDK 走默认）', () => {
+  it('未传 model/allowedTools 时 options 不含这些 key（让 SDK 走默认）', async () => {
     const realExe = 'C:\\bin\\claude.exe';
     fsExists.mockReturnValue(true);
     const driver = new ClaudeSdkDriver();
-    driver.start(
+    await driver.start(
       { [Symbol.asyncIterator]: () => (async function* () {})() },
       { pathToClaudeCodeExecutable: realExe, cwd: 'C:\\work' },
     );
@@ -338,7 +346,7 @@ describe('ClaudeSdkDriver.start', () => {
     expect(call.options).not.toHaveProperty('resume');
   });
 
-  it('.cmd wrapper 路径：start 自动解析为真 exe 后传 SDK（R-exe 落实）', () => {
+  it('.cmd wrapper 路径：start 自动解析为真 exe 后传 SDK（R-exe 落实）', async () => {
     const wrapperPath = 'C:\\nvm4w\\nodejs\\claude.cmd';
     const realExe =
       'C:\\nvm4w\\nodejs\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe';
@@ -348,7 +356,7 @@ describe('ClaudeSdkDriver.start', () => {
     fsRead.mockReturnValue(`@"${realExe}" %*` as unknown as Buffer);
 
     const driver = new ClaudeSdkDriver();
-    driver.start(
+    await driver.start(
       { [Symbol.asyncIterator]: () => (async function* () {})() },
       { pathToClaudeCodeExecutable: wrapperPath, cwd: 'C:\\work' },
     );
@@ -356,6 +364,116 @@ describe('ClaudeSdkDriver.start', () => {
       options?: Record<string, unknown>;
     };
     expect(call.options?.pathToClaudeCodeExecutable).toBe(realExe);
+  });
+
+  it('task-03（AC-03.1）：ClaudeSdkDriver implements InteractiveDriver，provider==="claude"', () => {
+    const driver = new ClaudeSdkDriver();
+    expect(driver.provider).toBe('claude');
+    // start/consume/interrupt 三方法存在（鸭子类型契约）
+    expect(typeof driver.start).toBe('function');
+    expect(typeof driver.consume).toBe('function');
+    expect(typeof driver.interrupt).toBe('function');
+  });
+
+  it('task-03（AC-03.2）：start 返回 ClaudeDriverHandle（含 query + provider=claude）', async () => {
+    const realExe = 'C:\\bin\\claude.exe';
+    fsExists.mockReturnValue(true);
+    const driver = new ClaudeSdkDriver();
+    const handle = await driver.start(
+      { [Symbol.asyncIterator]: () => (async function* () {})() },
+      { pathToClaudeCodeExecutable: realExe, cwd: 'C:\\work' },
+    );
+    expect(handle.provider).toBe('claude');
+    expect((handle as ClaudeDriverHandle).query).toBeDefined();
+    expect(typeof (handle as ClaudeDriverHandle).query.interrupt).toBe(
+      'function',
+    );
+  });
+});
+
+// ── mapUserTurnInputToSdk：UserTurnInput → SDKUserMessage 转换（D-009@v1）────────
+
+describe('mapUserTurnInputToSdk（UserTurnInput → SDKUserMessage，D-009@v1）', () => {
+  it('逐条映射 {type:user,text} → {type:user,message:{role:user,content:text},parent_tool_use_id:null}', async () => {
+    const turns: UserTurnInput[] = [
+      { type: 'user', text: 'hi' },
+      { type: 'user', text: 'second turn' },
+    ];
+    async function* src(): AsyncGenerator<UserTurnInput, void> {
+      for (const t of turns) yield t;
+    }
+    const out: SDKUserMessage[] = [];
+    for await (const m of mapUserTurnInputToSdk(src())) {
+      out.push(m);
+    }
+    expect(out).toHaveLength(2);
+    expect(out[0]).toEqual({
+      type: 'user',
+      message: { role: 'user', content: 'hi' },
+      parent_tool_use_id: null,
+    });
+    expect(out[1]).toEqual({
+      type: 'user',
+      message: { role: 'user', content: 'second turn' },
+      parent_tool_use_id: null,
+    });
+  });
+
+  it('空 text 仍 yield 一条消息（边界 1：driver 不校验语义）', async () => {
+    async function* src(): AsyncGenerator<UserTurnInput, void> {
+      yield { type: 'user', text: '' };
+    }
+    const out: SDKUserMessage[] = [];
+    for await (const m of mapUserTurnInputToSdk(src())) {
+      out.push(m);
+    }
+    expect(out).toHaveLength(1);
+    expect((out[0] as { message: { content: string } }).message.content).toBe(
+      '',
+    );
+  });
+
+  it('空上游 → 不 yield 任何消息', async () => {
+    async function* src(): AsyncGenerator<UserTurnInput, void> {
+      /* empty */
+    }
+    const out: SDKUserMessage[] = [];
+    for await (const m of mapUserTurnInputToSdk(src())) {
+      out.push(m);
+    }
+    expect(out).toHaveLength(0);
+  });
+
+  it('task-03（AC-03.2）：start 喂入 UserTurnInput 后，SDK 收到的 prompt 首条是转换后的 SDKUserMessage', async () => {
+    const realExe = 'C:\\bin\\claude.exe';
+    fsExists.mockReturnValue(true);
+    const captured: SDKUserMessage[] = [];
+    setMockQueryImpl((params) => {
+      // SDK 实际会 for-await 消费 prompt（mapUserTurnInputToSdk 的输出）。
+      void (async () => {
+        for await (const m of params.prompt as AsyncIterable<SDKUserMessage>) {
+          captured.push(m);
+        }
+      })();
+      return makeFakeQuery([resultSuccess('OK', 'sess')]);
+    });
+
+    async function* input(): AsyncGenerator<UserTurnInput, void> {
+      yield { type: 'user', text: 'hello' };
+    }
+    const driver = new ClaudeSdkDriver();
+    await driver.start(input(), {
+      pathToClaudeCodeExecutable: realExe,
+      cwd: 'C:\\work',
+    });
+    // 等 mock 内 async 消费完成
+    await new Promise((r) => setImmediate(r));
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toEqual({
+      type: 'user',
+      message: { role: 'user', content: 'hello' },
+      parent_tool_use_id: null,
+    });
   });
 });
 
@@ -372,13 +490,14 @@ describe('ClaudeSdkDriver.consume（spike H2 两轮 / D4 result 边界）', () =
       resultSuccess('TURN2', sessionId),
     ];
     const q = makeFakeQuery(messages);
+    const handle = { provider: 'claude', query: q } as ClaudeDriverHandle;
 
     const onResult = vi.fn();
     const onMessage = vi.fn();
     const onError = vi.fn();
 
     const driver = new ClaudeSdkDriver();
-    await driver.consume(q, { onResult, onMessage, onError });
+    await driver.consume(handle, { onResult, onMessage, onError });
 
     expect(onResult).toHaveBeenCalledTimes(2);
     expect((onResult.mock.calls[0]![0] as SDKResultMessage).result).toBe(
@@ -398,9 +517,10 @@ describe('ClaudeSdkDriver.consume（spike H2 两轮 / D4 result 边界）', () =
       assistantText('x'),
       resultSuccess('R', sessionId),
     ]);
+    const handle = { provider: 'claude', query: q } as ClaudeDriverHandle;
     const onResult = vi.fn();
     const driver = new ClaudeSdkDriver();
-    await driver.consume(q, { onResult });
+    await driver.consume(handle, { onResult });
     expect(onResult).toHaveBeenCalledTimes(1);
   });
 
@@ -412,11 +532,12 @@ describe('ClaudeSdkDriver.consume（spike H2 两轮 / D4 result 边界）', () =
       [Symbol.asyncIterator]: () => gen,
       interrupt: vi.fn(),
     } as unknown as Query;
+    const handle = { provider: 'claude', query: q } as ClaudeDriverHandle;
 
     const onResult = vi.fn();
     const onError = vi.fn();
     const driver = new ClaudeSdkDriver();
-    await driver.consume(q, { onResult, onError });
+    await driver.consume(handle, { onResult, onError });
 
     expect(onError).toHaveBeenCalledTimes(1);
     expect((onError.mock.calls[0]![0] as Error).message).toBe('spawn EINVAL');
@@ -426,9 +547,10 @@ describe('ClaudeSdkDriver.consume（spike H2 两轮 / D4 result 边界）', () =
   it('interrupt 触发的 result(error_during_execution) 正常走 onResult（D1）', async () => {
     const sessionId = 's2';
     const q = makeFakeQuery([resultInterrupt(sessionId)]);
+    const handle = { provider: 'claude', query: q } as ClaudeDriverHandle;
     const onResult = vi.fn();
     const driver = new ClaudeSdkDriver();
-    await driver.consume(q, { onResult });
+    await driver.consume(handle, { onResult });
     expect(onResult).toHaveBeenCalledTimes(1);
     expect(
       (onResult.mock.calls[0]![0] as SDKResultMessage).subtype,
@@ -444,19 +566,20 @@ describe('ClaudeSdkDriver.interrupt（spike D1 turn 级）', () => {
     expect(await driver.interrupt(null)).toBe(false);
   });
 
-  it('interrupt(q) 调用 q.interrupt() 一次，返回 true', async () => {
+  it('interrupt(handle) 调用底层 query.interrupt() 一次，返回 true', async () => {
     const interruptFn = vi.fn(async () => {});
     const q = {
       [Symbol.asyncIterator]: () => (async function* () {})(),
       interrupt: interruptFn,
     } as unknown as Query;
+    const handle = { provider: 'claude', query: q } as ClaudeDriverHandle;
     const driver = new ClaudeSdkDriver();
-    const ok = await driver.interrupt(q);
+    const ok = await driver.interrupt(handle);
     expect(ok).toBe(true);
     expect(interruptFn).toHaveBeenCalledTimes(1);
   });
 
-  it('interrupt(q) 时 q.interrupt() 抛错 → 捕获并返回 false（不向上冒泡）', async () => {
+  it('interrupt(handle) 时 query.interrupt() 抛错 → 捕获并返回 false（不向上冒泡）', async () => {
     const interruptFn = vi.fn(async () => {
       throw new Error('cannot interrupt');
     });
@@ -464,38 +587,68 @@ describe('ClaudeSdkDriver.interrupt（spike D1 turn 级）', () => {
       [Symbol.asyncIterator]: () => (async function* () {})(),
       interrupt: interruptFn,
     } as unknown as Query;
+    const handle = { provider: 'claude', query: q } as ClaudeDriverHandle;
     const driver = new ClaudeSdkDriver();
-    const ok = await driver.interrupt(q);
+    const ok = await driver.interrupt(handle);
     expect(ok).toBe(false);
     expect(interruptFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('task-03（AC-03.6）：handle 无 query.interrupt 方法 → false', async () => {
+    const handle = {
+      provider: 'claude',
+      query: {},
+    } as unknown as ClaudeDriverHandle;
+    const driver = new ClaudeSdkDriver();
+    const ok = await driver.interrupt(handle);
+    expect(ok).toBe(false);
   });
 });
 
 // ── 端到端：driver + 真实 InputQueue 喂入 + mock SDK 读取 prompt ─────────────────
 
 describe('driver + InputQueue 端到端（spike H2 同进程多轮）', () => {
-  it('SDK 收到的 prompt 是 InputQueue 本身（AsyncIterable）；driver 读 InputQueue 两条 msg 透传 SDK', async () => {
+  it('task-03（D-009@v1）：InputQueue<UserTurnInput> 喂入 driver，SDK 经 mapUserTurnInputToSdk 读到转换后的 SDKUserMessage', async () => {
     const realExe = 'C:\\bin\\claude.exe';
     fsExists.mockReturnValue(true);
-    const capturedPrompts: AsyncIterable<SDKUserMessage>[] = [];
+    const captured: SDKUserMessage[] = [];
     setMockQueryImpl((params) => {
-      capturedPrompts.push(params.prompt as AsyncIterable<SDKUserMessage>);
+      // SDK 实际 for-await 消费 driver 转换后的 prompt。
+      void (async () => {
+        for await (const m of params.prompt as AsyncIterable<SDKUserMessage>) {
+          captured.push(m);
+        }
+      })();
       return makeFakeQuery([resultSuccess('OK', 'sess')]);
     });
 
     const { InputQueue } = await import(
       '../../src/interactive/input-queue.js'
     );
-    const queue = new InputQueue();
-    queue.push({ type: 'user', message: { role: 'user', content: 'hi' }, parent_tool_use_id: null });
+    // task-01 起 InputQueue 默认类型参数为 UserTurnInput（provider-neutral）。
+    const queue = new InputQueue<UserTurnInput>();
+    queue.push({ type: 'user', text: 'hi' });
+    queue.push({ type: 'user', text: 'second' });
     queue.close();
 
     const driver = new ClaudeSdkDriver();
-    driver.start(queue, {
+    await driver.start(queue, {
       pathToClaudeCodeExecutable: realExe,
       cwd: 'C:\\work',
     });
-    // SDK 收到的 prompt 应是同一个 queue 引用
-    expect(capturedPrompts[0]).toBe(queue);
+    // 等 mock 内 async 消费完成
+    await new Promise((r) => setImmediate(r));
+    // 两条 UserTurnInput 均经 mapUserTurnInputToSdk 转成 SDKUserMessage 透传 SDK。
+    expect(captured).toHaveLength(2);
+    expect(captured[0]).toEqual({
+      type: 'user',
+      message: { role: 'user', content: 'hi' },
+      parent_tool_use_id: null,
+    });
+    expect(captured[1]).toEqual({
+      type: 'user',
+      message: { role: 'user', content: 'second' },
+      parent_tool_use_id: null,
+    });
   });
 });

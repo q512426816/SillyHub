@@ -15,6 +15,13 @@
  */
 
 import type { Query, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { UserTurnInput } from './driver.js';
+import type {
+  InteractiveDriver,
+  InteractiveDriverHandle,
+  InteractiveDriverMessage,
+  InteractiveDriverResult,
+} from './driver.js';
 
 /** session 生命周期状态。 */
 export type SessionStatus =
@@ -44,8 +51,16 @@ export interface SessionState {
   agentSessionId?: string;
   /** SDK Query 句柄，长生命周期跨多 turn（spike H2）。 */
   query?: Query;
-  /** per-session 输入队列（query 订阅一次）。 */
-  inputQueue: import('./input-queue.js').InputQueue;
+  /**
+   * per-session 输入队列（driver 订阅一次）。
+   *
+   * task-01（D-001@v1 / D-009@v1 过渡）：driver 归属由 `state.provider` 决定，
+   * task-02 起按 provider 从 `SessionManagerDeps.drivers` 选 driver。InputQueue 已
+   * 泛型化（默认 UserTurnInput），但现有 Claude 路径仍 push SDKUserMessage，故此处
+   * 显式标注 `<SDKUserMessage>` 保持编译等价（FR-10 不回退）；task-02 provider 化时
+   * 改为 `InputQueue<UserTurnInput>` 并由 Claude driver 内部做形态转换。
+   */
+  inputQueue: import('./input-queue.js').InputQueue<UserTurnInput>;
   /** 当前 turn 的 AgentRun.id（backend 在 inject 时创建并下发）。 */
   currentRunId?: string;
   /** 当前 turn 状态：active=空闲可接 inject，running=turn 执行中。 */
@@ -54,7 +69,12 @@ export interface SessionState {
   lastActiveAt: number;
   /** 固定 cwd（resume 还原用，spike D3）。driver.start 必须用 state.cwd。 */
   cwd: string;
-  /** provider（claude；codex 后续 CodexAppServerDriver 单独）。 */
+  /**
+   * provider（claude；codex 后续 CodexAppServerDriver 单独）。
+   *
+   * task-01（D-001@v1）：driver 归属由此字段决定，task-02 起按 provider 从
+   * `SessionManagerDeps.drivers` 选 driver（interrupt 路由校验不串 provider，E5）。
+   */
   provider: 'claude' | 'codex';
   /** pathToClaudeCodeExecutable（create 时由 daemon._agentPaths 提供）。 */
   pathToClaudeCodeExecutable: string;
@@ -78,6 +98,28 @@ export interface SessionState {
    * true 求值（scan 主用场景）。manualApproval=true 时才随 state 持久化。
    */
   askUserOnly?: boolean;
+  /**
+   * D-001@v1（task-02）：本 session 归属的 provider driver。create/restore 时由
+   * `_getDriver(provider)` 解析后写入。Claude/Codex session 各自持有对应 driver，
+   * interrupt/consume 按 `state.driver ?? _drivers.claude` 路由，不串 provider。
+   *
+   * task-02 前创建的旧内存 state 无此字段 → interrupt/consume fallback `_drivers.claude`
+   *（兼容，FR-10 不回退）。
+   */
+  driver?: InteractiveDriver;
+  /**
+   * D-001@v1（task-02）：driver 句柄（Codex 用 InteractiveDriverHandle）。
+   * Claude 路径仍用 `state.query`（SDK Query）；Codex 路径用本字段。
+   * 互斥：claude session 填 query，codex session 填 driverHandle。
+   */
+  driverHandle?: InteractiveDriverHandle;
+  /**
+   * D-002/D-006（task-02）：provider-neutral executable path。
+   * codex = codex CLI path；claude = claude exe（与 pathToClaudeCodeExecutable 并存）。
+   * create 时优先用本字段，缺省回退 pathToClaudeCodeExecutable。落盘时 codex session
+   * 写本字段，claude session 继续写 pathToClaudeCodeExecutable（R8）。
+   */
+  pathToAgentExecutable?: string;
 }
 
 /** CreateSessionInput（daemon._startInteractiveSession → SessionManager.create）。 */
@@ -117,6 +159,13 @@ export interface CreateSessionInput {
    * 裸 process.env（向后兼容 task-04）。**仅本地内存**，禁止序列化/落盘/回传。
    */
   env?: NodeJS.ProcessEnv;
+  /**
+   * D-002/D-006（task-02）：provider-neutral executable path。
+   * codex session 由 daemon 用 `_agentPaths.get('codex')` 填；claude session 不填
+   *（继续用 pathToClaudeCodeExecutable）。create 时优先用本字段，缺省回退
+   * pathToClaudeCodeExecutable。
+   */
+  pathToAgentExecutable?: string;
 }
 
 /** inject 返回值（runId 由 backend 在 inject 时已创建）。 */
@@ -126,18 +175,44 @@ export interface InjectResult {
 
 /** SessionManager 持有的依赖（便于注入 mock driver + backend 通知回调）。 */
 export interface SessionManagerDeps {
+  /**
+   * D-001@v1：provider driver registry。SessionManager 按 session.provider 选取。
+   * task-02 在 create/restoreAndReconnect/interrupt 接线；本任务（task-01）仅扩字段类型。
+   * 缺某 provider 的 create 由 task-02 抛 `UnsupportedProviderError`（E1）。
+   *
+   * task-01 Reverse Sync：蓝图伪代码标 `drivers`（必填），但 cli.ts/测试 mock 现有
+   * 构造只传 `driver`，必填会连锁报缺字段（cli.ts 不在 allowed_paths）。为满足 AC-05
+   *（typecheck 全绿）且不动 cli.ts/mock，本任务标 optional；task-02 接线后改必填。
+   */
+  drivers?: Partial<Record<'claude' | 'codex', InteractiveDriver>>;
+  /**
+   * @deprecated 兼容入口（task-02 起 SessionManager 构造函数内映射到 drivers.claude）。
+   *
+   * task-01 Reverse Sync：蓝图伪代码标 `driver?`（optional），但 session-manager.ts
+   * 现有 `this.deps.driver.xxx` 调用多处，改 optional 会连锁报 possibly undefined，
+   * 需改 session-manager 逻辑（违反"仅类型标注"约束）。为满足 AC-05（typecheck 全绿）
+   * 且不动 session-manager 业务逻辑，本任务保持 `driver` 非可选；task-02 接线
+   * `drivers` 后将其改 optional 并迁移到 drivers.claude。
+   */
   driver: import('./claude-sdk-driver.js').ClaudeSdkDriver;
-  /** backend 通知回调：result 触发关闭 AgentRun（task-05 真正实现，本任务用 mock）。 */
+  /** backend 通知回调：result 触发关闭 AgentRun（task-05 真正实现，本任务用 mock）。
+   *
+   * task-02（D-008@v1）：参数类型放宽为 provider-neutral 联合。Claude driver 传
+   * SDKResultMessage（联合子集）；Codex driver 传 InteractiveDriverResult（flat 契约）。
+   * SessionManager 不读 provider 专属字段，透传给 daemon.onTurnResult（daemon 按 provider 解释，task-06）。 */
   onTurnResult: (
     sessionId: string,
     runId: string,
-    result: SDKResultMessage,
+    result: SDKResultMessage | InteractiveDriverResult,
   ) => void | Promise<void>;
-  /** 中间消息 → submit AgentRunLog（task-06 SSE，本任务用 mock）。 */
+  /** 中间消息 → submit AgentRunLog（task-06 SSE，本任务用 mock）。
+   *
+   * task-02（D-008@v1）：参数类型放宽。Claude driver 透传 SDKMessage 原对象（鸭子
+   * 类型满足 Record）；Codex driver 传 flat InteractiveDriverMessage。daemon 按 provider 归一化。 */
   onTurnMessage: (
     sessionId: string,
     runId: string,
-    msg: SDKMessage,
+    msg: SDKMessage | InteractiveDriverMessage,
   ) => void | Promise<void>;
   /** session 终态通知 backend（end/failed → backend end_session，task-05 实现）。 */
   onSessionEnd: (
@@ -288,8 +363,16 @@ export interface PersistedSessionRecord {
   lastActiveAt: number;
   /** 恢复 driver 用（可空，空则恢复时重探，D-009）。 */
   model?: string;
-  /** 恢复 driver 用（可空，空则恢复时重探，D-009）。 */
+  /** 恢复 driver 用（可空，空则恢复时重探，D-009）。
+   *
+   * 语义升级（task-02 R8/D-002）：provider executable path。Claude 优先用此字段；
+   * Codex 用下方 pathToAgentExecutable。旧字段保留向后兼容已落盘 sessions.json。 */
   pathToClaudeCodeExecutable?: string;
+  /**
+   * D-002（task-02 R8）：provider-neutral executable path（Codex path 恢复用）。
+   * 与 pathToClaudeCodeExecutable 并存；codex session 落盘写本字段。可选，向后兼容。
+   */
+  pathToAgentExecutable?: string;
   /**
    * scan 真阻塞（恢复路径用，generic-wibbling-whisper 改造点 C/B）：是否启用
    * canUseTool（create 时存 enableApproval；恢复时 fallback 到实例级

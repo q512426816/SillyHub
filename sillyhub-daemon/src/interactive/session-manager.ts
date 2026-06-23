@@ -29,13 +29,20 @@ import type {
   OnUserDialog,
   SDKMessage,
   SDKResultMessage,
-  SDKUserMessage,
   UserDialogResult,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeSdkDriver } from './claude-sdk-driver.js';
+import type {
+  InteractiveDriver,
+  InteractiveDriverCallbacks,
+  InteractiveDriverHandle,
+  InteractiveDriverResult,
+  UserTurnInput,
+} from './driver.js';
 import { InputQueue } from './input-queue.js';
 import { PermissionResolver } from './permission-resolver.js';
 import type { PermissionSendFn } from './permission-resolver.js';
+import type { CanUseToolDecision } from './types.js';
 import type {
   CreateSessionInput,
   InjectResult,
@@ -235,6 +242,16 @@ export class SessionManager {
    */
   private readonly _supportedDialogKinds: string[] | undefined;
 
+  /**
+   * D-001@v1（task-02）：provider driver registry。`drivers.claude` / `drivers.codex`
+   * 由调用方注入（task-06 cli.ts 构造时 `drivers: { claude, codex }`）。
+   *
+   * 兼容（D-009 向后兼容）：构造函数把旧单 driver 入参 `deps.driver`（ClaudeSdkDriver）
+   * 映射到 `_drivers.claude`，让 cli.ts 现有 `new SessionManager({ driver, ... })` 零改动。
+   * 优先级：`deps.drivers.claude`（显式 registry）> `deps.driver`（兼容入口）。
+   */
+  private readonly _drivers: Partial<Record<'claude' | 'codex', InteractiveDriver>>;
+
   constructor(
     private readonly deps: SessionManagerDeps,
     opts: SessionManagerOptions = {},
@@ -254,6 +271,16 @@ export class SessionManager {
       optsScan !== undefined && Number.isFinite(optsScan) && optsScan > 0
         ? optsScan
         : DEFAULT_IDLE_SCAN_SEC;
+
+    // task-02（D-001@v1）：构造 drivers registry。显式 registry 优先；兼容旧单 driver 入参。
+    const explicitDrivers = deps.drivers ?? {};
+    this._drivers = { ...explicitDrivers };
+    if (deps.driver && !this._drivers.claude) {
+      // 兼容：旧调用方传 deps.driver（ClaudeSdkDriver）→ 映射到 _drivers.claude。
+      // task-03 让 ClaudeSdkDriver implements InteractiveDriver 后类型自然对齐；
+      // 此处 unknown 断言渡过过渡期类型差异（运行时鸭子类型满足）。
+      this._drivers.claude = deps.driver as unknown as InteractiveDriver;
+    }
 
     // task-08：远程人审三件套。manualApproval=true 时 resolverFactory/wsClient 必需。
     this._manualApproval = opts.manualApproval === true;
@@ -302,28 +329,201 @@ export class SessionManager {
   }
 
   /**
+   * D-008@v1（task-02）：provider-neutral 普通审批 public 入口。Codex driver 收到
+   * app-server server request（command/file/permission requestApproval）时调用，
+   * Claude driver 经 _buildCanUseToolCallback 内部走相同 resolver 机制。
+   *
+   * 策略（D-006）：
+   *   - session 非 running / 无 currentRunId → fail-closed deny（防 interrupt 后回调悬空）；
+   *   - askUserOnly=true 且非用户输入类（isUserInputKind≠true）→ allow-through
+   *     （不弹卡，记 metadata；scan 场景让普通工具自动推进）；
+   *   - 否则 → resolver.register（send PERMISSION_REQUEST）→ await decision（fail-closed：
+   *     send 失败 / signal aborted / 5min 超时 / wrapper 异常 全 deny）。
+   *
+   * 返回 CanUseToolDecision（Claude 直接用；Codex driver 据此映射 accept/decline）。
+   *
+   * @param sessionId 目标 session（resolver 按 session 隔离）
+   * @param input toolName/toolInput/signal/toolUseId/isUserInputKind
+   */
+  async requestPermission(
+    sessionId: string,
+    input: {
+      toolName: string;
+      toolInput: Record<string, unknown>;
+      signal?: AbortSignal;
+      toolUseId?: string;
+      isUserInputKind?: boolean;
+    },
+  ): Promise<CanUseToolDecision> {
+    return this._requestPermission({ sessionId, ...input });
+  }
+
+  /**
+   * D-008@v1（task-02）：provider-neutral 用户对话 public 入口。Codex driver 收到
+   * `item/tool/requestUserInput` 或可归一化的 MCP elicitation 时调用；Claude driver
+   * 经 _buildOnUserDialogCallback 内部走相同 resolver 机制（PERMISSION_REQUEST 带
+   * dialog_kind/dialog_payload）。
+   *
+   * 返回 { behavior:'completed', result } | { behavior:'cancelled' }。
+   * fail-closed：session 非 running / 无 resolver / send 失败 / 超时 / wrapper 异常 → cancelled。
+   */
+  async requestUserDialog(
+    sessionId: string,
+    input: {
+      dialogKind: string;
+      dialogPayload: Record<string, unknown>;
+      toolUseId?: string;
+      signal?: AbortSignal;
+    },
+  ): Promise<{ behavior: 'completed'; result: unknown } | { behavior: 'cancelled' }> {
+    return this._requestUserDialog({ sessionId, ...input });
+  }
+
+  /**
+   * D-008@v1（task-02）：requestPermission 内部实现。封装「读策略 → register → await」。
+   * 与 _buildCanUseToolCallback 共享同一套 fail-closed 语义（resolver.register 内部
+   * send 失败/signal aborted/5min 超时全 deny）。供 Codex driver 与未来 Claude helper 重构复用。
+   */
+  private async _requestPermission(input: {
+    sessionId: string;
+    toolName: string;
+    toolInput: Record<string, unknown>;
+    signal?: AbortSignal;
+    toolUseId?: string;
+    isUserInputKind?: boolean;
+  }): Promise<CanUseToolDecision> {
+    const state = this._store.get(input.sessionId);
+    // session 非 running / 无 currentRunId → fail-closed deny。
+    if (!state || state.status !== 'running' || !state.currentRunId) {
+      return { behavior: 'deny', message: 'session not in running turn' };
+    }
+    const runId = state.currentRunId;
+    // D-006：askUserOnly=true 且非用户输入类 → allow-through（scan 场景普通工具自动推进）。
+    if (state.askUserOnly === true && !input.isUserInputKind) {
+      return { behavior: 'allow' };
+    }
+    const resolver = this._resolversBySession.get(input.sessionId);
+    const wsClient = this._permissionWsClient;
+    if (!resolver || !wsClient) {
+      // 无 resolver（manualApproval=false 或未初始化）→ fail-closed deny。
+      return {
+        behavior: 'deny',
+        message: `Tool "${input.toolName}" denied: no permission resolver (session=${input.sessionId}, run=${runId})`,
+      };
+    }
+    const defaultDenyMessage = `Tool "${input.toolName}" denied by reviewer (session=${input.sessionId}, run=${runId})`;
+    try {
+      const { promise } = resolver.register({
+        sessionId: input.sessionId,
+        runId,
+        toolName: input.toolName,
+        toolInput: input.toolInput,
+        ...(input.toolUseId !== undefined ? { toolUseId: input.toolUseId } : {}),
+        signal: input.signal,
+        send: (msg) => wsClient.send(msg),
+        // 用户输入类（Codex request_user_input / Claude AskUserQuestion）标记 dialog，
+        // backend 据此走对话路径（不 arm 5min 超时 + SSE 携带 dialog 渲染问答卡）。
+        ...(input.isUserInputKind
+          ? { dialogKind: input.toolName, dialogPayload: input.toolInput }
+          : {}),
+      });
+      const decision = await promise;
+      if (decision.behavior === 'deny') {
+        return { behavior: 'deny', message: decision.message ?? defaultDenyMessage };
+      }
+      return { behavior: 'allow' };
+    } catch (err) {
+      const reason =
+        err instanceof Error ? err.message : String(err ?? 'unknown error');
+      return { behavior: 'deny', message: `${defaultDenyMessage}: wrapper error (${reason})` };
+    }
+  }
+
+  /**
+   * D-008@v1（task-02）：requestUserDialog 内部实现。与 _buildOnUserDialogCallback
+   * 共享同一套 resolver 机制（PERMISSION_REQUEST 带 dialog_kind/dialog_payload，
+   * PERMISSION_RESPONSE.allow 的 dialog_result 回喂）。
+   */
+  private async _requestUserDialog(input: {
+    sessionId: string;
+    dialogKind: string;
+    dialogPayload: Record<string, unknown>;
+    toolUseId?: string;
+    signal?: AbortSignal;
+  }): Promise<{ behavior: 'completed'; result: unknown } | { behavior: 'cancelled' }> {
+    const state = this._store.get(input.sessionId);
+    if (!state || state.status !== 'running' || !state.currentRunId) {
+      return { behavior: 'cancelled' };
+    }
+    const runId = state.currentRunId;
+    const resolver = this._resolversBySession.get(input.sessionId);
+    const wsClient = this._permissionWsClient;
+    if (!resolver || !wsClient) {
+      return { behavior: 'cancelled' };
+    }
+    try {
+      const { promise } = resolver.register({
+        sessionId: input.sessionId,
+        runId,
+        toolName: input.dialogKind,
+        toolInput: input.dialogPayload,
+        ...(input.toolUseId !== undefined ? { toolUseId: input.toolUseId } : {}),
+        signal: input.signal,
+        send: (msg) => wsClient.send(msg),
+        dialogKind: input.dialogKind,
+        dialogPayload: input.dialogPayload,
+      });
+      const decision = await promise;
+      if (decision.behavior === 'deny') {
+        return { behavior: 'cancelled' };
+      }
+      const dialogResult = (decision as { dialogResult?: unknown }).dialogResult;
+      return {
+        behavior: 'completed',
+        result: dialogResult !== undefined ? dialogResult : null,
+      };
+    } catch {
+      return { behavior: 'cancelled' };
+    }
+  }
+
+  /**
+   * D-001@v1（task-02）：按 provider 取已注册 driver。未注册 → 抛 UnsupportedProviderError。
+   *
+   * 兼容入口：`deps.driver`（ClaudeSdkDriver）经构造函数已映射到 `_drivers.claude`，
+   * 故 claude 路径无论走 `drivers` registry 还是旧 `driver` 入参都能取到 driver。
+   * 文案保留现有 Wave1/2 模板（task-02 不改文案；codex 未注册时仍抛此错，符合
+   *「driver 未注册即不支持」语义）。
+   */
+  private _getDriver(provider: 'claude' | 'codex'): InteractiveDriver {
+    const driver = this._drivers[provider];
+    if (!driver) {
+      throw new UnsupportedProviderError(provider);
+    }
+    return driver;
+  }
+
+  /**
    * 创建 session 并启动 driver 协程（design §7.6）。
    *
+   * task-02（D-001/FR-01）：不再硬编码 claude；按 `input.provider` 经 `_getDriver`
+   * 路由到对应 driver。未注册 provider 抛 UnsupportedProviderError（在写 store 前，不留孤儿）。
+   *
    * @throws {SessionAlreadyExistsError} 重复 sessionId
-   * @throws {UnsupportedProviderError} provider 非 claude
+   * @throws {UnsupportedProviderError} provider driver 未注册
    * @throws {ClaudeExecutableNotFoundError} executable 缺失（driver.start 内抛，透传）
    */
   async create(input: CreateSessionInput): Promise<void> {
-    if (input.provider !== 'claude') {
-      throw new UnsupportedProviderError(input.provider);
-    }
+    // D-001：先解析 driver（未注册即抛，在写 store 前，不留孤儿 state）。
+    const driver = this._getDriver(input.provider);
     if (this._store.has(input.sessionId)) {
       throw new SessionAlreadyExistsError(input.sessionId);
     }
 
-    // 1. 建 InputQueue，push 首 SDKUserMessage（spike H2 实测形态）。
-    const inputQueue = new InputQueue();
-    const firstMsg: SDKUserMessage = {
-      type: 'user',
-      message: { role: 'user', content: input.firstPrompt },
-      parent_tool_use_id: null,
-    };
-    inputQueue.push(firstMsg);
+    // D-009（task-02）：InputQueue 改 provider-neutral UserTurnInput。SessionManager
+    // 不再构造 SDKUserMessage；Claude driver 内部做形态转换（task-03）。
+    const inputQueue = new InputQueue<UserTurnInput>();
+    inputQueue.push({ type: 'user', text: input.firstPrompt });
 
     // 2. 写 SessionState（status=running，首 turn 的 currentRunId=firstRunId）。
     // scan 真阻塞（generic-wibbling-whisper 改造点 C/B/D）：求值 effective
@@ -331,6 +531,9 @@ export class SessionManager {
     // restoreAndReconnect 跨 daemon 重启恢复审批能力。
     const enableApproval = input.manualApproval ?? this._manualApproval;
     const effectiveAskUserOnly = input.askUserOnly === true;
+    // D-002（task-02）：provider-neutral executable path。codex 用 input.pathToAgentExecutable
+    //（daemon _agentPaths.get('codex')）；claude 继续用 pathToClaudeCodeExecutable。
+    const exePath = input.pathToAgentExecutable ?? input.pathToClaudeCodeExecutable;
     const state: SessionState = {
       sessionId: input.sessionId,
       leaseId: input.leaseId,
@@ -342,9 +545,11 @@ export class SessionManager {
       cwd: input.cwd,
       provider: input.provider,
       pathToClaudeCodeExecutable: input.pathToClaudeCodeExecutable,
+      pathToAgentExecutable: exePath,
       env: input.env,
       manualApproval: enableApproval,
       askUserOnly: effectiveAskUserOnly,
+      driver, // D-001：写入归属 driver，供 interrupt/consume 路由。
     };
     this._store.set(input.sessionId, state);
 
@@ -356,52 +561,31 @@ export class SessionManager {
       // resolver（每 session 一份，互不干扰）+ 构造远程人审 canUseTool 回调；
       // false（默认）时不传，SDK 走内置默认策略（spike H1 行为不变）。
       let resolver: PermissionResolver | undefined;
-      const driverOpts: Record<string, unknown> = {
-        pathToClaudeCodeExecutable: input.pathToClaudeCodeExecutable,
-        cwd: input.cwd,
+      // _buildDriverOptions 内部按 enableApproval 注入 canUseTool/onUserDialog +
+      // 建 resolver（scan 真阻塞，改造点 C/D）；create/restore 复用同一套注入逻辑。
+      const driverOpts = this._buildDriverOptions(state, {
+        exePath,
         model: input.model,
         allowedTools: input.allowedTools,
-      };
-      // gap-8：仅当 daemon 传入 env 时覆盖（缺省让 driver 回退裸 process.env，兼容）。
-      if (input.env !== undefined) {
-        driverOpts.env = input.env;
-      }
-      // scan 真阻塞（per-session，generic-wibbling-whisper.md 改造点 C）：
-      // input.manualApproval 显式控制（chat=false / scan=true，来自 backend lease metadata）；
-      // 未传时回退实例级 manualApproval（兼容现有测试 + cli.ts 实例级能力就绪）。
-      // chat=false 不注入 canUseTool，避免其 AskUserQuestion 被 backend
-      //（config.manual_approval=False）drop → 5min 超时 deny；scan=true 注入，真阻塞等人审。
-      // enableApproval 已在 state 构造前求值（见上），此处复用。
-      if (
-        enableApproval &&
-        this._permissionResolverFactory &&
-        this._permissionWsClient
-      ) {
-        resolver = this._permissionResolverFactory();
-        this._resolversBySession.set(input.sessionId, resolver);
-        driverOpts.canUseTool = this._buildCanUseToolCallback(
-          input.sessionId,
-          effectiveAskUserOnly,
-        );
-        // onUserDialog 路由（SDK request_user_dialog 路径）：
-        // supportedDialogKinds 非空才注入——SDK 契约「声明在此的 kind 才经
-        // onUserDialog」。⚠️ 注意：AskUserQuestion 在 SDK headless 模式下实际
-        // **不走** onUserDialog（它经 canUseTool 拦截，详见 _buildCanUseToolCallback
-        // 的 askUserOnly 分支）；此处 supportedDialogKinds 仅对 SDK 真正发出
-        // request_user_dialog 的其他 dialog kind 生效。默认 ['AskUserQuestion']：
-        // 历史值，保留向后兼容（即便 AskUserQuestion 实际不路由到这里也不破坏其他 kind）。
-        if (this._supportedDialogKinds && this._supportedDialogKinds.length > 0) {
-          driverOpts.onUserDialog = this._buildOnUserDialogCallback(
-            input.sessionId,
-          );
-          driverOpts.supportedDialogKinds = this._supportedDialogKinds;
-        }
-      }
-      const query = this.deps.driver.start(
+        env: input.env,
+        enableApproval,
+        effectiveAskUserOnly,
+      });
+      // 抽 helper 后 resolver 仍需在本作用域持有（create catch 清理用）。
+      resolver = this._resolversBySession.get(input.sessionId);
+      // task-02（D-001）：用 session 归属 driver（不再全局 this.deps.driver）。
+      // 过渡期 ClaudeSdkDriver.start 同步返回 Query、InteractiveDriver.start 返回
+      // Promise<Handle>；统一 await（同步返回值经 await 等价直传）。按 provider 写句柄：
+      // claude → state.query（SDK Query）；codex → state.driverHandle。
+      const handleOrQuery = (await driver.start(
         inputQueue,
-        driverOpts as unknown as Parameters<ClaudeSdkDriver['start']>[1],
-      );
-      state.query = query;
+        driverOpts as unknown as Parameters<InteractiveDriver['start']>[1],
+      )) as unknown;
+      if (input.provider === 'claude') {
+        state.query = handleOrQuery as import('@anthropic-ai/claude-agent-sdk').Query;
+      } else {
+        state.driverHandle = handleOrQuery as InteractiveDriverHandle;
+      }
 
       // 4. 异步 fire driver.consume（不阻塞 create 返回）。
       void this._runConsume(state);
@@ -420,6 +604,108 @@ export class SessionManager {
       }
       throw e;
     }
+  }
+
+  /**
+   * task-02（R7/D-008）：构造 provider-neutral driver options。create 与
+   * restoreAndReconnect 复用，保证 Claude canUseTool/onUserDialog 注入逻辑单一来源
+   *（FR-10 不回退：行为与改造前逐行等价，仅从 create/restore 抽出到此 helper）。
+   *
+   * 职责：
+   *   1. 构造 driverOpts base（exe path / cwd / model / allowedTools / env）；
+   *      exe 字段同时填 pathToClaudeCodeExecutable（Claude driver 读）和
+   *      pathToAgentExecutable（Codex driver 读，task-04），按 provider 决定主字段。
+   *   2. enableApproval=true 且 resolverFactory/wsClient 就绪时：建独立 resolver +
+   *      注入 canUseTool（_buildCanUseToolCallback，内部调 _requestPermission）+
+   *      onUserDialog（supportedDialogKinds 非空时）。
+   *
+   * @param state 当前 session（写 driver 归属、读 provider）
+   * @param spec exePath/model/allowedTools/env/enableApproval/effectiveAskUserOnly/resume
+   */
+  private _buildDriverOptions(
+    state: SessionState,
+    spec: {
+      exePath: string;
+      model?: string;
+      allowedTools?: string[];
+      env?: NodeJS.ProcessEnv;
+      enableApproval: boolean;
+      effectiveAskUserOnly: boolean;
+      resume?: string;
+    },
+  ): Record<string, unknown> {
+    const driverOpts: Record<string, unknown> = {
+      // Claude driver 读 pathToClaudeCodeExecutable；Codex driver 读 pathToAgentExecutable。
+      // 两字段都填 exePath，各 driver 取自己需要的（provider-neutral，不依赖 SessionManager 知道）。
+      pathToClaudeCodeExecutable: spec.exePath,
+      pathToAgentExecutable: spec.exePath,
+      cwd: state.cwd,
+    };
+    if (spec.model !== undefined) {
+      driverOpts.model = spec.model;
+    }
+    if (spec.allowedTools !== undefined) {
+      driverOpts.allowedTools = spec.allowedTools;
+    }
+    // gap-8：仅当传入 env 时覆盖（缺省让 driver 回退裸 process.env，兼容）。
+    if (spec.env !== undefined) {
+      driverOpts.env = spec.env;
+    }
+    if (spec.resume !== undefined) {
+      driverOpts.resume = spec.resume;
+    }
+    // scan 真阻塞（per-session，generic-wibbling-whisper.md 改造点 C/D）：
+    // enableApproval=true 时按 session 建独立 resolver + 注入远程人审 canUseTool +
+    // onUserDialog，让 scan 真阻塞等人审（chat=false 不注入，AskUserQuestion 被
+    // backend drop 不会 5min 超时）。行为与改造前逐行等价（FR-10）。
+    if (
+      spec.enableApproval &&
+      this._permissionResolverFactory &&
+      this._permissionWsClient
+    ) {
+      const resolver = this._permissionResolverFactory();
+      this._resolversBySession.set(state.sessionId, resolver);
+      driverOpts.canUseTool = this._buildCanUseToolCallback(
+        state.sessionId,
+        spec.effectiveAskUserOnly,
+      );
+      // onUserDialog 路由（SDK request_user_dialog 路径）：supportedDialogKinds 非空才注入。
+      // ⚠️ AskUserQuestion 在 SDK headless 模式实际不走 onUserDialog（经 canUseTool 拦截）；
+      // 此处仅对 SDK 真正发出 request_user_dialog 的其他 kind 生效。默认 ['AskUserQuestion']
+      // 历史值，保留向后兼容。
+      if (this._supportedDialogKinds && this._supportedDialogKinds.length > 0) {
+        driverOpts.onUserDialog = this._buildOnUserDialogCallback(
+          state.sessionId,
+        );
+        driverOpts.supportedDialogKinds = this._supportedDialogKinds;
+      }
+      // task-06（D-008@v1 / task-05）：Codex driver 的 sessionPermission hooks 注入。
+      // Codex driver 经 CodexStartOptions.sessionPermission 读这两个方法引用（task-05
+      // approval/user-input/elicitation 映射）。绑定到当前 session 的 SessionManager
+      // public 入口（requestPermission/requestUserDialog，签名与 CodexSessionPermissionHooks
+      // 一致）。manualApproval=true 时注入；未注入时 driver 走 fail-closed 占位（task-05
+      // 既有测试语义）。仅 codex provider 走此分支（Claude 用 canUseTool/onUserDialog）。
+      if (state.provider === 'codex') {
+        // 参数类型与 CodexSessionPermissionHooks 契约一致（与 SessionManager public
+        // requestPermission/requestUserDialog 入参同形，去掉 sessionId 由闭包绑定）。
+        driverOpts.sessionPermission = {
+          requestPermission: (input: {
+            toolName: string;
+            toolInput: Record<string, unknown>;
+            signal?: AbortSignal;
+            toolUseId?: string;
+            isUserInputKind?: boolean;
+          }) => this.requestPermission(state.sessionId, input),
+          requestUserDialog: (input: {
+            dialogKind: string;
+            dialogPayload: Record<string, unknown>;
+            toolUseId?: string;
+            signal?: AbortSignal;
+          }) => this.requestUserDialog(state.sessionId, input),
+        };
+      }
+    }
+    return driverOpts;
   }
 
   /**
@@ -683,21 +969,50 @@ export class SessionManager {
     };
   }
 
-  /** driver.consume 协程：一个 session 启动一次，跨多 turn。 */
+  /** driver.consume 协程：一个 session 启动一次，跨多 turn。
+   *
+   * task-02（D-001）：用 `state.driver`（session 归属）+ 按 provider 选 target
+   *（claude=state.query；codex=state.driverHandle）。过渡兼容：旧内存 state（task-02 前
+   * 创建）无 driver 字段 → fallback `_drivers.claude`（FR-10 不回退）。
+   *
+   * 回调适配：同时提供 ClaudeSdkDriver 旧形态（onResult/onMessage/onError）与
+   * InteractiveDriver 新形态（onTurnResult/onTurnMessage/onTurnError）两组键，让
+   * Claude driver（task-03 前读旧键）与 Codex driver / fake driver（读新键）都能工作。
+   * task-03 合并后 ClaudeSdkDriver implements InteractiveDriver 改读新键，旧键自然废弃。 */
   private async _runConsume(state: SessionState): Promise<void> {
-    const q = state.query;
-    if (!q) return;
+    const driver = state.driver ?? this._drivers.claude;
+    if (!driver) return;
+    // 按 provider 选 consume target：claude=Query，codex=InteractiveDriverHandle。
+    const target = state.provider === 'claude' ? state.query : state.driverHandle;
+    if (!target) return;
+    // onResult/onMessage 内部 Claude partial buffer 节流逻辑（ql-20260621-partial）保留；
+    // Codex flat message 不触发 stream_event 分支，自然走末尾 onTurnMessage 转发。
+    const onResult = (r: SDKResultMessage | InteractiveDriverResult): void => {
+      void this._onResult(state, r);
+    };
+    const onMessage = (m: SDKMessage | Record<string, unknown>): void => {
+      void this._onMessage(state, m as SDKMessage);
+    };
+    const onError = (e: unknown): void => {
+      // 边界 2：driver 异常 → fail。fail 内部幂等。
+      void this.fail(state.sessionId).then(() => undefined, () => undefined);
+      // 记录原始错误（便于 daemon 日志），consume 已结束。
+      this._lastError = e;
+    };
+    // 适配对象：新旧两组键并存（见方法注释）。
+    const callbacks = {
+      onResult,
+      onMessage,
+      onError,
+      onTurnResult: onResult,
+      onTurnMessage: onMessage,
+      onTurnError: onError,
+    };
     try {
-      await this.deps.driver.consume(q, {
-        onResult: (r) => this._onResult(state, r),
-        onMessage: (m) => this._onMessage(state, m),
-        onError: (e) => {
-          // 边界 2：query 异常 → fail。fail 内部幂等。
-          void this.fail(state.sessionId).then(() => undefined, () => undefined);
-          // 记录原始错误（便于 daemon 日志），consume 已结束。
-          this._lastError = e;
-        },
-      });
+      await driver.consume(
+        target as InteractiveDriverHandle,
+        callbacks as unknown as InteractiveDriverCallbacks,
+      );
     } catch {
       // consume 自身不应抛（driver.consume 内 try/catch），防御性标 failed。
       void this.fail(state.sessionId).then(
@@ -766,11 +1081,9 @@ export class SessionManager {
     // spike S1：push 永远进 InputQueue（turn 级串行由 SDK result 边界保证），不拒绝。
     // currentRunId 在前 turn result 收尾前由本 inject 切换（task-04 既有行为，保留）：
     // inject 时 backend 行锁已防重复创建，daemon 侧 currentRunId 反映「即将执行的 run」。
-    state.inputQueue.push({
-      type: 'user',
-      message: { role: 'user', content: prompt },
-      parent_tool_use_id: null,
-    });
+    // task-02（D-009）：push provider-neutral UserTurnInput（不再构造 SDKUserMessage；
+    // Claude driver 内部做形态转换，task-03）。
+    state.inputQueue.push({ type: 'user', text: prompt });
     state.currentRunId = runId;
     state.status = 'running';
     state.lastActiveAt = Date.now();
@@ -812,11 +1125,9 @@ export class SessionManager {
     const state = this._store.get(sessionId);
     if (!state) return false;
     if (state.status !== 'running') return false;
-    // task-08（AC-08.7）：interrupt 时 SDK 会 abort canUseTool 回调的 signal
-    //（resolver 内 signal abort → 立即 deny），但保险起见也 abortAll 当前 session
-    // 的 pending resolver（pending 回调不应跨 interrupt 续）。SDK result 边界
-    // 会再次 abortAll，幂等无副作用。
-    const interrupted = await this.deps.driver.interrupt(state.query ?? null);
+    // task-02（D-001/FR-03）：按 session 归属 driver interrupt（不用全局 deps.driver），
+    // 避免 codex session 误调 ClaudeSdkDriver.interrupt(null) 静默失效。target 按 provider 选。
+    const interrupted = await this._interruptInternal(state);
     if (interrupted) {
       // interrupt 信号本身不等同 run 终态（spike D1：等 SDK 吐 result subtype=
       // error_during_execution 才收敛）。但算用户活动（影响空闲回收）。
@@ -827,6 +1138,29 @@ export class SessionManager {
       this._scheduleFlush();
     }
     return interrupted;
+  }
+
+  /**
+   * task-02（D-001/FR-03）：provider-neutral interrupt 内部实现。interrupt 与
+   * _onIdleExpire 复用。按 `state.driver`（fallback `_drivers.claude` 兼容旧 state）
+   * + 按 provider 选 target（claude=query / codex=driverHandle）调用 driver.interrupt。
+   * 无 driver / 无 target → 返回 false（不抛）。
+   */
+  private async _interruptInternal(state: SessionState): Promise<boolean> {
+    const driver = state.driver ?? this._drivers.claude;
+    if (!driver) return false;
+    // 按 provider 选 target：claude=query / codex=driverHandle。缺省 null（与原
+    // `state.query ?? null` 语义一致，FR-10 不回退：query undefined 时仍调
+    // driver.interrupt(null) 让 driver 自行 no-op 返回 false）。
+    const rawTarget =
+      state.provider === 'claude' ? state.query : state.driverHandle;
+    const target = (rawTarget ?? null) as InteractiveDriverHandle | null;
+    try {
+      return await driver.interrupt(target);
+    } catch {
+      // interrupt 抛错保守返回 false（不冒泡，与现有 ClaudeSdkDriver.interrupt no-op 一致）。
+      return false;
+    }
   }
 
   /**
@@ -929,11 +1263,13 @@ export class SessionManager {
    * 靠 end 的 InputQueue.close 让 query 自然结束。
    */
   private async _onIdleExpire(state: SessionState): Promise<void> {
-    if (state.status === 'running' && state.query) {
+    if (state.status === 'running') {
+      // task-02（D-001）：用 provider-neutral _interruptInternal（不再全局 deps.driver）。
+      // interrupt 失败不阻塞 end；end 会 close InputQueue 让 driver 自然结束。
       try {
-        await this.deps.driver.interrupt(state.query);
+        await this._interruptInternal(state);
       } catch {
-        // interrupt 失败不阻塞 end；end 会 close InputQueue 让 query 自然结束。
+        // noop
       }
     }
     await this.end(state.sessionId);
@@ -1030,7 +1366,14 @@ export class SessionManager {
       if (state.currentRunId) {
         rec.currentRunId = state.currentRunId;
       }
-      if (state.pathToClaudeCodeExecutable) {
+      // task-02 R8（D-002）：按 provider 落盘 executable path。claude 继续写
+      // pathToClaudeCodeExecutable（向后兼容旧 sessions.json + Claude resume）；
+      // codex 写 pathToAgentExecutable（恢复时 codex driver 读此字段）。
+      if (state.provider === 'codex') {
+        if (state.pathToAgentExecutable) {
+          rec.pathToAgentExecutable = state.pathToAgentExecutable;
+        }
+      } else if (state.pathToClaudeCodeExecutable) {
         rec.pathToClaudeCodeExecutable = state.pathToClaudeCodeExecutable;
       }
       // scan 真阻塞（恢复路径用，generic-wibbling-whisper 改造点 C/B/D）：
@@ -1063,20 +1406,33 @@ export class SessionManager {
    * 调用方在 backend recover 成功后调 markReconnected 切 active。
    */
   async restoreAndReconnect(record: PersistedSessionRecord): Promise<void> {
-    if (record.provider !== 'claude') {
-      throw new UnsupportedProviderError(record.provider);
+    // task-02（D-007）：agentSessionId 是恢复必需的 provider 会话 id（Claude SDK
+    // session_id / Codex thread id）。空则不伪造恢复——抛错，不写 store、不调 driver.start。
+    // daemon._routeSessionResume 已在进入前校验，这里是第二道守卫。
+    if (!record.agentSessionId) {
+      throw new Error(
+        `restoreAndReconnect: missing agentSessionId (thread id) for session ${record.sessionId}`,
+      );
     }
+    // task-02（D-001/FR-06）：按 provider 取 driver（未注册 → UnsupportedProviderError）。
+    // 删除原 `if (record.provider !== 'claude') throw` 硬编码，codex 不再被拦截。
+    const driver = this._getDriver(record.provider);
     if (this._store.has(record.sessionId)) {
       throw new SessionAlreadyExistsError(record.sessionId);
     }
 
-    const inputQueue = new InputQueue();
+    // task-02（D-009）：恢复路径同样用 provider-neutral UserTurnInput 队列。
+    const inputQueue = new InputQueue<UserTurnInput>();
     // scan 真阻塞（恢复路径用，generic-wibbling-whisper 改造点 C/B/D）：
     // record 持久化字段优先，fallback 到实例级 _manualApproval / true（scan 主用场景）。
     // 旧 sessions.json（无 manualApproval/askUserOnly 字段）→ fallback 兼容。
     const restoreManualApproval =
       record.manualApproval ?? this._manualApproval;
     const restoreAskUserOnly = record.askUserOnly ?? true;
+    // task-02（D-002/R8）：provider-neutral executable path。codex 用 pathToAgentExecutable
+    //（落盘时写的 codex path）；claude 继续用 pathToClaudeCodeExecutable。
+    const exe =
+      record.pathToAgentExecutable ?? record.pathToClaudeCodeExecutable ?? '';
     const state: SessionState = {
       sessionId: record.sessionId,
       leaseId: record.leaseId,
@@ -1094,57 +1450,34 @@ export class SessionManager {
       cwd: record.cwd,
       provider: record.provider,
       pathToClaudeCodeExecutable: record.pathToClaudeCodeExecutable ?? '',
+      pathToAgentExecutable: exe,
       manualApproval: restoreManualApproval,
       askUserOnly: restoreAskUserOnly,
+      driver, // D-001：写入归属 driver。
     };
     this._store.set(state.sessionId, state);
 
-    // 探测 executable（D-009）：记录里带则复用，否则用空串（driver.start 内
-    // resolveClaudeExecutable 对空串抛 ClaudeExecutableNotFoundError → 同步 catch）。
-    const exe = record.pathToClaudeCodeExecutable ?? '';
-
     try {
-      const driverOpts: Record<string, unknown> = {
-        pathToClaudeCodeExecutable: exe,
-        cwd: record.cwd, // R-cwd：必须用记录 cwd。
+      // task-02（R7）：复用 _buildDriverOptions（含 canUseTool/onUserDialog 注入，
+      // 与 create 对齐，FR-10 行为不变）。resume = agentSessionId（Codex thread id / Claude session_id）。
+      const driverOpts = this._buildDriverOptions(state, {
+        exePath: exe,
+        model: record.model,
+        env: undefined,
+        enableApproval: restoreManualApproval,
+        effectiveAskUserOnly: restoreAskUserOnly,
         resume: record.agentSessionId, // spike D3 跨进程 resume。
-      };
-      if (record.model) {
-        driverOpts.model = record.model;
-      }
-      // 恢复路径注入 canUseTool（与 create 对齐，generic-wibbling-whisper 改造点 C/D）：
-      // manualApproval=true 时按 session 建独立 resolver + 注入远程人审回调 +
-      // onUserDialog，让 daemon 重启后恢复的 session 保留审批能力（否则 SDK 走内置
-      // 默认策略，AskUserQuestion 无阻塞 → scan 无法等人审）。
-      if (
-        restoreManualApproval &&
-        this._permissionResolverFactory &&
-        this._permissionWsClient
-      ) {
-        const resolver = this._permissionResolverFactory();
-        this._resolversBySession.set(record.sessionId, resolver);
-        driverOpts.canUseTool = this._buildCanUseToolCallback(
-          record.sessionId,
-          restoreAskUserOnly,
-        );
-        // onUserDialog 路由（SDK request_user_dialog 路径）：supportedDialogKinds
-        // 非空才注入——SDK 契约「声明在此的 kind 才经 onUserDialog」。与 create
-        // 对齐：默认 ['AskUserQuestion']，保留向后兼容。
-        if (
-          this._supportedDialogKinds &&
-          this._supportedDialogKinds.length > 0
-        ) {
-          driverOpts.onUserDialog = this._buildOnUserDialogCallback(
-            record.sessionId,
-          );
-          driverOpts.supportedDialogKinds = this._supportedDialogKinds;
-        }
-      }
-      const query = this.deps.driver.start(
+      });
+      // task-02（D-001）：用归属 driver，按 provider 写句柄。
+      const handleOrQuery = (await driver.start(
         inputQueue,
-        driverOpts as unknown as Parameters<ClaudeSdkDriver['start']>[1],
-      );
-      state.query = query;
+        driverOpts as unknown as Parameters<InteractiveDriver['start']>[1],
+      )) as unknown;
+      if (record.provider === 'claude') {
+        state.query = handleOrQuery as import('@anthropic-ai/claude-agent-sdk').Query;
+      } else {
+        state.driverHandle = handleOrQuery as InteractiveDriverHandle;
+      }
       // fire consume 后台协程（同 create，长生命周期）。
       void this._runConsume(state);
     } catch {
@@ -1239,7 +1572,7 @@ export class SessionManager {
    *   - ended 时不重复调（边界 8：END 与 turn 完成竞态，幂等）
    *   - lastActiveAt 更新
    */
-  private async _onResult(state: SessionState, result: SDKResultMessage): Promise<void> {
+  private async _onResult(state: SessionState, result: SDKResultMessage | InteractiveDriverResult): Promise<void> {
     if (state.status === 'ended' || state.status === 'failed') {
       // 迟到的 result，session 已收口：不重复发终态，避免双 onTurnResult。
       return;
@@ -1305,6 +1638,32 @@ export class SessionManager {
       if (sid && state.agentSessionId === undefined) {
         state.agentSessionId = sid;
         // task-10：首 turn system/init 拿到 agentSessionId 后才可恢复 → 排队 flush。
+        this._scheduleFlush();
+      }
+    }
+
+    // task-06（Reverse Sync / design §5.3 第 6 点 + task-04 L128-130）：Codex flat
+    // message 的 thread_started 事件（{event_type, content, metadata:{subtype:
+    // 'thread_started'}, session_id:threadId}）携带 Codex thread id。提取 session_id
+    // 写入 state.agentSessionId，让 snapshotPersistable 落盘 + restoreAndReconnect
+    // 可用（Codex thread id = resume key，缺失则不可恢复，D-007）。只写一次（与
+    // Claude system/init 同语义）。仅 Codex provider 的 flat message 走此分支
+    //（Claude 走上方 system/init）。
+    if (
+      state.provider === 'codex' &&
+      state.agentSessionId === undefined &&
+      msg &&
+      typeof msg === 'object'
+    ) {
+      const flat = msg as Record<string, unknown>;
+      const metadata = flat['metadata'] as Record<string, unknown> | undefined;
+      if (
+        metadata?.['subtype'] === 'thread_started' &&
+        typeof flat['session_id'] === 'string' &&
+        flat['session_id']
+      ) {
+        state.agentSessionId = flat['session_id'];
+        // task-10：拿到 agentSessionId 后才可恢复 → 排队 flush。
         this._scheduleFlush();
       }
     }

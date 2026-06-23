@@ -16,6 +16,8 @@ import type {
   SDKResultMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
+import type { UserTurnInput } from '../../src/interactive/driver.js';
+import type { ClaudeDriverHandle } from '../../src/interactive/claude-sdk-driver.js';
 
 // mock node:fs（resolveClaudeExecutable 用 existsSync）。
 const { fsExists, fsRead } = vi.hoisted(() => ({
@@ -162,10 +164,10 @@ describe('ClaudeSdkDriver.start：不传 allowedTools 黑名单（AC-09.8 / D-00
   it('options.allowedTools 缺省 → 传给 SDK 的 options 不含 allowedTools 字段', async () => {
     const realExe = 'C:\\bin\\claude.exe';
     const driver = new ClaudeSdkDriver();
-    const input: AsyncIterable<SDKUserMessage> = {
+    const input: AsyncIterable<UserTurnInput> = {
       [Symbol.asyncIterator]: () => (async function* () {})(),
     };
-    driver.start(input, {
+    await driver.start(input, {
       pathToClaudeCodeExecutable: realExe,
       cwd: 'C:\\work',
       // allowedTools 不传 → GLM 路径走全工具集（D-008 不预禁）。
@@ -180,10 +182,10 @@ describe('ClaudeSdkDriver.start：不传 allowedTools 黑名单（AC-09.8 / D-00
   it('options.allowedTools 显式传 → 仍透传（不强制丢弃，但 GLM 路径生产侧缺省）', async () => {
     const realExe = 'C:\\bin\\claude.exe';
     const driver = new ClaudeSdkDriver();
-    const input: AsyncIterable<SDKUserMessage> = {
+    const input: AsyncIterable<UserTurnInput> = {
       [Symbol.asyncIterator]: () => (async function* () {})(),
     };
-    driver.start(input, {
+    await driver.start(input, {
       pathToClaudeCodeExecutable: realExe,
       cwd: 'C:\\work',
       allowedTools: ['Read', 'Glob'], // 调用方显式白名单时透传。
@@ -205,16 +207,17 @@ describe('ClaudeSdkDriver.consume：tool_result(is_error=true) 原样透传（AC
     ];
     setMockQueryImpl(() => makeQuery(messages));
     const driver = new ClaudeSdkDriver();
-    const input: AsyncIterable<SDKUserMessage> = {
+    const input: AsyncIterable<UserTurnInput> = {
       [Symbol.asyncIterator]: () => (async function* () {})(),
     };
-    const q = driver.start(input, {
+    const handle = await driver.start(input, {
       pathToClaudeCodeExecutable: 'C:\\bin\\claude.exe',
       cwd: 'C:\\work',
     });
+    const q = (handle as ClaudeDriverHandle).query;
     const onResult = vi.fn(async () => {});
     const onMessage = vi.fn(async () => {});
-    await driver.consume(q, { onResult, onMessage });
+    await driver.consume(handle, { onResult, onMessage });
     // onMessage 收到 tool_result 原样（is_error=true 未被改写）。
     expect(onMessage).toHaveBeenCalledTimes(1);
     const forwarded = onMessage.mock.calls[0]![0] as SDKMessage;
@@ -233,15 +236,15 @@ describe('ClaudeSdkDriver.consume：tool_result(is_error=true) 原样透传（AC
     ];
     setMockQueryImpl(() => makeQuery(messages));
     const driver = new ClaudeSdkDriver();
-    const input: AsyncIterable<SDKUserMessage> = {
+    const input: AsyncIterable<UserTurnInput> = {
       [Symbol.asyncIterator]: () => (async function* () {})(),
     };
-    const q = driver.start(input, {
+    const handle = await driver.start(input, {
       pathToClaudeCodeExecutable: 'C:\\bin\\claude.exe',
       cwd: 'C:\\work',
     });
     const onMessage = vi.fn(async () => {});
-    await driver.consume(q, { onResult: async () => {}, onMessage });
+    await driver.consume(handle, { onResult: async () => {}, onMessage });
     const tr = (
       onMessage.mock.calls[0]![0] as unknown as {
         message: { content: Array<Record<string, unknown>> };
@@ -265,17 +268,18 @@ describe('ClaudeSdkDriver.consume：连续工具失败不阻断（AC-09.9 / spik
     ];
     setMockQueryImpl(() => makeQuery(messages));
     const driver = new ClaudeSdkDriver();
-    const input: AsyncIterable<SDKUserMessage> = {
+    const input: AsyncIterable<UserTurnInput> = {
       [Symbol.asyncIterator]: () => (async function* () {})(),
     };
-    const q = driver.start(input, {
+    const handle = await driver.start(input, {
       pathToClaudeCodeExecutable: 'C:\\bin\\claude.exe',
       cwd: 'C:\\work',
     });
+    const q = (handle as ClaudeDriverHandle).query;
     const interruptSpy = vi.spyOn(q, 'interrupt');
     const onResult = vi.fn(async () => {});
     const onMessage = vi.fn(async () => {});
-    await driver.consume(q, { onResult, onMessage });
+    await driver.consume(handle, { onResult, onMessage });
     // 6 条中间消息全部经 onMessage 转发（3 tool_result + 3 assistant text）。
     expect(onMessage).toHaveBeenCalledTimes(6);
     // driver 不调 interrupt（不强制结束 turn）。
@@ -313,16 +317,16 @@ describe('ClaudeSdkDriver.consume：result.is_error 与 tool_result(is_error) �
     } as unknown as SDKResultMessage;
     setMockQueryImpl(() => makeQuery([resultErr]));
     const driver = new ClaudeSdkDriver();
-    const input: AsyncIterable<SDKUserMessage> = {
+    const input: AsyncIterable<UserTurnInput> = {
       [Symbol.asyncIterator]: () => (async function* () {})(),
     };
-    const q = driver.start(input, {
+    const handle = await driver.start(input, {
       pathToClaudeCodeExecutable: 'C:\\bin\\claude.exe',
       cwd: 'C:\\work',
     });
     const onResult = vi.fn(async () => {});
     const onMessage = vi.fn(async () => {});
-    await driver.consume(q, { onResult, onMessage });
+    await driver.consume(handle, { onResult, onMessage });
     // turn 级 result 走 onResult，不进 onMessage。
     expect(onResult).toHaveBeenCalledTimes(1);
     expect(onResult.mock.calls[0]![0]).toBe(resultErr);

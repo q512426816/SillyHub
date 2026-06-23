@@ -50,9 +50,11 @@ import { CredentialManager } from './credential.js';
 import { TaskRunner } from './task-runner.js';
 import { Daemon } from './daemon.js';
 import { ClaudeSdkDriver } from './interactive/claude-sdk-driver.js';
+import { CodexAppServerDriver } from './interactive/codex-app-server-driver.js';
 import { SessionManager } from './interactive/session-manager.js';
 import { JsonSessionPersistence } from './interactive/session-store-persistence.js';
 import { DAEMON_VERSION } from './daemon-version.js';
+import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 
 // ── 路径访问（可测试性：函数返回，task-22 vi.spyOn 可 mock）──────────────────
 
@@ -406,6 +408,11 @@ export async function startAction(opts: StartOptions): Promise<number> {
   //   deps.onTurnMessage   → daemon.onTurnMessage   → hubClient.submitMessages    → backend SSE turn_progress
   //   deps.onSessionEnd    → daemon.onSessionEnd    → hubClient.notifySessionEnd  → backend end_session
   const driver = new ClaudeSdkDriver();
+  // task-06（D-001@v1）：注册 provider driver registry。claude + codex 两个 driver
+  // 由 SessionManager 按 session.provider 选取（task-02 _getDriver 路由）。Codex
+  // app-server driver 无状态（不持有 child；句柄以 CodexHandle 形式由 SessionManager
+  // 持有），可安全单例注入。
+  const codexDriver = new CodexAppServerDriver();
   // gap-8.3（design §11）：interactive session 持久化 + daemon 重启恢复。
   // JsonSessionPersistence 默认写 ~/.sillyhub/daemon/sessions.json；SessionManager
   // 状态变更排队 flush（_scheduleFlush），daemon 重启时 _recoverSessionsOnBoot
@@ -414,10 +421,34 @@ export async function startAction(opts: StartOptions): Promise<number> {
   let daemon: Daemon;
   const sessionManager = new SessionManager(
     {
+      // task-06（D-001@v1）：显式 drivers registry（claude + codex）。task-02 保留
+      // 旧 `driver` 兼容入口（构造函数内映射到 drivers.claude），但因 SessionManagerDeps
+      // 仍标 driver 必填（task-01 遗留，types.ts 不在本任务 allowed_paths），此处同时
+      // 传 driver（=claude driver）满足类型 + drivers registry 覆盖两 provider。
       driver,
+      drivers: { claude: driver, codex: codexDriver },
       persistence,
-      onTurnResult: (sessionId, runId, result) => daemon.onTurnResult(sessionId, runId, result),
-      onTurnMessage: (sessionId, runId, msg) => daemon.onTurnMessage(sessionId, runId, msg),
+      // task-02/06：回调类型放宽为联合（SDKResultMessage | InteractiveDriverResult
+      // / SDKMessage | InteractiveDriverMessage）。design §5.4.4 要求两种 provider
+      // 的消息都透传给 daemon.onTurnResult/onTurnMessage（daemon 按 provider 解释）：
+      //   - Claude SDK raw：result.type==='result' / msg.type 为字符串（assistant/user/...）
+      //   - Codex flat：{event_type, content, metadata, session_id}（无 type 字段，
+      //     有 event_type 字段；result 为 {subtype, is_error, ...}）
+      // 守卫放开：SDK 形态（有 type）或 Codex flat 形态（有 event_type / 无 type 但
+      // 是 object）都透传，让 daemon.onTurnMessage 内 duck-typing 统一处理。
+      onTurnResult: (sessionId, runId, result) => {
+        if (!result || typeof result !== 'object') return;
+        // Claude SDK result 带 type='result'；Codex driver result（subtype/is_error
+        // flat）无 type 但有 subtype。两者都透传，daemon.onTurnResult 内按字段提取。
+        void daemon.onTurnResult(sessionId, runId, result as SDKResultMessage);
+      },
+      onTurnMessage: (sessionId, runId, msg) => {
+        if (!msg || typeof msg !== 'object') return;
+        // Claude SDK msg 有 type 字符串；Codex flat msg 有 event_type 字符串。
+        // 都透传，daemon.onTurnMessage 内 duck-typing（type==='assistant' 提 usage；
+        // 其余原样 submitMessages，backend 按 event_type/content 展开）。
+        void daemon.onTurnMessage(sessionId, runId, msg as SDKMessage);
+      },
       onSessionEnd: (sessionId, status) => daemon.onSessionEnd(sessionId, status),
     },
     {
