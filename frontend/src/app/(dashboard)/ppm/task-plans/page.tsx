@@ -353,7 +353,7 @@ export default function TaskPlansPage() {
     {
       title: "操作",
       key: "actions",
-      width: "max-content",
+      width: 180,
       fixed: "right",
       render: (_v, t: PlanTask) => {
         const isOwner = currentUser?.id === t.user_id;

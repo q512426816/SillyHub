@@ -132,3 +132,4 @@ layout.tsx (根布局)
 | 2026-06-23 | ql-20260623-005-c3e1 | /ppm/task-plans 月份/项目/视图 查询条件改 antd 组件统一风格:月份 `<input type=month>` → DatePicker.MonthPicker,项目/视图原生 `<select>` → antd Select(与其他 Field 控件风格对齐) |
 | 2026-06-23 | ql-20260623-006-d4a9 | /ppm/task-plans 查询条件变化不自动查询:useEffect deps 从所有 filter state + searchNonce 精简为只 [searchNonce];任意条件变化只 setState 不查,搜索按钮/回车/重置走 setSearchNonce 触发,翻页走 pagination.onChange 直接调 load |
 | 2026-06-23 | ql-20260623-007-e5f1 | /ppm/task-plans 操作列+查询区对齐 project-plans:操作按钮从 ghost 改 default(执行 bg-blue-500/编辑默认/删除 destructive,同色方案);查询条件加展开/收起按钮,默认 4 个 Field(状态/月份/项目/负责人),展开后追加 3 个(计划时间/配合人员/视图) |
+| 2026-06-23 | ql-20260623-008-f2c3 | /ppm/task-plans 操作列 width 从 'max-content'(antd Table fixed+scroll.x 下不可靠)改具体数字 180px,真正收紧列宽消除留白 |

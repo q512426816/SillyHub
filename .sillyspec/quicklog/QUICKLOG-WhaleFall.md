@@ -862,3 +862,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
 结果:1) 新增 expanded state,顶部按钮行插入展开/收起切换(在重置和分隔之间);2) 查询 grid 默认 4 个 Field(状态/月份/项目/负责人),expanded && 包裹后 3 个(计划时间区间/配合人员/视图),共条数 div 永远显示;3) 操作列按钮从 ghost 改 default:执行 bg-blue-500 hover:bg-blue-600、编辑默认色、删除 destructive(完全对齐 project-plans 颜色方案)。width=max-content + whitespace-nowrap + fixed=right 保留。前端 typecheck 通过。
+
+
+## ql-20260623-008-f2c3 | 2026-06-23 10:40:00 | task-plans 操作列真正收紧(具体 width 替换 max-content)
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
+结果:操作列 width 从 'max-content'(antd Table fixed+scroll.x 模式下不可靠,实际给默认较宽值造成留白)改为具体数字 180px(3 个 sm Button + gap-1 实际占 ~156px,留 24px 缓冲)。前端 typecheck 通过。
