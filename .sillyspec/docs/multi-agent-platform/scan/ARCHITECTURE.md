@@ -80,7 +80,7 @@ created_at: 2026-06-23 01:56:21
 | --- | --- | --- | --- |
 | `postgres` | postgres:16-alpine | `${POSTGRES_PORT:-5432}:5432` | healthcheck pg_isready |
 | `redis` | redis:7-alpine（appendonly AOF） | —（内部） | healthcheck redis-cli ping |
-| `backend` | 构建 `../backend/Dockerfile`（build-args 注入 `CLAUDE_CODE_VERSION=2.1.158`、`SILLYSPEC_VERSION=3.18.6`） | `${BACKEND_PORT:-8000}:8000` | postgres/redis healthy |
+| `backend` | 构建 `../backend/Dockerfile`（build-args 注入 `CLAUDE_CODE_VERSION=2.1.158`、`SILLYSPEC_VERSION=3.19.1`） | `${BACKEND_PORT:-8000}:8000` | postgres/redis healthy |
 | `frontend` | 构建 `../frontend/Dockerfile`（SSR，`INTERNAL_API_BASE_URL=http://backend:8000`） | `${FRONTEND_PORT:-3000}:3000` | backend |
 
 backend 关键挂载与配置：

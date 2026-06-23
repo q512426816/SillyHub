@@ -65,7 +65,7 @@ created_at: 2026-06-23 02:12:59
 | --- | --- | --- | --- | --- |
 | `postgres` | `postgres:16-alpine` | `5432` | — | 见 §1 |
 | `redis` | `redis:7-alpine` | （未对外，仅容器内） | — | 见 §2，appendonly 持久化 |
-| `backend` | `build context=../backend`（Dockerfile） | `8000` | `postgres`(healthy) / `redis`(healthy) | 启动命令 `alembic upgrade head && uvicorn app.main:app`；构建参数 `CLAUDE_CODE_VERSION=2.1.158` / `SILLYSPEC_VERSION=3.18.6` |
+| `backend` | `build context=../backend`（Dockerfile） | `8000` | `postgres`(healthy) / `redis`(healthy) | 启动命令 `alembic upgrade head && uvicorn app.main:app`；构建参数 `CLAUDE_CODE_VERSION=2.1.158` / `SILLYSPEC_VERSION=3.19.1` |
 | `frontend` | `build context=../frontend`（Dockerfile） | `3000` | `backend` | 构建期注入 `INTERNAL_API_BASE_URL`（默认 `http://backend:8000`）/ `NEXT_PUBLIC_API_BASE_URL`（默认 `http://localhost:8000`） |
 
 命名卷：`pgdata`、`redisdata`、`worktree-data`、`claude-data`；外加 bind mount：宿主项目目录、`SPEC_DATA_HOST_DIR`。
