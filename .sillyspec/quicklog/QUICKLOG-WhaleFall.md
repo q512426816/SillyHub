@@ -947,3 +947,9 @@ created_at: 2026-06-03T08:42:04
 根因:milestone-details 主表 PpmSubTable 的 tableProps.scroll 带 y:"calc(100vh-430px)"(ql-017 为对齐 project-plans 所加)。主表 .ant-table-body 因此成为固定高度+overflow-y:auto 视窗,展开的明细子表(DetailLevelTable/DataTable)嵌在 body 内 → 明细子表表头被主表 sticky header 压住、末行超出 body 可视底部,首尾被视窗"切割"。analyze_image 三次确认静态截图内容完整,但用户动态查看时被切,矛盾正源于主表 body 视窗限制动态渲染(截图高 591px ≈ body 可视区)。本页是主子表展开页,与单层数据表 project-plans 不同,固定 scroll.y 本质上限制展开内容显示。
 方案:主表 PpmSubTable 的 tableProps.scroll 去掉 y,仅保留 x:"max-content"。主表随里程碑行数+展开子表自然撑高、整页滚动,明细子表表头不再被 sticky header 压、末行不再超视窗底部,首尾完整可见。不动 DataTable 的 overflow-hidden(经分析它非裁切源:外层 div 高度随 Table 内容,Table 不超出 div,overflow-hidden 不裁表头/末行)。
 结果:pnpm typecheck 通过 + milestone-details 18/18 测试全过(无回归)。Docker frontend 待重建部署验证。
+
+## ql-20260623-022-b3c9 | 2026-06-23 16:50:00 | milestone-details 明细子表标题显示模块名称而非 UUID
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
+背景:实施阶段模块行展开的明细子表标题 `明细 · 模块 <UUID>` 直接显示模块 UUID,用户要显示名称。
+结果:DetailLevelProps 加 moduleName?:string|null;DetailLevelTable 解构加 moduleName;ModuleLevelTable.moduleExpandRender 透传 moduleName={m.module_name};标题 `模块 ${moduleId}` → `模块 ${moduleName || "(未命名模块)"}`(不回退 UUID,空兜底对齐 moduleColumns 的 v ?? "(未命名模块)")。typecheck 通过 + milestone-details 18/18 测试全过。Docker frontend 待重建部署。

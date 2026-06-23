@@ -887,6 +887,7 @@ function ModuleLevelTable({
       <DetailLevelTable
         planNodeId={planNodeId}
         moduleId={m.id}
+        moduleName={m.module_name}
         onAddDetail={() => onAddDetail(m.id)}
         onOpenDetail={onOpenDetail}
         onSubmitDetail={onSubmitDetail}
@@ -1093,6 +1094,8 @@ interface DetailLevelProps {
   planNodeId: string;
   /** null/undefined = 该里程碑下所有明细;string = 仅该模块下的明细。 */
   moduleId: string | null;
+  /** 模块名称(实施阶段模块行展开透传,标题展示用);空兜底"(未命名模块)"。 */
+  moduleName?: string | null;
   onAddDetail: () => void;
   onOpenDetail: (d: PsPlanNodeDetail, mode?: DrawerMode) => void;
   onSubmitDetail: (
@@ -1117,6 +1120,7 @@ interface DetailLevelProps {
 function DetailLevelTable({
   planNodeId,
   moduleId,
+  moduleName,
   onAddDetail,
   onOpenDetail,
   onSubmitDetail,
@@ -1293,7 +1297,7 @@ function DetailLevelTable({
     <div className="rounded bg-muted/20 p-3">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-sm font-medium">
-          明细{moduleId ? ` · 模块 ${moduleId}` : ""}
+          明细{moduleId ? ` · 模块 ${moduleName || "(未命名模块)"}` : ""}
         </span>
         <Button
           size="sm"
