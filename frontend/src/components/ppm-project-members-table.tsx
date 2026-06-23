@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Table, type TableProps, Tag } from "antd";
 
 import { Button } from "@/components/ui/button";
+import { SectionCard } from "@/components/layout";
 import { PpmUserSelect, type PpmSelectOption } from "@/components/ppm-user-select";
 import { ApiError } from "@/lib/api";
 import type { UserRead } from "@/lib/admin";
@@ -220,7 +221,7 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
         fixed: "right",
         width: 140,
         render: (_v, row) => (
-          <div className="flex justify-end gap-1">
+          <div className="flex whitespace-nowrap gap-1">
             <Button
               size="sm"
               variant="outline"
@@ -248,11 +249,12 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
     return rows.slice(start, start + pageSize);
   }, [rows, page, pageSize]);
 
-  return (
-    <div className="flex flex-col gap-3">
+  // 页面模式(showToolbar=true):SectionCard + 顶部按钮右对齐 + Table bordered + scroll y。
+  // 抽屉模式(showToolbar=false):保留原 flex 布局,无 SectionCard 无 scroll y。
+  const body = (
+    <>
       {showToolbar && canWrite && (
-        <div className="flex items-center justify-end gap-2">
-          <span className="mr-auto text-xs text-muted-foreground">共 {total} 条</span>
+        <div className="mb-2 flex items-center justify-end gap-2">
           <Button
             size="sm"
             onClick={() => setDrawer({ open: true, mode: "create" })}
@@ -264,7 +266,7 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
 
       {toast && (
         <div
-          className={`rounded border px-3 py-2 text-xs ${
+          className={`mb-2 rounded border px-3 py-2 text-xs ${
             toast.ok
               ? "border-emerald-300 bg-emerald-50 text-emerald-700"
               : "border-destructive/30 bg-red-50 text-destructive"
@@ -288,7 +290,12 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
           dataSource={pagedRows}
           loading={loading}
           size="small"
-          scroll={{ x: "max-content" }}
+          bordered={showToolbar}
+          scroll={
+            showToolbar
+              ? { x: "max-content", y: "calc(100vh - 430px)" }
+              : { x: "max-content" }
+          }
           pagination={{
             current: page,
             pageSize,
@@ -323,8 +330,13 @@ export function PpmProjectMembersTable(props: PpmProjectMembersTableProps) {
           onConfirm={() => void handleConfirmDelete()}
         />
       )}
-    </div>
+    </>
   );
+
+  if (showToolbar) {
+    return <SectionCard bodyPadding="p-2">{body}</SectionCard>;
+  }
+  return <div className="flex flex-col gap-3">{body}</div>;
 }
 
 // ── 成员表单 Drawer ──────────────────────────────────────────────────────

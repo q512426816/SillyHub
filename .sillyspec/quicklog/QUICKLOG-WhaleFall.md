@@ -904,3 +904,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：backend/app/modules/ppm/task/router.py, frontend/src/lib/ppm/task.ts
 结果:后端 router.py:573-575 改 filename = f'工时记录_{datetime.now():%Y%m%d_%H%M%S}.xlsx'(datetime 已 import,替换原硬编码 'work_hour.xlsx');前端 task.ts:104 fallback 改 '工时记录.xlsx'(Content-Disposition 失败兜底)。对齐 task-plan('任务计划_{时间戳}.xlsx')/problem-list('问题清单_{时间戳}.xlsx')/problem-changes('问题变更_{时间戳}.xlsx')模式。前端 typecheck 通过 + 后端 ast 解析通过。
+
+
+## ql-20260623-015-a7c3 | 2026-06-23 14:10:00 | /ppm/project-members 对齐 project-plans 风格
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/project-members/page.tsx, frontend/src/components/ppm-project-members-table.tsx
+结果:page.tsx 改 PageContainer size=full + PageHeader(替代 div mx-auto max-w-7xl + header)。组件:1) 页面模式(showToolbar=true)用 SectionCard(bodyPadding=p-2) 包裹,抽屉模式(showToolbar=false)保留原 flex div 布局(projects 抽屉不受影响);2) Table 加 bordered + scroll y calc(100vh-430px)(仅页面模式);3) 顶部按钮去左侧'共 X 条'浮动文本(Table 分页 showTotal 保留);4) 操作列去 justify-end 改 whitespace-nowrap(fixed=right 自然左对齐),width 140 保留。前端 typecheck 通过。
