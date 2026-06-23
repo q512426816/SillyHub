@@ -356,6 +356,9 @@ export function isVersionBelow(version: string, minVersion: string): boolean {
 /**
  * task-08：canUseTool 远程人审请求事件（SSE event=permission_request）。
  * 对齐 backend permission_service.handle_permission_request publish 的 payload。
+ *
+ * task-09（FR-09 / D-006@v1 / D-010@v1）：该结构 provider 无关，Codex
+ * requestUserInput / 可归一化 MCP elicitation 经 daemon 归一化后复用同一形态。
  */
 export interface SessionPermissionRequest {
   session_id: string;
@@ -365,15 +368,27 @@ export interface SessionPermissionRequest {
   input: Record<string, unknown>;
   tool_use_id?: string;
   /**
-   * AskUserQuestion 对话类型标识（Claude Code canUseTool 远程人审的对话变体）。
-   * 存在时前端渲染 AskUserDialogCard（结构化问答），否则渲染普通
-   * PermissionApprovalCard（allow/deny 二选一）。常见值: "ask_user"。
+   * 对话类型标识（provider-neutral dialog 标记）。存在时前端渲染
+   * AskUserDialogCard（结构化问答），否则渲染普通 PermissionApprovalCard
+   *（allow/deny 二选一）。前端只按是否存在 kind 收卡，不区分具体取值。
+   *
+   * 取值来源（design §5.3 第5点 / D-010@v1）：
+   *   - Claude Code canUseTool AskUserQuestion → "ask_user"
+   *   - Codex app-server item/tool/requestUserInput → "codex_request_user_input"
+   *   - Codex app-server mcpServer/elicitation/request（可归一化） → "mcp_elicitation"
+   * 复杂 MCP elicitation 由 daemon fail-closed，不会产生此 kind 的卡片。
    */
   dialog_kind?: string;
   /**
-   * AskUserQuestion 对话载荷，含 questions 数组
+   * 对话载荷，含 questions 数组
    *（question / header / multiSelect / options[{label,description,preview}]）。
    * 仅当 dialog_kind 存在时有意义。
+   *
+   * provider 无关（D-010@v1 双向归一化）：daemon（task-05）负责把 Codex
+   * requestUserInput / 可归一化 MCP elicitation 归一化成与 Claude AskUserQuestion
+   * 同构的 {questions,options}；前端 AskUserDialogCard.parseQuestions 零分支复用，
+   * 不识别 Codex 原生 schema。响应回写时 Codex {answers:{[id]:{answers:string[]}}}
+   * 的 schema 还原也是 daemon 职责，前端只产出同构的 answers 数组。
    */
   dialog_payload?: Record<string, unknown>;
 }
@@ -401,8 +416,12 @@ export async function respondSessionPermission(
   decision: "allow" | "deny",
   message?: string,
   /**
-   * AskUserQuestion 对话结果（{answers: [{question, header?, answer}]}）。
-   * 仅当原 request 携带 dialog_kind 时有意义；普通审批不传。
+   * 对话结果（{answers: [{question, header?, answer}]}）。仅当原 request 携带
+   * dialog_kind 时有意义；普通审批不传。
+   *
+   * task-09（D-010@v1）：answers 结构 provider 无关，与 Claude AskUserQuestion
+   * 同构；Codex {answers:{[questionId]:{answers:string[]}}} 的 schema 还原在
+   * daemon 侧完成，前端不感知 provider 差异。
    */
   dialog_result?: Record<string, unknown>,
 ): Promise<{ accepted: boolean }> {

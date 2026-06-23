@@ -27,6 +27,10 @@ const sessionApi = vi.hoisted(() => ({
   streamSession: vi.fn(),
   getAgentSession: vi.fn(),
   fetchPendingDialogs: vi.fn(),
+  // task-08（FR-07 / D-005）：codex 路径不得调用 quick-chat API，mock 供断言 not.toHaveBeenCalled
+  quickChat: vi.fn(),
+  streamQuickChat: vi.fn(),
+  getQuickChatResult: vi.fn(),
 }));
 
 vi.mock("@/lib/daemon", async () => {
@@ -40,6 +44,9 @@ vi.mock("@/lib/daemon", async () => {
     streamSession: sessionApi.streamSession,
     getAgentSession: sessionApi.getAgentSession,
     fetchPendingDialogs: sessionApi.fetchPendingDialogs,
+    quickChat: sessionApi.quickChat,
+    streamQuickChat: sessionApi.streamQuickChat,
+    getQuickChatResult: sessionApi.getQuickChatResult,
   };
 });
 
@@ -51,6 +58,8 @@ interface FakeConnHandlers {
   onTurnCompleted: (env: any) => void;
   onSessionEnded: (env: any) => void;
   onError: (err: Error) => void;
+  onPermissionRequest: (req: any) => void;
+  onPermissionResolved: (resolved: any) => void;
   route: (env: any, cursor?: string | null) => void;
 }
 
@@ -74,6 +83,8 @@ function makeStreamMock(): { conn: FakeConn; factory: ReturnType<typeof vi.fn> }
           onTurnCompleted: (env: any) => handlers.onTurnCompleted(env),
           onSessionEnded: (env: any) => handlers.onSessionEnded(env),
           onError: (err: Error) => handlers.onError(err),
+          onPermissionRequest: (req: any) => handlers.onPermissionRequest?.(req),
+          onPermissionResolved: (resolved: any) => handlers.onPermissionResolved?.(resolved),
           // 便捷：用 envelope.event 路由
           route: (env: any, cursor?: string | null) => {
             switch (env.event) {
@@ -81,6 +92,8 @@ function makeStreamMock(): { conn: FakeConn; factory: ReturnType<typeof vi.fn> }
               case "log": handlers.onLog(env, cursor ?? null); break;
               case "turn_completed": handlers.onTurnCompleted(env); break;
               case "session_ended": handlers.onSessionEnded(env); break;
+              case "permission_request": handlers.onPermissionRequest?.(env); break;
+              case "permission_resolved": handlers.onPermissionResolved?.(env); break;
             }
           },
         },
@@ -926,5 +939,274 @@ describe("InteractiveSessionPanel", () => {
     await waitFor(() =>
       expect(screen.queryByText(/死卡问题/)).not.toBeInTheDocument(),
     );
+  });
+
+  /* ---------- task-08（FR-01 / FR-02 / FR-07 / D-005）：Codex provider interactive 路径 ---------- */
+
+  it("task-08 codex 首发 → createSession({provider:'codex'}) + 不调 quick-chat", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-codex", run_id: "run-codex-1", lease_id: "lc",
+      status: "active", stream_url: "",
+    });
+
+    setupPanel({ providers: ["claude", "codex"], defaultProvider: "codex" });
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hello codex" } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
+    expect(sessionApi.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "codex", prompt: "hello codex" }),
+    );
+    // 建交互式 SSE（不是 quick-chat）
+    expect(sessionApi.streamSession).toHaveBeenCalledTimes(1);
+    expect(sessionApi.streamSession.mock.calls[0]![0]).toBe("sess-codex");
+    // 全程不调 quick-chat API
+    expect(sessionApi.quickChat).not.toHaveBeenCalled();
+    expect(sessionApi.streamQuickChat).not.toHaveBeenCalled();
+    expect(sessionApi.getQuickChatResult).not.toHaveBeenCalled();
+  });
+
+  it("task-08 codex 多轮 → 第二条 injectSession，SSE 累计仍 1 次", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-codex", run_id: "run-codex-1", lease_id: "lc",
+      status: "active", stream_url: "",
+    });
+    sessionApi.injectSession.mockResolvedValue({
+      session_id: "sess-codex", run_id: "run-codex-2", status: "active",
+    });
+
+    setupPanel({ providers: ["claude", "codex"], defaultProvider: "codex" });
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "first codex" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+
+    const conn = stream.conn;
+    act(() => {
+      conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-codex-1", turn: 1 }));
+      conn.handlers.route(
+        makeEnvelope("turn_completed", { run_id: "run-codex-1", status: "completed" }),
+      );
+    });
+
+    const input2 = await screen.findByPlaceholderText(/继续追问/, undefined, { timeout: 2000 });
+    fireEvent.change(input2, { target: { value: "second codex" } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
+    expect(sessionApi.injectSession).toHaveBeenCalledWith("sess-codex", "second codex");
+    // 同 session 不重建 SSE
+    expect(sessionApi.streamSession).toHaveBeenCalledTimes(1);
+    // 全程不调 quick-chat
+    expect(sessionApi.quickChat).not.toHaveBeenCalled();
+    expect(sessionApi.streamQuickChat).not.toHaveBeenCalled();
+    expect(sessionApi.getQuickChatResult).not.toHaveBeenCalled();
+  });
+
+  /* ---- task-09（FR-09 / D-006@v1 / D-008@v1 / D-010@v1）：Codex dialog 卡片
+   * 收卡（onPermissionRequest 按 dialog_kind 存在性收）+ 响应回写
+   *（respondSessionPermission）+ permission_resolved/session_ended 移除。 ---- */
+
+  function makeCodexDialogPermission(
+    overrides: Record<string, any> = {},
+  ): any {
+    return {
+      event: "permission_request",
+      session_id: "sess-1",
+      run_id: "run-1",
+      request_id: "codex-req-1",
+      tool_name: "codex_request_user_input",
+      input: {},
+      tool_use_id: "tu-1",
+      dialog_kind: "codex_request_user_input",
+      dialog_payload: {
+        questions: [
+          {
+            question: "Codex 想知道下一步操作",
+            header: "下一步",
+            multiSelect: false,
+            options: [
+              { label: "继续执行" },
+              { label: "中止并回滚" },
+            ],
+          },
+        ],
+      },
+      ...overrides,
+    };
+  }
+
+  it("task-09 codex dialog permission_request → 渲染 AskUserDialogCard（可见问题/选项）", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+
+    setupPanel();
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hi" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+
+    const conn = stream.conn;
+    act(() => {
+      conn.handlers.onPermissionRequest(makeCodexDialogPermission());
+    });
+    await waitFor(() =>
+      expect(screen.getByText("Codex 想知道下一步操作")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("继续执行")).toBeInTheDocument();
+    expect(screen.getByText("codex_request_user_input")).toBeInTheDocument();
+  });
+
+  it("task-09 codex dialog 用户提交 → permission_resolved 移除卡片", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+    // AskUserDialogCard 内部调真实 respondSessionPermission → 走 apiFetch → fetch
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify({ accepted: true }), { status: 200 }),
+      );
+
+    setupPanel();
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hi" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+
+    const conn = stream.conn;
+    act(() => {
+      conn.handlers.onPermissionRequest(makeCodexDialogPermission());
+    });
+    await waitFor(() =>
+      expect(screen.getByText("Codex 想知道下一步操作")).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByText("继续执行"));
+    fireEvent.click(screen.getByRole("button", { name: /提交回答/ }));
+    // 用户提交后 handleDialogResolved 立即移除卡片（双保险）
+    await waitFor(() =>
+      expect(screen.queryByText("Codex 想知道下一步操作")).not.toBeInTheDocument(),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // permission_resolved SSE 到达后再次过滤（无副作用，已移除）
+    act(() => {
+      conn.handlers.onPermissionResolved({
+        event: "permission_resolved",
+        session_id: "sess-1",
+        request_id: "codex-req-1",
+        decision: "allow",
+      });
+    });
+    expect(screen.queryByText("Codex 想知道下一步操作")).not.toBeInTheDocument();
+  });
+
+  it("task-09 session ended SSE → 清空 Codex 待答卡", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+
+    setupPanel();
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hi" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+
+    const conn = stream.conn;
+    act(() => {
+      conn.handlers.onPermissionRequest(makeCodexDialogPermission());
+    });
+    await waitFor(() =>
+      expect(screen.getByText("Codex 想知道下一步操作")).toBeInTheDocument(),
+    );
+
+    // session_ended 到达 → onSessionEnded 清空 pendingRequests
+    act(() => {
+      conn.handlers.route(
+        makeEnvelope("session_ended", { run_id: null, status: "ended" }),
+      );
+    });
+    await waitFor(() =>
+      expect(screen.queryByText("Codex 想知道下一步操作")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("task-09 重复 request_id 的 codex dialog 只渲染一张卡", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+
+    setupPanel();
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hi" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+
+    const conn = stream.conn;
+    act(() => {
+      conn.handlers.onPermissionRequest(makeCodexDialogPermission());
+      // SSE 重连/重放同一 request_id
+      conn.handlers.onPermissionRequest(makeCodexDialogPermission());
+    });
+    // 问题文本只出现一次（去重生效）
+    expect(screen.getAllByText("Codex 想知道下一步操作")).toHaveLength(1);
+    expect(screen.getAllByText("继续执行")).toHaveLength(1);
+  });
+
+  it("task-09 mcp_elicitation dialog_kind 同样收卡渲染", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+
+    setupPanel();
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hi" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+
+    const conn = stream.conn;
+    act(() => {
+      conn.handlers.onPermissionRequest(
+        makeCodexDialogPermission({
+          request_id: "mcp-req-1",
+          tool_name: "mcp_server_x",
+          dialog_kind: "mcp_elicitation",
+          dialog_payload: {
+            questions: [
+              {
+                question: "MCP 服务器请求确认",
+                options: [{ label: "同意" }, { label: "拒绝" }],
+              },
+            ],
+          },
+        }),
+      );
+    });
+    await waitFor(() =>
+      expect(screen.getByText("MCP 服务器请求确认")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("mcp_elicitation")).toBeInTheDocument();
   });
 });

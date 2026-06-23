@@ -355,4 +355,193 @@ describe("AskUserDialogCard", () => {
     // request_id 前 12 字符 + "…"
     expect(screen.getByText(/req-1…/)).toBeInTheDocument();
   });
+
+  /* ---- task-09（FR-09 / D-010@v1）：Codex dialog payload 复用同一卡片 ----
+   * daemon（task-05）已把 Codex requestUserInput / 可归一化 MCP elicitation
+   * 转成与 Claude AskUserQuestion 同构的 {questions,options}，前端不识别
+   * Codex schema，零分支复用 AskUserDialogCard。响应回写仍是与 Claude 同构的
+   * {answers:[{question,header?,answer}]}，Codex {answers:{[id]:{answers:string[]}}}
+   * 的 schema 还原是 daemon 职责（task-05），前端不感知。 */
+
+  it("task-09 codex_request_user_input：渲染归一化后的问题/选项/header + badge", () => {
+    const codexPayload = {
+      questions: [
+        {
+          question: "使用哪个测试框架？",
+          header: "测试框架",
+          multiSelect: false,
+          options: [
+            { label: "pytest", description: "Python 主流" },
+            { label: "unittest" },
+          ],
+        },
+      ],
+    };
+    render(
+      <AskUserDialogCard
+        request={makeDialogRequest(codexPayload, {
+          dialog_kind: "codex_request_user_input",
+          tool_name: "codex_request_user_input",
+        })}
+      />,
+    );
+    // badge 直接显示后端传入的 kind 字符串（专业标识，不翻译）
+    expect(screen.getByText("codex_request_user_input")).toBeInTheDocument();
+    expect(screen.getByText("使用哪个测试框架？")).toBeInTheDocument();
+    expect(screen.getByText("测试框架")).toBeInTheDocument();
+    expect(screen.getByText("pytest")).toBeInTheDocument();
+    expect(screen.getByText("unittest")).toBeInTheDocument();
+  });
+
+  it("task-09 codex_request_user_input：单选作答 → 回写与 Claude 同构的 answers", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify({ accepted: true }), { status: 200 }),
+      );
+
+    const codexPayload = {
+      questions: [
+        {
+          question: "使用哪个测试框架？",
+          header: "测试框架",
+          options: [{ label: "pytest" }, { label: "unittest" }],
+        },
+      ],
+    };
+    render(
+      <AskUserDialogCard
+        request={makeDialogRequest(codexPayload, {
+          request_id: "codex-req-1",
+          dialog_kind: "codex_request_user_input",
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("pytest"));
+    fireEvent.click(screen.getByRole("button", { name: /提交回答/ }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]![1] as RequestInit).body as string,
+    );
+    // 回写结构：allow + 与 Claude 同构的 dialog_result.answers
+    expect(body.decision).toBe("allow");
+    expect(body.dialog_result).toEqual({
+      answers: [
+        {
+          question: "使用哪个测试框架？",
+          header: "测试框架",
+          answer: "pytest",
+        },
+      ],
+    });
+  });
+
+  it("task-09 mcp_elicitation：多 question + multiSelect 作答 → answers 数组", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify({ accepted: true }), { status: 200 }),
+      );
+
+    const mcpPayload = {
+      questions: [
+        {
+          question: "选择启用的能力",
+          multiSelect: true,
+          options: [{ label: "能力A" }, { label: "能力B" }, { label: "能力C" }],
+        },
+        {
+          question: "输出格式",
+          multiSelect: false,
+          options: [{ label: "JSON" }, { label: "YAML" }],
+        },
+      ],
+    };
+    render(
+      <AskUserDialogCard
+        request={makeDialogRequest(mcpPayload, {
+          request_id: "mcp-req-1",
+          dialog_kind: "mcp_elicitation",
+          tool_name: "mcp_server_x",
+        })}
+      />,
+    );
+
+    // 第一问多选两条
+    fireEvent.click(screen.getByText("能力A"));
+    fireEvent.click(screen.getByText("能力B"));
+    // 多 question：第二问未答前提交应禁用
+    expect(screen.getByRole("button", { name: /提交回答/ })).toBeDisabled();
+    // 第二问单选
+    fireEvent.click(screen.getByText("JSON"));
+    fireEvent.click(screen.getByRole("button", { name: /提交回答/ }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]![1] as RequestInit).body as string,
+    );
+    expect(body.dialog_result.answers).toEqual([
+      { question: "选择启用的能力", answer: ["能力A", "能力B"] },
+      { question: "输出格式", answer: "JSON" },
+    ]);
+  });
+
+  it("task-09 codex payload 缺 questions → 走兜底分支不崩溃", () => {
+    render(
+      <AskUserDialogCard
+        request={makeDialogRequest(
+          { someUnrecognizedField: true },
+          { dialog_kind: "codex_request_user_input" },
+        )}
+      />,
+    );
+    expect(screen.getByText(/无法解析提问内容/)).toBeInTheDocument();
+    // 兜底分支同样显示 kind badge
+    expect(screen.getByText("codex_request_user_input")).toBeInTheDocument();
+  });
+
+  it("task-09 codex 某 question options 为空 → 被跳过；全空走兜底", () => {
+    // 全部 question 的 options 为空 → questions.length===0 → 兜底
+    render(
+      <AskUserDialogCard
+        request={makeDialogRequest(
+          {
+            questions: [
+              { question: "无选项问题", options: [] },
+              { question: "另一个无选项", options: [] },
+            ],
+          },
+          { dialog_kind: "codex_request_user_input" },
+        )}
+      />,
+    );
+    expect(screen.getByText(/无法解析提问内容/)).toBeInTheDocument();
+    // 不渲染半残的 question 文本
+    expect(screen.queryByText("无选项问题")).not.toBeInTheDocument();
+  });
+
+  it("task-09 codex 多 question 全部作答后提交按钮才启用", () => {
+    const multiQ = {
+      questions: [
+        { question: "问题一", options: [{ label: "A1" }, { label: "A2" }] },
+        { question: "问题二", options: [{ label: "B1" }, { label: "B2" }] },
+      ],
+    };
+    render(
+      <AskUserDialogCard
+        request={makeDialogRequest(multiQ, {
+          dialog_kind: "codex_request_user_input",
+        })}
+      />,
+    );
+    const submit = screen.getByRole("button", { name: /提交回答/ });
+    expect(submit).toBeDisabled();
+    fireEvent.click(screen.getByText("A1"));
+    // 只答了一问，仍禁用
+    expect(submit).toBeDisabled();
+    fireEvent.click(screen.getByText("B2"));
+    expect(submit).not.toBeDisabled();
+  });
 });

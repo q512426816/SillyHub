@@ -1,18 +1,28 @@
 "use client";
 
 /**
- * AskUserDialogCard：Claude Code AskUserQuestion 对话卡片。
+ * AskUserDialogCard：结构化问答对话卡片（provider 无关）。
  *
  * 当 permission_request 携带 dialog_kind 时，本组件替代 PermissionApprovalCard
  * 渲染结构化问答（问题文本 + 选项列表 + 可选自定义文本输入）。提交后调
  * respondSessionPermission(sessionId, requestId, 'allow', undefined, {answers})。
  *
  * 与 PermissionApprovalCard 的差异：
- *   - 无 5min 倒计时（AskUserQuestion 对话可长期等待用户回答，backend 不超时）；
+ *   - 无 5min 倒计时（对话可长期等待用户回答，backend 不超时）；
  *   - 无 allow/deny 二选一，只有"提交回答"（语义上即 allow + dialog_result.answers）；
  *   - 提交后进入 disabled 状态，等待 permission_resolved SSE 由父组件移除本卡。
  *
- * 父组件（agent-log-viewer）按 req.dialog_kind 是否存在决定渲染本卡还是普通审批卡。
+ * 父组件（interactive-session-panel）按 req.dialog_kind 是否存在决定渲染本卡还是
+ * 普通审批卡。
+ *
+ * task-09（FR-09 / D-010@v1）：本组件 provider 无关，零分支复用。
+ *   - Claude Code canUseTool AskUserQuestion → dialog_kind="ask_user"
+ *   - Codex app-server item/tool/requestUserInput → dialog_kind="codex_request_user_input"
+ *   - Codex app-server mcpServer/elicitation/request（可归一化） → dialog_kind="mcp_elicitation"
+ * daemon（task-05）负责把 Codex 原生 payload 归一化成下方 DialogPayload 结构；
+ * parseQuestions 只依赖通用 questions/options 字段，不识别 provider 原生 schema。
+ * badge 直接显示后端传入的 kind 字符串（专业标识，不翻译）。复杂 MCP elicitation
+ * 由 daemon fail-closed，前端不会收到不可渲染的卡片；若收到缺字段 payload，走兜底分支。
  */
 
 import { useMemo, useState } from "react";

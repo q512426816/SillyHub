@@ -111,7 +111,6 @@ export function RuntimeSessionDialog({
 function RuntimeSessionDialogBody({
   runtime,
   open,
-  onClose,
   runtimes,
   initialSessionId,
 }: RuntimeSessionDialogProps) {
@@ -125,14 +124,15 @@ function RuntimeSessionDialogBody({
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   // attach 续聊面板（D-002 默认 attach / active attach 续聊 / reopen 续聊）
   const [attachSession, setAttachSession] = useState<AgentSessionRead | null>(null);
+  const runtimeId = runtime?.id;
 
   // D-002：默认 attach 只在「该 runtime 首次加载完成」触发一次，防 sessions 重载重复触发
   const defaultAttachedRef = useRef<string | null>(null);
 
   // 仅显示当前 runtime 的历史会话（ql-012 聚焦过滤）
   const visibleSessions = useMemo(
-    () => (runtime ? sessions.filter((s) => s.runtime_id === runtime.id) : sessions),
-    [sessions, runtime?.id],
+    () => (runtimeId ? sessions.filter((s) => s.runtime_id === runtimeId) : sessions),
+    [sessions, runtimeId],
   );
 
   const reloadSessions = useCallback(async () => {
@@ -149,11 +149,11 @@ function RuntimeSessionDialogBody({
     }
   }, []);
 
-  // open 且 runtime 有效时加载会话列表
+  // open 且 runtime 有效时加载会话列表（task-08：codex runtime 也加载历史，撤销 quick-chat 分流）
   useEffect(() => {
-    if (!open || !runtime) return;
+    if (!open || !runtimeId) return;
     void reloadSessions();
-  }, [open, runtime?.id, reloadSessions]);
+  }, [open, runtimeId, reloadSessions]);
 
   // D-001 单例切换兜底：runtime 变化时重置全部状态（外层 key 重 mount 已清，此为防御）
   useEffect(() => {
@@ -164,17 +164,16 @@ function RuntimeSessionDialogBody({
     setAttachSession(null);
     setListError(null);
     setLogsError(null);
-  }, [runtime?.id]);
+  }, [runtimeId]);
 
   // D-002 默认态：sessions 加载完成后，若有活跃会话 → attach 最近活跃；无 → idle。
   // task-04 / D-003：若外层传入 initialSessionId 且其属于本 runtime 的活跃会话 → 优先
   // attach 它（URL ?session= 恢复点）；否则回退「最近活跃」。仅在该 runtime 首次加载
   // 完成时触发一次（defaultAttachedRef 按 runtime.id 去重）。
   useEffect(() => {
-    if (!open || loading || !runtime) return;
-    const rid = runtime.id;
-    if (defaultAttachedRef.current === rid) return;
-    defaultAttachedRef.current = rid;
+    if (!open || loading || !runtimeId) return;
+    if (defaultAttachedRef.current === runtimeId) return;
+    defaultAttachedRef.current = runtimeId;
     // 优先：URL 恢复点 initialSessionId（需活跃 + 属于本 runtime）
     const restored =
       initialSessionId
@@ -202,7 +201,7 @@ function RuntimeSessionDialogBody({
       })();
     }
     // 无活跃 → 不 setAttachSession，右侧自然进入 idle 三态分支（新建空白面板）
-  }, [open, loading, runtime, visibleSessions, initialSessionId]);
+  }, [open, loading, runtimeId, visibleSessions, initialSessionId]);
 
   const handleSelect = useCallback(async (session: AgentSessionRead) => {
     // FR-02 / D-004：active 会话点开走 attach 续聊（拉 logs → 预填 → setAttachSession）
@@ -263,7 +262,7 @@ function RuntimeSessionDialogBody({
     }
   }, [selected?.id, attachSession?.id]);
 
-  // 续聊（reopen ended/failed，多为 claude；codex 只读由 SessionHistoryView 内部处理）
+  // 续聊（reopen ended/failed claude/codex；canResumeSession 守 provider+threadId，D-007）
   // 不写 URL（task-04 职责）
   const handleContinue = useCallback(async (session: AgentSessionRead) => {
     setListError(null);

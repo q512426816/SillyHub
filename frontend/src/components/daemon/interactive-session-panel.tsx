@@ -239,6 +239,11 @@ export function InteractiveSessionPanel({
         // ql-20260621：同 SSE channel 的 permission 事件分发（见 daemon.ts
         // streamSession 的 default 分支）。AskUserQuestion 卡片渲染 + 用户提交
         // 后由 backend 回 permission_resolved，或 5min 超时 backend 自收口。
+        //
+        // task-09（FR-09 / D-006@v1 / D-010@v1）：收卡只按 dialog_kind 存在性
+        //（if (!req.dialog_kind) return），不区分具体 kind 值，天然支持
+        // Claude ask_user / Codex codex_request_user_input / mcp_elicitation。
+        // 三者 payload 经 daemon 归一化后同构，AskUserDialogCard 零分支复用。
         onPermissionRequest: (req) => {
           // 按 request_id 去重；只保留 dialog_kind（AskUserDialogCard）类型的卡，
           // 普通工具审批（无 dialog_kind）交给 /runtimes 审批面板。

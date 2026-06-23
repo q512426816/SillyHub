@@ -42,6 +42,11 @@ const daemon = vi.hoisted(() => ({
   getAgentSession: vi.fn(),
   reopenSession: vi.fn(),
   streamSession: vi.fn(),
+  createSession: vi.fn(),
+  injectSession: vi.fn(),
+  quickChat: vi.fn(),
+  streamQuickChat: vi.fn(),
+  getQuickChatResult: vi.fn(),
 }));
 
 vi.mock("@/lib/daemon", async () => {
@@ -54,6 +59,11 @@ vi.mock("@/lib/daemon", async () => {
     getAgentSession: daemon.getAgentSession,
     reopenSession: daemon.reopenSession,
     streamSession: daemon.streamSession,
+    createSession: daemon.createSession,
+    injectSession: daemon.injectSession,
+    quickChat: daemon.quickChat,
+    streamQuickChat: daemon.streamQuickChat,
+    getQuickChatResult: daemon.getQuickChatResult,
   };
 });
 
@@ -61,12 +71,12 @@ vi.mock("@/lib/daemon", async () => {
 class FakeES {
   static instances: FakeES[] = [];
   url: string;
-  listeners: Record<string, ((e: { data: string }) => void)[]> = {};
+  listeners: Record<string, ((_e: { data: string }) => void)[]> = {};
   constructor(url: string) {
     this.url = url;
     FakeES.instances.push(this);
   }
-  addEventListener(kind: string, cb: (e: { data: string }) => void) {
+  addEventListener(kind: string, cb: (_e: { data: string }) => void) {
     (this.listeners[kind] ??= []).push(cb);
   }
   removeEventListener() {}
@@ -125,6 +135,35 @@ beforeEach(() => {
     close: () => {},
     getLastEventId: () => null,
   }));
+  // task-08：interactive 首发默认 mock（codex/claude 用例按需覆盖）
+  daemon.createSession.mockResolvedValue({
+    session_id: "sess-stub",
+    run_id: "run-stub",
+    lease_id: "lease-stub",
+    status: "active",
+    stream_url: "/api/daemon/sessions/sess-stub/stream",
+  });
+  daemon.quickChat.mockResolvedValue({
+    id: "run-codex",
+    agent_type: "claude_code",
+    provider: "codex",
+    model: null,
+    status: "pending",
+  });
+  daemon.streamQuickChat.mockImplementation((_runId, _onMessage, onDone) => {
+    queueMicrotask(() => onDone({ status: "completed" }));
+    return { close: vi.fn() };
+  });
+  daemon.getQuickChatResult.mockResolvedValue({
+    id: "run-codex",
+    status: "completed",
+    output_redacted: "codex 输出",
+    agent_type: "claude_code",
+    provider: "codex",
+    model: null,
+    started_at: null,
+    finished_at: null,
+  });
 });
 
 afterEach(() => {
@@ -416,14 +455,21 @@ describe("RuntimeSessionDialog", () => {
     );
   });
 
-  /* ---------- 用例 5：codex ended 只读置灰（SC-4 / FR-04） ---------- */
+  /* ---------- 用例 5：codex ended（有 threadId）可继续对话 reopen（FR-06 / D-007 / D-005） ---------- */
 
-  it("codex ended session → read-only + disabled 继续对话 with codex title (SC-4 / FR-04)", async () => {
+  it("codex ended session (with agent_session_id) → 继续对话可点 → reopen→attach (FR-06 / D-007)", async () => {
+    const codexRuntime = {
+      ...baseRuntime,
+      id: "rt-codex",
+      name: "MyCodex",
+      provider: "codex",
+      capabilities: { protocol: "json-rpc", agents: ["codex"] },
+    };
     daemon.listAgentSessions.mockResolvedValue({
       items: [
         makeSession({
           id: "send-codex", // ≤12 char
-          runtime_id: "rt-1",
+          runtime_id: "rt-codex",
           provider: "codex",
           status: "ended",
           agent_session_id: "ag-codex",
@@ -443,13 +489,17 @@ describe("RuntimeSessionDialog", () => {
         content_redacted: "codex 历史输出",
       },
     ]);
+    daemon.reopenSession.mockResolvedValue({
+      session_id: "send-codex",
+      status: "reconnecting",
+    });
 
     render(
       <RuntimeSessionDialog
-        runtime={baseRuntime}
+        runtime={codexRuntime}
         open={true}
         onClose={vi.fn()}
-        runtimes={[baseRuntime]}
+        runtimes={[codexRuntime]}
       />,
     );
 
@@ -461,14 +511,128 @@ describe("RuntimeSessionDialog", () => {
     );
     expect(screen.queryByTitle(/发送/)).not.toBeInTheDocument();
 
-    // 「继续对话」按钮存在但置灰 + title 含 codex 提示
+    // 「继续对话」按钮存在且可点（codex 放开 reopen，D-007 要求有 threadId）
+    const btn = await screen.findByRole("button", { name: /继续对话/ });
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
+
+    // 点击 → reopen → 切 attach（建 SSE）
+    fireEvent.click(btn);
+
+    await waitFor(() =>
+      expect(daemon.reopenSession).toHaveBeenCalledWith("send-codex"),
+    );
+    await waitFor(() =>
+      expect(daemon.streamSession).toHaveBeenCalledWith(
+        "send-codex",
+        expect.anything(),
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/交互式会话/)).toBeInTheDocument(),
+    );
+  });
+
+  /* ---------- 用例 5b：codex ended 无 threadId 续聊置灰（FR-06 / D-007） ---------- */
+
+  it("codex ended session without agent_session_id → 继续对话置灰 title=会话未建立 (FR-06 / D-007)", async () => {
+    const codexRuntime = {
+      ...baseRuntime,
+      id: "rt-codex",
+      name: "MyCodex",
+      provider: "codex",
+      capabilities: { protocol: "json-rpc", agents: ["codex"] },
+    };
+    daemon.listAgentSessions.mockResolvedValue({
+      items: [
+        makeSession({
+          id: "send-cxno",
+          runtime_id: "rt-codex",
+          provider: "codex",
+          status: "failed",
+          agent_session_id: null, // 无 threadId
+          ended_at: "2026-06-18T09:00:00Z",
+        }),
+      ],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    });
+    daemon.getAgentSessionLogs.mockResolvedValue([]);
+
+    render(
+      <RuntimeSessionDialog
+        runtime={codexRuntime}
+        open={true}
+        onClose={vi.fn()}
+        runtimes={[codexRuntime]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByText("send-cxno"));
+
+    // 「继续对话」置灰 + title 含「会话未建立」
     const btn = await screen.findByRole("button", { name: /继续对话/ });
     expect((btn as HTMLButtonElement).disabled).toBe(true);
-    expect(btn.getAttribute("title")).toMatch(/codex 暂不支持续聊/);
+    expect(btn.getAttribute("title")).toMatch(/会话未建立/);
 
-    // 点击置灰按钮不触发 reopen
     fireEvent.click(btn);
     expect(daemon.reopenSession).not.toHaveBeenCalled();
+  });
+
+  /* ---------- 用例 6：codex runtime 走 interactive（FR-01 / FR-07 / D-005） ---------- */
+
+  it("codex runtime → 交互式会话面板，首发 createSession({provider:'codex'}) 不调 quick-chat (FR-01 / FR-07 / D-005)", async () => {
+    const codexRuntime = {
+      ...baseRuntime,
+      id: "rt-codex",
+      name: "MyCodex",
+      provider: "codex",
+      capabilities: { protocol: "json-rpc", agents: ["codex"] },
+    };
+    daemon.createSession.mockResolvedValue({
+      session_id: "sess-codex",
+      run_id: "run-codex-1",
+      lease_id: "lease-codex",
+      status: "active",
+      stream_url: "/api/daemon/sessions/sess-codex/stream",
+    });
+
+    render(
+      <RuntimeSessionDialog
+        runtime={codexRuntime}
+        open={true}
+        onClose={vi.fn()}
+        runtimes={[codexRuntime]}
+      />,
+    );
+
+    // 历史列表恢复加载（撤销分流后 codex runtime 也调 listAgentSessions）
+    await waitFor(() => expect(daemon.listAgentSessions).toHaveBeenCalled());
+    // 渲染交互式会话 header（不是 Codex 快速对话）
+    await waitFor(() => expect(screen.getByText(/交互式会话/)).toBeInTheDocument());
+    expect(screen.queryByText(/Codex 快速对话/)).not.toBeInTheDocument();
+
+    // 首发消息 → createSession({provider:'codex'})
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "你好 codex" } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() =>
+      expect(daemon.createSession).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: "codex", prompt: "你好 codex" }),
+      ),
+    );
+    // 建 interactive SSE（不是 quick-chat）
+    await waitFor(() =>
+      expect(daemon.streamSession).toHaveBeenCalledWith(
+        "sess-codex",
+        expect.anything(),
+      ),
+    );
+    // 全程不调 quick-chat API
+    expect(daemon.quickChat).not.toHaveBeenCalled();
+    expect(daemon.streamQuickChat).not.toHaveBeenCalled();
+    expect(daemon.getQuickChatResult).not.toHaveBeenCalled();
   });
 
   /* ---------- 用例 6：关闭清理无泄漏（SC-5 / FR-05 / R-02） ---------- */

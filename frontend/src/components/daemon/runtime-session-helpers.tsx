@@ -1,19 +1,24 @@
 // runtime-session-helpers.tsx: 从 page.tsx 提取的会话列表/历史回看/attach 续聊 helper（task-01）
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { MessageSquarePlus, RefreshCw, Trash2 } from "lucide-react";
+import { MessageSquarePlus, Plus, RefreshCw, Send, Trash2 } from "lucide-react";
 
+import { AgentModelInput } from "@/components/AgentModelInput";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { InteractiveSessionPanel, type SessionTurnView } from "@/components/daemon/interactive-session-panel";
 import { type AgentRunLogEntry } from "@/lib/agent";
 import {
   PROVIDER_META,
+  getQuickChatResult,
+  quickChat,
+  streamQuickChat,
   type AgentSessionRead,
   type AgentSessionStatus,
   type DaemonRuntimeRead,
+  type QuickChatStreamMessage,
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
 
@@ -48,9 +53,9 @@ export function InteractiveSessionChatSection({
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // D-002@v3 非目标：交互式会话仅支持 claude（codex 后续），不支持 cursor/openclaw 等。
-  // 过滤 online runtime 的 provider，只保留 claude/codex，避免 createSession 触发
-  // backend SessionCreateRequest.provider Literal["claude","codex"] 422。
+  // task-08 / D-005@v1：Codex 与 Claude 均走 interactive SessionManager（撤销 quick-chat 分流）。
+  // daemon SessionManager（task-06）与 backend reopen（task-07）已放开 codex，二者都是
+  // 在线 interactive provider。
   const onlineProviders = useMemo(() => {
     const SUPPORTED_SESSION_PROVIDERS = ["claude", "codex"];
     const list = runtimes
@@ -119,6 +124,324 @@ export function InteractiveSessionChatSection({
   );
 }
 
+type QuickChatTurnStatus = "running" | "completed" | "failed";
+
+interface QuickChatTurnView {
+  id: string;
+  runId: string | null;
+  prompt: string;
+  output: string;
+  status: QuickChatTurnStatus;
+}
+
+function quickTurnId(): string {
+  return `quick-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function quickChatMessageText(msg: QuickChatStreamMessage): string {
+  return msg.messages
+    .map((item) => {
+      const content = typeof item.content === "string" ? item.content : "";
+      if (content) return content;
+      if (item.event_type === "tool_use" && item.tool_name) {
+        return `[TOOL_USE] ${item.tool_name}`;
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function appendQuickChatOutput(current: string, chunk: string): string {
+  if (!chunk) return current;
+  if (!current) return chunk;
+  const trimmed = chunk.trimStart();
+  const inline = trimmed.length > 0 && !trimmed.startsWith("[") && chunk.length < 120;
+  if (inline) return current + chunk;
+  return `${current}${current.endsWith("\n") ? "" : "\n"}${chunk}`;
+}
+
+function quickStatusLabel(status: QuickChatTurnStatus): string {
+  switch (status) {
+    case "running":
+      return "运行中";
+    case "completed":
+      return "已完成";
+    case "failed":
+      return "失败";
+  }
+}
+
+/**
+ * Codex 当前不支持 daemon interactive SessionManager；使用 quick-chat batch
+ * JSON-RPC 路径，并用 prev_run_id 续接上一轮 Codex session_id。
+ */
+export function QuickChatSessionSection({
+  provider,
+}: {
+  provider: "codex";
+}) {
+  const [model, setModel] = useState<string | null>(null);
+  const [input, setInput] = useState("");
+  const [turns, setTurns] = useState<QuickChatTurnView[]>([]);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastCompletedRunId, setLastCompletedRunId] = useState<string | null>(null);
+  const streamRef = useRef<EventSource | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    return () => {
+      streamRef.current?.close();
+      streamRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el && typeof el.scrollTo === "function") {
+      el.scrollTo(0, el.scrollHeight);
+    }
+  }, [turns]);
+
+  const reset = useCallback(() => {
+    streamRef.current?.close();
+    streamRef.current = null;
+    setTurns([]);
+    setInput("");
+    setError(null);
+    setRunning(false);
+    setLastCompletedRunId(null);
+  }, []);
+
+  const handleSend = useCallback(async () => {
+    const prompt = input.trim();
+    if (!prompt || running) return;
+
+    const turnId = quickTurnId();
+    setInput("");
+    setRunning(true);
+    setError(null);
+    setTurns((prev) => [
+      ...prev,
+      { id: turnId, runId: null, prompt, output: "", status: "running" },
+    ]);
+
+    try {
+      const resp = await quickChat(
+        prompt,
+        provider,
+        lastCompletedRunId ?? undefined,
+        model,
+      );
+      const runId = resp.id;
+      setTurns((prev) =>
+        prev.map((turn) =>
+          turn.id === turnId ? { ...turn, runId, status: "running" } : turn,
+        ),
+      );
+
+      let finished = false;
+      // task-09 附带 typecheck 修复：浏览器 window.setTimeout 返回 number，
+      // 显式标注避免 @types/node 的 setTimeout 重载（返回 Timeout）干扰 tsc。
+      let fallbackTimer: number | null = null;
+      const finish = async (fallbackStatus?: string) => {
+        if (finished) return;
+        finished = true;
+        if (fallbackTimer) window.clearTimeout(fallbackTimer);
+        streamRef.current?.close();
+        streamRef.current = null;
+        try {
+          const result = await getQuickChatResult(runId);
+          const finalStatus = result.status === "completed" ? "completed" : "failed";
+          setError(null);
+          setTurns((prev) =>
+            prev.map((turn) => {
+              if (turn.id !== turnId) return turn;
+              const finalOutput = result.output_redacted ?? "";
+              return {
+                ...turn,
+                output: turn.output || finalOutput,
+                status: finalStatus,
+              };
+            }),
+          );
+          if (finalStatus === "completed") {
+            setLastCompletedRunId(runId);
+          }
+        } catch {
+          const finalStatus = fallbackStatus === "completed" ? "completed" : "failed";
+          setTurns((prev) =>
+            prev.map((turn) =>
+              turn.id === turnId ? { ...turn, status: finalStatus } : turn,
+            ),
+          );
+          if (finalStatus === "completed") {
+            setLastCompletedRunId(runId);
+          }
+        } finally {
+          setRunning(false);
+        }
+      };
+
+      fallbackTimer = window.setTimeout(() => {
+        void finish();
+      }, 60_000);
+
+      streamRef.current = streamQuickChat(
+        runId,
+        (msg) => {
+          const chunk = quickChatMessageText(msg);
+          if (!chunk) return;
+          setTurns((prev) =>
+            prev.map((turn) =>
+              turn.id === turnId
+                ? { ...turn, output: appendQuickChatOutput(turn.output, chunk) }
+                : turn,
+            ),
+          );
+        },
+        (done) => {
+          void finish(done.status);
+        },
+        () => {
+          setError("实时连接异常，正在等待运行结果回收");
+        },
+      );
+    } catch (err) {
+      setTurns((prev) =>
+        prev.map((turn) =>
+          turn.id === turnId ? { ...turn, status: "failed" } : turn,
+        ),
+      );
+      setError(err instanceof Error ? err.message : "创建 Codex 对话失败");
+      setRunning(false);
+    }
+  }, [input, lastCompletedRunId, model, provider, running]);
+
+  const providerLabel = PROVIDER_META[provider]?.label ?? provider;
+
+  return (
+    <section className="flex h-full min-h-[520px] flex-col overflow-hidden rounded-md border bg-card">
+      <header className="border-b px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold">{providerLabel} 快速对话</h2>
+            <p className="text-[11px] text-muted-foreground">
+              使用 quick-chat 运行路径，上一轮完成后会自动接续上下文
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={reset}
+              disabled={running}
+              className="h-7 gap-1 px-2 text-[11px]"
+              title="新建会话"
+            >
+              <Plus className="h-3 w-3" />
+              新建会话
+            </Button>
+            <Badge variant="outline">quick-chat</Badge>
+          </div>
+        </div>
+        <div className="mt-3 max-w-md space-y-1">
+          <label className="text-[11px] font-medium text-muted-foreground">智能体模型</label>
+          <AgentModelInput
+            value={model}
+            onChange={setModel}
+            placeholder="模型覆盖"
+            className="w-full"
+            disabled={running}
+          />
+        </div>
+      </header>
+
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto bg-muted/20 px-4 py-4">
+        {error && (
+          <div className="mb-3 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
+            {error}
+          </div>
+        )}
+        {turns.length === 0 ? (
+          <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
+            <p className="text-xs font-medium text-foreground">{providerLabel} 已就绪</p>
+            <p className="mt-1 max-w-[300px] text-[11px] text-muted-foreground">
+              首条消息会创建 quick-chat run；后续消息在上一轮完成后接续。
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {turns.map((turn) => (
+              <div key={turn.id} className="space-y-1.5">
+                <div className="flex justify-end">
+                  <div className="max-w-[86%] rounded-md bg-primary px-3 py-2 text-xs leading-relaxed text-primary-foreground shadow-sm">
+                    <div className="whitespace-pre-wrap break-words">{turn.prompt}</div>
+                  </div>
+                </div>
+                {turn.output && (
+                  <div className="flex justify-start">
+                    <div className="max-w-[86%] rounded-md border bg-card px-3 py-2 text-xs leading-relaxed text-foreground shadow-sm">
+                      <div className="whitespace-pre-wrap break-words">{turn.output}</div>
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <Badge
+                    variant={
+                      turn.status === "failed"
+                        ? "destructive"
+                        : turn.status === "completed"
+                          ? "success"
+                          : "outline"
+                    }
+                    className="text-[10px]"
+                  >
+                    {quickStatusLabel(turn.status)}
+                  </Badge>
+                  {turn.runId && <span className="font-mono">{shortId(turn.runId)}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <footer className="border-t bg-card px-3 py-3">
+        <div className="flex items-end gap-2">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void handleSend();
+              }
+            }}
+            placeholder={running ? "等待本轮完成..." : `向 ${providerLabel} 发送消息`}
+            className="min-h-10 flex-1 resize-none rounded border border-input bg-background px-3 py-2 text-sm leading-5 focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:bg-muted"
+            rows={2}
+            disabled={running}
+          />
+          <Button
+            onClick={handleSend}
+            disabled={running || !input.trim()}
+            className="h-10 w-10 shrink-0 p-0"
+            title="发送"
+          >
+            {running ? (
+              <RefreshCw className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+          </Button>
+        </div>
+      </footer>
+    </section>
+  );
+}
+
 // ── 会话列表 + 历史回看（task-12 / FR-10 / D-005@v1） ───────────────────────
 
 export const ACTIVE_SESSION_VIEW_STATUSES: ReadonlySet<AgentSessionStatus> = new Set([
@@ -150,8 +473,8 @@ export function SessionsSidebar({
   error: string | null;
   selectedSessionId: string | null;
   deletingSessionId: string | null;
-  onSelect: (session: AgentSessionRead) => void;
-  onDelete: (session: AgentSessionRead) => void;
+  onSelect: (_session: AgentSessionRead) => void;
+  onDelete: (_session: AgentSessionRead) => void;
   onRetry: () => void;
 }) {
   return (
@@ -227,15 +550,15 @@ export function SessionsSidebar({
 }
 
 /**
- * task-11 续聊可用性（D-004@v1）：
- * 仅 claude + 有 agent_session_id + 终态（ended/failed）可恢复。
- * codex 暂不支持；active 本就活跃（不显示按钮，走只读回看 ql-007）；
- * 无 agent_session_id（create 失败的 failed）无法恢复。
+ * task-11 / task-08 续聊可用性（D-004@v1 / D-007@v1）：
+ * claude 或 codex + 有 agent_session_id + 终态（ended/failed）可恢复。
+ * active 本就活跃（不显示按钮，走只读回看 ql-007）；
+ * 无 agent_session_id（create 失败的 failed）无法恢复（D-007：缺 threadId 不得伪造恢复）。
  */
 export function canResumeSession(session: AgentSessionRead | null): boolean {
   if (!session) return false;
   return (
-    session.provider === "claude" &&
+    (session.provider === "claude" || session.provider === "codex") &&
     !!session.agent_session_id &&
     (session.status === "ended" || session.status === "failed")
   );
@@ -243,7 +566,9 @@ export function canResumeSession(session: AgentSessionRead | null): boolean {
 
 /** 续聊按钮不可用时的 title 提示文案。 */
 export function resumeDisabledTitle(session: AgentSessionRead): string {
-  if (session.provider !== "claude") return "codex 暂不支持续聊";
+  if (session.provider !== "claude" && session.provider !== "codex") {
+    return "当前会话不支持续聊";
+  }
   if (!session.agent_session_id) return "会话未建立，无法续聊";
   return "当前会话不支持续聊";
 }
@@ -307,7 +632,7 @@ export function SessionHistoryView({
   loading: boolean;
   error: string | null;
   onClose: () => void;
-  onContinue?: (session: AgentSessionRead) => void;
+  onContinue?: (_session: AgentSessionRead) => void;
 }) {
   // 跨 run 分组（保持后端返回顺序：run 顺序内 timestamp 升序）
   const groups = useMemo(() => {
