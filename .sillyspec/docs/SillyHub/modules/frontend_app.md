@@ -5,7 +5,7 @@ created_at: 2026-06-01T12:00:00
 
 # frontend_app
 > 最后更新：2026-06-23
-> 最近变更：ql-20260623-022-b3c9（milestone-details 明细子表标题显示模块名称而非 UUID）
+> 最近变更：ql-20260623-023-c4d1（milestone-details 页头 subtitle 去计划/项目 UUID,改显项目名）
 > 模块路径：frontend/src/app/**
 
 ## 职责
@@ -145,3 +145,4 @@ layout.tsx (根布局)
 | 2026-06-23 | ql-20260623-020-d2a1 | /ppm/milestone-details 两处展开区容器(模块层 line 909 + 明细层 line 1290)移除 `border border-dashed`,统一改 `rounded bg-muted/20 p-3`(明细层原 bg-card/40 同步统一为 bg-muted/20),对齐 plan-nodes line 268 风格。消除 ql-018 加内层 bordered 后「虚线外框 + 实线表框」叠加形成的双框视觉切割感,内层 bordered 表格成为唯一可视边框 |
 | 2026-06-23 | ql-20260623-021-a7e3 | /ppm/milestone-details 主表 PpmSubTable tableProps.scroll 去掉 y(ql-017 为对齐 project-plans 所加),仅保留 x:"max-content"。根因:固定 scroll.y 让主表 .ant-table-body 成固定高度视窗,展开的明细子表嵌在内 → 表头被 sticky header 压住、末行超出视窗底部,首尾被"切割"(静态截图内容完整,动态查看被切,矛盾源于主表 body 视窗限制)。去 y 后主表随里程碑行数 + 展开子表自然撑高、整页滚动,明细子表表头不再被压、末行不再超视窗,首尾完整可见。不动 DataTable 的 overflow-hidden(经分析非裁切源) |
 | 2026-06-23 | ql-20260623-022-b3c9 | /ppm/milestone-details 实施阶段模块行展开的明细子表标题 `明细 · 模块 <UUID>` 改显示模块名称:DetailLevelProps 加 moduleName?:string|null;ModuleLevelTable.moduleExpandRender 透传 moduleName={m.module_name};标题 `模块 ${moduleId}` → `模块 ${moduleName || "(未命名模块)"}`(不回退 UUID,空兜底对齐 moduleColumns) |
+| 2026-06-23 | ql-20260623-023-c4d1 | /ppm/milestone-details 页头 PageHeader subtitle「计划 {planId} · 项目 {projectId}」两处 UUID 改显项目名:PsProjectPlan 无独立计划名(用 project_name 标识,types.ts:300);加 projectName state + getProjectPlan 后 setProjectName(plan.project_name);subtitle 去「计划/项目 UUID」改 `{projectName ? 项目 ${projectName} · : ""}实施阶段三级...`(空值无前导点)。projectId/planId state 保留(PpmUserSelect searchData/listPsPlanNodes 仍用) |

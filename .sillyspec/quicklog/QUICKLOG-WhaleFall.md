@@ -953,3 +953,9 @@ created_at: 2026-06-03T08:42:04
 文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
 背景:实施阶段模块行展开的明细子表标题 `明细 · 模块 <UUID>` 直接显示模块 UUID,用户要显示名称。
 结果:DetailLevelProps 加 moduleName?:string|null;DetailLevelTable 解构加 moduleName;ModuleLevelTable.moduleExpandRender 透传 moduleName={m.module_name};标题 `模块 ${moduleId}` → `模块 ${moduleName || "(未命名模块)"}`(不回退 UUID,空兜底对齐 moduleColumns 的 v ?? "(未命名模块)")。typecheck 通过 + milestone-details 18/18 测试全过。Docker frontend 待重建部署。
+
+## ql-20260623-023-c4d1 | 2026-06-23 17:05:00 | milestone-details 页头 subtitle 去掉计划/项目 UUID 改显项目名
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
+背景:PageHeader subtitle 显示「计划 {planId} · 项目 {projectId}」两处 UUID。PsProjectPlan 无独立计划名(用 project_name 标识)且已含 project_name 字段(types.ts:300)。与用户确认:去掉「计划」部分,只显示项目名。
+结果:加 projectName state;getProjectPlan 后 setProjectName(plan.project_name);subtitle 去「计划 {planId}」「项目 {projectId}」,改 {projectName ? `项目 ${projectName} · ` : ""}实施阶段三级...(projectName 空时无前导点)。projectId/planId state 保留(PpmUserSelect searchData / listPsPlanNodes 仍用)。typecheck 通过 + 18/18 测试全过。Docker frontend 待重建部署。

@@ -161,6 +161,7 @@ export default function MilestoneDetailsPage() {
 
   const [psNodes, setPsNodes] = useState<PsPlanNode[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState<string | null>(null);
   const [projectManagerId, setProjectManagerId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -193,6 +194,7 @@ export default function MilestoneDetailsPage() {
       try {
         const plan = await getProjectPlan(planId);
         setProjectId(plan.project_id ?? null);
+        setProjectName(plan.project_name ?? null);
         setProjectManagerId(plan.project_manager_id ?? null);
         const list = await listPsPlanNodes(planId);
         setPsNodes(list);
@@ -542,8 +544,8 @@ export default function MilestoneDetailsPage() {
         title="里程碑明细"
         subtitle={
           <>
-            计划 {planId}
-            {projectId ? ` · 项目 ${projectId}` : ""} · 实施阶段三级(里程碑→模块→明细),其他阶段二级
+            {projectName ? `项目 ${projectName} · ` : ""}
+            实施阶段三级(里程碑→模块→明细),其他阶段二级
             {readOnly && " · 只读模式(非项目经理)"}
           </>
         }
