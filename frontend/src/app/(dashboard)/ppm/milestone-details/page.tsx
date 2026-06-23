@@ -647,7 +647,10 @@ export default function MilestoneDetailsPage() {
             loading,
             pagination: false,
             bordered: true,
-            scroll: { x: "max-content", y: "calc(100vh - 430px)" },
+            // 不设 scroll.y:本页是主子表展开页,固定高度会让展开的明细子表
+            // 表头被主表 sticky header 压住、末行超出 body 可视底部(首尾被切割)。
+            // 主表随里程碑行数 + 展开子表自然撑高、整页滚动,子表完整可见。
+            scroll: { x: "max-content" },
           }}
         />
       )}
