@@ -880,3 +880,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/app/(dashboard)/ppm/work-hours/page.tsx
 结果:/ppm/work-hours 整体重写对齐 project-plans:PageContainer size=full + PageHeader + SectionCard(bodyPadding=p-2);顶部按钮右对齐 ui Button(搜索 primary + 重置 outline + 分隔 + 工时统计→ outline + 导出 outline + 录入工时 primary);grid-cols-4 垂直 Field 查询条件(工作日期 RangePicker + 项目 antd Select + 类型 antd Select<number> + 录入人 PpmUserSelect style width 100%);Table bordered + scroll y calc(100vh-430px) + showTotal/showSizeChanger + 服务端分页 + searchNonce 兜底搜索(条件变化不自动查,点搜索/回车/重置触发);操作列 width 120 + whitespace-nowrap + fixed=right + ui Button(编辑 outline + 删除 destructive);移除 antd message 与本地 useMemo 过滤;buildParams(p,ps) 抽取过滤→WorkHourPageReq 映射;WorkHourDrawer 子组件保留原实现未动。前端 typecheck 通过。
+
+
+## ql-20260623-011-c3d1 | 2026-06-23 11:51:00 | 选择型查询条件选中即触发查询(Select/PpmUserSelect)
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/work-hours/page.tsx, frontend/src/app/(dashboard)/ppm/task-plans/page.tsx, frontend/src/app/(dashboard)/ppm/problem-list/page.tsx, frontend/src/app/(dashboard)/ppm/problem-changes/page.tsx
+结果:在 4 个走 searchNonce 模式的页面所有 Select/PpmUserSelect/MonthPicker 选择型查询条件 onChange 里追加 setSearchNonce((n)=>n+1) — 选中即触发查询,无需点搜索按钮。work-hours 3 处(项目/类型/录入人);task-plans 5 处(状态/月份/项目/负责人/视图);problem-list 4 处(状态/项目/问题类型/是否紧急);problem-changes 1 处(状态多选)。文本输入型(Input 关键字、配合人员、RangePicker 日期区间)保持原样 — 仍走 commitSearch/回车提交。React 18 batch 保证 setState+setSearchNonce 同帧合并,useEffect [searchNonce] 只触发 1 次重查,不会双查。前端 typecheck 通过。

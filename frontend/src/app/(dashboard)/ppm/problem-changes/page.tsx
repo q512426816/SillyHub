@@ -313,7 +313,10 @@ export default function ProblemChangesPage() {
               className="w-full"
               placeholder="状态(可多选)"
               value={statusFilter}
-              onChange={(v) => setStatusFilter(v as string[])}
+              onChange={(v) => {
+                setStatusFilter(v as string[]);
+                setSearchNonce((n) => n + 1);
+              }}
               options={STATUS_OPTIONS}
             />
           </Field>

@@ -440,7 +440,10 @@ export default function ProblemListPage() {
               className="w-full"
               placeholder="状态(可多选)"
               value={statusFilter}
-              onChange={(v) => setStatusFilter(v as string[])}
+              onChange={(v) => {
+                setStatusFilter(v as string[]);
+                setSearchNonce((n) => n + 1);
+              }}
               options={STATUS_OPTIONS}
             />
           </Field>
@@ -451,7 +454,10 @@ export default function ProblemListPage() {
               style={{ width: "100%" }}
               placeholder="选择项目"
               value={projectFilter}
-              onChange={(v) => setProjectFilter((v as string | null) ?? null)}
+              onChange={(v) => {
+                setProjectFilter((v as string | null) ?? null);
+                setSearchNonce((n) => n + 1);
+              }}
             />
           </Field>
           <Field label="问题类型">
@@ -459,7 +465,10 @@ export default function ProblemListPage() {
               className="w-full"
               placeholder="全部类型"
               value={proTypeFilter || undefined}
-              onChange={(v) => setProTypeFilter(v ?? "")}
+              onChange={(v) => {
+                setProTypeFilter(v ?? "");
+                setSearchNonce((n) => n + 1);
+              }}
               options={PRO_TYPE_OPTIONS}
             />
           </Field>
@@ -468,7 +477,10 @@ export default function ProblemListPage() {
               className="w-full"
               placeholder="全部"
               value={isUrgentFilter || undefined}
-              onChange={(v) => setIsUrgentFilter(v ?? "")}
+              onChange={(v) => {
+                setIsUrgentFilter(v ?? "");
+                setSearchNonce((n) => n + 1);
+              }}
               options={IS_URGENT_OPTIONS}
             />
           </Field>

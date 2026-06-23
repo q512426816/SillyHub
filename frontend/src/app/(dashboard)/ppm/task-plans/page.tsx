@@ -462,7 +462,10 @@ export default function TaskPlansPage() {
               className="w-full"
               placeholder="状态(可多选)"
               value={statusFilterList}
-              onChange={(v) => setStatusFilterList(v as string[])}
+              onChange={(v) => {
+                setStatusFilterList(v as string[]);
+                setSearchNonce((n) => n + 1);
+              }}
               options={STATUS_CODE_OPTIONS}
             />
           </Field>
@@ -471,9 +474,10 @@ export default function TaskPlansPage() {
               className="w-full"
               placeholder="选择月份"
               value={monthFilter ? dayjs(monthFilter, "YYYY-MM") : null}
-              onChange={(d) =>
-                setMonthFilter(d ? d.format("YYYY-MM") : "")
-              }
+              onChange={(d) => {
+                setMonthFilter(d ? d.format("YYYY-MM") : "");
+                setSearchNonce((n) => n + 1);
+              }}
             />
           </Field>
           <Field label="项目">
@@ -482,7 +486,10 @@ export default function TaskPlansPage() {
               placeholder="全部项目"
               allowClear
               value={projectFilter || undefined}
-              onChange={(v) => setProjectFilter(v ?? "")}
+              onChange={(v) => {
+                setProjectFilter(v ?? "");
+                setSearchNonce((n) => n + 1);
+              }}
               options={projects.map((p) => ({
                 label: p.project_name ?? p.id,
                 value: p.id,
@@ -496,7 +503,10 @@ export default function TaskPlansPage() {
               style={{ width: "100%" }}
               placeholder="负责人"
               value={userFilter}
-              onChange={(v) => setUserFilter((v as string | null) ?? null)}
+              onChange={(v) => {
+                setUserFilter((v as string | null) ?? null);
+                setSearchNonce((n) => n + 1);
+              }}
             />
           </Field>
           {expanded && (
@@ -526,7 +536,10 @@ export default function TaskPlansPage() {
                 <Select<ViewMode>
                   className="w-full"
                   value={view}
-                  onChange={(v) => setView(v as ViewMode)}
+                  onChange={(v) => {
+                    setView(v as ViewMode);
+                    setSearchNonce((n) => n + 1);
+                  }}
                   options={[
                     { label: "全部任务", value: "all" },
                     { label: "我的任务", value: "personal" },

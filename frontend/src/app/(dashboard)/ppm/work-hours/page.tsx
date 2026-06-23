@@ -399,7 +399,10 @@ export default function WorkHoursPage() {
               placeholder="全部项目"
               allowClear
               value={projectFilter || undefined}
-              onChange={(v) => setProjectFilter(v ?? "")}
+              onChange={(v) => {
+                setProjectFilter(v ?? "");
+                setSearchNonce((n) => n + 1);
+              }}
               options={projects.map((p) => ({
                 label: p.project_name ?? p.id,
                 value: p.id,
@@ -412,7 +415,10 @@ export default function WorkHoursPage() {
               placeholder="全部类型"
               allowClear
               value={typeFilter ?? undefined}
-              onChange={(v) => setTypeFilter(v ?? null)}
+              onChange={(v) => {
+                setTypeFilter(v ?? null);
+                setSearchNonce((n) => n + 1);
+              }}
               options={TYPE_OPTIONS.map((o) => ({
                 label: o.label,
                 value: o.value,
@@ -426,7 +432,10 @@ export default function WorkHoursPage() {
               placeholder="全部成员"
               allowClear
               value={userFilter}
-              onChange={(v) => setUserFilter((v as string | null) ?? null)}
+              onChange={(v) => {
+                setUserFilter((v as string | null) ?? null);
+                setSearchNonce((n) => n + 1);
+              }}
               onLoadedOptions={setUserOptions}
             />
           </Field>
