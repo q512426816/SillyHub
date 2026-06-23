@@ -22,15 +22,15 @@ description: 恢复工作 — 从中断处继续
 sillyspec progress show
 ```
 
-### 2. 如果有 progress.json
+### 2. 如果有活跃变更
 
-从 progress.json 中提取并展示当前状态，使用 `sillyspec progress show` 查看。
+从 `sillyspec progress show` 输出中提取并展示当前状态。
 
 然后问用户：
    1. 直接继续执行下一步
    2. 查看更多细节
 
-### 3. 如果没有 progress.json 或变更目录
+### 3. 如果没有活跃变更
 
 自动探测项目状态：
 
@@ -64,5 +64,5 @@ cat .sillyspec/ROADMAP.md 2>/dev/null
 
 ### 4. 关键原则
 
-- progress.json 是唯一的恢复数据源（存储在 `.sillyspec/changes/<name>/progress.json` 或旧版 `.sillyspec/.runtime/progress.json`）
-- progress.json 随 `sillyspec run <stage> --done` 自动更新，不需要手动保存
+- 进度数据存储在 SQLite 数据库中（`.sillyspec/.runtime/sillyspec.db`），通过 `sillyspec progress show` 命令查看
+- 进度随 `sillyspec run <stage> --done` 自动更新，不需要手动保存

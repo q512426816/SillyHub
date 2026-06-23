@@ -23,6 +23,8 @@ description: 用于按 plan 执行代码实现。适合用户说"开始写代码
 - Worktree 路径在 Step 3（确认 worktree 路径）中输出，后续子代理的 cwd 必须设为该路径
 - **禁止跳过 worktree 或在主仓库直接写代码**
 - 如果 worktree 创建失败，CLI 会报错并退出，需要排查后再重试
+- **未提交的文件、dirty 状态等不影响 worktree 创建和进入，直接按 CLI 输出的 worktree 路径操作即可**
+- 不要自行检查 git 状态来判断是否可以进入 worktree，CLI 会自动处理
 
 ## 用户指令
 $ARGUMENTS

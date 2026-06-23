@@ -68,7 +68,7 @@ $ARGUMENTS
 
 ### 关键规则
 - 不要跳过任何步骤
-- 不要手动修改 progress.json
+- 不要手动修改进度数据（SQLite 数据库）
 - 不要自动 commit，只 git add
 - 不要使用 npx
 - 不要编造不存在的 CLI 子命令

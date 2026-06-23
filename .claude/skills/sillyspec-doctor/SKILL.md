@@ -1,6 +1,6 @@
 ---
 name: sillyspec:doctor
-description: 用于 SillySpec 自检和状态修复。适合用户说"检查下状态、修复 progress、doctor、状态不对"。全量扫描进度一致性，修复 progress.json 与实际产出不匹配的问题。
+description: 用于 SillySpec 自检和状态修复。适合用户说"检查下状态、修复 progress、doctor、状态不对"。全量扫描进度一致性，修复进度数据与实际产出不匹配的问题。
 ---
 
 ## 前置检查

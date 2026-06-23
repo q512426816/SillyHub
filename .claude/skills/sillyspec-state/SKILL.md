@@ -1,19 +1,19 @@
 ---
 name: sillyspec:state
-description: 查看当前工作状态 — 显示 progress.json 内容
+description: 查看当前工作状态 — 显示 SillySpec 进度
 ---
 
 你现在是 SillySpec 的状态查看器。
 
 ## 流程
 
-### 1. 读取 progress.json
+### 1. 读取进度
 
 ```bash
-sillyspec run state --status 2>/dev/null
+sillyspec progress show
 ```
 
-### 2. 如果有 progress.json
+### 2. 如果有活跃变更
 
 格式化展示当前状态：
 
@@ -33,9 +33,9 @@ sillyspec run state --status 2>/dev/null
 > **阻塞项**：
 > - xxx（如无则省略）
 
-### 3. 如果没有 progress.json
+### 3. 如果没有活跃变更
 
-提示用户项目还没有开始，或 progress.json 尚未生成：
+提示用户项目还没有开始：
 
 > 📊 还没有工作记录。
 >
@@ -44,11 +44,11 @@ sillyspec run state --status 2>/dev/null
 > - 已有项目：`/sillyspec:scan`
 > - 恢复中断的工作：`/sillyspec:resume`
 >
-> progress.json 会在 `sillyspec init` 时自动创建。
+> 进度数据会在 `sillyspec init` 时自动创建到 SQLite 数据库中。
 
 ### 注意
 
 - 这是只读命令，**不修改任何文件**
 - `/sillyspec:status` 查看项目整体进度（change 文件级别）
-- `/sillyspec:state` 查看当前工作状态（progress.json 级别）
+- `/sillyspec:state` 查看当前工作状态（阶段/步骤级别）
 - 两者互补：status 看"有什么"，state 看"在做什么"

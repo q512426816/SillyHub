@@ -6,7 +6,7 @@
 >
 > - author: qinyi
 > - created_at: 2026-06-20
-> - sillyspec 版本：3.18.3
+> - sillyspec 版本：3.18.6
 
 ## 背景
 
