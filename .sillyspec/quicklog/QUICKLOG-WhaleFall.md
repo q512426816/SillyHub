@@ -928,3 +928,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx
 结果:milestone-details 两处子表加 bordered — (1) 模块中间层 PpmSubTable<PlanNodeModule> tableProps 加 bordered=true;(2) 明细三级 DataTable<PsPlanNodeDetail> 加 bordered prop。对齐主表(ql-017 已加 bordered)风格,3 层表(主表/模块/明细)边框一致。前端 typecheck 通过。
+
+
+## ql-20260623-019-3a8c | 2026-06-23 15:19:21 | milestone-details 子表表头样式 + 操作列显示"-"修复
+状态：已完成
+文件：frontend/src/components/ppm-status-actions.tsx, frontend/src/components/ppm-sub-table.tsx
+结果:(1) ppm-status-actions.tsx line 240 + 399 两处 buttons.length===0 兜底从 `<span>—</span>` 改为 null — PlanDetailActions(done/archived 状态无动作按钮) + ProblemActions 同步修复,避免 done/archived 明细行的操作列里在「详情」按钮旁出现破折号;(2) ppm-sub-table.tsx 移除 expandable.columnTitle='展开'(原 expandableTriggerField?'展开':undefined),默认 expand 列无表头文字,与其他列表头高度一致,避免 48px 宽展开列内 2 字符文字撑高表头。前端 typecheck 通过。

@@ -238,7 +238,7 @@ export function PlanDetailActions({
   }
 
   if (buttons.length === 0) {
-    return <span className="text-xs text-muted-foreground">—</span>;
+    return null;
   }
   return <div className="flex flex-wrap justify-end gap-1">{buttons}</div>;
 }
@@ -397,7 +397,7 @@ export function ProblemActions({
   }
 
   if (buttons.length === 0) {
-    return <span className="text-xs text-muted-foreground">—</span>;
+    return null;
   }
   return <div className="flex flex-wrap justify-end gap-1">{buttons}</div>;
 }

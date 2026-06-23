@@ -239,21 +239,21 @@ describe("PlanDetailActions — 按钮 6 态显隐 + 权限(AC-4)", () => {
     expect(onSubmit).toHaveBeenCalledWith("d7", "save");
   });
 
-  it("done:终态无操作按钮(只展示占位 —)", () => {
+  it("done:终态无操作按钮(渲染为空)", () => {
     const d = mkDetail({ id: "d8", status: "done" });
     const { container } = render(
       <PlanDetailActions detail={d} currentUserId="u1" onSubmit={onSubmit} />,
     );
-    expect(container.textContent).toBe("—");
+    expect(container.textContent).toBe("");
     expect(screen.queryByText("变更")).toBeNull();
   });
 
-  it("archived:终态无操作按钮", () => {
+  it("archived:终态无操作按钮(渲染为空)", () => {
     const d = mkDetail({ id: "d9", status: "archived" });
     const { container } = render(
       <PlanDetailActions detail={d} currentUserId="u1" onSubmit={onSubmit} />,
     );
-    expect(container.textContent).toBe("—");
+    expect(container.textContent).toBe("");
   });
 
   it("任意非终态 → 「变更」按钮可触发 change 动作", () => {

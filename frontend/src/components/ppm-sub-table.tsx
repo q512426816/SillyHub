@@ -144,10 +144,8 @@ export function PpmSubTable<T extends PpmSubTableRow>(
     return {
       expandedRowRender: (record: T) => expandRender(record),
       rowExpandable: () => true,
-      // expandableTriggerField 仅语义提示,默认所有行可展开
-      columnTitle: expandableTriggerField ? "展开" : undefined,
     };
-  }, [expandRender, expandableTriggerField]);
+  }, [expandRender]);
 
   // ── 列构建 ──
   const tableColumns = useMemo<TableColumnsType<T>>(() => {
