@@ -147,3 +147,10 @@
 - **grep 调用点范围**：迁移方法时 grep 调用点必须搜 `router.py` + 全 `backend/app/` + `tests/`，不能只搜当前文件——router 可能直接调 service 私有方法（如 `svc._get_owned_runtime`，task-02 曾漏 router.py:622 致 ws_rpc 6 用例 AttributeError 回归）。私有辅助删 facade 前必全 grep。
 - **异常类最终归位**：收尾阶段把异常类从 facade 迁各子包定义 + facade re-export（显式列出禁 `import *`），子包改子包直引（不再 import facade），此时 facade 可模块级 re-export 子包符号（子包不反向 import facade，单向无循环）。
 - **通用**：任何"单类拆子包 + facade 兼容（签名不变/router 零改动）"的重构适用此 import 策略组合。
+
+## 2026-06-23 — execute worktree 无 node_modules + 子代理 cwd 需显式 worktree 路径
+
+- SillySpec execute 的隔离 worktree（`.sillyspec/.runtime/worktrees/<change>`）是 baseline 快照，**不含 node_modules**（gitignore），worktree 内无法直接跑 tsc/vitest/lint。
+- 解法：PowerShell `New-Item -ItemType Junction` 把主仓库 `frontend/node_modules` 链到 `worktree/frontend/node_modules`（junction 免管理员，比 `cmd mklink /J` 引号嵌套更稳）。
+- Agent 子代理 cwd 可能**不随父 session 的 EnterWorktree 切换**（本次 task-01 子代理把产物写到了主仓库而非 worktree）。解法：子代理 prompt 显式给 worktree 绝对路径前缀；审查用 `git status` + `ls worktree` 确认落点，错位则 `cp` 统一到 worktree + 主仓库 `git checkout` 恢复。
+- Radix Dialog 测试：`DialogContent` role=dialog 可 `getByRole`；但标题含 `·`（middle dot）字符，`getByText` 正则易因字符/文本节点分割失败，改 `within(dialog).getAllByText(/runtime名/)` 限定作用域更稳。
