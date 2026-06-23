@@ -832,3 +832,9 @@ created_at: 2026-06-03T08:42:04
 
 
 
+
+
+## ql-20260623-003-a9c4 | 2026-06-23 09:50:00 | task-plans 视图切换(全部/我的任务)从顶部移到查询条件(配合人员后)
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/task-plans/page.tsx
+结果：顶部按钮行移除视图切换 select(保留 搜索/重置/分隔/导出/新建);视图切换作为 Field label='视图' 加入查询 grid 配合人员 Field 之后,inputCls 改 w-full 适配 Field 列宽。前端 typecheck 通过。

@@ -445,15 +445,6 @@ export default function TaskPlansPage() {
           >
             {exporting ? "导出中…" : "导出"}
           </Button>
-          <select
-            value={view}
-            onChange={(e) => setView(e.target.value as ViewMode)}
-            className={`w-32 ${inputCls}`}
-            aria-label="视图切换"
-          >
-            <option value="all">全部任务</option>
-            <option value="personal">我的任务</option>
-          </select>
           <Button size="sm" onClick={() => setDrawer({ open: true, mode: "create" })}>
             + 新建任务
           </Button>
@@ -527,6 +518,17 @@ export default function TaskPlansPage() {
               onChange={(e) => setWorkPartnerFilter(e.target.value)}
               onPressEnter={commitSearch}
             />
+          </Field>
+          <Field label="视图">
+            <select
+              value={view}
+              onChange={(e) => setView(e.target.value as ViewMode)}
+              className={`${inputCls} w-full`}
+              aria-label="视图切换"
+            >
+              <option value="all">全部任务</option>
+              <option value="personal">我的任务</option>
+            </select>
           </Field>
           <div className="self-end text-right text-xs text-muted-foreground">
             共 {total} 条
