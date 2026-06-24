@@ -87,12 +87,20 @@ export interface LaneResult {
  */
 export function assignLanes(items: LaneItem[]): LaneResult {
   if (items.length === 0) return { laneMap: new Map(), rowCount: 1 };
-  const sorted = [...items].sort((a, b) => {
+  // 按日期粒度(整天)排序与比较:同日算重叠,避免 datetime 时分导致
+  // 同日(A 上午结束+B 下午开始)被误判"不冲突"放同一行,而 computeBarLayout
+  // 按整天画条形(同日都占满)造成同行重叠。
+  const dayItems = items.map((it) => ({
+    id: it.id,
+    start: it.start.startOf("day"),
+    end: it.end.startOf("day"),
+  }));
+  const sorted = [...dayItems].sort((a, b) => {
     if (a.start.isBefore(b.start)) return -1;
     if (a.start.isAfter(b.start)) return 1;
     return 0;
   });
-  const laneEnds: Dayjs[] = []; // laneEnds[i] = 第 i 行最后任务的 end
+  const laneEnds: Dayjs[] = []; // laneEnds[i] = 第 i 行最后任务的 end(整天)
   const laneMap = new Map<string, number>();
   for (const it of sorted) {
     let slot = -1;

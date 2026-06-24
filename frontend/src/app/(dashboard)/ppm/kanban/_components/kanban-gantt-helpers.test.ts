@@ -90,6 +90,16 @@ describe("assignLanes", () => {
     expect(r.laneMap.get("b")).toBe(1);
     expect(r.laneMap.get("c")).toBe(0);
   });
+
+  it("同日不同时间算重叠(按整天,防 datetime 误判同行)", () => {
+    const r = assignLanes([
+      { id: "a", start: dayjs("2026-06-23 09:00"), end: dayjs("2026-06-23 12:00") },
+      { id: "b", start: dayjs("2026-06-23 14:00"), end: dayjs("2026-06-23 18:00") },
+    ]);
+    expect(r.rowCount).toBe(2); // 同日 → 不同行(整天粒度)
+    expect(r.laneMap.get("a")).toBe(0);
+    expect(r.laneMap.get("b")).toBe(1);
+  });
 });
 
 describe("rangeDateKeys", () => {
