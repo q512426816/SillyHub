@@ -96,7 +96,7 @@ export function InteractiveSessionChatSection({
   return (
     <div className="flex h-full min-w-0 flex-col">
       {attachSession && onCloseAttach && (
-        <div className="flex h-10 shrink-0 items-center justify-end border-b bg-muted/20 px-4">
+        <div className="flex h-10 shrink-0 items-center justify-end border-b bg-muted/20 px-5">
           <Button
             size="sm"
             variant="ghost"
@@ -107,19 +107,25 @@ export function InteractiveSessionChatSection({
           </Button>
         </div>
       )}
-      {/* key 强制 attach 切换时重 mount（清旧 SSE/轮询，task-10 unmount close） */}
-      <InteractiveSessionPanel
-        key={attachSession?.id ?? "live"}
-        providers={providers}
-        defaultProvider={defaultProvider}
-        model={model}
-        onModelChange={setModel}
-        hasOnlineProvider={hasOnlineProvider}
-        attachSessionId={attachSession?.id}
-        initialTurns={initialTurns}
-        onSessionCreated={handleSessionCreated}
-        onSessionReset={handleSessionReset}
-      />
+      {/* key 强制 attach 切换时重 mount（清旧 SSE/轮询，task-10 unmount close）。
+          外层 min-h-0 flex-1 overflow-hidden 容器为 panel 提供确定高度：
+          弹窗 grid 行高已由 grid-rows-[minmax(0,1fr)] 约束，此处再保证 attach
+          返回栏与 panel 在 flex-col 下正确分配，panel h-full 填满剩余空间，
+          否则消息变多会撑破容器被上层 overflow-hidden 裁掉（底部输入框/最新消息看不到）。 */}
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <InteractiveSessionPanel
+          key={attachSession?.id ?? "live"}
+          providers={providers}
+          defaultProvider={defaultProvider}
+          model={model}
+          onModelChange={setModel}
+          hasOnlineProvider={hasOnlineProvider}
+          attachSessionId={attachSession?.id}
+          initialTurns={initialTurns}
+          onSessionCreated={handleSessionCreated}
+          onSessionReset={handleSessionReset}
+        />
+      </div>
     </div>
   );
 }
@@ -482,7 +488,7 @@ export function SessionsSidebar({
       data-testid="session-list-scroll"
       className="flex h-full min-h-0 flex-col overflow-hidden border-r bg-card"
     >
-      <header className="border-b bg-muted/20 px-4 py-3">
+      <header className="border-b bg-muted/20 px-5 py-4">
         <h2 className="text-sm font-semibold">会话列表</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">
           {loading ? "加载中…" : `${sessions.length} 个会话`}
@@ -652,7 +658,7 @@ export function SessionHistoryView({
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
-      <header className="flex items-center justify-between gap-3 border-b bg-muted/20 px-4 py-3">
+      <header className="flex items-center justify-between gap-3 border-b bg-muted/20 px-5 py-4">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold">
             历史回看{session ? ` · ${shortId(session.id)}` : ""}

@@ -276,7 +276,7 @@ function RuntimeSessionDialogBody({
 
   return (
     <>
-      <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-card px-5 py-4">
+      <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-card px-5 py-4">
         <div className="min-w-0">
           <h2 className="truncate text-base font-semibold text-foreground">
             会话 · {runtime?.name ?? getProviderLabel(runtime?.provider)}
@@ -295,7 +295,7 @@ function RuntimeSessionDialogBody({
           刷新会话
         </Button>
       </header>
-      <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)] bg-background">
+      <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] bg-background">
         <SessionsSidebar
           sessions={visibleSessions}
           loading={loading}
