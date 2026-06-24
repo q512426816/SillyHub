@@ -191,15 +191,23 @@ export class PermissionResolver {
       signal: input.signal,
     };
 
-    // 5min 兜底定时器：到点 deny + 清理（防 WS 丢消息永久 hang）。
-    entry.fallbackTimer = setTimeout(() => {
-      this._settle(entry, {
-        behavior: 'deny',
-        message: 'permission request timeout (5min fallback)',
-      });
-    }, PERMISSION_FALLBACK_TIMEOUT_MS);
-    // 不阻塞进程退出。
-    entry.fallbackTimer.unref?.();
+    // 兜底定时器：仅普通审批（dialogKind 未定义）启 5min 兜底——防 WS 丢消息永久 hang。
+    // dialog 请求（dialogKind 存在，如 AskUserQuestion）**不启兜底**：用户决策必须等待，
+    // 与 backend permission_service.py / protocol.py「dialog 不 arm 超时、indefinitely」
+    // 语义对齐。超时自动 deny 会让 agent 拿到 "Proceed with recommended option" 自行猜测，
+    // 违背 scan 多子项目须用户决策的设计。signal abort listener + abortAll 收尾两者都保留
+    //（用户主动 cancel/interrupt/session 结束仍 deny 收尾，不死锁）。
+    const isDialog = input.dialogKind !== undefined;
+    if (!isDialog) {
+      entry.fallbackTimer = setTimeout(() => {
+        this._settle(entry, {
+          behavior: 'deny',
+          message: 'permission request timeout (5min fallback)',
+        });
+      }, PERMISSION_FALLBACK_TIMEOUT_MS);
+      // 不阻塞进程退出。
+      entry.fallbackTimer.unref?.();
+    }
 
     // signal 后续 abort → 立即 deny + 清理（移除 listener 防泄漏）。
     if (input.signal) {

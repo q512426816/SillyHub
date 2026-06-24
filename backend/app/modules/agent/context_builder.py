@@ -525,17 +525,17 @@ async def build_scan_bundle(
     is_platform_mode = bool(spec_root)
     init_cmd: str | None = None
     if not is_platform_mode:
-        init_cmd = f"sillyspec init --dir {root_path}"
+        init_cmd = f'sillyspec init --dir "{root_path}"'
     scan_start_cmd = (
         f"sillyspec run scan"
-        f" --dir {root_path}"
+        f' --dir "{root_path}"'
         f" --spec-root {host_spec_root}"
         f" --runtime-root {host_runtime_root}"
         f" --workspace-id {ws_id}"
         f" --scan-run-id {run_id_str}"
     )
     scan_done_cmd = (
-        f"sillyspec run scan --done --change default --dir {root_path}"
+        f'sillyspec run scan --done --change default --dir "{root_path}"'
         f' --input "步骤描述" --output "步骤摘要"'
     )
     if is_platform_mode:

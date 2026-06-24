@@ -255,7 +255,7 @@ async def test_build_scan_bundle_prompt_contains_full_scan_command(
     assert "sillyspec init --dir" not in prompt
     assert "第 1 步 — 初始化" not in prompt
     assert "sillyspec run scan" in prompt
-    assert "--dir /home/user/project" in prompt
+    assert '--dir "/home/user/project"' in prompt
     # D-006：prompt 用宿主推导路径，非入参 spec_root
     assert f"--spec-root {host_spec_root}" in prompt
     assert f"--workspace-id {mock_workspace.id}" in prompt
@@ -321,10 +321,38 @@ async def test_build_scan_bundle_non_platform_keeps_init(
 
     prompt = bundle.step_prompt
     # 非平台模式保留 init
-    assert "sillyspec init --dir /src/myaaa" in prompt
+    assert 'sillyspec init --dir "/src/myaaa"' in prompt
     # 仍是"第 1 步 — 初始化"
     assert "第 1 步 — 初始化" in prompt
     assert "第 2 步 — 启动 scan" in prompt
+
+
+@pytest.mark.asyncio
+async def test_build_scan_bundle_dir_path_double_quoted(
+    mock_session, mock_workspace, sample_run_id, monkeypatch
+):
+    """--dir 路径用双引号包裹，防 Windows 反斜杠路径在 Git Bash 无引号时被转义破坏。
+
+    现象：root_path = C:\\Users\\qinyi\\myaaa（反斜杠）在 Git Bash 无引号执行时，
+    \\U/\\q/\\I/\\m 被当转义吃掉反斜杠 → sillyspec 收到 C:Users... → Python pathlib
+    解释成 drive-relative 相对路径拼到 cwd → 报"目录不存在"且路径变形。双引号内
+    \\U 等（非 $ ` " \\ 换行）原样保留。同时覆盖含空格路径。平台模式 + mock settings。"""
+    mock_session.get = AsyncMock(return_value=mock_workspace)
+    _mock_settings(monkeypatch, transport="shared", spec_data_host_dir="/test/host/specs")
+
+    bundle = await build_scan_bundle(
+        session=mock_session,
+        workspace_id=mock_workspace.id,
+        spec_root="/data/specs/ws-abc",
+        root_path=r"C:\Users\qinyi\my project",
+        run_id=sample_run_id,
+    )
+
+    prompt = bundle.step_prompt
+    # 平台模式：scan 启动命令与 done 命令的 --dir 都必须双引号包裹路径
+    assert r'--dir "C:\Users\qinyi\my project"' in prompt
+    # 不应出现裸 --dir 无引号形态（--dir 后直接跟 C: 而非 "C:）
+    assert "--dir C:" not in prompt
 
 
 @pytest.mark.asyncio

@@ -530,3 +530,82 @@ describe('PermissionResolver onUserDialog 扩展（resolve 带 dialog_result）'
     expect((decision as { dialogResult?: unknown }).dialogResult).toBeUndefined();
   });
 });
+
+// ── dialog 请求不启兜底定时器（与 backend dialog 不超时语义对齐）──────────────
+// AskUserQuestion 等对话请求必须等用户决策，daemon 不再用 5min 兜底 deny 放行
+// "Proceed with recommended option"；仅靠 signal abort / abortAll 收尾（主动取消）。
+
+describe('PermissionResolver dialog 请求不启兜底定时器（永久等待用户决策）', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('dialog 请求（dialogKind 存在）推进远超 PERMISSION_FALLBACK_TIMEOUT_MS 仍 pending（不 deny）', async () => {
+    const resolver = new PermissionResolver();
+    const send = makeSend(true);
+    const { promise } = resolver.register({
+      sessionId: SESSION_ID,
+      runId: RUN_ID,
+      toolName: 'AskUserQuestion',
+      toolInput: { questions: [{ question: 'q' }] },
+      send,
+      dialogKind: 'AskUserQuestion',
+      dialogPayload: { questions: [{ question: 'q' }] },
+    });
+    // 推进远超普通审批的 5min 兜底
+    await vi.advanceTimersByTimeAsync(PERMISSION_FALLBACK_TIMEOUT_MS + 60_000);
+    let settled = false;
+    void promise.then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    expect(resolver.pendingCount).toBe(1);
+  });
+
+  it('dialog 请求 signal abort 仍能 deny 收尾（不死锁）', async () => {
+    const resolver = new PermissionResolver();
+    const send = makeSend(true);
+    const ac = new AbortController();
+    const { promise } = resolver.register({
+      sessionId: SESSION_ID,
+      runId: RUN_ID,
+      toolName: 'AskUserQuestion',
+      toolInput: {},
+      send,
+      signal: ac.signal,
+      dialogKind: 'AskUserQuestion',
+      dialogPayload: { questions: [] },
+    });
+    // 推进超过普通审批兜底仍 pending（确认没有兜底定时器）
+    await vi.advanceTimersByTimeAsync(PERMISSION_FALLBACK_TIMEOUT_MS + 60_000);
+    expect(resolver.pendingCount).toBe(1);
+    // 用户主动取消 → signal abort 仍 deny 收尾
+    ac.abort('user cancelled scan');
+    await vi.advanceTimersByTimeAsync(0);
+    const decision = await promise;
+    expect(decision.behavior).toBe('deny');
+    expect(resolver.pendingCount).toBe(0);
+  });
+
+  it('dialog 请求 abortAll 仍能 deny 收尾', async () => {
+    const resolver = new PermissionResolver();
+    const send = makeSend(true);
+    const { promise } = resolver.register({
+      sessionId: SESSION_ID,
+      runId: RUN_ID,
+      toolName: 'AskUserQuestion',
+      toolInput: {},
+      send,
+      dialogKind: 'AskUserQuestion',
+      dialogPayload: {},
+    });
+    await vi.advanceTimersByTimeAsync(PERMISSION_FALLBACK_TIMEOUT_MS + 60_000);
+    expect(resolver.pendingCount).toBe(1);
+    const count = resolver.abortAll('session_ended');
+    expect(count).toBe(1);
+    await vi.advanceTimersByTimeAsync(0);
+    const decision = await promise;
+    expect(decision.behavior).toBe('deny');
+    expect(resolver.pendingCount).toBe(0);
+  });
+});

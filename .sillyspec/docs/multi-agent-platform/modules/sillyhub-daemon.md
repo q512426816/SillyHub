@@ -32,6 +32,7 @@ created_at: 2026-06-24T01:16:42
 - claude-agent-sdk 跨平台二进制用 pnpm overrides 统一钉版 0.3.181，升级需全平台验证。
 - daemon 与 backend 的 session/permission 消息契约双向耦合，改动必须 backend daemon 模块 + frontend runtime-session 组件同步。
 - 守护进程生命周期（PID/日志/恢复）跨平台差异大，Windows/macOS/Linux 都要验证。
+- **dialog 审批不超时**：`PermissionResolver.register` 对 dialog 请求（`dialogKind` 存在，如 AskUserQuestion）不启 5min 兜底定时器，永久等待用户决策（与 backend `permission_service.py`/`protocol.py` 的 dialog 不超时语义对齐）；超时不再 deny 放行 "Proceed with recommended option"。普通工具审批（无 dialogKind）仍 5min 兜底；signal abort + abortAll 收尾两者都保留。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->

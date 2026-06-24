@@ -36,6 +36,18 @@ created_at: 2026-06-23 10:09:12
 - sillyhub-daemon/src/interactive/session-manager.ts（_scanIdle guard：active-only，running 跳过 + 注释）
 - sillyhub-daemon/tests/（idle 跳过 running 用例 + active 超阈值仍回收回归）
 
+## ql-20260623-006-7d3e | 2026-06-23 21:01:01 | 修复 scan 初始化两个问题：sillyspec 命令 --dir 路径未加引号导致 Windows 反斜杠路径被 Git Bash 转义破坏 + AskUserQuestion dialog 被 daemon 5min 兜底超时 deny（与 backend 已有 dialog 不超时语义对齐）
+状态：已完成
+根因：
+- 问题1：context_builder.py 生成 scan 命令时 --dir {root_path} 未加引号，root_path 是 Windows 反斜杠路径 C:\Users\...，Git Bash 无引号把 \U/\q 当转义吃掉反斜杠，sillyspec 收到 C:Users...，Python pathlib 解释成 drive-relative 相对路径拼到 cwd，报"目录不存在"且路径变形。
+- 问题2：sillyhub-daemon permission-resolver.ts register() 对所有 pending 请求一视同仁启 5min 兜底定时器（PERMISSION_FALLBACK_TIMEOUT_MS=305s），不区分 dialog 和普通审批；超时 deny 后 session-manager.ts:526 返回"Proceed with recommended option"→ agent 自动按推荐继续。而 backend 侧 permission_service.py:190-201 / protocol.py:165 早已对 dialog 不 arm 超时（indefinitely），daemon 漏了对齐。
+文件：
+- backend/app/modules/agent/context_builder.py（init_cmd L528 / scan_start_cmd L529-536 / scan_done_cmd L538 三处 --dir {root_path} 加双引号）
+- backend/tests/modules/agent/test_context_builder.py（更新现有 --dir 断言为带引号 + 新增反斜杠/空格路径加引号用例）
+- sillyhub-daemon/src/interactive/permission-resolver.ts（register 对 dialog 请求 dialogKind 存在时不启 fallbackTimer，永久等待；保留 signal abort listener + abortAll 收尾，普通审批不变）
+- sillyhub-daemon/tests/interactive/permission-resolver.test.ts（新增 dialog 请求超时不 deny + signal abort 仍 deny 收尾用例）
+结果：backend test_context_builder.py 24 passed（更新2处 --dir 断言带引号 + 新增反斜杠/空格路径加引号用例）；daemon permission-resolver.test.ts 23 passed（新增3用例：dialog 推进超 PERMISSION_FALLBACK_TIMEOUT_MS 仍 pending / signal abort deny 收尾 / abortAll deny 收尾）。未编译（改动小）。dialog 不超时与 backend permission_service.py:190-201 + protocol.py:165-167「dialog 不 arm 超时 indefinitely」语义对齐。
+
 ## ql-20260624-001-c4d9 | 2026-06-24 07:28:40 | 修复 sillyhub-daemon 6 文件 pre-existing vitest 失败（5 文件 7 用例 + 额外 terminal-observer flaky；本次 codex 改动未引入回归，已 stash 到 HEAD 验证同样失败）
 背景：跑全量测试时发现 daemon 有 7 个失败，逐一 stash 到 HEAD（ba87eec）重跑确认全部 pre-existing（与本次 codex interactive 改动无关）。后端 pytest 1883 passed、frontend 66 passed 均已全绿，本次只动 sillyhub-daemon。用户选「逐个修复全部 pre-existing」。
 文件（预估）：
