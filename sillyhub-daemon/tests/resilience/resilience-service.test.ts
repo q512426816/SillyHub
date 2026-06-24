@@ -374,4 +374,36 @@ describe("drainOutbox (task-18 / FR-07)", () => {
     await flush();
     expect(submit).not.toHaveBeenCalled();
   });
+
+  it("L3: 404 终态（lease/run 不存在）→ 丢弃不补发", async () => {
+    const store = new Map<string, OutboxEntry[]>([
+      ["run-1", [{ leaseId: "l", claimToken: "t", runId: "run-1", envelopes: [{ message: {}, dedup_key: "dk-1" }], ts: "x" }]],
+    ]);
+    const outbox = memOutbox(store);
+    const submit = vi.fn(async () => {
+      throw new HubHttpError(404, "not found", "u", "POST");
+    });
+    const svc = new ResilienceService(makeClient(submit), outbox, fastRetry, noopLogger());
+    await svc.drainOutbox();
+    await flush();
+    // 404 是终态业务错误：retryTerminal fail-fast 抛 → drain 丢弃该条
+    expect(outbox.markDelivered).toHaveBeenCalledWith("run-1", ["dk-1"]);
+    expect(store.has("run-1")).toBe(false);
+  });
+
+  it("L3: 可重试网络错误用尽 → 保留 entry 待下轮", async () => {
+    const store = new Map<string, OutboxEntry[]>([
+      ["run-1", [{ leaseId: "l", claimToken: "t", runId: "run-1", envelopes: [{ message: {}, dedup_key: "dk-1" }], ts: "x" }]],
+    ]);
+    const outbox = memOutbox(store);
+    const submit = vi.fn(async () => {
+      throw new TypeError("fetch failed");
+    });
+    const svc = new ResilienceService(makeClient(submit), outbox, fastRetry, noopLogger());
+    await svc.drainOutbox();
+    await flush();
+    // 可重试错误用尽：保留 entry（不 markDelivered），待下轮 drain 网络恢复后重试
+    expect(outbox.markDelivered).not.toHaveBeenCalled();
+    expect(store.has("run-1")).toBe(true);
+  });
 });

@@ -1,11 +1,15 @@
 """add agent_run_logs.dedup_key + partial unique index
 
 Revision ID: 202606241300
-Revises: 202607041200
+Revises: 202606241001
 
 2026-06-24-daemon-network-resilience task-20（FR-08 / R-12 / D-001@v2）：
 agent_run_logs 加 dedup_key 列 + 部分唯一索引（WHERE dedup_key IS NOT NULL），
 供 submit_messages INSERT ON CONFLICT DO NOTHING 幂等去重。
+
+注：down_revision 接 202606241001（主链单 head），不接 202607041200（ppm merge
+位于主链内部节点，从它分叉会形成幽灵 head）。同时删除坏掉的空 merge
+202606281200（引用从未存在的幽灵 revision 202606281000，是 alembic KeyError 根因）。
 """
 
 from __future__ import annotations
@@ -14,7 +18,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "202606241300"
-down_revision = "202607041200"
+down_revision = "202606241001"
 branch_labels = None
 depends_on = None
 

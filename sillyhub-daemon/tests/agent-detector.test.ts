@@ -619,7 +619,20 @@ describe('AgentDetector.isAvailable', () => {
 
 import { mkdtempSync, writeFileSync, chmodSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
+
+/**
+ * 跨平台测试 helper：返回 findOnPath 能识别的可执行文件名 + 内容。
+ * Windows 上 findOnPath 只认 .exe/.cmd/.bat/.ps1（WINDOWS_EXTS），无扩展名文件
+ * 会被跳过；Unix 无扩展名即可。本 helper 让这组真实 PATH 测试在双平台都通过。
+ */
+function makeBin(dir: string, name: string): string {
+  const isWin = process.platform === 'win32';
+  const fileName = isWin ? `${name}.cmd` : name;
+  const path = join(dir, fileName);
+  writeFileSync(path, isWin ? '@echo hi\r\n' : '#!/bin/sh\necho hi\n', { mode: 0o755 });
+  return path;
+}
 
 describe('AgentDetector.findOnPath（真实 PATH 解析）', () => {
   let tmpDir: string;
@@ -633,8 +646,7 @@ describe('AgentDetector.findOnPath（真实 PATH 解析）', () => {
   });
 
   it('PATH 上存在同名文件 → 返回绝对路径', () => {
-    const binPath = join(tmpDir, 'claude');
-    writeFileSync(binPath, '#!/bin/sh\necho hi\n', { mode: 0o755 });
+    const binPath = makeBin(tmpDir, 'claude');
     const detector = new AgentDetector();
     const originalPath = process.env.PATH;
     process.env.PATH = tmpDir;
@@ -655,13 +667,12 @@ describe('AgentDetector.findOnPath（真实 PATH 解析）', () => {
     mkdirSync(join(tmpDir, 'claude'));
     const subDir = join(tmpDir, 'sub');
     mkdirSync(subDir);
-    const realBin = join(subDir, 'claude');
-    writeFileSync(realBin, '#!/bin/sh\necho hi\n', { mode: 0o755 });
+    const realBin = makeBin(subDir, 'claude');
 
     const detector = new AgentDetector();
     const originalPath = process.env.PATH;
-    // PATH 顺序：先含目录的 tmpDir，再含真实文件的 subDir。
-    process.env.PATH = `${tmpDir}:${subDir}`;
+    // PATH 顺序：先含目录的 tmpDir，再含真实文件的 subDir（用 delimiter 跨平台）。
+    process.env.PATH = `${tmpDir}${delimiter}${subDir}`;
     try {
       const r = (
         detector as unknown as {
@@ -712,14 +723,12 @@ describe('AgentDetector.findOnPath（真实 PATH 解析）', () => {
     const dirB = join(tmpDir, 'b');
     mkdirSync(dirA);
     mkdirSync(dirB);
-    const binA = join(dirA, 'claude');
-    const binB = join(dirB, 'claude');
-    writeFileSync(binA, '', { mode: 0o755 });
-    writeFileSync(binB, '', { mode: 0o755 });
+    const binA = makeBin(dirA, 'claude');
+    makeBin(dirB, 'claude');
 
     const detector = new AgentDetector();
     const originalPath = process.env.PATH;
-    process.env.PATH = `${dirA}:${dirB}`;
+    process.env.PATH = `${dirA}${delimiter}${dirB}`;
     try {
       const r = (
         detector as unknown as {

@@ -256,9 +256,22 @@ export class ResilienceService {
                 run_id: runId,
                 error: this._causeForLog(e),
               });
+            } else if (e instanceof HubHttpError && !isRetryable(e)) {
+              // 4xx 业务错误（401/403/404/409 等，retryTerminal fail-fast 抛出）：
+              // lease/run 已终态或无权——不补发，丢弃该条（等同 validity 终态校验，
+              // 但在 backend 侧判定，避免 daemon 维护 lease/session 查询的复杂度）。
+              await this._outbox.markDelivered(
+                runId,
+                entry.envelopes.map((env) => env.dedup_key),
+              );
+              this._logger.warn('drain_dropped_terminal_http', {
+                run_id: runId,
+                status: e.status,
+                error: this._causeForLog(e),
+              });
             } else {
-              // 可重试网络错误用尽仍失败：保留 entry 待下轮 drain；4xx 业务错误也保留
-              // （backend 可能临时拒绝）。日志记录，不抛（drain 是尽力而为的后台任务）。
+              // 可重试网络错误用尽仍失败（5xx/timeout/fetch failed）：保留 entry 待
+              // 下轮 drain（网络恢复后重试）；不抛（drain 是尽力而为的后台任务）。
               this._logger.warn('drain_entry_failed', {
                 run_id: runId,
                 error: this._causeForLog(e),
