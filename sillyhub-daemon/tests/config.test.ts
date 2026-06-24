@@ -35,18 +35,26 @@ describe('config', () => {
   // ── AC-03：字段与默认值对照 Python config.py:22-32 DEFAULTS ──
 
   describe('字段与默认值（AC-03，对照 Python DEFAULTS）', () => {
-    it('DEFAULT_CONFIG 正好 19 字段，键名 1:1（task-10 新增 default_timeout_seconds / max_retries；daemon-api-key 新增 api_key；ql-20260616-003 新增 4 个 terminal_observer_*；ql-20260616-006 新增 lease_heartbeat_interval；2026-06-18-workspace-client-path task-02 新增 allowed_roots；2026-06-22-agent-run-pipeline-fix task-02 新增 spec_root_map）', () => {
+    it('DEFAULT_CONFIG 键名 1:1（task-10 新增 default_timeout_seconds / max_retries；daemon-api-key 新增 api_key；ql-20260616-003 新增 4 个 terminal_observer_*；ql-20260616-006 新增 lease_heartbeat_interval；2026-06-18-workspace-client-path task-02 新增 allowed_roots；2026-06-22-agent-run-pipeline-fix task-02 新增 spec_root_map；2026-06-24-daemon-network-resilience task-09 新增 retry_* / loop_restart_backoff_ms / outbox_max_* / disconnect_log_threshold_sec）', () => {
       expect(Object.keys(DEFAULT_CONFIG).sort()).toEqual([
         'allowed_roots',
         'api_key',
         'default_timeout_seconds',
+        'disconnect_log_threshold_sec',
         'heartbeat_interval',
         'lease_heartbeat_interval',
         'log_level',
+        'loop_restart_backoff_ms',
         'max_concurrent_tasks',
         'max_retries',
+        'outbox_max_per_run',
+        'outbox_max_total',
         'poll_interval',
         'profile',
+        'retry_backoff_factor',
+        'retry_base_delay_ms',
+        'retry_jitter',
+        'retry_max_attempts',
         'runtime_id',
         'server_url',
         'spec_root_map',

@@ -96,6 +96,38 @@ export interface DaemonConfig {
    */
   max_retries: number;
   /**
+   * 网络层（ResilienceService）重试最大尝试次数，默认 3。
+   * 2026-06-24-daemon-network-resilience task-09：仅对可重试错误（fetch
+   * failed/timeout/5xx/429）退避重试；4xx 业务错误 fail-fast 不重试。
+   */
+  retry_max_attempts: number;
+  /** 网络重试初始退避毫秒，默认 1000。退避 = base × factor^i ± jitter。 */
+  retry_base_delay_ms: number;
+  /** 网络重试退避倍数，默认 2（1s/2s/4s）。 */
+  retry_backoff_factor: number;
+  /** 网络重试退避抖动比例 [0,1]，默认 0.2（±20%）。 */
+  retry_jitter: number;
+  /**
+   * _fire 循环自愈重启退避毫秒，默认 5000。
+   * 2026-06-24-daemon-network-resilience task-04：非 AbortError 异常后带退避
+   * 重启三循环，防快速重启风暴。
+   */
+  loop_restart_backoff_ms: number;
+  /**
+   * outbox 每个 run 最大暂存条数，默认 500。
+   * 2026-06-24-daemon-network-resilience task-15：超限丢最旧 + warn。
+   */
+  outbox_max_per_run: number;
+  /** outbox 全局最大暂存条数，默认 5000。超限丢最旧 + warn。 */
+  outbox_max_total: number;
+  /**
+   * 连续断连超该秒数记一次 FATAL 日志（运维感知），默认 30。
+   * 2026-06-24-daemon-network-resilience task-05（D-006@v1）：仅 FATAL 计数，
+   * 不主动上报 degraded——backend DEFAULT_RUNTIME_STALE_SECONDS=45s 已因心跳
+   * 超时自然判 runtime offline，网络恢复后 heartbeat 自动拉回 online。
+   */
+  disconnect_log_threshold_sec: number;
+  /**
    * 是否在 agent run 启动时弹出本地终端窗口观察执行过程。默认 false。
    * daemon 写观察日志到 ~/.sillyhub/daemon/runs/<leaseId>/terminal.log，
    * enabled=true 时调 terminal-launcher 弹终端 tail 该日志。
@@ -196,6 +228,15 @@ export const DEFAULT_CONFIG: Readonly<DaemonConfig> = Object.freeze({
   // task-10 B2/B3：超时优先级链兜底 + spawn 级失败重试上限。
   default_timeout_seconds: 1800,
   max_retries: 1,
+  // 2026-06-24-daemon-network-resilience task-09：网络层可靠性配置默认值。
+  retry_max_attempts: 3,
+  retry_base_delay_ms: 1000,
+  retry_backoff_factor: 2,
+  retry_jitter: 0.2,
+  loop_restart_backoff_ms: 5000,
+  outbox_max_per_run: 500,
+  outbox_max_total: 5000,
+  disconnect_log_threshold_sec: 30,
   // ql-20260616-003：本地终端观察（默认关闭，--open-terminal 开启）
   terminal_observer_enabled: false,
   terminal_observer_mode: 'parsed',

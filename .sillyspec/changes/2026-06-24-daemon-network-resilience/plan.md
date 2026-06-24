@@ -19,17 +19,17 @@ plan_level: full
 | daemon 重启后 outbox load 恢复 + claim_token rotate 422 容忍（R-07/R-10） | task-15/18（outbox + drain 测试） | 缺失 token 的条目丢弃（可接受，warn 记录） |
 
 ## Wave 1（无依赖 — 止血：日志 + 保活，sillyhub-daemon 内独立可交付）
-- [ ] task-01: `hub-client._request` fetch reject 透传 `TypeError.cause`（不吞底层 code）（覆盖：FR-01）
-- [ ] task-02: `daemon.ts:1294`（onTurnMessage）+ `:1449`（heartbeat）warn 展开 `{ message, cause: { code, message } }`（覆盖：FR-01）
-- [ ] task-03: `cli.ts:713-720` unhandledRejection/uncaughtException handler 强化（结构化 FATAL 日志 + 绝不 process.exit）（覆盖：FR-02）
-- [ ] task-04: `daemon.ts _fire(1421)` 循环自愈——loop 非 AbortError 异常结束时带退避重启（覆盖：FR-02）
-- [ ] task-05: `daemon.ts` 断连 FATAL 计数（`disconnect_log_threshold_sec` 默认 30s；不主动 degraded，复用 backend 45s offline）（覆盖：FR-03, D-003, D-006）
-- [ ] task-06: W1 测试——cause 透传 / handler 不退进程 / _fire 自愈 / 断连计数（覆盖：FR-01, FR-02, FR-03）
+- [x] task-01: `hub-client._request` fetch reject 透传 `TypeError.cause`（不吞底层 code）（覆盖：FR-01）
+- [x] task-02: `daemon.ts:1294`（onTurnMessage）+ `:1449`（heartbeat）warn 展开 `{ message, cause: { code, message } }`（覆盖：FR-01）
+- [x] task-03: `cli.ts:713-720` unhandledRejection/uncaughtException handler 强化（结构化 FATAL 日志 + 绝不 process.exit）（覆盖：FR-02）
+- [x] task-04: `daemon.ts _fire(1421)` 循环自愈——loop 非 AbortError 异常结束时带退避重启（覆盖：FR-02）
+- [x] task-05: `daemon.ts` 断连 FATAL 计数（`disconnect_log_threshold_sec` 默认 30s；不主动 degraded，复用 backend 45s offline）（覆盖：FR-03, D-003, D-006）
+- [x] task-06: W1 测试——cause 透传 / handler 不退进程 / _fire 自愈 / 断连计数（覆盖：FR-01, FR-02, FR-03）
 
 ## Wave 2（依赖 W1 — 重试：interactive + batch + 终态，sillyhub-daemon 内）
 - [ ] task-07: 新增 `resilience/error-classify.ts`（isRetryable / toCauseInfo 纯函数）（覆盖：FR-04）
 - [ ] task-08: 新增 `resilience/service.ts` ResilienceService（submitWithRetry + retryTerminal + notifyHeartbeatResult + drainOutbox 占位）（覆盖：FR-04, FR-05）
-- [ ] task-09: `config.ts` 新增 retry_* 配置项 + 默认值（maxAttempts=3/baseDelayMs=1000/backoffFactor=2/jitter=0.2）（覆盖：FR-04）
+- [x] task-09: `config.ts` 新增 retry_* 配置项 + 默认值（maxAttempts=3/baseDelayMs=1000/backoffFactor=2/jitter=0.2）（覆盖：FR-04）
 - [ ] task-10: `daemon.onTurnMessage:1287` 改调 `_resilience.submitWithRetry`（+ 未注入回退直接调 HubClient）（覆盖：FR-04）
 - [ ] task-11: `task-runner.ts:1147` batch submit 改走 submitWithRetry + 生成 dedup_key（保持非阻塞）（覆盖：FR-10, D-005）
 - [ ] task-12: notifyRunResult/completeLease/notifySessionEnd 包 `retryTerminal` 轻量重试（覆盖：FR-05）

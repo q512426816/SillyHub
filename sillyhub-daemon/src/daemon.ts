@@ -55,7 +55,7 @@ import type {
 } from './types.js';
 import { AgentDetector } from './agent-detector.js';
 import type { DetectedAgent } from './agent-detector.js';
-import { HubClient } from './hub-client.js';
+import { HubClient, extractCause } from './hub-client.js';
 import { WsClient } from './ws-client.js';
 import { listDir } from './file-rpc.js';
 import { buildSpawnEnv } from './spawn-env.js';
@@ -514,6 +514,15 @@ export class Daemon {
 
   /** agent provider → server 分配的 runtime_id（register 成功后填入）。 */
   private readonly _registeredRuntimes = new Map<string, string>();
+
+  /**
+   * task-05（FR-03）：按 rid 维护的心跳断连计数。value=首次失败时间戳 ms，缺 key=健康。
+   * _fire 自愈重启 _heartbeatLoop 后类成员保留，不重置（避免重启即误判健康）。
+   */
+  private readonly _heartbeatFailSince = new Map<string, number>();
+
+  /** task-05：已告警 FATAL 的 rid 集合，防持续断连刷日志风暴；恢复时清除。 */
+  private readonly _degradedWarned = new Set<string>();
 
   /**
    * ql-20260616-006：agent provider → 本机 CLI 可执行文件路径。
@@ -1291,11 +1300,14 @@ export class Daemon {
         [fwdMsg],
       );
     } catch (e) {
+      // task-02（FR-01）：展开底层 cause，让 fetch failed 暴露 ECONNREFUSED/
+      // ENOTFOUND/ETIMEDOUT/证书错误等 undici code，而非仅 "fetch failed"。
       this._logger.warn('on_turn_message_submit_failed', {
         session_id: sessionId,
         lease_id: state.leaseId,
         run_id: runId,
-        error: e,
+        message: (e as Error | undefined)?.message ?? String(e),
+        cause: extractCause(e),
       });
     }
   }
@@ -1416,17 +1428,28 @@ export class Daemon {
 
   /**
    * 启动一个后台循环并追踪它的 AbortController + Promise。
-   * 循环抛 AbortError 时静默吞掉（正常停止）；其他异常记日志（不重启）。
+   * 循环抛 AbortError 时静默吞掉（正常停止）；其他异常记日志。
+   * task-04（FR-02）：非 AbortError 异常带退避自愈重启，防三循环崩了永久死。
+   * 重启前双重检查 _running（sleep 前后），stop() 退出后不复活循环。
    */
   private _fire(loop: (signal: AbortSignal) => Promise<void>): void {
     const controller = new AbortController();
     this._controllers.add(controller);
     const p: Promise<void> = loop(controller.signal)
-      .catch((e: unknown) => {
+      .catch(async (e: unknown) => {
         if (e instanceof AbortError || (e as Error | undefined)?.name === 'AbortError') {
           return;
         }
         this._logger.error('loop_crashed', { error: e });
+        // task-04：自愈重启——仅当仍在运行时带退避重启，AbortError/已 stop 不重启。
+        if (!this._running) return;
+        try {
+          await abortableSleep(this._config.loop_restart_backoff_ms ?? 5000, controller.signal);
+        } catch {
+          // sleep 期间被 abort（stop 触发）——不再重启。
+          return;
+        }
+        if (this._running) this._fire(loop);
       })
       .finally(() => {
         this._controllers.delete(controller);
@@ -1444,9 +1467,34 @@ export class Daemon {
         for (const rid of this._registeredRuntimes.values()) {
           try {
             await this._client.heartbeat(rid);
+            // task-05（FR-03）：成功→清断连计数 + 告警标记，下次断连重新计时告警。
+            this._heartbeatFailSince.delete(rid);
+            this._degradedWarned.delete(rid);
           } catch (e) {
             // 单个 rid 心跳失败不影响其他（daemon.py:172-177）
-            this._logger.warn('heartbeat_failed', { runtime_id: rid, error: e });
+            // task-02（FR-01）：展开 cause 暴露底层 undici code。
+            // task-05（FR-03 / D-006）：按 rid 累加断连时长，超阈值记一次 FATAL
+            //   （运维感知），不主动调 offline——backend 45s 自然判 runtime offline，
+            //   网络恢复后 heartbeat 自动拉回 online。
+            if (!this._heartbeatFailSince.has(rid)) {
+              this._heartbeatFailSince.set(rid, Date.now());
+            }
+            const elapsed = Date.now() - (this._heartbeatFailSince.get(rid) ?? Date.now());
+            if (
+              !this._degradedWarned.has(rid) &&
+              elapsed >= this._config.disconnect_log_threshold_sec * 1000
+            ) {
+              this._logger.error('daemon_disconnect_degraded', {
+                runtime_id: rid,
+                elapsed_sec: Math.round(elapsed / 1000),
+              });
+              this._degradedWarned.add(rid);
+            }
+            this._logger.warn('heartbeat_failed', {
+              runtime_id: rid,
+              message: (e as Error | undefined)?.message ?? String(e),
+              cause: extractCause(e),
+            });
           }
         }
       } catch (e) {

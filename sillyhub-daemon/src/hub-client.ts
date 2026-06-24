@@ -108,6 +108,47 @@ export class HubHttpError extends Error {
   }
 }
 
+// ── 错误 cause 提取（task-01 / FR-01）──────────────────────────────────────
+
+/**
+ * 从网络/HTTP 错误中提取稳定的 cause 信息，供日志展开底层原因。
+ *
+ * fetch failed（undici `TypeError`）的真实原因（`ECONNREFUSED`/`ENOTFOUND`/
+ * `ETIMEDOUT`/证书错误）挂在 `error.cause`，默认序列化只显示 `fetch failed`，
+ * 排查困难。本函数把 cause 链压平为 `{ message, code?, status? }`。
+ *
+ * 规则：
+ *   - `HubHttpError` → 返回 `{ message, status }`（业务错误，无 undici code）；
+ *   - `TypeError`（fetch failed）→ 读 `error.cause`，cause 是 Error 取
+ *     `cause.code ?? cause.name` + `cause.message`；cause 缺失 → `code = err.name`；
+ *   - `TimeoutError`/DOMException（AbortSignal.timeout）→ `code = err.name`；
+ *   - 非 Error 值 → `message = String(err)`，无 code。
+ *
+ * 纯函数，只读，不修改入参。task-07 的 error-classify.toCauseInfo 与之等价，
+ * 后续可统一，此处先在 hub-client 落地供 task-02 的 warn 展开（避免跨 task 阻塞）。
+ */
+export interface CauseInfo {
+  message: string;
+  code?: string;
+  status?: number;
+}
+
+export function extractCause(err: unknown): CauseInfo {
+  if (err instanceof HubHttpError) {
+    return { message: err.message, status: err.status };
+  }
+  const e = err as { message?: string; name?: string; cause?: unknown } | null;
+  const message =
+    e && typeof e.message === 'string' && e.message ? e.message : String(err);
+  const cause = e?.cause as
+    | { code?: string; name?: string; message?: string }
+    | undefined;
+  if (cause && (cause.code || cause.name)) {
+    return { message: cause.message ?? message, code: cause.code ?? cause.name };
+  }
+  return { message, code: e?.name };
+}
+
 // ── HubClient ─────────────────────────────────────────────────────────────────
 
 /** 默认请求超时 30 秒，对齐 Python httpx.AsyncClient(timeout=30.0)。 */

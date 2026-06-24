@@ -709,13 +709,35 @@ async function main(): Promise<void> {
 
 // 生产稳定性：三循环（heartbeat/poll/ws）fire-and-forget 的 async 若抛未捕获
 // rejection，Node 默认 --unhandled-rejections=throw 会让 daemon 静默 exit 1（仅留
-// heartbeat_failed 等 warn，无崩溃栈，难定位）。此处兜底记 FATAL 到 stderr。
+// heartbeat_failed 等 warn，无崩溃栈，难定位）。
+// task-03（FR-02 / D-006）：handler 吞事件保活——结构化 FATAL 日志（含 message+
+// stack+cause）供运维 grep 定位，绝不 process.exit（进程保活优先）。handler 自身
+// 容错：所有写日志包 try/catch，stderr 不可用时 fallback 原始字符串，绝不让 handler
+// 抛出。SIGINT/SIGTERM 仍走下方 process.exit(130) 不受影响。
+function logFatal(kind: string, payload: unknown): void {
+  try {
+    const err = payload instanceof Error ? payload : new Error(String(payload));
+    const cause = (err as Error & { cause?: unknown }).cause;
+    const parts = [`[FATAL ${kind}] ${err.message}`];
+    if (err.stack) parts.push(err.stack);
+    if (cause !== undefined) {
+      parts.push(`cause: ${JSON.stringify(cause)}`);
+    }
+    parts.push(`daemon 保活：已吞未捕获 ${kind}，进程不退出。`);
+    process.stderr.write(`${parts.join('\n')}\n`);
+  } catch {
+    try {
+      process.stderr.write(`[FATAL ${kind}] ${String(payload)}\n`);
+    } catch {
+      /* noop：stderr 不可用时彻底放弃，绝不抛出 */
+    }
+  }
+}
+
 process.on('unhandledRejection', (reason) => {
-  process.stderr.write(
-    `[FATAL unhandledRejection] ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}\n`,
-  );
+  logFatal('unhandledRejection', reason);
 });
 process.on('uncaughtException', (err) => {
-  process.stderr.write(`[FATAL uncaughtException] ${err.stack ?? err.message}\n`);
+  logFatal('uncaughtException', err);
 });
 void main();
