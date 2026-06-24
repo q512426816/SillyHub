@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<!-- author: WhaleFall | created_at: 2026-06-24T09:30:00 | 变更: 2026-06-24-kanban-gantt-ui -->
+<head>
+<meta charset="utf-8">
+<title>kanban 甘特图原型 — 2026-06-24-kanban-gantt-ui</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #f8fafc; margin: 0; padding: 20px; color: #0f172a; font-size: 13px; }
+  h2 { margin: 0 0 4px; font-size: 18px; }
+  .sub { color: #64748b; margin: 0 0 14px; }
+  .note { background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 8px 12px; color: #92400e; margin-bottom: 14px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .toolbar input, .toolbar select { padding: 5px 10px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 13px; background: #fff; }
+  .btn { padding: 5px 12px; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; }
+  .btn-primary { background: #2563eb; color: #fff; }
+  .btn-ghost { background: #fff; border: 1px solid #e2e8f0; color: #475569; }
+  .tabs { border-bottom: 1px solid #e2e8f0; margin-bottom: 0; }
+  .tab { display: inline-block; padding: 8px 16px; border-bottom: 2px solid transparent; cursor: pointer; color: #64748b; }
+  .tab.active { border-bottom-color: #2563eb; color: #2563eb; font-weight: 600; }
+
+  /* 甘特图主体 */
+  .gantt { display: flex; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; overflow: hidden; }
+  .row-head { width: 160px; flex-shrink: 0; border-right: 1px solid #e2e8f0; background: #f8fafc; }
+  .corner { height: 40px; border-bottom: 1px solid #e2e8f0; }
+  .user-block { border-bottom: 1px solid #f1f5f9; }
+  .user-name { height: 40px; padding: 0 12px; display: flex; align-items: center; gap: 8px; font-weight: 500; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+  .avatar { width: 24px; height: 24px; border-radius: 50%; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; }
+  .timeline { flex: 1; overflow-x: auto; position: relative; }
+  .date-row { display: flex; height: 40px; border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; background: #fff; z-index: 2; }
+  .date-cell { width: 90px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; border-right: 1px solid #f1f5f9; color: #475569; }
+  .date-cell .dow { font-size: 11px; color: #94a3b8; }
+  .date-cell.weekend { background: #fffbeb; }
+  .date-cell.today { background: #eff6ff; color: #2563eb; font-weight: 600; }
+
+  .lanes { position: relative; }
+  .lane { height: 36px; border-bottom: 1px dashed #f1f5f9; }
+  .lane:last-child { border-bottom: none; }
+  .lane-grid { position: absolute; top: 0; bottom: 0; width: 90px; border-right: 1px solid #f8fafc; pointer-events: none; }
+  .lane-grid.weekend { background: rgba(254, 243, 199, 0.4); }
+
+  .bar { position: absolute; height: 26px; top: 5px; border-radius: 6px; color: #fff; font-size: 11px; padding: 0 8px; display: flex; align-items: center; overflow: hidden; white-space: nowrap; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.15); transition: transform .1s, box-shadow .1s; }
+  .bar:hover { transform: translateY(-1px); box-shadow: 0 3px 8px rgba(0,0,0,.2); }
+  .bar .tag { margin-left: auto; opacity: .85; font-size: 10px; }
+  .today-line { position: absolute; top: 0; bottom: 0; width: 2px; background: #ef4444; opacity: .55; z-index: 4; }
+
+  .legend { display: flex; gap: 14px; margin-top: 14px; color: #64748b; flex-wrap: wrap; align-items: center; }
+  .legend-dot { width: 11px; height: 11px; border-radius: 3px; display: inline-block; margin-right: 4px; vertical-align: middle; }
+  .footer { margin-top: 16px; color: #64748b; line-height: 1.7; }
+  code { background: #f1f5f9; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h2>📋 kanban 甘特图原型</h2>
+<p class="sub">人员×日期矩阵 → 时间轴甘特图(自研方案 A)。纵轴人员多行泳道,横轴日期,任务条形跨 start→deadline。</p>
+
+<div class="note">⬇ 这是布局原型(模拟数据,非真实),确认设计方向用。点击任务条形模拟打开详情抽屉。</div>
+
+<!-- 模拟工具栏(复用现有 KanbanSearchBar) -->
+<div class="toolbar">
+  <select><option>全部项目</option><option>项目 A</option></select>
+  <select><option>全部状态</option><option>进行中</option></select>
+  <select><option>全部人员</option></select>
+  <input placeholder="关键词" style="flex:1;max-width:200px;">
+  <span style="color:#64748b;">📅 上周 | <b>本周</b> | 下周</span>
+  <button class="btn btn-primary">+ 新建任务</button>
+</div>
+
+<!-- Tab(复用现有两 tab 结构) -->
+<div class="tabs">
+  <span class="tab active">团队计划排程表</span>
+  <span class="tab">团队实际工作表</span>
+</div>
+
+<!-- 甘特图主体 -->
+<div class="gantt">
+  <!-- 左侧行头(人员, sticky) -->
+  <div class="row-head">
+    <div class="corner"></div>
+    <div class="user-block">
+      <div class="user-name"><span class="avatar" style="background:#2563eb;">张</span>张三<span style="margin-left:auto;color:#94a3b8;font-size:11px;">2 任务</span></div>
+    </div>
+    <div class="user-block">
+      <div class="user-name"><span class="avatar" style="background:#10b981;">李</span>李四<span style="margin-left:auto;color:#94a3b8;font-size:11px;">1 任务</span></div>
+    </div>
+    <div class="user-block">
+      <div class="user-name"><span class="avatar" style="background:#f59e0b;">王</span>王五<span style="margin-left:auto;color:#94a3b8;font-size:11px;">2 任务</span></div>
+    </div>
+  </div>
+
+  <!-- 右侧时间轴 -->
+  <div class="timeline">
+    <!-- 日期刻度 -->
+    <div class="date-row">
+      <div class="date-cell"><span>6/23</span><span class="dow">周一</span></div>
+      <div class="date-cell today"><span>6/24</span><span class="dow">周二·今天</span></div>
+      <div class="date-cell"><span>6/25</span><span class="dow">周三</span></div>
+      <div class="date-cell"><span>6/26</span><span class="dow">周四</span></div>
+      <div class="date-cell"><span>6/27</span><span class="dow">周五</span></div>
+      <div class="date-cell weekend"><span>6/28</span><span class="dow">周六</span></div>
+      <div class="date-cell weekend"><span>6/29</span><span class="dow">周日</span></div>
+    </div>
+
+    <!-- 张三:2 个并行任务 → 2 行泳道 -->
+    <div class="lanes" style="height:72px;">
+      <!-- 背景网格 -->
+      <div class="lane-grid" style="left:0px;"></div>
+      <div class="lane-grid" style="left:90px;"></div>
+      <div class="lane-grid" style="left:180px;"></div>
+      <div class="lane-grid" style="left:270px;"></div>
+      <div class="lane-grid" style="left:360px;"></div>
+      <div class="lane-grid weekend" style="left:450px;"></div>
+      <div class="lane-grid weekend" style="left:540px;"></div>
+      <!-- 任务条 -->
+      <div class="bar" style="background:#2563eb; left:2px; width:268px;" onclick="alert('详情抽屉:需求调研\nstart 6/23 → deadline 6/25')">需求调研<span class="tag">进行中</span></div>
+      <div class="bar" style="background:#06b6d4; top:41px; left:182px; width:268px;" onclick="alert('详情抽屉:接口联调\nstart 6/25 → deadline 6/27')">接口联调<span class="tag">待开始</span></div>
+    </div>
+
+    <!-- 李四:1 任务 → 1 行泳道 -->
+    <div class="lanes" style="height:36px;">
+      <div class="lane-grid" style="left:0px;"></div>
+      <div class="lane-grid" style="left:90px;"></div>
+      <div class="lane-grid" style="left:180px;"></div>
+      <div class="lane-grid" style="left:270px;"></div>
+      <div class="lane-grid" style="left:360px;"></div>
+      <div class="lane-grid weekend" style="left:450px;"></div>
+      <div class="lane-grid weekend" style="left:540px;"></div>
+      <div class="bar" style="background:#2563eb; left:92px; width:268px;" onclick="alert('详情抽屉:UI 设计\nstart 6/24 → deadline 6/26')">UI 设计<span class="tag">进行中</span></div>
+    </div>
+
+    <!-- 王五:2 任务 → 2 行泳道(架构设计长任务跨 5 天) -->
+    <div class="lanes" style="height:72px;">
+      <div class="lane-grid" style="left:0px;"></div>
+      <div class="lane-grid" style="left:90px;"></div>
+      <div class="lane-grid" style="left:180px;"></div>
+      <div class="lane-grid" style="left:270px;"></div>
+      <div class="lane-grid" style="left:360px;"></div>
+      <div class="lane-grid weekend" style="left:450px;"></div>
+      <div class="lane-grid weekend" style="left:540px;"></div>
+      <div class="bar" style="background:#10b981; left:2px; width:448px;" onclick="alert('详情抽屉:架构设计\nstart 6/23 → deadline 6/27')">架构设计(长任务)<span class="tag">进行中</span></div>
+      <div class="bar" style="background:#f59e0b; top:41px; left:272px; width:358px;" onclick="alert('详情抽屉:测试用例\nstart 6/26 → deadline 6/29(跨周末)')">测试用例<span class="tag">待开始</span></div>
+    </div>
+
+    <!-- 今天竖线(6/24 = 第2列, left=90 + 半格) -->
+    <div class="today-line" style="left:130px; top:40px; bottom:0;"></div>
+  </div>
+</div>
+
+<!-- 图例 -->
+<div class="legend">
+  <span><span class="legend-dot" style="background:#2563eb;"></span>项目 A</span>
+  <span><span class="legend-dot" style="background:#06b6d4;"></span>项目 B</span>
+  <span><span class="legend-dot" style="background:#10b981;"></span>项目 C</span>
+  <span><span class="legend-dot" style="background:#f59e0b;"></span>项目 D</span>
+  <span style="margin-left:auto;"><span class="legend-dot" style="background:#fffbeb;border:1px solid #fde68a;"></span>周末</span>
+  <span><span class="legend-dot" style="background:#ef4444;"></span>今天竖线</span>
+</div>
+
+<div class="footer">
+  <b>原型要点:</b><br>
+  ① 条形宽度 = 任务跨度 <code>(deadline - start_time) × 日宽(90px)</code>;<br>
+  ② 同人并行任务分泳道行(张三/王五各 2 行,李四 1 行) —— 贪心分配首个不冲突槽位;<br>
+  ③ 周末黄底高亮,今天红线;④ 点击条形 → 详情抽屉,右键 → 菜单(原型略);<br>
+  ⑤ 「团队实际工作表」tab 切换后,条形改用 <code>actual_start → actual_end</code> 渲染(结构同上)。<br>
+  <b>未排期任务</b>(无 start/deadline)归到行头下方独立区,不进入时间轴(原型未展示)。
+</div>
+
+</body>
+</html>

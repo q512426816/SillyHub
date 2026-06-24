@@ -37,8 +37,8 @@ import { useKanbanStore } from "@/stores/kanban";
 import { tokens } from "@/styles";
 import { Toast, useToast } from "../shared";
 import { KanbanSearchBar } from "./_components/kanban-search-bar";
-import { KanbanMatrix } from "./_components/kanban-matrix";
-import { KanbanActualMatrix } from "./_components/kanban-actual-matrix";
+import { KanbanGantt } from "./_components/kanban-gantt";
+import { KanbanActualGantt } from "./_components/kanban-actual-gantt";
 import { KanbanDateNav } from "./_components/kanban-date-nav";
 import { KanbanWorkHourChart } from "./_components/kanban-work-hour-chart";
 import { KanbanCreateTaskDialog } from "./_components/kanban-create-task-dialog";
@@ -244,7 +244,7 @@ export default function KanbanPage() {
             children: (
               <div className="flex h-full gap-3 overflow-hidden">
                 <div className="min-w-0 flex-1">
-                  <KanbanMatrix
+                  <KanbanGantt
                     users={users}
                     tasks={tasks}
                     startDate={dateRange[0].format("YYYY-MM-DD")}
@@ -294,7 +294,7 @@ export default function KanbanPage() {
                     />
                   </div>
                   <div className="flex-1 overflow-hidden">
-                    <KanbanActualMatrix
+                    <KanbanActualGantt
                       users={users}
                       executes={filteredExecutes}
                       startDate={dateRange[0].format("YYYY-MM-DD")}
