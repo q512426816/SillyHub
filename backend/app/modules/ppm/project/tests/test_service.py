@@ -242,6 +242,58 @@ async def test_member_crud_and_duplicate(db_session, operator):
         await msvc.get(m2.id)
 
 
+async def test_member_role_name_ilike_matches_multi_role(db_session, operator):
+    """回归:role_name 多角色逗号拼接存储(D-009@v1),page(role_name=)
+    用 ilike 模糊匹配,应能命中含该角色的多角色成员。
+
+    复现场景:/ppm/project-plans 编辑/新建时,项目经理下拉 res=projectMember +
+    searchData.role_name="项目经理" 拉选项;若成员 role_name 是
+    "开发经理,项目经理,前端开发人员,后端开发人员"(逗号拼接),
+    精确匹配会漏掉 → 下拉「无数据」。
+    """
+    project_svc = ProjectMaintenanceService(db_session)
+    project = await project_svc.create(
+        ProjectMaintenanceCreate(project_code="M-ILIKE", project_name="多角色成员项目"),
+        operator=operator,
+    )
+    msvc = ProjectMemberService(db_session)
+    # 单角色项目经理
+    await msvc.create(
+        ProjectMemberCreate(
+            pm_project_id=project.id,
+            user_id=uuid.uuid4(),
+            user_name="纯PM",
+            role_name="项目经理",
+        ),
+        operator=operator,
+    )
+    # 多角色逗号拼接,含「项目经理」
+    await msvc.create(
+        ProjectMemberCreate(
+            pm_project_id=project.id,
+            user_id=uuid.uuid4(),
+            user_name="多角色PM",
+            role_name="开发经理,项目经理,前端开发人员,后端开发人员",
+        ),
+        operator=operator,
+    )
+    # 不含「项目经理」的成员
+    await msvc.create(
+        ProjectMemberCreate(
+            pm_project_id=project.id,
+            user_id=uuid.uuid4(),
+            user_name="开发",
+            role_name="开发",
+        ),
+        operator=operator,
+    )
+
+    res = await msvc.page(ProjectMemberPageReq(pm_project_id=project.id, role_name="项目经理"))
+    assert res.total == 2, f"应命中 2 个项目经理(单/多角色),实得 {res.total}"
+    names = {m.user_name for m in res.items}
+    assert names == {"纯PM", "多角色PM"}
+
+
 # ---------------------------------------------------------------------------
 # ProjectStakeholderService (FK→project)
 # ---------------------------------------------------------------------------

@@ -450,7 +450,10 @@ class ProjectMemberService:
         if user_id is not None:
             stmt = stmt.where(PpmProjectMember.user_id == user_id)
         if req.role_name:
-            stmt = stmt.where(PpmProjectMember.role_name == req.role_name)
+            # role_name 在「项目成员管理」页是多角色逗号拼接存储
+            # (D-009@v1,源 multiple-value-type="join",如"开发经理,项目经理,..."),
+            # 这里用 ilike 模糊匹配,避免精确匹配漏掉多角色拼接的成员导致下拉「无数据」。
+            stmt = stmt.where(PpmProjectMember.role_name.ilike(f"%{req.role_name}%"))
         total = await count_total(self._session, stmt)
         stmt = apply_sort(
             stmt,

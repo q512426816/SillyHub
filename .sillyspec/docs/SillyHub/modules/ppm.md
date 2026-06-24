@@ -75,7 +75,11 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 - 导出列定义在 export.py 各 _COLUMNS 常量
 - plan fsm 的 PlanNodeDetailStatus 含 archived 终态
 - problem fsm 的 ProblemStatus 含挂起/关闭等扩展态
+- project_member.role_name 是多角色逗号拼接存储（D-009@v1，源 multiple-value-type="join"，如"开发经理,项目经理,前端开发人员"）；ProjectMemberService.page 按 role_name 过滤用 ilike 模糊匹配，避免精确匹配漏掉多角色拼接成员（曾致 /ppm/project-plans 编辑/新建项目经理下拉「无数据」）
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->
+
+## 变更索引
+- ql-20260624-010-xxxx | 修复项目计划编辑/新建项目经理下拉多角色成员显示无数据（role_name ilike 模糊匹配）
