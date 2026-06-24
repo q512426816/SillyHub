@@ -1016,3 +1016,9 @@ created_at: 2026-06-03T08:42:04
 文件：frontend/src/lib/ppm/aggregations.ts
 根因:toBarSeries grid bottom 仅 40-64,axisLabel rotate 30/45,项目名长 + kanban 工时图窄容器(380px)→X 轴类目标签和柱子重叠。
 修复:grid bottom 类目>6 时 96(原 40/64);axisLabel rotate 类目>6 时 45(原 30);formatter 截断长类目(>8 字 → 前 7 + …),tooltip 仍显全名。typecheck 通过。Docker frontend 待重建部署。
+
+## ql-20260624-007-b2d4 | 2026-06-24 14:10:00 | 修复项目工时饼图图例(类目)与扇形重叠
+状态：已完成
+文件：frontend/src/lib/ppm/aggregations.ts
+根因:toPieOption(项目工时占比饼图)legend vertical right 无 width/formatter,项目名长(融通项目.../25年浦镇QMS...)→图例项超出右侧容器,与扇形重叠。ql-006 改的是柱图(toBarSeries),本次是饼图。
+修复:legend 加 width:150 + formatter 截断长名(>10字→前9+…),tooltip 仍全名;pie center 40%→35% 给图例让空间。typecheck 通过。Docker frontend 待重建部署。

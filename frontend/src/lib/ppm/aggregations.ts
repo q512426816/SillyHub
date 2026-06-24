@@ -120,12 +120,20 @@ export function toPieSeries(
       formatter: (p: any) =>
         `${p.name}: ${toNumber(p.value).toFixed(1)}h (${p.percent ?? 0}%)`,
     },
-    legend: { type: "scroll", orient: "vertical", right: 0, top: "middle" },
+    legend: {
+      type: "scroll",
+      orient: "vertical",
+      right: 0,
+      top: "middle",
+      width: 150,
+      formatter: (name: string) =>
+        typeof name === "string" && name.length > 10 ? name.slice(0, 9) + "…" : name,
+    },
     series: [
       {
         type: "pie",
         radius: ["40%", "70%"],
-        center: ["40%", "50%"],
+        center: ["35%", "50%"],
         avoidLabelOverlap: true,
         label: { show: false },
         labelLine: { show: false },
