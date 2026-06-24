@@ -27,14 +27,14 @@ plan_level: full
 - [x] task-06: W1 测试——cause 透传 / handler 不退进程 / _fire 自愈 / 断连计数（覆盖：FR-01, FR-02, FR-03）
 
 ## Wave 2（依赖 W1 — 重试：interactive + batch + 终态，sillyhub-daemon 内）
-- [ ] task-07: 新增 `resilience/error-classify.ts`（isRetryable / toCauseInfo 纯函数）（覆盖：FR-04）
-- [ ] task-08: 新增 `resilience/service.ts` ResilienceService（submitWithRetry + retryTerminal + notifyHeartbeatResult + drainOutbox 占位）（覆盖：FR-04, FR-05）
+- [x] task-07: 新增 `resilience/error-classify.ts`（isRetryable / toCauseInfo 纯函数）（覆盖：FR-04）
+- [x] task-08: 新增 `resilience/service.ts` ResilienceService（submitWithRetry + retryTerminal + notifyHeartbeatResult + drainOutbox 占位）（覆盖：FR-04, FR-05）
 - [x] task-09: `config.ts` 新增 retry_* 配置项 + 默认值（maxAttempts=3/baseDelayMs=1000/backoffFactor=2/jitter=0.2）（覆盖：FR-04）
-- [ ] task-10: `daemon.onTurnMessage:1287` 改调 `_resilience.submitWithRetry`（+ 未注入回退直接调 HubClient）（覆盖：FR-04）
-- [ ] task-11: `task-runner.ts:1147` batch submit 改走 submitWithRetry + 生成 dedup_key（保持非阻塞）（覆盖：FR-10, D-005）
-- [ ] task-12: notifyRunResult/completeLease/notifySessionEnd 包 `retryTerminal` 轻量重试（覆盖：FR-05）
-- [ ] task-13: `cli.ts` 注入 ResilienceService（构造时传入 client/outbox/config/logger）（覆盖：FR-04）
-- [ ] task-14: W2 测试——error-classify / submitWithRetry 重试退避错误分类 / retryTerminal / batch 路径（覆盖：FR-04, FR-05, FR-10）
+- [x] task-10: `daemon.onTurnMessage:1287` 改调 `_resilience.submitWithRetry`（+ 未注入回退直接调 HubClient）（覆盖：FR-04）
+- [x] task-11: `task-runner.ts:1147` batch submit 改走 submitWithRetry + 生成 dedup_key（保持非阻塞）（覆盖：FR-10, D-005）
+- [x] task-12: notifyRunResult/completeLease/notifySessionEnd 包 `retryTerminal` 轻量重试（覆盖：FR-05）
+- [x] task-13: `cli.ts` 注入 ResilienceService（构造时传入 client/outbox/config/logger）（覆盖：FR-04）
+- [x] task-14: W2 测试——error-classify / submitWithRetry 重试退避错误分类 / retryTerminal / batch 路径（覆盖：FR-04, FR-05, FR-10）
 
 ## Wave 3（依赖 W2 — 暂存补发 + 幂等根治，跨子项目）
 - [ ] task-15: 新增 `resilience/outbox.ts`（落盘 JSONL `~/.sillyhub/daemon/outbox/<runId>.jsonl` + markDelivered + load 恢复 + 容量上限）（覆盖：FR-06, FR-09）

@@ -50,6 +50,9 @@ import { WorkspaceManager } from './workspace.js';
 import { CredentialManager } from './credential.js';
 import { TaskRunner } from './task-runner.js';
 import { Daemon } from './daemon.js';
+// 2026-06-24-daemon-network-resilience task-13：网络层重试编排注入。
+import { ResilienceService } from './resilience/service.js';
+import type { ResilienceLogger } from './resilience/service.js';
 import { ClaudeSdkDriver } from './interactive/claude-sdk-driver.js';
 import { CodexAppServerDriver } from './interactive/codex-app-server-driver.js';
 import { SessionManager } from './interactive/session-manager.js';
@@ -96,6 +99,26 @@ export async function saveConfigFn(
 }
 
 // ── 辅助函数（对齐 Python _read_pid / _is_process_alive / _write_pid / _remove_pid）──
+
+/**
+ * 2026-06-24-daemon-network-resilience task-13：ResilienceService 用的最小 logger。
+ *
+ * cli 层无 daemon 的 createLogger（daemon 内部私有），这里构造一个轻量 logger 走 stderr，
+ * 让 ResilienceService 的 submit_enqueued_to_outbox / submit_exhausted_no_outbox 等
+ * 事件可观测。daemon 自身的 createLogger 未对 ResilienceService 开放注入（避免循环依赖），
+ * 故 cli 侧独立提供。
+ */
+function cliResilienceLogger(): ResilienceLogger {
+  const write = (level: 'info' | 'warn' | 'error', event: string, kv?: Record<string, unknown>): void => {
+    const parts = kv ? Object.entries(kv).map(([k, v]) => `${k}=${v instanceof Error ? v.message : typeof v === 'object' ? JSON.stringify(v) : String(v)}`) : [];
+    process.stderr.write(`[resilience.${event}] ${parts.join(' ')}\n`);
+  };
+  return {
+    info: (e, kv) => write('info', e, kv),
+    warn: (e, kv) => write('warn', e, kv),
+    error: (e, kv) => write('error', e, kv),
+  };
+}
 
 /**
  * 读 PID 文件，返回存储的 PID；文件缺失或损坏返回 null。
@@ -394,7 +417,16 @@ export async function startAction(opts: StartOptions): Promise<number> {
   // ql-20260616-003：第 4 参传 config —— TaskRunner 需要读 terminal_observer_*
   // 字段决定是否写日志 + 弹独立终端。之前漏传，导致 config 一直走兜底（observer
   // 字段未生效）。
-  const taskRunner = new TaskRunner(client, workspaceMgr, credentialMgr, config);
+  // 2026-06-24-daemon-network-resilience task-13：构造 ResilienceService 注入
+  // TaskRunner（batch submit 重试）+ Daemon（interactive submit 重试 + 终态轻量重试）。
+  // W2 阶段 outbox 传 null（task-08 支持可选，用尽 warn 丢）；W3 task-15 落地后改传真实 Outbox。
+  const resilience = new ResilienceService(client, null, {
+    maxAttempts: config.retry_max_attempts,
+    baseDelayMs: config.retry_base_delay_ms,
+    backoffFactor: config.retry_backoff_factor,
+    jitter: config.retry_jitter,
+  }, cliResilienceLogger());
+  const taskRunner = new TaskRunner(client, workspaceMgr, credentialMgr, config, resilience);
 
   // task-04（D-002@v3 补丁 gap-1）：注入 SessionManager + daemon 桥接 deps。
   //
@@ -495,6 +527,7 @@ export async function startAction(opts: StartOptions): Promise<number> {
     persistence,
     recoveryClient: client,
     lockManager,
+    resilience,
   });
 
   // step 6: 写 PID 文件（对齐 Python __main__.py:106 `_write_pid(os.getpid())`）。

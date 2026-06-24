@@ -55,6 +55,10 @@ import {
   type TerminalObserver,
 } from './terminal-observer.js';
 import type { DaemonConfig } from './config.js';
+// 2026-06-24-daemon-network-resilience task-11/12：batch submit 重试 + 终态轻量重试。
+import type { ResilienceService } from './resilience/service.js';
+import type { Envelope } from './resilience/service.js';
+import { dedupKeyFor, toCauseInfo } from './resilience/error-classify.js';
 import type {
   AgentEvent,
   LeaseCtx,
@@ -203,6 +207,12 @@ export class TaskRunner {
     private readonly workspace: RunnerWorkspaceManager,
     private readonly credential: RunnerCredentialManager,
     private readonly config?: DaemonConfig,
+    /**
+     * 2026-06-24-daemon-network-resilience task-11/12：网络层重试编排。
+     * 注入后 batch submitMessages 走 submitWithRetry（非阻塞）、终态 completeLease
+     * 走 retryTerminal；未注入（undefined）回退直接调 client（向后兼容）。
+     */
+    private readonly resilience?: ResilienceService | null,
   ) {}
 
   // ── 追踪与取消 ────────────────────────────────────────────────────────────
@@ -1142,12 +1152,30 @@ export class TaskRunner {
     // submitMessages：fire-and-forget，不阻塞 stdout readline（每条 await HTTP
     // 会让 cursor/codex 执行慢一个数量级；失败仅 warn，对齐容错策略）。
     // ql-004：空 agentRunId 不发 submitMessages，防空 agent_run_id 422 风暴。
+    // task-11（FR-10 / D-005@v1）：注入 resilience 时走 submitWithRetry（带退避重试 +
+    // dedup_key），保持非阻塞（void + catch）；未注入回退原 client.submitMessages。
     if (env.claimToken && env.agentRunId) {
-      void this.client
-        .submitMessages(env.leaseId, env.claimToken, env.agentRunId, messages)
-        .catch((e) => {
-          console.warn('task_runner: event_forward_failed', env.leaseId, e);
-        });
+      if (this.resilience) {
+        const envelopes: Envelope[] = messages.map((m, idx) => ({
+          message: m,
+          dedup_key: dedupKeyFor(m, env.agentRunId, 0, idx),
+        }));
+        void this.resilience
+          .submitWithRetry(env.leaseId, env.claimToken, env.agentRunId, envelopes)
+          .catch((e) => {
+            console.warn(
+              'task_runner: event_forward_failed',
+              env.leaseId,
+              toCauseInfo(e),
+            );
+          });
+      } else {
+        void this.client
+          .submitMessages(env.leaseId, env.claimToken, env.agentRunId, messages)
+          .catch((e) => {
+            console.warn('task_runner: event_forward_failed', env.leaseId, e);
+          });
+      }
     }
   }
 

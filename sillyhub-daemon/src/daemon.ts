@@ -61,6 +61,10 @@ import { listDir } from './file-rpc.js';
 import { buildSpawnEnv } from './spawn-env.js';
 // 2026-06-24 preflight：启动前预检 sillyspec 版本 + daemon 自更新（失败不阻断启动）。
 import { runPreflight } from './preflight.js';
+// 2026-06-24-daemon-network-resilience task-10/12：网络层重试编排（submit 重试 + 终态轻量重试）。
+import { ResilienceService } from './resilience/service.js';
+import type { Envelope } from './resilience/service.js';
+import { dedupKeyFor } from './resilience/error-classify.js';
 import type { TaskRunner, TaskRunnerResult } from './task-runner.js';
 import type { SessionManager } from './interactive/session-manager.js';
 // task-06（D-007@v1）：spec bundle 同步共享 utility（task-04 抽出），interactive
@@ -410,6 +414,12 @@ export interface DaemonOptions {
    * stop 时 releaseAll。默认 undefined：不强制单实例（向后兼容）。
    */
   lockManager?: RuntimeLockLike | null;
+  /**
+   * 2026-06-24-daemon-network-resilience task-10/12/13：网络层重试编排服务。
+   * 注入后 submitMessages 走退避重试（用尽入 outbox）、终态上报走 retryTerminal。
+   * 默认 undefined：回退直接调 HubClient（无重试，向后兼容 W1）。
+   */
+  resilience?: ResilienceService | null;
 }
 
 /**
@@ -470,6 +480,12 @@ export class Daemon {
   private readonly _credentialManager: InteractiveCredentialManager | null;
   /** ql-20260624-006：runtime 单实例 lock 管理器。null 时不强制单实例。 */
   private readonly _lockManager: RuntimeLockLike | null;
+  /**
+   * 2026-06-24-daemon-network-resilience task-10/12：网络层重试编排。
+   * 注入后 onTurnMessage 走 submitWithRetry、终态走 retryTerminal；未注入（null）
+   * 回退直接调 _client（向后兼容）。由 cli（task-13）构造时注入。
+   */
+  private readonly _resilience: ResilienceService | null;
   /**
    * task-04：interactive lease.id → session_id（防 WS 重放重复 create，AC-09）。
    * batch lease 不进此 map（走 _inflightLeases 去重）。
@@ -555,6 +571,7 @@ export class Daemon {
     this._sessionManager = options?.sessionManager ?? null;
     this._credentialManager = options?.credentialManager ?? null;
     this._lockManager = options?.lockManager ?? null;
+    this._resilience = options?.resilience ?? null;
     this._persistence = options?.persistence ?? null;
     this._recoveryClient = options?.recoveryClient ?? null;
     this._recoveryConcurrency =
@@ -1177,12 +1194,15 @@ export class Daemon {
       payload.cache_read_tokens = resultMeta.usage.cache_read_input_tokens;
     }
     try {
-      await this._client.notifyRunResult(
-        state.leaseId,
-        state.claimToken,
-        runId,
-        payload,
-      );
+      // task-12（FR-05 / D-005@v1）：终态上报包 retryTerminal 轻量重试（不暂存）。
+      // _resilience 未注入 → 回退直接调 _client。用尽抛被下方 catch 兜住 warn。
+      const call = (): Promise<unknown> =>
+        this._client.notifyRunResult(state.leaseId, state.claimToken, runId, payload);
+      if (this._resilience) {
+        await this._resilience.retryTerminal(call);
+      } else {
+        await call();
+      }
     } catch (e) {
       // backend 500 / 422 / 网络 → warn 不向上抛（SessionManager._onResult 不感知，
       // daemon 主循环继续）。run 关闭失败由 backend 兜底（lease 超时 / SSE 重连）。
@@ -1293,12 +1313,29 @@ export class Daemon {
           fwdMsg['usage'] = lifted;
         }
       }
-      await this._client.submitMessages(
-        state.leaseId,
-        state.claimToken,
-        runId,
-        [fwdMsg],
-      );
+      // task-10（FR-04 / D-005@v1）：interactive submit 走退避重试。
+      // _resilience 未注入 → 回退直接调 _client（无重试，向后兼容）。
+      // dedup_key：Claude msg.id 优先（dedupKeyFor），无则 runId 兜底（interactive 单条，
+      // 无显式 seq 计数，task-16 用 runId+timestamp 确定性兜底）。
+      if (this._resilience) {
+        const envelope: Envelope = {
+          message: fwdMsg,
+          dedup_key: dedupKeyFor(fwdMsg, runId),
+        };
+        await this._resilience.submitWithRetry(
+          state.leaseId,
+          state.claimToken,
+          runId,
+          [envelope],
+        );
+      } else {
+        await this._client.submitMessages(
+          state.leaseId,
+          state.claimToken,
+          runId,
+          [fwdMsg],
+        );
+      }
     } catch (e) {
       // task-02（FR-01）：展开底层 cause，让 fetch failed 暴露 ECONNREFUSED/
       // ENOTFOUND/ETIMEDOUT/证书错误等 undici code，而非仅 "fetch failed"。
@@ -1353,7 +1390,15 @@ export class Daemon {
         ? 'driver_error'
         : 'manual';
     try {
-      await this._client.notifySessionEnd(sessionId, mappedStatus, reason);
+      // task-12（FR-05 / D-005@v1）：终态上报包 retryTerminal 轻量重试（不暂存）。
+      // _resilience 未注入 → 回退直接调 _client。用尽抛被下方 catch 兜住 warn。
+      const call = (): Promise<unknown> =>
+        this._client.notifySessionEnd(sessionId, mappedStatus, reason);
+      if (this._resilience) {
+        await this._resilience.retryTerminal(call);
+      } else {
+        await call();
+      }
     } catch (e) {
       this._logger.warn('on_session_end_notify_failed', {
         session_id: sessionId,
@@ -2437,20 +2482,28 @@ export class Daemon {
     // 4. COMPLETE：回传结果（task-17 completeLease）
     // 字段映射：TaskRunnerResult 是 camelCase，server complete_lease 期望 snake_case
     try {
-      await this._client.completeLease(leaseId, claimToken, {
-        success: taskResult.success,
-        output: taskResult.output,
-        error: taskResult.error,
-        patch: taskResult.patch,
-        files_changed: taskResult.filesChanged,
-        insertions: taskResult.insertions,
-        deletions: taskResult.deletions,
-        duration_ms: taskResult.durationMs,
-        session_id: taskResult.metadata?.session_id ?? taskResult.sessionId ?? '',
-        stats: taskResult.stats,
-        exit_code: taskResult.exitCode,
-        status: taskResult.status,
-      });
+      // task-12（FR-05 / D-005@v1）：终态上报包 retryTerminal 轻量重试（不暂存）。
+      // _resilience 未注入 → 回退直接调 _client。用尽抛被下方 catch 兜住。
+      const call = (): Promise<unknown> =>
+        this._client.completeLease(leaseId, claimToken, {
+          success: taskResult.success,
+          output: taskResult.output,
+          error: taskResult.error,
+          patch: taskResult.patch,
+          files_changed: taskResult.filesChanged,
+          insertions: taskResult.insertions,
+          deletions: taskResult.deletions,
+          duration_ms: taskResult.durationMs,
+          session_id: taskResult.metadata?.session_id ?? taskResult.sessionId ?? '',
+          stats: taskResult.stats,
+          exit_code: taskResult.exitCode,
+          status: taskResult.status,
+        });
+      if (this._resilience) {
+        await this._resilience.retryTerminal(call);
+      } else {
+        await call();
+      }
       this._logger.info('task_completed', {
         lease_id: leaseId,
         success: taskResult.success,
