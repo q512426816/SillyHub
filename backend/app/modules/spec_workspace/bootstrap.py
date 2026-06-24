@@ -318,6 +318,9 @@ async def _execute_bootstrap_agent_run(
                 spec_root=spec_root,
                 root_path=code_root,
                 run_id=run.id,
+                # 方案 A：按 workspace.path_source 决策 transport——bootstrap scan 入口与
+                # start_scan_dispatch 路径保持一致。workspace 在上方 line ~239 已加载并校验非 None。
+                path_source=workspace.path_source,
             )
             scan_provider = resolved_provider or "claude_code"
             now = datetime.now(UTC)

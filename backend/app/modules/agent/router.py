@@ -226,6 +226,10 @@ async def get_execution_context(
             root_path=lease_meta.get("root_path", ""),
             run_id=run.id,
             runtime_root=lease_meta.get("runtime_root"),
+            # 方案 A：按 workspace.path_source 决策 transport——daemon fetch 重建 scan
+            # bundle 时与首次 dispatch（start_scan_dispatch）路径保持一致。ws_row 在上方
+            # line ~187 已查；None（quick-chat，理论上 scan 必有 workspace）→ 全局兜底。
+            path_source=ws_row.path_source if ws_row else None,
         )
 
     claude_md = render_bundle_to_claude_md(bundle)

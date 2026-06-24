@@ -17,9 +17,10 @@ from sqlmodel import col
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.modules.agent.context_builder import transport_for_path_source
 from app.modules.agent.model import AgentRun
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
-from app.modules.workspace.model import AgentRunWorkspace
+from app.modules.workspace.model import AgentRunWorkspace, Workspace
 
 log = get_logger(__name__)
 
@@ -87,12 +88,6 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
         #         execPayload.transport === 'tar' 切分支，task-06）。
         #   - shared（默认，D-004@v1）：维持现状透传 spec_root/runtime_root，daemon 走
         #         translateSpecRoot，bind mount 共享，不 pull 不 sync（向后兼容）。
-        transport = get_settings().spec_transport
-        # transport 双写（camelCase + snake_case），对齐 specRoot/spec_root、rootPath/root_path
-        # 惯例；daemon execPayload 归一化两端字段名都覆盖（边界 E5）。
-        payload["transport"] = transport
-        payload["transportMode"] = transport
-
         # ws_id 解析上提（§4.3）：原代码在 spec_root 解析块内部解析 ws_id 仅用于 DB 回填，
         # 本任务上提到 transport 分支之前，让 tar/shared 两路共用同一份 ws_id（行为等价，
         # 同 lease_meta、同 UUID 逻辑；AC-10 现有 test_lease_service.py AC-02 守护）。
@@ -106,6 +101,28 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
                 ws_id = uuid.UUID(ws_id_raw) if isinstance(ws_id_raw, str) else ws_id_raw
             except (ValueError, AttributeError, TypeError):
                 ws_id = None
+
+        # 方案 A（path_source per-workspace transport 决策）：transport 不再只看全局
+        # settings.spec_transport，而是按 workspace.path_source 锁定。ws_id 非 None 时查
+        # Workspace 行取 path_source（daemon-client→tar / 显式 server-local→shared 锁死，
+        # 忽略全局）；path_source=None（quick-chat 无 workspace / 查不到行 / 字段空）→ 回退
+        # 全局 settings.spec_transport（向后兼容兜底，守护现有 test_lease_claim_transport C1-C5：
+        # 它们不创建真实 Workspace 行，全走兜底分支）。
+        settings = get_settings()
+        path_source: str | None = None
+        if ws_id is not None:
+            ws_row = await session.get(Workspace, ws_id)
+            if ws_row is not None:
+                path_source = ws_row.path_source
+        transport = (
+            settings.spec_transport
+            if path_source is None
+            else transport_for_path_source(path_source)
+        )
+        # transport 双写（camelCase + snake_case），对齐 specRoot/spec_root、rootPath/root_path
+        # 惯例；daemon execPayload 归一化两端字段名都覆盖（边界 E5）。
+        payload["transport"] = transport
+        payload["transportMode"] = transport
 
         if transport == "tar":
             # tar 模式：不透传 specRoot/spec_root/runtimeRoot/runtime_root（daemon pull 分支，

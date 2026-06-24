@@ -1015,18 +1015,25 @@ class AgentService:
                 # daemon 零客户端配置。spec_ws.spec_root（容器路径）保留供 backend 内部访问。
                 from app.core.config import get_settings
                 from app.modules.agent.context_builder import resolve_prompt_spec_root
+                from app.modules.workspace.model import Workspace
 
                 settings = get_settings()
-                # 按 transport 分支决定塞入 stage prompt 的 --spec-root 路径（design §5.0 表）。
+                # 方案 A（path_source per-workspace transport 决策）：按当前 workspace 的
+                # path_source 决定塞入 stage prompt 的 --spec-root 路径。daemon-client→tar
+                # （daemon 本地路径），显式 server-local→shared（锁死），None→全局兜底。
                 # 与 build_scan_bundle（context_builder.build_scan_bundle）复用同一 helper，保证
-                # scan 与 stage 链路在 tar 模式下路径一致（task-02）。
+                # scan 与 stage 链路路径一致（task-02）。
                 # 注意：host_spec_root 仅用于 prompt 文本（daemon 机器跑 sillyspec 时访问的路径）；
                 # spec_ws.spec_root（容器路径权威源）的读取不受影响，仅用于 platform-managed 策略
-                # 判断。stage 经 dispatch_to_daemon → interactive lease，tar 模式下 daemon
+                # 判断。stage 经 dispatch_to_daemon → batch lease（§0）；tar 模式下 daemon
                 # _startInteractiveSession pull + onSessionEnd sync 自动复用 Wave1（task-06），
                 # 本处无需任何 daemon 改动（D-007）。
+                # stage_ws 仅在此处读 path_source（identity map 缓存命中，下方 line ~1064 的
+                # workspace 查询复用同一缓存，无额外 DB 开销）。
+                stage_ws = await self._session.get(Workspace, workspace_id)
+                stage_path_source = stage_ws.path_source if stage_ws else None
                 host_spec_root = resolve_prompt_spec_root(
-                    settings.spec_transport, str(workspace_id), settings
+                    str(workspace_id), settings, path_source=stage_path_source
                 )
                 host_runtime_root = f"{host_spec_root}/runtime"
                 platform_args = (
@@ -1325,6 +1332,9 @@ class AgentService:
             spec_root=spec_root,
             root_path=root_path,
             run_id=run_id,
+            # 方案 A：透传 workspace.path_source（line ~1273 已取），让 build_scan_bundle
+            # 按 per-workspace 决策 transport（daemon-client→tar / server-local→shared）。
+            path_source=path_source,
         )
         resolved_provider = provider or (workspace.default_agent if workspace else None)
         resolved_model = model or (workspace.default_model if workspace else None)

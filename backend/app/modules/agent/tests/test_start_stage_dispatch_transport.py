@@ -82,6 +82,7 @@ async def _create_platform_workspace(
     spec_root: str | None = "/data/spec-workspaces/ws",
     runtime_id: uuid.UUID | None = None,
     ws_root: str = _STAGE_WS_ROOT,
+    path_source: str | None = None,
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     """构造 Workspace + SpecWorkspace + Change，返回 (workspace_id, change_id, user_id)。
 
@@ -105,7 +106,11 @@ async def _create_platform_workspace(
         # daemon-client: 强绑 runtime，让 _resolve_dispatch_runtime 直接命中（避免
         # 走 _has_online_runtime 的 ws_hub 查询路径）。
         daemon_runtime_id=runtime_id,
-        path_source="daemon-client" if runtime_id else None,
+        # 方案 A：transport 按 path_source 决策。显式传入优先；否则按 runtime_id 推导
+        # （绑 runtime → daemon-client，否则 server-local）。
+        path_source=path_source
+        if path_source is not None
+        else ("daemon-client" if runtime_id else "server-local"),
     )
     session.add(ws)
 
@@ -178,13 +183,16 @@ def _capture_dispatch_prompt() -> tuple[AsyncMock, dict[str, str]]:
 async def test_d1_tar_mode_platform_args_contains_daemon_local_path(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """D1: tar 模式 platform_args 含 daemon 本地路径 ~/.sillyhub/daemon/specs/{ws}。
+    """D1（方案 A）：daemon-client workspace → platform_args 含 daemon 本地 tar 路径。
 
-    守护 task-10 复用 task-02 resolve_prompt_spec_root helper，tar 分支返回
-    daemon 本地约定路径（与 daemon spec-sync.resolveSpecDir 输出一致）。
+    path_source='daemon-client' 锁 transport='tar'，忽略全局 SPEC_TRANSPORT（此处
+    patch 'shared' 验证锁定——daemon-client 即便全局 shared 也走 tar）。守护
+    resolve_prompt_spec_root per-workspace 决策覆盖全局的核心规则。
     """
-    _patch_transport(monkeypatch, "tar")
-    ws_id, change_id, uid = await _create_platform_workspace(db_session)
+    _patch_transport(monkeypatch, "shared")
+    ws_id, change_id, uid = await _create_platform_workspace(
+        db_session, path_source="daemon-client"
+    )
     dispatch_mock, captured = _capture_dispatch_prompt()
 
     with (
@@ -218,13 +226,15 @@ async def test_d1_tar_mode_platform_args_contains_daemon_local_path(
 async def test_d2_tar_mode_platform_args_contains_runtime_and_workspace_id(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """D2: tar 模式 platform_args 同时含 --runtime-root + --workspace-id。
+    """D2（方案 A）：daemon-client workspace → platform_args 含 tar runtime-root + workspace-id。
 
-    与 scan bundle 对齐（task-10 service.py:1029-1034）：runtime-root 在 spec-root
-    下加 /runtime，workspace-id 是 ws_id（str(UUID)）。
+    与 scan bundle 对齐：runtime-root 在 spec-root 下加 /runtime，workspace-id 是 ws_id。
+    path_source='daemon-client' 锁 tar（patch 'shared' 验证锁定覆盖全局）。
     """
-    _patch_transport(monkeypatch, "tar")
-    ws_id, change_id, uid = await _create_platform_workspace(db_session)
+    _patch_transport(monkeypatch, "shared")
+    ws_id, change_id, uid = await _create_platform_workspace(
+        db_session, path_source="daemon-client"
+    )
     dispatch_mock, captured = _capture_dispatch_prompt()
 
     with (
@@ -258,13 +268,14 @@ async def test_d2_tar_mode_platform_args_contains_runtime_and_workspace_id(
 async def test_d3_shared_mode_platform_args_contains_host_path(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """D3: shared 模式 platform_args 含宿主路径 spec_data_host_dir/{ws}（D-004 现状）。
+    """D3（方案 A）：server-local workspace → platform_args 含宿主 shared 路径。
 
-    shared（默认）→ resolve_prompt_spec_root 返回宿主路径，daemon 与 backend
-    同机 + Docker bind mount 共享同一物理盘，零改动（D-004 向后兼容）。
+    path_source='server-local' 锁 transport='shared'，忽略全局 SPEC_TRANSPORT（此处
+    patch 'tar' 验证锁定——server-local 即便全局 tar 也走 shared）。守护 server-local
+    锁死 shared、忽略全局的核心规则。
     """
-    _patch_transport(monkeypatch, "shared")
-    ws_id, change_id, uid = await _create_platform_workspace(db_session)
+    _patch_transport(monkeypatch, "tar")
+    ws_id, change_id, uid = await _create_platform_workspace(db_session, path_source="server-local")
     dispatch_mock, captured = _capture_dispatch_prompt()
 
     with (
@@ -299,12 +310,13 @@ async def test_d3_shared_mode_platform_args_contains_host_path(
 async def test_d4_shared_mode_platform_args_contains_host_runtime(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """D4: shared 模式 platform_args 含宿主 runtime-root（task-10 行 1029 host_runtime_root）。
+    """D4（方案 A）：server-local workspace → platform_args 含宿主 shared runtime-root。
 
     shared 分支 runtime-root = {host_spec_root}/runtime，宿主路径前缀。
+    path_source='server-local' 锁 shared（patch 'tar' 验证锁定覆盖全局）。
     """
-    _patch_transport(monkeypatch, "shared")
-    ws_id, change_id, uid = await _create_platform_workspace(db_session)
+    _patch_transport(monkeypatch, "tar")
+    ws_id, change_id, uid = await _create_platform_workspace(db_session, path_source="server-local")
     dispatch_mock, captured = _capture_dispatch_prompt()
 
     with (
@@ -417,18 +429,23 @@ async def test_d6_platform_managed_but_spec_root_empty_no_platform_args(
 
 
 @pytest.mark.asyncio
-async def test_d7_transport_orthogonal_to_strategy(
-    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+async def test_d7_path_source_orthogonal_to_strategy(
+    db_session: AsyncSession,
 ) -> None:
-    """D7: 同 workspace（platform-managed）仅 transport 不同 → 路径前缀不同。
+    """D7（方案 A）：transport 由 workspace.path_source 决定，与 strategy 正交。
 
-    守护 D-001 transport 正交 strategy（D-006 双轨语义）：切换 transport 只改
-    prompt 路径前缀，不改 strategy 判定。
+    daemon-client workspace → tar 路径；server-local workspace → shared 路径。
+    守护 per-workspace 决策：切换 path_source 只改 prompt 路径前缀，不改 strategy
+    判定（两者都 platform-managed）。不再依赖全局 SPEC_TRANSPORT patch。
     """
-    ws_id, change_id, uid = await _create_platform_workspace(db_session)
-
-    # tar 路径
-    _patch_transport(monkeypatch, "tar")
+    # 两个 workspace 需不同 root_path（workspaces.root_path UNIQUE）；都需真实存在
+    # （resolve_work_dir 会 stat 校验）。
+    tar_root = tempfile.mkdtemp(prefix="stage-ws-tar-")
+    shared_root = tempfile.mkdtemp(prefix="stage-ws-shared-")
+    # daemon-client workspace → tar 路径
+    tar_ws_id, tar_change_id, tar_uid = await _create_platform_workspace(
+        db_session, path_source="daemon-client", ws_root=tar_root
+    )
     tar_mock, tar_captured = _capture_dispatch_prompt()
     with (
         patch.object(AgentService, "_mark_no_online_daemon", new=AsyncMock()),
@@ -443,18 +460,20 @@ async def test_d7_transport_orthogonal_to_strategy(
     ):
         service = AgentService(db_session)
         await service.start_stage_dispatch(
-            workspace_id=ws_id,
-            change_id=change_id,
-            user_id=uid,
+            workspace_id=tar_ws_id,
+            change_id=tar_change_id,
+            user_id=tar_uid,
             stage="propose",
-            prompt_template="plan.md",  # 换模板避免与 shared 复用
+            prompt_template="propose.md",
             requires_worktree=False,
             read_only=True,
         )
     tar_prompt = tar_captured["prompt"]
 
-    # shared 路径（同 workspace）
-    _patch_transport(monkeypatch, "shared")
+    # server-local workspace（不同 workspace + 不同 root）→ shared 路径
+    shared_ws_id, shared_change_id, shared_uid = await _create_platform_workspace(
+        db_session, path_source="server-local", ws_root=shared_root
+    )
     shared_mock, shared_captured = _capture_dispatch_prompt()
     with (
         patch.object(AgentService, "_mark_no_online_daemon", new=AsyncMock()),
@@ -469,19 +488,19 @@ async def test_d7_transport_orthogonal_to_strategy(
     ):
         service = AgentService(db_session)
         await service.start_stage_dispatch(
-            workspace_id=ws_id,
-            change_id=change_id,
-            user_id=uid,
-            stage="plan",  # 换 stage 避免并发保护
+            workspace_id=shared_ws_id,
+            change_id=shared_change_id,
+            user_id=shared_uid,
+            stage="plan",
             prompt_template="execute.md",
             requires_worktree=False,
             read_only=True,
         )
     shared_prompt = shared_captured["prompt"]
 
-    # 同 workspace，路径前缀不同（正交）
-    assert f"~/.sillyhub/daemon/specs/{ws_id}" in tar_prompt
-    assert f"/data/spec-workspaces/{ws_id}" in shared_prompt
+    # path_source 决定路径前缀（正交于 strategy）
+    assert f"~/.sillyhub/daemon/specs/{tar_ws_id}" in tar_prompt
+    assert f"/data/spec-workspaces/{shared_ws_id}" in shared_prompt
     # 反向断言：tar 不含宿主路径，shared 不含 daemon 本地路径
     assert "/data/spec-workspaces/" not in tar_prompt
     assert "~/.sillyhub/" not in shared_prompt

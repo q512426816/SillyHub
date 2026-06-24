@@ -27,6 +27,7 @@ from app.modules.daemon.tests.test_lease_service import (
     _create_runtime,
     _create_user,
 )
+from app.modules.workspace.model import Workspace
 
 
 def _patch_transport(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
@@ -262,3 +263,103 @@ class TestBuildClaimPayloadTransport:
         # 仍不含 specRoot（tar 语义，边界 E6）
         assert "specRoot" not in payload
         assert "spec_root" not in payload
+
+    @pytest.mark.asyncio
+    async def test_c6_workspace_path_source_daemon_client_overrides_global(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """C6（方案 A）：workspace.path_source='daemon-client' 锁死 tar，覆盖全局 settings.spec_transport。
+
+        即便 _patch_transport('shared')，build_claim_payload 查到真实 Workspace 行
+        path_source='daemon-client' → transport_for_path_source → 'tar'。
+        守护 per-workspace 决策优先于全局兜底（C1-C5 无 Workspace 行全走兜底，本用例补真实行）。
+        """
+        # 全局 shared，但 workspace.path_source='daemon-client' 应覆盖为 tar
+        _patch_transport(monkeypatch, "shared")
+        user_id = await _create_user(db_session)
+        rt: DaemonRuntime = await _create_runtime(db_session, user_id)
+        ws = Workspace(
+            id=uuid.uuid4(),
+            name="client-ws",
+            slug=f"client-ws-{uuid.uuid4().hex[:8]}",
+            root_path="/tmp/client-project",
+            status="active",
+            path_source="daemon-client",
+            daemon_runtime_id=rt.id,
+        )
+        db_session.add(ws)
+        await db_session.commit()
+
+        lease = await _create_interactive_lease(
+            db_session,
+            rt.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(uuid.uuid4()),
+                "prompt": "hi",
+                "claim_token": "tok",
+                "workspace_id": str(ws.id),
+                "spec_root": "/data/spec-workspaces/c6",
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        # path_source='daemon-client' → tar（覆盖全局 shared）
+        assert payload["transport"] == "tar"
+        assert payload["transportMode"] == "tar"
+        # tar 分支透传 workspaceId（与 C1 同款）
+        assert payload["workspaceId"] == str(ws.id)
+        assert payload["workspace_id"] == str(ws.id)
+        # tar 分支不透传 specRoot（边界 E6）
+        assert "specRoot" not in payload
+
+    @pytest.mark.asyncio
+    async def test_c7_workspace_path_source_server_local_overrides_global(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """C7（方案 A）：workspace.path_source='server-local' 锁死 shared，覆盖全局 tar。
+
+        _patch_transport('tar')，但 workspace.path_source='server-local' → transport='shared'。
+        守护 server-local 锁死 shared（即便全局 tar）+ shared 分支透传 specRoot（C2 同款）。
+        """
+        _patch_transport(monkeypatch, "tar")
+        user_id = await _create_user(db_session)
+        rt: DaemonRuntime = await _create_runtime(db_session, user_id)
+        ws = Workspace(
+            id=uuid.uuid4(),
+            name="server-ws",
+            slug=f"server-ws-{uuid.uuid4().hex[:8]}",
+            root_path="/tmp/server-project",
+            status="active",
+            path_source="server-local",
+        )
+        db_session.add(ws)
+        await db_session.commit()
+
+        lease = await _create_interactive_lease(
+            db_session,
+            rt.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(uuid.uuid4()),
+                "prompt": "hi",
+                "claim_token": "tok",
+                "workspace_id": str(ws.id),
+                "spec_root": "/data/spec-workspaces/c7",
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        # path_source='server-local' → shared（覆盖全局 tar）
+        assert payload["transport"] == "shared"
+        assert payload["transportMode"] == "shared"
+        # shared 分支透传 specRoot（与 C2 同款）
+        assert payload["specRoot"] == "/data/spec-workspaces/c7"
+        # shared 分支不透传 workspaceId（D-004 守护）
+        assert "workspaceId" not in payload

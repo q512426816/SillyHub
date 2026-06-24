@@ -190,6 +190,65 @@ async def test_build_scan_bundle_prompt_spec_root_by_transport(
 
 
 @pytest.mark.asyncio
+async def test_build_scan_bundle_path_source_daemon_client_locks_tar(
+    mock_session, mock_workspace, sample_run_id, monkeypatch
+):
+    """方案 A：path_source='daemon-client' 锁死 tar，忽略全局 SPEC_TRANSPORT。
+
+    即便全局 settings.spec_transport='shared'，path_source='daemon-client' 优先 →
+    transport='tar' → prompt 含 daemon 本地路径 ~/.sillyhub/daemon/specs/{ws}。
+    守护 per-workspace 决策覆盖全局 SPEC_TRANSPORT 的核心规则。
+    """
+    mock_session.get = AsyncMock(return_value=mock_workspace)
+    ws_id = str(mock_workspace.id)
+    # 全局设 shared，path_source='daemon-client' 应覆盖为 tar
+    _mock_settings(monkeypatch, transport="shared", spec_data_host_dir="/test/host/specs")
+
+    bundle = await build_scan_bundle(
+        session=mock_session,
+        workspace_id=mock_workspace.id,
+        spec_root="/data/specs/ws-abc",
+        root_path="/home/user/project",
+        run_id=sample_run_id,
+        path_source="daemon-client",
+    )
+
+    expected_spec_root = f"~/.sillyhub/daemon/specs/{ws_id}"
+    assert f"--spec-root {expected_spec_root}" in bundle.step_prompt
+    # 守护：shared 宿主路径不应出现（tar 锁死，未被全局 shared 污染）
+    assert f"/test/host/specs/{ws_id}" not in bundle.step_prompt
+
+
+@pytest.mark.asyncio
+async def test_build_scan_bundle_path_source_server_local_locks_shared(
+    mock_session, mock_workspace, sample_run_id, monkeypatch
+):
+    """方案 A：path_source='server-local' 锁死 shared，忽略全局 SPEC_TRANSPORT。
+
+    即便全局 settings.spec_transport='tar'，path_source='server-local' 优先 →
+    transport='shared' → prompt 含宿主路径。守护 server-local 锁死 shared、忽略全局。
+    """
+    mock_session.get = AsyncMock(return_value=mock_workspace)
+    ws_id = str(mock_workspace.id)
+    # 全局设 tar，path_source='server-local' 应覆盖为 shared
+    _mock_settings(monkeypatch, transport="tar", spec_data_host_dir="/test/host/specs")
+
+    bundle = await build_scan_bundle(
+        session=mock_session,
+        workspace_id=mock_workspace.id,
+        spec_root="/data/specs/ws-abc",
+        root_path="/home/user/project",
+        run_id=sample_run_id,
+        path_source="server-local",
+    )
+
+    expected_spec_root = f"/test/host/specs/{ws_id}"
+    assert f"--spec-root {expected_spec_root}" in bundle.step_prompt
+    # 守护：tar daemon 本地路径不应出现（shared 锁死，未被全局 tar 污染）
+    assert f"~/.sillyhub/daemon/specs/{ws_id}" not in bundle.step_prompt
+
+
+@pytest.mark.asyncio
 async def test_build_scan_bundle_prompt_contains_workspace_id(
     mock_session, mock_workspace, sample_run_id
 ):
