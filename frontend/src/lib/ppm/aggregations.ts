@@ -56,11 +56,16 @@ export function toBarSeries(rows: BarRow[], color: string): EChartsOption {
       axisPointer: { type: "shadow" },
       valueFormatter: (v) => `${toNumber(v).toFixed(1)}h`,
     },
-    grid: { left: 48, right: 24, top: 24, bottom: crowded ? 64 : 40, containLabel: true },
+    grid: { left: 48, right: 24, top: 24, bottom: names.length > 6 ? 96 : 40, containLabel: true },
     xAxis: {
       type: "category",
       data: names,
-      axisLabel: { rotate: crowded ? 45 : names.length > 8 ? 30 : 0, interval: 0 },
+      axisLabel: {
+        rotate: names.length > 6 ? 45 : 0,
+        interval: 0,
+        formatter: (v: string) =>
+          typeof v === "string" && v.length > 8 ? v.slice(0, 7) + "…" : v,
+      },
     },
     yAxis: {
       type: "value",

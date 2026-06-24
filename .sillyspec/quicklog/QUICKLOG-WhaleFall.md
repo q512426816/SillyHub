@@ -1010,3 +1010,9 @@ created_at: 2026-06-03T08:42:04
 文件：frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-edit-task-dialog.tsx
 根因:kanban-edit-task-dialog.tsx:56 预填 endTime 用 new Date(task.deadline)(原生 Date 对象),但 antd6 DatePicker 用 dayjs,内部 generateConfig.isValidate(value) 调 value.isValid(),原生 Date 无 isValid 方法 → TypeError: S(...).isValid is not a function。
 修复:import dayjs;endTime: new Date → dayjs(task.deadline);FormValues.endTime 类型 Date → Dayjs。handleSubmit 的 values.endTime.toISOString()(dayjs 核心方法)保留。typecheck 通过。Docker frontend 待重建部署。
+
+## ql-20260624-006-a1c3 | 2026-06-24 14:00:00 | 修复项目工时分布柱图类目与柱子重叠
+状态：已完成
+文件：frontend/src/lib/ppm/aggregations.ts
+根因:toBarSeries grid bottom 仅 40-64,axisLabel rotate 30/45,项目名长 + kanban 工时图窄容器(380px)→X 轴类目标签和柱子重叠。
+修复:grid bottom 类目>6 时 96(原 40/64);axisLabel rotate 类目>6 时 45(原 30);formatter 截断长类目(>8 字 → 前 7 + …),tooltip 仍显全名。typecheck 通过。Docker frontend 待重建部署。
