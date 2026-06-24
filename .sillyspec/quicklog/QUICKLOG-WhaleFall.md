@@ -1028,3 +1028,9 @@ created_at: 2026-06-03T08:42:04
 文件：frontend/src/lib/ppm/aggregations.ts, frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-gantt.tsx, frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-actual-gantt.tsx
 背景:① 用户要饼图图例放下方(原 vertical right)。② 行头"人员/工时"数据不准(用全部 tasks + store task_count),要显示当前泳道图日期范围内的工时和任务。
 修复:① toPieOption legend vertical right→horizontal bottom 0(scroll+formatter 截断>8字),pie center 35%→50%/42% 上移让底部空间。② kanban-gantt 行头:删 userTotalHours(全量),改 visibleTasks=[...inRange,...unscheduled](范围内可见),工时=estimate_hours 之和,任务数=visibleTasks.length;actual-gantt 行头:visibleExecutes 范围内,time_spent 人天之和,显示"记录 N · X人天"。typecheck 通过 + 18 单测全过。Docker frontend 待重建部署。
+
+## ql-20260624-009-d4a6 | 2026-06-24 14:35:00 | 行头饱和度进度条改显范围内
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-gantt.tsx
+根因:行头 Progress 用 u.saturation(KanbanUserColumn.saturation,后端按全部任务算的全量饱和度),不随日期范围变。
+修复:顶层算 rangeCapacity(范围内非休息日含调休补班 × 8h/日);行头 saturationPct=visibleHours(范围内工时)/rangeCapacity×100,clamp 0-100;Progress percent/strokeColor 用 saturationPct。typecheck 通过。Docker frontend 待重建部署。

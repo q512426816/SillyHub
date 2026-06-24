@@ -75,6 +75,11 @@ export function KanbanGantt({
   const rangeStart = useMemo(() => dayjs(startDate), [startDate]);
   const rangeEnd = useMemo(() => dayjs(endDate), [endDate]);
   const dates = useMemo(() => rangeDateKeys(rangeStart, rangeEnd), [rangeStart, rangeEnd]);
+  /** 范围内工作日容量(非休息日含调休补班 × 8h/日),用于行头饱和度。 */
+  const rangeCapacity = useMemo(
+    () => dates.filter((dk) => !getDayStatus(dk).rest).length * 8,
+    [dates],
+  );
   const today = todayKey();
   const totalDaysWidth = dates.length * DAY_WIDTH;
 
@@ -176,6 +181,10 @@ export function KanbanGantt({
           const visibleHours = Math.round(
             visibleTasks.reduce((s, t) => s + (t.estimate_hours ?? 0), 0) * 10,
           ) / 10;
+          const saturationPct =
+            rangeCapacity > 0
+              ? Math.min(100, Math.round((visibleHours / rangeCapacity) * 100))
+              : 0;
           const displayName = u.username ?? u.user_id;
           return (
             <div key={u.user_id} className="flex border-b border-border" style={{ height: blockH }}>
@@ -198,10 +207,10 @@ export function KanbanGantt({
                       <span>任务 {visibleTasks.length}</span>
                     </div>
                     <Progress
-                      percent={Math.min(u.saturation, 100)}
+                      percent={saturationPct}
                       showInfo={false}
                       size="small"
-                      strokeColor={saturationColor(u.saturation)}
+                      strokeColor={saturationColor(saturationPct)}
                     />
                   </div>
                 </div>
