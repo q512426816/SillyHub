@@ -63,6 +63,13 @@ export interface LeaseHeartbeatBody {
 export interface SubmitMessagesBody {
   claim_token: string;
   agent_run_id: string;
+  /**
+   * 消息列表。每条是 provider 中立的 dict。
+   * 2026-06-24-daemon-network-resilience task-19（FR-08 / D-001@v2）：每条 message
+   * 可选携带 `dedup_key`（ResilienceService.submitWithRetry 注入到 message 顶层），
+   * backend submit_messages 据此 ON CONFLICT DO NOTHING 幂等去重；旧 daemon 不发
+   * 该字段时 backend 当 None（向后兼容，不强约束）。
+   */
   messages: Record<string, unknown>[];
 }
 

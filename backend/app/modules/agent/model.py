@@ -286,7 +286,20 @@ class AgentRunLog(BaseModel, table=True):
     """Individual log lines from an agent run."""
 
     __tablename__ = "agent_run_logs"
-    __table_args__ = (Index("ix_agent_run_logs_run", "run_id"),)
+    __table_args__ = (
+        Index("ix_agent_run_logs_run", "run_id"),
+        # 2026-06-24-daemon-network-resilience task-20（FR-08 / R-12 / D-001@v2）：
+        # 部分唯一索引——仅 dedup_key IS NOT NULL 时约束唯一，让 submit_messages
+        # 用 INSERT ON CONFLICT DO NOTHING 幂等去重（重复 (run_id, dedup_key) 仅落一行）。
+        # postgresql_where 仅 PG 生效（SQLite 忽略，测试侧靠 service 层去重兜底）。
+        Index(
+            "ux_agent_run_logs_dedup",
+            "run_id",
+            "dedup_key",
+            unique=True,
+            postgresql_where=text("dedup_key IS NOT NULL"),
+        ),
+    )
 
     id: uuid.UUID = Field(
         default_factory=uuid.uuid4,
@@ -309,6 +322,13 @@ class AgentRunLog(BaseModel, table=True):
     content_redacted: str | None = Field(
         default=None,
         sa_column=Column(Text, nullable=True),
+    )
+    # 2026-06-24-daemon-network-resilience task-20（FR-08）：幂等去重键。
+    # daemon ResilienceService.submitWithRetry 注入（Claude msg.id 或 runId:seq）。
+    # None 表示无去重（旧消息/未注入路径），不受唯一索引约束（部分索引 WHERE IS NOT NULL）。
+    dedup_key: str | None = Field(
+        default=None,
+        sa_column=Column(String(200), nullable=True),
     )
 
 

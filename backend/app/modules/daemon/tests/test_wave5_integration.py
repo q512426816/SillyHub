@@ -1575,3 +1575,145 @@ class TestCompleteLeaseWithResult:
         await db_session.refresh(agent_run)
         # AgentRun 不应被 cancelled 覆盖（killed 优先级更高）
         assert agent_run.status == "killed"
+
+
+# ── 2026-06-24-daemon-network-resilience task-22（FR-08 / D-001@v2）─────────────
+# submit_messages 的 dedup_key 幂等去重：重复 (run_id, dedup_key) 仅落一行；
+# 无 dedup_key 的消息照常 append（NULL 不约束）。
+
+
+class TestSubmitMessagesDedupKey:
+    """dedup_key 幂等：daemon 重试/outbox 补发重复提交同一 dedup_key 仅落库一行。"""
+
+    @pytest.mark.asyncio
+    async def test_duplicate_dedup_key_dedupes(self, db_session: AsyncSession) -> None:
+        """同一 dedup_key 二次提交 → AgentRunLog 仅 1 行。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        # 首次提交
+        c1 = await svc.submit_messages(
+            lease.id,
+            "tok",
+            agent_run.id,
+            [{"channel": "stdout", "content": "msg-a", "dedup_key": "dk-1"}],
+        )
+        assert c1 == 1
+        # 重复提交同一 dedup_key（daemon 重试/outbox 补发场景）
+        c2 = await svc.submit_messages(
+            lease.id,
+            "tok",
+            agent_run.id,
+            [{"channel": "stdout", "content": "msg-a-dup", "dedup_key": "dk-1"}],
+        )
+        assert c2 == 0  # 去重：不落新行
+
+        logs = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(AgentRunLog.run_id == agent_run.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(logs) == 1
+        assert logs[0].dedup_key == "dk-1"
+        assert logs[0].content_redacted == "msg-a"  # 保留首次，丢弃重复
+
+    @pytest.mark.asyncio
+    async def test_different_dedup_keys_both_written(self, db_session: AsyncSession) -> None:
+        """不同 dedup_key → 各落一行（不误去重 R-01）。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        count = await svc.submit_messages(
+            lease.id,
+            "tok",
+            agent_run.id,
+            [
+                {"channel": "stdout", "content": "a", "dedup_key": "dk-1"},
+                {"channel": "stdout", "content": "b", "dedup_key": "dk-2"},
+            ],
+        )
+        assert count == 2
+        logs = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(AgentRunLog.run_id == agent_run.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(logs) == 2
+
+    @pytest.mark.asyncio
+    async def test_none_dedup_key_appends_freely(self, db_session: AsyncSession) -> None:
+        """无 dedup_key（None）→ 不约束，重复内容照常 append（兼容旧 daemon）。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        agent_run = await _create_agent_run(db_session, status="running")
+        lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=agent_run.id,
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            metadata_={"claim_token": "tok"},
+        )
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        await svc.submit_messages(
+            lease.id,
+            "tok",
+            agent_run.id,
+            [{"channel": "stdout", "content": "same"}],
+        )
+        await svc.submit_messages(
+            lease.id,
+            "tok",
+            agent_run.id,
+            [{"channel": "stdout", "content": "same"}],
+        )
+        logs = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(AgentRunLog.run_id == agent_run.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(logs) == 2  # 无 dedup_key → 不去重，两行都落
+        assert all(row.dedup_key is None for row in logs)

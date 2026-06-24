@@ -18,34 +18,11 @@
 
 import { isRetryable, toCauseInfo } from './error-classify.js';
 import type { CauseInfo } from './error-classify.js';
-
-// ── 类型（task-15 落地后 Outbox/Envelope/OutboxEntry 统一到 outbox.ts）──────────
-
-/** 待提交消息信封：消息体 + 幂等键（task-16 dedupKeyFor 生成）。 */
-export interface Envelope {
-  message: Record<string, unknown>;
-  dedup_key: string;
-}
-
-/** outbox 落盘条目。 */
-export interface OutboxEntry {
-  leaseId: string;
-  claimToken: string;
-  runId: string;
-  envelopes: Envelope[];
-  ts: string;
-}
-
-/**
- * Outbox 接口（task-15 实现；W2 阶段 ResilienceService 可注入 null 表示无暂存）。
- * 本 task 在此内联接口定义，task-15 落地后从此 re-export 统一。
- */
-export interface Outbox {
-  enqueue(entry: OutboxEntry): Promise<void>;
-  markDelivered(runId: string, dedupKeys: string[]): Promise<void>;
-  pendingByRun(runId: string): OutboxEntry[];
-  load(): Promise<void>;
-}
+// task-18：drainOutbox 遇 422（claim_token rotate 失效）丢弃该条（R-10）。
+import { HubHttpError } from '../hub-client.js';
+// task-15：Envelope/OutboxEntry/Outbox 接口统一定义在 outbox.ts，此处 re-export。
+export type { Envelope, OutboxEntry, Outbox } from './outbox.js';
+import type { Envelope, Outbox } from './outbox.js';
 
 /** 重试配置（来自 DaemonConfig 的 retry_* 字段）。 */
 export interface RetryConfig {
@@ -55,7 +32,16 @@ export interface RetryConfig {
   jitter: number;
 }
 
-/** 最小 Logger 接口（与 daemon.Logger 对齐，避免循环依赖）。 */
+/**
+ * task-18：drainOutbox 补发前的终态校验回调（由 daemon 注入）。
+ *   - isLeaseValid(leaseId)：lease 未过期（claim_token 仍有效）。
+ *   - isSessionEnded(runId)：对应 session 是否已 ended/failed。
+ * 返回 true 表示**不可补发**（应丢弃）。
+ */
+export interface DrainValidityChecker {
+  isLeaseValid(leaseId: string): boolean;
+  isSessionEnded(runId: string): boolean;
+}
 export interface ResilienceLogger {
   warn(event: string, kv?: Record<string, unknown>): void;
   info(event: string, kv?: Record<string, unknown>): void;
@@ -85,12 +71,19 @@ const MAX_BACKOFF_MS = 8000;
 export class ResilienceService {
   /** 最近一次心跳是否健康（notifyHeartbeatResult 维护，drainOutbox W3 用）。 */
   private _healthy = true;
+  /** drainOutbox 防重入标记（task-18 AC-07）。 */
+  private _draining = false;
 
   constructor(
     private readonly _client: SubmitClient,
     private readonly _outbox: Outbox | null,
     private readonly _retry: RetryConfig,
     private readonly _logger: ResilienceLogger,
+    /**
+     * task-18：drainOutbox 补发前的终态校验回调（daemon 注入）。
+     * 未注入（null）时 drain 不做终态校验，仅按网络结果处理（422 仍丢弃）。
+     */
+    private readonly _validity: DrainValidityChecker | null = null,
   ) {}
 
   /**
@@ -107,7 +100,10 @@ export class ResilienceService {
     runId: string,
     envelopes: Envelope[],
   ): Promise<void> {
-    const messages = envelopes.map((e) => e.message);
+    // task-19（FR-08）：dedup_key 写入 message 顶层字段（backend submit_messages
+    // 从 msg['dedup_key'] 取，task-21 ON CONFLICT 据此去重）。envelope.dedup_key 仅
+    // daemon 内部（outbox markDelivered）用，提交时注入到 message。
+    const messages = envelopes.map((e) => ({ ...e.message, dedup_key: e.dedup_key }));
     const dedupKeys = envelopes.map((e) => e.dedup_key);
     let lastErr: unknown;
     for (let i = 0; i < this._retry.maxAttempts; i++) {
@@ -182,19 +178,98 @@ export class ResilienceService {
    */
   notifyHeartbeatResult(ok: boolean): void {
     this._healthy = ok;
-    if (ok) {
-      // W3 task-18：健康后 drain 补发 pending outbox。W2 阶段 drainOutbox 占位空实现。
+    if (ok && this._outbox) {
+      // task-18：健康后 drain 补发 pending outbox（防抖：仅 pending 非空时）。
       void this.drainOutbox();
     }
   }
 
   /**
-   * 补发 outbox 暂存消息（W3 task-18 实现）。
-   * W2 占位：无 outbox 或未实现时 no-op。
+   * 补发 outbox 暂存消息（task-18 / FR-07 / D-004@v1）。
+   *
+   * 由 ws onConnected / heartbeat healthy 触发。按 runId 顺序补发 pending：
+   *   - lease 过期 / session ended（校验回调判定）→ warn 丢弃该 run 待补发项。
+   *   - 补发走 retryTerminal（用尽抛，保留 entry 待下轮；不再 enqueue 避免死循环）。
+   *   - 422（claim_token rotate 失效）→ warn 丢弃该条（R-10，不无限重试）。
+   *   - 成功 → markDelivered。
+   * 防重入：_draining 标记。
    */
   async drainOutbox(): Promise<void> {
-    if (!this._outbox || !this._healthy) return;
-    // W3 task-18 接入真实 drain 逻辑（遍历 pending → submitWithRetry → 422 丢弃）。
+    if (!this._outbox || !this._healthy || this._draining) return;
+    this._draining = true;
+    try {
+      for (const runId of this._outbox.runs()) {
+        const entries = this._outbox.pendingByRun(runId);
+        for (const entry of entries) {
+          // 终态校验：lease 过期 / session ended → 丢弃该 run 待补发（R-07）。
+          if (this._validity) {
+            if (!this._validity.isLeaseValid(entry.leaseId)) {
+              await this._outbox.markDelivered(
+                runId,
+                entry.envelopes.map((e) => e.dedup_key),
+              );
+              this._logger.warn('drain_skipped_terminal', {
+                run_id: runId,
+                reason: 'lease_expired',
+              });
+              continue;
+            }
+            if (this._validity.isSessionEnded(runId)) {
+              await this._outbox.markDelivered(
+                runId,
+                entry.envelopes.map((e) => e.dedup_key),
+              );
+              this._logger.warn('drain_skipped_terminal', {
+                run_id: runId,
+                reason: 'session_ended',
+              });
+              continue;
+            }
+          }
+          // 补发：走 retryTerminal（用尽抛保留 entry，不 enqueue 避免死循环）。
+          // dedup_key 注入 message 顶层（与 submitWithRetry 一致，task-19）。
+          const messages = entry.envelopes.map((e) => ({
+            ...e.message,
+            dedup_key: e.dedup_key,
+          }));
+          try {
+            await this.retryTerminal(() =>
+              this._client.submitMessages(
+                entry.leaseId,
+                entry.claimToken,
+                runId,
+                messages,
+              ),
+            );
+            await this._outbox.markDelivered(
+              runId,
+              entry.envelopes.map((e) => e.dedup_key),
+            );
+          } catch (e) {
+            if (e instanceof HubHttpError && e.status === 422) {
+              // claim_token rotate 失效：丢弃该条（R-10）。
+              await this._outbox.markDelivered(
+                runId,
+                entry.envelopes.map((e) => e.dedup_key),
+              );
+              this._logger.warn('drain_dropped_token_invalid', {
+                run_id: runId,
+                error: this._causeForLog(e),
+              });
+            } else {
+              // 可重试网络错误用尽仍失败：保留 entry 待下轮 drain；4xx 业务错误也保留
+              // （backend 可能临时拒绝）。日志记录，不抛（drain 是尽力而为的后台任务）。
+              this._logger.warn('drain_entry_failed', {
+                run_id: runId,
+                error: this._causeForLog(e),
+              });
+            }
+          }
+        }
+      }
+    } finally {
+      this._draining = false;
+    }
   }
 
   /** 退避第 i 次延迟（base * factor^i，±jitter，截断 MAX_BACKOFF_MS）。 */

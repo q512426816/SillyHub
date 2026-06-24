@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -94,6 +95,24 @@ class RunSyncService:
                 continue
             # 顶层无 event_type/content → 当作 SDK 原始格式展开
             flat_messages.extend(_extract_sdk_messages(msg))
+
+        # task-21 / FR-08 / D-001@v2：dedup_key 幂等去重。daemon ResilienceService
+        # 重试/outbox 补发会重复提交同一 (run_id, dedup_key)；此处查 DB 已存在的
+        # dedup_key，写入循环跳过它们（等价 INSERT ON CONFLICT DO NOTHING，但 dialect
+        # 无关——SQLite 测试 + PG 生产一致）。dedup_key 由 daemon 注入 message 顶层
+        # （task-19），旧 daemon / 未注入路径无 dedup_key → None → 不约束（照常 append）。
+        existing_dedup_keys: set[str] = set()
+        submitted_dedup_keys = {
+            str(m["dedup_key"]) for m in flat_messages if m.get("dedup_key") is not None
+        }
+        if submitted_dedup_keys:
+            existing_rows = await self._session.execute(
+                select(AgentRunLog.dedup_key).where(
+                    AgentRunLog.run_id == agent_run_id,
+                    AgentRunLog.dedup_key.in_(submitted_dedup_keys),
+                )
+            )
+            existing_dedup_keys = {str(r[0]) for r in existing_rows.all() if r[0] is not None}
 
         # task-12 / D-002@v1 / FR-07 FR-08：本次 submit_messages 调用内"已完成"
         # thinking segment 集合。来源：(1) [THINKING_OVERRIDE] 信号声明的 segment；
@@ -199,6 +218,15 @@ class RunSyncService:
             if segment_id and is_partial and segment_id in completed_segments:
                 continue
 
+            # task-21 / FR-08：dedup_key 幂等——已存在的 (run_id, dedup_key) 跳过 INSERT
+            # （daemon 重试/outbox 补发的重复消息）。无 dedup_key 的消息照常 append（NULL 不约束）。
+            dedup_key = msg.get("dedup_key") if isinstance(msg, dict) else None
+            if dedup_key is not None:
+                dedup_key = str(dedup_key)
+                if dedup_key in existing_dedup_keys:
+                    continue
+                existing_dedup_keys.add(dedup_key)
+
             log_id = uuid.uuid4()
             log_entry = AgentRunLog(
                 id=log_id,
@@ -206,6 +234,7 @@ class RunSyncService:
                 timestamp=now,
                 channel=channel,
                 content_redacted=content[:5000],
+                dedup_key=dedup_key,
             )
             self._session.add(log_entry)
             count += 1

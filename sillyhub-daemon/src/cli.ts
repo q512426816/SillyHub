@@ -50,9 +50,10 @@ import { WorkspaceManager } from './workspace.js';
 import { CredentialManager } from './credential.js';
 import { TaskRunner } from './task-runner.js';
 import { Daemon } from './daemon.js';
-// 2026-06-24-daemon-network-resilience task-13：网络层重试编排注入。
+// 2026-06-24-daemon-network-resilience task-13/15：网络层重试编排注入。
 import { ResilienceService } from './resilience/service.js';
 import type { ResilienceLogger } from './resilience/service.js';
+import { FileOutbox } from './resilience/outbox.js';
 import { ClaudeSdkDriver } from './interactive/claude-sdk-driver.js';
 import { CodexAppServerDriver } from './interactive/codex-app-server-driver.js';
 import { SessionManager } from './interactive/session-manager.js';
@@ -417,15 +418,27 @@ export async function startAction(opts: StartOptions): Promise<number> {
   // ql-20260616-003：第 4 参传 config —— TaskRunner 需要读 terminal_observer_*
   // 字段决定是否写日志 + 弹独立终端。之前漏传，导致 config 一直走兜底（observer
   // 字段未生效）。
-  // 2026-06-24-daemon-network-resilience task-13：构造 ResilienceService 注入
-  // TaskRunner（batch submit 重试）+ Daemon（interactive submit 重试 + 终态轻量重试）。
-  // W2 阶段 outbox 传 null（task-08 支持可选，用尽 warn 丢）；W3 task-15 落地后改传真实 Outbox。
-  const resilience = new ResilienceService(client, null, {
+  // 2026-06-24-daemon-network-resilience task-13/15：构造 Outbox（落盘 JSONL）+
+  // ResilienceService 注入 TaskRunner（batch submit 重试）+ Daemon（interactive submit
+  // 重试 + 终态轻量重试 + drain 补发）。outboxDir 同源 ~/.sillyhub/daemon/。
+  const outbox = new FileOutbox(
+    join(DEFAULT_CONFIG_DIR, 'outbox'),
+    { maxPerRun: config.outbox_max_per_run, maxTotal: config.outbox_max_total },
+    cliResilienceLogger(),
+  );
+  // outbox.load 恢复 daemon 重启前的 pending（FR-09），失败不阻断启动。
+  await outbox.load().catch((e) => {
+    process.stderr.write(`[resilience.outbox_load_failed] ${(e as Error)?.message ?? e}\n`);
+  });
+  // W3 v1 取舍：validity 校验传 null——drain 不做 lease/session 终态预校验，靠 backend
+  // submit_messages 的 dedup_key 幂等（task-21 ON CONFLICT）兜底重复提交。终态预校验
+  // 是优化（避免无谓补发请求），非正确性必需；后续可接 daemon 的 lease/session 查询。
+  const resilience = new ResilienceService(client, outbox, {
     maxAttempts: config.retry_max_attempts,
     baseDelayMs: config.retry_base_delay_ms,
     backoffFactor: config.retry_backoff_factor,
     jitter: config.retry_jitter,
-  }, cliResilienceLogger());
+  }, cliResilienceLogger(), null);
   const taskRunner = new TaskRunner(client, workspaceMgr, credentialMgr, config, resilience);
 
   // task-04（D-002@v3 补丁 gap-1）：注入 SessionManager + daemon 桥接 deps。

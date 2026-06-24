@@ -1515,6 +1515,8 @@ export class Daemon {
             // task-05（FR-03）：成功→清断连计数 + 告警标记，下次断连重新计时告警。
             this._heartbeatFailSince.delete(rid);
             this._degradedWarned.delete(rid);
+            // task-18（FR-07 / D-004@v1）：心跳健康 → 触发 outbox drain（pending 非空时补发）。
+            this._resilience?.notifyHeartbeatResult(true);
           } catch (e) {
             // 单个 rid 心跳失败不影响其他（daemon.py:172-177）
             // task-02（FR-01）：展开 cause 暴露底层 undici code。
@@ -1540,6 +1542,8 @@ export class Daemon {
               message: (e as Error | undefined)?.message ?? String(e),
               cause: extractCause(e),
             });
+            // task-18：心跳失败 → 标记不健康（drainOutbox 不补发，等恢复）。
+            this._resilience?.notifyHeartbeatResult(false);
           }
         }
       } catch (e) {
@@ -1676,6 +1680,10 @@ export class Daemon {
         callbacks: {
           onMessage: (msg) => {
             void this._handleWsMessage(msg);
+          },
+          // task-18（FR-07 / D-004@v1）：WS 重连成功 → 触发 outbox drain（补发断连期间暂存的消息）。
+          onConnected: () => {
+            void this._resilience?.drainOutbox();
           },
         },
       });

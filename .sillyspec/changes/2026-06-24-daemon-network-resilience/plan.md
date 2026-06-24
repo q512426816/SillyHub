@@ -37,15 +37,15 @@ plan_level: full
 - [x] task-14: W2 测试——error-classify / submitWithRetry 重试退避错误分类 / retryTerminal / batch 路径（覆盖：FR-04, FR-05, FR-10）
 
 ## Wave 3（依赖 W2 — 暂存补发 + 幂等根治，跨子项目）
-- [ ] task-15: 新增 `resilience/outbox.ts`（落盘 JSONL `~/.sillyhub/daemon/outbox/<runId>.jsonl` + markDelivered + load 恢复 + 容量上限）（覆盖：FR-06, FR-09）
-- [ ] task-16: `dedupKeyFor`（Claude msg.id 优先；否则 `${runId}:${turnSeq}:${flatSeq}`）（覆盖：FR-08）
-- [ ] task-17: submitWithRetry 用尽入 outbox + 成功 markDelivered（覆盖：FR-06）
-- [ ] task-18: drainOutbox 实现（ws onConnected / heartbeat healthy 触发；补发前校验 lease 未过期 + session 非 ended；遇 422 token 失效丢弃；`_heartbeatLoop` 成功调 notifyHeartbeatResult）（覆盖：FR-07, D-004）
-- [ ] task-19: protocol SubmitMessagesBody.messages[].dedup_key（sillyhub-daemon protocol.ts + backend schema.py 透传）（覆盖：FR-08）
-- [ ] task-20: backend `AgentRunLog` 加 `dedup_key` 列 + migration（部分唯一索引 `WHERE dedup_key IS NOT NULL`）（覆盖：FR-08, R-12）
-- [ ] task-21: backend `run_sync/service.py submit_messages` 用 `INSERT ON CONFLICT DO NOTHING`（index_where 部分索引）+ 统一 thinking segment 去重（覆盖：FR-08, D-001@v2, D-002）
-- [ ] task-22: backend submit_messages 测试更新（dedup_key 去重 / NULL 兼容 / segment 统一）（覆盖：FR-08）
-- [ ] task-23: W3 测试——outbox 落盘/恢复/drain/token 422/容量 + backend 幂等集成（覆盖：FR-06, FR-07, FR-08, FR-09）
+- [x] task-15: 新增 `resilience/outbox.ts`（落盘 JSONL `~/.sillyhub/daemon/outbox/<runId>.jsonl` + markDelivered + load 恢复 + 容量上限）（覆盖：FR-06, FR-09）
+- [x] task-16: `dedupKeyFor`（Claude msg.id 优先；否则 `${runId}:${turnSeq}:${flatSeq}`）（覆盖：FR-08）
+- [x] task-17: submitWithRetry 用尽入 outbox + 成功 markDelivered（覆盖：FR-06）
+- [x] task-18: drainOutbox 实现（ws onConnected / heartbeat healthy 触发；补发前校验 lease 未过期 + session 非 ended；遇 422 token 失效丢弃；`_heartbeatLoop` 成功调 notifyHeartbeatResult）（覆盖：FR-07, D-004）
+- [x] task-19: protocol SubmitMessagesBody.messages[].dedup_key（sillyhub-daemon protocol.ts + backend schema.py 透传）（覆盖：FR-08）
+- [x] task-20: backend `AgentRunLog` 加 `dedup_key` 列 + migration（部分唯一索引 `WHERE dedup_key IS NOT NULL`）（覆盖：FR-08, R-12）
+- [x] task-21: backend `run_sync/service.py submit_messages` 用 `INSERT ON CONFLICT DO NOTHING`（index_where 部分索引）+ 统一 thinking segment 去重（覆盖：FR-08, D-001@v2, D-002）
+- [x] task-22: backend submit_messages 测试更新（dedup_key 去重 / NULL 兼容 / segment 统一）（覆盖：FR-08）
+- [x] task-23: W3 测试——outbox 落盘/恢复/drain/token 422/容量 + backend 幂等集成（覆盖：FR-06, FR-07, FR-08, FR-09）
 
 ## 调用点搜索（构造/接口变更调用方全量纳入）
 

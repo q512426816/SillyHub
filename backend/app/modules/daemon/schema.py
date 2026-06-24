@@ -166,7 +166,13 @@ class LeaseCompleteResponse(BaseModel):
 
 
 class LeaseMessagesRequest(BaseModel):
-    """Request body for submitting agent messages for a lease."""
+    """Request body for submitting agent messages for a lease.
+
+    2026-06-24-daemon-network-resilience task-19（FR-08 / D-001@v2）：每条 message dict
+    可选携带 ``dedup_key``（daemon ResilienceService 注入到 message 顶层），run_sync
+    submit_messages 据此幂等去重（task-21）。无类型约束（list[dict]），dedup_key 缺失
+    时当 None → 不约束（旧 daemon 兼容）。
+    """
 
     claim_token: str
     agent_run_id: uuid.UUID

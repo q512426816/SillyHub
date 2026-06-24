@@ -260,3 +260,118 @@ describe("retryTerminal (task-08 / FR-05)", () => {
     expect(outbox.enqueue).not.toHaveBeenCalled();
   });
 });
+
+// ── drainOutbox（task-18 / FR-07 / D-004@v1）──────────────────────────────────
+
+/** 内存 Outbox mock（drain 测试不依赖文件系统）。 */
+function memOutbox(initial: Map<string, OutboxEntry[]>): Outbox {
+  return {
+    enqueue: vi.fn(async () => undefined),
+    markDelivered: vi.fn(async (runId, keys) => {
+      const list = initial.get(runId);
+      if (!list || keys.length === 0) return;
+      const keySet = new Set(keys);
+      const kept = list.filter(
+        (e) => !e.envelopes.every((env) => keySet.has(env.dedup_key)),
+      );
+      if (kept.length === 0) initial.delete(runId);
+      else initial.set(runId, kept);
+    }),
+    pendingByRun: (runId) => [...(initial.get(runId) ?? [])],
+    runs: () => [...initial.keys()],
+    load: vi.fn(async () => undefined),
+  };
+}
+
+describe("drainOutbox (task-18 / FR-07)", () => {
+  it("AC-03 pending 补发成功 → markDelivered", async () => {
+    const store = new Map<string, OutboxEntry[]>([
+      ["run-1", [{ leaseId: "l", claimToken: "t", runId: "run-1", envelopes: [{ message: { a: 1 }, dedup_key: "dk-1" }], ts: "x" }]],
+    ]);
+    const outbox = memOutbox(store);
+    const submit = vi.fn(async () => ({}));
+    const svc = new ResilienceService(makeClient(submit), outbox, fastRetry, noopLogger());
+    await svc.drainOutbox();
+    await flush();
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(outbox.markDelivered).toHaveBeenCalledWith("run-1", ["dk-1"]);
+    expect(store.has("run-1")).toBe(false); // 补发后清空
+  });
+
+  it("AC-06 422 token 失效 → 丢弃该条（不重试）", async () => {
+    const store = new Map<string, OutboxEntry[]>([
+      ["run-1", [{ leaseId: "l", claimToken: "t", runId: "run-1", envelopes: [{ message: {}, dedup_key: "dk-1" }], ts: "x" }]],
+    ]);
+    const outbox = memOutbox(store);
+    const submit = vi.fn(async () => {
+      throw new HubHttpError(422, "token rotated", "u", "POST");
+    });
+    const svc = new ResilienceService(makeClient(submit), outbox, fastRetry, noopLogger());
+    await svc.drainOutbox();
+    await flush();
+    // 422 被丢弃：markDelivered 清空，不再重试
+    expect(outbox.markDelivered).toHaveBeenCalledWith("run-1", ["dk-1"]);
+    expect(store.has("run-1")).toBe(false);
+  });
+
+  it("AC-04 session ended（validity）→ 丢弃不补发", async () => {
+    const store = new Map<string, OutboxEntry[]>([
+      ["run-1", [{ leaseId: "l", claimToken: "t", runId: "run-1", envelopes: [{ message: {}, dedup_key: "dk-1" }], ts: "x" }]],
+    ]);
+    const outbox = memOutbox(store);
+    const submit = vi.fn(async () => ({}));
+    const validity = {
+      isLeaseValid: () => true,
+      isSessionEnded: () => true, // session 已结束
+    };
+    const svc = new ResilienceService(makeClient(submit), outbox, fastRetry, noopLogger(), validity);
+    await svc.drainOutbox();
+    await flush();
+    expect(submit).not.toHaveBeenCalled(); // 不补发
+    expect(outbox.markDelivered).toHaveBeenCalled(); // 丢弃
+  });
+
+  it("AC-05 lease 过期（validity）→ 丢弃不补发", async () => {
+    const store = new Map<string, OutboxEntry[]>([
+      ["run-1", [{ leaseId: "l", claimToken: "t", runId: "run-1", envelopes: [{ message: {}, dedup_key: "dk-1" }], ts: "x" }]],
+    ]);
+    const outbox = memOutbox(store);
+    const submit = vi.fn(async () => ({}));
+    const validity = {
+      isLeaseValid: () => false, // lease 过期
+      isSessionEnded: () => false,
+    };
+    const svc = new ResilienceService(makeClient(submit), outbox, fastRetry, noopLogger(), validity);
+    await svc.drainOutbox();
+    await flush();
+    expect(submit).not.toHaveBeenCalled();
+    expect(outbox.markDelivered).toHaveBeenCalled();
+  });
+
+  it("AC-07 防重入（_draining 并发不重复）", async () => {
+    const store = new Map<string, OutboxEntry[]>([
+      ["run-1", [{ leaseId: "l", claimToken: "t", runId: "run-1", envelopes: [{ message: {}, dedup_key: "dk-1" }], ts: "x" }]],
+    ]);
+    const outbox = memOutbox(store);
+    const submit = vi.fn(async () => ({}));
+    const svc = new ResilienceService(makeClient(submit), outbox, fastRetry, noopLogger());
+    // 并发触发两次 drain
+    await Promise.all([svc.drainOutbox(), svc.drainOutbox()]);
+    await flush();
+    // 第二次因 _draining 标记直接返回，submit 仅被调用一次
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("不健康（_healthy=false）时不 drain", async () => {
+    const store = new Map<string, OutboxEntry[]>([
+      ["run-1", [{ leaseId: "l", claimToken: "t", runId: "run-1", envelopes: [{ message: {}, dedup_key: "dk-1" }], ts: "x" }]],
+    ]);
+    const outbox = memOutbox(store);
+    const submit = vi.fn(async () => ({}));
+    const svc = new ResilienceService(makeClient(submit), outbox, fastRetry, noopLogger());
+    svc.notifyHeartbeatResult(false);
+    await svc.drainOutbox();
+    await flush();
+    expect(submit).not.toHaveBeenCalled();
+  });
+});
