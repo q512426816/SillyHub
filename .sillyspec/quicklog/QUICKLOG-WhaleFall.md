@@ -992,4 +992,11 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/app/(dashboard)/ppm/kanban/page.tsx, frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-search-bar.tsx
 背景:kanban 外层 flex h-full 占满无边距(不好看),查询条件横向 flex-wrap(非 project-plans 的 grid-cols-4 Field 风格)。
-结果:① page.tsx 外层 div→PageContainer size=full h-full(px-6 py-6 边距 + gap-4 间距)+ PageHeader(标题"看板")。② 查询区 SectionCard bodyPadding=p-2 包裹 KanbanSearchBar + DateNav+共X(border-t 分隔)。③ KanbanSearchBar 重构:顶部按钮右对齐(重置|分隔|新建任务)+ grid-cols-4 垂直 Field(人员/状态/项目/关键词/截止时间)。④ Tabs 去 px-3 pt-2 加 min-h-0(PageContainer gap-4 提供间距,防 flex 溢出)。typecheck 通过。Docker frontend 待重建部署。
+结果:① page.tsx 外层 div→PageContainer size=full h-full(px-6 py-6 边距 + gap-4 间距)+ PageHeader(标题"看板")。
+
+## ql-20260624-003-e5c4 | 2026-06-24 12:00:00 | kanban 按中国节假日/调休标注休息(自维护2026数据)
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-gantt-helpers.ts, frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-gantt.tsx, frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-actual-gantt.tsx
+背景:用户要按中国法定节假日(休息)+调休(补班)标注,不仅周末。chinese-days npm 不含2026(仅2004-2025)+API默认导出,不可用,已卸载。
+方案:自维护2026节假日+调休数据(国务院2025-11-04通知,人民网确认)。helpers 加 getDayStatus(date)→{rest,adjustedWork,label}:法定假日→rest+节名;调休补班→adjustedWork+"班";普通周末→rest+"休";工作日→正常。
+结果:helpers 加 HOLIDAYS_2026(7节日放假日期)+ADJUSTED_WORKDAYS_2026(6补班日)+getDayStatus;gantt/actual-gantt 日期刻度+背景列用 getDayStatus(rest→emerald 底+节名/休,adjustedWork→warning 底+"班")。getDayStatus 4 单测(假日/补班/周末/工作日)。typecheck 通过 + 18 单测全过。Docker frontend 待重建部署。② 查询区 SectionCard bodyPadding=p-2 包裹 KanbanSearchBar + DateNav+共X(border-t 分隔)。③ KanbanSearchBar 重构:顶部按钮右对齐(重置|分隔|新建任务)+ grid-cols-4 垂直 Field(人员/状态/项目/关键词/截止时间)。④ Tabs 去 px-3 pt-2 加 min-h-0(PageContainer gap-4 提供间距,防 flex 溢出)。typecheck 通过。Docker frontend 待重建部署。

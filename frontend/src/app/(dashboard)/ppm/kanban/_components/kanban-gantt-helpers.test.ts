@@ -8,6 +8,7 @@ import {
   BAR_GAP,
   rangeDateKeys,
   isWeekendKey,
+  getDayStatus,
 } from "./kanban-gantt-helpers";
 
 const rangeStart = dayjs("2026-06-23"); // 周一
@@ -124,5 +125,25 @@ describe("isWeekendKey", () => {
   it("工作日为 false", () => {
     expect(isWeekendKey("2026-06-23")).toBe(false); // 周一
     expect(isWeekendKey("2026-06-26")).toBe(false); // 周四
+  });
+});
+
+describe("getDayStatus(2026 节假日/调休)", () => {
+  it("法定假日 → rest + 节日名", () => {
+    expect(getDayStatus("2026-01-01")).toEqual({ rest: true, adjustedWork: false, label: "元旦" });
+    expect(getDayStatus("2026-02-17")).toEqual({ rest: true, adjustedWork: false, label: "春节" });
+    expect(getDayStatus("2026-10-01")).toEqual({ rest: true, adjustedWork: false, label: "国庆" });
+  });
+  it("调休补班(周末调整为上班) → adjustedWork + 班", () => {
+    expect(getDayStatus("2026-01-04")).toEqual({ rest: false, adjustedWork: true, label: "班" }); // 周日元旦补班
+    expect(getDayStatus("2026-02-14")).toEqual({ rest: false, adjustedWork: true, label: "班" }); // 周六春节补班
+    expect(getDayStatus("2026-10-10")).toEqual({ rest: false, adjustedWork: true, label: "班" }); // 周六国庆补班
+  });
+  it("普通周末(非补班) → rest + 休", () => {
+    expect(getDayStatus("2026-06-27")).toEqual({ rest: true, adjustedWork: false, label: "休" }); // 周六
+    expect(getDayStatus("2026-06-28")).toEqual({ rest: true, adjustedWork: false, label: "休" }); // 周日
+  });
+  it("普通工作日 → rest:false,无 label", () => {
+    expect(getDayStatus("2026-06-23")).toEqual({ rest: false, adjustedWork: false });
   });
 });

@@ -24,7 +24,7 @@ import {
   computeBarLayout,
   DATE_ROW_HEIGHT,
   DAY_WIDTH,
-  isWeekendKey,
+  getDayStatus,
   LANE_HEIGHT,
   rangeDateKeys,
   ROW_HEAD_WIDTH,
@@ -122,28 +122,33 @@ export function KanbanActualGantt({
             人员 / 实际工时
           </div>
           {dates.map((dk) => {
-            const weekend = isWeekendKey(dk);
+            const status = getDayStatus(dk);
             const isToday = dk === today;
             const d = dayjs(dk);
+            const bgTint = status.rest
+              ? `color-mix(in srgb, ${tokens.color.emerald} 14%, transparent)`
+              : status.adjustedWork
+                ? `color-mix(in srgb, ${tokens.color.semantic.warning.color} 14%, transparent)`
+                : undefined;
             return (
               <div
                 key={dk}
                 className="shrink-0 text-center"
-                style={{
-                  width: DAY_WIDTH,
-                  height: DATE_ROW_HEIGHT,
-                  backgroundColor: weekend
-                    ? `color-mix(in srgb, ${tokens.color.emerald} 14%, transparent)`
-                    : undefined,
-                }}
+                style={{ width: DAY_WIDTH, height: DATE_ROW_HEIGHT, backgroundColor: bgTint }}
               >
                 <div className={`pt-1.5 text-sm font-medium ${isToday ? "text-primary" : "text-foreground"}`}>
                   {d.format("MM/DD")}
-                  {weekend && (
-                    <span className="ml-0.5 rounded bg-amber-400 px-1 text-[9px] text-white">休</span>
+                  {status.label && (
+                    <span
+                      className={`ml-0.5 rounded px-1 text-[9px] text-white ${status.adjustedWork ? "bg-amber-500" : "bg-emerald-500"}`}
+                    >
+                      {status.label}
+                    </span>
                   )}
                 </div>
-                <div className={`text-[11px] ${weekend ? "text-amber-600" : "text-muted-foreground"}`}>
+                <div
+                  className={`text-[11px] ${status.rest ? "text-emerald-600" : status.adjustedWork ? "text-amber-600" : "text-muted-foreground"}`}
+                >
                   {d.format("ddd")}
                 </div>
               </div>
@@ -202,8 +207,10 @@ export function KanbanActualGantt({
                     style={{ left: i * DAY_WIDTH }}
                   />
                 ))}
-                {dates.map((dk, i) =>
-                  isWeekendKey(dk) ? (
+                {dates.map((dk, i) => {
+                  const status = getDayStatus(dk);
+                  if (!status.rest && !status.adjustedWork) return null;
+                  return (
                     <div
                       key={dk}
                       className="absolute top-0"
@@ -211,11 +218,13 @@ export function KanbanActualGantt({
                         left: i * DAY_WIDTH,
                         width: DAY_WIDTH,
                         height: lanesH,
-                        backgroundColor: `color-mix(in srgb, ${tokens.color.emerald} 8%, transparent)`,
+                        backgroundColor: status.rest
+                          ? `color-mix(in srgb, ${tokens.color.emerald} 8%, transparent)`
+                          : `color-mix(in srgb, ${tokens.color.semantic.warning.color} 8%, transparent)`,
                       }}
                     />
-                  ) : null,
-                )}
+                  );
+                })}
                 {grp.scheduled.map((ex) => {
                   const layout = computeBarLayout(
                     ex.actual_start_time,
