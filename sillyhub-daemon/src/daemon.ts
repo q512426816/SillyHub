@@ -59,6 +59,8 @@ import { HubClient } from './hub-client.js';
 import { WsClient } from './ws-client.js';
 import { listDir } from './file-rpc.js';
 import { buildSpawnEnv } from './spawn-env.js';
+// 2026-06-24 preflight：启动前预检 sillyspec 版本 + daemon 自更新（失败不阻断启动）。
+import { runPreflight } from './preflight.js';
 import type { TaskRunner, TaskRunnerResult } from './task-runner.js';
 import type { SessionManager } from './interactive/session-manager.js';
 // task-06（D-007@v1）：spec bundle 同步共享 utility（task-04 抽出），interactive
@@ -560,6 +562,17 @@ export class Daemon {
     }
     this._running = true;
     this._logger.info('starting', { runtime_id: this._config.runtime_id });
+
+    // preflight（2026-06-24）：启动前预检 sillyspec 版本 + daemon 自更新。
+    // 失败不阻断启动——runPreflight 内部每步 try/catch 隔离，此处再兜底防意外抛错。
+    // 适配内部 Logger（debug/info/warn/error 方法）为 preflight 的 (level,msg,data) 签名。
+    try {
+      await runPreflight(this._config, (level, msg, data) => {
+        this._logger[level](msg, data);
+      });
+    } catch (e) {
+      this._logger.warn('preflight_failed', { error: e });
+    }
 
     // 1. 探测 agent（task-16，真实方法名 detectAgents，不是 detectAll）
     const agents = await this._detector.detectAgents();
