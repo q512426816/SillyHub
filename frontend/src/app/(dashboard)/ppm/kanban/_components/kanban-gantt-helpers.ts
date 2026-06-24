@@ -12,7 +12,7 @@ import dayjs, { type Dayjs } from "dayjs";
 /** 唯一行高常量:驱动左侧行头与右侧条形,避免错位(D-006)。 */
 export const LANE_HEIGHT = 36;
 export const DATE_ROW_HEIGHT = 48;
-export const DAY_WIDTH = 120;
+export const DAY_WIDTH = 300;
 export const ROW_HEAD_WIDTH = 220;
 export const BAR_HEIGHT = 26;
 export const BAR_TOP_PAD = 5;
