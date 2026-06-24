@@ -1,7 +1,7 @@
 """add agent cache token count fields
 
-Revision ID: 202606280900
-Revises: 202607240900
+Revision ID: 202606241001
+Revises: 202606241000
 """
 
 from __future__ import annotations
@@ -9,8 +9,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "202606280900"
-down_revision = "202607240900"
+revision = "202606241001"
+down_revision = "202606241000"
 branch_labels = None
 depends_on = None
 
