@@ -979,3 +979,11 @@ created_at: 2026-06-03T08:42:04
 背景:用户质疑这三页"没改全"(ql-025 列它们为"已是 20"但未改代码)。核实三页默认 pageSize。
 排查:三页均用 PpmResourceTable 通用组件且未传 pageSize prop(逐页读 projects/customers/project-stakeholders page.tsx 确认);PpmResourceTable useState(DEFAULT_PAGE_SIZE)(ppm-resource-table.tsx:237);DEFAULT_PAGE_SIZE=20(shared.tsx:14);load 传后端 page_size=20,Table pagination pageSize=20。git blame 确认 DEFAULT_PAGE_SIZE 和 useState 自 2026-06-20(859a2467 qinyi 全量迁移)起就是 20,一直未变。
 结果:三页默认本就是 20 条/页,无需改代码。请用户硬刷新(Ctrl+Shift+R 清旧 JS 缓存)验证;若仍非 20 系浏览器缓存旧构建或数据少于 20 条时分页器不显式。本次无代码改动、无 commit。反思:sillyspec quick step1 明确要求建 quicklog(⛔ 不能跳过),本轮核实后直接回复未建记录未 --done,违反流程,已补建。
+
+## ql-20260624-001-a3b7 | 2026-06-24 09:05:00 | 修复 PpmResourceTable 默认 pageSize 10→20(projects/customers/project-stakeholders 实际查 10 条)
+状态：已完成
+文件：frontend/src/components/ppm-resource-table.tsx
+背景:用户反馈这三页实际查询 10 条/页。ql-026 核实结论"三页默认 20 无需改"是错的——误把 shared.tsx 的 DEFAULT_PAGE_SIZE=20 当作 PpmResourceTable 用的值,实际 PpmResourceTable 内部 line 199 自定义了同名局部常量 `const DEFAULT_PAGE_SIZE = 10`,useState(DEFAULT_PAGE_SIZE)(line 237) 用的是这个局部 10,所以三页默认 10 条。
+根因:ppm-resource-table.tsx:199 局部 DEFAULT_PAGE_SIZE=10(与 shared.tsx:14 的 20 重名但不同源),PpmResourceTable 默认 pageSize=10,被 projects/customers/project-stakeholders 三页继承。
+方案:ppm-resource-table.tsx:199 局部 DEFAULT_PAGE_SIZE 10→20,与 ppm 列表页统一默认 20 条对齐。
+结果:ppm-resource-table.tsx:199 `const DEFAULT_PAGE_SIZE = 10` → `= 20`。typecheck 通过(无 PpmResourceTable 专属测试)。三页(projects/customers/project-stakeholders)+ 所有 PpmResourceTable 消费方默认变 20。Docker frontend 待重建部署。
