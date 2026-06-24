@@ -153,8 +153,14 @@ export function KanbanActualGantt({
 
         {users.map((u) => {
           const grp = perUser.get(u.user_id) ?? { scheduled: [], unscheduled: [] };
+          // 只对范围内的实际记录分配泳道(范围外不渲染也不占行)
+          const inRange = grp.scheduled.filter(
+            (ex) =>
+              computeBarLayout(ex.actual_start_time, ex.actual_end_time, rangeStart, rangeEnd) !==
+              null,
+          );
           const { laneMap, rowCount } = assignLanes(
-            grp.scheduled.map((ex) => ({
+            inRange.map((ex) => ({
               id: ex.id,
               start: dayjs(ex.actual_start_time!),
               end: dayjs(ex.actual_end_time!),

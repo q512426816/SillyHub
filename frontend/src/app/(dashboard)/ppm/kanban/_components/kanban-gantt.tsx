@@ -155,8 +155,12 @@ export function KanbanGantt({
         {/* 每人块 */}
         {users.map((u) => {
           const grp = perUser.get(u.user_id) ?? { scheduled: [], unscheduled: [] };
+          // 只对范围内的任务分配泳道(范围外 computeBarLayout 返回 null,不渲染也不占行)
+          const inRange = grp.scheduled.filter(
+            (t) => computeBarLayout(t.start_time, t.deadline, rangeStart, rangeEnd) !== null,
+          );
           const { laneMap, rowCount } = assignLanes(
-            grp.scheduled.map((t) => ({
+            inRange.map((t) => ({
               id: t.id,
               start: dayjs(t.start_time!),
               end: dayjs(t.deadline!),

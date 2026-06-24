@@ -49,15 +49,19 @@ export function computeBarLayout(
   const s = start.isAfter(end) ? end : start;
   const dayStart = s.startOf("day");
   const dayEnd = end.startOf("day");
+  const rStart = rangeStart.startOf("day");
+  const rEnd = rangeEnd.startOf("day");
 
-  const clippedStart = dayStart.isBefore(rangeStart.startOf("day"));
-  const clippedEnd = dayEnd.isAfter(rangeEnd.startOf("day"));
-  const effStart = (clippedStart ? rangeStart : dayStart).startOf("day");
-  const effEnd = (clippedEnd ? rangeEnd : dayEnd).startOf("day");
+  // 完全在范围外(本周之外)→ 不渲染:避免范围外任务被裁剪堆到首/末列
+  if (dayEnd.isBefore(rStart) || dayStart.isAfter(rEnd)) return null;
 
-  const left = effStart.diff(rangeStart.startOf("day"), "day") * dayWidth;
-  const width =
-    (effEnd.diff(effStart, "day") + 1) * dayWidth - BAR_GAP;
+  const clippedStart = dayStart.isBefore(rStart);
+  const clippedEnd = dayEnd.isAfter(rEnd);
+  const effStart = clippedStart ? rStart : dayStart;
+  const effEnd = clippedEnd ? rEnd : dayEnd;
+
+  const left = effStart.diff(rStart, "day") * dayWidth;
+  const width = (effEnd.diff(effStart, "day") + 1) * dayWidth - BAR_GAP;
 
   return {
     left: Math.max(0, left),

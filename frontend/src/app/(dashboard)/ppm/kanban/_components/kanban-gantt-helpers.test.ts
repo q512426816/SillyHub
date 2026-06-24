@@ -48,6 +48,11 @@ describe("computeBarLayout", () => {
     expect(r!.left).toBe(1 * DAY_WIDTH);
     expect(r!.clippedStart).toBe(false);
   });
+
+  it("完全在范围外 → null(不渲染,避免堆到首/末列)", () => {
+    expect(computeBarLayout("2026-06-15", "2026-06-20", rangeStart, rangeEnd)).toBeNull(); // 早于范围
+    expect(computeBarLayout("2026-07-05", "2026-07-10", rangeStart, rangeEnd)).toBeNull(); // 晚于范围
+  });
 });
 
 describe("assignLanes", () => {
