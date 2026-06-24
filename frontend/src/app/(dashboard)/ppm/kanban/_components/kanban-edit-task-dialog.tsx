@@ -13,6 +13,7 @@
  */
 import { useEffect, useState } from "react";
 import { DatePicker, Form, Input, InputNumber, Modal, Select, message } from "antd";
+import dayjs, { type Dayjs } from "dayjs";
 
 import { ApiError } from "@/lib/api";
 import { updateKanbanTask } from "@/lib/ppm/kanban";
@@ -27,7 +28,7 @@ const STATUS_OPTIONS = [
 interface FormValues {
   title: string;
   status: string;
-  endTime?: Date;
+  endTime?: Dayjs;
   estimateHours?: number;
 }
 
@@ -53,7 +54,7 @@ export function KanbanEditTaskDialog({
       form.setFieldsValue({
         title: titleLine,
         status: task.status ?? "未开始",
-        endTime: task.deadline ? new Date(task.deadline) : undefined,
+        endTime: task.deadline ? dayjs(task.deadline) : undefined,
         estimateHours: task.estimate_hours ?? 8,
       });
     }

@@ -1004,3 +1004,9 @@ created_at: 2026-06-03T08:42:04
 状态：已完成
 文件：frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-gantt-helpers.ts
 结果:DAY_WIDTH 450→200。typecheck 通过 + 18 单测全过。Docker frontend 待重建部署。
+
+## ql-20260624-005-8e2f | 2026-06-24 13:45:00 | 修复编辑任务 DatePicker isValid 报错(endTime Date→dayjs)
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-edit-task-dialog.tsx
+根因:kanban-edit-task-dialog.tsx:56 预填 endTime 用 new Date(task.deadline)(原生 Date 对象),但 antd6 DatePicker 用 dayjs,内部 generateConfig.isValidate(value) 调 value.isValid(),原生 Date 无 isValid 方法 → TypeError: S(...).isValid is not a function。
+修复:import dayjs;endTime: new Date → dayjs(task.deadline);FormValues.endTime 类型 Date → Dayjs。handleSubmit 的 values.endTime.toISOString()(dayjs 核心方法)保留。typecheck 通过。Docker frontend 待重建部署。
