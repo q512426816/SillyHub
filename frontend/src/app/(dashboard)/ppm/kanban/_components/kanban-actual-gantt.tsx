@@ -356,8 +356,8 @@ function ActualBar({
         }
       }}
     >
-      {!narrow && <span className="truncate px-2">{title}</span>}
-      {!narrow && tag && <span className="ml-auto pr-1.5 text-[10px] opacity-80">{tag}</span>}
+      {!narrow && <span className="min-w-0 flex-1 truncate px-2">{title}</span>}
+      {!narrow && tag && <span className="ml-auto shrink-0 pr-1.5 text-[10px] opacity-80">{tag}</span>}
     </div>
   );
 }
