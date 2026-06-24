@@ -76,6 +76,7 @@ dashboard 页面遵循统一模式：
 - 页面取数在 Client Component 内 useEffect 或事件回调触发
 - antd Table 服务端分页 onChange 重查并回到对应页
 - 查询按钮点击即使条件未变也触发查询（searchNonce 兜底）
+- kanban 看板主体改为时间轴甘特图(自研 KanbanGantt/KanbanActualGantt + kanban-gantt-helpers 纯函数+14单测),纵轴人员多行泳道(贪心)+横轴日期+任务条形绝对定位(start→deadline/actual_start→end)+今天竖线/周末高亮,只读+点击详情,计划/实际两 tab;删除旧 KanbanMatrix/KanbanActualMatrix/kanban-actual-cell
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
