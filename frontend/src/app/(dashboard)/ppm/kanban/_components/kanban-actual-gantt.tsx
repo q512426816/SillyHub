@@ -178,6 +178,10 @@ export function KanbanActualGantt({
               : 0;
           const blockH = lanesH + unschedH;
           const isSelected = selectedUserId === u.user_id;
+          const visibleExecutes = [...inRange, ...grp.unscheduled];
+          const visibleHours = Math.round(
+            visibleExecutes.reduce((s, e) => s + (e.time_spent ?? 0), 0) * 10,
+          ) / 10;
           const displayName = u.username ?? u.user_id;
           return (
             <div key={u.user_id} className="flex border-b border-border" style={{ height: blockH }}>
@@ -193,7 +197,7 @@ export function KanbanActualGantt({
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-xs font-semibold text-foreground">{displayName}</div>
                     <div className="text-[10px] text-muted-foreground">
-                      记录 {grp.scheduled.length + grp.unscheduled.length}
+                      记录 {visibleExecutes.length} · {visibleHours}人天
                     </div>
                   </div>
                 </div>

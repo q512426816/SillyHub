@@ -122,18 +122,17 @@ export function toPieSeries(
     },
     legend: {
       type: "scroll",
-      orient: "vertical",
-      right: 0,
-      top: "middle",
-      width: 150,
+      orient: "horizontal",
+      bottom: 0,
+      left: "center",
       formatter: (name: string) =>
-        typeof name === "string" && name.length > 10 ? name.slice(0, 9) + "…" : name,
+        typeof name === "string" && name.length > 8 ? name.slice(0, 7) + "…" : name,
     },
     series: [
       {
         type: "pie",
         radius: ["40%", "70%"],
-        center: ["35%", "50%"],
+        center: ["50%", "42%"],
         avoidLabelOverlap: true,
         label: { show: false },
         labelLine: { show: false },

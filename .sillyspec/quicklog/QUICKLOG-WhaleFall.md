@@ -1022,3 +1022,9 @@ created_at: 2026-06-03T08:42:04
 文件：frontend/src/lib/ppm/aggregations.ts
 根因:toPieOption(项目工时占比饼图)legend vertical right 无 width/formatter,项目名长(融通项目.../25年浦镇QMS...)→图例项超出右侧容器,与扇形重叠。ql-006 改的是柱图(toBarSeries),本次是饼图。
 修复:legend 加 width:150 + formatter 截断长名(>10字→前9+…),tooltip 仍全名;pie center 40%→35% 给图例让空间。typecheck 通过。Docker frontend 待重建部署。
+
+## ql-20260624-008-c3e5 | 2026-06-24 14:25:00 | 饼图图例放下方 + 行头工时/任务改显范围内
+状态：已完成
+文件：frontend/src/lib/ppm/aggregations.ts, frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-gantt.tsx, frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-actual-gantt.tsx
+背景:① 用户要饼图图例放下方(原 vertical right)。② 行头"人员/工时"数据不准(用全部 tasks + store task_count),要显示当前泳道图日期范围内的工时和任务。
+修复:① toPieOption legend vertical right→horizontal bottom 0(scroll+formatter 截断>8字),pie center 35%→50%/42% 上移让底部空间。② kanban-gantt 行头:删 userTotalHours(全量),改 visibleTasks=[...inRange,...unscheduled](范围内可见),工时=estimate_hours 之和,任务数=visibleTasks.length;actual-gantt 行头:visibleExecutes 范围内,time_spent 人天之和,显示"记录 N · X人天"。typecheck 通过 + 18 单测全过。Docker frontend 待重建部署。

@@ -54,12 +54,6 @@ function saturationColor(v: number): string {
   return tokens.color.semantic.success.color;
 }
 
-function userTotalHours(userId: string, tasks: KanbanTaskCard[]): number {
-  let sum = 0;
-  for (const t of tasks) if (t.user_id === userId) sum += t.estimate_hours ?? 0;
-  return Math.round(sum * 10) / 10;
-}
-
 function isOverdue(t: KanbanTaskCard): boolean {
   if (!t.deadline || t.status === "已完成") return false;
   const d = dayjs(t.deadline);
@@ -178,7 +172,10 @@ export function KanbanGantt({
               : 0;
           const blockH = lanesH + unschedH;
           const isSelected = selectedUserId === u.user_id;
-          const totalHrs = userTotalHours(u.user_id, tasks);
+          const visibleTasks = [...inRange, ...grp.unscheduled];
+          const visibleHours = Math.round(
+            visibleTasks.reduce((s, t) => s + (t.estimate_hours ?? 0), 0) * 10,
+          ) / 10;
           const displayName = u.username ?? u.user_id;
           return (
             <div key={u.user_id} className="flex border-b border-border" style={{ height: blockH }}>
@@ -196,9 +193,9 @@ export function KanbanGantt({
                     <div className="truncate text-xs font-semibold text-foreground">{displayName}</div>
                     <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                       <span>
-                        工时 <b className="text-foreground">{totalHrs}h</b>
+                        工时 <b className="text-foreground">{visibleHours}h</b>
                       </span>
-                      <span>任务 {u.task_count}</span>
+                      <span>任务 {visibleTasks.length}</span>
                     </div>
                     <Progress
                       percent={Math.min(u.saturation, 100)}
