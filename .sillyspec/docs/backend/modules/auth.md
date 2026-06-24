@@ -35,4 +35,7 @@ login(account, password):
 - 平台级 `PLATFORM_ADMIN` 拥有全部权限，新增权限枚举要同步补种子。
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+- refresh token 轮换加 grace window(2026-06-24-concurrent-refresh-revoke):被 rotate 的旧 token 在 `auth_refresh_grace_seconds`(默认 60s)内再次提交 → 重新签发新对、**不**触发 revoke_all(并发刷新误杀兜底);超窗口才按重放吊销。`Session.rotated_at` 记录轮换时刻(grace 判定锚点),logout 不写。
+- access TTL 默认 30min(`auth_access_ttl_minutes`,原 15)。
+- `_consume_refresh_token` 返回三元组 `(user, session, is_grace)`;refresh / logout_session_by_refresh 两调用点。
 <!-- MANUAL_NOTES_END -->

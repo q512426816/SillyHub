@@ -539,6 +539,26 @@ modules:
     concerns: []
     review_reasons: []
 
+  # ─── Token Refresh Single-Flight (2026-06-24-concurrent-refresh-revoke 新增) ──
+
+  lib-token-refresh:
+    status: active
+    doc: modules/lib-token-refresh.md
+    paths:
+      - "frontend/src/lib/token-refresh.ts"
+    tags: [api, auth, token, single-flight, refresh]
+    aliases: [token-refresh]
+    entrypoints: []
+    main_symbols:
+      - ensureFreshAccessToken
+      - decodeJwtExp
+    depends_on: [stores-session, lib-api]
+    used_by: [lib-api, lib-auth, lib-ppm, components-shared]
+    needs_review: true
+    concerns: [new-module-pending-card]
+    review_reasons:
+      - 新增模块(2026-06-24-concurrent-refresh-revoke),modules/lib-token-refresh.md 卡片待下次 scan 生成
+
   # ─── Workspaces Client ─────────────────────────────────────────────
 
   lib-workspaces:
