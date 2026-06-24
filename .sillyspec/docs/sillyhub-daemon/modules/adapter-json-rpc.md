@@ -47,4 +47,5 @@ buildTurnStart: params.input=[{type:'text',text:prompt}]（codex 0.131 要求 in
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+- ql-20260624-007：turn/completed 是 codex 的 claude-result 等价收尾信号（QUICKLOG-qinyi-2026-06-23:178）。parseTurnCompleted 不再因 params.turn 缺失/非 object 而 return null——降级空对象继续产出 complete event，保证 method===turn/completed 一到必收敛（对齐 claude-sdk-driver result 强契约）。否则 consume 卡在 await currentTurnPromise（codex-app-server-driver.ts:774）→ AgentRun 永不收敛 → inject 报 already has an active run。
 <!-- MANUAL_NOTES_END -->

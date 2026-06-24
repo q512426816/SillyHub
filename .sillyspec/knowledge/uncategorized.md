@@ -181,3 +181,14 @@
 - 根因：agent-detector 在 Windows 给的是 npm cmd-shim `codex.cmd`；driver 直接 `spawn(codex.cmd, args, {stdio})` 无 shell/无 wrapper 解析 → Windows CreateProcess 对 `.cmd/.bat/.ps1` 返回 EINVAL。batch `task-runner.ts:705-713` 早用通用 `cmd-shim.ts` 的 `resolveWindowsCmdShim`（支持 codex.cmd 模式1=`{exe:node.exe,prependArgs:[codex.js]}` / claude.cmd 模式2 / cursor ps1 模式0），唯独 interactive codex driver 漏接。claude SDK driver 因 SDK 内部 spawn 无法传 shell，改用自带的 `resolveClaudeExecutable` 转 wrapper→真 .exe。
 - codex 特殊点：cmd-shim 引用的不是真 .exe 而是 `codex.js`（node ESM 入口，package.json type:module），`codex.js` 内部 `stdio:"inherit"` spawn 真 `codex.exe`（`@openai/codex-win32-x64/vendor/.../bin/codex.exe`），故解析结果 = `node.exe + [codex.js]`，`spawn(node.exe, [codex.js, ...args])` 等价原生 `codex.cmd`，stdio 经 inherit 直通。
 - 通用坑（防回归）：**任何自己 `child_process.spawn` 的路径**（interactive driver / 新 provider runtime / 任何长驻 stdio 子进程），Windows 上 spawn agent-detector 给的 `.cmd/.bat/.ps1` wrapper 前必须先 `resolveWindowsCmdShim` 解析成 `{exe, prependArgs}` 再 `spawn(exe, [...prependArgs, ...业务args], {shell:false})`，解析失败才回退 `shell:true`。新增 interactive driver 时对照 `task-runner.ts:705-713` 接线，别各自 spawn——否则只在 Windows 环境暴露（posix CI 跑不到，易漏）。
+
+## 2026-06-24 — codex turn 收敛强契约：turn/completed 不可被 parse 吞信号
+
+> 来源：ql-20260624-007-a9e3（json-rpc.ts parseTurnCompleted）。codex interactive turn 卡死（AgentRun 永不收敛 → inject 报 `already has an active run`）根因。
+
+- **turn/completed 是 codex 的 claude-result 等价收尾信号**（QUICKLOG-qinyi-2026-06-23:113 实测 codex 简单 turn 必发完整事件流末尾 turn/completed / :178 明确"与 claude result 等价"）。codex app-server 是被动 server，单 turn 完成后不自动 exit，**唯一**的单 turn 收尾信号就是 turn/completed notification。
+- **强契约不可吞**：parseTurnCompleted（`adapters/json-rpc.ts`）原在 `params.turn` 缺失/非 object 时 `return null`，把收尾信号当"非法 notification"吞掉 → complete event 不产出 → consume 卡在 `await currentTurnPromise`（`codex-app-server-driver.ts:774`，无超时兜底）→ `reportResult`/`notifyRunResult` 永不执行 → backend AgentRun 永卡 active。对齐 `claude-sdk-driver.ts:391-393`：result 一到即 `onResult`，零吞信号；codex 同理：turn/completed 一到必产 complete event（params.turn 异常时降级 unknown→driver 转 failed 上报）。
+- **为什么 claude 不卡、codex 卡**：claude 走 SDK 强契约（每 turn 必 yield result，generator 自然结束）；codex 靠自己 spawn+readline 解析 turn/completed 推断 turn 边界，信号被吞就永久挂起。
+- **daemon-network-resilience 变更救不了这种卡死**：那个变更针对"回传调用失败"（notifyRunResult 调了但网络丢）；这里是"压根没调 notifyRunResult"（consume 卡死到不了回传）。属更上游缺陷，该变更 plan 漏了这条。
+- 诊断兜底：codex 子进程 stdout 现已落盘 `~/.sillyhub/daemon/runs/codex-interactive/<sessionId>.log`（本次新增，CodexStartOptions.sessionId 串入），下次卡死秒级看 turn/completed 是否到达 / payload 长啥样。
+- 用户决策：**不加 turn 超时兜底**（会误杀推理模型正常长 turn），靠对齐 claude 强契约（不吞收尾信号）根治。

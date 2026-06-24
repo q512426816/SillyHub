@@ -599,9 +599,13 @@ export class JsonRpcAdapter implements ProtocolAdapter {
     ];
   }
 
-  private parseTurnCompleted(params: Record<string, unknown>): AgentEvent[] | null {
-    const turn = params.turn as Record<string, unknown> | undefined;
-    if (!turn || typeof turn !== 'object') return null; // B-07-9
+  private parseTurnCompleted(params: Record<string, unknown>): AgentEvent[] {
+    // ql-20260624-007：turn/completed 是 codex 的 claude-result 等价收尾信号
+    // （QUICKLOG-qinyi-2026-06-23:178）。params.turn 缺失/异常时不再 return null 吞信号，
+    // 降级空对象继续产出 complete event，保证 turn/completed 一到必收敛——对齐
+    // claude-sdk-driver.ts:391-393 的 result 强契约。否则 consume 卡在
+    // await currentTurnPromise（codex-app-server-driver.ts:774），AgentRun 永不收敛。
+    const turn = (params.turn ?? {}) as Record<string, unknown>;
     const status = typeof turn.status === 'string' ? turn.status : '';
     const events: AgentEvent[] = [];
 

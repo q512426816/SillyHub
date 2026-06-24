@@ -45,4 +45,5 @@ permission: canUseTool 回调 → PermissionResolver.register 生成 request_id 
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+- ql-20260624-007：codex turn 收敛依赖 turn/completed 经 parseTurnCompleted 产 complete event → finishTurn(currentTurnPromise)；该方法已对齐 claude result 强契约（params.turn 缺失也必收敛，见 adapter-json-rpc 模块）。新增 codex 子进程 stdout 原始行落盘：consume 内 ctx.sessionId 存在时建 WriteStream 写 ~/.sillyhub/daemon/runs/codex-interactive/<sessionId>.log（fire-and-forget 静默，不写日志不影响主流程），sessionId 经 CodexStartOptions 传入、session-manager._buildDriverOptions 一处填充（create+restore 共用）。下次 turn 卡死时看该日志确认 turn/completed 是否到达 / payload 长啥样。
 <!-- MANUAL_NOTES_END -->

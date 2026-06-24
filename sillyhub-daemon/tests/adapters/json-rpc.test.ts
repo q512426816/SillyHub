@@ -261,6 +261,49 @@ describe('parse notification - turn lifecycle', () => {
     expect(err!.content).toBe('something went wrong'); // 源 test L929
     expect(err!.metadata?.turn_status).toBe('failed');
   });
+
+  // ql-20260624-007：turn/completed 是收尾信号，params.turn 缺失/异常时也必须产出
+  // complete event（不再 return null 吞信号），对齐 claude-sdk-driver result 强契约。
+  // 否则 consume 卡在 await currentTurnPromise → AgentRun 永不收敛 → inject 报冲突。
+  it('ql-20260624-007 turn/completed 无 params.turn → 仍产出 complete（不再 null，必收敛）', () => {
+    const a = new JsonRpcAdapter('codex');
+    const events = a.parse(
+      JSON.stringify({ jsonrpc: '2.0', method: 'turn/completed', params: {} }),
+    );
+    expect(events).not.toBeNull();
+    const complete = events!.find((e) => e.type === 'complete');
+    expect(complete).toBeDefined();
+    // status 取不到为空串（driver _outcomeFromComplete 当 unknown → _reportOutcome 降级 failed）
+    expect(complete!.metadata?.turn_status).toBe('');
+  });
+
+  it('ql-20260624-007 turn/completed turn 非 object（字符串）→ 仍产出 complete 不吞信号', () => {
+    const a = new JsonRpcAdapter('codex');
+    const events = a.parse(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'turn/completed',
+        params: { turn: 'malformed' },
+      }),
+    );
+    expect(events).not.toBeNull();
+    expect(events!.find((e) => e.type === 'complete')).toBeDefined();
+  });
+
+  it('ql-20260624-007 turn/completed 无 params.turn + 残留 delta → flush 不丢 + complete', () => {
+    const a = new JsonRpcAdapter('codex');
+    // 先发 delta（小，未达阈值，进 buffer）
+    a.parse(P('codex', 'notification-item-agentMessage-delta.json'));
+    // turn/completed 无 turn 字段 → 应先 flush 残留 buffer，再产出 complete
+    const events = a.parse(
+      JSON.stringify({ jsonrpc: '2.0', method: 'turn/completed', params: {} }),
+    );
+    expect(events).not.toBeNull();
+    const flushed = events!.find((e) => e.metadata?.source === 'agent_message_delta');
+    expect(flushed).toBeDefined();
+    expect(flushed!.content).toBe('Hello');
+    expect(events!.find((e) => e.type === 'complete')).toBeDefined();
+  });
 });
 
 // ===========================================================================

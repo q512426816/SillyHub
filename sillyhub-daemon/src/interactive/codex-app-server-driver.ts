@@ -43,6 +43,10 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createWriteStream, type WriteStream } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import readline from 'node:readline';
 import { resolveWindowsCmdShim } from '../cmd-shim.js';
 import { JsonRpcAdapter, type PendingServerRequest } from '../adapters/json-rpc.js';
@@ -373,6 +377,13 @@ export interface CodexStartOptions extends InteractiveDriverStartOptions {
    * elicitation 永远阻塞（需此字段，未注入则 fail-closed）。
    */
   sessionPermission?: CodexSessionPermissionHooks;
+  /**
+   * ql-20260624-007：backend AgentSession id，仅用于 codex 子进程 stdout 原始行落盘
+   * （~/.sillyhub/daemon/runs/codex-interactive/<sessionId>.log），下次 turn 卡死时秒级
+   * 定位是「codex 没发 turn/completed」还是「被 parse 吞」。driver 不参与 turn 收敛逻辑，
+   * 缺省（未注入）→ 不落盘，行为不变。由 SessionManager._buildDriverOptions 注入。
+   */
+  sessionId?: string;
 }
 
 /**
@@ -503,6 +514,8 @@ export class CodexAppServerDriver implements InteractiveDriver {
       manualApproval: opts.manualApproval === true,
       askUserOnly: opts.askUserOnly === true,
       sessionPermission: opts.sessionPermission,
+      // ql-20260624-007：透传 sessionId 供 consume 落盘 stdout 诊断日志。
+      sessionId: opts.sessionId,
     };
 
     const handle: CodexHandle = {
@@ -540,6 +553,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
         manualApproval: boolean;
         askUserOnly: boolean;
         sessionPermission?: CodexSessionPermissionHooks;
+        sessionId?: string;
       };
     })._ctx;
     const child = h.child;
@@ -555,6 +569,9 @@ export class CodexAppServerDriver implements InteractiveDriver {
     let pendingTurnError: string | null = null;
     // consume 是否已最终收敛（防 exit 与 turn/completed 双触发）
     let finalized = false;
+    // ql-20260624-007：codex stdout 原始行落盘流（ctx.sessionId 缺省时为 null，不落盘）。
+    // fire-and-forget，诊断 turn/completed 是否到达 / 被 parse 吞，绝不影响主流程。
+    let stdoutLogStream: WriteStream | null = null;
 
     /** 本轮 outcome（success / failed / cancelled / unknown）。 */
     type TurnOutcome = {
@@ -680,6 +697,16 @@ export class CodexAppServerDriver implements InteractiveDriver {
     const handleLine = (line: string): void => {
       if (h.closing) return;
 
+      // ql-20260624-007：原始 stdout 行落盘（解析前记录 codex 实际发出的每行，
+      // 下次 turn 卡死时对照看 turn/completed 是否到达 / payload 长啥样）。
+      if (stdoutLogStream) {
+        try {
+          stdoutLogStream.write(line + '\n');
+        } catch {
+          // 静默：日志失败绝不影响主流程
+        }
+      }
+
       // 先处理 server request（task-05 异步分发到 handler + 登记），再 parse。
       // 注意：parse 也会登记到 adapter.pendingMap，我们用 handle 自己的队列。
       this._maybeRespondServerRequest(h, line, onMessage, {
@@ -743,6 +770,24 @@ export class CodexAppServerDriver implements InteractiveDriver {
     rl.on('line', handleLine);
 
     try {
+      // ql-20260624-007：sessionId 存在时建 codex stdout 落盘流（fire-and-forget）。
+      // 落盘到 ~/.sillyhub/daemon/runs/codex-interactive/<sessionId>.log。
+      if (ctx.sessionId) {
+        try {
+          const logDir = join(homedir(), '.sillyhub', 'daemon', 'runs', 'codex-interactive');
+          await mkdir(logDir, { recursive: true });
+          const stream = createWriteStream(join(logDir, `${ctx.sessionId}.log`), {
+            flags: 'a',
+          });
+          stream.on('error', () => {
+            // 静默：日志流错误绝不影响主流程
+          });
+          stdoutLogStream = stream;
+        } catch {
+          stdoutLogStream = null;
+        }
+      }
+
       // ── A. 握手（每条 300ms 间隔）─────────────────────────────────────────
       await this._handshake(h, ctx);
 
@@ -790,6 +835,11 @@ export class CodexAppServerDriver implements InteractiveDriver {
         result: `codex consume error: ${(err as Error).message}`,
       });
     } finally {
+      try {
+        stdoutLogStream?.end();
+      } catch {
+        // 防御性：日志流关闭失败不影响主流程
+      }
       try {
         rl.close();
       } catch {

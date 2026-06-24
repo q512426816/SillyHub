@@ -115,3 +115,12 @@ created_at: 2026-06-23 10:09:12
 - sillyhub-daemon/src/daemon.ts（lockManager 可选依赖注入 + start acquire all + stop releaseAll）
 - sillyhub-daemon/src/cli.ts（start 子命令加 --force + 构造 lockManager 注入 daemon）
 - sillyhub-daemon/tests/runtime-lock.test.ts（新，7 场景：首次创建/同 provider 拒绝/stale pid 回收/stop 后删除/--force 回收 stale/不同 provider 不阻塞/不同 server 不阻塞）
+
+## ql-20260624-007-a9e3 | 2026-06-24 21:49:07 | 修复 codex interactive turn 卡死（parseTurnCompleted 吞 turn/completed 收尾信号致 AgentRun 永不收敛→inject 报 already has an active run；顺带加 codex stdout 调试日志）
+状态：已完成
+文件：
+- sillyhub-daemon/src/adapters/json-rpc.ts（parseTurnCompleted 不再 return null：params.turn 缺失/异常时降级产出 complete event，保证 method===turn/completed 一到必收敛，对齐 claude-sdk-driver result 强契约；保留 _flushAgentMessageBuf 残留 delta）
+- sillyhub-daemon/src/interactive/codex-app-server-driver.ts（CodexStartOptions 加 sessionId 字段 + start 存 ctx + consume readline 每行原始 line appendFile 落盘 ~/.sillyhub/daemon/runs/codex-interactive/<sessionId>.log，fire-and-forget catch 静默，对齐 terminal-observer.ts）
+- sillyhub-daemon/src/interactive/session-manager.ts（_buildDriverOptions 一处填 driverOpts.sessionId=state.sessionId，create+restoreAndReconnect 共用）
+- sillyhub-daemon/tests/adapters/json-rpc.test.ts（+3 用例：parseTurnCompleted turn 缺失/异常必产 complete 不再 null + 残留 flush 不丢 + 其他 notification 不变）
+结果：①json-rpc.ts:602 parseTurnCompleted 不再 return null——params.turn 缺失/非 object 时降级空对象继续产出 complete event，保证 method===turn/completed 一到必收敛（对齐 claude-sdk-driver.ts:391-393 result 强契约），保留 :610 _flushAgentMessageBuf 残留 delta。②codex-app-server-driver.ts：CodexStartOptions 加 sessionId 字段 + start 透传 ctx + consume 建 WriteStream 落盘 ~/.sillyhub/daemon/runs/codex-interactive/<sessionId>.log（handleLine 每行原始 stdout 写入，fire-and-forget catch 静默，finally 关闭）；session-manager.ts _buildDriverOptions 一处填 sessionId（create+restoreAndReconnect 共用，claude driver 忽略）。验证：json-rpc 56 passed(+3 新)、codex-app-server-driver 21 passed、interactive/+daemon-interactive-codex 318 passed(22 files)、tsc --noEmit 0 error。模块文档同步 adapter-json-rpc.md + interactive.md（MANUAL_NOTES 区）。依据 QUICKLOG-qinyi-2026-06-23:113/174/178-179（turn/completed≡claude result 等价物）。残留：若根因是 codex 某些 turn 干脆不发 turn/completed（非被 parse 吞），② 日志下次复现可秒级定位；本次未加 turn 超时兜底（用户否决，对齐 claude 不靠超时）。

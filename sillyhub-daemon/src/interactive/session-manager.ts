@@ -640,6 +640,9 @@ export class SessionManager {
       pathToClaudeCodeExecutable: spec.exePath,
       pathToAgentExecutable: spec.exePath,
       cwd: state.cwd,
+      // ql-20260624-007：透传 sessionId 给 codex driver 落盘 stdout 诊断日志
+      //（claude driver 忽略此字段；provider-neutral 填充，各 driver 按需取）。
+      sessionId: state.sessionId,
     };
     if (spec.model !== undefined) {
       driverOpts.model = spec.model;
