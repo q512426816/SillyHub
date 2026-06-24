@@ -526,9 +526,12 @@ describe('ql-006/007 stream_event 实时 usage 累加', () => {
     const ev = events[0]!;
     expect(ev.type).toBe('text');
     expect(ev.metadata?.status).toBe('usage_update');
+    // task-01: usage 现含 cache_read_tokens / cache_creation_tokens（短名，初值 0）
     expect(ev.metadata?.usage).toEqual({
       input_tokens: 100,
       output_tokens: 50,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
     });
   });
 
@@ -795,6 +798,8 @@ describe('ql-006/007 stream_event 实时 usage 累加', () => {
     expect(events[0]!.metadata?.usage).toEqual({
       input_tokens: 0,
       output_tokens: 20,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
     });
   });
 
@@ -825,5 +830,323 @@ describe('ql-006/007 stream_event 实时 usage 累加', () => {
     const events = a.parse(bigLine) ?? [];
     expect(events).toHaveLength(1);
     expect(events[0]!.metadata?.usage?.output_tokens).toBe(25);
+  });
+});
+
+// ===========================================================================
+// task-01 (2026-06-24-runtime-usage-stats): Claude cache 词元采集 + 透传
+// 字段命名映射：Claude 原始事件 cache_*_input_tokens ↔ 内部短名 cache_*_tokens
+// 覆盖：
+//   - message_delta 提取 cache_creation_input_tokens / cache_read_input_tokens → usage_update
+//   - assistant commit 后 snapshot 透传 cache 两维
+//   - result 事件 extractResultStats: cache 用 result 优先覆盖 accumulated（task-16 修复，非求和）
+//   - message_delta 仅 cache 增长(input/output 不变)也 emit usage_update（grew 四维）
+//   - cache 字段缺失/非 number → 守卫不覆盖，保持 0
+// ===========================================================================
+
+describe('task-01 cache 词元采集', () => {
+  it('message_delta 带 cache → usage_update 含短名 cache_*_tokens', () => {
+    const a = new StreamJsonAdapter('claude');
+    a.resetAccumulator();
+    const line = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'message_delta',
+        usage: {
+          input_tokens: 100,
+          output_tokens: 50,
+          cache_creation_input_tokens: 200,
+          cache_read_input_tokens: 300,
+        },
+      },
+    });
+    const events = a.parse(line) ?? [];
+    expect(events).toHaveLength(1);
+    const ev = events[0]!;
+    expect(ev.metadata?.status).toBe('usage_update');
+    const usage = ev.metadata?.usage as Record<string, number>;
+    // 映射：cache_creation_input_tokens(200) → cache_creation_tokens(200)
+    //       cache_read_input_tokens(300)     → cache_read_tokens(300)
+    expect(usage.cache_creation_tokens).toBe(200);
+    expect(usage.cache_read_tokens).toBe(300);
+    expect(usage.input_tokens).toBe(100);
+    expect(usage.output_tokens).toBe(50);
+  });
+
+  it('message_delta 仅 cache 增长（input/output 不变）→ 仍 emit usage_update', () => {
+    // 防止 grew 判定漏 cache：第一条给 input/output + cache，第二条只加 cache
+    const a = new StreamJsonAdapter('claude');
+    a.resetAccumulator();
+    const line1 = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'message_delta',
+        usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 10 },
+      },
+    });
+    a.parse(line1);
+    // 第二条 input/output 不变，cache_creation 从 0 增长到 100
+    const line2 = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'message_delta',
+        usage: {
+          input_tokens: 10,
+          output_tokens: 5,
+          cache_read_input_tokens: 10,
+          cache_creation_input_tokens: 100,
+        },
+      },
+    });
+    const events = a.parse(line2) ?? [];
+    expect(events).toHaveLength(1);
+    const usage = events[0]!.metadata?.usage as Record<string, number>;
+    expect(usage.cache_creation_tokens).toBe(100);
+    expect(usage.cache_read_tokens).toBe(10);
+  });
+
+  it('assistant commit 后 cache 累加到 snapshot（透传到 assistant event metadata.usage）', () => {
+    const a = new StreamJsonAdapter('claude');
+    a.resetAccumulator();
+    // turn 1: message_delta 带 cache
+    a.parse(
+      JSON.stringify({
+        type: 'stream_event',
+        event: {
+          type: 'message_delta',
+          usage: {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_input_tokens: 200,
+            cache_read_input_tokens: 300,
+          },
+        },
+      }),
+    );
+    // assistant 事件 → commit _currentTurnUsage 到 _accumulatedUsage，snapshot 注入
+    const events = a.parse(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'text', text: 'hi' }],
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+      }),
+    ) ?? [];
+    expect(events.length).toBeGreaterThan(0);
+    const usage = events[0]!.metadata?.usage as Record<string, number>;
+    // commit 后 snapshot = _accumulatedUsage(200/300) + _currentTurnUsage(0/0)
+    expect(usage.cache_creation_tokens).toBe(200);
+    expect(usage.cache_read_tokens).toBe(300);
+  });
+
+  it('result 事件 extractResultStats: cache 用 result 优先（覆盖 accumulated），input/output 求和', () => {
+    const a = new StreamJsonAdapter('claude');
+    a.resetAccumulator();
+    // 先 assistant commit 累加 cache（accumulated = 200/300）
+    a.parse(
+      JSON.stringify({
+        type: 'stream_event',
+        event: {
+          type: 'message_delta',
+          usage: {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_input_tokens: 200,
+            cache_read_input_tokens: 300,
+          },
+        },
+      }),
+    );
+    a.parse(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'text', text: 'done' }],
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+      }),
+    );
+    // result 带 cache → cache 取 result.cache_*_input_tokens(200/300) 覆盖 accumulated
+    // （task-16 修复：cache 是会话级快照非增量，求和会翻倍；input/output 仍求和）
+    const events = a.parse(
+      JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        result: 'done',
+        session_id: 's1',
+        usage: {
+          input_tokens: 100,
+          output_tokens: 50,
+          cache_creation_input_tokens: 200,
+          cache_read_input_tokens: 300,
+        },
+        total_cost_usd: 0.5,
+      }),
+    ) ?? [];
+    expect(events).toHaveLength(1);
+    const stats = events[0]!.metadata?.stats as Record<string, number>;
+    expect(stats.cache_creation_tokens).toBe(200); // result 覆盖（非 200+200）
+    expect(stats.cache_read_tokens).toBe(300); // result 覆盖（非 300+300）
+    expect(stats.input_tokens).toBe(200); // 100 + 100
+    expect(stats.output_tokens).toBe(100); // 50 + 50
+  });
+
+  it('result 无 cache 字段 → extractResultStats 回落 accumulated（result.usage 缺 cache 按 0 累加）', () => {
+    const a = new StreamJsonAdapter('claude');
+    a.resetAccumulator();
+    a.parse(
+      JSON.stringify({
+        type: 'stream_event',
+        event: {
+          type: 'message_delta',
+          usage: {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_input_tokens: 200,
+            cache_read_input_tokens: 300,
+          },
+        },
+      }),
+    );
+    a.parse(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'text', text: 'done' }],
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+      }),
+    );
+    // result.usage 只有 input/output，无 cache 字段
+    const events = a.parse(
+      JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        result: 'done',
+        session_id: 's2',
+        usage: { input_tokens: 100, output_tokens: 50 },
+      }),
+    ) ?? [];
+    const stats = events[0]!.metadata?.stats as Record<string, number>;
+    // result 无 cache → 回落 accumulated(200/300)（task-16：cache replace 语义，缺失才回落）
+    expect(stats.cache_creation_tokens).toBe(200);
+    expect(stats.cache_read_tokens).toBe(300);
+  });
+
+  it('Claude CLI 不透传 cache 字段(R-01): 缺失 → 保持 0，不报错', () => {
+    const a = new StreamJsonAdapter('claude');
+    a.resetAccumulator();
+    // message_delta 只有 input/output，无 cache
+    const line = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'message_delta',
+        usage: { input_tokens: 100, output_tokens: 50 },
+      },
+    });
+    const events = a.parse(line) ?? [];
+    const usage = events[0]!.metadata?.usage as Record<string, number>;
+    expect(usage.cache_creation_tokens).toBe(0);
+    expect(usage.cache_read_tokens).toBe(0);
+  });
+
+  it('cache 字段非 number(字符串/null) → 守卫不覆盖，保持原值', () => {
+    const a = new StreamJsonAdapter('claude');
+    a.resetAccumulator();
+    const line = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'message_delta',
+        usage: {
+          input_tokens: 100,
+          output_tokens: 50,
+          cache_creation_input_tokens: 'not-a-number',
+          cache_read_input_tokens: null,
+        },
+      },
+    });
+    const events = a.parse(line) ?? [];
+    const usage = events[0]!.metadata?.usage as Record<string, number>;
+    // 守卫 typeof !== 'number' → 不覆盖，保持 0
+    expect(usage.cache_creation_tokens).toBe(0);
+    expect(usage.cache_read_tokens).toBe(0);
+    expect(usage.input_tokens).toBe(100);
+  });
+
+  it('assistant 兜底分支(message.usage)提取 cache → 累加到 _accumulatedUsage', () => {
+    // 无 message_delta，走 parseAssistant 兜底分支（_currentTurnUsage 全 0 → message.usage）
+    const a = new StreamJsonAdapter('claude');
+    a.resetAccumulator();
+    const events = a.parse(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'text', text: 'hi' }],
+          usage: {
+            input_tokens: 30,
+            output_tokens: 20,
+            cache_creation_input_tokens: 40,
+            cache_read_input_tokens: 60,
+          },
+        },
+      }),
+    ) ?? [];
+    expect(events.length).toBeGreaterThan(0);
+    const usage = events[0]!.metadata?.usage as Record<string, number>;
+    // 兜底分支直接累加 message.usage 到 _accumulatedUsage，snapshot = 40/60
+    expect(usage.cache_creation_tokens).toBe(40);
+    expect(usage.cache_read_tokens).toBe(60);
+  });
+
+  it('resetAccumulator 后 cache 累加器归零（跨 lease 不污染）', () => {
+    const a = new StreamJsonAdapter('claude');
+    a.parse(
+      JSON.stringify({
+        type: 'stream_event',
+        event: {
+          type: 'message_delta',
+          usage: {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_input_tokens: 200,
+            cache_read_input_tokens: 300,
+          },
+        },
+      }),
+    );
+    a.parse(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'text', text: 'turn1' }],
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+      }),
+    );
+
+    a.resetAccumulator();
+
+    // 第二轮：cache 应从 0 开始
+    const events = a.parse(
+      JSON.stringify({
+        type: 'stream_event',
+        event: {
+          type: 'message_delta',
+          usage: {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_creation_input_tokens: 15,
+            cache_read_input_tokens: 25,
+          },
+        },
+      }),
+    ) ?? [];
+    const usage = events[0]!.metadata?.usage as Record<string, number>;
+    expect(usage.cache_creation_tokens).toBe(15);
+    expect(usage.cache_read_tokens).toBe(25);
+    // 不含第一轮污染的 200/300
   });
 });

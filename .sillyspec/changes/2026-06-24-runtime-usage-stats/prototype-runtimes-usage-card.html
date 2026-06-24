@@ -1,0 +1,176 @@
+<!--
+  author: qinyi
+  created_at: 2026-06-24
+  变更: 2026-06-24-runtime-usage-stats
+  说明: 运行时卡片用量统计原型 —— 输入/输出/缓存词元 + 总费用 + 时间窗 sparkline
+  交互: 顶部时间窗切换器(当日/7天/30天)驱动所有卡片的数字与折线同步变化
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>运行时用量统计 · 原型</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background:#f5f6f8; margin:0; padding:24px; color:#1f2329; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  .sub { color:#8a8f99; font-size:13px; margin-bottom:18px; }
+  /* 顶部时间窗切换器 —— 全局控制所有卡片 */
+  .window-bar { display:flex; align-items:center; gap:16px; margin-bottom:20px; }
+  .window-bar .label { font-size:13px; color:#8a8f99; }
+  .tabs { display:inline-flex; background:#ebedf0; border-radius:8px; padding:3px; }
+  .tab { border:none; background:transparent; padding:6px 16px; border-radius:6px; cursor:pointer; font-size:13px; color:#4e5969; }
+  .tab.active { background:#fff; color:#165dff; font-weight:600; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  .legend { margin-left:auto; display:flex; gap:14px; font-size:12px; color:#8a8f99; }
+  .legend i { display:inline-block; width:10px; height:2px; vertical-align:middle; margin-right:4px; }
+  /* 卡片网格 xl:grid-cols-2 */
+  .grid { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; }
+  .card { background:#fff; border:1px solid#e5e6eb; border-radius:12px; padding:16px; }
+  .card-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .dot { width:8px; height:8px; border-radius:50%; }
+  .online{background:#00b42a}.offline{background:#c9cdd4}.maint{background:#ff7d00}
+  .name { font-weight:600; font-size:15px; }
+  .badge { font-size:11px; color:#86909c; background:#f2f3f5; padding:1px 7px; border-radius:4px; }
+  .meta { font-size:12px; color:#86909c; }
+  /* 4 个用量数字 */
+  .usage-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:12px; }
+  .metric { background:#f7f8fa; border-radius:8px; padding:8px 10px; }
+  .metric .m-label { font-size:11px; color:#86909c; }
+  .metric .m-value { font-size:18px; font-weight:600; margin-top:2px; }
+  .metric .m-value.cost { color:#f53f3f; }
+  .metric .m-value.cache { color:#d4a017; }
+  .metric .m-value.na { color:#c9cdd4; font-size:16px; }
+  /* sparkline */
+  .spark-wrap { background:#fafbfc; border-radius:6px; padding:6px 4px; height:46px; }
+  .spark { width:100%; height:100%; display:block; }
+  .line-in { stroke:#165dff; fill:none; stroke-width:1.4; }
+  .line-out { stroke:#00b42a; fill:none; stroke-width:1.4; }
+  .card-foot { display:flex; align-items:center; gap:8px; margin-top:12px; font-size:12px; color:#86909c; flex-wrap:wrap; }
+  .chip { background:#f2f3f5; border-radius:4px; padding:1px 6px; }
+  a { color:#165dff; text-decoration:none; cursor:pointer; }
+  .note { margin-top:20px; padding:12px 16px; background:#fffbe5; border:1px solid #ffe58f; border-radius:8px; font-size:12px; color:#7a5b00; }
+</style>
+</head>
+<body>
+  <h1>运行时列表 · 用量统计原型</h1>
+  <div class="sub">每张运行时卡片新增:输入 / 输出 / 缓存 词元 + 总费用,以及按时间窗的 sparkline 折线</div>
+
+  <!-- 顶部统一时间窗切换器,控制所有卡片 -->
+  <div class="window-bar">
+    <span class="label">时间窗</span>
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-w="1d">当日</button>
+      <button class="tab" data-w="7d">7 天</button>
+      <button class="tab" data-w="30d">30 天</button>
+    </div>
+    <div class="legend">
+      <span><i style="background:#165dff"></i>输入词元</span>
+      <span><i style="background:#00b42a"></i>输出词元</span>
+    </div>
+  </div>
+
+  <div class="grid" id="grid"><!-- 卡片由 JS 注入 --></div>
+
+  <div class="note">
+    说明:Claude / opencode 卡片有缓存数据(来自 cache_read/cache_creation);codex 是 OpenAI 系协议,usage 无 cache 字段,故缓存项显示「—」。
+    切换时间窗时,数字与 sparkline 同步变化(当日按小时 24 点,7天/30天按日)。
+  </div>
+
+<script>
+// 模拟数据:每 runtime × 每窗 的数字文本 + in/out 序列(sparkline 形状)
+function gen(count, base, amp, phase) {
+  const a = [];
+  for (let i = 0; i < count; i++) {
+    a.push(Math.round(base + amp * Math.sin(i / count * Math.PI * 2 + phase) + amp * 0.35 * Math.sin(i * 0.9 + phase)));
+  }
+  return a;
+}
+const RUNTIMES = [
+  { id:'claude', name:'Claude', badge:'claude-code', status:'online', statusText:'在线 · 心跳 3s · v1.2', sessions:12, caps:['scan','run'] },
+  { id:'codex',  name:'Codex',  badge:'codex',       status:'online', statusText:'在线 · 心跳 5s · v0.9', sessions:5,  caps:['run'] },
+  { id:'opencode', name:'OpenCode', badge:'opencode', status:'maint',  statusText:'维护 · 心跳 12s · v2.1', sessions:3, caps:['scan','stage'] },
+];
+const DATA = {
+  '1d': {
+    claude:   { input:'1.2M', output:'230K', cache:'5.4M', cost:'$12.34', in:gen(24,40,25,0), out:gen(24,10,7,1) },
+    codex:    { input:'480K', output:'92K',  cache:'—',    cost:'$4.10',  in:gen(24,18,12,2), out:gen(24,5,4,3) },
+    opencode: { input:'210K', output:'44K',  cache:'890K', cost:'$1.92',  in:gen(24,9,6,4),   out:gen(24,2,2,5) },
+  },
+  '7d': {
+    claude:   { input:'7.8M', output:'1.5M', cache:'38M',  cost:'$81.20', in:gen(7,60,30,0), out:gen(7,14,8,1) },
+    codex:    { input:'3.1M', output:'610K', cache:'—',    cost:'$28.40', in:gen(7,28,16,2), out:gen(7,6,4,3) },
+    opencode: { input:'1.4M', output:'290K', cache:'6.1M', cost:'$13.05', in:gen(7,14,8,4),  out:gen(7,3,2,5) },
+  },
+  '30d': {
+    claude:   { input:'32M',  output:'6.2M', cache:'158M', cost:'$340.55', in:gen(30,55,28,0), out:gen(30,12,7,1) },
+    codex:    { input:'12M',  output:'2.4M', cache:'—',    cost:'$118.30', in:gen(30,26,15,2), out:gen(30,5,3,3) },
+    opencode: { input:'5.6M', output:'1.1M', cache:'25M',  cost:'$52.10',  in:gen(30,13,7,4),  out:gen(30,3,2,5) },
+  },
+};
+
+// 序列 → SVG path(归一化到 viewBox 100×30)
+function toPath(arr) {
+  const max = Math.max(...arr), min = Math.min(...arr);
+  const span = max - min || 1;
+  return arr.map((v, i) => {
+    const x = (i / (arr.length - 1)) * 100;
+    const y = 28 - ((v - min) / span) * 24;
+    return (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
+  }).join(' ');
+}
+
+function renderCards() {
+  const grid = document.getElementById('grid');
+  grid.innerHTML = RUNTIMES.map(r => `
+    <div class="card" data-rid="${r.id}">
+      <div class="card-head">
+        <span class="dot ${r.status}"></span>
+        <span class="name">${r.name}</span>
+        <span class="badge">${r.badge}</span>
+        <span class="meta">${r.statusText}</span>
+      </div>
+      <div class="usage-grid">
+        <div class="metric"><div class="m-label">输入词元</div><div class="m-value" data-k="input">—</div></div>
+        <div class="metric"><div class="m-label">输出词元</div><div class="m-value" data-k="output">—</div></div>
+        <div class="metric"><div class="m-label">缓存词元</div><div class="m-value cache" data-k="cache">—</div></div>
+        <div class="metric"><div class="m-label">总费用</div><div class="m-value cost" data-k="cost">—</div></div>
+      </div>
+      <div class="spark-wrap"><svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none">
+        <path class="line-in"></path><path class="line-out"></path>
+      </svg></div>
+      <div class="card-foot">
+        <span>会话 ${r.sessions}</span><span>·</span>
+        <span>能力 ${r.caps.map(c=>'<span class="chip">'+c+'</span>').join(' ')}</span>
+        <span style="margin-left:auto"><a>详情</a></span>
+      </div>
+    </div>`).join('');
+}
+
+function applyWindow(w) {
+  RUNTIMES.forEach(r => {
+    const d = DATA[w][r.id];
+    const card = document.querySelector(`.card[data-rid="${r.id}"]`);
+    card.querySelector('[data-k="input"]').textContent = d.input;
+    card.querySelector('[data-k="output"]').textContent = d.output;
+    const cacheEl = card.querySelector('[data-k="cache"]');
+    cacheEl.textContent = d.cache;
+    cacheEl.className = 'm-value ' + (d.cache === '—' ? 'na' : 'cache');
+    card.querySelector('[data-k="cost"]').textContent = d.cost;
+    card.querySelector('.line-in').setAttribute('d', toPath(d.in));
+    card.querySelector('.line-out').setAttribute('d', toPath(d.out));
+  });
+}
+
+document.getElementById('tabs').addEventListener('click', e => {
+  const tab = e.target.closest('.tab');
+  if (!tab) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  tab.classList.add('active');
+  applyWindow(tab.dataset.w);
+});
+
+renderCards();
+applyWindow('1d');
+</script>
+</body>
+</html>

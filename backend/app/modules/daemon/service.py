@@ -282,6 +282,12 @@ class DaemonService:
         duration_api_ms: int | None = None,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
+        # task-07 / FR-02：prompt cache 词元透传（SDKResultSuccess.usage.cache_*）。
+        # facade 委托签名必须与 RunSyncService 同步，否则 router → facade → run_sync
+        # 链路在 facade 断（TypeError: unexpected keyword argument）。None 默认值
+        # 保证老调用方（router/WS）不传该参数时向后兼容。
+        cache_read_tokens: int | None = None,
+        cache_creation_tokens: int | None = None,
     ) -> AgentRun:
         """Close an interactive AgentRun from daemon SDK result (gap-3 / design §4).
 
@@ -320,6 +326,8 @@ class DaemonService:
             duration_api_ms=duration_api_ms,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_creation_tokens=cache_creation_tokens,
         )
 
     # ── Lease expiry / rollback (delegate to LeaseService, task-06) ───────

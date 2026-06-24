@@ -44,6 +44,8 @@ _METADATA_FIELDS = (
     "session_id",
     "input_tokens",
     "output_tokens",
+    "cache_read_tokens",  # task-06: batch meta cache read (prompt cache 命中读取词元)
+    "cache_creation_tokens",  # task-06: batch meta cache creation (prompt cache 写入词元)
 )
 
 

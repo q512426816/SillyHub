@@ -29,6 +29,7 @@ import {
   shortId,
 } from "@/components/daemon/runtime-session-helpers";
 import { RuntimeSessionDialog } from "@/components/daemon/runtime-session-dialog";
+import { RuntimeUsageLineChart } from "@/components/charts"; // task-13 桶导出(dynamic ssr:false),非原始组件
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
@@ -37,6 +38,7 @@ import {
   disableDaemonRuntime,
   enableDaemonRuntime,
   getAgentSession,
+  getRuntimesUsage,
   isVersionBelow,
   listAgentSessions,
   listDaemonRuntimes,
@@ -44,6 +46,8 @@ import {
   PROVIDER_META,
   type AgentSessionRead,
   type DaemonRuntimeRead,
+  type RuntimeUsageItem,
+  type RuntimeUsageWindow,
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/stores/session";
@@ -222,6 +226,35 @@ function formatRelativeTime(iso: string | null): string {
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
   return `${Math.floor(diff / 86_400_000)} 天前`;
 }
+
+// ===== task-14 / FR-01 / FR-04：用量统计格式化 helper（文件内私有，照搬 formatRelativeTime 的位置风格） =====
+
+/** token 数值 k/M 格式化（FR-01）。< 1000 原值；>= 1e6 用 M；>= 1e3 用 k。 */
+function formatTokens(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return "0";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+/** 费用 USD 格式化（FR-01）。$xx.xx，0 显示 $0.00。 */
+function formatCost(n: number): string {
+  return `$${(Number.isFinite(n) ? n : 0).toFixed(2)}`;
+}
+
+/** 缓存合并显示（D-001@v1）：read + creation，> 0 时 formatTokens，否则「—」（codex / 无 cache 数据）。 */
+function formatCache(item: RuntimeUsageItem | undefined): string {
+  if (!item) return "—";
+  const sum = item.summary.cache_read_tokens + item.summary.cache_creation_tokens;
+  return sum > 0 ? formatTokens(sum) : "—";
+}
+
+/** 时间窗中文 label（FR-04，CLAUDE.md 规则 11 中文 UI）。 */
+const WINDOW_LABELS: Record<RuntimeUsageWindow, string> = {
+  "1d": "当日",
+  "7d": "7 天",
+  "30d": "30 天",
+};
 
 function ProviderBadge({ provider }: { provider: string | null }) {
   const tone = getProviderTone(provider);
@@ -481,10 +514,27 @@ function RuntimeMeta({ label, children }: { label: string; children: ReactNode }
   );
 }
 
+/**
+ * UsageStat —— 用量数字小格子（task-14 / FR-01）。
+ * 类 RuntimeMeta 但更紧凑(4 列网格内):label 10px + value 14px 加粗 + truncate 防溢出。
+ * 借鉴 SummaryCard 的 label/value 排版风格。
+ */
+function UsageStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-medium uppercase text-muted-foreground">{label}</p>
+      <p className="mt-0.5 truncate text-sm font-semibold text-foreground">{value}</p>
+    </div>
+  );
+}
+
 function RuntimeCard({
   runtime,
   actioning,
   sessionStats,
+  usage,
+  usageWindow,
+  usageLoading,
   onToggleEnabled,
   onOpenSession,
   onDelete,
@@ -492,6 +542,9 @@ function RuntimeCard({
   runtime: DaemonRuntimeRead;
   actioning: boolean;
   sessionStats: { total: number; active: number };
+  usage?: RuntimeUsageItem;
+  usageWindow: RuntimeUsageWindow;
+  usageLoading?: boolean;
   onToggleEnabled: (runtime: DaemonRuntimeRead) => Promise<void>;
   onOpenSession: (runtime: DaemonRuntimeRead) => void;
   onDelete: (runtime: DaemonRuntimeRead) => Promise<void>;
@@ -513,6 +566,13 @@ function RuntimeCard({
   const canOpenSession =
     runtime.status === "online" &&
     (runtime.provider === "claude" || runtime.provider === "codex");
+
+  // task-14 / FR-01：用量区数字（summary 缺失 → 「—」，费用恒 $xx.xx）。
+  const summary = usage?.summary;
+  const inputLabel = summary ? formatTokens(summary.input_tokens) : "—";
+  const outputLabel = summary ? formatTokens(summary.output_tokens) : "—";
+  const cacheLabel = formatCache(usage);
+  const costLabel = summary ? formatCost(summary.total_cost_usd) : "$0.00";
 
   return (
     <article className="overflow-hidden rounded-md border bg-card transition-colors hover:border-primary/30">
@@ -573,6 +633,35 @@ function RuntimeCard({
             )}
           </span>
         </RuntimeMeta>
+      </div>
+
+      {/*
+        task-14 / FR-01 / FR-04：用量区（4 数字 + sparkline）。
+        - 数字:输入 / 输出 / 缓存(合并 read+creation,D-001@v1 无数据显示「—」) / 费用(USD)。
+        - sparkline:task-13 桶导出的 RuntimeUsageLineChart,传该 runtime 的 daily 序列(输入/输出双线)。
+        - usage=undefined(新 runtime / 窗口内无 run / 拉取失败)→ 数字全「—」、费用 $0.00、sparkline「暂无数据」。
+      */}
+      <div className="border-t px-4 py-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] font-medium uppercase text-muted-foreground">
+            用量统计（{WINDOW_LABELS[usageWindow]}）
+          </p>
+          <span className="text-[11px] text-muted-foreground">
+            {usageLoading ? "加载中" : ""}
+          </span>
+        </div>
+        <div className="mt-2 grid grid-cols-4 gap-2">
+          <UsageStat label="输入" value={inputLabel} />
+          <UsageStat label="输出" value={outputLabel} />
+          <UsageStat label="缓存" value={cacheLabel} />
+          <UsageStat label="费用" value={costLabel} />
+        </div>
+        <div className="mt-2">
+          <RuntimeUsageLineChart
+            points={usage?.daily ?? []}
+            loading={usageLoading}
+          />
+        </div>
       </div>
 
       <div className="border-t px-4 py-3">
@@ -699,6 +788,14 @@ export default function RuntimesPage() {
   // task-04 / D-003：URL ?session= 恢复点，仅 URL 恢复时传入弹窗默认态 attach。
   const [initialSessionId, setInitialSessionId] = useState<string | null>(null);
 
+  // task-14 / FR-04 / D-004@v1：用量统计页面级状态。
+  // usageWindow:时间窗(默认 7d);usageByRuntime:按 runtime_id 聚合的用量 Map(照搬 sessionStatsByRuntime 模式)。
+  // 非实时刷新(D-004@v1):仅进页面 + 切窗时调 getRuntimesUsage,不订阅 SSE、不轮询。
+  const [usageWindow, setUsageWindow] = useState<RuntimeUsageWindow>("7d");
+  const [usageByRuntime, setUsageByRuntime] = useState<Map<string, RuntimeUsageItem>>(new Map());
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageError, setUsageError] = useState<string | null>(null);
+
   // task-04 / D-003：URL 恢复编排（从原 SessionListSection 上移到 page）
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -800,6 +897,38 @@ export default function RuntimesPage() {
     }, 15_000);
     return () => window.clearInterval(timer);
   }, [reload]);
+
+  // task-14 / FR-04 / D-004@v1：拉取所有 runtime 的用量(进页面 + 切窗时触发,非实时)。
+  // cancelled 守卫防竞态(快速切窗时旧请求 resolve 跳过 set,只采最新窗)。
+  // 失败降级:usageByRuntime 清空(卡片显示空用量,不崩)、setUsageError 供顶部提示。
+  const reloadUsage = useCallback((window: RuntimeUsageWindow) => {
+    setUsageLoading(true);
+    setUsageError(null);
+    let cancelled = false;
+    getRuntimesUsage(window)
+      .then((resp) => {
+        if (cancelled) return;
+        // 按 runtime_id 聚合成 Map(照搬 sessionStatsByRuntime ~885-895 的模式)。
+        const map = new Map<string, RuntimeUsageItem>();
+        for (const item of resp.runtimes) map.set(item.runtime_id, item);
+        setUsageByRuntime(map);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setUsageByRuntime(new Map()); // 失败:空 Map,卡片 usage=undefined → 数字全「—」、sparkline「暂无数据」
+        setUsageError(err instanceof ApiError ? err.message : "加载用量统计失败");
+      })
+      .finally(() => {
+        if (!cancelled) setUsageLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    return reloadUsage(usageWindow);
+  }, [usageWindow, reloadUsage]);
 
   // task-04 / FR-06 / D-003：mount 读 ?session=<id> → 查 status，活跃 → 开对应 runtime
   // 弹窗（initialSessionId 接弹窗默认态 attach）；ended/failed/不存在/已删 → 清 param
@@ -949,17 +1078,46 @@ export default function RuntimesPage() {
                       {lastRefreshedAt ? `上次刷新：${formatRefreshTime(lastRefreshedAt)}` : "等待刷新"}
                     </p>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5"
-                    onClick={() => void reload({ showFeedback: true })}
-                    disabled={refreshing}
-                  >
-                    <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
-                    {refreshing ? "刷新中" : "刷新"}
-                  </Button>
+                  {/*
+                    task-14 / FR-04：时间窗切换器(3 tab)。切窗触发页面级 usageWindow 变化 →
+                    useEffect 重发 getRuntimesUsage(新窗) → 所有卡片用量区同步刷新。
+                    active 态 variant="default" / inactive variant="outline",照搬项目现有 tab 风格。
+                  */}
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1 rounded-md border bg-card p-0.5">
+                      {(Object.keys(WINDOW_LABELS) as RuntimeUsageWindow[]).map((w) => (
+                        <Button
+                          key={w}
+                          size="sm"
+                          variant={usageWindow === w ? "default" : "outline"}
+                          className="h-7 px-2.5 text-xs"
+                          onClick={() => setUsageWindow(w)}
+                          // aria-label 优先于可见文本「当日/7天/30天」作为 accessible name,
+                          // 供 findByRole({ name: /切换用量统计时间窗为.../ }) 定位 + 屏幕阅读器朗读完整语义(FR-04 可访问性)。
+                          aria-label={`切换用量统计时间窗为${WINDOW_LABELS[w]}`}
+                          title={`切换用量统计时间窗为${WINDOW_LABELS[w]}`}
+                        >
+                          {WINDOW_LABELS[w]}
+                        </Button>
+                      ))}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => void reload({ showFeedback: true })}
+                      disabled={refreshing}
+                    >
+                      <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+                      {refreshing ? "刷新中" : "刷新"}
+                    </Button>
+                  </div>
                 </div>
+                {usageError && (
+                  <p className="text-[11px] text-amber-600">
+                    用量统计加载失败：{usageError}（卡片用量区显示空）
+                  </p>
+                )}
                 <div
                   data-testid="runtime-list-scroll"
                   className="pr-1"
@@ -971,6 +1129,9 @@ export default function RuntimesPage() {
                         runtime={runtime}
                         actioning={runtimeActionId === runtime.id}
                         sessionStats={sessionStatsByRuntime.get(runtime.id) ?? { total: 0, active: 0 }}
+                        usage={usageByRuntime.get(runtime.id)}
+                        usageWindow={usageWindow}
+                        usageLoading={usageLoading}
                         onToggleEnabled={handleToggleRuntime}
                         onOpenSession={handleOpenSession}
                         onDelete={handleDeleteRuntime}

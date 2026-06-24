@@ -256,6 +256,88 @@ describe('Wave2 task-04 gap-1 daemon 桥接 onTurnResult/onTurnMessage/onSession
     expect(payload.output_tokens).toBeUndefined();
   });
 
+  // task-16 (2026-06-24-runtime-usage-stats)：SDK usage cache 全名 → 短名映射。
+  // Claude SDK result.usage 用 Anthropic 全名 cache_creation_input_tokens /
+  // cache_read_input_tokens；daemon 提取处映射为短名 cache_creation_tokens /
+  // cache_read_tokens（对齐 backend agent_runs 列 / _METADATA_FIELDS）。
+  it('task-16 onTurnResult: SDK cache_*_input_tokens 全名 → payload cache_*_tokens 短名映射', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    const result = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'cached',
+      usage: {
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_creation_input_tokens: 200,
+        cache_read_input_tokens: 800,
+      },
+    } as unknown as SDKResultMessage;
+
+    await daemon.onTurnResult('sess-1', 'run-1', result);
+
+    const callArgs = client.notifyRunResult.mock.calls[0]!;
+    const payload = callArgs[3] as Record<string, unknown>;
+    // 全名 → 短名映射
+    expect(payload.cache_creation_tokens).toBe(200);
+    expect(payload.cache_read_tokens).toBe(800);
+    // 全名不应出现在 payload（backend 期望短名）
+    expect(payload.cache_creation_input_tokens).toBeUndefined();
+    expect(payload.cache_read_input_tokens).toBeUndefined();
+    // input/output 仍正常透传
+    expect(payload.input_tokens).toBe(100);
+    expect(payload.output_tokens).toBe(50);
+  });
+
+  // task-16 / D-001@v1：usage 无 cache 字段（codex/老 CLI）→ payload 不含 cache → backend NULL。
+  it('task-16 onTurnResult: usage 无 cache 字段 → payload 不含 cache_*（D-001@v1 backend NULL）', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    const result = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      usage: { input_tokens: 100, output_tokens: 50 }, // 无 cache_*_input_tokens
+    } as unknown as SDKResultMessage;
+
+    await daemon.onTurnResult('sess-1', 'run-1', result);
+
+    const callArgs = client.notifyRunResult.mock.calls[0]!;
+    const payload = callArgs[3] as Record<string, unknown>;
+    expect(payload.input_tokens).toBe(100);
+    expect(payload.cache_read_tokens).toBeUndefined();
+    expect(payload.cache_creation_tokens).toBeUndefined();
+  });
+
+  // task-16：cache_*_input_tokens=0（无缓存命中）合法，typeof number 守卫放行 0。
+  it('task-16 onTurnResult: cache_*_input_tokens=0 合法值透传（守卫 typeof number 非 truthy）', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    const result = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      usage: {
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
+    } as unknown as SDKResultMessage;
+
+    await daemon.onTurnResult('sess-1', 'run-1', result);
+
+    const callArgs = client.notifyRunResult.mock.calls[0]!;
+    const payload = callArgs[3] as Record<string, unknown>;
+    expect(payload.cache_creation_tokens).toBe(0);
+    expect(payload.cache_read_tokens).toBe(0);
+  });
+
   // ── onTurnMessage → hubClient.submitMessages ──────────────────────────────
 
   it('onTurnMessage(state.active) → submitMessages(leaseId, claimToken, runId, [msg])', async () => {
@@ -284,6 +366,60 @@ describe('Wave2 task-04 gap-1 daemon 桥接 onTurnResult/onTurnMessage/onSession
     expect(client.submitMessages).not.toHaveBeenCalled();
     await daemon.onTurnMessage('sess-1', undefined as unknown as string, msg);
     expect(client.submitMessages).not.toHaveBeenCalled();
+  });
+
+  // task-16 (2026-06-24-runtime-usage-stats)：实时回写 —— Claude SDK assistant
+  // message 的 usage（msg.message.usage）含 Anthropic 全名 cache_*_input_tokens，
+  // daemon 提到顶层时映射为短名 cache_*_tokens（backend _METADATA_FIELDS 命中）。
+  it('task-16 onTurnMessage(assistant): usage 提顶层 + cache 全名→短名映射', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    const msg = {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'hi' }],
+        usage: {
+          input_tokens: 100,
+          output_tokens: 50,
+          cache_creation_input_tokens: 300,
+          cache_read_input_tokens: 900,
+        },
+      },
+    } as unknown as SDKMessage;
+
+    await daemon.onTurnMessage('sess-1', 'run-1', msg);
+
+    expect(client.submitMessages).toHaveBeenCalledTimes(1);
+    const forwarded = (client.submitMessages as ReturnType<typeof vi.fn>).mock.calls[0]![3] as Record<string, unknown>[];
+    // 顶层 usage 已注入，且短名 alias 存在（全名 → 短名映射）
+    const usage = forwarded[0]!.usage as Record<string, unknown>;
+    expect(usage.input_tokens).toBe(100);
+    expect(usage.cache_creation_tokens).toBe(300);
+    expect(usage.cache_read_tokens).toBe(900);
+  });
+
+  it('task-16 onTurnMessage(assistant): usage 无 cache → 顶层 usage 不含 cache 短名（D-001@v1）', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    const msg = {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'hi' }],
+        usage: { input_tokens: 100, output_tokens: 50 }, // 无 cache
+      },
+    } as unknown as SDKMessage;
+
+    await daemon.onTurnMessage('sess-1', 'run-1', msg);
+
+    const forwarded = (client.submitMessages as ReturnType<typeof vi.fn>).mock.calls[0]![3] as Record<string, unknown>[];
+    const usage = forwarded[0]!.usage as Record<string, unknown>;
+    expect(usage.input_tokens).toBe(100);
+    expect(usage.cache_read_tokens).toBeUndefined();
+    expect(usage.cache_creation_tokens).toBeUndefined();
   });
 
   // ── onSessionEnd → hubClient.notifySessionEnd ─────────────────────────────

@@ -950,15 +950,15 @@ export class TaskRunner {
 
     // 计算最终状态
     if (cancelled) {
-      return finishAttempt({ status: 'cancelled', exitCode: exitCode || 1, error: 'task cancelled', stats: lastStats });
+      return finishAttempt({ status: 'cancelled', exitCode: exitCode || 1, error: 'task cancelled', stats: mergeAdapterUsage(adapter, lastStats) });
     }
     if (timedOut) {
-      return finishAttempt({ status: 'timeout', exitCode: exitCode || 1, error: `task timed out after ${timeoutSec}s`, stats: lastStats });
+      return finishAttempt({ status: 'timeout', exitCode: exitCode || 1, error: `task timed out after ${timeoutSec}s`, stats: mergeAdapterUsage(adapter, lastStats) });
     }
     // spawnErrorRef.current：spawn 错误（'error' 事件异步赋值）。用对象容器
     // 避免 TS 对闭包内赋值的 let 变量做错误 narrowing（详见声明处注释）。
     if (spawnErrorRef.current) {
-      return finishAttempt({ status: 'failed', exitCode: exitCode || 127, error: spawnErrorRef.current.message, stats: lastStats });
+      return finishAttempt({ status: 'failed', exitCode: exitCode || 127, error: spawnErrorRef.current.message, stats: mergeAdapterUsage(adapter, lastStats) });
     }
     if (exitCode !== 0) {
       const errDetail = stderrBuf.trim();
@@ -976,11 +976,11 @@ export class TaskRunner {
         status: 'failed',
         exitCode: 1, // 统一映射非零退出为 1（对齐 Python 把非零 exit 视为 failed）
         error: errMsg,
-        stats: lastStats,
+        stats: mergeAdapterUsage(adapter, lastStats),
         businessError,
       });
     }
-    return finishAttempt({ status: 'completed', exitCode: 0, stats: lastStats });
+    return finishAttempt({ status: 'completed', exitCode: 0, stats: mergeAdapterUsage(adapter, lastStats) });
   }
 
   /**
@@ -1616,6 +1616,77 @@ export function isSpawnLevelFailure(
     return SPAWN_FAILURE_PATTERNS.test(r.error ?? '');
   }
   return false;
+}
+
+// ── task-16 (2026-06-24-runtime-usage-stats)：batch usage 兜底合并 ───────────
+
+/**
+ * ndjson adapter (task-03) 的 `getUsage()` 在 batch 路径原先无任何调用方：
+ * stream-json 的 cache 走 `extractResultStats` 注入 complete 事件 metadata.stats
+ * （→ lastStats → TaskResult.stats，cache 已就绪）；但 ndjson（opencode）**不产
+ * complete stats 事件**，只通过 `getUsage()` 暴露 usage，导致 batch 路径
+ * TaskResult.usage / cache 在 ndjson 下完全丢失（step9 符号影响面检查发现）。
+ *
+ * 本函数鸭子类型调用 `adapter.getUsage()`（仅 ndjson 实现；stream-json 用
+ * extractResultStats，无 getUsage → 跳过，零回归），把 adapter 累积的 usage
+ * 合并进 lastStats：
+ *   - lastStats 已有的字段不覆盖（stream-json/codex 产 stats 时优先）。
+ *   - lastStats 为空 → 整体用 getUsage()。
+ *   - lastStats 缺 cache_read_tokens / cache_creation_tokens → 从 getUsage() 补。
+ *   - getUsage() 缺失/抛错 → 原样返回 lastStats（不阻塞）。
+ *
+ * typeof === 'number' 守卫：非数字（含 undefined/NaN）不写，0 值合法不丢。
+ *
+ * @param adapter   ProtocolAdapter（鸭子类型，可能无 getUsage）
+ * @param lastStats complete 事件 metadata.stats（可能 undefined）
+ * @returns 合并后的 stats（可能 undefined —— 两处都无数据时）
+ */
+export function mergeAdapterUsage(
+  adapter: ProtocolAdapter,
+  lastStats: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  // 鸭子类型：仅 ndjson 实现 getUsage；stream-json 无此方法 → 直接返回原 stats。
+  const getUsage = (adapter as { getUsage?: () => Record<string, unknown> }).getUsage;
+  if (typeof getUsage !== 'function') {
+    return lastStats;
+  }
+  let adapterUsage: Record<string, unknown> | undefined;
+  try {
+    adapterUsage = getUsage.call(adapter);
+  } catch {
+    // adapter getUsage 异常不阻塞主流程（对齐 _handleLine 单行容错策略）。
+    return lastStats;
+  }
+  if (!adapterUsage || typeof adapterUsage !== 'object') {
+    return lastStats;
+  }
+  // lastStats 为空 → 整体用 adapterUsage；否则合并缺失字段（lastStats 优先）。
+  const merged: Record<string, unknown> = lastStats
+    ? { ...lastStats }
+    : {};
+  // input/output / cache 两维 / num_turns / total_cost_usd 等所有 number 字段
+  // 逐个补缺（lastStats 已有的不覆盖）。
+  const FIELDS = [
+    'input_tokens',
+    'output_tokens',
+    'cache_read_tokens',
+    'cache_creation_tokens',
+    'num_turns',
+    'total_cost_usd',
+  ];
+  for (const key of FIELDS) {
+    if (merged[key] === undefined) {
+      const v = adapterUsage[key];
+      if (typeof v === 'number') {
+        merged[key] = v;
+      }
+    }
+  }
+  // 两处都无任何业务字段 → 返回 undefined（避免空对象污染下游）。
+  if (Object.keys(merged).length === 0) {
+    return lastStats;
+  }
+  return merged;
 }
 
 /**

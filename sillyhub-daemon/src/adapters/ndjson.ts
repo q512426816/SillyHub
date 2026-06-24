@@ -45,6 +45,15 @@ import type { ProtocolAdapter } from './protocol-adapter.js';
  *
  * 这些状态不通过 parse 的返回值传递，而由 TaskRunner（task-19）在
  * 子进程退出后通过 getter 方法读取，拼装最终 TaskResult。
+ *
+ * usage 字段命名说明（task-03 决策，对齐后端契约 design §7）：
+ *   - `cache_write_tokens`（opencode 原始 `tokens.cache.write`）即 Anthropic
+ *     的 `cache_creation_tokens`（写入/创建缓存的 token），语义同义。
+ *   - 后端 `agent_runs` 列名 / `_METADATA_FIELDS` / 聚合 schema / stream-json
+ *     adapter（task-01）统一使用 `cache_creation_tokens`（creation 命名）。
+ *   - 本接口内部仍用 `cache_write_tokens`（贴近 opencode 源字段、最小改动），
+ *     在 `getUsage()` 出口额外吐 `cache_creation_tokens` 别名（=同值），
+ *     让 task-16 提交链 / 后端 `_METADATA_FIELDS` 任一字段名都能命中。
  */
 interface NdjsonState {
   output: string;
@@ -55,9 +64,21 @@ interface NdjsonState {
     input_tokens: number;
     output_tokens: number;
     cache_read_tokens: number;
+    /** opencode `tokens.cache.write`；= Anthropic `cache_creation_tokens`（见类 JSDoc）。 */
     cache_write_tokens: number;
   };
 }
+
+/**
+ * `getUsage()` 返回类型：基础 4 字段 + `cache_creation_tokens` 别名。
+ *
+ * 导出该类型供调用方（task-19 TaskRunner / task-16 提交链 / 测试）引用，
+ * 字段名 `cache_creation_tokens` 对齐后端契约（design §7 schema）。
+ */
+export type NdjsonUsage = NdjsonState['usage'] & {
+  /** = `cache_write_tokens`（opencode write 即 Anthropic cache_creation）。 */
+  cache_creation_tokens: number;
+};
 
 /** 初始化一个空状态对象（对照 Python _NdjsonState 默认值）。 */
 function createInitialState(): NdjsonState {
@@ -311,6 +332,12 @@ export class NdjsonAdapter implements ProtocolAdapter {
   /**
    * step_finish 事件（对照 Python _handle_step_finish L247-262）。
    * 累加 token 到 state.usage，无事件产出。
+   *
+   * cache 映射（task-03）：
+   *   - `tokens.cache.read` → `cache_read_tokens`
+   *   - `tokens.cache.write` → `cache_write_tokens`（opencode 命名）
+   *     = Anthropic `cache_creation_tokens`（写入/创建缓存，语义同义）。
+   *     出口别名见 `getUsage()`。
    */
   private handleStepFinish(part: Record<string, unknown>): void {
     const tokens = isRecord(part.tokens) ? part.tokens : null;
@@ -358,9 +385,25 @@ export class NdjsonAdapter implements ProtocolAdapter {
     return this.state.finalError;
   }
 
-  /** 累积的 token usage（多 step_finish 跨行累加）。 */
-  getUsage(): NdjsonState['usage'] {
-    return { ...this.state.usage };
+  /**
+   * 累积的 token usage（多 step_finish 跨行累加）。
+   *
+   * 返回浅拷贝（扁平 number 对象，调用方修改不影响内部 state）。
+   *
+   * 字段名映射（task-03，对齐后端契约 design §7）：
+   *   - 内部存储用 opencode 命名 `cache_write_tokens`（贴近源字段）。
+   *   - 出口额外吐 `cache_creation_tokens`（= cache_write_tokens 值），对齐
+   *     Anthropic / 后端 `agent_runs.cache_creation_tokens` 列名 / stream-json
+   *     adapter（task-01）/ `_METADATA_FIELDS`。两个 cache_write/creation 字段
+   *     并存同值，让 task-16 提交链、后端任一字段名都能命中，避免 cache 丢失。
+   *
+   * 供 task-19 TaskRunner 在子进程退出后读取，拼装 TaskResult.usage。
+   */
+  getUsage(): NdjsonUsage {
+    return {
+      ...this.state.usage,
+      cache_creation_tokens: this.state.usage.cache_write_tokens, // 别名：write=creation
+    };
   }
 }
 

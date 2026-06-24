@@ -455,6 +455,53 @@ describe('HubClient — gap-3 notifyRunResult + gap-4 notifySessionEnd', () => {
     expect('input_tokens' in body).toBe(false);
   });
 
+  // task-16 (2026-06-24-runtime-usage-stats)：cache 两维透传。
+  it('task-16 notifyRunResult: cache_read_tokens / cache_creation_tokens 透传到 body', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.notifyRunResult('lease-1', 'ct', 'run-1', {
+      status: 'success',
+      is_error: false,
+      input_tokens: 100,
+      output_tokens: 50,
+      cache_read_tokens: 800,
+      cache_creation_tokens: 200,
+    });
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body.cache_read_tokens).toBe(800);
+    expect(body.cache_creation_tokens).toBe(200);
+    expect(body.input_tokens).toBe(100);
+    expect(body.output_tokens).toBe(50);
+  });
+
+  // task-16 / D-001@v1：cache 缺失（codex/老 CLI）→ 不 set → backend NULL。
+  it('task-16 notifyRunResult: cache 字段 undefined 时不写入 body（backend NULL，D-001@v1）', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.notifyRunResult('lease-1', 'ct', 'run-1', {
+      status: 'success',
+      is_error: false,
+      input_tokens: 100,
+      // cache_read_tokens / cache_creation_tokens 未提供（codex 不透传 cache）
+    });
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body.input_tokens).toBe(100);
+    expect('cache_read_tokens' in body).toBe(false);
+    expect('cache_creation_tokens' in body).toBe(false);
+  });
+
+  // task-16：cache_read=0（无缓存命中）是合法值，守卫用 `!== undefined` 不丢 0。
+  it('task-16 notifyRunResult: cache_read_tokens=0 合法值透传（守卫 !== undefined 而非 truthy）', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.notifyRunResult('lease-1', 'ct', 'run-1', {
+      status: 'success',
+      is_error: false,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+    });
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body.cache_read_tokens).toBe(0);
+    expect(body.cache_creation_tokens).toBe(0);
+  });
+
   it('gap-4 notifySessionEnd: POST /sessions/{id}/end，body {status,reason}，鉴权走 api-key', async () => {
     const c = new HubClient('http://x:8000', { apiKey: 'shk_daemon' });
     await c.notifySessionEnd('sess-1', 'ended', 'idle_timeout');

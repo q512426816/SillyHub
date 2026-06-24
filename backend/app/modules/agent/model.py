@@ -215,6 +215,17 @@ class AgentRun(BaseModel, table=True):
         default=None,
         sa_column=Column(Integer, nullable=True),
     )
+    # ── Cache token tracking (prompt cache read/creation; 2026-06-24-runtime-usage-stats) ──
+    # Claude(Anthropic)有 cache_creation_input_tokens / cache_read_input_tokens;
+    # codex/OpenAI 系无 cache,对应 NULL(D-001@v1)。nullable 对齐 task-04 迁移。
+    cache_read_tokens: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
+    cache_creation_tokens: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
     # ── Post-scan validation fields ──
     post_scan_status: str | None = Field(
         default=None,

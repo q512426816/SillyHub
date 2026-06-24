@@ -71,9 +71,17 @@ export class StreamJsonAdapter implements ProtocolAdapter {
    * 跨 lease 重置：TaskRunner 在 runLease 步骤4 拿到 adapter 后调 resetAccumulator，
    * 避免 adapter 单例场景下跨 lease 累加污染（task-06 §边界处理 6）。
    */
-  private _accumulatedUsage: { input_tokens: number; output_tokens: number } = {
+  private _accumulatedUsage: {
+    input_tokens: number;
+    output_tokens: number;
+    // task-01 (2026-06-24-runtime-usage-stats): cache 两维（短名，内部存储统一去 _input_ 后缀）
+    cache_read_tokens: number;
+    cache_creation_tokens: number;
+  } = {
     input_tokens: 0,
     output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
   };
 
   /**
@@ -97,9 +105,17 @@ export class StreamJsonAdapter implements ProtocolAdapter {
    * `_currentTurnUsage.output_tokens`，让前端看到 output tokens 流式增长。
    * 真 usage 在 message_delta 到达时覆盖估算值。
    */
-  private _currentTurnUsage: { input_tokens: number; output_tokens: number } = {
+  private _currentTurnUsage: {
+    input_tokens: number;
+    output_tokens: number;
+    // task-01: cache 两维（短名）。取值点映射 Claude 原始 cache_*_input_tokens。
+    cache_read_tokens: number;
+    cache_creation_tokens: number;
+  } = {
     input_tokens: 0,
     output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
   };
 
   /**
@@ -184,9 +200,20 @@ export class StreamJsonAdapter implements ProtocolAdapter {
    * TaskRunner 在 runLease 步骤4 拿到 adapter 后调用，避免 adapter 单例时跨 lease 污染。
    */
   resetAccumulator(): void {
-    this._accumulatedUsage = { input_tokens: 0, output_tokens: 0 };
+    this._accumulatedUsage = {
+      input_tokens: 0,
+      output_tokens: 0,
+      // task-01: cache 两维一并清零（防跨 lease 污染）
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+    };
     // ql-20260617-006：连当前 turn 一起清零，防止跨 lease 污染。
-    this._currentTurnUsage = { input_tokens: 0, output_tokens: 0 };
+    this._currentTurnUsage = {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+    };
     // ql-20260617-007：估算状态也清零。
     this._currentTurnHasRealUsage = false;
     this._lastEmittedOutputTokens = 0;
@@ -471,18 +498,34 @@ export class StreamJsonAdapter implements ProtocolAdapter {
 
     const prevInput = this._currentTurnUsage.input_tokens;
     const prevOutput = this._currentTurnUsage.output_tokens;
+    const prevCacheRead = this._currentTurnUsage.cache_read_tokens;
+    const prevCacheCreation = this._currentTurnUsage.cache_creation_tokens;
     if (typeof usage.input_tokens === 'number') {
       this._currentTurnUsage.input_tokens = usage.input_tokens;
     }
     if (typeof usage.output_tokens === 'number') {
       this._currentTurnUsage.output_tokens = usage.output_tokens;
     }
+    // task-01: Claude cache 词元提取。
+    // 字段名映射：Claude 原始事件用 cache_creation_input_tokens / cache_read_input_tokens
+    //（带 _input_），内部统一存短名 cache_creation_tokens / cache_read_tokens（去 _input_）。
+    // typeof === 'number' 守卫：字段缺失/非 number（含 null/字符串）不覆盖，保持原值。
+    if (typeof usage.cache_creation_input_tokens === 'number') {
+      this._currentTurnUsage.cache_creation_tokens = usage.cache_creation_input_tokens;
+    }
+    if (typeof usage.cache_read_input_tokens === 'number') {
+      this._currentTurnUsage.cache_read_tokens = usage.cache_read_input_tokens;
+    }
     // 标记本 turn 已拿到真 usage，后续 content_block_delta 不再覆盖
     this._currentTurnHasRealUsage = true;
 
+    // task-01: grew 四维 — cache 任一增长也要 emit（否则 cache 涨但 input/output 不变
+    // 时不产 usage_update，前端实时看不到 cache）
     const grew =
       this._currentTurnUsage.input_tokens > prevInput ||
-      this._currentTurnUsage.output_tokens > prevOutput;
+      this._currentTurnUsage.output_tokens > prevOutput ||
+      this._currentTurnUsage.cache_read_tokens > prevCacheRead ||
+      this._currentTurnUsage.cache_creation_tokens > prevCacheCreation;
     if (!grew) return null;
     return this._buildUsageUpdateEvent();
   }
@@ -555,6 +598,12 @@ export class StreamJsonAdapter implements ProtocolAdapter {
               this._accumulatedUsage.input_tokens + this._currentTurnUsage.input_tokens,
             output_tokens:
               this._accumulatedUsage.output_tokens + this._currentTurnUsage.output_tokens,
+            // task-01: cache 两维透传（短名）。snapshot = 累计 + 当前 turn。
+            cache_read_tokens:
+              this._accumulatedUsage.cache_read_tokens + this._currentTurnUsage.cache_read_tokens,
+            cache_creation_tokens:
+              this._accumulatedUsage.cache_creation_tokens +
+              this._currentTurnUsage.cache_creation_tokens,
           },
         },
       },
@@ -594,7 +643,15 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     if (this._currentTurnUsage.input_tokens > 0 || this._currentTurnUsage.output_tokens > 0) {
       this._accumulatedUsage.input_tokens += this._currentTurnUsage.input_tokens;
       this._accumulatedUsage.output_tokens += this._currentTurnUsage.output_tokens;
-      this._currentTurnUsage = { input_tokens: 0, output_tokens: 0 };
+      // task-01: cache 两维一并 commit（_currentTurnUsage 累加到 _accumulatedUsage）
+      this._accumulatedUsage.cache_read_tokens += this._currentTurnUsage.cache_read_tokens;
+      this._accumulatedUsage.cache_creation_tokens += this._currentTurnUsage.cache_creation_tokens;
+      this._currentTurnUsage = {
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_creation_tokens: 0,
+      };
       // ql-20260617-007：commit 后 reset 估算 flag + emit 节流状态
       this._currentTurnHasRealUsage = false;
       this._lastEmittedOutputTokens = 0;
@@ -608,6 +665,13 @@ export class StreamJsonAdapter implements ProtocolAdapter {
         }
         if (typeof usage.output_tokens === 'number') {
           this._accumulatedUsage.output_tokens += usage.output_tokens;
+        }
+        // task-01: 兜底分支同样提取 cache（映射字段名 cache_*_input_tokens → cache_*_tokens）
+        if (typeof usage.cache_creation_input_tokens === 'number') {
+          this._accumulatedUsage.cache_creation_tokens += usage.cache_creation_input_tokens;
+        }
+        if (typeof usage.cache_read_input_tokens === 'number') {
+          this._accumulatedUsage.cache_read_tokens += usage.cache_read_input_tokens;
         }
       }
     }
@@ -675,6 +739,9 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     const usageSnapshot = {
       input_tokens: this._accumulatedUsage.input_tokens,
       output_tokens: this._accumulatedUsage.output_tokens,
+      // task-01: snapshot 透传 cache 两维（短名，由 for 循环注入到所有 event.metadata.usage）
+      cache_read_tokens: this._accumulatedUsage.cache_read_tokens,
+      cache_creation_tokens: this._accumulatedUsage.cache_creation_tokens,
     };
     for (const ev of events) {
       ev.metadata = { ...(ev.metadata ?? {}), usage: { ...usageSnapshot } };
@@ -989,7 +1056,13 @@ function normalizeToolResultContent(content: unknown): string {
  */
 function extractResultStats(
   resultMsg: Record<string, unknown>,
-  accumulated: { input_tokens: number; output_tokens: number },
+  accumulated: {
+    input_tokens: number;
+    output_tokens: number;
+    // task-01: cache 两维（短名，与 _accumulatedUsage 类型一致）
+    cache_read_tokens: number;
+    cache_creation_tokens: number;
+  },
 ): Record<string, unknown> {
   const stats: Record<string, unknown> = {};
   const knownKeys = [
@@ -1012,10 +1085,43 @@ function extractResultStats(
     stats.output_tokens =
       (typeof usage.output_tokens === 'number' ? usage.output_tokens : 0) +
       accumulated.output_tokens;
-  } else if (accumulated.input_tokens > 0 || accumulated.output_tokens > 0) {
+    // task-16 修复（2026-06-24-runtime-usage-stats task-16 / execute step13）：
+    // cache 两维采用「result.usage 优先，缺失才回落 accumulated」语义（replace/max），
+    // 而非 input/output 的求和语义。原因：Claude CLI 在 stream-json 模式下，
+    // cache_*_input_tokens 是**会话级累计快照**（不是 turn 增量）——
+    //   - result.usage.cache_*_input_tokens = 整个会话累计
+    //   - assistant.message.usage.cache_*_input_tokens（无 --include-partial-messages 时）
+    //     = 截至该 turn 的累计（与 result 同一份全局值的子集）
+    //   - message_delta.event.usage.cache_*_input_tokens（--include-partial-messages 时）
+    //     = 当前 turn 累计快照（同样非增量）
+    // 若按 input/output 求和（result.cache + accumulated.cache），accumulated 已含
+    // assistant/message_delta 的同一份 cache，必然翻倍（task-16 测试发现的 bug）。
+    // 故 cache 只取权威源：result.usage 有则用（覆盖 accumulated），无则回落 accumulated。
+    // 字段名映射：result.usage 用 cache_*_input_tokens（Claude 原始名），
+    // stats 输出统一用短名 cache_*_tokens。
+    const resultCacheCreation =
+      typeof usage.cache_creation_input_tokens === 'number'
+        ? usage.cache_creation_input_tokens
+        : undefined;
+    const resultCacheRead =
+      typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : undefined;
+    stats.cache_creation_tokens =
+      resultCacheCreation !== undefined
+        ? resultCacheCreation
+        : accumulated.cache_creation_tokens;
+    stats.cache_read_tokens =
+      resultCacheRead !== undefined ? resultCacheRead : accumulated.cache_read_tokens;
+  } else if (
+    accumulated.input_tokens > 0 ||
+    accumulated.output_tokens > 0 ||
+    accumulated.cache_read_tokens > 0 ||
+    accumulated.cache_creation_tokens > 0
+  ) {
     // result 无 usage → 仅用 accumulated（assistant 事件聚合值）
     stats.input_tokens = accumulated.input_tokens;
     stats.output_tokens = accumulated.output_tokens;
+    stats.cache_read_tokens = accumulated.cache_read_tokens;
+    stats.cache_creation_tokens = accumulated.cache_creation_tokens;
   }
   return stats;
 }

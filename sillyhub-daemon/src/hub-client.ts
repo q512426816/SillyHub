@@ -475,6 +475,11 @@ export class HubClient {
       duration_api_ms?: number;
       input_tokens?: number;
       output_tokens?: number;
+      // task-16 (2026-06-24-runtime-usage-stats)：cache 两维（短名，对齐 backend
+      // _METADATA_FIELDS）。codex/老 Claude CLI 不透传时 undefined → 守卫不 set →
+      // backend 收不到该字段 → NULL（D-001@v1）。
+      cache_read_tokens?: number;
+      cache_creation_tokens?: number;
     },
   ): Promise<Record<string, unknown>> {
     const path = `${REST_PREFIX}/leases/${encodeURIComponent(
@@ -514,6 +519,14 @@ export class HubClient {
     }
     if (payload.output_tokens !== undefined) {
       body.output_tokens = payload.output_tokens;
+    }
+    // task-16：cache 两维守卫（短名）。undefined → 不 set → backend NULL（D-001@v1）。
+    // 0 值合法（无缓存命中），用 `!== undefined` 而非 truthy 守卫。
+    if (payload.cache_read_tokens !== undefined) {
+      body.cache_read_tokens = payload.cache_read_tokens;
+    }
+    if (payload.cache_creation_tokens !== undefined) {
+      body.cache_creation_tokens = payload.cache_creation_tokens;
     }
     const resp = await fetch(url, {
       method: 'POST',

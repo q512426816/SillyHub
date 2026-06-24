@@ -59,6 +59,8 @@ from app.modules.daemon.schema import (
     LeaseSyncResponse,
     ListDirRequest,
     ListDirResponse,
+    RuntimeUsageListResponse,
+    RuntimeUsageWindow,
     SessionReopenResponse,
 )
 from app.modules.daemon.service import (
@@ -173,6 +175,39 @@ async def daemon_heartbeat(
         status=runtime.status or "online",
         pending_operations={},
     )
+
+
+# ── Runtime usage stats (FR-03 / D-002·003·004) ──────────────────────────────
+# 静态路径 /runtimes/usage 必须声明在动态 /runtimes/{runtime_id} 之前：FastAPI 按声明
+# 顺序匹配，否则 "usage" 会被 {runtime_id} 捕获，再 UUID parse 失败 -> 422。
+# 聚合在 service 层(task-08)，router 仅做参数校验 + DTO 封装；window Enum 边界非法值
+# 由 FastAPI 自动返回 422。
+
+
+@router.get(
+    "/runtimes/usage",
+    response_model=RuntimeUsageListResponse,
+)
+async def get_runtimes_usage(
+    session: SessionDep,
+    user: RuntimeAdminUser,
+    window: RuntimeUsageWindow = Query(
+        RuntimeUsageWindow.DAY7,
+        description="时间窗：1d(本地自然日 today 00:00，按小时) / 7d / 30d(按日)",
+    ),
+) -> RuntimeUsageListResponse:
+    """批量返回全部 runtime 在指定时间窗内的 token/cache/cost 用量(FR-03)。
+
+    聚合在 service 层用单条 LEFT JOIN+COALESCE SQL 去重(D-003@v2,task-08)；
+    分组粒度 1d→hour / 7d·30d→day(D-002@v1)；起点 1d=本地自然日 today 00:00(D-004@v1)。
+    空窗 / 无 runtime 正常返回 200 ``{"window":..., "runtimes":[]}``。
+    """
+    from app.modules.daemon.runtime.service import RuntimeService
+
+    svc = RuntimeService(session)
+    runtimes = await svc.get_runtimes_usage(window.value)
+    log.info("runtimes_usage_served", window=window.value, count=len(runtimes))
+    return RuntimeUsageListResponse(window=window.value, runtimes=runtimes)
 
 
 @router.get(

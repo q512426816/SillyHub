@@ -401,6 +401,150 @@ describe('TDD-3：首轮 turn 生命周期', () => {
   });
 });
 
+// ── TDD-2b：usage cache 尽力而为透传（task-02 / D-001@v1）─────────────────────
+//
+// 覆盖蓝图 task-02 §TDD 步骤 1 两用例：
+//   1. complete event usage 带 cache_read_tokens/cache_creation_tokens → 透传（数字）；
+//   2. usage 无 cache 字段 → 透传 undefined（非 0，后端按 NULL 处理）。
+// codex/OpenAI 系多无 cache（常态），不伪造 0。
+
+describe('TDD-2b：turn/completed usage cache 字段尽力而为（task-02 / D-001@v1）', () => {
+  it('usage 带 cache_read_tokens/cache_creation_tokens → onTurnResult.usage 透传两数字', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_123')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    push('hi');
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    emitLines(child, [turnStartedNotif('thr_123', 'turn_1')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    // turn/completed 携带 usage（input/output + cache_read/cache_creation）
+    emitLines(child, [
+      turnCompletedNotif('completed', {
+        usage: {
+          input_tokens: 10,
+          output_tokens: 5,
+          cache_read_tokens: 8,
+          cache_creation_tokens: 3,
+        },
+      }),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ subtype: 'success', is_error: false });
+    const usage = (results[0] as { usage?: Record<string, unknown> }).usage;
+    expect(usage).toBeDefined();
+    expect(usage!.input_tokens).toBe(10);
+    expect(usage!.output_tokens).toBe(5);
+    // 新增：cache 两字段透传为数字（不为 undefined）
+    expect(usage!.cache_read_tokens).toBe(8);
+    expect(usage!.cache_creation_tokens).toBe(3);
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('usage 无 cache 字段 → onTurnResult.usage.cache_* 为 undefined（非 0，D-001@v1）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_123')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    push('hi');
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    emitLines(child, [turnStartedNotif('thr_123', 'turn_1')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    // turn/completed 只带 input/output（codex 常态：无 cache）
+    emitLines(child, [
+      turnCompletedNotif('completed', {
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    expect(results).toHaveLength(1);
+    const usage = (results[0] as { usage?: Record<string, unknown> }).usage;
+    expect(usage).toBeDefined();
+    expect(usage!.input_tokens).toBe(10);
+    expect(usage!.output_tokens).toBe(5);
+    // 缺失 cache 字段 → undefined（非 0）。不伪造 0，后端按 NULL 处理。
+    expect(usage!.cache_read_tokens).toBeUndefined();
+    expect(usage!.cache_creation_tokens).toBeUndefined();
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('usage cache 字段类型异常（字符串）→ undefined，不 NaN、不抛', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_123')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    push('hi');
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    emitLines(child, [turnStartedNotif('thr_123', 'turn_1')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    // 非法类型（字符串）：typeof !== 'number' 守卫 → undefined
+    emitLines(child, [
+      turnCompletedNotif('completed', {
+        usage: {
+          input_tokens: 10,
+          output_tokens: 5,
+          cache_read_tokens: '300',
+          cache_creation_tokens: null,
+        },
+      }),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    expect(results).toHaveLength(1);
+    const usage = (results[0] as { usage?: Record<string, unknown> }).usage;
+    expect(usage).toBeDefined();
+    expect(usage!.input_tokens).toBe(10);
+    expect(usage!.cache_read_tokens).toBeUndefined();
+    expect(usage!.cache_creation_tokens).toBeUndefined();
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+});
+
 // ── TDD-4：多轮串行 ──────────────────────────────────────────────────────────
 
 describe('TDD-4：多轮串行（无并发 turn）', () => {

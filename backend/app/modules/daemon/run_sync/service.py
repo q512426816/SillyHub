@@ -72,6 +72,11 @@ class RunSyncService:
         # AgentRun 已有的非零值（complete_lease 路径会用 result 事件的真实值覆盖）。
         latest_input_tokens: int | None = None
         latest_output_tokens: int | None = None
+        # task-07 / FR-02：prompt cache 词元累积（同 input/output，取 max 防御
+        # Claude 中间事件 usage=0/0 乱序）。daemon Wave1 task-01/02/03 已把
+        # snake_case cache_read_tokens/cache_creation_tokens 写入 usage dict。
+        latest_cache_read_tokens: int | None = None
+        latest_cache_creation_tokens: int | None = None
         latest_session_id: str | None = None
         # ql-006：interactive session（SDK driver）的 onTurnMessage 发原始 SDK msg
         # （{type:"assistant"|"user", message:{content:[ContentBlock]}}），顶层无
@@ -150,10 +155,23 @@ class RunSyncService:
             if isinstance(usage, dict):
                 in_tok = usage.get("input_tokens")
                 out_tok = usage.get("output_tokens")
+                # task-07：prompt cache 词元（Claude cache_read/cache_creation；
+                # codex/OpenAI 无 cache → None → 跳过）。对齐 input/output 的
+                # max 累积（service.py:69-72 乱序防御注释）。
+                cache_read_tok = usage.get("cache_read_tokens")
+                cache_creation_tok = usage.get("cache_creation_tokens")
                 if isinstance(in_tok, (int, float)) and int(in_tok) > 0:
                     latest_input_tokens = max(latest_input_tokens or 0, int(in_tok))
                 if isinstance(out_tok, (int, float)) and int(out_tok) > 0:
                     latest_output_tokens = max(latest_output_tokens or 0, int(out_tok))
+                if isinstance(cache_read_tok, (int, float)) and int(cache_read_tok) > 0:
+                    latest_cache_read_tokens = max(
+                        latest_cache_read_tokens or 0, int(cache_read_tok)
+                    )
+                if isinstance(cache_creation_tok, (int, float)) and int(cache_creation_tok) > 0:
+                    latest_cache_creation_tokens = max(
+                        latest_cache_creation_tokens or 0, int(cache_creation_tok)
+                    )
             msg_session_id = msg.get("session_id")
             if isinstance(msg_session_id, str) and msg_session_id:
                 latest_session_id = msg_session_id
@@ -235,6 +253,20 @@ class RunSyncService:
                 agent_run.output_tokens is None or latest_output_tokens > agent_run.output_tokens
             ):
                 agent_run.output_tokens = latest_output_tokens
+                self._session.add(agent_run)
+            # task-07：cache 词元实时写回（仅增不减，对齐上面 input/output max
+            # 守卫）。前端 5s 轮询即可拿到累积 cache，不必等 result 事件汇总。
+            if latest_cache_read_tokens is not None and (
+                agent_run.cache_read_tokens is None
+                or latest_cache_read_tokens > agent_run.cache_read_tokens
+            ):
+                agent_run.cache_read_tokens = latest_cache_read_tokens
+                self._session.add(agent_run)
+            if latest_cache_creation_tokens is not None and (
+                agent_run.cache_creation_tokens is None
+                or latest_cache_creation_tokens > agent_run.cache_creation_tokens
+            ):
+                agent_run.cache_creation_tokens = latest_cache_creation_tokens
                 self._session.add(agent_run)
             # ql-20260617-001：session_id 实时写回（首次拿到就填，complete_lease 仍可覆盖）。
             if latest_session_id and not agent_run.session_id:
@@ -433,6 +465,11 @@ class RunSyncService:
         duration_api_ms: int | None = None,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
+        # task-07 / FR-02：prompt cache 词元透传（SDKResultSuccess.usage.cache_*）。
+        # None=daemon 未传，保留 AgentRun 原值不覆盖（对齐 D-001@v1 codex 无 cache）。
+        # 终态一次写入直接覆盖（无 max 守卫，对齐 input/output 终态覆盖模式）。
+        cache_read_tokens: int | None = None,
+        cache_creation_tokens: int | None = None,
     ) -> AgentRun:
         """Close an interactive AgentRun from daemon SDK result (gap-3 / design §4).
 
@@ -452,6 +489,11 @@ class RunSyncService:
         Idempotent: an AgentRun already in TERMINAL_TURN_STATUSES is a no-op
         (returns the row unchanged) so daemon retries after a transient network
         blip do not double-write or flip a completed run back to failed.
+
+        ``cache_read_tokens`` / ``cache_creation_tokens`` (task-07 / FR-02): prompt
+        cache 词元，daemon 从 SDKResultSuccess.usage 透传；None 表示 daemon 未传
+        （老 daemon / codex 无 cache），保留 AgentRun 原值不覆盖。终态一次写入
+        直接覆盖（无 max 守卫），对齐既有 input/output 终态覆盖语义。
 
         Raises ``DaemonAgentRunNotFound`` when the run does not exist or is not
         bound to the lease's session (resource-hiding 404 — no existence leak).
@@ -538,6 +580,12 @@ class RunSyncService:
             agent_run.input_tokens = input_tokens
         if output_tokens is not None:
             agent_run.output_tokens = output_tokens
+        # task-07：prompt cache 词元终态透传（直接覆盖，无 max — 终态一次写入，
+        # 对齐上面 input/output 直接覆盖模式）。
+        if cache_read_tokens is not None:
+            agent_run.cache_read_tokens = cache_read_tokens
+        if cache_creation_tokens is not None:
+            agent_run.cache_creation_tokens = cache_creation_tokens
         if result_summary:
             # Redact via git_gateway redact_output to avoid leaking secrets in
             # the stored summary (mirrors batch completeLease path).

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy import or_, select
+from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -13,9 +15,15 @@ from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.daemon.model import DaemonRuntime
 
+if TYPE_CHECKING:
+    from app.modules.daemon.schema import RuntimeUsageRead
+
 log = get_logger(__name__)
 
 DEFAULT_RUNTIME_STALE_SECONDS = 45
+
+# 时间窗选项(service 层用 Literal 类型注解,router 层用 Pydantic Enum 校验)。
+RuntimeUsageWindow = Literal["1d", "7d", "30d"]
 
 
 # ── Domain errors / RPC errors (runtime 主对象 + WS 通道层；task-07 迁入) ──────
@@ -308,3 +316,239 @@ class RuntimeService:
             return False
         heartbeat_at = value if value.tzinfo else value.replace(tzinfo=UTC)
         return heartbeat_at >= datetime.now(UTC) - timedelta(seconds=max_age_seconds)
+
+    # ── Usage aggregation (FR-03 / D-002@v1 / D-003@v2 / D-004@v1) ──────────────
+
+    async def get_runtimes_usage(
+        self,
+        window: RuntimeUsageWindow,
+    ) -> list[RuntimeUsageRead]:
+        """Batch-aggregate token/cache/cost usage per runtime over a time window.
+
+        单条 LEFT JOIN+COALESCE SQL 去重(D-003@v2):每 run 经 ``agent_session_id`` /
+        ``lease_id`` 各 LEFT JOIN 后唯一一行,``COALESCE(s.runtime_id, l.runtime_id)``
+        优先 session,interactive run 同时挂 session+lease 也只算一次(R-03 resolved)。
+
+        分组粒度(D-002@v1):1d→hour 桶(≤24 点),7d/30d→day 桶。
+        since(D-004@v1):1d=本地自然日 today 00:00 转 UTC;7d/30d=now(UTC)-N 天。
+
+        ⚠️ 方言分支(R-05):生产 PostgreSQL 用 ``date_trunc``;后端单测用 SQLite
+        in-memory(conftest.py),SQLite 无 ``date_trunc``,改用 ``strftime``。
+        通过 ``self._session.bind.dialect.name`` 分支。
+
+        ⚠️ SQLite 时区比较陷阱(R-05 补充):SQLAlchemy ``DateTime(timezone=True)`` 列
+        在 aiosqlite 下走 ORM 写入时**丢弃时区信息**,aware datetime 被存成本地 naive
+        时刻(本地 +08:00 的 ``23:59:00`` 存成 naive ``23:59:00``),且 SQLite 字符串
+        比较不识别 tz 后缀。故 SQLite 方言下:
+        - WHERE 用 ``datetime(r.created_at) >= :since``(归一化,naive 不转 UTC);
+        - ``since`` 传**本地 naive**(对齐 ORM 存储的本地 naive),见 ``_since_param``。
+        生产 PG 是 timestamptz 原生 UTC 比较,WHERE 用 ``r.created_at >= :since`` 且
+        since 传 aware UTC,不受此影响。
+        """
+        if window not in ("1d", "7d", "30d"):
+            raise ValueError(f"invalid window: {window!r} (expected 1d|7d|30d)")
+
+        since = self._compute_since(window)
+        unit = self._bucket_unit(window)
+        dialect = self._dialect_name()
+        since_param = self._since_param(since, dialect)
+
+        # ── summary(无时间桶)──
+        summary_sql = sa_text(self._build_summary_sql(dialect))
+        summary_rows = (
+            (await self._session.execute(summary_sql, {"since": since_param})).mappings().all()
+        )
+
+        # ── daily(按时间桶;方言分支:PG date_trunc / SQLite strftime)──
+        daily_sql = sa_text(self._build_daily_sql(dialect, unit))
+        daily_params: dict[str, object] = {"since": since_param}
+        if dialect == "postgresql":
+            daily_params["unit"] = unit
+        daily_rows = (await self._session.execute(daily_sql, daily_params)).mappings().all()
+
+        # ── 聚合成 RuntimeUsageRead(延迟 import 避免循环依赖)──
+        from app.modules.daemon.schema import (
+            RuntimeUsagePointRead,
+            RuntimeUsageRead,
+            RuntimeUsageSummaryRead,
+        )
+
+        summary_map: dict[str, RuntimeUsageSummaryRead] = {
+            str(row["rid"]): RuntimeUsageSummaryRead(
+                input_tokens=int(row["input_tokens"] or 0),
+                output_tokens=int(row["output_tokens"] or 0),
+                cache_read_tokens=int(row["cache_read_tokens"] or 0),
+                cache_creation_tokens=int(row["cache_creation_tokens"] or 0),
+                total_cost_usd=float(row["total_cost_usd"] or 0.0),
+            )
+            for row in summary_rows
+        }
+        daily_map: dict[str, list[RuntimeUsagePointRead]] = {}
+        for row in daily_rows:
+            rid = str(row["rid"])
+            daily_map.setdefault(rid, []).append(
+                RuntimeUsagePointRead(
+                    ts=self._normalize_bucket_ts(row["bucket"], dialect),
+                    input_tokens=int(row["input_tokens"] or 0),
+                    output_tokens=int(row["output_tokens"] or 0),
+                    cache_read_tokens=int(row["cache_read_tokens"] or 0),
+                    cache_creation_tokens=int(row["cache_creation_tokens"] or 0),
+                    total_cost_usd=float(row["total_cost_usd"] or 0.0),
+                )
+            )
+
+        result = [
+            RuntimeUsageRead(runtime_id=rid, summary=summary_map[rid], daily=daily_map.get(rid, []))
+            for rid in summary_map
+        ]
+        log.info("runtime_usage_aggregated", window=window, runtime_count=len(result))
+        return result
+
+    def _dialect_name(self) -> str:
+        """检测当前 session 绑定的 DB 方言名(postgresql / sqlite / ...)。
+
+        AsyncSession.bind 返回 AsyncEngine,其 .dialect.name 用于分支:
+        PG 用 ``date_trunc``,SQLite 用 ``strftime``(SQLite 无 date_trunc)。
+        """
+        bind = self._session.bind
+        # AsyncEngine.dialect 同步暴露;async 绑定是 AsyncEngine(单测+生产均如此)。
+        return bind.dialect.name
+
+    @staticmethod
+    def _since_param(since: datetime, dialect: str) -> datetime | str:
+        """since 参数方言化(R-05 时区陷阱修复)。
+
+        - PostgreSQL: 直接传 aware UTC datetime,timestamptz 列原生比较。
+        - SQLite: ⚠️ 关键陷阱 —— SQLAlchemy ``DateTime(timezone=True)`` 列在
+          aiosqlite 下走 ORM 写入时**丢弃时区信息**,aware datetime 被存成本地
+          naive 时刻(如本地 +08:00 的 ``2026-06-23 23:59:00+08:00`` 存成 naive
+          ``2026-06-23 23:59:00``)。``datetime(created_at)`` 对 naive 输入不做
+          UTC 转换,原样返回 23:59。故 since 也必须用**本地 naive**与之对齐,
+          否则比较错位(UTC 16:00 vs 本地 naive 23:59 → 昨天 run 被错误计入 1d 窗)。
+          实现把 aware since 转**本地 tz** 再 strip tzinfo,格式化为
+          ``YYYY-MM-DD HH:MM:SS.ffffff``(匹配 ``datetime()`` 输出)。
+          生产 PG 是 timestamptz 原生 UTC 比较,不受此影响。
+        """
+        if dialect == "postgresql":
+            return since
+        # SQLite:转本地 tz naive(对齐 ORM 存储的本地 naive 时刻)
+        since_local_naive = since.astimezone().replace(tzinfo=None)
+        return since_local_naive.isoformat(sep=" ")
+
+    @staticmethod
+    def _build_summary_sql(dialect: str) -> str:
+        """summary SQL(无时间桶),WHERE created_at 比较按方言归一化。
+
+        - PG: ``r.created_at >= :since``(timestamptz 原生比较,since=aware UTC)。
+        - SQLite: ``datetime(r.created_at) >= :since``(naive 原样归一化,since=本地 naive,
+          对齐 ORM 存储的本地 naive 时刻,见 ``_since_param`` docstring)。
+        """
+        cmp = "r.created_at" if dialect == "postgresql" else "datetime(r.created_at)"
+        return f"""
+            SELECT COALESCE(s.runtime_id, l.runtime_id) AS rid,
+                   SUM(COALESCE(r.input_tokens, 0))          AS input_tokens,
+                   SUM(COALESCE(r.output_tokens, 0))         AS output_tokens,
+                   SUM(COALESCE(r.cache_read_tokens, 0))     AS cache_read_tokens,
+                   SUM(COALESCE(r.cache_creation_tokens, 0)) AS cache_creation_tokens,
+                   SUM(COALESCE(r.total_cost_usd, 0))        AS total_cost_usd
+            FROM agent_runs r
+            LEFT JOIN agent_sessions s ON r.agent_session_id = s.id
+            LEFT JOIN daemon_task_leases l ON r.lease_id = l.id
+            WHERE COALESCE(s.runtime_id, l.runtime_id) IS NOT NULL
+              AND {cmp} >= :since
+            GROUP BY COALESCE(s.runtime_id, l.runtime_id)
+        """
+
+    @staticmethod
+    def _build_daily_sql(dialect: str, unit: Literal["hour", "day"]) -> str:
+        """构造 daily 时间桶 SQL,按方言分支(R-05)。
+
+        - PostgreSQL: ``date_trunc(:unit, r.created_at) AS bucket`` — 参数化 unit,
+          PG 原生支持;WHERE 用 ``r.created_at >= :since``(since=aware UTC)。
+        - SQLite: ``strftime('<fmt>', r.created_at) AS bucket`` — hour 桶用
+          ``%Y-%m-%d %H``(YYYY-MM-DD HH),day 桶用 ``%Y-%m-%d``;WHERE 用
+          ``datetime(r.created_at) >= :since``(since=本地 naive,对齐 ORM 存储)。
+
+        ⚠️ SQLite 的 strftime 返回 TEXT(本地 naive 桶),PG 的 date_trunc 返回 timestamptz;
+        ``_normalize_bucket_ts`` 统一把 bucket 解析成 aware UTC datetime(测试只断言
+        「ts 整点 + 桶数量」,不绑死时区,故生产/测试桶时区差异不影响断言)。
+        """
+        if dialect == "postgresql":
+            return """
+                SELECT COALESCE(s.runtime_id, l.runtime_id) AS rid,
+                       date_trunc(:unit, r.created_at)          AS bucket,
+                       SUM(COALESCE(r.input_tokens, 0))          AS input_tokens,
+                       SUM(COALESCE(r.output_tokens, 0))         AS output_tokens,
+                       SUM(COALESCE(r.cache_read_tokens, 0))     AS cache_read_tokens,
+                       SUM(COALESCE(r.cache_creation_tokens, 0)) AS cache_creation_tokens,
+                       SUM(COALESCE(r.total_cost_usd, 0))        AS total_cost_usd
+                FROM agent_runs r
+                LEFT JOIN agent_sessions s ON r.agent_session_id = s.id
+                LEFT JOIN daemon_task_leases l ON r.lease_id = l.id
+                WHERE COALESCE(s.runtime_id, l.runtime_id) IS NOT NULL
+                  AND r.created_at >= :since
+                GROUP BY COALESCE(s.runtime_id, l.runtime_id),
+                         date_trunc(:unit, r.created_at)
+                ORDER BY bucket ASC
+            """
+        # SQLite(及任何非 PG 方言,fallback 到 strftime)
+        fmt = "%Y-%m-%d %H" if unit == "hour" else "%Y-%m-%d"
+        # fmt 是内部常量(unit 受控为 'hour'|'day'),无 SQL 注入风险。
+        return f"""
+            SELECT COALESCE(s.runtime_id, l.runtime_id) AS rid,
+                   strftime('{fmt}', r.created_at)         AS bucket,
+                   SUM(COALESCE(r.input_tokens, 0))          AS input_tokens,
+                   SUM(COALESCE(r.output_tokens, 0))         AS output_tokens,
+                   SUM(COALESCE(r.cache_read_tokens, 0))     AS cache_read_tokens,
+                   SUM(COALESCE(r.cache_creation_tokens, 0)) AS cache_creation_tokens,
+                   SUM(COALESCE(r.total_cost_usd, 0))        AS total_cost_usd
+            FROM agent_runs r
+            LEFT JOIN agent_sessions s ON r.agent_session_id = s.id
+            LEFT JOIN daemon_task_leases l ON r.lease_id = l.id
+            WHERE COALESCE(s.runtime_id, l.runtime_id) IS NOT NULL
+              AND datetime(r.created_at) >= :since
+            GROUP BY COALESCE(s.runtime_id, l.runtime_id),
+                     strftime('{fmt}', r.created_at)
+            ORDER BY bucket ASC
+        """
+
+    @staticmethod
+    def _normalize_bucket_ts(bucket: object, dialect: str) -> datetime:
+        """把 SQL 返回的 bucket 列统一解析成 aware UTC datetime。
+
+        - PostgreSQL: ``date_trunc`` 返回 timestamptz/aware datetime,直接返回。
+        - SQLite: ``strftime`` 返回 TEXT(``YYYY-MM-DD HH`` 或 ``YYYY-MM-DD``),
+          解析为 naive datetime 后补 UTC tzinfo(桶本就是 UTC 归一化的)。
+        """
+        if isinstance(bucket, datetime):
+            return bucket if bucket.tzinfo is not None else bucket.replace(tzinfo=UTC)
+        # SQLite TEXT 桶
+        text_bucket = str(bucket)
+        for fmt in ("%Y-%m-%d %H", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(text_bucket, fmt).replace(tzinfo=UTC)
+            except ValueError:
+                continue
+        # 兜底:fromisoformat(覆盖 ``YYYY-MM-DDTHH:MM:SS`` 等)
+        return datetime.fromisoformat(text_bucket).replace(tzinfo=UTC)
+
+    @staticmethod
+    def _bucket_unit(window: RuntimeUsageWindow) -> Literal["hour", "day"]:
+        """分组粒度(D-002@v1):1d→hour,7d/30d→day。"""
+        return "hour" if window == "1d" else "day"
+
+    @staticmethod
+    def _compute_since(window: RuntimeUsageWindow) -> datetime:
+        """起点(D-004@v1):1d=本地自然日 today 00:00 转 UTC;7d/30d=now(UTC)-N 天。
+
+        created_at 为 timestamptz,返回 aware UTC datetime;SQLite 方言下再由
+        ``_since_param`` 转 UTC naive ISO 字符串比较。
+        """
+        now_utc = datetime.now(UTC)
+        if window == "1d":
+            # 本地自然日 today 00:00;用本地时间计算再转 UTC
+            local_now = now_utc.astimezone()  # 转本地 tz-aware
+            local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+            return local_midnight.astimezone(UTC)
+        delta = {"7d": timedelta(days=7), "30d": timedelta(days=30)}[window]
+        return now_utc - delta

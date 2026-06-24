@@ -184,6 +184,9 @@ describe('parse step events', () => {
     expect(usage.output_tokens).toBe(50);
     expect(usage.cache_read_tokens).toBe(20);
     expect(usage.cache_write_tokens).toBe(10);
+    // task-03：cache_creation_tokens 别名 = cache_write_tokens（对齐后端契约）
+    expect(usage.cache_creation_tokens).toBe(10);
+    expect(usage.cache_creation_tokens).toBe(usage.cache_write_tokens);
   });
 
   it('accumulates tokens across multiple step_finish', () => {
@@ -208,6 +211,37 @@ describe('parse step events', () => {
     const a = newAdapter();
     expect(a.parse(makeNdjsonLine('step_finish', { part: {} }))).toBeNull();
     expect(a.getUsage().input_tokens).toBe(0);
+  });
+
+  // task-03：多 step cache 累加 + cache_creation_tokens 别名同步
+  it('accumulates cache across multiple step_finish and syncs cache_creation_tokens alias', () => {
+    const a = newAdapter();
+    a.parse(
+      makeNdjsonLine('step_finish', {
+        part: { tokens: { input: 100, output: 50, cache: { read: 200, write: 80 } } },
+      }),
+    );
+    a.parse(
+      makeNdjsonLine('step_finish', {
+        part: { tokens: { input: 50, output: 30, cache: { read: 100, write: 40 } } },
+      }),
+    );
+    const usage = a.getUsage();
+    expect(usage.input_tokens).toBe(150);
+    expect(usage.output_tokens).toBe(80);
+    expect(usage.cache_read_tokens).toBe(300);
+    expect(usage.cache_write_tokens).toBe(120);
+    // 别名 = 累加后的 cache_write_tokens，与后端 cache_creation_tokens 对齐
+    expect(usage.cache_creation_tokens).toBe(120);
+  });
+
+  // task-03：cache 缺失时 cache_creation_tokens 也为 0（初值同步）
+  it('cache_creation_tokens defaults to 0 when no cache field', () => {
+    const a = newAdapter();
+    a.parse(makeNdjsonLine('step_finish', { part: { tokens: { input: 10, output: 5 } } }));
+    const usage = a.getUsage();
+    expect(usage.cache_write_tokens).toBe(0);
+    expect(usage.cache_creation_tokens).toBe(0);
   });
 });
 
@@ -315,12 +349,23 @@ describe('state isolation', () => {
     const a = newAdapter();
     a.parse(makeNdjsonLine('text', { part: { text: 'before reset' } }));
     a.parse(makeNdjsonLine('error', { error: { name: 'Err' } }));
+    a.parse(
+      makeNdjsonLine('step_finish', {
+        part: { tokens: { input: 10, output: 5, cache: { read: 7, write: 3 } } },
+      }),
+    );
     expect(a.getOutput()).toBe('before reset');
     expect(a.getFinalStatus()).toBe('failed');
     a.resetState();
     expect(a.getOutput()).toBe('');
     expect(a.getFinalStatus()).toBe('completed');
     expect(a.getSessionId()).toBe('');
+    // task-03：resetState 含 usage 重置（含 cache + cache_creation_tokens 别名）
+    const usage = a.getUsage();
+    expect(usage.input_tokens).toBe(0);
+    expect(usage.cache_read_tokens).toBe(0);
+    expect(usage.cache_write_tokens).toBe(0);
+    expect(usage.cache_creation_tokens).toBe(0);
   });
 });
 

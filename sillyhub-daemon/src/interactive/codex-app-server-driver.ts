@@ -559,7 +559,14 @@ export class CodexAppServerDriver implements InteractiveDriver {
     /** 本轮 outcome（success / failed / cancelled / unknown）。 */
     type TurnOutcome = {
       kind: 'success' | 'failed' | 'cancelled' | 'unknown';
-      usage?: { input_tokens?: number; output_tokens?: number };
+      usage?: {
+        input_tokens?: number;
+        output_tokens?: number;
+        // task-02（D-001@v1）：尽力而为 cache 字段（短名，对齐后端契约）。
+        // codex/OpenAI 系多无 cache，取不到即 undefined → 后端 NULL，不伪造 0。
+        cache_read_tokens?: number;
+        cache_creation_tokens?: number;
+      };
     };
 
     /** 开始一轮新 turn：重置 promise/resolver + 清 error/上报缓存。 */
@@ -795,7 +802,12 @@ export class CodexAppServerDriver implements InteractiveDriver {
   /** 从 complete event 提取 outcome（含 status / usage）。 */
   private _outcomeFromComplete(ev: AgentEvent): {
     kind: 'success' | 'failed' | 'cancelled' | 'unknown';
-    usage?: { input_tokens?: number; output_tokens?: number };
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_read_tokens?: number;
+      cache_creation_tokens?: number;
+    };
   } {
     const status = (ev.metadata as { turn_status?: string })?.turn_status ?? '';
     const usage = (ev.metadata as { usage?: Record<string, unknown> })?.usage;
@@ -803,13 +815,30 @@ export class CodexAppServerDriver implements InteractiveDriver {
     if (status === 'completed') kind = 'success';
     else if (status === 'failed') kind = 'failed';
     else if (status === 'cancelled') kind = 'cancelled';
-    const out: { kind: typeof kind; usage?: { input_tokens?: number; output_tokens?: number } } = {
-      kind,
-    };
+    const out: {
+      kind: typeof kind;
+      usage?: {
+        input_tokens?: number;
+        output_tokens?: number;
+        cache_read_tokens?: number;
+        cache_creation_tokens?: number;
+      };
+    } = { kind };
     if (usage && typeof usage === 'object') {
       out.usage = {
         input_tokens: typeof usage.input_tokens === 'number' ? usage.input_tokens : undefined,
         output_tokens: typeof usage.output_tokens === 'number' ? usage.output_tokens : undefined,
+        // task-02（D-001@v1）：尽力而为提取 cache 字段（短名，对齐后端契约）。
+        // codex/OpenAI 系多无 cache（cache_read_tokens/cache_creation_tokens 通常不存在），
+        // typeof !== 'number' → undefined，后端按 NULL 处理，不伪造 0。
+        // 若 codex 某天吐 cached_tokens/prompt_tokens_details.cached_tokens（OpenAI 新字段），
+        // 需在此映射点补字段名映射（本 task 不主动猜测字段名）。
+        cache_read_tokens:
+          typeof usage.cache_read_tokens === 'number' ? usage.cache_read_tokens : undefined,
+        cache_creation_tokens:
+          typeof usage.cache_creation_tokens === 'number'
+            ? usage.cache_creation_tokens
+            : undefined,
       };
     }
     return out;
@@ -819,7 +848,12 @@ export class CodexAppServerDriver implements InteractiveDriver {
   private _reportOutcome(
     outcome: {
       kind: 'success' | 'failed' | 'cancelled' | 'unknown';
-      usage?: { input_tokens?: number; output_tokens?: number };
+      usage?: {
+        input_tokens?: number;
+        output_tokens?: number;
+        cache_read_tokens?: number;
+        cache_creation_tokens?: number;
+      };
     },
     pendingErrorMsg: string | null,
     report: (r: Parameters<NonNullable<InteractiveDriverCallbacks['onTurnResult']>>[0]) => void,

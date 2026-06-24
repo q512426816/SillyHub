@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import enum
 import uuid
 from datetime import datetime
 from typing import Literal
@@ -236,3 +237,62 @@ class ListDirResponse(BaseModel):
     """Response body for POST /runtimes/{runtime_id}/list-dir."""
 
     entries: list[DirEntry]
+
+
+# ── Runtime usage stats (FR-03 / D-002@v1) ─────────────────────────────────
+# GET /api/daemon/runtimes/usage?window=1d|7d|30d 的响应 schema。
+# ts 粒度由 service 层 date_trunc 决定:1d→hour 桶(24 点),7d/30d→day 桶(D-002@v1)。
+
+
+class RuntimeUsageWindow(enum.StrEnum):
+    """时间窗选项(FR-03 / D-002@v1)。"""
+
+    DAY1 = "1d"
+    DAY7 = "7d"
+    DAY30 = "30d"
+
+
+# 给 service 层类型注解用(Literal 比 Enum 更轻,内部函数签名用 Literal)。
+RuntimeUsageWindowLiteral = Literal["1d", "7d", "30d"]
+
+
+class RuntimeUsageSummaryRead(BaseModel):
+    """单 runtime 在时间窗内的 token/cache/cost 聚合总量。
+
+    聚合后已 COALESCE 归 0,字段非可选(FR-05 NULL 兼容在 SUM(COALESCE(...,0)) 处理)。
+    """
+
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_creation_tokens: int
+    total_cost_usd: float
+
+
+class RuntimeUsagePointRead(BaseModel):
+    """时间桶点(1d 小时桶 / 7d·30d 日桶,D-002@v1)。
+
+    ts 来自 PG ``date_trunc('hour'/'day', created_at)``,为 aware datetime。
+    """
+
+    ts: datetime
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_creation_tokens: int
+    total_cost_usd: float
+
+
+class RuntimeUsageRead(BaseModel):
+    """单 runtime 的用量记录(summary 总量 + daily 时间序列)。"""
+
+    runtime_id: str
+    summary: RuntimeUsageSummaryRead
+    daily: list[RuntimeUsagePointRead]
+
+
+class RuntimeUsageListResponse(BaseModel):
+    """GET /api/daemon/runtimes/usage 顶层响应(design §7)。"""
+
+    window: str
+    runtimes: list[RuntimeUsageRead]

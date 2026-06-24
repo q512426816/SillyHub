@@ -930,3 +930,69 @@ export const AgentSessionListResponseSchema = z.object({
   offset: z.number(),
 });
 
+/* ---------- Runtime usage stats (task-11 / FR-01 / FR-03 / D-002@v1 / D-004@v1) ---------- */
+
+/**
+ * 时间窗字面量（D-002@v1）：
+ *   - "1d"：当日（本地自然日 today 00:00 起，D-004@v1），daily 按小时 24 桶；
+ *   - "7d" / "30d"：daily 按日桶。
+ */
+export type RuntimeUsageWindow = "1d" | "7d" | "30d";
+
+/**
+ * 单个 runtime 的用量汇总（SUM over window）。对齐后端 RuntimeUsageSummaryRead（task-09）。
+ * 后端 `SUM(COALESCE(col, 0))` 保证这些字段恒为数值（无 NULL）；
+ * 前端类型用 number 不可空。codex 等无 cache 的 runtime，cache_read/creation_tokens = 0。
+ */
+export interface RuntimeUsageSummary {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  total_cost_usd: number;
+}
+
+/**
+ * 时间序列单点（小时桶 1d / 日桶 7d·30d，D-002@v1）。ts 为 ISO 8601 字符串
+ * （后端 datetime 序列化结果），前端不再 Date 化，图表 x 轴直接用字符串。
+ */
+export interface RuntimeUsagePoint {
+  ts: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  total_cost_usd: number;
+}
+
+/** 单个 runtime 的完整用量（summary + 序列）。 */
+export interface RuntimeUsageItem {
+  runtime_id: string;
+  summary: RuntimeUsageSummary;
+  daily: RuntimeUsagePoint[];
+}
+
+/** GET /api/daemon/runtimes/usage 响应体。runtimes 为全部 runtime 的数组（可能含 0 用量项）。 */
+export interface RuntimeUsageResponse {
+  window: RuntimeUsageWindow;
+  runtimes: RuntimeUsageItem[];
+}
+
+/**
+ * GET /api/daemon/runtimes/usage?window=1d|7d|30d — 批量拉取所有 runtime 的 token/cost 用量（FR-01 / FR-03）。
+ *
+ * 非实时（D-004@v1）：本函数仅进页面/切窗时主动调用，后端不做 SSE 推送卡片聚合。
+ * 后端聚合用 LEFT JOIN+COALESCE 去重（D-003@v2），interactive run 只算一次。
+ * codex / OpenAI 系无 cache（D-001@v1），其 cache_* 恒为 0，前端显示「—」。
+ *
+ * @param window 时间窗；默认 "7d"。
+ * @throws ApiError 401 未登录 / 422 window 非法 / 5xx 后端故障——由 apiFetch 归一化抛出，调用方 try/catch。
+ */
+export async function getRuntimesUsage(
+  window: RuntimeUsageWindow = "7d",
+): Promise<RuntimeUsageResponse> {
+  return apiFetch<RuntimeUsageResponse>("/api/daemon/runtimes/usage", {
+    query: { window },
+  });
+}
+
