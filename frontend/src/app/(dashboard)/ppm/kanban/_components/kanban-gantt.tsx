@@ -162,7 +162,7 @@ export function KanbanGantt({
               end: dayjs(t.deadline!),
             })),
           );
-          const lanesH = rowCount * LANE_HEIGHT;
+          const lanesH = Math.max(rowCount, 2) * LANE_HEIGHT;
           const unschedH =
             grp.unscheduled.length > 0
               ? UNSCHEDULED_HEADER_H + grp.unscheduled.length * UNSCHEDULED_ROW_H

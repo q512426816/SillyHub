@@ -160,7 +160,7 @@ export function KanbanActualGantt({
               end: dayjs(ex.actual_end_time!),
             })),
           );
-          const lanesH = rowCount * LANE_HEIGHT;
+          const lanesH = Math.max(rowCount, 2) * LANE_HEIGHT;
           const unschedH =
             grp.unscheduled.length > 0
               ? UNSCHEDULED_HEADER_H + grp.unscheduled.length * UNSCHEDULED_ROW_H
