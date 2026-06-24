@@ -71,3 +71,18 @@ created_at: 2026-06-23 10:09:12
 - sillyhub-daemon/tests/interactive/session-manager-pending-cleanup.test.ts
 - sillyhub-daemon/tests/task-runner-terminal-observer.test.ts
 - sillyhub-daemon/tests/terminal-observer.test.ts
+
+## ql-20260624-002-b2f7 | 2026-06-24 09:03:54 | 修复 codex interactive session Windows 报 spawn EINVAL（codex-app-server-driver 漏接 resolveWindowsCmdShim，直接 spawn codex.cmd）
+状态：已完成
+结果：codex-app-server-driver.start() 接线 resolveWindowsCmdShim——win32+.cmd → {exe:node.exe,prependArgs:[codex.js]} → spawn(node.exe,[codex.js,...buildArgs()],shell=false)，解析失败回退 shell:true，非.cmd 不变（显式传 shell:useShell）。TDD red→green：实现前 3 wrapper 用例失败（bug 重现）现有 13 TDD 不受影响；实现后全绿。测试加 vi.mock('../../src/cmd-shim.js') + 3 用例（成功解析/fallback shell/非cmd直传）。验证：codex driver 18 passed、interactive 全部+daemon-interactive-codex 共 315 passed 0 failed 无回归、tsc --noEmit exit 0。等价原生 codex.cmd → codex.js(stdio:inherit) → 真 codex.exe，规避 spawn EINVAL。模块文档 interactive.md R-exe 注意事项已补 codex。
+文件：sillyhub-daemon/src/interactive/codex-app-server-driver.ts、sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts
+根因：codex-app-server-driver.ts:468 直接 spawn(agent-detector 给的 codex.cmd, ['app-server','--listen','stdio://'])，Windows spawn .cmd 无 shell/无 wrapper 解析 → CreateProcess EINVAL（daemon 日志 interactive_session_create_failed code=EINVAL error=spawn EINVAL）。claude driver 早用 resolveClaudeExecutable 解决同类 R-exe（interactive.md:38 task-01），batch task-runner.ts:705-713 早用通用 resolveWindowsCmdShim（cmd-shim.ts，已支持 codex.cmd 模式1 = {exe:node.exe, prependArgs:[codex.js]}），唯独 interactive codex driver 漏接。
+方案：codex-app-server-driver.start() 复用 cmd-shim.ts 的 resolveWindowsCmdShim，对齐 task-runner 接线——win32 + .cmd 时 spawn(resolved.exe, [...resolved.prependArgs, ...buildArgs()])，等价原生 codex.cmd → codex.js(stdio:inherit) → 真 codex.exe；解析失败回退 shell:true。非 .cmd（.exe/POSIX）行为不变。
+文档依据：cmd-shim.md（resolveWindowsCmdShim 契约+模式1 codex）、interactive.md:38（R-exe task-01）、claude-sdk-driver.ts:21-28、codex-app-server-driver.ts design §5.3。
+## ql-20260624-003-a7f1 | 2026-06-24 09:29:32 | 优化 /runtimes 会话弹窗布局样式
+状态：已完成
+结果：优化 RuntimeSessionDialog 弹窗尺寸、头部密度和双栏布局；会话列表改为弹窗内左侧栏，右侧交互式会话/历史回看改为 h-full 工作区，调整模型/操作区和底部输入栏间距。验证：frontend 下 `pnpm vitest run src/components/daemon/runtime-session-dialog.test.tsx`，10 passed。
+实际改动文件：
+- frontend/src/components/daemon/runtime-session-dialog.tsx
+- frontend/src/components/daemon/runtime-session-helpers.tsx
+- frontend/src/components/daemon/interactive-session-panel.tsx

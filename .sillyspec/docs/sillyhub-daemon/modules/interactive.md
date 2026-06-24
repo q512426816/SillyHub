@@ -35,7 +35,7 @@ permission: canUseTool 回调 → PermissionResolver.register 生成 request_id 
 ```
 
 ## 注意事项
-- **R-exe 关键修正（task-01）**：agent-detector 给的 claude 路径常是 npm cmd-shim wrapper（claude.cmd），SDK spawn 不带 shell 在 Windows CreateProcess 对 .cmd 返回 EINVAL。driver.start 前必须 resolveClaudeExecutable 转 wrapper→真 .exe。
+- **R-exe 关键修正（task-01 / ql-20260624-002）**：agent-detector 在 Windows 给的 claude/codex 路径常是 npm cmd-shim wrapper（claude.cmd / codex.cmd），spawn 不带 shell → CreateProcess 对 .cmd 返回 EINVAL（4ms 失败进程没起）。claude SDK driver.start 前用 resolveClaudeExecutable 转 wrapper→真 .exe；codex app-server driver.start（ql-20260624-002）复用 cmd-shim.ts 的 resolveWindowsCmdShim 解析 codex.cmd → {exe:node.exe, prependArgs:[codex.js]}，spawn(node.exe, [codex.js, ...args])，对齐 batch task-runner.ts:705-713，解析失败回退 shell:true。
 - **turn 级语义**：InputQueue 只保证 push 顺序 yield，「同一 turn 不接受第二条」由 SDK 自身保证（未 result 的 push 排到下一 turn，spike S1）。
 - **InputQueue 单订阅**：第二次 [Symbol.asyncIterator] 抛 SessionQueueDoubleSubscribeError；close 前已 push 的消息必须全部 yield 完才结束。
 - **PermissionResolver fail-closed 铁律**：send 失败/signal aborted/5min 超时/abortAll 全部 deny，绝不本地 allow；每个 promise 只 settle 一次；listener settle 时移除防泄漏；resolver 只活在当前 turn 协程内不跨 turn。

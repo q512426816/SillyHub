@@ -172,3 +172,12 @@
 - **MCP elicitation 复杂场景如实标注（D-008@v1, D-010@v1）**：可归一化成现有 `AskUserDialogCard` question/options UI 的简单 form/url 才阻塞等待用户；不支持的复杂 schema fail-closed 并上报 error log 说明「暂不支持」，**不写成「全面支持 MCP elicitation」**。文档与代码须一致，避免夸大未实现能力。
 - **AgentRunLog 无 metadata 列对 flat message 的影响**：Codex flat message 的 `metadata`（如 tool_use 的工具名/参数、turn id）若要完整展示，需确认 `AgentRunLog` 是否有 metadata 列承载；无列时只能塞进 `content` 或丢失细节。落地 Codex driver 前先核对 `AgentRunLog` 表结构与 `RunSyncService.submit_messages()` 落库字段，避免 flat message 的 metadata 静默丢失。
 - **缺 thread id 的 Codex session 不能伪造（D-007@v1）**：ended/failed Codex session 若缺 `agent_session_id`/threadId，不能可靠 reopen，应显示失败且**不伪造新 thread**（避免历史串线）。daemon recovery 同理：session store 缺 threadId 标 recovery failed，不伪造。
+
+## 2026-06-24 — interactive driver 自行 spawn 时漏接 resolveWindowsCmdShim 致 Windows spawn EINVAL
+
+> 来源：ql-20260624-002-b2f7（codex-app-server-driver）。batch task-runner 早有 resolveWindowsCmdShim，interactive codex driver 漏接。
+
+- 现象：codex interactive session 在 Windows 永远起不来，daemon 日志 `interactive_session_create_failed code=EINVAL error=spawn EINVAL`（4ms 失败，进程根本没起，不是握手问题）。
+- 根因：agent-detector 在 Windows 给的是 npm cmd-shim `codex.cmd`；driver 直接 `spawn(codex.cmd, args, {stdio})` 无 shell/无 wrapper 解析 → Windows CreateProcess 对 `.cmd/.bat/.ps1` 返回 EINVAL。batch `task-runner.ts:705-713` 早用通用 `cmd-shim.ts` 的 `resolveWindowsCmdShim`（支持 codex.cmd 模式1=`{exe:node.exe,prependArgs:[codex.js]}` / claude.cmd 模式2 / cursor ps1 模式0），唯独 interactive codex driver 漏接。claude SDK driver 因 SDK 内部 spawn 无法传 shell，改用自带的 `resolveClaudeExecutable` 转 wrapper→真 .exe。
+- codex 特殊点：cmd-shim 引用的不是真 .exe 而是 `codex.js`（node ESM 入口，package.json type:module），`codex.js` 内部 `stdio:"inherit"` spawn 真 `codex.exe`（`@openai/codex-win32-x64/vendor/.../bin/codex.exe`），故解析结果 = `node.exe + [codex.js]`，`spawn(node.exe, [codex.js, ...args])` 等价原生 `codex.cmd`，stdio 经 inherit 直通。
+- 通用坑（防回归）：**任何自己 `child_process.spawn` 的路径**（interactive driver / 新 provider runtime / 任何长驻 stdio 子进程），Windows 上 spawn agent-detector 给的 `.cmd/.bat/.ps1` wrapper 前必须先 `resolveWindowsCmdShim` 解析成 `{exe, prependArgs}` 再 `spawn(exe, [...prependArgs, ...业务args], {shell:false})`，解析失败才回退 `shell:true`。新增 interactive driver 时对照 `task-runner.ts:705-713` 接线，别各自 spawn——否则只在 Windows 环境暴露（posix CI 跑不到，易漏）。

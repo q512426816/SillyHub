@@ -44,6 +44,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import readline from 'node:readline';
+import { resolveWindowsCmdShim } from '../cmd-shim.js';
 import { JsonRpcAdapter, type PendingServerRequest } from '../adapters/json-rpc.js';
 import type { AgentEvent } from '../types.js';
 import type { CanUseToolDecision } from './types.js';
@@ -465,10 +466,31 @@ export class CodexAppServerDriver implements InteractiveDriver {
     const args = adapter.buildArgs();
     const env = (opts.env ?? { ...process.env }) as NodeJS.ProcessEnv;
 
-    const child = spawn(opts.pathToAgentExecutable, args, {
+    // ql-20260624-002 R-exe（修复 Windows spawn EINVAL）：agent-detector 在 Windows 给的
+    // 是 codex.cmd（npm cmd-shim），直接 spawn .cmd 无 shell → CreateProcess EINVAL
+    //（claude driver task-01 R-exe 同类问题，design §10 / interactive.md:38）。复用
+    // cmd-shim.ts 的 resolveWindowsCmdShim（batch task-runner.ts:705-713 早在用，已支持
+    // codex.cmd 模式1 = {exe:node.exe, prependArgs:[codex.js]}）解析为 node + codex.js，
+    // spawn 等价原生 codex.cmd → codex.js(stdio:inherit) → 真 codex.exe；解析失败回退
+    // shell:true（兜底，与 task-runner 一致）。非 .cmd（.exe / POSIX）行为不变。
+    let spawnCmdPath = opts.pathToAgentExecutable;
+    let spawnArgs = args;
+    let useShell = false;
+    if (process.platform === 'win32' && /\.cmd$/i.test(opts.pathToAgentExecutable)) {
+      const resolved = resolveWindowsCmdShim(opts.pathToAgentExecutable);
+      if (resolved) {
+        spawnCmdPath = resolved.exe;
+        spawnArgs = [...resolved.prependArgs, ...args];
+      } else {
+        useShell = true;
+      }
+    }
+
+    const child = spawn(spawnCmdPath, spawnArgs, {
       cwd: opts.cwd,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
+      shell: useShell,
     });
 
     // 用闭包把 start options 存进 handle（consume 读），避免再定义 handle 字段污染契约。

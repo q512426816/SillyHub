@@ -30,7 +30,14 @@ vi.mock('node:child_process', async (importOriginal) => {
   };
 });
 
+// mock cmd-shim：driver 仅对 .cmd 调 resolveWindowsCmdShim（现有用例 path 非 .cmd 不触发）。
+// 默认返回 null；ql-20260624-002 wrapper 用例内 vi.mocked(...).mockReturnValue override。
+vi.mock('../../src/cmd-shim.js', () => ({
+  resolveWindowsCmdShim: vi.fn(() => null),
+}));
+
 import { spawn } from 'node:child_process';
+import { resolveWindowsCmdShim } from '../../src/cmd-shim.js';
 import {
   CodexAppServerDriver,
   CodexExecutableNotFoundError,
@@ -184,6 +191,79 @@ beforeEach(() => {
 });
 
 // ── TDD-1：executable 缺失 ──────────────────────────────────────────────────
+
+describe('ql-20260624-002：Windows codex.cmd wrapper 解析（R-exe，规避 spawn EINVAL）', () => {
+  // clearAllMocks 不重置 mockReturnValue，显式归零防上一用例 override 跨用例继承。
+  beforeEach(() => {
+    vi.mocked(resolveWindowsCmdShim).mockReturnValue(null);
+  });
+
+  it.skipIf(process.platform !== 'win32')(
+    'codex.cmd 经 resolveWindowsCmdShim 解析 → spawn(node.exe, [codex.js, app-server...]) shell=false',
+    async () => {
+      vi.mocked(spawn).mockReturnValue(createFakeChild() as never);
+      vi.mocked(resolveWindowsCmdShim).mockReturnValue({
+        exe: 'C:\\nvm4w\\nodejs\\node.exe',
+        prependArgs: [
+          'C:\\nvm4w\\nodejs\\node_modules\\@openai\\codex\\bin\\codex.js',
+        ],
+      });
+
+      const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+      await driver.start(makeInputQueue().queue, makeOpts({
+        pathToAgentExecutable: 'C:\\nvm4w\\nodejs\\codex.cmd',
+      }));
+      await waitForSpawn();
+
+      expect(resolveWindowsCmdShim).toHaveBeenCalledWith('C:\\nvm4w\\nodejs\\codex.cmd');
+      expect(spawn).toHaveBeenCalledWith(
+        'C:\\nvm4w\\nodejs\\node.exe',
+        [
+          'C:\\nvm4w\\nodejs\\node_modules\\@openai\\codex\\bin\\codex.js',
+          'app-server',
+          '--listen',
+          'stdio://',
+        ],
+        expect.objectContaining({ shell: false, stdio: ['pipe', 'pipe', 'pipe'] }),
+      );
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'codex.cmd 解析失败(null) → 回退 spawn(codex.cmd, [app-server...], {shell:true})',
+    async () => {
+      vi.mocked(spawn).mockReturnValue(createFakeChild() as never);
+      vi.mocked(resolveWindowsCmdShim).mockReturnValue(null);
+
+      const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+      await driver.start(makeInputQueue().queue, makeOpts({
+        pathToAgentExecutable: 'C:\\nvm4w\\nodejs\\codex.cmd',
+      }));
+      await waitForSpawn();
+
+      expect(spawn).toHaveBeenCalledWith(
+        'C:\\nvm4w\\nodejs\\codex.cmd',
+        ['app-server', '--listen', 'stdio://'],
+        expect.objectContaining({ shell: true }),
+      );
+    },
+  );
+
+  it('非 .cmd（POSIX/exe）→ 不调 resolveWindowsCmdShim，spawn(path, [app-server...], {shell:false})', async () => {
+    vi.mocked(spawn).mockReturnValue(createFakeChild() as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    await driver.start(makeInputQueue().queue, makeOpts());
+    await waitForSpawn();
+
+    expect(resolveWindowsCmdShim).not.toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalledWith(
+      '/usr/local/bin/codex',
+      ['app-server', '--listen', 'stdio://'],
+      expect.objectContaining({ shell: false }),
+    );
+  });
+});
 
 describe('TDD-1：executable 缺失抛 CodexExecutableNotFoundError', () => {
   it('空 pathToAgentExecutable → start 抛错，不 spawn', async () => {
