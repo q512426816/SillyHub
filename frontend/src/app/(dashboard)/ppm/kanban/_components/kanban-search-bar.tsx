@@ -1,24 +1,22 @@
 "use client";
 
 /**
- * KanbanSearchBar — 对齐源 `SearchBar.vue`。
+ * KanbanSearchBar — 看板查询条件(对齐 project-plans grid-cols-4 Field 风格)。
  *
  * 字段(对应源 searchForm):
  *  - 人员多选(PpmUserSelect res=projectMember)→ store.filters.user_ids
  *  - 状态筛选(未开始/进行中/已完成)→ store.filters.status
  *  - 项目筛选(PpmUserSelect res=project)→ store.filters.project_id
  *  - 关键词输入 → store.filters.keyword
- *  - 重置按钮
- *  - 「新建任务」按钮(对齐源 task-kanban 顶部新建入口)
+ *  - 截止时间范围(RangePicker)→ store.filters.start_date/end_date
+ *  - 顶部按钮:重置 / 新建任务(右对齐,对齐 project-plans)
  *
  * 任一筛选变化即 setFilters + 触发 store.fetchUsers/fetchTasks。
- *
- * 注:源用 el-collapse 区分移动端;本仓统一一行 flex-wrap,AntD Select 自带响应式,
- *    移动端会自然换行,够用且简洁。
  */
 import { Button, DatePicker, Input, Select } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
+import type { ReactNode } from "react";
 
 import { PpmUserSelect } from "@/components/ppm-user-select";
 import { useKanbanStore } from "@/stores/kanban";
@@ -29,6 +27,16 @@ const STATUS_OPTIONS = [
   { label: "进行中", value: "进行中" },
   { label: "已完成", value: "已完成" },
 ];
+
+/** 查询条件外壳:垂直布局(标题在上,控件在下),对齐 project-plans 风格。 */
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex w-full flex-col gap-1">
+      <span className="text-xs leading-4 text-muted-foreground">{label}</span>
+      {children}
+    </div>
+  );
+}
 
 export function KanbanSearchBar({
   onCreateTask,
@@ -42,7 +50,6 @@ export function KanbanSearchBar({
   const fetchTasks = useKanbanStore((s) => s.fetchTasks);
 
   // 任一筛选变化 → 更新 store + 重新拉数据(对齐源 applyFilters + refreshData)
-  // 失败时 store 内已 message.error,这里吞掉避免 unhandled rejection。
   const applyAndRefresh = async () => {
     await Promise.all([fetchUsers(), fetchTasks()]).catch(() => {});
   };
@@ -65,7 +72,7 @@ export function KanbanSearchBar({
 
   const onKeywordChange = (v: string) => setFilters({ keyword: v || undefined });
 
-  // 日期范围筛选 (两重维度之日期维度) — 按 deadline/截止日期过滤
+  // 日期范围筛选(按 deadline/截止日期过滤)
   const dateValue: [Dayjs | null, Dayjs | null] | null = (() => {
     if (!filters.start_date && !filters.end_date) return null;
     return [
@@ -74,9 +81,7 @@ export function KanbanSearchBar({
     ];
   })();
 
-  const onDateChange = async (
-    range: [Dayjs | null, Dayjs | null] | null,
-  ) => {
+  const onDateChange = async (range: [Dayjs | null, Dayjs | null] | null) => {
     setFilters({
       start_date: range?.[0]?.format("YYYY-MM-DD") ?? undefined,
       end_date: range?.[1]?.format("YYYY-MM-DD") ?? undefined,
@@ -94,65 +99,71 @@ export function KanbanSearchBar({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b bg-background px-4 py-3">
-      <div className="w-56">
-        <PpmUserSelect
-          res="projectMember"
-          mode="multiple"
-          placeholder="筛选人员"
-          value={filters.user_ids ?? []}
-          onChange={onUsersChange}
-          allowClear
-        />
-      </div>
-
-      <Select
-        className="w-36"
-        placeholder="状态"
-        value={filters.status ?? ""}
-        onChange={onStatusChange}
-        options={STATUS_OPTIONS}
-        allowClear
-      />
-
-      <div className="w-48">
-        <PpmUserSelect
-          res="project"
-          placeholder="所属项目"
-          value={filters.project_id ?? null}
-          onChange={onProjectChange}
-          allowClear
-        />
-      </div>
-
-      <Input
-        className="w-48"
-        allowClear
-        prefix={<SearchOutlined />}
-        placeholder="任务关键词"
-        value={filters.keyword ?? ""}
-        onChange={(e) => onKeywordChange(e.target.value)}
-        onPressEnter={onSearch}
-      />
-
-      <DatePicker.RangePicker
-        className="w-64"
-        allowClear
-        placeholder={["截止开始", "截止结束"]}
-        value={dateValue ?? undefined}
-        onChange={(range) =>
-          onDateChange(
-            range as [Dayjs | null, Dayjs | null] | null,
-          )
-        }
-      />
-
-      <Button onClick={onReset}>重置</Button>
-
-      <div className="ml-auto">
+    <div>
+      {/* 顶部按钮行:右对齐(重置 | 分隔 | 新建任务),对齐 project-plans */}
+      <div className="mb-2 flex items-center justify-end gap-2">
+        <Button onClick={onReset}>重置</Button>
+        <span className="mx-1 h-6 w-px bg-border" aria-hidden />
         <Button type="primary" onClick={onCreateTask}>
           新建任务
         </Button>
+      </div>
+
+      {/* 查询条件:grid-cols-4 垂直 Field,任一变化即查 */}
+      <div className="grid w-full grid-cols-4 gap-3">
+        <Field label="人员">
+          <PpmUserSelect
+            res="projectMember"
+            mode="multiple"
+            placeholder="筛选人员"
+            value={filters.user_ids ?? []}
+            onChange={onUsersChange}
+            allowClear
+            style={{ width: "100%" }}
+          />
+        </Field>
+        <Field label="状态">
+          <Select
+            className="w-full"
+            placeholder="状态"
+            value={filters.status ?? ""}
+            onChange={onStatusChange}
+            options={STATUS_OPTIONS}
+            allowClear
+          />
+        </Field>
+        <Field label="所属项目">
+          <PpmUserSelect
+            res="project"
+            placeholder="所属项目"
+            value={filters.project_id ?? null}
+            onChange={onProjectChange}
+            allowClear
+            style={{ width: "100%" }}
+          />
+        </Field>
+        <Field label="任务关键词">
+          <Input
+            className="w-full"
+            allowClear
+            prefix={<SearchOutlined />}
+            placeholder="任务关键词"
+            value={filters.keyword ?? ""}
+            onChange={(e) => onKeywordChange(e.target.value)}
+            onPressEnter={onSearch}
+          />
+        </Field>
+        <Field label="截止时间">
+          <DatePicker.RangePicker
+            className="w-full"
+            allowClear
+            placeholder={["截止开始", "截止结束"]}
+            value={dateValue ?? undefined}
+            onChange={(range) =>
+              onDateChange(range as [Dayjs | null, Dayjs | null] | null)
+            }
+          />
+        </Field>
       </div>
     </div>
   );

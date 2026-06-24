@@ -26,6 +26,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import {
   listSimpleProjects,
 } from "@/lib/ppm/project";
+import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { DatePicker, Form, message, Modal, Radio, Tabs } from "antd";
 import type {
   KanbanTaskCard,
@@ -208,35 +209,38 @@ export default function KanbanPage() {
   }, [fetchTasks, fetchUsers]);
 
   return (
-    <div className="flex h-full flex-col">
-      <KanbanSearchBar
-        onCreateTask={() => {
-          setCreateDefaultAssignee(undefined);
-          setCreateOpen(true);
-        }}
-      />
+    <PageContainer size="full" className="h-full">
+      <PageHeader title="看板" subtitle="团队计划排程 / 实际工作甘特图视图" />
 
       <Toast toast={toast} />
 
-      {/* 日期导航条(计划/实际两 tab 共享) */}
-      <div className="flex items-center justify-between border-b bg-background px-4 py-2">
-        <KanbanDateNav range={dateRange} onChange={setDateRange} />
-        <div className="text-xs text-muted-foreground">
-          {activeTab === "plan"
-            ? loading
-              ? "加载中…"
-              : `共 ${tasks.length} 个任务 / ${users.length} 人`
-            : actualLoading
-              ? "加载中…"
-              : `共 ${filteredExecutes.length} 条实际工作 / ${users.length} 人`}
+      <SectionCard bodyPadding="p-2">
+        <KanbanSearchBar
+          onCreateTask={() => {
+            setCreateDefaultAssignee(undefined);
+            setCreateOpen(true);
+          }}
+        />
+        {/* 日期导航条(计划/实际两 tab 共享) */}
+        <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
+          <KanbanDateNav range={dateRange} onChange={setDateRange} />
+          <div className="text-xs text-muted-foreground">
+            {activeTab === "plan"
+              ? loading
+                ? "加载中…"
+                : `共 ${tasks.length} 个任务 / ${users.length} 人`
+              : actualLoading
+                ? "加载中…"
+                : `共 ${filteredExecutes.length} 条实际工作 / ${users.length} 人`}
+          </div>
         </div>
-      </div>
+      </SectionCard>
 
       {/* 主体:计划/实际 tab(对齐源 Home ScheduleCard/WorkCard) */}
       <Tabs
         activeKey={activeTab}
         onChange={(k) => setActiveTab(k as "plan" | "actual")}
-        className="flex flex-1 flex-col overflow-hidden px-3 pt-2 [&_.ant-tabs-content-holder]:flex-1 [&_.ant-tabs-content]:h-full [&_.ant-tabs-tabpane]:h-full"
+        className="flex min-h-0 flex-1 flex-col overflow-hidden [&_.ant-tabs-content-holder]:flex-1 [&_.ant-tabs-content]:h-full [&_.ant-tabs-tabpane]:h-full"
         items={[
           {
             key: "plan",
@@ -372,7 +376,7 @@ export default function KanbanPage() {
           setDetailTask((cur) => (cur ? { ...cur, ...updated } : cur))
         }
       />
-    </div>
+    </PageContainer>
   );
 }
 

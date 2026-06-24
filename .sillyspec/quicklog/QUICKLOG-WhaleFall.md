@@ -987,3 +987,9 @@ created_at: 2026-06-03T08:42:04
 根因:ppm-resource-table.tsx:199 局部 DEFAULT_PAGE_SIZE=10(与 shared.tsx:14 的 20 重名但不同源),PpmResourceTable 默认 pageSize=10,被 projects/customers/project-stakeholders 三页继承。
 方案:ppm-resource-table.tsx:199 局部 DEFAULT_PAGE_SIZE 10→20,与 ppm 列表页统一默认 20 条对齐。
 结果:ppm-resource-table.tsx:199 `const DEFAULT_PAGE_SIZE = 10` → `= 20`。typecheck 通过(无 PpmResourceTable 专属测试)。三页(projects/customers/project-stakeholders)+ 所有 PpmResourceTable 消费方默认变 20。Docker frontend 待重建部署。
+
+## ql-20260624-002-f2a3 | 2026-06-24 11:40:00 | kanban 查询条件+页面边距对齐 project-plans
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/kanban/page.tsx, frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-search-bar.tsx
+背景:kanban 外层 flex h-full 占满无边距(不好看),查询条件横向 flex-wrap(非 project-plans 的 grid-cols-4 Field 风格)。
+结果:① page.tsx 外层 div→PageContainer size=full h-full(px-6 py-6 边距 + gap-4 间距)+ PageHeader(标题"看板")。② 查询区 SectionCard bodyPadding=p-2 包裹 KanbanSearchBar + DateNav+共X(border-t 分隔)。③ KanbanSearchBar 重构:顶部按钮右对齐(重置|分隔|新建任务)+ grid-cols-4 垂直 Field(人员/状态/项目/关键词/截止时间)。④ Tabs 去 px-3 pt-2 加 min-h-0(PageContainer gap-4 提供间距,防 flex 溢出)。typecheck 通过。Docker frontend 待重建部署。
