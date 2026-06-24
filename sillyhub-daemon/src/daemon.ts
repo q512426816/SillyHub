@@ -235,6 +235,9 @@ interface ClientLike {
       duration_api_ms?: number;
       input_tokens?: number;
       output_tokens?: number;
+      // task-16：cache 两维（短名，对齐 backend _METADATA_FIELDS）。
+      cache_read_tokens?: number;
+      cache_creation_tokens?: number;
     },
   ): Promise<unknown>;
   /**
@@ -400,6 +403,13 @@ export interface DaemonOptions {
    * 默认 undefined：driver 回退裸 process.env（向后兼容）。
    */
   credentialManager?: InteractiveCredentialManager | null;
+  /**
+   * ql-20260624-006：runtime 单实例 lock 管理器。注入后 daemon.start 在注册 agents 前
+   * 对每个 provider acquire lock（强制一 host+一 user+一 provider=一 daemon，防同机双开
+   * 共享 backend runtime_id 致 ownership 双通过 + WS 重连风暴），失败回滚并阻止启动；
+   * stop 时 releaseAll。默认 undefined：不强制单实例（向后兼容）。
+   */
+  lockManager?: RuntimeLockLike | null;
 }
 
 /**
@@ -409,6 +419,15 @@ export interface DaemonOptions {
 export interface InteractiveCredentialManager {
   get(key: string): string | undefined;
   buildEnv(config: Record<string, unknown>): Record<string, string>;
+}
+
+/**
+ * ql-20260624-006：runtime 单实例 lock 管理器鸭子类型（对齐 src/runtime-lock.ts 的
+ * RuntimeLockManager，便于测试 mock）。
+ */
+export interface RuntimeLockLike {
+  acquire(provider: string): Promise<void>;
+  releaseAll(): Promise<void>;
 }
 
 // ── Daemon class（核心）──────────────────────────────────────────────────────
@@ -449,6 +468,8 @@ export class Daemon {
    * gap-8：本机凭证管理器（interactive 凭证 parity）。null 时 driver 回退裸 process.env。
    */
   private readonly _credentialManager: InteractiveCredentialManager | null;
+  /** ql-20260624-006：runtime 单实例 lock 管理器。null 时不强制单实例。 */
+  private readonly _lockManager: RuntimeLockLike | null;
   /**
    * task-04：interactive lease.id → session_id（防 WS 重放重复 create，AC-09）。
    * batch lease 不进此 map（走 _inflightLeases 去重）。
@@ -524,6 +545,7 @@ export class Daemon {
     this._wsReconnectDelay = options?.wsReconnectDelay ?? 10_000;
     this._sessionManager = options?.sessionManager ?? null;
     this._credentialManager = options?.credentialManager ?? null;
+    this._lockManager = options?.lockManager ?? null;
     this._persistence = options?.persistence ?? null;
     this._recoveryClient = options?.recoveryClient ?? null;
     this._recoveryConcurrency =
@@ -585,6 +607,24 @@ export class Daemon {
     if (availableAgents.length === 0) {
       this._logger.info('no_agents_detected');
     } else {
+      // ql-20260624-006：注册前 acquire runtime lock（强制单实例）。
+      // 任一 provider lock 被活跃进程持有 → 回滚已持有 + _running 复位 + 抛错，
+      // 阻止三循环启动（cli.ts catch 打印提示并 exit 1）。
+      if (this._lockManager) {
+        try {
+          for (const agent of availableAgents) {
+            await this._lockManager.acquire(agent.provider);
+          }
+          this._logger.info('runtime_lock_acquired', {
+            providers: availableAgents.map((a) => a.provider),
+          });
+        } catch (e) {
+          this._logger.error('runtime_lock_acquire_failed', { error: e });
+          await this._lockManager.releaseAll();
+          this._running = false;
+          throw e;
+        }
+      }
       for (const agent of availableAgents) {
         await this._registerOne(agent);
       }
@@ -655,6 +695,16 @@ export class Daemon {
         await this._sessionManager.flush();
       } catch (e) {
         this._logger.warn('session_flush_on_stop_failed', { error: e });
+      }
+    }
+
+    // ql-20260624-006：释放 runtime lock（启动期 acquire 的单实例 lock）。
+    // SIGKILL/断电未走到此 → 下次启动靠 pid 存活检测回收 stale lock。
+    if (this._lockManager) {
+      try {
+        await this._lockManager.releaseAll();
+      } catch (e) {
+        this._logger.warn('runtime_lock_release_failed', { error: e });
       }
     }
 
@@ -1042,7 +1092,14 @@ export class Daemon {
       num_turns?: number;
       duration_ms?: number;
       duration_api_ms?: number;
-      usage?: { input_tokens?: number; output_tokens?: number };
+      // task-16：usage 字段名映射点 —— Anthropic SDK 全名 cache_*_input_tokens，
+      // 提取处映射为短名 cache_*_tokens（对齐 backend 列 / _METADATA_FIELDS）。
+      usage?: {
+        input_tokens?: number;
+        output_tokens?: number;
+        cache_creation_input_tokens?: number;
+        cache_read_input_tokens?: number;
+      };
     };
     const status = resultMeta.subtype ?? 'success';
     const isError = resultMeta.is_error === true;
@@ -1057,6 +1114,9 @@ export class Daemon {
       duration_api_ms?: number;
       input_tokens?: number;
       output_tokens?: number;
+      // task-16：cache 两维（短名），SDK 全名在此处映射注入。
+      cache_read_tokens?: number;
+      cache_creation_tokens?: number;
     } = {
       status,
       is_error: isError,
@@ -1090,6 +1150,22 @@ export class Daemon {
     }
     if (resultMeta.usage && typeof resultMeta.usage.output_tokens === 'number') {
       payload.output_tokens = resultMeta.usage.output_tokens;
+    }
+    // task-16：cache 两维提取（Anthropic SDK 全名 → payload 短名映射）。
+    // 全名 cache_*_input_tokens 来自 Claude SDK result.usage；映射为短名 cache_*_tokens
+    //（对齐 backend agent_runs 列 / _METADATA_FIELDS）。typeof 'number' 守卫，
+    // 字段缺失（codex/老 CLI）不 set → backend NULL（D-001@v1）。0 值合法不丢。
+    if (
+      resultMeta.usage &&
+      typeof resultMeta.usage.cache_creation_input_tokens === 'number'
+    ) {
+      payload.cache_creation_tokens = resultMeta.usage.cache_creation_input_tokens;
+    }
+    if (
+      resultMeta.usage &&
+      typeof resultMeta.usage.cache_read_input_tokens === 'number'
+    ) {
+      payload.cache_read_tokens = resultMeta.usage.cache_read_input_tokens;
     }
     try {
       await this._client.notifyRunResult(
@@ -1188,7 +1264,24 @@ export class Daemon {
         const inner = fwdMsg['message'] as Record<string, unknown> | undefined;
         const usage = inner?.['usage'] as Record<string, unknown> | undefined;
         if (usage && typeof usage['input_tokens'] === 'number') {
-          fwdMsg['usage'] = usage;
+          // task-16：复制一份并做 Anthropic 全名 → 短名映射，让 backend
+          // _METADATA_FIELDS 命中 cache_*_tokens（Claude SDK 原始字段是
+          // cache_*_input_tokens）。不修改原 usage 对象（adapter 产，只读）。
+          // 全名缺失（codex/老 CLI）→ 短名也不 set → backend NULL（D-001@v1）。
+          const lifted: Record<string, unknown> = { ...usage };
+          if (
+            typeof lifted['cache_creation_input_tokens'] === 'number' &&
+            lifted['cache_creation_tokens'] === undefined
+          ) {
+            lifted['cache_creation_tokens'] = lifted['cache_creation_input_tokens'];
+          }
+          if (
+            typeof lifted['cache_read_input_tokens'] === 'number' &&
+            lifted['cache_read_tokens'] === undefined
+          ) {
+            lifted['cache_read_tokens'] = lifted['cache_read_input_tokens'];
+          }
+          fwdMsg['usage'] = lifted;
         }
       }
       await this._client.submitMessages(

@@ -42,6 +42,7 @@ import { Command } from 'commander';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
+import { hostname } from 'node:os';
 
 import { DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_PATH, loadConfig, saveConfig } from './config.js';
 import { HubClient } from './hub-client.js';
@@ -54,6 +55,7 @@ import { CodexAppServerDriver } from './interactive/codex-app-server-driver.js';
 import { SessionManager } from './interactive/session-manager.js';
 import { JsonSessionPersistence } from './interactive/session-store-persistence.js';
 import { DAEMON_VERSION } from './daemon-version.js';
+import { RuntimeLockManager } from './runtime-lock.js';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 
 // ── 路径访问（可测试性：函数返回，task-22 vi.spyOn 可 mock）──────────────────
@@ -204,6 +206,8 @@ export function createProgram(): Command {
     .option('--terminal-mode <mode>', 'Observer log mode: parsed (default) / raw / both')
     .option('--terminal-close-on-exit', 'Close observer terminal after task exits (best-effort, platform-dependent)')
     .option('--terminal-command <cmd>', 'Custom terminal launch command template, supports {log} and {title} placeholders')
+    // ql-20260624-006：强制回收 stale/corrupt runtime lock（不强杀活跃 daemon 进程）。
+    .option('--force', 'Force reclaim a stale or corrupt runtime lock before start (never kills a live daemon)')
     .action(async (opts: StartOptions) => {
       const code = await startAction(opts);
       if (code !== 0) process.exit(code);
@@ -263,6 +267,8 @@ interface StartOptions {
   'terminal-mode'?: string;
   'terminal-close-on-exit'?: boolean;
   'terminal-command'?: string;
+  // ql-20260624-006：强制回收 stale/corrupt runtime lock。commander --force 存为 force。
+  force?: boolean;
 }
 
 interface LogsOptions {
@@ -474,11 +480,21 @@ export async function startAction(opts: StartOptions): Promise<number> {
   // interactive 路径经 buildSpawnEnv 读 credentials.json 的 ANTHROPIC token，与 batch 对齐。
   // gap-8.3：persistence + recoveryClient 接通 daemon 重启恢复。client（HubClient）
   // 已实现 RecoveryCoordinator（recoverSession/confirmReconnected/markRecoveryFailed）。
+  // ql-20260624-006：runtime 单实例 lock（强制一 host+一 user+一 provider=一 daemon）。
+  // lock 维度 provider+hostname+serverOrigin，与 backend runtime_id upsert key 对齐。
+  const lockManager = new RuntimeLockManager({
+    hostname: hostname(),
+    serverOrigin: config.server_url,
+    pid: process.pid,
+    version: DAEMON_VERSION,
+    force: opts.force === true,
+  });
   daemon = new Daemon(config, client, taskRunner, {
     sessionManager,
     credentialManager: credentialMgr,
     persistence,
     recoveryClient: client,
+    lockManager,
   });
 
   // step 6: 写 PID 文件（对齐 Python __main__.py:106 `_write_pid(os.getpid())`）。

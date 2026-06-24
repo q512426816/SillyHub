@@ -86,3 +86,32 @@ created_at: 2026-06-23 10:09:12
 - frontend/src/components/daemon/runtime-session-dialog.tsx
 - frontend/src/components/daemon/runtime-session-helpers.tsx
 - frontend/src/components/daemon/interactive-session-panel.tsx
+## ql-20260624-004-c8a2 | 2026-06-24 09:56:29 | 优化 /settings/api-keys 页面样式
+状态：已完成
+结果：重做 /settings/api-keys 页面视觉层，统一 PageContainer/PageHeader/SectionCard/StatusBadge/EmptyState，补充 API Key 统计概览、表格密度和空态；ApiKeyCreateDialog 改用统一 Dialog 外壳并优化一次性明文展示。验证：frontend 目录下 `pnpm exec tsc --noEmit --pretty false` 通过。
+实际改动文件：
+- frontend/src/app/(dashboard)/settings/api-keys/page.tsx
+- frontend/src/components/api-key-create-dialog.tsx
+
+## ql-20260624-005-9f3a | 2026-06-24 10:10:18 | 修复 workspace 详情页「同步」按钮 POST /spec-workspace/sync 返回 422（清理废 UI 遗留）
+状态：已完成
+结果：纯删除 3 文件——page.tsx 移除「同步」按钮+handleSync+syncing state+syncSpecWorkspace import，并清理相邻「初始化/导入」按钮 disabled 里的 syncing 引用；spec-workspaces.ts 移除 syncSpecWorkspace 函数；lib-spec-workspaces.md 同步（契约表删行+关键逻辑改为 daemon 自动回传说明）。验证：frontend tsc --noEmit exit 0；spec-workspaces.test.ts 1 passed 无回归；workspace 详情页无测试文件；grep 确认全项目（排除 .sillyspec）无 syncSpecWorkspace/handleSync/setSyncing 残留。daemon postSpecSync 未动，tar 回传链路不受影响。
+根因：后端 `POST /spec-workspace/sync` 端点在 2026-06-23-spec-transport-tar-sync 变更中从「无 body stub（返回 SpecWorkspace）」改为「daemon tar 上传（必填 tar_bytes，返回 {ok,reparsed}）」。前端 `syncSpecWorkspace`（spec-workspaces.ts:40）/ `handleSync`（workspaces/[id]/page.tsx:274）/「同步」按钮（page.tsx:449）仍是旧契约，经 apiFetch POST 无 body → 后端 required `tar_bytes` body 缺失 → FastAPI 422。daemon 的 `postSpecSync`（hub-client.ts，带 tar body）正确，不受影响。
+依据文档：.sillyspec/changes/archive/2026-06-18-2026-06-18-workspace-client-path/verify-result.md:58（已标注为废 UI 遗留建议清理）。
+方案：清理废 UI——移除前端「同步」按钮、handleSync、syncing state、syncSpecWorkspace 函数（含相邻按钮 disabled 里 syncing 引用），并同步模块文档。手动同步语义已被 daemon 自动 tar 回传取代，前端无法生成 tar。
+文件：
+- frontend/src/app/(dashboard)/workspaces/[id]/page.tsx（移除 Sync 按钮 + handleSync + syncing state + import + 相邻 disabled 引用）
+- frontend/src/lib/spec-workspaces.ts（移除 syncSpecWorkspace 函数）
+- .sillyspec/docs/frontend/modules/lib-spec-workspaces.md（同步模块文档：契约表移除 syncSpecWorkspace 行 + 关键逻辑调整）
+
+## ql-20260624-006-b4e1 | 2026-06-24 11:22:33 | daemon 启动加 runtime lock 强制单实例（防同机同 provider 双开共享 backend runtime_id 致 ownership 双通过 + WS 重连风暴）
+状态：已完成
+结果：4 文件实现——runtime-lock.ts 新模块（computeLockKey=provider+hostname+serverOrigin sha256 前16hex 不含 api key；acquireLock O_EXCL 原子+pid 存活检测回收 stale+force 回收损坏，活跃 pid 一律拒绝不强杀；RuntimeLockManager acquire/releaseAll 跟踪）；daemon.ts（lockManager 可选注入 RuntimeLockLike；start 检测 agents 后 acquire all 失败 releaseAll 回滚+_running 复位+抛错阻止启动；stop releaseAll）；cli.ts（start 子命令加 --force+构造 RuntimeLockManager 注入 daemon）。验证：runtime-lock.test 11 passed（7 需求点+force corrupt+活跃拒绝+幂等+直接调用）；daemon.test+multi-runtime 37 passed 无回归（lockManager 不注入时跳过，向后兼容）；tsc --noEmit exit 0。cli.test 2 failed（status_shows_config/logs_no_file）经 git stash 验证为 pre-existing（status/logs 命令未改，~/.sillyhub config/log 残留）。config.runtime_id 孤儿字段未动。坑：验证时 stash push pathspec 误用致 git stash pop 误恢复 pre-existing codex-before-pull stash 污染 working tree（39 staged A 文件），已清理（concurrent-refresh-revoke 删除备份在 stash@{0}，runtime-usage-stats 恢复 untracked）。
+根因：backend runtime_id 按 (user_id, provider, hostname) upsert（runtime/service.py:108-142），同机同 provider 双开两个 daemon 进程命中同一 backend runtime 记录、共享 runtime_id → recoverSession ownership guard 双双通过（双接管）+ WS ws_hub replaced(close 4000) 重连风暴。invariant=一 host+一 user+一 provider=一 daemon 未在 daemon 本地启动阶段强制。
+依据：用户确认 invariant；memory daemon-recovery-capability-boundary 残留风险段（2026-06-24 精确化）。
+方案：新增 runtime-lock.ts（lock key=provider+hostname+server-hash，不放 api key 明文；内容 pid/hostname/provider/server_hash/started_at/updated_at/version；原子创建 O_EXCL + pid 存活检测回收 stale + --force）；daemon.ts 注入 lockManager（start 检测 agents 后 acquire all，失败回滚已持有 + 抛错阻止启动；stop/信号 releaseAll）；cli.ts 加 --force 选项 + 注入 lockManager。config.runtime_id 孤儿字段本次不动（独立设计异味）。
+文件：
+- sillyhub-daemon/src/runtime-lock.ts（新模块：lockKey/lockPath/isPidAlive/acquireLock/releaseLock + LockHeldError）
+- sillyhub-daemon/src/daemon.ts（lockManager 可选依赖注入 + start acquire all + stop releaseAll）
+- sillyhub-daemon/src/cli.ts（start 子命令加 --force + 构造 lockManager 注入 daemon）
+- sillyhub-daemon/tests/runtime-lock.test.ts（新，7 场景：首次创建/同 provider 拒绝/stale pid 回收/stop 后删除/--force 回收 stale/不同 provider 不阻塞/不同 server 不阻塞）

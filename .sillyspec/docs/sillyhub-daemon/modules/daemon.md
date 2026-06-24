@@ -25,6 +25,8 @@ created_at: 2026-06-10T16:55:00
 ```
 start()
   1. AgentDetector.detectAll() → availableAgents
+  1.5（ql-006）for each agent: lockManager.acquire(provider) 强制单实例
+      （一 host+一 user+一 provider=一 daemon；任一失败 releaseAll 回滚+抛错阻止启动）
   2. for each agent: client.register({ runtimeId: `${baseId}--${name}`, provider, version, protocol })
      → registeredRuntimes[name] = runtimeId
   3. 启动心跳循环：每 heartbeatInterval 发 client.heartbeat
@@ -82,6 +84,7 @@ SessionManager(provider driver registry)
 - Codex ended/failed session 若缺 `agent_session_id`/threadId，不能可靠 reopen，应显示失败且不伪造新 thread（与 design §9 兼容与迁移一致）
 - MCP elicitation 复杂 schema 当前 fail-closed，仅支持可归一化为 question/options 的简单场景，不支持复杂 form/schema
 - 依赖：agent-detector, client, config, protocol, ws-client, interactive/session-manager, interactive/driver（provider driver 契约）
+- ql-006：启动期 lockManager（runtime-lock.ts）强制单实例——backend runtime_id 按 (user_id,provider,hostname) upsert，同机同 provider 双开会共享 runtime_id 致 ownership 双通过+WS 重连风暴；lockManager 不注入时跳过（向后兼容）。stop 释放 lock，SIGKILL/断电靠下次启动 pid 存活检测回收 stale。
 
 ## 人工备注
 
@@ -92,3 +95,4 @@ SessionManager(provider driver registry)
 ## 变更记录
 
 - 2026-06-23-codex-interactive-session | SessionManager provider driver 化，接入 CodexAppServerDriver，Codex interactive 复用 AgentSession 生命周期（create/inject/interrupt/end/reopen/recovery），`_startInteractiveSession` 按 provider 取 executable，`_routeSessionResume` 按 provider 路由 recovery，message/result 类型放宽为 driver message/result；审批走 fail-closed 策略（D-001@v1/D-002@v1/D-004@v1/D-006@v1/D-007@v1/D-008@v1/D-009@v1/D-010@v1）。
+- ql-20260624-006-b4e1 | 启动期加 runtime lock 强制单实例（注入 lockManager=RuntimeLockManager，runtime-lock.ts），防同机同 provider 双开共享 backend runtime_id 致 ownership 双通过+WS replaced 重连风暴；start acquire all（失败回滚阻止启动），stop releaseAll。
