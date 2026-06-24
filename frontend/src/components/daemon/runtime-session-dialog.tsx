@@ -87,7 +87,7 @@ export function RuntimeSessionDialog({
 }: RuntimeSessionDialogProps) {
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-[900px] w-[90vw] h-[80vh] max-h-[88vh] p-0 overflow-hidden gap-0 flex flex-col">
+      <DialogContent className="flex h-[min(82vh,760px)] max-h-[calc(100vh-48px)] w-[min(1120px,calc(100vw-48px))] max-w-none flex-col gap-0 overflow-hidden p-0">
         {/* Radix 无障碍：DialogContent 缺 Title 会 console warn，sr-only 兜底 */}
         <DialogTitle className="sr-only">
           会话{runtime ? ` · ${runtime.name ?? getProviderLabel(runtime.provider)}` : ""}
@@ -276,12 +276,12 @@ function RuntimeSessionDialogBody({
 
   return (
     <>
-      <header className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+      <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-card px-5 py-4">
         <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold">
+          <h2 className="truncate text-base font-semibold text-foreground">
             会话 · {runtime?.name ?? getProviderLabel(runtime?.provider)}
           </h2>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="mt-0.5 text-xs text-muted-foreground">
             历史仅显示该运行时的会话，新建会话使用此提供方
           </p>
         </div>
@@ -290,12 +290,12 @@ function RuntimeSessionDialogBody({
           variant="outline"
           onClick={() => void reloadSessions()}
           disabled={loading}
-          className="h-7 text-[11px]"
+          className="h-8 shrink-0 text-xs"
         >
           刷新会话
         </Button>
       </header>
-      <div className="grid min-h-0 flex-1 grid-cols-[240px_1fr]">
+      <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)] bg-background">
         <SessionsSidebar
           sessions={visibleSessions}
           loading={loading}

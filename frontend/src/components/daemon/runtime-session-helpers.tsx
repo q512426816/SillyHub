@@ -94,14 +94,14 @@ export function InteractiveSessionChatSection({
   }, [router, searchParams]);
 
   return (
-    <div className="flex min-w-0 flex-col gap-2">
+    <div className="flex h-full min-w-0 flex-col">
       {attachSession && onCloseAttach && (
-        <div className="flex items-center justify-end">
+        <div className="flex h-10 shrink-0 items-center justify-end border-b bg-muted/20 px-4">
           <Button
             size="sm"
             variant="ghost"
             onClick={onCloseAttach}
-            className="h-7 text-[11px]"
+            className="h-7 text-xs"
           >
             返回历史
           </Button>
@@ -480,11 +480,11 @@ export function SessionsSidebar({
   return (
     <section
       data-testid="session-list-scroll"
-      className="flex max-h-[520px] min-h-0 flex-col overflow-hidden rounded-md border bg-card"
+      className="flex h-full min-h-0 flex-col overflow-hidden border-r bg-card"
     >
-      <header className="border-b px-3 py-2">
+      <header className="border-b bg-muted/20 px-4 py-3">
         <h2 className="text-sm font-semibold">会话列表</h2>
-        <p className="text-[11px] text-muted-foreground">
+        <p className="mt-0.5 text-xs text-muted-foreground">
           {loading ? "加载中…" : `${sessions.length} 个会话`}
         </p>
       </header>
@@ -508,7 +508,7 @@ export function SessionsSidebar({
                     type="button"
                     onClick={() => onSelect(s)}
                     className={cn(
-                      "flex min-w-0 flex-1 flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-muted/40",
+                      "flex min-w-0 flex-1 flex-col items-start gap-1 px-4 py-3 text-left hover:bg-muted/40",
                       selectedSessionId === s.id && "bg-muted/60",
                     )}
                   >
@@ -531,7 +531,7 @@ export function SessionsSidebar({
                     title="删除会话"
                     disabled={deletingSessionId === s.id}
                     onClick={() => onDelete(s)}
-                    className="flex w-9 shrink-0 items-center justify-center border-l text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                    className="flex w-10 shrink-0 items-center justify-center border-l text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
                   >
                     {deletingSessionId === s.id ? (
                       <RefreshCw className="h-3.5 w-3.5 animate-spin" />
@@ -651,8 +651,8 @@ export function SessionHistoryView({
   const resumeEnabled = canResumeSession(session);
 
   return (
-    <section className="flex min-h-[520px] flex-col overflow-hidden rounded-md border bg-card">
-      <header className="flex items-center justify-between gap-2 border-b px-4 py-3">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
+      <header className="flex items-center justify-between gap-3 border-b bg-muted/20 px-4 py-3">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold">
             历史回看{session ? ` · ${shortId(session.id)}` : ""}
@@ -682,7 +682,7 @@ export function SessionHistoryView({
           </Button>
         </div>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto bg-muted/20 px-4 py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-background px-5 py-5">
         {loading ? (
           <p className="text-center text-[11px] text-muted-foreground">加载历史日志…</p>
         ) : error ? (

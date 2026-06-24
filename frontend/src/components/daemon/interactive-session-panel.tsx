@@ -630,48 +630,48 @@ export function InteractiveSessionPanel({
   }, [view.status, view.currentRunId]);
 
   return (
-    <section className="flex h-[520px] flex-col overflow-hidden rounded-md border bg-card">
-      <header className="border-b px-4 py-3">
-        <div className="flex items-start justify-between gap-3">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
+      <header className="shrink-0 border-b bg-card px-5 py-4">
+        <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-2.5">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
               <MessageSquareText className="h-4 w-4" />
             </span>
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold">交互式会话</h2>
-              <p className="text-[11px] text-muted-foreground">
+              <h2 className="text-base font-semibold">交互式会话</h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">
                 {view.sessionId
                   ? `会话 ${view.sessionId.slice(0, 8)}…`
                   : "单一 SSE 贯穿多轮会话"}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <Button
               variant="outline"
               size="sm"
               onClick={handleNewSession}
               disabled={view.status === "creating" || view.status === "ending"}
-              className="h-7 gap-1 px-2 text-[11px]"
+              className="h-8 gap-1 px-3 text-xs"
               title="新建会话"
             >
               <Plus className="h-3 w-3" />
               新建会话
             </Button>
-            <Badge variant="outline">
+            <Badge variant="outline" className="h-7 px-2 text-xs">
               {hasOnlineProvider ? `${providers.length} 个提供方` : "未连接"}
             </Badge>
           </div>
         </div>
 
-        <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+        <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(160px,0.75fr)_minmax(220px,1fr)_auto] xl:items-end">
           <div className="space-y-1">
             <label className="text-[11px] font-medium text-muted-foreground">智能体提供方</label>
             <select
               value={provider}
               onChange={(e) => setProvider(e.target.value)}
               disabled={!hasOnlineProvider || view.status === "active" || view.status === "ending" || view.status === "creating"}
-              className="h-8 w-full min-w-0 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:bg-muted"
+              className="h-9 w-full min-w-0 rounded border border-input bg-background px-3 text-sm focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:bg-muted"
             >
               {(hasOnlineProvider ? providers : [provider]).map((item) => (
                 <option key={item} value={item}>
@@ -690,13 +690,13 @@ export function InteractiveSessionPanel({
               disabled={view.status === "active" || view.status === "ending" || view.status === "creating"}
             />
           </div>
-          <div className="flex items-end gap-1.5">
+          <div className="flex flex-wrap items-end justify-end gap-2">
             <Button
               variant="outline"
               size="sm"
               onClick={handleInterrupt}
               disabled={interruptDisabled}
-              className="h-8 gap-1 px-2.5 text-[11px]"
+              className="h-9 gap-1 px-3 text-xs"
               title="打断本轮（session 保持 active）"
             >
               <Ban className="h-3.5 w-3.5" />
@@ -707,7 +707,7 @@ export function InteractiveSessionPanel({
               size="sm"
               onClick={handleEnd}
               disabled={endDisabled}
-              className="h-8 gap-1 px-2.5 text-[11px]"
+              className="h-9 gap-1 px-3 text-xs"
               title="结束整个会话"
             >
               <Square className="h-3 w-3" />
@@ -717,7 +717,7 @@ export function InteractiveSessionPanel({
         </div>
       </header>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto bg-muted/20 px-4 py-4">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto bg-background px-5 py-5">
         {view.errorMsg && (
           <div className="mb-3 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
             {view.errorMsg}
@@ -791,8 +791,8 @@ export function InteractiveSessionPanel({
         )}
       </div>
 
-      <footer className="border-t bg-card px-3 py-3">
-        <div className="flex items-end gap-2">
+      <footer className="shrink-0 border-t bg-card px-5 py-4">
+        <div className="flex items-end gap-3">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -803,14 +803,14 @@ export function InteractiveSessionPanel({
               }
             }}
             placeholder={placeholder}
-            className="min-h-10 flex-1 resize-none rounded border border-input bg-background px-3 py-2 text-sm leading-5 focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:bg-muted"
+            className="min-h-12 flex-1 resize-none rounded border border-input bg-background px-3 py-2 text-sm leading-5 focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:bg-muted"
             rows={2}
             disabled={sendingDisabled}
           />
           <Button
             onClick={handleSend}
             disabled={sendingDisabled || !input.trim()}
-            className="h-10 w-10 shrink-0 p-0"
+            className="h-12 w-12 shrink-0 p-0"
             title="发送"
           >
             {view.status === "creating" ? (
