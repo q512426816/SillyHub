@@ -1000,3 +1000,7 @@ created_at: 2026-06-03T08:42:04
 背景:用户要按中国法定节假日(休息)+调休(补班)标注,不仅周末。chinese-days npm 不含2026(仅2004-2025)+API默认导出,不可用,已卸载。
 方案:自维护2026节假日+调休数据(国务院2025-11-04通知,人民网确认)。helpers 加 getDayStatus(date)→{rest,adjustedWork,label}:法定假日→rest+节名;调休补班→adjustedWork+"班";普通周末→rest+"休";工作日→正常。
 结果:helpers 加 HOLIDAYS_2026(7节日放假日期)+ADJUSTED_WORKDAYS_2026(6补班日)+getDayStatus;gantt/actual-gantt 日期刻度+背景列用 getDayStatus(rest→emerald 底+节名/休,adjustedWork→warning 底+"班")。getDayStatus 4 单测(假日/补班/周末/工作日)。typecheck 通过 + 18 单测全过。Docker frontend 待重建部署。② 查询区 SectionCard bodyPadding=p-2 包裹 KanbanSearchBar + DateNav+共X(border-t 分隔)。③ KanbanSearchBar 重构:顶部按钮右对齐(重置|分隔|新建任务)+ grid-cols-4 垂直 Field(人员/状态/项目/关键词/截止时间)。④ Tabs 去 px-3 pt-2 加 min-h-0(PageContainer gap-4 提供间距,防 flex 溢出)。typecheck 通过。Docker frontend 待重建部署。
+## ql-20260624-004-d7b1 | 2026-06-24 13:30:00 | kanban 日期列宽 450→200
+状态：已完成
+文件：frontend/src/app/(dashboard)/ppm/kanban/_components/kanban-gantt-helpers.ts
+结果:DAY_WIDTH 450→200。typecheck 通过 + 18 单测全过。Docker frontend 待重建部署。
