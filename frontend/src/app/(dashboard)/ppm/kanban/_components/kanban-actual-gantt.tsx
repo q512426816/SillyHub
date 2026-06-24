@@ -194,6 +194,14 @@ export function KanbanActualGantt({
                 </div>
               </div>
               <div className="relative" style={{ width: totalDaysWidth }}>
+                {/* 日期列竖向边框 */}
+                {dates.map((dk, i) => (
+                  <div
+                    key={`grid-${dk}`}
+                    className="pointer-events-none absolute bottom-0 top-0 border-l border-border/40"
+                    style={{ left: i * DAY_WIDTH }}
+                  />
+                ))}
                 {dates.map((dk, i) =>
                   isWeekendKey(dk) ? (
                     <div

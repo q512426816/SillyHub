@@ -206,6 +206,14 @@ export function KanbanGantt({
               </div>
               {/* 右内容:泳道 + 条形 + 未排期 */}
               <div className="relative" style={{ width: totalDaysWidth }}>
+                {/* 日期列竖向边框 */}
+                {dates.map((dk, i) => (
+                  <div
+                    key={`grid-${dk}`}
+                    className="pointer-events-none absolute bottom-0 top-0 border-l border-border/40"
+                    style={{ left: i * DAY_WIDTH }}
+                  />
+                ))}
                 {/* 周末背景列 */}
                 {dates.map((dk, i) =>
                   isWeekendKey(dk) ? (
