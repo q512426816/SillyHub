@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import require_permission, require_permission_any
-from app.core.db import get_session
+from app.core.db import get_session, get_session_factory
 from app.core.errors import AgentRunNotFound, AgentRunNotRunning
 from app.core.logging import get_logger
 from app.modules.agent.context_builder import (
@@ -412,26 +412,43 @@ _SSE_HEADERS = {
 async def stream_agent_run_logs(
     workspace_id: uuid.UUID,
     run_id: uuid.UUID,
-    session: SessionDep,
     user: Annotated[User, Depends(require_permission(Permission.TASK_READ))],
 ) -> StreamingResponse:
-    """SSE endpoint — stream real-time logs for a running agent run."""
-    svc = AgentService(session)
-    run = await svc.get_run(run_id)
-    if run is None:
+    """SSE endpoint — stream real-time logs for a running agent run.
+
+    连接池安全：不注入请求级 session（会贯穿整个 StreamingResponse 生命周期、
+    长时间占用一个连接池 slot）。run 存在性 / 状态校验改用短 session——校验后
+    立即归还；stream_run_logs 生成器内部用 get_session_factory() 自建独立
+    短 session（见 AgentService.stream_run_logs）。
+    """
+    # 存在性 + 状态校验：短 session，校验完即归还连接池 slot
+    run_status = None
+    run_exit_code = None
+    found = False
+    async with get_session_factory()() as session:
+        run = await AgentService(session).get_run(run_id)
+        if run is not None:
+            found = True
+            run_status = run.status
+            run_exit_code = run.exit_code
+    if not found:
         raise AgentRunNotFound(
             f"Agent run '{run_id}' not found.",
             details={"run_id": str(run_id)},
         )
-    if run.status not in ("pending", "running"):
-        done_data = json.dumps({"status": run.status, "exit_code": run.exit_code})
+    if run_status not in ("pending", "running"):
+        done_data = json.dumps({"status": run_status, "exit_code": run_exit_code})
         return StreamingResponse(
             iter([f"event: done\ndata: {done_data}\n\n"]),
             media_type="text/event-stream",
             headers=_SSE_HEADERS,
         )
+    # 生成器对象惰性求值；构造用短 session 随即归还，stream_run_logs 内部
+    # 自建短 session 做逐次查询，不占用请求级连接池 slot。
+    async with get_session_factory()() as ctor_session:
+        gen = AgentService(ctor_session).stream_run_logs(run_id)
     return StreamingResponse(
-        svc.stream_run_logs(run_id),
+        gen,
         media_type="text/event-stream",
         headers=_SSE_HEADERS,
     )

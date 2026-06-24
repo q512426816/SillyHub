@@ -241,13 +241,16 @@ def create_app() -> FastAPI:
         @qc_router.get("/daemon-chat/{run_id}/stream")
         async def stream_quick_chat(
             run_id: str,
-            session: AsyncSession = Depends(get_session),
             user: User = Depends(require_permission_any(Permission.TASK_READ)),
         ):
             """SSE endpoint — stream real-time agent messages for a quick-chat run.
 
             复用 AgentService.stream_run_logs：按 run_id 订阅 Redis pub/sub，
             不需要 workspace_id（quick-chat 类型的 AgentRun 无 workspace 关联）。
+
+            连接池安全：不注入请求级 session（会贯穿整个 StreamingResponse 生命周期、
+            长时间占用一个连接池 slot）。校验改用短 session——校验后立即归还；
+            stream_run_logs 生成器内部用 get_session_factory() 自建独立短 session。
             """
             import json
             import uuid as _uuid
@@ -255,6 +258,7 @@ def create_app() -> FastAPI:
             from fastapi import HTTPException, StreamingResponse
             from sqlalchemy import text as sa_text
 
+            from app.core.db import get_session_factory
             from app.modules.agent.service import AgentService
 
             # 校验 run_id 是合法 UUID + 属于 quick-chat（防止越权读其他类型 run）
@@ -263,20 +267,25 @@ def create_app() -> FastAPI:
             except (ValueError, TypeError):
                 raise HTTPException(status_code=404, detail="Run not found") from None
 
-            row = (
-                (
-                    await session.execute(
-                        sa_text(
-                            "SELECT id, status FROM agent_runs "
-                            "WHERE id = :id AND spec_strategy = 'quick-chat'"
-                        ),
-                        {"id": parsed},
+            # 校验：短 session，校验完即归还连接池 slot（不贯穿 SSE 生命周期）
+            status_val = None
+            async with get_session_factory()() as session:
+                row = (
+                    (
+                        await session.execute(
+                            sa_text(
+                                "SELECT id, status FROM agent_runs "
+                                "WHERE id = :id AND spec_strategy = 'quick-chat'"
+                            ),
+                            {"id": parsed},
+                        )
                     )
+                    .mappings()
+                    .first()
                 )
-                .mappings()
-                .first()
-            )
-            if row is None:
+                if row is not None:
+                    status_val = row["status"]
+            if status_val is None:
                 raise HTTPException(status_code=404, detail="Run not found")
 
             sse_headers = {
@@ -286,21 +295,20 @@ def create_app() -> FastAPI:
             }
 
             # 已终态：直接发 done 让前端立即收尾（与 agent router 的 stream_agent_run_logs 对齐）
-            if row["status"] not in ("pending", "running"):
-                done_data = json.dumps({"status": row["status"], "exit_code": None})
+            if status_val not in ("pending", "running"):
+                done_data = json.dumps({"status": status_val, "exit_code": None})
                 return StreamingResponse(
                     iter([f"event: done\ndata: {done_data}\n\n"]),
                     media_type="text/event-stream",
                     headers=sse_headers,
                 )
 
-            svc = AgentService(session)
-            run = await svc.get_run(parsed)
-            if run is None:
-                raise HTTPException(status_code=404, detail="Run not found")
-
+            # 生成器对象惰性求值；构造用短 session 随即归还，stream_run_logs 内部
+            # 自建短 session 做逐次查询，不占用请求级连接池 slot。
+            async with get_session_factory()() as ctor_session:
+                gen = AgentService(ctor_session).stream_run_logs(parsed)
             return StreamingResponse(
-                svc.stream_run_logs(parsed),
+                gen,
                 media_type="text/event-stream",
                 headers=sse_headers,
             )

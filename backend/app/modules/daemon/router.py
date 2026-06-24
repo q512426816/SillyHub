@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_principal, require_permission_any
-from app.core.db import get_session
+from app.core.db import get_session, get_session_factory
 from app.core.logging import get_logger
 from app.modules.agent.schema import AgentRunLogEntry
 from app.modules.auth.model import User
@@ -1115,7 +1115,6 @@ async def delete_session(
 @router.get("/sessions/{session_id}/stream")
 async def stream_session_logs(
     session_id: uuid.UUID,
-    session: SessionDep,
     user: TaskRunAgentUser,
 ) -> StreamingResponse:
     """Stream session-level SSE aggregating every AgentRun of the session.
@@ -1128,29 +1127,40 @@ async def stream_session_logs(
     a missing nor a cross-user session reaches the Redis subscription (no
     existence leak). A terminal-status session still enters the generator,
     which emits ``event: done`` internally.
+
+    连接池安全：不注入请求级 session（会贯穿整个 StreamingResponse 生命周期、
+    长时间占用一个连接池 slot）。归属校验改用短 session——校验后立即归还；
+    StreamingResponse 生成器内部用 get_session_factory() 自建独立短 session
+    做逐次查询（见 AgentService.stream_session_logs）。
     """
     # Local imports keep top-level load cost minimal and avoid an import cycle
     # (agent.service imports nothing from daemon, but be defensive).
     from app.modules.agent.model import AgentSession
     from app.modules.agent.service import AgentService
 
-    owned = (
-        await session.execute(
-            select(AgentSession).where(
-                AgentSession.id == session_id,
-                AgentSession.user_id == user.id,
+    # 归属校验：短 session，校验完即归还连接池 slot（不贯穿 SSE 生命周期）
+    gen = None
+    async with get_session_factory()() as session:
+        owned = (
+            await session.execute(
+                select(AgentSession).where(
+                    AgentSession.id == session_id,
+                    AgentSession.user_id == user.id,
+                )
             )
-        )
-    ).scalar_one_or_none()
+        ).scalar_one_or_none()
+        if owned is not None:
+            # 构造生成器对象（惰性求值，此处不执行其 body）；session 随
+            # async with 结束立即归还，stream_session_logs 内部自建短 session。
+            gen = AgentService(session).stream_session_logs(session_id)
     if owned is None:
         raise DaemonSessionNotFound(
             f"AgentSession '{session_id}' not found.",
             details={"session_id": str(session_id)},
         )
 
-    svc = AgentService(session)
     return StreamingResponse(
-        svc.stream_session_logs(session_id),
+        gen,
         media_type="text/event-stream",
         headers=_SESSION_SSE_HEADERS,
     )
