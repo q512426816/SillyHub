@@ -41,5 +41,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 ## 变更索引
 - ql-20260624-003-a7f1 | 优化 /runtimes 会话弹窗布局样式：扩大 RuntimeSessionDialog 工作区，改造会话列表为左侧栏，统一交互式会话与历史回看面板高度和输入栏间距。
+- ql-20260624-004-c8a2 | 优化 /settings/api-keys 页面和 API Key 创建弹窗：统一页面容器、标题区、卡片、状态和空态样式，补充统计概览与表格密度整理。
 
 <!-- MANUAL_NOTES_END -->

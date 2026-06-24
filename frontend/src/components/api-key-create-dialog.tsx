@@ -1,7 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import { Check, ClipboardCopy, KeyRound, ShieldAlert } from "lucide-react";
 
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api";
@@ -54,106 +63,152 @@ export function ApiKeyCreateDialog({ onCreated, onClose }: Props) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // clipboard API 在非 HTTPS 不可用，忽略
+      setError("复制失败，请手动选择明文复制");
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-lg rounded-lg border bg-background p-5 shadow-lg">
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-xl">
         {phase === "form" && (
           <>
-            <h2 className="text-base font-semibold">签发 API 密钥</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              为守护进程签发长期凭证。明文仅在签发后显示一次，请妥善保存。
-            </p>
+            <DialogHeader>
+              <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+                <KeyRound className="h-5 w-5" />
+              </div>
+              <DialogTitle>签发 API 密钥</DialogTitle>
+              <DialogDescription>
+                为守护进程签发长期凭证。明文仅在签发后显示一次，请妥善保存。
+              </DialogDescription>
+            </DialogHeader>
 
-            <div className="mt-4 space-y-3">
+            <div className="space-y-4">
               <div>
-                <label className="text-[11px] text-muted-foreground">名称（便于识别用途）</label>
+                <label className="text-xs font-medium text-muted-foreground">
+                  名称
+                </label>
                 <Input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="例如 my-macbook-daemon"
-                  className="mt-0.5"
+                  className="mt-1"
                   maxLength={100}
                 />
               </div>
               <div>
-                <label className="text-[11px] text-muted-foreground">
-                  过期天数（留空 = 永不过期）
+                <label className="text-xs font-medium text-muted-foreground">
+                  过期天数
                 </label>
                 <Input
                   type="number"
                   min={1}
                   value={expiresDays}
                   onChange={(e) => setExpiresDays(e.target.value)}
-                  placeholder="例如 90"
-                  className="mt-0.5"
+                  placeholder="留空表示永不过期，例如 90"
+                  className="mt-1"
                 />
               </div>
               {error && (
-                <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
+                <div className="rounded-lg border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
                   {error}
                 </div>
               )}
             </div>
 
-            <div className="mt-5 flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={onClose} disabled={issuing}>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose} disabled={issuing}>
                 取消
               </Button>
-              <Button size="sm" onClick={handleSubmit} disabled={issuing || !name.trim()}>
-                {issuing ? "签发中…" : "签发"}
+              <Button onClick={handleSubmit} disabled={issuing || !name.trim()}>
+                {issuing ? "签发中..." : "签发"}
               </Button>
-            </div>
+            </DialogFooter>
           </>
         )}
 
         {phase === "plaintext" && issued && (
           <>
-            <h2 className="text-base font-semibold">API 密钥已签发</h2>
-            <div className="mt-3 rounded border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              ⚠️ 这是该 Key 的唯一一次明文显示。关闭后将无法再次查看，请立即复制保存。
+            <DialogHeader>
+              <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-amber-50 text-amber-700">
+                <ShieldAlert className="h-5 w-5" />
+              </div>
+              <DialogTitle>API 密钥已签发</DialogTitle>
+              <DialogDescription>
+                这是该 Key 的唯一一次明文展示。关闭后将无法再次查看。
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                请立即复制并保存到安全位置，不要把明文写入日志、聊天或代码仓库。
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">
+                  明文密钥
+                </label>
+                <div className="mt-1 flex gap-2">
+                  <code className="min-w-0 flex-1 overflow-x-auto rounded-md border bg-muted px-3 py-2 text-xs">
+                    {issued.plaintext}
+                  </code>
+                  <Button variant="outline" onClick={handleCopy} className="shrink-0 gap-1">
+                    {copied ? (
+                      <Check className="h-4 w-4" />
+                    ) : (
+                      <ClipboardCopy className="h-4 w-4" />
+                    )}
+                    {copied ? "已复制" : "复制"}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid gap-3 rounded-lg border bg-muted/30 p-3 text-xs sm:grid-cols-3">
+                <MetaItem label="名称" value={issued.name} />
+                <MetaItem label="前缀" value={`${issued.key_prefix}...`} code />
+                <MetaItem
+                  label="过期"
+                  value={
+                    issued.expires_at
+                      ? new Date(issued.expires_at).toLocaleString("zh-CN")
+                      : "永不过期"
+                  }
+                />
+              </div>
+
+              {error && (
+                <div className="rounded-lg border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
+                  {error}
+                </div>
+              )}
             </div>
 
-            <div className="mt-3">
-              <label className="text-[11px] text-muted-foreground">明文（一次性）</label>
-              <div className="mt-1 flex gap-2">
-                <code className="flex-1 overflow-x-auto rounded border bg-muted px-2 py-1.5 text-xs">
-                  {issued.plaintext}
-                </code>
-                <Button size="sm" onClick={handleCopy}>
-                  {copied ? "已复制" : "复制"}
-                </Button>
-              </div>
-            </div>
-
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-              <div>
-                <span className="text-muted-foreground">名称：</span>
-                {issued.name}
-              </div>
-              <div>
-                <span className="text-muted-foreground">前缀：</span>
-                <code>{issued.key_prefix}…</code>
-              </div>
-              <div>
-                <span className="text-muted-foreground">过期：</span>
-                {issued.expires_at
-                  ? new Date(issued.expires_at).toLocaleString("zh-CN")
-                  : "永不过期"}
-              </div>
-            </div>
-
-            <div className="mt-5 flex justify-end">
-              <Button size="sm" onClick={onClose}>
-                我已保存，关闭
-              </Button>
-            </div>
+            <DialogFooter>
+              <Button onClick={onClose}>我已保存，关闭</Button>
+            </DialogFooter>
           </>
         )}
-      </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function MetaItem({
+  label,
+  value,
+  code = false,
+}: {
+  label: string;
+  value: string;
+  code?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="text-muted-foreground">{label}</div>
+      {code ? (
+        <code className="mt-0.5 block truncate text-foreground">{value}</code>
+      ) : (
+        <div className="mt-0.5 truncate font-medium text-foreground">{value}</div>
+      )}
     </div>
   );
 }

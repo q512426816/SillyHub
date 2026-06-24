@@ -37,15 +37,6 @@ export async function importSpecWorkspace(
   );
 }
 
-export async function syncSpecWorkspace(
-  workspaceId: string,
-): Promise<SpecWorkspace> {
-  return apiFetch<SpecWorkspace>(
-    `/api/workspaces/${workspaceId}/spec-workspace/sync`,
-    { method: "POST" },
-  );
-}
-
 export interface BootstrapResult {
   agent_run_id: string;
   stream_url: string;

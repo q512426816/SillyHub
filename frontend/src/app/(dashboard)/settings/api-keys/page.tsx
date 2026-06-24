@@ -1,19 +1,38 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { Ban, Clock3, KeyRound, Plus, RefreshCw, ShieldCheck } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { ApiKeyCreateDialog } from "@/components/api-key-create-dialog";
+import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
+import { EmptyState } from "@/components/ui/empty-state";
+import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
+import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import { listApiKeys, revokeApiKey, type ApiKeyRead } from "@/lib/api-keys";
+import { cn } from "@/lib/utils";
 
-function StatusBadge({ k }: { k: ApiKeyRead }) {
-  if (k.revoked_at) return <Badge variant="destructive">已吊销</Badge>;
-  if (k.expires_at && new Date(k.expires_at) <= new Date())
-    return <Badge variant="warning">已过期</Badge>;
-  return <Badge variant="success">活跃</Badge>;
+type ApiKeyStatus = {
+  label: string;
+  kind: StatusKind;
+};
+
+function getKeyStatus(k: ApiKeyRead): ApiKeyStatus {
+  if (k.revoked_at) return { label: "已吊销", kind: "error" };
+  if (k.expires_at && new Date(k.expires_at) <= new Date()) {
+    return { label: "已过期", kind: "warning" };
+  }
+  return { label: "活跃", kind: "success" };
+}
+
+function formatDateTime(value: string | null): string {
+  if (!value) return "从未使用";
+  return new Date(value).toLocaleString("zh-CN");
+}
+
+function formatExpiry(value: string | null): string {
+  return value ? new Date(value).toLocaleString("zh-CN") : "永不过期";
 }
 
 export default function ApiKeysSettingsPage() {
@@ -38,9 +57,24 @@ export default function ApiKeysSettingsPage() {
     void load();
   }, [load]);
 
+  const stats = useMemo(() => {
+    const now = Date.now();
+    const active = keys.filter(
+      (k) =>
+        !k.revoked_at &&
+        (!k.expires_at || new Date(k.expires_at).getTime() > now),
+    ).length;
+    const expired = keys.filter(
+      (k) => !k.revoked_at && k.expires_at && new Date(k.expires_at).getTime() <= now,
+    ).length;
+    const revoked = keys.filter((k) => k.revoked_at).length;
+    return { total: keys.length, active, expired, revoked };
+  }, [keys]);
+
   const handleRevoke = async (k: ApiKeyRead) => {
-    if (!confirm(`确定吊销 API 密钥 "${k.name}"？吊销后使用该密钥的守护进程将立即下线。`))
+    if (!confirm(`确定吊销 API 密钥 "${k.name}"？吊销后使用该密钥的守护进程将立即下线。`)) {
       return;
+    }
     try {
       await revokeApiKey(k.id);
       await load();
@@ -50,97 +84,132 @@ export default function ApiKeysSettingsPage() {
   };
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <div className="text-xs text-muted-foreground">
+    <PageContainer className="gap-5">
+      <PageHeader
+        title="API 密钥"
+        subtitle={
+          <span>
             <Link href="/settings" className="hover:underline">
               设置
-            </Link>{" "}
-            / API 密钥
-          </div>
-          <h1 className="mt-0.5">API 密钥</h1>
-          <p className="text-xs text-muted-foreground">
-            长期凭证供守护进程进程使用。明文仅在签发时显示一次。
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setShowCreate(true)}>
-          + 签发 API 密钥
-        </Button>
-      </header>
+            </Link>
+            <span className="px-1 text-muted-foreground/60">/</span>
+            为守护进程签发长期凭证，明文仅在创建时显示一次
+          </span>
+        }
+        actions={
+          <>
+            <Button
+              variant="outline"
+              size="lg"
+              onClick={() => void load()}
+              disabled={loading}
+              className="gap-2"
+            >
+              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+              刷新
+            </Button>
+            <Button size="lg" onClick={() => setShowCreate(true)} className="gap-2">
+              <Plus className="h-4 w-4" />
+              签发 API 密钥
+            </Button>
+          </>
+        }
+      />
 
       {pageError && (
-        <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
+        <div className="rounded-lg border border-destructive/30 bg-red-50 px-4 py-3 text-sm text-destructive">
           {pageError}
         </div>
       )}
 
-      {loading ? (
-        <p className="py-8 text-center text-xs text-muted-foreground">加载中…</p>
-      ) : keys.length === 0 ? (
-        <div className="rounded-md border bg-card p-8 text-center">
-          <p className="text-sm">还没有 API 密钥</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            签发后可在{" "}
-            <Link href="/runtimes" className="underline">
-              /runtimes
-            </Link>{" "}
-            页面看到带 --api-key 的启动命令。
-          </p>
-        </div>
-      ) : (
-        <div className="rounded-md border bg-card">
-          <table>
-            <thead>
-              <tr>
-                <th>名称</th>
-                <th>前缀</th>
-                <th>状态</th>
-                <th>最近使用</th>
-                <th>创建时间</th>
-                <th>过期</th>
-                <th className="text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {keys.map((k) => (
-                <tr key={k.id}>
-                  <td className="text-xs font-medium">{k.name}</td>
-                  <td>
-                    <code className="text-[11px]">{k.key_prefix}…</code>
-                  </td>
-                  <td>
-                    <StatusBadge k={k} />
-                  </td>
-                  <td className="text-[11px] text-muted-foreground">
-                    {k.last_used_at
-                      ? new Date(k.last_used_at).toLocaleString("zh-CN")
-                      : "—"}
-                  </td>
-                  <td className="text-[11px] text-muted-foreground">
-                    {new Date(k.created_at).toLocaleString("zh-CN")}
-                  </td>
-                  <td className="text-[11px] text-muted-foreground">
-                    {k.expires_at
-                      ? new Date(k.expires_at).toLocaleString("zh-CN")
-                      : "永不过期"}
-                  </td>
-                  <td className="text-right">
-                    {!k.revoked_at && (
-                      <button
-                        className="text-[11px] text-destructive hover:underline"
-                        onClick={() => void handleRevoke(k)}
-                      >
-                        吊销
-                      </button>
-                    )}
-                  </td>
+      <div className="grid gap-3 md:grid-cols-4">
+        <StatCard icon={<KeyRound className="h-4 w-4" />} label="全部密钥" value={stats.total} />
+        <StatCard icon={<ShieldCheck className="h-4 w-4" />} label="活跃" value={stats.active} tone="success" />
+        <StatCard icon={<Clock3 className="h-4 w-4" />} label="已过期" value={stats.expired} tone="warning" />
+        <StatCard icon={<Ban className="h-4 w-4" />} label="已吊销" value={stats.revoked} tone="error" />
+      </div>
+
+      <SectionCard title="密钥列表" bodyPadding="p-0">
+        {loading ? (
+          <div className="px-6 py-10 text-center text-sm text-muted-foreground">加载中...</div>
+        ) : keys.length === 0 ? (
+          <EmptyState
+            icon={<KeyRound className="h-5 w-5" />}
+            title="还没有 API 密钥"
+            description={
+              <span>
+                签发后可在{" "}
+                <Link href="/runtimes" className="underline">
+                  /runtimes
+                </Link>{" "}
+                页面复制带 --api-key 的守护进程启动命令。
+              </span>
+            }
+            action={
+              <Button size="sm" onClick={() => setShowCreate(true)} className="gap-1">
+                <Plus className="h-3.5 w-3.5" />
+                签发密钥
+              </Button>
+            }
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                  <th className="px-4 py-3 font-semibold">名称</th>
+                  <th className="px-4 py-3 font-semibold">前缀</th>
+                  <th className="px-4 py-3 font-semibold">状态</th>
+                  <th className="px-4 py-3 font-semibold">最近使用</th>
+                  <th className="px-4 py-3 font-semibold">创建时间</th>
+                  <th className="px-4 py-3 font-semibold">过期时间</th>
+                  <th className="px-4 py-3 text-right font-semibold">操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {keys.map((k) => {
+                  const status = getKeyStatus(k);
+                  return (
+                    <tr key={k.id} className="border-b last:border-0 hover:bg-muted/25">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-foreground">{k.name}</div>
+                        <div className="mt-0.5 text-[11px] text-muted-foreground">{k.id}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <code className="rounded bg-muted px-2 py-1 text-xs">{k.key_prefix}...</code>
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge kind={status.kind}>{status.label}</StatusBadge>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
+                        {formatDateTime(k.last_used_at)}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
+                        {formatDateTime(k.created_at)}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
+                        {formatExpiry(k.expires_at)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {!k.revoked_at && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            onClick={() => void handleRevoke(k)}
+                          >
+                            吊销
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
 
       {showCreate && (
         <ApiKeyCreateDialog
@@ -150,6 +219,38 @@ export default function ApiKeysSettingsPage() {
           onClose={() => setShowCreate(false)}
         />
       )}
+    </PageContainer>
+  );
+}
+
+function StatCard({
+  icon,
+  label,
+  value,
+  tone = "neutral",
+}: {
+  icon: ReactNode;
+  label: string;
+  value: number;
+  tone?: "neutral" | "success" | "warning" | "error";
+}) {
+  const toneClass = {
+    neutral: "bg-blue-50 text-blue-700",
+    success: "bg-emerald-50 text-emerald-700",
+    warning: "bg-amber-50 text-amber-700",
+    error: "bg-red-50 text-red-700",
+  }[tone];
+  return (
+    <div className="rounded-lg border bg-card p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-xs text-muted-foreground">{label}</div>
+          <div className="mt-1 text-2xl font-semibold tracking-tight">{value}</div>
+        </div>
+        <div className={cn("flex h-9 w-9 items-center justify-center rounded-md", toneClass)}>
+          {icon}
+        </div>
+      </div>
     </div>
   );
 }

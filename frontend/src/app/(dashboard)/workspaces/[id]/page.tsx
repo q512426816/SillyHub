@@ -26,7 +26,6 @@ import {
   generateProjects,
   getSpecWorkspace,
   importSpecWorkspace,
-  syncSpecWorkspace,
   type SpecWorkspace,
 } from "@/lib/spec-workspaces";
 import { getRuntimeProgress } from "@/lib/runtime";
@@ -114,7 +113,6 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const [archivedChanges, setArchivedChanges] = useState<number>(0);
   const [currentStage, setCurrentStage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
   const [importing, setImporting] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -271,19 +269,6 @@ export default function WorkspaceDetailPage({ params }: Props) {
 
   /* ---- Other handlers ---- */
 
-  const handleSync = async () => {
-    setSyncing(true);
-    setPageError(null);
-    try {
-      const updated = await syncSpecWorkspace(workspaceId);
-      setSpecWs(updated);
-    } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "同步失败");
-    } finally {
-      setSyncing(false);
-    }
-  };
-
   const handleImport = async () => {
     setImporting(true);
     setPageError(null);
@@ -437,7 +422,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
                   size="sm"
                   variant="outline"
                   onClick={handleBootstrap}
-                  disabled={bootstrapping || !!activeBootstrapRunId || syncing || importing}
+                  disabled={bootstrapping || !!activeBootstrapRunId || importing}
                 >
                   {bootstrapping
                     ? "初始化进行中…"
@@ -446,20 +431,12 @@ export default function WorkspaceDetailPage({ params }: Props) {
                       : "初始化"}
                 </Button>
               )}
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={handleSync}
-                disabled={syncing || importing || bootstrapping}
-              >
-                {syncing ? "同步中…" : "同步"}
-              </Button>
               {!specWs.repo_sillyspec_path && (
                 <Button
                   size="sm"
                   variant="ghost"
                   onClick={handleImport}
-                  disabled={syncing || importing || bootstrapping}
+                  disabled={importing || bootstrapping}
                 >
                   {importing ? "导入中…" : "导入"}
                 </Button>

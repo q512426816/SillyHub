@@ -45,4 +45,8 @@ DaemonDirBrowser: load(listDir) → enter(join) / goUp(parent) / selectCurrent
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+
+## 变更索引
+- ql-20260624-004-c8a2 | ApiKeyCreateDialog 改用统一 Dialog 外壳，优化创建表单与一次性明文展示布局。
+
 <!-- MANUAL_NOTES_END -->

@@ -37,4 +37,8 @@ created_at: 2026-06-24T01:02:00
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+
+## 变更索引
+- ql-20260624-004-c8a2 | 优化 /settings/api-keys 页面：统一 PageHeader、SectionCard、StatusBadge、EmptyState，增加统计概览并整理表格操作区。
+
 <!-- MANUAL_NOTES_END -->
