@@ -5,6 +5,7 @@
  * 故导出端点走独立 fetch + 浏览器触发保存。
  */
 import { getApiBaseUrl } from "@/lib/api";
+import { ensureFreshAccessToken } from "@/lib/token-refresh";
 import { useSession } from "@/stores/session";
 
 /**
@@ -74,30 +75,14 @@ export async function downloadExcel(
 
   // 401 → refresh + retry once(apiFetch 行为对齐)
   if (resp.status === 401) {
-    const { refreshToken, setTokens, hydrated } = useSession.getState();
-    if (refreshToken && hydrated) {
-      const refreshResp = await fetch(`${url.origin}/api/auth/refresh`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      });
-      if (refreshResp.ok) {
-        const refreshPayload = (await refreshResp.json().catch(() => null)) as {
-          access_token?: string | null;
-          refresh_token?: string | null;
-        } | null;
-        if (refreshPayload?.access_token) {
-          setTokens({
-            accessToken: refreshPayload.access_token,
-            refreshToken: refreshPayload.refresh_token ?? null,
-          });
-          // 用新 token 重试一次
-          resp = await doFetch(refreshPayload.access_token);
-        }
-      }
+    // 单飞刷新:与 apiFetch 共享同一 inflight,并发导出 + 普通 API 401 只发 1 次 refresh。
+    // 单飞成功后已写回 store,这里直接用返回的新 access token 重试。
+    const newToken = await ensureFreshAccessToken();
+    if (newToken) {
+      resp = await doFetch(newToken);
     }
 
-    // 仍然 401 → 清 session 跳 /login,与 apiFetch 行为对齐
+    // 仍然 401(单飞失败 / 二次 401)→ 清 session 跳 /login,与 apiFetch 行为对齐
     if (resp.status === 401) {
       useSession.getState().clear();
       if (typeof window !== "undefined") {

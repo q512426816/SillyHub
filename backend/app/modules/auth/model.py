@@ -114,6 +114,12 @@ class Session(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    # rotate 时刻:仅 refresh 正常轮换时由 service._mark_session_rotated 写入;
+    # logout 主动登出不写;grace 判定用 now - rotated_at < auth_refresh_grace_seconds。
+    rotated_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
 
 
 class Role(BaseModel, table=True):

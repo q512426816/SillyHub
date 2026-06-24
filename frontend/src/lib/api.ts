@@ -5,6 +5,7 @@
  * - Throws `ApiError` (with `code` / `details`) instead of plain `Error`.
  */
 import { useSession } from "@/stores/session";
+import { ensureFreshAccessToken } from "@/lib/token-refresh";
 
 /** Absolute backend URL — used only for SSR / direct server-side fetches. */
 const SERVER_API_BASE_URL = (
@@ -159,47 +160,22 @@ export async function apiFetch<T = unknown>(
       !String(finalHeaders["x-auth-retry"] ?? "").includes("1") &&
       !isAuthEndpoint(url.pathname)
     ) {
-      try {
-        const {
-          refreshToken,
-          setTokens,
-          hydrated,
-        } = useSession.getState();
-        if (refreshToken && hydrated) {
-          const refreshResp = await fetch(`${url.origin}/api/auth/refresh`, {
-            method: "POST",
-            headers: {
-              "content-type": "application/json",
-              "x-request-id": String(finalHeaders["x-request-id"]),
-            },
-            body: JSON.stringify({ refresh_token: refreshToken }),
-          });
-          const refreshText = await refreshResp.text();
-          const refreshPayload = refreshText ? safeJsonParse(refreshText) : null;
-
-          if (refreshResp.ok && refreshPayload && typeof refreshPayload === "object") {
-            const pair = refreshPayload as any;
-            setTokens({
-              accessToken: pair.access_token ?? null,
-              refreshToken: pair.refresh_token ?? null,
-            });
-            // Retry original call with new access token.
-            return apiFetch<T>(path, {
-              ...options,
-              headers: { ...headers, "x-auth-retry": "1" },
-              json,
-              query,
-            });
-          }
-        } else if (!hydrated) {
-          // Not hydrated yet; don't guess refresh token.
-        }
-      } catch {
-        // fallthrough to original error throw
+      // 单飞刷新:并发 401 风暴由 token-refresh 模块级 inflight 保证只发 1 次
+      // POST /api/auth/refresh 并写回 store;未登录/未 hydrate/refresh 失败均返回 null。
+      const newToken = await ensureFreshAccessToken();
+      if (newToken) {
+        // 拿到新 access token,带 x-auth-retry:1 重试一次(防单请求无限重试)。
+        // 新 token 已由 ensureFreshAccessToken() 写回 store,重试时 apiFetch 内部从 store
+        // 读取并组装 Authorization 头(与原内联 refresh 后 setTokens 再重试的行为一致)。
+        return apiFetch<T>(path, {
+          ...options,
+          headers: { ...headers, "x-auth-retry": "1" },
+          json,
+          query,
+        });
       }
-
+      // 单飞失败(未登录 / refresh 失败 / 未 hydrate):清 session + 跳 login,行为与原实现一致。
       useSession.getState().clear();
-
       if (typeof window !== "undefined") {
         window.location.href = "/login";
       }

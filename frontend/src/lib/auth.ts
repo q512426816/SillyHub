@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api";
+import { ensureFreshAccessToken } from "@/lib/token-refresh";
 import { useSession, type SessionTokens } from "@/stores/session";
 
 export interface TokenPair {
@@ -58,17 +59,16 @@ export async function refreshTokens(): Promise<SessionTokens> {
     throw new Error("Missing refresh token");
   }
 
-  const pair = await apiFetch<TokenPair>("/api/auth/refresh", {
-    method: "POST",
-    json: { refresh_token: refreshToken },
-  });
+  // 复用 token-refresh 模块级 inflight,与 apiFetch / ppm-export 三处共用同一次刷新,
+  // 避免本函数与并发 401 各发一次 refresh 触发 reuse-attack。
+  const newAccess = await ensureFreshAccessToken();
+  if (!newAccess) {
+    throw new Error("刷新失败:请重新登录");
+  }
 
-  const tokens = {
-    accessToken: pair.access_token,
-    refreshToken: pair.refresh_token,
-  };
-  useSession.getState().setTokens(tokens);
-  return tokens;
+  // 单飞成功已写回 store,从 store 读回完整 token 对,保持 SessionTokens 返回契约。
+  const { accessToken, refreshToken: newRefresh } = useSession.getState();
+  return { accessToken, refreshToken: newRefresh };
 }
 
 export async function logout(): Promise<void> {

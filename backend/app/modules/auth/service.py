@@ -17,7 +17,7 @@ Refresh strategy (references/15 §3):
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,6 +49,19 @@ log = get_logger(__name__)
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _as_utc(value: datetime) -> datetime:
+    """把可能 naive 的 datetime 视为 UTC 并补 tzinfo。
+
+    Session 的时间字段在 model 层声明为 ``DateTime(timezone=True)``,但 SQLite
+    测试环境读回会丢失 tzinfo(Python datetime 变 naive),生产 PostgreSQL 保留
+    aware。grace 判定需要与 ``_utc_now()``(aware UTC)做差,naive 混入会抛
+    ``TypeError``。统一在此处兜底:naive 视为 UTC(本服务所有时间戳一律 UTC 写入)。
+    """
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value
 
 
 class AuthService:
@@ -100,11 +113,15 @@ class AuthService:
         user_agent: str | None,
         ip: str | None,
     ) -> tuple[User, TokenPair]:
-        user, session = await self._consume_refresh_token(refresh_token)
-        await self._mark_session_revoked(session)
+        user, session, is_grace = await self._consume_refresh_token(refresh_token)
+        if not is_grace:
+            # 正常 rotate:写 revoked_at + rotated_at(grace 判定锚点)。
+            # is_grace=True 时 session 已 revoked+rotated,跳过避免刷新 rotated_at
+            # 导致 grace 窗口被无限续期(关键防线)。
+            await self._mark_session_rotated(session)
         pair = await self._issue_token_pair(user, user_agent=user_agent, ip=ip)
         await self._db.commit()
-        log.info("auth.refresh.success", user_id=str(user.id))
+        log.info("auth.refresh.success", user_id=str(user.id), grace=is_grace)
         return user, pair
 
     async def logout_session_by_refresh(self, *, refresh_token: str) -> None:
@@ -114,7 +131,7 @@ class AuthService:
         idempotent — clients regularly retry logout on network blips.
         """
         try:
-            _, session = await self._consume_refresh_token(refresh_token)
+            _, session, _ = await self._consume_refresh_token(refresh_token)
         except (AuthTokenInvalid, AuthRefreshReused, AuthUserInactive):
             return
         await self._mark_session_revoked(session)
@@ -194,7 +211,14 @@ class AuthService:
             refresh_expires_in=int((expires_at - _utc_now()).total_seconds()),
         )
 
-    async def _consume_refresh_token(self, refresh_token: str) -> tuple[User, SessionRow]:
+    async def _consume_refresh_token(self, refresh_token: str) -> tuple[User, SessionRow, bool]:
+        """消费 refresh token,返回 (user, session, is_grace)。
+
+        is_grace=True 表示命中宽限续期——session 已 revoked+rotated 且在
+        ``auth_refresh_grace_seconds`` 窗口内,上层 :meth:`refresh` 应跳过
+        :meth:`_mark_session_rotated` 直接签发新对(否则会刷新 rotated_at
+        把 grace 窗口无限续期)。
+        """
         # We can't index by the plain token (it's bcrypt-hashed) so we walk
         # the recent live sessions of *anyone* and pick the one whose hash
         # verifies. For V1 (single host, <1k active sessions) this is fine;
@@ -212,20 +236,34 @@ class AuthService:
                 user = await self._db.get(User, session.user_id)
                 if user is None or user.deleted_at is not None or user.status != "active":
                     raise AuthUserInactive("User account is no longer active.")
-                return user, session
+                return user, session, False
 
-        # Maybe this is a *revoked* token for someone — reuse attack.
-        reused = await self._lookup_revoked_session_owner(refresh_token)
-        if reused is not None:
-            await self.revoke_all_user_sessions(user_id=reused)
+        # live 未命中 → 查 revoked session(可能是 grace 续期,也可能是重放攻击)。
+        revoked = await self._find_revoked_session(refresh_token)
+        if revoked is not None:
+            user = await self._db.get(User, revoked.user_id)
+            if user is None or user.deleted_at is not None or user.status != "active":
+                raise AuthUserInactive("User account is no longer active.")
+            # grace 判定:rotated_at 存在且在窗口内 → 宽限续期,不吊销其它 session。
+            # rotated_at is None(非 rotate 吊销,如 logout/admin 吊销)短路到重放分支。
+            # grace=0 时 timedelta(seconds=0),elapsed < 0s 恒 False,退化为旧行为。
+            if revoked.rotated_at is not None:
+                rotated_at = _as_utc(revoked.rotated_at)
+                if (_utc_now() - rotated_at) < timedelta(
+                    seconds=self._settings.auth_refresh_grace_seconds
+                ):
+                    return user, revoked, True
+            # 超 grace 或非 rotate 吊销 → 重放攻击,吊销该用户全部 session。
+            await self.revoke_all_user_sessions(user_id=revoked.user_id)
             raise AuthRefreshReused(
                 "Refresh token has already been used; all sessions revoked.",
-                details={"user_id": str(reused)},
+                details={"user_id": str(revoked.user_id)},
             )
 
         raise AuthTokenInvalid("Refresh token is not recognised.")
 
-    async def _lookup_revoked_session_owner(self, refresh_token: str) -> uuid.UUID | None:
+    async def _find_revoked_session(self, refresh_token: str) -> SessionRow | None:
+        """查匹配 refresh token 的已吊销 session(返回整行,以便读 rotated_at)。"""
         stmt = (
             select(SessionRow)
             .where(col(SessionRow.revoked_at).is_not(None))
@@ -234,11 +272,24 @@ class AuthService:
         )
         for session in (await self._db.execute(stmt)).scalars().all():
             if verify_refresh_token(refresh_token, session.refresh_token_hash):
-                return session.user_id
+                return session
         return None
 
     async def _mark_session_revoked(self, session: SessionRow) -> None:
         session.revoked_at = _utc_now()
+        self._db.add(session)
+        await self._db.flush()
+
+    async def _mark_session_rotated(self, session: SessionRow) -> None:
+        """Rotate 专用:同时写 revoked_at + rotated_at。
+
+        区别于 :meth:`_mark_session_revoked`(logout 用,只写 revoked_at):
+        ``rotated_at`` 是 grace 判定的锚点,只有 refresh rotate 路径才写,
+        主动登出的 session 不参与 grace 续期(契约表 logout 行)。
+        """
+        now = _utc_now()
+        session.revoked_at = now
+        session.rotated_at = now
         self._db.add(session)
         await self._db.flush()
 

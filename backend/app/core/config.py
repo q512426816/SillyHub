@@ -43,8 +43,22 @@ class Settings(BaseSettings):
     commit_sha: str | None = None
 
     # ── Auth (task-04a) ────────────────────────────────────────────────
-    auth_access_ttl_minutes: int = Field(15, ge=1, le=24 * 60)
+    auth_access_ttl_minutes: int = Field(
+        30,
+        ge=1,
+        le=24 * 60,
+        description="Access token 有效期(分钟)。默认 30min(D-003@v1:15→30,降低 401 刷新频率)。",
+    )
     auth_refresh_ttl_days: int = Field(14, ge=1, le=90)
+    auth_refresh_grace_seconds: int = Field(
+        60,
+        ge=0,
+        le=600,
+        description=(
+            "Refresh token 轮换宽限窗口(秒)。rotate 后窗口内重复提交换新而非 revoke_all"
+            "(并发刷新误杀兜底)。0=退化为旧行为。D-002@v1。"
+        ),
+    )
     auth_bcrypt_rounds: int = Field(12, ge=4, le=15)
     platform_bootstrap_admin_email: str | None = None
     platform_bootstrap_admin_password: str | None = Field(default=None, min_length=8)

@@ -48,6 +48,7 @@ import {
   type MenuPermissionGroup,
 } from "@/lib/menu-permissions";
 import { useSession } from "@/stores/session";
+import { ensureFreshAccessToken, decodeJwtExp } from "@/lib/token-refresh";
 import { visibleMenusBySection } from "@/lib/permission";
 
 /**
@@ -139,6 +140,46 @@ export function AppShell({ children }: { children: ReactNode }) {
       // ignore storage errors
     }
   }, [collapsed]);
+
+  /**
+   * 主动刷新定时器(D-004@v1 / FR-06):
+   * 每 60s tick 一次,读当前 accessToken,解析 exp/iat;
+   * 若剩余有效期 < 1/3 TTL(30min TTL → 约 10min)则调单飞锁 ensureFreshAccessToken() 续期。
+   * - token 缺失 / decode 失败:静默跳过(不抛、不跳转)。
+   * - ensureFreshAccessToken 失败:catch 吞掉(401 由 api 层处理,主动刷新不负责登录态清理)。
+   * 依赖数组空:只在挂载时启定时器;tick 内用 getState() 读最新 token,避免闭包旧值。
+   */
+  useEffect(() => {
+    const REFRESH_INTERVAL_MS = 60_000; // 每分钟校验一次
+
+    const timer = setInterval(() => {
+      const { accessToken } = useSession.getState();
+      // 未登录 / 已登出:无 token 可续,静默跳过。
+      if (!accessToken) return;
+
+      const claims = decodeJwtExp(accessToken);
+      // token 非 JWT / 损坏 / 缺 exp|iat:静默跳过(decodeJwtExp 返回 null 不抛)。
+      if (!claims) return;
+
+      const now = Math.floor(Date.now() / 1000); // 秒级,与 JWT exp/iat 对齐
+      const ttl = claims.exp - claims.iat; // token 总有效期(秒)
+      const remain = claims.exp - now; // 剩余有效期(秒)
+
+      // remain < ttl/3:剩余不足 1/3 TTL → 触发主动续期。
+      // (30min TTL → 约 10min;15min TTL → 约 5min;完全由 token 自带 exp/iat 推算,不硬编码)
+      if (remain > 0 && remain < ttl / 3) {
+        // 复用单飞锁:与 task-08 的 401 被动刷新共享 inflight,不会并发发起两次 refresh。
+        // 失败静默吞掉 —— 主动刷新不负责 clear()/跳转 /login,那是 api 层 401 分支的职责。
+        ensureFreshAccessToken().catch(() => {
+          /* 静默:刷新失败不跳转,等真正 401 时由 api 层处理 */
+        });
+      }
+    }, REFRESH_INTERVAL_MS);
+
+    // 组件卸载时清掉定时器,避免泄漏 / 卸载后仍发请求。
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // 空依赖:只在挂载时启一次;token 变化靠 getState() 动态读取
 
   const toggleCollapsed = () => setCollapsed((prev) => !prev);
 
