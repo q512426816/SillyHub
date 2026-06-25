@@ -5,8 +5,15 @@ import { apiFetch, getApiBaseUrl } from "@/lib/api";
 import { useSession } from "@/stores/session";
 import type { AgentRunLogEntry } from "@/lib/agent";
 
+export interface OwnerRead {
+  user_id: string | null;
+  email: string | null;
+  display_name: string | null;
+}
+
 export interface DaemonRuntimeRead {
   id: string;
+  display_alias: string | null;
   name: string | null;
   provider: string | null;
   version: string | null;
@@ -15,12 +22,53 @@ export interface DaemonRuntimeRead {
   status: string | null; // online, offline, maintenance, disabled
   last_heartbeat_at: string | null;
   capabilities: Record<string, any> | null;
+  owner: OwnerRead | null;
   created_at: string;
   updated_at: string;
 }
 
 export async function listDaemonRuntimes(): Promise<DaemonRuntimeRead[]> {
   return apiFetch<DaemonRuntimeRead[]>("/api/daemon/runtimes");
+}
+
+// task-06 / FR-04 / D-006@v1：平台管理员全局分页视图。旧 listDaemonRuntimes()
+// 仍请求 /api/daemon/runtimes 返回数组（FR-06 兼容）。
+export interface DaemonRuntimeListParams {
+  q?: string;
+  type?: string;
+  status?: string;
+  user_id?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface DaemonRuntimeListResponse {
+  items: DaemonRuntimeRead[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface UpdateDaemonRuntimeInput {
+  display_alias?: string | null;
+}
+
+export async function listDaemonRuntimesPage(
+  params?: DaemonRuntimeListParams,
+): Promise<DaemonRuntimeListResponse> {
+  return apiFetch<DaemonRuntimeListResponse>("/api/daemon/runtimes/page", {
+    query: params as Record<string, string | number | undefined>,
+  });
+}
+
+export async function updateDaemonRuntime(
+  runtimeId: string,
+  input: UpdateDaemonRuntimeInput,
+): Promise<DaemonRuntimeRead> {
+  return apiFetch<DaemonRuntimeRead>(
+    `/api/daemon/runtimes/${encodeURIComponent(runtimeId)}`,
+    { method: "PATCH", json: input },
+  );
 }
 
 /**

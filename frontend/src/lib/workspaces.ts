@@ -24,9 +24,16 @@ export interface ScanResult {
 
 export type WorkspaceStatus = "active" | "archived" | "deleted";
 
+export interface OwnerRead {
+  user_id: string | null;
+  email: string | null;
+  display_name: string | null;
+}
+
 export interface Workspace {
   id: string;
   name: string;
+  display_alias: string | null;
   slug: string;
   root_path: string;
   // task-01 / 2026-06-18-workspace-client-path：路径来源
@@ -53,6 +60,7 @@ export interface Workspace {
   updated_at: string;
   last_scanned_at: string | null;
   deleted_at: string | null;
+  owner: OwnerRead | null;
 }
 
 export interface WorkspaceListResponse {
@@ -137,8 +145,23 @@ export async function activateWorkspace(workspaceId: string): Promise<Workspace>
   });
 }
 
-export async function listWorkspaces(): Promise<WorkspaceListResponse> {
-  return apiFetch<WorkspaceListResponse>("/api/workspaces");
+// task-06 / FR-04：服务端筛选分页。无参调用保持 {items,total} 兼容。
+export interface WorkspaceListParams {
+  q?: string;
+  type?: string;
+  status?: string;
+  user_id?: string;
+  limit?: number;
+  offset?: number;
+  include_deleted?: boolean;
+}
+
+export async function listWorkspaces(
+  params?: WorkspaceListParams,
+): Promise<WorkspaceListResponse> {
+  return apiFetch<WorkspaceListResponse>("/api/workspaces", {
+    query: params as Record<string, string | number | boolean | undefined>,
+  });
 }
 
 export interface CreateWorkspaceInput {
@@ -161,6 +184,7 @@ export async function createWorkspace(input: CreateWorkspaceInput): Promise<Work
 export interface UpdateWorkspaceInput {
   name?: string;
   slug?: string;
+  display_alias?: string | null;
   repo_url?: string | null;
   default_branch?: string | null;
   // Default agent provider; omit to keep, null to clear (FR-02,
