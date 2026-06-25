@@ -1,9 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Table, type TableProps, Tag } from "antd";
+import { type TableProps, Tag } from "antd";
 
 import { AdminUserDrawer } from "@/components/admin-user-drawer";
+import {
+  DataTable,
+  PageContainer,
+  PageHeader,
+  SearchBar,
+  SearchBarActions,
+  SectionCard,
+} from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import {
@@ -338,7 +346,8 @@ export default function AdminUsersPage() {
   ];
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-5 px-6 py-6">
+    <PageContainer size="full">
+      <PageHeader title="用户管理" subtitle="平台用户账号、角色与登录管理" />
       {toast && (
         <div
           className={`rounded border px-3 py-2 text-xs ${
@@ -365,44 +374,47 @@ export default function AdminUsersPage() {
         </div>
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={searchInput}
-              onChange={(e) => handleSearchInput(e.target.value)}
-              placeholder="搜索 登录名 / 显示名…"
-              className={`w-72 ${inputCls}`}
-            />
-            <select
-              value={statusFilter}
-              onChange={(e) => handleStatusFilterChange(e.target.value as StatusFilter)}
-              className={`w-32 ${inputCls}`}
-              aria-label="状态筛选"
-            >
-              <option value="all">全部状态</option>
-              <option value="active">启用</option>
-              <option value="disabled">禁用</option>
-            </select>
-            <div className="ml-auto flex items-center gap-3">
-              <span className="text-xs text-muted-foreground">
-                共 {total} 个用户
-              </span>
-              <Button
-                size="sm"
-                disabled={!canWrite}
-                onClick={() => setDrawer({ open: true, mode: "create" })}
-                title={!canWrite ? "无 user:write 权限" : undefined}
+          <SectionCard bodyPadding="p-2">
+            <SearchBar>
+              <input
+                value={searchInput}
+                onChange={(e) => handleSearchInput(e.target.value)}
+                placeholder="搜索 登录名 / 显示名…"
+                className={`w-72 ${inputCls}`}
+              />
+              <select
+                value={statusFilter}
+                onChange={(e) => handleStatusFilterChange(e.target.value as StatusFilter)}
+                className={`w-32 ${inputCls}`}
+                aria-label="状态筛选"
               >
-                + 新建用户
-              </Button>
-            </div>
-          </div>
+                <option value="all">全部状态</option>
+                <option value="active">启用</option>
+                <option value="disabled">禁用</option>
+              </select>
+              <SearchBarActions>
+                <span className="text-xs text-muted-foreground">
+                  共 {total} 个用户
+                </span>
+                <Button
+                  size="sm"
+                  disabled={!canWrite}
+                  onClick={() => setDrawer({ open: true, mode: "create" })}
+                  title={!canWrite ? "无 user:write 权限" : undefined}
+                >
+                  + 新建用户
+                </Button>
+              </SearchBarActions>
+            </SearchBar>
+          </SectionCard>
 
-          <Table<UserRead>
+          <DataTable<UserRead>
             rowKey="id"
             columns={columns}
             dataSource={users}
             loading={loading}
             size="small"
+            bordered
             scroll={{ x: "max-content" }}
             pagination={{
               current: page,
@@ -416,7 +428,7 @@ export default function AdminUsersPage() {
                 setPageSize(s);
               },
             }}
-            locale={{ emptyText: "暂无用户" }}
+            emptyText="暂无用户"
           />
         </>
       )}
@@ -477,7 +489,7 @@ export default function AdminUsersPage() {
           onClose={() => setAuditDrawer(null)}
         />
       )}
-    </div>
+    </PageContainer>
   );
 }
 
