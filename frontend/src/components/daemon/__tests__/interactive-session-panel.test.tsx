@@ -587,6 +587,7 @@ describe("InteractiveSessionPanel", () => {
         output: "历史回答",
         status: "completed" as const,
         seenLogIds: new Set<string>(),
+        extraLogs: [],
       },
     ];
   }
