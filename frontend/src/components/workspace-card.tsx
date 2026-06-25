@@ -23,9 +23,16 @@ interface Props {
   workspace: Workspace;
   boundRuntime?: DaemonRuntimeRead | null;
   onChanged: () => void;
+  // task-08 / FR-03：别名编辑入口（由 WorkspacesPage 弹 modal）。
+  onEditAlias: (workspace: Workspace) => void;
 }
 
-export function WorkspaceCard({ workspace, boundRuntime, onChanged }: Props) {
+export function WorkspaceCard({
+  workspace,
+  boundRuntime,
+  onChanged,
+  onEditAlias,
+}: Props) {
   const [busy, setBusy] = useState<"rescan" | "delete" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,10 +72,20 @@ export function WorkspaceCard({ workspace, boundRuntime, onChanged }: Props) {
     <article className="flex flex-col rounded-md border bg-card">
       <header className="flex items-center justify-between border-b px-4 py-2.5">
         <div className="min-w-0">
-          <h3 className="truncate text-sm font-medium">{workspace.name}</h3>
+          <h3 className="truncate text-sm font-medium">
+            {workspace.display_alias ?? workspace.name}
+          </h3>
           <p className="truncate font-mono text-[11px] text-muted-foreground">
             {workspace.slug}
           </p>
+          {workspace.display_alias && workspace.display_alias !== workspace.name ? (
+            <p className="truncate text-[10px] text-muted-foreground">原名：{workspace.name}</p>
+          ) : null}
+          {workspace.owner ? (
+            <p className="truncate text-[10px] text-muted-foreground">
+              负责人：{workspace.owner.display_name ?? workspace.owner.email ?? "未记录"}
+            </p>
+          ) : null}
           {isDaemonClientWorkspace(workspace) && (
             <Badge variant="outline" className="mt-1 text-[10px]">
               {workspacePathSourceLabel(workspace.path_source)}
@@ -107,6 +124,14 @@ export function WorkspaceCard({ workspace, boundRuntime, onChanged }: Props) {
       )}
 
       <footer className="flex items-center justify-end gap-2 border-t px-4 py-2">
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => onEditAlias(workspace)}
+          disabled={busy !== null}
+        >
+          别名
+        </Button>
         <Link
           href={`/workspaces/${workspace.id}`}
           className="inline-flex h-7 items-center rounded border border-border px-2 text-xs text-foreground hover:bg-muted"
