@@ -1,0 +1,448 @@
+<!-- author: qinyi -->
+<!-- created_at: 2026-06-25T17:35:00 -->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>平台管理员全局守护进程与工作区管理 · 原型</title>
+  <style>
+    :root {
+      --blue-50: #eff6ff;
+      --blue-600: #2563eb;
+      --blue-700: #1d4ed8;
+      --cyan-500: #06b6d4;
+      --emerald-50: #ecfdf5;
+      --emerald-600: #059669;
+      --amber-50: #fffbeb;
+      --amber-600: #d97706;
+      --red-50: #fef2f2;
+      --red-600: #dc2626;
+      --slate-50: #f8fafc;
+      --slate-100: #f1f5f9;
+      --slate-200: #e2e8f0;
+      --slate-300: #cbd5e1;
+      --slate-500: #64748b;
+      --slate-600: #475569;
+      --slate-700: #334155;
+      --slate-900: #0f172a;
+      --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.05);
+      --shadow-md: 0 6px 18px rgb(15 23 42 / 0.08);
+      --radius: 8px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--slate-100);
+      color: var(--slate-700);
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 14px;
+    }
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    h1 {
+      margin: 0;
+      color: var(--slate-900);
+      font-size: 24px;
+    }
+    p { margin: 0; }
+    .muted { color: var(--slate-500); font-size: 12px; }
+    .tabs {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--slate-200);
+      border-radius: var(--radius);
+      background: #fff;
+      box-shadow: var(--shadow-sm);
+    }
+    .tab {
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--slate-600);
+      cursor: pointer;
+      padding: 8px 12px;
+      font-weight: 600;
+    }
+    .tab.active {
+      background: var(--blue-600);
+      color: white;
+    }
+    .toolbar {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr 1fr 1fr auto;
+      gap: 12px;
+      padding: 14px;
+      margin-bottom: 16px;
+      border: 1px solid var(--slate-200);
+      border-radius: var(--radius);
+      background: #fff;
+      box-shadow: var(--shadow-sm);
+    }
+    label {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--slate-500);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    input, select {
+      width: 100%;
+      height: 34px;
+      border: 1px solid var(--slate-300);
+      border-radius: 6px;
+      padding: 0 10px;
+      color: var(--slate-700);
+      background: #fff;
+    }
+    .button {
+      height: 34px;
+      border: 1px solid var(--slate-300);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--slate-700);
+      cursor: pointer;
+      font-weight: 600;
+      padding: 0 12px;
+    }
+    .button.primary {
+      border-color: var(--blue-600);
+      background: var(--blue-600);
+      color: white;
+    }
+    .button.ghost {
+      border-color: transparent;
+      background: var(--slate-50);
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .metric {
+      min-height: 82px;
+      border: 1px solid var(--slate-200);
+      border-radius: var(--radius);
+      background: #fff;
+      padding: 14px;
+      box-shadow: var(--shadow-sm);
+    }
+    .metric b {
+      display: block;
+      color: var(--slate-900);
+      font-size: 22px;
+      margin-top: 4px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .card {
+      display: flex;
+      min-height: 210px;
+      flex-direction: column;
+      border: 1px solid var(--slate-200);
+      border-radius: var(--radius);
+      background: #fff;
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+    }
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--slate-100);
+    }
+    .title {
+      color: var(--slate-900);
+      font-size: 16px;
+      font-weight: 700;
+    }
+    .subtitle {
+      margin-top: 3px;
+      color: var(--slate-500);
+      font-size: 12px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 24px;
+      border-radius: 999px;
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .badge::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+    .online, .active { background: var(--emerald-50); color: var(--emerald-600); }
+    .offline, .archived { background: var(--slate-100); color: var(--slate-600); }
+    .disabled, .deleted { background: var(--red-50); color: var(--red-600); }
+    .maintenance, .pending { background: var(--amber-50); color: var(--amber-600); }
+    .card-body {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      padding: 14px 16px;
+    }
+    .field-value {
+      min-width: 0;
+      color: var(--slate-900);
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .path {
+      grid-column: 1 / -1;
+      border-radius: 6px;
+      background: var(--slate-50);
+      padding: 8px 10px;
+      color: var(--slate-600);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .card-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: auto;
+      border-top: 1px solid var(--slate-100);
+      padding: 12px 16px;
+    }
+    .pager {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 16px;
+      padding: 12px 14px;
+      border: 1px solid var(--slate-200);
+      border-radius: var(--radius);
+      background: #fff;
+      box-shadow: var(--shadow-sm);
+    }
+    .pages { display: flex; gap: 4px; }
+    .page {
+      min-width: 30px;
+      height: 30px;
+      border: 1px solid var(--slate-200);
+      border-radius: 6px;
+      background: white;
+      color: var(--slate-600);
+    }
+    .page.active {
+      border-color: var(--blue-600);
+      background: var(--blue-600);
+      color: white;
+    }
+    .modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgb(15 23 42 / 0.32);
+      padding: 24px;
+    }
+    .modal.open { display: flex; }
+    .dialog {
+      width: min(440px, 100%);
+      border-radius: 12px;
+      background: #fff;
+      padding: 18px;
+      box-shadow: var(--shadow-md);
+    }
+    .dialog h2 { margin: 0 0 6px; color: var(--slate-900); font-size: 18px; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+    @media (max-width: 860px) {
+      main { padding: 16px; }
+      header, .pager { flex-direction: column; align-items: stretch; }
+      .toolbar { grid-template-columns: 1fr; }
+      .summary, .grid { grid-template-columns: 1fr; }
+      .card-body { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="muted">平台管理员全局资源视图</p>
+        <h1>守护进程与工作区管理</h1>
+        <p class="muted">平台管理员可按人员过滤并操作全部数据，普通账号仅筛选自己可见的数据。</p>
+      </div>
+      <div class="tabs" aria-label="resource tabs">
+        <button class="tab active" data-tab="daemon">守护进程</button>
+        <button class="tab" data-tab="workspace">工作区</button>
+      </div>
+    </header>
+
+    <section class="toolbar" aria-label="filters">
+      <div>
+        <label for="q">名称 / 别名</label>
+        <input id="q" placeholder="搜索别名、名称、路径…" />
+      </div>
+      <div>
+        <label for="owner">人员</label>
+        <select id="owner">
+          <option>全部人员</option>
+          <option>qinyi / qinyi@example.com</option>
+          <option>dev-a / dev-a@example.com</option>
+        </select>
+      </div>
+      <div>
+        <label for="type">类型</label>
+        <select id="type">
+          <option>全部类型</option>
+          <option>Claude Code</option>
+          <option>Codex</option>
+          <option>daemon-client 工作区</option>
+          <option>server-local 工作区</option>
+        </select>
+      </div>
+      <div>
+        <label for="status">状态</label>
+        <select id="status">
+          <option>全部状态</option>
+          <option>在线 / active</option>
+          <option>离线 / archived</option>
+          <option>禁用 / deleted</option>
+        </select>
+      </div>
+      <div style="align-self: end; display: flex; gap: 8px;">
+        <button class="button primary" type="button">查询</button>
+        <button class="button" type="button">重置</button>
+      </div>
+    </section>
+
+    <section class="summary">
+      <div class="metric"><span class="muted">总数</span><b id="total">24</b><span class="muted">服务端 total</span></div>
+      <div class="metric"><span class="muted">当前页</span><b>12</b><span class="muted">pageSize = 12</span></div>
+      <div class="metric"><span class="muted">已定义别名</span><b>9</b><span class="muted">display_alias 非空</span></div>
+      <div class="metric"><span class="muted">人员过滤</span><b>管理员</b><span class="muted">普通账号隐藏此控件</span></div>
+    </section>
+
+    <section class="grid" id="cards"></section>
+
+    <section class="pager">
+      <span class="muted">共 24 条 · 第 1 / 2 页 · 服务端 limit / offset</span>
+      <div class="pages">
+        <button class="page">‹</button>
+        <button class="page active">1</button>
+        <button class="page">2</button>
+        <button class="page">›</button>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal" id="modal">
+    <div class="dialog">
+      <h2>调整别名</h2>
+      <p class="muted">别名只影响平台展示和搜索，不覆盖资源原始名称。</p>
+      <div style="margin-top: 14px;">
+        <label for="alias">展示别名</label>
+        <input id="alias" value="秦工主力 daemon" />
+      </div>
+      <div class="dialog-actions">
+        <button class="button" id="cancel" type="button">取消</button>
+        <button class="button primary" id="save" type="button">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const daemonCards = [
+      ["秦工主力 daemon", "claude-code-qinyi", "qinyi@example.com", "Claude Code", "online", "Win32 x64", "C:/Users/qinyi/IdeaProjects"],
+      ["Codex 沙盒", "codex-local", "dev-a@example.com", "Codex", "offline", "macOS arm64", "/Users/dev/projects"],
+      ["发布机代理", "release-daemon", "ops@example.com", "Claude Code", "disabled", "Linux x64", "/srv/sillyhub"],
+      ["备用交互 daemon", "interactive-backup", "qinyi@example.com", "Claude Code", "maintenance", "Windows x64", "D:/workspace"],
+    ];
+    const workspaceCards = [
+      ["主平台研发工作区", "multi-agent-platform", "qinyi@example.com", "daemon-client", "active", "SillyHub", "C:/Users/qinyi/IdeaProjects/multi-agent-platform"],
+      ["守护进程 SDK", "sillyhub-daemon", "dev-a@example.com", "server-local", "active", "Node.js", "/Users/dev/sillyhub-daemon"],
+      ["归档演示环境", "archive-demo", "ops@example.com", "server-local", "archived", "Docs", "/srv/archive/demo"],
+      ["旧测试工作区", "legacy-test", "qinyi@example.com", "daemon-client", "deleted", "Python", "D:/old/test"],
+    ];
+    const cards = document.querySelector("#cards");
+    const tabs = document.querySelectorAll(".tab");
+    const modal = document.querySelector("#modal");
+    const alias = document.querySelector("#alias");
+
+    function statusLabel(status) {
+      return { online: "在线", offline: "离线", disabled: "禁用", maintenance: "维护中", active: "活跃", archived: "已归档", deleted: "已删除" }[status] || status;
+    }
+
+    function render(items, mode) {
+      cards.innerHTML = items.map((item, index) => `
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <div class="title">${item[0]}</div>
+              <div class="subtitle">原名：${item[1]}</div>
+            </div>
+            <span class="badge ${item[4]}">${statusLabel(item[4])}</span>
+          </div>
+          <div class="card-body">
+            <div><label>人员</label><div class="field-value">${item[2]}</div></div>
+            <div><label>${mode === "daemon" ? "类型" : "来源"}</label><div class="field-value">${item[3]}</div></div>
+            <div><label>${mode === "daemon" ? "环境" : "模块"}</label><div class="field-value">${item[5]}</div></div>
+            <div class="path">${item[6]}</div>
+          </div>
+          <div class="card-actions">
+            <button class="button ghost" type="button" data-edit="${index}">定义别名</button>
+            <button class="button" type="button">${mode === "daemon" ? "会话" : "详情"}</button>
+            <button class="button" type="button">${mode === "daemon" ? "禁用/启用" : "重新扫描"}</button>
+          </div>
+        </article>
+      `).join("");
+      document.querySelectorAll("[data-edit]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const item = items[Number(btn.dataset.edit)];
+          alias.value = item[0];
+          modal.classList.add("open");
+        });
+      });
+    }
+
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        tabs.forEach((item) => item.classList.remove("active"));
+        tab.classList.add("active");
+        const mode = tab.dataset.tab;
+        render(mode === "workspace" ? workspaceCards : daemonCards, mode);
+      });
+    });
+    document.querySelector("#cancel").addEventListener("click", () => modal.classList.remove("open"));
+    document.querySelector("#save").addEventListener("click", () => modal.classList.remove("open"));
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) modal.classList.remove("open");
+    });
+    render(daemonCards, "daemon");
+  </script>
+</body>
+</html>

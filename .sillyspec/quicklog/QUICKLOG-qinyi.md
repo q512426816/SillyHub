@@ -136,3 +136,20 @@ created_at: 2026-06-23 10:09:12
 文件：backend/app/modules/daemon/runtime/service.py（delete_runtime 加软删引用 SET NULL 解绑 + import update）、backend/app/modules/daemon/tests/test_lease_service.py（增强软删用例补 SET NULL 断言）、.sillyspec/docs/backend/modules/daemon.md（变更记录同步）
 根因：workspace 软删不清 daemon_runtime_id + DB FK RESTRICT 不看 deleted_at + 现有检查 deleted_at IS NULL 漏软删引用 → 放行 → FK 拦截 500（SQLite 测试 FK 不严漏网，PG 生产暴露）。
 结果：未软删绑定保持 DaemonRuntimeInUse(409)；软删引用应用层 UPDATE workspaces SET daemon_runtime_id=NULL WHERE deleted_at IS NOT NULL 解绑绕过 FK RESTRICT → 删 runtime。测试：TestDeleteRuntime 4 passed（含增强软删用例断言 ws.daemon_runtime_id is None），mypy 0，ruff 过。dialect 差异坑：SQLite FK 不严测不出，PG 生产 FK 严暴露——典型测试/生产 dialect 漏网。
+
+## ql-20260625-003-4d7a | 2026-06-25 17:11:05 | 优化 Agent 运行日志展示，突出用户消息/Agent 回复并补充 token 用量
+状态：已完成
+文件：
+- backend/app/modules/agent/schema.py
+- frontend/src/lib/agent.ts
+- frontend/src/components/agent-run-panel.tsx
+- frontend/src/components/agent-log-viewer.tsx
+- frontend/src/components/agent-log/normalize.ts
+- frontend/src/components/daemon/interactive-session-panel.tsx
+- frontend/src/components/daemon/runtime-session-helpers.tsx
+- frontend/src/lib/daemon.ts
+- backend/app/modules/daemon/router.py
+- backend/app/modules/daemon/run_sync/service.py
+- frontend/src/components/__tests__/agent-log-viewer.test.tsx
+- frontend/src/components/__tests__/agent-run-panel.test.tsx
+结果：AgentRunResponse 透出 cache_read_tokens/cache_creation_tokens；AgentRunPanel 的 token 徽标展示输入、输出、缓存读取、缓存写入；AgentLogViewer 默认只展示 user_input、assistant 回复和 thinking 缩略，工具/结果/系统/警告/提问/普通输出通过按钮按需显示；保留 [SYSTEM:thinking_tokens] 用于顶部思考 token 概览但默认不渲染原始系统行；会话实时消息和历史回看同样按核心对话/折叠技术日志展示，并在 session SSE tokens/turn_completed 中透传 cache 字段。验证：frontend 下 pnpm vitest run src/components/daemon/runtime-session-dialog.test.tsx src/components/__tests__/agent-log-viewer.test.tsx src/components/__tests__/agent-run-panel.test.tsx，28 passed；backend 下 uv run pytest app/modules/daemon/tests/test_run_sync_cache_parse.py app/modules/daemon/tests/test_interactive_lifecycle_patch.py -q，33 passed。

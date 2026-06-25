@@ -44,4 +44,7 @@ multi-agent-platform 的核心 API 服务，monorepo 的"大脑"。以 FastAPI �
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+## 变更索引
+- ql-20260625-003-4d7a | AgentRunResponse 与 session SSE tokens/turn_completed 透出缓存读取/写入 token 字段，供前端运行日志与会话消息展示 cache 用量。
+
 <!-- MANUAL_NOTES_END -->
