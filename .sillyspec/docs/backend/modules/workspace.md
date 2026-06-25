@@ -34,6 +34,9 @@ rescan: 复用 scanner，差异更新
 - 软删除：`soft_delete` 仅置标记，`_resurrect_soft_deleted` 在相同 root_path 重建时复活记录。
 - slug 唯一性靠 `_ensure_unique_slug` 追加后缀，非 DB 唯一约束兜底。
 - change/task/agent 的 workspace 关联通过 *_workspace 关联表，删除 workspace 需考虑级联。
+- `display_alias`：workspace 新增 nullable `display_alias VARCHAR(200)`，标题优先展示、空值回退 name/slug（2026-06-25-admin-global-daemon-workspace-management，D-002）。
+- 列表筛选分页：`GET /api/workspaces` 支持 `q/type/status/user_id/limit/offset`；`user_id` 仅平台管理员生效（按 created_by 过滤），普通账号仍走 `allowed_workspace_ids` 权限边界（D-001/D-003）。
+- owner 展示：列表 owner 由 created_by JOIN users 填充（OwnerRead 嵌套 DTO，D-006），详情可为 None。
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->

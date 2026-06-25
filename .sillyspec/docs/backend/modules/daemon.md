@@ -22,7 +22,10 @@ created_at: 2026-06-19T19:40:00+08:00
   - `patch/service.py` → `PatchService`：worktree diff 应用。
 - `DaemonLeaseService`（`lease_service.py`）：独立活 service，`cancel_lease` 被 agent 模块跨模块调用（`agent/service.py:545`），原位保留，与本次 `LeaseService` 分管 lease 不同操作（D-003）。
 - 异常类/状态常量已迁入对应子包定义，facade `service.py` 集中 re-export，`from app.modules.daemon.service import XxxError` 路径不变（FR-05）。
-- `GET /api/daemon/runtimes`：读取当前用户可见的运行时。
+- `GET /api/daemon/runtimes`：读取当前用户可见的运行时（兼容旧调用，仍返回数组）。
+- `GET /api/daemon/runtimes/page`：平台管理员分页查询全部 owner 的 runtime（`q/type/status/user_id/limit/offset`），普通账号仅查自己；固定路径必须声明在 `/runtimes/{runtime_id}` 前（D-005），返回 `{items,total,limit,offset}`。
+- `PATCH /api/daemon/runtimes/{id}`：更新 `display_alias`（省略=不变、null/空白=清空、非空字符串=更新）；`get/disable/enable/delete/update` 接收 `is_platform_admin` 实现跨 owner 管理（D-001）。
+  - 以上三项来自 2026-06-25-admin-global-daemon-workspace-management。
 - `DELETE /api/daemon/runtimes/{id}`：物理删除 runtime 及其 lease/session（FK CASCADE）；被未软删 workspace 绑定时返回 409（`DaemonRuntimeInUse`，需先解绑），越权/不存在统一 404。
 - `GET /api/daemon/sessions`：按用户隔离并分页读取交互式会话。
 - `DELETE /api/daemon/sessions/{id}`：仅删除当前用户的终态会话；活动会话返回 409，越权与不存在统一返回 404。
@@ -44,6 +47,13 @@ created_at: 2026-06-19T19:40:00+08:00
 - `RunSyncService.submit_messages()` 接收 Codex driver 上报的 flat message（`event_type` + `content` + `metadata` + `session_id`），与 Claude SDK raw message 展开走同一落库路径；Codex driver 不把 app-server schema 泄漏到 backend（D-004@v1）。
 - 审批/dialog 仍以 `PERMISSION_REQUEST` / `PERMISSION_RESPONSE` 作 provider-neutral 通道；Codex 的 `item/tool/requestUserInput` 与 `mcpServer/elicitation/request` 复用同一通道，`dialog_kind` 分别标记 `codex_request_user_input` 与 `mcp_elicitation`（D-006@v1, D-008@v1）。
 - `ask_user_only=true` 时普通 command/file/permission 审批 allow-through，只阻塞用户输入/可归一化 MCP elicitation；`ask_user_only=false` 时普通审批走前端审批卡。MCP elicitation 复杂 schema 暂不支持（daemon 侧 fail-closed 并上报 error log）。
+
+## 注意事项
+
+- `display_alias`：runtime 新增 nullable `display_alias VARCHAR(200)`，搜索（ilike）与卡片标题优先用它，空值回退 name/provider（2026-06-25-admin-global-daemon-workspace-management，D-002）。
+- 路由顺序：`/runtimes/page`、`/runtimes/usage` 等固定路径必须声明在 `/runtimes/{runtime_id}` 前，否则 FastAPI 把 `page` 当 UUID 解析返回 422（D-005）。
+- 跨 owner 管理：`get/disable/enable/delete/update` 接收 `is_platform_admin`，平台管理员可操作任意 owner 的 runtime，普通账号仍受 owner 限制（D-001）。
+- owner 展示：列表 owner 由 LEFT JOIN users 填充（OwnerRead 嵌套 DTO，D-006），详情端点 owner 可为 None。
 
 ## 变更记录
 

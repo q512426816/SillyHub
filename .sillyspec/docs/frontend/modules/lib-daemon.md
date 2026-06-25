@@ -40,6 +40,8 @@ return { close(): es.close() }   // 调用方负责断开
 - 错误统一收敛到 `apiFetch` 抛 `ApiError`（含 409 业务码等），上层用 try/catch 或 `.catch` 处理；流解析失败不泄露原始 payload。
 - `streamSession` 的 `cursor` 续传依赖后端 `Last-Event-ID`，重连时需把上次 `lastEventId` 透传回来。
 - 交互会话 provider 区分 `claude` / `codex`（`InteractiveProvider`），不同 provider 的会话能力有差异。
+- `listDaemonRuntimesPage`（分页）：平台管理员全局视图，传 `q/type/status/user_id/limit/offset`；旧 `listDaemonRuntimes()` 保留返回数组（FR-06 兼容，AgentProviderSelect/WorkspaceDaemonSwitcher 等复用）（2026-06-25-admin-global-daemon-workspace-management）。
+- `updateDaemonRuntime`：PATCH `display_alias`（trim 后空串转 null 清空）；`DaemonRuntimeRead` 含 `display_alias` + 嵌套 `owner`（OwnerRead: user_id/email/display_name，D-006）。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->

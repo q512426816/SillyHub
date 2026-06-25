@@ -35,6 +35,7 @@ created_at: 2026-06-24T01:02:00
 - AppShell 菜单可见性依赖 lib-permission 的 `canSeeMenu` / `visibleMenusBySection`，改菜单结构要同步 menu-permissions 定义。
 - AgentRunPanel 是较重的组件，SSE 生命周期与 activeRunId 强绑定，卸载/切换时确保断流（hook 内已处理）。
 - ErrorBoundary 是全应用为数不多的兜底，tag 用于区分日志区/面板区等不同子树。
+- `WorkspaceCard`：标题 `display_alias ?? name` 回退；展示 owner 负责人（display_name ?? email）；提供别名编辑入口（由父页弹 modal 触发）（2026-06-25-admin-global-daemon-workspace-management，D-002/D-004）。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->

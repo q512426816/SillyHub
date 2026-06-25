@@ -34,6 +34,8 @@ getTopology(): GET /api/workspaces/topology → { nodes, edges }  # 全局，非
 - `updateWorkspace` 的 PATCH 语义：`default_agent` 传 null 显式清空、字段省略表示不变，依赖后端 `exclude_unset` 行为。
 - `scanGenerate` 的 input 含 `provider` 参数用于选择生成策略。
 - `getTopology` 是全局接口，前端拓扑页据此渲染所有工作空间及组件间的依赖关系。
+- `listWorkspaces(params)`：支持 `q/type/status/user_id/limit/offset` 服务端筛选分页；`user_id` 仅平台管理员视图生效，普通账号不传（2026-06-25-admin-global-daemon-workspace-management，D-003）。
+- `Workspace.display_alias`/`owner`：标题优先 display_alias 回退 name；owner 为嵌套 OwnerRead（D-006）；`UpdateWorkspaceInput.display_alias` PATCH 语义同 exclude_unset（null 清空、省略不变）。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->

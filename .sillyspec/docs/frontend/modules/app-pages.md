@@ -34,6 +34,7 @@ created_at: 2026-06-24T01:02:00
 - 登录态鉴权由 `(dashboard)` 布局统一兜底，单页不重复实现。
 - RuntimesPage 文件较长（600+ 行），含若干内联子组件（Key 复制、ServerUrl 设置等），改动时注意区分主页面与内联组件。
 - ApiKeysPage 的 key 明文只在创建瞬间返回，列表不回显，UI 需提示一次性。
+- `/runtimes`、`/workspaces` 页面：服务端分页（limit/offset）+ 筛选条（q/type/status）+ 平台管理员人员搜索（`useSession().is_platform_admin` 控制显隐，复用 `listUsers`，失败降级隐藏控件）+ 别名编辑（display_alias trim/null）+ URL 参数恢复（2026-06-25-admin-global-daemon-workspace-management，D-003/D-004）。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
