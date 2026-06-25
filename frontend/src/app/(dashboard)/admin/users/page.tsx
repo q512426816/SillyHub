@@ -1,15 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { type TableProps, Tag } from "antd";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Input, Select, type TableProps, Tag } from "antd";
 
 import { AdminUserDrawer } from "@/components/admin-user-drawer";
 import {
   DataTable,
   PageContainer,
   PageHeader,
-  SearchBar,
-  SearchBarActions,
   SectionCard,
 } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -48,6 +46,16 @@ interface DrawerState {
 
 const inputCls =
   "h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none";
+
+// 查询条件外壳：垂直布局（标题在上，控件在下），对齐 ppm/project-plans 的 Field。
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex w-full flex-col gap-1">
+      <span className="text-xs leading-4 text-muted-foreground">{label}</span>
+      {children}
+    </div>
+  );
+}
 
 const DEFAULT_PAGE_SIZE = 20;
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
@@ -144,6 +152,22 @@ export default function AdminUsersPage() {
 
   const handleStatusFilterChange = (value: StatusFilter) => {
     setStatusFilter(value);
+    setPage(1);
+  };
+
+  // 顶部「搜索」按钮：立即触发查询（跳过 debounce 等待）。
+  const handleSearchClick = () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setSearch(searchInput);
+    setPage(1);
+  };
+
+  // 顶部「重置」按钮：清空关键词 + 状态筛选。
+  const handleResetClick = () => {
+    setSearchInput("");
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setSearch("");
+    setStatusFilter("all");
     setPage(1);
   };
 
@@ -375,37 +399,48 @@ export default function AdminUsersPage() {
       ) : (
         <>
           <SectionCard bodyPadding="p-2">
-            <SearchBar>
-              <input
-                value={searchInput}
-                onChange={(e) => handleSearchInput(e.target.value)}
-                placeholder="搜索 登录名 / 显示名…"
-                className={`w-72 ${inputCls}`}
-              />
-              <select
-                value={statusFilter}
-                onChange={(e) => handleStatusFilterChange(e.target.value as StatusFilter)}
-                className={`w-32 ${inputCls}`}
-                aria-label="状态筛选"
+            {/* 顶部操作按钮行（右对齐，对齐 project-plans） */}
+            <div className="mb-2 flex items-center justify-end gap-2">
+              <Button size="sm" onClick={() => handleSearchClick()}>
+                搜索
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => handleResetClick()}>
+                重置
+              </Button>
+              <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+              <Button
+                size="sm"
+                disabled={!canWrite}
+                onClick={() => setDrawer({ open: true, mode: "create" })}
+                title={!canWrite ? "无 user:write 权限" : undefined}
               >
-                <option value="all">全部状态</option>
-                <option value="active">启用</option>
-                <option value="disabled">禁用</option>
-              </select>
-              <SearchBarActions>
-                <span className="text-xs text-muted-foreground">
-                  共 {total} 个用户
-                </span>
-                <Button
-                  size="sm"
-                  disabled={!canWrite}
-                  onClick={() => setDrawer({ open: true, mode: "create" })}
-                  title={!canWrite ? "无 user:write 权限" : undefined}
-                >
-                  + 新建用户
-                </Button>
-              </SearchBarActions>
-            </SearchBar>
+                + 新建用户
+              </Button>
+            </div>
+            {/* 搜索表单：grid-cols-4 垂直 Field（对齐 project-plans） */}
+            <div className="grid w-full grid-cols-4 gap-3">
+              <Field label="关键词">
+                <Input
+                  value={searchInput}
+                  onChange={(e) => handleSearchInput(e.target.value)}
+                  placeholder="搜索 登录名 / 显示名…"
+                  allowClear
+                  onPressEnter={() => handleSearchClick()}
+                />
+              </Field>
+              <Field label="状态">
+                <Select
+                  value={statusFilter}
+                  onChange={(v) => handleStatusFilterChange(v)}
+                  className="w-full"
+                  options={[
+                    { value: "all", label: "全部状态" },
+                    { value: "active", label: "启用" },
+                    { value: "disabled", label: "禁用" },
+                  ]}
+                />
+              </Field>
+            </div>
           </SectionCard>
 
           <DataTable<UserRead>
@@ -415,7 +450,7 @@ export default function AdminUsersPage() {
             loading={loading}
             size="small"
             bordered
-            scroll={{ x: "max-content" }}
+            scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
             pagination={{
               current: page,
               pageSize,
