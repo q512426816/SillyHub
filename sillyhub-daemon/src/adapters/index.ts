@@ -2,7 +2,7 @@
  * adapters/index.ts —— 协议抽象层的工厂与映射（W1 收敛点）。
  *
  * 职责：
- *   1. 维护 5 协议 → 12 provider 的正向映射 PROTOCOL_PROVIDERS（与 Python 一致）。
+ *   1. 维护 6 协议 → 12 provider 的正向映射 PROTOCOL_PROVIDERS。
  *   2. 提供 O(1) 反查 PROVIDER_TO_PROTOCOL + getProtocol(provider)。
  *   3. 提供 getBackend(provider) 工厂：按 provider 实例化对应 adapter，每次返回新实例。
  *
@@ -26,17 +26,18 @@ import { StreamJsonAdapter, type StreamJsonProvider } from './stream-json.js';
 import { JsonRpcAdapter, type JsonRpcProvider } from './json-rpc.js';
 import { JsonlAdapter } from './jsonl.js';
 import { NdjsonAdapter, type NdjsonProvider } from './ndjson.js';
+import { PiJsonAdapter } from './pi-json.js';
 import { TextAdapter } from './text.js';
 
 // ---------------------------------------------------------------------------
-// 协议类型联合（锁定 5 个合法值）
+// 协议类型联合（锁定 6 个合法值）
 // ---------------------------------------------------------------------------
 
 /**
- * 5 种协议字面量。新增协议必须在此联合追加，TS 编译器强制 PROTOCOL_PROVIDERS 补全。
+ * 6 种协议字面量。新增协议必须在此联合追加，TS 编译器强制 PROTOCOL_PROVIDERS 补全。
  * 对应 Python 的 PROTOCOL_PROVIDERS 字典键（隐式约束）。
  */
-export type ProtocolType = 'stream_json' | 'json_rpc' | 'jsonl' | 'ndjson' | 'text';
+export type ProtocolType = 'stream_json' | 'json_rpc' | 'jsonl' | 'ndjson' | 'pi_json' | 'text';
 
 // ---------------------------------------------------------------------------
 // 正向映射：协议 → provider 列表（与 Python __init__.py:81-87 逐字一致）
@@ -52,7 +53,8 @@ export const PROTOCOL_PROVIDERS: Readonly<Record<ProtocolType, readonly string[]
   stream_json: ['claude', 'gemini', 'cursor'],
   json_rpc: ['codex', 'hermes', 'kimi', 'kiro'],
   jsonl: ['copilot'],
-  ndjson: ['opencode', 'openclaw', 'pi'],
+  ndjson: ['opencode', 'openclaw'],
+  pi_json: ['pi'],
   text: ['antigravity'],
 });
 
@@ -79,7 +81,7 @@ export const PROVIDER_TO_PROTOCOL: Readonly<Record<string, ProtocolType>> = Obje
 
 /**
  * 所有 provider 拍平后的只读数组（模块加载时算一次，供断言与错误信息复用）。
- * 12 = stream_json(3) + json_rpc(4) + jsonl(1) + ndjson(3) + text(1)。
+ * 12 = stream_json(3) + json_rpc(4) + jsonl(1) + ndjson(2) + pi_json(1) + text(1)。
  */
 const ALL_PROVIDERS: readonly string[] = Object.values(PROTOCOL_PROVIDERS).flat();
 
@@ -90,7 +92,7 @@ const ALL_PROVIDERS: readonly string[] = Object.values(PROTOCOL_PROVIDERS).flat(
  */
 if (ALL_PROVIDERS.length !== 12) {
   throw new Error(
-    `PROTOCOL_PROVIDERS 覆盖 ${ALL_PROVIDERS.length} provider，期望 12（3+4+1+3+1）`,
+    `PROTOCOL_PROVIDERS 覆盖 ${ALL_PROVIDERS.length} provider，期望 12（3+4+1+2+1+1）`,
   );
 }
 if (new Set(ALL_PROVIDERS).size !== ALL_PROVIDERS.length) {
@@ -129,7 +131,7 @@ export function getProtocol(provider: string): ProtocolType {
  * protocol → adapter 实例化 thunk 映射。模块级常量，构建一次复用。
  * 每个 thunk 接收 provider 字符串，new 一个新实例——adapter 的 provider 字段由构造器注入
  * （StreamJsonAdapter/JsonRpcAdapter/NdjsonAdapter 的 constructor 签名要求 provider；
- *  JsonlAdapter/TextAdapter 的 provider 硬编码单值，thunk 忽略入参）。
+ *  JsonlAdapter/TextAdapter/PiJsonAdapter 的 provider 硬编码单值，thunk 忽略入参）。
  * 对应 Python __init__.py:124-130 _PROTOCOL_MODULES（Python 存 module path + class name 元组
  * 用于 importlib 懒加载；Node 直接存 thunk，省去动态 import 并把 provider 注入收进工厂）。
  */
@@ -140,6 +142,7 @@ const PROTOCOL_ADAPTER_FACTORIES: Readonly<
   json_rpc: (p) => new JsonRpcAdapter(p as JsonRpcProvider),
   jsonl: () => new JsonlAdapter(),
   ndjson: (p) => new NdjsonAdapter(p as NdjsonProvider),
+  pi_json: () => new PiJsonAdapter(),
   text: () => new TextAdapter(),
 });
 

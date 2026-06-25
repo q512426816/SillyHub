@@ -7,7 +7,8 @@
 - `stream-json/` — claude / gemini / cursor（src/adapters/stream-json.ts）
 - `json-rpc/`   — codex / hermes / kimi / kiro（src/adapters/json-rpc.ts）
 - `jsonl/`      — copilot（src/adapters/jsonl.ts）
-- `ndjson/`     — opencode / openclaw / pi（src/adapters/ndjson.ts）
+- `ndjson/`     — opencode / openclaw（src/adapters/ndjson.ts）
+- `pi-json/`    — pi（src/adapters/pi-json.ts）
 - `text/`       — antigravity（src/adapters/text.ts）
 
 ## 命名约定

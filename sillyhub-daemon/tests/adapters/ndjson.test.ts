@@ -1,6 +1,6 @@
 // tests/adapters/ndjson.test.ts
 // task-09: NdjsonAdapter 解析逻辑 1:1 迁移自 Python test_ndjson_backend.py。
-// 3 份 fixture（opencode/openclaw/pi）落盘自 Python _make_ndjson_line 样本
+// 2 份 fixture（opencode/openclaw）落盘自 Python _make_ndjson_line 样本
 // （tests/fixtures/ndjson/）。
 // IR 收敛后的事件类型对齐 task-02（5 元组）：step_start/status 收敛为
 // type:'text' + metadata.status（对齐 task-06/07/08）。
@@ -26,7 +26,7 @@ function newAdapter(provider: NdjsonProvider = 'opencode'): NdjsonAdapter {
 }
 
 /** fixture 加载器（ndjson/<provider>/sample.txt，返回完整多行文本）。 */
-const SAMPLE = (provider: 'opencode' | 'openclaw' | 'pi'): string =>
+const SAMPLE = (provider: 'opencode' | 'openclaw'): string =>
   loadFixture(`ndjson/${provider}/sample.txt`);
 
 /** 取数组首元素，noUncheckedIndexedAccess 下兜底 null。 */
@@ -280,14 +280,17 @@ describe('parse edge cases (→ null)', () => {
 // ===========================================================================
 
 describe('provider field & construction', () => {
-  it('三 provider 字段正确（AC-01）', () => {
+  it('两 provider 字段正确（AC-01）', () => {
     expect(newAdapter('opencode').provider).toBe('opencode');
     expect(newAdapter('openclaw').provider).toBe('openclaw');
-    expect(newAdapter('pi').provider).toBe('pi');
   });
 
   it('非法 provider 抛错（B-11，AC-11）', () => {
     expect(() => new NdjsonAdapter('claude' as NdjsonProvider)).toThrow(
+      /Unknown NdjsonAdapter provider/,
+    );
+    // pi 已拆出独立 pi_json 协议，不再是 ndjson provider
+    expect(() => new NdjsonAdapter('pi' as NdjsonProvider)).toThrow(
       /Unknown NdjsonAdapter provider/,
     );
   });
@@ -304,8 +307,8 @@ describe('provider field & construction', () => {
 // 三 provider 等价（AC-01：同输入产等价 IR，无 provider 分支）
 // ===========================================================================
 
-describe('three providers equivalence (AC-01, B-10)', () => {
-  it.each(['opencode', 'openclaw', 'pi'] as const)(
+describe('two providers equivalence (AC-01, B-10)', () => {
+  it.each(['opencode', 'openclaw'] as const)(
     'parses %s fixture without error + output 非空',
     (provider) => {
       const a = new NdjsonAdapter(provider);
@@ -320,13 +323,10 @@ describe('three providers equivalence (AC-01, B-10)', () => {
     },
   );
 
-  it('opencode/openclaw/pi 同输入产完全相同 IR（无 provider 分支）', () => {
+  it('opencode/openclaw 同输入产完全相同 IR（无 provider 分支）', () => {
     const line = makeNdjsonLine('text', { part: { text: 'same' } });
     expect(new NdjsonAdapter('opencode').parse(line)).toEqual(
       new NdjsonAdapter('openclaw').parse(line),
-    );
-    expect(new NdjsonAdapter('opencode').parse(line)).toEqual(
-      new NdjsonAdapter('pi').parse(line),
     );
   });
 });
@@ -388,18 +388,5 @@ describe('fixture samples (AC-08)', () => {
     expect(a.getOutput()).toBe('Hello from opencode');
     expect(a.getFinalStatus()).toBe('failed'); // 末尾 error 事件
     expect(a.getUsage().input_tokens).toBe(100);
-  });
-
-  it('pi/sample.txt: dict tool_output JSON 序列化', () => {
-    const a = newAdapter();
-    const lines = SAMPLE('pi').split('\n').filter((l) => l.trim());
-    const all: AgentEvent[] = [];
-    for (const line of lines) {
-      const ev = a.parse(line);
-      if (ev) all.push(...ev);
-    }
-    const result = all.find((e) => e.type === 'tool_result');
-    expect(result).toBeDefined();
-    expect(JSON.parse(result!.content)).toEqual({ matches: ['line1', 'line2'] });
   });
 });

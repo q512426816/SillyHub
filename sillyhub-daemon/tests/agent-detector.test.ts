@@ -100,7 +100,7 @@ describe('PROVIDER_SPECS', () => {
       openclaw: 'ndjson',
       hermes: 'json_rpc',
       gemini: 'stream_json',
-      pi: 'ndjson',
+      pi: 'pi_json',
       cursor: 'stream_json',
       kimi: 'json_rpc',
       kiro: 'json_rpc',

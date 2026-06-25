@@ -15,6 +15,7 @@ import { StreamJsonAdapter } from '../../src/adapters/stream-json';
 import { JsonRpcAdapter } from '../../src/adapters/json-rpc';
 import { JsonlAdapter } from '../../src/adapters/jsonl';
 import { NdjsonAdapter } from '../../src/adapters/ndjson';
+import { PiJsonAdapter } from '../../src/adapters/pi-json';
 import { TextAdapter } from '../../src/adapters/text';
 
 // 12 provider → 期望（protocol, adapterClass）映射
@@ -33,7 +34,7 @@ const EXPECTED: ReadonlyArray<{
   { provider: 'copilot', protocol: 'jsonl', cls: JsonlAdapter },
   { provider: 'opencode', protocol: 'ndjson', cls: NdjsonAdapter },
   { provider: 'openclaw', protocol: 'ndjson', cls: NdjsonAdapter },
-  { provider: 'pi', protocol: 'ndjson', cls: NdjsonAdapter },
+  { provider: 'pi', protocol: 'pi_json', cls: PiJsonAdapter },
   { provider: 'antigravity', protocol: 'text', cls: TextAdapter },
 ];
 
@@ -50,8 +51,11 @@ describe('adapters/index.ts — 工厂与映射', () => {
     it('jsonl → [copilot]', () => {
       expect([...PROTOCOL_PROVIDERS.jsonl]).toEqual(['copilot']);
     });
-    it('ndjson → [opencode, openclaw, pi]', () => {
-      expect([...PROTOCOL_PROVIDERS.ndjson]).toEqual(['opencode', 'openclaw', 'pi']);
+    it('ndjson → [opencode, openclaw]', () => {
+      expect([...PROTOCOL_PROVIDERS.ndjson]).toEqual(['opencode', 'openclaw']);
+    });
+    it('pi_json → [pi]', () => {
+      expect([...PROTOCOL_PROVIDERS.pi_json]).toEqual(['pi']);
     });
     it('text → [antigravity]', () => {
       expect([...PROTOCOL_PROVIDERS.text]).toEqual(['antigravity']);

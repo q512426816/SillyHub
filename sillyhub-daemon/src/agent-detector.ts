@@ -36,13 +36,14 @@ import { resolveCursorVersionEntry } from './cursor-version.js';
 // ---------------------------------------------------------------------------
 
 /**
- * 5 种 agent 协议字面量（对齐 task-11 PROTOCOL_PROVIDERS 的 key）。
+ * 6 种 agent 协议字面量（对齐 task-11 PROTOCOL_PROVIDERS 的 key）。
  */
 export type AgentProtocol =
   | 'stream_json'
   | 'json_rpc'
   | 'jsonl'
   | 'ndjson'
+  | 'pi_json'
   | 'text';
 
 /**
@@ -150,7 +151,7 @@ export const PROVIDER_SPECS = {
     bin: 'pi',
     envPath: 'SILLYHUB_PI_PATH',
     versionPattern: /(\d+\.\d+\.\d+)/,
-    protocol: 'ndjson' as const,
+    protocol: 'pi_json' as const,
   },
   cursor: {
     bin: 'cursor-agent',

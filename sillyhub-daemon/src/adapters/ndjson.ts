@@ -1,5 +1,5 @@
 /**
- * NdjsonAdapter —— opencode/openclaw/pi NDJSON 流式协议解析器。
+ * NdjsonAdapter —— opencode/openclaw NDJSON 流式协议解析器。
  *
  * 协议形态（对照 opencode.go processEvents / Python ndjson.py）：
  *   子进程 `run --format json --dangerously-skip-permissions <prompt>` 的 stdout
@@ -11,7 +11,7 @@
  *   - 本 adapter 只保留 parse(line) → AgentEvent IR 纯解析。
  *   - 子进程执行（spawn / stdin / 超时）下沉到 task-19 TaskRunner。
  *
- * 三 provider（opencode/openclaw/pi）共享完全相同的 NDJSON 字段结构
+ * 两 provider（opencode/openclaw）共享完全相同的 NDJSON 字段结构
  * （Python _BINARY_MAP 仅区分 binary 名，解析逻辑无差异）。本 adapter
  * 不引入 provider 分支，但保留 provider 字段标识，为未来协议漂移留扩展点。
  *
@@ -23,7 +23,7 @@
  * metadata 字段名沿用 snake_case（types.ts L48-55 注释"保持 Python 原名"，
  * 与 task-06/07/08 全局一致）。
  *
- * @see design.md §7.1（AgentEvent IR）/ §7.3（PROTOCOL_PROVIDERS: ndjson→[opencode,openclaw,pi]）
+ * @see design.md §7.1（AgentEvent IR）/ §7.3（PROTOCOL_PROVIDERS: ndjson→[opencode,openclaw]）
  * @see Python 源 sillyhub_daemon/backends/ndjson.py
  */
 
@@ -102,12 +102,12 @@ function createInitialState(): NdjsonState {
 
 /**
  * 合法的 ndjson provider 字面量 union。
- * 对照 Python _BINARY_MAP 的三个 key（ndjson.py:56-60）。
+ * 对照 Python _BINARY_MAP 的两个 key（ndjson.py:56-60，pi 已拆出独立 pi_json 协议）。
  */
-export type NdjsonProvider = 'opencode' | 'openclaw' | 'pi';
+export type NdjsonProvider = 'opencode' | 'openclaw';
 
 /**
- * NDJSON 流式协议 adapter（opencode/openclaw/pi 共用）。
+ * NDJSON 流式协议 adapter（opencode/openclaw 共用）。
  *
  * 用法（task-19 TaskRunner）：
  *   const adapter = new NdjsonAdapter('opencode');
@@ -127,7 +127,7 @@ export class NdjsonAdapter implements ProtocolAdapter {
 
   constructor(provider: NdjsonProvider = 'opencode') {
     // 校验 provider 合法性（对照 Python L62-66 的 _BINARY_MAP 查找）
-    if (provider !== 'opencode' && provider !== 'openclaw' && provider !== 'pi') {
+    if (provider !== 'opencode' && provider !== 'openclaw') {
       throw new Error(`Unknown NdjsonAdapter provider: ${provider}`);
     }
     this.provider = provider;
@@ -139,7 +139,7 @@ export class NdjsonAdapter implements ProtocolAdapter {
    * 对照 ndjson.ts:23 协议形态：`run --format json --dangerously-skip-permissions <prompt>`。
    * prompt 作为 args 末尾位置参数传入（不走 stdin），故 buildInput 不会被调用。
    *
-   * - `run`：opencode/openclaw/pi 都用此子命令触发非交互执行
+   * - `run`：opencode/openclaw 都用此子命令触发非交互执行
    * - `--format json`：stdout 输出 NDJSON 事件流（本 adapter parse 假设的输入格式）
    * - `--dangerously-skip-permissions`：跳过工具批准（daemon 自动审批）
    * - `<prompt>`：用户输入（位置参数）
