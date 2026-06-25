@@ -673,7 +673,12 @@ class TestDeleteRuntime:
     async def test_delete_runtime_allows_when_workspace_soft_deleted(
         self, db_session: AsyncSession
     ) -> None:
-        """只绑定到已软删 workspace 的 runtime 仍可删除（deleted_at IS NULL 过滤）。"""
+        """软删 workspace 引用的 runtime：应用层 SET NULL 解绑后删除（ql-002-7c3a）。
+
+        软删逻辑不清 daemon_runtime_id，PG FK RESTRICT 不看 deleted_at 会拦截；
+        delete_runtime 对软删引用应用层 UPDATE SET NULL 绕过 FK。SQLite 测应用层
+        update 逻辑（不依赖 FK），断言解绑 + 删除。
+        """
         user_id = await _create_user(db_session)
         svc = DaemonService(db_session)
         rt = await svc.register_runtime(user_id, name="freed-daemon", provider="claude_code")
@@ -691,7 +696,11 @@ class TestDeleteRuntime:
         await db_session.commit()
 
         await svc.delete_runtime(rt.id, user_id)
+        # runtime 已删
         assert await svc.get_runtime(rt.id) is None
+        # 软删 workspace 的 daemon_runtime_id 被应用层 SET NULL 解绑（绕过 FK RESTRICT）
+        await db_session.refresh(ws)
+        assert ws.daemon_runtime_id is None
 
 
 class TestDaemonHeartbeat:

@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -266,6 +266,11 @@ class RuntimeService:
         ``workspaces.daemon_runtime_id`` 是 RESTRICT（R-06 cascade 明确 out of
         scope）：若有未软删 workspace 仍绑定本 runtime，抛 ``DaemonRuntimeInUse``
         (409) 并带 workspace 列表，让调用方先解绑，而非让 FK 违约束冒泡成 500。
+
+        软删 workspace（deleted_at IS NOT NULL）的 ``daemon_runtime_id`` 不会被
+        软删逻辑清理，但 DB FK RESTRICT 不看 ``deleted_at``，仍会拦截 DELETE。
+        故对软删引用在此应用层 SET NULL 解绑（ql-20260625-002-7c3a），未软删绑定
+        已在上面 409 拦截，这里只解软删引用，不影响活跃 workspace。
         """
         runtime = await self._get_owned_runtime(runtime_id, user_id)
         # 删前检查：被未软删 workspace 绑定的 runtime 不允许物理删除（RESTRICT）。
@@ -289,6 +294,17 @@ class RuntimeService:
                     ],
                 },
             )
+        # 软删 workspace 仍引用本 runtime 时，应用层 SET NULL 解绑（绕过 FK RESTRICT）。
+        # 软删逻辑只置 deleted_at 不清 daemon_runtime_id，PG FK RESTRICT 不看 deleted_at
+        # 会拦截 DELETE；SQLite 测试库 FK 不严测不出，PG 生产暴露 500（dialect 差异）。
+        await self._session.execute(
+            update(Workspace)
+            .where(
+                col(Workspace.daemon_runtime_id) == runtime_id,
+                col(Workspace.deleted_at).is_not(None),
+            )
+            .values(daemon_runtime_id=None)
+        )
         await self._session.delete(runtime)
         await self._session.commit()
 

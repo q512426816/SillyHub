@@ -130,3 +130,9 @@ created_at: 2026-06-23 10:09:12
 文件：backend/app/modules/daemon/runtime/service.py（新增 DaemonRuntimeInUse + delete_runtime 删前绑定检查）、backend/app/modules/daemon/service.py（facade re-export DaemonRuntimeInUse）、backend/app/modules/daemon/tests/test_lease_service.py（+2 用例）、.sillyspec/docs/backend/modules/daemon.md（契约摘要 + 变更记录同步）
 根因：workspace.daemon_runtime_id FK 是 RESTRICT（设计意图 workspace/model.py:72 + migration 202607030900），delete_runtime 漏处理，PG commit 抛 IntegrityError 冒泡成 500（实测 runtime 71ba0e32 被 workspace myaaa 绑定）。
 结果：删前查未软删绑定 workspace（deleted_at IS NULL），有则抛 DaemonRuntimeInUse（HTTP_409 + 中文提示 + details.workspaces），物理删除语义不变。测试：TestDeleteRuntime 4 passed（原2+新2：被绑定→409、软删绑定→放行），test_lease_service.py 全量 43 passed，import 冒烟 OK。模块文档 daemon.md 同步。
+
+## ql-20260625-002-7c3a | 2026-06-25 13:52:38 | 修复 delete_runtime 软删 workspace 引用 dialect bug（软删引用自动 SET NULL 解绑）
+状态：已完成
+文件：backend/app/modules/daemon/runtime/service.py（delete_runtime 加软删引用 SET NULL 解绑 + import update）、backend/app/modules/daemon/tests/test_lease_service.py（增强软删用例补 SET NULL 断言）、.sillyspec/docs/backend/modules/daemon.md（变更记录同步）
+根因：workspace 软删不清 daemon_runtime_id + DB FK RESTRICT 不看 deleted_at + 现有检查 deleted_at IS NULL 漏软删引用 → 放行 → FK 拦截 500（SQLite 测试 FK 不严漏网，PG 生产暴露）。
+结果：未软删绑定保持 DaemonRuntimeInUse(409)；软删引用应用层 UPDATE workspaces SET daemon_runtime_id=NULL WHERE deleted_at IS NOT NULL 解绑绕过 FK RESTRICT → 删 runtime。测试：TestDeleteRuntime 4 passed（含增强软删用例断言 ws.daemon_runtime_id is None），mypy 0，ruff 过。dialect 差异坑：SQLite FK 不严测不出，PG 生产 FK 严暴露——典型测试/生产 dialect 漏网。
