@@ -16,37 +16,37 @@ plan_level: full
 
 ### Wave 1（并行，无依赖）
 
-- [ ] task-01: 增加后端权限、筛选分页、别名与路由顺序测试（覆盖：FR-01, FR-02, FR-03, FR-04, FR-06, D-001@v1, D-002@v1, D-003@v1, D-005@v1, D-006@v1）
-- [ ] task-02: 增加前端 API client 类型契约与页面交互测试或可验证检查点（覆盖：FR-03, FR-04, FR-05, FR-06, D-004@v1, D-006@v1）
+- [x] task-01: 增加后端权限、筛选分页、别名与路由顺序测试（覆盖：FR-01, FR-02, FR-03, FR-04, FR-06, D-001@v1, D-002@v1, D-003@v1, D-005@v1, D-006@v1）
+- [x] task-02: 增加前端 API client 类型契约与页面交互测试或可验证检查点（覆盖：FR-03, FR-04, FR-05, FR-06, D-004@v1, D-006@v1）
 
 ### Wave 2（依赖 Wave 1）
 
-- [ ] task-03: 添加 display_alias 数据迁移与 ORM 字段（覆盖：FR-03, D-002@v1）
+- [x] task-03: 添加 display_alias 数据迁移与 ORM 字段（覆盖：FR-03, D-002@v1）
 
 ### Wave 3（依赖 Wave 2）
 
-- [ ] task-04: 扩展 daemon runtime DTO、分页查询、别名更新和平台管理员跨 owner 管理（覆盖：FR-01, FR-02, FR-03, FR-04, FR-06, D-001@v1, D-002@v1, D-003@v1, D-005@v1, D-006@v1）
-- [ ] task-05: 扩展 workspace DTO、列表筛选分页、owner 返回和别名更新（覆盖：FR-01, FR-02, FR-03, FR-04, FR-06, D-001@v1, D-002@v1, D-003@v1, D-006@v1）
+- [x] task-04: 扩展 daemon runtime DTO、分页查询、别名更新和平台管理员跨 owner 管理（覆盖：FR-01, FR-02, FR-03, FR-04, FR-06, D-001@v1, D-002@v1, D-003@v1, D-005@v1, D-006@v1）
+- [x] task-05: 扩展 workspace DTO、列表筛选分页、owner 返回和别名更新（覆盖：FR-01, FR-02, FR-03, FR-04, FR-06, D-001@v1, D-002@v1, D-003@v1, D-006@v1）
 
 ### Wave 4（依赖 Wave 3）
 
-- [ ] task-06: 更新前端 daemon/workspace API client 类型与方法（覆盖：FR-03, FR-04, FR-06, D-006@v1）
-- [ ] task-09: 运行并修正 backend 模块级测试与格式检查（覆盖：FR-01, FR-02, FR-03, FR-04, FR-06, D-001@v1, D-002@v1, D-003@v1, D-005@v1, D-006@v1）
+- [x] task-06: 更新前端 daemon/workspace API client 类型与方法（覆盖：FR-03, FR-04, FR-06, D-006@v1）
+- [x] task-09: 运行并修正 backend 模块级测试与格式检查（覆盖：FR-01, FR-02, FR-03, FR-04, FR-06, D-001@v1, D-002@v1, D-003@v1, D-005@v1, D-006@v1）
 
 > task-06（前端 client）与 task-09（后端验证）分属前端/后端，无相互依赖，可并行。task-09 依赖的后端实现 task-03/04/05 已在 Wave 2/3 完成。
 
 ### Wave 5（依赖 Wave 4）
 
-- [ ] task-07: 改造 /runtimes 页面筛选、人员搜索、分页、别名编辑和卡片样式（覆盖：FR-01, FR-03, FR-04, FR-05, D-003@v1, D-004@v1, D-006@v1）
-- [ ] task-08: 改造 /workspaces 页面与 WorkspaceCard 筛选、人员搜索、分页、别名编辑和卡片样式（覆盖：FR-02, FR-03, FR-04, FR-05, D-002@v1, D-003@v1, D-004@v1, D-006@v1）
+- [x] task-07: 改造 /runtimes 页面筛选、人员搜索、分页、别名编辑和卡片样式（覆盖：FR-01, FR-03, FR-04, FR-05, D-003@v1, D-004@v1, D-006@v1）
+- [x] task-08: 改造 /workspaces 页面与 WorkspaceCard 筛选、人员搜索、分页、别名编辑和卡片样式（覆盖：FR-02, FR-03, FR-04, FR-05, D-002@v1, D-003@v1, D-004@v1, D-006@v1）
 
 ### Wave 6（依赖 Wave 5）
 
-- [ ] task-10: 运行并修正 frontend 类型检查、lint 与相关测试（覆盖：FR-03, FR-04, FR-05, FR-06, D-004@v1, D-006@v1）
+- [x] task-10: 运行并修正 frontend 类型检查、lint 与相关测试（覆盖：FR-03, FR-04, FR-05, FR-06, D-004@v1, D-006@v1）
 
 ### Wave 7（依赖 Wave 6）
 
-- [ ] task-11: 更新变更文档与模块影响记录，完成 verify 前自检（覆盖：FR-01, FR-02, FR-03, FR-04, FR-05, FR-06, D-001@v1, D-002@v1, D-003@v1, D-004@v1, D-005@v1, D-006@v1）
+- [x] task-11: 更新变更文档与模块影响记录，完成 verify 前自检（覆盖：FR-01, FR-02, FR-03, FR-04, FR-05, FR-06, D-001@v1, D-002@v1, D-003@v1, D-004@v1, D-005@v1, D-006@v1）
 
 ## 任务总表
 
