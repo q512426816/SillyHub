@@ -2,6 +2,12 @@
 
 > execute/quick 执行中发现的坑暂存于此，用户审阅后归类到对应文件并更新 INDEX.md。
 
+## 2026-06-25 — execute 启动前主仓库规范文件必须 commit（worktree apply 前提）
+
+- `sillyspec run execute` 创建 worktree 时，baseline = 主仓库当前 HEAD + overlay（staged 文件）。若 brainstorm/plan 产出的规范文件（proposal/design/plan/tasks）staged 未 commit，`sillyspec worktree apply` 陷死循环：apply 第一校验要主仓库 clean（staged commit/stash），但 commit 规范使 HEAD 推进 → base hash 校验失败；stash 规范则 overlay 的 plan.md 在主仓库不存在 → patch 失败。
+- 正确做法：**execute 启动前先把规范文件 commit**（主仓库 clean），再 run execute（worktree baseline 基于规范已 commit 的 HEAD，apply 时主仓库 = base，校验通过）。
+- 本次 `2026-06-25-admin-users-org-tree` 因 execute 前规范未 commit，worktree apply 失败，改用 worktree→主仓库手动 cp（改动经 task-05/10 测试验证后 cp），属 workaround。
+
 ## 2026-06-03 — Claude Code PreToolUse hook 拦截 git commit
 
 - `.claude/settings.json` 是 Claude Code hook 配置，只会拦截 Claude Code 自己发起的工具调用；普通终端或 IDE 里的 `git commit` 仍然只走 Git hooks。

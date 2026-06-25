@@ -88,9 +88,7 @@ async def org_tree(db_session):
     parent = Organization(name="Parent", code="parent", status="active")
     db_session.add(parent)
     await db_session.flush()
-    child = Organization(
-        name="Child", code="child", status="active", parent_id=parent.id
-    )
+    child = Organization(name="Child", code="child", status="active", parent_id=parent.id)
     db_session.add(child)
     await db_session.commit()
     await db_session.refresh(parent)
@@ -898,8 +896,9 @@ async def test_multiple_null_emails_coexist(client: AsyncClient, auth_headers, d
 # ── 2026-06-25-admin-users-org-tree task-05: list_users 组织维度过滤 ────
 
 
-def _make_user(email: str, username: str, *, display_name: str | None = None,
-               status: str = "active") -> User:
+def _make_user(
+    email: str, username: str, *, display_name: str | None = None, status: str = "active"
+) -> User:
     """造非 admin User(参考 target_user fixture :28-34 + _hash_pw :479-482)。"""
     return User(
         email=email,
@@ -920,9 +919,7 @@ async def test_list_users_no_org_filter_returns_all(
     bound = _make_user("ofall-bound@example.com", "ofallbound")
     unbound = _make_user("ofall-free@example.com", "ofallfree")
     db_session.add_all([bound, unbound])
-    db_session.add_all(
-        [UserOrganization(user_id=bound.id, organization_id=parent.id)]
-    )
+    db_session.add_all([UserOrganization(user_id=bound.id, organization_id=parent.id)])
     await db_session.commit()
 
     resp = await client.get("/api/admin/users", headers=auth_headers)
@@ -995,9 +992,7 @@ async def test_list_users_filter_by_parent_include_children(
 
 
 @pytest.mark.asyncio
-async def test_list_users_filter_distinct(
-    client: AsyncClient, auth_headers, db_session, org_tree
-):
+async def test_list_users_filter_distinct(client: AsyncClient, auth_headers, db_session, org_tree):
     """AC-04 / D-004@v1 核心:一用户绑子树内多个组织 → distinct 只返回一次。
 
     exists 子查询无 join 无重复行,故同一用户即便同时绑 parent+child,
@@ -1014,9 +1009,7 @@ async def test_list_users_filter_distinct(
         [
             UserOrganization(user_id=dup_user.id, organization_id=parent.id),
             UserOrganization(user_id=dup_user.id, organization_id=child.id),
-            UserOrganization(
-                user_id=only_child_user.id, organization_id=child.id
-            ),
+            UserOrganization(user_id=only_child_user.id, organization_id=child.id),
         ]
     )
     await db_session.commit()
@@ -1047,9 +1040,7 @@ async def test_list_users_filter_combine_with_search(
     """
     parent, child = org_tree
     # 命中:在子树内 + display_name 含 "alice" + active
-    alice = _make_user(
-        "alice-org@example.com", "aliceorg", display_name="Alice InOrg"
-    )
+    alice = _make_user("alice-org@example.com", "aliceorg", display_name="Alice InOrg")
     # 不命中 q:在子树内 + active,但 display_name/email 不含 "alice"
     bob = _make_user("bob-org@example.com", "boborg", display_name="Bob InOrg")
     # 不命中 status:在子树内 + display_name 含 "alice",但 inactive
