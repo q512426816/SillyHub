@@ -24,7 +24,8 @@ export interface RoleBrief {
 
 export interface UserRead {
   id: string;
-  email: string;
+  username: string;
+  email: string | null;
   display_name: string | null;
   status: string;
   is_platform_admin: boolean;
@@ -41,7 +42,8 @@ export interface UserListResponse {
 }
 
 export interface UserCreateRequest {
-  email: string;
+  username: string;
+  email?: string | null;
   password: string;
   display_name?: string;
   is_platform_admin?: boolean;
@@ -51,6 +53,8 @@ export interface UserCreateRequest {
 }
 
 export interface UserUpdateRequest {
+  username?: string;
+  email?: string | null;
   display_name?: string;
   is_platform_admin?: boolean;
   status?: string;

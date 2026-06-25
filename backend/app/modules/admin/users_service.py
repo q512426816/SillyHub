@@ -132,25 +132,29 @@ class UserService:
     async def create_user(
         self,
         *,
-        email: str,
         password: str,
+        username: str,
+        email: str | None = None,
         display_name: str | None = None,
         is_platform_admin: bool = False,
         login_enabled: bool = True,
-        username: str | None = None,
         organization_ids: list[uuid.UUID] | None = None,
         role_ids: list[uuid.UUID] | None = None,
     ) -> User:
         self._set_audit_context()
         pw_hash = password_hasher.hash(password)
         now = datetime.now(UTC)
-        resolved_username = await self._resolve_username(username, email)
+        # username 必填且由用户明确指定,撞库应直接 409 报错让用户改,
+        # 不再自动加序号(D-004 契约:create 冲突 = 用户输入错误)。
+        resolved_username = username.strip().lower()
+        await self._assert_username_available(resolved_username)
+        normalized_email = email.lower().strip() if email else None
         user = User(
             id=uuid.uuid4(),
-            email=email.lower().strip(),
+            email=normalized_email,
             username=resolved_username,
             password_hash=pw_hash,
-            display_name=display_name or email.split("@", 1)[0],
+            display_name=display_name or resolved_username,
             status="active",
             is_platform_admin=is_platform_admin,
             login_enabled=login_enabled,
@@ -190,22 +194,59 @@ class UserService:
         log.info("user.created", email=user.email, user_id=str(user.id))
         return user
 
-    async def _resolve_username(self, username: str | None, email: str) -> str:
-        """username 留空则取 email 本地部分(@ 前)小写;前缀重复自动加序号(a/a2/a3…)。
+    async def _resolve_username(
+        self,
+        username: str,
+        email: str | None = None,
+        *,
+        exclude_id: uuid.UUID | None = None,
+    ) -> str:
+        """username 必填,小写归一;前缀重复自动加序号(a/a2/a3…)。
 
-        与旧用户迁移规则统一(D-001@V1)。
+        email 仅作兼容签名保留,不再参与 base 计算(username 必填,
+        短路安全,email=None 也不崩)。exclude_id 用于 update 改名时
+        排除自身,避免「把自己当成冲突」导致改名失败或被加序号。
+
+        注意:create_user / update_user 自 D-004 起不再调用本方法加序号
+        (用户明确指定的登录名冲突应 409 报错,不静默改名);本方法保留
+        供其他场景(如 bootstrap 自动生成账号)使用。
         """
-        base = (username or email.split("@", 1)[0]).strip().lower()
+        base = username.strip().lower()
         candidate = base
         suffix = 2
         while True:
-            exists = await self.session.execute(
-                select(User.id).where(User.username == candidate).limit(1)
-            )
+            stmt = select(User.id).where(User.username == candidate)
+            if exclude_id is not None:
+                stmt = stmt.where(User.id != exclude_id)
+            exists = await self.session.execute(stmt.limit(1))
             if exists.scalars().first() is None:
                 return candidate
             candidate = f"{base}{suffix}"
             suffix += 1
+
+    async def _assert_username_available(
+        self,
+        username: str,
+        *,
+        exclude_id: uuid.UUID | None = None,
+    ) -> None:
+        """username 冲突直接抛 409 USERNAME_ALREADY_TAKEN(D-004 契约)。
+
+        create/update 用户明确输入的登录名冲突 = 用户输入错误,应报错
+        让用户改,而不是静默加序号。``exclude_id`` 用于 update 改名时
+        排除自身。
+        """
+        stmt = (
+            select(User.id).where(User.username == username).where(col(User.deleted_at).is_(None))
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(User.id != exclude_id)
+        hit = await self.session.execute(stmt.limit(1))
+        if hit.scalars().first() is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "USERNAME_ALREADY_TAKEN", "username": username},
+            )
 
     async def update_user(
         self,
@@ -215,6 +256,8 @@ class UserService:
         is_platform_admin: bool | None = None,
         status: str | None = None,
         login_enabled: bool | None = None,
+        username: str | None = None,
+        email: str | None = None,
         organization_ids: list[uuid.UUID] | None = None,
         role_ids: list[uuid.UUID] | None = None,
     ) -> User:
@@ -246,6 +289,37 @@ class UserService:
                 )
 
         self._set_audit_context()
+
+        # ---- username 变更 + 唯一校验(D-004)----
+        # exclude_id 排除自身,避免「我现在的名字和我自己冲突」;
+        # 目标名已被他人占用 → 抛 409 USERNAME_ALREADY_TAKEN,不静默加序号改名。
+        if username is not None and username.strip().lower() != (target.username or ""):
+            resolved = username.strip().lower()
+            await self._assert_username_available(resolved, exclude_id=target_id)
+            target.username = resolved
+
+        # ---- email 变更 + 非空唯一校验(D-003)----
+        # None 表示「未传该字段」不动 email;空串视为「清空邮箱」(target.email=None)。
+        if email is not None:
+            normalized_email = email.lower().strip()
+            prev = (target.email or "").lower()
+            if normalized_email != prev:
+                if normalized_email:
+                    hit = await self.session.execute(
+                        select(User.id)
+                        .where(User.email == normalized_email)
+                        .where(User.id != target_id)
+                        .where(col(User.deleted_at).is_(None))
+                        .limit(1)
+                    )
+                    if hit.scalars().first() is not None:
+                        raise HTTPException(
+                            status_code=409,
+                            detail={"code": "EMAIL_ALREADY_TAKEN"},
+                        )
+                    target.email = normalized_email
+                else:
+                    target.email = None
 
         if display_name is not None:
             target.display_name = display_name
@@ -282,6 +356,8 @@ class UserService:
                         "is_platform_admin": is_platform_admin,
                         "status": status,
                         "login_enabled": login_enabled,
+                        "username": username,
+                        "email": email,
                     },
                     default=str,
                     ensure_ascii=False,

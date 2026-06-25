@@ -80,12 +80,11 @@ class AuthService:
         user_agent: str | None,
         ip: str | None,
     ) -> tuple[User, TokenPair]:
-        # 邮箱或账号登录:含 @ 走 email,否则走 username;统一小写处理。
+        # 纯登录名(username)登录(D-001):account 字段名保留(零契约改动),
+        # 后端当 username 查;不再识别 @ email。username 在 DB 与
+        # _resolve_username 中统一小写存储,此处同步 strip+lower。
         normalized = account.strip().lower()
-        if "@" in normalized:
-            user = await self._lookup_active_user_by_email(normalized)
-        else:
-            user = await self._lookup_active_user_by_username(normalized)
+        user = await self._lookup_active_user_by_username(normalized)
         if user is None or not password_hasher.verify(password, user.password_hash):
             # Constant message: no email enumeration.
             raise AuthInvalidCredentials("Invalid email or password.")

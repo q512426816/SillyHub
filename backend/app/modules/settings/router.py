@@ -145,6 +145,7 @@ async def create_user(
     target = await svc.create_user(
         email=payload.email,
         password=payload.password,
+        username=payload.username,
         display_name=payload.display_name,
         is_platform_admin=payload.is_platform_admin,
         login_enabled=payload.login_enabled,
@@ -168,6 +169,8 @@ async def update_user(
         is_platform_admin=payload.is_platform_admin,
         status=payload.status,
         login_enabled=payload.login_enabled,
+        username=payload.username,
+        email=payload.email,
         organization_ids=payload.organization_ids,
         role_ids=payload.role_ids,
     )

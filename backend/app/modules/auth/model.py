@@ -37,7 +37,11 @@ class User(BaseModel, table=True):
         default_factory=uuid.uuid4,
         sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
     )
-    email: str = Field(sa_column=Column(String(255), nullable=False))
+    # email 改为可选:支持 username-only 账号(D-001)。schema(Email Optional)
+    # 与 migration(users.email nullable,2026-06-24-username-login task-04)均已
+    # 同步,这里 ORM 列定义补齐 nullable=True,否则 SQLite create_all 仍按
+    # NOT NULL 建表,create/insert 无 email 用户会抛 IntegrityError。
+    email: str | None = Field(default=None, sa_column=Column(String(255), nullable=True))
     # 登录账号:支持邮箱或账号登录。ORM 层允许 NULL 仅为兼容测试 fixture(多 NULL
     # 不参与唯一索引);生产由迁移 NOT NULL + bootstrap/create_user 保证非空,
     # 留空时自动取 email 本地部分(@ 前) + 去重加序号。

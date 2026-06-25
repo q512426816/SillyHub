@@ -144,10 +144,10 @@ export default function AdminUsersPage() {
   ) => {
     if (drawer.mode === "create") {
       const created = await createUser(body as UserCreateRequest);
-      showToast(true, `用户 ${created.email} 已创建`);
+      showToast(true, `用户 ${userDisplay(created)} 已创建`);
     } else if (drawer.user) {
       const updated = await updateUser(drawer.user.id, body as UserUpdateRequest);
-      showToast(true, `用户 ${updated.email} 已更新`);
+      showToast(true, `用户 ${userDisplay(updated)} 已更新`);
     }
     setDrawer({ open: false, mode: "create" });
     await load();
@@ -159,7 +159,7 @@ export default function AdminUsersPage() {
     setConfirmDelete(null);
     try {
       await deleteUser(target.id);
-      showToast(true, `用户 ${target.email} 已删除`);
+      showToast(true, `用户 ${userDisplay(target)} 已删除`);
       await load();
     } catch (err) {
       const code = err instanceof ApiError ? err.code : "";
@@ -179,10 +179,10 @@ export default function AdminUsersPage() {
     try {
       if (u.login_enabled) {
         await disableUserLogin(u.id);
-        showToast(true, `已禁用 ${u.email} 的登录`);
+        showToast(true, `已禁用 ${userDisplay(u)} 的登录`);
       } else {
         await enableUserLogin(u.id);
-        showToast(true, `已启用 ${u.email} 的登录`);
+        showToast(true, `已启用 ${userDisplay(u)} 的登录`);
       }
       await load();
     } catch (err) {
@@ -199,14 +199,14 @@ export default function AdminUsersPage() {
 
   const columns: TableProps<UserRead>["columns"] = [
     {
-      title: "邮箱",
-      dataIndex: "email",
-      key: "email",
+      title: "登录名",
+      dataIndex: "username",
+      key: "username",
       render: (_v: unknown, u: UserRead) => {
         const isSelf = u.id === currentUserId;
         return (
           <span className="font-mono">
-            {u.email}
+            {u.username}
             {u.is_platform_admin && (
               <Tag color="success" className="ml-2">超管</Tag>
             )}
@@ -216,6 +216,16 @@ export default function AdminUsersPage() {
           </span>
         );
       },
+    },
+    {
+      title: "邮箱",
+      dataIndex: "email",
+      key: "email",
+      render: (v: string | null) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {v ?? "—"}
+        </span>
+      ),
     },
     {
       title: "显示名",
@@ -359,7 +369,7 @@ export default function AdminUsersPage() {
             <input
               value={searchInput}
               onChange={(e) => handleSearchInput(e.target.value)}
-              placeholder="搜索 email / 显示名…"
+              placeholder="搜索 登录名 / 显示名…"
               className={`w-72 ${inputCls}`}
             />
             <select
@@ -485,7 +495,7 @@ function DeleteConfirm({
       <div className="w-96 rounded-md border bg-background p-5 shadow-lg">
         <h3 className="text-sm font-semibold">确认删除用户？</h3>
         <p className="mt-2 text-xs text-muted-foreground">
-          将删除用户 <span className="font-mono">{user.email}</span>。该操作不可恢复。
+          将删除用户 <span className="font-mono">{userDisplay(user)}</span>。该操作不可恢复。
         </p>
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="outline" size="sm" onClick={onCancel}>取消</Button>
@@ -542,7 +552,7 @@ function ResetPasswordDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
       <div className="w-[440px] rounded-md border bg-background p-5 shadow-lg">
-        <h3 className="text-sm font-semibold">重置 {user.email} 的密码</h3>
+        <h3 className="text-sm font-semibold">重置 {userDisplay(user)} 的密码</h3>
         {!result ? (
           <div className="mt-3 space-y-3">
             <label className="flex items-center gap-2 text-xs">
@@ -664,7 +674,7 @@ function SessionsDrawer({
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
       <div className="fixed right-0 top-0 z-50 flex h-full w-[520px] flex-col border-l bg-background shadow-xl">
         <div className="flex items-center justify-between border-b px-4 py-3">
-          <h3 className="text-sm font-medium">{user.email} 的会话</h3>
+          <h3 className="text-sm font-medium">{userDisplay(user)} 的会话</h3>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
             ✕
           </button>
@@ -755,7 +765,7 @@ function AuditDrawer({
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
       <div className="fixed right-0 top-0 z-50 flex h-full w-[560px] flex-col border-l bg-background shadow-xl">
         <div className="flex items-center justify-between border-b px-4 py-3">
-          <h3 className="text-sm font-medium">{user.email} 的审计日志（近 50 条）</h3>
+          <h3 className="text-sm font-medium">{userDisplay(user)} 的审计日志（近 50 条）</h3>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
             ✕
           </button>
@@ -801,4 +811,13 @@ function fmtDate(s: string): string {
   } catch {
     return s;
   }
+}
+
+/** 用户展示名：username 优先，email 兜底，全空返回占位。
+ *  username 后端必填（task-02/06），正常必有值；兜底仅防极端脏数据，避免 UI 出现空白/undefined。 */
+function userDisplay(u: {
+  username?: string | null;
+  email?: string | null;
+}): string {
+  return u.username || u.email || "（未命名）";
 }

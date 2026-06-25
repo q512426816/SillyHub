@@ -32,7 +32,7 @@ class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    email: str
+    email: str | None
     username: str | None
     display_name: str | None
     status: str

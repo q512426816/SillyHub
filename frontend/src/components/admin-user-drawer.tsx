@@ -43,6 +43,7 @@ export function AdminUserDrawer({
   canLoginManage,
   currentUserId,
 }: AdminUserDrawerProps) {
+  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -58,13 +59,15 @@ export function AdminUserDrawer({
     setError(null);
     setPassword("");
     if (mode === "edit" && user) {
-      setEmail(user.email);
+      setUsername(user.username ?? "");
+      setEmail(user.email ?? "");
       setDisplayName(user.display_name ?? "");
       setIsPlatformAdmin(user.is_platform_admin);
       setLoginEnabled(user.login_enabled);
       setOrganizationIds(user.organizations.map((o) => o.id));
       setRoleIds(user.roles.map((r) => r.id));
     } else {
+      setUsername("");
       setEmail("");
       setDisplayName("");
       setIsPlatformAdmin(false);
@@ -77,9 +80,10 @@ export function AdminUserDrawer({
   if (!open) return null;
 
   const isSelf = !!user && user.id === currentUserId;
-  const emailValid = EMAIL_PATTERN.test(email);
+  const usernameValid = username.trim().length >= 3;
+  const emailValid = email.trim() === "" || EMAIL_PATTERN.test(email);
   const passwordValid = mode === "edit" || password.length >= 8;
-  const formValid = emailValid && passwordValid;
+  const formValid = usernameValid && emailValid && passwordValid;
 
   const toggleOrg = (id: string) => {
     setOrganizationIds((prev) =>
@@ -99,7 +103,8 @@ export function AdminUserDrawer({
     try {
       if (mode === "create") {
         const body: UserCreateRequest = {
-          email,
+          username,
+          email: email.trim() || null,
           password,
           is_platform_admin: isPlatformAdmin,
           login_enabled: loginEnabled,
@@ -110,6 +115,11 @@ export function AdminUserDrawer({
         await onSubmit(body);
       } else if (user) {
         const body: UserUpdateRequest = {
+          username: username !== user.username ? username : undefined,
+          email:
+            email !== (user.email ?? "")
+              ? email.trim() || null
+              : undefined,
           display_name: displayName || undefined,
           is_platform_admin: isPlatformAdmin,
           login_enabled: loginEnabled,
@@ -131,7 +141,7 @@ export function AdminUserDrawer({
       <div className="fixed right-0 top-0 z-50 flex h-full w-[520px] flex-col border-l bg-background shadow-xl">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <h3 className="text-sm font-medium">
-            {mode === "create" ? "新建用户" : `编辑用户 ${user?.email}`}
+            {mode === "create" ? "新建用户" : `编辑用户 ${user?.username}`}
             {isSelf && (
               <span className="ml-2 text-[11px] text-amber-600">
                 （您正在编辑自己，部分操作受限）
@@ -148,19 +158,39 @@ export function AdminUserDrawer({
 
         <div className="flex-1 space-y-3 overflow-y-auto p-4">
           <div>
-            <label className="text-[11px] text-muted-foreground">邮箱</label>
+            <label className="text-[11px] text-muted-foreground">
+              登录名 *
+            </label>
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              disabled={!canWrite}
+              aria-label="登录名"
+              className={`mt-0.5 ${inputCls} ${
+                !usernameValid && username ? "border-destructive" : ""
+              }`}
+            />
+            {!usernameValid && username && (
+              <p className="mt-1 text-[10px] text-destructive">
+                登录名至少 3 位
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="text-[11px] text-muted-foreground">
+              邮箱（可选）
+            </label>
             <input
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              disabled={mode === "edit" || !canWrite}
+              disabled={!canWrite}
               aria-label="邮箱"
               className={`mt-0.5 ${inputCls} ${
-                mode === "create" && !emailValid && email
-                  ? "border-destructive"
-                  : ""
+                email && !emailValid ? "border-destructive" : ""
               }`}
             />
-            {mode === "create" && !emailValid && email && (
+            {email && !emailValid && (
               <p className="mt-1 text-[10px] text-destructive">
                 邮箱格式不合法
               </p>

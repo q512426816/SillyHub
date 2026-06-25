@@ -42,7 +42,7 @@ export default function LoginPage() {
       if (raw) {
         const cached = JSON.parse(raw) as Partial<LoginFormValues>;
         form.setFieldsValue({
-          account: cached.account ?? "admin@sillyhub.local",
+          account: cached.account ?? "admin",
           password: cached.password ?? "admin123",
           remember: true,
         });
@@ -137,7 +137,7 @@ export default function LoginPage() {
               <div className="mb-6">
                 <h1 className="text-2xl font-bold text-slate-900">账号登录</h1>
                 <p className="mt-1 text-sm text-slate-500">
-                  使用邮箱或账号访问平台
+                  使用登录名访问平台
                 </p>
               </div>
 
@@ -161,12 +161,12 @@ export default function LoginPage() {
                 </Form.Item>
 
                 <Form.Item
-                  label="邮箱 / 账号"
+                  label="登录名"
                   name="account"
-                  rules={[{ required: true, message: "请输入邮箱或账号" }]}
+                  rules={[{ required: true, message: "请输入登录名" }]}
                 >
                   <Input
-                    placeholder="邮箱或账号"
+                    placeholder="登录名"
                     autoComplete="username"
                     allowClear
                   />

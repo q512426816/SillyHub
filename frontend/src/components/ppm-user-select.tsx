@@ -107,7 +107,7 @@ const USER_ADAPTER: Adapter = {
       total,
       items: items.map((u) => ({
         value: u.id,
-        label: u.display_name || u.email,
+        label: u.display_name || u.email || u.username || u.id,
         raw: u,
       })),
     };

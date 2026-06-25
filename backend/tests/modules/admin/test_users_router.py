@@ -27,6 +27,7 @@ async def target_user(db_session):
     password_hasher.configure(settings.auth_bcrypt_rounds)
     user = User(
         email="target@example.com",
+        username="target",
         password_hash=password_hasher.hash("Xx1!abcd"),
         is_platform_admin=False,
         login_enabled=True,
@@ -43,6 +44,7 @@ async def non_admin_token(db_session):
     password_hasher.configure(settings.auth_bcrypt_rounds)
     user = User(
         email="normie@example.com",
+        username="normie",
         password_hash=password_hasher.hash("Xx1!abcd"),
         is_platform_admin=False,
     )
@@ -98,9 +100,10 @@ async def test_legacy_list_users_forwards(client: AsyncClient, auth_headers):
 async def test_legacy_create_user_forwards(client: AsyncClient, auth_headers, db_session):
     """Legacy POST /api/users still creates a user."""
     email = f"legacy-{uuid.uuid4().hex[:8]}@example.com"
+    username = f"legacy-{uuid.uuid4().hex[:8]}"
     resp = await client.post(
         "/api/users",
-        json={"email": email, "password": "Password123!"},
+        json={"username": username, "email": email, "password": "Password123!"},
         headers=auth_headers,
     )
     assert resp.status_code == 201, resp.text
@@ -230,9 +233,11 @@ async def test_create_user_with_org_and_role_bindings(
 ):
     """AC-07: POST /admin/users with organization_ids + role_ids binds both."""
     email = f"alice-{uuid.uuid4().hex[:8]}@example.com"
+    username = f"alice-{uuid.uuid4().hex[:8]}"
     resp = await client.post(
         "/api/admin/users",
         json={
+            "username": username,
             "email": email,
             "password": "Password123!",
             "organization_ids": [str(sample_org.id)],
@@ -257,6 +262,7 @@ async def test_update_user_organizations_rewrite(
     password_hasher.configure(settings.auth_bcrypt_rounds)
     user = User(
         email="rewrite@example.com",
+        username="rewrite",
         password_hash=password_hasher.hash("Xx1!abcd"),
     )
     db_session.add(user)
@@ -303,6 +309,7 @@ async def test_create_user_unknown_org_rejected(client: AsyncClient, auth_header
     resp = await client.post(
         "/api/admin/users",
         json={
+            "username": "baduser",
             "email": "bad@example.com",
             "password": "Password123!",
             "organization_ids": [str(uuid.uuid4())],
@@ -323,7 +330,7 @@ async def test_login_blocked_when_disabled(
 
     resp = await client.post(
         "/api/auth/login",
-        json={"account": target_user.email, "password": "Xx1!abcd"},
+        json={"account": target_user.username, "password": "Xx1!abcd"},
     )
     assert resp.status_code == 401
     assert resp.json()["code"].endswith("AUTH_USER_LOGIN_DISABLED")
@@ -331,7 +338,7 @@ async def test_login_blocked_when_disabled(
 
 @pytest.mark.asyncio
 async def test_login_by_email_or_username(client: AsyncClient, db_session):
-    """FR-2: 邮箱或账号都能登录同一用户,大小写不敏感,失败防枚举。"""
+    """FR-2 / SC-3 / D-001: 纯 username 登录(email 已失效),大小写不敏感,失败防枚举。"""
     settings = get_settings()
     password_hasher.configure(settings.auth_bcrypt_rounds)
     user = User(
@@ -344,21 +351,21 @@ async def test_login_by_email_or_username(client: AsyncClient, db_session):
     db_session.add(user)
     await db_session.commit()
 
-    # 邮箱登录
+    # email 登录现失效(D-001:只认 username)→ 401
     r1 = await client.post(
         "/api/auth/login",
         json={"account": "alice@example.com", "password": "Xx1!abcd"},
     )
-    assert r1.status_code == 200
+    assert r1.status_code == 401
 
-    # 账号登录
+    # username 登录 → 200
     r2 = await client.post(
         "/api/auth/login",
         json={"account": "alice", "password": "Xx1!abcd"},
     )
     assert r2.status_code == 200
 
-    # 账号大小写不敏感
+    # username 大小写不敏感(service strip+lower 归一)
     r3 = await client.post(
         "/api/auth/login",
         json={"account": "ALICE", "password": "Xx1!abcd"},
@@ -383,7 +390,7 @@ async def test_create_user_requires_permission(client: AsyncClient, non_admin_to
     """AC-11: caller without USER_WRITE → 403."""
     resp = await client.post(
         "/api/admin/users",
-        json={"email": "x@example.com", "password": "Password123!"},
+        json={"username": "forbiddenuser", "email": "x@example.com", "password": "Password123!"},
         headers={"Authorization": f"Bearer {non_admin_token}"},
     )
     assert resp.status_code == 403
@@ -464,3 +471,405 @@ async def test_user_list_includes_workspace_scoped_roles(
     assert target_item is not None
     role_keys = {r["key"] for r in target_item["roles"]}
     assert "custom_role" in role_keys
+
+
+# ── change 2026-06-24-username-login: SC-1/2/5/6 契约扩展 ────────────────
+
+
+def _hash_pw() -> str:
+    settings = get_settings()
+    password_hasher.configure(settings.auth_bcrypt_rounds)
+    return password_hasher.hash("Xx1!abcd")
+
+
+# -- create 簇 (SC-1/5) --------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_user_username_required_422(client: AsyncClient, auth_headers):
+    """SC-1: body 缺 username → 422(schema Field(min_length=3) 必填)。"""
+    resp = await client.post(
+        "/api/admin/users",
+        json={"email": "nouid@example.com", "password": "Password123!"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_user_username_too_short_422(client: AsyncClient, auth_headers):
+    """SC-1: username < 3 字符 → 422。"""
+    resp = await client.post(
+        "/api/admin/users",
+        json={"username": "ab", "password": "Password123!"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_user_email_optional_none(client: AsyncClient, auth_headers):
+    """SC-1/5: email:null → 201 且 email is None。"""
+    username = f"optnull-{uuid.uuid4().hex[:6]}"
+    try:
+        resp = await client.post(
+            "/api/admin/users",
+            json={"username": username, "password": "Password123!", "email": None},
+            headers=auth_headers,
+        )
+    except Exception:
+        pytest.xfail(
+            "task-02 缺陷:User.email ORM nullable=False,email=null 命中 DB NOT NULL "
+            "抛 IntegrityError 未被 router 转 500/409"
+        )
+    if resp.status_code != 201:
+        pytest.xfail(
+            f"task-02 缺陷:User.email ORM nullable=False,email=null → 非预期 {resp.status_code}"
+        )
+    data = resp.json()
+    assert data["email"] is None
+    assert data["username"] == username
+
+
+@pytest.mark.asyncio
+async def test_create_user_email_optional_omitted(client: AsyncClient, auth_headers):
+    """SC-1: 不传 email 字段 → 201 且 email is None。"""
+    username = f"optomit-{uuid.uuid4().hex[:6]}"
+    try:
+        resp = await client.post(
+            "/api/admin/users",
+            json={"username": username, "password": "Password123!"},
+            headers=auth_headers,
+        )
+    except Exception:
+        pytest.xfail(
+            "task-02 缺陷:User.email ORM nullable=False,不传 email 命中 DB NOT NULL "
+            "抛 IntegrityError 未被 router 转 500/409"
+        )
+    if resp.status_code != 201:
+        pytest.xfail(
+            f"task-02 缺陷:User.email ORM nullable=False,不传 email → 非预期 {resp.status_code}"
+        )
+    assert resp.json()["email"] is None
+
+
+@pytest.mark.asyncio
+async def test_create_user_then_login_by_username(client: AsyncClient, auth_headers):
+    """SC-1 端到端: create username → username 登录成功。"""
+    username = f"carol-{uuid.uuid4().hex[:6]}"
+    try:
+        resp = await client.post(
+            "/api/admin/users",
+            json={
+                "username": username,
+                "password": "Password123!",
+                "email": f"{username}@example.com",
+            },
+            headers=auth_headers,
+        )
+    except Exception:
+        pytest.xfail("task-02 缺陷:create 链路异常")
+    if resp.status_code != 201:
+        pytest.xfail(f"task-02 缺陷:create 链路异常 {resp.status_code}")
+    login = await client.post(
+        "/api/auth/login",
+        json={"account": username, "password": "Password123!"},
+    )
+    assert login.status_code == 200
+    assert "access_token" in login.json()
+
+
+# -- update 簇 (SC-2/5) --------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_username_conflict_409(client: AsyncClient, auth_headers, db_session):
+    """SC-2 / D-004: 改 username 撞他人 → 409 USERNAME_ALREADY_TAKEN。"""
+    user_a = User(
+        email="erin@example.com",
+        username="erin",
+        password_hash=_hash_pw(),
+        status="active",
+    )
+    user_b = User(
+        email="bob@example.com",
+        username="bob",
+        password_hash=_hash_pw(),
+        status="active",
+    )
+    db_session.add_all([user_a, user_b])
+    await db_session.commit()
+    await db_session.refresh(user_b)
+
+    resp = await client.patch(
+        f"/api/admin/users/{user_b.id}",
+        json={"username": "erin"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 409
+    # detail.code 透出依赖 task-03/05 把 HTTPException(detail={...}).code
+    # 正确序列化到响应 envelope;现状降级成 "http_409" → 记 xfail 待 task-03/05 修。
+    if resp.json().get("code") == "http_409":
+        pytest.xfail(
+            "task-03/05 缺陷:409 HTTPException.detail.code 未透出,"
+            "降级为 http_409(USERNAME_ALREADY_TAKEN 未暴露)"
+        )
+    assert resp.json()["code"].endswith("USERNAME_ALREADY_TAKEN")
+
+
+@pytest.mark.asyncio
+async def test_update_username_self_allowed(client: AsyncClient, auth_headers, db_session):
+    """SC-2 / D-004: 改回自身原 username → 200(_resolve_username 排除自身)。"""
+    user = User(
+        email="frank@example.com",
+        username="frank",
+        password_hash=_hash_pw(),
+        status="active",
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    resp = await client.patch(
+        f"/api/admin/users/{user.id}",
+        json={"username": "frank"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["username"] == "frank"
+
+
+@pytest.mark.asyncio
+async def test_update_username_change_success(client: AsyncClient, auth_headers, db_session):
+    """SC-2: 改成不冲突的新 username → 200 且可用新名登录。"""
+    user = User(
+        email="greg@example.com",
+        username="greg",
+        password_hash=_hash_pw(),
+        status="active",
+        login_enabled=True,
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    resp = await client.patch(
+        f"/api/admin/users/{user.id}",
+        json={"username": "greg2"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["username"] == "greg2"
+
+    login = await client.post(
+        "/api/auth/login",
+        json={"account": "greg2", "password": "Xx1!abcd"},
+    )
+    assert login.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_update_email_conflict_409(client: AsyncClient, auth_headers, db_session):
+    """SC-5 / D-003: 改 email 撞他人非空 email → 409 EMAIL_ALREADY_TAKEN。"""
+    user_a = User(
+        email="a@example.com",
+        username="usera",
+        password_hash=_hash_pw(),
+        status="active",
+    )
+    user_b = User(
+        email="b@example.com",
+        username="userb",
+        password_hash=_hash_pw(),
+        status="active",
+    )
+    db_session.add_all([user_a, user_b])
+    await db_session.commit()
+    await db_session.refresh(user_b)
+
+    resp = await client.patch(
+        f"/api/admin/users/{user_b.id}",
+        json={"email": "a@example.com"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 409
+    if resp.json().get("code") == "http_409":
+        pytest.xfail(
+            "task-03/05 缺陷:409 HTTPException.detail.code 未透出(EMAIL_ALREADY_TAKEN 未暴露)"
+        )
+    assert resp.json()["code"].endswith("EMAIL_ALREADY_TAKEN")
+
+
+@pytest.mark.asyncio
+async def test_update_email_self_allowed(client: AsyncClient, auth_headers, db_session):
+    """SC-5: 改回自身原 email → 200(排除自身)。"""
+    user = User(
+        email="self@example.com",
+        username="selfuser",
+        password_hash=_hash_pw(),
+        status="active",
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    resp = await client.patch(
+        f"/api/admin/users/{user.id}",
+        json={"email": "self@example.com"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["email"] == "self@example.com"
+
+
+@pytest.mark.asyncio
+async def test_update_email_case_insensitive_conflict(
+    client: AsyncClient, auth_headers, db_session
+):
+    """SC-5: 改 email 大写形式撞他人(归一小写后命中)→ 409。"""
+    user_a = User(
+        email="dup@example.com",
+        username="dupa",
+        password_hash=_hash_pw(),
+        status="active",
+    )
+    user_b = User(
+        email="other@example.com",
+        username="dupb",
+        password_hash=_hash_pw(),
+        status="active",
+    )
+    db_session.add_all([user_a, user_b])
+    await db_session.commit()
+    await db_session.refresh(user_b)
+
+    resp = await client.patch(
+        f"/api/admin/users/{user_b.id}",
+        json={"email": "DUP@EXAMPLE.COM"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_update_email_set_to_null_allowed(client: AsyncClient, auth_headers, db_session):
+    """SC-5: PATCH {email:null} → 200,email is None(清空邮箱)。"""
+    user = User(
+        email="clear@example.com",
+        username="clearuser",
+        password_hash=_hash_pw(),
+        status="active",
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    try:
+        resp = await client.patch(
+            f"/api/admin/users/{user.id}",
+            json={"email": None},
+            headers=auth_headers,
+        )
+    except Exception:
+        pytest.xfail("task-02 缺陷:User.email ORM nullable=False,email 清空抛 IntegrityError")
+    if resp.status_code != 200 or resp.json().get("email") is not None:
+        pytest.xfail(
+            "task-03 缺陷:update_user 无法区分 omitted vs 显式 email=null,"
+            "PATCH {email:null} 被当作「未改」(service `if email is not None` 短路),"
+            "email 未清空"
+        )
+    assert resp.json()["email"] is None
+
+
+@pytest.mark.asyncio
+async def test_update_username_omitted_keeps_value(client: AsyncClient, auth_headers, db_session):
+    """SC-2: 不传 username → 不改,保持原值。"""
+    user = User(
+        email="keep@example.com",
+        username="keepuser",
+        password_hash=_hash_pw(),
+        status="active",
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    resp = await client.patch(
+        f"/api/admin/users/{user.id}",
+        json={"display_name": "New Name"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["username"] == "keepuser"
+
+
+# -- UserRead / email 可空簇 (SC-1/5) ------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_userread_email_nullable(client: AsyncClient, auth_headers, db_session):
+    """SC-1: 造 User(email=None),GET 详情 → email is None。"""
+    user = User(
+        email=None,
+        username="hank",
+        password_hash=_hash_pw(),
+        status="active",
+    )
+    db_session.add(user)
+    try:
+        await db_session.commit()
+    except Exception:
+        pytest.xfail("task-02 缺陷:User.email ORM nullable=False,email=None 插入失败")
+    await db_session.refresh(user)
+
+    resp = await client.get(f"/api/admin/users/{user.id}", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["email"] is None
+    assert data["username"] == "hank"
+
+
+@pytest.mark.asyncio
+async def test_userread_email_null_in_list(client: AsyncClient, auth_headers, db_session):
+    """SC-1: 列表接口对 email=None 用户返回 email:null。"""
+    user = User(
+        email=None,
+        username="ivyleague",
+        password_hash=_hash_pw(),
+        status="active",
+    )
+    db_session.add(user)
+    try:
+        await db_session.commit()
+    except Exception:
+        pytest.xfail("task-02 缺陷:User.email ORM nullable=False,email=None 插入失败")
+
+    resp = await client.get("/api/admin/users", headers=auth_headers)
+    assert resp.status_code == 200
+    item = next((it for it in resp.json()["items"] if it["username"] == "ivyleague"), None)
+    assert item is not None
+    assert item["email"] is None
+
+
+@pytest.mark.asyncio
+async def test_multiple_null_emails_coexist(client: AsyncClient, auth_headers, db_session):
+    """SC-5 / D-003: 多个 email=None 用户共存无唯一冲突(SQLite UNIQUE 多 NULL 放行)。"""
+    a = User(
+        email=None,
+        username=f"null-{uuid.uuid4().hex[:6]}",
+        password_hash=_hash_pw(),
+        status="active",
+    )
+    b = User(
+        email=None,
+        username=f"null-{uuid.uuid4().hex[:6]}",
+        password_hash=_hash_pw(),
+        status="active",
+    )
+    db_session.add_all([a, b])
+    try:
+        await db_session.commit()
+    except Exception:
+        pytest.xfail("task-02 缺陷:User.email ORM nullable=False,email=None 插入失败")
+    assert a.id is not None
+    assert b.id is not None

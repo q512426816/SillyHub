@@ -422,6 +422,8 @@ async def update_user(
         is_platform_admin=payload.is_platform_admin,
         status=payload.status,
         login_enabled=payload.login_enabled,
+        username=payload.username,
+        email=payload.email,
         organization_ids=payload.organization_ids,
         role_ids=payload.role_ids,
     )

@@ -42,6 +42,7 @@ function makeRole(id: string, key: string, name: string): RoleRead {
 function makeUser(overrides: Partial<UserRead> = {}): UserRead {
   return {
     id: "u1",
+    username: "alice",
     email: "alice@example.com",
     display_name: "Alice",
     status: "active",
@@ -66,7 +67,7 @@ const baseProps = {
 };
 
 describe("AdminUserDrawer", () => {
-  it("create mode renders email + password + display_name fields", () => {
+  it("create mode renders username + email + password + display_name fields", () => {
     render(
       <AdminUserDrawer
         {...baseProps}
@@ -74,7 +75,8 @@ describe("AdminUserDrawer", () => {
         mode="create"
       />,
     );
-    expect(screen.getByText("邮箱")).toBeInTheDocument();
+    expect(screen.getByLabelText("登录名")).toBeInTheDocument();
+    expect(screen.getByLabelText("邮箱")).toBeInTheDocument();
     expect(screen.getByText(/密码（至少 8 位）/)).toBeInTheDocument();
     expect(screen.getByText(/显示名（可选）/)).toBeInTheDocument();
   });
@@ -98,6 +100,7 @@ describe("AdminUserDrawer", () => {
         open
         mode="edit"
         user={makeUser({
+          username: "alice",
           display_name: "Alice",
           is_platform_admin: true,
           organizations: [{ id: "o1", name: "Acme", code: "acme" }],
@@ -106,13 +109,16 @@ describe("AdminUserDrawer", () => {
       />,
     );
     expect(
+      (screen.getByLabelText("登录名") as HTMLInputElement).value,
+    ).toBe("alice");
+    expect(
       (screen.getByDisplayValue("Alice") as HTMLInputElement).value,
     ).toBe("Alice");
     const orgCheckbox = screen.getByLabelText("acme") as HTMLInputElement;
     expect(orgCheckbox.checked).toBe(true);
   });
 
-  it("create submit is disabled when email invalid or password too short", () => {
+  it("create submit is disabled when username missing or password too short", () => {
     render(
       <AdminUserDrawer
         {...baseProps}
@@ -134,8 +140,8 @@ describe("AdminUserDrawer", () => {
         mode="create"
       />,
     );
-    fireEvent.change(screen.getByLabelText("邮箱"), {
-      target: { value: "bob@example.com" },
+    fireEvent.change(screen.getByLabelText("登录名"), {
+      target: { value: "bob" },
     });
     fireEvent.change(screen.getByLabelText("密码"), {
       target: { value: "Password1!" },
@@ -145,8 +151,141 @@ describe("AdminUserDrawer", () => {
     fireEvent.click(submitBtn);
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     const body = onSubmit.mock.calls[0]![0];
-    expect(body.email).toBe("bob@example.com");
+    expect(body.username).toBe("bob");
     expect(body.password).toBe("Password1!");
+  });
+
+  it("test_username_required_create: create mode disables submit when username empty or too short", async () => {
+    render(
+      <AdminUserDrawer
+        {...baseProps}
+        open
+        mode="create"
+      />,
+    );
+    const submitBtn = screen.getByText("保存") as HTMLButtonElement;
+    // 仅填合法 password，username 空 → 保存禁用
+    fireEvent.change(screen.getByLabelText("密码"), {
+      target: { value: "Password1!" },
+    });
+    expect(submitBtn.disabled).toBe(true);
+    // username < 3 位 → 保存禁用
+    fireEvent.change(screen.getByLabelText("登录名"), {
+      target: { value: "ab" },
+    });
+    expect(submitBtn.disabled).toBe(true);
+    // username >= 3 位 → 保存启用
+    fireEvent.change(screen.getByLabelText("登录名"), {
+      target: { value: "alice" },
+    });
+    await waitFor(() => expect(submitBtn.disabled).toBe(false));
+  });
+
+  it("test_username_editable: edit mode allows editing username field", () => {
+    render(
+      <AdminUserDrawer
+        {...baseProps}
+        open
+        mode="edit"
+        user={makeUser({ username: "alice" })}
+      />,
+    );
+    const usernameInput = screen.getByLabelText("登录名") as HTMLInputElement;
+    // 初始回填 user.username
+    expect(usernameInput.value).toBe("alice");
+    // 可编辑（非 isSelf）
+    expect(usernameInput.disabled).toBe(false);
+    // 修改为新值
+    fireEvent.change(usernameInput, { target: { value: "alice2" } });
+    expect(usernameInput.value).toBe("alice2");
+  });
+
+  it("test_email_optional: create mode allows empty email and submits without email", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AdminUserDrawer
+        {...baseProps}
+        onSubmit={onSubmit}
+        open
+        mode="create"
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("登录名"), {
+      target: { value: "bob" },
+    });
+    fireEvent.change(screen.getByLabelText("密码"), {
+      target: { value: "Password1!" },
+    });
+    // email 留空
+    const submitBtn = screen.getByText("保存") as HTMLButtonElement;
+    await waitFor(() => expect(submitBtn.disabled).toBe(false));
+    fireEvent.click(submitBtn);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    const body = onSubmit.mock.calls[0]![0];
+    expect(body.username).toBe("bob");
+    // 空传 null
+    expect(body.email).toBeFalsy();
+  });
+
+  it("test_email_format_when_present: create mode validates email format only when email is non-empty", async () => {
+    render(
+      <AdminUserDrawer
+        {...baseProps}
+        open
+        mode="create"
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("登录名"), {
+      target: { value: "bob" },
+    });
+    fireEvent.change(screen.getByLabelText("密码"), {
+      target: { value: "Password1!" },
+    });
+    const submitBtn = screen.getByText("保存") as HTMLButtonElement;
+    // ① email 留空 → 保存启用
+    await waitFor(() => expect(submitBtn.disabled).toBe(false));
+    // ② email 非法 → 保存禁用 + 红字
+    fireEvent.change(screen.getByLabelText("邮箱"), {
+      target: { value: "bad-email" },
+    });
+    await waitFor(() => expect(submitBtn.disabled).toBe(true));
+    expect(screen.getByText("邮箱格式不合法")).toBeInTheDocument();
+    // ③ email 合法 → 保存启用 + 红字消失
+    fireEvent.change(screen.getByLabelText("邮箱"), {
+      target: { value: "bob@example.com" },
+    });
+    await waitFor(() => expect(submitBtn.disabled).toBe(false));
+    expect(screen.queryByText("邮箱格式不合法")).not.toBeInTheDocument();
+  });
+
+  it("test_username_conflict_error_display: create mode displays error and keeps input when onSubmit rejects", async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new Error("登录名已被占用"));
+    render(
+      <AdminUserDrawer
+        {...baseProps}
+        onSubmit={onSubmit}
+        open
+        mode="create"
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("登录名"), {
+      target: { value: "alice" },
+    });
+    fireEvent.change(screen.getByLabelText("密码"), {
+      target: { value: "Password1!" },
+    });
+    const submitBtn = screen.getByText("保存") as HTMLButtonElement;
+    await waitFor(() => expect(submitBtn.disabled).toBe(false));
+    fireEvent.click(submitBtn);
+    await waitFor(() =>
+      expect(screen.getByText("登录名已被占用")).toBeInTheDocument(),
+    );
+    // 输入保留，便于改后重试
+    const usernameInput = screen.getByLabelText("登录名") as HTMLInputElement;
+    expect(usernameInput.value).toBe("alice");
+    // onSubmit 被调用一次、body.username === "alice"
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0]![0].username).toBe("alice");
   });
 
   it("self-edit shows banner and disables self-demotion", () => {

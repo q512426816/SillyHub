@@ -143,6 +143,7 @@ describe("admin API client", () => {
       201,
     );
     await createUser({
+      username: "alice",
       email: "x@y.z",
       password: "Password123!",
     });

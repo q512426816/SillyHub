@@ -58,7 +58,7 @@ async function buildLabelMap(
   switch (res) {
     case "user": {
       const { items } = await listUsers({ limit: 1000 });
-      for (const u of items) map.set(u.id, u.display_name || u.email);
+      for (const u of items) map.set(u.id, u.display_name || u.email || u.username || u.id);
       break;
     }
     case "role": {

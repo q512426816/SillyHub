@@ -145,7 +145,7 @@ async def test_refresh_within_grace_does_not_revoke_other_sessions(db_session: A
     service = AuthService(db_session, settings=settings)
 
     user = await _make_user(db_session, email="u1@example.com")
-    t1 = await _login_for_refresh_token(service, account="u1@example.com")
+    t1 = await _login_for_refresh_token(service, account="u1")
     sx = await _make_other_active_session(db_session, user_id=user.id)
 
     # 正常 rotate T1 → 旧行 revoked_at 被写(但 service 现状不写 rotated_at)。

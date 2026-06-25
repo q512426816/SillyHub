@@ -189,9 +189,9 @@ class UserCreateRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    email: str = Field(min_length=3)
+    email: str | None = None
     password: str = Field(min_length=8)
-    username: str | None = None
+    username: str = Field(min_length=3)
     display_name: str | None = None
     is_platform_admin: bool = False
     login_enabled: bool = True
@@ -204,10 +204,15 @@ class UserUpdateRequest(BaseModel):
 
     ``organization_ids`` / ``role_ids`` follow rewrite semantics:
     ``None`` → leave alone, ``[]`` → clear, ``[a, b]`` → replace.
+
+    ``username`` / ``email`` 全 Optional（PATCH 语义）：
+    缺省/``None`` → 不改；提供非空值 → service 层做唯一校验后更新。
     """
 
     model_config = ConfigDict(extra="forbid")
 
+    username: str | None = None
+    email: str | None = None
     display_name: str | None = None
     is_platform_admin: bool | None = None
     status: str | None = None
@@ -222,7 +227,7 @@ class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    email: str
+    email: str | None
     username: str | None
     display_name: str | None
     status: str
