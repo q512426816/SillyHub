@@ -189,8 +189,8 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
         )
         .limit(1)
     )
-    ws_row = (await session.execute(ws_stmt)).first()
-    workspace_id = ws_row[0] if ws_row else None
+    # .scalar() 直接返回单列首值（无行→None），等价于 first()[0]，且避开 mypy 对 Row 的误报
+    workspace_id = (await session.execute(ws_stmt)).scalar()
 
     payload["agent_run_id"] = str(agent_run.id)
     payload["workspace_id"] = str(workspace_id) if workspace_id else None
