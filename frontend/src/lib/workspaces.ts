@@ -33,7 +33,7 @@ export interface OwnerRead {
 export interface Workspace {
   id: string;
   name: string;
-  display_alias: string | null;
+  display_alias?: string | null;
   slug: string;
   root_path: string;
   // task-01 / 2026-06-18-workspace-client-path：路径来源
@@ -60,7 +60,7 @@ export interface Workspace {
   updated_at: string;
   last_scanned_at: string | null;
   deleted_at: string | null;
-  owner: OwnerRead | null;
+  owner?: OwnerRead | null;
 }
 
 export interface WorkspaceListResponse {

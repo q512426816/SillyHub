@@ -55,6 +55,18 @@ vi.mock("@/lib/daemon", async () => {
   return {
     ...actual,
     listDaemonRuntimes: daemon.listDaemonRuntimes,
+    // task-07：page 列表数据源改 listDaemonRuntimesPage；测试 mock 仍按
+    // listDaemonRuntimes 数组设置，这里包装成分页响应，无需改每个 mockResolvedValue。
+    listDaemonRuntimesPage: vi.fn(async (params?: { limit?: number; offset?: number }) => {
+      const items = await daemon.listDaemonRuntimes();
+      return {
+        items,
+        total: items.length,
+        limit: params?.limit ?? 12,
+        offset: params?.offset ?? 0,
+      };
+    }),
+    updateDaemonRuntime: vi.fn(),
     listAgentSessions: daemon.listAgentSessions,
     deleteAgentSession: daemon.deleteAgentSession,
     deleteDaemonRuntime: daemon.deleteDaemonRuntime,

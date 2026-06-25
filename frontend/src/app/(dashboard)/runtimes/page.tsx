@@ -547,6 +547,7 @@ function RuntimeCard({
   onToggleEnabled,
   onOpenSession,
   onDelete,
+  onEditAlias,
 }: {
   runtime: DaemonRuntimeRead;
   actioning: boolean;

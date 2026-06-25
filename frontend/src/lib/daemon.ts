@@ -13,7 +13,7 @@ export interface OwnerRead {
 
 export interface DaemonRuntimeRead {
   id: string;
-  display_alias: string | null;
+  display_alias?: string | null;
   name: string | null;
   provider: string | null;
   version: string | null;
@@ -22,7 +22,7 @@ export interface DaemonRuntimeRead {
   status: string | null; // online, offline, maintenance, disabled
   last_heartbeat_at: string | null;
   capabilities: Record<string, any> | null;
-  owner: OwnerRead | null;
+  owner?: OwnerRead | null;
   created_at: string;
   updated_at: string;
 }
