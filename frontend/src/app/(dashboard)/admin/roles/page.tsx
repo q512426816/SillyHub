@@ -1,11 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Table, type TableProps, Tag } from "antd";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Input, type TableProps, Tag } from "antd";
 
 import { AdminRolePermissionPicker } from "@/components/admin-role-permission-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DataTable,
+  PageContainer,
+  PageHeader,
+  SectionCard,
+} from "@/components/layout";
 import { ApiError } from "@/lib/api";
 import {
   createRole,
@@ -29,6 +35,17 @@ interface DrawerState {
 }
 
 const KEY_PATTERN = /^[a-z][a-z0-9_]*$/;
+
+// 查询条件外壳：垂直布局（标题在上，控件在下），对齐 admin/users / project-plans 的 Field。
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex w-full flex-col gap-1">
+      <span className="text-xs leading-4 text-muted-foreground">{label}</span>
+      {children}
+    </div>
+  );
+}
+
 const DEFAULT_PAGE_SIZE = 20;
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const inputCls =
@@ -73,13 +90,26 @@ export default function AdminRolesPage() {
     void load();
   }, [load]);
 
-  useEffect(() => {
-    const handle = setTimeout(() => {
-      setSearch(searchInput);
-      setPage(1);
-    }, 500);
-    return () => clearTimeout(handle);
-  }, [searchInput]);
+  // 关键词输入纯受控：只更新输入态，不自动查询（点搜索/回车才触发）。
+  const handleSearchInput = (value: string) => {
+    setSearchInput(value);
+  };
+
+  // 顶部「搜索」按钮 / 输入框回车：用当前输入触发查询。
+  // 条件不变时 setState 不会重建 load、不触发 useEffect → 手动 load() 强制刷新。
+  const handleSearchClick = () => {
+    const noChange = searchInput === search && page === 1;
+    setSearch(searchInput);
+    setPage(1);
+    if (noChange) void load();
+  };
+
+  // 顶部「重置」按钮：清空关键词。
+  const handleResetClick = () => {
+    setSearchInput("");
+    setSearch("");
+    setPage(1);
+  };
 
   const showToast = (ok: boolean, text: string) => {
     setToast({ ok, text });
@@ -212,7 +242,8 @@ export default function AdminRolesPage() {
   ];
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-6 py-6">
+    <PageContainer size="full">
+      <PageHeader title="角色管理" subtitle="平台角色与权限管理" />
       {toast && (
         <div
           className={`rounded border px-3 py-2 text-xs ${
@@ -225,15 +256,16 @@ export default function AdminRolesPage() {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          placeholder="搜索 key / 名称…"
-          className={`w-72 ${inputCls}`}
-        />
-        <div className="ml-auto flex items-center gap-3">
-          <span className="text-xs text-muted-foreground">{total} 个角色</span>
+      <SectionCard bodyPadding="p-2">
+        {/* 顶部操作按钮行（右对齐，对齐 admin/users / project-plans） */}
+        <div className="mb-2 flex items-center justify-end gap-2">
+          <Button size="sm" onClick={() => handleSearchClick()}>
+            搜索
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => handleResetClick()}>
+            重置
+          </Button>
+          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
           <Button
             size="sm"
             disabled={!canWrite}
@@ -243,7 +275,19 @@ export default function AdminRolesPage() {
             + 新建角色
           </Button>
         </div>
-      </div>
+        {/* 搜索表单：grid-cols-4 垂直 Field */}
+        <div className="grid w-full grid-cols-4 gap-3">
+          <Field label="关键词">
+            <Input
+              value={searchInput}
+              onChange={(e) => handleSearchInput(e.target.value)}
+              placeholder="搜索 key / 名称…"
+              allowClear
+              onPressEnter={() => handleSearchClick()}
+            />
+          </Field>
+        </div>
+      </SectionCard>
 
       {error ? (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
@@ -258,12 +302,14 @@ export default function AdminRolesPage() {
           </Button>
         </div>
       ) : (
-        <Table<RoleRead>
+        <DataTable<RoleRead>
           rowKey="id"
           columns={columns}
           dataSource={roles}
           loading={loading}
           size="small"
+          bordered
+          scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
           pagination={{
             current: page,
             pageSize,
@@ -276,7 +322,7 @@ export default function AdminRolesPage() {
               setPageSize(s);
             },
           }}
-          locale={{ emptyText: "暂无角色，点击右上角新建" }}
+          emptyText="暂无角色，点击右上角新建"
         />
       )}
 
@@ -308,7 +354,7 @@ export default function AdminRolesPage() {
           onClose={() => setUsersDrawer(null)}
         />
       )}
-    </div>
+    </PageContainer>
   );
 }
 

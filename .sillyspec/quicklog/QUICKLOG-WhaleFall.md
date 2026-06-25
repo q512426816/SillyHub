@@ -46,4 +46,12 @@ created_at: 2026-06-24T19:19:38
 方案:handleSearchClick 加 noChange 判断(searchInput===search && page===1)，条件没变时手动 void load() 强制刷新；变了则 setSearch/setPage 自然触发 useEffect。
 结果:handleSearchClick 加 noChange(searchInput===search && page===1) 判断 + 不变时 void load() 强制刷新。typecheck no errors。
 
+## ql-20260625-005-c4d8 | 2026-06-25 15:25:00 | admin/roles 按用户页最终模式调整（布局+查询+列表+搜索行为）
+状态：已完成
+文件：frontend/src/app/(dashboard)/admin/roles/page.tsx
+需求：admin/roles 按 admin/users 最终模式(ql-001~004)调整。
+现状:裸 div max-w-6xl + 裸 input+debounce useEffect(500ms) + 右侧共N/新建 + 裸 antd Table。
+方案:①裸div→PageContainer(size full)+PageHeader(角色管理/平台角色与权限管理);②查询→SectionCard(p-2)内顶部按钮行(搜索/重置/分隔/+新建角色 justify-end)+grid-cols-4 Field(关键词 Input);③搜索行为对齐 ql-003/004(去 debounce,纯受控,handleSearchClick noChange 强制 load,回车触发);④裸Table→DataTable(bordered+emptyText+scroll y calc(100vh-430px))。复用 Field 组件定义。子组件 RoleDrawer/DeleteConfirm/RoleUsersDrawer 不变。
+结果:5处 Edit 完成(布局/查询/列表/搜索行为全对齐 admin/users)。typecheck no errors、lint 无 roles/page 相关。子组件未动。
+
 
