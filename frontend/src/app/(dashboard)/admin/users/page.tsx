@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Input, Select, type TableProps, Tag } from "antd";
 
 import { AdminUserDrawer } from "@/components/admin-user-drawer";
@@ -91,8 +91,6 @@ export default function AdminUsersPage() {
   const [sessionsDrawer, setSessionsDrawer] = useState<UserRead | null>(null);
   const [auditDrawer, setAuditDrawer] = useState<UserRead | null>(null);
 
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -141,13 +139,9 @@ export default function AdminUsersPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
+  // 关键词输入纯受控：只更新输入态，不自动查询（用户点搜索/回车才触发）。
   const handleSearchInput = (value: string) => {
     setSearchInput(value);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      setSearch(value);
-      setPage(1);
-    }, 400);
   };
 
   const handleStatusFilterChange = (value: StatusFilter) => {
@@ -155,9 +149,8 @@ export default function AdminUsersPage() {
     setPage(1);
   };
 
-  // 顶部「搜索」按钮：立即触发查询（跳过 debounce 等待）。
+  // 顶部「搜索」按钮 / 输入框回车：用当前输入触发查询。
   const handleSearchClick = () => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
     setSearch(searchInput);
     setPage(1);
   };
@@ -165,7 +158,6 @@ export default function AdminUsersPage() {
   // 顶部「重置」按钮：清空关键词 + 状态筛选。
   const handleResetClick = () => {
     setSearchInput("");
-    if (debounceRef.current) clearTimeout(debounceRef.current);
     setSearch("");
     setStatusFilter("all");
     setPage(1);
