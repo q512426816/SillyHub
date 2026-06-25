@@ -61,4 +61,12 @@ created_at: 2026-06-24T19:19:38
 方案：①aside w-56→w-64 加宽；②orgNodeTitle name span +min-w-0 flex-1(flex 里 truncate 生效不挤 count)；③count span +shrink-0(不被挤)。
 结果:typecheck no errors。组织名长时 truncate 省略，人数不被挤压。
 
+## ql-20260625-007-2c5f | 2026-06-25 20:18:00 | admin/users 组织树纵向滚动条 + 展开/收起交互
+状态：已完成
+文件：frontend/src/components/admin-org-tree.tsx
+需求：组织多/多层时树纵向溢出页面（需滚动条）；节点不能展开/收起（expandedKeys 固定全展开无 onExpand）。
+方案：①expandedKeys 改 state（受控，初始全展开，用户可点箭头折叠/展开）+ onExpand 回调；②Tree 外层 div maxHeight calc(100vh-200px) + overflow-y-auto 纵向滚动；③Tailwind max-h-[calc()] 方括号与 jsdom CSS selector 冲突，改 inline style。
+结果:commit 449d74ce。vitest 8 passed、typecheck no errors、rebuild frontend healthy。
+注：本次未走 sillyspec run quick 流程（直接改+commit），quicklog 补记。
+
 
