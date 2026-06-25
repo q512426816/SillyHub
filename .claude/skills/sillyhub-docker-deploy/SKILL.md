@@ -117,22 +117,30 @@ CORS_ALLOWED_ORIGINS=["http://localhost:3001","http://<LAN_IP>:3001"]
 
 后端镜像必须内置 agent 运行依赖。检查 `backend/Dockerfile`：
 
-- 使用 Node runtime stage 安装：
+- 使用 Node runtime stage 安装 Claude Code 与 SillySpec：
   ```bash
-  npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} sillyspec@${SILLYSPEC_VERSION}
+  # CLAUDE_CODE_VERSION 写死；SILLYSPEC_VERSION 空 → 取最新，填值 → pin。
+  npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} sillyspec${SILLYSPEC_VERSION:+@$SILLYSPEC_VERSION}
   ```
 - runtime stage 复制 `node`、`npm`、`npx`、`claude`、`sillyspec` 和 `/usr/local/lib/node_modules`。
 - runtime apt 依赖包含 `git`，agent worktree 和 CLI 调用会用到。
 - `HOME=/app`，并确保 `/app/.claude`、`/app/.cache`、`/app/.config`、`/tmp/.npm` 对 `app` 用户可写。
+- runtime stage 接收 `ARG COMMIT_SHA` 并 `ENV COMMIT_SHA=${COMMIT_SHA:-}`，让 `/api/health` 的 `commit_sha` 反映镜像版本（backend build context 是 `backend/`、不含仓库 `.git`，必须由 build arg 注入，否则恒为 `unknown`）。
 
-检查 `deploy/docker-compose.yml`：
+检查 `deploy/docker-compose.yml` 的 backend.build：
 
 ```yaml
 backend:
   build:
+    context: ../backend
+    # daemon 分发物（install.sh + sillyhub-daemon.js）由宿主机预构建后注入；
+    # 部署前必须 cd sillyhub-daemon && pnpm bundle 产出 build/bundle/。
+    additional_contexts:
+      daemon: ../sillyhub-daemon
     args:
       CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.158}
-      SILLYSPEC_VERSION: ${SILLYSPEC_VERSION:-3.19.1}
+      SILLYSPEC_VERSION: ${SILLYSPEC_VERSION:-}   # 空 = 取最新
+      COMMIT_SHA: ${COMMIT_SHA:-}                 # 启动前 export，见「启动」节
   env_file:
     - .env
   environment:
@@ -141,6 +149,8 @@ backend:
 ```
 
 > 版本号以 `deploy/docker-compose.yml` 实际 build args 为准，本文档中的数字仅为示例，可能滞后。
+>
+> **daemon 一键安装分发**：backend 通过 `additional_contexts: daemon` 把宿主机预构建的 `sillyhub-daemon/build/bundle/sillyhub-daemon.js` 与 `scripts/install.sh` 拷进镜像 `/app/daemon-dist/`，再由 3 个公开端点（无 `/api` 前缀）`GET /daemon/install.sh`、`GET /daemon/latest.json`、`GET /daemon/latest/sillyhub-daemon.js` 提供，使 `curl <SERVER>/daemon/install.sh | bash` 可用。daemon 代码改动后须重跑 `pnpm bundle` 再重建 backend。
 
 后端容器应通过 `backend/docker-entrypoint.sh` 在启动时生成 `/app/.claude/settings.json`，不要把真实 `ANTHROPIC_AUTH_TOKEN` 写进已跟踪的 `.claude/settings.json`。本地真实值只放在 gitignored 的 `deploy/.env`。
 Claude Code 相关变量要通过 `env_file: .env` 注入 backend 容器，避免宿主机 shell 里已有的 `ANTHROPIC_*` 变量覆盖 Docker 配置。
@@ -181,6 +191,21 @@ CLAUDE_SKIP_DANGEROUS_MODE_PERMISSION_PROMPT=true
 ## 启动
 
 直接用 compose 默认 builder 构建并启动。**代码是构建进镜像的（无源码 bind-mount），改了代码必须重建镜像。**
+
+部署前两步准备（每次重建 backend 都要做，且必须在同一个 shell 里执行，让环境变量对 compose 生效）：
+
+1. **构建 daemon bundle**（供 `/daemon/install.sh` 一键安装；首次或 daemon 代码改动后必跑）：
+   ```bash
+   pnpm -C sillyhub-daemon install --frozen-lockfile
+   pnpm -C sillyhub-daemon run bundle        # 产出 build/bundle/sillyhub-daemon.js
+   ```
+2. **注入 git SHA**（让 `/api/health` 的 `commit_sha` 与前端版本标识反映当前 commit；不导出则 backend 恒为 `unknown`）：
+   ```bash
+   export COMMIT_SHA=$(git rev-parse --short=12 HEAD)
+   export NEXT_PUBLIC_COMMIT_SHA="$COMMIT_SHA"
+   ```
+
+然后启动（同一 shell）：
 
 ```bash
 docker compose --env-file deploy/.env -f deploy/docker-compose.yml up --build -d
@@ -277,6 +302,26 @@ curl -fsSI http://<LAN_IP>:3001
 docker compose --env-file deploy/.env -f deploy/docker-compose.yml exec -T backend sh -lc \
   'node --version && npm --version && git --version && claude --version && sillyspec --version'
 ```
+
+> `sillyspec --version` 反映实际装入版本（`.env` 不设 `SILLYSPEC_VERSION` = 取最新；需固定则回填版本号并重建）。
+
+验证 daemon 一键安装分发（`curl <SERVER>/daemon/install.sh | bash` 依赖的公开端点，无 `/api` 前缀）：
+
+```bash
+curl -fsS http://127.0.0.1:8001/api/health        # commit_sha 应为真实 git short SHA，非 unknown
+curl -fsS http://127.0.0.1:8001/daemon/install.sh | head -n 3
+curl -fsS http://127.0.0.1:8001/daemon/latest.json
+curl -fsSI http://127.0.0.1:8001/daemon/latest/sillyhub-daemon.js
+# install.sh 经 Windows core.autocrlf=true 易被搞成 CRLF，curl|bash 会报
+# `set: pipefail: invalid option name`。bash -n 确认 LF 干净（Dockerfile 已
+# 对 /app/daemon-dist/install.sh 做 sed 's/\r$//'，.gitattributes 强制 *.sh eol=lf）。
+curl -fsS http://127.0.0.1:8001/daemon/install.sh | bash -n && echo SYNTAX_OK
+```
+
+- `latest.json` 应为 `{"version":"...","downloadUrl":"/daemon/latest/sillyhub-daemon.js"}`
+- `sillyhub-daemon.js` 应返回 `200` + `application/javascript`
+- `commit_sha` 为 `unknown` → 启动前未 `export COMMIT_SHA`（见「启动」节）
+- 任一 `/daemon/*` 返回 `404` → daemon bundle 没构建进镜像，回「启动」节先 `pnpm bundle` 再 `--build --force-recreate` 重建 backend
 
 验证 Docker 内 Claude Code settings，输出时必须遮蔽 token：
 
