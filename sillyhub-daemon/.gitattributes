@@ -1,0 +1,5 @@
+# 强制 shell 脚本 LF 行尾。
+# Windows 上 core.autocrlf=true 会把 *.sh checkout 成 CRLF，导致
+# `curl <SERVER>/daemon/install.sh | bash` 因 `set -euo pipefail\r` 报
+# `invalid option name`。这里固定 eol=lf，从源头杜绝 CRLF 污染。
+*.sh text eol=lf

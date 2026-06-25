@@ -36,9 +36,16 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
+      # 宿主机预构建的 daemon 分发物（install.sh + sillyhub-daemon.js）；
+      # 部署前需 cd sillyhub-daemon && pnpm bundle 产出 build/bundle/。
+      additional_contexts:
+        daemon: ../sillyhub-daemon
       args:
         CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.158}
-        SILLYSPEC_VERSION: ${SILLYSPEC_VERSION:-3.19.2}
+        # 空 → 取最新 sillyspec；填值 → pin。
+        SILLYSPEC_VERSION: ${SILLYSPEC_VERSION:-}
+        # Git SHA baked into the image; export COMMIT_SHA before `up --build`.
+        COMMIT_SHA: ${COMMIT_SHA:-}
     env_file:
       - .env
     restart: unless-stopped

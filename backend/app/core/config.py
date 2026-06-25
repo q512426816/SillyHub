@@ -10,6 +10,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
@@ -41,6 +42,9 @@ class Settings(BaseSettings):
     )
     otel_endpoint: str | None = None
     commit_sha: str | None = None
+    # Daemon distribution files (install.sh + sillyhub-daemon.js) baked into
+    # the backend image; override to a tmp_path in tests.
+    daemon_dist_dir: Path = Path("/app/daemon-dist")
 
     # ── Auth (task-04a) ────────────────────────────────────────────────
     auth_access_ttl_minutes: int = Field(

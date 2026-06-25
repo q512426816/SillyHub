@@ -5,14 +5,15 @@
 ARG PYTHON_VERSION=3.12
 ARG NODE_VERSION=20
 ARG CLAUDE_CODE_VERSION=2.1.158
-ARG SILLYSPEC_VERSION=3.19.2
+# 空 → npm install -g sillyspec 取最新；填值 → pin 到该版本（compose build arg 可覆盖）。
+ARG SILLYSPEC_VERSION=""
 
 FROM node:${NODE_VERSION}-slim AS node-tools
 
 ARG CLAUDE_CODE_VERSION
 ARG SILLYSPEC_VERSION
 
-RUN npm install --registry=https://registry.npmmirror.com -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} sillyspec@${SILLYSPEC_VERSION} \
+RUN npm install --registry=https://registry.npmmirror.com -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} sillyspec${SILLYSPEC_VERSION:+@$SILLYSPEC_VERSION} \
  && npm cache clean --force
 
 FROM python:${PYTHON_VERSION}-slim AS builder
@@ -43,6 +44,11 @@ FROM python:${PYTHON_VERSION}-slim AS runtime
 
 ARG CLAUDE_CODE_VERSION
 ARG SILLYSPEC_VERSION
+# Git commit SHA injected at build time (build arg → ENV) so the health
+# endpoint reports the exact image version without relying on a .git dir
+# (the build context is backend/, which does not contain the repo .git).
+# Empty default keeps the runtime `git rev-parse` fallback working locally.
+ARG COMMIT_SHA=""
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -50,6 +56,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     NPM_CONFIG_CACHE=/tmp/.npm \
     CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
     SILLYSPEC_VERSION=${SILLYSPEC_VERSION} \
+    COMMIT_SHA=${COMMIT_SHA:-} \
     PATH="/opt/venv/bin:${PATH}"
 
 # Non-root runtime user
@@ -73,9 +80,14 @@ RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /build /app
 
+# Daemon distribution files (pre-built on host, injected via the additional
+# context "daemon"). Served by /daemon/install.sh and /daemon/latest/sillyhub-daemon.js.
+COPY --from=daemon build/bundle/sillyhub-daemon.js /app/daemon-dist/sillyhub-daemon.js
+COPY --from=daemon scripts/install.sh /app/daemon-dist/install.sh
+
 RUN mkdir -p /app/.cache /app/.config /app/.claude /tmp/.npm /data/spec-workspaces \
  && chown -R app:app /app /tmp/.npm /data/spec-workspaces \
- && sed -i 's/\r$//' /app/docker-entrypoint.sh \
+ && sed -i 's/\r$//' /app/docker-entrypoint.sh /app/daemon-dist/install.sh \
  && chmod +x /app/docker-entrypoint.sh \
  && ln -sf /app/docker-entrypoint.sh /usr/local/bin/sillyhub-backend-entrypoint
 USER app

@@ -1,0 +1,9 @@
+# Trim the "daemon" additional build context (deploy/docker-compose.yml) so
+# only the pre-built bundle + install script are uploaded — NOT node_modules.
+node_modules
+dist
+src
+tests
+.git
+*.md
+# keep: build/bundle/sillyhub-daemon.js, scripts/install.sh, package.json

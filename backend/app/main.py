@@ -22,6 +22,7 @@ from app.modules.archive.router import router as archive_router
 from app.modules.auth.router import router as auth_router
 from app.modules.change import change_router
 from app.modules.change_writer.router import router as change_writer_router
+from app.modules.daemon.dist_router import router as daemon_dist_router
 from app.modules.daemon.router import router as daemon_router
 from app.modules.git_gateway.router import router as git_gateway_router
 from app.modules.git_identity import git_identity_router
@@ -416,6 +417,9 @@ def create_app() -> FastAPI:
         app.include_router(qc_router, prefix="/api")
 
     app.include_router(health_router, prefix="/api")
+    # Daemon distribution endpoints — public, no /api prefix, match the
+    # install.sh contract (curl <SERVER>/daemon/install.sh | bash).
+    app.include_router(daemon_dist_router)
     # Quick-chat endpoint must be registered BEFORE workspace_router so that
     # the fixed path /api/daemon-chat is matched before the parameterized
     # /api/workspaces/{workspace_id}/... routes.
