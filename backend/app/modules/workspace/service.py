@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.modules.agent.service import AgentService
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -33,6 +33,7 @@ from app.core.errors import (
 )
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentRun
+from app.modules.auth.model import User
 from app.modules.workspace.model import (
     AgentRunWorkspace,
     Workspace,
@@ -338,6 +339,74 @@ class WorkspaceService:
             count_stmt = count_stmt.where(col(Workspace.deleted_at).is_(None))
         total = len((await self._session.execute(count_stmt)).scalars().all())
         return items, total
+
+    async def list_with_owner(
+        self,
+        *,
+        include_deleted: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+        q: str | None = None,
+        workspace_type: str | None = None,
+        status: str | None = None,
+        user_id: uuid.UUID | None = None,
+        allowed_workspace_ids: list[uuid.UUID] | None = None,
+    ) -> tuple[list[tuple[Workspace, User | None]], int]:
+        """Filtered + paginated workspace list with owner JOIN (task-05 / FR-01/02/04).
+
+        - ``allowed_workspace_ids is None``: 平台管理员全量。
+        - ``allowed_workspace_ids == []``: 普通账号无可读 workspace，直接返回空。
+        - ``user_id``: 精确匹配 created_by（仅平台管理员传入；普通账号不传）。
+        - ``q``: 大小写不敏感匹配 display_alias/name/slug/root_path/component_key。
+        - ``workspace_type``: 精确匹配 type；值为 server-local/daemon-client 时也匹配 path_source。
+        - ``status``: 精确匹配 status。
+        """
+        if allowed_workspace_ids is not None and len(allowed_workspace_ids) == 0:
+            return [], 0
+
+        filters: list = []
+        if not include_deleted:
+            filters.append(col(Workspace.deleted_at).is_(None))
+        if allowed_workspace_ids is not None:
+            filters.append(col(Workspace.id).in_(allowed_workspace_ids))
+        if user_id is not None:
+            filters.append(col(Workspace.created_by) == user_id)
+        q_norm = (q or "").strip()
+        if q_norm:
+            pattern = f"%{q_norm}%"
+            filters.append(
+                or_(
+                    col(Workspace.display_alias).ilike(pattern),
+                    col(Workspace.name).ilike(pattern),
+                    col(Workspace.slug).ilike(pattern),
+                    col(Workspace.root_path).ilike(pattern),
+                    col(Workspace.component_key).ilike(pattern),
+                )
+            )
+        if workspace_type:
+            if workspace_type in ("server-local", "daemon-client"):
+                filters.append(col(Workspace.path_source) == workspace_type)
+            else:
+                filters.append(col(Workspace.type) == workspace_type)
+        if status:
+            filters.append(col(Workspace.status) == status)
+
+        total_stmt = select(func.count()).select_from(Workspace)
+        if filters:
+            total_stmt = total_stmt.where(*filters)
+        total = int((await self._session.scalar(total_stmt)) or 0)
+
+        rows_stmt = (
+            select(Workspace, User)
+            .outerjoin(User, Workspace.created_by == User.id)
+            .order_by(col(Workspace.created_at).desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        if filters:
+            rows_stmt = rows_stmt.where(*filters)
+        rows = list((await self._session.execute(rows_stmt)).all())
+        return [(ws, owner) for ws, owner in rows], total
 
     async def get(self, workspace_id: uuid.UUID) -> Workspace:
         workspace = await self._session.get(Workspace, workspace_id)

@@ -11,9 +11,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
 from app.core.auth_deps import require_permission, require_permission_any
 from app.core.db import get_session
@@ -31,6 +29,7 @@ from app.modules.workspace.relation_schema import (
 from app.modules.workspace.relation_service import RelationService
 from app.modules.workspace.scanner import ScanResult
 from app.modules.workspace.schema import (
+    OwnerRead,
     ScanGenerateRequest,
     ScanGenerateResponse,
     ScanRequest,
@@ -77,6 +76,28 @@ def _build_scan_response(result: ScanResult) -> ScanResponse:
         structure=WorkspaceStructureDTO(**result.structure.as_dict()),
         warnings=list(result.warnings),
     )
+
+
+def _build_owner_read(workspace: Workspace, owner: User | None) -> OwnerRead | None:
+    """Nested owner DTO (task-05 / D-006@v1).
+
+    ``owner`` 来自 created_by JOIN users；JOIN 不到（user 行缺失）时退化成只
+    带 user_id 的 OwnerRead，避免丢弃 workspace。
+    """
+    if owner is not None:
+        return OwnerRead(
+            user_id=owner.id,
+            email=owner.email,
+            display_name=owner.display_name,
+        )
+    if workspace.created_by is not None:
+        return OwnerRead(user_id=workspace.created_by)
+    return None
+
+
+def _workspace_read_with_owner(workspace: Workspace, owner: User | None) -> WorkspaceRead:
+    read = WorkspaceRead.model_validate(workspace)
+    return read.model_copy(update={"owner": _build_owner_read(workspace, owner)})
 
 
 @router.post("/scan", response_model=ScanResponse)
@@ -171,37 +192,47 @@ async def list_workspaces(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_READ))],
     include_deleted: Annotated[bool, Query(description="Admin-only flag")] = False,
+    q: Annotated[str | None, Query(max_length=200)] = None,
+    workspace_type: Annotated[str | None, Query(alias="type", max_length=50)] = None,
+    status_filter: Annotated[str | None, Query(alias="status", max_length=20)] = None,
+    user_id: Annotated[uuid.UUID | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> WorkspaceListResponse:
+    """List workspaces with server-side filter + pagination (task-05 / FR-01/02/04).
+
+    平台管理员：全量（allowed_workspace_ids=None），可按 user_id 过滤 created_by。
+    普通账号：allowed_workspace_ids 限制可见集合，user_id 参数被忽略。
+    """
+    service = WorkspaceService(session)
     if user.is_platform_admin:
-        service = WorkspaceService(session)
-        items, total = await service.list_(
+        rows, total = await service.list_with_owner(
             include_deleted=include_deleted,
             limit=limit,
             offset=offset,
+            q=q,
+            workspace_type=workspace_type,
+            status=status_filter,
+            user_id=user_id,
+            allowed_workspace_ids=None,
         )
     else:
         allowed = await allowed_workspace_ids(
             session, user_id=user.id, permission=Permission.WORKSPACE_READ
         )
-        stmt = select(Workspace).where(
-            col(Workspace.id).in_(allowed) if allowed else col(Workspace.id).in_([])
+        rows, total = await service.list_with_owner(
+            include_deleted=include_deleted,
+            limit=limit,
+            offset=offset,
+            q=q,
+            workspace_type=workspace_type,
+            status=status_filter,
+            user_id=None,
+            allowed_workspace_ids=allowed,
         )
-        if not include_deleted:
-            stmt = stmt.where(col(Workspace.deleted_at).is_(None))
-        stmt = stmt.order_by(col(Workspace.created_at).desc()).limit(limit).offset(offset)
-        items = list((await session.execute(stmt)).scalars().all())
-
-        count_stmt = select(Workspace).where(
-            col(Workspace.id).in_(allowed) if allowed else col(Workspace.id).in_([])
-        )
-        if not include_deleted:
-            count_stmt = count_stmt.where(col(Workspace.deleted_at).is_(None))
-        total = len((await session.execute(count_stmt)).scalars().all())
 
     return WorkspaceListResponse(
-        items=[WorkspaceRead.model_validate(w) for w in items],
+        items=[_workspace_read_with_owner(ws, owner) for ws, owner in rows],
         total=total,
     )
 

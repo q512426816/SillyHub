@@ -151,6 +151,7 @@ class WorkspaceUpdate(BaseModel):
     """
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
+    display_alias: str | None = Field(default=None, max_length=200)
     slug: str | None = Field(default=None, max_length=100)
     root_path: str | None = Field(default=None, min_length=1, max_length=4096)
     component_key: str | None = Field(default=None, max_length=100)
@@ -194,11 +195,20 @@ class WorkspaceUpdate(BaseModel):
         return self
 
 
+class OwnerRead(BaseModel):
+    """Nested owner DTO for platform-admin global views (task-05 / D-006@v1)."""
+
+    user_id: uuid.UUID | None = None
+    email: str | None = None
+    display_name: str | None = None
+
+
 class WorkspaceRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     name: str
+    display_alias: str | None = None
     slug: str
     root_path: str
     status: WorkspaceStatusLiteral
@@ -222,6 +232,7 @@ class WorkspaceRead(BaseModel):
     deleted_at: datetime | None
     path_source: PathSourceLiteral
     daemon_runtime_id: uuid.UUID | None
+    owner: OwnerRead | None = None
 
 
 class WorkspaceListResponse(BaseModel):
