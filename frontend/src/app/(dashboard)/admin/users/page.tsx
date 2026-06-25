@@ -150,9 +150,13 @@ export default function AdminUsersPage() {
   };
 
   // 顶部「搜索」按钮 / 输入框回车：用当前输入触发查询。
+  // 条件不变时 setState 不会重建 load、不触发 useEffect → 手动 load() 强制刷新，
+  // 让「即使没改条件，点搜索也查询」。
   const handleSearchClick = () => {
+    const noChange = searchInput === search && page === 1;
     setSearch(searchInput);
     setPage(1);
+    if (noChange) void load();
   };
 
   // 顶部「重置」按钮：清空关键词 + 状态筛选。

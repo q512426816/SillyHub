@@ -38,4 +38,12 @@ created_at: 2026-06-24T19:19:38
 方案:handleSearchInput 只 setSearchInput(去 debounce)；handleSearchClick=setSearch(searchInput)+setPage(1)；handleResetClick 同步清空；去 debounceRef+useRef import(若不再用)。状态 Select onChange 即筛保留。
 结果:①import 去 useRef；②删 debounceRef 声明；③handleSearchInput 只 setSearchInput；④handleSearchClick/ResetClick 去 clearTimeout。查询改为输入纯受控 + 搜索按钮/回车(onPressEnter)触发，状态 Select 即筛保留。typecheck no errors、lint 无 page.tsx 相关。
 
+## ql-20260625-004-b51a | 2026-06-25 15:10:00 | admin/users 搜索按钮强制查询（条件不变也刷新）
+状态：已完成
+文件：frontend/src/app/(dashboard)/admin/users/page.tsx
+需求：即使查询条件没变，点击搜索也查询。
+根因:ql-003 后 handleSearchClick 只 setSearch(searchInput)+setPage(1)，load=useCallback([search,statusFilter,page,pageSize])+useEffect([load])，条件不变→state 不变→load 不重建→useEffect 不触发→不查询。
+方案:handleSearchClick 加 noChange 判断(searchInput===search && page===1)，条件没变时手动 void load() 强制刷新；变了则 setSearch/setPage 自然触发 useEffect。
+结果:handleSearchClick 加 noChange(searchInput===search && page===1) 判断 + 不变时 void load() 强制刷新。typecheck no errors。
+
 
