@@ -449,6 +449,45 @@ class LeaseService:
                     error=str(exc),
                 )
 
+        # D-002@v1（2026-06-25-interactive-idle-timeout-fix）：完成驱动 end。
+        # scan run（change_id=None + platform-managed）与 stage run（change_id 非空）
+        # 完成后主动 end 关联 daemon interactive session，让 claude 进程及时退出，
+        # 不再依赖 idle 回收（D-001@v1 已默认禁用）。多轮对话（非 platform-managed
+        # 的 interactive lease）不自动 end，留给用户手动。复用现有 facade.end_session
+        # 的 runtime 归属校验路径，零重复收口代码。失败 try/except 不阻塞 lease 完成。
+        if lease.agent_run_id is not None and self._facade is not None:
+            try:
+                agent_run = await self._session.get(AgentRun, lease.agent_run_id)
+                should_end = agent_run is not None and (
+                    agent_run.change_id is not None  # stage run
+                    or getattr(agent_run, "spec_strategy", None) == "platform-managed"  # scan run
+                )
+                if should_end and agent_run is not None and agent_run.agent_session_id is not None:
+                    # end_session 需要 runtime owner（actor_runtime_owner_id 路径按
+                    # runtime 归属定位 session，不查 AgentSession.user_id）。lease.runtime_id
+                    # → DaemonRuntime.user_id。
+                    runtime = await self._session.get(DaemonRuntime, lease.runtime_id)
+                    if runtime is not None:
+                        await self._facade.end_session(
+                            agent_run.agent_session_id,
+                            runtime.user_id,
+                            reason="task_completed",
+                            actor_runtime_owner_id=runtime.user_id,
+                        )
+                        log.info(
+                            "complete_lease_end_session_sent",
+                            lease_id=str(lease_id),
+                            agent_run_id=str(lease.agent_run_id),
+                            agent_session_id=str(agent_run.agent_session_id),
+                        )
+            except Exception as exc:
+                log.warning(
+                    "complete_lease_end_session_failed",
+                    lease_id=str(lease_id),
+                    agent_run_id=str(lease.agent_run_id),
+                    error=str(exc),
+                )
+
         log.info(
             "daemon_lease_completed",
             lease_id=str(lease_id),

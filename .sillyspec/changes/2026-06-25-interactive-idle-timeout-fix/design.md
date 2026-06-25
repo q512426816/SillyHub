@@ -78,11 +78,14 @@ scan 场景下，agent 在单个 `claude -p` 调用内用 Bash 反复跑 `sillys
 
 | 操作 | 文件路径 | 说明 |
 |---|---|---|
-| 修改 | `sillyhub-daemon/src/interactive/session-manager.ts` | `_idleTimer` 默认不启动；`DEFAULT_IDLE_TIMEOUT_SEC` 改 0；`startIdleMonitor` 增 `>0` 守卫 |
+| 修改 | `sillyhub-daemon/src/interactive/session-manager.ts` | `_idleTimer` 默认不启动；`DEFAULT_IDLE_TIMEOUT_SEC` 改 0；`start()` + `_scanIdle()` 双守卫（`_idleTimeoutSec<=0` return） |
 | 修改 | `backend/app/modules/daemon/lease/service.py` | `complete_lease` 收尾链末尾增 scan/stage 完成主动 end_session 钩子 |
-| 新增 | `sillyhub-daemon/src/interactive/__tests__/session-manager-idle-disabled.test.ts` | idle 定时器默认不启动 + env 逃生口 + 长 turn 不杀 |
-| 修改 | `backend/app/modules/daemon/tests/test_lease_service.py` | scan/stage 完成 → end_session 调用断言；多轮对话不自动 end |
-| 修改 | `.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md` | idle 回收默认禁用 + 完成驱动 end 契约更新（scan 同步模块文档） |
+| 新增 | `sillyhub-daemon/tests/interactive/session-manager-idle-disabled.test.ts` | idle 定时器默认不启动 + env 逃生口 + 长 turn 不杀 |
+| 修改 | `sillyhub-daemon/tests/interactive/session-idle-scanner.test.ts` | AC-11 两断言随 D-001 默认值变更更新（env 非法/<=0 回退 1800→0） |
+| 修改 | `backend/app/modules/daemon/tests/test_lease_service.py` | scan/stage 完成 → end_session 调用断言；多轮对话不自动 end；end 失败/无 session_id 容错 |
+| 修改 | `.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md` | idle 回收默认禁用 + 完成驱动 end 契约更新 |
+
+> 注：`meta.json` 为 sillyspec 自动生成的元数据，不计入设计清单。
 
 ## 接口定义
 

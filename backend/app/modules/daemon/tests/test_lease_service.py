@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from app.modules.agent.model import AgentRun
+from app.modules.agent.model import AgentRun, AgentSession
 from app.modules.daemon.lease_service import (
     DaemonLeaseService,
     LeaseConflict,
@@ -1138,3 +1138,219 @@ class TestBuildClaimPayloadInteractiveSpecRoot:
         assert "runtimeRoot" not in payload
         assert "runtime_root" not in payload
         assert payload["kind"] == "batch"
+
+
+# ── 2026-06-25-interactive-idle-timeout-fix task-05（D-002@v1）──────────────────
+# 完成驱动 end：complete_lease 收尾对 scan/stage run 主动调 facade.end_session。
+# 覆盖 FR-3/4/5/6 + SC-1/5/6。DaemonService._lease._facade = self，故
+# complete_lease 内 self._facade.end_session == DaemonService.end_session。
+
+
+async def _create_run_with_session(
+    db_session: AsyncSession,
+    runtime_id: uuid.UUID,
+    user_id: uuid.UUID,
+    *,
+    change_id: uuid.UUID | None,
+    spec_strategy: str | None,
+    agent_session_id: uuid.UUID | None,
+) -> tuple[uuid.UUID, uuid.UUID, str]:
+    """构造 lease + AgentSession + AgentRun，返回 (lease_id, run_id, claim_token)。
+
+    scan run: change_id=None + spec_strategy='platform-managed'
+    stage run: change_id 非空
+    多轮对话: change_id=None + spec_strategy 非 'platform-managed'（如 'interactive'）
+    """
+    now = datetime.now(UTC)
+    run_id = uuid.uuid4()
+    sess_id = agent_session_id or uuid.uuid4()
+    claim_token = "tok-" + uuid.uuid4().hex[:8]
+
+    lease = DaemonTaskLease(
+        id=uuid.uuid4(),
+        runtime_id=runtime_id,
+        agent_run_id=run_id,
+        status="claimed",
+        kind="interactive",
+        claimed_at=now,
+        lease_expires_at=None,
+        metadata_={"claim_token": claim_token, "session_id": str(sess_id)},
+        created_at=now,
+        updated_at=now,
+    )
+    session = AgentSession(
+        id=sess_id,
+        user_id=user_id,
+        provider="claude",
+        status="active",
+        config={},
+        turn_count=1,
+        runtime_id=runtime_id,
+        lease_id=lease.id,
+        last_active_at=now,
+        created_at=now,
+    )
+    run = AgentRun(
+        id=run_id,
+        agent_type="claude_code",
+        provider="claude",
+        status="running",
+        spec_strategy=spec_strategy,
+        change_id=change_id,
+        agent_session_id=sess_id,
+    )
+    db_session.add_all([lease, session, run])
+    await db_session.commit()
+    return lease.id, run_id, claim_token
+
+
+class TestCompleteLeaseEndSession:
+    """D-002@v1: complete_lease 完成驱动 end_session。"""
+
+    @pytest.mark.asyncio
+    async def test_scan_run_complete_ends_session(self, db_session: AsyncSession) -> None:
+        """FR-3 / SC-1: scan run（change_id=None + platform-managed）完成 → end_session 被调。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease_id, _run_id, claim_token = await _create_run_with_session(
+            db_session,
+            rt.id,
+            user_id,
+            change_id=None,
+            spec_strategy="platform-managed",
+            agent_session_id=None,
+        )
+
+        svc = DaemonService(db_session)
+        called: list[tuple] = []
+        original_end = svc.end_session
+
+        async def spy_end(session_id, uid, *, reason="manual", actor_runtime_owner_id=None):
+            called.append((session_id, uid, reason, actor_runtime_owner_id))
+            return await original_end(
+                session_id, uid, reason=reason, actor_runtime_owner_id=actor_runtime_owner_id
+            )
+
+        svc.end_session = spy_end  # type: ignore[method-assign]
+        await svc.complete_lease(lease_id, claim_token, {"status": "completed"})
+
+        assert len(called) == 1
+        assert called[0][2] == "task_completed"
+        # session 已被 end（状态 ended）
+        sess = await db_session.get(AgentSession, called[0][0])
+        assert sess is not None
+        assert sess.status == "ended"
+
+    @pytest.mark.asyncio
+    async def test_stage_run_complete_ends_session(self, db_session: AsyncSession) -> None:
+        """FR-4 / SC-5: stage run（change_id 非空）完成 → end_session 被调。
+
+        SQLite 测试库不强制 FK，change_id 给随机 UUID 即可触发 stage 分支判定，
+        无需建完整 Change 行（避免 Workspace root_path 等 NOT NULL 链）。
+        """
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease_id, _run_id, claim_token = await _create_run_with_session(
+            db_session,
+            rt.id,
+            user_id,
+            change_id=uuid.uuid4(),  # 非空 = stage run
+            spec_strategy="platform-managed",
+            agent_session_id=None,
+        )
+
+        svc = DaemonService(db_session)
+        called: list[tuple] = []
+
+        async def spy_end(session_id, uid, *, reason="manual", actor_runtime_owner_id=None):
+            called.append((session_id, uid, reason))
+            return None
+
+        svc.end_session = spy_end  # type: ignore[method-assign]
+        await svc.complete_lease(lease_id, claim_token, {"status": "completed"})
+
+        assert len(called) == 1
+        assert called[0][2] == "task_completed"
+
+    @pytest.mark.asyncio
+    async def test_multiturn_chat_not_ended(self, db_session: AsyncSession) -> None:
+        """FR-5: 多轮对话（非 platform-managed，change_id=None）完成 → 不调 end_session。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease_id, _run_id, claim_token = await _create_run_with_session(
+            db_session,
+            rt.id,
+            user_id,
+            change_id=None,
+            spec_strategy="interactive",  # 非 platform-managed = 多轮对话
+            agent_session_id=None,
+        )
+
+        svc = DaemonService(db_session)
+        called: list[tuple] = []
+
+        async def spy_end(*args, **kwargs):
+            called.append((args, kwargs))
+            return None
+
+        svc.end_session = spy_end  # type: ignore[method-assign]
+        await svc.complete_lease(lease_id, claim_token, {"status": "completed"})
+
+        assert called == []  # 多轮对话不自动 end
+
+    @pytest.mark.asyncio
+    async def test_end_session_failure_does_not_block_lease(self, db_session: AsyncSession) -> None:
+        """FR-6 / SC-6: end_session 抛异常 → lease 仍 completed（容错）。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease_id, _run_id, claim_token = await _create_run_with_session(
+            db_session,
+            rt.id,
+            user_id,
+            change_id=None,
+            spec_strategy="platform-managed",
+            agent_session_id=None,
+        )
+
+        svc = DaemonService(db_session)
+
+        async def boom_end(*args, **kwargs):
+            raise RuntimeError("daemon unreachable")
+
+        svc.end_session = boom_end  # type: ignore[method-assign]
+        result = await svc.complete_lease(lease_id, claim_token, {"status": "completed"})
+
+        assert result.status == "completed"  # lease 完成不受影响
+
+    @pytest.mark.asyncio
+    async def test_no_agent_session_id_skips_end(self, db_session: AsyncSession) -> None:
+        """FR-6 边界: agent_session_id 为空 → 跳过 end，lease 仍 completed。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease_id, run_id, claim_token = await _create_run_with_session(
+            db_session,
+            rt.id,
+            user_id,
+            change_id=None,
+            spec_strategy="platform-managed",
+            agent_session_id=None,  # helper 内部会生成一个——这里改成测 None 路径
+        )
+        # 显式把 agent_run.agent_session_id 清空，测跳过路径
+        run = await db_session.get(AgentRun, run_id)
+        assert run is not None
+        run.agent_session_id = None
+        db_session.add(run)
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        called: list = []
+
+        async def spy_end(*args, **kwargs):
+            called.append(1)
+            return None
+
+        svc.end_session = spy_end  # type: ignore[method-assign]
+        result = await svc.complete_lease(lease_id, claim_token, {"status": "completed"})
+
+        assert called == []  # 无 agent_session_id → 跳过
+        assert result.status == "completed"

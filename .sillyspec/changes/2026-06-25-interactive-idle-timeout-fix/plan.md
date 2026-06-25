@@ -11,9 +11,9 @@ created_at: 2026-06-25T15:50:00
 
 ## Wave 1：核心修复（daemon + backend 两端，可并行）
 
-- [ ] task-01: daemon idle 自动回收默认禁用
-- [ ] task-02: backend facade 完成驱动 end 委托方法
-- [ ] task-03: complete_lease 完成驱动 end 钩子
+- [x] task-01: daemon idle 自动回收默认禁用
+- [x] task-02: backend facade 完成驱动 end 委托方法
+- [x] task-03: complete_lease 完成驱动 end 钩子
 
 ### task-01: task-daemon-idle-disable
 - **文件**：`sillyhub-daemon/src/interactive/session-manager.ts`
@@ -46,9 +46,9 @@ created_at: 2026-06-25T15:50:00
 
 ## Wave 2：测试 + 文档（依赖 Wave 1 实现）
 
-- [ ] task-04: daemon idle 禁用单测
-- [ ] task-05: complete_lease 完成驱动 end 单测
-- [ ] task-06: 模块文档契约更新
+- [x] task-04: daemon idle 禁用单测
+- [x] task-05: complete_lease 完成驱动 end 单测
+- [x] task-06: 模块文档契约更新
 
 ### task-04: task-daemon-idle-test
 - **文件**：`sillyhub-daemon/src/interactive/__tests__/session-manager-idle-disabled.test.ts`（新增）

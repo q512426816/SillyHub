@@ -290,18 +290,18 @@ describe('task-07 AC-11 idleTimeoutSec 可配 + 非法值兜底', () => {
     expect(sm.getIdleTimeoutSec()).toBe(60);
   });
 
-  it('env 非法（NaN）→ 回退 1800', () => {
+  it('env 非法（NaN）→ 回退默认 0（D-001@v1 默认禁用）', () => {
     const { driver } = makeMockDriver();
     vi.stubEnv('SESSION_IDLE_TIMEOUT_SEC', 'not-a-number');
     const sm = new SessionManager({ driver, ...makeDeps() });
-    expect(sm.getIdleTimeoutSec()).toBe(1800);
+    expect(sm.getIdleTimeoutSec()).toBe(0);
   });
 
-  it('env <=0 → 回退 1800', () => {
+  it('env <=0 → 回退默认 0（D-001@v1 默认禁用，idle 不启动）', () => {
     const { driver } = makeMockDriver();
     vi.stubEnv('SESSION_IDLE_TIMEOUT_SEC', '0');
     const sm = new SessionManager({ driver, ...makeDeps() });
-    expect(sm.getIdleTimeoutSec()).toBe(1800);
+    expect(sm.getIdleTimeoutSec()).toBe(0);
   });
 
   it('opts.idleTimeoutSec 优先于 env', () => {

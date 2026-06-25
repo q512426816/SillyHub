@@ -178,8 +178,12 @@ interface PartialFlushBuffer {
   completedSegments: Set<string>;
 }
 
-/** 默认空闲阈值（秒）= 30min（FR-06 / D-004@v1）。 */
-const DEFAULT_IDLE_TIMEOUT_SEC = 1800;
+/**
+ * 默认空闲阈值（秒）。D-001@v1（2026-06-25-interactive-idle-timeout-fix）：默认 0 = 禁用
+ * idle 自动回收。scan/stage 完成由 backend 主动 end_session 收口（D-002@v1），session 不再
+ * 因假性空闲被误杀。env SESSION_IDLE_TIMEOUT_SEC 显式设 >0 可恢复旧行为（逃生口）。
+ */
+const DEFAULT_IDLE_TIMEOUT_SEC = 0;
 /** 默认扫描周期（秒）。 */
 const DEFAULT_IDLE_SCAN_SEC = 60;
 
@@ -1191,6 +1195,9 @@ export class SessionManager {
    */
   start(): void {
     if (this._idleTimer) return;
+    // D-001@v1：idle 默认禁用（_idleTimeoutSec=0）。仅显式 >0 才启动定时器，
+    // 避免 scan 等长 turn 被 idle 误杀。完成驱动 end（D-002@v1）+ 用户手动 end 负责收口。
+    if (this._idleTimeoutSec <= 0) return;
     this._idleTimer = setInterval(() => {
       void this._scanIdle().catch((err) => {
         // 扫描异常不崩 daemon；console.error 兜底（真实 log 在 daemon 层，此处仅兜底）。
@@ -1237,6 +1244,9 @@ export class SessionManager {
   }
 
   private async _scanIdle(): Promise<void> {
+    // D-001@v1：idle 禁用（_idleTimeoutSec<=0）时直接返回，即使 scanOnce 被显式
+    // 调用也不 end。完成驱动 end（D-002@v1）+ 用户手动 end 负责收口。
+    if (this._idleTimeoutSec <= 0) return;
     const now = Date.now();
     // 快照 sessionId 列表，避免 end 修改 _store 时迭代异常。
     const ids = Array.from(this._store.keys());
