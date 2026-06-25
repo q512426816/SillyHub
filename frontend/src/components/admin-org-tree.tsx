@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Tree, type TreeDataNode } from "antd";
 import type { OrganizationRead } from "@/lib/admin";
 
@@ -8,8 +8,7 @@ import type { OrganizationRead } from "@/lib/admin";
 // 仅显示 status==='active' 的组织(disabled 整体不进树,但其成员已由后端聚合进
 // 父节点 subtree_member_count,D-002@v1,组件不重算)。顶部固定「全部组织」节点
 // (不显示成员数,避免子树重复累加歧义;成员总数由右侧表格 total 体现)。
-// 受控 expandedKeys 全展开(异步 treeData 下 defaultExpandAll 不可靠,参考
-// ppm/project-plans page.tsx:279-286)。
+// expandedKeys 受控(可展开/收起),初始全展开;树体限高 + overflow 避免纵向溢出。
 
 export interface AdminOrgTreeProps {
   /** 扁平组织列表(含 disabled,组件内部过滤 active)。来自 listOrganizations()。 */
@@ -73,7 +72,7 @@ function orgNodeTitle(org: OrganizationRead) {
   );
 }
 
-/** 收集树所有 key(用于受控 expandedKeys 全展开)。 */
+/** 收集树所有 key(用于初始 expandedKeys 全展开)。 */
 function collectAllKeys(nodes: TreeDataNode[]): string[] {
   const keys: string[] = [];
   for (const n of nodes) {
@@ -107,21 +106,28 @@ export function AdminOrgTree({
     [orgTree],
   );
 
+  // 初始全展开;用户可折叠/展开(受控 expandedKeys + onExpand)。
   const allKeys = useMemo<string[]>(
     () => ["all", ...collectAllKeys(orgTree)],
     [orgTree],
   );
+  const [expandedKeys, setExpandedKeys] = useState<string[]>(allKeys);
+  // organizations 变化时重置展开状态(新数据全展开)。
+  useMemo(() => setExpandedKeys(allKeys), [allKeys]);
 
   return (
-    <Tree
-      blockNode
-      treeData={treeData}
-      expandedKeys={allKeys}
-      selectedKeys={[selectedOrgId ?? "all"]}
-      onSelect={(keys) => {
-        const k = keys[0] as string | undefined;
-        onSelect(!k || k === "all" ? null : k);
-      }}
-    />
+    <div className="overflow-y-auto" style={{ maxHeight: "calc(100vh - 200px)" }}>
+      <Tree
+        blockNode
+        treeData={treeData}
+        expandedKeys={expandedKeys}
+        selectedKeys={[selectedOrgId ?? "all"]}
+        onExpand={(keys) => setExpandedKeys(keys as string[])}
+        onSelect={(keys) => {
+          const k = keys[0] as string | undefined;
+          onSelect(!k || k === "all" ? null : k);
+        }}
+      />
+    </div>
   );
 }
