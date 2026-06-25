@@ -75,7 +75,7 @@ graph LR
 - [x] SC-1 新建用户必填登录名、email 可不填，可用登录名登录
 - [x] SC-2 编辑可改登录名，重复时 409 友好报错
 - [x] SC-3 登录页只引导登录名，email 无法登录
-- [ ] SC-4 存量用户沿用原 username 正常登录（零数据迁移）
+- [x] SC-4 存量用户沿用原 username 正常登录（零数据迁移）
 - [x] SC-5 非空 email 全局唯一，多个空 email 共存不报错
 - [x] SC-6 `alembic heads` 单一 head，`alembic upgrade head` 成功
 - [x] SC-7 backend ruff/mypy/pytest + frontend tsc/lint/test 全绿

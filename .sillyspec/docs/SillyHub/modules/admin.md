@@ -17,7 +17,7 @@ created_at: 2026-06-24T01:16:36
 - 后端路由：`APIRouter prefix=/admin tag=admin`
   - 角色：`GET/POST /roles`（`RoleRead`/`RoleCreateRequest`）、`GET/PATCH/DELETE /roles/{id}`（`RoleUpdateRequest`）、`POST /roles/{id}/disable|enable`、`GET /roles/{id}/users`（`RoleUserListResponse`）
   - 组织：`GET/POST /organizations`（`OrganizationRead`/`OrganizationCreateRequest`）、`GET/PATCH/DELETE /organizations/{id}`（`OrganizationDetail`/`OrganizationUpdateRequest`）、`POST /organizations/{id}/disable|enable`
-  - 用户：复用 `UserService`（与 settings 同源）
+  - 用户：复用 `UserService`（与 settings 同源）；`UserCreateRequest`(username 必填 min3 / email Optional)、`UserUpdateRequest`(增 username/email 全 Optional 可编辑)、`UserRead`(email Optional)
 - 数据：`Organization`（树形 parent_id 自引用）、`UserOrganization`（M2N）、`UserRole`（M2N）、`Role`
 - 服务：`RoleService`（业务规则+审计）、`OrganizationService`（子树聚合）、`UserService`（自保护+最后管理员保护）
 - 前端：`(dashboard)/admin/*` 页面 + `admin-organization-tree.tsx`（组织树）/ `admin-role-permission-picker.tsx`（权限选择）/ `admin-user-drawer.tsx`（用户抽屉）+ `lib/admin.ts`
@@ -51,6 +51,7 @@ UserService: 自保护（不能删自己）+ 最后管理员保护（_active_adm
 ## 注意事项
 - `_user_roles_model()` 做了延迟 import 容错（task-05 标记），import 失败提示 task 未完成
 - 用户管理与 settings 模块共用 `UserService`，两处规则需保持一致勿发散
+- username 为登录主账号（必填、可编辑，D-001/D-004），create/update 经 `_resolve_username` 做唯一校验（排除自身），冲突抛 409；email 可空，非空全局唯一（D-003）
 - 组织删除需校验子孙与用户数，非空不允许直接删
 - 角色 disable 是软状态，权限校验需考虑 disabled 角色不生效
 - admin 为 needs_review 模块，文档与实现需重点对照

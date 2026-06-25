@@ -6,7 +6,7 @@
 schema_version: 1
 project: SillyHub
 source_commit: ba87eec
-generated_at: 2026-06-24 00:45:06
+generated_at: 2026-06-25 13:30:00
 generator: sillyspec-scan
 
 modules:
@@ -546,9 +546,8 @@ modules:
     depends_on: [core, models, auth]
     used_by: [frontend_app, frontend_components]
     needs_review: false
-    concerns: [modules/admin.md 文档不存在]
-    review_reasons:
-      - 后端 admin 模块已实现（router/services/model），但 modules 目录无对应 admin.md 文档，需补充
+    concerns: []
+    review_reasons: []
 
   # === Frontend 模块 ===
   frontend_app:

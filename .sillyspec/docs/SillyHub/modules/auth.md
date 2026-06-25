@@ -13,7 +13,7 @@ created_at: 2026-06-24T01:16:33
 
 ## 契约摘要
 - API（prefix=/auth）：`POST /api/auth/login`、`/refresh`、`/me`，以及 API Key 管理（创建/列出/吊销）。
-- `AuthService`：`login(email/username, password)` → 校验 + 签发 token 对；`refresh(refresh_token)` → 消费并换新；`logout_session_by_refresh` / `revoke_all_user_sessions` 会话吊销；`_issue_token_pair` 内部签发。
+- `AuthService`：`login(username, password)` → 纯 username 查询 + 密码校验 + 签发 token 对（email 不再作登录账号，D-001）；`refresh(refresh_token)` → 消费并换新；`logout_session_by_refresh` / `revoke_all_user_sessions` 会话吊销；`_issue_token_pair` 内部签发。
 - `ApiKeyService`：`create`（生成明文 + 哈希存储，仅创建时返回明文）、`list_for_user`、`revoke`、`authenticate(plaintext)`（按前缀定位 + 哈希比对 + `_mark_used`）。
 - `Permission(StrEnum)` / `PermissionGroup`：枚举全部权限点，按 `group()` 归入 AUDIT/WORKSPACE/PLATFORM/ADMIN/CHANGE/AGENT/PPM 等组。
 - `rbac`：`collect_permissions*`（all / platform / everywhere）、`has_permission`、`list_user_workspace_roles`、`allowed_workspace_ids`，按工作空间范围聚合权限。
@@ -22,7 +22,7 @@ created_at: 2026-06-24T01:16:33
 ## 关键逻辑
 ```
 # 登录签发
-login → _lookup_active_user_by_email/username → 密码 verify → _issue_token_pair(access+refresh)
+login → _lookup_active_user_by_username → 密码 verify → _issue_token_pair(access+refresh)  # 纯 username 查询(D-001),email 分支已移除
 # 权限校验（端点）
 require_permission(p) → get_current_user → rbac.has_permission(user, p, ws?)
 # 工作空间作用域
@@ -36,6 +36,7 @@ _extract_api_key → ApiKeyService.authenticate(明文) → User
 - API Key 明文仅在创建时一次性返回，数据库只存哈希；`authenticate` 失败不应泄露「用户存在与否」差异。
 - 权限分平台级与工作空间级两层，`collect_permissions_everywhere` 用于判断「任意 ws 内是否拥有某权限」。
 - RBAC 种子与管理员账号在应用启动时注入，调整权限点需同步更新 seed 与前端权限矩阵。
+- 登录仅认 username（D-001 纯登录名），email 不再作为登录账号识别；User.email 可空，非空仍全局唯一（D-003）。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
