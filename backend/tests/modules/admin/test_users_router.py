@@ -78,6 +78,26 @@ async def sample_role(db_session):
     return role
 
 
+@pytest.fixture
+async def org_tree(db_session):
+    """建父→子组织树(2026-06-25-admin-users-org-tree task-05),返回 (parent, child)。
+
+    复用范式:test_update_user_organizations_rewrite(:271-273) 建 Organization +
+    db_session.flush() 拿 id,再建子组织 parent_id=父.id。供组织过滤用例复用。
+    """
+    parent = Organization(name="Parent", code="parent", status="active")
+    db_session.add(parent)
+    await db_session.flush()
+    child = Organization(
+        name="Child", code="child", status="active", parent_id=parent.id
+    )
+    db_session.add(child)
+    await db_session.commit()
+    await db_session.refresh(parent)
+    await db_session.refresh(child)
+    return parent, child
+
+
 # ── Forward compatibility (legacy /api/users/* still works) ────────────
 
 
@@ -873,3 +893,225 @@ async def test_multiple_null_emails_coexist(client: AsyncClient, auth_headers, d
         pytest.xfail("task-02 缺陷:User.email ORM nullable=False,email=None 插入失败")
     assert a.id is not None
     assert b.id is not None
+
+
+# ── 2026-06-25-admin-users-org-tree task-05: list_users 组织维度过滤 ────
+
+
+def _make_user(email: str, username: str, *, display_name: str | None = None,
+               status: str = "active") -> User:
+    """造非 admin User(参考 target_user fixture :28-34 + _hash_pw :479-482)。"""
+    return User(
+        email=email,
+        username=username,
+        password_hash=_hash_pw(),
+        display_name=display_name,
+        status=status,
+        is_platform_admin=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_users_no_org_filter_returns_all(
+    client: AsyncClient, auth_headers, db_session, org_tree
+):
+    """AC-01: 不传 organization_id → 返回全部(行为不变,含未绑组织用户)。"""
+    parent, _child = org_tree
+    bound = _make_user("ofall-bound@example.com", "ofallbound")
+    unbound = _make_user("ofall-free@example.com", "ofallfree")
+    db_session.add_all([bound, unbound])
+    db_session.add_all(
+        [UserOrganization(user_id=bound.id, organization_id=parent.id)]
+    )
+    await db_session.commit()
+
+    resp = await client.get("/api/admin/users", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    emails = {it["email"] for it in data["items"]}
+    # 含全部非软删用户(含未绑组织用户)
+    assert bound.email in emails
+    assert unbound.email in emails
+
+
+@pytest.mark.asyncio
+async def test_list_users_filter_by_leaf_org(
+    client: AsyncClient, auth_headers, db_session, org_tree
+):
+    """AC-02: organization_id=叶子 + include_children=true → 仅显该组织用户。"""
+    parent, child = org_tree
+    parent_user = _make_user("leaf-parent@example.com", "leafparent")
+    child_user = _make_user("leaf-child@example.com", "leafchild")
+    db_session.add_all([parent_user, child_user])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            UserOrganization(user_id=parent_user.id, organization_id=parent.id),
+            UserOrganization(user_id=child_user.id, organization_id=child.id),
+        ]
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/admin/users",
+        params={"organization_id": str(child.id), "include_children": "true"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    emails = {it["email"] for it in resp.json()["items"]}
+    assert child_user.email in emails
+    # 叶子组织过滤不应含父组织成员
+    assert parent_user.email not in emails
+
+
+@pytest.mark.asyncio
+async def test_list_users_filter_by_parent_include_children(
+    client: AsyncClient, auth_headers, db_session, org_tree
+):
+    """AC-03: organization_id=父 + include_children=true → 显父+下级组织用户。"""
+    parent, child = org_tree
+    parent_user = _make_user("pc-parent@example.com", "pcparent")
+    child_user = _make_user("pc-child@example.com", "pcchild")
+    db_session.add_all([parent_user, child_user])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            UserOrganization(user_id=parent_user.id, organization_id=parent.id),
+            UserOrganization(user_id=child_user.id, organization_id=child.id),
+        ]
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/admin/users",
+        params={"organization_id": str(parent.id), "include_children": "true"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    emails = {it["email"] for it in resp.json()["items"]}
+    # 父 + 下级(子)用户都应显
+    assert parent_user.email in emails
+    assert child_user.email in emails
+
+
+@pytest.mark.asyncio
+async def test_list_users_filter_distinct(
+    client: AsyncClient, auth_headers, db_session, org_tree
+):
+    """AC-04 / D-004@v1 核心:一用户绑子树内多个组织 → distinct 只返回一次。
+
+    exists 子查询无 join 无重复行,故同一用户即便同时绑 parent+child,
+    organization_id=父(include_children=true)下也只出现一次,total 不虚高。
+    """
+    parent, child = org_tree
+    # dup_user 同时绑 parent + child(子树内多组织)
+    dup_user = _make_user("dup-multi@example.com", "dupmulti")
+    # only_child_user 只绑 child
+    only_child_user = _make_user("dup-only-child@example.com", "duponlychild")
+    db_session.add_all([dup_user, only_child_user])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            UserOrganization(user_id=dup_user.id, organization_id=parent.id),
+            UserOrganization(user_id=dup_user.id, organization_id=child.id),
+            UserOrganization(
+                user_id=only_child_user.id, organization_id=child.id
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/admin/users",
+        params={"organization_id": str(parent.id), "include_children": "true"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    emails = [it["email"] for it in data["items"]]
+    # dup_user 在子树多组织 → 仅出现一次(D-004 exists 无重复行)
+    assert emails.count(dup_user.email) == 1
+    # only_child_user(在 child 下)也被含入(include_children=true)
+    assert only_child_user.email in emails
+    # total 与 items 长度一致(无虚高,total 为过滤后总数,items 不受 limit)
+    assert data["total"] == len(data["items"])
+
+
+@pytest.mark.asyncio
+async def test_list_users_filter_combine_with_search(
+    client: AsyncClient, auth_headers, db_session, org_tree
+):
+    """AC-05: organization_id + q + status 叠加过滤(组织∩q∩active)。
+
+    q 匹配 email/display_name ilike(users_service.py:101-105);status="active"。
+    """
+    parent, child = org_tree
+    # 命中:在子树内 + display_name 含 "alice" + active
+    alice = _make_user(
+        "alice-org@example.com", "aliceorg", display_name="Alice InOrg"
+    )
+    # 不命中 q:在子树内 + active,但 display_name/email 不含 "alice"
+    bob = _make_user("bob-org@example.com", "boborg", display_name="Bob InOrg")
+    # 不命中 status:在子树内 + display_name 含 "alice",但 inactive
+    alice_off = _make_user(
+        "alice-off@example.com", "aliceoff", display_name="Alice Off", status="inactive"
+    )
+    db_session.add_all([alice, bob, alice_off])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            UserOrganization(user_id=alice.id, organization_id=child.id),
+            UserOrganization(user_id=bob.id, organization_id=child.id),
+            UserOrganization(user_id=alice_off.id, organization_id=child.id),
+        ]
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/admin/users",
+        params={
+            "organization_id": str(parent.id),
+            "include_children": "true",
+            "q": "alice",
+            "status": "active",
+        },
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    emails = {it["email"] for it in resp.json()["items"]}
+    assert alice.email in emails
+    assert bob.email not in emails  # 不含 "alice"
+    assert alice_off.email not in emails  # inactive
+
+
+@pytest.mark.asyncio
+async def test_list_users_filter_include_children_false(
+    client: AsyncClient, auth_headers, db_session, org_tree
+):
+    """AC-02 补充: organization_id=父 + include_children=false → 仅直接成员。
+
+    排除下级组织(子)成员,即便父 ∪ 子 都有用户。
+    """
+    parent, child = org_tree
+    parent_user = _make_user("icf-parent@example.com", "icfparent")
+    child_user = _make_user("icf-child@example.com", "icfchild")
+    db_session.add_all([parent_user, child_user])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            UserOrganization(user_id=parent_user.id, organization_id=parent.id),
+            UserOrganization(user_id=child_user.id, organization_id=child.id),
+        ]
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/admin/users",
+        params={"organization_id": str(parent.id), "include_children": "false"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    emails = {it["email"] for it in resp.json()["items"]}
+    assert parent_user.email in emails
+    # include_children=false → 下级(子)组织成员不显
+    assert child_user.email not in emails

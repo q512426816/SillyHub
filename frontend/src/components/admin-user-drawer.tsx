@@ -24,6 +24,10 @@ interface AdminUserDrawerProps {
   canWrite: boolean;
   canLoginManage: boolean;
   currentUserId: string;
+  /** create 模式默认选中的组织 id（来自父组件当前组织树筛选）。
+   *  undefined / 未传 → create 模式默认空选中（与现状一致）。
+   *  edit 模式忽略此 prop（始终用 user.organizations）。 */
+  defaultOrganizationIds?: string[];
 }
 
 const inputCls =
@@ -42,6 +46,7 @@ export function AdminUserDrawer({
   canWrite,
   canLoginManage,
   currentUserId,
+  defaultOrganizationIds,
 }: AdminUserDrawerProps) {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -72,10 +77,10 @@ export function AdminUserDrawer({
       setDisplayName("");
       setIsPlatformAdmin(false);
       setLoginEnabled(true);
-      setOrganizationIds([]);
+      setOrganizationIds(defaultOrganizationIds ?? []);
       setRoleIds([]);
     }
-  }, [open, mode, user]);
+  }, [open, mode, user, defaultOrganizationIds]);
 
   if (!open) return null;
 

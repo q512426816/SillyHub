@@ -97,8 +97,29 @@ async def _counts(session: AsyncSession, org_id: uuid.UUID) -> tuple[int, int]:
     return int(member_count), int(children_count)
 
 
+async def _subtree_member_count(session: AsyncSession, org_id: uuid.UUID) -> int:
+    """Count distinct members across ``org_id`` plus all its descendants.
+
+    ``_descendant_ids`` excludes the root, so we union ``{org_id}`` back
+    in before the IN lookup. A user bound to multiple orgs in the subtree
+    is counted once (distinct user_id, decision D-003@v1). Computed live
+    per call — no cache (D-005@v1).
+    """
+    descendant_ids = await _descendant_ids(session, org_id)
+    org_ids = {org_id} | descendant_ids
+    count = (
+        await session.execute(
+            select(func.count(UserOrganization.__table__.c.user_id.distinct()))
+            .select_from(UserOrganization.__table__)
+            .where(UserOrganization.__table__.c.organization_id.in_(org_ids))
+        )
+    ).scalar_one()
+    return int(count)
+
+
 async def _to_read(session: AsyncSession, org: Organization) -> OrganizationRead:
     members, children = await _counts(session, org.id)
+    subtree = await _subtree_member_count(session, org.id)
     return OrganizationRead(
         id=org.id,
         name=org.name,
@@ -109,6 +130,7 @@ async def _to_read(session: AsyncSession, org: Organization) -> OrganizationRead
         sort_order=org.sort_order,
         member_count=members,
         children_count=children,
+        subtree_member_count=subtree,
         created_at=org.created_at,
         updated_at=org.updated_at,
     )

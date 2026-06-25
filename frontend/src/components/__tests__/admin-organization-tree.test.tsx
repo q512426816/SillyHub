@@ -20,6 +20,7 @@ function makeOrg(
     sort_order: 0,
     member_count: 0,
     children_count: 0,
+    subtree_member_count: 0,
     created_at: "",
     updated_at: "",
     ...extra,

@@ -71,6 +71,8 @@ export interface UserListParams {
   order?: string;
   limit?: number;
   offset?: number;
+  organization_id?: string;
+  include_children?: boolean;
 }
 
 export interface UserSessionRead {
@@ -117,7 +119,7 @@ export async function listUsers(
   params?: UserListParams,
 ): Promise<UserListResponse> {
   return apiFetch<UserListResponse>("/api/admin/users", {
-    query: params as Record<string, string | number | undefined>,
+    query: params as Record<string, string | number | boolean | undefined>,
   });
 }
 
@@ -226,6 +228,7 @@ export interface OrganizationRead {
   sort_order: number;
   member_count: number;
   children_count: number;
+  subtree_member_count: number;
   created_at: string;
   updated_at: string;
 }

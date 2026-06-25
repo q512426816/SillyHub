@@ -350,6 +350,8 @@ async def list_users(
     order: str = Query("desc"),
     limit: int = Query(20, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    organization_id: uuid.UUID | None = Query(None),
+    include_children: bool = Query(True),
 ) -> UserListResponse:
     svc = UserService(session, user.id)
     rows, total = await svc.list_users(
@@ -360,6 +362,8 @@ async def list_users(
         order=order,
         limit=limit,
         offset=offset,
+        organization_id=organization_id,
+        include_children=include_children,
     )
     items = [await _user_with_relations(session, u) for u in rows]
     return UserListResponse(items=items, total=total)

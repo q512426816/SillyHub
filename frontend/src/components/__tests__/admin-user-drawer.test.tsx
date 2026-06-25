@@ -19,6 +19,7 @@ function makeOrg(id: string, name: string, code: string): OrganizationRead {
     sort_order: 0,
     member_count: 0,
     children_count: 0,
+    subtree_member_count: 0,
     created_at: "",
     updated_at: "",
   };
@@ -332,5 +333,56 @@ describe("AdminUserDrawer", () => {
     expect(cb.checked).toBe(false);
     fireEvent.click(cb);
     expect(cb.checked).toBe(true);
+  });
+
+  it("T-09: create 模式按 defaultOrganizationIds 预填勾选", () => {
+    render(
+      <AdminUserDrawer
+        {...baseProps}
+        open
+        mode="create"
+        defaultOrganizationIds={["o1"]}
+      />,
+    );
+    // o1 对应 organization(baseProps.organizations=[makeOrg("o1","Acme","acme")])
+    // checkbox aria-label=o.code="acme",默认勾选
+    const cb = screen.getByLabelText("acme") as HTMLInputElement;
+    expect(cb.checked).toBe(true);
+  });
+
+  it("T-10: create 模式不传 defaultOrganizationIds → 默认不勾(空回归)", () => {
+    render(
+      <AdminUserDrawer
+        {...baseProps}
+        open
+        mode="create"
+      />,
+    );
+    const cb = screen.getByLabelText("acme") as HTMLInputElement;
+    expect(cb.checked).toBe(false);
+  });
+
+  it("T-11: edit 模式忽略 defaultOrganizationIds,用 user.organizations", () => {
+    // 给两个 organization:o1(Acme) + o2(Beta),user.organizations=[o2]
+    render(
+      <AdminUserDrawer
+        {...baseProps}
+        organizations={[
+          makeOrg("o1", "Acme", "acme"),
+          makeOrg("o2", "Beta", "beta"),
+        ]}
+        open
+        mode="edit"
+        user={makeUser({
+          organizations: [{ id: "o2", name: "Beta", code: "beta" }],
+        })}
+        defaultOrganizationIds={["o1"]}
+      />,
+    );
+    // edit 模式:user.organizations=o2 → beta 勾选;defaultOrganizationIds=o1 被忽略
+    const betaCb = screen.getByLabelText("beta") as HTMLInputElement;
+    const acmeCb = screen.getByLabelText("acme") as HTMLInputElement;
+    expect(betaCb.checked).toBe(true);
+    expect(acmeCb.checked).toBe(false);
   });
 });

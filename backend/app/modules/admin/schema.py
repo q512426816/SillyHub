@@ -141,7 +141,8 @@ class OrganizationRead(BaseModel):
     """Single org + aggregate counts.
 
     ``member_count`` / ``children_count`` are filled by the service via
-    a single GROUP BY query (no N+1).
+    a single GROUP BY query (no N+1). ``subtree_member_count`` covers
+    the current org plus every descendant (distinct user_id).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -155,6 +156,8 @@ class OrganizationRead(BaseModel):
     sort_order: int
     member_count: int
     children_count: int
+    # 当前 + 所有下级 distinct 成员数（D-003@v1：同一用户在子树多组织只计 1，service 注入）
+    subtree_member_count: int
     created_at: datetime
     updated_at: datetime
 
@@ -252,6 +255,10 @@ class UserQueryParams(BaseModel):
     order: str = "desc"
     limit: int = Field(default=20, ge=1, le=200)
     offset: int = Field(default=0, ge=0)
+    # 组织维度过滤：None/缺省 = 不过滤（全部用户）；非空时仅当 include_children=True 含下级组织
+    organization_id: uuid.UUID | None = None
+    # 是否含下级组织（D-001@v1 默认 True：当前 + 下级；False = 仅当前组织）
+    include_children: bool = True
 
 
 class UserSessionRead(BaseModel):

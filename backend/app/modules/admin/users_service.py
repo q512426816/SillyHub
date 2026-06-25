@@ -26,7 +26,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -34,6 +34,7 @@ from app.core.errors import PermissionDenied
 from app.core.logging import get_logger
 from app.core.security import password_hasher
 from app.modules.admin.model import Organization, UserOrganization, UserRole
+from app.modules.admin.organizations_service import _descendant_ids
 from app.modules.admin.schema import UserWorkspaceRead
 from app.modules.auth.model import Role, User, UserWorkspaceRole
 from app.modules.auth.model import Session as AuthSession
@@ -92,6 +93,8 @@ class UserService:
         order: str = "desc",
         limit: int = 20,
         offset: int = 0,
+        organization_id: uuid.UUID | None = None,
+        include_children: bool = True,
     ) -> tuple[list[User], int]:
         base = select(User).where(col(User.deleted_at).is_(None))
 
@@ -106,6 +109,22 @@ class UserService:
             base = base.where(User.is_platform_admin.is_(True))
         elif role == "user":
             base = base.where(User.is_platform_admin.is_(False))
+
+        # 组织维度过滤(exists 子查询,无 join 无重复行 → total/分页天然正确,D-004@v1)
+        if organization_id is not None:
+            org_ids: set[uuid.UUID] = {organization_id}
+            if include_children:
+                org_ids |= await _descendant_ids(self.session, organization_id)
+            base = base.where(
+                exists(
+                    select(1)
+                    .select_from(UserOrganization.__table__)
+                    .where(
+                        (UserOrganization.__table__.c.user_id == User.id)
+                        & (UserOrganization.__table__.c.organization_id.in_(org_ids))
+                    )
+                )
+            )
 
         total_q = select(func.count()).select_from(base.subquery())
         total = (await self.session.execute(total_q)).scalar() or 0

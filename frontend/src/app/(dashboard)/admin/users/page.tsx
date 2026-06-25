@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Input, Select, type TableProps, Tag } from "antd";
 
 import { AdminUserDrawer } from "@/components/admin-user-drawer";
+import { AdminOrgTree } from "@/components/admin-org-tree";
 import {
   DataTable,
   PageContainer,
@@ -75,6 +76,7 @@ export default function AdminUsersPage() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [drawer, setDrawer] = useState<DrawerState>({
@@ -98,9 +100,11 @@ export default function AdminUsersPage() {
       const params: Parameters<typeof listUsers>[0] = {
         limit: pageSize,
         offset: (page - 1) * pageSize,
+        include_children: true, // 固定 true（D-001@v1）
       };
       if (search) params.q = search;
       if (statusFilter !== "all") params.status = statusFilter;
+      if (selectedOrgId) params.organization_id = selectedOrgId; // null/undefined → 不传，后端 None 行为不变（AC-09）
       const resp = await listUsers(params);
       setUsers(resp.items);
       setTotal(resp.total);
@@ -109,7 +113,7 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter, page, pageSize]);
+  }, [search, statusFilter, page, pageSize, selectedOrgId]);
 
   useEffect(() => {
     void load();
@@ -166,6 +170,21 @@ export default function AdminUsersPage() {
     setStatusFilter("all");
     setPage(1);
   };
+
+  // 点左侧组织树节点：setSelectedOrgId（驱动 load 依赖刷新）+ 重置到第 1 页。
+  const handleOrgSelect = (id: string | null) => {
+    setSelectedOrgId(id);
+    setPage(1);
+  };
+
+  // 右侧顶部「当前筛选」文案：null → 全部组织；否则「组织名（含下级组织）」。
+  // 查不到 name（脏数据）回退 id，避免 UI 出现空白。
+  const selectedOrgName = selectedOrgId
+    ? organizations.find((o) => o.id === selectedOrgId)?.name ?? selectedOrgId
+    : null;
+  const filterLabel = selectedOrgName
+    ? `${selectedOrgName}（含下级组织）`
+    : "全部组织";
 
   const handleSubmit = async (
     body: UserCreateRequest | UserUpdateRequest,
@@ -393,75 +412,92 @@ export default function AdminUsersPage() {
           </Button>
         </div>
       ) : (
-        <>
-          <SectionCard bodyPadding="p-2">
-            {/* 顶部操作按钮行（右对齐，对齐 project-plans） */}
-            <div className="mb-2 flex items-center justify-end gap-2">
-              <Button size="sm" onClick={() => handleSearchClick()}>
-                搜索
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => handleResetClick()}>
-                重置
-              </Button>
-              <span className="mx-1 h-6 w-px bg-border" aria-hidden />
-              <Button
-                size="sm"
-                disabled={!canWrite}
-                onClick={() => setDrawer({ open: true, mode: "create" })}
-                title={!canWrite ? "无 user:write 权限" : undefined}
-              >
-                + 新建用户
-              </Button>
-            </div>
-            {/* 搜索表单：grid-cols-4 垂直 Field（对齐 project-plans） */}
-            <div className="grid w-full grid-cols-4 gap-3">
-              <Field label="关键词">
-                <Input
-                  value={searchInput}
-                  onChange={(e) => handleSearchInput(e.target.value)}
-                  placeholder="搜索 登录名 / 显示名…"
-                  allowClear
-                  onPressEnter={() => handleSearchClick()}
-                />
-              </Field>
-              <Field label="状态">
-                <Select
-                  value={statusFilter}
-                  onChange={(v) => handleStatusFilterChange(v)}
-                  className="w-full"
-                  options={[
-                    { value: "all", label: "全部状态" },
-                    { value: "active", label: "启用" },
-                    { value: "disabled", label: "禁用" },
-                  ]}
-                />
-              </Field>
-            </div>
-          </SectionCard>
+        <div className="flex gap-4">
+          {/* 左：组织树筛选（对齐 ppm/project-plans 左树右表布局） */}
+          <aside className="w-56 shrink-0">
+            <SectionCard title="组织" bodyPadding="p-2">
+              <AdminOrgTree
+                organizations={organizations}
+                selectedOrgId={selectedOrgId}
+                onSelect={handleOrgSelect}
+              />
+            </SectionCard>
+          </aside>
 
-          <DataTable<UserRead>
-            rowKey="id"
-            columns={columns}
-            dataSource={users}
-            loading={loading}
-            size="small"
-            bordered
-            scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
-            pagination={{
-              current: page,
-              pageSize,
-              total,
-              showSizeChanger: true,
-              pageSizeOptions: PAGE_SIZE_OPTIONS,
-              showTotal: (t) => `共 ${t} 个用户`,
-              onChange: (p, s) => {
-                setPage(p);
-                setPageSize(s);
-              },
-            }}
-            emptyText="暂无用户"
-          />
-        </>
+          {/* 右：当前筛选 + 查询表单 + 表格 */}
+          <div className="min-w-0 flex-1">
+            <div className="mb-2 text-xs text-muted-foreground">
+              当前筛选：{filterLabel}
+            </div>
+            <SectionCard bodyPadding="p-2">
+              {/* 顶部操作按钮行（右对齐，对齐 project-plans） */}
+              <div className="mb-2 flex items-center justify-end gap-2">
+                <Button size="sm" onClick={() => handleSearchClick()}>
+                  搜索
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => handleResetClick()}>
+                  重置
+                </Button>
+                <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+                <Button
+                  size="sm"
+                  disabled={!canWrite}
+                  onClick={() => setDrawer({ open: true, mode: "create" })}
+                  title={!canWrite ? "无 user:write 权限" : undefined}
+                >
+                  + 新建用户
+                </Button>
+              </div>
+              {/* 搜索表单：grid-cols-4 垂直 Field（对齐 project-plans） */}
+              <div className="grid w-full grid-cols-4 gap-3">
+                <Field label="关键词">
+                  <Input
+                    value={searchInput}
+                    onChange={(e) => handleSearchInput(e.target.value)}
+                    placeholder="搜索 登录名 / 显示名…"
+                    allowClear
+                    onPressEnter={() => handleSearchClick()}
+                  />
+                </Field>
+                <Field label="状态">
+                  <Select
+                    value={statusFilter}
+                    onChange={(v) => handleStatusFilterChange(v)}
+                    className="w-full"
+                    options={[
+                      { value: "all", label: "全部状态" },
+                      { value: "active", label: "启用" },
+                      { value: "disabled", label: "禁用" },
+                    ]}
+                  />
+                </Field>
+              </div>
+            </SectionCard>
+
+            <DataTable<UserRead>
+              rowKey="id"
+              columns={columns}
+              dataSource={users}
+              loading={loading}
+              size="small"
+              bordered
+              scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
+              pagination={{
+                current: page,
+                pageSize,
+                total,
+                showSizeChanger: true,
+                pageSizeOptions: PAGE_SIZE_OPTIONS,
+                showTotal: (t) => `共 ${t} 个用户`,
+                onChange: (p, s) => {
+                  setPage(p);
+                  setPageSize(s);
+                },
+              }}
+              emptyText="暂无用户"
+            />
+          </div>
+        </div>
       )}
 
       <AdminUserDrawer
@@ -475,6 +511,7 @@ export default function AdminUsersPage() {
         canWrite={canWrite}
         canLoginManage={canLoginManage}
         currentUserId={currentUserId}
+        defaultOrganizationIds={selectedOrgId ? [selectedOrgId] : undefined}
       />
 
       {confirmDelete && (
