@@ -135,6 +135,7 @@ describe("task-15: AgentLogViewer turn 分组渲染", () => {
         logs={logs}
         loading={false}
         emptyText="空"
+        defaultViewMode="all"
       />,
     );
     // 两个 turn 头
@@ -185,6 +186,7 @@ describe("task-15: thinking 默认折叠为单行摘要", () => {
         logs={logs}
         loading={false}
         emptyText="空"
+        defaultViewMode="all"
       />,
     );
     // 折叠标题"思考"可见
@@ -210,6 +212,7 @@ describe("task-15: thinking 默认折叠为单行摘要", () => {
         logs={logs}
         loading={false}
         emptyText="空"
+        defaultViewMode="all"
       />,
     );
     // 点击"思考"按钮展开
@@ -257,6 +260,7 @@ describe("task-15: tool 卡片状态徽标 + 耗时", () => {
         logs={logs}
         loading={false}
         emptyText="空"
+        defaultViewMode="all"
       />,
     );
     // 状态徽标含 ✓
@@ -293,6 +297,7 @@ describe("task-15: tool 卡片状态徽标 + 耗时", () => {
         logs={logs}
         loading={false}
         emptyText="空"
+        defaultViewMode="all"
       />,
     );
     // 失败徽标 ✗
@@ -321,11 +326,99 @@ describe("task-15: tool 卡片状态徽标 + 耗时", () => {
         logs={logs}
         loading={false}
         emptyText="空"
+        defaultViewMode="all"
       />,
     );
     // tool 名可见（卡片已渲染）
     expect(screen.getByText("Bash")).toBeInTheDocument();
     // 无 result → 不应有耗时秒数（"[0-9.]+s"）
     expect(screen.queryByText(/\d+\.\d+s/)).not.toBeInTheDocument();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  5. ql-20260626-001 bug1：多行 thinking 折叠（修裸露成 INFO）        */
+/* ------------------------------------------------------------------ */
+
+describe("ql-20260626-001 bug1: 多行 thinking 走折叠分支不裸露成 INFO", () => {
+  it("含换行的 thinking（mergedThinkingContent 标记）渲染为「思考」折叠卡片", () => {
+    // DB 实证 run 6dc3a8d7 16:31:53（北京 00:31:53）的真实思考行：首行 [THINKING] +
+    // 后续裸行（引用 postcheck-result.json 的多行结构）。修复前 normalize 已设
+    // mergedThinkingContent（isThinkingOnly 看首行），但渲染层 isThinkingContent
+    // 要求每行都是 [THINKING]/[SYSTEM]/[ASSISTANT] → 多行返回 false → 走默认
+    // renderLogLines 把 "- overall_status: completed_with_warnings" 裸露成 INFO。
+    const content =
+      '[THINKING] Now I understand the situation fully. The postcheck-result.json shows:\n- overall_status: completed_with_warnings\n- The ONLY warning is "tool_use_error" — false positive';
+    const logs: AgentRunLogEntry[] = [
+      makeRawLog("stdout", content, "t1", "2026-06-26T16:31:53.000Z"),
+    ];
+    render(
+      <AgentLogViewer
+        title="测试"
+        runId="r1"
+        logs={logs}
+        loading={false}
+        emptyText="空"
+        defaultViewMode="all"
+      />,
+    );
+    // 修复后：走折叠分支 → 「思考」折叠卡片可见
+    expect(screen.getByText("思考")).toBeInTheDocument();
+    // 折叠态：裸引用文本不应作为独立行直接渲染（修复前会裸露成 INFO）
+    expect(screen.queryByText(/^- overall_status:/)).not.toBeInTheDocument();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  6. ql-20260626-001 bug2：对话视图为默认                            */
+/* ------------------------------------------------------------------ */
+
+describe("ql-20260626-001 bug2: 对话视图为默认（隐藏 tool/thinking）", () => {
+  it("默认对话视图只显 user_input + assistant，隐藏 thinking/tool_call", () => {
+    const logs: AgentRunLogEntry[] = [
+      makeRawLog("user_input", "帮我执行 scan", "u1", "2026-06-26T00:30:00.000Z"),
+      makeRawLog("stdout", "[THINKING] 我来规划一下", "t1", "2026-06-26T00:30:05.000Z"),
+      makeRawLog("stdout", "[ASSISTANT] 好的，开始执行", "a1", "2026-06-26T00:30:10.000Z"),
+      makeRawLog("tool_call", JSON.stringify({ tool: "Bash" }), "tc1", "2026-06-26T00:30:15.000Z"),
+    ];
+    render(
+      <AgentLogViewer title="测试" runId="r1" logs={logs} loading={false} emptyText="空" />,
+    );
+    // 对话内容可见
+    expect(screen.getByText("帮我执行 scan")).toBeInTheDocument();
+    expect(screen.getByText(/好的，开始执行/)).toBeInTheDocument();
+    // thinking / tool 隐藏
+    expect(screen.queryByText(/我来规划一下/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+    // 「对话」tab 默认激活（bg-primary）
+    const convBtn = screen.getByText("对话").closest("button");
+    expect(convBtn?.className).toContain("bg-primary");
+  });
+
+  it("切到「全部」tab 后 tool/thinking 可见", () => {
+    const logs: AgentRunLogEntry[] = [
+      makeRawLog("stdout", "[THINKING] 我来规划", "t1"),
+      makeRawLog("tool_call", JSON.stringify({ tool: "Bash" }), "tc1"),
+    ];
+    render(
+      <AgentLogViewer title="测试" runId="r1" logs={logs} loading={false} emptyText="空" />,
+    );
+    // 默认对话视图：tool 不可见
+    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+    // 切「全部」（exact 匹配 tab button，不与空态文案 "切到「全部」..." 冲突）
+    fireEvent.click(screen.getByText("全部"));
+    // 全部视图：tool 卡片可见（卡片多处出现 "Bash"，用 getAllByText）
+    expect(screen.getAllByText("Bash").length).toBeGreaterThan(0);
+  });
+
+  it("对话视图下仅有 tool/thinking 时显示引导空态", () => {
+    const logs: AgentRunLogEntry[] = [
+      makeRawLog("tool_call", JSON.stringify({ tool: "Bash" }), "tc1"),
+    ];
+    render(
+      <AgentLogViewer title="测试" runId="r1" logs={logs} loading={false} emptyText="空" />,
+    );
+    // 对话视图无对话内容 → 引导切「全部」
+    expect(screen.getByText(/切到「全部」查看完整日志/)).toBeInTheDocument();
   });
 });

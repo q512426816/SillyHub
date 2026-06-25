@@ -38,4 +38,7 @@ created_at: 2026-06-24T01:16:42
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+## 变更索引
+- ql-20260626-001-4a8e | 放宽 complete 事件 result body 截断 slice(3000)→slice(50000)（task-runner.ts `_eventToMessages` complete 分支），避免 daemon 侧砍断 agent 最终总结（backend 侧 content 已同步放宽到 50000）。
+
 <!-- MANUAL_NOTES_END -->

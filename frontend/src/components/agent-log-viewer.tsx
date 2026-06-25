@@ -11,7 +11,7 @@ import {
   Send,
   Wrench,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ErrorBoundary } from "@/components/error-boundary";
 import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
@@ -270,8 +270,15 @@ export function AgentLogRow({
   // 用 asString 统一降级（null/undefined→""，number/object→String），避免下游 split 崩。
   const contentSafe = asString(log.content_redacted);
 
-  // Check if stdout is thinking-only content
-  const isThinking = log.channel === "stdout" && isThinkingContent(contentSafe);
+  // ql-20260626-001 / bug1：thinking 判定与 normalize 对齐（修多行思考裸露成 INFO）。
+  // normalize isThinkingOnly（normalize.ts:594）只看首行 [THINKING] 即设
+  // mergedThinkingContent；原 isThinkingContent 要求每行都是 [THINKING]/[SYSTEM]/
+  // [ASSISTANT]，对含换行的多行思考（如引用 postcheck-result.json 的输出）返回 false，
+  // 导致已标记的思考走默认 renderLogLines 裸露成 INFO 文本（DB 实证 run 6dc3a8d7
+  // 16:31:53 思考行 "overall_status: completed_with_warnings - The ONLY warning is"）。
+  // 修复：凡 mergedThinkingContent != null 即视为 thinking 走折叠分支，与 normalize 对齐。
+  const isThinking = log.channel === "stdout"
+    && (processedLog.mergedThinkingContent != null || isThinkingContent(contentSafe));
 
   // task-15 / FR-10：tool 卡片耗时（tool_use→result 时间戳差）。
   // 仅 tool_call / parsedStdoutTool 卡片计算，其他 channel 不需要。
@@ -535,6 +542,7 @@ export function AgentLogViewer({
   compact,
   variant = "panel",
   isLive,
+  defaultViewMode = "conversation",
   containerRef,
   summary,
   actions,
@@ -551,6 +559,12 @@ export function AgentLogViewer({
   compact?: boolean;
   variant?: "panel" | "embedded";
   isLive?: boolean;
+  /**
+   * ql-20260626-001 / bug2：默认视图模式。
+   * - conversation（默认）：只显 agent 接收（user_input）+ 答复（assistant/pending_input）
+   * - all：全显（含 thinking / tool / 系统摘要），保留原 channel 二级筛选
+   */
+  defaultViewMode?: "conversation" | "all";
   containerRef?: React.RefObject<HTMLDivElement>;
   summary?: React.ReactNode;
   actions?: React.ReactNode;
@@ -568,6 +582,10 @@ export function AgentLogViewer({
   const scrollRef = containerRef ?? internalRef;
   const [fullscreen, setFullscreen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
+  // ql-20260626-001 / bug2：视图模式（对话默认 / 全部），单选 tab。恢复 ql-20260625-003
+  // 丢失的"默认只显 agent 接收+答复、不默认展示工具调用"诉求（该 quicklog 改动从未
+  // commit 进 main，agent-log-viewer.tsx 最近 commit 是 6-23 c1e30256）。
+  const [viewMode, setViewMode] = useState<"conversation" | "all">(defaultViewMode);
 
   // ql-20260622-003 / P1-1：normalize + 过滤 + turn 分组全部 memo，依赖 logs 引用 /
   // activeFilters，避免大日志列表每次 render 全量重算（normalize O(N)、turn 分组 O(N)）。
@@ -576,12 +594,24 @@ export function AgentLogViewer({
     () => processedLogs.filter((p) => !p.hidden),
     [processedLogs],
   );
-  const filteredLogs = useMemo(
-    () => activeFilters.size > 0
-      ? visibleLogs.filter((p) => activeFilters.has(p.log.channel))
-      : visibleLogs,
-    [visibleLogs, activeFilters],
+  // ql-20260626-001 / bug2：对话视图过滤——只保留 agent 接收（user_input）+ agent 答复
+  // （mergedAssistantContent / pending_input 提问），隐藏 thinking / tool_call / 系统
+  // 摘要 stdout。全部视图维持原 channel 二级筛选（activeFilters）。
+  const isConversationLog = useCallback(
+    (p: ProcessedLog) =>
+      p.log.channel === "user_input"
+      || p.log.channel === "pending_input"
+      || p.mergedAssistantContent != null,
+    [],
   );
+  const filteredLogs = useMemo(() => {
+    if (viewMode === "conversation") {
+      return visibleLogs.filter(isConversationLog);
+    }
+    return activeFilters.size > 0
+      ? visibleLogs.filter((p) => activeFilters.has(p.log.channel))
+      : visibleLogs;
+  }, [visibleLogs, viewMode, activeFilters, isConversationLog]);
   const turns = useMemo(() => groupIntoTurns(filteredLogs), [filteredLogs]);
 
   // ql-20260621：审批卡片随 ASK 通道展示——无过滤或 ASK(pending_input) 过滤时可见。
@@ -590,7 +620,9 @@ export function AgentLogViewer({
   const hasPermissionCards =
     !!permissionRequests &&
     permissionRequests.length > 0 &&
-    (activeFilters.size === 0 || activeFilters.has("pending_input"));
+    // ql-20260626-001 / bug2：对话视图始终展示审批/提问卡片（pending_input 是对话一部分）；
+    // 全部视图维持原 activeFilters 判定。
+    (viewMode === "conversation" || activeFilters.size === 0 || activeFilters.has("pending_input"));
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -649,7 +681,25 @@ export function AgentLogViewer({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          {channelFilters.map((f) => (
+          {/* ql-20260626-001 / bug2：视图 tab（对话默认 / 全部），单选 */}
+          <div className="flex items-center gap-0.5 rounded border border-zinc-200 bg-zinc-50 p-0.5">
+            {(["conversation", "all"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setViewMode(m)}
+                className={cn(
+                  "inline-flex h-5 items-center rounded px-2 text-[10px] font-semibold transition-colors",
+                  viewMode === m
+                    ? "bg-primary text-primary-foreground"
+                    : "text-zinc-600 hover:text-zinc-900",
+                )}
+              >
+                {m === "conversation" ? "对话" : "全部"}
+              </button>
+            ))}
+          </div>
+          {/* 全部视图下保留 channel 二级筛选（原 5 按钮） */}
+          {viewMode === "all" && channelFilters.map((f) => (
             <button
               key={f.key}
               onClick={() => toggleFilter(f.key)}
@@ -663,7 +713,7 @@ export function AgentLogViewer({
               {f.label}
             </button>
           ))}
-          {activeFilters.size > 0 && (
+          {viewMode === "all" && activeFilters.size > 0 && (
             <button
               onClick={() => setActiveFilters(new Set())}
               className="text-[10px] text-zinc-500 hover:text-zinc-800"
@@ -698,7 +748,11 @@ export function AgentLogViewer({
           </div>
         ) : filteredLogs.length === 0 && !hasPermissionCards ? (
           <p className="px-4 py-10 text-center text-xs text-zinc-600">
-            {visibleLogs.length === 0 ? emptyText : "无匹配日志"}
+            {visibleLogs.length === 0
+              ? emptyText
+              : viewMode === "conversation"
+                ? "暂无对话消息（工具调用/思考已隐藏，切到「全部」查看完整日志）"
+                : "无匹配日志"}
           </p>
         ) : (
           <>

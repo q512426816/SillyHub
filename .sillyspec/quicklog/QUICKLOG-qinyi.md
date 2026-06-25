@@ -153,3 +153,21 @@ created_at: 2026-06-23 10:09:12
 - frontend/src/components/__tests__/agent-log-viewer.test.tsx
 - frontend/src/components/__tests__/agent-run-panel.test.tsx
 结果：AgentRunResponse 透出 cache_read_tokens/cache_creation_tokens；AgentRunPanel 的 token 徽标展示输入、输出、缓存读取、缓存写入；AgentLogViewer 默认只展示 user_input、assistant 回复和 thinking 缩略，工具/结果/系统/警告/提问/普通输出通过按钮按需显示；保留 [SYSTEM:thinking_tokens] 用于顶部思考 token 概览但默认不渲染原始系统行；会话实时消息和历史回看同样按核心对话/折叠技术日志展示，并在 session SSE tokens/turn_completed 中透传 cache 字段。验证：frontend 下 pnpm vitest run src/components/daemon/runtime-session-dialog.test.tsx src/components/__tests__/agent-log-viewer.test.tsx src/components/__tests__/agent-run-panel.test.tsx，28 passed；backend 下 uv run pytest app/modules/daemon/tests/test_run_sync_cache_parse.py app/modules/daemon/tests/test_interactive_lifecycle_patch.py -q，33 passed。
+
+## ql-20260626-001-4a8e | 2026-06-26 01:25:09 | 修复 agent 实时日志展示：thinking 多行渲染裸露成 INFO（bug1）+ 实现"对话视图"为默认 tab（恢复 ql-20260625-003 丢失的诉求）+ 放宽 content 截断
+状态：进行中
+背景：ql-20260625-003 曾声称实现"AgentLogViewer 默认只展示 user_input/assistant/thinking 缩略、工具按需显示"，但该改动**从未 commit 进 main**（agent-log-viewer.tsx 最近 commit 是 6-23 c1e30256，stash/reflog 无此改动），用户记忆中的"6-25 要求"实际未落地，本次真正实现。
+根因：
+- bug1（thinking 多行渲染）：normalize isThinkingOnly（normalize.ts:594）只看首行 [THINKING] 即设 mergedThinkingContent；渲染 isThinkingContent（agent-log-viewer.tsx:572-582）要求每一行都是 [THINKING]/[SYSTEM]/[ASSISTANT] 才走折叠分支。含换行的多行思考（如引用 postcheck-result.json）isThinkingContent 返回 false → 走默认 renderLogLines 把思考内容裸露成 INFO 文本。DB 实证 run 6dc3a8d7 的 16:31:53（北京 00:31:53）日志 [THINKING] Now I understand...overall_status: completed_with_warnings\n- The ONLY warning is "（len 147，未截断）被裸露显示成"结尾 INFO 行"。
+- bug2（默认展示）：当前 agent-log-viewer.tsx:610-616 是 5 个多选 toggle filter，activeFilters 默认空 Set = 全显（含工具卡片），与用户"默认只显 agent 接收+答复"诉求不符。
+- 附带截断：content[:5000]（run_sync/service.py:236,245）+ daemon complete result slice(3000)（task-runner.ts:1401），非 bug1 根因（那条才 147 字符），但长输出会被截，作普遍改进。
+方案：
+- bug1：渲染层 isThinking 判定改为"processedLog.mergedThinkingContent != null 即走折叠分支"，与 normalize isThinkingOnly 对齐，不再要求全行前缀。
+- bug2：顶部改单选 tab「对话 / 全部」：对话视图默认只显 user_input（agent 接收）+ assistant 文本（agent 答复），隐藏 thinking/tool_call/系统摘要 stdout；「全部」= 现状全显（保留原 5 按钮作为"全部"视图下的二级筛选或移除）。
+- 截断：放宽 content[:5000]（后端）+ slice(3000)（daemon complete）。
+文件：
+- frontend/src/components/agent-log-viewer.tsx（isThinking 判定 + 对话/全部 tab）
+- frontend/src/components/agent-log/normalize.ts（必要时配合 thinking 标记）
+- frontend/src/components/__tests__/agent-log-viewer.test.tsx（thinking 多行折叠 + 对话视图默认用例）
+- backend/app/modules/daemon/run_sync/service.py（content[:5000] 放宽）
+- sillyhub-daemon/src/task-runner.ts（complete result slice(3000) 放宽）

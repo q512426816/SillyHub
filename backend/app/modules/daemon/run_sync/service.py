@@ -233,7 +233,8 @@ class RunSyncService:
                 run_id=agent_run_id,
                 timestamp=now,
                 channel=channel,
-                content_redacted=content[:5000],
+                # ql-20260626-001 放宽（原 5000 截断 agent 长答复/总结）
+                content_redacted=content[:50000],
                 dedup_key=dedup_key,
             )
             self._session.add(log_entry)
@@ -242,7 +243,7 @@ class RunSyncService:
                 {
                     "log_id": str(log_id),
                     "channel": channel,
-                    "content": content[:5000],
+                    "content": content[:50000],  # ql-20260626-001 同 DB 放宽
                     "timestamp": now.isoformat().replace("+00:00", "Z"),
                 }
             )

@@ -1398,7 +1398,7 @@ export class TaskRunner {
         let line = '[RESULT:success]';
         const body = rawContent.trim();
         if (body) {
-          line += ` ${body.slice(0, 3000)}`;
+          line += ` ${body.slice(0, 50000)}`; // ql-20260626-001 放宽（原 3000 截断完整 result 总结）
         }
         if (durationMs !== null) line += ` duration=${durationMs}ms`;
         if (numTurns !== null) line += ` turns=${numTurns}`;

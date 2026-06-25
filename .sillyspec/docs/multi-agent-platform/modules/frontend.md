@@ -43,5 +43,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 - ql-20260624-003-a7f1 | 优化 /runtimes 会话弹窗布局样式：扩大 RuntimeSessionDialog 工作区，改造会话列表为左侧栏，统一交互式会话与历史回看面板高度和输入栏间距。
 - ql-20260624-004-c8a2 | 优化 /settings/api-keys 页面和 API Key 创建弹窗：统一页面容器、标题区、卡片、状态和空态样式，补充统计概览与表格密度整理。
 - ql-20260625-003-4d7a | 优化 Agent/会话运行日志展示：默认突出用户消息、Agent 回复和思考缩略，补充 token/cache 用量、额外日志类型开关，以及会话实时/历史消息技术日志折叠。
+- ql-20260626-001-4a8e | 修复 agent 日志展示：thinking 多行渲染对齐 normalize（mergedThinkingContent!=null 即走折叠，修多行思考裸露成 INFO）+ 顶部「对话/全部」单选 tab 默认隐藏工具调用（真正落地 ql-003 丢失的对话视图诉求）+ 放宽 content 截断。改 agent-log-viewer.tsx（isThinking 判定 + viewMode/defaultViewMode + isConversationLog 过滤）。
 
 <!-- MANUAL_NOTES_END -->
