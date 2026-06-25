@@ -1,6 +1,6 @@
 ---
 author: qinyi
-created_at: 2026-06-25T17:35:00
+created_at: 2026-06-25 17:41:14
 ---
 
 # design.md — 平台管理员全局守护进程与工作区管理
@@ -42,11 +42,11 @@ created_at: 2026-06-25T17:35:00
 
 ### Phase 1：后端数据模型与 DTO
 
-在 `daemon_runtimes` 和 `workspaces` 增加 nullable `display_alias` 字段。DTO 增加 `display_alias` 和 owner 展示字段：`owner_user_id`、`owner_email`、`owner_display_name`。owner 字段由列表查询 JOIN `users` 得出，不作为 ORM 表字段存储。
+在 `daemon_runtimes` 和 `workspaces` 增加 nullable `display_alias` 字段。DTO 增加 `display_alias` 和嵌套 owner 展示对象：`owner.user_id`、`owner.email`、`owner.display_name`。owner 字段由列表查询 JOIN `users` 得出，不作为 ORM 表字段存储；详情端点可返回 `owner=None`，列表端点负责填充。
 
 ### Phase 2：后端服务端筛选/分页
 
-新增 daemon runtime 分页端点 `GET /api/daemon/runtimes/page`，保持原 `GET /api/daemon/runtimes` 返回数组用于兼容现有调用。分页端点支持 `q/type/status/user_id/limit/offset`，平台管理员查询全量，普通账号只查自己的 runtime。
+新增 daemon runtime 分页端点 `GET /api/daemon/runtimes/page`，保持原 `GET /api/daemon/runtimes` 返回数组用于兼容现有调用。分页端点支持 `q/type/status/user_id/limit/offset`，平台管理员查询全量，普通账号只查自己的 runtime。该固定路径必须在 `GET /api/daemon/runtimes/{runtime_id}` 之前声明，避免 FastAPI 将 `page` 当作 UUID 路径参数解析。
 
 扩展 `GET /api/workspaces` 的查询参数，保持响应结构 `WorkspaceListResponse` 不变。平台管理员查询全量；普通账号继续通过 `allowed_workspace_ids` 限制可见范围。`user_id` 仅平台管理员生效。
 
@@ -209,6 +209,7 @@ ALTER TABLE workspaces ADD COLUMN display_alias VARCHAR(200);
 | R-04 | `display_alias` 与原始 name 语义混淆 | P1 | UI 显示“原名”副标题；搜索同时匹配别名和原名 |
 | R-05 | workspace owner 来源 `created_by` 为空 | P1 | owner 字段 nullable；人员过滤只匹配有 owner 的记录 |
 | R-06 | runtime 用量统计仍是全量聚合，不随分页筛选严格收敛 | P2 | 本轮保持卡片用量可用；若需要准确分页聚合，后续为 usage 增加 runtime_id 列表参数 |
+| R-07 | `/api/daemon/runtimes/page` 固定路径被 `{runtime_id}` 动态路由抢先匹配 | P1 | router 中把 `/runtimes/page` 声明在 `/runtimes/{runtime_id}` 前，并加回归测试 |
 
 ## 11. 决策追踪
 
@@ -216,6 +217,8 @@ ALTER TABLE workspaces ADD COLUMN display_alias VARCHAR(200);
 - D-002@v1 覆盖 FR-03、Phase 1、Phase 3、数据模型、风险 R-04。
 - D-003@v1 覆盖 FR-04、Phase 2、Phase 4、风险 R-03/R-05。
 - D-004@v1 覆盖 FR-05、Phase 5、原型与验收标准。
+- D-005@v1 覆盖 Phase 2、文件变更清单和风险 R-07。
+- D-006@v1 覆盖 Phase 1、接口定义 7.1/7.3 和前端类型同步。
 
 当前无被 supersede 的决策。
 
@@ -224,7 +227,7 @@ ALTER TABLE workspaces ADD COLUMN display_alias VARCHAR(200);
 | 检查项 | 结果 |
 |---|---|
 | 需求覆盖 | 通过：覆盖平台管理员全局、普通账号筛选、人员搜索、分页、别名、样式 |
-| Grill 决策覆盖 | 通过：design 引用 D-001@v1 至 D-004@v1 |
+| Grill 决策覆盖 | 通过：design 引用 D-001@v1 至 D-006@v1 |
 | 约束一致性 | 通过：后端显式 Depends/RBAC，前端 apiFetch + client page 状态管理 |
 | 真实性 | 通过：表名、字段、端点、文件路径来自源码；新增项已标注 |
 | YAGNI | 通过：未引入 resource_aliases 通用表，未扩张 session/lease 生命周期 |

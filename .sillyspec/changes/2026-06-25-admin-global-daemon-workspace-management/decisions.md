@@ -1,6 +1,6 @@
 ---
 author: qinyi
-created_at: 2026-06-25T17:35:00
+created_at: 2026-06-25 17:41:14
 ---
 
 # decisions.md — 平台管理员全局守护进程与工作区管理
@@ -51,4 +51,28 @@ created_at: 2026-06-25T17:35:00
 - normalized_requirement: 守护进程与工作区页面都有筛选条、卡片网格、分页器、别名编辑入口和一致状态徽标；移动端一列、桌面两列，文本不溢出。
 - impacts: [FR-05, FE-01, FE-02, FE-03, QA-03]
 - evidence: `.sillyspec/changes/archive/2026-06-21-2026-06-21-frontend-style-system/design.md`, `.sillyspec/changes/2026-06-25-admin-global-daemon-workspace-management/prototype-admin-global-daemon-workspace-management.html`
+- priority: P1
+
+## D-005@v1: daemon 分页固定路径必须先于动态 runtime_id 路径声明
+
+- type: consistency
+- status: accepted
+- source: design-grill
+- question: 新增 `GET /api/daemon/runtimes/page` 是否会被现有 `GET /api/daemon/runtimes/{runtime_id}` 抢先匹配？
+- answer: 会有风险。FastAPI 按声明顺序匹配，固定路径必须声明在动态 UUID 路径前。现有 `runtime usage` 端点已有同类注释和顺序约束，本变更沿用该约束。
+- normalized_requirement: `router.py` 中 `/runtimes/page` 必须放在 `/runtimes/{runtime_id}` 前，并增加回归测试确认 `/api/daemon/runtimes/page` 返回 200 而不是 UUID parse 422。
+- impacts: [BE-02, QA-01]
+- evidence: `backend/app/modules/daemon/router.py`
+- priority: P1
+
+## D-006@v1: owner 展示字段使用嵌套 OwnerRead
+
+- type: consistency
+- status: accepted
+- source: design-grill
+- question: owner 信息在 DTO 中使用扁平字段还是嵌套对象？
+- answer: 使用嵌套 `OwnerRead | None`。列表端点构造 owner 对象；详情端点可返回 `owner=None`，避免在 ORM 表上伪造非持久字段，也减少前端字段散落。
+- normalized_requirement: `DaemonRuntimeRead` 和 `WorkspaceRead` 增加 `owner: OwnerRead | None = None`；前端类型以 `owner?.email/display_name` 读取人员信息。
+- impacts: [BE-01, BE-02, BE-03, FE-01, FE-02]
+- evidence: `.sillyspec/changes/2026-06-25-admin-global-daemon-workspace-management/design.md`, `backend/app/modules/daemon/schema.py`, `backend/app/modules/workspace/schema.py`
 - priority: P1
