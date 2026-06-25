@@ -76,6 +76,7 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 - plan fsm 的 PlanNodeDetailStatus 含 archived 终态
 - problem fsm 的 ProblemStatus 含挂起/关闭等扩展态
 - project_member.role_name 是多角色逗号拼接存储（D-009@v1，源 multiple-value-type="join"，如"开发经理,项目经理,前端开发人员"）；ProjectMemberService.page 按 role_name 过滤用 ilike 模糊匹配，避免精确匹配漏掉多角色拼接成员（曾致 /ppm/project-plans 编辑/新建项目经理下拉「无数据」）
+- ppm/project-maintenance/simple-list 只返回 {id, project_name}，不含 company_name；项目计划表单选项目后带公司名需另调 getProject(id)（ppm-project-plan-form.onProjectChange：Promise.all 查 getProject + listProjectMembers，公司名回填 + 唯一项目经理自动带入）
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
@@ -83,3 +84,4 @@ bug 类型跳过部门经理；按项目角色查 project_member 找下一处理
 
 ## 变更索引
 - ql-20260624-010-xxxx | 修复项目计划编辑/新建项目经理下拉多角色成员显示无数据（role_name ilike 模糊匹配）
+- ql-20260624-011-b8f2 | 项目计划选中项目后带出公司名 + 唯一项目经理自动带入（onProjectChange async 查 getProject+listProjectMembers）

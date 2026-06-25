@@ -61,6 +61,8 @@ import { PpmUserSelect, type PpmSelectOption } from "@/components/ppm-user-selec
 import { ApiError } from "@/lib/api";
 import {
   createProjectPlan,
+  getProject,
+  listProjectMembers,
   updateProjectPlan,
   type PsProjectPlan,
 } from "@/lib/ppm";
@@ -510,22 +512,41 @@ function numToStr(v: number | null | undefined): string | null {
   return String(v);
 }
 
-// 项目切换:回填 project_name + company_name,清空项目经理(对齐源 changeProjectInfo)。
-// 第三参数 _opts 为 onLoadedOptions 预留位,此处 onChange 签名透传 opts。
-function onProjectChange(
+// 项目切换:回填 project_name(下拉 options 直出)+ company_name(getProject 详情,
+// simple-list 不含公司名,故原回填本就不生效);项目经理先清空,若该项目只有
+// 唯一项目经理则自动带入(listProjectMembers 复用 ilike 过滤,命中单角色 +
+// 多角色逗号拼接的成员)。第三参数 _opts 为 onLoadedOptions 预留位。
+async function onProjectChange(
   form: ReturnType<typeof Form.useForm<FormValues>>[0],
   value: string | string[] | null,
   _opts?: PpmSelectOption[],
 ) {
   const id = Array.isArray(value) ? value[0] : value;
   const opt = _opts?.find((o) => o.value === id);
-  const raw = opt?.raw as
-    | { project_name?: string; company_name?: string }
-    | undefined;
+  const raw = opt?.raw as { project_name?: string } | undefined;
+  // 先用 options 直出值同步重置联动字段,清掉上一个项目的残留。
   form.setFieldValue("project_name", raw?.project_name ?? id ?? null);
-  form.setFieldValue("company_name", raw?.company_name ?? null);
+  form.setFieldValue("company_name", null);
   form.setFieldValue("project_manager_id", undefined);
   form.setFieldValue("project_manager_name", undefined);
+  if (!id) return;
+  // 并行查项目详情(含公司名)+ 该项目项目经理;公司名回填,项目经理唯一则带入。
+  try {
+    const [project, managers] = await Promise.all([
+      getProject(id),
+      listProjectMembers({ pm_project_id: id, role_name: "项目经理" }),
+    ]);
+    form.setFieldValue("company_name", project.company_name ?? null);
+    if (managers.length === 1) {
+      const m = managers[0];
+      if (m) {
+        form.setFieldValue("project_manager_id", m.user_id);
+        form.setFieldValue("project_manager_name", m.user_name ?? m.user_id);
+      }
+    }
+  } catch {
+    // 查询失败不阻断选项目:公司名/项目经理保持已重置的空值。
+  }
 }
 
 // 项目经理切换:回填 project_manager_name(对齐源 change-data 回填 name)。
