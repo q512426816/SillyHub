@@ -118,11 +118,59 @@ class DaemonService:
     async def heartbeat(self, runtime_id: uuid.UUID) -> DaemonRuntime:
         return await self._rt.heartbeat(runtime_id)
 
-    async def get_runtime(self, runtime_id: uuid.UUID) -> DaemonRuntime | None:
-        return await self._rt.get_runtime(runtime_id)
+    async def get_runtime(
+        self,
+        runtime_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        *,
+        is_platform_admin: bool = False,
+    ) -> DaemonRuntime | None:
+        return await self._rt.get_runtime(runtime_id, user_id, is_platform_admin=is_platform_admin)
 
     async def list_runtimes(self, user_id: uuid.UUID) -> list[DaemonRuntime]:
         return await self._rt.list_runtimes(user_id)
+
+    async def list_runtimes_page(
+        self,
+        *,
+        actor_user_id: uuid.UUID,
+        is_platform_admin: bool,
+        q: str | None,
+        type_filter: str | None,
+        status_filter: str | None,
+        user_id: uuid.UUID | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[tuple[DaemonRuntime, object]], int]:
+        """Paginated filtered runtime list (task-04 / FR-04). 委托 RuntimeService."""
+        return await self._rt.list_runtimes_page(
+            actor_user_id=actor_user_id,
+            is_platform_admin=is_platform_admin,
+            q=q,
+            type_filter=type_filter,
+            status_filter=status_filter,
+            user_id=user_id,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def update_runtime(
+        self,
+        runtime_id: uuid.UUID,
+        actor_user_id: uuid.UUID,
+        *,
+        display_alias: str | None,
+        display_alias_set: bool,
+        is_platform_admin: bool = False,
+    ) -> DaemonRuntime:
+        """PATCH display_alias 委托 (task-04 / D-002@v1)."""
+        return await self._rt.update_runtime(
+            runtime_id,
+            actor_user_id,
+            display_alias=display_alias,
+            display_alias_set=display_alias_set,
+            is_platform_admin=is_platform_admin,
+        )
 
     async def mark_offline(
         self,
@@ -131,24 +179,42 @@ class DaemonService:
     ) -> DaemonRuntime:
         return await self._rt.mark_offline(runtime_id, user_id)
 
-    async def disable_runtime(self, runtime_id: uuid.UUID, user_id: uuid.UUID) -> DaemonRuntime:
-        return await self._rt.disable_runtime(runtime_id, user_id)
+    async def disable_runtime(
+        self,
+        runtime_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        is_platform_admin: bool = False,
+    ) -> DaemonRuntime:
+        return await self._rt.disable_runtime(
+            runtime_id, user_id, is_platform_admin=is_platform_admin
+        )
 
     async def delete_runtime(
         self,
         runtime_id: uuid.UUID,
         user_id: uuid.UUID,
+        *,
+        is_platform_admin: bool = False,
     ) -> None:
-        return await self._rt.delete_runtime(runtime_id, user_id)
+        return await self._rt.delete_runtime(
+            runtime_id, user_id, is_platform_admin=is_platform_admin
+        )
 
     async def enable_runtime(
         self,
         runtime_id: uuid.UUID,
         user_id: uuid.UUID,
         *,
+        is_platform_admin: bool = False,
         max_age_seconds: int = 45,  # DEFAULT_RUNTIME_STALE_SECONDS 随迁后字面量
     ) -> DaemonRuntime:
-        return await self._rt.enable_runtime(runtime_id, user_id, max_age_seconds=max_age_seconds)
+        return await self._rt.enable_runtime(
+            runtime_id,
+            user_id,
+            is_platform_admin=is_platform_admin,
+            max_age_seconds=max_age_seconds,
+        )
 
     async def cleanup_stale_runtimes(
         self,

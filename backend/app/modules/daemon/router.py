@@ -43,7 +43,9 @@ from app.modules.daemon.schema import (
     DaemonHeartbeatRequest,
     DaemonHeartbeatResponse,
     DaemonRegisterRequest,
+    DaemonRuntimeListResponse,
     DaemonRuntimeRead,
+    DaemonRuntimeUpdate,
     DaemonTaskLeaseRead,
     LeaseClaimRequest,
     LeaseClaimResponse,
@@ -59,6 +61,7 @@ from app.modules.daemon.schema import (
     LeaseSyncResponse,
     ListDirRequest,
     ListDirResponse,
+    OwnerRead,
     RuntimeUsageListResponse,
     RuntimeUsageWindow,
     SessionReopenResponse,
@@ -210,6 +213,88 @@ async def get_runtimes_usage(
     return RuntimeUsageListResponse(window=window.value, runtimes=runtimes)
 
 
+def _runtime_read(runtime: object, owner: object | None = None) -> DaemonRuntimeRead:
+    """Build DaemonRuntimeRead, attaching nested OwnerRead when an owner user
+    row is available (task-04 / D-006@v1)."""
+    read = DaemonRuntimeRead.model_validate(runtime)
+    if owner is None:
+        return read
+    return read.model_copy(
+        update={
+            "owner": OwnerRead(
+                user_id=getattr(owner, "id", None),
+                email=getattr(owner, "email", None),
+                display_name=getattr(owner, "display_name", None),
+            )
+        }
+    )
+
+
+# ── Runtime admin global list (task-04 / FR-01/04 / D-005@v1) ────────────────
+# 固定路径 /runtimes/page 必须声明在动态 /runtimes/{runtime_id} 之前，否则
+# "page" 会被 {runtime_id} 捕获再 UUID parse 失败 → 422（与 /runtimes/usage 同款约束）。
+
+
+@router.get(
+    "/runtimes/page",
+    response_model=DaemonRuntimeListResponse,
+)
+async def list_runtimes_page(
+    session: SessionDep,
+    user: RuntimeAdminUser,
+    q: str | None = Query(default=None, max_length=200),
+    type_filter: str | None = Query(default=None, alias="type", max_length=50),
+    status_filter: str | None = Query(default=None, alias="status", max_length=20),
+    user_id: uuid.UUID | None = Query(default=None),
+    limit: int = Query(default=12, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> DaemonRuntimeListResponse:
+    """平台管理员分页查看全部 owner 的 runtime；普通账号只见自己 (FR-01/02/04)."""
+    svc = DaemonService(session)
+    await svc.cleanup_stale_runtimes()
+    rows, total = await svc.list_runtimes_page(
+        actor_user_id=user.id,
+        is_platform_admin=user.is_platform_admin,
+        q=q,
+        type_filter=type_filter,
+        status_filter=status_filter,
+        user_id=user_id,
+        limit=limit,
+        offset=offset,
+    )
+    return DaemonRuntimeListResponse(
+        items=[_runtime_read(runtime, owner) for runtime, owner in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.patch(
+    "/runtimes/{runtime_id}",
+    response_model=DaemonRuntimeRead,
+)
+async def update_runtime(
+    runtime_id: uuid.UUID,
+    data: DaemonRuntimeUpdate,
+    session: SessionDep,
+    user: RuntimeAdminUser,
+) -> DaemonRuntimeRead:
+    """PATCH runtime display_alias (task-04 / FR-03 / D-002@v1).
+
+    省略 display_alias = 不变；显式 null/空白 = 清空；字符串 = 更新（strip）。
+    """
+    svc = DaemonService(session)
+    runtime = await svc.update_runtime(
+        runtime_id,
+        user.id,
+        display_alias=data.display_alias,
+        display_alias_set="display_alias" in data.model_fields_set,
+        is_platform_admin=user.is_platform_admin,
+    )
+    return DaemonRuntimeRead.model_validate(runtime)
+
+
 @router.get(
     "/runtimes/{runtime_id}",
     response_model=DaemonRuntimeRead,
@@ -221,7 +306,7 @@ async def get_runtime(
 ) -> DaemonRuntimeRead:
     """Get daemon runtime info by ID."""
     svc = DaemonService(session)
-    runtime = await svc.get_runtime(runtime_id)
+    runtime = await svc.get_runtime(runtime_id, user.id, is_platform_admin=user.is_platform_admin)
     if runtime is None:
         raise DaemonRuntimeNotFound(
             f"Daemon runtime '{runtime_id}' not found.",
@@ -241,7 +326,9 @@ async def disable_runtime(
 ) -> DaemonRuntimeRead:
     """Disable a daemon runtime for placement without deleting it."""
     svc = DaemonService(session)
-    runtime = await svc.disable_runtime(runtime_id, user.id)
+    runtime = await svc.disable_runtime(
+        runtime_id, user.id, is_platform_admin=user.is_platform_admin
+    )
     return DaemonRuntimeRead.model_validate(runtime)
 
 
@@ -256,7 +343,9 @@ async def enable_runtime(
 ) -> DaemonRuntimeRead:
     """Enable a daemon runtime, restoring online only when heartbeat is fresh."""
     svc = DaemonService(session)
-    runtime = await svc.enable_runtime(runtime_id, user.id)
+    runtime = await svc.enable_runtime(
+        runtime_id, user.id, is_platform_admin=user.is_platform_admin
+    )
     return DaemonRuntimeRead.model_validate(runtime)
 
 
@@ -276,7 +365,7 @@ async def delete_runtime(
     runtime on next heartbeat.
     """
     svc = DaemonService(session)
-    await svc.delete_runtime(runtime_id, user.id)
+    await svc.delete_runtime(runtime_id, user.id, is_platform_admin=user.is_platform_admin)
 
 
 @router.post(

@@ -6,13 +6,14 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonRuntime
 from app.modules.workspace.model import Workspace
 
@@ -207,9 +208,27 @@ class RuntimeService:
         await self._session.refresh(runtime)
         return runtime
 
-    async def get_runtime(self, runtime_id: uuid.UUID) -> DaemonRuntime | None:
-        """Get a daemon runtime by ID."""
-        return await self._session.get(DaemonRuntime, runtime_id)
+    async def get_runtime(
+        self,
+        runtime_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        *,
+        is_platform_admin: bool = False,
+    ) -> DaemonRuntime | None:
+        """Get a daemon runtime by ID.
+
+        task-04 / D-001@v1: when ``user_id`` is supplied and the caller is not
+        a platform admin, restrict to the owner — non-owners get ``None``
+        (router translates to 404, no existence leak). Platform admins see any
+        runtime. Omitting ``user_id`` keeps the legacy unconditional lookup
+        (lease/WS paths resolve runtimes independently of owner).
+        """
+        runtime = await self._session.get(DaemonRuntime, runtime_id)
+        if runtime is None:
+            return None
+        if user_id is not None and not is_platform_admin and runtime.user_id != user_id:
+            return None
+        return runtime
 
     async def list_runtimes(self, user_id: uuid.UUID) -> list[DaemonRuntime]:
         """List all runtimes for a given user."""
@@ -219,6 +238,93 @@ class RuntimeService:
             .order_by(col(DaemonRuntime.created_at).desc())
         )
         return list((await self._session.execute(stmt)).scalars().all())
+
+    async def list_runtimes_page(
+        self,
+        *,
+        actor_user_id: uuid.UUID,
+        is_platform_admin: bool,
+        q: str | None,
+        type_filter: str | None,
+        status_filter: str | None,
+        user_id: uuid.UUID | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[tuple[DaemonRuntime, User | None]], int]:
+        """Paginated filtered runtime list with owner JOIN (task-04 / FR-01/02/04).
+
+        - 普通账号固定追加 ``user_id == actor_user_id``；请求的 ``user_id`` 被忽略。
+        - 平台管理员不限制 owner；传入 ``user_id`` 时按 owner 精确过滤。
+        - ``q`` 大小写不敏感匹配 display_alias/name/provider/version。
+        - ``type`` 精确匹配 provider；``status`` 精确匹配 status。
+        - total 为过滤后总数；items 按 created_at DESC + limit/offset。
+        """
+        filters: list = []
+        if is_platform_admin:
+            if user_id is not None:
+                filters.append(col(DaemonRuntime.user_id) == user_id)
+        else:
+            filters.append(col(DaemonRuntime.user_id) == actor_user_id)
+
+        q_norm = (q or "").strip()
+        if q_norm:
+            pattern = f"%{q_norm}%"
+            filters.append(
+                or_(
+                    col(DaemonRuntime.display_alias).ilike(pattern),
+                    col(DaemonRuntime.name).ilike(pattern),
+                    col(DaemonRuntime.provider).ilike(pattern),
+                    col(DaemonRuntime.version).ilike(pattern),
+                )
+            )
+        if type_filter:
+            filters.append(col(DaemonRuntime.provider) == type_filter)
+        if status_filter:
+            filters.append(col(DaemonRuntime.status) == status_filter)
+
+        total_stmt = select(func.count()).select_from(DaemonRuntime)
+        if filters:
+            total_stmt = total_stmt.where(*filters)
+        total = int((await self._session.scalar(total_stmt)) or 0)
+
+        rows_stmt = (
+            select(DaemonRuntime, User)
+            .outerjoin(User, DaemonRuntime.user_id == User.id)
+            .order_by(col(DaemonRuntime.created_at).desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        if filters:
+            rows_stmt = rows_stmt.where(*filters)
+        rows = list((await self._session.execute(rows_stmt)).all())
+        return [(runtime, owner) for runtime, owner in rows], total
+
+    async def update_runtime(
+        self,
+        runtime_id: uuid.UUID,
+        actor_user_id: uuid.UUID,
+        *,
+        display_alias: str | None,
+        display_alias_set: bool,
+        is_platform_admin: bool = False,
+    ) -> DaemonRuntime:
+        """Update editable runtime fields (task-04 / D-002@v1).
+
+        Only ``display_alias`` is editable. ``display_alias_set`` distinguishes
+        "field omitted" (no change) from explicit ``null`` (clear). Empty /
+        whitespace-only strings normalize to ``None``.
+        """
+        runtime = await self._get_owned_runtime(
+            runtime_id, actor_user_id, is_platform_admin=is_platform_admin
+        )
+        if display_alias_set:
+            normalized = display_alias.strip() if display_alias else None
+            runtime.display_alias = normalized or None
+            runtime.updated_at = datetime.now(UTC)
+            self._session.add(runtime)
+            await self._session.commit()
+            await self._session.refresh(runtime)
+        return runtime
 
     async def mark_offline(
         self,
@@ -241,9 +347,17 @@ class RuntimeService:
         await self._session.refresh(runtime)
         return runtime
 
-    async def disable_runtime(self, runtime_id: uuid.UUID, user_id: uuid.UUID) -> DaemonRuntime:
+    async def disable_runtime(
+        self,
+        runtime_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        is_platform_admin: bool = False,
+    ) -> DaemonRuntime:
         """Disable a runtime for placement without losing heartbeat freshness."""
-        runtime = await self._get_owned_runtime(runtime_id, user_id)
+        runtime = await self._get_owned_runtime(
+            runtime_id, user_id, is_platform_admin=is_platform_admin
+        )
         now = datetime.now(UTC)
         runtime.status = "disabled"
         runtime.updated_at = now
@@ -256,6 +370,8 @@ class RuntimeService:
         self,
         runtime_id: uuid.UUID,
         user_id: uuid.UUID,
+        *,
+        is_platform_admin: bool = False,
     ) -> None:
         """Physically delete an owned runtime (ql-20260621-012).
 
@@ -272,7 +388,9 @@ class RuntimeService:
         故对软删引用在此应用层 SET NULL 解绑（ql-20260625-002-7c3a），未软删绑定
         已在上面 409 拦截，这里只解软删引用，不影响活跃 workspace。
         """
-        runtime = await self._get_owned_runtime(runtime_id, user_id)
+        runtime = await self._get_owned_runtime(
+            runtime_id, user_id, is_platform_admin=is_platform_admin
+        )
         # 删前检查：被未软删 workspace 绑定的 runtime 不允许物理删除（RESTRICT）。
         # 排除 deleted_at IS NOT NULL 的软删 workspace，否则会永久卡住删除。
         bound = (
@@ -313,10 +431,13 @@ class RuntimeService:
         runtime_id: uuid.UUID,
         user_id: uuid.UUID,
         *,
+        is_platform_admin: bool = False,
         max_age_seconds: int = DEFAULT_RUNTIME_STALE_SECONDS,
     ) -> DaemonRuntime:
         """Enable a runtime, restoring online only when its heartbeat is fresh."""
-        runtime = await self._get_owned_runtime(runtime_id, user_id)
+        runtime = await self._get_owned_runtime(
+            runtime_id, user_id, is_platform_admin=is_platform_admin
+        )
         now = datetime.now(UTC)
         runtime.status = (
             "online"
@@ -356,9 +477,11 @@ class RuntimeService:
         self,
         runtime_id: uuid.UUID,
         user_id: uuid.UUID,
+        *,
+        is_platform_admin: bool = False,
     ) -> DaemonRuntime:
         runtime = await self._session.get(DaemonRuntime, runtime_id)
-        if runtime is None or runtime.user_id != user_id:
+        if runtime is None or (not is_platform_admin and runtime.user_id != user_id):
             raise DaemonRuntimeNotFound(
                 f"Daemon runtime '{runtime_id}' not found.",
                 details={"runtime_id": str(runtime_id)},

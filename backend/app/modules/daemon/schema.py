@@ -66,10 +66,23 @@ class DaemonRegisterRequest(BaseModel):
     capabilities: dict | None = None
 
 
+class OwnerRead(BaseModel):
+    """Nested owner DTO for platform-admin global views (task-04 / D-006@v1).
+
+    Populated by list endpoints via JOIN ``users``; detail endpoints may
+    leave it ``None``.
+    """
+
+    user_id: uuid.UUID | None = None
+    email: str | None = None
+    display_name: str | None = None
+
+
 class DaemonRuntimeRead(BaseModel):
     """Response body for daemon runtime info."""
 
     id: uuid.UUID
+    display_alias: str | None = None
     name: str | None
     provider: str | None
     version: str | None
@@ -78,10 +91,29 @@ class DaemonRuntimeRead(BaseModel):
     status: str | None
     last_heartbeat_at: datetime | None
     capabilities: dict | None
+    owner: OwnerRead | None = None
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DaemonRuntimeUpdate(BaseModel):
+    """Request body for PATCH /api/daemon/runtimes/{runtime_id} (task-04 / D-002@v1).
+
+    ``display_alias`` 省略 = 不变；显式 ``null`` = 清空；字符串 = 更新。
+    """
+
+    display_alias: str | None = Field(default=None, max_length=200)
+
+
+class DaemonRuntimeListResponse(BaseModel):
+    """Response body for GET /api/daemon/runtimes/page (task-04 / FR-04)."""
+
+    items: list[DaemonRuntimeRead]
+    total: int
+    limit: int
+    offset: int
 
 
 # ── Heartbeat ───────────────────────────────────────────────────────────────
