@@ -9,9 +9,9 @@ import { Button } from "@/components/ui/button";
 import { AgentProviderSelect } from "@/components/AgentProviderSelect";
 import { Input } from "@/components/ui/input";
 import { DaemonDirBrowser } from "@/components/daemon-dir-browser";
-import { ApiError } from "@/lib/api";
 import { normalizeClientPath } from "@/lib/client-path";
 import { listOnlineRuntimes, type DaemonRuntimeRead } from "@/lib/daemon";
+import { errMessage } from "@/lib/errors";
 import { hasAnyPermission } from "@/lib/permission";
 import {
   createWorkspace,
@@ -89,8 +89,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
       });
       onCreated();
     } catch (err) {
-      const msg = err instanceof ApiError ? `${err.code}: ${err.message}` : "创建失败";
-      setError(msg);
+      setError(errMessage(err, "创建失败"));
       setPhase("idle");
     }
   };
@@ -108,8 +107,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
       }
       setPhase("ready");
     } catch (err) {
-      const msg = err instanceof ApiError ? `${err.code}: ${err.message}` : "扫描失败";
-      setError(msg);
+      setError(errMessage(err, "扫描失败"));
       setPhase("idle");
     }
   };
@@ -122,8 +120,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
       const result = await scanGenerate(scan.root_path, scanProvider, scanModel);
       router.push(`/workspaces/${result.workspace_id}`);
     } catch (err) {
-      const msg = err instanceof ApiError ? `${err.code}: ${err.message}` : "生成失败";
-      setError(msg);
+      setError(errMessage(err, "生成失败"));
       setPhase("ready");
     }
   };
@@ -139,8 +136,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
       });
       onCreated();
     } catch (err) {
-      const msg = err instanceof ApiError ? `${err.code}: ${err.message}` : "创建失败";
-      setError(msg);
+      setError(errMessage(err, "创建失败"));
       setPhase("ready");
     }
   };

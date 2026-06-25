@@ -40,6 +40,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import { PpmFileUrls } from "@/components/ppm-file-urls";
 import { PpmUserSelect } from "@/components/ppm-user-select";
 import { ApiError } from "@/lib/api";
+import { errMessage } from "@/lib/errors";
 import {
   closeTaskProblem,
   createProblem,
@@ -114,10 +115,6 @@ function dayStrToApi(v: string | null | undefined): string | null {
 
 function notifyOk(text: string) {
   message.success(text);
-}
-function notifyErr(err: unknown, fallback: string) {
-  if (err instanceof ApiError) message.error(err.message || fallback);
-  else message.error(fallback);
 }
 
 // ── 流程履历 Timeline(对照源 el-timeline processList) ───────────────────────
@@ -349,7 +346,7 @@ export function ProblemCreateForm({
       onSuccess();
     } catch (err) {
       // 校验失败时 form 内部已标注;仅对 API 错误提示
-      if (err instanceof ApiError) notifyErr(err, "保存失败");
+      if (err instanceof ApiError) message.error(errMessage(err, "保存失败"));
     } finally {
       setBusy(false);
     }
@@ -600,7 +597,7 @@ export function ProblemStartForm({
       notifyOk(completed ? "已开始处置" : "已保存处置说明");
       onSuccess();
     } catch (err) {
-      notifyErr(err, "提交失败");
+      message.error(errMessage(err, "提交失败"));
     } finally {
       setBusy(false);
     }
@@ -672,7 +669,7 @@ export function ProblemAuditForm({
       }
       onSuccess();
     } catch (err) {
-      notifyErr(err, "提交失败");
+      message.error(errMessage(err, "提交失败"));
     } finally {
       setBusy(false);
     }
@@ -749,7 +746,7 @@ export function ProblemDoneForm({
       notifyOk(completed ? "已完工,进入待验证" : submit ? "已报工" : "已保存");
       onSuccess();
     } catch (err) {
-      notifyErr(err, "提交失败");
+      message.error(errMessage(err, "提交失败"));
     } finally {
       setBusy(false);
     }
@@ -852,7 +849,7 @@ export function ProblemCloseForm({
       notifyOk(checkResult === "1" ? "已验证通过并关闭" : "已打回处置");
       onSuccess();
     } catch (err) {
-      notifyErr(err, "提交失败");
+      message.error(errMessage(err, "提交失败"));
     } finally {
       setBusy(false);
     }

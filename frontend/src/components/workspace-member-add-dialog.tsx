@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ApiError } from "@/lib/api";
+import { errMessage } from "@/lib/errors";
 import {
   addMember,
   searchUsersForInvite,
@@ -74,9 +74,7 @@ export function WorkspaceMemberAddDialog({ workspaceId, onAdded, onClose }: Prop
         }
       } catch (err) {
         if (searchSeqRef.current === mySeq) {
-          const msg =
-            err instanceof ApiError ? `${err.code}: ${err.message}` : "搜索失败";
-          setError(msg);
+          setError(errMessage(err, "搜索失败"));
           setCandidates([]);
           setLoading(false);
         }
@@ -125,9 +123,7 @@ export function WorkspaceMemberAddDialog({ workspaceId, onAdded, onClose }: Prop
       onClose();
     } catch (err) {
       // FR-08 GWT4：保持对话框打开，顶部红色错误条；不调用 onClose
-      const msg =
-        err instanceof ApiError ? `${err.code}: ${err.message}` : "添加失败";
-      setError(msg);
+      setError(errMessage(err, "添加失败"));
       setSubmitting(false);
     }
   };

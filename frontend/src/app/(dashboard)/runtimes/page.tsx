@@ -51,6 +51,10 @@ import {
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/stores/session";
+// task-06 / FR-03 / D-003@v1：antd Modal.confirm（删除二次确认）+ useNotify（成功/失败 toast）。
+// Modal 走 App.useApp().modal 拿到主题上下文实例（非静态 Modal），由 antd-providers.tsx 的 <AntApp> 注入。
+import { App } from "antd";
+import { useNotify } from "@/lib/errors";
 
 type BadgeVariant = "default" | "success" | "outline" | "warning" | "destructive";
 type StatusMeta = {
@@ -547,7 +551,8 @@ function RuntimeCard({
   usageLoading?: boolean;
   onToggleEnabled: (runtime: DaemonRuntimeRead) => Promise<void>;
   onOpenSession: (runtime: DaemonRuntimeRead) => void;
-  onDelete: (runtime: DaemonRuntimeRead) => Promise<void>;
+  // task-06：签名从 Promise<void> 改 void —— modal.confirm 同步触发，删除在 onOk 异步回调里。
+  onDelete: (runtime: DaemonRuntimeRead) => void;
 }) {
   const status = getStatusMeta(runtime.status);
   const StatusIcon = status.icon;
@@ -706,7 +711,7 @@ function RuntimeCard({
           variant="outline"
           className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
           disabled={actioning}
-          onClick={() => void onDelete(runtime)}
+          onClick={() => onDelete(runtime)}
           title="移除此运行时记录（连带清除其下会话与任务记录）"
         >
           <Trash2 className="h-3.5 w-3.5" />
@@ -796,6 +801,12 @@ export default function RuntimesPage() {
   const [usageLoading, setUsageLoading] = useState(false);
   const [usageError, setUsageError] = useState<string | null>(null);
 
+  // task-06 / FR-03 / D-003@v1 / D-007@v1：notify（操作类 toast，封装 errMessage）
+  // 与 modal（antd Modal.confirm 二次确认，走 <AntApp> 主题实例）。
+  // 仅删除流程消费；reload/handleToggleRuntime 仍用顶部 inline 红条（design §5）。
+  const notify = useNotify();
+  const { modal } = App.useApp();
+
   // task-04 / D-003：URL 恢复编排（从原 SessionListSection 上移到 page）
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -860,26 +871,39 @@ export default function RuntimesPage() {
     }
   }, []);
 
-  // ql-012：移除运行时（物理删除，级联清会话/lease）。
-  const handleDeleteRuntime = useCallback(async (runtime: DaemonRuntimeRead) => {
-    const confirmed = window.confirm(
-      `确定移除运行时「${runtime.name ?? getProviderLabel(runtime.provider)}」？\n将同时清除该运行时下的会话与任务记录，且不可恢复。daemon 下次心跳会重新注册。`,
-    );
-    if (!confirmed) return;
-    setError(null);
-    setRuntimeActionId(runtime.id);
-    try {
-      await deleteDaemonRuntime(runtime.id);
-      setItems((prev) => (prev ? prev.filter((item) => item.id !== runtime.id) : prev));
-      setSessions((prev) => prev.filter((s) => s.runtime_id !== runtime.id));
-      if (dialogRuntime?.id === runtime.id) setDialogRuntime(null);
-      setLastRefreshedAt(new Date());
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "移除运行时失败");
-    } finally {
-      setRuntimeActionId(null);
-    }
-  }, [dialogRuntime?.id]);
+  // ql-012 / task-06 / FR-03 / D-003@v1 / D-007@v1：移除运行时（物理删除，级联清会话/lease）。
+  // 二次确认改 antd Modal.confirm（走主题 + destructive 红按钮），替代浏览器原生 window.confirm。
+  // 失败走 notify.error toast（409 后端中文 / network 中文兜底），成功补 notify.success（D-003@v1 范例）。
+  // 顶部 inline error state 仅 reload/toggle 用，删除流程不再触碰 setError（design §5：操作类 toast）。
+  const handleDeleteRuntime = useCallback(
+    (runtime: DaemonRuntimeRead) => {
+      modal.confirm({
+        title: "移除运行时",
+        content: `确定移除运行时「${
+          runtime.name ?? getProviderLabel(runtime.provider)
+        }」？将同时清除该运行时下的会话与任务记录，且不可恢复。daemon 下次心跳会重新注册。`,
+        okText: "移除",
+        okType: "danger",
+        cancelText: "取消",
+        onOk: async () => {
+          setRuntimeActionId(runtime.id);
+          try {
+            await deleteDaemonRuntime(runtime.id);
+            setItems((prev) => (prev ? prev.filter((item) => item.id !== runtime.id) : prev));
+            setSessions((prev) => prev.filter((s) => s.runtime_id !== runtime.id));
+            if (dialogRuntime?.id === runtime.id) setDialogRuntime(null);
+            setLastRefreshedAt(new Date());
+            notify.success("运行时已移除");
+          } catch (err) {
+            notify.error(err, "移除运行时失败");
+          } finally {
+            setRuntimeActionId(null);
+          }
+        },
+      });
+    },
+    [dialogRuntime?.id, modal, notify],
+  );
 
   // task-04 / D-001：卡片「会话」→ 打开单例弹窗。不再 scrollIntoView（无底部常驻会话区）。
   const handleOpenSession = useCallback((runtime: DaemonRuntimeRead) => {

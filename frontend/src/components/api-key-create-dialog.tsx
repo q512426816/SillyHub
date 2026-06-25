@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ApiError } from "@/lib/api";
+import { errMessage } from "@/lib/errors";
 import { createApiKey, type ApiKeyCreated } from "@/lib/api-keys";
 
 type Phase = "form" | "plaintext";
@@ -50,7 +50,7 @@ export function ApiKeyCreateDialog({ onCreated, onClose }: Props) {
       setPhase("plaintext");
       onCreated();
     } catch (err) {
-      setError(err instanceof ApiError ? `${err.code}: ${err.message}` : "签发失败");
+      setError(errMessage(err, "签发失败"));
     } finally {
       setIssuing(false);
     }

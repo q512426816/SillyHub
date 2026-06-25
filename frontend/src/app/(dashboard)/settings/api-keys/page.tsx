@@ -9,7 +9,7 @@ import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
-import { ApiError } from "@/lib/api";
+import { errMessage } from "@/lib/errors";
 import { listApiKeys, revokeApiKey, type ApiKeyRead } from "@/lib/api-keys";
 import { cn } from "@/lib/utils";
 
@@ -47,7 +47,7 @@ export default function ApiKeysSettingsPage() {
     try {
       setKeys(await listApiKeys());
     } catch (err) {
-      setPageError(err instanceof ApiError ? `${err.code}: ${err.message}` : "加载失败");
+      setPageError(errMessage(err, "加载失败"));
     } finally {
       setLoading(false);
     }
@@ -79,7 +79,7 @@ export default function ApiKeysSettingsPage() {
       await revokeApiKey(k.id);
       await load();
     } catch (err) {
-      setPageError(err instanceof ApiError ? `${err.code}: ${err.message}` : "吊销失败");
+      setPageError(errMessage(err, "吊销失败"));
     }
   };
 

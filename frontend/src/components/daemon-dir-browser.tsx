@@ -9,12 +9,12 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ApiError } from "@/lib/api";
 import {
   joinClientPath,
   normalizeClientPath,
   parentClientPath,
 } from "@/lib/client-path";
+import { errMessage } from "@/lib/errors";
 import { listDir, type DirEntry } from "@/lib/daemon";
 
 interface Props {
@@ -46,8 +46,7 @@ export function DaemonDirBrowser({
         setEntries(res.entries);
         setPath(normalized);
       } catch (err) {
-        const msg = err instanceof ApiError ? `${err.code}: ${err.message}` : "加载失败";
-        setError(msg);
+        setError(errMessage(err, "加载失败"));
         setEntries([]);
       } finally {
         setLoading(false);

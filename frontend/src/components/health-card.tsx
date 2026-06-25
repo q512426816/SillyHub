@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
-import { ApiError } from "@/lib/api";
+import { errMessage } from "@/lib/errors";
 import { type DependencyStatus, type HealthResponse, getHealth } from "@/lib/health";
 
 type FetchState =
@@ -31,9 +31,7 @@ export function HealthCard() {
         if (!cancelled) setState({ kind: "ok", data });
       } catch (err) {
         if (cancelled) return;
-        const msg =
-          err instanceof ApiError ? `${err.code}: ${err.message}` : "网络错误";
-        setState({ kind: "error", message: msg });
+        setState({ kind: "error", message: errMessage(err, "网络错误") });
       }
     };
     void tick();

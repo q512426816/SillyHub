@@ -21,10 +21,18 @@
 
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { App as AntApp } from "antd";
 
 import RuntimesPage from "@/app/(dashboard)/runtimes/page";
 import { useSession } from "@/stores/session";
 import type { RuntimeUsageItem, RuntimeUsageResponse } from "@/lib/daemon";
+
+// task-07：page 顶层调 useNotify() + App.useApp()（task-06 改 antd Modal.confirm +
+// message toast）。App.useApp() 需 <AntApp> Context 才能拿到真实实例（否则 modal 为
+// 空对象，删除流程 modal.confirm 会崩）。renderPage 统一包裹。
+function renderPage(ui: React.ReactElement) {
+  return render(<AntApp>{ui}</AntApp>);
+}
 
 // ── next/navigation mock(切窗不走路由,但 page mount 用 useSearchParams/useRouter) ──
 
@@ -134,7 +142,7 @@ function usageResponse(
 beforeEach(() => {
   useSession.setState({ accessToken: "tok", hydrated: true } as never);
   vi.stubGlobal("EventSource", FakeES);
-  vi.stubGlobal("confirm", vi.fn(() => true));
+  // task-07：删除 vi.stubGlobal("confirm", ...) —— task-06 已改用 antd Modal.confirm。
   nav.searchParams = new URLSearchParams();
   nav.replace = vi.fn();
   daemon.listDaemonRuntimes.mockResolvedValue([]);
@@ -171,7 +179,7 @@ afterEach(() => {
 
 /** 渲染并等用量统计区出现(卡片标题「用量统计(7 天)」)。 */
 async function renderAndWaitForUsage() {
-  const utils = render(<RuntimesPage />);
+  const utils = renderPage(<RuntimesPage />);
   await waitFor(() => {
     expect(daemon.getRuntimesUsage).toHaveBeenCalled();
   });
@@ -389,7 +397,7 @@ describe("task-14 / FR-04: loading 态(AC-07 子项)", () => {
       () => new Promise<RuntimeUsageResponse>(() => {}),
     );
 
-    await render(<RuntimesPage />);
+    await renderPage(<RuntimesPage />);
     // 等 listDaemonRuntimes resolve + getRuntimesUsage 被调(loading=true)
     await waitFor(() => expect(daemon.getRuntimesUsage).toHaveBeenCalled());
     // 用量区显示「加载中」(usageLoading=true)

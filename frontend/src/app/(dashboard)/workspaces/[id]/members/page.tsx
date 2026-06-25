@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { WorkspaceMemberAddDialog } from "@/components/workspace-member-add-dialog";
 import { WorkspaceMemberRow } from "@/components/workspace-member-row";
-import { ApiError } from "@/lib/api";
+import { errMessage } from "@/lib/errors";
 import {
   listMembers,
   removeMember,
@@ -52,11 +52,7 @@ export default function MembersPage({ params }: Props) {
       setMembers(list);
     } catch (err) {
       setMembers([]);
-      setError(
-        err instanceof ApiError
-          ? `${err.code}: ${err.message}`
-          : "加载成员列表失败",
-      );
+      setError(errMessage(err, "加载成员列表失败"));
     } finally {
       setLoading(false);
     }
@@ -77,11 +73,7 @@ export default function MembersPage({ params }: Props) {
       await updateMemberRole(workspaceId, userId, { role_key: nextRole });
       await refresh();
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? `${err.code}: ${err.message}`
-          : "修改角色失败",
-      );
+      setError(errMessage(err, "修改角色失败"));
     } finally {
       setActionLoading(false);
     }
@@ -105,11 +97,7 @@ export default function MembersPage({ params }: Props) {
       await transferOwnership(workspaceId, userId);
       await refresh();
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? `${err.code}: ${err.message}`
-          : "传递所有权失败",
-      );
+      setError(errMessage(err, "传递所有权失败"));
     } finally {
       setActionLoading(false);
     }
@@ -126,11 +114,7 @@ export default function MembersPage({ params }: Props) {
       await removeMember(workspaceId, userId);
       await refresh();
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? `${err.code}: ${err.message}`
-          : "移除成员失败",
-      );
+      setError(errMessage(err, "移除成员失败"));
     } finally {
       setActionLoading(false);
     }

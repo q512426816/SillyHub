@@ -192,3 +192,20 @@
 - **daemon-network-resilience 变更救不了这种卡死**：那个变更针对"回传调用失败"（notifyRunResult 调了但网络丢）；这里是"压根没调 notifyRunResult"（consume 卡死到不了回传）。属更上游缺陷，该变更 plan 漏了这条。
 - 诊断兜底：codex 子进程 stdout 现已落盘 `~/.sillyhub/daemon/runs/codex-interactive/<sessionId>.log`（本次新增，CodexStartOptions.sessionId 串入），下次卡死秒级看 turn/completed 是否到达 / payload 长啥样。
 - 用户决策：**不加 turn 超时兜底**（会误杀推理模型正常长 turn），靠对齐 claude 强契约（不吞收尾信号）根治。
+
+## 2026-06-25 — antd v5 两字中文按钮 autoLetterSpacing 致 DOM 字间空格（测试 getByRole 匹配失败）
+
+> 来源：2026-06-25-frontend-error-handling task-07（runtimes/page.test.tsx Modal.confirm 测试）。
+
+- 现象：antd v5 `Modal.confirm({ okText: "移除", cancelText: "取消" })` 的两字中文按钮，DOM 渲染为 `<span>移 除</span>` / `<span>取 消</span>`（字间插空格，autoLetterSpacing 特性）。测试 `getByRole("button", { name: "移除" })` 严格匹配失败。
+- 根因：antd v5 对中文等 CJK 文本默认开启 `autoLetterSpacing`（ConfigProvider 可关），渲染时在字符间插入空白节点提升可读性，破坏 `aria-label`/name 严格匹配。
+- 解法：测试用正则 `/移\s*除/` / `/取\s*消/` 兼容字间空白；或关 `autoLetterSpacing`（但影响视觉一致性，不推荐）。前端测试断言中文按钮一律用 `\s*` 兼容。
+
+## 2026-06-25 — SillySpec plan→execute contract：task 编号须严格按拓扑 Wave 递增
+
+> 来源：2026-06-25-frontend-error-handling plan step8/10（contract 校验失败排查）。
+
+- 现象：plan.md 按 brainstorm 的 3 Wave 分组时，task 编号（task-04 daemon 在 W3）与拓扑 Wave 顺序冲突，contract 校验报「task id 重复/不连续：期望 task-04 实际 task-03」。
+- 根因：SillySpec execute contract 校验器按 plan.md 文本里 `task-0N` 出现顺序期望严格递增，且把任务总表的 `task-0N` 引用也计入。若 task 编号不按拓扑 Wave 递增（如 W2 含 task-06 而 W3 是 task-04），校验失败。
+- 解法：①task 文件编号按拓扑 Wave 严格递增（W1=01,02..; W2=03,04..; 不回跳）；②plan.md 里 `task-0N` 仅保留在 Wave checkbox 行（9 行严格递增），任务总表/关键路径/AC/覆盖矩阵用纯数字编号（01/02）不带 task 前缀，避免被校验器重复计数；③AC 行不要用 `- [ ]` checkbox 格式（会被误当 task 行），用普通列表。
+- 已记 docs/sillyspec/brainstorm-supersede-dref-false-warning.md（supersede 校验误报）属同类 SillySpec 校验工具缺陷。

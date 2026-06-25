@@ -20,7 +20,7 @@
 import { create } from "zustand";
 import { message } from "antd";
 
-import { ApiError } from "@/lib/api";
+import { errMessage } from "@/lib/errors";
 import {
   assignKanbanTask,
   createKanbanTask,
@@ -176,10 +176,3 @@ export const useKanbanStore = create<KanbanState>((set, get) => ({
     set({ users: [], tasks: [], filters: {}, loading: false });
   },
 }));
-
-/** 统一错误文案:ApiError 用后端 message,其它用 fallback。 */
-function errMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) return err.message || fallback;
-  if (err instanceof Error && err.message) return err.message;
-  return fallback;
-}

@@ -12,23 +12,23 @@ project: frontend
 > 依据：`design.md`（§5/§6/§7）+ `requirements.md`（FR-01~FR-06）+ `decisions.md`（D-001~D-007，D-004@v2）+ 9 个 `tasks/task-NN.md` 蓝图。task 编号按拓扑顺序（W1→W5）严格递增，满足 plan→execute 契约（`task-0N` 仅在 Wave checkbox 出现，其余引用用纯数字编号）。无 Spike。
 
 ## Wave 1 — 基础（无依赖）
-- [ ] task-01: 新增 `errMessage(err, fallback?)` 纯函数（network 中文兜底 / err.message / fallback；绝不返回 err.code）— FR-01, D-001@v1, D-002@v1, D-006@v1
+- [x] task-01: 新增 `errMessage(err, fallback?)` 纯函数（network 中文兜底 / err.message / fallback；绝不返回 err.code）— FR-01, D-001@v1, D-002@v1, D-006@v1
 
 ## Wave 2 — 依赖 W1（4 个可并行）
-- [ ] task-02: 新增 `useNotify()` hook（`App.useApp().message` + errMessage）— FR-02, D-005@v1, D-007@v1
-- [ ] task-03: `errMessage` 单测（6 用例）— FR-01, D-001@v1
-- [ ] task-04: D 模式 16 处收敛（保持原 inline 展示）— FR-04, D-004@v2, D-007@v1, R-02
-- [ ] task-05: 合并 3 处重复 util → import 全局 — FR-05, D-002@v1
+- [x] task-02: 新增 `useNotify()` hook（`App.useApp().message` + errMessage）— FR-02, D-005@v1, D-007@v1
+- [x] task-03: `errMessage` 单测（6 用例）— FR-01, D-001@v1
+- [x] task-04: D 模式 16 处收敛（保持原 inline 展示）— FR-04, D-004@v2, D-007@v1, R-02
+- [x] task-05: 合并 3 处重复 util → import 全局 — FR-05, D-002@v1
 
 ## Wave 3 — 依赖 W2
-- [ ] task-06: daemon runtime 删除落地（`window.confirm`→antd `Modal.confirm` + `notify.error`/`notify.success`）— FR-03, D-003@v1, D-007@v1
+- [x] task-06: daemon runtime 删除落地（`window.confirm`→antd `Modal.confirm` + `notify.error`/`notify.success`）— FR-03, D-003@v1, D-007@v1
 
 ## Wave 4 — 依赖 W3
-- [ ] task-07: 验证 `runtimes/page.test.tsx` + `__tests__/page-usage.test.tsx` 不破坏 — R-06
-- [ ] task-08: 展示策略规范同步模块文档（新建 `lib-errors.md`）— FR-06, D-007@v1
+- [x] task-07: 验证 `runtimes/page.test.tsx` + `__tests__/page-usage.test.tsx` 不破坏 — R-06
+- [x] task-08: 展示策略规范同步模块文档（新建 `lib-errors.md`）— FR-06, D-007@v1
 
 ## Wave 5 — 全链路验证
-- [ ] task-09: `pnpm test` 全绿 + `tsc --noEmit` + `next lint` + D 模式 grep 残留=0 — R-02, NFR-01, NFR-05
+- [x] task-09: `pnpm test` 全绿 + `tsc --noEmit` + `next lint` + D 模式 grep 残留=0 — R-02, NFR-01, NFR-05
 
 ## 任务总表
 

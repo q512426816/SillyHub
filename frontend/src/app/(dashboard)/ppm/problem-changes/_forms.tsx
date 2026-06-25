@@ -40,6 +40,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import { PpmFileUrls } from "@/components/ppm-file-urls";
 import { PpmUserSelect } from "@/components/ppm-user-select";
 import { ApiError } from "@/lib/api";
+import { errMessage } from "@/lib/errors";
 import {
   createProblemChange,
   getProblem,
@@ -106,11 +107,6 @@ function toDayStr(v: unknown): string {
 
 function notifyOk(text: string) {
   message.success(text);
-}
-
-function notifyErr(err: unknown, fallback: string) {
-  if (err instanceof ApiError) message.error(err.message || fallback);
-  else message.error(fallback);
 }
 
 // ===========================================================================
@@ -338,7 +334,7 @@ export function ChangeCreateForm({
       notifyOk("已提交变更申请");
       onSuccess();
     } catch (err) {
-      if (err instanceof ApiError) notifyErr(err, "提交失败");
+      if (err instanceof ApiError) message.error(errMessage(err, "提交失败"));
     } finally {
       setBusy(false);
     }
@@ -569,7 +565,7 @@ export function ChangeEditForm({
       notifyOk("已保存");
       onSuccess();
     } catch (err) {
-      if (err instanceof ApiError) notifyErr(err, "保存失败");
+      if (err instanceof ApiError) message.error(errMessage(err, "保存失败"));
     } finally {
       setBusy(false);
     }
@@ -744,7 +740,7 @@ export function ChangeAuditForm({
       }
       onSuccess();
     } catch (err) {
-      notifyErr(err, "提交失败");
+      message.error(errMessage(err, "提交失败"));
     } finally {
       setBusy(false);
     }

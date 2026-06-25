@@ -12,9 +12,18 @@
 
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { App as AntApp } from "antd";
 
 import RuntimesPage from "@/app/(dashboard)/runtimes/page";
 import { useSession } from "@/stores/session";
+
+// task-07：page 顶层调 useNotify() + App.useApp()（task-06 把删除流程改为 antd
+// Modal.confirm + message toast）。App.useApp() 必须在 <AntApp> Context 内才能拿到
+// 真实 modal/message 实例（否则返回空对象 → modal.confirm is not a function）。
+// renderPage 统一包 <AntApp> wrapper，所有用例共用。
+function renderPage(ui: React.ReactElement) {
+  return render(<AntApp>{ui}</AntApp>);
+}
 
 // ── next/navigation mock（page 用 useSearchParams/useRouter 做 URL 恢复 + 清 param） ──
 
@@ -113,7 +122,8 @@ beforeEach(() => {
     close: () => {},
     getLastEventId: () => null,
   }));
-  vi.stubGlobal("confirm", vi.fn(() => true));
+  // task-07：删除 vi.stubGlobal("confirm", ...) —— task-06 已改用 antd Modal.confirm，
+  // 不再走 window.confirm。
 });
 
 afterEach(() => {
@@ -124,7 +134,7 @@ afterEach(() => {
 describe("RuntimesPage（弹窗化后，task-04/05）", () => {
   it("渲染 runtime 列表，无底部常驻会话区（卡片去 max-h）", async () => {
     daemon.listDaemonRuntimes.mockResolvedValue([makeRuntime()]);
-    render(<RuntimesPage />);
+    renderPage(<RuntimesPage />);
     await waitFor(() => expect(screen.getByText("daemon")).toBeInTheDocument());
     // runtime-list-scroll 仍在（卡片区），但 task-04 移除了 max-h-[680px]
     const list = screen.getByTestId("runtime-list-scroll");
@@ -137,7 +147,7 @@ describe("RuntimesPage（弹窗化后，task-04/05）", () => {
 
   it("点 runtime 卡片「会话」按钮 → 弹出 RuntimeSessionDialog（D-001 单例）", async () => {
     daemon.listDaemonRuntimes.mockResolvedValue([makeRuntime({ name: "MyClaude" })]);
-    render(<RuntimesPage />);
+    renderPage(<RuntimesPage />);
     const sessionBtn = await screen.findByRole("button", { name: /^会话$/ });
     fireEvent.click(sessionBtn);
     // 弹窗打开（Radix DialogContent role=dialog）— 点卡片「会话」按钮弹出 RuntimeSessionDialog
@@ -149,16 +159,82 @@ describe("RuntimesPage（弹窗化后，task-04/05）", () => {
     );
   });
 
-  it("ql-012 移除 runtime（confirm → deleteDaemonRuntime）", async () => {
+  // task-06 / task-07：删除流程从 window.confirm + setError 改为 antd Modal.confirm
+  // + notify.success/.error。测试改为：点移除按钮 → 找 Modal dialog → 点 Modal OK「移除」
+  // → 断言 deleteDaemonRuntime 被调 + 列表移除（不再断言 window.confirm）。
+  it("ql-012 移除 runtime（Modal.confirm → deleteDaemonRuntime → 列表移除）", async () => {
     daemon.listDaemonRuntimes.mockResolvedValue([
       makeRuntime({ id: "rt-del", name: "to-remove" }),
     ]);
-    render(<RuntimesPage />);
+    renderPage(<RuntimesPage />);
     const removeBtn = await screen.findByRole("button", { name: /移除/ });
     fireEvent.click(removeBtn);
-    await waitFor(() => expect(daemon.deleteDaemonRuntime).toHaveBeenCalledWith("rt-del"));
-    expect(confirm).toHaveBeenCalled();
-    await waitFor(() => expect(screen.queryByText("to-remove")).not.toBeInTheDocument());
+
+    // task-06：点卡片「移除」→ 弹 antd Modal.confirm（document.body portal）
+    const dialog = await screen.findByRole("dialog");
+    // Modal 的 OK 按钮文案「移除」（okText），用 within(dialog) 限定弹窗作用域，
+    // 避免误匹配卡片内同名「移除」按钮（卡片不在 dialog 内）。
+    // 注：antd v5 对两字中文按钮文案会自动插入字间距（渲染为 "移 除"），
+    // 用正则 /移\s*除/ 兼容。
+    const okBtn = within(dialog).getByRole("button", { name: /移\s*除/ });
+    fireEvent.click(okBtn);
+
+    await waitFor(() =>
+      expect(daemon.deleteDaemonRuntime).toHaveBeenCalledWith("rt-del"),
+    );
+    // 204 成功 → notify.success + 列表移除
+    await waitFor(() =>
+      expect(screen.queryByText("to-remove")).not.toBeInTheDocument(),
+    );
+  });
+
+  // AC-02-c（测试侧）：409 后端中文 message → notify.error toast，列表不变，
+  // 反向断言英文 code HTTP_409 不暴露给用户。
+  it("task-06：删除被绑定（409）→ notify.error 弹后端中文 message，列表不变", async () => {
+    daemon.listDaemonRuntimes.mockResolvedValue([
+      makeRuntime({ id: "rt-bound", name: "bound-runtime" }),
+    ]);
+    const { ApiError } = await import("@/lib/api");
+    daemon.deleteDaemonRuntime.mockRejectedValue(
+      new ApiError(409, {
+        code: "HTTP_409_CONFLICT",
+        message: "该 daemon 仍被 2 个 workspace 绑定，请先解绑后再移除",
+        request_id: "req-1",
+        details: null,
+      }),
+    );
+
+    renderPage(<RuntimesPage />);
+    const removeBtn = await screen.findByRole("button", { name: /移除/ });
+    fireEvent.click(removeBtn);
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /移\s*除/ }));
+
+    // 409 → notify.error 经 errMessage 取出后端中文 message（antd message portal）
+    await waitFor(() =>
+      expect(
+        screen.getByText(/该 daemon 仍被 2 个 workspace 绑定/),
+      ).toBeInTheDocument(),
+    );
+    // 列表不变（runtime 仍在）
+    expect(screen.getByText("bound-runtime")).toBeInTheDocument();
+    // 反向断言：英文 code 不暴露给用户（D-006@v1）
+    expect(screen.queryByText(/HTTP_409/)).not.toBeInTheDocument();
+  });
+
+  // AC-02-e（测试侧）：Modal 取消 → 不调 deleteDaemonRuntime，列表不变。
+  it("task-06：Modal 取消 → 不调 deleteDaemonRuntime，列表不变", async () => {
+    daemon.listDaemonRuntimes.mockResolvedValue([
+      makeRuntime({ id: "rt-x", name: "stay" }),
+    ]);
+    renderPage(<RuntimesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /移除/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /取\s*消/ }));
+    // 取消 → 不 delete
+    expect(daemon.deleteDaemonRuntime).not.toHaveBeenCalled();
+    // 列表不变
+    expect(screen.getByText("stay")).toBeInTheDocument();
   });
 
   it("URL ?session=<active> mount → 自动开弹窗（D-003 恢复）", async () => {
@@ -198,7 +274,7 @@ describe("RuntimesPage（弹窗化后，task-04/05）", () => {
     });
     nav.searchParams = new URLSearchParams("session=sess-url");
 
-    render(<RuntimesPage />);
+    renderPage(<RuntimesPage />);
     // URL active → page effect setDialogRuntime → 弹窗 open
     await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
   });
@@ -220,7 +296,7 @@ describe("RuntimesPage（弹窗化后，task-04/05）", () => {
     });
     nav.searchParams = new URLSearchParams("session=sess-end");
 
-    render(<RuntimesPage />);
+    renderPage(<RuntimesPage />);
     await waitFor(() => expect(daemon.getAgentSession).toHaveBeenCalledWith("sess-end"));
     // ended → 不开弹窗
     await waitFor(() =>
@@ -243,7 +319,7 @@ describe("RuntimesPage（弹窗化后，task-04/05）", () => {
     );
     nav.searchParams = new URLSearchParams("session=sess-gone");
 
-    render(<RuntimesPage />);
+    renderPage(<RuntimesPage />);
     await waitFor(() => expect(daemon.getAgentSession).toHaveBeenCalledWith("sess-gone"));
     await waitFor(() => expect(nav.replace).toHaveBeenCalled());
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

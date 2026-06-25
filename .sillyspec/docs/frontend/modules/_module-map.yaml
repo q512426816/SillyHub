@@ -1108,6 +1108,33 @@ modules:
     concerns: []
     review_reasons: []
 
+  # ─── Error Message & Notify Helpers (2026-06-25-frontend-error-handling 新增) ──
+
+  lib-errors:
+    status: active
+    doc: modules/lib-errors.md
+    paths:
+      - "frontend/src/lib/errors.ts"
+      - "frontend/src/lib/errors.test.ts"
+    tags: [errors, notify, antd, i18n, ux]
+    aliases: [errors-lib, error-message]
+    entrypoints: []
+    main_symbols:
+      - errMessage
+      - useNotify
+    depends_on: [lib-api]   # 仅 instanceof ApiError + 读 code/message
+    used_by:
+      - app-pages            # task-04 runtimes 删除首场景
+      - app-workspace-pages  # task-06 D 模式收敛（members）
+      - app-admin-pages      # task-06 D 模式收敛（按需）
+      - components-shared    # task-06 D 模式收敛（health-card / workspace-scan-dialog）
+      - components-admin     # task-06 D 模式收敛（api-key-create-dialog / daemon-dir-browser）
+      - stores-kanban        # task-07 store 层 import 全局 errMessage
+    needs_review: false
+    concerns: []
+    review_reasons:
+      - 新增模块(2026-06-25-frontend-error-handling),展示策略规范见 modules/lib-errors.md 注意事项区
+
   # ─── Admin Client（用户/角色/组织管理 API） ──────────────────────
 
   lib-admin:
