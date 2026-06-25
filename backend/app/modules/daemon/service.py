@@ -42,6 +42,7 @@ from app.modules.daemon.runtime.service import (  # noqa: E402, F401
     DaemonRpcRemoteError,
     DaemonRpcRemoteGatewayError,
     DaemonRpcTimeout,
+    DaemonRuntimeInUse,
     DaemonRuntimeNotFound,
     DaemonRuntimeOffline,
 )

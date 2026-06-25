@@ -14,6 +14,7 @@ from sqlmodel import col
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.daemon.model import DaemonRuntime
+from app.modules.workspace.model import Workspace
 
 if TYPE_CHECKING:
     from app.modules.daemon.schema import RuntimeUsageRead
@@ -35,6 +36,19 @@ RuntimeUsageWindow = Literal["1d", "7d", "30d"]
 class DaemonRuntimeNotFound(AppError):
     code = "HTTP_404_DAEMON_RUNTIME_NOT_FOUND"
     http_status = 404
+
+
+class DaemonRuntimeInUse(AppError):
+    """Daemon runtime 仍被一个或多个 workspace 绑定（R-06 RESTRICT）。
+
+    ``workspaces.daemon_runtime_id`` 外键按设计是 RESTRICT（workspace/model.py
+    + migration 202607030900 注释）：删除一个仍在为 workspace 服务的 daemon 应被
+    阻止。这里把它翻译成 409 + 绑定 workspace 列表，让调用方先去解绑，而不是让 DB
+    的 IntegrityError 冒泡成 500。
+    """
+
+    code = "HTTP_409_DAEMON_RUNTIME_IN_USE"
+    http_status = 409
 
 
 class DaemonRuntimeOffline(AppError):
@@ -248,8 +262,33 @@ class RuntimeService:
         DB ondelete=CASCADE removes bound ``daemon_task_leases`` and
         ``agent_sessions`` rows automatically. The daemon re-registers as a
         fresh runtime on its next heartbeat.
+
+        ``workspaces.daemon_runtime_id`` 是 RESTRICT（R-06 cascade 明确 out of
+        scope）：若有未软删 workspace 仍绑定本 runtime，抛 ``DaemonRuntimeInUse``
+        (409) 并带 workspace 列表，让调用方先解绑，而非让 FK 违约束冒泡成 500。
         """
         runtime = await self._get_owned_runtime(runtime_id, user_id)
+        # 删前检查：被未软删 workspace 绑定的 runtime 不允许物理删除（RESTRICT）。
+        # 排除 deleted_at IS NOT NULL 的软删 workspace，否则会永久卡住删除。
+        bound = (
+            await self._session.execute(
+                select(Workspace.id, Workspace.name, Workspace.slug).where(
+                    col(Workspace.daemon_runtime_id) == runtime_id,
+                    col(Workspace.deleted_at).is_(None),
+                )
+            )
+        ).all()
+        if bound:
+            names = ", ".join(row.slug or row.name or str(row.id) for row in bound)
+            raise DaemonRuntimeInUse(
+                f"该 daemon 仍被 {len(bound)} 个 workspace 绑定（{names}），"
+                "请先在对应 workspace 中解除绑定后再删除",
+                details={
+                    "workspaces": [
+                        {"id": str(row.id), "name": row.name, "slug": row.slug} for row in bound
+                    ],
+                },
+            )
         await self._session.delete(runtime)
         await self._session.commit()
 

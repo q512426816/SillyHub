@@ -1,0 +1,125 @@
+<!--
+author: qinyi
+created_at: 2026-06-25T09:51:22+08:00
+change: 2026-06-25-frontend-error-handling
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>前端错误处理规范化 · 设计原型</title>
+<style>
+  :root { --bd: #cbd5e1; --red: #ef4444; --green: #16a34a; --blue: #2563eb; --amber:#d97706; --bg:#f8fafc; }
+  * { box-sizing: border-box; }
+  body { font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; background: var(--bg); color: #0f172a; margin: 0; padding: 24px; line-height: 1.6; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 28px 0 10px; padding-bottom: 6px; border-bottom: 2px solid var(--bd); }
+  .meta { color: #64748b; font-size: 12px; margin-bottom: 20px; }
+  .box { display: inline-block; border: 1.5px solid var(--bd); border-radius: 6px; padding: 8px 12px; background: #fff; font-size: 12.5px; vertical-align: middle; }
+  .box.ok { border-color: var(--green); color: var(--green); }
+  .box.err { border-color: var(--red); color: var(--red); }
+  .box.key { border-color: var(--blue); color: var(--blue); background: #eff6ff; }
+  .box.new { border-style: dashed; border-color: var(--amber); }
+  .arrow { display: inline-block; margin: 0 8px; color: #94a3b8; vertical-align: middle; }
+  .row { margin: 10px 0; }
+  .tree { font-size: 12.5px; white-space: pre; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; margin-left:6px; }
+  .pill.toast { background:#fee2e2; color:var(--red); }
+  .pill.inline { background:#fef3c7; color:var(--amber); }
+  .pill.modal { background:#e0e7ff; color:#4338ca; }
+  .note { font-size: 11.5px; color: #64748b; margin-top: 6px; }
+  code { background:#e2e8f0; padding:1px 5px; border-radius:3px; font-size:12px; }
+  ul { font-size: 12.5px; }
+</style>
+</head>
+<body>
+
+<h1>前端错误处理规范化 — 设计原型</h1>
+<div class="meta">变更：2026-06-25-frontend-error-handling · author: qinyi · 2026-06-25T09:51:22+08:00</div>
+
+<!-- ============ 1. 调用链架构 ============ -->
+<h2>① 错误处理调用链（数据怎么流）</h2>
+<div class="row">
+  <span class="box">后端 AppError</span><span class="arrow">→</span>
+  <span class="box">{ code, message(中文), request_id, details }</span><span class="arrow">→</span>
+  <span class="box key">apiFetch</span><span class="arrow">→ 抛</span>
+  <span class="box err">ApiError</span>
+</div>
+<div class="row">
+  <span class="box err">ApiError</span><span class="arrow">→</span>
+  <span class="box new">errMessage(err, fallback?) <span class="pill inline">新增·纯函数</span></span><span class="arrow">取中文文案</span>
+</div>
+<div class="row">
+  <span class="box new">errMessage</span><span class="arrow">→ 按场景分发给 ↓</span>
+</div>
+<div class="row">
+  <span class="box new">useNotify().error(err) <span class="pill inline">新增·hook</span></span>
+  <span class="arrow">|</span>
+  <span class="box">setError(errMessage(err))</span>
+  <span class="arrow">|</span>
+  <span class="box">Modal.confirm(...)</span>
+</div>
+<div class="note">
+    <code>errMessage</code> 取文案规则：① <code>code==="network_error"</code> → 「网络连接失败，请检查网络后重试」（兜底浏览器英文）；
+    ② 否则用 <code>err.message</code>（后端已中文，如 409「该 daemon 仍被 N 个 workspace 绑定…」）；③ 无 → <code>fallback ?? "操作失败"</code>。
+</div>
+
+<!-- ============ 2. 展示策略决策树 ============ -->
+<h2>② 展示策略决策树（什么场景用什么）</h2>
+<div class="tree">
+错误发生
+ ├─ 用户主动触发的操作（删除 / 创建 / 更新 / 启停）
+ │    └─→ <span class="box new">useNotify().error / .success</span>  <span class="pill toast">antd toast 即时反馈</span>
+ │
+ ├─ 页面加载 / 列表拉取 / 详情获取失败
+ │    └─→ setError(errMessage(err))  <span class="pill inline">inline 红条 · 保留上下文</span>
+ │
+ ├─ 表单字段校验错误
+ │    └─→ inline 字段错误  <span class="pill inline">inline</span>
+ │
+ └─ 需要二次确认的危险操作
+      └─→ antd Modal.confirm(...)  <span class="pill modal">非 window.confirm</span>
+</div>
+<div class="note">铁律：任何路径都 <b>不</b> 把 <code>err.code</code>（英文 HTTP_xxx）拼给用户看 —— 消灭 D 反模式。</div>
+
+<!-- ============ 3. daemon 删除交互流程 ============ -->
+<h2>③ daemon runtime 删除交互流程（首个落地场景）</h2>
+<div class="row">
+  <span class="box">点「移除」</span><span class="arrow">→</span>
+  <span class="box">Modal.confirm</span><span class="arrow">「确定移除运行时 X？…」</span>
+</div>
+<div class="row">
+  <span class="box">确认</span><span class="arrow">→</span>
+  <span class="box key">DELETE /api/daemon/runtimes/{id}</span><span class="arrow">→</span>
+</div>
+<div class="row" style="margin-left:24px;">
+  <span class="box ok">204 成功</span><span class="arrow">→</span>
+  <span class="box new">notify.success("运行时已移除")</span><span class="arrow">→</span>
+  <span class="box">列表移除该卡片</span>
+</div>
+<div class="row" style="margin-left:24px;">
+  <span class="box err">409 被绑定</span><span class="arrow">→</span>
+  <span class="box new">notify.error(err)</span>
+  <span class="arrow">→ toast 弹「该 daemon 仍被 N 个 workspace 绑定（myaaa），请先解除绑定」</span>
+</div>
+<div class="row" style="margin-left:24px;">
+  <span class="box err">404 / 403</span><span class="arrow">→</span>
+  <span class="box new">notify.error(err)</span><span class="arrow">→ toast 弹后端中文 message</span>
+</div>
+<div class="note">修复前：409 → 500 白屏；修复后：409 → toast 中文提示，列表不动，用户知道要去 workspace 解绑。</div>
+
+<!-- ============ 4. 范围与 YAGNI ============ -->
+<h2>④ 改动范围（做什么 / 不做什么）</h2>
+<ul>
+  <li><b>新增</b>：<code>frontend/src/lib/errors.ts</code>（errMessage + useNotify）+ <code>errors.test.ts</code></li>
+  <li><b>落地</b>：<code>runtimes/page.tsx</code> 删除流程（Modal.confirm + notify）</li>
+  <li><b>收敛 D 反模式</b>（~8 处 <code>${code}: ${message}</code>）：api-keys / workspace-scan-dialog / daemon-dir-browser / workspace-member-add-dialog / health-card / server-status-card / api-key-create-dialog 等</li>
+  <li><b>合并重复</b>：kanban.ts / ppm problem-list / problem-changes 的局部 errMessage → import 全局</li>
+</ul>
+<ul>
+  <li><b>不做（YAGNI）</b>：不维护 code→中文映射表（后端 message 已中文）· 不强改 store 静态 message · 不全量收敛 80+ 处 · 不改 apiFetch/ApiError 契约</li>
+</ul>
+
+</body>
+</html>

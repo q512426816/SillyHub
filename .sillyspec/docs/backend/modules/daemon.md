@@ -23,6 +23,7 @@ created_at: 2026-06-19T19:40:00+08:00
 - `DaemonLeaseService`（`lease_service.py`）：独立活 service，`cancel_lease` 被 agent 模块跨模块调用（`agent/service.py:545`），原位保留，与本次 `LeaseService` 分管 lease 不同操作（D-003）。
 - 异常类/状态常量已迁入对应子包定义，facade `service.py` 集中 re-export，`from app.modules.daemon.service import XxxError` 路径不变（FR-05）。
 - `GET /api/daemon/runtimes`：读取当前用户可见的运行时。
+- `DELETE /api/daemon/runtimes/{id}`：物理删除 runtime 及其 lease/session（FK CASCADE）；被未软删 workspace 绑定时返回 409（`DaemonRuntimeInUse`，需先解绑），越权/不存在统一 404。
 - `GET /api/daemon/sessions`：按用户隔离并分页读取交互式会话。
 - `DELETE /api/daemon/sessions/{id}`：仅删除当前用户的终态会话；活动会话返回 409，越权与不存在统一返回 404。
 
@@ -50,3 +51,4 @@ created_at: 2026-06-19T19:40:00+08:00
 - 2026-06-22-daemon-service-split：将 `DaemonService` 巨石（~3500 行/51 方法）按生命周期拆为 `runtime/lease/run_sync/session/patch` 5 子域子包，`DaemonService` 退化为 facade（方法签名不变、`router.py` 零改动、行为不变）；异常类按子域迁入子包 + facade re-export 保持 import 路径兼容；`DaemonLeaseService` 原位不动（D-003）。跨子域调用经 facade 引用注入（D-006），子 service import 经 `__init__` 内 lazy import 避免 module-level 循环（D-005）。
 - ql-20260623-001-85ac | 修复 ruff N815：`DaemonVersionResponse` 的 `minRequired`/`downloadUrl` camelCase 字段（对外公开端点 GET /api/daemon/version 的 JSON 契约，router.py:72-75 注释，install.sh/前端消费）加 `# noqa: N815` 行内豁免，不改 snake_case（改了会破坏 install.sh/前端）；验证 `cd backend && uv run ruff check .` 通过。
 - 2026-06-23-codex-interactive-session | `SessionService.reopen_session` provider gate 放开 Codex（`{claude,codex}`，D-003@v1/D-007@v1），`DaemonSessionResumeUnsupported` 文案更新；`AgentSession.agent_session_id` 对 Codex 明确为 thread id；flat message 契约与 `dialog_kind`（`codex_request_user_input` / `mcp_elicitation`）通道对 Codex 生效（D-004@v1/D-006@v1/D-008@v1）；Claude 既有 reopen/permission 测试不变。
+- ql-20260625-001-b9e4 | `RuntimeService.delete_runtime`（`runtime/service.py`）删前检查未软删 workspace 绑定：`workspaces.daemon_runtime_id` FK 是 RESTRICT（`workspace/model.py:72` + migration `202607030900` 设计意图，R-06 cascade out of scope），被绑定时抛新增 `DaemonRuntimeInUse`（`HTTP_409_DAEMON_RUNTIME_IN_USE` + 中文提示 + `details.workspaces` 列表）而非让 PG IntegrityError 冒泡成 500；facade re-export 同名异常保持 import 路径；物理删除语义不变。

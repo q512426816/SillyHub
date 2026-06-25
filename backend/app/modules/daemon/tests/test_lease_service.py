@@ -21,9 +21,11 @@ from app.modules.daemon.lease_service import (
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.service import (
     DaemonInvalidClaimToken,
+    DaemonRuntimeInUse,
     DaemonRuntimeNotFound,
     DaemonService,
 )
+from app.modules.workspace.model import Workspace
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -634,6 +636,62 @@ class TestDeleteRuntime:
 
         # 归属者的 runtime 未被越权删除
         assert await svc.get_runtime(rt.id) is not None
+
+    @pytest.mark.asyncio
+    async def test_delete_runtime_blocked_when_workspace_bound(
+        self, db_session: AsyncSession
+    ) -> None:
+        """被未软删 workspace 绑定的 runtime 删除被拒 → DaemonRuntimeInUse (409)。"""
+        user_id = await _create_user(db_session)
+        svc = DaemonService(db_session)
+        rt = await svc.register_runtime(user_id, name="bound-daemon", provider="claude_code")
+
+        ws = Workspace(
+            id=uuid.uuid4(),
+            name="bound-ws",
+            slug=f"bound-ws-{rt.id.hex[:8]}",
+            root_path="/tmp/bound",
+            path_source="daemon-client",
+            daemon_runtime_id=rt.id,
+        )
+        db_session.add(ws)
+        await db_session.commit()
+
+        with pytest.raises(DaemonRuntimeInUse) as exc_info:
+            await svc.delete_runtime(rt.id, user_id)
+
+        # runtime 未被删
+        assert await svc.get_runtime(rt.id) is not None
+        # details 带绑定 workspace 列表 + 状态码 409
+        assert exc_info.value.http_status == 409
+        details = exc_info.value.details
+        assert details is not None
+        assert len(details["workspaces"]) == 1
+        assert details["workspaces"][0]["slug"] == ws.slug
+
+    @pytest.mark.asyncio
+    async def test_delete_runtime_allows_when_workspace_soft_deleted(
+        self, db_session: AsyncSession
+    ) -> None:
+        """只绑定到已软删 workspace 的 runtime 仍可删除（deleted_at IS NULL 过滤）。"""
+        user_id = await _create_user(db_session)
+        svc = DaemonService(db_session)
+        rt = await svc.register_runtime(user_id, name="freed-daemon", provider="claude_code")
+
+        ws = Workspace(
+            id=uuid.uuid4(),
+            name="soft-deleted-ws",
+            slug=f"soft-ws-{rt.id.hex[:8]}",
+            root_path="/tmp/soft",
+            path_source="daemon-client",
+            daemon_runtime_id=rt.id,
+            deleted_at=datetime.now(UTC),
+        )
+        db_session.add(ws)
+        await db_session.commit()
+
+        await svc.delete_runtime(rt.id, user_id)
+        assert await svc.get_runtime(rt.id) is None
 
 
 class TestDaemonHeartbeat:
