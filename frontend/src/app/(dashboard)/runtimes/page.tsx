@@ -42,9 +42,12 @@ import {
   isVersionBelow,
   listAgentSessions,
   listDaemonRuntimes,
+  listDaemonRuntimesPage,
   MIN_VERSIONS,
   PROVIDER_META,
+  updateDaemonRuntime,
   type AgentSessionRead,
+  type DaemonRuntimeListParams,
   type DaemonRuntimeRead,
   type RuntimeUsageItem,
   type RuntimeUsageWindow,
@@ -53,8 +56,10 @@ import { cn } from "@/lib/utils";
 import { useSession } from "@/stores/session";
 // task-06 / FR-03 / D-003@v1：antd Modal.confirm（删除二次确认）+ useNotify（成功/失败 toast）。
 // Modal 走 App.useApp().modal 拿到主题上下文实例（非静态 Modal），由 antd-providers.tsx 的 <AntApp> 注入。
-import { App } from "antd";
+import { App, Input, Modal } from "antd";
 import { useNotify } from "@/lib/errors";
+// task-07 / D-003@v1：平台管理员人员搜索复用既有 admin 用户列表。
+import { listUsers, type UserRead } from "@/lib/admin";
 
 type BadgeVariant = "default" | "success" | "outline" | "warning" | "destructive";
 type StatusMeta = {
@@ -553,6 +558,8 @@ function RuntimeCard({
   onOpenSession: (runtime: DaemonRuntimeRead) => void;
   // task-06：签名从 Promise<void> 改 void —— modal.confirm 同步触发，删除在 onOk 异步回调里。
   onDelete: (runtime: DaemonRuntimeRead) => void;
+  // task-07 / FR-03：别名编辑入口（由 RuntimesPage 弹 modal 编辑，避免卡片内状态膨胀）。
+  onEditAlias: (runtime: DaemonRuntimeRead) => void;
 }) {
   const status = getStatusMeta(runtime.status);
   const StatusIcon = status.icon;
@@ -592,11 +599,19 @@ function RuntimeCard({
               <Badge variant={status.badge}>{status.label}</Badge>
             </div>
             <h3 className="mt-2 truncate font-mono text-sm font-semibold">
-              {runtime.name ?? "未命名运行时"}
+              {runtime.display_alias ?? runtime.name ?? "未命名运行时"}
             </h3>
             <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
               {shortId(runtime.id)} · 注册 {createdLabel}
             </p>
+            {runtime.display_alias && runtime.name ? (
+              <p className="truncate text-[10px] text-muted-foreground">原名：{runtime.name}</p>
+            ) : null}
+            {runtime.owner ? (
+              <p className="truncate text-[10px] text-muted-foreground">
+                负责人：{runtime.owner.display_name ?? runtime.owner.email ?? "未记录"}
+              </p>
+            ) : null}
           </div>
         </div>
         <span className={cn("mt-1 h-2.5 w-2.5 shrink-0 rounded-full", status.dot)} />
@@ -680,6 +695,15 @@ function RuntimeCard({
       </div>
 
       <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-3">
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5"
+          onClick={() => onEditAlias(runtime)}
+          title="编辑展示别名"
+        >
+          别名
+        </Button>
         {canOpenSession && (
           <Button
             size="sm"
@@ -783,6 +807,19 @@ function EmptyState() {
 export default function RuntimesPage() {
   const [items, setItems] = useState<DaemonRuntimeRead[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // task-07 / FR-04 / FR-05 / D-003@v1：服务端筛选分页 + 平台管理员人员搜索 + 别名编辑。
+  const isPlatformAdmin = useSession((s) => s.user?.is_platform_admin === true);
+  const PAGE_SIZE = 12;
+  const [query, setQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [ownerUserId, setOwnerUserId] = useState<string | null>(null);
+  const [userOptions, setUserOptions] = useState<UserRead[]>([]);
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [aliasEditing, setAliasEditing] = useState<DaemonRuntimeRead | null>(null);
+  const [aliasValue, setAliasValue] = useState("");
+  const [aliasSaving, setAliasSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [runtimeActionId, setRuntimeActionId] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
@@ -835,23 +872,33 @@ export default function RuntimesPage() {
     if (showFeedback) setRefreshing(true);
     const startedAt = Date.now();
     try {
-      const [list, sessionsResp] = await Promise.all([
-        listDaemonRuntimes(),
+      const listParams: DaemonRuntimeListParams = {
+        q: query.trim() || undefined,
+        type: typeFilter || undefined,
+        status: statusFilter || undefined,
+        user_id: isPlatformAdmin ? ownerUserId ?? undefined : undefined,
+        limit: PAGE_SIZE,
+        offset: page * PAGE_SIZE,
+      };
+      const [resp, sessionsResp] = await Promise.all([
+        listDaemonRuntimesPage(listParams),
         listAgentSessions({ limit: 100 }).catch(() => null),
         showFeedback
           ? new Promise((resolve) => setTimeout(resolve, Math.max(0, 500 - (Date.now() - startedAt))))
           : Promise.resolve(),
       ]);
-      setItems(list);
+      setItems(resp.items);
+      setTotal(resp.total);
       setSessions(sessionsResp?.items ?? []);
       setLastRefreshedAt(new Date());
     } catch (err) {
       setItems([]);
+      setTotal(0);
       setError(err instanceof ApiError ? err.message : "加载列表失败");
     } finally {
       if (showFeedback) setRefreshing(false);
     }
-  }, []);
+  }, [query, typeFilter, statusFilter, ownerUserId, page, isPlatformAdmin]);
 
   const handleToggleRuntime = useCallback(async (runtime: DaemonRuntimeRead) => {
     setError(null);
@@ -910,6 +957,56 @@ export default function RuntimesPage() {
     setInitialSessionId(null);
     setDialogRuntime(runtime);
   }, []);
+
+  // task-07 / FR-04：改筛选条件时重置到第一页，避免筛选后停在空页。
+  const updateFilter = useCallback(
+    <T,>(setter: (v: T) => void) => (v: T) => {
+      setter(v);
+      setPage(0);
+    },
+    [],
+  );
+
+  // task-07 / FR-03：别名编辑（modal 弹层，由 RuntimeCard onEditAlias 触发）。
+  const handleOpenAlias = useCallback((runtime: DaemonRuntimeRead) => {
+    setAliasEditing(runtime);
+    setAliasValue(runtime.display_alias ?? "");
+  }, []);
+
+  const handleSaveAlias = useCallback(async () => {
+    if (!aliasEditing) return;
+    setAliasSaving(true);
+    try {
+      const updated = await updateDaemonRuntime(aliasEditing.id, {
+        display_alias: aliasValue.trim() || null,
+      });
+      setItems((prev) =>
+        prev ? prev.map((r) => (r.id === updated.id ? updated : r)) : prev,
+      );
+      notify.success("别名已更新");
+      setAliasEditing(null);
+    } catch (err) {
+      notify.error(err, "更新别名失败");
+    } finally {
+      setAliasSaving(false);
+    }
+  }, [aliasEditing, aliasValue, notify]);
+
+  // task-07 / D-003@v1：平台管理员人员搜索选项；失败降级为空（控件由 isPlatformAdmin 控制显隐）。
+  useEffect(() => {
+    if (!isPlatformAdmin) return;
+    let cancelled = false;
+    listUsers({ limit: 50 })
+      .then((resp) => {
+        if (!cancelled) setUserOptions(resp.items);
+      })
+      .catch(() => {
+        if (!cancelled) setUserOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isPlatformAdmin]);
 
   useEffect(() => {
     void reload();
@@ -1142,6 +1239,56 @@ export default function RuntimesPage() {
                     用量统计加载失败：{usageError}（卡片用量区显示空）
                   </p>
                 )}
+                {/* task-07 / FR-04 / FR-05：服务端筛选条 + 平台管理员人员搜索 */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    aria-label="搜索资源"
+                    placeholder="搜索别名/名称/提供方"
+                    value={query}
+                    onChange={(e) => updateFilter(setQuery)(e.target.value)}
+                    className="h-8 min-w-[12rem] flex-1 rounded border bg-card px-2 text-xs"
+                  />
+                  <select
+                    aria-label="筛选类型"
+                    value={typeFilter}
+                    onChange={(e) => updateFilter(setTypeFilter)(e.target.value)}
+                    className="h-8 rounded border bg-card px-2 text-xs"
+                  >
+                    <option value="">全部类型</option>
+                    {Object.entries(PROVIDER_META).map(([key, meta]) => (
+                      <option key={key} value={key}>
+                        {meta.label}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label="筛选状态"
+                    value={statusFilter}
+                    onChange={(e) => updateFilter(setStatusFilter)(e.target.value)}
+                    className="h-8 rounded border bg-card px-2 text-xs"
+                  >
+                    <option value="">全部状态</option>
+                    <option value="online">在线</option>
+                    <option value="maintenance">维护中</option>
+                    <option value="offline">离线</option>
+                    <option value="disabled">禁用</option>
+                  </select>
+                  {isPlatformAdmin ? (
+                    <select
+                      aria-label="筛选人员"
+                      value={ownerUserId ?? ""}
+                      onChange={(e) => updateFilter(setOwnerUserId)(e.target.value || null)}
+                      className="h-8 rounded border bg-card px-2 text-xs"
+                    >
+                      <option value="">全部人员</option>
+                      {userOptions.map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.display_name ?? u.email ?? u.username}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
+                </div>
                 <div
                   data-testid="runtime-list-scroll"
                   className="pr-1"
@@ -1159,8 +1306,35 @@ export default function RuntimesPage() {
                         onToggleEnabled={handleToggleRuntime}
                         onOpenSession={handleOpenSession}
                         onDelete={handleDeleteRuntime}
+                        onEditAlias={handleOpenAlias}
                       />
                     ))}
+                  </div>
+                  {/* task-07 / FR-04：服务端分页器 */}
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    <span className="text-[11px] text-muted-foreground">
+                      共 {total} 条 · 第 {page + 1} 页
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={page === 0}
+                        onClick={() => setPage((p) => Math.max(0, p - 1))}
+                        aria-label="上一页"
+                      >
+                        上一页
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={(page + 1) * PAGE_SIZE >= total}
+                        onClick={() => setPage((p) => p + 1)}
+                        aria-label="下一页"
+                      >
+                        下一页
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </section>
@@ -1177,6 +1351,31 @@ export default function RuntimesPage() {
         runtimes={items ?? []}
         initialSessionId={initialSessionId ?? undefined}
       />
+
+      {/* task-07 / FR-03：别名编辑 modal（RuntimeCard onEditAlias 触发） */}
+      <Modal
+        title="编辑展示别名"
+        open={aliasEditing !== null}
+        onOk={handleSaveAlias}
+        onCancel={() => setAliasEditing(null)}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={aliasSaving}
+        okButtonProps={{ disabled: aliasSaving }}
+        destroyOnClose
+      >
+        <Input
+          value={aliasValue}
+          onChange={(e) => setAliasValue(e.target.value)}
+          placeholder="留空清除别名，回退原始名称"
+          maxLength={200}
+          onPressEnter={handleSaveAlias}
+          aria-label="别名输入"
+        />
+        {aliasEditing?.name ? (
+          <p className="mt-2 text-xs text-muted-foreground">原始名称：{aliasEditing.name}</p>
+        ) : null}
+      </Modal>
     </main>
   );
 }
