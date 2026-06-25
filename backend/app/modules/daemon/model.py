@@ -45,6 +45,11 @@ class DaemonRuntime(BaseModel, table=True):
         default=None,
         sa_column=Column(String(255), nullable=True),
     )
+    # task-03 / D-002@v1: 展示别名，独立于注册用的 name；空值回退 name/provider。
+    display_alias: str | None = Field(
+        default=None,
+        sa_column=Column(String(200), nullable=True),
+    )
     provider: str | None = Field(
         default=None,
         sa_column=Column(String(50), nullable=True),

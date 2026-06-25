@@ -54,6 +54,11 @@ class Workspace(BaseModel, table=True):
         sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
     )
     name: str = Field(sa_column=Column(String(200), nullable=False))
+    # task-03 / D-002@v1: 展示别名，独立于扫描/创建用的 name；空值回退 name/slug。
+    display_alias: str | None = Field(
+        default=None,
+        sa_column=Column(String(200), nullable=True),
+    )
     slug: str = Field(sa_column=Column(String(100), nullable=False))
     root_path: str = Field(sa_column=Column(String, nullable=False))
     # Workspace path source: 'server-local' (root_path reachable from the
