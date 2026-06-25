@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
+from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.schema import SessionReopenResponse
 
@@ -141,7 +142,7 @@ class DaemonService:
         user_id: uuid.UUID | None,
         limit: int,
         offset: int,
-    ) -> tuple[list[tuple[DaemonRuntime, object]], int]:
+    ) -> tuple[list[tuple[DaemonRuntime, User | None]], int]:
         """Paginated filtered runtime list (task-04 / FR-04). 委托 RuntimeService."""
         return await self._rt.list_runtimes_page(
             actor_user_id=actor_user_id,
