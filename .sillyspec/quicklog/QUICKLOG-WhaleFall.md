@@ -54,4 +54,11 @@ created_at: 2026-06-24T19:19:38
 方案:①裸div→PageContainer(size full)+PageHeader(角色管理/平台角色与权限管理);②查询→SectionCard(p-2)内顶部按钮行(搜索/重置/分隔/+新建角色 justify-end)+grid-cols-4 Field(关键词 Input);③搜索行为对齐 ql-003/004(去 debounce,纯受控,handleSearchClick noChange 强制 load,回车触发);④裸Table→DataTable(bordered+emptyText+scroll y calc(100vh-430px))。复用 Field 组件定义。子组件 RoleDrawer/DeleteConfirm/RoleUsersDrawer 不变。
 结果:5处 Edit 完成(布局/查询/列表/搜索行为全对齐 admin/users)。typecheck no errors、lint 无 roles/page 相关。子组件未动。
 
+## ql-20260625-006-3d7e | 2026-06-25 19:55:00 | admin/users 左侧组织树加宽 + 节点文字截断修复
+状态：已完成
+文件：frontend/src/app/(dashboard)/admin/users/page.tsx + frontend/src/components/admin-org-tree.tsx
+需求：组织树太窄(w-56)，公司名长/多层时文字超出溢出。
+方案：①aside w-56→w-64 加宽；②orgNodeTitle name span +min-w-0 flex-1(flex 里 truncate 生效不挤 count)；③count span +shrink-0(不被挤)。
+结果:typecheck no errors。组织名长时 truncate 省略，人数不被挤压。
+
 

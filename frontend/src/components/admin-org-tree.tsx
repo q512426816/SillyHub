@@ -67,8 +67,8 @@ function orgNodeTitle(org: OrganizationRead) {
   const count = org.subtree_member_count ?? org.member_count;
   return (
     <span className="flex items-center justify-between gap-2">
-      <span className="truncate">{org.name}</span>
-      <span className="text-xs text-muted-foreground">{count}</span>
+      <span className="min-w-0 flex-1 truncate">{org.name}</span>
+      <span className="shrink-0 text-xs text-muted-foreground">{count}</span>
     </span>
   );
 }

@@ -414,7 +414,7 @@ export default function AdminUsersPage() {
       ) : (
         <div className="flex gap-4">
           {/* 左：组织树筛选（对齐 ppm/project-plans 左树右表布局） */}
-          <aside className="w-56 shrink-0">
+          <aside className="w-64 shrink-0">
             <SectionCard title="组织" bodyPadding="p-2">
               <AdminOrgTree
                 organizations={organizations}
