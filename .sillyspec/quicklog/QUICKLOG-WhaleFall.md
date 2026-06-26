@@ -78,4 +78,13 @@ created_at: 2026-06-24T19:19:38
 结果:commit 2fc490c3。typecheck no errors、lint 无 page.tsx 相关（仅已有 warning）、提交 hook lint+typecheck+test 全过、rebuild frontend healthy、grep 确认 "100vh-220px" 已编译进 /app/.next/server/.../scan-docs/page.js。后端无改动。frontend_app 模块文档同步追加该样式约定。
 注：本次错误走了 sillyspec run quick --change（项目有多个活跃 change + CLI 预生成 change 目录，skill 要求多变更带 --change），记录误入 changes/tasks.md。实际应记本文件（同 ql-20260625-002 坑）。本次补记，并删除该 change 目录回归 quicklog。
 
+## ql-20260626-003-e8a1 | 2026-06-26 10:32:05 | 修复 agent run logs 500（agent_run_logs.dedup_key schema 漂移）
+状态：已完成
+文件：（无代码改动；DB schema hotfix）
+需求：GET /api/workspaces/{id}/agent/runs/{rid}/logs 返回 500 Internal Server Error。
+根因：schema 漂移。migration 202606241300_add_agent_run_log_dedup_key 存在且正确（加 dedup_key 列 + 部分唯一索引 ux_agent_run_logs_dedup），DB alembic_version=202606251900（在 241300 之后），alembic 认定 241300 已执行 → upgrade head 不会重跑；但 agent_run_logs 表实际无 dedup_key 列、无该索引（某次 DB 被推进到 head 时 241300 的 DDL 未真正落地）。ORM AgentRunLog 查 dedup_key → asyncpg UndefinedColumnError → 500。调用链 router.py:398 get_agent_run_logs → service.py:704 get_run_logs。
+修复：直接补 DDL（幂等）—— ALTER TABLE agent_run_logs ADD COLUMN IF NOT EXISTS dedup_key VARCHAR(200)；CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_run_logs_dedup ON agent_run_logs(run_id,dedup_key) WHERE dedup_key IS NOT NULL。对现有数据零影响（新列 NULL、部分索引不约束旧行）。
+验证：① DB 列+索引已落地（information_schema.columns + pg_indexes 确认）；② 复现 service.get_run_logs 的 SELECT 不再报错（count 0）；③ 全表 ORM-vs-DB 列对比（63 ORM 表 vs 66 DB 表）漂移数=0，dedup_key 是唯一缺失且已补，无其他遗漏。未改代码/未 rebuild 镜像（migration 文件本就正确，DB 已直接修复）。
+注：alembic upgrade head 不重跑已标记完成的旧 migration，遇类似漂移需直接补 DDL 或 alembic stamp 回退后重跑。本次为运维 hotfix，无代码 commit。
+
 
