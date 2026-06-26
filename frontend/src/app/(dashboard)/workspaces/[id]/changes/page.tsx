@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api";
+import { listDaemonRuntimes, type DaemonRuntimeRead } from "@/lib/daemon";
 import {
   listChanges,
   reparseChanges,
@@ -21,6 +22,7 @@ import {
   type ChangeSummary,
   type ChangeWarning,
 } from "@/lib/changes";
+import { getWorkspace, type Workspace } from "@/lib/workspaces";
 
 interface Props {
   params: { id: string };
@@ -109,8 +111,21 @@ export default function ChangesPage({ params }: Props) {
   const [pageError, setPageError] = useState<string | null>(null);
   const [stats, setStats] = useState<ChangeReparseStats | null>(null);
   const [warnings, setWarnings] = useState<ChangeWarning[]>([]);
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [runtimes, setRuntimes] = useState<DaemonRuntimeRead[]>([]);
 
   const items = tab === "active" ? activeItems : archiveItems;
+  const daemonRuntimeId = workspace?.daemon_runtime_id ?? null;
+  const boundRuntime = useMemo(() => {
+    if (!daemonRuntimeId) return null;
+    return runtimes.find((r) => r.id === daemonRuntimeId) ?? null;
+  }, [daemonRuntimeId, runtimes]);
+  const isDaemonClient = workspace?.path_source === "daemon-client";
+  const newChangeDisabledReason = isDaemonClient
+    ? !daemonRuntimeId || boundRuntime?.status !== "online"
+      ? "需要在线 daemon 才能在客户端工作区创建变更"
+      : null
+    : null;
 
   const filtered = useMemo(() => {
     let result = items;
@@ -133,12 +148,16 @@ export default function ChangesPage({ params }: Props) {
     setLoading(true);
     setPageError(null);
     try {
-      const [active, archive] = await Promise.all([
+      const [active, archive, ws, runtimeList] = await Promise.all([
         listChanges(workspaceId, { location: "active" }),
         listChanges(workspaceId, { location: "archive" }),
+        getWorkspace(workspaceId),
+        listDaemonRuntimes().catch(() => [] as DaemonRuntimeRead[]),
       ]);
       setActiveItems(active.items);
       setArchiveItems(archive.items);
+      setWorkspace(ws);
+      setRuntimes(runtimeList);
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "加载变更列表失败");
     } finally {
@@ -289,6 +308,8 @@ export default function ChangesPage({ params }: Props) {
             <Button
               size="sm"
               variant="outline"
+              disabled={loading || newChangeDisabledReason !== null}
+              title={newChangeDisabledReason ?? undefined}
               onClick={() =>
                 router.push(`/workspaces/${workspaceId}/create-change`)
               }
