@@ -242,7 +242,9 @@ class TestScanDocsReparseUsesSpecRoot:
         # mock parser，捕获传入的 sillyspec_root 参数
         captured_root = None
 
-        def fake_parse_component(self_parser, root: Path, component_key: str):
+        def fake_parse_component(
+            self_parser, root: Path, component_key: str, platform_managed: bool = False
+        ):
             nonlocal captured_root
             captured_root = root
             return ScanDocsResult(component_key=component_key)

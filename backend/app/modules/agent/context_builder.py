@@ -597,7 +597,7 @@ async def build_scan_bundle(
             f"- 对 {root_path} 目录中的源码只读，不要修改项目文件\n"
             f"- 文档生成在 {host_spec_root}/ 下，源码目录保持只读，不会创建 .sillyspec/\n"
             f"- ⚠️ 平台模式禁止执行 sillyspec init（会在源码目录创建 .sillyspec 并触发源码保护）\n"
-            f"- 文档生成在 {host_spec_root}/.sillyspec/docs/ 目录下\n"
+            f"- 文档生成在 {host_spec_root}/docs/ 目录下（扁平布局，无 .sillyspec 包裹）\n"
             f"- 启动 scan 命令必须包含 --spec-root/--runtime-root/--workspace-id/--scan-run-id\n"
             f"- done 命令不需要重复平台参数\n"
             f"- 每个步骤必须用 done 完成，不要跳过\n"

@@ -43,6 +43,16 @@ allowed_paths:
   - 若判定 no-op：post_scan_validator.py 不改，acceptance 注明「source_root 是源码目录、scan agent 产出仍带 `.sillyspec` 包裹，platform-managed mode 不适用，依据 R3」。
   - 若判定需改：`_check_output_paths`（及必要的 `_check_source_pollution` expected_path 文案）按 platform-managed mode 取扁平 `spec_root/docs`，并补 mode 透传（`PostScanValidator.__init__` 或 validate 时传入）。
 
+### R3 核实结论（2026-06-26 执行）— 判定 no-op，`post_scan_validator.py` 不改
+
+依据：
+1. grep 证实 `PostScanValidator` 唯一生产调用方是 `backend/app/modules/daemon/run_sync/service.py:780`（`_run_post_scan_validation`），属 **batch task-runner 路径**；本变更聚焦的 daemon-client **interactive scan**（design §1 根因A `agent_sessions.14c9e08b`）不经过 PostScanValidator。
+2. design §3 非目标：不改 batch daemon-client（task-runner）路径的 spec 同步语义。
+3. `run_sync/service.py:746-747` 明确：PostScanValidator 结果仅写入 `lease.metadata['post_scan_validation']`，**不翻转 scan 成功语义**。故即便 batch 路径 platform-managed spec_root 下 `_check_output_paths` 的 `spec_root/.sillyspec/docs` 期望可能与扁平产出不符（潜在误报 `expected_docs_missing`），也不影响 scan-docs 可见性（读端由 task-02 `SpecPathResolver(platform_managed=True)` 修复）。
+4. 改 `post_scan_validator` 须令其感知 mode/strategy，而其调用方 `run_sync/service.py:780` 传裸 spec_root，引入 mode 透传超出本 task allowed_paths 且触及非目标 batch 路径。
+
+故 task-04 第二部分（post_scan_validator R3）= no-op，仅本结论记录；第一部分（SpecValidator mode）已 commit `601703aa`（`_projects_dir` helper + `validate(*, platform_managed)` + 三个内部方法均用 helper）。
+
 ## verify
 
 ```

@@ -327,6 +327,10 @@ async def test_build_scan_bundle_prompt_contains_full_scan_command(
     assert "第 1 步 — 启动 scan" in prompt
     # task-08: 不再有"在源码目录下创建 .sillyspec/"表述
     assert ".sillyspec/ 目录会在源码目录下创建" not in prompt
+    # task-05：平台模式文档输出路径扁平（{host_spec_root}/docs/，无 .sillyspec 包裹），
+    # 对齐 daemon 实际扁平产出 + SpecPathResolver(platform_managed=True).docs_dir 契约（D-005@v1）。
+    assert f"{host_spec_root}/docs/" in prompt
+    assert f"{host_spec_root}/.sillyspec/docs/" not in prompt
 
 
 @pytest.mark.asyncio
@@ -384,6 +388,8 @@ async def test_build_scan_bundle_non_platform_keeps_init(
     # 仍是"第 1 步 — 初始化"
     assert "第 1 步 — 初始化" in prompt
     assert "第 2 步 — 启动 scan" in prompt
+    # task-05 回归守护：非平台（server-local / repo-native）分支仍指示 .sillyspec 包裹产出
+    assert ".sillyspec/docs/" in prompt
 
 
 @pytest.mark.asyncio
