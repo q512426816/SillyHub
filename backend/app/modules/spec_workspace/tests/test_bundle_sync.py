@@ -176,7 +176,7 @@ class TestSync:
         assert not (spec_root / "docs" / "A.md").exists()
         assert (spec_root / "docs" / "B.md").read_text(encoding="utf-8") == "# B"
 
-    async def test_sync_preserves_runtime_dir(
+    async def test_sync_receives_runtime_dir_from_tar(
         self, db_session, client: AsyncClient, auth_headers, tmp_path
     ) -> None:
         ws = await _make_workspace(db_session)
@@ -185,7 +185,12 @@ class TestSync:
         (spec_root / ".runtime" / "x.log").write_text("runtime-cache", encoding="utf-8")
         await _make_spec_workspace(db_session, ws, spec_root)
 
-        tar_bytes = _build_tar({"docs/C.md": b"# C"})
+        tar_bytes = _build_tar(
+            {
+                "docs/C.md": b"# C",
+                ".runtime/sillyspec.db": b"daemon-runtime-db",
+            }
+        )
 
         with patch(
             "app.modules.scan_docs.service.ScanDocsService.reparse",
@@ -200,8 +205,9 @@ class TestSync:
             )
 
         assert resp.status_code == 200, resp.text
-        # .runtime preserved untouched
-        assert (spec_root / ".runtime" / "x.log").read_text(encoding="utf-8") == "runtime-cache"
+        # .runtime now comes from the daemon tar (D-003@v1 push path), not the old backend copy.
+        assert not (spec_root / ".runtime" / "x.log").exists()
+        assert (spec_root / ".runtime" / "sillyspec.db").read_bytes() == b"daemon-runtime-db"
 
     async def test_sync_invalid_tar_422(
         self, db_session, client: AsyncClient, auth_headers, tmp_path

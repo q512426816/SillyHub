@@ -81,6 +81,36 @@ class TestValidateEmptyProjectsDir:
         assert "No YAML files" in report.warnings[0].message
 
 
+class TestValidatePlatformManagedProjectsDir:
+    """platform_managed=True validates flat ``projects/`` without a .sillyspec wrapper."""
+
+    def test_flat_projects_dir_passes(self, validator: SpecValidator, tmp_path: Path) -> None:
+        projects_dir = tmp_path / "projects"
+        _write_yaml(
+            projects_dir / "backend.yaml",
+            "id: backend\nname: Backend\ntype: service\n",
+        )
+
+        report = validator.validate(tmp_path, platform_managed=True)
+
+        assert report.passed is True
+        assert report.errors == []
+
+    def test_wrapped_only_fails_in_flat_mode(
+        self, validator: SpecValidator, tmp_path: Path
+    ) -> None:
+        projects_dir = tmp_path / ".sillyspec" / "projects"
+        _write_yaml(
+            projects_dir / "backend.yaml",
+            "id: backend\nname: Backend\ntype: service\n",
+        )
+
+        report = validator.validate(tmp_path, platform_managed=True)
+
+        assert report.passed is False
+        assert any(issue.path.endswith("projects") for issue in report.errors)
+
+
 # ── YAML schema checks ────────────────────────────────────────────────────────
 
 
