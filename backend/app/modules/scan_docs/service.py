@@ -92,7 +92,11 @@ class ScanDocsService:
             spec_ws = await spec_ws_svc.get(workspace.id)
             if spec_ws.strategy == "platform-managed" and spec_ws.spec_root:
                 sillyspec_root = Path(spec_ws.spec_root)
-                platform_managed = True  # D-005@v1：扁平布局，parser 省略 .sillyspec 段
+                # D-005@v1：mode 看 path_source（正交于 root）。daemon-client 同步产出扁平
+                # 布局（无 .sillyspec 包裹）；server-local 平台镜像仍包裹。
+                from app.modules.workspace.service import is_daemon_client_path_source
+
+                platform_managed = is_daemon_client_path_source(workspace.path_source)
         except Exception:
             pass
 
