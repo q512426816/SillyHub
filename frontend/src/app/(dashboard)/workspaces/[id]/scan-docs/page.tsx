@@ -192,7 +192,9 @@ export default function ScanDocsPage({ params }: Props) {
             title="文档树"
             bodyPadding="p-2"
           >
-            <TreeView nodes={tree} workspaceId={workspaceId} onSelect={setSelectedDoc} selectedDoc={selectedDoc} />
+            <div className="max-h-[calc(100vh-220px)] overflow-auto">
+              <TreeView nodes={tree} workspaceId={workspaceId} onSelect={setSelectedDoc} selectedDoc={selectedDoc} />
+            </div>
           </SectionCard>
           <SectionCard>
             {selectedDoc ? (
