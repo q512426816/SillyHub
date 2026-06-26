@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,6 +63,10 @@ from app.modules.daemon.session.service import (  # noqa: E402, F401
     SessionDispatchResult,
     SessionRecoveryResult,
 )
+
+
+if TYPE_CHECKING:  # noqa: E402 — 仅 submit_messages 返回注解用，运行时不求值（无循环）
+    from app.modules.daemon.run_sync.service import SubmittedMessages
 
 
 class DaemonService:
@@ -290,11 +294,13 @@ class DaemonService:
         claim_token: str,
         agent_run_id: uuid.UUID,
         messages: list[dict],
-    ) -> int:
+    ) -> SubmittedMessages:
         """Submit agent conversation messages for a lease.
 
-        Writes to AgentRunLog, syncs AgentRun status, and publishes via Redis
-        pub/sub. Returns the number of messages written.
+        委托 RunSyncService：写 AgentRunLog + 同步 AgentRun 状态，返回
+        ``SubmittedMessages``（int 子类 == 写入条数，携带 Redis pub/sub 意图）。
+        router 在 session 归还连接后调 publish_submitted_messages 发布
+        （QueuePool 修复 3）。
         """
         # 委托到 RunSyncService（task-04 迁入 run_sync/service.py）。
         return await self._run.submit_messages(lease_id, claim_token, agent_run_id, messages)

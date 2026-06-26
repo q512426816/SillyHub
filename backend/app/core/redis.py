@@ -23,6 +23,11 @@ def get_redis() -> Redis:
             encoding="utf-8",
             decode_responses=True,
             health_check_interval=30,
+            # QueuePool 修复 1：socket 超时。publish/health-check 卡死时抛异常被
+            # 调用方 except 捕获，而不是永久 hang 在 socket read 上占用调用线程
+            # （并间接长期持有 DB 连接）。3s 足够覆盖正常 PUBLISH/订阅往返。
+            socket_timeout=3,
+            socket_connect_timeout=3,
         )
     return _client
 

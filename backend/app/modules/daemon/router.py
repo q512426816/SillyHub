@@ -37,6 +37,7 @@ from app.modules.daemon.protocol import (
     DAEMON_MSG_RPC_RESULT,
     PermissionRequestPayload,
 )
+from app.modules.daemon.run_sync.service import publish_submitted_messages
 from app.modules.daemon.schema import (
     AgentSessionListResponse,
     AgentSessionRead,
@@ -482,13 +483,17 @@ async def submit_lease_messages(
 ) -> LeaseMessagesResponse:
     """Submit agent conversation messages for a running lease."""
     svc = DaemonService(session)
-    count = await svc.submit_messages(
+    submission = await svc.submit_messages(
         lease_id,
         data.claim_token,
         data.agent_run_id,
         data.messages,
     )
-    return LeaseMessagesResponse(accepted=True, count=count)
+    # QueuePool 修复 3：Redis publish 在 service 返回（DB 已 commit、连接已归还）
+    # 之后执行。Redis 卡死不再持有本请求的 DB 连接池 slot。
+    if submission.publish_intent is not None:
+        await publish_submitted_messages(submission.publish_intent)
+    return LeaseMessagesResponse(accepted=True, count=int(submission))
 
 
 @router.post(

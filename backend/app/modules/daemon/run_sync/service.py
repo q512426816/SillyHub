@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -31,6 +33,136 @@ if TYPE_CHECKING:
     from app.modules.daemon.service import DaemonService
 
 log = get_logger(__name__)
+
+
+# ── QueuePool 修复 3：submit_messages 的发布意图 + 延迟 publish ────────────────
+# Redis publish 从 RunSyncService.submit_messages 迁出到 router（DB session 已
+# commit、连接归还后再发），避免 Redis 卡死永久占用 DB 连接池 slot（线上
+# QueuePool 连接耗尽 / 后端假死根因）。SubmittedMessages 继承 int（== 写入条数），
+# 让既有 ``count = await svc.submit_messages(...)`` + ``assert count == N`` 零
+# 改动；同时携带 PublishIntent 供 router 调 publish_submitted_messages。
+
+
+@dataclass
+class PublishIntent:
+    """submit_messages 待发布的 Redis pub/sub 意图（纯标量，不持有 DB session）。
+
+    1:1 对应原 service 内两个 publish 块所需的数据。由 submit_messages 在 commit
+    前从 agent_run 提取标量构造（避免 commit 后 expire_on_commit 触发 lazy
+    reload 重新占用连接）。
+    """
+
+    agent_run_id: uuid.UUID
+    lease_id: uuid.UUID
+    count: int
+    published_logs: list[dict]
+    agent_run_status: str | None
+    input_tokens: int | None
+    output_tokens: int | None
+    agent_session_id: uuid.UUID | None
+    timestamp_iso: str
+
+
+class SubmittedMessages(int):
+    """submit_messages 返回值。
+
+    继承 int（== 本次写入 AgentRunLog 条数）：既有调用方 ``count = await
+    svc.submit_messages(...)`` + ``assert count == N`` 零改动继续工作；同时携带
+    ``published_logs`` 与 ``publish_intent``，让 router 在 DB session 归还连接后
+    再执行 Redis pub/sub（QueuePool 修复 3）。
+    """
+
+    def __new__(
+        cls,
+        count: int,
+        published_logs: list[dict],
+        publish_intent: PublishIntent | None = None,
+    ) -> SubmittedMessages:
+        obj = super().__new__(cls, count)
+        obj.published_logs = published_logs  # type: ignore[attr-defined]
+        obj.publish_intent = publish_intent  # type: ignore[attr-defined]
+        return obj
+
+
+async def publish_submitted_messages(intent: PublishIntent) -> None:
+    """在 DB session 生命周期之外执行 submit_messages 的 Redis pub/sub。
+
+    QueuePool 修复 3：原逻辑位于 RunSyncService.submit_messages 内（夹在 commit
+    与 session-close 之间），Redis publish hang 会一直持有 DB 连接导致连接池
+    耗尽。现由 router 在 session commit/归还连接后调用本函数。两个 publish 块
+    （agent_run channel + session channel）各自独立 try/except：单 channel 失败
+    不影响另一个、不影响已 commit 的 AgentRunLog（AC-06）；Redis Pub/Sub 无历史，
+    丢失实时事件不影响 DB 真相，前端重连即续流。
+    """
+    # ql-20260616-003：每条已持久化的 log 单独 publish 成扁平 StreamLogEvent
+    # 形态，前端 SSE onmessage 直接当 StreamLogEvent 用；仍保留一条聚合 messages
+    # 事件做计数/审计。
+    try:
+        redis = get_redis()
+        channel_name = f"agent_run:{intent.agent_run_id}"
+        for log_payload in intent.published_logs:
+            await redis.publish(channel_name, json.dumps(log_payload))
+        summary_payload: dict = {
+            "event": "messages",
+            "lease_id": str(intent.lease_id),
+            "count": intent.count,
+        }
+        if intent.agent_run_status is not None:
+            summary_payload["agent_run_status"] = intent.agent_run_status
+        # ql-20260621：实时 token 透传到 run channel summary（订阅 agent_run:{id}
+        # 的 SSE 也能拿累积 token，不必等 close）。
+        if intent.input_tokens is not None:
+            summary_payload["input_tokens"] = intent.input_tokens
+        if intent.output_tokens is not None:
+            summary_payload["output_tokens"] = intent.output_tokens
+        await redis.publish(channel_name, json.dumps(summary_payload))
+    except Exception:
+        log.warning(
+            "daemon_messages_redis_publish_failed",
+            lease_id=str(intent.lease_id),
+            agent_run_id=str(intent.agent_run_id),
+        )
+
+    # task-06 / D-005@v1 / FR-03：interactive run 双 publish —— 把每条扁平 log
+    # 以带 run_id 标记的事件发布到 session 级 channel。batch run（agent_session_id
+    # IS NULL）跳过。独立 try/except：session publish 失败不得破坏 run channel 或
+    # 回滚已提交的 AgentRunLog（AC-06）。
+    if intent.agent_session_id is None:
+        return
+    try:
+        redis = get_redis()
+        session_channel = f"agent_session:{intent.agent_session_id}"
+        for log_payload in intent.published_logs:
+            session_payload = {
+                "event": "log",
+                "session_id": str(intent.agent_session_id),
+                "run_id": str(intent.agent_run_id),
+                "log_id": log_payload["log_id"],
+                "channel": log_payload["channel"],
+                "content": log_payload["content"],
+                "timestamp": log_payload["timestamp"],
+            }
+            await redis.publish(session_channel, json.dumps(session_payload))
+        # ql-20260621：实时 token 透传到 session channel（onTokens）。
+        if intent.input_tokens is not None or intent.output_tokens is not None:
+            token_payload: dict = {
+                "event": "tokens",
+                "session_id": str(intent.agent_session_id),
+                "run_id": str(intent.agent_run_id),
+                "timestamp": intent.timestamp_iso,
+            }
+            if intent.input_tokens is not None:
+                token_payload["input_tokens"] = intent.input_tokens
+            if intent.output_tokens is not None:
+                token_payload["output_tokens"] = intent.output_tokens
+            await redis.publish(session_channel, json.dumps(token_payload, default=str))
+    except Exception:
+        log.warning(
+            "daemon_messages_session_redis_publish_failed",
+            lease_id=str(intent.lease_id),
+            agent_run_id=str(intent.agent_run_id),
+            agent_session_id=str(intent.agent_session_id),
+        )
 
 
 class RunSyncService:
@@ -55,8 +187,12 @@ class RunSyncService:
     ) -> int:
         """Submit agent conversation messages for a lease.
 
-        Writes to AgentRunLog, syncs AgentRun status, and publishes via Redis
-        pub/sub. Returns the number of messages written.
+        Writes to AgentRunLog and syncs AgentRun status, then returns a
+        :class:`SubmittedMessages` (an ``int`` == messages written) carrying
+        the Redis pub/sub :class:`PublishIntent`. The caller (router) publishes
+        AFTER the DB session has committed / released its connection via
+        :func:`publish_submitted_messages` (QueuePool fix: Redis hangs must not
+        pin DB connections).
         """
         await self._facade._get_lease_and_verify_token(lease_id, claim_token)
 
@@ -303,86 +439,29 @@ class RunSyncService:
                 agent_run.session_id = latest_session_id
                 self._session.add(agent_run)
 
+        # QueuePool 修复 3：commit 前从 agent_run 提取 publish 所需标量。commit()
+        # 后 SQLAlchemy 默认 expire_on_commit 会令 ORM 属性失效，再读会触发 lazy
+        # reload 重新占用 DB 连接——违背"publish 移出 session 生命周期"的目的。
+        # 提前取好，PublishIntent 只含标量，publish 时完全不碰 session/连接。
+        publish_input_tokens = agent_run.input_tokens if agent_run is not None else None
+        publish_output_tokens = agent_run.output_tokens if agent_run is not None else None
+        publish_session_id = agent_run.agent_session_id if agent_run is not None else None
+
         if count > 0 or (agent_run is not None and agent_run_status == "running"):
-            await self._session.commit()
-
-        # ql-20260616-003：每条已持久化的 log 单独 publish 成扁平 StreamLogEvent
-        # 形态（{channel, content, timestamp, log_id}），前端 SSE onmessage 直接当
-        # StreamLogEvent 用，无需识别 {event:"messages"} 包装。仍保留一条聚合
-        # messages 事件做计数/审计（event 字段区分）。
-        try:
-            redis = get_redis()
-            channel_name = f"agent_run:{agent_run_id}"
-            for log_payload in published_logs:
-                await redis.publish(channel_name, json.dumps(log_payload))
-            summary_payload: dict = {
-                "event": "messages",
-                "lease_id": str(lease_id),
-                "count": count,
-            }
-            if agent_run_status is not None:
-                summary_payload["agent_run_status"] = agent_run_status
-            # ql-20260621：实时 token 透传到 run channel summary（与下方 session
-            # channel 的 tokens 事件同源）。订阅 agent_run:{run_id} 的 SSE 客户端
-            # 也能拿到累积 token，不必等 close。
-            if agent_run is not None:
-                if agent_run.input_tokens is not None:
-                    summary_payload["input_tokens"] = agent_run.input_tokens
-                if agent_run.output_tokens is not None:
-                    summary_payload["output_tokens"] = agent_run.output_tokens
-            await redis.publish(channel_name, json.dumps(summary_payload))
-        except Exception:
-            log.warning(
-                "daemon_messages_redis_publish_failed",
-                lease_id=str(lease_id),
-                agent_run_id=str(agent_run_id),
-            )
-
-        # task-06 / D-005@v1 / FR-03：interactive run 双 publish —— 保留上面
-        # agent_run:{run_id} 不变，同时把每条扁平 log 以带 run_id 标记的事件
-        # 发布到 session 级 channel ``agent_session:{session_id}``，让单条 SSE
-        # 连接跨多个 turn 不断流。batch run（agent_session_id IS NULL）跳过。
-        # 独立 try/except：session publish 失败不得破坏 run channel 或回滚已
-        # 提交的 AgentRunLog（AC-06）；Redis Pub/Sub 无历史，丢失实时事件不
-        # 影响 DB 真相，前端重连即续流。
-        if agent_run is not None and agent_run.agent_session_id is not None:
+            # QueuePool 修复 2：dedup 竞态下 (run_id, dedup_key) 唯一约束冲突会令
+            # session 中毒（事务未结束、连接不归还 → QueuePool 耗尽）。捕获
+            # IntegrityError → rollback，视为幂等成功：daemon ResilienceService 会
+            # 重试/outbox 补发，前端实时流容忍丢失/重复。继续用已构造的
+            # published_logs 走 publish（count 不变）。
             try:
-                redis = get_redis()
-                session_channel = f"agent_session:{agent_run.agent_session_id}"
-                for log_payload in published_logs:
-                    session_payload = {
-                        "event": "log",
-                        "session_id": str(agent_run.agent_session_id),
-                        "run_id": str(agent_run_id),
-                        "log_id": log_payload["log_id"],
-                        "channel": log_payload["channel"],
-                        "content": log_payload["content"],
-                        "timestamp": log_payload["timestamp"],
-                    }
-                    await redis.publish(session_channel, json.dumps(session_payload))
-                # ql-20260621：实时 token 透传到 session channel。DB 里 AgentRun
-                # 的 input_tokens/output_tokens 在上方（1180-1189）已按「仅增不减」
-                # 更新并 commit，这里把它推给前端 SSE onTokens，让 UI 执行过程中
-                # 实时显示累积输入/输出词元，不必等 turn_completed / close 才有值。
-                # 与 run channel 的 summary_payload 同源（同一个 agent_run 对象）。
-                if agent_run.input_tokens is not None or agent_run.output_tokens is not None:
-                    token_payload: dict = {
-                        "event": "tokens",
-                        "session_id": str(agent_run.agent_session_id),
-                        "run_id": str(agent_run_id),
-                        "timestamp": now.isoformat().replace("+00:00", "Z"),
-                    }
-                    if agent_run.input_tokens is not None:
-                        token_payload["input_tokens"] = agent_run.input_tokens
-                    if agent_run.output_tokens is not None:
-                        token_payload["output_tokens"] = agent_run.output_tokens
-                    await redis.publish(session_channel, json.dumps(token_payload, default=str))
-            except Exception:
+                await self._session.commit()
+            except IntegrityError:
+                await self._session.rollback()
                 log.warning(
-                    "daemon_messages_session_redis_publish_failed",
+                    "daemon_messages_commit_integrity_conflict",
                     lease_id=str(lease_id),
                     agent_run_id=str(agent_run_id),
-                    agent_session_id=str(agent_run.agent_session_id),
+                    count=count,
                 )
 
         log.info(
@@ -392,7 +471,24 @@ class RunSyncService:
             count=count,
             agent_run_status=agent_run_status,
         )
-        return count
+        # QueuePool 修复 3：不再在持有 session 的 service 内 publish。返回纯标量
+        # PublishIntent，router 在 session commit/归还连接后调用
+        # publish_submitted_messages 执行 Redis pub/sub（Redis 卡死不再拖垮连接池）。
+        return SubmittedMessages(
+            count,
+            published_logs,
+            PublishIntent(
+                agent_run_id=agent_run_id,
+                lease_id=lease_id,
+                count=count,
+                published_logs=published_logs,
+                agent_run_status=agent_run_status,
+                input_tokens=publish_input_tokens,
+                output_tokens=publish_output_tokens,
+                agent_session_id=publish_session_id,
+                timestamp_iso=now.isoformat().replace("+00:00", "Z"),
+            ),
+        )
 
     async def sync_agent_run_status(
         self,
