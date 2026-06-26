@@ -60,3 +60,21 @@ decision_ids: []
 - 停 daemon 按 --server 区分实例，勿误杀其他 daemon（见 memory multi-daemon-instances）；勿 `taskkill /IM` 通杀。
 - 记录实测证据（命令输出 / 截图）作为 SC 验收材料。
 - Windows/Linux/macOS 路径兼容（SC7，`os.homedir()`）。
+
+## 执行记录（2026-06-26）
+
+- 环境：Docker backend 已运行且 `/api/health` 返回 `commit_sha=445881aa2c63`；backend 日志持续出现 `GET /api/daemon/runtimes/{rid}/pending-change-writes 200`，确认宿主 daemon 正在轮询新增端点。
+- SC1：使用平台管理员短期 JWT 调真实 API：
+  - `/api/workspaces/7cd27eb9-f424-4eb5-a21d-81ce62d510ec/scan-docs` 返回 `scan_items=11,total=11`。
+  - `/knowledge` 返回 `knowledge_items=4`。
+  - `/runtime` 非空，`current_stage=status`。
+- SC2：DB 查询 `spec_workspaces`：`last_synced_at=2026-06-26 08:31:19.793512+00`，`sync_status=clean`；`scan_documents` 计数 `11`。
+- SC4：daemon 在线时调用真实 `POST /api/workspaces/7cd27eb9-f424-4eb5-a21d-81ce62d510ec/changes/proxy-create` 成功，返回：
+  - `change_id=da337043-8ec1-46b3-bef2-99d9e9c7165f`
+  - `change_key=2026-06-26-task14-e2e-daemon-change-write-96c125`
+  - `current_stage=draft`
+  DB 验证 `daemon_change_writes.status=done`，`ChangeDocument` 行数 `3`。
+- SC6/SC7：宿主文件存在于 `C:\Users\qinyi\.sillyhub\daemon\specs\7cd27eb9-f424-4eb5-a21d-81ce62d510ec\changes\2026-06-26-task14-e2e-daemon-change-write-96c125\`，包含 `MASTER.md/proposal.md/request.md`；backend 容器 `/data/spec-workspaces/.../changes/<key>/` 同步收到同三文件，证明 Docker backend × Windows 宿主 daemon 跨边界 tar 同步跑通。
+- SC5：未停止当前宿主 daemon（当前进程同时服务多个 runtime，避免误杀）。已用 disabled/non-bound runtime 调 `proxy-create` 验证结构化错误契约：HTTP `400`，body `code=DAEMON_CLIENT_NO_SESSION`，message `需要在线 daemon 才能在客户端工作区创建变更。`。真实“停 daemon 后 UI 禁用/错误”仍需人工运维动作确认。
+- SC3：当前数据库只有 `myaaa` 一个 `daemon-client` workspace，无 server-local/repo-native workspace 可做真实 e2e；server-local/repo-native 零回归由 task-13 自动化测试覆盖。
+- 结论：task-14 真实联调主体（SC1/SC2/SC4/SC6/SC7）通过；SC5 停 daemon 场景与 SC3 真实 workspace 场景保留为环境依赖的人工验证项。

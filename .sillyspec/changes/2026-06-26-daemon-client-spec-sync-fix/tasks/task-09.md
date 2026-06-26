@@ -50,3 +50,11 @@ backend 端 daemon 轮询/回执三端点（覆盖 FR-08），复用 pending-lea
 - claim_token 轮转对齐 lease 模式（`lease/service.py` _get_lease_and_verify_token）。
 - 纯任务队列，不启 agent（与 batch agent-run lease 区分；本端点只管状态机 + 文件清单回执，落 Change 行在 task-10 proxy 侧）。
 - Windows/Linux/macOS 兼容（无平台特定路径）。
+
+## 执行记录（2026-06-26）
+
+- 提交：`d8396f62 feat(daemon): change-write 任务队列三端点 + claim/complete + 60s 超时 gc (task-09)`。
+- 实现：新增 `change_write_router.py`，挂载 `pending-change-writes` / `claim` / `complete` 三端点；补 `ChangeWrite*` schema；新增 `test_change_write_router.py` 覆盖 pending、claim 并发、complete token 校验、失败回执、60s 超时 gc。
+- 说明：task-08 建表缺少 `claimed_at`，task-09 为实现 NFR-03 超时 gc 同步补了 `DaemonChangeWrite.claimed_at` 与 migration 列。
+- 验证：目标 backend pytest 集合 `74 passed`；`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy app` 通过。
+- 遗留：无代码遗留；真实 daemon 轮询链路留给 task-14 端到端验证。
