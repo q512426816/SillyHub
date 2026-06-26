@@ -29,15 +29,28 @@ import type { SessionState } from '../../src/interactive/types.js';
 // ── vi.mock spec-sync.ts：替换为 spy（B 组只验 daemon 调用契约）────────────────
 // pullSpecBundle 默认 resolve 到 '/fake/spec/dir'（非 null），让 daemon 走 set ctx 路径。
 // 各用例按需 vi.mocked(...).mockResolvedValueOnce / mockRejectedValueOnce 覆盖。
+// task-06：新增 syncSpecTreeIfNeeded mock——daemon onSessionEnd / onTurnResult 终态点改调它，
+// mock 内部转调 postSpecSync（ctx-guarded），保持既有 B5/B6/B9 的 postSpecSync 断言语义。
 const specSyncMocks = vi.hoisted(() => ({
   pullSpecBundle: vi.fn(),
   postSpecSync: vi.fn(),
   resolveSpecDir: vi.fn((ws: string) => `/fake/spec/dir/${ws}`),
+  syncSpecTreeIfNeeded: vi.fn(
+    async (ctx: { workspaceId: string } | null | undefined, _client: unknown) => {
+      // 对齐真函数语义：ctx 为空 no-op；否则转调 postSpecSync（mock）。
+      if (!ctx) return;
+      const ws = ctx.workspaceId;
+      const specRoot = `/fake/spec/dir/${ws}`;
+      // 复用真 postSpecSync mock 的行为（resolveDir mock 给固定路径）
+      await specSyncMocks.postSpecSync(_client, ws, specRoot);
+    },
+  ),
 }));
 vi.mock('../../src/spec-sync.js', () => ({
   pullSpecBundle: specSyncMocks.pullSpecBundle,
   postSpecSync: specSyncMocks.postSpecSync,
   resolveSpecDir: specSyncMocks.resolveSpecDir,
+  syncSpecTreeIfNeeded: specSyncMocks.syncSpecTreeIfNeeded,
 }));
 // 显式 import 触发 mock（虽然本测试主要用 specSyncMocks 引用，import 保证 daemon 内部
 // `from './spec-sync.js'` 解析到同一 mock 实例）。
@@ -292,6 +305,14 @@ beforeEach(() => {
   specSyncMocks.pullSpecBundle.mockResolvedValue('/fake/spec/dir');
   specSyncMocks.postSpecSync.mockResolvedValue({ ok: true, reparsed: 0 });
   specSyncMocks.resolveSpecDir.mockImplementation((ws: string) => `/fake/spec/dir/${ws}`);
+  // task-06：恢复 syncSpecTreeIfNeeded 默认实现（vi.clearAllMocks 会清掉 mockImplementation，
+  // 需重置为 ctx-guarded 转调 postSpecSync 的语义，否则 onSessionEnd/onTurnResult 路径不触发 postSpecSync）。
+  specSyncMocks.syncSpecTreeIfNeeded.mockImplementation(
+    async (ctx: { workspaceId: string } | null | undefined, client: unknown) => {
+      if (!ctx) return;
+      await specSyncMocks.postSpecSync(client, ctx.workspaceId, `/fake/spec/dir/${ctx.workspaceId}`);
+    },
+  );
 });
 
 describe('task-09 B 组：daemon interactive spec-sync 接入（D-007@v1）', () => {
@@ -584,5 +605,122 @@ describe('task-09 B 组：daemon interactive spec-sync 接入（D-007@v1）', ()
     // notifySessionEnd 仍调（onSessionEnd 前段不依赖 sessionManager）
     expect(client.notifySessionEnd).toHaveBeenCalledTimes(1);
     expect(specSyncMocks.postSpecSync).not.toHaveBeenCalled();
+  });
+
+  // ── task-06 C 组：scan run 终态（onTurnResult）触发 spec 树回灌（FR-05 / D-002@v1）─
+  // scan/stage 跑在长生命周期 interactive session（scan 期 session 永不 end），
+  // 故 scan 终态必须独立于 session-end 触发 sync。此处直接调 daemon.onTurnResult 模拟终态。
+
+  it('task-06 C1: onTurnResult 终态 → 触发 syncSpecTreeIfNeeded 一次（specSyncCtx 已登记）', async () => {
+    const sessionId = 'sess-c1';
+    const leaseId = 'lease-c1';
+    const runId = 'run-c1';
+    const stateMap = new Map<string, Partial<SessionState>>();
+    stateMap.set(sessionId, {
+      leaseId,
+      claimToken: 'tok-c1',
+    } as Partial<SessionState>);
+    const sessionManager = createMockSessionManager(stateMap);
+    const { daemon, client } = buildDaemon({ sessionManager });
+    track(daemon);
+
+    // 登记 specSyncCtx（模拟 scan/stage interactive pull 后的 set）
+    const daemonAny = daemon as unknown as {
+      _interactiveSpecSyncCtx: Map<string, { workspaceId: string }>;
+    };
+    daemonAny._interactiveSpecSyncCtx.set(leaseId, { workspaceId: 'ws-c1' });
+
+    // 最小 result stub（onTurnResult 内 duck-typing 读 subtype/is_error/usage）
+    const result = { subtype: 'success', is_error: false } as never;
+
+    await daemon.onTurnResult(sessionId, runId, result);
+
+    // notifyRunResult 已调（终态上报）
+    expect(client.notifyRunResult).toHaveBeenCalledTimes(1);
+    // task-06：syncSpecTreeIfNeeded 被调一次（终态点回灌），内部转调 postSpecSync
+    expect(specSyncMocks.syncSpecTreeIfNeeded).toHaveBeenCalledTimes(1);
+    expect(specSyncMocks.postSpecSync).toHaveBeenCalledTimes(1);
+    // ctx.workspaceId 透传正确
+    const syncCall = vi.mocked(specSyncMocks.syncSpecTreeIfNeeded).mock.calls[0]!;
+    expect(syncCall[0]).toEqual({ workspaceId: 'ws-c1' });
+    // 终态点不 delete ctx（留给 onSessionEnd 兜底）
+    expect(daemonAny._interactiveSpecSyncCtx.has(leaseId)).toBe(true);
+  });
+
+  it('task-06 C2: onTurnResult 终态 → notifyRunResult 失败仍触发 sync（sync 独立于 run 上报）', async () => {
+    const sessionId = 'sess-c2';
+    const leaseId = 'lease-c2';
+    const stateMap = new Map<string, Partial<SessionState>>();
+    stateMap.set(sessionId, { leaseId, claimToken: 'tok-c2' } as Partial<SessionState>);
+    const sessionManager = createMockSessionManager(stateMap);
+    const { daemon, client } = buildDaemon({ sessionManager });
+    track(daemon);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const daemonAny = daemon as unknown as {
+      _interactiveSpecSyncCtx: Map<string, { workspaceId: string }>;
+    };
+    daemonAny._interactiveSpecSyncCtx.set(leaseId, { workspaceId: 'ws-c2' });
+
+    // notifyRunResult 抛错（backend 500），onTurnResult 内 catch warn，但终态点 sync 仍执行
+    client.notifyRunResult.mockRejectedValueOnce({ status: 500, message: 'boom' });
+
+    await expect(
+      daemon.onTurnResult(sessionId, 'run-c2', { subtype: 'success' } as never),
+    ).resolves.toBeUndefined();
+
+    expect(client.notifyRunResult).toHaveBeenCalledTimes(1);
+    // 即便 notifyRunResult 失败，终态点 sync 仍触发（独立于 run 上报）
+    expect(specSyncMocks.syncSpecTreeIfNeeded).toHaveBeenCalledTimes(1);
+    expect(specSyncMocks.postSpecSync).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
+  });
+
+  it('task-06 C3: quick-chat/shared（无 specSyncCtx）→ onTurnResult 终态 syncSpecTreeIfNeeded no-op', async () => {
+    const sessionId = 'sess-c3';
+    const leaseId = 'lease-c3';
+    const stateMap = new Map<string, Partial<SessionState>>();
+    stateMap.set(sessionId, { leaseId, claimToken: 'tok-c3' } as Partial<SessionState>);
+    const sessionManager = createMockSessionManager(stateMap);
+    const { daemon } = buildDaemon({ sessionManager });
+    track(daemon);
+
+    // 不 set _interactiveSpecSyncCtx（模拟 quick-chat/shared）
+    await daemon.onTurnResult(sessionId, 'run-c3', { subtype: 'success' } as never);
+
+    // syncSpecTreeIfNeeded 被调（daemon 仍调用），但 ctx 为 null → postSpecSync 不调
+    expect(specSyncMocks.syncSpecTreeIfNeeded).toHaveBeenCalledTimes(1);
+    const syncCall = vi.mocked(specSyncMocks.syncSpecTreeIfNeeded).mock.calls[0]!;
+    expect(syncCall[0]).toBeNull();
+    expect(specSyncMocks.postSpecSync).not.toHaveBeenCalled();
+  });
+
+  it('task-06 C4: double-sync 幂等——onTurnResult 终态 + 后续 onSessionEnd，均无异常、各触发一次', async () => {
+    const sessionId = 'sess-c4';
+    const leaseId = 'lease-c4';
+    const stateMap = new Map<string, Partial<SessionState>>();
+    stateMap.set(sessionId, { leaseId, claimToken: 'tok-c4' } as Partial<SessionState>);
+    const sessionManager = createMockSessionManager(stateMap);
+    const { daemon, client } = buildDaemon({ sessionManager });
+    track(daemon);
+
+    const daemonAny = daemon as unknown as {
+      _interactiveSpecSyncCtx: Map<string, { workspaceId: string }>;
+    };
+    daemonAny._interactiveSpecSyncCtx.set(leaseId, { workspaceId: 'ws-c4' });
+
+    // ① scan 终态点（onTurnResult）触发一次 sync
+    await daemon.onTurnResult(sessionId, 'run-c4', { subtype: 'success' } as never);
+    expect(specSyncMocks.postSpecSync).toHaveBeenCalledTimes(1);
+    // 终态点不 delete ctx
+    expect(daemonAny._interactiveSpecSyncCtx.has(leaseId)).toBe(true);
+
+    // ② 后续 session end 兜底再触发一次（double-sync，幂等无害）
+    await daemon.onSessionEnd(sessionId, 'ended');
+    // 终态点 1 次 + session end 1 次 = 2 次
+    expect(specSyncMocks.postSpecSync).toHaveBeenCalledTimes(2);
+    expect(client.notifySessionEnd).toHaveBeenCalledTimes(1);
+    // session end finally delete ctx
+    expect(daemonAny._interactiveSpecSyncCtx.has(leaseId)).toBe(false);
   });
 });

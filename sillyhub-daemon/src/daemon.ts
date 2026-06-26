@@ -70,7 +70,7 @@ import type { SessionManager } from './interactive/session-manager.js';
 // task-06（D-007@v1）：spec bundle 同步共享 utility（task-04 抽出），interactive
 // 路径接入 pull（session 开始）+ sync（session end）。纯函数 + client 参数注入，
 // interactive 无 TaskRunner 实例也能直接调用。
-import { pullSpecBundle, postSpecSync, resolveSpecDir } from './spec-sync.js';
+import { pullSpecBundle, syncSpecTreeIfNeeded } from './spec-sync.js';
 import type {
   PersistedSessionRecord,
   SessionStatus,
@@ -1213,6 +1213,17 @@ export class Daemon {
         error: e,
       });
     }
+
+    // task-06（FR-05 / D-002@v1）：scan run 终态额外触发 spec 树回灌（独立于 session end）。
+    // scan/stage 跑在长生命周期 interactive session（scan 期 session 永不 end），仅靠
+    // onSessionEnd 兜底会导致 scan-docs/knowledge/.runtime 一直不可见；此处终态点立即回灌。
+    // 仅 scan/stage interactive 有 specSyncCtx（quick-chat/shared 不 set → syncSpecTreeIfNeeded no-op）。
+    // 幂等：apply_sync 整树覆写（D-006@v1），与后续 onSessionEnd double-sync 无害；终态点不
+    // delete ctx，留给 onSessionEnd 兜底再同步一次。
+    await syncSpecTreeIfNeeded(
+      this._interactiveSpecSyncCtx.get(state.leaseId) ?? null,
+      this._client as never,
+    );
   }
 
   /**
@@ -1442,21 +1453,17 @@ export class Daemon {
     if (!ctx) return; // 非 tar 模式 / pull 未登记 → 跳过（D-004 shared 现状）
 
     try {
-      // `as never`：见 _startInteractiveSession pull 处同款说明（ClientLike → HubClient）。
-      const resp = await postSpecSync(
-        this._client as never,
-        ctx.workspaceId,
-        resolveSpecDir(ctx.workspaceId),
-      );
+      // task-06（D-002@v1）：改调 syncSpecTreeIfNeeded（ctx-guarded 薄封装，内部 try/catch
+      // 仅 warn 不抛）。`as never`：见 _startInteractiveSession pull 处同款说明（ClientLike → HubClient）。
+      await syncSpecTreeIfNeeded(ctx, this._client as never);
       this._logger.info('interactive_spec_sync_ok', {
         session_id: sessionId,
         lease_id: leaseId,
         workspace_id: ctx.workspaceId,
-        resp,
       });
     } catch (e) {
       // R-03 容错：sync 失败仅 warn，不阻塞、不改写 session 终态。
-      //（notifySessionEnd 已上报，sync 失败 backend 标 sync_status=dirty 由 UI 提示重试）
+      //（syncSpecTreeIfNeeded 自身已 catch 不抛，此分支为防御性兜底；notifySessionEnd 已上报）
       this._logger.warn('interactive_spec_sync_failed', {
         session_id: sessionId,
         lease_id: leaseId,
