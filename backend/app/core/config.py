@@ -74,6 +74,26 @@ class Settings(BaseSettings):
             "管理 UI 展示,秒级精度无业务价值。0=退化为每次都写(旧行为)。"
         ),
     )
+    auth_api_key_cache_ttl: int = Field(
+        60,
+        ge=0,
+        description=(
+            "API key 认证成功结果 Redis 缓存 TTL(秒)。命中后跳过 bcrypt O(n)"
+            "扫描(生产根因:cost12 同步阻塞事件循环,2核1.6G 单用户即卡),仅按"
+            "缓存 user_id 查 DB 实时校验 user active/未删除(不缓存放行已失效"
+            "用户)。revoke 时按 key_prefix 清缓存。0=禁用正缓存(每次走 bcrypt)。"
+        ),
+    )
+    auth_api_key_negative_cache_ttl: int = Field(
+        30,
+        ge=0,
+        description=(
+            "API key 认证失败 Redis 负缓存 TTL(秒)。完全无 bcrypt 匹配的明文"
+            "30s 内秒回 None,防止无效 key 探测穿透到 bcrypt O(n) 扫描。"
+            "命中真实 key 但过期/owner 失效不设负缓存(避免 owner 恢复后误拒)。"
+            "0=禁用负缓存。"
+        ),
+    )
     platform_bootstrap_admin_email: str | None = None
     platform_bootstrap_admin_password: str | None = Field(default=None, min_length=8)
     platform_bootstrap_admin_display_name: str | None = None

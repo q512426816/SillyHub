@@ -288,6 +288,11 @@ class AgentRunLog(BaseModel, table=True):
     __tablename__ = "agent_run_logs"
     __table_args__ = (
         Index("ix_agent_run_logs_run", "run_id"),
+        # P0 性能优化(2026-06-27):timestamp 时间范围查询 + (run_id,timestamp) 联合
+        # 索引优化「按 run 查日志并按时间排序」的高频读。该表无 started_at 字段
+        # (属 agent_runs),故仅补这两项。见迁移 202606271300。
+        Index("ix_agent_run_logs_timestamp", "timestamp"),
+        Index("ix_agent_run_logs_run_timestamp", "run_id", "timestamp"),
         # 2026-06-24-daemon-network-resilience task-20（FR-08 / R-12 / D-001@v2）：
         # 部分唯一索引——仅 dedup_key IS NOT NULL 时约束唯一，让 submit_messages
         # 用 INSERT ON CONFLICT DO NOTHING 幂等去重（重复 (run_id, dedup_key) 仅落一行）。

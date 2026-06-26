@@ -19,6 +19,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    mem_limit: 256m
 
   redis:
     image: redis:7-alpine
@@ -31,6 +32,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    mem_limit: 128m
 
   backend:
     build:
@@ -94,6 +96,7 @@ services:
       - sh
       - -c
       - "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    mem_limit: 800m
 
   frontend:
     build:
@@ -114,6 +117,7 @@ services:
       NEXT_PUBLIC_COMMIT_SHA: ${NEXT_PUBLIC_COMMIT_SHA:-}
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
+    mem_limit: 400m
 
 volumes:
   pgdata:

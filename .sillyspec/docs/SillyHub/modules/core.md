@@ -44,6 +44,7 @@ register_audit_hooks(engine) → after_insert/update/delete → _write_audit_log
 
 ## 变更索引
 - ql-20260627-001-a3f2 | `Settings` 新增 `auth_api_key_last_used_throttle_seconds`（API key `last_used_at` 写入节流，默认 60s，0=每次都写）。
+- 2026-06-27-p0-perf-optimization | `Settings` 新增 `auth_api_key_cache_ttl`（默认 60s）/ `auth_api_key_negative_cache_ttl`（默认 30s）：API key 认证 Redis 正/负缓存 TTL。生产根因 cost12 bcrypt 同步阻塞事件循环的性能优化（2核1.6G 单用户即卡）。0=禁用对应缓存。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->

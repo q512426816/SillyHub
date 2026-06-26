@@ -38,6 +38,9 @@ aggregate_tool_failure(logs) → should_warn_tool_failure(threshold) → 告警
 - `cleanup_stale_runs` / `reconcile_stale_runs` 定时清理卡死 run，daemon 重启后靠 `recover_session_after_daemon_restart` 收敛。
 - 工具失败监控阈值 `_failure_threshold()` 受配置驱动，前端据此提示风险。
 
+## 变更索引
+- 2026-06-27-p0-perf-optimization | `AgentRunLog` 补 `ix_agent_run_logs_timestamp`（单列 timestamp）+ `ix_agent_run_logs_run_timestamp`（run_id, timestamp 联合）索引，优化「按时间范围查日志」与「按 run 查日志并按时间排序」的高频读；迁移 `202606271300`（down_revision `202606261130`），可回滚。该表无 started_at 字段（属 agent_runs）。
+
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->

@@ -64,3 +64,5 @@ frontend/CLAUDE.md
 .sillyspec/.runtime/worktrees/
 backups/
 img.png
+sillyhub-*-amd64.tar.gz
+.dockerignore

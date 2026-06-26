@@ -14,11 +14,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.security import password_hasher
+from app.core.security import password_hasher, verify_refresh_token
 from app.modules.auth.api_key_service import (
     API_KEY_PREFIX,
     ApiKeyService,
     _display_prefix,
+    _neg_cache_key,
+    _pos_cache_key,
 )
 from app.modules.auth.model import ApiKey, User
 
@@ -214,3 +216,142 @@ async def test_two_keys_for_same_user_dont_collide(db_session: AsyncSession) -> 
     assert p1 != p2
     assert await svc.authenticate(plaintext=p1) is not None
     assert await svc.authenticate(plaintext=p2) is not None
+
+
+# ── P0 性能优化:Redis 缓存 + bcrypt 异步化 (2026-06-27-p0-perf-optimization) ──
+
+
+class _FakeRedis:
+    """Minimal in-memory async Redis stand-in for cache tests.
+
+    Implements the subset :class:`ApiKeyService` touches: GET / SET(ex) /
+    DELETE / SCAN(match). No TTL expiry is simulated — tests assert on key
+    presence, not on timing.
+    """
+
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+
+    async def get(self, key: str) -> str | None:
+        return self.store.get(key)
+
+    async def set(self, key: str, value: str, ex: int | None = None) -> None:
+        self.store[key] = value
+
+    async def delete(self, key: str) -> None:
+        self.store.pop(key, None)
+
+    async def scan_iter(self, match: str | None = None, count: int | None = None):
+        import fnmatch
+
+        for k in list(self.store):
+            if match is None or fnmatch.fnmatch(k, match):
+                yield k
+
+
+def _spy_bcrypt(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+    """Wrap the module-level ``verify_refresh_token`` with a call counter."""
+    calls = {"n": 0}
+    real = verify_refresh_token
+
+    def counting(token: str, hashed: str) -> bool:
+        calls["n"] += 1
+        return real(token, hashed)
+
+    monkeypatch.setattr("app.modules.auth.api_key_service.verify_refresh_token", counting)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_positive_cache_hit_skips_bcrypt(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """正缓存命中后跳过 bcrypt O(n) 扫描(P0 性能优化核心)。"""
+    user = await _make_user(db_session)
+    svc = ApiKeyService(db_session, settings=get_settings())
+    _, plaintext = await svc.create(user_id=user.id, name="k", expires_at=None)
+
+    fake = _FakeRedis()
+    monkeypatch.setattr("app.modules.auth.api_key_service.get_redis", lambda: fake)
+    calls = _spy_bcrypt(monkeypatch)
+
+    # 首次:走 bcrypt 扫描 + 写正缓存
+    assert await svc.authenticate(plaintext=plaintext) is not None
+    after_first = calls["n"]
+    assert after_first >= 1
+    assert _pos_cache_key(plaintext, _display_prefix(plaintext)) in fake.store
+
+    # 再次:命中正缓存,不再调 bcrypt
+    assert await svc.authenticate(plaintext=plaintext) is not None
+    assert calls["n"] == after_first
+
+
+@pytest.mark.asyncio
+async def test_negative_cache_blocks_probe_replay(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """完全无效明文首走 bcrypt,二次起命中负缓存秒回 None(防探测穿透)。"""
+    user = await _make_user(db_session)
+    svc = ApiKeyService(db_session, settings=get_settings())
+    await svc.create(user_id=user.id, name="k", expires_at=None)
+
+    fake = _FakeRedis()
+    monkeypatch.setattr("app.modules.auth.api_key_service.get_redis", lambda: fake)
+    calls = _spy_bcrypt(monkeypatch)
+
+    bogus = API_KEY_PREFIX + "definitely-not-a-real-key-0xDEAD"
+    # 首次:无效明文走完 candidate 的 bcrypt → 写负缓存
+    assert await svc.authenticate(plaintext=bogus) is None
+    after_first = calls["n"]
+    assert after_first >= 1
+    assert fake.store.get(_neg_cache_key(bogus)) == "1"
+
+    # 再次:命中负缓存,不再调 bcrypt
+    assert await svc.authenticate(plaintext=bogus) is None
+    assert calls["n"] == after_first
+
+
+@pytest.mark.asyncio
+async def test_revoke_invalidates_positive_cache(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """revoke 必须清正缓存,否则被吊销 key 在 TTL 内仍可认证(安全漏洞)。"""
+    user = await _make_user(db_session)
+    svc = ApiKeyService(db_session, settings=get_settings())
+    row, plaintext = await svc.create(user_id=user.id, name="k", expires_at=None)
+
+    fake = _FakeRedis()
+    monkeypatch.setattr("app.modules.auth.api_key_service.get_redis", lambda: fake)
+
+    # 认证 → 写正缓存
+    assert await svc.authenticate(plaintext=plaintext) is not None
+    cache_key = _pos_cache_key(plaintext, _display_prefix(plaintext))
+    assert cache_key in fake.store
+
+    # revoke → 按 key_prefix 清缓存
+    assert await svc.revoke(api_key_id=row.id, user_id=user.id) is True
+    assert cache_key not in fake.store
+
+    # 再认证:缓存已清,走 bcrypt 发现 revoked → None
+    assert await svc.authenticate(plaintext=plaintext) is None
+
+
+@pytest.mark.asyncio
+async def test_authenticate_degrades_when_redis_unavailable(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """redis 全挂时缓存层降级,认证仍走 bcrypt 成功(测试/生产抖动不影响认证)。"""
+    user = await _make_user(db_session)
+    svc = ApiKeyService(db_session, settings=get_settings())
+    _, plaintext = await svc.create(user_id=user.id, name="k", expires_at=None)
+
+    def raising() -> None:
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr("app.modules.auth.api_key_service.get_redis", raising)
+
+    assert await svc.authenticate(plaintext=plaintext) is not None
