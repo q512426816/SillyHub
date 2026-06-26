@@ -35,10 +35,12 @@ created_at: 2026-06-24T01:16:42
 - **dialog 审批不超时**：`PermissionResolver.register` 对 dialog 请求（`dialogKind` 存在，如 AskUserQuestion）不启 5min 兜底定时器，永久等待用户决策（与 backend `permission_service.py`/`protocol.py` 的 dialog 不超时语义对齐）；超时不再 deny 放行 "Proceed with recommended option"。普通工具审批（无 dialogKind）仍 5min 兜底；signal abort + abortAll 收尾两者都保留。
 - **idle 自动回收默认禁用（D-001@v1）**：`session-manager.ts` 的 `_idleTimer` 默认不启动（`DEFAULT_IDLE_TIMEOUT_SEC=0`），session 不再因假性空闲被误杀。env `SESSION_IDLE_TIMEOUT_SEC>0` 可恢复旧行为（逃生口，用于极端运维）。session 终态收敛靠：backend 完成驱动 end + 用户手动 end（FR-05）+ interrupt（FR-04），不靠 idle 超时。
 - **完成驱动 end（D-002@v1）**：scan run（`change_id=None` + `spec_strategy=platform-managed`）与 stage run（`change_id` 非空）的 lease 完成时，backend `complete_lease` 收尾链末尾主动调 `end_session`（经 facade 委托 + FR-05 `session_end` → daemon `SessionManager.end()` → claude 进程退出），区别于用户手动 end。多轮对话（非 platform-managed）不自动 end，留给用户手动。end 失败 try/except warn 不阻塞 lease 完成。
+- **spec 树终态回灌 + change-write 分支（D-002/D-004@v1，2026-06-26-daemon-client-spec-sync-fix）**：scan run 终态（`onTurnResult` 收尾，`notifyRunResult` 后）+ onSessionEnd 兜底经 `syncSpecTreeIfNeeded(ctx, client)` 回灌（ctx null/undefined→no-op，失败仅 warn R-03）；`packSpecDir` push 路径**含** `.runtime`（非对称：pull 路径 backend `build_bundle` 仍排除）；`task-runner` `kind=change-write` 轻量分支轮询 `pending-change-writes`→claim→本地写 `~/.sillyhub/daemon/specs/<wsId>/changes/<key>/`→complete 回执→触发 syncSpecTreeIfNeeded，**不启 agent**。`hub-client` 加 pending/claim/complete change-write 方法。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 ## 变更索引
 - ql-20260626-001-4a8e | 放宽 complete 事件 result body 截断 slice(3000)→slice(50000)（task-runner.ts `_eventToMessages` complete 分支），避免 daemon 侧砍断 agent 最终总结（backend 侧 content 已同步放宽到 50000）。
+- 2026-06-26-daemon-client-spec-sync-fix | syncSpecTreeIfNeeded 抽离 + scan 终态回灌（FR-05）+ packSpecDir 含 .runtime（FR-06）+ task-runner kind=change-write 分支 + hub-client change-write 方法（FR-08/10）。
 
 <!-- MANUAL_NOTES_END -->

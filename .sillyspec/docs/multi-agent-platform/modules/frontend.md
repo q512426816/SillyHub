@@ -35,6 +35,7 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 - UI 文案与文档尽量用中文（项目硬性规则），仅专业术语保留英文。
 - frontend 容器 healthcheck 曾因 busybox wget 走 Docker 注入代理误报 unhealthy，属探针问题非服务故障；当前 Dockerfile 用 node20 内置 fetch 零依赖探测。
 - 改 daemon 交互类组件（runtime-session-dialog 等）要同步看 backend daemon 模块与 sillyhub-daemon protocol 的契约一致性。
+- **daemon-client changes 入口（2026-06-26-daemon-client-spec-sync-fix）**：daemon-client workspace 新建 change 调 `POST /api/workspaces/{id}/changes/proxy-create`（带 `runtime_id=workspace.daemon_runtime_id`），由 backend 经 `daemon_change_writes` lease-polling 让 daemon 代写文件；daemon 离线时按钮禁用 + tooltip 引导，端点返 `DAEMON_CLIENT_NO_SESSION`(400)。区别于 server-local/repo-native 走原 `changes/create`。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
@@ -44,5 +45,6 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 - ql-20260624-004-c8a2 | 优化 /settings/api-keys 页面和 API Key 创建弹窗：统一页面容器、标题区、卡片、状态和空态样式，补充统计概览与表格密度整理。
 - ql-20260625-003-4d7a | 优化 Agent/会话运行日志展示：默认突出用户消息、Agent 回复和思考缩略，补充 token/cache 用量、额外日志类型开关，以及会话实时/历史消息技术日志折叠。
 - ql-20260626-001-4a8e | 修复 agent 日志展示：thinking 多行渲染对齐 normalize（mergedThinkingContent!=null 即走折叠，修多行思考裸露成 INFO）+ 顶部「对话/全部」单选 tab 默认隐藏工具调用（真正落地 ql-003 丢失的对话视图诉求）+ 放宽 content 截断。改 agent-log-viewer.tsx（isThinking 判定 + viewMode/defaultViewMode + isConversationLog 过滤）。
+- 2026-06-26-daemon-client-spec-sync-fix | daemon-client changes proxy-create 入口（带 runtime_id）+ daemon 离线禁用引导（FR-08/09）。
 
 <!-- MANUAL_NOTES_END -->
