@@ -49,3 +49,16 @@ class BatchGenerateRequest(BaseModel):
 
 class BatchGenerateResponse(BaseModel):
     generated: list[str]
+
+
+class ProxyCreateChangeRequest(BaseModel):
+    """daemon-client 变更代写入参 (design §7.5 / task-10)。
+
+    ``runtime_id`` 为绑定该 workspace 的在线 daemon runtime；backend 经
+    lease-polling 下发 change-write 任务由 daemon 代写（D-004@v1）。
+    """
+
+    title: str = Field(..., min_length=1, max_length=500)
+    description: str = Field(default="", max_length=5000)
+    change_type: str | None = Field(default=None, max_length=50)
+    runtime_id: uuid.UUID
