@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +39,19 @@ log = get_logger(__name__)
 PROXY_CHANGE_WRITE_TIMEOUT_SECONDS = 60
 # 轮询周期（秒）—— ≤1s，daemon claim/complete 在该窗口内完成。
 PROXY_POLL_INTERVAL_SECONDS = 0.5
+
+
+def _runtime_heartbeat_is_fresh(runtime: object) -> bool:
+    """Return True only when the runtime status and heartbeat are both fresh."""
+    from app.modules.daemon.runtime.service import DEFAULT_RUNTIME_STALE_SECONDS
+
+    if getattr(runtime, "status", None) != "online":
+        return False
+    heartbeat = getattr(runtime, "last_heartbeat_at", None)
+    if heartbeat is None:
+        return False
+    heartbeat_at = heartbeat if heartbeat.tzinfo else heartbeat.replace(tzinfo=UTC)
+    return heartbeat_at >= datetime.now(UTC) - timedelta(seconds=DEFAULT_RUNTIME_STALE_SECONDS)
 
 
 class DaemonClientNoActiveSession(AppError):
@@ -190,7 +203,12 @@ async def proxy_create_change(
     from app.modules.daemon.model import DaemonRuntime
 
     runtime = await session.get(DaemonRuntime, runtime_id)
-    if runtime is None or (runtime.status or "") != "online":
+    if runtime is None or not _runtime_heartbeat_is_fresh(runtime):
+        if runtime is not None and runtime.status == "online":
+            runtime.status = "offline"
+            runtime.updated_at = datetime.now(UTC)
+            session.add(runtime)
+            await session.commit()
         raise DaemonClientNoActiveSession(
             "需要在线 daemon 才能在客户端工作区创建变更。",
             details={

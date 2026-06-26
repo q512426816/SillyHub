@@ -40,7 +40,7 @@ plan_level: full
 
 ## Wave 6（验证-端到端，依赖 Wave 5）
 
-- [ ] task-14: 端到端联调（真实 workspace `7cd27eb9`，backend Docker + 宿主 daemon）（←task-13）（覆盖：SC1, SC2, SC4, SC5, SC6, SC7）
+- [x] task-14: 端到端联调（真实 workspace `7cd27eb9`，backend Docker + 宿主 daemon）（←task-13）（覆盖：SC1, SC2, SC4, SC5, SC6, SC7）
 
 ## 任务总表
 

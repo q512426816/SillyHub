@@ -77,7 +77,7 @@ cd sillyhub-daemon && pnpm test
 - 提交：`445881aa test(spec-sync): cover daemon-client spec sync contracts (task-13)`。
 - 覆盖：补 scan_docs/runtime/knowledge/spec_workspace 双模式 reader 测试、`.runtime` apply_sync / double-sync 断言、daemon change-write handler 与 proxy-create 相关测试（task-09~12 提交内已包含对应模块测试）。
 - 验证：
-  - `uv run pytest app/modules/daemon/tests/test_change_write_router.py app/modules/change_writer/tests/test_proxy.py app/modules/knowledge/tests/test_router.py app/modules/runtime/tests/test_router.py app/modules/scan_docs/tests/test_service.py app/modules/spec_workspace/tests/test_bundle_sync.py app/modules/spec_workspace/tests/test_validator.py -q`：`74 passed`。
+  - `uv run pytest app/modules/daemon/tests/test_change_write_router.py app/modules/change_writer/tests/test_proxy.py app/modules/knowledge/tests/test_router.py app/modules/runtime/tests/test_router.py app/modules/scan_docs/tests/test_service.py app/modules/spec_workspace/tests/test_bundle_sync.py app/modules/spec_workspace/tests/test_validator.py -q`：`75 passed`（新增 stale heartbeat 直接 API 回归）。
   - `pnpm vitest run tests/task-11-change-write.test.ts tests/spec-sync.test.ts`：`26 passed`。
   - `pnpm vitest run "src/app/(dashboard)/workspaces/[id]/create-change/__tests__/page.test.tsx"`：`4 passed`。
   - backend `ruff check` / `ruff format --check` / `mypy app` 通过；daemon `tsc --noEmit` 通过；frontend `typecheck` 通过，`lint` 仅既有 warning。

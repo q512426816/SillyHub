@@ -87,5 +87,6 @@ cd backend && uv run pytest tests -k "change_writer or proxy_create or daemon_cl
 
 - 提交：`84ff1565 feat(change-writer): daemon-client proxy create change (task-10)`。
 - 实现：新增 `proxy.py`，实现 runtime 在线校验、`DaemonChangeWrite` pending 下发、回执轮询、超时失败、`Change`/`ChangeDocument` 落库；新增 `POST /workspaces/{id}/changes/proxy-create` 与 `ProxyCreateChangeRequest`；`service.create_change` 增 `runtime_id` 分流，daemon-client 无 runtime 返回 `DAEMON_CLIENT_NO_SESSION`。
-- 验证：`test_proxy.py` 覆盖在线成功、离线/未绑定 runtime 400、无 runtime 结构化错误、proxy 超时失败、server-local 回归；目标 backend pytest 集合 `74 passed`；ruff/format/mypy 通过。
+- 审查补丁：Step 13 发现直接调用 `proxy-create` 时若 runtime `status=online` 但 heartbeat 已过期，不能依赖 UI 预取 `/daemon/runtimes` 才触发 stale cleanup；`proxy.py` 增 heartbeat 新鲜度校验，stale runtime 会被标记 `offline` 并立即返回 `DAEMON_CLIENT_NO_SESSION(reason=runtime_offline)`。
+- 验证：`test_proxy.py` 覆盖在线成功、离线/未绑定 runtime 400、stale heartbeat 直接 API 400、无 runtime 结构化错误、proxy 超时失败、server-local 回归；目标 backend pytest 集合 `75 passed`；ruff/format/mypy 通过。
 - 遗留：daemon-client proxy-create 不自动 dispatch brainstorm，符合本 task 约束；后续是否接 agent 流需单独设计。

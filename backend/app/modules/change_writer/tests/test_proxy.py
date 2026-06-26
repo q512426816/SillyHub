@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -46,6 +47,7 @@ async def _setup_daemon_client_workspace(db_session, *, online: bool = True) -> 
         name="test-daemon",
         provider="claude",
         status="online" if online else "offline",
+        last_heartbeat_at=datetime.now(UTC) if online else None,
     )
     db_session.add(runtime)
 
@@ -202,6 +204,34 @@ async def test_proxy_create_change_runtime_offline(client, db_session):
     body = resp.json()
     assert body["code"] == "DAEMON_CLIENT_NO_SESSION"
     assert "daemon" in body["message"]
+
+
+async def test_proxy_create_change_runtime_stale_heartbeat_marks_offline(client, db_session):
+    """status 仍 online 但 heartbeat stale：直接 API 也应返回 DAEMON_CLIENT_NO_SESSION。"""
+    from app.modules.daemon.model import DaemonRuntime
+
+    refs = await _setup_daemon_client_workspace(db_session, online=True)
+    runtime = await db_session.get(DaemonRuntime, refs["runtime_id"])
+    assert runtime is not None
+    runtime.last_heartbeat_at = datetime.now(UTC) - timedelta(seconds=120)
+    db_session.add(runtime)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/workspaces/{refs['ws_id']}/changes/proxy-create",
+        json={
+            "title": "Stale Runtime",
+            "runtime_id": str(refs["runtime_id"]),
+        },
+        headers=_auth(refs["token"]),
+    )
+
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["code"] == "DAEMON_CLIENT_NO_SESSION"
+    assert body["details"]["reason"] == "runtime_offline"
+    await db_session.refresh(runtime)
+    assert runtime.status == "offline"
 
 
 async def test_proxy_create_change_runtime_not_bound(client, db_session):

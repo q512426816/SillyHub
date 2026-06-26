@@ -75,6 +75,12 @@ decision_ids: []
   - `current_stage=draft`
   DB 验证 `daemon_change_writes.status=done`，`ChangeDocument` 行数 `3`。
 - SC6/SC7：宿主文件存在于 `C:\Users\qinyi\.sillyhub\daemon\specs\7cd27eb9-f424-4eb5-a21d-81ce62d510ec\changes\2026-06-26-task14-e2e-daemon-change-write-96c125\`，包含 `MASTER.md/proposal.md/request.md`；backend 容器 `/data/spec-workspaces/.../changes/<key>/` 同步收到同三文件，证明 Docker backend × Windows 宿主 daemon 跨边界 tar 同步跑通。
-- SC5：未停止当前宿主 daemon（当前进程同时服务多个 runtime，避免误杀）。已用 disabled/non-bound runtime 调 `proxy-create` 验证结构化错误契约：HTTP `400`，body `code=DAEMON_CLIENT_NO_SESSION`，message `需要在线 daemon 才能在客户端工作区创建变更。`。真实“停 daemon 后 UI 禁用/错误”仍需人工运维动作确认。
-- SC3：当前数据库只有 `myaaa` 一个 `daemon-client` workspace，无 server-local/repo-native workspace 可做真实 e2e；server-local/repo-native 零回归由 task-13 自动化测试覆盖。
-- 结论：task-14 真实联调主体（SC1/SC2/SC4/SC6/SC7）通过；SC5 停 daemon 场景与 SC3 真实 workspace 场景保留为环境依赖的人工验证项。
+- SC5：按 `--server http://127.0.0.1:8001` 精确定位并停止宿主 daemon PID `12260`，等待 runtime 心跳过期后调用 `GET /api/daemon/runtimes` 触发 stale cleanup；绑定 runtime `132bb2af-cc95-47e9-8e3c-b07d39d1f1c4` 变为 `offline` 后，真实调用 `POST /api/workspaces/7cd27eb9-f424-4eb5-a21d-81ce62d510ec/changes/proxy-create` 返回 HTTP `400`，body `code=DAEMON_CLIENT_NO_SESSION`，`details.reason=runtime_offline`。验后用 worktree `sillyhub-daemon/dist/cli.js start --server http://127.0.0.1:8001 --force` 重启，PID `51500`，DB runtime 恢复 `online`。
+- SC3：创建临时 server-local workspace `0210a6dc-5a28-4373-b411-309c57ac3524`，root `/tmp/sillyhub-task14-server-local-20260626170448-1657bf`，通过真实 API 验证：
+  - `POST /api/workspaces` 返回 `201`，`path_source=server-local`。
+  - `POST /api/workspaces/{id}/scan-docs/reparse` 返回 `parsed=2`，`GET /scan-docs` 返回 `total=2`。
+  - `POST /api/workspaces/{id}/changes/create` 返回 `201`，`change_key=2026-06-26-task14-server-local-change-write-364f8f`，DB `change_documents` 行数 `3`。
+  - 容器文件 `/tmp/.../.sillyspec/changes/<key>/` 存在 `MASTER.md:297`、`proposal.md:239`、`request.md:222`，确认 `.sillyspec` 包裹语义和原直写路径保持。
+  - 验后 API 软删临时 workspace，并删除本次 `/tmp/sillyhub-task14-server-local-*` 与 `/data/spec-workspaces/<temp-ws-id>` 临时目录。
+- 观察项：server-local `changes/create` 会按既有逻辑 best-effort 自动 dispatch brainstorm；本次临时 workspace 无真实任务上下文，dispatch lease 很快 `failed`，不影响 `changes/create` API、落盘文件和 DB 文档验收。日志同时显示 platform mirror 未包含刚写入的 server-local change 文件，属于自动 dispatch 与 platform mirror 的既有限制，未纳入本次 daemon-client 修复范围。
+- 结论：task-14 SC1/SC2/SC3/SC4/SC5/SC6/SC7 全部实测通过；剩余风险仅为上述 server-local 自动 dispatch 观察项。
