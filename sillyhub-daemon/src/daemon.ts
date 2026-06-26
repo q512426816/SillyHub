@@ -65,7 +65,13 @@ import { runPreflight } from './preflight.js';
 import { ResilienceService } from './resilience/service.js';
 import type { Envelope } from './resilience/service.js';
 import { dedupKeyFor } from './resilience/error-classify.js';
-import type { TaskRunner, TaskRunnerResult } from './task-runner.js';
+import type {
+  TaskRunner,
+  TaskRunnerResult,
+  ChangeWriteCtx,
+  ChangeWriteFile,
+  ChangeWriteResult,
+} from './task-runner.js';
 import type { SessionManager } from './interactive/session-manager.js';
 // task-06（D-007@v1）：spec bundle 同步共享 utility（task-04 抽出），interactive
 // 路径接入 pull（session 开始）+ sync（session end）。纯函数 + client 参数注入，
@@ -277,11 +283,39 @@ interface ClientLike {
     wsId: string,
     tarBuf: Buffer,
   ): Promise<{ ok: boolean; reparsed: number }>;
+  /**
+   * task-11 / FR-08 / D-004@v1：拉取 runtime 下所有 pending change-write。
+   * 与 hub-client.ts getPendingChangeWrites 对齐。
+   */
+  getPendingChangeWrites(
+    runtimeId: string,
+  ): Promise<Record<string, unknown>[]>;
+  /**
+   * task-11：抢占一行 pending change-write（换取 claim_token）。
+   * task-09 端点无 body，runtimeId 仅日志用。
+   */
+  claimChangeWrite(
+    changeWriteId: string,
+    runtimeId?: string,
+  ): Promise<Record<string, unknown>>;
+  /**
+   * task-11：回执 change-write 执行结果（ok/files/error）。
+   */
+  completeChangeWrite(
+    changeWriteId: string,
+    claimToken: string,
+    payload: { ok: boolean; files?: unknown[]; error?: string },
+  ): Promise<unknown>;
 }
 
 /** daemon 需要的 TaskRunner 接口子集。 */
 interface TaskRunnerLike {
   runLease(ctx: LeaseCtx): Promise<TaskRunnerResult>;
+  /**
+   * task-11 / FR-10：change-write 轻量执行（不启 agent）。可选——测试 mock
+   * TaskRunner 未实现时 daemon 跳过 change-write 分支。
+   */
+  runChangeWrite?(ctx: ChangeWriteCtx): Promise<ChangeWriteResult>;
 }
 
 /** daemon 需要的 WsClient 接口子集。 */
@@ -549,6 +583,11 @@ export class Daemon {
 
   /** 进行中的 lease_id 集合（并发去重，边界 3）。 */
   private readonly _inflightLeases = new Set<string>();
+  /**
+   * task-11：change-write 在途去重集合（与 lease inflight 独立，避免 UUID 碰撞
+   * 误判 + 便于观测）。taskId 进入即 add，执行完 finally delete。
+   */
+  private readonly _inflightChangeWrites = new Set<string>();
 
   /** 信号 handler 引用（stop 时 process.off 注销，R8）。 */
   private _sigtermHandler: (() => void) | null = null;
@@ -1591,6 +1630,24 @@ export class Daemon {
           } catch (e) {
             this._logger.debug('poll_runtime_failed', { rid, error: e });
           }
+
+          // task-11 / FR-08 / D-004@v1：change-write 轮询分支（与 lease 轮询同节奏，
+          // 独立通道，**不走** _runLeaseStateMachine 的 claim→start→runLease→complete
+          // lease 三段；走 claim→本地写→complete→spec 回灌轻量流，FR-10 不启 agent）。
+          try {
+            const writes =
+              await this._client.getPendingChangeWrites(rid);
+            for (const w of writes) {
+              const taskId = w.task_id as string | undefined;
+              if (!taskId) continue;
+              this._fire(() => this._executeChangeWrite(taskId, rid, w));
+            }
+          } catch (e) {
+            this._logger.debug('poll_change_writes_failed', {
+              rid,
+              error: e,
+            });
+          }
         }
       } catch (e) {
         if (e instanceof AbortError) break;
@@ -2306,6 +2363,107 @@ export class Daemon {
       await this._runLeaseStateMachine(leaseId, runtimeId, payload);
     } finally {
       this._inflightLeases.delete(leaseId);
+    }
+  }
+
+  // ── task-11 / FR-10 / D-004@v1：change-write 轻量执行（不启 agent）─────────────
+
+  /**
+   * 执行一个 change-write 任务（claim → 本地写 → complete 回执 → sync）。
+   *
+   * **严格不走** ``_runLeaseStateMachine``（FR-10：纯文件写 + sync，不启 agent driver）。
+   * 调用 task-runner ``runChangeWrite`` 轻量分支（不 import/不调用 SessionManager /
+   * driver），complete 成功后由 runChangeWrite 内部触发 spec 回灌。
+   *
+   * 容错策略（对齐 design R-03）：
+   *   - claim 失败（404/409/网络）→ 仅 log，return（不重试，等下轮 poll）。
+   *   - 写文件 / path traversal 失败 → 回执 ok=false（若 client 支持），return。
+   *   - sync 失败 → runChangeWrite 内部已 warn 不抛（不改写 ok）。
+   *
+   * @param taskId  DaemonChangeWrite.id（task-09 task_id）
+   * @param runtimeId  当前 runtime（日志/claim 透传）
+   * @param item  getPendingChangeWrites 返回的单条（含 change_key/workspace_id/files）
+   */
+  private async _executeChangeWrite(
+    taskId: string,
+    runtimeId: string,
+    item: Record<string, unknown>,
+  ): Promise<void> {
+    // 并发去重：同一 taskId 已在执行，跳过。
+    if (this._inflightChangeWrites.has(taskId)) {
+      this._logger.info('change_write_inflight_skip', { task_id: taskId });
+      return;
+    }
+
+    const changeKey = item.change_key as string | undefined;
+    const workspaceId = item.workspace_id as string | undefined;
+    if (!changeKey || !workspaceId) {
+      this._logger.warn('change_write_missing_fields', {
+        task_id: taskId,
+        change_key: changeKey,
+        workspace_id: workspaceId,
+      });
+      return;
+    }
+
+    this._inflightChangeWrites.add(taskId);
+    let claimToken = '';
+    try {
+      // 1. CLAIM：抢占，拿 claim_token（task-09 端点无 body）。
+      let claimResp: Record<string, unknown>;
+      try {
+        claimResp = await this._client.claimChangeWrite(taskId, runtimeId);
+      } catch (e) {
+        // 404/409/网络 → 仅 log（不重试，等下轮 poll）。
+        this._logger.warn('change_write_claim_failed', {
+          task_id: taskId,
+          error: e,
+        });
+        return;
+      }
+      claimToken = (claimResp.claim_token as string | undefined) ?? '';
+      if (!claimToken) {
+        this._logger.warn('change_write_no_claim_token', { task_id: taskId });
+        return;
+      }
+
+      // 2. files 取 claim 回执（task-09 ChangeWriteClaimResponse 带 files，对齐 pending）。
+      const rawFiles = (claimResp.files ?? item.files ?? []) as unknown[];
+      const files: ChangeWriteFile[] = rawFiles.map((f) => {
+        const obj = f as { path?: string; content?: string };
+        return { path: String(obj.path ?? ''), content: String(obj.content ?? '') };
+      });
+
+      // 3. 本地写 + complete 回执 + sync（task-runner 轻量分支，不启 agent）。
+      const ctx: ChangeWriteCtx = {
+        taskId,
+        changeKey,
+        workspaceId,
+        claimToken,
+        files,
+      };
+      await this._taskRunner!.runChangeWrite!(ctx);
+      this._logger.info('change_write_done', { task_id: taskId, change_key: changeKey });
+    } catch (e) {
+      // 写文件 / path traversal 失败 → 回执 ok=false（尽力，对齐 R-03 不崩循环）。
+      this._logger.warn('change_write_execute_failed', {
+        task_id: taskId,
+        error: e,
+      });
+      try {
+        await this._client.completeChangeWrite(taskId, claimToken, {
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      } catch (e2) {
+        // 回执失败本身不阻塞（claim_token 为空时 backend 会 409，下轮 gc 兜底）。
+        this._logger.debug('change_write_complete_failed_failed', {
+          task_id: taskId,
+          error: e2,
+        });
+      }
+    } finally {
+      this._inflightChangeWrites.delete(taskId);
     }
   }
 

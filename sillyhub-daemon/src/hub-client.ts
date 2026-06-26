@@ -820,4 +820,105 @@ export class HubClient {
     }
     return (await resp.json()) as { ok: boolean; reparsed: number };
   }
+
+  // -- task-11 / FR-08 / D-004@v1：daemon-client change-write 轻量回执通道 ---------
+
+  /**
+   * task-11：拉取 runtime 下所有 pending change-write 任务（FR-08）。
+   *
+   * 端点：GET {REST_PREFIX}/runtimes/{runtimeId}/pending-change-writes（task-09）。
+   * 与 ``getPendingLeases`` 同款 GET（无 body），返回 pending change-write 列表。
+   *
+   * 响应元素字段（对齐 backend ``ChangeWritePendingItem``，snake_case）：
+   *   - task_id / change_key / workspace_id / files[]{path,content} / created_at
+   *
+   * 失败语义对齐 ``_request``：HTTP 非 2xx → HubHttpError；网络/超时透传 fetch 原始错误。
+   */
+  async getPendingChangeWrites(
+    runtimeId: string,
+  ): Promise<Record<string, unknown>[]> {
+    return this._request<Record<string, unknown>[]>(
+      'GET',
+      `${REST_PREFIX}/runtimes/${encodeURIComponent(runtimeId)}/pending-change-writes`,
+    );
+  }
+
+  /**
+   * task-11：抢占一行 pending change-write，换取 claim_token。
+   *
+   * 端点：POST {REST_PREFIX}/change-writes/{id}/claim（task-09）。
+   *
+   * **端点签名**：task-09 ``claim_change_write`` 路径参数只有 ``change_write_id``，
+   * **无 body**（claim_token 由后端生成、运行时身份经 ``get_current_principal`` 的
+   * X-API-Key/Bearer 鉴权头确认，与 lease claim 端点同款）。故本方法不发 body，
+   * runtimeId 仅用于日志/调试透传（不进请求）。
+   *
+   * 响应字段（对齐 backend ``ChangeWriteClaimResponse``）：
+   *   - task_id / claim_token / change_key / files[]
+   *
+   * 失败语义：404（不存在）/ 409（非 pending，已被他人 claim）→ HubHttpError。
+   */
+  async claimChangeWrite(
+    changeWriteId: string,
+    _runtimeId?: string,
+  ): Promise<Record<string, unknown>> {
+    // runtimeId 参数保留用于调用方语义对齐 getPendingChangeWrites/lease 流，
+    // 但 task-09 端点不接受 body，故不进请求（参考 hub-client 既有 lease claim 风格）。
+    void _runtimeId;
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/change-writes/${encodeURIComponent(changeWriteId)}/claim`,
+    );
+  }
+
+  /**
+   * task-11：回执 change-write 执行结果（ok/files 或 error）。
+   *
+   * 端点：POST {REST_PREFIX}/change-writes/{id}/complete（task-09）。
+   *
+   * body 字段（对齐 backend ``ChangeWriteCompleteRequest``，snake_case）：
+   *   - claim_token：claimChangeWrite 返回的令牌（token 轮转校验）
+   *   - ok：true=写成功→done / false=失败→failed
+   *   - files[]：实际写入的相对路径清单（ok=true 时回写，可选）
+   *   - error：失败原因（ok=false 时，可选）
+   *
+   * 与 ``completeLease`` 同款 POST + snake_case body 风格。
+   *
+   * 失败语义：409（非 claimed / token 不匹配）→ HubHttpError。
+   *
+   * @param payload  ``{ ok, files?, error? }``（claim_token 由本方法注入，调用方不传）
+   */
+  async completeChangeWrite(
+    changeWriteId: string,
+    claimToken: string,
+    payload: {
+      ok: boolean;
+      files?: unknown[];
+      error?: string;
+    },
+  ): Promise<Record<string, unknown>> {
+    const body: ChangeWriteCompleteBody = {
+      claim_token: claimToken,
+      ok: payload.ok,
+    };
+    if (payload.files !== undefined) {
+      body.files = payload.files;
+    }
+    if (payload.error !== undefined) {
+      body.error = payload.error;
+    }
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/change-writes/${encodeURIComponent(changeWriteId)}/complete`,
+      body,
+    );
+  }
+}
+
+/** task-11：complete_change_write 请求体（snake_case 对齐 backend Pydantic）。 */
+interface ChangeWriteCompleteBody {
+  claim_token: string;
+  ok: boolean;
+  files?: unknown;
+  error?: string;
 }
