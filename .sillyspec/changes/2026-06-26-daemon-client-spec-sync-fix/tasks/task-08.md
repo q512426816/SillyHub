@@ -65,6 +65,13 @@ design §8 给出「新表」vs「复用 `daemon_task_leases.kind='change-write'
 - `daemon_change_writes` 表出现在 `BaseModel.metadata.tables`（conftest 自动建表覆盖）。
 - 轮询查询有索引支撑：`EXPLAIN`（PG）/`EXPLAIN QUERY PLAN`（SQLite）`WHERE runtime_id=? AND status='pending'` 命中 `idx_daemon_change_writes_runtime_status`（集成测断言索引存在即可，不绑死 plan 输出）。
 
+### 执行记录（2026-06-26）
+
+- `model.py` 新增 `DaemonChangeWrite`（10 列：id/workspace_id/runtime_id/change_key/files/status/claim_token/created_at/completed_at/error + 3 索引：复合 `runtime_status`、`workspace_id`、`status`），import 补 `Text`。
+- migration `202606261130_create_daemon_change_writes.py`：`revision=202606261130`（grep 确认唯一）、`down_revision=202606251900`（`alembic heads` 核实为唯一 head）；`upgrade` create_table + 3 index，`downgrade` 逆序 drop_index → drop_table。
+- 验证：`alembic heads` 单一 head=`202606261130`（无多 head，排除 migration-chain-fragmentation 风险）；model import + `BaseModel.metadata.create_all`（SQLite，完整 metadata 含 workspaces/daemon_runtimes）建 `daemon_change_writes` 表成功（10 列 + 3 索引 + FK 链无误）；ruff/mypy 干净。
+- 待 task-14：`alembic upgrade head` 实际跑通——worktree `.venv` 无 `aiosqlite` + 无 PG，`env.py` 用 async engine（`async_engine_from_config`）跑不了 SQLite/PG upgrade；migration DDL 与 model 逐列对照一致 + 参考 `202606270900_create_daemon_tables` 同风格，Docker PG（task-14）环境验证 upgrade/downgrade 可逆。
+
 ## verify
 
 ```

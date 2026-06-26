@@ -13,6 +13,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     Uuid,
     text,
 )
@@ -274,4 +275,78 @@ class DaemonTaskLease(BaseModel, table=True):
             nullable=False,
             server_default=text("now()"),
         ),
+    )
+
+
+class DaemonChangeWrite(BaseModel, table=True):
+    """A change-write task queued for a daemon runtime to execute (D-004@v1).
+
+    daemon-client workspace 的 change 代写任务队列：daemon 经 lease-polling 轮询
+    (GET /runtimes/{rid}/pending-change-writes → claim → 本地写 changes/<key>/ →
+    complete 回执)，**不启动 agent**（与 DaemonTaskLease 的 agent-run 语义区分，
+    故独立新表而非复用 lease.kind）。
+    """
+
+    __tablename__ = "daemon_change_writes"
+    __table_args__ = (
+        # 复合索引：daemon 轮询热路径 WHERE runtime_id=? AND status='pending' (FR-08)
+        Index("idx_daemon_change_writes_runtime_status", "runtime_id", "status"),
+        Index("idx_daemon_change_writes_workspace_id", "workspace_id"),
+        Index("idx_daemon_change_writes_status", "status"),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    runtime_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("daemon_runtimes.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    change_key: str = Field(
+        sa_column=Column(String(128), nullable=False),
+    )
+    # [{path, content}, ...]，path 相对 changes/<key>/（与 changes.key 对齐）
+    files: list = Field(
+        sa_column=Column(JSON, nullable=False),
+    )
+    # pending / claimed / done / failed — free-form string column（与 lease.status
+    # 同风格，免后续加值迁移）
+    status: str = Field(
+        default="pending",
+        sa_column=Column(
+            String(20),
+            nullable=False,
+            server_default=text("pending"),
+        ),
+    )
+    claim_token: str | None = Field(
+        default=None,
+        sa_column=Column(String(128), nullable=True),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )
+    completed_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    error: str | None = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
     )
