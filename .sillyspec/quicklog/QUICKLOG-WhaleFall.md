@@ -69,4 +69,13 @@ created_at: 2026-06-24T19:19:38
 结果:commit 449d74ce。vitest 8 passed、typecheck no errors、rebuild frontend healthy。
 注：本次未走 sillyspec run quick 流程（直接改+commit），quicklog 补记。
 
+## ql-20260626-002-7d2a | 2026-06-26 10:06:57 | scan-docs 文档树增加最大高度+内部滚动
+状态：已完成
+文件：frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx
+需求：扫描文档页（/workspaces/[id]/scan-docs）左侧文档树无高度限制，文档多时撑长页面。增加最大高度（一屏可显示），超出滚动条。参考 admin/users 表格高度做法。
+现状:scan-docs/page.tsx 文档树 SectionCard(title=文档树 bodyPadding=p-2)内直接渲染 <TreeView>，无任何高度限制。
+方案:TreeView 外层包 <div className="max-h-[calc(100vh-220px)] overflow-auto">。偏移 220px = TopBar h-14(56) + PageContainer py-6(24×2) + PageHeader 两行标题(55) + gap-4(16) + SectionCard header(40)，参考 admin/users 表格 scroll.y=calc(100vh-430px) 思路（admin 偏移大因表格上方还有筛选表单+操作行+分页）。不动 SectionCard 组件本身，只改用法。
+结果:commit 2fc490c3。typecheck no errors、lint 无 page.tsx 相关（仅已有 warning）、提交 hook lint+typecheck+test 全过、rebuild frontend healthy、grep 确认 "100vh-220px" 已编译进 /app/.next/server/.../scan-docs/page.js。后端无改动。frontend_app 模块文档同步追加该样式约定。
+注：本次错误走了 sillyspec run quick --change（项目有多个活跃 change + CLI 预生成 change 目录，skill 要求多变更带 --change），记录误入 changes/tasks.md。实际应记本文件（同 ql-20260625-002 坑）。本次补记，并删除该 change 目录回归 quicklog。
+
 
