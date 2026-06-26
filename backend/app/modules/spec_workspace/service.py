@@ -292,9 +292,12 @@ class SpecWorkspaceService:
     ) -> int:
         """Overwrite the server ``spec_root`` with the uploaded tar, then reparse.
 
-        D-006@v1: whole-tree overwrite, no diff/merge. ``.runtime/`` is
-        preserved (daemon runtime cache, not spec data). Returns the
-        ``reparse`` ``parsed`` count.
+        D-006@v1: whole-tree overwrite, no diff/merge. 接收 tar 内 daemon 的
+        ``.runtime/``（daemon 是 daemon-client 唯一 sillyspec 执行方，``.runtime``
+        权威）；随整树覆盖落盘，不再保留 backend 旧的 ``.runtime``。
+
+        D-003@v1 非对称契约：push（本方法）包含 ``.runtime/``、pull（``build_bundle``）
+        仍排除 ``.runtime/``。Returns the ``reparse`` ``parsed`` count.
 
         Rollback (D-005@v1, 2026-06-23-spec-transport-tar-sync): tar 模式出问题时，
         清空 ``SPEC_TRANSPORT`` 回退 shared 默认 + 重新 scan 即可；数据可清，无迁移逻辑。
@@ -315,7 +318,6 @@ class SpecWorkspaceService:
             raise _spec_bundle_invalid("Invalid tar payload.", reason=str(e)) from e
 
         staging = Path(tempfile.mkdtemp(prefix="spec-sync-"))
-        runtime_bak: Path | None = None
         try:
             for m in tf.getmembers():
                 name = m.name.replace("\\", "/")
@@ -341,33 +343,19 @@ class SpecWorkspaceService:
             # already been validated to stay inside spec_root above.
             tf.extractall(staging, filter="fully_trusted")
 
-            # Preserve .runtime/ across the overwrite.
-            runtime_dir = spec_root / ".runtime"
-            if runtime_dir.exists():
-                runtime_bak = Path(tempfile.mkdtemp(prefix="runtime-bak-"))
-                shutil.move(str(runtime_dir), str(runtime_bak / ".runtime"))
-
-            # Clear old spec_root (everything except the moved .runtime).
+            # Clear old spec_root (whole-tree overwrite, D-006@v1).
             for child in spec_root.iterdir():
                 if child.is_dir():
                     shutil.rmtree(child)
                 else:
                     child.unlink()
 
-            # Move new tree in.
+            # Move new tree in (daemon tar 内的 .runtime/ 随整树覆盖落盘, D-003@v1).
             for child in staging.iterdir():
                 shutil.move(str(child), str(spec_root / child.name))
-
-            # Restore .runtime/.
-            if runtime_bak is not None:
-                shutil.move(str(runtime_bak / ".runtime"), str(runtime_dir))
-                shutil.rmtree(runtime_bak, ignore_errors=True)
-                runtime_bak = None
         finally:
             tf.close()
             shutil.rmtree(staging, ignore_errors=True)
-            if runtime_bak is not None:
-                shutil.rmtree(runtime_bak, ignore_errors=True)
 
         # 3. Stamp sync_status clean + reparse. Reparse failures leave the file
         # overwrite in place (files are the source of truth) but flip

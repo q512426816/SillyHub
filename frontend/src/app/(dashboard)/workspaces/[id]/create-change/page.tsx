@@ -2,14 +2,19 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import { listComponents, type Component } from "@/lib/components";
-import { createChange, type CreateChangeInput } from "@/lib/changes";
+import {
+  createChange,
+  proxyCreateChange,
+  type CreateChangeInput,
+} from "@/lib/changes";
+import { listDaemonRuntimes, type DaemonRuntimeRead } from "@/lib/daemon";
+import { getWorkspace, type Workspace } from "@/lib/workspaces";
 
 interface Props {
   params: { id: string };
@@ -21,6 +26,9 @@ export default function CreateChangePage({ params }: Props) {
   const [description, setDescription] = useState("");
   const [components, setComponents] = useState<Component[]>([]);
   const [selectedComponents, setSelectedComponents] = useState<string[]>([]);
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [runtimes, setRuntimes] = useState<DaemonRuntimeRead[]>([]);
+  const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,8 +38,58 @@ export default function CreateChangePage({ params }: Props) {
       .catch(() => {});
   }, [workspaceId]);
 
+  useEffect(() => {
+    let active = true;
+    setWorkspaceLoading(true);
+    Promise.all([
+      getWorkspace(workspaceId),
+      listDaemonRuntimes().catch(() => [] as DaemonRuntimeRead[]),
+    ])
+      .then(([ws, runtimeList]) => {
+        if (!active) return;
+        setWorkspace(ws);
+        setRuntimes(runtimeList);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setError(err instanceof ApiError ? err.message : "加载工作区信息失败");
+      })
+      .finally(() => {
+        if (active) setWorkspaceLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspaceId]);
+
+  const daemonRuntimeId = workspace?.daemon_runtime_id ?? null;
+  const boundRuntime = useMemo(() => {
+    if (!daemonRuntimeId) return null;
+    return runtimes.find((r) => r.id === daemonRuntimeId) ?? null;
+  }, [daemonRuntimeId, runtimes]);
+  const isDaemonClient = workspace?.path_source === "daemon-client";
+  const daemonDisabledReason = isDaemonClient
+    ? !daemonRuntimeId || boundRuntime?.status !== "online"
+      ? "需要在线 daemon 才能在客户端工作区创建变更"
+      : null
+    : null;
+  const submitDisabled =
+    loading ||
+    workspaceLoading ||
+    workspace === null ||
+    !description.trim() ||
+    daemonDisabledReason !== null;
+
   const handleSubmit = async () => {
     if (!description.trim()) return;
+    if (workspace === null) {
+      setError("工作区信息加载失败，请刷新后重试");
+      return;
+    }
+    if (daemonDisabledReason) {
+      setError(daemonDisabledReason);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -41,10 +99,22 @@ export default function CreateChangePage({ params }: Props) {
         affected_components:
           selectedComponents.length > 0 ? selectedComponents : undefined,
       };
-      const result = await createChange(workspaceId, input);
+      const result =
+        isDaemonClient && daemonRuntimeId
+          ? await proxyCreateChange(workspaceId, {
+              title: input.title,
+              description: input.description,
+              change_type: input.change_type,
+              runtime_id: daemonRuntimeId,
+            })
+          : await createChange(workspaceId, input);
       router.push(`/workspaces/${workspaceId}/changes/${result.id}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "创建变更失败");
+      if (err instanceof ApiError && err.code === "DAEMON_CLIENT_NO_SESSION") {
+        setError("当前 daemon 未在线，无法在客户端工作区创建变更，请启动 daemon 后重试");
+      } else {
+        setError(err instanceof ApiError ? err.message : "创建变更失败");
+      }
     } finally {
       setLoading(false);
     }
@@ -125,7 +195,8 @@ export default function CreateChangePage({ params }: Props) {
             <Button
               size="sm"
               onClick={handleSubmit}
-              disabled={loading || !description.trim()}
+              disabled={submitDisabled}
+              title={daemonDisabledReason ?? undefined}
             >
               {loading ? "创建中…" : "提交需求"}
             </Button>

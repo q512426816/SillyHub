@@ -23,6 +23,7 @@ async def _create_workspace(
     *,
     root_path: str = "/tmp/test-ws",
     component_key: str | None = "silly",
+    path_source: str = "server-local",
 ) -> Workspace:
     ws = Workspace(
         id=uuid.uuid4(),
@@ -30,6 +31,7 @@ async def _create_workspace(
         slug=f"test-ws-{uuid.uuid4().hex[:8]}",
         root_path=root_path,
         component_key=component_key,
+        path_source=path_source,
         status="active",
     )
     session.add(ws)
@@ -198,6 +200,37 @@ class TestReparseCreatesDocs:
         assert arch.exists is True
         assert arch.content is not None
         assert "Test Architecture" in arch.content
+
+    async def test_daemon_client_reads_flat_platform_spec_root(
+        self, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """daemon-client workspace reads ``spec_root/docs/...`` without a .sillyspec wrapper."""
+        spec_root = tmp_path / "spec"
+        scan_dir = spec_root / "docs" / "silly" / "scan"
+        scan_dir.mkdir(parents=True, exist_ok=True)
+        (scan_dir / "ARCHITECTURE.md").write_text(
+            "# Flat Architecture\nDaemon-client content.", encoding="utf-8"
+        )
+
+        ws = await _create_workspace(
+            db_session,
+            root_path=str(tmp_path / "client-unreachable"),
+            component_key="silly",
+            path_source="daemon-client",
+        )
+        await _create_spec_workspace(db_session, ws, str(spec_root))
+
+        svc = ScanDocsService(db_session)
+        stats, _result = await svc.reparse(ws.id)
+
+        assert stats["created"] > 0
+        items, total = await svc.list_(ws.id)
+        assert total > 0
+        arch = next((d for d in items if d.doc_type == "ARCHITECTURE"), None)
+        assert arch is not None
+        assert arch.path == "docs/silly/scan/ARCHITECTURE.md"
+        assert arch.content is not None
+        assert "Flat Architecture" in arch.content
 
 
 class TestReparseUpdatesDocs:

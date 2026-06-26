@@ -84,6 +84,7 @@ class ScanDocsService:
 
         # For platform-managed workspaces, read from spec_root instead of root_path
         sillyspec_root = Path(workspace.root_path)
+        platform_managed = False
         try:
             from app.modules.spec_workspace.service import SpecWorkspaceService
 
@@ -91,6 +92,11 @@ class ScanDocsService:
             spec_ws = await spec_ws_svc.get(workspace.id)
             if spec_ws.strategy == "platform-managed" and spec_ws.spec_root:
                 sillyspec_root = Path(spec_ws.spec_root)
+                # D-005@v1：mode 看 path_source（正交于 root）。daemon-client 同步产出扁平
+                # 布局（无 .sillyspec 包裹）；server-local 平台镜像仍包裹。
+                from app.modules.workspace.service import is_daemon_client_path_source
+
+                platform_managed = is_daemon_client_path_source(workspace.path_source)
         except Exception:
             pass
 
@@ -98,9 +104,11 @@ class ScanDocsService:
 
         if not workspace.component_key:
             # Parent workspace — parse the entire docs tree recursively
-            result = self._parser.parse_docs_tree(sillyspec_root)
+            result = self._parser.parse_docs_tree(sillyspec_root, platform_managed=platform_managed)
         else:
-            result = self._parser.parse_component(sillyspec_root, workspace.component_key)
+            result = self._parser.parse_component(
+                sillyspec_root, workspace.component_key, platform_managed=platform_managed
+            )
         stats["parsed"] = len([d for d in result.docs if d.exists])
 
         # Fetch existing rows keyed by path

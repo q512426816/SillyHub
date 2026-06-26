@@ -63,6 +63,13 @@ daemon-client workspace 的 spec 树当前只在 `onSessionEnd` 回灌（design 
 - quick-chat / shared（transport!=='tar'）interactive 不触发（无 specSyncCtx → `syncSpecTreeIfNeeded` no-op）。
 - `onSessionEnd` 兜底语义不变（finally delete ctx + AC-09 幂等）。
 
+### 执行记录（2026-06-26）
+
+- `spec-sync.ts`：`syncSpecTreeIfNeeded(ctx, client)` 抽离（ctx null/undefined→no-op，失败仅 warn R-03）+ `packSpecDir` 去掉 `.runtime` 排除（push 含 `.runtime`，D-003）。
+- `daemon.ts`：scan run 终态点（`onTurnResult` 收尾，`notifyRunResult` 后）触发 `syncSpecTreeIfNeeded`；`onSessionEnd` 改调同函数（复用，finally delete 不变 → AC-09）。
+- 验证：`npx vitest run tests/spec-sync.test.ts` **6 passed**（ctx null/undefined no-op、workspaceId 触发 postSpecSync、失败仅 warn 不抛、packSpecDir 含 `.runtime/sillyspec.db`）；`tsc --noEmit` 通过。
+- 注：daemon 全量 vitest 有 2 个 `cli.test.ts` 失败（`status_shows_config` / `logs_no_file`），系本机真实 `~/.sillyhub` 环境泄露（daemon 在线运行读到真实 config/log），与本 task 改动无关；ci-check hook 不跑 daemon 测试故不阻塞 commit。
+
 ## verify
 
 ```bash

@@ -81,14 +81,45 @@ class SpecPathResolver:
     # Instance methods
     # ------------------------------------------------------------------
 
-    def __init__(self, workspace_root: str | Path) -> None:
+    def __init__(self, workspace_root: str | Path, *, platform_managed: bool = False) -> None:
+        """Resolve SillySpec paths relative to *workspace_root*.
+
+        ``platform_managed``（D-005@v1，daemon-client / 平台托管场景）为 True 时，
+        ``workspace_root`` 本身就是 ``.sillyspec`` 内容根（扁平布局：``docs/``、
+        ``changes/``、``.runtime/`` 直接在其下），所有路径方法省略 ``.sillyspec`` 段。
+        默认 False（repo-native / server-local：``<root>/.sillyspec/...`` 包裹语义），
+        向后兼容现有调用方。
+        """
         self.root = Path(workspace_root)
+        self.platform_managed = platform_managed
+
+    # -- Factory ------------------------------------------------------------
+
+    @classmethod
+    def for_spec_workspace(cls, spec_ws: object) -> "SpecPathResolver":
+        """按 ``spec_workspaces.strategy`` 自动选 mode 构造 resolver（D-005@v1）。
+
+        鸭子类型：只要对象有 ``spec_root`` 与 ``strategy`` 属性即可，不硬依赖
+        ``SpecWorkspace`` ORM 模型（避免 core → modules 反向 import）。
+        ``strategy == "platform-managed"`` → 扁平；其余（repo-native / server-local）
+        → ``.sillyspec`` 包裹。
+        """
+        return cls(
+            spec_ws.spec_root,
+            platform_managed=(getattr(spec_ws, "strategy", None) == "platform-managed"),
+        )
+
+    # -- Internal helper ----------------------------------------------------
+
+    def _spec_root(self) -> Path:
+        """``.sillyspec`` 内容根：platform_managed 时即 ``self.root``，否则 ``self.root/.sillyspec``。"""
+        return self.root if self.platform_managed else self.root / ".sillyspec"
 
     # -- Change directories ------------------------------------------------
 
     def changes_root(self) -> Path:
         """``.sillyspec/changes/``"""
-        return self.root / ".sillyspec" / "changes"
+        return self._spec_root() / "changes"
 
     def change_dir(self, name: str) -> Path:
         """Active change directory: ``.sillyspec/changes/<name>/``"""
@@ -113,7 +144,7 @@ class SpecPathResolver:
 
     def runtime_dir(self) -> Path:
         """``.sillyspec/.runtime/``"""
-        return self.root / ".sillyspec" / ".runtime"
+        return self._spec_root() / ".runtime"
 
     def db_path(self) -> Path:
         """SQLite DB: ``.sillyspec/.runtime/sillyspec.db``"""
@@ -127,7 +158,7 @@ class SpecPathResolver:
 
     def docs_dir(self, project: str) -> Path:
         """``.sillyspec/docs/<project>/``"""
-        return self.root / ".sillyspec" / "docs" / project
+        return self._spec_root() / "docs" / project
 
     def scan_dir(self, project: str) -> Path:
         """``.sillyspec/docs/<project>/scan/``"""

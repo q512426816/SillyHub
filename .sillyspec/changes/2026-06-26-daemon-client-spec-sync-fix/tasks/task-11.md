@@ -74,3 +74,10 @@ daemon 轮询到 change-write 任务（task-09 端点下发的 `daemon_change_wr
 - 复用 task-06 `syncSpecTreeIfNeeded`（或退化 `postSpecSync`），**不重复实现** pack/walkDir/postSpecSync。
 - hub-client 三方法 additive，不破坏既有 `getPendingLeases`/`claimLease`/`completeLease`/`postSpecSync` 签名。
 - sync 失败仅 warn 不阻塞回执（对齐 task-runner.ts:493-500 / design R-03 既有语义）。
+
+## 执行记录（2026-06-26）
+
+- 提交：`0f5ff821 feat(daemon): execute change-write tasks without agent (task-11)`。
+- 实现：`HubClient` 新增 pending/claim/complete change-write 方法；daemon 轮询循环增加 change-write 分支和 inflight 去重；`TaskRunner.runChangeWrite` 写入 `changes/<key>/`、校验 traversal、complete 回执并触发 `syncSpecTreeIfNeeded`。
+- 验证：`pnpm vitest run tests/task-11-change-write.test.ts tests/spec-sync.test.ts` 通过，`26 passed`；`pnpm exec tsc --noEmit` 通过。
+- 设计取舍：`runChangeWrite` 先 complete 后 sync；sync 失败按设计只 warn、不改写 ok，避免回灌失败把本地写入误判为失败。真实跨边界回灌仍由 task-14 验证。

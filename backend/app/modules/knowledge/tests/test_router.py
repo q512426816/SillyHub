@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import shutil
+import uuid
 from pathlib import Path
 
 import pytest
+
+from app.modules.spec_workspace.model import SpecWorkspace
+from app.modules.workspace.model import Workspace
 
 COMPONENT_FIXTURES = Path(__file__).parent.parent.parent / "change" / "tests" / "fixtures" / "valid"
 
@@ -184,3 +188,51 @@ async def test_empty_knowledge_directory(
     )
     assert resp.status_code == 200
     assert resp.json()["total"] == 0
+
+
+async def test_daemon_client_knowledge_reads_platform_spec_root(
+    client,
+    db_session,
+    tmp_path: Path,
+    auth_headers: dict[str, str],
+) -> None:
+    spec_root = tmp_path / "platform-spec"
+    knowledge_dir = spec_root / "knowledge"
+    knowledge_dir.mkdir(parents=True, exist_ok=True)
+    (knowledge_dir / "INDEX.md").write_text(
+        "# Platform Knowledge\n\nDaemon-client content.",
+        encoding="utf-8",
+    )
+
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="daemon-client-knowledge",
+        slug=f"daemon-client-knowledge-{uuid.uuid4().hex[:8]}",
+        root_path=str(tmp_path / "client-machine-path"),
+        path_source="daemon-client",
+        status="active",
+    )
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+
+    spec_ws = SpecWorkspace(
+        id=uuid.uuid4(),
+        workspace_id=ws.id,
+        spec_root=str(spec_root),
+        strategy="platform-managed",
+        sync_status="clean",
+    )
+    db_session.add(spec_ws)
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/workspaces/{ws.id}/knowledge",
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["items"][0]["filename"] == "INDEX.md"
+    assert body["items"][0]["title"] == "Platform Knowledge"

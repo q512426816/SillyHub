@@ -40,15 +40,35 @@ class RuntimeService:
         self._session = session
         self._ws_service = workspace_service or WorkspaceService(session)
 
-    def _resolve_runtime_dir(self, workspace_id: uuid.UUID, workspace, spec_ws) -> Path | None:
-        resolver_root = None
+    @staticmethod
+    def _resolver_for(workspace, spec_ws) -> SpecPathResolver | None:
+        """构造正确 root + mode 的 resolver（D-005@v1）。
+
+        root 与 mode 是**正交**的两个维度：
+
+        - **root 选择**（沿用既有语义）：``spec_ws.strategy != "repo-native"``（即
+          platform-managed，含 server-local 平台镜像 + daemon-client）→ ``spec_ws.spec_root``；
+          其余（repo-native / 无 spec_ws）→ ``workspace.root_path``。
+        - **mode 选择**（D-005@v1 新增）：``path_source == "daemon-client"`` → 扁平
+          （daemon 同步产出的 spec_root 无 ``.sillyspec`` 包裹，``.runtime/`` 直接在其下）；
+          其余（server-local 平台镜像等）→ 包裹（``.sillyspec/.runtime/``，既有写入约定）。
+        """
+        from app.modules.workspace.service import is_daemon_client_path_source
+
         if spec_ws and spec_ws.strategy != "repo-native":
-            resolver_root = spec_ws.spec_root
+            root: str | None = spec_ws.spec_root
         elif workspace.root_path:
-            resolver_root = workspace.root_path
-        if resolver_root:
-            return SpecPathResolver(resolver_root).runtime_dir()
-        return None
+            root = workspace.root_path
+        else:
+            return None
+        return SpecPathResolver(
+            root,
+            platform_managed=is_daemon_client_path_source(workspace.path_source),
+        )
+
+    def _resolve_runtime_dir(self, workspace_id: uuid.UUID, workspace, spec_ws) -> Path | None:
+        resolver = self._resolver_for(workspace, spec_ws)
+        return resolver.runtime_dir() if resolver else None
 
     async def _get_base(self, workspace_id: uuid.UUID):
         workspace = await self._ws_service.get(workspace_id)
@@ -62,11 +82,8 @@ class RuntimeService:
         if not runtime_dir:
             return None
 
-        resolver = SpecPathResolver(
-            spec_ws.spec_root
-            if spec_ws and spec_ws.strategy != "repo-native"
-            else workspace.root_path
-        )
+        resolver = self._resolver_for(workspace, spec_ws)
+        assert resolver is not None  # runtime_dir 非 None 蕴含 resolver 非 None
 
         # --- Read from sillyspec.db (SQLite) ---
         db_path = resolver.db_path()

@@ -16,6 +16,11 @@ from app.core.logging import get_logger
 log = get_logger(__name__)
 
 
+def _projects_dir(root: Path, platform_managed: bool) -> Path:
+    """projects 目录：扁平（``root/projects``）或包裹（``root/.sillyspec/projects``）。D-005@v1。"""
+    return root / "projects" if platform_managed else root / ".sillyspec" / "projects"
+
+
 @dataclass
 class ValidationIssue:
     """A single validation problem found in spec files."""
@@ -51,12 +56,17 @@ class SpecValidator:
     3. Reference integrity: `relations.target` must reference an existing component
     """
 
-    def validate(self, spec_root: str | Path) -> ValidationReport:
+    def validate(
+        self, spec_root: str | Path, *, platform_managed: bool = False
+    ) -> ValidationReport:
         """Validate the spec workspace at the given root path.
 
         Args:
             spec_root: Absolute path to the spec workspace directory
                        (e.g., /data/spec-workspaces/{workspace_id}/)
+            platform_managed: True 时按扁平布局校验（D-005@v1：``projects/`` 直接在
+                       spec_root 下，省略 ``.sillyspec`` 段；daemon-client 同步产出）。
+                       默认 False（``.sillyspec/projects/`` 包裹）。
 
         Returns:
             ValidationReport with pass/fail status and list of issues.
@@ -76,14 +86,14 @@ class SpecValidator:
             return ValidationReport(passed=False, issues=issues)
 
         # 1. Directory structure check
-        issues.extend(self._check_directory_structure(root))
+        issues.extend(self._check_directory_structure(root, platform_managed))
 
         # 2. YAML schema check
         component_ids: list[str] = []
-        issues.extend(self._check_yaml_schema(root, component_ids))
+        issues.extend(self._check_yaml_schema(root, component_ids, platform_managed))
 
         # 3. Reference integrity check
-        issues.extend(self._check_references(root, component_ids))
+        issues.extend(self._check_references(root, component_ids, platform_managed))
 
         has_errors = any(i.severity == "error" for i in issues)
         report = ValidationReport(passed=not has_errors, issues=issues)
@@ -97,10 +107,12 @@ class SpecValidator:
         )
         return report
 
-    def _check_directory_structure(self, root: Path) -> list[ValidationIssue]:
+    def _check_directory_structure(
+        self, root: Path, platform_managed: bool = False
+    ) -> list[ValidationIssue]:
         """Check that required directories exist."""
         issues: list[ValidationIssue] = []
-        projects_dir = root / ".sillyspec" / "projects"
+        projects_dir = _projects_dir(root, platform_managed)
 
         if not projects_dir.exists():
             issues.append(
@@ -127,10 +139,11 @@ class SpecValidator:
         self,
         root: Path,
         component_ids: list[str],
+        platform_managed: bool = False,
     ) -> list[ValidationIssue]:
         """Check YAML schema of project component files."""
         issues: list[ValidationIssue] = []
-        projects_dir = root / ".sillyspec" / "projects"
+        projects_dir = _projects_dir(root, platform_managed)
 
         if not projects_dir.exists():
             return issues
@@ -189,10 +202,11 @@ class SpecValidator:
         self,
         root: Path,
         component_ids: list[str],
+        platform_managed: bool = False,
     ) -> list[ValidationIssue]:
         """Check that relation targets reference existing components."""
         issues: list[ValidationIssue] = []
-        projects_dir = root / ".sillyspec" / "projects"
+        projects_dir = _projects_dir(root, platform_managed)
 
         if not projects_dir.exists() or not component_ids:
             return issues

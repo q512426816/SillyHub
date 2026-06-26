@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+
+from app.modules.runtime.service import RuntimeService
+from app.modules.spec_workspace.model import SpecWorkspace
+from app.modules.workspace.model import Workspace
 
 COMPONENT_FIXTURES = Path(__file__).parent.parent.parent / "change" / "tests" / "fixtures" / "valid"
 
@@ -212,3 +217,45 @@ async def test_unknown_workspace_returns_404(client, auth_headers: dict[str, str
         headers=auth_headers,
     )
     assert resp.status_code == 404
+
+
+async def test_daemon_client_reads_flat_platform_runtime_dir(db_session, tmp_path: Path) -> None:
+    spec_root = tmp_path / "platform-spec"
+    _create_test_db(spec_root / ".runtime" / "sillyspec.db")
+
+    # A wrapped runtime DB with different contents must be ignored for daemon-client mode.
+    wrapped_db = spec_root / ".sillyspec" / ".runtime" / "sillyspec.db"
+    _create_test_db(wrapped_db)
+    conn = sqlite3.connect(str(wrapped_db))
+    try:
+        conn.execute("UPDATE changes SET name = 'wrong-wrapped-change'")
+        conn.commit()
+    finally:
+        conn.close()
+
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="daemon-client-runtime",
+        slug=f"daemon-client-runtime-{uuid.uuid4().hex[:8]}",
+        root_path=str(tmp_path / "client-machine-path"),
+        path_source="daemon-client",
+        status="active",
+    )
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+
+    spec_ws = SpecWorkspace(
+        id=uuid.uuid4(),
+        workspace_id=ws.id,
+        spec_root=str(spec_root),
+        strategy="platform-managed",
+        sync_status="clean",
+    )
+    db_session.add(spec_ws)
+    await db_session.commit()
+
+    progress = await RuntimeService(db_session).get_progress(ws.id)
+
+    assert progress is not None
+    assert progress.current_change == "change-001"

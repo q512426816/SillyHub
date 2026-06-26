@@ -32,7 +32,7 @@ const FAKE_HOME = mkdtempSync(join(tmpdir(), 'spec-sync-home-'));
 hoisted.homedirMock.mockReturnValue(FAKE_HOME);
 
 // spec-sync 在 homedir mock 就位后 import。
-const { resolveSpecDir, pullSpecBundle, packSpecDir, postSpecSync } =
+const { resolveSpecDir, pullSpecBundle, packSpecDir, postSpecSync, syncSpecTreeIfNeeded } =
   await import('../../src/spec-sync.js');
 
 // ── duck-type HubHttpError 构造器（不依赖 hub-client.ts 导出）────────────────
@@ -188,10 +188,11 @@ describe('packSpecDir', () => {
     }
   });
 
-  it('排除 .runtime 段 + 以 2×512 zero block 结尾', async () => {
-    // 构造 specDir：含 .runtime/leak.txt（应排除）+ spec.md（应包含）+ sub/nested.md
+  it('task-06：包含 .runtime/sillyspec.db（FR-06 push 路径）+ 以 2×512 zero block 结尾', async () => {
+    // 构造 specDir：含 .runtime/sillyspec.db（task-06 起应包含）+ spec.md + sub/nested.md
+    // design §5.2 D-003：push 路径不再排除 .runtime，daemon 的 sillyspec.db 需回灌。
     mkdirSync(join(scratch, '.runtime'));
-    writeFileSync(join(scratch, '.runtime', 'leak.txt'), 'secret');
+    writeFileSync(join(scratch, '.runtime', 'sillyspec.db'), 'sqlite-bytes');
     writeFileSync(join(scratch, 'spec.md'), 'root-spec');
     mkdirSync(join(scratch, 'sub'));
     writeFileSync(join(scratch, 'sub', 'nested.md'), 'nested');
@@ -201,10 +202,11 @@ describe('packSpecDir', () => {
     expect(buf.length % 512).toBe(0);
     const tail = buf.subarray(buf.length - 1024);
     expect(tail.every((b) => b === 0)).toBe(true);
-    // 不含 .runtime 段
+    // 含 .runtime 段（FR-06 / G2）
     const asText = buf.toString('utf-8');
-    expect(asText).not.toContain('.runtime');
-    expect(asText).not.toContain('secret');
+    expect(asText).toContain('.runtime');
+    expect(asText).toContain('sillyspec.db');
+    expect(asText).toContain('sqlite-bytes');
     // 含 spec.md / sub/nested.md
     expect(asText).toContain('spec.md');
     expect(asText).toContain('nested.md');
@@ -309,5 +311,83 @@ describe('postSpecSync', () => {
       postSpecSync: vi.fn().mockRejectedValue(fakeHttpErr(500, 'boom')),
     } as any;
     await expect(postSpecSync(client, 'ws', scratch)).rejects.toMatchObject({ status: 500 });
+  });
+});
+
+describe('syncSpecTreeIfNeeded（task-06 / D-002@v1）', () => {
+  let scratch: string;
+  beforeEach(() => {
+    scratch = mkdtempSync(join(tmpdir(), 'spec-sync-ifneeded-'));
+  });
+  afterEach(() => {
+    try {
+      rmSync(scratch, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  });
+
+  it('ctx 为 null → no-op，不调 client.postSpecSync', async () => {
+    const postSpy = vi.fn();
+    const client = { postSpecSync: postSpy } as any;
+    await syncSpecTreeIfNeeded(null, client);
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it('ctx 为 undefined → no-op，不调 client.postSpecSync', async () => {
+    const postSpy = vi.fn();
+    const client = { postSpecSync: postSpy } as any;
+    await syncSpecTreeIfNeeded(undefined, client);
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it('ctx 有 workspaceId → 等价 postSpecSync（pack + client.postSpecSync 调一次）', async () => {
+    // syncSpecTreeIfNeeded 内部用 resolveSpecDir(ctx.workspaceId)，需在 homedir mock 的
+    // spec 树下放文件，确保 pack 出非空 tar。这里直接在 resolveSpecDir(wsId) 下建文件。
+    const wsId = 'ws-ifneeded';
+    const specDir = resolveSpecDir(wsId);
+    mkdirSync(specDir, { recursive: true });
+    writeFileSync(join(specDir, 'spec.md'), 'content');
+    try {
+      const postSpy = vi.fn().mockResolvedValue({ ok: true, reparsed: 0 });
+      const client = { postSpecSync: postSpy } as any;
+      await syncSpecTreeIfNeeded({ workspaceId: wsId }, client);
+      expect(postSpy).toHaveBeenCalledTimes(1);
+      expect(postSpy.mock.calls[0][0]).toBe(wsId);
+      expect(Buffer.isBuffer(postSpy.mock.calls[0][1])).toBe(true);
+    } finally {
+      try {
+        rmSync(specDir, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+
+  it('client 未实现 postSpecSync → no-op（mock 容错），不抛', async () => {
+    // 即使有 ctx，client 无 postSpecSync 方法 → postSpecSync 返回 null，syncTree 不抛。
+    await expect(syncSpecTreeIfNeeded({ workspaceId: 'ws-mock' }, {} as any)).resolves.toBeUndefined();
+  });
+
+  it('R-03：postSpecSync 抛错时 syncTree 仅 warn 不抛（fire-and-forget）', async () => {
+    const wsId = 'ws-throw';
+    const specDir = resolveSpecDir(wsId);
+    mkdirSync(specDir, { recursive: true });
+    writeFileSync(join(specDir, 'spec.md'), 'x');
+    try {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const client = {
+        postSpecSync: vi.fn().mockRejectedValue(fakeHttpErr(500, 'boom')),
+      } as any;
+      await expect(syncSpecTreeIfNeeded({ workspaceId: wsId }, client)).resolves.toBeUndefined();
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    } finally {
+      try {
+        rmSync(specDir, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+    }
   });
 });

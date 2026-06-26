@@ -41,10 +41,15 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as readline from 'node:readline';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative, isAbsolute, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-import { pullSpecBundle, postSpecSync } from './spec-sync.js';
+import {
+  pullSpecBundle,
+  postSpecSync,
+  resolveSpecDir,
+  syncSpecTreeIfNeeded,
+} from './spec-sync.js';
 import { getBackend } from './adapters/index.js';
 import type { ProtocolAdapter } from './adapters/protocol-adapter.js';
 import { buildSpawnEnv } from './spawn-env.js';
@@ -139,6 +144,15 @@ export interface RunnerHubClient {
     wsId: string,
     tarBuf: Buffer,
   ): Promise<{ ok: boolean; reparsed: number }>;
+  /**
+   * task-11 / FR-08 / D-004@v1：回执 change-write 执行结果。
+   * 实际实现见 HubClient.completeChangeWrite。可选（mock client 未实现时跳过）。
+   */
+  completeChangeWrite?(
+    changeWriteId: string,
+    claimToken: string,
+    payload: { ok: boolean; files?: unknown[]; error?: string },
+  ): Promise<unknown>;
 }
 
 /**
@@ -1515,6 +1529,164 @@ export class TaskRunner {
       stats: extra.stats,
     };
   }
+
+  // ── task-11 / FR-10 / D-004@v1：change-write 轻量分支（不启 agent）─────────────
+
+  /**
+   * 执行一个 change-write 任务：本地写 changes/<key>/ 文件 + 回执 + spec 整树回灌。
+   *
+   * 与 ``runLease`` 并列但**严格区分**（FR-10）：
+   *   - **不**调 agent driver / SessionManager / spawn（纯文件写 + sync）；
+   *   - 执行栈不经过 ``runLease``。
+   *
+   * 流程（design §5.3 Phase 3 + §7.5 回灌）：
+   *   1. ``resolveSpecDir(wsId)`` 定位本地 spec 根（~/.sillyhub/daemon/specs/<wsId>）。
+   *   2. 目标子目录 ``join(specDir, 'changes', changeKey)``。
+   *   3. 遍历 ``files[]{path, content}``：path traversal 四类校验（../  / 绝对 / Win 盘符 /
+   *      join 后越界）→ 抛错拒绝；``mkdir recursive`` + ``writeFile`` utf-8。
+   *   4. 回执 ``completeChangeWrite(id, claimToken, { ok:true, files:[writtenRelPaths] })``。
+   *   5. sync：调 task-06 ``syncSpecTreeIfNeeded({workspaceId: wsId}, client)``（复用，
+   *      不重复 pack；失败仅 warn 不阻塞回执，对齐 R-03）。
+   *
+   * 任何 file 写入 / traversal 失败 → 抛错（调用方 daemon 负责回执 ok=false）。
+   * sync 失败**不**改写 ok（已先 complete 回执，sync 是 best-effort 回灌）。
+   *
+   * @param ctx change-write 执行上下文（taskId / changeKey / workspaceId / files / claimToken）
+   */
+  async runChangeWrite(ctx: ChangeWriteCtx): Promise<ChangeWriteResult> {
+    const { taskId, changeKey, workspaceId, files, claimToken } = ctx;
+    const specDir = resolveSpecDir(workspaceId);
+    const changesDir = join(specDir, 'changes', changeKey);
+
+    // 写入前先建 changesDir（即使 files 为空也要保证目录存在，供后续 sync 收集）。
+    await mkdir(changesDir, { recursive: true });
+
+    const writtenRelPaths: string[] = [];
+    for (const f of files) {
+      const relPath = validateChangeWritePath(f.path, changeKey);
+      const fullPath = join(changesDir, relPath);
+      // join 后二次校验（防御 normalize 后越界，照搬 spec-sync extractTar 范式）。
+      const rel = relative(changesDir, fullPath);
+      if (rel.startsWith('..') || isAbsolute(rel)) {
+        throw new Error(
+          `change-write path escapes changes dir: ${f.path} -> ${fullPath}`,
+        );
+      }
+      await mkdir(dirname(fullPath), { recursive: true });
+      await writeFile(fullPath, f.content, 'utf-8');
+      writtenRelPaths.push(relPath);
+    }
+
+    // 回执：ok=true + 实际写入路径清单。
+    // completeChangeWrite 是真实 HubClient 的 additive 方法（必有），mock client
+    // 未实现时降级跳过（仅本地写文件，不回执——测试场景）。
+    if (typeof this.client.completeChangeWrite === 'function') {
+      await this.client.completeChangeWrite(taskId, claimToken, {
+        ok: true,
+        files: writtenRelPaths,
+      });
+    }
+
+    // sync：复用 task-06 syncSpecTreeIfNeeded（ctx-guarded + 内部 try/catch，失败仅 warn）。
+    // design §5.3 末段：complete 成功后构造 specSyncCtx 回灌 changes/<key>/。
+    // syncSpecTreeIfNeeded 自身失败不抛（R-03），故此处不再 try/catch。
+    await syncSpecTreeIfNeeded(
+      { workspaceId },
+      this.client as unknown as Parameters<typeof syncSpecTreeIfNeeded>[1],
+    );
+
+    return {
+      taskId,
+      changeKey,
+      ok: true,
+      files: writtenRelPaths,
+    };
+  }
+}
+
+/**
+ * task-11：change-write 待写入的单个文件（design §7.5 ``files[]{path, content}``）。
+ *
+ * ``path`` 通常相对于 spec_root（``changes/<changeKey>/...``，由 backend
+ * proxy 下发）；兼容相对于 ``changes/<changeKey>/`` 的短路径。两种形态都会归一
+ * 到 change 目录内相对路径，traversal 由 ``validateChangeWritePath`` 拦截。
+ */
+export interface ChangeWriteFile {
+  path: string;
+  content: string;
+}
+
+/**
+ * task-11：runChangeWrite 执行上下文。
+ *
+ * 字段来源：task-09 ``ChangeWriteClaimResponse``（claim 后拿到 claim_token + files）
+ * 透传 runtimeId（仅日志/上下文用，不进 complete body）。
+ */
+export interface ChangeWriteCtx {
+  /** DaemonChangeWrite.id（task-09 task_id）。 */
+  taskId: string;
+  /** change 标识（落到 changes/<changeKey>/ 子目录）。 */
+  changeKey: string;
+  /** workspace id（定位本地 spec 根 + sync 回灌）。 */
+  workspaceId: string;
+  /** claimChangeWrite 颁发的令牌（complete 校验）。 */
+  claimToken: string;
+  /** 待写入文件清单（path 相对 changes/<key>/，content utf-8）。 */
+  files: ChangeWriteFile[];
+}
+
+/** task-11：runChangeWrite 返回值（含 ok / 实际写入相对路径清单）。 */
+export interface ChangeWriteResult {
+  taskId: string;
+  changeKey: string;
+  ok: boolean;
+  files: string[];
+}
+
+/**
+ * task-11：change-write path traversal 四类校验（照搬 spec-sync.ts:230 范式）。
+ *
+ * 拒绝：
+ *   1. ``path`` 含 ``..`` 段（防 ``foo/../../bar`` 越界）；
+ *   2. ``path`` 是绝对路径（``/`` 开头）；
+ *   3. ``path`` 含 Win 盘符（``[A-Za-z]:[\\/]``）；
+ *   （第 4 类 join 后越界由调用方 ``relative`` 二次校验兜底。）
+ *
+ * 接受两种合法形态：
+ *   - ``changes/<changeKey>/MASTER.md``（backend proxy 下发，path 相对 spec_root）
+ *   - ``MASTER.md``（兼容旧测试/调用方，path 相对 changes/<changeKey>/）
+ *
+ * 其余 ``changes/<otherKey>/...``、绝对路径、Win 盘符、``..``/``.`` 段均拒绝。
+ *
+ * @returns 归一化后的 change 目录内相对路径（POSIX 分隔符，供写入和回执 files[]）
+ */
+export function validateChangeWritePath(
+  filePath: string,
+  changeKey: string,
+): string {
+  if (
+    typeof filePath !== 'string' ||
+    filePath === '' ||
+    isAbsolute(filePath) ||
+    /^[A-Za-z]:[\\/]/.test(filePath)
+  ) {
+    throw new Error(`change-write path traversal blocked: ${String(filePath)}`);
+  }
+  const normalized = filePath.split('\\').join('/');
+  if (normalized.endsWith('/')) {
+    throw new Error(`change-write path traversal blocked: ${String(filePath)}`);
+  }
+  const parts = normalized.split('/').filter((part) => part.length > 0);
+  if (parts.length === 0 || parts.some((part) => part === '..' || part === '.')) {
+    throw new Error(`change-write path traversal blocked: ${String(filePath)}`);
+  }
+  if (parts[0] === 'changes') {
+    if (parts[1] !== changeKey || parts.length <= 2) {
+      throw new Error(`change-write path outside change dir: ${String(filePath)}`);
+    }
+    return parts.slice(2).join('/');
+  }
+  return parts.join('/');
 }
 
 // ── 公开类型 ──────────────────────────────────────────────────────────────────

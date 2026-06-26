@@ -12,35 +12,35 @@ plan_level: full
 
 ## Wave 1（无依赖，并行启动）
 
-- [ ] task-01: SpecPathResolver 增 `platform_managed` mode + `for_spec_workspace(spec_ws)` 工厂（覆盖：FR-01, FR-02, D-005@v1）
-- [ ] task-06: daemon 抽 `syncSpecTreeIfNeeded` + scan run 终态触发 + `packSpecDir` 不再排除 `.runtime`（覆盖：FR-05, FR-06, D-002@v1）
-- [ ] task-07: backend `apply_sync` 接收 `.runtime`（去 preserve-overwrite）+ 落 `last_synced_at`（覆盖：FR-06, FR-07）
-- [ ] task-08: `daemon_change_writes` model + migration（覆盖：FR-08, D-004@v1）
+- [x] task-01: SpecPathResolver 增 `platform_managed` mode + `for_spec_workspace(spec_ws)` 工厂（覆盖：FR-01, FR-02, D-005@v1）
+- [x] task-06: daemon 抽 `syncSpecTreeIfNeeded` + scan run 终态触发 + `packSpecDir` 不再排除 `.runtime`（覆盖：FR-05, FR-06, D-002@v1）
+- [x] task-07: backend `apply_sync` 接收 `.runtime`（去 preserve-overwrite）+ 落 `last_synced_at`（覆盖：FR-06, FR-07）
+- [x] task-08: `daemon_change_writes` model + migration（覆盖：FR-08, D-004@v1）
 
 ## Wave 2（依赖 Wave 1，并行）
 
-- [ ] task-02: scan_docs parser+service 按 mode 解析（←task-01）（覆盖：FR-01）
-- [ ] task-03: runtime/service + knowledge 重定向 spec_ws.spec_root + mode（←task-01）（覆盖：FR-01, FR-03）
-- [ ] task-04: spec_workspace/validator + post_scan_validator mode/核实 R3（←task-01）（覆盖：FR-01）
-- [ ] task-05: context_builder prompt platform-managed 分支去 `.sillyspec`（←task-01）（覆盖：FR-04）
-- [ ] task-09: backend `GET /runtimes/{rid}/pending-change-writes` + claim/complete 端点（←task-08）（覆盖：FR-08）
+- [x] task-02: scan_docs parser+service 按 mode 解析（←task-01）（覆盖：FR-01）
+- [x] task-03: runtime/service + knowledge 重定向 spec_ws.spec_root + mode（←task-01）（覆盖：FR-01, FR-03）
+- [x] task-04: spec_workspace/validator + post_scan_validator mode/核实 R3（←task-01）（覆盖：FR-01）
+- [x] task-05: context_builder prompt platform-managed 分支去 `.sillyspec`（←task-01）（覆盖：FR-04）
+- [x] task-09: backend `GET /runtimes/{rid}/pending-change-writes` + claim/complete 端点（←task-08）（覆盖：FR-08）
 
 ## Wave 3（依赖 Wave 1-2，并行）
 
-- [ ] task-10: change_writer `proxy_create_change` + `POST /changes/proxy-create` + schema + service 改造（←task-08, task-09）（覆盖：FR-08, FR-09）
-- [ ] task-11: daemon task-runner `kind=change-write` 轻量分支（←task-06, task-09）（覆盖：FR-08, FR-10, D-004@v1）
+- [x] task-10: change_writer `proxy_create_change` + `POST /changes/proxy-create` + schema + service 改造（←task-08, task-09）（覆盖：FR-08, FR-09）
+- [x] task-11: daemon task-runner `kind=change-write` 轻量分支（←task-06, task-09）（覆盖：FR-08, FR-10, D-004@v1）
 
 ## Wave 4（依赖 Wave 3）
 
-- [ ] task-12: frontend changes 新建入口 daemon-client 调 proxy + 无 daemon 禁用引导（←task-10）（覆盖：FR-08, FR-09）
+- [x] task-12: frontend changes 新建入口 daemon-client 调 proxy + 无 daemon 禁用引导（←task-10）（覆盖：FR-08, FR-09）
 
 ## Wave 5（验证-单测集成，依赖 Wave 2-4）
 
-- [ ] task-13: Phase 1-3 单测/集成测（←task-02~task-12）（覆盖：FR-01~FR-10, NFR-02~04）
+- [x] task-13: Phase 1-3 单测/集成测（←task-02~task-12）（覆盖：FR-01~FR-10, NFR-02~04）
 
 ## Wave 6（验证-端到端，依赖 Wave 5）
 
-- [ ] task-14: 端到端联调（真实 workspace `7cd27eb9`，backend Docker + 宿主 daemon）（←task-13）（覆盖：SC1, SC2, SC4, SC5, SC6, SC7）
+- [x] task-14: 端到端联调（真实 workspace `7cd27eb9`，backend Docker + 宿主 daemon）（←task-13）（覆盖：SC1, SC2, SC4, SC5, SC6, SC7）
 
 ## 任务总表
 

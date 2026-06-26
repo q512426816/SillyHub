@@ -39,6 +39,11 @@ allowed_paths:
 - `build_bundle` 仍排除 `.runtime`（pull 路径排除不变，非对称）。
 - Tar Slip 防护（绝对路径/盘符/越界校验 320-336）+ staging 原子交换（extractall 到 staging 再覆盖 spec_root）保持有效。
 
+### 执行记录（2026-06-26）
+
+- `service.py` `apply_sync`：删 `runtime_bak` preserve-overwrite（备份+恢复）→ 整树覆盖含 daemon tar 内 `.runtime`（D-003 push）；`last_synced_at=now()` / `sync_status='clean'` 现成逻辑保留（:363-367）；`build_bundle` 不动（pull 排除 `.runtime`，非对称）。
+- 验证：`uv run pytest tests/modules/spec_workspace/test_apply_sync.py` **5 passed**（`.runtime` 覆盖不保留旧、double-sync 幂等 NFR-02、tar slip 防护、绝对路径防护、`build_bundle` 排除 `.runtime` D-003 非对称）；ruff/mypy 干净。
+
 ## verify
 
 ```

@@ -126,14 +126,47 @@ export async function postSpecSync(
   return client.postSpecSync(wsId, tarBuf);
 }
 
+// ── syncSpecTreeIfNeeded ──────────────────────────────────────────────────────
+
+/**
+ * interactive 路径 spec 树回灌的 ctx-guarded 薄封装（task-06 / D-002@v1）。
+ *
+ * 抽离自 daemon `_postInteractiveSpecSync`（onSessionEnd 兜底）与 scan run 终态收尾点，
+ * 使两处复用同一段 no-op / sync 逻辑。行为：
+ *   - `ctx` 为 null/undefined → 直接 return（no-op：quick-chat/shared 不 set ctx 自然不触发，
+ *     onSessionEnd 反查 leaseId 失败也安全）。
+ *   - 否则等价 `postSpecSync(client, ctx.workspaceId, resolveSpecDir(ctx.workspaceId))`，
+ *     内部 try/catch，失败仅 warn 不抛（对齐 R-03：sync 尽力而为，不改写 run/session 终态）。
+ *   - client 未实现 `postSpecSync` → postSpecSync 自身返回 null（mock 容错），无副作用。
+ *
+ * 与 postSpecSync 的差异：postSpecSync 失败会向上抛（batch task-runner 路径由调用方 catch）；
+ * 本函数失败仅 warn 不抛（interactive 两处调用方均期望 fire-and-forget 语义）。
+ *
+ * @param ctx spec 同步上下文（null/undefined → no-op）
+ * @param client HubClient 实例（interactive = daemon 持有的 client）
+ */
+export async function syncSpecTreeIfNeeded(
+  ctx: { workspaceId: string } | null | undefined,
+  client: HubClient,
+): Promise<void> {
+  if (!ctx) return; // quick-chat / shared / 反查失败 → no-op
+  try {
+    await postSpecSync(client, ctx.workspaceId, resolveSpecDir(ctx.workspaceId));
+  } catch (e) {
+    // R-03：sync 失败仅 warn 不抛，不改写 run/session 终态。
+    console.warn('spec_sync: sync_tree_if_needed_failed', ctx.workspaceId, e);
+  }
+}
+
 // ── packSpecDir ───────────────────────────────────────────────────────────────
 
 /**
  * 把本地 spec 目录整树打包成 tar Buffer（零依赖手工 ustar）。
  *
- * 迁自 task-runner.ts:1512-1533（_packSpecDir）。排除 .runtime 段（与 backend GET bundle
- * 端点约定一致，design §7.2）。仅 regular file + directory；symlink 跳过（walkDir 不收集）。
- * 结尾追加 2×512 zero block。
+ * 迁自 task-runner.ts:1512-1533（_packSpecDir）。task-06（design §5.2 D-003 push 路径）：
+ * **包含** `.runtime/`（含 daemon sillyspec.db 等），不再排除——daemon 侧 .runtime 需回灌到
+ * backend（FR-06）。pull 路径 backend `build_bundle` 仍排除 .runtime，保持非对称（R7）。
+ * 仅 regular file + directory；symlink 跳过（walkDir 不收集）。结尾追加 2×512 zero block。
  *
  * 纯目录打包，无 client 依赖（client 调用在 postSpecSync）。
  */
@@ -141,8 +174,7 @@ export async function packSpecDir(specDir: string): Promise<Buffer> {
   const chunks: Buffer[] = [];
   const entries = await walkDir(specDir);
   for (const e of entries) {
-    // 排除任意层级的 .runtime 段（POSIX/Windows 分隔符都覆盖）
-    if (e.relPath.split(/[\\/]/).includes('.runtime')) continue;
+    // task-06：.runtime 段不再排除（design §5.2 D-003 push 路径），含 sillyspec.db 回灌。
     const header = await buildTarHeader(
       e.relPath + (e.isDir ? '/' : ''),
       e.isDir ? 0 : e.size,

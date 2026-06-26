@@ -69,3 +69,10 @@ cd frontend && pnpm lint
 - 复用既有 `apiFetch`/`ApiError`/inline 错误条；不引入新 toast 依赖。
 - `runtime_id` 取自 `workspace.daemon_runtime_id`（backend 已存），前端不发明 id。
 - 兼容 Windows/Linux/macOS（纯前端，无路径逻辑）。
+
+## 执行记录（2026-06-26）
+
+- 提交：`89c1c471 feat(frontend): proxy create daemon-client changes (task-12)`。
+- 实现：`frontend/src/lib/changes.ts` 新增 `proxyCreateChange`；创建变更页加载 workspace/runtime，daemon-client 在线走 proxy-create，离线/未绑定禁用提交并显示中文引导；列表页入口增加 daemon-client 离线禁用提示。
+- 验证：`pnpm vitest run "src/app/(dashboard)/workspaces/[id]/create-change/__tests__/page.test.tsx"` 通过，`4 passed`；`pnpm typecheck` 通过；`pnpm lint` 通过但保留既有 PPM/runtimes 等 warning（非本变更新增）。
+- 遗留：真实 UI 操作与 Docker backend/宿主 daemon 联动留给 task-14。

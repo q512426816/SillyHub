@@ -334,3 +334,40 @@ class RuntimeUsageListResponse(BaseModel):
 
     window: str
     runtimes: list[RuntimeUsageRead]
+
+
+# ── Change-write task queue (task-09, FR-08 / D-004@v1) ─────────────────────
+# daemon-client workspace 的 change 代写任务队列回执：daemon 轮询
+# GET /runtimes/{rid}/pending-change-writes → claim(token)→ 本地写 → complete 回执。
+# 复用 lease claim/complete 风格，token 轮转 + status pending→claimed→done/failed。
+
+
+class ChangeWritePendingItem(BaseModel):
+    """GET pending-change-writes 返回的单条待处理 change-write。"""
+
+    # task-09 蓝图称 task_id，对齐 lease 术语；底层即 DaemonChangeWrite.id（表无
+    # 独立 task_id 列，design §7.5 payload 只含 change_key+files）。
+    task_id: uuid.UUID
+    change_key: str
+    workspace_id: uuid.UUID
+    files: list
+    created_at: datetime
+
+
+class ChangeWriteClaimResponse(BaseModel):
+    """POST .../change-writes/{id}/claim 回执：daemon 凭 claim_token 调 complete。"""
+
+    task_id: uuid.UUID
+    claim_token: str
+    change_key: str
+    files: list
+
+
+class ChangeWriteCompleteRequest(BaseModel):
+    """POST .../change-writes/{id}/complete 请求体。"""
+
+    claim_token: str
+    ok: bool
+    # 回执写后的实际文件路径清单（可选，落库时回写 files）
+    files: list | None = None
+    error: str | None = None

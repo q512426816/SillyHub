@@ -110,6 +110,15 @@ _SESSION_SSE_HEADERS = {
 
 router = APIRouter(prefix="/daemon", tags=["daemon"])
 
+# task-09：change-write 任务队列回执三端点（FR-08 / D-004@v1），复用本 router 的
+# /daemon prefix + tag；路由写相对路径（/runtimes/{rid}/pending-change-writes 等），
+# 经外层 main.py 的 prefix="/api" 挂载后落地 /api/daemon/...
+from app.modules.daemon.change_write_router import (  # noqa: E402
+    router as change_write_router,
+)
+
+router.include_router(change_write_router)
+
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 # 管理 UI 端点用 runtime:admin；daemon 自身的注册/心跳/lease 生命周期仍走 get_current_principal
 RuntimeAdminUser = Annotated[User, Depends(require_permission_any(Permission.RUNTIME_ADMIN))]

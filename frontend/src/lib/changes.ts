@@ -126,6 +126,14 @@ export type CreateChangeInput = {
   lease_id?: string;
 };
 
+/** daemon-client 代理创建变更的请求参数。 */
+export type ProxyCreateChangeInput = {
+  title: string;
+  description?: string;
+  change_type?: string;
+  runtime_id: string;
+};
+
 /** 创建变更的响应 */
 export type CreateChangeResponse = {
   id: string;
@@ -238,6 +246,24 @@ export function createChange(
 ) {
   return apiFetch<CreateChangeResponse>(
     `/api/workspaces/${workspaceId}/changes/create`,
+    {
+      method: "POST",
+      json: input,
+    },
+  );
+}
+
+/**
+ * daemon-client 代理创建变更 — POST /workspaces/{id}/changes/proxy-create
+ *
+ * 由绑定的在线 daemon 通过 change-write 任务代写 spec 树。
+ */
+export function proxyCreateChange(
+  workspaceId: string,
+  input: ProxyCreateChangeInput,
+) {
+  return apiFetch<CreateChangeResponse>(
+    `/api/workspaces/${workspaceId}/changes/proxy-create`,
     {
       method: "POST",
       json: input,
