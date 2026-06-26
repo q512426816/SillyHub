@@ -169,7 +169,21 @@ class ApiKeyService:
         return None
 
     async def _mark_used(self, key: ApiKey) -> None:
-        """Update ``last_used_at`` on a successful authenticate."""
-        key.last_used_at = _utc_now()
+        """Update ``last_used_at`` on a successful authenticate.
+
+        Throttled by ``settings.auth_api_key_last_used_throttle_seconds``
+        (default 60s): if the stored value is newer than the threshold, the
+        UPDATE is skipped entirely. Without this, every request carrying the
+        same long-lived daemon key UPDATEs the same row and serialises on its
+        row lock — under load this exhausts the connection pool (生产雪崩:
+        38/39 连接等同一行锁 40-55s)。``last_used_at`` 仅供管理 UI 展示,
+        秒级精度无业务价值,60s 节流可接受。阈值=0 退化为每次都写。
+        """
+        now = _utc_now()
+        last = key.last_used_at
+        threshold = self._settings.auth_api_key_last_used_throttle_seconds
+        if last is not None and (now - _as_utc(last)).total_seconds() < threshold:
+            return
+        key.last_used_at = now
         self._db.add(key)
         await self._db.commit()

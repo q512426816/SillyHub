@@ -64,6 +64,16 @@ class Settings(BaseSettings):
         ),
     )
     auth_bcrypt_rounds: int = Field(12, ge=4, le=15)
+    auth_api_key_last_used_throttle_seconds: int = Field(
+        60,
+        ge=0,
+        description=(
+            "API key last_used_at 写入节流窗口(秒)。同一 key 在窗口内重复认证"
+            "跳过 last_used_at UPDATE,避免每请求写同一行导致行锁串行化雪崩"
+            "(生产事故:38/39 连接等同一行锁排队 40-55s)。last_used_at 仅供"
+            "管理 UI 展示,秒级精度无业务价值。0=退化为每次都写(旧行为)。"
+        ),
+    )
     platform_bootstrap_admin_email: str | None = None
     platform_bootstrap_admin_password: str | None = Field(default=None, min_length=8)
     platform_bootstrap_admin_display_name: str | None = None

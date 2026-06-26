@@ -185,8 +185,11 @@ class ApiKey(BaseModel, table=True):
     of the plaintext) for display in the admin UI.
 
     Revocation sets ``revoked_at``; expiry sets ``expires_at``. Both are
-    checked at authenticate time. ``last_used_at`` is updated on every
-    successful authenticate.
+    checked at authenticate time. ``last_used_at`` is updated on a successful
+    authenticate, throttled by
+    ``settings.auth_api_key_last_used_throttle_seconds`` (see
+    :meth:`ApiKeyService._mark_used`) to avoid every request UPDATE-ing the
+    same row.
     """
 
     __tablename__ = "api_keys"
