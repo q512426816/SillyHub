@@ -342,6 +342,12 @@ class DaemonChangeWrite(BaseModel, table=True):
             server_default=text("now()"),
         ),
     )
+    # claim 落点时间，供 NFR-03 超时 gc（claimed_at < now-60s → failed）。
+    # task-08 建表时遗漏，task-09 端点依赖此列（claim 置值 + gc 读取）。
+    claimed_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     completed_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),

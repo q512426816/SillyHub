@@ -49,6 +49,8 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.func.now(),
         ),
+        # task-09：claim 落点时间，NFR-03 超时 gc（claimed_at < now-60s → failed）
+        sa.Column("claimed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("error", sa.Text, nullable=True),
     )
