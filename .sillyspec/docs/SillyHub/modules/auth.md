@@ -14,7 +14,7 @@ created_at: 2026-06-24T01:16:33
 ## 契约摘要
 - API（prefix=/auth）：`POST /api/auth/login`、`/refresh`、`/me`，以及 API Key 管理（创建/列出/吊销）。
 - `AuthService`：`login(username, password)` → 纯 username 查询 + 密码校验 + 签发 token 对（email 不再作登录账号，D-001）；`refresh(refresh_token)` → 消费并换新；`logout_session_by_refresh` / `revoke_all_user_sessions` 会话吊销；`_issue_token_pair` 内部签发。
-- `ApiKeyService`：`create`（生成明文 + 哈希存储，仅创建时返回明文）、`list_for_user`、`revoke`、`authenticate(plaintext)`（按前缀定位 + 哈希比对 + `_mark_used`）。
+- `ApiKeyService`：`create`（生成明文 + 哈希存储，仅创建时返回明文）、`list_for_user`、`revoke`、`authenticate(plaintext)`（按前缀定位 + 哈希比对 + `_mark_used`）。`_mark_used` 写 `last_used_at` 受 `settings.auth_api_key_last_used_throttle_seconds`（默认 60s）节流：窗口内重复认证跳过 UPDATE，避免每请求写同一行导致行锁串行化雪崩（ql-20260627-001-a3f2）。
 - `Permission(StrEnum)` / `PermissionGroup`：枚举全部权限点，按 `group()` 归入 AUDIT/WORKSPACE/PLATFORM/ADMIN/CHANGE/AGENT/PPM 等组。
 - `rbac`：`collect_permissions*`（all / platform / everywhere）、`has_permission`、`list_user_workspace_roles`、`allowed_workspace_ids`，按工作空间范围聚合权限。
 - 启动 seed：`bootstrap_admin_and_seed_rbac`（建管理员 + 种 RBAC）、`seed_platform_admin_role`。
@@ -37,6 +37,9 @@ _extract_api_key → ApiKeyService.authenticate(明文) → User
 - 权限分平台级与工作空间级两层，`collect_permissions_everywhere` 用于判断「任意 ws 内是否拥有某权限」。
 - RBAC 种子与管理员账号在应用启动时注入，调整权限点需同步更新 seed 与前端权限矩阵。
 - 登录仅认 username（D-001 纯登录名），email 不再作为登录账号识别；User.email 可空，非空仍全局唯一（D-003）。
+
+## 变更索引
+- ql-20260627-001-a3f2 | API key 认证 last_used_at 时间节流（默认 60s），消除每请求 UPDATE 同一行致行锁串行化的生产性能雪崩。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->

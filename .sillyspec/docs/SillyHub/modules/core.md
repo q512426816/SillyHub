@@ -42,6 +42,9 @@ register_audit_hooks(engine) → after_insert/update/delete → _write_audit_log
 - `audit_hooks` 基于 ORM 事件钩子，直接用 `connection.execute` 绕过 ORM 的写入不会产生审计记录。
 - 全应用禁止直接 `SQLModel(...)`，数据模型必须继承 `models.base.BaseModel`，以便审计与元数据统一。
 
+## 变更索引
+- ql-20260627-001-a3f2 | `Settings` 新增 `auth_api_key_last_used_throttle_seconds`（API key `last_used_at` 写入节流，默认 60s，0=每次都写）。
+
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->

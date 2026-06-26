@@ -173,7 +173,8 @@ created_at: 2026-06-23 10:09:12
 - sillyhub-daemon/src/task-runner.ts（complete result slice(3000) 放宽）
 
 ## ql-20260627-001-a3f2 | 2026-06-27 00:06:53 | API key 认证 last_used_at 时间节流——修复每请求 UPDATE 同一行致行锁串行化的生产性能雪崩
-状态：进行中
+状态：已完成
+结果：19 测试全过（新增 2 个节流回归测试 + 原有 17），ruff format/check 通过；同步更新 auth.md / core.md 模块文档（新建变更索引）。预期效果：同一 key 60s 内仅 1 次 UPDATE，行锁竞争从「每请求」降到「每分钟 1 次」，雪崩消除。
 背景：线上后端 CPU 96%、health check 5s；39 个 DB 连接中 38 个卡在 UPDATE api_keys SET last_used_at 同一行等行锁（排队 40-55s）。daemon/前端共用同一 API key，每请求认证都 commit 写同一行 → 雪崩。
 方案：A 时间节流（直接命中根因，最小改动）。_mark_used 加 if：距上次 last_used_at < 阈值（默认 60s）则跳过 commit。同一 key 60s 内仅 1 次 UPDATE，行锁竞争从每请求降到每分钟 1 次，雪崩消失。
 文件：
