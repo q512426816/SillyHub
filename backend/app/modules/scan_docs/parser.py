@@ -93,16 +93,25 @@ class ScanDocsParser:
     def parse_docs_tree(
         self,
         sillyspec_root: Path,
+        *,
+        platform_managed: bool = False,
     ) -> ScanDocsResult:
         """Recursively parse all docs under .sillyspec/docs/.
 
         Parameters
         ----------
         sillyspec_root:
-            Path to the workspace root (where ``.sillyspec/`` lives).
+            Path to the workspace root (where ``.sillyspec/`` lives) — or, when
+            ``platform_managed`` is True, the ``.sillyspec`` content root itself
+            (扁平布局：``docs/`` 直接在其下，D-005@v1)。
+        platform_managed:
+            True 时按扁平布局解析（``sillyspec_root/docs/``，省略 ``.sillyspec`` 段），
+            用于 platform-managed / daemon-client workspace。默认 False（包裹语义）。
         """
         result = ScanDocsResult(component_key=None)
-        docs_dir = sillyspec_root / ".sillyspec" / "docs"
+        docs_dir = (
+            sillyspec_root / "docs" if platform_managed else sillyspec_root / ".sillyspec" / "docs"
+        )
 
         if not docs_dir.is_dir():
             result.warnings.append(
@@ -183,10 +192,16 @@ class ScanDocsParser:
         self,
         sillyspec_root: Path,
         component_key: str,
+        *,
+        platform_managed: bool = False,
     ) -> ScanDocsResult:
-        """Parse docs for a single component under .sillyspec/docs/{component_key}/scan/."""
+        """Parse docs for a single component under .sillyspec/docs/{component_key}/scan/.
+
+        ``platform_managed`` True 时按扁平布局解析（``sillyspec_root/docs/{component_key}/scan/``）。
+        """
         result = ScanDocsResult(component_key=component_key)
-        scan_dir = sillyspec_root / ".sillyspec" / "docs" / component_key / "scan"
+        docs_base = sillyspec_root if platform_managed else sillyspec_root / ".sillyspec"
+        scan_dir = docs_base / "docs" / component_key / "scan"
         sillyspec_resolved = sillyspec_root.resolve()
 
         found_types: dict[str, ParsedDoc] = {}
