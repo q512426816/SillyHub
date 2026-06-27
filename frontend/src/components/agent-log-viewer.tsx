@@ -22,6 +22,7 @@ import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
 import { PermissionApprovalCard } from "@/components/permission-approval-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MarkdownText } from "@/components/ui/markdown-text";
 import type { SessionPermissionRequest } from "@/lib/daemon";
 import { asString, cn } from "@/lib/utils";
 import type { AgentRunLogEntry } from "@/lib/agent";
@@ -383,8 +384,8 @@ export function AgentLogRow({
             <ToolResultCard body={processedLog.parsedToolResult} />
           </div>
         ) : processedLog.mergedAssistantContent != null ? (
-          <div className="min-w-0 max-w-full whitespace-pre-wrap break-words font-mono text-zinc-800 [overflow-wrap:anywhere]">
-            {processedLog.mergedAssistantContent}
+          <div className="min-w-0 max-w-full text-zinc-800 [overflow-wrap:anywhere]">
+            <MarkdownText content={processedLog.mergedAssistantContent} />
           </div>
         ) : isThinking ? (
           /* ql-20260617-011 + task-15 / FR-10：纯 [THINKING] delta 合并后渲染为完整段落。

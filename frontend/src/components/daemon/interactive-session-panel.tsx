@@ -36,6 +36,7 @@ import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { MarkdownText } from "@/components/ui/markdown-text";
 import { ApiError } from "@/lib/api";
 import {
   createSession,
@@ -773,7 +774,7 @@ export function InteractiveSessionPanel({
                 {turn.output && (
                   <div className="flex justify-start">
                     <div className="max-w-[86%] rounded-md border bg-card px-3 py-2 text-xs leading-relaxed text-foreground shadow-sm">
-                      <div className="whitespace-pre-wrap break-words">{turn.output}</div>
+                      <MarkdownText content={turn.output} />
                     </div>
                   </div>
                 )}

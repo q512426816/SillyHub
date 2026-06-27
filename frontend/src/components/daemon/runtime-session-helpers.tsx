@@ -8,6 +8,7 @@ import { MessageSquarePlus, Plus, RefreshCw, Send, Trash2 } from "lucide-react";
 import { AgentModelInput } from "@/components/AgentModelInput";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { MarkdownText } from "@/components/ui/markdown-text";
 import { InteractiveSessionPanel, type SessionTurnView } from "@/components/daemon/interactive-session-panel";
 import { type AgentRunLogEntry } from "@/lib/agent";
 import {
@@ -389,7 +390,7 @@ export function QuickChatSessionSection({
                 {turn.output && (
                   <div className="flex justify-start">
                     <div className="max-w-[86%] rounded-md border bg-card px-3 py-2 text-xs leading-relaxed text-foreground shadow-sm">
-                      <div className="whitespace-pre-wrap break-words">{turn.output}</div>
+                      <MarkdownText content={turn.output} />
                     </div>
                   </div>
                 )}
@@ -715,10 +716,14 @@ export function SessionHistoryView({
                         className={
                           isUser
                             ? "max-w-[86%] whitespace-pre-wrap break-words rounded-md bg-primary px-3 py-2 text-xs leading-relaxed text-primary-foreground shadow-sm"
-                            : "max-w-[86%] whitespace-pre-wrap break-words rounded-md border bg-card px-3 py-2 text-xs leading-relaxed text-foreground shadow-sm"
+                            : "max-w-[86%] rounded-md border bg-card px-3 py-2 text-xs leading-relaxed text-foreground shadow-sm"
                         }
                       >
-                        {log.content_redacted ?? ""}
+                        {isUser ? (
+                          log.content_redacted ?? ""
+                        ) : (
+                          <MarkdownText content={log.content_redacted ?? ""} />
+                        )}
                       </div>
                     </div>
                   );
