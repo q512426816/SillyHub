@@ -626,6 +626,18 @@ async def dispatch(
     if config is None or not config.enabled:
         return {"dispatched": False, "reason": f"no_config_for_stage:{target_stage}"}
 
+    # Execute team 分流（2026-06-28-team-mainline-integration D-006@v1）：opt-in
+    # team mode（change.stages.team_mode=True）→ 创建 execute Mission（写类 Worker
+    # 并行 + Finalizer 收敛），而非单 AgentRun。默认 single（保护 change workflow，
+    # 零行为变化 D-001）。per-Worker worktree 隔离 = D-006 完整实现延后；v1 共享
+    # worktree（靠 task 分工避免冲突，标注待完整 worktree 隔离）。
+    if target_stage == "execute":
+        change_for_mode = await session.get(Change, change_id)
+        if change_for_mode is not None:
+            stages_mode = dict(change_for_mode.stages or {})
+            if stages_mode.get("team_mode") is True:
+                return await _dispatch_execute_team(session, workspace_id, change_id, user_id)
+
     # Reconcile stale/orphan Runs before the active-run gate
     await _cleanup_before_dispatch(session, change_id)
 
@@ -711,6 +723,100 @@ async def dispatch(
 # ---------------------------------------------------------------------------
 # SillySpecStageDispatchService — unified dispatch entry (task-07)
 # ---------------------------------------------------------------------------
+
+
+async def _dispatch_execute_team(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> dict[str, Any]:
+    """Execute team 分流（D-006@v1，2026-06-28-team-mainline-integration）。
+
+    Opt-in 入口（``change.stages.team_mode=True`` 时由 ``dispatch`` 调用）：创建
+    execute Mission —— Coordinator 拆 plan 为写类 Worker（impl）→ 并行 dispatch →
+    Finalizer 收敛 patch（``finalize_execute_mission``，人审 apply-back D-006）。
+
+    per-Worker 独立 worktree 隔离 = D-006 完整实现延后；v1 共享 worktree，靠
+    Coordinator 拆 task 分工避免并发写冲突（proposal §9 完整隔离留后续）。
+    """
+    from app.modules.agent.control import MissionControlService
+    from app.modules.agent.delegation import (
+        CoordinatorPlanner,
+        DelegationError,
+        GLMConfig,
+    )
+    from app.modules.agent.execution import MissionExecutionService
+    from app.modules.agent.mission import MissionService
+
+    cfg = GLMConfig.from_env()
+    if cfg is None:
+        return {"dispatched": False, "reason": "glm_not_configured_for_execute_team"}
+    planner = CoordinatorPlanner(cfg)
+    objective = (
+        f"执行变更 {change_id} 的 plan：按 task 并行实现代码，每个 Worker 负责一组 "
+        "task（impl 角色，写代码），产出 patch 供 Finalizer 合并、人审 apply-back。"
+    )
+    try:
+        mission, runs = await MissionService(session).start_mission(
+            workspace_id=workspace_id,
+            objective=objective,
+            created_by=user_id,
+            change_id=change_id,
+            planner=planner,
+            budget_usd=4.0,
+        )
+    except DelegationError as exc:
+        log.warning(
+            "execute_team_plan_failed",
+            change_id=str(change_id),
+            error=str(exc),
+        )
+        return {"dispatched": False, "reason": f"execute_team_plan_failed:{exc}"}
+
+    exec_svc = MissionExecutionService(session)
+    ctrl = MissionControlService(session)
+    now = datetime.now(UTC)
+    for run in runs:
+        allowed, reason = await ctrl.can_dispatch_worker(mission)
+        if not allowed:
+            run.status = "killed"
+            run.finished_at = now
+            run.exit_code = -1
+            log.info(
+                "execute_team_worker_rejected",
+                mission_id=str(mission.id),
+                run_id=str(run.id),
+                reason=reason,
+            )
+            continue
+        try:
+            await exec_svc.dispatch_worker(
+                run,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                read_only=False,  # execute 写类 Worker
+            )
+        except Exception as exc:
+            log.warning(
+                "execute_team_dispatch_failed",
+                run_id=str(run.id),
+                error=str(exc),
+            )
+    await session.commit()
+    log.info(
+        "execute_team_dispatched",
+        change_id=str(change_id),
+        mission_id=str(mission.id),
+        workers=len(runs),
+    )
+    return {
+        "dispatched": True,
+        "mode": "team",
+        "mission_id": str(mission.id),
+        "workers": len(runs),
+        "stage": "execute",
+    }
 
 
 async def read_verify_result(
