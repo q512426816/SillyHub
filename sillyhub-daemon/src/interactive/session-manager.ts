@@ -143,6 +143,19 @@ interface SessionManagerDepsWithQueued extends SessionManagerDeps {
  * ql-20260617-012）。完整 assistant message 到达时清空 buffer（delta 是
  * 完整内容的子集，避免重复）。session end/fail 时销毁 timer。
  */
+/**
+ * ql-20260627-usage：partial flush 注入的 usage 快照。来自 stream_event
+ * message_delta.usage（Claude 流式 cumulative 计费，整条 message 的累计值）。
+ * 字段名映射为短名 cache_*_tokens（Claude SDK 原始为 cache_*_input_tokens），
+ * 与 backend _METADATA_FIELDS 对齐，避免 daemon lift 重复映射。
+ */
+interface PartialUsageSnapshot {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+}
+
 interface PartialFlushBuffer {
   /** 累积的 thinking_delta.thinking 内容（待 flush）。 */
   thinking: string;
@@ -176,6 +189,28 @@ interface PartialFlushBuffer {
    * 守卫：同 segment 的后续 partial 直接丢弃）。_clearPartialBuffer 后清空（turn 边界）。
    */
   completedSegments: Set<string>;
+  /**
+   * ql-20260627-usage：最新 message_delta.usage（cumulative）。null = 本 turn 尚未
+   * 收到 message_delta。_flushPartial 注入到 flat 消息顶层 usage，经 daemon
+   * onTurnMessage lift → backend submit_messages 实时更新 AgentRun token
+   *（不必等终态 result 汇总）。
+   */
+  pendingUsage: PartialUsageSnapshot | null;
+  /** ql-20260627-usage：上次已 flush 的 usage（去重，仅在变化时注入）。null = 从未注入。 */
+  flushedUsage: PartialUsageSnapshot | null;
+  /**
+   * ql-session-usage：session 级跨 API call 累积 token（实时显示用）。
+   * 每次 message_start 累加 input_tokens，message_delta 累加 output delta。
+   * pendingUsage 取 sessionUsage 值，使 submitMessages 发送递增的 session 总量。
+   */
+  sessionInputTokens: number;
+  sessionOutputTokens: number;
+  sessionCacheReadTokens: number;
+  sessionCacheCreationTokens: number;
+  /** 当前 API call 上次的 output_tokens（算 delta 用）。 */
+  lastCallOutputTokens: number;
+  lastCallCacheReadTokens: number;
+  lastCallCacheCreationTokens: number;
 }
 
 /**
@@ -1817,6 +1852,15 @@ export class SessionManager {
         currentSegmentId: null,
         flushedSegments: [],
         completedSegments: new Set<string>(),
+        pendingUsage: null,
+        flushedUsage: null,
+        sessionInputTokens: 0,
+        sessionOutputTokens: 0,
+        sessionCacheReadTokens: 0,
+        sessionCacheCreationTokens: 0,
+        lastCallOutputTokens: 0,
+        lastCallCacheReadTokens: 0,
+        lastCallCacheCreationTokens: 0,
       };
       this._partialBuffers.set(sessionId, buf);
     }
@@ -1830,6 +1874,8 @@ export class SessionManager {
           index?: number;
           delta?: { type?: string; thinking?: string; text?: string };
           message?: { id?: string };
+          // ql-20260627-usage：message_delta.usage（Claude SDK 全名 cache_*_input_tokens）。
+          usage?: Record<string, unknown>;
         };
         // task-11：message_start 提取 message.id（segmentId 拼接用，跨 message 隔离）。
         // SDK 实测 message_start 带 message.id（Anthropic Messages API 标准）；若缺失
@@ -1839,6 +1885,23 @@ export class SessionManager {
           if (typeof mid === 'string' && mid) {
             buf.currentMessageId = mid;
           }
+          // ql-session-usage：message_start.usage.input_tokens 是本次 API call
+          // 的完整输入 token（含 context）。累加到 session 级总量。
+          // cache_*_input_tokens 也在 message_start 中（如果启用 prompt caching）。
+          const startUsage = (ev.message as { usage?: Record<string, unknown> }).usage;
+          if (startUsage && typeof startUsage['input_tokens'] === 'number') {
+            buf.sessionInputTokens += startUsage['input_tokens'] as number;
+          }
+          if (startUsage && typeof startUsage['cache_read_input_tokens'] === 'number') {
+            buf.sessionCacheReadTokens += startUsage['cache_read_input_tokens'] as number;
+          }
+          if (startUsage && typeof startUsage['cache_creation_input_tokens'] === 'number') {
+            buf.sessionCacheCreationTokens += startUsage['cache_creation_input_tokens'] as number;
+          }
+          // 新 API call 开始，重置 per-call output tracker
+          buf.lastCallOutputTokens = 0;
+          buf.lastCallCacheReadTokens = 0;
+          buf.lastCallCacheCreationTokens = 0;
         }
         // content_block_start 带 content_block.type==='thinking' 仅是开始标记，
         // thinking_delta 会跟随，无需特殊处理（避免 emit 空消息）。
@@ -1867,6 +1930,41 @@ export class SessionManager {
           } else if (delta.type === 'text_delta' && typeof delta.text === 'string') {
             buf.assistant += delta.text;
           }
+        }
+        // ql-20260627-usage：message_delta 携带本 message 的 cumulative usage
+        //（Claude 流式计费，整条累计；cache_*_input_tokens 为全名）。
+        // ql-session-usage：message_delta.usage.output_tokens 是本 API call 的累计
+        // output。我们算 delta（本次 - 上次）累加到 session 级总量，让 submitMessages
+        // 发送递增的 session 总量（而非单次 call 的值，避免前端只看到几 k）。
+        if (ev.type === 'message_delta' && ev.usage) {
+          const u = ev.usage;
+          // output delta accumulation
+          const callOut = typeof u['output_tokens'] === 'number' ? (u['output_tokens'] as number) : 0;
+          const outDelta = Math.max(0, callOut - buf.lastCallOutputTokens);
+          buf.sessionOutputTokens += outDelta;
+          buf.lastCallOutputTokens = callOut;
+
+          // cache_read delta (message_delta may update cache_read cumulative for this call)
+          const callCacheRead = typeof u['cache_read_input_tokens'] === 'number'
+            ? (u['cache_read_input_tokens'] as number) : 0;
+          const cacheReadDelta = Math.max(0, callCacheRead - buf.lastCallCacheReadTokens);
+          buf.sessionCacheReadTokens += cacheReadDelta;
+          buf.lastCallCacheReadTokens = callCacheRead;
+
+          // cache_creation delta
+          const callCacheCreate = typeof u['cache_creation_input_tokens'] === 'number'
+            ? (u['cache_creation_input_tokens'] as number) : 0;
+          const cacheCreateDelta = Math.max(0, callCacheCreate - buf.lastCallCacheCreationTokens);
+          buf.sessionCacheCreationTokens += cacheCreateDelta;
+          buf.lastCallCacheCreationTokens = callCacheCreate;
+
+          // pendingUsage 用 session 级累积值
+          buf.pendingUsage = {
+            input_tokens: buf.sessionInputTokens,
+            output_tokens: buf.sessionOutputTokens,
+            cache_read_tokens: buf.sessionCacheReadTokens,
+            cache_creation_tokens: buf.sessionCacheCreationTokens,
+          };
         }
       }
     } else if (msgType === 'system') {
@@ -1931,6 +2029,22 @@ export class SessionManager {
     buf.thinking = '';
     buf.assistant = '';
 
+    // ql-20260627-usage：usage 仅在 pendingUsage 变化时注入一条 flat 消息
+    //（message_delta.usage 是 cumulative 全量，去重避免 backend 重复累加 token）。
+    // 一次 flush 至多注入一条（thinking 优先，否则 assistant）。
+    const usageToFlush =
+      buf.pendingUsage &&
+      !this._usageEqual(buf.pendingUsage, buf.flushedUsage)
+        ? buf.pendingUsage
+        : null;
+    let usageAttached = false;
+    const attachUsage = (formatted: SDKMessage): void => {
+      if (usageToFlush && !usageAttached) {
+        (formatted as Record<string, unknown>)['usage'] = { ...usageToFlush };
+        usageAttached = true;
+      }
+    };
+
     if (thinking) {
       // task-11（FR-07/FR-08）：partial 行携带 segmentId + isPartial，
       // 供 backend（task-12）+ 前端 normalize 识别「该 segment 已有完整行时丢弃」。
@@ -1941,6 +2055,7 @@ export class SessionManager {
         channel: 'stdout',
         metadata: { thinking: true, segmentId, isPartial: true },
       } as unknown as SDKMessage;
+      attachUsage(formatted);
       // 记录已 flush 的 segment（完整 message 到达时据此 emit override 信号）。
       buf.flushedSegments.push({ segmentId, logTimestamp: new Date().toISOString() });
       await this.deps.onTurnMessage(sessionId, runId, formatted);
@@ -1953,6 +2068,7 @@ export class SessionManager {
         content: `[ASSISTANT] ${assistant}`,
         channel: 'stdout',
       } as unknown as SDKMessage;
+      attachUsage(formatted);
       await this.deps.onTurnMessage(sessionId, runId, formatted);
     }
     // thinking_tokens 仅在值变化时 emit（running total，去重）。
@@ -1965,6 +2081,39 @@ export class SessionManager {
       } as unknown as SDKMessage;
       await this.deps.onTurnMessage(sessionId, runId, formatted);
     }
+    // usage 没有被任何 content 消息携带（message_delta 在 content 之后到达，
+    // thinking/assistant 可能已被前一轮 flush 清空）→ 发一条独立 usage 消息，
+    // 确保 backend 实时拿到 token 计数。content 为空字符串避免 agent_run_logs 多一行噪声。
+    if (usageToFlush && !usageAttached) {
+      const formatted = {
+        event_type: 'text',
+        content: '',
+        channel: 'stdout',
+      } as unknown as SDKMessage;
+      attachUsage(formatted);
+      await this.deps.onTurnMessage(sessionId, runId, formatted);
+    }
+    // usage 已通过 flat 消息注入 → 标记去重（下次同值不再发）。
+    if (usageToFlush) {
+      buf.flushedUsage = buf.pendingUsage;
+    }
+  }
+
+  /**
+   * ql-20260627-usage：比较两个 usage 快照是否全字段相等（_flushPartial 去重判定）。
+   * 两者皆 null 视为相等；任一为 null 视为不等。
+   */
+  private _usageEqual(
+    a: PartialUsageSnapshot | null,
+    b: PartialUsageSnapshot | null,
+  ): boolean {
+    if (!a || !b) return a === b;
+    return (
+      a.input_tokens === b.input_tokens &&
+      a.output_tokens === b.output_tokens &&
+      a.cache_read_tokens === b.cache_read_tokens &&
+      a.cache_creation_tokens === b.cache_creation_tokens
+    );
   }
 
   /**
@@ -1993,6 +2142,10 @@ export class SessionManager {
     buf.assistant = '';
     buf.lastTokens = 0;
     buf.flushedTokens = 0;
+    // ql-20260627-usage：完整 assistant message 已带终态 usage（daemon lift 自
+    // message.usage）；下条 message_start 开始新 message，usage 重新累计，故清零。
+    buf.pendingUsage = null;
+    buf.flushedUsage = null;
 
     // task-11：记录已完成 segment（late partial 守卫用）。
     for (const segId of completedSegments) {

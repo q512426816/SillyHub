@@ -23,7 +23,7 @@ import type { EChartsOption } from "echarts";
 import { CHART_COLORS } from "@/lib/ppm/aggregations";
 
 /**
- * 时间序列单点(小时桶 1d / 日桶 7d·30d,D-002@v1)。
+ * 时间序列单点(20 分钟桶 1d / 小时桶 7d / 日桶 30d)。
  * 字段与 task-11 lib/daemon.ts 的 RuntimeUsagePoint 对齐(完整 6 字段);
  * 本组件只消费 input_tokens / output_tokens,cache_* / total_cost_usd 透传不用。
  *

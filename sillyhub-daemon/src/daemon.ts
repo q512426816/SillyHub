@@ -1319,6 +1319,38 @@ export class Daemon {
     try {
       const fwdMsg = msg as unknown as Record<string, unknown>;
       const msgType = fwdMsg['type'];
+      // ql-20260627-usage（实时 token 透传）：通用 usage lift，提到 if/else 之外。
+      // 两类消息都可能携带 usage：
+      //   1) session-manager flush 产出的 flat 消息（[THINKING]/[ASSISTANT]）——
+      //      message_delta.usage 已注入顶层 fwdMsg['usage']（partial 实时计费）。
+      //   2) Claude SDK assistant 完整消息——usage 嵌套在 msg.message.usage。
+      // 统一提到顶层并做 Anthropic 全名（cache_*_input_tokens）→ 短名（cache_*_tokens）
+      // 映射，让 backend submit_messages 实时更新 AgentRun token，不必等 result 汇总。
+      // task-16：复制一份再映射，不修改原 usage 对象（adapter 产，只读）；全名缺失 →
+      // 短名也不 set（backend NULL，D-001@v1）。
+      let liftedUsage = fwdMsg['usage'] as Record<string, unknown> | undefined;
+      if (!liftedUsage && msgType === 'assistant') {
+        // assistant 完整消息：usage 嵌套在 message.usage，先取出（message_delta 未及时
+        // flush 被 _clearPartialBufferSync 清掉时的兜底终态来源）。
+        const inner = fwdMsg['message'] as Record<string, unknown> | undefined;
+        liftedUsage = inner?.['usage'] as Record<string, unknown> | undefined;
+      }
+      if (liftedUsage && typeof liftedUsage['input_tokens'] === 'number') {
+        const lifted: Record<string, unknown> = { ...liftedUsage };
+        if (
+          typeof lifted['cache_creation_input_tokens'] === 'number' &&
+          lifted['cache_creation_tokens'] === undefined
+        ) {
+          lifted['cache_creation_tokens'] = lifted['cache_creation_input_tokens'];
+        }
+        if (
+          typeof lifted['cache_read_input_tokens'] === 'number' &&
+          lifted['cache_read_tokens'] === undefined
+        ) {
+          lifted['cache_read_tokens'] = lifted['cache_read_input_tokens'];
+        }
+        fwdMsg['usage'] = lifted;
+      }
       // task-06（Reverse Sync / design §5.3 第 6 点）：Codex flat message 的
       // thread_started 事件携带 session_id=threadId。daemon 提取并记日志，便于
       // 追踪 Codex thread 与 AgentSession 的绑定；flat message 原样 submitMessages
@@ -1337,33 +1369,6 @@ export class Daemon {
             thread_id: flatSessionId,
             provider: state.provider,
           });
-        }
-      } else if (msgType === 'assistant') {
-        // 实时 token 回写（Claude SDK）：assistant message 的 usage 在 msg.message.usage，
-        // backend submit_messages 提取顶层 msg.usage。这里把 usage 提到顶层，让 backend
-        // 实时更新 AgentRun.input_tokens / output_tokens（每条 assistant message 都带
-        // 累积 usage，不必等 result 事件汇总）。
-        const inner = fwdMsg['message'] as Record<string, unknown> | undefined;
-        const usage = inner?.['usage'] as Record<string, unknown> | undefined;
-        if (usage && typeof usage['input_tokens'] === 'number') {
-          // task-16：复制一份并做 Anthropic 全名 → 短名映射，让 backend
-          // _METADATA_FIELDS 命中 cache_*_tokens（Claude SDK 原始字段是
-          // cache_*_input_tokens）。不修改原 usage 对象（adapter 产，只读）。
-          // 全名缺失（codex/老 CLI）→ 短名也不 set → backend NULL（D-001@v1）。
-          const lifted: Record<string, unknown> = { ...usage };
-          if (
-            typeof lifted['cache_creation_input_tokens'] === 'number' &&
-            lifted['cache_creation_tokens'] === undefined
-          ) {
-            lifted['cache_creation_tokens'] = lifted['cache_creation_input_tokens'];
-          }
-          if (
-            typeof lifted['cache_read_input_tokens'] === 'number' &&
-            lifted['cache_read_tokens'] === undefined
-          ) {
-            lifted['cache_read_tokens'] = lifted['cache_read_input_tokens'];
-          }
-          fwdMsg['usage'] = lifted;
         }
       }
       // task-10（FR-04 / D-005@v1）：interactive submit 走退避重试。

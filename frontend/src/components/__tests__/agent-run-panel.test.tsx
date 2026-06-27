@@ -124,6 +124,9 @@ describe("task-16: AgentRunPanel token 徽标展示 (FR-11)", () => {
     hoisted.getAgentRunMock.mockResolvedValue({
       input_tokens: 0,
       output_tokens: 0,
+      // 四维 badge：cache 维度同样为 0，避免 undefined 误显 "—" 占位。
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
     });
     render(
       <AgentRunPanel

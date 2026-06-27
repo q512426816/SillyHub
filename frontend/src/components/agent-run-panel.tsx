@@ -104,18 +104,26 @@ function adaptInputControls(input: AgentRunInputStream): AgentLogInputControls {
 function TokenUsageBadge({
   input,
   output,
+  cacheRead,
+  cacheCreation,
 }: {
   input: number | null;
   output: number | null;
+  cacheRead: number | null;
+  cacheCreation: number | null;
 }) {
   return (
     <span
       data-testid="token-usage-badge"
       className="inline-flex items-center gap-1 rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] font-mono text-zinc-600"
     >
-      <span title="输入 tokens">↓ {formatTokenCount(input)}</span>
+      <span title="输入词元">↓ {formatTokenCount(input)}</span>
       <span className="text-zinc-300">|</span>
-      <span title="输出 tokens">↑ {formatTokenCount(output)}</span>
+      <span title="输出词元">↑ {formatTokenCount(output)}</span>
+      <span className="text-zinc-300">|</span>
+      <span title="缓存读取">⚡ {formatTokenCount(cacheRead)}</span>
+      <span className="text-zinc-300">|</span>
+      <span title="缓存写入">✎ {formatTokenCount(cacheCreation)}</span>
     </span>
   );
 }
@@ -151,6 +159,8 @@ export function AgentRunPanel({
   const [tokenUsage, setTokenUsage] = React.useState<{
     input: number | null;
     output: number | null;
+    cacheRead: number | null;
+    cacheCreation: number | null;
   } | null>(null);
 
   // fetchUsage 通过 ref 暴露给 handleDone：handleDone 闭包在 useAgentRunStream 内部
@@ -192,6 +202,8 @@ export function AgentRunPanel({
             setTokenUsage({
               input: run.input_tokens,
               output: run.output_tokens,
+              cacheRead: run.cache_read_tokens,
+              cacheCreation: run.cache_creation_tokens,
             });
           }
         })
@@ -220,6 +232,8 @@ export function AgentRunPanel({
           <TokenUsageBadge
             input={tokenUsage.input}
             output={tokenUsage.output}
+            cacheRead={tokenUsage.cacheRead}
+            cacheCreation={tokenUsage.cacheCreation}
           />
         )}
         {summary}

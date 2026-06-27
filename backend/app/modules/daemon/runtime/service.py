@@ -540,8 +540,6 @@ class RuntimeService:
         # ── daily(按时间桶;方言分支:PG date_trunc / SQLite strftime)──
         daily_sql = sa_text(self._build_daily_sql(dialect, unit))
         daily_params: dict[str, object] = {"since": since_param}
-        if dialect == "postgresql":
-            daily_params["unit"] = unit
         daily_rows = (await self._session.execute(daily_sql, daily_params)).mappings().all()
 
         # ── 聚合成 RuntimeUsageRead(延迟 import 避免循环依赖)──
@@ -638,23 +636,27 @@ class RuntimeService:
         """
 
     @staticmethod
-    def _build_daily_sql(dialect: str, unit: Literal["hour", "day"]) -> str:
+    def _build_daily_sql(dialect: str, unit: Literal["20min", "hour", "day"]) -> str:
         """构造 daily 时间桶 SQL,按方言分支(R-05)。
 
-        - PostgreSQL: ``date_trunc(:unit, r.created_at) AS bucket`` — 参数化 unit,
-          PG 原生支持;WHERE 用 ``r.created_at >= :since``(since=aware UTC)。
-        - SQLite: ``strftime('<fmt>', r.created_at) AS bucket`` — hour 桶用
-          ``%Y-%m-%d %H``(YYYY-MM-DD HH),day 桶用 ``%Y-%m-%d``;WHERE 用
-          ``datetime(r.created_at) >= :since``(since=本地 naive,对齐 ORM 存储)。
-
-        ⚠️ SQLite 的 strftime 返回 TEXT(本地 naive 桶),PG 的 date_trunc 返回 timestamptz;
-        ``_normalize_bucket_ts`` 统一把 bucket 解析成 aware UTC datetime(测试只断言
-        「ts 整点 + 桶数量」,不绑死时区,故生产/测试桶时区差异不影响断言)。
+        桶粒度:20min(1d) / hour(7d) / day(30d)。
+        - PostgreSQL: date_trunc 支持 hour/day;20min 桶用
+          ``date_trunc('hour', ...) + FLOOR(minute/20)*interval '20 min'``。
+        - SQLite: strftime;20min 桶用 strftime modifier 对齐到 20 分钟整点。
         """
         if dialect == "postgresql":
-            return """
+            if unit == "20min":
+                bucket = (
+                    "date_trunc('hour', r.created_at) "
+                    "+ FLOOR(date_part('minute', r.created_at) / 20) * INTERVAL '20 minutes'"
+                )
+            elif unit == "hour":
+                bucket = "date_trunc('hour', r.created_at)"
+            else:
+                bucket = "date_trunc('day', r.created_at)"
+            return f"""
                 SELECT COALESCE(s.runtime_id, l.runtime_id) AS rid,
-                       date_trunc(:unit, r.created_at)          AS bucket,
+                       {bucket}                                  AS bucket,
                        SUM(COALESCE(r.input_tokens, 0))          AS input_tokens,
                        SUM(COALESCE(r.output_tokens, 0))         AS output_tokens,
                        SUM(COALESCE(r.cache_read_tokens, 0))     AS cache_read_tokens,
@@ -666,15 +668,22 @@ class RuntimeService:
                 WHERE COALESCE(s.runtime_id, l.runtime_id) IS NOT NULL
                   AND r.created_at >= :since
                 GROUP BY COALESCE(s.runtime_id, l.runtime_id),
-                         date_trunc(:unit, r.created_at)
+                         {bucket}
                 ORDER BY bucket ASC
             """
         # SQLite(及任何非 PG 方言,fallback 到 strftime)
-        fmt = "%Y-%m-%d %H" if unit == "hour" else "%Y-%m-%d"
-        # fmt 是内部常量(unit 受控为 'hour'|'day'),无 SQL 注入风险。
+        if unit == "20min":
+            bucket = (
+                "strftime('%Y-%m-%d %H:%M', r.created_at, "
+                "'-' || (CAST(strftime('%M', r.created_at) AS INTEGER) % 20) || ' minutes')"
+            )
+        elif unit == "hour":
+            bucket = "strftime('%Y-%m-%d %H', r.created_at)"
+        else:
+            bucket = "strftime('%Y-%m-%d', r.created_at)"
         return f"""
             SELECT COALESCE(s.runtime_id, l.runtime_id) AS rid,
-                   strftime('{fmt}', r.created_at)         AS bucket,
+                   {bucket}                               AS bucket,
                    SUM(COALESCE(r.input_tokens, 0))          AS input_tokens,
                    SUM(COALESCE(r.output_tokens, 0))         AS output_tokens,
                    SUM(COALESCE(r.cache_read_tokens, 0))     AS cache_read_tokens,
@@ -686,7 +695,7 @@ class RuntimeService:
             WHERE COALESCE(s.runtime_id, l.runtime_id) IS NOT NULL
               AND datetime(r.created_at) >= :since
             GROUP BY COALESCE(s.runtime_id, l.runtime_id),
-                     strftime('{fmt}', r.created_at)
+                     {bucket}
             ORDER BY bucket ASC
         """
 
@@ -702,7 +711,7 @@ class RuntimeService:
             return bucket if bucket.tzinfo is not None else bucket.replace(tzinfo=UTC)
         # SQLite TEXT 桶
         text_bucket = str(bucket)
-        for fmt in ("%Y-%m-%d %H", "%Y-%m-%d"):
+        for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H", "%Y-%m-%d"):
             try:
                 return datetime.strptime(text_bucket, fmt).replace(tzinfo=UTC)
             except ValueError:
@@ -711,9 +720,13 @@ class RuntimeService:
         return datetime.fromisoformat(text_bucket).replace(tzinfo=UTC)
 
     @staticmethod
-    def _bucket_unit(window: RuntimeUsageWindow) -> Literal["hour", "day"]:
-        """分组粒度(D-002@v1):1d→hour,7d/30d→day。"""
-        return "hour" if window == "1d" else "day"
+    def _bucket_unit(window: RuntimeUsageWindow) -> Literal["20min", "hour", "day"]:
+        """分组粒度:1d→20min 桶(≤72 点),7d→hour 桶(≤168 点),30d→day 桶(≤30 点)。"""
+        if window == "1d":
+            return "20min"
+        if window == "7d":
+            return "hour"
+        return "day"
 
     @staticmethod
     def _compute_since(window: RuntimeUsageWindow) -> datetime:

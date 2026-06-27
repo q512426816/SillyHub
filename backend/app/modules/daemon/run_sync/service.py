@@ -59,6 +59,8 @@ class PublishIntent:
     agent_run_status: str | None
     input_tokens: int | None
     output_tokens: int | None
+    cache_read_tokens: int | None
+    cache_creation_tokens: int | None
     agent_session_id: uuid.UUID | None
     timestamp_iso: str
 
@@ -115,6 +117,10 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
             summary_payload["input_tokens"] = intent.input_tokens
         if intent.output_tokens is not None:
             summary_payload["output_tokens"] = intent.output_tokens
+        if intent.cache_read_tokens is not None:
+            summary_payload["cache_read_tokens"] = intent.cache_read_tokens
+        if intent.cache_creation_tokens is not None:
+            summary_payload["cache_creation_tokens"] = intent.cache_creation_tokens
         await redis.publish(channel_name, json.dumps(summary_payload))
     except Exception:
         log.warning(
@@ -155,6 +161,10 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
                 token_payload["input_tokens"] = intent.input_tokens
             if intent.output_tokens is not None:
                 token_payload["output_tokens"] = intent.output_tokens
+            if intent.cache_read_tokens is not None:
+                token_payload["cache_read_tokens"] = intent.cache_read_tokens
+            if intent.cache_creation_tokens is not None:
+                token_payload["cache_creation_tokens"] = intent.cache_creation_tokens
             await redis.publish(session_channel, json.dumps(token_payload, default=str))
     except Exception:
         log.warning(
@@ -184,7 +194,7 @@ class RunSyncService:
         claim_token: str,
         agent_run_id: uuid.UUID,
         messages: list[dict],
-    ) -> int:
+    ) -> SubmittedMessages:
         """Submit agent conversation messages for a lease.
 
         Writes to AgentRunLog and syncs AgentRun status, then returns a
@@ -445,6 +455,11 @@ class RunSyncService:
         # 提前取好，PublishIntent 只含标量，publish 时完全不碰 session/连接。
         publish_input_tokens = agent_run.input_tokens if agent_run is not None else None
         publish_output_tokens = agent_run.output_tokens if agent_run is not None else None
+        # ql-cache：prompt cache 词元同步提取（对齐 input/output），供 publish 实时透传。
+        publish_cache_read_tokens = agent_run.cache_read_tokens if agent_run is not None else None
+        publish_cache_creation_tokens = (
+            agent_run.cache_creation_tokens if agent_run is not None else None
+        )
         publish_session_id = agent_run.agent_session_id if agent_run is not None else None
 
         if count > 0 or (agent_run is not None and agent_run_status == "running"):
@@ -485,6 +500,8 @@ class RunSyncService:
                 agent_run_status=agent_run_status,
                 input_tokens=publish_input_tokens,
                 output_tokens=publish_output_tokens,
+                cache_read_tokens=publish_cache_read_tokens,
+                cache_creation_tokens=publish_cache_creation_tokens,
                 agent_session_id=publish_session_id,
                 timestamp_iso=now.isoformat().replace("+00:00", "Z"),
             ),

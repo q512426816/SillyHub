@@ -33,6 +33,9 @@ export interface AgentRun {
   agent_session_id: string | null;
   input_tokens: number | null;
   output_tokens: number | null;
+  // Cache token tracking（prompt cache read/creation；Claude 命中缓存维度，codex 无缓存→null）
+  cache_read_tokens: number | null;
+  cache_creation_tokens: number | null;
   // Post-scan validation fields
   post_scan_status: string | null;
   source_commit: string | null;

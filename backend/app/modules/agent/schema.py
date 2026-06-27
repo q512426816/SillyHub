@@ -115,6 +115,8 @@ class AgentRunResponse(BaseModel):
     )
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_creation_tokens: int | None = None
     # Post-scan validation fields
     post_scan_status: str | None = None
     source_commit: str | None = None

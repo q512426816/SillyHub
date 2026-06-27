@@ -241,20 +241,20 @@ class TestGetRuntimesUsageDualPathDedup:
 
 
 class TestGetRuntimesUsageGrouping:
-    """D-002@v1 分组粒度:1d 小时桶 / 7d·30d 日桶。"""
+    """分组粒度:1d→20min 桶 / 7d→hour 桶 / 30d→day 桶。"""
 
     @pytest.mark.asyncio
-    async def test_window_1d_hourly_buckets(self, db_session: AsyncSession) -> None:
-        """1d 窗跨 3 小时的 run → daily 有 3 个 point,ts 为 hour-truncated(分秒归零)。"""
+    async def test_window_1d_20min_buckets(self, db_session: AsyncSession) -> None:
+        """1d 窗跨 3 个 20 分钟桶的 run → daily 有 3 个 point,ts 分钟为 0/20/40。"""
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)
         session = await _create_session(db_session, user_id=user_id, runtime_id=rt.id)
 
-        # 用本地自然日内的 3 个小时点(今天 09:30 / 10:15 / 11:45)
+        # 用本地自然日内的 3 个点(今天 09:05 / 09:25 / 10:45),分属 3 个 20 分钟桶
         now_local = datetime.now().astimezone()
         today_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
         base = today_local.replace(hour=9)
-        for minute in (30, 75, 105 + 60):  # 09:30, 10:15, 11:45(分钟偏移)
+        for minute in (5, 25, 105):  # 09:05→09:00桶, 09:25→09:20桶, 10:45→10:40桶
             ts = base + timedelta(minutes=minute)
             await _create_run(
                 db_session,
@@ -269,37 +269,36 @@ class TestGetRuntimesUsageGrouping:
         by_rid = _by_rid(result)
         assert _rid_of(rt) in by_rid
         points = by_rid[_rid_of(rt)].daily
-        assert len(points) == 3, f"跨 3 小时应 3 桶,实际 {len(points)}"
-        # ts 整点:分钟秒微秒全 0
+        assert len(points) == 3, f"跨 3 个 20 分钟桶应 3 桶,实际 {len(points)}"
+        # ts 分钟对齐到 0/20/40,秒微秒全 0
         for p in points:
             ts = _normalize_ts(p.ts)
-            assert ts.minute == 0 and ts.second == 0 and ts.microsecond == 0, (
-                f"小时桶 ts 应整点,实际 {ts}"
-            )
+            assert ts.minute in (0, 20, 40), f"20 分钟桶 ts 分钟应为 0/20/40,实际 {ts}"
+            assert ts.second == 0 and ts.microsecond == 0
         # 升序
         ts_list = [_normalize_ts(p.ts) for p in points]
         assert ts_list == sorted(ts_list)
 
     @pytest.mark.asyncio
-    async def test_window_7d_daily_buckets(self, db_session: AsyncSession) -> None:
-        """7d 窗跨 2 天的 run → daily 有 2 个 point,ts 为 day-truncated(时分秒归零)。"""
+    async def test_window_7d_hourly_buckets(self, db_session: AsyncSession) -> None:
+        """7d 窗跨 2 小时的 run → daily 有 2 个 point,ts 为 hour-truncated(分钟秒归零)。"""
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)
         session = await _create_session(db_session, user_id=user_id, runtime_id=rt.id)
 
         now = datetime.now(UTC)
-        # 今天某个时刻 + 昨天(>1 天前但在 7d 窗内)
+        # 今天 + 3 小时前(同一天不同小时)
         await _create_run(
             db_session,
             agent_session_id=session.id,
             input_tokens=5,
-            created_at=now - timedelta(hours=2),
+            created_at=now,
         )
         await _create_run(
             db_session,
             agent_session_id=session.id,
             input_tokens=7,
-            created_at=now - timedelta(days=1, hours=3),
+            created_at=now - timedelta(hours=3),
         )
 
         svc = RuntimeService(db_session)
@@ -308,25 +307,23 @@ class TestGetRuntimesUsageGrouping:
         by_rid = _by_rid(result)
         assert _rid_of(rt) in by_rid
         points = by_rid[_rid_of(rt)].daily
-        assert len(points) == 2, f"跨 2 天应 2 桶,实际 {len(points)}"
+        assert len(points) == 2, f"跨 2 小时应 2 桶,实际 {len(points)}"
         for p in points:
             ts = _normalize_ts(p.ts)
-            assert ts.hour == 0 and ts.minute == 0 and ts.second == 0, (
-                f"日桶 ts 应 00:00:00,实际 {ts}"
-            )
+            assert ts.minute == 0 and ts.second == 0, f"小时桶 ts 分秒归零,实际 {ts}"
 
     @pytest.mark.asyncio
-    async def test_window_1d_max_24_hourly_buckets(self, db_session: AsyncSession) -> None:
-        """1d 窗 daily 最多 24 个小时桶(不会无限多)。"""
+    async def test_window_1d_max_72_20min_buckets(self, db_session: AsyncSession) -> None:
+        """1d 窗 daily 最多 72 个 20 分钟桶(不会无限多)。"""
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)
         session = await _create_session(db_session, user_id=user_id, runtime_id=rt.id)
 
         now_local = datetime.now().astimezone()
         today_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-        # 今天每个小时各一个 run(最多 24 桶,但今天可能还没到 24 小时)
-        for h in range(24):
-            ts = today_local + timedelta(hours=h)
+        # 今天每个 20 分钟桶各一个 run(最多 72 桶,但今天可能还没到)
+        for m in range(0, 24 * 60, 20):
+            ts = today_local + timedelta(minutes=m)
             if ts <= now_local:
                 await _create_run(
                     db_session,
@@ -340,7 +337,7 @@ class TestGetRuntimesUsageGrouping:
 
         by_rid = _by_rid(result)
         if _rid_of(rt) in by_rid:
-            assert len(by_rid[_rid_of(rt)].daily) <= 24
+            assert len(by_rid[_rid_of(rt)].daily) <= 72
 
 
 class TestGetRuntimesUsageWindow:
@@ -563,13 +560,13 @@ class TestComputeSince:
 
 
 class TestBucketUnit:
-    """D-002@v1 _bucket_unit 静态方法。"""
+    """_bucket_unit 静态方法。"""
 
-    def test_bucket_unit_1d_is_hour(self) -> None:
-        assert RuntimeService._bucket_unit("1d") == "hour"
+    def test_bucket_unit_1d_is_20min(self) -> None:
+        assert RuntimeService._bucket_unit("1d") == "20min"
 
-    def test_bucket_unit_7d_is_day(self) -> None:
-        assert RuntimeService._bucket_unit("7d") == "day"
+    def test_bucket_unit_7d_is_hour(self) -> None:
+        assert RuntimeService._bucket_unit("7d") == "hour"
 
     def test_bucket_unit_30d_is_day(self) -> None:
         assert RuntimeService._bucket_unit("30d") == "day"

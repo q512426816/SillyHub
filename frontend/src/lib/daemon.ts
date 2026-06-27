@@ -680,6 +680,12 @@ export interface SessionStreamEnvelope {
    */
   input_tokens?: number | null;
   output_tokens?: number | null;
+  /**
+   * prompt cache 维度（Claude）：tokens / turn_completed 事件携带；
+   * codex / OpenAI 系无缓存 → null。供徽标四维展示。
+   */
+  cache_read_tokens?: number | null;
+  cache_creation_tokens?: number | null;
 }
 
 export interface SessionStreamHandlers {
@@ -1001,7 +1007,7 @@ export interface RuntimeUsageSummary {
 }
 
 /**
- * 时间序列单点（小时桶 1d / 日桶 7d·30d，D-002@v1）。ts 为 ISO 8601 字符串
+ * 时间序列单点（20 分钟桶 1d / 小时桶 7d / 日桶 30d）。ts 为 ISO 8601 字符串
  * （后端 datetime 序列化结果），前端不再 Date 化，图表 x 轴直接用字符串。
  */
 export interface RuntimeUsagePoint {
