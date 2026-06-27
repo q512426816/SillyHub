@@ -2594,6 +2594,17 @@ export class Daemon {
         (rawExec.agentSessionId as string | undefined) ??
         (rawExec.agent_session_id as string | undefined) ??
         payload.agentSessionId,
+      // ql-20260627：tar 模式 transport + workspaceId 透传（build_claim_payload 已返回，
+      // 但 execPayload 构造遗漏 → _startInteractiveSession 读不到 → 默认 shared → spec
+      // pull/sync 从不触发 → interactive scan 文档不同步到服务器）。
+      transport:
+        (rawExec.transport as string | undefined) ??
+        (rawExec.transport_mode as string | undefined) ??
+        (rawExec.transportMode as string | undefined) ??
+        'shared',
+      workspaceId:
+        (rawExec.workspaceId as string | undefined) ??
+        (rawExec.workspace_id as string | undefined),
       // gap-2：claim_token 归一化到 execPayload.claimToken。
       // 优先用 claim 阶段拿到的 claimToken（局部变量，来自 claimResp.claim_token）；
       // 兜底 rawExec.claim_token / rawExec.claimToken（理论上 claimResp 顶层就有，

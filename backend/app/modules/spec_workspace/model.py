@@ -19,7 +19,7 @@ from sqlmodel import Field
 from app.models.base import BaseModel
 
 SpecStrategy = Literal["platform-managed", "repo-mirrored", "repo-native"]
-SyncStatus = Literal["clean", "dirty", "conflicted"]
+SyncStatus = Literal["pending", "clean", "dirty", "conflicted"]
 
 
 class SpecWorkspace(BaseModel, table=True):
@@ -72,7 +72,7 @@ class SpecWorkspace(BaseModel, table=True):
         sa_column=Column(String(50), nullable=False),
     )
     sync_status: str = Field(
-        default="clean",
+        default="pending",
         sa_column=Column(String(20), nullable=False),
     )
     last_synced_at: datetime | None = Field(

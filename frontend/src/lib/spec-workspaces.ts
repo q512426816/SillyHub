@@ -5,7 +5,7 @@ import { apiFetch } from "@/lib/api";
 import type { AgentRunStatus } from "@/lib/agent";
 
 export type SpecStrategy = "platform-managed" | "repo-mirrored" | "repo-native";
-export type SyncStatus = "clean" | "dirty" | "conflicted";
+export type SyncStatus = "pending" | "clean" | "dirty" | "conflicted";
 
 export interface SpecWorkspace {
   id: string;

@@ -281,6 +281,16 @@ export interface LeaseCtx {
    * AskUserQuestion 走人审（歧义决策阻塞），其他工具 allow-through 让 scan 自动跑。
    */
   askUserOnly?: boolean;
+  /**
+   * ql-20260627：spec 传输模式（tar/shared）。daemon-client workspace → 'tar'（pull/sync）。
+   * build_claim_payload 返回，_startInteractiveSession 据此决定是否 pull + set syncCtx。
+   */
+  transport?: string;
+  /**
+   * ql-20260627：workspace ID（tar 模式 pullSpecBundle 需要）。
+   * build_claim_payload 返回，与 transport 配对使用。
+   */
+  workspaceId?: string;
 }
 
 /**

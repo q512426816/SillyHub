@@ -79,7 +79,7 @@ class SpecWorkspaceService:
             strategy=payload.strategy,
             repo_sillyspec_path=payload.repo_sillyspec_path,
             profile_version=payload.profile_version,
-            sync_status="clean",
+            sync_status="pending",
             last_synced_at=None,
             created_at=now,
             updated_at=now,

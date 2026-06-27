@@ -47,13 +47,15 @@ interface Props {
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-const SYNC_STATUS_VARIANT: Record<string, "success" | "warning" | "destructive"> = {
+const SYNC_STATUS_VARIANT: Record<string, "success" | "warning" | "destructive" | "outline"> = {
+  pending: "outline",
   clean: "success",
   dirty: "warning",
   conflicted: "destructive",
 };
 
 const SYNC_STATUS_LABEL: Record<string, string> = {
+  pending: "待同步",
   clean: "已同步",
   dirty: "有变更未同步",
   conflicted: "存在冲突",

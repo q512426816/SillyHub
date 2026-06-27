@@ -13,7 +13,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 SpecStrategyLiteral = Literal["platform-managed", "repo-mirrored", "repo-native"]
-SyncStatusLiteral = Literal["clean", "dirty", "conflicted"]
+SyncStatusLiteral = Literal["pending", "clean", "dirty", "conflicted"]
 
 
 class SpecWorkspaceCreate(BaseModel):
