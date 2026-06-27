@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -620,19 +621,31 @@ from app.modules.agent.delegation import CoordinatorPlanner, GLMConfig  # noqa: 
 from app.modules.agent.execution import MissionExecutionService  # noqa: E402
 from app.modules.agent.mission import MissionService, derive_status  # noqa: E402
 from app.modules.agent.mission_schema import (  # noqa: E402
+    MissionArtifactResponse,
     MissionCreateRequest,
     MissionResponse,
     MissionWorkerRunResponse,
 )
-from app.modules.agent.model import AgentMission  # noqa: E402
+from app.modules.agent.model import AgentArtifact, AgentMission  # noqa: E402
 
 # Roles that need write tools; everything else is treated read-only at dispatch.
 _WRITE_ROLES = frozenset({"impl"})
 
 
 def _mission_to_response(
-    mission: AgentMission, runs: list[AgentRun], cost: float
+    mission: AgentMission,
+    runs: list[AgentRun],
+    cost: float,
+    artifacts_by_run: dict[uuid.UUID, list[AgentArtifact]] | None = None,
 ) -> MissionResponse:
+    artifacts_by_run = artifacts_by_run or {}
+    workers: list[MissionWorkerRunResponse] = []
+    for r in runs:
+        w = MissionWorkerRunResponse.model_validate(r)
+        w.artifacts = [
+            MissionArtifactResponse.model_validate(a) for a in artifacts_by_run.get(r.id, [])
+        ]
+        workers.append(w)
     return MissionResponse(
         id=mission.id,
         workspace_id=mission.workspace_id,
@@ -644,8 +657,24 @@ def _mission_to_response(
         constraints=mission.constraints,
         cancelled_at=mission.cancelled_at,
         created_at=mission.created_at,
-        workers=[MissionWorkerRunResponse.model_validate(r) for r in runs],
+        workers=workers,
     )
+
+
+async def _load_mission_artifacts(
+    session: AsyncSession, mission_id: uuid.UUID
+) -> dict[uuid.UUID, list[AgentArtifact]]:
+    """Group a mission's Artifacts by run_id (for Worker.artifacts, Wave 3)."""
+    stmt = (
+        select(AgentArtifact)
+        .join(AgentRun, AgentArtifact.run_id == AgentRun.id)
+        .where(AgentRun.mission_id == mission_id)
+        .order_by(AgentArtifact.created_at)
+    )
+    out: dict[uuid.UUID, list[AgentArtifact]] = {}
+    for a in (await session.execute(stmt)).scalars().all():
+        out.setdefault(a.run_id, []).append(a)
+    return out
 
 
 @router.post(
@@ -677,7 +706,24 @@ async def create_mission(
         planner=planner,
     )
     exec_svc = MissionExecutionService(session)
+    ctrl = MissionControlService(session)
+    now = datetime.now(UTC)
     for run in runs:
+        # 治理门（D-008@v1，2026-06-28-team-mainline-integration）：dispatch 前检查
+        # 取消/并发上限/预算。拒绝时把该 Run 标 ``killed``（非悬挂），否则 pending
+        # 悬挂会让 derive_status 永远 running、Mission 永不收敛（start_mission 已
+        # persist N 个 pending，超预算/超并发时剩余的必须进入终态）。
+        allowed, reason = await ctrl.can_dispatch_worker(mission)
+        if not allowed:
+            run.status = "killed"
+            run.finished_at = now
+            run.exit_code = -1
+            log.info(
+                "mission_worker_dispatch_rejected",
+                run_id=str(run.id),
+                reason=reason,
+            )
+            continue
         read_only = run.role not in _WRITE_ROLES
         try:
             await exec_svc.dispatch_worker(
@@ -685,10 +731,11 @@ async def create_mission(
             )
         except Exception as exc:
             log.warning("mission_worker_dispatch_failed", run_id=str(run.id), error=str(exc))
-    ctrl = MissionControlService(session)
+    await session.commit()  # 提交 killed / dispatch 状态
     fresh = await ctrl.worker_runs(mission.id)
     cost = await ctrl.cost_so_far(mission.id)
-    return _mission_to_response(mission, fresh, cost)
+    arts = await _load_mission_artifacts(session, mission.id)
+    return _mission_to_response(mission, fresh, cost, arts)
 
 
 @router.get("/missions/{mission_id}", response_model=MissionResponse)
@@ -706,7 +753,8 @@ async def get_mission(
     ctrl = MissionControlService(session)
     runs = await ctrl.worker_runs(mission.id)
     cost = await ctrl.cost_so_far(mission.id)
-    return _mission_to_response(mission, runs, cost)
+    arts = await _load_mission_artifacts(session, mission.id)
+    return _mission_to_response(mission, runs, cost, arts)
 
 
 @router.post("/missions/{mission_id}/cancel", response_model=MissionResponse)
@@ -722,4 +770,5 @@ async def cancel_mission(
     await ctrl.cancel(mission)
     runs = await ctrl.worker_runs(mission.id)
     cost = await ctrl.cost_so_far(mission.id)
-    return _mission_to_response(mission, runs, cost)
+    arts = await _load_mission_artifacts(session, mission.id)
+    return _mission_to_response(mission, runs, cost, arts)

@@ -49,15 +49,29 @@ class MissionControlService:
         runs = await self.worker_runs(mission_id)
         return sum(1 for r in runs if r.status in _ACTIVE)
 
+    async def running_worker_count(self, mission_id: uuid.UUID) -> int:
+        """Count Workers already claimed by a daemon (``running``) — concurrency basis.
+
+        Distinct from ``active_worker_count`` (pending+running, used by cancel): the
+        dispatch gate limits *concurrently running* daemon processes, not pending
+        (not-yet-dispatched) Runs — otherwise a flat mission of N pending Workers
+        trips ``max_workers`` before any dispatch happens (2026-06-28 D-008@v1).
+        """
+        runs = await self.worker_runs(mission_id)
+        return sum(1 for r in runs if r.status == "running")
+
     async def can_dispatch_worker(self, mission: AgentMission) -> tuple[bool, str]:
         """Pre-dispatch gate. Returns ``(allowed, reason)``.
 
         ``reason`` is ``ok`` when allowed, otherwise one of:
         ``mission_cancelled | max_workers_reached | budget_exceeded``.
+
+        Concurrency uses ``running_worker_count`` (claimed by daemon), NOT
+        ``active_worker_count`` (pending+running) — see D-008@v1.
         """
         if mission.cancelled_at is not None:
             return False, "mission_cancelled"
-        if await self.active_worker_count(mission.id) >= MAX_WORKERS:
+        if await self.running_worker_count(mission.id) >= MAX_WORKERS:
             return False, "max_workers_reached"
         if (
             mission.budget_usd is not None

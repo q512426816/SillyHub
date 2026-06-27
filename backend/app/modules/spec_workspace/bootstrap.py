@@ -49,10 +49,24 @@ class SpecBootstrapService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def bootstrap(self, workspace_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+    async def bootstrap(
+        self,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        mode: str = "single",
+    ) -> dict:
         """Launch a bootstrap AgentRun for the given spec workspace.
 
-        Steps:
+        ``mode`` selects the orchestration strategy (2026-06-28-team-mainline-integration):
+        - ``single`` (default, D-001/E): current interactive AgentRun path —
+          backwards-compatible, zero behavior change.
+        - ``team`` / ``auto``: Coordinator splits the bootstrap objective into
+          parallel read-only Workers (arch/style/test/integration/risk), each
+          dispatched to a daemon; Finalizer merges their Artifacts (D-005/D-007).
+          scan 与 bootstrap 合一为只读场景 (D-003).
+
+        Steps (single):
         1. Load SpecWorkspace and Workspace records
         2. Ensure spec_root directory exists
         3. Write spec_bootstrap.start audit log
@@ -62,8 +76,13 @@ class SpecBootstrapService:
         7. Return launch contract
 
         Returns:
-            dict with agent_run_id, stream_url, status, spec_root, message.
+            dict with agent_run_id (single) or mission_id (team), stream_url,
+            status, spec_root, message.
         """
+        # Team / auto orchestration (D-001/E: opt-in, single stays default).
+        if mode in ("team", "auto"):
+            return await self._bootstrap_team(workspace_id, user_id, mode=mode)
+
         # 1. Load records
         spec_ws = await self._get_spec_workspace(workspace_id)
         workspace = await self._session.get(Workspace, workspace_id)
@@ -176,6 +195,145 @@ class SpecBootstrapService:
                 details={"workspace_id": str(workspace_id)},
             )
         return result
+
+    async def _bootstrap_team(
+        self,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        mode: str = "team",
+    ) -> dict:
+        """Team-mode bootstrap — parallel read-only Workers + Finalizer (Wave 2).
+
+        D-001/E: ``single`` (interactive) stays the default; ``team``/``auto`` is
+        opt-in. Reuses the Mission pipeline (MissionService → dispatch with
+        governance gate → Finalizer convergence via complete_lease, D-007/D-008)
+        so bootstrap team inherits the Wave 1 收敛闭环 for free.
+
+        Bootstrap is a read-only scenario (D-003): Workers analyze the project
+        (arch/style/test/integration/risk) and return structured Artifacts; the
+        Finalizer merges them. Writing ``.sillyspec/docs`` files is done by the
+        Workers themselves under read-only analysis prompts (v1) — Finalizer
+        merges the summaries, avoiding concurrent-write conflicts (proposal §9).
+        """
+        from app.modules.agent.control import MissionControlService
+        from app.modules.agent.delegation import (
+            CoordinatorPlanner,
+            DelegationError,
+            GLMConfig,
+        )
+        from app.modules.agent.execution import MissionExecutionService
+        from app.modules.agent.mission import MissionService
+
+        spec_ws = await self._get_spec_workspace(workspace_id)
+        workspace = await self._session.get(Workspace, workspace_id)
+        if workspace is None:
+            raise SpecWorkspaceNotFound(
+                "Workspace not found.",
+                details={"workspace_id": str(workspace_id)},
+            )
+
+        cfg = GLMConfig.from_env()
+        if cfg is None:
+            raise SpecWorkspaceNotFound(
+                "GLM endpoint not configured (ANTHROPIC_BASE_URL/AUTH_TOKEN) — "
+                "team-mode bootstrap requires the Coordinator.",
+                details={"workspace_id": str(workspace_id), "mode": mode},
+            )
+
+        planner = CoordinatorPlanner(cfg)
+        objective = (
+            "扫描项目结构并生成 .sillyspec 文档：分析架构、代码规范、测试、集成、"
+            "风险，每个 Worker 负责一个维度，产出结构化摘要（发现/结论/产出文件"
+            "路径/风险）。Worker 可在 spec_root 下写自己维度的文档。"
+        )
+        try:
+            mission, runs = await MissionService(self._session).start_mission(
+                workspace_id=workspace_id,
+                objective=objective,
+                created_by=user_id,
+                planner=planner,
+                # 默认预算保守（single 档 4×，原 plan T6.2 待观测回填）。
+                budget_usd=4.0,
+            )
+        except DelegationError as exc:
+            raise SpecWorkspaceNotFound(
+                f"team bootstrap 规划失败: {exc}",
+                details={"workspace_id": str(workspace_id), "error": str(exc)},
+            ) from exc
+
+        # Dispatch Worker Runs with governance gate (D-008). Bootstrap is
+        # read-only → all Workers read_only=True (D-004@v2: v1 不强制工具).
+        exec_svc = MissionExecutionService(self._session)
+        ctrl = MissionControlService(self._session)
+        now = datetime.now(UTC)
+        for run in runs:
+            allowed, reason = await ctrl.can_dispatch_worker(mission)
+            if not allowed:
+                run.status = "killed"
+                run.finished_at = now
+                run.exit_code = -1
+                log.info(
+                    "bootstrap_team_worker_rejected",
+                    mission_id=str(mission.id),
+                    run_id=str(run.id),
+                    reason=reason,
+                )
+                continue
+            try:
+                await exec_svc.dispatch_worker(
+                    run,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    read_only=True,
+                )
+            except Exception as exc:
+                log.warning(
+                    "bootstrap_team_dispatch_failed",
+                    run_id=str(run.id),
+                    error=str(exc),
+                )
+        await self._session.commit()
+
+        # Audit: bootstrap team started
+        self._session.add(
+            AuditLog(
+                id=uuid.uuid4(),
+                workspace_id=workspace_id,
+                actor_id=user_id,
+                action="spec_bootstrap.start",
+                resource_type="spec_workspace",
+                resource_id=workspace_id,
+                details_json=json.dumps(
+                    {
+                        "spec_root": str(spec_ws.spec_root),
+                        "strategy": spec_ws.strategy,
+                        "mode": mode,
+                        "mission_id": str(mission.id),
+                        "workers": len(runs),
+                    }
+                ),
+            )
+        )
+        await self._session.commit()
+
+        log.info(
+            "spec_bootstrap.team_start",
+            workspace_id=str(workspace_id),
+            mission_id=str(mission.id),
+            workers=len(runs),
+            mode=mode,
+        )
+
+        return {
+            "mode": mode,
+            "mission_id": mission.id,
+            "workspace_id": workspace_id,
+            "status": "running",
+            "spec_root": str(spec_ws.spec_root),
+            "workers": len(runs),
+            "message": "Bootstrap team mission started. Finalizer merges Worker Artifacts on convergence.",
+        }
 
 
 # ---------------------------------------------------------------------------

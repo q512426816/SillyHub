@@ -186,6 +186,13 @@ export function listWorkspaceAgentSessions(
 /*  Mission — multi-agent orchestration (2026-06-19-multi-agent)       */
 /* ================================================================== */
 
+export interface MissionArtifact {
+  id: string;
+  kind: string;
+  content_ref: string | null;
+  created_at: string;
+}
+
 export interface MissionWorkerRun {
   id: string;
   role: string | null;
@@ -194,6 +201,7 @@ export interface MissionWorkerRun {
   total_cost_usd: number | null;
   started_at: string | null;
   finished_at: string | null;
+  artifacts: MissionArtifact[];
 }
 
 export interface Mission {

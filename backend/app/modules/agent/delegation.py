@@ -29,6 +29,30 @@ WORKER_ROLES = frozenset({"arch", "code_style", "test", "integration", "risk", "
 
 MAX_WORKERS = 5  # Wave 1 硬约束 (proposal §5)
 
+
+# auto 路由启发式关键词（D-002@v1：四因子量化阈值待 plan 细化，v1 用关键词+长度）
+_TEAM_HINT_KEYWORDS = frozenset(
+    {"扫描", "架构", "多模块", "重构", "scan", "bootstrap", "全面", "整体", "multiple"}
+)
+
+
+def route(objective: str, constraints: dict[str, Any] | None = None) -> str:
+    """single/team/auto 三档路由（D-002@v1，2026-06-28-team-mainline-integration）。
+
+    第一版接 bootstrap + execute 入口（其他 stage 保持 single）。``auto`` 按启发式
+    （objective 长度 + 关键词）选 single/team；显式 ``constraints['mode']`` 优先。
+    四因子（任务数/模块跨度/风险/预计上下文）量化阈值待 plan 阶段细化。
+    """
+    if constraints:
+        forced = constraints.get("mode")
+        if forced in ("single", "team"):
+            return forced
+    # auto 启发式（v1 简化）
+    if len(objective) > 200 or any(k in objective for k in _TEAM_HINT_KEYWORDS):
+        return "team"
+    return "single"
+
+
 _SYSTEM = (
     "你是多 Agent 编排的 Coordinator。把用户的任务拆解为 Worker 委派，"
     "只输出一个 JSON 对象，不要有任何多余解释或 markdown 代码块。\n"

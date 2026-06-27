@@ -488,6 +488,31 @@ class LeaseService:
                     error=str(exc),
                 )
 
+        # Mission 收敛（D-007@v1，2026-06-28-team-mainline-integration）：lease 完成
+        # 是 Worker Run 收口的唯一锚点（batch + interactive 都走 complete_lease）。
+        # run 属于 mission 时：collect_completed_artifacts 回灌（C2，与 session end
+        # 解耦）+ 全 worker 终态（derive_status=done/degraded）触发 Finalizer 合并。
+        # 非 mission run（绝大多数）→ converge 直接 return None，零影响（SC-5 兼容）。
+        # 失败 try/except 不阻塞 lease 完成（与上方 stage_callback/post_scan/end_session
+        # 容错一致）。derive_status 是纯函数无 watcher，不能作触发器 — 锚点必须在此。
+        if lease.agent_run_id is not None:
+            try:
+                from app.modules.agent.delegation import GLMConfig
+                from app.modules.agent.finalizer import (
+                    converge_mission_for_completed_run,
+                )
+
+                await converge_mission_for_completed_run(
+                    self._session, lease.agent_run_id, GLMConfig.from_env()
+                )
+            except Exception as exc:
+                log.warning(
+                    "complete_lease_mission_converge_failed",
+                    lease_id=str(lease_id),
+                    agent_run_id=str(lease.agent_run_id),
+                    error=str(exc),
+                )
+
         log.info(
             "daemon_lease_completed",
             lease_id=str(lease_id),

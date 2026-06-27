@@ -11,9 +11,16 @@ Artifact collection is intentionally simple in v1: a Worker's structured output
 becomes one ``summary`` Artifact. Richer parsing (patch / test_result) lands
 with the Finalizer in Wave 4/6.
 
-NOTE: ``tool_config`` is passed through to the lease; the daemon applying it to
-the spawned claude CLI (``--allowedTools``) is a daemon-side change tracked for
-Wave 6 — until then Workers fall back to the daemon's default tool policy.
+NOTE (D-004@v2, 2026-06-28-team-mainline-integration): ``tool_config`` is passed
+through to the lease but the daemon does NOT apply it — ``--allowedTools`` is a
+daemon-side change not done in v1. Design Grill F1 further confirmed
+``canUseTool`` human-approval is only injected for interactive sessions
+(``permission_service.py``), not batch Worker leases, so write-Worker tool-level
+approval is also unavailable in v1. **v1 工具治理 = 不强制**: read-only and write
+Workers both run under the daemon's default policy + prompt constraints; safety
+for execute write-Workers converges at the Finalizer's human-reviewed patch
+apply-back (D-006@v1), not at the tool layer. The whitelist below is retained as
+a forward-compatibility hint for when daemon ``--allowedTools`` support lands.
 """
 
 from __future__ import annotations

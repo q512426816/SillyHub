@@ -15,6 +15,15 @@ class MissionCreateRequest(BaseModel):
     constraints: dict | None = None
 
 
+class MissionArtifactResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    kind: str
+    content_ref: str | None = None
+    created_at: datetime
+
+
 class MissionWorkerRunResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -25,6 +34,7 @@ class MissionWorkerRunResponse(BaseModel):
     total_cost_usd: float | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    artifacts: list[MissionArtifactResponse] = []
 
 
 class MissionResponse(BaseModel):
