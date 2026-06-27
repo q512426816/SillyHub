@@ -131,6 +131,15 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
             if ws_id is not None:
                 payload["workspaceId"] = str(ws_id)  # daemon pullSpecBundle 需 wsId（task-06）
                 payload["workspace_id"] = str(ws_id)  # snake_case 双写
+            # spec 同步策略透传（2026-06-28-daemon-client-spec-sync-strategy，D-001）：
+            # daemon pullSpecBundle 据此三分支初始化缓存。来源 lease_meta.spec_strategy
+            # （placement.py prepare_scan_interactive_dispatch 写入）。双写 camelCase+snake_case，
+            # 与 transport/workspaceId 惯例一致。未写（旧 lease/quick-chat）→ daemon 按默认
+            # platform-managed 兼容。
+            _spec_strategy = lease_meta.get("spec_strategy")
+            if _spec_strategy:
+                payload["specStrategy"] = _spec_strategy
+                payload["spec_strategy"] = _spec_strategy
             # 不 set specRoot/spec_root → daemon execPayload.specRoot 为 undefined
             # → _startInteractiveSession 走 pullSpecBundle（D-003@v1）。
             return payload

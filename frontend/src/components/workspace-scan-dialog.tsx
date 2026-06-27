@@ -46,6 +46,11 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   const [runtimes, setRuntimes] = useState<DaemonRuntimeRead[]>([]);
   const [daemonRuntimeId, setDaemonRuntimeId] = useState<string>("");
   const [daemonRootPath, setDaemonRootPath] = useState("");
+  // spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy）：daemon-client workspace
+  // 创建时用户可选源项目已有 .sillyspec 如何进入平台。默认 platform-managed 零回归。
+  const [specStrategy, setSpecStrategy] = useState<
+    "platform-managed" | "repo-mirrored" | "repo-native"
+  >("platform-managed");
 
   useEffect(() => {
     if (!canUseServerLocal && pathSource === "server-local") {
@@ -86,6 +91,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
         root_path: normalizedRoot,
         path_source: "daemon-client",
         daemon_runtime_id: daemonRuntimeId,
+        spec_strategy: specStrategy,
       });
       onCreated();
     } catch (err) {
@@ -251,6 +257,37 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
                   placeholder="my-workspace"
                   disabled={phase === "creating"}
                 />
+              </div>
+            )}
+            {daemonRootPath && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">
+                  spec 同步策略（源项目已有 .sillyspec 如何进入平台）
+                </label>
+                <div className="flex flex-col gap-1">
+                  {(
+                    [
+                      ["platform-managed", "平台托管（默认，不碰源项目，从零扫描）"],
+                      ["repo-mirrored", "单次导入（复制源项目 .sillyspec 快照，不污染源项目）"],
+                      ["repo-native", "源项目即真理（软链接，扫描直接写源项目）"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <label key={value} className="flex items-center gap-1.5 text-xs">
+                      <input
+                        type="radio"
+                        checked={specStrategy === value}
+                        onChange={() => setSpecStrategy(value)}
+                        disabled={phase === "creating"}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                {specStrategy === "repo-native" && (
+                  <p className="text-[11px] text-amber-600">
+                    ⚠ 扫描产出会写入源项目 .sillyspec（若被 git 跟踪需自行 commit）。
+                  </p>
+                )}
               </div>
             )}
             {daemonRootPath && (

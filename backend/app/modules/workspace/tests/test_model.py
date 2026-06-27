@@ -152,12 +152,17 @@ def test_workspace_create_component_fields_optional() -> None:
     assert dto.tech_stack == []
 
 
-def test_workspace_create_no_spec_strategy() -> None:
-    """WorkspaceCreate should NOT contain spec_strategy field."""
+def test_workspace_create_has_spec_strategy_default_platform_managed() -> None:
+    """WorkspaceCreate 含 spec_strategy 字段，默认 platform-managed（D-004）。
+
+    2026-06-28-daemon-client-spec-sync-strategy 起支持 platform-managed/repo-mirrored/repo-native，
+    daemon-client workspace 创建时用户可选源项目已有 .sillyspec 如何进入平台。
+    """
     from app.modules.workspace.schema import WorkspaceCreate
 
-    field_names = set(WorkspaceCreate.model_fields.keys())
-    assert "spec_strategy" not in field_names
+    field = WorkspaceCreate.model_fields.get("spec_strategy")
+    assert field is not None
+    assert field.default == "platform-managed"
 
 
 def test_workspace_read_has_no_sillyspec_path() -> None:

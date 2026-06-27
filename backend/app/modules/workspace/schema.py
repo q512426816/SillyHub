@@ -11,6 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 WorkspaceStatusLiteral = Literal["pending", "active", "archived", "deleted"]
 PathSourceLiteral = Literal["server-local", "daemon-client"]
+# spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy，D-001/D-004）。
+# daemon-client workspace 创建时用户可选；决定源项目已有 .sillyspec 如何进入平台。
+SpecStrategyLiteral = Literal["platform-managed", "repo-mirrored", "repo-native"]
 
 _SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$")
 
@@ -67,6 +70,9 @@ class ScanGenerateRequest(BaseModel):
     # Added here in task-01 per plan.md execute-consistency convention.
     path_source: PathSourceLiteral = "server-local"
     daemon_runtime_id: uuid.UUID | None = None
+    # spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy）。daemon-client
+    # scan-generate 首次创建 workspace 时据此落 spec_workspaces.strategy。
+    spec_strategy: SpecStrategyLiteral = "platform-managed"
 
     @field_validator("root_path", mode="before")
     @classmethod
@@ -117,6 +123,10 @@ class WorkspaceCreate(BaseModel):
     # existing create flow byte-identical.
     path_source: PathSourceLiteral = "server-local"
     daemon_runtime_id: uuid.UUID | None = None
+    # spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy，D-001/D-004）。
+    # daemon-client workspace 创建时用户可选；service 层据此落 spec_workspaces.strategy。
+    # 默认 platform-managed 保持现有行为零回归。
+    spec_strategy: SpecStrategyLiteral = "platform-managed"
 
     @field_validator("root_path", mode="before")
     @classmethod

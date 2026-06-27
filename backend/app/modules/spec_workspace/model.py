@@ -28,8 +28,8 @@ class SpecWorkspace(BaseModel, table=True):
     Strategy determines how spec files are managed:
 
     - ``platform-managed``: specs live in ``spec_root`` only (default).
-    - ``repo-mirrored``: ``spec_root`` is synced bidirectionally with
-      ``repo_sillyspec_path`` inside the repo.
+    - ``repo-mirrored``: daemon 初始化时从源项目 ``.sillyspec`` 单次同步快照到
+      ``spec_root``，之后平台托管（源项目后续变更不自动反映）。
     - ``repo-native``: the repo's own ``.sillyspec`` is the source of truth;
       ``spec_root`` is used as a cache or overlay.
     """

@@ -291,6 +291,13 @@ export interface LeaseCtx {
    * build_claim_payload 返回，与 transport 配对使用。
    */
   workspaceId?: string;
+  /**
+   * ql-20260628：spec 同步策略（platform-managed/repo-mirrored/repo-native）。
+   * daemon-client workspace 经 build_claim_payload 透传；daemon pullSpecBundle 据此
+   * 三分支初始化缓存（platform-managed 拉bundle / repo-mirrored 单次fs.cp / repo-native 建junction）。
+   * 缺省/未传 → daemon 按 platform-managed 兼容（D-004）。
+   */
+  specStrategy?: string;
 }
 
 /**

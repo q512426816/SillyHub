@@ -16,8 +16,8 @@
 // D-007@v1（utility 抽离）；蓝图 task-04.md。
 
 import { homedir } from 'node:os';
-import { join, relative, isAbsolute, dirname, sep as pathSep } from 'node:path';
-import { mkdir, rm, readdir, stat, readFile, writeFile } from 'node:fs/promises';
+import { join, relative, isAbsolute, dirname, resolve, sep as pathSep } from 'node:path';
+import { mkdir, rm, readdir, stat, lstat, readlink, symlink, cp, readFile, writeFile } from 'node:fs/promises';
 import type { HubClient } from './hub-client.js';
 
 // ── resolveSpecDir ────────────────────────────────────────────────────────────
@@ -44,6 +44,14 @@ export function resolveSpecDir(wsId: string): string {
 export interface PullSpecBundleOptions {
   /** execution-context 已带 spec_root 时跳过（防御，对齐 task-runner.ts:1423）。 */
   existingSpecRoot?: string | null;
+  /**
+   * spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy，D-001/D-002/D-005）。
+   * 缺省 platform-managed（拉平台 bundle）。repo-mirrored 首次从源项目 .sillyspec 单次
+   * fs.cp；repo-native 建 junction 缓存→源项目 .sillyspec。
+   */
+  strategy?: string;
+  /** 源项目根路径（repo-mirrored/repo-native 从 rootPath/.sillyspec 读）。 */
+  rootPath?: string;
 }
 
 /**
@@ -71,10 +79,52 @@ export async function pullSpecBundle(
 ): Promise<string | null> {
   if (!wsId) return null; // server-local / 非 daemon-client
   if (opts.existingSpecRoot) return null; // 防御：execution-context 已带
-  if (typeof client.getSpecBundle !== 'function') return null; // mock client 未实现
 
   // resolveSpecDir 先做 wsId 路径分隔符校验（§5 E-07），抛错即被调用方 catch。
   const specDir = resolveSpecDir(wsId);
+  const strategy = opts.strategy || 'platform-managed';
+
+  // ── repo-native（D-005）：建 junction 让缓存指向源项目 .sillyspec，跳过 pull 覆盖 ──
+  // scan 直接写源项目（实时双向）。R-01：repo-native 不走 rm/不覆盖，避免顺链删源项目。
+  if (strategy === 'repo-native' && opts.rootPath) {
+    const sourceSillyspec = join(opts.rootPath, '.sillyspec');
+    if (await pathExists(sourceSillyspec)) {
+      const ok = await ensureSpecJunction(specDir, sourceSillyspec);
+      if (ok) {
+        console.info('spec_sync: repo_native_junction_ready', wsId, specDir, '->', sourceSillyspec);
+        return specDir; // junction 就绪，scan 在源项目跑，postSpecSync 打包源项目回灌
+      }
+      // 普通目录残留阻塞 junction → 降级 pull（不删数据）
+      console.warn('spec_sync: repo_native_junction_blocked_fallback', wsId, specDir);
+    } else {
+      // 源项目无 .sillyspec → 降级 repo-mirrored（首次复制空操作，最终走 pull）
+      console.warn('spec_sync: repo_native_source_missing_fallback', wsId, sourceSillyspec);
+    }
+  }
+
+  // ── repo-mirrored（D-002）：首次（缓存空）从源项目 .sillyspec 单次 fs.cp ──────────
+  // 源项目已有内容立即可用，不污染源项目。非首次（缓存非空）/ 源项目无 .sillyspec → 走 pull。
+  if (strategy === 'repo-mirrored' && opts.rootPath) {
+    const sourceSillyspec = join(opts.rootPath, '.sillyspec');
+    const cacheEmpty = !(await dirHasContent(specDir));
+    if (cacheEmpty && (await pathExists(sourceSillyspec))) {
+      try {
+        await rm(specDir, { recursive: true, force: true });
+      } catch (e) {
+        console.warn('spec_sync: repo_mirrored_prerm_failed', specDir, e);
+      }
+      try {
+        await cp(sourceSillyspec, specDir, { recursive: true, force: true });
+        console.info('spec_sync: repo_mirrored_copied', wsId, sourceSillyspec, '->', specDir);
+        return specDir;
+      } catch (e) {
+        console.warn('spec_sync: repo_mirrored_cp_failed', specDir, e); // 回落 pull
+      }
+    }
+  }
+
+  // ── 默认（platform-managed / repo-mirrored 非首次 / repo-native 降级）：拉平台 bundle ──
+  if (typeof client.getSpecBundle !== 'function') return null; // mock client 未实现
 
   let tarBuf: Buffer;
   try {
@@ -92,6 +142,7 @@ export async function pullSpecBundle(
 
   // 覆盖语义：先 rm -rf（容忍不存在），再解包。
   // Windows EBUSY 降级：忽略 rm 错误，仍 mkdir + 解包（容忍残留，agent 侧覆盖读取）。
+  // R-01：仅 pull 路径走 rm（repo-native 已 return 不到此，junction 不会被 rm）。
   try {
     await rm(specDir, { recursive: true, force: true });
   } catch (e) {
@@ -99,6 +150,75 @@ export async function pullSpecBundle(
   }
   await extractTar(tarBuf, specDir);
   return specDir;
+}
+
+// ── repo-native / repo-mirrored helper（2026-06-28）───────────────────────────
+
+/** 路径存在（file 或 dir）。 */
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await stat(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 目录存在且含至少一个条目（repo-mirrored 判缓存空）。 */
+async function dirHasContent(dir: string): Promise<boolean> {
+  try {
+    const names = await readdir(dir);
+    return names.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 建/复用 specDir→target junction（repo-native，D-005；R-01 防误删/R-02 降级）。
+ *
+ * - 不存在 → 建（Win fs.symlink('junction') 无需提权 / Linux·macOS 普通 symlink）。
+ * - 已是符号链接/junction 且目标一致 → 复用，返回 true。
+ * - 已是符号链接但目标不一致 → 移除重建。
+ * - 是普通目录（历史残留）→ 不自动删（防误删数据），返回 false 让上层降级 pull。
+ *
+ * @returns true=junction 就绪；false=被普通目录阻塞，上层应降级
+ */
+async function ensureSpecJunction(specDir: string, target: string): Promise<boolean> {
+  let existing: string | null = null;
+  let isLink = false;
+  let isPlainDir = false;
+  try {
+    const lst = await lstat(specDir);
+    if (lst.isSymbolicLink()) {
+      isLink = true;
+      existing = await readlink(specDir);
+    } else if (lst.isDirectory()) {
+      isPlainDir = true;
+    }
+  } catch {
+    // 不存在，继续建
+  }
+  if (isPlainDir) return false; // 普通目录残留，不自动删（防误删），上层降级
+  if (isLink) {
+    const existingNorm = existing ? resolve(existing) : null;
+    if (existingNorm === resolve(target)) return true; // 目标一致，复用
+    try {
+      await rm(specDir, { recursive: true, force: true });
+    } catch (e) {
+      console.warn('spec_sync: junction_rebuild_prerm_failed', specDir, e);
+      return false;
+    }
+  }
+  await mkdir(dirname(specDir), { recursive: true });
+  // Win 用 junction（目录联接，fs.symlink type='junction' 无需提权）；
+  // Linux·macOS 用普通 symlink。target 须绝对路径（rootPath/.sillyspec 是绝对路径）。
+  if (process.platform === 'win32') {
+    await symlink(target, specDir, 'junction');
+  } else {
+    await symlink(target, specDir);
+  }
+  return true;
 }
 
 // ── postSpecSync ──────────────────────────────────────────────────────────────

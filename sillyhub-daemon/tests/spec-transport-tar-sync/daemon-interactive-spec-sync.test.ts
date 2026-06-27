@@ -359,7 +359,7 @@ describe('task-09 B 组：daemon interactive spec-sync 接入（D-007@v1）', ()
 
     // 时序断言（R-07）：pull await 未完成 → create 不应被调
     expect(specSyncMocks.pullSpecBundle).toHaveBeenCalledTimes(1);
-    expect(specSyncMocks.pullSpecBundle).toHaveBeenCalledWith(expect.anything(), 'ws-b1');
+    expect(specSyncMocks.pullSpecBundle).toHaveBeenCalledWith(expect.anything(), 'ws-b1', expect.anything());
     expect(sessionManager.create).not.toHaveBeenCalled();
 
     // resolve pull → daemon 继续 await → 调 create
@@ -416,7 +416,7 @@ describe('task-09 B 组：daemon interactive spec-sync 接入（D-007@v1）', ()
       if (vi.mocked(sessionManager.create).mock.calls.length > 0) break;
       await sleep(5);
     }
-    expect(specSyncMocks.pullSpecBundle).toHaveBeenCalledWith(expect.anything(), 'ws-b3');
+    expect(specSyncMocks.pullSpecBundle).toHaveBeenCalledWith(expect.anything(), 'ws-b3', expect.anything());
     expect(sessionManager.create).toHaveBeenCalledTimes(1);
     await daemon.stop();
   });

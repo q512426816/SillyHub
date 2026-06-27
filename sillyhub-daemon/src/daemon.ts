@@ -2288,6 +2288,15 @@ export class Daemon {
     const workspaceId =
       (execPayload as { workspaceId?: string }).workspaceId ??
       (execPayload as { workspace_id?: string }).workspace_id;
+    // spec 同步策略 + 源项目路径（2026-06-28-daemon-client-spec-sync-strategy，D-001）：
+    // daemon pullSpecBundle 据此三分支初始化缓存（platform-managed/repo-mirrored/repo-native）。
+    // specStrategy 缺省（旧 lease/quick-chat）→ pullSpecBundle 内按 platform-managed 兼容。
+    const specStrategy =
+      (execPayload as { specStrategy?: string }).specStrategy ??
+      (execPayload as { spec_strategy?: string }).spec_strategy;
+    const specRootPath =
+      (execPayload as { rootPath?: string }).rootPath ??
+      (execPayload as { root_path?: string }).root_path;
 
     if (transport === 'tar') {
       if (!workspaceId) {
@@ -2303,6 +2312,7 @@ export class Daemon {
           const specDir = await pullSpecBundle(
             this._client as never,
             workspaceId,
+            { strategy: specStrategy, rootPath: specRootPath },
           );
           // 404 容错（首次 scan backend 无 bundle）：utility 内已 mkdir 空目录返回路径非 null。
           // 登记_specSyncCtx 保证后续 onSessionEnd 触发 sync（即使 pull 拿到空目录也回传）。

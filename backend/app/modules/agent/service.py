@@ -1279,6 +1279,19 @@ class AgentService:
         workspace = await self._session.get(Workspace, workspace_id)
         path_source = workspace.path_source if workspace else "server-local"
 
+        # 解析 spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy，D-001）：
+        # 从 spec_workspaces 读 strategy，回退 platform-managed。透传到 lease payload
+        # 让 daemon pullSpecBundle 据此三分支初始化缓存（platform-managed/repo-mirrored/repo-native）。
+        spec_strategy = "platform-managed"
+        try:
+            from app.modules.spec_workspace.service import SpecWorkspaceService
+
+            _spec_ws = await SpecWorkspaceService(self._session).get(workspace_id)
+            if _spec_ws and _spec_ws.strategy:
+                spec_strategy = _spec_ws.strategy
+        except Exception:
+            pass
+
         # -- 1. Validate root_path (server-local only; daemon-client on client FS) -
         server_root = resolve_root_path_for_server(root_path, path_source)
         if server_root is not None:
@@ -1371,7 +1384,7 @@ class AgentService:
             provider=resolved_provider,
             model=resolved_model,
             status="pending",
-            spec_strategy="platform-managed",
+            spec_strategy=spec_strategy,
             agent_session_id=session.id,
         )
         self._session.add(run)
@@ -1404,6 +1417,7 @@ class AgentService:
                 workspace_slug=getattr(workspace, "slug", None) if workspace else None,
                 repo_url=repo_url,
                 branch=branch,
+                spec_strategy=spec_strategy,
             )
         except NoOnlineDaemonError as exc:
             await self._session.rollback()

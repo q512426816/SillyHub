@@ -443,6 +443,7 @@ class RunPlacementService:
         workspace_slug: str | None = None,
         repo_url: str | None = None,
         branch: str | None = None,
+        spec_strategy: str = "platform-managed",
     ) -> "RunPlacementService.InteractiveDispatch":
         """scan 真阻塞（generic-wibbling-whisper.md 改造点 A）：scan 专用 interactive lease。
 
@@ -485,6 +486,10 @@ class RunPlacementService:
             "spec_root": spec_root,
             "scan_run_id": str(agent_run_id),
             "mode": "scan",
+            # spec 同步策略透传（2026-06-28-daemon-client-spec-sync-strategy，D-001）：
+            # daemon claim 后经 build_claim_payload 读此字段放入 claim payload，
+            # pullSpecBundle 据此三分支初始化缓存。
+            "spec_strategy": spec_strategy,
         }
         if model:
             metadata["model"] = model

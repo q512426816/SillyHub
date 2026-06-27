@@ -131,6 +131,7 @@ async def scan_generate(
             agent_service=agent_service,
             provider=payload.provider,
             model=payload.model,
+            spec_strategy=payload.spec_strategy,
         )
         return ScanGenerateResponse(
             workspace_id=workspace_id,

@@ -170,8 +170,8 @@ class WorkspaceService:
             )
             self._session.add(workspace)
             await self._session.flush()
-            # 空 SpecWorkspace 占位（strategy=platform-managed），内容由后续 scan lease 填充
-            await self._ensure_empty_spec_workspace(workspace.id)
+            # 空 SpecWorkspace 占位，strategy 由用户选择（2026-06-28 起支持三值，默认 platform-managed）
+            await self._ensure_empty_spec_workspace(workspace.id, strategy=payload.spec_strategy)
             await self._session.commit()
             await self._session.refresh(workspace)
             log.info(
@@ -304,7 +304,7 @@ class WorkspaceService:
         if self._is_daemon_client_payload(payload):
             result.path_source = "daemon-client"
             result.daemon_runtime_id = payload.daemon_runtime_id
-            await self._ensure_empty_spec_workspace(result.id)
+            await self._ensure_empty_spec_workspace(result.id, strategy=payload.spec_strategy)
         else:
             scan = self.scan(root_path)
             if scan.is_sillyspec:
@@ -1028,6 +1028,7 @@ class WorkspaceService:
         agent_service: "AgentService",
         provider: str | None = None,
         model: str | None = None,
+        spec_strategy: str = "platform-managed",
     ) -> tuple[uuid.UUID, uuid.UUID]:
         """daemon-client scan-generate：创建 pending workspace + 派 scan lease 给绑定 daemon。
 
@@ -1060,7 +1061,7 @@ class WorkspaceService:
             )
             self._session.add(workspace)
             await self._session.flush()
-            await self._ensure_empty_spec_workspace(workspace.id)
+            await self._ensure_empty_spec_workspace(workspace.id, strategy=spec_strategy)
 
         existing_run = await self._find_active_scan_run(workspace.id)
         if existing_run is not None:
@@ -1097,12 +1098,15 @@ class WorkspaceService:
         """
         return getattr(payload, "path_source", "server-local") == "daemon-client"
 
-    async def _ensure_empty_spec_workspace(self, workspace_id: uuid.UUID) -> None:
+    async def _ensure_empty_spec_workspace(
+        self, workspace_id: uuid.UUID, *, strategy: str = "platform-managed"
+    ) -> None:
         """为 daemon-client workspace 创建空 SpecWorkspace 占位（无 .sillyspec 内容）。
 
-         与 _ensure_spec_workspace 区别：不 copytree，只建记录（strategy=platform-managed，
-         spec_root 由 SpecWorkspaceService 内部生成 {SPEC_DATA_ROOT}/{ws_id}），
-        内容由后续 scan lease 产出经 task-09 sync 回传覆盖。
+        与 _ensure_spec_workspace 区别：不 copytree，只建记录（strategy 由调用方传，
+        默认 platform-managed；2026-06-28-daemon-client-spec-sync-strategy 起支持
+        repo-mirrored/repo-native），spec_root 由 SpecWorkspaceService 内部生成
+        {SPEC_DATA_ROOT}/{ws_id}），内容由后续 scan lease 产出经 task-09 sync 回传覆盖。
         """
         from app.modules.spec_workspace.schema import SpecWorkspaceCreate
         from app.modules.spec_workspace.service import SpecWorkspaceService
@@ -1113,7 +1117,7 @@ class WorkspaceService:
         except Exception:
             await spec_ws_svc.create(
                 workspace_id=workspace_id,
-                payload=SpecWorkspaceCreate(strategy="platform-managed"),
+                payload=SpecWorkspaceCreate(strategy=strategy),
             )
 
     async def _find_active_by_root_path(self, root_path: str) -> Workspace | None:
