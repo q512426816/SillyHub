@@ -38,6 +38,25 @@ export type AgentLogInputControls = {
   onSubmit: (_logId: string) => void;
 };
 
+/**
+ * 日志语义分类（viewer 中文标签 + 筛选用）。
+ *
+ * 区别于底层 channel（stdout/stderr/tool_call/...），面向用户的分类：
+ * 由 normalize.ts `classifyLog` 把每条 raw log 映射到此枚举，
+ * viewer 据此渲染中文徽标并提供语义筛选（替代原 channel 二级筛选）。
+ */
+export type SemanticCategory =
+  | "user"
+  | "ask"
+  | "assistant"
+  | "thinking"
+  | "tool_call"
+  | "tool_result"
+  | "system"
+  | "result"
+  | "error"
+  | "log";
+
 export interface ProcessedLog {
   /** Original log entry */
   log: import("@/lib/agent").AgentRunLogEntry;
@@ -93,4 +112,10 @@ export interface ProcessedLog {
    * 渲染层可读取做 turn 分组。
    */
   segmentId?: string;
+  /**
+   * 语义分类（中文徽标 + 语义筛选用），由 normalize.classifyLog 在归一化阶段设置。
+   * 替代原 channel 维度的 logChannelMeta：viewer 据此返回中文标签与着色。
+   * 缺失时 viewer 兜底为 "log"。
+   */
+  semanticCategory?: SemanticCategory;
 }

@@ -1,6 +1,6 @@
 import type { AgentRunLogEntry } from "@/lib/agent";
 import { asString } from "@/lib/utils";
-import type { ProcessedLog, ScanCheckResult, ToolCallEntry } from "./types";
+import type { ProcessedLog, ScanCheckResult, SemanticCategory, ToolCallEntry } from "./types";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -318,6 +318,37 @@ export function mergeThinkingPiece(prev: string, piece: string): string {
 /*  Log normalization                                                  */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 日志语义分类（viewer 中文标签 + 筛选用）。
+ *
+ * 区别于底层 channel（stdout/stderr/tool_call/...），语义分类面向用户：
+ *   - user_input → user；pending_input → ask；tool_call → tool_call；
+ *     stderr → error。
+ *   - stdout 按文本协议前缀分：[TOOL_RESULT] → tool_result、[THINKING] → thinking、
+ *     [ASSISTANT] → assistant、[SYSTEM → system、[RESULT → result。
+ *   - 无协议前缀的纯文本 stdout → assistant（codex / json-rpc 流式 delta）。
+ *   - 其余兜底 → log。
+ *
+ * viewer 据此渲染中文徽标并提供语义筛选，替代原 channel 二级筛选。
+ */
+export function classifyLog(channel: string, content: string): SemanticCategory {
+  if (channel === "user_input") return "user";
+  if (channel === "pending_input") return "ask";
+  if (channel === "tool_call") return "tool_call";
+  const text = content ?? "";
+  if (text.includes("[TOOL_RESULT]")) return "tool_result";
+  if (text.startsWith("[THINKING]")) return "thinking";
+  if (text.startsWith("[ASSISTANT]")) return "assistant";
+  if (text.startsWith("[SYSTEM")) return "system";
+  if (text.startsWith("[RESULT")) return "result";
+  if (channel === "stderr") return "error";
+  // 纯文本 stdout（无协议前缀）→ assistant 流式文本（codex / json-rpc streaming）
+  if (channel === "stdout" && text.length > 0 && !text.startsWith("[")) {
+    return "assistant";
+  }
+  return "log";
+}
+
 export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
   // ql-20260620：归一化本身若因异常数据抛错，回退为逐条原样渲染，
   // 保证日志面板不整页崩（client-side exception）。
@@ -376,6 +407,13 @@ function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
   for (let i = 0; i < logs.length; i++) {
     const current = result[i];
     if (!current) continue;
+
+    // 设置语义分类（viewer 中文标签 + 语义筛选用）。
+    // 对每条 processed log 都设置（含被合并 hidden 的条目——其本身不渲染，无副作用）。
+    current.semanticCategory = classifyLog(
+      current.log.channel,
+      asString(current.log.content_redacted),
+    );
 
     if (current.log.channel === "tool_call") {
       // task-14 / FR-09：解析 tool_use_id（task-13 注入），记入 ProcessedLog

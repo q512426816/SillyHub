@@ -2,13 +2,17 @@
 
 import {
   AlertTriangle,
+  Brain,
+  CheckCircle2,
   CircleDot,
   Clock3,
   CornerDownRight,
+  Flag,
   Maximize2,
   MessageSquareText,
   Minimize2,
   Send,
+  Settings,
   Wrench,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -23,7 +27,7 @@ import { asString, cn } from "@/lib/utils";
 import type { AgentRunLogEntry } from "@/lib/agent";
 
 // New modules
-export type { ToolCallEntry, ScanCheckResult, AgentLogInputControls } from "./agent-log/types";
+export type { ToolCallEntry, ScanCheckResult, AgentLogInputControls, SemanticCategory } from "./agent-log/types";
 export type { ProcessedLog } from "./agent-log/types";
 export {
   COMMAND_COLLAPSE_LINES,
@@ -33,6 +37,7 @@ export {
   parseScanCheckOutput,
   isPendingReplied,
   normalizeLogs,
+  classifyLog,
   isThinkingContent,
   filterToolProtocolLines,
 } from "./agent-log/normalize";
@@ -48,7 +53,7 @@ import {
   EMPTY_REPLIED_INPUTS,
 } from "./agent-log/normalize";
 import { ToolCallPreview, CollapsibleSection, ToolResultCard } from "./agent-log/tool-renderers";
-import type { AgentLogInputControls, ProcessedLog, ScanCheckResult } from "./agent-log/types";
+import type { AgentLogInputControls, ProcessedLog, ScanCheckResult, SemanticCategory } from "./agent-log/types";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -75,44 +80,88 @@ function semanticLineClass(line: string): string {
   return "text-zinc-800";
 }
 
-function logChannelMeta(channel: AgentRunLogEntry["channel"]): {
+/**
+ * 语义分类 → 中文徽标 + 图标 + 着色（中文日志分类 + 语义筛选升级）。
+ *
+ * 替代原 channel 维度的 logChannelMeta：按 normalize.classifyLog 得到的
+ * SemanticCategory 返回面向用户的中文标签与着色。颜色沿用原方案
+ * （user 紫 / ask/system 琥珀 / tool 蓝 / tool_result 绿 / error 红）。
+ *
+ * 标签保持 ≤2 字以适配 68px 固定宽度徽标（grid 第二列 74px/84px）。
+ */
+function semanticCategoryMeta(category: SemanticCategory): {
   label: string;
   Icon: React.ComponentType<{ className?: string }>;
   badgeClass: string;
   rowClass: string;
 } {
-  switch (channel) {
-    case "tool_call":
+  switch (category) {
+    case "user":
       return {
-        label: "TOOL",
-        Icon: Wrench,
-        badgeClass: "border-blue-200 bg-blue-50 text-blue-700",
-        rowClass: "bg-blue-50/30 hover:bg-blue-50/70",
-      };
-    case "stderr":
-      return {
-        label: "WARN",
-        Icon: AlertTriangle,
-        badgeClass: "border-amber-200 bg-amber-50 text-amber-800",
-        rowClass: "bg-amber-50/60 hover:bg-amber-50",
-      };
-    case "pending_input":
-      return {
-        label: "ASK",
-        Icon: MessageSquareText,
-        badgeClass: "border-amber-200 bg-amber-50 text-amber-800",
-        rowClass: "bg-amber-50/60 hover:bg-amber-50",
-      };
-    case "user_input":
-      return {
-        label: "REPLY",
+        label: "用户",
         Icon: CornerDownRight,
         badgeClass: "border-violet-200 bg-violet-50 text-violet-700",
         rowClass: "bg-violet-50/50 hover:bg-violet-50",
       };
+    case "ask":
+      return {
+        label: "提问",
+        Icon: MessageSquareText,
+        badgeClass: "border-amber-200 bg-amber-50 text-amber-800",
+        rowClass: "bg-amber-50/60 hover:bg-amber-50",
+      };
+    case "assistant":
+      return {
+        label: "助手",
+        Icon: MessageSquareText,
+        badgeClass: "border-sky-200 bg-sky-50 text-sky-700",
+        rowClass: "hover:bg-zinc-100/60",
+      };
+    case "thinking":
+      return {
+        label: "思路",
+        Icon: Brain,
+        badgeClass: "border-zinc-200 bg-white text-zinc-600",
+        rowClass: "hover:bg-zinc-100/60",
+      };
+    case "tool_call":
+      return {
+        label: "工具",
+        Icon: Wrench,
+        badgeClass: "border-blue-200 bg-blue-50 text-blue-700",
+        rowClass: "bg-blue-50/30 hover:bg-blue-50/70",
+      };
+    case "tool_result":
+      return {
+        label: "返回",
+        Icon: CheckCircle2,
+        badgeClass: "border-emerald-200 bg-emerald-50 text-emerald-700",
+        rowClass: "bg-emerald-50/30 hover:bg-emerald-50/60",
+      };
+    case "system":
+      return {
+        label: "系统",
+        Icon: Settings,
+        badgeClass: "border-amber-200 bg-amber-50 text-amber-800",
+        rowClass: "bg-amber-50/40 hover:bg-amber-50",
+      };
+    case "result":
+      return {
+        label: "结果",
+        Icon: Flag,
+        badgeClass: "border-sky-200 bg-sky-50 text-sky-700",
+        rowClass: "bg-sky-50/30 hover:bg-sky-50/60",
+      };
+    case "error":
+      return {
+        label: "错误",
+        Icon: AlertTriangle,
+        badgeClass: "border-red-200 bg-red-50 text-red-700",
+        rowClass: "bg-red-50/40 hover:bg-red-50",
+      };
     default:
       return {
-        label: "INFO",
+        label: "日志",
         Icon: CircleDot,
         badgeClass: "border-zinc-200 bg-white text-zinc-600",
         rowClass: "hover:bg-zinc-100/60",
@@ -253,7 +302,7 @@ export function AgentLogRow({
   inputControls?: AgentLogInputControls;
 }) {
   const log = processedLog.log;
-  const meta = logChannelMeta(log.channel);
+  const meta = semanticCategoryMeta(processedLog.semanticCategory ?? "log");
   const toolCall = log.channel === "tool_call"
     ? parseToolCallContent(log.content_redacted)
     : null;
@@ -609,7 +658,7 @@ export function AgentLogViewer({
       return visibleLogs.filter(isConversationLog);
     }
     return activeFilters.size > 0
-      ? visibleLogs.filter((p) => activeFilters.has(p.log.channel))
+      ? visibleLogs.filter((p) => activeFilters.has(p.semanticCategory ?? "log"))
       : visibleLogs;
   }, [visibleLogs, viewMode, activeFilters, isConversationLog]);
   const turns = useMemo(() => groupIntoTurns(filteredLogs), [filteredLogs]);
@@ -622,7 +671,7 @@ export function AgentLogViewer({
     permissionRequests.length > 0 &&
     // ql-20260626-001 / bug2：对话视图始终展示审批/提问卡片（pending_input 是对话一部分）；
     // 全部视图维持原 activeFilters 判定。
-    (viewMode === "conversation" || activeFilters.size === 0 || activeFilters.has("pending_input"));
+    (viewMode === "conversation" || activeFilters.size === 0 || activeFilters.has("ask"));
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -639,12 +688,19 @@ export function AgentLogViewer({
     return () => { document.body.style.overflow = ""; };
   }, [fullscreen]);
 
-  const channelFilters = [
-    { key: "stdout", label: "INFO" },
-    { key: "tool_call", label: "TOOL" },
-    { key: "stderr", label: "WARN" },
-    { key: "pending_input", label: "ASK" },
-    { key: "user_input", label: "REPLY" },
+  // 语义筛选器（中文标签）——替代原 channel 二级筛选。
+  // key 对齐 normalize.classifyLog 的 SemanticCategory；filteredLogs 据此匹配。
+  const semanticFilters = [
+    { key: "assistant", label: "助手回复" },
+    { key: "thinking", label: "思考过程" },
+    { key: "tool_call", label: "工具调用" },
+    { key: "tool_result", label: "工具结果" },
+    { key: "system", label: "系统信息" },
+    { key: "user", label: "用户输入" },
+    { key: "ask", label: "提问审批" },
+    { key: "result", label: "执行结果" },
+    { key: "error", label: "错误警告" },
+    { key: "log", label: "日志" },
   ];
 
   function toggleFilter(key: string) {
@@ -699,7 +755,7 @@ export function AgentLogViewer({
             ))}
           </div>
           {/* 全部视图下保留 channel 二级筛选（原 5 按钮） */}
-          {viewMode === "all" && channelFilters.map((f) => (
+          {viewMode === "all" && semanticFilters.map((f) => (
             <button
               key={f.key}
               onClick={() => toggleFilter(f.key)}
