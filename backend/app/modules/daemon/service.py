@@ -64,8 +64,7 @@ from app.modules.daemon.session.service import (  # noqa: E402, F401
     SessionRecoveryResult,
 )
 
-
-if TYPE_CHECKING:  # noqa: E402 — 仅 submit_messages 返回注解用，运行时不求值（无循环）
+if TYPE_CHECKING:
     from app.modules.daemon.run_sync.service import SubmittedMessages
 
 
