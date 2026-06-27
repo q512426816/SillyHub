@@ -132,6 +132,16 @@ export const MSG = {
    * payload: PermissionResponsePayload。
    */
   PERMISSION_RESPONSE: 'daemon:permission_response',
+
+  /**
+   * Server → Daemon：服务端推送 daemon 自更新指令。
+   *
+   * daemon 收到后调 runDaemonSelfUpdate 下载最新 bundle 替换本地文件，
+   * 然后进程退出（由外部 supervisor/install.sh wrapper 重启拉起新版本）。
+   *
+   * payload: `{ runtime_id?: string, version?: string }`（version 为最新版本号，仅用于日志）。
+   */
+  SELF_UPDATE: 'daemon:self_update',
 } as const;
 
 /** WebSocket 消息类型联合（字面量），用于 DaemonMessage.type。 */

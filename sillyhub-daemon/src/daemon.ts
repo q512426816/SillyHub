@@ -61,6 +61,8 @@ import { listDir } from './file-rpc.js';
 import { buildSpawnEnv } from './spawn-env.js';
 // 2026-06-24 preflight：启动前预检 sillyspec 版本 + daemon 自更新（失败不阻断启动）。
 import { runPreflight } from './preflight.js';
+// daemon 自身构建标识（release=git SHA），register 时上报供服务端判定是否需推送自更新。
+import { BUILD_ID } from './build-id.js';
 // 2026-06-24-daemon-network-resilience task-10/12：网络层重试编排（submit 重试 + 终态轻量重试）。
 import { ResilienceService } from './resilience/service.js';
 import type { Envelope } from './resilience/service.js';
@@ -817,6 +819,7 @@ export class Daemon {
           version: agent.version,
           protocol: agent.protocol,
           bin_path: agent.path, // 真实字段是 path
+          daemon_build_id: BUILD_ID, // 上报 daemon 自身构建标识，供服务端判定是否需推送自更新
         },
       });
       const serverRuntimeId = String(resp.id ?? '');
@@ -1842,6 +1845,32 @@ export class Daemon {
         void this._routePermissionResponse(rawPayload).catch((e) => {
           this._logger.error('permission_response_failed', { error: e });
         });
+        break;
+      }
+      // Server → Daemon：服务端判定 daemon 版本落后后推送的自更新指令。
+      // 复用 preflight 的 runDaemonSelfUpdate 下载 + 原子替换 bundle，成功后
+      // 优雅退出等外部 supervisor（install.sh wrapper）重启拉起新版本。
+      case MSG.SELF_UPDATE: {
+        const payload = (msg as { payload?: { version?: string } }).payload;
+        this._logger.info('self_update_received', {
+          version: payload?.version,
+        });
+        try {
+          // 复用 preflight 的自更新逻辑（下载 + 替换 bundle 文件）
+          const { runDaemonSelfUpdate } = await import('./preflight.js');
+          await runDaemonSelfUpdate(BUILD_ID, this._config, (level, m, data) => {
+            // 适配 PreflightLogger 的 (level,msg,data) 签名为内部 Logger 方法
+            this._logger[level](m, data);
+          });
+          this._logger.info('self_update_done', { version: payload?.version });
+          // 替换成功 → 优雅退出，等外部 supervisor 重启
+          this._logger.info('self_update_restart', {});
+          setTimeout(() => process.exit(0), 500); // 给日志 flush 500ms
+        } catch (e) {
+          this._logger.warn('self_update_failed', {
+            error: (e as Error)?.message ?? String(e),
+          });
+        }
         break;
       }
       default: {

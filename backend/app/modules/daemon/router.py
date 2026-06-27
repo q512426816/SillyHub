@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_principal, require_permission_any
+from app.core.config import get_settings
 from app.core.db import get_session, get_session_factory
 from app.core.logging import get_logger
 from app.modules.agent.schema import AgentRunLogEntry
@@ -88,9 +89,37 @@ log = get_logger(__name__)
 # 当前硬编码；后续可改为读 nginx 托管的 latest.json 或配置中心。
 # latest.json（install.sh 消费）字段：version / downloadUrl；本端点多返回 minRequired
 # 供前端做版本门槛提示。
-DAEMON_LATEST_VERSION = "0.1.0"
-DAEMON_MIN_REQUIRED_VERSION = "0.1.0"
 DAEMON_DOWNLOAD_URL = "/daemon/latest/sillyhub-daemon.js"
+
+
+def _compute_daemon_version() -> str:
+    """从已部署的 daemon bundle 中提取 BUILD_ID（git short SHA）。
+
+    daemon 侧 build-id.ts 在 bundle 时注入 BUILD_ID，此处从部署的 JS 文件中
+    正则提取。提取失败时回退 "unknown"。
+    """
+    import re
+
+    try:
+        bundle_path = get_settings().daemon_dist_dir / "sillyhub-daemon.js"
+        if not bundle_path.is_file():
+            return "unknown"
+        text = bundle_path.read_text(errors="replace")
+        m = re.search(r'BUILD_ID\s*=\s*["\x27]([^"\x27]+)', text)
+        return m.group(1) if m else "unknown"
+    except Exception:
+        return "unknown"
+
+
+def get_daemon_latest_version() -> str:
+    """缓存 daemon latest version（进程级，deploy 后不变）。"""
+    global _DAEMON_VERSION_CACHE
+    if _DAEMON_VERSION_CACHE is None:
+        _DAEMON_VERSION_CACHE = _compute_daemon_version()
+    return _DAEMON_VERSION_CACHE
+
+
+_DAEMON_VERSION_CACHE: str | None = None
 
 
 class DaemonVersionResponse(BaseModel):
@@ -138,8 +167,8 @@ async def get_daemon_version() -> DaemonVersionResponse:
     静态托管；调用方（前端/脚本）按自身已知的服务端 base URL 拼接。
     """
     return DaemonVersionResponse(
-        latest=DAEMON_LATEST_VERSION,
-        minRequired=DAEMON_MIN_REQUIRED_VERSION,
+        latest=get_daemon_latest_version(),
+        minRequired="0.1.0",
         downloadUrl=DAEMON_DOWNLOAD_URL,
     )
 
@@ -303,6 +332,33 @@ async def update_runtime(
         is_platform_admin=user.is_platform_admin,
     )
     return DaemonRuntimeRead.model_validate(runtime)
+
+
+@router.post(
+    "/runtimes/{runtime_id}/self-update",
+)
+async def trigger_daemon_self_update(
+    runtime_id: uuid.UUID,
+    user: RuntimeAdminUser,
+) -> dict[str, str | bool]:
+    """推送 daemon 自更新指令到指定 runtime（admin）。
+
+    通过 WS 发送 `daemon:self_update`，daemon 收到后下载最新 bundle 替换并退出重启。
+    返回 `{"sent": bool, "latest_version": str}`。
+    """
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+    latest = get_daemon_latest_version()
+    hub = get_daemon_ws_hub()
+    sent = await hub.send_self_update(runtime_id, version=latest)
+    if not sent:
+        from app.modules.daemon.runtime.service import DaemonRuntimeOffline
+
+        raise DaemonRuntimeOffline(
+            "Runtime is offline or WS send failed.",
+            details={"runtime_id": str(runtime_id)},
+        )
+    return {"sent": True, "latest_version": latest}
 
 
 @router.get(

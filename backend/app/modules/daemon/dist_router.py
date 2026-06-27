@@ -20,7 +20,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from app.core.config import get_settings
-from app.modules.daemon.router import DAEMON_DOWNLOAD_URL, DAEMON_LATEST_VERSION
+from app.modules.daemon.router import DAEMON_DOWNLOAD_URL, get_daemon_latest_version
 
 router = APIRouter(prefix="/daemon", tags=["daemon-distribution"])
 
@@ -38,13 +38,16 @@ async def get_install_script() -> FileResponse:
 async def get_latest_manifest() -> dict[str, str]:
     """Return ``{version, downloadUrl}`` consumed by ``install.sh``'s ``fetch_latest``.
 
-    Field names (``version`` / ``downloadUrl``) are a hard contract: ``install.sh``
-    parses them with ``sed`` (``sillyhub-daemon/scripts/install.sh``). They differ
-    from ``/api/daemon/version``'s ``latest / minRequired / downloadUrl`` on
-    purpose — this endpoint speaks the installer's dialect, that one speaks the
-    UI's.
+    Field names: ``version``（BUILD_ID / git SHA）+ ``url``（preflight.ts 消费）+ ``downloadUrl``
+    （install.sh 消费）。同时返回两种字段名以兼容两个消费方。
     """
-    return {"version": DAEMON_LATEST_VERSION, "downloadUrl": DAEMON_DOWNLOAD_URL}
+    version = get_daemon_latest_version()
+    download_url = DAEMON_DOWNLOAD_URL
+    return {
+        "version": version,
+        "url": download_url,
+        "downloadUrl": download_url,
+    }
 
 
 @router.get("/latest/sillyhub-daemon.js")

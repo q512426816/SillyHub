@@ -26,7 +26,8 @@ cd "$ROOT_DIR"
 # [0/3] 注入 BUILD_ID（git short SHA）→ src/build-id.ts
 # 仅当目标内容与现有一致时跳过改写，避免重复构建污染 src tree。
 # 放在 pnpm build（tsc）之前：tsc 把 build-id.ts 的 BUILD_ID 编译进 dist → ncc 内联进 bundle。
-BUILD_ID="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
+GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
+BUILD_ID="${GIT_SHA}-$(date +%Y%m%d%H%M%S)"
 BUILD_ID_FILE="src/build-id.ts"
 # 单引号风格与 src/build-id.ts 占位保持一致（项目惯例），shell 用双引号包裹整体 + 内部单引号字面量。
 DESIRED="export const BUILD_ID = '${BUILD_ID}';"

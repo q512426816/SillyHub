@@ -189,7 +189,24 @@ export async function runDaemonSelfUpdate(
     current: buildId,
     latest: latest.version,
   });
-  await downloadAndReplace(latest.url, latest.version, buildId, binDir, logger);
+
+  // 相对 URL → 拼接 server_url
+  let fullUrl = latest.url;
+  if (!fullUrl.startsWith('http')) {
+    const base = config.server_url.replace(/\/+$/, '');
+    fullUrl = `${base}${fullUrl.startsWith('/') ? '' : '/'}${fullUrl}`;
+  }
+
+  const updated = await downloadAndReplace(fullUrl, latest.version, buildId, binDir, logger);
+
+  if (updated) {
+    // 替换成功 → 优雅退出，等外部 supervisor（install.sh wrapper）重启拉起新版本。
+    logger('info', 'daemon_self_update_restart', {
+      from: buildId,
+      to: latest.version,
+    });
+    setTimeout(() => process.exit(0), 500); // 给日志 flush 500ms
+  }
 }
 
 /**
@@ -224,13 +241,15 @@ async function fetchLatest(
     return null;
   }
 
-  const obj = body as Partial<LatestInfo> | null;
+  const obj = body as Partial<LatestInfo> & Record<string, unknown> | null;
+  // 兼容服务端 downloadUrl 和 preflight 原有 url 两种字段名
+  const downloadUrl = obj?.url ?? obj?.downloadUrl ?? obj?.download_url;
   if (
     !obj
     || typeof obj.version !== 'string'
-    || typeof obj.url !== 'string'
+    || typeof downloadUrl !== 'string'
     || obj.version === ''
-    || obj.url === ''
+    || downloadUrl === ''
   ) {
     logger('warn', 'daemon_latest_invalid_shape', { url });
     return null;
@@ -238,7 +257,7 @@ async function fetchLatest(
 
   return {
     version: obj.version,
-    url: obj.url,
+    url: downloadUrl,
     publishedAt:
       typeof obj.publishedAt === 'string' ? obj.publishedAt : undefined,
   };
@@ -254,28 +273,28 @@ async function fetchLatest(
  * 下载失败 / 写盘失败 → 仅 warn。
  */
 async function downloadAndReplace(
-  downloadUrl: string,
+  fullUrl: string,
   newVersion: string,
   currentId: string,
   binDir: string,
   logger: PreflightLogger,
-): Promise<void> {
+): Promise<boolean> {
   let resp: Response;
   try {
-    resp = await fetch(downloadUrl);
+    resp = await fetch(fullUrl);
   } catch (e) {
     logger('warn', 'daemon_bundle_download_failed', {
-      url: downloadUrl,
+      url: fullUrl,
       error: fmtErr(e),
     });
-    return;
+    return false;
   }
   if (!resp.ok) {
     logger('warn', 'daemon_bundle_download_non_ok', {
-      url: downloadUrl,
+      url: fullUrl,
       status: resp.status,
     });
-    return;
+    return false;
   }
 
   const buf = Buffer.from(await resp.arrayBuffer());
@@ -291,14 +310,15 @@ async function downloadAndReplace(
       target,
       error: fmtErr(e),
     });
-    return;
+    return false;
   }
 
-  logger('warn', 'daemon_self_updated_need_restart', {
+  logger('info', 'daemon_self_updated_need_restart', {
     from: currentId,
     to: newVersion,
     target,
   });
+  return true;
 }
 
 // ── 工具：同步执行 shell 命令 ─────────────────────────────────────────────────

@@ -14,6 +14,7 @@ from app.modules.daemon.protocol import (
     DAEMON_MSG_HEARTBEAT_ACK,
     DAEMON_MSG_PERMISSION_RESPONSE,
     DAEMON_MSG_RPC,
+    DAEMON_MSG_SELF_UPDATE,
     DAEMON_MSG_TASK_AVAILABLE,
 )
 from app.modules.daemon.service import (
@@ -278,6 +279,21 @@ class DaemonWsHub:
         daemon-side fallback timer to fail-closed deny.
         """
         message = {"type": DAEMON_MSG_PERMISSION_RESPONSE, "payload": payload}
+        return await self.send_to_runtime(runtime_id, message)
+
+    async def send_self_update(
+        self,
+        runtime_id: uuid.UUID,
+        version: str | None = None,
+    ) -> bool:
+        """推送 daemon 自更新指令（Server → Daemon）。
+
+        daemon 收到后下载最新 bundle 替换本地文件，然后退出等外部 supervisor 重启。
+        """
+        payload = {}
+        if version:
+            payload["version"] = version
+        message = {"type": DAEMON_MSG_SELF_UPDATE, "payload": payload}
         return await self.send_to_runtime(runtime_id, message)
 
     # ── RPC correlation ──────────────────────────────────────────────────────
