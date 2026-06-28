@@ -1,15 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 
+import { AgentLogViewer } from "@/components/agent-log-viewer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import {
   cancelMission,
   createMission,
+  getAgentRunLogs,
   getMission,
+  type AgentRunLogEntry,
   type Mission,
   type MissionArtifact,
   type MissionWorkerRun,
@@ -25,6 +27,19 @@ const STATUS_BADGE: Record<string, string> = {
 };
 
 const ACTIVE = new Set(["planning", "running", "degraded"]);
+
+/** 从 URL ?mission=xxx 读 mission_id（刷新持久化，避免 useSearchParams 的 Suspense 依赖）。 */
+function readMissionIdFromUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get("mission");
+}
+
+function writeMissionIdToUrl(missionId: string) {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  url.searchParams.set("mission", missionId);
+  window.history.replaceState(null, "", url);
+}
 
 /** 成本/预算进度条颜色：绿(<70%) / 黄(70-100%) / 红(>100% 超预算)。 */
 function costBarColor(ratio: number): string {
@@ -88,6 +103,52 @@ function ArtifactCard({ artifact }: { artifact: MissionArtifact }) {
   );
 }
 
+/** Worker 日志面板：内嵌 getAgentRunLogs + AgentLogViewer（展开时拉取+轮询，不跳页）。 */
+function WorkerLogPanel({
+  workspaceId,
+  runId,
+  active,
+}: {
+  workspaceId: string;
+  runId: string;
+  active: boolean;
+}) {
+  const [logs, setLogs] = useState<AgentRunLogEntry[] | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    try {
+      setLogs(await getAgentRunLogs(workspaceId, runId));
+    } catch {
+      setLogs([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [workspaceId, runId]);
+
+  useEffect(() => {
+    refresh();
+    // Worker 仍在跑时轮询（5s）；终态后只拉一次（logs 不再变）。
+    if (!active) return;
+    const t = setInterval(refresh, 5000);
+    return () => clearInterval(t);
+  }, [refresh, active]);
+
+  return (
+    <div className="border-t border-gray-200 pt-2">
+      <AgentLogViewer
+        title={`Worker 日志（${runId.slice(0, 8)}）`}
+        runId={runId}
+        logs={logs}
+        loading={loading}
+        emptyText="暂无日志（Worker 尚未产出，或仍在排队/执行中）"
+        variant="embedded"
+        compact
+      />
+    </div>
+  );
+}
+
 function WorkerRow({
   worker,
   workspaceId,
@@ -95,6 +156,7 @@ function WorkerRow({
   worker: MissionWorkerRun;
   workspaceId: string;
 }) {
+  const [logOpen, setLogOpen] = useState(false);
   const statusColor =
     worker.status === "failed"
       ? "text-red-600"
@@ -105,18 +167,20 @@ function WorkerRow({
           : worker.status === "killed"
             ? "text-gray-400"
             : "text-gray-600";
+  const workerActive = ACTIVE.has(worker.status) || worker.status === "pending";
   return (
     <li className="space-y-1 rounded border border-gray-200 p-2 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="outline">{worker.role ?? "worker"}</Badge>
         <span className={statusColor}>{worker.status}</span>
         <span className="truncate text-gray-500">{worker.objective ?? ""}</span>
-        <Link
-          href={`/workspaces/${workspaceId}/agent?run=${worker.id}`}
-          className="ml-auto text-xs text-blue-600 hover:underline"
+        <button
+          type="button"
+          onClick={() => setLogOpen((v) => !v)}
+          className="ml-auto rounded border border-gray-300 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50"
         >
-          查看日志 →
-        </Link>
+          {logOpen ? "收起日志" : "查看日志"}
+        </button>
       </div>
       {worker.artifacts.length > 0 && (
         <div className="space-y-1">
@@ -124,6 +188,13 @@ function WorkerRow({
             <ArtifactCard key={a.id} artifact={a} />
           ))}
         </div>
+      )}
+      {logOpen && (
+        <WorkerLogPanel
+          workspaceId={workspaceId}
+          runId={worker.id}
+          active={workerActive}
+        />
       )}
     </li>
   );
@@ -135,6 +206,20 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 刷新持久化：从 URL ?mission=xxx 恢复 mission（避免刷新丢数据）。
+  useEffect(() => {
+    const missionId = readMissionIdFromUrl();
+    if (missionId && !mission) {
+      getMission(missionId)
+        .then(setMission)
+        .catch(() => {
+          /* mission 可能已删，静默 */
+        });
+    }
+    // 仅挂载时读一次 URL（refresh 后浏览器保留 query）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const refresh = useCallback(async (id: string) => {
     try {
       setMission(await getMission(id));
@@ -143,9 +228,7 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
     }
   }, []);
 
-  // Poll while the Mission is active. 10s (not 3s) — the backend shares a small
-  // connection pool with daemon websockets; aggressive polling provoked pool
-  // exhaustion under load.
+  // Mission 活跃时轮询状态（10s — backend 连接池小，避免激进轮询）。
   useEffect(() => {
     if (!mission || !ACTIVE.has(mission.status)) return;
     const t = setInterval(() => refresh(mission.id), 10000);
@@ -162,6 +245,7 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
         budget_usd: 1.0,
       });
       setMission(m);
+      writeMissionIdToUrl(m.id); // 持久化到 URL，刷新可恢复
       setObjective("");
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
@@ -186,6 +270,7 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
       </h2>
       <p className="text-sm text-gray-500">
         描述任务目标，Coordinator 会拆解为 Worker 团队，并行派发到 daemon 执行、收敛产出。
+        刷新页面会保留当前 Mission。
       </p>
 
       {!mission && (
