@@ -131,6 +131,11 @@ class AgentRunLogEntry(BaseModel):
     timestamp: datetime
     channel: str
     content_redacted: str | None
+    # 2026-06-28-daemon-subagent-transcript task-07 / D-004@v1：子代理归属字段，
+    # 经 model_validate 自动透传（main.py / agent router / daemon router 调用点不改）。
+    parent_tool_use_id: str | None = None
+    subagent_type: str | None = None
+    depth: int | None = None
     model_config = {"from_attributes": True}
 
 

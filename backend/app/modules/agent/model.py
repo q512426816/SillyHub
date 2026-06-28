@@ -304,6 +304,10 @@ class AgentRunLog(BaseModel, table=True):
             unique=True,
             postgresql_where=text("dedup_key IS NOT NULL"),
         ),
+        # 2026-06-28-daemon-subagent-transcript task-07 / D-004@v1：子代理归属索引，
+        # 支持按 parent_tool_use_id 聚合查询某子代理的所有日志行（方案 B 列式承载
+        # 的核心优势，见 design §8）。主 agent 行 parent_tool_use_id=NULL 不受索引影响。
+        Index("ix_agent_run_logs_parent", "parent_tool_use_id"),
     )
 
     id: uuid.UUID = Field(
@@ -334,6 +338,23 @@ class AgentRunLog(BaseModel, table=True):
     dedup_key: str | None = Field(
         default=None,
         sa_column=Column(String(200), nullable=True),
+    )
+    # 2026-06-28-daemon-subagent-transcript task-07 / D-001@v1 / D-004@v1 / D-008@v1：
+    # 子代理归属字段（来自 SDK message 顶层 parent_tool_use_id/subagent_type/depth）。
+    # 主 agent 行三列为 NULL（向后兼容，前端按主 agent 渲染，FR-09）。daemon
+    # session-manager 维护 depth 透传（D-007@v1），backend _extract_sdk_messages
+    # 注入每条 flat record（D-008@v1），submit_messages 落库三列（task-09）。
+    parent_tool_use_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(200), nullable=True),
+    )
+    subagent_type: str | None = Field(
+        default=None,
+        sa_column=Column(String(100), nullable=True),
+    )
+    depth: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
     )
 
 
