@@ -17,6 +17,14 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { InteractiveSessionPanel } from "../interactive-session-panel";
 import type { SessionStreamConnection } from "@/lib/daemon";
 
+// MarkdownText 用 next/dynamic + ssr:false，jsdom 测试同步 render 处于 loading(null)，
+// turn.output 文本不出现。mock 成纯文本渲染（测 panel 交互逻辑，不测 markdown 库）。
+vi.mock("@/components/ui/markdown-text", () => ({
+  MarkdownText: ({ content }: { content: string }) => (
+    <div data-testid="markdown-text">{content}</div>
+  ),
+}));
+
 /* ----- mock lib/daemon ----- */
 
 const sessionApi = vi.hoisted(() => ({

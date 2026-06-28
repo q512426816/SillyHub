@@ -33,6 +33,14 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: nav.replace, push: vi.fn(), refresh: vi.fn() }),
 }));
 
+// MarkdownText 用 next/dynamic + ssr:false，jsdom 测试同步 render 处于 loading(null)，
+// 历史/流式回答文本不出现。mock 成纯文本渲染（测 dialog 交互逻辑，不测 markdown 库）。
+vi.mock("@/components/ui/markdown-text", () => ({
+  MarkdownText: ({ content }: { content: string }) => (
+    <div data-testid="markdown-text">{content}</div>
+  ),
+}));
+
 // ── mocks ────────────────────────────────────────────────────────────────────
 
 const daemon = vi.hoisted(() => ({

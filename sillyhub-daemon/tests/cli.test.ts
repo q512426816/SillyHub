@@ -53,6 +53,11 @@ let _origExit: typeof process.exit | null = null;
 async function setupCliWithTmpHome(tmpDir: string): Promise<void> {
   vi.resetModules();
   vi.stubEnv('HOME', tmpDir);
+  // Windows 的 os.homedir()（libuv）读 USERPROFILE 而非 HOME，仅 stub HOME 在
+  // Windows 不生效，DEFAULT_CONFIG_DIR 仍指向真实 ~/.sillyhub/daemon，破坏隔离
+  //（status/logs 读到真实 config/pid/log）。同时 stub USERPROFILE 让两侧一致。
+  // POSIX 的 homedir() 用 HOME，USERPROFILE stub 无副作用。
+  vi.stubEnv('USERPROFILE', tmpDir);
   // stub argv + exit：持续到 teardownCliWithTmpHome 才还原（防 main 异步副作用）
   if (_origArgv === null) {
     _origArgv = process.argv;

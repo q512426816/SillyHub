@@ -219,21 +219,34 @@ describe('parse tool_execution_end → tool_result', () => {
 // ===========================================================================
 
 describe('parse turn_end → usage', () => {
-  it('从 message.usage 映射 4 字段 + cache_creation_tokens 别名', () => {
+  it('从 message.usage 映射 4 字段 + cache_creation_tokens 别名，并 emit usage_update 事件', () => {
     const a = newAdapter();
-    expect(
-      a.parse(
-        makePiEvent('turn_end', {
-          message: {
-            role: 'assistant',
-            content: [],
-            usage: { input: 10, output: 5, cacheRead: 2, cacheWrite: 1, totalTokens: 18 },
-            stopReason: 'stop',
-          },
-          toolResults: [],
-        }),
-      ),
-    ).toBeNull(); // 无事件产出
+    const events = a.parse(
+      makePiEvent('turn_end', {
+        message: {
+          role: 'assistant',
+          content: [],
+          usage: { input: 10, output: 5, cacheRead: 2, cacheWrite: 1, totalTokens: 18 },
+          stopReason: 'stop',
+        },
+        toolResults: [],
+      }),
+    );
+    // c2563282：turn_end 累积 usage 后 emit usage_update 事件（text + metadata.status），
+    // 让 task-runner _eventToMessages 透传 token 到 backend（pi provider 否则 input_tokens 永空）。
+    // 事件格式对齐 stream-json adapter 的 _buildUsageUpdateEvent。
+    expect(events).toHaveLength(1);
+    expect(events![0]!.type).toBe('text');
+    expect(events![0]!.content).toBe('');
+    expect(events![0]!.metadata).toMatchObject({
+      status: 'usage_update',
+      usage: {
+        input_tokens: 10,
+        output_tokens: 5,
+        cache_read_tokens: 2,
+        cache_creation_tokens: 1,
+      },
+    });
     const usage = a.getUsage();
     expect(usage.input_tokens).toBe(10);
     expect(usage.output_tokens).toBe(5);
@@ -401,10 +414,10 @@ describe('fixture sample（完整事件流）', () => {
       const ev = a.parse(line);
       if (ev) all.push(...ev);
     }
-    // text×2 + tool_use + tool_result = 4
-    expect(all.length).toBe(4);
+    // text×2 + tool_use + tool_result + usage_update(text) = 5
+    expect(all.length).toBe(5);
     expect(all.map((e) => e.type)).toEqual([
-      'text', 'text', 'tool_use', 'tool_result',
+      'text', 'text', 'tool_use', 'tool_result', 'text',
     ]);
     expect(a.getOutput()).toBe('Hello! 👋');
     expect(a.getSessionId()).toBe('sess-pi-019efc1d');

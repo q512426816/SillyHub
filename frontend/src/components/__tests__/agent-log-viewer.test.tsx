@@ -8,12 +8,22 @@
 //   - tool 卡片状态徽标：✓ 成功 + 耗时秒；✗ 失败
 //   - ErrorBoundary：单 turn 崩溃不影响其他 turn
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
 import { AgentLogViewer, groupIntoTurns } from "@/components/agent-log-viewer";
 import type { AgentRunLogEntry } from "@/lib/agent";
 import type { ProcessedLog } from "@/components/agent-log/types";
+
+// MarkdownText 用 next/dynamic + ssr:false（react-markdown 依赖浏览器 API），
+// jsdom 测试里同步 render 处于 loading(null)，assistant 文本不出现导致 getByText 失败。
+// mock 成纯文本渲染：这些用例测的是 AgentLogViewer 的视图/过滤/分组逻辑，
+// 不测 markdown 渲染本身（由 @uiw/react-markdown-preview 库保证）。
+vi.mock("@/components/ui/markdown-text", () => ({
+  MarkdownText: ({ content }: { content: string }) => (
+    <div data-testid="markdown-text">{content}</div>
+  ),
+}));
 
 function makeProcessed(
   channel: AgentRunLogEntry["channel"],

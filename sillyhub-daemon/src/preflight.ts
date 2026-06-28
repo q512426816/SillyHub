@@ -313,7 +313,7 @@ async function downloadAndReplace(
     return false;
   }
 
-  logger('info', 'daemon_self_updated_need_restart', {
+  logger('warn', 'daemon_self_updated_need_restart', {
     from: currentId,
     to: newVersion,
     target,

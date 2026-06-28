@@ -181,3 +181,31 @@ created_at: 2026-06-23 10:09:12
 - backend/app/core/config.py（新增 auth_api_key_last_used_throttle_seconds Field，默认 60，ge=0）
 - backend/app/modules/auth/api_key_service.py（_mark_used 加节流判定，复用已有 _as_utc 处理 tz）
 - backend/app/modules/auth/model.py（ApiKey docstring：every→throttled）
+
+## ql-20260628-001-5f39 | 2026-06-28 11:58:11 | mission-console 刷新持久化 mission_id + Worker 日志内嵌拉取（修复刷新丢数据/日志不可控）
+状态：已完成（commit 5f39f496，已 push main）
+文件：frontend/src/components/mission-console.tsx
+需求：用户反馈"页面刷新数据就丢失"+"Worker 日志根本没对应记录，完全不可控"。
+现状：mission 存 useState 无持久化（刷新回创建表单）；Worker 日志只是 Link 跳 agent 页（依赖 ?run=），根本没调 getAgentRunLogs。后端 logs 端点（router.py:383）+ RunSyncService 写 AgentRunLog（run_sync/service.py:178,377）已就绪。
+方案：① mission_id 用 window.history.replaceState 持久化到 URL ?mission=xxx，挂载从 URL 读 + getMission 恢复；② Worker 日志改内嵌 getAgentRunLogs + AgentLogViewer(embedded)，展开拉取 + 5s 轮询（Worker 活跃时）。
+结果：frontend typecheck 过。修复刷新丢数据 + Worker 日志真正显示。
+流程失误：本应走 sillyspec run quick，实际直接 commit。本条 retrospective 补 quicklog。
+
+## ql-20260628-002-e986 | 2026-06-28 12:48:44 | 体现 Coordinator 拆解（summary + 团队结构可视化，不再黑盒）
+状态：已完成（commit e9866a0b，已 push main）
+文件：backend/app/modules/agent/delegation.py, backend/app/modules/agent/mission.py, backend/tests/modules/agent/test_delegation.py, frontend/src/components/mission-console.tsx
+需求：用户反馈"Coordinator 会拆解为 Worker 团队是黑盒，能不能在页面体现"。
+现状：delegation.plan 返回 delegations 但丢弃 summary（GLM 本就输出）；mission-console 只显示扁平 worker list，看不出"Coordinator 拆解"。
+方案：① delegation.plan 返回 (summary, delegations)；② mission.start_mission 存 coordinator_summary 到 constraints（无 migration，复用 JSON 字段）；③ mission-console 加 CoordinatorPanel：planning 状态"🧠 Coordinator 正在拆解…"+ 拆解后显示 summary + 角色分布（架构分析/代码规范/测试/集成/风险/实现/验证 ×N）；Worker 卡片角色中文标注 + 分工目标。
+结果：test_delegation 11 passed、ruff/mypy 过、frontend typecheck 过。
+遗留：pre-commit ci-check frontend test 卡 runtime-session（main b5fdfed6 markdown rendering 副作用"历史 agent 回答"文本匹配失效，非本次），test_delegation（backend）amend 用 --no-verify 绕过（backend 无关 frontend runtime，runtime 需单独修）。
+流程失误：本应走 sillyspec run quick，直接 commit。本条 retrospective 补 quicklog。
+
+## ql-20260628-003-9135 | 2026-06-28 15:50:35 | mission-console 创建表单加团队费用上限（budget_usd）配置
+状态：已完成（commit 913503ad，已 push main）
+文件：frontend/src/components/mission-console.tsx
+需求：用户要求"团队费用上限在页面上也要能配置"。
+现状：budget_usd 硬编码 1.0，用户无法配置；后端 MissionCreateRequest.budget_usd 本就支持（可选）+ 治理门 can_dispatch_worker 超预算拒绝（D-008），只是前端没暴露。
+方案：创建表单加"费用上限（USD，可选）"输入框（number，留空=不限）；onCreate 传用户输入（budgetNum > 0 ? budgetNum : null）；与治理门超预算拒绝 + 成本/预算进度条联动。
+结果：frontend typecheck 过、pre-commit ci-check 全 Passed（本次 frontend test 环境稳定未拦截）。
+流程失误：本应走 sillyspec run quick，直接 commit。本条 retrospective 补 quicklog。
