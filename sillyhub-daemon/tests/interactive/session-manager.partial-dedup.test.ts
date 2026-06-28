@@ -15,6 +15,13 @@
 // 策略：白盒直接调 SessionManager 的 _bufferPartial / _flushPartial /
 // _clearPartialBuffer / _onMessage 私有方法（经 any 桥接），spy deps.onTurnMessage
 // 捕获所有 emit。不启动真实 driver，绕过 SDK。
+//
+// 2026-06-28-daemon-subagent-transcript task-03 / D-002@v1 更新：partial 改二级 Map
+// 按 parent_tool_use_id 分桶。本文件全部用例为主 agent（parent=null → 'main' 桶），
+// segmentId 契约从 `${messageId}:${index}` 变为 `main:${messageId}:${index}`（parent
+// 前缀隔离主/子 segment 空间），_partialBuffers 访问改二级 .get('main')，_flushPartial
+// 加 parentKey 参数。行为不变（partial/override/去重/late 守卫），仅 segmentId 字符串
+// 与 Map 结构跟进新契约。主/子分桶隔离见 session-manager.partial-bucket.test.ts。
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { SessionManager } from '../../src/interactive/session-manager.js';
@@ -189,7 +196,7 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     p._onMessage(state, thinkingDelta(0, 'x'.repeat(90)));
 
     // 手动 flush（绕过 timer 等待）。
-    await p._flushPartial(SID);
+    await p._flushPartial(SID, 'main');
 
     expect(onTurnMessage).toHaveBeenCalledTimes(1);
     const emitted = onTurnMessage.mock.calls[0][2] as Record<string, unknown>;
@@ -197,7 +204,7 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     expect(emitted.content).toMatch(/^\[THINKING\] /);
     // 关键断言：segmentId = `${messageId}:${index}`，isPartial=true。
     const meta = (emitted.metadata ?? {}) as Record<string, unknown>;
-    expect(meta.segmentId).toBe('msg-abc:0');
+    expect(meta.segmentId).toBe('main:msg-abc:0');
     expect(meta.thinking).toBe(true);
     expect(meta.isPartial).toBe(true);
   });
@@ -210,7 +217,7 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     p._onMessage(state, messageStart('msg-abc'));
     p._onMessage(state, blockStart(0));
     p._onMessage(state, thinkingDelta(0, 'x'.repeat(90)));
-    await p._flushPartial(SID);
+    await p._flushPartial(SID, 'main');
     expect(onTurnMessage).toHaveBeenCalledTimes(1);
 
     // 2. 完整 assistant message 到达（含 thinking block index=0 全文）。
@@ -220,7 +227,7 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     );
 
     // 完整 message 会被 _onMessage 转发给 onTurnMessage（1 条）+ override 信号（1 条）。
-    // 至少 emit 了 [THINKING_OVERRIDE] msg-abc:0。
+    // 至少 emit 了 [THINKING_OVERRIDE] main:msg-abc:0。
     const calls = onTurnMessage.mock.calls.map((c) => c[2]) as Array<
       Record<string, unknown>
     >;
@@ -230,15 +237,15 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
         m.content.startsWith('[THINKING_OVERRIDE]'),
     );
     expect(override, 'expected [THINKING_OVERRIDE] signal').toBeDefined();
-    expect(override!.content).toBe('[THINKING_OVERRIDE] msg-abc:0');
+    expect(override!.content).toBe('[THINKING_OVERRIDE] main:msg-abc:0');
     const meta = (override!.metadata ?? {}) as Record<string, unknown>;
-    expect(meta.segmentId).toBe('msg-abc:0');
+    expect(meta.segmentId).toBe('main:msg-abc:0');
     expect(meta.stale).toBe(true);
     expect(meta.thinking).toBe(true);
 
     // completedSegments 已记录。
-    const buf = p._partialBuffers.get(SID);
-    expect(buf.completedSegments.has('msg-abc:0')).toBe(true);
+    const buf = p._partialBuffers.get(SID).get('main');
+    expect(buf.completedSegments.has('main:msg-abc:0')).toBe(true);
   });
 
   it('多 thinking block：segmentId 各自独立，override 分别 emit', async () => {
@@ -249,10 +256,10 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     // 两个 thinking block：index=0 和 index=2（中间夹 tool_use 用 index=1）。
     p._onMessage(state, blockStart(0));
     p._onMessage(state, thinkingDelta(0, 'x'.repeat(90)));
-    await p._flushPartial(SID);
+    await p._flushPartial(SID, 'main');
     p._onMessage(state, blockStart(2));
     p._onMessage(state, thinkingDelta(2, 'y'.repeat(90)));
-    await p._flushPartial(SID);
+    await p._flushPartial(SID, 'main');
 
     // 完整 message 含两个 thinking block。
     await p._onMessage(
@@ -275,8 +282,8 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
       .map((m) => m.content as string)
       .sort();
     expect(overrides).toEqual([
-      '[THINKING_OVERRIDE] msg-multi:0',
-      '[THINKING_OVERRIDE] msg-multi:2',
+      '[THINKING_OVERRIDE] main:msg-multi:0',
+      '[THINKING_OVERRIDE] main:msg-multi:2',
     ]);
   });
 
@@ -288,7 +295,7 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     p._onMessage(state, messageStart('msg-late'));
     p._onMessage(state, blockStart(0));
     p._onMessage(state, thinkingDelta(0, 'x'.repeat(90)));
-    await p._flushPartial(SID);
+    await p._flushPartial(SID, 'main');
 
     // 2. 完整 message 到达（标记 completedSegments）。
     await p._onMessage(
@@ -300,7 +307,7 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
 
     // 3. 网络重排：late thinking_delta 到达（同 segmentId）。
     p._onMessage(state, thinkingDelta(0, '迟到的增量'));
-    await p._flushPartial(SID);
+    await p._flushPartial(SID, 'main');
 
     // late partial 被丢弃，没有新 emit（只可能有残留 timer 空 flush no-op）。
     const callsAfter = onTurnMessage.mock.calls.length;
@@ -326,12 +333,12 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
         delta: { type: 'thinking_delta', thinking: 'z'.repeat(90) },
       },
     });
-    await p._flushPartial(SID);
+    await p._flushPartial(SID, 'main');
 
     const emitted = onTurnMessage.mock.calls[0][2] as Record<string, unknown>;
     const meta = (emitted.metadata ?? {}) as Record<string, unknown>;
     // 退化：turnIndex:thinking（turnIndex 来自 currentRunId，这里是 'run-1'）。
-    expect(meta.segmentId).toBe('run-1:thinking');
+    expect(meta.segmentId).toBe('main:run-1:thinking');
     expect(meta.isPartial).toBe(true);
   });
 
@@ -349,7 +356,7 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
         delta: { type: 'text_delta', text: 'a'.repeat(90) },
       },
     });
-    await p._flushPartial(SID);
+    await p._flushPartial(SID, 'main');
 
     const calls = onTurnMessage.mock.calls.map((c) => c[2]) as Array<
       Record<string, unknown>
@@ -372,19 +379,19 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     p._onMessage(state, messageStart('msg-reset'));
     p._onMessage(state, blockStart(0));
     p._onMessage(state, thinkingDelta(0, 'x'.repeat(90)));
-    await p._flushPartial(SID);
+    await p._flushPartial(SID, 'main');
     await p._onMessage(
       state,
       assistantMessage('msg-reset', [{ index: 0, text: '完整' }]),
     );
 
     // 完整 message 后 completedSegments 非空（late partial 守卫生效）。
-    const bufMid = p._partialBuffers.get(SID);
-    expect(bufMid.completedSegments.has('msg-reset:0')).toBe(true);
+    const bufMid = p._partialBuffers.get(SID).get('main');
+    expect(bufMid.completedSegments.has('main:msg-reset:0')).toBe(true);
 
     // turn 结束（_onResult）后清空。
     await p._onResult(state, { type: 'result', subtype: 'success' });
-    const bufAfter = p._partialBuffers.get(SID);
+    const bufAfter = p._partialBuffers.get(SID).get('main');
     expect(bufAfter.completedSegments.size).toBe(0);
   });
 
@@ -411,7 +418,7 @@ describe('task-11: partial/完整 thinking 按 segmentId 去重', () => {
     // 只转发完整 message（1 条），不 emit override（无已 flush 的 partial）。
     const delta = onTurnMessage.mock.calls.length - callsBefore;
     expect(delta).toBe(1); // 仅完整 assistant 转发
-    const buf = p._partialBuffers.get(SID);
+    const buf = p._partialBuffers.get(SID).get('main');
     expect(buf.thinking).toBe(''); // buffer 已清
     expect(buf.timer).toBeNull();
   });

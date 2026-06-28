@@ -157,6 +157,12 @@ interface PartialUsageSnapshot {
 }
 
 interface PartialFlushBuffer {
+  /**
+   * 2026-06-28-daemon-subagent-transcript task-03 / D-002@v1：本桶归属 parentKey。
+   * 'main' = 主 agent（parent_tool_use_id=null）；否则 = 子代理的 tool_use_id。
+   * _resolveSegmentId 据此给 segmentId 加 parent 前缀，避免主/子 segment 撞 id。
+   */
+  parentKey: string;
   /** 累积的 thinking_delta.thinking 内容（待 flush）。 */
   thinking: string;
   /** 累积的 text_delta.text 内容（待 flush）。 */
@@ -236,11 +242,13 @@ export class SessionManager {
   private readonly _pendingInjectCount = new Map<string, number>();
 
   /**
-   * ql-20260621-partial：per-session partial 消息缓冲（streaming delta 节流）。
-   * key = sessionId，value = PartialFlushBuffer（thinking/text delta 累积 +
-   * 500ms flush 定时器）。create 时按需懒建，end/fail 时销毁。
+   * ql-20260621-partial + 2026-06-28-daemon-subagent-transcript task-03 / D-002@v1：
+   * 二级 Map partial 缓冲——外层 key=sessionId，内层 key=parentKey（'main'=主 agent /
+   * 子代理 tool_use_id），value=PartialFlushBuffer。按 parent 分桶：子代理完整 assistant
+   * message 只清自己的桶，不误清主 agent partial（R-02 P0）。主 agent 单代理场景恒用
+   * 'main' 桶，行为与改造前单桶逐字节等价。create 时按需懒建，end/fail/shutdown 销毁整 session。
    */
-  private readonly _partialBuffers = new Map<string, PartialFlushBuffer>();
+  private readonly _partialBuffers = new Map<string, Map<string, PartialFlushBuffer>>();
 
   /** partial flush 节流间隔（ms）。累积 delta 到此窗口后批量推送一次。 */
   private static readonly PARTIAL_FLUSH_MS = 500;
@@ -589,6 +597,7 @@ export class SessionManager {
       manualApproval: enableApproval,
       askUserOnly: effectiveAskUserOnly,
       driver, // D-001：写入归属 driver，供 interrupt/consume 路由。
+      subagentDepth: new Map(), // task-02 / D-007@v1：子代理 depth 追踪。
     };
     this._store.set(input.sessionId, state);
 
@@ -1502,6 +1511,7 @@ export class SessionManager {
       manualApproval: restoreManualApproval,
       askUserOnly: restoreAskUserOnly,
       driver, // D-001：写入归属 driver。
+      subagentDepth: new Map(), // task-02 / D-007@v1：恢复后从空开始（depth 不持久化）。
     };
     this._store.set(state.sessionId, state);
 
@@ -1656,11 +1666,14 @@ export class SessionManager {
     }
     // task-10：turn result 收尾后排队 flush（currentRunId 已清空）。
     this._scheduleFlush();
-    // task-11（边界 7）：turn 边界重置 completedSegments —— 新 turn 的 segmentId
-    // 空间独立，避免跨 turn 误判 late partial。buffer 不销毁（session 仍 active）。
-    const buf = this._partialBuffers.get(state.sessionId);
-    if (buf) {
-      buf.completedSegments = new Set<string>();
+    // task-11（边界 7）+ task-03（D-002）：turn 边界重置所有桶的 completedSegments ——
+    // 新 turn 的 segmentId 空间独立，避免跨 turn 误判 late partial。多桶（主+各子代理）
+    // 全部重置；buffer 不销毁（session 仍 active，下 turn 复用桶）。
+    const turnSessionMap = this._partialBuffers.get(state.sessionId);
+    if (turnSessionMap) {
+      for (const buf of turnSessionMap.values()) {
+        buf.completedSegments = new Set<string>();
+      }
     }
   }
 
@@ -1676,6 +1689,37 @@ export class SessionManager {
    * 完整 message 为全文 [THINKING]/[ASSISTANT]，partial delta 必须丢弃避免重复）。
    */
   private async _onMessage(state: SessionState, msg: SDKMessage): Promise<void> {
+    // 2026-06-28-daemon-subagent-transcript task-02 / D-007@v1：子代理 depth 计算 +
+    // 注入 msg.depth（转发给 backend 落库 depth 列）。主 agent(parent_tool_use_id=null)
+    // →0；子代理按 parent_tool_use_id 查 state.subagentDepth 得 depth（查不到退化 1，R-04）。
+    // assistant message 另遍历 tool_use blocks 预登记 tool_use.id → msgDepth+1，供该
+    // tool_use 派生的子代理消息查 depth（主 tool_use→子 1，子 tool_use→孙 2，多层嵌套）。
+    const msgRecord = msg as Record<string, unknown>;
+    const rawParent = msgRecord['parent_tool_use_id'];
+    const parentToolUseId = typeof rawParent === 'string' ? rawParent : null;
+    const msgDepth = parentToolUseId
+      ? (state.subagentDepth.get(parentToolUseId) ?? 1)
+      : 0;
+    msgRecord['depth'] = msgDepth;
+    if (msgRecord['type'] === 'assistant') {
+      const inner = msgRecord['message'] as Record<string, unknown> | undefined;
+      const blocks = inner?.['content'];
+      if (Array.isArray(blocks)) {
+        for (const b of blocks) {
+          if (
+            b &&
+            typeof b === 'object' &&
+            (b as { type?: string }).type === 'tool_use'
+          ) {
+            const tId = (b as { id?: string }).id;
+            if (typeof tId === 'string' && tId) {
+              state.subagentDepth.set(tId, msgDepth + 1);
+            }
+          }
+        }
+      }
+    }
+
     if (
       msg &&
       typeof msg === 'object' &&
@@ -1683,7 +1727,14 @@ export class SessionManager {
       (msg as { subtype?: string }).subtype === 'init'
     ) {
       const sid = (msg as { session_id?: string }).session_id;
-      if (sid && state.agentSessionId === undefined) {
+      // 2026-06-28-daemon-subagent-transcript task-04 / D-003@v1：防御性守卫——
+      // 子代理 system/init（parent_tool_use_id 非空）不得覆盖主 session 的
+      // agentSessionId（resume key）。现有 ===undefined 守卫已挡住（主 init 必
+      // 先于子代理到达），此处加 parent_tool_use_id 双重守卫防御时序异常，
+      // 不依赖单一 ===undefined。
+      const isSubagentInit =
+        (msg as { parent_tool_use_id?: string | null }).parent_tool_use_id != null;
+      if (sid && !isSubagentInit && state.agentSessionId === undefined) {
         state.agentSessionId = sid;
         // task-10：首 turn system/init 拿到 agentSessionId 后才可恢复 → 排队 flush。
         this._scheduleFlush();
@@ -1739,13 +1790,17 @@ export class SessionManager {
       // [THINKING_OVERRIDE] 覆盖信号（必须在完整 message 之后，语义"完整行覆盖
       // partial 行"）。driver 的 onMessage 回调不 await _onMessage 返回值，故 override
       // 异步 emit 不影响转发时序。
-      const completed = this._extractCompletedSegments(state, msg);
-      const buf = this._partialBuffers.get(state.sessionId);
+      // task-03 / D-002@v1：按本 message 的 parentKey 分桶——子代理完整 assistant
+      // message 只清/override 自己的桶，绝不触碰主 agent 桶（R-02 P0）。completed/
+      // segmentId 全部带 parent 前缀，与该桶 partial 对齐。
+      const parentKey = parentToolUseId ?? 'main';
+      const completed = this._extractCompletedSegments(state, msg, parentKey);
+      const buf = this._partialBuffers.get(state.sessionId)?.get(parentKey);
       const flushedSnapshot = buf
         ? buf.flushedSegments.slice()
         : [];
       // 第一阶段：sync 清 buffer + 记录 completedSegments（late partial 守卫立即生效）。
-      this._clearPartialBufferSync(state.sessionId, completed);
+      this._clearPartialBufferSync(state.sessionId, parentKey, completed);
       // 转发完整 message（保持原有 await onTurnMessage 语义）。
       const runId = state.currentRunId;
       if (runId) {
@@ -1770,6 +1825,60 @@ export class SessionManager {
   // ── ql-20260621-partial：streaming delta 缓冲节流 ──────────────────────────
 
   /**
+   * 2026-06-28-daemon-subagent-transcript task-03 / D-002@v1：从消息读归属 parentKey。
+   * SDKPartialAssistantMessage（stream_event，sdk.d.ts:3723）/ assistant / user message
+   * 带 parent_tool_use_id（非空=子代理该 tool_use 的 id，null=主 agent）→ 取该 id；
+   * 其余消息类型（如 SDKThinkingTokensMessage 不带该字段）读不到 → 退化 'main'
+   *（thinking_tokens 归主桶，estimated_tokens 显示降级，非计费不影响 R-02 回归）。
+   */
+  private _parentKeyOf(msg: SDKMessage): string {
+    const raw = (msg as Record<string, unknown>)['parent_tool_use_id'];
+    return typeof raw === 'string' && raw ? raw : 'main';
+  }
+
+  /**
+   * task-03 / D-002@v1：获取或创建指定 parentKey 的 partial 桶（二级 Map 内层）。
+   * 主 agent → 'main' 桶（行为与改造前单桶等价，R-02）；子代理 → 各自 tool_use_id 桶，
+   * 互不干扰。空桶对象首次 partial 时懒建。
+   */
+  private _getOrCreateBuffer(
+    sessionId: string,
+    parentKey: string,
+  ): PartialFlushBuffer {
+    let sessionMap = this._partialBuffers.get(sessionId);
+    if (!sessionMap) {
+      sessionMap = new Map<string, PartialFlushBuffer>();
+      this._partialBuffers.set(sessionId, sessionMap);
+    }
+    let buf = sessionMap.get(parentKey);
+    if (!buf) {
+      buf = {
+        parentKey,
+        thinking: '',
+        assistant: '',
+        lastTokens: 0,
+        flushedTokens: 0,
+        timer: null,
+        currentMessageId: null,
+        currentSegmentId: null,
+        flushedSegments: [],
+        completedSegments: new Set<string>(),
+        pendingUsage: null,
+        flushedUsage: null,
+        sessionInputTokens: 0,
+        sessionOutputTokens: 0,
+        sessionCacheReadTokens: 0,
+        sessionCacheCreationTokens: 0,
+        lastCallOutputTokens: 0,
+        lastCallCacheReadTokens: 0,
+        lastCallCacheCreationTokens: 0,
+      };
+      sessionMap.set(parentKey, buf);
+    }
+    return buf;
+  }
+
+  /**
    * task-11（design §5.3 D1/D2）：拼 thinking segment 的稳定 segmentId。
    *
    * 优先方案：`${messageId}:${blockIndex}`（同 assistant message 内 content block
@@ -1790,14 +1899,18 @@ export class SessionManager {
     // 「从 delta 顶层读 message.id 作 hint」永远拿到 undefined，形同虚设；保留它
     // 反而掩盖了「currentMessageId 被 _clearPartialBufferSync 清空 → late delta
     // 退化为 runId:thinking」的真问题。故移除 hint，只信 currentMessageId。
+    // task-03 / D-002：segmentId 加 buf.parentKey 前缀（'main' 或 tool_use_id），
+    // 主/子代理 segment 空间隔离，避免不同 agent 的同 messageId:index 撞 id 导致
+    // completedSegments 守卫跨 agent 误判。partial 与 complete 都加同前缀，去重自洽。
     const mid = buf.currentMessageId;
     const idx = typeof blockIndex === 'number' ? String(blockIndex) : 'thinking';
+    const prefix = buf.parentKey;
     if (mid) {
-      return `${mid}:${idx}`;
+      return `${prefix}:${mid}:${idx}`;
     }
     // 退化：同 turn 共享 segmentId（接受合并精度损失，边界 6）。
     const runKey = state.currentRunId ?? 'unknown';
-    return `${runKey}:thinking`;
+    return `${prefix}:${runKey}:thinking`;
   }
 
   /**
@@ -1810,6 +1923,7 @@ export class SessionManager {
   private _extractCompletedSegments(
     state: SessionState,
     msg: SDKMessage,
+    parentKey: string,
   ): Set<string> {
     const segments = new Set<string>();
     const message = (msg as { message?: { id?: string; content?: unknown } }).message;
@@ -1822,7 +1936,9 @@ export class SessionManager {
     for (let i = 0; i < content.length; i++) {
       const block = content[i] as { type?: string } | null;
       if (block && block.type === 'thinking') {
-        segments.add(mid ? `${mid}:${i}` : `${runKey}:thinking`);
+        // task-03 / D-002：segmentId 带 parentKey 前缀，与 _resolveSegmentId 对齐
+        //（partial/complete 同前缀，completedSegments 守卫不跨 agent 误判）。
+        segments.add(mid ? `${parentKey}:${mid}:${i}` : `${parentKey}:${runKey}:thinking`);
       }
     }
     return segments;
@@ -1840,30 +1956,11 @@ export class SessionManager {
    */
   private _bufferPartial(state: SessionState, msg: SDKMessage): void {
     const sessionId = state.sessionId;
-    let buf = this._partialBuffers.get(sessionId);
-    if (!buf) {
-      buf = {
-        thinking: '',
-        assistant: '',
-        lastTokens: 0,
-        flushedTokens: 0,
-        timer: null,
-        currentMessageId: null,
-        currentSegmentId: null,
-        flushedSegments: [],
-        completedSegments: new Set<string>(),
-        pendingUsage: null,
-        flushedUsage: null,
-        sessionInputTokens: 0,
-        sessionOutputTokens: 0,
-        sessionCacheReadTokens: 0,
-        sessionCacheCreationTokens: 0,
-        lastCallOutputTokens: 0,
-        lastCallCacheReadTokens: 0,
-        lastCallCacheCreationTokens: 0,
-      };
-      this._partialBuffers.set(sessionId, buf);
-    }
+    // task-03 / D-002@v1：按 msg 归属 parentKey 分桶——子代理 partial delta 进自己的
+    // 桶，主 agent 进 'main' 桶。stream_event 带 parent_tool_use_id（sdk.d.ts:3723），
+    // thinking_tokens 不带（退化 'main'）。主/子 partial 互不干扰（R-02 P0）。
+    const parentKey = this._parentKeyOf(msg);
+    const buf = this._getOrCreateBuffer(sessionId, parentKey);
 
     const msgType = (msg as { type?: string }).type;
     if (msgType === 'stream_event') {
@@ -1979,7 +2076,8 @@ export class SessionManager {
     // 直到 flush 清 timer；flush 后若仍有 partial 到达会重建 timer（自然节流）。
     if (buf.timer === null) {
       buf.timer = setTimeout(() => {
-        this._flushPartial(sessionId).catch((err) => {
+        // task-03：flush 指定 parentKey 的桶（timer 是 per-buffer 的）。
+        this._flushPartial(sessionId, parentKey).catch((err) => {
           // flush 失败不崩 session 运行；记日志后继续（buffer 清空，下次 partial 重建）。
           // eslint-disable-next-line no-console
           console.error('[session-manager] partial flush failed', err);
@@ -2002,16 +2100,20 @@ export class SessionManager {
    * 清空 buffer 内容 + timer 引用（idle）。无 currentRunId / session 不存在
    * 时丢弃（不推到已结束的 turn）。
    */
-  private async _flushPartial(sessionId: string): Promise<void> {
-    const buf = this._partialBuffers.get(sessionId);
+  private async _flushPartial(
+    sessionId: string,
+    parentKey: string,
+  ): Promise<void> {
+    const buf = this._partialBuffers.get(sessionId)?.get(parentKey);
     if (!buf) return;
     // 先清 timer 引用，让下次 partial 能重建（自然节流）。
     buf.timer = null;
 
     const state = this._store.get(sessionId);
     if (!state) {
-      // session 已不存在（end/fail 已销毁 buffer，但定时器可能已 in-flight）。
-      this._partialBuffers.delete(sessionId);
+      // session 已不存在（end/fail 已销毁 buffer，但定时器可能已 in-flight）→ 销毁
+      // 整个 session 所有桶（_destroyPartialBuffer 遍历内层 Map clearTimeout）。
+      this._destroyPartialBuffer(sessionId);
       return;
     }
     const runId = state.currentRunId;
@@ -2130,9 +2232,10 @@ export class SessionManager {
    */
   private _clearPartialBufferSync(
     sessionId: string,
+    parentKey: string,
     completedSegments: ReadonlySet<string> = new Set(),
   ): void {
-    const buf = this._partialBuffers.get(sessionId);
+    const buf = this._partialBuffers.get(sessionId)?.get(parentKey);
     if (!buf) return;
     if (buf.timer) {
       clearTimeout(buf.timer);
@@ -2203,11 +2306,15 @@ export class SessionManager {
    * session end/fail/daemon shutdown 时调用，防止 timer 泄漏。
    */
   private _destroyPartialBuffer(sessionId: string): void {
-    const buf = this._partialBuffers.get(sessionId);
-    if (!buf) return;
-    if (buf.timer) {
-      clearTimeout(buf.timer);
-      buf.timer = null;
+    // task-03 / D-002：销毁整个 session 的所有桶（主 + 各子代理）。每个桶有独立 timer，
+    // 全部 clearTimeout 防泄漏。
+    const sessionMap = this._partialBuffers.get(sessionId);
+    if (!sessionMap) return;
+    for (const buf of sessionMap.values()) {
+      if (buf.timer) {
+        clearTimeout(buf.timer);
+        buf.timer = null;
+      }
     }
     this._partialBuffers.delete(sessionId);
   }
