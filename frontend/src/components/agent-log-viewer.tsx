@@ -304,6 +304,13 @@ export function AgentLogRow({
 }) {
   const log = processedLog.log;
   const meta = semanticCategoryMeta(processedLog.semanticCategory ?? "log");
+  // 2026-06-28-daemon-subagent-transcript task-11 / FR-08 / D-005@v1：子代理归属渲染。
+  // subagent_type 非空或 depth>0 → 子代理行：行首 [子代理:<type>] 徽标 + depth 左缩进。
+  // 主 agent（null/0）→ isSubagent=false，渲染不变（design §9 brownfield / G5）。
+  // 本期平铺带标签 + 缩进，不折叠嵌套（D-005，数据已落库，未来升级只改前端）。
+  const subagentType = log.subagent_type ?? null;
+  const logDepth = log.depth ?? 0;
+  const isSubagent = subagentType != null || logDepth > 0;
   const toolCall = log.channel === "tool_call"
     ? parseToolCallContent(log.content_redacted)
     : null;
@@ -345,6 +352,9 @@ export function AgentLogRow({
         meta.rowClass,
         isThinking && "opacity-80",
       )}
+      // task-11 / D-005：子代理行按 depth 左缩进（覆盖 px-3 的 12px：depth=1→26 /
+      // depth=2→40，最深 4 层封顶防溢出）。主 agent（depth=0）不加 style 保持原样。
+      style={isSubagent ? { paddingLeft: `${12 + Math.min(logDepth, 4) * 14}px` } : undefined}
     >
       <span className="mt-0.5 flex min-w-0 items-center gap-1 font-mono text-[11px] text-zinc-500">
         <Clock3 className="hidden h-3 w-3 shrink-0 sm:block" />
@@ -360,6 +370,13 @@ export function AgentLogRow({
         {meta.label}
       </span>
       <div className="min-w-0 max-w-full">
+        {/* task-11 / FR-08 / D-005@v1：子代理行首徽标（中文）。subagent_type 非空时
+            渲染 [子代理:<type>]，让用户一眼区分主 agent 与子代理活动。主 agent 不渲染。 */}
+        {isSubagent && subagentType && (
+          <span className="mr-1 inline-flex items-center rounded border border-indigo-200 bg-indigo-50 px-1 align-middle text-[10px] font-semibold text-indigo-700">
+            子代理:{subagentType}
+          </span>
+        )}
         {/* channel=tool_call → specialized renderer */}
         {toolCall ? (
           <div className="font-mono [overflow-wrap:anywhere]">

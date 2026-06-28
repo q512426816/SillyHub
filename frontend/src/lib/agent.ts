@@ -58,6 +58,13 @@ export interface AgentRunLogEntry {
   // ql-20260616-002：后端 schema 字段是 str | None（model.py:238 / schema.py:93），
   // 之前前端错声明为 string,导致 normalize.ts 直接 content.split 崩溃。
   content_redacted: string | null;
+  // 2026-06-28-daemon-subagent-transcript task-10 / FR-08 / D-005@v1：子代理归属三列。
+  // 后端 AgentRunLog 落库（task-07/09）+ _extract_sdk_messages 透传（task-08）+
+  // SSE 实时流（task-09 published_logs）。主 agent / 历史日志（未升级 daemon）→
+  // null/undefined，viewer 按主 agent 渲染（design §9 brownfield / G5）。
+  parent_tool_use_id?: string | null;
+  subagent_type?: string | null;
+  depth?: number | null;
 }
 
 export interface CreateAgentRunInput {
@@ -111,6 +118,11 @@ export interface StreamLogEvent {
   content: string;
   timestamp: string;
   log_id: string | null;
+  // task-10 / FR-08：SSE 实时流归属（backend published_logs / session payload 透传，
+  // task-09）。实时流与 DB 查询路径都有归属，viewer 统一渲染。历史/主 agent → undefined。
+  parent_tool_use_id?: string | null;
+  subagent_type?: string | null;
+  depth?: number | null;
 }
 
 // ── Agent Run User Input ──

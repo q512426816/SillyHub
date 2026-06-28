@@ -432,3 +432,92 @@ describe("ql-20260626-001 bug2: 对话视图为默认（隐藏 tool/thinking）"
     expect(screen.getByText(/切到「全部」查看完整日志/)).toBeInTheDocument();
   });
 });
+
+/* ------------------------------------------------------------------ */
+/*  2026-06-28-daemon-subagent-transcript task-14 / FR-08 / D-005@v1   */
+/*  子代理归属渲染：徽标 [子代理:type] + depth 缩进                      */
+/* ------------------------------------------------------------------ */
+
+describe("task-11 / FR-08: 子代理归属渲染（徽标 + depth 缩进）", () => {
+  it("subagent_type 非空 → 渲染 [子代理:type] 中文徽标", () => {
+    const logs: AgentRunLogEntry[] = [
+      {
+        id: "sub1",
+        run_id: "r1",
+        channel: "stdout",
+        content_redacted: "[ASSISTANT] 子代理回复",
+        timestamp: "2026-06-28T10:00:00.000Z",
+        parent_tool_use_id: "toolu_sub_1",
+        subagent_type: "general-purpose",
+        depth: 1,
+      } as AgentRunLogEntry,
+    ];
+    render(
+      <AgentLogViewer
+        title="测试"
+        runId="r1"
+        logs={logs}
+        loading={false}
+        emptyText="空"
+        defaultViewMode="all"
+      />,
+    );
+    expect(screen.getByText("子代理:general-purpose")).toBeInTheDocument();
+  });
+
+  it("多层子代理（user_input 隔开避免合并）→ 各自徽标", () => {
+    const logs: AgentRunLogEntry[] = [
+      makeRawLog("user_input", "提问1", "u1", "2026-06-28T10:00:00.000Z"),
+      {
+        id: "sub-l1",
+        run_id: "r1",
+        channel: "stdout",
+        content_redacted: "[ASSISTANT] 子代理",
+        timestamp: "2026-06-28T10:00:01.000Z",
+        parent_tool_use_id: "toolu_1",
+        subagent_type: "Explore",
+        depth: 1,
+      } as AgentRunLogEntry,
+      makeRawLog("user_input", "提问2", "u2", "2026-06-28T10:00:02.000Z"),
+      {
+        id: "sub-l2",
+        run_id: "r1",
+        channel: "stdout",
+        content_redacted: "[ASSISTANT] 孙代理",
+        timestamp: "2026-06-28T10:00:03.000Z",
+        parent_tool_use_id: "toolu_2",
+        subagent_type: "Plan",
+        depth: 2,
+      } as AgentRunLogEntry,
+    ];
+    render(
+      <AgentLogViewer
+        title="测试"
+        runId="r1"
+        logs={logs}
+        loading={false}
+        emptyText="空"
+        defaultViewMode="all"
+      />,
+    );
+    expect(screen.getByText("子代理:Explore")).toBeInTheDocument();
+    expect(screen.getByText("子代理:Plan")).toBeInTheDocument();
+  });
+
+  it("主 agent（无归属字段）→ 不渲染子代理徽标", () => {
+    const logs: AgentRunLogEntry[] = [
+      makeRawLog("stdout", "[ASSISTANT] 主 agent 回复", "main1"),
+    ];
+    render(
+      <AgentLogViewer
+        title="测试"
+        runId="r1"
+        logs={logs}
+        loading={false}
+        emptyText="空"
+        defaultViewMode="all"
+      />,
+    );
+    expect(screen.queryByText(/^子代理:/)).not.toBeInTheDocument();
+  });
+});

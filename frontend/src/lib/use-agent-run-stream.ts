@@ -205,6 +205,13 @@ export function useAgentRunStream(
             timestamp: event.timestamp,
             channel: event.channel,
             content_redacted: event.content ?? "",
+            // 2026-06-28-daemon-subagent-transcript task-10 / FR-08：SSE 实时流归属
+            // 透传（backend published_logs / session payload 带，task-09）。让实时流
+            // log 与 DB 查询路径都有归属，viewer 统一渲染子代理徽标 + depth 缩进
+            //（task-11）。历史/主 agent → null（与 backend nullable 一致，design §9）。
+            parent_tool_use_id: event.parent_tool_use_id ?? null,
+            subagent_type: event.subagent_type ?? null,
+            depth: event.depth ?? null,
           },
         ];
       });
