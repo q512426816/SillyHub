@@ -49,6 +49,15 @@ export interface SessionState {
   claimToken: string;
   /** SDK 返回的 session_id（首 turn system/init 写入；resume 用，spike D3）。Wave1/2 内存态。 */
   agentSessionId?: string;
+  /**
+   * 2026-06-28-daemon-subagent-transcript task-02 / D-007@v1：子代理深度追踪。
+   * key = tool_use block id（即子代理消息的 parent_tool_use_id），value = 该子代理
+   * 的 depth（主 agent = 0，子 = 父 + 1）。主 agent 发 tool_use 时预登记
+   * `subagentDepth[tool_use.id] = msgDepth + 1`；子代理消息按 parent_tool_use_id 查得
+   * depth 注入 msg.depth 透传给 backend 落库。跨 turn 复用（不清）。仅内存态不落盘
+   *（归属是日志元数据，非 session 恢复必需；恢复后从空 Map 开始）。
+   */
+  subagentDepth: Map<string, number>;
   /** SDK Query 句柄，长生命周期跨多 turn（spike H2）。 */
   query?: Query;
   /**

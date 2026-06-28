@@ -342,6 +342,15 @@ export class ClaudeSdkDriver implements InteractiveDriver {
     // SessionManager._onMessage 负责识别并批量推送，不会每 token 一次 HTTP。
     options.includePartialMessages = true;
 
+    // 2026-06-28-daemon-subagent-transcript task-01 / D-001@v1 / D-006@v1：
+    // 开启子代理（Task/Agent tool spawn）text/thinking 转发。SDK 默认 false 时
+    // 子代理只有 tool_use/tool_result 心跳进主流（text/thinking 丢弃，daemon
+    // 根本收不到）；开启后子代理完整对话作为带 parent_tool_use_id 的
+    // assistant/user message 流入主流 query generator（sdk.d.ts:1544-1550），
+    // 让 SessionManager 识别归属 + partial 按 parent 分桶（task-02/03）。
+    // 仅 Claude provider（D-006@v1，Codex 机制不同本期不碰）。
+    options.forwardSubagentText = true;
+
     // D-009@v1：UserTurnInput → SDKUserMessage（SDK 类型隔离在 driver 内部）。
     const sdkInput = mapUserTurnInputToSdk(input);
     const query = sdkQuery({ prompt: sdkInput, options });
