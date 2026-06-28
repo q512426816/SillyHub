@@ -27,9 +27,10 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agent.model import AgentRun, AgentSession
+from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.agent.placement import RunPlacementService
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.service import DaemonService
@@ -486,3 +487,97 @@ class TestCloseInteractiveRunCacheTokens:
         )
         assert run2.cache_read_tokens == 100
         assert run2.cache_creation_tokens == 50
+
+
+class TestSubmitSubagentAttribution:
+    """2026-06-28-daemon-subagent-transcript task-13 / FR-07 / D-008：
+    submit_messages 把 flat record 的归属字段落库到 AgentRunLog 三列
+    （parent_tool_use_id / subagent_type / depth）。覆盖 flat msg 直传 + SDK 原始
+    message 经 _extract_sdk_messages 展开每条注入两条路径。主 agent / 历史日志
+    无归属 → NULL（brownfield 兼容，design §9）。"""
+
+    @pytest.mark.asyncio
+    async def test_flat_record_attribution_persisted_to_columns(
+        self, db_session, mocked_redis
+    ) -> None:
+        lease_id, run_id, token = await _seed_batch_run_for_submit(db_session)
+        svc = DaemonService(db_session)
+        messages = [
+            {
+                "event_type": "text",
+                "content": "[ASSISTANT] 子代理回复",
+                "channel": "stdout",
+                "parent_tool_use_id": "toolu_sub_1",
+                "subagent_type": "general-purpose",
+                "depth": 1,
+            },
+            {
+                "event_type": "text",
+                "content": "[ASSISTANT] 主 agent 回复",
+                "channel": "stdout",
+            },
+        ]
+        count = await svc.submit_messages(lease_id, token, run_id, messages)
+        assert count == 2
+
+        rows = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog)
+                    .where(AgentRunLog.run_id == run_id)
+                    .order_by(AgentRunLog.timestamp)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 2
+        # 子代理行（先到）：归属三列写入
+        sub_row = rows[0]
+        assert sub_row.parent_tool_use_id == "toolu_sub_1"
+        assert sub_row.subagent_type == "general-purpose"
+        assert sub_row.depth == 1
+        # 主 agent 行（后到，无归属字段）→ NULL
+        main_row = rows[1]
+        assert main_row.parent_tool_use_id is None
+        assert main_row.subagent_type is None
+        assert main_row.depth is None
+
+    @pytest.mark.asyncio
+    async def test_sdk_message_attribution_persisted_via_extract(
+        self, db_session, mocked_redis
+    ) -> None:
+        """SDK 原始 assistant message（顶层带归属）经 _extract_sdk_messages 展开后，
+        每条 flat record 带归属 → 落库三列（task-08 每条注入 + task-09 落库端到端）。"""
+        lease_id, run_id, token = await _seed_batch_run_for_submit(db_session)
+        svc = DaemonService(db_session)
+        messages = [
+            {
+                "type": "assistant",
+                "parent_tool_use_id": "toolu_sdk",
+                "subagent_type": "Explore",
+                "depth": 2,
+                "message": {
+                    "id": "msg-sdk",
+                    "role": "assistant",
+                    "content": [
+                        {"type": "thinking", "thinking": "子代理思考"},
+                        {"type": "text", "text": "子代理文本"},
+                    ],
+                },
+            }
+        ]
+        count = await svc.submit_messages(lease_id, token, run_id, messages)
+        assert count >= 2  # thinking + text 至少 2 条
+
+        rows = (
+            (await db_session.execute(select(AgentRunLog).where(AgentRunLog.run_id == run_id)))
+            .scalars()
+            .all()
+        )
+        assert len(rows) >= 2
+        # D-008：每条 flat record 都带归属（同 message 多 block 同属一代理）
+        for row in rows:
+            assert row.parent_tool_use_id == "toolu_sdk"
+            assert row.subagent_type == "Explore"
+            assert row.depth == 2

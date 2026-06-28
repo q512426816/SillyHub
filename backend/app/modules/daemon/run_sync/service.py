@@ -147,6 +147,10 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
                 "channel": log_payload["channel"],
                 "content": log_payload["content"],
                 "timestamp": log_payload["timestamp"],
+                # task-09 / FR-08：归属透传到 session channel（interactive run 实时流）。
+                "parent_tool_use_id": log_payload.get("parent_tool_use_id"),
+                "subagent_type": log_payload.get("subagent_type"),
+                "depth": log_payload.get("depth"),
             }
             await redis.publish(session_channel, json.dumps(session_payload))
         # ql-20260621：实时 token 透传到 session channel（onTokens）。
@@ -382,6 +386,14 @@ class RunSyncService:
                 # ql-20260626-001 放宽（原 5000 截断 agent 长答复/总结）
                 content_redacted=content[:50000],
                 dedup_key=dedup_key,
+                # 2026-06-28-daemon-subagent-transcript task-09 / FR-07：归属三列。
+                # daemon session-manager 注入 msg.depth（D-007）+ SDK 顶层
+                # parent_tool_use_id/subagent_type，_extract_sdk_messages（task-08）透传到
+                # 每条 flat record；此处读出落库。主 agent / 未升级 daemon → None
+                # （brownfield，design §9）。msg 是 flat record（submit_messages 循环变量）。
+                parent_tool_use_id=msg.get("parent_tool_use_id") if isinstance(msg, dict) else None,
+                subagent_type=msg.get("subagent_type") if isinstance(msg, dict) else None,
+                depth=msg.get("depth") if isinstance(msg, dict) else None,
             )
             self._session.add(log_entry)
             count += 1
@@ -391,6 +403,13 @@ class RunSyncService:
                     "channel": channel,
                     "content": content[:50000],  # ql-20260626-001 同 DB 放宽
                     "timestamp": now.isoformat().replace("+00:00", "Z"),
+                    # 2026-06-28-daemon-subagent-transcript task-09 / FR-08：归属三列
+                    # 透传到 SSE 实时流——run channel publish 整个 payload，session
+                    # channel（publish_submitted_messages）也取这三字段。让前端实时
+                    # 流（不经 DB 查询）也能渲染子代理归属，与 DB 查询路径一致。
+                    "parent_tool_use_id": log_entry.parent_tool_use_id,
+                    "subagent_type": log_entry.subagent_type,
+                    "depth": log_entry.depth,
                 }
             )
 
@@ -1140,6 +1159,28 @@ def _extract_sdk_messages(msg: dict) -> list[dict]:
                         }
                     )
                 )
+
+    # 2026-06-28-daemon-subagent-transcript task-08 / D-008@v1（Grill X-001）：
+    # 归属字段（parent_tool_use_id/subagent_type/depth）从 msg 顶层读，注入到*每条*
+    # flat record——归属是 message 级属性，同一 SDK message 的所有 content block
+    # （text/thinking/tool_use/tool_result）同属一个子代理，每行 log 都要带归属
+    # （否则同 message 展开多行归属不一致：thinking 行有归属、紧随 text 行 NULL）。
+    # 与 usage/session_id 区分：后者是 message 级聚合量，仍走 stamp() 仅首条避免重复
+    # 累加；归属不经 stamp，循环后统一写入每条。主 agent（parent=null）→ attribution
+    # 空 → 不注入 → 落库三列 NULL（brownfield 兼容，design §9）。
+    attribution: dict = {}
+    _raw_ptui = msg.get("parent_tool_use_id")
+    if isinstance(_raw_ptui, str) and _raw_ptui:
+        attribution["parent_tool_use_id"] = _raw_ptui
+    _raw_st = msg.get("subagent_type")
+    if isinstance(_raw_st, str) and _raw_st:
+        attribution["subagent_type"] = _raw_st
+    _raw_depth = msg.get("depth")
+    if isinstance(_raw_depth, int) and not isinstance(_raw_depth, bool):
+        attribution["depth"] = _raw_depth
+    if attribution:
+        for _rec in out:
+            _rec.update(attribution)
 
     return out
 
