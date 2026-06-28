@@ -16,7 +16,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.modules.agent.delegation import CoordinatorPlanner, Delegation, DelegationError
+from app.modules.agent.delegation import CoordinatorPlanner, DelegationError
 from app.modules.agent.model import AgentMission, AgentRun
 
 log = get_logger(__name__)
@@ -87,13 +87,19 @@ class MissionService:
         active_planner = planner or self._planner
         if active_planner is None:
             raise DelegationError("MissionService requires a CoordinatorPlanner")
-        delegations: list[Delegation] = await active_planner.plan(objective, constraints)
+        coordinator_summary, delegations = await active_planner.plan(objective, constraints)
+
+        # 存 Coordinator 拆解 summary 到 constraints（供前端展示拆解结果，无 migration，
+        # 2026-06-28：让"Coordinator 拆解"从黑盒变为页面可见）。
+        merged_constraints: dict[str, Any] = dict(constraints or {})
+        if coordinator_summary:
+            merged_constraints["coordinator_summary"] = coordinator_summary
 
         mission = AgentMission(
             workspace_id=workspace_id,
             change_id=change_id,
             objective=objective,
-            constraints=constraints,
+            constraints=merged_constraints,
             budget_tokens=budget_tokens,
             budget_usd=budget_usd,
             created_by=created_by,

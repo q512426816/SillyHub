@@ -160,7 +160,10 @@ class CoordinatorPlanner:
 
     async def plan(
         self, objective: str, constraints: dict[str, Any] | None = None
-    ) -> list[Delegation]:
+    ) -> tuple[str, list[Delegation]]:
+        """Returns ``(summary, delegations)`` — ``summary`` is the Coordinator's
+        one-line understanding of the task (2026-06-28: surfaced to the UI so
+        the 拆解 is no longer a black box)."""
         user = f"任务：{objective}\n\n输出委派清单 JSON："
         payload = {
             "model": self._config.model,
@@ -188,10 +191,12 @@ class CoordinatorPlanner:
         if parsed is None:
             raise DelegationError("unparseable")
         delegations = parse_delegations(parsed)
+        summary = str(parsed.get("summary", "")).strip()
         log.info(
             "coordinator_plan_ok",
             model=self._config.model,
             workers=len(delegations),
             roles=[d.role for d in delegations],
+            has_summary=bool(summary),
         )
-        return delegations
+        return summary, delegations

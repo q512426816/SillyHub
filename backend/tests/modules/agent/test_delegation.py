@@ -117,7 +117,8 @@ async def test_planner_plan_parses_response() -> None:
     with patch(
         "app.modules.agent.delegation.httpx.AsyncClient", return_value=_mock_client(payload)
     ):
-        dels = await planner.plan("do something")
+        summary, dels = await planner.plan("do something")
+    assert summary == "s"
     assert len(dels) == 1 and dels[0].worker_id == "a"
 
 
@@ -155,18 +156,25 @@ async def test_start_mission_creates_mission_and_worker_runs(
 ) -> None:
     planner = MagicMock()
     planner.plan = AsyncMock(
-        return_value=[
-            MagicMock(
-                worker_id="a", role="arch", objective="oa", expected_artifact="a.md", read_only=True
-            ),
-            MagicMock(
-                worker_id="b",
-                role="impl",
-                objective="ob",
-                expected_artifact="b.diff",
-                read_only=False,
-            ),
-        ]
+        return_value=(
+            "scan repo 拆解摘要",
+            [
+                MagicMock(
+                    worker_id="a",
+                    role="arch",
+                    objective="oa",
+                    expected_artifact="a.md",
+                    read_only=True,
+                ),
+                MagicMock(
+                    worker_id="b",
+                    role="impl",
+                    objective="ob",
+                    expected_artifact="b.diff",
+                    read_only=False,
+                ),
+            ],
+        )
     )
     ws_id = await _make_workspace(db_session)
     svc = MissionService(db_session)

@@ -28,7 +28,17 @@ const STATUS_BADGE: Record<string, string> = {
 
 const ACTIVE = new Set(["planning", "running", "degraded"]);
 
-/** 从 URL ?mission=xxx 读 mission_id（刷新持久化，避免 useSearchParams 的 Suspense 依赖）。 */
+/** Worker 角色中文标注（Coordinator 拆解出的分工，体现团队结构）。 */
+const ROLE_LABEL: Record<string, string> = {
+  arch: "架构分析",
+  code_style: "代码规范",
+  test: "测试",
+  integration: "集成",
+  risk: "风险",
+  impl: "实现",
+  verify: "验证",
+};
+
 function readMissionIdFromUrl(): string | null {
   if (typeof window === "undefined") return null;
   return new URLSearchParams(window.location.search).get("mission");
@@ -41,7 +51,6 @@ function writeMissionIdToUrl(missionId: string) {
   window.history.replaceState(null, "", url);
 }
 
-/** 成本/预算进度条颜色：绿(<70%) / 黄(70-100%) / 红(>100% 超预算)。 */
 function costBarColor(ratio: number): string {
   if (ratio > 1.0) return "bg-red-500";
   if (ratio >= 0.7) return "bg-yellow-500";
@@ -79,10 +88,70 @@ function CostBar({ cost, budget }: { cost: number; budget: number | null }) {
   );
 }
 
+/**
+ * Coordinator 拆解面板：体现"Coordinator → Worker 团队"的拆解关系（不再是黑盒）。
+ * - planning: 显示"Coordinator 正在拆解..."
+ * - 有 workers: 显示 Coordinator summary（一句话理解）+ 拆解为 N 个 Worker + 角色分布
+ */
+function CoordinatorPanel({ mission }: { mission: Mission }) {
+  const summary = mission.constraints?.coordinator_summary;
+  const summaryText =
+    typeof summary === "string" && summary.trim() ? summary.trim() : null;
+  const workers = mission.workers;
+  // 角色分布（体现 Coordinator 的分工决策）
+  const roleCounts = new Map<string, number>();
+  for (const w of workers) {
+    const r = w.role ?? "worker";
+    roleCounts.set(r, (roleCounts.get(r) ?? 0) + 1);
+  }
+
+  if (mission.status === "planning") {
+    return (
+      <div className="rounded border border-blue-200 bg-blue-50 p-3 text-sm">
+        <div className="flex items-center gap-2 font-medium text-blue-700">
+          <span className="animate-pulse">🧠</span> Coordinator 正在拆解任务为
+          Worker 团队…
+        </div>
+        <p className="mt-1 text-xs text-blue-600">
+          调用 GLM 分析任务，规划 Worker 角色与分工，完成后并行派发到 daemon。
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded border border-gray-200 bg-gray-50 p-3 text-sm">
+      <div className="flex items-center gap-2 font-medium">
+        🧠 Coordinator
+        <Badge variant="outline" className="text-xs">
+          已拆解为 {workers.length} 个 Worker
+        </Badge>
+      </div>
+      {summaryText && (
+        <p className="mt-1 text-xs text-gray-600">
+          <span className="text-gray-400">任务理解：</span>
+          {summaryText}
+        </p>
+      )}
+      {roleCounts.size > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          <span className="text-xs text-gray-400">分工：</span>
+          {[...roleCounts.entries()].map(([role, n]) => (
+            <Badge key={role} variant="outline" className="text-[11px]">
+              {ROLE_LABEL[role] ?? role}
+              {n > 1 ? ` ×${n}` : ""}
+            </Badge>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ArtifactCard({ artifact }: { artifact: MissionArtifact }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="rounded border border-gray-200 bg-gray-50 text-xs">
+    <div className="rounded border border-gray-200 bg-white text-xs">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -103,7 +172,6 @@ function ArtifactCard({ artifact }: { artifact: MissionArtifact }) {
   );
 }
 
-/** Worker 日志面板：内嵌 getAgentRunLogs + AgentLogViewer（展开时拉取+轮询，不跳页）。 */
 function WorkerLogPanel({
   workspaceId,
   runId,
@@ -128,7 +196,6 @@ function WorkerLogPanel({
 
   useEffect(() => {
     refresh();
-    // Worker 仍在跑时轮询（5s）；终态后只拉一次（logs 不再变）。
     if (!active) return;
     const t = setInterval(refresh, 5000);
     return () => clearInterval(t);
@@ -168,12 +235,15 @@ function WorkerRow({
             ? "text-gray-400"
             : "text-gray-600";
   const workerActive = ACTIVE.has(worker.status) || worker.status === "pending";
+  const role = worker.role ?? "worker";
   return (
     <li className="space-y-1 rounded border border-gray-200 p-2 text-sm">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline">{worker.role ?? "worker"}</Badge>
+        <Badge variant="outline" className="text-xs">
+          {ROLE_LABEL[role] ?? role}
+        </Badge>
+        <span className="text-[11px] text-gray-400">[{role}]</span>
         <span className={statusColor}>{worker.status}</span>
-        <span className="truncate text-gray-500">{worker.objective ?? ""}</span>
         <button
           type="button"
           onClick={() => setLogOpen((v) => !v)}
@@ -182,6 +252,12 @@ function WorkerRow({
           {logOpen ? "收起日志" : "查看日志"}
         </button>
       </div>
+      {worker.objective && (
+        <p className="text-xs text-gray-600">
+          <span className="text-gray-400">分工目标：</span>
+          {worker.objective}
+        </p>
+      )}
       {worker.artifacts.length > 0 && (
         <div className="space-y-1">
           {worker.artifacts.map((a) => (
@@ -206,17 +282,13 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 刷新持久化：从 URL ?mission=xxx 恢复 mission（避免刷新丢数据）。
   useEffect(() => {
     const missionId = readMissionIdFromUrl();
     if (missionId && !mission) {
       getMission(missionId)
         .then(setMission)
-        .catch(() => {
-          /* mission 可能已删，静默 */
-        });
+        .catch(() => {});
     }
-    // 仅挂载时读一次 URL（refresh 后浏览器保留 query）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -228,7 +300,6 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
     }
   }, []);
 
-  // Mission 活跃时轮询状态（10s — backend 连接池小，避免激进轮询）。
   useEffect(() => {
     if (!mission || !ACTIVE.has(mission.status)) return;
     const t = setInterval(() => refresh(mission.id), 10000);
@@ -245,7 +316,7 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
         budget_usd: 1.0,
       });
       setMission(m);
-      writeMissionIdToUrl(m.id); // 持久化到 URL，刷新可恢复
+      writeMissionIdToUrl(m.id);
       setObjective("");
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
@@ -304,6 +375,10 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
           </div>
           <CostBar cost={mission.cost_so_far} budget={mission.budget_usd} />
           <p className="text-sm text-gray-700">{mission.objective}</p>
+
+          {/* Coordinator 拆解面板：体现拆解关系（不再是黑盒） */}
+          <CoordinatorPanel mission={mission} />
+
           <ul className="space-y-2">
             {mission.workers.map((w) => (
               <WorkerRow key={w.id} worker={w} workspaceId={workspaceId} />
