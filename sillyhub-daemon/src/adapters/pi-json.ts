@@ -226,8 +226,9 @@ export class PiJsonAdapter implements ProtocolAdapter {
       case 'tool_execution_end':
         return this.handleToolEnd(raw);
       case 'turn_end':
-        this.handleTurnEnd(raw);
-        return null; // 无事件产出，仅累积 usage
+        // turn_end：累积 usage 后 emit usage_update 事件，让 task-runner 透传到
+        // backend（否则 pi provider 的 agent_runs.input_tokens 永远为空）。
+        return this.handleTurnEnd(raw);
       case 'error':
         return this.handleError(raw);
       // 纯生命周期事件，无 IR 产出
@@ -320,21 +321,44 @@ export class PiJsonAdapter implements ProtocolAdapter {
   }
 
   /**
-   * turn_end：累积 usage（从 message.usage）。无事件产出。
+   * turn_end：累积 usage（从 message.usage），并 emit 一个 `usage_update`
+   * AgentEvent（带 input_tokens 等累计 snapshot），让 task-runner 的
+   * `_eventToMessages`（usage_update 分支）透传到 backend 写库。
    *
-   * 字段映射（对齐后端契约，见 getUsage / ndjson.ts 同名决策）：
+   * 字段映射（对齐后端契约，见 getUsage / ndjson.ts / stream-json.ts 同名决策）：
    *   input → input_tokens；output → output_tokens；
-   *   cacheRead → cache_read_tokens；cacheWrite → cache_write_tokens（= creation）。
+   *   cacheRead → cache_read_tokens；cacheWrite → cache_creation_tokens（= creation）。
    *   totalTokens 不映射（后端无对应列）。
+   *
+   * 事件格式对齐 stream-json adapter `_buildUsageUpdateEvent()`：text 事件 +
+   * metadata.status='usage_update' + metadata.usage。无 usage 时仍返回 null（与
+   * 原行为一致，避免产出空 token 噪声事件）。
    */
-  private handleTurnEnd(raw: Record<string, unknown>): void {
+  private handleTurnEnd(raw: Record<string, unknown>): AgentEvent[] | null {
     const message = isRecord(raw.message) ? raw.message : {};
     const usage = isRecord(message.usage) ? message.usage : null;
-    if (!usage) return;
+    if (!usage) return null;
     this.state.usage.input_tokens += numOr0(usage.input);
     this.state.usage.output_tokens += numOr0(usage.output);
     this.state.usage.cache_read_tokens += numOr0(usage.cacheRead);
     this.state.usage.cache_write_tokens += numOr0(usage.cacheWrite);
+
+    // usage_update snapshot = 当前累计 state.usage（cache_creation 别名 = cache_write）。
+    return [
+      {
+        type: 'text',
+        content: '',
+        metadata: {
+          status: 'usage_update',
+          usage: {
+            input_tokens: this.state.usage.input_tokens,
+            output_tokens: this.state.usage.output_tokens,
+            cache_read_tokens: this.state.usage.cache_read_tokens,
+            cache_creation_tokens: this.state.usage.cache_write_tokens,
+          },
+        },
+      },
+    ];
   }
 
   /**

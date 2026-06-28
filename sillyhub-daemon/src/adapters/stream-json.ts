@@ -439,6 +439,34 @@ export class StreamJsonAdapter implements ProtocolAdapter {
       // ql-20260617-012：新 turn 开始时清掉 thinking buffer（防御多 turn 残留）
       this._thinkingBuf = '';
       this._thinkingBufStartedAt = 0;
+
+      // ql-token-fix：message_start.message.usage 含本次 API call 的 input_tokens
+      // 和 cache 维度——message_delta 不带 input_tokens，所以必须在这里提取。
+      // 累加到 _currentTurnUsage（跨 API call 累积 → 走 _accumulatedUsage 在 commit 时合并）。
+      const msg = event.message;
+      if (isRecord(msg)) {
+        const startUsage = msg.usage;
+        if (isRecord(startUsage)) {
+          if (typeof startUsage.input_tokens === 'number') {
+            this._currentTurnUsage.input_tokens += startUsage.input_tokens;
+          }
+          if (typeof startUsage.cache_creation_input_tokens === 'number') {
+            this._currentTurnUsage.cache_creation_tokens += startUsage.cache_creation_input_tokens;
+          }
+          if (typeof startUsage.cache_read_input_tokens === 'number') {
+            this._currentTurnUsage.cache_read_tokens += startUsage.cache_read_input_tokens;
+          }
+        }
+      }
+
+      // 如果 input_tokens 已有值，立即 emit 一个 usage_update 让前端看到
+      if (
+        this._currentTurnUsage.input_tokens > 0 ||
+        this._currentTurnUsage.cache_read_tokens > 0
+      ) {
+        this._currentTurnHasRealUsage = true;
+        return this._buildUsageUpdateEvent();
+      }
       return null;
     }
 
