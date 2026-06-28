@@ -278,6 +278,7 @@ function WorkerRow({
 
 export function MissionConsole({ workspaceId }: { workspaceId: string }) {
   const [objective, setObjective] = useState("");
+  const [budget, setBudget] = useState("");
   const [mission, setMission] = useState<Mission | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -311,13 +312,15 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
     setBusy(true);
     setError(null);
     try {
+      const budgetNum = budget.trim() ? Number(budget) : null;
       const m = await createMission(workspaceId, {
         objective: objective.trim(),
-        budget_usd: 1.0,
+        budget_usd: budgetNum !== null && budgetNum > 0 ? budgetNum : null,
       });
       setMission(m);
       writeMissionIdToUrl(m.id);
       setObjective("");
+      setBudget("");
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
@@ -353,9 +356,25 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
             value={objective}
             onChange={(e) => setObjective(e.target.value)}
           />
-          <Button onClick={onCreate} disabled={busy || !objective.trim()}>
-            {busy ? "规划中…" : "启动团队"}
-          </Button>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-[11px] font-medium text-muted-foreground">
+                费用上限（USD，可选）
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                className="w-44 rounded border p-2 text-sm"
+                placeholder="如 4.0（留空=不限）"
+                value={budget}
+                onChange={(e) => setBudget(e.target.value)}
+              />
+            </div>
+            <Button onClick={onCreate} disabled={busy || !objective.trim()}>
+              {busy ? "规划中…" : "启动团队"}
+            </Button>
+          </div>
         </div>
       )}
 
