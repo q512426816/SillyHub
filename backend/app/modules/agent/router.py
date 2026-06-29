@@ -45,6 +45,7 @@ from app.modules.auth.model import User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
 from app.modules.daemon.model import DaemonTaskLease
 from app.modules.workspace.model import AgentRunWorkspace, Workspace
+from app.modules.workspace.service import resolve_root_path_for_daemon
 
 log = get_logger(__name__)
 
@@ -266,7 +267,9 @@ async def get_execution_context(
         session_id=run.session_id,
         workspace_name=ws_row.name if ws_row else None,
         workspace_slug=ws_row.slug if ws_row else None,
-        root_path=ws_row.root_path if ws_row else None,
+        root_path=(
+            resolve_root_path_for_daemon(ws_row.root_path, ws_row.path_source) if ws_row else None
+        ),
         # task-07 新增：workspace_id 无条件透传（None 时 daemon 兜底）；
         # spec_root 按上面 path_source / run_type 分支赋值。
         workspace_id=workspace_id,

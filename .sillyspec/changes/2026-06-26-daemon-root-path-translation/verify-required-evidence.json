@@ -1,0 +1,16 @@
+{
+  "generatedAt": "2026-06-26T06:09:02.469Z",
+  "schemaVersion": 1,
+  "items": [
+    {
+      "task": "task-05",
+      "verdict": "spec+quality",
+      "evidence": [
+        "file-rpc.ts:66 assertWithinAllowedRoots 仅被 listDir 调用",
+        "daemon.ts:1710 listDir 用 config.allowed_roots(list_dir RPC 专用)",
+        "task-runner.ts:323 prepareWorkspace 分支0 statSync rootPath 决定 cwd(不走 allowed_roots)",
+        "用户确认跳过 task-05"
+      ]
+    }
+  ]
+}

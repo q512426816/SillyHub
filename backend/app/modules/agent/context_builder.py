@@ -20,6 +20,7 @@ from app.modules.spec_profile.provider import SpecProfileProvider
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.task.model import Task
 from app.modules.workspace.model import Workspace, WorkspaceRelation
+from app.modules.workspace.service import resolve_root_path_for_daemon
 
 log = get_logger(__name__)
 
@@ -529,6 +530,10 @@ async def build_scan_bundle(
     Raises:
         WorkspaceNotFound: workspace_id 对应的 Workspace 不存在。
     """
+    # task-04（daemon-root-path-translation）：root_path 改写成宿主机路径。
+    # scan 命令（--dir）/allowed_paths/platform_metadata 给 daemon，需宿主机路径；
+    # daemon-client 原样透传，裸机未配前缀原样返回。spec_root/runtime_root 仍容器路径。
+    root_path = resolve_root_path_for_daemon(root_path, path_source)
     # Step 1 — 校验 Workspace 存在性
     workspace = await session.get(Workspace, workspace_id)
     if workspace is None:

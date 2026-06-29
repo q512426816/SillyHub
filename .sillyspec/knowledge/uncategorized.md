@@ -215,3 +215,24 @@
 - 根因：SillySpec execute contract 校验器按 plan.md 文本里 `task-0N` 出现顺序期望严格递增，且把任务总表的 `task-0N` 引用也计入。若 task 编号不按拓扑 Wave 递增（如 W2 含 task-06 而 W3 是 task-04），校验失败。
 - 解法：①task 文件编号按拓扑 Wave 严格递增（W1=01,02..; W2=03,04..; 不回跳）；②plan.md 里 `task-0N` 仅保留在 Wave checkbox 行（9 行严格递增），任务总表/关键路径/AC/覆盖矩阵用纯数字编号（01/02）不带 task 前缀，避免被校验器重复计数；③AC 行不要用 `- [ ]` checkbox 格式（会被误当 task 行），用普通列表。
 - 已记 docs/sillyspec/brainstorm-supersede-dref-false-warning.md（supersede 校验误报）属同类 SillySpec 校验工具缺陷。
+
+## 2026-06-26 — daemon allowed_roots 只管 list_dir RPC，不管 CC 执行 cwd [待确认]
+
+> 来源：2026-06-26-daemon-root-path-translation execute（design D-002 superseded）。
+
+- daemon `assertWithinAllowedRoots`（`sillyhub-daemon/src/file-rpc.ts:66`）只被 `listDir` 调用（`daemon.ts:1710`，list_dir RPC），**不用于 CC 执行的 cwd/文件访问**。CC 的 cwd 由 `task-runner.ts:323` `prepareWorkspace` 分支0 `statSync(rootPath)` 决定，CC 访问文件走 OS 权限（独立进程）。
+- 设计 daemon 侧"放行 CC 访问"类功能时，勿误以为 allowed_roots 管 CC 执行——它只管 daemon 自身的 list_dir RPC（前端浏览目录场景）。CC 能否在项目根执行 + 访问源码，取决于 backend 下发的 root_path 是否为 daemon 可 statSync 的宿主机路径（backend 侧 container→host 改写，本次变更修复）。
+
+## 2026-06-26 — sillyspec execute 的 exec-run ID 可能复用旧目录，review.json 残留需先 Read 再覆盖 [待确认]
+
+> 来源：2026-06-26-daemon-root-path-translation（task-01~06 review.json 全是 admin-org 残留）。
+
+- `sillyspec run execute` 的 exec-run ID（如 `exec-2026-06-24-100156`）可能复用旧变更的 execute-runs 目录，导致 `tasks/task-XX/review.json` 是**旧变更的残留**（changedFiles/reviewerNotes 是旧变更的）。
+- 写 review.json 前必须先 Read（发现残留）再 Write 覆盖，否则 Write 报 `File has not been read yet`。残留会误导后续审查。
+
+## 2026-06-26 — sillyspec plan postcheck 多变更环境校验错变更（progress.json 空 + sort reverse） [待确认]
+
+> 已记 `docs/sillyspec/plan-postcheck-multi-change-bug.md`（完整根因+workaround）。此处知识库索引。
+
+- plan step 4 postcheck 的 `resolveChangeDir` 读空 `progress.json` → 回退 `sort().reverse()` 取字典序最大目录（`workspace-*` 排在 `2026-*` 前），校验了别人的变更卡住当前 plan。
+- workaround：写 `progress.json` `{"currentChange":"<变更名>"}` + task 放 `tasks/` 子目录。

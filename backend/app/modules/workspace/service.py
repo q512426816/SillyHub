@@ -93,6 +93,42 @@ def resolve_root_path_for_server(
     return _rewrite_path(root_path)
 
 
+def resolve_root_path_for_daemon(
+    root_path: str,
+    path_source: str | None = "server-local",
+) -> str:
+    """Map root_path to a path the daemon process can access on its host.
+
+    与 ``resolve_root_path_for_server``（host→container，给 backend 容器内用）
+    成对，本函数做**逆运算** container→host，供 backend 下发 root_path 给 daemon 时
+    改写（lease claim payload / execution-context / scan --dir）。
+
+    - ``daemon-client``：root_path 本就在 daemon 机器（宿主机路径），原样返回。
+    - ``server-local`` / 其他：若 root_path 以 ``container_path_prefix`` 开头，替换为
+      ``host_path_prefix``；否则原样返回。
+    - 未配置前缀（裸机部署，容器=宿主机）时原样返回（向后兼容）。
+
+    路径规范化（``\\``→``/``、前缀末尾 ``/``）沿用 ``_rewrite_path`` 的跨平台处理。
+    """
+    if is_daemon_client_path_source(path_source):
+        return root_path
+    settings = get_settings()
+    host_prefix = settings.host_path_prefix
+    container_prefix = settings.container_path_prefix
+    if not host_prefix or not container_prefix:
+        return root_path
+    # Normalize both to forward-slash, ensure prefix ends with /
+    normalized = root_path.replace("\\", "/").rstrip("/")
+    c_norm = container_prefix.replace("\\", "/").rstrip("/") + "/"
+    if normalized.startswith(c_norm) or normalized + "/" == c_norm:
+        remainder = normalized[len(c_norm.rstrip("/")) :]
+        # Ensure remainder starts with /
+        if not remainder.startswith("/"):
+            remainder = "/" + remainder
+        return host_prefix.rstrip("/") + remainder
+    return root_path
+
+
 class WorkspaceService:
     """Coordinates filesystem scans and DB persistence for workspaces."""
 

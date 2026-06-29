@@ -21,6 +21,7 @@ from app.modules.agent.context_builder import transport_for_path_source
 from app.modules.agent.model import AgentRun
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
 from app.modules.workspace.model import AgentRunWorkspace, Workspace
+from app.modules.workspace.service import resolve_root_path_for_daemon
 
 log = get_logger(__name__)
 
@@ -114,6 +115,10 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
             ws_row = await session.get(Workspace, ws_id)
             if ws_row is not None:
                 path_source = ws_row.path_source
+        # task-02（daemon-root-path-translation）：root_path container→host 改写，
+        # 让 daemon 收到宿主机路径做 cwd（daemon-client 原样透传，裸机原样返回）。
+        if payload.get("root_path"):
+            payload["root_path"] = resolve_root_path_for_daemon(payload["root_path"], path_source)
         transport = (
             settings.spec_transport
             if path_source is None
@@ -245,9 +250,17 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
     if lease_meta.get("workspace_slug"):
         payload["workspaceSlug"] = lease_meta["workspace_slug"]
         payload["workspace_slug"] = lease_meta["workspace_slug"]
+    # task-02（daemon-root-path-translation）：root_path container→host 改写。
+    # batch 分支按 workspace.path_source 决策（daemon-client 原样，server-local 改写）。
+    ws_path_source: str | None = None
+    if workspace_id:
+        ws_row_batch = await session.get(Workspace, workspace_id)
+        if ws_row_batch is not None:
+            ws_path_source = ws_row_batch.path_source
     if lease_meta.get("root_path"):
-        payload["rootPath"] = lease_meta["root_path"]
-        payload["root_path"] = lease_meta["root_path"]
+        daemon_root_path = resolve_root_path_for_daemon(lease_meta["root_path"], ws_path_source)
+        payload["rootPath"] = daemon_root_path
+        payload["root_path"] = daemon_root_path
 
     # Include runtime capabilities (cmd_path, bin_path, protocol)
     runtime = await session.get(DaemonRuntime, lease.runtime_id)
