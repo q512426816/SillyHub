@@ -1,0 +1,268 @@
+<!-- author: qinyi -->
+<!-- created_at: 2026-06-28T04:10:00 -->
+<!-- prototype: daemon-client workspace spec 同步策略可选 · 创建表单 strategy 选择器 + daemon pull 决策流程 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>daemon-client spec 同步策略 · 原型</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --blue-50:#eff6ff;--blue-100:#dbeafe;--blue-600:#2563eb;--blue-700:#1d4ed8;
+    --cyan-500:#06b6d4;--cyan-50:#ecfeff;
+    --emerald-50:#ecfdf5;--emerald-500:#10b981;--emerald-600:#059669;--emerald-700:#047857;
+    --amber-50:#fffbeb;--amber-500:#f59e0b;--amber-600:#d97706;--amber-700:#b45309;
+    --violet-50:#f5f3ff;--violet-500:#8b5cf6;--violet-600:#7c3aed;--violet-700:#6d28d9;
+    --red-50:#fef2f2;--red-500:#ef4444;--red-600:#dc2626;--red-700:#b91c1c;
+    --slate-50:#f8fafc;--slate-100:#f1f5f9;--slate-200:#e2e8f0;--slate-300:#cbd5e1;
+    --slate-400:#94a3b8;--slate-500:#64748b;--slate-600:#475569;--slate-700:#334155;--slate-800:#1e293b;--slate-900:#0f172a;
+    --r-sm:6px;--r-md:8px;--r-lg:12px;--r-xl:16px;
+    --sh-sm:0 1px 2px 0 rgb(15 23 42/.05);
+    --sh-md:0 4px 6px -1px rgb(15 23 42/.07),0 2px 4px -2px rgb(15 23 42/.05);
+    --sh-lg:0 10px 15px -3px rgb(15 23 42/.08),0 4px 6px -4px rgb(15 23 42/.05);
+    --font:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--slate-100);color:var(--slate-800);font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased;padding:28px 24px}
+  .wrap{max-width:1080px;margin:0 auto}
+  .page-head{margin-bottom:22px}
+  .page-head h1{font-size:22px;font-weight:700;color:var(--slate-900);letter-spacing:-.01em}
+  .page-head p{font-size:13px;color:var(--slate-500);margin-top:4px}
+  .label{font-size:11px;font-weight:600;color:var(--slate-400);text-transform:uppercase;letter-spacing:.08em;margin:26px 0 10px}
+
+  /* dialog mockup */
+  .dialog{background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-xl);box-shadow:var(--sh-lg);overflow:hidden;max-width:680px}
+  .dialog-head{padding:18px 22px;border-bottom:1px solid var(--slate-200);display:flex;align-items:center;justify-content:space-between}
+  .dialog-head h2{font-size:16px;font-weight:700;color:var(--slate-900)}
+  .dialog-head .tag{font-size:11px;font-weight:600;color:var(--violet-700);background:var(--violet-50);padding:3px 9px;border-radius:999px}
+  .dialog-body{padding:20px 22px}
+  .field{display:flex;flex-direction:column;gap:7px;margin-bottom:16px}
+  .field label{font-size:12.5px;font-weight:600;color:var(--slate-700)}
+  .field .hint{font-size:11.5px;color:var(--slate-400)}
+  .input{height:36px;border:1px solid var(--slate-300);border-radius:var(--r-md);padding:0 12px;font-size:13px;color:var(--slate-800);background:#fff;display:flex;align-items:center}
+  .input.muted{color:var(--slate-400);background:var(--slate-50)}
+
+  /* segmented strategy selector */
+  .seg{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .seg-opt{border:1.5px solid var(--slate-200);border-radius:var(--r-md);padding:12px 13px;cursor:pointer;background:#fff;transition:all .15s;position:relative}
+  .seg-opt:hover{border-color:var(--slate-300);background:var(--slate-50)}
+  .seg-opt.active{border-color:var(--blue-600);background:var(--blue-50);box-shadow:0 0 0 3px rgb(37 99 235/.08)}
+  .seg-opt .opt-title{font-size:13px;font-weight:700;color:var(--slate-800);display:flex;align-items:center;gap:7px}
+  .seg-opt.active .opt-title{color:var(--blue-700)}
+  .seg-opt .opt-code{font-size:10.5px;font-weight:600;color:var(--slate-400);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:3px}
+  .seg-opt.active .opt-code{color:var(--blue-600)}
+  .seg-opt .opt-icon{width:18px;height:18px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0}
+  .ic-blue{background:var(--blue-600)}
+  .ic-emerald{background:var(--emerald-500)}
+  .ic-violet{background:var(--violet-500)}
+  .seg-opt .default-flag{position:absolute;top:10px;right:10px;font-size:9.5px;font-weight:600;color:var(--slate-400);background:var(--slate-100);padding:2px 6px;border-radius:4px}
+  .seg-opt.active .default-flag{color:var(--blue-600);background:var(--blue-100)}
+
+  /* detail card for selected strategy */
+  .detail{margin-top:14px;border:1px solid var(--slate-200);border-radius:var(--r-md);padding:14px 16px;background:var(--slate-50)}
+  .detail h4{font-size:12.5px;font-weight:700;color:var(--slate-700);margin-bottom:8px;display:flex;align-items:center;gap:7px}
+  .detail ul{list-style:none;padding:0}
+  .detail li{font-size:12.5px;color:var(--slate-600);padding:3px 0 3px 16px;position:relative}
+  .detail li::before{content:"";position:absolute;left:2px;top:11px;width:5px;height:5px;border-radius:50%;background:var(--slate-400)}
+  .detail li.warn{color:var(--amber-700)}
+  .detail li.warn::before{background:var(--amber-500)}
+  .detail .meta{margin-top:10px;padding-top:10px;border-top:1px dashed var(--slate-200);display:flex;gap:14px;flex-wrap:wrap}
+  .detail .meta span{font-size:11px;color:var(--slate-500)}
+  .detail .meta b{color:var(--slate-700);font-weight:600}
+
+  .dialog-foot{padding:14px 22px;border-top:1px solid var(--slate-200);display:flex;justify-content:flex-end;gap:10px;background:var(--slate-50)}
+  .btn{display:inline-flex;align-items:center;gap:7px;padding:8px 16px;border-radius:var(--r-md);font-size:13px;font-weight:600;cursor:pointer;border:1px solid transparent;font-family:var(--font)}
+  .btn-primary{background:var(--blue-600);color:#fff;box-shadow:var(--sh-sm)}
+  .btn-outline{background:#fff;color:var(--slate-700);border-color:var(--slate-300)}
+
+  /* flow diagram */
+  .flow-card{background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-lg);box-shadow:var(--sh-sm);padding:20px 22px;margin-top:14px}
+  .flow-card h3{font-size:14px;font-weight:700;color:var(--slate-800);margin-bottom:4px}
+  .flow-card .sub{font-size:12px;color:var(--slate-500);margin-bottom:18px}
+  .flow{display:flex;flex-direction:column;gap:0;align-items:center}
+  .node{border:1.5px solid var(--slate-300);border-radius:var(--r-md);padding:9px 16px;font-size:12.5px;font-weight:600;color:var(--slate-700);background:#fff;text-align:center;min-width:200px}
+  .node.entry{border-color:var(--slate-400);background:var(--slate-50)}
+  .node.branch-blue{border-color:var(--blue-600);color:var(--blue-700);background:var(--blue-50)}
+  .node.branch-emerald{border-color:var(--emerald-500);color:var(--emerald-700);background:var(--emerald-50)}
+  .node.branch-violet{border-color:var(--violet-500);color:var(--violet-700);background:var(--violet-50)}
+  .node.terminal{border-color:var(--slate-300);color:var(--slate-600);background:var(--slate-50);font-weight:500}
+  .arrow{color:var(--slate-300);font-size:18px;line-height:1;padding:5px 0}
+  .branch-row{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;width:100%;margin-top:6px}
+  .branch-col{display:flex;flex-direction:column;align-items:center;gap:0}
+  .branch-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;padding:3px 9px;border-radius:999px}
+  .bl-blue{color:var(--blue-700);background:var(--blue-100)}
+  .bl-emerald{color:var(--emerald-700);background:var(--emerald-50)}
+  .bl-violet{color:var(--violet-700);background:var(--violet-50)}
+  .step{font-size:11.5px;color:var(--slate-600);text-align:center;padding:4px 6px;line-height:1.5}
+  .step .code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;color:var(--slate-500)}
+  .warn-pill{display:inline-block;font-size:10px;font-weight:600;color:var(--amber-700);background:var(--amber-50);padding:2px 7px;border-radius:4px;margin-top:4px}
+
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:18px;padding-top:14px;border-top:1px solid var(--slate-100)}
+  .legend span{font-size:11.5px;color:var(--slate-500);display:flex;align-items:center;gap:6px}
+  .legend .dot{width:9px;height:9px;border-radius:3px}
+  .footnote{font-size:11.5px;color:var(--slate-400);margin-top:18px;line-height:1.7}
+  .footnote code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;background:var(--slate-100);padding:1px 5px;border-radius:3px;color:var(--slate-600)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="page-head">
+    <h1>daemon-client spec 同步策略（可选）</h1>
+    <p>创建 daemon-client workspace 时让用户决定源项目已有 <code style="font-family:ui-monospace;font-size:12px;background:var(--slate-100);padding:1px 5px;border-radius:3px">.sillyspec</code> 如何同步到平台 specRoot/runtimeRoot · 方案 A（lease 透传 + daemon 自治）</p>
+  </div>
+
+  <div class="label">① 创建对话框 — strategy 选择器</div>
+  <div class="dialog">
+    <div class="dialog-head">
+      <h2>新建工作空间</h2>
+      <span class="tag">daemon-client</span>
+    </div>
+    <div class="dialog-body">
+      <div class="field">
+        <label>工作空间名称</label>
+        <input class="input" value="my-project" readonly>
+      </div>
+      <div class="field">
+        <label>客户端项目路径（root_path）</label>
+        <input class="input muted" value="C:\Users\qinyi\IdeaProjects\my-project" readonly>
+        <span class="hint">daemon 在客户端机器访问该路径；若含 <code style="font-family:ui-monospace;font-size:11px">.sillyspec</code>，按下方策略同步</span>
+      </div>
+      <div class="field">
+        <label>spec 同步策略</label>
+        <span class="hint">决定源项目已有 <code style="font-family:ui-monospace;font-size:11px">.sillyspec</code> 内容如何进入平台</span>
+        <div class="seg" id="seg">
+          <div class="seg-opt active" data-strategy="platform-managed">
+            <span class="default-flag">默认</span>
+            <div class="opt-title"><span class="opt-icon ic-blue">P</span>平台托管</div>
+            <div class="opt-code">platform-managed</div>
+          </div>
+          <div class="seg-opt" data-strategy="repo-mirrored">
+            <div class="opt-title"><span class="opt-icon ic-emerald">M</span>单次导入</div>
+            <div class="opt-code">repo-mirrored</div>
+          </div>
+          <div class="seg-opt" data-strategy="repo-native">
+            <div class="opt-title"><span class="opt-icon ic-violet">N</span>源项目即真理</div>
+            <div class="opt-code">repo-native</div>
+          </div>
+        </div>
+        <div class="detail" id="detail"></div>
+      </div>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-outline">取消</button>
+      <button class="btn btn-primary">创建并扫描</button>
+    </div>
+  </div>
+
+  <div class="label">② daemon pull 阶段 — 按 strategy 自治分支</div>
+  <div class="flow-card">
+    <h3>pullSpecBundle(strategy, rootPath) 决策流程</h3>
+    <div class="sub">backend 经 scan lease payload 透传 strategy → daemon 在 pull 阶段自治分支 → scan 天然在其后执行（时序零协调）</div>
+    <div class="flow">
+      <div class="node entry">daemon 收到 scan lease（含 strategy + rootPath）</div>
+      <div class="arrow">▼</div>
+      <div class="node">resolveSpecDir(wsId) = ~/.sillyhub/daemon/specs/{ws}</div>
+      <div class="arrow">▼</div>
+      <div class="branch-row">
+        <div class="branch-col">
+          <span class="branch-label bl-blue">platform-managed</span>
+          <div class="node branch-blue">getSpecBundle 拉平台 bundle</div>
+          <div class="arrow">▼</div>
+          <div class="step">404 → <span class="code">mkdir 空目录</span><br>（现状，从零 scan）</div>
+          <div class="arrow">▼</div>
+          <div class="node terminal">scan 写独立缓存</div>
+        </div>
+        <div class="branch-col">
+          <span class="branch-label bl-emerald">repo-mirrored</span>
+          <div class="node branch-emerald">getSpecBundle 404 或缓存空？</div>
+          <div class="arrow">▼</div>
+          <div class="step">是 → <span class="code">fs.cp</span> 从<br><span class="code">rootPath/.sillyspec</span> 复制</div>
+          <div class="arrow">▼</div>
+          <div class="node terminal">单次快照 · 之后平台托管<br>不污染源项目</div>
+        </div>
+        <div class="branch-col">
+          <span class="branch-label bl-violet">repo-native</span>
+          <div class="node branch-violet">rootPath/.sillyspec 存在？</div>
+          <div class="arrow">▼</div>
+          <div class="step">是 → 建 junction<br><span class="code">specs/{ws} → rootPath/.sillyspec</span><br>跳过 getSpecBundle 覆盖</div>
+          <div class="arrow">▼</div>
+          <div class="node terminal">scan 直接写源项目<br><span class="warn-pill">不存在则降级单次导入</span></div>
+        </div>
+      </div>
+      <div class="arrow">▼</div>
+      <div class="node entry">scan 终态 → postSpecSync 整树回灌 → backend apply_sync 落 specRoot（三策略都走）</div>
+    </div>
+    <div class="legend">
+      <span><span class="dot" style="background:var(--blue-600)"></span>平台托管（当前默认）</span>
+      <span><span class="dot" style="background:var(--emerald-500)"></span>单次导入快照</span>
+      <span><span class="dot" style="background:var(--violet-500)"></span>源项目即真理（junction）</span>
+    </div>
+  </div>
+
+  <div class="footnote">
+    <b>关键约束：</b><br>
+    · <code>pullSpecBundle</code> 现有 <code>rm(specDir, recursive)</code> 在 repo-native 模式必须跳过（junction 不能 rm，否则顺链误删源项目）<br>
+    · junction 建立用 <code>fs.symlink(target, path, 'junction')</code>（Windows 无需提权）/ Linux·macOS 普通 symlink<br>
+    · <code>packSpecDir</code> 用 <code>readFile</code> 天然穿过 junction 打包源项目真实内容，push 无需改<br>
+    · 默认值保持 <code>platform-managed</code>，不改变现有 workspace 行为；用户主动选才切换
+  </div>
+</div>
+
+<script>
+  const DETAILS = {
+    'platform-managed': {
+      title: '平台托管', ic: 'ic-blue',
+      items: [
+        '不碰源项目 .sillyspec，daemon 用独立缓存 ~/.sillyhub/daemon/specs/{ws}',
+        'scan 从零生成文档，回灌平台 specRoot',
+        '源项目已有内容不会被复用（当前行为）'
+      ],
+      meta: [['写入源项目', '否'], ['实时同步', '否'], ['复杂度', '最低']]
+    },
+    'repo-mirrored': {
+      title: '单次导入', ic: 'ic-emerald',
+      items: [
+        '初始化时从 rootPath/.sillyspec 单次复制到 daemon 缓存',
+        '源项目已有内容立即可用，scan 增量更新',
+        '不写入源项目，之后源项目变更不自动反映（分叉）'
+      ],
+      meta: [['写入源项目', '否'], ['实时同步', '仅初始化一次'], ['复杂度', '低']]
+    },
+    'repo-native': {
+      title: '源项目即真理', ic: 'ic-violet',
+      items: [
+        'daemon 建 junction 让缓存指向 rootPath/.sillyspec',
+        'scan 直接操作源项目 .sillyspec，实时双向',
+        {warn: '写入源项目 — 若 .sillyspec 被 git 跟踪，scan 产出变成工作区改动（需自行 commit）'}
+      ],
+      meta: [['写入源项目', '是'], ['实时同步', '是'], ['复杂度', '中（junction 生命周期）']]
+    }
+  };
+  const seg = document.getElementById('seg');
+  const detail = document.getElementById('detail');
+  function render(strategy){
+    const d = DETAILS[strategy];
+    let html = `<h4><span class="opt-icon ${d.ic}">i</span>${d.title}</h4><ul>`;
+    d.items.forEach(it => {
+      if (typeof it === 'string') html += `<li>${it}</li>`;
+      else html += `<li class="warn">⚠ ${it.warn}</li>`;
+    });
+    html += '</ul><div class="meta">';
+    d.meta.forEach(([k,v]) => html += `<span>${k}：<b>${v}</b></span>`);
+    html += '</div>';
+    detail.innerHTML = html;
+  }
+  seg.querySelectorAll('.seg-opt').forEach(opt => {
+    opt.addEventListener('click', () => {
+      seg.querySelectorAll('.seg-opt').forEach(o => o.classList.remove('active'));
+      opt.classList.add('active');
+      render(opt.dataset.strategy);
+    });
+  });
+  render('platform-managed');
+</script>
+</body>
+</html>
