@@ -89,7 +89,7 @@ def test_depth_non_int_not_injected() -> None:
     msg = _assistant_msg(
         [{"type": "text", "text": "x"}],
         parent_tool_use_id="toolu_d",
-        depth="1",  # type: ignore[arg-type]  故意传错类型验证防御
+        depth="1",  # type: ignore[arg-type]
     )
     records = _extract_sdk_messages(msg)
     for r in records:
