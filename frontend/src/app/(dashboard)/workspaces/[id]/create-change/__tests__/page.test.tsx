@@ -100,6 +100,7 @@ function mkRuntime(
     status: "online",
     last_heartbeat_at: "2026-06-26T00:00:00Z",
     capabilities: null,
+    allowed_roots: [],
     created_at: "2026-06-26T00:00:00Z",
     updated_at: "2026-06-26T00:00:00Z",
     ...overrides,

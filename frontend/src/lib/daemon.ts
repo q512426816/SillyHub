@@ -22,6 +22,7 @@ export interface DaemonRuntimeRead {
   status: string | null; // online, offline, maintenance, disabled
   last_heartbeat_at: string | null;
   capabilities: Record<string, any> | null;
+  allowed_roots: string[];
   owner?: OwnerRead | null;
   created_at: string;
   updated_at: string;
@@ -68,6 +69,20 @@ export async function updateDaemonRuntime(
   return apiFetch<DaemonRuntimeRead>(
     `/api/daemon/runtimes/${encodeURIComponent(runtimeId)}`,
     { method: "PATCH", json: input },
+  );
+}
+
+/**
+ * 2026-06-29-runtime-allowed-roots-config task-06：
+ * PUT runtime allowed_roots（admin 配置可访问目录沙箱）。
+ */
+export async function updateRuntimeAllowedRoots(
+  runtimeId: string,
+  allowedRoots: string[],
+): Promise<DaemonRuntimeRead> {
+  return apiFetch<DaemonRuntimeRead>(
+    `/api/daemon/runtimes/${encodeURIComponent(runtimeId)}/allowed-roots`,
+    { method: "PUT", json: { allowed_roots: allowedRoots } },
   );
 }
 

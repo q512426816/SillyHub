@@ -36,10 +36,11 @@
  * @module daemon
  */
 
-import { hostname, platform, arch } from 'node:os';
+import { arch, homedir, hostname, platform } from 'node:os';
 import { mkdir } from 'node:fs/promises';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { DaemonConfig } from './config.js';
+import { normalizeAllowedRoots } from './config.js';
 import { MSG } from './protocol.js';
 // task-06（design §5.4.4）：onTurnMessage/onTurnResult 参数类型从 Claude SDK 专属类型
 // 放宽为 provider-neutral 联合，支持 Codex flat message/result 透传。
@@ -1565,12 +1566,14 @@ export class Daemon {
         await abortableSleep(this._config.heartbeat_interval * 1000, signal);
         for (const rid of this._registeredRuntimes.values()) {
           try {
-            await this._client.heartbeat(rid);
+            const hbResp = await this._client.heartbeat(rid);
             // task-05（FR-03）：成功→清断连计数 + 告警标记，下次断连重新计时告警。
             this._heartbeatFailSince.delete(rid);
             this._degradedWarned.delete(rid);
             // task-18（FR-07 / D-004@v1）：心跳健康 → 触发 outbox drain（pending 非空时补发）。
             this._resilience?.notifyHeartbeatResult(true);
+            // 2026-06-29-runtime-allowed-roots-config task-04：心跳响应同步 allowed_roots。
+            this._syncAllowedRoots(hbResp);
           } catch (e) {
             // 单个 rid 心跳失败不影响其他（daemon.py:172-177）
             // task-02（FR-01）：展开 cause 暴露底层 undici code。
@@ -1605,6 +1608,26 @@ export class Daemon {
         // 非预期异常：记日志后继续循环（不崩）
         this._logger.warn('heartbeat_loop_error', { error: e });
       }
+    }
+  }
+
+  /**
+   * 2026-06-29-runtime-allowed-roots-config task-04：心跳响应同步 allowed_roots。
+   * 解析 backend 下发的 allowed_roots → 覆盖本地 config（合并 homedir 兜底）。
+   * 向后兼容：响应无 allowed_roots 字段（旧 backend）→ 不动。
+   */
+  private _syncAllowedRoots(resp: Record<string, unknown> | unknown): void {
+    if (!resp || typeof resp !== 'object') return;
+    const raw = (resp as Record<string, unknown>).allowed_roots;
+    if (!Array.isArray(raw)) return; // 旧 backend 无字段 → 向后兼容
+    // 展开 ~/.sillyhub 占位 + 合并 homedir 兜底（normalizeAllowedRoots 内含 homedir）
+    const expanded = raw.map((p) => (typeof p === 'string' ? p.replace(/^~(?=$|[/\\])/, homedir()) : p));
+    const merged = [...expanded, homedir()];
+    const normalized = normalizeAllowedRoots(merged);
+    // 仅在变化时覆盖（避免每心跳重复写对象引用）
+    if (JSON.stringify(normalized) !== JSON.stringify(this._config.allowed_roots)) {
+      this._config.allowed_roots = normalized;
+      this._logger.info('allowed_roots_synced', { count: normalized.length });
     }
   }
 

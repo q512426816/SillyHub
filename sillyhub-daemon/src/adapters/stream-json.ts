@@ -15,6 +15,7 @@
 
 import type { AgentEvent } from '../types.js';
 import type { ProtocolAdapter } from './protocol-adapter.js';
+import { buildCcSettingsJson } from '../permission-rules.js';
 
 /** stream-json 协议支持的 provider 子集（三者共用一套解析逻辑）。 */
 export type StreamJsonProvider = 'claude' | 'gemini' | 'cursor';
@@ -253,6 +254,7 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     sessionId?: string;
     resumeSessionId?: string;
     prompt?: string;
+    allowedRoots?: string[];
     toolConfig?: {
       mode?: string;
       allowed_tools?: string[];
@@ -300,6 +302,11 @@ export class StreamJsonAdapter implements ProtocolAdapter {
       // 的 message.usage 永远是 {0,0}，只能在最终 result 事件拿到真实值——无法实时累加。
       '--include-partial-messages',
     ];
+    // 2026-06-29-runtime-allowed-roots-config task-05：注入 CC permission 沙箱
+    // （写白名单 allow + 写通配 deny + 读自由）。仅 claude 分支（cursor 走自己的权限）。
+    if (opts?.allowedRoots && opts.allowedRoots.length > 0) {
+      args.push('--settings', buildCcSettingsJson(opts.allowedRoots));
+    }
     if (tc?.allowed_tools && tc.allowed_tools.length > 0) {
       args.push('--allowedTools', tc.allowed_tools.join(','));
     }

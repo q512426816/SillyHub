@@ -176,6 +176,22 @@ class DaemonService:
             is_platform_admin=is_platform_admin,
         )
 
+    async def update_allowed_roots(
+        self,
+        runtime_id: uuid.UUID,
+        actor_user_id: uuid.UUID,
+        *,
+        allowed_roots: list[str],
+        is_platform_admin: bool = False,
+    ) -> DaemonRuntime:
+        """PUT allowed_roots facade (2026-06-29-runtime-allowed-roots-config task-02)."""
+        return await self._rt.update_allowed_roots(
+            runtime_id,
+            actor_user_id,
+            allowed_roots=allowed_roots,
+            is_platform_admin=is_platform_admin,
+        )
+
     async def mark_offline(
         self,
         runtime_id: uuid.UUID,

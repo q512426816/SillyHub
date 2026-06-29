@@ -83,6 +83,13 @@ class DaemonRuntime(BaseModel, table=True):
         default=None,
         sa_column=Column("metadata", JSON, nullable=True),
     )
+    # 2026-06-29-runtime-allowed-roots-config task-01：可访问目录沙箱
+    # （list_dir 放行 + CC 写入白名单）。默认 ~/.sillyhub（daemon 侧解析 homedir）。
+    # admin 经 runtimes 页面配置多路径；daemon 心跳拉取同步本地 config。
+    allowed_roots: list[str] = Field(
+        default_factory=lambda: ["~/.sillyhub"],
+        sa_column=Column(JSON, nullable=False, server_default=text("'[\"~/.sillyhub\"]'")),
+    )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(

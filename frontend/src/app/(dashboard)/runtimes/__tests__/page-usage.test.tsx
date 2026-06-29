@@ -110,6 +110,7 @@ function makeRuntime(overrides: Record<string, unknown> = {}) {
     status: "online",
     last_heartbeat_at: "2026-06-24T10:00:00Z",
     capabilities: { protocol: "ws", agents: ["claude"] },
+    allowed_roots: [],
     created_at: "2026-06-24T09:00:00Z",
     updated_at: "2026-06-24T10:00:00Z",
     ...overrides,

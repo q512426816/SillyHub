@@ -13,6 +13,7 @@ import {
   Copy,
   Cpu,
   MessageSquare,
+  Plus,
   Power,
   RefreshCw,
   Server,
@@ -46,6 +47,7 @@ import {
   MIN_VERSIONS,
   PROVIDER_META,
   updateDaemonRuntime,
+  updateRuntimeAllowedRoots,
   type AgentSessionRead,
   type DaemonRuntimeListParams,
   type DaemonRuntimeRead,
@@ -548,6 +550,8 @@ function RuntimeCard({
   onOpenSession,
   onDelete,
   onEditAlias,
+  onEditAllowedRoots,
+  isPlatformAdmin,
 }: {
   runtime: DaemonRuntimeRead;
   actioning: boolean;
@@ -561,6 +565,10 @@ function RuntimeCard({
   onDelete: (runtime: DaemonRuntimeRead) => void;
   // task-07 / FR-03：别名编辑入口（由 RuntimesPage 弹 modal 编辑，避免卡片内状态膨胀）。
   onEditAlias: (runtime: DaemonRuntimeRead) => void;
+  // task-06 / FR-04 / D-006@v1：可访问目录（allowed_roots 沙箱）编辑入口，仅 admin 可见。
+  onEditAllowedRoots: (runtime: DaemonRuntimeRead) => void;
+  // task-06 / FR-04：是否平台管理员（控制「可访问目录」编辑按钮显隐）。
+  isPlatformAdmin: boolean;
 }) {
   const status = getStatusMeta(runtime.status);
   const StatusIcon = status.icon;
@@ -695,6 +703,35 @@ function RuntimeCard({
         </div>
       </div>
 
+      {/* task-06 / FR-04 / D-006@v1：可访问目录（allowed_roots 沙箱）展示。
+          daemon 在此白名单内才能 list_dir / 创建 workspace（D-002@v1 越界 403）。
+          空 → 「未配置（任意目录可访问）」；非空 → 逐行 Tag 列出根路径。 */}
+      <div className="border-t px-4 py-3">
+        <p className="text-[11px] font-medium uppercase text-muted-foreground">
+          可访问目录
+        </p>
+        <div className="mt-2">
+          {(runtime.allowed_roots ?? []).length > 0 ? (
+            <span className="inline-flex flex-wrap gap-1.5">
+              {(runtime.allowed_roots ?? []).map((root, idx) => (
+                <span
+                  key={`${root}-${idx}`}
+                  className="inline-flex min-w-0 items-center gap-1 rounded border border-border/70 bg-muted/50 px-2 py-0.5 font-mono text-[11px] font-medium text-muted-foreground"
+                  title={root}
+                >
+                  <Terminal className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{root}</span>
+                </span>
+              ))}
+            </span>
+          ) : (
+            <span className="text-[11px] text-muted-foreground">
+              未配置（任意目录可访问）
+            </span>
+          )}
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-3">
         <Button
           size="sm"
@@ -705,6 +742,18 @@ function RuntimeCard({
         >
           别名
         </Button>
+        {/* task-06 / FR-04 / D-006@v1：仅平台管理员可配置 daemon 可访问目录沙箱。 */}
+        {isPlatformAdmin ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            onClick={() => onEditAllowedRoots(runtime)}
+            title="配置该运行时可访问的目录沙箱"
+          >
+            可访问目录
+          </Button>
+        ) : null}
         {canOpenSession && (
           <Button
             size="sm"
@@ -821,6 +870,11 @@ export default function RuntimesPage() {
   const [aliasEditing, setAliasEditing] = useState<DaemonRuntimeRead | null>(null);
   const [aliasValue, setAliasValue] = useState("");
   const [aliasSaving, setAliasSaving] = useState(false);
+  // task-06 / FR-04 / D-006@v1：可访问目录（allowed_roots 沙箱）编辑态。
+  // rootsEditing：当前编辑的 runtime（null=关闭）；rootsValue：路径数组（每行一个）。
+  const [rootsEditing, setRootsEditing] = useState<DaemonRuntimeRead | null>(null);
+  const [rootsValue, setRootsValue] = useState<string[]>([]);
+  const [rootsSaving, setRootsSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [runtimeActionId, setRuntimeActionId] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
@@ -992,6 +1046,40 @@ export default function RuntimesPage() {
       setAliasSaving(false);
     }
   }, [aliasEditing, aliasValue, notify]);
+
+  // task-06 / FR-04 / D-006@v1：可访问目录（allowed_roots 沙箱）编辑。
+  // 复用 display_alias 模式：page 顶层 state + antd Modal + useNotify。
+  // 保存时去重 + 去空白（空行视为删除），调 updateRuntimeAllowedRoots + 刷新列表。
+  const handleOpenAllowedRoots = useCallback((runtime: DaemonRuntimeRead) => {
+    setRootsEditing(runtime);
+    setRootsValue([...(runtime.allowed_roots ?? [])]);
+  }, []);
+
+  const handleSaveAllowedRoots = useCallback(async () => {
+    if (!rootsEditing) return;
+    // 去空白 + 去重（保留顺序），空数组=清空沙箱（daemon 回退任意目录）。
+    const seen = new Set<string>();
+    const cleaned: string[] = [];
+    for (const raw of rootsValue) {
+      const trimmed = raw.trim();
+      if (!trimmed || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      cleaned.push(trimmed);
+    }
+    setRootsSaving(true);
+    try {
+      const updated = await updateRuntimeAllowedRoots(rootsEditing.id, cleaned);
+      setItems((prev) =>
+        prev ? prev.map((r) => (r.id === updated.id ? updated : r)) : prev,
+      );
+      notify.success("可访问目录已更新");
+      setRootsEditing(null);
+    } catch (err) {
+      notify.error(err, "更新可访问目录失败");
+    } finally {
+      setRootsSaving(false);
+    }
+  }, [rootsEditing, rootsValue, notify]);
 
   // task-07 / D-003@v1：平台管理员人员搜索选项；失败降级为空（控件由 isPlatformAdmin 控制显隐）。
   useEffect(() => {
@@ -1308,6 +1396,8 @@ export default function RuntimesPage() {
                         onOpenSession={handleOpenSession}
                         onDelete={handleDeleteRuntime}
                         onEditAlias={handleOpenAlias}
+                        onEditAllowedRoots={handleOpenAllowedRoots}
+                        isPlatformAdmin={isPlatformAdmin}
                       />
                     ))}
                   </div>
@@ -1376,6 +1466,71 @@ export default function RuntimesPage() {
         {aliasEditing?.name ? (
           <p className="mt-2 text-xs text-muted-foreground">原始名称：{aliasEditing.name}</p>
         ) : null}
+      </Modal>
+
+      {/* task-06 / FR-04 / D-006@v1：可访问目录（allowed_roots 沙箱）编辑 modal。
+          每个路径一行 Input + 删除按钮 + 底部添加按钮。
+          daemon 仅允许在此白名单内 list_dir / 创建 workspace（D-002@v1 越界 403）。
+          清空全部路径 = 回退任意目录可访问（提示已说明）。 */}
+      <Modal
+        title="配置可访问目录"
+        open={rootsEditing !== null}
+        onOk={handleSaveAllowedRoots}
+        onCancel={() => setRootsEditing(null)}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={rootsSaving}
+        okButtonProps={{ disabled: rootsSaving }}
+        destroyOnClose
+        width={560}
+      >
+        <p className="mb-3 text-xs text-muted-foreground">
+          配置该运行时（daemon）允许访问的根目录白名单。仅在白名单内的目录可被列出与打开工作区，越界访问将返回 403。清空全部路径则回退为「任意目录可访问」。
+        </p>
+        <div className="space-y-2">
+          {rootsValue.map((path, idx) => (
+            <div key={idx} className="flex items-center gap-2">
+              <Input
+                value={path}
+                onChange={(e) =>
+                  setRootsValue((prev) =>
+                    prev.map((v, i) => (i === idx ? e.target.value : v)),
+                  )
+                }
+                placeholder="例如 ~/.sillyhub 或 F:/WorkNew/SillyHub"
+                aria-label={`可访问目录路径 ${idx + 1}`}
+                onPressEnter={handleSaveAllowedRoots}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 shrink-0 gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() =>
+                  setRootsValue((prev) => prev.filter((_, i) => i !== idx))
+                }
+                title="删除该路径"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                删除
+              </Button>
+            </div>
+          ))}
+          {rootsValue.length === 0 ? (
+            <p className="py-2 text-center text-xs text-muted-foreground">
+              当前未配置任何可访问目录，daemon 可访问任意路径
+            </p>
+          ) : null}
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="mt-3 gap-1.5"
+          onClick={() => setRootsValue((prev) => [...prev, ""])}
+          title="添加一个路径"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          添加路径
+        </Button>
       </Modal>
     </main>
   );

@@ -326,6 +326,44 @@ class RuntimeService:
             await self._session.refresh(runtime)
         return runtime
 
+    async def update_allowed_roots(
+        self,
+        runtime_id: uuid.UUID,
+        actor_user_id: uuid.UUID,
+        *,
+        allowed_roots: list[str],
+        is_platform_admin: bool = False,
+    ) -> DaemonRuntime:
+        """Update allowed_roots sandbox (2026-06-29-runtime-allowed-roots-config task-02).
+
+        校验：每条绝对路径或 ``~`` 开头、去重、非空。
+        """
+        import re
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for path in allowed_roots:
+            if not isinstance(path, str) or not path.strip():
+                continue
+            p = path.strip()
+            # 绝对路径（Win 盘符 / POSIX /）或 ~ 开头
+            if not (p.startswith("~") or re.match(r"^[A-Za-z]:[\\/]", p) or p.startswith("/")):
+                raise ValueError(f"路径必须为绝对路径或 ~ 开头：{p}")
+            if p not in seen:
+                seen.add(p)
+                normalized.append(p)
+        if not normalized:
+            raise ValueError("allowed_roots 至少一条有效路径")
+        runtime = await self._get_owned_runtime(
+            runtime_id, actor_user_id, is_platform_admin=is_platform_admin
+        )
+        runtime.allowed_roots = normalized
+        runtime.updated_at = datetime.now(UTC)
+        self._session.add(runtime)
+        await self._session.commit()
+        await self._session.refresh(runtime)
+        return runtime
+
     async def mark_offline(
         self,
         runtime_id: uuid.UUID,

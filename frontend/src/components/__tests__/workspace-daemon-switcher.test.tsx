@@ -44,6 +44,7 @@ function mkRuntime(
     status: o.status ?? "online",
     last_heartbeat_at: o.last_heartbeat_at ?? null,
     capabilities: o.capabilities ?? null,
+    allowed_roots: o.allowed_roots ?? [],
     created_at: o.created_at ?? "2026-01-01T00:00:00Z",
     updated_at: o.updated_at ?? "2026-01-01T00:00:00Z",
   };

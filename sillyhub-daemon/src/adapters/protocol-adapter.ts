@@ -86,6 +86,7 @@ export interface ProtocolAdapter {
     sessionId?: string;
     resumeSessionId?: string;
     prompt?: string;
+    allowedRoots?: string[];
     toolConfig?: {
       mode?: string;
       allowed_tools?: string[];
