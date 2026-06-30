@@ -35,6 +35,7 @@ from app.core.logging import get_logger
 from app.modules.agent.model import AgentArtifact, AgentRun
 from app.modules.agent.placement import RunPlacementService
 from app.modules.workspace.model import Workspace
+from app.modules.workspace.service import resolve_root_path_for_daemon
 
 log = get_logger(__name__)
 
@@ -103,6 +104,13 @@ class MissionExecutionService:
         ws = await self._session.get(Workspace, workspace_id)
         repo_url = ws.repo_url if ws else None
         branch = ws.default_branch if ws else None
+        # 2026-06-29：Worker lease 透传 root_path（resolve_root_path_for_daemon
+        # 容器→宿主机改写），让 daemon prepareWorkspace 在项目根执行（非空 mirror）。
+        root_path = (
+            resolve_root_path_for_daemon(ws.root_path, ws.path_source)
+            if ws and ws.root_path
+            else None
+        )
         # provider must be a daemon-known name ("claude"); fall back when the
         # workspace hasn't configured default_agent — otherwise daemon rejects
         # with "unsupported provider: claude_code" (it falls back to agent_type).
@@ -121,6 +129,7 @@ class MissionExecutionService:
             stage=run.role or "mission_worker",
             read_only=read_only,
             tool_config=worker_tool_config(read_only),
+            root_path=root_path,
         )
         if lease_id is not None:
             log.info(
