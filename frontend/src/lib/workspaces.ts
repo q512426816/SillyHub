@@ -2,6 +2,7 @@
  * Workspace API client. Mirrors backend/app/modules/workspace/schema.py.
  */
 import { apiFetch } from "@/lib/api";
+import type { SpecStrategy } from "@/lib/spec-workspaces";
 
 export interface WorkspaceStructure {
   has_projects_dir: boolean;
@@ -126,6 +127,7 @@ export async function scanGenerate(
   model?: string | null,
   pathSource?: "server-local" | "daemon-client",
   daemonRuntimeId?: string | null,
+  specStrategy?: SpecStrategy,
 ): Promise<ScanGenerateResponse> {
   return apiFetch<ScanGenerateResponse>("/api/workspaces/scan-generate", {
     method: "POST",
@@ -135,6 +137,7 @@ export async function scanGenerate(
       ...(model ? { model } : {}),
       ...(pathSource ? { path_source: pathSource } : {}),
       ...(daemonRuntimeId ? { daemon_runtime_id: daemonRuntimeId } : {}),
+      ...(specStrategy ? { spec_strategy: specStrategy } : {}),
     },
   });
 }

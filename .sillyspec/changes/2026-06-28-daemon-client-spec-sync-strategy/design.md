@@ -79,6 +79,26 @@ push（`postSpecSync`/`packSpecDir`/`apply_sync`）三策略都走，平台 spec
 - **跨平台**：Win junction（`fs.symlink 'junction'`）/ Linux·macOS symlink 分支单测（mock `process.platform`）。
 - **文档**：spec_workspace 模块文档更新 strategy 三值语义；daemon spec-sync 模块文档补 strategy 分支 + junction 生命周期。
 
+### 5.5 daemon-client 首次 scan 触发入口（task-14 补全）
+
+**问题**：daemon-client workspace 经 `create` 入口（`WorkspaceService.create` daemon-client 分支 `service.py:195-218`）创建后只建空 spec_workspaces 占位记录（`_ensure_empty_spec_workspace`），**不派 scan lease**——不像 server-local 创建走 `scanGenerate`（创建+scan 一体，`workspace-scan-dialog.tsx:126`）。导致 daemon-client 创建后无首次 scan 触发机制，repo-native/repo-mirrored 策略下源项目 `.sillyspec` 数据无法回灌平台 specRoot，scan-docs/changes 初始全空（§5.0 契约表与 proposal 成功标准假设的「首次 scan」从未发生）。实证：workspace `5c22aa2e`（strategy=repo-native 已落库）创建后 daemon 从未 scan，平台 specRoot `/data/spec-workspaces/5c22aa2e-...` 空目录，源项目 `.sillyspec` 数据齐全。
+
+**方案**：工作区详情页给 daemon-client workspace 加「扫描」按钮，复用既有 scan-generate 通路（`POST /api/workspaces/scan-generate`）。`scan_generate_daemon_client`（`service.py:1058`）对**已存在** workspace 安全复用（`_find_active_by_root_path :1076` 找到即跳过创建），并从 `spec_ws.strategy` 读真实策略派 scan lease（task-03 已实现 `start_scan_dispatch` 读 `spec_ws.strategy`）。
+
+**UX 设计（D-006@v1）**：
+- 「扫描」按钮在 daemon-client workspace 三策略（platform-managed/repo-mirrored/repo-native）全显示（`isDaemonClientWorkspace(workspace)`，`page.tsx:347` 已有同判定）。
+- platform-managed 现有「初始化」bootstrap 按钮保留共存——语义不同：「初始化」=`spec-bootstrap`（sillyspec init 空结构），「扫描」=`scan-generate`（让 daemon 跑 sillyspec scan 回灌文档）。
+- `scan_generate_daemon_client` 幂等（`_find_active_scan_run` 去重），首次扫描与重新扫描统一为「扫描」一个按钮。
+- scan 进度复用 `AgentRunPanel`（参考 bootstrap 模式 `page.tsx:497-518`），**独立 scan 状态机**（`activeScanRunId`/`scanStatus`/`scanError`，参考 `:123-126` bootstrap 状态）与 bootstrap **互斥**（跑一个时另一个 disabled，同时只一个 spec run）。
+- scan 完成 `onDone` → `load()` reload（componentCount/activeChanges/archivedChanges/specWs）。
+- 错误走 `pageError`。
+
+**前端改动**：
+- `page.tsx`：extra 区 daemon-client 显示「扫描」按钮；新增 scan 状态 + `handleScan`（调 `scanGenerate`）+ AgentRunPanel 实例；scan/bootstrap 按钮 disabled 联动互斥。
+- `lib/workspaces.ts`：`scanGenerate`（`:123-140`）加 `specStrategy` 参数 + 请求体 `spec_strategy` 透传（保 scan-generate 创建路径完整；daemon-client 虽走 createWorkspace 创建不经此，但透传为完整性 + 未来复用）。
+
+**后端**：无改动。`scan_generate_daemon_client` 已支持已存在 workspace（`:1076`）；`start_scan_dispatch` 从 `spec_ws.strategy` 读真实值（task-03）；`build_claim_payload` 透传 specStrategy（task-04）；daemon 三分支 + 终态回灌（task-07/08/09 + `daemon.ts:1259-1268`）全已实现。task-14 只补前端触发入口。
+
 ## 6. 文件变更清单
 
 | 操作 | 文件路径 | 说明 |
@@ -94,6 +114,9 @@ push（`postSpecSync`/`packSpecDir`/`apply_sync`）三策略都走，平台 spec
 | 修改 | `frontend/src/components/workspace-scan-dialog.tsx` | daemon-client 创建表单加 strategy segmented control（:87 附近，默认 platform-managed，repo-native 标注写入源项目） |
 | 新增 | `sillyhub-daemon/tests/spec-strategy/pull-strategy.test.ts`（暂定名） | pullSpecBundle 三分支 + junction 生命周期 + rm 防误删 + 跨平台 junction 单测 |
 | 新增 | `backend/tests/modules/agent/test_dispatch_spec_strategy.py`（暂定名） | dispatch 透传 strategy + AgentRun.spec_strategy 读真实值测 |
+| 修改 | `frontend/src/app/(dashboard)/workspaces/[id]/page.tsx` | daemon-client 详情页加「扫描」按钮（三策略全显示）+ 独立 scan 状态机 + AgentRunPanel 实例 + 与 bootstrap 互斥（task-14） |
+| 修改 | `frontend/src/lib/workspaces.ts` | `scanGenerate` 加 specStrategy 参数 + 请求体 spec_strategy 透传（task-14） |
+| 新增 | `frontend/src/lib/__tests__/workspaces.test.ts`（或 page.test.tsx） | scanGenerate spec_strategy 透传测 + daemon-client 三策略显示扫描按钮/点击调用/与 bootstrap 互斥测（task-14） |
 
 ## 7. 接口定义
 
@@ -130,6 +153,19 @@ export async function pullSpecBundle(
 ): Promise<string | null>;
 ```
 
+```typescript
+// frontend/src/lib/workspaces.ts（task-14 补全）
+export async function scanGenerate(
+  rootPath: string,
+  provider?: string | null,
+  model?: string | null,
+  pathSource?: "server-local" | "daemon-client",
+  daemonRuntimeId?: string | null,
+  specStrategy?: "platform-managed" | "repo-mirrored" | "repo-native",
+): Promise<ScanGenerateResponse>;
+// 请求体加 spec_strategy 透传（保 scan-generate 创建路径完整；daemon-client 走 createWorkspace 创建不经此，但完整性 + 未来复用）
+```
+
 ## 7.5 生命周期契约表
 
 涉及 session/lease/daemon/lifecycle 关键词，必填：
@@ -141,6 +177,7 @@ export async function pullSpecBundle(
 | daemon pull 缓存初始化 | daemon | 本地 fs | specStrategy, rootPath, wsId | 缓存初始化（platform-managed 拉bundle / repo-mirrored 复制 / repo-native 建junction） |
 | scan run 终态 sync | daemon | backend | workspaceId, tar(spec tree) | spec_workspaces.last_synced_at ← now（既有，三策略都走） |
 | create session（既有） | backend | daemon | sessionId, leaseId, claimToken | session active（不变） |
+| daemon-client 首次 scan 触发（task-14） | 前端详情页 | backend | root_path, path_source=daemon-client, daemon_runtime_id（, spec_strategy） | scan lease 派绑定 daemon（既有 scan_generate_daemon_client，新增前端入口） |
 
 每个事件映射到 task：workspace 创建落 strategy→Phase1 task；lease payload 加 specStrategy→Phase1 context.py task；daemon pull 三分支→Phase2 task；scan 终态 sync 既有不改。`specStrategy` 字段出现在 LeaseCtx（§7）+ build_claim_payload 透传 + daemon.ts 读取。
 
@@ -170,6 +207,8 @@ export async function pullSpecBundle(
 | R-04 | `walkDir`/`packSpecDir` 遍历 junction 行为不符预期 | P2 | 核实 fs.stat 默认跟随链接（已确认 stat 跟随/lstat 不跟随，当前用 stat 正确）；packSpecDir 穿 junction 单测 |
 | R-05 | strategy 透传链路漏字段（backend context.py 或 daemon.ts 漏读） | P1 | dispatch 透传集成测（lease payload 含 specStrategy）+ daemon 读取测；对齐 task-03 transport 透传的契约完整性验收模式 |
 | R-06 | repo-mirrored 单次复制后源项目变更不反映（用户预期偏差） | P2 | UI 文案明确"仅初始化导入一次，之后平台托管"；rescan 可重新触发（既有机制） |
+| R-07 | scan/bootstrap 按钮未互斥致双 spec run 并发 | P2 | scan 按钮 disabled 当 activeBootstrapRunId 存在、bootstrap 按钮 disabled 当 activeScanRunId 存在（task-14 前端联动） |
+| R-08 | 用户误多次点扫描触发重复 scan lease | P3 | scan_generate_daemon_client 幂等（_find_active_scan_run 去重）兜底；scan 运行中按钮 disabled |
 
 ## 11. 决策追踪
 
@@ -180,12 +219,13 @@ export async function pullSpecBundle(
 | D-003@v1（范围只 daemon-client） | accepted | §3 非目标 + 全变更范围约束 |
 | D-004@v1（默认 platform-managed） | accepted | §5.1 前端默认 + schema 默认 + §9 兼容策略 |
 | D-005@v1（repo-native 接受写入源项目） | accepted | §5.1 前端文案 + §5.2/5.3 repo-native 分支 + R-03 |
+| D-006@v1（daemon-client 详情页扫描入口，三策略全显示 + 与初始化共存 + 独立状态机互斥） | accepted | §5.5 + R-07/R-08 + task-14 |
 
-无未解决的 D-xxx。剩余风险 R-01~R-06 见上表。
+无未解决的 D-xxx。剩余风险 R-01~R-08 见上表。
 
 ## 12. 自审
 
-- **需求覆盖**：✅ 三 strategy 全做（G1）、repo-mirrored 单次导入（G2）、repo-native junction（G3）、lease 透传（G4）、默认零回归（G5）均覆盖。
+- **需求覆盖**：✅ 三 strategy 全做（G1）、repo-mirrored 单次导入（G2）、repo-native junction（G3）、lease 透传（G4）、默认零回归（G5）均覆盖。task-14 补 daemon-client 首次 scan 触发入口（§5.5）覆盖 D-006——修复 proposal 成功标准「首次 scan 后平台 specRoot 含源项目已有内容」的前置缺口（创建后无触发入口）。
 - **Grill/决策覆盖**：✅ design.md 引用全部 D-001~D-005（§11 决策追踪逐条映射）。
 - **约束一致性**：✅ 与 ARCHITECTURE.md 的 tar transport 通路一致（不改 build_bundle/apply_sync/postSpecSync 语义，只改 daemon pull 初始化）；strategy 透传对齐 task-03 transport 透传模式（context.py 同处）。
 - **真实性**：✅ 文件路径/方法名（_ensure_empty_spec_workspace / start_scan_dispatch / prepare_scan_interactive_dispatch / build_claim_payload / pullSpecBundle / resolveSpecDir / LeaseCtx）、行号（service.py:1374/1392/1100/1116、spec-sync.ts:96、daemon.ts:2284、types.ts:293、context.py:89-117）均来自真实代码查证。

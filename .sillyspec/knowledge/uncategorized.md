@@ -2,6 +2,12 @@
 
 > execute/quick 执行中发现的坑暂存于此，用户审阅后归类到对应文件并更新 INDEX.md。
 
+## 2026-06-30 — install.sh 改动需重建 backend 镜像才下发（baked into image）+ bash heredoc \${VAR} 转义陷阱
+
+- **生效路径**：`sillyhub-daemon/scripts/install.sh` 不是运行时读取，而是 backend 镜像构建时 `COPY scripts/install.sh /app/daemon-dist/install.sh`（backend/Dockerfile:86）baked 进镜像，由公开端点 `/daemon/install.sh` 下发（`app/modules/daemon/dist_router.py`，无 /api 前缀）。改 install.sh 后必须**重建并重新部署 backend 镜像**，新安装的用户才拿到新版；仅改文件不重建，下发的仍是旧镜像里的 install.sh。`config.py` 的 `daemon_dist_dir` 仅在测试用 tmp_path 覆盖，生产是镜像内固定路径。
+- **heredoc 转义陷阱**：bash 无引号 heredoc（`<<EOF`）中，`\${VAR}` 的反斜杠会转义 `$` → 输出字面 `${VAR}` 不展开；要展开须让 `$` 前无反斜杠，或用 `\\` 分隔。install.sh 生成 `.cmd` wrapper 时写 `"${win_bin_dir}\${BUNDLE_NAME}"`，Windows 路径反斜杠紧贴 `${` 触发此陷阱，生成的 .cmd 含字面量 `${BUNDLE_NAME}`。修复：bundle 路径改用 cmd 内置 `%~dp0`（=该 .cmd 自身所在目录，自相对、bash heredoc 不碰 `%`、不依赖运行时 PATH）。
+- **本机已装实例**：install.sh 重建下发只影响**新安装**；本机已生成的 `~/.sillyhub/daemon/bin/sillyhub-daemon.cmd` 需手工修或重装才修复。
+
 ## 2026-06-25 — execute 启动前主仓库规范文件必须 commit（worktree apply 前提）
 
 - `sillyspec run execute` 创建 worktree 时，baseline = 主仓库当前 HEAD + overlay（staged 文件）。若 brainstorm/plan 产出的规范文件（proposal/design/plan/tasks）staged 未 commit，`sillyspec worktree apply` 陷死循环：apply 第一校验要主仓库 clean（staged commit/stash），但 commit 规范使 HEAD 推进 → base hash 校验失败；stash 规范则 overlay 的 plan.md 在主仓库不存在 → patch 失败。

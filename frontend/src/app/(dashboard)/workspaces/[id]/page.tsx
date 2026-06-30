@@ -31,6 +31,7 @@ import {
 import { getRuntimeProgress } from "@/lib/runtime";
 import {
   getWorkspace,
+  scanGenerate,
   updateWorkspace,
   type Workspace,
 } from "@/lib/workspaces";
@@ -124,6 +125,11 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const [lastBsRun, setLastBsRun] = useState<AgentRun | null>(null);
   const [bootstrapStatus, setBootstrapStatus] = useState<AgentRunStatus | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  // daemon-client scan 状态（task-14 / D-006@v1）：详情页扫描入口，独立状态机与 bootstrap 互斥
+  const [activeScanRunId, setActiveScanRunId] = useState<string | null>(null);
+  const [scanStatus, setScanStatus] = useState<AgentRunStatus | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
   const [generatingProjects, setGeneratingProjects] = useState(false);
   // workspace 级默认 agent provider 编辑态（FR-01/FR-02，2026-06-14-agent-runtime-selection）
   const [defaultAgent, setDefaultAgent] = useState<string | null>(null);
@@ -229,6 +235,19 @@ export default function WorkspaceDetailPage({ params }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId]);
 
+  // scan 回调（task-14 / D-006@v1）：run 结束 reload；关闭面板清状态
+  const handleScanRunDone = useCallback((status: string) => {
+    setScanStatus(status as AgentRunStatus);
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId]);
+
+  const closeScanPanel = useCallback(() => {
+    setActiveScanRunId(null);
+    setScanStatus(null);
+    setScanError(null);
+  }, []);
+
   /* ---- Bootstrap handler ---- */
 
   async function handleBootstrap() {
@@ -247,6 +266,32 @@ export default function WorkspaceDetailPage({ params }: Props) {
       setPageError(err instanceof ApiError ? err.message : "初始化失败");
     } finally {
       setBootstrapping(false);
+    }
+  }
+
+  /* ---- Scan handler（task-14 / D-006@v1：daemon-client 详情页扫描入口）---- */
+  async function handleScan() {
+    if (!workspace?.daemon_runtime_id) return;
+    setScanning(true);
+    setPageError(null);
+    setActiveScanRunId(null);
+    setScanStatus(null);
+    setScanError(null);
+    try {
+      const result = await scanGenerate(
+        workspace.root_path,
+        workspace.default_agent ?? null,
+        workspace.default_model ?? null,
+        "daemon-client",
+        workspace.daemon_runtime_id,
+        specWs?.strategy,
+      );
+      setActiveScanRunId(result.agent_run_id);
+      setScanStatus("pending");
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "扫描失败");
+    } finally {
+      setScanning(false);
     }
   }
 
@@ -424,13 +469,28 @@ export default function WorkspaceDetailPage({ params }: Props) {
                   size="sm"
                   variant="outline"
                   onClick={handleBootstrap}
-                  disabled={bootstrapping || !!activeBootstrapRunId || importing}
+                  disabled={bootstrapping || !!activeBootstrapRunId || importing || !!activeScanRunId || scanning}
                 >
                   {bootstrapping
                     ? "初始化进行中…"
                     : activeBootstrapRunId
                       ? "初始化运行中…"
                       : "初始化"}
+                </Button>
+              )}
+              {/* task-14 / D-006@v1：daemon-client 详情页扫描入口（三策略全显示，与初始化互斥） */}
+              {isDaemonClientWorkspace(workspace) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleScan}
+                  disabled={!!activeBootstrapRunId || !!activeScanRunId || scanning || importing || bootstrapping}
+                >
+                  {scanning
+                    ? "派发中…"
+                    : activeScanRunId
+                      ? "扫描运行中…"
+                      : "扫描"}
                 </Button>
               )}
               {!specWs.repo_sillyspec_path && (
@@ -513,6 +573,30 @@ export default function WorkspaceDetailPage({ params }: Props) {
             />
             {bootstrapError && (
               <p className="mt-2 text-xs text-destructive">{bootstrapError}</p>
+            )}
+          </div>
+        )}
+
+        {/* task-14 / D-006@v1：daemon-client 扫描运行面板 */}
+        {activeScanRunId && (
+          <div className="mb-3">
+            <AgentRunPanel
+              workspaceId={workspaceId}
+              runId={activeScanRunId}
+              isActive={scanStatus === "running" || scanStatus === "pending"}
+              title="扫描运行"
+              emptyText="等待日志输出..."
+              isLive={scanStatus === "running" || scanStatus === "pending"}
+              summary={
+                <Badge variant={statusToVariant(scanStatus)}>
+                  {scanStatus ?? "等待中"}
+                </Badge>
+              }
+              onClose={closeScanPanel}
+              onDone={handleScanRunDone}
+            />
+            {scanError && (
+              <p className="mt-2 text-xs text-destructive">{scanError}</p>
             )}
           </div>
         )}

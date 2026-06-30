@@ -12,6 +12,7 @@ created_at: 2026-06-28 04:17:35
 | 平台用户 | 在 UI 创建 daemon-client workspace 时选 spec 同步策略，查看 scan-docs/knowledge/runtime/changes |
 | backend（FastAPI） | 跑 Docker，托管 spec_workspaces，构造 scan lease payload 透传 strategy，读平台 specRoot |
 | daemon（sillyhub-daemon） | 跑客户端机器，按 strategy 自治分支初始化 spec 缓存（pull/复制/junction），执行 scan，回灌 spec 树 |
+| 前端（Next.js） | daemon-client workspace 详情页提供「扫描」入口触发首次/重新 scan，复用 AgentRunPanel 展示进度（task-14） |
 
 ## 功能需求
 
@@ -105,6 +106,18 @@ created_at: 2026-06-28 04:17:35
 - **When** 实现完成
 - **Then** repo-mirrored 注释更新为"初始化单次同步快照"（覆盖旧 bidirectionally synced）
 
+### FR-14: daemon-client 详情页扫描入口（首次/重新 scan 触发）
+覆盖决策：D-006@v1
+- **Given** daemon-client workspace 详情页（任意 strategy：platform-managed/repo-mirrored/repo-native）
+- **When** 用户点击「扫描」按钮
+- **Then** 调 scan-generate（POST /api/workspaces/scan-generate），scan_generate_daemon_client 复用已存在 workspace（_find_active_by_root_path）并从 spec_ws.strategy 读真实策略派 scan lease
+- **Given** scan 运行中且 platform-managed 的「初始化」按钮也存在
+- **When** 两按钮共存
+- **Then** 两者互斥 disabled（同时只一个 spec run；scan_generate_daemon_client 幂等 _find_active_scan_run 去重）
+- **Given** scan 完成
+- **When** AgentRunPanel onDone
+- **Then** reload（componentCount/activeChanges/archivedChanges/specWs）
+
 ## 非功能需求
 
 - **兼容性**：Windows / Linux / macOS（daemon 路径用 `os.homedir()`，junction 按 `process.platform` 分支）。默认 platform-managed 零回归；daemon 缺 specStrategy 字段时按 platform-managed 兼容。
@@ -121,5 +134,6 @@ created_at: 2026-06-28 04:17:35
 | D-003@v1 | FR-02 | 范围只 daemon-client（server-local 不动） |
 | D-004@v1 | FR-01, FR-02, FR-05, FR-11 | 默认 platform-managed 零回归 |
 | D-005@v1 | FR-07, FR-10, FR-11 | repo-native 接受写入源项目 |
+| D-006@v1 | FR-14 | daemon-client 详情页扫描入口（三策略全显示 + 与初始化共存 + 独立状态机互斥） |
 
-无未覆盖的 D-xxx@vN（D-001~D-005 全部被 FR 覆盖）。剩余风险 R-01~R-06 见 design.md §10。
+无未覆盖的 D-xxx@vN（D-001~D-006 全部被 FR 覆盖）。剩余风险 R-01~R-08 见 design.md §10。

@@ -209,3 +209,14 @@ created_at: 2026-06-23 10:09:12
 方案：创建表单加"费用上限（USD，可选）"输入框（number，留空=不限）；onCreate 传用户输入（budgetNum > 0 ? budgetNum : null）；与治理门超预算拒绝 + 成本/预算进度条联动。
 结果：frontend typecheck 过、pre-commit ci-check 全 Passed（本次 frontend test 环境稳定未拦截）。
 流程失误：本应走 sillyspec run quick，直接 commit。本条 retrospective 补 quicklog。
+
+## ql-20260630-001-b9ce | 2026-06-30 09:00:46 | 修复 install.sh 生成 Windows .cmd wrapper 的 bash heredoc 转义 bug（\${BUNDLE_NAME} 不展开 + WSL node 路径未转 Windows 格式）
+状态：已暂存（git add install.sh，未 commit；本机 .cmd 已手工修可立即用）
+根因：install.sh:234-242 用无引号 heredoc <<CMDEOF 生成 .cmd，"${win_bin_dir}\${BUNDLE_NAME}" 的 \$ 被 bash 当转义输出字面 $，${BUNDLE_NAME} 不展开，生成的 .cmd 含字面量 ${BUNDLE_NAME} → cmd 执行报 Cannot find module '...bin${BUNDLE_NAME}'。对照 bash wrapper（install.sh:209 /$BUNDLE_NAME）正常，唯独 .cmd 翻车。次要：win_node_dir WSL 分支取 dirname NODE_BIN=/mnt/c/nvm4w/nodejs（WSL 路径）未转 Windows 格式，cmd 不认，if exist 永远 false。
+方案：① heredoc 内 bundle 路径 "\${BUNDLE_NAME}" → "%~dp0\${BUNDLE_NAME}"（cmd 内置 %~dp0=.cmd 自身所在目录，自相对不依赖 PATH；bash heredoc 不碰 %，\${BUNDLE_NAME} 前无反斜杠正常展开），消除转义陷阱；② win_node_dir → win_node_dir_win，WSL 分支 wslpath -w 转 C:\...，Git Bash 分支 sed 与原 win_bin_dir 同表达式保持一致。
+文件：
+- sillyhub-daemon/scripts/install.sh（write_wrapper 的 .cmd 生成段）
+- C:\Users\qinyi\.sillyhub\daemon\bin\sillyhub-daemon.cmd（本机已手工临时修，非仓库文件）
+验证：bash -n 通过 + 落盘 heredoc 模拟 WSL/Git Bash 两分支，确认 ${BUNDLE_NAME}→sillyhub-daemon.js 展开、%~dp0 保留、反斜杠保留、WSL wslpath 产出 C:\nvm4w\nodejs；断言无字面量 ${BUNDLE_NAME} PASS。未跑 backend test_daemon_dist.py（用 fake install.sh 不涉内容，零影响）。
+生效路径：install.sh 经 backend/Dockerfile:86 COPY 进镜像 baked into image，需重建+部署 backend 镜像才下发；本机 .cmd 已手工修，现在可跑。
+遗留（pre-existing，非本次回归）：Git Bash sed 路径转换缺盘符反斜杠（s|...|\1:| 输出 c: 非 c:\），win_node_dir_win/win_bin_dir/win_bin_for_path 三处共用，Git Bash 场景 node 绝对路径兜底无效（fallback PATH 的 node，nvm4w 在 PATH 仍可跑）。WSL 走 wslpath 不受影响。建议后续单独修。
