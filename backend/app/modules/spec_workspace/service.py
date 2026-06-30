@@ -10,6 +10,7 @@ created_at: 2026-05-27
 
 from __future__ import annotations
 
+import base64
 import io
 import shutil
 import tarfile
@@ -154,29 +155,121 @@ class SpecWorkspaceService:
 
     # ── Import / Sync (stub implementations) ────────────────────────────────
 
-    async def import_from_repo(self, workspace_id: uuid.UUID) -> SpecWorkspace:
-        """Import spec files from the repo ``.sillyspec`` directory into the
+    async def import_from_repo(
+        self,
+        workspace_id: uuid.UUID,
+        *,
+        runtime_id: uuid.UUID | None = None,
+        root_path: str | None = None,
+    ) -> SpecWorkspace:
+        """Import spec files from the client ``.sillyspec`` directory into the
         platform-managed spec workspace.
 
-        **Stub**: only updates ``sync_status`` to ``clean`` and stamps
-        ``last_synced_at``. The actual filesystem import logic will be added
-        in a later wave.
+        2026-06-30：从 stub 变实现。daemon-client workspace 的 root_path 在宿主机，
+        backend 容器读不到 → 通过 daemon WS RPC ``get_spec_bundle`` 让 daemon 打包
+        rootPath/.sillyspec 整树为 tar（base64），backend apply_sync 写入 spec_root。
+
+        server-local workspace：root_path 已在容器内，直接读 .sillyspec 打包。
+
+        Args:
+            workspace_id: workspace UUID。
+            runtime_id: daemon runtime UUID（daemon-client workspace 必填，路由 RPC）。
+            root_path: workspace root_path（容器路径或 daemon-client 宿主机路径）。
         """
         spec_ws = await self.get(workspace_id)
-        now = datetime.now(UTC)
 
-        spec_ws.sync_status = "clean"
-        spec_ws.last_synced_at = now
-        spec_ws.updated_at = now
+        # 获取 workspace 行（拿 root_path / path_source / daemon_runtime_id）
+        from app.modules.workspace.model import Workspace
 
-        await self._session.commit()
-        await self._session.refresh(spec_ws)
+        ws = await self._session.get(Workspace, workspace_id)
+        if ws is None:
+            raise SpecWorkspaceNotFound(
+                f"Workspace '{workspace_id}' not found for spec import.",
+            )
+        ws_root_path = root_path or ws.root_path or ""
+        ws_path_source = ws.path_source or "server-local"
+        ws_runtime_id = runtime_id or ws.daemon_runtime_id
 
+        if not ws_root_path:
+            raise AppError(
+                "Workspace has no root_path; cannot import .sillyspec.",
+                code="SPEC_IMPORT_NO_ROOT_PATH",
+                http_status=400,
+            )
+
+        # ── daemon-client：经 WS RPC 让 daemon 打包 → 回传 → apply_sync ──
+        if ws_path_source == "daemon-client" and ws_runtime_id:
+            from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+            hub = get_daemon_ws_hub()
+            from app.modules.workspace.service import resolve_root_path_for_daemon
+
+            daemon_root = resolve_root_path_for_daemon(ws_root_path, ws_path_source)
+            try:
+                result = await hub.send_rpc(
+                    ws_runtime_id,
+                    "get_spec_bundle",
+                    {"root_path": daemon_root},
+                    timeout=60.0,
+                )
+            except Exception as exc:
+                raise AppError(
+                    f"Daemon RPC get_spec_bundle failed: {exc}",
+                    code="SPEC_IMPORT_RPC_FAILED",
+                    http_status=502,
+                ) from exc
+            tar_b64 = result.get("tar_base64", "") if isinstance(result, dict) else ""
+            if not tar_b64:
+                raise AppError(
+                    "Daemon returned empty spec bundle.",
+                    code="SPEC_IMPORT_EMPTY_BUNDLE",
+                    http_status=422,
+                )
+            tar_bytes = base64.b64decode(tar_b64)
+            reparsed = await self.apply_sync(workspace_id, tar_bytes)
+            log.info(
+                "spec_workspace.import_from_repo",
+                spec_workspace_id=str(spec_ws.id),
+                workspace_id=str(workspace_id),
+                path_source=ws_path_source,
+                tar_bytes=len(tar_bytes),
+                reparsed=reparsed,
+            )
+            return spec_ws
+
+        # ── server-local：容器内直接打包 .sillyspec → apply_sync ──
+        from app.modules.workspace.service import resolve_root_path_for_server
+
+        server_path = resolve_root_path_for_server(ws_root_path, ws_path_source)
+        if server_path is None:
+            raise AppError(
+                "Cannot resolve server-local path for import.",
+                code="SPEC_IMPORT_PATH_UNRESOLVED",
+                http_status=400,
+            )
+        spec_source = Path(server_path) / ".sillyspec"
+        if not spec_source.is_dir():
+            raise AppError(
+                f"No .sillyspec directory at {spec_source}",
+                code="SPEC_IMPORT_NO_SILLYSPEC_DIR",
+                http_status=404,
+            )
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            for path in sorted(spec_source.rglob("*")):
+                rel = path.relative_to(spec_source)
+                if any(part == ".runtime" for part in rel.parts):
+                    continue
+                tar.add(str(path), arcname=str(rel), recursive=False)
+        tar_bytes = buf.getvalue()
+        reparsed = await self.apply_sync(workspace_id, tar_bytes)
         log.info(
             "spec_workspace.import_from_repo",
             spec_workspace_id=str(spec_ws.id),
             workspace_id=str(workspace_id),
-            note="stub — no filesystem changes made",
+            path_source=ws_path_source,
+            tar_bytes=len(tar_bytes),
+            reparsed=reparsed,
         )
         return spec_ws
 

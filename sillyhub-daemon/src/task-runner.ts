@@ -457,6 +457,8 @@ export class TaskRunner {
               sessionId: effectiveCtx.sessionId,
               resumeSessionId: effectiveCtx.resumeSessionId,
               prompt: ctx.prompt ?? '',
+              // 2026-06-29-runtime-allowed-roots-config task-05：传 allowed_roots 给 adapter 注入 CC 沙箱
+              allowedRoots: this.config?.allowed_roots,
               toolConfig: ctx.toolConfig as
                 | { mode?: string; allowed_tools?: string[]; max_turns?: number }
                 | undefined,

@@ -345,7 +345,7 @@ export async function loadConfig(
  * @param raw 从 JSON 合并后的原始值（可能 undefined / 非数组 / 含相对路径 / 脏数据）。
  * @returns 规范化后的非空绝对路径数组（去重保序，全新数组）。
  */
-function normalizeAllowedRoots(raw: unknown): string[] {
+export function normalizeAllowedRoots(raw: unknown): string[] {
   // B1：缺字段 / 非数组 / 空数组 → 回填默认 [homedir()]
   if (!Array.isArray(raw) || raw.length === 0) {
     return [homedir()];

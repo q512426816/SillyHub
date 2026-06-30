@@ -36,10 +36,12 @@
  * @module daemon
  */
 
-import { hostname, platform, arch } from 'node:os';
+import { arch, homedir, hostname, platform } from 'node:os';
 import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { DaemonConfig } from './config.js';
+import { normalizeAllowedRoots } from './config.js';
 import { MSG } from './protocol.js';
 // task-06（design §5.4.4）：onTurnMessage/onTurnResult 参数类型从 Claude SDK 专属类型
 // 放宽为 provider-neutral 联合，支持 Codex flat message/result 透传。
@@ -1565,12 +1567,14 @@ export class Daemon {
         await abortableSleep(this._config.heartbeat_interval * 1000, signal);
         for (const rid of this._registeredRuntimes.values()) {
           try {
-            await this._client.heartbeat(rid);
+            const hbResp = await this._client.heartbeat(rid);
             // task-05（FR-03）：成功→清断连计数 + 告警标记，下次断连重新计时告警。
             this._heartbeatFailSince.delete(rid);
             this._degradedWarned.delete(rid);
             // task-18（FR-07 / D-004@v1）：心跳健康 → 触发 outbox drain（pending 非空时补发）。
             this._resilience?.notifyHeartbeatResult(true);
+            // 2026-06-29-runtime-allowed-roots-config task-04：心跳响应同步 allowed_roots。
+            this._syncAllowedRoots(rid, hbResp);
           } catch (e) {
             // 单个 rid 心跳失败不影响其他（daemon.py:172-177）
             // task-02（FR-01）：展开 cause 暴露底层 undici code。
@@ -1605,6 +1609,39 @@ export class Daemon {
         // 非预期异常：记日志后继续循环（不崩）
         this._logger.warn('heartbeat_loop_error', { error: e });
       }
+    }
+  }
+
+  /**
+   * 2026-06-29-runtime-allowed-roots-config task-04：心跳响应同步 allowed_roots。
+   *
+   * **per-runtime map + 并集**（修 bug：多 runtime allowed_roots 不同时，
+   * 单 runtime 覆盖全局 config 导致振荡——claude 配 F:/ 被 hermes 心跳覆盖丢失）。
+   * daemon 一台机器一个沙箱，config.allowed_roots = 所有 runtime allowed_roots 并集。
+   *
+   * 向后兼容：响应无 allowed_roots 字段（旧 backend）→ 不动。
+   */
+  private readonly _allowedRootsByRuntime = new Map<string, string[]>();
+  private _syncAllowedRoots(rid: string, resp: Record<string, unknown> | unknown): void {
+    if (!resp || typeof resp !== 'object') return;
+    const raw = (resp as Record<string, unknown>).allowed_roots;
+    if (!Array.isArray(raw)) return; // 旧 backend 无字段 → 向后兼容
+    // 展开 ~/.sillyhub 占位
+    const expanded = raw
+      .filter((p): p is string => typeof p === 'string')
+      .map((p) => p.replace(/^~(?=$|[/\\])/, homedir()));
+    this._allowedRootsByRuntime.set(rid, expanded);
+    // 并集：所有 runtime allowed_roots + homedir 兜底
+    const union = new Set<string>();
+    for (const roots of this._allowedRootsByRuntime.values()) {
+      for (const r of roots) union.add(r);
+    }
+    union.add(homedir());
+    const normalized = normalizeAllowedRoots([...union]);
+    // 仅在变化时覆盖（避免每心跳重复写对象引用）
+    if (JSON.stringify(normalized) !== JSON.stringify(this._config.allowed_roots)) {
+      this._config.allowed_roots = normalized;
+      this._logger.info('allowed_roots_synced', { count: normalized.length, runtimes: this._allowedRootsByRuntime.size });
     }
   }
 
@@ -1760,6 +1797,7 @@ export class Daemon {
         },
       });
       this._registerListDirRpcHandler(ws, runtimeId);
+      this._registerGetSpecBundleRpcHandler(ws, runtimeId);
 
       try {
         ws.connect();
@@ -1780,6 +1818,23 @@ export class Daemon {
     ws.registerRpcHandler('list_dir', async (params) => {
       const path = typeof params.path === 'string' ? params.path : '';
       return listDir(path, this._config.allowed_roots);
+    });
+  }
+
+  /**
+   * 2026-06-30：spec import RPC——backend 经 WS RPC 让 daemon 打包客户端
+   * rootPath/.sillyspec 整树为 tar，base64 编码回传。backend apply_sync 写入 spec_root。
+   * daemon-client workspace 的 root_path 是宿主机路径（F:\WorkNew\SillyHub），daemon 可访问。
+   */
+  private _registerGetSpecBundleRpcHandler(ws: WsClientLike, runtimeId: string): void {
+    if (typeof ws.registerRpcHandler !== 'function') return;
+    ws.registerRpcHandler('get_spec_bundle', async (params) => {
+      const rootPath = typeof params.root_path === 'string' ? params.root_path : '';
+      if (!rootPath) throw new Error('root_path required for get_spec_bundle');
+      const specDir = join(rootPath, '.sillyspec');
+      const { packSpecDir } = await import('./spec-sync.js');
+      const tarBuf = await packSpecDir(specDir);
+      return { tar_base64: tarBuf.toString('base64') };
     });
   }
 

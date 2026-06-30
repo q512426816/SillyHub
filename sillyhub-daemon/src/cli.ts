@@ -519,6 +519,13 @@ export async function startAction(opts: StartOptions): Promise<number> {
       // 后，AskUserQuestion 的 questions 经 PERMISSION_REQUEST（带 dialog_kind/dialog_payload）
       // 发到前端，用户选择的答案经 PERMISSION_RESPONSE.dialog_result 回喂 SDK。
       supportedDialogKinds: ['AskUserQuestion'],
+      // interactive CC 写拦截（2026-06-29）：注入 allowed_roots provider，让所有
+      // interactive CC session（含默认 chat / enableApproval=false）的 canUseTool
+      // 对写工具（Write/Edit/MultiEdit）做白名单校验，越界 deny；读工具不拦。
+      // 用函数：daemon 心跳 _syncAllowedRoots 会更新 config.allowed_roots（同一
+      // config 对象引用，daemon.ts constructor this._config = config），provider
+      // 每次调用读到最新值，无需 SessionManager 感知更新事件。
+      allowedRootsProvider: () => config.allowed_roots,
     },
   );
   // gap-8（interactive 凭证 parity）：把同一 CredentialManager 传给 Daemon，让

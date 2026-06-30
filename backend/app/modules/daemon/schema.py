@@ -91,6 +91,8 @@ class DaemonRuntimeRead(BaseModel):
     status: str | None
     last_heartbeat_at: datetime | None
     capabilities: dict | None
+    # 2026-06-29-runtime-allowed-roots-config task-01：可访问目录沙箱
+    allowed_roots: list[str] = Field(default_factory=lambda: ["~/.sillyhub"])
     owner: OwnerRead | None = None
     created_at: datetime
     updated_at: datetime
@@ -105,6 +107,16 @@ class DaemonRuntimeUpdate(BaseModel):
     """
 
     display_alias: str | None = Field(default=None, max_length=200)
+
+
+class DaemonRuntimeAllowedRootsUpdate(BaseModel):
+    """Request body for PUT /api/daemon/runtimes/{runtime_id}/allowed-roots.
+
+    2026-06-29-runtime-allowed-roots-config task-02：admin 配置可访问目录沙箱。
+    每条路径绝对路径或 ``~`` 开头（daemon 侧展开 homedir）；后端只校验格式。
+    """
+
+    allowed_roots: list[str] = Field(min_length=1, max_length=50)
 
 
 class DaemonRuntimeListResponse(BaseModel):
@@ -131,6 +143,8 @@ class DaemonHeartbeatResponse(BaseModel):
     runtime_id: uuid.UUID
     status: str
     pending_operations: dict | None = None
+    # 2026-06-29-runtime-allowed-roots-config task-03：daemon 心跳拉取同步本地 config
+    allowed_roots: list[str] = Field(default_factory=list)
 
 
 # ── Lease claim ─────────────────────────────────────────────────────────────

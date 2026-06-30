@@ -9,6 +9,7 @@ from fastapi import (
     APIRouter,
     Depends,
     Header,
+    HTTPException,
     Query,
     Request,
     WebSocket,
@@ -45,6 +46,7 @@ from app.modules.daemon.schema import (
     DaemonHeartbeatRequest,
     DaemonHeartbeatResponse,
     DaemonRegisterRequest,
+    DaemonRuntimeAllowedRootsUpdate,
     DaemonRuntimeListResponse,
     DaemonRuntimeRead,
     DaemonRuntimeUpdate,
@@ -216,6 +218,7 @@ async def daemon_heartbeat(
         runtime_id=runtime.id,
         status=runtime.status or "online",
         pending_operations={},
+        allowed_roots=runtime.allowed_roots or ["~/.sillyhub"],
     )
 
 
@@ -331,6 +334,33 @@ async def update_runtime(
         display_alias_set="display_alias" in data.model_fields_set,
         is_platform_admin=user.is_platform_admin,
     )
+    return DaemonRuntimeRead.model_validate(runtime)
+
+
+@router.put(
+    "/runtimes/{runtime_id}/allowed-roots",
+    response_model=DaemonRuntimeRead,
+)
+async def update_runtime_allowed_roots(
+    runtime_id: uuid.UUID,
+    data: DaemonRuntimeAllowedRootsUpdate,
+    session: SessionDep,
+    user: RuntimeAdminUser,
+) -> DaemonRuntimeRead:
+    """PUT runtime allowed_roots sandbox (2026-06-29-runtime-allowed-roots-config task-02).
+
+    admin 配置 daemon 可访问目录（多路径，绝对路径或 ~ 开头）。
+    """
+    svc = DaemonService(session)
+    try:
+        runtime = await svc.update_allowed_roots(
+            runtime_id,
+            user.id,
+            allowed_roots=data.allowed_roots,
+            is_platform_admin=user.is_platform_admin,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return DaemonRuntimeRead.model_validate(runtime)
 
 
