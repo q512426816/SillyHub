@@ -135,6 +135,9 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const [defaultAgent, setDefaultAgent] = useState<string | null>(null);
   const [defaultModel, setDefaultModel] = useState<string | null>(null);
   const [savingDefaultAgent, setSavingDefaultAgent] = useState(false);
+  // ql-20260630-001：scan 进入 failed/killed 视为"未完成·可重扫"（守护进程重启等中断），
+  // 不当冷冰冰终态失败——scan 幂等，直接给重新扫描入口，对齐"像会话一样继续"。
+  const scanInterrupted = scanStatus === "failed" || scanStatus === "killed";
 
   const handleSaveDefaultAgent = async () => {
     if (!workspace) return;
@@ -588,13 +591,23 @@ export default function WorkspaceDetailPage({ params }: Props) {
               emptyText="等待日志输出..."
               isLive={scanStatus === "running" || scanStatus === "pending"}
               summary={
-                <Badge variant={statusToVariant(scanStatus)}>
-                  {scanStatus ?? "等待中"}
+                <Badge variant={scanInterrupted ? "warning" : statusToVariant(scanStatus)}>
+                  {scanInterrupted ? "未完成" : (scanStatus ?? "等待中")}
                 </Badge>
               }
               onClose={closeScanPanel}
               onDone={handleScanRunDone}
             />
+            {scanInterrupted && (
+              <div className="mt-2 flex items-center justify-between gap-2 rounded border border-warning/30 bg-warning/5 px-3 py-2 text-xs">
+                <span className="text-warning">
+                  上次扫描未完成（守护进程可能重启），可重新扫描。
+                </span>
+                <Button size="sm" variant="outline" onClick={() => void handleScan()}>
+                  重新扫描
+                </Button>
+              </div>
+            )}
             {scanError && (
               <p className="mt-2 text-xs text-destructive">{scanError}</p>
             )}

@@ -22,7 +22,11 @@ vi.mock("next/link", () => ({
 
 // ── AgentRunPanel 整体 mock（隔离 SSE + markdown-text jsdom null）─────────────
 vi.mock("@/components/agent-run-panel", () => ({
-  AgentRunPanel: () => <div data-testid="agent-run-panel-mock" />,
+  AgentRunPanel: ({ onDone }: { onDone?: (status: string) => void }) => (
+    <div data-testid="agent-run-panel-mock">
+      <button onClick={() => onDone?.("failed")}>模拟扫描失败</button>
+    </div>
+  ),
 }));
 
 // ── 子组件 mock（减少依赖）───────────────────────────────────────────────────
@@ -146,5 +150,19 @@ describe("WorkspaceDetailPage daemon-client 扫描入口（task-14 / D-006@v1）
     expect(args[3]).toBe("daemon-client"); // path_source
     expect(args[4]).toBe("rid-1"); // daemon_runtime_id
     expect(args[5]).toBe("repo-native"); // spec_strategy
+  });
+
+  it("scan 中断(failed)显示「重新扫描」入口而非冷冰冰失败（ql-20260630-001）", async () => {
+    await renderWithStrategy("repo-native");
+    fireEvent.click(screen.getByRole("button", { name: "扫描" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("agent-run-panel-mock")).toBeInTheDocument(),
+    );
+    // 模拟 daemon 重启：后端 _converge_crashed_run 把 run 收敛为 failed
+    fireEvent.click(screen.getByRole("button", { name: "模拟扫描失败" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "重新扫描" })).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/上次扫描未完成/)).toBeInTheDocument();
   });
 });
