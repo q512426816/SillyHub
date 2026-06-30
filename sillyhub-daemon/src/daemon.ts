@@ -1573,7 +1573,7 @@ export class Daemon {
             // task-18（FR-07 / D-004@v1）：心跳健康 → 触发 outbox drain（pending 非空时补发）。
             this._resilience?.notifyHeartbeatResult(true);
             // 2026-06-29-runtime-allowed-roots-config task-04：心跳响应同步 allowed_roots。
-            this._syncAllowedRoots(hbResp);
+            this._syncAllowedRoots(rid, hbResp);
           } catch (e) {
             // 单个 rid 心跳失败不影响其他（daemon.py:172-177）
             // task-02（FR-01）：展开 cause 暴露底层 undici code。
@@ -1613,21 +1613,34 @@ export class Daemon {
 
   /**
    * 2026-06-29-runtime-allowed-roots-config task-04：心跳响应同步 allowed_roots。
-   * 解析 backend 下发的 allowed_roots → 覆盖本地 config（合并 homedir 兜底）。
+   *
+   * **per-runtime map + 并集**（修 bug：多 runtime allowed_roots 不同时，
+   * 单 runtime 覆盖全局 config 导致振荡——claude 配 F:/ 被 hermes 心跳覆盖丢失）。
+   * daemon 一台机器一个沙箱，config.allowed_roots = 所有 runtime allowed_roots 并集。
+   *
    * 向后兼容：响应无 allowed_roots 字段（旧 backend）→ 不动。
    */
-  private _syncAllowedRoots(resp: Record<string, unknown> | unknown): void {
+  private readonly _allowedRootsByRuntime = new Map<string, string[]>();
+  private _syncAllowedRoots(rid: string, resp: Record<string, unknown> | unknown): void {
     if (!resp || typeof resp !== 'object') return;
     const raw = (resp as Record<string, unknown>).allowed_roots;
     if (!Array.isArray(raw)) return; // 旧 backend 无字段 → 向后兼容
-    // 展开 ~/.sillyhub 占位 + 合并 homedir 兜底（normalizeAllowedRoots 内含 homedir）
-    const expanded = raw.map((p) => (typeof p === 'string' ? p.replace(/^~(?=$|[/\\])/, homedir()) : p));
-    const merged = [...expanded, homedir()];
-    const normalized = normalizeAllowedRoots(merged);
+    // 展开 ~/.sillyhub 占位
+    const expanded = raw
+      .filter((p): p is string => typeof p === 'string')
+      .map((p) => p.replace(/^~(?=$|[/\\])/, homedir()));
+    this._allowedRootsByRuntime.set(rid, expanded);
+    // 并集：所有 runtime allowed_roots + homedir 兜底
+    const union = new Set<string>();
+    for (const roots of this._allowedRootsByRuntime.values()) {
+      for (const r of roots) union.add(r);
+    }
+    union.add(homedir());
+    const normalized = normalizeAllowedRoots([...union]);
     // 仅在变化时覆盖（避免每心跳重复写对象引用）
     if (JSON.stringify(normalized) !== JSON.stringify(this._config.allowed_roots)) {
       this._config.allowed_roots = normalized;
-      this._logger.info('allowed_roots_synced', { count: normalized.length });
+      this._logger.info('allowed_roots_synced', { count: normalized.length, runtimes: this._allowedRootsByRuntime.size });
     }
   }
 

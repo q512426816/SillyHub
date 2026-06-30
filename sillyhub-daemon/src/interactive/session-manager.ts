@@ -40,6 +40,7 @@ import type {
   UserTurnInput,
 } from './driver.js';
 import { InputQueue } from './input-queue.js';
+import { isWriteWithinAllowedRoots } from './write-guard.js';
 import { PermissionResolver } from './permission-resolver.js';
 import type { PermissionSendFn } from './permission-resolver.js';
 import type { CanUseToolDecision } from './types.js';
@@ -108,6 +109,25 @@ export interface SessionManagerOptions {
    * 无法回传用户选择）。manualApproval=false 时本字段无意义（不注入 onUserDialog）。
    */
   supportedDialogKinds?: string[];
+  /**
+   * 写工具白名单根目录提供者（interactive CC 写拦截，2026-06-29）。
+   *
+   * 返回 daemon config.allowed_roots（heartbeat 同步的绝对路径数组）。注入后，
+   * SessionManager 在「所有」session（含默认 chat / enableApproval=false）都注入
+   * canUseTool 回调，对写工具（Write/Edit/MultiEdit）做白名单校验：
+   *   - 落在某个 root 之下（含等于 root）→ 继续 allow / 走原 enableApproval 人审逻辑；
+   *   - 越界 → deny（message "path outside allowed_roots"）。
+   * 读工具（Read/Grep/Bash/Glob/WebFetch 等）不拦（读自由）。
+   *
+   * 用函数而非数组：daemon 心跳会更新 config.allowed_roots（daemon.ts
+   * _syncAllowedRoots 写同一 config 对象引用），provider 每次调用读到最新值，无需
+   * SessionManager 感知更新事件。
+   *
+   * 不注入（undefined）= 不启用写拦截（向后兼容，测试默认）。注入空数组也视为
+   * 不启用（isWriteWithinAllowedRoots 内 allowedRoots.length===0 直接放行，避免
+   * 配置缺失导致全 deny 卡死 chat）。
+   */
+  allowedRootsProvider?: () => string[];
 }
 
 /**
@@ -288,6 +308,12 @@ export class SessionManager {
    * 时不读（不注入 onUserDialog）。
    */
   private readonly _supportedDialogKinds: string[] | undefined;
+  /**
+   * 写工具白名单根目录提供者（interactive CC 写拦截，2026-06-29）。
+   * 未注入 = 不启用写拦截。注入后所有 session 的 canUseTool 都前置写校验。
+   * 见 SessionManagerOptions.allowedRootsProvider 文档。
+   */
+  private readonly _allowedRootsProvider: (() => string[]) | undefined;
 
   /**
    * D-001@v1（task-02）：provider driver registry。`drivers.claude` / `drivers.codex`
@@ -359,6 +385,9 @@ export class SessionManager {
         );
       }
     }
+    // interactive CC 写拦截（2026-06-29）：注入 provider 后所有 session 的 canUseTool
+    // 前置写校验（含默认 chat / enableApproval=false）。未注入 = 不启用（向后兼容）。
+    this._allowedRootsProvider = opts.allowedRootsProvider;
   }
 
   /** task-08：manual_approval 当前是否启用（测试 / daemon 透传用）。 */
@@ -707,19 +736,28 @@ export class SessionManager {
     }
     // scan 真阻塞（per-session，generic-wibbling-whisper.md 改造点 C/D）：
     // enableApproval=true 时按 session 建独立 resolver + 注入远程人审 canUseTool +
-    // onUserDialog，让 scan 真阻塞等人审（chat=false 不注入，AskUserQuestion 被
-    // backend drop 不会 5min 超时）。行为与改造前逐行等价（FR-10）。
-    if (
+    // onUserDialog，让 scan 真阻塞等人审（chat=false 不注入 AskUserQuestion 人审，
+    // 但见下方 allowed_roots 写拦截：注入 provider 后 chat 也注入 canUseTool 做写校验）。
+    // 行为与改造前逐行等价（FR-10）+ allowed_roots 写拦截增量（2026-06-29）。
+    const approvalReady =
       spec.enableApproval &&
-      this._permissionResolverFactory &&
-      this._permissionWsClient
-    ) {
-      const resolver = this._permissionResolverFactory();
+      !!this._permissionResolverFactory &&
+      !!this._permissionWsClient;
+    // interactive CC 写拦截（2026-06-29）：注入 allowedRootsProvider 后，无论
+    // enableApproval true/false，都给 Claude driver 注入 canUseTool（写工具白名单前置
+    // 校验）。enableApproval=true 时 canUseTool = 写校验 + 远程人审；false 时
+    // canUseTool = 写校验 + 直接 allow。读工具不拦（读自由）。
+    const writeGuardEnabled = !!this._allowedRootsProvider;
+    if (approvalReady) {
+      const resolver = this._permissionResolverFactory!();
       this._resolversBySession.set(state.sessionId, resolver);
-      driverOpts.canUseTool = this._buildCanUseToolCallback(
+      const inner = this._buildCanUseToolCallback(
         state.sessionId,
         spec.effectiveAskUserOnly,
       );
+      driverOpts.canUseTool = writeGuardEnabled
+        ? this._wrapWithWriteGuard(inner)
+        : inner;
       // onUserDialog 路由（SDK request_user_dialog 路径）：supportedDialogKinds 非空才注入。
       // ⚠️ AskUserQuestion 在 SDK headless 模式实际不走 onUserDialog（经 canUseTool 拦截）；
       // 此处仅对 SDK 真正发出 request_user_dialog 的其他 kind 生效。默认 ['AskUserQuestion']
@@ -755,8 +793,67 @@ export class SessionManager {
           }) => this.requestUserDialog(state.sessionId, input),
         };
       }
+    } else if (writeGuardEnabled) {
+      // 默认 chat（enableApproval=false）：注入「写校验 only」canUseTool。
+      // 不依赖 resolver/wsClient（纯本地校验）：写工具白名单外 deny、白名单内 allow；
+      // 读工具 / 其他 allow（读自由）。SDK 不会因 canUseTool 注入而走人审（人审只在
+      // approvalReady 分支内经 resolver.register 触发）。
+      const inner = this._buildWriteOnlyCanUseToolCallback(state.sessionId);
+      driverOpts.canUseTool = this._wrapWithWriteGuard(inner);
     }
     return driverOpts;
+  }
+
+  /**
+   * interactive CC 写拦截（2026-06-29）：包装一层写工具白名单前置守卫。
+   *
+   * 调用顺序：先 isWriteWithinAllowedRoots —— 写工具（Write/Edit/MultiEdit）取
+   * file_path/path 校验 allowed_roots，越界直接 deny（message 含 path +
+   * "path outside allowed_roots"）；白名单内 / 非写工具 / 读工具 → 交给内层 callback
+   *（approvalReady=true 走远程人审；false 走直接 allow）。
+   *
+   * provider 返回空数组 = 视为未启用（直接转内层，不拦）——避免配置缺失导致全 deny。
+   *
+   * @param inner 内层 canUseTool（写校验通过后调用的真实审批 / allow 逻辑）。
+   */
+  private _wrapWithWriteGuard(inner: CanUseTool): CanUseTool {
+    return async (
+      toolName: string,
+      toolInput: Record<string, unknown>,
+      options: Parameters<CanUseTool>[2],
+    ): ReturnType<CanUseTool> => {
+      const roots = this._allowedRootsProvider?.() ?? [];
+      if (roots.length > 0 && !isWriteWithinAllowedRoots(toolName, toolInput, roots)) {
+        // 取目标路径放进 message，便于 Claude 自行诊断 / 回退。
+        const target = toolInput['file_path'] ?? toolInput['path'];
+        return {
+          behavior: 'deny',
+          message: `path outside allowed_roots${target ? `: ${String(target)}` : ''}`,
+        };
+      }
+      return inner(toolName, toolInput, options);
+    };
+  }
+
+  /**
+   * interactive CC 写拦截（2026-06-29）：默认 chat（enableApproval=false）的 canUseTool
+   * 内层逻辑——写校验通过后直接 allow（透传 updatedInput 满足 Claude CLI Zod record 校验，
+   * 与 _buildCanUseToolCallback allow 分支同模式）。读工具 / 其他一律 allow。
+   *
+   * fail-closed 守卫：session 非 running turn → allow（无审批状态可守，回退到 SDK 内置
+   * 行为；写拦截只在 running turn 有意义，且 _wrapWithWriteGuard 已先行 deny 越界写）。
+   * 实际上 SDK 不会在非 running turn 调 canUseTool，此分支仅为类型完整 + 防御性。
+   */
+  private _buildWriteOnlyCanUseToolCallback(_sessionId: string): CanUseTool {
+    return async (
+      _toolName: string,
+      toolInput: Record<string, unknown>,
+      _options: Parameters<CanUseTool>[2],
+    ): ReturnType<CanUseTool> => {
+      // toolInput 已是 record（SDK 契约）；原样透传满足 Claude CLI Zod record 校验
+      //（allow 分支 updatedInput required）。
+      return { behavior: 'allow', updatedInput: toolInput };
+    };
   }
 
   /**
