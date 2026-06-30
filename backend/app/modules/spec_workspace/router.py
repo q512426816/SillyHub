@@ -103,11 +103,11 @@ async def import_spec_workspace(
     session: SessionDep,
     _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
 ) -> SpecWorkspaceRead:
-    """Import spec files from the repo ``.sillyspec`` directory into the
+    """Import spec files from the client/repo ``.sillyspec`` directory into the
     platform-managed spec workspace.
 
-    This is a stub implementation — the actual filesystem import logic will be
-    added in a later wave.
+    daemon-client workspace: WS RPC → daemon 打包 rootPath/.sillyspec → apply_sync。
+    server-local workspace: 容器内直接读 .sillyspec → apply_sync。
     """
     service = SpecWorkspaceService(session)
     spec_ws = await service.import_from_repo(workspace_id)

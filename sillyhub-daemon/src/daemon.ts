@@ -38,6 +38,7 @@
 
 import { arch, homedir, hostname, platform } from 'node:os';
 import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { DaemonConfig } from './config.js';
 import { normalizeAllowedRoots } from './config.js';
@@ -1796,6 +1797,7 @@ export class Daemon {
         },
       });
       this._registerListDirRpcHandler(ws, runtimeId);
+      this._registerGetSpecBundleRpcHandler(ws, runtimeId);
 
       try {
         ws.connect();
@@ -1816,6 +1818,23 @@ export class Daemon {
     ws.registerRpcHandler('list_dir', async (params) => {
       const path = typeof params.path === 'string' ? params.path : '';
       return listDir(path, this._config.allowed_roots);
+    });
+  }
+
+  /**
+   * 2026-06-30：spec import RPC——backend 经 WS RPC 让 daemon 打包客户端
+   * rootPath/.sillyspec 整树为 tar，base64 编码回传。backend apply_sync 写入 spec_root。
+   * daemon-client workspace 的 root_path 是宿主机路径（F:\WorkNew\SillyHub），daemon 可访问。
+   */
+  private _registerGetSpecBundleRpcHandler(ws: WsClientLike, runtimeId: string): void {
+    if (typeof ws.registerRpcHandler !== 'function') return;
+    ws.registerRpcHandler('get_spec_bundle', async (params) => {
+      const rootPath = typeof params.root_path === 'string' ? params.root_path : '';
+      if (!rootPath) throw new Error('root_path required for get_spec_bundle');
+      const specDir = join(rootPath, '.sillyspec');
+      const { packSpecDir } = await import('./spec-sync.js');
+      const tarBuf = await packSpecDir(specDir);
+      return { tar_base64: tarBuf.toString('base64') };
     });
   }
 
