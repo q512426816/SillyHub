@@ -83,7 +83,7 @@ generator: sillyspec-scan
 
 ### deploy / 基础设施
 - Docker Compose 编排；镜像 `postgres:16-alpine`、`redis:7-alpine`
-- backend 镜像通过 build-args 注入 `CLAUDE_CODE_VERSION=2.1.158`、`SILLYSPEC_VERSION=3.19.1`
+- backend 镜像通过 build-args 注入 `CLAUDE_CODE_VERSION=2.1.158`、`SILLYSPEC_VERSION=3.20.4`
 - 数据卷：`worktree-data`、`claude-data` 命名卷；`/host-projects`、`/data/spec-workspaces` bind mount
 
 ## 部署拓扑（`deploy/`）
