@@ -667,14 +667,15 @@ class ChangeService:
 
     async def reparse(self, workspace_id: uuid.UUID) -> tuple[dict[str, int], ChangeParserResult]:
         workspace = await self._workspace_service.get(workspace_id)
-        # 平台托管工作区：从 spec_root 读取（对齐 scan_docs/service.py），
-        # 否则 stage 产物回流会扫不到 spec_root/changes/ 而只看 root_path。
+        # 平台 specRoot 有镜像数据就读（任意 strategy：platform-managed/repo-native/repo-mirrored）。
+        # 旧逻辑只 platform-managed 读 spec_root，repo-native/repo-mirrored 读 root_path
+        # （daemon-client 客户端路径容器内不可达）→ 扫不到 changes → 变更中心不显示。
         sillyspec_root = Path(workspace.root_path)
         try:
             from app.modules.spec_workspace.service import SpecWorkspaceService
 
             spec_ws = await SpecWorkspaceService(self._session).get(workspace.id)
-            if spec_ws and spec_ws.strategy == "platform-managed" and spec_ws.spec_root:
+            if spec_ws and spec_ws.spec_root:
                 sillyspec_root = Path(spec_ws.spec_root)
         except Exception as exc:
             log.warning(
@@ -683,7 +684,12 @@ class ChangeService:
                 error=str(exc),
             )
 
-        result = self._parser.parse_workspace(sillyspec_root)
+        from app.modules.workspace.service import is_daemon_client_path_source
+
+        # daemon-client 同步产出扁平布局（无 .sillyspec 包裹），parser 需 platform_managed
+        # 才能读到 specRoot/changes/；server-local 仍包裹（.sillyspec/changes/）
+        platform_managed = is_daemon_client_path_source(workspace.path_source)
+        result = self._parser.parse_workspace(sillyspec_root, platform_managed=platform_managed)
         stats = {"parsed": 0, "created": 0, "updated": 0, "deleted": 0, "renamed": 0}
 
         # Fetch existing changes

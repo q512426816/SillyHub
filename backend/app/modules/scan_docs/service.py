@@ -82,7 +82,9 @@ class ScanDocsService:
         """Reparse all docs under .sillyspec/docs/ for a workspace."""
         workspace = await self._workspace_service.get(workspace_id)
 
-        # For platform-managed workspaces, read from spec_root instead of root_path
+        # 平台 specRoot 有镜像数据就读（任意 strategy：platform-managed/repo-native/repo-mirrored）。
+        # 旧逻辑只 platform-managed 读 spec_root，导致 repo-native/repo-mirrored 读 root_path
+        # （daemon-client 客户端路径容器内不可达）→ DOCS_DIR_MISSING → 扫描文档不显示。
         sillyspec_root = Path(workspace.root_path)
         platform_managed = False
         try:
@@ -90,7 +92,7 @@ class ScanDocsService:
 
             spec_ws_svc = SpecWorkspaceService(self._session)
             spec_ws = await spec_ws_svc.get(workspace.id)
-            if spec_ws.strategy == "platform-managed" and spec_ws.spec_root:
+            if spec_ws.spec_root:
                 sillyspec_root = Path(spec_ws.spec_root)
                 # D-005@v1：mode 看 path_source（正交于 root）。daemon-client 同步产出扁平
                 # 布局（无 .sillyspec 包裹）；server-local 平台镜像仍包裹。

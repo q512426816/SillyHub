@@ -65,9 +65,11 @@ class ChangeParserResult:
 class ChangeParser:
     """Parses ``.sillyspec/changes/{active|archive}/{change_key}/`` directories."""
 
-    def parse_workspace(self, sillyspec_root: Path) -> ChangeParserResult:
+    def parse_workspace(
+        self, sillyspec_root: Path, *, platform_managed: bool = False
+    ) -> ChangeParserResult:
         result = ChangeParserResult()
-        resolver = SpecPathResolver(sillyspec_root)
+        resolver = SpecPathResolver(sillyspec_root, platform_managed=platform_managed)
         changes_base = resolver.changes_root()
 
         # --- 1. Scan active changes: changes/<name>/ (excluding archive/) ---

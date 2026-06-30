@@ -220,3 +220,12 @@ created_at: 2026-06-23 10:09:12
 验证：bash -n 通过 + 落盘 heredoc 模拟 WSL/Git Bash 两分支，确认 ${BUNDLE_NAME}→sillyhub-daemon.js 展开、%~dp0 保留、反斜杠保留、WSL wslpath 产出 C:\nvm4w\nodejs；断言无字面量 ${BUNDLE_NAME} PASS。未跑 backend test_daemon_dist.py（用 fake install.sh 不涉内容，零影响）。
 生效路径：install.sh 经 backend/Dockerfile:86 COPY 进镜像 baked into image，需重建+部署 backend 镜像才下发；本机 .cmd 已手工修，现在可跑。
 遗留（pre-existing，非本次回归）：Git Bash sed 路径转换缺盘符反斜杠（s|...|\1:| 输出 c: 非 c:\），win_node_dir_win/win_bin_dir/win_bin_for_path 三处共用，Git Bash 场景 node 绝对路径兜底无效（fallback PATH 的 node，nvm4w 在 PATH 仍可跑）。WSL 走 wslpath 不受影响。建议后续单独修。
+
+## ql-20260630-002-reparse | 2026-06-30 23:10:00 | reparse 支持 daemon-client 扁平 specRoot + repo-native/repo-mirrored 策略（修扫描文档/变更中心不显示）
+状态：已暂存（git add 4 文件，未 commit；DB 已临时 ALTER 生效；待 build backend 持久化）
+根因：daemon-client workspace（fb5008c1, repo-native）specRoot 有 1324 文件回灌成功，但前端扫描文档/变更中心空——DB 表空（reparse 没解析 specRoot 进 DB）。三层 bug：① scan_docs/service.py:93 + change/service.py:677 只 strategy==platform-managed 才读平台 spec_root，repo-native 读 workspace.root_path（客户端 C:\Users 容器不可达）→ DOCS_DIR_MISSING；② change/parser.py:68 parse_workspace 不支持扁平布局（daemon-client 同步产出无 .sillyspec 包裹），写死 .sillyspec/changes/，SpecPathResolver 已支持 platform_managed 但 parser 没传；③ DB 字段短：scan_documents.doc_type varchar(100) + workspaces.role varchar(100)（sillyhub-daemon role 115 字符）→ StringDataRightTruncation 500。
+方案：① scan_docs/change service 去掉 strategy==platform-managed 限制改 if spec_ws.spec_root（任意 strategy 读平台 specRoot）；② change/parser.py parse_workspace 加 platform_managed 参数 + change/service.py 传 is_daemon_client_path_source(workspace.path_source)；③ migration 扩 scan_documents.doc_type/workspaces.role→text, slug/component_key/default_branch→varchar(200)。
+文件：backend/app/modules/scan_docs/service.py + backend/app/modules/change/service.py + backend/app/modules/change/parser.py + backend/migrations/versions/202606301500_reparse_field_length.py（down_revision=202606291030）
+验证：docker cp 改后文件进容器 + restart backend，reparse scan-docs parsed 205 created 205；reparse changes parsed 87 created 87。fb5008c1 扫描文档+变更中心数据已显示（前端刷新可见）。
+生效路径：代码已 git add 待 commit；DB 已临时 ALTER 生效；migration 需 commit + build backend 镜像部署后 alembic upgrade 持久化（ALTER TYPE 幂等，DB 已改则 no-op + stamp）。
+遗留：build backend 镜像正式部署（docker cp 临时，下次 down/up 丢失）；旧 workspace（5c22aa2e 等）同样问题，reparse 可修。
