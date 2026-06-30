@@ -87,4 +87,17 @@ created_at: 2026-06-24T19:19:38
 验证：① DB 列+索引已落地（information_schema.columns + pg_indexes 确认）；② 复现 service.get_run_logs 的 SELECT 不再报错（count 0）；③ 全表 ORM-vs-DB 列对比（63 ORM 表 vs 66 DB 表）漂移数=0，dedup_key 是唯一缺失且已补，无其他遗漏。未改代码/未 rebuild 镜像（migration 文件本就正确，DB 已直接修复）。
 注：alembic upgrade head 不重跑已标记完成的旧 migration，遇类似漂移需直接补 DDL 或 alembic stamp 回退后重跑。本次为运维 hotfix，无代码 commit。
 
+## ql-20260630-001-a1b2 | 2026-06-30 09:38:40 | runtimes allowed_roots 沙箱（完整变更 + 3 修复 + 部署）
+状态：已完成（3 commit 本地，push 待 GitHub 网络 port 443 连不上）
+文件：backend/daemon/model.py+router.py+runtime/service.py+schema.py+service.py+migration 202606291030；sillyhub-daemon/src/daemon.ts+config.ts+permission-rules.ts+adapters/stream-json.ts+task-runner.ts+adapters/protocol-adapter.ts+interactive/session-manager.ts+interactive/write-guard.ts+cli.ts；frontend/src/app/(dashboard)/runtimes/page.tsx+lib/daemon.ts；backend/app/modules/agent/execution.py
+需求：/runtimes 页面查看并配置 daemon 守护进程可访问目录（allowed_roots 沙箱）。Agent 团队 CC 写 D:/ 不受限 + cwd 空 mirror + permission allow 不含 F:/。
+排查 + 修复（3 个 bug，跨 runtimes allowed_roots 完整变更 SillySpec brainstorm→execute）：
+1. permission allow 不含 F:/：根因——claude/hermes 两 runtime allowed_roots 不同（claude=[~/.sillyhub,F:/]，hermes=[~/.sillyhub]），_syncAllowedRoots 单 runtime 覆盖全局 config → hermes 心跳覆盖丢 F:/ 振荡。修——per-runtime map + 并集（daemon 一台机器一个沙箱，所有 runtime allowed_roots 取并集）。
+2. interactive CC 写不受限：根因——interactive（/runtimes 对话/quick-chat 走 claude-sdk-driver）没 permission 注入（只 batch stream-json --settings）。SDK(claude-agent-sdk)不支持 settings JSON。修——write-guard.ts(isWriteWithinAllowedRoots 纯函数,写工具校验 file_path 在 allowed_roots 内,读自由) + session-manager _wrapWithWriteGuard(canUseTool 前置写校验,白名单内 allow/外 deny,默认 chat 也注入不只 enableApproval) + cli allowedRootsProvider。
+3. Agent 团队 cwd 空 mirror：根因——dispatch_worker(mission Wave3 execution.py:112)调 dispatch_to_daemon 没传 root_path → lease.metadata 无 root_path → daemon prepareWorkspace 分支0 无 rootPath → fallback 空 mirror(C:\\Users\\12532\\.sillyhub\\daemon\\workspaces\\default) → CC 在空目录找不到代码(沙箱锁定)。修——从 workspace 取 root_path + resolve_root_path_for_daemon 改写容器→宿主机,传给 dispatch_to_daemon。
+完整变更（runtimes allowed_roots，SillySpec change 2026-06-29-runtime-allowed-roots-config）：backend daemon_runtimes+allowed_roots(JSONB 默认 ["~/.sillyhub"])+migration 202606291030+PUT /runtimes/{id}/allowed-roots(admin+路径校验)+心跳响应带 allowed_roots；daemon _syncAllowedRoots(心跳拉取同步本地 config,展开 ~/.sillyhub+合并 homedir)；CC permission 注入 batch(stream-json --settings buildCcSettingsJson allow Write 白名单+deny Write(**)+读自由)+interactive(canUseTool 写守卫)；frontend /runtimes RuntimeCard allowed_roots 展示+admin 编辑 Modal(多路径增删)。
+commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix interactive 写守卫+多 runtime 并集) + a3a2dc3d(fix Worker root_path 透传)。
+测试：backend daemon pytest 415p(3 既存 session SSE failed 无关)/sillyhub-daemon vitest 1514p(含 permission-rules 7p+session-manager-allowed-roots 16p)/frontend typecheck+18 runtimes 测试。部署：backend rebuild a3a2dc3d + daemon pnpm bundle + 重启(allowed_roots_synced count=3 含 F:/)。全栈 healthy。
+注：CC permission 验证——claude --help 确认 --settings+Tool(spec) 格式(Write(path/**))+--disallowedTools；SDK(sdk.d.ts)确认 disallowedTools/permissionMode/canUseTool 但无 settings JSON → interactive 用 canUseTool 回调。Codex provider 写拦截未实现(走 sessionPermission 非 canUseTool)。Bash 间接写文件不拦(读自由语义)。push 待 GitHub 网络。
+
 
