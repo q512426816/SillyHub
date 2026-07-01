@@ -11,6 +11,11 @@ function makeDoc(path: string, doc_type = "OTHER"): ScanDocSummary {
     title: path.split("/").pop() ?? null,
     exists: true,
     last_modified_at: null,
+    source_member_id: null,
+    source_synced_at: null,
+    source_mtime: null,
+    content_hash: null,
+    conflict_count: 0,
   };
 }
 

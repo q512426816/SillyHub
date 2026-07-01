@@ -32,6 +32,7 @@ from app.modules.ppm.problem import model as _ppm_problem_model  # noqa: F401
 from app.modules.ppm.project import model as _ppm_project_model  # noqa: F401
 from app.modules.ppm.task import model as _ppm_task_model  # noqa: F401
 from app.modules.release import model as _release_model  # noqa: F401
+from app.modules.scan_docs import conflict_model as _scan_conflict_model  # noqa: F401
 from app.modules.scan_docs import model as _scan_model  # noqa: F401
 from app.modules.settings import model as _settings_model  # noqa: F401
 from app.modules.spec_profile import model as _spec_profile_model  # noqa: F401

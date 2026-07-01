@@ -49,3 +49,32 @@ class ScanDocument(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    # ── Source tracking (change 2026-07-01-collaborative-workspace) ──
+    source_member_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    source_runtime_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("daemon_runtimes.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    source_synced_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    source_mtime: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    content_hash: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )

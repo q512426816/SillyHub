@@ -71,6 +71,15 @@ def _stub_reparse(monkeypatch):
 
     monkeypatch.setattr(ScanDocsService, "reparse", _fake_reparse)
 
+    # Stub the phase dispatcher added by 2026-07-01-changes-align-sillyspec so
+    # neither scan_docs nor change reparse hits the real workspace table.
+    from app.modules.spec_workspace.service import SpecWorkspaceService
+
+    async def _fake_phase(self, workspace_id, spec_ws, phase):
+        return 1
+
+    monkeypatch.setattr(SpecWorkspaceService, "_reparse_phase", _fake_phase)
+
 
 @pytest.mark.asyncio
 async def test_apply_sync_receives_runtime_and_stamps_sync(tmp_path, db_session):
@@ -93,12 +102,13 @@ async def test_apply_sync_receives_runtime_and_stamps_sync(tmp_path, db_session)
     svc = SpecWorkspaceService(db_session)
     reparsed = await svc.apply_sync(workspace_id, tar_bytes)
 
-    assert reparsed == 1
+    assert reparsed["reparsed_docs"] == 1
     # Spec tree overwritten.
     assert (spec_root / "docs" / "index.md").read_text(encoding="utf-8") == "# hello"
-    # .runtime comes from the tar (whole-tree overwrite, D-003@v1).
+    # .runtime comes from the tar (file-level merge preserves other members' docs).
     assert (spec_root / ".runtime" / "state.json").read_text(encoding="utf-8") == '{"v":2}'
-    assert not (spec_root / ".runtime" / "stale.txt").exists()
+    # stale.txt was in spec_root but not in staging tar — preserved (D-006@v2).
+    assert (spec_root / ".runtime" / "stale.txt").exists()
 
     spec_ws = await svc.get(workspace_id)
     assert spec_ws.sync_status == "clean"

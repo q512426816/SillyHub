@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import io
 import json
 import shutil
@@ -587,13 +588,86 @@ class SpecWorkspaceService:
                     ) from None
 
             tf.extractall(staging, filter="fully_trusted")
-            for child in spec_root.iterdir():
-                if child.is_dir():
-                    shutil.rmtree(child)
+
+            # 3. Per-file merge (D-006@v2): walk staging files, compare content_hash
+            # / source_mtime against existing scan_documents.  Files in spec_root
+            # but NOT in staging are kept (preserve other members' exclusive docs).
+            from app.modules.scan_docs.conflict_service import ScanDocConflictService
+            from app.modules.scan_docs.model import ScanDocument
+
+            conflict_svc = ScanDocConflictService(self._session)
+            now = datetime.now(UTC)
+            for m in tf.getmembers():
+                if not m.isfile():
+                    continue
+                rel_path = m.name.replace("\\", "/")
+                src_file = staging / m.name
+                target = spec_root / rel_path
+                target.parent.mkdir(parents=True, exist_ok=True)
+
+                content = src_file.read_bytes()
+                ch = hashlib.sha256(content).hexdigest()
+                src_mtime = datetime.fromtimestamp(m.mtime, tz=UTC) if m.mtime > 0 else None
+
+                cur = (
+                    (
+                        await self._session.execute(
+                            select(ScanDocument)
+                            .where(
+                                ScanDocument.workspace_id == workspace_id,
+                                ScanDocument.path == rel_path,
+                            )
+                            .limit(1)
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
+
+                if cur:
+                    if cur.content_hash == ch:
+                        continue
+                    # Normalize naive datetimes (SQLite returns naive) to UTC-aware.
+                    cur_raw = cur.source_mtime
+                    if cur_raw is not None and cur_raw.tzinfo is None:
+                        cur_raw = cur_raw.replace(tzinfo=UTC)
+                    cur_mtime = cur_raw or datetime.min.replace(tz=UTC)
+                    inc_raw = src_mtime
+                    if inc_raw is not None and inc_raw.tzinfo is None:
+                        inc_raw = inc_raw.replace(tzinfo=UTC)
+                    inc_mtime = inc_raw or datetime.min.replace(tz=UTC)
+                    if inc_mtime > cur_mtime:
+                        await conflict_svc.archive_conflict(
+                            workspace_id,
+                            rel_path,
+                            old_content=cur.content,
+                            old_source_member_id=cur.source_member_id,
+                            old_source_runtime_id=cur.source_runtime_id,
+                            old_mtime=cur.source_mtime,
+                            new_source_member_id=None,
+                            new_mtime=src_mtime,
+                        )
+                        cur.content = content.decode("utf-8", errors="replace")
+                        cur.content_hash = ch
+                        cur.source_mtime = src_mtime
+                        cur.source_synced_at = now
+                        cur.last_modified_at = src_mtime or now
+                        shutil.move(str(src_file), str(target))
                 else:
-                    child.unlink()
-            for child in staging.iterdir():
-                shutil.move(str(child), str(spec_root / child.name))
+                    doc = ScanDocument(
+                        workspace_id=workspace_id,
+                        path=rel_path,
+                        doc_type=rel_path.rsplit(".", 1)[-1] if "." in rel_path else "md",
+                        title=rel_path.rsplit("/", 1)[-1] if "/" in rel_path else rel_path,
+                        content=content.decode("utf-8", errors="replace"),
+                        content_hash=ch,
+                        source_mtime=src_mtime,
+                        source_synced_at=now,
+                        source_member_id=None,
+                        exists=True,
+                    )
+                    self._session.add(doc)
+                    shutil.move(str(src_file), str(target))
         finally:
             tf.close()
             shutil.rmtree(staging, ignore_errors=True)

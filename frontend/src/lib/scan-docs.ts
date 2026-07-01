@@ -7,6 +7,11 @@ export type ScanDocSummary = {
   title: string | null;
   exists: boolean;
   last_modified_at: string | null;
+  source_member_id: string | null;
+  source_synced_at: string | null;
+  source_mtime: string | null;
+  content_hash: string | null;
+  conflict_count: number;
 };
 
 export type ScanDocRead = {
@@ -17,6 +22,11 @@ export type ScanDocRead = {
   exists: boolean;
   content: string | null;
   last_modified_at: string | null;
+  source_member_id: string | null;
+  source_synced_at: string | null;
+  source_mtime: string | null;
+  content_hash: string | null;
+  conflict_count: number;
 };
 
 export type ScanDocList = {
@@ -44,6 +54,21 @@ export type ScanDocReparseResponse = {
   warnings: ScanDocWarning[];
 };
 
+/**
+ * Stale threshold in ms (default 1h). Override via env var.
+ */
+export const STALE_THRESHOLD_MS = Number(
+  process.env.NEXT_PUBLIC_SCAN_DOC_STALE_MS ?? 60 * 60 * 1000,
+);
+
+export type ConflictHistoryItem = {
+  id: string;
+  old_content: string | null;
+  old_source_member_id: string | null;
+  old_mtime: string | null;
+  created_at: string;
+};
+
 export function listScanDocs(workspaceId: string, query?: { q?: string }) {
   const qs = query?.q ? `?q=${encodeURIComponent(query.q)}` : "";
   return apiFetch<ScanDocList>(
@@ -64,5 +89,14 @@ export function reparseScanDocs(workspaceId: string) {
   return apiFetch<ScanDocReparseResponse>(
     `/api/workspaces/${workspaceId}/scan-docs/reparse`,
     { method: "POST" },
+  );
+}
+
+export function listDocConflicts(
+  workspaceId: string,
+  docId: string,
+) {
+  return apiFetch<{ items: ConflictHistoryItem[] }>(
+    `/api/workspaces/${workspaceId}/scan-docs/${docId}/conflicts`,
   );
 }

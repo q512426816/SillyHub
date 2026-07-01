@@ -15,6 +15,7 @@ import {
   listScanDocs,
   reparseScanDocs,
   getScanDoc,
+  STALE_THRESHOLD_MS,
   type ScanDocSummary,
   type ScanDocReparseResponse,
   type ScanDocRead,
@@ -70,7 +71,19 @@ function TreeView({ nodes, workspaceId, onSelect, selectedDoc, depth = 0 }: {
           >
             <FileIcon />
             <span className="truncate">{doc.title ?? node.name}</span>
-            <Badge variant={doc.exists ? "success" : "outline"} className="ml-auto text-[10px] px-1.5">{doc.doc_type}</Badge>
+            <span className="ml-auto flex items-center gap-1">
+              {doc.source_member_id && (
+                <Badge variant="info" className="text-[10px] px-1.5">
+                  👤 {doc.source_member_id.slice(0, 8)}
+                </Badge>
+              )}
+              {doc.conflict_count > 0 && (
+                <Badge variant="destructive" className="text-[10px] px-1.5">
+                  ⚠ 冲突{doc.conflict_count}
+                </Badge>
+              )}
+              <Badge variant={doc.exists ? "success" : "outline"} className="text-[10px] px-1.5">{doc.doc_type}</Badge>
+            </span>
           </button>
         );
       })}

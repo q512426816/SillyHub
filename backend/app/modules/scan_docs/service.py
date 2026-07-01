@@ -6,7 +6,9 @@ from the DB; reparse re-reads the filesystem and reconciles rows.
 
 from __future__ import annotations
 
+import hashlib
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import func, or_, select
@@ -171,6 +173,10 @@ class ScanDocsService:
         parsed_doc: ParsedDoc,
         *,
         workspace_id: uuid.UUID,
+        content_hash: str | None = None,
+        source_synced_at: datetime | None = None,
+        source_member_id: uuid.UUID | None = None,
+        source_runtime_id: uuid.UUID | None = None,
     ) -> ScanDocument:
         return ScanDocument(
             id=uuid.uuid4(),
@@ -181,6 +187,11 @@ class ScanDocsService:
             exists=parsed_doc.exists,
             content=parsed_doc.content,
             last_modified_at=parsed_doc.last_modified_at,
+            content_hash=content_hash
+            or hashlib.sha256((parsed_doc.content or "").encode("utf-8")).hexdigest(),
+            source_synced_at=source_synced_at,
+            source_member_id=source_member_id,
+            source_runtime_id=source_runtime_id,
         )
 
     @staticmethod
@@ -194,3 +205,8 @@ class ScanDocsService:
         row.exists = parsed_doc.exists
         row.content = parsed_doc.content
         row.last_modified_at = parsed_doc.last_modified_at
+        # Preserve/update source tracking columns (task-07).
+        new_hash = hashlib.sha256((parsed_doc.content or "").encode("utf-8")).hexdigest()
+        if row.content_hash is None:
+            row.content_hash = new_hash
+            row.source_synced_at = datetime.now(UTC)

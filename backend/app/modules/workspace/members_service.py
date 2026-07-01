@@ -24,12 +24,13 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.core.errors import WorkspaceNotFound
 from app.modules.auth.model import Role, User, UserWorkspaceRole
+from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
 from app.modules.workspace.model import Workspace
 from app.modules.workspace.schema import UserSearchHit, WorkspaceMemberView
 
@@ -382,6 +383,13 @@ async def remove_member(
 
     for row in existing_rows:
         await session.delete(row)
+    # task-09: cascade-clear the member's binding row (FR-008).
+    await session.execute(
+        delete(WorkspaceMemberRuntime).where(
+            col(WorkspaceMemberRuntime.workspace_id) == workspace_id,
+            col(WorkspaceMemberRuntime.user_id) == user_id,
+        )
+    )
     await session.commit()
 
 
