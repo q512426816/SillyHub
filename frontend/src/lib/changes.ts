@@ -334,8 +334,8 @@ export function transitionChange(
 /**
  * 提交反馈 — POST /api/workspaces/{wid}/changes/{cid}/feedback
  *
- * 在 technical_verification 或 business_review 阶段提交反馈。
- * 后端根据 category 自动决定返工目标阶段，并触发 rework_required 流转。
+ * 在 verify 阶段（pending_review=human_test）提交返工反馈。
+ * 后端根据 category 自动决定返工目标阶段（execute/brainstorm 等）。
  */
 export function submitFeedback(
   workspaceId: string,
