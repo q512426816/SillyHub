@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -38,14 +38,31 @@ class ScanDocsService:
 
     # -- Queries ---
 
-    async def list_(self, workspace_id: uuid.UUID) -> tuple[list[ScanDocument], int]:
+    async def list_(
+        self,
+        workspace_id: uuid.UUID,
+        *,
+        q: str | None = None,
+    ) -> tuple[list[ScanDocument], int]:
         await self._workspace_service.get(workspace_id)
         stmt = (
             select(ScanDocument)
             .where(col(ScanDocument.workspace_id) == workspace_id)
             .where(col(ScanDocument.exists).is_(True))
-            .order_by(col(ScanDocument.path).asc())
         )
+        if q:
+            # 跨方言（PG/SQLite）大小写不敏感搜索：func.lower() + like + escape。
+            # 转义用户输入中的通配符 %/_ 与转义符 \，避免被当作 LIKE 通配符。
+            escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{escaped.lower()}%"
+            stmt = stmt.where(
+                or_(
+                    func.lower(ScanDocument.path).like(pattern, escape="\\"),
+                    func.lower(ScanDocument.title).like(pattern, escape="\\"),
+                    func.lower(ScanDocument.content).like(pattern, escape="\\"),
+                )
+            )
+        stmt = stmt.order_by(col(ScanDocument.path).asc())
         items = list((await self._session.execute(stmt)).scalars().all())
         return items, len(items)
 

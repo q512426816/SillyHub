@@ -44,9 +44,10 @@ export type ScanDocReparseResponse = {
   warnings: ScanDocWarning[];
 };
 
-export function listScanDocs(workspaceId: string) {
+export function listScanDocs(workspaceId: string, query?: { q?: string }) {
+  const qs = query?.q ? `?q=${encodeURIComponent(query.q)}` : "";
   return apiFetch<ScanDocList>(
-    `/api/workspaces/${workspaceId}/scan-docs`,
+    `/api/workspaces/${workspaceId}/scan-docs${qs}`,
   );
 }
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,41 +19,9 @@ import {
   type ScanDocReparseResponse,
   type ScanDocRead,
 } from "@/lib/scan-docs";
+import { buildTree, type TreeNode } from "@/lib/scan-docs-tree";
 
 interface Props { params: { id: string }; }
-
-interface TreeNode {
-  name: string;
-  path: string;
-  doc?: ScanDocSummary;
-  children: TreeNode[];
-}
-
-function buildTree(docs: ScanDocSummary[]): TreeNode[] {
-  const root: TreeNode = { name: "", path: "", children: [] };
-  for (const doc of docs) {
-    const allParts = doc.path.split("/");
-    const parts = allParts.slice(2); // skip .sillyspec and docs
-    let current = root;
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i]!;
-      const isFile = i === parts.length - 1;
-      const existingChild = current.children.find((c) => c.name === part);
-      if (existingChild) { current = existingChild; }
-      else {
-        const newNode: TreeNode = { name: part, path: parts.slice(0, i + 1).join("/"), children: [] };
-        current.children.push(newNode); current = newNode;
-      }
-      if (isFile) { current.doc = doc; }
-    }
-  }
-  const sortNodes = (nodes: TreeNode[]): TreeNode[] => nodes.sort((a, b) => {
-    const af = a.doc !== undefined, bf = b.doc !== undefined;
-    if (af !== bf) return af ? 1 : -1;
-    return a.name.localeCompare(b.name);
-  }).map((n) => ({ ...n, children: sortNodes(n.children) }));
-  return sortNodes(root.children);
-}
 
 function FolderIcon({ open }: { open?: boolean }) {
   return open ? (
@@ -118,23 +86,47 @@ export default function ScanDocsPage({ params }: Props) {
   const [loading, setLoading] = useState(true);
   const [reparsing, setReparsing] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
 
-  const load = useCallback(async () => {
+  // 仅拉文档列表（可选关键词过滤 path/title/content）。搜索时不触发 reparse，保证响应快。
+  const fetchDocs = useCallback(async (q?: string) => {
     setLoading(true); setPageError(null);
     try {
-      // Auto-reparse to get latest from platform storage
-      await reparseScanDocs(workspaceId);
-      const resp = await listScanDocs(workspaceId);
+      const resp = await listScanDocs(workspaceId, q ? { q } : undefined);
       setDocs(resp.items);
     } catch (err) { setPageError(err instanceof ApiError ? err.message : "加载扫描文档失败"); }
     finally { setLoading(false); }
   }, [workspaceId]);
 
-  useEffect(() => { void load(); }, [load]);
+  // 首次进入：reparse 同步平台存储 + 拉全量。
+  const reparseAndLoad = useCallback(async () => {
+    setLoading(true); setPageError(null);
+    try {
+      await reparseScanDocs(workspaceId);
+      await fetchDocs();
+    } catch (err) { setPageError(err instanceof ApiError ? err.message : "加载扫描文档失败"); }
+    finally { setLoading(false); }
+  }, [workspaceId, fetchDocs]);
+
+  useEffect(() => { void reparseAndLoad(); }, [reparseAndLoad]);
+
+  // 搜索框输入 debounce 300ms → debouncedQ。
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(searchInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  // debouncedQ 变化触发过滤查询；跳过首次（首次由 reparseAndLoad 负责，避免重复请求）。
+  const skipFirstSearchRef = useRef(true);
+  useEffect(() => {
+    if (skipFirstSearchRef.current) { skipFirstSearchRef.current = false; return; }
+    void fetchDocs(debouncedQ || undefined);
+  }, [debouncedQ, fetchDocs]);
 
   const handleReparse = async () => {
     setReparsing(true); setPageError(null); setSelectedDoc(null);
-    try { const resp = await reparseScanDocs(workspaceId); setReparseResult(resp); await load(); }
+    try { const resp = await reparseScanDocs(workspaceId); setReparseResult(resp); await fetchDocs(debouncedQ || undefined); }
     catch (err) { setPageError(err instanceof ApiError ? err.message : "重新解析失败"); }
     finally { setReparsing(false); }
   };
@@ -185,15 +177,26 @@ export default function ScanDocsPage({ params }: Props) {
       {loading ? (
         <p className="py-12 text-center text-xs text-muted-foreground">加载中…</p>
       ) : docs.length === 0 ? (
-        <div className="py-12 text-center text-xs text-muted-foreground">暂无扫描文档。点击「重新扫描」从文件系统解析。</div>
+        <div className="py-12 text-center text-xs text-muted-foreground">
+          {debouncedQ ? `没有匹配「${debouncedQ}」的文档` : "暂无扫描文档。点击「重新扫描」从文件系统解析。"}
+        </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
           <SectionCard
             title="文档树"
             bodyPadding="p-2"
           >
-            <div className="max-h-[calc(100vh-220px)] overflow-auto">
-              <TreeView nodes={tree} workspaceId={workspaceId} onSelect={setSelectedDoc} selectedDoc={selectedDoc} />
+            <div className="space-y-2">
+              <input
+                type="text"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="搜索名称或内容"
+                className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+              <div className="max-h-[calc(100vh-260px)] overflow-auto">
+                <TreeView nodes={tree} workspaceId={workspaceId} onSelect={setSelectedDoc} selectedDoc={selectedDoc} />
+              </div>
             </div>
           </SectionCard>
           <SectionCard>

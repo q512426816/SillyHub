@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import require_permission
@@ -35,9 +35,13 @@ async def list_scan_docs(
     workspace_id: uuid.UUID,
     session: SessionDep,
     _user: Annotated[User, Depends(require_permission(Permission.SCAN_DOCS_READ))],
+    q: Annotated[
+        str | None,
+        Query(min_length=1, description="按 path/title/content 大小写不敏感搜索"),
+    ] = None,
 ) -> ScanDocList:
     service = ScanDocsService(session)
-    items, total = await service.list_(workspace_id)
+    items, total = await service.list_(workspace_id, q=q)
     return ScanDocList(
         items=[ScanDocSummary.model_validate(d) for d in items],
         total=total,

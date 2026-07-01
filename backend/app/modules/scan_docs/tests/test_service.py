@@ -120,6 +120,108 @@ class TestListDocsReturnsExisting:
         assert doc_types == {"ARCHITECTURE", "STRUCTURE"}
 
 
+class TestListDocsWithQuery:
+    """list_(q=) 按 path/title/content 大小写不敏感搜索，并转义 LIKE 通配符。"""
+
+    async def _make_doc(
+        self,
+        session: AsyncSession,
+        workspace_id: uuid.UUID,
+        *,
+        path: str,
+        title: str | None = None,
+        content: str | None = None,
+        doc_type: str = "OTHER",
+    ) -> ScanDocument:
+        doc = ScanDocument(
+            id=uuid.uuid4(),
+            workspace_id=workspace_id,
+            doc_type=doc_type,
+            path=path,
+            title=title,
+            exists=True,
+            content=content,
+        )
+        session.add(doc)
+        await session.commit()
+        return doc
+
+    async def test_q_none_returns_all(self, db_session: AsyncSession) -> None:
+        ws = await _create_workspace(db_session)
+        await self._make_doc(db_session, ws.id, path="docs/a/auth.md", title="Auth", content="c1")
+        await self._make_doc(db_session, ws.id, path="docs/a/core.md", title="Core", content="c2")
+        svc = ScanDocsService(db_session)
+        _items, total = await svc.list_(ws.id)
+        assert total == 2
+
+    async def test_q_matches_path(self, db_session: AsyncSession) -> None:
+        ws = await _create_workspace(db_session)
+        await self._make_doc(
+            db_session, ws.id, path="docs/silly/flows/auth.md", title="T", content="x"
+        )
+        await self._make_doc(
+            db_session, ws.id, path="docs/silly/modules/agent.md", title="T", content="x"
+        )
+        svc = ScanDocsService(db_session)
+        items, total = await svc.list_(ws.id, q="auth")
+        assert total == 1
+        assert "auth" in items[0].path
+
+    async def test_q_matches_title(self, db_session: AsyncSession) -> None:
+        ws = await _create_workspace(db_session)
+        await self._make_doc(
+            db_session, ws.id, path="docs/a/x.md", title="用户管理模块", content="x"
+        )
+        await self._make_doc(db_session, ws.id, path="docs/a/y.md", title="其他", content="x")
+        svc = ScanDocsService(db_session)
+        items, total = await svc.list_(ws.id, q="用户管理")
+        assert total == 1
+        assert items[0].title == "用户管理模块"
+
+    async def test_q_matches_content(self, db_session: AsyncSession) -> None:
+        ws = await _create_workspace(db_session)
+        await self._make_doc(
+            db_session,
+            ws.id,
+            path="docs/a/x.md",
+            title="T",
+            content="这里的正文包含 rareMarker123 标记",
+        )
+        await self._make_doc(db_session, ws.id, path="docs/a/y.md", title="T", content="无关内容")
+        svc = ScanDocsService(db_session)
+        items, total = await svc.list_(ws.id, q="rareMarker123")
+        assert total == 1
+        assert items[0].content is not None
+        assert "rareMarker123" in items[0].content
+
+    async def test_q_case_insensitive(self, db_session: AsyncSession) -> None:
+        ws = await _create_workspace(db_session)
+        await self._make_doc(db_session, ws.id, path="docs/a/AUTH.md", title="T", content="x")
+        svc = ScanDocsService(db_session)
+        _items, total = await svc.list_(ws.id, q="auth")
+        assert total == 1
+
+    async def test_q_no_match_returns_empty(self, db_session: AsyncSession) -> None:
+        ws = await _create_workspace(db_session)
+        await self._make_doc(
+            db_session, ws.id, path="docs/a/auth.md", title="Auth", content="content"
+        )
+        svc = ScanDocsService(db_session)
+        items, total = await svc.list_(ws.id, q="zzznotexist")
+        assert total == 0
+        assert items == []
+
+    async def test_q_escapes_like_wildcards(self, db_session: AsyncSession) -> None:
+        """q 含 % 应作为字面量搜索，而非匹配全部（验证转义生效）。"""
+        ws = await _create_workspace(db_session)
+        await self._make_doc(
+            db_session, ws.id, path="docs/a/auth.md", title="Auth", content="content"
+        )
+        svc = ScanDocsService(db_session)
+        _items, total = await svc.list_(ws.id, q="%")
+        assert total == 0  # 字面 % 不出现在任何文档，转义后不会通配匹配全部
+
+
 # ── get() ────────────────────────────────────────────────────────────────
 
 
