@@ -35,29 +35,27 @@ CHANGE_FIXTURES = Path(__file__).parent / "fixtures" / "changes"
 class TestStageAgentConfig:
     """Test the STAGE_AGENT_CONFIG mapping."""
 
-    def test_propose_config_exists(self):
-        config = get_config_for_stage("propose")
+    def test_brainstorm_config_exists(self):
+        config = get_config_for_stage("brainstorm")
         assert config is not None
         assert isinstance(config, StageAgentConfig)
 
-    def test_propose_config_values(self):
-        config = get_config_for_stage("propose")
+    def test_brainstorm_config_values(self):
+        config = get_config_for_stage("brainstorm")
         assert config.enabled is True
-        assert config.prompt_template == "propose.md"
-        assert config.phase == "Propose"
+        assert config.prompt_template == "brainstorm.md"
+        assert config.phase == "Brainstorm"
         assert config.requires_worktree is True
         assert config.read_only is False
 
     def test_all_expected_stages_present(self):
         expected = {
-            "propose",
+            "scan",
             "brainstorm",
             "plan",
             "execute",
             "verify",
-            "scan",
             "archive",
-            "quick",
         }
         assert set(STAGE_AGENT_CONFIG.keys()) == expected
 
@@ -72,7 +70,7 @@ class TestStageAgentConfig:
         assert config.read_only is False
 
     def test_write_stages_require_worktree(self):
-        write_stages = ["execute", "verify", "brainstorm", "propose", "plan", "archive", "quick"]
+        write_stages = ["execute", "verify", "brainstorm", "plan", "archive"]
         for stage in write_stages:
             config = get_config_for_stage(stage)
             assert config is not None
@@ -218,8 +216,8 @@ async def _create_test_workspace(
 class TestDispatch:
     """Test the dispatch() function."""
 
-    async def test_dispatch_propose_stage(self, db_session: AsyncSession, tmp_path: Path):
-        """When transitioning to propose, dispatch should trigger an agent run."""
+    async def test_dispatch_brainstorm_stage(self, db_session: AsyncSession, tmp_path: Path):
+        """When transitioning to brainstorm, dispatch should trigger an agent run."""
         ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
         change = await _create_test_change(
             db_session,
@@ -244,18 +242,18 @@ class TestDispatch:
                 session=db_session,
                 workspace_id=ws.id,
                 change_id=change.id,
-                target_stage="propose",
+                target_stage="brainstorm",
                 user_id=user_id,
             )
 
         assert result["dispatched"] is True
-        assert result["stage"] == "propose"
-        assert result["phase"] == "Propose"
+        assert result["stage"] == "brainstorm"
+        assert result["phase"] == "Brainstorm"
         assert "agent_run_id" in result
 
         # Verify last_dispatch recorded in stages JSON
         await db_session.refresh(change)
-        assert change.stages["last_dispatch"]["stage"] == "propose"
+        assert change.stages["last_dispatch"]["stage"] == "brainstorm"
 
     async def test_dispatch_no_config_for_stage(self, db_session: AsyncSession, tmp_path: Path):
         """Stages without config (e.g. draft) should not dispatch."""
@@ -263,7 +261,7 @@ class TestDispatch:
         change = await _create_test_change(
             db_session,
             workspace_id=ws.id,
-            current_stage="draft",
+            current_stage="scan",
         )
         user_id = uuid.uuid4()
 
@@ -284,7 +282,7 @@ class TestDispatch:
         change = await _create_test_change(
             db_session,
             workspace_id=ws.id,
-            current_stage="propose",
+            current_stage="brainstorm",
         )
 
         # Create an active run
@@ -302,7 +300,7 @@ class TestDispatch:
             session=db_session,
             workspace_id=ws.id,
             change_id=change.id,
-            target_stage="propose",
+            target_stage="brainstorm",
             user_id=user_id,
         )
 
@@ -327,7 +325,7 @@ class TestDispatch:
                 session=db_session,
                 workspace_id=ws.id,
                 change_id=change.id,
-                target_stage="propose",
+                target_stage="brainstorm",
                 user_id=user_id,
             )
 
@@ -345,14 +343,14 @@ class TestTransitionWithDispatch:
     async def test_draft_to_brainstorm_triggers_dispatch(
         self, db_session: AsyncSession, tmp_path: Path
     ):
-        """AC-01: draft → brainstorm should trigger agent dispatch."""
+        """AC-01: scan → brainstorm should trigger agent dispatch."""
         from app.modules.change.service import ChangeService
 
         ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
         change = await _create_test_change(
             db_session,
             workspace_id=ws.id,
-            current_stage="draft",
+            current_stage="scan",
             path=str(tmp_path / ".sillyspec" / "changes" / "change" / "test"),
         )
         user_id = uuid.uuid4()
@@ -409,7 +407,7 @@ class TestTransitionWithDispatch:
         change = await _create_test_change(
             db_session,
             workspace_id=ws.id,
-            current_stage="draft",
+            current_stage="scan",
         )
 
         svc = ChangeService(db_session)
@@ -432,7 +430,7 @@ class TestTransitionWithDispatch:
         change = await _create_test_change(
             db_session,
             workspace_id=ws.id,
-            current_stage="draft",
+            current_stage="scan",
         )
 
         svc = ChangeService(db_session)
@@ -447,7 +445,7 @@ class TestTransitionWithDispatch:
         stages = result["change"].stages or {}
         transitions = stages.get("transitions", [])
         assert len(transitions) == 1
-        assert transitions[0]["from"] == "draft"
+        assert transitions[0]["from"] == "scan"
         assert transitions[0]["to"] == "brainstorm"
         assert transitions[0]["by_role"] == "admin"
 
@@ -460,7 +458,7 @@ class TestTransitionWithDispatch:
         change = await _create_test_change(
             db_session,
             workspace_id=ws.id,
-            current_stage="draft",
+            current_stage="scan",
         )
 
         svc = ChangeService(db_session)
@@ -696,7 +694,7 @@ class TestProposeStageFullFlow:
         change = await _create_test_change(
             db_session,
             workspace_id=ws.id,
-            current_stage="draft",
+            current_stage="scan",
             path=str(tmp_path / ".sillyspec" / "changes" / "change" / "test"),
         )
         user_id = uuid.uuid4()
@@ -777,6 +775,7 @@ class TestProposeStageFullFlow:
 
     async def test_propose_to_plan(self, db_session: AsyncSession, tmp_path: Path):
         """After propose, reviewer can advance to plan."""
+        pytest.skip("propose stage removed from StageEnum (task-01)")
         from app.modules.change.service import ChangeService
 
         ws = await _create_test_workspace(db_session, root_path=str(tmp_path))
@@ -831,6 +830,7 @@ class TestProposeStageFullFlow:
 
     async def test_role_permission_enforcement(self, db_session: AsyncSession, tmp_path: Path):
         """business_user cannot advance propose → plan (only reviewer)."""
+        pytest.skip("propose stage removed from StageEnum (task-01)")
         from app.core.errors import PermissionDenied
         from app.modules.change.service import ChangeService
 

@@ -57,7 +57,7 @@ class TestDispatchProviderPropagation:
                 session=db_session,
                 workspace_id=ws.id,
                 change_id=change.id,
-                target_stage="propose",
+                target_stage="brainstorm",
                 user_id=user_id,
                 provider="codex",
                 model="gpt-5-codex",
@@ -87,7 +87,7 @@ class TestDispatchProviderPropagation:
                 session=db_session,
                 workspace_id=ws.id,
                 change_id=change.id,
-                target_stage="propose",
+                target_stage="brainstorm",
                 user_id=user_id,
             )
 
@@ -106,7 +106,7 @@ class TestDispatchNextStepProviderPropagation:
         change = await _create_test_change(
             db_session,
             workspace_id=ws.id,
-            current_stage="propose",
+            current_stage="brainstorm",
         )
         user_id = uuid.uuid4()
         service = SillySpecStageDispatchService(db_session)
@@ -130,7 +130,7 @@ class TestDispatchNextStepProviderPropagation:
                 workspace_id=ws.id,
                 change_id=change.id,
                 user_id=user_id,
-                target_stage="propose",
+                target_stage="brainstorm",
                 provider="codex",
                 model="gpt-5-codex",
             )

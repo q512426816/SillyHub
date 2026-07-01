@@ -1,73 +1,69 @@
-"""Tests for human_gate transitions and resolve_human_gate."""
+"""Tests for stage model alignment — StageEnum, TRANSITIONS, new status enums."""
 
-import pytest
-
-from app.modules.change.model import TRANSITIONS, HumanGate, StageEnum
-from app.modules.change.service import resolve_human_gate
-
-
-class TestHumanGateEnum:
-    def test_all_values(self):
-        expected = {
-            "none",
-            "need_requirement_input",
-            "need_proposal_review",
-            "need_plan_review",
-            "need_human_test",
-            "need_archive_confirm",
-            "blocked",
-        }
-        assert {g.value for g in HumanGate} == expected
+from app.modules.change.model import (
+    TRANSITIONS,
+    ChangeStatus,
+    StageEnum,
+    StageStatus,
+    StepStatus,
+    can_transition,
+)
 
 
-class TestResolveHumanGate:
-    """AD-01: resolve_human_gate always returns none after task-01."""
+class TestStageEnumAligned:
+    """StageEnum now matches sillyspec STAGE_ORDER exactly."""
 
-    @pytest.mark.parametrize(
-        "stage",
-        [
+    def test_spec_stages_order(self):
+        assert [s.value for s in StageEnum.spec_stages()] == [
+            "scan",
             "brainstorm",
-            "propose",
             "plan",
+            "execute",
             "verify",
             "archive",
-            "execute",
-            "quick",
-            "scan",
-            "draft",
-            "unknown_stage",
-        ],
-    )
-    def test_always_returns_none(self, stage):
-        assert resolve_human_gate(stage) == HumanGate.NONE
+        ]
+
+    def test_no_hub_stages(self):
+        assert not hasattr(StageEnum, "hub_stages")
+
+    def test_no_all_stages(self):
+        assert not hasattr(StageEnum, "all_stages")
 
 
-class TestTransitionsTable:
-    def test_no_legacy_enum_members(self):
-        member_names = {m.name for m in StageEnum}
-        assert "REWORK_REQUIRED" not in member_names
-        assert "ACCEPTED" not in member_names
+class TestNewStatusEnums:
+    def test_change_status_values(self):
+        assert ChangeStatus.ACTIVE.value == "active"
+        assert ChangeStatus.ARCHIVED.value == "archived"
 
-    def test_verify_exits(self):
-        verify_targets = set(TRANSITIONS[StageEnum.VERIFY].keys())
-        assert verify_targets == {
-            StageEnum.QUICK,
-            StageEnum.ARCHIVE,
-            StageEnum.BLOCKED,
-            StageEnum.PROPOSE,
-        }
+    def test_stage_status_values(self):
+        assert StageStatus.PENDING.value == "pending"
+        assert StageStatus.IN_PROGRESS.value == "in-progress"
+        assert StageStatus.COMPLETED.value == "completed"
+        assert StageStatus.BLOCKED.value == "blocked"
 
-    def test_quick_exits(self):
-        quick_targets = set(TRANSITIONS[StageEnum.QUICK].keys())
-        assert quick_targets == {StageEnum.VERIFY, StageEnum.BLOCKED}
+    def test_step_status_has_waiting(self):
+        assert StepStatus.WAITING.value == "waiting"
 
-    def test_blocked_exits(self):
-        blocked_targets = set(TRANSITIONS[StageEnum.BLOCKED].keys())
-        assert blocked_targets == {StageEnum.PROPOSE, StageEnum.PLAN, StageEnum.EXECUTE}
 
-    def test_archived_is_terminal(self):
-        assert TRANSITIONS[StageEnum.ARCHIVED] == {}
+class TestTransitionsMainline:
+    """TRANSITIONS now only contains the 5 mainline edges from stage-contract."""
 
-    def test_draft_exits(self):
-        draft_targets = set(TRANSITIONS[StageEnum.DRAFT].keys())
-        assert draft_targets == {StageEnum.BRAINSTORM, StageEnum.SCAN}
+    def test_mainline(self):
+        assert StageEnum.BRAINSTORM in dict(TRANSITIONS[StageEnum.SCAN])
+        assert StageEnum.PLAN in dict(TRANSITIONS[StageEnum.BRAINSTORM])
+        assert StageEnum.EXECUTE in dict(TRANSITIONS[StageEnum.PLAN])
+        assert StageEnum.VERIFY in dict(TRANSITIONS[StageEnum.EXECUTE])
+        assert StageEnum.ARCHIVE in dict(TRANSITIONS[StageEnum.VERIFY])
+
+    def test_no_deprecated_stages(self):
+        for src in TRANSITIONS:
+            assert src.value not in ("propose", "quick", "draft")
+
+    def test_verify_only_archive(self):
+        assert set(TRANSITIONS[StageEnum.VERIFY].keys()) == {StageEnum.ARCHIVE}
+
+    def test_can_transition_works(self):
+        assert can_transition(StageEnum.SCAN, StageEnum.BRAINSTORM)
+        assert can_transition(StageEnum.BRAINSTORM, StageEnum.PLAN)
+        assert not can_transition(StageEnum.BRAINSTORM, StageEnum.EXECUTE)
+        assert not can_transition(StageEnum.SCAN, StageEnum.ARCHIVE)

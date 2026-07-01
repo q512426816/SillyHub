@@ -10,13 +10,15 @@ created_at: 2026-05-27
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
+import json
 import shutil
 import tarfile
 import tempfile
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -300,6 +302,145 @@ class SpecWorkspaceService:
         )
         return spec_ws
 
+    async def import_from_repo_sse(
+        self,
+        workspace_id: uuid.UUID,
+        *,
+        runtime_id: uuid.UUID | None = None,
+        root_path: str | None = None,
+    ) -> AsyncIterator[str]:
+        """SSE event generator for import（D-001 流式，2026-07-01-spec-import-...）。
+
+        Yields SSE 事件：``packing`` → ``packed`` → ``applying`` → ``reparsing_docs``
+        → ``reparsing_changes`` → ``done``。daemon 离线/超时/remote 错误 → ``error`` 事件
+        （透传 ql-001 错误码）+ return（流正常关闭）。``packing`` 阶段（daemon 打包 ~16.8s）
+        每 5s yield ``: keepalive`` 注释行，防 Next.js rewrite proxy idle timeout。
+
+        与 ``import_from_repo`` 共用前置（workspace 解析 / RPC / 打包）+ 落盘 reparse
+        （``_write_spec_root`` + ``_reparse_phase``），但把 apply_sync 拆成可分阶段 yield。
+        """
+
+        def _evt(event: str, **data: object) -> str:
+            return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+        from app.modules.workspace.model import Workspace
+
+        spec_ws = await self.get(workspace_id)
+        ws = await self._session.get(Workspace, workspace_id)
+        if ws is None:
+            yield _evt(
+                "error", code="HTTP_404_SPEC_WORKSPACE_NOT_FOUND", message="workspace not found"
+            )
+            return
+        ws_root_path = root_path or ws.root_path or ""
+        ws_path_source = ws.path_source or "server-local"
+        ws_runtime_id = runtime_id or ws.daemon_runtime_id
+        if not ws_root_path:
+            yield _evt("error", code="SPEC_IMPORT_NO_ROOT_PATH", message="no root_path")
+            return
+
+        tar_bytes: bytes
+        if ws_path_source == "daemon-client" and ws_runtime_id:
+            from app.modules.daemon.runtime.service import (
+                DaemonRpcConflict,
+                DaemonRpcForbiddenError,
+                DaemonRpcRemoteError,
+                DaemonRpcRemoteGatewayError,
+                DaemonRpcTimeout,
+                DaemonRuntimeOffline,
+            )
+            from app.modules.daemon.ws_hub import get_daemon_ws_hub
+            from app.modules.workspace.service import resolve_root_path_for_daemon
+
+            yield _evt("packing", phase="packing")
+            hub = get_daemon_ws_hub()
+            daemon_root = resolve_root_path_for_daemon(ws_root_path, ws_path_source)
+            rpc_task = asyncio.ensure_future(
+                hub.send_rpc(
+                    ws_runtime_id,
+                    "get_spec_bundle",
+                    {"root_path": daemon_root},
+                    timeout=60.0,
+                )
+            )
+            # 心跳：每 5s 未完成就 yield keepalive，防止 proxy idle timeout 断连。
+            while True:
+                done, _ = await asyncio.wait({rpc_task}, timeout=5.0)
+                if done:
+                    break
+                yield ": keepalive\n\n"
+            try:
+                result = rpc_task.result()
+            except (DaemonRuntimeOffline, DaemonRpcTimeout, DaemonRpcConflict) as e:
+                yield _evt(
+                    "error",
+                    code=getattr(e, "code", "HTTP_504_DAEMON_RUNTIME_OFFLINE"),
+                    message=getattr(e, "message", str(e)),
+                )
+                return
+            except DaemonRpcRemoteError as exc:
+                code = (
+                    DaemonRpcForbiddenError.code
+                    if exc.code == "forbidden"
+                    else DaemonRpcRemoteGatewayError.code
+                )
+                yield _evt("error", code=code, message=f"Daemon get_spec_bundle: {exc.message}")
+                return
+            except Exception as exc:
+                yield _evt("error", code="SPEC_IMPORT_RPC_FAILED", message=str(exc))
+                return
+            tar_b64 = result.get("tar_base64", "") if isinstance(result, dict) else ""
+            if not tar_b64:
+                yield _evt("error", code="SPEC_IMPORT_EMPTY_BUNDLE", message="empty bundle")
+                return
+            tar_bytes = base64.b64decode(tar_b64)
+            yield _evt("packed", phase="packed", tar_bytes=len(tar_bytes))
+        else:
+            from app.modules.workspace.service import resolve_root_path_for_server
+
+            yield _evt("packing", phase="packing")
+            server_path = resolve_root_path_for_server(ws_root_path, ws_path_source)
+            if server_path is None:
+                yield _evt(
+                    "error",
+                    code="SPEC_IMPORT_PATH_UNRESOLVED",
+                    message="cannot resolve server path",
+                )
+                return
+            spec_source = Path(server_path) / ".sillyspec"
+            if not spec_source.is_dir():
+                yield _evt(
+                    "error",
+                    code="SPEC_IMPORT_NO_SILLYSPEC_DIR",
+                    message=f"no .sillyspec at {spec_source}",
+                )
+                return
+            buf = io.BytesIO()
+            with tarfile.open(fileobj=buf, mode="w") as tar:
+                for path in sorted(spec_source.rglob("*")):
+                    rel = path.relative_to(spec_source)
+                    if any(part == ".runtime" for part in rel.parts):
+                        continue
+                    tar.add(str(path), arcname=str(rel), recursive=False)
+            tar_bytes = buf.getvalue()
+            yield _evt("packed", phase="packed", tar_bytes=len(tar_bytes))
+
+        # 落盘 + 两阶段 reparse（D-003 各自容错；_reparse_phase 失败已设 dirty 不抛）
+        yield _evt("applying", phase="applying")
+        spec_ws = await self._write_spec_root(workspace_id, tar_bytes)
+        yield _evt("reparsing_docs", phase="reparsing_docs")
+        docs = await self._reparse_phase(workspace_id, spec_ws, "scan_docs")
+        yield _evt("reparsing_docs", phase="reparsing_docs", parsed=docs)
+        yield _evt("reparsing_changes", phase="reparsing_changes")
+        changes = await self._reparse_phase(workspace_id, spec_ws, "change")
+        yield _evt("reparsing_changes", phase="reparsing_changes", parsed=changes)
+        yield _evt(
+            "done",
+            phase="done",
+            spec_workspace_id=str(spec_ws.id),
+            sync_status=spec_ws.sync_status,
+        )
+
     async def sync(self, workspace_id: uuid.UUID) -> SpecWorkspace:
         """Synchronise the platform spec workspace with the repo ``.sillyspec``
         directory.
@@ -405,33 +546,23 @@ class SpecWorkspaceService:
 
         return spec_root_abs, _stream()
 
-    async def apply_sync(
+    async def _write_spec_root(
         self,
         workspace_id: uuid.UUID,
         tar_bytes: bytes,
-    ) -> int:
-        """Overwrite the server ``spec_root`` with the uploaded tar, then reparse.
+    ) -> SpecWorkspace:
+        """Validate + overwrite spec_root with tar (D-006 whole-tree), commit clean.
 
-        D-006@v1: whole-tree overwrite, no diff/merge. 接收 tar 内 daemon 的
-        ``.runtime/``（daemon 是 daemon-client 唯一 sillyspec 执行方，``.runtime``
-        权威）；随整树覆盖落盘，不再保留 backend 旧的 ``.runtime``。
-
-        D-003@v1 非对称契约：push（本方法）包含 ``.runtime/``、pull（``build_bundle``）
-        仍排除 ``.runtime/``。Returns the ``reparse`` ``parsed`` count.
-
-        Rollback (D-005@v1, 2026-06-23-spec-transport-tar-sync): tar 模式出问题时，
-        清空 ``SPEC_TRANSPORT`` 回退 shared 默认 + 重新 scan 即可；数据可清，无迁移逻辑。
-        本方法对 shared/tar 两种 transport 均适用（端点 ``/spec-workspace/sync`` 权限
-        WORKSPACE_WRITE 不读 strategy，platform-managed/repo-* 天然放行）。
+        D-001（2026-07-01-spec-import-async-and-change-reparse）：从 apply_sync 提取，
+        供 apply_sync（sync 端点）与 import_from_repo_sse（import SSE）共用——SSE 需在
+        写盘 / reparse_docs / reparse_changes 之间分阶段 yield 事件。Returns refreshed
+        spec_ws（sync_status=clean，尚未 reparse）。
         """
         spec_ws = await self.get(workspace_id)
         spec_root = Path(spec_ws.spec_root)
         spec_root.mkdir(parents=True, exist_ok=True)
         spec_root_resolved = spec_root.resolve()
 
-        # 1. Open + fully validate every member BEFORE touching disk.
-        # tf is used across the try/finally below; closing in finally is
-        # equivalent to a with-block.
         try:
             tf = tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*")  # noqa: SIM115
         except tarfile.TarError as e:
@@ -441,13 +572,11 @@ class SpecWorkspaceService:
         try:
             for m in tf.getmembers():
                 name = m.name.replace("\\", "/")
-                # Reject absolute paths and Windows drive letters.
                 if name.startswith("/") or (len(name) > 1 and name[1] == ":"):
                     raise _spec_bundle_invalid(
                         "Absolute path in tar is not allowed.",
                         member=m.name,
                     )
-                # Reject anything that resolves outside spec_root (Zip/Tar Slip).
                 target = (spec_root / name).resolve()
                 try:
                     target.relative_to(spec_root_resolved)
@@ -457,55 +586,76 @@ class SpecWorkspaceService:
                         member=m.name,
                     ) from None
 
-            # 2. Materialise the new tree into staging first; only once that
-            # succeeds do we clear the old spec_root (atomic-ish swap).
-            # filter="fully_trusted" is safe here because every member path has
-            # already been validated to stay inside spec_root above.
             tf.extractall(staging, filter="fully_trusted")
-
-            # Clear old spec_root (whole-tree overwrite, D-006@v1).
             for child in spec_root.iterdir():
                 if child.is_dir():
                     shutil.rmtree(child)
                 else:
                     child.unlink()
-
-            # Move new tree in (daemon tar 内的 .runtime/ 随整树覆盖落盘, D-003@v1).
             for child in staging.iterdir():
                 shutil.move(str(child), str(spec_root / child.name))
         finally:
             tf.close()
             shutil.rmtree(staging, ignore_errors=True)
 
-        # 3. Stamp sync_status clean + reparse. Reparse failures leave the file
-        # overwrite in place (files are the source of truth) but flip
-        # sync_status back to dirty so the UI shows a refresh is needed.
         now = datetime.now(UTC)
         spec_ws.sync_status = "clean"
         spec_ws.last_synced_at = now
         spec_ws.updated_at = now
         await self._session.commit()
+        return spec_ws
 
-        from app.modules.scan_docs.service import ScanDocsService
+    async def apply_sync(
+        self,
+        workspace_id: uuid.UUID,
+        tar_bytes: bytes,
+    ) -> dict[str, int]:
+        """Overwrite spec_root with tar, then reparse docs + changes (D-003).
 
-        scan_svc = ScanDocsService(self._session)
+        D-006 whole-tree overwrite. D-003 docs/changes 两阶段独立 try/except（单阶段
+        失败 dirty 不阻断另一阶段）。Returns ``{reparsed_docs, reparsed_changes}``。
+        """
+        spec_ws = await self._write_spec_root(workspace_id, tar_bytes)
+        reparsed_docs = await self._reparse_phase(workspace_id, spec_ws, "scan_docs")
+        reparsed_changes = await self._reparse_phase(workspace_id, spec_ws, "change")
+        log.info(
+            "spec_workspace.sync_applied",
+            workspace_id=str(workspace_id),
+            reparsed_docs=reparsed_docs,
+            reparsed_changes=reparsed_changes,
+        )
+        return {"reparsed_docs": reparsed_docs, "reparsed_changes": reparsed_changes}
+
+    async def _reparse_phase(
+        self,
+        workspace_id: uuid.UUID,
+        spec_ws: SpecWorkspace,
+        phase: str,
+    ) -> int:
+        """Run one reparse phase (scan_docs or change) with dirty-on-failure.
+
+        D-003: each phase is independent. On exception, flip sync_status to
+        dirty, log, and return 0 — the caller continues to the next phase
+        rather than aborting the whole import.
+        """
         try:
-            stats, _ = await scan_svc.reparse(workspace_id)
+            if phase == "scan_docs":
+                from app.modules.scan_docs.service import ScanDocsService
+
+                stats, _ = await ScanDocsService(self._session).reparse(workspace_id)
+            else:
+                from app.modules.change.service import ChangeService
+
+                stats, _ = await ChangeService(self._session).reparse(workspace_id)
         except Exception as e:
             log.warning(
-                "spec_workspace.sync_reparse_failed",
+                "spec_workspace.sync_reparse_phase_failed",
                 workspace_id=str(workspace_id),
+                phase=phase,
                 error=str(e),
             )
             spec_ws.sync_status = "dirty"
             spec_ws.updated_at = datetime.now(UTC)
             await self._session.commit()
-            raise
-
-        reparsed = int(stats.get("parsed", 0))
-        log.info(
-            "spec_workspace.sync_applied",
-            workspace_id=str(workspace_id),
-            reparsed=reparsed,
-        )
-        return reparsed
+            return 0
+        return int(stats.get("parsed", 0)) if stats else 0

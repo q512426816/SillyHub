@@ -20,7 +20,6 @@ import {
   getChangeDocumentContent,
   getChangeDocuments,
   rejectChange,
-  submitFeedback,
   checkArchiveGate,
   getAgentStatus,
   triggerDispatch,
@@ -33,53 +32,53 @@ import {
   type ChangeRead,
   type ArchiveGateResponse,
   type DispatchResponse,
-  type HumanGate,
-} from "@/lib/changes";
-import { SillySpecStepProgress, type StepInfo } from "@/components/sillyspec-step-progress";
-import { getTaskBoard, type TaskBoard } from "@/lib/tasks";
-import {
   listReviews,
   submitReview,
   transitionChange,
   type ReviewEntry,
-} from "@/lib/workflow";
+} from "@/lib/changes";
+import { SillySpecStepProgress, type StepInfo } from "@/components/sillyspec-step-progress";
+import { getTaskBoard, type TaskBoard } from "@/lib/tasks";
 
 interface Props {
   params: { id: string; cid: string };
 }
 
-// ── Workflow Stages (unified with SillySpec) ───────────────────────
+// ── Workflow Stages (主线 6 stage，对齐 design §5 Phase 4) ──────────
+// quick/blocked/archived 退化为 status 徽标（非线性节点），不进本数组。
+// 当 current_stage 为这三态时，WORKFLOW_STAGES.indexOf 返回 -1，
+// 步骤条早返回 null，由独立 STATUS_BADGE 徽标承载语义。
 const WORKFLOW_STAGES = [
-  "draft", "scan", "brainstorm", "propose", "plan",
-  "execute", "verify", "quick", "archive", "archived", "blocked",
+  "scan", "brainstorm", "plan", "execute", "verify", "archive",
 ] as const;
 
 const WORKFLOW_STAGE_LABELS: Record<string, string> = {
-  draft: "草稿", scan: "扫描", brainstorm: "需求分析",
-  propose: "提案", plan: "规划", execute: "执行",
-  verify: "验证", archive: "归档", quick: "快速修复",
-  archived: "已归档", blocked: "已阻塞",
+  scan: "扫描", brainstorm: "需求分析",
+  plan: "规划", execute: "执行",
+  verify: "验证", archive: "归档",
 };
 
 const WORKFLOW_STAGE_COLORS: Record<string, "success" | "outline" | "destructive" | "default" | "warning"> = {
-  draft: "outline", scan: "default", brainstorm: "warning",
-  propose: "warning", plan: "default", execute: "default",
-  verify: "warning", archive: "default", quick: "default",
-  archived: "success", blocked: "destructive",
+  scan: "default", brainstorm: "warning",
+  plan: "default", execute: "default",
+  verify: "warning", archive: "default",
 };
 
-// Gate panel config: what to show for each human_gate value
+// quick/blocked/archived 三态 status 徽标（非线性节点，独立呈现）
+const STATUS_BADGE: Record<string, { label: string; variant: "success" | "outline" | "destructive" | "default" | "warning" }> = {
+  quick: { label: "快速修复", variant: "default" },
+  blocked: { label: "已阻塞", variant: "destructive" },
+  archived: { label: "已归档", variant: "success" },
+};
+
+// Gate panel config: 由 change.pending_review 投影字段驱动（对齐 task-03 PendingReview 枚举）
+// 4 个面板分别对应 proposal_review / plan_review / human_test / archive_confirm。
 const GATE_PANELS: Record<string, {
   title: string;
   description: string;
   actions: { label: string; variant: "default" | "outline" | "destructive"; action: string }[];
 }> = {
-  need_requirement_input: {
-    title: "请补充需求",
-    description: "智能体分析后认为需求不够明确，请补充详细信息",
-    actions: [{ label: "重新分析需求", variant: "default", action: "redispatch_brainstorm" }],
-  },
-  need_proposal_review: {
+  proposal_review: {
     title: "四件套已生成，请确认",
     description: "智能体 已生成 proposal / requirements / design / tasks，请审阅后决定",
     actions: [
@@ -88,7 +87,7 @@ const GATE_PANELS: Record<string, {
       { label: "需求不明确", variant: "destructive", action: "proposal_unclear" },
     ],
   },
-  need_plan_review: {
+  plan_review: {
     title: "执行计划已生成，请确认",
     description: "智能体 已生成执行计划，请审阅后决定",
     actions: [
@@ -98,26 +97,19 @@ const GATE_PANELS: Record<string, {
       { label: "退回需求", variant: "destructive", action: "plan_back_to_brainstorm" },
     ],
   },
-  need_human_test: {
+  human_test: {
     title: "自动验证通过，请人工测试",
-    description: "智能体 已完成自动验证，请进行人工测试",
+    description: "智能体 已完成自动验证，请进行人工测试（发现 BUG / 文档不符即返工反馈）",
     actions: [
       { label: "测试通过", variant: "default", action: "test_pass" },
       { label: "发现 BUG", variant: "destructive", action: "test_bug" },
       { label: "文档不符", variant: "outline", action: "test_doc_mismatch" },
     ],
   },
-  need_archive_confirm: {
+  archive_confirm: {
     title: "归档确认",
     description: "所有验证已通过，确认归档此变更",
     actions: [{ label: "确认归档", variant: "default", action: "archive_confirm" }],
-  },
-  blocked: {
-    title: "需要人工介入",
-    description: "智能体自动修复达到上限，需要人工处理",
-    actions: [
-      { label: "退回执行", variant: "outline", action: "transition_execute" },
-    ],
   },
 };
 
@@ -205,11 +197,6 @@ export default function ChangeDetailPage({ params }: Props) {
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-
-  // ── Feedback form state (task-06) ──────────────────────────────────
-  const [feedbackCategory, setFeedbackCategory] = useState<string>("");
-  const [feedbackText, setFeedbackText] = useState("");
-  const [submittingFeedback, setSubmittingFeedback] = useState(false);
 
   // ── Archive gate state (task-06) ───────────────────────────────────
   const [archiveGate, setArchiveGate] = useState<ArchiveGateResponse | null>(null);
@@ -307,7 +294,7 @@ export default function ChangeDetailPage({ params }: Props) {
       });
       // Show agent dispatch feedback
       if (result.agent_dispatch?.dispatched) {
-        setSuccessMsg(`🤖 智能体 已自动派发 (${result.agent_dispatch.phase ?? targetStage})`);
+        setSuccessMsg(`🤖 智能体 已自动派发 (${result.agent_dispatch.stage ?? targetStage})`);
         setTimeout(() => setSuccessMsg(null), 4000);
       } else if (result.agent_dispatch && !result.agent_dispatch.dispatched) {
         const reason = result.agent_dispatch.reason;
@@ -397,34 +384,6 @@ export default function ChangeDetailPage({ params }: Props) {
       setPageError(err instanceof ApiError ? err.message : "启动执行失败");
     } finally {
       setExecuting(false);
-    }
-  };
-
-  // ── Feedback submit handler (task-06) ────────────────────────────
-  const handleSubmitFeedback = async () => {
-    if (!change || !feedbackCategory || !feedbackText.trim()) return;
-    setSubmittingFeedback(true);
-    setPageError(null);
-    try {
-      const result = await submitFeedback(
-        workspaceId,
-        changeId,
-        feedbackCategory,
-        feedbackText.trim(),
-      );
-      setChange({
-        ...change,
-        current_stage: result.current_stage ?? change.current_stage,
-        status: result.status ?? change.status,
-      });
-      setFeedbackCategory("");
-      setFeedbackText("");
-      setSuccessMsg("✅ 反馈已提交");
-      setTimeout(() => setSuccessMsg(null), 3000);
-    } catch (err) {
-      setPageError(err instanceof ApiError ? err.message : "提交反馈失败");
-    } finally {
-      setSubmittingFeedback(false);
     }
   };
 
@@ -574,8 +533,9 @@ export default function ChangeDetailPage({ params }: Props) {
     );
   }
 
-  const humanGate = (change.human_gate ?? "none") as HumanGate;
-  const gatePanel = GATE_PANELS[humanGate];
+  // pending_review 为只读投影（task-03 后端 DTO），驱动 GATE_PANELS。
+  // 无投影（null/undefined）时无审核面板。
+  const gatePanel = GATE_PANELS[change.pending_review ?? ""];
 
   const handleGateAction = async (action: string) => {
     if (transitioning) return;
@@ -640,9 +600,25 @@ export default function ChangeDetailPage({ params }: Props) {
         title={
           <span className="flex items-center gap-2">
             <span className="truncate">{change.title ?? change.change_key}</span>
-            <Badge variant={WORKFLOW_STAGE_COLORS[change.current_stage ?? "draft"] ?? "outline"}>
-              {WORKFLOW_STAGE_LABELS[change.current_stage ?? "draft"] ?? change.current_stage ?? "未知"}
-            </Badge>
+            {(() => {
+              // quick/blocked/archived 三态走 STATUS_BADGE；
+              // 主线 6 stage 走 WORKFLOW_STAGE_LABELS/COLORS；
+              // 旧值（brownfield）走 ?? "未知" 兜底不崩。
+              const stage = change.current_stage ?? "draft";
+              const statusBadge = STATUS_BADGE[stage];
+              if (statusBadge) {
+                return (
+                  <Badge variant={statusBadge.variant}>
+                    {statusBadge.label}
+                  </Badge>
+                );
+              }
+              return (
+                <Badge variant={WORKFLOW_STAGE_COLORS[stage] ?? "outline"}>
+                  {WORKFLOW_STAGE_LABELS[stage] ?? stage ?? "未知"}
+                </Badge>
+              );
+            })()}
           </span>
         }
         subtitle={
@@ -707,7 +683,7 @@ export default function ChangeDetailPage({ params }: Props) {
         >
           任务看板
         </Link>
-        {humanGate === "none" && (agentStatus?.has_active_run || agentStatus?.config_enabled) && (
+        {!gatePanel && (agentStatus?.has_active_run || agentStatus?.config_enabled) && (
           <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
             <div className="h-2 w-2 animate-pulse rounded-full bg-primary" />
             <span className="text-xs text-muted-foreground">
@@ -1111,47 +1087,6 @@ export default function ChangeDetailPage({ params }: Props) {
               </div>
             )}
           </section>
-
-          {(change.current_stage === "business_review" || change.current_stage === "technical_verification") && (
-            <section className="rounded-md border bg-card p-3">
-              <h3 className="mb-2 text-xs font-medium">提交反馈（返工）</h3>
-              <div className="space-y-2">
-                <div>
-                  <label className="mb-1 block text-[11px] text-muted-foreground">反馈类别</label>
-                  <select
-                    className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs focus:border-ring focus:outline-none"
-                    value={feedbackCategory}
-                    onChange={(e) => setFeedbackCategory(e.target.value)}
-                  >
-                    <option value="">— 选择类别 —</option>
-                    <option value="A">A — Bug / 快速修复</option>
-                    <option value="B">B — 需求理解错误（重设计）</option>
-                    <option value="C">C — 歧义 / 信息不足</option>
-                    <option value="D">D — 衍生新 change（当前通过）</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="mb-1 block text-[11px] text-muted-foreground">反馈内容</label>
-                  <textarea
-                    className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs focus:border-ring focus:outline-none"
-                    rows={3}
-                    placeholder="描述具体问题…"
-                    value={feedbackText}
-                    onChange={(e) => setFeedbackText(e.target.value)}
-                    maxLength={2000}
-                  />
-                </div>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  disabled={submittingFeedback || !feedbackCategory || !feedbackText.trim()}
-                  onClick={() => void handleSubmitFeedback()}
-                >
-                  {submittingFeedback ? "提交中…" : "提交反馈并退回"}
-                </Button>
-              </div>
-            </section>
-          )}
 
           {change.affected_components.length > 0 && (
             <section className="rounded-md border bg-card">

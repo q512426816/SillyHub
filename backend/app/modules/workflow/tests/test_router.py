@@ -83,142 +83,28 @@ async def _add_doc(session, change_id: uuid.UUID, doc_type: str) -> None:
     await session.commit()
 
 
-# ── Change transition tests ────────────────────────────────────────────────
-
-
-async def test_change_transition_draft_to_brainstorm(client, db_session):
-    refs = await _setup(db_session)
-    await _add_doc(db_session, refs["change_id"], "master")
-    resp = await client.post(
-        f"/api/workspaces/{refs['ws_id']}/changes/{refs['change_id']}/transition",
-        json={"target_stage": "brainstorm"},
-        headers=_auth(refs["token"]),
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["change"]["current_stage"] == "brainstorm"
-
-
-async def test_change_transition_invalid(client, db_session):
-    refs = await _setup(db_session)
-    resp = await client.post(
-        f"/api/workspaces/{refs['ws_id']}/changes/{refs['change_id']}/transition",
-        json={"target_stage": "archive"},
-        headers=_auth(refs["token"]),
-    )
-    assert resp.status_code == 422
-
-
-async def test_change_transition_invalid_stage_name(client, db_session):
-    refs = await _setup(db_session)
-    # "proposed" is not a valid StageEnum value — should be "propose"
-    resp = await client.post(
-        f"/api/workspaces/{refs['ws_id']}/changes/{refs['change_id']}/transition",
-        json={"target_stage": "proposed"},
-        headers=_auth(refs["token"]),
-    )
-    assert resp.status_code == 422
-
-
-async def test_change_transition_no_auth(client, db_session):
-    refs = await _setup(db_session)
-    resp = await client.post(
-        f"/api/workspaces/{refs['ws_id']}/changes/{refs['change_id']}/transition",
-        json={"target_stage": "brainstorm"},
-    )
-    assert resp.status_code == 401
-
-
-async def test_change_transition_not_found(client, db_session):
-    refs = await _setup(db_session)
-    fake_id = uuid.uuid4()
-    resp = await client.post(
-        f"/api/workspaces/{refs['ws_id']}/changes/{fake_id}/transition",
-        json={"target_stage": "brainstorm"},
-        headers=_auth(refs["token"]),
-    )
-    assert resp.status_code == 404
-
-
-# ── Review tests ───────────────────────────────────────────────────────────
-
-
-async def test_submit_review_approve(client, db_session):
-    refs = await _setup(db_session)
-    resp = await client.post(
-        f"/api/workspaces/{refs['ws_id']}/changes/{refs['change_id']}/reviews",
-        json={"verdict": "approve", "comment": "Looks good"},
-        headers=_auth(refs["token"]),
-    )
-    assert resp.status_code == 201
-    body = resp.json()
-    assert body["verdict"] == "approve"
-    assert body["comment"] == "Looks good"
-
-
-async def test_submit_review_reject_transitions(client, db_session):
-    refs = await _setup(db_session)
-    # First transition to brainstorm
-    await _add_doc(db_session, refs["change_id"], "master")
-    await client.post(
-        f"/api/workspaces/{refs['ws_id']}/changes/{refs['change_id']}/transition",
-        json={"target_stage": "brainstorm"},
-        headers=_auth(refs["token"]),
-    )
-    # Reject
-    resp = await client.post(
-        f"/api/workspaces/{refs['ws_id']}/changes/{refs['change_id']}/reviews",
-        json={"verdict": "reject", "comment": "Not ready"},
-        headers=_auth(refs["token"]),
-    )
-    assert resp.status_code == 201
-    assert resp.json()["verdict"] == "reject"
-
-    # Review record is created; brainstorm -> blocked is not in TRANSITIONS
-    from sqlalchemy import select
-    from sqlmodel import col
-
-    from app.modules.change.model import Change
-
-    stmt = select(Change).where(col(Change.id) == refs["change_id"])
-    change = (await db_session.execute(stmt)).scalars().first()
-    assert change.current_stage == "brainstorm"
-
-
-async def test_list_reviews(client, db_session):
-    refs = await _setup(db_session)
-    for verdict in ("approve", "reject"):
-        await client.post(
-            f"/api/workspaces/{refs['ws_id']}/changes/{refs['change_id']}/reviews",
-            json={"verdict": verdict},
-            headers=_auth(refs["token"]),
-        )
-    resp = await client.get(
-        f"/api/workspaces/{refs['ws_id']}/changes/{refs['change_id']}/reviews",
-        headers=_auth(refs["token"]),
-    )
-    assert resp.status_code == 200
-    assert len(resp.json()) == 2
-
-
-async def test_review_no_auth(client, db_session):
-    refs = await _setup(db_session)
-    resp = await client.post(
-        f"/api/workspaces/{refs['ws_id']}/changes/{refs['change_id']}/reviews",
-        json={"verdict": "approve"},
-    )
-    assert resp.status_code == 401
-
-
 # ── Audit log tests ────────────────────────────────────────────────────────
 
 
-async def test_audit_log_written_on_transition(client, db_session):
+async def test_audit_log_written_on_task_transition(client, db_session):
     refs = await _setup(db_session)
-    await _add_doc(db_session, refs["change_id"], "master")
+    from app.modules.task.model import Task
+
+    task_id = uuid.uuid4()
+    task = Task(
+        id=task_id,
+        workspace_id=refs["ws_id"],
+        change_id=refs["change_id"],
+        task_key="task-01",
+        title="Test Task",
+        status="draft",
+    )
+    db_session.add(task)
+    await db_session.commit()
+
     await client.post(
-        f"/api/workspaces/{refs['ws_id']}/changes/{refs['change_id']}/transition",
-        json={"target_stage": "brainstorm"},
+        f"/api/workspaces/{refs['ws_id']}/tasks/{task_id}/transition",
+        json={"target": "ready"},
         headers=_auth(refs["token"]),
     )
     resp = await client.get(
@@ -228,20 +114,33 @@ async def test_audit_log_written_on_transition(client, db_session):
     assert resp.status_code == 200
     logs = resp.json()
     assert len(logs) >= 1
-    assert logs[0]["action"] == "change.transition"
-    assert logs[0]["resource_type"] == "change"
+    assert logs[0]["action"] == "task.transition"
+    assert logs[0]["resource_type"] == "task"
 
 
 async def test_audit_log_filter_by_resource_type(client, db_session):
     refs = await _setup(db_session)
-    await _add_doc(db_session, refs["change_id"], "master")
+    from app.modules.task.model import Task
+
+    task_id = uuid.uuid4()
+    task = Task(
+        id=task_id,
+        workspace_id=refs["ws_id"],
+        change_id=refs["change_id"],
+        task_key="task-02",
+        title="Test Task",
+        status="draft",
+    )
+    db_session.add(task)
+    await db_session.commit()
+
     await client.post(
-        f"/api/workspaces/{refs['ws_id']}/changes/{refs['change_id']}/transition",
-        json={"target_stage": "brainstorm"},
+        f"/api/workspaces/{refs['ws_id']}/tasks/{task_id}/transition",
+        json={"target": "ready"},
         headers=_auth(refs["token"]),
     )
     resp = await client.get(
-        f"/api/workspaces/{refs['ws_id']}/audit?resource_type=task",
+        f"/api/workspaces/{refs['ws_id']}/audit?resource_type=change",
         headers=_auth(refs["token"]),
     )
     assert resp.status_code == 200

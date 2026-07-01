@@ -50,10 +50,11 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 class SpecSyncResponse(BaseModel):
-    """Response DTO for the spec sync endpoint (FR-05)."""
+    """Response DTO for the spec sync endpoint (FR-05 / D-003)."""
 
     ok: bool
-    reparsed: int
+    reparsed: int  # = reparsed_docs（向后兼容，旧客户端读这个）
+    reparsed_changes: int = 0
 
 
 # ── Spec Workspace ─────────────────────────────────────────────────────────────
@@ -94,24 +95,32 @@ async def download_spec_bundle(
     )
 
 
-@router.post(
-    "/spec-workspace/import",
-    response_model=SpecWorkspaceRead,
-)
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+
+@router.post("/spec-workspace/import")
 async def import_spec_workspace(
     workspace_id: uuid.UUID,
     session: SessionDep,
     _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
-) -> SpecWorkspaceRead:
-    """Import spec files from the client/repo ``.sillyspec`` directory into the
-    platform-managed spec workspace.
+) -> StreamingResponse:
+    """Import spec via SSE（D-001 流式，2026-07-01-spec-import-async-and-change-reparse）。
 
-    daemon-client workspace: WS RPC → daemon 打包 rootPath/.sillyspec → apply_sync。
-    server-local workspace: 容器内直接读 .sillyspec → apply_sync。
+    分阶段推送 packing/packed/applying/reparsing_docs/reparsing_changes/done/error；
+    daemon 离线/超时/打包失败 → error 事件（透传 ql-001 错误码）。daemon-client 的
+    packing 阶段每 5s keepalive 防 Next.js proxy idle timeout。前端 importSpecWorkspace
+    流式读 event-stream（不再返回 JSON）。
     """
     service = SpecWorkspaceService(session)
-    spec_ws = await service.import_from_repo(workspace_id)
-    return SpecWorkspaceRead.model_validate(spec_ws)
+    return StreamingResponse(
+        service.import_from_repo_sse(workspace_id),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
 
 
 @router.post(
@@ -132,8 +141,14 @@ async def sync_spec_workspace(
     count.
     """
     service = SpecWorkspaceService(session)
-    reparsed = await service.apply_sync(workspace_id, tar_bytes)
-    return SpecSyncResponse(ok=True, reparsed=reparsed)
+    # apply_sync 返回 {reparsed_docs, reparsed_changes}（D-003）；sync 端点暂时只暴露 docs
+    # 数保持 SpecSyncResponse 兼容，task-03 加 reparsed_changes 字段 + import SSE。
+    result = await service.apply_sync(workspace_id, tar_bytes)
+    return SpecSyncResponse(
+        ok=True,
+        reparsed=result["reparsed_docs"],
+        reparsed_changes=result["reparsed_changes"],
+    )
 
 
 @router.patch("/spec-workspace", response_model=SpecWorkspaceRead)

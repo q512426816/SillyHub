@@ -105,4 +105,34 @@ describe('packSpecDir (task-06 / D-003@v1 push 含 .runtime)', () => {
     expect(names).toContain('docs/index.md');
     expect(names).toContain('.runtime/sillyspec.db');
   });
+
+  it('excludeRuntime:true 排除 .runtime 整树（import/get_spec_bundle 路径，ql-20260701-002）', async () => {
+    await mkdir(join(dir, 'docs'), { recursive: true });
+    await writeFile(join(dir, 'docs', 'index.md'), '# hi');
+    await mkdir(join(dir, '.runtime', 'worktrees'), { recursive: true });
+    await writeFile(join(dir, '.runtime', 'sillyspec.db'), 'sqlite-bytes');
+    await writeFile(join(dir, '.runtime', 'worktrees', 'big.txt'), 'x'.repeat(1000));
+
+    const tarBuf = await packSpecDir(dir, { excludeRuntime: true });
+    const names = parseTarNames(tarBuf);
+
+    // spec 数据保留，.runtime 整树（含嵌套 worktrees）排除
+    expect(names).toContain('docs/index.md');
+    expect(names.some((n) => n === '.runtime' || n.startsWith('.runtime/'))).toBe(false);
+  });
+
+  it('excludeNames 排除顶层目录如 changes（import/get_spec_bundle 路径，ql-20260701-003）', async () => {
+    await mkdir(join(dir, 'docs'), { recursive: true });
+    await writeFile(join(dir, 'docs', 'a.md'), 'a');
+    await mkdir(join(dir, 'changes', 'sub'), { recursive: true });
+    await writeFile(join(dir, 'changes', 'task-01.md'), 'x'.repeat(1000));
+    await writeFile(join(dir, 'changes', 'sub', 'task-02.md'), 'y');
+
+    const tarBuf = await packSpecDir(dir, { excludeNames: ['changes'] });
+    const names = parseTarNames(tarBuf);
+
+    // spec 数据保留，changes 整树（含子目录）排除
+    expect(names).toContain('docs/a.md');
+    expect(names.some((n) => n === 'changes' || n.startsWith('changes/'))).toBe(false);
+  });
 });

@@ -1833,7 +1833,12 @@ export class Daemon {
       if (!rootPath) throw new Error('root_path required for get_spec_bundle');
       const specDir = join(rootPath, '.sillyspec');
       const { packSpecDir } = await import('./spec-sync.js');
-      const tarBuf = await packSpecDir(specDir);
+      // ql-20260701-002：排除 .runtime（运行时缓存含 worktrees 2.1G，非 spec 数据）。
+      // D-002（2026-07-01-spec-import-async-and-change-reparse）：撤销 ql-003 的
+      // excludeNames:['changes'] 误判——changes 是变更中心依赖（ChangeService.reparse 解析
+      // 填 Change 表），必须导入。打包慢改由 backend import SSE 异步化解决，而非排除数据。
+      // postSpecSync 回灌路径不受影响（不传此选项，保持含 .runtime）。
+      const tarBuf = await packSpecDir(specDir, { excludeRuntime: true });
       return { tar_base64: tarBuf.toString('base64') };
     });
   }

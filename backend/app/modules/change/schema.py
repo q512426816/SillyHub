@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import enum
 import uuid
 from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class PendingReview(enum.StrEnum):
+    """当前变更等待用户审核的面板类型（只读投影）。"""
+
+    PROPOSAL_REVIEW = "proposal_review"
+    PLAN_REVIEW = "plan_review"
+    HUMAN_TEST = "human_test"
+    ARCHIVE_CONFIRM = "archive_confirm"
 
 
 class ChangeRead(BaseModel):
@@ -24,7 +34,7 @@ class ChangeRead(BaseModel):
     change_type: str | None
     owner_id: uuid.UUID | None
     current_stage: str | None = None
-    human_gate: str | None = "none"
+    pending_review: PendingReview | None = None
     stages: dict | None = None
     approval_status: str | None = None
     approved_by: str | None = None
@@ -47,7 +57,6 @@ class ChangeSummary(BaseModel):
     affected_components: list[str]
     owner_id: uuid.UUID | None
     current_stage: str | None = None
-    human_gate: str | None = "none"
     updated_at: datetime
     workspace_ids: list[uuid.UUID] = []
 

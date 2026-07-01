@@ -1,35 +1,53 @@
-"""Tests for complete_stage, _resolve_stage_completion, and rerun_stage."""
+"""Tests for complete_stage + _resolve_stage_completion after W2 remap.
+
+After task-01 removed HumanGate and task-04 remapped, _resolve_stage_completion
+returns a 2-tuple (new_stage, dispatch_target). propose/quick/blocked/draft are
+no longer part of the mainline mapping.
+"""
+
+from __future__ import annotations
 
 import pytest
 
-from app.modules.change.model import HumanGate
 from app.modules.change.service import ChangeService
 
 
 class TestResolveStageCompletion:
-    """_resolve_stage_completion static method mapping tests."""
+    """_resolve_stage_completion returns (new_stage, dispatch_target) 2-tuple."""
 
     @pytest.mark.parametrize(
-        "stage,result,expected_stage,expected_gate,expected_dispatch",
+        "stage, result, expected_stage, expected_dispatch",
         [
-            ("brainstorm", "clear", "propose", HumanGate.NEED_PROPOSAL_REVIEW, None),
-            ("brainstorm", "ambiguous", "brainstorm", HumanGate.NEED_REQUIREMENT_INPUT, None),
-            ("brainstorm", None, "propose", HumanGate.NEED_PROPOSAL_REVIEW, None),
-            ("propose", None, "propose", HumanGate.NEED_PROPOSAL_REVIEW, None),
-            ("plan", None, "plan", HumanGate.NEED_PLAN_REVIEW, None),
-            ("execute", None, "verify", HumanGate.NONE, "verify"),
-            ("verify", "passed", "verify", HumanGate.NEED_HUMAN_TEST, None),
-            ("verify", "failed", "quick", HumanGate.NONE, "quick"),
-            ("verify", None, "quick", HumanGate.NONE, "quick"),
-            ("quick", None, "verify", HumanGate.NONE, "verify"),
-            ("archive", None, "archived", HumanGate.NONE, None),
-            ("scan", None, "scan", HumanGate.NONE, None),
+            # brainstorm mainline: clear → dispatch plan
+            ("brainstorm", "clear", "plan", "plan"),
+            ("brainstorm", None, "plan", "plan"),
+            # brainstorm ambiguous → stay (no dispatch)
+            ("brainstorm", "ambiguous", "brainstorm", None),
+            # plan → dispatch execute
+            ("plan", None, "execute", "execute"),
+            # execute → dispatch verify
+            ("execute", None, "verify", "verify"),
+            # verify passed → dispatch archive
+            ("verify", "passed", "archive", "archive"),
+            # verify not passed → stay verify (no dispatch, await human)
+            ("verify", None, "verify", None),
+            ("verify", "failed", "verify", None),
+            # archive → terminal archived (no dispatch)
+            ("archive", None, "archived", None),
         ],
     )
-    def test_mapping(self, stage, result, expected_stage, expected_gate, expected_dispatch):
-        new_stage, new_gate, dispatch_target = ChangeService._resolve_stage_completion(
-            stage, result
-        )
+    def test_mapping(self, stage, result, expected_stage, expected_dispatch):
+        new_stage, dispatch_target = ChangeService._resolve_stage_completion(stage, result)
         assert new_stage == expected_stage
-        assert new_gate == expected_gate
         assert dispatch_target == expected_dispatch
+
+    def test_unknown_stage_no_change(self):
+        # Unknown stage returns identity (no change)
+        new_stage, dispatch_target = ChangeService._resolve_stage_completion("unknown", None)
+        assert new_stage == "unknown"
+        assert dispatch_target is None
+
+    def test_scan_stays(self):
+        # scan is auxiliary — completion stays scan
+        new_stage, _dispatch_target = ChangeService._resolve_stage_completion("scan", None)
+        assert new_stage == "scan"

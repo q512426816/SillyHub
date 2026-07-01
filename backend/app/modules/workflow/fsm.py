@@ -1,10 +1,5 @@
 """Finite state machines for Task lifecycles.
 
-.. deprecated::
-   ChangeFSM is deprecated. Change state transitions are now managed by
-   ``app.modules.change.model.StageEnum`` + ``TRANSITIONS``.
-   Only TaskFSM remains in this module.
-
 Task FSM:
     draft -> ready -> in_progress -> review -> done
                             \\-> blocked -> in_progress
@@ -12,8 +7,6 @@ Task FSM:
 """
 
 from __future__ import annotations
-
-import warnings
 
 from app.core.errors import AppError
 
@@ -56,34 +49,6 @@ class FSM:
                     "allowed": sorted(allowed),
                 },
             )
-
-
-# ── DEPRECATED: ChangeFSM — use StageEnum + TRANSITIONS instead ──
-# Kept for backward compatibility with any external consumers.
-# Will be removed in a future version.
-
-CHANGE_TRANSITIONS: dict[str, set[str]] = {
-    "draft": {"proposed"},
-    "proposed": {"reviewed", "rejected"},
-    "reviewed": {"approved", "rejected"},
-    "approved": {"in_progress", "rejected"},
-    "in_progress": {"completed", "rejected"},
-    "completed": {"merged"},
-    "rejected": {"draft"},
-    "merged": set(),
-}
-
-
-def __getattr__(name: str):
-    """Lazy deprecation wrapper for ChangeFSM."""
-    if name == "ChangeFSM":
-        warnings.warn(
-            "ChangeFSM is deprecated. Use app.modules.change.model.StageEnum + TRANSITIONS.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return FSM("Change", CHANGE_TRANSITIONS)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 TASK_TRANSITIONS: dict[str, set[str]] = {

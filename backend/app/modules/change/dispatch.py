@@ -29,6 +29,21 @@ log = get_logger(__name__)
 # Stage agent configuration
 # ---------------------------------------------------------------------------
 
+STAGE_ORDER: list[str] = [
+    "scan",
+    "brainstorm",
+    "plan",
+    "execute",
+    "verify",
+    "archive",
+]
+
+assert [s.value for s in StageEnum.spec_stages()] == STAGE_ORDER, (
+    f"StageEnum.spec_stages() mismatch: "
+    f"expected {STAGE_ORDER}, "
+    f"got {[s.value for s in StageEnum.spec_stages()]}"
+)
+
 
 @dataclass
 class StageAgentConfig:
@@ -75,14 +90,6 @@ STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
         read_only=False,
         description="Write question lists and decision records to change directory.",
     ),
-    StageEnum.PROPOSE.value: StageAgentConfig(
-        enabled=True,
-        prompt_template="propose.md",
-        phase="Propose",
-        requires_worktree=True,
-        read_only=False,
-        description="Write the four-piece proposal set to change directory.",
-    ),
     StageEnum.PLAN.value: StageAgentConfig(
         enabled=True,
         prompt_template="plan.md",
@@ -114,14 +121,6 @@ STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
         requires_worktree=True,
         read_only=False,
         description="Write module-impact analysis and move change directory to archive.",
-    ),
-    StageEnum.QUICK.value: StageAgentConfig(
-        enabled=True,
-        prompt_template="quick.md",
-        phase="Quick",
-        requires_worktree=True,
-        read_only=False,
-        description="Write quicklog and may modify code directly.",
     ),
 }
 
@@ -184,19 +183,7 @@ async def auto_dispatch_next_step(
         )
         return {"dispatched": False, "reason": "sync_failed"}
 
-    # 1.5 Guard: skip if human_gate is set (awaiting human action)
     change = await session.get(Change, change_id)
-    if change and change.human_gate and change.human_gate not in ("none", "None", ""):
-        log.info(
-            "auto_dispatch_skip_human_gate",
-            change_id=str(change_id),
-            human_gate=change.human_gate,
-        )
-        return {
-            "dispatched": False,
-            "reason": "human_gate_pending",
-            "human_gate": change.human_gate,
-        }
 
     # 1.6 Guard: skip if Hub DB current_stage is a terminal state
     _terminal_stages = frozenset({"archived", "cancelled"})
@@ -252,38 +239,6 @@ async def auto_dispatch_next_step(
         if complete_result.dispatch_target:
             target = complete_result.dispatch_target
 
-            # verify auto-fix: check auto_fix_count before dispatching quick
-            if sync_result.current_stage == "verify" and target == "quick":
-                change = await session.get(Change, change_id)
-                if change:
-                    stages = change.stages or {}
-                    fix_count = stages.get("_auto_fix_count", 0)
-                    if fix_count >= 3:
-                        change.human_gate = "blocked"
-                        change.stages = stages
-                        session.add(change)
-                        await session.commit()
-                        log.warning(
-                            "verify_auto_fix_limit_reached",
-                            change_id=str(change_id),
-                            attempts=fix_count,
-                        )
-                        return {
-                            "dispatched": False,
-                            "reason": "verify_auto_fix_limit",
-                            "stage": "verify",
-                            "human_gate": "blocked",
-                        }
-                    stages["_auto_fix_count"] = fix_count + 1
-                    change.stages = stages
-                    session.add(change)
-                    await session.commit()
-                    log.info(
-                        "verify_auto_fix_dispatching_quick",
-                        change_id=str(change_id),
-                        attempt=fix_count + 1,
-                    )
-
             # Chain limit check
             change = await session.get(Change, change_id)
             if change is None:
@@ -308,17 +263,15 @@ async def auto_dispatch_next_step(
             dispatch_result["reason"] = "auto_dispatch_after_complete"
             return dispatch_result
 
-        # No dispatch needed — gate set, wait for human
+        # No dispatch needed — stage completed without auto-advance
         log.info(
-            "auto_dispatch_stage_completed_with_gate",
+            "auto_dispatch_stage_completed_no_dispatch",
             change_id=str(change_id),
-            gate=complete_result.gate,
             stage=sync_result.current_stage,
         )
         return {
             "dispatched": False,
             "reason": "stage_completed",
-            "human_gate": complete_result.gate,
         }
 
     # 3. no pending step
@@ -825,8 +778,7 @@ async def read_verify_result(
 ) -> str:
     """Read verify-result.md and return 'passed' or 'failed'.
 
-    Default to 'passed' if file missing or no conclusive marker found,
-    to avoid verify→quick→verify loops.
+    Default to 'passed' if file missing or no conclusive marker found.
     """
     change = await session.get(Change, change_id)
     if not change or not change.path:
@@ -890,7 +842,7 @@ class SillySpecStageDispatchService:
             workspace_id: Workspace UUID.
             change_id: Change UUID.
             user_id: User UUID triggering the dispatch.
-            target_stage: Target SillySpec stage name (e.g. "propose").
+            target_stage: Target SillySpec stage name (e.g. "plan").
 
         Returns:
             Dict with dispatched, agent_run_id, stage, reason, etc.
@@ -1217,37 +1169,15 @@ class SillySpecStageDispatchService:
             if conn:
                 conn.close()
 
-        # Step 4: Sync current_stage to Change record
-        # Guard: don't overwrite if human_gate is set (awaiting human action)
-        _human_gate_gates = frozenset(
-            {
-                "need_human_test",
-                "need_proposal_review",
-                "need_plan_review",
-                "need_requirement_input",
-                "need_archive_confirm",
-                "blocked",
-            }
-        )
+        # Step 4: Sync current_stage to Change record (directly follows sillyspec.db)
         if change.current_stage != db_current_stage:
-            if change.human_gate in _human_gate_gates:
-                log.info(
-                    "sync_stage_status.stage_update_skipped_human_gate",
-                    change_id=str(change_id),
-                    old=change.current_stage,
-                    new=db_current_stage,
-                    human_gate=change.human_gate,
-                )
-                # Override db_current_stage to keep Hub's view consistent
-                db_current_stage = change.current_stage
-            else:
-                log.info(
-                    "sync_stage_status.stage_updated",
-                    change_id=str(change_id),
-                    old=change.current_stage,
-                    new=db_current_stage,
-                )
-                change.current_stage = db_current_stage
+            log.info(
+                "sync_stage_status.stage_updated",
+                change_id=str(change_id),
+                old=change.current_stage,
+                new=db_current_stage,
+            )
+            change.current_stage = db_current_stage
 
         # Step 5: Sync step status to Change.stages JSON
         stages_json = change.stages or {}
@@ -1301,8 +1231,26 @@ class SillySpecStageDispatchService:
             spec_ws = (await session.execute(stmt)).scalars().first()
 
             if spec_ws and spec_ws.strategy != "repo-native":
-                resolver_root = spec_ws.spec_root
-                return SpecPathResolver(resolver_root).db_path()
+                # repo-mirrored: daemon 同步源项目 .sillyspec 快照到 specDir 扁平布局
+                if spec_ws.strategy == "repo-mirrored":
+                    resolver = SpecPathResolver(spec_ws.spec_root, platform_managed=True)
+                else:
+                    # platform-managed: for_spec_workspace 已设 platform_managed=True
+                    resolver = SpecPathResolver.for_spec_workspace(spec_ws)
+                db_path = resolver.db_path()
+                log.info(
+                    "spec_db_resolved",
+                    db_path=str(db_path),
+                    strategy=spec_ws.strategy,
+                    change_id=str(change.id),
+                )
+                if not db_path.exists():
+                    log.warning(
+                        "spec_db_missing",
+                        db_path=str(db_path),
+                        strategy=spec_ws.strategy,
+                    )
+                return db_path
         except Exception:
             pass
 

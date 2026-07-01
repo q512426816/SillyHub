@@ -1,7 +1,8 @@
 /**
  * Spec Workspace API client. Mirrors backend spec_workspace endpoints.
  */
-import { apiFetch } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/api";
+import { useSession } from "@/stores/session";
 import type { AgentRunStatus } from "@/lib/agent";
 
 export type SpecStrategy = "platform-managed" | "repo-mirrored" | "repo-native";
@@ -28,13 +29,101 @@ export async function getSpecWorkspace(
   );
 }
 
+export type ImportPhase =
+  | "packing"
+  | "packed"
+  | "applying"
+  | "reparsing_docs"
+  | "reparsing_changes"
+  | "done"
+  | "error";
+
+export interface ImportSseHandlers {
+  onProgress?: (phase: ImportPhase, data?: Record<string, unknown>) => void;
+}
+
+/**
+ * 流式导入 spec（D-001 SSE，2026-07-01-spec-import-async-and-change-reparse）。
+ *
+ * POST /import 返回 text/event-stream，分阶段推 packing/packed/applying/
+ * reparsing_docs/reparsing_changes/done/error。原生 fetch + ReadableStream 解析
+ * （不复用 apiFetch——它 JSON parse）；error 事件 → throw ApiError；done → resolve。
+ * 调用方通过 onProgress 更新阶段进度 UI，done 后自行刷新 spec_ws + 变更中心。
+ */
 export async function importSpecWorkspace(
   workspaceId: string,
-): Promise<SpecWorkspace> {
-  return apiFetch<SpecWorkspace>(
+  handlers: ImportSseHandlers = {},
+): Promise<void> {
+  const { onProgress } = handlers;
+  const { accessToken } = useSession.getState();
+  const resp = await fetch(
     `/api/workspaces/${workspaceId}/spec-workspace/import`,
-    { method: "POST" },
+    {
+      method: "POST",
+      headers: {
+        accept: "text/event-stream",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+    },
   );
+  if (!resp.ok || !resp.body) {
+    const text = await resp.text().catch(() => "");
+    let payload: { code?: string; message?: string } | null = null;
+    try {
+      payload = text ? JSON.parse(text) : null;
+    } catch {
+      payload = null;
+    }
+    throw new ApiError(resp.status, {
+      code: payload?.code ?? "import_failed",
+      message: payload?.message ?? `导入失败 (HTTP ${resp.status})`,
+      request_id: null,
+      details: null,
+    });
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const flush = (block: string): void => {
+    const trimmed = block.trim();
+    if (!trimmed || trimmed.startsWith(":")) return; // keepalive / comment
+    let event = "";
+    let dataStr = "";
+    for (const line of trimmed.split("\n")) {
+      if (line.startsWith("event: ")) event = line.slice(7);
+      else if (line.startsWith("data: ")) dataStr = line.slice(6);
+    }
+    if (!event) return;
+    let data: Record<string, unknown> = {};
+    if (dataStr) {
+      try {
+        data = JSON.parse(dataStr) as Record<string, unknown>;
+      } catch {
+        data = { raw: dataStr };
+      }
+    }
+    const phase = event as ImportPhase;
+    onProgress?.(phase, data);
+    if (phase === "error") {
+      throw new ApiError(0, {
+        code: (data.code as string) ?? "import_error",
+        message: (data.message as string) ?? "导入失败",
+        request_id: null,
+        details: null,
+      });
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const blocks = buffer.split("\n\n");
+    buffer = blocks.pop() ?? "";
+    for (const block of blocks) flush(block);
+  }
+  if (buffer.trim()) flush(buffer);
 }
 
 export interface BootstrapResult {
