@@ -284,7 +284,7 @@ export default function ChangesPage({ params }: Props) {
   ];
 
   return (
-    <PageContainer>
+    <PageContainer size="full">
       <PageHeader
         title="变更中心"
         subtitle={
@@ -294,24 +294,6 @@ export default function ChangesPage({ params }: Props) {
           >
             ← 组件列表
           </Link>
-        }
-        actions={
-          <>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={loading || newChangeDisabledReason !== null}
-              title={newChangeDisabledReason ?? undefined}
-              onClick={() =>
-                router.push(`/workspaces/${workspaceId}/create-change`)
-              }
-            >
-              + 新建变更
-            </Button>
-            <Button size="sm" onClick={handleReparse} disabled={reparsing}>
-              {reparsing ? "解析中…" : "重新扫描"}
-            </Button>
-          </>
         }
       />
 
@@ -368,6 +350,24 @@ export default function ChangesPage({ params }: Props) {
           </div>
         }
       >
+        {/* 顶部操作按钮行（右对齐，对齐 admin/roles / admin/users） */}
+        <div className="mb-2 flex items-center justify-end gap-2">
+          <Button size="sm" onClick={handleReparse} disabled={reparsing}>
+            {reparsing ? "解析中…" : "重新扫描"}
+          </Button>
+          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={loading || newChangeDisabledReason !== null}
+            title={newChangeDisabledReason ?? undefined}
+            onClick={() =>
+              router.push(`/workspaces/${workspaceId}/create-change`)
+            }
+          >
+            + 新建变更
+          </Button>
+        </div>
         {/* 查询条件：grid-cols-4 垂直 Field，对齐 admin/roles */}
         <div className="grid w-full grid-cols-4 gap-3">
           <Field label="关键词">
@@ -392,22 +392,23 @@ export default function ChangesPage({ params }: Props) {
             </Select>
           </Field>
         </div>
-        <DataTable<ChangeSummary>
-          rowKey="id"
-          columns={columns}
-          dataSource={filtered}
-          loading={loading}
-          size="small"
-          bordered
-          scroll={{ y: "calc(100vh - 430px)" }}
-          pagination={false}
-          emptyText={
-            items.length === 0
-              ? `当前没有${tab === "active" ? "进行中" : "已归档"}的变更。`
-              : "没有匹配的变更。"
-          }
-        />
       </SectionCard>
+
+      <DataTable<ChangeSummary>
+        rowKey="id"
+        columns={columns}
+        dataSource={filtered}
+        loading={loading}
+        size="small"
+        bordered
+        scroll={{ y: "calc(100vh - 430px)" }}
+        pagination={false}
+        emptyText={
+          items.length === 0
+            ? `当前没有${tab === "active" ? "进行中" : "已归档"}的变更。`
+            : "没有匹配的变更。"
+        }
+      />
 
       <SectionCard title="变更生命周期">
         <div className="flex items-center justify-center gap-0">
