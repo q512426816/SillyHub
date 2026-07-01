@@ -401,7 +401,7 @@ export default function ChangesPage({ params }: Props) {
         loading={loading}
         size="small"
         bordered
-        scroll={{ y: "calc(100vh - 430px)" }}
+        scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
         pagination={false}
         emptyText={
           items.length === 0
