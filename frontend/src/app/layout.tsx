@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { AntdRegistry } from "@ant-design/nextjs-registry";
 
 import { AntdProviders } from "@/components/antd-providers";
+import { AppProviders } from "@/lib/providers";
 import { inter } from "@/styles/fonts";
 import "./globals.css";
 
@@ -21,7 +22,9 @@ export default function RootLayout({
         className={`${inter.className} min-h-screen bg-background text-foreground`}
       >
         <AntdRegistry>
-          <AntdProviders>{children}</AntdProviders>
+          <AntdProviders>
+            <AppProviders>{children}</AppProviders>
+          </AntdProviders>
         </AntdRegistry>
       </body>
     </html>

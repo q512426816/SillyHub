@@ -13,16 +13,22 @@
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App as AntApp } from "antd";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import RuntimesPage from "@/app/(dashboard)/runtimes/page";
 import { useSession } from "@/stores/session";
 
-// task-07：page 顶层调 useNotify() + App.useApp()（task-06 把删除流程改为 antd
-// Modal.confirm + message toast）。App.useApp() 必须在 <AntApp> Context 内才能拿到
-// 真实 modal/message 实例（否则返回空对象 → modal.confirm is not a function）。
-// renderPage 统一包 <AntApp> wrapper，所有用例共用。
+// task-10（react-query-migration）：page 顶层调 useQueryClient()/useDaemonRuntimes，需包
+// QueryClientProvider。每测试独立 QueryClient（retry:false/gcTime:0）防缓存串。
 function renderPage(ui: React.ReactElement) {
-  return render(<AntApp>{ui}</AntApp>);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0, refetchInterval: false } },
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <AntApp>{ui}</AntApp>
+    </QueryClientProvider>,
+  );
 }
 
 // ── next/navigation mock（page 用 useSearchParams/useRouter 做 URL 恢复 + 清 param） ──

@@ -41,9 +41,6 @@ import {
   getAgentSession,
   getRuntimesUsage,
   isVersionBelow,
-  listAgentSessions,
-  listDaemonRuntimes,
-  listDaemonRuntimesPage,
   MIN_VERSIONS,
   PROVIDER_META,
   updateDaemonRuntime,
@@ -54,6 +51,9 @@ import {
   type RuntimeUsageItem,
   type RuntimeUsageWindow,
 } from "@/lib/daemon";
+import { useDaemonRuntimes } from "@/lib/use-daemon-runtimes";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/stores/session";
 // task-06 / FR-03 / D-003@v1：antd Modal.confirm（删除二次确认）+ useNotify（成功/失败 toast）。
@@ -855,9 +855,9 @@ function EmptyState() {
 }
 
 export default function RuntimesPage() {
-  const [items, setItems] = useState<DaemonRuntimeRead[] | null>(null);
+  // task-10（react-query-migration）：items/total/sessions 由 useDaemonRuntimes 管。
+  const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
-  // task-07 / FR-04 / FR-05 / D-003@v1：服务端筛选分页 + 平台管理员人员搜索 + 别名编辑。
   const isPlatformAdmin = useSession((s) => s.user?.is_platform_admin === true);
   const PAGE_SIZE = 12;
   const [query, setQuery] = useState("");
@@ -866,7 +866,6 @@ export default function RuntimesPage() {
   const [ownerUserId, setOwnerUserId] = useState<string | null>(null);
   const [userOptions, setUserOptions] = useState<UserRead[]>([]);
   const [page, setPage] = useState(0);
-  const [total, setTotal] = useState(0);
   const [aliasEditing, setAliasEditing] = useState<DaemonRuntimeRead | null>(null);
   const [aliasValue, setAliasValue] = useState("");
   const [aliasSaving, setAliasSaving] = useState(false);
@@ -878,7 +877,6 @@ export default function RuntimesPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [runtimeActionId, setRuntimeActionId] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
-  const [sessions, setSessions] = useState<AgentSessionRead[]>([]);
   // task-04 / D-001：单例弹窗 runtime（null=关闭）。切换 runtime 即替换 dialogRuntime，
   // RuntimeSessionDialog 内部 key 随 runtime.id 重 mount 清旧状态。
   const [dialogRuntime, setDialogRuntime] = useState<DaemonRuntimeRead | null>(null);
@@ -921,39 +919,70 @@ export default function RuntimesPage() {
     clearSessionParam();
   }, [clearSessionParam]);
 
-  const reload = useCallback(async (options: { showFeedback?: boolean } = {}) => {
-    setError(null);
-    const showFeedback = options.showFeedback ?? false;
-    if (showFeedback) setRefreshing(true);
-    const startedAt = Date.now();
-    try {
-      const listParams: DaemonRuntimeListParams = {
-        q: query.trim() || undefined,
-        type: typeFilter || undefined,
-        status: statusFilter || undefined,
-        user_id: isPlatformAdmin ? ownerUserId ?? undefined : undefined,
-        limit: PAGE_SIZE,
-        offset: page * PAGE_SIZE,
-      };
-      const [resp, sessionsResp] = await Promise.all([
-        listDaemonRuntimesPage(listParams),
-        listAgentSessions({ limit: 100 }).catch(() => null),
-        showFeedback
-          ? new Promise((resolve) => setTimeout(resolve, Math.max(0, 500 - (Date.now() - startedAt))))
-          : Promise.resolve(),
-      ]);
-      setItems(resp.items);
-      setTotal(resp.total);
-      setSessions(sessionsResp?.items ?? []);
-      setLastRefreshedAt(new Date());
-    } catch (err) {
-      setItems([]);
-      setTotal(0);
-      setError(err instanceof ApiError ? err.message : "加载列表失败");
-    } finally {
-      if (showFeedback) setRefreshing(false);
-    }
-  }, [query, typeFilter, statusFilter, ownerUserId, page, isPlatformAdmin]);
+  // task-10：listParams 作为 queryKey 一部分；useMemo 稳定引用。
+  const listParams = useMemo<DaemonRuntimeListParams>(
+    () => ({
+      q: query.trim() || undefined,
+      type: typeFilter || undefined,
+      status: statusFilter || undefined,
+      user_id: isPlatformAdmin ? ownerUserId ?? undefined : undefined,
+      limit: PAGE_SIZE,
+      offset: page * PAGE_SIZE,
+    }),
+    [query, typeFilter, statusFilter, ownerUserId, page, isPlatformAdmin],
+  );
+  const { items, total, sessions, isLoading, error: listError, refetch } = useDaemonRuntimes(listParams);
+
+  useEffect(() => {
+    setError(listError ? (listError instanceof ApiError ? listError.message : "加载列表失败") : null);
+  }, [listError]);
+  // lastRefreshedAt：用 length 做 dep（避免 new Date() 无限 OOM 循环）。
+  useEffect(() => {
+    setLastRefreshedAt(new Date());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items?.length, total, sessions?.length]);
+
+  type RuntimesCache = { items: DaemonRuntimeRead[]; total: number; sessions: AgentSessionRead[] };
+  const patchItems = useCallback(
+    (updater: (prev: DaemonRuntimeRead[]) => DaemonRuntimeRead[]) => {
+      queryClient.setQueryData<RuntimesCache>(queryKeys.daemonRuntimes.list(listParams), (old) => ({
+        items: updater(old?.items ?? []),
+        total: old?.total ?? 0,
+        sessions: old?.sessions ?? [],
+      }));
+    },
+    [queryClient, listParams],
+  );
+  const patchSessions = useCallback(
+    (updater: (prev: AgentSessionRead[]) => AgentSessionRead[]) => {
+      queryClient.setQueryData<RuntimesCache>(queryKeys.daemonRuntimes.list(listParams), (old) => ({
+        items: old?.items ?? [],
+        total: old?.total ?? 0,
+        sessions: updater(old?.sessions ?? []),
+      }));
+    },
+    [queryClient, listParams],
+  );
+
+  // reload：手动刷新/操作后调用，保留 500ms 最短时长 spinner 语义。
+  const reload = useCallback(
+    async (options: { showFeedback?: boolean } = {}) => {
+      setError(null);
+      const showFeedback = options.showFeedback ?? false;
+      if (!showFeedback) { void refetch(); return; }
+      setRefreshing(true);
+      const startedAt = Date.now();
+      try {
+        await Promise.all([
+          refetch(),
+          new Promise((resolve) => setTimeout(resolve, Math.max(0, 500 - (Date.now() - startedAt)))),
+        ]);
+      } finally {
+        setRefreshing(false);
+      }
+    },
+    [refetch],
+  );
 
   const handleToggleRuntime = useCallback(async (runtime: DaemonRuntimeRead) => {
     setError(null);
@@ -962,16 +991,13 @@ export default function RuntimesPage() {
       const updated = runtime.status === "disabled"
         ? await enableDaemonRuntime(runtime.id)
         : await disableDaemonRuntime(runtime.id);
-      setItems((prev) =>
-        prev ? prev.map((item) => (item.id === updated.id ? updated : item)) : prev,
-      );
-      setLastRefreshedAt(new Date());
+      patchItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "运行时状态操作失败");
     } finally {
       setRuntimeActionId(null);
     }
-  }, []);
+  }, [patchItems]);
 
   // ql-012 / task-06 / FR-03 / D-003@v1 / D-007@v1：移除运行时（物理删除，级联清会话/lease）。
   // 二次确认改 antd Modal.confirm（走主题 + destructive 红按钮），替代浏览器原生 window.confirm。
@@ -991,10 +1017,9 @@ export default function RuntimesPage() {
           setRuntimeActionId(runtime.id);
           try {
             await deleteDaemonRuntime(runtime.id);
-            setItems((prev) => (prev ? prev.filter((item) => item.id !== runtime.id) : prev));
-            setSessions((prev) => prev.filter((s) => s.runtime_id !== runtime.id));
+            patchItems((prev) => prev.filter((item) => item.id !== runtime.id));
+            patchSessions((prev) => prev.filter((s) => s.runtime_id !== runtime.id));
             if (dialogRuntime?.id === runtime.id) setDialogRuntime(null);
-            setLastRefreshedAt(new Date());
             notify.success("运行时已移除");
           } catch (err) {
             notify.error(err, "移除运行时失败");
@@ -1004,7 +1029,7 @@ export default function RuntimesPage() {
         },
       });
     },
-    [dialogRuntime?.id, modal, notify],
+    [dialogRuntime?.id, modal, notify, patchItems, patchSessions],
   );
 
   // task-04 / D-001：卡片「会话」→ 打开单例弹窗。不再 scrollIntoView（无底部常驻会话区）。
@@ -1035,9 +1060,7 @@ export default function RuntimesPage() {
       const updated = await updateDaemonRuntime(aliasEditing.id, {
         display_alias: aliasValue.trim() || null,
       });
-      setItems((prev) =>
-        prev ? prev.map((r) => (r.id === updated.id ? updated : r)) : prev,
-      );
+      patchItems((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
       notify.success("别名已更新");
       setAliasEditing(null);
     } catch (err) {
@@ -1045,7 +1068,7 @@ export default function RuntimesPage() {
     } finally {
       setAliasSaving(false);
     }
-  }, [aliasEditing, aliasValue, notify]);
+  }, [aliasEditing, aliasValue, notify, patchItems]);
 
   // task-06 / FR-04 / D-006@v1：可访问目录（allowed_roots 沙箱）编辑。
   // 复用 display_alias 模式：page 顶层 state + antd Modal + useNotify。
@@ -1069,9 +1092,7 @@ export default function RuntimesPage() {
     setRootsSaving(true);
     try {
       const updated = await updateRuntimeAllowedRoots(rootsEditing.id, cleaned);
-      setItems((prev) =>
-        prev ? prev.map((r) => (r.id === updated.id ? updated : r)) : prev,
-      );
+      patchItems((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
       notify.success("可访问目录已更新");
       setRootsEditing(null);
     } catch (err) {
@@ -1079,7 +1100,7 @@ export default function RuntimesPage() {
     } finally {
       setRootsSaving(false);
     }
-  }, [rootsEditing, rootsValue, notify]);
+  }, [rootsEditing, rootsValue, notify, patchItems]);
 
   // task-07 / D-003@v1：平台管理员人员搜索选项；失败降级为空（控件由 isPlatformAdmin 控制显隐）。
   useEffect(() => {
@@ -1097,16 +1118,7 @@ export default function RuntimesPage() {
     };
   }, [isPlatformAdmin]);
 
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      void reload();
-    }, 15_000);
-    return () => window.clearInterval(timer);
-  }, [reload]);
+  // task-10：首载 + 15s 轮询 useEffect 已删（useDaemonRuntimes mount-fetch + refetchInterval:15000 接管）。
 
   // task-14 / FR-04 / D-004@v1：拉取所有 runtime 的用量(进页面 + 切窗时触发,非实时)。
   // cancelled 守卫防竞态(快速切窗时旧请求 resolve 跳过 set,只采最新窗)。
@@ -1148,8 +1160,8 @@ export default function RuntimesPage() {
     if (urlRestoreDoneRef.current) return;
     const sessionId = searchParams.get("session");
     if (!sessionId) return;
-    // 等 items 加载完成（reload 的 finally setItems）
-    if (items === null) return;
+    // 等 items 加载完成（首屏 loading 期内不处理 URL 恢复）
+    if (isLoading) return;
     urlRestoreDoneRef.current = true;
     void (async () => {
       let session: AgentSessionRead | null =
@@ -1158,12 +1170,11 @@ export default function RuntimesPage() {
         try {
           session = await getAgentSession(sessionId);
         } catch {
-          // 不属于本用户 / 已删 / 网络错误 → 降级
           session = null;
         }
       }
       if (session && isActiveSession(session)) {
-        const matched = (items ?? []).find((r) => r.id === session!.runtime_id) ?? null;
+        const matched = items.find((r) => r.id === session!.runtime_id) ?? null;
         if (matched) {
           // 活跃 + runtime 在列 → 开弹窗，initialSessionId 接弹窗默认态 attach
           setInitialSessionId(session.id);
@@ -1177,7 +1188,7 @@ export default function RuntimesPage() {
         clearSessionParam();
       }
     })();
-  }, [searchParams, items, sessions, clearSessionParam]);
+  }, [searchParams, items, sessions, isLoading, clearSessionParam]);
 
   const displayItems = useMemo(() => {
     const statusRank: Record<string, number> = {
@@ -1256,7 +1267,7 @@ export default function RuntimesPage() {
         </div>
       )}
 
-      {items === null ? (
+      {isLoading ? (
         <LoadingState />
       ) : (
         <>

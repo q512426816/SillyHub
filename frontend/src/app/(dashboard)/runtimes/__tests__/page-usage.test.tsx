@@ -21,17 +21,24 @@
 
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App as AntApp } from "antd";
 
 import RuntimesPage from "@/app/(dashboard)/runtimes/page";
 import { useSession } from "@/stores/session";
 import type { RuntimeUsageItem, RuntimeUsageResponse } from "@/lib/daemon";
 
-// task-07：page 顶层调 useNotify() + App.useApp()（task-06 改 antd Modal.confirm +
-// message toast）。App.useApp() 需 <AntApp> Context 才能拿到真实实例（否则 modal 为
-// 空对象，删除流程 modal.confirm 会崩）。renderPage 统一包裹。
+// task-10（react-query-migration）：page 顶层调 useQueryClient()/useDaemonRuntimes，
+// 需包 QueryClientProvider。每测试独立 QueryClient（retry:false）继承 AntApp 包裹。
 function renderPage(ui: React.ReactElement) {
-  return render(<AntApp>{ui}</AntApp>);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0, refetchInterval: false } },
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <AntApp>{ui}</AntApp>
+    </QueryClientProvider>,
+  );
 }
 
 // ── next/navigation mock(切窗不走路由,但 page mount 用 useSearchParams/useRouter) ──
@@ -192,6 +199,9 @@ afterEach(() => {
 /** 渲染并等用量统计区出现(卡片标题「用量统计(7 天)」)。 */
 async function renderAndWaitForUsage() {
   const utils = renderPage(<RuntimesPage />);
+  await waitFor(() => {
+    expect(screen.queryByText("加载中...")).not.toBeInTheDocument();
+  });
   await waitFor(() => {
     expect(daemon.getRuntimesUsage).toHaveBeenCalled();
   });

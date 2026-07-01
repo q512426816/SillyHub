@@ -15,7 +15,7 @@ import {
   Terminal,
   XCircle,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { AgentLogViewer, parseToolCallContent, parseScanCheckOutput, type ToolCallEntry } from "@/components/agent-log-viewer";
 import { AgentRunPanel } from "@/components/agent-run-panel";
@@ -29,10 +29,10 @@ import {
   formatRunProviderLabel,
   getAgentRunLogs,
   killAgentRun,
-  listAgentRuns,
   type AgentRun,
   type AgentRunLogEntry,
 } from "@/lib/agent";
+import { useAgentRuns } from "@/lib/use-agent-runs";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -237,8 +237,11 @@ function SectionTitle({
 export default function AgentPage({ params }: Props) {
   const workspaceId = params.id;
 
-  const [runs, setRuns] = useState<AgentRun[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // task-09（2026-07-01-react-query-migration）：react-query 接管 list 获取 + 条件轮询。
+  const { runs, isLoading, error: listError, refetch } = useAgentRuns(workspaceId);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const reload = useCallback(() => { setActionError(null); void refetch(); }, [refetch]);
+  const error = actionError ?? listError?.message ?? null;
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [expandedLogs, setExpandedLogs] = useState<AgentRunLogEntry[] | null>(null);
@@ -252,7 +255,7 @@ export default function AgentPage({ params }: Props) {
   /* ---- Derived ---- */
   const runningRuns = useMemo(
     () => {
-      const list = (runs ?? []).filter((r) => r.status === "running");
+      const list = runs.filter((r) => r.status === "running");
       // ql-20260617-002：活跃运行按 started_at 升序（先启动的在前），null 兜底用 created_at。
       return list.sort((a, b) => {
         const ta = new Date(a.started_at ?? a.created_at).getTime();
@@ -266,7 +269,7 @@ export default function AgentPage({ params }: Props) {
     () => {
       // ql-20260617-002：按 finished_at 降序（最近结束的在前），started_at 为 null 时
       // 兜底 created_at，避免 pending run 排到表头。后端按 started_at 排但前端做兜底。
-      const list = (runs ?? []).filter(
+      const list = runs.filter(
         (r) => r.status === "completed" || r.status === "failed" || r.status === "killed",
       );
       const sorted = list.sort((a, b) => {
@@ -293,28 +296,7 @@ export default function AgentPage({ params }: Props) {
     [filteredCompletedRuns, safeHistoryPage],
   );
 
-  /* ---- Load runs ---- */
-  const reload = useCallback(async () => {
-    setError(null);
-    try {
-      const list = await listAgentRuns(workspaceId);
-      setRuns(list);
-    } catch (err) {
-      setRuns([]);
-      setError(err instanceof ApiError ? err.message : "加载智能体运行记录失败");
-    }
-  }, [workspaceId]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  /* ---- Auto-refresh while running ---- */
-  useEffect(() => {
-    if (runningRuns.length === 0) return;
-    const timer = setInterval(() => void reload(), 5_000);
-    return () => clearInterval(timer);
-  }, [runningRuns.length, reload]);
+  /* ---- Load + auto-refresh (task-09: react-query mount-fetch + refetchInterval) ---- */
 
   /* ---- Load active run logs ----
    * task-06：活跃 run 日志流 + 历史 prefetch 由 <AgentRunPanel> 内的
@@ -341,7 +323,7 @@ export default function AgentPage({ params }: Props) {
         await killAgentRun(workspaceId, runId);
         reload();
       } catch (err) {
-        setError(err instanceof ApiError ? err.message : "停止智能体失败");
+        setActionError(err instanceof ApiError ? err.message : "停止智能体失败");
       }
     },
     [workspaceId, reload],
@@ -354,7 +336,7 @@ export default function AgentPage({ params }: Props) {
   const isActiveRun = useMemo(
     () => {
       if (!activeRunId) return false;
-      const run = runs?.find((r) => r.id === activeRunId);
+      const run = runs.find((r) => r.id === activeRunId);
       return run?.status === "running" ?? false;
     },
     [activeRunId, runs],
@@ -384,7 +366,7 @@ export default function AgentPage({ params }: Props) {
         const logs = await getAgentRunLogs(workspaceId, runId);
         setExpandedLogs(logs);
       } catch (err) {
-        setError(err instanceof ApiError ? err.message : "加载日志失败");
+        setActionError(err instanceof ApiError ? err.message : "加载日志失败");
       } finally {
         setExpandedLogsLoading(false);
       }
@@ -429,7 +411,7 @@ export default function AgentPage({ params }: Props) {
       />
 
       {/* ---- Stats bar ---- */}
-      {runs !== null && runs.length > 0 && (
+      {!isLoading && runs.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <SummaryCard label="总运行" value={String(runs.length)} icon={History} />
           <SummaryCard label="运行中" value={String(runningRuns.length)} icon={Activity} tone={runningRuns.length > 0 ? "running" : "neutral"} />
@@ -446,7 +428,7 @@ export default function AgentPage({ params }: Props) {
       )}
 
       {/* ---- Loading ---- */}
-      {runs === null && (
+      {isLoading && (
         <div className="flex items-center justify-center rounded-md border bg-card py-20 text-xs text-muted-foreground">
           <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-primary" />
           加载中...
@@ -454,7 +436,7 @@ export default function AgentPage({ params }: Props) {
       )}
 
       {/* ---- Active Runs ---- */}
-      {runs !== null && runningRuns.length > 0 && (
+      {!isLoading && runningRuns.length > 0 && (
         <section className="flex min-w-0 flex-col gap-3">
           <SectionTitle icon={Activity} title="活跃运行" meta={`${runningRuns.length} 个`} />
           <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
@@ -586,7 +568,7 @@ export default function AgentPage({ params }: Props) {
       )}
 
       {/* ---- Completed Runs ---- */}
-      {runs !== null && completedRuns.length > 0 && (
+      {!isLoading && completedRuns.length > 0 && (
         <section className="flex min-w-0 flex-col gap-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <SectionTitle icon={History} title="历史运行" meta={`${filteredCompletedRuns.length} / ${completedRuns.length} 条`} />
@@ -807,7 +789,7 @@ export default function AgentPage({ params }: Props) {
       )}
 
       {/* ---- Empty state ---- */}
-      {runs !== null && runs.length === 0 && (
+      {!isLoading && runs.length === 0 && (
         <SectionCard>
           <div className="flex flex-col items-center gap-3 py-12">
             <span className="flex h-10 w-10 items-center justify-center rounded-md border bg-muted/40 text-primary">
