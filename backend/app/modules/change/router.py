@@ -65,6 +65,9 @@ async def list_changes(
     location: str | None = Query(None),
     status: str | None = Query(None),
     owner: str | None = Query(None),
+    search: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
 ) -> ChangeList:
     service = ChangeService(session)
     items, total = await service.list_(
@@ -72,6 +75,9 @@ async def list_changes(
         location=location,
         status=status,
         owner=owner,
+        search=search,
+        page=page,
+        page_size=page_size,
     )
     enriched = await service.enrich_summaries(items)
     return ChangeList(items=enriched, total=total)
