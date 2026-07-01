@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -81,29 +81,52 @@ class ChangeService:
         location: str | None = None,
         status: str | None = None,
         owner: str | None = None,
+        search: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
     ) -> tuple[list[Change], int]:
+        """List changes for a workspace, with pagination + search (ql-20260701-005).
+
+        ``search`` ILIKE-matches change_key or title. Returns ``(items, total)``
+        where total is the count **before** pagination (matching admin/roles 分页
+        查询模式).
+        """
         await self._workspace_service.get(workspace_id)
 
-        # Query via primary workspace FK OR M:N association table
+        # Base: find change_ids that belong to this workspace (direct FK OR M:N)
         mn_subq = select(col(ChangeWorkspace.change_id)).where(
             col(ChangeWorkspace.workspace_id) == workspace_id,
         )
-        stmt = select(Change).where(
+        base = select(Change).where(
             (col(Change.workspace_id) == workspace_id) | (col(Change.id).in_(mn_subq))
         )
 
         if location:
-            stmt = stmt.where(col(Change.location) == location)
+            base = base.where(col(Change.location) == location)
         if status:
-            stmt = stmt.where(col(Change.status) == status)
+            base = base.where(col(Change.status) == status)
         if owner:
             try:
                 owner_uuid = uuid.UUID(owner)
-                stmt = stmt.where(col(Change.owner_id) == owner_uuid)
+                base = base.where(col(Change.owner_id) == owner_uuid)
             except ValueError:
-                pass  # invalid UUID, skip filter
-        stmt = stmt.order_by(col(Change.change_key).asc())
-        items = list((await self._session.execute(stmt)).scalars().all())
+                pass
+        if search:
+            pattern = f"%{search}%"
+            base = base.where(or_(
+                col(Change.change_key).ilike(pattern),
+                col(Change.title).ilike(pattern),
+            ))
+
+        # Count total (before dedup — close enough for pagination)
+        count_stmt = select(func.count()).select_from(base.subquery())
+        total = (await self._session.execute(count_stmt)).scalar() or 0
+
+        base = base.order_by(col(Change.change_key).asc())
+        if page_size > 0:
+            base = base.offset((page - 1) * page_size).limit(page_size)
+
+        items = list((await self._session.execute(base)).scalars().all())
         # De-duplicate (primary workspace and M:N may overlap)
         seen: set[uuid.UUID] = set()
         unique_items: list[Change] = []
@@ -111,7 +134,7 @@ class ChangeService:
             if item.id not in seen:
                 seen.add(item.id)
                 unique_items.append(item)
-        return unique_items, len(unique_items)
+        return unique_items, total
 
     async def get_by_key(self, workspace_id: uuid.UUID, change_key: str) -> Change:
         """Look up a change by its *change_key* within the workspace."""

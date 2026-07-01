@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Input, Select, type TableProps } from "antd";
 
 import {
@@ -112,11 +112,14 @@ export default function ChangesPage({ params }: Props) {
   const workspaceId = params.id;
   const router = useRouter();
   const [tab, setTab] = useState<"active" | "archive">("active");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("");
-  const [activeItems, setActiveItems] = useState<ChangeSummary[]>([]);
-  const [archiveItems, setArchiveItems] = useState<ChangeSummary[]>([]);
+  const [items, setItems] = useState<ChangeSummary[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [reparsing, setReparsing] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
   const [stats, setStats] = useState<ChangeReparseStats | null>(null);
@@ -124,7 +127,6 @@ export default function ChangesPage({ params }: Props) {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [runtimes, setRuntimes] = useState<DaemonRuntimeRead[]>([]);
 
-  const items = tab === "active" ? activeItems : archiveItems;
   const daemonRuntimeId = workspace?.daemon_runtime_id ?? null;
   const boundRuntime = useMemo(() => {
     if (!daemonRuntimeId) return null;
@@ -137,35 +139,22 @@ export default function ChangesPage({ params }: Props) {
       : null
     : null;
 
-  const filtered = useMemo(() => {
-    let result = items;
-    if (stageFilter) {
-      result = result.filter((c) => c.current_stage === stageFilter);
-    }
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(
-        (c) =>
-          c.change_key.toLowerCase().includes(q) ||
-          (c.title ?? "").toLowerCase().includes(q) ||
-          c.affected_components.some((comp) => comp.toLowerCase().includes(q)),
-      );
-    }
-    return result;
-  }, [items, searchQuery, stageFilter]);
-
-  const loadAll = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setPageError(null);
     try {
-      const [active, archive, ws, runtimeList] = await Promise.all([
-        listChanges(workspaceId, { location: "active" }),
-        listChanges(workspaceId, { location: "archive" }),
+      const [resp, ws, runtimeList] = await Promise.all([
+        listChanges(workspaceId, {
+          location: tab,
+          search: search || undefined,
+          page,
+          pageSize,
+        }),
         getWorkspace(workspaceId),
         listDaemonRuntimes().catch(() => [] as DaemonRuntimeRead[]),
       ]);
-      setActiveItems(active.items);
-      setArchiveItems(archive.items);
+      setItems(resp.items);
+      setTotal(resp.total);
       setWorkspace(ws);
       setRuntimes(runtimeList);
     } catch (err) {
@@ -173,12 +162,35 @@ export default function ChangesPage({ params }: Props) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [workspaceId, tab, search, page, pageSize]);
 
   useEffect(() => {
-    void loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId]);
+    void load();
+  }, [load]);
+
+  const handleSearchInput = (value: string) => {
+    setSearchInput(value);
+  };
+
+  const handleSearchClick = () => {
+    const noChange = searchInput === search && page === 1;
+    setSearch(searchInput);
+    setPage(1);
+    if (noChange) void load();
+  };
+
+  const handleResetClick = () => {
+    setSearchInput("");
+    setSearch("");
+    setStageFilter("");
+    setPage(1);
+  };
+
+  const handleTabChange = (newTab: "active" | "archive") => {
+    if (newTab === tab) return;
+    setTab(newTab);
+    setPage(1);
+  };
 
   const handleReparse = async () => {
     setReparsing(true);
@@ -187,7 +199,7 @@ export default function ChangesPage({ params }: Props) {
       const resp = await reparseChanges(workspaceId);
       setStats(resp.stats);
       setWarnings(resp.warnings);
-      await loadAll();
+      await load();
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "重新解析失败");
     } finally {
@@ -327,8 +339,15 @@ export default function ChangesPage({ params }: Props) {
       )}
 
       <SectionCard bodyPadding="p-2">
-        {/* 顶部操作按钮行（右对齐，对齐 admin/roles / admin/users） */}
+        {/* 顶部操作按钮行（对齐 admin/roles） */}
         <div className="mb-2 flex items-center justify-end gap-2">
+          <Button size="sm" onClick={handleSearchClick}>
+            搜索
+          </Button>
+          <Button size="sm" variant="outline" onClick={handleResetClick}>
+            重置
+          </Button>
+          <span className="mx-1 h-6 w-px bg-border" aria-hidden />
           <Button size="sm" onClick={handleReparse} disabled={reparsing}>
             {reparsing ? "解析中…" : "重新扫描"}
           </Button>
@@ -345,14 +364,15 @@ export default function ChangesPage({ params }: Props) {
             + 新建变更
           </Button>
         </div>
-        {/* 查询条件：grid-cols-4 垂直 Field，对齐 admin/roles */}
+        {/* 查询条件：grid-cols-4 垂直 Field */}
         <div className="grid w-full grid-cols-4 gap-3">
           <Field label="关键词">
             <Input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
               placeholder="搜索 Key / 标题 / 组件…"
               allowClear
+              onPressEnter={() => handleSearchClick()}
             />
           </Field>
           <Field label="阶段">
@@ -374,21 +394,17 @@ export default function ChangesPage({ params }: Props) {
       {/* 进行中/已归档 tab，放 DataTable 上方左侧（不在查询条件上面） */}
       <div className="flex items-center gap-1">
         {TABS.map((t) => {
-          const count =
-            t.key === "active"
-              ? activeItems.length
-              : archiveItems.length;
           return (
             <button
               key={t.key}
-              onClick={() => setTab(t.key as "active" | "archive")}
+              onClick={() => handleTabChange(t.key as "active" | "archive")}
               className={`border-b-2 pb-1.5 text-xs font-medium transition-colors ${
                 tab === t.key
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               } mr-3 last:mr-0`}
             >
-              {t.label} ({count})
+              {t.label}
             </button>
           );
         })}
@@ -397,12 +413,23 @@ export default function ChangesPage({ params }: Props) {
       <DataTable<ChangeSummary>
         rowKey="id"
         columns={columns}
-        dataSource={filtered}
+        dataSource={items}
         loading={loading}
         size="small"
         bordered
         scroll={{ y: "calc(100vh - 430px)" }}
-        pagination={false}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50, 100],
+          showTotal: (t) => `共 ${t} 条`,
+          onChange: (p, s) => {
+            setPage(p);
+            setPageSize(s);
+          },
+        }}
         emptyText={
           items.length === 0
             ? `当前没有${tab === "active" ? "进行中" : "已归档"}的变更。`
