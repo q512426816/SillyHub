@@ -44,6 +44,9 @@ from app.modules.tool_gateway.policy_router import router as policy_crud_router
 from app.modules.tool_gateway.router import router as tool_gateway_router
 from app.modules.workflow.router import router as workflow_router
 from app.modules.workspace import workspace_router
+from app.modules.workspace.member_runtimes.router import (
+    router as member_runtimes_router,
+)
 from app.modules.workspace.members_router import router as members_router
 from app.modules.worktree import lease_router, worktree_router
 
@@ -434,6 +437,7 @@ def create_app() -> FastAPI:
     # double-count members_router's own prefix and raise
     # ``ValueError: Duplicated param name workspace_id``.
     app.include_router(members_router, prefix="/api", tags=["workspace-members"])
+    app.include_router(member_runtimes_router, prefix="/api", tags=["workspace-member-runtimes"])
     app.include_router(auth_router, prefix="/api")
     app.include_router(change_router, prefix="/api")
     app.include_router(scan_docs_router, prefix="/api")
