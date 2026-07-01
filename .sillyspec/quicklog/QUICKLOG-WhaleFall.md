@@ -108,4 +108,12 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 方案：import_from_repo except 链拆分——DaemonRuntimeOffline/DaemonRpcTimeout/DaemonRpcConflict 直接 raise(504/504/409)；DaemonRpcRemoteError re-map(forbidden→403 HTTP_403_DAEMON_RPC_FORBIDDEN / 其他→502 HTTP_502_DAEMON_RPC_REMOTE)；其余兜底 502 SPEC_IMPORT_RPC_FAILED。前端只显 err.message 不依赖 code，改 code 安全。
 结果：新增 test_import.py 4 测试(offline→504/remote→502/forbidden→403/正常→200)，spec_workspace 全模块 37 测试全过，ruff 通过。daemon 离线时用户需启动 daemon（物理限制：容器读不到宿主机 .sillyspec）。注：sillyspec run quick --done 不持久化 step 进度（progress.json quick.steps 始终 pending，每次 --done 重置到 step1），疑似 CLI 缺陷。
 
+## ql-20260701-002-b3e4 | 2026-07-01 09:43:51 | spec-workspace import 卡死 500（daemon get_spec_bundle 打包 2G .runtime/worktrees）
+状态：已完成
+文件：sillyhub-daemon/src/spec-sync.ts + sillyhub-daemon/src/daemon.ts + sillyhub-daemon/tests/spec-sync.test.ts
+需求：POST spec-workspace/import 返回 500（点击导入报错）。
+现状：根因=daemon get_spec_bundle(packSpecDir) 打包项目 .sillyspec 整树含 .runtime/worktrees（2.1G/117787 文件），卡满 60s RPC timeout→backend HTTP_504_DAEMON_RPC_TIMEOUT→Next.js proxy 500。daemon 现已 online（心跳11s）故 TIMEOUT 非 OFFLINE（ql-001 的 OFFLINE 场景已不适用）。packSpecDir 按注释包含 .runtime（task-06 D-003 push 路径），但 get_spec_bundle（import 项目源）不该含 .runtime（项目 runtime cache 含 worktrees，可达 GB，非 spec 数据）。
+方案：spec-sync.ts packSpecDir 加 opts.excludeRuntime 参数（默认 false，postSpecSync 回灌保持含 .runtime）；daemon.ts get_spec_bundle 调 packSpecDir(specDir,{excludeRuntime:true}) 排除 .runtime（与 backend build_bundle 排除 .runtime 对称）。tests/spec-sync.test.ts 加 excludeRuntime 排除测试。
+结果：vitest spec-sync 7 过（含新增 excludeRuntime）。tsc --noEmit 仅 pre-existing build-id.ts 缺失（bundle 生成）。daemon 改动需用户重新 bundle + 重启本机 daemon 生效（用户本机 daemon 仍跑旧代码）；backend 镜像 rebuild 后容器内 daemon + 分发为新代码。
+
 

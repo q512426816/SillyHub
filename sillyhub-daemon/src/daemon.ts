@@ -1833,7 +1833,10 @@ export class Daemon {
       if (!rootPath) throw new Error('root_path required for get_spec_bundle');
       const specDir = join(rootPath, '.sillyspec');
       const { packSpecDir } = await import('./spec-sync.js');
-      const tarBuf = await packSpecDir(specDir);
+      // ql-20260701-002：排除 .runtime——项目源 .sillyspec 的 .runtime 是 SillySpec 运行时
+      // 缓存(含 worktrees，可达 GB)，非 spec 数据，导入会卡满 RPC timeout。与 backend
+      // build_bundle 排除 .runtime 对称。postSpecSync 回灌路径不受影响(不传此选项)。
+      const tarBuf = await packSpecDir(specDir, { excludeRuntime: true });
       return { tar_base64: tarBuf.toString('base64') };
     });
   }

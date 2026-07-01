@@ -290,10 +290,21 @@ export async function syncSpecTreeIfNeeded(
  *
  * 纯目录打包，无 client 依赖（client 调用在 postSpecSync）。
  */
-export async function packSpecDir(specDir: string): Promise<Buffer> {
+export async function packSpecDir(
+  specDir: string,
+  opts: { excludeRuntime?: boolean } = {},
+): Promise<Buffer> {
+  const excludeRuntime = opts.excludeRuntime === true;
   const chunks: Buffer[] = [];
   const entries = await walkDir(specDir);
   for (const e of entries) {
+    // ql-20260701-002：import 路径(get_spec_bundle)排除 .runtime——项目源 .sillyspec 的
+    // .runtime 是 SillySpec 运行时缓存(含 worktrees，可达 GB)，非 spec 数据，绝不该导入
+    // 平台 spec_root。与 backend build_bundle 排除 .runtime 对称。postSpecSync 不传此选项，
+    // 保持 task-06 含 .runtime 回灌(design §5.2 D-003)。
+    if (excludeRuntime && e.relPath.split('/').includes('.runtime')) {
+      continue;
+    }
     // task-06：.runtime 段不再排除（design §5.2 D-003 push 路径），含 sillyspec.db 回灌。
     const header = await buildTarHeader(
       e.relPath + (e.isDir ? '/' : ''),
