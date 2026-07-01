@@ -132,4 +132,11 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 方案：layout 改 client(usePathname)，changes 路径隐藏 WorkspaceTabs(其他页保留)；changes 页 PageHeader actions 只留 +新建变更/重新扫描，查询(关键词/阶段)移到列表 SectionCard 内 grid-cols-4 Field(antd Input/Select 垂直)，DataTable 加 bordered+scroll.y calc(100vh-430px)。保留 changes 业务(进行中/已归档 tab + 即时 filter + 生命周期图)。
 结果：typecheck 0 error，eslint 无 warning。rebuild frontend 后生效（用户硬刷新浏览器）。随后又把进行中/已归档 tab 从查询区右上角移到 DataTable 上方左侧。
 
+## ql-20260701-005-a1b2 | 2026-07-01 15:08:00 | 变更中心 DataTable 改后端分页查询
+状态：已完成
+文件：backend/app/modules/change/service.py + backend/app/modules/change/router.py + frontend/src/lib/changes.ts + frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+需求：变更中心的 table 改为分页查询（与 admin/roles 一致）。
+现状：前端即时 filter（无分页，pagination=false），一次拉全量数据。
+方案：backend list_ 加 search/page/page_size 参数（ILIKE 搜索 change_key/title，OFFSET/LIMIT 分页，func.count 返回 total）；router 加 Query 参数；前端 listChanges 加对应参数；changes 页 state 加 searchInput/search/items/total/page/pageSize，搜索改受控（搜索/重置按钮触发），DataTable pagination 用后端 total，tab 去计数。
+结果：typecheck 0 error，ruff check+format 过。backend+frontend rebuild healthy。
 
