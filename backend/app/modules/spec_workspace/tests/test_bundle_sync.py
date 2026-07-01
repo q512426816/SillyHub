@@ -170,7 +170,9 @@ class TestSync:
 
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body == {"ok": True, "reparsed": 1}
+        # D-003：apply_sync 现返回 {reparsed_docs, reparsed_changes}；sync DTO 暴露两段
+        # （reparsed=docs 向后兼容 + reparsed_changes；test spec_root 无 changes → 0）。
+        assert body == {"ok": True, "reparsed": 1, "reparsed_changes": 0}
 
         # Old file gone, new file present
         assert not (spec_root / "docs" / "A.md").exists()

@@ -26,6 +26,7 @@ import {
   generateProjects,
   getSpecWorkspace,
   importSpecWorkspace,
+  type ImportPhase,
   type SpecWorkspace,
 } from "@/lib/spec-workspaces";
 import { getRuntimeProgress } from "@/lib/runtime";
@@ -117,6 +118,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const [currentStage, setCurrentStage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
+  const [importPhase, setImportPhase] = useState<ImportPhase | null>(null);
   const [bootstrapping, setBootstrapping] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
 
@@ -321,14 +323,20 @@ export default function WorkspaceDetailPage({ params }: Props) {
 
   const handleImport = async () => {
     setImporting(true);
+    setImportPhase("packing");
     setPageError(null);
     try {
-      const imported = await importSpecWorkspace(workspaceId);
-      setSpecWs(imported);
+      await importSpecWorkspace(workspaceId, {
+        onProgress: (phase) => setImportPhase(phase),
+      });
+      // done：刷新 spec_ws + 变更中心（changes 入 Change 表后立即显示）
+      setSpecWs(await getSpecWorkspace(workspaceId));
+      void load();
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "导入失败");
     } finally {
       setImporting(false);
+      setImportPhase(null);
     }
   };
 
@@ -503,7 +511,19 @@ export default function WorkspaceDetailPage({ params }: Props) {
                   onClick={handleImport}
                   disabled={importing || bootstrapping}
                 >
-                  {importing ? "导入中…" : "导入"}
+                  {importing
+                    ? `${
+                        {
+                          packing: "打包中",
+                          packed: "已打包",
+                          applying: "落盘中",
+                          reparsing_docs: "解析文档",
+                          reparsing_changes: "解析变更",
+                          done: "完成",
+                          error: "失败",
+                        }[importPhase ?? "packing"]
+                      }…`
+                    : "导入"}
                 </Button>
               )}
             </div>
