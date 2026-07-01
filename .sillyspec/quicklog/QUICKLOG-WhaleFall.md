@@ -130,6 +130,6 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 需求：/workspaces/{id}/changes 页去掉顶部【概览/组件/变更/成员】tab，页面按 /admin/roles 样式调整。
 现状：tab 来自 layout.tsx 的 WorkspaceTabs(所有 workspace 子页共享)；changes 页查询在 PageHeader actions(裸 input/select 横向)，DataTable 无 bordered/scroll.y。
 方案：layout 改 client(usePathname)，changes 路径隐藏 WorkspaceTabs(其他页保留)；changes 页 PageHeader actions 只留 +新建变更/重新扫描，查询(关键词/阶段)移到列表 SectionCard 内 grid-cols-4 Field(antd Input/Select 垂直)，DataTable 加 bordered+scroll.y calc(100vh-430px)。保留 changes 业务(进行中/已归档 tab + 即时 filter + 生命周期图)。
-结果：typecheck 0 error，eslint 无 warning。rebuild frontend 后生效（用户硬刷新浏览器）。
+结果：typecheck 0 error，eslint 无 warning。rebuild frontend 后生效（用户硬刷新浏览器）。随后又把进行中/已归档 tab 从查询区右上角移到 DataTable 上方左侧。
 
 
