@@ -200,7 +200,6 @@ export default function ChangesPage({ params }: Props) {
       title: "变更 Key",
       dataIndex: "change_key",
       key: "change_key",
-      width: 120,
       render: (v: string, c: ChangeSummary) => (
         <Link
           href={`/workspaces/${workspaceId}/changes/${c.id}`}
@@ -214,7 +213,6 @@ export default function ChangesPage({ params }: Props) {
       title: "标题",
       dataIndex: "title",
       key: "title",
-      width: 200,
       ellipsis: true,
       render: (v: string | null) => (
         <span className="font-medium">{v ?? "—"}</span>
@@ -265,7 +263,6 @@ export default function ChangesPage({ params }: Props) {
     {
       title: "影响组件",
       key: "affected_components",
-      width: 180,
       ellipsis: true,
       render: (c: ChangeSummary) => (
         <span className="text-[11px]">
@@ -279,7 +276,6 @@ export default function ChangesPage({ params }: Props) {
       title: "更新时间",
       dataIndex: "updated_at",
       key: "updated_at",
-      width: 100,
       align: "right",
       render: (v: string) => (
         <span className="text-[11px] text-muted-foreground">
@@ -407,7 +403,7 @@ export default function ChangesPage({ params }: Props) {
         loading={loading}
         size="small"
         bordered
-        scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
+        scroll={{ y: "calc(100vh - 430px)" }}
         pagination={false}
         emptyText={
           items.length === 0
