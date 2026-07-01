@@ -100,4 +100,12 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 测试：backend daemon pytest 415p(3 既存 session SSE failed 无关)/sillyhub-daemon vitest 1514p(含 permission-rules 7p+session-manager-allowed-roots 16p)/frontend typecheck+18 runtimes 测试。部署：backend rebuild a3a2dc3d + daemon pnpm bundle + 重启(allowed_roots_synced count=3 含 F:/)。全栈 healthy。
 注：CC permission 验证——claude --help 确认 --settings+Tool(spec) 格式(Write(path/**))+--disallowedTools；SDK(sdk.d.ts)确认 disallowedTools/permissionMode/canUseTool 但无 settings JSON → interactive 用 canUseTool 回调。Codex provider 写拦截未实现(走 sessionPermission 非 canUseTool)。Bash 间接写文件不拦(读自由语义)。push 待 GitHub 网络。
 
+## ql-20260701-001-7a1c | 2026-07-01 09:10:18 | spec-workspace import 错误码语义透传（daemon 离线不再误报 502）
+状态：已完成
+文件：backend/app/modules/spec_workspace/service.py + backend/app/modules/spec_workspace/tests/test_import.py
+需求：POST /api/workspaces/{id}/spec-workspace/import 返回 502 SPEC_IMPORT_RPC_FAILED "daemon runtime offline"，排查并修正。
+现状：根因=环境问题。workspace 8f8a1d7f 绑定的 claude runtime 462d0e85 当前 offline（最后心跳 2026-06-30 17:49，全部 2 个 runtime 均 offline）；root_path=F:\WorkNew\SillyHub 是宿主机路径，容器读不到，daemon-client 必须 daemon 在线才能打包 .sillyspec，import 失败本身正确。代码缺陷：import_from_repo 用 except Exception 把 DaemonRuntimeOffline(504)/DaemonRpcTimeout(504)/DaemonRpcConflict(409)/DaemonRpcRemoteError(403|502) 全吞成 502 SPEC_IMPORT_RPC_FAILED，破坏既有错误码体系，前端无法区分 daemon 离线 vs 真 RPC 失败。
+方案：import_from_repo except 链拆分——DaemonRuntimeOffline/DaemonRpcTimeout/DaemonRpcConflict 直接 raise(504/504/409)；DaemonRpcRemoteError re-map(forbidden→403 HTTP_403_DAEMON_RPC_FORBIDDEN / 其他→502 HTTP_502_DAEMON_RPC_REMOTE)；其余兜底 502 SPEC_IMPORT_RPC_FAILED。前端只显 err.message 不依赖 code，改 code 安全。
+结果：新增 test_import.py 4 测试(offline→504/remote→502/forbidden→403/正常→200)，spec_workspace 全模块 37 测试全过，ruff 通过。daemon 离线时用户需启动 daemon（物理限制：容器读不到宿主机 .sillyspec）。注：sillyspec run quick --done 不持久化 step 进度（progress.json quick.steps 始终 pending，每次 --done 重置到 step1），疑似 CLI 缺陷。
+
 

@@ -199,6 +199,18 @@ class SpecWorkspaceService:
 
         # ── daemon-client：经 WS RPC 让 daemon 打包 → 回传 → apply_sync ──
         if ws_path_source == "daemon-client" and ws_runtime_id:
+            # ql-20260701-001：daemon RPC 错误码语义透传。原实现用 except Exception 把
+            # DaemonRuntimeOffline(504)/DaemonRpcTimeout(504)/DaemonRpcConflict(409)/
+            # DaemonRpcRemoteError(403|502) 全吞成 502 SPEC_IMPORT_RPC_FAILED，破坏既有
+            # 错误码体系，前端无法区分 "daemon 没开" 与 "真 RPC 失败"。改为透传/重映射。
+            from app.modules.daemon.runtime.service import (
+                DaemonRpcConflict,
+                DaemonRpcForbiddenError,
+                DaemonRpcRemoteError,
+                DaemonRpcRemoteGatewayError,
+                DaemonRpcTimeout,
+                DaemonRuntimeOffline,
+            )
             from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
             hub = get_daemon_ws_hub()
@@ -212,6 +224,21 @@ class SpecWorkspaceService:
                     {"root_path": daemon_root},
                     timeout=60.0,
                 )
+            except (DaemonRuntimeOffline, DaemonRpcTimeout, DaemonRpcConflict):
+                # 已是 AppError 子类，自带正确 code/http_status（504/504/409），透传。
+                raise
+            except DaemonRpcRemoteError as exc:
+                # daemon 在线但打包业务失败 → 复用既有 re-map 约定
+                # （forbidden→403 / 其他→502），避免裸 daemon 错误码直漏 HTTP 状态映射。
+                if exc.code == "forbidden":
+                    raise DaemonRpcForbiddenError(
+                        f"Daemon get_spec_bundle forbidden: {exc.message}",
+                        details={"runtime_id": str(ws_runtime_id), "daemon_code": exc.code},
+                    ) from exc
+                raise DaemonRpcRemoteGatewayError(
+                    f"Daemon get_spec_bundle failed: {exc.message}",
+                    details={"runtime_id": str(ws_runtime_id), "daemon_code": exc.code},
+                ) from exc
             except Exception as exc:
                 raise AppError(
                     f"Daemon RPC get_spec_bundle failed: {exc}",
