@@ -138,5 +138,5 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 需求：变更中心的 table 改为分页查询（与 admin/roles 一致）。
 现状：前端即时 filter（无分页，pagination=false），一次拉全量数据。
 方案：backend list_ 加 search/page/page_size 参数（ILIKE 搜索 change_key/title，OFFSET/LIMIT 分页，func.count 返回 total）；router 加 Query 参数；前端 listChanges 加对应参数；changes 页 state 加 searchInput/search/items/total/page/pageSize，搜索改受控（搜索/重置按钮触发），DataTable pagination 用后端 total，tab 去计数。
-结果：typecheck 0 error，ruff check+format 过。backend+frontend rebuild healthy。
+结果：typecheck 0 error，ruff check+format 过。backend+frontend rebuild healthy。随后变更生命周期移到查询条件上方；layout 对 changes 路径返回 fragment（无 main wrapper），DOM 与 admin/roles 完全一致，宽度统一。
 
