@@ -10,7 +10,6 @@ export type ChangeSummary = {
   affected_components: string[];
   owner_id: string | null;
   current_stage: string | null;
-  human_gate: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -19,12 +18,14 @@ export type ChangeRead = ChangeSummary & {
   path: string;
   archived_at: string | null;
   current_stage: string | null;
-  human_gate: string | null;
   stages: Record<string, any> | null;
   approval_status: string | null;
   approved_by: string | null;
   approved_at: string | null;
   rejection_reason: string | null;
+  /** 当前应展示的审核面板类型（task-03/07 StageProjectionService 投影，对齐 design §5 P3 / FR-03）。
+   *  取值：proposal_review | plan_review | human_test | archive_confirm | null */
+  pending_review: string | null;
 };
 
 export type ChangeList = {
@@ -500,5 +501,42 @@ export function archiveConfirm(
       method: "POST",
       json: { comment: comment ?? null },
     },
+  );
+}
+
+// ── Generic Review API（task-11 合并自 lib/workflow.ts，单一来源 D-006） ──
+
+/** 通用审核记录（GET/POST /reviews 端点返回结构） */
+export interface ReviewEntry {
+  id: string;
+  change_id: string;
+  reviewer_id: string;
+  verdict: "approve" | "reject";
+  comment: string | null;
+  created_at: string;
+}
+
+/**
+ * 提交通用审核 — POST /api/workspaces/{wid}/changes/{cid}/reviews
+ *
+ * verdict=approve/reject 的通用审核入口（区别于上面 proposalReview/planReview 等
+ * 阶段化审核端点）。
+ */
+export function submitReview(
+  workspaceId: string,
+  changeId: string,
+  verdict: "approve" | "reject",
+  comment?: string,
+) {
+  return apiFetch<ReviewEntry>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/reviews`,
+    { method: "POST", json: { verdict, comment } },
+  );
+}
+
+/** 拉取通用审核列表 — GET /api/workspaces/{wid}/changes/{cid}/reviews */
+export function listReviews(workspaceId: string, changeId: string) {
+  return apiFetch<ReviewEntry[]>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/reviews`,
   );
 }

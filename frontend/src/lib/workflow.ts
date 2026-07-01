@@ -1,71 +1,15 @@
 import { apiFetch } from "./api";
 
-export interface ReviewEntry {
-  id: string;
-  change_id: string;
-  reviewer_id: string;
-  verdict: "approve" | "reject";
-  comment: string | null;
-  created_at: string;
-}
+// task-11：transition/review 封装（transitionChange/submitReview/listReviews/ReviewEntry）
+// 已合并进 lib/changes.ts（单一来源 D-006）。本文件仅保留 task 状态流转 transitionTask，
+// 不属于 change transition 契约。
 
-/** Agent dispatch info returned by transition endpoint. */
-export type AgentDispatchResult = {
-  dispatched: boolean;
-  reason?: string;
-  stage?: string;
-  phase?: string;
-  agent_run_id?: string;
-  error?: string;
-};
-
-/** Transition endpoint response — wraps change data + agent dispatch info. */
-export type TransitionResponse = {
-  change: {
-    id: string;
-    status: string;
-    current_stage: string | null;
-    [key: string]: unknown;
-  };
-  agent_dispatch: AgentDispatchResult | null;
-};
-
-export function transitionChange(
-  workspaceId: string,
-  changeId: string,
-  targetStage: string,
-  reason?: string,
-  provider?: string | null,
-  model?: string | null,
-) {
-  const body: Record<string, unknown> = { target_stage: targetStage };
-  if (reason !== undefined) body.reason = reason;
-  if (provider !== undefined) body.provider = provider;
-  if (model !== undefined) body.model = model;
-  return apiFetch<TransitionResponse>(
-    `/api/workspaces/${workspaceId}/changes/${changeId}/transition`,
-    { method: "POST", json: body },
-  );
-}
-
-export function submitReview(
-  workspaceId: string,
-  changeId: string,
-  verdict: "approve" | "reject",
-  comment?: string,
-) {
-  return apiFetch<ReviewEntry>(
-    `/api/workspaces/${workspaceId}/changes/${changeId}/reviews`,
-    { method: "POST", json: { verdict, comment } },
-  );
-}
-
-export function listReviews(workspaceId: string, changeId: string) {
-  return apiFetch<ReviewEntry[]>(
-    `/api/workspaces/${workspaceId}/changes/${changeId}/reviews`,
-  );
-}
-
+/**
+ * Task 状态流转 — POST /api/workspaces/{wid}/tasks/{tid}/transition
+ *
+ * 注意：这是 task（TaskCard）级别的状态流转，与 change 的阶段流转（transitionChange，
+ * 已迁至 @/lib/changes）是不同契约，不可混用。
+ */
 export function transitionTask(
   workspaceId: string,
   taskId: string,

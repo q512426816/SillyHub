@@ -27,22 +27,15 @@ from app.models.base import BaseModel
 
 
 class StageEnum(enum.StrEnum):
-    """统一工作流阶段枚举：SillySpec 8 主阶段 + Hub 3 业务扩展。"""
+    """统一工作流阶段枚举：SillySpec 6 主阶段。"""
 
     # ── SillySpec 主阶段（由 CLI 管理） ──
     SCAN = "scan"
     BRAINSTORM = "brainstorm"
-    PROPOSE = "propose"
     PLAN = "plan"
     EXECUTE = "execute"
     VERIFY = "verify"
     ARCHIVE = "archive"
-    QUICK = "quick"
-
-    # ── Hub 业务扩展阶段 ──
-    DRAFT = "draft"
-    BLOCKED = "blocked"
-    ARCHIVED = "archived"
 
     @classmethod
     def spec_stages(cls) -> list[StageEnum]:
@@ -50,81 +43,51 @@ class StageEnum(enum.StrEnum):
         return [
             cls.SCAN,
             cls.BRAINSTORM,
-            cls.PROPOSE,
             cls.PLAN,
             cls.EXECUTE,
             cls.VERIFY,
             cls.ARCHIVE,
-            cls.QUICK,
         ]
 
-    @classmethod
-    def hub_stages(cls) -> list[StageEnum]:
-        """Hub 业务扩展阶段列表。"""
-        return [cls.DRAFT, cls.BLOCKED, cls.ARCHIVED]
 
-    @classmethod
-    def all_stages(cls) -> list[StageEnum]:
-        """全部阶段列表。"""
-        return cls.spec_stages() + cls.hub_stages()
+class ChangeStatus(enum.StrEnum):
+    """变更状态枚举，对齐 sillyspec progress.js。"""
+
+    ACTIVE = "active"
+    ARCHIVED = "archived"
 
 
-class HumanGate(enum.StrEnum):
-    """人工等待门控枚举 — 表达「人在等什么」。"""
+class StageStatus(enum.StrEnum):
+    """阶段状态枚举，对齐 sillyspec progress.js:44。"""
 
-    NONE = "none"
-    NEED_REQUIREMENT_INPUT = "need_requirement_input"
-    NEED_PROPOSAL_REVIEW = "need_proposal_review"
-    NEED_PLAN_REVIEW = "need_plan_review"
-    NEED_HUMAN_TEST = "need_human_test"
-    NEED_ARCHIVE_CONFIRM = "need_archive_confirm"
-    BLOCKED = "blocked"  # 自动修复超限等，需人工介入
+    PENDING = "pending"
+    IN_PROGRESS = "in-progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    BLOCKED = "blocked"
+    REVISING = "revising"
+    STALE = "stale"
+
+
+class StepStatus(enum.StrEnum):
+    """步骤状态枚举，对齐 sillyspec progress.js:41。"""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in-progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    BLOCKED = "blocked"
+    WAITING = "waiting"
+    STALE = "stale"
 
 
 TRANSITIONS: dict[StageEnum, dict[StageEnum, list[str]]] = {
-    # ── draft → SillySpec 入口（Agent 接管） ──
-    StageEnum.DRAFT: {
-        StageEnum.BRAINSTORM: ["agent"],
-        StageEnum.SCAN: ["agent"],
-    },
-    # ── SillySpec 主线流程 ──
-    StageEnum.SCAN: {
-        StageEnum.BRAINSTORM: ["agent"],
-    },
-    StageEnum.BRAINSTORM: {
-        StageEnum.PROPOSE: ["agent"],
-    },
-    StageEnum.PROPOSE: {
-        StageEnum.PLAN: ["reviewer", "agent"],
-        StageEnum.BRAINSTORM: ["reviewer"],
-    },
-    StageEnum.PLAN: {
-        StageEnum.EXECUTE: ["reviewer", "agent"],
-        StageEnum.PROPOSE: ["reviewer"],
-        StageEnum.BRAINSTORM: ["reviewer"],
-    },
-    StageEnum.EXECUTE: {
-        StageEnum.VERIFY: ["agent"],
-    },
-    StageEnum.VERIFY: {
-        StageEnum.QUICK: ["agent"],
-        StageEnum.ARCHIVE: ["reviewer", "agent"],
-        StageEnum.BLOCKED: ["agent"],
-        StageEnum.PROPOSE: ["reviewer"],  # AD-03: human_test doc_mismatch 回退
-    },
-    StageEnum.QUICK: {
-        StageEnum.VERIFY: ["agent"],
-        StageEnum.BLOCKED: ["agent"],
-    },
-    StageEnum.BLOCKED: {
-        StageEnum.PROPOSE: ["reviewer"],
-        StageEnum.PLAN: ["reviewer"],
-        StageEnum.EXECUTE: ["reviewer"],
-    },
-    StageEnum.ARCHIVE: {
-        StageEnum.ARCHIVED: ["system"],
-    },
-    StageEnum.ARCHIVED: {},
+    # ── SillySpec 主线流程（stage-contract allowedFrom/allowedTo） ──
+    StageEnum.SCAN: {StageEnum.BRAINSTORM: ["agent"]},
+    StageEnum.BRAINSTORM: {StageEnum.PLAN: ["agent"]},
+    StageEnum.PLAN: {StageEnum.EXECUTE: ["agent"]},
+    StageEnum.EXECUTE: {StageEnum.VERIFY: ["agent"]},
+    StageEnum.VERIFY: {StageEnum.ARCHIVE: ["agent"]},
 }
 
 
@@ -189,10 +152,6 @@ class Change(BaseModel, table=True):
     current_stage: str | None = Field(
         default=None,
         sa_column=Column(String, nullable=True, default=None),
-    )
-    human_gate: str = Field(
-        default="none",
-        sa_column=Column(String(50), nullable=False, server_default="none"),
     )
     stages: dict = Field(
         default_factory=dict,

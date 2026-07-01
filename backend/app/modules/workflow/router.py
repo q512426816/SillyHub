@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_user, require_permission
@@ -15,11 +15,8 @@ from app.modules.auth.permissions import Permission
 from app.modules.workflow.schema import (
     AuditLogEntry,
     ReviewResponse,
-    ReviewSubmitRequest,
     TaskTransitionRequest,
     TaskTransitionResponse,
-    TransitionRequest,
-    TransitionResponse,
 )
 from app.modules.workflow.service import WorkflowService
 
@@ -27,50 +24,6 @@ router = APIRouter(tags=["workflow"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
-
-
-@router.post(
-    "/workspaces/{workspace_id}/changes/{change_id}/transition",
-    response_model=TransitionResponse,
-)
-async def transition_change(
-    workspace_id: uuid.UUID,
-    change_id: uuid.UUID,
-    data: TransitionRequest,
-    session: SessionDep,
-    user: Annotated[User, Depends(require_permission(Permission.CHANGE_UPDATE))],
-) -> TransitionResponse:
-    svc = WorkflowService(session)
-    change, prev = await svc.transition_change(
-        workspace_id,
-        change_id,
-        user.id,
-        data.target,
-    )
-    return TransitionResponse(id=change.id, status=change.status, previous_status=prev)
-
-
-@router.post(
-    "/workspaces/{workspace_id}/changes/{change_id}/reviews",
-    response_model=ReviewResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def submit_review(
-    workspace_id: uuid.UUID,
-    change_id: uuid.UUID,
-    data: ReviewSubmitRequest,
-    session: SessionDep,
-    user: Annotated[User, Depends(require_permission(Permission.CHANGE_APPROVE))],
-) -> ReviewResponse:
-    svc = WorkflowService(session)
-    review = await svc.submit_review(
-        workspace_id,
-        change_id,
-        user.id,
-        data.verdict,
-        data.comment,
-    )
-    return ReviewResponse.model_validate(review)
 
 
 @router.get(

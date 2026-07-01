@@ -43,7 +43,15 @@ const TABS = [
   { key: "archive", label: "已归档" },
 ] as const;
 
+// 审核面板投影（D-004）：对齐 task-03 DTO 的 pending_review 取值
+// proposal_review/plan_review/human_test/archive_confirm + blocked 业务态。
+// brownfield 兜底：旧 change 仍带 need_* 风格 human_gate 时降级映射，不崩。
 const GATE_LABELS: Record<string, { label: string; kind: "warning" | "error" }> = {
+  proposal_review: { label: "待提案审核", kind: "warning" },
+  plan_review: { label: "待计划审核", kind: "warning" },
+  human_test: { label: "待人工测试", kind: "warning" },
+  archive_confirm: { label: "待归档确认", kind: "warning" },
+  // 旧 human_gate 兼容（task-03 切换前的 brownfield 投影）
   need_proposal_review: { label: "待提案审核", kind: "warning" },
   need_plan_review: { label: "待计划审核", kind: "warning" },
   need_human_test: { label: "待人工测试", kind: "warning" },
@@ -63,47 +71,40 @@ const TYPE_LABEL: Record<string, string> = {
   prototype: "原型",
 };
 
+// 主线 6 stage（对齐工具 STAGE_ORDER：scan→brainstorm→plan→execute→verify→archive）。
+// status 投影（blocked/archived）作为业务态徽标，不再作为 stage 枚举值。
 const STAGE_KIND: Record<string, StatusKind> = {
-  draft: "neutral",
   scan: "info",
   brainstorm: "warning",
-  propose: "warning",
   plan: "info",
   execute: "info",
   verify: "success",
-  rework_required: "error",
-  accepted: "success",
   archive: "neutral",
-  quick: "info",
+  // status 投影（业务态徽标）
+  blocked: "error",
+  archived: "neutral",
 };
 
 const STAGE_LABEL: Record<string, string> = {
-  draft: "草稿",
   scan: "扫描",
   brainstorm: "需求分析",
-  propose: "提案",
   plan: "规划",
   execute: "执行",
   verify: "验证",
-  rework_required: "需返工",
-  accepted: "已验收",
   archive: "归档",
-  quick: "快速",
+  // status 投影
+  blocked: "阻塞",
+  archived: "已归档",
 };
 
 const STAGE_OPTIONS = [
   { value: "", label: "全部阶段" },
-  { value: "draft", label: "草稿" },
   { value: "scan", label: "扫描" },
   { value: "brainstorm", label: "需求分析" },
-  { value: "propose", label: "提案" },
   { value: "plan", label: "规划" },
   { value: "execute", label: "执行" },
   { value: "verify", label: "验证" },
-  { value: "rework_required", label: "需返工" },
-  { value: "accepted", label: "已验收" },
   { value: "archive", label: "归档" },
-  { value: "quick", label: "快速" },
 ] as const;
 
 type StatusKind = "info" | "success" | "warning" | "error" | "neutral";
@@ -237,14 +238,10 @@ export default function ChangesPage({ params }: Props) {
       key: "status",
       width: 110,
       render: (_v: unknown, c: ChangeSummary) => {
-        const gate = GATE_LABELS[c.human_gate ?? ""];
-        if (gate) {
-          return <StatusBadge kind={gate.kind}>{gate.label}</StatusBadge>;
+        if (c.status === "archived" || c.current_stage === "archive") {
+          return <StatusBadge kind="neutral">已归档</StatusBadge>;
         }
-        if (c.current_stage === "accepted") {
-          return <StatusBadge kind="success">已完成</StatusBadge>;
-        }
-        if (c.current_stage && c.current_stage !== "draft") {
+        if (c.current_stage && c.current_stage !== "scan") {
           return <StatusBadge kind="info">进行中</StatusBadge>;
         }
         return <StatusBadge kind="neutral">空闲</StatusBadge>;
@@ -254,11 +251,14 @@ export default function ChangesPage({ params }: Props) {
       title: "阶段",
       key: "stage",
       width: 96,
-      render: (_v: unknown, c: ChangeSummary) => (
-        <StatusBadge kind={STAGE_KIND[c.current_stage ?? "draft"] ?? "neutral"}>
-          {STAGE_LABEL[c.current_stage ?? "draft"] ?? c.current_stage ?? "draft"}
-        </StatusBadge>
-      ),
+      render: (_v: unknown, c: ChangeSummary) => {
+        const stage = c.current_stage ?? "scan";
+        return (
+          <StatusBadge kind={STAGE_KIND[stage] ?? "neutral"}>
+            {STAGE_LABEL[stage] ?? stage}
+          </StatusBadge>
+        );
+      },
     },
     {
       title: "影响组件",
@@ -415,18 +415,18 @@ export default function ChangesPage({ params }: Props) {
       <SectionCard title="变更生命周期">
         <div className="flex items-center justify-center gap-0">
           {[
-            "需求输入",
-            "Change 创建",
-            "Task 拆分",
+            "扫描",
+            "需求分析",
+            "规划",
             "执行",
             "验证",
             "归档",
-          ].map((step, i) => (
+          ].map((step, i, arr) => (
             <div key={step} className="flex items-center">
               <div className="whitespace-nowrap rounded-md border border-border bg-muted/40 px-3 py-1.5 text-[11px] font-medium text-foreground">
                 {step}
               </div>
-              {i < 5 && (
+              {i < arr.length - 1 && (
                 <span className="mx-2 text-muted-foreground">&rarr;</span>
               )}
             </div>

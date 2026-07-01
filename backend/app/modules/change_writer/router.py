@@ -197,16 +197,6 @@ async def execute_change(
     if change is None:
         raise AppError(f"Change '{change_key}' not found.", http_status=404)
 
-    # Stage guard
-    current_stage = getattr(change, "current_stage", None) or "draft"
-    if current_stage != "ready_for_dev":
-        raise AppError(
-            f"Change '{change_key}' \u5f53\u524d\u9636\u6bb5\u4e3a '{current_stage}'\uff0c"
-            f"\u4ec5\u5f53\u9636\u6bb5\u4e3a 'ready_for_dev' \u65f6\u53ef\u6267\u884c\u3002"
-            f"\u8bf7\u5148\u5b8c\u6210\u8bbe\u8ba1\u8bc4\u5ba1\u5e76\u6d41\u8f6c\u81f3 ready_for_dev\u3002",
-            http_status=409,
-        )
-
     # Dispatch via unified service
     service = SillySpecStageDispatchService(session)
     result = await service.dispatch_next_step(

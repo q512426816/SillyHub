@@ -19,13 +19,15 @@ from sqlmodel import col
 
 from app.core.errors import ChangeDocNotFound, ChangeNotFound, InvalidTransition, PermissionDenied
 from app.core.logging import get_logger
-from app.modules.change.model import TRANSITIONS, Change, ChangeDocument, HumanGate, StageEnum
+from app.modules.change.model import TRANSITIONS, Change, ChangeDocument, StageEnum
 from app.modules.change.parser import ChangeParser, ChangeParserResult, ParsedChange
+from app.modules.change.projection import StageProjectionService
 from app.modules.change.schema import (
     ArchiveCheckItem,
     ArchiveGateResponse,
     ChangeRead,
     ChangeSummary,
+    PendingReview,
 )
 from app.modules.workspace.model import ChangeWorkspace, Workspace
 from app.modules.workspace.service import WorkspaceService
@@ -33,11 +35,6 @@ from app.modules.workspace.service import WorkspaceService
 log = get_logger(__name__)
 
 MAX_CONTENT_BYTES = 1_000_000  # 1 MB
-
-
-def resolve_human_gate(target_stage: str) -> str:
-    """AD-01: transition 时一律返回 none。gate 时机推迟到 complete_stage 中处理。"""
-    return HumanGate.NONE
 
 
 @dataclass
@@ -358,7 +355,9 @@ class ChangeService:
     ) -> Change:
         """执行状态流转。"""
         change = await self.get(workspace_id, change_id)
-        current = change.current_stage or "draft"
+        current = change.current_stage
+        if not current or current == "draft":
+            current = "scan"
 
         # Validate current stage exists in TRANSITIONS
         current_key = StageEnum(current)  # convert to StageEnum
@@ -398,7 +397,6 @@ class ChangeService:
         # Update change
         change.current_stage = target_stage
         change.stages = stages
-        change.human_gate = resolve_human_gate(target_stage)
         change.updated_at = datetime.now(UTC)
         self._session.add(change)
 
@@ -974,6 +972,35 @@ class ChangeService:
         row.path = parsed.path
 
     # ── Review Gate methods ────────────────────────────────────────────
+    #
+    # D-004@v2: 4 审核面板 = stage 完成事件投影（非 waiting step）。
+    # 提交审核 = 先用 StageProjectionService.compute_pending_review 校验
+    # 当前变更确实处于该面板（否则 InvalidTransition），再推进下一 stage
+    # （复用 transition_with_dispatch / rerun_stage），不再读写
+    # change.human_gate。
+
+    async def _assert_pending_review(
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        expected: PendingReview,
+    ) -> Change:
+        """校验变更当前 pending_review == expected，不匹配抛 InvalidTransition。
+
+        D-004@v2：审核端点提交前的前置校验，对应 sillyspec stage 完成事件
+        投影。投影降级（db 缺失/读失败）返回 None 时也按不匹配处理。
+        """
+        change = await self.get(workspace_id, change_id)
+        actual = await StageProjectionService(self._session).compute_pending_review(
+            self._session, change_id
+        )
+        if actual != expected:
+            raise InvalidTransition(
+                f"当前状态不允许该审核提交: 期望 pending_review={expected.value}, "
+                f"实际={actual.value if actual else None}",
+                details={"expected": expected.value, "actual": actual.value if actual else None},
+            )
+        return change
 
     async def proposal_review(
         self,
@@ -983,18 +1010,15 @@ class ChangeService:
         comment: str | None,
         user_id: uuid.UUID,
     ) -> dict:
-        change = await self.get(workspace_id, change_id)
-        if change.current_stage != "propose" or change.human_gate != "need_proposal_review":
-            raise InvalidTransition(
-                "当前状态不允许 proposal review",
-                details={"current_stage": change.current_stage, "human_gate": change.human_gate},
-            )
+        change = await self._assert_pending_review(
+            workspace_id, change_id, PendingReview.PROPOSAL_REVIEW
+        )
 
         # Record review_history before executing the action
         target_action_map = {
             "approve": "transition:plan",
-            "revise": "rerun:propose",
-            "unclear": "transition:brainstorm",
+            "revise": "rerun:brainstorm",
+            "unclear": "rerun:brainstorm",
         }
         stages = change.stages or {}
         review_history = stages.get("review_history", [])
@@ -1004,7 +1028,7 @@ class ChangeService:
                 "comment": comment,
                 "user_id": str(user_id),
                 "submitted_at": datetime.now(UTC).isoformat(),
-                "from_stage": "propose",
+                "from_stage": change.current_stage,
                 "target_action": target_action_map[decision],
             }
         )
@@ -1014,35 +1038,27 @@ class ChangeService:
         await self._session.commit()
 
         if decision == "approve":
+            # brainstorm 完成且用户确认 → 推进到 plan（dispatch plan agent）
             return await self.transition_with_dispatch(
                 workspace_id=workspace_id,
                 change_id=change_id,
                 target_stage="plan",
-                user_role="reviewer",
+                user_role="admin",
                 reason=comment or "proposal approved",
                 user_id=user_id,
             )
-        elif decision == "revise":
-            r = await self.rerun_stage(
-                workspace_id=workspace_id,
-                change_id=change_id,
-                stage="propose",
-                comment=comment,
-                user_id=user_id,
-            )
-            return {
-                "change": r.change,
-                "agent_dispatch": r.agent_dispatch,
-            }
-        else:  # unclear
-            return await self.transition_with_dispatch(
-                workspace_id=workspace_id,
-                change_id=change_id,
-                target_stage="brainstorm",
-                user_role="admin",
-                reason=comment or "proposal unclear, back to brainstorm",
-                user_id=user_id,
-            )
+        # revise / unclear → 重新跑 brainstorm agent（保持 brainstorm stage）
+        r = await self.rerun_stage(
+            workspace_id=workspace_id,
+            change_id=change_id,
+            stage="brainstorm",
+            comment=comment,
+            user_id=user_id,
+        )
+        return {
+            "change": r.change,
+            "agent_dispatch": r.agent_dispatch,
+        }
 
     async def plan_review(
         self,
@@ -1052,19 +1068,16 @@ class ChangeService:
         comment: str | None,
         user_id: uuid.UUID,
     ) -> dict:
-        change = await self.get(workspace_id, change_id)
-        if change.current_stage != "plan" or change.human_gate != "need_plan_review":
-            raise InvalidTransition(
-                "当前状态不允许 plan review",
-                details={"current_stage": change.current_stage, "human_gate": change.human_gate},
-            )
+        change = await self._assert_pending_review(
+            workspace_id, change_id, PendingReview.PLAN_REVIEW
+        )
 
         # Record review_history
         target_action_map = {
             "approve": "transition:execute",
             "replan": "rerun:plan",
-            "back_to_propose": "transition:propose",
-            "back_to_brainstorm": "transition:brainstorm",
+            "back_to_propose": "rerun:brainstorm",
+            "back_to_brainstorm": "rerun:brainstorm",
         }
         stages = change.stages or {}
         review_history = stages.get("review_history", [])
@@ -1074,7 +1087,7 @@ class ChangeService:
                 "comment": comment,
                 "user_id": str(user_id),
                 "submitted_at": datetime.now(UTC).isoformat(),
-                "from_stage": "plan",
+                "from_stage": change.current_stage,
                 "target_action": target_action_map[decision],
             }
         )
@@ -1084,15 +1097,17 @@ class ChangeService:
         await self._session.commit()
 
         if decision == "approve":
+            # plan 完成且用户确认 → 推进到 execute（dispatch execute agent）
             return await self.transition_with_dispatch(
                 workspace_id=workspace_id,
                 change_id=change_id,
                 target_stage="execute",
-                user_role="reviewer",
+                user_role="admin",
                 reason=comment or "plan approved",
                 user_id=user_id,
             )
-        elif decision == "replan":
+        if decision == "replan":
+            # 保持 plan stage，重新跑 plan agent
             r = await self.rerun_stage(
                 workspace_id=workspace_id,
                 change_id=change_id,
@@ -1104,24 +1119,18 @@ class ChangeService:
                 "change": r.change,
                 "agent_dispatch": r.agent_dispatch,
             }
-        elif decision == "back_to_propose":
-            return await self.transition_with_dispatch(
-                workspace_id=workspace_id,
-                change_id=change_id,
-                target_stage="propose",
-                user_role="admin",
-                reason=comment or "back to propose",
-                user_id=user_id,
-            )
-        else:  # back_to_brainstorm
-            return await self.transition_with_dispatch(
-                workspace_id=workspace_id,
-                change_id=change_id,
-                target_stage="brainstorm",
-                user_role="admin",
-                reason=comment or "back to brainstorm",
-                user_id=user_id,
-            )
+        # back_to_propose / back_to_brainstorm → 回到 brainstorm 重跑
+        r = await self.rerun_stage(
+            workspace_id=workspace_id,
+            change_id=change_id,
+            stage="brainstorm",
+            comment=comment,
+            user_id=user_id,
+        )
+        return {
+            "change": r.change,
+            "agent_dispatch": r.agent_dispatch,
+        }
 
     async def human_test(
         self,
@@ -1131,18 +1140,15 @@ class ChangeService:
         comment: str | None,
         user_id: uuid.UUID,
     ) -> dict:
-        change = await self.get(workspace_id, change_id)
-        if change.current_stage != "verify" or change.human_gate != "need_human_test":
-            raise InvalidTransition(
-                "当前状态不允许 human test",
-                details={"current_stage": change.current_stage, "human_gate": change.human_gate},
-            )
+        change = await self._assert_pending_review(
+            workspace_id, change_id, PendingReview.HUMAN_TEST
+        )
 
         # Record review_history
         target_action_map = {
             "pass": "transition:archive",
-            "bug": "transition:quick",
-            "doc_mismatch": "transition:propose",
+            "bug": "rerun:execute",
+            "doc_mismatch": "rerun:brainstorm",
         }
         stages = change.stages or {}
         review_history = stages.get("review_history", [])
@@ -1152,7 +1158,7 @@ class ChangeService:
                 "comment": comment,
                 "user_id": str(user_id),
                 "submitted_at": datetime.now(UTC).isoformat(),
-                "from_stage": "verify",
+                "from_stage": change.current_stage,
                 "target_action": target_action_map[result],
             }
         )
@@ -1162,70 +1168,70 @@ class ChangeService:
         await self._session.commit()
 
         if result == "pass":
-            # AD-04: pass 只设 archive+need_archive_confirm，不 dispatch archive
-            change.current_stage = "archive"
-            change.human_gate = HumanGate.NEED_ARCHIVE_CONFIRM
-            change.updated_at = datetime.now(UTC)
-            self._session.add(change)
-            await self._session.commit()
+            # verify 完成且人工验收通过 → 推进到 archive（dispatch archive agent）
+            return await self.transition_with_dispatch(
+                workspace_id=workspace_id,
+                change_id=change_id,
+                target_stage="archive",
+                user_role="admin",
+                reason=comment or "human test passed",
+                user_id=user_id,
+            )
+        if result == "bug":
+            # 回到 execute 重跑
+            r = await self.rerun_stage(
+                workspace_id=workspace_id,
+                change_id=change_id,
+                stage="execute",
+                comment=comment,
+                user_id=user_id,
+            )
             return {
-                "change": change,
-                "agent_dispatch": {"dispatched": False, "reason": "need_archive_confirm"},
+                "change": r.change,
+                "agent_dispatch": r.agent_dispatch,
             }
-        elif result == "bug":
-            return await self.transition_with_dispatch(
-                workspace_id=workspace_id,
-                change_id=change_id,
-                target_stage="quick",
-                user_role="admin",
-                reason=comment or "bug found in human test",
-                user_id=user_id,
-            )
-        else:  # doc_mismatch
-            return await self.transition_with_dispatch(
-                workspace_id=workspace_id,
-                change_id=change_id,
-                target_stage="propose",
-                user_role="admin",
-                reason=comment or "doc mismatch found in human test",
-                user_id=user_id,
-            )
+        # doc_mismatch → 回到 brainstorm 重跑
+        r = await self.rerun_stage(
+            workspace_id=workspace_id,
+            change_id=change_id,
+            stage="brainstorm",
+            comment=comment,
+            user_id=user_id,
+        )
+        return {
+            "change": r.change,
+            "agent_dispatch": r.agent_dispatch,
+        }
 
     # ── Stage completion ────────────────────────────────────────────────
 
     @staticmethod
-    def _resolve_stage_completion(stage: str, result: str | None) -> tuple[str, str, str | None]:
-        """Map stage + result to (new_current_stage, new_human_gate, dispatch_target).
+    def _resolve_stage_completion(stage: str, result: str | None) -> tuple[str, str | None]:
+        """Map stage + result to (new_current_stage, dispatch_target).
 
         See design.md "complete_stage 阶段映射".
         """
         if stage == "brainstorm":
             if result == "clear" or result is None:
-                return ("propose", HumanGate.NEED_PROPOSAL_REVIEW, None)
-            return ("brainstorm", HumanGate.NEED_REQUIREMENT_INPUT, None)
-
-        if stage == "propose":
-            return ("propose", HumanGate.NEED_PROPOSAL_REVIEW, None)
+                return ("plan", "plan")
+            return ("brainstorm", None)
 
         if stage == "plan":
-            return ("plan", HumanGate.NEED_PLAN_REVIEW, None)
+            return ("execute", "execute")
 
         if stage == "execute":
-            return ("verify", HumanGate.NONE, "verify")
+            return ("verify", "verify")
 
         if stage == "verify":
             if result == "passed":
-                return ("verify", HumanGate.NEED_HUMAN_TEST, None)
-            return ("quick", HumanGate.NONE, "quick")
-
-        if stage == "quick":
-            return ("verify", HumanGate.NONE, "verify")
+                return ("archive", "archive")
+            return ("verify", None)
 
         if stage == "archive":
-            return ("archived", HumanGate.NONE, None)
+            return ("archived", None)
 
         # Unknown stage — no change
-        return (stage, HumanGate.NONE, None)
+        return (stage, None)
 
     async def complete_stage(
         self,
@@ -1235,16 +1241,15 @@ class ChangeService:
         result: str | None = None,
         summary: str | None = None,
     ) -> CompleteStageResult:
-        """Agent 完成某一阶段后，统一设置 current_stage 和 human_gate。
+        """Agent 完成某一阶段后，统一设置 current_stage。
 
         AD-01: 此方法只更新 DB 状态，不执行 agent dispatch。
         dispatch 由调用方 (auto_dispatch_next_step) 根据 dispatch_target 执行。
         """
         change = await self.get(workspace_id, change_id)
-        new_stage, new_gate, dispatch_target = self._resolve_stage_completion(stage, result)
+        new_stage, dispatch_target = self._resolve_stage_completion(stage, result)
 
         change.current_stage = new_stage
-        change.human_gate = new_gate
         change.updated_at = datetime.now(UTC)
 
         stages = change.stages or {}
@@ -1253,7 +1258,6 @@ class ChangeService:
             "result": result,
             "summary": summary,
             "new_stage": new_stage,
-            "new_gate": new_gate,
             "completed_at": datetime.now(UTC).isoformat(),
         }
         change.stages = stages
@@ -1267,9 +1271,7 @@ class ChangeService:
             action="change.complete_stage",
             resource_type="change",
             resource_id=change.id,
-            details_json=json.dumps(
-                {"stage": stage, "result": result, "new_stage": new_stage, "new_gate": new_gate}
-            ),
+            details_json=json.dumps({"stage": stage, "result": result, "new_stage": new_stage}),
         )
         self._session.add(audit)
         self._session.add(change)
@@ -1278,7 +1280,7 @@ class ChangeService:
         return CompleteStageResult(
             change=change,
             dispatch_target=dispatch_target,
-            gate=new_gate,
+            gate="none",
         )
 
     async def rerun_stage(
@@ -1290,34 +1292,16 @@ class ChangeService:
         comment: str | None = None,
         user_id: uuid.UUID | None = None,
     ) -> RerunStageResult:
-        """Re-run the current stage by dispatching an agent after reviewer feedback.
+        """Re-run a stage by dispatching its agent after reviewer feedback.
 
-        Allows a reviewer to request re-execution of the same stage (propose/plan)
-        when ``human_gate`` is ``need_proposal_review`` or ``need_plan_review``.
-        The stage stays the same; the agent re-generates the document.
+        D-004@v2: 由 review 端点（proposal/plan/human-test 的 revise / replan /
+        bug / back_to_* 分支）驱动。不再依赖 ``human_gate`` —— 是否允许 rerun
+        已由调用方（review 端点）通过 ``_assert_pending_review`` 校验。stage
+        可与 current_stage 不同（reviewer 要求回到更早 stage 重跑）。
         """
         change = await self.get(workspace_id, change_id)
 
-        # 1. Validate stage matches current_stage
-        current = change.current_stage or "draft"
-        if stage != current:
-            raise InvalidTransition(
-                f"rerun_stage 阶段不匹配: 请求 {stage}，当前 {current}",
-                details={"requested_stage": stage, "current_stage": current},
-            )
-
-        # 2. Validate human_gate
-        allowed_gates = {HumanGate.NEED_PROPOSAL_REVIEW, HumanGate.NEED_PLAN_REVIEW}
-        if change.human_gate not in allowed_gates:
-            raise InvalidTransition(
-                f"当前 human_gate 不允许 rerun: {change.human_gate}",
-                details={
-                    "human_gate": change.human_gate,
-                    "allowed": sorted(allowed_gates),
-                },
-            )
-
-        # 3. Record comment to stages.review_history
+        # 1. Record comment to stages.review_history
         stages = change.stages or {}
         review_history = stages.get("review_history", [])
         review_history.append(
@@ -1330,10 +1314,7 @@ class ChangeService:
         )
         stages["review_history"] = review_history
 
-        # 4. Clear human_gate
-        change.human_gate = HumanGate.NONE
-
-        # 5. Update stages.last_review
+        # 2. Update stages.last_review
         stages["last_review"] = {
             "action": "rerun",
             "stage": stage,
@@ -1344,7 +1325,7 @@ class ChangeService:
         change.updated_at = datetime.now(UTC)
         self._session.add(change)
 
-        # 6. Write audit log
+        # 3. Write audit log
         from app.modules.workflow.model import AuditLog
 
         audit_entry = AuditLog(
@@ -1358,10 +1339,10 @@ class ChangeService:
         )
         self._session.add(audit_entry)
 
-        # 7. Commit DB changes
+        # 4. Commit DB changes
         await self._session.commit()
 
-        # 8. Dispatch agent for current stage (best-effort, independent session)
+        # 5. Dispatch agent for the target stage (best-effort, independent session)
         dispatched = False
         agent_dispatch: dict = {}
         if user_id is not None:
@@ -1405,18 +1386,19 @@ class ChangeService:
         comment: str | None,
         user_id: uuid.UUID,
     ) -> dict:
-        """AD-05: 归档确认 — 只在 archive+need_archive_confirm 时允许。
+        """归档确认（D-004@v2 / D-007）。
 
-        清除 human_gate 并 dispatch archive Agent。
+        平台语义：用户在 archive stage 确认归档。本端点仅做 Hub 侧状态推进/
+        记录（写 stages.archive_confirmed + review_history），不再写
+        ``human_gate``，也不直接 dispatch / subprocess 跑 sillyspec CLI ——
+        ``sillyspec run archive --done --confirm`` 由 daemon agent 在 archive
+        stage 执行（design §5 P3、§7.5）。
         """
-        change = await self.get(workspace_id, change_id)
-        if change.current_stage != "archive" or change.human_gate != "need_archive_confirm":
-            raise InvalidTransition(
-                "当前状态不允许归档确认",
-                details={"current_stage": change.current_stage, "human_gate": change.human_gate},
-            )
+        change = await self._assert_pending_review(
+            workspace_id, change_id, PendingReview.ARCHIVE_CONFIRM
+        )
 
-        # Record review_history
+        # Record review_history + archive_confirmed flag（业务投影字段）
         stages = change.stages or {}
         review_history = stages.get("review_history", [])
         review_history.append(
@@ -1425,42 +1407,25 @@ class ChangeService:
                 "comment": comment,
                 "user_id": str(user_id),
                 "submitted_at": datetime.now(UTC).isoformat(),
-                "from_stage": "archive",
-                "target_action": "dispatch:archive",
+                "from_stage": change.current_stage,
+                "target_action": "confirm:archive",
             }
         )
         stages["review_history"] = review_history
+        stages["archive_confirmed"] = {
+            "confirmed": True,
+            "comment": comment,
+            "user_id": str(user_id),
+            "at": datetime.now(UTC).isoformat(),
+        }
         change.stages = stages
-        change.human_gate = HumanGate.NONE
         change.updated_at = datetime.now(UTC)
         self._session.add(change)
         await self._session.commit()
 
-        # Dispatch archive Agent (best-effort, independent session)
-        dispatch_result: dict = {}
-        try:
-            from app.core.db import get_session_factory
-            from app.modules.change.dispatch import dispatch
-
-            factory = get_session_factory()
-            async with factory() as dispatch_session:
-                dispatch_result = await dispatch(
-                    session=dispatch_session,
-                    workspace_id=workspace_id,
-                    change_id=change_id,
-                    target_stage="archive",
-                    user_id=user_id,
-                )
-        except Exception as exc:
-            log.warning(
-                "archive_confirm_dispatch_failed",
-                change_id=str(change_id),
-                error=str(exc),
-            )
-            dispatch_result = {
-                "dispatched": False,
-                "reason": "dispatch_exception",
-                "error": str(exc),
-            }
-
-        return {"change": change, "agent_dispatch": dispatch_result}
+        # Hub 侧仅记录确认状态，不 dispatch、不写 human_gate（D-007：archive
+        # 的 sillyspec CLI --confirm 由 daemon agent 执行）。
+        return {
+            "change": change,
+            "agent_dispatch": {"dispatched": False, "reason": "archive_confirmed_hub_side"},
+        }

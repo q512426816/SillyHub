@@ -8,8 +8,8 @@ export interface StepInfo {
   index: number;
   /** 步骤名称 */
   name: string;
-  /** 步骤状态 */
-  status: "pending" | "running" | "completed" | "failed";
+  /** 步骤状态（waiting 对齐 design §8 StepStatus.WAITING = 工具 progress.js:41） */
+  status: "pending" | "running" | "completed" | "failed" | "waiting";
   /** 关联的 AgentRun ID */
   agent_run_id?: string;
 }
@@ -61,6 +61,13 @@ const STEP_STATUS_STYLES: Record<
     dot: "bg-red-500",
     icon: "✗",
     text: "text-red-600",
+  },
+  // waiting：等待人工介入（design §8 StepStatus.WAITING，对应审核面板投影），
+  // 用琥珀色与 pending（灰，尚未开始）区分。
+  waiting: {
+    dot: "bg-amber-500",
+    icon: "⏸",
+    text: "text-amber-600 font-medium",
   },
   pending: {
     dot: "bg-gray-300",
