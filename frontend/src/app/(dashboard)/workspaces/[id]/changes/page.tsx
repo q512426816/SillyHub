@@ -262,6 +262,8 @@ export default function ChangesPage({ params }: Props) {
     {
       title: "影响组件",
       key: "affected_components",
+      width: 180,
+      ellipsis: true,
       render: (c: ChangeSummary) => (
         <span className="text-[11px]">
           {c.affected_components.length > 0
@@ -274,6 +276,7 @@ export default function ChangesPage({ params }: Props) {
       title: "更新时间",
       dataIndex: "updated_at",
       key: "updated_at",
+      width: 100,
       align: "right",
       render: (v: string) => (
         <span className="text-[11px] text-muted-foreground">
@@ -401,7 +404,7 @@ export default function ChangesPage({ params }: Props) {
         loading={loading}
         size="small"
         bordered
-        scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
+        scroll={{ y: "calc(100vh - 430px)" }}
         pagination={false}
         emptyText={
           items.length === 0
