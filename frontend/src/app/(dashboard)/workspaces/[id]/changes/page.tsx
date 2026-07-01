@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { type TableProps } from "antd";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Input, Select, type TableProps } from "antd";
 
 import {
   DataTable,
@@ -26,6 +26,16 @@ import { getWorkspace, type Workspace } from "@/lib/workspaces";
 
 interface Props {
   params: { id: string };
+}
+
+// 查询条件垂直 Field（label 在上，控件在下），对齐 admin/roles / admin/users。
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex w-full flex-col gap-1">
+      <span className="text-xs leading-4 text-muted-foreground">{label}</span>
+      {children}
+    </div>
+  );
 }
 
 const TABS = [
@@ -287,24 +297,6 @@ export default function ChangesPage({ params }: Props) {
         }
         actions={
           <>
-            <input
-              type="text"
-              placeholder="搜索 Key / 标题 / 组件…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-8 rounded border border-input bg-background px-2.5 text-xs focus:border-ring focus:outline-none"
-            />
-            <select
-              value={stageFilter}
-              onChange={(e) => setStageFilter(e.target.value)}
-              className="h-8 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none"
-            >
-              {STAGE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
             <Button
               size="sm"
               variant="outline"
@@ -351,7 +343,7 @@ export default function ChangesPage({ params }: Props) {
       )}
 
       <SectionCard
-        bodyPadding="p-0"
+        bodyPadding="p-2"
         extra={
           <div className="flex gap-1">
             {TABS.map((t) => {
@@ -376,12 +368,38 @@ export default function ChangesPage({ params }: Props) {
           </div>
         }
       >
+        {/* 查询条件：grid-cols-4 垂直 Field，对齐 admin/roles */}
+        <div className="grid w-full grid-cols-4 gap-3">
+          <Field label="关键词">
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜索 Key / 标题 / 组件…"
+              allowClear
+            />
+          </Field>
+          <Field label="阶段">
+            <Select
+              value={stageFilter}
+              onChange={(v) => setStageFilter(v ?? "")}
+              className="w-full"
+            >
+              {STAGE_OPTIONS.map((opt) => (
+                <Select.Option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </Select.Option>
+              ))}
+            </Select>
+          </Field>
+        </div>
         <DataTable<ChangeSummary>
           rowKey="id"
           columns={columns}
           dataSource={filtered}
           loading={loading}
           size="small"
+          bordered
+          scroll={{ y: "calc(100vh - 430px)" }}
           pagination={false}
           emptyText={
             items.length === 0

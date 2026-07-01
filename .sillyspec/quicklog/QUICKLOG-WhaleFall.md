@@ -124,4 +124,12 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 方案：packSpecDir 加 opts.excludeNames(顶层目录黑名单)+ walkDir 加 pruneTop 剪枝(排除目录不递归，避免遍历)；get_spec_bundle 传 excludeRuntime:true + excludeNames:['changes']（changes 是 SillySpec 流程档案，reparse 不读，非 spec 数据）。postSpecSync 不传 exclude 保持含 .runtime 回灌。
 结果：剪枝后打包 16.8s→0.0s(1.3M，实测)。vitest spec-sync 8 过。tsc build 过。import 总耗时预计<5s，根治 proxy 超时。daemon 需用户重启本机 daemon(preflight 自更新)生效。
 
+## ql-20260701-004-9e2a | 2026-07-01 14:24:58 | 变更中心页去掉 workspace tab + 查询区按 admin/roles 调整
+状态：已完成
+文件：frontend/src/app/(dashboard)/workspaces/[id]/layout.tsx + frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+需求：/workspaces/{id}/changes 页去掉顶部【概览/组件/变更/成员】tab，页面按 /admin/roles 样式调整。
+现状：tab 来自 layout.tsx 的 WorkspaceTabs(所有 workspace 子页共享)；changes 页查询在 PageHeader actions(裸 input/select 横向)，DataTable 无 bordered/scroll.y。
+方案：layout 改 client(usePathname)，changes 路径隐藏 WorkspaceTabs(其他页保留)；changes 页 PageHeader actions 只留 +新建变更/重新扫描，查询(关键词/阶段)移到列表 SectionCard 内 grid-cols-4 Field(antd Input/Select 垂直)，DataTable 加 bordered+scroll.y calc(100vh-430px)。保留 changes 业务(进行中/已归档 tab + 即时 filter + 生命周期图)。
+结果：typecheck 0 error，eslint 无 warning。rebuild frontend 后生效（用户硬刷新浏览器）。
+
 
