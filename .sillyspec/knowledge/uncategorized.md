@@ -242,3 +242,9 @@
 
 - plan step 4 postcheck 的 `resolveChangeDir` 读空 `progress.json` → 回退 `sort().reverse()` 取字典序最大目录（`workspace-*` 排在 `2026-*` 前），校验了别人的变更卡住当前 plan。
 - workaround：写 `progress.json` `{"currentChange":"<变更名>"}` + task 放 `tasks/` 子目录。
+
+## 2026-07-01 — Next.js rewrite proxy 对长请求 socket hang up + daemon 分发以 git SHA 为版本号
+
+- **Next.js rewrite proxy 超时**：frontend `next.config.mjs` 用 `rewrites` 把 `/api/:path*` 代理到 backend（Next.js 14.2.5 standalone node server，非 nginx）。backend 处理慢（>~20-30s）时 proxy 端 `socket hang up / ECONNRESET` 返 500 给浏览器，但 backend 仍在后台跑完（业务成功、前端误报）。无显式 proxyTimeout 配置项（standalone server.js 生成，不易 patch）。根治：耗时端点改 SSE 流式（text/event-stream 长连接 + 阶段事件 + 长阻塞段每 5s yield `: keepalive` 注释行保活），前端原生 fetch+ReadableStream 解析（不复用 JSON 的 apiFetch）。参考范式：`agent/router.py:_SSE_HEADERS` + `StreamingResponse(gen, media_type="text/event-stream")`。
+- **daemon 分发以 git SHA 为版本号**：`pnpm bundle` 的 `BUILD_ID={commit-sha}-{timestamp}`（build-bundle.sh 写 src/build-id.ts），backend `/daemon/latest.json` 分发此 version，daemon `preflight` 启动时比较本地 vs 服务器 SHA 决定是否自更新。**未 commit 的 daemon 改动 bundle 后 BUILD_ID 仍是当前 HEAD SHA**——若用户 daemon 已是该 SHA，preflight 判定版本相同不更新，新代码不生效。故 daemon 改动必须**先 commit（新 SHA）→ 再 bundle → 再 rebuild backend**，分发版本才会递增。同理 backend 镜像 rebuild 才把新 daemon bundle（`additional_contexts: daemon`）bake 进镜像。
+- **apply_sync 黑盒 vs SSE 分阶段**：原 `apply_sync`（写盘+reparse 整体返回 int）无法在 SSE 中途 yield reparse 阶段进度。解法：提取 `_write_spec_root`（写盘+commit clean）供 apply_sync 与 SSE 生成器共用，SSE 顺序调 `_write_spec_root`→`_reparse_phase(scan_docs)`→`_reparse_phase(change)`，每步 yield 事件。两阶段 reparse 各自 try/except 设 dirty 不阻断（D-003，docs/changes 独立数据，部分成功优于全失败）。
