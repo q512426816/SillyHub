@@ -566,6 +566,12 @@ export class Daemon {
   /** 每个 _fire 的 Promise（stop 时 allSettled 等待）。 */
   private readonly _loopPromises = new Set<Promise<void>>();
 
+  /**
+   * _fire 断路器：记录每次自愈重启的起始时间戳。
+   * 循环成功运行超过 loop_restart_backoff_ms 后清除，允许计数器归零。
+   */
+  private readonly _restartStartedAt = new WeakMap<Function, number>();
+
   /** agent provider → server 分配的 runtime_id（register 成功后填入）。 */
   private readonly _registeredRuntimes = new Map<string, string>();
 
@@ -1473,6 +1479,19 @@ export class Daemon {
     // 仍继续尝试 sync——sync 尽力而为，失败也仅 warn（R-03）。shared 模式无 specSyncCtx →
     // 跳过（D-004）。
     await this._postInteractiveSpecSync(sessionId);
+
+    // 清理 _interactiveSessionsByLease（防内存泄漏）。
+    // SESSION_END WS 消息路径已在 _routeSessionControl 中 delete（line ~2022）；
+    // 但 session 通过 idle 超时 / driver error / 手动 end 结束时只走本回调，
+    // 不经过 SESSION_END WS 消息 → 条目泄漏。此处兜底清理（幂等，重复 delete 无副作用）。
+    try {
+      const state = this._sessionManager?.get(sessionId);
+      if (state?.leaseId) {
+        this._interactiveSessionsByLease.delete(state.leaseId);
+      }
+    } catch {
+      // state 查不到（sessionManager 已 dispose 等极端情况）——忽略。
+    }
   }
 
   /**
@@ -1532,25 +1551,64 @@ export class Daemon {
    * 循环抛 AbortError 时静默吞掉（正常停止）；其他异常记日志。
    * task-04（FR-02）：非 AbortError 异常带退避自愈重启，防三循环崩了永久死。
    * 重启前双重检查 _running（sleep 前后），stop() 退出后不复活循环。
+   *
+   * 断路器（circuit-breaker）：连续崩溃超过 max_loop_restarts 次后停止重启，
+   * 记 FATAL 日志。循环成功运行超过 loop_restart_backoff_ms 后计数器自动归零，
+   * 避免偶发崩溃累积到上限。
+   *
+   * @param loop  后台循环函数
+   * @param restartCount  当前连续重启次数（内部递归传递，外部调用省略）
    */
-  private _fire(loop: (signal: AbortSignal) => Promise<void>): void {
+  private _fire(
+    loop: (signal: AbortSignal) => Promise<void>,
+    restartCount = 0,
+  ): void {
     const controller = new AbortController();
     this._controllers.add(controller);
+    const startedAt = Date.now();
     const p: Promise<void> = loop(controller.signal)
       .catch(async (e: unknown) => {
         if (e instanceof AbortError || (e as Error | undefined)?.name === 'AbortError') {
           return;
         }
-        this._logger.error('loop_crashed', { error: e });
-        // task-04：自愈重启——仅当仍在运行时带退避重启，AbortError/已 stop 不重启。
-        if (!this._running) return;
-        try {
-          await abortableSleep(this._config.loop_restart_backoff_ms ?? 5000, controller.signal);
-        } catch {
-          // sleep 期间被 abort（stop 触发）——不再重启。
+        // 断路器：循环成功运行超过退避时间 → 重置计数器（瞬态故障，非持久性 bug）。
+        const survivedMs = Date.now() - startedAt;
+        const backoffMs = this._config.loop_restart_backoff_ms ?? 5000;
+        const effectiveCount = survivedMs >= backoffMs ? 0 : restartCount;
+
+        const nextCount = effectiveCount + 1;
+        const maxRestarts = this._config.max_loop_restarts ?? 10;
+
+        this._logger.error('loop_crashed', {
+          error: e,
+          restart_count: nextCount,
+          max_restarts: maxRestarts,
+          survived_ms: survivedMs,
+        });
+
+        // 断路器触发：连续崩溃超限 → 停止重启，记 FATAL。
+        if (nextCount >= maxRestarts) {
+          this._logger.error('loop_circuit_breaker_open', {
+            restart_count: nextCount,
+            max_restarts: maxRestarts,
+            error: e,
+          });
+          this._restartStartedAt.delete(loop);
           return;
         }
-        if (this._running) this._fire(loop);
+
+        // task-04：自愈重启——仅当仍在运行时带退避重启，AbortError/已 stop 不重启。
+        if (!this._running) return;
+        this._restartStartedAt.set(loop, Date.now());
+        try {
+          await abortableSleep(backoffMs, controller.signal);
+        } catch {
+          // sleep 期间被 abort（stop 触发）——不再重启。
+          this._restartStartedAt.delete(loop);
+          return;
+        }
+        if (this._running) this._fire(loop, nextCount);
+        else this._restartStartedAt.delete(loop);
       })
       .finally(() => {
         this._controllers.delete(controller);

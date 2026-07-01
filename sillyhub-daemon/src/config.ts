@@ -114,6 +114,12 @@ export interface DaemonConfig {
    */
   loop_restart_backoff_ms: number;
   /**
+   * _fire 循环连续崩溃最大重启次数，默认 10。
+   * 达到上限后循环停止重启并记 FATAL 日志（断路器）。
+   * 成功运行超过 loop_restart_backoff_ms 后计数器自动归零。
+   */
+  max_loop_restarts: number;
+  /**
    * outbox 每个 run 最大暂存条数，默认 500。
    * 2026-06-24-daemon-network-resilience task-15：超限丢最旧 + warn。
    */
@@ -234,6 +240,7 @@ export const DEFAULT_CONFIG: Readonly<DaemonConfig> = Object.freeze({
   retry_backoff_factor: 2,
   retry_jitter: 0.2,
   loop_restart_backoff_ms: 5000,
+  max_loop_restarts: 10,
   outbox_max_per_run: 500,
   outbox_max_total: 5000,
   disconnect_log_threshold_sec: 30,
