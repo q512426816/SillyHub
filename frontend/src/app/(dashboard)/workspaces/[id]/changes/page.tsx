@@ -326,32 +326,7 @@ export default function ChangesPage({ params }: Props) {
         </SectionCard>
       )}
 
-      <SectionCard
-        bodyPadding="p-2"
-        extra={
-          <div className="flex gap-1">
-            {TABS.map((t) => {
-              const count =
-                t.key === "active"
-                  ? activeItems.length
-                  : archiveItems.length;
-              return (
-                <button
-                  key={t.key}
-                  onClick={() => setTab(t.key as "active" | "archive")}
-                  className={`border-b-2 pb-1.5 text-xs font-medium transition-colors ${
-                    tab === t.key
-                      ? "border-primary text-primary"
-                      : "border-transparent text-muted-foreground hover:text-foreground"
-                  } mr-3 last:mr-0`}
-                >
-                  {t.label} ({count})
-                </button>
-              );
-            })}
-          </div>
-        }
-      >
+      <SectionCard bodyPadding="p-2">
         {/* 顶部操作按钮行（右对齐，对齐 admin/roles / admin/users） */}
         <div className="mb-2 flex items-center justify-end gap-2">
           <Button size="sm" onClick={handleReparse} disabled={reparsing}>
@@ -395,6 +370,29 @@ export default function ChangesPage({ params }: Props) {
           </Field>
         </div>
       </SectionCard>
+
+      {/* 进行中/已归档 tab，放 DataTable 上方左侧（不在查询条件上面） */}
+      <div className="flex items-center gap-1">
+        {TABS.map((t) => {
+          const count =
+            t.key === "active"
+              ? activeItems.length
+              : archiveItems.length;
+          return (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key as "active" | "archive")}
+              className={`border-b-2 pb-1.5 text-xs font-medium transition-colors ${
+                tab === t.key
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              } mr-3 last:mr-0`}
+            >
+              {t.label} ({count})
+            </button>
+          );
+        })}
+      </div>
 
       <DataTable<ChangeSummary>
         rowKey="id"
