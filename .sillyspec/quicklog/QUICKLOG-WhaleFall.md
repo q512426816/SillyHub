@@ -116,4 +116,12 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 方案：spec-sync.ts packSpecDir 加 opts.excludeRuntime 参数（默认 false，postSpecSync 回灌保持含 .runtime）；daemon.ts get_spec_bundle 调 packSpecDir(specDir,{excludeRuntime:true}) 排除 .runtime（与 backend build_bundle 排除 .runtime 对称）。tests/spec-sync.test.ts 加 excludeRuntime 排除测试。
 结果：vitest spec-sync 7 过（含新增 excludeRuntime）。tsc --noEmit 仅 pre-existing build-id.ts 缺失（bundle 生成）。daemon 改动需用户重新 bundle + 重启本机 daemon 生效（用户本机 daemon 仍跑旧代码）；backend 镜像 rebuild 后容器内 daemon + 分发为新代码。
 
+## ql-20260701-003-c2d5 | 2026-07-01 10:11:43 | spec-workspace import 数据已导入但 frontend proxy ECONNRESET 500（daemon 打包 changes 12M 慢）
+状态：已完成
+文件：sillyhub-daemon/src/spec-sync.ts + sillyhub-daemon/src/daemon.ts + sillyhub-daemon/tests/spec-sync.test.ts
+需求：重启 daemon 后 POST spec-workspace/import 仍报 500。
+现状：根因=walkDir 无剪枝——packSpecDir 排除 .runtime 后仍在循环里 filter（只省 tar 写入不省遍历），仍递归 stat .runtime(2G worktrees)+changes(万级文件)。实测打包 16.8s/11.4M(排除.runtime 后)+WS传1.3M+reparse2.7s≈22s>frontend Next.js 14.2.5 rewrite proxy 超时→socket hang up ECONNRESET 500。但 backend 业务成功(spec_workspace.import_from_repo info，205 文档已导入，tar_bytes=11977728)。backend 无 OOM(0restart/25%mem)。reparse 只读 docs(实测2.7s/205文档)，不读 changes。
+方案：packSpecDir 加 opts.excludeNames(顶层目录黑名单)+ walkDir 加 pruneTop 剪枝(排除目录不递归，避免遍历)；get_spec_bundle 传 excludeRuntime:true + excludeNames:['changes']（changes 是 SillySpec 流程档案，reparse 不读，非 spec 数据）。postSpecSync 不传 exclude 保持含 .runtime 回灌。
+结果：剪枝后打包 16.8s→0.0s(1.3M，实测)。vitest spec-sync 8 过。tsc build 过。import 总耗时预计<5s，根治 proxy 超时。daemon 需用户重启本机 daemon(preflight 自更新)生效。
+
 

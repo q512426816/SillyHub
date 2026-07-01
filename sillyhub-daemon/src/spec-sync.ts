@@ -292,19 +292,21 @@ export async function syncSpecTreeIfNeeded(
  */
 export async function packSpecDir(
   specDir: string,
-  opts: { excludeRuntime?: boolean } = {},
+  opts: { excludeRuntime?: boolean; excludeNames?: string[] } = {},
 ): Promise<Buffer> {
-  const excludeRuntime = opts.excludeRuntime === true;
+  // ql-20260701-002/003：import 路径(get_spec_bundle)排除非 spec 数据的顶层目录——
+  // .runtime（运行时缓存含 worktrees，可达 GB）+ excludeNames（如 changes：SillySpec 流程
+  // 档案，reparse 不读，可达十 MB + 万级文件，Windows 遍历慢，是 import 超时主因）。与
+  // backend build_bundle 排除 .runtime 对称。postSpecSync 不传此选项，保持 task-06 含
+  // .runtime 回灌(design §5.2 D-003)。
+  const excludeTop = new Set<string>(opts.excludeNames ?? []);
+  if (opts.excludeRuntime) excludeTop.add('.runtime');
   const chunks: Buffer[] = [];
-  const entries = await walkDir(specDir);
+  // 传 excludeTop 给 walkDir 剪枝（不递归进排除目录）。仅在循环里 filter 只省 tar 写入、
+  // 不省遍历——.runtime(2G worktrees)/changes(万级文件) 仍会被 stat 一遍，打包照样 16s+。
+  // ql-003。postSpecSync 不传 exclude → walkDir 不剪枝，保持含 .runtime 回灌。
+  const entries = await walkDir(specDir, excludeTop);
   for (const e of entries) {
-    // ql-20260701-002：import 路径(get_spec_bundle)排除 .runtime——项目源 .sillyspec 的
-    // .runtime 是 SillySpec 运行时缓存(含 worktrees，可达 GB)，非 spec 数据，绝不该导入
-    // 平台 spec_root。与 backend build_bundle 排除 .runtime 对称。postSpecSync 不传此选项，
-    // 保持 task-06 含 .runtime 回灌(design §5.2 D-003)。
-    if (excludeRuntime && e.relPath.split('/').includes('.runtime')) {
-      continue;
-    }
     // task-06：.runtime 段不再排除（design §5.2 D-003 push 路径），含 sillyspec.db 回灌。
     const header = await buildTarHeader(
       e.relPath + (e.isDir ? '/' : ''),
@@ -392,7 +394,7 @@ interface WalkEntry {
  * 递归遍历目录，收集所有 entry（含目录本身与子目录），相对路径用 POSIX 分隔符 `/`
  *（tar 标准是 forward slash；Windows 下 join 用 `\`，但 tar entry name 必须是 `/`）。
  */
-async function walkDir(root: string): Promise<WalkEntry[]> {
+async function walkDir(root: string, pruneTop?: Set<string>): Promise<WalkEntry[]> {
   const out: WalkEntry[] = [];
   async function recurse(dir: string): Promise<void> {
     let names: string[];
@@ -410,6 +412,12 @@ async function walkDir(root: string): Promise<WalkEntry[]> {
         continue;
       }
       const relToRoot = relative(root, abs).split(pathSep).join('/');
+      // ql-003：剪枝——顶层排除目录(.runtime/changes 等)不收集、不递归，避免遍历
+      // .runtime/worktrees(2G) + changes(万级文件) 拖慢 import 打包。
+      const topName = relToRoot.split('/')[0] ?? '';
+      if (pruneTop && pruneTop.has(topName)) {
+        continue;
+      }
       if (st.isDirectory()) {
         out.push({ absPath: abs, relPath: relToRoot, isDir: true, size: 0 });
         await recurse(abs);
