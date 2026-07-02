@@ -138,5 +138,82 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 需求：变更中心的 table 改为分页查询（与 admin/roles 一致）。
 现状：前端即时 filter（无分页，pagination=false），一次拉全量数据。
 方案：backend list_ 加 search/page/page_size 参数（ILIKE 搜索 change_key/title，OFFSET/LIMIT 分页，func.count 返回 total）；router 加 Query 参数；前端 listChanges 加对应参数；changes 页 state 加 searchInput/search/items/total/page/pageSize，搜索改受控（搜索/重置按钮触发），DataTable pagination 用后端 total，tab 去计数。
-结果：typecheck 0 error，ruff check+format 过。backend+frontend rebuild healthy。随后变更生命周期移到查询条件上方；layout 对 changes 路径返回 fragment（无 main wrapper），DOM 与 admin/roles 完全一致，宽度统一。
+结果：typecheck 0 error，ruff check+format 过。backend+frontend rebuild healthy。随后变更生命周期移到查询条件上方；layout 对 changes 路径返回 fragment（无 main wrapper），DOM 与 admin/roles 完全一致，宽度统一。列表 Link 加 prefetch={false} 避免 Next.js RSC 批量预取（每行 change 进入视口触发 ?_rsc 请求，20 条→20 个请求）。
 
+## ql-20260702-001-d4e5 | 2026-07-02 08:47:15 | 变更中心【阶段】筛选没生效（改后端分页时漏了）
+状态：已完成
+文件：backend/app/modules/change/service.py + backend/app/modules/change/router.py + frontend/src/lib/changes.ts + frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+需求：查询条件【阶段】没生效。
+现状：ql-005 改后端分页时，stageFilter 仍为前端 state 但 dataSource 用后端 items（不经前端 filter），所以 stage 筛选完全无效。
+方案：backend list_ 加 current_stage 参数（WHERE current_stage=?）；router 加 current_stage Query；前端 listChanges 加 currentStage；changes 页 load 传 currentStage:stageFilter，useCallback 依赖加 stageFilter（Select onChange 即时触发后端查询）。
+结果：typecheck 过，ruff 过。Select 选阶段即时触发后端分页查询。
+
+## ql-20260702-002-e6f7 | 2026-07-02 09:09:05 | 导入的 change current_stage 全空（reparse 不推断 stage）
+状态：已完成
+文件：backend/app/modules/change/parser.py + backend/app/modules/change/service.py
+需求：扫描到的 change 数据 current_stage 都是空的。
+现状：current_stage 权威源是 sillyspec.db（SillySpec CLI 本地 SQLite），但 .runtime 被导入排除（ql-002，worktrees 2G）→ 平台读不到。reparse 只解析文件系统不读 sillyspec.db，dispatch 才同步 current_stage（但导入的 change 没经 dispatch）。
+方案：parser ParsedChange 加 current_stage 字段 + _parse_change 从 change 目录文档存在性推断 stage（archive→archive / verify-result.md→verify / plan.md+tasks→plan / proposal+design→propose / 否则 scan）；service _apply_parsed 同步 parsed.current_stage 到 Change row。
+结果：ruff+mypy 过。用户需点「重新扫描」触发 reparse 填充。推断是 fallback（非权威，精确 stage 仍需 sillyspec.db）。
+
+## ql-20260702-003-a3b4 | 2026-07-02 09:15:00 | 阶段推断 propose 改 brainstorm
+状态：已完成
+文件：backend/app/modules/change/parser.py
+需求：阶段还有 propose（SillySpec 主线无此 stage）。
+方案：_infer_current_stage 有 proposal.md/design.md 时返回 brainstorm（不是 propose）。SillySpec 主线 scan→brainstorm→plan→execute→verify→archive。
+结果：ruff 过。用户重新扫描后 propose 全变 brainstorm。
+
+## ql-20260702-004-b5c6 | 2026-07-02 09:22:00 | 解析警告改中文
+状态：已完成
+文件：backend/app/modules/change/parser.py + frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+需求：reparse 返回的解析警告 detail 全英文，改中文。
+方案：parser.py 5 处 ParseWarning detail 改中文（LEGACY_CHANGE_DIR/PATH_TRAVERSAL/LEGACY_CHANGE_PATH/LEGACY_FILENAME）；前端「个 warning」改「个警告」。
+结果：ruff+typecheck 过。
+
+## ql-20260702-005-c7d8 | 2026-07-02 09:30:00 | /runtimes 「可访问目录」改「可写目录」
+状态：已完成
+文件：frontend/src/app/(dashboard)/runtimes/page.tsx
+需求：allowed_roots 实际是写白名单（读取不受限），UI 名称「可访问目录」误导，改「可写目录」。
+方案：runtimes/page.tsx 全部「可访问目录」→「可写目录」（标签/按钮/tooltip/Modal 标题/描述/notify/aria-label/空态），Modal 描述明确「读取不受限，仅白名单内可写」。
+结果：typecheck 过。（安全 bug：D 盘能写 不在 allowed_roots——需排查 daemon write-guard，另案处理。）
+
+## ql-20260702-006-e8f9 | 2026-07-02 10:11:00 | 安全修复：Bash 间接写绕过 write-guard
+状态：已完成
+文件：sillyhub-daemon/src/interactive/write-guard.ts + sillyhub-daemon/tests/write-guard.test.ts
+需求：allowed_roots 配了 ~/.sillyhub + F:/，CC 仍能在 D 盘写文件。
+现状：write-guard WRITE_TOOLS 只有 Write/Edit/MultiEdit，Bash 一律 return true（放行）。CC 用 Bash echo > D:\file / cp / tee 间接写完全绕过白名单。
+方案：write-guard 加 Bash 写检测——extractBashWritePaths 正则提取重定向(>/>>)/cp/mv/install/tee/mkdir/touch 目标路径，isWriteWithinAllowedRoots 对 Bash：纯读放行，含写则每个目标校验在 allowed_roots。提取 isPathUnderAnyRoot 独立函数（Write/Edit + Bash 共用）。17 vitest 测试覆盖。
+结果：vitest 17 passed。commit 829e576e。后续发现 extractBashWritePaths 的 m[1]/m[2] 在 noUncheckedIndexedAccess 下为 string|undefined，push 到 string[] 报 TS2345 → bundle 编译失败、daemon 停留旧版 c85dec8c（829e576e 代码实际未进分发）。commit dbe8e956 提取 const+if 守卫收窄类型（逻辑零变化，17 测试仍过）。pnpm bundle 成功（BUILD_ID 829e576e-20260702102214）+ docker compose -f deploy/docker-compose.yml build/up backend，daemon version c85dec8c→829e576e-20260702102214 已生效（curl latest.json + 容器内 grep BUILD_ID 三重验证）。坑：compose 文件在 deploy/ 下、之前在仓库根目录跑 docker compose 报 no configuration file，且 `| tail` 掩盖退出码需 set -o pipefail。已 push（829e576e..dbe8e956）。本机若单独跑 daemon 会经 preflight 自更新拉新版。
+
+## ql-20260702-007-f1a8 | 2026-07-02 10:52:54 | 修复 allowed_roots 配盘符根（D:\）后 write-guard 仍 deny
+状态：已完成
+文件：sillyhub-daemon/src/interactive/write-guard.ts + sillyhub-daemon/tests/write-guard.test.ts
+需求：/runtimes 配 D 盘为 allowed_root（可写目录）后，新会话（8438086b）CC 仍不能在 D 盘创建文件；未配时失败属正常（ed544515 会话）。
+现状：write-guard isPathUnderAnyRoot 对盘符根 root 失效——pathResolve('D:/')='D:\'（结尾已是 sep），原逻辑 prefix=rl+sep 产生 'D:\\' 双反斜杠，target.startsWith 永远 false → 配 D 盘仍 deny 所有写。Unix 根 '/' 同理（容器侧 allowed_roots 通常非根未暴露）。node 实测确认 starts=false。
+方案：isPathUnderAnyRoot 加 endsWith(sep) 判断——root 已含尾部 sep 时 prefix 不再补 sep（Windows 盘符根 D:\ + Unix 根 /）。Write/Edit 与 Bash 间接写共用此函数，一并修复。
+结果：vitest 22 passed 1 skipped（+6 新用例：5 Windows 盘符根 + 1 Unix 根，Unix 根在 Windows 跳过）。daemon 模块文档同步（write-guard 首次登记 + 注意事项 + 变更索引）。待 bundle rebuild + 部署后用户本机 daemon self-update 即生效。
+
+## ql-20260702-008-c2e4 | 2026-07-02 11:37:24 | daemon allowed_roots 不同步 D:/（启动管道 SIGPIPE 损坏心跳）
+状态：已完成
+文件：~/.sillyhub/daemon/bin/sillyhub-daemon.js（运维修复）+ 启动方式（nohup+redirect，无代码变更）
+需求：配 D 盘为 allowed_root 后，新会话（46effdc0）CC 仍不能在 D 盘写（未配时失败属正常）。
+根因（curl + 代码 + DB + 前台日志多重确认）：
+  1. backend 正常：REST heartbeat 下发 ["~/.sillyhub","F:/","D:/"]（X-API-Key curl 实证），DB runtime 462d0e85（本机 claude provider）allowed_roots 含 D:/。
+  2. daemon 代码正常：_syncAllowedRoots（daemon.ts:1683）+ normalizeAllowedRoots（config.ts:355）逻辑正确，前台跑 daemon 35s 捕获到 allowed_roots_synced count=4（含 D:/）。
+  3. 真根因：daemon background 启动时 stdout 接管道（排查中曾用 `sillyhub-daemon start | head -8`），head 关闭后 daemon 写 stdout 收 SIGPIPE，损坏心跳循环 → _syncAllowedRoots 不执行 → 内存 config 无 D:/ → write-guard deny D:。前台/无管道启动心跳正常。
+  4. write-guard 用内存 config（cli.ts:528），磁盘 config.json 无 D:/ 是 _syncAllowedRoots 不落盘（设计），非 bug。
+修复：替换本机 bin 为 4b3dada9（含 ql-006/007，补齐虽非根因）+ `nohup sillyhub-daemon start > daemon.log 2>&1 & disown` 启动（redirect stdout 避免 SIGPIPE + 独立持久）。重启后 allowed_roots_synced count=4、心跳正常（15s 间隔）、daemon.log 落盘。
+结果：daemon 内存 config 含 D:/，write-guard 放行 D 盘写。用户重开 CC 会话即可写 D 盘。无代码变更（daemon 代码正确）。
+遗留（后续）：
+  - preflight fetch /daemon/latest.json 经 frontend 3000 → 404（frontend 未代理该路径），daemon bin 无法自动升级（本机曾长期停 13403c71）。待修 frontend proxy 或 preflight 路径。
+  - _syncAllowedRoots 不落盘 config.json：磁盘配置不可见 + 重启窗口期（首次心跳前内存无 D:/）。可考虑落盘。
+  - daemon 对 SIGPIPE 不 resilient：background+管道启动损坏心跳循环，可增强 EPIPE 处理或 install.sh 规范 redirect。
+
+## ql-20260702-009-a1b3 | 2026-07-02 14:15:17 | write-guard Bash git bash 路径绕过（pathResolve 不认 /e/ 盘符映射）
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/src/interactive/write-guard.ts + sillyhub-daemon/tests/write-guard.test.ts
+需求：CC 会话 04273031/系统 93ff417f 中，Write 工具对 E 盘正确 deny(path outside allowed_roots)，但 CC 改用 Bash 重定向(echo > /e/file)写 E 盘成功绕过——应无法创建而非 Bash 重定向写成功。
+根因：write-guard extractBashWritePaths 提取重定向目标 /e/test.txt 后直接 pathResolve。Node pathResolve 是 Windows 语义，不认 git bash 的 /e/→E:\ 盘符映射，把 /e/test.txt resolve 成 daemon cwd 盘符下路径 F:\e\test.txt，恰好落在盘根 allowed_root F:/ 内 → 误判 allow；而 git bash 实际写 E:\test.txt 越界。node 实测 resolve('/e/test.txt')=F:\e\test.txt, inRoot(F:/)=true。daemon 跑 npm dist（已含 ql-006 Bash 检测），非版本问题，是路径解析语义漏洞。
+方案：write-guard 加 normalizeBashWritePath——strip 外层引号 + Windows(sep==='\\')下 git bash /x/... 归一化为 X:/...(pathResolve 转 X:\...)，Linux 不动(真 Unix 路径)。extractBashWritePaths 返回前对每个路径 map 归一化。类型修正：正则捕获组 m[0]/m[1] 在 noUncheckedIndexedAccess 下 string|undefined，提 const+守卫。
+结果：vitest 28 passed 1 skipped(+6 git bash 用例：echo>/e/ deny、echo>/f/白名单内 allow、echo>/d/ D盘根 allow、带引号 deny、cp /e/ deny、mkdir /e/ deny，Windows 平台)。pnpm build(tsc)通过 dist 含 normalizeBashWritePath。pnpm bundle BUILD_ID 878e4c6e-20260702142817。daemon 跑 npm dist 需 pnpm build 已就位；backend rebuild 后容器分发 bundle 为新代码；本机 daemon 需重启加载新 dist。

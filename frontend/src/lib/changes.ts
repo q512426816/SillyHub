@@ -127,13 +127,14 @@ export type CreateChangeResponse = {
 
 export function listChanges(
   workspaceId: string,
-  params?: { location?: string; status?: string; owner?: string; search?: string; page?: number; pageSize?: number },
+  params?: { location?: string; status?: string; owner?: string; search?: string; currentStage?: string; page?: number; pageSize?: number },
 ) {
   const searchParams = new URLSearchParams();
   if (params?.location) searchParams.set("location", params.location);
   if (params?.status) searchParams.set("status", params.status);
   if (params?.owner) searchParams.set("owner", params.owner);
   if (params?.search) searchParams.set("search", params.search);
+  if (params?.currentStage) searchParams.set("current_stage", params.currentStage);
   if (params?.page) searchParams.set("page", String(params.page));
   if (params?.pageSize) searchParams.set("page_size", String(params.pageSize));
   const qs = searchParams.toString();

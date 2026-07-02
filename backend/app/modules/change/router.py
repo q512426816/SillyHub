@@ -72,6 +72,7 @@ async def list_changes(
     status: str | None = Query(None),
     owner: str | None = Query(None),
     search: str | None = Query(None),
+    current_stage: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
 ) -> ChangeList:
@@ -82,6 +83,7 @@ async def list_changes(
         status=status,
         owner=owner,
         search=search,
+        current_stage=current_stage,
         page=page,
         page_size=page_size,
     )

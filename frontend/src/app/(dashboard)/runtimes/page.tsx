@@ -565,9 +565,9 @@ function RuntimeCard({
   onDelete: (runtime: DaemonRuntimeRead) => void;
   // task-07 / FR-03：别名编辑入口（由 RuntimesPage 弹 modal 编辑，避免卡片内状态膨胀）。
   onEditAlias: (runtime: DaemonRuntimeRead) => void;
-  // task-06 / FR-04 / D-006@v1：可访问目录（allowed_roots 沙箱）编辑入口，仅 admin 可见。
+  // task-06 / FR-04 / D-006@v1：可写目录（allowed_roots 沙箱）编辑入口，仅 admin 可见。
   onEditAllowedRoots: (runtime: DaemonRuntimeRead) => void;
-  // task-06 / FR-04：是否平台管理员（控制「可访问目录」编辑按钮显隐）。
+  // task-06 / FR-04：是否平台管理员（控制「可写目录」编辑按钮显隐）。
   isPlatformAdmin: boolean;
 }) {
   const status = getStatusMeta(runtime.status);
@@ -703,12 +703,12 @@ function RuntimeCard({
         </div>
       </div>
 
-      {/* task-06 / FR-04 / D-006@v1：可访问目录（allowed_roots 沙箱）展示。
+      {/* task-06 / FR-04 / D-006@v1：可写目录（allowed_roots 沙箱）展示。
           daemon 在此白名单内才能 list_dir / 创建 workspace（D-002@v1 越界 403）。
           空 → 「未配置（任意目录可访问）」；非空 → 逐行 Tag 列出根路径。 */}
       <div className="border-t px-4 py-3">
         <p className="text-[11px] font-medium uppercase text-muted-foreground">
-          可访问目录
+          可写目录（读取不受限）
         </p>
         <div className="mt-2">
           {(runtime.allowed_roots ?? []).length > 0 ? (
@@ -726,7 +726,7 @@ function RuntimeCard({
             </span>
           ) : (
             <span className="text-[11px] text-muted-foreground">
-              未配置（任意目录可访问）
+              未配置（任意目录可写）
             </span>
           )}
         </div>
@@ -742,16 +742,16 @@ function RuntimeCard({
         >
           别名
         </Button>
-        {/* task-06 / FR-04 / D-006@v1：仅平台管理员可配置 daemon 可访问目录沙箱。 */}
+        {/* task-06 / FR-04 / D-006@v1：仅平台管理员可配置 daemon 可写目录沙箱。 */}
         {isPlatformAdmin ? (
           <Button
             size="sm"
             variant="outline"
             className="gap-1.5"
             onClick={() => onEditAllowedRoots(runtime)}
-            title="配置该运行时可访问的目录沙箱"
+            title="配置该运行时可写的目录沙箱（读取不受限）"
           >
-            可访问目录
+            可写目录
           </Button>
         ) : null}
         {canOpenSession && (
@@ -869,7 +869,7 @@ export default function RuntimesPage() {
   const [aliasEditing, setAliasEditing] = useState<DaemonRuntimeRead | null>(null);
   const [aliasValue, setAliasValue] = useState("");
   const [aliasSaving, setAliasSaving] = useState(false);
-  // task-06 / FR-04 / D-006@v1：可访问目录（allowed_roots 沙箱）编辑态。
+  // task-06 / FR-04 / D-006@v1：可写目录（allowed_roots 沙箱）编辑态。
   // rootsEditing：当前编辑的 runtime（null=关闭）；rootsValue：路径数组（每行一个）。
   const [rootsEditing, setRootsEditing] = useState<DaemonRuntimeRead | null>(null);
   const [rootsValue, setRootsValue] = useState<string[]>([]);
@@ -1070,7 +1070,7 @@ export default function RuntimesPage() {
     }
   }, [aliasEditing, aliasValue, notify, patchItems]);
 
-  // task-06 / FR-04 / D-006@v1：可访问目录（allowed_roots 沙箱）编辑。
+  // task-06 / FR-04 / D-006@v1：可写目录（allowed_roots 沙箱）编辑。
   // 复用 display_alias 模式：page 顶层 state + antd Modal + useNotify。
   // 保存时去重 + 去空白（空行视为删除），调 updateRuntimeAllowedRoots + 刷新列表。
   const handleOpenAllowedRoots = useCallback((runtime: DaemonRuntimeRead) => {
@@ -1093,10 +1093,10 @@ export default function RuntimesPage() {
     try {
       const updated = await updateRuntimeAllowedRoots(rootsEditing.id, cleaned);
       patchItems((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
-      notify.success("可访问目录已更新");
+      notify.success("可写目录已更新");
       setRootsEditing(null);
     } catch (err) {
-      notify.error(err, "更新可访问目录失败");
+      notify.error(err, "更新可写目录失败");
     } finally {
       setRootsSaving(false);
     }
@@ -1479,12 +1479,12 @@ export default function RuntimesPage() {
         ) : null}
       </Modal>
 
-      {/* task-06 / FR-04 / D-006@v1：可访问目录（allowed_roots 沙箱）编辑 modal。
+      {/* task-06 / FR-04 / D-006@v1：可写目录（allowed_roots 沙箱）编辑 modal。
           每个路径一行 Input + 删除按钮 + 底部添加按钮。
           daemon 仅允许在此白名单内 list_dir / 创建 workspace（D-002@v1 越界 403）。
           清空全部路径 = 回退任意目录可访问（提示已说明）。 */}
       <Modal
-        title="配置可访问目录"
+        title="配置可写目录"
         open={rootsEditing !== null}
         onOk={handleSaveAllowedRoots}
         onCancel={() => setRootsEditing(null)}
@@ -1496,7 +1496,7 @@ export default function RuntimesPage() {
         width={560}
       >
         <p className="mb-3 text-xs text-muted-foreground">
-          配置该运行时（daemon）允许访问的根目录白名单。仅在白名单内的目录可被列出与打开工作区，越界访问将返回 403。清空全部路径则回退为「任意目录可访问」。
+          配置该运行时（daemon）允许写入的根目录白名单。读取不受限，仅在白名单内的目录可创建/修改文件，越界写入将被拒绝。清空全部路径则回退为「任意目录可写」。
         </p>
         <div className="space-y-2">
           {rootsValue.map((path, idx) => (
@@ -1509,7 +1509,7 @@ export default function RuntimesPage() {
                   )
                 }
                 placeholder="例如 ~/.sillyhub 或 F:/WorkNew/SillyHub"
-                aria-label={`可访问目录路径 ${idx + 1}`}
+                aria-label={`可写目录路径 ${idx + 1}`}
                 onPressEnter={handleSaveAllowedRoots}
               />
               <Button
@@ -1528,7 +1528,7 @@ export default function RuntimesPage() {
           ))}
           {rootsValue.length === 0 ? (
             <p className="py-2 text-center text-xs text-muted-foreground">
-              当前未配置任何可访问目录，daemon 可访问任意路径
+              当前未配置任何可写目录，daemon 可写任意路径
             </p>
           ) : null}
         </div>

@@ -54,6 +54,8 @@ class ParsedChange:
     affected_components: list[str] = field(default_factory=list)
     docs: list[ParsedDoc] = field(default_factory=list)
     warnings: list[ParseWarning] = field(default_factory=list)
+    # ql-20260702-001：从文档存在性推断（sillyspec.db 未导入时的 fallback）
+    current_stage: str | None = None
 
 
 @dataclass
@@ -117,12 +119,12 @@ class ChangeParser:
         if legacy_base.is_dir():
             log.warning(
                 "legacy_changes_dir_found",
-                detail="Found legacy 'changes/change/' directory. Please migrate to v4 layout.",
+                detail="发现旧版 'changes/change/' 目录，请迁移到 v4 布局。",
             )
             result.warnings.append(
                 ParseWarning(
                     code="LEGACY_CHANGE_DIR",
-                    detail="Legacy 'changes/change/' directory found. Migrate to changes/<name>/ layout.",
+                    detail="发现旧版 'changes/change/' 目录，请迁移到 changes/<变更名>/ 布局。",
                 )
             )
             for entry in sorted(legacy_base.iterdir()):
@@ -158,7 +160,7 @@ class ChangeParser:
                 result.warnings.append(
                     ParseWarning(
                         code="PATH_TRAVERSAL",
-                        detail=f"Skipping directory outside root: {entry}",
+                        detail=f"跳过根目录外的子目录：{entry}",
                         change_key=entry.name,
                     )
                 )
@@ -464,8 +466,7 @@ class ChangeParser:
             parsed.warnings.append(
                 ParseWarning(
                     code="LEGACY_CHANGE_PATH",
-                    detail=f"Change '{change_key}' is at legacy path 'changes/change/{change_key}'. "
-                    "Migrate to 'changes/{change_key}'.",
+                    detail=f"变更 '{change_key}' 在旧版路径 'changes/change/{change_key}'，请迁移到 'changes/{change_key}'。",
                     change_key=change_key,
                 )
             )
@@ -511,8 +512,7 @@ class ChangeParser:
                             parsed.warnings.append(
                                 ParseWarning(
                                     code="LEGACY_FILENAME",
-                                    detail=f"Found legacy '{legacy_name}', expected '{canonical_name}' "
-                                    f"for change '{change_key}'.",
+                                    detail=f"变更 '{change_key}' 使用旧版文件名 '{legacy_name}'，应为 '{canonical_name}'。",
                                     change_key=change_key,
                                     doc_type=doc_type,
                                 )
@@ -560,4 +560,30 @@ class ChangeParser:
         parsed.change_type = self._infer_change_type(change_dir)
         parsed.affected_components = self._infer_affected_components(change_dir, sillyspec_root)
 
+        # ql-20260702-001：从文档存在性推断 current_stage（sillyspec.db 未导入时的 fallback）
+        parsed.current_stage = self._infer_current_stage(change_dir, location)
+
         return parsed
+
+    @staticmethod
+    def _infer_current_stage(change_dir: Path, location: str) -> str:
+        """从 change 目录文档存在性推断 current_stage（fallback，非权威）。
+
+        sillyspec.db 是权威数据源（含 SillySpec CLI 记录的精确 stage），但 .runtime
+        被导入排除（worktrees 太大），平台读不到。这里从 change 目录的文档产出推断
+        大致 stage：archive → archive / verify-result → verify / plan+tasks → plan /
+        proposal+design → propose / 否则 scan。
+        """
+        if location == "archive":
+            return "archive"
+
+        def has(f: str) -> bool:
+            return (change_dir / f).is_file()
+
+        if has("verify-result.md"):
+            return "verify"
+        if has("plan.md") or has("tasks.md") or (change_dir / "tasks").is_dir():
+            return "plan"
+        if has("proposal.md") or has("design.md"):
+            return "brainstorm"
+        return "scan"

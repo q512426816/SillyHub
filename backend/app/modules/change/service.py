@@ -102,6 +102,7 @@ class ChangeService:
         status: str | None = None,
         owner: str | None = None,
         search: str | None = None,
+        current_stage: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[Change], int]:
@@ -131,6 +132,8 @@ class ChangeService:
                 base = base.where(col(Change.owner_id) == owner_uuid)
             except ValueError:
                 pass
+        if current_stage:
+            base = base.where(col(Change.current_stage) == current_stage)
         if search:
             pattern = f"%{search}%"
             base = base.where(
@@ -1262,6 +1265,9 @@ class ChangeService:
         row.change_key = parsed.change_key
         row.location = parsed.location
         row.path = parsed.path
+        # ql-20260702-001：同步推断的 current_stage（fallback；dispatch 读 sillyspec.db 时覆盖）
+        if parsed.current_stage is not None:
+            row.current_stage = parsed.current_stage
 
     # ── Review Gate methods ────────────────────────────────────────────
     #

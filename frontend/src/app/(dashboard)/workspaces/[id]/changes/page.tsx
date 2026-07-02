@@ -148,6 +148,7 @@ export default function ChangesPage({ params }: Props) {
         listChanges(workspaceId, {
           location: tab,
           search: search || undefined,
+          currentStage: stageFilter || undefined,
           page,
           pageSize,
         }),
@@ -163,7 +164,7 @@ export default function ChangesPage({ params }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [workspaceId, tab, search, page, pageSize]);
+  }, [workspaceId, tab, search, stageFilter, page, pageSize]);
 
   useEffect(() => {
     void load();
@@ -216,6 +217,7 @@ export default function ChangesPage({ params }: Props) {
       render: (v: string, c: ChangeSummary) => (
         <Link
           href={`/workspaces/${workspaceId}/changes/${c.id}`}
+          prefetch={false}
           className="font-mono text-[11px] text-primary hover:underline"
         >
           {v}
@@ -321,7 +323,7 @@ export default function ChangesPage({ params }: Props) {
         <div className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
           已重新扫描：解析 {stats.parsed}，新增 {stats.created} · 更新{" "}
           {stats.updated} · 删除 {stats.deleted}。
-          {warnings.length > 0 && ` ${warnings.length} 个 warning。`}
+          {warnings.length > 0 && ` ${warnings.length} 个警告。`}
         </div>
       )}
 
