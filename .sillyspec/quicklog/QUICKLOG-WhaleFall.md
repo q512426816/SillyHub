@@ -176,3 +176,11 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 需求：allowed_roots 实际是写白名单（读取不受限），UI 名称「可访问目录」误导，改「可写目录」。
 方案：runtimes/page.tsx 全部「可访问目录」→「可写目录」（标签/按钮/tooltip/Modal 标题/描述/notify/aria-label/空态），Modal 描述明确「读取不受限，仅白名单内可写」。
 结果：typecheck 过。（安全 bug：D 盘能写 不在 allowed_roots——需排查 daemon write-guard，另案处理。）
+
+## ql-20260702-006-e8f9 | 2026-07-02 10:11:00 | 安全修复：Bash 间接写绕过 write-guard
+状态：已完成
+文件：sillyhub-daemon/src/interactive/write-guard.ts + sillyhub-daemon/tests/write-guard.test.ts
+需求：allowed_roots 配了 ~/.sillyhub + F:/，CC 仍能在 D 盘写文件。
+现状：write-guard WRITE_TOOLS 只有 Write/Edit/MultiEdit，Bash 一律 return true（放行）。CC 用 Bash echo > D:\file / cp / tee 间接写完全绕过白名单。
+方案：write-guard 加 Bash 写检测——extractBashWritePaths 正则提取重定向(>/>>)/cp/mv/install/tee/mkdir/touch 目标路径，isWriteWithinAllowedRoots 对 Bash：纯读放行，含写则每个目标校验在 allowed_roots。提取 isPathUnderAnyRoot 独立函数（Write/Edit + Bash 共用）。17 vitest 测试覆盖。
+结果：vitest 17 passed。daemon 改动需用户重启 daemon 生效。
