@@ -148,3 +148,10 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 方案：backend list_ 加 current_stage 参数（WHERE current_stage=?）；router 加 current_stage Query；前端 listChanges 加 currentStage；changes 页 load 传 currentStage:stageFilter，useCallback 依赖加 stageFilter（Select onChange 即时触发后端查询）。
 结果：typecheck 过，ruff 过。Select 选阶段即时触发后端分页查询。
 
+## ql-20260702-002-e6f7 | 2026-07-02 09:09:05 | 导入的 change current_stage 全空（reparse 不推断 stage）
+状态：已完成
+文件：backend/app/modules/change/parser.py + backend/app/modules/change/service.py
+需求：扫描到的 change 数据 current_stage 都是空的。
+现状：current_stage 权威源是 sillyspec.db（SillySpec CLI 本地 SQLite），但 .runtime 被导入排除（ql-002，worktrees 2G）→ 平台读不到。reparse 只解析文件系统不读 sillyspec.db，dispatch 才同步 current_stage（但导入的 change 没经 dispatch）。
+方案：parser ParsedChange 加 current_stage 字段 + _parse_change 从 change 目录文档存在性推断 stage（archive→archive / verify-result.md→verify / plan.md+tasks→plan / proposal+design→propose / 否则 scan）；service _apply_parsed 同步 parsed.current_stage 到 Change row。
+结果：ruff+mypy 过。用户需点「重新扫描」触发 reparse 填充。推断是 fallback（非权威，精确 stage 仍需 sillyspec.db）。

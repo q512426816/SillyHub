@@ -54,6 +54,8 @@ class ParsedChange:
     affected_components: list[str] = field(default_factory=list)
     docs: list[ParsedDoc] = field(default_factory=list)
     warnings: list[ParseWarning] = field(default_factory=list)
+    # ql-20260702-001：从文档存在性推断（sillyspec.db 未导入时的 fallback）
+    current_stage: str | None = None
 
 
 @dataclass
@@ -560,4 +562,30 @@ class ChangeParser:
         parsed.change_type = self._infer_change_type(change_dir)
         parsed.affected_components = self._infer_affected_components(change_dir, sillyspec_root)
 
+        # ql-20260702-001：从文档存在性推断 current_stage（sillyspec.db 未导入时的 fallback）
+        parsed.current_stage = self._infer_current_stage(change_dir, location)
+
         return parsed
+
+    @staticmethod
+    def _infer_current_stage(change_dir: Path, location: str) -> str:
+        """从 change 目录文档存在性推断 current_stage（fallback，非权威）。
+
+        sillyspec.db 是权威数据源（含 SillySpec CLI 记录的精确 stage），但 .runtime
+        被导入排除（worktrees 太大），平台读不到。这里从 change 目录的文档产出推断
+        大致 stage：archive → archive / verify-result → verify / plan+tasks → plan /
+        proposal+design → propose / 否则 scan。
+        """
+        if location == "archive":
+            return "archive"
+
+        def has(f: str) -> bool:
+            return (change_dir / f).is_file()
+
+        if has("verify-result.md"):
+            return "verify"
+        if has("plan.md") or has("tasks.md") or (change_dir / "tasks").is_dir():
+            return "plan"
+        if has("proposal.md") or has("design.md"):
+            return "propose"
+        return "scan"
