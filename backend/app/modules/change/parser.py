@@ -119,12 +119,12 @@ class ChangeParser:
         if legacy_base.is_dir():
             log.warning(
                 "legacy_changes_dir_found",
-                detail="Found legacy 'changes/change/' directory. Please migrate to v4 layout.",
+                detail="发现旧版 'changes/change/' 目录，请迁移到 v4 布局。",
             )
             result.warnings.append(
                 ParseWarning(
                     code="LEGACY_CHANGE_DIR",
-                    detail="Legacy 'changes/change/' directory found. Migrate to changes/<name>/ layout.",
+                    detail="发现旧版 'changes/change/' 目录，请迁移到 changes/<变更名>/ 布局。",
                 )
             )
             for entry in sorted(legacy_base.iterdir()):
@@ -160,7 +160,7 @@ class ChangeParser:
                 result.warnings.append(
                     ParseWarning(
                         code="PATH_TRAVERSAL",
-                        detail=f"Skipping directory outside root: {entry}",
+                        detail=f"跳过根目录外的子目录：{entry}",
                         change_key=entry.name,
                     )
                 )
@@ -466,8 +466,7 @@ class ChangeParser:
             parsed.warnings.append(
                 ParseWarning(
                     code="LEGACY_CHANGE_PATH",
-                    detail=f"Change '{change_key}' is at legacy path 'changes/change/{change_key}'. "
-                    "Migrate to 'changes/{change_key}'.",
+                    detail=f"变更 '{change_key}' 在旧版路径 'changes/change/{change_key}'，请迁移到 'changes/{change_key}'。",
                     change_key=change_key,
                 )
             )
@@ -513,8 +512,7 @@ class ChangeParser:
                             parsed.warnings.append(
                                 ParseWarning(
                                     code="LEGACY_FILENAME",
-                                    detail=f"Found legacy '{legacy_name}', expected '{canonical_name}' "
-                                    f"for change '{change_key}'.",
+                                    detail=f"变更 '{change_key}' 使用旧版文件名 '{legacy_name}'，应为 '{canonical_name}'。",
                                     change_key=change_key,
                                     doc_type=doc_type,
                                 )

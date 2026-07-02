@@ -323,7 +323,7 @@ export default function ChangesPage({ params }: Props) {
         <div className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
           已重新扫描：解析 {stats.parsed}，新增 {stats.created} · 更新{" "}
           {stats.updated} · 删除 {stats.deleted}。
-          {warnings.length > 0 && ` ${warnings.length} 个 warning。`}
+          {warnings.length > 0 && ` ${warnings.length} 个警告。`}
         </div>
       )}
 

@@ -162,3 +162,10 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 需求：阶段还有 propose（SillySpec 主线无此 stage）。
 方案：_infer_current_stage 有 proposal.md/design.md 时返回 brainstorm（不是 propose）。SillySpec 主线 scan→brainstorm→plan→execute→verify→archive。
 结果：ruff 过。用户重新扫描后 propose 全变 brainstorm。
+
+## ql-20260702-004-b5c6 | 2026-07-02 09:22:00 | 解析警告改中文
+状态：已完成
+文件：backend/app/modules/change/parser.py + frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+需求：reparse 返回的解析警告 detail 全英文，改中文。
+方案：parser.py 5 处 ParseWarning detail 改中文（LEGACY_CHANGE_DIR/PATH_TRAVERSAL/LEGACY_CHANGE_PATH/LEGACY_FILENAME）；前端「个 warning」改「个警告」。
+结果：ruff+typecheck 过。
