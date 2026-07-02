@@ -176,6 +176,8 @@ class WorkspaceService:
             await self._session.flush()
             # Check if platform storage already has .sillyspec (scan-generate case)
             await self._ensure_spec_workspace_from_platform(existing)
+            # 激活时创建人自动添加为 owner（scan-generate 路径可能还未添加）
+            await self._ensure_creator_as_owner(existing.id, user_id=created_by)
             await self.session.commit()
             await self.session.refresh(existing)
             log.info("workspace.activated_from_create", workspace_id=str(existing.id))
@@ -211,6 +213,8 @@ class WorkspaceService:
             await self._session.flush()
             # 空 SpecWorkspace 占位，strategy 由用户选择（2026-06-28 起支持三值，默认 platform-managed）
             await self._ensure_empty_spec_workspace(workspace.id, strategy=payload.spec_strategy)
+            # 创建人自动添加为 owner
+            await self._ensure_creator_as_owner(workspace.id, user_id=created_by)
             await self._session.commit()
             await self._session.refresh(workspace)
             log.info(
@@ -274,6 +278,9 @@ class WorkspaceService:
 
         # Create SpecWorkspace with repo-native strategy
         await self._ensure_spec_workspace(workspace.id, scan.sillyspec_path)
+
+        # 创建人自动添加为 owner
+        await self._ensure_creator_as_owner(workspace.id, user_id=created_by)
 
         await self._session.commit()
         await self._session.refresh(workspace)
@@ -508,8 +515,16 @@ class WorkspaceService:
         )
         return workspace, scan
 
-    async def soft_delete(self, workspace_id: uuid.UUID) -> Workspace:
+    async def soft_delete(
+        self,
+        workspace_id: uuid.UUID,
+        deleted_by: uuid.UUID | None = None,
+    ) -> Workspace:
         workspace = await self.get(workspace_id)
+        # Only the owner (created_by) may delete a workspace.
+        # If created_by is None (legacy data), skip the check.
+        if workspace.created_by is not None and deleted_by != workspace.created_by:
+            raise WorkspacePermissionDenied("Only the workspace owner can delete this workspace.")
         now = datetime.now(UTC)
         workspace.deleted_at = now
         workspace.updated_at = now
@@ -1071,6 +1086,9 @@ class WorkspaceService:
                     strategy="platform-managed",
                 ),
             )
+            # scan-generate：创建人自动添加为 owner
+            await self._ensure_creator_as_owner(workspace.id, user_id=user_id)
+            await self._session.flush()  # 确保 member 行写入
 
         # 5a. Idempotency: reuse in-progress scan run if one exists
         existing_run = await self._find_active_scan_run(workspace.id)
@@ -1152,6 +1170,9 @@ class WorkspaceService:
             self._session.add(workspace)
             await self._session.flush()
             await self._ensure_empty_spec_workspace(workspace.id, strategy=spec_strategy)
+            # daemon-client scan-generate：创建人自动添加为 owner
+            await self._ensure_creator_as_owner(workspace.id, user_id=user_id)
+            await self._session.flush()  # 确保 member 行写入再提交
 
         existing_run = await self._find_active_scan_run(workspace.id)
         if existing_run is not None:
@@ -1187,6 +1208,55 @@ class WorkspaceService:
         daemon_runtime_id 非空，此处只读字段不做二次校验。
         """
         return getattr(payload, "path_source", "server-local") == "daemon-client"
+
+    async def _ensure_creator_as_owner(
+        self, workspace_id: uuid.UUID, *, user_id: uuid.UUID | None = None
+    ) -> None:
+        """Ensure the creator is a ``workspace_owner`` member of this workspace.
+
+        Idempotent: caller may pass ``user_id`` explicitly for paths where
+        ``created_by`` is not set on the workspace row yet. Skips silently when
+        ``user_id`` is None (legacy test paths).
+        """
+        uid = user_id or getattr(
+            (await self._session.get(Workspace, workspace_id)), "created_by", None
+        )
+        if uid is None:
+            return
+        role = (
+            (
+                await self._session.execute(
+                    select(Role).where(col(Role.key) == "workspace_owner").limit(1)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if role is None:
+            log.warning("workspace.owner_role_missing")
+            return
+        existing = (
+            (
+                await self._session.execute(
+                    select(UserWorkspaceRole)
+                    .where(col(UserWorkspaceRole.user_id) == uid)
+                    .where(col(UserWorkspaceRole.workspace_id) == workspace_id)
+                    .limit(1)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if existing is not None:
+            return  # already a member
+        self._session.add(
+            UserWorkspaceRole(
+                user_id=uid,
+                workspace_id=workspace_id,
+                role_id=role.id,
+                granted_by=uid,
+            )
+        )
 
     async def _ensure_empty_spec_workspace(
         self, workspace_id: uuid.UUID, *, strategy: str = "platform-managed"

@@ -12,6 +12,7 @@ from app.core.errors import (
     WorkspaceNotSillyspec,
     WorkspacePathNotDir,
     WorkspacePathNotFound,
+    WorkspacePermissionDenied,
     WorkspaceSlugDuplicate,
 )
 from app.modules.workspace.schema import WorkspaceCreate
@@ -104,6 +105,44 @@ async def test_create_duplicate_slug(db_session, tmp_path: Path) -> None:
             WorkspaceCreate(name="other", slug="same-slug", root_path=str(root_b)),
             created_by=None,
         )
+
+
+async def test_soft_delete_by_non_owner_raises(db_session, tmp_path: Path) -> None:
+    root = _make_workspace(tmp_path)
+    service = WorkspaceService(db_session)
+    owner_id = uuid.uuid4()
+    ws = await service.create(
+        WorkspaceCreate(name="ws", root_path=str(root)),
+        created_by=owner_id,
+    )
+    other_id = uuid.uuid4()
+    with pytest.raises(WorkspacePermissionDenied):
+        await service.soft_delete(ws.id, deleted_by=other_id)
+
+
+async def test_soft_delete_by_owner_succeeds(db_session, tmp_path: Path) -> None:
+    root = _make_workspace(tmp_path)
+    service = WorkspaceService(db_session)
+    owner_id = uuid.uuid4()
+    ws = await service.create(
+        WorkspaceCreate(name="ws", root_path=str(root)),
+        created_by=owner_id,
+    )
+    deleted = await service.soft_delete(ws.id, deleted_by=owner_id)
+    assert deleted.status == "deleted"
+    assert deleted.deleted_at is not None
+
+
+async def test_soft_delete_by_none_created_by_skips_owner_check(db_session, tmp_path: Path) -> None:
+    """Legacy records with created_by=None can be deleted by anyone."""
+    root = _make_workspace(tmp_path)
+    service = WorkspaceService(db_session)
+    ws = await service.create(
+        WorkspaceCreate(name="ws", root_path=str(root)),
+        created_by=None,
+    )
+    deleted = await service.soft_delete(ws.id, deleted_by=uuid.uuid4())
+    assert deleted.status == "deleted"
 
 
 async def test_list_filters_soft_deleted_by_default(db_session, tmp_path: Path) -> None:

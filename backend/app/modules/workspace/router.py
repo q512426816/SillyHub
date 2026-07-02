@@ -378,10 +378,10 @@ async def reparse_workspace(
 async def delete_workspace(
     workspace_id: uuid.UUID,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_ADMIN))],
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_ADMIN))],
 ) -> WorkspaceRead:
     service = WorkspaceService(session)
-    return WorkspaceRead.model_validate(await service.soft_delete(workspace_id))
+    return WorkspaceRead.model_validate(await service.soft_delete(workspace_id, deleted_by=user.id))
 
 
 @router.patch(
