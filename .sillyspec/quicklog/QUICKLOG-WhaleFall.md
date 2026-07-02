@@ -208,3 +208,12 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
   - preflight fetch /daemon/latest.json 经 frontend 3000 → 404（frontend 未代理该路径），daemon bin 无法自动升级（本机曾长期停 13403c71）。待修 frontend proxy 或 preflight 路径。
   - _syncAllowedRoots 不落盘 config.json：磁盘配置不可见 + 重启窗口期（首次心跳前内存无 D:/）。可考虑落盘。
   - daemon 对 SIGPIPE 不 resilient：background+管道启动损坏心跳循环，可增强 EPIPE 处理或 install.sh 规范 redirect。
+
+## ql-20260702-009-a1b3 | 2026-07-02 14:15:17 | write-guard Bash git bash 路径绕过（pathResolve 不认 /e/ 盘符映射）
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/src/interactive/write-guard.ts + sillyhub-daemon/tests/write-guard.test.ts
+需求：CC 会话 04273031/系统 93ff417f 中，Write 工具对 E 盘正确 deny(path outside allowed_roots)，但 CC 改用 Bash 重定向(echo > /e/file)写 E 盘成功绕过——应无法创建而非 Bash 重定向写成功。
+根因：write-guard extractBashWritePaths 提取重定向目标 /e/test.txt 后直接 pathResolve。Node pathResolve 是 Windows 语义，不认 git bash 的 /e/→E:\ 盘符映射，把 /e/test.txt resolve 成 daemon cwd 盘符下路径 F:\e\test.txt，恰好落在盘根 allowed_root F:/ 内 → 误判 allow；而 git bash 实际写 E:\test.txt 越界。node 实测 resolve('/e/test.txt')=F:\e\test.txt, inRoot(F:/)=true。daemon 跑 npm dist（已含 ql-006 Bash 检测），非版本问题，是路径解析语义漏洞。
+方案：write-guard 加 normalizeBashWritePath——strip 外层引号 + Windows(sep==='\\')下 git bash /x/... 归一化为 X:/...(pathResolve 转 X:\...)，Linux 不动(真 Unix 路径)。extractBashWritePaths 返回前对每个路径 map 归一化。类型修正：正则捕获组 m[0]/m[1] 在 noUncheckedIndexedAccess 下 string|undefined，提 const+守卫。
+结果：vitest 28 passed 1 skipped(+6 git bash 用例：echo>/e/ deny、echo>/f/白名单内 allow、echo>/d/ D盘根 allow、带引号 deny、cp /e/ deny、mkdir /e/ deny，Windows 平台)。pnpm build(tsc)通过 dist 含 normalizeBashWritePath。pnpm bundle BUILD_ID 878e4c6e-20260702142817。daemon 跑 npm dist 需 pnpm build 已就位；backend rebuild 后容器分发 bundle 为新代码；本机 daemon 需重启加载新 dist。

@@ -61,6 +61,39 @@ function isPathUnderAnyRoot(target: string, allowedRoots: string[]): boolean {
 }
 
 /**
+ * ql-20260702-009：归一化 Bash 命令提取的写路径，修正 git bash 路径语义。
+ *
+ * 问题：CC 在 Windows git bash 用 `/e/file` 写 E 盘，Node pathResolve（Windows
+ * 语义）把 `/e/file` resolve 成 cwd 盘符下路径（如 `F:\e\file`），恰好落在盘根
+ * allowed_root（`F:/`）内 → 误判 allow，而 git bash 实际写 `E:\file` 越界绕过。
+ *
+ * 归一化（仅 Windows）：
+ *   - strip 外层引号（`'...'` / `"..."`）—— 重定向目标可能带引号；
+ *   - git bash `/x/...` → `X:/...`（pathResolve 转 `X:\...`）。
+ * Linux 不动（`/x/` 是真 Unix 路径，无盘符映射）。
+ */
+function normalizeBashWritePath(raw: string): string {
+  let p = raw;
+  // strip 外层引号
+  if (
+    (p.startsWith("'") && p.endsWith("'")) ||
+    (p.startsWith('"') && p.endsWith('"'))
+  ) {
+    p = p.slice(1, -1);
+  }
+  // Windows：git bash /x/... → X:/...（修正盘符映射）
+  if (sep === '\\') {
+    const m = /^\/([a-zA-Z])\//.exec(p);
+    const slash = m?.[0];
+    const drive = m?.[1];
+    if (slash && drive) {
+      p = `${drive.toUpperCase()}:/${p.slice(slash.length)}`;
+    }
+  }
+  return p;
+}
+
+/**
  * ql-20260702-006：从 Bash 命令提取写操作的目标路径。
  *
  * 覆盖常见写模式：重定向（>/>>）、cp/mv/install 目标、tee、mkdir、touch。
@@ -94,7 +127,8 @@ function extractBashWritePaths(command: string): string[] {
     const target = m[1];
     if (target) paths.push(target);
   }
-  return paths;
+  // ql-20260702-009：归一化（git bash /x/ → X:/ + strip 引号），修正 pathResolve 盘符映射
+  return paths.map(normalizeBashWritePath);
 }
 
 /**

@@ -95,3 +95,32 @@ describe('isWriteWithinAllowedRoots — 盘符根/根目录 root（ql-20260702-0
     expect(isWriteWithinAllowedRoots('Write', { file_path: '/tmp/x.txt' }, ['/'])).toBe(true);
   });
 });
+
+describe('isWriteWithinAllowedRoots — Bash git bash 路径归一化（ql-20260702-009）', () => {
+  // CC 在 Windows git bash 用 /x/file 路径，Node pathResolve 不认 /x/→X:\ 映射，
+  // 修复前 resolve 成 cwd 盘符下路径误判落在盘根 allowed_root；修复后归一化正确拦。
+  it.skipIf(!isWin)('Bash echo > /e/file 越界 E 盘 → deny', () => {
+    expect(isWriteWithinAllowedRoots('Bash', { command: 'echo x > /e/test.txt' }, ['F:/'])).toBe(false);
+  });
+  it.skipIf(!isWin)('Bash echo > /f/ 白名单内 → allow', () => {
+    expect(
+      isWriteWithinAllowedRoots('Bash', { command: 'echo x > /f/WorkNew/SillyHub/a.txt' }, [
+        'F:/WorkNew/SillyHub',
+      ]),
+    ).toBe(true);
+  });
+  it.skipIf(!isWin)('Bash echo > /d/ D 盘根白名单 → allow', () => {
+    expect(isWriteWithinAllowedRoots('Bash', { command: 'echo x > /d/file.txt' }, ['D:/'])).toBe(true);
+  });
+  it.skipIf(!isWin)('Bash echo 带引号越界 → deny', () => {
+    expect(
+      isWriteWithinAllowedRoots('Bash', { command: "echo x > '/e/test.txt'" }, ['F:/']),
+    ).toBe(false);
+  });
+  it.skipIf(!isWin)('Bash cp 目标 /e/ 越界 → deny', () => {
+    expect(isWriteWithinAllowedRoots('Bash', { command: 'cp src.txt /e/dst.txt' }, ['F:/'])).toBe(false);
+  });
+  it.skipIf(!isWin)('Bash mkdir /e/ 越界 → deny', () => {
+    expect(isWriteWithinAllowedRoots('Bash', { command: 'mkdir /e/newdir' }, ['F:/'])).toBe(false);
+  });
+});
