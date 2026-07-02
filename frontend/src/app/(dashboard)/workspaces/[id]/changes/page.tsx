@@ -148,6 +148,7 @@ export default function ChangesPage({ params }: Props) {
         listChanges(workspaceId, {
           location: tab,
           search: search || undefined,
+          currentStage: stageFilter || undefined,
           page,
           pageSize,
         }),
@@ -163,7 +164,7 @@ export default function ChangesPage({ params }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [workspaceId, tab, search, page, pageSize]);
+  }, [workspaceId, tab, search, stageFilter, page, pageSize]);
 
   useEffect(() => {
     void load();

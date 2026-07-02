@@ -140,3 +140,11 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 方案：backend list_ 加 search/page/page_size 参数（ILIKE 搜索 change_key/title，OFFSET/LIMIT 分页，func.count 返回 total）；router 加 Query 参数；前端 listChanges 加对应参数；changes 页 state 加 searchInput/search/items/total/page/pageSize，搜索改受控（搜索/重置按钮触发），DataTable pagination 用后端 total，tab 去计数。
 结果：typecheck 0 error，ruff check+format 过。backend+frontend rebuild healthy。随后变更生命周期移到查询条件上方；layout 对 changes 路径返回 fragment（无 main wrapper），DOM 与 admin/roles 完全一致，宽度统一。列表 Link 加 prefetch={false} 避免 Next.js RSC 批量预取（每行 change 进入视口触发 ?_rsc 请求，20 条→20 个请求）。
 
+## ql-20260702-001-d4e5 | 2026-07-02 08:47:15 | 变更中心【阶段】筛选没生效（改后端分页时漏了）
+状态：已完成
+文件：backend/app/modules/change/service.py + backend/app/modules/change/router.py + frontend/src/lib/changes.ts + frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+需求：查询条件【阶段】没生效。
+现状：ql-005 改后端分页时，stageFilter 仍为前端 state 但 dataSource 用后端 items（不经前端 filter），所以 stage 筛选完全无效。
+方案：backend list_ 加 current_stage 参数（WHERE current_stage=?）；router 加 current_stage Query；前端 listChanges 加 currentStage；changes 页 load 传 currentStage:stageFilter，useCallback 依赖加 stageFilter（Select onChange 即时触发后端查询）。
+结果：typecheck 过，ruff 过。Select 选阶段即时触发后端分页查询。
+
