@@ -192,3 +192,19 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 现状：write-guard isPathUnderAnyRoot 对盘符根 root 失效——pathResolve('D:/')='D:\'（结尾已是 sep），原逻辑 prefix=rl+sep 产生 'D:\\' 双反斜杠，target.startsWith 永远 false → 配 D 盘仍 deny 所有写。Unix 根 '/' 同理（容器侧 allowed_roots 通常非根未暴露）。node 实测确认 starts=false。
 方案：isPathUnderAnyRoot 加 endsWith(sep) 判断——root 已含尾部 sep 时 prefix 不再补 sep（Windows 盘符根 D:\ + Unix 根 /）。Write/Edit 与 Bash 间接写共用此函数，一并修复。
 结果：vitest 22 passed 1 skipped（+6 新用例：5 Windows 盘符根 + 1 Unix 根，Unix 根在 Windows 跳过）。daemon 模块文档同步（write-guard 首次登记 + 注意事项 + 变更索引）。待 bundle rebuild + 部署后用户本机 daemon self-update 即生效。
+
+## ql-20260702-008-c2e4 | 2026-07-02 11:37:24 | daemon allowed_roots 不同步 D:/（启动管道 SIGPIPE 损坏心跳）
+状态：已完成
+文件：~/.sillyhub/daemon/bin/sillyhub-daemon.js（运维修复）+ 启动方式（nohup+redirect，无代码变更）
+需求：配 D 盘为 allowed_root 后，新会话（46effdc0）CC 仍不能在 D 盘写（未配时失败属正常）。
+根因（curl + 代码 + DB + 前台日志多重确认）：
+  1. backend 正常：REST heartbeat 下发 ["~/.sillyhub","F:/","D:/"]（X-API-Key curl 实证），DB runtime 462d0e85（本机 claude provider）allowed_roots 含 D:/。
+  2. daemon 代码正常：_syncAllowedRoots（daemon.ts:1683）+ normalizeAllowedRoots（config.ts:355）逻辑正确，前台跑 daemon 35s 捕获到 allowed_roots_synced count=4（含 D:/）。
+  3. 真根因：daemon background 启动时 stdout 接管道（排查中曾用 `sillyhub-daemon start | head -8`），head 关闭后 daemon 写 stdout 收 SIGPIPE，损坏心跳循环 → _syncAllowedRoots 不执行 → 内存 config 无 D:/ → write-guard deny D:。前台/无管道启动心跳正常。
+  4. write-guard 用内存 config（cli.ts:528），磁盘 config.json 无 D:/ 是 _syncAllowedRoots 不落盘（设计），非 bug。
+修复：替换本机 bin 为 4b3dada9（含 ql-006/007，补齐虽非根因）+ `nohup sillyhub-daemon start > daemon.log 2>&1 & disown` 启动（redirect stdout 避免 SIGPIPE + 独立持久）。重启后 allowed_roots_synced count=4、心跳正常（15s 间隔）、daemon.log 落盘。
+结果：daemon 内存 config 含 D:/，write-guard 放行 D 盘写。用户重开 CC 会话即可写 D 盘。无代码变更（daemon 代码正确）。
+遗留（后续）：
+  - preflight fetch /daemon/latest.json 经 frontend 3000 → 404（frontend 未代理该路径），daemon bin 无法自动升级（本机曾长期停 13403c71）。待修 frontend proxy 或 preflight 路径。
+  - _syncAllowedRoots 不落盘 config.json：磁盘配置不可见 + 重启窗口期（首次心跳前内存无 D:/）。可考虑落盘。
+  - daemon 对 SIGPIPE 不 resilient：background+管道启动损坏心跳循环，可增强 EPIPE 处理或 install.sh 规范 redirect。
