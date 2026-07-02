@@ -16,7 +16,7 @@ created_at: 2026-06-24T01:16:33
 - backend service：`DaemonService`（runtime/lease 生命周期、`submit_messages`、`close_interactive_run`、`sync_agent_run_status`、`cleanup_stale_runtimes`）；`DaemonLeaseService`（claim_task/heartbeat_lease/expire_overdue_leases/cancel_lease，claim_token 鉴权）；`SessionService`（交互式会话 create_session/inject_session/interrupt_session/end_session/recover_session_after_daemon_restart）。
 - `DaemonWsHub`：维护 runtime→WebSocket 映射，提供 `notify_task_available`、`send_session_control`、`send_permission_response`、`send_rpc`（带 rpc_id 关联的 RPC，如 list_dir）、`broadcast`。
 - 协议（`protocol.py` 双端对应）：`daemon:task_available / heartbeat / heartbeat_ack / lease_claim / lease_start / lease_complete / lease_messages / rpc / rpc_result / session_inject / session_interrupt / session_end / session_resume / permission_request / permission_response`。Node 端 `MSG`/`LEASE_STATE`/`WS_PATH='/api/daemon/ws'`/`REST_PREFIX='/api/daemon'` 与之对齐。
-- Node daemon 进程：`cli.ts`（start/stop/status/logs，PID 文件管理，信号由 Daemon 内部 handler 处理）；`Daemon` 类（detectAgents→register→三循环：lease 领取、ws 心跳、会话控制）；`TaskRunner`（批处理 lease 执行，renderAgentEvent/resolveTimeout/resolveMaxRetries/isSpawnLevelFailure）；`interactive/`（claude-sdk-driver、session-manager、input-queue、permission-resolver、session-store-persistence）；`HubClient`（REST）、`WsClient`（WS + RPC）、`RecoveryCoordinator`（重启后会话收敛）。
+- Node daemon 进程：`cli.ts`（start/stop/status/logs，PID 文件管理，信号由 Daemon 内部 handler 处理）；`Daemon` 类（detectAgents→register→三循环：lease 领取、ws 心跳、会话控制）；`TaskRunner`（批处理 lease 执行，renderAgentEvent/resolveTimeout/resolveMaxRetries/isSpawnLevelFailure）；`interactive/`（claude-sdk-driver、session-manager、input-queue、permission-resolver、session-store-persistence、write-guard）；`HubClient`（REST）、`WsClient`（WS + RPC）、`RecoveryCoordinator`（重启后会话收敛）。
 
 ## 关键逻辑
 ```
@@ -37,7 +37,11 @@ backend send_rpc(rpc_id) → daemon 执行 → rpc_result(rpc_id) → resolve_rp
 - daemon 重启后会话收敛是关键不变量：`recover_session_after_daemon_restart` + Node 端 `RecoveryCoordinator` + `confirm-reconnected`/`mark-recovery-failed` 端点配合，避免会话悬挂。
 - `/sessions/{id}/end` 端点的 daemon 身份用 runtime 归属校验（非 lease），曾有 404 修复记录，改动需注意归属判定路径。
 - 当前活跃变更 `2026-06-23-codex-interactive-session` 在重构交互式会话生命周期，本卡片描述的 session 端点集合会随之演进。
+- allowed_roots 写白名单：interactive 会话经 session-manager 的 canUseTool 包装器注入 write-guard（`isWriteWithinAllowedRoots`），把显式写（Write/Edit/MultiEdit）与 Bash 间接写（重定向 `>`/`>>`、cp/mv/install、tee、mkdir、touch）限制在 daemon config.allowed_roots 内，读自由；batch（lease）模式走 `--settings` permission 注入。`isPathUnderAnyRoot` 做边界敏感前缀比较时，盘符根（`D:\`）与 Unix 根（`/`）经 pathResolve 后已含尾部 sep，前缀不可再补 sep，否则产生双反斜杠/双斜杠前缀误判越界（ql-20260702-007）。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->
+
+## 变更索引
+- ql-20260702-007-f1a8 | 修复 isPathUnderAnyRoot 盘符根/Unix 根路径前缀比较（root 已含尾 sep 不再补，消除配 D 盘做 allowed_root 仍误 deny）

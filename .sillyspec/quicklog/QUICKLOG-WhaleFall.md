@@ -184,3 +184,11 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 现状：write-guard WRITE_TOOLS 只有 Write/Edit/MultiEdit，Bash 一律 return true（放行）。CC 用 Bash echo > D:\file / cp / tee 间接写完全绕过白名单。
 方案：write-guard 加 Bash 写检测——extractBashWritePaths 正则提取重定向(>/>>)/cp/mv/install/tee/mkdir/touch 目标路径，isWriteWithinAllowedRoots 对 Bash：纯读放行，含写则每个目标校验在 allowed_roots。提取 isPathUnderAnyRoot 独立函数（Write/Edit + Bash 共用）。17 vitest 测试覆盖。
 结果：vitest 17 passed。commit 829e576e。后续发现 extractBashWritePaths 的 m[1]/m[2] 在 noUncheckedIndexedAccess 下为 string|undefined，push 到 string[] 报 TS2345 → bundle 编译失败、daemon 停留旧版 c85dec8c（829e576e 代码实际未进分发）。commit dbe8e956 提取 const+if 守卫收窄类型（逻辑零变化，17 测试仍过）。pnpm bundle 成功（BUILD_ID 829e576e-20260702102214）+ docker compose -f deploy/docker-compose.yml build/up backend，daemon version c85dec8c→829e576e-20260702102214 已生效（curl latest.json + 容器内 grep BUILD_ID 三重验证）。坑：compose 文件在 deploy/ 下、之前在仓库根目录跑 docker compose 报 no configuration file，且 `| tail` 掩盖退出码需 set -o pipefail。已 push（829e576e..dbe8e956）。本机若单独跑 daemon 会经 preflight 自更新拉新版。
+
+## ql-20260702-007-f1a8 | 2026-07-02 10:52:54 | 修复 allowed_roots 配盘符根（D:\）后 write-guard 仍 deny
+状态：已完成
+文件：sillyhub-daemon/src/interactive/write-guard.ts + sillyhub-daemon/tests/write-guard.test.ts
+需求：/runtimes 配 D 盘为 allowed_root（可写目录）后，新会话（8438086b）CC 仍不能在 D 盘创建文件；未配时失败属正常（ed544515 会话）。
+现状：write-guard isPathUnderAnyRoot 对盘符根 root 失效——pathResolve('D:/')='D:\'（结尾已是 sep），原逻辑 prefix=rl+sep 产生 'D:\\' 双反斜杠，target.startsWith 永远 false → 配 D 盘仍 deny 所有写。Unix 根 '/' 同理（容器侧 allowed_roots 通常非根未暴露）。node 实测确认 starts=false。
+方案：isPathUnderAnyRoot 加 endsWith(sep) 判断——root 已含尾部 sep 时 prefix 不再补 sep（Windows 盘符根 D:\ + Unix 根 /）。Write/Edit 与 Bash 间接写共用此函数，一并修复。
+结果：vitest 22 passed 1 skipped（+6 新用例：5 Windows 盘符根 + 1 Unix 根，Unix 根在 Windows 跳过）。daemon 模块文档同步（write-guard 首次登记 + 注意事项 + 变更索引）。待 bundle rebuild + 部署后用户本机 daemon self-update 即生效。

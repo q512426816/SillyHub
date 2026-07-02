@@ -49,9 +49,14 @@ function isPathUnderAnyRoot(target: string, allowedRoots: string[]): boolean {
     if (isWin) {
       const rl = r.toLowerCase();
       const dl = resolved.toLowerCase();
-      return dl === rl || dl.startsWith(rl + sep);
+      // ql-20260702-007：root 已含尾部 sep（盘符根 D:\）时不再补 sep，
+      // 否则 rl+sep 产生 "D:\\" 双反斜杠前缀，dl.startsWith 永远 false → 误 deny。
+      const prefix = rl.endsWith(sep) ? rl : rl + sep;
+      return dl === rl || dl.startsWith(prefix);
     }
-    return resolved === r || resolved.startsWith(r + sep);
+    // Unix 同理：根 "/" 已含尾部 sep，不再补，避免 "//" 前缀。
+    const prefix = r.endsWith(sep) ? r : r + sep;
+    return resolved === r || resolved.startsWith(prefix);
   });
 }
 
