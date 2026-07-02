@@ -68,22 +68,26 @@ function extractBashWritePaths(command: string): string[] {
   // 1. 重定向 > / >>（排除 2>&1 / >&2 等文件描述符）
   const redirRe = /(?:>>|>)\s*(\S+)/g;
   while ((m = redirRe.exec(command)) !== null) {
-    if (!/^&\d/.test(m[1])) paths.push(m[1]);
+    const target = m[1];
+    if (target && !/^&\d/.test(target)) paths.push(target);
   }
   // 2. cp/mv/install src... dst（取最后参数为目标）
   const cpRe = /\b(?:cp|mv|install)\s+(?:-[^\s]+\s+)*(\S+)\s+(\S+)/g;
   while ((m = cpRe.exec(command)) !== null) {
-    paths.push(m[2]);
+    const dst = m[2];
+    if (dst) paths.push(dst);
   }
   // 3. tee [-options] path
   const teeRe = /\btee\s+(?:-[^\s]+\s+)*(\S+)/g;
   while ((m = teeRe.exec(command)) !== null) {
-    paths.push(m[1]);
+    const target = m[1];
+    if (target) paths.push(target);
   }
   // 4. mkdir/touch [-options] path
   const mkRe = /\b(?:mkdir|touch)\s+(?:-[^\s]+\s+)*(\S+)/g;
   while ((m = mkRe.exec(command)) !== null) {
-    paths.push(m[1]);
+    const target = m[1];
+    if (target) paths.push(target);
   }
   return paths;
 }
