@@ -587,5 +587,5 @@ class ChangeParser:
         if has("plan.md") or has("tasks.md") or (change_dir / "tasks").is_dir():
             return "plan"
         if has("proposal.md") or has("design.md"):
-            return "propose"
+            return "brainstorm"
         return "scan"
