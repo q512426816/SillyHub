@@ -169,3 +169,10 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 需求：reparse 返回的解析警告 detail 全英文，改中文。
 方案：parser.py 5 处 ParseWarning detail 改中文（LEGACY_CHANGE_DIR/PATH_TRAVERSAL/LEGACY_CHANGE_PATH/LEGACY_FILENAME）；前端「个 warning」改「个警告」。
 结果：ruff+typecheck 过。
+
+## ql-20260702-005-c7d8 | 2026-07-02 09:30:00 | /runtimes 「可访问目录」改「可写目录」
+状态：已完成
+文件：frontend/src/app/(dashboard)/runtimes/page.tsx
+需求：allowed_roots 实际是写白名单（读取不受限），UI 名称「可访问目录」误导，改「可写目录」。
+方案：runtimes/page.tsx 全部「可访问目录」→「可写目录」（标签/按钮/tooltip/Modal 标题/描述/notify/aria-label/空态），Modal 描述明确「读取不受限，仅白名单内可写」。
+结果：typecheck 过。（安全 bug：D 盘能写 不在 allowed_roots——需排查 daemon write-guard，另案处理。）
