@@ -33,28 +33,6 @@ export type ChangeList = {
   total: number;
 };
 
-export type ChangeDocMatrixEntry = {
-  doc_type: string;
-  exists: boolean;
-  path: string;
-  status: string | null;
-  last_modified_at: string | null;
-};
-
-export type ChangeDocMatrix = {
-  change_id: string;
-  documents: ChangeDocMatrixEntry[];
-  prototypes: string[];
-  references: string[];
-};
-
-export type ChangeDocContent = {
-  doc_type: string;
-  path: string;
-  content: string | null;
-  exists: boolean;
-};
-
 export type ChangeWarning = {
   code: string;
   detail: string;
@@ -167,24 +145,6 @@ export function listChanges(
 export function getChange(workspaceId: string, changeId: string) {
   return apiFetch<ChangeRead>(
     `/api/workspaces/${workspaceId}/changes/${changeId}`,
-  );
-}
-
-export function getChangeDocuments(workspaceId: string, changeId: string) {
-  return apiFetch<ChangeDocMatrix>(
-    `/api/workspaces/${workspaceId}/changes/${changeId}/documents`,
-  );
-}
-
-export function getChangeDocumentContent(
-  workspaceId: string,
-  changeId: string,
-  docType: string,
-  path?: string,
-) {
-  const qs = path ? `?path=${encodeURIComponent(path)}` : "";
-  return apiFetch<ChangeDocContent>(
-    `/api/workspaces/${workspaceId}/changes/${changeId}/documents/${docType}${qs}`,
   );
 }
 

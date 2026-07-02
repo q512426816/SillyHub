@@ -127,6 +127,25 @@ class SpecWorkspaceService:
             )
         return spec_ws
 
+    async def ensure_spec_workspace(self, workspace_id: uuid.UUID) -> SpecWorkspace:
+        """Ensure a SpecWorkspace exists for the given workspace_id (D-009).
+
+        Returns the existing row if found; otherwise creates one with default
+        strategy='platform-managed' and sensible defaults.  This is the
+        automatic spec container bootstrap step used by init dispatch — it
+        replaces the old explicit ``bootstrapSpecWorkspace`` button path
+        (2026-07-02-workspace-config-flow D-002 / D-009).
+        """
+        from app.modules.spec_workspace.schema import SpecWorkspaceCreate
+
+        try:
+            return await self.get(workspace_id)
+        except SpecWorkspaceNotFound:
+            return await self.create(
+                workspace_id,
+                SpecWorkspaceCreate(strategy="platform-managed"),
+            )
+
     # ── Update ─────────────────────────────────────────────────────────────
 
     async def update(
@@ -442,6 +461,63 @@ class SpecWorkspaceService:
             sync_status=spec_ws.sync_status,
         )
 
+    # ── Manual sync (D-012，task-13：path_source 分流) ──────────────────────
+    #
+    # 「同步到服务器」手动按钮：把本地（或本机）spec 改动回灌到服务器权威 spec_root。
+    # 复用 DaemonChangeWrite outbox（kind="spec-sync"）共享 change-detail-file-tree-editor
+    # 基础设施，不另起表。
+    #
+    # 分流：
+    #   - server-local：root_path 在容器/宿主机可读，直接打包 .sillyspec → apply_sync
+    #     落盘返 done（与 import_from_repo 等价但同步语义：把本机 spec 整树覆盖服务器）。
+    #   - daemon-client：root_path 在成员宿主机，backend 读不到 → 建 kind="spec-sync" 的
+    #     DaemonChangeWrite 行，daemon 拉到后调 postSpecSync 整树回灌（D-012）。
+
+    async def sync_manual_server_local(
+        self,
+        workspace_id: uuid.UUID,
+        *,
+        runtime_id: uuid.UUID | None = None,
+        root_path: str | None = None,
+    ) -> dict[str, str]:
+        """server-local 手动同步：本机 .sillyspec 打包 → apply_sync 落盘返 done。
+
+        复用 ``import_from_repo`` 的 server-local 分支（容器内打包 .sillyspec 整树 →
+        apply_sync 覆盖 spec_root + reparse）。返回 ``{"status": "done"}``。
+        """
+        await self.import_from_repo(workspace_id, runtime_id=runtime_id, root_path=root_path)
+        return {"status": "done"}
+
+    async def sync_manual_get_pending(
+        self,
+        workspace_id: uuid.UUID,
+    ) -> list[dict[str, object]]:
+        """查询 workspace 下所有 kind="spec-sync" 的 DaemonChangeWrite 行状态。
+
+        前端轮询用：返回 pending/claimed/done/failed 行清单（按 created_at 排序），
+        前端取最新一条判定「同步到服务器」的进度。
+        """
+        from app.modules.daemon.model import DaemonChangeWrite
+
+        stmt = (
+            select(DaemonChangeWrite)
+            .where(DaemonChangeWrite.workspace_id == workspace_id)  # type: ignore[arg-type]
+            .where(DaemonChangeWrite.kind == "spec-sync")  # type: ignore[operator]
+            .order_by(DaemonChangeWrite.created_at.desc())
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [
+            {
+                "task_id": str(rw.id),
+                "status": rw.status,
+                "runtime_id": str(rw.runtime_id),
+                "error": rw.error,
+                "created_at": rw.created_at,  # type: ignore[dict-item]
+                "completed_at": rw.completed_at,  # type: ignore[dict-item]
+            }
+            for rw in rows
+        ]
+
     async def sync(self, workspace_id: uuid.UUID) -> SpecWorkspace:
         """Synchronise the platform spec workspace with the repo ``.sillyspec``
         directory.
@@ -675,6 +751,13 @@ class SpecWorkspaceService:
         now = datetime.now(UTC)
         spec_ws.sync_status = "clean"
         spec_ws.last_synced_at = now
+        # task-09 / D-010: spec tree just rewritten server-side → bump the
+        # authoritative version so daemon clients see a newer value on their
+        # next lease and pull a fresh bundle. Incremented here (the single
+        # landing point for apply_sync / import_from_repo / SSE import) rather
+        # than in scan_generate, because scan_generate only dispatches a lease;
+        # the actual tree write happens through _write_spec_root.
+        spec_ws.spec_version = (spec_ws.spec_version or 0) + 1
         spec_ws.updated_at = now
         await self._session.commit()
         return spec_ws

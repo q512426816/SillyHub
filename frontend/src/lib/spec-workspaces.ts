@@ -163,6 +163,76 @@ export async function generateProjects(
   );
 }
 
+// ── Init dispatch (D-002/D-009, task-08) ──
+
+export interface InitDispatchResult {
+  lease_id: string;
+  runtime_id: string;
+  claim_token: string;
+}
+
+/**
+ * POST /api/workspaces/{workspaceId}/init — dispatch an init-mode
+ * interactive lease to the current member's daemon.  The daemon writes
+ * `.sillyspec-platform.json` and pulls the latest spec bundle.
+ */
+export async function initDispatch(
+  workspaceId: string,
+): Promise<InitDispatchResult> {
+  return apiFetch<InitDispatchResult>(
+    `/api/workspaces/${workspaceId}/init`,
+    { method: "POST" },
+  );
+}
+
+// ── Sync Manual (D-012, task-13/14) ──
+
+export interface SyncManualResult {
+  status: "pending" | "done";
+  task_id?: string;
+}
+
+/**
+ * POST /api/workspaces/{workspaceId}/spec-workspace/sync-manual
+ *
+ * 「同步到服务器」手动按钮入口。
+ * - server-local：立即返 {"status": "done"}。
+ * - daemon-client：建 kind=spec-sync 的 DaemonChangeWrite outbox 行，
+ *   返 {"status": "pending", "task_id": "uuid"}。
+ */
+export async function syncManual(
+  workspaceId: string,
+): Promise<SyncManualResult> {
+  return apiFetch<SyncManualResult>(
+    `/api/workspaces/${workspaceId}/spec-workspace/sync-manual`,
+    { method: "POST" },
+  );
+}
+
+export interface PendingSyncItem {
+  id: string;
+  workspace_id: string;
+  runtime_id: string;
+  change_key: string;
+  kind: string;
+  status: string;
+  created_at: string;
+}
+
+/**
+ * GET /api/workspaces/{workspaceId}/spec-workspace/sync-manual/pending
+ *
+ * 查询 workspace 下所有 kind="spec-sync" 的 pending 行。
+ * 按 created_at desc 返回，前端取最新一条判定进度。
+ */
+export async function listPendingSync(
+  workspaceId: string,
+): Promise<PendingSyncItem[]> {
+  return apiFetch<PendingSyncItem[]>(
+    `/api/workspaces/${workspaceId}/spec-workspace/sync-manual/pending`,
+  );
+}
+
 // ── Spec Workspace Update ──
 
 export interface SpecWorkspaceUpdateInput {

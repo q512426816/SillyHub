@@ -1282,13 +1282,24 @@ class AgentService:
         # 解析 spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy，D-001）：
         # 从 spec_workspaces 读 strategy，回退 platform-managed。透传到 lease payload
         # 让 daemon pullSpecBundle 据此三分支初始化缓存（platform-managed/repo-mirrored/repo-native）。
+        #
+        # task-10（2026-07-02-workspace-config-flow，D-010）：同一 SpecWorkspace 行顺便读
+        # latest_spec_version（服务器权威文档版本），供 daemon 保鲜比对（任务执行前比对本地
+        # .sillyspec-platform.json.spec_version，旧了 pullSpecBundle）。值源 = SpecWorkspace
+        # .spec_version（task-09 落字段）。向前兼容 getattr 默认 0（task-09 未合前）。
+        # 实际透传到 daemon claim payload 由 build_claim_payload（daemon/lease/context.py）
+        # 独立从 SpecWorkspace 读——本处解析供 dispatch 路径日志/未来 init dispatch 复用，
+        # 不依赖 placement 签名（不在本任务 allowed_paths 内）。
         spec_strategy = "platform-managed"
+        latest_spec_version = 0
         try:
             from app.modules.spec_workspace.service import SpecWorkspaceService
 
             _spec_ws = await SpecWorkspaceService(self._session).get(workspace_id)
             if _spec_ws and _spec_ws.strategy:
                 spec_strategy = _spec_ws.strategy
+            if _spec_ws is not None:
+                latest_spec_version = int(getattr(_spec_ws, "spec_version", 0) or 0)
         except Exception:
             pass
 
@@ -1451,6 +1462,10 @@ class AgentService:
             run_id=str(run.id),
             session_id=str(session.id),
             lease_id=str(dispatch.lease_id),
+            # task-10：透出 latest_spec_version 到日志，便于排查 daemon 保鲜比对失灵
+            # （版本未递增 / daemon 拉到旧值的诊断）。值源 SpecWorkspace.spec_version。
+            latest_spec_version=latest_spec_version,
+            spec_strategy=spec_strategy,
         )
 
         # -- 8. Wake daemon + SESSION_INJECT 首 turn（参照 create_session 收尾）---
@@ -1480,6 +1495,154 @@ class AgentService:
             session_id=str(session.id),
         )
         return run
+
+    async def start_init_dispatch(
+        self,
+        workspace_id: uuid.UUID,
+        actor_user_id: uuid.UUID,
+    ) -> dict:
+        """Create an init-mode interactive lease for the given workspace and actor.
+
+        This is the automated 'Initialize' flow (2026-07-02-workspace-config-flow
+        D-002/D-009)::
+
+          1. Ensure the spec workspace container exists (``ensure_spec_workspace``).
+          2. Resolve the member binding for ``runtime_id`` + ``root_path``.
+          3. Create an interactive lease with ``mode='init'`` and a payload
+             containing ``platform_config{server_origin, strategy}`` and
+             ``latest_spec_version``.
+          4. Wake the target daemon so it picks up the lease.
+
+        The daemon processes the lease by writing ``.sillyspec-platform.json``
+        to the member's local project directory, pulling the spec bundle, and
+        reporting completion (task-07).
+
+        Args:
+            workspace_id: Target workspace UUID.
+            actor_user_id: The user who triggers initialization.
+
+        Returns:
+            dict with ``lease_id``, ``runtime_id``, ``claim_token``.
+
+        Raises:
+            AgentRunError: If the actor has no member binding or no daemon
+                runtime configured.
+        """
+        import json
+        import secrets
+        from datetime import UTC, datetime
+
+        from sqlalchemy import text
+
+        from app.modules.daemon.ws_hub import get_daemon_ws_hub
+        from app.modules.spec_workspace.service import SpecWorkspaceService
+        from app.modules.workspace.member_runtimes.resolver import (
+            MemberBindingResolver,
+        )
+
+        # -- 1. Ensure spec workspace container exists -------------------------
+        spec_ws_svc = SpecWorkspaceService(self._session)
+        spec_ws = await spec_ws_svc.ensure_spec_workspace(workspace_id)
+
+        # -- 2. Resolve member binding for runtime_id + root_path --------------
+        binding = await MemberBindingResolver.resolve_member_binding(
+            self._session,
+            workspace_id,
+            actor_user_id,
+        )
+        runtime_id = binding.runtime_id
+        root_path = binding.root_path
+
+        if runtime_id is None:
+            raise AgentRunError(
+                "Member has no daemon runtime configured; cannot dispatch init lease.",
+                details={
+                    "workspace_id": str(workspace_id),
+                    "user_id": str(actor_user_id),
+                },
+            )
+
+        # -- 3. Build platform_config + latest_spec_version --------------------
+        # server_origin tells the daemon where the platform backend lives.
+        # Default matches the daemon's own default (``config.server_url``);
+        # override via SERVER_ORIGIN env var for production deployments.
+        server_origin = os.getenv("SERVER_ORIGIN", "http://localhost:8000")
+        platform_config: dict[str, str] = {
+            "server_origin": server_origin,
+            "strategy": spec_ws.strategy,
+        }
+        latest_spec_version = int(getattr(spec_ws, "spec_version", 0) or 0)
+
+        # -- 4. Create init-mode interactive lease (daemon_task_leases row) -----
+        lease_id = uuid.uuid4()
+        now = datetime.now(UTC)
+        claim_token = secrets.token_hex(32)
+
+        metadata: dict = {
+            "mode": "init",
+            "workspace_id": str(workspace_id),
+            "actor_user_id": str(actor_user_id),
+            "runtime_id": str(runtime_id),
+            "root_path": root_path,
+            "platform_config": platform_config,
+            "latest_spec_version": latest_spec_version,
+            "claim_token": claim_token,
+        }
+
+        await self._session.execute(
+            text(
+                """
+                INSERT INTO daemon_task_leases
+                    (id, agent_run_id, runtime_id, status, kind,
+                     lease_expires_at, metadata, created_at, updated_at)
+                VALUES
+                    (:id, NULL, :runtime_id, 'pending', 'interactive',
+                     NULL, :metadata, :now, :now)
+                """
+            ),
+            {
+                "id": lease_id.hex,
+                "runtime_id": runtime_id.hex,
+                "metadata": json.dumps(metadata),
+                "now": now,
+            },
+        )
+        await self._session.commit()
+
+        log.info(
+            "start_init_dispatch_lease_created",
+            workspace_id=str(workspace_id),
+            user_id=str(actor_user_id),
+            lease_id=str(lease_id),
+            runtime_id=str(runtime_id),
+            latest_spec_version=latest_spec_version,
+            strategy=spec_ws.strategy,
+        )
+
+        # -- 5. Wake daemon ----------------------------------------------------
+        hub = get_daemon_ws_hub()
+        if hub.is_connected(runtime_id):
+            await hub.send_wakeup(runtime_id, lease_id=lease_id)
+            log.info(
+                "start_init_dispatch_wakeup_sent",
+                runtime_id=str(runtime_id),
+                lease_id=str(lease_id),
+            )
+        else:
+            log.warning(
+                "start_init_dispatch_daemon_offline",
+                workspace_id=str(workspace_id),
+                user_id=str(actor_user_id),
+                lease_id=str(lease_id),
+                runtime_id=str(runtime_id),
+                note="daemon will pick up the lease on next poll",
+            )
+
+        return {
+            "lease_id": str(lease_id),
+            "runtime_id": str(runtime_id),
+            "claim_token": claim_token,
+        }
 
     async def _get_workspace_root(self, workspace_id: uuid.UUID) -> str:
         """Get the root_path of a workspace."""

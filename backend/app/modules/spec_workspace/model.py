@@ -13,7 +13,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, String, Text, Uuid
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text, Uuid
 from sqlmodel import Field
 
 from app.models.base import BaseModel
@@ -70,6 +70,17 @@ class SpecWorkspace(BaseModel, table=True):
     profile_version: str = Field(
         default="0.1.0",
         sa_column=Column(String(50), nullable=False),
+    )
+    # Change 2026-07-02-workspace-config-flow task-09 / D-010:
+    # Server-authoritative spec bundle version. Incremented each time the spec
+    # tree is rewritten by scan_generate success / apply_sync landing (see
+    # service `_write_spec_root`). Daemon compares lease payload
+    # `latest_spec_version` against local .sillyspec-platform.json.spec_version
+    # to decide whether to pull a fresh bundle. NOT the same as `profile_version`
+    # (scan profile format version) — different semantics, kept separate.
+    spec_version: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, default=0),
     )
     sync_status: str = Field(
         default="pending",

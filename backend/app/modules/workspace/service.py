@@ -23,6 +23,8 @@ from sqlmodel import col
 
 from app.core.config import get_settings
 from app.core.errors import (
+    AppError,
+    PermissionDenied,
     WorkspaceNotFound,
     WorkspaceNotSillyspec,
     WorkspacePathDuplicate,
@@ -33,7 +35,8 @@ from app.core.errors import (
 )
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentRun
-from app.modules.auth.model import User
+from app.modules.auth.model import Role, User, UserWorkspaceRole
+from app.modules.scan_docs.model import ScanDocument
 from app.modules.workspace.model import (
     AgentRunWorkspace,
     Workspace,
@@ -956,6 +959,7 @@ class WorkspaceService:
         agent_service: "AgentService",
         provider: str | None = None,
         model: str | None = None,
+        force: bool = False,
     ) -> tuple[uuid.UUID, uuid.UUID]:
         """Create workspace + spec_workspace and trigger scan agent.
 
@@ -963,6 +967,8 @@ class WorkspaceService:
             root_path: Absolute path to the user's project directory.
             user_id: User who initiated the scan request.
             agent_service: AgentService instance (injected by caller).
+            force: When True, skip the "already scanned" guard and re-scan
+                   even if scan_documents exist for this workspace.
 
         Returns:
             (workspace_id, agent_run_id) tuple.
@@ -971,6 +977,8 @@ class WorkspaceService:
             WorkspacePathNotFound: root_path does not exist.
             WorkspacePathNotDir: root_path is not a directory.
             WorkspacePermissionDenied: Insufficient path permissions.
+            PermissionDenied: Actor is not a workspace owner (403).
+            AppError(409): Workspace already has scan documents and force=False.
         """
         # 1. Validate root_path
         resolved = _rewrite_path(root_path)
@@ -979,6 +987,52 @@ class WorkspaceService:
 
         # 2. Idempotency: check if active workspace already exists for this root_path
         workspace = await self._find_active_by_root_path(root_path)
+
+        # ── Gate: owner check (D-003@V2) + count check (D-004) ──
+        if workspace is not None:
+            # 2a. Owner validation: only workspace_owner may initiate a scan.
+            #     Skip this check when the workspace has no members at all
+            #     (pre-membership phase — anyone who discovers the workspace
+            #     can scan it). Once at least one UserWorkspaceRole row exists,
+            #     the caller MUST hold workspace_owner.
+            member_count_stmt = (
+                select(func.count())
+                .select_from(UserWorkspaceRole)
+                .where(UserWorkspaceRole.workspace_id == workspace.id)
+            )
+            member_count = int((await self._session.scalar(member_count_stmt)) or 0)
+            if member_count > 0:
+                owner_stmt = (
+                    select(UserWorkspaceRole)
+                    .join(Role, Role.id == UserWorkspaceRole.role_id)
+                    .where(UserWorkspaceRole.workspace_id == workspace.id)
+                    .where(UserWorkspaceRole.user_id == user_id)
+                    .where(Role.key == "workspace_owner")
+                    .limit(1)
+                )
+                owner_row = (await self._session.execute(owner_stmt)).scalars().first()
+                if owner_row is None:
+                    raise PermissionDenied("仅 owner 可扫描")
+
+            # 2b. Scan-document guard: if the workspace already has scan
+            #     documents and the caller did not pass force=True, refuse.
+            count_stmt = (
+                select(func.count())
+                .select_from(ScanDocument)
+                .where(ScanDocument.workspace_id == workspace.id)
+                .where(ScanDocument.exists.is_(True))
+            )
+            doc_count = int((await self._session.scalar(count_stmt)) or 0)
+            if doc_count > 0 and not force:
+                raise AppError(
+                    "该工作区已有扫描结果，如需重扫请确认",
+                    code="workspace_already_scanned",
+                    http_status=409,
+                    details={
+                        "workspace_id": str(workspace.id),
+                        "scan_document_count": doc_count,
+                    },
+                )
 
         if workspace is None:
             # 3. Create Workspace record

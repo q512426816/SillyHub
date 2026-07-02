@@ -124,6 +124,104 @@ async def import_spec_workspace(
 
 
 @router.post(
+    "/spec-workspace/sync-manual",
+    response_model=dict,
+)
+async def sync_manual_spec_workspace(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+) -> dict:
+    """「同步到服务器」手动按钮（D-012 / task-13）：path_source 分流。
+
+    解析当前用户的 per-member binding（``MemberBindingResolver``）；未绑定回退读
+    workspace 全局 ``path_source``/``root_path``/``daemon_runtime_id``（向后兼容）。
+
+    - **server-local**：root_path 在容器/宿主机可读 → 直接打包 .sillyspec → apply_sync
+      落盘 + reparse，立即返 ``{"status": "done"}``。
+    - **daemon-client**：root_path 在成员宿主机，backend 读不到 → 建 ``kind="spec-sync"``
+      的 DaemonChangeWrite outbox 行（files 携带 workspace_id 元信息），返
+      ``{"status": "pending", "task_id": <uuid>}``。前端轮询 ``GET .../sync-manual/pending``。
+    """
+    service = SpecWorkspaceService(session)
+
+    # 解析 actor 的 binding：优先 per-member 行（W1 接线），缺则回退 workspace 全局列。
+    from app.modules.workspace.member_runtimes.resolver import MemberBindingResolver
+
+    runtime_id: uuid.UUID | None = None
+    root_path: str | None = None
+    path_source: str | None = None
+    try:
+        binding = await MemberBindingResolver.resolve_member_binding(session, workspace_id, user.id)
+        runtime_id = binding.runtime_id
+        root_path = binding.root_path
+        path_source = binding.path_source
+    except Exception:
+        # 无 per-member 行 → 回退 workspace 全局列（兼容旧 binding / 未初始化成员）。
+        from app.modules.workspace.model import Workspace
+
+        ws = await session.get(Workspace, workspace_id)
+        runtime_id = ws.daemon_runtime_id if ws else None
+        root_path = ws.root_path if ws else None
+        path_source = ws.path_source if ws else None
+
+    # daemon-client：建 spec-sync outbox 行。
+    if path_source == "daemon-client" and runtime_id is not None:
+        from app.modules.daemon.model import DaemonChangeWrite
+
+        # files 携带 workspace_id 元信息（daemon task-runner 据 kind=spec-sync 分流，
+        # 不写 changes/<key>/ 而是调 postSpecSync 整树回灌）。
+        cw = DaemonChangeWrite(
+            id=uuid.uuid4(),
+            workspace_id=workspace_id,
+            runtime_id=runtime_id,
+            change_key="spec-sync",
+            kind="spec-sync",
+            files=[{"workspace_id": str(workspace_id)}],
+            status="pending",
+        )
+        session.add(cw)
+        await session.commit()
+        await session.refresh(cw)
+        log.info(
+            "spec_workspace.sync_manual_dispatched",
+            workspace_id=str(workspace_id),
+            change_write_id=str(cw.id),
+            runtime_id=str(runtime_id),
+        )
+        return {"status": "pending", "task_id": str(cw.id)}
+
+    # server-local（或 path_source 未标 daemon-client）：本机直接落盘。
+    result = await service.sync_manual_server_local(
+        workspace_id, runtime_id=runtime_id, root_path=root_path
+    )
+    log.info(
+        "spec_workspace.sync_manual_done",
+        workspace_id=str(workspace_id),
+        path_source=path_source,
+    )
+    return result
+
+
+@router.get(
+    "/spec-workspace/sync-manual/pending",
+    response_model=list[dict],
+)
+async def list_sync_manual_pending(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+) -> list[dict]:
+    """查询 workspace 下所有 ``kind="spec-sync"`` 的 DaemonChangeWrite 行状态。
+
+    前端轮询用：按 created_at desc 返回，前端取最新一条判定进度
+    （pending/claimed=进行中，done=完成，failed=失败）。
+    """
+    service = SpecWorkspaceService(session)
+    return await service.sync_manual_get_pending(workspace_id)
+
+
+@router.post(
     "/spec-workspace/sync",
     response_model=SpecSyncResponse,
 )

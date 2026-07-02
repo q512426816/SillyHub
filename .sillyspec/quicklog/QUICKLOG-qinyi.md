@@ -229,3 +229,10 @@ created_at: 2026-06-23 10:09:12
 验证：docker cp 改后文件进容器 + restart backend，reparse scan-docs parsed 205 created 205；reparse changes parsed 87 created 87。fb5008c1 扫描文档+变更中心数据已显示（前端刷新可见）。
 生效路径：代码已 git add 待 commit；DB 已临时 ALTER 生效；migration 需 commit + build backend 镜像部署后 alembic upgrade 持久化（ALTER TYPE 幂等，DB 已改则 no-op + stamp）。
 遗留：build backend 镜像正式部署（docker cp 临时，下次 down/up 丢失）；旧 workspace（5c22aa2e 等）同样问题，reparse 可修。
+
+## ql-20260702-001-f3c7 | 2026-07-02 08:54:34 | 修复 install.sh 生成 Windows .cmd wrapper 在中文 Windows cmd.exe 下因 LF换行+UTF-8中文 REM 注释致解析报错（注释行被当命令执行）
+状态：已完成
+文件：sillyhub-daemon/scripts/install.sh（仓库）；C:\Users\qinyi\.sillyhub\daemon\bin\sillyhub-daemon.cmd（用户机非仓库文件，已止血重写+备份 .bak）
+背景：用户在 C:\Users\qinyi> 跑 sillyhub-daemon start 时，daemon 正常启动（Runtime ID 正常输出），但 cmd 打印两行噪音错误：'-' 不是内部或外部命令 / '鎵€鍦ㄧ洰褮曪級锛沶ode'（UTF-8中文 GBK 乱码）不是内部或外部命令。根因=install.sh:240-249 heredoc 生成 .cmd 默认 LF 换行 + REM 注释含 UTF-8 中文，中文 Windows cmd.exe（GBK 代码页）下 REM 行解析错位、注释内容被当命令执行。已用最小复现实验证实：仅 LF+中文REM 组合出错，CRLF+中文/LF+英文/CRLF+英文 均正常。
+方案：① install.sh 生成 .cmd 后用 awk 转 CRLF（BEGIN{ORS="\r\n"} 跨平台 Git Bash/WSL/Linux 一致）；② 该 REM 注释改英文（双保险）。bash wrapper（无扩展名）UTF-8+LF 对 bash 无害不动。
+结果：install.sh 注释改英文 + heredoc 后 awk 转 CRLF；bash -n 通过；模拟修复后产出 cat -A 全 CRLF(^M$)+纯 ASCII。用户机 .cmd 已重写（heredoc+awk，备份 .cmd.bak）→ cmd.exe 实跑 --version 输出 0.1.0 无噪音（对比修复前两行报错彻底消失）。坑：printf 拼接含反斜杠路径会把 \node.exe 的 \n 当 LF（首次写坏 .cmd 成 ode.exe），改 heredoc+awk（与 install.sh 一致）修复；grep -P 在 LC_ALL=C 下报错，非 ASCII 检查改高位字节范围或依赖 cat -A 肉眼。

@@ -25,3 +25,14 @@ created_at: 2026-06-25T14:01:00
     5. 去掉冗余顶部「共 N」（分页 showTotal 已有）
   - 文件：`frontend/src/app/(dashboard)/admin/users/page.tsx`
   - 验证：typecheck no errors、lint 无 page.tsx 相关、frontend rebuild healthy
+
+- [x] **成员接入引导卡片：Daemon Runtime 改下拉 + 路径来源/标签中文化**
+  - 文件：`frontend/src/components/workspace-access-guide.tsx`（+ 补最小测试）
+  - 背景：`/workspaces/[id]` 当前用户未配置 binding 时弹出的引导卡，「Daemon Runtime ID」让用户手填 UUID、「路径来源」下拉显示英文内部值，UX 不合理且违反中文 UI 规则。
+  - 方案：
+    1. 「Daemon Runtime ID」Input → 下拉：数据源 `listDaemonRuntimes()`（`@/lib/daemon`，已按当前登录用户过滤）；交互沿用 `workspace-daemon-switcher.tsx`（online 排前、离线也可选、每项 PROVIDER_META label + DAEMON_RUNTIME_STATUS_LABELS/labelOf + daemonRuntimeStatusVariant 状态徽标）；空态提示「请先在 /runtimes 启动一个守护进程」。
+    2. 「路径来源」下拉选项显示中文：复用 `workspacePathSourceLabel()`（`@/lib/workspace-path`）→「本机守护进程路径 / 服务器本地路径」，value 仍保留英文枚举 `daemon-client`/`server-local`。
+    3. 英文 label 中文化：「Daemon Runtime ID」→「绑定守护进程」。
+    4. `runtime_id` 保持 `string | null`（可不选→提交 null），`root_path` 仍必填；不破坏 `MemberBindingUpsertRequest` 契约。
+  - 依据：CLAUDE.md 规则 11（中文 UI）；复用现有 `listDaemonRuntimes` / `workspace-daemon-switcher` 模式 / `workspacePathSourceLabel`，不新增 API。
+  - 测试：补最小用例（mock `listDaemonRuntimes` 验证下拉渲染 + 中文 label + 空态），`cd frontend && pnpm test` + `pnpm typecheck` + `pnpm lint`。

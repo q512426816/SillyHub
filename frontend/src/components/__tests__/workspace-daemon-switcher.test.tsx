@@ -3,9 +3,9 @@
 // 覆盖：
 //   - 「切换守护进程」展开列表，online runtime 排前；
 //   - 当前绑定项标注「当前」；
-//   - 点击非当前项 → updateWorkspace({ daemon_runtime_id }) + onChanged；
+//   - 点击非当前项 → upsertMyBinding({runtime_id, root_path, path_source}) + onChanged；
 //   - 点击当前项 → 仅收起，不重复提交；
-//   - updateWorkspace 失败 → 显示错误（role=alert）且不触发 onChanged。
+//   - upsertMyBinding 失败 → 显示错误（role=alert）且不触发 onChanged。
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -20,16 +20,16 @@ vi.mock("@/lib/daemon", () => ({
   },
 }));
 
-vi.mock("@/lib/workspaces", () => ({
-  updateWorkspace: vi.fn(),
+vi.mock("@/lib/workspace-binding", () => ({
+  upsertMyBinding: vi.fn(),
 }));
 
 import { WorkspaceDaemonSwitcher } from "@/components/workspace-daemon-switcher";
 import { listDaemonRuntimes, type DaemonRuntimeRead } from "@/lib/daemon";
-import { updateWorkspace } from "@/lib/workspaces";
+import { upsertMyBinding, type MemberBindingView } from "@/lib/workspace-binding";
 
 const mockedList = vi.mocked(listDaemonRuntimes);
-const mockedUpdate = vi.mocked(updateWorkspace);
+const mockedUpsert = vi.mocked(upsertMyBinding);
 
 function mkRuntime(
   o: Partial<DaemonRuntimeRead> & { id: string },
@@ -47,6 +47,20 @@ function mkRuntime(
     allowed_roots: o.allowed_roots ?? [],
     created_at: o.created_at ?? "2026-01-01T00:00:00Z",
     updated_at: o.updated_at ?? "2026-01-01T00:00:00Z",
+  };
+}
+
+function mkBinding(
+  o: Partial<MemberBindingView> & { runtime_id?: string | null },
+): MemberBindingView {
+  return {
+    workspace_id: o.workspace_id ?? "ws-1",
+    user_id: o.user_id ?? "user-1",
+    runtime_id: o.runtime_id ?? null,
+    root_path: o.root_path ?? "/home/user/project",
+    path_source: o.path_source ?? "daemon-client",
+    synced_at: o.synced_at ?? null,
+    last_scan_at: o.last_scan_at ?? null,
   };
 }
 
@@ -81,7 +95,7 @@ describe("WorkspaceDaemonSwitcher", () => {
     render(
       <WorkspaceDaemonSwitcher
         workspaceId="ws-1"
-        currentRuntimeId="rt-cursor"
+        currentBinding={mkBinding({ runtime_id: "rt-cursor" })}
         onChanged={vi.fn()}
       />,
     );
@@ -99,16 +113,16 @@ describe("WorkspaceDaemonSwitcher", () => {
     expect(screen.getByText("当前")).toBeInTheDocument();
   });
 
-  it("点击非当前项调 updateWorkspace({ daemon_runtime_id }) 并触发 onChanged", async () => {
+  it("点击非当前项调 upsertMyBinding({runtime_id, root_path, path_source}) 并触发 onChanged", async () => {
     const claude = mkRuntime({ id: "rt-claude", provider: "claude" });
     mockedList.mockResolvedValue([claude]);
-    mockedUpdate.mockResolvedValue({} as never);
+    mockedUpsert.mockResolvedValue({} as never);
     const onChanged = vi.fn();
 
     render(
       <WorkspaceDaemonSwitcher
         workspaceId="ws-1"
-        currentRuntimeId="rt-other"
+        currentBinding={mkBinding({ runtime_id: "rt-other" })}
         onChanged={onChanged}
       />,
     );
@@ -120,21 +134,23 @@ describe("WorkspaceDaemonSwitcher", () => {
     fireEvent.click(screen.getByText("Claude Code"));
 
     await waitFor(() =>
-      expect(mockedUpdate).toHaveBeenCalledWith("ws-1", {
-        daemon_runtime_id: "rt-claude",
+      expect(mockedUpsert).toHaveBeenCalledWith("ws-1", {
+        runtime_id: "rt-claude",
+        root_path: "/home/user/project",
+        path_source: "daemon-client",
       }),
     );
     expect(onChanged).toHaveBeenCalledTimes(1);
   });
 
-  it("点击当前项仅收起，不调 updateWorkspace", async () => {
+  it("点击当前项仅收起，不调 upsertMyBinding", async () => {
     const claude = mkRuntime({ id: "rt-claude", provider: "claude" });
     mockedList.mockResolvedValue([claude]);
 
     render(
       <WorkspaceDaemonSwitcher
         workspaceId="ws-1"
-        currentRuntimeId="rt-claude"
+        currentBinding={mkBinding({ runtime_id: "rt-claude" })}
         onChanged={vi.fn()}
       />,
     );
@@ -148,19 +164,19 @@ describe("WorkspaceDaemonSwitcher", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("daemon-switcher-list")).toBeNull(),
     );
-    expect(mockedUpdate).not.toHaveBeenCalled();
+    expect(mockedUpsert).not.toHaveBeenCalled();
   });
 
-  it("updateWorkspace 失败时显示错误且不触发 onChanged", async () => {
+  it("upsertMyBinding 失败时显示错误且不触发 onChanged", async () => {
     const claude = mkRuntime({ id: "rt-claude", provider: "claude" });
     mockedList.mockResolvedValue([claude]);
-    mockedUpdate.mockRejectedValue(new Error("boom"));
+    mockedUpsert.mockRejectedValue(new Error("boom"));
     const onChanged = vi.fn();
 
     render(
       <WorkspaceDaemonSwitcher
         workspaceId="ws-1"
-        currentRuntimeId="rt-other"
+        currentBinding={mkBinding({ runtime_id: "rt-other" })}
         onChanged={onChanged}
       />,
     );

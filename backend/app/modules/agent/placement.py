@@ -452,11 +452,15 @@ class RunPlacementService:
         / runtime_root / workspace_* / repo_url / branch，daemon 经 execution-context
         重建 scan bundle）+ 强制 ``manual_approval=True``（注入 canUseTool）+
         ``ask_user_only=True``（只 AskUserQuestion 阻塞，其他工具 allow-through 让 scan
-        自动跑）。runtime 按 ``_get_online_runtime(user_id)`` 路由（workspace_id 仅进
-        metadata 用于产物/审批关联，不参与 runtime 选择——interactive session 本 wave
-        不支持 workspace 维度路由）。
+        自动跑）。runtime 按 ``_resolve_dispatch_runtime(workspace_id, user_id)``
+        路由——per-member binding 优先，无 member 行回退 workspace 全局列（D-006，
+        2026-07-02-workspace-config-flow task-01）。
         """
-        runtime = await self._get_online_runtime(user_id, provider=provider)
+        runtime = await self._resolve_dispatch_runtime(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            provider=provider,
+        )
         if runtime is None:
             log.warning(
                 "scan_interactive_dispatch_no_online_runtime",
@@ -608,25 +612,94 @@ class RunPlacementService:
     ) -> dict | None:
         """Resolve the runtime a dispatch should target.
 
-        Routing rules (change 2026-06-18-workspace-client-path task-03,
-        FR-02 / D-001@v1):
+        Routing rules (change 2026-07-02-workspace-config-flow task-01,
+        D-006 / per-member binding):
 
         - ``workspace_id is None``  → server-local compatibility path
           (``_get_online_runtime(user_id, provider=...)``). Keeps existing
           tests and callers working (design §9 / backward compat).
-        - workspace row missing     → log warning + fall back to server-local
-          (defensive; should not happen in normal flow).
+        - Per-member binding (WorkspaceMemberRuntime) takes priority:
+          if a row exists for ``(workspace_id, user_id)``, use its
+          ``runtime_id`` (must be online + owned by user); offline/missing
+          → ``NoOnlineDaemonError(runtime_id=...)``.
+        - No binding row   → fall back to legacy ``Workspace.daemon_runtime_id``
+          global column (backward compatible, see task-02 deprecation).
         - ``path_source != 'daemon-client'`` → server-local behavior unchanged.
-        - daemon-client with empty ``daemon_runtime_id`` → defensive
-          ``NoOnlineDaemonError`` (schema validator should already catch this).
-        - daemon-client             → bind to ``workspace.daemon_runtime_id``;
-          offline / missing / cross-user → ``NoOnlineDaemonError(runtime_id=...)``.
-          provider mismatch is a warning only (bound runtime wins).
+        - provider mismatch on bound runtime is a warning only (bound wins).
         """
         # Branch 0: no workspace context → legacy server-local path.
         if workspace_id is None:
             return await self._get_online_runtime(user_id, provider=provider)
 
+        # Branch 1: per-member binding (D-006, 2026-07-02-workspace-config-flow
+        # task-01). If a WorkspaceMemberRuntime row exists for this
+        # (workspace_id, user_id), use its runtime_id (must be online + owned
+        # by user). No binding row -> fall through to legacy Workspace global
+        # column (backward compatible).
+        from app.modules.workspace.member_runtimes.exceptions import (
+            MemberBindingNotFound,
+        )
+        from app.modules.workspace.member_runtimes.resolver import (
+            MemberBindingResolver,
+        )
+
+        try:
+            binding = await MemberBindingResolver.resolve_member_binding(
+                self._session, workspace_id, user_id
+            )
+        except MemberBindingNotFound:
+            binding = None  # No binding row — fall through to legacy logic.
+        except Exception as exc:
+            log.warning(
+                "resolve_member_binding_unexpected_error",
+                workspace_id=str(workspace_id),
+                user_id=str(user_id),
+                error=str(exc),
+            )
+            binding = None  # Defensive fallback to legacy logic.
+
+        if binding is not None:
+            # Guard: reject mock/proxy runtime_id values from mock sessions.
+            rt_id = None
+            if binding.runtime_id is not None:
+                try:
+                    rt_id = uuid.UUID(str(binding.runtime_id))
+                except (ValueError, TypeError):
+                    log.warning(
+                        "resolve_member_binding_invalid_runtime_id",
+                        workspace_id=str(workspace_id),
+                        user_id=str(user_id),
+                    )
+                    binding = None
+
+        if binding is not None and rt_id is not None:
+            rt = await self._query_online_by_id(rt_id)
+            if rt is None:
+                raise NoOnlineDaemonError(
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    runtime_id=rt_id,
+                )
+            rt_user_raw = rt.get("user_id")
+            rt_user_id = uuid.UUID(rt_user_raw) if isinstance(rt_user_raw, str) else rt_user_raw
+            if rt_user_id != user_id:
+                raise NoOnlineDaemonError(
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    runtime_id=rt_id,
+                    message="目标 daemon 不属于当前用户，无法路由",
+                )
+            if provider and rt.get("provider") and rt["provider"] != provider:
+                log.warning(
+                    "dispatch_member_binding_provider_mismatch",
+                    wanted=provider,
+                    bound=rt["provider"],
+                    runtime_id=str(rt_id),
+                    workspace_id=str(workspace_id),
+                )
+            return rt
+
+        # Fall through to legacy workspace global-column logic.
         ws_row = (
             (
                 await self._session.execute(
@@ -748,6 +821,68 @@ class RunPlacementService:
           ``decide_backend`` fails fast instead of letting dispatch fail
           later (avoiding decide/dispatch semantic split, R-decide-dispatch-race).
         """
+        # Branch 1: per-member binding takes priority (D-006,
+        # 2026-07-02-workspace-config-flow task-01). If a
+        # WorkspaceMemberRuntime row exists for this (workspace_id, user_id),
+        # validate its runtime_id. No binding row -> fall through to legacy
+        # Workspace.daemon_runtime_id global column.
+        from app.modules.workspace.member_runtimes.exceptions import (
+            MemberBindingNotFound,
+        )
+        from app.modules.workspace.member_runtimes.resolver import (
+            MemberBindingResolver,
+        )
+
+        try:
+            binding = await MemberBindingResolver.resolve_member_binding(
+                self._session, workspace_id, user_id
+            )
+        except MemberBindingNotFound:
+            binding = None  # No binding row — fall through to legacy logic.
+        except Exception as exc:
+            log.warning(
+                "resolve_member_binding_unexpected_error",
+                workspace_id=str(workspace_id),
+                user_id=str(user_id),
+                error=str(exc),
+            )
+            binding = None  # Defensive fallback to legacy logic.
+
+        if binding is not None:
+            # Guard: reject mock/proxy runtime_id values from mock sessions.
+            rt_id = None
+            if binding.runtime_id is not None:
+                try:
+                    rt_id = uuid.UUID(str(binding.runtime_id))
+                except (ValueError, TypeError):
+                    log.warning(
+                        "resolve_member_binding_invalid_runtime_id",
+                        workspace_id=str(workspace_id),
+                        user_id=str(user_id),
+                    )
+                    binding = None
+
+        if binding is not None and rt_id is not None:
+            rt = await self._query_online_by_id(rt_id)
+            if rt is None:
+                raise NoOnlineDaemonError(
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    runtime_id=rt_id,
+                )
+            rt_user_raw = rt.get("user_id")
+            rt_user_id = uuid.UUID(rt_user_raw) if isinstance(rt_user_raw, str) else rt_user_raw
+            if rt_user_id != user_id:
+                raise NoOnlineDaemonError(
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    runtime_id=rt_id,
+                    message="目标 daemon 不属于当前用户，无法路由",
+                )
+            return rt
+
+        # binding is None (no binding row) → fall through to legacy.
+
         try:
             ws_row = (
                 (

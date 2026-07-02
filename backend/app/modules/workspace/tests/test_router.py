@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+
+# Import to register workspace_member_runtimes in BaseModel.metadata.
+from app.modules.workspace.member_runtimes import model as _wmr_model  # noqa: F401
 
 
 def _make_workspace(tmp_path: Path, name: str = "workspace") -> Path:
@@ -382,3 +388,96 @@ async def test_patch_slug_conflict_returns_409(
         headers=auth_headers,
     )
     assert resp.status_code == 409
+
+
+# ── Init endpoint (POST /{workspace_id}/init) ──────────────────────────────
+
+
+async def test_init_endpoint_returns_lease(
+    db_session,
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    """POST /api/workspaces/{workspace_id}/init creates an init-mode interactive
+    lease and returns lease_id / runtime_id / claim_token.
+
+    This is the HTTP-level integration test complementing the service-level
+    coverage in test_start_init_dispatch.py.
+    """
+    from app.modules.auth.model import User
+    from app.modules.daemon.model import DaemonRuntime
+    from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+    from app.modules.workspace.model import Workspace
+
+    # ── seed data ───────────────────────────────────────────────────────
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="init-test-ws",
+        slug=f"init-{uuid.uuid4().hex[:8]}",
+        root_path="/tmp/init-test",
+        path_source="daemon-client",
+        status="active",
+    )
+    db_session.add(ws)
+
+    admin = (
+        (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+        .scalars()
+        .first()
+    )
+    assert admin is not None, "admin user must exist (auth_admin_token fixture)"
+
+    rt = DaemonRuntime(
+        id=uuid.uuid4(),
+        user_id=admin.id,
+        name="init-test-daemon",
+        provider="claude_code",
+        status="online",
+        last_heartbeat_at=datetime.now(UTC),
+    )
+    db_session.add(rt)
+
+    db_session.add(
+        WorkspaceMemberRuntime(
+            workspace_id=ws.id,
+            user_id=admin.id,
+            runtime_id=rt.id,
+            root_path="/Users/admin/project",
+            path_source="daemon-client",
+        )
+    )
+    await db_session.commit()
+
+    # ── act ─────────────────────────────────────────────────────────────
+    resp = await client.post(
+        f"/api/workspaces/{ws.id}/init",
+        headers=auth_headers,
+    )
+
+    # ── assert ──────────────────────────────────────────────────────────
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "lease_id" in body, f"Missing lease_id in {body}"
+    assert "runtime_id" in body, f"Missing runtime_id in {body}"
+    assert "claim_token" in body, f"Missing claim_token in {body}"
+    # Validate UUIDs
+    assert uuid.UUID(body["lease_id"])
+    assert uuid.UUID(body["runtime_id"])
+    # claim_token is secrets.token_hex(32) → 64 hex chars
+    assert len(body["claim_token"]) == 64, f"claim_token length: {len(body['claim_token'])}"
+    # lease is pending (interactive)
+    from app.modules.daemon.model import DaemonTaskLease
+
+    lease = (
+        (
+            await db_session.execute(
+                select(DaemonTaskLease).where(DaemonTaskLease.id == uuid.UUID(body["lease_id"]))
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert lease is not None
+    assert lease.status == "pending"
+    assert lease.kind == "interactive"
+    assert lease.runtime_id == rt.id

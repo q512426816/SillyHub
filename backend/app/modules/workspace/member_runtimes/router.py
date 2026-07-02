@@ -50,6 +50,8 @@ class MemberBindingView(BaseModel):
     path_source: str
     synced_at: str | None
     last_scan_at: str | None
+    init_synced_at: str | None
+    init_synced_spec_version: int | None
 
 
 def _to_view(row: WorkspaceMemberRuntime) -> MemberBindingView:
@@ -61,6 +63,8 @@ def _to_view(row: WorkspaceMemberRuntime) -> MemberBindingView:
         path_source=row.path_source,
         synced_at=row.synced_at.isoformat() if row.synced_at else None,
         last_scan_at=row.last_scan_at.isoformat() if row.last_scan_at else None,
+        init_synced_at=row.init_synced_at.isoformat() if row.init_synced_at else None,
+        init_synced_spec_version=row.init_synced_spec_version,
     )
 
 

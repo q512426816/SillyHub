@@ -18,9 +18,13 @@ from app.modules.change.schema import (
     ApproveRequest,
     ArchiveConfirmRequest,
     ArchiveGateResponse,
-    ChangeDocContent,
     ChangeDocMatrix,
     ChangeDocMatrixEntry,
+    ChangeFileContent,
+    ChangeFileEntry,
+    ChangeFileList,
+    ChangeFileWriteRequest,
+    ChangeFileWriteResponse,
     ChangeList,
     ChangeRead,
     ChangeReparseResponse,
@@ -32,6 +36,8 @@ from app.modules.change.schema import (
     FeedbackRequest,
     HumanTestRequest,
     OkResponse,
+    PendingFileEntry,
+    PendingFileList,
     PlanReviewRequest,
     ProgressUpdate,
     ProposalReviewRequest,
@@ -127,30 +133,6 @@ async def get_change_documents(
     )
 
 
-@router.get(
-    "/changes/{change_id}/documents/{doc_type}",
-    response_model=ChangeDocContent,
-)
-async def get_change_document(
-    workspace_id: uuid.UUID,
-    change_id: uuid.UUID,
-    doc_type: str,
-    session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
-    path: str | None = Query(None),
-) -> ChangeDocContent:
-    service = ChangeService(session)
-    doc_path, content, exists = await service.get_document_content(
-        workspace_id, change_id, doc_type, file_path=path
-    )
-    return ChangeDocContent(
-        doc_type=doc_type,
-        path=doc_path,
-        content=content,
-        exists=exists,
-    )
-
-
 @router.post(
     "/changes/reparse",
     response_model=ChangeReparseResponse,
@@ -178,6 +160,74 @@ async def reparse_changes(
         stats=ChangeReparseStats(**stats),
         warnings=warnings,
     )
+
+
+# ── File tree endpoints（2026-07-02-change-detail-file-tree-editor）──────
+
+
+@router.get(
+    "/changes/{change_id}/files",
+    response_model=ChangeFileList,
+)
+async def list_change_files(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+) -> ChangeFileList:
+    service = ChangeService(session)
+    items = await service.list_files(workspace_id, change_id)
+    return ChangeFileList(
+        change_id=change_id,
+        items=[ChangeFileEntry(**it) for it in items],
+    )
+
+
+@router.get(
+    "/changes/{change_id}/files/content",
+    response_model=ChangeFileContent,
+)
+async def get_change_file_content(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+    path: str = Query(...),
+) -> ChangeFileContent:
+    service = ChangeService(session)
+    rel, content, exists = await service.read_file(workspace_id, change_id, path)
+    return ChangeFileContent(path=rel, content=content, exists=exists)
+
+
+@router.post(
+    "/changes/{change_id}/files/content",
+    response_model=ChangeFileWriteResponse,
+)
+async def write_change_file_content(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    body: ChangeFileWriteRequest,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+) -> ChangeFileWriteResponse:
+    service = ChangeService(session)
+    result = await service.write_file(workspace_id, change_id, body.path, body.content)
+    return ChangeFileWriteResponse(**result)
+
+
+@router.get(
+    "/changes/{change_id}/files/pending",
+    response_model=PendingFileList,
+)
+async def list_pending_change_files(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+) -> PendingFileList:
+    service = ChangeService(session)
+    items = await service.list_pending_files(workspace_id, change_id)
+    return PendingFileList(items=[PendingFileEntry(**it) for it in items])
 
 
 # ── Progress / Approval / Documents sync ─────────────────────────────────

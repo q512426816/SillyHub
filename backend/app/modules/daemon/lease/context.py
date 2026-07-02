@@ -115,6 +115,30 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
             ws_row = await session.get(Workspace, ws_id)
             if ws_row is not None:
                 path_source = ws_row.path_source
+
+        # task-10（2026-07-02-workspace-config-flow，D-010）：lease payload 统一带
+        # latest_spec_version（服务器权威文档版本），供 daemon 保鲜比对——每次执行
+        # agent/scan/init 任务前比对本地 .sillyspec-platform.json.spec_version，旧了
+        # 触发 pullSpecBundle。值源 = SpecWorkspace.spec_version（task-09 落字段）。
+        #
+        # 向前兼容（task-09 未合前）：getattr(spec_ws, "spec_version", 0)——spec_ws 行
+        # 此时无 spec_version 列 → 返回默认 0。task-09 合入加列后自动读真实值，本处零改动。
+        # quick-chat（ws_id=None）/ 查不到 SpecWorkspace 行 → 默认 0（无 spec 同步语义，
+        # daemon 不比对）。tar 与 shared 两分支共用同一查询，避免 shared 分支重复查 DB。
+        latest_spec_version = 0
+        _resolved_spec_ws: "object | None" = None
+        if ws_id is not None:
+            from app.modules.spec_workspace.model import SpecWorkspace
+
+            _sv_stmt = select(SpecWorkspace).where(col(SpecWorkspace.workspace_id) == ws_id)
+            _resolved_spec_ws = (await session.execute(_sv_stmt)).scalars().first()
+            if _resolved_spec_ws is not None:
+                latest_spec_version = int(getattr(_resolved_spec_ws, "spec_version", 0) or 0)
+        # 双写（camelCase + snake_case），与 transport/specStrategy/workspaceId 惯例一致，
+        # daemon execPayload 归一化两端字段名都覆盖。
+        payload["latestSpecVersion"] = latest_spec_version
+        payload["latest_spec_version"] = latest_spec_version
+
         # task-02（daemon-root-path-translation）：root_path container→host 改写，
         # 让 daemon 收到宿主机路径做 cwd（daemon-client 原样透传，裸机原样返回）。
         if payload.get("root_path"):
@@ -160,14 +184,9 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
         # 到 metadata，spec_root 保持 None → 不透传 → daemon 完全回退 prompt 翻译（向后兼容）。
         spec_root: str | None = lease_meta.get("spec_root")
         if not spec_root and ws_id is not None:
-            # ws_id 已在上提块解析（§4.3），此处直接复用，避免重复 UUID 解析。
-            from app.modules.spec_workspace.model import SpecWorkspace
-
-            # SpecWorkspace 主键是 id，workspace_id 是 unique index 列，
-            # 不能用 session.get(SpecWorkspace, ws_id)（那是按主键查）。
-            # 用 select 按 workspace_id 查（对齐 change/dispatch.py:1192 模式）。
-            ws_stmt = select(SpecWorkspace).where(col(SpecWorkspace.workspace_id) == ws_id)
-            spec_ws = (await session.execute(ws_stmt)).scalars().first()
+            # task-10：SpecWorkspace 行已在上方 version 解析块查过（_resolved_spec_ws），
+            # 此处直接复用，不再重复查 DB（避免 shared 分支双查）。
+            spec_ws = _resolved_spec_ws
             if spec_ws is not None:
                 # SpecWorkspace.spec_root 是 nullable=False（model.py:59），必有值。
                 spec_root = spec_ws.spec_root
@@ -261,6 +280,23 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
         daemon_root_path = resolve_root_path_for_daemon(lease_meta["root_path"], ws_path_source)
         payload["rootPath"] = daemon_root_path
         payload["root_path"] = daemon_root_path
+
+    # task-10（2026-07-02-workspace-config-flow，D-010）：batch lease 同样带
+    # latest_spec_version（agent 任务执行前 daemon 比对保鲜）。值源与 interactive 分支
+    # 同 = SpecWorkspace.spec_version，向前兼容 getattr 默认 0（task-09 未合前）。
+    # workspace_id=None（无 M:N 关联）→ 默认 0（无 spec 同步语义）。
+    batch_latest_spec_version = 0
+    if workspace_id:
+        from app.modules.spec_workspace.model import SpecWorkspace
+
+        _batch_sv_stmt = select(SpecWorkspace).where(
+            col(SpecWorkspace.workspace_id) == workspace_id
+        )
+        _batch_spec_ws = (await session.execute(_batch_sv_stmt)).scalars().first()
+        if _batch_spec_ws is not None:
+            batch_latest_spec_version = int(getattr(_batch_spec_ws, "spec_version", 0) or 0)
+    payload["latestSpecVersion"] = batch_latest_spec_version
+    payload["latest_spec_version"] = batch_latest_spec_version
 
     # Include runtime capabilities (cmd_path, bin_path, protocol)
     runtime = await session.get(DaemonRuntime, lease.runtime_id)

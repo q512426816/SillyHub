@@ -366,6 +366,8 @@ class ChangeWritePendingItem(BaseModel):
     workspace_id: uuid.UUID
     files: list
     created_at: datetime
+    # create=新变更代写 / edit=现有文件手动编辑（2026-07-02-change-detail-file-tree-editor D-001）
+    kind: str = "create"
 
 
 class ChangeWriteClaimResponse(BaseModel):
@@ -375,6 +377,7 @@ class ChangeWriteClaimResponse(BaseModel):
     claim_token: str
     change_key: str
     files: list
+    kind: str = "create"
 
 
 class ChangeWriteCompleteRequest(BaseModel):

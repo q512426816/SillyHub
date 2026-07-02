@@ -49,6 +49,11 @@ import {
   postSpecSync,
   resolveSpecDir,
   syncSpecTreeIfNeeded,
+  readLocalSpecVersion,
+  shouldRefreshSpec,
+  bumpLocalSpecVersion,
+  handleInitLease,
+  type HandleInitLeaseParams,
 } from './spec-sync.js';
 import { getBackend } from './adapters/index.js';
 import type { ProtocolAdapter } from './adapters/protocol-adapter.js';
@@ -326,6 +331,23 @@ export class TaskRunner {
     let heartbeatPromise: Promise<void> | null = null;
 
     try {
+      // ── init lease 分支（task-07 / D-002/D-009）：mode='init' → 不启 agent ──────────
+      // daemon 拉到 init lease（kind=batch + mode='init'，backend task-06 start_init_dispatch
+      // 下发）：写 .sillyspec-platform.json（6 字段）到成员 rootPath → pullSpecBundle 拉文档
+      // 缓存 → postSpecSync 回灌本地改动 → 提前 return TaskRunnerResult（不 spawn agent）。
+      // 完整编排抽到 spec-sync.handleInitLease（纯函数 + client 参数注入，D-007@v1）。
+      //
+      // mode 探测：lease payload 字段 mode / purpose / init_mode 任一为 'init' 即视为 init lease
+      //（backend task-06 待合并，字段名以 init lease 生命周期契约 §9 mode="init" 为准；多字段
+      // 兜底提高兼容性）。非 init lease（缺省/未知 mode）→ 落入下方既有 9 步编排。
+      const leaseMode =
+        (ctx as { mode?: string }).mode ??
+        (ctx as { purpose?: string }).purpose ??
+        (ctx as { init_mode?: string }).init_mode;
+      if (leaseMode === 'init') {
+        return this._runInitLease(ctx, leaseId, startTime);
+      }
+
       // 步骤 1：workspace.prepareWorkspace（失败直接抛 → finally 映射 failed）
       // ql-20260617-009：优先用 ctx.rootPath（真实代码目录，host path）作 cwd，跳过 mirror。
       // rootPath 不可访问时 prepareWorkspace 内部自动回落到 mirror by slug。
@@ -344,15 +366,45 @@ export class TaskRunner {
       // 时触发。server-local（无 workspaceId / specRoot 已有值）→ pullSpecBundle 返回 null。
       // pull 失败（bundle 404 / 网络错）不致命（FR-05「按需」语义）：agent 仍按 workDir
       // 自身的 .sillyspec 执行，对齐 design §5 E-01。
+      //
+      // task-11（D-010 日常保鲜）：pull 前比对 lease 下发的 latest_spec_version 与本地
+      // `.sillyspec-platform.json.spec_version`。一致 → 跳过 pull（specRoot 直接指向本地
+      // 缓存目录，agent 读已有内容）；不一致 / 本地无版本记录 → pullSpecBundle 刷新，
+      // 成功后 bumpLocalSpecVersion 回写新版本。lease 未透传 latest_spec_version（旧
+      // backend / server-local）→ 保持旧行为（pullSpecBundle 内 existingSpecRoot 等既有逻辑）。
       let specRoot: string | null = null;
       try {
         const wsId = (ctx as { workspaceId?: string }).workspaceId;
         const existingSpecRoot = (ctx as { specRoot?: string }).specRoot;
-        specRoot = await pullSpecBundle(
-          this.client as unknown as Parameters<typeof pullSpecBundle>[0],
-          wsId,
-          { existingSpecRoot },
-        );
+        const leaseSpecVersion =
+          (ctx as { latestSpecVersion?: number }).latestSpecVersion ??
+          (ctx as { latest_spec_version?: number }).latest_spec_version;
+        let skipPullDueToVersion = false;
+        if (wsId && !existingSpecRoot && leaseSpecVersion !== undefined) {
+          const localVersion = await readLocalSpecVersion(ctx.rootPath);
+          if (!shouldRefreshSpec(localVersion, leaseSpecVersion)) {
+            // 版本一致：跳过 pull，specRoot 指向本地缓存（resolveSpecDir 已做路径校验，
+            // 缓存目录可能尚未存在——agent 读时由 sillyspec 自身处理，对齐 pull 404 容错语义）。
+            skipPullDueToVersion = true;
+            specRoot = resolveSpecDir(wsId);
+            console.info('task_runner: spec_version_fresh_skip_pull', leaseId, {
+              workspace_id: wsId,
+              spec_version: localVersion,
+            });
+          }
+        }
+        if (!skipPullDueToVersion) {
+          specRoot = await pullSpecBundle(
+            this.client as unknown as Parameters<typeof pullSpecBundle>[0],
+            wsId,
+            { existingSpecRoot },
+          );
+          // pull 成功（specDir 非空）+ lease 带了 latest_spec_version → 回写本地版本保鲜。
+          // 仅 daemon-client（wsId 非空）路径有意义；server-local pullSpecBundle 返回 null 跳过。
+          if (specRoot && wsId && leaseSpecVersion !== undefined) {
+            await bumpLocalSpecVersion(ctx.rootPath, leaseSpecVersion);
+          }
+        }
       } catch (e) {
         console.warn('task_runner: spec_bundle_pull_failed', leaseId, e);
       }
@@ -555,6 +607,119 @@ export class TaskRunner {
       if (hbStop) hbStop.abort();
       if (heartbeatPromise) await heartbeatPromise.catch(() => {});
     }
+  }
+
+  // ── init lease 轻量分支（task-07 / D-002/D-009，不启 agent）──────────────────
+
+  /**
+   * 处理 init lease：写 .sillyspec-platform.json + pull 文档 + post 本地改动。
+   *
+   * 与 ``runLease`` 并列但**严格不启 agent**（与 ``runChangeWrite`` 同范式的轻量分支）：
+   *   - 不调 workspace.prepareWorkspace / getBackend / spawn / heartbeat（init 不跑 agent）；
+   *   - 完整编排委托 ``spec-sync.handleInitLease``（纯函数 + client 参数注入，D-007@v1）。
+   *
+   * lease payload 来源（backend task-06 start_init_dispatch 下发，待合并）：
+   *   - workspaceId / rootPath：成员 binding 解析（task-01 per-member）；
+   *   - platformConfig{server_origin, strategy} + latest_spec_version：SpecWorkspace 字段。
+   *   serverOrigin 缺省时回落 config.server_url（与 daemon._serverOrigin 一致，避免 backend
+   *   未透传时 platform.json.server_origin 空）。
+   *
+   * 终态上报（design §9 init_completed / init_failed）：
+   *   - 成功 → _finish status='completed'，**stats 携带 init_synced_at + init_synced_spec_version**
+   *     供 daemon complete_lease 透传给 backend 更新 WorkspaceMemberRuntime（complete body
+   *     stats 字段是 free-form Record，backend 据 stats.init_synced_* 落库）。
+   *   - 失败 → status='failed'，error 含失败步骤，stats 仍带 init_synced_spec_version（兜底 0）
+   *     让 backend 记录「初始化失败」终态。
+   *
+   * 容错：handleInitLease 内部已 catch 各步骤（写 platform.json / pull 硬失败 abort，post
+   * 软失败 warn），不会向上抛；此处不再 try/catch（保证终态落 completed/failed 而非 runLease
+   * 顶层 catch 的 generic failed）。
+   */
+  private async _runInitLease(
+    ctx: LeaseCtx,
+    leaseId: string,
+    startTime: number,
+  ): Promise<TaskRunnerResult> {
+    const workspaceId =
+      (ctx as { workspaceId?: string }).workspaceId ??
+      (ctx as { workspace_id?: string }).workspace_id;
+    const rootPath = ctx.rootPath;
+
+    // 缺关键字段 → 直接 failed（init lease 必带 workspaceId + rootPath，缺失是 lease 构造异常）。
+    if (!workspaceId || !rootPath) {
+      const errMsg = `init lease missing required fields: workspace_id=${workspaceId ?? ''} root_path=${rootPath ?? ''}`;
+      return this._finish(leaseId, startTime, false, 1, 'failed', '', this._truncate(errMsg, MAX_ERROR), '', {
+        diff: EMPTY_DIFF,
+        exitCode: 1,
+        spawnStatus: 'failed',
+        stats: { init_synced: false, init_error: errMsg },
+        retryCount: 0,
+      });
+    }
+
+    // platform_config + latest_spec_version 从 lease payload 鸭子类型读取（backend task-06 透传；
+    // 字段名兼容 camelCase / snake_case）。serverOrigin 缺省回落 config.server_url。
+    const platformConfigRaw =
+      (ctx as { platformConfig?: Record<string, unknown> }).platformConfig ??
+      (ctx as { platform_config?: Record<string, unknown> }).platform_config ??
+      {};
+    const serverOrigin =
+      pickStr(platformConfigRaw, 'server_origin', 'serverOrigin') ||
+      this.config?.server_url ||
+      '';
+    const strategy =
+      pickStr(platformConfigRaw, 'strategy') || ctx.specStrategy || 'platform-managed';
+    const latestSpecVersion =
+      pickNum(platformConfigRaw, 'latest_spec_version', 'latestSpecVersion') ??
+      (ctx as { latestSpecVersion?: number }).latestSpecVersion ??
+      (ctx as { latest_spec_version?: number }).latest_spec_version;
+
+    const initParams: HandleInitLeaseParams = {
+      workspaceId,
+      rootPath,
+      serverOrigin,
+      strategy,
+      latestSpecVersion,
+    };
+
+    const result = await handleInitLease(
+      this.client as unknown as Parameters<typeof handleInitLease>[0],
+      initParams,
+    );
+
+    // 终态：成功 completed / 失败 failed。stats 携带 init_synced_* 供 backend 落库
+    // WorkspaceMemberRuntime（complete_lease body.stats 是 free-form Record，daemon.ts
+    // completeLease 透传 taskResult.stats 不需改 daemon）。
+    const initSyncedAt = new Date().toISOString();
+    const stats: Record<string, unknown> = {
+      init_synced: result.ok,
+      init_synced_at: initSyncedAt,
+      init_synced_spec_version: result.specVersion,
+    };
+    if (result.platformConfig) {
+      stats.init_platform_config = result.platformConfig;
+    }
+    if (!result.ok && result.error) {
+      stats.init_error = result.error;
+    }
+
+    console.info('task_runner: init_lease_done', leaseId, {
+      workspace_id: workspaceId,
+      ok: result.ok,
+      spec_version: result.specVersion,
+    });
+
+    const status: TaskStatus = result.ok ? 'completed' : 'failed';
+    const exitCode = result.ok ? 0 : 1;
+    const output = result.ok ? 'init lease completed' : '';
+    const error = result.ok ? '' : this._truncate(result.error ?? 'init lease failed', MAX_ERROR);
+    return this._finish(leaseId, startTime, result.ok, exitCode, status, output, error, '', {
+      diff: EMPTY_DIFF,
+      exitCode,
+      spawnStatus: status,
+      stats,
+      retryCount: 0,
+    });
   }
 
   // ── ql-20260616-006：lease heartbeat 循环（cancel 信号检测 + 续期）──────────
@@ -1541,22 +1706,69 @@ export class TaskRunner {
    *   - **不**调 agent driver / SessionManager / spawn（纯文件写 + sync）；
    *   - 执行栈不经过 ``runLease``。
    *
+   * kind 分流（2026-07-02-workspace-config-flow task-13 / D-012）：
+   *   - ``create`` / ``edit``（默认）：写 changes/<key>/ 文件 + syncSpecTreeIfNeeded 回灌。
+   *   - ``spec-sync``：「同步到服务器」手动按钮 —— **不写 changes/<key>/**，
+   *     直接调 ``postSpecSync`` 把本地 spec 整树回灌到服务器权威 spec_root。
+   *     files 字段携带 workspace_id 元信息（不再写文件）。
+   *
    * 流程（design §5.3 Phase 3 + §7.5 回灌）：
    *   1. ``resolveSpecDir(wsId)`` 定位本地 spec 根（~/.sillyhub/daemon/specs/<wsId>）。
-   *   2. 目标子目录 ``join(specDir, 'changes', changeKey)``。
-   *   3. 遍历 ``files[]{path, content}``：path traversal 四类校验（../  / 绝对 / Win 盘符 /
+   *   2. ``kind === 'spec-sync'`` → ``postSpecSync`` 整树回灌（跳过文件写入）。
+   *   3. 否则目标子目录 ``join(specDir, 'changes', changeKey)``。
+   *   4. 遍历 ``files[]{path, content}``：path traversal 四类校验（../  / 绝对 / Win 盘符 /
    *      join 后越界）→ 抛错拒绝；``mkdir recursive`` + ``writeFile`` utf-8。
-   *   4. 回执 ``completeChangeWrite(id, claimToken, { ok:true, files:[writtenRelPaths] })``。
-   *   5. sync：调 task-06 ``syncSpecTreeIfNeeded({workspaceId: wsId}, client)``（复用，
-   *      不重复 pack；失败仅 warn 不阻塞回执，对齐 R-03）。
+   *   5. 回执 ``completeChangeWrite(id, claimToken, { ok:true, files:[writtenRelPaths] })``。
+   *   6. create/edit sync：调 task-06 ``syncSpecTreeIfNeeded({workspaceId: wsId}, client)``
+   *      （复用，不重复 pack；失败仅 warn 不阻塞回执，对齐 R-03）。
    *
    * 任何 file 写入 / traversal 失败 → 抛错（调用方 daemon 负责回执 ok=false）。
    * sync 失败**不**改写 ok（已先 complete 回执，sync 是 best-effort 回灌）。
    *
-   * @param ctx change-write 执行上下文（taskId / changeKey / workspaceId / files / claimToken）
+   * @param ctx change-write 执行上下文（taskId / changeKey / workspaceId / files / claimToken / kind）
    */
   async runChangeWrite(ctx: ChangeWriteCtx): Promise<ChangeWriteResult> {
-    const { taskId, changeKey, workspaceId, files, claimToken } = ctx;
+    const { taskId, changeKey, workspaceId, files, claimToken, kind } = ctx;
+
+    // ── kind=spec-sync 分支：整树回灌到服务器（D-012 / task-13）──────────────
+    // 「同步到服务器」手动按钮：不写 changes/<key>/，直接把本地 spec 整树 push 回服务器。
+    // 复用 postSpecSync（spec-sync.ts）：pack 整树（排除 .runtime 走 postSpecSync 内部
+    // packSpecDir）→ HTTP POST .../sync → backend apply_sync 落盘 + reparse。
+    // 失败抛错（调用方 _executeChangeWrite 回执 ok=false），成功后 complete 回执 ok=true。
+    if (kind === 'spec-sync') {
+      const specDir = resolveSpecDir(workspaceId);
+      let pushOk = false;
+      try {
+        const resp = await postSpecSync(
+          this.client as unknown as Parameters<typeof postSpecSync>[0],
+          workspaceId,
+          specDir,
+        );
+        pushOk = resp !== null;
+      } catch (e) {
+        // postSpecSync 抛错（网络 / 4xx/5xx）→ 回执 ok=false。
+        if (typeof this.client.completeChangeWrite === 'function') {
+          await this.client.completeChangeWrite(taskId, claimToken, {
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+        throw e;
+      }
+      if (typeof this.client.completeChangeWrite === 'function') {
+        await this.client.completeChangeWrite(taskId, claimToken, {
+          ok: true,
+          files: [],
+        });
+      }
+      return {
+        taskId,
+        changeKey,
+        ok: pushOk,
+        files: [],
+      };
+    }
+
     const specDir = resolveSpecDir(workspaceId);
     const changesDir = join(specDir, 'changes', changeKey);
 
@@ -1635,6 +1847,13 @@ export interface ChangeWriteCtx {
   claimToken: string;
   /** 待写入文件清单（path 相对 changes/<key>/，content utf-8）。 */
   files: ChangeWriteFile[];
+  /**
+   * 任务类型（2026-07-02-workspace-config-flow task-13 / D-012）：
+   *   - ``create`` / ``edit``（默认）：写 changes/<key>/ 文件 + sync 回灌。
+   *   - ``spec-sync``：整树回灌到服务器（postSpecSync），不写文件。
+   * 缺省 ``create`` 与 backend ``DaemonChangeWrite.kind`` server_default 对齐。
+   */
+  kind?: string;
 }
 
 /** task-11：runChangeWrite 返回值（含 ok / 实际写入相对路径清单）。 */
@@ -1711,6 +1930,35 @@ export interface TaskRunnerResult extends TaskResult {
 }
 
 // ── 内部常量 & 辅助函数 ───────────────────────────────────────────────────────
+
+/**
+ * task-07：从 lease payload 鸭子类型 Record 安全取 string / number 字段（多键名兜底）。
+ *
+ * init lease 的 platform_config 由 backend task-06 下发，字段名 camelCase / snake_case
+ * 兼容；直接 `(typeof x === 'string' && x)` 会产出 `string | false` 污染类型，本辅助函数
+ * 收敛为 `string | undefined` / `number | undefined`，避免 `||` 回退链的类型 widen。
+ */
+function pickStr(
+  obj: Record<string, unknown>,
+  ...keys: string[]
+): string | undefined {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === 'string' && v) return v;
+  }
+  return undefined;
+}
+
+function pickNum(
+  obj: Record<string, unknown>,
+  ...keys: string[]
+): number | undefined {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+  }
+  return undefined;
+}
 
 const EMPTY_DIFF = {
   patch: '',

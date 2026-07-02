@@ -71,6 +71,29 @@ class ChangeService:
 
     # ── Queries ───────────────────────────────────────────────────────────
 
+    async def _resolve_change_dir(self, workspace: Workspace, change: Change) -> Path:
+        """解析单个变更目录的绝对路径（task-01 / D-006@v1）。
+
+        ``change.path`` 是 reparse 时存的相对 sillyspec_root 路径（已含 archive/
+        段与 .sillyspec 包裹层，对齐 parser rel_prefix），故直接 ``sillyspec_root
+        / change.path`` 即可，覆盖 active/archive × server-local/daemon-client
+        全组合。sillyspec_root 解析对齐 ``reparse``（service.py:696-708）。
+        """
+        sillyspec_root = Path(workspace.root_path)
+        try:
+            from app.modules.spec_workspace.service import SpecWorkspaceService
+
+            spec_ws = await SpecWorkspaceService(self._session).get(workspace.id)
+            if spec_ws and spec_ws.spec_root:
+                sillyspec_root = Path(spec_ws.spec_root)
+        except Exception as exc:
+            log.warning(
+                "change.resolve_change_dir_failed",
+                workspace_id=str(workspace.id),
+                error=str(exc),
+            )
+        return sillyspec_root / change.path
+
     async def list_(
         self,
         workspace_id: uuid.UUID,
@@ -208,61 +231,305 @@ class ChangeService:
         references = [Path(d.path).name for d in docs if d.doc_type == "reference" and d.exists]
         return docs, prototypes, references
 
-    async def get_document_content(
-        self,
-        workspace_id: uuid.UUID,
-        change_id: uuid.UUID,
-        doc_type: str,
-        *,
-        file_path: str | None = None,
-    ) -> tuple[str, str | None, bool]:
-        """Read document content from filesystem on-demand.
+    # ── File tree (task-03/04/05/07, 2026-07-02-change-detail-file-tree-editor) ──
 
-        Returns (path, content, exists).
+    # is_text 判定的文本扩展名（编辑器对非文本只读，D-007）
+    _TEXT_SUFFIXES = frozenset(
+        {
+            ".md",
+            ".mdx",
+            ".html",
+            ".htm",
+            ".yaml",
+            ".yml",
+            ".json",
+            ".txt",
+        }
+    )
+
+    @staticmethod
+    def _is_text_file(name: str) -> bool:
+        suffix = Path(name).suffix.lower()
+        return suffix in ChangeService._TEXT_SUFFIXES
+
+    async def list_files(self, workspace_id: uuid.UUID, change_id: uuid.UUID) -> list[dict]:
+        """遍历变更目录全部文件，返回扁平清单（task-03 / FR-03）。
+
+        每项 ``{path, name, size, last_modified_at, is_text}``，path 相对变更目录
+        （posix 风格，如 ``tasks/task-01.md``）。排除目录、``.`` 开头隐藏文件、
+        ``__pycache__``。目录不存在返回空列表（不抛）。
         """
         change = await self.get(workspace_id, change_id)
         workspace = await self._workspace_service.get(workspace_id)
-        root = Path(workspace.root_path)
+        change_dir = await self._resolve_change_dir(workspace, change)
+        if not change_dir.is_dir():
+            return []
 
-        # Find the ChangeDocument row
-        stmt = select(ChangeDocument).where(
-            col(ChangeDocument.change_id) == change.id,
-            col(ChangeDocument.doc_type) == doc_type,
-        )
-        if file_path:
-            stmt = stmt.where(col(ChangeDocument.path) == file_path)
-        doc = (await self._session.execute(stmt)).scalars().first()
+        items: list[dict] = []
+        for entry in sorted(change_dir.rglob("*")):
+            if not entry.is_file():
+                continue
+            name = entry.name
+            if name.startswith("."):
+                continue
+            # 排除 __pycache__ 段
+            if "__pycache__" in entry.parts:
+                continue
+            try:
+                rel = entry.relative_to(change_dir)
+            except ValueError:
+                continue
+            stat = entry.stat()
+            items.append(
+                {
+                    "path": rel.as_posix(),
+                    "name": name,
+                    "size": stat.st_size,
+                    "last_modified_at": datetime.fromtimestamp(stat.st_mtime, tz=UTC),
+                    "is_text": self._is_text_file(name),
+                }
+            )
+        return items
 
-        if doc is None or not doc.exists:
+    async def read_file(
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        rel_path: str,
+    ) -> tuple[str, str | None, bool]:
+        """按相对 path 读单文件（task-04 / FR-04 / D-004）。
+
+        路径穿越守卫：resolve 后必须落在变更目录内（覆盖 ../ 、绝对路径、符号链接）。
+        返回 ``(path, content, exists)``，content > MAX_CONTENT_BYTES 截断。
+        """
+        change = await self.get(workspace_id, change_id)
+        workspace = await self._workspace_service.get(workspace_id)
+        change_dir = (await self._resolve_change_dir(workspace, change)).resolve()
+        full_path = (change_dir / rel_path).resolve()
+        try:
+            full_path.relative_to(change_dir)
+        except ValueError:
             raise ChangeDocNotFound(
-                f"Document '{doc_type}' not found for change.",
-                details={
-                    "workspace_id": str(workspace_id),
-                    "change_id": str(change_id),
-                    "doc_type": doc_type,
-                },
+                "Path traversal detected.",
+                details={"path": rel_path},
+            ) from None
+
+        if not full_path.is_file():
+            return rel_path, None, False
+        size = full_path.stat().st_size
+        content = full_path.read_text(encoding="utf-8", errors="replace")
+        if size > MAX_CONTENT_BYTES:
+            content = content[: MAX_CONTENT_BYTES // 4]
+        return rel_path, content, True
+
+    async def write_file(
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        rel_path: str,
+        content: str,
+    ) -> dict:
+        """编辑保存（task-05 / FR-05/06 / D-001/002/006）。
+
+        path_source 分流：
+        - server-local：write_text 到 ``{root_path}/.sillyspec/changes/{key}/{path}``，
+          resync，返 ``{status:"done"}``。
+        - daemon-client：后端直写平台镜像（spike-01 验证可写）+ 建/合并同
+          change_key+path 的 pending DaemonChangeWrite 行（kind=edit，D-002 合并），
+          **不 await**（D-001 离线续传），resync，返 ``{status:"pending", task_id}``。
+
+        path resolve 必须落变更目录内（守卫，D-004）；content ≤ 1MB。
+        """
+        if len(content.encode("utf-8")) > MAX_CONTENT_BYTES:
+            raise ChangeDocNotFound(
+                "File content exceeds size limit.",
+                details={"path": rel_path, "limit": MAX_CONTENT_BYTES},
+            )
+        change = await self.get(workspace_id, change_id)
+        workspace = await self._workspace_service.get(workspace_id)
+        change_dir = (await self._resolve_change_dir(workspace, change)).resolve()
+        full_path = (change_dir / rel_path).resolve()
+        try:
+            full_path.relative_to(change_dir)
+        except ValueError:
+            raise ChangeDocNotFound(
+                "Path traversal detected.",
+                details={"path": rel_path},
+            ) from None
+
+        from app.modules.workspace.service import is_daemon_client_path_source
+
+        # 写盘（server-local 直写目标 / daemon-client 直写镜像，spike-01 验证可写）
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_text(content, encoding="utf-8")
+
+        # 同文件 pending 合并 + 离线续传 outbox（仅 daemon-client）
+        task_id: uuid.UUID | None = None
+        if is_daemon_client_path_source(workspace.path_source):
+            task_id = await self._enqueue_edit_write(
+                workspace=workspace, change=change, rel_path=rel_path, content=content
             )
 
-        # Read from filesystem
-        full_path = root / doc.path
+        # resync（镜像/目标已新鲜，POST 时即刷新，D-005）
         try:
-            resolved = full_path.resolve()
-            if not str(resolved).startswith(str(root.resolve())):
-                raise ChangeDocNotFound("Path traversal detected.")
-            if not full_path.is_file():
-                return doc.path, None, False
-            size = full_path.stat().st_size
-            content = full_path.read_text(encoding="utf-8", errors="replace")
-            if size > MAX_CONTENT_BYTES:
-                content = content[: MAX_CONTENT_BYTES // 4]
-            # Update word_count on content read
-            doc.word_count = len(content.split())
-            self._session.add(doc)
-            return doc.path, content, True
-        except ChangeDocNotFound:
-            raise
+            await self._resync_change_docs(workspace_id, change.id)
+        except Exception as exc:
+            log.warning("change.write_file_resync_failed", change_id=str(change.id), error=str(exc))
+
+        return {"status": "pending" if task_id else "done", "task_id": task_id}
+
+    async def _enqueue_edit_write(
+        self,
+        *,
+        workspace: Workspace,
+        change: Change,
+        rel_path: str,
+        content: str,
+    ) -> uuid.UUID:
+        """建/合并同 change_key+path 的 pending DaemonChangeWrite 行（D-002）。
+
+        files 项 path 用扁平 ``changes/{key}/{rel_path}``（对齐 _build_files 范式，
+        daemon runChangeWrite 通用消费）。命中 pending 行则 UPDATE content（last-write-wins）。
+        """
+        from app.modules.daemon.model import DaemonChangeWrite
+
+        files_payload = [
+            {
+                "path": f"changes/{change.change_key}/{rel_path}",
+                "content": content,
+                "doc_type": "edit",
+            }
+        ]
+        # runtime_id：daemon-client 必有绑定 runtime（写回通道）
+        runtime_id = workspace.daemon_runtime_id
+        if runtime_id is None:
+            # 无绑定 runtime 无法入队，跳过 outbox（镜像已写，仅本机未回写）
+            raise ChangeDocNotFound(
+                "daemon-client workspace 未绑定 daemon runtime，无法入队写回。",
+                details={"workspace_id": str(workspace.id)},
+            )
+
+        existing = (
+            (
+                await self._session.execute(
+                    select(DaemonChangeWrite).where(
+                        col(DaemonChangeWrite.workspace_id) == workspace.id,  # type: ignore[arg-type]
+                        col(DaemonChangeWrite.change_key) == change.change_key,  # type: ignore[arg-type]
+                        col(DaemonChangeWrite.status) == "pending",  # type: ignore[arg-type]
+                        col(DaemonChangeWrite.kind) == "edit",  # type: ignore[arg-type]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        # 匹配同 path 的 pending 行（files[0].path 相同）
+        match = next(
+            (
+                cw
+                for cw in existing
+                if cw.files and cw.files[0].get("path") == files_payload[0]["path"]
+            ),
+            None,
+        )
+        if match is not None:
+            match.files = files_payload
+            match.created_at = datetime.now(UTC)
+            self._session.add(match)
+            await self._session.commit()
+            return match.id
+
+        new_row = DaemonChangeWrite(
+            id=uuid.uuid4(),
+            workspace_id=workspace.id,
+            runtime_id=runtime_id,
+            change_key=change.change_key,
+            files=files_payload,
+            kind="edit",
+            status="pending",
+        )
+        self._session.add(new_row)
+        await self._session.commit()
+        return new_row.id
+
+    async def _resync_change_docs(self, workspace_id: uuid.UUID, change_id: uuid.UUID) -> None:
+        """per-change 文档刷新（task-06 / FR-07 / D-005）。
+
+        复用 ChangeParser._parse_change 单目录解析 + _apply_parsed + _sync_docs
+        刷 ChangeDocument 行 + title（编辑 proposal.md heading 后跟上）。
+        best-effort：失败仅 log 不抛（R-05）。非全量 reparse。
+        """
+        change = await self.get(workspace_id, change_id)
+        workspace = await self._workspace_service.get(workspace_id)
+        change_dir = await self._resolve_change_dir(workspace, change)
+        if not change_dir.is_dir():
+            return
+
+        sillyspec_root = Path(workspace.root_path)
+        try:
+            from app.modules.spec_workspace.service import SpecWorkspaceService
+
+            spec_ws = await SpecWorkspaceService(self._session).get(workspace.id)
+            if spec_ws and spec_ws.spec_root:
+                sillyspec_root = Path(spec_ws.spec_root)
         except Exception:
-            return doc.path, None, False
+            pass
+
+        # rel_prefix 用 change.path（已含 archive 段 + .sillyspec 包裹，与 _resolve_change_dir
+        # 一致），避免重建 rel_prefix 漏掉 archive 段破坏 change.path。
+        rel_prefix = change.path
+        parsed = self._parser._parse_change(
+            sillyspec_root,
+            change_dir,
+            location=change.location or "active",
+            rel_prefix=rel_prefix,
+        )
+        self._apply_parsed(change, parsed, workspace_id=workspace_id)
+        await self._sync_docs(
+            change=parsed,
+            workspace_id=workspace_id,
+            existing_change=change,
+            stats={"parsed": 0, "created": 0, "updated": 0, "deleted": 0, "renamed": 0},
+        )
+        change.updated_at = datetime.now(UTC)
+        self._session.add(change)
+        await self._session.commit()
+
+    async def list_pending_files(self, workspace_id: uuid.UUID, change_id: uuid.UUID) -> list[dict]:
+        """查询该变更 pending/claimed edit 行（task-07 / FR-08）。"""
+        change = await self.get(workspace_id, change_id)
+        from app.modules.daemon.model import DaemonChangeWrite
+
+        rows = (
+            (
+                await self._session.execute(
+                    select(DaemonChangeWrite)
+                    .where(
+                        col(DaemonChangeWrite.workspace_id) == workspace_id,  # type: ignore[arg-type]
+                        col(DaemonChangeWrite.change_key) == change.change_key,  # type: ignore[arg-type]
+                        col(DaemonChangeWrite.status).in_(["pending", "claimed"]),  # type: ignore[arg-type]
+                        col(DaemonChangeWrite.kind) == "edit",  # type: ignore[arg-type]
+                    )
+                    .order_by(col(DaemonChangeWrite.created_at))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        prefix = f"changes/{change.change_key}/"
+        items: list[dict] = []
+        for cw in rows:
+            files = cw.files or []
+            fpath = files[0].get("path") if files else None
+            rel = fpath[len(prefix) :] if fpath and fpath.startswith(prefix) else fpath or ""
+            items.append(
+                {
+                    "path": rel,
+                    "status": cw.status,
+                    "created_at": cw.created_at,
+                }
+            )
+        return items
 
     # ── Progress / Approval / Documents ─────────────────────────────────
 

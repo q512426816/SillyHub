@@ -26,14 +26,17 @@ import {
   PROVIDER_META,
   type DaemonRuntimeRead,
 } from "@/lib/daemon";
-import { updateWorkspace } from "@/lib/workspaces";
+import {
+  upsertMyBinding,
+  type MemberBindingView,
+} from "@/lib/workspace-binding";
 import { DAEMON_RUNTIME_STATUS_LABELS, labelOf } from "@/lib/status-labels";
 
 interface Props {
   workspaceId: string;
-  /** 当前绑定的 daemon runtime id（workspace.daemon_runtime_id）。 */
-  currentRuntimeId: string | null;
-  /** 改绑成功后回调（父级 reload workspace + boundRuntime）。 */
+  /** 当前用户 member binding（binding.runtime_id 作为当前高亮项）。 */
+  currentBinding: MemberBindingView;
+  /** 改绑成功后回调（父级 reload workspace + binding）。 */
   onChanged?: () => void;
 }
 
@@ -54,7 +57,7 @@ function sortRuntimes(list: DaemonRuntimeRead[]): DaemonRuntimeRead[] {
 
 export function WorkspaceDaemonSwitcher({
   workspaceId,
-  currentRuntimeId,
+  currentBinding,
   onChanged,
 }: Props) {
   const [runtimes, setRuntimes] = useState<DaemonRuntimeRead[]>([]);
@@ -88,14 +91,18 @@ export function WorkspaceDaemonSwitcher({
   const handleSwitch = useCallback(
     async (rt: DaemonRuntimeRead) => {
       // 点击当前绑定项：仅收起，不重复提交。
-      if (rt.id === currentRuntimeId) {
+      if (rt.id === currentBinding.runtime_id) {
         setOpen(false);
         return;
       }
       setSwitchingId(rt.id);
       setError(null);
       try {
-        await updateWorkspace(workspaceId, { daemon_runtime_id: rt.id });
+        await upsertMyBinding(workspaceId, {
+          runtime_id: rt.id,
+          root_path: currentBinding.root_path,
+          path_source: currentBinding.path_source,
+        });
         setOpen(false);
         onChanged?.();
       } catch (e) {
@@ -104,7 +111,7 @@ export function WorkspaceDaemonSwitcher({
         setSwitchingId(null);
       }
     },
-    [workspaceId, currentRuntimeId, onChanged],
+    [workspaceId, currentBinding, onChanged],
   );
 
   return (
@@ -144,7 +151,7 @@ export function WorkspaceDaemonSwitcher({
           ) : (
             <ul className="space-y-0.5" data-testid="daemon-switcher-list">
               {runtimes.map((rt) => {
-                const isCurrent = rt.id === currentRuntimeId;
+                const isCurrent = rt.id === currentBinding.runtime_id;
                 const status = rt.status ?? "unknown";
                 const healthy = status === "online";
                 return (

@@ -173,62 +173,6 @@ async def test_get_document_matrix(
     assert "design" in existing_types
 
 
-async def test_get_single_doc_content(
-    client, workspace_with_changes: dict, auth_headers: dict[str, str]
-) -> None:
-    ws_id = workspace_with_changes["ws_id"]
-
-    await client.post(
-        f"/api/workspaces/{ws_id}/changes/reparse",
-        headers=auth_headers,
-    )
-
-    list_resp = await client.get(
-        f"/api/workspaces/{ws_id}/changes",
-        params={"location": "active"},
-        headers=auth_headers,
-    )
-    demo = next(
-        i for i in list_resp.json()["items"] if i["change_key"] == "2026-05-25-demo-feature"
-    )
-
-    resp = await client.get(
-        f"/api/workspaces/{ws_id}/changes/{demo['id']}/documents/proposal",
-        headers=auth_headers,
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["doc_type"] == "proposal"
-    assert body["exists"] is True
-    assert "demo feature" in body["content"].lower()
-
-
-async def test_get_missing_doc(
-    client, workspace_with_changes: dict, auth_headers: dict[str, str]
-) -> None:
-    ws_id = workspace_with_changes["ws_id"]
-
-    await client.post(
-        f"/api/workspaces/{ws_id}/changes/reparse",
-        headers=auth_headers,
-    )
-
-    list_resp = await client.get(
-        f"/api/workspaces/{ws_id}/changes",
-        params={"location": "active"},
-        headers=auth_headers,
-    )
-    demo = next(
-        i for i in list_resp.json()["items"] if i["change_key"] == "2026-05-25-demo-feature"
-    )
-
-    resp = await client.get(
-        f"/api/workspaces/{ws_id}/changes/{demo['id']}/documents/plan",
-        headers=auth_headers,
-    )
-    assert resp.status_code == 404  # doc exists=False, ChangeDocNotFound
-
-
 async def test_cross_workspace_isolation(
     client, workspace_with_changes: dict, auth_headers: dict[str, str]
 ) -> None:

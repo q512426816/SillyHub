@@ -80,7 +80,14 @@ import type { SessionManager } from './interactive/session-manager.js';
 // task-06（D-007@v1）：spec bundle 同步共享 utility（task-04 抽出），interactive
 // 路径接入 pull（session 开始）+ sync（session end）。纯函数 + client 参数注入，
 // interactive 无 TaskRunner 实例也能直接调用。
-import { pullSpecBundle, syncSpecTreeIfNeeded } from './spec-sync.js';
+import {
+  pullSpecBundle,
+  syncSpecTreeIfNeeded,
+  readLocalSpecVersion,
+  shouldRefreshSpec,
+  bumpLocalSpecVersion,
+  resolveSpecDir,
+} from './spec-sync.js';
 import type {
   PersistedSessionRecord,
   SessionStatus,
@@ -2423,32 +2430,66 @@ export class Daemon {
           lease_id: leaseId,
         });
       } else {
-        try {
-          // `as never`：ClientLike 是 daemon 内部鸭子类型，spec-sync utility 期望 HubClient
-          // 具体类型；ClientLike 已声明 getSpecBundle/postSpecSync 签名（additive），运行时
-          // 真实 _client 为 HubClient 实例（main.ts 注入），duck-type 安全（task-06 §4.1/边界 11）。
-          const specDir = await pullSpecBundle(
-            this._client as never,
-            workspaceId,
-            { strategy: specStrategy, rootPath: specRootPath },
-          );
-          // 404 容错（首次 scan backend 无 bundle）：utility 内已 mkdir 空目录返回路径非 null。
-          // 登记_specSyncCtx 保证后续 onSessionEnd 触发 sync（即使 pull 拿到空目录也回传）。
-          this._interactiveSpecSyncCtx.set(leaseId, { workspaceId });
+        // task-11（D-010 日常保鲜）：pull 前比对 lease latest_spec_version 与本地
+        // `.sillyspec-platform.json.spec_version`。一致 → 跳过 pull（interactive 路径仍
+        // set specSyncCtx 保证 onSessionEnd 回灌）；不一致 / 本地无记录 → pullSpecBundle
+        // 刷新，成功后 bumpLocalSpecVersion 回写新版本。lease 未透传 latest_spec_version
+        //（旧 backend）→ 保持旧行为（无条件 pull）。
+        const leaseSpecVersion =
+          (execPayload as { latestSpecVersion?: number }).latestSpecVersion ??
+          (execPayload as { latest_spec_version?: number }).latest_spec_version;
+        let skipPullDueToVersion = false;
+        if (leaseSpecVersion !== undefined) {
+          const localVersion = await readLocalSpecVersion(specRootPath);
+          if (!shouldRefreshSpec(localVersion, leaseSpecVersion)) {
+            skipPullDueToVersion = true;
+            this._logger.info('interactive_spec_version_fresh_skip_pull', {
+              lease_id: leaseId,
+              workspace_id: workspaceId,
+              spec_version: localVersion,
+            });
+          }
+        }
+        // 无论 pull 与否，specSyncCtx 都登记（interactive 路径 onSessionEnd 兜底回灌）。
+        this._interactiveSpecSyncCtx.set(leaseId, { workspaceId });
+        if (skipPullDueToVersion) {
+          // 版本一致跳过 pull：仍 info 一次便于观测，specSyncCtx 已 set。
           this._logger.info('interactive_spec_pulled', {
             lease_id: leaseId,
             workspace_id: workspaceId,
-            spec_dir: specDir,
+            spec_dir: resolveSpecDir(workspaceId),
+            skipped: 'version_fresh',
           });
-        } catch (e) {
-          // R-03 容错：pull 失败（5xx/网络，404 已被 utility 容错）不阻塞 session 启动。
-          // agent 仍可跑（读不到缓存则 sillyspec 生成新文档），不 set specSyncCtx
-          //（保守：pull 失败不回传残缺目录）。
-          this._logger.warn('interactive_spec_pull_failed', {
-            lease_id: leaseId,
-            workspace_id: workspaceId,
-            error: (e as Error)?.message ?? String(e),
-          });
+        } else {
+          try {
+            // `as never`：ClientLike 是 daemon 内部鸭子类型，spec-sync utility 期望 HubClient
+            // 具体类型；ClientLike 已声明 getSpecBundle/postSpecSync 签名（additive），运行时
+            // 真实 _client 为 HubClient 实例（main.ts 注入），duck-type 安全（task-06 §4.1/边界 11）。
+            const specDir = await pullSpecBundle(
+              this._client as never,
+              workspaceId,
+              { strategy: specStrategy, rootPath: specRootPath },
+            );
+            // 404 容错（首次 scan backend 无 bundle）：utility 内已 mkdir 空目录返回路径非 null。
+            // lease 带了 latest_spec_version → 回写本地版本保鲜（D-010）。
+            if (leaseSpecVersion !== undefined) {
+              await bumpLocalSpecVersion(specRootPath, leaseSpecVersion);
+            }
+            this._logger.info('interactive_spec_pulled', {
+              lease_id: leaseId,
+              workspace_id: workspaceId,
+              spec_dir: specDir,
+            });
+          } catch (e) {
+            // R-03 容错：pull 失败（5xx/网络，404 已被 utility 容错）不阻塞 session 启动。
+            // agent 仍可跑（读不到缓存则 sillyspec 生成新文档）。specSyncCtx 已 set，
+            // onSessionEnd 仍会尝试回灌（保守：即使 pull 失败也回传本地状态）。
+            this._logger.warn('interactive_spec_pull_failed', {
+              lease_id: leaseId,
+              workspace_id: workspaceId,
+              error: (e as Error)?.message ?? String(e),
+            });
+          }
         }
       }
     }
@@ -2597,12 +2638,16 @@ export class Daemon {
       });
 
       // 3. 本地写 + complete 回执 + sync（task-runner 轻量分支，不启 agent）。
+      // task-13 / D-012：透传 kind（claim 回执 ChangeWriteClaimResponse 带 kind），
+      // task-runner 据 kind=spec-sync 分流到 postSpecSync 整树回灌（不写文件）。
+      const kind = (claimResp.kind as string | undefined) ?? 'create';
       const ctx: ChangeWriteCtx = {
         taskId,
         changeKey,
         workspaceId,
         claimToken,
         files,
+        kind,
       };
       await this._taskRunner!.runChangeWrite!(ctx);
       this._logger.info('change_write_done', { task_id: taskId, change_key: changeKey });

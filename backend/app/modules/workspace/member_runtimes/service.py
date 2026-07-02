@@ -53,6 +53,10 @@ async def upsert_my_binding(
     existing = await session.get(WorkspaceMemberRuntime, (workspace_id, user_id))
     now = datetime.now(UTC)
     if existing:
+        # Edit path (D-007): only the editable binding columns change.
+        # init_synced_at / init_synced_spec_version are NOT touched here — they
+        # are written exclusively by the init-lease complete path (task-07).
+        # Changing one's daemon/path must not reset initialization state.
         existing.runtime_id = runtime_id
         existing.root_path = root_path
         existing.path_source = path_source
@@ -61,12 +65,16 @@ async def upsert_my_binding(
         await session.refresh(existing)
         return existing, False
 
+    # Create path: init_synced_* start NULL (uninitialized) and remain so until
+    # the member's first `init` lease completes (task-07 / task-09 migration).
     binding = WorkspaceMemberRuntime(
         workspace_id=workspace_id,
         user_id=user_id,
         runtime_id=runtime_id,
         root_path=root_path,
         path_source=path_source,
+        init_synced_at=None,
+        init_synced_spec_version=None,
         created_at=now,
         updated_at=now,
     )

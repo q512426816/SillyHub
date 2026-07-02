@@ -323,6 +323,18 @@ class DaemonChangeWrite(BaseModel, table=True):
     change_key: str = Field(
         sa_column=Column(String(128), nullable=False),
     )
+    # 任务类型：create=proxy_create_change 创建新变更（MASTER/proposal/request），
+    # edit=变更详情文件树手动编辑现有文件（2026-07-02-change-detail-file-tree-editor）。
+    # daemon 侧 runChangeWrite 不区分（通用写 files），kind 仅 backend 用于 pending
+    # 列表过滤（避免 edit 查询误纳 create 行）。
+    kind: str = Field(
+        default="create",
+        sa_column=Column(
+            String(20),
+            nullable=False,
+            server_default=text("'create'"),
+        ),
+    )
     # [{path, content}, ...]，path 相对 changes/<key>/（与 changes.key 对齐）
     files: list = Field(
         sa_column=Column(JSON, nullable=False),

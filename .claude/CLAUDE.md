@@ -19,7 +19,8 @@
 12. 代码实现必须兼容 Windows、Linux 和 macOS。
 13. 不要奉承用户，禁止回复“你说得对”这类无意义话术；直接给结论、依据和方案。
 14. 发现 SillySpec 工具缺陷或改进点，记录到项目根目录 `docs/sillyspec/`。
-15. 前端样式统一参考：
+15. 用户不太懂代码，尽量使用正常人员能看懂的描述。
+16. 前端样式统一参考：
   * `.sillyspec/changes/archive/2026-06-21-2026-06-21-frontend-style-system/prototype-frontend-style-system.html`
   * `.sillyspec/changes/archive/2026-06-21-2026-06-21-frontend-style-system/design.md`
 

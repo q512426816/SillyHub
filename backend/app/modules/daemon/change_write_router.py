@@ -154,6 +154,7 @@ async def get_pending_change_writes(
                 workspace_id=cw.workspace_id,
                 files=cw.files or [],
                 created_at=cw.created_at,  # type: ignore[arg-type]
+                kind=cw.kind,
             )
         )
     return out
@@ -181,7 +182,7 @@ async def claim_change_write(
         locked = await session.execute(
             sa_text(
                 """
-                SELECT id, change_key, files
+                SELECT id, change_key, files, kind
                 FROM daemon_change_writes
                 WHERE id = :cid AND status = 'pending'
                 FOR UPDATE SKIP LOCKED
@@ -218,6 +219,7 @@ async def claim_change_write(
         await session.commit()
         change_key = row["change_key"]
         files = row["files"] or []
+        kind = row["kind"] or "create"
     else:
         # ── SQLite 退化：事务内状态校验（无 SKIP LOCKED） ─────────────────
         cw = await session.get(DaemonChangeWrite, change_write_id)
@@ -241,6 +243,7 @@ async def claim_change_write(
         await session.commit()
         change_key = cw.change_key
         files = cw.files or []
+        kind = cw.kind
 
     log.info(
         "daemon_change_write_claimed",
@@ -251,6 +254,7 @@ async def claim_change_write(
         claim_token=claim_token,
         change_key=change_key,
         files=files,
+        kind=kind,
     )
 
 

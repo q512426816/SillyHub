@@ -248,6 +248,30 @@ async def get_workspace(
     return WorkspaceRead.model_validate(await service.get(workspace_id))
 
 
+@router.post("/{workspace_id}/init")
+async def init_workspace(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_WRITE))],
+) -> dict:
+    """Initialize the workspace for the current user (D-002/D-009).
+
+    Ensures the spec workspace container exists, then dispatches an init-mode
+    interactive lease to the member's daemon.  The daemon writes
+    ``.sillyspec-platform.json`` to the member's local project directory and
+    pulls the latest spec bundle.
+
+    Returns the ``lease_id``, ``runtime_id``, and ``claim_token``.
+    """
+    from app.modules.agent.service import AgentService
+
+    agent_service = AgentService(session)
+    return await agent_service.start_init_dispatch(
+        workspace_id=workspace_id,
+        actor_user_id=user.id,
+    )
+
+
 @router.get("/{workspace_id}/relations", response_model=RelationListResponse)
 async def list_relations(
     workspace_id: uuid.UUID,

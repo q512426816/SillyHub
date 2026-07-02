@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AgentRunPanel } from "@/components/agent-run-panel";
 import { AgentModelInput } from "@/components/AgentModelInput";
@@ -15,17 +15,17 @@ import { ApiError } from "@/lib/api";
 import { getDaemonRuntime, type DaemonRuntimeRead } from "@/lib/daemon";
 import { isDaemonClientWorkspace } from "@/lib/workspace-path";
 import {
-  listAgentRuns,
-  type AgentRun,
   type AgentRunStatus,
 } from "@/lib/agent";
 import { listComponents } from "@/lib/components";
 import { listChanges } from "@/lib/changes";
 import {
-  bootstrapSpecWorkspace,
   generateProjects,
   getSpecWorkspace,
   importSpecWorkspace,
+  initDispatch,
+  listPendingSync,
+  syncManual,
   type ImportPhase,
   type SpecWorkspace,
 } from "@/lib/spec-workspaces";
@@ -36,6 +36,8 @@ import {
   updateWorkspace,
   type Workspace,
 } from "@/lib/workspaces";
+import { fetchMyBinding, type MemberBindingView } from "@/lib/workspace-binding";
+import { useSession } from "@/stores/session";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -79,14 +81,6 @@ function statusToVariant(status: AgentRunStatus | null): "success" | "warning" |
   }
 }
 
-const BS_STATUS_LABEL: Record<string, string> = {
-  completed: "成功",
-  failed: "失败",
-  killed: "已终止",
-  running: "运行中",
-  pending: "等待中",
-};
-
 function fmtDuration(ms: number | null): string {
   if (ms == null) return "—";
   const s = Math.round(ms / 1000);
@@ -94,14 +88,6 @@ function fmtDuration(ms: number | null): string {
   const m = Math.floor(s / 60);
   return `${m}m ${s % 60}s`;
 }
-
-function bsRunStatus(run: AgentRun): { label: string; variant: "success" | "destructive" | "warning" | "outline" } {
-  if (run.status === "completed" && run.post_scan_status === "failed_post_check") {
-    return { label: "后置校验失败", variant: "warning" };
-  }
-  return { label: BS_STATUS_LABEL[run.status] ?? run.status, variant: statusToVariant(run.status) };
-}
-
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
@@ -116,30 +102,40 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const [activeChanges, setActiveChanges] = useState<number>(0);
   const [archivedChanges, setArchivedChanges] = useState<number>(0);
   const [currentStage, setCurrentStage] = useState<string | null>(null);
+  const [myBinding, setMyBinding] = useState<MemberBindingView | null>(null);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
   const [importPhase, setImportPhase] = useState<ImportPhase | null>(null);
-  const [bootstrapping, setBootstrapping] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
 
-  // Bootstrap state（panel runId / status / error 来源；SSE 连接由 AgentRunPanel 内部 hook 管理）
-  const [activeBootstrapRunId, setActiveBootstrapRunId] = useState<string | null>(null);
-  const [lastBsRun, setLastBsRun] = useState<AgentRun | null>(null);
-  const [bootstrapStatus, setBootstrapStatus] = useState<AgentRunStatus | null>(null);
-  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
-  // daemon-client scan 状态（task-14 / D-006@v1）：详情页扫描入口，独立状态机与 bootstrap 互斥
+  // daemon-client scan 状态（task-14 / D-006@v1）：详情页扫描入口
   const [activeScanRunId, setActiveScanRunId] = useState<string | null>(null);
   const [scanStatus, setScanStatus] = useState<AgentRunStatus | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [generatingProjects, setGeneratingProjects] = useState(false);
+  // task-08 / D-002/D-009：init dispatch 状态
+  const [initSyncedAt, setInitSyncedAt] = useState<string | null>(null);
+  const [initing, setIniting] = useState(false);
+  const initPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // task-14 / D-012：同步到服务器状态机
+  const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "done" | "failed">("idle");
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // workspace 级默认 agent provider 编辑态（FR-01/FR-02，2026-06-14-agent-runtime-selection）
   const [defaultAgent, setDefaultAgent] = useState<string | null>(null);
   const [defaultModel, setDefaultModel] = useState<string | null>(null);
   const [savingDefaultAgent, setSavingDefaultAgent] = useState(false);
   // ql-20260630-001：scan 进入 failed/killed 视为"未完成·可重扫"（守护进程重启等中断），
-  // 不当冷冰冰终态失败——scan 幂等，直接给重新扫描入口，对齐"像会话一样继续"。
+  // 不以冷冰冰终态失败——scan 幂等，直接给重新扫描入口，对齐"像会话一样继续"。
   const scanInterrupted = scanStatus === "failed" || scanStatus === "killed";
+  // task-08 / D-003@V2：owner 门禁
+  const isOwner = (() => {
+    const ownerId = workspace?.owner?.user_id;
+    const currentUserId = useSession.getState().user?.id;
+    if (!ownerId || !currentUserId) return true; // 无 owner / 无会话时放行
+    return ownerId === currentUserId;
+  })();
 
   const handleSaveDefaultAgent = async () => {
     if (!workspace) return;
@@ -185,32 +181,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
       setArchivedChanges(archived.total ?? archived.items?.length ?? 0);
       setCurrentStage(rt?.current_stage ?? null);
 
-      // Recover an in-progress Bootstrap/scan run (change_id == null) if any.
-      // 仅设状态：SSE 连接与 dialog 恢复由 <AgentRunPanel> 内部 hook 处理（FR-01 / FR-07）。
-      const runs = await listAgentRuns(workspaceId).catch(() => [] as AgentRun[]);
-      const bsRuns = runs
-        .filter((r) => r.change_id == null)
-        .sort((a, b) => {
-          const ta = a.finished_at ?? a.started_at ?? "";
-          const tb = b.finished_at ?? b.started_at ?? "";
-          return +new Date(tb) - +new Date(ta);
-        });
-      const activeRun = bsRuns[0];
-
-      if (
-        activeRun &&
-        (activeRun.status === "pending" || activeRun.status === "running") &&
-        activeBootstrapRunId !== activeRun.id
-      ) {
-        setActiveBootstrapRunId(activeRun.id);
-        setBootstrapStatus(activeRun.status);
-      }
-
-      // Save last finished Bootstrap run for display.
-      const finished = bsRuns.find((r) =>
-        ["completed", "failed", "killed"].includes(r.status),
-      );
-      setLastBsRun(finished ?? null);
+      // task-08 / D-002：获取当前成员 binding 以判定 init 状态
+      const binding = await fetchMyBinding(workspaceId).catch(() => null);
+      setMyBinding(binding as MemberBindingView | null);
+      setInitSyncedAt((binding as { init_synced_at?: string | null } | null)?.init_synced_at ?? null);
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "加载工作区失败");
     } finally {
@@ -220,27 +194,21 @@ export default function WorkspaceDetailPage({ params }: Props) {
 
   useEffect(() => {
     void load();
-    // Bootstrap SSE 连接的生命周期由 <AgentRunPanel> 内部 hook 管理（R-01）。
+    // 初始化轮询清理（task-08 / D-002/D-009）
+    return () => {
+      if (initPollRef.current) {
+        clearInterval(initPollRef.current);
+        initPollRef.current = null;
+      }
+      if (syncPollRef.current) {
+        clearInterval(syncPollRef.current);
+        syncPollRef.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId]);
 
-  /* ---- Bootstrap panel callbacks ---- */
-
-  // 关闭面板：只清状态，panel 卸载 → hook cleanup → disconnect（R-01）。
-  const closeBootstrapPanel = useCallback(() => {
-    setActiveBootstrapRunId(null);
-    setBootstrapStatus(null);
-    setBootstrapError(null);
-  }, []);
-
-  // run 结束回调：onDone 是 hook useEffect deps，必须 useCallback 稳定引用（R-01 / task-01 提醒）。
-  const handleBootstrapRunDone = useCallback((status: string) => {
-    setBootstrapStatus(status as AgentRunStatus);
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId]);
-
-  // scan 回调（task-14 / D-006@v1）：run 结束 reload；关闭面板清状态
+  /* ---- Scan panel callbacks（task-14 / D-006@v1）---- */
   const handleScanRunDone = useCallback((status: string) => {
     setScanStatus(status as AgentRunStatus);
     void load();
@@ -253,30 +221,115 @@ export default function WorkspaceDetailPage({ params }: Props) {
     setScanError(null);
   }, []);
 
-  /* ---- Bootstrap handler ---- */
+  /* ---- Init handler（D-002/D-009，task-08）---- */
 
-  async function handleBootstrap() {
-    setBootstrapping(true);
+  async function handleInit() {
+    setIniting(true);
     setPageError(null);
-    setActiveBootstrapRunId(null);
-    setBootstrapStatus(null);
-    setBootstrapError(null);
-
     try {
-      const result = await bootstrapSpecWorkspace(workspaceId);
-      setActiveBootstrapRunId(result.agent_run_id);
-      setBootstrapStatus(result.status);
-      // SSE 连接由 <AgentRunPanel runId={result.agent_run_id} isActive> 自动建立（D-002）。
+      await initDispatch(workspaceId);
+      // 轮询 fetchMyBinding 直到 init_synced_at 非空
+      initPollRef.current = setInterval(async () => {
+        if (document.hidden) return; // visibilitychange 暂停（D-005）
+        try {
+          const binding = await fetchMyBinding(workspaceId);
+          const syncedAt = (binding as { init_synced_at?: string | null } | null)?.init_synced_at ?? null;
+          if (syncedAt) {
+            if (initPollRef.current) {
+              clearInterval(initPollRef.current);
+              initPollRef.current = null;
+            }
+            setInitSyncedAt(syncedAt);
+            setIniting(false);
+            void load();
+          }
+        } catch {
+          // 轮询错误忽略，下一 tick 重试
+        }
+      }, 2000);
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "初始化失败");
-    } finally {
-      setBootstrapping(false);
+      setIniting(false);
     }
   }
 
-  /* ---- Scan handler（task-14 / D-006@v1：daemon-client 详情页扫描入口）---- */
+  /* ---- Sync Manual handler（D-012，task-14）---- */
+
+  async function handleSyncManual() {
+    if (!specWs) return;
+    setSyncStatus("syncing");
+    setSyncError(null);
+    setPageError(null);
+    try {
+      const result = await syncManual(workspaceId);
+      if (result.status === "done") {
+        setSyncStatus("done");
+        return;
+      }
+      // pending → 轮询
+      syncPollRef.current = setInterval(async () => {
+        if (document.hidden) return;
+        try {
+          const items = await listPendingSync(workspaceId);
+          const latest = items[0];
+          if (!latest) {
+            setSyncStatus("done");
+            if (syncPollRef.current) {
+              clearInterval(syncPollRef.current);
+              syncPollRef.current = null;
+            }
+            return;
+          }
+          if (latest.status === "done") {
+            setSyncStatus("done");
+            if (syncPollRef.current) {
+              clearInterval(syncPollRef.current);
+              syncPollRef.current = null;
+            }
+            void load();
+          } else if (latest.status === "failed") {
+            setSyncStatus("failed");
+            setSyncError("同步到服务器失败");
+            if (syncPollRef.current) {
+              clearInterval(syncPollRef.current);
+              syncPollRef.current = null;
+            }
+          }
+          // pending/claimed/in_progress → 继续轮询
+        } catch {
+          // 轮询错误忽略，下一 tick 重试
+        }
+      }, 2000);
+      // 5min 上限（R-06）
+      setTimeout(() => {
+        setSyncStatus((s) => {
+          if (s === "syncing") {
+            setSyncError("仍在排队，请稍后再试");
+            return "failed";
+          }
+          return s;
+        });
+        if (syncPollRef.current) {
+          clearInterval(syncPollRef.current);
+          syncPollRef.current = null;
+        }
+      }, 5 * 60 * 1000);
+    } catch (err) {
+      setSyncStatus("failed");
+      setSyncError(err instanceof ApiError ? err.message : "同步派发失败");
+    }
+  }
+
+  /* ---- Scan handler（task-14 / D-006@v1 + task-08 D-003@V2）---- */
   async function handleScan() {
     if (!workspace?.daemon_runtime_id) return;
+
+    // D-003@V2：已扫过时弹确认
+    if (componentCount > 0) {
+      const ok = window.confirm("该工作区已有扫描结果，是否重新扫描？");
+      if (!ok) return;
+    }
+
     setScanning(true);
     setPageError(null);
     setActiveScanRunId(null);
@@ -294,6 +347,15 @@ export default function WorkspaceDetailPage({ params }: Props) {
       setActiveScanRunId(result.agent_run_id);
       setScanStatus("pending");
     } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        const confirmed = window.confirm("该工作区已有扫描结果，是否重新扫描？");
+        if (confirmed) {
+          // 用户确认后重试；此轮已释放 scanning 锁，re-invoke 即可
+          setScanning(false);
+          await handleScan();
+          return;
+        }
+      }
       setPageError(err instanceof ApiError ? err.message : "扫描失败");
     } finally {
       setScanning(false);
@@ -404,7 +466,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
           <div className="mt-3 border-t pt-2.5">
             <WorkspaceDaemonSwitcher
               workspaceId={workspaceId}
-              currentRuntimeId={workspace.daemon_runtime_id}
+              currentBinding={myBinding!}
               onChanged={() => void load()}
             />
           </div>
@@ -475,27 +537,25 @@ export default function WorkspaceDetailPage({ params }: Props) {
         extra={
           specWs ? (
             <div className="flex gap-2">
+              {/* task-08 / D-002：初始化按钮（platform-managed → init dispatch） */}
               {specWs.strategy === "platform-managed" && (
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={handleBootstrap}
-                  disabled={bootstrapping || !!activeBootstrapRunId || importing || !!activeScanRunId || scanning}
+                  onClick={handleInit}
+                  disabled={initing || !!activeScanRunId || scanning || importing}
                 >
-                  {bootstrapping
-                    ? "初始化进行中…"
-                    : activeBootstrapRunId
-                      ? "初始化运行中…"
-                      : "初始化"}
+                  {initing ? "初始化进行中…" : "初始化"}
                 </Button>
               )}
-              {/* task-14 / D-006@v1：daemon-client 详情页扫描入口（三策略全显示，与初始化互斥） */}
+              {/* task-14 / D-006@v1：daemon-client 详情页扫描入口；task-08 D-003@V2 owner 门禁 */}
               {isDaemonClientWorkspace(workspace) && (
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={handleScan}
-                  disabled={!!activeBootstrapRunId || !!activeScanRunId || scanning || importing || bootstrapping}
+                  disabled={!isOwner || !!activeScanRunId || scanning || importing || initing}
+                  title={!isOwner ? "仅 owner 可扫描" : undefined}
                 >
                   {scanning
                     ? "派发中…"
@@ -504,12 +564,33 @@ export default function WorkspaceDetailPage({ params }: Props) {
                       : "扫描"}
                 </Button>
               )}
+              {/* task-14 / D-012：就绪态「同步到服务器」按钮 */}
+              {initSyncedAt && componentCount > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleSyncManual}
+                  disabled={
+                    syncStatus === "syncing" ||
+                    initing ||
+                    !!activeScanRunId ||
+                    scanning ||
+                    importing
+                  }
+                >
+                  {syncStatus === "syncing"
+                    ? "同步中…"
+                    : syncStatus === "done"
+                      ? "已同步"
+                      : "同步到服务器"}
+                </Button>
+              )}
               {!specWs.repo_sillyspec_path && (
                 <Button
                   size="sm"
                   variant="ghost"
                   onClick={handleImport}
-                  disabled={importing || bootstrapping}
+                  disabled={importing || initing}
                 >
                   {importing
                     ? `${
@@ -530,73 +611,70 @@ export default function WorkspaceDetailPage({ params }: Props) {
           ) : undefined
         }
       >
-        {/* Bootstrap guidance for empty platform-managed spec roots */}
-        {specWs && specWs.strategy === "platform-managed" && !bootstrapping && !activeBootstrapRunId && (
+        {/* task-08 / D-002/D-005/D-003@V2：三态引导 */}
+        {specWs && !initing && (
+          <>
+            {!initSyncedAt && (
+              /* 未初始化 */
+              <div className="mb-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                <p className="font-medium">此工作区尚未初始化。</p>
+                <p className="mt-0.5 text-blue-600">
+                  点击上方<strong> 初始化 </strong>按钮，将平台配置下发到本地项目目录。
+                </p>
+              </div>
+            )}
+            {initSyncedAt && componentCount === 0 && (
+              /* 已初始化·未扫描 */
+              <div className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <p className="font-medium">已初始化，但工作区尚无扫描文档。</p>
+                <p className="mt-0.5 text-amber-600">
+                  请由 owner 点击<strong> 扫描 </strong>按钮生成规范文档。
+                </p>
+              </div>
+            )}
+            {initSyncedAt && componentCount > 0 && (
+              /* 就绪 */
+              <div className="mb-3 rounded border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
+                <p className="font-medium">工作区已就绪。</p>
+                <p className="mt-0.5 text-green-600">
+                  规范文档已同步，可直接使用。
+                </p>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Init 进行中反馈 */}
+        {initing && (
           <div className="mb-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
-            <p className="font-medium">此工作区使用平台托管策略。</p>
+            <p className="font-medium">初始化进行中...</p>
             <p className="mt-0.5 text-blue-600">
-              规范文件存储在独立的平台目录中，需要先初始化。点击上方
-              <strong> 初始化 </strong>按钮使用 SillySpec CLI 初始化规范空间，或点击
-              <strong> 导入 </strong>从代码仓库导入已有的 .sillyspec。
+              正在将平台配置下发到本地项目目录并拉取文档缓存，请稍候...
             </p>
           </div>
         )}
 
-        {/* Last Bootstrap run result */}
-        {!activeBootstrapRunId && lastBsRun && (() => {
-            const bs = bsRunStatus(lastBsRun);
-            return (
-          <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs">
-            <span className="text-muted-foreground">上次初始化</span>
-            <Badge variant={bs.variant}>
-              {bs.label}
-            </Badge>
-            <span className="text-muted-foreground">
-              {lastBsRun.started_at ? formatTs(lastBsRun.started_at) : "—"}
-            </span>
-            {lastBsRun.duration_ms != null && (
-              <span className="text-muted-foreground">耗时 {fmtDuration(lastBsRun.duration_ms)}</span>
-            )}
-            {lastBsRun.exit_code != null && lastBsRun.exit_code !== 0 && (
-              <span className="text-destructive">exit_code={lastBsRun.exit_code}</span>
-            )}
-            <span className="font-mono text-zinc-400">{lastBsRun.id.slice(0, 8)}</span>
-            {bs.variant === "success" && componentCount === 0 && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleGenerateProjects}
-                disabled={generatingProjects}
-                className="ml-auto h-6 text-[11px]"
-              >
-                {generatingProjects ? "生成中..." : "生成项目组件"}
-              </Button>
-            )}
+        {/* task-14 / D-012：同步到服务器状态反馈 */}
+        {syncStatus === "syncing" && (
+          <div className="mb-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+            <p className="font-medium">同步中...</p>
+            <p className="mt-0.5 text-blue-600">
+              正在将缓存变更推送到服务器，请稍候...
+            </p>
           </div>
-            );
-          })()}
-
-        {/* Bootstrap run panel — 统一 AgentRunPanel（FR-01，hook + 面板组件 D-002） */}
-        {activeBootstrapRunId && (
-          <div className="mb-3">
-            <AgentRunPanel
-              workspaceId={workspaceId}
-              runId={activeBootstrapRunId}
-              isActive={bootstrapStatus === "running" || bootstrapStatus === "pending"}
-              title="初始化运行"
-              emptyText="等待日志输出..."
-              isLive={bootstrapStatus === "running" || bootstrapStatus === "pending"}
-              summary={
-                <Badge variant={statusToVariant(bootstrapStatus)}>
-                  {bootstrapStatus ?? "等待中"}
-                </Badge>
-              }
-              onClose={closeBootstrapPanel}
-              onDone={handleBootstrapRunDone}
-            />
-            {bootstrapError && (
-              <p className="mt-2 text-xs text-destructive">{bootstrapError}</p>
-            )}
+        )}
+        {syncStatus === "done" && (
+          <div className="mb-3 rounded border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
+            <p className="font-medium">已同步。</p>
+            <p className="mt-0.5 text-green-600">
+              缓存变更已成功推送到服务器。
+            </p>
+          </div>
+        )}
+        {syncStatus === "failed" && (
+          <div className="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-destructive">
+            <p className="font-medium">同步失败。</p>
+            {syncError && <p className="mt-0.5">{syncError}</p>}
           </div>
         )}
 

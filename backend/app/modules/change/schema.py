@@ -88,6 +88,50 @@ class ChangeDocContent(BaseModel):
     exists: bool
 
 
+# ── File tree DTOs（2026-07-02-change-detail-file-tree-editor）──────────
+
+
+class ChangeFileEntry(BaseModel):
+    """变更目录下的单个文件（list_files 返回项）。"""
+
+    path: str  # 相对变更目录 posix，如 "tasks/task-01.md"
+    name: str
+    size: int
+    last_modified_at: datetime | None = None
+    is_text: bool
+
+
+class ChangeFileList(BaseModel):
+    change_id: uuid.UUID
+    items: list[ChangeFileEntry]
+
+
+class ChangeFileContent(BaseModel):
+    path: str
+    content: str | None
+    exists: bool
+
+
+class ChangeFileWriteRequest(BaseModel):
+    path: str
+    content: str
+
+
+class ChangeFileWriteResponse(BaseModel):
+    status: str  # "done" | "pending"
+    task_id: uuid.UUID | None = None
+
+
+class PendingFileEntry(BaseModel):
+    path: str
+    status: str  # pending | claimed
+    created_at: datetime
+
+
+class PendingFileList(BaseModel):
+    items: list[PendingFileEntry]
+
+
 class ChangeWarning(BaseModel):
     code: str
     detail: str

@@ -8,6 +8,7 @@ import { AgentRunPanel } from "@/components/agent-run-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AgentProviderSelect } from "@/components/AgentProviderSelect";
+import { ChangeFileTree } from "@/components/change-file-tree";
 import {
   PageContainer,
   PageHeader,
@@ -17,8 +18,6 @@ import {
   approveChange,
   executeChange,
   getChange,
-  getChangeDocumentContent,
-  getChangeDocuments,
   rejectChange,
   checkArchiveGate,
   getAgentStatus,
@@ -27,8 +26,6 @@ import {
   planReview,
   humanTest,
   archiveConfirm,
-  type ChangeDocContent,
-  type ChangeDocMatrix,
   type ChangeRead,
   type ArchiveGateResponse,
   type DispatchResponse,
@@ -120,44 +117,6 @@ const APPROVAL_LABELS: Record<string, string> = {
   not_required: "无需审批",
 };
 
-const DOC_TABS = [
-  "MASTER",
-  "proposal",
-  "requirements",
-  "design",
-  "plan",
-  "tasks",
-  "verify_result",
-  "module_impact",
-  "prototypes",
-  "references",
-] as const;
-
-const DOC_LABELS: Record<string, string> = {
-  MASTER: "MASTER.md",
-  proposal: "proposal.md",
-  requirements: "requirements.md",
-  design: "design.md",
-  plan: "plan.md",
-  tasks: "tasks.md",
-  verify_result: "verify-result.md",
-  module_impact: "module-impact.md",
-  prototypes: "prototypes",
-  references: "references",
-};
-
-// 必需文档（四件套）— 完整度"就绪"计数只以此为分母
-const REQUIRED_DOCS = ["proposal", "design", "requirements", "tasks"] as const;
-// 可选/阶段性文档 — 单独展示存在状态，不计入完整度分母
-const OPTIONAL_DOCS = [
-  "plan",
-  "verify_result",
-  "module_impact",
-  "MASTER",
-  "prototypes",
-  "references",
-] as const;
-
 const COMPONENT_EMOJI: Record<string, string> = {
   frontend: "🌐",
   web: "🌐",
@@ -182,9 +141,6 @@ export default function ChangeDetailPage({ params }: Props) {
   const workspaceId = params.id;
   const changeId = params.cid;
   const [change, setChange] = useState<ChangeRead | null>(null);
-  const [matrix, setMatrix] = useState<ChangeDocMatrix | null>(null);
-  const [activeDoc, setActiveDoc] = useState<string>("MASTER");
-  const [docContent, setDocContent] = useState<ChangeDocContent | null>(null);
   const [loadingDoc, setLoadingDoc] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -232,15 +188,13 @@ export default function ChangeDetailPage({ params }: Props) {
       setPageError(null);
       setLoadError(null);
       try {
-        const [c, m, r, tb, as] = await Promise.all([
+        const [c, r, tb, as] = await Promise.all([
           getChange(workspaceId, changeId),
-          getChangeDocuments(workspaceId, changeId),
           listReviews(workspaceId, changeId).catch(() => []),
           getTaskBoard(workspaceId, changeId).catch(() => null),
           getAgentStatus(workspaceId, changeId).catch(() => null),
         ]);
         setChange(c);
-        setMatrix(m);
         setReviews(r);
         setTaskBoard(tb);
         setAgentStatus(as);
@@ -252,24 +206,6 @@ export default function ChangeDetailPage({ params }: Props) {
     };
     void load();
   }, [workspaceId, changeId]);
-
-  const handleDocSelect = async (docType: string) => {
-    setActiveDoc(docType);
-    setLoadingDoc(true);
-    setDocContent(null);
-    try {
-      if (docType === "prototypes" || docType === "references") {
-        setDocContent(null);
-      } else {
-        const content = await getChangeDocumentContent(workspaceId, changeId, docType);
-        setDocContent(content);
-      }
-    } catch {
-      setDocContent(null);
-    } finally {
-      setLoadingDoc(false);
-    }
-  };
 
   const handleTransition = async (targetStage: string) => {
     if (!change) return;
@@ -333,8 +269,6 @@ export default function ChangeDetailPage({ params }: Props) {
       setTransitioning(false);
     }
   };
-
-  const docExistsMap = new Map(matrix?.documents.map((d) => [d.doc_type, d]) ?? []);
 
   const handleApprove = async () => {
     if (!change) return;
@@ -468,38 +402,18 @@ export default function ChangeDetailPage({ params }: Props) {
     void refreshAgentStatus();
   }, [refreshAgentStatus]);
 
-  // ── Manual refresh: agent-status + documents + change ────────────
+  // ── Manual refresh: agent-status + change ─────────────────────────
   const refreshAll = useCallback(async () => {
     try {
-      const [c, m, as] = await Promise.all([
+      const [c, as] = await Promise.all([
         getChange(workspaceId, changeId),
-        getChangeDocuments(workspaceId, changeId),
         getAgentStatus(workspaceId, changeId),
       ]);
       setChange(c);
-      setMatrix(m);
       setAgentStatus(as);
     } catch { /* silent */ }
   }, [workspaceId, changeId]);
 
-  // ── Auto-refresh active doc content when matrix updates ──────────
-  useEffect(() => {
-    if (
-      activeDoc &&
-      activeDoc !== "prototypes" &&
-      activeDoc !== "references" &&
-      matrix &&
-      !loadingDoc
-    ) {
-      const docEntry = docExistsMap.get(activeDoc);
-      if (docEntry?.exists) {
-        void getChangeDocumentContent(workspaceId, changeId, activeDoc)
-          .then((content) => setDocContent(content))
-          .catch(() => {});
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matrix]);
 
   // Auto-load archive gate when entering archive stage
   useEffect(() => {
@@ -574,13 +488,11 @@ export default function ChangeDetailPage({ params }: Props) {
         );
       }
       setGateComment("");
-      const [updated, updatedMatrix, updatedAgentStatus] = await Promise.all([
+      const [updated, updatedAgentStatus] = await Promise.all([
         getChange(workspaceId, changeId),
-        getChangeDocuments(workspaceId, changeId),
         getAgentStatus(workspaceId, changeId),
       ]);
       setChange(updated);
-      setMatrix(updatedMatrix);
       setAgentStatus(updatedAgentStatus);
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "操作失败");
@@ -827,171 +739,14 @@ export default function ChangeDetailPage({ params }: Props) {
 
       <section className="rounded-md border bg-card">
         <div className="flex items-center justify-between border-b px-3 py-2">
-          <h2 className="text-xs font-medium">变更文档完整性</h2>
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] text-muted-foreground">
-              {REQUIRED_DOCS.filter((dt) => docExistsMap.get(dt)?.exists ?? false).length}
-              /{REQUIRED_DOCS.length} 必需文档就绪
-            </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 px-1.5 text-[11px]"
-              onClick={() => void refreshAll()}
-              disabled={transitioning}
-            >
-              刷新
-            </Button>
-          </div>
+          <h2 className="text-xs font-medium">变更文件</h2>
         </div>
-        <div className="space-y-2 px-3 py-3">
-          <div>
-            <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-              必需文档
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {REQUIRED_DOCS.map((dt) => {
-                const exists = docExistsMap.get(dt)?.exists ?? false;
-                const bg = exists
-                  ? "bg-emerald-50 border-emerald-200/60"
-                  : "bg-red-50 border-red-200/60";
-                const textColor = exists ? "text-emerald-600" : "text-destructive";
-                return (
-                  <div
-                    key={dt}
-                    className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 ${bg}`}
-                  >
-                    <span className={`text-[11px] ${textColor}`}>{exists ? "✓" : "✗"}</span>
-                    <span className={`text-[11px] font-medium ${textColor}`}>
-                      {DOC_LABELS[dt] ?? `${dt}.md`}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-          <div>
-            <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-              可选 / 阶段性文档
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {OPTIONAL_DOCS.map((dt) => {
-                const isSpecial = dt === "prototypes" || dt === "references";
-                const count = isSpecial
-                  ? dt === "prototypes"
-                    ? (matrix?.prototypes.length ?? 0)
-                    : (matrix?.references.length ?? 0)
-                  : 0;
-                const exists = isSpecial
-                  ? count > 0
-                  : (docExistsMap.get(dt)?.exists ?? false);
-
-                let bg = "bg-gray-100 border-gray-200";
-                let textColor = "text-gray-400";
-                let icon = "—";
-                if (exists) {
-                  bg = "bg-emerald-50 border-emerald-200/60";
-                  textColor = "text-emerald-600";
-                  icon = isSpecial ? "◐" : "✓";
-                }
-
-                return (
-                  <div
-                    key={dt}
-                    className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 ${bg}`}
-                  >
-                    <span className={`text-[11px] ${textColor}`}>{icon}</span>
-                    <span className={`text-[11px] font-medium ${textColor}`}>
-                      {DOC_LABELS[dt] ?? `${dt}.md`}
-                      {isSpecial && count > 0 && ` (${count})`}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+        <div className="p-3">
+          <ChangeFileTree workspaceId={workspaceId} changeId={changeId} />
         </div>
       </section>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
-        <section className="rounded-md border bg-card">
-          <div className="flex flex-wrap gap-px border-b bg-muted/40 px-2 pt-1.5">
-            {DOC_TABS.map((dt) => {
-              const doc = docExistsMap.get(dt);
-              const isSpecial = dt === "prototypes" || dt === "references";
-              const count = isSpecial
-                ? dt === "prototypes"
-                  ? (matrix?.prototypes.length ?? 0)
-                  : (matrix?.references.length ?? 0)
-                : 0;
-              const exists = isSpecial ? count > 0 : (doc?.exists ?? false);
-
-              return (
-                <button
-                  key={dt}
-                  onClick={() => handleDocSelect(dt)}
-                  className={`rounded-t px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                    activeDoc === dt
-                      ? "bg-card text-foreground"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {dt === "verify_result"
-                    ? "verify"
-                    : dt === "module_impact"
-                      ? "module-impact"
-                      : dt}
-                  {!isSpecial && !exists && (
-                    <span className="ml-0.5 opacity-40">∅</span>
-                  )}
-                  {isSpecial && count > 0 && (
-                    <span className="ml-0.5 rounded bg-muted px-1 text-[10px]">
-                      {count}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-          <div className="p-3">
-            {loadingDoc ? (
-              <p className="text-xs text-muted-foreground">加载中…</p>
-            ) : activeDoc === "prototypes" ? (
-              matrix && matrix.prototypes.length > 0 ? (
-                <ul className="space-y-0.5">
-                  {matrix.prototypes.map((p) => (
-                    <li key={p} className="font-mono text-[11px]">{p}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-muted-foreground">无 prototype 文件。</p>
-              )
-            ) : activeDoc === "references" ? (
-              matrix && matrix.references.length > 0 ? (
-                <ul className="space-y-0.5">
-                  {matrix.references.map((r) => (
-                    <li key={r} className="font-mono text-[11px]">{r}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-muted-foreground">无 reference 文件。</p>
-              )
-            ) : docContent ? (
-              docContent.exists ? (
-                <pre className="max-h-[500px] overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-4">
-                  {docContent.content}
-                </pre>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  文档 <code>{activeDoc}</code> 尚未创建。
-                </p>
-              )
-            ) : (
-              <p className="text-xs text-muted-foreground">选择一个标签页查看内容。</p>
-            )}
-          </div>
-        </section>
-
         <aside className="space-y-3">
           {change.approval_status && change.approval_status !== "not_required" && (
             <section className="rounded-md border bg-card">

@@ -338,28 +338,6 @@ export default function ChangesPage({ params }: Props) {
         </SectionCard>
       )}
 
-      <SectionCard title="变更生命周期">
-        <div className="flex items-center justify-center gap-0">
-          {[
-            "扫描",
-            "需求分析",
-            "规划",
-            "执行",
-            "验证",
-            "归档",
-          ].map((step, i, arr) => (
-            <div key={step} className="flex items-center">
-              <div className="whitespace-nowrap rounded-md border border-border bg-muted/40 px-3 py-1.5 text-[11px] font-medium text-foreground">
-                {step}
-              </div>
-              {i < arr.length - 1 && (
-                <span className="mx-2 text-muted-foreground">&rarr;</span>
-              )}
-            </div>
-          ))}
-        </div>
-      </SectionCard>
-
       <SectionCard bodyPadding="p-2">
         {/* 顶部操作按钮行（对齐 admin/roles） */}
         <div className="mb-2 flex items-center justify-end gap-2">
