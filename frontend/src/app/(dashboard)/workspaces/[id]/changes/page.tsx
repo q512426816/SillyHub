@@ -216,6 +216,7 @@ export default function ChangesPage({ params }: Props) {
       render: (v: string, c: ChangeSummary) => (
         <Link
           href={`/workspaces/${workspaceId}/changes/${c.id}`}
+          prefetch={false}
           className="font-mono text-[11px] text-primary hover:underline"
         >
           {v}
