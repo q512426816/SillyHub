@@ -275,6 +275,40 @@ describe('Shell 工具间接写 — extractShellWritePaths + canWrite', () => {
     );
     expect(res).toMatchObject({ behavior: 'deny' });
   });
+
+  // ql-20260703-001：claude 只暴露 Bash tool（无独立 PowerShell/CMD tool），
+  // agent 用 Bash tool 跑跨 shell 命令（powershell/pwsh/cmd）。修复前
+  // _shellKindOfTool('Bash')→'bash' 仅 bash 提取，漏 PowerShell cmdlet →
+  // Set-Content 绕过（真机 e2e 发现）。修复后合并 bash+powershell+cmd 三提取。
+  it('ql-20260703-001: Bash tool 跑 powershell Set-Content -Path 越界 → deny', async () => {
+    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const res = await canUseTool(
+      'Bash',
+      { command: 'powershell -Command "Set-Content -Path C:\\evil\\a.txt -Value x"' },
+      { signal: undefined },
+    );
+    expect(res).toMatchObject({ behavior: 'deny' });
+  });
+
+  it('ql-20260703-001: Bash tool 跑 powershell Set-Content 位置参数越界 → deny', async () => {
+    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const res = await canUseTool(
+      'Bash',
+      { command: 'powershell -Command "Set-Content C:\\evil\\a.txt x"' },
+      { signal: undefined },
+    );
+    expect(res).toMatchObject({ behavior: 'deny' });
+  });
+
+  it('ql-20260703-001: Bash tool 跑 pwsh Out-File 越界 → deny', async () => {
+    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const res = await canUseTool(
+      'Bash',
+      { command: 'pwsh -Command "Out-File -FilePath C:\\evil\\b.txt -InputObject y"' },
+      { signal: undefined },
+    );
+    expect(res).toMatchObject({ behavior: 'deny' });
+  });
 });
 
 // ── runtimeId 透传 + per-runtime 隔离 ──────────────────────────────────────────

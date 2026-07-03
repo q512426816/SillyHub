@@ -986,11 +986,22 @@ export class SessionManager {
       return [];
     }
     // Shell 间接写（Bash/PowerShell/CMD）
+    // 注意：claude 只暴露 Bash tool（无独立 PowerShell/CMD tool），agent 常用
+    // Bash tool 跑跨 shell 命令（如 `powershell -Command "Set-Content ..."`、
+    // `cmd /c mkdir ...`）。若仅按 toolName 选 bash 提取，会漏 PowerShell cmdlet
+    // 与 CMD 命令的写路径（真机回归 ql-20260703-001 发现 Set-Content 绕过）。
+    // 因此对 shell 工具合并 bash + powershell + cmd 三种提取取并集（正则各自
+    // 精确，PowerShell cmdlet 名不会误匹配 bash/cmd 命令，反之亦然，安全）。
     const shell = this._shellKindOfTool(toolName);
     if (shell) {
       const command = toolInput['command'];
       if (typeof command !== 'string' || command.length === 0) return [];
-      return extractShellWritePaths(command, shell);
+      const all = [
+        ...extractShellWritePaths(command, 'bash'),
+        ...extractShellWritePaths(command, 'powershell'),
+        ...extractShellWritePaths(command, 'cmd'),
+      ];
+      return [...new Set(all)];
     }
     return [];
   }
