@@ -173,14 +173,20 @@ class DaemonPermissionService:
 
     async def handle_permission_request(
         self,
-        runtime_id: uuid.UUID,
+        daemon_id: uuid.UUID,
         payload: PermissionRequestPayload,
     ) -> None:
         """WS PERMISSION_REQUEST handler: validate + publish SSE + (maybe) arm timer.
 
+        ``daemon_id`` is the daemon entity id the request arrived on (= the WS
+        connection key since task-06). Validation:
+
         Validation (fail-soft: warn + drop, never close the WS — task-03 NFR-05):
           1. session exists (read-only; lock lives in the REST response endpoint)
-          2. session.runtime_id matches the daemon that sent the request
+          2. session.runtime_id resolves to a runtime whose owning daemon entity
+             id == ``daemon_id`` (migration window: runtime.daemon_instance_id
+             is NULL → the runtime_id itself is the legacy routing key, so the
+             check then expects ``daemon_id == session.runtime_id``).
           3. session.status ∈ ACTIVE_SESSION_STATUSES
           4. session.config.get("manual_approval") is True (FR-07 gate)
           5. current run exists, status ∈ ACTIVE_TURN_STATUSES,
@@ -216,13 +222,23 @@ class DaemonPermissionService:
                 request_id=request_id,
             )
             return
-        if session_obj.runtime_id != runtime_id:
+        if session_obj.runtime_id is None:
             log.warning(
-                "permission_request_runtime_mismatch",
+                "permission_request_no_runtime",
                 session_id=str(session_id),
                 request_id=request_id,
-                expected_runtime_id=str(session_obj.runtime_id),
-                received_runtime_id=str(runtime_id),
+                daemon_id=str(daemon_id),
+            )
+            return
+        expected_daemon_id = await self._resolve_daemon_id_for_runtime(session_obj.runtime_id)
+        if expected_daemon_id != daemon_id:
+            log.warning(
+                "permission_request_daemon_mismatch",
+                session_id=str(session_id),
+                request_id=request_id,
+                runtime_id=str(session_obj.runtime_id),
+                expected_daemon_id=str(expected_daemon_id),
+                received_daemon_id=str(daemon_id),
             )
             return
         if (session_obj.status or "") not in ACTIVE_SESSION_STATUSES:
@@ -310,6 +326,37 @@ class DaemonPermissionService:
             request_id=request_id,
             tool_name=payload.tool_name,
         )
+
+    # ── daemon_id resolution (task-06 ws routes by daemon_instance_id) ───────
+
+    async def _resolve_daemon_id_for_runtime(
+        self,
+        runtime_id: uuid.UUID,
+    ) -> uuid.UUID | None:
+        """Resolve the daemon_entity key the WS hub routes by, for a runtime.
+
+        task-06 / design §5.3: ``DaemonWsHub`` connections are keyed by
+        ``daemon_instance_id`` (one socket per daemon entity), but sessions +
+        permission timers still carry ``runtime_id`` (the provider row). This
+        mirrors ``session.service._resolve_daemon_id_for_runtime`` so the
+        permission downlink addresses the right WS connection.
+
+        Migration fallback (D-007 window): pre-existing runtime rows have
+        ``daemon_instance_id=NULL`` until the daemon re-registers. For those we
+        fall back to the ``runtime_id`` itself as the connection key (legacy
+        routing surface) — this keeps existing tests that bind only a runtime
+        row working and matches the session service's fallback 1:1. Returns
+        ``None`` only when the runtime row is missing entirely.
+        """
+        from app.modules.daemon.model import DaemonRuntime
+
+        rt = await self._svc._session.get(DaemonRuntime, runtime_id)  # type: ignore[attr-defined]
+        if rt is None:
+            return None
+        if rt.daemon_instance_id is None:
+            # D-007 migration window: no daemon entity yet -> route by runtime_id.
+            return runtime_id
+        return rt.daemon_instance_id
 
     # ── Dialog persistence helper ────────────────────────────────────────────
 
@@ -489,7 +536,21 @@ class DaemonPermissionService:
         if message is not None:
             ws_payload["message"] = message
 
-        sent = await self._hub.send_permission_response(session_obj.runtime_id, ws_payload)
+        # task-06: WS hub routes by daemon_instance_id. Resolve the daemon
+        # entity owning this runtime; migration-window fallback routes by
+        # runtime_id (legacy surface). Resolve failure → 504.
+        route_key = await self._resolve_daemon_id_for_runtime(session_obj.runtime_id)
+        if route_key is None:
+            raise DaemonRuntimeOffline(
+                f"daemon runtime '{session_obj.runtime_id}' not found; "
+                f"permission response could not be delivered.",
+                details={
+                    "runtime_id": str(session_obj.runtime_id),
+                    "session_id": str(session_id),
+                    "request_id": request_id,
+                },
+            )
+        sent = await self._hub.send_permission_response(route_key, ws_payload)
         if not sent:
             # Re-arm: the daemon fallback timer will still deny; surface 504 so
             # the frontend can prompt retry. Re-create a fresh 5min timer so a
@@ -508,6 +569,7 @@ class DaemonPermissionService:
                 f"permission response could not be delivered.",
                 details={
                     "runtime_id": str(session_obj.runtime_id),
+                    "daemon_id": str(route_key),
                     "session_id": str(session_id),
                     "request_id": request_id,
                 },
@@ -575,7 +637,14 @@ class DaemonPermissionService:
         if dialog_result is not None:
             ws_payload["dialog_result"] = dialog_result
 
-        sent = await self._hub.send_permission_response(session_obj.runtime_id, ws_payload)
+        # task-06: WS hub routes by daemon_instance_id (migration-window
+        # fallback routes by runtime_id). Resolve before sending.
+        route_key = await self._resolve_daemon_id_for_runtime(session_obj.runtime_id)
+        sent = (
+            await self._hub.send_permission_response(route_key, ws_payload)
+            if route_key is not None
+            else False
+        )
         if not sent:
             # Dialogs have no backend timeout to re-arm; surface 504 so the
             # frontend can retry. The DB row stays pending (untouched below)
@@ -585,6 +654,7 @@ class DaemonPermissionService:
                 f"dialog response could not be delivered.",
                 details={
                     "runtime_id": str(session_obj.runtime_id),
+                    "daemon_id": str(route_key) if route_key is not None else None,
                     "session_id": str(session_id),
                     "request_id": request_id,
                 },
@@ -654,27 +724,46 @@ class DaemonPermissionService:
         if current is not None and current.done() is False and current is asyncio.current_task():
             self._timers.pop(request_id, None)
 
-        if runtime_id is None:
-            log.warning(
-                "permission_timeout_no_runtime",
-                session_id=str(session_id),
-                request_id=request_id,
-            )
-            return
-
         ws_payload = {
             "session_id": str(session_id),
             "request_id": request_id,
             "decision": "deny",
             "message": "permission request timed out (5min)",
         }
-        sent = await self._hub.send_permission_response(runtime_id, ws_payload)
+        # task-06: WS hub routes by daemon_instance_id (migration-window
+        # fallback routes by runtime_id).
+        route_key = (
+            await self._resolve_daemon_id_for_runtime(runtime_id)
+            if runtime_id is not None
+            else None
+        )
+        if route_key is None:
+            log.warning(
+                "permission_timeout_no_runtime",
+                session_id=str(session_id),
+                request_id=request_id,
+                runtime_id=str(runtime_id) if runtime_id is not None else None,
+            )
+            # Still publish the timeout SSE so the frontend card dismisses.
+            await self._svc._publish_session_event(  # type: ignore[attr-defined]
+                session_id,
+                {
+                    "event": "permission_resolved",
+                    "session_id": str(session_id),
+                    "request_id": request_id,
+                    "decision": "deny",
+                    "reason": "timeout",
+                },
+            )
+            return
+        sent = await self._hub.send_permission_response(route_key, ws_payload)
         if not sent:
             log.warning(
                 "permission_timeout_send_failed",
                 session_id=str(session_id),
                 request_id=request_id,
                 runtime_id=str(runtime_id),
+                daemon_id=str(route_key),
             )
 
         await self._svc._publish_session_event(  # type: ignore[attr-defined]

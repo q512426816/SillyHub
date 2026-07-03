@@ -4,11 +4,18 @@ endpoint + ws_hub.send_permission_response envelope (task-08 / FR-07 / D-007@v1)
 The WS receive-loop branch lives inside ``router.daemon_websocket``; we exercise
 it through the FastAPI ``AsyncClient`` so the routing + payload validation +
 handler dispatch are covered end-to-end with a mocked permission service.
+
+task-06 adaptation: ``DaemonWsHub`` routes by ``daemon_instance_id`` (one socket
+per daemon entity). ``handle_permission_request`` now receives the daemon_id the
+request arrived on and validates ownership against the runtime's owning daemon
+entity. These tests cover the bound + migration-window paths.
 """
 
 from __future__ import annotations
 
+import asyncio
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -187,3 +194,225 @@ class TestWsUplinkPayloadValidation:
         )
         assert p.message is None
         assert p.decision == "allow"
+
+
+# ── handle_permission_request daemon_id ownership (task-06 adaptation) ───────
+#
+# task-06: WS hub routes by daemon_instance_id; router.daemon_websocket now
+# calls handle_permission_request(daemon_id, payload). Ownership must pass when
+# daemon_id == the runtime's owning daemon_instance_id, and also under the
+# migration-window fallback (daemon_instance_id NULL → route key == runtime_id).
+
+
+async def _make_user_session(db_session, runtime_id):
+    """Create a User + manual_approval AgentSession bound to runtime_id."""
+    from app.modules.agent.model import AgentRun, AgentSession
+    from app.modules.auth.model import User
+
+    uid = uuid.uuid4()
+    db_session.add(
+        User(
+            id=uid,
+            email=f"perm-{uid}@example.com",
+            password_hash="x",
+            display_name="T",
+            status="active",
+        )
+    )
+    await db_session.commit()
+    sess = AgentSession(
+        id=uuid.uuid4(),
+        user_id=uid,
+        provider="claude",
+        status="active",
+        config={"manual_approval": True, "model": "claude"},
+        turn_count=1,
+        runtime_id=runtime_id,
+        lease_id=uuid.uuid4(),
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(sess)
+    await db_session.flush()
+    run = AgentRun(
+        id=uuid.uuid4(),
+        agent_type="claude_code",
+        provider="claude",
+        status="running",
+        spec_strategy="interactive",
+        agent_session_id=sess.id,
+    )
+    db_session.add(run)
+    await db_session.commit()
+    await db_session.refresh(sess)
+    await db_session.refresh(run)
+    return sess, run
+
+
+def _mock_redis() -> AsyncMock:
+    redis = AsyncMock()
+    redis.publish = AsyncMock()
+    return redis
+
+
+class TestHandlePermissionDaemonIdOwnership:
+    @pytest.mark.asyncio
+    async def test_bound_runtime_accepts_matching_daemon_id(self, db_session) -> None:
+        """Runtime bound to a daemon_instance: daemon_id == instance.id passes."""
+        from app.modules.daemon.model import DaemonInstance, DaemonRuntime
+        from app.modules.daemon.permission_service import DaemonPermissionService
+        from app.modules.daemon.protocol import PermissionRequestPayload
+        from app.modules.daemon.service import DaemonService
+
+        inst = DaemonInstance(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            hostname="h",
+            server_url="http://srv",
+        )
+        db_session.add(inst)
+        await db_session.flush()
+        rt = DaemonRuntime(
+            id=uuid.uuid4(),
+            daemon_instance_id=inst.id,
+            user_id=inst.user_id,
+            name="daemon",
+            provider="claude",
+            status="online",
+            last_heartbeat_at=datetime.now(UTC),
+        )
+        db_session.add(rt)
+        await db_session.commit()
+        await db_session.refresh(rt)
+        sess, run = await _make_user_session(db_session, rt.id)
+
+        svc = DaemonService(db_session)
+        hub = MagicMock()
+        hub.send_permission_response = AsyncMock(return_value=True)
+        perm = DaemonPermissionService(svc, hub, timeout_sec=30.0)
+
+        with patch("app.modules.daemon.session.service.get_redis", return_value=_mock_redis()):
+            await perm.handle_permission_request(
+                inst.id,
+                PermissionRequestPayload(
+                    session_id=sess.id,
+                    run_id=run.id,
+                    request_id="req-owned",
+                    tool_name="Bash",
+                    input={"command": "ls"},
+                ),
+            )
+        # Timer armed ⇒ request accepted (ownership passed).
+        assert "req-owned" in perm._timers
+        task = perm._timers["req-owned"]
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    @pytest.mark.asyncio
+    async def test_bound_runtime_rejects_wrong_daemon_id(self, db_session) -> None:
+        """Runtime bound to instance A: daemon_id from instance B → dropped."""
+        from app.modules.daemon.model import DaemonInstance, DaemonRuntime
+        from app.modules.daemon.permission_service import DaemonPermissionService
+        from app.modules.daemon.protocol import PermissionRequestPayload
+        from app.modules.daemon.service import DaemonService
+
+        inst = DaemonInstance(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            hostname="h",
+            server_url="http://srv",
+        )
+        db_session.add(inst)
+        await db_session.flush()
+        rt = DaemonRuntime(
+            id=uuid.uuid4(),
+            daemon_instance_id=inst.id,
+            user_id=inst.user_id,
+            name="daemon",
+            provider="claude",
+            status="online",
+            last_heartbeat_at=datetime.now(UTC),
+        )
+        db_session.add(rt)
+        await db_session.commit()
+        await db_session.refresh(rt)
+        sess, run = await _make_user_session(db_session, rt.id)
+
+        svc = DaemonService(db_session)
+        hub = MagicMock()
+        hub.send_permission_response = AsyncMock(return_value=True)
+        perm = DaemonPermissionService(svc, hub, timeout_sec=30.0)
+
+        with patch("app.modules.daemon.session.service.get_redis", return_value=_mock_redis()):
+            await perm.handle_permission_request(
+                uuid.uuid4(),  # a different daemon_id
+                PermissionRequestPayload(
+                    session_id=sess.id,
+                    run_id=run.id,
+                    request_id="req-rej",
+                    tool_name="Bash",
+                    input={"command": "ls"},
+                ),
+            )
+        # No timer armed ⇒ request dropped by ownership check.
+        assert "req-rej" not in perm._timers
+        hub.send_permission_response.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_migration_window_fallback_accepts_runtime_id_as_daemon_id(
+        self, db_session
+    ) -> None:
+        """daemon_instance_id NULL: legacy routing key == runtime_id."""
+        from app.modules.daemon.model import DaemonRuntime
+        from app.modules.daemon.permission_service import DaemonPermissionService
+        from app.modules.daemon.protocol import PermissionRequestPayload
+        from app.modules.daemon.service import DaemonService
+
+        rt = DaemonRuntime(
+            id=uuid.uuid4(),
+            daemon_instance_id=None,
+            user_id=uuid.uuid4(),
+            name="daemon",
+            provider="claude",
+            status="online",
+            last_heartbeat_at=datetime.now(UTC),
+        )
+        db_session.add(rt)
+        await db_session.commit()
+        await db_session.refresh(rt)
+        sess, run = await _make_user_session(db_session, rt.id)
+
+        svc = DaemonService(db_session)
+        hub = MagicMock()
+        hub.send_permission_response = AsyncMock(return_value=True)
+        perm = DaemonPermissionService(svc, hub, timeout_sec=30.0)
+
+        with patch("app.modules.daemon.session.service.get_redis", return_value=_mock_redis()):
+            # Old daemons still pass runtime_id (== daemon_local_id surface in
+            # legacy mode). The fallback accepts runtime_id as the route key.
+            await perm.handle_permission_request(
+                rt.id,
+                PermissionRequestPayload(
+                    session_id=sess.id,
+                    run_id=run.id,
+                    request_id="req-fb",
+                    tool_name="Bash",
+                    input={"command": "ls"},
+                ),
+            )
+        assert "req-fb" in perm._timers
+        task = perm._timers["req-fb"]
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+def asyncio_imported_cancel():
+    """Late import of asyncio.CancelledError to avoid a module-level import."""
+    import asyncio
+
+    return asyncio.CancelledError
