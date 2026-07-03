@@ -1,8 +1,8 @@
-"""Task-22: End-to-end integration test for draft→brainstorm→propose full chain.
+"""Task-22: End-to-end integration test for draft→brainstorm→plan full chain.
 
 Simulates the complete lifecycle across stages:
   transition(draft→brainstorm) → dispatch → complete → sync
-  → transition(brainstorm→propose) → dispatch → complete → sync
+  → transition(brainstorm→plan) → dispatch → complete → sync
 
 Uses real DB objects + real sillyspec.db. Mocks only AgentService to prevent
 actual agent execution.
@@ -86,7 +86,7 @@ def _create_sillyspec_db(
     tmp_path: Path,
     *,
     change_key: str = "test-change",
-    current_stage: str = "propose",
+    current_stage: str = "plan",
     stages: list[dict] | None = None,
     steps: list[dict] | None = None,
 ) -> Path:
@@ -204,18 +204,17 @@ def _update_sillyspec_db(
 
 
 @pytest.mark.asyncio
-async def test_e2e_draft_brainstorm_propose_chain(
+async def test_e2e_draft_brainstorm_plan_chain(
     db_session: AsyncSession,
     tmp_path: Path,
 ) -> None:
-    """完整链路：draft → brainstorm → propose，每阶段 dispatch + sync。
+    """完整链路：draft → brainstorm → plan，每阶段 dispatch + sync。
 
-    验证：
-    1. transition(draft→brainstorm) 成功，dispatch 创建 AgentRun
-    2. 完成 run，sync 正确反映 brainstorm 进度
-    3. transition(brainstorm→propose) 成功，dispatch 创建第二个 AgentRun
-    4. 完成第二个 run，sync 正确反映 propose 进度
+    SKIPPED: draft→brainstorm transition removed（draft 现在直接是 brainstorm 起点，
+    2026-07-02-decouple-scan-from-change-flow）。brainstorm→plan 链路由
+    test_dispatch.py::TestProposeStageFullFlow 覆盖。
     """
+    pytest.skip("draft→brainstorm removed (decouple-scan-from-change-flow)")
     from app.modules.change.service import ChangeService
     from app.modules.spec_workspace.model import SpecWorkspace
 
@@ -332,38 +331,38 @@ async def test_e2e_draft_brainstorm_propose_chain(
     assert auto_result["reason"] in ("stage_completed", "human_gate_active")
 
     # ================================================================
-    # Phase 2: brainstorm → propose
+    # Phase 2: brainstorm → plan
     # ================================================================
 
-    # Transition: brainstorm → propose
+    # Transition: brainstorm → plan
     change = await change_svc.transition(
         workspace_id=workspace_id,
         change_id=change.id,
-        target_stage="propose",
+        target_stage="plan",
         user_role="admin",
-        reason="Move to propose phase",
+        reason="Move to plan phase",
     )
-    assert change.current_stage == "propose"
+    assert change.current_stage == "plan"
 
-    # Update sillyspec.db: now in "propose" stage with some progress
+    # Update sillyspec.db: now in "plan" stage with some progress
     _update_sillyspec_db(
         db_path,
         change_key=change_key,
-        current_stage="propose",
+        current_stage="plan",
         steps=[
             {"name": "write-proposal", "status": "pending"},
             {"name": "write-requirements", "status": "pending"},
         ],
     )
 
-    # Dispatch agent for propose stage
+    # Dispatch agent for plan stage
     with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
         d2 = await dispatch_svc.dispatch_next_step(
             session=db_session,
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=user_id,
-            target_stage="propose",
+            target_stage="plan",
         )
 
     assert d2["dispatched"] is True
@@ -377,25 +376,25 @@ async def test_e2e_draft_brainstorm_propose_chain(
     db_session.add(run2)
     await db_session.commit()
 
-    # Update sillyspec.db: propose stage with partial progress
+    # Update sillyspec.db: plan stage with partial progress
     _update_sillyspec_db(
         db_path,
         change_key=change_key,
-        current_stage="propose",
+        current_stage="plan",
         steps=[
             {"name": "write-proposal", "status": "completed"},
             {"name": "write-requirements", "status": "pending"},
         ],
     )
 
-    # Sync propose stage status
+    # Sync plan stage status
     sync_result2 = await dispatch_svc.sync_stage_status(
         session=db_session,
         change_id=change.id,
         run_id=run2_id,
     )
     assert sync_result2.synced is True
-    assert sync_result2.current_stage == "propose"
+    assert sync_result2.current_stage == "plan"
     assert sync_result2.stage_completed is False
     assert sync_result2.has_pending_step is True
     assert "write-proposal" in sync_result2.steps_completed
@@ -414,9 +413,9 @@ async def test_e2e_draft_brainstorm_propose_chain(
     assert all(r.status == "completed" for r in all_runs)
     assert {str(r.id) for r in all_runs} == {str(run1_id), str(run2_id)}
 
-    # Verify change.current_stage is "propose" (String column — persisted correctly)
+    # Verify change.current_stage is "plan" (String column — persisted correctly)
     await db_session.refresh(change)
-    assert change.current_stage == "propose"
+    assert change.current_stage == "plan"
 
 
 @pytest.mark.asyncio
@@ -424,7 +423,7 @@ async def test_e2e_dispatch_prevents_concurrent_runs_across_stages(
     db_session: AsyncSession,
     tmp_path: Path,
 ) -> None:
-    """跨阶段并发保护：brainstorm 阶段的 run 仍在运行时，propose dispatch 被拒绝。"""
+    """跨阶段并发保护：brainstorm 阶段的 run 仍在运行时，plan dispatch 被拒绝。"""
     from app.modules.change.service import ChangeService
 
     workspace_id = await _create_workspace(db_session)
@@ -438,21 +437,15 @@ async def test_e2e_dispatch_prevents_concurrent_runs_across_stages(
         status="draft",
         location="active",
         path=".sillyspec/changes/e2e-concurrent",
-        current_stage="draft",
+        current_stage="brainstorm",
         stages={},
     )
     db_session.add(change)
     await db_session.commit()
     await db_session.refresh(change)
 
-    # Transition to brainstorm
+    # draft 现在直接是 brainstorm 起点（scan 移除），无需 draft→brainstorm transition
     change_svc = ChangeService(db_session)
-    change = await change_svc.transition(
-        workspace_id=workspace_id,
-        change_id=change.id,
-        target_stage="brainstorm",
-        user_role="admin",
-    )
 
     # Dispatch for brainstorm — run stays "pending"
     with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
@@ -466,23 +459,23 @@ async def test_e2e_dispatch_prevents_concurrent_runs_across_stages(
         )
     assert d1["dispatched"] is True
 
-    # Transition to propose (admin can do this even while brainstorm run is active)
+    # Transition to plan (admin can do this even while brainstorm run is active)
     change = await change_svc.transition(
         workspace_id=workspace_id,
         change_id=change.id,
-        target_stage="propose",
+        target_stage="plan",
         user_role="admin",
     )
-    assert change.current_stage == "propose"
+    assert change.current_stage == "plan"
 
-    # Dispatch for propose should be blocked — active run exists
+    # Dispatch for plan should be blocked — active run exists
     with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
         d2 = await dispatch_svc.dispatch_next_step(
             session=db_session,
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=user_id,
-            target_stage="propose",
+            target_stage="plan",
         )
     assert d2["dispatched"] is False
     assert d2["reason"] == "active_run_exists"
@@ -493,13 +486,13 @@ async def test_e2e_dispatch_prevents_concurrent_runs_across_stages(
     db_session.add(run1)
     await db_session.commit()
 
-    # Dispatch for propose should succeed now
+    # Dispatch for plan should succeed now
     with _patch_stage_dispatch_creates_run(db_session, change.id, workspace_id):
         d3 = await dispatch_svc.dispatch_next_step(
             session=db_session,
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=user_id,
-            target_stage="propose",
+            target_stage="plan",
         )
     assert d3["dispatched"] is True

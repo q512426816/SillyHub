@@ -572,7 +572,7 @@ class ChangeParser:
         sillyspec.db 是权威数据源（含 SillySpec CLI 记录的精确 stage），但 .runtime
         被导入排除（worktrees 太大），平台读不到。这里从 change 目录的文档产出推断
         大致 stage：archive → archive / verify-result → verify / plan+tasks → plan /
-        proposal+design → propose / 否则 scan。
+        proposal+design → brainstorm / 否则 brainstorm（scan 已移除，起点为 brainstorm）。
         """
         if location == "archive":
             return "archive"
@@ -586,4 +586,5 @@ class ChangeParser:
             return "plan"
         if has("proposal.md") or has("design.md"):
             return "brainstorm"
-        return "scan"
+        # scan 已从变更流程移除：空变更目录默认起点 brainstorm
+        return "brainstorm"

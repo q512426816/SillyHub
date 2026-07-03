@@ -46,17 +46,17 @@ interface Props {
 // 当 current_stage 为这三态时，WORKFLOW_STAGES.indexOf 返回 -1，
 // 步骤条早返回 null，由独立 STATUS_BADGE 徽标承载语义。
 const WORKFLOW_STAGES = [
-  "scan", "brainstorm", "plan", "execute", "verify", "archive",
+  "brainstorm", "plan", "execute", "verify", "archive",
 ] as const;
 
 const WORKFLOW_STAGE_LABELS: Record<string, string> = {
-  scan: "扫描", brainstorm: "需求分析",
+  brainstorm: "需求分析",
   plan: "规划", execute: "执行",
   verify: "验证", archive: "归档",
 };
 
 const WORKFLOW_STAGE_COLORS: Record<string, "success" | "outline" | "destructive" | "default" | "warning"> = {
-  scan: "default", brainstorm: "warning",
+  brainstorm: "warning",
   plan: "default", execute: "default",
   verify: "warning", archive: "default",
 };

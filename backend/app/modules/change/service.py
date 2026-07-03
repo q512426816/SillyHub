@@ -652,7 +652,7 @@ class ChangeService:
         change = await self.get(workspace_id, change_id)
         current = change.current_stage
         if not current or current == "draft":
-            current = "scan"
+            current = "brainstorm"
 
         # Validate current stage exists in TRANSITIONS
         current_key = StageEnum(current)  # convert to StageEnum

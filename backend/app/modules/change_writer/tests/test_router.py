@@ -34,6 +34,7 @@ async def _setup_prerequisites(db_session) -> dict:
         repo_url="https://github.com/org/repo.git",
         default_branch="main",
         source_yaml_path="projects/backend.yaml",
+        last_scanned_at=datetime.now(UTC),
     )
     db_session.add(ws)
 

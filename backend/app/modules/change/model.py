@@ -27,10 +27,9 @@ from app.models.base import BaseModel
 
 
 class StageEnum(enum.StrEnum):
-    """统一工作流阶段枚举：SillySpec 6 主阶段。"""
+    """变更流程阶段枚举：5 主阶段（scan 已移除，回归 workspace 初始化）。"""
 
-    # ── SillySpec 主阶段（由 CLI 管理） ──
-    SCAN = "scan"
+    # ── 变更流程主阶段（scan 不在变更流程，由 workspace 初始化承载） ──
     BRAINSTORM = "brainstorm"
     PLAN = "plan"
     EXECUTE = "execute"
@@ -41,7 +40,6 @@ class StageEnum(enum.StrEnum):
     def spec_stages(cls) -> list[StageEnum]:
         """SillySpec 主阶段列表。"""
         return [
-            cls.SCAN,
             cls.BRAINSTORM,
             cls.PLAN,
             cls.EXECUTE,
@@ -82,8 +80,7 @@ class StepStatus(enum.StrEnum):
 
 
 TRANSITIONS: dict[StageEnum, dict[StageEnum, list[str]]] = {
-    # ── SillySpec 主线流程（stage-contract allowedFrom/allowedTo） ──
-    StageEnum.SCAN: {StageEnum.BRAINSTORM: ["agent"]},
+    # ── 变更主线流程（scan 已移除，brainstorm 为入口） ──
     StageEnum.BRAINSTORM: {StageEnum.PLAN: ["agent"]},
     StageEnum.PLAN: {StageEnum.EXECUTE: ["agent"]},
     StageEnum.EXECUTE: {StageEnum.VERIFY: ["agent"]},

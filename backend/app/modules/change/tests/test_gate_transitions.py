@@ -15,7 +15,6 @@ class TestStageEnumAligned:
 
     def test_spec_stages_order(self):
         assert [s.value for s in StageEnum.spec_stages()] == [
-            "scan",
             "brainstorm",
             "plan",
             "execute",
@@ -46,10 +45,9 @@ class TestNewStatusEnums:
 
 
 class TestTransitionsMainline:
-    """TRANSITIONS now only contains the 5 mainline edges from stage-contract."""
+    """TRANSITIONS now only contains the 4 mainline edges (scan removed)."""
 
     def test_mainline(self):
-        assert StageEnum.BRAINSTORM in dict(TRANSITIONS[StageEnum.SCAN])
         assert StageEnum.PLAN in dict(TRANSITIONS[StageEnum.BRAINSTORM])
         assert StageEnum.EXECUTE in dict(TRANSITIONS[StageEnum.PLAN])
         assert StageEnum.VERIFY in dict(TRANSITIONS[StageEnum.EXECUTE])
@@ -63,7 +61,6 @@ class TestTransitionsMainline:
         assert set(TRANSITIONS[StageEnum.VERIFY].keys()) == {StageEnum.ARCHIVE}
 
     def test_can_transition_works(self):
-        assert can_transition(StageEnum.SCAN, StageEnum.BRAINSTORM)
         assert can_transition(StageEnum.BRAINSTORM, StageEnum.PLAN)
         assert not can_transition(StageEnum.BRAINSTORM, StageEnum.EXECUTE)
-        assert not can_transition(StageEnum.SCAN, StageEnum.ARCHIVE)
+        assert not can_transition(StageEnum.BRAINSTORM, StageEnum.ARCHIVE)

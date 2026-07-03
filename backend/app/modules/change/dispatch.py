@@ -30,7 +30,6 @@ log = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 STAGE_ORDER: list[str] = [
-    "scan",
     "brainstorm",
     "plan",
     "execute",
@@ -74,14 +73,6 @@ class StageSyncResult:
 
 
 STAGE_AGENT_CONFIG: dict[str, StageAgentConfig] = {
-    StageEnum.SCAN.value: StageAgentConfig(
-        enabled=True,
-        prompt_template="scan.md",
-        phase="Scan",
-        requires_worktree=False,
-        read_only=False,
-        description="Write scan documents to .sillyspec/docs/.",
-    ),
     StageEnum.BRAINSTORM.value: StageAgentConfig(
         enabled=True,
         prompt_template="brainstorm.md",
