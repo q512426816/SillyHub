@@ -35,7 +35,8 @@ WORKDIR /build
 COPY pyproject.toml README.md ./
 # Lock-less install is acceptable for V1; once we add uv.lock, switch to `uv sync --frozen`.
 RUN uv venv /opt/venv \
- && uv pip install --python /opt/venv/bin/python --no-cache -e .
+ && uv pip install --python /opt/venv/bin/python --no-cache -e . \
+ && uv pip install --python /opt/venv/bin/python --no-cache alembic
 
 COPY . .
 
