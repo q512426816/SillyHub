@@ -26,8 +26,8 @@ import {
 
 interface Props {
   workspaceId: string;
-  /** 当前用户 member binding（binding.daemon_id 作为当前高亮项）。 */
-  currentBinding: MemberBindingView;
+  /** 当前用户 member binding（binding.daemon_id 作为当前高亮项）。null = 未绑定。 */
+  currentBinding: MemberBindingView | null;
   /** 改绑成功后回调（父级 reload workspace + binding）。 */
   onChanged?: () => void;
 }
@@ -80,7 +80,7 @@ export function WorkspaceDaemonSwitcher({
     void load();
   }, [load]);
 
-  const currentDaemonId = (currentBinding as any).daemon_id;
+  const currentDaemonId = (currentBinding as any)?.daemon_id ?? null;
 
   const handleSwitch = useCallback(
     async (di: DaemonInstanceRead) => {
@@ -94,8 +94,8 @@ export function WorkspaceDaemonSwitcher({
       try {
         await upsertMyBinding(workspaceId, {
           daemon_id: di.id,
-          root_path: currentBinding.root_path,
-          path_source: currentBinding.path_source,
+          root_path: currentBinding?.root_path ?? null,
+          path_source: currentBinding?.path_source ?? null,
         } as any);
         setOpen(false);
         onChanged?.();

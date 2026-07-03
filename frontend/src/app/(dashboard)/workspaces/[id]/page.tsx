@@ -496,7 +496,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
           <div className="mt-3 border-t pt-2.5">
             <WorkspaceDaemonSwitcher
               workspaceId={workspaceId}
-              currentBinding={myBinding!}
+              currentBinding={myBinding}
               onChanged={() => void load()}
             />
           </div>
