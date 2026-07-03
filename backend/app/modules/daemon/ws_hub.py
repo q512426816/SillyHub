@@ -13,6 +13,7 @@ from app.core.logging import get_logger
 from app.modules.daemon.protocol import (
     DAEMON_MSG_HEARTBEAT_ACK,
     DAEMON_MSG_PERMISSION_RESPONSE,
+    DAEMON_MSG_POLICY_UPDATE,
     DAEMON_MSG_RPC,
     DAEMON_MSG_SELF_UPDATE,
     DAEMON_MSG_TASK_AVAILABLE,
@@ -334,6 +335,36 @@ class DaemonWsHub:
         if version:
             payload["version"] = version
         message = {"type": DAEMON_MSG_SELF_UPDATE, "payload": payload}
+        return await self.send_to_runtime(daemon_id, message)
+
+    async def send_policy_update(
+        self,
+        daemon_id: uuid.UUID,
+        allowed_roots: list[str],
+        version: int,
+        *,
+        payload_runtime_id: uuid.UUID | None = None,
+    ) -> bool:
+        """Push a filesystem-policy hot-reload downlink to a daemon entity (task-07 / D-004).
+
+        2026-07-03-daemon-entity-binding：allowed_roots 归 daemon_instance，ws_hub 按
+        ``daemon_id`` 路由（design §5.3，单 WS/daemon）。payload 内 ``runtime_id`` 仍
+        标识 provider 会话（daemon 侧 PolicyCache key），由 ``payload_runtime_id`` 注入，
+        缺省回退到 ``daemon_id``（兼容旧 hub-level 测试 / 无 provider 上下文场景）。
+
+        Thin wrapper around ``send_to_runtime`` that assembles the
+        ``daemon:policy_update`` envelope so the caller (policy service) only
+        supplies the new ``allowed_roots`` and monotonic ``version``. Best-effort:
+        returns False when the daemon is offline or the send failed — the daemon
+        reconciles on its next heartbeat via full-resync, so no error is raised.
+        """
+        prid = payload_runtime_id if payload_runtime_id is not None else daemon_id
+        payload = {
+            "runtime_id": str(prid),
+            "allowed_roots": allowed_roots,
+            "version": version,
+        }
+        message = {"type": DAEMON_MSG_POLICY_UPDATE, "payload": payload}
         return await self.send_to_runtime(daemon_id, message)
 
     # ── RPC correlation ──────────────────────────────────────────────────────

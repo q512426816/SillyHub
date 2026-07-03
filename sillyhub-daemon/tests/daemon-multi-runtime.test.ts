@@ -39,9 +39,13 @@ import {
   afterEach,
   vi,
 } from 'vitest';
+import { join, resolve } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { mkdirSync } from 'node:fs';
 import type { DaemonConfig } from '../src/config.js';
 import type { DetectedAgent } from '../src/agent-detector.js';
 import { Daemon } from '../src/daemon.js';
+import { PolicyCache } from '../src/policy/runtime-policy.js';
 import type { WsClientCallbacks } from '../src/ws-client.js';
 
 // ── fixture ──────────────────────────────────────────────────────────────────
@@ -378,5 +382,71 @@ describe('daemon multi-runtime registration (test_daemon_multi_runtime.py)', () 
     // server 分配的 per-provider runtime id 不应作为 WS 身份
     expect(wsRuntimeIds).not.toContain('srv-rt-claude');
     expect(wsRuntimeIds).not.toContain('srv-rt-codex');
+  });
+
+  // 2026-07-03-daemon-entity-binding：allowed_roots 上提到 daemon_instance 级（design §4.2）。
+  // HEAD 心跳路径：单条心跳（daemon_local_id + providers）→ resp.allowed_roots 写到
+  // config.allowed_roots（_syncAllowedRoots 单值，不再 per-runtime PolicyCache）。
+  // per-runtime 隔离语义在新模型下已不存在（一个 daemon 一份 allowed_roots）。
+  it('heartbeat_syncs_allowed_roots_per_daemon: 心跳 resp.allowed_roots 写入 config.allowed_roots（展开 ~/.sillyhub + homedir 兜底）', async () => {
+    const daemonRoot = join(tmpdir(), 'sillyhub-entity-binding-hb');
+    mkdirSync(daemonRoot, { recursive: true });
+
+    const policyCache = new PolicyCache();
+    // 初始 config.allowed_roots（验证心跳会覆盖它，而非保留）
+    const initialAllowedRoots = [homedir()];
+
+    const agents = [
+      makeAgent('claude', { version: '2.0.0' }),
+      makeAgent('codex', { version: '0.100.0' }),
+    ];
+    // HEAD：单条心跳（daemonLocalId, providers）→ 单个 resp，allowed_roots 是 daemon 级单值。
+    // 不再按 rid 分支（heartbeat 入参是 daemonLocalId = config.runtime_id = 'rt-base-001'）。
+    const client: MockClient = {
+      register: vi.fn(async (params: { providers?: { provider: string }[] }) => perDaemonRegisterResp(params)),
+      heartbeat: vi.fn(async () => ({ allowed_roots: [daemonRoot] })),
+      claimLease: vi.fn(async () => ({ claim_token: 'tok', payload: {} })),
+      startLease: vi.fn(async () => ({})),
+      completeLease: vi.fn(async () => ({})),
+      getPendingLeases: vi.fn(async () => []),
+      close: vi.fn(),
+    };
+    const factory = vi.fn(
+      (opts: { runtimeId: string; callbacks: WsClientCallbacks }) => ({
+        connect: vi.fn(() => opts.callbacks.onConnected?.()),
+        close: vi.fn(() => opts.callbacks.onDisconnected?.(1000, 'close')),
+        registerRpcHandler: vi.fn(),
+      }),
+    );
+    const config: DaemonConfig = {
+      ...baseConfig,
+      allowed_roots: initialAllowedRoots,
+      heartbeat_interval: 0.02,
+    };
+    const daemon = new Daemon(config, client as never, null, {
+      detector: { detectAgents: vi.fn(async () => agents) } as never,
+      wsClientFactory: factory as never,
+      policyCache,
+    });
+    daemons.push(daemon);
+
+    await daemon.start();
+    // 等一拍心跳（20ms，确保心跳触发）
+    await new Promise((r) => setTimeout(r, 60));
+    await daemon.stop();
+
+    // 断言 1（HEAD 核心）：心跳 resp.allowed_roots 写入 config.allowed_roots（per-daemon 单值），
+    // 含 daemonRoot + homedir 兜底（_syncAllowedRoots 展开 + normalize）。
+    // 注意：_syncAllowedRoots → normalizeAllowedRoots 用 path.resolve 规范化（非
+    // resolveRealPath 的 realpathSync，后者会小写化 Windows 盘符），故断言也用 resolve 对齐。
+    expect(config.allowed_roots).toContain(resolve(daemonRoot));
+    expect(config.allowed_roots).toContain(homedir());
+    // 心跳确实覆盖了初始值（initialAllowedRoots 仅 [homedir]，现多了 daemonRoot）
+    expect(config.allowed_roots.length).toBeGreaterThanOrEqual(2);
+
+    // 断言 2（HEAD）：心跳路径不再写 PolicyCache（PolicyCache 仅由 WS POLICY_UPDATE 推送填）。
+    // claude/codex 两个 server runtime_id 都无 PolicyCache 条目。
+    expect(policyCache.get('srv-rt-claude')).toBeUndefined();
+    expect(policyCache.get('srv-rt-codex')).toBeUndefined();
   });
 });

@@ -40,10 +40,15 @@ import type {
   UserTurnInput,
 } from './driver.js';
 import { InputQueue } from './input-queue.js';
-import { isWriteWithinAllowedRoots } from './write-guard.js';
 import { PermissionResolver } from './permission-resolver.js';
 import type { PermissionSendFn } from './permission-resolver.js';
 import type { CanUseToolDecision } from './types.js';
+import type { PolicyEngine } from '../policy/filesystem-policy.js';
+import { isPathUnderAnyRoot } from '../policy/path-utils.js';
+import {
+  extractShellWritePaths,
+  type ShellKind,
+} from '../policy/shell-paths.js';
 import type {
   CreateSessionInput,
   InjectResult,
@@ -126,8 +131,40 @@ export interface SessionManagerOptions {
    * 不注入（undefined）= 不启用写拦截（向后兼容，测试默认）。注入空数组也视为
    * 不启用（isWriteWithinAllowedRoots 内 allowedRoots.length===0 直接放行，避免
    * 配置缺失导致全 deny 卡死 chat）。
+   *
+   * **task-14（design §5.2 D-002）**：`policyEngine` 注入后，写校验优先走
+   * `PolicyEngine.canWrite(runtimeId, path, provider, tool)`（按 runtime_id 隔离，
+   * 统一中文 deny 文案 + audit）。`allowedRootsProvider` 仅作 fallback
+   * （policyEngine 未注入时向后兼容，task-15 删 write-guard.ts 后清理）。
    */
   allowedRootsProvider?: () => string[];
+  /**
+   * task-14（design §5.1.3 / §5.2 D-002 D-006）：文件系统权限引擎。
+   *
+   * 注入后，interactive session 的 canUseTool 写守卫（_wrapWithWriteGuard）改调
+   * `policyEngine.canWrite(runtimeId, path, provider, tool)`：按 runtime_id 隔离的
+   * PolicyCache 边界校验 + 统一中文 deny 文案（PolicyDecision.reason）+ audit
+   * （ALLOW/DENY 均记）。runtimeId 由 `runtimeIdProvider(sessionId)` 实时解析。
+   *
+   * 覆盖工具：Write/Edit/MultiEdit（取 file_path/path）+ Bash/PowerShell/CMD
+   * （经 policy/shell-paths 的 extractShellWritePaths 提取写目标路径，逐条 canWrite）。
+   * 读工具 / 提取不到写路径 → 不拦（读自由，交内层 allow/审批）。
+   *
+   * 不注入（undefined/null）= 退化到 allowedRootsProvider fallback（向后兼容，
+   * task-11 装配但未接入 tool 前的过渡态）。task-15 删 write-guard.ts 后此字段
+   * 必填（cli.ts 生产路径已注入）。
+   */
+  policyEngine?: PolicyEngine | null;
+  /**
+   * task-14：按 sessionId 解析归属 runtime_id（PolicyEngine.canWrite 第一参数）。
+   *
+   * daemon 生产路径注入闭包：`daemon._registeredRuntimes.get(state.provider)`
+   * （session 归属 runtime，design §5.2 L175）。session 不存在 / provider 未注册
+   * 运行时 → 闭包返回空串，PolicyEngine.cache 未命中 deny（fail-closed）。
+   *
+   * 测试注入固定 runtimeId 字符串。policyEngine 未注入时此字段无意义（不读）。
+   */
+  runtimeIdProvider?: (provider: string) => string;
 }
 
 /**
@@ -312,8 +349,19 @@ export class SessionManager {
    * 写工具白名单根目录提供者（interactive CC 写拦截，2026-06-29）。
    * 未注入 = 不启用写拦截。注入后所有 session 的 canUseTool 都前置写校验。
    * 见 SessionManagerOptions.allowedRootsProvider 文档。
+   *
+   * **task-14**：policyEngine 注入后此字段仅 fallback 用。
    */
   private readonly _allowedRootsProvider: (() => string[]) | undefined;
+  /**
+   * task-14（design §5.1.3 / §5.2）：PolicyEngine 引用。注入后写守卫改调 canWrite
+   * （按 runtimeId 隔离 + 统一中文文案 + audit）。null/undefined = fallback 旧行为。
+   */
+  private readonly _policyEngine: PolicyEngine | null | undefined;
+  /** task-14：按 sessionId 解析 runtimeId 的闭包（daemon 注入 _registeredRuntimes 查询）。 */
+  private readonly _runtimeIdProvider:
+    | ((sessionId: string) => string)
+    | undefined;
 
   /**
    * D-001@v1（task-02）：provider driver registry。`drivers.claude` / `drivers.codex`
@@ -388,6 +436,10 @@ export class SessionManager {
     // interactive CC 写拦截（2026-06-29）：注入 provider 后所有 session 的 canUseTool
     // 前置写校验（含默认 chat / enableApproval=false）。未注入 = 不启用（向后兼容）。
     this._allowedRootsProvider = opts.allowedRootsProvider;
+    // task-14（design §5.2）：PolicyEngine 注入后写守卫改调 canWrite（按 runtimeId
+    // 隔离 + 统一中文 deny 文案 + audit）。null/undefined = fallback allowedRootsProvider。
+    this._policyEngine = opts.policyEngine ?? null;
+    this._runtimeIdProvider = opts.runtimeIdProvider;
   }
 
   /** task-08：manual_approval 当前是否启用（测试 / daemon 透传用）。 */
@@ -746,11 +798,12 @@ export class SessionManager {
       spec.enableApproval &&
       !!this._permissionResolverFactory &&
       !!this._permissionWsClient;
-    // interactive CC 写拦截（2026-06-29）：注入 allowedRootsProvider 后，无论
+    // interactive CC 写拦截（2026-06-29）+ task-14（design §5.2 PolicyEngine）：
+    // 注入 policyEngine（优先）或 allowedRootsProvider（fallback）后，无论
     // enableApproval true/false，都给 Claude driver 注入 canUseTool（写工具白名单前置
     // 校验）。enableApproval=true 时 canUseTool = 写校验 + 远程人审；false 时
     // canUseTool = 写校验 + 直接 allow。读工具不拦（读自由）。
-    const writeGuardEnabled = !!this._allowedRootsProvider;
+    const writeGuardEnabled = !!this._policyEngine || !!this._allowedRootsProvider;
     if (approvalReady) {
       const resolver = this._permissionResolverFactory!();
       this._resolversBySession.set(state.sessionId, resolver);
@@ -759,7 +812,7 @@ export class SessionManager {
         spec.effectiveAskUserOnly,
       );
       driverOpts.canUseTool = writeGuardEnabled
-        ? this._wrapWithWriteGuard(inner)
+        ? this._wrapWithWriteGuard(state.sessionId, state.provider, inner)
         : inner;
       // onUserDialog 路由（SDK request_user_dialog 路径）：supportedDialogKinds 非空才注入。
       // ⚠️ AskUserQuestion 在 SDK headless 模式实际不走 onUserDialog（经 canUseTool 拦截）；
@@ -802,40 +855,169 @@ export class SessionManager {
       // 读工具 / 其他 allow（读自由）。SDK 不会因 canUseTool 注入而走人审（人审只在
       // approvalReady 分支内经 resolver.register 触发）。
       const inner = this._buildWriteOnlyCanUseToolCallback(state.sessionId);
-      driverOpts.canUseTool = this._wrapWithWriteGuard(inner);
+      driverOpts.canUseTool = this._wrapWithWriteGuard(
+        state.sessionId,
+        state.provider,
+        inner,
+      );
     }
     return driverOpts;
   }
 
   /**
-   * interactive CC 写拦截（2026-06-29）：包装一层写工具白名单前置守卫。
+   * interactive CC 写拦截（2026-06-29）+ task-14（design §5.2 PolicyEngine）：
+   * 包装一层写工具白名单前置守卫。
    *
-   * 调用顺序：先 isWriteWithinAllowedRoots —— 写工具（Write/Edit/MultiEdit）取
-   * file_path/path 校验 allowed_roots，越界直接 deny（message 含 path +
-   * "path outside allowed_roots"）；白名单内 / 非写工具 / 读工具 → 交给内层 callback
-   *（approvalReady=true 走远程人审；false 走直接 allow）。
+   * **task-14 主路径（policyEngine 注入）**：
+   *   - 写工具（Write/Edit/MultiEdit）：取 file_path/path，调
+   *     `policyEngine.canWrite(runtimeId, path, provider, toolName)`；
+   *   - Shell 工具（Bash/PowerShell/CMD）：经 policy/shell-paths 的
+   *     `extractShellWritePaths(command, shell)` 提取写目标路径，逐条 canWrite，
+   *     任一 deny 即拒绝（reason 取首个 deny）；
+   *   - deny → 返回 decision.reason（PolicyEngine 统一中文文案，含 provider/路径/原因）；
+   *   - allow / 非写工具 / 提取不到写路径 → 交内层 callback（approvalReady=true 走
+   *     远程人审；false 走直接 allow）。
    *
-   * provider 返回空数组 = 视为未启用（直接转内层，不拦）——避免配置缺失导致全 deny。
+   * **fallback 路径（policyEngine 未注入，向后兼容 / 测试）**：复用旧
+   * `allowedRootsProvider + isWriteWithinAllowedRoots` 语义。task-15 删 write-guard.ts
+   * 时清理（届时 cli.ts 生产路径必注入 policyEngine）。
    *
-   * @param inner 内层 canUseTool（写校验通过后调用的真实审批 / allow 逻辑）。
+   * @param sessionId  当前 session（runtimeIdProvider 闭包查询用）。
+   * @param provider   session 归属 provider（透传 PolicyEngine.canWrite 第三参数）。
+   * @param inner      内层 canUseTool（写校验通过后调用的真实审批 / allow 逻辑）。
    */
-  private _wrapWithWriteGuard(inner: CanUseTool): CanUseTool {
+  private _wrapWithWriteGuard(
+    sessionId: string,
+    provider: 'claude' | 'codex',
+    inner: CanUseTool,
+  ): CanUseTool {
     return async (
       toolName: string,
       toolInput: Record<string, unknown>,
       options: Parameters<CanUseTool>[2],
     ): ReturnType<CanUseTool> => {
+      // task-14 主路径：policyEngine 注入 → 走 canWrite（按 runtimeId 隔离 + 中文文案 + audit）。
+      if (this._policyEngine) {
+        const deny = this._judgeWriteViaPolicyEngine(
+          sessionId,
+          provider,
+          toolName,
+          toolInput,
+        );
+        if (deny) {
+          return { behavior: 'deny', message: deny };
+        }
+        return inner(toolName, toolInput, options);
+      }
+      // fallback（policyEngine 未注入，向后兼容 / 测试）：复用与主路径相同的路径提取
+      // （policy/shell-paths）+ isPathUnderAnyRoot 边界校验（迁移自 write-guard.ts，
+      // task-15 删 write-guard.ts）。allowedRootsProvider 空数组 → 视为未启用放行。
       const roots = this._allowedRootsProvider?.() ?? [];
-      if (roots.length > 0 && !isWriteWithinAllowedRoots(toolName, toolInput, roots)) {
-        // 取目标路径放进 message，便于 Claude 自行诊断 / 回退。
-        const target = toolInput['file_path'] ?? toolInput['path'];
-        return {
-          behavior: 'deny',
-          message: `path outside allowed_roots${target ? `: ${String(target)}` : ''}`,
-        };
+      if (roots.length > 0) {
+        const writePaths = this._extractWritePathsForTool(toolName, toolInput);
+        const outside = writePaths.find((p) => !isPathUnderAnyRoot(p, roots));
+        if (outside !== undefined) {
+          return {
+            behavior: 'deny',
+            message: `path outside allowed_roots: ${outside}`,
+          };
+        }
       }
       return inner(toolName, toolInput, options);
     };
+  }
+
+  /**
+   * task-14（design §5.1.3 / §5.2）：经 PolicyEngine 校验一次工具调用的写路径。
+   *
+   * 提取写目标路径（Write/Edit/MultiEdit 取 file_path/path；Bash/PowerShell/CMD
+   * 经 extractShellWritePaths），逐条 `canWrite(runtimeId, path, provider, tool)`。
+   * 任一 deny 即返回首个 deny 的 reason（统一中文文案）；全 allow / 无写路径返回 null。
+   *
+   * runtimeId 由 runtimeIdProvider 闭包解析（daemon._registeredRuntimes.get(provider)）；
+   * 解析为空串时 PolicyCache 未命中 → fail-closed deny（design D-007）。
+   *
+   * @returns deny 的 reason 字符串；null = 放行（交内层）。
+   */
+  private _judgeWriteViaPolicyEngine(
+    sessionId: string,
+    provider: 'claude' | 'codex',
+    toolName: string,
+    toolInput: Record<string, unknown>,
+  ): string | null {
+    const engine = this._policyEngine;
+    if (!engine) return null;
+
+    // 提取写目标路径。
+    const writePaths = this._extractWritePathsForTool(toolName, toolInput);
+    if (writePaths.length === 0) return null; // 非写工具 / 提取不到 → 放行
+
+    const runtimeId = this._runtimeIdProvider?.(provider) ?? '';
+    const tool = toolName; // PolicyEngine audit 字段（Write/Edit/Bash/...）。
+    for (const p of writePaths) {
+      const decision = engine.canWrite(runtimeId, p, provider, tool);
+      if (!decision.allowed) {
+        // 取首个 deny 的 reason（PolicyEngine 已组装中文文案）。
+        return decision.reason;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * task-14：从工具入参提取写目标路径。
+   *
+   *   - Write/Edit/MultiEdit：取 file_path / path；
+   *   - Bash：extractShellWritePaths(command, 'bash')；
+   *   - PowerShell：extractShellWritePaths(command, 'powershell')；
+   *   - CMD：extractShellWritePaths(command, 'cmd')；
+   *   - 其余工具 → []（读自由，不拦）。
+   */
+  private _extractWritePathsForTool(
+    toolName: string,
+    toolInput: Record<string, unknown>,
+  ): string[] {
+    // 显式写文件工具（Write/Edit/MultiEdit）
+    if (toolName === 'Write' || toolName === 'Edit' || toolName === 'MultiEdit') {
+      const fp = toolInput['file_path'];
+      if (typeof fp === 'string' && fp.length > 0) return [fp];
+      const p = toolInput['path'];
+      if (typeof p === 'string' && p.length > 0) return [p];
+      return [];
+    }
+    // Shell 间接写（Bash/PowerShell/CMD）
+    // 注意：claude 只暴露 Bash tool（无独立 PowerShell/CMD tool），agent 常用
+    // Bash tool 跑跨 shell 命令（如 `powershell -Command "Set-Content ..."`、
+    // `cmd /c mkdir ...`）。若仅按 toolName 选 bash 提取，会漏 PowerShell cmdlet
+    // 与 CMD 命令的写路径（真机回归 ql-20260703-001 发现 Set-Content 绕过）。
+    // 因此对 shell 工具合并 bash + powershell + cmd 三种提取取并集（正则各自
+    // 精确，PowerShell cmdlet 名不会误匹配 bash/cmd 命令，反之亦然，安全）。
+    const shell = this._shellKindOfTool(toolName);
+    if (shell) {
+      const command = toolInput['command'];
+      if (typeof command !== 'string' || command.length === 0) return [];
+      const all = [
+        ...extractShellWritePaths(command, 'bash'),
+        ...extractShellWritePaths(command, 'powershell'),
+        ...extractShellWritePaths(command, 'cmd'),
+      ];
+      return [...new Set(all)];
+    }
+    return [];
+  }
+
+  /** task-14：工具名 → ShellKind（非 shell 工具返回 undefined）。 */
+  private _shellKindOfTool(toolName: string): ShellKind | undefined {
+    switch (toolName) {
+      case 'Bash':
+        return 'bash';
+      case 'PowerShell':
+        return 'powershell';
+      case 'CMD':
+        return 'cmd';
+      default:
+        return undefined;
+    }
   }
 
   /**

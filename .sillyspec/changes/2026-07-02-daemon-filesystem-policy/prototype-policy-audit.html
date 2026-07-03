@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Policy Audit Log 审计页 - 线框原型</title>
+<!--
+  author: WhaleFall
+  created_at: 2026-07-02 14:55:00
+  变更: 2026-07-02-daemon-filesystem-policy
+  用途: Filesystem Policy Engine 审计页 UI 线框，供用户确认交互方向
+  说明: 纯线框/ASCII 风格，不实现真实功能；仅展示布局与交互流程
+-->
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Cascadia Mono", "Consolas", "Microsoft YaHei", monospace;
+    background: #f5f5f5;
+    color: #222;
+    padding: 24px;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .meta { color: #888; font-size: 12px; margin-bottom: 20px; }
+  .card {
+    background: #fff;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+  }
+  .card h2 { font-size: 14px; margin-bottom: 12px; border-left: 3px solid #1677ff; padding-left: 8px; }
+  .filter-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
+  .field select, .field input {
+    padding: 5px 8px; border: 1px solid #d9d9d9; border-radius: 3px;
+    font-family: inherit; font-size: 13px; min-width: 160px;
+  }
+  .btn { padding: 5px 14px; border: 1px solid #1677ff; background: #1677ff; color: #fff; border-radius: 3px; cursor: pointer; font-size: 13px; }
+  .btn.ghost { background: #fff; color: #1677ff; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #f0f0f0; }
+  th { background: #fafafa; color: #666; font-weight: 600; font-size: 12px; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 2px; font-size: 12px; }
+  .tag.allow { background: #f6ffed; color: #389e0d; border: 1px solid #b7eb8f; }
+  .tag.deny { background: #fff2f0; color: #cf1322; border: 1px solid #ffccc7; }
+  .provider { display: inline-block; padding: 0 6px; background: #f0f5ff; color: #2f54eb; border-radius: 2px; font-size: 12px; }
+  .path { color: #555; word-break: break-all; }
+  .reason { color: #cf1322; font-size: 12px; }
+  .stats { display: flex; gap: 24px; margin-bottom: 12px; font-size: 13px; }
+  .stat .num { font-size: 22px; font-weight: 600; }
+  .stat.allow .num { color: #389e0d; }
+  .stat.deny .num { color: #cf1322; }
+  .stat .label { color: #888; font-size: 12px; }
+  .ascii { background: #1e1e1e; color: #d4d4d4; padding: 14px; border-radius: 4px; font-size: 12px; white-space: pre; overflow-x: auto; margin-top: 12px; }
+  .note { background: #fffbe6; border: 1px solid #ffe58f; padding: 10px 14px; border-radius: 3px; font-size: 12px; color: #614700; margin-top: 12px; }
+  .pager { margin-top: 12px; text-align: right; color: #888; font-size: 12px; }
+  details summary { cursor: pointer; color: #1677ff; font-size: 13px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Policy Audit Log 审计页 — 线框原型</h1>
+  <div class="meta">变更 2026-07-02-daemon-filesystem-policy · 给平台用户查看 Filesystem Policy 的 ALLOW/DENY 决策记录</div>
+
+  <!-- 入口：从 runtime 详情页进入 -->
+  <div class="card">
+    <h2>入口与位置</h2>
+    <div class="note">
+      ▸ 入口：Runtime 列表页 → 点某个 runtime 卡片 → 「审计日志」Tab（与「可写目录」同级）<br>
+      ▸ 路由：<code>/runtimes/[id]/audit</code>　▸ 数据源：<code>GET /workspaces/&#123;wid&#125;/runtimes/&#123;rid&#125;/audit</code>
+    </div>
+  </div>
+
+  <!-- 统计概览 -->
+  <div class="card">
+    <h2>统计概览（顶部）</h2>
+    <div class="stats">
+      <div class="stat allow"><div class="num">1,284</div><div class="label">放行 ALLOW（近 24h）</div></div>
+      <div class="stat deny"><div class="num">17</div><div class="label">拒绝 DENY（近 24h）</div></div>
+      <div class="stat"><div class="num">5</div><div class="label">涉及 Agent 种类</div></div>
+      <div class="stat"><div class="num">~15s</div><div class="label">最新一条距今</div></div>
+    </div>
+    <div class="note">ALLOW+DENY 全量记录（D-006）。DENY 数突出显示，便于快速发现越界尝试。</div>
+  </div>
+
+  <!-- 筛选区 -->
+  <div class="card">
+    <h2>筛选区</h2>
+    <div class="filter-row">
+      <div class="field">
+        <label>决策</label>
+        <select><option>全部</option><option>ALLOW</option><option>DENY</option></select>
+      </div>
+      <div class="field">
+        <label>Agent 种类 (provider)</label>
+        <select><option>全部</option><option>claude</option><option>codex</option><option>gemini</option></select>
+      </div>
+      <div class="field">
+        <label>Tool</label>
+        <select><option>全部</option><option>Write</option><option>Edit</option><option>Bash</option><option>PowerShell</option><option>CMD</option></select>
+      </div>
+      <div class="field">
+        <label>路径包含</label>
+        <input type="text" placeholder="如 E:\Temp">
+      </div>
+      <div class="field">
+        <label>时间范围</label>
+        <select><option>近 1 小时</option><option>近 24 小时</option><option>近 7 天</option><option>自定义</option></select>
+      </div>
+      <button class="btn">查询</button>
+      <button class="btn ghost">导出 CSV</button>
+    </div>
+  </div>
+
+  <!-- 列表 -->
+  <div class="card">
+    <h2>审计记录列表</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>时间</th>
+          <th>决策</th>
+          <th>Agent</th>
+          <th>Tool</th>
+          <th>目标路径</th>
+          <th>原因 / 拒绝理由</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>2026-07-02 14:52:31</td>
+          <td><span class="tag deny">DENY</span></td>
+          <td><span class="provider">claude</span></td>
+          <td>Write</td>
+          <td class="path">E:\Temp\a.txt</td>
+          <td class="reason">目标目录未配置为可写目录</td>
+        </tr>
+        <tr>
+          <td>2026-07-02 14:52:10</td>
+          <td><span class="tag deny">DENY</span></td>
+          <td><span class="provider">claude</span></td>
+          <td>Bash</td>
+          <td class="path">echo test &gt; E:\a.txt</td>
+          <td class="reason">重定向目标 E:\ 越界</td>
+        </tr>
+        <tr>
+          <td>2026-07-02 14:51:48</td>
+          <td><span class="tag deny">DENY</span></td>
+          <td><span class="provider">claude</span></td>
+          <td>PowerShell</td>
+          <td class="path">Set-Content E:\a.txt</td>
+          <td class="reason">Set-Content 目标 E:\ 越界</td>
+        </tr>
+        <tr>
+          <td>2026-07-02 14:51:22</td>
+          <td><span class="tag deny">DENY</span></td>
+          <td><span class="provider">codex</span></td>
+          <td>Write</td>
+          <td class="path">C:\Windows\system32\cfg.bat</td>
+          <td class="reason">目标目录未配置为可写目录</td>
+        </tr>
+        <tr>
+          <td>2026-07-02 14:50:59</td>
+          <td><span class="tag allow">ALLOW</span></td>
+          <td><span class="provider">claude</span></td>
+          <td>Write</td>
+          <td class="path">D:\Projects\a.ts</td>
+          <td class="reason" style="color:#888">—</td>
+        </tr>
+        <tr>
+          <td>2026-07-02 14:50:31</td>
+          <td><span class="tag allow">ALLOW</span></td>
+          <td><span class="provider">claude</span></td>
+          <td>Edit</td>
+          <td class="path">F:\WorkNew\SillyHub\src\index.ts</td>
+          <td class="reason" style="color:#888">—</td>
+        </tr>
+        <tr>
+          <td>2026-07-02 14:50:05</td>
+          <td><span class="tag deny">DENY</span></td>
+          <td><span class="provider">claude</span></td>
+          <td>Bash</td>
+          <td class="path">mkdir E:\abc</td>
+          <td class="reason">mkdir 目标 E:\ 越界</td>
+        </tr>
+        <tr>
+          <td>2026-07-02 14:49:40</td>
+          <td><span class="tag allow">ALLOW</span></td>
+          <td><span class="provider">codex</span></td>
+          <td>Bash</td>
+          <td class="path">cp src.ts D:\Projects\dst.ts</td>
+          <td class="reason" style="color:#888">—</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="pager">共 1,301 条 · 第 1 / 87 页 · ‹ 上一页 1 2 3 … 87 下一页 ›</div>
+  </div>
+
+  <!-- 交互流程 -->
+  <div class="card">
+    <h2>交互流程</h2>
+    <div class="ascii">┌──────────────────────────────────────────────────────────────────┐
+│  Runtime 列表页                                                   │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                │
+│  │ claude      │  │ codex       │  │ gemini      │                │
+│  │ ● online    │  │ ● online    │  │ ○ offline   │                │
+│  │ [可写目录]  │  │ [可写目录]  │  │ [可写目录]  │                │
+│  │ [审计日志]← │  │ [审计日志]  │  │ [审计日志]  │                │
+│  └─────────────┘  └─────────────┘  └─────────────┘                │
+└──────────┬───────────────────────────────────────────────────────┘
+           │ 点 [审计日志]
+           ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  /runtimes/[id]/audit  审计页（本原型）                           │
+│  [统计概览] [筛选: 决策/Agent/Tool/路径/时间]                     │
+│  [ALLOW/DENY 记录列表]  → 点行展开详情                            │
+└──────────────────────────────────────────────────────────────────┘</div>
+  </div>
+
+  <div class="card">
+    <h2>统一错误提示预览（D-001 配套，daemon deny 时返回 agent）</h2>
+    <div class="ascii">Runtime Policy 拒绝本次写入。
+
+  Agent：claude
+  目标路径：E:\Temp\a.txt
+  原因：目标目录未配置为可写目录。</div>
+    <div class="note">替换现有 <code>path outside allowed_roots: &lt;path&gt;</code>，统一中文文案。</div>
+  </div>
+
+  <details>
+    <summary>设计要点回顾（展开）</summary>
+    <div class="note" style="margin-top:8px">
+      • ALLOW+DENY 全量记录（D-006），backend 落 PolicyAuditLog 表，daemon 批量上报 + 限流<br>
+      • 按 runtime 隔离（D-002）：审计页进入即绑定某 runtime，只看该 runtime 的记录<br>
+      • 「Agent 种类」= provider（claude/codex/...），项目无独立 Agent 实体<br>
+      • 路径规范化含 realpath（D-005），展示规范化后的路径<br>
+      • Python/Node 脚本内部 open() 不出现在此页（D-001 降级，靠 prompt + 无法 audit 孙进程）
+    </div>
+  </details>
+
+</div>
+</body>
+</html>

@@ -144,6 +144,127 @@ describe('WsClient — 连接生命周期', () => {
     expect(c.isConnected).toBe(true); // 仍连接
     c.close();
   });
+
+  // task-13（2026-07-02-daemon-filesystem-policy / D-004）：POLICY_UPDATE 推送
+  // → onPolicyUpdate 回调触发，参数正确；不进 onMessage。
+  it('收到 daemon:policy_update → onPolicyUpdate(rid, roots, version) 触发，不进 onMessage', async () => {
+    const onMessage = vi.fn();
+    const onPolicyUpdate = vi.fn();
+    const c = new WsClient({
+      serverUrl: mock.url.replace('ws://', 'http://'),
+      runtimeId: 'r1',
+      callbacks: { onMessage, onPolicyUpdate },
+    });
+    c.connect();
+    await vi.waitFor(() => expect(c.isConnected).toBe(true));
+    mock.conns[0]?.send(
+      JSON.stringify({
+        type: 'daemon:policy_update',
+        payload: {
+          runtime_id: 'srv-rt-claude',
+          allowed_roots: ['/a', '/b'],
+          version: 5,
+        },
+      }),
+    );
+    await vi.waitFor(() => expect(onPolicyUpdate).toHaveBeenCalledTimes(1));
+    expect(onPolicyUpdate).toHaveBeenCalledWith('srv-rt-claude', ['/a', '/b'], 5);
+    // 不污染 lease 消息分发
+    expect(onMessage).not.toHaveBeenCalled();
+    c.close();
+  });
+
+  // task-13：payload 字段缺失 / 类型错 → 不崩、不回调（经 onError warn）。
+  it('policy_update 缺 runtime_id → 不调 onPolicyUpdate、调 onError', async () => {
+    const onPolicyUpdate = vi.fn();
+    const onError = vi.fn();
+    const c = new WsClient({
+      serverUrl: mock.url.replace('ws://', 'http://'),
+      runtimeId: 'r1',
+      callbacks: { onPolicyUpdate, onError },
+    });
+    c.connect();
+    await vi.waitFor(() => expect(c.isConnected).toBe(true));
+    mock.conns[0]?.send(
+      JSON.stringify({
+        type: 'daemon:policy_update',
+        payload: { allowed_roots: ['/a'], version: 1 },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    expect(onPolicyUpdate).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(c.isConnected).toBe(true);
+    c.close();
+  });
+
+  it('policy_update allowed_roots 非数组 → 不调 onPolicyUpdate', async () => {
+    const onPolicyUpdate = vi.fn();
+    const onError = vi.fn();
+    const c = new WsClient({
+      serverUrl: mock.url.replace('ws://', 'http://'),
+      runtimeId: 'r1',
+      callbacks: { onPolicyUpdate, onError },
+    });
+    c.connect();
+    await vi.waitFor(() => expect(c.isConnected).toBe(true));
+    mock.conns[0]?.send(
+      JSON.stringify({
+        type: 'daemon:policy_update',
+        payload: { runtime_id: 'r1', allowed_roots: 'not-array', version: 1 },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    expect(onPolicyUpdate).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    c.close();
+  });
+
+  it('policy_update allowed_roots 含非字符串元素 → 过滤后回调', async () => {
+    const onPolicyUpdate = vi.fn();
+    const c = new WsClient({
+      serverUrl: mock.url.replace('ws://', 'http://'),
+      runtimeId: 'r1',
+      callbacks: { onPolicyUpdate },
+    });
+    c.connect();
+    await vi.waitFor(() => expect(c.isConnected).toBe(true));
+    mock.conns[0]?.send(
+      JSON.stringify({
+        type: 'daemon:policy_update',
+        payload: {
+          runtime_id: 'r1',
+          allowed_roots: ['/a', 123, '/b', null, { x: 1 }],
+          version: 2,
+        },
+      }),
+    );
+    await vi.waitFor(() => expect(onPolicyUpdate).toHaveBeenCalledTimes(1));
+    expect(onPolicyUpdate).toHaveBeenCalledWith('r1', ['/a', '/b'], 2);
+    c.close();
+  });
+
+  it('policy_update version 非数字 → 不调 onPolicyUpdate', async () => {
+    const onPolicyUpdate = vi.fn();
+    const onError = vi.fn();
+    const c = new WsClient({
+      serverUrl: mock.url.replace('ws://', 'http://'),
+      runtimeId: 'r1',
+      callbacks: { onPolicyUpdate, onError },
+    });
+    c.connect();
+    await vi.waitFor(() => expect(c.isConnected).toBe(true));
+    mock.conns[0]?.send(
+      JSON.stringify({
+        type: 'daemon:policy_update',
+        payload: { runtime_id: 'r1', allowed_roots: ['/a'], version: 'oops' },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    expect(onPolicyUpdate).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    c.close();
+  });
 });
 
 describe('WsClient — 5s 重连退避（FR-03）', () => {

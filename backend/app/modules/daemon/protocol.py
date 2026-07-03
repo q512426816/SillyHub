@@ -49,6 +49,11 @@ DAEMON_MSG_PERMISSION_REQUEST = "daemon:permission_request"  # Daemon → Server
 DAEMON_MSG_PERMISSION_RESPONSE = "daemon:permission_response"  # Server → Daemon, FR-07 / D-007
 DAEMON_MSG_SELF_UPDATE = "daemon:self_update"  # Server → Daemon, 推送 daemon 自更新指令
 
+# task-06 / D-004: policy 热更新 WS push（Server → Daemon）。
+# backend 在 admin 改 allowed_roots 后立即推送，daemon 收到后用 version 去重
+# （收旧 version 忽略 R-07），实现 sub-second 生效；心跳响应仍带 allowed_roots 兜底。
+DAEMON_MSG_POLICY_UPDATE = "daemon:policy_update"  # Server → Daemon, D-004
+
 
 # ── Message envelope ────────────────────────────────────────────────────────
 
@@ -227,3 +232,20 @@ WS_HANDSHAKE_QUERY_PARAM = "daemon_local_id"
 # message to the correct SessionManager / task-runner. Only the *connection
 # routing key* changed from runtime_id → daemon_instance_id (ws_hub); payloads
 # keep runtime_id.
+
+# ── Policy hot-reload (task-06 / D-004) ──────────────────────────────────────
+# 对齐 design.md §7.2 + sillyhub-daemon RuntimePolicy.version（单调递增）。
+
+
+class PolicyUpdatePayload(BaseModel):
+    """POLICY_UPDATE payload (Server → Daemon, D-004).
+
+    backend 在 admin 修改某 runtime 的 allowed_roots 后立即 WS push，daemon
+    PolicyCache 按 runtime_id 全量替换并去并集；version 单调递增，daemon 收到
+    旧 version 时忽略（R-07 重连丢消息兜底靠心跳 15s reloadAll）。旧 daemon
+    不监听此消息 → 忽略，靠心跳同步（向后兼容）。
+    """
+
+    runtime_id: uuid.UUID
+    allowed_roots: list[str]
+    version: int  # 单调递增；对齐 RuntimePolicy.version，daemon 侧去重

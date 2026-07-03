@@ -217,3 +217,30 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 根因：write-guard extractBashWritePaths 提取重定向目标 /e/test.txt 后直接 pathResolve。Node pathResolve 是 Windows 语义，不认 git bash 的 /e/→E:\ 盘符映射，把 /e/test.txt resolve 成 daemon cwd 盘符下路径 F:\e\test.txt，恰好落在盘根 allowed_root F:/ 内 → 误判 allow；而 git bash 实际写 E:\test.txt 越界。node 实测 resolve('/e/test.txt')=F:\e\test.txt, inRoot(F:/)=true。daemon 跑 npm dist（已含 ql-006 Bash 检测），非版本问题，是路径解析语义漏洞。
 方案：write-guard 加 normalizeBashWritePath——strip 外层引号 + Windows(sep==='\\')下 git bash /x/... 归一化为 X:/...(pathResolve 转 X:\...)，Linux 不动(真 Unix 路径)。extractBashWritePaths 返回前对每个路径 map 归一化。类型修正：正则捕获组 m[0]/m[1] 在 noUncheckedIndexedAccess 下 string|undefined，提 const+守卫。
 结果：vitest 28 passed 1 skipped(+6 git bash 用例：echo>/e/ deny、echo>/f/白名单内 allow、echo>/d/ D盘根 allow、带引号 deny、cp /e/ deny、mkdir /e/ deny，Windows 平台)。pnpm build(tsc)通过 dist 含 normalizeBashWritePath。pnpm bundle BUILD_ID 878e4c6e-20260702142817。daemon 跑 npm dist 需 pnpm build 已就位；backend rebuild 后容器分发 bundle 为新代码；本机 daemon 需重启加载新 dist。
+
+## ql-20260703-001-7e3a | 2026-07-03 14:15:00 | session-manager Bash tool 跨 shell 提取遗漏（PowerShell Set-Content 绕过 PolicyEngine）
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/src/interactive/session-manager.ts + sillyhub-daemon/tests/interactive/session-manager-allowed-roots.test.ts
+需求：e2e 回归步骤 4（design §13 #6 PowerShell）：claude Bash tool 跑 `powershell -Command "Set-Content E:/a.txt"` 越界写成功绕过（Write 工具/bash 重定向/cmd mkdir 都拦了，唯 PowerShell 漏），E:/a.txt 真实落盘。
+根因：claude 只暴露 Bash tool（无独立 PowerShell/CMD tool），`_shellKindOfTool('Bash')`→`'bash'`，`extractShellWritePaths(command,'bash')`→`extractBashWritePaths` 不识别 PowerShell cmdlet（Set-Content/Add-Content/Out-File/Copy-Item 等），写路径未提取→canWrite 未调→绕过。bash 重定向/mkdir 恰被 bash 提取覆盖所以拦了，PowerShell cmdlet 名 bash 正则不匹配所以漏。
+方案：`_extractWritePathsForTool` shell 分支合并 bash+powershell+cmd 三种提取取并集（`[...new Set(...)]` 去重）。正则各自精确（PowerShell cmdlet 名不匹配 bash/cmd 命令，反之亦然），合并安全无误提取。
+结果：已完成。修复 _extractWritePathsForTool shell 分支合并 bash+powershell+cmd 三提取取并集（[...new Set(...)] 去重）。typecheck 零错。session-manager-allowed-roots 20 passed（17 原 + 3 新跨 shell：Bash tool 跑 powershell Set-Content -Path / 位置参数 / pwsh Out-File 越界全 deny）。shell-paths 30 passed 无回归。修复前 Bash tool 跑 powershell cmdlet 越界写绕过（真机 E:/a.txt 落盘），修复后拦截。待 commit+bundle+部署后 daemon 真机复测。
+
+## ql-20260703-002-c2d4 | 2026-07-03 14:57:00 | runtimeIdProvider 用 config.runtime_id（非注册 runtime）致 PolicyCache 永久 miss，配 allowed_roots 后 interactive session 仍 deny
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/src/daemon.ts + sillyhub-daemon/src/interactive/session-manager.ts + sillyhub-daemon/src/cli.ts
+需求：真机 e2e：在【守护进程运行时】页面给 Claude Code 配 E:/ 为可写目录，resume 上次对话（claude --resume 49ef9eac / 系统 session bf2a461a）后仍 deny 写 E 盘。
+根因：cli.ts:609 `runtimeIdProvider: () => config.runtime_id`（config 4f24728c），但 daemon 注册的 claude runtime 是 462d0e85（`_registeredRuntimes`，心跳 _syncAllowedRoots 按 462d0e85 存 PolicyCache）。session-manager canWrite(4f24728c, path) → PolicyCache.get(4f24728c)=undefined → fail-closed deny（无论配没配 E:/ 都 deny）。session-manager:937 注释本就写"runtimeIdProvider 闭包解析 daemon._registeredRuntimes.get(provider)"但实现没这么做（task-14 遗留 E2E-3）。
+方案：daemon.ts 加 public `resolveRuntimeId(provider)`；session-manager runtimeIdProvider 签名改 `(provider: string) => string`，_judgeWriteViaPolicyEngine 传 provider；cli.ts runtimeIdProvider 改 `(provider) => daemon?.resolveRuntimeId(provider) ?? ''`。
+结果：已完成。daemon.ts 加 public `resolveRuntimeId(provider)`；session-manager runtimeIdProvider 签名 `(sessionId)=>string` 改 `(provider)=>string`，_judgeWriteViaPolicyEngine 传 provider；cli.ts runtimeIdProvider 改 `(provider) => daemon?.resolveRuntimeId(provider) ?? ''`。typecheck 零错。session-manager-allowed-roots 20 passed 无回归。daemon-multi-runtime 8 errors 是 preflight.ts:208 process.exit 在 vitest 触发（git stash 确认非本次引起，423359c6 既有问题，独立）。待 commit+bundle+部署后真机复测（配 E:/ → resume → 应可写）。
+=== ql-003 记录追加 ===
+## ql-20260703-003-f9d7 | 2026-07-03 15:30:00 | 审计页强制 wid 致「未提供 workspace 来源」——后端加免 wid 路由 + 前端适配
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/audit/router.py + frontend/src/lib/daemon-audit.ts + frontend/src/app/(dashboard)/runtimes/[id]/audit/page.tsx + page.test.tsx
+需求：步骤 5 审计页显示「未提供 workspace 来源（URL 需带 ?wid=）」。task-20 遗留（E2E-2）：GET 端点强制 workspace_id path 段，但 DaemonRuntime 无 workspace_id（audit workspace_id daemon best-effort 可空），真正语义按 runtime_id 查。
+根因：task-10 GET /workspaces/{wid}/runtimes/{rid}/policy-audit 强制 wid（UUID path 段）。task-21 入口 /runtimes/{id}/audit 不带 wid → 前端显示无 wid 提示，无法查审计。
+方案：后端 audit/router.py 加 GET /runtimes/{runtime_id}/policy-audit（service.query(workspace_id=None) 跳过 workspace 过滤）。前端 daemon-audit.ts 加 fetchPolicyAuditByRuntime + usePolicyAuditByRuntime；audit/page.tsx 改用新 hook，删 workspaceId 依赖 + wid 提示。
+结果：已完成。backend ruff All checks passed + frontend 22 passed（daemon-audit 17 + page 5）+ lint ok。待 commit+bundle+backend rebuild 后生效。

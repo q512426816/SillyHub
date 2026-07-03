@@ -33,6 +33,7 @@ import { RuntimeSessionDialog } from "@/components/daemon/runtime-session-dialog
 import { RuntimeUsageLineChart } from "@/components/charts"; // task-13 桶导出(dynamic ssr:false),非原始组件
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import Link from "next/link";
 import { ApiError } from "@/lib/api";
 import {
   deleteDaemonRuntime,
@@ -754,6 +755,15 @@ function RuntimeCard({
             可写目录
           </Button>
         ) : null}
+        {/* task-21：审计日志入口，所有可访问 runtime 的用户可见（平台用户功能）。
+            跳转 /runtimes/{id}/audit（task-20 路由）。与「可写目录」同级，风格一致。 */}
+        <Link
+          href={`/runtimes/${runtime.id}/audit`}
+          className="inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-input bg-background px-2 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+          title="查看该运行时的审计日志"
+        >
+          审计日志
+        </Link>
         {canOpenSession && (
           <Button
             size="sm"

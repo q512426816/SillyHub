@@ -343,4 +343,14 @@ describe("RuntimesPage（弹窗化后，task-04/05）", () => {
     await waitFor(() => expect(nav.replace).toHaveBeenCalled());
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
+
+  // task-21：runtime 卡片渲染「审计日志」入口，href 指向 /runtimes/{id}/audit。
+  // 蓝图：与「可写目录」同级，所有可访问 runtime 的用户可见（不限 admin）。
+  it("task-21：runtime 卡片渲染「审计日志」入口，href 指向 /runtimes/{id}/audit", async () => {
+    daemon.listDaemonRuntimes.mockResolvedValue([makeRuntime({ id: "rt-audit" })]);
+    renderPage(<RuntimesPage />);
+    const auditLink = await screen.findByRole("link", { name: "审计日志" });
+    expect(auditLink).toBeInTheDocument();
+    expect(auditLink).toHaveAttribute("href", "/runtimes/rt-audit/audit");
+  });
 });

@@ -2,8 +2,11 @@
  * `list_dir` RPC handler —— daemon 端文件 RPC 业务层（task-05 / FR-03 / FR-04）。
  *
  * 实现 design §5 Phase 2 的 daemon 端目录列举：
- *   1. allowed_roots 白名单校验（D-002@v1）：path 必须 resolve 后落在某个 root 之下
- *      （含等于 root 本身），越界抛 `RpcError('forbidden')`。
+ *   1. 权限校验改调 `PolicyEngine.canRead(runtimeId, path)`（design §5.2 / task-18）：
+ *      读操作默认全 allow、**不产 audit**（D-008 仅审计写类）。读自由语义不变，
+ *      仅把数据源从「全局 config.allowed_roots」换成「per-runtime PolicyEngine」，
+ *      并透传 runtimeId 供后续写类隔离裁决。policyEngine 为 null 时 fallback
+ *      到旧的 `assertWithinAllowedRoots`（向后兼容，cli 未注入引擎的边界场景）。
  *   2. 目标必须存在且是目录：lstat 判定本体，避免 symlink 误穿透；不存在/非目录抛 `not_found`。
  *   3. readdir + 逐项 stat（follow symlink）：返回 `{ entries: [{ name, type }] }`。
  *
@@ -25,6 +28,7 @@
 import { readdir, stat, lstat } from 'node:fs/promises';
 import { resolve as pathResolve, sep } from 'node:path';
 import { RpcError } from './ws-client.js';
+import type { PolicyEngine } from './policy/filesystem-policy.js';
 
 // ── 类型定义（与 backend schema / 前端类型三端对齐）──────────────────────────
 
@@ -108,19 +112,30 @@ export function assertWithinAllowedRoots(
  *      单项 stat 失败（dangling symlink / 权限不足）→ 兜底 file + 不中断整体（B3/B4）。
  *   5. 排序：dir 优先，同类按 name 字符序（前端展示友好；YAGNI 不做 i18n）。
  *
- * @param path          客户端要浏览的目录（任意形态：相对/绝对/含 `..`）。
- * @param allowed_roots 白名单根目录（task-02 loadConfig 保证：绝对路径、去重、非空）。
+ * @param path           客户端要浏览的目录（任意形态：相对/绝对/含 `..`）。
+ * @param policyEngine   PolicyEngine 引用（task-11 注入）；非空时走 `canRead`（读全 allow、
+ *                       不产 audit，D-008），仅透传 runtimeId 供后续写类隔离。
+ * @param runtimeId      发起本次 list_dir 的 runtime id（从 RPC 上下文取，per-runtime 隔离）。
+ * @param fallbackRoots  policyEngine 为 null 时的兜底白名单（向后兼容；cli 未注入引擎场景）。
  * @returns `{ entries: [...] }`；目录为空 → `entries: []`（非 error）。
- * @throws {RpcError} `code='forbidden'`（path 越界 / 空 / allowed_roots 空）。
+ * @throws {RpcError} `code='forbidden'`（policyEngine 为 null 兜底场景下 path 越界 / 空 / roots 空）。
  * @throws {RpcError} `code='not_found'`（path 不存在 / 不是目录）。
  * @throws {RpcError} `code='internal'`（权限不足 / 其他 fs 错误）。
  */
 export async function listDir(
   path: string,
-  allowed_roots: string[],
+  policyEngine: PolicyEngine | null,
+  runtimeId: string,
+  fallbackRoots: string[] = [],
 ): Promise<ListDirResult> {
-  // 1. 白名单校验（D-002）—— 内部已 pathResolve 折叠 ..
-  assertWithinAllowedRoots(path, allowed_roots);
+  // 1. 权限校验（task-18 / design §5.2）：
+  //    - policyEngine 非空：走 canRead（读全 allow，不 audit，D-008），仅透传 runtimeId。
+  //    - policyEngine 为 null：fallback 旧 assertWithinAllowedRoots（向后兼容）。
+  if (policyEngine) {
+    policyEngine.canRead(runtimeId, path);
+  } else {
+    assertWithinAllowedRoots(path, fallbackRoots);
+  }
   const abs = pathResolve(path);
 
   // 2. 目标必须存在且是目录。用 lstat 判定本体（不跟随 symlink）。
