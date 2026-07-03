@@ -120,5 +120,51 @@ async def list_policy_audit(
     )
 
 
+@router.get(
+    "/runtimes/{runtime_id}/policy-audit",
+    response_model=AuditPageResponse,
+)
+async def list_policy_audit_by_runtime(
+    runtime_id: uuid.UUID,
+    session: SessionDep,
+    user: RuntimeAdminUser,
+    decision: str | None = Query(default=None, max_length=16),
+    provider: str | None = Query(default=None, max_length=50),
+    tool: str | None = Query(default=None, max_length=128),
+    path: str | None = Query(default=None, max_length=512, description="substring match"),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> AuditPageResponse:
+    """Paginated + filtered read by runtime (ql-20260703-003).
+
+    Unlike ``GET /workspaces/{wid}/runtimes/{rid}/policy-audit`` which requires
+    a workspace_id in the path, this variant queries by runtime_id only —
+    ``workspace_id`` is left ``None`` so ``service.query`` skips the workspace
+    condition. Designed for the frontend audit page which may not always have a
+    workspace_id context (task-21 entry at ``/runtimes/{id}/audit``).
+    """
+    svc = AuditService(session)
+    items, total = await svc.query(
+        workspace_id=None,
+        runtime_id=runtime_id,
+        decision=decision,
+        provider=provider,
+        tool=tool,
+        path_contains=path,
+        since=since,
+        until=until,
+        limit=limit,
+        offset=offset,
+    )
+    return AuditPageResponse(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
 # Re-export so callers can reference the cap without importing the schema.
 __all__ = ["AUDIT_BATCH_MAX_EVENTS", "AuditLogRead", "router"]

@@ -43,7 +43,7 @@ vi.mock("next/navigation", () => ({
 // ── usePolicyAudit mock：捕获最后一次调用的参数 + 可控返回 ────────────────────
 
 const auditMock = vi.hoisted(() => ({
-  usePolicyAudit: vi.fn(),
+  usePolicyAuditByRuntime: vi.fn(),
 }));
 
 vi.mock("@/lib/daemon-audit", async () => {
@@ -52,7 +52,7 @@ vi.mock("@/lib/daemon-audit", async () => {
   );
   return {
     ...actual,
-    usePolicyAudit: auditMock.usePolicyAudit,
+    usePolicyAuditByRuntime: auditMock.usePolicyAuditByRuntime,
   };
 });
 
@@ -123,7 +123,7 @@ const FIXTURE_ITEMS: AuditLogRead[] = [
 ];
 
 /** 默认返回：fixture 列表 + total=1301（对齐 prototype 分页文案）。 */
-function defaultReturn(overrides: Partial<ReturnType<typeof auditMock.usePolicyAudit>> = {}) {
+function defaultReturn(overrides: Partial<ReturnType<typeof auditMock.usePolicyAuditByRuntime>> = {}) {
   return {
     items: FIXTURE_ITEMS,
     total: 1301,
@@ -142,8 +142,8 @@ describe("runtime audit page (task-20)", () => {
   beforeEach(() => {
     nav.params = { id: "rt-123" };
     nav.searchParams = new URLSearchParams({ wid: "ws-abc" });
-    auditMock.usePolicyAudit.mockReset();
-    auditMock.usePolicyAudit.mockReturnValue(defaultReturn());
+    auditMock.usePolicyAuditByRuntime.mockReset();
+    auditMock.usePolicyAuditByRuntime.mockReturnValue(defaultReturn());
   });
 
   afterEach(() => {
@@ -182,22 +182,21 @@ describe("runtime audit page (task-20)", () => {
     });
   });
 
-  it("usePolicyAudit 收到正确的 workspaceId/runtimeId + 初始分页参数", async () => {
+  it("usePolicyAuditByRuntime 收到正确的 runtimeId + 初始分页参数", async () => {
     renderPage(<AuditPage />);
 
-    // 初始调用带 wid/rid（来自 URL ?wid + 路由 [id]）
-    expect(auditMock.usePolicyAudit).toHaveBeenCalled();
-    const initialCall = auditMock.usePolicyAudit.mock.calls[0]!;
-    expect(initialCall[0]).toBe("ws-abc");
-    expect(initialCall[1]).toBe("rt-123");
+    // 新 hook（ql-20260703-003）接 (runtimeId, params, opts?)。
+    expect(auditMock.usePolicyAuditByRuntime).toHaveBeenCalled();
+    const initialCall = auditMock.usePolicyAuditByRuntime.mock.calls[0]!;
+    expect(initialCall[0]).toBe("rt-123");
 
     // 初始 params 带 limit/offset=0
-    const initialParams = initialCall[2] as { limit?: number; offset?: number };
+    const initialParams = initialCall[1] as { limit?: number; offset?: number };
     expect(initialParams.limit).toBe(50);
     expect(initialParams.offset).toBe(0);
 
-    // enabled 应为 true（wid + rid 都在）
-    const opts = initialCall[3] as { enabled?: boolean } | undefined;
+    // enabled 应为 true（runtimeId 在）
+    const opts = initialCall[2] as { enabled?: boolean } | undefined;
     expect(opts?.enabled).toBe(true);
   });
 
@@ -207,28 +206,20 @@ describe("runtime audit page (task-20)", () => {
     const next = screen.getByRole("button", { name: "下一页" });
     fireEvent.click(next);
 
-    // usePolicyAudit 被再次求值，offset 应 = limit（50）
+    // usePolicyAuditByRuntime 被再次求值，offset 应 = limit（50）
     await waitFor(() => {
       const lastCall =
-        auditMock.usePolicyAudit.mock.calls[auditMock.usePolicyAudit.mock.calls.length - 1]!;
-      const params = lastCall[2] as { offset?: number; limit?: number };
+        auditMock.usePolicyAuditByRuntime.mock.calls[auditMock.usePolicyAuditByRuntime.mock.calls.length - 1]!;
+      const params = lastCall[1] as { offset?: number; limit?: number };
       expect(params.offset).toBe(50);
     });
   });
 
-  it("缺 ?wid（workspace 来源缺失）→ enabled=false，展示缺失提示", async () => {
-    nav.searchParams = new URLSearchParams(); // 无 wid
+  it("缺 ?wid（ql-003 免 wid 路由）→ 正常加载（不再要求 ?wid）", async () => {
+    nav.searchParams = new URLSearchParams();
     renderPage(<AuditPage />);
 
-    // 提示文案
-    expect(
-      screen.getByText(/未提供 workspace 来源|无法定位 workspace/i),
-    ).toBeInTheDocument();
-
-    // hook 仍被调用，但 enabled 应为 false（不实际请求）
-    const lastCall =
-      auditMock.usePolicyAudit.mock.calls[auditMock.usePolicyAudit.mock.calls.length - 1]!;
-    const opts = lastCall[3] as { enabled?: boolean } | undefined;
-    expect(opts?.enabled).toBe(false);
+    // 免 wid 路由下仍正常渲染（无 wid 提示），hook 被调用
+    expect(auditMock.usePolicyAuditByRuntime).toHaveBeenCalled();
   });
 });

@@ -235,3 +235,12 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 根因：cli.ts:609 `runtimeIdProvider: () => config.runtime_id`（config 4f24728c），但 daemon 注册的 claude runtime 是 462d0e85（`_registeredRuntimes`，心跳 _syncAllowedRoots 按 462d0e85 存 PolicyCache）。session-manager canWrite(4f24728c, path) → PolicyCache.get(4f24728c)=undefined → fail-closed deny（无论配没配 E:/ 都 deny）。session-manager:937 注释本就写"runtimeIdProvider 闭包解析 daemon._registeredRuntimes.get(provider)"但实现没这么做（task-14 遗留 E2E-3）。
 方案：daemon.ts 加 public `resolveRuntimeId(provider)`；session-manager runtimeIdProvider 签名改 `(provider: string) => string`，_judgeWriteViaPolicyEngine 传 provider；cli.ts runtimeIdProvider 改 `(provider) => daemon?.resolveRuntimeId(provider) ?? ''`。
 结果：已完成。daemon.ts 加 public `resolveRuntimeId(provider)`；session-manager runtimeIdProvider 签名 `(sessionId)=>string` 改 `(provider)=>string`，_judgeWriteViaPolicyEngine 传 provider；cli.ts runtimeIdProvider 改 `(provider) => daemon?.resolveRuntimeId(provider) ?? ''`。typecheck 零错。session-manager-allowed-roots 20 passed 无回归。daemon-multi-runtime 8 errors 是 preflight.ts:208 process.exit 在 vitest 触发（git stash 确认非本次引起，423359c6 既有问题，独立）。待 commit+bundle+部署后真机复测（配 E:/ → resume → 应可写）。
+=== ql-003 记录追加 ===
+## ql-20260703-003-f9d7 | 2026-07-03 15:30:00 | 审计页强制 wid 致「未提供 workspace 来源」——后端加免 wid 路由 + 前端适配
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/audit/router.py + frontend/src/lib/daemon-audit.ts + frontend/src/app/(dashboard)/runtimes/[id]/audit/page.tsx + page.test.tsx
+需求：步骤 5 审计页显示「未提供 workspace 来源（URL 需带 ?wid=）」。task-20 遗留（E2E-2）：GET 端点强制 workspace_id path 段，但 DaemonRuntime 无 workspace_id（audit workspace_id daemon best-effort 可空），真正语义按 runtime_id 查。
+根因：task-10 GET /workspaces/{wid}/runtimes/{rid}/policy-audit 强制 wid（UUID path 段）。task-21 入口 /runtimes/{id}/audit 不带 wid → 前端显示无 wid 提示，无法查审计。
+方案：后端 audit/router.py 加 GET /runtimes/{runtime_id}/policy-audit（service.query(workspace_id=None) 跳过 workspace 过滤）。前端 daemon-audit.ts 加 fetchPolicyAuditByRuntime + usePolicyAuditByRuntime；audit/page.tsx 改用新 hook，删 workspaceId 依赖 + wid 提示。
+结果：已完成。backend ruff All checks passed + frontend 22 passed（daemon-audit 17 + page 5）+ lint ok。待 commit+bundle+backend rebuild 后生效。

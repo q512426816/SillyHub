@@ -107,6 +107,45 @@ export async function fetchPolicyAudit(
   );
 }
 
+/**
+ * GET /api/daemon/runtimes/{runtime_id}/policy-audit
+ *
+ * ql-20260703-003：免 workspace_id 的审计查询（后端 ql-003 新增路由）。
+ * 适用于前端审计页可能无 workspace_id 上下文（task-21 入口 /runtimes/{id}/audit）。
+ * 返回指定 runtime 的所有审计记录（不限 workspace，service.query(workspace_id=None)）。
+ */
+export async function fetchPolicyAuditByRuntime(
+  runtimeId: string,
+  params: FetchPolicyAuditParams,
+): Promise<AuditPageResponse> {
+  return apiFetch<AuditPageResponse>(
+    `/api/daemon/runtimes/${encodeURIComponent(runtimeId)}/policy-audit`,
+    { query: params as Record<string, string | number | undefined> },
+  );
+}
+
+function auditByRuntimeQueryKey(runtimeId: string, params: FetchPolicyAuditParams) {
+  return ["daemonAuditByRuntime", runtimeId, params] as const;
+}
+
+export function usePolicyAuditByRuntime(
+  runtimeId: string | null | undefined,
+  params: FetchPolicyAuditParams = {},
+  options?: { enabled?: boolean; refetchInterval?: number },
+) {
+  const enabled = options?.enabled ?? !!runtimeId;
+  const q = useQuery<AuditPageResponse, ApiError>({
+    queryKey: auditByRuntimeQueryKey(runtimeId ?? "", params),
+    queryFn: () => fetchPolicyAuditByRuntime(runtimeId!, params),
+    enabled,
+    refetchInterval: options?.refetchInterval,
+  });
+  const items = q.data?.items ?? [];
+  const total = q.data?.total ?? 0;
+  return { items, total, isLoading: q.isLoading, isError: q.isError, error: q.error, refetch: q.refetch };
+}
+
+
 // ── TanStack Query hook ──────────────────────────────────────────────────────
 //
 // queryKey 内联在本模块(query-keys.ts 不在本任务 allowed_paths 内)。

@@ -32,7 +32,7 @@
  * 此偏差在 task-20 allowed_paths 内无法通过改后端路由解决，故前端守卫 + 提示。
  */
 import { useMemo, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams } from "next/navigation";
 import {
   Button,
   DatePicker,
@@ -47,7 +47,7 @@ import dayjs, { type Dayjs } from "dayjs";
 
 import { ApiError } from "@/lib/api";
 import {
-  usePolicyAudit,
+  usePolicyAuditByRuntime,
   type AuditDecision,
   type AuditLogRead,
   type FetchPolicyAuditParams,
@@ -87,11 +87,7 @@ function fmtRelative(iso: string | null): string {
 
 export default function AuditPage() {
   const params = useParams<{ id: string }>();
-  const searchParams = useSearchParams();
   const runtimeId = params.id;
-  // workspaceId 来源见文件顶部「设计偏差」注释：URL ?wid=。
-  const workspaceId = searchParams.get("wid") ?? "";
-
   const [form] = Form.useForm<FilterFormValues>();
   // 已提交的筛选值（Form 只在点「查询」时同步到这里，触发 hook 重取）。
   const [applied, setApplied] = useState<FilterFormValues>({});
@@ -114,11 +110,10 @@ export default function AuditPage() {
   }, [applied, page]);
 
   // wid 缺失 → enabled=false，不发请求（避免 422）。见文件顶部设计偏差。
-  const { items, total, isLoading, isError, error, refetch } = usePolicyAudit(
-    workspaceId || null,
+  const { items, total, isLoading, isError, error, refetch } = usePolicyAuditByRuntime(
     runtimeId,
     hookParams,
-    { enabled: !!workspaceId && !!runtimeId },
+    { enabled: !!runtimeId },
   );
 
   // 统计概览：基于当前结果集做客户端聚合（无独立聚合端点）。
@@ -219,16 +214,6 @@ export default function AuditPage() {
         <StatCard label="最新一条距今" value={fmtRelative(stats.latest)} tone="neutral" />
       </section>
 
-      {/* workspace 来源缺失提示（设计偏差，见文件顶部注释） */}
-      {!workspaceId && (
-        <div className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          <span>
-            未提供 workspace 来源（URL 需带 <code>?wid=&lt;workspace_id&gt;</code>）。
-            当前审计查询端点要求 workspace_id，无法定位记录。请从关联的 workspace
-            进入，或等待后端新增按 runtime_id 查询的别名端点。
-          </span>
-        </div>
-      )}
 
       {isError && (
         <div className="flex items-start gap-2 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
@@ -288,7 +273,7 @@ export default function AuditPage() {
           pagination={false}
           size="small"
           scroll={{ x: 900 }}
-          locale={{ emptyText: workspaceId ? "暂无审计记录" : "未提供 workspace 来源，无法查询" }}
+          locale={{ emptyText: "暂无审计记录" }}
         />
         {/* 分页器（对齐 prototype：共 N 条 · 第 X / Y 页） */}
         <div className="mt-3 flex items-center justify-between gap-2">
