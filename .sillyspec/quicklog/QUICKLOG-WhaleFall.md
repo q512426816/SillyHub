@@ -244,3 +244,11 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 根因：task-10 GET /workspaces/{wid}/runtimes/{rid}/policy-audit 强制 wid（UUID path 段）。task-21 入口 /runtimes/{id}/audit 不带 wid → 前端显示无 wid 提示，无法查审计。
 方案：后端 audit/router.py 加 GET /runtimes/{runtime_id}/policy-audit（service.query(workspace_id=None) 跳过 workspace 过滤）。前端 daemon-audit.ts 加 fetchPolicyAuditByRuntime + usePolicyAuditByRuntime；audit/page.tsx 改用新 hook，删 workspaceId 依赖 + wid 提示。
 结果：已完成。backend ruff All checks passed + frontend 22 passed（daemon-audit 17 + page 5）+ lint ok。待 commit+bundle+backend rebuild 后生效。
+## ql-20260703-004-1a2b | 2026-07-03 16:10:00 | frontend 镜像未 rebuild 致审计页仍显旧 wid 提示（ql-003 修复未部署）
+状态：已完成
+关联变更：（无）
+文件：（无代码改动，仅 Docker rebuild）
+需求：步骤 5 审计页仍显示「未提供 workspace 来源」。ql-003 已删 page.tsx 该提示 + 加免 wid 路由，但 frontend Docker 镜像 3 小时前构建（旧代码含提示），未随 backend rebuild。
+根因：ql-003 commit 后只 rebuild backend + daemon bundle，漏 rebuild frontend。frontend 镜像跑旧代码（grep 容器 .next 确认含「未提供 workspace 来源」，本地 page.tsx 已 0 处）。
+方案：rebuild frontend 镜像（docker compose up --build --force-recreate -d frontend）。
+结果：已完成。frontend rebuild 后容器内「未提供 workspace 来源」零命中（新代码），审计页 /runtimes/{id}/audit HTTP 200，backend+frontend healthy，backend commit_sha 0b363804c9dd（= main HEAD 含免 wid 路由）。用户刷新审计页应正常显示记录。
