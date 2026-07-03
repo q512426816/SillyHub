@@ -83,6 +83,8 @@ const STATUS_CONFIG: Record<string, { label: string; badge: "success" | "destruc
   completed: { label: "已完成", badge: "success", dot: "bg-emerald-500" },
   failed: { label: "失败", badge: "destructive", dot: "bg-red-500" },
   killed: { label: "已终止", badge: "warning", dot: "bg-amber-500" },
+  // ql-20260702-002：pending 单列"排队中"（琥珀），让排队态可见，区别于 running 蓝脉动。
+  pending: { label: "排队中", badge: "warning", dot: "bg-amber-500" },
 };
 
 function runStatusLabel(run: AgentRun): { label: string; badge: "success" | "destructive" | "warning" | "outline"; dot: string } {
@@ -138,6 +140,8 @@ function runStatusKind(run: AgentRun): "success" | "error" | "warning" | "neutra
   if (run.status === "completed") return "success";
   if (run.status === "failed") return "error";
   if (run.status === "killed") return "warning";
+  // ql-20260702-002：pending 防御性分支（pending 不进历史表格，但避免 fallback 显示原始串）。
+  if (run.status === "pending") return "warning";
   return "neutral";
 }
 
@@ -265,6 +269,17 @@ export default function AgentPage({ params }: Props) {
     },
     [runs],
   );
+  // ql-20260702-002：pending run 单列派生（原 runningRuns/completedRuns 都过滤掉 pending，
+  // 导致"总运行"=runs.length 含 pending 但列表不可见）。排队中按 created_at 升序。
+  const pendingRuns = useMemo(
+    () =>
+      runs
+        .filter((r) => r.status === "pending")
+        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
+    [runs],
+  );
+  // 活跃面板 = 排队 + 运行中（排队在前）；两者都是"未结束、用户需关注"。
+  const activeRuns = useMemo(() => [...pendingRuns, ...runningRuns], [pendingRuns, runningRuns]);
   const completedRuns = useMemo(
     () => {
       // ql-20260617-002：按 finished_at 降序（最近结束的在前），started_at 为 null 时
@@ -402,6 +417,15 @@ export default function AgentPage({ params }: Props) {
                 {runningRuns.length} 个运行中
               </div>
             )}
+            {/* ql-20260702-002：排队中角标（琥珀），提示有 pending run 等待 daemon 接管。 */}
+            {pendingRuns.length > 0 && (
+              <div className="flex h-8 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 text-xs font-medium text-amber-700">
+                <span className="relative flex h-2 w-2">
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
+                </span>
+                {pendingRuns.length} 个排队中
+              </div>
+            )}
             <Button size="sm" variant="outline" onClick={() => void reload()}>
               <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
               刷新
@@ -436,11 +460,11 @@ export default function AgentPage({ params }: Props) {
       )}
 
       {/* ---- Active Runs ---- */}
-      {!isLoading && runningRuns.length > 0 && (
+      {!isLoading && activeRuns.length > 0 && (
         <section className="flex min-w-0 flex-col gap-3">
-          <SectionTitle icon={Activity} title="活跃运行" meta={`${runningRuns.length} 个`} />
+          <SectionTitle icon={Activity} title="活跃运行" meta={`${activeRuns.length} 个`} />
           <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-            {runningRuns.map((run) => (
+            {activeRuns.map((run) => (
               <div
                 key={run.id}
                 className={cn(
@@ -452,11 +476,20 @@ export default function AgentPage({ params }: Props) {
                 <div className="flex flex-col gap-3 border-b bg-muted/30 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex min-w-0 items-center gap-2.5">
                     <span className="relative flex h-2 w-2">
-                      <span className="absolute inline-flex h-full w-full animate-pulse rounded-full bg-blue-400 opacity-75" />
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
+                      {run.status === "running" ? (
+                        <>
+                          <span className="absolute inline-flex h-full w-full animate-pulse rounded-full bg-blue-400 opacity-75" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
+                        </>
+                      ) : (
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
+                      )}
                     </span>
                     <code className="truncate font-mono text-xs font-medium">{shortId(run.id)}</code>
                     <Badge variant="default" className="shrink-0">{formatRunProviderLabel(run)}</Badge>
+                    {run.status === "pending" && (
+                      <Badge variant="warning" className="shrink-0">排队中</Badge>
+                    )}
                   </div>
                   <div className="flex shrink-0 gap-1.5">
                     <Button

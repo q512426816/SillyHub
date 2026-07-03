@@ -44,5 +44,6 @@ created_at: 2026-06-24T01:16:42
 - ql-20260626-001-4a8e | 放宽 complete 事件 result body 截断 slice(3000)→slice(50000)（task-runner.ts `_eventToMessages` complete 分支），避免 daemon 侧砍断 agent 最终总结（backend 侧 content 已同步放宽到 50000）。
 - 2026-06-26-daemon-client-spec-sync-fix | syncSpecTreeIfNeeded 抽离 + scan 终态回灌（FR-05）+ packSpecDir 含 .runtime（FR-06）+ task-runner kind=change-write 分支 + hub-client change-write 方法（FR-08/10）。
 - ql-20260702-001-f3c7 | install.sh 生成 .cmd wrapper 改 CRLF（awk）+ REM 英文化（修中文 Windows cmd.exe 下 LF+UTF-8 中文 REM 致注释被当命令执行的噪音报错；daemon 本身正常）。
+- ql-20260703-001-643f | agent-detector normalizeProvider（claude_code/claude-code→claude，其余原样）+ daemon _startInteractiveSession:2338 / reopen:2144 归一化（替换粗暴三元 === 'codex'?'codex':'claude'，防 opencode/cursor/openclaw 误归 claude）+ :2355 early-return 加 notifyRunResult 回传标 run failed（治本：provider 错配/CLI 缺失时不再 lease 永远 claimed/run 永远 pending 无声卡死，主动回传 backend 标 failed）。
 
 <!-- MANUAL_NOTES_END -->

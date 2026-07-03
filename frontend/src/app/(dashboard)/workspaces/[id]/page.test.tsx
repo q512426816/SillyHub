@@ -249,6 +249,17 @@ describe("WorkspaceDetailPage daemon-client 扫描入口（task-14 / D-006@v1 + 
     expect(screen.queryByText("工作区已就绪。")).not.toBeInTheDocument();
   });
 
+  it("repo-native 未初始化时显示「扫描」引导而非「初始化」", async () => {
+    // 回归：原消息不区分策略，对所有策略都提示"点击初始化按钮"，
+    // 但初始化按钮只在 platform-managed 下渲染，导致 repo-native 用户
+    // 看到承诺一个不存在的按钮。修复后文案按策略区分。
+    await renderWithStrategy("repo-native");
+    expect(screen.getByText("此工作区尚未扫描。")).toBeInTheDocument();
+    // 不应出现初始化按钮或初始化引导
+    expect(screen.queryByText("此工作区尚未初始化。")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "初始化" })).not.toBeInTheDocument();
+  });
+
   it("已初始化·未扫描时显示请先扫描引导", async () => {
     await renderWithStrategy("platform-managed", {
       initSyncedAt: "2026-07-02T10:00:00Z",

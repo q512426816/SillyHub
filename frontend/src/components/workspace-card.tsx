@@ -4,20 +4,17 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { WorkspacePathFields } from "@/components/workspace-path-fields";
 import { ApiError } from "@/lib/api";
 import type { DaemonRuntimeRead } from "@/lib/daemon";
-import {
-  isDaemonClientWorkspace,
-  workspacePathSourceLabel,
-} from "@/lib/workspace-path";
 import {
   deleteWorkspace,
   rescanWorkspace,
   type Workspace,
 } from "@/lib/workspaces";
 import { STATUS_LABELS, labelOf } from "@/lib/status-labels";
+import { cn } from "@/lib/utils";
 
 interface Props {
   workspace: Workspace;
@@ -68,31 +65,42 @@ export function WorkspaceCard({
     }
   };
 
+  // ql-20260702：别名与原名不同时才补显原名，二者同行排版（标题 + 原名）。
+  const hasAlias =
+    !!workspace.display_alias && workspace.display_alias !== workspace.name;
+  const ownerName = workspace.owner
+    ? (workspace.owner.display_name ??
+      workspace.owner.email ??
+      "未记录")
+    : null;
+
   return (
-    <article className="flex flex-col rounded-md border bg-card">
-      <header className="flex items-center justify-between border-b px-4 py-2.5">
+    <article className="flex flex-col rounded-lg border bg-card shadow-sm transition-shadow hover:shadow-md">
+      <header className="flex items-start justify-between gap-2 border-b px-4 py-3">
         <div className="min-w-0">
-          <h3 className="truncate text-sm font-medium">
-            {workspace.display_alias ?? workspace.name}
-          </h3>
+          <div className="flex items-baseline gap-2">
+            <h3 className="truncate text-sm font-semibold text-foreground">
+              {workspace.display_alias ?? workspace.name}
+            </h3>
+            {hasAlias ? (
+              <span className="truncate text-[11px] text-muted-foreground">
+                原名 {workspace.name}
+              </span>
+            ) : null}
+          </div>
           <p className="truncate font-mono text-[11px] text-muted-foreground">
             {workspace.slug}
           </p>
-          {workspace.display_alias && workspace.display_alias !== workspace.name ? (
-            <p className="truncate text-[10px] text-muted-foreground">原名：{workspace.name}</p>
-          ) : null}
-          {workspace.owner ? (
-            <p className="truncate text-[10px] text-muted-foreground">
-              负责人：{workspace.owner.display_name ?? workspace.owner.email ?? "未记录"}
+          {ownerName ? (
+            <p className="truncate text-[11px] text-muted-foreground">
+              负责人：{ownerName}
             </p>
           ) : null}
-          {isDaemonClientWorkspace(workspace) && (
-            <Badge variant="outline" className="mt-1 text-[10px]">
-              {workspacePathSourceLabel(workspace.path_source)}
-            </Badge>
-          )}
         </div>
-        <Badge variant={workspace.status === "active" ? "success" : "outline"}>
+        <Badge
+          variant={workspace.status === "active" ? "success" : "outline"}
+          className="shrink-0"
+        >
           {labelOf(STATUS_LABELS, workspace.status)}
         </Badge>
       </header>
@@ -103,10 +111,11 @@ export function WorkspaceCard({
           runtime={boundRuntime}
           linkRuntime
         />
-        <dt className="text-muted-foreground">最后扫描</dt>
-        <dd>{formatTs(workspace.last_scanned_at)}</dd>
-        <dt className="text-muted-foreground">创建于</dt>
-        <dd>{formatTs(workspace.created_at)}</dd>
+        {/* ql-20260702：最后扫描与创建于合并为一行，节省纵向空间。 */}
+        <dt className="col-span-2 mt-1 flex flex-wrap items-center gap-x-3 text-[11px] text-muted-foreground">
+          <span>创建于 {formatTs(workspace.created_at)}</span>
+          <span>最后扫描 {formatTs(workspace.last_scanned_at)}</span>
+        </dt>
         {workspace.tech_stack && workspace.tech_stack.length > 0 && (
           <>
             <dt className="text-muted-foreground">技术栈</dt>
@@ -123,7 +132,19 @@ export function WorkspaceCard({
         <p className="px-4 pb-2 text-xs text-destructive">{error}</p>
       )}
 
-      <footer className="flex items-center justify-end gap-2 border-t px-4 py-2">
+      <footer className="mt-auto flex flex-wrap items-center justify-end gap-1.5 border-t px-4 py-2.5">
+        <Link
+          href={`/workspaces/${workspace.id}`}
+          className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+        >
+          详情
+        </Link>
+        <Link
+          href={`/workspaces/${workspace.id}/components`}
+          className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+        >
+          关系
+        </Link>
         <Button
           size="sm"
           variant="ghost"
@@ -132,18 +153,6 @@ export function WorkspaceCard({
         >
           别名
         </Button>
-        <Link
-          href={`/workspaces/${workspace.id}`}
-          className="inline-flex h-7 items-center rounded border border-border px-2 text-xs text-foreground hover:bg-muted"
-        >
-          详情
-        </Link>
-        <Link
-          href={`/workspaces/${workspace.id}/components`}
-          className="inline-flex h-7 items-center rounded border border-border px-2 text-xs text-foreground hover:bg-muted"
-        >
-          关系
-        </Link>
         <Button size="sm" variant="ghost" onClick={handleRescan} disabled={busy !== null}>
           {busy === "rescan" ? "扫描中…" : "重新扫描"}
         </Button>

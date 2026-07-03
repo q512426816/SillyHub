@@ -550,8 +550,8 @@ describe('task-06: daemon Codex interactive 接入', () => {
     expect(sessionManager.markReconnected).not.toHaveBeenCalled();
   });
 
-  // ── TC6b: provider 未知 → 归一 claude（保守）────────────────────────────────
-  it('TC6b: SESSION_RESUME provider 未知 → 归一 claude 交 restoreAndReconnect', async () => {
+  // ── TC6b: provider 未知 → 原样透传（ql-20260703-001 normalizeProvider）────────
+  it('TC6b: SESSION_RESUME provider 未知 → 原样交 restoreAndReconnect（不再误归 claude）', async () => {
     const sessionManager = createMockSessionManager();
     const { daemon } = buildDaemon({ sessionManager });
     daemons.push(daemon);
@@ -570,8 +570,11 @@ describe('task-06: daemon Codex interactive 接入', () => {
 
     expect(sessionManager.restoreAndReconnect).toHaveBeenCalledTimes(1);
     const record = sessionManager.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
-    // 未知 provider 归一为 claude（不因字符串异常崩溃）
-    expect(record.provider).toBe('claude');
+    // ql-20260703-001：normalizeProvider 替代粗暴三元（=== 'codex' ? 'codex' : 'claude'），
+    // 未知 provider 原样透传——不再误归 'claude'（避免 opencode/cursor/openclaw 被误用
+    // claude driver）。不崩溃；未知值由 SessionManager._getDriver 的
+    // UnsupportedProviderError 兜底，比 silently 用错 driver 更安全。
+    expect(record.provider).toBe('some-unknown-provider');
   });
 });
 

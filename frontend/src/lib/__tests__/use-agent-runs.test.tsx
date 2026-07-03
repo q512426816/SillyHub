@@ -27,6 +27,8 @@ describe("agentRunsRefetchInterval", () => {
     expect(agentRunsRefetchInterval([makeRun({status:"completed"})])).toBe(false);
     expect(agentRunsRefetchInterval([])).toBe(false);
     expect(agentRunsRefetchInterval(undefined)).toBe(false);
+    // ql-20260702-002：pending 不触发轮询（pending 无实时输出，避免 daemon 未接管时空轮询）。
+    expect(agentRunsRefetchInterval([makeRun({status:"pending"})])).toBe(false);
   });
 });
 describe("useAgentRuns", () => {

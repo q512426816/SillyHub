@@ -363,3 +363,89 @@ class TestBuildClaimPayloadTransport:
         assert payload["specRoot"] == "/data/spec-workspaces/c7"
         # shared 分支不透传 workspaceId（D-004 守护）
         assert "workspaceId" not in payload
+
+
+class TestBuildClaimPayloadProviderNormalization:
+    """ql-20260703-001：interactive claim payload provider 归一化（adapter id →
+    daemon provider key）。
+
+    backend AgentRun.agent_type 永远是 adapter id（默认 'claude_code'），经 lease
+    metadata.provider 透传。daemon _agentPaths 按 agent-detector 的 provider key
+    （'claude'）注册，命名空间不一致。build_claim_payload 在 backend 输出边界归一化
+    （双保险：daemon normalizeProvider 也做同样归一化），避免 daemon _agentPaths.get
+    失败 → interactive 静默早返回 → lease 永远 claimed / run 永远 pending。
+    """
+
+    @pytest.mark.asyncio
+    async def test_claude_code_normalized_to_claude(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """metadata.provider='claude_code' → payload.provider='claude'。"""
+        _patch_transport(monkeypatch, "shared")
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease = await _create_interactive_lease(
+            db_session,
+            rt.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(uuid.uuid4()),
+                "prompt": "hello",
+                "provider": "claude_code",
+                "claim_token": "tok",
+            },
+        )
+        payload = await build_claim_payload(db_session, lease)
+        assert payload["provider"] == "claude"
+
+    @pytest.mark.asyncio
+    async def test_legacy_claude_hyphen_normalized(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """legacy 'claude-code' 连字符形式也归一化为 'claude'（防御，backend
+        service.py:382 已规范为下划线，这里守边界）。"""
+        _patch_transport(monkeypatch, "shared")
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease = await _create_interactive_lease(
+            db_session,
+            rt.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(uuid.uuid4()),
+                "prompt": "hello",
+                "provider": "claude-code",
+                "claim_token": "tok",
+            },
+        )
+        payload = await build_claim_payload(db_session, lease)
+        assert payload["provider"] == "claude"
+
+    @pytest.mark.asyncio
+    async def test_other_provider_passthrough(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """非 claude_code 的 provider（codex/opencode/cursor/...）原样透传
+        （adapter id 与 detector key 同名，_agentPaths 直接命中）。"""
+        _patch_transport(monkeypatch, "shared")
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease = await _create_interactive_lease(
+            db_session,
+            rt.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(uuid.uuid4()),
+                "prompt": "hello",
+                "provider": "codex",
+                "claim_token": "tok",
+            },
+        )
+        payload = await build_claim_payload(db_session, lease)
+        assert payload["provider"] == "codex"

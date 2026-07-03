@@ -182,6 +182,30 @@ export const PROVIDER_SPECS = {
 /** provider 名联合类型（'claude' | 'codex' | ... 共 12 个字面量）。 */
 export type ProviderName = keyof typeof PROVIDER_SPECS;
 
+/**
+ * 把 backend adapter id（AgentRun.agent_type，如 'claude_code'）归一化为 daemon
+ * agent-detector 的 provider key（PROVIDER_SPECS 的 key，如 'claude'）。
+ *
+ * backend AgentRun.agent_type 永远是 adapter id（默认 'claude_code'，见 backend
+ * schema.py:14 / main.py:178-179），经 lease metadata.provider 透传给 daemon。但
+ * daemon _agentPaths 按 agent-detector 的 provider key 注册（daemon.ts:845
+ * _agentPaths.set(agent.provider, ...)）。两者命名空间不一致，daemon 边界必须归一化，
+ * 否则 _agentPaths.get('claude_code') 返回 undefined → interactive 静默早返回 →
+ * lease 永远 claimed / run 永远 pending（ql-20260703-001）。
+ *
+ * 已知映射：claude_code / 'claude-code'(legacy 连字符) → 'claude'；其余（codex /
+ * opencode / openclaw / cursor / ...）原样透传（adapter id 与 detector key 同名时
+ * _agentPaths 直接命中）。未知值原样返回，由调用方 _agentPaths.get 兜底，命中失败走
+ * interactive_${provider}_executable_not_found 早返回（daemon.ts:2355）+ 回传 backend
+ * 标 failed（notifyRunResult，避免无声卡死）。
+ */
+export function normalizeProvider(raw: string | undefined | null): string {
+  const r = (raw ?? '').trim();
+  if (!r) return 'claude';
+  if (r === 'claude_code' || r === 'claude-code') return 'claude';
+  return r;
+}
+
 // ---------------------------------------------------------------------------
 // AgentDetector
 // ---------------------------------------------------------------------------

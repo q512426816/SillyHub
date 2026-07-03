@@ -12,6 +12,10 @@ export interface MemberBindingView {
   path_source: string;
   synced_at: string | null;
   last_scan_at: string | null;
+  /** 平台配置首次下发到本地项目目录的时间（workspace-config-flow W2）。
+   *  NULL = 该成员尚未初始化。仅 platform-managed 策略会写入；
+   *  repo-native / repo-mirrored 不走 init 下发，恒为 NULL。 */
+  init_synced_at: string | null;
 }
 
 export interface MemberBindingUpsertRequest {

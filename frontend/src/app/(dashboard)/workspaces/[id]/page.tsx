@@ -183,8 +183,8 @@ export default function WorkspaceDetailPage({ params }: Props) {
 
       // task-08 / D-002：获取当前成员 binding 以判定 init 状态
       const binding = await fetchMyBinding(workspaceId).catch(() => null);
-      setMyBinding(binding as MemberBindingView | null);
-      setInitSyncedAt((binding as { init_synced_at?: string | null } | null)?.init_synced_at ?? null);
+      setMyBinding(binding);
+      setInitSyncedAt(binding?.init_synced_at ?? null);
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "加载工作区失败");
     } finally {
@@ -233,7 +233,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
         if (document.hidden) return; // visibilitychange 暂停（D-005）
         try {
           const binding = await fetchMyBinding(workspaceId);
-          const syncedAt = (binding as { init_synced_at?: string | null } | null)?.init_synced_at ?? null;
+          const syncedAt = binding?.init_synced_at ?? null;
           if (syncedAt) {
             if (initPollRef.current) {
               clearInterval(initPollRef.current);
@@ -615,13 +615,22 @@ export default function WorkspaceDetailPage({ params }: Props) {
         {specWs && !initing && (
           <>
             {!initSyncedAt && (
-              /* 未初始化 */
-              <div className="mb-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
-                <p className="font-medium">此工作区尚未初始化。</p>
-                <p className="mt-0.5 text-blue-600">
-                  点击上方<strong> 初始化 </strong>按钮，将平台配置下发到本地项目目录。
-                </p>
-              </div>
+              /* 未初始化：文案按 spec 策略区分，避免承诺一个不会出现的按钮 */
+              specWs.strategy === "platform-managed" ? (
+                <div className="mb-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                  <p className="font-medium">此工作区尚未初始化。</p>
+                  <p className="mt-0.5 text-blue-600">
+                    点击上方<strong> 初始化 </strong>按钮，将平台配置下发到本地项目目录。
+                  </p>
+                </div>
+              ) : (
+                <div className="mb-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                  <p className="font-medium">此工作区尚未扫描。</p>
+                  <p className="mt-0.5 text-blue-600">
+                    点击上方<strong> 扫描 </strong>按钮，将仓库中的规范文档读取到平台。
+                  </p>
+                </div>
+              )
             )}
             {initSyncedAt && componentCount === 0 && (
               /* 已初始化·未扫描 */

@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   PROVIDER_SPECS,
   AgentDetector,
+  normalizeProvider,
   type AgentProviderSpec,
   type DetectedAgent,
   type ProviderName,
@@ -830,5 +831,33 @@ describe('AgentDetector P0-B 补漏（多 provider / isAvailable / env 正向）
     const r = await (d as unknown as { detectVersion: DetectFn })
       .detectVersion('/usr/bin/codex', PROVIDER_SPECS.codex);
     expect(r).toBe('0.131.0');
+  });
+});
+
+// ql-20260703-001：normalizeProvider（backend adapter id → daemon detector
+// provider key）。interactive lease claim payload 的 provider 来自 backend
+// AgentRun.agent_type（默认 'claude_code'），daemon _agentPaths 按 detector key
+// （'claude'）注册，边界必须归一化，否则 _agentPaths.get 失败静默卡死。
+describe('normalizeProvider', () => {
+  it('claude_code → claude（backend adapter id 归一化，修 P0-B 根因）', () => {
+    expect(normalizeProvider('claude_code')).toBe('claude');
+  });
+  it('claude-code legacy 连字符 → claude（防御，service.py:382 已规范为下划线）', () => {
+    expect(normalizeProvider('claude-code')).toBe('claude');
+  });
+  it('codex / opencode / cursor / openclaw 原样透传（adapter id 与 detector key 同名）', () => {
+    expect(normalizeProvider('codex')).toBe('codex');
+    expect(normalizeProvider('opencode')).toBe('opencode');
+    expect(normalizeProvider('cursor')).toBe('cursor');
+    expect(normalizeProvider('openclaw')).toBe('openclaw');
+  });
+  it('空值 → claude（兜底，backend 默认 claude_code，空值罕见）', () => {
+    expect(normalizeProvider(undefined)).toBe('claude');
+    expect(normalizeProvider(null)).toBe('claude');
+    expect(normalizeProvider('')).toBe('claude');
+    expect(normalizeProvider('  ')).toBe('claude');
+  });
+  it('未知 adapter id 原样返回（_agentPaths.get 兜底，命中失败走 daemon.ts:2355 早返回+回传）', () => {
+    expect(normalizeProvider('some_new_adapter')).toBe('some_new_adapter');
   });
 });

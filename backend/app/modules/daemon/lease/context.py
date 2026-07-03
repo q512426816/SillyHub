@@ -42,6 +42,24 @@ def _raise_no_agent_run(lease: DaemonTaskLease) -> None:
     )
 
 
+def _normalize_lease_provider(raw: str | None) -> str | None:
+    """归一化 backend adapter id → daemon provider key（ql-20260703-001）。
+
+    backend AgentRun.agent_type 永远是 adapter id（默认 'claude_code'），经 lease
+    metadata.provider 透传给 daemon。daemon _agentPaths 按 agent-detector 的 provider
+    key（'claude'）注册，命名空间不一致。这里在 backend 输出边界归一化（双保险：daemon
+    端 normalizeProvider 也做同样归一化），避免任何一边漏改导致 claude_code vs claude
+    错配重现 → daemon _agentPaths.get 失败 → interactive 静默早返回 → lease 永远
+    claimed / run 永远 pending。
+
+    映射：'claude_code' / 'claude-code'(legacy) → 'claude'；其余原样（adapter id 与
+    detector key 同名时直接命中 _agentPaths）。
+    """
+    if raw == "claude_code" or raw == "claude-code":
+        return "claude"
+    return raw
+
+
 async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> dict:
     """Build execution context payload for a claimed lease.
 
@@ -68,7 +86,9 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
         payload["agent_run_id"] = lease_meta.get("run_id")
         payload["run_id"] = lease_meta.get("run_id")
         payload["prompt"] = lease_meta.get("prompt")
-        payload["provider"] = lease_meta.get("provider")
+        # ql-20260703-001：归一化 adapter id → daemon provider key（claude_code→claude），
+        # 与 daemon normalizeProvider 双保险，避免 daemon _agentPaths.get 失败静默卡死。
+        payload["provider"] = _normalize_lease_provider(lease_meta.get("provider"))
         payload["model"] = lease_meta.get("model")
         payload["root_path"] = lease_meta.get("cwd") or lease_meta.get("root_path")
         # scan 真阻塞：透传 manual_approval / ask_user_only（prepare_scan_interactive_dispatch

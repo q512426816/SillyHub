@@ -55,7 +55,7 @@ import type {
   LeaseCtx,
   LeasePayload,
 } from './types.js';
-import { AgentDetector } from './agent-detector.js';
+import { AgentDetector, normalizeProvider } from './agent-detector.js';
 import type { DetectedAgent } from './agent-detector.js';
 import { HubClient, extractCause } from './hub-client.js';
 import { WsClient } from './ws-client.js';
@@ -2141,8 +2141,11 @@ export class Daemon {
       });
       return;
     }
-    const provider =
-      ((raw.provider as string | undefined) ?? 'claude') === 'codex' ? 'codex' : 'claude';
+    // ql-20260703-001：改用 normalizeProvider（原粗暴三元 === 'codex' ? 'codex' : 'claude'
+    // 会把 opencode/cursor/openclaw 误归 'claude'）。与 _startInteractiveSession create
+    // 路径（:2338）统一归一化逻辑，两端一致。断言 union 同 create 路径（interactive
+    // driver registry 只 claude/codex，types.ts:196）。
+    const provider = normalizeProvider(raw.provider as string | undefined) as 'claude' | 'codex';
     // backend reopen payload 不带 exe path；按归一化后的 provider 从 _agentPaths
     //（agent-detector 注册：create 时 _agentPaths.set(provider, path)）补齐，否则
     // restoreAndReconnect 内 exe = record.pathToAgentExecutable ??
@@ -2335,7 +2338,14 @@ export class Daemon {
     // specRootMap 空串 → 完全跳过（向后兼容旧 daemon，AC-04）
     // rootPath 优先作 cwd（与 batch 一致，ql-20260617-009）；无则 workspace_dir 兜底。
     const cwd = execPayload.rootPath ?? this._config.workspace_dir;
-    const provider = (execPayload.provider ?? 'claude') as 'claude' | 'codex';
+    // ql-20260703-001：归一化 adapter id → detector provider key（claude_code→claude），
+    // 对齐 reopen 路径（:2144）。原 (execPayload.provider ?? 'claude') as 'claude'|'codex'
+    // 直接透传 backend 的 'claude_code' → _agentPaths.get('claude_code')=undefined →
+    // 命中 :2355 静默早返回 → lease 永远 claimed / run 永远 pending。
+    // 断言 'claude'|'codex'：interactive driver registry 当前只这两者
+    // （types.ts:196 Record<'claude'|'codex'>），未知 provider 由 SessionManager.create
+    // 抛 UnsupportedProviderError 兜底。
+    const provider = normalizeProvider(execPayload.provider) as 'claude' | 'codex';
     // task-06（D-002@v1）：executable path 按 provider 取。claude → claude CLI path；
     // codex → codex app-server path（agent-detector 探测后 _agentPaths.set('codex', path)）。
     // 字段名保留 pathToClaudeCodeExecutable（CreateSessionInput 兼容名，语义=provider
@@ -2355,13 +2365,34 @@ export class Daemon {
     if (!pathToClaudeCodeExecutable) {
       // task-06（FR-05 / D-002@v1）：provider 的 executable 缺失 → 拒绝启动。
       // 错误码 provider-specific（interactive_${provider}_executable_not_found），
-      // 让日志/监控能区分 claude vs codex 缺失。不调 create；backend 据 lease 超时 /
-      // WS 失活 / onSessionEnd 收 failed（与 Claude AC-07 同路径）。daemon 主循环不崩。
+      // 让日志/监控能区分 claude vs codex 缺失。不调 create；daemon 主循环不崩。
       this._logger.error(`interactive_${provider}_executable_not_found`, {
         lease_id: leaseId,
         provider,
         code: `${provider.toUpperCase()}_EXECUTABLE_NOT_FOUND`,
       });
+      // ql-20260703-001（治本）：原注释称"backend 据 lease 超时/WS 失活收 failed"，
+      // 实测 interactive lease lease_expires_at=NULL（长生命周期）+ WS 不失活 → 永不收
+      // failed，run 永远 pending（用户实测 workspace 8777e292 的 scan run e0f4f147 卡
+      // 死 10+ 分钟）。这里主动回传 notifyRunResult 标 failed，避免无声卡死。
+      // execPayload.claimToken 已在 _runLeaseStateMachine:2785 归一化可用；firstRunId
+      // 已过 :2345 非空检查。notifyRunResult 失败仅 warn（不阻塞主循环，backend 侧
+      // lease GC / WS 失活兜底仍在）。
+      if (execPayload.claimToken && firstRunId) {
+        try {
+          await this._client.notifyRunResult(leaseId, execPayload.claimToken, firstRunId, {
+            status: 'error_during_execution',
+            is_error: true,
+            result_summary: `provider '${execPayload.provider ?? ''}' (normalized='${provider}') executable not found; agent-detector key mismatch or CLI not installed`,
+          });
+        } catch (e) {
+          this._logger.warn('interactive_executable_not_found_report_failed', {
+            lease_id: leaseId,
+            provider,
+            error: String(e),
+          });
+        }
+      }
       return;
     }
 
