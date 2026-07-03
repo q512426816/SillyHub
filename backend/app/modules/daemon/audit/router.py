@@ -67,7 +67,9 @@ async def post_audit_batch(
     schema's ``max_length`` — over-cap requests 422 before reaching the service).
     """
     svc = AuditService(session)
-    await svc._verify_claim_token(data.runtime_id, data.claim_token)
+    # ql-20260703-005：claim_token 可选（None 时跳过 lease 验证，仅靠 X-API-Key）。
+    if data.claim_token:
+        await svc._verify_claim_token(data.runtime_id, data.claim_token)
     inserted = await svc.batch_insert(
         data.runtime_id,
         data.events,

@@ -252,3 +252,11 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 根因：ql-003 commit 后只 rebuild backend + daemon bundle，漏 rebuild frontend。frontend 镜像跑旧代码（grep 容器 .next 确认含「未提供 workspace 来源」，本地 page.tsx 已 0 处）。
 方案：rebuild frontend 镜像（docker compose up --build --force-recreate -d frontend）。
 结果：已完成。frontend rebuild 后容器内「未提供 workspace 来源」零命中（新代码），审计页 /runtimes/{id}/audit HTTP 200，backend+frontend healthy，backend commit_sha 0b363804c9dd（= main HEAD 含免 wid 路由）。用户刷新审计页应正常显示记录。
+## ql-20260703-005-3f4c | 2026-07-03 16:40:00 | 审计日志空——AuditSink sender body 缺 runtime_id/claim_token 致 POST 422 落盘 audit-failed.jsonl
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/src/cli.ts + backend/app/modules/daemon/audit/schema.py + backend/app/modules/daemon/audit/router.py
+需求：策略审计日志页空。DB policy_audit_log 0 行。
+根因：cli.ts makeAuditSender 的 postBatch body 只传 `{events}`，缺 backend AuditBatchRequest 要求的 `runtime_id` + `claim_token`（required）→ backend 422 → sender 重试耗尽落盘 `~/.sillyhub/daemon/audit-failed.jsonl`（6.5KB DENY 事件）。且 daemon AuditEvent 含 runtimeId 但 backend AuditEventIn extra=forbid 不接收。
+方案：cli.ts postBatch 按 runtimeId 分组 + 去掉每事件 runtimeId 字段 + body 加 `runtime_id`；backend schema claim_token 改 Optional（daemon X-API-Key 已鉴权，装配期不持有 lease token）；router claim_token None 时跳过 _verify_claim_token。
+结果：已完成。typecheck 零错 + ruff All checks passed。daemon bundle + backend rebuild。积压 audit-failed.jsonl 6.5KB 需手动重报（或丢弃，新 audit 上报正常后增量）。

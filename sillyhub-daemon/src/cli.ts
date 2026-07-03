@@ -183,18 +183,29 @@ function makeAuditSender(
   }
   return {
     async postBatch(events: AuditEvent[]): Promise<void> {
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ events }),
-        signal: AbortSignal.timeout(30_000),
-        // Node 原生 fetch 默认不读 HTTP_PROXY/HTTPS_PROXY（等价 trust_env=False）。
-      });
-      if (!resp.ok) {
-        const bodyText = await resp.text().catch(() => '');
-        throw new Error(
-          `audit_batch_failed status=${resp.status} body=${bodyText.slice(0, 200)}`,
-        );
+      // 按 runtimeId 分组（backend AuditBatchRequest 单 runtime_id），
+      // 并去掉每事件的 runtimeId 字段（backend AuditEventIn extra=forbid 不接收）。
+      const groups = new Map<string, Omit<AuditEvent, "runtimeId">[]>();
+      for (const ev of events) {
+        const { runtimeId, ...rest } = ev;
+        const arr = groups.get(runtimeId) ?? [];
+        arr.push(rest);
+        groups.set(runtimeId, arr);
+      }
+      for (const [rid, evs] of groups) {
+        const resp = await fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ runtime_id: rid, events: evs }),
+          signal: AbortSignal.timeout(30_000),
+          // Node 原生 fetch 默认不读 HTTP_PROXY/HTTPS_PROXY（等价 trust_env=False）。
+        });
+        if (!resp.ok) {
+          const bodyText = await resp.text().catch(() => "");
+          throw new Error(
+            `audit_batch_failed status=${resp.status} body=${bodyText.slice(0, 200)}`,
+          );
+        }
       }
     },
   };

@@ -53,7 +53,10 @@ class AuditBatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     runtime_id: uuid.UUID
-    claim_token: str = Field(min_length=1, max_length=128)
+    # ql-20260703-005：claim_token 改可选——daemon X-API-Key 已鉴权 daemon 身份，
+    # 装配期不持有 lease token（cli.ts makeAuditSender 注释），claim_token 级 lease
+    # 鉴权降级为可选（传则验证，不传则仅靠 X-API-Key）。
+    claim_token: str | None = Field(default=None, max_length=128)
     workspace_id: uuid.UUID | None = None
     events: list[AuditEventIn] = Field(
         default_factory=list,
