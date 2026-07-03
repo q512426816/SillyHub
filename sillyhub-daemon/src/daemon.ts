@@ -36,12 +36,11 @@
  * @module daemon
  */
 
-import { arch, homedir, hostname, platform } from 'node:os';
+import { arch, hostname, platform } from 'node:os';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { DaemonConfig } from './config.js';
-import { normalizeAllowedRoots } from './config.js';
 import { MSG } from './protocol.js';
 // task-06（design §5.4.4）：onTurnMessage/onTurnResult 参数类型从 Claude SDK 专属类型
 // 放宽为 provider-neutral 联合，支持 Codex flat message/result 透传。
@@ -76,6 +75,10 @@ import type {
   ChangeWriteFile,
   ChangeWriteResult,
 } from './task-runner.js';
+// task-11（design §5）：Filesystem Policy Engine 三件套（构造注入，additive）。
+import type { PolicyCache } from './policy/runtime-policy.js';
+import type { AuditSink } from './policy/audit-sink.js';
+import type { PolicyEngine } from './policy/filesystem-policy.js';
 import type { SessionManager } from './interactive/session-manager.js';
 // task-06（D-007@v1）：spec bundle 同步共享 utility（task-04 抽出），interactive
 // 路径接入 pull（session 开始）+ sync（session end）。纯函数 + client 参数注入，
@@ -359,6 +362,15 @@ type WsClientFactory = (opts: {
     onConnected?: () => void;
     onDisconnected?: (code: number, reason: string) => void;
     onError?: (err: Error) => void;
+    /**
+     * task-13（D-004）：POLICY_UPDATE 推送回调。daemon 据此 sub-second 热更新
+     * PolicyCache，并做 version 去重（R-07）。
+     */
+    onPolicyUpdate?: (
+      runtimeId: string,
+      allowedRoots: string[],
+      version: number,
+    ) => void;
   };
 }) => WsClientLike;
 
@@ -465,6 +477,19 @@ export interface DaemonOptions {
    * 默认 undefined：回退直接调 HubClient（无重试，向后兼容 W1）。
    */
   resilience?: ResilienceService | null;
+  /**
+   * task-11（design §5 / 2026-07-02-daemon-filesystem-policy）：Filesystem Policy Engine
+   * 三件套，构造注入（additive）。三者均 optional，不传时 Daemon 行为与改动前一致
+   *（现有 write-guard 仍在，task-15 才删除），现有 18 个测试构造点无需改动。
+   *
+   * 装配关系（cli.ts）：cache → auditSink → engine（PolicyEngine 构造依赖前两者）。
+   * 真正接入各 tool 接入点由后续 task-12 ~ task-18 完成；本任务仅持有引用。
+   */
+  policyCache?: PolicyCache | null;
+  /** 同 {@link DaemonOptions.policyCache}。 */
+  auditSink?: AuditSink | null;
+  /** 同 {@link DaemonOptions.policyCache}。 */
+  policyEngine?: PolicyEngine | null;
 }
 
 /**
@@ -531,6 +556,25 @@ export class Daemon {
    * 回退直接调 _client（向后兼容）。由 cli（task-13）构造时注入。
    */
   private readonly _resilience: ResilienceService | null;
+  /**
+   * task-11（design §5）：Filesystem Policy Engine 三件套引用。null = 未注入
+   *（additive：不传时 Daemon 行为不变，现有 write-guard 仍在，task-15 才删）。
+   * 真正接入各 tool 由 task-12 ~ task-18 完成；此处仅持有引用供后续 task 取用。
+   */
+  private readonly _policyCache: PolicyCache | null;
+  /**
+   * task-13（D-004 / R-07）：POLICY_UPDATE 推送的 per-runtime version 去重表。
+   *
+   * 收到 POLICY_UPDATE(version) 时：仅当 version > 已记录的最大 version 才写
+   * PolicyCache 并更新本表；旧 version（乱序/重放）忽略。与 PolicyCache.set
+   * 内部自管的 version 解耦——PolicyCache.version 是写入次数计数，本表是
+   * backend 推送序列号，两者语义不同（design §5.3 + R-07）。
+   */
+  private readonly _lastPolicyVersion = new Map<string, number>();
+  /** 同 {@link _policyCache}。 */
+  private readonly _auditSink: AuditSink | null;
+  /** 同 {@link _policyCache}。 */
+  private readonly _policyEngine: PolicyEngine | null;
   /**
    * task-04：interactive lease.id → session_id（防 WS 重放重复 create，AC-09）。
    * batch lease 不进此 map（走 _inflightLeases 去重）。
@@ -628,6 +672,10 @@ export class Daemon {
     this._credentialManager = options?.credentialManager ?? null;
     this._lockManager = options?.lockManager ?? null;
     this._resilience = options?.resilience ?? null;
+    // task-11：Policy 三件套构造注入（additive，未传 = null，行为不变）。
+    this._policyCache = options?.policyCache ?? null;
+    this._auditSink = options?.auditSink ?? null;
+    this._policyEngine = options?.policyEngine ?? null;
     this._persistence = options?.persistence ?? null;
     this._recoveryClient = options?.recoveryClient ?? null;
     this._recoveryConcurrency =
@@ -1678,36 +1726,70 @@ export class Daemon {
   }
 
   /**
-   * 2026-06-29-runtime-allowed-roots-config task-04：心跳响应同步 allowed_roots。
+   * 2026-07-02-daemon-filesystem-policy task-12：心跳响应同步 allowed_roots。
    *
-   * **per-runtime map + 并集**（修 bug：多 runtime allowed_roots 不同时，
-   * 单 runtime 覆盖全局 config 导致振荡——claude 配 F:/ 被 hermes 心跳覆盖丢失）。
-   * daemon 一台机器一个沙箱，config.allowed_roots = 所有 runtime allowed_roots 并集。
+   * **per-runtime 隔离**（D-002 / design §1.3 §5.1.2）：每个 runtime 的 allowed_roots
+   * 独立写入 PolicyCache（this._policyCache.set(rid, roots)），不再做并集、
+   * 不再覆盖 config.allowed_roots。修 bug：多 runtime allowed_roots 不同时，
+   * 单 runtime 心跳覆盖全局 config 造成 claude/codex 互相串扰。
+   *
+   * D-007：不再 expand `~` 占位、不偷偷加 homedir 兜底——严格按 backend 下发
+   * 的原始 roots 交给 PolicyCache（set 内部 resolveRealPath 规范化）。admin
+   * 未显式配则未命中由调用方决定 fallback。
+   *
+   * 兜底：_policyCache 为 null（未注入，仅旧测试场景）→ no-op，不抛错。
+   * cli.ts 生产链路必注入 PolicyCache（task-11）。
    *
    * 向后兼容：响应无 allowed_roots 字段（旧 backend）→ 不动。
    */
-  private readonly _allowedRootsByRuntime = new Map<string, string[]>();
   private _syncAllowedRoots(rid: string, resp: Record<string, unknown> | unknown): void {
+    // 未注入 PolicyCache（仅旧测试场景）→ no-op（cli.ts 生产必注入，task-11）。
+    if (!this._policyCache) return;
     if (!resp || typeof resp !== 'object') return;
     const raw = (resp as Record<string, unknown>).allowed_roots;
     if (!Array.isArray(raw)) return; // 旧 backend 无字段 → 向后兼容
-    // 展开 ~/.sillyhub 占位
-    const expanded = raw
-      .filter((p): p is string => typeof p === 'string')
-      .map((p) => p.replace(/^~(?=$|[/\\])/, homedir()));
-    this._allowedRootsByRuntime.set(rid, expanded);
-    // 并集：所有 runtime allowed_roots + homedir 兜底
-    const union = new Set<string>();
-    for (const roots of this._allowedRootsByRuntime.values()) {
-      for (const r of roots) union.add(r);
+    // 严格按 backend 下发：不 expand `~`、不补 homedir（D-007）。
+    const roots = raw.filter((p): p is string => typeof p === 'string');
+    // 每 rid 独立存（PolicyCache.set 内部 resolveRealPath 规范化 + version 续递增）
+    this._policyCache.set(rid, roots);
+    this._logger.info('policy_cache_set', { rid, count: roots.length });
+  }
+
+  /**
+   * task-13（2026-07-02-daemon-filesystem-policy / D-004 / R-07）：处理 WS POLICY_UPDATE 推送。
+   *
+   * 与 {@link _syncAllowedRoots}（心跳兜底）互补：
+   *   - 心跳路径是「定期全量刷新」，WS 推送是「admin 改动后即时单点更新」（sub-second）；
+   *   - 两者都落到 `_policyCache.set(rid, roots)`，PolicyCache 内部 version 续递增。
+   *
+   * version 去重（R-07）：backend 推送带单调递增 version，daemon 维护 per-rid
+   * 最大已见 version，**仅当新 version > 已记录才写入**，旧/乱序/重放包忽略。
+   * 与 PolicyCache 自身 version 解耦（一个是推送序列号，一个是写入计数）。
+   *
+   * 兜底：_policyCache 为 null（未注入，仅旧测试场景）→ no-op，不抛错
+   *（cli.ts 生产链路必注入 PolicyCache，task-11）。
+   *
+   * @param rid          目标 runtime_id
+   * @param roots        新 allowed_roots（原始字符串，规范化由 PolicyCache 负责）
+   * @param version      backend 推送序列号（单调递增）
+   */
+  private _handlePolicyUpdate(
+    rid: string,
+    roots: string[],
+    version: number,
+  ): void {
+    // 未注入 PolicyCache（仅旧测试场景）→ no-op（cli.ts 生产必注入，task-11）。
+    if (!this._policyCache) return;
+    const last = this._lastPolicyVersion.get(rid) ?? 0;
+    // R-07：旧/重复 version 忽略（防乱序、防重放覆盖新值）。
+    if (version <= last) {
+      this._logger.info('policy_update_stale', { rid, version, last });
+      return;
     }
-    union.add(homedir());
-    const normalized = normalizeAllowedRoots([...union]);
-    // 仅在变化时覆盖（避免每心跳重复写对象引用）
-    if (JSON.stringify(normalized) !== JSON.stringify(this._config.allowed_roots)) {
-      this._config.allowed_roots = normalized;
-      this._logger.info('allowed_roots_synced', { count: normalized.length, runtimes: this._allowedRootsByRuntime.size });
-    }
+    this._lastPolicyVersion.set(rid, version);
+    // 严格按 backend 下发：不 expand `~`、不补 homedir（D-007，与 _syncAllowedRoots 一致）。
+    this._policyCache.set(rid, roots);
+    this._logger.info('policy_cache_set', { rid, count: roots.length, version });
   }
 
   // ── 轮询循环（daemon.py:183-215，HTTP 兜底）────────────────────────────────
@@ -1858,6 +1940,10 @@ export class Daemon {
           // task-18（FR-07 / D-004@v1）：WS 重连成功 → 触发 outbox drain（补发断连期间暂存的消息）。
           onConnected: () => {
             void this._resilience?.drainOutbox();
+          },
+          // task-13（D-004）：POLICY_UPDATE 推送 → sub-second 热更新 PolicyCache。
+          onPolicyUpdate: (rid, roots, version) => {
+            this._handlePolicyUpdate(rid, roots, version);
           },
         },
       });

@@ -60,6 +60,11 @@ import { SessionManager } from './interactive/session-manager.js';
 import { JsonSessionPersistence } from './interactive/session-store-persistence.js';
 import { DAEMON_VERSION } from './daemon-version.js';
 import { RuntimeLockManager } from './runtime-lock.js';
+// task-11（design §5）：Filesystem Policy Engine 三件套，cli 生产装配注入 Daemon。
+import { PolicyCache } from './policy/runtime-policy.js';
+import { AuditSink } from './policy/audit-sink.js';
+import type { AuditBatchSender, AuditEvent } from './policy/audit-sink.js';
+import { PolicyEngine } from './policy/filesystem-policy.js';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 
 // ── 路径访问（可测试性：函数返回，task-22 vi.spyOn 可 mock）──────────────────
@@ -118,6 +123,59 @@ function cliResilienceLogger(): ResilienceLogger {
     info: (e, kv) => write('info', e, kv),
     warn: (e, kv) => write('warn', e, kv),
     error: (e, kv) => write('error', e, kv),
+  };
+}
+
+/**
+ * task-11（design §5.1.5）：构造 Audit 批量上报的 AuditBatchSender 适配器。
+ *
+ * AuditSink 通过依赖倒置的 {@link AuditBatchSender} 接口上报，不硬耦合 HubClient。
+ * 本函数把「POST 到 `${serverUrl}/api/daemon/audit/batch`」包装成该接口的实现：
+ *   - 路径前缀 `/api/daemon`（REST_PREFIX，daemon module 专用），对齐 design 表 §7.2
+ *     `POST /daemon/audit/batch`（= `/api/daemon/audit/batch`）；
+ *   - 鉴权用 daemon 级凭证（X-API-Key 优先，回退 Bearer token），与 register/heartbeat
+ *     同级——audit 端点目前按 daemon runtime 鉴权（claim_token 级鉴权属后续 backend
+ *     任务范畴，装配期不持有 lease token，故用 daemon 级凭证）；
+ *   - 复用 hub-client.ts 的原生 fetch 风格：Node 原生 fetch 默认不读 HTTP_PROXY
+ *     （等价 Python httpx trust_env=False），AbortSignal.timeout 30s，非 2xx 抛 Error。
+ *
+ * 失败语义：网络/超时/非 2xx 均 reject（由 AuditSink.sendWithRetry 指数退避重试、
+ * 重试耗尽降级落盘 jsonl，见 audit-sink.ts）。本适配器只负责「发一次」，不重试。
+ *
+ * @param serverUrl backend origin，如 'http://localhost:8000'（尾部斜杠容错）
+ * @param apiKey    daemon X-API-Key 凭证（可选）
+ * @param token     daemon Bearer token 凭证（apiKey 缺失时回退）
+ */
+function makeAuditSender(
+  serverUrl: string,
+  apiKey?: string,
+  token?: string,
+): AuditBatchSender {
+  // 对齐 hub-client.ts constructor 的去尾斜杠处理，避免 `${base}/api/...` 双斜杠。
+  const baseUrl = serverUrl.replace(/\/+$/, '');
+  const url = `${baseUrl}/api/daemon/audit/batch`;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (apiKey) {
+    headers['X-API-Key'] = apiKey;
+  } else if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return {
+    async postBatch(events: AuditEvent[]): Promise<void> {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ events }),
+        signal: AbortSignal.timeout(30_000),
+        // Node 原生 fetch 默认不读 HTTP_PROXY/HTTPS_PROXY（等价 trust_env=False）。
+      });
+      if (!resp.ok) {
+        const bodyText = await resp.text().catch(() => '');
+        throw new Error(
+          `audit_batch_failed status=${resp.status} body=${bodyText.slice(0, 200)}`,
+        );
+      }
+    },
   };
 }
 
@@ -541,6 +599,23 @@ export async function startAction(opts: StartOptions): Promise<number> {
     version: DAEMON_VERSION,
     force: opts.force === true,
   });
+  // task-11（design §5）：Filesystem Policy Engine 三件套装配。
+  // 构造顺序：cache → auditSink → engine（PolicyEngine 依赖前两者）。
+  //   - PolicyCache：纯内存，由 daemon 心跳 _syncAllowedRoots + WS POLICY_UPDATE 维护
+  //     （task-12 接入，本任务仅持有实例）；
+  //   - AuditSink：注入 makeAuditSender 适配器（POST /api/daemon/audit/batch），失败
+  //     指数退避重试 + 落盘降级（audit-sink.ts 内部处理）；
+  //   - PolicyEngine：消费 cache + auditSink，各 tool 接入点由 task-12 ~ task-18 接入。
+  // 三者 additive 注入，未接入 tool 前 Daemon 行为不变（write-guard 仍在，task-15 删）。
+  const policyCache = new PolicyCache();
+  const auditSink = new AuditSink(
+    makeAuditSender(
+      config.server_url,
+      config.api_key ?? undefined,
+      config.token ?? undefined,
+    ),
+  );
+  const policyEngine = new PolicyEngine(policyCache, auditSink);
   daemon = new Daemon(config, client, taskRunner, {
     sessionManager,
     credentialManager: credentialMgr,
@@ -548,6 +623,9 @@ export async function startAction(opts: StartOptions): Promise<number> {
     recoveryClient: client,
     lockManager,
     resilience,
+    policyCache,
+    auditSink,
+    policyEngine,
   });
 
   // step 6: 写 PID 文件（对齐 Python __main__.py:106 `_write_pid(os.getpid())`）。

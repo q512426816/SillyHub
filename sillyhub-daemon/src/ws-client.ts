@@ -64,6 +64,22 @@ export interface WsClientCallbacks {
   onDisconnected?: (code: number, reason: string) => void;
   /** WS error 事件（连接失败、握手失败、运行时错误）。仅日志用，不阻塞重连。 */
   onError?: (err: Error) => void;
+  /**
+   * task-13（2026-07-02-daemon-filesystem-policy / D-004）：收到 POLICY_UPDATE 推送。
+   *
+   * backend 在 admin 改动 allowed_roots 后实时下发，daemon 据此 sub-second 热更新
+   * PolicyCache（无需等下一拍心跳）。version 单调递增，由 daemon 层做去重
+   *（PolicyCache.set 内部自管 version，与本回调解耦；旧 version 在 daemon 回调里忽略，R-07）。
+   *
+   * @param runtimeId     目标 runtime_id
+   * @param allowedRoots  新的 allowed_roots（原始字符串数组，规范化由 PolicyCache 负责）
+   * @param version       本次推送版本号（单调递增，daemon 据此丢弃乱序旧包）
+   */
+  onPolicyUpdate?: (
+    runtimeId: string,
+    allowedRoots: string[],
+    version: number,
+  ) => void;
 }
 
 /** WsClient 构造参数。 */
@@ -366,7 +382,70 @@ export class WsClient {
       void this._dispatchRpc(msg);
       return;
     }
+    // task-13（D-004）：POLICY_UPDATE 走独立分支，解析 payload 后调 onPolicyUpdate，
+    // 不进 onMessage（不污染 lease 消息分发）。daemon 层在回调里做 version 去重 +
+    // 写 PolicyCache。
+    //
+    // 注意：消息 type 用字符串字面量 `"daemon:policy_update"` 而非 MSG 常量——
+    // protocol.ts 受 task-13 allowed_paths 限制未加 POLICY_UPDATE 常量；本字面量
+    // 与 backend protocol.py `DAEMON_MSG_POLICY_UPDATE = "daemon:policy_update"`
+    // 逐字对齐（任一字符漂移即推送链路断）。
+    //
+    // 取 msg.type 为 string 再比较：DaemonMessage.type 是 MsgType 联合字面量
+    //（不含 policy_update），直接字面量比较会被 TS 判为无重叠（TS2367）。
+    const msgType: string = msg.type;
+    if (msgType === 'daemon:policy_update') {
+      this._handlePolicyUpdate(msg);
+      return;
+    }
     this._callbacks.onMessage?.(msg);
+  }
+
+  /**
+   * 解析 POLICY_UPDATE 消息并触发 onPolicyUpdate 回调（task-13 / D-004）。
+   *
+   * payload 字段判空守卫（design §7.2 PolicyUpdatePayload）：
+   *   - runtime_id：非空 string，否则丢弃 + onError warn；
+   *   - allowed_roots：string[]，过滤非字符串元素；空数组合法（admin 清空策略）；
+   *   - version：number（单调递增），NaN/非 number 视为无效丢弃。
+   *
+   * 仅做解析 + 回调透传——version 去重 / PolicyCache 写入在 daemon 层回调里完成
+   *（与 PolicyCache.set 内部 version 解耦）。
+   */
+  private _handlePolicyUpdate(msg: DaemonMessage): void {
+    const payload = (msg.payload ?? {}) as {
+      runtime_id?: unknown;
+      allowed_roots?: unknown;
+      version?: unknown;
+    };
+    const runtimeId =
+      typeof payload.runtime_id === 'string' ? payload.runtime_id : '';
+    if (!runtimeId) {
+      this._handleError(
+        new Error('policy_update missing runtime_id, dropping'),
+      );
+      return;
+    }
+    if (!Array.isArray(payload.allowed_roots)) {
+      this._handleError(
+        new Error(`policy_update allowed_roots not array: ${runtimeId}`),
+      );
+      return;
+    }
+    const allowedRoots = payload.allowed_roots.filter(
+      (p): p is string => typeof p === 'string',
+    );
+    const version =
+      typeof payload.version === 'number' && Number.isFinite(payload.version)
+        ? payload.version
+        : NaN;
+    if (Number.isNaN(version)) {
+      this._handleError(
+        new Error(`policy_update invalid version: ${runtimeId}`),
+      );
+      return;
+    }
+    this._callbacks.onPolicyUpdate?.(runtimeId, allowedRoots, version);
   }
 
   /**

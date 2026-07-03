@@ -39,9 +39,14 @@ import {
   afterEach,
   vi,
 } from 'vitest';
+import { join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { mkdirSync } from 'node:fs';
 import type { DaemonConfig } from '../src/config.js';
 import type { DetectedAgent } from '../src/agent-detector.js';
 import { Daemon } from '../src/daemon.js';
+import { PolicyCache } from '../src/policy/runtime-policy.js';
+import { resolveRealPath } from '../src/policy/path-utils.js';
 import type { WsClientCallbacks } from '../src/ws-client.js';
 
 // ── fixture ──────────────────────────────────────────────────────────────────
@@ -372,5 +377,81 @@ describe('daemon multi-runtime registration (test_daemon_multi_runtime.py)', () 
     expect(factory).toHaveBeenCalledTimes(2);
     expect(wsRuntimeIds.sort()).toEqual(['srv-rt-claude', 'srv-rt-codex'].sort());
     expect(wsRuntimeIds).not.toContain('local-config-id');
+  });
+
+  // task-12（2026-07-02-daemon-filesystem-policy / D-002）：心跳响应按 rid 独立存 PolicyCache，
+  // 不再取并集、不再覆盖 config.allowed_roots。claude/codex 各存各，互不串扰。
+  it('heartbeat_syncs_allowed_roots_per_rid: 多 runtime 心跳各存各 PolicyCache，config.allowed_roots 不被覆盖', async () => {
+    const claudeRoot = join(tmpdir(), 'sillyhub-task12-claude-ws');
+    const codexRoot = join(tmpdir(), 'sillyhub-task12-codex-ws');
+    mkdirSync(claudeRoot, { recursive: true });
+    mkdirSync(codexRoot, { recursive: true });
+
+    const policyCache = new PolicyCache();
+    // 初始 config.allowed_roots（验证心跳不覆盖它）
+    const initialAllowedRoots = [homedir()];
+
+    const agents = [
+      makeAgent('claude', { version: '2.0.0' }),
+      makeAgent('codex', { version: '0.100.0' }),
+    ];
+    // 不同 rid 心跳返回不同 allowed_roots（多 runtime 隔离场景）
+    const heartbeatResp = (rid: string) => {
+      if (rid === 'srv-rt-claude') return { allowed_roots: [claudeRoot] };
+      if (rid === 'srv-rt-codex') return { allowed_roots: [codexRoot] };
+      return {};
+    };
+    const client: MockClient = {
+      register: vi
+        .fn()
+        .mockResolvedValueOnce({ id: 'srv-rt-claude' })
+        .mockResolvedValueOnce({ id: 'srv-rt-codex' }),
+      heartbeat: vi.fn(async (rid: string) => heartbeatResp(rid)),
+      claimLease: vi.fn(async () => ({ claim_token: 'tok', payload: {} })),
+      startLease: vi.fn(async () => ({})),
+      completeLease: vi.fn(async () => ({})),
+      getPendingLeases: vi.fn(async () => []),
+      close: vi.fn(),
+    };
+    const factory = vi.fn(
+      (opts: { runtimeId: string; callbacks: WsClientCallbacks }) => ({
+        connect: vi.fn(() => opts.callbacks.onConnected?.()),
+        close: vi.fn(() => opts.callbacks.onDisconnected?.(1000, 'close')),
+        registerRpcHandler: vi.fn(),
+      }),
+    );
+    const config: DaemonConfig = {
+      ...baseConfig,
+      allowed_roots: initialAllowedRoots,
+      heartbeat_interval: 0.02,
+    };
+    const daemon = new Daemon(config, client as never, null, {
+      detector: { detectAgents: vi.fn(async () => agents) } as never,
+      wsClientFactory: factory as never,
+      policyCache,
+    });
+    daemons.push(daemon);
+
+    await daemon.start();
+    // 等两拍心跳（20ms ×2，确保两个 rid 都被心跳到）
+    await new Promise((r) => setTimeout(r, 80));
+    await daemon.stop();
+
+    // 断言 1：claude/codex 各自的 allowed_roots 独立存入 PolicyCache（不并集、不串扰）
+    const claudePolicy = policyCache.get('srv-rt-claude');
+    const codexPolicy = policyCache.get('srv-rt-codex');
+    expect(claudePolicy).toBeDefined();
+    expect(codexPolicy).toBeDefined();
+    expect(claudePolicy?.allowedRoots).toEqual([resolveRealPath(claudeRoot)]);
+    expect(codexPolicy?.allowedRoots).toEqual([resolveRealPath(codexRoot)]);
+    // 隔离：claude 不含 codex 的 root，反之亦然
+    expect(claudePolicy?.allowedRoots).not.toContain(resolveRealPath(codexRoot));
+    expect(codexPolicy?.allowedRoots).not.toContain(resolveRealPath(claudeRoot));
+    // version：心跳至少刷过一次 → >= 1
+    expect(claudePolicy?.version).toBeGreaterThanOrEqual(1);
+    expect(codexPolicy?.version).toBeGreaterThanOrEqual(1);
+
+    // 断言 2：config.allowed_roots 不再被心跳覆盖（保留初始值，task-12 去并集核心）
+    expect(config.allowed_roots).toEqual(initialAllowedRoots);
   });
 });
