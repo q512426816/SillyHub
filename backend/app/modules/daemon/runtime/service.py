@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal
 
@@ -14,7 +15,7 @@ from sqlmodel import col
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.auth.model import User
-from app.modules.daemon.model import DaemonRuntime
+from app.modules.daemon.model import DaemonInstance, DaemonRuntime
 from app.modules.workspace.model import Workspace
 
 if TYPE_CHECKING:
@@ -37,6 +38,18 @@ RuntimeUsageWindow = Literal["1d", "7d", "30d"]
 class DaemonRuntimeNotFound(AppError):
     code = "HTTP_404_DAEMON_RUNTIME_NOT_FOUND"
     http_status = 404
+
+
+class DaemonInstanceOwnershipMismatch(AppError):
+    """daemon_local_id 归属另一用户（design §5.2 step 1 防劫持）。
+
+    daemon_instances.id 是 daemon 上报的本地 uuid。若同一 id 已被另一个 user 注册，
+    本次注册的 user 与现存行 user_id 不一致 → 拒绝（403），防 daemon_local_id 伪造
+    劫持他人 daemon 实体及其绑定。
+    """
+
+    code = "HTTP_403_DAEMON_INSTANCE_OWNERSHIP_MISMATCH"
+    http_status = 403
 
 
 class DaemonRuntimeInUse(AppError):
@@ -111,86 +124,186 @@ class DaemonRpcRemoteError(Exception):
         super().__init__(f"daemon rpc error: {self.code}: {self.message}")
 
 
+@dataclass
+class RegisteredRuntime:
+    """register_daemon 返回的单个 provider 运行时映射。"""
+
+    provider: str
+    runtime_id: uuid.UUID
+
+
+@dataclass
+class DaemonRegisterResult:
+    """register_daemon 返回值（design §5.2 step 5）。
+
+    daemon 侧缓存 ``runtimes`` 的 runtime_id，用于后续 WS payload 标识具体
+    provider 会话（连接路由按 daemon_instance_id，WS payload 内仍带 runtime_id）。
+    """
+
+    daemon_instance_id: uuid.UUID
+    runtimes: list[RegisteredRuntime]
+
+
 class RuntimeService:
     """Runtime lifecycle: register / heartbeat / enable / disable / cleanup."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def register_runtime(
+    async def register_daemon(
         self,
         user_id: uuid.UUID,
         *,
-        name: str | None = None,
-        provider: str | None = None,
-        version: str | None = None,
+        daemon_local_id: uuid.UUID,
+        server_url: str,
+        hostname: str,
         os: str | None = None,
         arch: str | None = None,
-        capabilities: dict | None = None,
-    ) -> DaemonRuntime:
-        """Register a new daemon runtime or return existing one (idempotent).
+        allowed_roots: list[str] | None = None,
+        providers: list[dict] | None = None,
+    ) -> DaemonRegisterResult:
+        """Per-daemon 注册（design §5.2 / D-006 / D-001）。
 
-        If a runtime with the same user_id + provider + name already exists,
-        update its fields and return it. Otherwise create a new record.
+        1. upsert daemon_instances by ``id=daemon_local_id``：复用身份，更新机器级
+           字段（hostname/os/arch/allowed_roots/status=online/last_heartbeat_at）。
+           归属校验：现有行 user_id 不匹配 → DaemonInstanceOwnershipMismatch (403)。
+        2. 对每个 provider upsert daemon_runtimes by (daemon_instance_id, provider)：
+           更新 version/status/last_heartbeat_at；新建时落 user_id/daemon_instance_id。
+        3. stale 清理（design §9.2）：删除该 daemon_instance_id 下、本次未上报的
+           runtime（provider 被卸载）。
+        4. 返回 daemon_instance_id + 各 provider 的 runtime_id。
         """
         now = datetime.now(UTC)
+        roots = allowed_roots if allowed_roots is not None else ["~/.sillyhub"]
+        reported_providers: list[dict] = list(providers or [])
 
-        # Try to find existing runtime by user_id + provider + name
-        stmt = select(DaemonRuntime).where(
-            col(DaemonRuntime.user_id) == user_id,
-            col(DaemonRuntime.provider) == provider,
-            col(DaemonRuntime.name) == name,
-        )
-        existing = (await self._session.execute(stmt)).scalars().first()
-
-        if existing is not None:
-            # Update existing record
-            existing.version = version
-            existing.os = os
-            existing.arch = arch
-            existing.capabilities = capabilities
-            if existing.status != "disabled":
-                existing.status = "online"
-            existing.last_heartbeat_at = now
-            existing.updated_at = now
-            self._session.add(existing)
-            await self._session.commit()
-            await self._session.refresh(existing)
-            log.info(
-                "daemon_runtime_reregistered",
-                runtime_id=str(existing.id),
-                user_id=str(user_id),
-                provider=provider,
+        # ── step 1: upsert daemon_instances ────────────────────────────────────
+        instance = await self._session.get(DaemonInstance, daemon_local_id)
+        if instance is None:
+            instance = DaemonInstance(
+                id=daemon_local_id,
+                user_id=user_id,
+                hostname=hostname,
+                server_url=server_url,
+                os=os,
+                arch=arch,
+                allowed_roots=roots,
+                status="online",
+                last_heartbeat_at=now,
             )
-            return existing
+            self._session.add(instance)
+            log.info(
+                "daemon_instance_registered",
+                daemon_instance_id=str(daemon_local_id),
+                user_id=str(user_id),
+                hostname=hostname,
+            )
+        else:
+            if instance.user_id != user_id:
+                raise DaemonInstanceOwnershipMismatch(
+                    "daemon_local_id 已被其他用户注册，禁止跨用户复用守护进程身份。",
+                    details={
+                        "daemon_instance_id": str(daemon_local_id),
+                        "owner_user_id": str(instance.user_id),
+                    },
+                )
+            instance.hostname = hostname
+            instance.server_url = server_url
+            instance.os = os
+            instance.arch = arch
+            instance.allowed_roots = roots
+            instance.status = "online"
+            instance.last_heartbeat_at = now
+            instance.updated_at = now
+            self._session.add(instance)
+            log.info(
+                "daemon_instance_reregistered",
+                daemon_instance_id=str(daemon_local_id),
+                hostname=hostname,
+            )
 
-        # Create new runtime
-        runtime = DaemonRuntime(
-            id=uuid.uuid4(),
-            user_id=user_id,
-            name=name,
-            provider=provider,
-            version=version,
-            os=os,
-            arch=arch,
-            status="online",
-            last_heartbeat_at=now,
-            capabilities=capabilities,
-            metadata_={},
+        # ── step 2: per-provider upsert daemon_runtimes ────────────────────────
+        reported_provider_names = {
+            item.get("provider") for item in reported_providers if item.get("provider")
+        }
+        existing_runtimes = (
+            (
+                await self._session.execute(
+                    select(DaemonRuntime).where(
+                        col(DaemonRuntime.daemon_instance_id) == daemon_local_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
         )
-        self._session.add(runtime)
+        existing_by_provider: dict[str, DaemonRuntime] = {
+            (rt.provider or ""): rt for rt in existing_runtimes
+        }
+
+        result_runtimes: list[RegisteredRuntime] = []
+        for item in reported_providers:
+            provider_name = item.get("provider")
+            if not provider_name:
+                continue
+            version = item.get("version")
+            rt = existing_by_provider.get(provider_name)
+            if rt is None:
+                rt = DaemonRuntime(
+                    id=uuid.uuid4(),
+                    daemon_instance_id=daemon_local_id,
+                    user_id=user_id,
+                    name=hostname,
+                    provider=provider_name,
+                    version=version,
+                    status="online",
+                    last_heartbeat_at=now,
+                    metadata_={},
+                )
+                self._session.add(rt)
+                log.info(
+                    "daemon_runtime_registered",
+                    runtime_id=str(rt.id),
+                    daemon_instance_id=str(daemon_local_id),
+                    provider=provider_name,
+                )
+            else:
+                rt.version = version
+                if rt.status != "disabled":
+                    rt.status = "online"
+                rt.last_heartbeat_at = now
+                rt.updated_at = now
+                self._session.add(rt)
+            result_runtimes.append(RegisteredRuntime(provider=provider_name, runtime_id=rt.id))
+
+        # ── step 3: stale runtime cleanup（本次未上报的 provider）─────────────
+        stale = [
+            rt
+            for provider, rt in existing_by_provider.items()
+            if provider not in reported_provider_names
+        ]
+        for rt in stale:
+            await self._session.delete(rt)
+            log.info(
+                "daemon_runtime_stale_removed",
+                runtime_id=str(rt.id),
+                daemon_instance_id=str(daemon_local_id),
+                provider=rt.provider,
+            )
+
         await self._session.commit()
-        await self._session.refresh(runtime)
-        log.info(
-            "daemon_runtime_registered",
-            runtime_id=str(runtime.id),
-            user_id=str(user_id),
-            provider=provider,
+        return DaemonRegisterResult(
+            daemon_instance_id=daemon_local_id,
+            runtimes=result_runtimes,
         )
-        return runtime
 
     async def heartbeat(self, runtime_id: uuid.UUID) -> DaemonRuntime:
-        """Update heartbeat timestamp for a daemon runtime."""
+        """Update heartbeat timestamp for a daemon runtime.
+
+        2026-07-03-daemon-entity-binding task-07：provider 无独立心跳（design §9.2），
+        daemon 单条心跳合并上报经 ``heartbeat_daemon``。本方法保留供残留调用方与
+        单 runtime 测试使用（不再被 HTTP ``/heartbeat`` 端点调用）。
+        """
         runtime = await self._session.get(DaemonRuntime, runtime_id)
         if runtime is None:
             raise DaemonRuntimeNotFound(
@@ -207,6 +320,77 @@ class RuntimeService:
         await self._session.commit()
         await self._session.refresh(runtime)
         return runtime
+
+    async def heartbeat_daemon(
+        self,
+        daemon_local_id: uuid.UUID,
+        providers: list[dict] | None = None,
+    ) -> DaemonInstance:
+        """Per-daemon 心跳（design §5.4 / §9.1 / D-006）。
+
+        daemon 单条心跳合并上报 ``daemon_local_id`` + 各 provider 状态。backend：
+
+        1. 刷新 ``daemon_instances.last_heartbeat_at=now``；若非 disabled 则
+           ``status='online'``（daemon 实体在线）。daemon 实体不存在 → 404（必须先
+           register，design §9.1 registered 事件先于 heartbeat）。
+        2. 遍历 ``providers`` 更新对应 ``daemon_runtimes.status``（by
+           ``daemon_instance_id + provider``）。``disabled`` 的 runtime 不被心跳
+           拉回 online（保留管理员禁用意图，与旧 ``heartbeat`` 语义一致）。
+        3. runtime 自身的 ``last_heartbeat_at`` 同步刷新（provider 级 status 快照
+           列保留，design §9.2，仅 stale 判定不再以它为准）。
+
+        heartbeat_ack 经 WS 下发到该 daemon 连接（task-06 通路），HTTP 响应只回
+        ``{daemon_instance_id, status, allowed_roots}``。
+        """
+        instance = await self._session.get(DaemonInstance, daemon_local_id)
+        if instance is None:
+            raise DaemonRuntimeNotFound(
+                f"Daemon instance '{daemon_local_id}' not found.",
+                details={"daemon_local_id": str(daemon_local_id)},
+            )
+
+        now = datetime.now(UTC)
+        instance.last_heartbeat_at = now
+        instance.updated_at = now
+        if instance.status != "disabled":
+            instance.status = "online"
+        self._session.add(instance)
+
+        reported = list(providers or [])
+        if reported:
+            # 一次性取出该 daemon 下所有 runtime，按 provider 索引，避免逐条 get。
+            runtimes = (
+                (
+                    await self._session.execute(
+                        select(DaemonRuntime).where(
+                            col(DaemonRuntime.daemon_instance_id) == daemon_local_id,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            by_provider: dict[str, DaemonRuntime] = {(rt.provider or ""): rt for rt in runtimes}
+            for item in reported:
+                provider_name = item.get("provider")
+                if not provider_name:
+                    continue
+                rt = by_provider.get(provider_name)
+                if rt is None:
+                    # provider 在 register 后才会上报心跳；理论上不会缺失，缺失即跳过
+                    # （register 才负责创建 runtime，design §9.2）。
+                    continue
+                rt_status = item.get("status") or "online"
+                # disabled 保留（管理员禁用不被心跳推翻）；其余跟随上报值。
+                if rt.status != "disabled":
+                    rt.status = rt_status
+                rt.last_heartbeat_at = now
+                rt.updated_at = now
+                self._session.add(rt)
+
+        await self._session.commit()
+        await self._session.refresh(instance)
+        return instance
 
     async def get_runtime(
         self,
@@ -239,6 +423,32 @@ class RuntimeService:
         )
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def _get_runtimes_by_instance(self, instance_id: uuid.UUID) -> list[DaemonRuntime]:
+        """Get all DaemonRuntime rows belonging to a daemon instance."""
+        stmt = (
+            select(DaemonRuntime)
+            .where(col(DaemonRuntime.daemon_instance_id) == instance_id)
+            .order_by(col(DaemonRuntime.provider))
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def list_instances(
+        self,
+        user_id: uuid.UUID,
+    ) -> list[DaemonInstance]:
+        """List online daemon instances for a user (task-10 / FR-09).
+
+        Used by GET /api/daemon/instances for workspace-daemon-switcher.
+        Returns only online instances. The caller joins provider runtimes.
+        """
+        stmt = (
+            select(DaemonInstance)
+            .where(col(DaemonInstance.user_id) == user_id)
+            .where(col(DaemonInstance.status) == "online")
+            .order_by(col(DaemonInstance.hostname))
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
     async def list_runtimes_page(
         self,
         *,
@@ -255,7 +465,9 @@ class RuntimeService:
 
         - 普通账号固定追加 ``user_id == actor_user_id``；请求的 ``user_id`` 被忽略。
         - 平台管理员不限制 owner；传入 ``user_id`` 时按 owner 精确过滤。
-        - ``q`` 大小写不敏感匹配 display_alias/name/provider/version。
+        - ``q`` 大小写不敏感匹配 name/provider/version（display_alias 已上提到
+          daemon_instances，本接口 runtime 维度暂不 JOIN instance 别名，按
+          name/provider/version 过滤即可，前端机器级视图另走 daemon_instance 列表）。
         - ``type`` 精确匹配 provider；``status`` 精确匹配 status。
         - total 为过滤后总数；items 按 created_at DESC + limit/offset。
         """
@@ -271,7 +483,6 @@ class RuntimeService:
             pattern = f"%{q_norm}%"
             filters.append(
                 or_(
-                    col(DaemonRuntime.display_alias).ilike(pattern),
                     col(DaemonRuntime.name).ilike(pattern),
                     col(DaemonRuntime.provider).ilike(pattern),
                     col(DaemonRuntime.version).ilike(pattern),
@@ -308,22 +519,26 @@ class RuntimeService:
         display_alias_set: bool,
         is_platform_admin: bool = False,
     ) -> DaemonRuntime:
-        """Update editable runtime fields (task-04 / D-002@v1).
+        """Update editable daemon fields (task-04 / D-002@v1).
 
-        Only ``display_alias`` is editable. ``display_alias_set`` distinguishes
-        "field omitted" (no change) from explicit ``null`` (clear). Empty /
-        whitespace-only strings normalize to ``None``.
+        2026-07-03-daemon-entity-binding：display_alias 已上提到 daemon_instances
+        （design §4.1/§4.2）。本方法经 runtime.daemon_instance_id 写到所属
+        daemon_instance.display_alias。``display_alias_set`` 区分「字段省略 = 不变」
+        与显式 ``null`` = 清空；空/空白串归一为 ``None``。返回值仍为 runtime（调用方
+        读 DaemonRuntimeRead）。
         """
         runtime = await self._get_owned_runtime(
             runtime_id, actor_user_id, is_platform_admin=is_platform_admin
         )
-        if display_alias_set:
+        if display_alias_set and runtime.daemon_instance_id is not None:
             normalized = display_alias.strip() if display_alias else None
-            runtime.display_alias = normalized or None
-            runtime.updated_at = datetime.now(UTC)
-            self._session.add(runtime)
-            await self._session.commit()
-            await self._session.refresh(runtime)
+            instance = await self._session.get(DaemonInstance, runtime.daemon_instance_id)
+            if instance is not None:
+                instance.display_alias = normalized or None
+                instance.updated_at = datetime.now(UTC)
+                self._session.add(instance)
+                await self._session.commit()
+                await self._session.refresh(runtime)
         return runtime
 
     async def update_allowed_roots(
@@ -336,7 +551,9 @@ class RuntimeService:
     ) -> DaemonRuntime:
         """Update allowed_roots sandbox (2026-06-29-runtime-allowed-roots-config task-02).
 
-        校验：每条绝对路径或 ``~`` 开头、去重、非空。
+        2026-07-03-daemon-entity-binding：allowed_roots 已上提到 daemon_instances
+        （design §4.1/§4.2）。本方法经 runtime.daemon_instance_id 写到所属
+        daemon_instance.allowed_roots。校验：每条绝对路径或 ``~`` 开头、去重、非空。
         """
         import re
 
@@ -357,11 +574,14 @@ class RuntimeService:
         runtime = await self._get_owned_runtime(
             runtime_id, actor_user_id, is_platform_admin=is_platform_admin
         )
-        runtime.allowed_roots = normalized
-        runtime.updated_at = datetime.now(UTC)
-        self._session.add(runtime)
-        await self._session.commit()
-        await self._session.refresh(runtime)
+        if runtime.daemon_instance_id is not None:
+            instance = await self._session.get(DaemonInstance, runtime.daemon_instance_id)
+            if instance is not None:
+                instance.allowed_roots = normalized
+                instance.updated_at = datetime.now(UTC)
+                self._session.add(instance)
+                await self._session.commit()
+                await self._session.refresh(runtime)
         return runtime
 
     async def mark_offline(
@@ -492,24 +712,66 @@ class RuntimeService:
         self,
         max_age_seconds: int = DEFAULT_RUNTIME_STALE_SECONDS,
     ) -> int:
-        """Mark runtimes as offline if heartbeat is older than max_age_seconds."""
+        """Mark stale daemon entities (and their runtimes) offline.
+
+        2026-07-03-daemon-entity-binding task-07（design §5.4 / §9.1 stale 事件）：
+        stale 判定从 per-runtime ``last_heartbeat_at`` 改以
+        ``daemon_instances.last_heartbeat_at`` 为准（provider 无独立心跳，§9.2）。
+        daemon 实体超 ``max_age_seconds`` 未心跳 →
+
+            daemon_instances.status = 'offline'
+            + 其下**所有** daemon_runtimes.status = 'offline'（联动）
+
+        ``disabled`` 的 runtime 保留 disabled（管理员禁用意图不被 stale 覆盖，与旧
+        语义一致）。runtime 自身的 ``last_heartbeat_at`` 不再独立判定 stale。
+
+        返回被标 offline 的 **daemon 实体** 数（旧实现返回 runtime 数；调用方仅作
+        日志/告警，语义切换无副作用）。
+        """
         cutoff = datetime.now(UTC) - timedelta(seconds=max_age_seconds)
-        stmt = select(DaemonRuntime).where(
-            col(DaemonRuntime.status) == "online",
-            or_(
-                col(DaemonRuntime.last_heartbeat_at).is_(None),
-                col(DaemonRuntime.last_heartbeat_at) < cutoff,
-            ),
+        # 选出心跳过期（或从未心跳）的在线 daemon 实体。
+        stale_instances = list(
+            (
+                await self._session.execute(
+                    select(DaemonInstance).where(
+                        col(DaemonInstance.status) == "online",
+                        or_(
+                            col(DaemonInstance.last_heartbeat_at).is_(None),
+                            col(DaemonInstance.last_heartbeat_at) < cutoff,
+                        ),
+                    )
+                )
+            )
+            .scalars()
+            .all()
         )
-        stale = list((await self._session.execute(stmt)).scalars().all())
+        if not stale_instances:
+            return 0
         now = datetime.now(UTC)
-        for runtime in stale:
-            runtime.status = "offline"
-            runtime.updated_at = now
-            self._session.add(runtime)
-        if stale:
-            await self._session.commit()
-        return len(stale)
+        instance_ids = [inst.id for inst in stale_instances]
+        for inst in stale_instances:
+            inst.status = "offline"
+            inst.updated_at = now
+            self._session.add(inst)
+        # 联动：把这些 daemon 下所有非 disabled runtime 标 offline（一次性查 + 改）。
+        runtimes = (
+            (
+                await self._session.execute(
+                    select(DaemonRuntime).where(
+                        col(DaemonRuntime.daemon_instance_id).in_(instance_ids),
+                        col(DaemonRuntime.status) != "disabled",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for rt in runtimes:
+            rt.status = "offline"
+            rt.updated_at = now
+            self._session.add(rt)
+        await self._session.commit()
+        return len(stale_instances)
 
     async def _get_owned_runtime(
         self,

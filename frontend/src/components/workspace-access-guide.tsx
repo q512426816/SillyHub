@@ -109,8 +109,11 @@ export function WorkspaceAccessGuide({
     setSaving(true);
     setError(null);
     try {
+      // 从选中 runtime 中提取 daemon_instance_id 作为 daemon_id
+      const selectedRuntime = runtimes.find((r) => r.id === runtimeId);
+      const daemonId = selectedRuntime?.daemon_instance_id ?? (runtimeId || null);
       const req: MemberBindingUpsertRequest = {
-        runtime_id: runtimeId || null,
+        daemon_id: daemonId,
         root_path: rootPath,
         path_source: pathSource,
       };

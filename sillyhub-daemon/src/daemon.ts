@@ -214,15 +214,18 @@ interface DetectorLike {
 /** daemon 需要的 HubClient 接口子集。 */
 interface ClientLike {
   register(params: {
-    name?: string;
-    provider?: string;
-    version?: string;
-    protocol?: string;
+    daemonLocalId: string;
+    serverUrl: string;
+    hostname: string;
     os?: string;
     arch?: string;
-    capabilities?: Record<string, unknown>;
+    allowedRoots?: string[];
+    providers: { provider: string; version?: string; status?: string }[];
   }): Promise<Record<string, unknown>>;
-  heartbeat(runtimeId: string): Promise<unknown>;
+  heartbeat(
+    daemonLocalId: string,
+    providers?: { provider: string; status?: string }[],
+  ): Promise<unknown>;
   markOffline?(runtimeId: string): Promise<unknown>;
   claimLease(leaseId: string, runtimeId: string): Promise<Record<string, unknown>>;
   startLease(leaseId: string, claimToken: string): Promise<unknown>;
@@ -559,8 +562,17 @@ export class Daemon {
    */
   private readonly _recoveredSessionIds = new Set<string>();
 
-  /** server 分配的 runtime_id → WS 客户端（每个 provider runtime 各一条连接）。 */
-  private readonly _wsClients = new Map<string, WsClientLike>();
+  /**
+   * 单条 WS 客户端（连 backend Hub 带 daemon_local_id，design §5.5 / D-006）。
+   *
+   * 2026-07-03-daemon-entity-binding task-07：从 per-provider ``_wsClients`` Map
+   * 收敛为单条 ``_wsClient``。一个物理 daemon 进程对 backend 只开一条 WS，连接
+   * 身份用 ``daemon_local_id``（= ``config.runtime_id``）。WS receive loop 按
+   * ``message.payload.runtime_id`` 分发到对应 provider 的 session-manager /
+   * task-runner（实际 dispatch 已按 sessionId/leaseId，不依赖连接维度的 provider
+   * 路由，design §5.5）。null = 未连接（无已注册 runtime / 已关闭）。
+   */
+  private _wsClient: WsClientLike | null = null;
   private readonly _wsClientFactory: WsClientFactory;
   private readonly _wsReconnectDelay: number;
 
@@ -583,13 +595,14 @@ export class Daemon {
   private readonly _registeredRuntimes = new Map<string, string>();
 
   /**
-   * task-05（FR-03）：按 rid 维护的心跳断连计数。value=首次失败时间戳 ms，缺 key=健康。
-   * _fire 自愈重启 _heartbeatLoop 后类成员保留，不重置（避免重启即误判健康）。
+   * task-05（FR-03）→ task-07 per-daemon：心跳断连计数。value=首次失败时间戳 ms，
+   * null=健康。_fire 自愈重启 _heartbeatLoop 后类成员保留，不重置（避免重启即
+   * 误判健康）。原 per-runtime Map 已随单条心跳合并收敛为单值。
    */
-  private readonly _heartbeatFailSince = new Map<string, number>();
+  private _heartbeatFailSince: number | null = null;
 
-  /** task-05：已告警 FATAL 的 rid 集合，防持续断连刷日志风暴；恢复时清除。 */
-  private readonly _degradedWarned = new Set<string>();
+  /** task-05 → task-07 per-daemon：已告警 FATAL 标记，防持续断连刷日志风暴；恢复时清除。 */
+  private _degradedWarned = false;
 
   /**
    * ql-20260616-006：agent provider → 本机 CLI 可执行文件路径。
@@ -685,7 +698,9 @@ export class Daemon {
       agents: availableAgents.map((a) => a.provider),
     });
 
-    // 2. 逐个 register（task-17，单个失败不中断其余）
+    // 2. per-daemon 注册（design §5.2 / D-006）：单次 POST /register 上报整体
+    // daemon_local_id + 探测到的 provider 列表。单个失败不中断（错误隔离在
+    // _registerDaemon 内）。
     if (availableAgents.length === 0) {
       this._logger.info('no_agents_detected');
     } else {
@@ -707,9 +722,7 @@ export class Daemon {
           throw e;
         }
       }
-      for (const agent of availableAgents) {
-        await this._registerOne(agent);
-      }
+      await this._registerDaemon(availableAgents);
     }
 
     // task-10（FR-08 / §5）：在三循环启动前执行崩溃恢复编排。
@@ -790,7 +803,7 @@ export class Daemon {
       }
     }
 
-    this._closeAllWsClients();
+    this._closeWsClient();
     // 关闭 HTTP（真实 HubClient.close 是同步 void no-op）
     try {
       this._client.close();
@@ -818,39 +831,62 @@ export class Daemon {
     );
   }
 
-  private async _registerOne(agent: DetectedAgent): Promise<void> {
+  /**
+   * per-daemon 注册（design §5.2 / D-006）。
+   *
+   * 单次 POST /register 上报 daemon_local_id（=config.runtime_id）+ 机器级字段
+   * + 探测到的 provider 列表。backend 返回 ``{ daemon_instance_id, runtimes }``，
+   * 本地把每个 provider → runtime_id 存入 ``_registeredRuntimes``（WS payload 标识
+   * 具体 provider 会话用）。同时维护 ``_agentPaths``（provider → 本机 path）。
+   *
+   * 失败隔离：整个注册失败只 warn，不抛（保持与旧 _registerOne「单失败不中断」语义；
+   * 此处是整体失败=所有 provider 都没注册上，但仍不阻断三循环启动——daemon 会等
+   * 下次心跳周期重试由上层编排处理）。
+   */
+  private async _registerDaemon(agents: DetectedAgent[]): Promise<void> {
+    const serverUrl = this._serverOrigin();
+    const providers = agents.map((a) => ({
+      provider: a.provider,
+      version: a.version ?? undefined,
+      status: 'online',
+    }));
     try {
-      // 真实 HubClient.register 接受对象参数，provider 字段填 agent.provider
-      //（对齐真实 DetectedAgent.provider，不是蓝图的 agent.name）。
       const resp = await this._client.register({
-        name: hostname(),
-        provider: agent.provider,
-        version: agent.version ?? 'unknown',
-        protocol: agent.protocol,
+        daemonLocalId: this._config.runtime_id,
+        serverUrl,
+        hostname: hostname(),
         os: platform(),
         arch: arch(),
-        capabilities: {
-          provider: agent.provider,
-          version: agent.version,
-          protocol: agent.protocol,
-          bin_path: agent.path, // 真实字段是 path
-          daemon_build_id: BUILD_ID, // 上报 daemon 自身构建标识，供服务端判定是否需推送自更新
-        },
+        allowedRoots: this._config.allowed_roots,
+        providers,
       });
-      const serverRuntimeId = String(resp.id ?? '');
-      this._registeredRuntimes.set(agent.provider, serverRuntimeId);
-      // ql-20260616-006：cmd_path 不来自 server（server 不知 daemon 本机路径），
-      // 由 daemon 自己维护 provider → 本机 path 映射，runLease 前注入到 ctx。
-      if (agent.path) {
-        this._agentPaths.set(agent.provider, agent.path);
+      // backend 返回 { daemon_instance_id, runtimes: [{provider, runtime_id}] }
+      const runtimes = (resp.runtimes ?? []) as {
+        provider?: string;
+        runtime_id?: string;
+      }[];
+      for (const item of runtimes) {
+        const providerName = item.provider;
+        const runtimeId = String(item.runtime_id ?? '');
+        if (providerName && runtimeId) {
+          this._registeredRuntimes.set(providerName, runtimeId);
+        }
       }
-      this._logger.info('registered', {
-        provider: agent.provider,
-        runtime_id: serverRuntimeId,
+      // 维护 provider → 本机 path 映射（cmd_path 不来自 server，daemon 自维护）
+      for (const a of agents) {
+        if (a.path) {
+          this._agentPaths.set(a.provider, a.path);
+        }
+      }
+      this._logger.info('daemon_registered', {
+        daemon_local_id: this._config.runtime_id,
+        providers: [...this._registeredRuntimes.keys()],
       });
     } catch (e) {
-      // 单个 agent 失败不中断其余注册（daemon.py:105-111）
-      this._logger.error('register_failed', { provider: agent.provider, error: e });
+      this._logger.error('daemon_register_failed', {
+        daemon_local_id: this._config.runtime_id,
+        error: e,
+      });
     }
   }
 
@@ -1630,44 +1666,51 @@ export class Daemon {
     while (this._running) {
       try {
         await abortableSleep(this._config.heartbeat_interval * 1000, signal);
-        for (const rid of this._registeredRuntimes.values()) {
-          try {
-            const hbResp = await this._client.heartbeat(rid);
-            // task-05（FR-03）：成功→清断连计数 + 告警标记，下次断连重新计时告警。
-            this._heartbeatFailSince.delete(rid);
-            this._degradedWarned.delete(rid);
-            // task-18（FR-07 / D-004@v1）：心跳健康 → 触发 outbox drain（pending 非空时补发）。
-            this._resilience?.notifyHeartbeatResult(true);
-            // 2026-06-29-runtime-allowed-roots-config task-04：心跳响应同步 allowed_roots。
-            this._syncAllowedRoots(rid, hbResp);
-          } catch (e) {
-            // 单个 rid 心跳失败不影响其他（daemon.py:172-177）
-            // task-02（FR-01）：展开 cause 暴露底层 undici code。
-            // task-05（FR-03 / D-006）：按 rid 累加断连时长，超阈值记一次 FATAL
-            //   （运维感知），不主动调 offline——backend 45s 自然判 runtime offline，
-            //   网络恢复后 heartbeat 自动拉回 online。
-            if (!this._heartbeatFailSince.has(rid)) {
-              this._heartbeatFailSince.set(rid, Date.now());
-            }
-            const elapsed = Date.now() - (this._heartbeatFailSince.get(rid) ?? Date.now());
-            if (
-              !this._degradedWarned.has(rid) &&
-              elapsed >= this._config.disconnect_log_threshold_sec * 1000
-            ) {
-              this._logger.error('daemon_disconnect_degraded', {
-                runtime_id: rid,
-                elapsed_sec: Math.round(elapsed / 1000),
-              });
-              this._degradedWarned.add(rid);
-            }
-            this._logger.warn('heartbeat_failed', {
-              runtime_id: rid,
-              message: (e as Error | undefined)?.message ?? String(e),
-              cause: extractCause(e),
-            });
-            // task-18：心跳失败 → 标记不健康（drainOutbox 不补发，等恢复）。
-            this._resilience?.notifyHeartbeatResult(false);
+        // task-07 / D-006：单条心跳合并上报 daemon_local_id + 各 provider 状态。
+        // 至少一个 provider 已注册才发心跳（design §5.4）；无 provider 则跳过，
+        // 等同旧「无 runtime 不发心跳」语义。
+        const registeredProviders = [...this._registeredRuntimes.keys()];
+        if (registeredProviders.length === 0) continue;
+        const daemonLocalId = this._config.runtime_id;
+        const providers = registeredProviders.map((provider) => ({
+          provider,
+          status: 'online' as const,
+        }));
+        try {
+          const hbResp = await this._client.heartbeat(daemonLocalId, providers);
+          // task-05（FR-03）→ task-07 per-daemon：成功 → 清断连计数 + 告警标记。
+          this._heartbeatFailSince = null;
+          this._degradedWarned = false;
+          // task-18（FR-07 / D-004@v1）：心跳健康 → 触发 outbox drain。
+          this._resilience?.notifyHeartbeatResult(true);
+          // 2026-06-29-runtime-allowed-roots-config task-04：心跳响应同步 allowed_roots。
+          this._syncAllowedRoots(hbResp);
+        } catch (e) {
+          // task-02（FR-01）：展开 cause 暴露底层 undici code。
+          // task-05（FR-03 / D-006）→ task-07 per-daemon：累加断连时长，超阈值记一次
+          //   FATAL（运维感知），不主动调 offline——backend 45s 自然判 daemon 实体
+          //   offline（runtime 联动），网络恢复后 heartbeat 自动拉回 online。
+          if (this._heartbeatFailSince === null) {
+            this._heartbeatFailSince = Date.now();
           }
+          const elapsed = Date.now() - (this._heartbeatFailSince ?? Date.now());
+          if (
+            !this._degradedWarned &&
+            elapsed >= this._config.disconnect_log_threshold_sec * 1000
+          ) {
+            this._logger.error('daemon_disconnect_degraded', {
+              daemon_local_id: daemonLocalId,
+              elapsed_sec: Math.round(elapsed / 1000),
+            });
+            this._degradedWarned = true;
+          }
+          this._logger.warn('heartbeat_failed', {
+            daemon_local_id: daemonLocalId,
+            message: (e as Error | undefined)?.message ?? String(e),
+            cause: extractCause(e),
+          });
+          // task-18：心跳失败 → 标记不健康（drainOutbox 不补发，等恢复）。
+          this._resilience?.notifyHeartbeatResult(false);
         }
       } catch (e) {
         if (e instanceof AbortError) break;
@@ -1678,16 +1721,14 @@ export class Daemon {
   }
 
   /**
-   * 2026-06-29-runtime-allowed-roots-config task-04：心跳响应同步 allowed_roots。
+   * 2026-06-29-runtime-allowed-roots-config task-04 → task-07 per-daemon：心跳响应
+   * 同步 allowed_roots。
    *
-   * **per-runtime map + 并集**（修 bug：多 runtime allowed_roots 不同时，
-   * 单 runtime 覆盖全局 config 导致振荡——claude 配 F:/ 被 hermes 心跳覆盖丢失）。
-   * daemon 一台机器一个沙箱，config.allowed_roots = 所有 runtime allowed_roots 并集。
-   *
+   * 单条 WS 后 allowed_roots 来源唯一（daemon 实体级），不再需要 per-runtime 并集。
+   * 响应 allowed_roots 写入 config.allowed_roots（展开 ~/.sillyhub 占位 + homedir 兜底）。
    * 向后兼容：响应无 allowed_roots 字段（旧 backend）→ 不动。
    */
-  private readonly _allowedRootsByRuntime = new Map<string, string[]>();
-  private _syncAllowedRoots(rid: string, resp: Record<string, unknown> | unknown): void {
+  private _syncAllowedRoots(resp: Record<string, unknown> | unknown): void {
     if (!resp || typeof resp !== 'object') return;
     const raw = (resp as Record<string, unknown>).allowed_roots;
     if (!Array.isArray(raw)) return; // 旧 backend 无字段 → 向后兼容
@@ -1695,18 +1736,13 @@ export class Daemon {
     const expanded = raw
       .filter((p): p is string => typeof p === 'string')
       .map((p) => p.replace(/^~(?=$|[/\\])/, homedir()));
-    this._allowedRootsByRuntime.set(rid, expanded);
-    // 并集：所有 runtime allowed_roots + homedir 兜底
-    const union = new Set<string>();
-    for (const roots of this._allowedRootsByRuntime.values()) {
-      for (const r of roots) union.add(r);
-    }
+    const union = new Set<string>(expanded);
     union.add(homedir());
     const normalized = normalizeAllowedRoots([...union]);
     // 仅在变化时覆盖（避免每心跳重复写对象引用）
     if (JSON.stringify(normalized) !== JSON.stringify(this._config.allowed_roots)) {
       this._config.allowed_roots = normalized;
-      this._logger.info('allowed_roots_synced', { count: normalized.length, runtimes: this._allowedRootsByRuntime.size });
+      this._logger.info('allowed_roots_synced', { count: normalized.length });
     }
   }
 
@@ -1769,11 +1805,11 @@ export class Daemon {
   // ── WS 循环（daemon.py:219-251，抽象为 WsClient 委托，R4.3）─────────────────
 
   private async _wsLoop(signal: AbortSignal): Promise<void> {
-    // 每个 register 返回的 server runtime id 各建一条 WS（与心跳/轮询一致）。
-    // WsClient 内部自动管理重连；daemon 每秒 reconcile 新注册的 runtime。
+    // task-07 / D-006：单条 WS（daemon_local_id）。WsClient 内部自动管理重连；
+    // daemon 每秒 reconcile——register 后无 WS 则建，全部 unregister 则关。
     while (this._running) {
       try {
-        this._ensureWsClients();
+        this._ensureWsClient();
         await abortableSleep(1000, signal);
       } catch (e) {
         if (e instanceof AbortError) break;
@@ -1798,19 +1834,14 @@ export class Daemon {
 
   /**
    * scan 真阻塞（generic-wibbling-whisper.md 改造点 C）：发 WS 消息（PERMISSION_REQUEST）
-   * 到 backend，供 SessionManager 的 permissionWsClient.send 调用。用首个已注册 runtime 的
-   * WsClient（scan 单 runtime；backend 从 WS 连接识别 runtime_id）。连接未就绪 / 发送异常
-   * → 返回 false（fail-closed，canUseTool 回调 deny，不让工具静默放行）。
+   * 到 backend，供 SessionManager 的 permissionWsClient.send 调用。task-07：单条 WS
+   * 收敛后直接用 ``_wsClient``。连接未就绪 / 发送异常 → 返回 false（fail-closed，
+   * canUseTool 回调 deny，不让工具静默放行）。
    */
   sendToHub(msg: { type: string; payload: unknown }): boolean {
-    const rid = this._firstRegisteredRuntimeId();
-    if (!rid) {
-      this._logger.warn('send_to_hub_no_runtime', { msg_type: msg.type });
-      return false;
-    }
-    const ws = this._wsClients.get(rid);
+    const ws = this._wsClient;
     if (!ws || typeof ws.send !== 'function') {
-      this._logger.warn('send_to_hub_no_ws', { msg_type: msg.type, runtime_id: rid });
+      this._logger.warn('send_to_hub_no_ws', { msg_type: msg.type });
       return false;
     }
     try {
@@ -1825,59 +1856,55 @@ export class Daemon {
     }
   }
 
-  /** 为每个 server 分配的 runtime id 确保存在 WS 连接。 */
-  private _ensureWsClients(): void {
-    const registeredIds = this._registeredRuntimeIds();
-    if (registeredIds.length === 0) {
-      this._closeAllWsClients();
+  /**
+   * task-07 / D-006：确保单条 WS 客户端存在（连 backend Hub 带 daemon_local_id）。
+   *
+   * 收敛自 per-provider ``_wsClients`` Map：一个物理 daemon 对 backend 只开一条 WS。
+   * 至少一个 provider 已注册（``_registeredRuntimes`` 非空）→ 若 ``_wsClient`` 为
+   * null 则创建；否则保持。无已注册 runtime → 关闭并清空 ``_wsClient``。
+   */
+  private _ensureWsClient(): void {
+    const hasRegistered = this._registeredRuntimes.size > 0;
+    if (!hasRegistered) {
+      this._closeWsClient();
       return;
     }
-
-    for (const rid of [...this._wsClients.keys()]) {
-      if (!registeredIds.includes(rid)) {
-        try {
-          this._wsClients.get(rid)?.close();
-        } catch (e) {
-          this._logger.warn('ws_close_failed', { runtime_id: rid, error: e });
-        }
-        this._wsClients.delete(rid);
-      }
-    }
+    if (this._wsClient !== null) return;
 
     const serverUrl = this._serverOrigin();
-    for (const runtimeId of registeredIds) {
-      if (this._wsClients.has(runtimeId)) continue;
-
-      const ws = this._wsClientFactory({
-        serverUrl,
-        runtimeId,
-        callbacks: {
-          onMessage: (msg) => {
-            void this._handleWsMessage(msg);
-          },
-          // task-18（FR-07 / D-004@v1）：WS 重连成功 → 触发 outbox drain（补发断连期间暂存的消息）。
-          onConnected: () => {
-            void this._resilience?.drainOutbox();
-          },
+    // task-07：连接身份用 daemon_local_id（= config.runtime_id）。ws-client.ts 将其
+    // 作为握手标识发送（详见 ws-client.ts：当前 query 参数名仍为 runtime_id，属遗留
+    // 待补——backend task-06 已改期望 daemon_local_id，daemon 侧 ws-client.ts 握手字段
+    // 改名不在本 task allowed_paths，见 review 标注）。
+    const ws = this._wsClientFactory({
+      serverUrl,
+      runtimeId: this._config.runtime_id,
+      callbacks: {
+        onMessage: (msg) => {
+          void this._handleWsMessage(msg);
         },
-      });
-      this._registerListDirRpcHandler(ws, runtimeId);
-      this._registerGetSpecBundleRpcHandler(ws, runtimeId);
+        // task-18（FR-07 / D-004@v1）：WS 重连成功 → 触发 outbox drain（补发断连期间暂存的消息）。
+        onConnected: () => {
+          void this._resilience?.drainOutbox();
+        },
+      },
+    });
+    this._registerListDirRpcHandler(ws);
+    this._registerGetSpecBundleRpcHandler(ws);
 
-      try {
-        ws.connect();
-      } catch (e) {
-        this._logger.warn('ws_connect_failed', { runtime_id: runtimeId, error: e });
-      }
-
-      this._wsClients.set(runtimeId, ws);
-      this._logger.info('ws_client_created', { runtime_id: runtimeId });
+    try {
+      ws.connect();
+    } catch (e) {
+      this._logger.warn('ws_connect_failed', { daemon_local_id: this._config.runtime_id, error: e });
     }
+
+    this._wsClient = ws;
+    this._logger.info('ws_client_created', { daemon_local_id: this._config.runtime_id });
   }
 
-  private _registerListDirRpcHandler(ws: WsClientLike, runtimeId: string): void {
+  private _registerListDirRpcHandler(ws: WsClientLike): void {
     if (typeof ws.registerRpcHandler !== 'function') {
-      this._logger.warn('ws_no_rpc_support', { runtime_id: runtimeId });
+      this._logger.warn('ws_no_rpc_support', { daemon_local_id: this._config.runtime_id });
       return;
     }
     ws.registerRpcHandler('list_dir', async (params) => {
@@ -1891,7 +1918,7 @@ export class Daemon {
    * rootPath/.sillyspec 整树为 tar，base64 编码回传。backend apply_sync 写入 spec_root。
    * daemon-client workspace 的 root_path 是宿主机路径（F:\WorkNew\SillyHub），daemon 可访问。
    */
-  private _registerGetSpecBundleRpcHandler(ws: WsClientLike, runtimeId: string): void {
+  private _registerGetSpecBundleRpcHandler(ws: WsClientLike): void {
     if (typeof ws.registerRpcHandler !== 'function') return;
     ws.registerRpcHandler('get_spec_bundle', async (params) => {
       const rootPath = typeof params.root_path === 'string' ? params.root_path : '';
@@ -1908,15 +1935,14 @@ export class Daemon {
     });
   }
 
-  private _closeAllWsClients(): void {
-    for (const [rid, ws] of this._wsClients) {
-      try {
-        ws.close();
-      } catch (e) {
-        this._logger.warn('ws_close_failed', { runtime_id: rid, error: e });
-      }
+  private _closeWsClient(): void {
+    if (this._wsClient === null) return;
+    try {
+      this._wsClient.close();
+    } catch (e) {
+      this._logger.warn('ws_close_failed', { daemon_local_id: this._config.runtime_id, error: e });
     }
-    this._wsClients.clear();
+    this._wsClient = null;
   }
 
   // ── 事件分发（daemon.py:253-267）───────────────────────────────────────────

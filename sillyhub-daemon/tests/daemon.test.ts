@@ -74,9 +74,35 @@ interface MockClient {
   close: ReturnType<typeof vi.fn>;
 }
 
+/**
+ * Per-daemon register 契约（2026-07-03-daemon-entity-binding task-05）：
+ * daemon.start() 单次调 register，body 含 daemon_local_id + providers 列表；
+ * resp 返 { daemon_instance_id, runtimes: [{provider, runtime_id}] }。
+ *
+ * 注意：默认 mock 返回 per-daemon 响应（task-05 _registerDaemon 读 resp.runtimes，
+ * 每个 provider 映射到 'srv-rid-1'），让现有 lease/WS/心跳测试能复用 runtime id。
+ * register 契约测试（AC-01/01b/05d/11）显式提供自己的 per-daemon mock 做精确断言。
+ *
+ * perDaemonRegisterResp：根据入参 providers 生成 per-daemon 响应的 helper。
+ */
+function perDaemonRegisterResp(
+  params: { providers?: { provider: string }[] } | undefined,
+): { daemon_instance_id: string; runtimes: { provider: string; runtime_id: string }[] } {
+  const providers = params?.providers ?? [];
+  return {
+    daemon_instance_id: 'srv-inst-1',
+    runtimes: providers.map((p) => ({ provider: p.provider, runtime_id: 'srv-rid-1' })),
+  };
+}
+
 function createMockClient(): MockClient {
   return {
-    register: vi.fn(async () => ({ id: 'srv-rid-1' })),
+    // 默认返回 per-daemon 响应（task-05 _registerDaemon 读 resp.runtimes）。
+    // perDaemonRegisterResp 把每个上报的 provider 映射到 'srv-rid-1'，让现有
+    // lease/WS/心跳测试能复用 'srv-rid-1' 这个 runtime id。
+    register: vi.fn(async (params: { providers?: { provider: string }[] }) =>
+      perDaemonRegisterResp(params),
+    ),
     heartbeat: vi.fn(async () => ({})),
     markOffline: vi.fn(async () => ({})),
     claimLease: vi.fn(async () => ({
@@ -208,38 +234,43 @@ describe('Daemon', () => {
     return d;
   }
 
-  // AC-01: start 探测 agent 并逐个 register
-  it('AC-01: start 探测 agent 并逐个 register，填入 _registeredRuntimes', async () => {
-    const { daemon, client, detector } = buildDaemon({});
+  // AC-01: start 探测 agent 并单次 per-daemon register（task-05）
+  it('AC-01: start 探测 agent 并单次 register（per-daemon），providers 含 claude+codex', async () => {
+    const client = createMockClient();
+    client.register.mockImplementation(async (params: { providers?: { provider: string }[] }) =>
+      perDaemonRegisterResp(params),
+    );
+    const { daemon, detector } = buildDaemon({ client });
     track(daemon);
 
     await daemon.start();
 
     expect(detector.detectAgents).toHaveBeenCalledOnce();
-    expect(client.register).toHaveBeenCalledTimes(2);
-    // register 用 provider 字段（agent.provider，对齐真实 DetectedAgent）
-    expect(client.register).toHaveBeenCalledWith(expect.objectContaining({
-      provider: 'claude',
-    }));
-    expect(client.register).toHaveBeenCalledWith(expect.objectContaining({
-      provider: 'codex',
-    }));
-    // 等一拍心跳（heartbeat 对每个 registered rid 调一次）
+    // per-daemon：register 只调 1 次（整批上报）
+    expect(client.register).toHaveBeenCalledTimes(1);
+    const params = client.register.mock.calls[0]![0] as {
+      providers: { provider: string }[];
+    };
+    expect(new Set(params.providers.map((p) => p.provider))).toEqual(
+      new Set(['claude', 'codex']),
+    );
+    // 等一拍心跳（task-07 per-daemon：单次调用，带 daemon_local_id + providers）
     await sleep(60);
     expect(client.heartbeat).toHaveBeenCalled();
     await daemon.stop();
   });
 
-  it('AC-01b: 单个 agent register 失败不中断其余', async () => {
+  // AC-01b: per-daemon 整体 register 失败 → catch+warn，daemon 仍启动（不抛）
+  it('AC-01b: register 整体失败被吞，daemon.start 仍 resolve', async () => {
     const client = createMockClient();
-    client.register
-      .mockRejectedValueOnce(new Error('net err'))
-      .mockResolvedValueOnce({ id: 'srv-2' });
+    client.register.mockImplementation(async () => {
+      throw new Error('net err');
+    });
     const { daemon } = buildDaemon({ client });
     track(daemon);
 
-    await daemon.start();
-    expect(client.register).toHaveBeenCalledTimes(2);
+    await expect(daemon.start()).resolves.not.toThrow();
+    expect(client.register).toHaveBeenCalledTimes(1);
     await daemon.stop();
   });
 
@@ -507,9 +538,14 @@ describe('Daemon', () => {
 
   it('AC-05d: stop 将已注册的 server runtime id 标记为离线', async () => {
     const client = createMockClient();
-    client.register
-      .mockResolvedValueOnce({ id: 'srv-claude' })
-      .mockResolvedValueOnce({ id: 'srv-codex' });
+    // per-daemon：单次返回两个 runtime（task-05 契约）
+    client.register.mockResolvedValue({
+      daemon_instance_id: 'srv-inst',
+      runtimes: [
+        { provider: 'claude', runtime_id: 'srv-claude' },
+        { provider: 'codex', runtime_id: 'srv-codex' },
+      ],
+    });
     const { daemon } = buildDaemon({ client });
     track(daemon);
 
@@ -811,10 +847,10 @@ describe('Daemon', () => {
     expect(elapsed).toBeLessThan(2000);
   });
 
-  // AC-10: 心跳容错（对齐 Python test_heartbeat_survives_errors）
-  it('AC-10: 单个 rid heartbeat 抛错 → 循环不崩，后续心跳继续', async () => {
+  // AC-10: 心跳容错（对齐 Python test_heartbeat_survives_errors → task-07 per-daemon）
+  it('AC-10: 单次 heartbeat 抛错 → 循环不崩，后续心跳继续', async () => {
     const client = createMockClient();
-    // 前 2 次 heartbeat 抛错，第 3 次起正常
+    // 前 2 次 heartbeat 抛错，第 3 次起正常。task-07：heartbeat 单次调用（非 per-runtime）。
     client.heartbeat
       .mockRejectedValueOnce(new Error('net timeout'))
       .mockRejectedValueOnce(new Error('conn refused'));
@@ -833,11 +869,16 @@ describe('Daemon', () => {
     expect(daemon.isRunning).toBe(false);
   });
 
-  // AC-11: 心跳只用 registered runtimes（对齐 Python test_heartbeat_only_uses_registered_runtimes）
-  it('AC-11: 心跳遍历 _registeredRuntimes 的 server id，不含 config.runtime_id', async () => {
+  // AC-11: 心跳只用已注册 provider（对齐 Python test_heartbeat_only_uses_registered_runtimes → task-07 per-daemon）
+  it('AC-11: 单条心跳带 daemon_local_id + 全部已注册 provider', async () => {
     const client = createMockClient();
-    // register 返回固定 server id（区别于 config.runtime_id）
-    client.register.mockResolvedValue({ id: 'srv-allocated-rid' });
+    client.register.mockResolvedValue({
+      daemon_instance_id: 'srv-inst',
+      runtimes: [
+        { provider: 'claude', runtime_id: 'srv-allocated-rid' },
+        { provider: 'codex', runtime_id: 'srv-allocated-rid' },
+      ],
+    });
     const { daemon } = buildDaemon({ client });
     track(daemon);
 
@@ -845,12 +886,13 @@ describe('Daemon', () => {
     await sleep(80);
     await daemon.stop();
 
-    // 心跳调用的 rid 全部是 server 分配的 'srv-allocated-rid'，不含 config 的 'runtime-uuid-123'
-    const heartbeatedRids = client.heartbeat.mock.calls.map((c) => c[0] as string);
-    expect(heartbeatedRids.length).toBeGreaterThan(0);
-    for (const rid of heartbeatedRids) {
-      expect(rid).toBe('srv-allocated-rid');
-      expect(rid).not.toBe('runtime-uuid-123');
+    // 心跳调用的首参为 daemon_local_id（= config.runtime_id），第二参为 providers 列表
+    expect(client.heartbeat.mock.calls.length).toBeGreaterThan(0);
+    for (const call of client.heartbeat.mock.calls as [string, { provider: string }[]][]) {
+      const [daemonLocalId, providers] = call;
+      expect(daemonLocalId).toBe(mockConfig.runtime_id);
+      const providerNames = providers.map((p) => p.provider).sort();
+      expect(providerNames).toEqual(['claude', 'codex']);
     }
   });
 });

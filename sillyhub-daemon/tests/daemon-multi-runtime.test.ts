@@ -90,9 +90,31 @@ interface MockClient {
   close: ReturnType<typeof vi.fn>;
 }
 
+/**
+ * Per-daemon register 契约（2026-07-03-daemon-entity-binding task-05）：
+ * daemon.start() 收集所有 available agents 后**单次**调 register，body 含
+ * daemon_local_id + providers 列表；resp 返 daemon_instance_id + runtimes[]。
+ * _registeredRuntimes 由 resp.runtimes 填充（provider → runtime_id）。
+ *
+ * 默认 register mock：根据入参 providers 生成 per-daemon 响应。
+ */
+function perDaemonRegisterResp(
+  params: { providers?: { provider: string }[] } | undefined,
+): { daemon_instance_id: string; runtimes: { provider: string; runtime_id: string }[] } {
+  const providers = params?.providers ?? [];
+  return {
+    daemon_instance_id: 'srv-inst-1',
+    runtimes: providers.map((p) => ({
+      provider: p.provider,
+      runtime_id: 'srv-rt-' + p.provider,
+    })),
+  };
+}
+
 function makeClient(registerImpl?: ReturnType<typeof vi.fn>): MockClient {
   return {
-    register: registerImpl ?? vi.fn(async () => ({ id: 'srv-rid' })),
+    register:
+      registerImpl ?? vi.fn(async (params: { providers?: { provider: string }[] }) => perDaemonRegisterResp(params)),
     heartbeat: vi.fn(async () => ({})),
     claimLease: vi.fn(async () => ({ claim_token: 'tok', payload: {} })),
     startLease: vi.fn(async () => ({})),
@@ -160,8 +182,8 @@ describe('daemon multi-runtime registration (test_daemon_multi_runtime.py)', () 
     vi.restoreAllMocks();
   });
 
-  // Python test_daemon_registers_each_available_agent
-  it('registers_each_available_agent: 2 available + 1 unavailable → register 恰 2 次', async () => {
+  // Python test_daemon_registers_each_available_agent（per-daemon：单次调用）
+  it('registers_each_available_agent: 2 available + 1 unavailable → register 单次，providers={claude,codex}', async () => {
     const agents = [
       makeAgent('claude', { version: '2.0.1', protocol: 'stream_json' }),
       makeAgent('codex', { version: '0.120.0', protocol: 'json_rpc' }),
@@ -173,26 +195,30 @@ describe('daemon multi-runtime registration (test_daemon_multi_runtime.py)', () 
     await daemon.start();
     await daemon.stop();
 
-    expect(client.register).toHaveBeenCalledTimes(2);
-    // providers set 恰为 {claude, codex}（unavailable 的 copilot 被过滤）
-    const providers = new Set(
-      client.register.mock.calls.map((c) => (c[0] as { provider: string }).provider),
-    );
+    // per-daemon：register 只调 1 次（整批上报），unavailable 的 copilot 被过滤
+    expect(client.register).toHaveBeenCalledTimes(1);
+    const params = client.register.mock.calls[0]![0] as {
+      providers: { provider: string }[];
+    };
+    const providers = new Set(params.providers.map((p) => p.provider));
     expect(providers).toEqual(new Set(['claude', 'codex']));
   });
 
-  // Python test_daemon_runtime_id_format（TS 行为：server 分配 resp.id）
-  it('runtime_id_from_server: resp.id 存入 _registeredRuntimes（TS server 分配语义）', async () => {
+  // Python test_daemon_runtime_id_format（per-daemon：resp.runtimes 分配 server runtime_id）
+  it('runtime_id_from_server: resp.runtimes 由 server 分配，providers 含 [claude,gemini]', async () => {
     const agents = [
       makeAgent('claude', { version: '3.0.0' }),
       makeAgent('gemini', { version: '1.0.0' }),
     ];
-    // 每次 register 返回不同 server id
+    // 单次返回 per-daemon 响应（daemon_instance_id + runtimes[]）
     const client = makeClient(
-      vi
-        .fn()
-        .mockResolvedValueOnce({ id: 'srv-claude-xyz' })
-        .mockResolvedValueOnce({ id: 'srv-gemini-abc' }),
+      vi.fn(async () => ({
+        daemon_instance_id: 'srv-inst',
+        runtimes: [
+          { provider: 'claude', runtime_id: 'srv-claude-xyz' },
+          { provider: 'gemini', runtime_id: 'srv-gemini-abc' },
+        ],
+      })),
     );
     const { daemon } = build({ agents, client, config: { runtime_id: 'rt-abc' } });
     daemons.push(daemon);
@@ -200,15 +226,13 @@ describe('daemon multi-runtime registration (test_daemon_multi_runtime.py)', () 
     await daemon.start();
     await daemon.stop();
 
-    // register 被调 2 次，每次 resp.id 不同
-    expect(client.register).toHaveBeenCalledTimes(2);
-    // 内部 _registeredRuntimes Map 内容无法直接访问（private），但可通过 register 调用顺序
-    // 间接验证 server id 被消费：心跳循环会遍历这些 id（但心跳间隔 9999s 不会触发）。
-    // 行为等价验证：register 的入参含正确的 provider（TS 不在客户端拼 runtime_id）。
-    const callProviders = client.register.mock.calls.map(
-      (c) => (c[0] as { provider: string }).provider,
-    );
-    expect(callProviders).toEqual(['claude', 'gemini']);
+    // per-daemon：register 只调 1 次
+    expect(client.register).toHaveBeenCalledTimes(1);
+    const params = client.register.mock.calls[0]![0] as {
+      providers: { provider: string }[];
+    };
+    // 上报 providers 含 claude + gemini（client 不拼 runtime_id，server 分配）
+    expect(params.providers.map((p) => p.provider).sort()).toEqual(['claude', 'gemini']);
   });
 
   // Python test_daemon_no_agents_detected
@@ -228,70 +252,48 @@ describe('daemon multi-runtime registration (test_daemon_multi_runtime.py)', () 
   });
 
   // Python test_daemon_single_registration_failure_continues
-  it('single_registration_failure_continues: 第 1 个 register 抛错，第 2 个仍注册', async () => {
+  // per-daemon：整体 register 是一次调用，"per-provider 单失败不中断" 语义不再适用。
+  // _registerDaemon 整体失败时 catch + warn（daemon_register_failed），不抛、daemon 仍启动。
+  it('register_failure_logged_not_throwing: register reject → daemon.start 仍 resolve，不抛', async () => {
     const agents = [
       makeAgent('claude', { version: '2.0.0' }),
       makeAgent('codex', { version: '0.100.0' }),
     ];
-    const client = makeClient(
-      vi
-        .fn()
-        .mockRejectedValueOnce(new Error('network error'))
-        .mockResolvedValueOnce({ id: 'srv-codex' }),
-    );
+    const client = makeClient(vi.fn(async () => {
+      throw new Error('network error');
+    }));
     const { daemon } = build({ agents, client });
     daemons.push(daemon);
 
-    await daemon.start();
+    // register 整体失败被吞，daemon.start() 仍 resolve（不抛）
+    await expect(daemon.start()).resolves.not.toThrow();
     await daemon.stop();
 
-    // register 被尝试 2 次（1 失败 1 成功）
-    expect(client.register).toHaveBeenCalledTimes(2);
-    // 第 2 次调用是 codex
-    const secondProvider = (client.register.mock.calls[1]![0] as { provider: string }).provider;
-    expect(secondProvider).toBe('codex');
+    // 整体 register 只尝试 1 次（per-daemon 单次调用）
+    expect(client.register).toHaveBeenCalledTimes(1);
   });
 
   // Python test_daemon_registers_with_capabilities
-  it('registers_with_capabilities: capabilities 含 provider/version/protocol/bin_path 精确值', async () => {
-    const agents = [
-      makeAgent('claude', {
-        version: '2.5.0',
-        protocol: 'stream_json',
-        path: '/usr/local/bin/claude',
-      }),
-    ];
-    const { daemon, client } = build({ agents });
-    daemons.push(daemon);
-
-    await daemon.start();
-    await daemon.stop();
-
-    expect(client.register).toHaveBeenCalledTimes(1);
-    const params = client.register.mock.calls[0]![0] as {
-      capabilities: Record<string, unknown>;
-    };
-    const caps = params.capabilities;
-    expect(caps['provider']).toBe('claude');
-    expect(caps['version']).toBe('2.5.0');
-    expect(caps['protocol']).toBe('stream_json');
-    // TS 用 agent.path（真实字段名），映射到 capabilities.bin_path
-    expect(caps['bin_path']).toBe('/usr/local/bin/claude');
-  });
+  // capabilities 字段已移除（per-daemon body 用 providers[].version/status），语义不存在 → 删除该用例。
+  //（原 test_daemon_registers_with_capabilities 断言 capabilities 4 字段精确值，per-daemon 后不再上报。）
 
   // Python test_daemon_tracks_registered_runtimes
-  // TS _registeredRuntimes 是 private Map，无法直接读。通过心跳循环间接验证：
-  // start 后等一拍短心跳，heartbeat 调用次数 == registered 数（短间隔触发）。
-  it('tracks_registered_runtimes: 2 agent 注册后心跳遍历 2 个 server id', async () => {
+  // task-07 / D-006：心跳合并为单条 per-daemon（带 daemon_local_id + providers 列表）。
+  // start 后等一拍短心跳，heartbeat 单次调用，首参为 daemon_local_id（= config.runtime_id），
+  // 第二参 providers 含所有已注册 provider。
+  it('tracks_registered_runtimes: 2 agent 注册后单条心跳带 daemon_local_id + providers', async () => {
     const agents = [
       makeAgent('claude', { version: '2.0.0' }),
       makeAgent('codex', { version: '0.100.0' }),
     ];
     const client = makeClient(
-      vi
-        .fn()
-        .mockResolvedValueOnce({ id: 'srv-rt-claude' })
-        .mockResolvedValueOnce({ id: 'srv-rt-codex' }),
+      vi.fn(async () => ({
+        daemon_instance_id: 'srv-inst',
+        runtimes: [
+          { provider: 'claude', runtime_id: 'srv-rt-claude' },
+          { provider: 'codex', runtime_id: 'srv-rt-codex' },
+        ],
+      })),
     );
     const { daemon } = build({
       agents,
@@ -305,19 +307,25 @@ describe('daemon multi-runtime registration (test_daemon_multi_runtime.py)', () 
     await new Promise((r) => setTimeout(r, 60));
     await daemon.stop();
 
-    // 心跳被调（次数 >= 1），且调用的 runtimeId 是 server 分配的 id（非 base rt-test）
+    // 心跳被调（次数 >= 1），首参为 daemon_local_id（config.runtime_id，非 server runtime id）
     expect(client.heartbeat).toHaveBeenCalled();
-    const heartbeatedIds = new Set(client.heartbeat.mock.calls.map((c) => c[0] as string));
-    // 两个 server id 都应被心跳（可能只跑了一拍，至少有一个）
-    const serverIds = ['srv-rt-claude', 'srv-rt-codex'];
-    const hit = [...heartbeatedIds].filter((id) => serverIds.includes(id));
-    expect(hit.length).toBeGreaterThan(0);
-    // base runtime_id 不应被心跳（TS 用 server 分配的 id，非 base）
-    expect(heartbeatedIds.has('rt-test')).toBe(false);
+    const calls = client.heartbeat.mock.calls as [string, { provider: string; status?: string }[]][];
+    for (const [daemonLocalId, providers] of calls) {
+      expect(daemonLocalId).toBe('rt-test');
+      // providers 含两个 provider（claude + codex）
+      const providerNames = providers.map((p) => p.provider).sort();
+      expect(providerNames).toEqual(['claude', 'codex']);
+    }
+    // 旧 per-runtime 调用（首参为 srv-rt-*）不应再出现
+    const firstArgs = calls.map((c) => c[0]);
+    expect(firstArgs).not.toContain('srv-rt-claude');
+    expect(firstArgs).not.toContain('srv-rt-codex');
   });
 
   // Python test_daemon_version_unknown_when_null
-  it('version_unknown_when_null: agent.version=null → register body version="unknown"，capabilities.version=null', async () => {
+  // per-daemon：version 现在在 providers[].version。daemon 不再 fallback 'unknown'
+  //（design：backend 用 None）。agent.version=null → providers[0].version 为 undefined。
+  it('version_unknown_when_null: agent.version=null → providers[0].version 为 undefined（daemon 不 fallback）', async () => {
     const agents = [makeAgent('claude', { version: null })];
     const { daemon, client } = build({ agents });
     daemons.push(daemon);
@@ -327,26 +335,21 @@ describe('daemon multi-runtime registration (test_daemon_multi_runtime.py)', () 
 
     expect(client.register).toHaveBeenCalledTimes(1);
     const params = client.register.mock.calls[0]![0] as {
-      version: string;
-      capabilities: { version: string | null };
+      providers: { provider: string; version?: string }[];
     };
-    // 顶层 version fallback 'unknown'（对齐 daemon.ts:356 `agent.version ?? 'unknown'`）
-    expect(params.version).toBe('unknown');
-    // capabilities.version 透传原始 null（不 fallback，对齐 daemon.ts:362）
-    expect(params.capabilities.version).toBeNull();
+    // daemon _registerDaemon 用 `version: a.version ?? undefined`（不 fallback 'unknown'）
+    expect(params.providers[0]!.provider).toBe('claude');
+    expect(params.providers[0]!.version).toBeUndefined();
   });
 
-  it('ws_uses_server_assigned_runtime_ids: 每个 registered runtime 各建一条 WS（非 config.runtime_id）', async () => {
+  // task-07 / D-006 / design §5.5：单 WS 收敛——一个 daemon 对 backend 只开一条 WS，
+  // 连接身份 = daemon_local_id（config.runtime_id），不再 per-provider 各建。
+  it('ws_uses_daemon_local_id: 单条 WS，身份为 daemon_local_id（非 per-provider runtime_id）', async () => {
     const agents = [
       makeAgent('claude', { version: '2.0.0' }),
       makeAgent('codex', { version: '0.100.0' }),
     ];
-    const client = makeClient(
-      vi
-        .fn()
-        .mockResolvedValueOnce({ id: 'srv-rt-claude' })
-        .mockResolvedValueOnce({ id: 'srv-rt-codex' }),
-    );
+    const client = makeClient();
     const wsRuntimeIds: string[] = [];
     const factory = vi.fn(
       (opts: { runtimeId: string; callbacks: WsClientCallbacks }) => {
@@ -369,8 +372,11 @@ describe('daemon multi-runtime registration (test_daemon_multi_runtime.py)', () 
     await new Promise((r) => setTimeout(r, 50));
     await daemon.stop();
 
-    expect(factory).toHaveBeenCalledTimes(2);
-    expect(wsRuntimeIds.sort()).toEqual(['srv-rt-claude', 'srv-rt-codex'].sort());
-    expect(wsRuntimeIds).not.toContain('local-config-id');
+    // 单条 WS（factory 仅被调一次），身份 = daemon_local_id（config.runtime_id）
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(wsRuntimeIds).toEqual(['local-config-id']);
+    // server 分配的 per-provider runtime id 不应作为 WS 身份
+    expect(wsRuntimeIds).not.toContain('srv-rt-claude');
+    expect(wsRuntimeIds).not.toContain('srv-rt-codex');
   });
 });

@@ -25,6 +25,7 @@ class WorkspaceMemberRuntime(BaseModel, table=True):
     __table_args__ = (
         Index("ix_wmr_workspace", "workspace_id"),
         Index("ix_wmr_runtime", "runtime_id"),
+        Index("ix_wmr_daemon", "daemon_id"),
     )
 
     workspace_id: uuid.UUID = Field(
@@ -48,6 +49,18 @@ class WorkspaceMemberRuntime(BaseModel, table=True):
         sa_column=Column(
             Uuid(as_uuid=True),
             ForeignKey("daemon_runtimes.id", ondelete="RESTRICT"),
+            nullable=True,
+        ),
+    )
+    # Change 2026-07-03-daemon-entity-binding task-03 / D-004:
+    # 新绑定对象——守护进程实体（取代 runtime_id 作为派发依据）。nullable 便于
+    # 过渡：旧 binding 行 daemon_id 留空 → dispatch 报「未绑定守护进程，请重绑」
+    # （task-08）。ondelete=RESTRICT：删 daemon_instance 前需先解绑，避免悬空。
+    daemon_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("daemon_instances.id", ondelete="RESTRICT"),
             nullable=True,
         ),
     )

@@ -57,7 +57,10 @@ function mockAgent(provider: string, path: string, available = true): DetectedAg
 
 function createMockClient() {
   return {
-    register: vi.fn(async () => ({ id: 'srv-rid-1' })),
+    register: vi.fn(async () => ({
+      daemon_instance_id: 'srv-inst',
+      runtimes: [{ provider: 'claude', runtime_id: 'srv-rid-1' }],
+    })),
     heartbeat: vi.fn(async () => ({})),
     markOffline: vi.fn(async () => ({})),
     claimLease: vi.fn(async () => ({ claim_token: 't', payload: {} })),

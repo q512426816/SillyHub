@@ -55,15 +55,54 @@ class SessionReopenResponse(BaseModel):
 # ── Register ────────────────────────────────────────────────────────────────
 
 
-class DaemonRegisterRequest(BaseModel):
-    """Request body for daemon runtime registration."""
+class DaemonRegisterProviderItem(BaseModel):
+    """单个 provider 上报项（per-daemon register body 内 ``providers[]`` 元素）。
 
-    name: str | None = None
-    provider: str = Field(max_length=50)  # "claude-code" | "sillyspec"
+    design §5.2：daemon 一次性上报其探测到的所有 provider，后端为每个 provider
+    upsert 一行 daemon_runtimes。
+    """
+
+    provider: str = Field(min_length=1, max_length=50)
     version: str | None = Field(default=None, max_length=50)
+    status: str = Field(default="online", max_length=20)
+
+
+class DaemonRegisterRequest(BaseModel):
+    """Per-daemon 注册请求体（design §5.2 / D-006）。
+
+    daemon 启动一次性上报其 ``daemon_local_id``（=本地 config.runtime_id，后端
+    不自生成）+ 机器级字段 + 探测到的 provider 列表。后端先 upsert
+    daemon_instances，再为每个 provider upsert daemon_runtimes，并清理 stale runtime。
+
+    WS breaking（D-007）：旧 daemon 按 per-provider body 上报（无 daemon_local_id）
+    → pydantic 校验 daemon_local_id 必填失败 → 422 拒绝。
+    """
+
+    daemon_local_id: uuid.UUID = Field(description="daemon 本地 uuid，复用身份")
+    server_url: str = Field(max_length=255)
+    hostname: str = Field(max_length=255)
     os: str | None = Field(default=None, max_length=50)
     arch: str | None = Field(default=None, max_length=50)
-    capabilities: dict | None = None
+    allowed_roots: list[str] = Field(default_factory=lambda: ["~/.sillyhub"])
+    providers: list[DaemonRegisterProviderItem] = Field(min_length=1)
+
+
+class DaemonRegisterRuntimeItem(BaseModel):
+    """register 响应内单个 provider 的运行时映射。"""
+
+    provider: str
+    runtime_id: uuid.UUID
+
+
+class DaemonRegisterResponse(BaseModel):
+    """Per-daemon 注册响应（design §5.2 step 5）。
+
+    daemon 侧缓存 ``runtimes`` 的 ``runtime_id``，用于后续 WS payload 标识
+    具体 provider 会话（连接路由按 daemon_id，但单条 WS 内仍需 runtime_id 分发）。
+    """
+
+    daemon_instance_id: uuid.UUID
+    runtimes: list[DaemonRegisterRuntimeItem]
 
 
 class OwnerRead(BaseModel):
@@ -79,19 +118,27 @@ class OwnerRead(BaseModel):
 
 
 class DaemonRuntimeRead(BaseModel):
-    """Response body for daemon runtime info."""
+    """Response body for daemon runtime info.
+
+    2026-07-03-daemon-entity-binding task-05：机器级字段（os / arch / capabilities /
+    allowed_roots / display_alias）已上提到 daemon_instances（design §4.2），本 DTO
+    这些字段保留为 optional 占位（default=None / default_factory），让现有返回该
+    DTO 的端点（disable / enable / get / list / update）在 runtime 行不含这些列时
+    不崩。语义正确的机器级视图由后续 daemon_instance Read 承载（task-06/前端）。
+    """
 
     id: uuid.UUID
+    # 机器级，已挪到 daemon_instances；此处占位 default=None 防 model_validate 崩。
     display_alias: str | None = None
     name: str | None
     provider: str | None
     version: str | None
-    os: str | None
-    arch: str | None
+    os: str | None = None
+    arch: str | None = None
     status: str | None
     last_heartbeat_at: datetime | None
-    capabilities: dict | None
-    # 2026-06-29-runtime-allowed-roots-config task-01：可访问目录沙箱
+    capabilities: dict | None = None
+    # 机器级沙箱，已挪到 daemon_instances；占位 default。
     allowed_roots: list[str] = Field(default_factory=lambda: ["~/.sillyhub"])
     owner: OwnerRead | None = None
     created_at: datetime
@@ -126,6 +173,38 @@ class DaemonRuntimeListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+# ── Daemon instances list ─────────────────────────────────────────────────────
+# DTO for GET /api/daemon/instances (task-10 / FR-09). Used by the frontend
+# workspace-daemon-switcher to list online daemon instances for the current user.
+
+
+class DaemonInstanceProviderItem(BaseModel):
+    """A single provider runtime nested under a daemon instance.
+
+    ``provider`` is the provider slug (e.g. "claude", "codex").
+    ``status`` is the runtime status within this daemon.
+    """
+
+    provider: str
+    status: str
+    version: str | None = None
+
+
+class DaemonInstanceRead(BaseModel):
+    """Frontend-oriented daemon instance DTO with nested provider info.
+
+    Used by GET /api/daemon/instances for the workspace-daemon-switcher
+    (task-10, design §7). Includes the list of provider runtimes so the
+    frontend can render provider badges without an extra HTTP round-trip.
+    """
+
+    id: uuid.UUID
+    hostname: str
+    display_alias: str | None = None
+    status: str
+    providers: list[DaemonInstanceProviderItem] = Field(default_factory=list)
 
 
 # ── Heartbeat ───────────────────────────────────────────────────────────────

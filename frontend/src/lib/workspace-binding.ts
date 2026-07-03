@@ -7,6 +7,8 @@ import { apiFetch } from "./api";
 export interface MemberBindingView {
   workspace_id: string;
   user_id: string;
+  daemon_id: string | null;
+  /** @deprecated kept for backward compat with existing bindings */
   runtime_id: string | null;
   root_path: string;
   path_source: string;
@@ -19,7 +21,7 @@ export interface MemberBindingView {
 }
 
 export interface MemberBindingUpsertRequest {
-  runtime_id: string | null;
+  daemon_id: string | null;
   root_path: string;
   path_source: string;
 }

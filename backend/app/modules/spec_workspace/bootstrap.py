@@ -565,13 +565,17 @@ async def _execute_bootstrap_agent_run(
             delivered = await placement.notify_interactive_dispatch(dispatch)
             if delivered:
                 hub = get_daemon_ws_hub()
+                # send_session_control routes by daemon_id (WS connection key,
+                # design §5.3); payload carries runtime_id for provider session
+                # identification on the daemon side.
                 await hub.send_session_control(
-                    dispatch.runtime_id,
+                    dispatch.daemon_id,
                     DAEMON_MSG_SESSION_INJECT,
                     {
                         "session_id": str(session_obj.id),
                         "lease_id": str(dispatch.lease_id),
                         "run_id": str(run.id),
+                        "runtime_id": str(dispatch.runtime_id),
                         "prompt": bundle.step_prompt,
                         "claim_token": dispatch.claim_token,
                     },

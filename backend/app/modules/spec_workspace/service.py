@@ -181,7 +181,7 @@ class SpecWorkspaceService:
         self,
         workspace_id: uuid.UUID,
         *,
-        runtime_id: uuid.UUID | None = None,
+        daemon_id: uuid.UUID | None = None,
         root_path: str | None = None,
     ) -> SpecWorkspace:
         """Import spec files from the client ``.sillyspec`` directory into the
@@ -195,8 +195,11 @@ class SpecWorkspaceService:
 
         Args:
             workspace_id: workspace UUID。
-            runtime_id: daemon runtime UUID（daemon-client workspace 必填，路由 RPC）。
+            daemon_id: daemon_instance UUID（daemon-client workspace 必填，路由 RPC）。
             root_path: workspace root_path（容器路径或 daemon-client 宿主机路径）。
+
+        Change 2026-07-03-daemon-entity-binding task-09: parameter ``runtime_id``
+        replaced by ``daemon_id`` — ``hub.send_rpc`` now routes by daemon entity.
         """
         spec_ws = await self.get(workspace_id)
 
@@ -210,7 +213,10 @@ class SpecWorkspaceService:
             )
         ws_root_path = root_path or ws.root_path or ""
         ws_path_source = ws.path_source or "server-local"
-        ws_runtime_id = runtime_id or ws.daemon_runtime_id
+        # transitional fallback: use workspace's legacy daemon_runtime_id when
+        # no daemon_id was provided (migration period; runtime_id used as WS
+        # routing key, best-effort under daemon-entity-binding model).
+        ws_daemon_id = daemon_id or ws.daemon_runtime_id
 
         if not ws_root_path:
             raise AppError(
@@ -220,7 +226,7 @@ class SpecWorkspaceService:
             )
 
         # ── daemon-client：经 WS RPC 让 daemon 打包 → 回传 → apply_sync ──
-        if ws_path_source == "daemon-client" and ws_runtime_id:
+        if ws_path_source == "daemon-client" and ws_daemon_id:
             # ql-20260701-001：daemon RPC 错误码语义透传。原实现用 except Exception 把
             # DaemonRuntimeOffline(504)/DaemonRpcTimeout(504)/DaemonRpcConflict(409)/
             # DaemonRpcRemoteError(403|502) 全吞成 502 SPEC_IMPORT_RPC_FAILED，破坏既有
@@ -241,7 +247,7 @@ class SpecWorkspaceService:
             daemon_root = resolve_root_path_for_daemon(ws_root_path, ws_path_source)
             try:
                 result = await hub.send_rpc(
-                    ws_runtime_id,
+                    ws_daemon_id,
                     "get_spec_bundle",
                     {"root_path": daemon_root},
                     timeout=60.0,
@@ -255,11 +261,11 @@ class SpecWorkspaceService:
                 if exc.code == "forbidden":
                     raise DaemonRpcForbiddenError(
                         f"Daemon get_spec_bundle forbidden: {exc.message}",
-                        details={"runtime_id": str(ws_runtime_id), "daemon_code": exc.code},
+                        details={"daemon_id": str(ws_daemon_id), "daemon_code": exc.code},
                     ) from exc
                 raise DaemonRpcRemoteGatewayError(
                     f"Daemon get_spec_bundle failed: {exc.message}",
-                    details={"runtime_id": str(ws_runtime_id), "daemon_code": exc.code},
+                    details={"daemon_id": str(ws_daemon_id), "daemon_code": exc.code},
                 ) from exc
             except Exception as exc:
                 raise AppError(
@@ -326,7 +332,7 @@ class SpecWorkspaceService:
         self,
         workspace_id: uuid.UUID,
         *,
-        runtime_id: uuid.UUID | None = None,
+        daemon_id: uuid.UUID | None = None,
         root_path: str | None = None,
     ) -> AsyncIterator[str]:
         """SSE event generator for import（D-001 流式，2026-07-01-spec-import-...）。
@@ -354,13 +360,16 @@ class SpecWorkspaceService:
             return
         ws_root_path = root_path or ws.root_path or ""
         ws_path_source = ws.path_source or "server-local"
-        ws_runtime_id = runtime_id or ws.daemon_runtime_id
+        # transitional fallback: use workspace's legacy daemon_runtime_id when
+        # no daemon_id was provided (migration period; runtime_id used as WS
+        # routing key, best-effort under daemon-entity-binding model).
+        ws_daemon_id = daemon_id or ws.daemon_runtime_id
         if not ws_root_path:
             yield _evt("error", code="SPEC_IMPORT_NO_ROOT_PATH", message="no root_path")
             return
 
         tar_bytes: bytes
-        if ws_path_source == "daemon-client" and ws_runtime_id:
+        if ws_path_source == "daemon-client" and ws_daemon_id:
             from app.modules.daemon.runtime.service import (
                 DaemonRpcConflict,
                 DaemonRpcForbiddenError,
@@ -377,7 +386,7 @@ class SpecWorkspaceService:
             daemon_root = resolve_root_path_for_daemon(ws_root_path, ws_path_source)
             rpc_task = asyncio.ensure_future(
                 hub.send_rpc(
-                    ws_runtime_id,
+                    ws_daemon_id,
                     "get_spec_bundle",
                     {"root_path": daemon_root},
                     timeout=60.0,
@@ -477,7 +486,7 @@ class SpecWorkspaceService:
         self,
         workspace_id: uuid.UUID,
         *,
-        runtime_id: uuid.UUID | None = None,
+        daemon_id: uuid.UUID | None = None,
         root_path: str | None = None,
     ) -> dict[str, str]:
         """server-local 手动同步：本机 .sillyspec 打包 → apply_sync 落盘返 done。
@@ -485,7 +494,7 @@ class SpecWorkspaceService:
         复用 ``import_from_repo`` 的 server-local 分支（容器内打包 .sillyspec 整树 →
         apply_sync 覆盖 spec_root + reparse）。返回 ``{"status": "done"}``。
         """
-        await self.import_from_repo(workspace_id, runtime_id=runtime_id, root_path=root_path)
+        await self.import_from_repo(workspace_id, daemon_id=daemon_id, root_path=root_path)
         return {"status": "done"}
 
     async def sync_manual_get_pending(

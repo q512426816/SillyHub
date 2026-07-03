@@ -87,6 +87,14 @@ vi.mock("@/lib/workspace-binding", () => ({
   fetchMyBinding: bindingApi.fetchMyBinding,
 }));
 
+const daemonApi = vi.hoisted(() => ({
+  listDaemonRuntimes: vi.fn(),
+}));
+vi.mock("@/lib/daemon", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
+  return { ...actual, getDaemonRuntime: vi.fn(async () => null), listDaemonRuntimes: daemonApi.listDaemonRuntimes };
+});
+
 const componentsApi = vi.hoisted(() => ({ listComponents: vi.fn() }));
 vi.mock("@/lib/components", () => ({ listComponents: componentsApi.listComponents }));
 
@@ -96,10 +104,6 @@ vi.mock("@/lib/agent", async () => {
   return { ...actual, listAgentRuns: vi.fn(async () => []) };
 });
 vi.mock("@/lib/runtime", () => ({ getRuntimeProgress: vi.fn(async () => null) }));
-vi.mock("@/lib/daemon", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
-  return { ...actual, getDaemonRuntime: vi.fn(async () => null) };
-});
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
 
@@ -140,6 +144,7 @@ function mockDefaultBinding() {
   bindingApi.fetchMyBinding.mockResolvedValue({
     workspace_id: "ws-1",
     user_id: "user-1",
+    daemon_id: null,
     runtime_id: "rid-1",
     root_path: "C:/proj",
     path_source: "daemon-client",
@@ -171,6 +176,7 @@ async function renderWithStrategy(
     bindingApi.fetchMyBinding.mockResolvedValue({
       workspace_id: "ws-1",
       user_id: "user-1",
+      daemon_id: null,
       runtime_id: "rid-1",
       root_path: "C:/proj",
       path_source: "daemon-client",
@@ -458,5 +464,122 @@ describe("WorkspaceDetailPage daemon-client 扫描入口（task-14 / D-006@v1 + 
     await waitFor(() => {
       expect(screen.getByText("同步失败。")).toBeInTheDocument();
     });
+  });
+
+  // ── task-11 / daemon-entity-binding：default_agent 独立选择器 ──
+
+  it("default_agent 卡片展示：daemon 未绑时显示占位提示", async () => {
+    await renderWithStrategy("repo-native");
+    // daemon_id=null → 占位提示
+    expect(screen.getByText("请先绑定守护进程。")).toBeInTheDocument();
+  });
+
+  it("default_agent 卡片展示：已绑 daemon 有在线 provider 时显示 provider 选择器", async () => {
+    daemonApi.listDaemonRuntimes.mockResolvedValue([
+      // 匹配绑定 daemon "did-1" 的一个在线 provider
+      {
+        id: "rt-claude",
+        daemon_instance_id: "did-1",
+        provider: "claude",
+        status: "online",
+        name: "Claude Code",
+        version: "2.0.0",
+        allowed_roots: [],
+        created_at: "2026-07-01T00:00:00Z",
+        updated_at: "2026-07-01T00:00:00Z",
+      },
+      // 不匹配的 daemon（应被过滤）
+      {
+        id: "rt-codex",
+        daemon_instance_id: "did-other",
+        provider: "codex",
+        status: "online",
+        name: "Codex",
+        version: "0.100.0",
+        allowed_roots: [],
+        created_at: "2026-07-01T00:00:00Z",
+        updated_at: "2026-07-01T00:00:00Z",
+      },
+    ]);
+
+    const { ws, specWs } = makeWorkspace("repo-native");
+    ws.default_agent = null;
+    ws.default_model = null;
+    workspacesApi.getWorkspace.mockResolvedValue(ws);
+    specApi.getSpecWorkspace.mockResolvedValue(specWs);
+    workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1" });
+    componentsApi.listComponents.mockResolvedValue({ items: [], total: 3 });
+    // 设置 binding 有 daemon_id
+    bindingApi.fetchMyBinding.mockResolvedValue({
+      workspace_id: "ws-1",
+      user_id: "user-1",
+      daemon_id: "did-1",
+      runtime_id: "rid-1",
+      root_path: "C:/proj",
+      path_source: "daemon-client",
+      synced_at: null,
+      last_scan_at: null,
+      init_synced_at: "2026-07-02T10:00:00Z",
+    });
+
+    render(<WorkspaceDetailPage params={{ id: "ws-1" }} />);
+    await waitFor(() =>
+      expect(screen.getAllByText("multi-agent-platform").length).toBeGreaterThan(0),
+    );
+
+    // 不应出现"请先绑定"占位
+    expect(screen.queryByText("请先绑定守护进程。")).not.toBeInTheDocument();
+    // 应该有 provider 选择器（<select> 元素）
+    const select = screen.getByRole("combobox");
+    expect(select).toBeInTheDocument();
+    // 选项应包含 claude
+    expect(select).toContainHTML("Claude Code");
+    // 不应包含 codex（那是另一个 daemon 的）
+    expect(select).not.toContainHTML("Codex");
+  });
+
+  it("default_agent 卡片展示：已绑 daemon 无在线 provider 时显示无 provider 提示", async () => {
+    daemonApi.listDaemonRuntimes.mockResolvedValue([
+      // 匹配 daemon 但 status=offline，应被过滤
+      {
+        id: "rt-claude",
+        daemon_instance_id: "did-1",
+        provider: "claude",
+        status: "offline",
+        name: "Claude Code",
+        version: "2.0.0",
+        allowed_roots: [],
+        created_at: "2026-07-01T00:00:00Z",
+        updated_at: "2026-07-01T00:00:00Z",
+      },
+    ]);
+
+    const { ws, specWs } = makeWorkspace("repo-native");
+    ws.default_agent = null;
+    ws.default_model = null;
+    workspacesApi.getWorkspace.mockResolvedValue(ws);
+    specApi.getSpecWorkspace.mockResolvedValue(specWs);
+    workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1" });
+    componentsApi.listComponents.mockResolvedValue({ items: [], total: 3 });
+    bindingApi.fetchMyBinding.mockResolvedValue({
+      workspace_id: "ws-1",
+      user_id: "user-1",
+      daemon_id: "did-1",
+      runtime_id: "rid-1",
+      root_path: "C:/proj",
+      path_source: "daemon-client",
+      synced_at: null,
+      last_scan_at: null,
+      init_synced_at: "2026-07-02T10:00:00Z",
+    });
+
+    render(<WorkspaceDetailPage params={{ id: "ws-1" }} />);
+    await waitFor(() =>
+      expect(screen.getAllByText("multi-agent-platform").length).toBeGreaterThan(0),
+    );
+
+    expect(
+      screen.getByText("当前绑定的守护进程无在线智能体提供方，请先确认守护进程已启用。"),
+    ).toBeInTheDocument();
   });
 });

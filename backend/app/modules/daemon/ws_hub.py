@@ -39,11 +39,13 @@ RPC_DEFAULT_TIMEOUT = 10.0
 
 
 class DaemonWsHub:
-    """WebSocket connection manager for daemon runtimes.
+    """WebSocket connection manager for daemon processes (task-06 / D-006).
 
-    Maintains a registry of active WebSocket connections keyed by runtime_id.
-    Supports broadcasting task_available notifications and per-runtime
-    message sending with dedup protection and slow-connection eviction.
+    Maintains a registry of active WebSocket connections keyed by
+    ``daemon_instance_id`` (one connection per daemon entity, regardless of how
+    many providers it fronts). Server→daemon payloads still carry
+    ``runtime_id`` to identify the provider session on the daemon side
+    (design §5.3); routing is by ``daemon_id`` only.
     """
 
     def __init__(self) -> None:
@@ -58,46 +60,47 @@ class DaemonWsHub:
 
     # ── Connection lifecycle ──────────────────────────────────────────────────
 
-    async def connect(self, runtime_id: uuid.UUID, ws: WebSocket) -> None:
-        """Accept and register a WebSocket connection for a daemon runtime.
+    async def connect(self, daemon_id: uuid.UUID, ws: WebSocket) -> None:
+        """Accept and register a WebSocket connection for a daemon entity.
 
-        If a connection already exists for the given runtime_id, the old one
-        is closed before the new one is registered.
+        If a connection already exists for the given ``daemon_id``, the old one
+        is closed before the new one is registered (design §9.3, code=4000
+        replaced — same daemon reconnecting evicts the stale socket).
         """
         async with self._lock:
-            existing = self._connections.get(runtime_id)
+            existing = self._connections.get(daemon_id)
             if existing is not None:
                 log.warning(
                     "ws_replacing_existing_connection",
-                    runtime_id=str(runtime_id),
+                    daemon_id=str(daemon_id),
                 )
                 try:
                     await existing.close(code=4000, reason="replaced")
                 except Exception:
                     pass
 
-            self._connections[runtime_id] = ws
+            self._connections[daemon_id] = ws
 
         log.info(
             "ws_daemon_connected",
-            runtime_id=str(runtime_id),
+            daemon_id=str(daemon_id),
             total_connected=len(self._connections),
         )
 
-    async def disconnect(self, runtime_id: uuid.UUID) -> None:
-        """Remove a daemon runtime's WebSocket connection."""
+    async def disconnect(self, daemon_id: uuid.UUID) -> None:
+        """Remove a daemon entity's WebSocket connection."""
         async with self._lock:
-            removed = self._connections.pop(runtime_id, None)
+            removed = self._connections.pop(daemon_id, None)
 
         if removed is not None:
             # Cancel any pending RPCs so awaiting send_rpc callers fail fast
             # (DaemonRuntimeOffline) instead of waiting for the full 10s timeout.
-            # rpc_id is not bound to runtime_id, so all pending entries are
+            # rpc_id is not bound to daemon_id, so all pending entries are
             # cancelled — this is rare and logged for visibility.
             await self.cancel_all_pending()
             log.info(
                 "ws_daemon_disconnected",
-                runtime_id=str(runtime_id),
+                daemon_id=str(daemon_id),
                 total_connected=len(self._connections),
             )
 
@@ -105,17 +108,17 @@ class DaemonWsHub:
 
     async def send_to_runtime(
         self,
-        runtime_id: uuid.UUID,
+        daemon_id: uuid.UUID,
         message: dict[str, Any],
     ) -> bool:
-        """Send a JSON message to a specific runtime.
+        """Send a JSON message to the daemon entity owning ``daemon_id``.
 
         Returns True if the message was sent successfully, False otherwise.
         Evicts slow connections whose send buffer is full.
         """
-        ws = self._connections.get(runtime_id)
+        ws = self._connections.get(daemon_id)
         if ws is None:
-            log.warning("ws_send_no_connection", runtime_id=str(runtime_id))
+            log.warning("ws_send_no_connection", daemon_id=str(daemon_id))
             return False
 
         try:
@@ -127,17 +130,17 @@ class DaemonWsHub:
         except TimeoutError:
             log.warning(
                 "ws_send_timeout_evicting",
-                runtime_id=str(runtime_id),
+                daemon_id=str(daemon_id),
             )
-            await self.disconnect(runtime_id)
+            await self.disconnect(daemon_id)
             return False
         except Exception:
             log.warning(
                 "ws_send_failed",
-                runtime_id=str(runtime_id),
+                daemon_id=str(daemon_id),
                 exc_info=True,
             )
-            await self.disconnect(runtime_id)
+            await self.disconnect(daemon_id)
             return False
 
     async def broadcast(
@@ -146,15 +149,16 @@ class DaemonWsHub:
         *,
         exclude: set[uuid.UUID] | None = None,
     ) -> int:
-        """Broadcast a JSON message to all connected runtimes.
+        """Broadcast a JSON message to all connected daemon entities.
 
-        Returns the number of runtimes the message was sent to.
+        Returns the number of daemon entities the message was sent to.
+        ``exclude`` is a set of daemon_ids to skip.
         """
         exclude = exclude or set()
-        targets = [rid for rid in self._connections if rid not in exclude]
+        targets = [did for did in self._connections if did not in exclude]
         sent = 0
-        for rid in targets:
-            if await self.send_to_runtime(rid, message):
+        for did in targets:
+            if await self.send_to_runtime(did, message):
                 sent += 1
         return sent
 
@@ -162,22 +166,33 @@ class DaemonWsHub:
 
     async def notify_task_available(
         self,
-        runtime_id: uuid.UUID,
+        daemon_id: uuid.UUID,
         task_id: uuid.UUID | None = None,
         lease_id: uuid.UUID | None = None,
+        *,
+        payload_runtime_id: uuid.UUID | None = None,
     ) -> bool:
-        """Send a task_available notification to a specific runtime.
+        """Send a task_available notification to a specific daemon entity.
+
+        Routing is by ``daemon_id`` (the WS connection key, design §5.3). The
+        payload still carries ``runtime_id`` so the daemon can dispatch the wake
+        to the correct provider session; ``payload_runtime_id`` defaults to
+        ``daemon_id`` when the caller has no provider-level runtime_id to inject
+        (keeps legacy hub-level tests green).
 
         Uses a sliding-window dedup to avoid sending duplicate wakeups for
         the same logical event within a short timeframe.
         """
+        # Payload runtime_id (provider session discriminator, design §5.3).
+        prid = payload_runtime_id if payload_runtime_id is not None else daemon_id
+
         # Build a dedup key from the distinguishing identifiers.
-        dedup_key = f"{runtime_id}:{task_id}:{lease_id}"
+        dedup_key = f"{daemon_id}:{task_id}:{lease_id}"
 
         if dedup_key in self._dedup_window:
             log.debug(
                 "ws_wakeup_dedup_skip",
-                runtime_id=str(runtime_id),
+                daemon_id=str(daemon_id),
                 dedup_key=dedup_key,
             )
             return True  # Already sent; caller can treat as success.
@@ -187,16 +202,17 @@ class DaemonWsHub:
         message = {
             "type": DAEMON_MSG_TASK_AVAILABLE,
             "payload": {
-                "runtime_id": str(runtime_id),
+                "runtime_id": str(prid),
                 "task_id": str(task_id) if task_id else None,
                 "lease_id": str(lease_id) if lease_id else None,
             },
         }
 
-        result = await self.send_to_runtime(runtime_id, message)
+        result = await self.send_to_runtime(daemon_id, message)
         log.info(
             "ws_task_available_sent",
-            runtime_id=str(runtime_id),
+            daemon_id=str(daemon_id),
+            runtime_id=str(prid),
             task_id=str(task_id) if task_id else None,
             success=result,
         )
@@ -204,17 +220,21 @@ class DaemonWsHub:
 
     async def send_wakeup(
         self,
-        runtime_id: uuid.UUID | str,
+        daemon_id: uuid.UUID | str,
         task_id: uuid.UUID | str | None = None,
         lease_id: uuid.UUID | str | None = None,
+        *,
+        payload_runtime_id: uuid.UUID | str | None = None,
     ) -> bool:
-        """Send a wakeup signal to a daemon runtime.
+        """Send a wakeup signal to a daemon entity.
 
         Convenience wrapper around ``notify_task_available`` that accepts
         both ``uuid.UUID`` and ``str`` arguments so callers do not need
-        to convert explicitly.
+        to convert explicitly. ``payload_runtime_id`` (provider session
+        discriminator in the payload, design §5.3) is optional and defaults
+        to ``daemon_id``.
         """
-        rid = uuid.UUID(str(runtime_id)) if not isinstance(runtime_id, uuid.UUID) else runtime_id
+        did = uuid.UUID(str(daemon_id)) if not isinstance(daemon_id, uuid.UUID) else daemon_id
         tid = (
             uuid.UUID(str(task_id))
             if task_id is not None and not isinstance(task_id, uuid.UUID)
@@ -225,65 +245,85 @@ class DaemonWsHub:
             if lease_id is not None and not isinstance(lease_id, uuid.UUID)
             else lease_id
         )
-        return await self.notify_task_available(rid, task_id=tid, lease_id=lid)
+        prid = (
+            uuid.UUID(str(payload_runtime_id))
+            if payload_runtime_id is not None and not isinstance(payload_runtime_id, uuid.UUID)
+            else payload_runtime_id
+        )
+        return await self.notify_task_available(
+            did, task_id=tid, lease_id=lid, payload_runtime_id=prid
+        )
 
     async def send_heartbeat_ack(
         self,
-        runtime_id: uuid.UUID,
+        daemon_id: uuid.UUID,
         pending_operations: dict[str, Any] | None = None,
+        *,
+        payload_runtime_id: uuid.UUID | None = None,
     ) -> bool:
-        """Send a heartbeat_ack message to a specific runtime."""
+        """Send a heartbeat_ack message to the daemon entity owning ``daemon_id``.
+
+        The payload carries ``runtime_id`` so the daemon can correlate the ack
+        to a provider session (design §5.3); defaults to ``daemon_id`` when
+        the caller does not supply a provider-level runtime_id.
+        """
+        prid = payload_runtime_id if payload_runtime_id is not None else daemon_id
         message = {
             "type": DAEMON_MSG_HEARTBEAT_ACK,
             "payload": {
-                "runtime_id": str(runtime_id),
+                "runtime_id": str(prid),
                 "pending_operations": pending_operations or {},
             },
         }
-        return await self.send_to_runtime(runtime_id, message)
+        return await self.send_to_runtime(daemon_id, message)
 
     async def send_session_control(
         self,
-        runtime_id: uuid.UUID,
+        daemon_id: uuid.UUID,
         msg_type: str,
         payload: dict[str, Any],
     ) -> bool:
         """Send an interactive-session control message (task-03 / FR-02/04/05).
 
         ``msg_type`` is one of ``DAEMON_MSG_SESSION_INJECT`` /
-        ``DAEMON_MSG_SESSION_INTERRUPT`` / ``DAEMON_MSG_SESSION_END`` and
-        ``payload`` carries the matching SessionInjectPayload /
-        SessionControlPayload dict. Internally wraps ``send_to_runtime`` so the
-        caller only needs to know whether the message was delivered.
+        ``DAEMON_MSG_SESSION_INTERRUPT`` / ``DAEMON_MSG_SESSION_END`` /
+        ``DAEMON_MSG_SESSION_RESUME`` and ``payload`` carries the matching
+        SessionInjectPayload / SessionControlPayload dict — including the
+        provider ``runtime_id`` so the daemon dispatches to the right session
+        (design §5.3). Routing is by ``daemon_id``. Internally wraps
+        ``send_to_runtime`` so the caller only needs to know whether the
+        message was delivered.
 
-        Returns True on successful send, False when the runtime is offline or
+        Returns True on successful send, False when the daemon is offline or
         the send timed out / failed (the slow-connection eviction policy is
         inherited from ``send_to_runtime``). The service layer decides the
         convergence policy per call site (create/inject → raise runtime_offline,
         interrupt → raise runtime_offline, end → structured warning only).
         """
         message = {"type": msg_type, "payload": payload}
-        return await self.send_to_runtime(runtime_id, message)
+        return await self.send_to_runtime(daemon_id, message)
 
     async def send_permission_response(
         self,
-        runtime_id: uuid.UUID,
+        daemon_id: uuid.UUID,
         payload: dict[str, Any],
     ) -> bool:
         """Send a PERMISSION_RESPONSE downlink to the daemon (task-08 / FR-07 / D-007@v1).
 
         Thin wrapper around ``send_to_runtime`` so the caller (permission_service)
-        does not need to assemble the envelope. Returns True on successful send,
-        False when the runtime is offline or the send timed out — the service
-        layer surfaces this as ``DaemonRuntimeOffline`` (504) and relies on the
-        daemon-side fallback timer to fail-closed deny.
+        does not need to assemble the envelope. ``payload`` carries the
+        provider ``runtime_id`` for daemon-side session correlation
+        (design §5.3); routing is by ``daemon_id``. Returns True on successful
+        send, False when the daemon is offline or the send timed out — the
+        service layer surfaces this as ``DaemonRuntimeOffline`` (504) and
+        relies on the daemon-side fallback timer to fail-closed deny.
         """
         message = {"type": DAEMON_MSG_PERMISSION_RESPONSE, "payload": payload}
-        return await self.send_to_runtime(runtime_id, message)
+        return await self.send_to_runtime(daemon_id, message)
 
     async def send_self_update(
         self,
-        runtime_id: uuid.UUID,
+        daemon_id: uuid.UUID,
         version: str | None = None,
     ) -> bool:
         """推送 daemon 自更新指令（Server → Daemon）。
@@ -294,13 +334,13 @@ class DaemonWsHub:
         if version:
             payload["version"] = version
         message = {"type": DAEMON_MSG_SELF_UPDATE, "payload": payload}
-        return await self.send_to_runtime(runtime_id, message)
+        return await self.send_to_runtime(daemon_id, message)
 
     # ── RPC correlation ──────────────────────────────────────────────────────
 
     async def send_rpc(
         self,
-        runtime_id: uuid.UUID,
+        daemon_id: uuid.UUID,
         method: str,
         params: dict[str, Any],
         *,
@@ -310,7 +350,7 @@ class DaemonWsHub:
 
         Returns the daemon ``result`` dict on success.
         Raises:
-            DaemonRuntimeOffline: runtime has no active WS connection or send failed.
+            DaemonRuntimeOffline: daemon has no active WS connection or send failed.
             DaemonRpcConflict: rpc_id collision (UUID4 practical impossibility).
             DaemonRpcTimeout: no reply within ``timeout`` seconds (R-01).
             DaemonRpcRemoteError: daemon returned an error dict (caller maps to HTTP).
@@ -327,10 +367,10 @@ class DaemonWsHub:
                     f"rpc_id '{rpc_id}' already pending.",
                     details={"rpc_id": rpc_id},
                 )
-            if not self.is_connected(runtime_id):
+            if not self.is_connected(daemon_id):
                 raise DaemonRuntimeOffline(
-                    f"daemon runtime '{runtime_id}' is offline (no WS connection).",
-                    details={"runtime_id": str(runtime_id)},
+                    f"daemon '{daemon_id}' is offline (no WS connection).",
+                    details={"daemon_id": str(daemon_id)},
                 )
             self._pending_rpcs[rpc_id] = future
 
@@ -346,12 +386,12 @@ class DaemonWsHub:
         # send_to_runtime evicts + disconnects on send failure, which in turn
         # triggers cancel_all_pending (clearing our future). We still clean up
         # defensively before raising so the map never holds a dangling entry.
-        sent = await self.send_to_runtime(runtime_id, message)
+        sent = await self.send_to_runtime(daemon_id, message)
         if not sent:
             await self._cancel_rpc(rpc_id)
             raise DaemonRuntimeOffline(
-                f"daemon runtime '{runtime_id}' WS send failed (offline).",
-                details={"runtime_id": str(runtime_id), "rpc_id": rpc_id},
+                f"daemon '{daemon_id}' WS send failed (offline).",
+                details={"daemon_id": str(daemon_id), "rpc_id": rpc_id},
             )
 
         # 3. Await the reply with timeout.
@@ -362,7 +402,7 @@ class DaemonWsHub:
             raise DaemonRpcTimeout(
                 f"daemon rpc '{method}' timed out after {timeout}s.",
                 details={
-                    "runtime_id": str(runtime_id),
+                    "daemon_id": str(daemon_id),
                     "rpc_id": rpc_id,
                     "timeout_seconds": timeout,
                 },
@@ -371,8 +411,8 @@ class DaemonWsHub:
             # future.cancel() — most likely disconnect → cancel_all_pending.
             # Re-raise as DaemonRuntimeOffline so callers map to 504.
             raise DaemonRuntimeOffline(
-                f"daemon runtime '{runtime_id}' disconnected mid-rpc.",
-                details={"runtime_id": str(runtime_id), "rpc_id": rpc_id},
+                f"daemon '{daemon_id}' disconnected mid-rpc.",
+                details={"daemon_id": str(daemon_id), "rpc_id": rpc_id},
             ) from None
 
         # 4. Unpack result/error.
@@ -419,7 +459,7 @@ class DaemonWsHub:
     async def cancel_all_pending(self) -> None:
         """Cancel every pending RPC future (called on daemon disconnect).
 
-        rpc_id is not bound to runtime_id, so we cancel the whole map; this is
+        rpc_id is not bound to daemon_id, so we cancel the whole map; this is
         rare and logged for visibility. Awaiters will surface
         DaemonRuntimeOffline via the CancelledError handler in send_rpc.
         """
@@ -436,18 +476,28 @@ class DaemonWsHub:
 
     # ── Query helpers ─────────────────────────────────────────────────────────
 
-    def is_connected(self, runtime_id: uuid.UUID) -> bool:
-        """Check if a runtime has an active WebSocket connection."""
-        return runtime_id in self._connections
+    def is_connected(self, daemon_id: uuid.UUID) -> bool:
+        """Check if a daemon entity has an active WebSocket connection."""
+        return daemon_id in self._connections
 
     @property
     def connected_count(self) -> int:
-        """Return the number of active WebSocket connections."""
+        """Return the number of active WebSocket connections (= online daemons)."""
         return len(self._connections)
 
     @property
+    def connected_daemon_ids(self) -> list[uuid.UUID]:
+        """Return a list of currently connected daemon_instance_ids."""
+        return list(self._connections.keys())
+
+    @property
     def connected_runtime_ids(self) -> list[uuid.UUID]:
-        """Return a list of currently connected runtime IDs."""
+        """Deprecated alias kept for transitional callers (placement.py).
+
+        task-06 / design §5.3 renamed the semantics to daemon_instance_id;
+        placement.py is adapted in its own task. Returns the connection keys
+        (now daemon_ids). New code should use :attr:`connected_daemon_ids`.
+        """
         return list(self._connections.keys())
 
 

@@ -13,11 +13,20 @@ import {
   DEFAULT_CONFIG,
   DEFAULT_CONFIG_DIR,
   DEFAULT_CONFIG_PATH,
+  configPathForServer,
+  serverHash,
   type DaemonConfig,
 } from '../src/config';
 
 /** UUID v4 正则（crypto.randomUUID() 输出格式）。 */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * 测试用固定 server_url。2026-07-03-daemon-entity-binding task-04：loadConfig
+ * 签名改为 (server_url, opts?)，现有 path-based 用例通过 opts.path 覆盖文件定位，
+ * server_url 仅作为占位（不参与路径计算），故取与 DEFAULT_CONFIG 一致的默认值。
+ */
+const TEST_SERVER = 'http://localhost:8000';
 
 describe('config', () => {
   let tmpDir: string;
@@ -117,7 +126,7 @@ describe('config', () => {
 
   describe('AC-02 文件不存在', () => {
     it('返回所有默认值，runtime_id 为合法 uuid v4', async () => {
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.server_url).toBe('http://localhost:8000');
       expect(cfg.token).toBeNull();
       expect(cfg.profile).toBe('default');
@@ -129,7 +138,7 @@ describe('config', () => {
     });
 
     it('自动生成的 runtime_id 立即落盘（对齐 Python _load 末尾 save）', async () => {
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       const raw = await readFile(configPath, 'utf-8');
       expect(JSON.parse(raw).runtime_id).toBe(cfg.runtime_id);
     });
@@ -139,13 +148,13 @@ describe('config', () => {
 
   describe('AC-01 save/load 往返', () => {
     it('改字段后 save 再 load，被改字段一致、runtime_id 不变', async () => {
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       cfg.token = 'test-token-123';
       cfg.server_url = 'http://custom:9999';
       cfg.log_level = 'debug';
       await saveConfig(cfg, configPath);
 
-      const reloaded = await loadConfig(configPath);
+      const reloaded = await loadConfig(TEST_SERVER, { path: configPath });
       expect(reloaded.token).toBe('test-token-123');
       expect(reloaded.server_url).toBe('http://custom:9999');
       expect(reloaded.log_level).toBe('debug');
@@ -165,7 +174,7 @@ describe('config', () => {
   describe('缺字段合并默认', () => {
     it('只写 token 的 config.json，其余补默认、runtime_id 仍生成', async () => {
       await writeFile(configPath, JSON.stringify({ token: 'partial' }), 'utf-8');
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.token).toBe('partial');
       expect(cfg.server_url).toBe('http://localhost:8000');
       expect(cfg.poll_interval).toBe(30);
@@ -175,19 +184,19 @@ describe('config', () => {
     it('runtime_id 已存在时不重新生成', async () => {
       const existing = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
       await writeFile(configPath, JSON.stringify({ runtime_id: existing }), 'utf-8');
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.runtime_id).toBe(existing);
     });
 
     it('runtime_id 为 null（用户写 null）也触发生成（边界 R5）', async () => {
       await writeFile(configPath, JSON.stringify({ runtime_id: null }), 'utf-8');
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.runtime_id).toMatch(UUID_RE);
     });
 
     it('runtime_id 为空串也触发生成', async () => {
       await writeFile(configPath, JSON.stringify({ runtime_id: '' }), 'utf-8');
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.runtime_id).toMatch(UUID_RE);
     });
   });
@@ -209,12 +218,12 @@ describe('config', () => {
   describe('JSON 损坏', () => {
     it('损坏 JSON 抛 SyntaxError，不静默返回默认', async () => {
       await writeFile(configPath, '{ invalid json', 'utf-8');
-      await expect(loadConfig(configPath)).rejects.toThrow(SyntaxError);
+      await expect(loadConfig(TEST_SERVER, { path: configPath })).rejects.toThrow(SyntaxError);
     });
 
     it('空文件（0 字节）抛错', async () => {
       await writeFile(configPath, '', 'utf-8');
-      await expect(loadConfig(configPath)).rejects.toThrow();
+      await expect(loadConfig(TEST_SERVER, { path: configPath })).rejects.toThrow();
     });
   });
 
@@ -222,7 +231,7 @@ describe('config', () => {
 
   describe('DEFAULT_CONFIG 不被污染', () => {
     it('loadConfig 后 DEFAULT_CONFIG.runtime_id 仍为空串', async () => {
-      await loadConfig(configPath);
+      await loadConfig(TEST_SERVER, { path: configPath });
       expect(DEFAULT_CONFIG.runtime_id).toBe('');
     });
 
@@ -242,7 +251,7 @@ describe('config', () => {
     });
 
     it('T1 文件不存在时 loadConfig 返回 [homedir()]（默认值兜底）', async () => {
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.allowed_roots).toEqual([homedir()]);
     });
 
@@ -258,7 +267,7 @@ describe('config', () => {
         }),
         'utf-8',
       );
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.allowed_roots).toEqual([homedir()]);
       expect(cfg.runtime_id).toBe(existing);
       expect(cfg.token).toBe('old-token');
@@ -278,7 +287,7 @@ describe('config', () => {
         }),
         'utf-8',
       );
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.allowed_roots).toEqual([resolve(dirA), resolve(dirB)]);
     });
 
@@ -293,7 +302,7 @@ describe('config', () => {
         }),
         'utf-8',
       );
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.allowed_roots).toEqual([resolve('./repos')]);
     });
 
@@ -308,7 +317,7 @@ describe('config', () => {
         }),
         'utf-8',
       );
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       // resolve 后路径应为平台分隔符，与 join(tmpDir,'sub') resolve 等价
       expect(cfg.allowed_roots).toEqual([resolve(join(tmpDir, 'sub'))]);
     });
@@ -326,7 +335,7 @@ describe('config', () => {
         }),
         'utf-8',
       );
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.allowed_roots).toEqual([a, b]);
     });
 
@@ -342,7 +351,7 @@ describe('config', () => {
         }),
         'utf-8',
       );
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.allowed_roots).toEqual([a]);
     });
 
@@ -357,7 +366,7 @@ describe('config', () => {
         }),
         'utf-8',
       );
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.allowed_roots).toEqual([homedir()]);
     });
 
@@ -369,7 +378,7 @@ describe('config', () => {
         JSON.stringify({ runtime_id: existing, allowed_roots: [] }),
         'utf-8',
       );
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.allowed_roots).toEqual([homedir()]);
     });
 
@@ -383,7 +392,7 @@ describe('config', () => {
         }),
         'utf-8',
       );
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.allowed_roots).toEqual([homedir()]);
     });
 
@@ -394,7 +403,7 @@ describe('config', () => {
         JSON.stringify({ runtime_id: existing, allowed_roots: null }),
         'utf-8',
       );
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.allowed_roots).toEqual([homedir()]);
     });
 
@@ -410,7 +419,7 @@ describe('config', () => {
       };
       const path1 = join(tmpDir, 'c1.json');
       await saveConfig(cfg1, path1);
-      const loaded = await loadConfig(path1);
+      const loaded = await loadConfig(TEST_SERVER, { path: path1 });
       expect(loaded.runtime_id).toBe(existing); // 不重生
       // 第二次 save：用 load 回来的结果（已去重 + resolve）
       const path2 = join(tmpDir, 'c2.json');
@@ -420,7 +429,7 @@ describe('config', () => {
       // parsed 后 allowed_roots 应一致
       expect(JSON.parse(raw2).allowed_roots).toEqual([dirA, dirB]);
       // 再次 load（round-trip 三次）字段稳定
-      const loaded2 = await loadConfig(path2);
+      const loaded2 = await loadConfig(TEST_SERVER, { path: path2 });
       expect(loaded2.allowed_roots).toEqual([dirA, dirB]);
     });
 
@@ -432,7 +441,7 @@ describe('config', () => {
     });
 
     it('T10/R-3 loadConfig 后修改返回的 cfg.allowed_roots 不影响 DEFAULT_CONFIG', async () => {
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       // 给返回的 cfg 追加项
       cfg.allowed_roots.push('/should/not/leak');
       // DEFAULT_CONFIG 必须仍是 [homedir()]
@@ -450,8 +459,8 @@ describe('config', () => {
       const before = await stat(configPath);
       // 等待 > 1ms 确保 mtime 分辨率可区分（部分 FS 精度仅秒级，多读几次）
       await new Promise((r) => setTimeout(r, 1100));
-      await loadConfig(configPath);
-      const cfg = await loadConfig(configPath);
+      await loadConfig(TEST_SERVER, { path: configPath });
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       const after = await stat(configPath);
       // runtime_id 已存在 → 不触发落盘；allowed_roots 规范化也不落盘
       expect(cfg.runtime_id).toBe(existing);
@@ -493,20 +502,20 @@ describe('config', () => {
     // ── AC-01：env 设完整映射，loadConfig 读到并覆盖到 spec_root_map ──
     it('AC-01 env SPEC_ROOT_MAP="/data/spec-workspaces:C:/data/spec-workspaces" → cfg.spec_root_map 等于该值', async () => {
       process.env.SPEC_ROOT_MAP = '/data/spec-workspaces:C:/data/spec-workspaces';
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.spec_root_map).toBe('/data/spec-workspaces:C:/data/spec-workspaces');
     });
 
     // ── AC-04：env 未设 → 默认空串，不报错（向后兼容旧 daemon）──
     it('AC-04 env 未设 SPEC_ROOT_MAP → cfg.spec_root_map 为空串（默认值，向后兼容）', async () => {
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.spec_root_map).toBe('');
     });
 
     // ── 边界 1：env 设空串 → 覆盖为空串（翻译器会跳过）──
     it('env 设空串 SPEC_ROOT_MAP="" → cfg.spec_root_map 为空串（空串覆盖，翻译器跳过）', async () => {
       process.env.SPEC_ROOT_MAP = '';
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.spec_root_map).toBe('');
     });
 
@@ -521,7 +530,7 @@ describe('config', () => {
         'utf-8',
       );
       process.env.SPEC_ROOT_MAP = '/data/spec-workspaces:C:/data/spec-workspaces';
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.spec_root_map).toBe('/data/spec-workspaces:C:/data/spec-workspaces');
     });
 
@@ -535,7 +544,7 @@ describe('config', () => {
         }),
         'utf-8',
       );
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       expect(cfg.spec_root_map).toBe('/from:/to');
     });
 
@@ -543,7 +552,7 @@ describe('config', () => {
     // （design §4.1：避免 host 路径被序列化到 config.json，跨机器冲突）
     it('env 注入的 spec_root_map 不落盘（saveConfig 不写 env 值，除非用户显式改 cfg 后 save）', async () => {
       process.env.SPEC_ROOT_MAP = '/data/spec-workspaces:C:/data/spec-workspaces';
-      const cfg = await loadConfig(configPath);
+      const cfg = await loadConfig(TEST_SERVER, { path: configPath });
       // loadConfig 触发 runtime_id 自动生成会落盘一次，此时 spec_root_map 不应被写入
       const raw = await readFile(configPath, 'utf-8');
       const parsed = JSON.parse(raw);

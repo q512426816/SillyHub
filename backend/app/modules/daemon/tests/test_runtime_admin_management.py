@@ -32,7 +32,7 @@ from app.core.config import get_settings
 from app.core.security import create_access_token, password_hasher
 from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
-from app.modules.daemon.model import DaemonRuntime
+from app.modules.daemon.model import DaemonInstance, DaemonRuntime
 from app.modules.workspace.model import Workspace
 
 # ── helpers ─────────────────────────────────────────────────────────────────
@@ -112,6 +112,26 @@ async def _grant_workspace_permission(
     await session.commit()
 
 
+async def _create_daemon_instance(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    hostname: str = "test-host",
+) -> DaemonInstance:
+    inst = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        hostname=hostname,
+        server_url="http://localhost:8001",
+        status="online",
+        last_heartbeat_at=datetime.now(UTC),
+    )
+    session.add(inst)
+    await session.commit()
+    await session.refresh(inst)
+    return inst
+
+
 async def _create_runtime(
     session: AsyncSession,
     user_id: uuid.UUID,
@@ -120,6 +140,7 @@ async def _create_runtime(
     provider: str = "claude",
     status: str = "online",
     version: str | None = None,
+    daemon_instance_id: uuid.UUID | None = None,
 ) -> DaemonRuntime:
     rt = DaemonRuntime(
         id=uuid.uuid4(),
@@ -128,6 +149,7 @@ async def _create_runtime(
         provider=provider,
         status=status,
         version=version,
+        daemon_instance_id=daemon_instance_id,
         last_heartbeat_at=datetime.now(UTC),
     )
     session.add(rt)
@@ -347,9 +369,19 @@ async def test_patch_runtime_display_alias_set_and_clear(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
     admin, user_a, _ = await _bootstrap_admin_and_normal_users(db_session)
-    rt = await _create_runtime(db_session, user_a.id, name="orig-name", provider="claude")
+    # display_alias 已上提到 daemon_instances（design §4.1/§4.2），test 需先建
+    # daemon_instance，再建 runtime 挂到该 instance 下。
+    inst = await _create_daemon_instance(db_session, user_a.id, hostname="orig-host")
+    rt = await _create_runtime(
+        db_session,
+        user_a.id,
+        name="orig-name",
+        provider="claude",
+        daemon_instance_id=inst.id,
+    )
 
-    # set alias
+    # set alias — display_alias 经 DaemonRuntimeRead 返回时是 None（字段已移至
+    # daemon_instances，schema 占位 default=None）。实际值写到了 daemon_instance。
     resp = await client.patch(
         f"/api/daemon/runtimes/{rt.id}",
         json={"display_alias": "  生产环境主 daemon  "},
@@ -357,9 +389,16 @@ async def test_patch_runtime_display_alias_set_and_clear(
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["display_alias"] == "生产环境主 daemon"  # stripped
+    # DaemonRuntimeRead.display_alias 是占位 default=None（已移至 DaemonInstance）
+    assert body["display_alias"] is None
     assert body["name"] == "orig-name"  # original name untouched
     assert body["provider"] == "claude"
+    # 实际值落到了 daemon_instance.display_alias
+    # ⚠️ db_session 与 router session 不同对象，需 refresh 从 DB 读最新值
+    instance = await db_session.get(DaemonInstance, inst.id)
+    assert instance is not None
+    await db_session.refresh(instance)
+    assert instance.display_alias == "生产环境主 daemon"  # stripped
 
     # clear alias with null
     resp = await client.patch(
@@ -371,6 +410,11 @@ async def test_patch_runtime_display_alias_set_and_clear(
     body = resp.json()
     assert body["display_alias"] is None
     assert body["name"] == "orig-name"
+    # daemon_instance 级验证
+    instance = await db_session.get(DaemonInstance, inst.id)
+    assert instance is not None
+    await db_session.refresh(instance)
+    assert instance.display_alias is None
 
 
 # ── cross-owner management ───────────────────────────────────────────────────

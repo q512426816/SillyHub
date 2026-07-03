@@ -8,11 +8,10 @@ import { AgentModelInput } from "@/components/AgentModelInput";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
-import { AgentProviderSelect } from "@/components/AgentProviderSelect";
 import { WorkspaceDaemonSwitcher } from "@/components/workspace-daemon-switcher";
 import { WorkspacePathFields } from "@/components/workspace-path-fields";
 import { ApiError } from "@/lib/api";
-import { getDaemonRuntime, type DaemonRuntimeRead } from "@/lib/daemon";
+import { getDaemonRuntime, listDaemonRuntimes, PROVIDER_META, type DaemonRuntimeRead } from "@/lib/daemon";
 import { isDaemonClientWorkspace } from "@/lib/workspace-path";
 import {
   type AgentRunStatus,
@@ -126,6 +125,8 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const [defaultAgent, setDefaultAgent] = useState<string | null>(null);
   const [defaultModel, setDefaultModel] = useState<string | null>(null);
   const [savingDefaultAgent, setSavingDefaultAgent] = useState(false);
+  // task-11 / daemon-entity-binding：当前绑定守护进程的在线 provider 列表
+  const [boundDaemonProviders, setBoundDaemonProviders] = useState<string[]>([]);
   // ql-20260630-001：scan 进入 failed/killed 视为"未完成·可重扫"（守护进程重启等中断），
   // 不以冷冰冰终态失败——scan 幂等，直接给重新扫描入口，对齐"像会话一样继续"。
   const scanInterrupted = scanStatus === "failed" || scanStatus === "killed";
@@ -207,6 +208,35 @@ export default function WorkspaceDetailPage({ params }: Props) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId]);
+
+  /* ----  task-11 / daemon-entity-binding：根据绑定 daemon 获取在线 provider 列表 ---- */
+  useEffect(() => {
+    if (!myBinding?.daemon_id) {
+      setBoundDaemonProviders([]);
+      return;
+    }
+    let active = true;
+    listDaemonRuntimes()
+      .then((runtimes) => {
+        if (!active) return;
+        const filtered = runtimes.filter(
+          (r) =>
+            r.daemon_instance_id === myBinding.daemon_id &&
+            r.status === "online" &&
+            r.provider,
+        );
+        const providers = Array.from(
+          new Set(filtered.map((r) => r.provider as string)),
+        );
+        setBoundDaemonProviders(providers);
+      })
+      .catch(() => {
+        if (active) setBoundDaemonProviders([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [myBinding?.daemon_id]);
 
   /* ---- Scan panel callbacks（task-14 / D-006@v1）---- */
   const handleScanRunDone = useCallback((status: string) => {
@@ -473,41 +503,65 @@ export default function WorkspaceDetailPage({ params }: Props) {
         )}
       </SectionCard>
 
-      {/* Default Agent provider（FR-01/FR-02）*/}
+      {/* Default Agent provider（FR-01/FR-02 / daemon-entity-binding task-11）*/}
       <SectionCard title="默认智能体提供方">
         <div className="space-y-2.5">
           <p className="text-xs text-muted-foreground">
             自动派发（阶段流转、scan-generate）且未显式指定 provider 时使用。留空则由守护进程默认决定。
           </p>
-          <div className="flex items-end gap-2">
-            <div className="flex-1 space-y-1">
-              <label className="text-[11px] text-muted-foreground">智能体提供方</label>
-              <AgentProviderSelect
-                value={defaultAgent}
-                onChange={setDefaultAgent}
-                includeDefault="未设置（由守护进程默认决定）"
-              />
-            </div>
-            <div className="flex-1 space-y-1">
-              <label className="text-[11px] text-muted-foreground">智能体模型</label>
-              <AgentModelInput
-                value={defaultModel}
-                onChange={setDefaultModel}
-                placeholder="提供方默认值"
-              />
-            </div>
-            <Button
-              size="sm"
-              onClick={handleSaveDefaultAgent}
-              disabled={
-                savingDefaultAgent ||
-                (defaultAgent === workspace.default_agent &&
-                  defaultModel === workspace.default_model)
-              }
-            >
-              {savingDefaultAgent ? "保存中..." : "保存"}
-            </Button>
-          </div>
+          {myBinding?.daemon_id ? (
+            boundDaemonProviders.length > 0 ? (
+              <div className="flex items-end gap-2">
+                <div className="flex-1 space-y-1">
+                  <label className="text-[11px] text-muted-foreground">智能体提供方</label>
+                  <select
+                    value={defaultAgent ?? ""}
+                    onChange={(e) => setDefaultAgent(e.target.value === "" ? null : e.target.value)}
+                    className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
+                  >
+                    <option value="">未设置（由守护进程默认决定）</option>
+                    {boundDaemonProviders.map((p) => (
+                      <option key={p} value={p}>
+                        {PROVIDER_META[p]?.label ?? p}
+                      </option>
+                    ))}
+                    {defaultAgent && !boundDaemonProviders.includes(defaultAgent) && (
+                      <option value={defaultAgent}>
+                        {PROVIDER_META[defaultAgent]?.label ?? defaultAgent}（离线）
+                      </option>
+                    )}
+                  </select>
+                </div>
+                <div className="flex-1 space-y-1">
+                  <label className="text-[11px] text-muted-foreground">智能体模型</label>
+                  <AgentModelInput
+                    value={defaultModel}
+                    onChange={setDefaultModel}
+                    placeholder="提供方默认值"
+                  />
+                </div>
+                <Button
+                  size="sm"
+                  onClick={handleSaveDefaultAgent}
+                  disabled={
+                    savingDefaultAgent ||
+                    (defaultAgent === workspace.default_agent &&
+                      defaultModel === workspace.default_model)
+                  }
+                >
+                  {savingDefaultAgent ? "保存中..." : "保存"}
+                </Button>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                当前绑定的守护进程无在线智能体提供方，请先确认守护进程已启用。
+              </p>
+            )
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              请先绑定守护进程。
+            </p>
+          )}
         </div>
       </SectionCard>
 

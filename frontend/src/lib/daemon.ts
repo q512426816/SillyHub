@@ -24,12 +24,43 @@ export interface DaemonRuntimeRead {
   capabilities: Record<string, any> | null;
   allowed_roots: string[];
   owner?: OwnerRead | null;
+  /** 所属守护进程实例 ID（daemon-entity-binding task-11）。 */
+  daemon_instance_id?: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export async function listDaemonRuntimes(): Promise<DaemonRuntimeRead[]> {
   return apiFetch<DaemonRuntimeRead[]>("/api/daemon/runtimes");
+}
+
+/**
+ * 2026-07-03-daemon-entity-binding task-10：守护进程实体（daemon_instance）的前端 DTO。
+ *
+ * 由 workspace-daemon-switcher 使用，展示当前用户在线守护进程列表。
+ * providers 为该 daemon 实体下已启用的运行时列表（用于渲染 provider 徽标）。
+ */
+export interface DaemonInstanceProviderItem {
+  provider: string;
+  status: string;
+  version?: string | null;
+}
+
+export interface DaemonInstanceRead {
+  id: string;
+  hostname: string;
+  display_alias: string | null;
+  status: string;
+  providers: DaemonInstanceProviderItem[];
+}
+
+/**
+ * GET /api/daemon/instances — 列出当前用户在线的守护进程实体。
+ * 返回包含各 daemon 已启用 provider 列表，用于 workspace-daemon-switcher
+ * 下拉显示 hostname/display_alias + provider 徽标（task-10 / FR-09）。
+ */
+export async function listDaemonInstances(): Promise<DaemonInstanceRead[]> {
+  return apiFetch<DaemonInstanceRead[]>("/api/daemon/instances");
 }
 
 // task-06 / FR-04 / D-006@v1：平台管理员全局分页视图。旧 listDaemonRuntimes()

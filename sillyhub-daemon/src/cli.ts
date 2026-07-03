@@ -44,7 +44,13 @@ import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { hostname } from 'node:os';
 
-import { DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_PATH, loadConfig, saveConfig } from './config.js';
+import {
+  DEFAULT_CONFIG_DIR,
+  DEFAULT_CONFIG,
+  loadConfig,
+  saveConfig,
+  configPathForServer,
+} from './config.js';
 import { HubClient } from './hub-client.js';
 import { WorkspaceManager } from './workspace.js';
 import { CredentialManager } from './credential.js';
@@ -83,20 +89,35 @@ export function getLogFile(): string {
 
 /**
  * 加载配置的包装函数。task-22 可 spy 替换为内存配置。
+ *
+ * 2026-07-03-daemon-entity-binding task-04（D-001）：签名从 `loadConfigFn(path)`
+ * 改为 `loadConfigFn(server_url)`。配置文件路径现由 server_url 驱动
+ * （`configPathForServer` → `config-<sha256[0:8]>.json`），每个后端地址独立配置
+ * 文件 + 独立 daemon_local_id。
+ *
  * 默认委托 config.ts 的 loadConfig。
+ *
+ * @param server_url daemon 连接的后端地址（决定 per-server 配置文件名）。
  */
-export async function loadConfigFn(path: string): Promise<ReturnType<typeof loadConfig>> {
-  return loadConfig(path);
+export async function loadConfigFn(server_url: string): Promise<ReturnType<typeof loadConfig>> {
+  return loadConfig(server_url);
 }
 
 /**
  * 保存配置的包装函数。task-22 可 spy 拦截文件写入。
+ *
+ * 2026-07-03-daemon-entity-binding task-04（D-001）：第二参数从 `path` 改为
+ * `server_url`，与 loadConfigFn 对称——配置文件路径由 server_url 驱动
+ * （configPathForServer）。落盘到 per-server 文件，保证下次同 server 启动复用。
+ *
+ * @param config    要保存的配置对象。
+ * @param server_url daemon 连接的后端地址（决定 per-server 文件名）。
  */
 export async function saveConfigFn(
   config: Parameters<typeof saveConfig>[0],
-  path: string,
+  server_url: string,
 ): Promise<void> {
-  await saveConfig(config, path);
+  await saveConfig(config, configPathForServer(server_url));
 }
 
 // ── 辅助函数（对齐 Python _read_pid / _is_process_alive / _write_pid / _remove_pid）──
@@ -326,9 +347,17 @@ export async function startAction(opts: StartOptions): Promise<number> {
   }
 
   // step 1-2: 加载配置 + CLI 覆盖字段。
-  // config.ts 是函数式 loadConfig(path?)，返回 DaemonConfig 纯对象（非 class 实例）。
-  const configPath = DEFAULT_CONFIG_PATH;
-  const config = { ...(await loadConfigFn(configPath)) };
+  // config.ts 是函数式 loadConfig(server_url)，返回 DaemonConfig 纯对象（非 class 实例）。
+  //
+  // 2026-07-03-daemon-entity-binding task-04（D-001）：配置文件路径现由 server_url 驱动
+  //（configPathForServer → config-<sha256[0:8]>.json），故 loadConfig 前必须先确定
+  // server_url。来源优先级：CLI --server 参数 > DEFAULT_CONFIG.server_url（兜底默认
+  // http://localhost:8000）。注意此处 server_url 仅用于定位 per-server 文件；
+  // 后续 opts.server 仍会覆盖 config.server_url 字段并落盘，保证持久化值与定位一致。
+  //（用户首次用 --server A 启动 → 写入 config-<hashA>.json，server_url=A；下次同命令
+  // 启动 opts.server=A 与 per-server 文件内 server_url 一致，无歧义。）
+  const serverUrl = opts.server ?? DEFAULT_CONFIG.server_url;
+  const config = { ...(await loadConfigFn(serverUrl)) };
 
   if (opts.server) {
     config.server_url = opts.server;
@@ -382,7 +411,11 @@ export async function startAction(opts: StartOptions): Promise<number> {
   }
 
   // step 3: 持久化配置（对齐 Python `config.save()`）。
-  await saveConfigFn(config, configPath);
+  // 2026-07-03-daemon-entity-binding task-04：落盘到 per-server 文件
+  //（configPathForServer(config.server_url)）。用 config.server_url（已被
+  // opts.server 覆盖后的最终值）而非 serverUrl，确保 opts.server 改了 server
+  // 时落盘到新 server 的 per-server 文件（与 loadConfigFn 定位一致）。
+  await saveConfigFn(config, config.server_url);
 
   // step 4: 凭证缺失校验（兼容旧版错误消息：仍是 token/api_key 任一即可）。
   if (!config.token && !config.api_key) {
@@ -660,12 +693,14 @@ export function stopAction(): number {
  * @returns 退出码（status 命令始终返回 0，对齐 Python 无 sys.exit）
  */
 export async function statusAction(): Promise<number> {
-  const configPath = DEFAULT_CONFIG_PATH;
+  // 2026-07-03-daemon-entity-binding task-04：status 无 server 参数，读默认
+  // per-server 文件（DEFAULT_CONFIG.server_url = http://localhost:8000）。
+  // 若连过其他后端，该文件可能不存在 → 显示 unknown（不影响 PID/State 判断）。
   let config: { runtime_id: string; server_url: string } | null = null;
   try {
-    config = await loadConfigFn(configPath);
+    config = await loadConfigFn(DEFAULT_CONFIG.server_url);
   } catch {
-    // 配置加载失败（文件损坏等）→ 用占位值，不中断 status 输出
+    // 配置加载失败（文件损坏/不存在等）→ 用占位值，不中断 status 输出
     config = { runtime_id: '(unknown)', server_url: '(unknown)' };
   }
 

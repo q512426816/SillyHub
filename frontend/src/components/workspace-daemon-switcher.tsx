@@ -1,20 +1,13 @@
 "use client";
 
 /**
- * ql-20260619-006：daemon-client workspace 的「切换 Daemon」改绑组件。
- *
- * 动机：workspace 详情页「绑定 Daemon」此前只读（WorkspacePathFields 仅展示），
- * 绑定的 daemon 一旦离线，扫描/阶段派发走 daemon-client 强绑路由会直接
- * NoOnlineDaemonError（run 失败、无日志）。backend PATCH /api/workspaces/{id}
- * 的 WorkspaceUpdate 已支持 daemon_runtime_id，此处补前端入口。
+ * task-10 (2026-07-03-daemon-entity-binding)：守护进程切换器——下拉选 daemon 实体。
  *
  * 职责：
- *   - listDaemonRuntimes() 拉当前用户全部 runtime（online 排前）。
- *   - 「切换 Daemon」按钮展开列表；online 可直接选，offline/disabled 标注
- *     状态但仍可选（用户可能马上启用 / 重启该 daemon）。
- *   - 选中非当前项 → updateWorkspace({ daemon_runtime_id }) → onChanged 刷新父级。
- *
- * 仅 daemon-client workspace 渲染（由父级 [id]/page.tsx 条件判断）。
+ *   - listDaemonInstances() 拉当前用户在线守护进程实体（含已启用 provider 列表）。
+ *   - 每项展示 hostname/display_alias 为主文 + 副位 provider 徽标。
+ *   - 选中非当前项调 upsertMyBinding({ daemon_id }) => onChanged 刷新父级。
+ *   - 空列表展示「暂无在线守护进程」空态引导。
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -22,19 +15,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import {
-  listDaemonRuntimes,
+  listDaemonInstances,
   PROVIDER_META,
-  type DaemonRuntimeRead,
+  type DaemonInstanceRead,
 } from "@/lib/daemon";
 import {
   upsertMyBinding,
   type MemberBindingView,
 } from "@/lib/workspace-binding";
-import { DAEMON_RUNTIME_STATUS_LABELS, labelOf } from "@/lib/status-labels";
 
 interface Props {
   workspaceId: string;
-  /** 当前用户 member binding（binding.runtime_id 作为当前高亮项）。 */
+  /** 当前用户 member binding（binding.daemon_id 作为当前高亮项）。 */
   currentBinding: MemberBindingView;
   /** 改绑成功后回调（父级 reload workspace + binding）。 */
   onChanged?: () => void;
@@ -45,14 +37,14 @@ function providerLabel(provider: string | null): string {
   return PROVIDER_META[provider]?.label ?? provider;
 }
 
-/** online 排前；同级按 provider label 稳定排序。 */
-function sortRuntimes(list: DaemonRuntimeRead[]): DaemonRuntimeRead[] {
-  return [...list].sort((a, b) => {
-    const ra = a.status === "online" ? 0 : 1;
-    const rb = b.status === "online" ? 0 : 1;
-    if (ra !== rb) return ra - rb;
-    return providerLabel(a.provider).localeCompare(providerLabel(b.provider), "zh-CN");
-  });
+function providerIcon(provider: string | null): string {
+  if (!provider) return "";
+  return PROVIDER_META[provider]?.icon ?? "";
+}
+
+function providerColor(provider: string | null): string {
+  if (!provider) return "";
+  return PROVIDER_META[provider]?.color ?? "";
 }
 
 export function WorkspaceDaemonSwitcher({
@@ -60,7 +52,7 @@ export function WorkspaceDaemonSwitcher({
   currentBinding,
   onChanged,
 }: Props) {
-  const [runtimes, setRuntimes] = useState<DaemonRuntimeRead[]>([]);
+  const [instances, setInstances] = useState<DaemonInstanceRead[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -70,8 +62,8 @@ export function WorkspaceDaemonSwitcher({
     setLoading(true);
     setError(null);
     try {
-      const list = await listDaemonRuntimes();
-      setRuntimes(sortRuntimes(list));
+      const list = await listDaemonInstances();
+      setInstances(list);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "加载守护进程列表失败");
     } finally {
@@ -88,21 +80,23 @@ export function WorkspaceDaemonSwitcher({
     void load();
   }, [load]);
 
+  const currentDaemonId = (currentBinding as any).daemon_id;
+
   const handleSwitch = useCallback(
-    async (rt: DaemonRuntimeRead) => {
+    async (di: DaemonInstanceRead) => {
       // 点击当前绑定项：仅收起，不重复提交。
-      if (rt.id === currentBinding.runtime_id) {
+      if (di.id === currentDaemonId) {
         setOpen(false);
         return;
       }
-      setSwitchingId(rt.id);
+      setSwitchingId(di.id);
       setError(null);
       try {
         await upsertMyBinding(workspaceId, {
-          runtime_id: rt.id,
+          daemon_id: di.id,
           root_path: currentBinding.root_path,
           path_source: currentBinding.path_source,
-        });
+        } as any);
         setOpen(false);
         onChanged?.();
       } catch (e) {
@@ -111,7 +105,7 @@ export function WorkspaceDaemonSwitcher({
         setSwitchingId(null);
       }
     },
-    [workspaceId, currentBinding, onChanged],
+    [workspaceId, currentBinding, currentDaemonId, onChanged],
   );
 
   return (
@@ -125,10 +119,10 @@ export function WorkspaceDaemonSwitcher({
           variant="outline"
           className="h-6 text-[11px]"
           onClick={handleToggle}
-          disabled={loading && runtimes.length === 0}
+          disabled={loading && instances.length === 0}
           aria-expanded={open}
         >
-          {loading && runtimes.length === 0 ? "加载中…" : "切换守护进程"}
+          {loading && instances.length === 0 ? "加载中…" : "切换守护进程"}
         </Button>
       </div>
 
@@ -144,50 +138,49 @@ export function WorkspaceDaemonSwitcher({
             <p className="px-2 py-1.5 text-[11px] text-muted-foreground">
               加载中…
             </p>
-          ) : runtimes.length === 0 ? (
+          ) : instances.length === 0 ? (
             <p className="px-2 py-1.5 text-[11px] text-muted-foreground">
-              暂无守护进程运行时，请先在 /runtimes 启动一个。
+              暂无在线守护进程，请先启动守护进程
             </p>
           ) : (
             <ul className="space-y-0.5" data-testid="daemon-switcher-list">
-              {runtimes.map((rt) => {
-                const isCurrent = rt.id === currentBinding.runtime_id;
-                const status = rt.status ?? "unknown";
-                const healthy = status === "online";
+              {instances.map((di) => {
+                const isCurrent = di.id === currentDaemonId;
                 return (
-                  <li key={rt.id}>
+                  <li key={di.id}>
                     <button
                       type="button"
                       disabled={switchingId !== null}
-                      onClick={() => void handleSwitch(rt)}
+                      onClick={() => void handleSwitch(di)}
                       className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50"
                       aria-current={isCurrent || undefined}
                     >
-                      <span className="flex min-w-0 items-center gap-1.5">
-                        <span className="font-medium">
-                          {providerLabel(rt.provider)}
+                      <span className="flex min-w-0 flex-col gap-0.5">
+                        <span className="flex items-center gap-1.5">
+                          <span className="font-medium">
+                            {di.display_alias ?? di.hostname}
+                          </span>
+                          {isCurrent && (
+                            <Badge variant="default" className="text-[10px]">
+                              当前
+                            </Badge>
+                          )}
                         </span>
-                        <span className="truncate text-muted-foreground">
-                          {rt.name ?? rt.id.slice(0, 8)}
-                        </span>
-                        {isCurrent && (
-                          <Badge variant="default" className="text-[10px]">
-                            当前
-                          </Badge>
+                        {di.providers.length > 0 && (
+                          <span className="flex flex-wrap gap-1">
+                            {di.providers.map((p) => (
+                              <Badge
+                                key={p.provider}
+                                variant="outline"
+                                className={`inline-flex items-center gap-0.5 px-1.5 py-0 text-[10px] leading-none ${providerColor(p.provider)}`}
+                              >
+                                <span className="text-[10px]">{providerIcon(p.provider)}</span>
+                                {providerLabel(p.provider)}
+                              </Badge>
+                            ))}
+                          </span>
                         )}
                       </span>
-                      <Badge
-                        variant={
-                          healthy
-                            ? "success"
-                            : status === "disabled"
-                              ? "destructive"
-                              : "outline"
-                        }
-                        className="text-[10px]"
-                      >
-                        {labelOf(DAEMON_RUNTIME_STATUS_LABELS, status)}
-                      </Badge>
                     </button>
                   </li>
                 );

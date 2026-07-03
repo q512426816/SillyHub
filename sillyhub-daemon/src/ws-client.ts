@@ -318,7 +318,7 @@ export class WsClient {
     } else {
       wsBase = 'ws://' + base;
     }
-    const query = `runtime_id=${encodeURIComponent(this._opts.runtimeId)}`;
+    const query = `daemon_local_id=${encodeURIComponent(this._opts.runtimeId)}`;
     return `${wsBase}${WS_PATH}?${query}`;
   }
 

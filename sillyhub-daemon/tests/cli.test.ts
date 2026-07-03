@@ -400,7 +400,7 @@ describe('TestStartApiKey (daemon-api-key)', () => {
     expect(code).toBe(0);
     // config.json 在 tmpDir 下应已写入。
     const raw = await import('node:fs/promises').then((m) =>
-      m.readFile(configMod.DEFAULT_CONFIG_PATH, 'utf-8'),
+      m.readFile(configMod.configPathForServer('http://localhost:8000'), 'utf-8'),
     );
     const saved = JSON.parse(raw);
     expect(saved.api_key).toBe('shk_live_test_key');
@@ -429,7 +429,7 @@ describe('TestStartApiKey (daemon-api-key)', () => {
     ]);
 
     const raw = await import('node:fs/promises').then((m) =>
-      m.readFile(configMod.DEFAULT_CONFIG_PATH, 'utf-8'),
+      m.readFile(configMod.configPathForServer('http://localhost:8000'), 'utf-8'),
     );
     const saved = JSON.parse(raw);
     expect(saved.api_key).toBe('shk_live_commander_real');
@@ -497,7 +497,7 @@ describe('TestStartTerminalObserver (ql-20260616-003)', () => {
       expect(code).toBe(0);
 
       const raw = await import('node:fs/promises').then((fs) =>
-        fs.readFile(configMod.DEFAULT_CONFIG_PATH, 'utf-8'),
+        fs.readFile(configMod.configPathForServer('http://localhost:8000'), 'utf-8'),
       );
       const saved = JSON.parse(raw);
       expect(saved.terminal_observer_mode).toBe(m);
@@ -518,7 +518,7 @@ describe('TestStartTerminalObserver (ql-20260616-003)', () => {
     expect(code).toBe(0);
 
     const raw = await import('node:fs/promises').then((fs) =>
-      fs.readFile(configMod.DEFAULT_CONFIG_PATH, 'utf-8'),
+      fs.readFile(configMod.configPathForServer('http://localhost:8000'), 'utf-8'),
     );
     const saved = JSON.parse(raw);
     expect(saved.terminal_observer_enabled).toBe(true);
@@ -539,7 +539,7 @@ describe('TestStartTerminalObserver (ql-20260616-003)', () => {
     expect(code).toBe(0);
 
     const raw = await import('node:fs/promises').then((fs) =>
-      fs.readFile(configMod.DEFAULT_CONFIG_PATH, 'utf-8'),
+      fs.readFile(configMod.configPathForServer('http://localhost:8000'), 'utf-8'),
     );
     const saved = JSON.parse(raw);
     expect(saved.terminal_observer_close_on_exit).toBe(true);

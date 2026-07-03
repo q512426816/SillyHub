@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.auth.model import User
-from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
+from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.schema import SessionReopenResponse
 
 log = get_logger(__name__)
@@ -37,6 +37,8 @@ from app.modules.daemon.patch.service import (  # noqa: E402, F401
     PatchConflictError,
 )
 from app.modules.daemon.runtime.service import (  # noqa: E402, F401
+    DaemonInstanceOwnershipMismatch,
+    DaemonRegisterResult,
     DaemonRpcConflict,
     DaemonRpcForbiddenError,
     DaemonRpcGatewayError,
@@ -98,29 +100,55 @@ class DaemonService:
 
     # ── Runtime operations (delegate to RuntimeService) ───────────────────
 
-    async def register_runtime(
+    async def register_daemon(
         self,
         user_id: uuid.UUID,
         *,
-        name: str | None = None,
-        provider: str | None = None,
-        version: str | None = None,
+        daemon_local_id: uuid.UUID,
+        server_url: str,
+        hostname: str,
         os: str | None = None,
         arch: str | None = None,
-        capabilities: dict | None = None,
-    ) -> DaemonRuntime:
-        return await self._rt.register_runtime(
+        allowed_roots: list[str] | None = None,
+        providers: list[dict] | None = None,
+    ) -> DaemonRegisterResult:
+        """Per-daemon 注册 facade（design §5.2 / D-006）。
+
+        转发到 RuntimeService.register_daemon：upsert daemon_instances + 各
+        daemon_runtimes + stale 清理。返回 daemon_instance_id + 各 runtime_id。
+        """
+        return await self._rt.register_daemon(
             user_id,
-            name=name,
-            provider=provider,
-            version=version,
+            daemon_local_id=daemon_local_id,
+            server_url=server_url,
+            hostname=hostname,
             os=os,
             arch=arch,
-            capabilities=capabilities,
+            allowed_roots=allowed_roots,
+            providers=providers,
         )
 
     async def heartbeat(self, runtime_id: uuid.UUID) -> DaemonRuntime:
+        """Per-runtime 心跳 facade（legacy，仅残留调用方使用）。
+
+        2026-07-03-daemon-entity-binding task-07：HTTP ``/heartbeat`` 端点改走
+        ``heartbeat_daemon``（per-daemon 合并心跳）。本方法保留供单 runtime 测试与
+        潜在残留调用方使用（provider 无独立心跳，design §9.2）。
+        """
         return await self._rt.heartbeat(runtime_id)
+
+    async def heartbeat_daemon(
+        self,
+        daemon_local_id: uuid.UUID,
+        providers: list[dict] | None = None,
+    ) -> DaemonInstance:
+        """Per-daemon 心跳 facade（design §5.4 / §9.1 / D-006）。
+
+        转发到 RuntimeService.heartbeat_daemon：刷新 daemon_instances.last_heartbeat_at
+        + 各 daemon_runtimes.status。返回 DaemonInstance（HTTP 响应从中读
+        daemon_instance_id / status / allowed_roots）。
+        """
+        return await self._rt.heartbeat_daemon(daemon_local_id, providers)
 
     async def get_runtime(
         self,
@@ -133,6 +161,14 @@ class DaemonService:
 
     async def list_runtimes(self, user_id: uuid.UUID) -> list[DaemonRuntime]:
         return await self._rt.list_runtimes(user_id)
+
+    async def list_instances(self, user_id: uuid.UUID) -> list[DaemonInstance]:
+        """List online daemon instances for the current user (task-10 / FR-09).
+
+        Delegates to RuntimeService. Returns ORM DaemonInstance rows;
+        the router constructs DaemonInstanceRead DTOs with provider info.
+        """
+        return await self._rt.list_instances(user_id)
 
     async def list_runtimes_page(
         self,

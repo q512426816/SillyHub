@@ -19,7 +19,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.modules.agent.context_builder import transport_for_path_source
 from app.modules.agent.model import AgentRun
-from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
+from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
 from app.modules.workspace.model import AgentRunWorkspace, Workspace
 from app.modules.workspace.service import resolve_root_path_for_daemon
 
@@ -318,11 +318,14 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
     payload["latestSpecVersion"] = batch_latest_spec_version
     payload["latest_spec_version"] = batch_latest_spec_version
 
-    # Include runtime capabilities (cmd_path, bin_path, protocol)
+    # Include runtime capabilities (cmd_path, bin_path, protocol) from
+    # daemon_instance (DaemonRuntime.capabilities removed in Wave 1, design §4.2).
     runtime = await session.get(DaemonRuntime, lease.runtime_id)
-    if runtime is not None and runtime.capabilities:
-        caps = runtime.capabilities if isinstance(runtime.capabilities, dict) else {}
-        payload["cmd_path"] = caps.get("bin_path", "")
-        payload["protocol"] = caps.get("protocol", "")
+    if runtime is not None and runtime.daemon_instance_id is not None:
+        instance = await session.get(DaemonInstance, runtime.daemon_instance_id)
+        if instance is not None and instance.capabilities:
+            caps = instance.capabilities if isinstance(instance.capabilities, dict) else {}
+            payload["cmd_path"] = caps.get("bin_path", "")
+            payload["protocol"] = caps.get("protocol", "")
 
     return payload

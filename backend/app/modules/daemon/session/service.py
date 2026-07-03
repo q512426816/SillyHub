@@ -28,7 +28,7 @@ from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
-from app.modules.daemon.model import DaemonTaskLease
+from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.protocol import (
     DAEMON_MSG_SESSION_END,
     DAEMON_MSG_SESSION_INJECT,
@@ -44,6 +44,34 @@ log = get_logger(__name__)
 ACTIVE_SESSION_STATUSES = frozenset({"pending", "active", "reconnecting"})
 ACTIVE_TURN_STATUSES = frozenset({"pending", "running", "pending_approval"})
 TERMINAL_TURN_STATUSES = frozenset({"completed", "failed", "killed", "cancelled"})
+
+
+async def _resolve_daemon_id_for_runtime(
+    db_session: AsyncSession,
+    runtime_id: uuid.UUID,
+) -> uuid.UUID | None:
+    """task-06 / design §5.3: map a provider ``runtime_id`` to its daemon entity.
+
+    WS Hub routes by ``daemon_instance_id`` (one socket per daemon entity), but
+    sessions / dispatches are still keyed by ``daemon_runtimes.id`` (the provider
+    row). This helper looks up the owning ``daemon_instance_id`` for a runtime
+    so the session service can address the right WS connection.
+
+    Migration fallback (D-007 window): pre-existing runtime rows have
+    ``daemon_instance_id=NULL`` until the daemon re-registers under the new
+    per-server config. For those, we fall back to the ``runtime_id`` itself as
+    the connection key so the offline check + best-effort sends keep working
+    against the legacy routing surface — once a daemon_instance is bound, the
+    per-daemon key takes over. Returns ``None`` only when the runtime row is
+    missing entirely (truly unknown runtime).
+    """
+    runtime = await db_session.get(DaemonRuntime, runtime_id)
+    if runtime is None:
+        return None
+    if runtime.daemon_instance_id is None:
+        # D-007 migration window: no daemon entity yet → route by runtime_id.
+        return runtime_id
+    return runtime.daemon_instance_id
 
 
 class DaemonSessionNotFound(AppError):
@@ -414,19 +442,27 @@ class SessionService:
         from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
         hub = get_daemon_ws_hub()
-        control_ok = await hub.send_session_control(
-            dispatch.runtime_id,
-            DAEMON_MSG_SESSION_INJECT,
-            {
-                "session_id": str(session.id),
-                "lease_id": str(dispatch.lease_id),
-                "run_id": str(run.id),
-                "prompt": prompt,
-                # gap-2：首 turn SESSION_INJECT 携带 lease 级 claim_token，
-                # daemon 存入 SessionState.claimToken。
-                "claim_token": dispatch.claim_token,
-            },
-        )
+        # task-06: WS Hub routes by daemon_instance_id; resolve from the
+        # provider runtime_id carried on the dispatch.
+        daemon_id = await _resolve_daemon_id_for_runtime(self._session, dispatch.runtime_id)
+        control_ok = False
+        if daemon_id is not None:
+            control_ok = await hub.send_session_control(
+                daemon_id,
+                DAEMON_MSG_SESSION_INJECT,
+                {
+                    "session_id": str(session.id),
+                    "lease_id": str(dispatch.lease_id),
+                    "run_id": str(run.id),
+                    "prompt": prompt,
+                    # gap-2：首 turn SESSION_INJECT 携带 lease 级 claim_token，
+                    # daemon 存入 SessionState.claimToken。
+                    "claim_token": dispatch.claim_token,
+                    # design §5.3: payload carries the provider runtime_id so
+                    # the daemon dispatches to the correct SessionManager.
+                    "runtime_id": str(dispatch.runtime_id),
+                },
+            )
         if not control_ok:
             # Wake-up delivered but control send failed: the daemon will still
             # claim the lease (metadata has the prompt), so we do NOT fail the
@@ -579,17 +615,27 @@ class SessionService:
         inject_claim_token = lease_meta.get("claim_token", "")
 
         hub = get_daemon_ws_hub()
-        control_ok = await hub.send_session_control(
-            session.runtime_id,  # type: ignore[arg-type]
-            DAEMON_MSG_SESSION_INJECT,
-            {
-                "session_id": str(session.id),
-                "lease_id": str(session.lease_id),
-                "run_id": str(run.id),
-                "prompt": prompt,
-                "claim_token": inject_claim_token,
-            },
+        # task-06: resolve provider runtime_id → daemon_instance_id (WS route key).
+        runtime_id = session.runtime_id
+        daemon_id = (
+            await _resolve_daemon_id_for_runtime(self._session, runtime_id)
+            if runtime_id is not None
+            else None
         )
+        control_ok = False
+        if daemon_id is not None and runtime_id is not None:
+            control_ok = await hub.send_session_control(
+                daemon_id,
+                DAEMON_MSG_SESSION_INJECT,
+                {
+                    "session_id": str(session.id),
+                    "lease_id": str(session.lease_id),
+                    "run_id": str(run.id),
+                    "prompt": prompt,
+                    "claim_token": inject_claim_token,
+                    "runtime_id": str(runtime_id),  # design §5.3 provider discriminator
+                },
+            )
         if not control_ok:
             # New run failed to dispatch → converge it to failed but leave the
             # session active so the caller can retry (boundary #13).
@@ -669,12 +715,28 @@ class SessionService:
         from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
         hub = get_daemon_ws_hub()
+        # task-06: resolve provider runtime_id → daemon_instance_id (WS route key).
+        runtime_id = session.runtime_id
+        daemon_id = (
+            await _resolve_daemon_id_for_runtime(self._session, runtime_id)
+            if runtime_id is not None
+            else None
+        )
+        if daemon_id is None or runtime_id is None:
+            raise DaemonRuntimeOffline(
+                f"daemon runtime '{runtime_id}' is offline; interrupt could not be delivered.",
+                details={
+                    "session_id": str(session_id),
+                    "runtime_id": str(runtime_id) if runtime_id else None,
+                },
+            )
         control_ok = await hub.send_session_control(
-            session.runtime_id,  # type: ignore[arg-type]
+            daemon_id,
             DAEMON_MSG_SESSION_INTERRUPT,
             {
                 "session_id": str(session.id),
                 "lease_id": str(session.lease_id),
+                "runtime_id": str(runtime_id),  # design §5.3 provider discriminator
             },
         )
         if not control_ok:
@@ -762,14 +824,19 @@ class SessionService:
             from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
             hub = get_daemon_ws_hub()
-            end_ok = await hub.send_session_control(
-                session.runtime_id,
-                DAEMON_MSG_SESSION_END,
-                {
-                    "session_id": str(session.id),
-                    "lease_id": str(session.lease_id),
-                },
-            )
+            # task-06: resolve provider runtime_id → daemon_instance_id.
+            daemon_id = await _resolve_daemon_id_for_runtime(self._session, session.runtime_id)
+            end_ok = False
+            if daemon_id is not None:
+                end_ok = await hub.send_session_control(
+                    daemon_id,
+                    DAEMON_MSG_SESSION_END,
+                    {
+                        "session_id": str(session.id),
+                        "lease_id": str(session.lease_id),
+                        "runtime_id": str(session.runtime_id),
+                    },
+                )
             if not end_ok:
                 log.warning(
                     "session_end_control_send_failed",
@@ -1308,7 +1375,9 @@ class SessionService:
             from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
             hub = get_daemon_ws_hub()
-            if not hub.is_connected(runtime_id):
+            # task-06: WS Hub routes by daemon_instance_id; resolve from runtime.
+            target_daemon_id = await _resolve_daemon_id_for_runtime(self._session, runtime_id)
+            if target_daemon_id is None or not hub.is_connected(target_daemon_id):
                 raise DaemonOffline(
                     f"Target runtime '{runtime_id}' is offline; reopen needs a "
                     f"live daemon to run the SDK resume.",
@@ -1377,11 +1446,17 @@ class SessionService:
             from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
             hub = get_daemon_ws_hub()
-            resume_ok = await hub.send_session_control(
-                target_runtime_id,
-                DAEMON_MSG_SESSION_RESUME,
-                resume_payload,
+            # task-06: resolve provider runtime_id → daemon_instance_id (WS key).
+            resume_daemon_id = await _resolve_daemon_id_for_runtime(
+                self._session, target_runtime_id
             )
+            resume_ok = False
+            if resume_daemon_id is not None:
+                resume_ok = await hub.send_session_control(
+                    resume_daemon_id,
+                    DAEMON_MSG_SESSION_RESUME,
+                    resume_payload,
+                )
             if not resume_ok:
                 log.warning(
                     "session_resume_control_not_delivered",
@@ -1475,14 +1550,19 @@ class SessionService:
         if session.runtime_id is not None:
             hub = get_daemon_ws_hub()
             try:
-                end_ok = await hub.send_session_control(
-                    session.runtime_id,
-                    DAEMON_MSG_SESSION_END,
-                    {
-                        "session_id": str(session.id),
-                        "lease_id": str(session.lease_id) if session.lease_id else "",
-                    },
-                )
+                # task-06: resolve provider runtime_id → daemon_instance_id.
+                daemon_id = await _resolve_daemon_id_for_runtime(self._session, session.runtime_id)
+                end_ok = False
+                if daemon_id is not None:
+                    end_ok = await hub.send_session_control(
+                        daemon_id,
+                        DAEMON_MSG_SESSION_END,
+                        {
+                            "session_id": str(session.id),
+                            "lease_id": str(session.lease_id) if session.lease_id else "",
+                            "runtime_id": str(session.runtime_id),
+                        },
+                    )
                 if not end_ok:
                     log.warning(
                         "session_delete_end_control_send_failed",

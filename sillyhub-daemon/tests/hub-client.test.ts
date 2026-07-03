@@ -146,11 +146,14 @@ describe('HubClient — 6 个 lease/runtime 端点 URL/method/body 契约', () =
     expect(r).toEqual({ status: 'completed' });
   });
 
-  it('heartbeat(runtime): POST /heartbeat body {runtime_id}（非 lease 子路径）', async () => {
+  it('heartbeat(daemonLocalId, providers): POST /heartbeat body {daemon_local_id, providers}（task-07 per-daemon）', async () => {
     const c = new HubClient('http://x:8000', 't');
-    await c.heartbeat('rt-1');
+    await c.heartbeat('dlid-1', [{ provider: 'claude', status: 'online' }]);
     expect(lastCall!.url).toBe(`http://x:8000${REST_PREFIX}/heartbeat`);
-    expect(JSON.parse(lastCall!.init.body as string)).toEqual({ runtime_id: 'rt-1' });
+    expect(JSON.parse(lastCall!.init.body as string)).toEqual({
+      daemon_local_id: 'dlid-1',
+      providers: [{ provider: 'claude', status: 'online' }],
+    });
   });
 
   it('markOffline(runtime): POST /runtimes/{id}/offline without body', async () => {
@@ -162,68 +165,98 @@ describe('HubClient — 6 个 lease/runtime 端点 URL/method/body 契约', () =
   });
 });
 
-// ── register 条件 body 拼装（对齐 client.py:55-99 / test_client.py:TestRegister）──
+// ── register 条件 body 拼装（per-daemon，task-05 / 2026-07-03-daemon-entity-binding）──
+// body：必填 daemon_local_id/server_url/hostname/providers 总写入；os/arch/allowed_roots
+// 条件写入（提供时）；providers[] 每项 {provider, version?, status?}。
+// 响应：{ daemon_instance_id, runtimes: [{provider, runtime_id}] }。
 
-describe('HubClient — register 条件 body 拼装', () => {
-  beforeEach(() => vi.stubGlobal('fetch', mockFetchOk({ runtime_id: 'rt-new' })));
+describe('HubClient — register 条件 body 拼装（per-daemon）', () => {
+  beforeEach(() =>
+    vi.stubGlobal(
+      'fetch',
+      mockFetchOk({
+        daemon_instance_id: 'srv-inst',
+        runtimes: [{ provider: 'claude', runtime_id: 'rt-new' }],
+      }),
+    ),
+  );
 
-  it('必填字段总写入（即使空串）+ 条件字段省略', async () => {
+  it('必填字段总写入：daemon_local_id/server_url/hostname/providers', async () => {
     const c = new HubClient('http://x:8000', 't');
     const r = await c.register({
-      name: 'host1',
-      provider: 'claude',
-      version: '2.1.0',
-      os: 'darwin',
-      arch: 'arm64',
+      daemonLocalId: 'daemon-uuid-1',
+      serverUrl: 'http://x:8000',
+      hostname: 'host1',
+      providers: [{ provider: 'claude', version: '2.1.0', status: 'available' }],
     });
     const body = JSON.parse(lastCall!.init.body as string);
-    expect(body).toEqual({
-      name: 'host1',
-      provider: 'claude',
-      version: '2.1.0',
-      os: 'darwin',
-      arch: 'arm64',
-    });
-    expect(body.runtime_id).toBeUndefined();
-    expect(body.protocol).toBeUndefined();
+    expect(body.daemon_local_id).toBe('daemon-uuid-1');
+    expect(body.server_url).toBe('http://x:8000');
+    expect(body.hostname).toBe('host1');
+    expect(body.providers).toEqual([
+      { provider: 'claude', version: '2.1.0', status: 'available' },
+    ]);
+    // 条件字段未提供 → 不写入
+    expect(body.os).toBeUndefined();
+    expect(body.arch).toBeUndefined();
+    expect(body.allowed_roots).toBeUndefined();
+    // 旧 per-provider 字段不再出现
+    expect(body.name).toBeUndefined();
     expect(body.capabilities).toBeUndefined();
-    expect(r).toEqual({ runtime_id: 'rt-new' });
-  });
-
-  it('runtimeId 提供时写入；protocol 非空写入；capabilities 提供写入', async () => {
-    const c = new HubClient('http://x:8000', 't');
-    await c.register({
-      name: 'h',
-      provider: 'p',
-      version: 'v',
-      os: 'o',
-      arch: 'a',
-      runtimeId: 'rt-1',
-      protocol: 'stream_json',
-      capabilities: { tools: true },
-    });
-    const body = JSON.parse(lastCall!.init.body as string);
-    expect(body.runtime_id).toBe('rt-1');
-    expect(body.protocol).toBe('stream_json');
-    expect(body.capabilities).toEqual({ tools: true });
-  });
-
-  it('protocol 空串不写入（对齐 Python `if protocol:`）', async () => {
-    const c = new HubClient('http://x:8000', 't');
-    await c.register({ name: 'h', protocol: '' });
-    const body = JSON.parse(lastCall!.init.body as string);
     expect(body.protocol).toBeUndefined();
+    expect(r).toEqual({
+      daemon_instance_id: 'srv-inst',
+      runtimes: [{ provider: 'claude', runtime_id: 'rt-new' }],
+    });
   });
 
-  it('extra 透传字段（对应 Python **kwargs）展开进 body', async () => {
+  it('os/arch/allowed_roots 提供时写入', async () => {
     const c = new HubClient('http://x:8000', 't');
     await c.register({
-      name: 'h',
-      extra: { custom_field: 'x', tags: ['a', 'b'] },
+      daemonLocalId: 'd-1',
+      serverUrl: 'http://x:8000',
+      hostname: 'h',
+      os: 'darwin',
+      arch: 'arm64',
+      allowedRoots: ['/repo/a', '/repo/b'],
+      providers: [{ provider: 'p' }],
     });
     const body = JSON.parse(lastCall!.init.body as string);
-    expect(body.custom_field).toBe('x');
-    expect(body.tags).toEqual(['a', 'b']);
+    expect(body.os).toBe('darwin');
+    expect(body.arch).toBe('arm64');
+    expect(body.allowed_roots).toEqual(['/repo/a', '/repo/b']);
+  });
+
+  it('providers 透传多项 + version/status 可选省略', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.register({
+      daemonLocalId: 'd-1',
+      serverUrl: 'http://x:8000',
+      hostname: 'h',
+      providers: [
+        { provider: 'claude', version: '2.0.0', status: 'available' },
+        { provider: 'codex' }, // version/status 缺省
+      ],
+    });
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body.providers).toHaveLength(2);
+    expect(body.providers[0]).toEqual({ provider: 'claude', version: '2.0.0', status: 'available' });
+    expect(body.providers[1]).toEqual({ provider: 'codex' });
+  });
+
+  it('POST /api/daemon/register，鉴权头随 apiKey/Bearer', async () => {
+    const c = new HubClient('http://x:8000', { apiKey: 'shk_daemon' });
+    await c.register({
+      daemonLocalId: 'd-1',
+      serverUrl: 'http://x:8000',
+      hostname: 'h',
+      providers: [{ provider: 'claude' }],
+    });
+    expect(lastCall!.url).toBe(`http://x:8000${REST_PREFIX}/register`);
+    expect(lastCall!.init.method).toBe('POST');
+    const headers = lastCall!.init.headers as Record<string, string>;
+    expect(headers['X-API-Key']).toBe('shk_daemon');
+    expect(headers['Content-Type']).toBe('application/json');
   });
 });
 

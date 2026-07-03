@@ -18,7 +18,7 @@ from app.modules.daemon.lease_service import (
     LeaseNotFound,
     LeaseTokenMismatch,
 )
-from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
+from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.service import (
     DaemonInvalidClaimToken,
     DaemonRuntimeInUse,
@@ -54,6 +54,46 @@ async def _create_runtime(session: AsyncSession, user_id: uuid.UUID) -> DaemonRu
         user_id=user_id,
         name="test-daemon",
         provider="claude_code",
+        status="online",
+        last_heartbeat_at=datetime.now(UTC),
+    )
+    session.add(rt)
+    await session.commit()
+    await session.refresh(rt)
+    return rt
+
+
+async def _legacy_register_runtime(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    name: str | None = None,
+    provider: str | None = None,
+    version: str | None = None,
+) -> DaemonRuntime:
+    """兼容旧 register_runtime 签名的测试 helper（2026-07-03-daemon-entity-binding）。
+
+    旧 ``register_runtime`` 已被 per-daemon ``register_daemon`` 取代。仍按 per-provider
+    语义创建单 runtime 行的测试（heartbeat/disable/enable/delete/cleanup）改用本 helper：
+    每次创建独立的 DaemonInstance + 挂在其下的单个 DaemonRuntime，返回该 runtime。
+    """
+    instance_id = uuid.uuid4()
+    instance = DaemonInstance(
+        id=instance_id,
+        user_id=user_id,
+        hostname=name or "test-host",
+        server_url="http://test.local",
+        status="online",
+        last_heartbeat_at=datetime.now(UTC),
+    )
+    session.add(instance)
+    rt = DaemonRuntime(
+        id=uuid.uuid4(),
+        daemon_instance_id=instance_id,
+        user_id=user_id,
+        name=name,
+        provider=provider,
+        version=version,
         status="online",
         last_heartbeat_at=datetime.now(UTC),
     )
@@ -520,93 +560,197 @@ class TestValidateClaimToken:
 # ── DaemonService Tests ──────────────────────────────────────────────────────
 
 
-class TestRegisterRuntime:
-    """Tests for DaemonService.register_runtime."""
+class TestRegisterDaemon:
+    """Tests for DaemonService.register_daemon (per-daemon, design §5.2 / D-006)."""
 
     @pytest.mark.asyncio
-    async def test_register_runtime_when_new(self, db_session: AsyncSession) -> None:
-        """register_runtime creates a new DaemonRuntime record."""
+    async def test_register_daemon_creates_instance_and_runtimes(
+        self, db_session: AsyncSession
+    ) -> None:
+        """验收 1：单 daemon 注册后 daemon_instances 恰好 1 行、daemon_runtimes N 行，
+        均挂同一 daemon_instance_id。
+        """
         user_id = await _create_user(db_session)
         svc = DaemonService(db_session)
+        daemon_local_id = uuid.uuid4()
 
-        rt = await svc.register_runtime(
+        result = await svc.register_daemon(
             user_id,
-            name="my-daemon",
-            provider="claude_code",
-            version="1.0.0",
+            daemon_local_id=daemon_local_id,
+            server_url="http://hub.local",
+            hostname="host-a",
             os="linux",
             arch="x86_64",
+            allowed_roots=["~/.sillyhub"],
+            providers=[
+                {"provider": "claude", "version": "1.2.0", "status": "online"},
+                {"provider": "codex", "version": "0.1.0", "status": "online"},
+            ],
         )
 
-        assert rt.id is not None
-        assert rt.user_id == user_id
-        assert rt.name == "my-daemon"
-        assert rt.provider == "claude_code"
-        assert rt.version == "1.0.0"
-        assert rt.status == "online"
-        assert rt.last_heartbeat_at is not None
+        assert result.daemon_instance_id == daemon_local_id
+        providers_returned = {r.provider: r.runtime_id for r in result.runtimes}
+        assert set(providers_returned) == {"claude", "codex"}
+
+        # 验收 1：daemon_instances 恰好 1 行
+        instances = (await db_session.execute(select(DaemonInstance))).scalars().all()
+        assert len(instances) == 1
+        inst = instances[0]
+        assert inst.id == daemon_local_id
+        assert inst.user_id == user_id
+        assert inst.hostname == "host-a"
+        assert inst.os == "linux"
+        assert inst.status == "online"
+        assert inst.last_heartbeat_at is not None
+
+        # daemon_runtimes N 行（=上报 provider 数），均挂同一 daemon_instance_id
+        runtimes = (
+            (
+                await db_session.execute(
+                    select(DaemonRuntime).where(
+                        col(DaemonRuntime.daemon_instance_id) == daemon_local_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(runtimes) == 2
+        assert {rt.provider for rt in runtimes} == {"claude", "codex"}
+        assert all(rt.daemon_instance_id == daemon_local_id for rt in runtimes)
+        # runtime_id 与返回值一致
+        for rt in runtimes:
+            assert rt.provider is not None
+            assert rt.id == providers_returned[rt.provider]
 
     @pytest.mark.asyncio
-    async def test_register_runtime_when_idempotent(self, db_session: AsyncSession) -> None:
-        """register_runtime with same user+provider+name updates existing record."""
-        user_id = await _create_user(db_session)
-        svc = DaemonService(db_session)
-
-        rt1 = await svc.register_runtime(
-            user_id,
-            name="my-daemon",
-            provider="claude_code",
-            version="1.0.0",
-        )
-        rt2 = await svc.register_runtime(
-            user_id,
-            name="my-daemon",
-            provider="claude_code",
-            version="2.0.0",
-        )
-
-        assert rt1.id == rt2.id
-        assert rt2.version == "2.0.0"
-
-    @pytest.mark.asyncio
-    async def test_register_runtime_preserves_disabled_status(
+    async def test_register_daemon_reuses_identity_on_hostname_change(
         self, db_session: AsyncSession
     ) -> None:
-        """Re-registering a disabled runtime updates metadata without enabling placement."""
+        """验收 2：换 hostname 重启 daemon → daemon_instances.id 不变（复用 daemon_local_id）。"""
         user_id = await _create_user(db_session)
         svc = DaemonService(db_session)
+        daemon_local_id = uuid.uuid4()
 
-        rt1 = await svc.register_runtime(
+        await svc.register_daemon(
             user_id,
-            name="my-daemon",
-            provider="claude_code",
-            version="1.0.0",
+            daemon_local_id=daemon_local_id,
+            server_url="http://hub.local",
+            hostname="host-old",
+            providers=[{"provider": "claude", "version": "1.0.0"}],
         )
-        await svc.disable_runtime(rt1.id, user_id)
-
-        rt2 = await svc.register_runtime(
+        # 换 hostname 重启
+        await svc.register_daemon(
             user_id,
-            name="my-daemon",
-            provider="claude_code",
-            version="2.0.0",
+            daemon_local_id=daemon_local_id,
+            server_url="http://hub.local",
+            hostname="host-new",
+            providers=[{"provider": "claude", "version": "1.0.0"}],
         )
 
-        assert rt1.id == rt2.id
-        assert rt2.version == "2.0.0"
-        assert rt2.status == "disabled"
+        instances = (
+            (
+                await db_session.execute(
+                    select(DaemonInstance).where(col(DaemonInstance.id) == daemon_local_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(instances) == 1
+        assert instances[0].hostname == "host-new"
+        # runtime 也复用（同 provider 不重建 id）
+        runtimes = (
+            (
+                await db_session.execute(
+                    select(DaemonRuntime).where(
+                        col(DaemonRuntime.daemon_instance_id) == daemon_local_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(runtimes) == 1
 
     @pytest.mark.asyncio
-    async def test_register_runtime_different_names_creates_separate(
+    async def test_register_daemon_stale_cleanup_removes_unreported_provider(
         self, db_session: AsyncSession
     ) -> None:
-        """register_runtime with different names creates separate records."""
+        """验收 3：provider 卸载重注册后，对应 daemon_runtimes 行被删除。"""
         user_id = await _create_user(db_session)
         svc = DaemonService(db_session)
+        daemon_local_id = uuid.uuid4()
 
-        rt1 = await svc.register_runtime(user_id, name="daemon-a", provider="claude_code")
-        rt2 = await svc.register_runtime(user_id, name="daemon-b", provider="claude_code")
+        first = await svc.register_daemon(
+            user_id,
+            daemon_local_id=daemon_local_id,
+            server_url="http://hub.local",
+            hostname="host",
+            providers=[
+                {"provider": "claude", "version": "1.0.0"},
+                {"provider": "codex", "version": "0.5.0"},
+            ],
+        )
+        claude_rid = next(r.runtime_id for r in first.runtimes if r.provider == "claude")
+        codex_rid = next(r.runtime_id for r in first.runtimes if r.provider == "codex")
 
-        assert rt1.id != rt2.id
+        # 重注册时只报 claude（codex 卸载）→ codex runtime 应被清理
+        await svc.register_daemon(
+            user_id,
+            daemon_local_id=daemon_local_id,
+            server_url="http://hub.local",
+            hostname="host",
+            providers=[{"provider": "claude", "version": "1.1.0"}],
+        )
+
+        runtimes = (
+            (
+                await db_session.execute(
+                    select(DaemonRuntime).where(
+                        col(DaemonRuntime.daemon_instance_id) == daemon_local_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        providers = {rt.provider for rt in runtimes}
+        assert providers == {"claude"}
+        # claude runtime 复用同一 id
+        assert any(rt.id == claude_rid for rt in runtimes)
+        # codex runtime 已删除
+        assert await db_session.get(DaemonRuntime, codex_rid) is None
+
+    @pytest.mark.asyncio
+    async def test_register_daemon_rejects_cross_user_hijack(
+        self, db_session: AsyncSession
+    ) -> None:
+        """归属校验：daemon_local_id 已被其他用户注册 → 403 防劫持。"""
+        from app.modules.daemon.service import DaemonInstanceOwnershipMismatch
+
+        owner = await _create_user(db_session)
+        intruder = await _create_user(db_session)
+        svc = DaemonService(db_session)
+        daemon_local_id = uuid.uuid4()
+
+        await svc.register_daemon(
+            owner,
+            daemon_local_id=daemon_local_id,
+            server_url="http://hub.local",
+            hostname="host",
+            providers=[{"provider": "claude", "version": "1.0.0"}],
+        )
+
+        with pytest.raises(DaemonInstanceOwnershipMismatch) as exc_info:
+            await svc.register_daemon(
+                intruder,
+                daemon_local_id=daemon_local_id,
+                server_url="http://hub.local",
+                hostname="host",
+                providers=[{"provider": "claude", "version": "1.0.0"}],
+            )
+        assert exc_info.value.http_status == 403
 
 
 class TestDeleteRuntime:
@@ -617,7 +761,9 @@ class TestDeleteRuntime:
         """delete_runtime physically removes the runtime row."""
         user_id = await _create_user(db_session)
         svc = DaemonService(db_session)
-        rt = await svc.register_runtime(user_id, name="to-delete", provider="claude_code")
+        rt = await _legacy_register_runtime(
+            db_session, user_id, name="to-delete", provider="claude_code"
+        )
 
         await svc.delete_runtime(rt.id, user_id)
 
@@ -629,7 +775,7 @@ class TestDeleteRuntime:
         owner = await _create_user(db_session)
         intruder = await _create_user(db_session)
         svc = DaemonService(db_session)
-        rt = await svc.register_runtime(owner, name="owned", provider="claude_code")
+        rt = await _legacy_register_runtime(db_session, owner, name="owned", provider="claude_code")
 
         with pytest.raises(DaemonRuntimeNotFound):
             await svc.delete_runtime(rt.id, intruder)
@@ -644,7 +790,9 @@ class TestDeleteRuntime:
         """被未软删 workspace 绑定的 runtime 删除被拒 → DaemonRuntimeInUse (409)。"""
         user_id = await _create_user(db_session)
         svc = DaemonService(db_session)
-        rt = await svc.register_runtime(user_id, name="bound-daemon", provider="claude_code")
+        rt = await _legacy_register_runtime(
+            db_session, user_id, name="bound-daemon", provider="claude_code"
+        )
 
         ws = Workspace(
             id=uuid.uuid4(),
@@ -681,7 +829,9 @@ class TestDeleteRuntime:
         """
         user_id = await _create_user(db_session)
         svc = DaemonService(db_session)
-        rt = await svc.register_runtime(user_id, name="freed-daemon", provider="claude_code")
+        rt = await _legacy_register_runtime(
+            db_session, user_id, name="freed-daemon", provider="claude_code"
+        )
 
         ws = Workspace(
             id=uuid.uuid4(),
@@ -704,59 +854,113 @@ class TestDeleteRuntime:
 
 
 class TestDaemonHeartbeat:
-    """Tests for DaemonService.heartbeat."""
+    """Tests for DaemonService.heartbeat_daemon (per-daemon, task-07)."""
 
     @pytest.mark.asyncio
-    async def test_heartbeat_updates_timestamp(self, db_session: AsyncSession) -> None:
-        """heartbeat updates last_heartbeat_at and returns the runtime."""
+    async def test_heartbeat_daemon_refreshes_instance_and_provider_status(
+        self, db_session: AsyncSession
+    ) -> None:
+        """per-daemon 心跳刷新 daemon_instances.last_heartbeat_at + 各 runtime.status。"""
         user_id = await _create_user(db_session)
         svc = DaemonService(db_session)
-        rt = await svc.register_runtime(user_id, name="hb-daemon", provider="claude_code")
+        result = await svc.register_daemon(
+            user_id,
+            daemon_local_id=uuid.uuid4(),
+            server_url="http://test.local",
+            hostname="hb-daemon",
+            providers=[
+                {"provider": "claude", "version": "1.0"},
+                {"provider": "codex", "version": "2.0"},
+            ],
+        )
+        daemon_local_id = result.daemon_instance_id
 
-        old_hb = rt.last_heartbeat_at
-        # Small delay to ensure timestamp differs
+        # 把 instance + runtime 心跳拨旧，验证心跳能拉回 fresh。
+        old_hb = datetime.now(UTC) - timedelta(seconds=30)
+        instance = await db_session.get(DaemonInstance, daemon_local_id)
+        assert instance is not None
+        instance.last_heartbeat_at = old_hb
+        instance.status = "offline"  # 模拟曾被 stale 标 offline
+        db_session.add(instance)
+        for rt in result.runtimes:
+            r = await db_session.get(DaemonRuntime, rt.runtime_id)
+            assert r is not None
+            r.last_heartbeat_at = old_hb
+            r.status = "offline"
+            db_session.add(r)
+        await db_session.commit()
+
         import asyncio
 
         await asyncio.sleep(0.01)
 
-        updated = await svc.heartbeat(rt.id)
-        assert updated.last_heartbeat_at > old_hb
+        updated = await svc.heartbeat_daemon(
+            daemon_local_id,
+            providers=[
+                {"provider": "claude", "status": "online"},
+                {"provider": "codex", "status": "online"},
+            ],
+        )
+        assert updated.id == daemon_local_id
         assert updated.status == "online"
-
-    @pytest.mark.asyncio
-    async def test_heartbeat_when_not_found(self, db_session: AsyncSession) -> None:
-        """heartbeat on non-existent runtime raises DaemonRuntimeNotFound."""
-        svc = DaemonService(db_session)
-        with pytest.raises(DaemonRuntimeNotFound):
-            await svc.heartbeat(uuid.uuid4())
-
-    @pytest.mark.asyncio
-    async def test_heartbeat_preserves_disabled_status(self, db_session: AsyncSession) -> None:
-        """Heartbeat keeps disabled runtimes disabled while refreshing freshness."""
-        user_id = await _create_user(db_session)
-        svc = DaemonService(db_session)
-        rt = await svc.register_runtime(user_id, name="disabled-hb", provider="claude_code")
-        disabled = await svc.disable_runtime(rt.id, user_id)
-        old_hb = datetime.now(UTC) - timedelta(seconds=60)
-        disabled.last_heartbeat_at = old_hb
-        db_session.add(disabled)
-        await db_session.commit()
-
-        updated = await svc.heartbeat(rt.id)
-
-        assert updated.status == "disabled"
-        assert updated.last_heartbeat_at is not None
         updated_hb = updated.last_heartbeat_at
+        assert updated_hb is not None
         if updated_hb.tzinfo is None:
             updated_hb = updated_hb.replace(tzinfo=UTC)
         assert updated_hb > old_hb
+        # 各 runtime status 跟随上报值（online）+ last_heartbeat_at 同步刷新。
+        for rt in result.runtimes:
+            r = await db_session.get(DaemonRuntime, rt.runtime_id)
+            assert r is not None
+            assert r.status == "online"
+            assert r.last_heartbeat_at is not None
+            rt_hb = r.last_heartbeat_at
+            if rt_hb.tzinfo is None:
+                rt_hb = rt_hb.replace(tzinfo=UTC)
+            assert rt_hb > old_hb
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_daemon_when_instance_not_found(self, db_session: AsyncSession) -> None:
+        """heartbeat_daemon on non-existent daemon_local_id raises DaemonRuntimeNotFound."""
+        svc = DaemonService(db_session)
+        with pytest.raises(DaemonRuntimeNotFound):
+            await svc.heartbeat_daemon(uuid.uuid4(), providers=[])
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_daemon_preserves_disabled_runtime(
+        self, db_session: AsyncSession
+    ) -> None:
+        """disabled runtime 不被心跳拉回 online（管理员禁用意图保留）。"""
+        user_id = await _create_user(db_session)
+        svc = DaemonService(db_session)
+        result = await svc.register_daemon(
+            user_id,
+            daemon_local_id=uuid.uuid4(),
+            server_url="http://test.local",
+            hostname="disabled-hb",
+            providers=[{"provider": "claude"}],
+        )
+        rt_id = result.runtimes[0].runtime_id
+        # 先 disable 该 runtime（管理员禁用）
+        await svc.disable_runtime(rt_id, user_id)
+
+        updated = await svc.heartbeat_daemon(
+            result.daemon_instance_id,
+            providers=[{"provider": "claude", "status": "online"}],
+        )
+        assert updated.status == "online"  # daemon 实体被拉回 online
+        r = await db_session.get(DaemonRuntime, rt_id)
+        assert r is not None
+        assert r.status == "disabled"  # runtime 保留 disabled
 
     @pytest.mark.asyncio
     async def test_enable_runtime_uses_heartbeat_freshness(self, db_session: AsyncSession) -> None:
         """Enable restores online only for runtimes with a fresh heartbeat."""
         user_id = await _create_user(db_session)
         svc = DaemonService(db_session)
-        rt = await svc.register_runtime(user_id, name="enable-hb", provider="claude_code")
+        rt = await _legacy_register_runtime(
+            db_session, user_id, name="enable-hb", provider="claude_code"
+        )
 
         await svc.disable_runtime(rt.id, user_id)
         fresh = await svc.enable_runtime(rt.id, user_id, max_age_seconds=45)
@@ -771,47 +975,89 @@ class TestDaemonHeartbeat:
         assert stale.status == "offline"
 
     @pytest.mark.asyncio
-    async def test_cleanup_stale_runtimes_marks_old_heartbeats_offline(
+    async def test_cleanup_stale_runtimes_marks_daemon_offline_and_cascades(
         self, db_session: AsyncSession
     ) -> None:
-        """cleanup_stale_runtimes marks online runtimes offline after heartbeat timeout."""
+        """cleanup_stale_runtimes: daemon 实体心跳过期 → instance offline + 其下 runtime 联动 offline (task-07)。"""
         user_id = await _create_user(db_session)
         svc = DaemonService(db_session)
-        stale = await svc.register_runtime(user_id, name="stale", provider="claude")
-        fresh = await svc.register_runtime(user_id, name="fresh", provider="codex")
 
-        stale.last_heartbeat_at = datetime.now(UTC) - timedelta(seconds=180)
-        fresh.last_heartbeat_at = datetime.now(UTC)
-        db_session.add(stale)
-        db_session.add(fresh)
+        # stale daemon（两 provider，heartbeat 拨旧）
+        stale_result = await svc.register_daemon(
+            user_id,
+            daemon_local_id=uuid.uuid4(),
+            server_url="http://stale.local",
+            hostname="stale",
+            providers=[{"provider": "claude"}, {"provider": "codex"}],
+        )
+        stale_instance = await db_session.get(DaemonInstance, stale_result.daemon_instance_id)
+        assert stale_instance is not None
+        stale_instance.last_heartbeat_at = datetime.now(UTC) - timedelta(seconds=180)
+        db_session.add(stale_instance)
+        # fresh daemon（heartbeat fresh）
+        fresh_result = await svc.register_daemon(
+            user_id,
+            daemon_local_id=uuid.uuid4(),
+            server_url="http://fresh.local",
+            hostname="fresh",
+            providers=[{"provider": "gemini"}],
+        )
+        fresh_instance = await db_session.get(DaemonInstance, fresh_result.daemon_instance_id)
+        assert fresh_instance is not None
+        fresh_instance.last_heartbeat_at = datetime.now(UTC)
+        db_session.add(fresh_instance)
         await db_session.commit()
 
         count = await svc.cleanup_stale_runtimes(max_age_seconds=120)
 
-        assert count == 1
-        await db_session.refresh(stale)
-        await db_session.refresh(fresh)
-        assert stale.status == "offline"
-        assert fresh.status == "online"
+        assert count == 1  # 1 个 daemon 实体被标 offline
+        await db_session.refresh(stale_instance)
+        await db_session.refresh(fresh_instance)
+        assert stale_instance.status == "offline"
+        assert fresh_instance.status == "online"
+        # stale daemon 下两个 runtime 联动 offline
+        for rt in stale_result.runtimes:
+            r = await db_session.get(DaemonRuntime, rt.runtime_id)
+            assert r is not None
+            assert r.status == "offline"
+        # fresh daemon 的 runtime 仍 online
+        for rt in fresh_result.runtimes:
+            r = await db_session.get(DaemonRuntime, rt.runtime_id)
+            assert r is not None
+            assert r.status == "online"
 
     @pytest.mark.asyncio
     async def test_cleanup_stale_runtimes_ignores_disabled_runtimes(
         self, db_session: AsyncSession
     ) -> None:
-        """Disabled runtimes stay disabled even when their heartbeat is stale."""
+        """Disabled runtimes stay disabled even when their daemon heartbeat is stale."""
         user_id = await _create_user(db_session)
         svc = DaemonService(db_session)
-        rt = await svc.register_runtime(user_id, name="disabled-stale", provider="claude")
-        disabled = await svc.disable_runtime(rt.id, user_id)
-        disabled.last_heartbeat_at = datetime.now(UTC) - timedelta(seconds=180)
-        db_session.add(disabled)
+        result = await svc.register_daemon(
+            user_id,
+            daemon_local_id=uuid.uuid4(),
+            server_url="http://test.local",
+            hostname="disabled-stale",
+            providers=[{"provider": "claude"}],
+        )
+        rt_id = result.runtimes[0].runtime_id
+        await svc.disable_runtime(rt_id, user_id)
+        instance = await db_session.get(DaemonInstance, result.daemon_instance_id)
+        assert instance is not None
+        instance.last_heartbeat_at = datetime.now(UTC) - timedelta(seconds=180)
+        db_session.add(instance)
         await db_session.commit()
 
         count = await svc.cleanup_stale_runtimes(max_age_seconds=45)
 
-        assert count == 0
-        await db_session.refresh(disabled)
-        assert disabled.status == "disabled"
+        # daemon 实体仍被标 offline（实体级 status 不受 runtime disabled 影响），
+        # 但其下 disabled runtime 保留 disabled（不被 stale 覆盖成 offline）。
+        assert count == 1
+        await db_session.refresh(instance)
+        assert instance.status == "offline"
+        r = await db_session.get(DaemonRuntime, rt_id)
+        assert r is not None
+        assert r.status == "disabled"
 
 
 class TestCompleteLease:

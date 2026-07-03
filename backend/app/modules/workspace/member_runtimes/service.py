@@ -11,7 +11,7 @@ from sqlmodel import col
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
-from app.modules.daemon.model import DaemonRuntime
+from app.modules.daemon.model import DaemonInstance
 from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
 
 log = get_logger(__name__)
@@ -32,21 +32,26 @@ async def upsert_my_binding(
     workspace_id: uuid.UUID,
     user_id: uuid.UUID,
     *,
-    runtime_id: uuid.UUID | None,
+    daemon_id: uuid.UUID | None,
     root_path: str,
     path_source: str,
 ) -> tuple[WorkspaceMemberRuntime, bool]:
     """Upsert a member's binding row. Returns ``(row, created)``.
 
-    Raises ``AppError(403)`` if ``runtime_id`` is set but belongs to a
+    Change 2026-07-03-daemon-entity-binding task-09 (D-004): the binding
+    target is ``daemon_id`` (FK→daemon_instances) instead of ``runtime_id``.
+    ``runtime_id`` column is preserved nullable but NOT written by this
+    function — it retains legacy snapshot data only.
+
+    Raises ``AppError(403)`` if ``daemon_id`` is set but belongs to a
     different user (defensive — prevents cross-user daemon hijack).
     """
-    if runtime_id is not None:
-        daemon = await session.get(DaemonRuntime, runtime_id)
+    if daemon_id is not None:
+        daemon = await session.get(DaemonInstance, daemon_id)
         if daemon is None or daemon.user_id != user_id:
             raise AppError(
-                "Daemon runtime does not belong to you.",
-                code="runtime_not_owned",
+                "Daemon instance does not belong to you.",
+                code="daemon_not_owned",
                 http_status=403,
             )
 
@@ -57,7 +62,7 @@ async def upsert_my_binding(
         # init_synced_at / init_synced_spec_version are NOT touched here — they
         # are written exclusively by the init-lease complete path (task-07).
         # Changing one's daemon/path must not reset initialization state.
-        existing.runtime_id = runtime_id
+        existing.daemon_id = daemon_id
         existing.root_path = root_path
         existing.path_source = path_source
         existing.updated_at = now
@@ -70,7 +75,7 @@ async def upsert_my_binding(
     binding = WorkspaceMemberRuntime(
         workspace_id=workspace_id,
         user_id=user_id,
-        runtime_id=runtime_id,
+        daemon_id=daemon_id,
         root_path=root_path,
         path_source=path_source,
         init_synced_at=None,

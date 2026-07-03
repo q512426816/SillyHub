@@ -20,7 +20,10 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.daemon.model import DaemonRuntime
+# task-03: WorkspaceMemberRuntime.daemon_id FK 跨模块指向 daemon_instances，
+# 必须导入 DaemonInstance 让其表注册进 BaseModel.metadata，否则 create_all 时
+# FK 找不到目标表（NoReferencedTableError）。
+from app.modules.daemon.model import DaemonInstance
 from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
 from app.modules.workspace.member_runtimes.service import (
     get_my_binding,
@@ -35,18 +38,18 @@ pytestmark = pytest.mark.asyncio
 # ---------------------------------------------------------------------------
 
 
-async def _create_runtime(session: AsyncSession, user_id: uuid.UUID) -> DaemonRuntime:
-    rt = DaemonRuntime(
+async def _create_daemon_instance(session: AsyncSession, user_id: uuid.UUID) -> DaemonInstance:
+    """Insert a DaemonInstance row."""
+    inst = DaemonInstance(
         id=uuid.uuid4(),
-        name=f"daemon-{user_id}",
         user_id=user_id,
-        provider="claude",
+        hostname="test-host",
+        server_url="http://localhost:8000",
         status="online",
-        heartbeat_at=datetime.now(UTC),
     )
-    session.add(rt)
+    session.add(inst)
     await session.flush()
-    return rt
+    return inst
 
 
 async def _create_user(session: AsyncSession) -> uuid.UUID:
@@ -92,13 +95,13 @@ async def test_create_binding_init_synced_fields_are_null(db_session: AsyncSessi
     """D-010: a freshly created binding must report init_synced_* == NULL."""
     user_id = await _create_user(db_session)
     workspace_id = await _create_workspace(db_session)
-    runtime = await _create_runtime(db_session, user_id)
+    daemon = await _create_daemon_instance(db_session, user_id)
 
     row, created = await upsert_my_binding(
         db_session,
         workspace_id,
         user_id,
-        runtime_id=runtime.id,
+        daemon_id=daemon.id,
         root_path="/tmp/my-project",
         path_source="daemon-client",
     )
@@ -117,7 +120,7 @@ async def test_get_my_binding_returns_init_synced_fields(db_session: AsyncSessio
         db_session,
         workspace_id,
         user_id,
-        runtime_id=None,
+        daemon_id=None,
         root_path="/tmp/my-project",
         path_source="daemon-client",
     )
@@ -132,14 +135,14 @@ async def test_edit_binding_does_not_touch_init_synced_fields(db_session: AsyncS
     """Editing runtime/path must not reset init_synced_* (owned by init complete)."""
     user_id = await _create_user(db_session)
     workspace_id = await _create_workspace(db_session)
-    runtime = await _create_runtime(db_session, user_id)
+    daemon = await _create_daemon_instance(db_session, user_id)
 
     # Create with NULL init_synced_*.
     row, created = await upsert_my_binding(
         db_session,
         workspace_id,
         user_id,
-        runtime_id=runtime.id,
+        daemon_id=daemon.id,
         root_path="/tmp/old",
         path_source="daemon-client",
     )
@@ -164,7 +167,7 @@ async def test_edit_binding_does_not_touch_init_synced_fields(db_session: AsyncS
         db_session,
         workspace_id,
         user_id,
-        runtime_id=runtime.id,
+        daemon_id=daemon.id,
         root_path="/tmp/new",
         path_source="daemon-client",
     )
@@ -180,7 +183,7 @@ async def test_edit_binding_does_not_touch_init_synced_fields(db_session: AsyncS
 async def test_create_binding_without_runtime_still_null_init_synced(
     db_session: AsyncSession,
 ):
-    """Edge: binding with runtime_id=None (server-local path) also starts NULL."""
+    """Edge: binding with daemon_id=None (server-local path) also starts NULL."""
     user_id = await _create_user(db_session)
     workspace_id = await _create_workspace(db_session)
 
@@ -188,7 +191,7 @@ async def test_create_binding_without_runtime_still_null_init_synced(
         db_session,
         workspace_id,
         user_id,
-        runtime_id=None,
+        daemon_id=None,
         root_path="/tmp/server-local",
         path_source="server-local",
     )

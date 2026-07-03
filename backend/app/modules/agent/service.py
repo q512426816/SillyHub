@@ -1479,12 +1479,13 @@ class AgentService:
 
         hub = get_daemon_ws_hub()
         await hub.send_session_control(
-            dispatch.runtime_id,
+            dispatch.daemon_id,
             DAEMON_MSG_SESSION_INJECT,
             {
                 "session_id": str(session.id),
                 "lease_id": str(dispatch.lease_id),
                 "run_id": str(run.id),
+                "runtime_id": str(dispatch.runtime_id),
                 "prompt": bundle.step_prompt,
                 "claim_token": dispatch.claim_token,
             },
@@ -1544,18 +1545,19 @@ class AgentService:
         spec_ws_svc = SpecWorkspaceService(self._session)
         spec_ws = await spec_ws_svc.ensure_spec_workspace(workspace_id)
 
-        # -- 2. Resolve member binding for runtime_id + root_path --------------
+        # -- 2. Resolve member binding for runtime_id + daemon_id + root_path ----
         binding = await MemberBindingResolver.resolve_member_binding(
             self._session,
             workspace_id,
             actor_user_id,
         )
-        runtime_id = binding.runtime_id
+        daemon_id = binding.daemon_id
         root_path = binding.root_path
+        runtime_id = binding.runtime_id  # D-003: preserved for lease FK / metadata
 
-        if runtime_id is None:
+        if daemon_id is None:
             raise AgentRunError(
-                "Member has no daemon runtime configured; cannot dispatch init lease.",
+                "Member has no daemon configured; cannot dispatch init lease.",
                 details={
                     "workspace_id": str(workspace_id),
                     "user_id": str(actor_user_id),
@@ -1621,10 +1623,18 @@ class AgentService:
 
         # -- 5. Wake daemon ----------------------------------------------------
         hub = get_daemon_ws_hub()
-        if hub.is_connected(runtime_id):
-            await hub.send_wakeup(runtime_id, lease_id=lease_id)
+        # routing by daemon_id (WS connection key, design §5.3); payload carries
+        # runtime_id for provider session identification.
+        wake_id = daemon_id if daemon_id is not None else runtime_id
+        if hub.is_connected(wake_id):
+            await hub.send_wakeup(
+                wake_id,
+                lease_id=lease_id,
+                payload_runtime_id=runtime_id,
+            )
             log.info(
                 "start_init_dispatch_wakeup_sent",
+                daemon_id=str(daemon_id) if daemon_id else None,
                 runtime_id=str(runtime_id),
                 lease_id=str(lease_id),
             )
@@ -1635,6 +1645,7 @@ class AgentService:
                 user_id=str(actor_user_id),
                 lease_id=str(lease_id),
                 runtime_id=str(runtime_id),
+                daemon_id=str(daemon_id) if daemon_id else None,
                 note="daemon will pick up the lease on next poll",
             )
 

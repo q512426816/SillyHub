@@ -132,7 +132,7 @@ describe("WorkspaceAccessGuide", () => {
 
     await waitFor(() =>
       expect(mockedUpsert).toHaveBeenCalledWith("ws-1", {
-        runtime_id: "rt-claude",
+        daemon_id: "rt-claude",
         root_path: "/Users/me/code",
         path_source: "daemon-client",
       }),
@@ -236,7 +236,7 @@ describe("WorkspaceAccessGuide", () => {
 
       await waitFor(() =>
         expect(mockedUpsert).toHaveBeenCalledWith("ws-1", {
-          runtime_id: "rt-cursor",
+          daemon_id: "rt-cursor",
           root_path: "/Users/me/new-code",
           path_source: "daemon-client",
         }),

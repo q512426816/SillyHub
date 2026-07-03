@@ -202,3 +202,28 @@ class PermissionResponsePayload(BaseModel):
     # present iff the originating request was a dialog, absent for plain
     # canUseTool approvals.
     dialog_result: dict | None = None
+
+
+# ── WS handshake query contract (task-06 / D-006 / design §5.3) ──────────────
+
+
+# Name of the query parameter the WS handshake endpoint reads to identify the
+# connecting daemon entity. The value is the daemon's locally-persisted
+# ``daemon_local_id`` (= ``daemon_instances.id`` PK); backend looks it up and
+# registers the WS connection keyed by that id (one connection per daemon,
+# regardless of provider count).
+#
+# Breaking change (D-007): old daemons connect with ``?runtime_id=...`` and are
+# rejected (code=4001 invalid) — the new backend only accepts
+# ``?daemon_local_id=...``. No legacy fallback is provided on purpose (daemon +
+# backend upgrade together).
+WS_HANDSHAKE_QUERY_PARAM = "daemon_local_id"
+
+
+# Note on payload ``runtime_id`` fields (design §5.3):
+# The TaskAvailablePayload / HeartbeatPayload / HeartbeatAckPayload and the
+# session_control payloads retain their ``runtime_id`` field — that is the
+# *provider session* discriminator the daemon uses to dispatch an inbound
+# message to the correct SessionManager / task-runner. Only the *connection
+# routing key* changed from runtime_id → daemon_instance_id (ws_hub); payloads
+# keep runtime_id.

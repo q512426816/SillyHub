@@ -23,10 +23,10 @@
  */
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 
 // ── 路径常量（对齐 Python config.py:15-16）──────────────────────────────────
 
@@ -42,8 +42,83 @@ export const DEFAULT_CONFIG_DIR: string = join(homedir(), '.sillyhub', 'daemon')
 /**
  * 默认配置文件 `<DEFAULT_CONFIG_DIR>/config.json`。
  * 等价 Python `DEFAULT_CONFIG_DIR / "config.json"`。
+ *
+ * 2026-07-03-daemon-entity-binding task-04（D-001）：保留为旧配置文件路径常量，
+ * **仅用于首次升级迁移源**（per-server 文件缺失时从此处搬运 daemon_local_id）
+ * 与外部测试的兼容断言。生产代码定位新 daemon 配置文件统一改用
+ * `configPathForServer(server_url)`，不再直接消费本常量。不删除以保持
+ * 向后兼容引用稳定（cli.test.ts 等历史断言依赖）。
  */
 export const DEFAULT_CONFIG_PATH: string = join(DEFAULT_CONFIG_DIR, 'config.json');
+
+// ── per-server 配置路径（task-04 / D-001）──────────────────────────────────
+
+/**
+ * 按 server_url 计算的 per-server 配置文件名前缀长度（sha256 前 8 位十六进制）。
+ *
+ * 碰撞概率 16^8 ≈ 43 亿分之一，可接受（后端最终以 daemon_local_id 主键去重，
+ * server_hash 仅用于本地文件名隔离，碰撞最坏后果是两 server 共用一份配置，
+ * 不影响身份正确性）。
+ */
+const SERVER_HASH_LENGTH = 8;
+
+/**
+ * 计算某 server_url 的本地配置文件 hash 片段（sha256 前 8 位十六进制）。
+ *
+ * 纯函数（同一输入恒同输出），导出供 cli/测试复用。hash 计算用
+ * `node:crypto` 的 `createHash('sha256')`（同步 digest，UTF-8 编码 server_url）。
+ *
+ * @param server_url daemon 连接的后端地址（如 `http://localhost:8000`）。
+ * @returns 8 位十六进制字符串（小写）。
+ */
+export function serverHash(server_url: string): string {
+  return createHash('sha256').update(server_url, 'utf-8').digest('hex').slice(0, SERVER_HASH_LENGTH);
+}
+
+/**
+ * 返回某 server_url 对应的 per-server 配置文件绝对路径。
+ *
+ * 文件名格式：`config-<server_hash>.json`（如 `config-a1b2c3d4.json`），
+ * 位于 `configDir`（默认 `DEFAULT_CONFIG_DIR = ~/.sillyhub/daemon`）下。
+ *
+ * 设计（design §5.1 / D-001）：每个 daemon 进程按它连接的后端地址用独立配置文件
+ * → 独立 daemon_local_id。同机多 daemon 连不同后端时配置互不覆盖。
+ *
+ * @param server_url daemon 连接的后端地址。
+ * @param configDir  配置目录（默认 DEFAULT_CONFIG_DIR；测试可注入 tmpdir）。
+ */
+export function configPathForServer(
+  server_url: string,
+  configDir: string = DEFAULT_CONFIG_DIR,
+): string {
+  return join(configDir, `config-${serverHash(server_url)}.json`);
+}
+
+/**
+ * 检查某配置目录下是否已存在**任意** per-server 配置文件（`config-<hash>.json`）。
+ *
+ * task-04 一次性迁移判定（design §5.1 + acceptance "两 server 不同 daemon_local_id"）：
+ * 首次升级时，legacy `config.json` 的 runtime_id 只迁移给第一个被创建的 per-server
+ * 文件；本函数通过扫描目录判断「是否已有 per-server 文件」来阻止重复迁移（否则连 N 个
+ * 后端会共享同一 legacy 身份，违反隔离）。
+ *
+ * 仅匹配 `config-<8位hex>.json` 命名（PER_SERVER_CONFIG_RE），忽略旧 `config.json`
+ * 与其他文件（pid/log 等）。
+ *
+ * @param configDir 配置目录（默认 DEFAULT_CONFIG_DIR）。
+ * @returns 已有 per-server 文件 → true；目录不存在/无匹配文件 → false。
+ */
+const PER_SERVER_CONFIG_RE = /^config-[0-9a-f]{8}\.json$/;
+export function hasAnyPerServerConfig(configDir: string = DEFAULT_CONFIG_DIR): boolean {
+  let entries: string[];
+  try {
+    entries = readdirSync(configDir);
+  } catch {
+    // 目录不存在或不可读 → 视为无 per-server 文件（不阻断迁移）
+    return false;
+  }
+  return entries.some((name) => PER_SERVER_CONFIG_RE.test(name));
+}
 
 // ── DaemonConfig interface（字段与 Python DEFAULTS 1:1）─────────────────────
 
@@ -262,17 +337,46 @@ export const DEFAULT_CONFIG: Readonly<DaemonConfig> = Object.freeze({
 // ── loadConfig（异步加载 + 合并默认 + 自动生成 runtime_id）──────────────────
 
 /**
- * 从 config.json 加载配置。
+ * `loadConfig` 的可选参数。
+ *
+ * 2026-07-03-daemon-entity-binding task-04（D-001）：配置文件路径现由 server_url
+ * 驱动（`configPathForServer`）。两个可选字段覆盖默认定位，仅用于测试与历史兼容：
+ *   - `path`：显式指定文件绝对路径（**优先级最高**，跳过 server_url 计算）。
+ *     保留以兼容历史 `loadConfig(path)` 调用语义（config.test.ts 的 path-based
+ *     用例：嵌套目录、损坏 JSON、空文件等）。
+ *   - `configDir`：注入配置目录（默认 DEFAULT_CONFIG_DIR）；与 server_url 配合
+ *     定位 per-server 文件，测试用来隔离到 tmpdir 而不污染真实 ~/.sillyhub。
+ */
+export interface LoadConfigOptions {
+  /** 显式文件路径（覆盖 server_url 计算，最高优先级）。 */
+  path?: string;
+  /** per-server 文件所在目录（默认 DEFAULT_CONFIG_DIR）。仅在 path 未指定时生效。 */
+  configDir?: string;
+}
+
+/**
+ * 从 per-server 配置文件加载配置。
+ *
+ * 2026-07-03-daemon-entity-binding task-04（D-001）签名变更：
+ *   - 旧：`loadConfig(path?)`，path 默认 `DEFAULT_CONFIG_PATH`（单一全局 config.json）。
+ *   - 新：`loadConfig(server_url, opts?)`，server_url **必填**，文件名由
+ *     `configPathForServer(server_url)` 计算（`config-<sha256[0:8]>.json`）。
+ *     `opts.path` 可显式覆盖路径（历史兼容/测试）。
  *
  * 行为对齐 Python `DaemonConfig._load()`（config.py:41-51）：
  *
  * 1. 起始 = 浅拷贝 `DEFAULT_CONFIG`（不污染常量）。
- * 2. 文件存在 → `readFile` + `JSON.parse`，结果**浅合并**到 _data
+ * 2. **首次升级迁移（brownfield 兼容，design §5.1 / §10）**：
+ *    per-server 文件不存在 **且** 旧 `config.json`（DEFAULT_CONFIG_PATH）存在 →
+ *    读旧文件，把 `runtime_id`（仅此字段，其余字段走默认 + 旧文件合并）写到新
+ *    per-server 文件，保留 daemon 身份。**幂等**：per-server 文件已存在则不迁移。
+ *    迁移后**不删**旧 config.json（保留备份，用户可手动清理）。
+ * 3. per-server 文件存在 → `readFile` + `JSON.parse`，结果**浅合并**到 _data
  *    （`Object.assign`，等价 Python `self._data.update(saved)`）。
  *    缺字段自动补默认；DaemonConfig 全是扁平字段，浅合并即正确。
- * 3. `runtime_id` 为空/null/falsy（`""` / `null` / `undefined`）→
+ * 4. `runtime_id` 为空/null/falsy（`""` / `null` / `undefined`）→
  *    生成 `randomUUID()` 并立即 `saveConfig()` 落盘（对齐 Python config.py:49-51）。
- * 4. 返回合并后的完整配置。
+ * 5. 返回合并后的完整配置。
  *
  * 异常策略（对齐 Python「宽容加载，严格使用」）：
  *   - JSON 损坏 → `JSON.parse` 抛 `SyntaxError` 原样冒泡，不吞不降级
@@ -282,16 +386,61 @@ export const DEFAULT_CONFIG: Readonly<DaemonConfig> = Object.freeze({
  *     daemon 应停止而非带病运行（YAGNI，不 retry 不降级）。
  *   - `server_url` 为空 → 不报错，交由 hub-client 在实际请求时失败。
  *
- * @param path 配置文件路径，默认 `DEFAULT_CONFIG_PATH`。
+ * @param server_url daemon 连接的后端地址（决定 per-server 文件名）。
+ * @param opts       路径覆盖/目录注入（测试与历史兼容用）。
  * @returns 合并后的完整配置（所有字段必有值）。
  */
 export async function loadConfig(
-  path: string = DEFAULT_CONFIG_PATH,
+  server_url: string,
+  opts: LoadConfigOptions = {},
 ): Promise<DaemonConfig> {
+  // step 0: 定位配置文件路径。opts.path 显式覆盖优先；否则按 server_url 算 per-server 文件。
+  const path = opts.path ?? configPathForServer(server_url, opts.configDir);
+  // 是否走 per-server 默认路径（非测试/历史 path 覆盖）。迁移逻辑仅在 per-server
+  // 模式触发——opts.path 显式指定是测试/历史兼容场景，不应被 legacy config.json 迁移污染。
+  const usingPerServerPath = opts.path === undefined;
+
   // step 1: 浅拷贝起始数据（避免污染 DEFAULT_CONFIG 常量）。
   const data: DaemonConfig = { ...DEFAULT_CONFIG };
 
-  // step 2: 文件存在则读 + 解析 + 浅合并。
+  // step 2: 首次升级迁移（brownfield）。仅当走 per-server 默认路径 + per-server 文件
+  // 不存在 + 旧 config.json 存在时触发，幂等（per-server 已存在则跳过）。仅搬 runtime_id
+  // 字段，保留 daemon 身份。不删旧 config.json（design §10：保留备份）。
+  // migrated 标记：迁移发生后，step 4 必须强制落盘 per-server 文件（哪怕 runtime_id
+  // 已从 legacy 继承无需新生成），否则迁移结果丢失，下次启动重复迁移且 per-server 永不落盘。
+  //
+  // **一次性语义**（task-04 acceptance "两 server 不同 daemon_local_id" 守护）：
+  // 迁移只在「DEFAULT_CONFIG_DIR 下尚无任何 per-server 文件」时触发——首个被创建的
+  // per-server 文件继承 legacy runtime_id，之后用户连其他后端时目录已有 per-server 文件，
+  // 不再迁移（新建独立身份）。否则字面"per-server 不存在即迁移"会让连 N 个后端共享同一
+  // legacy 身份，违反隔离目标。
+  let migrated = false;
+  const perServerExisted = existsSync(path);
+  const migrationDir = opts.configDir ?? DEFAULT_CONFIG_DIR;
+  // 一次性迁移：仅当走 per-server 路径 + 当前 per-server 不存在 + 目录下无任何
+  // per-server 文件 + legacy 存在时触发。hasAnyPerServerConfig 已隐含 perServerExisted
+  //（当前文件在则扫描到），故不再单独检查 perServerExisted。
+  if (
+    usingPerServerPath &&
+    !hasAnyPerServerConfig(migrationDir) &&
+    existsSync(DEFAULT_CONFIG_PATH)
+  ) {
+    try {
+      const legacyRaw = await readFile(DEFAULT_CONFIG_PATH, 'utf-8');
+      const legacy = JSON.parse(legacyRaw) as Partial<DaemonConfig>;
+      // 仅迁移 runtime_id（daemon_local_id 身份）。其余字段让默认值 + 后续合并兜底，
+      // 避免 legacy 的 server_url/token 等污染新 per-server（不同后端身份应隔离）。
+      if (legacy.runtime_id) {
+        data.runtime_id = legacy.runtime_id;
+        migrated = true;
+      }
+    } catch {
+      // 旧 config.json 损坏/不可读 → 放弃迁移，按全新身份生成（不阻断启动）。
+      // 记录由调用方/默认 runtime_id 生成路径兜底。
+    }
+  }
+
+  // step 3: per-server 文件存在则读 + 解析 + 浅合并。
   // 用 existsSync 而非 fs/promises.access + try/catch：启动一次性调用，语义直观。
   if (existsSync(path)) {
     const raw = await readFile(path, 'utf-8');
@@ -309,15 +458,24 @@ export async function loadConfig(
   // 不因规范化立即落盘——与 runtime_id 自动生成路径不同，避免每次启动写盘。
   data.allowed_roots = normalizeAllowedRoots(data.allowed_roots);
 
-  // step 3: runtime_id 为空/null/undefined（边界 R5）→ 生成 uuid 并落盘。
+  // step 4: runtime_id 为空/null/undefined（边界 R5）→ 生成 uuid 并落盘。
   // 用 `||` 一步覆盖 null / "" / undefined 三种 falsy，对齐 Python
   // `if not self._data.get("runtime_id")` 的语义。
   // 注：interface 声明 runtime_id 为 string（非 nullable），但用户 config.json
   // 可能写 `"runtime_id": null`，合并后 data.runtime_id 实际为 null ——
   // `|| randomUUID()` 把它纠正回 string，保证运行时与类型一致。
-  if (!data.runtime_id) {
+  // 触发条件：①全新身份（无 legacy 也无 per-server）②per-server 缺 runtime_id。
+  // 若迁移已注入 runtime_id 或 per-server 已存 runtime_id，则不重生（身份稳定）。
+  const generated = !data.runtime_id;
+  if (generated) {
     data.runtime_id = randomUUID();
-    // 对齐 Python config.py:51 `self.save()`：自动生成后立即落盘。
+  }
+  // 落盘条件（对齐 Python config.py:51 `self.save()` 的「自动生成后立即落盘」+ 迁移固化）：
+  //   - generated：runtime_id 刚生成 → 必须落盘
+  //   - migrated：从 legacy 迁移了 runtime_id → 必须落盘固化到 per-server（否则丢失）
+  //   - !perServerExisted：目标文件原本不存在（全新 per-server，无论路径来源）→ 落盘新建
+  // 仅当目标文件已存在且未迁移且未生成时，跳过落盘（避免每次启动无谓写盘，T11 守护）。
+  if (generated || migrated || !perServerExisted) {
     await saveConfig(data, path);
   }
 

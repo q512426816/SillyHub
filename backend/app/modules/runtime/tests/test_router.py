@@ -259,3 +259,68 @@ async def test_daemon_client_reads_flat_platform_runtime_dir(db_session, tmp_pat
 
     assert progress is not None
     assert progress.current_change == "change-001"
+
+
+async def test_daemon_client_repo_native_uses_spec_root(db_session, tmp_path: Path) -> None:
+    """daemon-client + repo-native 组合验证：root 强制走 spec_root 而非 workspace.root_path。
+
+    修复 task-16: daemon-client workspace 无视 strategy 强制走 spec_root，
+    避免 fallback 到 workspace.root_path（宿主机路径，后端容器访问不到）。
+    """
+    spec_root = tmp_path / "server-spec-root"
+    _create_test_db(spec_root / ".runtime" / "sillyspec.db")
+
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="dc-repo-native",
+        slug=f"dc-repo-native-{uuid.uuid4().hex[:8]}",
+        # root_path 设为不存在的路径，模拟 Windows 宿主路径不可访问
+        root_path=str(tmp_path / "nonexistent-host-path"),
+        path_source="daemon-client",
+        status="active",
+    )
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+
+    spec_ws = SpecWorkspace(
+        id=uuid.uuid4(),
+        workspace_id=ws.id,
+        spec_root=str(spec_root),
+        strategy="repo-native",
+        sync_status="clean",
+    )
+    db_session.add(spec_ws)
+    await db_session.commit()
+
+    progress = await RuntimeService(db_session).get_progress(ws.id)
+
+    assert progress is not None
+    assert progress.current_change == "change-001"
+    assert progress.project == "test-project"
+
+
+async def test_non_daemon_client_without_spec_root_uses_root_path(
+    db_session, tmp_path: Path
+) -> None:
+    """非 daemon-client + 无 spec_ws 时回退到 workspace.root_path（向后兼容）。"""
+    sillyspec_dir = tmp_path / "workspace-root" / ".sillyspec" / ".runtime"
+    _create_test_db(sillyspec_dir / "sillyspec.db")
+
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="local-ws",
+        slug=f"local-ws-{uuid.uuid4().hex[:8]}",
+        root_path=str(tmp_path / "workspace-root"),
+        path_source="server-local",
+        status="active",
+    )
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+
+    # No SpecWorkspace row — simulate pre-scan state
+    progress = await RuntimeService(db_session).get_progress(ws.id)
+
+    assert progress is not None
+    assert progress.current_change == "change-001"

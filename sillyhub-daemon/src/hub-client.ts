@@ -27,21 +27,23 @@ import type { SessionRecoverStatus } from './daemon.js';
 
 // ── body 类型（字段名 snake_case 对齐 backend Pydantic 模型）──────────────────
 
-/** register 请求体。必填字段总写入（空串也算），条件字段按存在性写入。 */
+/**
+ * register 请求体（per-daemon，2026-07-03-daemon-entity-binding design §5.2 / D-006）。
+ *
+ * daemon 启动一次性上报 daemon_local_id（=本地 config.runtime_id）+ 机器级字段
+ * + 探测到的 provider 列表。后端先 upsert daemon_instances，再为每 provider
+ * upsert daemon_runtimes，并清理 stale runtime。
+ */
 export interface RegisterBody {
-  name: string;
-  provider: string;
-  version: string;
-  os: string;
-  arch: string;
-  /** 仅当调用方提供 runtimeId 时写入（对齐 Python `if runtime_id is not None`）。 */
-  runtime_id?: string;
-  /** 仅当非空串时写入（对齐 Python `if protocol:`）。 */
-  protocol?: string;
-  /** 仅当非 undefined 时写入（对齐 Python `if capabilities:`）。 */
-  capabilities?: Record<string, unknown>;
-  /** 对应 Python **kwargs 透传字段。 */
-  [extra: string]: unknown;
+  /** daemon 本地 uuid（身份，复用）。对应 backend DaemonRegisterRequest.daemon_local_id。 */
+  daemon_local_id: string;
+  server_url: string;
+  hostname: string;
+  os?: string;
+  arch?: string;
+  allowed_roots?: string[];
+  /** 探测到的 provider 列表，每项 {provider, version?, status?}。 */
+  providers: { provider: string; version?: string; status?: string }[];
 }
 
 /** claim_lease 请求体。 */
@@ -79,9 +81,12 @@ export interface CompleteLeaseBody {
   result: Record<string, unknown>;
 }
 
-/** heartbeat（runtime 心跳）请求体。 */
+/** heartbeat（per-daemon 心跳）请求体。2026-07-03-daemon-entity-binding task-07 / D-006。 */
 export interface HeartbeatBody {
-  runtime_id: string;
+  /** daemon 本地 uuid（= daemon_instances.id）。 */
+  daemon_local_id: string;
+  /** 各 provider 当前状态，每项 {provider, status}。 */
+  providers: { provider: string; status?: string }[];
 }
 
 // ── 错误类型 ──────────────────────────────────────────────────────────────────
@@ -280,47 +285,31 @@ export class HubClient {
   // -- Runtime 生命周期（FR-03 / FR-07）--
 
   /**
-   * 注册 daemon runtime。
+   * 注册 daemon（per-daemon，design §5.2 / D-006）。
    *
-   * body 条件字段拼装严格对齐 client.py:83-96：
-   *   - 必填（总写入，即使空串）：name / provider / version / os / arch
-   *   - runtime_id：仅当调用方提供 runtimeId 时写入（Python `if runtime_id is not None`）
-   *   - protocol：仅当非空串写入（Python `if protocol:`）
-   *   - capabilities：仅当非 undefined 时写入（Python `if capabilities:`）
-   *   - extra：展开进 body（对应 Python `**kwargs` 透传，client.py:89）
-   *
-   * 返回 backend 响应（通常含 `{ runtime_id }`）。
+   * daemon 启动一次性上报 daemon_local_id + 机器级字段 + 探测到的 provider 列表。
+   * 后端先 upsert daemon_instances，再为每 provider upsert daemon_runtimes，并清理
+   * stale runtime。返回 ``{ daemon_instance_id, runtimes: [{provider, runtime_id}] }``。
    */
   async register(params: {
-    runtimeId?: string;
-    name?: string;
-    provider?: string;
-    version?: string;
-    protocol?: string;
+    daemonLocalId: string;
+    serverUrl: string;
+    hostname: string;
     os?: string;
     arch?: string;
-    capabilities?: Record<string, unknown>;
-    /** 对应 Python **kwargs 透传字段。 */
-    extra?: Record<string, unknown>;
+    allowedRoots?: string[];
+    providers: { provider: string; version?: string; status?: string }[];
   }): Promise<Record<string, unknown>> {
     const body: RegisterBody = {
-      name: params.name ?? '',
-      provider: params.provider ?? '',
-      version: params.version ?? '',
-      os: params.os ?? '',
-      arch: params.arch ?? '',
-      ...(params.extra ?? {}),
+      daemon_local_id: params.daemonLocalId,
+      server_url: params.serverUrl,
+      hostname: params.hostname,
+      providers: params.providers,
     };
-    if (params.runtimeId !== undefined) {
-      body.runtime_id = params.runtimeId;
-    }
-    if (params.protocol) {
-      // 非空串才写入（Python `if protocol:`）
-      body.protocol = params.protocol;
-    }
-    if (params.capabilities) {
-      // 非 undefined 才写入（Python `if capabilities:`）
-      body.capabilities = params.capabilities;
+    if (params.os) body.os = params.os;
+    if (params.arch) body.arch = params.arch;
+    if (params.allowedRoots && params.allowedRoots.length > 0) {
+      body.allowed_roots = params.allowedRoots;
     }
     return this._request<Record<string, unknown>>(
       'POST',
@@ -330,14 +319,18 @@ export class HubClient {
   }
 
   /**
-   * runtime HTTP 心跳（非 lease 心跳）。
-   * 端点：POST {REST_PREFIX}/heartbeat，body `{ runtime_id }`。
+   * per-daemon HTTP 心跳（非 lease 心跳）。2026-07-03-daemon-entity-binding task-07 / D-006。
+   * 端点：POST {REST_PREFIX}/heartbeat，body `{ daemon_local_id, providers: [{provider, status}] }`。
+   * daemon 单条心跳合并上报 daemon_local_id + 各 provider 状态。
    */
-  async heartbeat(runtimeId: string): Promise<Record<string, unknown>> {
+  async heartbeat(
+    daemonLocalId: string,
+    providers?: { provider: string; status?: string }[],
+  ): Promise<Record<string, unknown>> {
     return this._request<Record<string, unknown>>(
       'POST',
       `${REST_PREFIX}/heartbeat`,
-      { runtime_id: runtimeId } satisfies HeartbeatBody,
+      { daemon_local_id: daemonLocalId, providers: providers ?? [] } satisfies HeartbeatBody,
     );
   }
 

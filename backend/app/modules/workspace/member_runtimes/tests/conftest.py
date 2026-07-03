@@ -41,6 +41,7 @@ def _selected_metadata() -> Any:
     full = BaseModel.metadata
     needed = {
         "users",
+        "daemon_instances",
         "daemon_runtimes",
         "workspaces",
         "workspace_member_runtimes",

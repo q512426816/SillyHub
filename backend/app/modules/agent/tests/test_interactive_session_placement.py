@@ -211,7 +211,7 @@ class TestNotifyInteractiveDispatch:
 
         mock_hub = MagicMock()
         mock_hub.is_connected.return_value = False
-        mock_hub.connected_runtime_ids = []
+        mock_hub.connected_daemon_ids = []
         with patch("app.modules.daemon.ws_hub.get_daemon_ws_hub", return_value=mock_hub):
             ok = await placement.notify_interactive_dispatch(dispatch)
         assert ok is False

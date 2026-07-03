@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.service import AgentService
-from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
+from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
 from app.modules.workspace.model import Workspace
@@ -44,13 +44,31 @@ async def _create_user(session: AsyncSession) -> uuid.UUID:
     return uid
 
 
-async def _create_runtime(session: AsyncSession, user_id: uuid.UUID) -> DaemonRuntime:
+async def _create_daemon_instance(session: AsyncSession, user_id: uuid.UUID) -> DaemonInstance:
+    """Insert a DaemonInstance row."""
+    inst = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        hostname="test-host",
+        server_url="http://localhost:8000",
+        status="online",
+    )
+    session.add(inst)
+    await session.commit()
+    await session.refresh(inst)
+    return inst
+
+
+async def _create_runtime(
+    session: AsyncSession, user_id: uuid.UUID, daemon_instance_id: uuid.UUID
+) -> DaemonRuntime:
     """Insert a DaemonRuntime row."""
     from datetime import UTC, datetime
 
     rt = DaemonRuntime(
         id=uuid.uuid4(),
         user_id=user_id,
+        daemon_instance_id=daemon_instance_id,
         name="test-init-daemon",
         provider="claude_code",
         status="online",
@@ -72,7 +90,8 @@ async def test_start_init_dispatch_creates_spec_workspace_and_lease(
     """
     # ── Setup ───────────────────────────────────────────────────────────────
     user_id = await _create_user(db_session)
-    runtime = await _create_runtime(db_session, user_id)
+    daemon = await _create_daemon_instance(db_session, user_id)
+    runtime = await _create_runtime(db_session, user_id, daemon.id)
 
     workspace = Workspace(
         id=uuid.uuid4(),
@@ -84,12 +103,13 @@ async def test_start_init_dispatch_creates_spec_workspace_and_lease(
     )
     db_session.add(workspace)
 
-    # Per-member binding (with daemon runtime + root_path)
+    # Per-member binding (with daemon + runtime + root_path)
     member_root_path = "/Users/test/projects/my-project"
     db_session.add(
         WorkspaceMemberRuntime(
             workspace_id=workspace.id,
             user_id=user_id,
+            daemon_id=daemon.id,
             runtime_id=runtime.id,
             root_path=member_root_path,
             path_source="daemon-client",
@@ -150,7 +170,8 @@ async def test_start_init_dispatch_reuses_existing_spec_workspace(
 ) -> None:
     """AC-I2: Existing SpecWorkspace → reused, not duplicated."""
     user_id = await _create_user(db_session)
-    runtime = await _create_runtime(db_session, user_id)
+    daemon = await _create_daemon_instance(db_session, user_id)
+    runtime = await _create_runtime(db_session, user_id, daemon.id)
 
     workspace = Workspace(
         id=uuid.uuid4(),
@@ -175,6 +196,7 @@ async def test_start_init_dispatch_reuses_existing_spec_workspace(
         WorkspaceMemberRuntime(
             workspace_id=workspace.id,
             user_id=user_id,
+            daemon_id=daemon.id,
             runtime_id=runtime.id,
             root_path="/Users/test/proj",
             path_source="daemon-client",
@@ -241,7 +263,7 @@ async def test_start_init_dispatch_raises_when_no_runtime(
             actor_user_id=user_id,
         )
 
-    assert "no daemon runtime" in str(exc_info.value).lower()
+    assert "no daemon configured" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio
@@ -252,7 +274,8 @@ async def test_start_init_dispatch_lease_has_correct_root_path_from_binding(
     not from the workspace global root_path.
     """
     user_id = await _create_user(db_session)
-    runtime = await _create_runtime(db_session, user_id)
+    daemon = await _create_daemon_instance(db_session, user_id)
+    runtime = await _create_runtime(db_session, user_id, daemon.id)
 
     workspace_root = "/workspace/global/path"
     member_root = "/Users/alice/my-project"
@@ -270,6 +293,7 @@ async def test_start_init_dispatch_lease_has_correct_root_path_from_binding(
         WorkspaceMemberRuntime(
             workspace_id=workspace.id,
             user_id=user_id,
+            daemon_id=daemon.id,
             runtime_id=runtime.id,
             root_path=member_root,  # per-member path (authoritative)
             path_source="daemon-client",

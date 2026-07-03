@@ -148,12 +148,14 @@ async def sync_manual_spec_workspace(
     # 解析 actor 的 binding：优先 per-member 行（W1 接线），缺则回退 workspace 全局列。
     from app.modules.workspace.member_runtimes.resolver import MemberBindingResolver
 
+    daemon_id: uuid.UUID | None = None
     runtime_id: uuid.UUID | None = None
     root_path: str | None = None
     path_source: str | None = None
     try:
         binding = await MemberBindingResolver.resolve_member_binding(session, workspace_id, user.id)
-        runtime_id = binding.runtime_id
+        daemon_id = binding.daemon_id
+        runtime_id = binding.runtime_id  # D-003: preserved for DaemonChangeWrite FK
         root_path = binding.root_path
         path_source = binding.path_source
     except Exception:
@@ -161,6 +163,7 @@ async def sync_manual_spec_workspace(
         from app.modules.workspace.model import Workspace
 
         ws = await session.get(Workspace, workspace_id)
+        daemon_id = ws.daemon_runtime_id if ws else None  # legacy runtime_id as fallback
         runtime_id = ws.daemon_runtime_id if ws else None
         root_path = ws.root_path if ws else None
         path_source = ws.path_source if ws else None
@@ -188,12 +191,13 @@ async def sync_manual_spec_workspace(
             workspace_id=str(workspace_id),
             change_write_id=str(cw.id),
             runtime_id=str(runtime_id),
+            daemon_id=str(daemon_id) if daemon_id else None,
         )
         return {"status": "pending", "task_id": str(cw.id)}
 
     # server-local（或 path_source 未标 daemon-client）：本机直接落盘。
     result = await service.sync_manual_server_local(
-        workspace_id, runtime_id=runtime_id, root_path=root_path
+        workspace_id, daemon_id=daemon_id, root_path=root_path
     )
     log.info(
         "spec_workspace.sync_manual_done",

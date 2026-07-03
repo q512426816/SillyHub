@@ -15,7 +15,7 @@ import {
   Terminal,
   XCircle,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AgentLogViewer, parseToolCallContent, parseScanCheckOutput, type ToolCallEntry } from "@/components/agent-log-viewer";
 import { AgentRunPanel } from "@/components/agent-run-panel";
@@ -33,6 +33,9 @@ import {
   type AgentRunLogEntry,
 } from "@/lib/agent";
 import { useAgentRuns } from "@/lib/use-agent-runs";
+import { PROVIDER_META, listDaemonRuntimes, type DaemonRuntimeRead } from "@/lib/daemon";
+import { getWorkspace, scanGenerate, type Workspace } from "@/lib/workspaces";
+import { fetchMyBinding, type MemberBindingView } from "@/lib/workspace-binding";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -256,6 +259,89 @@ export default function AgentPage({ params }: Props) {
   const HISTORY_PAGE_SIZE = 10;
   const [historyPage, setHistoryPage] = useState(1);
 
+  /* ---- task-12 / D-005：provider 单次覆盖状态 ---- */
+  const [workspaceData, setWorkspaceData] = useState<Workspace | null>(null);
+  const [myBinding, setMyBinding] = useState<MemberBindingView | null>(null);
+  const [allRuntimes, setAllRuntimes] = useState<DaemonRuntimeRead[]>([]);
+  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string>("");
+  const [dispatching, setDispatching] = useState(false);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
+  const [formLoading, setFormLoading] = useState(true);
+
+  /* ---- 获取 workspace / binding / daemon runtimes ---- */
+  useEffect(() => {
+    let active = true;
+    async function loadFormData() {
+      setFormLoading(true);
+      try {
+        const [ws, binding, runtimes] = await Promise.all([
+          getWorkspace(workspaceId).catch(() => null),
+          fetchMyBinding(workspaceId).catch(() => null),
+          listDaemonRuntimes().catch(() => [] as DaemonRuntimeRead[]),
+        ]);
+        if (!active) return;
+        setWorkspaceData(ws);
+        setMyBinding(binding);
+        setAllRuntimes(runtimes);
+        // 默认回填 workspace.default_agent（D-005 回填但不持久化）
+        setSelectedProvider(ws?.default_agent ?? null);
+        setSelectedModel("");
+      } catch {
+        // 静默，不阻塞页面渲染
+      } finally {
+        if (active) setFormLoading(false);
+      }
+    }
+    void loadFormData();
+    return () => { active = false; };
+  }, [workspaceId]);
+
+  /* ---- 该绑定 daemon 的在线 provider 列表 ---- */
+  const onlineProviders = useMemo(() => {
+    if (!myBinding?.daemon_id) return [] as string[];
+    return Array.from(
+      new Set(
+        allRuntimes
+          .filter(
+            (r) =>
+              r.daemon_instance_id === myBinding.daemon_id &&
+              r.status === "online" &&
+              r.provider,
+          )
+          .map((r) => r.provider as string),
+      ),
+    );
+  }, [myBinding, allRuntimes]);
+
+  /* ---- provider 可用性校验 ---- */
+  const providerEnabled = useMemo(() => {
+    if (!selectedProvider) return true; // null = 跟随默认，放行给后端兜底
+    return onlineProviders.includes(selectedProvider);
+  }, [selectedProvider, onlineProviders]);
+
+  /* ---- 启动扫描 ---- */
+  const handleDispatch = useCallback(async () => {
+    if (!workspaceData?.root_path) return;
+    setDispatching(true);
+    setDispatchError(null);
+    try {
+      await scanGenerate(
+        workspaceData.root_path,
+        selectedProvider, // 单次覆盖（D-005），不写回 workspace.default_agent
+        selectedModel || null,
+        "daemon-client",
+        workspaceData.daemon_runtime_id,
+        undefined,
+      );
+      void refetch();
+    } catch (err) {
+      setDispatchError(err instanceof ApiError ? err.message : "启动智能体运行失败");
+    } finally {
+      setDispatching(false);
+    }
+  }, [workspaceData, selectedProvider, selectedModel, refetch]);
+
   /* ---- Derived ---- */
   const runningRuns = useMemo(
     () => {
@@ -433,6 +519,83 @@ export default function AgentPage({ params }: Props) {
           </>
         }
       />
+
+      {/* ---- task-12 / D-005：Provider 单次覆盖「新运行」表单 ---- */}
+      {!formLoading && (
+        <SectionCard title="新运行">
+          <div className="flex flex-wrap items-end gap-3">
+            {/* Provider 选择 */}
+            <div className="flex flex-col gap-1">
+              <label className="text-[11px] text-muted-foreground">智能体提供方</label>
+              <select
+                value={selectedProvider ?? ""}
+                onChange={(e) => setSelectedProvider(e.target.value === "" ? null : e.target.value)}
+                className="h-8 rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
+              >
+                <option value="">
+                  {workspaceData?.default_agent
+                    ? `跟随工作区默认（${PROVIDER_META[workspaceData.default_agent]?.label ?? workspaceData.default_agent}）`
+                    : "跟随工作区默认（未设置）"}
+                </option>
+                {onlineProviders.map((p) => (
+                  <option key={p} value={p}>
+                    {PROVIDER_META[p]?.label ?? p}
+                  </option>
+                ))}
+                {/* D-005：selectedProvider 指向离线 provider → 追加渲染并标注（离线） */}
+                {selectedProvider &&
+                  !onlineProviders.includes(selectedProvider) && (
+                    <option value={selectedProvider}>
+                      {PROVIDER_META[selectedProvider]?.label ?? selectedProvider}（离线）
+                    </option>
+                  )}
+              </select>
+            </div>
+            {/* Model 输入 */}
+            <div className="flex flex-col gap-1">
+              <label className="text-[11px] text-muted-foreground">智能体模型</label>
+              <input
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                placeholder="留空使用默认模型"
+                className="h-8 rounded border border-input bg-background px-2.5 text-xs focus:border-ring focus:outline-none min-w-[200px]"
+              />
+            </div>
+            {/* 启动按钮 */}
+            <div className="flex flex-col gap-1">
+              <label className="text-[11px] text-muted-foreground opacity-0">操作</label>
+              <Button
+                size="sm"
+                onClick={() => void handleDispatch()}
+                disabled={
+                  dispatching ||
+                  !myBinding?.daemon_id ||
+                  (!providerEnabled && selectedProvider !== null) ||
+                  !workspaceData?.root_path
+                }
+              >
+                <Bot className="mr-1.5 h-3.5 w-3.5" />
+                {dispatching ? "启动中..." : "启动扫描"}
+              </Button>
+            </div>
+          </div>
+
+          {/* 校验提示 */}
+          {selectedProvider && !providerEnabled && (
+            <p className="mt-2 text-xs text-destructive">
+              该守护进程未启用 {PROVIDER_META[selectedProvider]?.label ?? selectedProvider}
+            </p>
+          )}
+          {!myBinding?.daemon_id && workspaceData?.path_source === "daemon-client" && (
+            <p className="mt-2 text-xs text-amber-600">
+              请先在工作区设置中绑定守护进程
+            </p>
+          )}
+          {dispatchError && (
+            <p className="mt-2 text-xs text-destructive">{dispatchError}</p>
+          )}
+        </SectionCard>
+      )}
 
       {/* ---- Stats bar ---- */}
       {!isLoading && runs.length > 0 && (

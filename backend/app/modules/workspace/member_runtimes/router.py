@@ -37,7 +37,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 class MemberBindingUpsertRequest(BaseModel):
-    runtime_id: uuid.UUID | None = None
+    daemon_id: uuid.UUID | None = None
     root_path: str
     path_source: str = "daemon-client"
 
@@ -45,7 +45,8 @@ class MemberBindingUpsertRequest(BaseModel):
 class MemberBindingView(BaseModel):
     workspace_id: uuid.UUID
     user_id: uuid.UUID
-    runtime_id: uuid.UUID | None
+    daemon_id: uuid.UUID | None = None
+    runtime_id: uuid.UUID | None = None
     root_path: str
     path_source: str
     synced_at: str | None
@@ -58,6 +59,7 @@ def _to_view(row: WorkspaceMemberRuntime) -> MemberBindingView:
     return MemberBindingView(
         workspace_id=row.workspace_id,
         user_id=row.user_id,
+        daemon_id=row.daemon_id,
         runtime_id=row.runtime_id,
         root_path=row.root_path,
         path_source=row.path_source,
@@ -89,18 +91,18 @@ async def upsert_my_binding_endpoint(
     user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
     response: Response,
 ):
-    """Upsert the caller's own binding. runtime_id must belong to the caller."""
+    """Upsert the caller's own binding. daemon_id must belong to the caller."""
     try:
         row, created = await upsert_my_binding(
             session,
             workspace_id,
             user.id,
-            runtime_id=payload.runtime_id,
+            daemon_id=payload.daemon_id,
             root_path=payload.root_path,
             path_source=payload.path_source,
         )
     except AppError as exc:
-        if exc.code == "runtime_not_owned":
+        if exc.code == "daemon_not_owned":
             response.status_code = status.HTTP_403_FORBIDDEN
             return {"detail": str(exc), "code": exc.code}
         raise

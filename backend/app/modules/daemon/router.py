@@ -43,9 +43,11 @@ from app.modules.daemon.run_sync.service import publish_submitted_messages
 from app.modules.daemon.schema import (
     AgentSessionListResponse,
     AgentSessionRead,
-    DaemonHeartbeatRequest,
-    DaemonHeartbeatResponse,
+    DaemonInstanceProviderItem,
+    DaemonInstanceRead,
     DaemonRegisterRequest,
+    DaemonRegisterResponse,
+    DaemonRegisterRuntimeItem,
     DaemonRuntimeAllowedRootsUpdate,
     DaemonRuntimeListResponse,
     DaemonRuntimeRead,
@@ -132,6 +134,43 @@ class DaemonVersionResponse(BaseModel):
     downloadUrl: str = Field(description="单文件 bundle 下载地址（相对站内路径）")  # noqa: N815 - JSON 契约字段名（install.sh/前端消费，不可改 snake_case）
 
 
+# ── Per-daemon heartbeat DTO（inline，task-07）─────────────────────────────────
+# design §5.4 / §9.1：daemon 单条心跳合并上报 daemon_local_id + 各 provider 状态。
+# 原 schema.py 内的 runtime_id 版本已被 per-daemon 契约取代；DTO 内联在此避免
+# 触碰 schema.py（task-05 的 allowed_path，非 task-07）。WS breaking（D-007）：
+# daemon_local_id 必填，旧 daemon per-provider body 会被 pydantic 拒成 422。
+
+
+class DaemonHeartbeatProviderItem(BaseModel):
+    """单个 provider 心跳上报项（per-daemon heartbeat body 内 ``providers[]``）。"""
+
+    provider: str = Field(min_length=1, max_length=50)
+    status: str = Field(default="online", max_length=20)
+
+
+class DaemonHeartbeatRequest(BaseModel):
+    """Per-daemon 心跳请求体（design §5.4 / §9.1 / D-006）。
+
+    daemon 周期上报其 ``daemon_local_id``（=daemon_instances.id）+ 各 provider 的
+    当前 status。backend 刷新 daemon_instances.last_heartbeat_at + 各 runtime.status。
+    """
+
+    daemon_local_id: uuid.UUID = Field(description="daemon 本地 uuid（daemon_instances.id）")
+    providers: list[DaemonHeartbeatProviderItem] = Field(default_factory=list)
+
+
+class DaemonHeartbeatResponse(BaseModel):
+    """Per-daemon 心跳响应体。
+
+    heartbeat_ack 经 WS 下发到 daemon 连接（task-06）；HTTP 响应只回 daemon 实体
+    级摘要。``allowed_roots`` 从 daemon_instances 读（已上提，design §4.2）。
+    """
+
+    daemon_instance_id: uuid.UUID
+    status: str
+    allowed_roots: list[str] = Field(default_factory=list)
+
+
 # SSE response headers shared with the run-scoped stream endpoint
 # (app/modules/agent/router.py). Proxies/buffers must not hold SSE frames.
 _SESSION_SSE_HEADERS = {
@@ -180,26 +219,38 @@ async def get_daemon_version() -> DaemonVersionResponse:
 
 @router.post(
     "/register",
-    response_model=DaemonRuntimeRead,
+    response_model=DaemonRegisterResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def register_daemon(
     data: DaemonRegisterRequest,
     session: SessionDep,
     user: Annotated[User, Depends(get_current_principal)],
-) -> DaemonRuntimeRead:
-    """Register a new daemon runtime or return existing one."""
+) -> DaemonRegisterResponse:
+    """Per-daemon 注册（design §5.2 / D-006）。
+
+    daemon 启动一次性上报 daemon_local_id + 机器级字段 + provider 列表。backend
+    先 upsert daemon_instances，再为每个 provider upsert daemon_runtimes，并清理
+    stale runtime（provider 卸载）。返回 daemon_instance_id + 各 runtime_id。
+    """
     svc = DaemonService(session)
-    runtime = await svc.register_runtime(
+    result = await svc.register_daemon(
         user.id,
-        name=data.name,
-        provider=data.provider,
-        version=data.version,
+        daemon_local_id=data.daemon_local_id,
+        server_url=data.server_url,
+        hostname=data.hostname,
         os=data.os,
         arch=data.arch,
-        capabilities=data.capabilities,
+        allowed_roots=data.allowed_roots,
+        providers=[item.model_dump() for item in data.providers],
     )
-    return DaemonRuntimeRead.model_validate(runtime)
+    return DaemonRegisterResponse(
+        daemon_instance_id=result.daemon_instance_id,
+        runtimes=[
+            DaemonRegisterRuntimeItem(provider=r.provider, runtime_id=r.runtime_id)
+            for r in result.runtimes
+        ],
+    )
 
 
 @router.post(
@@ -211,14 +262,27 @@ async def daemon_heartbeat(
     session: SessionDep,
     user: Annotated[User, Depends(get_current_principal)],
 ) -> DaemonHeartbeatResponse:
-    """HTTP heartbeat endpoint (fallback for when WebSocket is unavailable)."""
+    """Per-daemon HTTP 心跳（design §5.4 / §9.1 / D-006）。
+
+    daemon 单条心跳合并上报 ``daemon_local_id`` + 各 provider 状态。backend 刷新
+    ``daemon_instances.last_heartbeat_at`` + 各 ``daemon_runtimes.status``。
+    ``heartbeat_ack`` 经 WS 下发到该 daemon 连接（task-06 通路），本 HTTP 响应只
+    回 ``{daemon_instance_id, status, allowed_roots}``（allowed_roots 从 daemon
+    实体读，已上提到 daemon_instances，design §4.2）。
+
+    WS breaking（D-007）：旧 daemon 按 per-provider body 上报（无 daemon_local_id）
+    → pydantic 校验 daemon_local_id 必填失败 → 422 拒绝，要求同步升级。
+    """
     svc = DaemonService(session)
-    runtime = await svc.heartbeat(data.runtime_id)
+    instance = await svc.heartbeat_daemon(
+        data.daemon_local_id,
+        providers=[item.model_dump() for item in data.providers],
+    )
+    allowed = (instance.allowed_roots if instance.allowed_roots else None) or ["~/.sillyhub"]
     return DaemonHeartbeatResponse(
-        runtime_id=runtime.id,
-        status=runtime.status or "online",
-        pending_operations={},
-        allowed_roots=runtime.allowed_roots or ["~/.sillyhub"],
+        daemon_instance_id=instance.id,
+        status=instance.status or "online",
+        allowed_roots=allowed,
     )
 
 
@@ -477,6 +541,50 @@ async def mark_runtime_offline(
     svc = DaemonService(session)
     runtime = await svc.mark_offline(runtime_id, user.id)
     return DaemonRuntimeRead.model_validate(runtime)
+
+
+@router.get(
+    "/instances",
+    response_model=list[DaemonInstanceRead],
+)
+async def list_daemon_instances(
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> list[DaemonInstanceRead]:
+    """List online daemon instances for the current user (task-10 / FR-09).
+
+    Used by workspace-daemon-switcher to show available daemons.
+    Returns each daemon instance with its enabled provider runtimes so the
+    frontend can render provider badges without extra round-trips.
+    """
+    svc = DaemonService(session)
+    await svc.cleanup_stale_runtimes()
+    instances = await svc.list_instances(user.id)
+
+    reads: list[DaemonInstanceRead] = []
+    for inst in instances:
+        # Fetch provider runtimes for this daemon instance
+        from app.modules.daemon.runtime.service import RuntimeService
+
+        rt_svc = RuntimeService(session)
+        provider_rows = await rt_svc._get_runtimes_by_instance(inst.id)
+        reads.append(
+            DaemonInstanceRead(
+                id=inst.id,
+                hostname=inst.hostname,
+                display_alias=inst.display_alias,
+                status=inst.status or "online",
+                providers=[
+                    DaemonInstanceProviderItem(
+                        provider=r.provider or "",
+                        status=r.status or "unknown",
+                        version=r.version,
+                    )
+                    for r in provider_rows
+                ],
+            )
+        )
+    return reads
 
 
 @router.get(
@@ -1382,23 +1490,66 @@ async def get_session_logs(
 @router.websocket("/ws")
 async def daemon_websocket(
     websocket: WebSocket,
-    runtime_id: str = Query(..., description="Daemon runtime UUID"),
+    daemon_local_id: str = Query(
+        ...,
+        description="Daemon-local UUID (daemon_instances.id). Replaces the legacy runtime_id handshake (task-06 / D-006 / design §5.3).",
+    ),
 ) -> None:
-    """WebSocket endpoint for daemon runtime real-time communication.
+    """WebSocket endpoint for daemon entity real-time communication (task-06).
 
-    The daemon connects with its ``runtime_id`` as a query parameter and
-    listens for server-pushed messages (task_available, heartbeat_ack, etc.)
-    while sending periodic heartbeat messages to keep the connection alive.
+    Each daemon process connects **once** with its ``daemon_local_id`` (the
+    locally-persisted uuid surfaced as ``daemon_instances.id``). The backend
+    looks up that id, registers the connection keyed by ``daemon_id``, and
+    routes all server→daemon messages over this single socket. Provider-level
+    dispatch (which runtime/session a message targets) is carried inside each
+    payload's ``runtime_id`` field (design §5.3).
+
+    Breaking change (D-007): the legacy ``?runtime_id=...`` handshake is no
+    longer accepted — old daemons are rejected with code=4001 and a hint to
+    upgrade.
 
     Authentication is expected to be handled at the HTTP upgrade phase via
     the ``Authorization: Bearer <token>`` header or a ``token`` query param.
     """
-    # Validate runtime_id format before accepting.
+    # Validate daemon_local_id format before accepting.
     try:
-        rid = uuid.UUID(runtime_id)
+        daemon_id = uuid.UUID(daemon_local_id)
     except (ValueError, AttributeError):
-        log.warning("ws_invalid_runtime_id", runtime_id=runtime_id)
-        await websocket.close(code=4001, reason="invalid runtime_id")
+        log.warning("ws_invalid_daemon_local_id", daemon_local_id=daemon_local_id)
+        await websocket.close(code=4001, reason="invalid daemon_local_id")
+        return
+
+    # Look up the daemon entity (must be registered first via POST /register).
+    # Lazy import keeps the model import off the hot path and matches the
+    # ws_hub singleton accessor pattern below.
+    from app.core.db import get_session_factory
+    from app.modules.daemon.model import DaemonInstance
+
+    try:
+        session_factory = get_session_factory()
+        async with session_factory() as ws_session:
+            instance = await ws_session.get(DaemonInstance, daemon_id)
+    except Exception:
+        log.exception(
+            "ws_handshake_instance_lookup_failed",
+            daemon_id=str(daemon_id),
+        )
+        await websocket.close(code=1011, reason="internal error")
+        return
+
+    if instance is None:
+        # Unknown daemon_local_id → reject (not registered). Old daemons that
+        # still send a runtime_id here arrive as a parse-failure above; a
+        # daemon_local_id that parses but has no row means the daemon skipped
+        # registration — both are handshake failures (D-007 breaking).
+        log.warning(
+            "ws_handshake_unknown_daemon",
+            daemon_id=str(daemon_id),
+            hint="daemon must POST /register before opening the WS",
+        )
+        await websocket.close(
+            code=4001, reason="unknown daemon_local_id; upgrade daemon and register first"
+        )
         return
 
     await websocket.accept()
@@ -1410,7 +1561,7 @@ async def daemon_websocket(
     from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
     hub = get_daemon_ws_hub()
-    await hub.connect(rid, websocket)
+    await hub.connect(daemon_id, websocket)
 
     try:
         while True:
@@ -1419,15 +1570,27 @@ async def daemon_websocket(
             except ValueError:
                 log.warning(
                     "ws_invalid_json",
-                    runtime_id=str(rid),
+                    daemon_id=str(daemon_id),
                 )
                 continue
 
             msg_type = data.get("type")
 
             if msg_type == DAEMON_MSG_HEARTBEAT:
-                log.debug("ws_heartbeat_received", runtime_id=str(rid))
-                await hub.send_heartbeat_ack(rid)
+                # design §10 risk control: the daemon may include a provider
+                # runtime_id in the payload; validate it belongs to this daemon
+                # entity and drop on mismatch (best-effort, never close WS).
+                raw_payload = data.get("payload") or {}
+                await _validate_payload_runtime_belongs(
+                    daemon_id,
+                    raw_payload,
+                    "heartbeat",
+                )
+                log.debug("ws_heartbeat_received", daemon_id=str(daemon_id))
+                await hub.send_heartbeat_ack(
+                    daemon_id,
+                    payload_runtime_id=await _payload_runtime_id(raw_payload, daemon_id),
+                )
             elif msg_type == DAEMON_MSG_RPC_RESULT:
                 # daemon → server RPC reply. Route to the pending future via the
                 # hub correlation map; struct validation + error mapping lives in
@@ -1437,7 +1600,7 @@ async def daemon_websocket(
                 if not rpc_id:
                     log.warning(
                         "ws_rpc_result_missing_id",
-                        runtime_id=str(rid),
+                        daemon_id=str(daemon_id),
                         msg=data,
                     )
                     continue
@@ -1455,38 +1618,114 @@ async def daemon_websocket(
                 except Exception:
                     log.warning(
                         "ws_permission_request_invalid_payload",
-                        runtime_id=str(rid),
+                        daemon_id=str(daemon_id),
                         payload=raw_payload,
                     )
                     continue
+                # design §10: the session referenced by the request must be
+                # owned by the daemon that opened this connection. The
+                # permission service repeats this check internally; we pass the
+                # connection's daemon_id so the service can map session → daemon.
                 # Open a short-lived DB session for the request (WS loop has no
                 # request-scoped dependency). Best-effort; failures only warn.
                 try:
-                    from app.core.db import get_session_factory
-
                     session_factory = get_session_factory()
                     async with session_factory() as ws_session:
                         svc = DaemonService(ws_session)
                         perm = DaemonPermissionService(svc, hub)
-                        await perm.handle_permission_request(rid, payload)
+                        await perm.handle_permission_request(daemon_id, payload)
                 except Exception:
                     log.exception(
                         "ws_permission_request_handler_failed",
-                        runtime_id=str(rid),
+                        daemon_id=str(daemon_id),
                         request_id=payload.request_id,
                     )
             else:
                 log.warning(
                     "ws_unknown_message_type",
-                    runtime_id=str(rid),
+                    daemon_id=str(daemon_id),
                     msg_type=msg_type,
                 )
     except WebSocketDisconnect:
-        log.info("ws_client_disconnected", runtime_id=str(rid))
+        log.info("ws_client_disconnected", daemon_id=str(daemon_id))
     except Exception:
-        log.exception("ws_unexpected_error", runtime_id=str(rid))
+        log.exception("ws_unexpected_error", daemon_id=str(daemon_id))
     finally:
-        await hub.disconnect(rid)
+        await hub.disconnect(daemon_id)
+
+
+async def _payload_runtime_id(
+    raw_payload: dict,
+    daemon_id: uuid.UUID,
+) -> uuid.UUID:
+    """Extract ``payload.runtime_id`` if present and well-formed, else daemon_id.
+
+    Used to echo the provider runtime_id back in heartbeat_ack so the daemon
+    can correlate the ack to a provider session (design §5.3).
+    """
+    raw = raw_payload.get("runtime_id")
+    if not raw:
+        return daemon_id
+    try:
+        return uuid.UUID(str(raw))
+    except (ValueError, AttributeError):
+        return daemon_id
+
+
+async def _validate_payload_runtime_belongs(
+    daemon_id: uuid.UUID,
+    raw_payload: dict,
+    label: str,
+) -> None:
+    """design §10 risk control: payload.runtime_id must belong to daemon_id.
+
+    Validates that a ``runtime_id`` carried inside an inbound WS payload
+    resolves to a ``daemon_runtimes`` row whose ``daemon_instance_id`` equals
+    the connection's ``daemon_id``. On mismatch (dirty data / cross-daemon
+    leak) the message is *not* rejected here — callers drop the message and
+    this helper only emits a warning. Best-effort: DB lookup failures are
+    logged and treated as valid (fail-open) so a transient DB hiccup cannot
+    stall the WS receive loop.
+    """
+    raw_rid = raw_payload.get("runtime_id")
+    if not raw_rid:
+        return  # payload carries no runtime_id — nothing to validate.
+    try:
+        runtime_id = uuid.UUID(str(raw_rid))
+    except (ValueError, AttributeError):
+        log.warning(
+            "ws_payload_invalid_runtime_id",
+            label=label,
+            daemon_id=str(daemon_id),
+            runtime_id=raw_rid,
+        )
+        return
+
+    try:
+        from app.modules.daemon.model import DaemonRuntime
+
+        session_factory = get_session_factory()
+        async with session_factory() as ws_session:
+            runtime = await ws_session.get(DaemonRuntime, runtime_id)
+    except Exception:
+        # Fail-open on DB errors — never stall the WS loop.
+        log.exception(
+            "ws_payload_runtime_validation_db_error",
+            label=label,
+            daemon_id=str(daemon_id),
+            runtime_id=str(runtime_id),
+        )
+        return
+
+    if runtime is None or runtime.daemon_instance_id != daemon_id:
+        log.warning(
+            "ws_payload_runtime_id_mismatch",
+            label=label,
+            daemon_id=str(daemon_id),
+            payload_runtime_id=str(runtime_id),
+            bound_daemon_id=str(runtime.daemon_instance_id) if runtime else None,
+            hint="dropping message; payload.runtime_id not owned by this connection",
+        )
 
 
 @router.get(
@@ -1504,7 +1743,7 @@ async def get_pending_leases(
     result = await session.execute(
         sa_text(
             """
-            SELECT l.id, l.agent_run_id, l.metadata, r.provider, r.capabilities
+            SELECT l.id, l.agent_run_id, l.metadata, r.provider
             FROM daemon_task_leases l
             JOIN daemon_runtimes r ON l.runtime_id = r.id
             WHERE l.runtime_id = :rid AND l.status = 'pending'
@@ -1516,7 +1755,6 @@ async def get_pending_leases(
     rows = result.mappings().all()
     out = []
     for row in rows:
-        caps = row["capabilities"] or {}
         meta = row["metadata"] or {}
         out.append(
             {
@@ -1525,8 +1763,10 @@ async def get_pending_leases(
                 "prompt": meta.get("prompt", ""),
                 "provider": meta.get("provider") or row["provider"],
                 "model": meta.get("model"),
-                "cmd_path": caps.get("bin_path", ""),
-                "protocol": caps.get("protocol", ""),
+                # daemon 侧自维护 provider→path 映射（daemon.ts _agentPaths），
+                # capabilities 已上提到 daemon_instances 且不再含 cmd_path/protocol。
+                "cmd_path": "",
+                "protocol": "",
             }
         )
     return out

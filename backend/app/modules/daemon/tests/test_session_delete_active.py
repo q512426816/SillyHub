@@ -62,6 +62,7 @@ def _mock_hub(*, connected: bool = True) -> MagicMock:
     hub = MagicMock()
     hub.is_connected.return_value = connected
     hub.connected_runtime_ids = []
+    hub.connected_daemon_ids = []
     hub.send_wakeup = AsyncMock(return_value=True)
     hub.send_session_control = AsyncMock(return_value=connected)
     return hub

@@ -405,7 +405,7 @@ async def test_init_endpoint_returns_lease(
     coverage in test_start_init_dispatch.py.
     """
     from app.modules.auth.model import User
-    from app.modules.daemon.model import DaemonRuntime
+    from app.modules.daemon.model import DaemonInstance, DaemonRuntime
     from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
     from app.modules.workspace.model import Workspace
 
@@ -427,9 +427,20 @@ async def test_init_endpoint_returns_lease(
     )
     assert admin is not None, "admin user must exist (auth_admin_token fixture)"
 
+    # Create DaemonInstance first (task-09: binding target)
+    di = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=admin.id,
+        hostname="test-host",
+        server_url="http://localhost:8000",
+        status="online",
+    )
+    db_session.add(di)
+
     rt = DaemonRuntime(
         id=uuid.uuid4(),
         user_id=admin.id,
+        daemon_instance_id=di.id,
         name="init-test-daemon",
         provider="claude_code",
         status="online",
@@ -441,6 +452,7 @@ async def test_init_endpoint_returns_lease(
         WorkspaceMemberRuntime(
             workspace_id=ws.id,
             user_id=admin.id,
+            daemon_id=di.id,
             runtime_id=rt.id,
             root_path="/Users/admin/project",
             path_source="daemon-client",

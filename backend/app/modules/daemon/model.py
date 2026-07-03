@@ -22,18 +22,117 @@ from sqlmodel import Field
 from app.models.base import BaseModel
 
 
+class DaemonInstance(BaseModel, table=True):
+    """A physical daemon process with a stable identity (design §4.1 / D-001).
+
+    身份由 daemon 上报的本地 uuid 承载（``id`` = daemon 侧 ``daemon_local_id``，
+    后端不自生成）。一行 = 一个用户在一台机器上、连某一个后端的守护进程。
+    多 provider 由子表 :class:`DaemonRuntime` 承载，本表只管机器级字段。
+    """
+
+    __tablename__ = "daemon_instances"
+    __table_args__ = (
+        Index("ix_daemon_instances_user_server", "user_id", "server_url", "hostname"),
+    )
+
+    # daemon 上报的 daemon_local_id 作主键，后端不自生成（无 default_factory）。
+    id: uuid.UUID = Field(
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    user_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    hostname: str = Field(sa_column=Column(String(255), nullable=False))
+    # admin 自定义机器别名（从旧 runtime.display_alias 提升到此，design §4.1）。
+    display_alias: str | None = Field(
+        default=None,
+        sa_column=Column(String(200), nullable=True),
+    )
+    server_url: str = Field(sa_column=Column(String(255), nullable=False))
+    os: str | None = Field(
+        default=None,
+        sa_column=Column(String(50), nullable=True),
+    )
+    arch: str | None = Field(
+        default=None,
+        sa_column=Column(String(50), nullable=True),
+    )
+    version: str | None = Field(
+        default=None,
+        sa_column=Column(String(50), nullable=True),
+    )
+    # 机器级沙箱（从旧 runtime.allowed_roots 提升到此，design §4.1 / §4.2）。
+    allowed_roots: list[str] = Field(
+        default_factory=lambda: ["~/.sillyhub"],
+        sa_column=Column(JSON, nullable=False, server_default=text("'[\"~/.sillyhub\"]'")),
+    )
+    capabilities: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    status: str = Field(
+        default="online",
+        sa_column=Column(
+            String(20),
+            nullable=False,
+            server_default=text("'online'"),
+        ),
+    )
+    last_heartbeat_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )
+
+
 class DaemonRuntime(BaseModel, table=True):
-    """A registered local daemon runtime (e.g. Claude Code CLI instance)."""
+    """A registered local daemon runtime (e.g. Claude Code CLI instance).
+
+    Change 2026-07-03-daemon-entity-binding (design §4.2 / D-002): 退化为
+    :class:`DaemonInstance` 的从属清单——一行 = 某个 daemon 实体下的一种
+    provider。机器级字段（os/arch/allowed_roots/capabilities/display_alias）
+    已上提到 daemon_instances，本表只保留 provider 维度信息。
+    """
 
     __tablename__ = "daemon_runtimes"
     __table_args__ = (
         Index("idx_daemon_runtimes_user_id", "user_id"),
         Index("idx_daemon_runtimes_status", "status"),
+        Index("idx_daemon_runtimes_instance", "daemon_instance_id"),
     )
 
     id: uuid.UUID = Field(
         default_factory=uuid.uuid4,
         sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    # 所属守护进程实体（design §4.2 / D-002）。迁移期 nullable=True 过渡
+    # （D-007 重置：旧 runtime 行无对应 daemon_instance，task-13 清空后再 NOT NULL）。
+    daemon_instance_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("daemon_instances.id", ondelete="CASCADE"),
+            nullable=True,
+        ),
     )
     user_id: uuid.UUID = Field(
         sa_column=Column(
@@ -46,24 +145,11 @@ class DaemonRuntime(BaseModel, table=True):
         default=None,
         sa_column=Column(String(255), nullable=True),
     )
-    # task-03 / D-002@v1: 展示别名，独立于注册用的 name；空值回退 name/provider。
-    display_alias: str | None = Field(
-        default=None,
-        sa_column=Column(String(200), nullable=True),
-    )
     provider: str | None = Field(
         default=None,
         sa_column=Column(String(50), nullable=True),
     )
     version: str | None = Field(
-        default=None,
-        sa_column=Column(String(50), nullable=True),
-    )
-    os: str | None = Field(
-        default=None,
-        sa_column=Column(String(50), nullable=True),
-    )
-    arch: str | None = Field(
         default=None,
         sa_column=Column(String(50), nullable=True),
     )
@@ -75,20 +161,9 @@ class DaemonRuntime(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
-    capabilities: dict | None = Field(
-        default=None,
-        sa_column=Column(JSON, nullable=True),
-    )
     metadata_: dict | None = Field(
         default=None,
         sa_column=Column("metadata", JSON, nullable=True),
-    )
-    # 2026-06-29-runtime-allowed-roots-config task-01：可访问目录沙箱
-    # （list_dir 放行 + CC 写入白名单）。默认 ~/.sillyhub（daemon 侧解析 homedir）。
-    # admin 经 runtimes 页面配置多路径；daemon 心跳拉取同步本地 config。
-    allowed_roots: list[str] = Field(
-        default_factory=lambda: ["~/.sillyhub"],
-        sa_column=Column(JSON, nullable=False, server_default=text("'[\"~/.sillyhub\"]'")),
     )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
