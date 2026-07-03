@@ -92,12 +92,12 @@ async def _create_workspace(session: AsyncSession) -> uuid.UUID:
 # ===================================================================
 
 
-def test_get_config_for_propose() -> None:
-    """Propose stage has a valid config."""
-    config = get_config_for_stage("propose")
+def test_get_config_for_brainstorm() -> None:
+    """Brainstorm stage has a valid config."""
+    config = get_config_for_stage("brainstorm")
     assert config is not None
     assert config.enabled is True
-    assert config.prompt_template == "propose.md"
+    assert config.prompt_template == "brainstorm.md"
     assert config.requires_worktree is True
     assert config.read_only is False
 
@@ -159,7 +159,7 @@ async def test_has_active_run_false_with_failed(db_session: AsyncSession) -> Non
 
 
 # ===================================================================
-# 3. dispatch() — propose stage
+# 3. dispatch() — brainstorm stage
 # ===================================================================
 
 
@@ -185,7 +185,7 @@ async def test_dispatch_active_run_blocks(db_session: AsyncSession) -> None:
         session=db_session,
         workspace_id=change.workspace_id,
         change_id=change.id,
-        target_stage="propose",
+        target_stage="brainstorm",
         user_id=uuid.uuid4(),
     )
     assert result["dispatched"] is False
@@ -198,7 +198,7 @@ async def test_dispatch_change_not_found(db_session: AsyncSession) -> None:
         session=db_session,
         workspace_id=uuid.uuid4(),
         change_id=uuid.uuid4(),
-        target_stage="propose",
+        target_stage="brainstorm",
         user_id=uuid.uuid4(),
     )
     assert result["dispatched"] is False
@@ -218,21 +218,21 @@ async def test_dispatch_updates_last_dispatch_in_stages(db_session: AsyncSession
             session=db_session,
             workspace_id=change.workspace_id,
             change_id=change.id,
-            target_stage="propose",
+            target_stage="brainstorm",
             user_id=uuid.uuid4(),
         )
 
     assert result["dispatched"] is True
-    assert result["stage"] == "propose"
+    assert result["stage"] == "brainstorm"
 
     # Verify stages JSON was updated
     await db_session.refresh(change)
     last_dispatch = change.stages.get("last_dispatch")
     assert last_dispatch is not None
-    assert last_dispatch["stage"] == "propose"
+    assert last_dispatch["stage"] == "brainstorm"
     assert "at" in last_dispatch
     assert "config" in last_dispatch
-    assert last_dispatch["config"]["prompt_template"] == "propose.md"
+    assert last_dispatch["config"]["prompt_template"] == "brainstorm.md"
 
 
 # ===================================================================
@@ -292,11 +292,11 @@ async def test_dispatch_next_step_creates_agent_run(db_session: AsyncSession) ->
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=uuid.uuid4(),
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
     assert result["dispatched"] is True
-    assert result["stage"] == "propose"
+    assert result["stage"] == "brainstorm"
     assert result["agent_run_id"] is not None
     # Validate UUID format
     uuid.UUID(result["agent_run_id"])
@@ -318,13 +318,13 @@ async def test_dispatch_next_step_passes_prompt_template(db_session: AsyncSessio
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=uuid.uuid4(),
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
         # Verify start_stage_dispatch was called with correct params
         call_kwargs = mock_svc.start_stage_dispatch.call_args[1]
-        assert call_kwargs["stage"] == "propose"
-        assert call_kwargs["prompt_template"] == "propose.md"
+        assert call_kwargs["stage"] == "brainstorm"
+        assert call_kwargs["prompt_template"] == "brainstorm.md"
 
 
 async def test_dispatch_next_step_unconfigured_stage(db_session: AsyncSession) -> None:
@@ -358,12 +358,12 @@ async def test_dispatch_next_step_active_run_exists(db_session: AsyncSession) ->
         workspace_id=workspace_id,
         change_id=change.id,
         user_id=uuid.uuid4(),
-        target_stage="propose",
+        target_stage="brainstorm",
     )
 
     assert result["dispatched"] is False
     assert result["reason"] == "active_run_exists"
-    assert result["stage"] == "propose"
+    assert result["stage"] == "brainstorm"
 
 
 async def test_dispatch_next_step_change_not_found(db_session: AsyncSession) -> None:
@@ -377,7 +377,7 @@ async def test_dispatch_next_step_change_not_found(db_session: AsyncSession) -> 
             workspace_id=workspace_id,
             change_id=uuid.uuid4(),
             user_id=uuid.uuid4(),
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
 
@@ -398,12 +398,12 @@ async def test_dispatch_next_step_bundle_build_error(db_session: AsyncSession) -
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=uuid.uuid4(),
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
     assert result["dispatched"] is False
     assert result["reason"] == "bundle_build_error"
-    assert result["stage"] == "propose"
+    assert result["stage"] == "brainstorm"
 
 
 async def test_dispatch_next_step_agent_start_error(db_session: AsyncSession) -> None:
@@ -421,12 +421,12 @@ async def test_dispatch_next_step_agent_start_error(db_session: AsyncSession) ->
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=uuid.uuid4(),
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
     assert result["dispatched"] is False
     assert result["reason"] == "agent_start_error"
-    assert result["stage"] == "propose"
+    assert result["stage"] == "brainstorm"
 
     # Wave0 (ql-20260619-001-f6cc): dispatch_next_step no longer pre-creates a
     # Run, so a start_stage_dispatch failure leaves NO Run behind.
@@ -449,7 +449,7 @@ async def test_dispatch_next_step_records_last_dispatch(db_session: AsyncSession
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=uuid.uuid4(),
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
     assert result["dispatched"] is True
@@ -457,9 +457,9 @@ async def test_dispatch_next_step_records_last_dispatch(db_session: AsyncSession
     await db_session.refresh(change)
     last_dispatch = change.stages.get("last_dispatch")
     assert last_dispatch is not None
-    assert last_dispatch["stage"] == "propose"
+    assert last_dispatch["stage"] == "brainstorm"
     assert last_dispatch["run_id"] is not None
-    assert last_dispatch["config"]["phase"] == "Propose"
+    assert last_dispatch["config"]["phase"] == "Brainstorm"
     assert last_dispatch["config"]["requires_worktree"] is True
 
 
@@ -475,7 +475,7 @@ async def test_dispatch_next_step_creates_workspace_association(db_session: Asyn
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=uuid.uuid4(),
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
     assert result["dispatched"] is True
@@ -515,7 +515,7 @@ async def test_dispatch_next_step_idempotency(db_session: AsyncSession) -> None:
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=user_id,
-            target_stage="propose",
+            target_stage="brainstorm",
         )
         assert result1["dispatched"] is True
 
@@ -525,7 +525,7 @@ async def test_dispatch_next_step_idempotency(db_session: AsyncSession) -> None:
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=user_id,
-            target_stage="propose",
+            target_stage="brainstorm",
         )
         assert result2["dispatched"] is False
         assert result2["reason"] == "active_run_exists"
@@ -546,7 +546,7 @@ from app.modules.change.dispatch import StageSyncResult
 def _create_sillyspec_db(
     tmp_path: SyncPath,
     change_key: str = "test-change",
-    current_stage: str = "propose",
+    current_stage: str = "brainstorm",
     stages: list[dict] | None = None,
     steps: list[dict] | None = None,
 ) -> SyncPath:
@@ -624,7 +624,7 @@ async def test_sync_stage_status_normal_sync(db_session: AsyncSession) -> None:
         _create_sillyspec_db(
             SyncPath(tmp_dir),
             change_key="test-sync",
-            current_stage="propose",
+            current_stage="brainstorm",
             steps=[
                 {"name": "step1", "status": "completed"},
                 {"name": "step2", "status": "pending"},
@@ -637,7 +637,7 @@ async def test_sync_stage_status_normal_sync(db_session: AsyncSession) -> None:
             result = await service.sync_stage_status(db_session, change.id, run_id)
 
     assert result.synced is True
-    assert result.current_stage == "propose"
+    assert result.current_stage == "brainstorm"
     assert result.current_step == "step2"
     assert result.stage_completed is False
     assert result.has_pending_step is True
@@ -646,9 +646,9 @@ async def test_sync_stage_status_normal_sync(db_session: AsyncSession) -> None:
 
     # Verify Change.current_stage was updated
     await db_session.refresh(change)
-    assert change.current_stage == "propose"
-    assert "propose" in change.stages
-    assert change.stages["propose"]["steps"]["completed"] == ["step1"]
+    assert change.current_stage == "brainstorm"
+    assert "brainstorm" in change.stages
+    assert change.stages["brainstorm"]["steps"]["completed"] == ["step1"]
 
 
 async def test_sync_stage_status_all_steps_completed(db_session: AsyncSession) -> None:
@@ -662,7 +662,7 @@ async def test_sync_stage_status_all_steps_completed(db_session: AsyncSession) -
         status="draft",
         location="active",
         path=".sillyspec/changes/test-completed",
-        current_stage="propose",
+        current_stage="brainstorm",
         stages={},
     )
     db_session.add(change)
@@ -675,8 +675,8 @@ async def test_sync_stage_status_all_steps_completed(db_session: AsyncSession) -
         _create_sillyspec_db(
             SyncPath(tmp_dir),
             change_key="test-completed",
-            current_stage="propose",
-            stages=[{"stage": "propose", "status": "completed"}],
+            current_stage="brainstorm",
+            stages=[{"stage": "brainstorm", "status": "completed"}],
             steps=[
                 {"name": "step1", "status": "completed"},
                 {"name": "step2", "status": "completed"},
@@ -844,7 +844,7 @@ async def test_sync_stage_status_empty_steps(db_session: AsyncSession) -> None:
         status="draft",
         location="active",
         path=".sillyspec/changes/test-empty-steps",
-        current_stage="propose",
+        current_stage="brainstorm",
         stages={},
     )
     db_session.add(change)
@@ -857,8 +857,8 @@ async def test_sync_stage_status_empty_steps(db_session: AsyncSession) -> None:
         _create_sillyspec_db(
             SyncPath(tmp_dir),
             change_key="test-empty-steps",
-            current_stage="propose",
-            stages=[{"stage": "propose", "status": "in-progress"}],
+            current_stage="brainstorm",
+            stages=[{"stage": "brainstorm", "status": "in-progress"}],
             steps=[],  # No steps
         )
         service = SillySpecStageDispatchService(db_session)
@@ -960,7 +960,7 @@ async def test_dispatch_then_sync_partial_progress(db_session: AsyncSession) -> 
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=uuid.uuid4(),
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
     assert dispatch_result["dispatched"] is True
@@ -980,7 +980,7 @@ async def test_dispatch_then_sync_partial_progress(db_session: AsyncSession) -> 
         _create_sillyspec_db(
             SyncPath(tmp_dir),
             change_key="t20-partial",
-            current_stage="propose",
+            current_stage="brainstorm",
             steps=[
                 {"name": "brainstorm", "status": "completed"},
                 {"name": "write-proposal", "status": "pending"},
@@ -997,7 +997,7 @@ async def test_dispatch_then_sync_partial_progress(db_session: AsyncSession) -> 
 
     # Verify sync_result
     assert sync_result.synced is True
-    assert sync_result.current_stage == "propose"
+    assert sync_result.current_stage == "brainstorm"
     assert sync_result.current_step == "write-proposal"
     assert sync_result.stage_completed is False
     assert sync_result.has_pending_step is True
@@ -1005,12 +1005,12 @@ async def test_dispatch_then_sync_partial_progress(db_session: AsyncSession) -> 
     assert "write-proposal" in sync_result.steps_pending
 
     # Verify in-memory stages state (before refresh)
-    assert "propose" in change.stages
-    assert change.stages["propose"]["steps"]["completed"] == ["brainstorm"]
+    assert "brainstorm" in change.stages
+    assert change.stages["brainstorm"]["steps"]["completed"] == ["brainstorm"]
 
     # Verify current_stage column IS persisted (String column, no mutation issue)
     await db_session.refresh(change)
-    assert change.current_stage == "propose"
+    assert change.current_stage == "brainstorm"
 
 
 async def test_dispatch_then_sync_all_completed(db_session: AsyncSession) -> None:
@@ -1026,7 +1026,7 @@ async def test_dispatch_then_sync_all_completed(db_session: AsyncSession) -> Non
         status="draft",
         location="active",
         path=".sillyspec/changes/t20-done",
-        current_stage="propose",
+        current_stage="brainstorm",
         stages={},
     )
     db_session.add(change)
@@ -1041,7 +1041,7 @@ async def test_dispatch_then_sync_all_completed(db_session: AsyncSession) -> Non
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=uuid.uuid4(),
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
     assert dispatch_result["dispatched"] is True
@@ -1058,8 +1058,8 @@ async def test_dispatch_then_sync_all_completed(db_session: AsyncSession) -> Non
         _create_sillyspec_db(
             SyncPath(tmp_dir),
             change_key="t20-done",
-            current_stage="propose",
-            stages=[{"stage": "propose", "status": "completed"}],
+            current_stage="brainstorm",
+            stages=[{"stage": "brainstorm", "status": "completed"}],
             steps=[
                 {"name": "brainstorm", "status": "completed"},
                 {"name": "write-proposal", "status": "completed"},
@@ -1081,7 +1081,7 @@ async def test_dispatch_then_sync_all_completed(db_session: AsyncSession) -> Non
     assert len(sync_result.steps_completed) == 2
 
     # Verify in-memory stages shows completed
-    assert change.stages["propose"]["status"] == "completed"
+    assert change.stages["brainstorm"]["status"] == "completed"
 
 
 async def test_dispatch_then_sync_no_db_stops_chain(db_session: AsyncSession) -> None:
@@ -1114,7 +1114,7 @@ async def test_dispatch_then_sync_no_db_stops_chain(db_session: AsyncSession) ->
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=uuid.uuid4(),
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
     assert dispatch_result["dispatched"] is True
@@ -1148,7 +1148,7 @@ async def test_dispatch_sync_auto_dispatch_chain(db_session: AsyncSession) -> No
         status="draft",
         location="active",
         path=".sillyspec/changes/t20-chain",
-        current_stage="propose",
+        current_stage="brainstorm",
         stages={},
     )
     db_session.add(change)
@@ -1163,7 +1163,7 @@ async def test_dispatch_sync_auto_dispatch_chain(db_session: AsyncSession) -> No
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=user_id,
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
     assert d1["dispatched"] is True
@@ -1180,7 +1180,7 @@ async def test_dispatch_sync_auto_dispatch_chain(db_session: AsyncSession) -> No
         synced=True,
         change_id=change.id,
         run_id=run1_id,
-        current_stage="propose",
+        current_stage="brainstorm",
         current_step="write-proposal",
         stage_completed=False,
         has_pending_step=True,
@@ -1194,7 +1194,7 @@ async def test_dispatch_sync_auto_dispatch_chain(db_session: AsyncSession) -> No
         mock_dispatch.return_value = {
             "dispatched": True,
             "agent_run_id": str(uuid.uuid4()),
-            "stage": "propose",
+            "stage": "brainstorm",
         }
 
         auto_result = await auto_dispatch_next_step(
@@ -1211,7 +1211,7 @@ async def test_dispatch_sync_auto_dispatch_chain(db_session: AsyncSession) -> No
     # Verify the standalone dispatch() was called with correct stage
     mock_dispatch.assert_called_once()
     call_kwargs = mock_dispatch.call_args
-    assert call_kwargs.kwargs.get("target_stage") == "propose"
+    assert call_kwargs.kwargs.get("target_stage") == "brainstorm"
 
 
 # ===================================================================
@@ -1284,7 +1284,7 @@ async def test_wave0_dispatch_next_step_creates_single_run(db_session: AsyncSess
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=uuid.uuid4(),
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
     assert result["dispatched"] is True
@@ -1303,7 +1303,7 @@ async def test_wave0_dispatch_next_step_ids_consistent(db_session: AsyncSession)
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=uuid.uuid4(),
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
     returned_id = uuid.UUID(result["agent_run_id"])
@@ -1331,7 +1331,7 @@ async def test_wave0_dispatch_next_step_single_workspace_association(
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=uuid.uuid4(),
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
     returned_id = uuid.UUID(result["agent_run_id"])
@@ -1361,7 +1361,7 @@ async def test_wave0_dispatch_next_step_start_failure_leaves_no_run(
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=uuid.uuid4(),
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
     assert result["dispatched"] is False
@@ -1397,7 +1397,7 @@ async def test_wave0_dispatch_next_step_clears_legacy_orphan_and_unblocks(
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=uuid.uuid4(),
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
     assert result["dispatched"] is True  # 不再被孤儿阻塞
@@ -1671,7 +1671,7 @@ async def test_dispatch_next_step_unblocks_after_stale_pending_orphan(
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=uuid.uuid4(),
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
     assert result["dispatched"] is True  # 孤儿被时间窗清理，不再阻塞
@@ -1703,7 +1703,7 @@ async def test_dispatch_persists_last_dispatch_run_id(db_session: AsyncSession) 
             session=db_session,
             workspace_id=change.workspace_id,
             change_id=change.id,
-            target_stage="propose",
+            target_stage="brainstorm",
             user_id=uuid.uuid4(),
         )
 

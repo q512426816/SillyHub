@@ -174,8 +174,9 @@ class TestSync:
         # （reparsed=docs 向后兼容 + reparsed_changes；test spec_root 无 changes → 0）。
         assert body == {"ok": True, "reparsed": 1, "reparsed_changes": 0}
 
-        # Old file gone, new file present
-        assert not (spec_root / "docs" / "A.md").exists()
+        # D-006@v2 per-file merge：tar 未包含的旧文件被保留（保护其他成员的
+        # 独占文档），tar 内的同路径/新文件正常落地。
+        assert (spec_root / "docs" / "A.md").exists()  # 保留
         assert (spec_root / "docs" / "B.md").read_text(encoding="utf-8") == "# B"
 
     async def test_sync_receives_runtime_dir_from_tar(
@@ -207,8 +208,9 @@ class TestSync:
             )
 
         assert resp.status_code == 200, resp.text
-        # .runtime now comes from the daemon tar (D-003@v1 push path), not the old backend copy.
-        assert not (spec_root / ".runtime" / "x.log").exists()
+        # D-006@v2 per-file merge：tar 未包含的 .runtime/x.log 被保留；
+        # tar 内的 sillyspec.db 作为新文件落地（内容正确写入）。
+        assert (spec_root / ".runtime" / "x.log").exists()  # 保留
         assert (spec_root / ".runtime" / "sillyspec.db").read_bytes() == b"daemon-runtime-db"
 
     async def test_sync_invalid_tar_422(

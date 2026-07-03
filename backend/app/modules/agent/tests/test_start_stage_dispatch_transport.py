@@ -131,7 +131,7 @@ async def _create_platform_workspace(
         status="in-progress",
         location="active",
         path=".sillyspec/changes/stage-test",
-        current_stage="propose",
+        current_stage="brainstorm",
         stages={},
     )
     session.add(change)
@@ -211,8 +211,8 @@ async def test_d1_tar_mode_platform_args_contains_daemon_local_path(
             workspace_id=ws_id,
             change_id=change_id,
             user_id=uid,
-            stage="propose",
-            prompt_template="propose.md",
+            stage="brainstorm",
+            prompt_template="brainstorm.md",
             requires_worktree=False,
             read_only=True,
         )
@@ -253,8 +253,8 @@ async def test_d2_tar_mode_platform_args_contains_runtime_and_workspace_id(
             workspace_id=ws_id,
             change_id=change_id,
             user_id=uid,
-            stage="propose",
-            prompt_template="propose.md",
+            stage="brainstorm",
+            prompt_template="brainstorm.md",
             requires_worktree=False,
             read_only=True,
         )
@@ -294,8 +294,8 @@ async def test_d3_shared_mode_platform_args_contains_host_path(
             workspace_id=ws_id,
             change_id=change_id,
             user_id=uid,
-            stage="propose",
-            prompt_template="propose.md",
+            stage="brainstorm",
+            prompt_template="brainstorm.md",
             requires_worktree=False,
             read_only=True,
         )
@@ -335,8 +335,8 @@ async def test_d4_shared_mode_platform_args_contains_host_runtime(
             workspace_id=ws_id,
             change_id=change_id,
             user_id=uid,
-            stage="propose",
-            prompt_template="propose.md",
+            stage="brainstorm",
+            prompt_template="brainstorm.md",
             requires_worktree=False,
             read_only=True,
         )
@@ -374,8 +374,8 @@ async def test_d5_non_platform_managed_no_platform_args(
             workspace_id=ws_id,
             change_id=change_id,
             user_id=uid,
-            stage="propose",
-            prompt_template="propose.md",
+            stage="brainstorm",
+            prompt_template="brainstorm.md",
             requires_worktree=False,
             read_only=True,
         )
@@ -418,8 +418,8 @@ async def test_d6_platform_managed_but_spec_root_empty_no_platform_args(
             workspace_id=ws_id,
             change_id=change_id,
             user_id=uid,
-            stage="propose",
-            prompt_template="propose.md",
+            stage="brainstorm",
+            prompt_template="brainstorm.md",
             requires_worktree=False,
             read_only=True,
         )
@@ -463,8 +463,8 @@ async def test_d7_path_source_orthogonal_to_strategy(
             workspace_id=tar_ws_id,
             change_id=tar_change_id,
             user_id=tar_uid,
-            stage="propose",
-            prompt_template="propose.md",
+            stage="brainstorm",
+            prompt_template="brainstorm.md",
             requires_worktree=False,
             read_only=True,
         )
@@ -548,8 +548,8 @@ async def test_f1_start_stage_dispatch_produces_batch_lease(
             workspace_id=ws_id,
             change_id=change_id,
             user_id=uid,
-            stage="propose",
-            prompt_template="propose.md",
+            stage="brainstorm",
+            prompt_template="brainstorm.md",
             requires_worktree=False,
             read_only=True,
         )

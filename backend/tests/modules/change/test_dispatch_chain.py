@@ -12,7 +12,7 @@ import sqlite3
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -82,7 +82,7 @@ def _create_sillyspec_db(
     tmp_path: Path,
     *,
     change_key: str = "test-change",
-    current_stage: str = "propose",
+    current_stage: str = "brainstorm",
     stages: list[dict] | None = None,
     steps: list[dict] | None = None,
 ) -> Path:
@@ -176,7 +176,7 @@ async def test_dispatch_complete_sync_auto_dispatch(
         status="draft",
         location="active",
         path=".sillyspec/changes/chain-test-21",
-        current_stage="propose",
+        current_stage="brainstorm",
         stages={},
     )
     db_session.add(change)
@@ -187,7 +187,7 @@ async def test_dispatch_complete_sync_auto_dispatch(
     _create_sillyspec_db(
         tmp_path,
         change_key=change_key,
-        current_stage="propose",
+        current_stage="brainstorm",
         steps=[
             {"name": "brainstorm", "status": "completed"},
             {"name": "write-proposal", "status": "pending"},
@@ -202,7 +202,7 @@ async def test_dispatch_complete_sync_auto_dispatch(
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=user_id,
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
     assert d1["dispatched"] is True
@@ -228,7 +228,7 @@ async def test_dispatch_complete_sync_auto_dispatch(
 
     # Verify sync result
     assert sync_result.synced is True
-    assert sync_result.current_stage == "propose"
+    assert sync_result.current_stage == "brainstorm"
     assert sync_result.stage_completed is False
     assert sync_result.has_pending_step is True
     assert "brainstorm" in sync_result.steps_completed
@@ -237,14 +237,14 @@ async def test_dispatch_complete_sync_auto_dispatch(
 
     # Verify change.current_stage was synced (String column persisted correctly)
     await db_session.refresh(change)
-    assert change.current_stage == "propose"
+    assert change.current_stage == "brainstorm"
 
     # --- Step 4: auto_dispatch_next_step triggers next dispatch ---
     with patch("app.modules.change.dispatch.dispatch", new_callable=AsyncMock) as mock_dispatch:
         mock_dispatch.return_value = {
             "dispatched": True,
             "agent_run_id": str(uuid.uuid4()),
-            "stage": "propose",
+            "stage": "brainstorm",
         }
 
         auto_result = await auto_dispatch_next_step(
@@ -288,7 +288,7 @@ async def test_dispatch_complete_sync_stage_done_no_auto_dispatch(
         status="draft",
         location="active",
         path=".sillyspec/changes/chain-test-21-done",
-        current_stage="propose",
+        current_stage="brainstorm",
         stages={},
     )
     db_session.add(change)
@@ -299,8 +299,8 @@ async def test_dispatch_complete_sync_stage_done_no_auto_dispatch(
     _create_sillyspec_db(
         tmp_path,
         change_key=change_key,
-        current_stage="propose",
-        stages=[{"stage": "propose", "status": "completed"}],
+        current_stage="brainstorm",
+        stages=[{"stage": "brainstorm", "status": "completed"}],
         steps=[
             {"name": "brainstorm", "status": "completed"},
             {"name": "write-proposal", "status": "completed"},
@@ -315,7 +315,7 @@ async def test_dispatch_complete_sync_stage_done_no_auto_dispatch(
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=user_id,
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
     run1_id = uuid.UUID(d1["agent_run_id"])
@@ -341,6 +341,14 @@ async def test_dispatch_complete_sync_stage_done_no_auto_dispatch(
     with (
         patch("app.modules.change.dispatch.dispatch", new_callable=AsyncMock) as mock_dispatch,
         patch("app.modules.change.service.ChangeService.reparse", new_callable=AsyncMock),
+        # brainstorm 完成后 _resolve_stage_completion 真实返回 dispatch_target="plan"
+        # (auto-advance)。本测试聚焦 auto_dispatch 在 dispatch_target=None 时不调度
+        # 的分支，故 mock complete_stage 返回 None（对齐 e2e 同名场景）。
+        patch(
+            "app.modules.change.service.ChangeService.complete_stage",
+            new_callable=AsyncMock,
+            return_value=MagicMock(dispatch_target=None, stage="brainstorm"),
+        ),
     ):
         auto_result = await auto_dispatch_next_step(
             session=db_session,
@@ -372,7 +380,7 @@ async def test_dispatch_complete_sync_no_db_stops_chain(
         status="draft",
         location="active",
         path=".sillyspec/changes/chain-no-db",
-        current_stage="propose",
+        current_stage="brainstorm",
         stages={},
     )
     db_session.add(change)
@@ -387,7 +395,7 @@ async def test_dispatch_complete_sync_no_db_stops_chain(
             workspace_id=workspace_id,
             change_id=change.id,
             user_id=user_id,
-            target_stage="propose",
+            target_stage="brainstorm",
         )
 
     run1_id = uuid.UUID(d1["agent_run_id"])

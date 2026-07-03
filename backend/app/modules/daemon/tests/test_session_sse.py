@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.agent.model import AgentRun, AgentSession
 from app.modules.agent.service import AgentService
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
+from app.modules.daemon.run_sync.service import publish_submitted_messages
 from app.modules.daemon.service import DaemonService
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -172,6 +173,8 @@ class TestSubmitMessagesDualPublish:
         with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
             svc = DaemonService(db_session)
             count = await svc.submit_messages(lease.id, "tok", run.id, _messages("a", "b"))
+            # QueuePool 修复 3：Redis publish 已迁出到 router 侧，测试需显式触发。
+            await publish_submitted_messages(count.publish_intent)
 
         assert count == 2
         buckets = _classify_publishes(redis)
@@ -209,7 +212,8 @@ class TestSubmitMessagesDualPublish:
         redis = AsyncMock()
         with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
             svc = DaemonService(db_session)
-            await svc.submit_messages(lease.id, "tok", run.id, _messages("x"))
+            result = await svc.submit_messages(lease.id, "tok", run.id, _messages("x"))
+            await publish_submitted_messages(result.publish_intent)
 
         buckets = _classify_publishes(redis)
         assert f"agent_run:{run.id}" in buckets  # run channel unchanged
@@ -251,6 +255,7 @@ class TestSubmitMessagesDualPublish:
             svc = DaemonService(db_session)
             # Must not raise
             count = await svc.submit_messages(lease.id, "tok", run.id, _messages("a", "b"))
+            await publish_submitted_messages(count.publish_intent)
 
         assert count == 2
         # run channel publishes happened before the session publish attempt

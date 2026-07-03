@@ -82,8 +82,8 @@ class TestTransitionResponseFormat:
         mock_dispatch_result = {
             "dispatched": True,
             "agent_run_id": str(uuid.uuid4()),
-            "stage": "brainstorm",
-            "phase": "Brainstorm",
+            "stage": "plan",
+            "phase": "Plan",
         }
 
         with patch(
@@ -93,7 +93,7 @@ class TestTransitionResponseFormat:
         ):
             resp = await client.post(
                 f"/api/workspaces/{ws_id}/changes/{change_id}/transition",
-                json={"target_stage": "brainstorm"},
+                json={"target_stage": "plan"},
                 headers=auth_headers,
             )
 
@@ -109,11 +109,11 @@ class TestTransitionResponseFormat:
         assert dispatch is not None
         assert dispatch["dispatched"] is True
         assert dispatch["agent_run_id"] is not None
-        assert dispatch["stage"] == "brainstorm"
+        assert dispatch["stage"] == "plan"
 
         # change contains full change data
         assert body["change"]["id"] == change_id
-        assert body["change"]["current_stage"] == "brainstorm"
+        assert body["change"]["current_stage"] == "plan"
 
     async def test_dispatch_failure_returns_null_agent_dispatch(
         self, client, ws_with_changes: dict, auth_headers: dict[str, str]
@@ -134,7 +134,7 @@ class TestTransitionResponseFormat:
         ):
             resp = await client.post(
                 f"/api/workspaces/{ws_id}/changes/{change_id}/transition",
-                json={"target_stage": "brainstorm"},
+                json={"target_stage": "plan"},
                 headers=auth_headers,
             )
 
@@ -157,14 +157,14 @@ class TestTransitionResponseFormat:
         ):
             resp = await client.post(
                 f"/api/workspaces/{ws_id}/changes/{change_id}/transition",
-                json={"target_stage": "brainstorm"},
+                json={"target_stage": "plan"},
                 headers=auth_headers,
             )
 
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert "change" in body
-        assert body["change"]["current_stage"] == "brainstorm"
+        assert body["change"]["current_stage"] == "plan"
         # Dispatch exception → service returns {dispatched: false} → router maps to null
         assert body["agent_dispatch"] is None
 
@@ -181,7 +181,7 @@ class TestTransitionResponseFormat:
         ):
             resp = await client.post(
                 f"/api/workspaces/{ws_id}/changes/{change_id}/transition",
-                json={"target_stage": "brainstorm"},
+                json={"target_stage": "plan"},
                 headers=auth_headers,
             )
 
@@ -190,7 +190,7 @@ class TestTransitionResponseFormat:
 
         # Verify ChangeRead fields present
         assert change["id"] == change_id
-        assert change["current_stage"] == "brainstorm"
+        assert change["current_stage"] == "plan"
         assert "change_key" in change
         assert "status" in change
         assert "stages" in change
