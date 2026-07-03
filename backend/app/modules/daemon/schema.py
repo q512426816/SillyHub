@@ -128,6 +128,9 @@ class DaemonRuntimeRead(BaseModel):
     """
 
     id: uuid.UUID
+    # 所属守护进程实体（design §4.2）。前端 workspace-access-guide 等靠这个字段
+    # 解析 daemon_id 写 PUT /my-binding（缺失会 fallback runtime_id → daemon_not_owned 403）。
+    daemon_instance_id: uuid.UUID | None = None
     # 机器级，已挪到 daemon_instances；此处占位 default=None 防 model_validate 崩。
     display_alias: str | None = None
     name: str | None
