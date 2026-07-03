@@ -65,6 +65,7 @@ async def _setup_daemon_client_workspace(db_session, *, online: bool = True) -> 
         path_source="daemon-client",
         daemon_runtime_id=runtime_id,
         created_by=user_id,
+        last_scanned_at=datetime.now(UTC),
     )
     db_session.add(ws)
     await db_session.commit()

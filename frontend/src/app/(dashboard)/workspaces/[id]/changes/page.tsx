@@ -74,7 +74,6 @@ const TYPE_LABEL: Record<string, string> = {
 // 主线 6 stage（对齐工具 STAGE_ORDER：scan→brainstorm→plan→execute→verify→archive）。
 // status 投影（blocked/archived）作为业务态徽标，不再作为 stage 枚举值。
 const STAGE_KIND: Record<string, StatusKind> = {
-  scan: "info",
   brainstorm: "warning",
   plan: "info",
   execute: "info",
@@ -86,7 +85,6 @@ const STAGE_KIND: Record<string, StatusKind> = {
 };
 
 const STAGE_LABEL: Record<string, string> = {
-  scan: "扫描",
   brainstorm: "需求分析",
   plan: "规划",
   execute: "执行",
@@ -99,7 +97,6 @@ const STAGE_LABEL: Record<string, string> = {
 
 const STAGE_OPTIONS = [
   { value: "", label: "全部阶段" },
-  { value: "scan", label: "扫描" },
   { value: "brainstorm", label: "需求分析" },
   { value: "plan", label: "规划" },
   { value: "execute", label: "执行" },

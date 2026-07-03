@@ -68,6 +68,24 @@ class ChangeWriterService:
         - ``lease_id is None`` + server-local/repo-native → 原 ``_repo_dir_for_workspace``
           直写路径不变。
         """
+        # 门禁（D-004@V1 / FR-05）：未扫描 workspace 不允许新建变更。
+        # scan 从变更流程移除后，brainstorm 需要项目地图（scan_docs），
+        # 未扫描 workspace 直接进 brainstorm 会缺地图 → 拒绝并引导先扫描。
+        ws_for_gate = await self._session.get(Workspace, workspace_id)
+        if ws_for_gate is None or ws_for_gate.deleted_at is not None:
+            raise WorkspaceNotFound(
+                "Workspace not found.",
+                details={"workspace_id": str(workspace_id)},
+            )
+        if ws_for_gate.last_scanned_at is None:
+            raise ChangeWriteError(
+                "请先扫描工作区后再创建变更。",
+                details={
+                    "workspace_id": str(workspace_id),
+                    "reason": "workspace_not_scanned",
+                },
+            )
+
         if lease_id is not None:
             lease = await self._get_active_lease(lease_id, user_id)
             if lease.workspace_id != workspace_id:
