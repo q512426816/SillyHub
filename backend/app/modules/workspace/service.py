@@ -185,6 +185,11 @@ class WorkspaceService:
 
         # ── FR-06 / D-003@v1：daemon-client 分支（backend 读不到客户端 root_path）──
         if self._is_daemon_client_payload(payload):
+            # task-10/11 补遗：daemon_id 维度创建——早校验归属（daemon 属 created_by），
+            # 避免做了一堆 spec_workspace/owner 副作用后才在 member binding 处失败。
+            # 仅 daemon_id 提供 + created_by 非 None 时校验；legacy（仅 runtime_id）跳过。
+            if payload.daemon_id is not None and created_by is not None:
+                await self._guard_daemon_owned_by_user(payload.daemon_id, created_by)
             workspace = Workspace(
                 id=uuid.uuid4(),
                 name=payload.name,
@@ -215,11 +220,28 @@ class WorkspaceService:
             await self._ensure_empty_spec_workspace(workspace.id, strategy=payload.spec_strategy)
             # 创建人自动添加为 owner
             await self._ensure_creator_as_owner(workspace.id, user_id=created_by)
+            # task-10/11 补遗：daemon_id 维度下，创建即建成员绑定行（workspace+user+daemon+path）。
+            # 复用 upsert_my_binding（含归属校验 + 幂等 upsert + commit）。仅 daemon_id 提供 + created_by
+            # 非 None 时；workspace 行已 flush，FK 不会悬空。
+            if payload.daemon_id is not None and created_by is not None:
+                from app.modules.workspace.member_runtimes.service import (
+                    upsert_my_binding,
+                )
+
+                await upsert_my_binding(
+                    self._session,
+                    workspace.id,
+                    created_by,
+                    daemon_id=payload.daemon_id,
+                    root_path=payload.root_path,
+                    path_source="daemon-client",
+                )
             await self._session.commit()
             await self._session.refresh(workspace)
             log.info(
                 "workspace.created.daemon_client",
                 workspace_id=str(workspace.id),
+                daemon_id=str(payload.daemon_id) if payload.daemon_id else None,
                 daemon_runtime_id=str(workspace.daemon_runtime_id),
             )
             return workspace
@@ -1205,9 +1227,26 @@ class WorkspaceService:
         """判断创建/扫描请求是否为 daemon-client 路径来源（FR-06 / D-003@v1）。
 
         task-01 schema validator 已保证 path_source='daemon-client' 时
-        daemon_runtime_id 非空，此处只读字段不做二次校验。
+        daemon_id 或 daemon_runtime_id 至少一个非空（task-10/11 补遗：daemon_id 优先），
+        此处只读字段不做二次校验。
         """
         return getattr(payload, "path_source", "server-local") == "daemon-client"
+
+    async def _guard_daemon_owned_by_user(self, daemon_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        """守护进程归属校验（task-10/11 补遗，D-004 / FR）。
+
+        daemon_id 必须属于 user_id，否则抛 AppError(code=daemon_not_owned, 403)。
+        与 member_runtimes.service.upsert_my_binding 的守护一致——防跨用户劫持。
+        """
+        from app.modules.daemon.model import DaemonInstance
+
+        daemon = await self._session.get(DaemonInstance, daemon_id)
+        if daemon is None or daemon.user_id != user_id:
+            raise AppError(
+                "Daemon instance does not belong to you.",
+                code="daemon_not_owned",
+                http_status=403,
+            )
 
     async def _ensure_creator_as_owner(
         self, workspace_id: uuid.UUID, *, user_id: uuid.UUID | None = None
