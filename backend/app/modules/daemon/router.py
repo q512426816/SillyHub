@@ -513,6 +513,7 @@ async def update_runtime_allowed_roots(
 )
 async def trigger_daemon_self_update(
     runtime_id: uuid.UUID,
+    session: SessionDep,
     user: RuntimeAdminUser,
 ) -> dict[str, str | bool]:
     """推送 daemon 自更新指令到指定 runtime（admin）。
@@ -520,11 +521,16 @@ async def trigger_daemon_self_update(
     通过 WS 发送 `daemon:self_update`，daemon 收到后下载最新 bundle 替换并退出重启。
     返回 `{"sent": bool, "latest_version": str}`。
     """
+    from app.modules.daemon.model import DaemonRuntime
     from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
     latest = get_daemon_latest_version()
     hub = get_daemon_ws_hub()
-    sent = await hub.send_self_update(runtime_id, version=latest)
+    # task-06: ws_hub 按 daemon_instance_id 路由；runtime_id → daemon_id。
+    # 迁移窗口 runtime.daemon_instance_id IS NULL → 回退 runtime_id（兼容旧数据）。
+    runtime = await session.get(DaemonRuntime, runtime_id)
+    daemon_id = (runtime.daemon_instance_id if runtime else None) or runtime_id
+    sent = await hub.send_self_update(daemon_id, version=latest)
     if not sent:
         from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 
@@ -1077,7 +1083,7 @@ async def list_dir(
     """
     svc = DaemonService(session)
     # Ownership check: runtime not owned by current user → 404.
-    await svc._get_owned_runtime(runtime_id, user.id)
+    runtime = await svc._get_owned_runtime(runtime_id, user.id)
 
     # Lazy import (matches placement.py / agent.service.py): the ws_hub
     # singleton accessor is patched per-test via ws_hub.get_daemon_ws_hub, and a
@@ -1086,8 +1092,11 @@ async def list_dir(
     from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
     hub = get_daemon_ws_hub()
+    # task-06: ws_hub 按 daemon_instance_id 路由；runtime_id → daemon_id。
+    # 迁移窗口 runtime.daemon_instance_id IS NULL → 回退 runtime_id（兼容旧数据）。
+    daemon_id = runtime.daemon_instance_id or runtime_id
     try:
-        result = await hub.send_rpc(runtime_id, "list_dir", {"path": data.path})
+        result = await hub.send_rpc(daemon_id, "list_dir", {"path": data.path})
     except DaemonRuntimeOffline as exc:
         raise DaemonRpcGatewayError(
             f"daemon runtime '{runtime_id}' offline.",
