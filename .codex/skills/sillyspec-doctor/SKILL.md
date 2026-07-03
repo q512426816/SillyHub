@@ -3,29 +3,59 @@ name: sillyspec:doctor
 description: 用于 SillySpec 自检和状态修复。适合用户说"检查下状态、修复 progress、doctor、状态不对"。全量扫描进度一致性，修复进度数据与实际产出不匹配的问题。
 ---
 
+## 何时使用
+
+- 用户说"检查下状态、修复 progress、doctor、状态不对"
+- 进度数据与实际产出不匹配时自检修复
+- 5 步：环境检查 → 项目配置 → 数据库完整性 → 状态一致性 → 修复建议
+
 ## 前置检查
 
-**在执行任何检查之前，先确认 SillySpec CLI 是否可用：**
+**执行任何步骤前，先确认 SillySpec CLI 可用：**
 
-1. 运行 `sillyspec --version`
-2. 如果失败：
-   - 输出：❌ SillySpec CLI 未安装
-   - 给出安装命令：`npm install -g sillyspec`
-   - 停止，不要继续后续步骤
+```bash
+sillyspec --version
+```
 
-## 多变更说明
+失败则提示 `❌ SillySpec CLI 未安装` + 安装命令 `npm install -g sillyspec`，停止。
 
-如果项目有多个活跃变更（`.sillyspec/changes/` 下有多个目录），所有 `sillyspec run` 命令需要加 `--change <变更名>`。只有一个变更时可省略（CLI 自动检测）。
+## 步骤生命周期（所有阶段通用）
 
-## 执行
+> `sillyspec doctor` 是 `sillyspec run doctor` 的顶层别名，两者等价。
 
-**CLI 可用后，使用 exec 工具（shell）执行以下命令，不要自己编造流程：**
+```bash
+sillyspec run doctor                           # 输出当前步骤 prompt
+sillyspec run doctor --done --output "摘要"    # 完成当前步骤
+sillyspec run doctor --status                  # 查看阶段进度
+sillyspec run doctor --reset                   # 重置阶段（从头开始）
+```
 
-1. 运行 `sillyspec run doctor` — 读取输出的步骤 prompt
-2. 按照输出的 prompt **严格执行**，不要跳过或自行添加步骤
-3. 步骤完成后，运行 `sillyspec run doctor --done --output "你的摘要"`
-4. 重复 2-3 直到阶段完成
-5. **禁止**在没有运行 CLI 的情况下自行决定流程
+## 通用参数（所有阶段适用）
+
+| 参数 | 说明 |
+|---|---|
+| `--spec-dir <path>` | 指定规范目录（默认 `<项目>/.sillyspec`） |
+| `--non-interactive` | CI/脚本下禁用交互式 prompt |
+| `--json` | 输出 JSON（程序化读取） |
+
+## doctor 特有
+
+doctor 是辅助阶段，用于诊断而非推进流程。配套的轻量诊断命令（不经 run）：
+
+```bash
+sillyspec progress show                        # 查看当前进度
+sillyspec progress check                       # 状态一致性检查（只报告，不修复）
+sillyspec progress repair                      # 修复状态元数据（dry-run）
+sillyspec progress repair --apply              # 真正修复
+sillyspec progress validate                    # 校验并修复
+sillyspec worktree doctor [--fix]              # worktree 健康检查 + 修复
+```
+
+## 铁律
+
+- **必须用 exec 工具（shell）执行 CLI，不要自己编造流程**
+- doctor 只诊断和建议，修复操作要让用户确认
+- 完成后立即 `--done`，不跳过
 
 ## 用户指令
 $ARGUMENTS

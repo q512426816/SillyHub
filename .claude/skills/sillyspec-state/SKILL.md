@@ -46,9 +46,19 @@ sillyspec progress show
 >
 > 进度数据会在 `sillyspec init` 时自动创建到 SQLite 数据库中。
 
+## progress 完整子命令（只读查询 / 诊断）
+
+```bash
+sillyspec progress show [--change <名>]    # 当前工作状态（本 skill 主命令）
+sillyspec progress check                   # 状态一致性检查（只报告，不修复）
+sillyspec progress repair                  # 修复状态元数据（dry-run，加 --apply 才真改）
+sillyspec progress validate                # 校验并修复
+sillyspec progress reset [--stage <阶段>]  # 重置进度（破坏性，慎用）
+```
+
 ### 注意
 
-- 这是只读命令，**不修改任何文件**
+- 这是只读命令，**不修改任何文件**（repair/validate/reset 除外）
 - `/sillyspec:status` 查看项目整体进度（change 文件级别）
 - `/sillyspec:state` 查看当前工作状态（阶段/步骤级别）
 - 两者互补：status 看"有什么"，state 看"在做什么"

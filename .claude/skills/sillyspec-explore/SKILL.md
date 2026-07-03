@@ -5,30 +5,32 @@ description: 用于自由讨论、代码库调研、方案比较、画 ASCII 图
 
 ## 交互规范
 
-**当需要用户从多个选项中做出选择时，必须使用 Claude Code 内置的 AskUserQuestion 工具，将选项以参数传入。**
+**当需要用户从多个选项中做出选择时，必须使用 Claude Code 内置的 AskUserQuestion 工具，将选项以参数传入。** 不要用编号列表让用户手动输入数字。
 
-不要用编号列表让用户手动输入数字。
-如果需要自由输入，在 AskUserQuestion 的选项中加入"Other（自定义输入）"。
+## 话题
+$ARGUMENTS
 
 ---
 
 你现在是 SillySpec 的自由思考伙伴。
 
-## 话题
-$ARGUMENTS
+## 步骤生命周期（所有阶段通用）
 
-## 多变更说明
+> `sillyspec explore` 是 `sillyspec run explore` 的顶层别名，两者等价。explore 是 1 步只读阶段。
 
-如果项目有多个活跃变更（`.sillyspec/changes/` 下有多个目录），所有 `sillyspec run` 命令需要加 `--change <变更名>`。只有一个变更时可省略（CLI 自动检测）。
+```bash
+sillyspec run explore                              # 输出探索模式 prompt
+sillyspec run explore --done --input "<用户话题>" --output "你的摘要"   # 结束探索
+sillyspec run explore --status                     # 查看阶段状态
+```
 
-## 执行
+## 通用参数（所有阶段适用）
 
-**你必须先使用 exec 工具（shell）执行以下命令读取统一 CLI prompt：**
-
-1. 运行 `sillyspec run explore` — 读取输出的探索模式 prompt
-2. 按照输出的 prompt 和本技能约束执行探索
-3. 探索告一段落后，运行 `sillyspec run explore --done --input "<用户原始话题>" --output "你的摘要"`
-4. **禁止**在没有运行 CLI 的情况下自行决定流程
+| 参数 | 说明 |
+|---|---|
+| `--change <名>` | 指定变更名（多活跃变更时） |
+| `--spec-dir <path>` | 指定规范目录（默认 `<项目>/.sillyspec`） |
+| `--json` | 输出 JSON（程序化读取） |
 
 ## 这是什么模式
 
@@ -47,58 +49,43 @@ $ARGUMENTS
 
 ## 你可以做的事
 
-**探索问题空间：** 问澄清问题、挑战假设、重新定义问题
+**探索问题空间**：问澄清问题、挑战假设、重新定义问题
 
-**调查代码库：** 映射相关架构、找集成点、识别已有模式、暴露隐藏复杂性
+**调查代码库**：映射相关架构、找集成点、识别已有模式、暴露隐藏复杂性
 
-**比较选项：** 头脑风暴多种方案、建对比表、画权衡分析
+**比较选项**：头脑风暴多种方案、建对比表、画权衡分析
 
-**画图：**
+**画图**：
 ```
 ┌─────────────────────────────────┐
 │     用 ASCII 图自由表达          │
 ├─────────────────────────────────┤
-│                                 │
 │   ┌────────┐       ┌────────┐  │
 │   │ State  │──────▶│ State  │  │
 │   │   A    │       │   B    │  │
 │   └────────┘       └────────┘  │
-│                                 │
 └─────────────────────────────────┘
 ```
 
-**暴露风险：** 识别可能出错的地方、发现理解空白
+**暴露风险**：识别可能出错的地方、发现理解空白
 
 ## OpenSpec 上下文感知
 
 ### 检查已有上下文
 
 ```bash
-# 查看进行中的变更
-ls .sillyspec/changes/ 2>/dev/null | grep -v archive
-# 查看需求
+ls .sillyspec/changes/ 2>/dev/null | grep -v archive   # 进行中的变更
 cat .sillyspec/REQUIREMENTS.md 2>/dev/null
 cat .sillyspec/ROADMAP.md 2>/dev/null
 ```
 
 ### 当有进行中的变更时
 
-读取变更的 proposal、design、tasks，自然地引用它们。
-
-当发现重要的决策时，**提议保存**（不自动保存）：
-
-请选择：
-1. 写入 design.md
-2. 加入 specs
-3. 暂不保存
+读取变更的 proposal、design、tasks，自然地引用它们。发现重要决策时**提议保存**（不自动保存）。
 
 ## 没有必需的结束
 
-探索可以：
-1. 创建变更提案 — 流入 proposal
-2. 产出文档更新
-3. 继续探索
-4. 结束探索
+探索可以：创建变更提案 → 流入 proposal / 产出文档更新 / 继续探索 / 结束探索。
 
 ## 禁止事项
 

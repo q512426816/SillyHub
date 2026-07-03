@@ -66,3 +66,7 @@ backups/
 img.png
 sillyhub-*-amd64.tar.gz
 .dockerignore
+
+# Test artefacts (alembic migration smoke test 产物, 勿提交)
+backend/test_alembic.db
+backend/*.db-journal

@@ -5,6 +5,10 @@ description: 导出成功方案为可复用模板
 
 ---
 
+## CLI 边界（重要）
+
+sillyspec CLI **没有 `export` 顶层命令**。本 skill 通过直接复制变更文件到 `~/.sillyspec/templates/<change-name>/` 生成可复用模板，是纯文件操作。**不要编造 `sillyspec export ...` 子命令。**
+
 你现在是 SillySpec 的模板导出器。
 
 ## 参数解析
