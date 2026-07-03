@@ -1,17 +1,19 @@
 // workspace-access-guide 组件单测。
 //
+// 2026-07-03-daemon-entity-binding（D-004/D-006）：下拉改 daemon 实体维度。
+//
 // 覆盖：
-//   - 「绑定守护进程」下拉来自 listDaemonRuntimes()，online 排前，option 文案
-//     含 provider 中文 + name + 中文状态；默认带「不绑定守护进程」空选项。
+//   - 「绑定守护进程」下拉来自 listDaemonInstances()（守护进程实体），online 排前，
+//     option 文案含 hostname + provider 列表 + 中文状态；默认带「不绑定守护进程」空选项。
 //   - 「路径来源」下拉显示中文（本机守护进程路径 / 服务器本地路径）。
-//   - 守护进程列表为空 → 显示引导文案「请先在『守护进程』页启动一个」。
-//   - 填路径 + 选 runtime + 保存 → upsertMyBinding 正确入参 + onConfigured 触发。
+//   - 守护进程列表为空 → 显示引导文案。
+//   - 填路径 + 选 daemon + 保存 → upsertMyBinding 正确入参（daemon_id）+ onConfigured 触发。
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("@/lib/daemon", () => ({
-  listDaemonRuntimes: vi.fn(),
+  listDaemonInstances: vi.fn(),
   PROVIDER_META: {
     claude: { label: "Claude Code", icon: "🟣", color: "bg-purple-100" },
     cursor: { label: "Cursor", icon: "🟡", color: "bg-amber-100" },
@@ -23,28 +25,21 @@ vi.mock("@/lib/workspace-binding", () => ({
 }));
 
 import { WorkspaceAccessGuide } from "@/components/workspace-access-guide";
-import { listDaemonRuntimes, type DaemonRuntimeRead } from "@/lib/daemon";
+import { listDaemonInstances, type DaemonInstanceRead } from "@/lib/daemon";
 import { upsertMyBinding } from "@/lib/workspace-binding";
 
-const mockedList = vi.mocked(listDaemonRuntimes);
+const mockedList = vi.mocked(listDaemonInstances);
 const mockedUpsert = vi.mocked(upsertMyBinding);
 
-function mkRuntime(
-  o: Partial<DaemonRuntimeRead> & { id: string },
-): DaemonRuntimeRead {
+function mkInstance(
+  o: Partial<DaemonInstanceRead> & { id: string },
+): DaemonInstanceRead {
   return {
     id: o.id,
-    name: o.name ?? null,
-    provider: o.provider ?? "claude",
-    version: o.version ?? null,
-    os: o.os ?? null,
-    arch: o.arch ?? null,
+    hostname: o.hostname ?? "HOST",
+    display_alias: o.display_alias ?? null,
     status: o.status ?? "online",
-    last_heartbeat_at: o.last_heartbeat_at ?? null,
-    capabilities: o.capabilities ?? null,
-    allowed_roots: o.allowed_roots ?? [],
-    created_at: o.created_at ?? "2026-01-01T00:00:00Z",
-    updated_at: o.updated_at ?? "2026-01-01T00:00:00Z",
+    providers: o.providers ?? [{ provider: "claude", status: "online" }],
   };
 }
 
@@ -53,21 +48,21 @@ describe("WorkspaceAccessGuide", () => {
     vi.clearAllMocks();
   });
 
-  it("「绑定守护进程」下拉 online 排前，option 含中文 provider 与状态", async () => {
+  it("「绑定守护进程」下拉 online 排前，option 含 hostname + provider 列表 + 状态", async () => {
     // 后端顺序故意 offline 在前，组件应把 online 排前。
-    const cursor = mkRuntime({
-      id: "rt-cursor",
-      provider: "cursor",
+    const desktop = mkInstance({
+      id: "inst-desktop",
+      hostname: "DESKTOP",
       status: "offline",
-      name: "DESKTOP",
+      providers: [{ provider: "cursor", status: "offline" }],
     });
-    const claude = mkRuntime({
-      id: "rt-claude",
-      provider: "claude",
+    const mbp = mkInstance({
+      id: "inst-mbp",
+      hostname: "MBP",
       status: "online",
-      name: "MBP",
+      providers: [{ provider: "claude", status: "online" }],
     });
-    mockedList.mockResolvedValue([cursor, claude]);
+    mockedList.mockResolvedValue([desktop, mbp]);
 
     render(<WorkspaceAccessGuide workspaceId="ws-1" onConfigured={vi.fn()} />);
 
@@ -75,8 +70,10 @@ describe("WorkspaceAccessGuide", () => {
     const options = Array.from(select.querySelectorAll("option"));
     // option[0] 是「不绑定守护进程」空选项，其后 online 排前。
     expect(options[0]!.textContent).toBe("不绑定守护进程");
+    expect(options[1]!.textContent).toContain("MBP");
     expect(options[1]!.textContent).toContain("Claude Code");
     expect(options[1]!.textContent).toContain("在线");
+    expect(options[2]!.textContent).toContain("DESKTOP");
     expect(options[2]!.textContent).toContain("Cursor");
     expect(options[2]!.textContent).toContain("离线");
   });
@@ -96,20 +93,18 @@ describe("WorkspaceAccessGuide", () => {
     mockedList.mockResolvedValue([]);
     render(<WorkspaceAccessGuide workspaceId="ws-1" onConfigured={vi.fn()} />);
     await waitFor(() =>
-      expect(
-        screen.getByText(/请先在「守护进程」页启动一个/),
-      ).toBeInTheDocument(),
+      expect(screen.getByText(/还没有在线守护进程/)).toBeInTheDocument(),
     );
   });
 
-  it("填路径 + 选 runtime + 保存 → upsertMyBinding 正确入参并触发 onConfigured", async () => {
-    const claude = mkRuntime({
-      id: "rt-claude",
-      provider: "claude",
+  it("填路径 + 选 daemon + 保存 → upsertMyBinding 正确入参并触发 onConfigured", async () => {
+    const mbp = mkInstance({
+      id: "inst-mbp",
+      hostname: "MBP",
       status: "online",
-      name: "MBP",
+      providers: [{ provider: "claude", status: "online" }],
     });
-    mockedList.mockResolvedValue([claude]);
+    mockedList.mockResolvedValue([mbp]);
     mockedUpsert.mockResolvedValue({} as never);
     const onConfigured = vi.fn();
 
@@ -123,16 +118,16 @@ describe("WorkspaceAccessGuide", () => {
     fireEvent.change(screen.getByLabelText("本地项目路径"), {
       target: { value: "/Users/me/code" },
     });
-    // 选 runtime
+    // 选 daemon
     fireEvent.change(screen.getByLabelText("绑定守护进程"), {
-      target: { value: "rt-claude" },
+      target: { value: "inst-mbp" },
     });
     // 点保存
     fireEvent.click(screen.getByText("保存我的接入配置"));
 
     await waitFor(() =>
       expect(mockedUpsert).toHaveBeenCalledWith("ws-1", {
-        daemon_id: "rt-claude",
+        daemon_id: "inst-mbp",
         root_path: "/Users/me/code",
         path_source: "daemon-client",
       }),
@@ -141,27 +136,27 @@ describe("WorkspaceAccessGuide", () => {
   });
 
   describe("编辑模式（initial 传入）", () => {
-    it("传入 initial 时回填当前 runtime_id / root_path / path_source，且展示编辑文案", async () => {
-      const claude = mkRuntime({
-        id: "rt-claude",
-        provider: "claude",
+    it("传入 initial 时回填当前 daemon_id / root_path / path_source，且展示编辑文案", async () => {
+      const mbp = mkInstance({
+        id: "inst-mbp",
+        hostname: "MBP",
         status: "online",
-        name: "MBP",
+        providers: [{ provider: "claude", status: "online" }],
       });
-      const cursor = mkRuntime({
-        id: "rt-cursor",
-        provider: "cursor",
+      const desktop = mkInstance({
+        id: "inst-desktop",
+        hostname: "DESKTOP",
         status: "offline",
-        name: "DESKTOP",
+        providers: [{ provider: "cursor", status: "offline" }],
       });
-      mockedList.mockResolvedValue([cursor, claude]);
+      mockedList.mockResolvedValue([desktop, mbp]);
 
       render(
         <WorkspaceAccessGuide
           workspaceId="ws-1"
           onConfigured={vi.fn()}
           initial={{
-            runtime_id: "rt-claude",
+            daemon_id: "inst-mbp",
             root_path: "/Users/me/old-code",
             path_source: "server-local",
           }}
@@ -172,15 +167,19 @@ describe("WorkspaceAccessGuide", () => {
       expect(
         await screen.findByText("✏ 编辑我的接入配置"),
       ).toBeInTheDocument();
-      // runtime 下拉回填到 rt-claude
-      const runtimeSelect = screen.getByLabelText("绑定守护进程") as HTMLSelectElement;
-      expect(runtimeSelect.value).toBe("rt-claude");
+      // daemon 下拉回填到 inst-mbp
+      const daemonSelect = screen.getByLabelText(
+        "绑定守护进程",
+      ) as HTMLSelectElement;
+      expect(daemonSelect.value).toBe("inst-mbp");
       // 路径回填
       expect(
         (screen.getByLabelText("本地项目路径") as HTMLInputElement).value,
       ).toBe("/Users/me/old-code");
       // 路径来源回填到 server-local
-      const pathSourceSelect = screen.getByLabelText("路径来源") as HTMLSelectElement;
+      const pathSourceSelect = screen.getByLabelText(
+        "路径来源",
+      ) as HTMLSelectElement;
       expect(pathSourceSelect.value).toBe("server-local");
       // 编辑模式按钮文案
       expect(
@@ -188,20 +187,18 @@ describe("WorkspaceAccessGuide", () => {
       ).toBeInTheDocument();
     });
 
-    it("编辑模式改 path_source / root_path 后保存 → upsertMyBinding 用新值入参并触发 onConfigured", async () => {
-      const claude = mkRuntime({
-        id: "rt-claude",
-        provider: "claude",
+    it("编辑模式改 daemon / path_source / root_path 后保存 → upsertMyBinding 用新值入参并触发 onConfigured", async () => {
+      const mbp = mkInstance({
+        id: "inst-mbp",
+        hostname: "MBP",
         status: "online",
-        name: "MBP",
       });
-      const cursor = mkRuntime({
-        id: "rt-cursor",
-        provider: "cursor",
+      const desktop = mkInstance({
+        id: "inst-desktop",
+        hostname: "DESKTOP",
         status: "online",
-        name: "DESKTOP",
       });
-      mockedList.mockResolvedValue([cursor, claude]);
+      mockedList.mockResolvedValue([mbp, desktop]);
       mockedUpsert.mockResolvedValue({} as never);
       const onConfigured = vi.fn();
 
@@ -210,7 +207,7 @@ describe("WorkspaceAccessGuide", () => {
           workspaceId="ws-1"
           onConfigured={onConfigured}
           initial={{
-            runtime_id: "rt-claude",
+            daemon_id: "inst-mbp",
             root_path: "/Users/me/old-code",
             path_source: "server-local",
           }}
@@ -219,9 +216,9 @@ describe("WorkspaceAccessGuide", () => {
 
       await screen.findByText("✏ 编辑我的接入配置");
 
-      // 改 runtime 到 cursor
+      // 改 daemon 到 desktop
       fireEvent.change(screen.getByLabelText("绑定守护进程"), {
-        target: { value: "rt-cursor" },
+        target: { value: "inst-desktop" },
       });
       // 改路径
       fireEvent.change(screen.getByLabelText("本地项目路径"), {
@@ -236,7 +233,7 @@ describe("WorkspaceAccessGuide", () => {
 
       await waitFor(() =>
         expect(mockedUpsert).toHaveBeenCalledWith("ws-1", {
-          daemon_id: "rt-cursor",
+          daemon_id: "inst-desktop",
           root_path: "/Users/me/new-code",
           path_source: "daemon-client",
         }),

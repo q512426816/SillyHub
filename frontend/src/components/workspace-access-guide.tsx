@@ -6,21 +6,23 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api";
 import {
-  listDaemonRuntimes,
+  listDaemonInstances,
   PROVIDER_META,
-  type DaemonRuntimeRead,
+  type DaemonInstanceRead,
 } from "@/lib/daemon";
 import { errMessage } from "@/lib/errors";
-import { DAEMON_RUNTIME_STATUS_LABELS, labelOf } from "@/lib/status-labels";
 import { workspacePathSourceLabel } from "@/lib/workspace-path";
 import {
   upsertMyBinding,
   type MemberBindingUpsertRequest,
 } from "@/lib/workspace-binding";
 
-/** 已绑定成员回填的当前值（编辑模式 initial）。 */
+/**
+ * 已绑定成员回填的当前值（编辑模式 initial）。
+ * 2026-07-03-daemon-entity-binding：绑定维度从 runtime_id 改 daemon_id（D-004）。
+ */
 export interface AccessGuideInitial {
-  runtime_id: string | null;
+  daemon_id: string | null;
   root_path: string;
   path_source: string;
 }
@@ -40,80 +42,76 @@ function providerLabel(provider: string | null): string {
   return PROVIDER_META[provider]?.label ?? provider;
 }
 
-/** 下拉项文案：provider 中文 · runtime name · 中文状态。 */
-function runtimeOptionLabel(rt: DaemonRuntimeRead): string {
-  const name = rt.name?.trim() || rt.id.slice(0, 8);
-  const status = labelOf(DAEMON_RUNTIME_STATUS_LABELS, rt.status);
-  return `${providerLabel(rt.provider)} · ${name} · ${status}`;
+/** 下拉项文案：hostname · provider 列表 · 状态。一个守护进程一项（含其全部 provider）。 */
+function instanceOptionLabel(inst: DaemonInstanceRead): string {
+  const name = inst.display_alias?.trim() || inst.hostname;
+  const providers =
+    (inst.providers ?? []).map((p) => providerLabel(p.provider)).join("/") ||
+    "无 provider";
+  const status = inst.status === "online" ? "在线" : "离线";
+  return `${name} · ${providers} · ${status}`;
 }
 
-/** online 排前；同级按 provider label 稳定排序（与 workspace-daemon-switcher 一致）。 */
-function sortRuntimes(list: DaemonRuntimeRead[]): DaemonRuntimeRead[] {
+/** online 排前；同级按 hostname 稳定排序（与 workspace-daemon-switcher 一致）。 */
+function sortInstances(list: DaemonInstanceRead[]): DaemonInstanceRead[] {
   return [...list].sort((a, b) => {
     const ra = a.status === "online" ? 0 : 1;
     const rb = b.status === "online" ? 0 : 1;
     if (ra !== rb) return ra - rb;
-    return providerLabel(a.provider).localeCompare(
-      providerLabel(b.provider),
-      "zh-CN",
-    );
+    return a.hostname.localeCompare(b.hostname, "zh-CN");
   });
 }
 
 /**
- * Access guide card: member configures own daemon runtime + local path.
+ * Access guide card: member configures own daemon + local path.
  * Shown when the current user has no binding for this workspace (FR-001/FR-003).
  *
- * 「绑定守护进程」下拉数据源 listDaemonRuntimes()（已按当前登录用户过滤），
- * 交互沿用 workspace-daemon-switcher：online 排前、离线可选、状态中文化。
- * runtime_id 可不选（提交 null）；root_path 必填。
+ * 2026-07-03-daemon-entity-binding（D-004/D-006）：「绑定守护进程」下拉数据源
+ * listDaemonInstances()（守护进程实体，含其 providers 列表），一个守护进程一项
+ * （不再按 runtime/provider 维度选）。daemon_id 可不选（提交 null）；root_path 必填。
  */
 export function WorkspaceAccessGuide({
   workspaceId,
   onConfigured,
   initial,
 }: Props) {
-  const [runtimeId, setRuntimeId] = useState(initial?.runtime_id ?? "");
+  const [daemonId, setDaemonId] = useState(initial?.daemon_id ?? "");
   const [rootPath, setRootPath] = useState(initial?.root_path ?? "");
   const [pathSource, setPathSource] = useState<"server-local" | "daemon-client">(
-    (initial?.path_source as "server-local" | "daemon-client") ??
-      "daemon-client",
+    (initial?.path_source as "server-local" | "daemon-client") ?? "daemon-client",
   );
   const editing = !!initial;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [runtimes, setRuntimes] = useState<DaemonRuntimeRead[]>([]);
-  const [loadingRuntimes, setLoadingRuntimes] = useState(true);
-  const [runtimesError, setRuntimesError] = useState<string | null>(null);
+  const [instances, setInstances] = useState<DaemonInstanceRead[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const loadRuntimes = useCallback(async () => {
-    setLoadingRuntimes(true);
-    setRuntimesError(null);
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
-      const list = await listDaemonRuntimes();
-      setRuntimes(sortRuntimes(list));
+      const list = await listDaemonInstances();
+      setInstances(sortInstances(list));
     } catch (e) {
-      setRuntimesError(e instanceof ApiError ? e.message : "加载守护进程列表失败");
+      setLoadError(e instanceof ApiError ? e.message : "加载守护进程列表失败");
     } finally {
-      setLoadingRuntimes(false);
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void loadRuntimes();
-  }, [loadRuntimes]);
+    void load();
+  }, [load]);
 
   const handleSave = async () => {
     if (!rootPath || saving) return;
     setSaving(true);
     setError(null);
     try {
-      // 从选中 runtime 中提取 daemon_instance_id 作为 daemon_id
-      const selectedRuntime = runtimes.find((r) => r.id === runtimeId);
-      const daemonId = selectedRuntime?.daemon_instance_id ?? (runtimeId || null);
       const req: MemberBindingUpsertRequest = {
-        daemon_id: daemonId,
+        daemon_id: daemonId || null,
         root_path: rootPath,
         path_source: pathSource,
       };
@@ -133,12 +131,12 @@ export function WorkspaceAccessGuide({
     >
       <div className="mb-3">
         <h3 className="text-sm font-semibold text-amber-900">
-          {editing ? "✏ 编辑我的接入配置" : "⚙ 配置你在此工作空间的 daemon 和本地路径"}
+          {editing ? "✏ 编辑我的接入配置" : "⚙ 配置你在此工作空间的守护进程和本地路径"}
         </h3>
         <p className="mt-1 text-xs text-amber-800">
           {editing
             ? "修改你自己的守护进程和本地代码检出路径。保存后，后续 scan / 运行 agent 会用新值。代码靠 git 同步，平台不碰代码内容。"
-            : "你已被加入此工作空间。请配置你自己的守护进程和本地代码检出路径，然后才能 scan / 运行 agent。 代码靠 git 同步，平台不碰代码内容。"}
+            : "你已被加入此工作空间。请配置你自己的守护进程和本地代码检出路径，然后才能 scan / 运行 agent。代码靠 git 同步，平台不碰代码内容。"}
         </p>
       </div>
 
@@ -149,35 +147,35 @@ export function WorkspaceAccessGuide({
       )}
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <div className="space-y-1" data-testid="runtime-field">
-          <label htmlFor="runtime" className="text-xs font-medium">
+        <div className="space-y-1" data-testid="daemon-field">
+          <label htmlFor="daemon" className="text-xs font-medium">
             绑定守护进程
           </label>
           <select
-            id="runtime"
-            value={runtimeId}
-            onChange={(e) => setRuntimeId(e.target.value)}
-            disabled={loadingRuntimes}
+            id="daemon"
+            value={daemonId}
+            onChange={(e) => setDaemonId(e.target.value)}
+            disabled={loading}
             className="w-full rounded border border-border bg-background px-2 py-1.5 text-xs disabled:opacity-50"
           >
             <option value="">不绑定守护进程</option>
-            {runtimes.map((rt) => (
-              <option key={rt.id} value={rt.id}>
-                {runtimeOptionLabel(rt)}
+            {instances.map((inst) => (
+              <option key={inst.id} value={inst.id}>
+                {instanceOptionLabel(inst)}
               </option>
             ))}
           </select>
-          {loadingRuntimes && (
+          {loading && (
             <p className="text-[11px] text-muted-foreground">加载中…</p>
           )}
-          {runtimesError && (
+          {loadError && (
             <p className="text-[11px] text-destructive" role="alert">
-              {runtimesError}
+              {loadError}
             </p>
           )}
-          {!loadingRuntimes && !runtimesError && runtimes.length === 0 && (
+          {!loading && !loadError && instances.length === 0 && (
             <p className="text-[11px] text-muted-foreground">
-              还没有守护进程运行时，请先在「守护进程」页启动一个。
+              还没有在线守护进程，请先启动一个。
             </p>
           )}
         </div>
