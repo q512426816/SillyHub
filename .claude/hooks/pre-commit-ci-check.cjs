@@ -127,6 +127,21 @@ if (hasBackend) {
   if (!runCheck("backend: mypy", "uv run mypy app", { cwd: "backend" })) {
     failures.push("backend: mypy");
   }
+
+  // 提醒式守门（2026-07-04-frontend-openapi-types, D-004@V1）：后端 schema.py
+  // 改动但前端 api-types.ts 未同步 → 仅 log 提醒，不 deny（避免 commit 时跑
+  // Python dump 拖慢；强制 block 待全量迁移后开启）。
+  const schemaChanged = files.some(
+    (f) => f.startsWith("backend/app/modules/") && f.endsWith("schema.py")
+  );
+  const apiTypesSynced =
+    files.includes("frontend/src/lib/api-types.ts") ||
+    files.includes("backend/openapi.json");
+  if (schemaChanged && !apiTypesSynced) {
+    log(
+      "提醒: 后端 schema.py 改动但 frontend/src/lib/api-types.ts 未同步，建议跑 `pnpm gen:types`（本次不拦截）"
+    );
+  }
 }
 
 if (hasFrontend) {
