@@ -164,7 +164,7 @@ export interface SessionManagerOptions {
    *
    * 测试注入固定 runtimeId 字符串。policyEngine 未注入时此字段无意义（不读）。
    */
-  runtimeIdProvider?: (sessionId: string) => string;
+  runtimeIdProvider?: (provider: string) => string;
 }
 
 /**
@@ -952,7 +952,7 @@ export class SessionManager {
     const writePaths = this._extractWritePathsForTool(toolName, toolInput);
     if (writePaths.length === 0) return null; // 非写工具 / 提取不到 → 放行
 
-    const runtimeId = this._runtimeIdProvider?.(sessionId) ?? '';
+    const runtimeId = this._runtimeIdProvider?.(provider) ?? '';
     const tool = toolName; // PolicyEngine audit 字段（Write/Edit/Bash/...）。
     for (const p of writePaths) {
       const decision = engine.canWrite(runtimeId, p, provider, tool);

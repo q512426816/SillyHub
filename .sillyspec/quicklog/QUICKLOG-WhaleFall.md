@@ -226,3 +226,12 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 根因：claude 只暴露 Bash tool（无独立 PowerShell/CMD tool），`_shellKindOfTool('Bash')`→`'bash'`，`extractShellWritePaths(command,'bash')`→`extractBashWritePaths` 不识别 PowerShell cmdlet（Set-Content/Add-Content/Out-File/Copy-Item 等），写路径未提取→canWrite 未调→绕过。bash 重定向/mkdir 恰被 bash 提取覆盖所以拦了，PowerShell cmdlet 名 bash 正则不匹配所以漏。
 方案：`_extractWritePathsForTool` shell 分支合并 bash+powershell+cmd 三种提取取并集（`[...new Set(...)]` 去重）。正则各自精确（PowerShell cmdlet 名不匹配 bash/cmd 命令，反之亦然），合并安全无误提取。
 结果：已完成。修复 _extractWritePathsForTool shell 分支合并 bash+powershell+cmd 三提取取并集（[...new Set(...)] 去重）。typecheck 零错。session-manager-allowed-roots 20 passed（17 原 + 3 新跨 shell：Bash tool 跑 powershell Set-Content -Path / 位置参数 / pwsh Out-File 越界全 deny）。shell-paths 30 passed 无回归。修复前 Bash tool 跑 powershell cmdlet 越界写绕过（真机 E:/a.txt 落盘），修复后拦截。待 commit+bundle+部署后 daemon 真机复测。
+
+## ql-20260703-002-c2d4 | 2026-07-03 14:57:00 | runtimeIdProvider 用 config.runtime_id（非注册 runtime）致 PolicyCache 永久 miss，配 allowed_roots 后 interactive session 仍 deny
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/src/daemon.ts + sillyhub-daemon/src/interactive/session-manager.ts + sillyhub-daemon/src/cli.ts
+需求：真机 e2e：在【守护进程运行时】页面给 Claude Code 配 E:/ 为可写目录，resume 上次对话（claude --resume 49ef9eac / 系统 session bf2a461a）后仍 deny 写 E 盘。
+根因：cli.ts:609 `runtimeIdProvider: () => config.runtime_id`（config 4f24728c），但 daemon 注册的 claude runtime 是 462d0e85（`_registeredRuntimes`，心跳 _syncAllowedRoots 按 462d0e85 存 PolicyCache）。session-manager canWrite(4f24728c, path) → PolicyCache.get(4f24728c)=undefined → fail-closed deny（无论配没配 E:/ 都 deny）。session-manager:937 注释本就写"runtimeIdProvider 闭包解析 daemon._registeredRuntimes.get(provider)"但实现没这么做（task-14 遗留 E2E-3）。
+方案：daemon.ts 加 public `resolveRuntimeId(provider)`；session-manager runtimeIdProvider 签名改 `(provider: string) => string`，_judgeWriteViaPolicyEngine 传 provider；cli.ts runtimeIdProvider 改 `(provider) => daemon?.resolveRuntimeId(provider) ?? ''`。
+结果：已完成。daemon.ts 加 public `resolveRuntimeId(provider)`；session-manager runtimeIdProvider 签名 `(sessionId)=>string` 改 `(provider)=>string`，_judgeWriteViaPolicyEngine 传 provider；cli.ts runtimeIdProvider 改 `(provider) => daemon?.resolveRuntimeId(provider) ?? ''`。typecheck 零错。session-manager-allowed-roots 20 passed 无回归。daemon-multi-runtime 8 errors 是 preflight.ts:208 process.exit 在 vitest 触发（git stash 确认非本次引起，423359c6 既有问题，独立）。待 commit+bundle+部署后真机复测（配 E:/ → resume → 应可写）。

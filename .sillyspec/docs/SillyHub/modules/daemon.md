@@ -46,3 +46,4 @@ backend send_rpc(rpc_id) → daemon 执行 → rpc_result(rpc_id) → resolve_rp
 ## 变更索引
 - ql-20260702-007-f1a8 | 修复 isPathUnderAnyRoot 盘符根/Unix 根路径前缀比较（root 已含尾 sep 不再补，消除配 D 盘做 allowed_root 仍误 deny）
 - ql-20260703-001-7e3a | session-manager Bash tool 跨 shell 提取遗漏修复（合并 bash+powershell+cmd 三提取取并集，PowerShell Set-Content 经 Bash tool 绕过 PolicyEngine 的真机 bug）
+- ql-20260703-002-c2d4 | runtimeIdProvider 用 config.runtime_id（非注册 runtime）致 PolicyCache 永久 miss，配 allowed_roots 后 interactive session 仍 deny（改 daemon.resolveRuntimeId(provider)）

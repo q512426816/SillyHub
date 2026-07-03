@@ -1870,6 +1870,14 @@ export class Daemon {
     return this._config.server_url.replace(/\/+$/, '');
   }
 
+  /**
+   * 按 provider 解析已注册的 runtime_id（task-14 runtimeIdProvider 用）。
+   * 未注册返回空串 → 调用方 fail-closed deny（design D-007）。
+   */
+  resolveRuntimeId(provider: string): string {
+    return this._registeredRuntimes.get(provider) ?? '';
+  }
+
   private _registeredRuntimeIds(): string[] {
     return [...new Set(this._registeredRuntimes.values())].filter(Boolean);
   }

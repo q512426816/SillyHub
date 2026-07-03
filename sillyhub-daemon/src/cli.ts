@@ -601,12 +601,12 @@ export async function startAction(opts: StartOptions): Promise<number> {
       // interactive CC 写拦截（2026-06-29）+ task-14（design §5.2 PolicyEngine）：
       // 注入 policyEngine 引用，让 SessionManager 的写守卫改调
       // `policyEngine.canWrite(runtimeId, path, provider, tool)`（按 runtime_id 隔离 +
-      // 统一中文 deny 文案 + audit）。runtimeIdProvider 闭包读 config.runtime_id
-      // （单 runtime 默认来源；多 runtime 由后续 task 接 daemon._registeredRuntimes
-      // 查询 —— daemon.ts 不在本任务 allowed_paths，此刻先取 config 兜底，行为对齐
-      // daemon sendToHub 的 _firstRegisteredRuntimeId 兜底链路）。
+      // 统一中文 deny 文案 + audit）。runtimeIdProvider 按 provider 查注册 runtime
+      // （ql-20260703-002：原取 config.runtime_id 致 PolicyCache 永久 miss，配
+      // allowed_roots 后 interactive session 仍 deny；改 daemon.resolveRuntimeId
+      // (provider) 对齐心跳 _syncAllowedRoots 按 _registeredRuntimes 存的 rid）。
       policyEngine,
-      runtimeIdProvider: () => config.runtime_id,
+      runtimeIdProvider: (provider: string) => daemon?.resolveRuntimeId(provider) ?? '',
     },
   );
   // gap-8（interactive 凭证 parity）：把同一 CredentialManager 传给 Daemon，让
