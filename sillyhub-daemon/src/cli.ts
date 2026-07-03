@@ -497,7 +497,9 @@ export async function startAction(opts: StartOptions): Promise<number> {
     backoffFactor: config.retry_backoff_factor,
     jitter: config.retry_jitter,
   }, cliResilienceLogger(), null);
-  const taskRunner = new TaskRunner(client, workspaceMgr, credentialMgr, config, resilience);
+  // task-16：TaskRunner 创建推迟到 policyCache 之后（共享同一 PolicyCache 实例，
+  // 注入到 TaskRunner constructor 第 6 位参数）。原位置（policyCache 未创建）改为此注释占位。
+  // const taskRunner = new TaskRunner(client, workspaceMgr, credentialMgr, config, resilience);
 
   // task-04（D-002@v3 补丁 gap-1）：注入 SessionManager + daemon 桥接 deps。
   //
@@ -527,6 +529,25 @@ export async function startAction(opts: StartOptions): Promise<number> {
   // 状态变更排队 flush（_scheduleFlush），daemon 重启时 _recoverSessionsOnBoot
   // 加载并经 restoreAndReconnect（driver resume）恢复。
   const persistence = new JsonSessionPersistence();
+  // task-11（design §5）：Filesystem Policy Engine 三件套装配。
+  // 构造顺序：cache → auditSink → engine（PolicyEngine 依赖前两者）。
+  //   - PolicyCache：纯内存，由 daemon 心跳 _syncAllowedRoots + WS POLICY_UPDATE 维护
+  //     （task-12 接入）；
+  //   - AuditSink：注入 makeAuditSender 适配器（POST /api/daemon/audit/batch），失败
+  //     指数退避重试 + 落盘降级（audit-sink.ts 内部处理）；
+  //   - PolicyEngine：消费 cache + auditSink，task-14（interactive canUseTool）接入，
+  //     task-12 ~ task-18 接入其余 tool。
+  // **task-14**：装配提前到 SessionManager 之前（policyEngine 引用注入 SessionManager，
+  // 让 interactive 写守卫走 PolicyEngine.canWrite）。三者 additive，Daemon 行为不变。
+  const policyCache = new PolicyCache();
+  const auditSink = new AuditSink(
+    makeAuditSender(
+      config.server_url,
+      config.api_key ?? undefined,
+      config.token ?? undefined,
+    ),
+  );
+  const policyEngine = new PolicyEngine(policyCache, auditSink);
   let daemon: Daemon;
   const sessionManager = new SessionManager(
     {
@@ -577,13 +598,15 @@ export async function startAction(opts: StartOptions): Promise<number> {
       // 后，AskUserQuestion 的 questions 经 PERMISSION_REQUEST（带 dialog_kind/dialog_payload）
       // 发到前端，用户选择的答案经 PERMISSION_RESPONSE.dialog_result 回喂 SDK。
       supportedDialogKinds: ['AskUserQuestion'],
-      // interactive CC 写拦截（2026-06-29）：注入 allowed_roots provider，让所有
-      // interactive CC session（含默认 chat / enableApproval=false）的 canUseTool
-      // 对写工具（Write/Edit/MultiEdit）做白名单校验，越界 deny；读工具不拦。
-      // 用函数：daemon 心跳 _syncAllowedRoots 会更新 config.allowed_roots（同一
-      // config 对象引用，daemon.ts constructor this._config = config），provider
-      // 每次调用读到最新值，无需 SessionManager 感知更新事件。
-      allowedRootsProvider: () => config.allowed_roots,
+      // interactive CC 写拦截（2026-06-29）+ task-14（design §5.2 PolicyEngine）：
+      // 注入 policyEngine 引用，让 SessionManager 的写守卫改调
+      // `policyEngine.canWrite(runtimeId, path, provider, tool)`（按 runtime_id 隔离 +
+      // 统一中文 deny 文案 + audit）。runtimeIdProvider 闭包读 config.runtime_id
+      // （单 runtime 默认来源；多 runtime 由后续 task 接 daemon._registeredRuntimes
+      // 查询 —— daemon.ts 不在本任务 allowed_paths，此刻先取 config 兜底，行为对齐
+      // daemon sendToHub 的 _firstRegisteredRuntimeId 兜底链路）。
+      policyEngine,
+      runtimeIdProvider: () => config.runtime_id,
     },
   );
   // gap-8（interactive 凭证 parity）：把同一 CredentialManager 传给 Daemon，让
@@ -599,23 +622,20 @@ export async function startAction(opts: StartOptions): Promise<number> {
     version: DAEMON_VERSION,
     force: opts.force === true,
   });
-  // task-11（design §5）：Filesystem Policy Engine 三件套装配。
-  // 构造顺序：cache → auditSink → engine（PolicyEngine 依赖前两者）。
-  //   - PolicyCache：纯内存，由 daemon 心跳 _syncAllowedRoots + WS POLICY_UPDATE 维护
-  //     （task-12 接入，本任务仅持有实例）；
-  //   - AuditSink：注入 makeAuditSender 适配器（POST /api/daemon/audit/batch），失败
-  //     指数退避重试 + 落盘降级（audit-sink.ts 内部处理）；
-  //   - PolicyEngine：消费 cache + auditSink，各 tool 接入点由 task-12 ~ task-18 接入。
-  // 三者 additive 注入，未接入 tool 前 Daemon 行为不变（write-guard 仍在，task-15 删）。
-  const policyCache = new PolicyCache();
-  const auditSink = new AuditSink(
-    makeAuditSender(
-      config.server_url,
-      config.api_key ?? undefined,
-      config.token ?? undefined,
-    ),
+  // task-16：TaskRunner 注入 policyCache（per-runtime allowed_roots 数据源，D-002）。
+  // task-17：TaskRunner 注入 policyEngine（batch Codex 带内审批决策 accept/decline，R-06）。
+  // 与 Daemon 共享同一 PolicyCache/PolicyEngine 实例（由心跳 _syncAllowedRoots + WS POLICY_UPDATE 维护）。
+  // **task-14**：policyCache/auditSink/policyEngine 装配已上移到 SessionManager 之前
+  // （policyEngine 引用注入 SessionManager），此处直接复用，避免重复构造。
+  const taskRunner = new TaskRunner(
+    client,
+    workspaceMgr,
+    credentialMgr,
+    config,
+    resilience,
+    policyCache,
+    policyEngine,
   );
-  const policyEngine = new PolicyEngine(policyCache, auditSink);
   daemon = new Daemon(config, client, taskRunner, {
     sessionManager,
     credentialManager: credentialMgr,

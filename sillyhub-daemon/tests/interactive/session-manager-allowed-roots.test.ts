@@ -1,14 +1,22 @@
 // tests/interactive/session-manager-allowed-roots.test.ts
-// interactive CC 写拦截（2026-06-29）：canUseTool 对写工具（Write/Edit/MultiEdit）
-// 按 daemon config.allowed_roots 白名单校验——白名单内 allow、越界 deny；
-// 读工具（Read/Grep/Bash/Glob/...）不拦（读自由）。
+// task-14（design §5.2 D-002 D-006）：interactive canUseTool 写拦截改调
+// PolicyEngine.canWrite(runtimeId, path, provider, tool)。
 //
 // 覆盖：
-//   1. 写校验纯函数 isWriteWithinAllowedRoots（白名单内 true / 越界 false / 读工具 true / 无 path true）；
-//   2. enableApproval=false（默认 chat）注入 allowedRootsProvider 后也注入 canUseTool：
-//      写白名单内 allow、写越界 deny（message "path outside allowed_roots"）、读工具 allow；
-//   3. enableApproval=true（scan / 人审）路径也前置写校验（写越界 deny，不走远程人审）；
-//   4. 不注入 allowedRootsProvider → 默认 chat 不注入 canUseTool（向后兼容）。
+//   1. enableApproval=false（默认 chat）注入 policyEngine 后也注入 canUseTool：
+//      写白名单内 allow（透传 updatedInput）、写越界 deny（reason = PolicyEngine 统一
+//      中文文案）、读工具 allow；
+//   2. enableApproval=true（scan / 人审）路径也前置写校验（写越界直接 deny，不触发
+//      远程人审 send）；
+//   3. Bash/PowerShell/CMD shell 间接写：经 shell-paths 提取写路径，逐条 canWrite，
+//      越界 deny；
+//   4. runtimeId 透传：runtimeIdProvider 返回的 id 经 PolicyCache 隔离（A runtime
+//      allow 的路径对 B runtime 不可见）；
+//   5. fallback（不注入 policyEngine）→ allowedRootsProvider 旧行为兼容。
+//
+// 旧的 write-guard.test.ts 已删除（isWriteWithinAllowedRoots + extractBashWritePaths
+// 逻辑已迁 policy/path-utils.ts + policy/shell-paths.ts 且已有单测覆盖，见
+// tests/policy/path-utils.test.ts + tests/policy/shell-paths.test.ts）。
 
 import { describe, it, expect, vi } from 'vitest';
 import type {
@@ -18,7 +26,9 @@ import type {
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { SessionManager } from '../../src/interactive/session-manager.js';
-import { isWriteWithinAllowedRoots } from '../../src/interactive/write-guard.js';
+import { PolicyEngine } from '../../src/policy/filesystem-policy.js';
+import { PolicyCache } from '../../src/policy/runtime-policy.js';
+import { AuditSink } from '../../src/policy/audit-sink.js';
 import type {
   ClaudeSdkDriver,
   ConsumeCallbacks,
@@ -72,106 +82,37 @@ const noopDeps = {
   onSessionEnd: vi.fn(async (_s: string, _st: string) => {}),
 };
 
-// ── 纯函数 isWriteWithinAllowedRoots ──────────────────────────────────────────
+/** 构造真实 PolicyEngine + 预置 runtimeId 的 allowed_roots。 */
+function makePolicyEngine(
+  runtimeId: string,
+  roots: string[],
+): { engine: PolicyEngine; cache: PolicyCache } {
+  const cache = new PolicyCache();
+  cache.set(runtimeId, roots);
+  // AuditSink 不注入 sender → 默认 nullSender（不真正上报，仅落 buffer）。
+  const engine = new PolicyEngine(cache, new AuditSink());
+  return { engine, cache };
+}
 
-describe('isWriteWithinAllowedRoots（写校验纯函数）', () => {
-  it('写工具白名单内 → true', () => {
-    expect(
-      isWriteWithinAllowedRoots('Write', { file_path: 'C:\\work\\a.txt' }, [
-        'C:\\work',
-      ]),
-    ).toBe(true);
-  });
+// ── 默认 chat（enableApproval=false）写拦截（走 PolicyEngine）─────────────────
 
-  it('写工具白名单外 → false', () => {
-    expect(
-      isWriteWithinAllowedRoots('Write', { file_path: 'C:\\evil\\a.txt' }, [
-        'C:\\work',
-      ]),
-    ).toBe(false);
-  });
+describe('默认 chat（enableApproval=false）写拦截 — PolicyEngine.canWrite', () => {
+  const RUNTIME_ID = 'rt-claude-1';
 
-  it('写工具 path 字段（非 file_path）→ 也校验', () => {
-    expect(
-      isWriteWithinAllowedRoots('Write', { path: 'C:\\work\\sub\\b.txt' }, [
-        'C:\\work',
-      ]),
-    ).toBe(true);
-    expect(
-      isWriteWithinAllowedRoots('Write', { path: 'D:\\elsewhere' }, ['C:\\work']),
-    ).toBe(false);
-  });
-
-  it('边界敏感：兄弟撞名目录不误匹配（/home/user vs /home/user-evil）', () => {
-    expect(
-      isWriteWithinAllowedRoots('Write', { file_path: '/home/user-evil/x' }, [
-        '/home/user',
-      ]),
-    ).toBe(false);
-    // 等于 root 本身允许（在 root 下）。
-    expect(
-      isWriteWithinAllowedRoots('Edit', { file_path: '/home/user' }, [
-        '/home/user',
-      ]),
-    ).toBe(true);
-  });
-
-  it('.. 穿越被折叠（C:\\work\\..\\evil → C:\\evil 越界）', () => {
-    expect(
-      isWriteWithinAllowedRoots(
-        'Write',
-        { file_path: 'C:\\work\\..\\evil\\a.txt' },
-        ['C:\\work'],
-      ),
-    ).toBe(false);
-  });
-
-  it('MultiEdit / Edit 同 Write 处理', () => {
-    expect(
-      isWriteWithinAllowedRoots('Edit', { file_path: 'C:\\work\\a.txt' }, [
-        'C:\\work',
-      ]),
-    ).toBe(true);
-    expect(
-      isWriteWithinAllowedRoots('MultiEdit', { file_path: 'C:\\x' }, [
-        'C:\\work',
-      ]),
-    ).toBe(false);
-  });
-
-  it('读工具 / 其他 → true（读自由，不校验）', () => {
-    const roots = ['C:\\work'];
-    expect(isWriteWithinAllowedRoots('Read', { file_path: 'C:\\anywhere' }, roots)).toBe(true);
-    expect(isWriteWithinAllowedRoots('Grep', { path: 'C:\\anywhere' }, roots)).toBe(true);
-    expect(isWriteWithinAllowedRoots('Bash', { command: 'rm -rf /' }, roots)).toBe(true);
-    expect(isWriteWithinAllowedRoots('Glob', { pattern: '**/*' }, roots)).toBe(true);
-    expect(isWriteWithinAllowedRoots('WebFetch', { url: 'http://x' }, roots)).toBe(true);
-  });
-
-  it('写工具但取不到 path → true（无法校验，放行交内层）', () => {
-    expect(isWriteWithinAllowedRoots('Write', {}, ['C:\\work'])).toBe(true);
-    expect(isWriteWithinAllowedRoots('Write', null, ['C:\\work'])).toBe(true);
-  });
-
-  it('allowedRoots 为空 → true（视为未启用）', () => {
-    expect(
-      isWriteWithinAllowedRoots('Write', { file_path: 'C:\\anywhere' }, []),
-    ).toBe(true);
-  });
-});
-
-// ── 默认 chat（enableApproval=false）写拦截 ──────────────────────────────────
-
-describe('默认 chat（enableApproval=false）写拦截', () => {
   /**
-   * 构造一个「注入 allowedRootsProvider + manualApproval=false」的 chat session，
+   * 构造一个「注入 policyEngine + manualApproval=false」的 chat session，
    * 返回注入的 canUseTool 回调。模拟默认对话场景：不启用人审，仅写校验。
    */
   async function makeChatSession(roots: string[]) {
+    const { engine } = makePolicyEngine(RUNTIME_ID, roots);
     const { driver, getOpts } = makeDriverCapturingOpts();
-    const sm = new SessionManager({ driver, ...noopDeps }, {
-      allowedRootsProvider: () => roots,
-    });
+    const sm = new SessionManager(
+      { driver, ...noopDeps },
+      {
+        policyEngine: engine,
+        runtimeIdProvider: () => RUNTIME_ID,
+      },
+    );
     await sm.create({ ...BASE_INPUT, manualApproval: false });
     const canUseTool = getOpts()?.canUseTool;
     expect(canUseTool).toBeTypeOf('function');
@@ -191,7 +132,7 @@ describe('默认 chat（enableApproval=false）写拦截', () => {
     });
   });
 
-  it('写工具白名单外 → deny（message 含 "path outside allowed_roots"）', async () => {
+  it('写工具白名单外 → deny（reason = PolicyEngine 统一中文文案，含路径/原因）', async () => {
     const { canUseTool } = await makeChatSession(['C:\\work']);
     const res = await canUseTool(
       'Write',
@@ -199,22 +140,25 @@ describe('默认 chat（enableApproval=false）写拦截', () => {
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'deny' });
-    expect((res as { message?: string }).message).toContain(
-      'path outside allowed_roots',
-    );
-    // message 携带越界 path 便于诊断。
-    expect((res as { message?: string }).message).toContain('C:\\secret\\pw.txt');
+    const message = (res as { message?: string }).message ?? '';
+    // 统一中文文案标题。
+    expect(message).toContain('Runtime Policy 拒绝本次写入');
+    // Agent 透传（claude）。
+    expect(message).toContain('Agent：claude');
+    // 原因 = 未配置为可写目录。
+    expect(message).toContain('目标目录未配置为可写目录');
   });
 
-  it('读工具（Read/Grep/Bash）→ allow（不拦，读自由）', async () => {
+  it('读工具（Read/Grep/Bash 纯读）→ allow（不拦，读自由）', async () => {
     const { canUseTool } = await makeChatSession(['C:\\work']);
     const r1 = await canUseTool('Read', { file_path: 'C:\\anywhere' }, { signal: undefined });
     expect(r1).toMatchObject({ behavior: 'allow' });
-    const r2 = await canUseTool('Bash', { command: 'ls /' }, { signal: undefined });
+    // Bash 纯读命令（无重定向/cp/mv/tee/mkdir/touch）→ 提取不到写路径 → 放行。
+    const r2 = await canUseTool('Bash', { command: 'ls -la /' }, { signal: undefined });
     expect(r2).toMatchObject({ behavior: 'allow' });
   });
 
-  it('Edit / MultiEdit 越界同样 deny', async () => {
+  it('Edit / MultiEdit 越界同样 deny（中文文案）', async () => {
     const { canUseTool } = await makeChatSession(['C:\\work']);
     const e = await canUseTool('Edit', { file_path: 'C:\\out\\x' }, { signal: undefined });
     expect(e).toMatchObject({ behavior: 'deny' });
@@ -226,26 +170,187 @@ describe('默认 chat（enableApproval=false）写拦截', () => {
     expect(m).toMatchObject({ behavior: 'deny' });
   });
 
-  it('provider 返回空数组 → 不拦（视为未启用，写越界也 allow）', async () => {
-    const { canUseTool } = await makeChatSession([]);
-    const res = await canUseTool(
+  it('path 字段（非 file_path）→ 也校验', async () => {
+    const { canUseTool } = await makeChatSession(['C:\\work']);
+    // 白名单内 path 字段 → allow。
+    const inside = await canUseTool(
       'Write',
-      { file_path: 'C:\\anywhere' },
+      { path: 'C:\\work\\sub\\b.txt' },
       { signal: undefined },
     );
-    // 空数组 → 写守卫短路放行 → 内层 allow。
+    expect(inside).toMatchObject({ behavior: 'allow' });
+    // 白名单外 path 字段 → deny。
+    const outside = await canUseTool('Write', { path: 'D:\\elsewhere' }, { signal: undefined });
+    expect(outside).toMatchObject({ behavior: 'deny' });
+  });
+});
+
+// ── Bash / PowerShell / CMD shell 间接写 ──────────────────────────────────────
+
+describe('Shell 工具间接写 — extractShellWritePaths + canWrite', () => {
+  const RUNTIME_ID = 'rt-shell-1';
+
+  async function makeChatSession(roots: string[]) {
+    const { engine } = makePolicyEngine(RUNTIME_ID, roots);
+    const { driver, getOpts } = makeDriverCapturingOpts();
+    const sm = new SessionManager(
+      { driver, ...noopDeps },
+      {
+        policyEngine: engine,
+        runtimeIdProvider: () => RUNTIME_ID,
+      },
+    );
+    await sm.create({ ...BASE_INPUT, manualApproval: false });
+    const canUseTool = getOpts()?.canUseTool;
+    expect(canUseTool).toBeTypeOf('function');
+    return { canUseTool: canUseTool!, sm };
+  }
+
+  it('Bash 重定向 > 白名单外 → deny', async () => {
+    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const res = await canUseTool(
+      'Bash',
+      { command: 'echo hello > C:\\evil\\out.txt' },
+      { signal: undefined },
+    );
+    expect(res).toMatchObject({ behavior: 'deny' });
+  });
+
+  it('Bash 重定向 > 白名单内 → allow', async () => {
+    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const res = await canUseTool(
+      'Bash',
+      { command: 'echo hello > C:\\work\\out.txt' },
+      { signal: undefined },
+    );
     expect(res).toMatchObject({ behavior: 'allow' });
+  });
+
+  it('Bash cp 目标在白名单外 → deny', async () => {
+    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const res = await canUseTool(
+      'Bash',
+      { command: 'cp C:\\work\\src.txt C:\\evil\\dst.txt' },
+      { signal: undefined },
+    );
+    expect(res).toMatchObject({ behavior: 'deny' });
+  });
+
+  it('Bash 混合读+写，写越界 → deny', async () => {
+    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const res = await canUseTool(
+      'Bash',
+      { command: 'ls C:\\work && echo x > C:\\evil\\out.txt' },
+      { signal: undefined },
+    );
+    expect(res).toMatchObject({ behavior: 'deny' });
+  });
+
+  it('Bash 2>&1 不算写路径（fd 重定向）→ allow', async () => {
+    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const res = await canUseTool(
+      'Bash',
+      { command: 'cmd 2>&1' },
+      { signal: undefined },
+    );
+    expect(res).toMatchObject({ behavior: 'allow' });
+  });
+
+  it('PowerShell Out-File 白名单外 → deny', async () => {
+    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const res = await canUseTool(
+      'PowerShell',
+      { command: 'Out-File -FilePath C:\\evil\\p.txt -InputObject x' },
+      { signal: undefined },
+    );
+    expect(res).toMatchObject({ behavior: 'deny' });
+  });
+
+  it('CMD echo > 白名单外 → deny', async () => {
+    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const res = await canUseTool(
+      'CMD',
+      { command: 'echo x > C:\\evil\\c.txt' },
+      { signal: undefined },
+    );
+    expect(res).toMatchObject({ behavior: 'deny' });
+  });
+});
+
+// ── runtimeId 透传 + per-runtime 隔离 ──────────────────────────────────────────
+
+describe('runtimeId 透传到 PolicyEngine（per-runtime 隔离 D-002）', () => {
+  it('A runtime allow 的路径对 B runtime 不可见（deny）', async () => {
+    const cache = new PolicyCache();
+    cache.set('rt-A', ['C:\\workA']);
+    cache.set('rt-B', ['C:\\workB']);
+    const engine = new PolicyEngine(cache, new AuditSink());
+
+    let currentRid = 'rt-A';
+    const { driver, getOpts } = makeDriverCapturingOpts();
+    const sm = new SessionManager(
+      { driver, ...noopDeps },
+      {
+        policyEngine: engine,
+        runtimeIdProvider: () => currentRid,
+      },
+    );
+    await sm.create({ ...BASE_INPUT, manualApproval: false });
+    const canUseTool = getOpts()?.canUseTool!;
+
+    // rt-A：C:\workA\x allow；C:\workB\x deny。
+    currentRid = 'rt-A';
+    expect(
+      await canUseTool('Write', { file_path: 'C:\\workA\\x.txt' }, { signal: undefined }),
+    ).toMatchObject({ behavior: 'allow' });
+    expect(
+      await canUseTool('Write', { file_path: 'C:\\workB\\x.txt' }, { signal: undefined }),
+    ).toMatchObject({ behavior: 'deny' });
+
+    // rt-B：C:\workB\x allow；C:\workA\x deny。
+    currentRid = 'rt-B';
+    expect(
+      await canUseTool('Write', { file_path: 'C:\\workB\\x.txt' }, { signal: undefined }),
+    ).toMatchObject({ behavior: 'allow' });
+    expect(
+      await canUseTool('Write', { file_path: 'C:\\workA\\x.txt' }, { signal: undefined }),
+    ).toMatchObject({ behavior: 'deny' });
+  });
+
+  it('runtimeId 为空 → PolicyCache 未命中 deny（fail-closed D-007）', async () => {
+    const cache = new PolicyCache();
+    cache.set('rt-real', ['C:\\work']);
+    const engine = new PolicyEngine(cache, new AuditSink());
+    const { driver, getOpts } = makeDriverCapturingOpts();
+    const sm = new SessionManager(
+      { driver, ...noopDeps },
+      {
+        policyEngine: engine,
+        runtimeIdProvider: () => '', // 空 runtimeId
+      },
+    );
+    await sm.create({ ...BASE_INPUT, manualApproval: false });
+    const canUseTool = getOpts()?.canUseTool!;
+    const res = await canUseTool(
+      'Write',
+      { file_path: 'C:\\work\\a.txt' },
+      { signal: undefined },
+    );
+    expect(res).toMatchObject({ behavior: 'deny' });
+    expect((res as { message?: string }).message).toContain('策略未加载');
   });
 });
 
 // ── enableApproval=true（人审）路径也前置写校验 ────────────────────────────────
 
 describe('enableApproval=true（人审）路径前置写校验', () => {
+  const RUNTIME_ID = 'rt-approval-1';
   /**
-   * 构造一个 manualApproval=true + allowedRootsProvider 的 session。
+   * 构造一个 manualApproval=true + policyEngine 的 session。
    * 验证写越界在到达远程人审（resolver.register → send）之前就被 deny。
    */
   async function makeApprovalSession(roots: string[]) {
+    const { engine } = makePolicyEngine(RUNTIME_ID, roots);
     const { driver, getOpts } = makeDriverCapturingOpts();
     const sendMock = vi.fn(() => true);
     const sm = new SessionManager(
@@ -253,7 +358,8 @@ describe('enableApproval=true（人审）路径前置写校验', () => {
       {
         manualApproval: true,
         permissionWsClient: { send: sendMock },
-        allowedRootsProvider: () => roots,
+        policyEngine: engine,
+        runtimeIdProvider: () => RUNTIME_ID,
       },
     );
     await sm.create({ ...BASE_INPUT, manualApproval: true, askUserOnly: true });
@@ -275,13 +381,35 @@ describe('enableApproval=true（人审）路径前置写校验', () => {
   });
 });
 
-// ── 向后兼容：不注入 provider ──────────────────────────────────────────────────
+// ── 向后兼容：不注入 policyEngine → allowedRootsProvider fallback ──────────────
 
-describe('向后兼容：不注入 allowedRootsProvider', () => {
-  it('默认 chat（manualApproval=false）不注入 canUseTool（旧行为不变）', async () => {
+describe('向后兼容：不注入 policyEngine → allowedRootsProvider fallback', () => {
+  it('默认 chat（manualApproval=false）不注入任何写守卫 → 不注入 canUseTool', async () => {
     const { driver, getOpts } = makeDriverCapturingOpts();
     const sm = new SessionManager({ driver, ...noopDeps });
     await sm.create({ ...BASE_INPUT, manualApproval: false });
     expect(getOpts()?.canUseTool).toBeUndefined();
+  });
+
+  it('注入 allowedRootsProvider（无 policyEngine）→ fallback 旧写校验', async () => {
+    const { driver, getOpts } = makeDriverCapturingOpts();
+    const sm = new SessionManager(
+      { driver, ...noopDeps },
+      { allowedRootsProvider: () => ['C:\\work'] },
+    );
+    await sm.create({ ...BASE_INPUT, manualApproval: false });
+    const canUseTool = getOpts()?.canUseTool!;
+    // 白名单内 allow。
+    expect(
+      await canUseTool('Write', { file_path: 'C:\\work\\a.txt' }, { signal: undefined }),
+    ).toMatchObject({ behavior: 'allow' });
+    // 越界 deny（fallback 文案：path outside allowed_roots）。
+    const deny = await canUseTool(
+      'Write',
+      { file_path: 'C:\\evil\\a.txt' },
+      { signal: undefined },
+    );
+    expect(deny).toMatchObject({ behavior: 'deny' });
+    expect((deny as { message?: string }).message).toContain('path outside allowed_roots');
   });
 });

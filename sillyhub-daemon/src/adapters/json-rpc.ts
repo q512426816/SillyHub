@@ -38,20 +38,41 @@
 import type { AgentEvent } from '../types.js';
 import type { ProtocolAdapter } from './protocol-adapter.js';
 import { DAEMON_VERSION } from '../daemon-version.js';
+// task-17 / R-06：命令类审批（commandExecution）走 shell-paths 提取写路径，
+// 交 PolicyEngine 逐条 canWrite 校验。仅 batch Codex 路径用，不影响 interactive。
+import { extractShellWritePaths, type ShellKind } from '../policy/shell-paths.js';
 
 /** JSON-RPC 2.0 四 provider 联合（工厂 task-11 会做 narrowing）。 */
 export type JsonRpcProvider = 'codex' | 'hermes' | 'kimi' | 'kiro';
 
 /**
- * 自动应答模板（对照 Python _handle_server_request L237-247 的 5 个 approval method）。
- * method 名逐字来自 Python，禁止改动。
+ * task-17 / R-06：Codex 带内审批协议 method 名（item/fileChange / item/commandExecution）。
+ *
+ * method 名逐字来自 codex app-server（对照 codex-app-server-driver.ts:1152-1162）。
+ * hermes/kimi/kiro 复用同一套 method 名（共享 JsonRpcAdapter）。execCommandApproval /
+ * applyPatchApproval 是旧别名（部分 provider 仍用），一并识别。
+ *
+ * 响应格式：`{ decision: 'accept' | 'decline' }`（对照 _writeFailClosedResponse L1096）。
+ * decline 不带额外字段，理由通过 audit + AgentEvent 透传（不回传给 codex，codex 只看 decision）。
  */
-const APPROVAL_RESPONSES: Record<string, Record<string, unknown>> = {
-  'item/commandExecution/requestApproval': { decision: 'accept' },
-  execCommandApproval: { decision: 'accept' },
-  'item/fileChange/requestApproval': { decision: 'accept' },
-  applyPatchApproval: { decision: 'accept' },
-  'mcpServer/elicitation/request': { action: 'accept', content: null, _meta: null },
+const APPROVAL_METHODS = new Set<string>([
+  'item/commandExecution/requestApproval',
+  'item/fileChange/requestApproval',
+  // 旧别名（hermes/kimi 等 provider 可能仍用）
+  'execCommandApproval',
+  'applyPatchApproval',
+]);
+
+/**
+ * task-17 / R-06：mcpServer/elicitation/request 的固定应答（非写类，不参与 PolicyEngine 决策）。
+ *
+ * elicitation 是 codex 向用户提问（非文件写），batch 无人工，按 design 默认 accept 空回复，
+ * 让 turn 继续。对照 Python _handle_server_request L237-247。
+ */
+const ELICITATION_RESPONSE: Record<string, unknown> = {
+  action: 'accept',
+  content: null,
+  _meta: null,
 };
 
 /** server request 待应答条目（TaskRunner 取出后据此写 stdin）。 */
@@ -59,8 +80,96 @@ export interface PendingServerRequest {
   id: number | string;
   method: string;
   params: Record<string, unknown>;
-  /** 预填应答模板（approval 类有，未知 method 为 null，TaskRunner 自决）。 */
-  responseTemplate: Record<string, unknown> | null;
+  /**
+   * task-17 / R-06：审批种类（'file' / 'command' / 'elicitation' / null）。
+   * - file/command → TaskRunner 走 PolicyEngine 决策（writePaths 逐条 canWrite）；
+   * - elicitation → 固定 accept 空回复（非写类，不参与决策）；
+   * - null → 未知 method，TaskRunner 按 unhandled 处理（JSON-RPC error -32601）。
+   *
+   * 可选：interactive codex-app-server-driver.ts:1044 直接构造此结构不填此字段
+   *（interactive 走自己的 _handleApproval，不读 approvalKind），故兼容设为可选。
+   */
+  approvalKind?: 'file' | 'command' | 'elicitation' | null;
+  /**
+   * task-17 / R-06：本次审批涉及的写目标路径数组（file/command 类）。
+   * - file：从 params.item 提取（path / change 等字段，尽力而为，提不到为空数组）；
+   * - command：从 params.item.command 经 extractShellWritePaths 提取；
+   * - elicitation / 未知：永远为空数组。
+   * TaskRunner 对每条调 policyEngine.canWrite，全 allow → accept，任一 deny → decline。
+   */
+  writePaths?: string[];
+  /**
+   * task-17 / R-06：触发的工具名（用于 audit 记录 + canWrite 的 tool 参数）。
+   * file → 'codex_file_change_approval'，command → 'codex_command_approval'。
+   */
+  toolName?: string;
+  /**
+   * task-17 兼容字段：interactive codex-app-server-driver.ts:1044 仍构造此结构
+   *（responseTemplate: null），保持向后兼容。batch 路径不再使用（决策由 PolicyEngine）。
+   */
+  responseTemplate?: Record<string, unknown> | null;
+}
+
+/**
+ * task-17 / R-06：从 fileChange approval params 尽力提取写目标路径。
+ *
+ * codex app-server fileChange approval payload 字段无法从现有代码 100% 确认
+ * （interactive 路径只透传 req.params 给 requestPermission hook，从未提取 path；
+ * fixture 用 `{ item: { id, type: 'fileChange' } }` 不含 path；扩权场景用
+ * `{ grantRoot, reason }`）。按 design §13 #9 降级策略：尝试多个候选字段，
+ * 任一命中即返回；全部提不到返回空数组（TaskRunner 据此 fail-closed decline，
+ * 理由：无法静态判断写路径，保守拒绝），靠 audit 追溯兜底。
+ *
+ * 候选字段（覆盖已知 codex schema 可能形态）：
+ *   - params.item.path（直接路径）
+ *   - params.item.change.path（codex 旧 change 对象）
+ *   - params.item.change.text 内的 diff 首行（+++ b/path 提取，最后兜底）
+ *   - params.grantRoot（扩权场景，单一路径）
+ */
+function extractFileChangePaths(params: Record<string, unknown>): string[] {
+  const paths: string[] = [];
+  const item = params.item as Record<string, unknown> | undefined;
+
+  // 候选 1：item.path
+  if (item && typeof item.path === 'string' && item.path) {
+    paths.push(item.path);
+  }
+  // 候选 2：item.change.path
+  const change = item?.change as Record<string, unknown> | undefined;
+  if (change && typeof change.path === 'string' && change.path) {
+    paths.push(change.path);
+  }
+  // 候选 3：item.change.text 的 diff 首行 +++ b/path
+  if (change && typeof change.text === 'string' && change.text) {
+    const m = /^\+\+\+\s+b\/(.+)$/m.exec(change.text);
+    if (m && m[1]) paths.push(m[1]);
+  }
+  // 候选 4：grantRoot（扩权场景，单一路径）
+  if (typeof params.grantRoot === 'string' && params.grantRoot) {
+    paths.push(params.grantRoot);
+  }
+  return paths;
+}
+
+/**
+ * task-17 / R-06：从 commandExecution approval params 提取写目标路径。
+ *
+ * payload 字段（fixture 证据 server-request-commandExecution-approval.json）：
+ * `params.item.command` 为命令字符串。经 extractShellWritePaths 按 shell 类型
+ * 提取重定向 / cp / mv / tee / mkdir 等写目标。
+ *
+ * shell 类型判定：Windows 默认 powershell（codex 在 Windows 跑 powershell 命令），
+ * 其他平台 bash。codex 命令通常无显式 shell 标记，保守按平台默认。
+ */
+function extractCommandWritePaths(
+  params: Record<string, unknown>,
+  shell: ShellKind,
+): string[] {
+  const item = params.item as Record<string, unknown> | undefined;
+  const command =
+    item && typeof item.command === 'string' ? item.command : '';
+  if (!command) return [];
+  return extractShellWritePaths(command, shell);
 }
 
 export class JsonRpcAdapter implements ProtocolAdapter {
@@ -341,18 +450,81 @@ export class JsonRpcAdapter implements ProtocolAdapter {
 
   // -- 分支 2：server request -----------------------------------------
 
+  /**
+   * task-17 / R-06：解析 server request。
+   *
+   * 改造前（task-16 之前）：APPROVAL_RESPONSES 自动 accept，batch 路径无沙箱。
+   * 改造后：识别审批 method → 提取写路径 → 产出「待决策事件」(auto_accept=false)，
+   * TaskRunner 在 _handleLine 检测到 approval 事件后调 policyEngine 决策：
+   *   - 全 allow → 写 accept response；
+   *   - 任一 deny → 写 decline response（附中文 reason）。
+   *
+   * 审批 method 三类（对照 codex-app-server-driver.ts _dispatchServerRequest）：
+   *   - file/command → 走 PolicyEngine（writePaths 逐条 canWrite）；
+   *   - elicitation → 固定 accept（非写类，不参与决策，预填 ELICITATION_RESPONSE）；
+   *   - 其他未知 → error event + 登记待应答（TaskRunner 可自定义应答）。
+   */
   private parseServerRequest(msg: Record<string, unknown>): AgentEvent[] {
     const id = msg.id as number | string;
     const method = typeof msg.method === 'string' ? msg.method : '';
     const params = (msg.params ?? {}) as Record<string, unknown>;
-    const template = APPROVAL_RESPONSES[method] ?? null;
 
-    // 记录待应答（无论是否 approval，都登记让 TaskRunner 决策）
-    const entry: PendingServerRequest = { id, method, params, responseTemplate: template };
+    // shell 类型判定：Windows 默认 powershell，其他平台 bash（codex 命令通常无显式标记）
+    const shell: ShellKind = process.platform === 'win32' ? 'powershell' : 'bash';
+
+    let approvalKind: PendingServerRequest['approvalKind'] = null;
+    let writePaths: string[] = [];
+    let toolName = '';
+    let prefillResponse: Record<string, unknown> | null = null;
+
+    if (method === 'item/fileChange/requestApproval' || method === 'applyPatchApproval') {
+      approvalKind = 'file';
+      toolName = 'codex_file_change_approval';
+      writePaths = extractFileChangePaths(params);
+    } else if (
+      method === 'item/commandExecution/requestApproval' ||
+      method === 'execCommandApproval'
+    ) {
+      approvalKind = 'command';
+      toolName = 'codex_command_approval';
+      writePaths = extractCommandWritePaths(params, shell);
+    } else if (method === 'mcpServer/elicitation/request') {
+      approvalKind = 'elicitation';
+      prefillResponse = ELICITATION_RESPONSE;
+    }
+
+    // 记录待应答（无论是否 approval，都登记让 TaskRunner 决策 / 应答）
+    const entry: PendingServerRequest = {
+      id,
+      method,
+      params,
+      approvalKind,
+      writePaths,
+      toolName,
+    };
     this.pendingMap.set(id, entry);
 
-    if (template !== null) {
-      // 已知 approval：产出 tool_use event，标记 auto_accept + response_template
+    if (approvalKind === 'file' || approvalKind === 'command') {
+      // 写类审批：产出待决策事件（auto_accept=false，TaskRunner 走 PolicyEngine）
+      return [
+        {
+          type: 'tool_use',
+          content: '',
+          metadata: {
+            kind: 'approval',
+            auto_accept: false,
+            approval_kind: approvalKind,
+            rpc_id: id,
+            rpc_method: method,
+            tool_name: toolName,
+            write_paths: writePaths,
+          },
+        },
+      ];
+    }
+
+    if (approvalKind === 'elicitation') {
+      // elicitation：非写类，固定 accept（不参与 PolicyEngine 决策）
       return [
         {
           type: 'tool_use',
@@ -360,9 +532,10 @@ export class JsonRpcAdapter implements ProtocolAdapter {
           metadata: {
             kind: 'approval',
             auto_accept: true,
+            approval_kind: 'elicitation',
             rpc_id: id,
             rpc_method: method,
-            response_template: template,
+            response_template: prefillResponse,
           },
         },
       ];

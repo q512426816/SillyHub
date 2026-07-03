@@ -307,25 +307,75 @@ describe('parse notification - turn lifecycle', () => {
 });
 
 // ===========================================================================
-// server request: approval → tool_use + pending id（AC-03）
-// 对照 Python _handle_server_request L237-247
+// server request: approval → 待决策事件 + pending id（task-17 / R-06）
+// task-17 改造：移除自动 accept，file/command 类产出 auto_accept=false 待决策事件，
+// 由 TaskRunner 走 PolicyEngine 决策（见 task-runner batch 决策测试）。
 // ===========================================================================
 
-describe('parse server request - pending id 记录与消费', () => {
-  it('commandExecution approval → tool_use + 记录 pending id=10', () => {
+describe('parse server request - pending id 记录与消费（task-17 待决策）', () => {
+  it('commandExecution approval → tool_use(auto_accept=false) + 记录 pending id=10 + 提取命令写路径', () => {
     const a = new JsonRpcAdapter('codex');
     const events = a.parse(P('codex', 'server-request-commandExecution-approval.json'));
     const ev = first(events);
     expect(ev!.type).toBe('tool_use');
     expect(ev!.metadata?.kind).toBe('approval');
-    expect(ev!.metadata?.auto_accept).toBe(true);
-    expect(ev!.metadata?.response_template).toEqual({ decision: 'accept' });
+    // task-17：不再自动 accept，标记 auto_accept=false 待 PolicyEngine 决策
+    expect(ev!.metadata?.auto_accept).toBe(false);
+    expect(ev!.metadata?.approval_kind).toBe('command');
+    expect(ev!.metadata?.tool_name).toBe('codex_command_approval');
     // AC-03: pending id 已记录
     const pending = a.getPendingServerRequests();
     expect(pending.length).toBe(1);
-    expect(pending[0]!.id).toBe(10); // 源 test L238
+    expect(pending[0]!.id).toBe(10);
     expect(pending[0]!.method).toBe('item/commandExecution/requestApproval');
-    expect(pending[0]!.responseTemplate).toEqual({ decision: 'accept' });
+    expect(pending[0]!.approvalKind).toBe('command');
+    expect(pending[0]!.toolName).toBe('codex_command_approval');
+  });
+
+  it('commandExecution 含重定向命令 → extractShellWritePaths 提取写路径', () => {
+    const a = new JsonRpcAdapter('codex');
+    // 构造一条带重定向的命令审批：echo x > /etc/passwd
+    const line = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 20,
+      method: 'item/commandExecution/requestApproval',
+      params: { item: { id: 'i', type: 'commandExecution', command: 'echo x > /etc/passwd' } },
+    });
+    a.parse(line);
+    const pending = a.getPendingServerRequests()[0]!;
+    expect(pending.approvalKind).toBe('command');
+    expect(pending.writePaths).toContain('/etc/passwd');
+  });
+
+  it('fileChange approval → auto_accept=false + approvalKind=file', () => {
+    const a = new JsonRpcAdapter('hermes');
+    a.parse(P('hermes', 'server-request-fileChange-approval.json'));
+    const p = a.getPendingServerRequests()[0]!;
+    expect(p.id).toBe(11);
+    expect(p.method).toBe('item/fileChange/requestApproval');
+    expect(p.approvalKind).toBe('file');
+    expect(p.toolName).toBe('codex_file_change_approval');
+  });
+
+  it('fileChange approval 含 item.path → 提取写路径', () => {
+    const a = new JsonRpcAdapter('codex');
+    const line = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 30,
+      method: 'item/fileChange/requestApproval',
+      params: { item: { id: 'i', type: 'fileChange', path: '/repo/out.txt' } },
+    });
+    a.parse(line);
+    const p = a.getPendingServerRequests()[0]!;
+    expect(p.writePaths).toContain('/repo/out.txt');
+  });
+
+  it('fileChange approval 无可识别路径字段 → writePaths 空（TaskRunner fail-closed）', () => {
+    const a = new JsonRpcAdapter('hermes');
+    // fixture 的 fileChange approval 只含 {item:{id,type}} 无 path 字段
+    a.parse(P('hermes', 'server-request-fileChange-approval.json'));
+    const p = a.getPendingServerRequests()[0]!;
+    expect(p.writePaths).toEqual([]);
   });
 
   it('markResponded(10) 移除 pending id', () => {
@@ -344,27 +394,22 @@ describe('parse server request - pending id 记录与消费', () => {
     expect(ev!.type).toBe('error');
     expect(ev!.content).toContain('unhandled server request');
     expect(a.getPendingServerRequests().length).toBe(1);
-    expect(a.getPendingServerRequests()[0]!.responseTemplate).toBeNull();
+    expect(a.getPendingServerRequests()[0]!.approvalKind).toBeNull();
   });
 
-  it('其他 approval method 也有正确 template（hermes fileChange）', () => {
-    const a = new JsonRpcAdapter('hermes');
-    a.parse(P('hermes', 'server-request-fileChange-approval.json'));
-    const p = a.getPendingServerRequests()[0]!;
-    expect(p.id).toBe(11);
-    expect(p.method).toBe('item/fileChange/requestApproval');
-    expect(p.responseTemplate).toEqual({ decision: 'accept' });
-  });
-
-  it('execCommandApproval（kimi）+ mcpServer/elicitation（kiro）template', () => {
-    const kimi = new JsonRpcAdapter('kimi');
-    kimi.parse(P('kimi', 'server-request-execCommandApproval.json'));
-    expect(kimi.getPendingServerRequests()[0]!.responseTemplate).toEqual({ decision: 'accept' });
-
+  it('mcpServer/elicitation（kiro）→ 固定 accept（非写类，不参与 PolicyEngine）', () => {
     const kiro = new JsonRpcAdapter('kiro');
     kiro.parse(P('kiro', 'server-request-mcp-elicitation.json'));
     const kiroPending = kiro.getPendingServerRequests()[0]!;
-    expect(kiroPending.responseTemplate).toEqual({ action: 'accept', content: null, _meta: null });
+    expect(kiroPending.approvalKind).toBe('elicitation');
+  });
+
+  it('execCommandApproval（kimi 旧别名）→ approvalKind=command', () => {
+    const kimi = new JsonRpcAdapter('kimi');
+    kimi.parse(P('kimi', 'server-request-execCommandApproval.json'));
+    const p = kimi.getPendingServerRequests()[0]!;
+    expect(p.approvalKind).toBe('command');
+    expect(p.toolName).toBe('codex_command_approval');
   });
 });
 

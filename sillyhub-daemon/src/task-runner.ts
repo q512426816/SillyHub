@@ -69,6 +69,17 @@ import type { DaemonConfig } from './config.js';
 import type { ResilienceService } from './resilience/service.js';
 import type { Envelope } from './resilience/service.js';
 import { dedupKeyFor, toCauseInfo } from './resilience/error-classify.js';
+// 2026-07-02-daemon-filesystem-policy task-16：per-runtime allowed_roots 快照数据源。
+// batch Claude spawn 时按 task.runtimeId 从 PolicyCache 取该 runtime 的 allowed_roots，
+// 替代全局 config.allowed_roots（D-002）。冻结语义见 runLease 内注释（D-003）。
+import type { PolicyCache } from './policy/runtime-policy.js';
+// task-17 / R-06：batch Codex 带内审批决策引擎。file/command 类审批 server request
+// 命中时，对每个写路径调 policyEngine.canWrite(runtimeId, path, 'codex', tool)，
+// 全 allow → accept，任一 deny → decline（附中文 reason）。仅 batch 路径用，
+// 不影响 interactive Codex（codex-app-server-driver.ts 自己有 _handleApproval）。
+import type { PolicyEngine } from './policy/filesystem-policy.js';
+// task-17：approval 应答写 stdin 需识别 JsonRpcAdapter 的 PendingServerRequest 字段。
+import type { PendingServerRequest } from './adapters/json-rpc.js';
 import type {
   AgentEvent,
   LeaseCtx,
@@ -232,6 +243,33 @@ export class TaskRunner {
      * 走 retryTerminal；未注入（undefined）回退直接调 client（向后兼容）。
      */
     private readonly resilience?: ResilienceService | null,
+    /**
+     * 2026-07-02-daemon-filesystem-policy task-16：per-runtime allowed_roots 数据源。
+     * batch spawn 时按 ``ctx.runtimeId`` 取 ``PolicyCache.get(rid)?.allowedRoots`` 生成
+     * CC ``--settings``（D-002）。未注入（undefined/null，仅旧测试场景）回退
+     * ``config.allowed_roots``（向后兼容，单一全局沙箱）。cli.ts 生产链路必注入
+     *（与 Daemon 共享同一 PolicyCache 实例，由心跳 + WS POLICY_UPDATE 维护）。
+     *
+     * 冻结语义（D-003）：spawn 那一刻取快照，跑 batch 期间不随热更新变；
+     * 新起 batch 再读 PolicyCache 最新值。
+     */
+    private readonly policyCache?: PolicyCache | null,
+    /**
+     * 2026-07-02-daemon-filesystem-policy task-17 / R-06：batch Codex 带内审批决策引擎。
+     *
+     * batch spawn codex 时若收到 `item/fileChange/requestApproval` /
+     * `item/commandExecution/requestApproval` server request，TaskRunner 在 _handleLine
+     * 检测到 approval 事件后，对每个写路径调
+     * ``policyEngine.canWrite(ctx.runtimeId, path, 'codex', tool)``：
+     *   - 全 allow → 写 ``{ decision: 'accept' }`` response 到 stdin；
+     *   - 任一 deny → 写 ``{ decision: 'decline' }`` response（decline 不带 reason 字段，
+     *     codex 只看 decision；中文 reason 通过 audit + AgentEvent 透传供前端展示）。
+     *
+     * 未注入（undefined/null，仅旧测试场景）→ fail-closed decline（无引擎无法放行，
+     * 保守拒绝，对齐 task-14 interactive「未注入 sessionPermission → decline」语义）。
+     * cli.ts 生产链路必注入（与 Daemon 共享同一 PolicyEngine 实例）。
+     */
+    private readonly policyEngine?: PolicyEngine | null,
   ) {}
 
   // ── 追踪与取消 ────────────────────────────────────────────────────────────
@@ -486,6 +524,17 @@ export class TaskRunner {
       const spawnEnv = buildSpawnEnv(ctx, { credential: this.credential });
       const maxRetries = resolveMaxRetries(this.config);
 
+      // task-16（D-003 冻结语义）：allowed_roots 在 spawn 前取一次 PolicyCache 快照，
+      // 整个 batch（含 spawn 重试）期间冻结，不随 WS POLICY_UPDATE 热更新变。
+      // 新起 batch 才再读 PolicyCache 最新值。
+      // 数据源优先级：PolicyCache.get(ctx.runtimeId)?.allowedRoots（per-runtime）
+      //   > config.allowed_roots（未注入 policyCache 时的全局兜底，向后兼容）。
+      // policyCache 未注入（旧测试）或 rid 未命中（runtime 尚未注册 / 心跳未拉到）
+      // 都回退 config.allowed_roots，绝不 throw，保持旧沙箱行为。
+      const frozenAllowedRoots =
+        this.policyCache?.get(ctx.runtimeId)?.allowedRoots ??
+        this.config?.allowed_roots;
+
       // 重试循环：spawn → stream → 判定（task-10 B3）。
       // 可重试：timeout / spawn ENOENT / OOM / segfault / killed。
       // 不重试：cancelled / businessError（claude is_error）/ completed / 业务非零退出。
@@ -503,14 +552,15 @@ export class TaskRunner {
         }
         // args 每次重试都重新构建（重试时 effectiveCtx.resumeSessionId 已清空，buildArgs 不带 --resume）
         // ql-20260617-008：透传 prompt，ndjson 协议把 prompt 作为 args 末尾位置参数
+        // task-16：allowedRoots 用 frozenAllowedRoots（D-003 冻结，不随热更新变）。
         const args = adapter.buildArgs
           ? adapter.buildArgs({
               model: effectiveCtx.model,
               sessionId: effectiveCtx.sessionId,
               resumeSessionId: effectiveCtx.resumeSessionId,
               prompt: ctx.prompt ?? '',
-              // 2026-06-29-runtime-allowed-roots-config task-05：传 allowed_roots 给 adapter 注入 CC 沙箱
-              allowedRoots: this.config?.allowed_roots,
+              // task-16：per-runtime allowed_roots（PolicyCache.get 快照，spawn 时冻结）。
+              allowedRoots: frozenAllowedRoots,
               toolConfig: ctx.toolConfig as
                 | { mode?: string; allowed_tools?: string[]; max_turns?: number }
                 | undefined,
@@ -1095,6 +1145,8 @@ export class TaskRunner {
             leaseId,
             claimToken,
             agentRunId: ctx.agentRunId ?? '',
+            // task-17：approval 决策需 runtimeId 隔离 PolicyEngine.canWrite（D-002）。
+            runtimeId: ctx.runtimeId,
             observer,
             onStats: (stats: Record<string, unknown>) => {
               lastStats = stats;
@@ -1190,6 +1242,8 @@ export class TaskRunner {
       leaseId: string;
       claimToken: string;
       agentRunId: string;
+      /** task-17：approval 决策按 runtime_id 隔离 PolicyEngine.canWrite（D-002）。 */
+      runtimeId: string;
       observer: TerminalObserver;
       onStats?: (stats: Record<string, unknown>) => void;
       prompt?: string;
@@ -1289,6 +1343,19 @@ export class TaskRunner {
       return;
     }
 
+    // task-17 / R-06：Codex batch 带内审批决策。
+    // 扫描本轮 events 是否含 approval tool_use（json-rpc adapter parseServerRequest 产出）。
+    // 命中则对每个写路径调 policyEngine.canWrite 决策，写 accept/decline response 到 stdin。
+    // 必须在 _eventToMessages 之前处理：approval 是 server request 需 daemon 应答，
+    // 不应答会卡死 turn（codex 等 response 才继续）。仅 json-rpc adapter 的 batch 路径生效，
+    // stream-json / ndjson 无 server request 概念（无 PendingServerRequest）。
+    const approvalEv = events.find(
+      (e) => e.type === 'tool_use' && e.metadata?.kind === 'approval',
+    );
+    if (approvalEv) {
+      await this._handleApprovalDecision(adapter, child, env, approvalEv);
+    }
+
     // 累积 output + 提交 submitMessages
     const messages: Record<string, unknown>[] = [];
     for (const ev of events) {
@@ -1360,7 +1427,180 @@ export class TaskRunner {
     }
   }
 
-  // ── AgentEvent → submitMessages payload（对齐 Python _event_to_message）────
+  // ── task-17 / R-06：batch Codex 带内审批决策 ───────────────────────────────
+
+  /**
+   * task-17 / R-06：处理 batch Codex server request 审批决策。
+   *
+   * json-rpc adapter 的 parseServerRequest 已识别 file/command 类 approval，提取写路径
+   * 并登记 PendingServerRequest。本方法对每个写路径调 policyEngine.canWrite 决策：
+   *   - 全 allow（含 0 路径的写审批不可解，fail-closed decline）→ 写 accept response；
+   *   - 任一 deny（含未注入 policyEngine / 提取不到路径）→ 写 decline response。
+   *
+   * 决策结果通过 audit（PolicyEngine 内部已记 ALLOW/DENY）+ AgentEvent.metadata 透传
+   * 给前端展示（decline 时 metadata.reason 携带中文理由，submitMessages 一并上报）。
+   *
+   * response 格式（对照 codex-app-server-driver.ts _writeFailClosedResponse L1096）：
+   *   ``{"jsonrpc":"2.0","id":<id>,"result":{"decision":"accept"|"decline"}}``
+   *
+   * 不影响 interactive Codex（codex-app-server-driver.ts 走自己的 _handleApproval，
+   * 不经 TaskRunner._handleLine）。
+   */
+  private async _handleApprovalDecision(
+    adapter: ProtocolAdapter,
+    child: ChildProcess,
+    env: {
+      leaseId: string;
+      runtimeId: string;
+      observer: TerminalObserver;
+    },
+    approvalEv: AgentEvent,
+  ): Promise<void> {
+    // 从 adapter 取出 pending 条目（json-rpc adapter 已登记）。
+    // 鸭子类型：仅 JsonRpcAdapter 有 getPendingServerRequests / markResponded。
+    const withJsonRpc = adapter as {
+      getPendingServerRequests?: () => readonly PendingServerRequest[];
+      markResponded?: (id: number | string) => void;
+    };
+    if (
+      typeof withJsonRpc.getPendingServerRequests !== 'function' ||
+      typeof withJsonRpc.markResponded !== 'function'
+    ) {
+      // 非 json-rpc adapter（stream-json / ndjson 无 server request）→ 跳过。
+      return;
+    }
+
+    const rpcId = approvalEv.metadata?.rpc_id as number | string | undefined;
+    if (rpcId === undefined) return;
+
+    // 找到对应 pending 条目（按 id）。
+    const pending = withJsonRpc
+      .getPendingServerRequests()
+      .find((p) => p.id === rpcId);
+    if (!pending) return;
+
+    const approvalKind = pending.approvalKind ?? null;
+    const writePaths = pending.writePaths ?? [];
+    const toolName = pending.toolName || 'codex_approval';
+
+    // elicitation：非写类，固定 accept（adapter 已预填 ELICITATION_RESPONSE，
+    // 此处直接写 accept decision 保持简单 —— elicitation 实际由 codex-app-server
+    // 走 mcpServer/elicitation/request 单独 method，正常不会进 file/command 分支）。
+    if (approvalKind === 'elicitation') {
+      await this._writeApprovalResponse(child, rpcId, {
+        decision: 'accept',
+      });
+      withJsonRpc.markResponded(rpcId);
+      return;
+    }
+
+    // file/command 类：走 PolicyEngine 决策。
+    let decision = 'accept';
+    let reason = '';
+    let deniedPath = '';
+
+    if (approvalKind === 'file' || approvalKind === 'command') {
+      // 未注入 policyEngine → fail-closed decline（无引擎无法放行，保守拒绝）。
+      if (!this.policyEngine) {
+        decision = 'decline';
+        reason =
+          'Runtime Policy 拒绝本次写入。\n' +
+          `Agent：codex\n` +
+          `原因：PolicyEngine 未注入（batch 审批无法决策，保守拒绝）。`;
+        deniedPath = '<no-policy-engine>';
+      } else if (writePaths.length === 0) {
+        // task-17 降级（design §13 #9）：写路径提取不到（codex payload 字段不明确），
+        // 无法静态判断目标 → fail-closed decline，靠 audit 追溯兜底。
+        decision = 'decline';
+        reason =
+          'Runtime Policy 拒绝本次写入。\n' +
+          `Agent：codex\n` +
+          `原因：无法从审批消息中提取写目标路径（codex 审批 payload 字段未覆盖），保守拒绝。`;
+        deniedPath = '<unknown-path>';
+      } else {
+        // 逐条 canWrite：任一 deny 即整体 decline（对齐 canRename 短路语义）。
+        for (const p of writePaths) {
+          const d = this.policyEngine.canWrite(
+            env.runtimeId,
+            p,
+            'codex',
+            toolName,
+          );
+          if (!d.allowed) {
+            decision = 'decline';
+            reason = d.reason;
+            deniedPath = d.normalizedPath;
+            break;
+          }
+        }
+      }
+    } else {
+      // 未知 approvalKind（null，adapter 未识别 method）→ fail-closed decline。
+      decision = 'decline';
+      reason = `Runtime Policy 拒绝本次写入。\nAgent：codex\n原因：未识别的审批 method（${pending.method}）。`;
+    }
+
+    // 写 response 到 stdin（accept/decline，codex 只看 decision 字段）。
+    await this._writeApprovalResponse(child, rpcId, { decision });
+    withJsonRpc.markResponded(rpcId);
+
+    // 把决策结果回填到 approvalEv.metadata，让后续 _eventToMessages / submitMessages
+    // 把 decline 中文理由透传给前端（accept 时 reason 为空，不影响展示）。
+    approvalEv.metadata = {
+      ...approvalEv.metadata,
+      approval_decision: decision,
+      ...(decision === 'decline' ? { deny_reason: reason, denied_path: deniedPath } : {}),
+    };
+
+    // observer + 本地 echo：让用户看到审批决策（accept/decline + 路径）。
+    env.observer.writeParsed(
+      renderAgentEvent(env.leaseId, {
+        ...approvalEv,
+        content: decision === 'decline' ? `审批拒绝：${deniedPath}` : '审批通过',
+      }),
+    );
+  }
+
+  /**
+   * task-17：把 approval response JSON-RPC 写到子进程 stdin（带背压保护）。
+   *
+   * 格式：``{"jsonrpc":"2.0","id":<id>,"result":{"decision":"accept"|"decline"}}``
+   *（对照 codex-app-server-driver.ts:1119 CodexJsonRpcResponse 形态）。
+   *
+   * 写失败仅 warn（不阻塞 readline，对齐 _handleLine 单行容错策略）。
+   */
+  private async _writeApprovalResponse(
+    child: ChildProcess,
+    id: number | string,
+    result: Record<string, unknown>,
+  ): Promise<void> {
+    if (!child.stdin || child.stdin.destroyed) return;
+    const response = JSON.stringify({ jsonrpc: '2.0', id, result });
+    try {
+      await new Promise<void>((resolve) => {
+        let done = false;
+        const finish = (): void => {
+          if (!done) {
+            done = true;
+            resolve();
+          }
+        };
+        const ok = child.stdin!.write(response + '\n', (err?: Error | null) => {
+          if (err) console.warn('task_runner: approval_response_write_failed', err);
+          finish();
+        });
+        if (!ok) {
+          child.stdin!.once('drain', finish);
+        } else {
+          setImmediate(finish);
+        }
+      });
+    } catch (e) {
+      console.warn('task_runner: approval_response_exception', e);
+    }
+  }
+
+
 
   /**
    * 把 AgentEvent IR 渲染成 server submit_messages 的 message dict 列表。
@@ -1470,6 +1710,21 @@ export class TaskRunner {
           typeof md.tool_name === 'string' && md.tool_name
             ? md.tool_name
             : 'unknown';
+        // task-17 / R-06：审批 decline 事件 → stdout 直接写中文理由（不渲染 [TOOL_USE]
+        // 模板，让前端 / 日志一眼可见拒绝原因 + 越界路径）。accept 时 metadata 无 reason，
+        // 走下面的标准 tool_use 渲染（[TOOL_USE] Name: ...）。
+        if (md.approval_decision === 'decline') {
+          const reason =
+            typeof md.deny_reason === 'string' && md.deny_reason
+              ? md.deny_reason
+              : '审批拒绝（未知原因）';
+          messages.push({
+            event_type: ev.type,
+            content: `[APPROVAL:DECLINE] ${name}\n${reason}`.slice(0, 5000),
+            channel: 'stderr',
+          });
+          break;
+        }
         const inputObj =
           md.tool_input &&
           typeof md.tool_input === 'object' &&

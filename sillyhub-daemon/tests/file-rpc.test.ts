@@ -4,7 +4,7 @@
 // 用例编号 T1~T13 对齐 task-05.md §7.1。
 // 不读文件内容（design §3 非目标）—— 本测只验证目录列举语义。
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, rm, mkdir, writeFile, symlink, chmod } from 'node:fs/promises';
 import { tmpdir, platform } from 'node:os';
 import { join, resolve, sep } from 'node:path';
@@ -14,8 +14,22 @@ import {
   type DirEntry,
 } from '../src/file-rpc';
 import { RpcError } from '../src/ws-client';
+import type { PolicyEngine, PolicyDecision } from '../src/policy/filesystem-policy';
 
 const IS_WIN = platform() === 'win32';
+
+/** 构造一个 spy PolicyEngine：记录 canRead 入参 + 可配置 decision（默认全 allow）。 */
+function makePolicyEngineSpy(opts?: {
+  decision?: PolicyDecision;
+}): { engine: PolicyEngine; canRead: ReturnType<typeof vi.fn> } {
+  const canRead = vi.fn();
+  canRead.mockReturnValue(
+    opts?.decision ?? { allowed: true, reason: 'allow', normalizedPath: '/x' },
+  );
+  // 用对象冒充 PolicyEngine 实例（listDir 只调 canRead，鸭子类型足够）。
+  const engine = { canRead } as unknown as PolicyEngine;
+  return { engine, canRead };
+}
 
 /** 构造临时根目录 + 测试桩文件。返回 { root, abs, file }。 */
 async function makeRoot(opts?: {
@@ -144,11 +158,16 @@ describe('assertWithinAllowedRoots — D-002 穿越防护（task-05 T2/T3/T4/T11
 describe('listDir — readdir+stat（task-05 T1/T6/T7/T8）', () => {
   let tmpRoot: string;
   let tmpAbs: (rel: string) => string;
+  let engine: PolicyEngine;
+  let canRead: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     const r = await makeRoot();
     tmpRoot = r.root;
     tmpAbs = r.abs;
+    const spy = makePolicyEngineSpy();
+    engine = spy.engine;
+    canRead = spy.canRead;
   });
 
   afterEach(async () => {
@@ -156,7 +175,7 @@ describe('listDir — readdir+stat（task-05 T1/T6/T7/T8）', () => {
   });
 
   it('T1: 合法 root 内目录列举 → entries 含所有项，dir 优先 + 字母序', async () => {
-    const result = await listDir(tmpRoot, [tmpRoot]);
+    const result = await listDir(tmpRoot, engine, 'rt-T1');
     expect(result.entries.length).toBe(3);
     // 排序：dir 优先（a, c），再 file（b.txt）；同类字母序：a < c, b.txt 唯一 file
     const names = result.entries.map((e) => e.name);
@@ -171,26 +190,26 @@ describe('listDir — readdir+stat（task-05 T1/T6/T7/T8）', () => {
   it('T1b: path 为 root 子目录，列举该子目录', async () => {
     await mkdir(tmpAbs('a/sub1'));
     await mkdir(tmpAbs('a/sub2'));
-    const result = await listDir(tmpAbs('a'), [tmpRoot]);
+    const result = await listDir(tmpAbs('a'), engine, 'rt-T1b');
     const names = result.entries.map((e) => e.name).sort();
     expect(names).toEqual(['sub1', 'sub2']);
     expect(result.entries.every((e) => e.type === 'dir')).toBe(true);
   });
 
   it('T5: listDir 接受 path === root', async () => {
-    const result = await listDir(tmpRoot, [tmpRoot]);
+    const result = await listDir(tmpRoot, engine, 'rt-T5');
     expect(result.entries.length).toBeGreaterThan(0);
   });
 
   it('T8: 空目录 → { entries: [] }（非 reject）', async () => {
     await mkdir(tmpAbs('empty-dir'));
-    const result = await listDir(tmpAbs('empty-dir'), [tmpRoot]);
+    const result = await listDir(tmpAbs('empty-dir'), engine, 'rt-T8');
     expect(result.entries).toEqual([]);
   });
 
   it('T6: 不存在路径 → not_found', async () => {
     try {
-      await listDir(tmpAbs('does-not-exist'), [tmpRoot]);
+      await listDir(tmpAbs('does-not-exist'), engine, 'rt-T6');
       throw new Error('should have thrown');
     } catch (e) {
       expect(e).toBeInstanceOf(RpcError);
@@ -200,7 +219,7 @@ describe('listDir — readdir+stat（task-05 T1/T6/T7/T8）', () => {
 
   it('T7: path 是文件 → not_found "is not a directory"', async () => {
     try {
-      await listDir(tmpAbs('b.txt'), [tmpRoot]);
+      await listDir(tmpAbs('b.txt'), engine, 'rt-T7');
       throw new Error('should have thrown');
     } catch (e) {
       expect(e).toBeInstanceOf(RpcError);
@@ -209,10 +228,10 @@ describe('listDir — readdir+stat（task-05 T1/T6/T7/T8）', () => {
     }
   });
 
-  it('越界 path → forbidden（listDir 路径层）', async () => {
+  it('policyEngine 为 null + fallback_roots 越界 → forbidden（向后兼容路径层）', async () => {
     const evil = IS_WIN ? 'C:\\Windows' : '/etc';
     try {
-      await listDir(evil, [tmpRoot]);
+      await listDir(evil, null, 'rt-fb', [tmpRoot]);
       throw new Error('should have thrown');
     } catch (e) {
       expect(e).toBeInstanceOf(RpcError);
@@ -220,8 +239,23 @@ describe('listDir — readdir+stat（task-05 T1/T6/T7/T8）', () => {
     }
   });
 
+  it('T18a: policyEngine.canRead 透传 runtimeId + path（读自由，即便旧白名单外也放行）', async () => {
+    // canRead 默认全 allow（D-008 读自由）——即便 path 在旧 allowed_roots 之外也不抛。
+    const evil = IS_WIN ? 'C:\\Windows' : '/etc';
+    // 越界路径在真实 fs 多半不存在 → lstat 抛 not_found；我们只断言「不被 canRead 拦」。
+    try {
+      await listDir(evil, engine, 'rt-T18a');
+    } catch (e) {
+      // 只允许 not_found（说明越过了权限校验进入 fs 层），不允许 forbidden。
+      expect(e).toBeInstanceOf(RpcError);
+      expect((e as RpcError).code).toBe('not_found');
+    }
+    // canRead 收到透传的 runtimeId + path（task-18 验收：runtimeId 透传）。
+    expect(canRead).toHaveBeenCalledWith('rt-T18a', evil);
+  });
+
   it('T1c: 返回结构精确匹配 { entries: [{ name: string, type: "dir"|"file" }] }', async () => {
-    const result = await listDir(tmpRoot, [tmpRoot]);
+    const result = await listDir(tmpRoot, engine, 'rt-T1c');
     expect(Object.keys(result).sort()).toEqual(['entries']);
     for (const e of result.entries as DirEntry[]) {
       expect(Object.keys(e).sort()).toEqual(['name', 'type']);
@@ -276,7 +310,7 @@ describe('listDir — 符号链接与权限（task-05 T9/T10）', () => {
       throw e;
     }
 
-    const result = await listDir(tmpRoot, [tmpRoot]);
+    const result = await listDir(tmpRoot, null, "rt-symlink", [tmpRoot]);
     const byName = new Map(result.entries.map((e) => [e.name, e.type]));
     // stat 跟随 symlink：symlink→dir 归 dir
     expect(byName.get('link-to-dir')).toBe('dir');
@@ -303,7 +337,7 @@ describe('listDir — 符号链接与权限（task-05 T9/T10）', () => {
       throw e;
     }
     try {
-      const result = await listDir(tmpRoot, [tmpRoot]);
+      const result = await listDir(tmpRoot, null, "rt-symlink", [tmpRoot]);
       const byName = new Map(result.entries.map((e) => [e.name, e.type]));
       // stat 穿越无权限目录 → EACCES → 兜底 file，整体不中断
       expect(byName.get('locked-link')).toBe('file');
@@ -323,7 +357,7 @@ describe('listDir — resolve 一致性（Windows 路径形态）', () => {
       // 本用例不假设 cwd，仅断言「相对路径不会绕过 root 校验」
       let caught: unknown;
       try {
-        await listDir('a', [r.root]);
+        await listDir('a', null, 'rt-resolve', [r.root]);
       } catch (e) {
         caught = e;
       }
@@ -335,6 +369,47 @@ describe('listDir — resolve 一致性（Windows 路径形态）', () => {
         // 罕见：cwd===r.root 且恰好有 a 子目录 → 成功也合理（resolve 后在 root 内）
         expect(caught).toBeUndefined();
       }
+    } finally {
+      await rm(r.root, { recursive: true, force: true });
+    }
+  });
+});
+
+// task-18: list_dir 改调 PolicyEngine.canRead（D-008：读全 allow、不产 audit）。
+describe('listDir — PolicyEngine 接入（task-18 / D-008）', () => {
+  it('canRead 全 allow、不产 audit 事件（mock auditSink.record 未被调）', async () => {
+    const { PolicyCache } = await import('../src/policy/runtime-policy.js');
+    const { PolicyEngine } = await import('../src/policy/filesystem-policy.js');
+    const { AuditSink } = await import('../src/policy/audit-sink.js');
+
+    // 真实 PolicyCache + 真实 PolicyEngine + mock AuditSink（拦截 record）。
+    const cache = new PolicyCache();
+    const record = vi.fn();
+    // AuditSink 构造需 sender（这里 flush 不触发，sender 给空函数）。
+    const auditSink = {
+      record,
+      flush: vi.fn().mockResolvedValue(undefined),
+    } as unknown as InstanceType<typeof AuditSink>;
+    const engine = new PolicyEngine(cache, auditSink);
+
+    const r = await makeRoot();
+    try {
+      // 命中 root（白名单内放行，行为不变）。
+      const result = await listDir(r.root, engine, 'rt-D008');
+      expect(result.entries.length).toBeGreaterThanOrEqual(0);
+      // D-008：canRead 不调 auditSink.record（读不审计）。
+      expect(record).not.toHaveBeenCalled();
+    } finally {
+      await rm(r.root, { recursive: true, force: true });
+    }
+  });
+
+  it('runtimeId 透传：listDir 把发起 runtime 的 id 传给 canRead', async () => {
+    const spy = makePolicyEngineSpy();
+    const r = await makeRoot();
+    try {
+      await listDir(r.root, spy.engine, 'rt-xyz-789');
+      expect(spy.canRead).toHaveBeenCalledWith('rt-xyz-789', r.root);
     } finally {
       await rm(r.root, { recursive: true, force: true });
     }

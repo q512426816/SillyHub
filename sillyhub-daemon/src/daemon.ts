@@ -1968,7 +1968,15 @@ export class Daemon {
     }
     ws.registerRpcHandler('list_dir', async (params) => {
       const path = typeof params.path === 'string' ? params.path : '';
-      return listDir(path, this._config.allowed_roots);
+      // task-18：改调 PolicyEngine.canRead（读全 allow、不产 audit，D-008），
+      // runtimeId 取发起本次 RPC 的 runtime（handler 注册闭包内可见）。
+      // policyEngine 为 null 时 listDir 内部 fallback 到 config.allowed_roots。
+      return listDir(
+        path,
+        this._policyEngine,
+        runtimeId,
+        this._config.allowed_roots,
+      );
     });
   }
 
