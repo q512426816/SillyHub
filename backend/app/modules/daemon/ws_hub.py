@@ -13,6 +13,7 @@ from app.core.logging import get_logger
 from app.modules.daemon.protocol import (
     DAEMON_MSG_HEARTBEAT_ACK,
     DAEMON_MSG_PERMISSION_RESPONSE,
+    DAEMON_MSG_POLICY_UPDATE,
     DAEMON_MSG_RPC,
     DAEMON_MSG_SELF_UPDATE,
     DAEMON_MSG_TASK_AVAILABLE,
@@ -294,6 +295,28 @@ class DaemonWsHub:
         if version:
             payload["version"] = version
         message = {"type": DAEMON_MSG_SELF_UPDATE, "payload": payload}
+        return await self.send_to_runtime(runtime_id, message)
+
+    async def send_policy_update(
+        self,
+        runtime_id: uuid.UUID,
+        allowed_roots: list[str],
+        version: int,
+    ) -> bool:
+        """Push a filesystem-policy hot-reload downlink to a daemon runtime (task-07 / D-004).
+
+        Thin wrapper around ``send_to_runtime`` that assembles the
+        ``daemon:policy_update`` envelope so the caller (policy service) only
+        supplies the new ``allowed_roots`` and monotonic ``version``. Best-effort:
+        returns False when the runtime is offline or the send failed — the daemon
+        reconciles on its next heartbeat via full-resync, so no error is raised.
+        """
+        payload = {
+            "runtime_id": str(runtime_id),
+            "allowed_roots": allowed_roots,
+            "version": version,
+        }
+        message = {"type": DAEMON_MSG_POLICY_UPDATE, "payload": payload}
         return await self.send_to_runtime(runtime_id, message)
 
     # ── RPC correlation ──────────────────────────────────────────────────────

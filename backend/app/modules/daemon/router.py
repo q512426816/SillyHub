@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import (
@@ -151,6 +152,16 @@ from app.modules.daemon.change_write_router import (  # noqa: E402
 
 router.include_router(change_write_router)
 
+# task-10 / D-006@v1: daemon audit batch upload + paginated audit read.
+# Inherits this router's /daemon prefix → POST resolves to
+# /api/daemon/audit/batch (matches design §7.3); the GET audit read resolves
+# to /api/daemon/workspaces/{wid}/runtimes/{rid}/policy-audit (deviation: design
+# §7.3 wrote /api/workspaces/... but editing app/main.py is out of task-10's
+# allowed_paths — see audit/router.py module docstring).
+from app.modules.daemon.audit.router import router as audit_router  # noqa: E402
+
+router.include_router(audit_router)
+
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 # 管理 UI 端点用 runtime:admin；daemon 自身的注册/心跳/lease 生命周期仍走 get_current_principal
 RuntimeAdminUser = Annotated[User, Depends(require_permission_any(Permission.RUNTIME_ADMIN))]
@@ -255,6 +266,22 @@ async def get_runtimes_usage(
     return RuntimeUsageListResponse(window=window.value, runtimes=runtimes)
 
 
+def _derive_policy_version(updated_at: datetime | None) -> int:
+    """Derive a monotonic policy ``version`` from a runtime's ``updated_at``.
+
+    task-08 / D-004：daemon uses this to drop stale/reordered
+    ``policy_update`` pushes (only accept when incoming version > local).
+    Epoch millis keeps second-level writes distinct and is monotonic across
+    successive DB writes (``update_allowed_roots`` bumps ``updated_at`` each
+    call). A missing ``updated_at`` falls back to wall-clock now so the push
+    still carries a sensible, forward-only value.
+    """
+    ts = updated_at if updated_at is not None else datetime.now(UTC)
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    return int(ts.timestamp() * 1000)
+
+
 def _runtime_read(runtime: object, owner: object | None = None) -> DaemonRuntimeRead:
     """Build DaemonRuntimeRead, attaching nested OwnerRead when an owner user
     row is available (task-04 / D-006@v1)."""
@@ -350,6 +377,11 @@ async def update_runtime_allowed_roots(
     """PUT runtime allowed_roots sandbox (2026-06-29-runtime-allowed-roots-config task-02).
 
     admin 配置 daemon 可访问目录（多路径，绝对路径或 ~ 开头）。
+
+    task-08 / design §5.3：DB 写入成功后 best-effort 推送 ``policy_update`` 到在线
+    daemon（sub-second 热更新）。推送失败（runtime 离线 / 通道异常）不阻断 PUT
+    响应——daemon 在下一次心跳拉取全量 resync 兜底（R-07）。``version`` 从更新后
+    runtime 的 ``updated_at`` 派生为 epoch 毫秒，单调递增，供 daemon 丢弃乱序旧推送。
     """
     svc = DaemonService(session)
     try:
@@ -361,6 +393,24 @@ async def update_runtime_allowed_roots(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    # task-08：best-effort WS push（runtime 离线不阻断 PUT，心跳兜底 R-07）。
+    # version 派生自 updated_at（epoch 毫秒，单调）。
+    version = _derive_policy_version(runtime.updated_at)
+    # Lazy import（与 list_dir / self_update 一致）：ws_hub 单例经
+    # get_daemon_ws_hub 取，测试 per-test patch 不会被模块顶部 import 绑死。
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+    try:
+        hub = get_daemon_ws_hub()
+        await hub.send_policy_update(runtime.id, list(runtime.allowed_roots or []), version)
+    except Exception:
+        log.warning(
+            "allowed_roots_policy_push_failed",
+            runtime_id=str(runtime.id),
+            version=version,
+            exc_info=True,
+        )
     return DaemonRuntimeRead.model_validate(runtime)
 
 
