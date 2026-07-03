@@ -122,7 +122,14 @@ class WorkspaceCreate(BaseModel):
     # change 2026-06-18-workspace-client-path). server-local default keeps the
     # existing create flow byte-identical.
     path_source: PathSourceLiteral = "server-local"
+    # daemon_runtime_id：legacy 全局 daemon 绑定字段（FK daemon_runtimes）。daemon-entity-binding
+    # 后退化为 read-only fallback；新链路（创建对话框 / 详情页 switcher）一律走 daemon_id。
+    # 仍保留为 optional 兼容 scan-generate 等内部老调用方（仅传 runtime_id 场景）。
     daemon_runtime_id: uuid.UUID | None = None
+    # daemon_id：守护进程实体（FK daemon_instances）——2026-07-03-daemon-entity-binding
+    # task-10/11 补遗的「添加工作区」对话框 daemon 维度入口。daemon-client create
+    # 选此字段；service.create 据此建 workspace_member_runtimes 成员绑定行（D-004）。
+    daemon_id: uuid.UUID | None = None
     # spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy，D-001/D-004）。
     # daemon-client workspace 创建时用户可选；service 层据此落 spec_workspaces.strategy。
     # 默认 platform-managed 保持现有行为零回归。
@@ -147,8 +154,17 @@ class WorkspaceCreate(BaseModel):
 
     @model_validator(mode="after")
     def _validate_daemon_binding(self) -> "WorkspaceCreate":
-        if self.path_source == "daemon-client" and self.daemon_runtime_id is None:
-            raise ValueError("daemon_runtime_id is required when path_source='daemon-client'")
+        # daemon-client 路径来源需绑定一个守护进程：daemon_id（新，实体维度）或
+        # daemon_runtime_id（legacy fallback）至少一个非空。task-10/11 补遗后 daemon_id 优先。
+        if (
+            self.path_source == "daemon-client"
+            and self.daemon_id is None
+            and self.daemon_runtime_id is None
+        ):
+            raise ValueError(
+                "daemon_id (or legacy daemon_runtime_id) is required when "
+                "path_source='daemon-client'"
+            )
         return self
 
 

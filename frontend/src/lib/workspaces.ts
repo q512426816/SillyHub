@@ -174,6 +174,13 @@ export interface CreateWorkspaceInput {
   spec_strategy?: string;
   // task-10：daemon-client 路径来源（默认 server-local）
   path_source?: "server-local" | "daemon-client";
+  /**
+   * 守护进程实体 ID（FK daemon_instances）。daemon-entity-binding task-10/11 补遗：
+   * 「添加工作区」对话框 daemon 维度入口传此字段，不再传 daemon_runtime_id。
+   * backend WorkspaceService.create 据此建 workspace_member_runtimes 成员绑定行。
+   */
+  daemon_id?: string | null;
+  /** @deprecated daemon-entity-binding 后退化为 fallback；新链路一律用 daemon_id。 */
   daemon_runtime_id?: string | null;
 }
 

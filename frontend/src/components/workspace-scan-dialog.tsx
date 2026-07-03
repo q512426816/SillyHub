@@ -10,7 +10,13 @@ import { AgentProviderSelect } from "@/components/AgentProviderSelect";
 import { Input } from "@/components/ui/input";
 import { DaemonDirBrowser } from "@/components/daemon-dir-browser";
 import { normalizeClientPath } from "@/lib/client-path";
-import { listOnlineRuntimes, type DaemonRuntimeRead } from "@/lib/daemon";
+import {
+  listDaemonInstances,
+  listDaemonRuntimes,
+  PROVIDER_META,
+  type DaemonInstanceRead,
+  type DaemonRuntimeRead,
+} from "@/lib/daemon";
 import { errMessage } from "@/lib/errors";
 import { hasAnyPermission } from "@/lib/permission";
 import {
@@ -43,8 +49,13 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   const [scanModel, setScanModel] = useState<string | null>(null);
 
   const [pathSource, setPathSource] = useState<PathSource>("daemon-client");
-  const [runtimes, setRuntimes] = useState<DaemonRuntimeRead[]>([]);
-  const [daemonRuntimeId, setDaemonRuntimeId] = useState<string>("");
+  // daemon-entity-binding task-10/11 补遗：创建对话框从 runtime 维度改为 daemon 实体维度。
+  // 下拉展示守护进程实体（含全部 provider），value=inst.id；不再按 runtime 一项一条。
+  const [instances, setInstances] = useState<DaemonInstanceRead[]>([]);
+  const [daemonId, setDaemonId] = useState<string>("");
+  // list-dir RPC 仍走 runtime 维度路由（/runtimes/{runtime_id}/list-dir，内部解析 daemon_id）。
+  // 选 daemon 后从此 daemon 的 online providers 中取第一个 runtime_id 用于路径浏览。
+  const [browseRuntimeId, setBrowseRuntimeId] = useState<string>("");
   const [daemonRootPath, setDaemonRootPath] = useState("");
   // spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy）：daemon-client workspace
   // 创建时用户可选源项目已有 .sillyspec 如何进入平台。默认 platform-managed 零回归。
@@ -62,16 +73,36 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
 
   useEffect(() => {
     if (pathSource !== "daemon-client") return;
-    void listOnlineRuntimes()
-      .then(setRuntimes)
-      .catch(() => setRuntimes([]));
+    void listDaemonInstances()
+      .then(setInstances)
+      .catch(() => setInstances([]));
   }, [pathSource]);
+
+  // task-10/11 补遗：选 daemon 后解析该 daemon 下第一个 online runtime_id 供 list-dir 浏览。
+  // list-dir RPC 端点仍按 runtime_id 路由（/runtimes/{runtime_id}/list-dir），内部解析 daemon_id；
+  // 创建则按 daemon_id 走 WorkspaceService.create 建 member binding 行。
+  useEffect(() => {
+    if (!daemonId) {
+      setBrowseRuntimeId("");
+      return;
+    }
+    void listDaemonRuntimes()
+      .then((all) => {
+        const hit = all.find(
+          (r) =>
+            r.daemon_instance_id === daemonId && r.status === "online",
+        );
+        setBrowseRuntimeId(hit?.id ?? "");
+      })
+      .catch(() => setBrowseRuntimeId(""));
+  }, [daemonId]);
 
   const handlePathSourceChange = (next: PathSource) => {
     setPathSource(next);
     setError(null);
     if (next === "server-local") {
-      setDaemonRuntimeId("");
+      setDaemonId("");
+      setBrowseRuntimeId("");
       setDaemonRootPath("");
     } else {
       setRootPath("");
@@ -81,7 +112,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   };
 
   const handleCreateDaemonClient = async () => {
-    if (!daemonRuntimeId || !daemonRootPath) return;
+    if (!daemonId || !daemonRootPath) return;
     const normalizedRoot = normalizeClientPath(daemonRootPath);
     setError(null);
     setPhase("creating");
@@ -90,7 +121,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
         name: name.trim() || normalizedRoot.split(/[\\/]/).filter(Boolean).at(-1) || normalizedRoot,
         root_path: normalizedRoot,
         path_source: "daemon-client",
-        daemon_runtime_id: daemonRuntimeId,
+        daemon_id: daemonId,
         spec_strategy: specStrategy,
       });
       onCreated();
@@ -221,29 +252,49 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
               </label>
               <select
                 className="w-full rounded border bg-background px-2 py-1.5 text-sm"
-                value={daemonRuntimeId}
-                onChange={(e) => setDaemonRuntimeId(e.target.value)}
+                value={daemonId}
+                onChange={(e) => setDaemonId(e.target.value)}
                 disabled={phase === "creating"}
               >
                 <option value="">— 请选择在线守护进程 —</option>
-                {runtimes.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name ?? r.id} ({r.provider ?? "?"})
-                  </option>
-                ))}
+                {instances.map((inst) => {
+                  const label =
+                    inst.display_alias ?? inst.hostname;
+                  const providers = inst.providers
+                    .map((p) => PROVIDER_META[p.provider]?.label ?? p.provider)
+                    .join(" / ");
+                  const isOnline = inst.status === "online";
+                  return (
+                    <option
+                      key={inst.id}
+                      value={inst.id}
+                      // 离线 daemon 也展示但禁选（用户能看到，引导启动）
+                      disabled={!isOnline}
+                    >
+                      {label} · {providers || "无 provider"} ·{" "}
+                      {isOnline ? "在线" : "离线"}
+                    </option>
+                  );
+                })}
               </select>
-              {runtimes.length === 0 && (
+              {instances.length === 0 && (
                 <p className="text-[11px] text-muted-foreground">
                   无在线守护进程，请先启动 sillyhub-daemon。
                 </p>
               )}
             </div>
-            {daemonRuntimeId && (
+            {daemonId && browseRuntimeId && (
               <DaemonDirBrowser
-                runtimeId={daemonRuntimeId}
+                runtimeId={browseRuntimeId}
                 onSelect={(p) => setDaemonRootPath(normalizeClientPath(p))}
                 selectedPath={daemonRootPath}
               />
+            )}
+            {daemonId && !browseRuntimeId && (
+              <p className="text-[11px] text-amber-600">
+                选中的守护进程暂无在线 provider runtime，无法浏览目录；
+                可手动填写路径后创建。
+              </p>
             )}
             {daemonRootPath && (
               <div className="space-y-1.5">

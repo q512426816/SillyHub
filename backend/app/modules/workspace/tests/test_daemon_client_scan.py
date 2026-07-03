@@ -2,6 +2,11 @@
 
 daemon-client workspace 的 root_path 在客户端机器上，backend 读不到。
 create 跳过本地 scan/copytree；scan-generate 派 scan lease 给绑定 daemon。
+
+Change 2026-07-03-daemon-entity-binding task-10/11 补遗：daemon-client create
+改走 daemon_id 维度（守护进程实体）。WorkspaceCreate.daemon_id 必填（与
+daemon_runtime_id 至少一个非空，daemon_id 优先），create 成员绑定行
+workspace_member_runtimes{workspace_id,user_id,daemon_id,root_path,path_source}。
 """
 
 from __future__ import annotations
@@ -9,6 +14,11 @@ from __future__ import annotations
 import uuid
 from unittest.mock import AsyncMock
 
+import pytest
+from pydantic import ValidationError
+
+from app.modules.daemon.model import DaemonInstance
+from app.modules.workspace.member_runtimes.service import get_my_binding
 from app.modules.workspace.schema import WorkspaceCreate
 from app.modules.workspace.service import WorkspaceService
 
@@ -100,3 +110,162 @@ async def test_scan_generate_daemon_client_dispatches_scan(db_session) -> None:
     assert ws.path_source == "daemon-client"
     assert ws.daemon_runtime_id == runtime_id
     assert ws.status == "pending"
+
+
+# ---------------------------------------------------------------------------
+# daemon-entity-binding 补遗（task-10/11）：daemon-client create 走 daemon_id 维度
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_create_daemon_id_replaces_runtime_id_for_daemon_client() -> None:
+    """WorkspaceCreate.path_source='daemon-client' 必填 daemon_id（不再要求 daemon_runtime_id）。
+
+    单传 daemon_id 应通过；同时传 daemon_runtime_id（legacy fallback）也通过；
+    daemon-client 且两者都缺时 ValidationError。
+    """
+    # 只传 daemon_id（新链路）：合法
+    payload = WorkspaceCreate(
+        name="x",
+        root_path="/x",
+        path_source="daemon-client",
+        daemon_id=uuid.uuid4(),
+    )
+    assert payload.daemon_id is not None
+    assert payload.daemon_runtime_id is None
+
+    # server-local 无需任何 daemon 字段：合法
+    WorkspaceCreate(name="y", root_path="/y")
+
+    # daemon-client 且 daemon_id 与 daemon_runtime_id 都缺：非法
+    with pytest.raises(ValidationError):
+        WorkspaceCreate(name="z", root_path="/z", path_source="daemon-client")
+
+
+async def test_create_daemon_client_writes_member_binding_for_daemon_id(db_session) -> None:
+    """daemon-client create 用 daemon_id 维度，落 workspace + 一条 WorkspaceMemberRuntime 行。
+
+    覆盖 task-10/11 补遗：创建对话框选 daemon 后，service.create 必须建一条
+    成员绑定行（workspace_id+created_by+daemon_id+root_path+path_source='daemon-client'），
+    让后续派发/扫描经 member binding 走（D-004 / FR）。
+    """
+    from app.modules.auth.model import User
+
+    user_id = uuid.uuid4()
+    db_session.add(
+        User(
+            id=user_id,
+            email=f"creator-{user_id.hex[:8]}@example.com",
+            password_hash="x",
+            display_name="Creator",
+            status="active",
+        )
+    )
+    daemon = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        hostname="host-1",
+        server_url="http://localhost:8000",
+        status="online",
+    )
+    db_session.add(daemon)
+    await db_session.flush()
+
+    service = WorkspaceService(db_session)
+    ws = await service.create(
+        WorkspaceCreate(
+            name="Daemon Project",
+            root_path="/remote/daemon/proj",
+            path_source="daemon-client",
+            daemon_id=daemon.id,
+        ),
+        created_by=user_id,
+    )
+
+    # workspace 行落库；daemon_runtime_id 留空（global fallback 字段废弃）
+    assert ws.path_source == "daemon-client"
+    assert ws.status == "active"
+
+    # 成员绑定行已建：daemon_id / root_path / path_source 写入；init_synced_* 未触发（None）
+    binding = await get_my_binding(db_session, ws.id, user_id)
+    assert binding is not None
+    assert binding.daemon_id == daemon.id
+    assert binding.root_path == "/remote/daemon/proj"
+    assert binding.path_source == "daemon-client"
+    assert binding.init_synced_at is None
+    assert binding.init_synced_spec_version is None
+
+
+async def test_create_daemon_client_without_daemon_id_skips_member_binding(
+    db_session,
+) -> None:
+    """仅传 daemon_runtime_id（legacy，无 daemon_id）的 daemon-client create：不建 member binding。
+
+    老链路（task-08 scan-generate 等内部）仍只传 daemon_runtime_id；为不引入回归，
+    service.create 在 daemon_id 缺失时不写 member binding（仅落 workspace + 空 spec）。
+    """
+    service = WorkspaceService(db_session)
+    ws = await service.create(
+        WorkspaceCreate(
+            name="Legacy Daemon",
+            root_path="/remote/legacy",
+            path_source="daemon-client",
+            daemon_runtime_id=uuid.uuid4(),
+        ),
+        created_by=None,
+    )
+    assert ws.path_source == "daemon-client"
+    assert ws.daemon_runtime_id is not None
+
+
+async def test_create_daemon_client_rejects_daemon_owned_by_other_user(db_session) -> None:
+    """daemon_id 归属校验：daemon 属他人 → create 拒绝（防跨用户劫持）。
+
+    与 upsert_my_binding 的 daemon_not_owned 一致（D-004 / FR）；service.create
+    走相同守护，daemon 不属于 created_by 时抛 AppError(code=daemon_not_owned)。
+    """
+    from app.core.errors import AppError
+    from app.modules.auth.model import User
+
+    owner_id = uuid.uuid4()
+    other_id = uuid.uuid4()
+    db_session.add(
+        User(
+            id=owner_id,
+            email=f"owner-{owner_id.hex[:8]}@example.com",
+            password_hash="x",
+            display_name="Owner",
+            status="active",
+        )
+    )
+    db_session.add(
+        User(
+            id=other_id,
+            email=f"other-{other_id.hex[:8]}@example.com",
+            password_hash="x",
+            display_name="Other",
+            status="active",
+        )
+    )
+    # daemon 属 other_user
+    daemon = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=other_id,
+        hostname="host-other",
+        server_url="http://localhost:8000",
+        status="online",
+    )
+    db_session.add(daemon)
+    await db_session.flush()
+
+    service = WorkspaceService(db_session)
+    with pytest.raises(AppError) as exc_info:
+        await service.create(
+            WorkspaceCreate(
+                name="Hijack",
+                root_path="/remote/hijack",
+                path_source="daemon-client",
+                daemon_id=daemon.id,
+            ),
+            created_by=owner_id,
+        )
+    assert exc_info.value.code == "daemon_not_owned"
