@@ -89,10 +89,11 @@ vi.mock("@/lib/workspace-binding", () => ({
 
 const daemonApi = vi.hoisted(() => ({
   listDaemonRuntimes: vi.fn(),
+  listDaemonInstances: vi.fn(),
 }));
 vi.mock("@/lib/daemon", async () => {
   const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
-  return { ...actual, getDaemonRuntime: vi.fn(async () => null), listDaemonRuntimes: daemonApi.listDaemonRuntimes };
+  return { ...actual, getDaemonRuntime: vi.fn(async () => null), listDaemonRuntimes: daemonApi.listDaemonRuntimes, listDaemonInstances: daemonApi.listDaemonInstances };
 });
 
 const componentsApi = vi.hoisted(() => ({ listComponents: vi.fn() }));
@@ -501,6 +502,9 @@ describe("WorkspaceDetailPage daemon-client 扫描入口（task-14 / D-006@v1 + 
         updated_at: "2026-07-01T00:00:00Z",
       },
     ]);
+    daemonApi.listDaemonInstances.mockResolvedValue([
+      { id: "did-1", hostname: "HOST-1", display_alias: null, status: "online", providers: [{ provider: "claude", status: "online" }] },
+    ]);
 
     const { ws, specWs } = makeWorkspace("repo-native");
     ws.default_agent = null;
@@ -552,6 +556,9 @@ describe("WorkspaceDetailPage daemon-client 扫描入口（task-14 / D-006@v1 + 
         created_at: "2026-07-01T00:00:00Z",
         updated_at: "2026-07-01T00:00:00Z",
       },
+    ]);
+    daemonApi.listDaemonInstances.mockResolvedValue([
+      { id: "did-1", hostname: "HOST-1", display_alias: null, status: "online", providers: [{ provider: "claude", status: "offline" }] },
     ]);
 
     const { ws, specWs } = makeWorkspace("repo-native");

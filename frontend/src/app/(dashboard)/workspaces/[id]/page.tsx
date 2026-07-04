@@ -11,7 +11,7 @@ import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { WorkspaceDaemonSwitcher } from "@/components/workspace-daemon-switcher";
 import { WorkspacePathFields } from "@/components/workspace-path-fields";
 import { ApiError } from "@/lib/api";
-import { getDaemonRuntime, listDaemonRuntimes, PROVIDER_META, type DaemonRuntimeRead } from "@/lib/daemon";
+import { getDaemonRuntime, listDaemonInstances, listDaemonRuntimes, PROVIDER_META, type DaemonInstanceRead, type DaemonRuntimeRead } from "@/lib/daemon";
 import { isDaemonClientWorkspace } from "@/lib/workspace-path";
 import {
   type AgentRunStatus,
@@ -127,6 +127,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const [savingDefaultAgent, setSavingDefaultAgent] = useState(false);
   // task-11 / daemon-entity-binding：当前绑定守护进程的在线 provider 列表
   const [boundDaemonProviders, setBoundDaemonProviders] = useState<string[]>([]);
+  const [boundDaemon, setBoundDaemon] = useState<DaemonInstanceRead | null>(null);
   // ql-20260630-001：scan 进入 failed/killed 视为"未完成·可重扫"（守护进程重启等中断），
   // 不以冷冰冰终态失败——scan 幂等，直接给重新扫描入口，对齐"像会话一样继续"。
   const scanInterrupted = scanStatus === "failed" || scanStatus === "killed";
@@ -213,11 +214,12 @@ export default function WorkspaceDetailPage({ params }: Props) {
   useEffect(() => {
     if (!myBinding?.daemon_id) {
       setBoundDaemonProviders([]);
+      setBoundDaemon(null);
       return;
     }
     let active = true;
-    listDaemonRuntimes()
-      .then((runtimes) => {
+    Promise.all([listDaemonRuntimes(), listDaemonInstances()])
+      .then(([runtimes, instances]) => {
         if (!active) return;
         const filtered = runtimes.filter(
           (r) =>
@@ -229,9 +231,15 @@ export default function WorkspaceDetailPage({ params }: Props) {
           new Set(filtered.map((r) => r.provider as string)),
         );
         setBoundDaemonProviders(providers);
+        setBoundDaemon(
+          instances.find((i) => i.id === myBinding.daemon_id) ?? null,
+        );
       })
       .catch(() => {
-        if (active) setBoundDaemonProviders([]);
+        if (active) {
+          setBoundDaemonProviders([]);
+          setBoundDaemon(null);
+        }
       });
     return () => {
       active = false;
@@ -484,6 +492,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
           <WorkspacePathFields
             workspace={workspace}
             runtime={boundRuntime}
+            daemon={boundDaemon}
             linkRuntime
           />
           <dt className="text-muted-foreground">创建于</dt>
