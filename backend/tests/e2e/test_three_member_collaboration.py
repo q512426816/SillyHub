@@ -19,7 +19,7 @@ from sqlmodel import col
 
 from app.modules.auth.model import Role, User, UserWorkspaceRole
 from app.modules.change_writer.proxy import proxy_create_change
-from app.modules.daemon.model import DaemonRuntime
+from app.modules.daemon.model import DaemonInstance, DaemonRuntime
 from app.modules.scan_docs.conflict_service import ScanDocConflictService
 from app.modules.scan_docs.model import ScanDocument
 from app.modules.spec_workspace.schema import SpecWorkspaceCreate
@@ -79,6 +79,25 @@ async def _create_runtime(session, user_id: uuid.UUID, provider: str = "claude")
     session.add(rt)
     await session.flush()
     return rt
+
+
+async def _create_daemon_instance(
+    session, user_id: uuid.UUID, hostname: str = "test-host"
+) -> DaemonInstance:
+    """daemon-entity-binding D-004：member binding 目标改为 daemon 实体。
+
+    创建一行 daemon_instances（身份 = 上报的本地 uuid），供 upsert_my_binding
+    的 daemon_id 参数引用。机器级字段够用即可（hostname/server_url 必填）。
+    """
+    inst = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        hostname=hostname,
+        server_url="http://test.local",
+    )
+    session.add(inst)
+    await session.flush()
+    return inst
 
 
 async def _get_workspace_owner_role(session) -> Role:
@@ -199,8 +218,11 @@ async def test_e2e_three_member_collaboration(tmp_path: Path, db_session) -> Non
     assert len(members_after) == 3  # owner + alice + bob
 
     # Alice and Bob configure their bindings (SC-1).
+    # daemon-entity-binding D-004：绑定目标从 runtime 改 daemon 实体。
+    # alice 仍创建 runtime（Phase 7 proxy_create_change 走老 runtime_id 接口要用）。
     alice_runtime = await _create_runtime(db_session, alice.id, provider="claude")
-    bob_runtime = await _create_runtime(db_session, bob.id, provider="codex")
+    alice_daemon = await _create_daemon_instance(db_session, alice.id, hostname="alice-host")
+    bob_daemon = await _create_daemon_instance(db_session, bob.id, hostname="bob-host")
 
     alice_root = tmp_path / "ws-alice"
     alice_root.mkdir(parents=True, exist_ok=True)
@@ -211,7 +233,7 @@ async def test_e2e_three_member_collaboration(tmp_path: Path, db_session) -> Non
         db_session,
         ws_id,
         alice.id,
-        runtime_id=alice_runtime.id,
+        daemon_id=alice_daemon.id,
         root_path=str(alice_root),
         path_source="daemon-client",
     )
@@ -219,7 +241,7 @@ async def test_e2e_three_member_collaboration(tmp_path: Path, db_session) -> Non
         db_session,
         ws_id,
         bob.id,
-        runtime_id=bob_runtime.id,
+        daemon_id=bob_daemon.id,
         root_path=str(bob_root),
         path_source="daemon-client",
     )
@@ -239,7 +261,7 @@ async def test_e2e_three_member_collaboration(tmp_path: Path, db_session) -> Non
         alice.id,
     )
     assert str(alice_resolved.root_path) == str(alice_root)
-    assert alice_resolved.runtime_id == alice_runtime.id
+    assert alice_resolved.daemon_id == alice_daemon.id
     assert alice_resolved.path_source == "daemon-client"
 
     bob_resolved = await MemberBindingResolver.resolve_member_binding(
@@ -248,7 +270,7 @@ async def test_e2e_three_member_collaboration(tmp_path: Path, db_session) -> Non
         bob.id,
     )
     assert str(bob_resolved.root_path) == str(bob_root)
-    assert bob_resolved.runtime_id == bob_runtime.id
+    assert bob_resolved.daemon_id == bob_daemon.id
     assert bob_resolved.path_source == "daemon-client"
 
     # Non-member should get 409 (SC-2 missing-binding guard).

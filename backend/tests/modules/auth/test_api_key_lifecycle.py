@@ -53,13 +53,20 @@ async def test_api_key_end_to_end_lifecycle(client: AsyncClient, db_session: Asy
     key_h = {"X-API-Key": plaintext}
 
     # 1. Daemon registers with API key
+    # daemon-entity-binding D-006：register body 从 {name, provider} 改为
+    # per-daemon 上报（daemon_local_id + 机器级字段 + providers[]）。
     register_resp = await client.post(
         "/api/daemon/register",
         headers=key_h,
-        json={"name": "test-daemon", "provider": "claude"},
+        json={
+            "daemon_local_id": str(uuid.uuid4()),
+            "server_url": "http://test.local",
+            "hostname": "test-host",
+            "providers": [{"provider": "claude"}],
+        },
     )
     assert register_resp.status_code == 201, register_resp.text
-    runtime_id = register_resp.json()["id"]
+    runtime_id = register_resp.json()["runtimes"][0]["runtime_id"]
 
     # 2. Daemon lists its runtimes with API key
     list_resp = await client.get("/api/daemon/runtimes", headers=key_h)
@@ -89,6 +96,11 @@ async def test_daemon_still_works_with_bearer_token(
     resp = await client.post(
         "/api/daemon/register",
         headers=h,
-        json={"name": "bearer-daemon", "provider": "claude"},
+        json={
+            "daemon_local_id": str(uuid.uuid4()),
+            "server_url": "http://test.local",
+            "hostname": "bearer-host",
+            "providers": [{"provider": "claude"}],
+        },
     )
     assert resp.status_code == 201
