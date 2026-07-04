@@ -22,6 +22,8 @@
  */
 
 import { REST_PREFIX } from './protocol.js';
+import { DAEMON_VERSION } from './daemon-version.js';
+import { BUILD_ID } from './build-id.js';
 import type { ExecutionContextPayload } from './types.js';
 import type { SessionRecoverStatus } from './daemon.js';
 
@@ -42,6 +44,11 @@ export interface RegisterBody {
   os?: string;
   arch?: string;
   allowed_roots?: string[];
+  /** daemon 自身版本（2026-07-04-daemon-version-management D-001）。 */
+  /** daemon_version=语义版本（DAEMON_VERSION），daemon_build_id=git SHA（BUILD_ID）。 */
+  /** hub-client 内部填充，调用方无需传；后端写入 daemon_instances.version/build_id。 */
+  daemon_version: string;
+  daemon_build_id: string;
   /** 探测到的 provider 列表，每项 {provider, version?, status?}。 */
   providers: { provider: string; version?: string; status?: string }[];
 }
@@ -85,6 +92,9 @@ export interface CompleteLeaseBody {
 export interface HeartbeatBody {
   /** daemon 本地 uuid（= daemon_instances.id）。 */
   daemon_local_id: string;
+  /** daemon 自身版本（D-001/D-002，register + heartbeat 都带）。hub-client 内部填充。 */
+  daemon_version: string;
+  daemon_build_id: string;
   /** 各 provider 当前状态，每项 {provider, status}。 */
   providers: { provider: string; status?: string }[];
 }
@@ -304,6 +314,8 @@ export class HubClient {
       daemon_local_id: params.daemonLocalId,
       server_url: params.serverUrl,
       hostname: params.hostname,
+      daemon_version: DAEMON_VERSION,
+      daemon_build_id: BUILD_ID,
       providers: params.providers,
     };
     if (params.os) body.os = params.os;
@@ -330,7 +342,7 @@ export class HubClient {
     return this._request<Record<string, unknown>>(
       'POST',
       `${REST_PREFIX}/heartbeat`,
-      { daemon_local_id: daemonLocalId, providers: providers ?? [] } satisfies HeartbeatBody,
+      { daemon_local_id: daemonLocalId, daemon_version: DAEMON_VERSION, daemon_build_id: BUILD_ID, providers: providers ?? [] } satisfies HeartbeatBody,
     );
   }
 

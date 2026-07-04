@@ -83,6 +83,11 @@ class DaemonRegisterRequest(BaseModel):
     hostname: str = Field(max_length=255)
     os: str | None = Field(default=None, max_length=50)
     arch: str | None = Field(default=None, max_length=50)
+    # daemon 自身版本（2026-07-04-daemon-version-management D-001）。
+    # daemon_version=语义版本（DAEMON_VERSION），daemon_build_id=git SHA（BUILD_ID）。
+    # Optional 兼容旧 daemon（不上报则 NULL，D-008）。
+    daemon_version: str | None = Field(default=None, max_length=50)
+    daemon_build_id: str | None = Field(default=None, max_length=50)
     allowed_roots: list[str] = Field(default_factory=lambda: ["~/.sillyhub"])
     providers: list[DaemonRegisterProviderItem] = Field(min_length=1)
 
@@ -136,6 +141,10 @@ class DaemonRuntimeRead(BaseModel):
     name: str | None
     provider: str | None
     version: str | None
+    # daemon 进程版本（2026-07-04-daemon-version-management D-005），JOIN daemon_instances 带出。
+    # 区别于 version（= provider/agent CLI 版本）。default None 兼容不 JOIN 的端点。
+    daemon_version: str | None = None
+    daemon_build_id: str | None = None
     os: str | None = None
     arch: str | None = None
     status: str | None
@@ -207,14 +216,21 @@ class DaemonInstanceRead(BaseModel):
     hostname: str
     display_alias: str | None = None
     status: str
+    # daemon 进程版本（2026-07-04-daemon-version-management D-005），from_attributes 自动映射。
+    version: str | None = None
+    build_id: str | None = None
     providers: list[DaemonInstanceProviderItem] = Field(default_factory=list)
 
 
 # ── Heartbeat ───────────────────────────────────────────────────────────────
 
 
+# [DEPRECATED] 旧 per-runtime heartbeat body（runtime_id 版本），已被 router.py 内联的
+# per-daemon DaemonHeartbeatRequest（daemon_local_id 版本，design §5.4 / D-006）取代，
+# 不再被任何端点使用。保留仅为历史参考，勿复用。
+# 2026-07-04-daemon-version-management 核实（R-01 命名冲突，生效版在 router.py:152）。
 class DaemonHeartbeatRequest(BaseModel):
-    """Request body for HTTP heartbeat (WebSocket fallback)."""
+    """[DEPRECATED] 旧 per-runtime heartbeat body，已被 per-daemon 版本取代。"""
 
     runtime_id: uuid.UUID
 

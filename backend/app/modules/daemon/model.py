@@ -65,6 +65,13 @@ class DaemonInstance(BaseModel, table=True):
         default=None,
         sa_column=Column(String(50), nullable=True),
     )
+    # daemon 构建标识（git short SHA，release 注入；dev="dev"）。
+    # 2026-07-04-daemon-version-management D-003：用于精确版本比对与升级判断
+    # （区别于 version 的语义版本；self-update preflight 按 build_id 比对）。
+    build_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(50), nullable=True),
+    )
     # 机器级沙箱（从旧 runtime.allowed_roots 提升到此，design §4.1 / §4.2）。
     allowed_roots: list[str] = Field(
         default_factory=lambda: ["~/.sillyhub"],

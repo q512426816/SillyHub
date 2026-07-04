@@ -15,6 +15,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { HubClient, HubHttpError } from '../src/hub-client';
 import { REST_PREFIX } from '../src/protocol';
+import { DAEMON_VERSION } from '../src/daemon-version';
+import { BUILD_ID } from '../src/build-id';
 
 // ── fetch mock 工具 ──────────────────────────────────────────────────────────
 // 记录最后一次调用的 (url, init)，并返回可控 Response。
@@ -152,6 +154,8 @@ describe('HubClient — 6 个 lease/runtime 端点 URL/method/body 契约', () =
     expect(lastCall!.url).toBe(`http://x:8000${REST_PREFIX}/heartbeat`);
     expect(JSON.parse(lastCall!.init.body as string)).toEqual({
       daemon_local_id: 'dlid-1',
+      daemon_version: DAEMON_VERSION,
+      daemon_build_id: BUILD_ID,
       providers: [{ provider: 'claude', status: 'online' }],
     });
   });
@@ -196,6 +200,9 @@ describe('HubClient — register 条件 body 拼装（per-daemon）', () => {
     expect(body.providers).toEqual([
       { provider: 'claude', version: '2.1.0', status: 'available' },
     ]);
+    // daemon 自身版本（2026-07-04-daemon-version-management D-001，hub-client 内部填）
+    expect(body.daemon_version).toBe(DAEMON_VERSION);
+    expect(body.daemon_build_id).toBe(BUILD_ID);
     // 条件字段未提供 → 不写入
     expect(body.os).toBeUndefined();
     expect(body.arch).toBeUndefined();

@@ -161,6 +161,8 @@ class RuntimeService:
         arch: str | None = None,
         allowed_roots: list[str] | None = None,
         providers: list[dict] | None = None,
+        daemon_version: str | None = None,
+        daemon_build_id: str | None = None,
     ) -> DaemonRegisterResult:
         """Per-daemon 注册（design §5.2 / D-006 / D-001）。
 
@@ -187,6 +189,8 @@ class RuntimeService:
                 server_url=server_url,
                 os=os,
                 arch=arch,
+                version=daemon_version,
+                build_id=daemon_build_id,
                 allowed_roots=roots,
                 status="online",
                 last_heartbeat_at=now,
@@ -211,6 +215,8 @@ class RuntimeService:
             instance.server_url = server_url
             instance.os = os
             instance.arch = arch
+            instance.version = daemon_version
+            instance.build_id = daemon_build_id
             instance.allowed_roots = roots
             instance.status = "online"
             instance.last_heartbeat_at = now
@@ -325,6 +331,8 @@ class RuntimeService:
         self,
         daemon_local_id: uuid.UUID,
         providers: list[dict] | None = None,
+        daemon_version: str | None = None,
+        daemon_build_id: str | None = None,
     ) -> DaemonInstance:
         """Per-daemon 心跳（design §5.4 / §9.1 / D-006）。
 
@@ -352,6 +360,11 @@ class RuntimeService:
         now = datetime.now(UTC)
         instance.last_heartbeat_at = now
         instance.updated_at = now
+        # 仅在上报非 None 时刷新版本（旧 daemon 不上报保持原值，D-008 兼容）。
+        if daemon_version is not None:
+            instance.version = daemon_version
+        if daemon_build_id is not None:
+            instance.build_id = daemon_build_id
         if instance.status != "disabled":
             instance.status = "online"
         self._session.add(instance)
@@ -460,7 +473,7 @@ class RuntimeService:
         user_id: uuid.UUID | None,
         limit: int,
         offset: int,
-    ) -> tuple[list[tuple[DaemonRuntime, User | None]], int]:
+    ) -> tuple[list[tuple[DaemonRuntime, User | None, DaemonInstance | None]], int]:
         """Paginated filtered runtime list with owner JOIN (task-04 / FR-01/02/04).
 
         - 普通账号固定追加 ``user_id == actor_user_id``；请求的 ``user_id`` 被忽略。
@@ -499,8 +512,9 @@ class RuntimeService:
         total = int((await self._session.scalar(total_stmt)) or 0)
 
         rows_stmt = (
-            select(DaemonRuntime, User)
+            select(DaemonRuntime, User, DaemonInstance)
             .outerjoin(User, DaemonRuntime.user_id == User.id)
+            .outerjoin(DaemonInstance, DaemonRuntime.daemon_instance_id == DaemonInstance.id)
             .order_by(col(DaemonRuntime.created_at).desc())
             .limit(limit)
             .offset(offset)
@@ -508,7 +522,10 @@ class RuntimeService:
         if filters:
             rows_stmt = rows_stmt.where(*filters)
         rows = list((await self._session.execute(rows_stmt)).all())
-        return [(runtime, owner) for runtime, owner in rows], total
+        return (
+            [(runtime, owner, instance) for runtime, owner, instance in rows],
+            total,
+        )
 
     async def update_runtime(
         self,

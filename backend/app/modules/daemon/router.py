@@ -116,23 +116,65 @@ def _compute_daemon_version() -> str:
         return "unknown"
 
 
+def _compute_daemon_semver() -> str:
+    """从已部署 bundle 提取 DAEMON_VERSION（语义版本）。
+
+    2026-07-04-daemon-version-management D-004/D-009：与 BUILD_ID（SHA）分开提取，
+    供 GET /api/daemon/version 展示语义版本（self-update 仍用 BUILD_ID 比对）。
+    提取失败回退 "unknown"。
+    """
+    import re
+
+    try:
+        bundle_path = get_settings().daemon_dist_dir / "sillyhub-daemon.js"
+        if not bundle_path.is_file():
+            return "unknown"
+        text = bundle_path.read_text(errors="replace")
+        m = re.search(r'DAEMON_VERSION\s*=\s*["\x27]([^"\x27]+)', text)
+        return m.group(1) if m else "unknown"
+    except Exception:
+        return "unknown"
+
+
 def get_daemon_latest_version() -> str:
-    """缓存 daemon latest version（进程级，deploy 后不变）。"""
+    """缓存 daemon latest BUILD_ID（git SHA，进程级，deploy 后不变）。
+
+    2026-07-04-daemon-version-management D-009：返回值仍为 SHA，供 self-update 端点
+    WS 推送（daemon preflight 按 BUILD_ID 比对）。语义版本走 get_daemon_latest_semver。
+    """
     global _DAEMON_VERSION_CACHE
     if _DAEMON_VERSION_CACHE is None:
         _DAEMON_VERSION_CACHE = _compute_daemon_version()
     return _DAEMON_VERSION_CACHE
 
 
+def get_daemon_latest_semver() -> str:
+    """缓存 daemon latest 语义版本（DAEMON_VERSION，供前端展示）。"""
+    global _DAEMON_SEMVER_CACHE
+    if _DAEMON_SEMVER_CACHE is None:
+        _DAEMON_SEMVER_CACHE = _compute_daemon_semver()
+    return _DAEMON_SEMVER_CACHE
+
+
 _DAEMON_VERSION_CACHE: str | None = None
+_DAEMON_SEMVER_CACHE: str | None = None
 
 
 class DaemonVersionResponse(BaseModel):
-    """GET /api/daemon/version 响应：daemon 分发元数据（公开端点）。"""
+    """GET /api/daemon/version 响应：daemon 分发元数据（公开端点）。
 
-    latest: str = Field(description="最新发布版本号")
+    2026-07-04-daemon-version-management D-004：新增 latest_version（语义）+
+    latest_build_id（SHA），供前端版本比对与升级入口。旧 latest/minRequired/
+    downloadUrl 保留（install.sh 兼容）。
+    """
+
+    latest: str = Field(description="最新发布版本号（= latest_build_id 回退值，兼容 install.sh）")
     minRequired: str = Field(description="最低兼容版本号（低于则需升级）")  # noqa: N815 - JSON 契约字段名（install.sh/前端消费，不可改 snake_case）
     downloadUrl: str = Field(description="单文件 bundle 下载地址（相对站内路径）")  # noqa: N815 - JSON 契约字段名（install.sh/前端消费，不可改 snake_case）
+    latest_version: str = Field(
+        description="最新语义版本（DAEMON_VERSION，bundle 提取失败=unknown）"
+    )
+    latest_build_id: str = Field(description="最新构建标识（BUILD_ID/git SHA，前端升级比对用）")
 
 
 # ── Per-daemon heartbeat DTO（inline，task-07）─────────────────────────────────
@@ -154,9 +196,13 @@ class DaemonHeartbeatRequest(BaseModel):
 
     daemon 周期上报其 ``daemon_local_id``（=daemon_instances.id）+ 各 provider 的
     当前 status。backend 刷新 daemon_instances.last_heartbeat_at + 各 runtime.status。
+    2026-07-04-daemon-version-management：同时上报 daemon_version/daemon_build_id
+    （D-002，register + heartbeat 都带），backend 刷新 instance.version/build_id。
     """
 
     daemon_local_id: uuid.UUID = Field(description="daemon 本地 uuid（daemon_instances.id）")
+    daemon_version: str | None = Field(default=None, max_length=50)
+    daemon_build_id: str | None = Field(default=None, max_length=50)
     providers: list[DaemonHeartbeatProviderItem] = Field(default_factory=list)
 
 
@@ -222,6 +268,8 @@ async def get_daemon_version() -> DaemonVersionResponse:
         latest=get_daemon_latest_version(),
         minRequired="0.1.0",
         downloadUrl=DAEMON_DOWNLOAD_URL,
+        latest_version=get_daemon_latest_semver(),
+        latest_build_id=get_daemon_latest_version(),
     )
 
 
@@ -254,6 +302,8 @@ async def register_daemon(
         arch=data.arch,
         allowed_roots=data.allowed_roots,
         providers=[item.model_dump() for item in data.providers],
+        daemon_version=data.daemon_version,
+        daemon_build_id=data.daemon_build_id,
     )
     return DaemonRegisterResponse(
         daemon_instance_id=result.daemon_instance_id,
@@ -288,6 +338,8 @@ async def daemon_heartbeat(
     instance = await svc.heartbeat_daemon(
         data.daemon_local_id,
         providers=[item.model_dump() for item in data.providers],
+        daemon_version=data.daemon_version,
+        daemon_build_id=data.daemon_build_id,
     )
     allowed = (instance.allowed_roots if instance.allowed_roots else None) or ["~/.sillyhub"]
     return DaemonHeartbeatResponse(
@@ -346,21 +398,28 @@ def _derive_policy_version(updated_at: datetime | None) -> int:
     return int(ts.timestamp() * 1000)
 
 
-def _runtime_read(runtime: object, owner: object | None = None) -> DaemonRuntimeRead:
+def _runtime_read(
+    runtime: object,
+    owner: object | None = None,
+    instance: object | None = None,
+) -> DaemonRuntimeRead:
     """Build DaemonRuntimeRead, attaching nested OwnerRead when an owner user
-    row is available (task-04 / D-006@v1)."""
+    row is available (task-04 / D-006@v1)。2026-07-04-daemon-version-management：
+    instance 非空时填 daemon_version/daemon_build_id（JOIN daemon_instances 带出）。"""
     read = DaemonRuntimeRead.model_validate(runtime)
-    if owner is None:
+    update: dict[str, object] = {}
+    if owner is not None:
+        update["owner"] = OwnerRead(
+            user_id=getattr(owner, "id", None),
+            email=getattr(owner, "email", None),
+            display_name=getattr(owner, "display_name", None),
+        )
+    if instance is not None:
+        update["daemon_version"] = getattr(instance, "version", None)
+        update["daemon_build_id"] = getattr(instance, "build_id", None)
+    if not update:
         return read
-    return read.model_copy(
-        update={
-            "owner": OwnerRead(
-                user_id=getattr(owner, "id", None),
-                email=getattr(owner, "email", None),
-                display_name=getattr(owner, "display_name", None),
-            )
-        }
-    )
+    return read.model_copy(update=update)
 
 
 # ── Runtime admin global list (task-04 / FR-01/04 / D-005@v1) ────────────────
@@ -396,7 +455,7 @@ async def list_runtimes_page(
         offset=offset,
     )
     return DaemonRuntimeListResponse(
-        items=[_runtime_read(runtime, owner) for runtime, owner in rows],
+        items=[_runtime_read(runtime, owner, instance) for runtime, owner, instance in rows],
         total=total,
         limit=limit,
         offset=offset,
