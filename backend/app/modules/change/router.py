@@ -210,10 +210,11 @@ async def write_change_file_content(
     change_id: uuid.UUID,
     body: ChangeFileWriteRequest,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
+    user: Annotated[User, Depends(require_permission(Permission.CHANGE_CREATE))],
 ) -> ChangeFileWriteResponse:
     service = ChangeService(session)
-    result = await service.write_file(workspace_id, change_id, body.path, body.content)
+    # D-001@v1：daemon-client 写回入队需 user_id 校验 daemon 归属（现算 runtime）。
+    result = await service.write_file(workspace_id, change_id, body.path, body.content, user.id)
     return ChangeFileWriteResponse(**result)
 
 

@@ -98,16 +98,17 @@ async def proxy_create_change(
     session: SessionDep,
     user: CurrentUser,
 ) -> ChangeCreateResponse:
-    """daemon-client 变更代写入口 (design §5.3 Phase 3 / D-004@v1)。
+    """daemon-client 变更代写入口 (design §5.3 Phase 3 / D-002@v1)。
 
     与 server-local ``/changes/create`` 区分：
-    - 不传 ``lease_id``，改传 ``runtime_id``（绑定在线 daemon）。
-    - 经 ``service.create_change(..., runtime_id=...)`` 走 proxy 路径（lease-polling
-      下发 daemon_change_writes → 等回执 → 落库 Change）。
+    - 不传 ``lease_id`` 也不传 ``runtime_id``（D-002@v1）。
+    - 经 ``service.create_change`` 走 proxy 路径（lease-polling 下发
+      daemon_change_writes → 等回执 → 落库 Change）；runtime 由后端从 binding +
+      workspace.default_agent 现算。
     - **不自动 dispatch brainstorm**（daemon-client change 暂不接 agent 流；agent
       dispatch 由 task-12/后续接，避免与 server-local auto-dispatch 语义混淆）。
 
-    daemon 离线 / runtime 不绑定 → 400 ``DAEMON_CLIENT_NO_SESSION``（service 层抛）。
+    daemon 离线 / 未绑定 → 400 ``DAEMON_CLIENT_NO_SESSION``（service 层抛）。
     """
     service = ChangeWriterService(session)
     change = await service.create_change(
@@ -115,7 +116,6 @@ async def proxy_create_change(
         user.id,
         title=data.title,
         change_type=data.change_type,
-        runtime_id=data.runtime_id,
         description=data.description,
     )
 

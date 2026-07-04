@@ -54,19 +54,20 @@ class ChangeWriterService:
         affected_components: list[str] | None = None,
         lease_id: uuid.UUID | None = None,
         description: str = "",
-        runtime_id: uuid.UUID | None = None,
     ) -> Change:
         """Create a change directory + MASTER.md + proposal.md inside the lease worktree or workspace root.
 
-        分流（design §5.3 Phase 3 / D-004@v1）：
+        分流（design §5.3 Phase 3 / D-001@v1 / D-002@v1）：
         - ``lease_id is not None`` → server-local worktree 直写（原路径，零回归）。
-        - ``lease_id is None`` + daemon-client workspace + ``runtime_id`` → 委托
-          ``proxy_create_change`` 经 lease-polling 代写队列下发 daemon。
-        - ``lease_id is None`` + daemon-client + ``runtime_id is None`` → 抛
-          ``DaemonClientNoActiveSession``（替代旧 ``_repo_dir_for_workspace`` 的裸
-          'requires an active lease' 抛错，前端据结构化 code 渲染 toast）。
+        - ``lease_id is None`` + daemon-client workspace → 委托 ``proxy_create_change``
+          经 lease-polling 代写队列下发 daemon。runtime 由 ``proxy_create_change`` 内部
+          ``resolve_runtime_for_writeback`` 现算（D-001@v1），失败抛
+          ``DaemonClientNoActiveSession``（结构化 code 渲染 toast）。
         - ``lease_id is None`` + server-local/repo-native → 原 ``_repo_dir_for_workspace``
           直写路径不变。
+
+        D-002@v1（2026-07-05-daemon-client-change-binding-fix）：删 ``runtime_id``
+        入参——写回始终用 binding + workspace.default_agent 现算，不再由 caller 传。
         """
         # 门禁（D-004@V1 / FR-05）：未扫描 workspace 不允许新建变更。
         # scan 从变更流程移除后，brainstorm 需要项目地图（scan_docs），
@@ -103,32 +104,17 @@ class ChangeWriterService:
                     details={"workspace_id": str(workspace_id)},
                 )
             if is_daemon_client_path_source(workspace.path_source):
-                # daemon-client：必须经 proxy 代写（runtime 在线校验 + lease-polling 下发）。
-                # runtime_id is None → proxy 内部抛 DaemonClientNoActiveSession
+                # daemon-client：必须经 proxy 代写（runtime 现算 + lease-polling 下发）。
+                # runtime 解析失败由 proxy_create_change 内部抛 DaemonClientNoActiveSession
                 # （替代旧 _repo_dir_for_workspace 的裸抛 'requires an active lease'）。
                 from app.modules.change_writer.proxy import (
                     proxy_create_change,
                 )
 
-                # runtime_id is None 防御：proxy_create_change 需 runtime_id 入参，
-                # 此处显式抛结构化错误（避免把 None 传进函数触发 TypeError）。
-                if runtime_id is None:
-                    from app.modules.change_writer.proxy import (
-                        DaemonClientNoActiveSession,
-                    )
-
-                    raise DaemonClientNoActiveSession(
-                        "需要在线 daemon 才能在客户端工作区创建变更。",
-                        details={
-                            "workspace_id": str(workspace_id),
-                            "reason": "runtime_not_provided",
-                        },
-                    )
                 return await proxy_create_change(
                     self._session,
                     workspace_id=workspace_id,
                     user_id=user_id,
-                    runtime_id=runtime_id,
                     title=title,
                     description=description,
                     change_type=change_type,

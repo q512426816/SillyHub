@@ -163,9 +163,12 @@ async def sync_manual_spec_workspace(
 
     - **server-local**：root_path 在容器/宿主机可读 → 直接打包 .sillyspec → apply_sync
       落盘 + reparse，立即返 ``{"status": "done"}``。
-    - **daemon-client**：root_path 在成员宿主机，backend 读不到 → 建 ``kind="spec-sync"``
-      的 DaemonChangeWrite outbox 行（files 携带 workspace_id 元信息），返
-      ``{"status": "pending", "task_id": <uuid>}``。前端轮询 ``GET .../sync-manual/pending``。
+    - **daemon-client**：root_path 在成员宿主机，backend 读不到 → runtime 由
+      ``resolve_runtime_for_writeback`` 现算（D-001@v1，2026-07-05-daemon-client-change-binding-fix）；
+      建 ``kind="spec-sync"`` 的 DaemonChangeWrite outbox 行（files 携带 workspace_id
+      元信息），返 ``{"status": "pending", "task_id": <uuid>}``。前端轮询
+      ``GET .../sync-manual/pending``。daemon-client 解析失败 → 400
+      ``DAEMON_CLIENT_NO_SESSION``（不再错走 server-local）。
     """
     service = SpecWorkspaceService(session)
 
@@ -173,13 +176,11 @@ async def sync_manual_spec_workspace(
     from app.modules.workspace.member_runtimes.resolver import MemberBindingResolver
 
     daemon_id: uuid.UUID | None = None
-    runtime_id: uuid.UUID | None = None
     root_path: str | None = None
     path_source: str | None = None
     try:
         binding = await MemberBindingResolver.resolve_member_binding(session, workspace_id, user.id)
         daemon_id = binding.daemon_id
-        runtime_id = binding.runtime_id  # D-003: preserved for DaemonChangeWrite FK
         root_path = binding.root_path
         path_source = binding.path_source
     except Exception:
@@ -188,13 +189,22 @@ async def sync_manual_spec_workspace(
 
         ws = await session.get(Workspace, workspace_id)
         daemon_id = ws.daemon_runtime_id if ws else None  # legacy runtime_id as fallback
-        runtime_id = ws.daemon_runtime_id if ws else None
         root_path = ws.root_path if ws else None
         path_source = ws.path_source if ws else None
 
-    # daemon-client：建 spec-sync outbox 行。
-    if path_source == "daemon-client" and runtime_id is not None:
+    # daemon-client：runtime 现算 + 建 spec-sync outbox 行。
+    if path_source == "daemon-client":
         from app.modules.daemon.model import DaemonChangeWrite
+        from app.modules.workspace.member_runtimes.resolver import (
+            resolve_runtime_for_writeback,
+        )
+
+        # D-001@v1：runtime_id 不再直读 binding.runtime_id / ws.daemon_runtime_id
+        # （新链路两处皆 NULL），改由共享 resolver 用 binding + default_agent 现算。
+        # 解析失败抛 DaemonClientNoActiveSession（AppError HTTP 400）。
+        resolved = await resolve_runtime_for_writeback(session, workspace_id, user.id)
+        rid_raw = resolved["id"]
+        runtime_id: uuid.UUID = uuid.UUID(rid_raw) if isinstance(rid_raw, str) else rid_raw
 
         # files 携带 workspace_id 元信息（daemon task-runner 据 kind=spec-sync 分流，
         # 不写 changes/<key>/ 而是调 postSpecSync 整树回灌）。
