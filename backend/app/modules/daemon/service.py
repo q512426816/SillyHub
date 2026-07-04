@@ -111,11 +111,14 @@ class DaemonService:
         arch: str | None = None,
         allowed_roots: list[str] | None = None,
         providers: list[dict] | None = None,
+        daemon_version: str | None = None,
+        daemon_build_id: str | None = None,
     ) -> DaemonRegisterResult:
         """Per-daemon 注册 facade（design §5.2 / D-006）。
 
         转发到 RuntimeService.register_daemon：upsert daemon_instances + 各
         daemon_runtimes + stale 清理。返回 daemon_instance_id + 各 runtime_id。
+        2026-07-04-daemon-version-management：透传 daemon_version/build_id。
         """
         return await self._rt.register_daemon(
             user_id,
@@ -126,6 +129,8 @@ class DaemonService:
             arch=arch,
             allowed_roots=allowed_roots,
             providers=providers,
+            daemon_version=daemon_version,
+            daemon_build_id=daemon_build_id,
         )
 
     async def heartbeat(self, runtime_id: uuid.UUID) -> DaemonRuntime:
@@ -141,14 +146,22 @@ class DaemonService:
         self,
         daemon_local_id: uuid.UUID,
         providers: list[dict] | None = None,
+        daemon_version: str | None = None,
+        daemon_build_id: str | None = None,
     ) -> DaemonInstance:
         """Per-daemon 心跳 facade（design §5.4 / §9.1 / D-006）。
 
         转发到 RuntimeService.heartbeat_daemon：刷新 daemon_instances.last_heartbeat_at
         + 各 daemon_runtimes.status。返回 DaemonInstance（HTTP 响应从中读
         daemon_instance_id / status / allowed_roots）。
+        2026-07-04-daemon-version-management：透传 daemon_version/build_id。
         """
-        return await self._rt.heartbeat_daemon(daemon_local_id, providers)
+        return await self._rt.heartbeat_daemon(
+            daemon_local_id,
+            providers,
+            daemon_version=daemon_version,
+            daemon_build_id=daemon_build_id,
+        )
 
     async def get_runtime(
         self,
