@@ -138,16 +138,16 @@ class TestSyncManual:
     async def test_daemon_client_creates_spec_sync_outbox_row(
         self, db_session, client: AsyncClient, auth_headers, tmp_path
     ) -> None:
-        """daemon-client：建 kind=spec-sync 的 DaemonChangeWrite 行，返 pending+task_id。"""
-        ws = await _make_workspace(
-            db_session,
-            path_source="daemon-client",
-            daemon_runtime_id=uuid.uuid4(),
-        )
-        await _make_spec_workspace(db_session, ws, tmp_path / "spec-root")
+        """daemon-client：建 kind=spec-sync 的 DaemonChangeWrite 行，返 pending+task_id。
 
-        # 解析 actor user id（auth_headers 是 admin token；从 DB 查 admin user）。
+        D-001@v1（2026-07-05-daemon-client-change-binding-fix）：runtime_id 改由
+        resolve_runtime_for_writeback 现算（不再读 binding.runtime_id / ws.daemon_runtime_id）。
+        用新链路 fixture（binding.daemon_id + DaemonInstance + default_agent）。
+        """
         from app.modules.auth.model import User
+        from app.modules.workspace.member_runtimes.tests.helpers_writeback import (
+            make_daemon_client_workspace_with_binding,
+        )
 
         admin = (
             (await db_session.execute(select(User).where(User.email == "admin@example.com")))
@@ -155,15 +155,13 @@ class TestSyncManual:
             .first()
         )
         assert admin is not None, "测试库需有 admin 用户"
-        runtime_id = uuid.uuid4()
-        await _make_member_binding(
-            db_session,
-            ws,
-            user_id=admin.id,
-            runtime_id=runtime_id,
-            root_path="/home/user/project",
-            path_source="daemon-client",
+
+        binding_refs = await make_daemon_client_workspace_with_binding(
+            db_session, user_id=admin.id, default_agent="claude"
         )
+        ws = await db_session.get(Workspace, binding_refs["ws_id"])
+        assert ws is not None
+        await _make_spec_workspace(db_session, ws, tmp_path / "spec-root")
 
         resp = await client.post(
             f"/api/workspaces/{ws.id}/spec-workspace/sync-manual",
@@ -176,14 +174,14 @@ class TestSyncManual:
         task_id = body["task_id"]
         assert task_id
 
-        # DB 落 kind=spec-sync 行
+        # DB 落 kind=spec-sync 行，runtime_id = resolver 现算值（= binding fixture 的 runtime_id）。
         stmt = select(DaemonChangeWrite).where(DaemonChangeWrite.workspace_id == ws.id)
         rows = (await db_session.execute(stmt)).scalars().all()
         assert len(rows) == 1
         cw = rows[0]
         assert cw.kind == "spec-sync"
         assert cw.status == "pending"
-        assert cw.runtime_id == runtime_id
+        assert cw.runtime_id == binding_refs["runtime_id"]
         assert cw.change_key == "spec-sync"
         # files 携带 workspace_id 元信息
         assert isinstance(cw.files, list)

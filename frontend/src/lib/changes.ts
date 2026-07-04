@@ -105,12 +105,15 @@ export type CreateChangeInput = {
   lease_id?: string;
 };
 
-/** daemon-client 代理创建变更的请求参数。 */
+/** daemon-client 代理创建变更的请求参数。
+
+D-002@v1（2026-07-05-daemon-client-change-binding-fix）：删 ``runtime_id`` 字段——
+runtime 由后端 ``resolve_runtime_for_writeback`` 用 binding + workspace.default_agent
+现算，daemon_id 亦从 per-member binding 解析，前端无需传。 */
 export type ProxyCreateChangeInput = {
   title: string;
   description?: string;
   change_type?: string;
-  runtime_id: string;
 };
 
 /** 创建变更的响应 */

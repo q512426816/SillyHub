@@ -211,10 +211,10 @@ async def test_enqueue_edit_write_merges_same_path(
 
     svc = ChangeService(db_session)
     tid1 = await svc._enqueue_edit_write(
-        workspace=ws, change=change, rel_path="proposal.md", content="v1"
+        workspace=ws, change=change, rel_path="proposal.md", content="v1", user_id=user.id
     )
     tid2 = await svc._enqueue_edit_write(
-        workspace=ws, change=change, rel_path="proposal.md", content="v2"
+        workspace=ws, change=change, rel_path="proposal.md", content="v2", user_id=user.id
     )
     # D-002：合并 → 同一行 id，content=v2（last-write-wins）
     assert tid1 == tid2
@@ -226,7 +226,7 @@ async def test_enqueue_edit_write_merges_same_path(
 
     # 不同 path → 新建行
     tid3 = await svc._enqueue_edit_write(
-        workspace=ws, change=change, rel_path="design.md", content="d"
+        workspace=ws, change=change, rel_path="design.md", content="d", user_id=user.id
     )
     assert tid3 != tid1
     rows = list((await db_session.execute(select(DaemonChangeWrite))).scalars().all())
