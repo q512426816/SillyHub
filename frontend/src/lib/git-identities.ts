@@ -1,46 +1,13 @@
 import { apiFetch } from "./api";
+import type { components } from "@/lib/api-types";
 
-export type GitIdentityRead = {
-  id: string;
-  user_id: string;
-  provider: string;
-  git_username: string | null;
-  git_email: string | null;
-  credential_type: string;
-  key_id: string;
-  allowed_repositories: string[];
-  expires_at: string | null;
-  revoked_at: string | null;
-  last_used_at: string | null;
-  created_at: string;
-};
-
-export type GitIdentityList = {
-  items: GitIdentityRead[];
-  total: number;
-};
-
-export type GitIdentityCreate = {
-  provider: string;
-  credential_type?: string;
-  git_username?: string;
-  git_email?: string;
-  credential: string;
-  allowed_repositories?: string[];
-  expires_at?: string;
-};
-
-export type AccessCheckRequest = {
-  identity_id: string;
-  repo_url: string;
-};
-
-export type AccessCheckResult = {
-  identity_id: string;
-  repo_url: string;
-  accessible: boolean;
-  reason: string | null;
-};
+// 类型从 OpenAPI 自动生成（@/lib/api-types，由 scripts/gen-api-types.mjs 产出），
+// 消除手写类型漂移。后端 schema 来源：backend/app/modules/git/schema.py。
+export type GitIdentityRead = components["schemas"]["GitIdentityRead"];
+export type GitIdentityList = components["schemas"]["GitIdentityList"];
+export type GitIdentityCreate = components["schemas"]["GitIdentityCreate"];
+export type AccessCheckRequest = components["schemas"]["AccessCheckRequest"];
+export type AccessCheckResult = components["schemas"]["AccessCheckResult"];
 
 export function listGitIdentities() {
   return apiFetch<GitIdentityList>("/api/git/identities");
