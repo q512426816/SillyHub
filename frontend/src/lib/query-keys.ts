@@ -19,4 +19,9 @@ export const queryKeys = {
     list: (params: DaemonRuntimeListParams) =>
       ["daemonRuntimes", "list", params] as const,
   },
+  // 2026-07-04-daemon-version-management task-09：daemon 分发元数据
+  //（最新版本号 + build_id），runtimes 页用于卡片版本徽标比对。
+  daemonVersion: {
+    all: ["daemonVersion"] as const,
+  },
 } as const;

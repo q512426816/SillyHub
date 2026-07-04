@@ -331,6 +331,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/my-bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Bindings Endpoint
+         * @description Return the caller's member bindings across ALL workspaces.
+         *
+         *     遗留 1（daemon-entity-binding）：工作区列表卡片按 daemon 实体展示绑定信息，
+         *     新工作区 ``workspace.daemon_runtime_id`` 为 NULL（绑定存 member binding 行）。
+         *     批量端点一次拉取当前用户全部 binding，前端按 workspace_id 索引，避免列表 N 次请求。
+         *
+         *     鉴权仅需登录（``get_current_user``）—— 返回行天然限定为调用者本人，
+         *     无需逐 workspace 校验 WORKSPACE_READ；未加入任何 workspace 的用户返回空列表。
+         */
+        get: operations["list_my_bindings_endpoint_api_workspaces_my_bindings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}": {
         parameters: {
             query?: never;
@@ -6726,6 +6753,8 @@ export interface components {
          *
          *     daemon 周期上报其 ``daemon_local_id``（=daemon_instances.id）+ 各 provider 的
          *     当前 status。backend 刷新 daemon_instances.last_heartbeat_at + 各 runtime.status。
+         *     2026-07-04-daemon-version-management：同时上报 daemon_version/daemon_build_id
+         *     （D-002，register + heartbeat 都带），backend 刷新 instance.version/build_id。
          */
         DaemonHeartbeatRequest: {
             /**
@@ -6734,6 +6763,10 @@ export interface components {
              * @description daemon 本地 uuid（daemon_instances.id）
              */
             daemon_local_id: string;
+            /** Daemon Version */
+            daemon_version?: string | null;
+            /** Daemon Build Id */
+            daemon_build_id?: string | null;
             /** Providers */
             providers?: components["schemas"]["DaemonHeartbeatProviderItem"][];
         };
@@ -6790,6 +6823,10 @@ export interface components {
             display_alias?: string | null;
             /** Status */
             status: string;
+            /** Version */
+            version?: string | null;
+            /** Build Id */
+            build_id?: string | null;
             /** Providers */
             providers?: components["schemas"]["DaemonInstanceProviderItem"][];
         };
@@ -6837,6 +6874,10 @@ export interface components {
             os?: string | null;
             /** Arch */
             arch?: string | null;
+            /** Daemon Version */
+            daemon_version?: string | null;
+            /** Daemon Build Id */
+            daemon_build_id?: string | null;
             /** Allowed Roots */
             allowed_roots?: string[];
             /** Providers */
@@ -6922,6 +6963,10 @@ export interface components {
             provider: string | null;
             /** Version */
             version: string | null;
+            /** Daemon Version */
+            daemon_version?: string | null;
+            /** Daemon Build Id */
+            daemon_build_id?: string | null;
             /** Os */
             os?: string | null;
             /** Arch */
@@ -6994,11 +7039,15 @@ export interface components {
         /**
          * DaemonVersionResponse
          * @description GET /api/daemon/version 响应：daemon 分发元数据（公开端点）。
+         *
+         *     2026-07-04-daemon-version-management D-004：新增 latest_version（语义）+
+         *     latest_build_id（SHA），供前端版本比对与升级入口。旧 latest/minRequired/
+         *     downloadUrl 保留（install.sh 兼容）。
          */
         DaemonVersionResponse: {
             /**
              * Latest
-             * @description 最新发布版本号
+             * @description 最新发布版本号（= latest_build_id 回退值，兼容 install.sh）
              */
             latest: string;
             /**
@@ -7011,6 +7060,16 @@ export interface components {
              * @description 单文件 bundle 下载地址（相对站内路径）
              */
             downloadUrl: string;
+            /**
+             * Latest Version
+             * @description 最新语义版本（DAEMON_VERSION，bundle 提取失败=unknown）
+             */
+            latest_version: string;
+            /**
+             * Latest Build Id
+             * @description 最新构建标识（BUILD_ID/git SHA，前端升级比对用）
+             */
+            latest_build_id: string;
         };
         /**
          * DirEntry
@@ -7748,6 +7807,35 @@ export interface components {
              * @default daemon-client
              */
             path_source: string;
+        };
+        /** MemberBindingView */
+        MemberBindingView: {
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /** Daemon Id */
+            daemon_id?: string | null;
+            /** Runtime Id */
+            runtime_id?: string | null;
+            /** Root Path */
+            root_path: string;
+            /** Path Source */
+            path_source: string;
+            /** Synced At */
+            synced_at: string | null;
+            /** Last Scan At */
+            last_scan_at: string | null;
+            /** Init Synced At */
+            init_synced_at: string | null;
+            /** Init Synced Spec Version */
+            init_synced_spec_version: number | null;
         };
         /** MissionArtifactResponse */
         MissionArtifactResponse: {
@@ -12457,6 +12545,8 @@ export interface components {
             path_source: "server-local" | "daemon-client";
             /** Daemon Runtime Id */
             daemon_runtime_id?: string | null;
+            /** Daemon Id */
+            daemon_id?: string | null;
             /**
              * Spec Strategy
              * @default platform-managed
@@ -13431,6 +13521,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TopologyResponse"];
+                };
+            };
+        };
+    };
+    list_my_bindings_endpoint_api_workspaces_my_bindings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberBindingView"][];
                 };
             };
         };

@@ -705,6 +705,32 @@
         }
       }
     },
+    "/api/workspaces/my-bindings": {
+      "get": {
+        "tags": [
+          "workspace"
+        ],
+        "summary": "List My Bindings Endpoint",
+        "description": "Return the caller's member bindings across ALL workspaces.\n\n遗留 1（daemon-entity-binding）：工作区列表卡片按 daemon 实体展示绑定信息，\n新工作区 ``workspace.daemon_runtime_id`` 为 NULL（绑定存 member binding 行）。\n批量端点一次拉取当前用户全部 binding，前端按 workspace_id 索引，避免列表 N 次请求。\n\n鉴权仅需登录（``get_current_user``）—— 返回行天然限定为调用者本人，\n无需逐 workspace 校验 WORKSPACE_READ；未加入任何 workspace 的用户返回空列表。",
+        "operationId": "list_my_bindings_endpoint_api_workspaces_my_bindings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MemberBindingView"
+                  },
+                  "type": "array",
+                  "title": "Response List My Bindings Endpoint Api Workspaces My Bindings Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}": {
       "get": {
         "tags": [
@@ -22772,6 +22798,30 @@
             "title": "Daemon Local Id",
             "description": "daemon 本地 uuid（daemon_instances.id）"
           },
+          "daemon_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daemon Version"
+          },
+          "daemon_build_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daemon Build Id"
+          },
           "providers": {
             "items": {
               "$ref": "#/components/schemas/DaemonHeartbeatProviderItem"
@@ -22785,7 +22835,7 @@
           "daemon_local_id"
         ],
         "title": "DaemonHeartbeatRequest",
-        "description": "Per-daemon 心跳请求体（design §5.4 / §9.1 / D-006）。\n\ndaemon 周期上报其 ``daemon_local_id``（=daemon_instances.id）+ 各 provider 的\n当前 status。backend 刷新 daemon_instances.last_heartbeat_at + 各 runtime.status。"
+        "description": "Per-daemon 心跳请求体（design §5.4 / §9.1 / D-006）。\n\ndaemon 周期上报其 ``daemon_local_id``（=daemon_instances.id）+ 各 provider 的\n当前 status。backend 刷新 daemon_instances.last_heartbeat_at + 各 runtime.status。\n2026-07-04-daemon-version-management：同时上报 daemon_version/daemon_build_id\n（D-002，register + heartbeat 都带），backend 刷新 instance.version/build_id。"
       },
       "DaemonHeartbeatResponse": {
         "properties": {
@@ -22869,6 +22919,28 @@
           "status": {
             "type": "string",
             "title": "Status"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "build_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Id"
           },
           "providers": {
             "items": {
@@ -22962,6 +23034,30 @@
               }
             ],
             "title": "Arch"
+          },
+          "daemon_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daemon Version"
+          },
+          "daemon_build_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daemon Build Id"
           },
           "allowed_roots": {
             "items": {
@@ -23145,6 +23241,28 @@
               }
             ],
             "title": "Version"
+          },
+          "daemon_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daemon Version"
+          },
+          "daemon_build_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daemon Build Id"
           },
           "os": {
             "anyOf": [
@@ -23372,7 +23490,7 @@
           "latest": {
             "type": "string",
             "title": "Latest",
-            "description": "最新发布版本号"
+            "description": "最新发布版本号（= latest_build_id 回退值，兼容 install.sh）"
           },
           "minRequired": {
             "type": "string",
@@ -23383,16 +23501,28 @@
             "type": "string",
             "title": "Downloadurl",
             "description": "单文件 bundle 下载地址（相对站内路径）"
+          },
+          "latest_version": {
+            "type": "string",
+            "title": "Latest Version",
+            "description": "最新语义版本（DAEMON_VERSION，bundle 提取失败=unknown）"
+          },
+          "latest_build_id": {
+            "type": "string",
+            "title": "Latest Build Id",
+            "description": "最新构建标识（BUILD_ID/git SHA，前端升级比对用）"
           }
         },
         "type": "object",
         "required": [
           "latest",
           "minRequired",
-          "downloadUrl"
+          "downloadUrl",
+          "latest_version",
+          "latest_build_id"
         ],
         "title": "DaemonVersionResponse",
-        "description": "GET /api/daemon/version 响应：daemon 分发元数据（公开端点）。"
+        "description": "GET /api/daemon/version 响应：daemon 分发元数据（公开端点）。\n\n2026-07-04-daemon-version-management D-004：新增 latest_version（语义）+\nlatest_build_id（SHA），供前端版本比对与升级入口。旧 latest/minRequired/\ndownloadUrl 保留（install.sh 兼容）。"
       },
       "DirEntry": {
         "properties": {
@@ -25208,6 +25338,108 @@
           "root_path"
         ],
         "title": "MemberBindingUpsertRequest"
+      },
+      "MemberBindingView": {
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id"
+          },
+          "daemon_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daemon Id"
+          },
+          "runtime_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Id"
+          },
+          "root_path": {
+            "type": "string",
+            "title": "Root Path"
+          },
+          "path_source": {
+            "type": "string",
+            "title": "Path Source"
+          },
+          "synced_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Synced At"
+          },
+          "last_scan_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Scan At"
+          },
+          "init_synced_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Init Synced At"
+          },
+          "init_synced_spec_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Init Synced Spec Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workspace_id",
+          "user_id",
+          "root_path",
+          "path_source",
+          "synced_at",
+          "last_scan_at",
+          "init_synced_at",
+          "init_synced_spec_version"
+        ],
+        "title": "MemberBindingView"
       },
       "MissionArtifactResponse": {
         "properties": {
@@ -39593,6 +39825,18 @@
               }
             ],
             "title": "Daemon Runtime Id"
+          },
+          "daemon_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daemon Id"
           },
           "spec_strategy": {
             "type": "string",

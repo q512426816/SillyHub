@@ -26,6 +26,9 @@ export interface DaemonRuntimeRead {
   owner?: OwnerRead | null;
   /** 所属守护进程实例 ID（daemon-entity-binding task-11）。 */
   daemon_instance_id?: string | null;
+  /** daemon 进程版本（2026-07-04-daemon-version-management D-005）。区别于 version（provider CLI 版本）。 */
+  daemon_version?: string | null;
+  daemon_build_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -51,6 +54,9 @@ export interface DaemonInstanceRead {
   hostname: string;
   display_alias: string | null;
   status: string;
+  /** daemon 进程版本（2026-07-04-daemon-version-management D-005）。 */
+  version?: string | null;
+  build_id?: string | null;
   providers: DaemonInstanceProviderItem[];
 }
 
@@ -186,6 +192,40 @@ export async function deleteDaemonRuntime(
   await apiFetch(`/api/daemon/runtimes/${encodeURIComponent(runtimeId)}`, {
     method: "DELETE",
   });
+}
+
+/**
+ * GET /api/daemon/version — daemon 分发元数据（公开端点）。
+ * 2026-07-04-daemon-version-management D-004：返回 latest_version（语义）+
+ * latest_build_id（SHA）供前端版本比对与升级入口。旧 latest/minRequired/
+ * downloadUrl 保留（install.sh 兼容）。
+ */
+export interface DaemonVersionInfo {
+  latest: string;
+  minRequired: string;
+  downloadUrl: string;
+  latest_version: string;
+  latest_build_id: string;
+}
+
+export async function getDaemonVersion(): Promise<DaemonVersionInfo> {
+  return apiFetch<DaemonVersionInfo>("/api/daemon/version");
+}
+
+/**
+ * POST /api/daemon/runtimes/{id}/self-update — 推送 daemon 自更新指令（admin）。
+ * 2026-07-04-daemon-version-management D-007：复用现有 self-update 端点（runtime_id
+ * 维度，升级整个 daemon 进程）。后端经 WS 下发 daemon:self_update，daemon 下载新
+ * bundle 替换并 exit 重启；前端经心跳/re-register 看到新版本。返回 {sent, latest_version}。
+ * 失败抛 ApiError（504 daemon 离线 / WS 发送失败）。
+ */
+export async function triggerDaemonSelfUpdate(
+  runtimeId: string,
+): Promise<{ sent: boolean; latest_version: string }> {
+  return apiFetch(
+    `/api/daemon/runtimes/${encodeURIComponent(runtimeId)}/self-update`,
+    { method: "POST" },
+  );
 }
 
 export interface QuickChatResponse {

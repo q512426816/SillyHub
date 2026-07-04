@@ -40,20 +40,23 @@ import {
   disableDaemonRuntime,
   enableDaemonRuntime,
   getAgentSession,
+  getDaemonVersion,
   getRuntimesUsage,
   isVersionBelow,
   MIN_VERSIONS,
   PROVIDER_META,
+  triggerDaemonSelfUpdate,
   updateDaemonRuntime,
   updateRuntimeAllowedRoots,
   type AgentSessionRead,
   type DaemonRuntimeListParams,
   type DaemonRuntimeRead,
+  type DaemonVersionInfo,
   type RuntimeUsageItem,
   type RuntimeUsageWindow,
 } from "@/lib/daemon";
 import { useDaemonRuntimes } from "@/lib/use-daemon-runtimes";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/stores/session";
@@ -331,6 +334,60 @@ function VersionCell({ provider, version }: { provider: string | null; version: 
   );
 }
 
+/**
+ * 2026-07-04-daemon-version-management task-09：daemon 进程版本徽标。
+ *
+ * 比对逻辑（design §版本徽标）：
+ *   - build_id 为 null/undefined（daemon 旧版未上报）→ 「未知」灰
+ *   - build_id === "dev"（本地开发 daemon）→ 「dev」灰
+ *   - latest 非空非 unknown 且 build_id === latest.latest_build_id → 「最新」绿
+ *   - 两者都有效且不等 → 「可升级」橙
+ *
+ * latest 可能未拉到（getDaemonVersion 失败/未登录）或为 "unknown"
+ *（install.sh fallback），此时无法判定「最新」/「可升级」，统一降级为「未知」灰。
+ */
+type DaemonVersionBadgeState = {
+  label: string;
+  variant: BadgeVariant;
+};
+
+function getDaemonVersionBadgeState(
+  buildId: string | null | undefined,
+  latest: DaemonVersionInfo | undefined,
+): DaemonVersionBadgeState {
+  if (!buildId) {
+    return { label: "未知", variant: "outline" };
+  }
+  if (buildId === "dev") {
+    return { label: "dev", variant: "outline" };
+  }
+  const latestBuildId = latest?.latest_build_id;
+  if (
+    latestBuildId &&
+    latestBuildId !== "unknown" &&
+    latest?.latest_version &&
+    latest.latest_version !== "unknown"
+  ) {
+    if (buildId === latestBuildId) {
+      return { label: "最新", variant: "success" };
+    }
+    return { label: "可升级", variant: "warning" };
+  }
+  // latest 未拉到 / unknown：无法判定，保守显示「未知」。
+  return { label: "未知", variant: "outline" };
+}
+
+function DaemonVersionBadge({
+  buildId,
+  latest,
+}: {
+  buildId: string | null | undefined;
+  latest: DaemonVersionInfo | undefined;
+}) {
+  const state = getDaemonVersionBadgeState(buildId, latest);
+  return <Badge variant={state.variant}>{state.label}</Badge>;
+}
+
 function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
   const accessToken = useSession((s) => s.accessToken);
   const [copied, setCopied] = useState(false);
@@ -547,11 +604,14 @@ function RuntimeCard({
   usage,
   usageWindow,
   usageLoading,
+  latestVersion,
+  upgrading,
   onToggleEnabled,
   onOpenSession,
   onDelete,
   onEditAlias,
   onEditAllowedRoots,
+  onUpgrade,
   isPlatformAdmin,
 }: {
   runtime: DaemonRuntimeRead;
@@ -560,6 +620,8 @@ function RuntimeCard({
   usage?: RuntimeUsageItem;
   usageWindow: RuntimeUsageWindow;
   usageLoading?: boolean;
+  latestVersion?: DaemonVersionInfo;
+  upgrading?: boolean;
   onToggleEnabled: (runtime: DaemonRuntimeRead) => Promise<void>;
   onOpenSession: (runtime: DaemonRuntimeRead) => void;
   // task-06：签名从 Promise<void> 改 void —— modal.confirm 同步触发，删除在 onOk 异步回调里。
@@ -568,6 +630,8 @@ function RuntimeCard({
   onEditAlias: (runtime: DaemonRuntimeRead) => void;
   // task-06 / FR-04 / D-006@v1：可写目录（allowed_roots 沙箱）编辑入口，仅 admin 可见。
   onEditAllowedRoots: (runtime: DaemonRuntimeRead) => void;
+  // 2026-07-04-daemon-version-management task-09：daemon 进程升级（self-update 端点）。
+  onUpgrade: (runtime: DaemonRuntimeRead) => void;
   // task-06 / FR-04：是否平台管理员（控制「可写目录」编辑按钮显隐）。
   isPlatformAdmin: boolean;
 }) {
@@ -647,6 +711,24 @@ function RuntimeCard({
           )}
         </RuntimeMeta>
         <RuntimeMeta label="协议">{protocol}</RuntimeMeta>
+        {/* 2026-07-04-daemon-version-management task-09：daemon 进程版本（区别于 version=provider CLI 版本）。
+            显示语义版本号 + build_id 短码（前 7 位）+ 版本徽标（最新/可升级/未知/dev）。 */}
+        <RuntimeMeta label="Daemon 版本">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="truncate font-mono">
+              {runtime.daemon_version ?? "未知"}
+            </span>
+            {runtime.daemon_build_id ? (
+              <span className="font-mono text-[10px] text-muted-foreground">
+                #{runtime.daemon_build_id.slice(0, 7)}
+              </span>
+            ) : null}
+            <DaemonVersionBadge
+              buildId={runtime.daemon_build_id}
+              latest={latestVersion}
+            />
+          </span>
+        </RuntimeMeta>
         {binPath && (
           <RuntimeMeta label="可执行路径">
             <span className="inline-flex min-w-0 items-center gap-1.5">
@@ -755,6 +837,27 @@ function RuntimeCard({
             可写目录
           </Button>
         ) : null}
+        {/* 2026-07-04-daemon-version-management task-09：升级 daemon 到最新版（self-update）。
+            离线 runtime 禁用（后端 WS 下发不达）；upgrading 态 loading 防重复点。 */}
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5"
+          disabled={runtime.status !== "online" || upgrading}
+          onClick={() => onUpgrade(runtime)}
+          title={
+            runtime.status !== "online"
+              ? "离线，无法升级"
+              : "下发 daemon 自更新指令，重启后版本将自动更新"
+          }
+        >
+          {upgrading ? (
+            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="h-3.5 w-3.5" />
+          )}
+          {upgrading ? "下发中" : "升级到最新版"}
+        </Button>
         {/* task-21：审计日志入口，所有可访问 runtime 的用户可见（平台用户功能）。
             跳转 /runtimes/{id}/audit（task-20 路由）。与「可写目录」同级，风格一致。 */}
         <Link
@@ -886,6 +989,8 @@ export default function RuntimesPage() {
   const [rootsSaving, setRootsSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [runtimeActionId, setRuntimeActionId] = useState<string | null>(null);
+  // 2026-07-04-daemon-version-management task-09：daemon 升级中标记（卡片按钮 loading）。
+  const [upgradeActionId, setUpgradeActionId] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
   // task-04 / D-001：单例弹窗 runtime（null=关闭）。切换 runtime 即替换 dialogRuntime，
   // RuntimeSessionDialog 内部 key 随 runtime.id 重 mount 清旧状态。
@@ -942,6 +1047,18 @@ export default function RuntimesPage() {
     [query, typeFilter, statusFilter, ownerUserId, page, isPlatformAdmin],
   );
   const { items, total, sessions, isLoading, error: listError, refetch } = useDaemonRuntimes(listParams);
+
+  // 2026-07-04-daemon-version-management task-09：页面级拉 daemon 分发元数据
+  //（最新版本号 + build_id），传给每个 RuntimeCard 做版本徽标比对。
+  // staleTime 5min：版本不会频繁变；onSuccess 时不强制刷新 runtimes（心跳 15s 轮询
+  // 自带刷新，升级后看心跳回的新版本即可）。
+  const { data: latestVersion } = useQuery<DaemonVersionInfo>({
+    queryKey: queryKeys.daemonVersion.all,
+    queryFn: getDaemonVersion,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: false,
+    retry: false,
+  });
 
   useEffect(() => {
     setError(listError ? (listError instanceof ApiError ? listError.message : "加载列表失败") : null);
@@ -1008,6 +1125,29 @@ export default function RuntimesPage() {
       setRuntimeActionId(null);
     }
   }, [patchItems]);
+
+  // 2026-07-04-daemon-version-management task-09：下发 daemon self-update 指令。
+  // 离线 runtime 由卡片按钮 disabled 兜底，这里再保险跳过；成功 toast 提示重启后生效，
+  // 失败 toast 显示后端中文（504 daemon 离线 / WS 发送失败）。
+  // 不强制轮询：心跳 15s 自带刷新，daemon 重启 re-register 后卡片自然显示新版本。
+  const handleUpgrade = useCallback(
+    async (runtime: DaemonRuntimeRead) => {
+      if (runtime.status !== "online") return;
+      setUpgradeActionId(runtime.id);
+      try {
+        await triggerDaemonSelfUpdate(runtime.id);
+        notify.success("升级指令已下发，daemon 重启后版本将自动更新");
+        // 软刷新 runtimes + version：daemon 重启需要数秒，这里只触发 invalidate，
+        // 实际新版本要等心跳/re-register（15s 轮询自然看到）。
+        void queryClient.invalidateQueries({ queryKey: queryKeys.daemonRuntimes.all });
+      } catch (err) {
+        notify.error(err, "下发升级指令失败");
+      } finally {
+        setUpgradeActionId(null);
+      }
+    },
+    [notify, queryClient],
+  );
 
   // ql-012 / task-06 / FR-03 / D-003@v1 / D-007@v1：移除运行时（物理删除，级联清会话/lease）。
   // 二次确认改 antd Modal.confirm（走主题 + destructive 红按钮），替代浏览器原生 window.confirm。
@@ -1413,11 +1553,14 @@ export default function RuntimesPage() {
                         usage={usageByRuntime.get(runtime.id)}
                         usageWindow={usageWindow}
                         usageLoading={usageLoading}
+                        latestVersion={latestVersion}
+                        upgrading={upgradeActionId === runtime.id}
                         onToggleEnabled={handleToggleRuntime}
                         onOpenSession={handleOpenSession}
                         onDelete={handleDeleteRuntime}
                         onEditAlias={handleOpenAlias}
                         onEditAllowedRoots={handleOpenAllowedRoots}
+                        onUpgrade={handleUpgrade}
                         isPlatformAdmin={isPlatformAdmin}
                       />
                     ))}
