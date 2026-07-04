@@ -209,5 +209,90 @@ class TestImportSse:
         assert "done" in names
         assert "reparsing_changes" in names
 
+    async def test_import_sse_resolves_daemon_id_from_member_binding(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        """daemon-entity-binding 补遗（ql-20260704-002）：daemon-client workspace 的
+        daemon_id 存 per-member binding 行（workspace.daemon_runtime_id=NULL）。import
+        必须经 MemberBindingResolver 解析 binding 拿 daemon_id，否则落 server path 分支
+        返回 SPEC_IMPORT_PATH_UNRESOLVED "cannot resolve server path"。
+        """
+        from sqlalchemy import select
+
+        from app.modules.auth.model import User
+        from app.modules.daemon.model import DaemonInstance
+        from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+
+        admin = (
+            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+            .scalars()
+            .first()
+        )
+        assert admin is not None
+
+        # 新链路 workspace：daemon_runtime_id=NULL，daemon_id 存 member binding 行
+        ws = Workspace(
+            id=uuid.uuid4(),
+            name="binding ws",
+            slug=f"binding-{uuid.uuid4().hex[:8]}",
+            root_path=f"/tmp/binding-{uuid.uuid4().hex}",
+            status="active",
+            component_key="comp",
+            path_source="daemon-client",
+            daemon_runtime_id=None,  # 关键：daemon-entity-binding 后新链路为 NULL
+        )
+        db_session.add(ws)
+        daemon = DaemonInstance(
+            id=uuid.uuid4(),
+            user_id=admin.id,
+            hostname="binding-host",
+            server_url="http://localhost:8000",
+            status="online",
+        )
+        db_session.add(daemon)
+        await db_session.flush()
+        db_session.add(
+            WorkspaceMemberRuntime(
+                workspace_id=ws.id,
+                user_id=admin.id,
+                daemon_id=daemon.id,
+                root_path=ws.root_path,
+                path_source="daemon-client",
+            )
+        )
+        await db_session.commit()
+        await _make_spec_workspace(db_session, ws, tmp_path / "spec-root")
+
+        tar_bytes = _build_tar({"docs": None, "docs/A.md": b"# A"})
+        hub = AsyncMock()
+        hub.send_rpc = AsyncMock(return_value={"tar_base64": base64.b64encode(tar_bytes).decode()})
+        with (
+            patch("app.modules.daemon.ws_hub.get_daemon_ws_hub", return_value=hub),
+            patch(
+                "app.modules.scan_docs.service.ScanDocsService.reparse",
+                new=AsyncMock(return_value=({"parsed": 1}, None)),
+            ),
+            patch(
+                "app.modules.change.service.ChangeService.reparse",
+                new=AsyncMock(return_value=({"parsed": 1}, None)),
+            ),
+        ):
+            resp = await client.post(
+                f"/api/workspaces/{ws.id}/spec-workspace/import", headers=auth_headers
+            )
+
+        assert resp.status_code == 200, resp.text
+        events = _parse_sse(resp.text)
+        names = [e for e, _ in events]
+        # 走 daemon 分支：packed + done；不是 error SPEC_IMPORT_PATH_UNRESOLVED
+        assert "packed" in names, f"expected daemon branch, got events: {events}"
+        assert "done" in names
+        err = [d for e, d in events if e == "error"]
+        assert not err, f"unexpected error event: {err}"
+        # RPC 用的是 binding 的 daemon_id（不是 NULL）
+        hub.send_rpc.assert_awaited_once()
+        rpc_daemon_id = hub.send_rpc.await_args.args[0]
+        assert rpc_daemon_id == daemon.id
+
 
 pytestmark = pytest.mark.asyncio

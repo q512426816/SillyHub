@@ -106,7 +106,7 @@ _SSE_HEADERS = {
 async def import_spec_workspace(
     workspace_id: uuid.UUID,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
 ) -> StreamingResponse:
     """Import spec via SSE（D-001 流式，2026-07-01-spec-import-async-and-change-reparse）。
 
@@ -114,10 +114,34 @@ async def import_spec_workspace(
     daemon 离线/超时/打包失败 → error 事件（透传 ql-001 错误码）。daemon-client 的
     packing 阶段每 5s keepalive 防 Next.js proxy idle timeout。前端 importSpecWorkspace
     流式读 event-stream（不再返回 JSON）。
+
+    daemon-entity-binding 补遗（ql-20260704-002）：daemon_id 存 per-member binding 行
+    （workspace.daemon_runtime_id 已退化为 NULL），import 必须经 MemberBindingResolver
+    解析 actor 的 binding 拿 daemon_id（对齐 sync-manual router.py:148-169），无 binding
+    行回退 workspace 全局 daemon_runtime_id（兼容 legacy / 未初始化成员）。否则
+    service.import_from_repo_sse 拿到 ws_daemon_id=None → daemon-client 分流失败 →
+    落 server path 分支 → "cannot resolve server path"。
     """
     service = SpecWorkspaceService(session)
+    # 解析 actor 的 binding：优先 per-member 行（daemon-entity-binding 新链路），缺则回退
+    # workspace 全局 daemon_runtime_id（兼容 legacy / 未初始化成员）。
+    daemon_id: uuid.UUID | None = None
+    root_path: str | None = None
+    try:
+        from app.modules.workspace.member_runtimes.resolver import MemberBindingResolver
+
+        binding = await MemberBindingResolver.resolve_member_binding(session, workspace_id, user.id)
+        daemon_id = binding.daemon_id
+        root_path = binding.root_path
+    except Exception:
+        from app.modules.workspace.model import Workspace
+
+        ws = await session.get(Workspace, workspace_id)
+        daemon_id = ws.daemon_runtime_id if ws else None  # legacy runtime_id as fallback
+        root_path = ws.root_path if ws else None
+
     return StreamingResponse(
-        service.import_from_repo_sse(workspace_id),
+        service.import_from_repo_sse(workspace_id, daemon_id=daemon_id, root_path=root_path),
         media_type="text/event-stream",
         headers=_SSE_HEADERS,
     )
