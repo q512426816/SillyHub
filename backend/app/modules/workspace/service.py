@@ -215,7 +215,12 @@ class WorkspaceService:
                 last_scanned_at=now,
             )
             self._session.add(workspace)
-            await self._session.flush()
+            try:
+                await self._session.flush()
+            except IntegrityError as exc:
+                await self._session.rollback()
+                self._translate_integrity_error(exc, slug=slug, root_path=payload.root_path)
+                raise  # _translate_integrity_error always raises; this is unreachable
             # 空 SpecWorkspace 占位，strategy 由用户选择（2026-06-28 起支持三值，默认 platform-managed）
             await self._ensure_empty_spec_workspace(workspace.id, strategy=payload.spec_strategy)
             # 创建人自动添加为 owner

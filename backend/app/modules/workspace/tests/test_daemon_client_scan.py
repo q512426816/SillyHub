@@ -217,6 +217,44 @@ async def test_create_daemon_client_without_daemon_id_skips_member_binding(
     assert ws.daemon_runtime_id is not None
 
 
+async def test_create_daemon_client_slug_conflict_raises_slug_duplicate(db_session) -> None:
+    """daemon-client create 撞同名 slug → WorkspaceSlugDuplicate(409) 而非裸 IntegrityError(500)。
+
+    回归守护：service.create 的 daemon-client 分支 flush 必须包 try/except IntegrityError
+    翻译（与 server-local 分支 _translate_integrity_error 一致）。否则用户在 UI 用
+    daemon-client 模式建一个跟现有 active workspace 同 slug 的工作区，会收到 500
+    （撞 ux_workspaces_slug_active partial unique index）。
+    """
+    from app.core.errors import WorkspaceSlugDuplicate
+
+    service = WorkspaceService(db_session)
+    # 第一个 daemon-client workspace：占用 slug=dup-name
+    first = await service.create(
+        WorkspaceCreate(
+            name="Dup Name",
+            root_path="/remote/first",
+            path_source="daemon-client",
+            daemon_runtime_id=uuid.uuid4(),
+        ),
+        created_by=None,
+    )
+    assert first.slug == "dup-name"
+
+    # 第二个 daemon-client workspace：同名 slug、不同 root_path（避开 _find_active_by_root_path 复用）
+    # 修复前：flush 抛裸 IntegrityError → router 上浮变 500
+    # 修复后：_translate_integrity_error → WorkspaceSlugDuplicate（HTTP 409）
+    with pytest.raises(WorkspaceSlugDuplicate):
+        await service.create(
+            WorkspaceCreate(
+                name="Dup Name",
+                root_path="/remote/second",
+                path_source="daemon-client",
+                daemon_runtime_id=uuid.uuid4(),
+            ),
+            created_by=None,
+        )
+
+
 async def test_create_daemon_client_rejects_daemon_owned_by_other_user(db_session) -> None:
     """daemon_id 归属校验：daemon 属他人 → create 拒绝（防跨用户劫持）。
 
