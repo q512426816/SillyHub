@@ -159,4 +159,33 @@ describe("WorkspaceCard 结构 (ql-20260702)", () => {
       "/workspaces/ws-8/components",
     );
   });
+
+  // 遗留 1（daemon-entity-binding）：daemon_runtime_id=NULL 的新工作区，
+  // 卡片按 daemon 实体展示绑定（hostname/display_alias + provider 徽标）。
+  it("daemon-client + boundDaemon：按 daemon 实体展示 hostname 与 provider 徽标", () => {
+    render(
+      <WorkspaceCard
+        workspace={mkWorkspace({
+          id: "ws-9",
+          path_source: "daemon-client",
+          daemon_runtime_id: null,
+        })}
+        boundDaemon={{
+          id: "inst-1",
+          hostname: "dev-host",
+          display_alias: null,
+          status: "online",
+          providers: [
+            { provider: "claude", status: "online" },
+            { provider: "codex", status: "online" },
+          ],
+        }}
+        onChanged={() => {}}
+        onEditAlias={() => {}}
+      />,
+    );
+    expect(screen.getByText("dev-host")).toBeInTheDocument();
+    // 两个 provider 徽标都渲染。
+    expect(screen.getByText("Claude Code")).toBeInTheDocument();
+  });
 });

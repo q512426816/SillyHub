@@ -8,13 +8,19 @@ import { PageContainer, PageHeader } from "@/components/layout";
 import { WorkspaceCard } from "@/components/workspace-card";
 import { WorkspaceScanDialog } from "@/components/workspace-scan-dialog";
 import { ApiError } from "@/lib/api";
-import { listDaemonRuntimes, type DaemonRuntimeRead } from "@/lib/daemon";
+import {
+  listDaemonInstances,
+  listDaemonRuntimes,
+  type DaemonInstanceRead,
+  type DaemonRuntimeRead,
+} from "@/lib/daemon";
 import { listUsers, type UserRead } from "@/lib/admin";
 import {
   listWorkspaces,
   updateWorkspace,
   type Workspace,
 } from "@/lib/workspaces";
+import { fetchMyBindings } from "@/lib/workspace-binding";
 import { useNotify } from "@/lib/errors";
 import { useSession } from "@/stores/session";
 
@@ -24,6 +30,14 @@ const PAGE_SIZE = 12;
 export default function WorkspacesPage() {
   const [items, setItems] = useState<Workspace[] | null>(null);
   const [runtimesById, setRuntimesById] = useState<Map<string, DaemonRuntimeRead>>(
+    () => new Map(),
+  );
+  // 遗留 1（daemon-entity-binding）：按 daemon 实体展示。新工作区 daemon_runtime_id=NULL，
+  // 绑定在 member binding 行；instancesById 提供 daemon 实体，bindingsByWs 提供 workspace→daemon_id。
+  const [instancesById, setInstancesById] = useState<Map<string, DaemonInstanceRead>>(
+    () => new Map(),
+  );
+  const [bindingsByWs, setBindingsByWs] = useState<Map<string, { daemon_id: string | null }>>(
     () => new Map(),
   );
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +59,12 @@ export default function WorkspacesPage() {
   const reload = useCallback(async () => {
     setError(null);
     try {
-      const [{ items: list, total: count }, runtimes] = await Promise.all([
+      const [
+        { items: list, total: count },
+        runtimes,
+        instances,
+        bindings,
+      ] = await Promise.all([
         listWorkspaces({
           q: query.trim() || undefined,
           type: typeFilter || undefined,
@@ -55,14 +74,24 @@ export default function WorkspacesPage() {
           offset: page * PAGE_SIZE,
         }),
         listDaemonRuntimes().catch(() => [] as DaemonRuntimeRead[]),
+        listDaemonInstances().catch(() => [] as DaemonInstanceRead[]),
+        fetchMyBindings(),
       ]);
       setItems(list);
       setTotal(count);
       setRuntimesById(new Map(runtimes.map((runtime) => [runtime.id, runtime])));
+      setInstancesById(new Map(instances.map((inst) => [inst.id, inst])));
+      setBindingsByWs(
+        new Map(
+          bindings.map((b) => [b.workspace_id, { daemon_id: b.daemon_id }]),
+        ),
+      );
     } catch (err) {
       setItems([]);
       setTotal(0);
       setRuntimesById(new Map());
+      setInstancesById(new Map());
+      setBindingsByWs(new Map());
       setError(err instanceof ApiError ? err.message : "加载列表失败");
     }
   }, [query, typeFilter, statusFilter, ownerUserId, page, isPlatformAdmin]);
@@ -207,17 +236,25 @@ export default function WorkspacesPage() {
       ) : (
         <>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            {items.map((w) => (
-              <WorkspaceCard
-                key={w.id}
-                workspace={w}
-                boundRuntime={
-                  w.daemon_runtime_id ? runtimesById.get(w.daemon_runtime_id) : null
-                }
-                onChanged={reload}
-                onEditAlias={handleOpenAlias}
-              />
-            ))}
+            {items.map((w) => {
+              // 遗留 1：优先按 daemon 实体展示（新工作区 daemon_runtime_id=NULL）。
+              const bindingDaemonId = bindingsByWs.get(w.id)?.daemon_id;
+              const boundDaemon = bindingDaemonId
+                ? instancesById.get(bindingDaemonId) ?? null
+                : null;
+              return (
+                <WorkspaceCard
+                  key={w.id}
+                  workspace={w}
+                  boundRuntime={
+                    w.daemon_runtime_id ? runtimesById.get(w.daemon_runtime_id) : null
+                  }
+                  boundDaemon={boundDaemon}
+                  onChanged={reload}
+                  onEditAlias={handleOpenAlias}
+                />
+              );
+            })}
           </div>
           {/* task-08 / FR-04：服务端分页器 */}
           <div className="flex items-center justify-between gap-2 pt-1">

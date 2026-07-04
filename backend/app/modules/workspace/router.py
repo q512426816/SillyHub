@@ -13,12 +13,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_deps import require_permission, require_permission_any
+from app.core.auth_deps import get_current_user, require_permission, require_permission_any
 from app.core.db import get_session
 from app.core.errors import PermissionDenied
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.auth.rbac import allowed_workspace_ids, has_permission
+from app.modules.workspace.member_runtimes.router import MemberBindingView, _to_view
+from app.modules.workspace.member_runtimes.service import list_my_bindings
 from app.modules.workspace.model import Workspace
 from app.modules.workspace.relation_schema import (
     RelationCreate,
@@ -186,6 +188,24 @@ async def get_topology(
 ) -> TopologyResponse:
     """Return the full workspace topology graph."""
     return await TopologyBuilder.build(session)
+
+
+@router.get("/my-bindings", response_model=list[MemberBindingView])
+async def list_my_bindings_endpoint(
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_user)],
+) -> list[MemberBindingView]:
+    """Return the caller's member bindings across ALL workspaces.
+
+    遗留 1（daemon-entity-binding）：工作区列表卡片按 daemon 实体展示绑定信息，
+    新工作区 ``workspace.daemon_runtime_id`` 为 NULL（绑定存 member binding 行）。
+    批量端点一次拉取当前用户全部 binding，前端按 workspace_id 索引，避免列表 N 次请求。
+
+    鉴权仅需登录（``get_current_user``）—— 返回行天然限定为调用者本人，
+    无需逐 workspace 校验 WORKSPACE_READ；未加入任何 workspace 的用户返回空列表。
+    """
+    rows = await list_my_bindings(session, user_id=user.id)
+    return [_to_view(r) for r in rows]
 
 
 @router.get("", response_model=WorkspaceListResponse)

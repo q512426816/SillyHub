@@ -3,32 +3,18 @@
  *
  * 长期凭证管理：admin 签发 / 列表 / 吊销。Plaintext 仅在创建时一次性返回，
  * 后续 GET 不再包含。
+ *
+ * 类型从 OpenAPI 自动生成（@/lib/api-types，由 scripts/gen-api-types.mjs 产出），
+ * 消除手写类型漂移。后端 schema 来源：backend/app/modules/auth。
  */
 
 import { apiFetch } from "@/lib/api";
+import type { components } from "@/lib/api-types";
 
-export interface ApiKeyRead {
-  id: string;
-  name: string;
-  key_prefix: string;
-  last_used_at: string | null;
-  expires_at: string | null;
-  created_at: string;
-  revoked_at: string | null;
-}
-
-export interface ApiKeyCreated extends ApiKeyRead {
-  plaintext: string;
-}
-
-export interface ApiKeyListResponse {
-  items: ApiKeyRead[];
-}
-
-export interface ApiKeyCreateRequest {
-  name: string;
-  expires_at: string | null;
-}
+export type ApiKeyRead = components["schemas"]["ApiKeyRead"];
+export type ApiKeyCreated = components["schemas"]["ApiKeyCreated"];
+export type ApiKeyListResponse = components["schemas"]["ApiKeyListResponse"];
+export type ApiKeyCreateRequest = components["schemas"]["ApiKeyCreateRequest"];
 
 /** 列出当前 admin 的所有 API Key（不含 plaintext）。 */
 export async function listApiKeys(): Promise<ApiKeyRead[]> {

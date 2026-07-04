@@ -7,7 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { WorkspacePathFields } from "@/components/workspace-path-fields";
 import { ApiError } from "@/lib/api";
-import type { DaemonRuntimeRead } from "@/lib/daemon";
+import type {
+  DaemonInstanceRead,
+  DaemonRuntimeRead,
+} from "@/lib/daemon";
 import {
   deleteWorkspace,
   rescanWorkspace,
@@ -19,6 +22,12 @@ import { cn } from "@/lib/utils";
 interface Props {
   workspace: Workspace;
   boundRuntime?: DaemonRuntimeRead | null;
+  /**
+   * 遗留 1（daemon-entity-binding）：按 daemon 实体展示绑定。
+   * 新工作区 ``workspace.daemon_runtime_id`` 为 NULL（绑定存 member binding 行），
+   * 列表卡片优先用 daemon 实体渲染守护进程信息。
+   */
+  boundDaemon?: DaemonInstanceRead | null;
   onChanged: () => void;
   // task-08 / FR-03：别名编辑入口（由 WorkspacesPage 弹 modal）。
   onEditAlias: (workspace: Workspace) => void;
@@ -27,6 +36,7 @@ interface Props {
 export function WorkspaceCard({
   workspace,
   boundRuntime,
+  boundDaemon,
   onChanged,
   onEditAlias,
 }: Props) {
@@ -109,6 +119,7 @@ export function WorkspaceCard({
         <WorkspacePathFields
           workspace={workspace}
           runtime={boundRuntime}
+          daemon={boundDaemon}
           linkRuntime
         />
         {/* ql-20260702：最后扫描与创建于合并为一行，节省纵向空间。 */}

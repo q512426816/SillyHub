@@ -89,6 +89,20 @@ async def upsert_my_binding(
     return binding, True
 
 
+async def list_my_bindings(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+) -> list[WorkspaceMemberRuntime]:
+    """Return the caller's binding rows across ALL workspaces.
+
+    遗留 1（daemon-entity-binding）：工作区列表卡片不再依赖 ``workspace.daemon_runtime_id``
+    （新工作区该列为 NULL），改为按 daemon 实体展示。批量端点一次性拉取当前用户
+    在所有工作区的 member binding，前端按 workspace_id 索引，避免列表 N 次请求。
+    """
+    stmt = select(WorkspaceMemberRuntime).where(col(WorkspaceMemberRuntime.user_id) == user_id)
+    return list((await session.execute(stmt)).scalars().all())
+
+
 async def list_member_bindings(
     session: AsyncSession,
     workspace_id: uuid.UUID,

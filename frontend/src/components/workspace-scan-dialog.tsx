@@ -291,10 +291,26 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
               />
             )}
             {daemonId && !browseRuntimeId && (
-              <p className="text-[11px] text-amber-600">
-                选中的守护进程暂无在线 provider runtime，无法浏览目录；
-                可手动填写路径后创建。
-              </p>
+              <div className="space-y-1.5">
+                <label
+                  className="text-xs font-medium text-muted-foreground"
+                  htmlFor="daemon-root-path-manual"
+                >
+                  守护进程暂无在线智能体，请手动填写项目路径
+                </label>
+                <Input
+                  id="daemon-root-path-manual"
+                  value={daemonRootPath}
+                  onChange={(e) =>
+                    setDaemonRootPath(normalizeClientPath(e.target.value))
+                  }
+                  placeholder="C:\\path\\to\\repo  或  /abs/path/to/repo"
+                  disabled={phase === "creating"}
+                />
+                <p className="text-[11px] text-amber-600">
+                  无法浏览目录（守护进程无在线 provider runtime）；请直接填写绝对路径后创建。
+                </p>
+              </div>
             )}
             {daemonRootPath && (
               <div className="space-y-1.5">
