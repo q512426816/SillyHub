@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,6 @@ import {
   proxyCreateChange,
   type CreateChangeInput,
 } from "@/lib/changes";
-import { listDaemonRuntimes, type DaemonRuntimeRead } from "@/lib/daemon";
 import { getWorkspace, type Workspace } from "@/lib/workspaces";
 
 interface Props {
@@ -27,7 +26,6 @@ export default function CreateChangePage({ params }: Props) {
   const [components, setComponents] = useState<Component[]>([]);
   const [selectedComponents, setSelectedComponents] = useState<string[]>([]);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
-  const [runtimes, setRuntimes] = useState<DaemonRuntimeRead[]>([]);
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,14 +39,9 @@ export default function CreateChangePage({ params }: Props) {
   useEffect(() => {
     let active = true;
     setWorkspaceLoading(true);
-    Promise.all([
-      getWorkspace(workspaceId),
-      listDaemonRuntimes().catch(() => [] as DaemonRuntimeRead[]),
-    ])
-      .then(([ws, runtimeList]) => {
-        if (!active) return;
-        setWorkspace(ws);
-        setRuntimes(runtimeList);
+    getWorkspace(workspaceId)
+      .then((ws) => {
+        if (active) setWorkspace(ws);
       })
       .catch((err) => {
         if (!active) return;
@@ -62,32 +55,16 @@ export default function CreateChangePage({ params }: Props) {
     };
   }, [workspaceId]);
 
-  const daemonRuntimeId = workspace?.daemon_runtime_id ?? null;
-  const boundRuntime = useMemo(() => {
-    if (!daemonRuntimeId) return null;
-    return runtimes.find((r) => r.id === daemonRuntimeId) ?? null;
-  }, [daemonRuntimeId, runtimes]);
   const isDaemonClient = workspace?.path_source === "daemon-client";
-  const daemonDisabledReason = isDaemonClient
-    ? !daemonRuntimeId || boundRuntime?.status !== "online"
-      ? "需要在线 daemon 才能在客户端工作区创建变更"
-      : null
-    : null;
+  // D-002@v1：runtime 由后端从 binding + workspace.default_agent 现算，前端不再
+  // 校验 daemon 在线状态（提交时由后端心跳校验，离线返 DAEMON_CLIENT_NO_SESSION）。
   const submitDisabled =
-    loading ||
-    workspaceLoading ||
-    workspace === null ||
-    !description.trim() ||
-    daemonDisabledReason !== null;
+    loading || workspaceLoading || workspace === null || !description.trim();
 
   const handleSubmit = async () => {
     if (!description.trim()) return;
     if (workspace === null) {
       setError("工作区信息加载失败，请刷新后重试");
-      return;
-    }
-    if (daemonDisabledReason) {
-      setError(daemonDisabledReason);
       return;
     }
     setLoading(true);
@@ -99,15 +76,14 @@ export default function CreateChangePage({ params }: Props) {
         affected_components:
           selectedComponents.length > 0 ? selectedComponents : undefined,
       };
-      const result =
-        isDaemonClient && daemonRuntimeId
-          ? await proxyCreateChange(workspaceId, {
-              title: input.title,
-              description: input.description,
-              change_type: input.change_type,
-              runtime_id: daemonRuntimeId,
-            })
-          : await createChange(workspaceId, input);
+      // daemon-client 走 proxy-create（不传 runtime_id，后端从 binding 现算）。
+      const result = isDaemonClient
+        ? await proxyCreateChange(workspaceId, {
+            title: input.title,
+            description: input.description,
+            change_type: input.change_type,
+          })
+        : await createChange(workspaceId, input);
       router.push(`/workspaces/${workspaceId}/changes/${result.id}`);
     } catch (err) {
       if (err instanceof ApiError && err.code === "DAEMON_CLIENT_NO_SESSION") {
@@ -192,12 +168,7 @@ export default function CreateChangePage({ params }: Props) {
 
           {/* 提交 */}
           <div className="flex gap-2 pt-1">
-            <Button
-              size="sm"
-              onClick={handleSubmit}
-              disabled={submitDisabled}
-              title={daemonDisabledReason ?? undefined}
-            >
+            <Button size="sm" onClick={handleSubmit} disabled={submitDisabled}>
               {loading ? "创建中…" : "提交需求"}
             </Button>
             <Button variant="ghost" size="sm" onClick={() => router.back()}>

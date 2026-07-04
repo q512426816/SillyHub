@@ -131,7 +131,6 @@ async def test_proxy_create_change_online(client, db_session):
                 "title": "Daemon Change",
                 "description": "需要支持 daemon 代写",
                 "change_type": "feature",
-                "runtime_id": str(refs["runtime_id"]),
             },
             headers=_auth(refs["token"]),
         )
@@ -190,21 +189,21 @@ async def test_proxy_create_change_online(client, db_session):
 
 
 async def test_proxy_create_change_runtime_offline(client, db_session):
-    """离线 runtime：400 DAEMON_CLIENT_NO_SESSION + 引导 detail。"""
+    """离线 runtime：400 DAEMON_CLIENT_NO_SESSION + reason=daemon_offline。"""
     refs = await _setup_daemon_client_workspace(db_session, online=False)
 
     resp = await client.post(
         f"/api/workspaces/{refs['ws_id']}/changes/proxy-create",
         json={
             "title": "Should Fail",
-            "runtime_id": str(refs["runtime_id"]),
         },
         headers=_auth(refs["token"]),
     )
     assert resp.status_code == 400
     body = resp.json()
     assert body["code"] == "DAEMON_CLIENT_NO_SESSION"
-    assert "daemon" in body["message"]
+    # D-001@v1：reason 区分场景（legacy fallback 走 daemon_offline）。
+    assert body["details"]["reason"] == "daemon_offline"
 
 
 async def test_proxy_create_change_runtime_stale_heartbeat_marks_offline(client, db_session):
@@ -222,7 +221,6 @@ async def test_proxy_create_change_runtime_stale_heartbeat_marks_offline(client,
         f"/api/workspaces/{refs['ws_id']}/changes/proxy-create",
         json={
             "title": "Stale Runtime",
-            "runtime_id": str(refs["runtime_id"]),
         },
         headers=_auth(refs["token"]),
     )
@@ -235,21 +233,90 @@ async def test_proxy_create_change_runtime_stale_heartbeat_marks_offline(client,
     assert runtime.status == "offline"
 
 
-async def test_proxy_create_change_runtime_not_bound(client, db_session):
-    """runtime_id 不绑定该 workspace → 400 DAEMON_CLIENT_NO_SESSION。"""
+async def test_proxy_create_change_unbound_daemon_client_returns_400(client, db_session):
+    """daemon-client workspace 无 binding 且无 legacy daemon_runtime_id → 400 not_bound。
+
+    D-002@v1（2026-07-05-daemon-client-change-binding-fix）：runtime_id 不再由前端传，
+    后端经 resolve_runtime_for_writeback 解析。新链路下若既无 binding 又无 legacy
+    daemon_runtime_id，resolver 抛 DaemonClientNoActiveSession(reason=not_bound)。
+    替代旧 test_proxy_create_change_runtime_not_bound（测旧 runtime_id mismatch 语义，
+    入参删 runtime_id 后场景不存在）。
+    """
+    from app.modules.workspace.model import Workspace
+
     refs = await _setup_daemon_client_workspace(db_session, online=True)
-    other_runtime = uuid.uuid4()
+    # 清掉 legacy daemon_runtime_id，模拟新链路未绑定场景。
+    ws = await db_session.get(Workspace, refs["ws_id"])
+    assert ws is not None
+    ws.daemon_runtime_id = None
+    db_session.add(ws)
+    await db_session.commit()
 
     resp = await client.post(
         f"/api/workspaces/{refs['ws_id']}/changes/proxy-create",
-        json={
-            "title": "Mismatch Runtime",
-            "runtime_id": str(other_runtime),
-        },
+        json={"title": "Unbound"},
         headers=_auth(refs["token"]),
     )
     assert resp.status_code == 400
-    assert resp.json()["code"] == "DAEMON_CLIENT_NO_SESSION"
+    body = resp.json()
+    assert body["code"] == "DAEMON_CLIENT_NO_SESSION"
+    assert body["details"]["reason"] == "not_bound"
+
+
+async def test_proxy_create_change_binding_path_online(client, db_session):
+    """新链路 fixture（binding + DaemonInstance + default_agent）：proxy-create 201。
+
+    task-07 AC-01：daemon_runtime_id=None + per-member binding 行 → resolve_runtime_for_writeback
+    命中 → 下发 change-write → 落库 Change。覆盖现有 fixture（非空 daemon_runtime_id）的盲区。
+    """
+    from app.modules.workspace.member_runtimes.tests.helpers_writeback import (
+        make_daemon_client_workspace_with_binding,
+    )
+
+    # 复用 _setup_daemon_client_workspace 的 user/token 创建逻辑（admin token）。
+    refs = await _setup_daemon_client_workspace(db_session, online=True)
+    # 用 admin user 起新链路 workspace（独立 ws_id）。
+    binding_refs = await make_daemon_client_workspace_with_binding(
+        db_session, user_id=refs["user_id"], default_agent="claude"
+    )
+
+    from app.modules.change_writer import proxy as proxy_mod
+
+    async def fake_await(session, cw_id):
+        await _simulate_daemon_complete(session, cw_id)
+        from app.modules.daemon.model import DaemonChangeWrite
+
+        return await session.get(DaemonChangeWrite, cw_id)
+
+    with patch.object(proxy_mod, "_await_change_write_receipt", side_effect=fake_await):
+        resp = await client.post(
+            f"/api/workspaces/{binding_refs['ws_id']}/changes/proxy-create",
+            json={"title": "Binding Path", "description": "新链路", "change_type": "feature"},
+            headers=_auth(refs["token"]),
+        )
+
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["title"] == "Binding Path"
+
+    # DaemonChangeWrite.runtime_id 为 resolver 现算值（= binding_refs["runtime_id"]）。
+    from sqlalchemy import select
+
+    from app.modules.daemon.model import DaemonChangeWrite
+
+    cw = (
+        (
+            await db_session.execute(
+                select(DaemonChangeWrite).where(
+                    DaemonChangeWrite.workspace_id == binding_refs["ws_id"]
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert cw is not None
+    assert cw.runtime_id == binding_refs["runtime_id"]
 
 
 async def test_proxy_create_change_timeout(client, db_session):
@@ -267,7 +334,6 @@ async def test_proxy_create_change_timeout(client, db_session):
             f"/api/workspaces/{refs['ws_id']}/changes/proxy-create",
             json={
                 "title": "Timeout Change",
-                "runtime_id": str(refs["runtime_id"]),
             },
             headers=_auth(refs["token"]),
         )
@@ -334,19 +400,25 @@ async def test_await_change_write_receipt_refreshes_external_update(db_session):
     assert result.status == "done"
 
 
-async def test_service_create_change_daemon_client_no_runtime_raises(client, db_session):
-    """service.create_change(daemon-client, runtime_id=None) → DaemonClientNoActiveSession。"""
+async def test_service_create_change_daemon_client_offline_raises(client, db_session):
+    """service.create_change(daemon-client, daemon 离线) → DaemonClientNoActiveSession。
+
+    D-002@v1（2026-07-05-daemon-client-change-binding-fix）：create_change 签名删
+    runtime_id（写回始终现算）。替代旧 test_service_create_change_daemon_client_no_runtime_raises
+    （测旧 runtime_id=None 入参，入参删后场景不存在）。daemon 离线时 resolver 抛
+    DaemonClientNoActiveSession(reason=daemon_offline)。
+    """
     from app.modules.change_writer.proxy import DaemonClientNoActiveSession
     from app.modules.change_writer.service import ChangeWriterService
 
-    refs = await _setup_daemon_client_workspace(db_session, online=True)
+    refs = await _setup_daemon_client_workspace(db_session, online=False)
     service = ChangeWriterService(db_session)
 
     with pytest.raises(DaemonClientNoActiveSession):
         await service.create_change(
             refs["ws_id"],
             refs["user_id"],
-            title="No Runtime",
+            title="Offline Daemon",
         )
 
 

@@ -52,13 +52,13 @@ class BatchGenerateResponse(BaseModel):
 
 
 class ProxyCreateChangeRequest(BaseModel):
-    """daemon-client 变更代写入参 (design §7.5 / task-10)。
+    """daemon-client 变更代写入参 (design §7.5 / D-002@v1)。
 
-    ``runtime_id`` 为绑定该 workspace 的在线 daemon runtime；backend 经
-    lease-polling 下发 change-write 任务由 daemon 代写（D-004@v1）。
+    D-002@v1（2026-07-05-daemon-client-change-binding-fix）：删 ``runtime_id`` 字段。
+    runtime 由后端 ``resolve_runtime_for_writeback`` 用 binding + workspace.default_agent
+    现算（与派发链路共用解析）。daemon_id 亦从 per-member binding 拿，前端无需传。
     """
 
     title: str = Field(..., min_length=1, max_length=500)
     description: str = Field(default="", max_length=5000)
     change_type: str | None = Field(default=None, max_length=50)
-    runtime_id: uuid.UUID

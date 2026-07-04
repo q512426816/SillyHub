@@ -2808,16 +2808,17 @@ export interface paths {
         put?: never;
         /**
          * Proxy Create Change
-         * @description daemon-client 变更代写入口 (design §5.3 Phase 3 / D-004@v1)。
+         * @description daemon-client 变更代写入口 (design §5.3 Phase 3 / D-002@v1)。
          *
          *     与 server-local ``/changes/create`` 区分：
-         *     - 不传 ``lease_id``，改传 ``runtime_id``（绑定在线 daemon）。
-         *     - 经 ``service.create_change(..., runtime_id=...)`` 走 proxy 路径（lease-polling
-         *       下发 daemon_change_writes → 等回执 → 落库 Change）。
+         *     - 不传 ``lease_id`` 也不传 ``runtime_id``（D-002@v1）。
+         *     - 经 ``service.create_change`` 走 proxy 路径（lease-polling 下发
+         *       daemon_change_writes → 等回执 → 落库 Change）；runtime 由后端从 binding +
+         *       workspace.default_agent 现算。
          *     - **不自动 dispatch brainstorm**（daemon-client change 暂不接 agent 流；agent
          *       dispatch 由 task-12/后续接，避免与 server-local auto-dispatch 语义混淆）。
          *
-         *     daemon 离线 / runtime 不绑定 → 400 ``DAEMON_CLIENT_NO_SESSION``（service 层抛）。
+         *     daemon 离线 / 未绑定 → 400 ``DAEMON_CLIENT_NO_SESSION``（service 层抛）。
          */
         post: operations["proxy_create_change_api_workspaces__workspace_id__changes_proxy_create_post"];
         delete?: never;
@@ -5583,6 +5584,13 @@ export interface paths {
          *     daemon 离线/超时/打包失败 → error 事件（透传 ql-001 错误码）。daemon-client 的
          *     packing 阶段每 5s keepalive 防 Next.js proxy idle timeout。前端 importSpecWorkspace
          *     流式读 event-stream（不再返回 JSON）。
+         *
+         *     daemon-entity-binding 补遗（ql-20260704-002）：daemon_id 存 per-member binding 行
+         *     （workspace.daemon_runtime_id 已退化为 NULL），import 必须经 MemberBindingResolver
+         *     解析 actor 的 binding 拿 daemon_id（对齐 sync-manual router.py:148-169），无 binding
+         *     行回退 workspace 全局 daemon_runtime_id（兼容 legacy / 未初始化成员）。否则
+         *     service.import_from_repo_sse 拿到 ws_daemon_id=None → daemon-client 分流失败 →
+         *     落 server path 分支 → "cannot resolve server path"。
          */
         post: operations["import_spec_workspace_api_workspaces__workspace_id__spec_workspace_import_post"];
         delete?: never;
@@ -5609,9 +5617,12 @@ export interface paths {
          *
          *     - **server-local**：root_path 在容器/宿主机可读 → 直接打包 .sillyspec → apply_sync
          *       落盘 + reparse，立即返 ``{"status": "done"}``。
-         *     - **daemon-client**：root_path 在成员宿主机，backend 读不到 → 建 ``kind="spec-sync"``
-         *       的 DaemonChangeWrite outbox 行（files 携带 workspace_id 元信息），返
-         *       ``{"status": "pending", "task_id": <uuid>}``。前端轮询 ``GET .../sync-manual/pending``。
+         *     - **daemon-client**：root_path 在成员宿主机，backend 读不到 → runtime 由
+         *       ``resolve_runtime_for_writeback`` 现算（D-001@v1，2026-07-05-daemon-client-change-binding-fix）；
+         *       建 ``kind="spec-sync"`` 的 DaemonChangeWrite outbox 行（files 携带 workspace_id
+         *       元信息），返 ``{"status": "pending", "task_id": <uuid>}``。前端轮询
+         *       ``GET .../sync-manual/pending``。daemon-client 解析失败 → 400
+         *       ``DAEMON_CLIENT_NO_SESSION``（不再错走 server-local）。
          */
         post: operations["sync_manual_spec_workspace_api_workspaces__workspace_id__spec_workspace_sync_manual_post"];
         delete?: never;
@@ -9648,10 +9659,11 @@ export interface components {
         };
         /**
          * ProxyCreateChangeRequest
-         * @description daemon-client 变更代写入参 (design §7.5 / task-10)。
+         * @description daemon-client 变更代写入参 (design §7.5 / D-002@v1)。
          *
-         *     ``runtime_id`` 为绑定该 workspace 的在线 daemon runtime；backend 经
-         *     lease-polling 下发 change-write 任务由 daemon 代写（D-004@v1）。
+         *     D-002@v1（2026-07-05-daemon-client-change-binding-fix）：删 ``runtime_id`` 字段。
+         *     runtime 由后端 ``resolve_runtime_for_writeback`` 用 binding + workspace.default_agent
+         *     现算（与派发链路共用解析）。daemon_id 亦从 per-member binding 拿，前端无需传。
          */
         ProxyCreateChangeRequest: {
             /** Title */
@@ -9663,11 +9675,6 @@ export interface components {
             description: string;
             /** Change Type */
             change_type?: string | null;
-            /**
-             * Runtime Id
-             * Format: uuid
-             */
-            runtime_id: string;
         };
         /** PsPlanNodeCreate */
         PsPlanNodeCreate: {

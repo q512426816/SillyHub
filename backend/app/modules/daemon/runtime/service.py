@@ -53,12 +53,14 @@ class DaemonInstanceOwnershipMismatch(AppError):
 
 
 class DaemonRuntimeInUse(AppError):
-    """Daemon runtime 仍被一个或多个 workspace 绑定（R-06 RESTRICT）。
+    """Daemon runtime 仍有进行中的任务/写回引用（D-003@v1 RESTRICT）。
 
-    ``workspaces.daemon_runtime_id`` 外键按设计是 RESTRICT（workspace/model.py
-    + migration 202607030900 注释）：删除一个仍在为 workspace 服务的 daemon 应被
-    阻止。这里把它翻译成 409 + 绑定 workspace 列表，让调用方先去解绑，而不是让 DB
-    的 IntegrityError 冒泡成 500。
+    2026-07-05-daemon-client-change-binding-fix task-05：RESTRICT 检查表从
+    ``workspaces.daemon_runtime_id``（新链路恒 NULL，失效）改为
+    ``daemon_task_leases.runtime_id`` + ``daemon_change_writes.runtime_id``
+    （D-003 保留 FK 处，派发+写回现算后有真实值）。只挡 in-flight
+    （lease/change_write status pending/claimed），让调用方等待完成或取消后再删，
+    而非让 in-flight 工作 CASCADE 静默丢失。
     """
 
     code = "HTTP_409_DAEMON_RUNTIME_IN_USE"
@@ -654,42 +656,64 @@ class RuntimeService:
         ``agent_sessions`` rows automatically. The daemon re-registers as a
         fresh runtime on its next heartbeat.
 
-        ``workspaces.daemon_runtime_id`` 是 RESTRICT（R-06 cascade 明确 out of
-        scope）：若有未软删 workspace 仍绑定本 runtime，抛 ``DaemonRuntimeInUse``
-        (409) 并带 workspace 列表，让调用方先解绑，而非让 FK 违约束冒泡成 500。
+        D-003@v1（2026-07-05-daemon-client-change-binding-fix task-05）：删前
+        RESTRICT 检查改查 ``daemon_task_leases.runtime_id`` + ``daemon_change_writes.runtime_id``
+        （in-flight：status pending/claimed）。旧查 ``workspaces.daemon_runtime_id``
+        在新链路恒 NULL（binding 不再写该列）→ 保护失效；新链路 lease/change_write
+        的 runtime_id 由派发/写回现算填入有真实值，RESTRICT 保护恢复有效。任一命中 →
+        抛 ``DaemonRuntimeInUse`` (409)，避免 in-flight 工作 CASCADE 静默丢失。
 
-        软删 workspace（deleted_at IS NOT NULL）的 ``daemon_runtime_id`` 不会被
-        软删逻辑清理，但 DB FK RESTRICT 不看 ``deleted_at``，仍会拦截 DELETE。
-        故对软删引用在此应用层 SET NULL 解绑（ql-20260625-002-7c3a），未软删绑定
-        已在上面 409 拦截，这里只解软删引用，不影响活跃 workspace。
+        软删 workspace（deleted_at IS NOT NULL）的 legacy ``daemon_runtime_id`` 仍
+        可能非空（旧数据），应用层 SET NULL 解绑（ql-20260625-002-7c3a）绕过 FK
+        RESTRICT；与 in-flight 检查正交（design §11 DaemonRuntime.delete）。
         """
         runtime = await self._get_owned_runtime(
             runtime_id, user_id, is_platform_admin=is_platform_admin
         )
-        # 删前检查：被未软删 workspace 绑定的 runtime 不允许物理删除（RESTRICT）。
-        # 排除 deleted_at IS NOT NULL 的软删 workspace，否则会永久卡住删除。
-        bound = (
+        # 删前检查：有 in-flight 任务/写回引用本 runtime 时禁止物理删除（D-003@v1，
+        # 2026-07-05-daemon-client-change-binding-fix task-05）。
+        #
+        # 旧逻辑查 ``workspaces.daemon_runtime_id``（RESTRICT），但 daemon-entity-binding
+        # 后该列退化为 NULL（新链路不再写）→ 查不到引用 → 误删 in-flight runtime。
+        # 改查 ``daemon_task_leases.runtime_id`` + ``daemon_change_writes.runtime_id``
+        # （D-003 保留 FK 处）：派发 placement 现算填 lease.runtime_id、写回
+        # resolve_runtime_for_writeback 现算填 change_write.runtime_id，二者有真实值。
+        # 只挡 in-flight（pending/claimed）；终态行（completed/expired/cancelled/done/failed）
+        # 已不在工作流内，CASCADE 自动清理，不阻止删除。
+        from app.modules.daemon.model import DaemonChangeWrite, DaemonTaskLease
+
+        inflight_leases = (
             await self._session.execute(
-                select(Workspace.id, Workspace.name, Workspace.slug).where(
-                    col(Workspace.daemon_runtime_id) == runtime_id,
-                    col(Workspace.deleted_at).is_(None),
+                select(DaemonTaskLease.id).where(
+                    col(DaemonTaskLease.runtime_id) == runtime_id,
+                    col(DaemonTaskLease.status).in_(["pending", "claimed"]),
                 )
             )
         ).all()
-        if bound:
-            names = ", ".join(row.slug or row.name or str(row.id) for row in bound)
+        inflight_writes = (
+            await self._session.execute(
+                select(DaemonChangeWrite.id).where(
+                    col(DaemonChangeWrite.runtime_id) == runtime_id,
+                    col(DaemonChangeWrite.status).in_(["pending", "claimed"]),
+                )
+            )
+        ).all()
+        if inflight_leases or inflight_writes:
+            total = len(inflight_leases) + len(inflight_writes)
             raise DaemonRuntimeInUse(
-                f"该 daemon 仍被 {len(bound)} 个 workspace 绑定（{names}），"
-                "请先在对应 workspace 中解除绑定后再删除",
+                f"该 daemon runtime 仍有 {total} 个进行中的任务/写回"
+                f"（lease {len(inflight_leases)} + change_write {len(inflight_writes)}），"
+                "请等待完成或取消后再删除",
                 details={
-                    "workspaces": [
-                        {"id": str(row.id), "name": row.name, "slug": row.slug} for row in bound
-                    ],
+                    "inflight_leases": len(inflight_leases),
+                    "inflight_change_writes": len(inflight_writes),
                 },
             )
         # 软删 workspace 仍引用本 runtime 时，应用层 SET NULL 解绑（绕过 FK RESTRICT）。
         # 软删逻辑只置 deleted_at 不清 daemon_runtime_id，PG FK RESTRICT 不看 deleted_at
         # 会拦截 DELETE；SQLite 测试库 FK 不严测不出，PG 生产暴露 500（dialect 差异）。
+        # 注：此清理仅服务于 legacy ``workspaces.daemon_runtime_id`` 列（新链路恒 NULL），
+        # 与上面 in-flight RESTRICT 检查正交（design §11 DaemonRuntime.delete）。
         await self._session.execute(
             update(Workspace)
             .where(

@@ -331,6 +331,7 @@ class ChangeService:
         change_id: uuid.UUID,
         rel_path: str,
         content: str,
+        user_id: uuid.UUID,
     ) -> dict:
         """编辑保存（task-05 / FR-05/06 / D-001/002/006）。
 
@@ -342,6 +343,10 @@ class ChangeService:
           **不 await**（D-001 离线续传），resync，返 ``{status:"pending", task_id}``。
 
         path resolve 必须落变更目录内（守卫，D-004）；content ≤ 1MB。
+
+        D-001@v1（2026-07-05-daemon-client-change-binding-fix）：补 ``user_id`` 参数，
+          daemon-client 分流入队时由 ``resolve_runtime_for_writeback`` 现算 runtime
+          （替代旧直读 ``workspace.daemon_runtime_id``，新链路该列 NULL）。
         """
         if len(content.encode("utf-8")) > MAX_CONTENT_BYTES:
             raise ChangeDocNotFound(
@@ -370,7 +375,11 @@ class ChangeService:
         task_id: uuid.UUID | None = None
         if is_daemon_client_path_source(workspace.path_source):
             task_id = await self._enqueue_edit_write(
-                workspace=workspace, change=change, rel_path=rel_path, content=content
+                workspace=workspace,
+                change=change,
+                rel_path=rel_path,
+                content=content,
+                user_id=user_id,
             )
 
         # resync（镜像/目标已新鲜，POST 时即刷新，D-005）
@@ -388,13 +397,21 @@ class ChangeService:
         change: Change,
         rel_path: str,
         content: str,
+        user_id: uuid.UUID,
     ) -> uuid.UUID:
         """建/合并同 change_key+path 的 pending DaemonChangeWrite 行（D-002）。
 
         files 项 path 用扁平 ``changes/{key}/{rel_path}``（对齐 _build_files 范式，
         daemon runChangeWrite 通用消费）。命中 pending 行则 UPDATE content（last-write-wins）。
+
+        D-001@v1（2026-07-05-daemon-client-change-binding-fix）：runtime_id 改由
+        ``resolve_runtime_for_writeback`` 现算（替代旧直读 ``workspace.daemon_runtime_id``），
+        需 ``user_id`` 校验 daemon 归属。失败抛 ``DaemonClientNoActiveSession``。
         """
         from app.modules.daemon.model import DaemonChangeWrite
+        from app.modules.workspace.member_runtimes.resolver import (
+            resolve_runtime_for_writeback,
+        )
 
         files_payload = [
             {
@@ -403,14 +420,11 @@ class ChangeService:
                 "doc_type": "edit",
             }
         ]
-        # runtime_id：daemon-client 必有绑定 runtime（写回通道）
-        runtime_id = workspace.daemon_runtime_id
-        if runtime_id is None:
-            # 无绑定 runtime 无法入队，跳过 outbox（镜像已写，仅本机未回写）
-            raise ChangeDocNotFound(
-                "daemon-client workspace 未绑定 daemon runtime，无法入队写回。",
-                details={"workspace_id": str(workspace.id)},
-            )
+        # runtime_id：写回时现算（D-001@v1）。失败抛 DaemonClientNoActiveSession
+        # （reason 区分 not_bound / daemon_offline / default_agent_unset / provider_unavailable）。
+        resolved = await resolve_runtime_for_writeback(self._session, workspace.id, user_id)
+        rid_raw = resolved["id"]
+        runtime_id: uuid.UUID = uuid.UUID(rid_raw) if isinstance(rid_raw, str) else rid_raw
 
         existing = (
             (

@@ -784,25 +784,29 @@ class TestDeleteRuntime:
         assert await svc.get_runtime(rt.id) is not None
 
     @pytest.mark.asyncio
-    async def test_delete_runtime_blocked_when_workspace_bound(
+    async def test_delete_runtime_blocked_when_inflight_lease(
         self, db_session: AsyncSession
     ) -> None:
-        """被未软删 workspace 绑定的 runtime 删除被拒 → DaemonRuntimeInUse (409)。"""
+        """D-003@v1（2026-07-05-daemon-client-change-binding-fix）：runtime 仍有
+        in-flight lease 时删除被拒 → DaemonRuntimeInUse (409)。
+
+        替代旧 test_delete_runtime_blocked_when_workspace_bound（测 workspace 绑定阻止删除，
+        daemon-entity-binding 后 workspaces.daemon_runtime_id 恒 NULL，该 RESTRICT 失效）。
+        新链路 RESTRICT 改查 daemon_task_leases + daemon_change_writes 的 in-flight runtime_id。
+        """
         user_id = await _create_user(db_session)
         svc = DaemonService(db_session)
         rt = await _legacy_register_runtime(
-            db_session, user_id, name="bound-daemon", provider="claude_code"
+            db_session, user_id, name="inflight-daemon", provider="claude_code"
         )
-
-        ws = Workspace(
-            id=uuid.uuid4(),
-            name="bound-ws",
-            slug=f"bound-ws-{rt.id.hex[:8]}",
-            root_path="/tmp/bound",
-            path_source="daemon-client",
-            daemon_runtime_id=rt.id,
+        # in-flight lease 引用本 runtime → 应阻止删除。
+        db_session.add(
+            DaemonTaskLease(
+                id=uuid.uuid4(),
+                runtime_id=rt.id,
+                status="pending",
+            )
         )
-        db_session.add(ws)
         await db_session.commit()
 
         with pytest.raises(DaemonRuntimeInUse) as exc_info:
@@ -810,12 +814,11 @@ class TestDeleteRuntime:
 
         # runtime 未被删
         assert await svc.get_runtime(rt.id) is not None
-        # details 带绑定 workspace 列表 + 状态码 409
+        # details 带 in-flight 计数 + 状态码 409
         assert exc_info.value.http_status == 409
         details = exc_info.value.details
         assert details is not None
-        assert len(details["workspaces"]) == 1
-        assert details["workspaces"][0]["slug"] == ws.slug
+        assert details["inflight_leases"] == 1
 
     @pytest.mark.asyncio
     async def test_delete_runtime_allows_when_workspace_soft_deleted(

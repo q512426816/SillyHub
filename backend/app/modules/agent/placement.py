@@ -867,32 +867,15 @@ class RunPlacementService:
     ) -> dict | None:
         """Return the online daemon_instance row, or None if offline / not owned.
 
-        Used by ``_resolve_dispatch_runtime`` and ``_resolve_decide_runtime``
-        to verify the bound daemon entity is reachable before resolving its
-        provider runtimes (design §6 / D-004).
+        Thin wrapper over the shared module-level query (D-004@v1,
+        2026-07-05-daemon-client-change-binding-fix task-01). 派发与写回链路共用同一
+        条 SQL，避免逻辑重复。
         """
-        try:
-            result = await self._session.execute(
-                text(
-                    """
-                    SELECT id, status, hostname
-                    FROM daemon_instances
-                    WHERE id = :did
-                      AND user_id = :uid
-                      AND status = 'online'
-                    """
-                ),
-                {"did": daemon_id.hex, "uid": user_id.hex},
-            )
-            row = result.mappings().first()
-            return dict(row) if row else None
-        except Exception as exc:
-            log.warning(
-                "placement_daemon_online_query_failed",
-                daemon_id=str(daemon_id),
-                error=str(exc),
-            )
-            return None
+        from app.modules.workspace.member_runtimes.queries import (
+            query_daemon_online_by_id,
+        )
+
+        return await query_daemon_online_by_id(self._session, daemon_id, user_id)
 
     async def _query_runtime_by_daemon_and_provider(
         self,
@@ -900,84 +883,24 @@ class RunPlacementService:
         target_provider: str | None,
     ) -> dict | None:
         """Return the first online runtime matching ``target_provider`` on the
-        given daemon, or None if no such runtime exists (design §6 D-005).
-
-        When ``target_provider`` is None (workspace has no default_agent and no
-        caller override), return any online runtime on the daemon, preferring
-        the most recently seen.
+        given daemon, or None (design §6 D-005). 共享查询薄壳（task-01）。
         """
-        try:
-            if target_provider:
-                result = await self._session.execute(
-                    text(
-                        """
-                        SELECT id, user_id, provider, status, daemon_instance_id
-                        FROM daemon_runtimes
-                        WHERE daemon_instance_id = :did
-                          AND provider = :prov
-                          AND status = 'online'
-                        ORDER BY last_heartbeat_at DESC NULLS LAST
-                        LIMIT 1
-                        """
-                    ),
-                    {"did": daemon_id.hex, "prov": target_provider},
-                )
-            else:
-                result = await self._session.execute(
-                    text(
-                        """
-                        SELECT id, user_id, provider, status, daemon_instance_id
-                        FROM daemon_runtimes
-                        WHERE daemon_instance_id = :did
-                          AND status = 'online'
-                        ORDER BY last_heartbeat_at DESC NULLS LAST
-                        LIMIT 1
-                        """
-                    ),
-                    {"did": daemon_id.hex},
-                )
-            row = result.mappings().first()
-            return dict(row) if row else None
-        except Exception as exc:
-            log.warning(
-                "placement_runtime_by_daemon_query_failed",
-                daemon_id=str(daemon_id),
-                target_provider=target_provider,
-                error=str(exc),
-            )
-            return None
+        from app.modules.workspace.member_runtimes.queries import (
+            query_runtime_by_daemon_and_provider,
+        )
+
+        return await query_runtime_by_daemon_and_provider(self._session, daemon_id, target_provider)
 
     async def _get_daemon_enabled_providers(
         self,
         daemon_id: uuid.UUID,
     ) -> list[str]:
-        """Return a sorted list of unique provider names enabled on the daemon.
+        """Return sorted unique provider names enabled on the daemon. 共享查询薄壳（task-01）。"""
+        from app.modules.workspace.member_runtimes.queries import (
+            get_daemon_enabled_providers,
+        )
 
-        Used by the D-008 error path to build a user-facing message listing
-        which providers the daemon actually has, so the user can reconfigure
-        ``default_agent`` accordingly.
-        """
-        try:
-            result = await self._session.execute(
-                text(
-                    """
-                    SELECT DISTINCT provider
-                    FROM daemon_runtimes
-                    WHERE daemon_instance_id = :did
-                      AND provider IS NOT NULL
-                    ORDER BY provider
-                    """
-                ),
-                {"did": daemon_id.hex},
-            )
-            return [row[0] for row in result.all()]
-        except Exception as exc:
-            log.warning(
-                "placement_daemon_providers_query_failed",
-                daemon_id=str(daemon_id),
-                error=str(exc),
-            )
-            return []
+        return await get_daemon_enabled_providers(self._session, daemon_id)
 
     async def _resolve_decide_runtime(
         self,

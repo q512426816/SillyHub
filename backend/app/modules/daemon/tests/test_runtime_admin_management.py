@@ -469,18 +469,62 @@ async def test_normal_user_cross_owner_actions_return_not_found(
 
 
 @pytest.mark.asyncio
-async def test_platform_admin_delete_bound_runtime_returns_409(
+async def test_platform_admin_delete_runtime_with_inflight_lease_returns_409(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
+    """D-003@v1（2026-07-05-daemon-client-change-binding-fix task-05）：runtime 仍有
+    in-flight lease 时禁止删除（409 DaemonRuntimeInUse）。
+
+    替代旧 test_platform_admin_delete_bound_runtime_returns_409（测 workspace binding 阻止删除，
+    daemon-entity-binding 后 workspaces.daemon_runtime_id 恒 NULL，该 RESTRICT 失效）。
+    新链路 RESTRICT 改查 daemon_task_leases + daemon_change_writes 的 in-flight runtime_id。
+    """
+    from app.modules.daemon.model import DaemonTaskLease
+
     admin, _user_a, user_b = await _bootstrap_admin_and_normal_users(db_session)
-    rt = await _create_runtime(db_session, user_b.id, name="rt-bound")
-    # active (non-soft-deleted) workspace bound to this runtime
-    await _create_workspace_row(
-        db_session, created_by=user_b.id, name="ws-bound", daemon_runtime_id=rt.id
+    rt = await _create_runtime(db_session, user_b.id, name="rt-inflight")
+    # in-flight lease 引用本 runtime（status=pending）→ 应阻止删除。
+    db_session.add(
+        DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            status="pending",
+        )
     )
+    await db_session.commit()
 
     resp = await client.delete(f"/api/daemon/runtimes/{rt.id}", headers=_headers(_token_for(admin)))
     assert resp.status_code == 409, resp.text
     body = resp.json()
-    # DaemonRuntimeInUse details surface the bound workspaces
-    assert "workspaces" in body.get("details", {})
+    assert body["code"] == "HTTP_409_DAEMON_RUNTIME_IN_USE"
+    assert body["details"]["inflight_leases"] == 1
+
+
+@pytest.mark.asyncio
+async def test_platform_admin_delete_runtime_with_inflight_change_write_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """D-003@v1：runtime 仍有 in-flight change_write 时禁止删除（409）。"""
+    from app.modules.daemon.model import DaemonChangeWrite
+
+    admin, _user_a, user_b = await _bootstrap_admin_and_normal_users(db_session)
+    rt = await _create_runtime(db_session, user_b.id, name="rt-write")
+    ws = await _create_workspace_row(db_session, created_by=user_b.id, name="ws-write")
+    db_session.add(
+        DaemonChangeWrite(
+            id=uuid.uuid4(),
+            workspace_id=ws.id,
+            runtime_id=rt.id,
+            change_key="2026-07-05-demo",
+            kind="create",
+            files=[],
+            status="pending",
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.delete(f"/api/daemon/runtimes/{rt.id}", headers=_headers(_token_for(admin)))
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body["code"] == "HTTP_409_DAEMON_RUNTIME_IN_USE"
+    assert body["details"]["inflight_change_writes"] == 1

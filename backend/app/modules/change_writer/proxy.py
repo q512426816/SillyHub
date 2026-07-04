@@ -170,15 +170,18 @@ async def proxy_create_change(
     *,
     workspace_id: uuid.UUID,
     user_id: uuid.UUID,
-    runtime_id: uuid.UUID,
     title: str,
     description: str = "",
     change_type: str | None = None,
 ) -> Change:
     """daemon-client 变更代写：下发 change-write 任务 → 等回执 → 落库 Change。
 
-    runtime 校验失败（不绑定/离线）→ 抛 ``DaemonClientNoActiveSession``（400，
-    code ``DAEMON_CLIENT_NO_SESSION``）。
+    runtime 解析失败（未绑定 / daemon 离线 / default_agent 无匹配 runtime）→
+    抛 ``DaemonClientNoActiveSession``（400，code ``DAEMON_CLIENT_NO_SESSION``）。
+
+    D-001@v1（2026-07-05-daemon-client-change-binding-fix）：runtime_id 不再由
+    caller 传入，改由 ``resolve_runtime_for_writeback`` 用 binding + default_agent
+    现算（与派发链路共用解析）。
     """
     workspace = await session.get(Workspace, workspace_id)
     if workspace is None or workspace.deleted_at is not None:
@@ -187,19 +190,18 @@ async def proxy_create_change(
             details={"workspace_id": str(workspace_id)},
         )
 
-    # 防御性 assert：service 已按 path_source 分流，此处仅 daemon-client 走 proxy。
-    # runtime 校验：必须绑定该 workspace 且 online。
-    if workspace.daemon_runtime_id is None or workspace.daemon_runtime_id != runtime_id:
-        raise DaemonClientNoActiveSession(
-            "需要在线 daemon 才能在客户端工作区创建变更。",
-            details={
-                "workspace_id": str(workspace_id),
-                "runtime_id": str(runtime_id),
-                "reason": "runtime_not_bound",
-            },
-        )
+    # 校验：从 binding + workspace.default_agent 现算 online runtime（D-001@v1）。
+    # 失败抛 DaemonClientNoActiveSession（reason 区分 not_bound / daemon_offline /
+    # default_agent_unset / provider_unavailable）。
+    from app.modules.workspace.member_runtimes.resolver import (
+        resolve_runtime_for_writeback,
+    )
 
-    # runtime 在线校验（避免 deferred import 循环：runtime model 与本模块分离）。
+    resolved = await resolve_runtime_for_writeback(session, workspace_id, user_id)
+    rid_raw = resolved["id"]
+    runtime_id: uuid.UUID = uuid.UUID(rid_raw) if isinstance(rid_raw, str) else rid_raw
+
+    # runtime 在线心跳二次校验（防竞态：现算后到下发前 daemon 可能掉线）。
     from app.modules.daemon.model import DaemonRuntime
 
     runtime = await session.get(DaemonRuntime, runtime_id)
