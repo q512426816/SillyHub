@@ -105,7 +105,7 @@ export default function RuntimePage({ params }: Props) {
       title: "步骤数",
       key: "steps",
       render: (_v: unknown, [, stage]: [string, StageProgress]) => (
-        <span className="text-xs">{stage.steps.length}</span>
+        <span className="text-xs">{stage.steps?.length ?? 0}</span>
       ),
     },
     {
@@ -263,5 +263,5 @@ export default function RuntimePage({ params }: Props) {
 
 function toStageEntries(progress: RuntimeProgress | null): [string, StageProgress][] {
   if (!progress) return [];
-  return Object.entries(progress.stages);
+  return Object.entries(progress.stages ?? {});
 }

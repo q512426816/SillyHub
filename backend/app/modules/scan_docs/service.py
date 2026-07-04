@@ -17,6 +17,8 @@ from sqlmodel import col
 
 from app.core.errors import ScanDocNotFound
 from app.core.logging import get_logger
+from app.modules.scan_docs.conflict_model import ScanDocConflictHistory
+from app.modules.scan_docs.conflict_service import ScanDocConflictService
 from app.modules.scan_docs.model import ScanDocument
 from app.modules.scan_docs.parser import ParsedDoc, ScanDocsParser, ScanDocsResult
 from app.modules.workspace.service import WorkspaceService
@@ -45,7 +47,7 @@ class ScanDocsService:
         workspace_id: uuid.UUID,
         *,
         q: str | None = None,
-    ) -> tuple[list[ScanDocument], int]:
+    ) -> tuple[list[ScanDocument], int, dict[str, int]]:
         await self._workspace_service.get(workspace_id)
         stmt = (
             select(ScanDocument)
@@ -66,7 +68,8 @@ class ScanDocsService:
             )
         stmt = stmt.order_by(col(ScanDocument.path).asc())
         items = list((await self._session.execute(stmt)).scalars().all())
-        return items, len(items)
+        conflict_counts = await self._count_conflicts_batch(workspace_id, [d.path for d in items])
+        return items, len(items), conflict_counts
 
     async def get(
         self,
@@ -94,6 +97,51 @@ class ScanDocsService:
                 },
             )
         return doc
+
+    # -- Conflict history (D-001@V1) ---
+
+    async def count_conflicts(self, workspace_id: uuid.UUID, path: str) -> int:
+        """单路径历史冲突条数（用于详情页徽章）。"""
+        stmt = (
+            select(func.count())
+            .select_from(ScanDocConflictHistory)
+            .where(col(ScanDocConflictHistory.workspace_id) == workspace_id)
+            .where(col(ScanDocConflictHistory.path) == path)
+        )
+        return int((await self._session.execute(stmt)).scalar_one())
+
+    async def list_conflicts(
+        self,
+        workspace_id: uuid.UUID,
+        doc_id: uuid.UUID,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[ScanDocConflictHistory]:
+        """某文档的历史冲突归档，按 created_at 倒序。doc 不存在抛 ScanDocNotFound。"""
+        doc = await self.get(workspace_id, doc_id)
+        return await ScanDocConflictService(self._session).list_history(
+            workspace_id,
+            doc.path,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def _count_conflicts_batch(
+        self,
+        workspace_id: uuid.UUID,
+        paths: list[str],
+    ) -> dict[str, int]:
+        """批量算 path→conflict_count（一次 group by，避免列表 N+1）。"""
+        if not paths:
+            return {}
+        cnt_stmt = (
+            select(ScanDocConflictHistory.path, func.count())
+            .where(col(ScanDocConflictHistory.workspace_id) == workspace_id)
+            .where(col(ScanDocConflictHistory.path).in_(paths))
+            .group_by(ScanDocConflictHistory.path)
+        )
+        return {row[0]: int(row[1]) for row in (await self._session.execute(cnt_stmt)).all()}
 
     # -- Reparse ---
 

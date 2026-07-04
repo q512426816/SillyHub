@@ -24,6 +24,16 @@ const RESOURCE_COLORS: Record<string, "default" | "success" | "warning" | "destr
 
 const PAGE_SIZE = 20;
 
+// details_json 后端是 JSON 字符串(Text 列)，需要解析为对象；非法 JSON 兜底为 null。
+export function parseDetails(s: string | null): Record<string, unknown> | null {
+  if (!s) return null;
+  try {
+    return JSON.parse(s) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 function categorizeAction(action: string): { label: string; variant: "default" | "success" | "warning" | "destructive" | "outline" } {
   if (action.startsWith("git_") || action.includes("git") || action.includes("commit") || action.includes("branch") || action.includes("push") || action.includes("merge")) {
     return { label: "Git", variant: "default" };
@@ -44,11 +54,13 @@ function categorizeAction(action: string): { label: string; variant: "default" |
 }
 
 function getResultStatus(entry: AuditLogEntry): { label: string; variant: "success" | "warning" | "destructive" | "outline" } {
-  const details = entry.details_json;
-  if (!details) {
+  const raw = entry.details_json;
+  const details = parseDetails(raw);
+  if (!details || !raw) {
     return { label: "无详情", variant: "outline" };
   }
-  const str = JSON.stringify(details).toLowerCase();
+  // details_json 已是合法 JSON 字符串，关键字搜索等价于直接对原始字符串搜小写形式。
+  const str = raw.toLowerCase();
   if (str.includes("error") || str.includes("fail") || str.includes("denied")) {
     return { label: "异常", variant: "destructive" };
   }
@@ -119,7 +131,8 @@ export default function AuditPage({ params }: Props) {
     const toolCalls = items.filter((e) => e.resource_type === "agent_run").length;
     const anomalies = items.filter((e) => {
       if (!e.details_json) return false;
-      const str = JSON.stringify(e.details_json).toLowerCase();
+      // details_json 已是 JSON 字符串，直接搜原始字符串即可覆盖所有 value。
+      const str = e.details_json.toLowerCase();
       return str.includes("error") || str.includes("fail");
     }).length;
     return { total, git, toolCalls, anomalies };
@@ -244,7 +257,7 @@ export default function AuditPage({ params }: Props) {
                       </td>
                       <td className="max-w-[200px] truncate text-[11px]">
                         {entry.details_json
-                          ? JSON.stringify(entry.details_json).slice(0, 60)
+                          ? entry.details_json.slice(0, 60)
                           : "---"}
                       </td>
                     </tr>

@@ -2,30 +2,13 @@
  * Runtime progress API client. Mirrors backend/app/modules/runtime/schema.py.
  */
 import { apiFetch } from "@/lib/api";
+import type { components } from "@/lib/api-types";
 
-export interface StageStep {
-  name: string;
-  status: string;
-  started_at: string | null;
-  completed_at: string | null;
-  output: string | null;
-}
-
-export interface StageProgress {
-  status: string;
-  steps: StageStep[];
-  started_at: string | null;
-  completed_at: string | null;
-}
-
-export interface RuntimeProgress {
-  version: number;
-  project: string | null;
-  current_stage: string | null;
-  current_change: string | null;
-  stages: Record<string, StageProgress>;
-  last_active: string | null;
-}
+// 复用 OpenAPI 生成的 RuntimeProgress / StageProgress / StageStep 类型，
+// 字段命名与后端 snake_case DTO 一致。
+export type StageStep = components["schemas"]["StageStep"];
+export type StageProgress = components["schemas"]["StageProgress"];
+export type RuntimeProgress = components["schemas"]["RuntimeProgress"];
 
 export async function getRuntimeProgress(
   workspaceId: string,

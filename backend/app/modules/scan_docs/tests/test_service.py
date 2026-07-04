@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ScanDocNotFound, WorkspaceNotFound
+from app.modules.scan_docs.conflict_model import ScanDocConflictHistory
 from app.modules.scan_docs.model import ScanDocument
+from app.modules.scan_docs.schema import ScanDocRead, ScanDocSummary
 from app.modules.scan_docs.service import ScanDocsService
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.workspace.model import Workspace
@@ -82,6 +85,32 @@ async def _create_scan_doc(
     return doc
 
 
+async def _create_conflict(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    path: str,
+    *,
+    created_at: datetime | None = None,
+) -> ScanDocConflictHistory:
+    """插入一条冲突归档（D-001@V1）以测试计数/列表。"""
+    row = ScanDocConflictHistory(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        path=path,
+        old_content="old",
+        old_source_member_id=None,
+        old_source_runtime_id=None,
+        old_mtime=None,
+        new_source_member_id=None,
+        new_mtime=None,
+        created_at=created_at or datetime.now(UTC),
+    )
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+    return row
+
+
 # ── list_() ──────────────────────────────────────────────────────────────
 
 
@@ -100,9 +129,10 @@ class TestListDocsReturnsEmpty:
     async def test_empty_result(self, db_session: AsyncSession) -> None:
         ws = await _create_workspace(db_session)
         svc = ScanDocsService(db_session)
-        items, total = await svc.list_(ws.id)
+        items, total, conflict_counts = await svc.list_(ws.id)
         assert items == []
         assert total == 0
+        assert conflict_counts == {}
 
 
 class TestListDocsReturnsExisting:
@@ -114,7 +144,7 @@ class TestListDocsReturnsExisting:
         await _create_scan_doc(db_session, ws.id, "STRUCTURE")
 
         svc = ScanDocsService(db_session)
-        items, total = await svc.list_(ws.id)
+        items, total, _conflict_counts = await svc.list_(ws.id)
         assert total == 2
         doc_types = {d.doc_type for d in items}
         assert doc_types == {"ARCHITECTURE", "STRUCTURE"}
@@ -151,7 +181,7 @@ class TestListDocsWithQuery:
         await self._make_doc(db_session, ws.id, path="docs/a/auth.md", title="Auth", content="c1")
         await self._make_doc(db_session, ws.id, path="docs/a/core.md", title="Core", content="c2")
         svc = ScanDocsService(db_session)
-        _items, total = await svc.list_(ws.id)
+        _items, total, _cc = await svc.list_(ws.id)
         assert total == 2
 
     async def test_q_matches_path(self, db_session: AsyncSession) -> None:
@@ -163,7 +193,7 @@ class TestListDocsWithQuery:
             db_session, ws.id, path="docs/silly/modules/agent.md", title="T", content="x"
         )
         svc = ScanDocsService(db_session)
-        items, total = await svc.list_(ws.id, q="auth")
+        items, total, _cc = await svc.list_(ws.id, q="auth")
         assert total == 1
         assert "auth" in items[0].path
 
@@ -174,7 +204,7 @@ class TestListDocsWithQuery:
         )
         await self._make_doc(db_session, ws.id, path="docs/a/y.md", title="其他", content="x")
         svc = ScanDocsService(db_session)
-        items, total = await svc.list_(ws.id, q="用户管理")
+        items, total, _cc = await svc.list_(ws.id, q="用户管理")
         assert total == 1
         assert items[0].title == "用户管理模块"
 
@@ -189,7 +219,7 @@ class TestListDocsWithQuery:
         )
         await self._make_doc(db_session, ws.id, path="docs/a/y.md", title="T", content="无关内容")
         svc = ScanDocsService(db_session)
-        items, total = await svc.list_(ws.id, q="rareMarker123")
+        items, total, _cc = await svc.list_(ws.id, q="rareMarker123")
         assert total == 1
         assert items[0].content is not None
         assert "rareMarker123" in items[0].content
@@ -198,7 +228,7 @@ class TestListDocsWithQuery:
         ws = await _create_workspace(db_session)
         await self._make_doc(db_session, ws.id, path="docs/a/AUTH.md", title="T", content="x")
         svc = ScanDocsService(db_session)
-        _items, total = await svc.list_(ws.id, q="auth")
+        _items, total, _cc = await svc.list_(ws.id, q="auth")
         assert total == 1
 
     async def test_q_no_match_returns_empty(self, db_session: AsyncSession) -> None:
@@ -207,7 +237,7 @@ class TestListDocsWithQuery:
             db_session, ws.id, path="docs/a/auth.md", title="Auth", content="content"
         )
         svc = ScanDocsService(db_session)
-        items, total = await svc.list_(ws.id, q="zzznotexist")
+        items, total, _cc = await svc.list_(ws.id, q="zzznotexist")
         assert total == 0
         assert items == []
 
@@ -218,7 +248,7 @@ class TestListDocsWithQuery:
             db_session, ws.id, path="docs/a/auth.md", title="Auth", content="content"
         )
         svc = ScanDocsService(db_session)
-        _items, total = await svc.list_(ws.id, q="%")
+        _items, total, _cc = await svc.list_(ws.id, q="%")
         assert total == 0  # 字面 % 不出现在任何文档，转义后不会通配匹配全部
 
 
@@ -295,7 +325,7 @@ class TestReparseCreatesDocs:
 
         assert stats["created"] > 0
         # Verify the doc exists in DB
-        items, total = await svc.list_(ws.id)
+        items, total, _cc = await svc.list_(ws.id)
         assert total > 0
         arch = next((d for d in items if d.doc_type == "ARCHITECTURE"), None)
         assert arch is not None
@@ -326,7 +356,7 @@ class TestReparseCreatesDocs:
         stats, _result = await svc.reparse(ws.id)
 
         assert stats["created"] > 0
-        items, total = await svc.list_(ws.id)
+        items, total, _cc = await svc.list_(ws.id)
         assert total > 0
         arch = next((d for d in items if d.doc_type == "ARCHITECTURE"), None)
         assert arch is not None
@@ -365,7 +395,7 @@ class TestReparseUpdatesDocs:
         stats2, _ = await svc.reparse(ws.id)
         assert stats2["updated"] >= 1
 
-        items, _ = await svc.list_(ws.id)
+        items, _, _cc = await svc.list_(ws.id)
         arch = next(d for d in items if d.doc_type == "ARCHITECTURE")
         assert "V2 Architecture" in arch.content
 
@@ -394,7 +424,7 @@ class TestReparseIdempotent:
         assert stats2["updated"] > 0
 
         # Same total count
-        _items1, total1 = await svc.list_(ws.id)
+        _items1, total1, _cc = await svc.list_(ws.id)
         assert total1 == stats1["created"] + stats1["updated"]
 
 
@@ -430,3 +460,137 @@ class TestReparseRemovesDeletedFiles:
         arch = (await db_session.execute(stmt)).scalar_one()
         assert arch.exists is False
         assert arch.content is None
+
+
+# ── schema 字段映射 + conflict_count（task-02）─────────────────────────
+
+
+class TestSchemaMapsSourceFields:
+    """ScanDocSummary/ScanDocRead 通过 from_attributes 映射 model 已有列。"""
+
+    async def test_summary_maps_source_and_hash(self, db_session: AsyncSession) -> None:
+        ws = await _create_workspace(db_session)
+        member_id = uuid.uuid4()
+        synced = datetime.now(UTC)
+        mtime = datetime.now(UTC)
+        doc = ScanDocument(
+            id=uuid.uuid4(),
+            workspace_id=ws.id,
+            doc_type="ARCH",
+            path="docs/ARCH.md",
+            title="t",
+            exists=True,
+            content="c",
+            source_member_id=member_id,
+            source_synced_at=synced,
+            source_mtime=mtime,
+            content_hash="abc123",
+        )
+        db_session.add(doc)
+        await db_session.commit()
+        await db_session.refresh(doc)
+
+        summary = ScanDocSummary.model_validate(doc)
+        assert summary.source_member_id == member_id
+        assert summary.content_hash == "abc123"
+        # conflict_count 默认 0（model 无此列，需 router 注入）
+        assert summary.conflict_count == 0
+
+        read = ScanDocRead.model_validate(doc)
+        assert read.source_member_id == member_id
+        assert read.content_hash == "abc123"
+        # SQLite/aiosqlite 存 naive datetime（去掉 tzinfo 比较，详见 backend-test-sqlite-vs-pg）
+        assert read.source_mtime.replace(tzinfo=None) == mtime.replace(tzinfo=None)
+
+
+# ── conflict_count（task-03）─────────────────────────────────────────────
+
+
+class TestListConflictCounts:
+    """list_ 返回的 conflict_counts 在 0/1/多 冲突历史下都正确。"""
+
+    async def test_zero_when_no_history(self, db_session: AsyncSession) -> None:
+        ws = await _create_workspace(db_session)
+        await _create_scan_doc(db_session, ws.id, "ARCH")
+        svc = ScanDocsService(db_session)
+        _items, _total, conflict_counts = await svc.list_(ws.id)
+        assert conflict_counts == {}
+
+    async def test_one_conflict(self, db_session: AsyncSession) -> None:
+        ws = await _create_workspace(db_session)
+        doc = await _create_scan_doc(db_session, ws.id, "ARCH")
+        await _create_conflict(db_session, ws.id, doc.path)
+        svc = ScanDocsService(db_session)
+        items, _total, conflict_counts = await svc.list_(ws.id)
+        assert conflict_counts == {doc.path: 1}
+        # router 注入后该条目计数 = 1
+        s = ScanDocSummary.model_validate(items[0])
+        s = s.model_copy(update={"conflict_count": conflict_counts.get(items[0].path, 0)})
+        assert s.conflict_count == 1
+
+    async def test_multiple_conflicts_per_path(self, db_session: AsyncSession) -> None:
+        ws = await _create_workspace(db_session)
+        doc_a = await _create_scan_doc(db_session, ws.id, "ARCH_A")
+        doc_b = await _create_scan_doc(db_session, ws.id, "ARCH_B")
+        # doc_a 3 条冲突，doc_b 1 条
+        await _create_conflict(db_session, ws.id, doc_a.path)
+        await _create_conflict(db_session, ws.id, doc_a.path)
+        await _create_conflict(db_session, ws.id, doc_a.path)
+        await _create_conflict(db_session, ws.id, doc_b.path)
+        svc = ScanDocsService(db_session)
+        _items, _total, conflict_counts = await svc.list_(ws.id)
+        assert conflict_counts == {doc_a.path: 3, doc_b.path: 1}
+
+
+class TestCountConflictsSingle:
+    """count_conflicts(workspace_id, path) 返回单路径计数。"""
+
+    async def test_count(self, db_session: AsyncSession) -> None:
+        ws = await _create_workspace(db_session)
+        doc = await _create_scan_doc(db_session, ws.id, "ARCH")
+        await _create_conflict(db_session, ws.id, doc.path)
+        await _create_conflict(db_session, ws.id, doc.path)
+        svc = ScanDocsService(db_session)
+        assert await svc.count_conflicts(ws.id, doc.path) == 2
+
+    async def test_count_zero(self, db_session: AsyncSession) -> None:
+        ws = await _create_workspace(db_session)
+        svc = ScanDocsService(db_session)
+        assert await svc.count_conflicts(ws.id, "nope.md") == 0
+
+
+# ── list_conflicts（task-03）─────────────────────────────────────────────
+
+
+class TestListConflictsByDoc:
+    """list_conflicts 按 created_at 倒序；doc 不存在抛 ScanDocNotFound。"""
+
+    async def test_descending_by_created_at(self, db_session: AsyncSession) -> None:
+        ws = await _create_workspace(db_session)
+        doc = await _create_scan_doc(db_session, ws.id, "ARCH")
+        # 三条递增时间戳的冲突历史
+        t1 = datetime(2026, 7, 1, 12, 0, 0, tzinfo=UTC)
+        t2 = datetime(2026, 7, 2, 12, 0, 0, tzinfo=UTC)
+        t3 = datetime(2026, 7, 3, 12, 0, 0, tzinfo=UTC)
+        await _create_conflict(db_session, ws.id, doc.path, created_at=t1)
+        await _create_conflict(db_session, ws.id, doc.path, created_at=t3)
+        await _create_conflict(db_session, ws.id, doc.path, created_at=t2)
+        svc = ScanDocsService(db_session)
+        rows = await svc.list_conflicts(ws.id, doc.id)
+        # SQLite 存 naive，比较时统一去 tzinfo
+        got = [
+            r.created_at.replace(tzinfo=None) if r.created_at.tzinfo else r.created_at for r in rows
+        ]
+        want = [t3.replace(tzinfo=None), t2.replace(tzinfo=None), t1.replace(tzinfo=None)]
+        assert got == want
+
+    async def test_doc_not_found_raises(self, db_session: AsyncSession) -> None:
+        ws = await _create_workspace(db_session)
+        svc = ScanDocsService(db_session)
+        with pytest.raises(ScanDocNotFound):
+            await svc.list_conflicts(ws.id, uuid.uuid4())
+
+    async def test_workspace_not_found_raises(self, db_session: AsyncSession) -> None:
+        svc = ScanDocsService(db_session)
+        with pytest.raises(WorkspaceNotFound):
+            await svc.list_conflicts(uuid.uuid4(), uuid.uuid4())

@@ -176,12 +176,12 @@ class RuntimeService:
                     stages[stage_name] = stage_progress
 
                 return RuntimeProgress(
-                    _version=4,
+                    version=4,
                     project=project_name,
-                    currentStage=current_stage,
-                    currentChange=change_name,
+                    current_stage=current_stage,
+                    current_change=change_name,
                     stages=stages,
-                    lastActive=self._parse_dt(last_active),
+                    last_active=self._parse_dt(last_active),
                 )
 
             finally:

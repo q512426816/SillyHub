@@ -194,7 +194,7 @@ class DaemonService:
         user_id: uuid.UUID | None,
         limit: int,
         offset: int,
-    ) -> tuple[list[tuple[DaemonRuntime, User | None]], int]:
+    ) -> tuple[list[tuple[DaemonRuntime, User | None, DaemonInstance | None]], int]:
         """Paginated filtered runtime list (task-04 / FR-04). 委托 RuntimeService."""
         return await self._rt.list_runtimes_page(
             actor_user_id=actor_user_id,

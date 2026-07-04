@@ -13,6 +13,7 @@ from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.scan_docs.schema import (
+    ScanDocConflictRead,
     ScanDocList,
     ScanDocRead,
     ScanDocReparseResponse,
@@ -41,11 +42,14 @@ async def list_scan_docs(
     ] = None,
 ) -> ScanDocList:
     service = ScanDocsService(session)
-    items, total = await service.list_(workspace_id, q=q)
-    return ScanDocList(
-        items=[ScanDocSummary.model_validate(d) for d in items],
-        total=total,
-    )
+    items, total, conflict_counts = await service.list_(workspace_id, q=q)
+    summaries = [
+        ScanDocSummary.model_validate(d).model_copy(
+            update={"conflict_count": conflict_counts.get(d.path, 0)}
+        )
+        for d in items
+    ]
+    return ScanDocList(items=summaries, total=total)
 
 
 @router.get(
@@ -60,7 +64,25 @@ async def get_scan_doc(
 ) -> ScanDocRead:
     service = ScanDocsService(session)
     doc = await service.get(workspace_id, doc_id)
-    return ScanDocRead.model_validate(doc)
+    read = ScanDocRead.model_validate(doc)
+    read.conflict_count = await service.count_conflicts(workspace_id, doc.path)
+    return read
+
+
+@router.get(
+    "/scan-docs/{doc_id}/conflicts",
+    response_model=list[ScanDocConflictRead],
+)
+async def list_scan_doc_conflicts(
+    workspace_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.SCAN_DOCS_READ))],
+) -> list[ScanDocConflictRead]:
+    """某扫描文档路径的历史冲突归档（D-001@V1 last-write-wins 覆盖快照，倒序）。"""
+    service = ScanDocsService(session)
+    items = await service.list_conflicts(workspace_id, doc_id)
+    return [ScanDocConflictRead.model_validate(i) for i in items]
 
 
 @router.post(

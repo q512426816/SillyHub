@@ -55,7 +55,7 @@ export function WorkspaceBindingGuard({ workspaceId }: Props) {
   // 已绑定：渲染「编辑我的接入配置」入口（详情页规范管理区顶部）。
   if (editing && binding) {
     const initial: AccessGuideInitial = {
-      daemon_id: binding.daemon_id,
+      daemon_id: binding.daemon_id ?? null,
       root_path: binding.root_path,
       path_source: binding.path_source,
     };

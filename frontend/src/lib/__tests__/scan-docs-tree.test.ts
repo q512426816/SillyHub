@@ -6,6 +6,7 @@ import type { ScanDocSummary } from "../scan-docs";
 function makeDoc(path: string, doc_type = "OTHER"): ScanDocSummary {
   return {
     id: path,
+    workspace_id: "ws-test",
     doc_type,
     path,
     title: path.split("/").pop() ?? null,

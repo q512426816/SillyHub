@@ -629,6 +629,10 @@ export interface paths {
         /**
          * Upsert My Binding Endpoint
          * @description Upsert the caller's own binding. daemon_id must belong to the caller.
+         *
+         *     service.upsert_my_binding 在 daemon 不归属调用方时抛
+         *     AppError(http_status=403, code="daemon_not_owned")，这里不再 catch，异常直通
+         *     全局处理器（app/core/errors.py）统一返 403 + 标准错误 body。
          */
         put: operations["upsert_my_binding_endpoint_api_workspaces__workspace_id__my_binding_put"];
         post?: never;
@@ -1169,6 +1173,26 @@ export interface paths {
         };
         /** Get Scan Doc */
         get: operations["get_scan_doc_api_workspaces__workspace_id__scan_docs__doc_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/scan-docs/{doc_id}/conflicts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Scan Doc Conflicts
+         * @description 某扫描文档路径的历史冲突归档（D-001@V1 last-write-wins 覆盖快照，倒序）。
+         */
+        get: operations["list_scan_doc_conflicts_api_workspaces__workspace_id__scan_docs__doc_id__conflicts_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -10576,19 +10600,19 @@ export interface components {
              * Version
              * @default 1
              */
-            _version: number;
+            version: number;
             /** Project */
             project?: string | null;
-            /** Currentstage */
-            currentStage?: string | null;
-            /** Currentchange */
-            currentChange?: string | null;
+            /** Current Stage */
+            current_stage?: string | null;
+            /** Current Change */
+            current_change?: string | null;
             /** Stages */
             stages?: {
                 [key: string]: components["schemas"]["StageProgress"];
             };
-            /** Lastactive */
-            lastActive?: string | null;
+            /** Last Active */
+            last_active?: string | null;
         };
         /**
          * RuntimeUsageListResponse
@@ -10658,6 +10682,34 @@ export interface components {
          * @enum {string}
          */
         RuntimeUsageWindow: "1d" | "7d" | "30d";
+        /**
+         * ScanDocConflictRead
+         * @description 单条扫描文档路径的历史冲突归档记录（D-001@V1 last-write-wins 覆盖快照）。
+         */
+        ScanDocConflictRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Old Content */
+            old_content?: string | null;
+            /** Old Source Member Id */
+            old_source_member_id?: string | null;
+            /** Old Source Runtime Id */
+            old_source_runtime_id?: string | null;
+            /** Old Mtime */
+            old_mtime?: string | null;
+            /** New Source Member Id */
+            new_source_member_id?: string | null;
+            /** New Mtime */
+            new_mtime?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** ScanDocList */
         ScanDocList: {
             /** Items */
@@ -10695,6 +10747,19 @@ export interface components {
             content?: string | null;
             /** Last Modified At */
             last_modified_at?: string | null;
+            /** Source Member Id */
+            source_member_id?: string | null;
+            /** Source Synced At */
+            source_synced_at?: string | null;
+            /** Source Mtime */
+            source_mtime?: string | null;
+            /** Content Hash */
+            content_hash?: string | null;
+            /**
+             * Conflict Count
+             * @default 0
+             */
+            conflict_count: number;
         };
         /**
          * ScanDocReparseResponse
@@ -10761,6 +10826,19 @@ export interface components {
             exists: boolean;
             /** Last Modified At */
             last_modified_at?: string | null;
+            /** Source Member Id */
+            source_member_id?: string | null;
+            /** Source Synced At */
+            source_synced_at?: string | null;
+            /** Source Mtime */
+            source_mtime?: string | null;
+            /** Content Hash */
+            content_hash?: string | null;
+            /**
+             * Conflict Count
+             * @default 0
+             */
+            conflict_count: number;
         };
         /** ScanDocWarning */
         ScanDocWarning: {
@@ -14087,7 +14165,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MemberBindingView"] | null;
                 };
             };
             /** @description Validation Error */
@@ -14122,7 +14200,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MemberBindingView"];
                 };
             };
             /** @description Validation Error */
@@ -14153,7 +14231,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MemberBindingView"][];
                 };
             };
             /** @description Validation Error */
@@ -15178,6 +15256,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScanDocRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_scan_doc_conflicts_api_workspaces__workspace_id__scan_docs__doc_id__conflicts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanDocConflictRead"][];
                 };
             };
             /** @description Validation Error */

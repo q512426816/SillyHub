@@ -18,7 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import require_permission
 from app.core.db import get_session
-from app.core.errors import AppError
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
@@ -70,7 +69,7 @@ def _to_view(row: WorkspaceMemberRuntime) -> MemberBindingView:
     )
 
 
-@router.get("/my-binding")
+@router.get("/my-binding", response_model=MemberBindingView | None)
 async def get_my_binding_endpoint(
     workspace_id: uuid.UUID,
     session: SessionDep,
@@ -83,7 +82,7 @@ async def get_my_binding_endpoint(
     return _to_view(row)
 
 
-@router.put("/my-binding")
+@router.put("/my-binding", response_model=MemberBindingView)
 async def upsert_my_binding_endpoint(
     workspace_id: uuid.UUID,
     payload: MemberBindingUpsertRequest,
@@ -91,26 +90,25 @@ async def upsert_my_binding_endpoint(
     user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
     response: Response,
 ):
-    """Upsert the caller's own binding. daemon_id must belong to the caller."""
-    try:
-        row, created = await upsert_my_binding(
-            session,
-            workspace_id,
-            user.id,
-            daemon_id=payload.daemon_id,
-            root_path=payload.root_path,
-            path_source=payload.path_source,
-        )
-    except AppError as exc:
-        if exc.code == "daemon_not_owned":
-            response.status_code = status.HTTP_403_FORBIDDEN
-            return {"detail": str(exc), "code": exc.code}
-        raise
+    """Upsert the caller's own binding. daemon_id must belong to the caller.
+
+    service.upsert_my_binding 在 daemon 不归属调用方时抛
+    AppError(http_status=403, code="daemon_not_owned")，这里不再 catch，异常直通
+    全局处理器（app/core/errors.py）统一返 403 + 标准错误 body。
+    """
+    row, created = await upsert_my_binding(
+        session,
+        workspace_id,
+        user.id,
+        daemon_id=payload.daemon_id,
+        root_path=payload.root_path,
+        path_source=payload.path_source,
+    )
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
     return _to_view(row)
 
 
-@router.get("/members/bindings")
+@router.get("/members/bindings", response_model=list[MemberBindingView])
 async def list_member_bindings_endpoint(
     workspace_id: uuid.UUID,
     session: SessionDep,

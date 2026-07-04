@@ -405,9 +405,9 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
                   .join(" / ") || "---"}
               </dd>
             </dl>
-            {scan.warnings.length > 0 && (
+            {scan.warnings && scan.warnings.length > 0 && (
               <ul className="mt-2 list-inside list-disc text-amber-600">
-                {scan.warnings.map((w) => (
+                {(scan.warnings ?? []).map((w) => (
                   <li key={w}>{w}</li>
                 ))}
               </ul>

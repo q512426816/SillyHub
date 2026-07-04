@@ -1,111 +1,42 @@
 /**
  * Workspace API client. Mirrors backend/app/modules/workspace/schema.py.
+ *
+ * task-11 / 2026-07-04-fix-frontend-type-divergence：响应类型全部改为
+ * OpenAPI 生成类型别名（单一真相），请求输入类型保留手写以维持窄约束。
  */
 import { apiFetch } from "@/lib/api";
 import type { SpecStrategy } from "@/lib/spec-workspaces";
+import type { components } from "@/lib/api-types";
 
-export interface WorkspaceStructure {
-  has_projects_dir: boolean;
-  has_changes_dir: boolean;
-  has_docs_dir: boolean;
-  has_runtime_dir: boolean;
-  has_local_yaml: boolean;
-  projects_count: number;
-  active_changes_count: number;
-  archived_changes_count: number;
-}
+type Schemas = components["schemas"];
 
-export interface ScanResult {
-  root_path: string;
-  sillyspec_path?: string;
-  is_sillyspec: boolean;
-  structure: WorkspaceStructure;
-  warnings: string[];
-}
+// task-11：响应类型对齐 OpenAPI 生成类型，保留原类型名作为别名（调用方零改动）。
+export type WorkspaceStructure = Schemas["WorkspaceStructureDTO"];
 
-export type WorkspaceStatus = "active" | "archived" | "deleted";
+export type ScanResult = Schemas["ScanResponse"];
 
-export interface OwnerRead {
-  user_id: string | null;
-  email: string | null;
-  display_name: string | null;
-}
+// task-11：从生成类型派生 WorkspaceStatus，自动含 "pending"（单一真相）。
+export type WorkspaceStatus = Schemas["WorkspaceRead"]["status"];
 
-export interface Workspace {
-  id: string;
-  name: string;
-  display_alias?: string | null;
-  slug: string;
-  root_path: string;
-  // task-01 / 2026-06-18-workspace-client-path：路径来源
-  path_source: "server-local" | "daemon-client";
-  daemon_runtime_id: string | null;
-  status: WorkspaceStatus;
-  // Component metadata fields
-  component_key: string | null;
-  type: string | null;
-  role: string | null;
-  repo_url: string | null;
-  default_branch: string | null;
-  // Default agent provider for auto-scheduled dispatch (FR-02,
-  // 2026-06-14-agent-runtime-selection).
-  default_agent: string | null;
-  default_model: string | null;
-  tech_stack: string[];
-  build_command: string | null;
-  test_command: string | null;
-  source_yaml_path: string | null;
-  // Original fields
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-  last_scanned_at: string | null;
-  deleted_at: string | null;
-  owner?: OwnerRead | null;
-}
+export type OwnerRead = Schemas["app__modules__workspace__schema__OwnerRead"];
 
-export interface WorkspaceListResponse {
-  items: Workspace[];
-  total: number;
-}
+export type Workspace = Schemas["WorkspaceRead"];
+
+export type WorkspaceListResponse = Schemas["WorkspaceListResponse"];
 
 // ── Workspace Relation types ──
 
-export interface WorkspaceRelation {
-  id: string;
-  source_id: string;
-  target_id: string;
-  relation_type: string;
-  description: string | null;
-  created_at: string;
-}
+export type WorkspaceRelation = Schemas["RelationRead"];
 
-export interface RelationListResponse {
-  outgoing: WorkspaceRelation[];
-  incoming: WorkspaceRelation[];
-}
+export type RelationListResponse = Schemas["RelationListResponse"];
 
 // ── Topology types ──
 
-export interface TopologyNode {
-  id: string;
-  name: string;
-  slug: string;
-  component_key: string | null;
-}
+export type TopologyNode = Schemas["TopologyNode"];
 
-export interface TopologyEdge {
-  id: string;
-  source_id: string;
-  target_id: string;
-  relation_type: string;
-  description: string | null;
-}
+export type TopologyEdge = Schemas["TopologyEdge"];
 
-export interface TopologyResponse {
-  nodes: TopologyNode[];
-  edges: TopologyEdge[];
-}
+export type TopologyResponse = Schemas["TopologyResponse"];
 
 // ── Workspace CRUD ──
 
@@ -116,10 +47,8 @@ export async function scanWorkspace(rootPath: string): Promise<ScanResult> {
   });
 }
 
-export interface ScanGenerateResponse {
-  workspace_id: string;
-  agent_run_id: string;
-}
+// task-11：对齐 OpenAPI 生成类型。
+export type ScanGenerateResponse = Schemas["ScanGenerateResponse"];
 
 export async function scanGenerate(
   rootPath: string,

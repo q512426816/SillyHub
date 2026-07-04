@@ -174,12 +174,12 @@ export default function ScanDocsPage({ params }: Props) {
       {reparseResult && (
         <div className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
           扫描完成：解析 {reparseResult.stats.parsed} 个文档，新增 {reparseResult.stats.created} · 更新 {reparseResult.stats.updated} · 删除{" "}{reparseResult.stats.deleted}。
-          {reparseResult.warnings.length > 0 &&
+          {reparseResult.warnings && reparseResult.warnings.length > 0 &&
             " " + reparseResult.warnings.length + " 个警告。"}
         </div>
       )}
 
-      {reparseResult && reparseResult.warnings.length > 0 && (
+      {reparseResult && reparseResult.warnings && reparseResult.warnings.length > 0 && (
         <SectionCard title="扫描警告">
           <ul className="list-disc space-y-0.5 pl-4 text-xs text-amber-600">
             {reparseResult.warnings.map((w, i) => (<li key={i}><span className="font-mono">[{w.code}]</span>{" "}{w.detail}</li>))}

@@ -21,7 +21,7 @@ router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["runtime"])
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
-@router.get("/runtime", response_model=RuntimeProgress | None, response_model_by_alias=False)
+@router.get("/runtime", response_model=RuntimeProgress | None)
 async def get_runtime_progress(
     workspace_id: uuid.UUID,
     session: SessionDep,

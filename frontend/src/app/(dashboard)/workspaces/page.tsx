@@ -83,7 +83,7 @@ export default function WorkspacesPage() {
       setInstancesById(new Map(instances.map((inst) => [inst.id, inst])));
       setBindingsByWs(
         new Map(
-          bindings.map((b) => [b.workspace_id, { daemon_id: b.daemon_id }]),
+          bindings.map((b) => [b.workspace_id, { daemon_id: b.daemon_id ?? null }]),
         ),
       );
     } catch (err) {

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 
 class StageStep(BaseModel):
@@ -29,14 +29,12 @@ class StageProgress(BaseModel):
 class RuntimeProgress(BaseModel):
     """Runtime progress DTO (mapped from sillyspec.db)."""
 
-    model_config = ConfigDict(populate_by_name=True)
-
-    version: int = Field(default=1, alias="_version")
+    version: int = 1
     project: str | None = None
-    current_stage: str | None = Field(default=None, alias="currentStage")
-    current_change: str | None = Field(default=None, alias="currentChange")
+    current_stage: str | None = None
+    current_change: str | None = None
     stages: dict[str, StageProgress] = Field(default_factory=dict)
-    last_active: datetime | None = Field(default=None, alias="lastActive")
+    last_active: datetime | None = None
 
 
 class UserInputEntry(BaseModel):

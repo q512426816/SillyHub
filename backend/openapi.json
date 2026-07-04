@@ -1549,7 +1549,17 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemberBindingView"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Get My Binding Endpoint Api Workspaces  Workspace Id  My Binding Get"
+                }
               }
             }
           },
@@ -1571,7 +1581,7 @@
           "workspace-member-runtimes"
         ],
         "summary": "Upsert My Binding Endpoint",
-        "description": "Upsert the caller's own binding. daemon_id must belong to the caller.",
+        "description": "Upsert the caller's own binding. daemon_id must belong to the caller.\n\nservice.upsert_my_binding 在 daemon 不归属调用方时抛\nAppError(http_status=403, code=\"daemon_not_owned\")，这里不再 catch，异常直通\n全局处理器（app/core/errors.py）统一返 403 + 标准错误 body。",
         "operationId": "upsert_my_binding_endpoint_api_workspaces__workspace_id__my_binding_put",
         "parameters": [
           {
@@ -1600,7 +1610,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MemberBindingView"
+                }
               }
             }
           },
@@ -1643,7 +1655,13 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MemberBindingView"
+                  },
+                  "title": "Response List Member Bindings Endpoint Api Workspaces  Workspace Id  Members Bindings Get"
+                }
               }
             }
           },
@@ -3392,6 +3410,64 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ScanDocRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/scan-docs/{doc_id}/conflicts": {
+      "get": {
+        "tags": [
+          "scan-docs"
+        ],
+        "summary": "List Scan Doc Conflicts",
+        "description": "某扫描文档路径的历史冲突归档（D-001@V1 last-write-wins 覆盖快照，倒序）。",
+        "operationId": "list_scan_doc_conflicts_api_workspaces__workspace_id__scan_docs__doc_id__conflicts_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Doc Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScanDocConflictRead"
+                  },
+                  "title": "Response List Scan Doc Conflicts Api Workspaces  Workspace Id  Scan Docs  Doc Id  Conflicts Get"
                 }
               }
             }
@@ -34942,7 +35018,7 @@
       },
       "RuntimeProgress": {
         "properties": {
-          "_version": {
+          "version": {
             "type": "integer",
             "title": "Version",
             "default": 1
@@ -34958,7 +35034,7 @@
             ],
             "title": "Project"
           },
-          "currentStage": {
+          "current_stage": {
             "anyOf": [
               {
                 "type": "string"
@@ -34967,9 +35043,9 @@
                 "type": "null"
               }
             ],
-            "title": "Currentstage"
+            "title": "Current Stage"
           },
-          "currentChange": {
+          "current_change": {
             "anyOf": [
               {
                 "type": "string"
@@ -34978,7 +35054,7 @@
                 "type": "null"
               }
             ],
-            "title": "Currentchange"
+            "title": "Current Change"
           },
           "stages": {
             "additionalProperties": {
@@ -34987,7 +35063,7 @@
             "type": "object",
             "title": "Stages"
           },
-          "lastActive": {
+          "last_active": {
             "anyOf": [
               {
                 "type": "string",
@@ -34997,7 +35073,7 @@
                 "type": "null"
               }
             ],
-            "title": "Lastactive"
+            "title": "Last Active"
           }
         },
         "type": "object",
@@ -35136,6 +35212,98 @@
         "title": "RuntimeUsageWindow",
         "description": "时间窗选项(FR-03 / D-002@v1)。"
       },
+      "ScanDocConflictRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "old_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Content"
+          },
+          "old_source_member_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Source Member Id"
+          },
+          "old_source_runtime_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Source Runtime Id"
+          },
+          "old_mtime": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Mtime"
+          },
+          "new_source_member_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Source Member Id"
+          },
+          "new_mtime": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Mtime"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created_at"
+        ],
+        "title": "ScanDocConflictRead",
+        "description": "单条扫描文档路径的历史冲突归档记录（D-001@V1 last-write-wins 覆盖快照）。"
+      },
       "ScanDocList": {
         "properties": {
           "items": {
@@ -35215,6 +35383,58 @@
               }
             ],
             "title": "Last Modified At"
+          },
+          "source_member_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Member Id"
+          },
+          "source_synced_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Synced At"
+          },
+          "source_mtime": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Mtime"
+          },
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Hash"
+          },
+          "conflict_count": {
+            "type": "integer",
+            "title": "Conflict Count",
+            "default": 0
           }
         },
         "type": "object",
@@ -35326,6 +35546,58 @@
               }
             ],
             "title": "Last Modified At"
+          },
+          "source_member_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Member Id"
+          },
+          "source_synced_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Synced At"
+          },
+          "source_mtime": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Mtime"
+          },
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Hash"
+          },
+          "conflict_count": {
+            "type": "integer",
+            "title": "Conflict Count",
+            "default": 0
           }
         },
         "type": "object",
