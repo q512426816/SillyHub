@@ -89,7 +89,7 @@ async def test_decide_backend_returns_daemon_when_online():
 def test_no_online_daemon_error_requires_user_id():
     """user_id is mandatory -> TypeError when omitted."""
     with pytest.raises(TypeError):
-        NoOnlineDaemonError()  # type: ignore[call-arg]
+        NoOnlineDaemonError()
 
 
 def test_no_online_daemon_error_default_message():

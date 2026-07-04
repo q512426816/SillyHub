@@ -200,4 +200,4 @@ async def run_guard(
     checker = _GUARD_RULES.get(key)
     if checker is None:
         return []
-    return await checker(session, change)  # type: ignore[operator]
+    return await checker(session, change)

@@ -81,8 +81,8 @@ class SubmittedMessages(int):
         publish_intent: PublishIntent | None = None,
     ) -> SubmittedMessages:
         obj = super().__new__(cls, count)
-        obj.published_logs = published_logs  # type: ignore[attr-defined]
-        obj.publish_intent = publish_intent  # type: ignore[attr-defined]
+        obj.published_logs = published_logs
+        obj.publish_intent = publish_intent
         return obj
 
 

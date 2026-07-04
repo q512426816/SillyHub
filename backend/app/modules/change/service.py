@@ -416,10 +416,10 @@ class ChangeService:
             (
                 await self._session.execute(
                     select(DaemonChangeWrite).where(
-                        col(DaemonChangeWrite.workspace_id) == workspace.id,  # type: ignore[arg-type]
-                        col(DaemonChangeWrite.change_key) == change.change_key,  # type: ignore[arg-type]
-                        col(DaemonChangeWrite.status) == "pending",  # type: ignore[arg-type]
-                        col(DaemonChangeWrite.kind) == "edit",  # type: ignore[arg-type]
+                        col(DaemonChangeWrite.workspace_id) == workspace.id,
+                        col(DaemonChangeWrite.change_key) == change.change_key,
+                        col(DaemonChangeWrite.status) == "pending",
+                        col(DaemonChangeWrite.kind) == "edit",
                     )
                 )
             )
@@ -508,10 +508,10 @@ class ChangeService:
                 await self._session.execute(
                     select(DaemonChangeWrite)
                     .where(
-                        col(DaemonChangeWrite.workspace_id) == workspace_id,  # type: ignore[arg-type]
-                        col(DaemonChangeWrite.change_key) == change.change_key,  # type: ignore[arg-type]
-                        col(DaemonChangeWrite.status).in_(["pending", "claimed"]),  # type: ignore[arg-type]
-                        col(DaemonChangeWrite.kind) == "edit",  # type: ignore[arg-type]
+                        col(DaemonChangeWrite.workspace_id) == workspace_id,
+                        col(DaemonChangeWrite.change_key) == change.change_key,
+                        col(DaemonChangeWrite.status).in_(["pending", "claimed"]),
+                        col(DaemonChangeWrite.kind) == "edit",
                     )
                     .order_by(col(DaemonChangeWrite.created_at))
                 )

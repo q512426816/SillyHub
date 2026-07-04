@@ -96,9 +96,9 @@ async def _gc_expired_change_writes(session: AsyncSession) -> int:
     cutoff = datetime.now(UTC) - timedelta(seconds=CHANGE_WRITE_CLAIM_TIMEOUT_SECONDS)
     stmt = (
         select(DaemonChangeWrite)
-        .where(DaemonChangeWrite.status == "claimed")  # type: ignore[arg-type]
-        .where(DaemonChangeWrite.claimed_at.is_not(None))  # type: ignore[attr-defined]
-        .where(DaemonChangeWrite.claimed_at < cutoff)  # type: ignore[operator]
+        .where(DaemonChangeWrite.status == "claimed")
+        .where(DaemonChangeWrite.claimed_at.is_not(None))
+        .where(DaemonChangeWrite.claimed_at < cutoff)
     )
     rows = (await session.execute(stmt)).scalars().all()
     if not rows:
@@ -140,8 +140,8 @@ async def get_pending_change_writes(
     # SQLAlchemy 统一处理跨 dialect 的 UUID 序列化（PG/SQLite 均正确）。
     stmt = (
         select(DaemonChangeWrite)
-        .where(DaemonChangeWrite.runtime_id == runtime_id)  # type: ignore[arg-type]
-        .where(DaemonChangeWrite.status == "pending")  # type: ignore[arg-type]
+        .where(DaemonChangeWrite.runtime_id == runtime_id)
+        .where(DaemonChangeWrite.status == "pending")
         .order_by(DaemonChangeWrite.created_at)
     )
     rows = (await session.execute(stmt)).scalars().all()
@@ -153,7 +153,7 @@ async def get_pending_change_writes(
                 change_key=cw.change_key,
                 workspace_id=cw.workspace_id,
                 files=cw.files or [],
-                created_at=cw.created_at,  # type: ignore[arg-type]
+                created_at=cw.created_at,
                 kind=cw.kind,
             )
         )

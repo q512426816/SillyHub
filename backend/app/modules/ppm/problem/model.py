@@ -156,9 +156,7 @@ def _problem_effective_status(self: PpmProblemList) -> str:
     return getattr(self, "_effective_status", None) or self.status
 
 
-PpmProblemList.effective_status = property(  # type: ignore[attr-defined]
-    _problem_effective_status
-)
+PpmProblemList.effective_status = property(_problem_effective_status)
 # ===========================================================================
 
 

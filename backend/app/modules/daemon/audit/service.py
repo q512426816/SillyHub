@@ -66,9 +66,7 @@ class AuditService:
             DaemonAuditAuthDenied: no matching claimed lease.
             DaemonAuditRuntimeMismatch: token valid but for another runtime.
         """
-        stmt = (
-            select(DaemonTaskLease).where(DaemonTaskLease.status == "claimed")  # type: ignore[arg-type]
-        )
+        stmt = select(DaemonTaskLease).where(DaemonTaskLease.status == "claimed")
         rows = (await self._session.execute(stmt)).scalars().all()
         matched: DaemonTaskLease | None = None
         other_runtime = False
@@ -162,21 +160,21 @@ class AuditService:
         """
         conds = []
         if workspace_id is not None:
-            conds.append(PolicyAuditLog.workspace_id == workspace_id)  # type: ignore[arg-type]
+            conds.append(PolicyAuditLog.workspace_id == workspace_id)
         if runtime_id is not None:
-            conds.append(PolicyAuditLog.runtime_id == runtime_id)  # type: ignore[arg-type]
+            conds.append(PolicyAuditLog.runtime_id == runtime_id)
         if decision is not None:
-            conds.append(PolicyAuditLog.decision == decision)  # type: ignore[arg-type]
+            conds.append(PolicyAuditLog.decision == decision)
         if provider is not None:
-            conds.append(PolicyAuditLog.provider == provider)  # type: ignore[arg-type]
+            conds.append(PolicyAuditLog.provider == provider)
         if tool is not None:
-            conds.append(PolicyAuditLog.tool == tool)  # type: ignore[arg-type]
+            conds.append(PolicyAuditLog.tool == tool)
         if path_contains is not None:
-            conds.append(PolicyAuditLog.path.contains(path_contains))  # type: ignore[attr-defined]
+            conds.append(PolicyAuditLog.path.contains(path_contains))
         if since is not None:
-            conds.append(PolicyAuditLog.created_at >= since)  # type: ignore[operator]
+            conds.append(PolicyAuditLog.created_at >= since)
         if until is not None:
-            conds.append(PolicyAuditLog.created_at <= until)  # type: ignore[operator]
+            conds.append(PolicyAuditLog.created_at <= until)
 
         count_stmt = select(func.count()).select_from(PolicyAuditLog)
         if conds:
@@ -186,11 +184,7 @@ class AuditService:
         stmt = select(PolicyAuditLog)
         if conds:
             stmt = stmt.where(*conds)
-        stmt = (
-            stmt.order_by(PolicyAuditLog.created_at.desc())  # type: ignore[attr-defined]
-            .limit(limit)
-            .offset(offset)
-        )
+        stmt = stmt.order_by(PolicyAuditLog.created_at.desc()).limit(limit).offset(offset)
         rows = (await self._session.execute(stmt)).scalars().all()
         items = [AuditLogRead.model_validate(row) for row in rows]
         return items, total
@@ -200,7 +194,7 @@ class AuditService:
     async def cleanup_old(self, days: int = AUDIT_RETENTION_DAYS) -> int:
         """Delete audit rows older than ``days`` (R-05). Returns deleted count."""
         cutoff = datetime.now(UTC) - timedelta(days=days)
-        stmt = delete(PolicyAuditLog).where(PolicyAuditLog.created_at < cutoff)  # type: ignore[operator]
+        stmt = delete(PolicyAuditLog).where(PolicyAuditLog.created_at < cutoff)
         result = await self._session.execute(stmt)
         await self._session.commit()
         return int(result.rowcount or 0)

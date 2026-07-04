@@ -72,7 +72,7 @@ def test_policy_audit_log_default_id_and_created_at() -> None:
 
 
 @pytest.mark.asyncio
-async def test_policy_audit_log_persist_and_query(db_session) -> None:  # type: ignore[no-untyped-def]
+async def test_policy_audit_log_persist_and_query(db_session) -> None:
     """内存 SQLite 插入 + 按 runtime_id 查询 OK（参考 daemon/tests async fixture 风格）."""
     import uuid
 

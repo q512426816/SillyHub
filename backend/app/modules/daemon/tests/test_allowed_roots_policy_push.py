@@ -212,7 +212,7 @@ async def test_put_allowed_roots_version_monotonic_across_writes(
     captured: list[int] = []
 
     async def _capture(*args: object, **_kwargs: object) -> bool:
-        captured.append(args[2])  # type: ignore[arg-type]
+        captured.append(args[2])
         return True
 
     hub = MagicMock()

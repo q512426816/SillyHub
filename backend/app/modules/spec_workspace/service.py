@@ -510,8 +510,8 @@ class SpecWorkspaceService:
 
         stmt = (
             select(DaemonChangeWrite)
-            .where(DaemonChangeWrite.workspace_id == workspace_id)  # type: ignore[arg-type]
-            .where(DaemonChangeWrite.kind == "spec-sync")  # type: ignore[operator]
+            .where(DaemonChangeWrite.workspace_id == workspace_id)
+            .where(DaemonChangeWrite.kind == "spec-sync")
             .order_by(DaemonChangeWrite.created_at.desc())
         )
         rows = (await self._session.execute(stmt)).scalars().all()
@@ -521,8 +521,8 @@ class SpecWorkspaceService:
                 "status": rw.status,
                 "runtime_id": str(rw.runtime_id),
                 "error": rw.error,
-                "created_at": rw.created_at,  # type: ignore[dict-item]
-                "completed_at": rw.completed_at,  # type: ignore[dict-item]
+                "created_at": rw.created_at,
+                "completed_at": rw.completed_at,
             }
             for rw in rows
         ]

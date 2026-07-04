@@ -1477,7 +1477,7 @@ class TestCompleteLeaseEndSession:
                 session_id, uid, reason=reason, actor_runtime_owner_id=actor_runtime_owner_id
             )
 
-        svc.end_session = spy_end  # type: ignore[method-assign]
+        svc.end_session = spy_end
         await svc.complete_lease(lease_id, claim_token, {"status": "completed"})
 
         assert len(called) == 1
@@ -1512,7 +1512,7 @@ class TestCompleteLeaseEndSession:
             called.append((session_id, uid, reason))
             return None
 
-        svc.end_session = spy_end  # type: ignore[method-assign]
+        svc.end_session = spy_end
         await svc.complete_lease(lease_id, claim_token, {"status": "completed"})
 
         assert len(called) == 1
@@ -1539,7 +1539,7 @@ class TestCompleteLeaseEndSession:
             called.append((args, kwargs))
             return None
 
-        svc.end_session = spy_end  # type: ignore[method-assign]
+        svc.end_session = spy_end
         await svc.complete_lease(lease_id, claim_token, {"status": "completed"})
 
         assert called == []  # 多轮对话不自动 end
@@ -1563,7 +1563,7 @@ class TestCompleteLeaseEndSession:
         async def boom_end(*args, **kwargs):
             raise RuntimeError("daemon unreachable")
 
-        svc.end_session = boom_end  # type: ignore[method-assign]
+        svc.end_session = boom_end
         result = await svc.complete_lease(lease_id, claim_token, {"status": "completed"})
 
         assert result.status == "completed"  # lease 完成不受影响
@@ -1595,7 +1595,7 @@ class TestCompleteLeaseEndSession:
             called.append(1)
             return None
 
-        svc.end_session = spy_end  # type: ignore[method-assign]
+        svc.end_session = spy_end
         result = await svc.complete_lease(lease_id, claim_token, {"status": "completed"})
 
         assert called == []  # 无 agent_session_id → 跳过

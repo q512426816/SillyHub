@@ -71,21 +71,21 @@ class TestPolicyUpdatePayload:
 
     def test_missing_runtime_id_raises(self) -> None:
         with pytest.raises(ValidationError):
-            PolicyUpdatePayload(  # type: ignore[call-arg]
+            PolicyUpdatePayload(
                 allowed_roots=[],
                 version=1,
             )
 
     def test_missing_allowed_roots_raises(self) -> None:
         with pytest.raises(ValidationError):
-            PolicyUpdatePayload(  # type: ignore[call-arg]
+            PolicyUpdatePayload(
                 runtime_id=uuid.uuid4(),
                 version=1,
             )
 
     def test_missing_version_raises(self) -> None:
         with pytest.raises(ValidationError):
-            PolicyUpdatePayload(  # type: ignore[call-arg]
+            PolicyUpdatePayload(
                 runtime_id=uuid.uuid4(),
                 allowed_roots=[],
             )
@@ -103,5 +103,5 @@ class TestPolicyUpdatePayload:
             PolicyUpdatePayload(
                 runtime_id=uuid.uuid4(),
                 allowed_roots=[],
-                version="three",  # type: ignore[arg-type]
+                version="three",
             )

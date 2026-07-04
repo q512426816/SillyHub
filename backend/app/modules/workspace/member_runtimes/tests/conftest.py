@@ -54,7 +54,7 @@ def _selected_metadata() -> Any:
 
 
 @pytest.fixture()
-async def db_engine():  # type: ignore[no-untyped-def]
+async def db_engine():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
     meta = _selected_metadata()
     async with engine.begin() as conn:

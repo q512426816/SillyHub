@@ -516,7 +516,7 @@ class TestWsHubSendPermissionResponse:
         hub = DaemonWsHub()
         rid = uuid.uuid4()
         ws = AsyncMock()
-        ws.sent = []  # type: ignore[attr-defined]
+        ws.sent = []
 
         async def _send_json(message: dict[str, Any]) -> None:
             ws.sent.append(message)

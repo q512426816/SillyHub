@@ -81,7 +81,7 @@ def _build_tar(members: dict[str, bytes | None]) -> bytes:
     return buf.read()
 
 
-def _mock_reparse() -> object:  # type: ignore[misc]
+def _mock_reparse() -> object:
     """Patch both reparse services so apply_sync doesn't need a real parser."""
     return (
         patch(

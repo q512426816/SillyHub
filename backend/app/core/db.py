@@ -118,7 +118,7 @@ def _try_inject_audit_context(session: AsyncSession, request: Request) -> None:
 
 
 async def get_session(
-    request: Request = None,  # type: ignore[assignment]
+    request: Request = None,
 ) -> AsyncIterator[AsyncSession]:
     """FastAPI dependency: yield a session with audit_context injected when possible."""
     factory = get_session_factory()

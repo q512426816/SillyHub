@@ -14,13 +14,13 @@ def test_task_context_defaults():
 
 def test_validate_context_valid():
     ctx = TaskContext(change_title="Change", task_title="Task", task_key="task-01")
-    violations = AgentAdapter.validate_context(None, ctx)  # type: ignore[arg-type]
+    violations = AgentAdapter.validate_context(None, ctx)
     assert violations == []
 
 
 def test_validate_context_missing_title():
     ctx = TaskContext(change_title="", task_title="", task_key="task-01")
-    violations = AgentAdapter.validate_context(None, ctx)  # type: ignore[arg-type]
+    violations = AgentAdapter.validate_context(None, ctx)
     assert len(violations) == 2
 
 

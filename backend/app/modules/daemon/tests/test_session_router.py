@@ -71,7 +71,7 @@ async def _create_runtime(session: AsyncSession, user_id: uuid.UUID) -> DaemonRu
 
 def _wire_mock_ws(hub: DaemonWsHub, runtime_id: uuid.UUID) -> AsyncMock:
     ws = AsyncMock()
-    ws.sent_messages = []  # type: ignore[attr-defined]
+    ws.sent_messages = []
 
     async def _send_json(message: dict[str, Any]) -> None:
         ws.sent_messages.append(message)

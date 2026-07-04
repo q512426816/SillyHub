@@ -137,7 +137,7 @@ class _Crud[T]:
         return obj
 
     async def create(self, data: dict[str, Any]) -> T:
-        obj = self._model(id=uuid.uuid4(), **data)  # type: ignore[call-arg]
+        obj = self._model(id=uuid.uuid4(), **data)
         obj = self._set_created_updated(obj)
         self._session.add(obj)
         await self._session.commit()
@@ -175,7 +175,7 @@ class _Crud[T]:
             self._model,
             req.order_by,
             allowed_sort,
-            req.order,  # type: ignore[arg-type]
+            req.order,
         )
         stmt = apply_pagination(stmt, req)
         rows = (await self._session.execute(stmt)).scalars().all()
@@ -185,14 +185,14 @@ class _Crud[T]:
     def _set_created_updated(self, obj: T) -> T:
         now = _now()
         if hasattr(obj, "created_at"):
-            obj.created_at = now  # type: ignore[attr-defined]
+            obj.created_at = now
         if hasattr(obj, "updated_at"):
-            obj.updated_at = now  # type: ignore[attr-defined]
+            obj.updated_at = now
         return obj
 
     def _touch_updated(self, obj: T) -> T:
         if hasattr(obj, "updated_at"):
-            obj.updated_at = _now()  # type: ignore[attr-defined]
+            obj.updated_at = _now()
         return obj
 
 

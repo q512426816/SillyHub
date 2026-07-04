@@ -126,7 +126,7 @@ async def _to_read(session: AsyncSession, org: Organization) -> OrganizationRead
         code=org.code,
         description=org.description,
         parent_id=org.parent_id,
-        status=org.status,  # type: ignore[arg-type]
+        status=org.status,
         sort_order=org.sort_order,
         member_count=members,
         children_count=children,

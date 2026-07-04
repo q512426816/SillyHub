@@ -171,7 +171,7 @@ class ExecutionCoordinatorService:
         )
         result = await self.session.execute(stmt)
 
-        if result.rowcount != 1:  # type: ignore[union-attr]
+        if result.rowcount != 1:
             raise OptimisticLockError(
                 f"Optimistic lock conflict for run '{run_id}'. "
                 f"Expected version {expected_version}.",

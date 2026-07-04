@@ -144,8 +144,8 @@ class _Crud[T]:
         return obj
 
     async def create(self, data: dict[str, Any]) -> T:
-        obj = self._model(id=uuid.uuid4(), **data)  # type: ignore[call-arg]
-        obj = self._touch(obj)  # type: ignore[arg-type]
+        obj = self._model(id=uuid.uuid4(), **data)
+        obj = self._touch(obj)
         self._session.add(obj)
         await self._session.commit()
         await self._session.refresh(obj)
@@ -156,7 +156,7 @@ class _Crud[T]:
         for k, v in data.items():
             if v is not None:
                 setattr(obj, k, v)
-        obj = self._touch(obj)  # type: ignore[arg-type]
+        obj = self._touch(obj)
         await self._session.commit()
         await self._session.refresh(obj)
         return obj
@@ -182,7 +182,7 @@ class _Crud[T]:
             self._model,
             req.order_by,
             allowed_sort,
-            req.order,  # type: ignore[arg-type]
+            req.order,
         )
         stmt = apply_pagination(stmt, req)
         rows = (await self._session.execute(stmt)).scalars().all()
@@ -191,7 +191,7 @@ class _Crud[T]:
     def _touch(self, obj: T) -> T:
         """刷新 updated_at。"""
         if hasattr(obj, "updated_at"):
-            obj.updated_at = _now()  # type: ignore[attr-defined]
+            obj.updated_at = _now()
         return obj
 
 

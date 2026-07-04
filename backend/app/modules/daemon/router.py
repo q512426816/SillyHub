@@ -709,7 +709,7 @@ async def claim_lease(
         lease_id=lease.id,
         claim_token=meta.get("claim_token", ""),
         payload=payload,
-        lease_expires_at=lease.lease_expires_at,  # type: ignore[arg-type]
+        lease_expires_at=lease.lease_expires_at,
     )
 
 

@@ -211,7 +211,7 @@ class DaemonPermissionService:
         from app.modules.agent.model import AgentSession
 
         session_obj = (
-            await self._svc._session.execute(  # type: ignore[attr-defined]
+            await self._svc._session.execute(
                 select(AgentSession).where(AgentSession.id == session_id)
             )
         ).scalar_one_or_none()
@@ -259,7 +259,7 @@ class DaemonPermissionService:
             )
             return
 
-        current_run = await self._svc._get_current_run(session_id)  # type: ignore[attr-defined]
+        current_run = await self._svc._get_current_run(session_id)
         if current_run is None or current_run.id != run_id:
             log.warning(
                 "permission_request_run_mismatch",
@@ -294,9 +294,7 @@ class DaemonPermissionService:
         if is_dialog:
             sse_payload["dialog_kind"] = payload.dialog_kind
             sse_payload["dialog_payload"] = payload.dialog_payload
-        await self._svc._publish_session_event(  # type: ignore[attr-defined]
-            session_id, sse_payload
-        )
+        await self._svc._publish_session_event(session_id, sse_payload)
 
         if is_dialog:
             # Persist the dialog so it survives a frontend refresh. Idempotent
@@ -350,7 +348,7 @@ class DaemonPermissionService:
         """
         from app.modules.daemon.model import DaemonRuntime
 
-        rt = await self._svc._session.get(DaemonRuntime, runtime_id)  # type: ignore[attr-defined]
+        rt = await self._svc._session.get(DaemonRuntime, runtime_id)
         if rt is None:
             return None
         if rt.daemon_instance_id is None:
@@ -370,7 +368,7 @@ class DaemonPermissionService:
         call (different request, same DB session) sees it.
         """
         assert payload.dialog_kind is not None  # caller guarantees this
-        session = self._svc._session  # type: ignore[attr-defined]
+        session = self._svc._session
         existing = (
             await session.execute(
                 select(SessionDialogRequest).where(
@@ -417,12 +415,12 @@ class DaemonPermissionService:
         """
         # Read-only ownership check (the lock is harmless for a GET and keeps
         # the helper self-contained; we commit immediately to release it).
-        await self._svc._get_owned_session_for_update(session_id, user_id)  # type: ignore[attr-defined]
-        await self._svc._session.commit()  # type: ignore[attr-defined]
+        await self._svc._get_owned_session_for_update(session_id, user_id)
+        await self._svc._session.commit()
 
         rows = (
             (
-                await self._svc._session.execute(  # type: ignore[attr-defined]
+                await self._svc._session.execute(
                     select(SessionDialogRequest)
                     .where(
                         SessionDialogRequest.session_id == session_id,
@@ -467,9 +465,7 @@ class DaemonPermissionService:
           4. resolve request_id → dialog row OR pending timer (404 otherwise);
           5. send WS downlink (504 if runtime offline), publish permission_resolved SSE.
         """
-        session_obj = await self._svc._get_owned_session_for_update(  # type: ignore[attr-defined]
-            session_id, user_id
-        )
+        session_obj = await self._svc._get_owned_session_for_update(session_id, user_id)
         if (session_obj.status or "") not in ACTIVE_SESSION_STATUSES:
             raise DaemonSessionNotActive(
                 f"AgentSession '{session_id}' is not active (status={session_obj.status}).",
@@ -482,9 +478,9 @@ class DaemonPermissionService:
                 details={"session_id": str(session_id)},
             )
         # Release the row lock ASAP — WS send / SSE publish are not DB work.
-        await self._svc._session.commit()  # type: ignore[attr-defined]
+        await self._svc._session.commit()
 
-        current_run = await self._svc._get_current_run(session_id)  # type: ignore[attr-defined]
+        current_run = await self._svc._get_current_run(session_id)
         if current_run is None:
             raise DaemonSessionNotActive(
                 f"AgentSession '{session_id}' has no active run to approve.",
@@ -497,7 +493,7 @@ class DaemonPermissionService:
         # check the DB first because dialogs are the persistent case; a plain
         # approval has no row and falls through to the timer lookup.
         dialog_row = (
-            await self._svc._session.execute(  # type: ignore[attr-defined]
+            await self._svc._session.execute(
                 select(SessionDialogRequest).where(SessionDialogRequest.request_id == request_id)
             )
         ).scalar_one_or_none()
@@ -575,7 +571,7 @@ class DaemonPermissionService:
                 },
             )
 
-        await self._svc._publish_session_event(  # type: ignore[attr-defined]
+        await self._svc._publish_session_event(
             session_id,
             {
                 "event": "permission_resolved",
@@ -669,9 +665,9 @@ class DaemonPermissionService:
         # session_obj would require an extra param, so we read it off the
         # owned session's user_id (already validated upstream).
         dialog_row.answered_by = session_obj.user_id
-        await self._svc._session.commit()  # type: ignore[attr-defined]
+        await self._svc._session.commit()
 
-        await self._svc._publish_session_event(  # type: ignore[attr-defined]
+        await self._svc._publish_session_event(
             session_id,
             {
                 "event": "permission_resolved",
@@ -745,7 +741,7 @@ class DaemonPermissionService:
                 runtime_id=str(runtime_id) if runtime_id is not None else None,
             )
             # Still publish the timeout SSE so the frontend card dismisses.
-            await self._svc._publish_session_event(  # type: ignore[attr-defined]
+            await self._svc._publish_session_event(
                 session_id,
                 {
                     "event": "permission_resolved",
@@ -766,7 +762,7 @@ class DaemonPermissionService:
                 daemon_id=str(route_key),
             )
 
-        await self._svc._publish_session_event(  # type: ignore[attr-defined]
+        await self._svc._publish_session_event(
             session_id,
             {
                 "event": "permission_resolved",

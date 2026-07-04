@@ -657,7 +657,7 @@ class SessionService:
             raise DaemonRuntimeOffline(
                 f"daemon runtime '{session.runtime_id}' is offline; turn could not be dispatched.",
                 details={
-                    "runtime_id": str(session.runtime_id),  # type: ignore[arg-type]
+                    "runtime_id": str(session.runtime_id),
                     "session_id": str(session.id),
                     "run_id": str(run.id),
                 },
@@ -670,7 +670,7 @@ class SessionService:
         return SessionDispatchResult(
             agent_session=session,
             agent_run=run,
-            lease_id=session.lease_id,  # type: ignore[arg-type]
+            lease_id=session.lease_id,
         )
 
     async def interrupt_session(
@@ -744,7 +744,7 @@ class SessionService:
                 f"daemon runtime '{session.runtime_id}' is offline; "
                 f"interrupt could not be delivered.",
                 details={
-                    "runtime_id": str(session.runtime_id),  # type: ignore[arg-type]
+                    "runtime_id": str(session.runtime_id),
                     "session_id": str(session.id),
                     "run_id": str(run.id),
                 },
@@ -954,7 +954,7 @@ class SessionService:
                 return SessionRecoveryResult(
                     session_id=session.id,
                     lease_id=session.lease_id,
-                    status=session.status,  # type: ignore[arg-type]
+                    status=session.status,
                 )
 
             # Ownership guards: runtime/lease/provider/lease kind must all match.

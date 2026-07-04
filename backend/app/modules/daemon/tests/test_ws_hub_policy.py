@@ -52,7 +52,7 @@ class TestSendPolicyUpdate:
 
         hub = DaemonWsHub()
         # Patch send_to_runtime to simulate the offline (False) path explicitly.
-        hub.send_to_runtime = AsyncMock(return_value=False)  # type: ignore[method-assign]
+        hub.send_to_runtime = AsyncMock(return_value=False)
         ok = await hub.send_policy_update(uuid.uuid4(), ["D:/x"], version=1)
         assert ok is False
 

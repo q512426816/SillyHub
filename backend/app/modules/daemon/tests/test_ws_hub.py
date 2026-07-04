@@ -25,7 +25,7 @@ from app.modules.daemon.ws_hub import DaemonWsHub
 def _make_mock_ws() -> AsyncMock:
     """Create a mock WebSocket that records sent JSON messages."""
     ws = AsyncMock()
-    ws.sent_messages = []  # type: ignore[attr-defined]
+    ws.sent_messages = []
 
     async def _send_json(message: dict[str, Any]) -> None:
         ws.sent_messages.append(message)

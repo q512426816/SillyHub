@@ -180,7 +180,7 @@ class TestWsUplinkPayloadValidation:
             PermissionResponsePayload(
                 session_id=uuid.uuid4(),
                 request_id="r",
-                decision="maybe",  # type: ignore[arg-type]
+                decision="maybe",
             )
 
     @pytest.mark.asyncio

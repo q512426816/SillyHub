@@ -142,7 +142,7 @@ async def generate_document(
         change_id=change_id,
         doc_type=data.doc_type,
         content=data.content,
-        lease_id=data.lease_id,  # type: ignore[arg-type]
+        lease_id=data.lease_id,
     )
     return MarkdownGenerateResponse(doc_type=data.doc_type, path=rel_path, size=size)
 

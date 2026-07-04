@@ -58,7 +58,7 @@ async def _create_lease_claimed(
     from app.modules.agent.model import AgentRun
     from app.modules.daemon.model import DaemonTaskLease
 
-    user_id = (await session.get(DaemonRuntime, runtime_id)).user_id  # type: ignore[union-attr]
+    user_id = (await session.get(DaemonRuntime, runtime_id)).user_id
     agent_run = AgentRun(
         id=uuid.uuid4(),
         user_id=user_id,
@@ -89,7 +89,7 @@ async def _create_lease_claimed(
 
 def _event(decision: str = "ALLOW", **kw: Any) -> AuditEventIn:
     base: dict[str, Any] = {
-        "decision": decision,  # type: ignore[dict-item]
+        "decision": decision,
         "provider": "claude",
         "tool": "Write",
         "path": "/tmp/a.txt",
@@ -97,7 +97,7 @@ def _event(decision: str = "ALLOW", **kw: Any) -> AuditEventIn:
         "ts": datetime.now(UTC),
     }
     base.update(kw)
-    return AuditEventIn(**base)  # type: ignore[arg-type]
+    return AuditEventIn(**base)
 
 
 def _user(uid: uuid.UUID) -> SimpleNamespace:
@@ -245,7 +245,7 @@ class TestPostAuditBatchEndpoint:
             workspace_id=uuid.uuid4(),
             events=[_event("ALLOW"), _event("DENY", reason="x")],
         )
-        resp = await post_audit_batch(req, db_session, _user(uid))  # type: ignore[arg-type]
+        resp = await post_audit_batch(req, db_session, _user(uid))
         assert resp.accepted == 2
         assert resp.runtime_id == rt.id
 
@@ -260,7 +260,7 @@ class TestPostAuditBatchEndpoint:
             events=[_event()],
         )
         with pytest.raises(DaemonAuditAuthDenied):
-            await post_audit_batch(req, db_session, _user(uid))  # type: ignore[arg-type]
+            await post_audit_batch(req, db_session, _user(uid))
 
     @pytest.mark.asyncio
     async def test_batch_rejected_cross_runtime_token(self, db_session: AsyncSession) -> None:
@@ -275,7 +275,7 @@ class TestPostAuditBatchEndpoint:
             events=[_event()],
         )
         with pytest.raises(DaemonAuditRuntimeMismatch):
-            await post_audit_batch(req, db_session, _user(uid))  # type: ignore[arg-type]
+            await post_audit_batch(req, db_session, _user(uid))
 
 
 class TestListPolicyAuditEndpoint:
@@ -298,7 +298,7 @@ class TestListPolicyAuditEndpoint:
             workspace_id=ws,
             runtime_id=rt.id,
             session=db_session,
-            user=_user(uid),  # type: ignore[arg-type]
+            user=_user(uid),
             decision="ALLOW",
             provider=None,
             tool=None,
@@ -327,7 +327,7 @@ class TestListPolicyAuditEndpoint:
             workspace_id=ws,
             runtime_id=rt.id,
             session=db_session,
-            user=_user(uid),  # type: ignore[arg-type]
+            user=_user(uid),
             decision=None,
             provider=None,
             tool=None,
@@ -342,7 +342,7 @@ class TestListPolicyAuditEndpoint:
             workspace_id=ws,
             runtime_id=rt.id,
             session=db_session,
-            user=_user(uid),  # type: ignore[arg-type]
+            user=_user(uid),
             decision=None,
             provider=None,
             tool=None,
