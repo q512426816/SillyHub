@@ -58,6 +58,7 @@ function mkBinding(
     synced_at: o.synced_at ?? null,
     last_scan_at: o.last_scan_at ?? null,
     init_synced_at: o.init_synced_at ?? null,
+    init_synced_spec_version: o.init_synced_spec_version ?? null,
   };
 }
 

@@ -300,7 +300,8 @@ export default function TaskDetailPage({ params }: Props) {
 
   const changeKey = change?.change_key ?? changeId;
   const availableTransitions = TASK_TRANSITIONS[task.status] ?? [];
-  const criteria = parseCriteria(task.content);
+  // schema 中 TaskRead.content 为可选（string | null | undefined），缺席视同 null。
+  const criteria = parseCriteria(task.content ?? null);
 
   const formatDate = (iso: string) => {
     try {

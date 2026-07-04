@@ -2,21 +2,12 @@
  * Git Gateway API client. Mirrors backend/app/modules/git_gateway/router.py.
  */
 import { apiFetch } from "@/lib/api";
+import type { components } from "@/lib/api-types";
 
-// ── Types ──
-
-export interface GitOperationRequest {
-  operation: string;
-  args?: string[];
-}
-
-export interface GitOperationResponse {
-  id: string;
-  operation: string;
-  result_code: number;
-  redacted_output: string;
-  timestamp: string;
-}
+// 类型从 OpenAPI 自动生成（@/lib/api-types，由 scripts/gen-api-types.mjs 产出），
+// 消除手写类型漂移。后端 schema 来源：backend/app/modules/git_gateway/schema.py。
+export type GitOperationRequest = components["schemas"]["GitOperationRequest"];
+export type GitOperationResponse = components["schemas"]["GitOperationResponse"];
 
 // ── Endpoints ──
 

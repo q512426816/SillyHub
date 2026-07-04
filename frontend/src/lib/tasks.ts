@@ -1,63 +1,18 @@
 import { apiFetch } from "./api";
+import type { components } from "@/lib/api-types";
 
-export type TaskSummary = {
-  id: string;
-  workspace_id: string;
-  change_id: string;
-  task_key: string;
-  title: string | null;
-  status: string;
-  phase: string | null;
-  priority: string | null;
-  owner_key: string | null;
-  estimated_hours: number | null;
-  affected_components: string[];
-  depends_on: string[];
-  blocks: string[];
-  created_at: string;
-  updated_at: string;
-};
-
-export type TaskRead = TaskSummary & {
-  allowed_paths: string[];
-  path: string | null;
-  content: string | null;
-};
-
-export type TaskList = {
-  items: TaskSummary[];
-  total: number;
-};
-
-export type TaskBoardColumn = {
-  status: string;
-  count: number;
-  items: TaskSummary[];
-};
-
-export type TaskBoard = {
-  columns: TaskBoardColumn[];
-};
-
-export type TaskParseWarning = {
-  code: string;
-  detail: string;
-  task_key: string | null;
-};
-
-export type TaskReparseStats = {
-  parsed: number;
-  created: number;
-  updated: number;
-  deleted: number;
-};
-
-export type TaskReparseResponse = {
-  workspace_id: string;
-  change_id: string;
-  stats: TaskReparseStats;
-  warnings: TaskParseWarning[];
-};
+// 类型从 OpenAPI 自动生成（@/lib/api-types，由 scripts/gen-api-types.mjs 产出），
+// 消除手写类型漂移。后端 schema 来源：backend/app/modules/task/schema.py。
+// 注意：schema 的 TaskSummary/TaskRead 比旧手写多 `workspace_ids: string[]`（超集，
+// 读侧消费者忽略即可）；TaskParseWarning.task_key 在 schema 中为可选（旧手写为可空）。
+export type TaskSummary = components["schemas"]["TaskSummary"];
+export type TaskRead = components["schemas"]["TaskRead"];
+export type TaskList = components["schemas"]["TaskList"];
+export type TaskBoardColumn = components["schemas"]["TaskBoardColumn"];
+export type TaskBoard = components["schemas"]["TaskBoard"];
+export type TaskParseWarning = components["schemas"]["TaskParseWarning"];
+export type TaskReparseStats = components["schemas"]["TaskReparseStats"];
+export type TaskReparseResponse = components["schemas"]["TaskReparseResponse"];
 
 export function listTasks(
   workspaceId: string,

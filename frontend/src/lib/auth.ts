@@ -1,37 +1,23 @@
 import { apiFetch } from "@/lib/api";
 import { ensureFreshAccessToken } from "@/lib/token-refresh";
 import { useSession, type SessionTokens } from "@/stores/session";
+import type { components } from "@/lib/api-types";
 
-export interface TokenPair {
-  access_token: string;
-  refresh_token: string;
-  token_type: "bearer";
-  access_expires_in: number;
-  refresh_expires_in: number;
-}
-
-export interface MeResponse {
-  user: {
-    id: string;
-    email: string;
-    display_name: string | null;
-    is_platform_admin?: boolean;
-  };
-  workspaces: Array<{
-    workspace_id: string;
-    role_key: string;
-    role_name: string;
-  }>;
-  permissions?: string[];
-}
+// 类型从 OpenAPI 自动生成（@/lib/api-types，由 scripts/gen-api-types.mjs 产出），
+// 消除手写类型漂移。后端 schema 来源：backend/app/modules/auth/schema.py。
+export type TokenPair = components["schemas"]["TokenPair"];
+export type MeResponse = components["schemas"]["MeResponse"];
 
 export async function fetchMe(): Promise<MeResponse> {
   const me = await apiFetch<MeResponse>("/api/auth/me");
+  // schema 的 UserRead 中 email/username/display_name 均可空（登录允许 username-only），
+  // 而 SessionUser 的 email/displayName 为非空 string，这里做降级合并保证类型诚实。
   useSession.getState().setUser({
     id: me.user.id,
-    email: me.user.email,
-    displayName: me.user.display_name ?? me.user.email,
-    is_platform_admin: me.user.is_platform_admin ?? false,
+    email: me.user.email ?? me.user.username ?? "",
+    displayName:
+      me.user.display_name ?? me.user.email ?? me.user.username ?? "",
+    is_platform_admin: me.user.is_platform_admin,
     permissions: me.permissions ?? [],
   });
   return me;
@@ -92,4 +78,3 @@ export async function logout(): Promise<void> {
     useSession.getState().clear();
   }
 }
-

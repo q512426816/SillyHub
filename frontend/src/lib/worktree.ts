@@ -2,49 +2,24 @@
  * Worktree API client. Mirrors backend/app/modules/worktree/schema.py.
  */
 import { apiFetch } from "@/lib/api";
+import type { components } from "@/lib/api-types";
 
-// ── Types ──
-
-export interface WorktreeAcquireRequest {
-  component_id?: string;
-  change_id?: string;
-  task_id?: string;
-  git_identity_id?: string;
-  ttl_seconds?: number;
-}
-
-export interface WorktreeLeaseRead {
-  id: string;
-  workspace_id: string;
-  component_id: string | null;
-  change_id: string | null;
-  task_id: string | null;
-  user_id: string | null;
-  run_id: string | null;
-  git_identity_id: string | null;
-  path: string;
-  branch_name: string;
-  status: string;
-  locked_at: string;
-  released_at: string | null;
-  expires_at: string;
-}
-
-export interface WorktreeLeaseList {
-  items: WorktreeLeaseRead[];
-  total: number;
-}
-
-export interface WorktreeExtendRequest {
-  additional_seconds: number;
-}
+// 类型从 OpenAPI 自动生成（@/lib/api-types，由 scripts/gen-api-types.mjs 产出），
+// 消除手写类型漂移。后端 schema 来源：backend/app/modules/worktree/schema.py。
+// 注意：schema 的 WorktreeAcquireRequest 各 ID 字段均为必填（后端 422 兜底），
+// 因此 acquireWorktree 的 input 不再默认 {}；WorktreeLeaseRead 的 ID 字段后端
+// 声明为非空 uuid（旧手写误为 string | null，读侧收窄安全）。
+export type WorktreeAcquireRequest = components["schemas"]["WorktreeAcquireRequest"];
+export type WorktreeLeaseRead = components["schemas"]["WorktreeLeaseRead"];
+export type WorktreeLeaseList = components["schemas"]["WorktreeLeaseList"];
+export type WorktreeExtendRequest = components["schemas"]["WorktreeExtendRequest"];
 
 // ── Workspace-scoped endpoints ──
 
 /** Acquire (create) a worktree lease for a workspace. */
 export function acquireWorktree(
   workspaceId: string,
-  input: WorktreeAcquireRequest = {},
+  input: WorktreeAcquireRequest,
 ): Promise<WorktreeLeaseRead> {
   return apiFetch<WorktreeLeaseRead>(
     `/api/workspaces/${workspaceId}/worktrees/acquire`,

@@ -2,32 +2,14 @@
  * Knowledge & Quicklog API client. Mirrors backend/app/modules/knowledge/schema.py.
  */
 import { apiFetch } from "@/lib/api";
+import type { components } from "@/lib/api-types";
 
-export interface KnowledgeEntry {
-  filename: string;
-  path: string;
-  title: string | null;
-  content: string | null;
-  last_modified_at: string | null;
-}
-
-export interface KnowledgeList {
-  items: KnowledgeEntry[];
-  total: number;
-}
-
-export interface QuicklogEntry {
-  filename: string;
-  path: string;
-  title: string | null;
-  content: string | null;
-  last_modified_at: string | null;
-}
-
-export interface QuicklogList {
-  items: QuicklogEntry[];
-  total: number;
-}
+// 类型从 OpenAPI 自动生成（@/lib/api-types，由 scripts/gen-api-types.mjs 产出），
+// 消除手写类型漂移。后端 schema 来源：backend/app/modules/knowledge/schema.py。
+export type KnowledgeEntry = components["schemas"]["KnowledgeEntry"];
+export type KnowledgeList = components["schemas"]["KnowledgeList"];
+export type QuicklogEntry = components["schemas"]["QuicklogEntry"];
+export type QuicklogList = components["schemas"]["QuicklogList"];
 
 export async function listKnowledge(
   workspaceId: string,

@@ -4,20 +4,13 @@
  * User management moved to `/api/admin/users` (see `@/lib/admin`).
  */
 import { apiFetch } from "@/lib/api";
+import type { components } from "@/lib/api-types";
 
-export interface SettingRead {
-  key: string;
-  value: string;
-  updated_at: string | null;
-}
-
-export interface SettingsBulkRead {
-  settings: SettingRead[];
-}
-
-export interface SettingsUpdateResponse {
-  updated: string[];
-}
+// 类型从 OpenAPI 自动生成（@/lib/api-types，由 scripts/gen-api-types.mjs 产出），
+// 消除手写类型漂移。后端 schema 来源：backend/app/modules/settings/schema.py。
+export type SettingRead = components["schemas"]["SettingRead"];
+export type SettingsBulkRead = components["schemas"]["SettingsBulkRead"];
+export type SettingsUpdateResponse = components["schemas"]["SettingsUpdateResponse"];
 
 export async function listSettings(): Promise<SettingsBulkRead> {
   return apiFetch<SettingsBulkRead>("/api/settings");
