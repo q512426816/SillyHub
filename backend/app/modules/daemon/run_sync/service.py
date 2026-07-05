@@ -284,6 +284,15 @@ class RunSyncService:
         # 软删标记；commit 前 pending 对象还在 identity map，session.delete 直接撤销
         # 即可，无额外 SQL 开销。
         flushed_partials: dict[str, AgentRunLog] = {}
+        # ql-20260706-002：tool_use_id → tool_kind 缓存（tool_kind 跨消息继承）。
+        # _extract_sdk_messages 的 tool_result 分支产出的 stdout 行无 tool_kind，但
+        # 自带 tool_use_id（Anthropic API）；配对的 tool_use（同 id）在上一轮 assistant
+        # message 已被 classify_tool_kind 打标。SDK 消息顺序恒为 assistant(tool_use)
+        # → user(tool_result)，本循环按顺序处理：tool_use 行登记 id→kind，后续
+        # tool_result 行回查补 kind。让 [TOOL_RESULT] 命令输出也带 tool_kind，前端
+        # 第二层 SillySpec 筛选才能命中 sillyspec 的 ✅ Step 进度等（d751a871 根因）。
+        # 缓存单次调用内有效；跨调用的 tool_result 查不到则保持 None（兼容不报错）。
+        tool_kind_by_tool_use_id: dict[str, str] = {}
 
         for msg in flat_messages:
             # ql-20260616-003：daemon _eventToMessage 不发 channel/timestamp/log_id，
@@ -412,6 +421,22 @@ class RunSyncService:
                 # msg.get 优先命中（含 _extract_sdk_messages 注入值 + 新 daemon 直传）；
                 # 显式归一 None，避免下游 publish 拿到非预期类型。
                 tool_kind = tool_kind if isinstance(tool_kind, str) and tool_kind else None
+
+            # ql-20260706-002：tool_kind 跨消息继承——tool_result（命令输出 stdout 行）
+            # 继承配对 tool_use（命令调用 tool_call 行）的 tool_kind。tool_use 行
+            # （带 tool_kind + tool_use_id）登记 id→kind 缓存；tool_result 行（stdout，
+            # 无 tool_kind）按自带 tool_use_id 回查补 kind。让 stdout 的 [TOOL_RESULT]
+            # 行也带 tool_kind，前端第二层筛选命中 sillyspec 步骤进度等命令输出
+            # （d751a871 根因）。batch mode 扁平 [TOOL_RESULT] 文本行无 tool_use_id
+            # → msg.get 返回 None → 跳过，行为不变；tool_use_id 在缓存缺失时也跳过。
+            _msg_tuid = msg.get("tool_use_id") if isinstance(msg, dict) else None
+            if isinstance(_msg_tuid, str) and _msg_tuid:
+                if event_type == "tool_use" and tool_kind:
+                    tool_kind_by_tool_use_id[_msg_tuid] = tool_kind
+                elif event_type == "tool_result" and not tool_kind:
+                    _inherited = tool_kind_by_tool_use_id.get(_msg_tuid)
+                    if isinstance(_inherited, str) and _inherited:
+                        tool_kind = _inherited
             log_entry = AgentRunLog(
                 id=log_id,
                 run_id=agent_run_id,
@@ -1181,14 +1206,20 @@ def _extract_sdk_messages(msg: dict) -> list[dict]:
                 tool_kind = classify_tool_kind(name, input_obj)
             except Exception:
                 tool_kind = None
-            out.append(
-                {
-                    "event_type": "tool_use",
-                    "content": tc_json,
-                    "channel": "tool_call",
-                    "tool_kind": tool_kind,
-                }
-            )
+            # ql-20260706-002：tool_use_id 挂到 flat record *顶层*（不止 tc_payload
+            # JSON 内），让 submit_messages 登记 tool_use_id → tool_kind 缓存，供配对
+            # 的 tool_result 行继承（d751a871 根因：命令输出 [TOOL_RESULT] 漏 tool_kind
+            # 致前端 SillySpec 筛选看不到 sillyspec 的 ✅ Step 进度）。tool_use_id 仅
+            # 非空时携带（与 tc_payload 内字段同步，退化路径保持原形状）。
+            tc_record: dict = {
+                "event_type": "tool_use",
+                "content": tc_json,
+                "channel": "tool_call",
+                "tool_kind": tool_kind,
+            }
+            if tool_use_id:
+                tc_record["tool_use_id"] = tool_use_id
+            out.append(tc_record)
 
         elif btype == "tool_result":
             # tool_result content 可能是 str 或 [{type:"text",text:...}] blocks
@@ -1203,16 +1234,21 @@ def _extract_sdk_messages(msg: dict) -> list[dict]:
                 text = "".join(parts)
             else:
                 text = str(raw or "")
+            # ql-20260706-002：tool_result block 自带 tool_use_id（Anthropic API 标准，
+            # user message content 里 {type:"tool_result", tool_use_id:"toolu_xxx", ...}），
+            # 提取挂到 flat record 顶层，让 submit_messages 回查 tool_use→tool_kind 缓存
+            # 继承配对命令调用的 tool_kind（d751a871 根因修复）。
+            raw_tuid = b.get("tool_use_id")
+            result_tool_use_id = raw_tuid if isinstance(raw_tuid, str) and raw_tuid else ""
             if text:
-                out.append(
-                    stamp(
-                        {
-                            "event_type": "tool_result",
-                            "content": f"[TOOL_RESULT] {text[:3000]}",
-                            "channel": "stdout",
-                        }
-                    )
-                )
+                rec: dict = {
+                    "event_type": "tool_result",
+                    "content": f"[TOOL_RESULT] {text[:3000]}",
+                    "channel": "stdout",
+                }
+                if result_tool_use_id:
+                    rec["tool_use_id"] = result_tool_use_id
+                out.append(stamp(rec))
 
     # 2026-06-28-daemon-subagent-transcript task-08 / D-008@v1（Grill X-001）：
     # 归属字段（parent_tool_use_id/subagent_type/depth）从 msg 顶层读，注入到*每条*

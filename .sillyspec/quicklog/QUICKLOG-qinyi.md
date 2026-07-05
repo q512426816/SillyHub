@@ -81,6 +81,15 @@ created_at: 2026-07-05 16:33:00
 测试：加 2 个回归——(1) 失败路径 mock_session.rollback.assert_not_called()；(2) default_agent=NULL 且不传 provider 时 dispatch provider=="claude" 且 AgentSession.provider=="claude"。agent 模块全量 190 passed / 6 skipped 零回归。
 中断续作：本条更早一轮会话已写完代码+测试但未 commit/未记 quicklog 即中断（注释误标 ql-20260705-005），本轮收尾提交。
 
+## ql-20260706-002-b5e8 | 2026-07-06 02:41:07 | tool_result 继承 tool_use 的 tool_kind 治命令输出在 SillySpec 筛选消失（续 d751a871）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/run_sync/service.py, backend/tests/modules/agent/test_agent_run_log_tool_kind.py
+依据：d751a871 诊断——run be48ad3a 的 sillyspec 命令输出（✅ Step 1/11 … 共 10 条步骤进度）没打 tool_kind=sillyspec，只有命令调用打标。前端第二层 SillySpec 筛选把 10 条步骤进度全排除（用户"步骤只显示1个"抱怨根因）。病根：_extract_sdk_messages 的 tool_result 分支直接把命令输出落成 [TOOL_RESULT] stdout 行，既没 classify 也未继承配对 tool_use 的 tool_kind。难点：Anthropic 协议里 tool_use 在 assistant message、tool_result 在下一轮 user message，两条 SDK message 单次 _extract_sdk_messages 拿不到对应关系。
+修法（纯 backend，daemon 无需改动）：(1) _extract_sdk_messages tool_use 分支 tool_call JSON flat record 顶层挂 tool_use_id（原仅在 tc_payload JSON 内）；(2) tool_result 分支从 block 自带 tool_use_id（Anthropic API 标准）提取挂 flat record 顶层；(3) submit_messages 循环维护 session 级 tool_use_id→tool_kind 缓存，tool_use 行登记、tool_result 行按 id 回查补 tool_kind。SDK 消息顺序恒 assistant→user 保证缓存先填后查；跨调用缺失 / 旧 daemon 缺 id 时保持 None（兼容不报错）。
+测试：加 4 个用例——tool_result 提取 tool_use_id；tool_use tool_call 行顶层带 tool_use_id；端到端继承（tool_use+tool_result 同批→[TOOL_RESULT] 行落库 tool_kind=sillyspec + published_logs 透传）；缓存缺失兼容（孤立 tool_result 保持 None）。tool_kind 文件 19 passed；agent+daemon 全量 258 passed 零回归；ruff format + mypy 全过。
+续作说明：本条续 d751a871 会话——上轮 sillyspec quick 走到 Step2 读代码阶段中断、无实现产出，本轮照其方案直接实现 + 测试 + 提交。
+
 
 
 

@@ -544,3 +544,167 @@ async def test_api_get_logs_filter_excludes_null_kind(
     assert len(body) == 1
     assert body[0]["tool_kind"] == "read"
     assert body[0]["channel"] == "tool_call"
+
+
+# ---------------------------------------------------------------------------
+# 6. tool_kind 跨消息继承（ql-20260706-002 / d751a871 根因）
+# ---------------------------------------------------------------------------
+
+
+def test_extract_sdk_messages_tool_result_carries_tool_use_id() -> None:
+    """ql-20260706-002：SDK user tool_result block 自带 tool_use_id → flat record 顶层
+    带同值，供 submit_messages 回查 tool_use→tool_kind 缓存继承（d751a871 根因修复）。"""
+    msg = {
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_abc",
+                    "content": "✅ Step 1/11 完成",
+                }
+            ],
+        },
+    }
+    out = _extract_sdk_messages(msg)
+    assert len(out) == 1
+    rec = out[0]
+    assert rec["event_type"] == "tool_result"
+    assert rec["channel"] == "stdout"
+    assert rec["tool_use_id"] == "toolu_abc"
+    assert "[TOOL_RESULT] ✅ Step 1/11 完成" in rec["content"]
+    # tool_result 分支不自己打 tool_kind（继承在 submit_messages 完成跨消息配对）
+    assert "tool_kind" not in rec
+
+
+def test_extract_sdk_messages_tool_use_call_record_carries_tool_use_id() -> None:
+    """ql-20260706-002：tool_use 的 tool_call JSON flat record 顶层带 tool_use_id，
+    让 submit_messages 登记 tool_use_id → tool_kind 缓存供配对 tool_result 继承。"""
+    msg = {
+        "type": "assistant",
+        "message": {
+            "id": "msg_tu",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_xyz",
+                    "name": "Bash",
+                    "input": {"command": "sillyspec run execute"},
+                }
+            ],
+        },
+    }
+    out = _extract_sdk_messages(msg)
+    tool_call = next(r for r in out if r.get("channel") == "tool_call")
+    assert tool_call["tool_use_id"] == "toolu_xyz"
+    assert tool_call["tool_kind"] == "sillyspec"
+
+
+async def test_submit_messages_tool_result_inherits_tool_kind_from_tool_use(
+    db_session: AsyncSession,
+) -> None:
+    """ql-20260706-002（d751a871 根因）：assistant tool_use（sillyspec 命令调用）+
+    user tool_result（✅ Step 输出）同批提交，tool_result 行落库时继承配对 tool_use
+    的 tool_kind=sillyspec。前端 SillySpec 筛选才能看到步骤进度输出。"""
+    run = await _make_agent_run(db_session)
+    svc = RunSyncService(db_session)
+    _stub_facade(svc)
+
+    messages = [
+        {
+            "type": "assistant",
+            "message": {
+                "id": "msg_a",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_inh",
+                        "name": "Bash",
+                        "input": {"command": "sillyspec run execute"},
+                    }
+                ],
+            },
+        },
+        {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_inh",
+                        "content": "✅ Step 1/11 完成",
+                    }
+                ],
+            },
+        },
+    ]
+    result = await svc.submit_messages(
+        lease_id=uuid.uuid4(),
+        claim_token="tkn",
+        agent_run_id=run.id,
+        messages=messages,
+    )
+    # assistant tool_use → 2 行（stdout [TOOL_USE] + tool_call JSON）；user tool_result → 1 行
+    assert int(result) == 3
+    rows = (
+        await db_session.execute(
+            AgentRunLog.__table__.select()
+            .where(AgentRunLog.run_id == run.id)
+            .order_by(text("rowid"))
+        )
+    ).all()
+    # [TOOL_RESULT] 行继承 sillyspec（核心断言）
+    result_rows = [r for r in rows if "[TOOL_RESULT]" in r.content_redacted]
+    assert len(result_rows) == 1
+    assert result_rows[0].tool_kind == "sillyspec"
+    assert result_rows[0].channel == "stdout"
+    # 命令调用行本身也带 sillyspec（回归，继承不能冲掉原打标）
+    tool_call_rows = [r for r in rows if r.channel == "tool_call"]
+    assert len(tool_call_rows) == 1
+    assert tool_call_rows[0].tool_kind == "sillyspec"
+    # published_logs 里 [TOOL_RESULT] 行也透传 tool_kind（前端实时流筛选命中）
+    result_payload = next(
+        p
+        for p in result.publish_intent.published_logs  # type: ignore[attr-defined]
+        if "[TOOL_RESULT]" in p["content"]
+    )
+    assert result_payload["tool_kind"] == "sillyspec"
+
+
+async def test_submit_messages_tool_result_without_prior_tool_use_stays_null(
+    db_session: AsyncSession,
+) -> None:
+    """ql-20260706-002 兼容：tool_result 的 tool_use_id 在缓存里没有（tool_use 未落库 /
+    跨调用 / 旧 daemon）→ tool_kind 保持 None，不报错（brownfield 兼容）。"""
+    run = await _make_agent_run(db_session)
+    svc = RunSyncService(db_session)
+    _stub_facade(svc)
+
+    messages = [
+        {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_orphan",
+                        "content": "孤立结果（无配对 tool_use）",
+                    }
+                ],
+            },
+        }
+    ]
+    await svc.submit_messages(
+        lease_id=uuid.uuid4(),
+        claim_token="tkn",
+        agent_run_id=run.id,
+        messages=messages,
+    )
+    rows = (
+        await db_session.execute(AgentRunLog.__table__.select().where(AgentRunLog.run_id == run.id))
+    ).all()
+    assert len(rows) == 1
+    assert rows[0].tool_kind is None
