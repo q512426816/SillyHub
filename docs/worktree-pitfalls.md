@@ -4,9 +4,18 @@ created_at: 2026-07-05 11:30:00
 tags: [worktree, execute, 环境坑]
 ---
 
-# worktree execute 阶段环境坑（2026-07-05-agent-log-type-tags 记录）
+# worktree execute 阶段环境坑（项目 worktree 使用手册）
 
-execute 阶段 worktree（平台模式）遇到的 4 个环境问题，与具体变更无关，是 worktree 隔离机制的通用副作用。后续 execute 若再遇可参照。
+> 本文档是 multi-agent-platform 项目用 worktree 隔离时的环境坑备忘，**非 sillyspec 工具 gap**（已从 `docs/sillyspec/` 迁出）。4 个坑里坑 3 已被 sillyspec 自动解决，坑 1 sillyspec 可改进（baseline commit 加 `--no-verify`，未登记到 sillyspec gap 清单），坑 2/4 是 git worktree 固有 + 项目特定产物（sillyspec 管不了）。后续 execute 若再遇可参照。
+
+execute 阶段 worktree（平台模式）遇到的 4 个环境问题，与具体变更无关，是 worktree 隔离机制的通用副作用。
+
+| 坑 | sillyspec 处置 |
+|---|---|
+| 1. baseline checkpoint 被 pre-commit ruff 拦截 | 未处置（baseline commit 未加 `--no-verify`） |
+| 2. 缺 .env | 管不了（git worktree 固有） |
+| 3. 缺 node_modules | **已自动处理** ✅（`provisionDeps` junction/symlink + install 兜底） |
+| 4. 缺 build-id.ts | 管不了（项目特定构建产物） |
 
 ## 1. baseline checkpoint 被 pre-commit ruff 拦截
 
@@ -29,6 +38,8 @@ execute 阶段 worktree（平台模式）遇到的 4 个环境问题，与具体
 **建议**：迁移验证留到 verify 阶段在主仓库/PG 跑，worktree 内不强制跑 alembic upgrade。
 
 ## 3. worktree 缺 node_modules（sillyhub-daemon / frontend）
+
+> ✅ **sillyspec 已自动处理**：`provisionDeps`（`worktree-deps.js`）在创建 worktree 时会自动把主仓库 `node_modules` 用 junction/symlink 链过来（lockfile hash 一致走快路径），失败回退 install。子代理**无需**手动 mklink。下面的手动步骤仅作 sillyspec 不可用 / link 失败时的 fallback 参考。
 
 **现象**：worktree 内 `npx vitest` / `pnpm test` 报 `'vitest' 不是内部或外部命令` 或 `ERR_MODULE_NOT_FOUND`。
 

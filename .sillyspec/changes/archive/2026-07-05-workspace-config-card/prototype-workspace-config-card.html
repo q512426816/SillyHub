@@ -1,0 +1,401 @@
+<!-- author: qinyi -->
+<!-- created_at: 2026-07-05T00:58:20 -->
+<!-- prototype: 工作区配置卡 WorkspaceConfigCard · 升级详情页「规范管理」区为「我的工作区配置」 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工作区配置卡 · 原型</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --blue-50:#eff6ff;--blue-100:#dbeafe;--blue-600:#2563eb;--blue-700:#1d4ed8;
+    --cyan-500:#06b6d4;--cyan-50:#ecfeff;
+    --emerald-50:#ecfdf5;--emerald-500:#10b981;--emerald-600:#059669;--emerald-700:#047857;
+    --amber-50:#fffbeb;--amber-500:#f59e0b;--amber-600:#d97706;--amber-700:#b45309;
+    --red-50:#fef2f2;--red-500:#ef4444;--red-600:#dc2626;--red-700:#b91c1c;
+    --slate-50:#f8fafc;--slate-100:#f1f5f9;--slate-200:#e2e8f0;--slate-300:#cbd5e1;
+    --slate-400:#94a3b8;--slate-500:#64748b;--slate-600:#475569;--slate-700:#334155;--slate-800:#1e293b;--slate-900:#0f172a;
+    --r-sm:6px;--r-md:8px;--r-lg:12px;
+    --sh-sm:0 1px 2px 0 rgb(15 23 42/.05);
+    --sh-md:0 4px 6px -1px rgb(15 23 42/.07),0 2px 4px -2px rgb(15 23 42/.05);
+    --sh-lg:0 10px 15px -3px rgb(15 23 42/.08),0 4px 6px -4px rgb(15 23 42/.05);
+    --font:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;
+    --mono:ui-monospace,'Cascadia Code',Consolas,'Courier New',monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--slate-100);color:var(--slate-800);font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1100px;margin:0 auto;padding:24px}
+  .label{font-size:11px;font-weight:600;color:var(--slate-400);text-transform:uppercase;letter-spacing:.08em;margin:32px 0 10px}
+  .label:first-child{margin-top:0}
+  .label .hint{font-weight:400;text-transform:none;letter-spacing:0;color:var(--slate-400);font-size:11.5px;margin-left:8px}
+
+  /* ===== 详情页外壳 ===== */
+  .page{background:var(--slate-50);border:1px solid var(--slate-200);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--sh-lg)}
+  .topbar{height:52px;background:#fff;border-bottom:1px solid var(--slate-200);display:flex;align-items:center;gap:10px;padding:0 20px}
+  .crumb{font-size:13px;color:var(--slate-500)}
+  .crumb b{color:var(--slate-800);font-weight:600}
+  .crumb .sep{margin:0 6px;color:var(--slate-300)}
+  .content{padding:20px 22px}
+
+  /* ===== Page Head ===== */
+  .page-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;gap:12px}
+  .page-head h1{font-size:20px;font-weight:700;color:var(--slate-900);letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+  .page-head p{font-size:12.5px;color:var(--slate-500);margin-top:3px;font-family:var(--mono)}
+
+  /* ===== 按钮 ===== */
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:var(--r-md);font-size:12.5px;font-weight:600;cursor:pointer;border:1px solid transparent;transition:all .15s;font-family:var(--font)}
+  .btn svg{width:14px;height:14px}
+  .btn-primary{background:var(--blue-600);color:#fff;box-shadow:var(--sh-sm)}
+  .btn-primary:hover{background:var(--blue-700)}
+  .btn-outline{background:#fff;color:var(--slate-700);border-color:var(--slate-300)}
+  .btn-outline:hover{background:var(--slate-50);border-color:var(--slate-400)}
+  .btn-ghost{background:transparent;color:var(--slate-600)}
+  .btn-ghost:hover{background:var(--slate-100)}
+  .btn-sm{padding:5px 9px;font-size:12px}
+  .btn:disabled,.btn.disabled{opacity:.5;cursor:not-allowed}
+
+  /* ===== 徽标 ===== */
+  .badge{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600}
+  .badge .dot{width:6px;height:6px;border-radius:50%}
+  .badge.blue{background:var(--blue-50);color:var(--blue-700)} .badge.blue .dot{background:var(--blue-600)}
+  .badge.emerald{background:var(--emerald-50);color:var(--emerald-700)} .badge.emerald .dot{background:var(--emerald-600)}
+  .badge.amber{background:var(--amber-50);color:var(--amber-700)} .badge.amber .dot{background:var(--amber-500)}
+  .badge.red{background:var(--red-50);color:var(--red-700)} .badge.red .dot{background:var(--red-600)}
+  .badge.slate{background:var(--slate-100);color:var(--slate-600)} .badge.slate .dot{background:var(--slate-400)}
+
+  /* ===== 配置卡（核心） ===== */
+  .config-card{background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-lg);box-shadow:var(--sh-sm);overflow:hidden}
+  .config-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--slate-100);gap:10px;flex-wrap:wrap}
+  .config-head .title-wrap{display:flex;align-items:center;gap:8px}
+  .config-head h2{font-size:15px;font-weight:700;color:var(--slate-900)}
+  .config-head .sub{font-size:11.5px;color:var(--slate-400);font-weight:400}
+  .head-actions{display:flex;gap:6px;flex-wrap:wrap}
+
+  /* 分组 */
+  .group{padding:6px 0}
+  .group + .group{border-top:1px dashed var(--slate-200)}
+  .group-head{display:flex;align-items:center;justify-content:space-between;padding:12px 18px 4px}
+  .group-title{font-size:11.5px;font-weight:700;color:var(--slate-600);text-transform:uppercase;letter-spacing:.05em;display:flex;align-items:center;gap:6px}
+  .group-title .tag{font-size:10.5px;font-weight:500;text-transform:none;letter-spacing:0;color:var(--slate-400);background:var(--slate-100);padding:1px 7px;border-radius:999px}
+  .group-title .tag.editable{color:var(--blue-700);background:var(--blue-50)}
+  .group-title .tag.readonly{color:var(--slate-500);background:var(--slate-100)}
+
+  /* dl 网格（字段展示） */
+  .dl{display:grid;grid-template-columns:170px 1fr;gap:9px 16px;padding:8px 18px 14px}
+  .dl dt{font-size:12px;color:var(--slate-500);font-weight:500;padding-top:3px;display:flex;align-items:center;gap:5px}
+  .dl dt .tip{color:var(--slate-300);cursor:help}
+  .dl dd{font-size:13px;color:var(--slate-800);font-weight:500;min-width:0}
+  .mono-path{font-family:var(--mono);font-size:12px;color:var(--slate-700);background:var(--slate-50);border:1px solid var(--slate-100);padding:3px 8px;border-radius:var(--r-sm);display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
+  .mono-path[title]{cursor:help}
+  .dd-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .daemon-chip{display:inline-flex;align-items:center;gap:7px;padding:3px 9px 3px 4px;border:1px solid var(--slate-200);border-radius:999px;background:#fff}
+  .daemon-chip .dot{width:8px;height:8px;border-radius:50%;background:var(--emerald-500);box-shadow:0 0 0 2px var(--emerald-50)}
+  .daemon-chip .dot.off{background:var(--slate-400);box-shadow:0 0 0 2px var(--slate-100)}
+  .daemon-chip .name{font-size:12.5px;font-weight:600;color:var(--slate-800)}
+  .daemon-chip .meta{font-size:11px;color:var(--slate-400)}
+  .daemon-chip .prov{font-size:10.5px;font-weight:600;color:var(--blue-700);background:var(--blue-50);padding:1px 6px;border-radius:999px}
+
+  /* tooltip 提示行 */
+  .field-hint{font-size:11px;color:var(--slate-400);margin-top:3px;line-height:1.45}
+  .field-hint code{font-family:var(--mono);font-size:10.5px;background:var(--slate-100);padding:1px 4px;border-radius:3px;color:var(--slate-600)}
+
+  /* ===== 编辑表单（就地展开） ===== */
+  .edit-form{padding:14px 18px;background:var(--blue-50);border-top:1px solid var(--blue-100)}
+  .edit-form .row{display:grid;grid-template-columns:140px 1fr;gap:9px 14px;margin-bottom:10px;align-items:center}
+  .edit-form .row label{font-size:12px;color:var(--slate-600);font-weight:600}
+  .edit-form .input,.edit-form select{height:32px;border:1px solid var(--slate-300);border-radius:var(--r-md);padding:0 10px;font-size:12.5px;color:var(--slate-800);background:#fff;font-family:var(--font);width:100%}
+  .edit-form .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:6px;padding-top:10px;border-top:1px solid var(--blue-100)}
+
+  /* ===== 首次引导（未绑定） ===== */
+  .guide{padding:20px 22px;text-align:center}
+  .guide .ico{width:42px;height:42px;border-radius:var(--r-md);background:var(--blue-50);color:var(--blue-600);display:inline-flex;align-items:center;justify-content:center;margin-bottom:8px}
+  .guide .ico svg{width:22px;height:22px}
+  .guide h3{font-size:15px;font-weight:700;color:var(--slate-900);margin-bottom:4px}
+  .guide p{font-size:12.5px;color:var(--slate-500);margin-bottom:14px;max-width:420px;margin-left:auto;margin-right:auto}
+  .guide .mini-form{max-width:480px;margin:0 auto;text-align:left;background:#fff;border:1px solid var(--slate-200);border-radius:var(--r-md);padding:14px}
+  .guide .mini-form .row{display:grid;grid-template-columns:110px 1fr;gap:8px 12px;margin-bottom:8px;align-items:center}
+  .guide .mini-form .row label{font-size:12px;color:var(--slate-600);font-weight:600}
+  .guide .mini-form .input,.guide .mini-form select{height:30px;border:1px solid var(--slate-300);border-radius:var(--r-sm);padding:0 9px;font-size:12px;color:var(--slate-700);background:#fff;font-family:var(--font);width:100%}
+  .guide .mini-form .actions{display:flex;justify-content:flex-end;margin-top:8px}
+
+  .foot{margin-top:28px;padding:14px 0;text-align:center;color:var(--slate-400);font-size:11.5px;border-top:1px solid var(--slate-200)}
+  .legend{display:inline-flex;align-items:center;gap:14px;margin-top:6px;flex-wrap:wrap;justify-content:center}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .legend .dot{width:8px;height:8px;border-radius:50%}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="label">① 已绑定 · 已初始化（daemon-client 默认态）<span class="hint">完整展示两组：我的接入（可编辑）+ 工作区文档存储（共享只读）</span></div>
+  <div class="page">
+    <div class="topbar">
+      <div class="crumb"><b>工作区</b><span class="sep">/</span><b>multi-agent-platform</b></div>
+    </div>
+    <div class="content">
+      <div class="page-head">
+        <div>
+          <h1>multi-agent-platform <span class="badge emerald"><span class="dot"></span>活跃</span></h1>
+          <p>multi-agent-platform</p>
+        </div>
+      </div>
+
+      <!-- ===== 我的工作区配置卡（核心） ===== -->
+      <div class="config-card">
+        <div class="config-head">
+          <div class="title-wrap">
+            <h2>我的工作区配置</h2>
+            <span class="sub">查看这个工作区的接入与文档存储位置</span>
+          </div>
+          <div class="head-actions">
+            <button class="btn btn-outline btn-sm">初始化</button>
+            <button class="btn btn-outline btn-sm">扫描</button>
+            <button class="btn btn-outline btn-sm">同步到服务器</button>
+          </div>
+        </div>
+
+        <!-- 组 1：我的接入 -->
+        <div class="group">
+          <div class="group-head">
+            <div class="group-title">我的接入 <span class="tag editable">每人一份 · 可编辑</span></div>
+            <button class="btn btn-ghost btn-sm">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              编辑我的接入
+            </button>
+          </div>
+          <dl class="dl">
+            <dt>绑定守护进程</dt>
+            <dd>
+              <div class="dd-row">
+                <span class="daemon-chip">
+                  <span class="dot"></span>
+                  <span class="name">DESKTOP-QINYI</span>
+                  <span class="meta">qinyi-local</span>
+                  <span class="prov">claude</span>
+                </span>
+              </div>
+            </dd>
+
+            <dt>我的本地项目路径</dt>
+            <dd><span class="mono-path" title="C:\Users\qinyi\IdeaProjects\multi-agent-platform">C:\Users\qinyi\IdeaProjects\multi-agent-platform</span></dd>
+
+            <dt>路径来源</dt>
+            <dd><span class="badge blue"><span class="dot"></span>daemon-client</span></dd>
+
+            <dt>接入初始化状态</dt>
+            <dd>
+              <div class="dd-row">
+                <span class="badge emerald"><span class="dot"></span>已初始化</span>
+                <span style="font-size:11.5px;color:var(--slate-400)">2026-07-04 16:22 · 文档版本 v7</span>
+              </div>
+            </dd>
+
+            <dt>上次接入同步</dt>
+            <dd><span style="font-size:12.5px;color:var(--slate-600)">2026-07-04 16:22:18</span></dd>
+          </dl>
+        </div>
+
+        <!-- 组 2：工作区文档存储 -->
+        <div class="group">
+          <div class="group-head">
+            <div class="group-title">工作区文档存储 <span class="tag readonly">全工作区共享 · 只读</span></div>
+          </div>
+          <dl class="dl">
+            <dt>
+              服务器文档目录
+              <span class="tip" title="平台权威文档存储位置，所有成员共享同一份">ⓘ</span>
+            </dt>
+            <dd><span class="mono-path" title="/data/sillyspec-data/fb5008c1-c262-4c8c-b3cb-a82abc39731e">/data/sillyspec-data/fb5008c1-…-a82abc39731e</span></dd>
+
+            <dt>runtime 目录</dt>
+            <dd><span class="mono-path" title="/data/sillyspec-data/fb5008c1-c262-4c8c-b3cb-a82abc39731e/runtime">…/fb5008c1-…-a82abc39731e/runtime</span></dd>
+
+            <dt>
+              守护进程本地缓存
+              <span class="tip" title="守护进程在你电脑上缓存这个工作区文档的位置。~ = 你的用户主目录（Windows: C:\Users\<你>；macOS/Linux: /home/<你>）">ⓘ</span>
+            </dt>
+            <dd>
+              <span class="mono-path" title="~/.sillyhub/daemon/specs/fb5008c1-c262-4c8c-b3cb-a82abc39731e">~/.sillyhub/daemon/specs/fb5008c1-…-a82abc39731e</span>
+              <div class="field-hint">守护进程在你电脑上的缓存副本。<code>~</code> = 你的用户主目录</div>
+            </dd>
+
+            <dt>文档版本</dt>
+            <dd><span style="font-size:12.5px;color:var(--slate-600);font-weight:600">v7</span> <span style="font-size:11.5px;color:var(--slate-400)">(每次扫描/同步递增)</span></dd>
+
+            <dt>同步状态</dt>
+            <dd><span class="badge emerald"><span class="dot"></span>synced</span></dd>
+
+            <dt>上次文档同步</dt>
+            <dd><span style="font-size:12.5px;color:var(--slate-600)">2026-07-04 16:22:18</span></dd>
+
+            <dt>spec 策略</dt>
+            <dd><span style="font-size:12.5px;color:var(--slate-600)">platform-managed</span> <span style="font-size:11.5px;color:var(--slate-400)">(平台托管)</span></dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="label">② 未绑定（首次引导）<span class="hint">my-binding 为空 → 显示首次绑定表单（复用现有 WorkspaceAccessGuide 首次模式）</span></div>
+  <div class="page">
+    <div class="content">
+      <div class="config-card">
+        <div class="config-head">
+          <div class="title-wrap">
+            <h2>我的工作区配置</h2>
+            <span class="sub">查看这个工作区的接入与文档存储位置</span>
+          </div>
+        </div>
+        <div class="guide">
+          <div class="ico">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </div>
+          <h3>配置你在这个工作区的接入</h3>
+          <p>选择你机器上运行的守护进程和本地代码检出路径，平台才能在你的机器上扫描/同步文档。</p>
+          <div class="mini-form">
+            <div class="row">
+              <label>绑定守护进程</label>
+              <select><option>DESKTOP-QINYI · qinyi-local (claude)</option></select>
+            </div>
+            <div class="row">
+              <label>本地项目路径</label>
+              <input class="input" value="C:\Users\qinyi\IdeaProjects\multi-agent-platform">
+            </div>
+            <div class="row">
+              <label>路径来源</label>
+              <select><option>daemon-client</option><option>server-local</option></select>
+            </div>
+            <div class="actions">
+              <button class="btn btn-primary btn-sm">保存接入配置</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="label">③ server-local 工作区<span class="hint">path_source=server-local → 隐藏 daemon 相关字段，只展示服务器存储</span></div>
+  <div class="page">
+    <div class="content">
+      <div class="config-card">
+        <div class="config-head">
+          <div class="title-wrap">
+            <h2>我的工作区配置</h2>
+            <span class="sub">查看这个工作区的接入与文档存储位置</span>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="group-head">
+            <div class="group-title">我的接入 <span class="tag editable">每人一份 · 可编辑</span></div>
+            <button class="btn btn-ghost btn-sm">编辑我的接入</button>
+          </div>
+          <dl class="dl">
+            <dt>绑定守护进程</dt>
+            <dd><span style="font-size:12.5px;color:var(--slate-400)">服务器本地工作区，无需守护进程</span></dd>
+            <dt>我的本地项目路径</dt>
+            <dd><span class="mono-path" title="/host-projects/legacy-server-local">/host-projects/legacy-server-local</span></dd>
+            <dt>路径来源</dt>
+            <dd><span class="badge slate"><span class="dot"></span>server-local</span></dd>
+          </dl>
+        </div>
+
+        <div class="group">
+          <div class="group-head">
+            <div class="group-title">工作区文档存储 <span class="tag readonly">全工作区共享 · 只读</span></div>
+          </div>
+          <dl class="dl">
+            <dt>服务器文档目录</dt>
+            <dd><span class="mono-path" title="/data/sillyspec-data/legacy-server-local">/data/sillyspec-data/legacy-server-local</span></dd>
+            <dt>runtime 目录</dt>
+            <dd><span class="mono-path">…/legacy-server-local/runtime</span></dd>
+            <dt>文档版本</dt>
+            <dd><span style="font-size:12.5px;color:var(--slate-600);font-weight:600">v3</span></dd>
+            <dt>同步状态</dt>
+            <dd><span class="badge emerald"><span class="dot"></span>synced</span></dd>
+            <dt>spec 策略</dt>
+            <dd><span style="font-size:12.5px;color:var(--slate-600)">repo-native</span> <span style="font-size:11.5px;color:var(--slate-400)">(仓库原生)</span></dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="label">④ 编辑模式（点「编辑我的接入」就地展开）<span class="hint">回填当前 binding，保存后刷新 + 收起</span></div>
+  <div class="page">
+    <div class="content">
+      <div class="config-card">
+        <div class="config-head">
+          <div class="title-wrap">
+            <h2>我的工作区配置</h2>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="group-head">
+            <div class="group-title">我的接入 <span class="tag editable">每人一份 · 可编辑</span></div>
+            <button class="btn btn-ghost btn-sm">收起</button>
+          </div>
+          <dl class="dl">
+            <dt>绑定守护进程</dt>
+            <dd>
+              <span class="daemon-chip"><span class="dot"></span><span class="name">DESKTOP-QINYI</span><span class="prov">claude</span></span>
+            </dd>
+            <dt>我的本地项目路径</dt>
+            <dd><span class="mono-path">C:\Users\qinyi\IdeaProjects\multi-agent-platform</span></dd>
+            <dt>路径来源</dt>
+            <dd><span class="badge blue"><span class="dot"></span>daemon-client</span></dd>
+          </dl>
+
+          <!-- 就地编辑表单 -->
+          <div class="edit-form">
+            <div class="row">
+              <label>绑定守护进程</label>
+              <select><option>DESKTOP-QINYI · qinyi-local (claude)</option><option>MACBOOK-YI · yi-mac (codex)</option></select>
+            </div>
+            <div class="row">
+              <label>本地项目路径</label>
+              <input class="input" value="C:\Users\qinyi\IdeaProjects\multi-agent-platform">
+            </div>
+            <div class="row">
+              <label>路径来源</label>
+              <select><option>daemon-client</option><option>server-local</option></select>
+            </div>
+            <div class="actions">
+              <button class="btn btn-ghost btn-sm">取消</button>
+              <button class="btn btn-primary btn-sm">保存</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="group-head">
+            <div class="group-title">工作区文档存储 <span class="tag readonly">全工作区共享 · 只读</span></div>
+          </div>
+          <dl class="dl">
+            <dt>服务器文档目录</dt>
+            <dd><span class="mono-path">/data/sillyspec-data/fb5008c1-…</span></dd>
+            <dt>同步状态</dt>
+            <dd><span class="badge emerald"><span class="dot"></span>synced</span></dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div>工作区配置卡 · 4 个关键状态原型 · 实际实现时复用现有 WorkspaceAccessGuide / WorkspaceBindingGuard 子组件</div>
+    <div class="legend">
+      <span><span class="dot" style="background:var(--blue-600)"></span>我的接入（per-member 可编辑）</span>
+      <span><span class="dot" style="background:var(--slate-400)"></span>工作区文档存储（共享只读）</span>
+      <span><span class="dot" style="background:var(--emerald-500)"></span>已初始化/在线</span>
+      <span><span class="dot" style="background:var(--amber-500)"></span>未初始化/待操作</span>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

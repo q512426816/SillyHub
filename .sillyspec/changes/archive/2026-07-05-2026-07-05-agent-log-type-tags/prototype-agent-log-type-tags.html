@@ -1,0 +1,284 @@
+<!--
+author: qinyi
+created_at: 2026-07-05 00:55:00
+description: agent 执行日志类型细分原型 - 两层筛选(日志类型 + 工具类型) + 工具徽标
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Agent 日志类型细分 - 设计原型</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #fafafa; color: #18181b; padding: 24px; font-size: 14px; line-height: 1.6;
+  }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .sub { color: #71717a; font-size: 13px; margin-bottom: 20px; }
+  .panel {
+    background: #fff; border: 1px solid #e4e4e7; border-radius: 10px;
+    padding: 16px 18px; margin-bottom: 14px;
+  }
+  .panel-title {
+    font-size: 12px; font-weight: 600; color: #52525b; text-transform: uppercase;
+    letter-spacing: 0.5px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+  }
+  .panel-title .hint { color: #a1a1aa; font-weight: 400; text-transform: none; letter-spacing: 0; }
+  .panel-title .new { background: #6366f1; color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 4px; }
+
+  .btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 10px; border: 1px solid #e4e4e7; border-radius: 6px;
+    background: #fff; color: #52525b; font-size: 12px; cursor: pointer;
+    transition: all 0.12s;
+  }
+  .btn:hover { background: #f4f4f5; }
+  .btn.active { background: #18181b; color: #fff; border-color: #18181b; }
+  .btn .ic { font-size: 13px; }
+
+  /* 工具徽标颜色（与现有 SemanticCategory 风格一致：border-200 bg-50 text-700） */
+  .tag {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 1px 7px; border: 1px solid; border-radius: 4px;
+    font-size: 11px; font-weight: 500; white-space: nowrap;
+  }
+  .tk-sillyspec { border-color: #f5d0fe; background: #fdf4ff; color: #a21caf; }
+  .tk-skill     { border-color: #fecdd3; background: #fff1f2; color: #be123c; }
+  .tk-bash      { border-color: #bbf7d0; background: #f0fdf4; color: #15803d; }
+  .tk-read      { border-color: #bae6fd; background: #f0f9ff; color: #0369a1; }
+  .tk-write     { border-color: #99f6e4; background: #f0fdfa; color: #0f766e; }
+  .tk-search    { border-color: #c7d2fe; background: #eef2ff; color: #4338ca; }
+  .tk-task      { border-color: #fed7aa; background: #fff7ed; color: #c2410c; }
+  .tk-web       { border-color: #a5f3fc; background: #ecfeff; color: #0e7490; }
+  .tk-todo      { border-color: #fef08a; background: #fefce8; color: #a16207; }
+  .tk-mcp       { border-color: #cbd5e1; background: #f8fafc; color: #475569; }
+  .tk-other     { border-color: #e4e4e7; background: #fff; color: #52525b; }
+  .tk-none      { border-color: #e4e4e7; background: #fafafa; color: #a1a1aa; font-style: italic; }
+
+  /* 日志类型徽标（现有 SemanticCategory，复用项目配色） */
+  .sc { padding: 1px 7px; border: 1px solid; border-radius: 4px; font-size: 11px; font-weight: 500; min-width: 36px; text-align: center; }
+  .sc-user    { border-color: #ddd6fe; background: #f5f3ff; color: #6d28d9; }
+  .sc-assistant{border-color: #bae6fd; background: #f0f9ff; color: #0369a1; }
+  .sc-thinking{ border-color: #e4e4e7; background: #fff; color: #52525b; }
+  .sc-tool    { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }
+  .sc-result  { border-color: #bbf7d0; background: #f0fdf4; color: #15803d; }
+  .sc-system  { border-color: #fde68a; background: #fffbeb; color: #b45309; }
+  .sc-error   { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
+
+  .log-list { border: 1px solid #e4e4e7; border-radius: 8px; overflow: hidden; }
+  .log-row {
+    display: grid; grid-template-columns: 64px 56px 88px 1fr; gap: 10px;
+    padding: 8px 12px; border-bottom: 1px solid #f4f4f5; align-items: center;
+    font-size: 12px;
+  }
+  .log-row:last-child { border-bottom: none; }
+  .log-row.hidden { display: none; }
+  .log-row.dim { opacity: 0.35; }
+  .ts { color: #a1a1aa; font-variant-numeric: tabular-nums; font-size: 11px; }
+  .content { color: #3f3f46; font-family: "SF Mono", Consolas, monospace; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .subagent-tag { background: #fef3c7; color: #92400e; font-size: 10px; padding: 0 4px; border-radius: 3px; margin-right: 4px; }
+
+  .legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; margin-top: 10px; }
+  .note { background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 8px 12px; font-size: 12px; color: #92400e; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<h1>Agent 执行日志 · 类型细分设计原型</h1>
+<div class="sub">变更 2026-07-05-agent-log-type-tags · 给每条工具调用打专属标签，两层筛选 · 这是布局方向原型，配色/图标在实施阶段对齐项目样式系统</div>
+
+<div class="panel">
+  <div class="panel-title">第一层 · 日志类型 <span class="hint">（现有，不动）</span></div>
+  <div class="btn-row" id="layer1">
+    <button class="btn active"><span class="ic">💬</span>助手</button>
+    <button class="btn active"><span class="ic">🧠</span>思路</button>
+    <button class="btn active"><span class="ic">🔧</span>工具</button>
+    <button class="btn active"><span class="ic">✅</span>返回</button>
+    <button class="btn active"><span class="ic">⚙️</span>系统</button>
+    <button class="btn active"><span class="ic">⚠️</span>错误</button>
+    <button class="btn active"><span class="ic">👤</span>用户</button>
+    <button class="btn active"><span class="ic">🏁</span>结果</button>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-title">第二层 · 工具类型 <span class="new">新增</span> <span class="hint">（仅工具调用行生效 · 多选 · 点亮=只看该工具）</span></div>
+  <div class="btn-row" id="layer2">
+    <button class="btn tk-btn" data-tk="sillyspec"><span class="ic">🟣</span>SillySpec</button>
+    <button class="btn tk-btn" data-tk="skill"><span class="ic">⚡</span>技能</button>
+    <button class="btn tk-btn" data-tk="bash"><span class="ic">💻</span>命令行</button>
+    <button class="btn tk-btn" data-tk="read"><span class="ic">📄</span>读文件</button>
+    <button class="btn tk-btn" data-tk="write"><span class="ic">✏️</span>写文件</button>
+    <button class="btn tk-btn" data-tk="search"><span class="ic">🔍</span>搜索</button>
+    <button class="btn tk-btn" data-tk="task"><span class="ic">🤖</span>子任务</button>
+    <button class="btn tk-btn" data-tk="web"><span class="ic">🌐</span>网搜</button>
+    <button class="btn tk-btn" data-tk="todo"><span class="ic">📋</span>清单</button>
+    <button class="btn tk-btn" data-tk="mcp"><span class="ic">🔌</span>MCP</button>
+    <button class="btn tk-btn" data-tk="other"><span class="ic">⚪</span>其他</button>
+    <button class="btn" id="clear-tk">清除筛选</button>
+  </div>
+  <div class="legend">
+    <span class="tag tk-sillyspec">🟣 SillySpec</span>
+    <span class="tag tk-skill">⚡ 技能</span>
+    <span class="tag tk-bash">💻 命令行</span>
+    <span class="tag tk-read">📄 读文件</span>
+    <span class="tag tk-write">✏️ 写文件</span>
+    <span class="tag tk-search">🔍 搜索</span>
+    <span class="tag tk-task">🤖 子任务</span>
+    <span class="tag tk-web">🌐 网搜</span>
+    <span class="tag tk-todo">📋 清单</span>
+    <span class="tag tk-mcp">🔌 MCP</span>
+    <span class="tag tk-other">⚪ 其他</span>
+  </div>
+  <div class="note">设计要点：第一层"工具"按钮仍控制是否显示所有工具调用；第二层在工具调用内部再细分具体工具。两层正交，可叠加（例：第一层点亮"工具"+第二层点亮"SillySpec/技能"=只看 SillySpec 和技能的调用）。</div>
+</div>
+
+<div class="panel">
+  <div class="panel-title">日志列表样例 <span class="hint">（真实场景：agent 跑了一个 SillySpec 变更流程，调用了多种工具）</span></div>
+  <div class="log-list" id="logs">
+    <div class="log-row" data-tk="">
+      <span class="ts">00:12:01</span>
+      <span class="sc sc-user">用户</span>
+      <span></span>
+      <span class="content">帮我把 agent 日志的工具调用细分到每个工具</span>
+    </div>
+    <div class="log-row" data-tk="">
+      <span class="ts">00:12:02</span>
+      <span class="sc sc-thinking">思路</span>
+      <span></span>
+      <span class="content">先看看现有 AgentRunLog 的结构……</span>
+    </div>
+    <div class="log-row" data-tk="search">
+      <span class="ts">00:12:03</span>
+      <span class="sc sc-tool">工具</span>
+      <span class="tag tk-search">🔍 搜索</span>
+      <span class="content">Grep: pattern="AgentRunLog" path="backend/"</span>
+    </div>
+    <div class="log-row" data-tk="read">
+      <span class="ts">00:12:04</span>
+      <span class="sc sc-tool">工具</span>
+      <span class="tag tk-read">📄 读文件</span>
+      <span class="content">Read: backend/app/modules/agent/model.py</span>
+    </div>
+    <div class="log-row" data-tk="read">
+      <span class="ts">00:12:05</span>
+      <span class="sc sc-tool">工具</span>
+      <span class="tag tk-read">📄 读文件</span>
+      <span class="content">Read: frontend/src/components/agent-log-viewer.tsx</span>
+    </div>
+    <div class="log-row" data-tk="skill">
+      <span class="ts">00:12:06</span>
+      <span class="sc sc-tool">工具</span>
+      <span class="tag tk-skill">⚡ 技能</span>
+      <span class="content">Skill: sillyspec-brainstorm (启动需求澄清流程)</span>
+    </div>
+    <div class="log-row" data-tk="sillyspec">
+      <span class="ts">00:12:07</span>
+      <span class="sc sc-tool">工具</span>
+      <span class="tag tk-sillyspec">🟣 SillySpec</span>
+      <span class="content">Bash: sillyspec run brainstorm --change 2026-07-05-agent-log-type-tags</span>
+    </div>
+    <div class="log-row" data-tk="sillyspec">
+      <span class="ts">00:13:15</span>
+      <span class="sc sc-tool">工具</span>
+      <span class="tag tk-sillyspec">🟣 SillySpec</span>
+      <span class="content">Bash: sillyspec run brainstorm --done --output "需求已澄清"</span>
+    </div>
+    <div class="log-row" data-tk="task">
+      <span class="ts">00:13:20</span>
+      <span class="sc sc-tool">工具</span>
+      <span class="tag tk-task">🤖 子任务</span>
+      <span class="content"><span class="subagent-tag">子代理</span>Agent(Explore): 调研 agent log 类型系统现状</span>
+    </div>
+    <div class="log-row" data-tk="write">
+      <span class="ts">00:14:00</span>
+      <span class="sc sc-tool">工具</span>
+      <span class="tag tk-write">✏️ 写文件</span>
+      <span class="content">Write: design.md (设计文档)</span>
+    </div>
+    <div class="log-row" data-tk="bash">
+      <span class="ts">00:14:30</span>
+      <span class="sc sc-tool">工具</span>
+      <span class="tag tk-bash">💻 命令行</span>
+      <span class="content">Bash: alembic revision --autogenerate -m add_tool_kind</span>
+    </div>
+    <div class="log-row" data-tk="todo">
+      <span class="ts">00:14:31</span>
+      <span class="sc sc-tool">工具</span>
+      <span class="tag tk-todo">📋 清单</span>
+      <span class="content">TaskUpdate: task-1 状态 → in_progress</span>
+    </div>
+    <div class="log-row" data-tk="web">
+      <span class="ts">00:14:40</span>
+      <span class="sc sc-tool">工具</span>
+      <span class="tag tk-web">🌐 网搜</span>
+      <span class="content">WebSearch: "tailwind badge color palette 2026"</span>
+    </div>
+    <div class="log-row" data-tk="mcp">
+      <span class="ts">00:14:45</span>
+      <span class="sc sc-tool">工具</span>
+      <span class="tag tk-mcp">🔌 MCP</span>
+      <span class="content">mcp__playwright__browser_navigate (打开浏览器验证)</span>
+    </div>
+    <div class="log-row" data-tk="other">
+      <span class="ts">00:14:50</span>
+      <span class="sc sc-tool">工具</span>
+      <span class="tag tk-other">⚪ 其他</span>
+      <span class="content">ExitPlanMode: 退出计划模式</span>
+    </div>
+    <div class="log-row" data-tk="">
+      <span class="ts">00:15:00</span>
+      <span class="sc sc-result">结果</span>
+      <span></span>
+      <span class="content">✅ 完成 · 耗时 180s · 调用 13 次工具</span>
+    </div>
+    <div class="log-row" data-tk="" data-old="1">
+      <span class="ts">— 旧 —</span>
+      <span class="sc sc-tool">工具</span>
+      <span class="tag tk-none">工具</span>
+      <span class="content">（历史日志无 tool_kind，前端兼容显示通用"工具"徽标）</span>
+    </div>
+  </div>
+</div>
+
+<div class="note">兼容性：旧日志（上线前）<code>tool_kind=NULL</code>，前端显示通用"工具"徽标，第二层筛选不命中。新日志从识别层打标后正常显示专属徽标。</div>
+
+<script>
+  const active = new Set();
+  const btns = document.querySelectorAll('.tk-btn');
+  const rows = document.querySelectorAll('.log-row[data-tk]');
+  const clearBtn = document.getElementById('clear-tk');
+
+  function apply() {
+    rows.forEach(r => {
+      const tk = r.dataset.tk;
+      if (active.size === 0) {
+        r.classList.remove('hidden');
+        r.classList.remove('dim');
+      } else if (tk && active.has(tk)) {
+        r.classList.remove('hidden');
+        r.classList.remove('dim');
+      } else if (tk) {
+        r.classList.add('hidden');
+      }
+      // 非工具行不受第二层影响
+    });
+  }
+
+  btns.forEach(b => {
+    b.addEventListener('click', () => {
+      const tk = b.dataset.tk;
+      if (active.has(tk)) { active.delete(tk); b.classList.remove('active'); }
+      else { active.add(tk); b.classList.add('active'); }
+      apply();
+    });
+  });
+  clearBtn.addEventListener('click', () => {
+    active.clear(); btns.forEach(b => b.classList.remove('active')); apply();
+  });
+</script>
+
+</body>
+</html>

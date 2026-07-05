@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>工作区配置流程原型 — 2026-07-02-workspace-config-flow</title>
+<!--
+  author: qinyi
+  created_at: 2026-07-02 09:38:12
+  变更: 2026-07-02-workspace-config-flow（工作区配置流程重设计）
+  说明: 线框原型，展示 初始化 → 扫描 → 文档同步 流程与详情页交互，用于确认设计方向。
+-->
+<style>
+  body { font-family: -apple-system, "Microsoft YaHei", sans-serif; max-width: 1000px; margin: 20px auto; padding: 0 20px; color: #222; background: #fafafa; }
+  h1 { font-size: 20px; }
+  h2 { font-size: 15px; margin-top: 28px; border-left: 3px solid #f59e0b; padding-left: 8px; }
+  .meta { color: #888; font-size: 12px; margin-bottom: 16px; }
+  .toolbar { display:flex; gap:8px; margin: 12px 0; flex-wrap:wrap; align-items:center; }
+  .toolbar button { padding: 6px 12px; border: 1px solid #d9d9d9; background:#fff; border-radius:4px; cursor:pointer; font-size:13px; }
+  .toolbar button.active { background:#f59e0b; color:#fff; border-color:#f59e0b; }
+  .card { border:1px solid #d9d9d9; border-radius:8px; background:#fff; padding:16px; margin:12px 0; }
+  .card.amber { border-color:#fbbf24; background:#fffbeb; }
+  .card.blue { border-color:#60a5fa; background:#eff6ff; }
+  .card.green { border-color:#34d399; background:#ecfdf5; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .field { flex:1; min-width:170px; }
+  .field label { display:block; font-size:11px; color:#666; margin-bottom:3px; }
+  .field .val { font-size:13px; padding:5px 8px; background:#f5f5f5; border-radius:4px; font-family:monospace; }
+  .btn { display:inline-block; padding:5px 12px; border-radius:4px; font-size:12px; cursor:pointer; margin-right:6px; }
+  .btn-primary { background:#2563eb; color:#fff; border:none; }
+  .btn-warn { background:#f59e0b; color:#fff; border:none; }
+  .btn-ghost { background:#fff; border:1px solid #d9d9d9; color:#444; }
+  .flow { font-family:monospace; font-size:12px; background:#1f2937; color:#e5e7eb; padding:12px; border-radius:6px; white-space:pre; overflow-x:auto; }
+  .modal { border:2px dashed #ef4444; border-radius:6px; padding:12px; background:#fef2f2; margin:10px 0; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; background:#e5e7eb; }
+  .badge.on { background:#10b981; color:#fff; }
+  .hidden { display:none; }
+  .note { font-size:12px; color:#888; margin-top:6px; }
+  ul { font-size:13px; line-height:1.7; }
+</style>
+</head>
+<body>
+<h1>工作区配置流程原型</h1>
+<div class="meta">变更 2026-07-02-workspace-config-flow ｜ author: qinyi ｜ 2026-07-02 ｜ 线框原型，用于确认设计方向</div>
+
+<div class="toolbar">
+  <span style="font-size:12px;color:#666;">切换查看：</span>
+  <button onclick="show('s1')" id="b1">① 未初始化（新成员）</button>
+  <button onclick="show('s2')" id="b2">② 已初始化·未扫描</button>
+  <button onclick="show('s3')" id="b3">③ 已扫描·就绪</button>
+  <button onclick="show('edit')" id="be">编辑我的接入配置</button>
+  <button onclick="show('gate')" id="bg">扫描门禁弹窗</button>
+</div>
+
+<!-- 状态1：未初始化 -->
+<div class="state" id="s1">
+  <h2>详情页 — 新成员首次进入（未初始化）</h2>
+  <div class="card amber">
+    <div><b>⚙ 配置你在此工作空间的 daemon 和本地路径</b></div>
+    <p class="note">你已被加入此工作空间。先点「初始化」领取平台配置并拉取已有文档，才能 scan / 运行 agent。</p>
+    <div class="row">
+      <div class="field"><label>绑定守护进程</label><div class="val">下拉选你的 daemon ▾</div></div>
+      <div class="field"><label>本地项目路径</label><div class="val">/Users/you/code/project</div></div>
+      <div class="field"><label>路径来源</label><div class="val">本机守护进程路径 ▾</div></div>
+    </div>
+    <div style="margin-top:10px;">
+      <span class="btn btn-warn">初始化（领配置 + 拉文档）</span>
+    </div>
+    <p class="note">→ 初始化 = 派 init 任务给 daemon：写 .sillyspec-platform.json + pull 文档缓存 + 回灌本地改动</p>
+  </div>
+</div>
+
+<!-- 状态2：已初始化未扫描 -->
+<div class="state hidden" id="s2">
+  <h2>详情页 — 已初始化·服务器尚无扫描文档</h2>
+  <div class="card blue">
+    <div><b>✅ 已接入</b> <span class="badge on">已初始化</span></div>
+    <div class="row" style="margin-top:8px;">
+      <div class="field"><label>绑定守护进程</label><div class="val">Claude Code · MBP · 在线</div></div>
+      <div class="field"><label>本地项目路径</label><div class="val">/Users/you/code/project</div></div>
+      <div class="field"><label>文档版本</label><div class="val">—（尚未扫描）</div></div>
+    </div>
+    <div class="modal" style="margin-top:10px;">
+      <b>⚠ 工作区尚未扫描</b>
+      <p class="note" style="margin:4px 0;">平台还没有这份项目的文档。请先点「扫描」生成文档（任一成员扫一次即可，结果全工作区共用）。</p>
+      <span class="btn btn-primary">扫描</span>
+    </div>
+  </div>
+</div>
+
+<!-- 状态3：已扫描就绪 -->
+<div class="state hidden" id="s3">
+  <h2>详情页 — 已扫描·就绪</h2>
+  <div class="card green">
+    <div><b>✅ 工作区就绪</b> <span class="badge on">已初始化</span> <span class="badge on">已扫描</span></div>
+    <div class="row" style="margin-top:8px;">
+      <div class="field"><label>绑定守护进程</label><div class="val">Claude Code · MBP · 在线</div></div>
+      <div class="field"><label>本地项目路径</label><div class="val">/Users/you/code/project</div></div>
+      <div class="field"><label>文档版本</label><div class="val">v3 · 已同步</div></div>
+      <div class="field"><label>路径来源</label><div class="val">本机守护进程路径</div></div>
+    </div>
+    <div style="margin-top:10px;">
+      <span class="btn btn-ghost">编辑我的接入配置</span>
+      <span class="btn btn-ghost">重新扫描</span>
+      <span class="btn btn-warn">同步到服务器</span>
+      <span class="btn btn-primary">运行 Agent</span>
+    </div>
+    <p class="note">→ 日常保鲜：每次执行任务前 daemon 自动比对服务器文档版本，旧了重拉（整包）；本地有未回灌改动先回灌再拉。手动改了文档可点「同步到服务器」立即回灌（D-012）。</p>
+  </div>
+</div>
+
+<!-- 编辑入口 -->
+<div class="state hidden" id="edit">
+  <h2>编辑我的接入配置（per-member，已绑定后可改）</h2>
+  <div class="card">
+    <div class="row">
+      <div class="field"><label>绑定守护进程</label><div class="val">下拉换 daemon ▾</div></div>
+      <div class="field"><label>本地项目路径（可改）</label><div class="val">/Users/you/code/another-path</div></div>
+      <div class="field"><label>路径来源</label><div class="val">本机守护进程路径 ▾</div></div>
+    </div>
+    <div style="margin-top:10px;">
+      <span class="btn btn-primary">保存</span>
+      <span class="btn btn-ghost">取消</span>
+    </div>
+    <p class="note">→ 改路径后下次初始化/操作会重新拉文档到新缓存位置。</p>
+  </div>
+</div>
+
+<!-- 扫描门禁 -->
+<div class="state hidden" id="gate">
+  <h2>扫描权限 / 门禁弹窗</h2>
+  <div class="modal">
+    <b>非 owner 视角：仅工作区 owner 可扫描</b>
+    <p class="note" style="margin:6px 0;">扫描由 owner 统一负责，结果全工作区共用。你作为成员只需「初始化」拉取现成文档，无需（也不能）扫描。</p>
+    <div><span class="btn btn-ghost">知道了</span></div>
+  </div>
+  <div class="modal" style="margin-top:10px;">
+    <b>owner 视角：该工作区已扫描过</b>
+    <p class="note" style="margin:6px 0;">当前文档版本 v3。重新扫描会覆盖现有文档（服务器权威，旧版归档）。</p>
+    <div>
+      <span class="btn btn-warn">仍要重扫</span>
+      <span class="btn btn-ghost">取消</span>
+    </div>
+  </div>
+  <p class="note">扫描永不过期：有文档即视为已扫，owner 重扫需手动确认（D-003@V2 / D-004）。</p>
+</div>
+
+<h2>整体流程图</h2>
+<div class="flow">新成员加入工作区
+   │
+   ▼
+[未初始化] ──点「初始化」──▶ 派 init 任务 ──▶ daemon 写 .sillyspec-platform.json
+   │                                          + pull 文档缓存 + 回灌本地改动
+   ▼
+[已初始化·未扫描] ──提示「请先扫描」──▶ 任一成员点「扫描」──▶ 生成文档回灌服务器
+   │                                              │
+   │                                              ▼
+   ▼                                         文档落服务器（权威）
+[已扫描·就绪] ◀──────────────────────────── 拉文档 ◀────┘
+   │
+   ▼
+日常：每次任务前查版本保鲜 ｜ 服务器权威 / 客户端缓存 ｜ 整包同步（先够用再说）</div>
+
+<h2>关键决策（D-001 ~ D-010）</h2>
+<div class="card">
+<ul>
+<li><b>D-001</b> 文档同步：整包（YAGNI，留 spec_version 扩展点）</li>
+<li><b>D-002</b> 初始化按钮：重定义为「下发 .sillyspec-platform.json + 拉文档缓存」</li>
+<li><b>D-003</b> 扫描归属：任意成员可扫 + 已有则提示</li>
+<li><b>D-004</b> 扫描有效期：永不过期（有文档即已扫）</li>
+<li><b>D-005</b> 初始化 vs 扫描：初始化只拉已有，无则提示先扫；扫描独立</li>
+<li><b>D-006 / D-007</b> per-member 接线（复用 WorkspaceMemberRuntime）+ 客户端路径 per-member 可编辑</li>
+<li><b>D-008</b> 双向冲突：pull 前先 push 本地改动（服务器权威，本地不丢）</li>
+<li><b>D-009 / D-010</b> 配置下发走 init 任务（lease）+ 缓存按 spec_version 检查保鲜</li>
+</ul>
+</div>
+
+<script>
+function show(id){
+  document.querySelectorAll('.state').forEach(function(e){e.classList.add('hidden');});
+  document.getElementById(id).classList.remove('hidden');
+  ['b1','b2','b3','be','bg'].forEach(function(b){document.getElementById(b).classList.remove('active');});
+  var map={s1:'b1',s2:'b2',s3:'b3',edit:'be',gate:'bg'};
+  document.getElementById(map[id]).classList.add('active');
+}
+show('s1');
+</script>
+</body>
+</html>

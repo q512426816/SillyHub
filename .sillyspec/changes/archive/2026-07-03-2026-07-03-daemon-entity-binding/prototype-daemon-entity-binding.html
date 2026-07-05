@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+<!-- author: qinyi | created_at: 2026-07-03 | change: 2026-07-03-daemon-entity-binding -->
+<head>
+<meta charset="utf-8">
+<title>守护进程实体化绑定 · 设计原型</title>
+<style>
+  body { font-family: -apple-system, "Microsoft YaHei", sans-serif; max-width: 980px; margin: 24px auto; padding: 0 16px; color: #222; line-height: 1.6; }
+  h1 { font-size: 20px; border-bottom: 2px solid #333; padding-bottom: 8px; }
+  h2 { font-size: 16px; margin-top: 32px; color: #1668dc; border-left: 4px solid #1668dc; padding-left: 8px; }
+  .note { color: #666; font-size: 13px; font-style: italic; }
+  .er { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; margin: 12px 0; }
+  .entity { border: 2px solid #1668dc; border-radius: 8px; padding: 10px 12px; min-width: 210px; background: #fff; }
+  .entity.new { border-color: #27ae60; }
+  .entity h3 { margin: 0 0 8px; font-size: 14px; color: #1668dc; }
+  .entity.new h3 { color: #27ae60; }
+  .pk { color: #c0392b; font-weight: bold; font-size: 12px; }
+  .fk { color: #8e44ad; font-size: 12px; }
+  .field { font-size: 12px; color: #555; }
+  .arrow { font-size: 18px; color: #1668dc; align-self: center; font-weight: bold; }
+  .mockup { border: 1px dashed #999; border-radius: 6px; padding: 16px; background: #fff; }
+  .daemon-card { border: 1px solid #ccc; border-radius: 6px; padding: 10px 12px; margin: 8px 0; }
+  .daemon-card.selected { background: #e6f4ff; border-color: #1668dc; }
+  .badge { display: inline-block; background: #f0f0f0; border-radius: 10px; padding: 2px 8px; font-size: 11px; margin-right: 4px; color: #888; }
+  .badge.on { background: #d4edda; color: #155724; }
+  .flow { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; white-space: pre; background: #f6f8fa; padding: 12px; border-radius: 6px; overflow-x: auto; }
+  .box { border: 1px solid #e0e0e0; border-radius: 6px; padding: 12px 16px; margin: 12px 0; background: #fafafa; }
+  .box p { margin: 4px 0; font-size: 13.5px; }
+  code { background: #eef; padding: 1px 5px; border-radius: 3px; font-size: 12.5px; }
+  label { font-size: 13px; color: #444; }
+  select { font-size: 13px; padding: 3px 6px; }
+  .tag { display:inline-block; background:#fff3cd; color:#856404; border-radius:3px; padding:1px 6px; font-size:11px; margin-left:6px; }
+</style>
+</head>
+<body>
+
+<h1>守护进程实体化绑定 · 设计原型</h1>
+<p class="note">变更 <code>2026-07-03-daemon-entity-binding</code> — 工作区从绑「用户×机器×智能体的细粒度记录」改为绑「守护进程实体」，智能体退化为守护进程的从属清单。</p>
+
+<h2>① 数据模型关系</h2>
+<div class="er">
+  <div class="entity new">
+    <h3>daemon_instances <span class="tag">新表</span></h3>
+    <div class="pk">id（daemon 本地 uuid 上报）</div>
+    <div class="field">user_id · hostname · <b>server_url</b></div>
+    <div class="field">os · arch · version（机器级，从 runtime 提升）</div>
+    <div class="field">allowed_roots · status · last_heartbeat_at</div>
+    <div class="field">capabilities · display_alias</div>
+    <div class="note">唯一键：(user_id, server_url, daemon_local_id)</div>
+  </div>
+  <div class="arrow">←—1:N—→</div>
+  <div class="entity">
+    <h3>daemon_runtimes（退化为从属）</h3>
+    <div class="pk">id</div>
+    <div class="fk">daemon_instance_id → daemon_instances</div>
+    <div class="field">provider（claude/codex/...）</div>
+    <div class="field">status · version · last_heartbeat_at</div>
+    <div class="note">移除 os/arch/allowed_roots（已搬走）</div>
+  </div>
+</div>
+<div class="er">
+  <div class="entity">
+    <h3>workspace_member_runtimes（per-member 绑定）</h3>
+    <div class="pk">(workspace_id, user_id) 复合主键</div>
+    <div class="fk">daemon_id → daemon_instances <span class="tag">新列</span></div>
+    <div class="field">root_path · path_source · init_synced_at</div>
+    <div class="note">runtime_id 列改 nullable（废弃/仅快照）</div>
+  </div>
+  <div class="arrow">—派发用—→</div>
+  <div class="entity">
+    <h3>daemon_task_leases（不动）</h3>
+    <div class="fk">runtime_id → daemon_runtimes（保留）</div>
+    <div class="note">lease / change_write 仍记「哪个智能体跑的」</div>
+  </div>
+</div>
+
+<h2>② 前端绑定 UI（线框）</h2>
+<div class="mockup">
+  <p><strong>工作区：我的项目</strong> · 守护进程绑定（per-member）</p>
+  <div class="daemon-card selected">
+    <div><strong>💻 QINYI-DESKTOP</strong> <span class="note">连本地后端 · 在线</span></div>
+    <div style="margin-top:6px">
+      <span class="badge on">claude ✓</span>
+      <span class="badge on">codex ✓</span>
+      <span class="badge">copilot 未启用</span>
+    </div>
+  </div>
+  <div class="daemon-card">
+    <div><strong>💻 LAPTOP-REMOTE</strong> <span class="note">连远程后端 · 离线</span></div>
+    <div style="margin-top:6px"><span class="badge on">claude ✓</span></div>
+  </div>
+  <div style="margin-top:14px">
+    <label>默认智能体（从该守护进程已启用的里选）：</label>
+    <select><option>claude</option><option>codex</option></select>
+    <span class="note">  单次执行可在 agent 页临时覆盖</span>
+  </div>
+  <p class="note">切换器从「选智能体记录」→「选守护进程」，启用智能体作徽标；默认智能体独立选，不再揉进绑定。</p>
+</div>
+
+<h2>③ 任务派发流程</h2>
+<div class="flow">workspace_member_runtimes.<b>daemon_id</b>   +   workspace.<b>default_agent</b>
+        │
+        ▼
+  在该 daemon_instance 的 daemon_runtimes 里
+  找 provider == default_agent 且 status == online
+        │
+        ├─ 命中  → lease.runtime_id = 该 runtime（派发，记「哪个智能体跑的」）
+        └─ 未命中 → 报错：「该守护进程未启用 <default_agent>，请去守护进程启用
+                   或本次指定其他智能体」</div>
+
+<h2>④ 注册与通信（守护进程 ↔ 后端）</h2>
+<div class="box">
+  <p>• <b>配置隔离</b>：守护进程配置按后端地址分文件 <code>config-&lt;server_hash&gt;.json</code> —— 连本地/连远程各一份，独立 daemon_local_id，解决同机多实例身份冲突。</p>
+  <p>• <b>注册上报</b>：<code>daemon_local_id + server_url + 探测到的 provider 列表</code> → 后端先 upsert <code>daemon_instances</code>，再为每个 provider upsert <code>daemon_runtimes</code>（带 daemon_instance_id）。</p>
+  <p>• <b>WS 通道</b>：从「每个智能体一条 WS」改为<b>每个守护进程一条 WS</b>（<code>dict[daemon_id, WebSocket]</code>），握手带 daemon_local_id。</p>
+  <p>• <b>心跳</b>：守护进程单条心跳带 daemon_local_id + 各 provider 状态 → 后端更新 daemon_instances.last_heartbeat + 各 runtime.status。</p>
+  <p>• agent-detector 探测逻辑<b>不动</b>（仍扫 PATH），只改注册上报内容。</p>
+  <p class="note">• breaking：守护进程与后端必须同步升级；数据倾向重置（CLAUDE.md 规则10 允许）。</p>
+</div>
+
+</body>
+</html>

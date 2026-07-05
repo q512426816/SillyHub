@@ -1,0 +1,148 @@
+<!--
+author: qinyi
+created_at: 2026-07-02 10:26:32
+change: 2026-07-02-change-detail-file-tree-editor
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>变更详情 — 文件树 + 编辑器 原型</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --border: #e4e7eb;
+    --fg: #1f2933; --muted: #6b7280;
+    --primary: #2563eb; --primary-fg: #ffffff;
+    --success: #10b981; --warning: #f59e0b; --danger: #ef4444;
+    --pending: #f59e0b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.5 -apple-system,"Segoe UI",sans-serif; background: var(--bg); color: var(--fg); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  .sub { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
+  .warn-bar { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; padding: 6px 10px; border-radius: 6px; font-size: 11px; margin-bottom: 10px; display:none; }
+  .sync-line { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+  .grid { display: grid; grid-template-columns: 280px 1fr; gap: 12px; }
+  .tree, .editor { padding: 8px; }
+  .tree-h, .editor-h { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; padding: 4px 6px 8px; border-bottom: 1px solid var(--border); margin: -8px -8px 8px; }
+  .node { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  .node:hover { background: #f1f5f9; }
+  .node.sel { background: #eef2ff; color: var(--primary); font-weight: 600; }
+  .node .ico { width: 14px; text-align: center; }
+  .badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; margin-left: auto; }
+  .b-pending { background: #fef3c7; color: #92400e; }
+  .b-dir { color: var(--muted); }
+  .depth-1 { padding-left: 22px; }
+  .depth-2 { padding-left: 38px; }
+  .path { font-family: monospace; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+  textarea { width: 100%; height: 240px; border: 1px solid var(--border); border-radius: 6px; padding: 8px; font: 12px/1.5 monospace; resize: vertical; }
+  .actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  button { font: 12px inherit; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); cursor: pointer; }
+  button.primary { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .status { font-size: 11px; display: flex; align-items: center; gap: 4px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .dot.saving { background: var(--primary); animation: pulse 1s infinite; }
+  .dot.done { background: var(--success); }
+  .dot.pending { background: var(--pending); }
+  .dot.failed { background: var(--danger); }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .legend { margin-top: 14px; font-size: 11px; color: var(--muted); }
+  .legend span { margin-right: 14px; }
+  .controls { margin: 10px 0; font-size: 11px; }
+  .controls label { margin-right: 12px; cursor: pointer; }
+  hr { border: 0; border-top: 1px dashed var(--border); margin: 14px 0; }
+  .caption { font-size: 11px; color: var(--muted); margin-top: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>变更详情：2026-07-02-change-detail-file-tree-editor</h1>
+  <div class="sub">← 变更列表 &nbsp;·&nbsp; 阶段：执行 &nbsp;·&nbsp; Key: 2026-07-02-...</div>
+
+  <div class="controls">
+    <strong>演示：</strong>
+    <label><input type="radio" name="mode" value="online" checked> daemon 在线</label>
+    <label><input type="radio" name="mode" value="offline"> daemon 离线（排队续传）</label>
+  </div>
+
+  <div id="warn" class="warn-bar">⚠️ daemon 当前离线，保存将进入「排队中」，待 daemon 重连后自动回写本机</div>
+  <div class="sync-line">镜像最后同步：2026-07-02 10:20:05 · 工作区类型：daemon-client</div>
+
+  <div class="grid">
+    <div class="card tree">
+      <div class="tree-h">文档树（全部文件）</div>
+      <div class="node"><span class="ico">📁</span> MASTER.md</div>
+      <div class="node"><span class="ico">📄</span> proposal.md</div>
+      <div class="node sel"><span class="ico">📄</span> design.md <span class="badge b-pending">排队中</span></div>
+      <div class="node"><span class="ico">📄</span> plan.md</div>
+      <div class="node"><span class="ico">📄</span> tasks.md</div>
+      <div class="node"><span class="ico">📁</span> tasks/ <span class="badge b-dir">3</span></div>
+      <div class="node depth-1"><span class="ico">📄</span> task-01.md</div>
+      <div class="node depth-1"><span class="ico">📄</span> task-02.md</div>
+      <div class="node depth-1"><span class="ico">📄</span> task-03.md</div>
+      <div class="node"><span class="ico">📁</span> references/ <span class="badge b-dir">2</span></div>
+      <div class="node depth-1"><span class="ico">📄</span> ref-01.md</div>
+      <div class="node"><span class="ico">🌐</span> prototype-ui.html</div>
+    </div>
+
+    <div class="card editor">
+      <div class="editor-h">design.md &nbsp;<span style="font-weight:400;text-transform:none;color:var(--muted)">— 可编辑</span></div>
+      <div class="path">changes/2026-07-02-.../design.md</div>
+      <textarea id="ta"># 设计
+
+## Phase 1 — 后端读取
+GET /changes/{cid}/files 列出变更目录全部文件……
+
+用户在此手动修改文档内容，点保存即写回。</textarea>
+      <div class="actions">
+        <button class="primary" id="save" onclick="doSave()">保存</button>
+        <button onclick="reset_()">放弃修改</button>
+        <span class="status" id="st"><span class="dot done"></span> 已保存</span>
+      </div>
+      <div class="caption">保存路径：daemon-client → outbox 队列写回本机；server-local → 直写镜像。</div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <strong>保存状态机：</strong>
+    <span><span class="dot saving"></span> 保存中</span>
+    <span><span class="dot done"></span> 已保存（已回写）</span>
+    <span><span class="dot pending"></span> 排队中（daemon 离线，续传）</span>
+    <span><span class="dot failed"></span> 失败</span>
+  </div>
+
+  <hr>
+  <div class="caption">本原型仅示意布局/交互，非最终视觉。样式遵循 frontend-style-system 语义色。</div>
+</div>
+<script>
+  const st = document.getElementById('st');
+  const btn = document.getElementById('save');
+  const warn = document.getElementById('warn');
+  function setStatus(kind, label){
+    st.innerHTML = `<span class="dot ${kind}"></span> ${label}`;
+  }
+  function doSave(){
+    btn.disabled = true;
+    const offline = document.querySelector('input[name=mode]:checked').value === 'offline';
+    setStatus('saving', '保存中…');
+    setTimeout(()=>{
+      if(offline){
+        setStatus('pending', '排队中（daemon 离线，待重连回写）');
+      } else {
+        setStatus('done', '已保存 · 已回写本机 · 已刷新文档矩阵');
+      }
+      btn.disabled = false;
+    }, 700);
+  }
+  function reset_(){ setStatus('done','已保存'); }
+  document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener('change',()=>{
+    const offline = document.querySelector('input[name=mode]:checked').value === 'offline';
+    warn.style.display = offline ? 'block' : 'none';
+    if(offline) setStatus('done','已保存'); else setStatus('done','已保存');
+  }));
+</script>
+</body>
+</html>

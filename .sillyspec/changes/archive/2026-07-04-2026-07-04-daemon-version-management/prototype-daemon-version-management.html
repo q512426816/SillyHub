@@ -1,0 +1,189 @@
+<!--
+author: qinyi
+created_at: 2026-07-04 17:23:26
+change: 2026-07-04-daemon-version-management
+description: daemon 版本可见 + 远程升级入口 前端原型（daemon 卡片版本展示与升级按钮）
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>daemon 版本管理 - 原型</title>
+<style>
+  :root {
+    --bg: #0b0f17; --panel: #131a26; --panel-2: #1b2433; --border: #25303f;
+    --text: #e6edf6; --muted: #8a98ab; --accent: #4f8cff; --accent-2: #6aa1ff;
+    --green: #3ecf8e; --green-bg: rgba(62,207,142,.12);
+    --amber: #f5a524; --amber-bg: rgba(245,165,36,.14);
+    --gray: #6b7689; --gray-bg: rgba(107,118,137,.14);
+    --red: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 32px 24px; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  .sub { color: var(--muted); margin: 0 0 28px; font-size: 13px; }
+  .bar { display: flex; align-items: center; justify-content: space-between;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 18px; margin-bottom: 18px; }
+  .bar .label { font-size: 13px; color: var(--muted); }
+  .bar .latest { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px; }
+  .row { display: flex; align-items: center; justify-content: space-between; }
+  .host { font-size: 15px; font-weight: 600; }
+  .id { color: var(--muted); font-size: 12px; font-family: ui-monospace, monospace; margin-top: 2px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .dot.online { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .dot.offline { background: var(--gray); }
+  .status { font-size: 12px; color: var(--muted); }
+  .ver-block { margin: 14px 0; padding: 12px; background: var(--panel-2);
+    border-radius: 8px; border: 1px solid var(--border); }
+  .ver-line { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .ver-line + .ver-line { margin-top: 6px; }
+  .ver-num { font-family: ui-monospace, monospace; font-size: 14px; }
+  .sha { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500; }
+  .badge.latest { color: var(--green); background: var(--green-bg); }
+  .badge.upgrade { color: var(--amber); background: var(--amber-bg); }
+  .badge.unknown { color: var(--gray); background: var(--gray-bg); }
+  .actions { display: flex; gap: 8px; }
+  button { font: inherit; border-radius: 8px; padding: 8px 14px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--panel-2); color: var(--text); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { background: var(--accent-2); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .ghost { background: transparent; }
+  #toast { position: fixed; right: 24px; bottom: 24px; background: var(--panel-2);
+    border: 1px solid var(--accent); color: var(--text); padding: 12px 16px;
+    border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.4); opacity: 0;
+    transform: translateY(10px); transition: all .2s; pointer-events: none; max-width: 320px; }
+  #toast.show { opacity: 1; transform: translateY(0); }
+  .legend { display: flex; gap: 18px; margin-top: 22px; flex-wrap: wrap; }
+  .legend span { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .note { margin-top: 26px; padding: 14px; background: var(--panel); border: 1px dashed var(--border);
+    border-radius: 10px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Daemon 版本管理</h1>
+  <p class="sub">服务器查看每个客户端 daemon 版本，并一键触发升级（复用已有 self-update 链路）。</p>
+
+  <div class="bar">
+    <div><span class="label">服务器最新版本（GET /api/daemon/version）</span></div>
+    <div class="latest">v1.4.2 · <span style="color:var(--muted)">build a1b2c3d</span></div>
+  </div>
+
+  <div class="grid">
+    <!-- 卡片1：最新 -->
+    <div class="card">
+      <div class="row">
+        <div>
+          <div class="host">win-dev-qinyi</div>
+          <div class="id">daemon_inst_8f33 · claude, codex</div>
+        </div>
+        <div class="status"><span class="dot online"></span>在线</div>
+      </div>
+      <div class="ver-block">
+        <div class="ver-line"><span class="ver-num">v1.4.2</span><span class="badge latest">最新</span></div>
+        <div class="ver-line"><span class="sha">build a1b2c3d</span></div>
+      </div>
+      <div class="actions">
+        <button class="ghost" disabled>已是最新</button>
+        <button disabled>升级</button>
+      </div>
+    </div>
+
+    <!-- 卡片2：可升级 -->
+    <div class="card">
+      <div class="row">
+        <div>
+          <div class="host">ubuntu-build-01</div>
+          <div class="id">daemon_inst_2c9f · claude</div>
+        </div>
+        <div class="status"><span class="dot online"></span>在线</div>
+      </div>
+      <div class="ver-block">
+        <div class="ver-line"><span class="ver-num">v1.3.0</span><span class="badge upgrade">可升级 → v1.4.2</span></div>
+        <div class="ver-line"><span class="sha">build 7e8f901（当前）· a1b2c3d（最新）</span></div>
+      </div>
+      <div class="actions">
+        <button class="primary" onclick="upgrade(this, 'ubuntu-build-01')">升级到最新版</button>
+      </div>
+    </div>
+
+    <!-- 卡片3：未知（旧 daemon 不上报） -->
+    <div class="card">
+      <div class="row">
+        <div>
+          <div class="host">mac-mini-relay</div>
+          <div class="id">daemon_inst_55a1 · codex</div>
+        </div>
+        <div class="status"><span class="dot online"></span>在线</div>
+      </div>
+      <div class="ver-block">
+        <div class="ver-line"><span class="ver-num" style="color:var(--muted)">未知</span><span class="badge unknown">旧版客户端未上报</span></div>
+        <div class="ver-line"><span class="sha">建议升级以启用版本上报</span></div>
+      </div>
+      <div class="actions">
+        <button class="primary" onclick="upgrade(this, 'mac-mini-relay')">升级到最新版</button>
+      </div>
+    </div>
+
+    <!-- 卡片4：离线 -->
+    <div class="card">
+      <div class="row">
+        <div>
+          <div class="host">ci-runner-7</div>
+          <div class="id">daemon_inst_b03e · claude</div>
+        </div>
+        <div class="status"><span class="dot offline"></span>离线</div>
+      </div>
+      <div class="ver-block">
+        <div class="ver-line"><span class="ver-num">v1.4.2</span><span class="badge latest">最新</span></div>
+        <div class="ver-line"><span class="sha">最后心跳 2 小时前</span></div>
+      </div>
+      <div class="actions">
+        <button disabled>离线，无法升级</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><span class="dot online"></span>在线</span>
+    <span><span class="dot offline"></span>离线</span>
+    <span><span class="badge latest">最新</span> build_id 与服务器一致</span>
+    <span><span class="badge upgrade">可升级</span> build_id 不一致</span>
+    <span><span class="badge unknown">未知</span> 旧客户端未上报</span>
+  </div>
+
+  <div class="note">
+    交互说明：点击「升级到最新版」→ 调 <code>POST /api/daemon/runtimes/&#123;runtime_id&#125;/self-update</code>
+    （取该 daemon instance 下任一在线 runtime）→ 后端经 WS 下发 <code>daemon:self_update</code> →
+    daemon 下载新 bundle 替换并 exit 重启 → 重新 register 上报新版本 → 前端经心跳刷新看到新版本。
+    升级为异步操作，仅 toast 提示，不做实时进度（YAGNI）。
+  </div>
+</div>
+
+<div id="toast"></div>
+<script>
+  function upgrade(btn, host) {
+    btn.disabled = true;
+    btn.textContent = '已下发…';
+    showToast('升级指令已下发至 ' + host + '，daemon 重启后版本将自动更新。');
+    setTimeout(() => { btn.disabled = false; btn.textContent = '升级到最新版'; }, 3000);
+  }
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(window.__tt);
+    window.__tt = setTimeout(() => t.classList.remove('show'), 4000);
+  }
+</script>
+</body>
+</html>
