@@ -44,6 +44,20 @@ export const CONNECT_TIMEOUT_MS = 10_000;
 /** 单次 close 的优雅关闭超时（毫秒）。Python close_timeout=5 → 5s。 */
 export const CLOSE_TIMEOUT_MS = 5_000;
 
+/**
+ * 应用层 WS keepalive ping 间隔（毫秒）。
+ *
+ * npm `ws` 库默认不发 ping（与 Python `websockets` 库默认 20s ping 不同），
+ * TS 移植时漏配 → 连接长时间无数据流动时，经 docker NAT 的链路被中间网络层
+ * 当 idle 掐断（实测每 5-10min 断一次）。import 的 get_spec_bundle RPC 打包
+ * ~16s 无数据流动撞进断连窗口 → mid-rpc cancel（HTTP_504_DAEMON_RUNTIME_OFFLINE）。
+ * 每 30s 主动 ping 保活，让断连从「被动等 RPC 撞窗口」收敛到「keepalive 周期保活」。
+ */
+export const WS_PING_INTERVAL_MS = 30_000;
+
+/** ping 后等待 pong 的超时（毫秒）。超时则 terminate 触发既有 close→reconnect。 */
+export const WS_PONG_TIMEOUT_MS = 10_000;
+
 // ── 回调接口 ──────────────────────────────────────────────────────────────────
 
 /** WsClient 事件回调。全部可选，缺省为 no-op。 */
@@ -165,6 +179,10 @@ export class WsClient {
   private _reconnectTimer: NodeJS.Timeout | null = null;
   /** connect 握手超时定时器。 */
   private _connectTimer: NodeJS.Timeout | null = null;
+  /** keepalive ping 周期定时器（_handleOpen 启动，_handleClose/close 清除）。 */
+  private _pingTimer: NodeJS.Timeout | null = null;
+  /** 单次 ping 的 pong 超时定时器（收到 pong 清；超时则 terminate）。 */
+  private _pongTimer: NodeJS.Timeout | null = null;
 
   /**
    * task-05：已注册的 RPC method → handler 映射。
@@ -236,6 +254,7 @@ export class WsClient {
       this._handleClose(code, reason.toString()),
     );
     ws.on('error', (err: Error) => this._handleError(err));
+    ws.on('pong', () => this._handlePong());
   }
 
   /**
@@ -246,6 +265,7 @@ export class WsClient {
     this._running = false;
     this._clearReconnectTimer();
     this._clearConnectTimer();
+    this._stopKeepalive();
     if (this._ws) {
       try {
         this._ws.close(1000, 'client_shutdown');
@@ -347,6 +367,7 @@ export class WsClient {
   private _handleOpen(): void {
     this._clearConnectTimer();
     this._state = WsState.Connected;
+    this._startKeepalive();
     this._callbacks.onConnected?.();
   }
 
@@ -518,6 +539,7 @@ export class WsClient {
 
   private _handleClose(code: number, reason: string): void {
     this._clearConnectTimer();
+    this._stopKeepalive();
     this._ws = null;
     this._callbacks.onDisconnected?.(code, reason);
     if (this._running) {
@@ -560,6 +582,85 @@ export class WsClient {
     if (this._connectTimer) {
       clearTimeout(this._connectTimer);
       this._connectTimer = null;
+    }
+  }
+
+  // ── WS keepalive（ping/pong）───────────────────────────────────────────────
+
+  /**
+   * 启动应用层 keepalive（每次 (re)connect open 都调）。
+   *
+   * 每 ``WS_PING_INTERVAL_MS`` 发一次 ping，发后挂 ``WS_PONG_TIMEOUT_MS`` pong
+   * 超时；收到 pong 清超时；超时未收 → ``ws.terminate()`` 触发既有 close→reconnect
+   * 路径（不让连接在网络层静默 idle 断开后卡住，RPC 不再撞窗口）。
+   *
+   * 幂等：先停旧定时器再启新。所有定时器 ``unref``，进程退出不阻塞。
+   */
+  private _startKeepalive(): void {
+    this._stopKeepalive();
+    if (!this._ws) return;
+    this._pingTimer = setInterval(
+      () => this._sendPing(),
+      WS_PING_INTERVAL_MS,
+    );
+    this._pingTimer.unref?.();
+  }
+
+  /**
+   * 单次 ping 周期回调：发 ws.ping()，挂 pong 超时；超时 terminate 触发重连。
+   * 连接不在 OPEN 态时跳过（_handleClose 会清 _pingTimer，这里是安全网）。
+   */
+  private _sendPing(): void {
+    const ws = this._ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    this._clearPongTimer();
+    try {
+      ws.ping();
+    } catch (err) {
+      this._handleError(
+        err instanceof Error ? err : new Error(`ws ping failed: ${String(err)}`),
+      );
+      return;
+    }
+    this._pongTimer = setTimeout(() => {
+      this._pongTimer = null;
+      // 终止期间连接可能已被 close 清掉，二次守卫。
+      const cur = this._ws;
+      if (!cur || cur.readyState !== WebSocket.OPEN) return;
+      this._handleError(
+        new Error(`ws pong timeout after ${WS_PONG_TIMEOUT_MS}ms, terminating`),
+      );
+      try {
+        cur.terminate();
+      } catch {
+        /* noop */
+      }
+    }, WS_PONG_TIMEOUT_MS);
+    this._pongTimer.unref?.();
+  }
+
+  /** 收到 pong → 清当前 pong 超时（下一拍 ping 由 _pingTimer 周期驱动）。 */
+  private _handlePong(): void {
+    this._clearPongTimer();
+  }
+
+  /** 停止 keepalive：清 ping 周期 + pong 超时定时器。 */
+  private _stopKeepalive(): void {
+    this._clearPingTimer();
+    this._clearPongTimer();
+  }
+
+  private _clearPingTimer(): void {
+    if (this._pingTimer) {
+      clearInterval(this._pingTimer);
+      this._pingTimer = null;
+    }
+  }
+
+  private _clearPongTimer(): void {
+    if (this._pongTimer) {
+      clearTimeout(this._pongTimer);
+      this._pongTimer = null;
     }
   }
 }

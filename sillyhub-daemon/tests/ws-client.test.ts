@@ -13,6 +13,8 @@ import {
   type RpcHandler,
   RECONNECT_INTERVAL_MS,
   CONNECT_TIMEOUT_MS,
+  WS_PING_INTERVAL_MS,
+  WS_PONG_TIMEOUT_MS,
 } from '../src/ws-client.js';
 import { MSG, WS_PATH } from '../src/protocol.js';
 
@@ -55,13 +57,13 @@ describe('WsClient — URL 构造 1:1 对齐 Python _build_ws_url', () => {
       runtimeId: 'r1',
     });
     expect((c as unknown as { _buildWsUrl: () => string })._buildWsUrl()).toBe(
-      `ws://hub.example.com:8000${WS_PATH}?runtime_id=r1`,
+      `ws://hub.example.com:8000${WS_PATH}?daemon_local_id=r1`,
     );
   });
   it('https:// → wss://', () => {
     const c = new WsClient({ serverUrl: 'https://hub.example.com', runtimeId: 'r2' });
     expect((c as unknown as { _buildWsUrl: () => string })._buildWsUrl()).toBe(
-      `wss://hub.example.com${WS_PATH}?runtime_id=r2`,
+      `wss://hub.example.com${WS_PATH}?daemon_local_id=r2`,
     );
   });
   it('末尾斜杠被 rstrip', () => {
@@ -70,13 +72,13 @@ describe('WsClient — URL 构造 1:1 对齐 Python _build_ws_url', () => {
       runtimeId: 'r3',
     });
     expect((c as unknown as { _buildWsUrl: () => string })._buildWsUrl()).toBe(
-      `ws://localhost:8000${WS_PATH}?runtime_id=r3`,
+      `ws://localhost:8000${WS_PATH}?daemon_local_id=r3`,
     );
   });
   it('runtime_id 被 encodeURIComponent', () => {
     const c = new WsClient({ serverUrl: 'http://x', runtimeId: 'a b/c' });
     expect((c as unknown as { _buildWsUrl: () => string })._buildWsUrl()).toContain(
-      'runtime_id=a%20b%2Fc',
+      'daemon_local_id=a%20b%2Fc',
     );
   });
 });
@@ -591,5 +593,110 @@ describe('WsClient — RPC 分发（task-05）', () => {
     const out = mock.received[0] as { type: string };
     expect(out.type).toBe('daemon:rpc_result');
     c.close();
+  });
+});
+
+// keepalive（ping/pong）：npm ws 库默认不发 ping，经 docker NAT 的连接静止时
+// 被中间网络层掐断（实测每 5-10min 一次），import 的 get_spec_bundle RPC 打包
+// ~16s 无数据流动撞进断连窗口 → mid-rpc cancel（HTTP_504_DAEMON_RUNTIME_OFFLINE）。
+// 周期 ping 保活 + pong 超时 terminate 让断连从「被动撞窗口」收敛到「主动检测重连」。
+describe('WsClient — WS keepalive（ping/pong，防网络层 idle 断连）', () => {
+  it('常量对齐：WS_PING_INTERVAL_MS=30000 / WS_PONG_TIMEOUT_MS=10000', () => {
+    expect(WS_PING_INTERVAL_MS).toBe(30_000);
+    expect(WS_PONG_TIMEOUT_MS).toBe(10_000);
+  });
+
+  it('_handleOpen 启动 keepalive（_pingTimer 非 null）；close() 清理', async () => {
+    const mock = await startMockServer();
+    try {
+      const c = new WsClient({
+        serverUrl: mock.url.replace('ws://', 'http://'),
+        runtimeId: 'r1',
+      });
+      c.connect();
+      await vi.waitFor(() => expect(c.isConnected).toBe(true));
+      expect(
+        (c as unknown as { _pingTimer: unknown })._pingTimer,
+      ).not.toBeNull();
+      c.close();
+      expect(
+        (c as unknown as { _pingTimer: unknown })._pingTimer,
+      ).toBeNull();
+    } finally {
+      await new Promise<void>((r) => mock.server.close(() => r()));
+    }
+  });
+
+  it('_sendPing 发 ping 后，pong 超时未收 → terminate', () => {
+    const c = new WsClient({ serverUrl: 'http://x', runtimeId: 'r1' });
+    let pingCalls = 0;
+    let termCalls = 0;
+    // 注入 fake _ws：可控 ping / terminate，绕过真实 server 自动回 pong。
+    const fakeWs = {
+      readyState: WebSocket.OPEN,
+      ping: () => {
+        pingCalls += 1;
+      },
+      terminate: () => {
+        termCalls += 1;
+      },
+    };
+    (c as unknown as { _ws: unknown })._ws = fakeWs;
+    vi.useFakeTimers();
+    try {
+      (c as unknown as { _sendPing: () => void })._sendPing();
+      expect(pingCalls).toBe(1);
+      // 不触发 _handlePong → 推进 pong 超时，terminate 被调
+      vi.advanceTimersByTime(WS_PONG_TIMEOUT_MS);
+      expect(termCalls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('_sendPing 发 ping 后收到 _handlePong → pong 超时已清，不 terminate', () => {
+    const c = new WsClient({ serverUrl: 'http://x', runtimeId: 'r1' });
+    let termCalls = 0;
+    const fakeWs = {
+      readyState: WebSocket.OPEN,
+      ping: () => undefined,
+      terminate: () => {
+        termCalls += 1;
+      },
+    };
+    (c as unknown as { _ws: unknown })._ws = fakeWs;
+    vi.useFakeTimers();
+    try {
+      (c as unknown as { _sendPing: () => void })._sendPing();
+      (c as unknown as { _handlePong: () => void })._handlePong();
+      vi.advanceTimersByTime(WS_PONG_TIMEOUT_MS + 1000);
+      expect(termCalls).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('close() 清 _pingTimer 与 _pongTimer', async () => {
+    const mock = await startMockServer();
+    try {
+      const c = new WsClient({
+        serverUrl: mock.url.replace('ws://', 'http://'),
+        runtimeId: 'r1',
+      });
+      c.connect();
+      await vi.waitFor(() => expect(c.isConnected).toBe(true));
+      const hack = c as unknown as {
+        _pingTimer: NodeJS.Timeout | null;
+        _pongTimer: NodeJS.Timeout | null;
+      };
+      // _startKeepalive 已设 _pingTimer；手动挂一个 _pongTimer 模拟刚发完 ping。
+      expect(hack._pingTimer).not.toBeNull();
+      hack._pongTimer = setTimeout(() => undefined, 10_000);
+      c.close();
+      expect(hack._pingTimer).toBeNull();
+      expect(hack._pongTimer).toBeNull();
+    } finally {
+      await new Promise<void>((r) => mock.server.close(() => r()));
+    }
   });
 });

@@ -37,6 +37,7 @@ created_at: 2026-06-24T01:16:42
 - **完成驱动 end（D-002@v1）**：scan run（`change_id=None` + `spec_strategy=platform-managed`）与 stage run（`change_id` 非空）的 lease 完成时，backend `complete_lease` 收尾链末尾主动调 `end_session`（经 facade 委托 + FR-05 `session_end` → daemon `SessionManager.end()` → claude 进程退出），区别于用户手动 end。多轮对话（非 platform-managed）不自动 end，留给用户手动。end 失败 try/except warn 不阻塞 lease 完成。
 - **spec 树终态回灌 + change-write 分支（D-002/D-004@v1，2026-06-26-daemon-client-spec-sync-fix）**：scan run 终态（`onTurnResult` 收尾，`notifyRunResult` 后）+ onSessionEnd 兜底经 `syncSpecTreeIfNeeded(ctx, client)` 回灌（ctx null/undefined→no-op，失败仅 warn R-03）；`packSpecDir` push 路径**含** `.runtime`（非对称：pull 路径 backend `build_bundle` 仍排除）；`task-runner` `kind=change-write` 轻量分支轮询 `pending-change-writes`→claim→本地写 `~/.sillyhub/daemon/specs/<wsId>/changes/<key>/`→complete 回执→触发 syncSpecTreeIfNeeded，**不启 agent**。`hub-client` 加 pending/claim/complete change-write 方法。
 - **install.sh .cmd wrapper 必须 CRLF + 纯 ASCII REM**：`scripts/install.sh` 生成 Windows `sillyhub-daemon.cmd` 时，heredoc 默认 LF 换行，需 `awk 'BEGIN{ORS="\r\n"} {sub(/\r$/,""); print}'` 转 CRLF；REM 注释一律英文。LF + UTF-8 中文 REM 在中文 Windows cmd.exe（GBK 代码页）下会让 REM 行解析错位、注释被当命令执行（打印 `'X' 不是内部或外部命令` 噪音，daemon 本身不受影响）。bash wrapper（无扩展名）UTF-8+LF 对 bash 无害，不受此约束。
+- **WS keepalive 防 NAT idle 断连**：`ws-client.ts` 的 `WsClient` 每 30s 主动 ping + 10s pong 超时 terminate（npm `ws` 库默认不发 ping，与 Python `websockets` 默认 20s ping 不同；TS 移植漏配 → 连接经 docker NAT 静止时被中间层掐断，长 RPC 如 import `get_spec_bundle` 打包 ~16s 撞断连窗口报 `HTTP_504_DAEMON_RUNTIME_OFFLINE` mid-rpc）。pong 超时走既有 close→reconnect 路径；所有 keepalive 定时器 unref，进程退出不阻塞。
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
@@ -45,5 +46,6 @@ created_at: 2026-06-24T01:16:42
 - 2026-06-26-daemon-client-spec-sync-fix | syncSpecTreeIfNeeded 抽离 + scan 终态回灌（FR-05）+ packSpecDir 含 .runtime（FR-06）+ task-runner kind=change-write 分支 + hub-client change-write 方法（FR-08/10）。
 - ql-20260702-001-f3c7 | install.sh 生成 .cmd wrapper 改 CRLF（awk）+ REM 英文化（修中文 Windows cmd.exe 下 LF+UTF-8 中文 REM 致注释被当命令执行的噪音报错；daemon 本身正常）。
 - ql-20260703-001-643f | agent-detector normalizeProvider（claude_code/claude-code→claude，其余原样）+ daemon _startInteractiveSession:2338 / reopen:2144 归一化（替换粗暴三元 === 'codex'?'codex':'claude'，防 opencode/cursor/openclaw 误归 claude）+ :2355 early-return 加 notifyRunResult 回传标 run failed（治本：provider 错配/CLI 缺失时不再 lease 永远 claimed/run 永远 pending 无声卡死，主动回传 backend 标 failed）。
+- ql-20260705-004-5e2f | ws-client.ts 加 WS keepalive（30s ping + 10s pong 超时 terminate）：修 import get_spec_bundle RPC 撞 docker NAT idle 断连窗口报 HTTP_504_DAEMON_RUNTIME_OFFLINE mid-rpc（npm ws 库默认不发 ping，Python→TS 移植漏配）+ 顺手修 4 个 daemon_local_id URL query 测试断言（daemon-entity-binding 遗留债）。
 
 <!-- MANUAL_NOTES_END -->
