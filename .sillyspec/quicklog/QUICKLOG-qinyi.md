@@ -41,7 +41,7 @@ created_at: 2026-07-05 16:33:00
 测试：加用例验证 count 数字渲染（如 3 条 bash tool_call → 命令行按钮显示 3）。
 
 ## ql-20260705-005-e5a2 | 2026-07-05 17:50:00 | 前端输入词元合并 cache_read 治标签对应不上（C4）
-状态：进行中
+状态：已完成
 关联变更：（无）
 文件：frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx
 依据：A(ql-001) 修 backend 让 input_tokens=0（Claude cache 全命中）能正确写入，但前端 page.tsx:708 守卫 `input_tokens > 0` 致 0 仍显示"执行中…"，与 output 数字不对称（用户"标签对应不上"抱怨的最后一环）。
@@ -49,7 +49,7 @@ created_at: 2026-07-05 16:33:00
 测试：page.tsx 是 Next.js page 无直接单测；验证靠 typecheck + 部署后 curl/UI 手动看。
 
 ## ql-20260705-006-a1b7 | 2026-07-05 18:05:00 | classify 改主命令判定治 sillyspec 误归（C3 两端同步）
-状态：进行中
+状态：已完成
 关联变更：（无）
 文件：backend/app/modules/agent/tool_kind.py, sillyhub-daemon/src/tool-kind.ts, backend/tests/modules/agent/test_tool_kind.py, sillyhub-daemon/tests/tool-kind.test.ts
 依据：DB 实测 run be48ad3a 的 41 条 sillyspec 里 34 条（83%）是误归——都是 `python -c "..."` 生成 sillyspec 文档，脚本内容含 sillyspec 字样被 D-001"command 含子串即标"逻辑误判。D-001 基于"误标成本低"假设，实际误标率 83% 太高。
@@ -57,7 +57,7 @@ created_at: 2026-07-05 16:33:00
 测试：改 SHARED_CASES + test_sillyspec_substring_semantics（cat sillyspec-note.md 从 sillyspec 改 bash）；加 python/grep 误归排除用例。
 
 ## ql-20260705-007-9f3c | 2026-07-05 18:55:00 | classifyLog 区分 tool_kind=ask 让 AskUserQuestion 进提问审批（C7）
-状态：进行中
+状态：已完成
 关联变更：（无）
 文件：frontend/src/components/agent-log/normalize.ts, frontend/src/components/__tests__/agent-log-viewer.test.tsx
 依据：DB 实测 run 254e5e2a 的 AskUserQuestion 有记录（tool_call | ask | 2 条），但前端 normalize.classifyLog(channel, content) 不接收 tool_kind，所有 tool_call 一律归 tool_call semanticCategory。"提问审批"按钮筛 ask semanticCategory（只匹配 pending_input channel）→ AskUserQuestion 看不到（被归工具调用）。
@@ -65,12 +65,21 @@ created_at: 2026-07-05 16:33:00
 测试：加用例 AskUserQuestion（tool_call + tool_kind=ask）→ 提问审批筛选可见。
 
 ## ql-20260705-008-4e2a | 2026-07-05 21:50:00 | 心跳/register 回填 PolicyCache 治写拦截 fail-closed deny（C8）
-状态：进行中
+状态：已完成
 关联变更：（无）
 文件：sillyhub-daemon/src/daemon.ts
 依据：Agent 调查——interactive scan run 写 spec 目录被拦（agent 自述"Runtime Policy 未配置"=CAUSE_POLICY_NOT_LOADED 逐字）。根因：cli.ts 注入 policyEngine 但 _syncAllowedRoots(1779-1795) 只写 config.allowed_roots，漏写 _policyCache；register(902-922) 也没回填。PolicyCache 唯一写入是 WS POLICY_UPDATE（未触发）→ PolicyEngine.canWrite cache miss → fail-closed deny。注释 1800-1802 承诺心跳回填 PolicyCache 但实现脱节。DB allowed_roots=[~/.sillyhub, C:\Users\qinyi\.sillyhub] 配置正确，问题是没进 PolicyCache。
 修法：加 _syncPolicyCache(roots) helper（null 守卫 + 对每个 _registeredRuntimes values 调 _policyCache.set）；_syncAllowedRoots 末尾 + register 末尾都调 _syncPolicyCache（关闭启动窗口）。
 测试：daemon vitest 加用例心跳/register 后 PolicyCache.get(rid) 非空。
+
+## ql-20260706-001-a3f7 | 2026-07-06 02:32:59 | scan dispatch 失败路径去 rollback + provider 兜底改 claude 治 scan-generate 500（续 scan-generate-failure-chain，注释原误标 ql-20260705-005 撞前端词元修复，已改 ql-20260706-001）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/agent/service.py, backend/tests/modules/agent/test_scan_interactive_dispatch.py
+依据：scan-generate 500 链（见 memory scan-generate-failure-chain）——d16e13c7 在 NoOnlineDaemonError 分支引入 rollback，但 prepare_scan_interactive_dispatch 抛 NoOnlineDaemonError 前（placement.py:489）无任何 DB 写（lease INSERT 在 :540 之后），事务里只有本函数上方 add+flush 的 AgentSession/AgentRun；rollback 把 AgentSession 冲掉，_mark_no_online_daemon 随后 commit 插 agent_runs 时 agent_session_id 外键违约（agent_runs_agent_session_id_fkey）→ 500。同函数 scan_provider 兜底误用 "claude_code"（那是 agent_type，daemon 实际 provider 是 claude/codex/...，daemon 上永不启用），default_agent=NULL 的 daemon-client scan-generate 新工作区 dispatch 永远匹配不到 daemon → NoOnlineDaemonError。AgentSession.provider NOT NULL（model.py:418），不能传 None。
+修法：scan_provider 兜底改 "claude"（合法 provider 通行默认值，DB default_agent='claude' 工作区均成功）；NoOnlineDaemonError 分支删 rollback，保留 session+run 仅标 failed 由 _mark_no_online_daemon 整体提交。
+测试：加 2 个回归——(1) 失败路径 mock_session.rollback.assert_not_called()；(2) default_agent=NULL 且不传 provider 时 dispatch provider=="claude" 且 AgentSession.provider=="claude"。agent 模块全量 190 passed / 6 skipped 零回归。
+中断续作：本条更早一轮会话已写完代码+测试但未 commit/未记 quicklog 即中断（注释误标 ql-20260705-005），本轮收尾提交。
 
 
 

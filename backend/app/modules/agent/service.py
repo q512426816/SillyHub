@@ -1377,7 +1377,12 @@ class AgentService:
         )
         resolved_provider = provider or (workspace.default_agent if workspace else None)
         resolved_model = model or (workspace.default_model if workspace else None)
-        scan_provider = resolved_provider or "claude_code"
+        # scan_provider 兜底 "claude"（不是 "claude_code"——那是 agent_type，daemon 实际
+        # provider 是 claude/codex/...，详见 _query_runtime_by_daemon_and_provider）。
+        # AgentSession.provider NOT NULL（model.py:418），不能传 None；workspace.default_agent
+        # 为 NULL（daemon-client scan-generate 新建工作区不设该列）且请求未传 provider 时，
+        # 走 "claude" 这个通行默认值，否则 dispatch 永远匹配不到 daemon 触发 NoOnlineDaemonError。
+        scan_provider = resolved_provider or "claude"
 
         now = datetime.now(UTC)
         # -- 4. 建 AgentSession（manual_approval=True + ask_user_only=True）------
@@ -1446,7 +1451,13 @@ class AgentService:
                 spec_strategy=spec_strategy,
             )
         except NoOnlineDaemonError as exc:
-            await self._session.rollback()
+            # 不 rollback：prepare_scan_interactive_dispatch 抛 NoOnlineDaemonError 前无任何
+            # DB 写操作（raise 在 placement.py:489，lease INSERT 在 :540 之后），事务里只有
+            # 本函数上方 add+flush 的 AgentSession / AgentRun / AgentRunWorkspace。若 rollback
+            # 会把 AgentSession 一起冲掉，随后 _mark_no_online_daemon 的 commit 插入 agent_runs
+            # 时 agent_session_id 外键违约（agent_runs_agent_session_id_fkey）→ 500。
+            # 正确做法：保留 session+run，仅把 run 标 failed 并整体提交（d16e13c7 引入的
+            # rollback 即此 500 根因）。
             await self._mark_no_online_daemon(run, exc)
             return run
 

@@ -162,6 +162,62 @@ async def test_start_scan_dispatch_no_online_daemon_marks_failed(monkeypatch):
         spec_root="/data/specs/ws",
     )
 
-    # 收敛为 no-online-daemon（run 返回，_mark 被调，session rollback）。
+    # 收敛为 no-online-daemon（run 返回，_mark 被调）。
     mark_mock.assert_awaited_once()
     assert run is not None
+    # 回归（ql-20260706-001）：失败路径禁止 rollback——prepare_scan_interactive_dispatch
+    # 抛 NoOnlineDaemonError 前无任何 DB 写操作，事务里只有本函数 add+flush 的
+    # AgentSession/AgentRun。rollback 会把 AgentSession 冲掉，_mark_no_online_daemon 的
+    # commit 插入 agent_runs 时 agent_session_id 外键违约 → 500。原实现（d16e13c7）即此
+    # 500 根因。
+    mock_session.rollback.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_start_scan_dispatch_provider_fallback_is_claude_not_claude_code(monkeypatch):
+    """回归（ql-20260706-001）：default_agent=NULL 且请求未传 provider 时，dispatch
+    provider 兜底必须是 "claude"（合法 provider），不能是 "claude_code"（agent_type，
+    daemon 上永不启用，会触发 NoOnlineDaemonError）。AgentSession.provider NOT NULL，故
+    不能传 None——"claude" 是通行默认值（DB default_agent='claude' 的工作区均派发成功）。"""
+    workspace = _mock_workspace()  # default_agent=None
+    mock_session = _mock_session(workspace)
+    svc = AgentService(mock_session)
+
+    monkeypatch.setattr(
+        "app.modules.agent.context_builder.build_scan_bundle",
+        AsyncMock(return_value=_scan_bundle()),
+    )
+
+    dispatch = MagicMock()
+    dispatch.lease_id = uuid.uuid4()
+    dispatch.runtime_id = uuid.uuid4()
+    dispatch.run_id = uuid.uuid4()
+    dispatch.claim_token = "claim-tok"
+    prepare_mock = AsyncMock(return_value=dispatch)
+    monkeypatch.setattr(RunPlacementService, "prepare_scan_interactive_dispatch", prepare_mock)
+    monkeypatch.setattr(
+        RunPlacementService, "notify_interactive_dispatch", AsyncMock(return_value=True)
+    )
+    hub = MagicMock()
+    hub.send_session_control = AsyncMock()
+    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
+
+    # 不传 provider，workspace.default_agent=None → 兜底 "claude"。
+    await svc.start_scan_dispatch(
+        workspace_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        root_path="/home/user/project",
+        spec_root="/data/specs/ws",
+    )
+
+    prepare_mock.assert_awaited_once()
+    dispatched_provider = prepare_mock.call_args.kwargs.get("provider")
+    assert dispatched_provider == "claude"
+    # AgentSession.provider 也应是 "claude"（NOT NULL，且与 dispatch 一致）。
+    added_sessions = [
+        c.args[0]
+        for c in mock_session.add.call_args_list
+        if c.args and isinstance(c.args[0], AgentSession)
+    ]
+    assert len(added_sessions) == 1
+    assert added_sessions[0].provider == "claude"
