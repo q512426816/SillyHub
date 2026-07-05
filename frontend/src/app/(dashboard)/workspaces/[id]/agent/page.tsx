@@ -154,9 +154,9 @@ function isWorkspaceScanRun(run: AgentRun): boolean {
 
 function pendingMetric(run: AgentRun, kind: "cost" | "usage" = "usage"): string {
   if (run.status !== "running") return "—";
-  // ql-20260617-003：Claude CLI stream-json 中间 assistant 事件 usage 永远是 {0, 0}，
-  // 真实 token 数只在最终 result 事件才有。所以执行期间无法显示累加值，明确告知用户
-  // "执行中（完成后统计）"，避免显示假 "0"。
+  // ql-20260617-003 + ql-20260705-001/005：Claude CLI stream-json 中间事件 usage 是
+  // {0,0}（A 修复后 backend 接受 0），真实值在最终 result 事件。执行期间若 input +
+  // cache_read 合并仍为 0（首轮无 cache）→ 显示"执行中…"避免假 0；output/cost 同理。
   return kind === "cost" ? "完成后结算" : "执行中…";
 }
 
@@ -705,9 +705,14 @@ export default function AgentPage({ params }: Props) {
                     ) : pendingMetric(run, "cost")}
                   </MetaItem>
                   <MetaItem label="输入词元">
-                    {run.input_tokens != null && run.input_tokens > 0
-                      ? run.input_tokens.toLocaleString()
-                      : pendingMetric(run)}
+                    {(() => {
+                      // ql-20260705-005 (C4)：合并 input + cache_read 显示总输入。
+                      // A(ql-001) 后 backend 写 input=0（cache 全命中），单看 input 会
+                      // 显示"执行中…"与 output 不对称；合并 cache_read 后 cache 全命中
+                      // 场景显示总输入大数，符合用户直觉。底部徽标仍分开显示 ↓/⚡ 细节。
+                      const total = (run.input_tokens ?? 0) + (run.cache_read_tokens ?? 0);
+                      return total > 0 ? total.toLocaleString() : pendingMetric(run);
+                    })()}
                   </MetaItem>
                   <MetaItem label="输出词元">
                     {run.output_tokens != null && run.output_tokens > 0

@@ -40,5 +40,14 @@ created_at: 2026-07-05 16:33:00
 修法：useMemo 算 semanticCounts（按 semanticCategory）+ toolKindCounts（tool_call 行按 tool_kind，其他桶=null+plan/ask/schedule+other 与 ql-002 守卫一致）；count>0 时 label 后显示灰色数字。
 测试：加用例验证 count 数字渲染（如 3 条 bash tool_call → 命令行按钮显示 3）。
 
+## ql-20260705-005-e5a2 | 2026-07-05 17:50:00 | 前端输入词元合并 cache_read 治标签对应不上（C4）
+状态：进行中
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/workspaces/[id]/agent/page.tsx
+依据：A(ql-001) 修 backend 让 input_tokens=0（Claude cache 全命中）能正确写入，但前端 page.tsx:708 守卫 `input_tokens > 0` 致 0 仍显示"执行中…"，与 output 数字不对称（用户"标签对应不上"抱怨的最后一环）。
+修法：输入词元显示 input_tokens + cache_read_tokens 合并（总输入 token），total>0 显示数字否则 pendingMetric。cache 全命中时显示 cache_read 大数（直观，符合用户"总输入"直觉）。底部徽标仍分开显示 ↓input / ⚡cache_read 细节，互补。
+测试：page.tsx 是 Next.js page 无直接单测；验证靠 typecheck + 部署后 curl/UI 手动看。
+
+
 
 
