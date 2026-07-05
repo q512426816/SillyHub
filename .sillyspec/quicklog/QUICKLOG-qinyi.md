@@ -56,6 +56,14 @@ created_at: 2026-07-05 16:33:00
 修法（推翻 D-001 子串语义，改主命令判定）：command 任一段（&&/;/|）的主命令是 sillyspec 才归 sillyspec；覆盖直接调用 + pnpm/npx/yarn/sudo/node 包装 + 复合命令。脚本内容/grep/cat 含 sillyspec 字样的不再误归。两端 PY+TS 同步 + 测试同步。
 测试：改 SHARED_CASES + test_sillyspec_substring_semantics（cat sillyspec-note.md 从 sillyspec 改 bash）；加 python/grep 误归排除用例。
 
+## ql-20260705-007-9f3c | 2026-07-05 18:55:00 | classifyLog 区分 tool_kind=ask 让 AskUserQuestion 进提问审批（C7）
+状态：进行中
+关联变更：（无）
+文件：frontend/src/components/agent-log/normalize.ts, frontend/src/components/__tests__/agent-log-viewer.test.tsx
+依据：DB 实测 run 254e5e2a 的 AskUserQuestion 有记录（tool_call | ask | 2 条），但前端 normalize.classifyLog(channel, content) 不接收 tool_kind，所有 tool_call 一律归 tool_call semanticCategory。"提问审批"按钮筛 ask semanticCategory（只匹配 pending_input channel）→ AskUserQuestion 看不到（被归工具调用）。
+修法：classifyLog 加 tool_kind 参数，tool_call + tool_kind=ask → ask semanticCategory（其他 tool_kind 仍归 tool_call）。AskUserQuestion 进提问审批，pending_input 也在提问审批。
+测试：加用例 AskUserQuestion（tool_call + tool_kind=ask）→ 提问审批筛选可见。
+
 
 
 

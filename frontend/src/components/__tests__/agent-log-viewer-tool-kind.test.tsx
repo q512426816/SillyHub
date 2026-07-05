@@ -252,3 +252,24 @@ describe("ql-20260705-004: 筛选标签 count（C6）", () => {
     expect(otherBtn.querySelector("span")?.textContent).toBe("2");
   });
 });
+
+describe("ql-20260705-007: AskUserQuestion 进提问审批（C7）", () => {
+  it("tool_call + tool_kind=ask → 点提问审批可见（之前归工具调用看不到）", () => {
+    const logs: AgentRunLogEntry[] = [
+      toolCallLog("tc1", "Bash", "bash"),
+      toolCallLog("tc2", "AskUserQuestion", "ask"),
+    ];
+    renderViewer(logs);
+    // 点"提问审批"（第一层 ask 语义）
+    fireEvent.click(screen.getByRole("button", { name: "提问审批" }));
+    // AskUserQuestion 归 ask → 可见
+    expect(screen.getAllByText("AskUserQuestion").length).toBeGreaterThanOrEqual(1);
+    // bash 归 tool_call → 被过滤
+    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+  });
+
+  it("未选筛选时 AskUserQuestion 默认显示（全部视图）", () => {
+    renderViewer([toolCallLog("tc1", "AskUserQuestion", "ask")]);
+    expect(screen.getAllByText("AskUserQuestion").length).toBeGreaterThanOrEqual(1);
+  });
+});

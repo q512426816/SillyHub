@@ -322,8 +322,8 @@ export function mergeThinkingPiece(prev: string, piece: string): string {
  * 日志语义分类（viewer 中文标签 + 筛选用）。
  *
  * 区别于底层 channel（stdout/stderr/tool_call/...），语义分类面向用户：
- *   - user_input → user；pending_input → ask；tool_call → tool_call；
- *     stderr → error。
+ *   - user_input → user；pending_input → ask；tool_call → tool_call（tool_kind=ask
+ *     的 AskUserQuestion 归 ask，ql-20260705-007）；stderr → error。
  *   - stdout 按文本协议前缀分：[TOOL_RESULT] → tool_result、[THINKING] → thinking、
  *     [ASSISTANT] → assistant、[SYSTEM → system、[RESULT → result。
  *   - 无协议前缀的纯文本 stdout → assistant（codex / json-rpc 流式 delta）。
@@ -331,10 +331,18 @@ export function mergeThinkingPiece(prev: string, piece: string): string {
  *
  * viewer 据此渲染中文徽标并提供语义筛选，替代原 channel 二级筛选。
  */
-export function classifyLog(channel: string, content: string): SemanticCategory {
+export function classifyLog(
+  channel: string,
+  content: string,
+  toolKind?: string | null,
+): SemanticCategory {
   if (channel === "user_input") return "user";
   if (channel === "pending_input") return "ask";
-  if (channel === "tool_call") return "tool_call";
+  // ql-20260705-007 (C7)：AskUserQuestion（tool_kind=ask）归 ask 语义类，让"提问
+  // 审批"筛选能匹配（之前一律归 tool_call 致 AskUserQuestion 看不到）。
+  if (channel === "tool_call") {
+    return toolKind === "ask" ? "ask" : "tool_call";
+  }
   const text = content ?? "";
   if (text.includes("[TOOL_RESULT]")) return "tool_result";
   if (text.startsWith("[THINKING]")) return "thinking";
@@ -413,6 +421,7 @@ function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
     current.semanticCategory = classifyLog(
       current.log.channel,
       asString(current.log.content_redacted),
+      current.log.tool_kind,
     );
 
     if (current.log.channel === "tool_call") {
