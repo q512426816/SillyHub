@@ -174,3 +174,81 @@ describe("task-08: tool_call 行工具徽标渲染（R-07 null 兜底）", () =>
     expect(tools.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe("ql-20260705-002: 其他桶逻辑（C1+C2）", () => {
+  // null（旧/未打标）+ plan（UI 无按钮）+ bash（有按钮）三类 tool_call
+  // tool 名各不相同，用作行锚点（ToolCallPreview 渲染 entry.tool）。
+  const logs: AgentRunLogEntry[] = [
+    toolCallLog("tc-null", "LegacyTool", null),
+    toolCallLog("tc-plan", "ExitPlanMode", "plan"),
+    toolCallLog("tc-bash", "Bash", "bash"),
+  ];
+
+  it("C1：选中「其他」→ tool_kind=null 的旧日志行显示（原被守卫 tool_kind!=null 隐藏）", () => {
+    renderViewer(logs);
+    fireEvent.click(screen.getByRole("button", { name: "其他" }));
+    expect(screen.getAllByText("LegacyTool").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("C2：选中「其他」→ plan 行显示（UI 无 plan 按钮，归其他桶）", () => {
+    renderViewer(logs);
+    fireEvent.click(screen.getByRole("button", { name: "其他" }));
+    expect(screen.getAllByText("ExitPlanMode").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("选中「其他」→ bash 行不显示（bash 有独立按钮，不归其他桶）", () => {
+    renderViewer(logs);
+    fireEvent.click(screen.getByRole("button", { name: "其他" }));
+    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+  });
+
+  it("选中「命令行」（不选其他）→ null + plan 行被隐藏，只显示 bash", () => {
+    renderViewer(logs);
+    fireEvent.click(screen.getByRole("button", { name: "命令行" }));
+    expect(screen.getAllByText("Bash").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("LegacyTool")).not.toBeInTheDocument();
+    expect(screen.queryByText("ExitPlanMode")).not.toBeInTheDocument();
+  });
+
+  it("多选「其他」+「命令行」→ 三行都显示", () => {
+    renderViewer(logs);
+    fireEvent.click(screen.getByRole("button", { name: "其他" }));
+    fireEvent.click(screen.getByRole("button", { name: "命令行" }));
+    expect(screen.getAllByText("LegacyTool").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("ExitPlanMode").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Bash").length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("ql-20260705-004: 筛选标签 count（C6）", () => {
+  it("第二层按钮显示对应桶的 count（aria-hidden span）", () => {
+    const logs: AgentRunLogEntry[] = [
+      toolCallLog("tc1", "Bash", "bash"),
+      toolCallLog("tc2", "Bash", "bash"),
+      toolCallLog("tc3", "Read", "read"),
+    ];
+    renderViewer(logs);
+    // getByRole name 仍匹配 label（count span aria-hidden 不计入 accessible name）
+    const cmdBtn = screen.getByRole("button", { name: "命令行" });
+    expect(cmdBtn.querySelector("span")?.textContent).toBe("2");
+    const readBtn = screen.getByRole("button", { name: "读文件" });
+    expect(readBtn.querySelector("span")?.textContent).toBe("1");
+  });
+
+  it("count=0 的标签不显示数字 span", () => {
+    renderViewer([toolCallLog("tc1", "Bash", "bash")]);
+    const mcpBtn = screen.getByRole("button", { name: "MCP" });
+    expect(mcpBtn.querySelector("span")).toBeNull();
+  });
+
+  it("其他桶 count = null + plan/ask/schedule + other 总和", () => {
+    const logs: AgentRunLogEntry[] = [
+      toolCallLog("tc1", "Old", null),
+      toolCallLog("tc2", "ExitPlanMode", "plan"),
+      toolCallLog("tc3", "Bash", "bash"),
+    ];
+    renderViewer(logs);
+    const otherBtn = screen.getByRole("button", { name: "其他" });
+    expect(otherBtn.querySelector("span")?.textContent).toBe("2");
+  });
+});

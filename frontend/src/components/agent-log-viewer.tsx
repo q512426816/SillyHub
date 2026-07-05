@@ -568,17 +568,14 @@ function TurnBlock({
 
   return (
     <div
-      className={cn(
-        "min-w-0",
-        embedded
-          ? "border-b border-zinc-100 last:border-b-0"
-          : "rounded-md border border-zinc-200 bg-white",
-      )}
+      // ql-20260705-003 (B)：去 turn 卡片外边框改 border-b divider，收紧 98 turn
+      // 场景的垂直空白（用户选"减小卡片密度"，不折叠内容）。
+      className="min-w-0 border-b border-zinc-100 last:border-b-0"
     >
       <div
         className={cn(
-          "flex items-center gap-2 px-3 py-1.5",
-          embedded ? "bg-transparent" : "border-b border-zinc-100 bg-zinc-50/70",
+          "flex items-center gap-2 px-3 py-1",
+          embedded ? "bg-transparent" : "bg-zinc-50/70",
         )}
       >
         <span className="inline-flex items-center rounded bg-zinc-200/70 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600">
@@ -684,6 +681,28 @@ export function AgentLogViewer({
     () => processedLogs.filter((p) => !p.hidden),
     [processedLogs],
   );
+  // ql-20260705-004 (C6)：筛选标签 count——第一层按 semanticCategory，第二层按
+  // tool_kind（其他桶 = null + plan/ask/schedule + other，与 ql-20260705-002 守卫一致）。
+  const semanticCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of visibleLogs) {
+      const cat = p.semanticCategory ?? "log";
+      counts.set(cat, (counts.get(cat) ?? 0) + 1);
+    }
+    return counts;
+  }, [visibleLogs]);
+  const toolKindCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of visibleLogs) {
+      if ((p.semanticCategory ?? "log") !== "tool_call") continue;
+      const tk = p.log.tool_kind;
+      const isOtherBucket = tk == null
+        || tk === "plan" || tk === "ask" || tk === "schedule" || tk === "other";
+      const bucket = isOtherBucket ? "other" : tk;
+      counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+    }
+    return counts;
+  }, [visibleLogs]);
   // ql-20260626-001 / bug2：对话视图过滤——只保留 agent 接收（user_input）+ agent 答复
   // （mergedAssistantContent / pending_input 提问），隐藏 thinking / tool_call / 系统
   // 摘要 stdout。全部视图维持原 channel 二级筛选（activeFilters）。
@@ -703,13 +722,22 @@ export function AgentLogViewer({
       : visibleLogs;
     // task-08 / FR-11：第二层工具类型筛选——active 非空时只保留 tool_kind ∈ active 的
     // tool_call 行；非工具行（assistant/thinking/user/...）一律放行（两层正交）。
-    // tool_kind 缺失（旧日志）在 active 非空时不命中（design §10 R-07：兜底徽标显示，
-    // 但第二层筛选取值集合不含 null，故被隐藏——与原型 line 246 一致）。
+    // ql-20260705-002 (C1+C2)：原守卫 tool_kind!=null 过严——null（旧/未打标 tool_call）
+    // 在 active 时被隐藏；且 plan/ask/schedule（UI 未单独列按钮）也无按钮命中。现改为
+    // "其他桶"：null + plan/ask/schedule + other 都归"其他"按钮匹配，选中时一并显示。
     if (activeToolKindFilters.size === 0) return afterLayer1;
     return afterLayer1.filter((p) => {
       const cat = p.semanticCategory ?? "log";
       if (cat !== "tool_call") return true;
-      return p.log.tool_kind != null && activeToolKindFilters.has(p.log.tool_kind);
+      const tk = p.log.tool_kind;
+      if (tk != null && activeToolKindFilters.has(tk)) return true;
+      if (
+        activeToolKindFilters.has("other")
+        && (tk == null || tk === "plan" || tk === "ask" || tk === "schedule" || tk === "other")
+      ) {
+        return true;
+      }
+      return false;
     });
   }, [visibleLogs, viewMode, activeFilters, activeToolKindFilters, isConversationLog]);
   const turns = useMemo(() => groupIntoTurns(filteredLogs), [filteredLogs]);
@@ -839,20 +867,26 @@ export function AgentLogViewer({
             ))}
           </div>
           {/* 全部视图下保留 channel 二级筛选（原 5 按钮） */}
-          {viewMode === "all" && semanticFilters.map((f) => (
-            <button
-              key={f.key}
-              onClick={() => toggleFilter(f.key)}
-              className={cn(
-                "inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-semibold transition-colors",
-                activeFilters.has(f.key)
-                  ? "border-blue-500/40 bg-blue-500/15 text-blue-700"
-                  : "border-zinc-200 bg-white text-zinc-600 hover:text-zinc-900",
-              )}
-            >
-              {f.label}
-            </button>
-          ))}
+          {viewMode === "all" && semanticFilters.map((f) => {
+            const count = semanticCounts.get(f.key) ?? 0;
+            return (
+              <button
+                key={f.key}
+                onClick={() => toggleFilter(f.key)}
+                className={cn(
+                  "inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-semibold transition-colors",
+                  activeFilters.has(f.key)
+                    ? "border-blue-500/40 bg-blue-500/15 text-blue-700"
+                    : "border-zinc-200 bg-white text-zinc-600 hover:text-zinc-900",
+                )}
+              >
+                {f.label}
+                {count > 0 && (
+                  <span aria-hidden="true" className="ml-0.5 opacity-60">{count}</span>
+                )}
+              </button>
+            );
+          })}
           {viewMode === "all" && activeFilters.size > 0 && (
             <button
               onClick={() => setActiveFilters(new Set())}
@@ -866,20 +900,26 @@ export function AgentLogViewer({
               横向滚动：flex + overflow-x-auto，11 按钮在窄屏不挤占第一层。 */}
           {showToolKindFilters && (
             <div className="flex items-center gap-0.5 overflow-x-auto rounded border border-zinc-200 bg-zinc-50 p-0.5">
-              {toolKindFilters.map((f) => (
-                <button
-                  key={f.key}
-                  onClick={() => toggleToolKindFilter(f.key)}
-                  className={cn(
-                    "inline-flex h-5 shrink-0 items-center rounded px-1.5 text-[10px] font-semibold transition-colors",
-                    activeToolKindFilters.has(f.key)
-                      ? "border border-blue-500/40 bg-blue-500/15 text-blue-700"
-                      : "border border-transparent text-zinc-600 hover:text-zinc-900",
-                  )}
-                >
-                  {f.label}
-                </button>
-              ))}
+              {toolKindFilters.map((f) => {
+                const count = toolKindCounts.get(f.key) ?? 0;
+                return (
+                  <button
+                    key={f.key}
+                    onClick={() => toggleToolKindFilter(f.key)}
+                    className={cn(
+                      "inline-flex h-5 shrink-0 items-center rounded px-1.5 text-[10px] font-semibold transition-colors",
+                      activeToolKindFilters.has(f.key)
+                        ? "border border-blue-500/40 bg-blue-500/15 text-blue-700"
+                        : "border border-transparent text-zinc-600 hover:text-zinc-900",
+                    )}
+                  >
+                    {f.label}
+                    {count > 0 && (
+                      <span aria-hidden="true" className="ml-0.5 opacity-60">{count}</span>
+                    )}
+                  </button>
+                );
+              })}
               {activeToolKindFilters.size > 0 && (
                 <button
                   onClick={() => setActiveToolKindFilters(new Set())}
@@ -965,7 +1005,7 @@ export function AgentLogViewer({
               </div>
             )}
             {filteredLogs.length > 0 && (
-              <div className="min-w-0 max-w-full space-y-2 p-2">
+              <div className="min-w-0 max-w-full space-y-0 p-1">
                 {turns.map((turnLogs, turnIdx) => (
                   // task-15 / FR-10：turn 分组渲染——单 turn 渲染失败不影响其他 turn
                   // （ErrorBoundary 双层隔离：外层 turn 级，内层 row 级见 TurnBlock）。

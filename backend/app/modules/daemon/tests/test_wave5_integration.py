@@ -1181,10 +1181,12 @@ class TestSubmitMessagesSync:
         assert agent_run.session_id == "sess-abc-123"
 
     @pytest.mark.asyncio
-    async def test_submit_messages_ignores_zero_usage(self, db_session: AsyncSession) -> None:
-        """ql-20260617-003：Claude CLI 中间 assistant 事件 usage 永远是 {0, 0}（真实
-        值只在最终 result 事件）。daemon 透传 0/0 时，backend 不应把它写回 AgentRun，
-        否则前端会显示 "0" 而不是 "执行中..."，让用户误以为 token 是真实值。
+    async def test_submit_messages_writes_zero_usage(self, db_session: AsyncSession) -> None:
+        """ql-20260705-001：daemon 透传 0/0（Claude 中间事件 或 prompt cache 全命中）
+        时，backend 写入 0（不再当噪声丢）。前端顶部 stat 用 >0 守卫仍显示"执行中…"，
+        不会显示假 0；底部徽标 formatTokenCount(0)="0" 准确反映"未命中 cache 的输入
+        为 0"。"0 不覆盖已有真实值"由 max + 仅增不减写回保证（见
+        test_run_sync_cache_parse.test_zero_does_not_clobber_existing）。
         """
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)
@@ -1218,9 +1220,9 @@ class TestSubmitMessagesSync:
         )
 
         await db_session.refresh(agent_run)
-        # 0/0 被忽略，input_tokens / output_tokens 保持 None；session_id 仍写回。
-        assert agent_run.input_tokens is None
-        assert agent_run.output_tokens is None
+        # ql-20260705-001：0 写入（不再 None）；session_id 仍写回。
+        assert agent_run.input_tokens == 0
+        assert agent_run.output_tokens == 0
         assert agent_run.session_id == "sess-xyz"
 
     @pytest.mark.asyncio

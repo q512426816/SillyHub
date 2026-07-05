@@ -222,10 +222,11 @@ class RunSyncService:
         # message（task-runner.ts:1142-1155），但首条 message 总有 content（[ASSISTANT]/
         # [TOOL_USE]/[TOOL_RESULT] 等），所以「仅在 content 为空时提取 usage」的旧分支
         # 永远走不到。现在对所有 message 都提取 usage/session_id（取 max 防御乱序）。
-        # ql-20260617-003：Claude CLI stream-json 的中间 assistant 事件 usage 永远是
-        # {input_tokens:0, output_tokens:0}（只在最终 result 事件才有真实值）。
-        # 所以 daemon 透传的 usage 经常是 0/0 —— 我们把它当成"无数据"，不覆盖
-        # AgentRun 已有的非零值（complete_lease 路径会用 result 事件的真实值覆盖）。
+        # ql-20260617-003 + ql-20260705-001：Claude CLI stream-json 的中间 assistant
+        # 事件 usage 永远是 {0,0}（真实值只在最终 result 事件）。但 prompt cache 全
+        # 命中时 result 事件的 input_tokens 也是合法的 0（真实输入在 cache_read）。
+        # 旧 >0 守卫把合法 0 当噪声丢，致 AgentRun.input_tokens 永久 NULL；现接受 0，
+        # 靠 max 累积 + 仅增不减写回（service.py:478-501）防御中间事件 0/0。
         latest_input_tokens: int | None = None
         latest_output_tokens: int | None = None
         # task-07 / FR-02：prompt cache 词元累积（同 input/output，取 max 防御
@@ -334,15 +335,19 @@ class RunSyncService:
                 # max 累积（service.py:69-72 乱序防御注释）。
                 cache_read_tok = usage.get("cache_read_tokens")
                 cache_creation_tok = usage.get("cache_creation_tokens")
-                if isinstance(in_tok, (int, float)) and int(in_tok) > 0:
+                # ql-20260705-001：接受 0（Claude prompt cache 全命中时 input_tokens
+                # 合法为 0，真实输入在 cache_read_tokens）。旧 >0 守卫把合法 0 当噪声
+                # 丢，致 AgentRun.input_tokens 永久 NULL。改由 max 累积 + 仅增不减写回
+                # （service.py:478-501）防御中间事件 0/0 —— 0 不拉低已有非零值。
+                if isinstance(in_tok, (int, float)):
                     latest_input_tokens = max(latest_input_tokens or 0, int(in_tok))
-                if isinstance(out_tok, (int, float)) and int(out_tok) > 0:
+                if isinstance(out_tok, (int, float)):
                     latest_output_tokens = max(latest_output_tokens or 0, int(out_tok))
-                if isinstance(cache_read_tok, (int, float)) and int(cache_read_tok) > 0:
+                if isinstance(cache_read_tok, (int, float)):
                     latest_cache_read_tokens = max(
                         latest_cache_read_tokens or 0, int(cache_read_tok)
                     )
-                if isinstance(cache_creation_tok, (int, float)) and int(cache_creation_tok) > 0:
+                if isinstance(cache_creation_tok, (int, float)):
                     latest_cache_creation_tokens = max(
                         latest_cache_creation_tokens or 0, int(cache_creation_tok)
                     )

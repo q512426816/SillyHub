@@ -281,8 +281,13 @@ class TestSubmitMessagesCacheTokens:
         assert run.cache_creation_tokens == 800
 
     @pytest.mark.asyncio
-    async def test_cache_token_zero_filtered(self, db_session, mocked_redis) -> None:
-        """cache_read_tokens=0（Claude 中间事件）被 > 0 过滤，AgentRun 保持 None（AC-3）。"""
+    async def test_cache_token_zero_accepted(self, db_session, mocked_redis) -> None:
+        """ql-20260705-001：cache_read/creation=0 写入 0（不再当噪声丢）。
+
+        Claude prompt cache 全命中时 0 是合法值（真实输入在 cache_read_tokens）。
+        旧 >0 守卫把 0 丢弃致 NULL；现接受 0，靠 max + 仅增不减写回防中间事件 0/0
+        （见 test_zero_does_not_clobber_existing）。
+        """
         lease_id, run_id, token = await _seed_batch_run_for_submit(db_session)
         svc = DaemonService(db_session)
         await svc.submit_messages(
@@ -304,11 +309,96 @@ class TestSubmitMessagesCacheTokens:
         )
         run = await db_session.get(AgentRun, run_id)
         assert run is not None
-        assert run.cache_read_tokens is None  # 0 被 > 0 过滤
-        assert run.cache_creation_tokens is None
-        # input/output 仍写入（> 0）
+        assert run.cache_read_tokens == 0  # ql-20260705-001：0 写入，不再 None
+        assert run.cache_creation_tokens == 0
         assert run.input_tokens == 10
         assert run.output_tokens == 5
+
+    @pytest.mark.asyncio
+    async def test_zero_does_not_clobber_existing(self, db_session, mocked_redis) -> None:
+        """ql-20260705-001：乱序防御——先写真实值，再收 0/0（中间事件），不被覆盖。
+
+        原 AC-3 真正意图是防 Claude 中间事件 0/0 覆盖已有真实值；改由 max 累积 +
+        仅增不减写回实现（不再用提取阶段 >0 丢弃）。
+        """
+        lease_id, run_id, token = await _seed_batch_run_for_submit(db_session)
+        svc = DaemonService(db_session)
+        # 先写真实值
+        await svc.submit_messages(
+            lease_id,
+            token,
+            run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[ASSISTANT] real",
+                    "usage": {
+                        "input_tokens": 100,
+                        "output_tokens": 50,
+                        "cache_read_tokens": 1000,
+                        "cache_creation_tokens": 200,
+                    },
+                }
+            ],
+        )
+        # 再收 0/0 中间事件（乱序）
+        await svc.submit_messages(
+            lease_id,
+            token,
+            run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[ASSISTANT] mid",
+                    "usage": {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "cache_read_tokens": 0,
+                        "cache_creation_tokens": 0,
+                    },
+                }
+            ],
+        )
+        run = await db_session.get(AgentRun, run_id)
+        assert run is not None
+        assert run.input_tokens == 100  # 不被 0 覆盖
+        assert run.output_tokens == 50
+        assert run.cache_read_tokens == 1000
+        assert run.cache_creation_tokens == 200
+
+    @pytest.mark.asyncio
+    async def test_input_zero_cache_full_hit_written(self, db_session, mocked_redis) -> None:
+        """ql-20260705-001：Claude prompt cache 全命中场景（核心 bug 复现）。
+
+        input_tokens=0（未命中 cache 的输入为 0）+ cache_read_tokens>0（全命中 cache）。
+        修复前：input_tokens 被 >0 守卫丢，永久 NULL（DB 实测就是 NULL）；
+        修复后：写入 0，前端可正确显示而非永远"执行中…"。
+        """
+        lease_id, run_id, token = await _seed_batch_run_for_submit(db_session)
+        svc = DaemonService(db_session)
+        await svc.submit_messages(
+            lease_id,
+            token,
+            run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[ASSISTANT] cache hit",
+                    "usage": {
+                        "input_tokens": 0,
+                        "output_tokens": 99451,
+                        "cache_read_tokens": 1600000,
+                        "cache_creation_tokens": 0,
+                    },
+                }
+            ],
+        )
+        run = await db_session.get(AgentRun, run_id)
+        assert run is not None
+        assert run.input_tokens == 0  # 修复前是 None（被 >0 守卫丢）
+        assert run.output_tokens == 99451
+        assert run.cache_read_tokens == 1600000
+        assert run.cache_creation_tokens == 0
 
     @pytest.mark.asyncio
     async def test_no_cache_key_keeps_none(self, db_session, mocked_redis) -> None:
