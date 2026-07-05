@@ -15,6 +15,29 @@ export type ToolKind = typeof TOOL_KIND_VALUES[number];
  * Returns:
  *   TOOL_KIND_VALUES 之一，或 null（非工具调用 / toolName 缺失）。
  */
+function isSillyspecCommand(cmd: string): boolean {
+  // ql-20260705-006 (C3)：与 Python _is_sillyspec_command 同逻辑（R-05 防漂移）。
+  // command 任一段（&&/;/|）主命令是 sillyspec 才归，排除脚本内容/grep 含字样误归
+  // （推翻 D-001 子串语义——DB 实测 41 条 sillyspec 里 34 条 83% 误归）。
+  let seg = cmd;
+  for (const sep of ['&&', ';', '|']) {
+    seg = seg.split(sep).join('\n');
+  }
+  for (const line of seg.split('\n')) {
+    const parts = line.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) continue;
+    let idx = 0;
+    while (
+      idx < parts.length - 1
+      && ['pnpm', 'npx', 'yarn', 'sudo', 'node'].includes(parts[idx]!)
+    ) {
+      idx++;
+    }
+    if (parts[idx] === 'sillyspec') return true;
+  }
+  return false;
+}
+
 export function classifyToolKind(
   toolName: string | undefined | null,
   args: Record<string, unknown> | undefined,
@@ -22,8 +45,9 @@ export function classifyToolKind(
   if (!toolName) return null;
   const name = toolName.toLowerCase();
   if (name === 'bash') {
-    const cmd = String((args as { command?: unknown } | undefined)?.command ?? '');
-    return cmd.includes('sillyspec') ? 'sillyspec' : 'bash';
+    const rawCmd = (args as { command?: unknown } | undefined)?.command;
+    const cmd = typeof rawCmd === 'string' ? rawCmd : '';
+    return isSillyspecCommand(cmd) ? 'sillyspec' : 'bash';
   }
   if (name === 'skill') return 'skill';
   if (name === 'read') return 'read';

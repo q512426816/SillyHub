@@ -59,6 +59,25 @@ describe('classifyToolKind', () => {
     ).toBe('sillyspec');
   });
 
+  // ql-20260705-006 (C3)：主命令判定，覆盖复合命令 + 排除脚本内容误归
+  it('Bash "git add . && sillyspec run execute" → sillyspec（C3 复合命令第二段是主命令）', () => {
+    expect(
+      classifyToolKind('Bash', { command: 'git add . && sillyspec run execute' }),
+    ).toBe('sillyspec');
+  });
+
+  it('Bash "cat docs/sillyspec-note.md" → bash（C3 排除脚本内容含字样误归）', () => {
+    expect(
+      classifyToolKind('Bash', { command: 'cat docs/sillyspec-note.md' }),
+    ).toBe('bash');
+  });
+
+  it('Bash "grep sillyspec *.ts" → bash（C3 排除 grep 模式误归）', () => {
+    expect(
+      classifyToolKind('Bash', { command: 'grep sillyspec *.ts' }),
+    ).toBe('bash');
+  });
+
   it('Bash "ls -la" → bash（不含 sillyspec）', () => {
     expect(classifyToolKind('Bash', { command: 'ls -la' })).toBe('bash');
   });

@@ -29,6 +29,29 @@ TOOL_KIND_VALUES: tuple[str, ...] = (
 )
 
 
+def _is_sillyspec_command(cmd: str) -> bool:
+    """ql-20260705-006 (C3)：command 任一段（&&/;/|）主命令是 sillyspec 才归 sillyspec。
+
+    覆盖直接调用（sillyspec run scan）/ pnpm/npx/yarn/sudo/node 包装 / 复合命令
+    任一段（git add . && sillyspec run execute）。排除脚本内容（python -c
+    "...sillyspec..."）/ grep sillyspec / cat sillyspec-note.md 等参数含字样的
+    误归（推翻 D-001 子串语义——DB 实测 run be48ad3a 的 41 条 sillyspec 里
+    34 条 83% 是此类误归）。
+    """
+    for sep in ("&&", ";", "|"):
+        cmd = cmd.replace(sep, "\n")
+    for line in cmd.split("\n"):
+        parts = line.strip().split()
+        if not parts:
+            continue
+        idx = 0
+        while idx < len(parts) - 1 and parts[idx] in {"pnpm", "npx", "yarn", "sudo", "node"}:
+            idx += 1
+        if parts[idx] == "sillyspec":
+            return True
+    return False
+
+
 def classify_tool_kind(
     tool_name: str | None,
     args: dict | None,
@@ -42,8 +65,9 @@ def classify_tool_kind(
         return None
     name = tool_name.lower()
     if name == "bash":
-        cmd = (args or {}).get("command") or ""
-        return "sillyspec" if "sillyspec" in cmd else "bash"
+        raw_cmd = (args or {}).get("command")
+        cmd = raw_cmd if isinstance(raw_cmd, str) else ""
+        return "sillyspec" if _is_sillyspec_command(cmd) else "bash"
     if name == "skill":
         return "skill"
     if name == "read":

@@ -14,17 +14,19 @@ from app.modules.agent.tool_kind import TOOL_KIND_VALUES, classify_tool_kind
 # 共享用例表（task-03 TS 版逐字对照）：(tool_name, args, expected)
 # ---------------------------------------------------------------------------
 SHARED_CASES: list[tuple[str | None, dict | None, str | None]] = [
-    # --- sillyspec（D-001 不分子命令：复合命令 / npx wrapper / 子命令都归 sillyspec）
+    # --- sillyspec（ql-20260705-006 主命令判定：直接调用 / 包装 / 复合命令都归）
     ("Bash", {"command": "sillyspec run execute"}, "sillyspec"),
     ("Bash", {"command": "sillyspec run plan"}, "sillyspec"),
     ("Bash", {"command": "sillyspec run execute && git commit"}, "sillyspec"),
     ("Bash", {"command": "git add . && sillyspec run execute"}, "sillyspec"),
     ("Bash", {"command": "npx sillyspec run plan"}, "sillyspec"),
     ("Bash", {"command": "pnpm sillyspec run verify"}, "sillyspec"),
-    # --- bash（普通命令，不含 sillyspec 子串）
+    # --- bash（普通命令 / ql-20260705-006 排除脚本内容含 sillyspec 字样误归）
     ("Bash", {"command": "ls -la"}, "bash"),
     ("Bash", {"command": "git status"}, "bash"),
     ("Bash", {"command": "uv run pytest -v"}, "bash"),
+    ("Bash", {"command": "cat docs/sillyspec-note.md"}, "bash"),
+    ("Bash", {"command": "grep sillyspec *.ts"}, "bash"),
     ("Bash", {}, "bash"),
     ("Bash", None, "bash"),
     # --- skill
@@ -131,21 +133,29 @@ def test_bash_missing_command_key() -> None:
 
 
 def test_bash_command_not_string() -> None:
-    """Bash command 非 string（异常 payload）兜底为 bash 不崩。"""
-    # design 实现：``((args or {}).get("command") or "")`` 遇非 str 时
-    # ``in`` 检查会抛 TypeError——这里锁定当前实现行为：调用方应保证 str。
-    # 若未来要兼容非 str，需在 tool_kind.py 加 str() 强转；当前与 TS
-    # ``String(args?.command ?? '')`` 行为对齐前需先决策（不在此 task 范围）。
-    with pytest.raises(TypeError):
-        classify_tool_kind("Bash", {"command": 123})  # type: ignore[arg-type]
+    """ql-20260705-006：Bash command 非 str → 兜底 "" 归 bash（isinstance 守卫）。"""
+    # design 实现：raw_cmd if isinstance(raw_cmd, str) else ""——非 str 兜底 ""，
+    # 与 TS `typeof rawCmd === 'string' ? rawCmd : ''` 同逻辑（R-05 防漂移）。
+    assert classify_tool_kind("Bash", {"command": 123}) == "bash"  # type: ignore[arg-type]
 
 
-def test_sillyspec_substring_semantics() -> None:
-    """D-001：command 含 sillyspec 子串即标 sillyspec，不分子命令/上下文。"""
-    # 子串出现在路径/参数中也命中（D-001 已权衡 R-06 误标成本低）
-    assert classify_tool_kind("Bash", {"command": "cat docs/sillyspec-note.md"}) == "sillyspec"
-    # 大小写不敏感（command 本身不归一化，仅 tool_name 归一化）——
-    # ``SillySpec`` 大写不含小写 ``sillyspec`` 子串 → bash
+def test_sillyspec_main_command_semantics() -> None:
+    """ql-20260705-006 (C3)：推翻 D-001 子串语义，改主命令判定。
+
+    command 任一段主命令是 sillyspec 才归 sillyspec；脚本内容/grep/cat 含
+    sillyspec 字样不再误归（DB 实测 run be48ad3a 41 条 sillyspec 83% 误归）。
+    """
+    # 主命令判定：直接调用 + pnpm/npx 包装 + 复合命令任一段都归 sillyspec
+    assert classify_tool_kind("Bash", {"command": "sillyspec run scan"}) == "sillyspec"
+    assert classify_tool_kind("Bash", {"command": "npx sillyspec run plan"}) == "sillyspec"
+    assert (
+        classify_tool_kind("Bash", {"command": "git add . && sillyspec run execute"}) == "sillyspec"
+    )
+    # 排除误归：脚本内容 / grep / cat 含 sillyspec 字样 → bash
+    assert classify_tool_kind("Bash", {"command": "cat docs/sillyspec-note.md"}) == "bash"
+    assert classify_tool_kind("Bash", {"command": "grep sillyspec *.ts"}) == "bash"
+    assert classify_tool_kind("Bash", {"command": "python -c \"print('sillyspec')\""}) == "bash"
+    # 大小写：cmd 不归一化，SillySpec 大写 != sillyspec → bash
     assert classify_tool_kind("Bash", {"command": "SillySpec run plan"}) == "bash"
 
 

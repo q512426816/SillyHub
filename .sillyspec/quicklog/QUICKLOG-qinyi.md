@@ -48,6 +48,15 @@ created_at: 2026-07-05 16:33:00
 修法：输入词元显示 input_tokens + cache_read_tokens 合并（总输入 token），total>0 显示数字否则 pendingMetric。cache 全命中时显示 cache_read 大数（直观，符合用户"总输入"直觉）。底部徽标仍分开显示 ↓input / ⚡cache_read 细节，互补。
 测试：page.tsx 是 Next.js page 无直接单测；验证靠 typecheck + 部署后 curl/UI 手动看。
 
+## ql-20260705-006-a1b7 | 2026-07-05 18:05:00 | classify 改主命令判定治 sillyspec 误归（C3 两端同步）
+状态：进行中
+关联变更：（无）
+文件：backend/app/modules/agent/tool_kind.py, sillyhub-daemon/src/tool-kind.ts, backend/tests/modules/agent/test_tool_kind.py, sillyhub-daemon/tests/tool-kind.test.ts
+依据：DB 实测 run be48ad3a 的 41 条 sillyspec 里 34 条（83%）是误归——都是 `python -c "..."` 生成 sillyspec 文档，脚本内容含 sillyspec 字样被 D-001"command 含子串即标"逻辑误判。D-001 基于"误标成本低"假设，实际误标率 83% 太高。
+修法（推翻 D-001 子串语义，改主命令判定）：command 任一段（&&/;/|）的主命令是 sillyspec 才归 sillyspec；覆盖直接调用 + pnpm/npx/yarn/sudo/node 包装 + 复合命令。脚本内容/grep/cat 含 sillyspec 字样的不再误归。两端 PY+TS 同步 + 测试同步。
+测试：改 SHARED_CASES + test_sillyspec_substring_semantics（cat sillyspec-note.md 从 sillyspec 改 bash）；加 python/grep 误归排除用例。
+
+
 
 
 
