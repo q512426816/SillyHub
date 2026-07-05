@@ -57,6 +57,7 @@ export async function scanGenerate(
   pathSource?: "server-local" | "daemon-client",
   daemonRuntimeId?: string | null,
   specStrategy?: SpecStrategy,
+  daemonId?: string | null,
 ): Promise<ScanGenerateResponse> {
   return apiFetch<ScanGenerateResponse>("/api/workspaces/scan-generate", {
     method: "POST",
@@ -65,6 +66,9 @@ export async function scanGenerate(
       ...(provider ? { provider } : {}),
       ...(model ? { model } : {}),
       ...(pathSource ? { path_source: pathSource } : {}),
+      // daemon-entity-binding 后优先传 daemon_id（稳定绑定键）；daemon_runtime_id
+      // 保留为 legacy 兼容，二者 backend schema 层 daemon-client 至少一个非空。
+      ...(daemonId ? { daemon_id: daemonId } : {}),
       ...(daemonRuntimeId ? { daemon_runtime_id: daemonRuntimeId } : {}),
       ...(specStrategy ? { spec_strategy: specStrategy } : {}),
     },

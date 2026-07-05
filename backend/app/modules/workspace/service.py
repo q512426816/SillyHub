@@ -1159,19 +1159,25 @@ class WorkspaceService:
         *,
         root_path: str,
         user_id: uuid.UUID,
-        daemon_runtime_id: uuid.UUID,
         agent_service: "AgentService",
         provider: str | None = None,
         model: str | None = None,
         spec_strategy: str = "platform-managed",
+        daemon_id: uuid.UUID | None = None,
+        daemon_runtime_id: uuid.UUID | None = None,
     ) -> tuple[uuid.UUID, uuid.UUID]:
         """daemon-client scan-generate：创建 pending workspace + 派 scan lease 给绑定 daemon。
 
         FR-06 / D-003@v1：backend 读不到客户端 root_path，跳过 _guard_path 本地校验；
-        workspace.path_source='daemon-client' + daemon_runtime_id 绑定；dispatch 经
-        task-03 强绑到 daemon_runtime_id。scan 产出由 daemon 端 sillyspec scan 生成 →
+        daemon-entity-binding 后绑定键为 daemon_id（per-member binding 行），daemon_runtime_id
+        降级为 legacy 兼容（二者 schema 层保证至少一个非空，daemon_id 优先）。新建 workspace
+        时若给 daemon_id，复用 upsert_my_binding 建成员绑定行，使 start_scan_dispatch 的
+        MemberBindingResolver 能解析到 daemon。scan 产出由 daemon 端 sillyspec scan 生成 →
         task-09 postSpecSync 回传 → backend spec_root 覆盖（真理源在服务器）。
         """
+        # daemon_id 优先：早校验归属（与 create 流程一致，防跨用户劫持）。
+        if daemon_id is not None:
+            await self._guard_daemon_owned_by_user(daemon_id, user_id)
         workspace = await self._find_active_by_root_path(root_path)
         if workspace is None:
             name = Path(root_path).name
@@ -1199,6 +1205,21 @@ class WorkspaceService:
             await self._ensure_empty_spec_workspace(workspace.id, strategy=spec_strategy)
             # daemon-client scan-generate：创建人自动添加为 owner
             await self._ensure_creator_as_owner(workspace.id, user_id=user_id)
+            # daemon_id 维度：建成员绑定行（workspace+user+daemon+path），对齐 create 流程，
+            # 使后续 start_scan_dispatch 经 MemberBindingResolver 解析到该 daemon。
+            if daemon_id is not None:
+                from app.modules.workspace.member_runtimes.service import (
+                    upsert_my_binding,
+                )
+
+                await upsert_my_binding(
+                    self._session,
+                    workspace.id,
+                    user_id,
+                    daemon_id=daemon_id,
+                    root_path=root_path,
+                    path_source="daemon-client",
+                )
             await self._session.flush()  # 确保 member 行写入再提交
 
         existing_run = await self._find_active_scan_run(workspace.id)
@@ -1223,7 +1244,8 @@ class WorkspaceService:
             "workspace.scan_generated.daemon_client",
             workspace_id=str(workspace.id),
             agent_run_id=str(agent_run.id),
-            daemon_runtime_id=str(daemon_runtime_id),
+            daemon_id=str(daemon_id) if daemon_id else None,
+            daemon_runtime_id=str(daemon_runtime_id) if daemon_runtime_id else None,
         )
         return (workspace.id, agent_run.id)
 

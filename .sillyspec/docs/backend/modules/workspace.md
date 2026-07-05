@@ -39,4 +39,5 @@ rescan: 复用 scanner，差异更新
 - owner 展示：列表 owner 由 created_by JOIN users 填充（OwnerRead 嵌套 DTO，D-006），详情可为 None。
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+- scan-generate daemon-client 子流绑定键（ql-20260705-003）：daemon-entity-binding 后稳定绑定键是 `daemon_id`（守护进程实体），`daemon_runtime_id` 退化为 legacy 兼容。`ScanGenerateRequest` 接受 `daemon_id` 或 `daemon_runtime_id` 至少一个（daemon_id 优先）；`scan_generate_daemon_client` 给 daemon_id 时早校验 `_guard_daemon_owned_by_user` 防劫持，新建 workspace 时 `upsert_my_binding` 建 per-member 绑定行（与 create 流程对齐），使 `start_scan_dispatch` 经 MemberBindingResolver 解析到 daemon。前端 scanGenerate 加 `daemonId` 参，调用点（agent/page、workspace-config-card）一律传 `myBinding.daemon_id`。
 <!-- MANUAL_NOTES_END -->

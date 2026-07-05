@@ -1,16 +1,15 @@
 /**
- * task-15: workspaces/[id]/page.tsx daemon-client 扫描入口 page 层测试（D-006@v1）。
- * task-08: 三态引导 + init dispatch + owner 门禁 + 409 确认框。
+ * task-09 / FR-003：page 层接线 WorkspaceConfigCard 的回归测试。
  *
- * 覆盖 task-14 的 page 改动：daemon-client 三策略显示「扫描」按钮、点击触发
- * scanGenerate（带 spec_strategy）、与 platform-managed「初始化」共存。
- * task-08 覆盖：未初始化/已初始化未扫描/已扫描三态引导、初始化按钮改调 initDispatch、
- * 扫描按钮非 owner 禁用提示、owner 已扫时弹确认。
- *
- * scanGenerate 的 spec_strategy 透传契约由 lib/workspaces.test.ts 覆盖；
- * AgentRunPanel 内部 SSE/markdown 不在本测试范围（整体 mock）。
+ * task-07 把原「规范管理（Spec Workspace）」SectionCard 整段删除，替换为
+ * <WorkspaceConfigCard>。卡片内部 6 状态分支（初始化/扫描/同步/导入/三态引导
+ * /owner 门禁/409 重扫）的按钮与文案由 task-08 的 workspace-config-card.test.tsx
+ * 单独覆盖；本测试只验证 page 层接线：
+ *   1. page 渲染 <WorkspaceConfigCard>（用 data-testid mock 隔离卡片内部）；
+ *   2. 其他区块（基本信息 / 默认智能体 / Overview / Quick nav）行为零回归——
+ *      特别保留 task-11 的 default_agent × 3 case 作为「其他区块行为不变」守护。
  */
-import { cleanup, render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import WorkspaceDetailPage from "@/app/(dashboard)/workspaces/[id]/page";
@@ -25,19 +24,12 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-// ── AgentRunPanel 整体 mock（隔离 SSE + markdown-text jsdom null）─────────────
-// MarkdownText（next/dynamic ssr:false）在 jsdom 下一直为 null（已知坑
-// frontend-markdown-text-jsdom-null）。AgentRunPanel mock 整体隔离，无需再单独 mock。
-// 其他 test 需要 MarkdownText 时分两种模式：测试父组件逻辑→vi.mock 成纯文本渲染；
-vi.mock("@/components/agent-run-panel", () => ({
-  AgentRunPanel: ({ onDone }: { onDone?: (status: string) => void }) => (
-    <div data-testid="agent-run-panel-mock">
-      <button onClick={() => onDone?.("failed")}>模拟扫描失败</button>
-    </div>
+// ── 子组件 mock（减少依赖）───────────────────────────────────────────────────
+vi.mock("@/components/workspace-config-card", () => ({
+  WorkspaceConfigCard: () => (
+    <div data-testid="workspace-config-card-mock" />
   ),
 }));
-
-// ── 子组件 mock（减少依赖）───────────────────────────────────────────────────
 vi.mock("@/components/workspace-daemon-switcher", () => ({
   WorkspaceDaemonSwitcher: () => null,
 }));
@@ -196,278 +188,53 @@ async function renderWithStrategy(
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
-describe("WorkspaceDetailPage daemon-client 扫描入口（task-14 / D-006@v1 + task-08）", () => {
+describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）", () => {
   afterEach(() => {
     vi.clearAllMocks();
     useSession.getState().clear();
   });
 
-  // ── 既有 task-14 测试（保持向后兼容）──
+  // ── task-09：page 层接线断言 ──
 
-  it("daemon-client 三策略均显示「扫描」按钮", async () => {
+  it("page 渲染 <WorkspaceConfigCard>（原规范管理区已替换为卡片）", async () => {
+    await renderWithStrategy("platform-managed");
+    expect(screen.getByTestId("workspace-config-card-mock")).toBeInTheDocument();
+  });
+
+  it("page 不再渲染原「规范管理」SectionCard 标题", async () => {
+    await renderWithStrategy("repo-native");
+    // task-07 删除原 SectionCard，标题文本不应再出现在 page 层
+    expect(screen.queryByText("规范管理")).not.toBeInTheDocument();
+    expect(screen.queryByText("规范管理（Spec Workspace）")).not.toBeInTheDocument();
+  });
+
+  it("page 不再直接展示 spec_root / profile_version 字段（已迁入卡片）", async () => {
+    await renderWithStrategy("platform-managed");
+    // 这些字段原本直接在 page 渲染，task-07 后迁入卡片内部展示
+    expect(screen.queryByText("/data/spec-workspaces/ws-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("0.1.0")).not.toBeInTheDocument();
+  });
+
+  it("page 不再渲染已迁入卡片的操作按钮（初始化/扫描/同步到服务器）", async () => {
+    await renderWithStrategy("platform-managed", {
+      initSyncedAt: "2026-07-02T10:00:00Z",
+      componentCount: 3,
+    });
+    // 这些按钮随 task-07 迁入卡片，page 层不再渲染（行为由 task-08 组件测试覆盖）
+    expect(screen.queryByRole("button", { name: "初始化" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "扫描" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "同步到服务器" })).not.toBeInTheDocument();
+  });
+
+  it("三种策略下卡片均渲染（接线不分策略）", async () => {
     for (const strat of ["platform-managed", "repo-mirrored", "repo-native"] as const) {
       cleanup();
       await renderWithStrategy(strat);
-      expect(screen.getByRole("button", { name: "扫描" })).toBeInTheDocument();
+      expect(screen.getByTestId("workspace-config-card-mock")).toBeInTheDocument();
     }
   });
 
-  it("platform-managed 同时显示「初始化」+「扫描」", async () => {
-    await renderWithStrategy("platform-managed");
-    expect(screen.getByRole("button", { name: "初始化" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "扫描" })).toBeInTheDocument();
-  });
-
-  it("点击「扫描」触发 scanGenerate 带 daemon-client + spec_strategy", async () => {
-    await renderWithStrategy("repo-native");
-    fireEvent.click(screen.getByRole("button", { name: "扫描" }));
-    await waitFor(() => expect(workspacesApi.scanGenerate).toHaveBeenCalled());
-    expect(workspacesApi.scanGenerate.mock.calls.length).toBeGreaterThan(0);
-    const args = workspacesApi.scanGenerate.mock.calls[0]!;
-    expect(args[0]).toBe("C:/proj"); // root_path
-    expect(args[3]).toBe("daemon-client"); // path_source
-    expect(args[4]).toBe("rid-1"); // daemon_runtime_id
-    expect(args[5]).toBe("repo-native"); // spec_strategy
-  });
-
-  it("scan 中断(failed)显示「重新扫描」入口而非冷冰冰失败（ql-20260630-001）", async () => {
-    await renderWithStrategy("repo-native");
-    fireEvent.click(screen.getByRole("button", { name: "扫描" }));
-    await waitFor(() =>
-      expect(screen.getByTestId("agent-run-panel-mock")).toBeInTheDocument(),
-    );
-    // 模拟 daemon 重启：后端 _converge_crashed_run 把 run 收敛为 failed
-    fireEvent.click(screen.getByRole("button", { name: "模拟扫描失败" }));
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "重新扫描" })).toBeInTheDocument(),
-    );
-    expect(screen.getByText(/上次扫描未完成/)).toBeInTheDocument();
-  });
-
-  // ── task-08 三态引导 ──
-
-  it("未初始化时显示「初始化」按钮 + 引导", async () => {
-    await renderWithStrategy("platform-managed");
-    // 未初始化 → init_synced_at 为 null → 蓝色引导
-    expect(screen.getByText("此工作区尚未初始化。")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "初始化" })).toBeInTheDocument();
-    // 不应出现已初始化或就绪提示
-    expect(screen.queryByText("已初始化，但工作区尚无扫描文档。")).not.toBeInTheDocument();
-    expect(screen.queryByText("工作区已就绪。")).not.toBeInTheDocument();
-  });
-
-  it("repo-native 未初始化时显示「扫描」引导而非「初始化」", async () => {
-    // 回归：原消息不区分策略，对所有策略都提示"点击初始化按钮"，
-    // 但初始化按钮只在 platform-managed 下渲染，导致 repo-native 用户
-    // 看到承诺一个不存在的按钮。修复后文案按策略区分。
-    await renderWithStrategy("repo-native");
-    expect(screen.getByText("此工作区尚未扫描。")).toBeInTheDocument();
-    // 不应出现初始化按钮或初始化引导
-    expect(screen.queryByText("此工作区尚未初始化。")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "初始化" })).not.toBeInTheDocument();
-  });
-
-  it("已初始化·未扫描时显示请先扫描引导", async () => {
-    await renderWithStrategy("platform-managed", {
-      initSyncedAt: "2026-07-02T10:00:00Z",
-      componentCount: 0,
-    });
-    expect(screen.getByText("已初始化，但工作区尚无扫描文档。")).toBeInTheDocument();
-    expect(screen.getByText(/请由 owner 点击/)).toBeInTheDocument();
-    // 不应出现未初始化或就绪
-    expect(screen.queryByText("此工作区尚未初始化。")).not.toBeInTheDocument();
-    expect(screen.queryByText("工作区已就绪。")).not.toBeInTheDocument();
-  });
-
-  it("已初始化·已扫描时显示就绪引导", async () => {
-    await renderWithStrategy("platform-managed", {
-      initSyncedAt: "2026-07-02T10:00:00Z",
-      componentCount: 3,
-    });
-    expect(screen.getByText("工作区已就绪。")).toBeInTheDocument();
-    expect(screen.getByText(/规范文档已同步/)).toBeInTheDocument();
-    // 不应出现未初始化或请先扫描
-    expect(screen.queryByText("此工作区尚未初始化。")).not.toBeInTheDocument();
-    expect(screen.queryByText("已初始化，但工作区尚无扫描文档。")).not.toBeInTheDocument();
-  });
-
-  // ── task-08 init dispatch ──
-
-  it("点击「初始化」调用 initDispatch 并显示进行中", async () => {
-    const mockInitDispatch = vi.fn().mockResolvedValue({
-      lease_id: "lease-1",
-      runtime_id: "rid-1",
-      claim_token: "tok-1",
-    });
-    // 临时替换 initDispatch mock
-    vi.mocked(await import("@/lib/spec-workspaces")).initDispatch = mockInitDispatch;
-
-    await renderWithStrategy("platform-managed");
-    fireEvent.click(screen.getByRole("button", { name: "初始化" }));
-
-    await waitFor(() => {
-      expect(mockInitDispatch).toHaveBeenCalledWith("ws-1");
-      expect(screen.getByText("初始化进行中...")).toBeInTheDocument();
-    });
-  });
-
-  // ── task-08 owner 门禁 ──
-
-  it("非 owner 扫描按钮禁用 + title 提示", async () => {
-    useSession.getState().setUser({
-      id: "user-2",
-      email: "other@test.com",
-      displayName: "Other User",
-    });
-    // 创建 owner 为 user-1 的工作区
-    const ws = {
-      id: "ws-1",
-      name: "multi-agent-platform",
-      slug: "multi-agent-platform",
-      root_path: "C:/proj",
-      status: "active",
-      path_source: "daemon-client",
-      daemon_runtime_id: "rid-1",
-      owner: { user_id: "user-1", email: "owner@test.com", display_name: "Owner" },
-      default_agent: null,
-      default_model: null,
-      created_at: "2026-06-30T00:55:11Z",
-      last_scanned_at: "2026-06-30T00:55:11Z",
-    } as unknown as Workspace;
-    const specWs = {
-      id: "sw-1",
-      workspace_id: "ws-1",
-      spec_root: "/data/spec-workspaces/ws-1",
-      strategy: "repo-native" as const,
-      repo_sillyspec_path: null,
-      profile_version: "0.1.0",
-      sync_status: "clean",
-      last_synced_at: "2026-06-30T00:55:27Z",
-      created_at: "2026-06-30T00:55:12Z",
-      updated_at: "2026-06-30T00:55:27Z",
-    } as unknown as SpecWorkspace;
-
-    workspacesApi.getWorkspace.mockResolvedValue(ws);
-    specApi.getSpecWorkspace.mockResolvedValue(specWs);
-    workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1" });
-    componentsApi.listComponents.mockResolvedValue({ items: [], total: 0 });
-    mockDefaultBinding();
-
-    render(<WorkspaceDetailPage params={{ id: "ws-1" }} />);
-    await waitFor(() =>
-      expect(screen.getAllByText("multi-agent-platform").length).toBeGreaterThan(0),
-    );
-
-    const scanBtn = screen.getByRole("button", { name: "扫描" });
-    expect(scanBtn).toBeDisabled();
-    expect(scanBtn).toHaveAttribute("title", "仅 owner 可扫描");
-  });
-
-  it("owner 已有扫描结果时点扫描弹确认框", async () => {
-    // 当前用户即 owner
-    useSession.getState().setUser({
-      id: "user-1",
-      email: "owner@test.com",
-      displayName: "Owner",
-    });
-
-    await renderWithStrategy("repo-native", {
-      initSyncedAt: "2026-07-02T10:00:00Z",
-      componentCount: 3, // 已有扫描结果
-    });
-
-    // mock confirm → 取消
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
-
-    fireEvent.click(screen.getByRole("button", { name: "扫描" }));
-
-    await waitFor(() => {
-      expect(confirmSpy).toHaveBeenCalled();
-      expect(workspacesApi.scanGenerate).not.toHaveBeenCalled(); // 取消不调用
-    });
-
-    confirmSpy.mockRestore();
-  });
-
-  it("owner 确认重扫后调用 scanGenerate", async () => {
-    useSession.getState().setUser({
-      id: "user-1",
-      email: "owner@test.com",
-      displayName: "Owner",
-    });
-
-    await renderWithStrategy("repo-native", {
-      initSyncedAt: "2026-07-02T10:00:00Z",
-      componentCount: 3,
-    });
-
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-
-    fireEvent.click(screen.getByRole("button", { name: "扫描" }));
-
-    await waitFor(() => {
-      expect(confirmSpy).toHaveBeenCalled();
-      expect(workspacesApi.scanGenerate).toHaveBeenCalledTimes(1);
-    });
-
-    confirmSpy.mockRestore();
-  });
-
-  // ── task-14 / D-012：同步按钮状态机 ──
-
-  it("已就绪（initSynced + componentCount > 0）时显示「同步到服务器」按钮", async () => {
-    specApi.syncManual.mockResolvedValue({ status: "done" });
-    await renderWithStrategy("platform-managed", {
-      initSyncedAt: "2026-07-02T10:00:00Z",
-      componentCount: 3,
-    });
-    expect(screen.getByRole("button", { name: "同步到服务器" })).toBeInTheDocument();
-  });
-
-  it("未就绪时不显示同步按钮", async () => {
-    specApi.syncManual.mockResolvedValue({ status: "done" });
-    // componentCount=0 → 未就绪
-    await renderWithStrategy("platform-managed", {
-      initSyncedAt: "2026-07-02T10:00:00Z",
-      componentCount: 0,
-    });
-    expect(screen.queryByRole("button", { name: "同步到服务器" })).not.toBeInTheDocument();
-
-    cleanup();
-    // initSyncedAt=null → 未就绪
-    await renderWithStrategy("platform-managed", {
-      initSyncedAt: null,
-      componentCount: 3,
-    });
-    expect(screen.queryByRole("button", { name: "同步到服务器" })).not.toBeInTheDocument();
-  });
-
-  it("syncManual 返 done → 按钮变「已同步」+ 反馈展示", async () => {
-    specApi.syncManual.mockResolvedValue({ status: "done" });
-    await renderWithStrategy("platform-managed", {
-      initSyncedAt: "2026-07-02T10:00:00Z",
-      componentCount: 3,
-    });
-    fireEvent.click(screen.getByRole("button", { name: "同步到服务器" }));
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "已同步" })).toBeInTheDocument();
-      expect(screen.getByText("已同步。")).toBeInTheDocument();
-    });
-  });
-
-  it("syncManual 失败 → 显示失败反馈", async () => {
-    specApi.syncManual.mockRejectedValue(new Error("网络错误"));
-    await renderWithStrategy("platform-managed", {
-      initSyncedAt: "2026-07-02T10:00:00Z",
-      componentCount: 3,
-    });
-    fireEvent.click(screen.getByRole("button", { name: "同步到服务器" }));
-    await waitFor(() => {
-      expect(screen.getByText("同步失败。")).toBeInTheDocument();
-    });
-  });
-
-  // ── task-11 / daemon-entity-binding：default_agent 独立选择器 ──
+  // ── task-11 / daemon-entity-binding：default_agent 独立选择器（保留，其他区块行为不变）──
 
   it("default_agent 卡片展示：daemon 未绑时显示占位提示", async () => {
     await renderWithStrategy("repo-native");
@@ -533,8 +300,10 @@ describe("WorkspaceDetailPage daemon-client 扫描入口（task-14 / D-006@v1 + 
 
     // 不应出现"请先绑定"占位
     expect(screen.queryByText("请先绑定守护进程。")).not.toBeInTheDocument();
-    // 应该有 provider 选择器（<select> 元素）
-    const select = screen.getByRole("combobox");
+    // 应该有 provider 选择器（<select> 元素）；用 findByRole 等 useEffect 异步
+    // 加载 daemon providers 完成（boundDaemonProviders 变非空才渲染 select），
+    // 修全量跑 flaky：waitFor 只等 workspace name，effect 来不及 settle。
+    const select = await screen.findByRole("combobox");
     expect(select).toBeInTheDocument();
     // 选项应包含 claude
     expect(select).toContainHTML("Claude Code");
@@ -585,8 +354,11 @@ describe("WorkspaceDetailPage daemon-client 扫描入口（task-14 / D-006@v1 + 
       expect(screen.getAllByText("multi-agent-platform").length).toBeGreaterThan(0),
     );
 
+    // 用 findByText 等 useEffect 异步加载完成（boundDaemonProviders 经 filter
+    // 后为空 → 走"无在线 provider"分支）；同步 getByText 在 myBinding/effect
+    // 时序边界下可能短暂命中"请先绑定"占位，造成全量跑 flaky。
     expect(
-      screen.getByText("当前绑定的守护进程无在线智能体提供方，请先确认守护进程已启用。"),
+      await screen.findByText("当前绑定的守护进程无在线智能体提供方，请先确认守护进程已启用。"),
     ).toBeInTheDocument();
   });
 });

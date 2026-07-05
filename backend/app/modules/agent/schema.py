@@ -136,6 +136,9 @@ class AgentRunLogEntry(BaseModel):
     parent_tool_use_id: str | None = None
     subagent_type: str | None = None
     depth: int | None = None
+    # 2026-07-05-agent-log-type-tags task-01 / D-003@v1 方案 B：结构化工具类型，
+    # 经 model_validate 自动透传（落库侧 task-04/05 注入，调用点不改）。
+    tool_kind: str | None = None
     model_config = {"from_attributes": True}
 
 

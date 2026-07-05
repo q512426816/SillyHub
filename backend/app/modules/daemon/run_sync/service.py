@@ -24,6 +24,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.modules.agent.model import AgentRun, AgentRunLog
+from app.modules.agent.tool_kind import classify_tool_kind
 from app.modules.daemon.lease.service import DaemonAgentRunNotFound
 from app.modules.daemon.model import DaemonTaskLease
 from app.modules.daemon.session.service import TERMINAL_TURN_STATUSES
@@ -151,6 +152,10 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
                 "parent_tool_use_id": log_payload.get("parent_tool_use_id"),
                 "subagent_type": log_payload.get("subagent_type"),
                 "depth": log_payload.get("depth"),
+                # 2026-07-05-agent-log-type-tags task-04 / FR-06 / R-08：tool_kind 透传到
+                # session channel（interactive run 实时流），与 run channel published_logs
+                # 对齐，前端实时流工具徽标 + 第二层筛选可拿到标签。
+                "tool_kind": log_payload.get("tool_kind"),
             }
             await redis.publish(session_channel, json.dumps(session_payload))
         # ql-20260621：实时 token 透传到 session channel（onTokens）。
@@ -378,6 +383,30 @@ class RunSyncService:
                 existing_dedup_keys.add(dedup_key)
 
             log_id = uuid.uuid4()
+            # 2026-07-05-agent-log-type-tags task-04 / FR-05：batch 路径 tool_kind
+            # 兜底落库。优先 msg.get("tool_kind")（新 daemon 已带，含 _extract_sdk_messages
+            # 主路径打标值）；缺则仅对 channel=='tool_call' 行 JSON.parse(content)
+            # 取 tool/args 调 classify_tool_kind 兜底（旧 daemon 无 tool_kind 字段时启用）。
+            # stdout 文本行（[TOOL_USE]/[ASSISTANT]/...）不兜底（tool_kind=None），
+            # design §5 Phase 2 明确：DB 列层面只 tool_call 行有值。
+            # 防御：classify_tool_kind 在 bash + args.command 非 str 时会抛 TypeError
+            # （Python 版未强转），JSON.parse 失败也会抛；统一 try/except 静默退 None，
+            # 不阻塞落库（design §6 / R-08）。
+            tool_kind = msg.get("tool_kind") if isinstance(msg, dict) else None
+            if tool_kind is None and channel == "tool_call":
+                try:
+                    parsed = json.loads(content) if isinstance(content, str) and content else {}
+                    if isinstance(parsed, dict):
+                        tool_kind = classify_tool_kind(
+                            parsed.get("tool"),
+                            parsed.get("args") if isinstance(parsed.get("args"), dict) else None,
+                        )
+                except Exception:
+                    tool_kind = None
+            else:
+                # msg.get 优先命中（含 _extract_sdk_messages 注入值 + 新 daemon 直传）；
+                # 显式归一 None，避免下游 publish 拿到非预期类型。
+                tool_kind = tool_kind if isinstance(tool_kind, str) and tool_kind else None
             log_entry = AgentRunLog(
                 id=log_id,
                 run_id=agent_run_id,
@@ -394,6 +423,9 @@ class RunSyncService:
                 parent_tool_use_id=msg.get("parent_tool_use_id") if isinstance(msg, dict) else None,
                 subagent_type=msg.get("subagent_type") if isinstance(msg, dict) else None,
                 depth=msg.get("depth") if isinstance(msg, dict) else None,
+                # task-04 / FR-04 FR-05：tool_kind 落库列（_extract_sdk_messages 主路径
+                # 或 JSON.parse 兜底；stdout 行为 None）。
+                tool_kind=tool_kind,
             )
             self._session.add(log_entry)
             count += 1
@@ -410,6 +442,10 @@ class RunSyncService:
                     "parent_tool_use_id": log_entry.parent_tool_use_id,
                     "subagent_type": log_entry.subagent_type,
                     "depth": log_entry.depth,
+                    # 2026-07-05-agent-log-type-tags task-04 / FR-06 / R-08：tool_kind
+                    # 透传到 SSE 实时流（run channel）。前端实时日志行渲染工具徽标 +
+                    # 第二层筛选需此字段，DB 列与实时流保持一致。
+                    "tool_kind": log_entry.tool_kind,
                 }
             )
 
@@ -1128,11 +1164,24 @@ def _extract_sdk_messages(msg: dict) -> list[dict]:
             except (TypeError, ValueError):
                 tc_payload["args"] = {}
                 tc_json = json.dumps(tc_payload)
+            # 2026-07-05-agent-log-type-tags task-04 / FR-04：interactive 路径
+            # tool_use 打标。从 SDK block 的 name + input 调 classify_tool_kind（task-02）
+            # 识别，结果挂到 tool_call JSON 那条 flat record 顶层 tool_kind 字段（与
+            # event_type/content/channel 同级），后续 submit_messages 落库 +
+            # publish payload 都从 msg.get("tool_kind") 取（FR-05/06）。
+            # 配对的 stdout [TOOL_USE] 文本行不带 tool_kind（design §5 Phase 2）。
+            # 防御：classify_tool_kind 在 bash + args.command 非 str（list/dict）
+            # 时 "sillyspec" in cmd 会抛 TypeError，包 try/except 静默退 None。
+            try:
+                tool_kind = classify_tool_kind(name, input_obj)
+            except Exception:
+                tool_kind = None
             out.append(
                 {
                     "event_type": "tool_use",
                     "content": tc_json,
                     "channel": "tool_call",
+                    "tool_kind": tool_kind,
                 }
             )
 

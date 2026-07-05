@@ -308,6 +308,10 @@ class AgentRunLog(BaseModel, table=True):
         # 支持按 parent_tool_use_id 聚合查询某子代理的所有日志行（方案 B 列式承载
         # 的核心优势，见 design §8）。主 agent 行 parent_tool_use_id=NULL 不受索引影响。
         Index("ix_agent_run_logs_parent", "parent_tool_use_id"),
+        # 2026-07-05-agent-log-type-tags task-01 / D-003@v1 方案 B：结构化 tool_kind
+        # 列索引，支撑 Phase3 两层筛选（tool_kind / parent_tool_use_id 维度筛日志）。
+        # None 表示非工具调用（user_input 等），不受筛选影响。
+        Index("ix_agent_run_logs_tool_kind", "tool_kind"),
     )
 
     id: uuid.UUID = Field(
@@ -355,6 +359,14 @@ class AgentRunLog(BaseModel, table=True):
     depth: int | None = Field(
         default=None,
         sa_column=Column(Integer, nullable=True),
+    )
+    # 2026-07-05-agent-log-type-tags task-01 / D-003@v1 方案 B：结构化工具类型列，
+    # 由 task-04/05 在落库时从 SDK message 解析注入（如 Read/Edit/Bash/...）。
+    # None 表示非工具调用日志（user_input / 纯文本 assistant 输出 / stderr 等），
+    # 依赖 default=None 兜底，user_input 构造点无需改动。
+    tool_kind: str | None = Field(
+        default=None,
+        sa_column=Column(String(32), nullable=True),
     )
 
 

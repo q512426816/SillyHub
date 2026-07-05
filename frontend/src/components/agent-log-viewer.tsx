@@ -54,6 +54,7 @@ import {
   EMPTY_REPLIED_INPUTS,
 } from "./agent-log/normalize";
 import { ToolCallPreview, CollapsibleSection, ToolResultCard } from "./agent-log/tool-renderers";
+import { toolKindMeta } from "./agent-log/tool-kind-meta";
 import type { AgentLogInputControls, ProcessedLog, ScanCheckResult, SemanticCategory } from "./agent-log/types";
 
 /* ------------------------------------------------------------------ */
@@ -377,6 +378,24 @@ export function AgentLogRow({
             子代理:{subagentType}
           </span>
         )}
+        {/* task-08 / FR-09 / FR-10 / D-003@v1：tool_call 行追加工具种类徽标（toolKindMeta）。
+            null/undefined/未知 kind → 灰色兜底「工具」（design §10 R-07 兼容旧日志）。
+            放在 type 徽标之后、tool_call 内容之前；tool_result（无 tool_kind）不渲染。 */}
+        {(processedLog.semanticCategory ?? "log") === "tool_call" && (() => {
+          const tk = toolKindMeta(log.tool_kind);
+          const TkIcon = tk.Icon;
+          return (
+            <span
+              className={cn(
+                "mr-1 inline-flex h-5 items-center gap-1 rounded border px-1.5 align-middle text-[10px] font-semibold",
+                tk.badgeClass,
+              )}
+            >
+              <TkIcon className="h-3 w-3 shrink-0" />
+              {tk.label}
+            </span>
+          );
+        })()}
         {/* channel=tool_call → specialized renderer */}
         {toolCall ? (
           <div className="font-mono [overflow-wrap:anywhere]">
@@ -649,6 +668,10 @@ export function AgentLogViewer({
   const scrollRef = containerRef ?? internalRef;
   const [fullscreen, setFullscreen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
+  // task-08 / FR-10 / FR-11 / D-003@v1：第二层「工具类型」筛选（多选 active Set<tool_kind>）。
+  // 仅对 tool_call 行生效：active 非空 → 只显示 tool_kind ∈ active 的 tool_call 行；
+  // 非工具行（assistant/thinking/user/...）不受第二层影响（与第一层 SemanticCategory 正交）。
+  const [activeToolKindFilters, setActiveToolKindFilters] = useState<Set<string>>(new Set());
   // ql-20260626-001 / bug2：视图模式（对话默认 / 全部），单选 tab。恢复 ql-20260625-003
   // 丢失的"默认只显 agent 接收+答复、不默认展示工具调用"诉求（该 quicklog 改动从未
   // commit 进 main，agent-log-viewer.tsx 最近 commit 是 6-23 c1e30256）。
@@ -675,10 +698,20 @@ export function AgentLogViewer({
     if (viewMode === "conversation") {
       return visibleLogs.filter(isConversationLog);
     }
-    return activeFilters.size > 0
+    const afterLayer1 = activeFilters.size > 0
       ? visibleLogs.filter((p) => activeFilters.has(p.semanticCategory ?? "log"))
       : visibleLogs;
-  }, [visibleLogs, viewMode, activeFilters, isConversationLog]);
+    // task-08 / FR-11：第二层工具类型筛选——active 非空时只保留 tool_kind ∈ active 的
+    // tool_call 行；非工具行（assistant/thinking/user/...）一律放行（两层正交）。
+    // tool_kind 缺失（旧日志）在 active 非空时不命中（design §10 R-07：兜底徽标显示，
+    // 但第二层筛选取值集合不含 null，故被隐藏——与原型 line 246 一致）。
+    if (activeToolKindFilters.size === 0) return afterLayer1;
+    return afterLayer1.filter((p) => {
+      const cat = p.semanticCategory ?? "log";
+      if (cat !== "tool_call") return true;
+      return p.log.tool_kind != null && activeToolKindFilters.has(p.log.tool_kind);
+    });
+  }, [visibleLogs, viewMode, activeFilters, activeToolKindFilters, isConversationLog]);
   const turns = useMemo(() => groupIntoTurns(filteredLogs), [filteredLogs]);
 
   // ql-20260621：审批卡片随 ASK 通道展示——无过滤或 ASK(pending_input) 过滤时可见。
@@ -729,6 +762,39 @@ export function AgentLogViewer({
       return next;
     });
   }
+
+  // task-08 / FR-11 / D-003@v1：第二层「工具类型」按钮（11 个，14 枚举的 UI 简化）。
+  // plan/ask/schedule 低频归「其他」不单独列（plan 用 Compass/ask 用 MessageSquareText/
+  // schedule 用 CalendarClock 图标已映射到 TOOL_KIND_META，但 UI 不暴露单独按钮）。
+  // key 严格对齐 backend TOOL_KIND_VALUES / TOOL_KIND_META（agent-log/tool-kind-meta.ts）。
+  const toolKindFilters = [
+    { key: "sillyspec", label: "SillySpec" },
+    { key: "skill", label: "技能" },
+    { key: "bash", label: "命令行" },
+    { key: "read", label: "读文件" },
+    { key: "write", label: "写文件" },
+    { key: "search", label: "搜索" },
+    { key: "task", label: "子任务" },
+    { key: "web", label: "网搜" },
+    { key: "todo", label: "清单" },
+    { key: "mcp", label: "MCP" },
+    { key: "other", label: "其他" },
+  ];
+
+  function toggleToolKindFilter(key: string) {
+    setActiveToolKindFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  // task-08 / R-03 防拥挤：第二层仅在「工具视图」显示——第一层选中「工具」(tool_call)
+  // 或全部视图且无第一层筛选时展示。对话视图不显示。当第一层切走（取消工具）时
+  // 第二层 active 自动失效（filteredLogs 因 tool_call 行被滤掉而无目标，UI 也隐藏）。
+  const showToolKindFilters = viewMode === "all"
+    && (activeFilters.size === 0 || activeFilters.has("tool_call"));
 
   return (
     <div
@@ -794,6 +860,35 @@ export function AgentLogViewer({
             >
               清除
             </button>
+          )}
+          {/* task-08 / FR-11 / D-003@v1：第二层「工具类型」筛选（多选）。
+              R-03 防拥挤：仅在工具视图（第一层含 tool_call 或无第一层筛选）显示。
+              横向滚动：flex + overflow-x-auto，11 按钮在窄屏不挤占第一层。 */}
+          {showToolKindFilters && (
+            <div className="flex items-center gap-0.5 overflow-x-auto rounded border border-zinc-200 bg-zinc-50 p-0.5">
+              {toolKindFilters.map((f) => (
+                <button
+                  key={f.key}
+                  onClick={() => toggleToolKindFilter(f.key)}
+                  className={cn(
+                    "inline-flex h-5 shrink-0 items-center rounded px-1.5 text-[10px] font-semibold transition-colors",
+                    activeToolKindFilters.has(f.key)
+                      ? "border border-blue-500/40 bg-blue-500/15 text-blue-700"
+                      : "border border-transparent text-zinc-600 hover:text-zinc-900",
+                  )}
+                >
+                  {f.label}
+                </button>
+              ))}
+              {activeToolKindFilters.size > 0 && (
+                <button
+                  onClick={() => setActiveToolKindFilters(new Set())}
+                  className="ml-1 shrink-0 text-[10px] text-zinc-500 hover:text-zinc-800"
+                >
+                  清除
+                </button>
+              )}
+            </div>
           )}
           {summary}
           {actions}

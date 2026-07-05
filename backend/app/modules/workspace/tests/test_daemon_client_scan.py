@@ -307,3 +307,155 @@ async def test_create_daemon_client_rejects_daemon_owned_by_other_user(db_sessio
             created_by=owner_id,
         )
     assert exc_info.value.code == "daemon_not_owned"
+
+
+# ---------------------------------------------------------------------------
+# ql-20260705-003：scan-generate 接 daemon_id（daemon-entity-binding 遗漏补齐）
+# ---------------------------------------------------------------------------
+
+
+def test_scan_generate_request_accepts_daemon_id_without_runtime_id() -> None:
+    """ScanGenerateRequest.path_source='daemon-client' 接受单传 daemon_id（新链路）。
+
+    daemon-entity-binding 后 daemon_id 是稳定绑定键，daemon_runtime_id 降级 legacy。
+    单传 daemon_id 合法；同时传 daemon_runtime_id（legacy）也合法；两者都缺非法；
+    server-local 无需任何 daemon 字段。
+    """
+    from app.modules.workspace.schema import ScanGenerateRequest
+
+    # 只传 daemon_id（新链路）：合法
+    payload = ScanGenerateRequest(
+        root_path="/x",
+        path_source="daemon-client",
+        daemon_id=uuid.uuid4(),
+    )
+    assert payload.daemon_id is not None
+    assert payload.daemon_runtime_id is None
+
+    # 只传 daemon_runtime_id（legacy fallback）：合法
+    ScanGenerateRequest(
+        root_path="/x",
+        path_source="daemon-client",
+        daemon_runtime_id=uuid.uuid4(),
+    )
+
+    # server-local 无需 daemon 字段：合法
+    ScanGenerateRequest(root_path="/x")
+
+    # daemon-client 且 daemon_id 与 daemon_runtime_id 都缺：非法
+    with pytest.raises(ValidationError):
+        ScanGenerateRequest(root_path="/x", path_source="daemon-client")
+
+
+async def test_scan_generate_daemon_client_with_daemon_id_writes_member_binding(
+    db_session,
+) -> None:
+    """scan-generate 用 daemon_id 维度，落 pending workspace + 成员绑定行。
+
+    覆盖 ql-20260705-003：daemon-entity-binding 后 scan-generate 新建 workspace 时，
+    必须复用 upsert_my_binding 建成员绑定行，使 start_scan_dispatch 经
+    MemberBindingResolver 解析到 daemon（与 create 流程对齐）。
+    """
+    from app.modules.auth.model import User
+
+    user_id = uuid.uuid4()
+    db_session.add(
+        User(
+            id=user_id,
+            email=f"scan-{user_id.hex[:8]}@example.com",
+            password_hash="x",
+            display_name="Scanner",
+            status="active",
+        )
+    )
+    daemon = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        hostname="host-scan",
+        server_url="http://localhost:8000",
+        status="online",
+    )
+    db_session.add(daemon)
+    await db_session.flush()
+
+    service = WorkspaceService(db_session)
+    agent_service = AsyncMock()
+    agent_run = AsyncMock()
+    agent_run.id = uuid.uuid4()
+    agent_service.start_scan_dispatch = AsyncMock(return_value=agent_run)
+
+    ws_id, run_id = await service.scan_generate_daemon_client(
+        root_path="/remote/scan/proj",
+        user_id=user_id,
+        agent_service=agent_service,
+        daemon_id=daemon.id,
+    )
+
+    # 派了 scan
+    agent_service.start_scan_dispatch.assert_awaited_once()
+    assert run_id == agent_run.id
+
+    # workspace pending + 成员绑定行带 daemon_id（dispatch 经此解析 daemon）
+    ws = await service.get(ws_id)
+    assert ws.path_source == "daemon-client"
+    assert ws.status == "pending"
+    binding = await get_my_binding(db_session, ws_id, user_id)
+    assert binding is not None
+    assert binding.daemon_id == daemon.id
+    assert binding.root_path == "/remote/scan/proj"
+    assert binding.path_source == "daemon-client"
+
+
+async def test_scan_generate_daemon_client_rejects_daemon_owned_by_other_user(
+    db_session,
+) -> None:
+    """scan-generate daemon_id 归属校验：daemon 属他人 → 拒绝（防跨用户劫持）。
+
+    与 create 流程的 _guard_daemon_owned_by_user 守护一致；拒绝时不派 scan。
+    """
+    from app.core.errors import AppError
+    from app.modules.auth.model import User
+
+    owner_id = uuid.uuid4()
+    other_id = uuid.uuid4()
+    db_session.add(
+        User(
+            id=owner_id,
+            email=f"owner-{owner_id.hex[:8]}@example.com",
+            password_hash="x",
+            display_name="Owner",
+            status="active",
+        )
+    )
+    db_session.add(
+        User(
+            id=other_id,
+            email=f"other-{other_id.hex[:8]}@example.com",
+            password_hash="x",
+            display_name="Other",
+            status="active",
+        )
+    )
+    # daemon 属 other_user
+    daemon = DaemonInstance(
+        id=uuid.uuid4(),
+        user_id=other_id,
+        hostname="host-other",
+        server_url="http://localhost:8000",
+        status="online",
+    )
+    db_session.add(daemon)
+    await db_session.flush()
+
+    service = WorkspaceService(db_session)
+    agent_service = AsyncMock()
+
+    with pytest.raises(AppError) as exc_info:
+        await service.scan_generate_daemon_client(
+            root_path="/remote/hijack",
+            user_id=owner_id,
+            agent_service=agent_service,
+            daemon_id=daemon.id,
+        )
+    assert exc_info.value.code == "daemon_not_owned"
+    agent_service.start_scan_dispatch.assert_not_awaited()

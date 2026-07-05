@@ -80,6 +80,9 @@ import type { PolicyCache } from './policy/runtime-policy.js';
 import type { PolicyEngine } from './policy/filesystem-policy.js';
 // task-17：approval 应答写 stdin 需识别 JsonRpcAdapter 的 PendingServerRequest 字段。
 import type { PendingServerRequest } from './adapters/json-rpc.js';
+// task-06：tool_use 分支推导工具种类（C-01 顶层 tool_kind 字段）。
+// 与 backend/app/modules/agent/tool_kind.py 同逻辑，修改须同步（R-05 防漂移）。
+import { classifyToolKind } from './tool-kind.js';
 import type {
   AgentEvent,
   LeaseCtx,
@@ -1764,6 +1767,14 @@ export class TaskRunner {
           content: stdoutContent,
           channel: 'stdout',
         });
+        // task-06 / FR-03：推导工具种类。stdout 文本行（上方 SemanticCategory=log）
+        // 不带 tool_kind（C-02：log 不参与工具筛选维度）；仅 tool_call JSON 行带。
+        // toolName 缺失或为 unknown 时 classifyToolKind 返回 null，条件展开省略字段
+        // （C-01：tool_kind 与 event_type/content/channel 同级顶层，非 metadata）。
+        const toolKind = classifyToolKind(
+          typeof md.tool_name === 'string' && md.tool_name ? md.tool_name : null,
+          inputObj,
+        );
         // 额外发一条 tool_call channel 的 JSON，前端 parseToolCallContent 解析为
         // ToolCallCard。对齐老 _emit_stdout L749-757 的 tc_content 格式。
         // task-13：补 tool_use_id 字段（snake_case，对齐 Anthropic API 命名 + 与
@@ -1795,6 +1806,7 @@ export class TaskRunner {
           event_type: ev.type,
           content: tcContent,
           channel: 'tool_call',
+          ...(toolKind ? { tool_kind: toolKind } : {}),
         });
         break;
       }

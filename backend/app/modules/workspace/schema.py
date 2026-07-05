@@ -70,6 +70,11 @@ class ScanGenerateRequest(BaseModel):
     # Added here in task-01 per plan.md execute-consistency convention.
     path_source: PathSourceLiteral = "server-local"
     daemon_runtime_id: uuid.UUID | None = None
+    # daemon_id：守护进程实体（FK daemon_instances）——daemon-entity-binding 后的稳定
+    # 绑定键。daemon-client scan-generate 优先用此字段（新工作区 workspace.daemon_runtime_id
+    # 恒 NULL，绑定下沉到 per-member binding 行）。task-10/11 补遗对齐 WorkspaceCreate；
+    # daemon_runtime_id 保留为 legacy 兼容入口（仅老调用方）。
+    daemon_id: uuid.UUID | None = None
     # spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy）。daemon-client
     # scan-generate 首次创建 workspace 时据此落 spec_workspaces.strategy。
     spec_strategy: SpecStrategyLiteral = "platform-managed"
@@ -81,8 +86,17 @@ class ScanGenerateRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_daemon_binding(self) -> "ScanGenerateRequest":
-        if self.path_source == "daemon-client" and self.daemon_runtime_id is None:
-            raise ValueError("daemon_runtime_id is required when path_source='daemon-client'")
+        # daemon-entity-binding 后绑定键是 daemon_id（per-member binding 行），
+        # daemon_runtime_id 退化为 legacy 兼容；二者至少一个非空即放行。
+        # 与 _is_daemon_client_payload 注释及 WorkspaceCreate 校验逻辑对齐。
+        if (
+            self.path_source == "daemon-client"
+            and self.daemon_id is None
+            and self.daemon_runtime_id is None
+        ):
+            raise ValueError(
+                "daemon_id or daemon_runtime_id is required when path_source='daemon-client'"
+            )
         return self
 
 

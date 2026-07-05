@@ -695,12 +695,27 @@ class AgentService:
             result.append(enriched)
         return result
 
-    async def get_run_logs(self, run_id: uuid.UUID) -> list[AgentRunLog]:
+    async def get_run_logs(
+        self,
+        run_id: uuid.UUID,
+        *,
+        tool_kind: str | None = None,
+    ) -> list[AgentRunLog]:
         stmt = (
             select(AgentRunLog)
             .where(col(AgentRunLog.run_id) == run_id)
             .order_by(col(AgentRunLog.timestamp))
         )
+        # 2026-07-05-agent-log-type-tags task-05 / FR-07 / D-003@v1：
+        # ?tool_kind= 逗号分隔多选，仅筛 channel=tool_call 行（走
+        # ix_agent_run_logs_tool_kind 索引）；不传返回全部（§9 兼容）。
+        if tool_kind:
+            kinds = [k.strip() for k in tool_kind.split(",") if k.strip()]
+            if kinds:
+                stmt = stmt.where(
+                    col(AgentRunLog.channel) == "tool_call",
+                    col(AgentRunLog.tool_kind).in_(kinds),
+                )
         return list((await self._session.execute(stmt)).scalars().all())
 
     async def list_workspace_active_sessions(

@@ -104,3 +104,48 @@ async def test_scan_generate_existing_scan_unaffected(client: AsyncClient, auth_
             headers=auth_headers,
         )
     assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_scan_generate_daemon_client_with_daemon_id(client: AsyncClient, auth_headers):
+    """daemon-client scan-generate 用 daemon_id（非 runtime_id）放行，不再 422。
+
+    回归守护 ql-20260705-003：daemon-entity-binding 后新工作区 daemon_runtime_id 恒 NULL，
+    前端改传 daemon_id；schema 接受单 daemon_id 不再要求 daemon_runtime_id。
+    """
+    ws_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    with patch(
+        "app.modules.workspace.service.WorkspaceService.scan_generate_daemon_client",
+        new_callable=AsyncMock,
+        return_value=(ws_id, run_id),
+    ):
+        resp = await client.post(
+            "/api/workspaces/scan-generate",
+            json={
+                "root_path": "/tmp/test-project",
+                "path_source": "daemon-client",
+                "daemon_id": str(uuid.uuid4()),
+            },
+            headers=auth_headers,
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["workspace_id"] == str(ws_id)
+    assert data["agent_run_id"] == str(run_id)
+
+
+@pytest.mark.asyncio
+async def test_scan_generate_daemon_client_without_binding_is_422(
+    client: AsyncClient, auth_headers
+):
+    """daemon-client 但 daemon_id 和 daemon_runtime_id 都缺 → 422。
+
+    守护 ql-20260705-003：校验器放宽为「二者至少一个」，但都缺仍拒。
+    """
+    resp = await client.post(
+        "/api/workspaces/scan-generate",
+        json={"root_path": "/tmp/test", "path_source": "daemon-client"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422

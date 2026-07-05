@@ -323,6 +323,13 @@ export default function AgentPage({ params }: Props) {
   /* ---- 启动扫描 ---- */
   const handleDispatch = useCallback(async () => {
     if (!workspaceData?.root_path) return;
+    // daemon-entity-binding 后稳定绑定键是 myBinding.daemon_id；workspace.daemon_runtime_id
+    // 对新工作区恒 NULL（绑定下沉到 per-member binding 行）。未绑定直接提示，避免 backend 422。
+    const daemonId = myBinding?.daemon_id ?? null;
+    if (!daemonId) {
+      setDispatchError("未绑定守护进程，无法启动扫描。请先在「我的接入」完成绑定。");
+      return;
+    }
     setDispatching(true);
     setDispatchError(null);
     try {
@@ -331,8 +338,9 @@ export default function AgentPage({ params }: Props) {
         selectedProvider, // 单次覆盖（D-005），不写回 workspace.default_agent
         selectedModel || null,
         "daemon-client",
-        workspaceData.daemon_runtime_id,
+        null,
         undefined,
+        daemonId,
       );
       void refetch();
     } catch (err) {
@@ -340,7 +348,7 @@ export default function AgentPage({ params }: Props) {
     } finally {
       setDispatching(false);
     }
-  }, [workspaceData, selectedProvider, selectedModel, refetch]);
+  }, [workspaceData, myBinding, selectedProvider, selectedModel, refetch]);
 
   /* ---- Derived ---- */
   const runningRuns = useMemo(

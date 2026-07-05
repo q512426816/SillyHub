@@ -7,7 +7,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -391,6 +391,10 @@ async def get_agent_run_logs(
     run_id: uuid.UUID,
     session: SessionDep,
     user: Annotated[User, Depends(require_permission(Permission.TASK_READ))],
+    tool_kind: str | None = Query(
+        None,
+        description="逗号分隔多选工具种类，仅筛 channel=tool_call 行；不传返回全部",
+    ),
 ) -> list[AgentRunLogEntry]:
     svc = AgentService(session)
     run = await svc.get_run(run_id)
@@ -399,7 +403,7 @@ async def get_agent_run_logs(
             f"Agent run '{run_id}' not found.",
             details={"run_id": str(run_id)},
         )
-    logs = await svc.get_run_logs(run_id)
+    logs = await svc.get_run_logs(run_id, tool_kind=tool_kind)
     return [AgentRunLogEntry.model_validate(e) for e in logs]
 
 

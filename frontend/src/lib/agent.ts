@@ -65,6 +65,11 @@ export interface AgentRunLogEntry {
   parent_tool_use_id?: string | null;
   subagent_type?: string | null;
   depth?: number | null;
+  // task-07 / FR-09 / D-001@v1 / D-002@v1：工具种类打标（14 枚举 + null）。
+  // backend TOOL_KIND_VALUES 落库兜底（submit_messages）+ daemon _extract_sdk_messages
+  // 透传。非工具调用 / 主 agent 历史日志（未升级 daemon）→ null/undefined，
+  // viewer 按通用「工具」徽标渲染（toolKindMeta 灰色兜底）。
+  tool_kind?: string | null;
 }
 
 export interface CreateAgentRunInput {
@@ -123,6 +128,10 @@ export interface StreamLogEvent {
   parent_tool_use_id?: string | null;
   subagent_type?: string | null;
   depth?: number | null;
+  // task-07 / FR-09 / D-001@v1 / D-002@v1：工具种类打标（14 枚举 + null），与
+  // AgentRunLogEntry.tool_kind 同语义。SSE 实时流由 daemon _extract_sdk_messages
+  // 注入；非工具调用 / 历史流 → undefined（viewer 灰色兜底）。
+  tool_kind?: string | null;
 }
 
 // ── Agent Run User Input ──
