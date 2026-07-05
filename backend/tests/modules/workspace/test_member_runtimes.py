@@ -150,23 +150,25 @@ async def member_factory(db_session, role_seeder):
 
 
 @pytest.fixture()
-async def runtime_factory(db_session):
-    """Create a ``DaemonRuntime`` owned by ``user_id`` (task-03 ownership guard)."""
-    from app.modules.daemon.model import DaemonRuntime
+async def daemon_factory(db_session):
+    """Create a ``DaemonInstance`` owned by ``user_id``.
 
-    async def _make(owner_id: uuid.UUID, *, name: str = "rt") -> DaemonRuntime:
-        rt = DaemonRuntime(
+    daemon-entity-binding D-004：member binding 目标改为 daemon 实体（取代
+    旧 runtime_id）。ownership guard 据此判定归属，故 AC-1 用 daemon 实体构造。
+    """
+    from app.modules.daemon.model import DaemonInstance
+
+    async def _make(owner_id: uuid.UUID, *, hostname: str = "host") -> DaemonInstance:
+        inst = DaemonInstance(
             id=uuid.uuid4(),
             user_id=owner_id,
-            name=name,
-            provider="claude",
-            status="online",
-            last_heartbeat_at=datetime.now(UTC),
+            hostname=hostname,
+            server_url="http://test.local",
         )
-        db_session.add(rt)
+        db_session.add(inst)
         await db_session.commit()
-        await db_session.refresh(rt)
-        return rt
+        await db_session.refresh(inst)
+        return inst
 
     return _make
 
@@ -315,20 +317,21 @@ async def test_ac5_put_cannot_target_another_user(
 # ────────────────────────────────────────────────────────────────────────────
 
 
-async def test_ac1_put_my_binding_foreign_runtime_returns_403(
+async def test_ac1_put_my_binding_foreign_daemon_returns_403(
     client: AsyncClient,
     db_session,
     role_seeder,
     user_factory,
     ws_factory,
     member_factory,
-    runtime_factory,
+    daemon_factory,
 ):
-    """AC-1: a non-owner member binds a runtime_id owned by someone else → 403.
+    """AC-1: a non-owner member binds a daemon_id owned by someone else → 403.
 
-    The service-layer ownership guard refuses the bind; the router translates
-    ``runtime_not_owned`` to 403 ``runtime_not_owned``. No binding row is
-    persisted.
+    daemon-entity-binding D-004：绑定目标从 runtime 改 daemon 实体。
+    ``service.upsert_my_binding`` 在 daemon 不归属调用方时抛
+    ``AppError(http_status=403, code="daemon_not_owned")``，router 不 catch，
+    全局处理器（``app/core/errors.py``）统一返 403 + 标准错误 body。无 binding 行落库。
     """
     owner, _ = await user_factory(email="owner@x.com", display_name="Owner")
     dev, dev_tok = await user_factory(email="dev@x.com", display_name="Dev")
@@ -336,50 +339,50 @@ async def test_ac1_put_my_binding_foreign_runtime_returns_403(
     await member_factory(ws.id, owner.id, "workspace_owner", granted_by=owner.id)
     await member_factory(ws.id, dev.id, "developer", granted_by=owner.id)
 
-    # Runtime owned by owner — dev must not be allowed to bind it.
-    owner_rt = await runtime_factory(owner.id, name="owner-rt")
+    # Daemon owned by owner — dev must not be allowed to bind it.
+    owner_daemon = await daemon_factory(owner.id, hostname="owner-host")
 
     resp = await client.put(
         f"/api/workspaces/{ws.id}/my-binding",
         headers=_bearer(dev_tok),
         json={
-            "runtime_id": str(owner_rt.id),
+            "daemon_id": str(owner_daemon.id),
             "root_path": "/home/dev/repo",
             "path_source": "daemon-client",
         },
     )
     assert resp.status_code == 403, resp.text
-    assert resp.json()["code"] == "runtime_not_owned"
+    assert resp.json()["code"] == "daemon_not_owned"
 
     rows = await _binding_rows(db_session, workspace_id=ws.id)
     assert rows == []
 
 
-async def test_ac1_put_my_binding_own_runtime_succeeds(
+async def test_ac1_put_my_binding_own_daemon_succeeds(
     client: AsyncClient,
     role_seeder,
     user_factory,
     ws_factory,
     member_factory,
-    runtime_factory,
+    daemon_factory,
 ):
-    """AC-1 complement: binding a runtime the caller owns → 201."""
+    """AC-1 complement: binding a daemon the caller owns → 201."""
     dev, dev_tok = await user_factory(email="dev@x.com", display_name="Dev")
     ws = await ws_factory(owner_id=dev.id)
     await member_factory(ws.id, dev.id, "developer", granted_by=dev.id)
-    dev_rt = await runtime_factory(dev.id, name="dev-rt")
+    dev_daemon = await daemon_factory(dev.id, hostname="dev-host")
 
     resp = await client.put(
         f"/api/workspaces/{ws.id}/my-binding",
         headers=_bearer(dev_tok),
         json={
-            "runtime_id": str(dev_rt.id),
+            "daemon_id": str(dev_daemon.id),
             "root_path": "/home/dev/repo",
             "path_source": "daemon-client",
         },
     )
     assert resp.status_code == 201, resp.text
-    assert resp.json()["runtime_id"] == str(dev_rt.id)
+    assert resp.json()["daemon_id"] == str(dev_daemon.id)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -433,7 +436,7 @@ async def test_ac4_list_bindings_owner_returns_200(
         db_session,
         workspace_id=ws.id,
         user_id=owner.id,
-        runtime_id=None,
+        daemon_id=None,
         root_path="/home/owner/repo",
         path_source="server-local",
     )
@@ -441,7 +444,7 @@ async def test_ac4_list_bindings_owner_returns_200(
         db_session,
         workspace_id=ws.id,
         user_id=dev.id,
-        runtime_id=None,
+        daemon_id=None,
         root_path="/home/dev/repo",
         path_source="server-local",
     )
@@ -491,10 +494,8 @@ async def test_ac3_resolver_missing_raises_member_binding_not_found(
     member_factory,
 ):
     """AC-3: resolve_member_binding with no row → MemberBindingNotFound (409)."""
-    from app.modules.workspace.member_runtimes import (
-        MemberBindingNotFound,
-        MemberBindingResolver,
-    )
+    from app.modules.workspace.member_runtimes.exceptions import MemberBindingNotFound
+    from app.modules.workspace.member_runtimes.resolver import MemberBindingResolver
 
     owner, _ = await user_factory(email="owner@x.com", display_name="Owner")
     ws = await ws_factory(owner_id=owner.id)
@@ -518,10 +519,10 @@ async def test_ac3_resolver_hit_returns_row(
     member_factory,
 ):
     """AC-3: resolve_member_binding returns the persisted row on hit."""
-    from app.modules.workspace.member_runtimes import MemberBindingResolver
     from app.modules.workspace.member_runtimes import (
         service as binding_service,
     )
+    from app.modules.workspace.member_runtimes.resolver import MemberBindingResolver
 
     owner, _ = await user_factory(email="owner@x.com", display_name="Owner")
     ws = await ws_factory(owner_id=owner.id)
@@ -531,7 +532,7 @@ async def test_ac3_resolver_hit_returns_row(
         db_session,
         workspace_id=ws.id,
         user_id=owner.id,
-        runtime_id=None,
+        daemon_id=None,
         root_path="/home/owner/repo",
         path_source="server-local",
     )

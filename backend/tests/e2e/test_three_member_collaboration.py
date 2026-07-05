@@ -19,7 +19,7 @@ from sqlmodel import col
 
 from app.modules.auth.model import Role, User, UserWorkspaceRole
 from app.modules.change_writer.proxy import proxy_create_change
-from app.modules.daemon.model import DaemonInstance, DaemonRuntime
+from app.modules.daemon.model import DaemonInstance
 from app.modules.scan_docs.conflict_service import ScanDocConflictService
 from app.modules.scan_docs.model import ScanDocument
 from app.modules.spec_workspace.schema import SpecWorkspaceCreate
@@ -65,20 +65,6 @@ async def _create_user(session, username: str) -> User:
     session.add(u)
     await session.flush()
     return u
-
-
-async def _create_runtime(session, user_id: uuid.UUID, provider: str = "claude") -> DaemonRuntime:
-    rt = DaemonRuntime(
-        id=uuid.uuid4(),
-        name=f"daemon-{provider}-{user_id}",
-        user_id=user_id,
-        provider=provider,
-        status="online",
-        heartbeat_at=datetime.now(UTC),
-    )
-    session.add(rt)
-    await session.flush()
-    return rt
 
 
 async def _create_daemon_instance(
@@ -219,8 +205,6 @@ async def test_e2e_three_member_collaboration(tmp_path: Path, db_session) -> Non
 
     # Alice and Bob configure their bindings (SC-1).
     # daemon-entity-binding D-004：绑定目标从 runtime 改 daemon 实体。
-    # alice 仍创建 runtime（Phase 7 proxy_create_change 走老 runtime_id 接口要用）。
-    alice_runtime = await _create_runtime(db_session, alice.id, provider="claude")
     alice_daemon = await _create_daemon_instance(db_session, alice.id, hostname="alice-host")
     bob_daemon = await _create_daemon_instance(db_session, bob.id, hostname="bob-host")
 
@@ -372,7 +356,6 @@ async def test_e2e_three_member_collaboration(tmp_path: Path, db_session) -> Non
             db_session,
             workspace_id=ws_id,
             user_id=alice.id,
-            runtime_id=alice_runtime.id,
             title="alice change",
             description="testing member binding",
             change_type="feature",
