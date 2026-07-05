@@ -169,3 +169,38 @@ class TestParseWorkspace:
         result = parser.parse_workspace(silly_root)
         keys = {c.change_key for c in result.changes}
         assert "archive" not in keys
+
+    def test_platform_managed_flat_path_no_sillyspec_prefix(
+        self, parser: ChangeParser, tmp_path: Path
+    ) -> None:
+        """ql-20260706-004：扁平布局（platform_managed=True）change.path 不带 .sillyspec 前缀。
+
+        daemon-client 平台镜像 spec_root 下 changes/docs 直接在根（无 .sillyspec 包裹），
+        change.path 必须以 changes/ 开头，否则 _resolve_change_dir(spec_root/path) 拼
+        出不存在路径、文件树全空（用户反馈"变更文件结构树不显示"根因）。
+        """
+        flat_root = tmp_path / "flat"
+        shutil.copytree(FIXTURES, flat_root / "changes")
+        result = parser.parse_workspace(flat_root, platform_managed=True)
+        assert result.changes, "应解析到变更"
+        for c in result.changes:
+            assert not c.path.startswith(".sillyspec"), (
+                f"扁平布局 path 不应带 .sillyspec 前缀: {c.path}"
+            )
+            assert c.path.startswith("changes/"), f"扁平布局 path 应以 changes/ 开头: {c.path}"
+
+    def test_wrapped_path_keeps_sillyspec_prefix(
+        self, parser: ChangeParser, silly_root: Path
+    ) -> None:
+        """ql-20260706-004：包裹布局（默认 platform_managed=False）保留 .sillyspec 前缀。
+
+        对照用例——repo-native/server-local 的 <root>/.sillyspec/changes/ 包裹结构
+        下 change.path 仍带 .sillyspec/ 前缀（确保 rel_wrap 改动不破坏包裹场景）。
+        """
+        result = parser.parse_workspace(silly_root)
+        assert result.changes
+        for c in result.changes:
+            if c.path:
+                assert c.path.startswith(".sillyspec/changes/"), (
+                    f"包裹布局 path 应带 .sillyspec/changes/ 前缀: {c.path}"
+                )

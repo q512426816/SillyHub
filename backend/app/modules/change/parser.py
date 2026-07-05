@@ -73,6 +73,11 @@ class ChangeParser:
         result = ChangeParserResult()
         resolver = SpecPathResolver(sillyspec_root, platform_managed=platform_managed)
         changes_base = resolver.changes_root()
+        # ql-20260706-004：rel_prefix 按 platform_managed 决定是否带 .sillyspec/ 包裹
+        # 前缀。扁平布局（daemon-client 平台镜像，changes/docs 在 spec_root 根下）不带；
+        # 包裹布局（repo-native/server-local，<root>/.sillyspec/ 子目录）带。change.path
+        # 前缀错会让 _resolve_change_dir(spec_root/change.path) 拼出不存在路径、文件树全空。
+        rel_wrap = "" if platform_managed else ".sillyspec/"
 
         # --- 1. Scan active changes: changes/<name>/ (excluding archive/) ---
         if changes_base.is_dir():
@@ -90,7 +95,7 @@ class ChangeParser:
                     sillyspec_root,
                     entry,
                     location="active",
-                    rel_prefix=f".sillyspec/changes/{entry.name}",
+                    rel_prefix=f"{rel_wrap}changes/{entry.name}",
                 )
                 result.changes.append(parsed)
                 result.warnings.extend(parsed.warnings)
@@ -109,7 +114,7 @@ class ChangeParser:
                     sillyspec_root,
                     entry,
                     location="archive",
-                    rel_prefix=f".sillyspec/changes/archive/{entry.name}",
+                    rel_prefix=f"{rel_wrap}changes/archive/{entry.name}",
                 )
                 result.changes.append(parsed)
                 result.warnings.extend(parsed.warnings)
@@ -138,7 +143,7 @@ class ChangeParser:
                     sillyspec_root,
                     entry,
                     location="active",
-                    rel_prefix=f".sillyspec/changes/change/{entry.name}",
+                    rel_prefix=f"{rel_wrap}changes/change/{entry.name}",
                     is_legacy=True,
                 )
                 result.changes.append(parsed)

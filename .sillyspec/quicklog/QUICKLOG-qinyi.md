@@ -91,12 +91,13 @@ created_at: 2026-07-05 16:33:00
 续作说明：本条续 d751a871 会话——上轮 sillyspec quick 走到 Step2 读代码阶段中断、无实现产出，本轮照其方案直接实现 + 测试 + 提交。
 
 ## ql-20260706-004-7c4a | 2026-07-06 03:30:53 | 变更详情页两个数据显示 bug——智能体执行日志串台 scan run + 变更文件结构树空（change.path 多 .sillyspec 前缀）
-状态：进行中
+状态：已完成
 关联变更：（无）
 文件：backend/app/modules/change/router.py, backend/app/modules/change/parser.py, backend/tests/modules/change/test_dispatch.py, backend/tests/modules/change/test_parser.py
 依据：DB + 容器双向核实。(1) 日志串台：归档变更 stages.last_dispatch 全空（DB 实测 5 条均空）触发 router.get_agent_status(L561-590)/manual_dispatch(L647-677) 的 fallback，fallback 仅 WHERE workspace_id ORDER BY started_at 取最近 AgentRun，未按 change_id 过滤；8 条 AgentRun.change_id 全 NULL（含 SillyHub scan run 254e5e2a，日志首条"请对项目目录…执行 sillyspec scan"），fallback 顶数把它当变更日志返回。AgentRun.change_id 列实存（model.py:166，带索引 ix_agent_runs_change_id），dispatch.py has_active_run(L348/374/463/513) 已按 change_id 过滤，fallback 本应一致却漏。(2) 文件树空：parser.py L93/112/141 三处 rel_prefix 硬编码 ".sillyspec/changes/..." 无视 platform_managed；daemon-client 平台镜像 spec_root 是扁平结构（changes/docs/knowledge 在根，无 .sillyspec 包裹层），change.path 被存成带 .sillyspec 前缀，_resolve_change_dir(spec_root/change.path) 拼出不存在路径，list_files 命中 is_dir()==False 返回空。容器实证 /data/spec-workspaces/ac52b5e7.../changes/archive/2026-07-05-workspace-config-card/ 下 proposal.md/design.md/plan.md/tasks.md 全套文件齐全，但 .sillyspec/ 子目录根本不存在。reparse(L996-999) 已正确传 platform_managed=is_daemon_client_path_source 给 parse_workspace，parser 内部 rel_prefix 却没用该标志。
 修法：(1) router.py 两处 fallback 的 select 加 .where(AgentRun.change_id == change_id)，查不到则 last_dispatch 保持 None（前端不渲染日志面板），删掉 workspace 级回退（正是串台源）；(2) parser.py parse_workspace 按 platform_managed 算前缀（prefix = "" if platform_managed else ".sillyspec/"），三处 rel_prefix 改用前缀拼接；修完触发一次 reparse 刷新现有错误 change.path。
-测试：test_dispatch.py 加 fallback 按 change_id 过滤用例（构造它变更的 run 不被本变更取到）；test_parser.py 加 platform_managed=True 扁平 rel_prefix 不带 .sillyspec 用例。change 模块相关测试全绿。
+测试：test_dispatch.py 加 fallback 按 change_id 过滤用例（构造它变更的 run 不被本变更取到）；test_parser.py 加 platform_managed=True 扁平 rel_prefix 不带 .sillyspec 用例 + 包裹布局对照用例。实测 change 模块全量 124 passed + 2 skipped（propose stage 移除，正常 skip）零回归；test_parser 17 passed（新 2）；test_dispatch 28 passed（新 1）；ruff check + ruff format + mypy 全过。
+部署：Bug2 需重建 backend 容器后触发一次 reparse（或 scan）刷新现有 change.path——当前生产 DB 所有归档 change.path 仍带错误 .sillyspec 前缀，reparse 后扁平工作区会刷新成 changes/... 直达真实目录。
 
 ## ql-20260706-003 | 2026-07-06 03:10:00 | spec 工作区导入(import)链路 4 处治 get_spec_bundle 导入必断（WS 1009 + tz 笔误 + SSE keepalive + close code 日志）
 状态：已完成

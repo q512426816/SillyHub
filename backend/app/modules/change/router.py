@@ -557,21 +557,20 @@ async def get_agent_status(
     stages = change.stages or {}
     last_dispatch = stages.get("last_dispatch")
 
-    # Fallback: if last_dispatch has no run_id, query the most recent agent run
+    # Fallback: if last_dispatch has no run_id, query this change's most recent run.
+    # ql-20260706-004：按 change_id 精确过滤——旧实现只按 workspace 取最近 run，会把
+    # workspace 下 scan/它变更的 run（change_id 为 NULL）误当本变更日志串台显示。
+    # AgentRun.change_id 列实存（model.py，带索引 ix_agent_runs_change_id），dispatch
+    # 落库即写（agent/service.py），故按 FK 取本变更最近 run；没派发过则保持 None
+    # （前端不渲染日志面板），不再做 workspace 级回退（那正是串台来源）。
     if not last_dispatch or not last_dispatch.get("run_id"):
         from sqlalchemy import select
 
         from app.modules.agent.model import AgentRun
-        from app.modules.workspace.model import AgentRunWorkspace
 
-        # Query via workspace association table (change_id on run may be null)
         stmt = (
             select(AgentRun)
-            .join(
-                AgentRunWorkspace,
-                col(AgentRunWorkspace.agent_run_id) == col(AgentRun.id),
-            )
-            .where(col(AgentRunWorkspace.workspace_id) == workspace_id)
+            .where(col(AgentRun.change_id) == change_id)
             .order_by(col(AgentRun.started_at).desc())
             .limit(1)
         )
@@ -644,21 +643,16 @@ async def manual_dispatch(
     stages = change.stages or {}
     last_dispatch = stages.get("last_dispatch")
 
-    # Fallback: if last_dispatch has no run_id, query the most recent agent run
-    # (same logic as get_agent_status endpoint)
+    # Fallback: same logic as get_agent_status endpoint (ql-20260706-004：按
+    # change_id 过滤，避免 scan run 串台；详见 get_agent_status 注释)。
     if not last_dispatch or not last_dispatch.get("run_id"):
         from sqlalchemy import select
 
         from app.modules.agent.model import AgentRun
-        from app.modules.workspace.model import AgentRunWorkspace
 
         stmt = (
             select(AgentRun)
-            .join(
-                AgentRunWorkspace,
-                col(AgentRunWorkspace.agent_run_id) == col(AgentRun.id),
-            )
-            .where(col(AgentRunWorkspace.workspace_id) == workspace_id)
+            .where(col(AgentRun.change_id) == change_id)
             .order_by(col(AgentRun.started_at).desc())
             .limit(1)
         )

@@ -617,6 +617,57 @@ class TestAgentStatusAPI:
         body = resp.json()
         assert body["config_enabled"] is True  # plan has config
 
+    async def test_agent_status_fallback_filters_by_change_id(
+        self,
+        client,
+        db_session: AsyncSession,
+        workspace_with_changes: dict,
+        auth_headers: dict[str, str],
+    ):
+        """ql-20260706-004：last_dispatch 缺失时 fallback 必须按 change_id 过滤。
+
+        旧实现只按 workspace 取最近 run，把 change_id=NULL 的 run（如 scan）当
+        本变更日志返回（串台根因）。修复后 fallback 按 AgentRun.change_id == change_id
+        取，demo change 无绑定 run → last_dispatch 为 None。
+        """
+        from datetime import UTC, datetime
+
+        from app.modules.workspace.model import AgentRunWorkspace
+
+        ws_id = workspace_with_changes["ws_id"]
+        change_id = await _get_demo_change_id(client, ws_id, auth_headers)
+
+        # workspace 下插一条 change_id=NULL 的 run（模拟 scan / 未绑变更的执行），
+        # 并经 AgentRunWorkspace 关联到本 workspace——旧 fallback 经此 join 取到它。
+        scan_run = AgentRun(
+            id=uuid.uuid4(),
+            change_id=None,
+            agent_type="claude_code",
+            status="completed",
+            started_at=datetime.now(UTC),
+        )
+        db_session.add(scan_run)
+        db_session.add(
+            AgentRunWorkspace(
+                agent_run_id=scan_run.id,
+                workspace_id=uuid.UUID(ws_id),
+            )
+        )
+        await db_session.commit()
+
+        # demo change 新建、stages 为空 → fallback 触发
+        resp = await client.get(
+            f"/api/workspaces/{ws_id}/changes/{change_id}/agent-status",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        # 修复后：fallback 按 change_id 过滤；demo change 没有任何绑定的 run，
+        # last_dispatch 必须为 None（修前会取到 scan_run → 串台）。
+        assert body["last_dispatch"] is None, (
+            f"fallback 不应返回 change_id=NULL 的 run：{body['last_dispatch']}"
+        )
+
 
 class TestManualDispatchAPI:
     """Test the manual dispatch API endpoint."""
