@@ -90,6 +90,24 @@ created_at: 2026-07-05 16:33:00
 测试：加 4 个用例——tool_result 提取 tool_use_id；tool_use tool_call 行顶层带 tool_use_id；端到端继承（tool_use+tool_result 同批→[TOOL_RESULT] 行落库 tool_kind=sillyspec + published_logs 透传）；缓存缺失兼容（孤立 tool_result 保持 None）。tool_kind 文件 19 passed；agent+daemon 全量 258 passed 零回归；ruff format + mypy 全过。
 续作说明：本条续 d751a871 会话——上轮 sillyspec quick 走到 Step2 读代码阶段中断、无实现产出，本轮照其方案直接实现 + 测试 + 提交。
 
+## ql-20260706-004-7c4a | 2026-07-06 03:30:53 | 变更详情页两个数据显示 bug——智能体执行日志串台 scan run + 变更文件结构树空（change.path 多 .sillyspec 前缀）
+状态：进行中
+关联变更：（无）
+文件：backend/app/modules/change/router.py, backend/app/modules/change/parser.py, backend/tests/modules/change/test_dispatch.py, backend/tests/modules/change/test_parser.py
+依据：DB + 容器双向核实。(1) 日志串台：归档变更 stages.last_dispatch 全空（DB 实测 5 条均空）触发 router.get_agent_status(L561-590)/manual_dispatch(L647-677) 的 fallback，fallback 仅 WHERE workspace_id ORDER BY started_at 取最近 AgentRun，未按 change_id 过滤；8 条 AgentRun.change_id 全 NULL（含 SillyHub scan run 254e5e2a，日志首条"请对项目目录…执行 sillyspec scan"），fallback 顶数把它当变更日志返回。AgentRun.change_id 列实存（model.py:166，带索引 ix_agent_runs_change_id），dispatch.py has_active_run(L348/374/463/513) 已按 change_id 过滤，fallback 本应一致却漏。(2) 文件树空：parser.py L93/112/141 三处 rel_prefix 硬编码 ".sillyspec/changes/..." 无视 platform_managed；daemon-client 平台镜像 spec_root 是扁平结构（changes/docs/knowledge 在根，无 .sillyspec 包裹层），change.path 被存成带 .sillyspec 前缀，_resolve_change_dir(spec_root/change.path) 拼出不存在路径，list_files 命中 is_dir()==False 返回空。容器实证 /data/spec-workspaces/ac52b5e7.../changes/archive/2026-07-05-workspace-config-card/ 下 proposal.md/design.md/plan.md/tasks.md 全套文件齐全，但 .sillyspec/ 子目录根本不存在。reparse(L996-999) 已正确传 platform_managed=is_daemon_client_path_source 给 parse_workspace，parser 内部 rel_prefix 却没用该标志。
+修法：(1) router.py 两处 fallback 的 select 加 .where(AgentRun.change_id == change_id)，查不到则 last_dispatch 保持 None（前端不渲染日志面板），删掉 workspace 级回退（正是串台源）；(2) parser.py parse_workspace 按 platform_managed 算前缀（prefix = "" if platform_managed else ".sillyspec/"），三处 rel_prefix 改用前缀拼接；修完触发一次 reparse 刷新现有错误 change.path。
+测试：test_dispatch.py 加 fallback 按 change_id 过滤用例（构造它变更的 run 不被本变更取到）；test_parser.py 加 platform_managed=True 扁平 rel_prefix 不带 .sillyspec 用例。change 模块相关测试全绿。
+
+## ql-20260706-003 | 2026-07-06 03:10:00 | spec 工作区导入(import)链路 4 处治 get_spec_bundle 导入必断（WS 1009 + tz 笔误 + SSE keepalive + close code 日志）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/router.py, backend/app/modules/spec_workspace/service.py, deploy/docker-compose.yml
+依据：用户报 import "daemon disconnected mid-rpc"。加 backend WS close code 日志后抓到 close=1009 "frame exceeds limit of 16777216 bytes"——daemon get_spec_bundle 把 spec 目录（16MB/1545 文件）tar+base64 单帧回传，base64 膨胀 ~33% 达 21MB 超 uvicorn 默认 ws_max_size=16MiB，backend 主动断 WS（非网络 idle，keepalive 修复无效）。临时调 --ws-max-size 100MB 后暴露 service.py:719/723 datetime.min.replace(tz=UTC) 笔误（应 tzinfo=，同文件 718/722 正确，复制粘贴漏改），source_mtime=None 命中即 TypeError。再修后又暴露 import SSE applying/reparsing_docs/reparsing_changes 三阶段直接 await 慢函数（_write_spec_root 写 1545 文件 + _reparse_phase），SSE 静默超 Next.js rewrite 代理 undici bodyTimeout 被砍（CancelledError），前端"导入卡住"。packing 段有 keepalive（387-400）这三阶段 design 漏。
+修法：① router.py WebSocketDisconnect as exc 补记 code=getattr(exc,'code')/reason；② service.py:719/723 tz=→tzinfo=；③ 三阶段包 asyncio.ensure_future+5s 周期 yield ': keepalive'（与 packing 同模式）；④ docker-compose --ws-max-size 104857600（100MB）兜底。
+测试：端到端——用户触发 import 同步成功（无 1009/无 TypeError/无 CancelledError）。backend 容器 production 镜像无 pytest，靠端到端；现有 test_import.py 断言事件名（packing/packed/applying/done）keepalive 改动保持不变不破坏。
+遗留：gzip 治本（daemon 压缩+backend gunzip）超 quick 范围作后续独立变更。另发现 init_synced_at 写入路径（workspace-config-flow task-07 init-lease complete）从未实现，前端"接入初始化状态"永远未初始化——独立接线遗漏，需单独排查。
+坑：sillyspec --done step 2 自动 commit ql-003(59a53833) 但 baseline 边界排除 keepalive（service.py[tz=] 进 commit，keepalive 留工作区），单独 commit 37ccc3ee 补"ql-003 补"。
+
 
 
 
