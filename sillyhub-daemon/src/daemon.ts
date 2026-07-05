@@ -920,6 +920,10 @@ export class Daemon {
           this._registeredRuntimes.set(providerName, runtimeId);
         }
       }
+      // ql-20260705-008：register 成功立即写 PolicyCache（关闭启动窗口——心跳 30s
+      // 才回第一次，scan run 启动时若已 register 即可立即有策略，不依赖 WS
+      // POLICY_UPDATE 推送）。
+      this._syncPolicyCache(this._config.allowed_roots);
       // 维护 provider → 本机 path 映射（cmd_path 不来自 server，daemon 自维护）
       for (const a of agents) {
         if (a.path) {
@@ -1791,6 +1795,22 @@ export class Daemon {
     if (JSON.stringify(normalized) !== JSON.stringify(this._config.allowed_roots)) {
       this._config.allowed_roots = normalized;
       this._logger.info('allowed_roots_synced', { count: normalized.length });
+    }
+    // ql-20260705-008：每次心跳都同步 PolicyCache（不仅变化时）——首次心跳
+    // allowed_roots 可能与默认值相同但 PolicyCache 仍空。注释 1800-1802 承诺心跳
+    // 回填 PolicyCache 但旧实现漏写，补上（否则 canWrite fail-closed deny）。
+    this._syncPolicyCache(normalized);
+  }
+
+  /**
+   * ql-20260705-008：把 allowed_roots 同步到 PolicyCache（每个 registered runtime）。
+   * 心跳 _syncAllowedRoots + register 都调，确保 PolicyCache 有数据。_policyCache
+   * null（未注入，仅旧测试）→ no-op。
+   */
+  private _syncPolicyCache(roots: string[]): void {
+    if (!this._policyCache) return;
+    for (const runtimeId of this._registeredRuntimes.values()) {
+      if (runtimeId) this._policyCache.set(runtimeId, roots);
     }
   }
 

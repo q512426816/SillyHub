@@ -444,9 +444,17 @@ describe('daemon multi-runtime registration (test_daemon_multi_runtime.py)', () 
     // 心跳确实覆盖了初始值（initialAllowedRoots 仅 [homedir]，现多了 daemonRoot）
     expect(config.allowed_roots.length).toBeGreaterThanOrEqual(2);
 
-    // 断言 2（HEAD）：心跳路径不再写 PolicyCache（PolicyCache 仅由 WS POLICY_UPDATE 推送填）。
-    // claude/codex 两个 server runtime_id 都无 PolicyCache 条目。
-    expect(policyCache.get('srv-rt-claude')).toBeUndefined();
-    expect(policyCache.get('srv-rt-codex')).toBeUndefined();
+    // ql-20260705-008：心跳路径现在写 PolicyCache（修复写拦截 fail-closed deny——
+    // 旧实现注释承诺回填但漏写，PolicyCache 永久空致 canWrite deny，agent 自述
+    // "Runtime Policy 未配置"=CAUSE_POLICY_NOT_LOADED）。两个 server runtime_id 都
+    // 有 PolicyCache 条目（PolicyEntry {allowedRoots, version}）。allowedRoots 经
+    // resolveRealPath 小写化盘符（与 config.allowed_roots 的 resolve 大写差异，见上
+    // 注释 440-441），按定义性 + 长度断言。
+    const claudePolicy = policyCache.get('srv-rt-claude');
+    expect(claudePolicy).toBeDefined();
+    expect(claudePolicy!.allowedRoots.length).toBeGreaterThanOrEqual(2);
+    const codexPolicy = policyCache.get('srv-rt-codex');
+    expect(codexPolicy).toBeDefined();
+    expect(codexPolicy!.allowedRoots.length).toBeGreaterThanOrEqual(2);
   });
 });

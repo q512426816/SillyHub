@@ -64,6 +64,15 @@ created_at: 2026-07-05 16:33:00
 修法：classifyLog 加 tool_kind 参数，tool_call + tool_kind=ask → ask semanticCategory（其他 tool_kind 仍归 tool_call）。AskUserQuestion 进提问审批，pending_input 也在提问审批。
 测试：加用例 AskUserQuestion（tool_call + tool_kind=ask）→ 提问审批筛选可见。
 
+## ql-20260705-008-4e2a | 2026-07-05 21:50:00 | 心跳/register 回填 PolicyCache 治写拦截 fail-closed deny（C8）
+状态：进行中
+关联变更：（无）
+文件：sillyhub-daemon/src/daemon.ts
+依据：Agent 调查——interactive scan run 写 spec 目录被拦（agent 自述"Runtime Policy 未配置"=CAUSE_POLICY_NOT_LOADED 逐字）。根因：cli.ts 注入 policyEngine 但 _syncAllowedRoots(1779-1795) 只写 config.allowed_roots，漏写 _policyCache；register(902-922) 也没回填。PolicyCache 唯一写入是 WS POLICY_UPDATE（未触发）→ PolicyEngine.canWrite cache miss → fail-closed deny。注释 1800-1802 承诺心跳回填 PolicyCache 但实现脱节。DB allowed_roots=[~/.sillyhub, C:\Users\qinyi\.sillyhub] 配置正确，问题是没进 PolicyCache。
+修法：加 _syncPolicyCache(roots) helper（null 守卫 + 对每个 _registeredRuntimes values 调 _policyCache.set）；_syncAllowedRoots 末尾 + register 末尾都调 _syncPolicyCache（关闭启动窗口）。
+测试：daemon vitest 加用例心跳/register 后 PolicyCache.get(rid) 非空。
+
+
 
 
 
