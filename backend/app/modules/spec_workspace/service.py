@@ -716,11 +716,11 @@ class SpecWorkspaceService:
                     cur_raw = cur.source_mtime
                     if cur_raw is not None and cur_raw.tzinfo is None:
                         cur_raw = cur_raw.replace(tzinfo=UTC)
-                    cur_mtime = cur_raw or datetime.min.replace(tz=UTC)
+                    cur_mtime = cur_raw or datetime.min.replace(tzinfo=UTC)
                     inc_raw = src_mtime
                     if inc_raw is not None and inc_raw.tzinfo is None:
                         inc_raw = inc_raw.replace(tzinfo=UTC)
-                    inc_mtime = inc_raw or datetime.min.replace(tz=UTC)
+                    inc_mtime = inc_raw or datetime.min.replace(tzinfo=UTC)
                     if inc_mtime > cur_mtime:
                         await conflict_svc.archive_conflict(
                             workspace_id,

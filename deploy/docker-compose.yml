@@ -95,7 +95,10 @@ services:
     command:
       - sh
       - -c
-      - "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"
+      # --ws-max-size 100MB：spec import 的 get_spec_bundle RPC 把 tar+base64 单帧回传，
+      # 默认 16MiB 上限会被 >12MB 的 spec 目录撑爆（WS close 1009 致 import 必断）。
+      # 治本在 daemon 端 gzip 压缩，这里是防御性兜底。
+      - "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-max-size 104857600"
     mem_limit: 800m
 
   frontend:

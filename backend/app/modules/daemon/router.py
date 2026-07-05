@@ -1794,8 +1794,15 @@ async def daemon_websocket(
                     daemon_id=str(daemon_id),
                     msg_type=msg_type,
                 )
-    except WebSocketDisconnect:
-        log.info("ws_client_disconnected", daemon_id=str(daemon_id))
+    except WebSocketDisconnect as exc:
+        # 记 close code/reason：区分 1000(主动关) / 1006(网络层断) / 1011 / 4000(replaced) 等，
+        # 否则 daemon 端 WS 断开（尤其 import get_spec_bundle 期间）只能看到 "disconnected"，无法定位根因。
+        log.info(
+            "ws_client_disconnected",
+            daemon_id=str(daemon_id),
+            code=getattr(exc, "code", None),
+            reason=getattr(exc, "reason", None) or "",
+        )
     except Exception:
         log.exception("ws_unexpected_error", daemon_id=str(daemon_id))
     finally:
