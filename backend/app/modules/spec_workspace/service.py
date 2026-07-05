@@ -454,15 +454,43 @@ class SpecWorkspaceService:
             tar_bytes = buf.getvalue()
             yield _evt("packed", phase="packed", tar_bytes=len(tar_bytes))
 
-        # 落盘 + 两阶段 reparse（D-003 各自容错；_reparse_phase 失败已设 dirty 不抛）
+        # 落盘 + 两阶段 reparse（D-003 各自容错；_reparse_phase 失败已设 dirty 不抛）。
+        # 三阶段都是慢操作（写 1545+ 文件入伙 + reparse docs/changes），SSE 流必须周期
+        # yield keepalive，否则单阶段静默超过 Next.js rewrite 代理 undici bodyTimeout
+        # 会被砍断（CancelledError）——与 packing 阶段同模式（见上 387-400）。
         yield _evt("applying", phase="applying")
-        spec_ws = await self._write_spec_root(workspace_id, tar_bytes)
+        write_task = asyncio.ensure_future(self._write_spec_root(workspace_id, tar_bytes))
+        while True:
+            done, _ = await asyncio.wait({write_task}, timeout=5.0)
+            if done:
+                break
+            yield ": keepalive\n\n"
+        spec_ws = write_task.result()
+
         yield _evt("reparsing_docs", phase="reparsing_docs")
-        docs = await self._reparse_phase(workspace_id, spec_ws, "scan_docs")
+        reparse_docs_task = asyncio.ensure_future(
+            self._reparse_phase(workspace_id, spec_ws, "scan_docs")
+        )
+        while True:
+            done, _ = await asyncio.wait({reparse_docs_task}, timeout=5.0)
+            if done:
+                break
+            yield ": keepalive\n\n"
+        docs = reparse_docs_task.result()
         yield _evt("reparsing_docs", phase="reparsing_docs", parsed=docs)
+
         yield _evt("reparsing_changes", phase="reparsing_changes")
-        changes = await self._reparse_phase(workspace_id, spec_ws, "change")
+        reparse_changes_task = asyncio.ensure_future(
+            self._reparse_phase(workspace_id, spec_ws, "change")
+        )
+        while True:
+            done, _ = await asyncio.wait({reparse_changes_task}, timeout=5.0)
+            if done:
+                break
+            yield ": keepalive\n\n"
+        changes = reparse_changes_task.result()
         yield _evt("reparsing_changes", phase="reparsing_changes", parsed=changes)
+
         yield _evt(
             "done",
             phase="done",
