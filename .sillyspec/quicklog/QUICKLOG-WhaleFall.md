@@ -269,3 +269,12 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 根因：page.tsx 决策列 render 直接回显 {v}（ALLOW/DENY 英文枚举）；原因列 span 默认不渲染 reason 里的 \n（daemon buildDenyReason 产出 "Runtime Policy 拒绝本次写入。\nAgent：...\n目标路径：...\n原因：..." 多行中文长文），挤成一行。后端 reason 本身已是中文，无需改。
 方案：决策列 ALLOW→放行(绿 Tag)/DENY→拒绝(红 Tag)；原因列加 whitespace-pre-line + break-words 让多行 reason 按换行符正常折行；ALLOW 空串仍显「—」。同步 page.test.tsx 决策断言 DENY/ALLOW→拒绝/放行。
 结果：已完成。vitest 5/5 passed + tsc --noEmit exit 0 + pnpm lint exit 0（仅既有 unused-vars warning）。待 commit + frontend docker rebuild 后真机生效。
+
+## ql-20260706-002-c5d8 | 2026-07-06 09:32:37 | backend alembic multiple heads（20260705_tool_kind + dceb0c45ab3e 未 merge）致部署 crash loop
+状态：已完成
+关联变更：（无）
+文件：backend/migrations/versions/20260706_merge_heads.py
+需求：rebuild backend 镜像部署后，容器 crash loop（10 restarts，unhealthy），日志报 "Multiple head revisions are present for given argument 'head'"，alembic upgrade head 启动失败。
+根因：alembic heads --verbose 确认当前有两个独立 head——①20260705_tool_kind（down_revision=202607041800，文件 20260705_add_agent_run_log_tool_kind.py）②dceb0c45ab3e（merge point，已 merge p0la1ud1t006+202607022300，文件 dceb0c45ab3e_merge.py）。9561babd 加的 dceb0c45ab3e_merge 漏掉 20260705_tool_kind 分支（agent-log-type-tags 变更引入），未收编，仍是 multiple heads。
+方案：在 backend/migrations/versions/ 新增 merge migration 20260706_merge_heads.py，down_revision=("20260705_tool_kind","dceb0c45ab3e")，upgrade/downgrade 空实现。然后 rebuild backend 镜像 + 重启 + 验证 alembic heads 只剩 1 个 + healthy + commit_sha=93d98789。
+结果：已完成。新增 20260706_merge_heads.py（down_revision=(20260705_tool_kind,dceb0c45ab3e)，空 upgrade/downgrade）。挂载最新 migrations 跑 alembic heads 确认只剩 1 个 head（20260706_merge_heads）。rebuild backend 后启动日志完整 upgrade 链（p0la1ud1t006->b16bf63a5d05->202607041800->20260705_tool_kind + dceb0c45ab3e->20260706_merge_heads），backend healthy（status/db/redis ok），镜像内 alembic heads 只 1 个。附带修复部署回归 commit_sha=unknown：根因是 compose `environment COMMIT_SHA: ${COMMIT_SHA:-}` 在 up 时插值并覆盖镜像 baked ENV（Dockerfile line 60 已 `ENV COMMIT_SHA=${COMMIT_SHA:-}`），仅 build 时 export 不够，up 时也必须 export COMMIT_SHA；已 `COMMIT_SHA=$(git rev-parse HEAD) up backend`，验证 commit_sha=93d98789bf7b6964408bf418e1850ce83f8d7a43 生效。
