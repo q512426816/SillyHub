@@ -132,6 +132,7 @@ class RegisteredRuntime:
 
     provider: str
     runtime_id: uuid.UUID
+    allowed_roots: list[str]
 
 
 @dataclass
@@ -267,6 +268,7 @@ class RuntimeService:
                     status="online",
                     last_heartbeat_at=now,
                     metadata_={},
+                    allowed_roots=list(roots),
                 )
                 self._session.add(rt)
                 log.info(
@@ -282,7 +284,13 @@ class RuntimeService:
                 rt.last_heartbeat_at = now
                 rt.updated_at = now
                 self._session.add(rt)
-            result_runtimes.append(RegisteredRuntime(provider=provider_name, runtime_id=rt.id))
+            result_runtimes.append(
+                RegisteredRuntime(
+                    provider=provider_name,
+                    runtime_id=rt.id,
+                    allowed_roots=list(rt.allowed_roots or []),
+                )
+            )
 
         # ── step 3: stale runtime cleanup（本次未上报的 provider）─────────────
         stale = [
@@ -593,14 +601,13 @@ class RuntimeService:
         runtime = await self._get_owned_runtime(
             runtime_id, actor_user_id, is_platform_admin=is_platform_admin
         )
-        if runtime.daemon_instance_id is not None:
-            instance = await self._session.get(DaemonInstance, runtime.daemon_instance_id)
-            if instance is not None:
-                instance.allowed_roots = normalized
-                instance.updated_at = datetime.now(UTC)
-                self._session.add(instance)
-                await self._session.commit()
-                await self._session.refresh(runtime)
+        # 2026-07-06-allowed-roots-per-runtime：写 runtime 级（per-runtime 隔离），
+        # 不写 instance（instance.allowed_roots 仅 daemon 上报刷新作机器级 default）。
+        runtime.allowed_roots = normalized
+        runtime.updated_at = datetime.now(UTC)
+        self._session.add(runtime)
+        await self._session.commit()
+        await self._session.refresh(runtime)
         return runtime
 
     async def mark_offline(

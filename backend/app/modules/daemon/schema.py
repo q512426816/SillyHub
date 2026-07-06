@@ -97,6 +97,7 @@ class DaemonRegisterRuntimeItem(BaseModel):
 
     provider: str
     runtime_id: uuid.UUID
+    allowed_roots: list[str] = Field(default_factory=list)
 
 
 class DaemonRegisterResponse(BaseModel):

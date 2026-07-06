@@ -206,16 +206,23 @@ class DaemonHeartbeatRequest(BaseModel):
     providers: list[DaemonHeartbeatProviderItem] = Field(default_factory=list)
 
 
+class DaemonHeartbeatRuntimePolicy(BaseModel):
+    """心跳响应内单个 runtime 的 per-runtime allowed_roots。"""
+
+    runtime_id: uuid.UUID
+    allowed_roots: list[str]
+
+
 class DaemonHeartbeatResponse(BaseModel):
     """Per-daemon 心跳响应体。
 
-    heartbeat_ack 经 WS 下发到 daemon 连接（task-06）；HTTP 响应只回 daemon 实体
-    级摘要。``allowed_roots`` 从 daemon_instances 读（已上提，design §4.2）。
+    2026-07-06-allowed-roots-per-runtime：返 per-runtime allowed_roots map
+    （runtimes: [{runtime_id, allowed_roots}]），daemon _syncAllowedRoots per-runtime 同步。
     """
 
     daemon_instance_id: uuid.UUID
     status: str
-    allowed_roots: list[str] = Field(default_factory=list)
+    runtimes: list[DaemonHeartbeatRuntimePolicy] = Field(default_factory=list)
 
 
 # SSE response headers shared with the run-scoped stream endpoint
@@ -308,7 +315,11 @@ async def register_daemon(
     return DaemonRegisterResponse(
         daemon_instance_id=result.daemon_instance_id,
         runtimes=[
-            DaemonRegisterRuntimeItem(provider=r.provider, runtime_id=r.runtime_id)
+            DaemonRegisterRuntimeItem(
+                provider=r.provider,
+                runtime_id=r.runtime_id,
+                allowed_roots=r.allowed_roots,
+            )
             for r in result.runtimes
         ],
     )
@@ -341,11 +352,29 @@ async def daemon_heartbeat(
         daemon_version=data.daemon_version,
         daemon_build_id=data.daemon_build_id,
     )
-    allowed = (instance.allowed_roots if instance.allowed_roots else None) or ["~/.sillyhub"]
+    from sqlalchemy import col as _col
+
+    from app.modules.daemon.model import DaemonRuntime
+
+    rt_rows = (
+        (
+            await session.execute(
+                select(DaemonRuntime).where(_col(DaemonRuntime.daemon_instance_id) == instance.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     return DaemonHeartbeatResponse(
         daemon_instance_id=instance.id,
         status=instance.status or "online",
-        allowed_roots=allowed,
+        runtimes=[
+            DaemonHeartbeatRuntimePolicy(
+                runtime_id=rt.id,
+                allowed_roots=list(rt.allowed_roots or []),
+            )
+            for rt in rt_rows
+        ],
     )
 
 
@@ -417,9 +446,6 @@ def _runtime_read(
     if instance is not None:
         update["daemon_version"] = getattr(instance, "version", None)
         update["daemon_build_id"] = getattr(instance, "build_id", None)
-        # allowed_roots 已上提到 daemon_instances（design §4.2）；从 instance 填真实值，
-        # 否则 model_validate(runtime) 因 runtime ORM 无此属性 fallback 到 default。
-        update["allowed_roots"] = list(getattr(instance, "allowed_roots", None) or [])
     if not update:
         return read
     return read.model_copy(update=update)
@@ -536,13 +562,13 @@ async def update_runtime_allowed_roots(
     # version 派生自 daemon_instance.updated_at（写入实际发生的行，epoch 毫秒，单调）。
     if instance is not None:
         version = _derive_policy_version(instance.updated_at)
-        roots_to_push = list(instance.allowed_roots or [])
+        roots_to_push = list(runtime.allowed_roots or [])
         daemon_id = instance.id
     else:
         # runtime 无关联 daemon_instance（迁移过渡 / 测试 fixture）→ 仍推一个
         # 前向 version，避免 PUT 路径空推。daemon_id 退化为 runtime.id。
         version = _derive_policy_version(runtime.updated_at)
-        roots_to_push = []
+        roots_to_push = list(runtime.allowed_roots or [])
         daemon_id = runtime.id
 
     # Lazy import（与 list_dir / self_update 一致）：ws_hub 单例经
