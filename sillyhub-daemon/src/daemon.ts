@@ -908,10 +908,11 @@ export class Daemon {
         allowedRoots: this._config.allowed_roots,
         providers,
       });
-      // backend 返回 { daemon_instance_id, runtimes: [{provider, runtime_id}] }
+      // backend 返回 { daemon_instance_id, runtimes: [{provider, runtime_id, allowed_roots}] }
       const runtimes = (resp.runtimes ?? []) as {
         provider?: string;
         runtime_id?: string;
+        allowed_roots?: string[];
       }[];
       for (const item of runtimes) {
         const providerName = item.provider;
@@ -919,10 +920,19 @@ export class Daemon {
         if (providerName && runtimeId) {
           this._registeredRuntimes.set(providerName, runtimeId);
         }
+        // 2026-07-06-allowed-roots-per-runtime task-07：register 响应 per-runtime
+        // allowed_roots 立即初始化 PolicyCache（关闭首次写 fail-closed 窗口）。
+        if (runtimeId && this._policyCache && Array.isArray(item.allowed_roots)) {
+          const expanded = item.allowed_roots
+            .filter((p): p is string => typeof p === 'string')
+            .map((p) => p.replace(/^~(?=$|[/\\])/, homedir()));
+          const union = new Set<string>(expanded);
+          union.add(homedir());
+          this._policyCache.set(runtimeId, normalizeAllowedRoots([...union]));
+        }
       }
-      // ql-20260705-008：register 成功立即写 PolicyCache（关闭启动窗口——心跳 30s
-      // 才回第一次，scan run 启动时若已 register 即可立即有策略，不依赖 WS
-      // POLICY_UPDATE 推送）。
+      // 兜底：backend 未返 per-runtime allowed_roots（旧）→ 用 config.allowed_roots
+      // 给所有 runtime 设共享值（首次心跳 _syncAllowedRoots 会修正）。
       this._syncPolicyCache(this._config.allowed_roots);
       // 维护 provider → 本机 path 映射（cmd_path 不来自 server，daemon 自维护）
       for (const a of agents) {
@@ -1782,23 +1792,43 @@ export class Daemon {
    */
   private _syncAllowedRoots(resp: Record<string, unknown> | unknown): void {
     if (!resp || typeof resp !== 'object') return;
-    const raw = (resp as Record<string, unknown>).allowed_roots;
-    if (!Array.isArray(raw)) return; // 旧 backend 无字段 → 向后兼容
-    // 展开 ~/.sillyhub 占位
+    const obj = resp as Record<string, unknown>;
+    // 2026-07-06-allowed-roots-per-runtime：per-runtime map
+    // （runtimes: [{runtime_id, allowed_roots}]），各 runtime 独立同步 PolicyCache。
+    const runtimesRaw = obj.runtimes;
+    if (Array.isArray(runtimesRaw)) {
+      for (const item of runtimesRaw) {
+        if (!item || typeof item !== 'object') continue;
+        const rt = item as Record<string, unknown>;
+        const rid = rt.runtime_id;
+        const rootsRaw = rt.allowed_roots;
+        if (!Array.isArray(rootsRaw)) continue;
+        const runtimeId = rid === undefined || rid === null ? '' : String(rid);
+        if (!runtimeId || !this._policyCache) continue;
+        const expanded = rootsRaw
+          .filter((p): p is string => typeof p === 'string')
+          .map((p) => p.replace(/^~(?=$|[/\\])/, homedir()));
+        const union = new Set<string>(expanded);
+        union.add(homedir());
+        this._policyCache.set(runtimeId, normalizeAllowedRoots([...union]));
+      }
+      this._logger.info('allowed_roots_synced_per_runtime', {
+        count: runtimesRaw.length,
+      });
+      return;
+    }
+    // 兼容旧 backend（allowed_roots 单值 → 同步到所有 runtime，过渡期）
+    const raw = obj.allowed_roots;
+    if (!Array.isArray(raw)) return;
     const expanded = raw
       .filter((p): p is string => typeof p === 'string')
       .map((p) => p.replace(/^~(?=$|[/\\])/, homedir()));
     const union = new Set<string>(expanded);
     union.add(homedir());
     const normalized = normalizeAllowedRoots([...union]);
-    // 仅在变化时覆盖（避免每心跳重复写对象引用）
     if (JSON.stringify(normalized) !== JSON.stringify(this._config.allowed_roots)) {
       this._config.allowed_roots = normalized;
-      this._logger.info('allowed_roots_synced', { count: normalized.length });
     }
-    // ql-20260705-008：每次心跳都同步 PolicyCache（不仅变化时）——首次心跳
-    // allowed_roots 可能与默认值相同但 PolicyCache 仍空。注释 1800-1802 承诺心跳
-    // 回填 PolicyCache 但旧实现漏写，补上（否则 canWrite fail-closed deny）。
     this._syncPolicyCache(normalized);
   }
 
