@@ -160,6 +160,12 @@ class DaemonRuntime(BaseModel, table=True):
         default=None,
         sa_column=Column(String(50), nullable=True),
     )
+    # per-runtime 沙箱（2026-07-06-allowed-roots-per-runtime：从 instance 下沉回 runtime，
+    # CC/Hermes 互不影响；新 runtime 注册 copy instance.default，之后独立演化）。
+    allowed_roots: list[str] = Field(
+        default_factory=list,
+        sa_column=Column(JSON, nullable=True),
+    )
     status: str | None = Field(
         default="online",
         sa_column=Column(String(20), nullable=True),
