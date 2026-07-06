@@ -109,6 +109,15 @@ created_at: 2026-07-05 16:33:00
 遗留：gzip 治本（daemon 压缩+backend gunzip）超 quick 范围作后续独立变更。另发现 init_synced_at 写入路径（workspace-config-flow task-07 init-lease complete）从未实现，前端"接入初始化状态"永远未初始化——独立接线遗漏，需单独排查。
 坑：sillyspec --done step 2 自动 commit ql-003(59a53833) 但 baseline 边界排除 keepalive（service.py[tz=] 进 commit，keepalive 留工作区），单独 commit 37ccc3ee 补"ql-003 补"。
 
+## ql-20260706-005 | 2026-07-06 03:50:00 | init lease 完整链路适配 daemon-entity-binding + 三态展示 bug（续 ql-003 遗留 init_synced_at 未实现）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/agent/service.py, backend/app/modules/daemon/lease/context.py, backend/app/modules/daemon/lease/service.py, frontend/src/components/workspace-config-card.tsx
+依据：ql-003 遗留"init_synced_at 写入路径从未实现"。剥洋葱诊断 init 流程在 daemon-entity-binding + workspace-config-flow 多版本变更后从未端到端跑通，逐层补 6 处接线遗漏：① complete_lease 不写 init_synced_at（lease/service.py，task-07 接线遗漏）；② start_init_dispatch runtime_id.hex None（binding.runtime_id None，daemon-entity-binding 后退化）；③ start_init_dispatch runtime_id 没 resolve 有效值（claim_lease 写 daemon_local_id FK 违约 daemon_runtimes，scan 行因 runtime_id 已有效不触发）；④ lease kind=interactive（daemon 端 init 分支在 batch runLease 探测 mode='init'，interactive 被 interactive handler 拒因缺 session_id/run_id/prompt → interactive_missing_fields）；⑤ build_claim_payload batch 分支要求 agent_run_id（init 不启 agent，422 NO_AGENT_RUN）；⑥ 前端 init 按钮只 platform-managed（repo-native/daemon-client 没入口，DB 实证从未跑过 init lease）。另修三态展示 bug：card 用 componentCount（项目组件数）判断"无扫描文档"是字段误用，DB 实际 1562 ScanDocument 但 componentCount=0（无 projects/*.yaml）误报；改用 specWs.last_synced_at。
+修法：① complete_lease 加 init 分支（meta.mode=='init' 回写 WorkspaceMemberRuntime.init_synced_at + spec_version）；② runtime_id.hex None 守卫；③ runtime_id None 时从 daemon_runtimes（daemon_instance_id）resolve claude；④ lease kind 改 'batch'；⑤ build_claim_payload 加 init 分支（构建 daemon _runInitLease 期望的 workspaceId/rootPath/platform_config/latestSpecVersion payload）；⑥ 前端 init 按钮去 strategy==='platform-managed' 限制；⑦ 三态判断改用 specWs.last_synced_at。
+测试：端到端——用户点初始化 → init_synced_at 写入 → 前端显示已初始化 + 工作区已就绪。backend 容器无 pytest 靠端到端；前端 workspace-config-card.test.tsx makeSpecWs 默认 last_synced_at 有值 + 无三态断言，改动不破坏。
+坑：init bug 链 6 层（每修一层 rebuild 验证暴露下一层），最终手动 git commit + push（b5dda23f）。daemon 端 _runInitLease（task-runner.ts）早已实现，但 backend 多处没按它的契约（kind=batch / mode=init / payload 字段）下发——是 backend 侧的系统性接线遗漏，非 daemon 问题。
+
 
 
 
