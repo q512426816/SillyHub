@@ -296,3 +296,13 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 根因：2026-07-06-allowed-roots-per-runtime task-01 迁移 copy instance→runtime，但 disabled runtime（462d0e85/5f8f2098 daemon_instance_id=null）copy NULL → daemon_runtimes.allowed_roots=None。DaemonRuntimeRead.model_validate(runtime) 时 allowed_roots=None（显式 None，Field default_factory 不触发）→ pydantic list_type 校验失败 500。
 方案：schema.py DaemonRuntimeRead 加 field_validator("allowed_roots", mode=before) None→[]（兼容 NULL 列）。
 结果：已完成。ruff format+check 通过。容器挂载本地代码验证 disabled runtime（462d0e85 allowed_roots=None）_runtime_read 返回 []（不再 500）。
+
+## ql-20260706-005-b1e3 | 2026-07-06 14:08:19 | heartbeat 端点 ImportError: col（误从 sqlalchemy 导入，应为 sqlmodel）致 daemon 拿不到 per-runtime allowed_roots，CC 配的可写目录全 deny
+状态：进行中
+关联变更：2026-07-06-allowed-roots-per-runtime
+文件：backend/app/modules/daemon/router.py, sillyhub-daemon/src/daemon.ts
+需求：守护进程 CC runtime（780cae63）在 UI 配了可写目录 ["~/.sillyhub","D:/"]，DB 里 daemon_runtimes.allowed_roots 值正确，但 CC 实际写任何路径都被 Runtime Policy 拒绝（"目标目录未配置为可写目录"），policy_audit_log 该 runtime ALLOW 记录 0 条。
+根因：①backend router.py:355 `from sqlalchemy import col as _col` 是错误导入——col 属 sqlmodel（service.py:13 `from sqlmodel import col` 用对了），sqlalchemy 顶层无 col → ImportError → POST /api/daemon/heartbeat 每次都 500（backend 日志 + curl 实测确认）。daemon 每 15s 心跳全失败，_syncAllowedRoots 永远拿不到 per-runtime runtimes[] map，PolicyCache[780cae63] 停滞在 register 初始值（不含用户配的 D:/），CC 写 D:/、F:/ 全 deny。②daemon.ts:936 `_syncPolicyCache(config.allowed_roots)` 无条件执行，会覆盖 925-932 register 响应刚 set 的 per-runtime allowed_roots（即使 heartbeat 修好，register 后首次心跳前 PolicyCache 仍是 config 而非用户配值）。
+方案：①router.py:355 改 `from sqlmodel import col as _col`（与 service.py 一致），heartbeat 恢复返 per-runtime map；②daemon.ts:936 兜底改条件执行——仅当 backend 未返任何 per-runtime allowed_roots 时才用 config 兜底，保留 register 响应设的正确值。
+状态：已完成
+结果：已完成 + 验证通过。ruff All checks passed。rebuild backend 镜像 + recreate 容器后，curl POST /api/daemon/heartbeat 返 200 + per-runtime runtimes map（CC 780cae63 → ["~/.sillyhub","D:/"]，hermes 23bab2e2 → ["~/.sillyhub"]），backend 日志多条 heartbeat 200 OK（daemon 心跳恢复，不再 ImportError 500）。daemon 心跳 _syncAllowedRoots 现拿得到 runtimes[]，PolicyCache[780cae63] 每 15s 校正为 [~/.sillyhub→homedir/.sillyhub, D:/, homedir]，CC 写这些路径恢复 allow。daemon.ts:936 修复已 tsc build 到 dist（全局 daemon symlink → 本地），下次 daemon 重启 register 时不再覆盖 per-runtime 值；当前 daemon 已过 register 阶段、心跳已校正 PolicyCache，无需重启即恢复写入。

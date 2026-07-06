@@ -352,7 +352,10 @@ async def daemon_heartbeat(
         daemon_version=data.daemon_version,
         daemon_build_id=data.daemon_build_id,
     )
-    from sqlalchemy import col as _col
+    # ql-20260706-005：col 属 sqlmodel（非 sqlalchemy 顶层），误从 sqlalchemy
+    # 导入会 ImportError → heartbeat 端点 500 → daemon 拿不到 per-runtime
+    # allowed_roots → CC 配的可写目录全 deny。与 service.py:13 用法对齐。
+    from sqlmodel import col as _col
 
     from app.modules.daemon.model import DaemonRuntime
 

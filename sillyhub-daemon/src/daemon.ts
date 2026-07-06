@@ -931,9 +931,14 @@ export class Daemon {
           this._policyCache.set(runtimeId, normalizeAllowedRoots([...union]));
         }
       }
-      // 兜底：backend 未返 per-runtime allowed_roots（旧）→ 用 config.allowed_roots
-      // 给所有 runtime 设共享值（首次心跳 _syncAllowedRoots 会修正）。
-      this._syncPolicyCache(this._config.allowed_roots);
+      // 兜底：仅当 backend 未返任何 per-runtime allowed_roots（旧 backend）时，
+      // 才用 config.allowed_roots 给所有 runtime 设共享值。新 backend register
+      // 响应总带 per-runtime allowed_roots（上方 task-07 已按 runtime 独立 set），
+      // 无条件覆盖会冲掉用户配的值（ql-20260706-005）。
+      const gotPerRuntime = runtimes.some((it) => Array.isArray(it.allowed_roots));
+      if (!gotPerRuntime) {
+        this._syncPolicyCache(this._config.allowed_roots);
+      }
       // 维护 provider → 本机 path 映射（cmd_path 不来自 server，daemon 自维护）
       for (const a of agents) {
         if (a.path) {
