@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # ── Interactive session list / read (task-12, FR-10 / D-005@v1) ──────────────
 # DTO for GET /api/daemon/sessions. Field nullability aligns with the actual
@@ -156,6 +156,13 @@ class DaemonRuntimeRead(BaseModel):
     owner: OwnerRead | None = None
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("allowed_roots", mode="before")
+    @classmethod
+    def _coerce_none_roots(cls, v: object) -> list[str]:
+        # 2026-07-06-allowed-roots-per-runtime：DB runtime.allowed_roots 可能为 NULL
+        # （disabled/stale runtime 无 daemon_instance，迁移 copy 不到 default）→ []
+        return [] if v is None else v  # type: ignore[return-value]
 
     model_config = {"from_attributes": True}
 

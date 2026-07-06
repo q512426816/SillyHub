@@ -287,3 +287,12 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 根因：2026-07-03-daemon-entity-binding（52101447）把 allowed_roots 从 DaemonRuntime 上提到 DaemonInstance（model.py:76，DaemonRuntime 已无此属性）。service.list_runtimes_page（runtime/service.py:467）SQL outerjoin(DaemonInstance) 已 JOIN instance，但 router._runtime_read（router.py:401-422）instance 分支只填 daemon_version/daemon_build_id，漏填 allowed_roots；model_validate(runtime) 因 runtime ORM 无此属性 fallback 到 DaemonRuntimeRead.allowed_roots default ["~/.sillyhub"]。PUT /runtimes/{id}/allowed-roots（router.py:567）同样 DaemonRuntimeRead.model_validate(runtime) 不传 instance——尽管端点内已 session.get(DaemonInstance) 拿到 instance（用于 WS push line 536），返回时却没用它填 allowed_roots。回归点：b989bf62 加 daemon_version/build_id 填充时漏带 allowed_roots。
 方案：①_runtime_read instance 分支加 update["allowed_roots"]=list(getattr(instance,"allowed_roots",None) or [])；②PUT 端点 return 改用 _runtime_read(runtime, instance=instance) 复用同一填充逻辑。两处统一修复 list + PUT 链路。
 结果：已完成 + 验证通过。router.py 两处修复：①_runtime_read instance 分支加 allowed_roots 填充；②update_runtime_allowed_roots return 改 _runtime_read(runtime, instance=instance)。ruff All checks passed。容器挂载本地代码实测（_verify_fix.py 跑完已删）：对 runtime 780cae63（instance 4f24728c），修复前 _runtime_read 返回 default ['~/.sillyhub']，修复后返回 ['~/.sillyhub','D:/']（= DB daemon_instances.allowed_roots 真实值）。待 rebuild backend + 部署 + 前端真机确认回显。
+
+## ql-20260706-004-9d2e | 2026-07-06 13:20:00 | GET /runtimes/page 500（disabled runtime allowed_roots=None 致 DaemonRuntimeRead 校验失败）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/schema.py
+需求：GET /api/daemon/runtimes/page 返回 500（pydantic ValidationError: allowed_roots list_type input_value=None）。
+根因：2026-07-06-allowed-roots-per-runtime task-01 迁移 copy instance→runtime，但 disabled runtime（462d0e85/5f8f2098 daemon_instance_id=null）copy NULL → daemon_runtimes.allowed_roots=None。DaemonRuntimeRead.model_validate(runtime) 时 allowed_roots=None（显式 None，Field default_factory 不触发）→ pydantic list_type 校验失败 500。
+方案：schema.py DaemonRuntimeRead 加 field_validator("allowed_roots", mode=before) None→[]（兼容 NULL 列）。
+结果：已完成。ruff format+check 通过。容器挂载本地代码验证 disabled runtime（462d0e85 allowed_roots=None）_runtime_read 返回 []（不再 500）。
