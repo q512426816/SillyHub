@@ -665,12 +665,16 @@ class WorkspaceService:
         }
 
         generated_files = 0
-        all_relations: list[dict] = []
         component_keys: set[str] = set()
 
         for prefix, members in sorted(groups.items()):
             component_key = prefix
             component_keys.add(component_key)
+            # 每个组件分组只保留本组贡献的 relations。
+            # 之前 all_relations 误声明在循环外，导致第 N 个分组背上
+            # 前 N-1 个分组累积的依赖（“万物依赖万物”），并因旧条目残留
+            # 产生 auth→auth 之类的自环。
+            all_relations: list[dict] = []
 
             # Collect paths
             paths = set()
