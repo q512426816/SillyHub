@@ -173,12 +173,12 @@ describe("runtime audit page (task-20)", () => {
     expect(screen.getByText(/共 1301 条/)).toBeInTheDocument();
   });
 
-  it("ALLOW/DENY 决策标签渲染（DENY 红 / ALLOW 绿）", async () => {
+  it("决策标签渲染为中文（DENY→拒绝 红 / ALLOW→放行 绿）", async () => {
     renderPage(<AuditPage />);
     await waitFor(() => {
-      // Tag 文本 DENY / ALLOW 各至少一个
-      expect(screen.getAllByText("DENY").length).toBeGreaterThan(0);
-      expect(screen.getAllByText("ALLOW").length).toBeGreaterThan(0);
+      // ql-20260706-001：决策列回显中文——DENY→「拒绝」/ ALLOW→「放行」（红绿 Tag）。
+      expect(screen.getAllByText("拒绝").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("放行").length).toBeGreaterThan(0);
     });
   });
 

@@ -83,3 +83,6 @@ dashboard 页面遵循统一模式：
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 <!-- MANUAL_NOTES_END -->
+
+## 变更索引
+- ql-20260706-001-7b2e | runtimes/[id]/audit 审计页决策列(ALLOW/DENY)回显中文「放行/拒绝」(红绿 Tag)+ 原因列多行中文 reason 加 whitespace-pre-line 正常换行(原 span 把 daemon buildDenyReason 的 \n 多行长文压成一行)

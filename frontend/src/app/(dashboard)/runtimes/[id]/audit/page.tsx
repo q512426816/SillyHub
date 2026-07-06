@@ -142,8 +142,11 @@ export default function AuditPage() {
       dataIndex: "decision",
       key: "decision",
       width: 90,
+      // 中文回显：ALLOW→放行 / DENY→拒绝（保留红绿 Tag 区分，对齐 CLAUDE.md 中文优先约定）。
       render: (v: string) => (
-        <Tag color={v === "DENY" ? "error" : "success"}>{v}</Tag>
+        <Tag color={v === "DENY" ? "error" : "success"}>
+          {v === "DENY" ? "拒绝" : "放行"}
+        </Tag>
       ),
     },
     {
@@ -172,8 +175,17 @@ export default function AuditPage() {
       title: "原因 / 拒绝理由",
       dataIndex: "reason",
       key: "reason",
+      // reason 字段 DENY 时为 daemon buildDenyReason 产出的多行中文长文
+      // （含 Agent / 目标路径 / 原因），需 whitespace-pre-line 才能按 \n 正常换行；
+      // ALLOW 时为空串 → 显示「—」。
       render: (v: string) => (
-        <span className={v ? "text-xs text-destructive" : "text-xs text-muted-foreground"}>
+        <span
+          className={
+            v
+              ? "whitespace-pre-line break-words text-xs text-destructive"
+              : "text-xs text-muted-foreground"
+          }
+        >
           {v || "—"}
         </span>
       ),

@@ -260,3 +260,12 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 根因：cli.ts makeAuditSender 的 postBatch body 只传 `{events}`，缺 backend AuditBatchRequest 要求的 `runtime_id` + `claim_token`（required）→ backend 422 → sender 重试耗尽落盘 `~/.sillyhub/daemon/audit-failed.jsonl`（6.5KB DENY 事件）。且 daemon AuditEvent 含 runtimeId 但 backend AuditEventIn extra=forbid 不接收。
 方案：cli.ts postBatch 按 runtimeId 分组 + 去掉每事件 runtimeId 字段 + body 加 `runtime_id`；backend schema claim_token 改 Optional（daemon X-API-Key 已鉴权，装配期不持有 lease token）；router claim_token None 时跳过 _verify_claim_token。
 结果：已完成。typecheck 零错 + ruff All checks passed。daemon bundle + backend rebuild。积压 audit-failed.jsonl 6.5KB 需手动重报（或丢弃，新 audit 上报正常后增量）。
+
+## ql-20260706-001-7b2e | 2026-07-06 08:41:50 | 策略审计页决策列(ALLOW/DENY)回显中文「放行/拒绝」+ 原因列多行换行
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/runtimes/[id]/audit/page.tsx + frontend/src/app/(dashboard)/runtimes/[id]/audit/page.test.tsx
+需求：/runtimes/<id>/audit 审计页【决策】列显示 ALLOW/DENY 英文；【原因/拒绝理由】列 daemon 上报的多行中文 reason 被 span 压成一行难读。用户要求回显中文。
+根因：page.tsx 决策列 render 直接回显 {v}（ALLOW/DENY 英文枚举）；原因列 span 默认不渲染 reason 里的 \n（daemon buildDenyReason 产出 "Runtime Policy 拒绝本次写入。\nAgent：...\n目标路径：...\n原因：..." 多行中文长文），挤成一行。后端 reason 本身已是中文，无需改。
+方案：决策列 ALLOW→放行(绿 Tag)/DENY→拒绝(红 Tag)；原因列加 whitespace-pre-line + break-words 让多行 reason 按换行符正常折行；ALLOW 空串仍显「—」。同步 page.test.tsx 决策断言 DENY/ALLOW→拒绝/放行。
+结果：已完成。vitest 5/5 passed + tsc --noEmit exit 0 + pnpm lint exit 0（仅既有 unused-vars warning）。待 commit + frontend docker rebuild 后真机生效。
