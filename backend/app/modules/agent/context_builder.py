@@ -15,11 +15,10 @@ from app.core.errors import ChangeNotFound, WorkspaceNotFound
 from app.core.logging import get_logger
 from app.modules.agent.base import AgentSpecBundle, TaskContext, WorkspaceSpecSummary
 from app.modules.change.model import Change, ChangeDocument
-from app.modules.scan_docs.model import ScanDocument
 from app.modules.spec_profile.provider import SpecProfileProvider
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.task.model import Task
-from app.modules.workspace.model import Workspace, WorkspaceRelation
+from app.modules.workspace.model import Workspace
 from app.modules.workspace.service import resolve_root_path_for_daemon
 
 log = get_logger(__name__)
@@ -84,123 +83,15 @@ async def _fetch_referenced_workspaces(
     max_depth: int = 1,
     snippet_max_chars: int = 2000,
 ) -> list[WorkspaceSpecSummary]:
-    """Traverse WorkspaceRelation graph and collect spec summaries.
+    """跨工作区上下文（已废弃，D-004@V1，变更 2026-07-06-component-readonly-split）。
 
-    Args:
-        session: Async DB session.
-        workspace_id: The primary workspace whose relations to traverse.
-        max_depth: Graph traversal depth. Default 1 = immediate neighbours only.
-            Must be >= 1. Values > 1 may cause performance issues on large graphs.
-        snippet_max_chars: Maximum characters to read from each spec doc file.
-
-    Returns:
-        List of WorkspaceSpecSummary for all reachable workspaces, deduplicated
-        by workspace_id (first encounter wins).
+    原实现遍历 ``WorkspaceRelation`` 图收集相邻 workspace 的 spec 摘要；关系层已砍
+    （446 条边 100% 垃圾：自环 / 反向 / 万物依赖万物），图遍历不再有意义。函数退化为
+    返回空列表，保留签名避免 ``build_spec_bundle`` 调用方连锁改动——``referenced_workspaces``
+    恒为空。参数保留以满足既有调用约表（``build_spec_bundle`` 仍以 ``max_depth=1`` 调用）。
     """
-    if max_depth < 1:
-        raise ValueError("max_depth must be >= 1")
-
-    visited: set[uuid.UUID] = {workspace_id}
-    results: list[WorkspaceSpecSummary] = []
-
-    # BFS frontier: each entry is (related_ws_id, relation_type, direction)
-    frontier: list[tuple[uuid.UUID, str, str]] = []
-
-    # -- Initial pass: find all direct relations of the primary workspace ------
-    rel_stmt = select(WorkspaceRelation).where(
-        (col(WorkspaceRelation.source_id) == workspace_id)
-        | (col(WorkspaceRelation.target_id) == workspace_id),
-    )
-    relations = list((await session.execute(rel_stmt)).scalars().all())
-
-    for rel in relations:
-        if rel.source_id == workspace_id:
-            related_id = rel.target_id
-            direction = "outgoing"
-        else:
-            related_id = rel.source_id
-            direction = "incoming"
-
-        if related_id in visited:
-            continue
-        visited.add(related_id)
-        frontier.append((related_id, rel.relation_type, direction))
-
-    # -- Process frontier (BFS for depth > 1) ---------------------------------
-    depth = 1
-    while frontier and depth < max_depth:
-        next_frontier: list[tuple[uuid.UUID, str, str]] = []
-        for related_id, _rt, _dir in frontier:
-            sub_rel_stmt = select(WorkspaceRelation).where(
-                (col(WorkspaceRelation.source_id) == related_id)
-                | (col(WorkspaceRelation.target_id) == related_id),
-            )
-            sub_rels = list((await session.execute(sub_rel_stmt)).scalars().all())
-            for sr in sub_rels:
-                nid = sr.target_id if sr.source_id == related_id else sr.source_id
-                if nid in visited:
-                    continue
-                visited.add(nid)
-                # Direction is always from the perspective of the primary workspace
-                # For deeper hops, treat them as outgoing from the chain
-                next_frontier.append((nid, sr.relation_type, "outgoing"))
-        frontier.extend(next_frontier)
-        depth += 1
-
-    # -- Build summaries for all discovered workspaces -------------------------
-    for related_id, relation_type, direction in frontier:
-        # Fetch workspace row
-        ws = await session.get(Workspace, related_id)
-        if ws is None:
-            continue
-        # Skip soft-deleted workspaces
-        if ws.deleted_at is not None or ws.status == "deleted":
-            continue
-
-        # Fetch SpecWorkspace (may not exist)
-        sw_stmt = select(SpecWorkspace).where(
-            col(SpecWorkspace.workspace_id) == related_id,
-        )
-        spec_ws = (await session.execute(sw_stmt)).scalar_one_or_none()
-        spec_root: str | None = spec_ws.spec_root if spec_ws else None
-
-        # Fetch scan documents with content
-        doc_stmt = (
-            select(ScanDocument)
-            .where(
-                col(ScanDocument.workspace_id) == related_id,
-                col(ScanDocument.exists).is_(True),
-            )
-            .order_by(col(ScanDocument.doc_type))
-        )
-        docs = list((await session.execute(doc_stmt)).scalars().all())
-
-        doc_summaries: dict[str, str] = {}
-        for doc in docs:
-            # Prefer the content column, fall back to reading file from path
-            raw_content: str | None = doc.content
-            if raw_content is None:
-                raw_content = _read_file_safe(doc.path)
-            if raw_content is not None:
-                if snippet_max_chars <= 0:
-                    doc_summaries[doc.doc_type] = ""
-                else:
-                    doc_summaries[doc.doc_type] = raw_content[:snippet_max_chars]
-
-        results.append(
-            WorkspaceSpecSummary(
-                workspace_id=ws.id,
-                name=ws.name,
-                slug=ws.slug,
-                component_key=ws.component_key,
-                relation_type=relation_type,
-                direction=direction,
-                spec_root=spec_root,
-                doc_summaries=doc_summaries,
-            )
-        )
-
-    return results
+    _ = (session, workspace_id, max_depth, snippet_max_chars)
+    return []
 
 
 async def build_spec_bundle(

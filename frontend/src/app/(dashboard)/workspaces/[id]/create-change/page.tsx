@@ -151,7 +151,7 @@ export default function CreateChangePage({ params }: Props) {
               <div className="flex flex-wrap gap-1.5">
                 {components.map((c) => (
                   <button
-                    key={c.id}
+                    key={c.component_key}
                     onClick={() => toggleComponent(c.component_key)}
                     className={`rounded border px-2 py-1 text-[11px] transition-colors ${
                       selectedComponents.includes(c.component_key)

@@ -19,16 +19,13 @@ from app.core.errors import PermissionDenied
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.auth.rbac import allowed_workspace_ids, has_permission
+from app.modules.workspace.component_catalog_service import (
+    ComponentCatalogService,
+    ComponentListResponse,
+)
 from app.modules.workspace.member_runtimes.router import MemberBindingView, _to_view
 from app.modules.workspace.member_runtimes.service import list_my_bindings
 from app.modules.workspace.model import Workspace
-from app.modules.workspace.relation_schema import (
-    RelationCreate,
-    RelationListResponse,
-    RelationRead,
-    TopologyResponse,
-)
-from app.modules.workspace.relation_service import RelationService
 from app.modules.workspace.scanner import ScanResult
 from app.modules.workspace.schema import (
     OwnerRead,
@@ -43,7 +40,7 @@ from app.modules.workspace.schema import (
     WorkspaceUpdate,
 )
 from app.modules.workspace.service import WorkspaceService
-from app.modules.workspace.topology import TopologyBuilder
+from app.modules.workspace.topology import TopologyBuilder, TopologyResponse
 
 router = APIRouter(prefix="/workspaces", tags=["workspace"])
 
@@ -295,48 +292,20 @@ async def init_workspace(
     )
 
 
-@router.get("/{workspace_id}/relations", response_model=RelationListResponse)
-async def list_relations(
+@router.get("/{workspace_id}/components", response_model=ComponentListResponse)
+async def list_components(
     workspace_id: uuid.UUID,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_READ))],
-) -> RelationListResponse:
-    """List all outgoing + incoming relations for a workspace."""
-    service = RelationService(session)
-    return await service.list_for_workspace(workspace_id)
+    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+) -> ComponentListResponse:
+    """列出项目组的只读组件（一级子项目，D-001@V1，变更 2026-07-06-component-readonly-split）。
 
-
-@router.post(
-    "/{workspace_id}/relations",
-    response_model=RelationRead,
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_relation(
-    workspace_id: uuid.UUID,
-    payload: RelationCreate,
-    session: SessionDep,
-    _user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_WRITE))],
-) -> RelationRead:
-    """Create a relation. source_id = workspace_id from path."""
-    service = RelationService(session)
-    relation = await service.create(workspace_id, payload)
-    return RelationRead.model_validate(relation)
-
-
-@router.delete(
-    "/relations/{relation_id}",
-    response_model=RelationRead,
-    status_code=status.HTTP_200_OK,
-)
-async def delete_relation(
-    relation_id: uuid.UUID,
-    session: SessionDep,
-    _user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_ADMIN))],
-) -> RelationRead:
-    """Delete a relation by id."""
-    service = RelationService(session)
-    relation = await service.delete(relation_id)
-    return RelationRead.model_validate(relation)
+    组件不再是 workspaces 表的行——内部组件元数据从 ``projects/*.yaml`` 只读派生，
+    无 workspace 身份，写端点天然无法作用其上。
+    """
+    service = ComponentCatalogService(session)
+    components = await service.list_components(workspace_id)
+    return ComponentCatalogService.to_response(components)
 
 
 @router.post("/{workspace_id}/rescan", response_model=ScanResponse)
@@ -356,41 +325,9 @@ async def generate_projects(
     session: SessionDep,
     _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_ADMIN))],
 ) -> dict:
-    """Generate projects/*.yaml from _module-map.yaml and reparse into child workspaces."""
+    """Generate projects/*.yaml from _module-map.yaml (一级粒度，只产 yaml)."""
     service = WorkspaceService(session)
     return await service.generate_projects(workspace_id)
-
-
-@router.post("/{workspace_id}/reparse")
-async def reparse_workspace(
-    workspace_id: uuid.UUID,
-    session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_ADMIN))],
-) -> dict:
-    """Parse projects/*.yaml under a parent Workspace and sync children + relations."""
-    service = WorkspaceService(session)
-    _parse_result, stats, children, relations = await service.reparse(workspace_id)
-    return {
-        **stats,
-        "children": [
-            {
-                "id": str(c.id),
-                "name": c.name,
-                "component_key": c.component_key,
-                "slug": c.slug,
-            }
-            for c in children
-        ],
-        "relations": [
-            {
-                "id": str(r.id),
-                "source_id": str(r.source_id),
-                "target_id": str(r.target_id),
-                "relation_type": r.relation_type,
-            }
-            for r in relations
-        ],
-    }
 
 
 @router.delete(

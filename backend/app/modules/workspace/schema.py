@@ -280,23 +280,6 @@ class WorkspaceListResponse(BaseModel):
     total: int
 
 
-class WorkspaceRelationCreate(BaseModel):
-    target_id: uuid.UUID
-    relation_type: str = Field(min_length=1, max_length=50)
-    description: str | None = Field(default=None)
-
-
-class WorkspaceRelationRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    source_id: uuid.UUID
-    target_id: uuid.UUID
-    relation_type: str
-    description: str | None
-    created_at: datetime
-
-
 def slugify(name: str) -> str:
     """Derive a default slug from a workspace name.
 

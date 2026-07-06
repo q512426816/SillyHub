@@ -129,13 +129,14 @@ export default function TopologyPage({ params }: Props) {
         <div>
           <p className="text-[11px] text-muted-foreground">
             <Link href={`/workspaces/${workspaceId}/components`} className="hover:underline">
-              ← 关系列表
+              ← 项目组件
             </Link>
           </p>
           <h1 className="text-base font-semibold">工作区拓扑</h1>
         </div>
         <div className="text-[11px] text-muted-foreground">
           {topology ? `${topology.nodes.length} 节点 · ${topology.edges.length} 边` : ""}
+          {/* D-004@V1：关系层已砍，edges 恒 0；保留入口显示项目组节点。 */}
         </div>
       </header>
 

@@ -40,12 +40,6 @@ from app.modules.scan_docs.model import ScanDocument
 from app.modules.workspace.model import (
     AgentRunWorkspace,
     Workspace,
-    WorkspaceRelation,
-)
-from app.modules.workspace.parser import (
-    ParsedWorkspace,
-    ParseResult,
-    WorkspaceParser,
 )
 from app.modules.workspace.scanner import ScanResult, WorkspaceScanner
 from app.modules.workspace.schema import WorkspaceCreate, WorkspaceUpdate, slugify
@@ -522,16 +516,8 @@ class WorkspaceService:
         workspace.last_scanned_at = datetime.now(UTC)
         workspace.updated_at = workspace.last_scanned_at
 
-        if scan.is_sillyspec and scan.structure.has_projects_dir:
-            try:
-                await self.reparse(workspace_id)
-                log.info("workspace.rescan.projects_imported", workspace_id=str(workspace.id))
-            except Exception as exc:
-                log.warning(
-                    "workspace.rescan.projects_import_failed",
-                    workspace_id=str(workspace.id),
-                    error=str(exc),
-                )
+        # 组件不再是 workspaces 表行（D-001@V1，变更 2026-07-06-component-readonly-split），
+        # rescan 无需 reparse 落子组件；scan 结果仍用于刷新 last_scanned_at 与 structure。
 
         await self._session.commit()
         await self._session.refresh(workspace)
@@ -640,93 +626,57 @@ class WorkspaceService:
 
         modules = module_map.get("modules", {})
         if not modules:
-            return {
-                "generated_files": 0,
-                "reparse": {"parsed": 0, "created": 0, "updated": 0, "deleted": 0},
-            }
+            return {"generated_files": 0}
 
-        # Group modules by prefix (e.g. "backend-agent" -> "backend", "core-config" -> "core")
-        groups: dict[str, list[tuple[str, dict]]] = {}
-        for key, info in modules.items():
+        # 按一级目录分组（D-002@V1，变更 2026-07-06-component-readonly-split）。
+        # 改前按 module key 首段（key.split("-")[0]）分组，会产出模块级组件（backend-agent 等
+        # 35 个），与用户"应该有好几个"心智不符；改后按 module path 的顶级目录
+        # （backend/frontend/daemon/sillyhub-daemon/ppm）分组，模块级归入对应一级组件，
+        # 只产 5 个一级子项目 yaml。
+        root_path_normalized = _rewrite_path(ws.root_path)
+        groups: set[str] = set()
+        for _key, info in modules.items():
             if not isinstance(info, dict):
                 continue
-            prefix = key.split("-")[0] if "-" in key else key
-            groups.setdefault(prefix, []).append((key, info))
+            for raw_path in info.get("paths", []):
+                rel = raw_path
+                if raw_path.startswith(root_path_normalized):
+                    rel = os.path.relpath(raw_path, root_path_normalized)
+                top = rel.replace("\\", "/").split("/")[0]
+                if top:
+                    groups.add(top)
 
-        # Generate projects/*.yaml
+        # Generate projects/*.yaml（只产一级子项目；不再生成 relations 段——D-004 砍关系层，
+        # 避免 446 条垃圾边复活，也避开已修的累积 bug 路径 ql-20260706-007）。
         projects_dir = Path(spec_root) / ".sillyspec" / "projects"
         projects_dir.mkdir(parents=True, exist_ok=True)
 
-        # Collect all paths to detect tech_stack and build commands
+        name_map = {
+            "backend": "Backend API",
+            "frontend": "Frontend App",
+            "daemon": "Daemon",
+            "sillyhub-daemon": "SillyHub Daemon",
+            "ppm": "PPM",
+        }
         tech_stack_map = {
             "backend": ["Python", "FastAPI", "SQLAlchemy", "Pydantic"],
             "frontend": ["TypeScript", "Next.js", "React", "Tailwind CSS"],
-            "core": ["Python", "SQLAlchemy", "Redis"],
+            "daemon": ["TypeScript", "Node.js"],
+            "sillyhub-daemon": ["TypeScript", "Node.js"],
+            "ppm": ["Python", "FastAPI"],
         }
+        role_service = {"backend", "frontend"}
 
         generated_files = 0
-        component_keys: set[str] = set()
-
-        for prefix, members in sorted(groups.items()):
-            component_key = prefix
-            component_keys.add(component_key)
-            # 每个组件分组只保留本组贡献的 relations。
-            # 之前 all_relations 误声明在循环外，导致第 N 个分组背上
-            # 前 N-1 个分组累积的依赖（“万物依赖万物”），并因旧条目残留
-            # 产生 auth→auth 之类的自环。
-            all_relations: list[dict] = []
-
-            # Collect paths
-            paths = set()
-            for _key, info in members:
-                for p in info.get("paths", []):
-                    paths.add(p)
-
-            # Determine relative path from workspace root
-            rel_path = paths.pop() if len(paths) == 1 else None
-            if rel_path:
-                # Make it relative
-                root_path = _rewrite_path(ws.root_path)
-                if rel_path.startswith(root_path):
-                    rel_path = os.path.relpath(rel_path, root_path).replace("\\", "/")
-
-            # Collect depends_on across members for relations
-            for _key, info in members:
-                for dep in info.get("depends_on", []):
-                    dep_prefix = dep.split("-")[0] if "-" in dep else dep
-                    if dep_prefix != prefix and dep_prefix in groups:
-                        all_relations.append(
-                            {
-                                "target": dep_prefix,
-                                "type": "depends_on",
-                            }
-                        )
-
-            name_map = {
-                "backend": "Backend API",
-                "frontend": "Frontend App",
-                "core": "Core Infrastructure",
-            }
-
+        for component_key in sorted(groups):
             project_def: dict = {
                 "id": component_key,
-                "name": name_map.get(prefix, prefix.capitalize()),
+                "name": name_map.get(component_key, component_key.capitalize()),
                 "type": "component",
-                "role": "service" if prefix in ("backend", "frontend") else "library",
-                "tech_stack": tech_stack_map.get(prefix, []),
+                "role": "service" if component_key in role_service else "library",
+                "path": component_key,
+                "tech_stack": tech_stack_map.get(component_key, []),
             }
-            if rel_path:
-                project_def["path"] = rel_path
-            if all_relations:
-                # Deduplicate
-                seen = set()
-                unique = []
-                for r in all_relations:
-                    k = (r["target"], r["type"])
-                    if k not in seen:
-                        seen.add(k)
-                        unique.append(r)
-                project_def["relations"] = unique
 
             out_path = projects_dir / f"{component_key}.yaml"
             with out_path.open("w", encoding="utf-8") as f:
@@ -735,265 +685,7 @@ class WorkspaceService:
                 )
             generated_files += 1
 
-        # Now reparse to create child workspaces
-        _parse_result, stats, children, _relations = await self.reparse(workspace_id)
-
-        return {
-            "generated_files": generated_files,
-            "reparse": stats,
-            "children": [
-                {"id": str(c.id), "name": c.name, "component_key": c.component_key, "slug": c.slug}
-                for c in children
-            ],
-        }
-
-    # -- Reparse ---
-
-    async def reparse(
-        self,
-        workspace_id: uuid.UUID,
-    ) -> tuple[ParseResult, dict[str, int], list[Workspace], list[WorkspaceRelation]]:
-        """Parse projects/*.yaml under a parent Workspace and create child
-        Workspaces + WorkspaceRelations.
-
-        Args:
-            workspace_id: Parent Workspace UUID.
-
-        Returns:
-            tuple of (ParseResult, stats, children, relations).
-
-        Raises:
-            WorkspaceNotFound: if workspace_id is missing or soft-deleted.
-        """
-        # 1. Verify parent workspace
-        ws = await self.get(workspace_id)
-
-        # 2. Determine parse root — prefer spec_root for platform-managed
-        from app.modules.spec_workspace.service import SpecWorkspaceService
-
-        spec_ws_svc = SpecWorkspaceService(self._session)
-        parse_root: str | None = None
-        try:
-            spec_ws = await spec_ws_svc.get(ws.id)
-            if spec_ws.strategy == "platform-managed" and spec_ws.spec_root:
-                parse_root = spec_ws.spec_root
-        except Exception:
-            pass
-        root_path = parse_root or _rewrite_path(ws.root_path)
-        # For building child root_paths, always use the original host root
-        host_root = _rewrite_path(ws.root_path)
-
-        # 3. Call parser (reads YAML from parse root)
-        parser = WorkspaceParser()
-        parse_result = parser.parse(root_path)
-
-        # 4. path_missing re-validation
-        for pw in parse_result.workspaces:
-            if pw.status == "path_missing" and pw.path:
-                resolved = Path(host_root) / pw.path
-                if resolved.exists():
-                    pw.status = "active"
-
-        # 5. Query existing child workspaces
-        # Children have root_path under host_root/ (constructed by _build_child_root_path).
-        normalized_host = host_root.replace("\\", "/")
-        stmt = select(Workspace).where(
-            col(Workspace.root_path).like(normalized_host + "/%"),
-            col(Workspace.deleted_at).is_(None),
-        )
-        existing_rows = list((await self._session.execute(stmt)).scalars().all())
-        # Also find orphaned children from previous parse_root-based paths
-        if parse_root and parse_root != host_root:
-            normalized_parse = parse_root.replace("\\", "/")
-            orphan_stmt = select(Workspace).where(
-                col(Workspace.root_path).like(normalized_parse + "/%"),
-                col(Workspace.deleted_at).is_(None),
-            )
-            for row in (await self._session.execute(orphan_stmt)).scalars().all():
-                if row not in existing_rows:
-                    existing_rows.append(row)
-        existing_children: dict[str, Workspace] = {
-            ws.source_yaml_path: ws for ws in existing_rows if ws.source_yaml_path
-        }
-        existing_by_key: dict[str, Workspace] = {
-            ws.component_key: ws for ws in existing_rows if ws.component_key
-        }
-
-        # 6. Iterate parsed workspaces — UPSERT
-        stats: dict[str, int] = {
-            "parsed": 0,
-            "created": 0,
-            "updated": 0,
-            "deleted": 0,
-            "relations_created": 0,
-            "relations_deleted": 0,
-        }
-        seen_child_ids: set[uuid.UUID] = set()
-
-        for pw in parse_result.workspaces:
-            stats["parsed"] += 1
-            child_root = self._build_child_root_path(host_root, pw)
-
-            # Skip if child root_path would collide with parent
-            if os.path.normpath(child_root) == os.path.normpath(host_root):
-                stats["parsed"] -= 1
-                continue
-
-            # Match existing row
-            existing = existing_children.get(pw.source_yaml_path) or existing_by_key.get(
-                pw.component_key
-            )
-
-            if existing:
-                # UPDATE
-                existing.name = pw.name
-                existing.type = pw.type
-                existing.role = pw.role
-                existing.repo_url = pw.repo_url
-                existing.default_branch = pw.default_branch
-                existing.tech_stack = pw.tech_stack
-                existing.build_command = pw.build_command
-                existing.test_command = pw.test_command
-                existing.source_yaml_path = pw.source_yaml_path
-                existing.component_key = pw.component_key
-                existing.root_path = child_root
-                existing.updated_at = datetime.now(UTC)
-                stats["updated"] += 1
-                seen_child_ids.add(existing.id)
-            else:
-                # CREATE
-                slug = (slugify(pw.name)[:78] + "-" + pw.component_key[:20])[:100]
-                child = Workspace(
-                    id=uuid.uuid4(),
-                    name=pw.name,
-                    slug=slug,
-                    root_path=child_root,
-                    status="active",
-                    component_key=pw.component_key,
-                    type=pw.type,
-                    role=pw.role,
-                    repo_url=pw.repo_url,
-                    default_branch=pw.default_branch,
-                    tech_stack=pw.tech_stack,
-                    build_command=pw.build_command,
-                    test_command=pw.test_command,
-                    source_yaml_path=pw.source_yaml_path,
-                    created_by=None,
-                    created_at=datetime.now(UTC),
-                    updated_at=datetime.now(UTC),
-                )
-                self._session.add(child)
-                stats["created"] += 1
-                seen_child_ids.add(child.id)
-
-        await self._session.flush()
-
-        # 7. Soft-delete removed children
-        for _source_path, child in existing_children.items():
-            if child.id not in seen_child_ids:
-                child.deleted_at = datetime.now(UTC)
-                child.status = "deleted"
-                child.updated_at = datetime.now(UTC)
-                stats["deleted"] += 1
-
-        await self._session.flush()
-
-        # 8. Delete old relations + create new relations
-        # Collect key -> id mapping from all children (including newly created)
-        all_children_stmt = select(Workspace).where(col(Workspace.id).in_(seen_child_ids))
-        all_children = list((await self._session.execute(all_children_stmt)).scalars().all())
-        key_to_id: dict[str, uuid.UUID] = {
-            ws.component_key: ws.id for ws in all_children if ws.component_key
-        }
-
-        # Delete old relations where source or target is in seen_child_ids
-        old_rels_stmt = select(WorkspaceRelation).where(
-            or_(
-                col(WorkspaceRelation.source_id).in_(seen_child_ids),
-                col(WorkspaceRelation.target_id).in_(seen_child_ids),
-            )
-        )
-
-        deleted_rel_ids: set[uuid.UUID] = set()
-        for rel in (await self._session.execute(old_rels_stmt)).scalars().all():
-            if rel.id not in deleted_rel_ids:
-                await self._session.delete(rel)
-                deleted_rel_ids.add(rel.id)
-                stats["relations_deleted"] += 1
-
-        await self._session.flush()
-
-        # Create new relations with in-memory dedup
-        seen_edges: set[tuple[uuid.UUID, uuid.UUID, str]] = set()
-        for pr in parse_result.relations:
-            src_id = key_to_id.get(pr.source_key)
-            tgt_id = key_to_id.get(pr.target_key)
-            if not src_id or not tgt_id:
-                continue
-            edge = (src_id, tgt_id, pr.relation_type)
-            if edge in seen_edges:
-                continue
-            seen_edges.add(edge)
-            rel = WorkspaceRelation(
-                id=uuid.uuid4(),
-                source_id=src_id,
-                target_id=tgt_id,
-                relation_type=pr.relation_type,
-                description=pr.description,
-            )
-            self._session.add(rel)
-            stats["relations_created"] += 1
-
-        # 9. Commit + return
-        await self._session.commit()
-
-        # Re-query final state
-        final_children = list(
-            (
-                await self._session.execute(
-                    select(Workspace).where(col(Workspace.id).in_(seen_child_ids))
-                )
-            )
-            .scalars()
-            .all()
-        )
-        final_rels = list(
-            (
-                await self._session.execute(
-                    select(WorkspaceRelation).where(
-                        or_(
-                            col(WorkspaceRelation.source_id).in_(seen_child_ids),
-                            col(WorkspaceRelation.target_id).in_(seen_child_ids),
-                        )
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-
-        return parse_result, stats, final_children, final_rels
-
-    @staticmethod
-    def _build_child_root_path(parent_root: str, parsed: ParsedWorkspace) -> str:
-        """Construct the root_path for a child Workspace.
-
-        Rules:
-        1. parsed.path is absolute (host path) -> rewrite via _rewrite_path
-        2. parsed.path is relative -> os.path.join(parent_root, parsed.path)
-        3. parsed.path is None or empty -> parent_root + "/" + component_key
-
-        Returns forward-slash normalized path.
-        """
-        if parsed.path:
-            p = parsed.path.replace("\\", "/")
-            # Detect absolute Windows (C:/...) or Posix (/...) paths
-            is_absolute = (len(p) >= 2 and p[1] == ":") or p.startswith("/")
-            if is_absolute:
-                return _rewrite_path(parsed.path)
-            joined = os.path.join(parent_root, parsed.path)
-            return os.path.normpath(joined).replace("\\", "/")
-        return os.path.normpath(parent_root).replace("\\", "/") + "/" + parsed.component_key
+        return {"generated_files": generated_files}
 
     # -- Scan-generate ---
 
@@ -1445,16 +1137,7 @@ class WorkspaceService:
             if spec_ws.strategy == "platform-managed" and spec_ws.spec_root:
                 platform_sillyspec = Path(spec_ws.spec_root) / ".sillyspec"
                 if platform_sillyspec.is_dir():
-                    # Platform storage already has .sillyspec — just reimport children
-                    try:
-                        await self.reparse(workspace.id)
-                        log.info("spec_workspace.projects_imported", workspace_id=str(workspace.id))
-                    except Exception as exc:
-                        log.warning(
-                            "spec_workspace.projects_import_failed",
-                            workspace_id=str(workspace.id),
-                            error=str(exc),
-                        )
+                    # 组件不再落库（D-001@V1），仅 reparse changes（变更仍需从文件系统入库）。
                     try:
                         from app.modules.change.service import ChangeService
 
@@ -1531,17 +1214,7 @@ class WorkspaceService:
                 ),
             )
 
-        # Import projects and changes from .sillyspec into DB
-        try:
-            await self.reparse(workspace_id)
-            log.info("spec_workspace.projects_imported", workspace_id=str(workspace_id))
-        except Exception as exc:
-            log.warning(
-                "spec_workspace.projects_import_failed",
-                workspace_id=str(workspace_id),
-                error=str(exc),
-            )
-
+        # 组件不再落库（D-001@V1），仅 reparse changes（变更仍需从文件系统入库）。
         try:
             from app.modules.change.service import ChangeService
 
