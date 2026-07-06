@@ -48,3 +48,4 @@ backend send_rpc(rpc_id) → daemon 执行 → rpc_result(rpc_id) → resolve_rp
 - ql-20260703-001-7e3a | session-manager Bash tool 跨 shell 提取遗漏修复（合并 bash+powershell+cmd 三提取取并集，PowerShell Set-Content 经 Bash tool 绕过 PolicyEngine 的真机 bug）
 - ql-20260703-002-c2d4 | runtimeIdProvider 用 config.runtime_id（非注册 runtime）致 PolicyCache 永久 miss，配 allowed_roots 后 interactive session 仍 deny（改 daemon.resolveRuntimeId(provider)）
 - ql-20260703-003-f9d7 | 审计页免 wid 路由——后端加 GET /daemon/runtimes/{rid}/policy-audit + 前端 usePolicyAuditByRuntime（前端审计页不再要求 ?wid）
+- ql-20260706-003-8a3f | runtimes 页可写目录配置不回显修复（daemon-entity-binding 上提 allowed_roots 到 daemon_instances 后，router._runtime_read instance 分支只填 daemon_version/build_id 漏填 allowed_roots + PUT /allowed-roots 端点 model_validate 不传 instance；统一 _runtime_read 填充 instance.allowed_roots + PUT 复用 _runtime_read）

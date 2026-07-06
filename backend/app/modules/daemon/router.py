@@ -417,6 +417,9 @@ def _runtime_read(
     if instance is not None:
         update["daemon_version"] = getattr(instance, "version", None)
         update["daemon_build_id"] = getattr(instance, "build_id", None)
+        # allowed_roots 已上提到 daemon_instances（design §4.2）；从 instance 填真实值，
+        # 否则 model_validate(runtime) 因 runtime ORM 无此属性 fallback 到 default。
+        update["allowed_roots"] = list(getattr(instance, "allowed_roots", None) or [])
     if not update:
         return read
     return read.model_copy(update=update)
@@ -564,7 +567,8 @@ async def update_runtime_allowed_roots(
             version=version,
             exc_info=True,
         )
-    return DaemonRuntimeRead.model_validate(runtime)
+    # 用 _runtime_read 填充 instance.allowed_roots（否则前端拿到 default [~/.sillyhub]）
+    return _runtime_read(runtime, instance=instance)
 
 
 @router.post(
