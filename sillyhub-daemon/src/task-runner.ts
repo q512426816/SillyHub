@@ -95,6 +95,8 @@ import type {
 const MAX_OUTPUT = 10_000;
 /** 错误信息最大字符数（对齐 Python _MAX_ERROR = 5000）。 */
 const MAX_ERROR = 5_000;
+/** ql-20260706-009：stderr 实时 forward 到 backend 的行数上限（防风暴）。 */
+const MAX_STDERR_FORWARD = 50;
 /** 超时 kill 优雅升级：SIGTERM 后 2 秒仍存活则 SIGKILL（对齐 Python stream_json.py:115）。 */
 const KILL_GRACE_MS = 2_000;
 
@@ -977,11 +979,13 @@ export class TaskRunner {
     let timedOut = false;
     let cancelled = false;
     let stderrBuf = '';
+    // ql-20260706-009：已 forward 到 backend 的 stderr 行数（防风暴）。
+    let stderrForwarded = 0;
     // task-06：收集 complete 事件 metadata.stats（claude result 消息的 usage/cost）。
     // complete 事件通常仅一个，覆盖式赋值；失败路径保持 undefined。
     let lastStats: Record<string, unknown> | undefined;
 
-    // stderr 累积（用于失败诊断）+ observer raw 写入
+    // stderr 累积（用于失败诊断）+ observer raw 写入 + ql-20260706-009 实时 forward
     child.stderr?.on('data', (chunk: Buffer | string) => {
       const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
       stderrBuf += text;
@@ -991,6 +995,20 @@ export class TaskRunner {
       for (const ln of lines) {
         if (ln.length === 0) continue;
         observer.writeRawStderr(ln);
+        // ql-20260706-009：stderr 关键行实时 forward 到 backend agent_run_logs
+        // （channel='stderr'），让前端"错误警告"筛可见——修 claude 529/API Error
+        // 等只吐 stderr 不进 stdout stream-json 致前端只看 init 没下文的可见性 bug。
+        // fire-and-forget（同 stdout submitMessages 策略）；MAX_STDERR_FORWARD 防风暴。
+        if (claimToken && ctx.agentRunId && stderrForwarded < MAX_STDERR_FORWARD) {
+          stderrForwarded += 1;
+          void this.client
+            .submitMessages(leaseId, claimToken, ctx.agentRunId, [
+              { event_type: 'stderr', content: ln.slice(0, 5000), channel: 'stderr' },
+            ])
+            .catch((e) => {
+              console.warn('task_runner: stderr_forward_failed', leaseId, e);
+            });
+        }
       }
       // stderr 也算 error 文本上限保护（避免无限累积）
       if (stderrBuf.length > MAX_ERROR * 4) {

@@ -352,6 +352,47 @@ class LeaseService:
                     if "exit_code" in stats:
                         agent_run.exit_code = stats["exit_code"]
 
+                # ql-20260706-009：兜底——run failed 时把 output_redacted 写一条
+                # stderr AgentRunLog + SSE 推送，让前端日志流可见失败原因（防 daemon
+                # stderr 没实时 forward 的兜底；daemon 侧 task-runner.ts stderr forward
+                # 是主路径，这里是双保险）。前端收 done event 后刷新也能看到 DB 这条。
+                if agent_run.status == "failed" and agent_run.output_redacted:
+                    try:
+                        import json as _json
+
+                        from app.core.redis import get_redis
+                        from app.modules.agent.model import AgentRunLog
+
+                        _failure_content = agent_run.output_redacted[:50000]
+                        _failure_log = AgentRunLog(
+                            run_id=agent_run.id,
+                            channel="stderr",
+                            content_redacted=_failure_content,
+                            timestamp=now,
+                        )
+                        self._session.add(_failure_log)
+                        await self._session.flush()
+                        await get_redis().publish(
+                            f"agent_run:{agent_run.id}",
+                            _json.dumps(
+                                {
+                                    "log_id": str(_failure_log.id),
+                                    "channel": "stderr",
+                                    "content": _failure_content,
+                                    "timestamp": now.isoformat().replace("+00:00", "Z"),
+                                    "parent_tool_use_id": None,
+                                    "subagent_type": None,
+                                    "depth": None,
+                                    "tool_kind": None,
+                                }
+                            ),
+                        )
+                    except Exception:
+                        log.warning(
+                            "complete_lease_failure_log_failed",
+                            agent_run_id=str(agent_run.id),
+                        )
+
                 self._session.add(agent_run)
 
         # task-07（workspace-config-flow D-010）：init lease complete 时回写 member

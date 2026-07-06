@@ -147,6 +147,16 @@ created_at: 2026-07-05 16:33:00
 遗留：① API 529 overloaded 是 inference gateway 临时容量问题（非代码），用户重试 dispatch 即可，持续则查 gateway 127.0.0.1:15721 / API quota；② 部署：daemon 改动需 build + 重启本机 daemon 进程才生效；③ session-manager.ts MultiEdit 死代码后续可清理。
 坑：诊断要分清两条独立错误——exit=1 的 Permission deny 是致命代码 bug（必现），529 是临时容量（偶发）；claude cli 版本演进废弃工具时，permission settings 生成器要同步。
 
+## ql-20260706-009-a68c | 2026-07-06 11:34:16 | daemon stderr 错误不 forward + backend run failed 不写 error log 致前端看不到 529/失败原因（两端修）
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/src/task-runner.ts, backend/app/modules/daemon/lease/service.py
+依据：用户报 dispatch 失败"前端只看 init 没下文，看不到 529"。诊断：claude 的 529 attempt / API Error 输出在 stderr（不进 stdout stream-json）；daemon task-runner.ts:1124 readline 只读 child.stdout，:985-999 child.stderr 只累积 stderrBuf + observer.writeRawStderr 落盘 terminal.log，**不 forward 到 backend**；stderrBuf 仅失败时写入 run.output_redacted（lease/service.py:328）。前端 SSE 只看 agent_run_logs（stdout forward），stderr 完全不可见——DB output_redacted 有 529（用户看不到）+ terminal.log 有（用户看不到）。
+修法（两端）：① daemon task-runner.ts:985-999 child.stderr.on('data') for 循环里，每行 fire-and-forget this.client.submitMessages(leaseId, claimToken, ctx.agentRunId, [{event_type:'stderr', content, channel:'stderr'}])，MAX_STDERR_FORWARD=50 防风暴（同 stdout submitMessages 非阻塞策略）；② backend lease/service.py complete_lease failed 路径（output_redacted 写完后）兜底写一条 AgentRunLog(channel='stderr', content=output_redacted) + redis publish log_payload 到 agent_run:{run_id}（复用 run_sync submit_messages 的 payload 格式），前端 SSE 实时收 + DB 持久化（双保险）。leaseId/claimToken 是 runLease 局部变量(:359/:364) stderr 闭包可访问；AgentRunLog id/timestamp 默认(model.py:317/328) 构造只需 run_id/channel/content_redacted。
+测试：daemon typecheck(tsc --noEmit) 过 + 全套 vitest 1756 passed/8 skipped 零回归；backend daemon 模块 471 passed 零回归。
+遗留：① 端到端部署验证（daemon bundle + backend rebuild + 重启 daemon，用户重触发 dispatch 看 stderr/529 是否回流前端"错误警告"筛）；② daemon 新增 stderr forward 无专门单测（fire-and-forget 简单，靠 typecheck + 全套回归守护），后续可补 mock client 断言。
+坑：stderr forward 用 fire-and-forget 不阻塞 readline；防风暴 MAX_STDERR_FORWARD=50（claude stderr 通常 <10 行）；backend 兜底用局部 import（json/get_redis/AgentRunLog）避免改文件顶部 import。
+
 
 
 
