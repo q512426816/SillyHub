@@ -354,6 +354,48 @@ class LeaseService:
 
                 self._session.add(agent_run)
 
+        # task-07（workspace-config-flow D-010）：init lease complete 时回写 member
+        # binding 的 init_synced_*。upsert_my_binding 注释明说这两个字段只由此路径写，
+        # 但本路径之前漏实现 → 前端"接入初始化状态"永远显示未初始化。
+        # try/except 兜底：meta 损坏 / 无 binding 只 warn，不阻塞 lease 完成。
+        _init_meta = lease.metadata_ if isinstance(lease.metadata_, dict) else {}
+        if _init_meta.get("mode") == "init":
+            try:
+                _init_ws_id = uuid.UUID(str(_init_meta.get("workspace_id")))
+                _init_user_id = uuid.UUID(str(_init_meta.get("actor_user_id")))
+                _init_spec_ver = int(_init_meta.get("latest_spec_version") or 0)
+            except (TypeError, ValueError):
+                log.warning(
+                    "init_lease_complete_bad_meta",
+                    lease_id=str(lease.id),
+                )
+            else:
+                from app.modules.workspace.member_runtimes.model import (
+                    WorkspaceMemberRuntime,
+                )
+
+                _init_binding = await self._session.get(
+                    WorkspaceMemberRuntime, (_init_ws_id, _init_user_id)
+                )
+                if _init_binding is not None:
+                    _init_binding.init_synced_at = now
+                    _init_binding.init_synced_spec_version = _init_spec_ver
+                    self._session.add(_init_binding)
+                    log.info(
+                        "init_lease_complete_synced",
+                        lease_id=str(lease.id),
+                        workspace_id=str(_init_ws_id),
+                        user_id=str(_init_user_id),
+                        spec_version=_init_spec_ver,
+                    )
+                else:
+                    log.warning(
+                        "init_lease_complete_no_binding",
+                        lease_id=str(lease.id),
+                        workspace_id=str(_init_ws_id),
+                        user_id=str(_init_user_id),
+                    )
+
         await self._session.commit()
         await self._session.refresh(lease)
 

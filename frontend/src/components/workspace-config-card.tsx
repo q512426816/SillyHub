@@ -393,16 +393,14 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
   // 头部操作按钮（5 按钮，与 page.tsx 598-674 行条件等价）
   const headActions = specWs ? (
     <div className="flex gap-2">
-      {specWs.strategy === "platform-managed" && (
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void handleInit()}
-          disabled={initing || !!activeScanRunId || scanning || importing}
-        >
-          {initing ? "初始化进行中…" : "初始化"}
-        </Button>
-      )}
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => void handleInit()}
+        disabled={initing || !!activeScanRunId || scanning || importing}
+      >
+        {initing ? "初始化进行中…" : "初始化"}
+      </Button>
       {daemonClient && (
         <Button
           size="sm"
@@ -684,7 +682,10 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
               </p>
             </div>
           ))}
-        {initSyncedAt && componentCount === 0 && (
+        {/* 三态引导原用 componentCount（项目组件数）判断"有无扫描文档"是字段误用——
+            DB 可能 1562 ScanDocument 但 componentCount=0（无 projects/*.yaml）误报"无扫描
+            文档"。改用 specWs.last_synced_at（spec 同步过 = 扫描/reparse 落了 ScanDocument）。 */}
+        {initSyncedAt && !specWs?.last_synced_at && (
           <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <p className="font-medium">已初始化，但工作区尚无扫描文档。</p>
             <p className="mt-0.5 text-amber-600">
@@ -692,7 +693,7 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
             </p>
           </div>
         )}
-        {initSyncedAt && componentCount > 0 && (
+        {initSyncedAt && !!specWs?.last_synced_at && (
           <div className="rounded border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
             <p className="font-medium">工作区已就绪。</p>
             <p className="mt-0.5 text-green-600">规范文档已同步，可直接使用。</p>

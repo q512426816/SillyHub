@@ -1590,6 +1590,33 @@ class AgentService:
                 },
             )
 
+        # daemon-entity-binding 后 binding.runtime_id 常为 None（runtime 退化从属、
+        # binding 按 daemon_id）。但 daemon_task_leases.runtime_id FK→daemon_runtimes
+        # 需要有效 id（否则 claim_lease line 188 写 daemon 传的 daemon_local_id 会
+        # FK 违约——daemon_local_id 在 daemon_instances 不在 daemon_runtimes）。从
+        # daemon_instance 的 runtimes 选一个（优先 claude，与 scan dispatch 一致）。
+        if runtime_id is None:
+            from sqlalchemy import select as _sa_select
+
+            from app.modules.daemon.model import DaemonRuntime as _DaemonRuntime
+
+            _rts = (
+                (
+                    await self._session.execute(
+                        _sa_select(_DaemonRuntime).where(
+                            _DaemonRuntime.daemon_instance_id == daemon_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for _preferred in ("claude", "codex", "cursor", "opencode", "openclaw"):
+                _m = next((r for r in _rts if r.provider == _preferred), None)
+                if _m is not None:
+                    runtime_id = _m.id
+                    break
+
         # -- 3. Build platform_config + latest_spec_version --------------------
         # server_origin tells the daemon where the platform backend lives.
         # Default matches the daemon's own default (``config.server_url``);
@@ -1617,6 +1644,10 @@ class AgentService:
             "claim_token": claim_token,
         }
 
+        # kind='batch'（不是 'interactive'）：daemon 端 init lease 分支在 task-runner
+        # 的 batch runLease（mode='init' 探测 → _runInitLease → handleInitLease）。若用
+        # kind='interactive'，daemon 的 interactive handler 会因 init lease 无
+        # session_id/run_id/prompt 早返回（interactive_missing_fields），lease 永远 claimed。
         await self._session.execute(
             text(
                 """
@@ -1624,13 +1655,16 @@ class AgentService:
                     (id, agent_run_id, runtime_id, status, kind,
                      lease_expires_at, metadata, created_at, updated_at)
                 VALUES
-                    (:id, NULL, :runtime_id, 'pending', 'interactive',
+                    (:id, NULL, :runtime_id, 'pending', 'batch',
                      NULL, :metadata, :now, :now)
                 """
             ),
             {
                 "id": lease_id.hex,
-                "runtime_id": runtime_id.hex,
+                # runtime_id 可能为 None（daemon-entity-binding 后 runtime 退化从属，
+                # 新 binding 按 daemon_id 绑定，runtime_id 常为 NULL）—— lease.runtime_id
+                # 列 nullable，传 None 写 NULL。之前直接 .hex 报 AttributeError 阻塞 init。
+                "runtime_id": runtime_id.hex if runtime_id is not None else None,
                 "metadata": json.dumps(metadata),
                 "now": now,
             },

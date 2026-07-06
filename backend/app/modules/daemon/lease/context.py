@@ -219,6 +219,44 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
                 payload["runtime_root"] = runtime_root
         return payload
 
+    # init lease（kind=batch + mode='init'，task-07 / workspace-config-flow D-002/D-009）：
+    # 不启 agent（无 agent_run_id），daemon 端 _runInitLease 读 payload 写
+    # .sillyspec-platform.json + pull spec。从 lease metadata 构建最小 payload，跳过
+    # batch agent_run_id 校验（init 无 AgentRun，否则 _raise_no_agent_run 422）。
+    # root_path 按 workspace.path_source 改写（daemon-client 原样 / server-local 容器→宿主）。
+    # daemon _runInitLease 读 workspaceId/rootPath(camelCase) + platform_config + latestSpecVersion。
+    if lease_meta.get("mode") == "init":
+        payload["mode"] = "init"
+        _init_ws_raw = lease_meta.get("workspace_id")
+        _init_ws: uuid.UUID | None = None
+        if _init_ws_raw:
+            try:
+                _init_ws = (
+                    uuid.UUID(_init_ws_raw) if isinstance(_init_ws_raw, str) else _init_ws_raw
+                )
+            except (ValueError, AttributeError, TypeError):
+                _init_ws = None
+        if _init_ws is not None:
+            payload["workspace_id"] = str(_init_ws)
+            payload["workspaceId"] = str(_init_ws)
+        _init_root = lease_meta.get("root_path")
+        if _init_root and _init_ws is not None:
+            _ws_row = await session.get(Workspace, _init_ws)
+            if _ws_row is not None:
+                _init_root = resolve_root_path_for_daemon(_init_root, _ws_row.path_source)
+        if _init_root:
+            payload["rootPath"] = _init_root  # daemon _runInitLease 读 ctx.rootPath
+            payload["root_path"] = _init_root
+        _init_pc = lease_meta.get("platform_config")
+        if _init_pc is not None:
+            payload["platform_config"] = _init_pc
+            payload["platformConfig"] = _init_pc
+        _init_sv = lease_meta.get("latest_spec_version")
+        if _init_sv is not None:
+            payload["latest_spec_version"] = _init_sv
+            payload["latestSpecVersion"] = _init_sv
+        return payload
+
     if lease.agent_run_id is None:
         # ql-004：batch lease（interactive 已在上方 return）agent_run_id 不应为
         # NULL。静默返回 agent_run_id=None 的 payload 会让 daemon 发空
