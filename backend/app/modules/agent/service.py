@@ -232,6 +232,7 @@ def resolve_work_dir(
     lease: WorktreeLease | None,
     requires_worktree: bool,
     read_only: bool,
+    path_source: str | None = None,
 ) -> Path:
     """根据阶段配置和 worktree 可用性确定工作目录。
 
@@ -247,15 +248,21 @@ def resolve_work_dir(
         lease: 已获取的 WorktreeLease，无 git identity 时为 None。
         requires_worktree: 阶段配置是否要求 worktree。
         read_only: 阶段是否只读。
+        path_source: workspace 路径来源（Workspace.path_source）。'daemon-client'
+            表示 root_path 在绑定 daemon 宿主上、backend 容器不可达，跳过本地
+            stat 校验（由 daemon 自行校验）；其他值（None/'server-local'）保留校验。
 
     Returns:
         确定的工作目录 Path。
 
     Raises:
-        AgentRunError: workspace_root 路径不存在时。
+        AgentRunError: workspace_root 路径不存在时（仅 server-local）。
     """
     ws_root = Path(workspace_root)
-    if not ws_root.exists():
+    # daemon-client: root_path 在绑定 daemon 宿主上，backend 容器内不可达，
+    # 本地 stat 恒失败；真正访问由 daemon 完成，跳过校验（修复 change dispatch
+    # 在容器内 stat 宿主路径恒失败导致 stage_dispatch_failed 静默 200）。
+    if path_source != "daemon-client" and not ws_root.exists():
         raise AgentRunError(
             f"Workspace root does not exist: {workspace_root}",
             details={"workspace_root": workspace_root},
@@ -974,7 +981,7 @@ class AgentService:
                 details={"change_id": str(change_id)},
             )
 
-        workspace_root = await self._get_workspace_root(workspace_id)
+        workspace_root, path_source = await self._get_workspace_root(workspace_id)
 
         # -- 2. Resolve worktree or working directory -------------------------
 
@@ -995,6 +1002,7 @@ class AgentService:
             lease=lease,
             requires_worktree=requires_worktree,
             read_only=read_only,
+            path_source=path_source,
         )
 
         # 审计日志：写阶段 + 无 lease → 记录 warning
@@ -1715,8 +1723,13 @@ class AgentService:
             "claim_token": claim_token,
         }
 
-    async def _get_workspace_root(self, workspace_id: uuid.UUID) -> str:
-        """Get the root_path of a workspace."""
+    async def _get_workspace_root(self, workspace_id: uuid.UUID) -> tuple[str, str]:
+        """Get (root_path, path_source) of a workspace.
+
+        path_source 决定 root_path 可达性语义（见 Workspace.path_source）：
+        'daemon-client' 时 root_path 在绑定 daemon 宿主上、backend 容器不可达，
+        调用方据此跳过本地 stat（resolve_work_dir）。
+        """
         from app.modules.workspace.model import Workspace
 
         ws_stmt = select(Workspace).where(col(Workspace.id) == workspace_id)
@@ -1726,7 +1739,7 @@ class AgentService:
                 f"Workspace '{workspace_id}' not found.",
                 details={"workspace_id": str(workspace_id)},
             )
-        return workspace.root_path
+        return workspace.root_path, workspace.path_source
 
 
 async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:

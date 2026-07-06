@@ -121,6 +121,37 @@ def test_resolve_work_dir_workspace_root_not_exists():
     assert "Workspace root does not exist" in str(exc_info.value)
 
 
+def test_resolve_work_dir_daemon_client_skips_stat():
+    """daemon-client：root_path 在绑定 daemon 宿主上，backend 容器不可达，
+    跳过本地 stat 校验，路径透传给 daemon（修复 change dispatch 静默失败）。"""
+    host_path = "/nonexistent/host/path/C:/Users/x/proj"
+    result = resolve_work_dir(
+        workspace_root=host_path,
+        change_path=None,
+        change_key=None,
+        lease=None,
+        requires_worktree=False,
+        read_only=True,
+        path_source="daemon-client",
+    )
+    assert result == Path(host_path)
+
+
+def test_resolve_work_dir_daemon_client_change_path_fallback():
+    """daemon-client 只读 + change_path（容器内不存在）→ fallback ws_root 宿主路径。"""
+    host_path = "C:\\Users\\x\\proj"
+    result = resolve_work_dir(
+        workspace_root=host_path,
+        change_path=".sillyspec/changes/foo",
+        change_key="foo",
+        lease=None,
+        requires_worktree=False,
+        read_only=True,
+        path_source="daemon-client",
+    )
+    assert result == Path(host_path)
+
+
 # ---------------------------------------------------------------------------
 # _ensure_change_dir_in_worktree tests
 # ---------------------------------------------------------------------------

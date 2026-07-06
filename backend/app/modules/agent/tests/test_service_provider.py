@@ -299,7 +299,7 @@ async def test_start_stage_dispatch_uses_workspace_default_agent():
         patch.object(
             AgentService,
             "_get_workspace_root",
-            new=AsyncMock(return_value="/ws"),
+            new=AsyncMock(return_value=("/ws", "server-local")),
         ),
     ):
         svc = AgentService(session)

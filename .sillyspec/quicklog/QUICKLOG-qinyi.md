@@ -118,6 +118,16 @@ created_at: 2026-07-05 16:33:00
 测试：端到端——用户点初始化 → init_synced_at 写入 → 前端显示已初始化 + 工作区已就绪。backend 容器无 pytest 靠端到端；前端 workspace-config-card.test.tsx makeSpecWs 默认 last_synced_at 有值 + 无三态断言，改动不破坏。
 坑：init bug 链 6 层（每修一层 rebuild 验证暴露下一层），最终手动 git commit + push（b5dda23f）。daemon 端 _runInitLease（task-runner.ts）早已实现，但 backend 多处没按它的契约（kind=batch / mode=init / payload 字段）下发——是 backend 侧的系统性接线遗漏，非 daemon 问题。
 
+## ql-20260706-006-0b32 | 2026-07-06 09:21:14 | daemon-client 模式 change dispatch 静默失败（backend 容器 stat 宿主 root_path 恒失败）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/agent/service.py, backend/app/modules/agent/tests/test_service_provider.py, backend/tests/modules/agent/test_work_dir_strategy.py, backend/app/modules/agent/tests/test_start_init_dispatch.py
+依据：用户报"变更中心 dispatch 200 OK 但看不到日志"。诊断 backend 日志：`stage_dispatch_failed warning "Workspace root does not exist: C:\Users\qinyi\IdeaProjects\cs\SillyHub"`。DB：workspace.root_path 存 Windows 宿主路径、path_source=daemon-client；该 change 的 agent_runs 0 条（活儿压根没派出去）；绑定 daemon 在线。根因在 resolve_work_dir(service.py:257-262) 直接 `Path(workspace_root).exists()`——daemon-client 模式 root_path 在绑定 daemon 宿主上、backend Linux 容器内不可达，stat 恒 False → 抛 AgentRunError → 被 change dispatch 层 catch 成 warning、HTTP 仍 200、前端无 SSE 日志流可订阅。Workspace.path_source 注释(model.py:64-68)本就声明 daemon-client 的 root_path 在 daemon 上，backend 不该 stat。
+修法：① resolve_work_dir 加 path_source kw 参数（默认 None），daemon-client 时跳过本地 stat、路径透传给 daemon 校验，server-local/None 保留校验（向后兼容）；② _get_workspace_root 改返回 (root_path, path_source) tuple；③ _start_stage_dispatch 解包并透传 path_source 给 resolve_work_dir。3 文件 6 处改动。
+测试：backend 本地 .venv 跑——直接相关 3 文件 25 passed（含新增 test_resolve_work_dir_daemon_client_skips_stat / _change_path_fallback + 向后兼容 6 旧测试 + test_start_stage_dispatch_transport D1-D7/F1 daemon-client 真实路径不破坏 + test_service_provider mock 改 tuple）；agent+change 全套 536 passed / 7 skipped / 1 FAILED（test_start_init_dispatch::test_start_init_dispatch_creates_spec_workspace_and_lease 期望 lease.kind==interactive 实际 batch——ql-005 b5dda23f 把 init lease kind 改 batch 时漏更新该测试断言，git show 铁证 ql-005 改 service.py 未改此测试，预存债与本变更无关）。
+遗留：① test_start_init_dispatch.py:142 断言 interactive→batch（ql-005 遗留测试债，本批次顺带修复，init dispatch 全套 4 passed）；② 端到端部署验证待 rebuild backend 后用户在 UI 重触发 dispatch 确认日志回流。
+坑：无。resolve_work_dir 本就是 keyword-only 函数，加带默认值 kw 参数向后兼容；测试侧只需 test_service_provider 一处 mock 的 return_value 改 tuple。
+
 
 
 

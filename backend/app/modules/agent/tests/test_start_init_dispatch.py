@@ -139,7 +139,7 @@ async def test_start_init_dispatch_creates_spec_workspace_and_lease(
     )
     lease = (await db_session.execute(lease_stmt)).scalars().first()
     assert lease is not None, "DaemonTaskLease should exist"
-    assert lease.kind == "interactive", "Lease kind must be interactive"
+    assert lease.kind == "batch", "Lease kind must be batch"
     assert lease.status == "pending"
     assert lease.runtime_id == runtime.id
 
