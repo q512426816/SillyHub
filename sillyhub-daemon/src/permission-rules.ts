@@ -3,7 +3,7 @@
  *
  * 2026-06-29-runtime-allowed-roots-config task-05：
  * - 读自由（Read/Grep/Bash 等不配 deny）
- * - 写受限（Write/Edit/MultiEdit 白名单内 allow、白名单外 deny）
+ * - 写受限（Write/Edit 白名单内 allow、白名单外 deny）
  *
  * 生成 CC `--settings` JSON 的 `permissions` 部分。CC permission 优先级：
  * allow（具体路径）覆盖 deny（通配 `**`）。
@@ -14,7 +14,7 @@
 import { homedir } from 'node:os';
 
 /** 受限的写入工具（CC 文件修改类工具）。 */
-const WRITE_TOOLS = ['Write', 'Edit', 'MultiEdit'] as const;
+const WRITE_TOOLS = ['Write', 'Edit'] as const;
 
 /**
  * 展开 `~` 为 homedir，规范化路径（统一正斜杠）。

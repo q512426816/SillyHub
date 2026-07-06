@@ -14,9 +14,8 @@ describe('permission-rules', () => {
     expect(allow).toContain('Write(/tmp/**)');
     expect(allow).toContain('Write(/tmp)');
     expect(allow).toContain('Edit(/tmp/**)');
-    expect(allow).toContain('MultiEdit(/tmp/**)');
-    // 通配 deny
-    expect(deny).toEqual(expect.arrayContaining(['Write(**)', 'Edit(**)', 'MultiEdit(**)']));
+    // 通配 deny（MultiEdit 已废弃，CC 2.x 无此工具，配了会启动校验失败 exit 1）
+    expect(deny).toEqual(expect.arrayContaining(['Write(**)', 'Edit(**)']));
   });
 
   it('多路径各生成 allow', () => {

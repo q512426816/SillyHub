@@ -128,6 +128,25 @@ created_at: 2026-07-05 16:33:00
 遗留：① test_start_init_dispatch.py:142 断言 interactive→batch（ql-005 遗留测试债，本批次顺带修复，init dispatch 全套 4 passed）；② 端到端部署验证待 rebuild backend 后用户在 UI 重触发 dispatch 确认日志回流。
 坑：无。resolve_work_dir 本就是 keyword-only 函数，加带默认值 kw 参数向后兼容；测试侧只需 test_service_provider 一处 mock 的 return_value 改 tuple。
 
+## ql-20260706-007-7f3a | 2026-07-06 10:27:50 | 修复 generate_projects 的 depends_on 聚合作用域 bug（“万物依赖万物”垃圾关系 + 自环）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/workspace/service.py（all_relations 移入分组循环体）；backend/tests/modules/workspace/test_generate_projects.py（新建，2 回归测试）
+依据：调研 SillyHub /components 页“无子组件”时发现 workspace_relations 表 446 条边全是 depends_on、两端 workspace 全 deleted；读 projects/*.yaml 见每个组件都 depends_on 几乎所有其他组件 + 自环（auth→auth）。根因在 generate_projects（service.py:606-744）：all_relations 声明在 for prefix,members 循环【外】（原 :668），循环内各分组往共享列表 append 依赖（:690-699），写 yaml 时各分组用“累积至今”的全部（:716-725）→ 第 N 分组背上前 N-1 个累积依赖；前面分组塞过 {target:auth} 残留致 auth.yaml 自环。源头 _module-map.yaml 数据干净（backend 28 模块/101 依赖/0 自环，core/models 依赖为空，health→[core] 等合理），垃圾 100% 来自聚合作用域。
+结果：service.py 把 all_relations 初始化移入 for 循环体内（每分组独立置空）+ 中文注释。新增 test_generate_projects.py 2 测试：①跨分组不污染（core/models 无依赖、frontend 只依赖 backend、backend 依赖 core/models/auth、auth 依赖 core）②无自环。反向验证：还原 bug 后 2 测试 fail（core.yaml 出现 core/core,auth 自环），改回 pass。tests/modules/workspace/ 全量 96 passed 1 skipped（SQLite FOR UPDATE 限制，无关）零回归。
+不含（留给后续乙路变更）：DB 446 条垃圾 relations 清理、36 个 soft-deleted component workspace 清理、components/topology 页改造、reparse 重建。
+坑：quick CLI 未自动写 ql 条目（quick-guard.json 无 ql-ID、QUICKLOG 无匹配），手动补 ql-20260706-007 已完成条目；实际生效 QUICKLOG 是源码 .sillyspec/quicklog/QUICKLOG-qinyi.md（git 跟踪），daemon spec 目录那份滞后未同步（平台模式 quicklog 写源码目录是事实）。
+
+## ql-20260706-008-fe27 | 2026-07-06 10:45:11 | daemon 拼 claude permission 含过时 MultiEdit 工具致 cli 2.1.193 启动 exit 1（change dispatch 卡 init 没下文）
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/src/permission-rules.ts, sillyhub-daemon/tests/permission-rules.test.ts
+依据：用户报 dispatch 后"init 没下文"。DB agent_run c4574163 status=failed（6 秒），daemon runs/92d3fd65/terminal.log 实证两条独立错误：① done status=failed exit=1 error="Permission deny rule MultiEdit(**) matches no known tool — check for typos"——daemon permission-rules.ts:17 WRITE_TOOLS 含 'MultiEdit'，buildWritePermissionRules 给 claude --settings 生成 deny MultiEdit(**)，但 claude code cli 2.1.193 早无 MultiEdit 工具（早期版本有，现废弃改 Edit 多次），启动校验 deny 规则匹配不到已知工具直接 exit 1；② attempt=1/2 http=529 error=overloaded（inference gateway 127.0.0.1:15721 临时过载，非代码 bug）。terminal.log cmd 完整 settings 实证 deny:["Write(**)","Edit(**)","MultiEdit(**)"]。
+修法：permission-rules.ts WRITE_TOOLS 去 MultiEdit 只留 Write/Edit；docstring 注释同步；test permission-rules.test.ts 去 MultiEdit allow/deny 断言。session-manager.ts:981 interactive canUseTool 的 MultiEdit 分支保留（claude 不再调，死代码无害，独立路径不在本次范围）。
+测试：sillyhub-daemon vitest 跑 permission-rules(7) + tool-kind(43) + session-manager-allowed-roots(20) 共 70 passed 零回归。
+遗留：① API 529 overloaded 是 inference gateway 临时容量问题（非代码），用户重试 dispatch 即可，持续则查 gateway 127.0.0.1:15721 / API quota；② 部署：daemon 改动需 build + 重启本机 daemon 进程才生效；③ session-manager.ts MultiEdit 死代码后续可清理。
+坑：诊断要分清两条独立错误——exit=1 的 Permission deny 是致命代码 bug（必现），529 是临时容量（偶发）；claude cli 版本演进废弃工具时，permission settings 生成器要同步。
+
 
 
 
