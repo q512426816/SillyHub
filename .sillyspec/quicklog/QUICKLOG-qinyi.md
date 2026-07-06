@@ -157,6 +157,16 @@ created_at: 2026-07-05 16:33:00
 遗留：① 端到端部署验证（daemon bundle + backend rebuild + 重启 daemon，用户重触发 dispatch 看 stderr/529 是否回流前端"错误警告"筛）；② daemon 新增 stderr forward 无专门单测（fire-and-forget 简单，靠 typecheck + 全套回归守护），后续可补 mock client 断言。
 坑：stderr forward 用 fire-and-forget 不阻塞 readline；防风暴 MAX_STDERR_FORWARD=50（claude stderr 通常 <10 行）；backend 兜底用局部 import（json/get_redis/AgentRunLog）避免改文件顶部 import。
 
+## ql-20260706-010-a076 | 2026-07-06 13:29:41 | daemon fire-and-forget forward 在 claude exit 后丢尾部消息（429 attempt/API Error/最后 tool_result 全丢）
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/src/task-runner.ts
+依据：用户报 dispatch 失败"429 attempt 看不到"。诊断 agent_run_logs c76562cd：stdout 1(init)+tool_call 1(Bash)+stderr 3(思考)，0 条含 429/attempt/rate_limit；terminal.log 有完整 10 条 429 attempt + API Error。根因：429 attempt 是 claude stdout api_retry system event，_eventToMessage forward（[SYSTEM:api_retry]）走 fire-and-forget（void submitMessages.catch）；claude 429 重试 10 次后秒退 exit 1，daemon 在 child.exit 后直接收尾（清 watchdog→返回 result），不等在飞 forward HTTP 完成 → 尾部消息（429 attempt + API Error + 最后 tool_result）全丢。前面的 init/tool_use 有时间发完所以能看到。ql-009 的 stderr forward 只覆盖 stderr，429 在 stdout 没覆盖到。
+修法：task-runner.ts 6 处改——① runLease 加 pendingForwards: Promise<unknown>[] 收集 forward promise；② stderr forward 由 void .catch 改 pendingForwards.push；③ _handleLine 调用 env 传 pendingForwards 引用；④ _handleLine env 类型加 pendingForwards 字段；⑤ _handleLine submitMessages（resilience + client 两分支）由 void .catch 改 env.pendingForwards.push；⑥ child exit awaited 后加 await Promise.allSettled(pendingForwards)（清 watchdog 前），确保尾部消息发完再返回。
+测试：daemon typecheck（tsc --noEmit）过 + 全套 vitest 1756 passed/8 skipped 零回归（stderr forward + submitMessages 改 push 不破坏现有 mock 计数断言）。
+遗留：① 端到端部署验证（daemon bundle + backend rebuild + 重启 daemon，用户重触发 dispatch 看 429 attempt 是否回流前端）；② pendingForwards 在 sillyhub-daemon 单测无专门覆盖（靠 typecheck + 全套回归守护）。
+坑：pendingForwards 类型 Promise<void>[] 报 TS2345（submitMessages 返回 Promise<unknown>），改 Promise<unknown>[] 过；catch 后的 promise 永远 resolve（allSettled 不 reject，吞掉 forward 失败仅 warn 不阻塞）。
+
 
 
 

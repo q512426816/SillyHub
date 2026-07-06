@@ -981,6 +981,9 @@ export class TaskRunner {
     let stderrBuf = '';
     // ql-20260706-009：已 forward 到 backend 的 stderr 行数（防风暴）。
     let stderrForwarded = 0;
+    // ql-20260706-010：收集 fire-and-forget forward promise，claude exit 后 await，
+    // 防尾部消息（429 attempt/API Error/最后 tool_result）在 daemon 收尾时丢失。
+    const pendingForwards: Promise<unknown>[] = [];
     // task-06：收集 complete 事件 metadata.stats（claude result 消息的 usage/cost）。
     // complete 事件通常仅一个，覆盖式赋值；失败路径保持 undefined。
     let lastStats: Record<string, unknown> | undefined;
@@ -1001,13 +1004,15 @@ export class TaskRunner {
         // fire-and-forget（同 stdout submitMessages 策略）；MAX_STDERR_FORWARD 防风暴。
         if (claimToken && ctx.agentRunId && stderrForwarded < MAX_STDERR_FORWARD) {
           stderrForwarded += 1;
-          void this.client
-            .submitMessages(leaseId, claimToken, ctx.agentRunId, [
-              { event_type: 'stderr', content: ln.slice(0, 5000), channel: 'stderr' },
-            ])
-            .catch((e) => {
-              console.warn('task_runner: stderr_forward_failed', leaseId, e);
-            });
+          pendingForwards.push(
+            this.client
+              .submitMessages(leaseId, claimToken, ctx.agentRunId, [
+                { event_type: 'stderr', content: ln.slice(0, 5000), channel: 'stderr' },
+              ])
+              .catch((e) => {
+                console.warn('task_runner: stderr_forward_failed', leaseId, e);
+              }),
+          );
         }
       }
       // stderr 也算 error 文本上限保护（避免无限累积）
@@ -1174,6 +1179,7 @@ export class TaskRunner {
             },
             prompt,
             model: ctx.model,
+            pendingForwards,
           });
         }
         child.off('exit', exitCloser);
@@ -1196,6 +1202,13 @@ export class TaskRunner {
         child.once('exit', done);
         child.once('error', done);
       });
+    }
+
+    // ql-20260706-010：await 所有 pending forward，确保 claude exit 前瞬间产生的
+    // 尾部消息（429 attempt / API Error / 最后 tool_result）发完再返回，防
+    // fire-and-forget 在 daemon 收尾时丢失（c76562cd 实证 10 条 429 attempt 全丢）。
+    if (pendingForwards.length > 0) {
+      await Promise.allSettled(pendingForwards);
     }
 
     // 清理定时器
@@ -1269,6 +1282,8 @@ export class TaskRunner {
       onStats?: (stats: Record<string, unknown>) => void;
       prompt?: string;
       model?: string;
+      /** ql-20260706-010：收集本行 forward promise，runLease exit 后统一 await。 */
+      pendingForwards: Promise<unknown>[];
     },
   ): Promise<void> {
     // R-03：control_request 行优先交给 adapter.onControl 应答
@@ -1429,21 +1444,25 @@ export class TaskRunner {
           message: m,
           dedup_key: dedupKeyFor(m, env.agentRunId, 0, idx),
         }));
-        void this.resilience
-          .submitWithRetry(env.leaseId, env.claimToken, env.agentRunId, envelopes)
-          .catch((e) => {
-            console.warn(
-              'task_runner: event_forward_failed',
-              env.leaseId,
-              toCauseInfo(e),
-            );
-          });
+        env.pendingForwards.push(
+          this.resilience
+            .submitWithRetry(env.leaseId, env.claimToken, env.agentRunId, envelopes)
+            .catch((e) => {
+              console.warn(
+                'task_runner: event_forward_failed',
+                env.leaseId,
+                toCauseInfo(e),
+              );
+            }),
+        );
       } else {
-        void this.client
-          .submitMessages(env.leaseId, env.claimToken, env.agentRunId, messages)
-          .catch((e) => {
-            console.warn('task_runner: event_forward_failed', env.leaseId, e);
-          });
+        env.pendingForwards.push(
+          this.client
+            .submitMessages(env.leaseId, env.claimToken, env.agentRunId, messages)
+            .catch((e) => {
+              console.warn('task_runner: event_forward_failed', env.leaseId, e);
+            }),
+        );
       }
     }
   }
