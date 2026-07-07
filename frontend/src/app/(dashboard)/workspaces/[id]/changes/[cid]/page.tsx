@@ -353,6 +353,22 @@ export default function ChangeDetailPage({ params }: Props) {
     setPageError(null);
     try {
       const result = await triggerDispatch(workspaceId, changeId, stageProvider, stageModel);
+
+      // 软失败（200 OK + dispatched:false）：dispatch_result.error 携带真实原因
+      // （如 daemon-client root 校验失败 / dispatch_error）。不抛 ApiError，必须显式读。
+      // 不读则前端无任何提示（既不 success 也不 error）—— 前端 dispatch 错误不显示 bug。
+      if (result.dispatch_result && !result.dispatch_result.dispatched) {
+        const dr = result.dispatch_result;
+        const reasonText =
+          dr.reason && dr.reason !== "dispatch_error" ? `（${dr.reason}）` : "";
+        setPageError(
+          dr.error ? `派发失败${reasonText}：${dr.error}` : `派发失败${reasonText}`,
+        );
+        // 软失败时仍 refresh agent status（last_dispatch 可能更新），但不展开日志面板
+        void refreshAgentStatus();
+        return;
+      }
+
       setAgentStatus(result);
       setLogsExpanded(true);
 

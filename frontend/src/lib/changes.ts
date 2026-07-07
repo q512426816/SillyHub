@@ -366,6 +366,17 @@ export type DispatchResponse = {
   has_active_run: boolean;
   config_enabled: boolean;
   last_dispatch: DispatchResult;
+  /**
+   * 手动 dispatch（POST /dispatch）的软失败结果。200 OK + dispatched:false 时携带
+   * reason + error（如 daemon-client root 校验失败 / dispatch_error）。前端必须读此
+   * 字段显示失败原因——软失败不抛 ApiError，handleDispatch 的 catch 拿不到。
+   */
+  dispatch_result?: {
+    dispatched: boolean;
+    reason?: string | null;
+    error?: string | null;
+    stage?: string | null;
+  };
 };
 
 /**
