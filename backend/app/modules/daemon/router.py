@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import (
     APIRouter,
@@ -1232,6 +1232,79 @@ async def list_dir(
 
     entries = result.get("entries", []) if isinstance(result, dict) else []
     return ListDirResponse(entries=entries)
+
+
+# ql-20260706-006：系统原生文件夹选择对话框（daemon 调 PowerShell FolderBrowserDialog）。
+class BrowseFolderResponse(BaseModel):
+    """daemon 弹系统对话框后返回的选中路径（用户取消则 path 为空串）。"""
+
+    path: str
+
+
+class BrowseFolderRequest(BaseModel):
+    """ql-20260707-003：可选 initial_path——对话框默认定位到该目录（当前输入框已有值）。"""
+
+    initial_path: str | None = None
+
+
+@router.post(
+    "/runtimes/{runtime_id}/browse-folder",
+    response_model=BrowseFolderResponse,
+)
+async def browse_folder(
+    runtime_id: uuid.UUID,
+    data: BrowseFolderRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> BrowseFolderResponse:
+    """弹系统原生文件夹选择对话框（daemon 端 PowerShell FolderBrowserDialog）。
+
+    daemon 是用户机器上的本地进程，可直接调系统对话框。选中的完整路径经 WS RPC
+    回传。用户取消（daemon_code=cancelled）→ path 空串。
+    """
+    svc = DaemonService(session)
+    runtime = await svc._get_owned_runtime(runtime_id, user.id)
+
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+    hub = get_daemon_ws_hub()
+    daemon_id = runtime.daemon_instance_id or runtime_id
+    try:
+        # ql-20260707-002：用户选文件夹可能要几十秒~几分钟，远超默认 RPC 10s 超时。
+        # 传 180s 对齐 daemon 端 PowerShell exec timeout。
+        # ql-20260707-003：传 initialPath 让对话框默认定位到当前输入框已有目录。
+        rpc_params: dict[str, Any] = {}
+        if data.initial_path:
+            rpc_params["initial_path"] = data.initial_path
+        result = await hub.send_rpc(daemon_id, "browse_folder", rpc_params, timeout=180.0)
+    except DaemonRuntimeOffline as exc:
+        raise DaemonRpcGatewayError(
+            f"daemon runtime '{runtime_id}' offline.",
+            details={"runtime_id": str(runtime_id), "reason": "offline_or_send_failed"},
+        ) from exc
+    except DaemonRpcTimeout as exc:
+        raise DaemonRpcGatewayError(
+            "daemon browse_folder rpc timed out.",
+            details={
+                "runtime_id": str(runtime_id),
+                "rpc_id": exc.details.get("rpc_id") if exc.details else None,
+            },
+        ) from exc
+    except DaemonRpcRemoteError as exc:
+        # cancelled（用户关闭对话框）→ 返回空 path（非错误，前端静默）。
+        if exc.code == "cancelled":
+            return BrowseFolderResponse(path="")
+        raise DaemonRpcRemoteGatewayError(
+            f"daemon browse_folder failed: {exc.code}.",
+            details={
+                "runtime_id": str(runtime_id),
+                "daemon_code": exc.code,
+                "daemon_message": exc.message,
+            },
+        ) from exc
+
+    path = result.get("path", "") if isinstance(result, dict) else ""
+    return BrowseFolderResponse(path=path)
 
 
 # ── Interactive session endpoints (task-05, FR-01/02/04/05) ─────────────────

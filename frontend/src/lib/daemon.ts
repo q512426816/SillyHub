@@ -158,6 +158,24 @@ export async function listDir(
   );
 }
 
+/**
+ * ql-20260706-006：弹系统原生文件夹选择对话框（daemon 调 PowerShell FolderBrowserDialog）。
+ * 用户选中返回完整路径；取消（daemon cancelled）返回空串。
+ * ql-20260707-003：initialPath 可选，对话框默认定位到该目录（当前输入框已有值）。
+ */
+export async function browseFolder(
+  runtimeId: string,
+  initialPath?: string,
+): Promise<string> {
+  const body: Record<string, string> = {};
+  if (initialPath && initialPath.trim()) body.initial_path = initialPath.trim();
+  const resp = await apiFetch<{ path: string }>(
+    `/api/daemon/runtimes/${runtimeId}/browse-folder`,
+    { method: "POST", json: body },
+  );
+  return resp.path;
+}
+
 export async function getDaemonRuntime(
   runtimeId: string,
 ): Promise<DaemonRuntimeRead> {

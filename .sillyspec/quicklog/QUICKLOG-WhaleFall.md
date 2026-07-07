@@ -306,3 +306,44 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 方案：①router.py:355 改 `from sqlmodel import col as _col`（与 service.py 一致），heartbeat 恢复返 per-runtime map；②daemon.ts:936 兜底改条件执行——仅当 backend 未返任何 per-runtime allowed_roots 时才用 config 兜底，保留 register 响应设的正确值。
 状态：已完成
 结果：已完成 + 验证通过。ruff All checks passed。rebuild backend 镜像 + recreate 容器后，curl POST /api/daemon/heartbeat 返 200 + per-runtime runtimes map（CC 780cae63 → ["~/.sillyhub","D:/"]，hermes 23bab2e2 → ["~/.sillyhub"]），backend 日志多条 heartbeat 200 OK（daemon 心跳恢复，不再 ImportError 500）。daemon 心跳 _syncAllowedRoots 现拿得到 runtimes[]，PolicyCache[780cae63] 每 15s 校正为 [~/.sillyhub→homedir/.sillyhub, D:/, homedir]，CC 写这些路径恢复 allow。daemon.ts:936 修复已 tsc build 到 dist（全局 daemon symlink → 本地），下次 daemon 重启 register 时不再覆盖 per-runtime 值；当前 daemon 已过 register 阶段、心跳已校正 PolicyCache，无需重启即恢复写入。
+
+## ql-20260707-001-a3f2 | 2026-07-07 09:17:32 | runtimes 可写目录输入框改系统原生文件夹选择对话框（daemon PowerShell FolderBrowserDialog）
+状态：进行中
+关联变更：（无）
+文件：sillyhub-daemon/src/daemon.ts, sillyhub-daemon/src/file-rpc.ts, backend/app/modules/daemon/router.py, frontend/src/lib/daemon.ts, frontend/src/app/(dashboard)/runtimes/page.tsx
+需求：/runtimes 页守护进程的「可写目录」原是纯文本输入框，用户希望改成像软件安装时选目录那样——点「浏览」直接弹系统原生文件夹选择对话框，选完路径自动回填。
+方案演进（3 轮迭代）：
+  1. 第一轮：前端实现树形目录浏览器（antd Tree + 地址栏）。daemon list_dir 放开 allowed_roots 白名单限制（file-rpc.ts fallbackRoots 空时跳过权限校验；daemon.ts 传空 fallbackRoots）。但用户反馈「不直观，想要系统原生的不是自己实现的」。
+  2. 第二轮：改用系统原生 FolderBrowserDialog。daemon 新增 browse_folder RPC（PowerShell 调 System.Windows.Forms.FolderBrowserDialog）；backend 新增 POST /runtimes/{rid}/browse-folder 端点转发；frontend 新增 browseFolder API + 「浏览」按钮直接调（取消树形 modal，保留代码作 fallback 未用）。用户反馈「中文路径乱码」。
+  3. 第三轮：PowerShell 脚本头部加 [Console]::OutputEncoding = UTF8 修中文。用 -EncodedCommand（UTF-16LE base64）传脚本避免引号转义。用户反馈「多屏总在主屏弹」。
+  4. 第四轮：PowerShell 读 [Cursor]::Position + Screen.FromPoint 找鼠标所在屏，建透明隐藏 Form（Opacity=0，Size=1x1，Show+Hide）作 ShowDialog 的父窗口，对话框跟随鼠标屏弹。
+改动细节：
+  - daemon.ts: import exec（node:child_process）+ RpcError；新增 browse_folder RPC handler（仅 win32，PS 脚本 EncodedCommand 调用，cancelled→空 path，timeout 180s）；list_dir 改传空 fallbackRoots（放开浏览限制）。
+  - file-rpc.ts: listDir 权限校验加 else if (fallbackRoots.length > 0)——空数组跳过 assertWithinAllowedRoots（目录浏览读自由，读操作无安全风险）。
+  - backend router.py: 新增 BrowseFolderResponse(BaseModel) + POST /runtimes/{rid}/browse-folder 端点（send_rpc browse_folder，cancelled→返空 path 非错误，其他 daemon error→502）。
+  - frontend lib/daemon.ts: 新增 browseFolder(runtimeId) → POST /browse-folder，返 path 字符串。
+  - frontend runtimes/page.tsx: 「浏览」按钮 onClick 改 handleBrowseNative（调 browseFolder，成功回填输入框，失败 notify.error）。保留树形 modal 代码（handleBrowseDir/handleLoadTreeData/treeData 等）但不再触发，作非 Windows 平台 fallback。
+验证：tsc --noEmit 零错。ruff All checks passed。backend + frontend rebuild 镜像部署，daemon kill+重启加载新 dist。点击「浏览」→ 弹 Windows 系统 FolderBrowserDialog → 选含中文的文件夹路径正确回填（UTF-8 编码）→ 鼠标在副屏时对话框在副屏弹（多屏适配）。
+结果：已完成 + 部署生效（按用户要求不 commit/push）。注意 daemon 改动需 kill 旧进程 + 清 ~/.sillyhub/daemon/locks/* 再重启（全局 daemon symlink 指向本地 dist）。
+
+## ql-20260707-002-b7e1 | 2026-07-07 09:29:42 | browse-folder 端点 504（WS RPC 默认 10s 超时，用户选文件夹超时）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/router.py
+需求：点击「浏览」弹系统文件夹对话框，前端收到 504 Gateway Timeout（POST /api/daemon/runtimes/{rid}/browse-folder）。
+根因：ws_hub.py `RPC_DEFAULT_TIMEOUT = 10.0` 秒，send_rpc 默认 10s 超时。用户在 FolderBrowserDialog 里浏览+选文件夹远超 10s，daemon 还在等 PowerShell 返回，backend 先超时 → DaemonRpcGatewayError（http_status=504，service.py:94-98）→ 前端 504。
+方案：browse_folder 端点显式传 `timeout=180.0` 给 send_rpc（对齐 daemon 端 PowerShell exec 的 180s timeout，service.py DaemonRpcTimeout → router except 映射）。
+结果：已完成 + 部署。ruff All checks passed。rebuild backend 镜像 + recreate 容器 healthy。用户现在有 3 分钟在系统对话框里选文件夹，不再 504。
+
+## ql-20260707-003-c4d2 | 2026-07-07 09:53:53 | 浏览文件夹时默认定位到输入框已有目录（initial_path → SelectedPath）
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/src/daemon.ts, backend/app/modules/daemon/router.py, frontend/src/lib/daemon.ts, frontend/src/app/(dashboard)/runtimes/page.tsx
+需求：配置可写目录时，若输入框已有正确路径值（如 D:/WorkNew），再点「浏览」希望系统对话框直接定位到该目录，而不是总从「此电脑」开始。
+方案：前端把当前输入框 path 作 initial_path 传 backend → WS RPC 转发 daemon → PowerShell 展开 ~（homedir）+ Test-Path -LiteralPath 校验存在且是目录后，设 $d.SelectedPath = (Resolve-Path).Path；不存在则跳过（FolderBrowserDialog 用默认起点）。PS 单引号转义（' → ''）防注入。
+改动：
+  - daemon.ts: browse_folder handler 改收 params，读 initial_path，JS 端先展开 ~ → homedir，PS 脚本加 `$initial = '<safe>'` + `if ($initial -and (Test-Path -LiteralPath $initial -PathType Container)) { $d.SelectedPath = (Resolve-Path -LiteralPath $initial).Path }`。
+  - router.py: 新增 BrowseFolderRequest(initial_path: str | None)，端点 body 接收，rpc_params 透传 initial_path（snake_case 满足 ruff N815）。
+  - lib/daemon.ts: browseFolder 增 initialPath 形参，body.initial_path 发送。
+  - page.tsx: handleBrowseNative 增 currentPath 形参，按钮 onClick 传当前 path。
+结果：已完成 + 部署。ruff/tsc/build 全过。backend+frontend rebuild + daemon 重启。点「浏览」时对话框默认定位到输入框已有目录（路径存在时）。

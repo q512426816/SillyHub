@@ -12,6 +12,7 @@ import {
   CircleDashed,
   Copy,
   Cpu,
+  FolderOpen,
   MessageSquare,
   Plus,
   Power,
@@ -36,6 +37,7 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { ApiError } from "@/lib/api";
 import {
+  browseFolder,
   deleteDaemonRuntime,
   disableDaemonRuntime,
   enableDaemonRuntime,
@@ -43,6 +45,7 @@ import {
   getDaemonVersion,
   getRuntimesUsage,
   isVersionBelow,
+  listDir,
   MIN_VERSIONS,
   PROVIDER_META,
   triggerDaemonSelfUpdate,
@@ -62,7 +65,8 @@ import { cn } from "@/lib/utils";
 import { useSession } from "@/stores/session";
 // task-06 / FR-03 / D-003@v1：antd Modal.confirm（删除二次确认）+ useNotify（成功/失败 toast）。
 // Modal 走 App.useApp().modal 拿到主题上下文实例（非静态 Modal），由 antd-providers.tsx 的 <AntApp> 注入。
-import { App, Input, Modal } from "antd";
+import { App, Input, Modal, Spin, Tree } from "antd";
+import type { DataNode } from "antd/es/tree";
 import { useNotify } from "@/lib/errors";
 // task-07 / D-003@v1：平台管理员人员搜索复用既有 admin 用户列表。
 import { listUsers, type UserRead } from "@/lib/admin";
@@ -987,6 +991,14 @@ export default function RuntimesPage() {
   const [rootsEditing, setRootsEditing] = useState<DaemonRuntimeRead | null>(null);
   const [rootsValue, setRootsValue] = useState<string[]>([]);
   const [rootsSaving, setRootsSaving] = useState(false);
+  // ql-20260706-006：目录浏览器状态。browseRuntimeId=null 表示关闭。
+  const [browseRuntimeId, setBrowseRuntimeId] = useState<string | null>(null);
+  const [browseError, setBrowseError] = useState<string | null>(null);
+  const browseTargetRef = useRef<number>(-1);
+  // ql-20260706-006：树形目录浏览器状态。
+  const [treeData, setTreeData] = useState<DataNode[]>([]);
+  const [treeSelectedPath, setTreeSelectedPath] = useState("");
+  const [browseManualPath, setBrowseManualPath] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [runtimeActionId, setRuntimeActionId] = useState<string | null>(null);
   // 2026-07-04-daemon-version-management task-09：daemon 升级中标记（卡片按钮 loading）。
@@ -1227,6 +1239,106 @@ export default function RuntimesPage() {
     setRootsEditing(runtime);
     setRootsValue([...(runtime.allowed_roots ?? [])]);
   }, []);
+
+  // ── 树形目录浏览器 ────────────────────────────────────────────────────────
+  // ql-20260706-006：用 antd Tree 实现类似 Windows 资源管理器的目录树。
+  // 初始化时会自动探测常用盘符（C:\, D:\, E:\, F:\ 等），展开节点时调 daemon
+  // listDir 异步加载子目录，点击目录节点即可选中路径。
+
+  /** 递归更新树数据（antd Tree loadData 模式需要）。 */
+  const updateTreeData = useCallback((list: DataNode[], key: React.Key, children: DataNode[]): DataNode[] =>
+    list.map((node) => {
+      if (node.key === key) return { ...node, children };
+      if (node.children) return { ...node, children: updateTreeData(node.children, key, children) };
+      return node;
+    }), []);
+
+  const handleBrowseDir = useCallback(async (runtimeId: string, _path: string, idx: number) => {
+    browseTargetRef.current = idx;
+    setBrowseRuntimeId(runtimeId);
+    setBrowseError(null);
+    setTreeSelectedPath("");
+    setBrowseManualPath("");
+    // 初始化根节点：尝试 Windows 盘符（A:\~Z:\） + Unix 根 /。listDir 不存在的盘
+    // 会抛错，catch 后自动排除。
+    const drives = ['C:\\', 'D:\\', 'E:\\', 'F:\\', 'G:\\'];
+    const initNodes: DataNode[] = [];
+    for (const d of drives) {
+      try {
+        await listDir(runtimeId, d);
+        initNodes.push({ title: d, key: d, isLeaf: false, icon: <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" /> });
+      } catch { /* 盘不存在或不可达 */ }
+    }
+    setTreeData(initNodes);
+    if (initNodes.length > 0 && initNodes[0]) {
+      const first = initNodes[0].key as string;
+      setTreeSelectedPath(first);
+      setBrowseManualPath(first);
+    }
+  }, []);
+
+  /** Tree loadData：展开节点时异步加载子目录列表。 */
+  const handleLoadTreeData = useCallback(async (node: DataNode): Promise<void> => {
+    if (!browseRuntimeId) return;
+    const path = node.key as string;
+    try {
+      const resp = await listDir(browseRuntimeId, path);
+      const children: DataNode[] = resp.entries
+        .filter((e) => e.type === "dir")
+        .map((e) => ({
+          title: e.name,
+          key: path.endsWith("\\") || path.endsWith("/") ? path + e.name : path + "\\" + e.name,
+          isLeaf: false,
+          icon: <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />,
+        }));
+      setTreeData((prev) => updateTreeData(prev, node.key, children));
+    } catch {
+      setTreeData((prev) => updateTreeData(prev, node.key, []));
+    }
+  }, [browseRuntimeId, updateTreeData]);
+
+  /** 选中树节点时同步 selectedPath。 */
+  const handleTreeSelect = useCallback((keys: React.Key[]) => {
+    if (keys.length > 0) {
+      const p = keys[0] as string;
+      setTreeSelectedPath(p);
+      setBrowseManualPath(p);
+    }
+  }, []);
+
+  const handleSelectBrowseDir = useCallback(() => {
+    const idx = browseTargetRef.current;
+    const path = treeSelectedPath;
+    if (idx >= 0 && path) {
+      setRootsValue((prev) => prev.map((v, i) => (i === idx ? path : v)));
+    }
+    setBrowseRuntimeId(null);
+    setBrowseError(null);
+    setTreeData([]);
+    setBrowseManualPath("");
+  }, [treeSelectedPath]);
+
+  /** 手动输入路径后跳转（直接填入选中，点确认即可使用）。 */
+  const handleJumpToPath = useCallback(() => {
+    const p = browseManualPath.trim();
+    if (!p) return;
+    setTreeSelectedPath(p);
+  }, [browseManualPath]);
+
+  /** ql-20260706-006：调系统原生文件夹选择对话框（daemon PowerShell FolderBrowserDialog）。 */
+  const handleBrowseNative = useCallback(async (runtimeId: string, idx: number, currentPath?: string) => {
+    setRuntimeActionId(runtimeId);
+    try {
+      const path = await browseFolder(runtimeId, currentPath);
+      if (path) {
+        setRootsValue((prev) => prev.map((v, i) => (i === idx ? path : v)));
+      }
+    } catch (err) {
+      notify.error(err, "打开系统目录选择器失败");
+    } finally {
+      setRuntimeActionId(null);
+    }
+  }, [notify]);
 
   const handleSaveAllowedRoots = useCallback(async () => {
     if (!rootsEditing) return;
@@ -1668,6 +1780,17 @@ export default function RuntimesPage() {
               <Button
                 size="sm"
                 variant="outline"
+                className="h-8 shrink-0 gap-1"
+                onClick={() => rootsEditing && handleBrowseNative(rootsEditing.id, idx, path)}
+                disabled={runtimeActionId === rootsEditing?.id}
+                title="打开系统文件夹选择对话框"
+              >
+                <FolderOpen className="h-3.5 w-3.5" />
+                浏览
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
                 className="h-8 shrink-0 gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive"
                 onClick={() =>
                   setRootsValue((prev) => prev.filter((_, i) => i !== idx))
@@ -1695,6 +1818,68 @@ export default function RuntimesPage() {
           <Plus className="h-3.5 w-3.5" />
           添加路径
         </Button>
+      </Modal>
+
+      {/* ql-20260706-006：目录浏览器 modal（基于 daemon list_dir 遍历子目录）。 */}
+      <Modal
+        title="选择目录"
+        open={browseRuntimeId !== null}
+        onOk={handleSelectBrowseDir}
+        onCancel={() => { setBrowseRuntimeId(null); setBrowseError(null); }}
+        okText="选择此目录"
+        cancelText="取消"
+        destroyOnClose
+        width={560}
+      >
+        {/* 地址栏：可手动输入路径 */}
+        <div className="mb-2 flex items-center gap-2">
+          <div className="relative flex-1">
+            <Input
+              value={browseManualPath}
+              onChange={(e) => setBrowseManualPath(e.target.value)}
+              onPressEnter={handleJumpToPath}
+              placeholder="输入路径直接跳转，如 D:/ 或 C:/Users"
+              size="small"
+              className="pr-8"
+            />
+          </div>
+          <Button size="sm" variant="outline" onClick={handleJumpToPath} className="h-7 shrink-0">
+            跳转
+          </Button>
+        </div>
+        {browseError ? (
+          <div className="mb-2 px-2 py-1.5 text-xs text-destructive rounded border border-destructive/30 bg-destructive/5">
+            {browseError}
+          </div>
+        ) : null}
+        {treeData.length === 0 && !browseError ? (
+          <div className="flex justify-center py-8">
+            <Spin size="small" />
+          </div>
+        ) : (
+          <div className="overflow-auto rounded border" style={{ maxHeight: 300 }}>
+            <Tree
+              treeData={treeData}
+              loadData={handleLoadTreeData}
+              onSelect={handleTreeSelect}
+              selectedKeys={treeSelectedPath ? [treeSelectedPath] : []}
+              showIcon
+              blockNode
+              height={300}
+              defaultExpandedKeys={treeData.length > 0 ? [treeData[0]?.key as string] : []}
+            />
+          </div>
+        )}
+        {treeSelectedPath ? (
+          <div className="mt-2 flex items-center gap-2 rounded bg-muted px-2 py-1 text-xs font-mono">
+            <span className="text-muted-foreground shrink-0">已选路径：</span>
+            <code className="truncate">{treeSelectedPath}</code>
+          </div>
+        ) : (
+          <div className="mt-2 text-center text-xs text-muted-foreground">
+            在目录树中选择一个文件夹，或在上方输入路径后点「跳转」
+          </div>
+        )}
       </Modal>
     </main>
   );

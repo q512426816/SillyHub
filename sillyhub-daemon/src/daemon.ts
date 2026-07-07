@@ -39,6 +39,7 @@
 import { arch, homedir, hostname, platform } from 'node:os';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { exec } from 'node:child_process';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { type DaemonConfig, normalizeAllowedRoots } from './config.js';
 import { MSG } from './protocol.js';
@@ -57,7 +58,7 @@ import type {
 import { AgentDetector, normalizeProvider } from './agent-detector.js';
 import type { DetectedAgent } from './agent-detector.js';
 import { HubClient, extractCause } from './hub-client.js';
-import { WsClient } from './ws-client.js';
+import { WsClient, RpcError } from './ws-client.js';
 import { listDir } from './file-rpc.js';
 // task-03（2026-07-06-daemon-host-fs-delegate）：host_fs.* WS handler 业务层。
 // backend 经 HostFsDelegate + ws_rpc 调本 handler 在宿主执行 stat/git_apply/...（FR-02）。
@@ -2068,11 +2069,73 @@ export class Daemon {
     }
     ws.registerRpcHandler('list_dir', async (params) => {
       const path = typeof params.path === 'string' ? params.path : '';
-      // 单 WS / per-daemon 模型（2026-07-03-daemon-entity-binding）：list_dir RPC 由
-      // backend 发起、无 provider 上下文，allowed_roots 为 daemon 实体级（config 单值）。
-      // PolicyEngine per-runtime 机制保留为遗留（origin task-18），但 list_dir 不再走它，
-      // 直接 fallback 到 config.allowed_roots（policyEngine=null 分支）。
-      return listDir(path, null, '', this._config.allowed_roots);
+      // ql-20260706-006：目录浏览器遍历所有目录选择路径，不受 allowed_roots 限制。
+      // 往 file-rpc 传入 policyEngine=null 时只要 fallbackRoots 为空数组就会抛错，
+      // 这里直接传空白名单，让 file-rpc.listDir 跳过权限校验（只做存在+目录检查）。
+      return listDir(path, null, '', []);
+    });
+    // ql-20260706-006：弹出系统原生文件夹选择对话框（PowerShell FolderBrowserDialog）。
+    // daemon 是用户机器上的本地进程，可直接调系统对话框；选中的完整路径经 WS 回传。
+    // 仅 Windows 支持（PowerShell + System.Windows.Forms）。其他平台抛 unsupported。
+    // 多屏适配：按鼠标当前位置建隐藏父窗口，对话框在鼠标所在屏幕弹（不是总在主屏）。
+    // 用 -EncodedCommand（UTF-16LE base64）避免引号转义 + 原生支持中文描述/路径。
+    ws.registerRpcHandler('browse_folder', async (params) => {
+      if (platform() !== 'win32') {
+        throw new RpcError('unsupported', 'browse_folder only supported on Windows');
+      }
+      // ql-20260707-003：若前端传入 initialPath（当前输入框已有值），对话框默认定位到该目录。
+      // 展开 ~ → homedir；PS 单引号转义（' → ''）后嵌入脚本，Test-Path 校验存在才设 SelectedPath。
+      const initialRaw =
+        typeof (params as { initial_path?: unknown } | undefined)?.initial_path === 'string'
+          ? (params as { initial_path?: string }).initial_path!.trim()
+          : '';
+      const initialAbs = initialRaw ? initialRaw.replace(/^~(?=$|[/\\])/, homedir()) : '';
+      const psSafe = initialAbs.replace(/'/g, "''");
+      const psScript =
+        '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n' +
+        'Add-Type -AssemblyName System.Windows.Forms\n' +
+        'Add-Type -AssemblyName System.Drawing\n' +
+        "$initial = '" + psSafe + "'\n" +
+        '$cursor = [System.Windows.Forms.Cursor]::Position\n' +
+        '$screen = [System.Windows.Forms.Screen]::FromPoint($cursor)\n' +
+        '$dummy = New-Object System.Windows.Forms.Form\n' +
+        "$dummy.StartPosition = 'Manual'\n" +
+        '$dummy.Location = $screen.Bounds.Location\n' +
+        '$dummy.Size = New-Object System.Drawing.Size(1, 1)\n' +
+        '$dummy.ShowInTaskbar = $false\n' +
+        '$dummy.Opacity = 0\n' +
+        '$dummy.Show() | Out-Null\n' +
+        '$dummy.Hide()\n' +
+        '$d = New-Object System.Windows.Forms.FolderBrowserDialog\n' +
+        "$d.Description = '选择要添加为可写目录的文件夹'\n" +
+        '$d.ShowNewFolderButton = $true\n' +
+        'if ($initial -and (Test-Path -LiteralPath $initial -PathType Container)) {\n' +
+        '  $d.SelectedPath = (Resolve-Path -LiteralPath $initial).Path\n' +
+        '}\n' +
+        '$r = $d.ShowDialog($dummy)\n' +
+        '$dummy.Close()\n' +
+        'if ($r -eq [System.Windows.Forms.DialogResult]::OK) {\n' +
+        '  [Console]::Out.WriteLine($d.SelectedPath)\n' +
+        '}\n';
+      const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
+      return new Promise<{ path: string }>((resolve, reject) => {
+        exec(`powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`, {
+          encoding: 'utf8',
+          timeout: 180000,
+          windowsHide: false,
+        }, (err, stdout) => {
+          if (err) {
+            reject(new RpcError('internal', `browse_folder failed: ${err.message}`));
+            return;
+          }
+          const selected = stdout.trim();
+          if (!selected) {
+            reject(new RpcError('cancelled', 'user cancelled folder selection'));
+            return;
+          }
+          resolve({ path: selected });
+        });
+      });
     });
   }
 

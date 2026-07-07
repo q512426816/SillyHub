@@ -130,10 +130,11 @@ export async function listDir(
 ): Promise<ListDirResult> {
   // 1. 权限校验（task-18 / design §5.2）：
   //    - policyEngine 非空：走 canRead（读全 allow，不 audit，D-008），仅透传 runtimeId。
-  //    - policyEngine 为 null：fallback 旧 assertWithinAllowedRoots（向后兼容）。
+  //    - policyEngine 为 null + fallbackRoots 非空：fallback 旧 assertWithinAllowedRoots。
+  //    - policyEngine 为 null + fallbackRoots 空：跳过权限校验（目录浏览器，读自由）。
   if (policyEngine) {
     policyEngine.canRead(runtimeId, path);
-  } else {
+  } else if (fallbackRoots.length > 0) {
     assertWithinAllowedRoots(path, fallbackRoots);
   }
   const abs = pathResolve(path);
