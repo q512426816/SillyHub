@@ -295,7 +295,13 @@ class TestGitApply:
         out = await delegate.git_apply(daemon_client_workspace, "PATCH", use_3way=True)
         assert out == {"ok": True, "conflict_detail": None}
         assert rpc.calls[0]["method"] == "git_apply"
-        assert rpc.calls[0]["args"] == {"patch_data": "PATCH", "use_3way": True}
+        # args 必须含 workdir（= workspace.root_path，daemon handler 据此在宿主 git apply）
+        # —— 钉死 runtime_id-vs-instance_id + args 契约回归（e2e 2026-07-07 暴露）。
+        assert rpc.calls[0]["args"] == {
+            "workdir": daemon_client_workspace.root_path,
+            "patch_data": "PATCH",
+            "use_3way": True,
+        }
 
 
 # ── 5. git_rev_parse ────────────────────────────────────────────────────────────────
@@ -317,7 +323,11 @@ class TestGitRevParse:
         out = await delegate.git_rev_parse(daemon_client_workspace, "HEAD")
         assert out == "abc123def456"
         assert rpc.calls[0]["method"] == "git_rev_parse"
-        assert rpc.calls[0]["args"] == {"ref": "HEAD"}
+        # args 含 root（= workspace.root_path）+ ref —— daemon handler runGitRevParse(root, ref)。
+        assert rpc.calls[0]["args"] == {
+            "root": daemon_client_workspace.root_path,
+            "ref": "HEAD",
+        }
 
     async def test_daemon_client_returns_none_when_no_commit(self, daemon_client_workspace):
         delegate, _ = _make_delegate_with_rpc(result={})
@@ -393,7 +403,7 @@ class TestReadPackageJson:
         out = await delegate.read_package_json(daemon_client_workspace)
         assert out == {"name": "remote"}
         assert rpc.calls[0]["method"] == "read_package_json"
-        assert rpc.calls[0]["args"] == {}
+        assert rpc.calls[0]["args"] == {"root": daemon_client_workspace.root_path}
 
 
 # ── 8. read_local_yaml ──────────────────────────────────────────────────────────────
@@ -424,7 +434,7 @@ class TestReadLocalYaml:
         out = await delegate.read_local_yaml(daemon_client_workspace)
         assert out == {"build": "remote build"}
         assert rpc.calls[0]["method"] == "read_local_yaml"
-        assert rpc.calls[0]["args"] == {}
+        assert rpc.calls[0]["args"] == {"root": daemon_client_workspace.root_path}
 
 
 # ── daemon_id resolution edge cases ─────────────────────────────────────────────────

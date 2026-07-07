@@ -322,7 +322,11 @@ class HostFsDelegate:
             result = await self._via_rpc_or_degrade(
                 method="git_apply",
                 workspace=workspace,
-                args={"patch_data": patch_data, "use_3way": use_3way},
+                args={
+                    "workdir": workspace.root_path,
+                    "patch_data": patch_data,
+                    "use_3way": use_3way,
+                },
                 degraded=self._DEGRADED_GIT_APPLY,
             )
             # Memoise only on a successful apply so a transient RPC failure
@@ -438,7 +442,7 @@ class HostFsDelegate:
             result = await self._via_rpc_or_degrade(
                 method="git_rev_parse",
                 workspace=workspace,
-                args={"ref": ref},
+                args={"root": workspace.root_path, "ref": ref},
                 degraded={"commit": None},
             )
             commit = result.get("commit") if isinstance(result, dict) else None
@@ -596,7 +600,7 @@ class HostFsDelegate:
             result = await self._via_rpc_or_degrade(
                 method="read_package_json",
                 workspace=workspace,
-                args={},
+                args={"root": workspace.root_path},
                 degraded={"data": None},
             )
             if not isinstance(result, dict):
@@ -628,7 +632,7 @@ class HostFsDelegate:
             result = await self._via_rpc_or_degrade(
                 method="read_local_yaml",
                 workspace=workspace,
-                args={},
+                args={"root": workspace.root_path},
                 degraded={"data": None},
             )
             if not isinstance(result, dict):

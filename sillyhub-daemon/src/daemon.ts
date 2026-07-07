@@ -2208,7 +2208,12 @@ export class Daemon {
     });
     ws.registerRpcHandler('host_fs.git_rev_parse', async (params) => {
       const root = typeof params.root === 'string' ? params.root : '';
-      return handler.gitRevParse({ root });
+      // ref 默认 HEAD（对齐 backend _get_source_commit；delegate 传具体 ref 时用之）。
+      const ref =
+        typeof params.ref === 'string' && params.ref.length > 0
+          ? params.ref
+          : 'HEAD';
+      return handler.gitRevParse({ root, ref });
     });
     ws.registerRpcHandler('host_fs.pollution_archive', async (params) => {
       const source_root =

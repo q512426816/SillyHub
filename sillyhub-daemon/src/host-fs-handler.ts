@@ -226,6 +226,7 @@ async function runGitApply(
  */
 async function runGitRevParse(
   root: string,
+  ref: string = 'HEAD',
 ): Promise<{ commit: string | null; error: string | null }> {
   async function tryOnce(): Promise<{
     commit: string | null;
@@ -234,7 +235,7 @@ async function runGitRevParse(
   }> {
     const r = await runCmd(
       'git',
-      ['-C', root, 'rev-parse', 'HEAD'],
+      ['-C', root, 'rev-parse', ref],
       { timeout: GIT_TIMEOUT_MS },
     );
     if (r.ok) {
@@ -423,10 +424,13 @@ export class HostFsHandler {
    * 非 git 仓库 / git 不可用 / 超时 → commit=null + error 代号（不抛，backend 降级 warning）。
    * safe.directory dubious ownership 自动重试。
    */
-  async gitRevParse(params: { root: string }): Promise<GitRevParseResult> {
+  async gitRevParse(params: {
+    root: string;
+    ref?: string;
+  }): Promise<GitRevParseResult> {
     assertWithinAllowedRoots(params.root, this._allowedRoots);
     const root = pathResolve(params.root);
-    return runGitRevParse(root);
+    return runGitRevParse(root, params.ref && params.ref.length > 0 ? params.ref : 'HEAD');
   }
 
   // ── pollution_archive ─────────────────────────────────────────────────────
@@ -442,13 +446,20 @@ export class HostFsHandler {
    */
   async pollutionArchive(params: {
     source_root: string;
-    runtime_root: string;
-    scan_run_id: string;
+    runtime_root?: string;
+    scan_run_id?: string;
   }): Promise<PollutionArchiveResult> {
     assertWithinAllowedRoots(params.source_root, this._allowedRoots);
-    assertWithinAllowedRoots(params.runtime_root, this._allowedRoots);
     const sourceRoot = pathResolve(params.source_root);
-    const runtimeRoot = pathResolve(params.runtime_root);
+    // runtime_root / scan_run_id 可选：delegate.pollution_archive 只传 source_root
+    // （post_scan_validator:745 调用同样只传 source_root）。空时 fallback
+    // source_root + 时间戳，archive 到 source_root/.pollution-<ts>/（与 delegate
+    // server-local _local_pollution_archive 一致），不阻塞污染清理路径。
+    const runtimeRoot =
+      params.runtime_root && params.runtime_root.length > 0
+        ? (assertWithinAllowedRoots(params.runtime_root, this._allowedRoots),
+          pathResolve(params.runtime_root))
+        : sourceRoot;
     const sourceSillyspec = join(sourceRoot, '.sillyspec');
 
     // 1. source 不存在 → 未归档（file_count:0）。
@@ -476,8 +487,12 @@ export class HostFsHandler {
       return { archived: false, archive_path: null, file_count: 0 };
     }
 
-    // 3. 移动到归档目录。
-    const archiveDir = join(runtimeRoot, 'pollution', params.scan_run_id);
+    // 3. 移动到归档目录（scan_run_id 空 → 时间戳兜底，避免 join 段为空）。
+    const scanRunId =
+      params.scan_run_id && params.scan_run_id.length > 0
+        ? params.scan_run_id
+        : `local-${Date.now()}`;
+    const archiveDir = join(runtimeRoot, 'pollution', scanRunId);
     const archivePath = join(archiveDir, '.sillyspec');
     try {
       await mkdir(archiveDir, { recursive: true });
