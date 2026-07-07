@@ -9,6 +9,7 @@ import sqlite3
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +26,9 @@ from app.modules.runtime.schema import (
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.workspace.service import WorkspaceService
 
+if TYPE_CHECKING:
+    from app.modules.daemon.host_fs import HostFsDelegate
+
 log = get_logger(__name__)
 
 
@@ -36,9 +40,23 @@ class RuntimeService:
         session: AsyncSession,
         *,
         workspace_service: WorkspaceService | None = None,
+        host_fs: HostFsDelegate | None = None,
     ) -> None:
+        """Initialize runtime reader.
+
+        Args:
+            session: Active async DB session.
+            workspace_service: Optional injected ``WorkspaceService`` (tests).
+            host_fs: Optional :class:`HostFsDelegate`. When provided, all
+                host-filesystem access (stat / read / list) goes through it so
+                daemon-client workspaces read ``.runtime/`` over WS RPC. When
+                ``None`` (default — server-local / existing tests), the service
+                falls back to direct ``Path`` / ``sqlite3`` access on the
+                resolved container path (D-004 zero-regression).
+        """
         self._session = session
         self._ws_service = workspace_service or WorkspaceService(session)
+        self._host_fs = host_fs
 
     @staticmethod
     def _resolver_for(workspace, spec_ws) -> SpecPathResolver | None:
@@ -101,6 +119,9 @@ class RuntimeService:
         assert resolver is not None  # runtime_dir 非 None 蕴含 resolver 非 None
 
         # --- Read from sillyspec.db (SQLite) ---
+        # task-12：db 读取保持容器 sqlite3.connect 直读（task-16 fix 后 daemon-client
+        # 的 root 强制 spec_ws.spec_root 服务器可读路径，容器可达；HostFsDelegate 的
+        # read_file 返 str 不能传二进制 sqlite db，扩接口超出 task-12 allowed_paths）。
         db_path = resolver.db_path()
         if db_path.is_file():
             return self._read_sqlite_progress(db_path, runtime_dir)
@@ -212,12 +233,8 @@ class RuntimeService:
             return []
 
         ui_path = runtime_dir / "user-inputs.md"
-        if not ui_path.is_file():
-            return []
-
-        try:
-            content = ui_path.read_text(encoding="utf-8")
-        except OSError:
+        content = await self._read_text(workspace, ui_path)
+        if content is None:
             return []
 
         entries: list[UserInputEntry] = []
@@ -236,13 +253,7 @@ class RuntimeService:
             return None
 
         ui_path = runtime_dir / "user-inputs.md"
-        if not ui_path.is_file():
-            return None
-
-        try:
-            return ui_path.read_text(encoding="utf-8")
-        except OSError:
-            return None
+        return await self._read_text(workspace, ui_path)
 
     async def get_artifacts(self, workspace_id: uuid.UUID) -> list[ArtifactEntry]:
         workspace, spec_ws = await self._get_base(workspace_id)
@@ -251,10 +262,33 @@ class RuntimeService:
             return []
 
         artifacts_dir = runtime_dir / "artifacts"
+        entries: list[ArtifactEntry] = []
+
+        if self._host_fs is not None:
+            # daemon-client / 注入 delegate 分支：list_dir + stat 走 RPC（D-006 RPC 失败
+            # delegate 返语义安全空值，不抛）。root=spec_root 已是服务器/宿主侧能解析路径。
+            names = await self._host_fs.list_dir(workspace, str(artifacts_dir))
+            for name in sorted(names):
+                child = str(artifacts_dir / name)
+                st = await self._host_fs.stat(workspace, child)
+                if not st.get("exists") or st.get("is_dir"):
+                    continue
+                from datetime import datetime as dt
+
+                # delegate.stat 不返 mtime（task-01 契约只 exists/is_dir/size），
+                # last_modified 退化为 None（前端展示 size 仍可用；mtime 需扩接口）。
+                entries.append(
+                    ArtifactEntry(
+                        filename=name,
+                        size_bytes=int(st.get("size", 0)),
+                        last_modified=None,
+                    )
+                )
+            return entries
+
+        # server-local 旧分支（host_fs=None）：容器 Path 直读。
         if not artifacts_dir.is_dir():
             return []
-
-        entries: list[ArtifactEntry] = []
         for f in sorted(artifacts_dir.iterdir()):
             if f.is_file():
                 stat = f.stat()
@@ -277,12 +311,42 @@ class RuntimeService:
 
         artifact_path = (runtime_dir / "artifacts" / filename).resolve()
         artifacts_dir = (runtime_dir / "artifacts").resolve()
+        # 越界校验保留本地做（路径规范化不依赖 fs，task-12 constraints）。
         if not str(artifact_path).startswith(str(artifacts_dir)):
             return None
-        if not artifact_path.is_file():
-            return None
+        return await self._read_text(workspace, artifact_path, errors="replace")
 
+    async def _read_text(self, workspace, abs_path: Path, *, errors: str = "strict") -> str | None:
+        """读 UTF-8 文本文件，host_fs 可用时走 delegate RPC，否则容器 Path 直读。
+
+        统一了 user-inputs.md / artifact 内容读取：host_fs=None（server-local 默认 +
+        既有测试）走旧 ``Path.is_file`` + ``read_text``；host_fs 注入时走
+        ``delegate.stat`` + ``delegate.read_file``，daemon-client 经 WS RPC。
+
+        ``errors`` 仅作用于 server-local 容器分支（delegate.read_file 返 daemon
+        侧解码后的 str，无 errors 概念）。默认 ``strict`` 与原 user-inputs 行为一致；
+        artifact 内容传 ``replace`` 与原行为一致。
+        """
+        path_str = str(abs_path)
+        if self._host_fs is not None:
+            st = await self._host_fs.stat(workspace, path_str)
+            if not st.get("exists") or st.get("is_dir"):
+                return None
+            try:
+                return await self._host_fs.read_file(workspace, path_str)
+            except Exception:
+                return None
+        if not abs_path.is_file():
+            return None
+        # server-local 容器分支：errors="replace" 时 UnicodeDecodeError 被替换字符吞
+        # （原 get_artifact_content 行为）；errors="strict" 时坏编码 UnicodeDecodeError
+        # 传播（原 get_user_inputs 行为，except OSError 不接 UnicodeDecodeError）。
+        if errors == "replace":
+            try:
+                return abs_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                return None
         try:
-            return artifact_path.read_text(encoding="utf-8", errors="replace")
+            return abs_path.read_text(encoding="utf-8")
         except OSError:
             return None

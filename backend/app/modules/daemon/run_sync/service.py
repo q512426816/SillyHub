@@ -886,8 +886,15 @@ class RunSyncService:
 
     # ── private helpers（随主方法归位，design §6 / §10 R6） ───────────────
 
-    async def _trigger_stage_completion_callback(self, agent_run_id: uuid.UUID) -> None:
+    async def _trigger_stage_completion_callback(
+        self,
+        agent_run_id: uuid.UUID,
+        path_source: str | None = None,
+    ) -> None:
         """A2: stage dispatch 的 AgentRun 完成后同步 sillyspec.db 并推进下一阶段。
+
+        task-05：path_source 由 complete_lease 入口反查后透传（default=None 向后
+        兼容）；回调体分流归 task-07，本方法实现体暂不动。
 
         仅对 stage dispatch（change_id 非空、status=completed）生效；scan
         （change_id=None）由 spec sync + scan_docs.reparse 单独回流，不走这里。
@@ -910,7 +917,12 @@ class RunSyncService:
             return
 
         svc = SillySpecStageDispatchService(self._session)
-        sync_result = await svc.sync_stage_status(self._session, agent_run.change_id, agent_run.id)
+        sync_result = await svc.sync_stage_status(
+            self._session,
+            agent_run.change_id,
+            agent_run.id,
+            path_source=path_source,
+        )
         if not sync_result.synced:
             log.info(
                 "stage_callback_sync_skipped",
@@ -935,8 +947,15 @@ class RunSyncService:
             change_id=str(agent_run.change_id),
         )
 
-    async def _run_post_scan_validation(self, lease: DaemonTaskLease) -> None:
+    async def _run_post_scan_validation(
+        self,
+        lease: DaemonTaskLease,
+        path_source: str | None = None,
+    ) -> None:
         """C: scan 完成后跑平台侧结构化校验（PostScanValidator）。
+
+        task-05：path_source 由 complete_lease 入口反查后透传（default=None 向后
+        兼容）；回调体分流归 task-08，本方法实现体暂不动。
 
         消费 sillyspec 平台模式产出的结构化回执：manifest.json / platform-scan.json
         / postcheck-result / 源码污染检测 / 7 份 scan 文档齐全性。仅对 scan run
@@ -975,8 +994,34 @@ class RunSyncService:
             )
             return
 
-        validator = PostScanValidator(source_root, spec_root, runtime_root, str(agent_run.id))
-        result = validator.validate(agent_run.output_redacted or "", agent_run.exit_code or 0)
+        # task-07：daemon-client 分支经 HostFsDelegate RPC 走原语（D-009 方案 B）；
+        # server-local（含 path_source=None 兜底）走原生 subprocess/shutil 路径
+        # （NFR-02 零回归）。delegate 由 task-06 lazy property 注入。
+        delegate = None
+        workspace = None
+        if path_source == "daemon-client" and self._facade is not None:
+            try:
+                delegate = self._facade.host_fs_delegate
+                workspace = await self._resolve_lease_workspace(lease)
+            except Exception as exc:  # delegate 构造/workspace 反查不应中断 lease
+                log.warning(
+                    "post_scan_validation_delegate_unavailable",
+                    lease_id=str(lease.id),
+                    error=str(exc),
+                )
+                delegate = None
+                workspace = None
+
+        validator = PostScanValidator(
+            source_root,
+            spec_root,
+            runtime_root,
+            str(agent_run.id),
+            delegate=delegate,
+            path_source=path_source or "server-local",
+            workspace=workspace,
+        )
+        result = await validator.validate(agent_run.output_redacted or "", agent_run.exit_code or 0)
         meta["post_scan_validation"] = {
             "status": str(result.status.value),
             "has_errors": result.has_errors,
@@ -1004,6 +1049,29 @@ class RunSyncService:
             errors=len(result.errors),
             warnings=len(result.warnings),
         )
+
+    async def _resolve_lease_workspace(self, lease: DaemonTaskLease):
+        """反查 lease 关联 workspace（task-07 daemon-client 分支专用）。
+
+        链路同 lease/service.py:_resolve_lease_workspace_path_source：经 M:N
+        关联表 AgentRunWorkspace。失败返回 None（不抛，caller 已 try/except
+        兜底降级 server-local）。
+        """
+        from sqlmodel import col
+
+        from app.modules.workspace.model import AgentRunWorkspace, Workspace
+
+        if lease.agent_run_id is None:
+            return None
+        ws_stmt = (
+            select(AgentRunWorkspace.workspace_id)
+            .where(col(AgentRunWorkspace.agent_run_id) == lease.agent_run_id)
+            .limit(1)
+        )
+        ws_row = (await self._session.execute(ws_stmt)).first()
+        if ws_row is None:
+            return None
+        return await self._session.get(Workspace, ws_row[0])
 
     async def _publish_run_event(
         self,

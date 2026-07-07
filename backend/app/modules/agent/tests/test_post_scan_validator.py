@@ -12,6 +12,7 @@ Covers:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 
@@ -280,7 +281,7 @@ class TestPostScanValidator:
             scan_run_id="test-run",
         )
 
-        result = validator.validate(agent_output="", agent_exit_code=0)
+        result = asyncio.run(validator.validate(agent_output="", agent_exit_code=0))
 
         assert result.status == ScanRunStatus.FAILED_POST_CHECK
         assert any(e.code == "source_root_pollution" for e in result.errors)
@@ -346,7 +347,7 @@ class TestPostScanValidator:
             scan_run_id="test-run",
         )
 
-        result = validator.validate(agent_output="", agent_exit_code=0)
+        result = asyncio.run(validator.validate(agent_output="", agent_exit_code=0))
 
         assert result.status == ScanRunStatus.SUCCESS
         assert len(result.errors) == 0
@@ -392,7 +393,7 @@ class TestPostScanValidator:
             scan_run_id="test-nongit",
         )
 
-        result = validator.validate(agent_output="", agent_exit_code=0)
+        result = asyncio.run(validator.validate(agent_output="", agent_exit_code=0))
 
         # ql-20260617-014：不应是 FAILED_POST_CHECK，应是 COMPLETED_WITH_WARNINGS
         assert result.status == ScanRunStatus.COMPLETED_WITH_WARNINGS
@@ -452,3 +453,139 @@ class TestLocalConfigValidation:
 
         warnings = _check_local_config(source_root)
         assert len(warnings) == 0
+
+
+class _FakeDelegate:
+    """task-07 daemon-client 路径 mock：模拟 HostFsDelegate 原语返回值。"""
+
+    def __init__(
+        self,
+        *,
+        commit: str | None = "abc123",
+        archive: dict | None = None,
+        package_json: dict | None = None,
+        local_yaml: dict | None = None,
+    ) -> None:
+        self._commit = commit
+        self._archive = archive or {"archived": False, "detail": None}
+        self._package_json = package_json
+        self._local_yaml = local_yaml
+
+    async def git_rev_parse(self, workspace, ref):
+        return self._commit
+
+    async def pollution_archive(self, workspace, source_root):
+        return self._archive
+
+    async def read_package_json(self, workspace):
+        return self._package_json
+
+    async def read_local_yaml(self, workspace):
+        return self._local_yaml
+
+
+class TestDaemonClientValidation:
+    """task-07 daemon-client 分流单测（D-009 方案 B）。"""
+
+    def test_daemon_client_commit_success(self, tmp_path):
+        import asyncio
+
+        delegate = _FakeDelegate(commit="deadbeef")
+        # workspace 仅作 path_source 分流载体，daemon-client 测试用最小占位。
+        workspace = type("Ws", (), {"path_source": "daemon-client"})()
+        validator = PostScanValidator(
+            source_root=tmp_path / "src",
+            spec_root=tmp_path / "spec",
+            runtime_root=tmp_path / "runtime",
+            scan_run_id="dc-1",
+            delegate=delegate,
+            path_source="daemon-client",
+            workspace=workspace,
+        )
+        result = asyncio.run(validator.validate(agent_output="", agent_exit_code=0))
+        assert result.metadata.get("source_commit") == "deadbeef"
+        assert result.metadata.get("path_source") == "daemon-client"
+
+    def test_daemon_client_commit_unavailable_warning(self, tmp_path):
+        import asyncio
+
+        delegate = _FakeDelegate(commit=None)
+        workspace = type("Ws", (), {"path_source": "daemon-client"})()
+        validator = PostScanValidator(
+            source_root=tmp_path / "src",
+            spec_root=tmp_path / "spec",
+            runtime_root=tmp_path / "runtime",
+            scan_run_id="dc-2",
+            delegate=delegate,
+            path_source="daemon-client",
+            workspace=workspace,
+        )
+        result = asyncio.run(validator.validate(agent_output="", agent_exit_code=0))
+        assert result.metadata.get("source_commit") is None
+        assert any(w.code == "source_commit_unavailable" for w in result.warnings)
+
+    def test_daemon_client_pollution_archived(self, tmp_path):
+        import asyncio
+
+        delegate = _FakeDelegate(
+            archive={
+                "archived": True,
+                "detail": {"file_count": 3, "archive_path": "/host/archive/.sillyspec"},
+            }
+        )
+        workspace = type("Ws", (), {"path_source": "daemon-client"})()
+        validator = PostScanValidator(
+            source_root=tmp_path / "src",
+            spec_root=tmp_path / "spec",
+            runtime_root=tmp_path / "runtime",
+            scan_run_id="dc-3",
+            delegate=delegate,
+            path_source="daemon-client",
+            workspace=workspace,
+        )
+        result = asyncio.run(validator.validate(agent_output="", agent_exit_code=0))
+        assert any(w.code == "pollution_archived" for w in result.warnings)
+        assert result.metadata["pollution_cleanup"]["archived"] is True
+
+    def test_daemon_client_local_config_missing_script(self, tmp_path):
+        import asyncio
+
+        delegate = _FakeDelegate(
+            local_yaml={"build": "npm run build"},
+            package_json={"scripts": {"lint": "eslint ."}},
+        )
+        workspace = type("Ws", (), {"path_source": "daemon-client"})()
+        validator = PostScanValidator(
+            source_root=tmp_path / "src",
+            spec_root=tmp_path / "spec",
+            runtime_root=tmp_path / "runtime",
+            scan_run_id="dc-4",
+            delegate=delegate,
+            path_source="daemon-client",
+            workspace=workspace,
+        )
+        result = asyncio.run(validator.validate(agent_output="", agent_exit_code=0))
+        assert any(
+            w.code == "local_config_invalid" and w.details.get("script_name") == "build"
+            for w in result.warnings
+        )
+
+    def test_server_local_fallback_when_no_delegate(self, tmp_path):
+        """path_source=daemon-client 但 delegate/workspace=None → 降级 server-local。"""
+        import asyncio
+
+        validator = PostScanValidator(
+            source_root=tmp_path / "src",
+            spec_root=tmp_path / "spec",
+            runtime_root=tmp_path / "runtime",
+            scan_run_id="dc-5",
+            delegate=None,
+            path_source="server-local",
+            workspace=None,
+        )
+        # _is_daemon_client() False → 走 server-local（asyncio.to_thread 不报错）
+        result = asyncio.run(validator.validate(agent_output="", agent_exit_code=0))
+        assert (
+            result.metadata.get("path_source") is None
+            or result.metadata.get("path_source") != "daemon-client"
+        )

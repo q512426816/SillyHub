@@ -414,9 +414,16 @@ async def _execute_bootstrap_agent_run(
                 session.add(run)
                 await session.commit()
 
-            # -- 2. Preflight (server-local only; daemon-client paths live on client) -
-            preflight_error = preflight_workspace_code_root(
+            # -- 2. Preflight (task-13：经 HostFsDelegate，daemon-client 走 RPC 校验) ---
+            from app.modules.daemon.host_fs import HostFsDelegate, HostFsWsRpc
+            from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+            _hub = get_daemon_ws_hub()
+            _delegate = HostFsDelegate(session, _hub, HostFsWsRpc(_hub))
+            preflight_error = await preflight_workspace_code_root(
+                workspace,
                 code_root,
+                _delegate,
                 path_source=workspace.path_source,
             )
             if preflight_error is not None:
@@ -646,72 +653,98 @@ _PROJECT_SIGNATURES = [
 _PLATFORM_ENTRIES = frozenset({".sillyspec", "worktree", "README.md", ".git"})
 
 
-def preflight_workspace_code_root(
+async def preflight_workspace_code_root(
+    workspace,
     code_root: str,
+    delegate,
     *,
     path_source: str = "server-local",
 ) -> str | None:
-    """Validate code_root on the backend host before bootstrap dispatch.
+    """Validate code_root before bootstrap dispatch via :class:`HostFsDelegate`.
 
-    daemon-client workspaces skip this check — ``code_root`` is only reachable
-    from the bound daemon (FR-06 / D-003@v1). server-local paths are rewritten
-    for Docker bind mounts (``HOST_PATH_PREFIX`` → ``CONTAINER_PATH_PREFIX``).
+    task-13：原实现调 ``resolve_root_path_for_server`` 在 daemon-client 模式返 None
+    隐式跳过校验（靠 daemon 侧自检兜底）。改为显式经 HostFsDelegate —— daemon-client
+    走 WS RPC 在宿主侧校验、server-local 走 delegate 本地容器分支（D-004 行为不变）。
+
+    校验语义不变（目录存在 / 非空 / 项目签名探测 / git safe.directory）：仅数据来源
+    从 ``Path.exists / .is_dir / .iterdir`` 换成 ``delegate.stat / list_dir``。git
+    safe.directory subprocess 仅 server-local 容器有意义，daemon-client 路径不在
+    backend 触发（由 daemon handler 侧自管）。
+
+    Returns an error string if preflight fails, or ``None`` if OK.
     """
     from app.modules.workspace.service import resolve_root_path_for_server
 
     server_path = resolve_root_path_for_server(code_root, path_source)
     if server_path is None:
-        log.info(
-            "spec_bootstrap_preflight_skipped",
-            path_source=path_source,
-            code_root=code_root,
-        )
-        return None
-    return _run_preflight(Path(server_path))
+        # daemon-client：路径在宿主机，backend 无法 resolve 容器路径。原实现跳过校验，
+        # 但 task-13 要求显式经 delegate RPC 校验。delegate 内部按 path_source 分流，
+        # daemon-client 走 WS RPC（D-006 RPC 失败 delegate 返语义安全值不抛，preflight
+        # 落到 "does not exist" 错误串，与 server-local 不存在路径行为一致）。
+        server_path = code_root
+    return await _run_preflight(workspace, server_path, delegate)
 
 
-def _run_preflight(code_root: Path) -> str | None:
-    """Validate code_root before launching the bootstrap agent.
+async def _run_preflight(workspace, code_root: str, delegate) -> str | None:
+    """Validate code_root before launching the bootstrap agent（task-13 delegate 版）。
 
     Returns an error string if preflight fails, or ``None`` if OK.
     """
-    if not code_root.exists():
+    root_stat = await delegate.stat(workspace, code_root)
+    if not root_stat.get("exists"):
         return f"source_root does not exist: {code_root}"
-    if not code_root.is_dir():
+    if not root_stat.get("is_dir"):
         return f"source_root is not a directory: {code_root}"
-    entries = list(code_root.iterdir())
-    meaningful = [e for e in entries if e.name not in _PLATFORM_ENTRIES]
+    entries = await delegate.list_dir(workspace, code_root)
+    meaningful = [e for e in entries if e not in _PLATFORM_ENTRIES]
     if not meaningful:
         return f"source_root is empty (no files besides platform-managed dirs): {code_root}"
-    has_signature = any((code_root / sig).exists() for sig in _PROJECT_SIGNATURES)
-    if not has_signature:
-        # Check one level deeper — code may live inside a subdirectory
-        for entry in entries:
-            if (
-                entry.is_dir()
-                and entry.name not in _PLATFORM_ENTRIES
-                and any((entry / sig).exists() for sig in _PROJECT_SIGNATURES)
-            ):
-                return None
-        names = ", ".join(e.name for e in entries[:10])
-        return (
-            f"source_root has no recognizable project signature "
-            f"(checked: {', '.join(_PROJECT_SIGNATURES[:7])}). "
-            f"Found: {names}"
-        )
 
-    # Ensure git safe.directory for bind-mounted host directories
-    import subprocess
+    # 项目签名探测：根目录直接命中，或一级子目录命中（嵌套项目结构）。
+    async def _has_signature(dir_abs: str) -> bool:
+        names = await delegate.list_dir(workspace, dir_abs)
+        return any(sig in names for sig in _PROJECT_SIGNATURES)
 
-    try:
-        subprocess.run(
-            ["git", "config", "--global", "--add", "safe.directory", str(code_root)],
-            capture_output=True,
-            check=False,
-            timeout=5,
-        )
-    except Exception:
+    if await _has_signature(code_root):
+        # 根目录直接命中签名 → 落到下方 git safe.directory 收尾（与原行为一致）。
         pass
+    else:
+        # 检查一级子目录：命中任一则视为合法项目（原实现此处直接 return None，
+        # 不触发 git safe.directory；task-13 保留此早退语义零回归）。
+        nested_hit = False
+        for name in entries:
+            if name in _PLATFORM_ENTRIES:
+                continue
+            child_abs = f"{code_root.rstrip('/')}/{name}"
+            child_stat = await delegate.stat(workspace, child_abs)
+            if child_stat.get("is_dir") and await _has_signature(child_abs):
+                nested_hit = True
+                break
+        if not nested_hit:
+            names = ", ".join(entries[:10])
+            return (
+                f"source_root has no recognizable project signature "
+                f"(checked: {', '.join(_PROJECT_SIGNATURES[:7])}). "
+                f"Found: {names}"
+            )
+        return None
+
+    # Ensure git safe.directory for bind-mounted host directories（仅 server-local 容器
+    # 有意义；daemon-client 路径不在 backend 触发，由 daemon handler 侧自管）。
+    from app.modules.workspace.service import is_daemon_client_path_source
+
+    if not is_daemon_client_path_source(getattr(workspace, "path_source", None)):
+        import subprocess
+
+        try:
+            subprocess.run(
+                ["git", "config", "--global", "--add", "safe.directory", code_root],
+                capture_output=True,
+                check=False,
+                timeout=5,
+            )
+        except Exception:
+            pass
 
     return None
 

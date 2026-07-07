@@ -34,17 +34,31 @@ def test_resolve_root_path_for_server_local_rewrites(
     assert resolve_root_path_for_server(host_path, "server-local") == "/host-projects/happy"
 
 
-def test_preflight_workspace_code_root_skips_daemon_client():
-    assert (
+def test_preflight_workspace_code_root_daemon_client_via_delegate():
+    """task-13：daemon-client 不再跳过 preflight，经 delegate RPC 校验（mock delegate stat/list_dir）。"""
+    import asyncio
+    from types import SimpleNamespace
+
+    class _FakeDelegate:
+        async def stat(self, workspace, path):
+            return {"exists": True, "is_dir": True, "size": 0}
+
+        async def list_dir(self, workspace, path):
+            return ["package.json"]
+
+    workspace = SimpleNamespace(path_source="daemon-client")
+    result = asyncio.run(
         preflight_workspace_code_root(
+            workspace,
             r"C:\Users\qinyi\IdeaProjects\happy",
+            _FakeDelegate(),
             path_source="daemon-client",
         )
-        is None
     )
+    assert result is None
 
 
-def test_preflight_workspace_code_root_checks_rewritten_server_path(
+async def test_preflight_workspace_code_root_checks_rewritten_server_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
@@ -59,9 +73,18 @@ def test_preflight_workspace_code_root_checks_rewritten_server_path(
 
     get_settings.cache_clear()
 
+    from types import SimpleNamespace
+
+    from app.modules.daemon.host_fs import HostFsDelegate
+
     host_path = "Z:/fake-host-projects/happy"
     assert not Path(host_path).exists()
-    assert preflight_workspace_code_root(host_path, path_source="server-local") is None
+    workspace = SimpleNamespace(path_source="server-local")
+    delegate = HostFsDelegate(session=None, ws_hub=None)  # server-local 本地分支
+    result = await preflight_workspace_code_root(
+        workspace, host_path, delegate, path_source="server-local"
+    )
+    assert result is None
 
 
 # ── resolve_root_path_for_daemon（container→host，逆 _rewrite_path）──────────────

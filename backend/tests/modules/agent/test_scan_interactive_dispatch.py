@@ -63,6 +63,28 @@ def _mock_session(workspace: MagicMock) -> MagicMock:
     return s
 
 
+def _make_pass_delegate() -> MagicMock:
+    """mock HostFsDelegate 让 start_scan_dispatch 入口校验一律放行（task-10 接线后必须）。
+
+    task-10 把 root_path 校验 + 资产保护检测改经 HostFsDelegate（daemon-client 走
+    WS RPC）。这些测试聚焦 interactive session 行为，不验证 root_path 校验——mock
+    delegate.stat 区分路径：root_path 本身放行（exists:True/is_dir:True），任何
+    .sillyspec 子路径都返回不存在（资产保护不命中）；list_dir 返回 []（无资产）。
+    """
+    delegate = MagicMock()
+
+    async def _stat(workspace, path):
+        # root_path 自身放行；任何 .sillyspec 子路径（sillyspec.db 等）都返回不存在
+        # → 资产保护检测 _has_assets=False。
+        if ".sillyspec" in path:
+            return {"exists": False, "is_dir": False, "size": 0}
+        return {"exists": True, "is_dir": True, "size": 0}
+
+    delegate.stat = AsyncMock(side_effect=_stat)
+    delegate.list_dir = AsyncMock(return_value=[])
+    return delegate
+
+
 @pytest.mark.asyncio
 async def test_start_scan_dispatch_uses_interactive_session(monkeypatch):
     """start_scan_dispatch 走 interactive session（prepare_scan_interactive_dispatch），
@@ -95,6 +117,9 @@ async def test_start_scan_dispatch_uses_interactive_session(monkeypatch):
     hub = MagicMock()
     hub.send_session_control = AsyncMock()
     monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
+
+    # task-10：入口校验经 HostFsDelegate（daemon-client workspace mock 不走真实 RPC）
+    monkeypatch.setattr(AgentService, "_get_host_fs_delegate", lambda self: _make_pass_delegate())
 
     await svc.start_scan_dispatch(
         workspace_id=uuid.uuid4(),
@@ -155,6 +180,9 @@ async def test_start_scan_dispatch_no_online_daemon_marks_failed(monkeypatch):
     mark_mock = AsyncMock()
     monkeypatch.setattr(svc, "_mark_no_online_daemon", mark_mock)
 
+    # task-10：入口校验经 HostFsDelegate（daemon-client workspace mock 不走真实 RPC）
+    monkeypatch.setattr(AgentService, "_get_host_fs_delegate", lambda self: _make_pass_delegate())
+
     run = await svc.start_scan_dispatch(
         workspace_id=uuid.uuid4(),
         user_id=uuid.uuid4(),
@@ -201,6 +229,9 @@ async def test_start_scan_dispatch_provider_fallback_is_claude_not_claude_code(m
     hub = MagicMock()
     hub.send_session_control = AsyncMock()
     monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
+
+    # task-10：入口校验经 HostFsDelegate（daemon-client workspace mock 不走真实 RPC）
+    monkeypatch.setattr(AgentService, "_get_host_fs_delegate", lambda self: _make_pass_delegate())
 
     # 不传 provider，workspace.default_agent=None → 兜底 "claude"。
     await svc.start_scan_dispatch(

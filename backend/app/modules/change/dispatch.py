@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +22,9 @@ from app.core.logging import get_logger
 from app.modules.agent.base import AgentSpecBundle
 from app.modules.agent.model import AgentRun
 from app.modules.change.model import Change, StageEnum
+
+if TYPE_CHECKING:
+    from app.modules.workspace.model import Workspace
 
 log = get_logger(__name__)
 
@@ -812,6 +815,29 @@ class SillySpecStageDispatchService:
             session: Async database session.
         """
         self._session = session
+        # task-08：daemon-client 分支 lazy 构造的 HostFsDelegate（仅 stage
+        # callback 走 daemon-client 时才需要）。仿 DaemonService.host_fs_delegate
+        # lazy property，避免顶层 import 循环（host_fs 依赖 daemon.service 异常）。
+        self._host_fs_delegate: Any = None
+
+    def _get_host_fs_delegate(self) -> Any:
+        """Lazy-construct HostFsDelegate for daemon-client stage sync.
+
+        仅 daemon-client path_source 调用（sync_stage_status 分流），构造时
+        绑定进程级 ws_hub + HostFsWsRpc。失败抛 HostFsDelegateUnavailable 由
+        caller 兜底降级 StageSyncResult(synced=False)（D-006）。
+        """
+        if self._host_fs_delegate is None:
+            from app.modules.daemon.host_fs import HostFsDelegate, HostFsWsRpc
+            from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+            hub = get_daemon_ws_hub()
+            self._host_fs_delegate = HostFsDelegate(
+                self._session,
+                ws_hub=hub,
+                ws_rpc=HostFsWsRpc(hub),
+            )
+        return self._host_fs_delegate
 
     async def dispatch_next_step(
         self,
@@ -995,6 +1021,8 @@ class SillySpecStageDispatchService:
         session: AsyncSession,
         change_id: uuid.UUID,
         run_id: uuid.UUID,
+        *,
+        path_source: str | None = None,
     ) -> StageSyncResult:
         """AgentRun 完成后从 sillyspec.db 同步阶段/步骤状态到 Hub。
 
@@ -1005,6 +1033,10 @@ class SillySpecStageDispatchService:
             session: SQLAlchemy async session。
             change_id: 目标变更的 UUID。
             run_id: 刚完成的 AgentRun 的 UUID（用于审计追踪）。
+            path_source: task-08 透传的工作区路径来源。``"daemon-client"`` 走
+                HostFsDelegate RPC 读 sillyspec.db（D-004 / D-009），其他 /
+                None 走原 server-local ``sqlite3.connect`` 本地容器分支
+                （NFR-02 零回归）。
 
         Returns:
             StageSyncResult 包含同步状态和步骤信息。
@@ -1015,11 +1047,17 @@ class SillySpecStageDispatchService:
             ChangeNotFound: 当 change_id 在 Hub DB 中不存在时。
         """
         from app.core.errors import ChangeNotFound
+        from app.modules.workspace.service import is_daemon_client_path_source
 
         # Step 1: Load Change
         change = await session.get(Change, change_id)
         if change is None:
             raise ChangeNotFound(f"Change '{change_id}' not found.")
+
+        # task-08：按 path_source 分流（D-004）。daemon-client 走 HostFsDelegate
+        # RPC 读 sillyspec.db；server-local 走原 sqlite3 直读本地容器分支。
+        if is_daemon_client_path_source(path_source):
+            return await self._sync_stage_status_daemon_client(session, change, change_id, run_id)
 
         # Step 2: Resolve sillyspec.db path — try all candidates
         db_path = await self._resolve_db_path(session, change)
@@ -1269,6 +1307,267 @@ class SillySpecStageDispatchService:
         if not workspace or not workspace.root_path:
             return None
         return SpecPathResolver(workspace.root_path).db_path()
+
+    async def _sync_stage_status_daemon_client(
+        self,
+        session: AsyncSession,
+        change: Change,
+        change_id: uuid.UUID,
+        run_id: uuid.UUID,
+    ) -> StageSyncResult:
+        """task-08 daemon-client 分支：经 HostFsDelegate RPC 读 sillyspec.db。
+
+        D-009 方案 B / D-004：daemon-client 模式 sillyspec.db 在客户端机器，
+        backend 容器不可达。经 delegate.stat 判存在 + delegate.read_file 取
+        内容（latin-1 往返保字节，写临时文件后 sqlite3 直读），跑同一套
+        changes/stages/steps 查询。
+
+        D-006：delegate RPC 失败（HostFsDelegateUnavailable / 传输异常）→
+        StageSyncResult(synced=False) 兜底，warn 不阻塞 lease。
+        """
+        import tempfile
+
+        from app.modules.workspace.model import Workspace
+
+        # workspace + spec_ws 解析（复用 _resolve_db_path 的 spec_ws.strategy 分支）
+        ws_stmt = select(Workspace).where(col(Workspace.id) == change.workspace_id)
+        workspace = (await session.execute(ws_stmt)).scalars().first()
+        if workspace is None or not workspace.root_path:
+            return StageSyncResult(
+                synced=False,
+                change_id=change_id,
+                run_id=run_id,
+                error="workspace_missing_for_daemon_client_sync",
+            )
+
+        # 候选 db 绝对路径（host 侧）—— spec_root 优先，fallback workspace root
+        db_candidates = await self._resolve_db_rel_candidates(session, change, workspace)
+        if not db_candidates:
+            return StageSyncResult(
+                synced=False,
+                change_id=change_id,
+                run_id=run_id,
+                error="sillyspec.db path unresolvable",
+            )
+
+        try:
+            delegate = self._get_host_fs_delegate()
+        except Exception as exc:
+            log.warning(
+                "sync_stage_status.delegate_unavailable",
+                change_id=str(change_id),
+                error=str(exc),
+            )
+            return StageSyncResult(
+                synced=False,
+                change_id=change_id,
+                run_id=run_id,
+                error=f"delegate_unavailable: {exc}",
+            )
+
+        # 经 delegate.stat 探存在 + delegate.read_file 取 db 字节。
+        # read_file 返回 str（UTF-8 解码），db 是二进制——用 latin-1 往返保字节
+        # （latin-1 是 1:1 字节映射，无损）。写临时文件后 sqlite3.connect 直读。
+        db_content: str | None = None
+        for rel_path in db_candidates:
+            try:
+                stat_info = await delegate.stat(workspace, rel_path)
+                if isinstance(stat_info, dict) and stat_info.get("exists"):
+                    db_content = await delegate.read_file(workspace, rel_path)
+                    break
+            except Exception as exc:  # D-006：单个候选 stat/read 失败不致命
+                log.info(
+                    "sync_stage_status.daemon_client_db_read_failed",
+                    change_id=str(change_id),
+                    rel_path=rel_path,
+                    error=str(exc),
+                )
+
+        if not db_content:
+            log.warning(
+                "sync_stage_status.daemon_client_db_not_found",
+                change_id=str(change_id),
+            )
+            return StageSyncResult(
+                synced=False,
+                change_id=change_id,
+                run_id=run_id,
+                error="sillyspec.db not found via delegate",
+            )
+
+        # latin-1 往返还原字节，写临时文件供 sqlite3 直读
+        try:
+            db_bytes = db_content.encode("latin-1")
+        except Exception as exc:
+            return StageSyncResult(
+                synced=False,
+                change_id=change_id,
+                run_id=run_id,
+                error=f"db_decode_failed: {exc}",
+            )
+
+        conn: sqlite3.Connection | None = None
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp_file:
+                tmp_file.write(db_bytes)
+                tmp_path = Path(tmp_file.name)
+            conn = sqlite3.connect(f"file:{tmp_path}?mode=ro", uri=True)
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT current_stage, status FROM changes WHERE name = ?",
+                (change.change_key,),
+            ).fetchone()
+            if row is None:
+                log.warning(
+                    "sync_stage_status.change_not_in_db",
+                    change_key=change.change_key,
+                    change_id=str(change_id),
+                )
+                return StageSyncResult(
+                    synced=False,
+                    change_id=change_id,
+                    run_id=run_id,
+                    error="change_key not found in sillyspec.db",
+                )
+
+            db_current_stage = row["current_stage"]
+            stage_row = conn.execute(
+                "SELECT id, status, completed_at FROM stages "
+                "WHERE change_id = (SELECT id FROM changes WHERE name = ?) "
+                "AND stage = ?",
+                (change.change_key, db_current_stage),
+            ).fetchone()
+
+            stage_completed = False
+            steps_completed: list[str] = []
+            steps_pending: list[str] = []
+            current_step: str | None = None
+            if stage_row is not None:
+                stage_completed = stage_row["status"] == "completed"
+                step_rows = conn.execute(
+                    "SELECT name, status FROM steps WHERE stage_id = ? ORDER BY ordering",
+                    (stage_row["id"],),
+                ).fetchall()
+                for step in step_rows:
+                    if step["status"] == "completed":
+                        steps_completed.append(step["name"])
+                    else:
+                        steps_pending.append(step["name"])
+                if steps_pending:
+                    current_step = steps_pending[0]
+        except sqlite3.Error as exc:
+            log.info(
+                "sync_stage_status.daemon_client_db_read_failed",
+                change_id=str(change_id),
+                error=str(exc),
+            )
+            return StageSyncResult(
+                synced=False,
+                change_id=change_id,
+                run_id=run_id,
+                error=f"db_read_failed: {exc}",
+            )
+        finally:
+            if conn:
+                conn.close()
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
+
+        # 投影到 Change（与 server-local 一致）
+        if change.current_stage != db_current_stage:
+            log.info(
+                "sync_stage_status.stage_updated",
+                change_id=str(change_id),
+                old=change.current_stage,
+                new=db_current_stage,
+            )
+            change.current_stage = db_current_stage
+
+        stages_json = change.stages or {}
+        stages_json[db_current_stage] = {
+            "status": "completed" if stage_completed else "in_progress",
+            "steps": {
+                "completed": steps_completed,
+                "pending": steps_pending,
+            },
+            "current_step": current_step,
+            "synced_at": datetime.now(UTC).isoformat(),
+            "synced_from_run": str(run_id),
+        }
+        change.stages = stages_json
+        change.updated_at = datetime.now(UTC)
+        session.add(change)
+        await session.commit()
+
+        return StageSyncResult(
+            synced=True,
+            change_id=change_id,
+            run_id=run_id,
+            current_stage=db_current_stage,
+            current_step=current_step,
+            stage_completed=stage_completed,
+            has_pending_step=len(steps_pending) > 0,
+            steps_completed=steps_completed,
+            steps_pending=steps_pending,
+        )
+
+    async def _resolve_db_rel_candidates(
+        self,
+        session: AsyncSession,
+        change: Change,
+        workspace: Workspace,
+    ) -> list[str]:
+        """解析 sillyspec.db 相对 workspace.root_path 的候选路径（task-08）。
+
+        daemon-client 分支专用：返回 RPC 友好的相对路径列表（spec_root 优先 +
+        workspace root fallback），供 delegate.stat/read_file 消费。host 绝对路径
+        容器不可达，故只算 rel。
+        """
+        from app.core.spec_paths import SpecPathResolver
+        from app.modules.spec_workspace.model import SpecWorkspace
+
+        candidates: list[str] = []
+        root = Path(workspace.root_path)
+
+        try:
+            stmt = select(SpecWorkspace).where(
+                col(SpecWorkspace.workspace_id) == change.workspace_id
+            )
+            spec_ws = (await session.execute(stmt)).scalars().first()
+            if spec_ws and spec_ws.strategy != "repo-native" and spec_ws.spec_root:
+                if spec_ws.strategy == "repo-mirrored":
+                    resolver = SpecPathResolver(spec_ws.spec_root, platform_managed=True)
+                else:
+                    resolver = SpecPathResolver.for_spec_workspace(spec_ws)
+                db_abs = resolver.db_path()
+                try:
+                    rel = db_abs.resolve().relative_to(root.resolve())
+                    candidates.append(str(rel).replace("\\", "/"))
+                except ValueError:
+                    candidates.append(str(db_abs).replace("\\", "/"))
+        except Exception:
+            pass
+
+        # fallback：workspace root_path 下 .sillyspec/.runtime/sillyspec.db
+        default_db = SpecPathResolver(workspace.root_path).db_path()
+        try:
+            rel = default_db.resolve().relative_to(root.resolve())
+            candidates.append(str(rel).replace("\\", "/"))
+        except ValueError:
+            candidates.append(str(default_db).replace("\\", "/"))
+
+        # 去重保序
+        seen: set[str] = set()
+        unique: list[str] = []
+        for c in candidates:
+            if c not in seen:
+                seen.add(c)
+                unique.append(c)
+        return unique
 
     async def _read_verify_result(
         self,

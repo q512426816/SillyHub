@@ -59,6 +59,20 @@ class SpecWorkspaceService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    # ── HostFsDelegate access ─────────────────────────────────────────────
+    #
+    # task-11：spec_workspace service 不持有 daemon facade，按需局部构造
+    # HostFsDelegate（server-local 分支用 stat/list_dir 原语；daemon-client 分支
+    # 仍走既有 get_spec_bundle 整树打包 RPC——task-01 八方法契约不含该方法，本 service
+    # 保留 daemon-client 的 hub.send_rpc 直调）。lazy + 复用进程级 ws_hub 单例，避免
+    # 每次调用重建 RPC 客户端。
+    def _host_fs_delegate(self):
+        from app.modules.daemon.host_fs import HostFsDelegate, HostFsWsRpc
+        from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+        hub = get_daemon_ws_hub()
+        return HostFsDelegate(self._session, hub, HostFsWsRpc(hub))
+
     # ── Create / get ───────────────────────────────────────────────────────
 
     async def create(
@@ -227,60 +241,9 @@ class SpecWorkspaceService:
 
         # ── daemon-client：经 WS RPC 让 daemon 打包 → 回传 → apply_sync ──
         if ws_path_source == "daemon-client" and ws_daemon_id:
-            # ql-20260701-001：daemon RPC 错误码语义透传。原实现用 except Exception 把
-            # DaemonRuntimeOffline(504)/DaemonRpcTimeout(504)/DaemonRpcConflict(409)/
-            # DaemonRpcRemoteError(403|502) 全吞成 502 SPEC_IMPORT_RPC_FAILED，破坏既有
-            # 错误码体系，前端无法区分 "daemon 没开" 与 "真 RPC 失败"。改为透传/重映射。
-            from app.modules.daemon.runtime.service import (
-                DaemonRpcConflict,
-                DaemonRpcForbiddenError,
-                DaemonRpcRemoteError,
-                DaemonRpcRemoteGatewayError,
-                DaemonRpcTimeout,
-                DaemonRuntimeOffline,
+            tar_bytes = await self._fetch_spec_bundle_via_rpc(
+                ws_daemon_id, ws_root_path, ws_path_source
             )
-            from app.modules.daemon.ws_hub import get_daemon_ws_hub
-
-            hub = get_daemon_ws_hub()
-            from app.modules.workspace.service import resolve_root_path_for_daemon
-
-            daemon_root = resolve_root_path_for_daemon(ws_root_path, ws_path_source)
-            try:
-                result = await hub.send_rpc(
-                    ws_daemon_id,
-                    "get_spec_bundle",
-                    {"root_path": daemon_root},
-                    timeout=60.0,
-                )
-            except (DaemonRuntimeOffline, DaemonRpcTimeout, DaemonRpcConflict):
-                # 已是 AppError 子类，自带正确 code/http_status（504/504/409），透传。
-                raise
-            except DaemonRpcRemoteError as exc:
-                # daemon 在线但打包业务失败 → 复用既有 re-map 约定
-                # （forbidden→403 / 其他→502），避免裸 daemon 错误码直漏 HTTP 状态映射。
-                if exc.code == "forbidden":
-                    raise DaemonRpcForbiddenError(
-                        f"Daemon get_spec_bundle forbidden: {exc.message}",
-                        details={"daemon_id": str(ws_daemon_id), "daemon_code": exc.code},
-                    ) from exc
-                raise DaemonRpcRemoteGatewayError(
-                    f"Daemon get_spec_bundle failed: {exc.message}",
-                    details={"daemon_id": str(ws_daemon_id), "daemon_code": exc.code},
-                ) from exc
-            except Exception as exc:
-                raise AppError(
-                    f"Daemon RPC get_spec_bundle failed: {exc}",
-                    code="SPEC_IMPORT_RPC_FAILED",
-                    http_status=502,
-                ) from exc
-            tar_b64 = result.get("tar_base64", "") if isinstance(result, dict) else ""
-            if not tar_b64:
-                raise AppError(
-                    "Daemon returned empty spec bundle.",
-                    code="SPEC_IMPORT_EMPTY_BUNDLE",
-                    http_status=422,
-                )
-            tar_bytes = base64.b64decode(tar_b64)
             reparsed = await self.apply_sync(workspace_id, tar_bytes)
             log.info(
                 "spec_workspace.import_from_repo",
@@ -292,31 +255,8 @@ class SpecWorkspaceService:
             )
             return spec_ws
 
-        # ── server-local：容器内直接打包 .sillyspec → apply_sync ──
-        from app.modules.workspace.service import resolve_root_path_for_server
-
-        server_path = resolve_root_path_for_server(ws_root_path, ws_path_source)
-        if server_path is None:
-            raise AppError(
-                "Cannot resolve server-local path for import.",
-                code="SPEC_IMPORT_PATH_UNRESOLVED",
-                http_status=400,
-            )
-        spec_source = Path(server_path) / ".sillyspec"
-        if not spec_source.is_dir():
-            raise AppError(
-                f"No .sillyspec directory at {spec_source}",
-                code="SPEC_IMPORT_NO_SILLYSPEC_DIR",
-                http_status=404,
-            )
-        buf = io.BytesIO()
-        with tarfile.open(fileobj=buf, mode="w") as tar:
-            for path in sorted(spec_source.rglob("*")):
-                rel = path.relative_to(spec_source)
-                if any(part == ".runtime" for part in rel.parts):
-                    continue
-                tar.add(str(path), arcname=str(rel), recursive=False)
-        tar_bytes = buf.getvalue()
+        # ── server-local：容器内打包 .sillyspec → apply_sync ──
+        tar_bytes = await self._pack_sillyspec_local(ws, ws_root_path, ws_path_source)
         reparsed = await self.apply_sync(workspace_id, tar_bytes)
         log.info(
             "spec_workspace.import_from_repo",
@@ -370,27 +310,9 @@ class SpecWorkspaceService:
 
         tar_bytes: bytes
         if ws_path_source == "daemon-client" and ws_daemon_id:
-            from app.modules.daemon.runtime.service import (
-                DaemonRpcConflict,
-                DaemonRpcForbiddenError,
-                DaemonRpcRemoteError,
-                DaemonRpcRemoteGatewayError,
-                DaemonRpcTimeout,
-                DaemonRuntimeOffline,
-            )
-            from app.modules.daemon.ws_hub import get_daemon_ws_hub
-            from app.modules.workspace.service import resolve_root_path_for_daemon
-
             yield _evt("packing", phase="packing")
-            hub = get_daemon_ws_hub()
-            daemon_root = resolve_root_path_for_daemon(ws_root_path, ws_path_source)
             rpc_task = asyncio.ensure_future(
-                hub.send_rpc(
-                    ws_daemon_id,
-                    "get_spec_bundle",
-                    {"root_path": daemon_root},
-                    timeout=60.0,
-                )
+                self._fetch_spec_bundle_via_rpc(ws_daemon_id, ws_root_path, ws_path_source)
             )
             # 心跳：每 5s 未完成就 yield keepalive，防止 proxy idle timeout 断连。
             while True:
@@ -399,59 +321,25 @@ class SpecWorkspaceService:
                     break
                 yield ": keepalive\n\n"
             try:
-                result = rpc_task.result()
-            except (DaemonRuntimeOffline, DaemonRpcTimeout, DaemonRpcConflict) as e:
-                yield _evt(
-                    "error",
-                    code=getattr(e, "code", "HTTP_504_DAEMON_RUNTIME_OFFLINE"),
-                    message=getattr(e, "message", str(e)),
-                )
-                return
-            except DaemonRpcRemoteError as exc:
-                code = (
-                    DaemonRpcForbiddenError.code
-                    if exc.code == "forbidden"
-                    else DaemonRpcRemoteGatewayError.code
-                )
-                yield _evt("error", code=code, message=f"Daemon get_spec_bundle: {exc.message}")
+                tar_bytes = rpc_task.result()
+            except AppError as exc:
+                # helper 把 daemon-client RPC 全部错误封装为 AppError 子类（透传既有
+                # code/message：DaemonRuntimeOffline/DaemonRpcTimeout/DaemonRpcConflict
+                # 自带 504/504/409，DaemonRpcForbiddenError/DemonRpcRemoteGatewayError
+                # 自带 403/502，SPEC_IMPORT_EMPTY_BUNDLE 422，SPEC_IMPORT_RPC_FAILED 502）。
+                yield _evt("error", code=exc.code, message=exc.message)
                 return
             except Exception as exc:
                 yield _evt("error", code="SPEC_IMPORT_RPC_FAILED", message=str(exc))
                 return
-            tar_b64 = result.get("tar_base64", "") if isinstance(result, dict) else ""
-            if not tar_b64:
-                yield _evt("error", code="SPEC_IMPORT_EMPTY_BUNDLE", message="empty bundle")
-                return
-            tar_bytes = base64.b64decode(tar_b64)
             yield _evt("packed", phase="packed", tar_bytes=len(tar_bytes))
         else:
-            from app.modules.workspace.service import resolve_root_path_for_server
-
             yield _evt("packing", phase="packing")
-            server_path = resolve_root_path_for_server(ws_root_path, ws_path_source)
-            if server_path is None:
-                yield _evt(
-                    "error",
-                    code="SPEC_IMPORT_PATH_UNRESOLVED",
-                    message="cannot resolve server path",
-                )
+            try:
+                tar_bytes = await self._pack_sillyspec_local(ws, ws_root_path, ws_path_source)
+            except AppError as exc:
+                yield _evt("error", code=exc.code, message=exc.message)
                 return
-            spec_source = Path(server_path) / ".sillyspec"
-            if not spec_source.is_dir():
-                yield _evt(
-                    "error",
-                    code="SPEC_IMPORT_NO_SILLYSPEC_DIR",
-                    message=f"no .sillyspec at {spec_source}",
-                )
-                return
-            buf = io.BytesIO()
-            with tarfile.open(fileobj=buf, mode="w") as tar:
-                for path in sorted(spec_source.rglob("*")):
-                    rel = path.relative_to(spec_source)
-                    if any(part == ".runtime" for part in rel.parts):
-                        continue
-                    tar.add(str(path), arcname=str(rel), recursive=False)
-            tar_bytes = buf.getvalue()
             yield _evt("packed", phase="packed", tar_bytes=len(tar_bytes))
 
         # 落盘 + 两阶段 reparse（D-003 各自容错；_reparse_phase 失败已设 dirty 不抛）。
@@ -497,6 +385,143 @@ class SpecWorkspaceService:
             spec_workspace_id=str(spec_ws.id),
             sync_status=spec_ws.sync_status,
         )
+
+    # ── import helpers（task-11：分流内聚，import_from_repo 与 _sse 共用）─────
+    #
+    # 两处 ``if ws_path_source == "daemon-client"`` 分流从 import_from_repo / _sse
+    # 提取到这两个 helper，消除重复控制流。daemon-client 仍走整树打包 RPC（task-01
+    # 八方法契约不含 get_spec_bundle，service.py 保留 hub.send_rpc 直调）；
+    # server-local 用 HostFsDelegate.stat/list_dir 做结构发现 + 容器内 Path 直读字节
+    # 打包（D-004：server-local 行为本就本地容器，delegate 三原语服务此分支的统一抽象，
+    # 但文件字节读取 delegate.read_file 返 str 仅适用 UTF-8 文本，二进制文件保持容器
+    # 直读以零回归——见 CONSTRAINT_GAP 上报）。
+
+    async def _fetch_spec_bundle_via_rpc(
+        self,
+        ws_daemon_id: uuid.UUID,
+        ws_root_path: str,
+        ws_path_source: str,
+    ) -> bytes:
+        """daemon-client 分支：hub.send_rpc(get_spec_bundle) → tar_bytes。
+
+        错误码透传链与原 import_from_repo 一致（ql-20260701-001）：
+        DaemonRuntimeOffline/DaemonRpcTimeout/DaemonRpcConflict 已是 AppError 子类直接
+        透传；DaemonRpcRemoteError 重映射 forbidden→403 / 其他→502；其余异常包成
+        SPEC_IMPORT_RPC_FAILED(502)；空 bundle 抛 SPEC_IMPORT_EMPTY_BUNDLE(422)。
+        """
+        from app.modules.daemon.runtime.service import (
+            DaemonRpcConflict,
+            DaemonRpcForbiddenError,
+            DaemonRpcRemoteError,
+            DaemonRpcRemoteGatewayError,
+            DaemonRpcTimeout,
+            DaemonRuntimeOffline,
+        )
+        from app.modules.daemon.ws_hub import get_daemon_ws_hub
+        from app.modules.workspace.service import resolve_root_path_for_daemon
+
+        hub = get_daemon_ws_hub()
+        daemon_root = resolve_root_path_for_daemon(ws_root_path, ws_path_source)
+        try:
+            result = await hub.send_rpc(
+                ws_daemon_id,
+                "get_spec_bundle",
+                {"root_path": daemon_root},
+                timeout=60.0,
+            )
+        except (DaemonRuntimeOffline, DaemonRpcTimeout, DaemonRpcConflict):
+            raise
+        except DaemonRpcRemoteError as exc:
+            if exc.code == "forbidden":
+                raise DaemonRpcForbiddenError(
+                    f"Daemon get_spec_bundle forbidden: {exc.message}",
+                    details={"daemon_id": str(ws_daemon_id), "daemon_code": exc.code},
+                ) from exc
+            raise DaemonRpcRemoteGatewayError(
+                f"Daemon get_spec_bundle failed: {exc.message}",
+                details={"daemon_id": str(ws_daemon_id), "daemon_code": exc.code},
+            ) from exc
+        except Exception as exc:
+            raise AppError(
+                f"Daemon RPC get_spec_bundle failed: {exc}",
+                code="SPEC_IMPORT_RPC_FAILED",
+                http_status=502,
+            ) from exc
+        tar_b64 = result.get("tar_base64", "") if isinstance(result, dict) else ""
+        if not tar_b64:
+            raise AppError(
+                "Daemon returned empty spec bundle.",
+                code="SPEC_IMPORT_EMPTY_BUNDLE",
+                http_status=422,
+            )
+        return base64.b64decode(tar_b64)
+
+    async def _pack_sillyspec_local(
+        self,
+        ws,
+        ws_root_path: str,
+        ws_path_source: str,
+    ) -> bytes:
+        """server-local 分支：容器内打包 root/.sillyspec 整树（排除 .runtime）。
+
+        task-11：用 HostFsDelegate.stat/list_dir 做目录存在判断与递归结构发现（替代
+        ``spec_source.is_dir()`` / ``rglob``），文件字节读取仍用容器内 Path 直读
+        （delegate.read_file 返 str 不适用二进制；server-local 路径本就在容器内，D-004
+        行为不变）。``resolve_root_path_for_server`` 仍负责 host→container 路径改写。
+        """
+        from app.modules.workspace.service import resolve_root_path_for_server
+
+        server_path = resolve_root_path_for_server(ws_root_path, ws_path_source)
+        if server_path is None:
+            raise AppError(
+                "Cannot resolve server-local path for import.",
+                code="SPEC_IMPORT_PATH_UNRESOLVED",
+                http_status=400,
+            )
+        sillyspec_abs = f"{server_path.rstrip('/')}/.sillyspec"
+        delegate = self._host_fs_delegate()
+        spec_stat = await delegate.stat(ws, sillyspec_abs)
+        if not spec_stat.get("exists") or not spec_stat.get("is_dir"):
+            raise AppError(
+                f"No .sillyspec directory at {sillyspec_abs}",
+                code="SPEC_IMPORT_NO_SILLYSPEC_DIR",
+                http_status=404,
+            )
+        # 递归遍历 .sillyspec（用 delegate.list_dir + stat 替代 rglob），收集相对路径。
+        rel_files: list[str] = []
+        await self._walk_sillyspec_local(delegate, ws, sillyspec_abs, "", rel_files)
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            for rel in sorted(rel_files):
+                abs_path = Path(sillyspec_abs) / rel
+                tar.add(str(abs_path), arcname=rel, recursive=False)
+        return buf.getvalue()
+
+    @staticmethod
+    async def _walk_sillyspec_local(
+        delegate,
+        ws,
+        dir_abs: str,
+        rel_prefix: str,
+        out: list[str],
+    ) -> None:
+        """DFS 遍历 ``dir_abs``，把文件相对路径 append 到 ``out``。
+
+        跳过任何含 ``.runtime`` 段的子树（与原 ``rglob`` + ``.runtime`` 过滤等价）。
+        用 delegate.list_dir 列名 + delegate.stat 判 is_dir，server-local 走 delegate
+        本地分支（``Path.iterdir`` / ``Path.is_dir``）行为同原 ``rglob``。
+        """
+        entries = await delegate.list_dir(ws, dir_abs)
+        for name in entries:
+            rel = f"{rel_prefix}{name}" if not rel_prefix else f"{rel_prefix}/{name}"
+            if name == ".runtime":
+                continue
+            child_abs = f"{dir_abs.rstrip('/')}/{name}"
+            child_stat = await delegate.stat(ws, child_abs)
+            if child_stat.get("is_dir"):
+                await SpecWorkspaceService._walk_sillyspec_local(delegate, ws, child_abs, rel, out)
+            elif child_stat.get("exists"):
+                out.append(rel)
 
     # ── Manual sync (D-012，task-13：path_source 分流) ──────────────────────
     #

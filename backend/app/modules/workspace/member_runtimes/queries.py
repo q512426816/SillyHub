@@ -112,6 +112,82 @@ async def query_runtime_by_daemon_and_provider(
         return None
 
 
+async def resolve_daemon_instance_for_workspace(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+) -> uuid.UUID | None:
+    """Resolve the ``daemon_instances.id`` whose host owns *workspace_id*'s source.
+
+    Workspace-scoped counterpart of :func:`resolve_runtime_for_writeback`'s
+    two-step lookup, **without** the ``user_id`` gate (host-fs 委托路径是 daemon
+    上报回调，无天然 actor user_id，见 ``HostFsDelegate._via_rpc``). Used by
+    ``HostFsDelegate`` (change 2026-07-06-daemon-host-fs-delegate) to route
+    ``host_fs.*`` WS RPCs to the correct per-daemon connection — the WS routing
+    key is the daemon **instance** id (``router.py`` WS handshake /
+    ``ws_hub._connections``），NOT the runtime id (``daemon_runtimes.id``) that
+    ``workspace.daemon_runtime_id`` historically stored.
+
+    解析顺序（镜像 ``resolve_runtime_for_writeback`` Step 1/2，去 user_id 门控）：
+
+    1. **新链路**：``workspace_member_runtimes`` 存在带 ``daemon_id`` 的 binding
+       行 → ``daemon_id`` 即 instance id（daemon-entity-binding 后稳定绑定键，
+       D-007 重置后新 workspace 此为唯一来源）。daemon-client workspace 的源码
+       物理位于某台 daemon 宿主，workspace 编码了"哪个 daemon 的宿主有源"，多
+       成员绑定时取带 ``daemon_id`` 的行即源宿主 daemon（LIMIT 1）。
+    2. **legacy 回退**：``workspaces.daemon_runtime_id`` 非空 → join
+       ``daemon_runtimes.daemon_instance_id``（既有 fixture / 历史数据零回归）。
+    3. 都无 → 返回 None（genuinely unbound，caller 兜底报错）。
+
+    Returns:
+        The resolved ``daemon_instances.id``，或 None（未绑定 / 解析失败）。
+    """
+    try:
+        # Step 1: member binding（新链路）— daemon_id 即 instance id。
+        result = await session.execute(
+            text(
+                """
+                SELECT daemon_id
+                FROM workspace_member_runtimes
+                WHERE workspace_id = :wid
+                  AND daemon_id IS NOT NULL
+                LIMIT 1
+                """
+            ),
+            {"wid": workspace_id.hex},
+        )
+        row = result.first()
+        if row and row[0] is not None:
+            raw = row[0]
+            return raw if isinstance(raw, uuid.UUID) else uuid.UUID(str(raw))
+
+        # Step 2: legacy fallback（daemon_runtime_id → daemon_instance_id）。
+        result = await session.execute(
+            text(
+                """
+                SELECT dr.daemon_instance_id
+                FROM workspaces w
+                JOIN daemon_runtimes dr ON dr.id = w.daemon_runtime_id
+                WHERE w.id = :wid
+                  AND dr.daemon_instance_id IS NOT NULL
+                """
+            ),
+            {"wid": workspace_id.hex},
+        )
+        row = result.first()
+        if row and row[0] is not None:
+            raw = row[0]
+            return raw if isinstance(raw, uuid.UUID) else uuid.UUID(str(raw))
+
+        return None
+    except Exception as exc:
+        log.warning(
+            "resolve_daemon_instance_for_workspace_failed",
+            workspace_id=str(workspace_id),
+            error=str(exc),
+        )
+        return None
+
+
 async def get_daemon_enabled_providers(
     session: AsyncSession,
     daemon_id: uuid.UUID,

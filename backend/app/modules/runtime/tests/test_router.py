@@ -324,3 +324,131 @@ async def test_non_daemon_client_without_spec_root_uses_root_path(
 
     assert progress is not None
     assert progress.current_change == "change-001"
+
+
+# ---------------------------------------------------------------------------
+# task-12: HostFsDelegate 注入分支单测（daemon-client 经 WS RPC 读 user-inputs/
+# artifacts，host_fs=None 走旧容器 Path 分支保 server-local 零回归）。
+# db 读取保持容器 sqlite 直读（task-16 fix 后 spec_root 服务器可读），故不覆盖
+# host_fs 读 db 场景——见 service.py:get_progress 注释（task-01 契约 gap）。
+# ---------------------------------------------------------------------------
+
+
+class _FakeHostFs:
+    """Minimal HostFsDelegate double — only stat/read_file/list_dir consumed."""
+
+    def __init__(self, files: dict[str, str], dirs: dict[str, list[str]]):
+        self._files = files  # path -> text content
+        self._dirs = dirs  # path -> child names
+        self.calls: list[tuple[str, str]] = []
+
+    async def stat(self, workspace, path):
+        self.calls.append(("stat", path))
+        if path in self._files:
+            return {"exists": True, "is_dir": False, "size": len(self._files[path])}
+        if path in self._dirs:
+            return {"exists": True, "is_dir": True, "size": 0}
+        return {"exists": False, "is_dir": False, "size": 0}
+
+    async def read_file(self, workspace, path):
+        self.calls.append(("read_file", path))
+        return self._files.get(path, "")
+
+    async def list_dir(self, workspace, path):
+        self.calls.append(("list_dir", path))
+        return list(self._dirs.get(path, []))
+
+
+async def _make_dc_workspace(db_session, spec_root: str):
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="dc-host-fs",
+        slug=f"dc-host-fs-{uuid.uuid4().hex[:8]}",
+        root_path="/client/path",
+        path_source="daemon-client",
+        status="active",
+    )
+    db_session.add(ws)
+    spec_ws = SpecWorkspace(
+        id=uuid.uuid4(),
+        workspace_id=ws.id,
+        spec_root=str(spec_root),
+        strategy="platform-managed",
+        sync_status="clean",
+    )
+    db_session.add(spec_ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+    return ws
+
+
+async def test_host_fs_reads_user_inputs_via_delegate(db_session, tmp_path) -> None:
+    """host_fs 注入：user-inputs.md 经 delegate.read_file 读取。"""
+    spec_root = tmp_path / "dc-spec"
+    spec_root.mkdir()
+    ui_path = str(spec_root / ".runtime" / "user-inputs.md")
+    fake = _FakeHostFs(files={ui_path: "# title\nline one\nline two\n"}, dirs={})
+
+    ws = await _make_dc_workspace(db_session, spec_root)
+    entries = await RuntimeService(db_session, host_fs=fake).get_user_inputs(ws.id)
+    assert [e.content for e in entries] == ["line one", "line two"]
+
+
+async def test_host_fs_user_inputs_missing_returns_none(db_session, tmp_path) -> None:
+    spec_root = tmp_path / "dc-spec2"
+    spec_root.mkdir()
+    fake = _FakeHostFs(files={}, dirs={})
+    ws = await _make_dc_workspace(db_session, spec_root)
+    assert await RuntimeService(db_session, host_fs=fake).get_user_inputs_raw(ws.id) is None
+    assert await RuntimeService(db_session, host_fs=fake).get_user_inputs(ws.id) == []
+
+
+async def test_host_fs_artifacts_listed_via_delegate(db_session, tmp_path) -> None:
+    spec_root = tmp_path / "dc-spec3"
+    spec_root.mkdir()
+    arts_dir = spec_root / ".runtime" / "artifacts"
+    a1 = str(arts_dir / "note.md")
+    a2 = str(arts_dir / "image.txt")
+    fake = _FakeHostFs(
+        files={a1: "hi", a2: "yo"},
+        dirs={str(arts_dir): ["note.md", "image.txt"]},
+    )
+    ws = await _make_dc_workspace(db_session, spec_root)
+    svc = RuntimeService(db_session, host_fs=fake)
+    entries = await svc.get_artifacts(ws.id)
+    names = sorted(e.filename for e in entries)
+    assert names == ["image.txt", "note.md"]
+    sizes = {e.filename: e.size_bytes for e in entries}
+    assert sizes == {"note.md": 2, "image.txt": 2}
+
+
+async def test_host_fs_artifacts_empty(db_session, tmp_path) -> None:
+    spec_root = tmp_path / "dc-spec4"
+    spec_root.mkdir()
+    fake = _FakeHostFs(files={}, dirs={})
+    ws = await _make_dc_workspace(db_session, spec_root)
+    assert await RuntimeService(db_session, host_fs=fake).get_artifacts(ws.id) == []
+
+
+async def test_host_fs_artifact_traversal_rejected(db_session, tmp_path) -> None:
+    """越界 filename（含 ..）经 startswith 校验拒绝，不读 delegate。"""
+    spec_root = tmp_path / "dc-spec5"
+    spec_root.mkdir()
+    a1 = str(spec_root / ".runtime" / "artifacts" / "real.md")
+    fake = _FakeHostFs(files={a1: "ok"}, dirs={})
+    ws = await _make_dc_workspace(db_session, spec_root)
+    # filename 含路径分隔符会落到 artifacts_dir 之外，startswith 拒绝
+    content = await RuntimeService(db_session, host_fs=fake).get_artifact_content(
+        ws.id, "../escape.md"
+    )
+    assert content is None
+
+
+async def test_host_fs_artifact_content_via_delegate(db_session, tmp_path) -> None:
+    spec_root = tmp_path / "dc-spec6"
+    spec_root.mkdir()
+    a1 = str(spec_root / ".runtime" / "artifacts" / "real.md")
+    fake = _FakeHostFs(files={a1: "# real"}, dirs={})
+    ws = await _make_dc_workspace(db_session, spec_root)
+    content = await RuntimeService(db_session, host_fs=fake).get_artifact_content(ws.id, "real.md")
+    assert content == "# real"

@@ -159,6 +159,28 @@ def _patch_transport(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
     )
 
 
+def _make_pass_delegate() -> MagicMock:
+    """构造一个 mock HostFsDelegate，stat/list_dir 一律放行（task-09/10 接线后必须）。
+
+    task-09（resolve_work_dir）+ task-10（start_scan_dispatch 入口校验）改经
+    HostFsDelegate 做 workspace_root 存在性 + 资产保护判定。transport/lease-kind
+    类测试聚焦下游行为，root_path 校验不是它们的职责——这里 mock delegate 让校验
+    一律通过（stat.exists=True/is_dir=True，list_dir=[] 表示无 .sillyspec 资产）。
+    用 side_effect 区分：root_path 自身放行；.sillyspec 子路径返回不存在（避免
+    资产保护误命中——start_scan_dispatch 会 stat sillyspec.db）。
+    """
+    delegate = MagicMock()
+
+    async def _stat(workspace, path):
+        if ".sillyspec" in str(path):
+            return {"exists": False, "is_dir": False, "size": 0}
+        return {"exists": True, "is_dir": True, "size": 0}
+
+    delegate.stat = AsyncMock(side_effect=_stat)
+    delegate.list_dir = AsyncMock(return_value=[])
+    return delegate
+
+
 # ── D 组：start_stage_dispatch platform_args tar/shared 分支 ─────────────────
 
 
@@ -205,6 +227,11 @@ async def test_d1_tar_mode_platform_args_contains_daemon_local_path(
             "app.modules.agent.placement.RunPlacementService.decide_backend",
             new=AsyncMock(),
         ),
+        patch.object(
+            AgentService,
+            "_get_host_fs_delegate",
+            return_value=_make_pass_delegate(),
+        ),
     ):
         service = AgentService(db_session)
         await service.start_stage_dispatch(
@@ -246,6 +273,11 @@ async def test_d2_tar_mode_platform_args_contains_runtime_and_workspace_id(
         patch(
             "app.modules.agent.placement.RunPlacementService.decide_backend",
             new=AsyncMock(),
+        ),
+        patch.object(
+            AgentService,
+            "_get_host_fs_delegate",
+            return_value=_make_pass_delegate(),
         ),
     ):
         service = AgentService(db_session)
@@ -457,6 +489,11 @@ async def test_d7_path_source_orthogonal_to_strategy(
             "app.modules.agent.placement.RunPlacementService.decide_backend",
             new=AsyncMock(),
         ),
+        patch.object(
+            AgentService,
+            "_get_host_fs_delegate",
+            return_value=_make_pass_delegate(),
+        ),
     ):
         service = AgentService(db_session)
         await service.start_stage_dispatch(
@@ -542,6 +579,11 @@ async def test_f1_start_stage_dispatch_produces_batch_lease(
             new=AsyncMock(),
         ),
         patch("app.modules.daemon.ws_hub.get_daemon_ws_hub", return_value=mock_hub),
+        patch.object(
+            AgentService,
+            "_get_host_fs_delegate",
+            return_value=_make_pass_delegate(),
+        ),
     ):
         service = AgentService(db_session)
         run = await service.start_stage_dispatch(

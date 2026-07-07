@@ -59,6 +59,9 @@ import type { DetectedAgent } from './agent-detector.js';
 import { HubClient, extractCause } from './hub-client.js';
 import { WsClient } from './ws-client.js';
 import { listDir } from './file-rpc.js';
+// task-03（2026-07-06-daemon-host-fs-delegate）：host_fs.* WS handler 业务层。
+// backend 经 HostFsDelegate + ws_rpc 调本 handler 在宿主执行 stat/git_apply/...（FR-02）。
+import { HostFsHandler } from './host-fs-handler.js';
 import { buildSpawnEnv } from './spawn-env.js';
 // 2026-06-24 preflight：启动前预检 sillyspec 版本 + daemon 自更新（失败不阻断启动）。
 import { runPreflight } from './preflight.js';
@@ -2043,6 +2046,10 @@ export class Daemon {
     });
     this._registerListDirRpcHandler(ws);
     this._registerGetSpecBundleRpcHandler(ws);
+    // task-03（2026-07-06-daemon-host-fs-delegate）：注册 host_fs.* 八方法 RPC handler。
+    // backend complete_lease 收尾（apply_patch/post_scan/stage_callback）经 HostFsDelegate +
+    // ws_rpc 调本 handler 在宿主执行（FR-02）。方法名带 host_fs. 前缀与 design §7 method 字段对齐。
+    this._registerHostFsRpcHandler(ws);
 
     try {
       ws.connect();
@@ -2088,6 +2095,78 @@ export class Daemon {
       // postSpecSync 回灌路径不受影响（不传此选项，保持含 .runtime）。
       const tarBuf = await packSpecDir(specDir, { excludeRuntime: true });
       return { tar_base64: tarBuf.toString('base64') };
+    });
+  }
+
+  /**
+   * task-03（2026-07-06-daemon-host-fs-delegate / FR-02）：注册 host_fs.* 八方法 RPC handler。
+   *
+   * backend complete_lease 收尾的 3 个宿主操作（apply_patch / post_scan / stage_callback）
+   * 经 HostFsDelegate（task-01）+ ws_rpc（task-02）调本 handler，在宿主（Windows）执行
+   * stat / read_file / list_dir / git_apply / git_rev_parse / pollution_archive /
+   * read_package_json / read_local_yaml。
+   *
+   * 方法名带 `host_fs.` 前缀（与 design §7 method 字段对齐，避免与 list_dir /
+   * get_spec_bundle 命名空间冲突）。handler 收 `params`（ws-client.ts:_dispatchRpc 已归一化
+   * params 子对象），透传 workspace_id 仅用于日志（实际路径由 args 提供，与 backend
+   * HostFsDelegate 签名一致）。
+   *
+   * allowed_roots 取 daemon 实体级 config（与 _registerListDirRpcHandler 同模式）。
+   * 每方法 handler 内 try/catch 消化异常 → RpcError 结构化返回，**绝不冒泡到
+   * ws-client.ts:_dispatchRpc 之外**（design §4.1 3 + task-03 验收）。
+   */
+  private _registerHostFsRpcHandler(ws: WsClientLike): void {
+    if (typeof ws.registerRpcHandler !== 'function') {
+      this._logger.warn('ws_no_rpc_support', { daemon_local_id: this._config.runtime_id });
+      return;
+    }
+    const handler = new HostFsHandler({ allowed_roots: this._config.allowed_roots });
+
+    // 八方法各注册一次（method 带 host_fs. 前缀）。handler 抛 RpcError 由 _dispatchRpc
+    // 原样回填 code；抛普通 Error 映射 internal（ws-client.ts:512-519）。
+    ws.registerRpcHandler('host_fs.stat', async (params) => {
+      const path = typeof params.path === 'string' ? params.path : '';
+      return handler.stat(path);
+    });
+    ws.registerRpcHandler('host_fs.read_file', async (params) => {
+      const path = typeof params.path === 'string' ? params.path : '';
+      return { content: await handler.readFile(path) };
+    });
+    ws.registerRpcHandler('host_fs.list_dir', async (params) => {
+      const path = typeof params.path === 'string' ? params.path : '';
+      return handler.listDir(path);
+    });
+    ws.registerRpcHandler('host_fs.git_apply', async (params) => {
+      const workdir = typeof params.workdir === 'string' ? params.workdir : '';
+      const patch_data =
+        typeof params.patch_data === 'string' ? params.patch_data : '';
+      const use_3way = params.use_3way === true;
+      return handler.gitApply({ workdir, patch_data, use_3way });
+    });
+    ws.registerRpcHandler('host_fs.git_rev_parse', async (params) => {
+      const root = typeof params.root === 'string' ? params.root : '';
+      return handler.gitRevParse({ root });
+    });
+    ws.registerRpcHandler('host_fs.pollution_archive', async (params) => {
+      const source_root =
+        typeof params.source_root === 'string' ? params.source_root : '';
+      const runtime_root =
+        typeof params.runtime_root === 'string' ? params.runtime_root : '';
+      const scan_run_id =
+        typeof params.scan_run_id === 'string' ? params.scan_run_id : '';
+      return handler.pollutionArchive({
+        source_root,
+        runtime_root,
+        scan_run_id,
+      });
+    });
+    ws.registerRpcHandler('host_fs.read_package_json', async (params) => {
+      const root = typeof params.root === 'string' ? params.root : '';
+      return handler.readPackageJson({ root });
+    });
+    ws.registerRpcHandler('host_fs.read_local_yaml', async (params) => {
+      const root = typeof params.root === 'string' ? params.root : '';
+      return handler.readLocalYaml({ root });
     });
   }
 

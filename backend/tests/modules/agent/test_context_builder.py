@@ -520,78 +520,75 @@ async def test_build_scan_bundle_done_command_has_no_platform_params(
 # ---------------------------------------------------------------------------
 
 
-def test_run_preflight_nonexistent_dir():
-    """source_root 不存在时 preflight 失败。"""
+def _run_preflight_local(code_root):
+    """task-13 后 _run_preflight 改 async+(workspace,code_root,delegate)，server-local 测试经本地 delegate 包装。"""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.modules.daemon.host_fs import HostFsDelegate
     from app.modules.spec_workspace.bootstrap import _run_preflight
 
-    result = _run_preflight(Path("/nonexistent/path"))
+    workspace = SimpleNamespace(path_source="server-local")
+    delegate = HostFsDelegate(session=None, ws_hub=None)
+    return asyncio.run(_run_preflight(workspace, str(code_root), delegate))
+
+
+def test_run_preflight_nonexistent_dir():
+    """source_root 不存在时 preflight 失败。"""
+    result = _run_preflight_local(Path("/nonexistent/path"))
     assert result is not None
     assert "does not exist" in result
 
 
 def test_run_preflight_empty_dir(tmp_path):
     """source_root 为空时 preflight 失败。"""
-    from app.modules.spec_workspace.bootstrap import _run_preflight
-
-    result = _run_preflight(tmp_path)
+    result = _run_preflight_local(tmp_path)
     assert result is not None
     assert "empty" in result
 
 
 def test_run_preflight_no_project_signature(tmp_path):
     """source_root 有文件但无项目特征时 preflight 失败。"""
-    from app.modules.spec_workspace.bootstrap import _run_preflight
-
     (tmp_path / "random.txt").write_text("hello")
-    result = _run_preflight(tmp_path)
+    result = _run_preflight_local(tmp_path)
     assert result is not None
     assert "no recognizable project signature" in result
 
 
 def test_run_preflight_has_package_json(tmp_path):
     """source_root 有 package.json 时 preflight 通过。"""
-    from app.modules.spec_workspace.bootstrap import _run_preflight
-
     (tmp_path / "package.json").write_text("{}")
-    assert _run_preflight(tmp_path) is None
+    assert _run_preflight_local(tmp_path) is None
 
 
 def test_run_preflight_has_backend_dir(tmp_path):
     """source_root 有 backend/ 目录时 preflight 通过。"""
-    from app.modules.spec_workspace.bootstrap import _run_preflight
-
     (tmp_path / "backend").mkdir()
     (tmp_path / "backend" / "main.py").write_text("pass")
-    assert _run_preflight(tmp_path) is None
+    assert _run_preflight_local(tmp_path) is None
 
 
 def test_run_preflight_platform_only_files_pass(tmp_path):
     """只有 README.md + .sillyspec + worktree 时，视为空目录失败。"""
-    from app.modules.spec_workspace.bootstrap import _run_preflight
-
     (tmp_path / "README.md").write_text("# hello")
     (tmp_path / ".sillyspec").mkdir()
     (tmp_path / "worktree").mkdir()
-    result = _run_preflight(tmp_path)
+    result = _run_preflight_local(tmp_path)
     assert result is not None
     assert "empty" in result
 
 
 def test_run_preflight_code_in_subdirectory(tmp_path):
     """顶层无签名但子目录有 pyproject.toml 时 preflight 通过。"""
-    from app.modules.spec_workspace.bootstrap import _run_preflight
-
     sub = tmp_path / "my-project"
     sub.mkdir()
     (sub / "pyproject.toml").write_text("[project]")
-    assert _run_preflight(tmp_path) is None
+    assert _run_preflight_local(tmp_path) is None
 
 
 def test_run_preflight_readme_with_code_pass(tmp_path):
     """有 README.md 和 backend/ 目录时 preflight 通过。"""
-    from app.modules.spec_workspace.bootstrap import _run_preflight
-
     (tmp_path / "README.md").write_text("# project")
     (tmp_path / "backend").mkdir()
     (tmp_path / "backend" / "main.py").write_text("pass")
-    assert _run_preflight(tmp_path) is None
+    assert _run_preflight_local(tmp_path) is None

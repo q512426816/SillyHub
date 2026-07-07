@@ -1,5 +1,16 @@
-"""Tests for task-12: resolve_work_dir + _ensure_change_dir_in_worktree."""
+"""Tests for task-12: resolve_work_dir + _ensure_change_dir_in_worktree.
 
+task-09（2026-07-06-daemon-host-fs-delegate）：resolve_work_dir 改 async + 注入
+HostFsDelegate。workspace_root 存在性校验从 ql-006 的散落 ``if path_source !=
+"daemon-client"`` point-fix 内聚到 delegate.stat（server-local 本地容器 stat /
+daemon-client WS RPC 委托 daemon 宿主 stat）。下列测试覆盖：
+  - 无 delegate 注入的向后兼容路径（保持 ql-006 行为：server-local 本地校验、
+    daemon-client 跳过本地 stat）—— resolve_work_dir 调用方未传 delegate 时走此分支。
+  - delegate 注入的两条路径：stat.exists=True 放行 / stat.exists=False raise
+    AgentRunError（含 RPC 失败降级 {exists:False} 的等价模拟）。
+"""
+
+import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,11 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.agent.service import AgentRunError, AgentService, resolve_work_dir
 
 # ---------------------------------------------------------------------------
-# resolve_work_dir tests
+# resolve_work_dir tests (no delegate — backwards-compatible ql-006 path)
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_work_dir_write_stage_with_lease(tmp_path):
+@pytest.mark.asyncio
+async def test_resolve_work_dir_write_stage_with_lease(tmp_path):
     """有 lease + 写阶段 → 返回 lease.path / 'repo'。"""
     ws_root = tmp_path / "workspace"
     ws_root.mkdir()
@@ -21,7 +33,7 @@ def test_resolve_work_dir_write_stage_with_lease(tmp_path):
     mock_lease = MagicMock()
     mock_lease.path = str(tmp_path / "worktree-1")
 
-    result = resolve_work_dir(
+    result = await resolve_work_dir(
         workspace_root=str(ws_root),
         change_path=None,
         change_key=None,
@@ -33,12 +45,13 @@ def test_resolve_work_dir_write_stage_with_lease(tmp_path):
     assert result == Path(str(tmp_path / "worktree-1")) / "repo"
 
 
-def test_resolve_work_dir_write_stage_no_lease(tmp_path):
+@pytest.mark.asyncio
+async def test_resolve_work_dir_write_stage_no_lease(tmp_path):
     """无 lease + 写阶段 → 返回 workspace root。"""
     ws_root = tmp_path / "workspace"
     ws_root.mkdir()
 
-    result = resolve_work_dir(
+    result = await resolve_work_dir(
         workspace_root=str(ws_root),
         change_path=None,
         change_key=None,
@@ -50,7 +63,8 @@ def test_resolve_work_dir_write_stage_no_lease(tmp_path):
     assert result == ws_root
 
 
-def test_resolve_work_dir_read_only_ignores_lease(tmp_path):
+@pytest.mark.asyncio
+async def test_resolve_work_dir_read_only_ignores_lease(tmp_path):
     """只读阶段 → 忽略 lease，返回 workspace root。"""
     ws_root = tmp_path / "workspace"
     ws_root.mkdir()
@@ -58,7 +72,7 @@ def test_resolve_work_dir_read_only_ignores_lease(tmp_path):
     mock_lease = MagicMock()
     mock_lease.path = str(tmp_path / "worktree-1")
 
-    result = resolve_work_dir(
+    result = await resolve_work_dir(
         workspace_root=str(ws_root),
         change_path=None,
         change_key=None,
@@ -70,14 +84,15 @@ def test_resolve_work_dir_read_only_ignores_lease(tmp_path):
     assert result == ws_root
 
 
-def test_resolve_work_dir_read_only_with_change_path(tmp_path):
+@pytest.mark.asyncio
+async def test_resolve_work_dir_read_only_with_change_path(tmp_path):
     """只读阶段 + change_path 有效目录 → 返回拼接路径。"""
     ws_root = tmp_path / "workspace"
     ws_root.mkdir()
     change_dir = ws_root / ".sillyspec" / "changes" / "my-change"
     change_dir.mkdir(parents=True)
 
-    result = resolve_work_dir(
+    result = await resolve_work_dir(
         workspace_root=str(ws_root),
         change_path=".sillyspec/changes/my-change",
         change_key="my-change",
@@ -89,12 +104,13 @@ def test_resolve_work_dir_read_only_with_change_path(tmp_path):
     assert result == change_dir
 
 
-def test_resolve_work_dir_read_only_change_path_not_exists(tmp_path):
+@pytest.mark.asyncio
+async def test_resolve_work_dir_read_only_change_path_not_exists(tmp_path):
     """只读阶段 + change_path 目录不存在 → fallback 到 workspace root。"""
     ws_root = tmp_path / "workspace"
     ws_root.mkdir()
 
-    result = resolve_work_dir(
+    result = await resolve_work_dir(
         workspace_root=str(ws_root),
         change_path=".sillyspec/changes/nonexistent",
         change_key="nonexistent",
@@ -106,10 +122,11 @@ def test_resolve_work_dir_read_only_change_path_not_exists(tmp_path):
     assert result == ws_root
 
 
-def test_resolve_work_dir_workspace_root_not_exists():
-    """workspace root 不存在 → 抛出 AgentRunError。"""
+@pytest.mark.asyncio
+async def test_resolve_work_dir_workspace_root_not_exists():
+    """workspace root 不存在 → 抛出 AgentRunError（无 delegate 注入路径）。"""
     with pytest.raises(AgentRunError) as exc_info:
-        resolve_work_dir(
+        await resolve_work_dir(
             workspace_root="/nonexistent/path/xyz",
             change_path=None,
             change_key=None,
@@ -121,11 +138,12 @@ def test_resolve_work_dir_workspace_root_not_exists():
     assert "Workspace root does not exist" in str(exc_info.value)
 
 
-def test_resolve_work_dir_daemon_client_skips_stat():
+@pytest.mark.asyncio
+async def test_resolve_work_dir_daemon_client_skips_stat():
     """daemon-client：root_path 在绑定 daemon 宿主上，backend 容器不可达，
-    跳过本地 stat 校验，路径透传给 daemon（修复 change dispatch 静默失败）。"""
+    跳过本地 stat 校验，路径透传给 daemon（无 delegate 注入时的 ql-006 行为）。"""
     host_path = "/nonexistent/host/path/C:/Users/x/proj"
-    result = resolve_work_dir(
+    result = await resolve_work_dir(
         workspace_root=host_path,
         change_path=None,
         change_key=None,
@@ -137,10 +155,11 @@ def test_resolve_work_dir_daemon_client_skips_stat():
     assert result == Path(host_path)
 
 
-def test_resolve_work_dir_daemon_client_change_path_fallback():
+@pytest.mark.asyncio
+async def test_resolve_work_dir_daemon_client_change_path_fallback():
     """daemon-client 只读 + change_path（容器内不存在）→ fallback ws_root 宿主路径。"""
     host_path = "C:\\Users\\x\\proj"
-    result = resolve_work_dir(
+    result = await resolve_work_dir(
         workspace_root=host_path,
         change_path=".sillyspec/changes/foo",
         change_key="foo",
@@ -150,6 +169,124 @@ def test_resolve_work_dir_daemon_client_change_path_fallback():
         path_source="daemon-client",
     )
     assert result == Path(host_path)
+
+
+# ---------------------------------------------------------------------------
+# resolve_work_dir tests (task-09 — HostFsDelegate injected)
+# ---------------------------------------------------------------------------
+
+
+def _make_delegate(stat_result: dict) -> MagicMock:
+    """构造一个 mock HostFsDelegate，stat 返回 *stat_result*。"""
+    delegate = MagicMock()
+    delegate.stat = AsyncMock(return_value=stat_result)
+    return delegate
+
+
+def _make_workspace(path_source: str = "daemon-client") -> MagicMock:
+    """构造一个最小 mock Workspace（delegate.stat 的 RPC 分支需 daemon 绑定）。"""
+    ws = MagicMock()
+    ws.path_source = path_source
+    ws.daemon_runtime_id = uuid.uuid4() if path_source == "daemon-client" else None
+    return ws
+
+
+@pytest.mark.asyncio
+async def test_resolve_work_dir_delegate_stat_exists_passes():
+    """delegate 注入 + stat.exists=True → 放行，不 raise（daemon-client RPC 命中）。"""
+    workspace = _make_workspace("daemon-client")
+    delegate = _make_delegate({"exists": True, "is_dir": True, "size": 0})
+
+    result = await resolve_work_dir(
+        workspace_root="/host/path/not/in/container",
+        change_path=None,
+        change_key=None,
+        lease=None,
+        requires_worktree=False,
+        read_only=True,
+        path_source="daemon-client",
+        delegate=delegate,
+        workspace=workspace,
+    )
+
+    assert result == Path("/host/path/not/in/container")
+    delegate.stat.assert_awaited_once_with(workspace, "/host/path/not/in/container")
+
+
+@pytest.mark.asyncio
+async def test_resolve_work_dir_delegate_stat_not_exists_raises():
+    """delegate 注入 + stat.exists=False → raise AgentRunError（RPC 失败降级等价路径）。
+
+    task-04 D-006：daemon-client RPC 失败时 delegate.stat 降级返回
+    {exists:False}，resolve_work_dir 据此 raise——与 daemon 断线 dispatch 校验
+    缺位的失败语义一致（不再静默放行）。
+    """
+    workspace = _make_workspace("daemon-client")
+    delegate = _make_delegate({"exists": False, "is_dir": False, "size": 0})
+
+    with pytest.raises(AgentRunError) as exc_info:
+        await resolve_work_dir(
+            workspace_root="/host/path/disconnected",
+            change_path=None,
+            change_key=None,
+            lease=None,
+            requires_worktree=False,
+            read_only=True,
+            path_source="daemon-client",
+            delegate=delegate,
+            workspace=workspace,
+        )
+
+    assert "Workspace root does not exist" in str(exc_info.value)
+    assert exc_info.value.details == {"workspace_root": "/host/path/disconnected"}
+
+
+@pytest.mark.asyncio
+async def test_resolve_work_dir_delegate_server_local_uses_delegate(tmp_path):
+    """delegate 注入 + server-local → 走 delegate.stat 本地分支（零回归路径）。
+
+    server-local 时 delegate.stat 内部走 Path.exists()，与 ql-006 之前的本地
+    校验行为等价；resolve_work_dir 不再裸调 Path.exists()，统一交给 delegate。
+    """
+    workspace = _make_workspace("server-local")
+    delegate = _make_delegate({"exists": True, "is_dir": True, "size": 0})
+
+    result = await resolve_work_dir(
+        workspace_root=str(tmp_path),
+        change_path=None,
+        change_key=None,
+        lease=None,
+        requires_worktree=False,
+        read_only=True,
+        path_source="server-local",
+        delegate=delegate,
+        workspace=workspace,
+    )
+
+    assert result == tmp_path
+    delegate.stat.assert_awaited_once_with(workspace, str(tmp_path))
+
+
+@pytest.mark.asyncio
+async def test_resolve_work_dir_delegate_server_local_not_exists_raises(tmp_path):
+    """delegate 注入 + server-local + 本地不存在 → delegate.stat 返回 exists=False → raise。"""
+    workspace = _make_workspace("server-local")
+    delegate = _make_delegate({"exists": False, "is_dir": False, "size": 0})
+
+    with pytest.raises(AgentRunError) as exc_info:
+        await resolve_work_dir(
+            workspace_root=str(tmp_path / "missing"),
+            change_path=None,
+            change_key=None,
+            lease=None,
+            requires_worktree=False,
+            read_only=True,
+            path_source="server-local",
+            delegate=delegate,
+            workspace=workspace,
+        )
+
+    assert "Workspace root does not exist" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
