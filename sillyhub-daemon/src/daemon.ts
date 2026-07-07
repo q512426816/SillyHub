@@ -2804,7 +2804,7 @@ export class Daemon {
         });
       } else {
         // task-11（D-010 日常保鲜）：pull 前比对 lease latest_spec_version 与本地
-        // `.sillyspec-platform.json.spec_version`。一致 → 跳过 pull（interactive 路径仍
+        // `.runtime/spec-version.json.spec_version`（D-001@v1）。一致 → 跳过 pull（interactive 路径仍
         // set specSyncCtx 保证 onSessionEnd 回灌）；不一致 / 本地无记录 → pullSpecBundle
         // 刷新，成功后 bumpLocalSpecVersion 回写新版本。lease 未透传 latest_spec_version
         //（旧 backend）→ 保持旧行为（无条件 pull）。
@@ -2813,7 +2813,7 @@ export class Daemon {
           (execPayload as { latest_spec_version?: number }).latest_spec_version;
         let skipPullDueToVersion = false;
         if (leaseSpecVersion !== undefined) {
-          const localVersion = await readLocalSpecVersion(specRootPath);
+          const localVersion = await readLocalSpecVersion(resolveSpecDir(workspaceId));
           if (!shouldRefreshSpec(localVersion, leaseSpecVersion)) {
             skipPullDueToVersion = true;
             this._logger.info('interactive_spec_version_fresh_skip_pull', {
@@ -2846,7 +2846,7 @@ export class Daemon {
             // 404 容错（首次 scan backend 无 bundle）：utility 内已 mkdir 空目录返回路径非 null。
             // lease 带了 latest_spec_version → 回写本地版本保鲜（D-010）。
             if (leaseSpecVersion !== undefined) {
-              await bumpLocalSpecVersion(specRootPath, leaseSpecVersion);
+              await bumpLocalSpecVersion(resolveSpecDir(workspaceId), leaseSpecVersion);
             }
             this._logger.info('interactive_spec_pulled', {
               lease_id: leaseId,

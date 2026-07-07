@@ -65,6 +65,7 @@ frontend/CLAUDE.md
 backups/
 img.png
 sillyhub-*-amd64.tar.gz
+sillyhub-daemon/.sillyhub/
 .dockerignore
 
 # Test artefacts (alembic migration smoke test 产物, 勿提交)

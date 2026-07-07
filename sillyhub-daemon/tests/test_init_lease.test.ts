@@ -1,36 +1,44 @@
 // tests/test_init_lease.ts
 // 2026-07-02-workspace-config-flow task-07：daemon init lease 处理单测。
+// + 2026-07-07-platform-json-contract-align（D-001@v1）：daemon 退出 .sillyspec-platform.json，
+//   状态独立到 resolveSpecDir(workspaceId)/.runtime/spec-version.json（2 字段 spec_version + synced_at）。
 //
-// 覆盖（design §5 / §7 / §9 生命周期契约 / §10 W2 验收）：
-//   - handleInitLease（spec-sync.ts 纯函数 + client 注入）：
-//       * 成功 → 写 .sillyspec-platform.json（6 字段）+ pullSpecBundle + postSpecSync，
-//         返回 { ok:true, specVersion=latestSpecVersion, platformConfig }。
-//       * platform.json 写失败（rootPath 不可写）→ ok=false abort。
-//       * pullSpecBundle 抛错（5xx，非 404）→ ok=false abort，platform.json 已写。
-//       * postSpecSync 抛错 → ok 不变（R-03 软失败，仅 warn）。
-//       * 404 容错：getSpecBundle 404 → pullSpecBundle 内 mkdir 空目录返回非 null，init 仍成功。
-//   - TaskRunner.runLease mode='init' 分支（task-runner.ts）：
-//       * mode='init' → 不 spawn agent（getBackend 不被调），终态 completed，
-//         stats 携带 init_synced_at + init_synced_spec_version。
-//       * 缺 workspaceId/rootPath → failed，stats.init_synced=false。
-//       * 非 init mode（缺省）→ 落入既有 spawn 编排（init 分支不触发）。
+// 覆盖（design §5 / §9 生命周期契约 / §10 W2 验收）：
+//   - handleInitLease：成功 → 返回 { ok, specVersion, daemonState }（验证返回值，不读落盘——
+//     handleInitLease 内部 writeDaemonState 写 resolveSpecDir(wsId) 即真实家目录缓存区，
+//     用测试 wsId 隔离 + afterAll 清理，避免污染真实工作区 UUID）。
+//   - writeDaemonState 单元：直接传 tmp specCacheRoot，验证落盘 2 字段。
+//   - TaskRunner.runLease mode='init'：不 spawn agent，终态 completed，stats init_synced_*。
+//
+// 注：不 mock node:os.homedir（vitest ESM 下 vi.mock 对 spec-sync.ts 内部 homedir 穿透不稳），
+// 改用真实 resolveSpecDir + 测试 wsId（非真实 UUID）隔离 + afterAll 清理。
 //
 // vitest.config.ts: globals=false → 显式 import；include=tests/**/*.test.ts。
-//   （task-16：原文件名缺 .test 后缀 → 被 include glob 漏选 → 重命名为 .test.ts 纳入默认套件。）
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
-
-// ── handleInitLease 单测（spec-sync.ts，纯函数）────────────────────────────────
 
 import {
   handleInitLease,
-  writePlatformConfig,
-  readPlatformConfig,
-  PLATFORM_CONFIG_FILENAME,
+  writeDaemonState,
+  DAEMON_STATE_FILENAME,
+  resolveSpecDir,
 } from '../src/spec-sync.js';
+
+// 测试用 workspaceId 前缀（非真实 UUID，不碰撞真实工作区缓存）。afterAll 统一清理。
+const TEST_WS_IDS = [
+  'ws-init-ok', 'ws-init-defaults', 'ws-init-404', 'ws-init-5xx', 'ws-init-postfail',
+  'ws-runner-ver', 'ws-init-1',
+];
+afterAll(async () => {
+  await Promise.all(
+    TEST_WS_IDS.map((wsId) =>
+      rm(resolveSpecDir(wsId), { recursive: true, force: true }).catch(() => {}),
+    ),
+  );
+});
 
 /** 构造 mock client：getSpecBundle 返回最小 tar / postSpecSync 返回 { ok, reparsed }。 */
 function makeClient(overrides: {
@@ -46,104 +54,81 @@ function makeClient(overrides: {
   };
 }
 
-describe('handleInitLease / platform.json 读写 (task-07)', () => {
-  let rootDir: string;
-
-  beforeEach(async () => {
-    rootDir = await mkdtemp(join(tmpdir(), 'init-lease-root-'));
-  });
-
-  afterEach(async () => {
-    await rm(rootDir, { recursive: true, force: true });
-  });
-
-  it('成功：写 platform.json（6 字段）+ pull + post，返回 ok + specVersion', async () => {
+describe('handleInitLease / daemon 状态文件 (task-07 / D-001@v1)', () => {
+  it('成功：写状态文件 + pull + post，返回 ok + specVersion + daemonState（2 字段）', async () => {
     const client = makeClient();
     const result = await handleInitLease(client as never, {
       workspaceId: 'ws-init-ok',
-      rootPath: rootDir,
+      rootPath: '/tmp/init-lease-rootpath-unused', // D-001@v1：rootPath 不再被 daemon 写
       serverOrigin: 'https://platform.example.com',
       strategy: 'platform-managed',
       latestSpecVersion: 3,
     });
 
-    // 终态成功，specVersion 透传 latestSpecVersion
+    // 终态成功，specVersion 透传 latestSpecVersion，daemonState 含 2 字段
     expect(result.ok).toBe(true);
     expect(result.specVersion).toBe(3);
-    expect(result.platformConfig).not.toBeNull();
+    expect(result.daemonState).not.toBeNull();
+    expect(result.daemonState!.spec_version).toBe(3);
+    expect(typeof result.daemonState!.synced_at).toBe('string');
+    expect(result.daemonState!.synced_at.length).toBeGreaterThan(0);
     expect(result.specDir).not.toBeNull();
-
-    // platform.json 落盘 6 字段（design §7 schema）
-    const cfg = JSON.parse(
-      await readFile(join(rootDir, PLATFORM_CONFIG_FILENAME), 'utf-8'),
-    ) as Record<string, unknown>;
-    expect(cfg.workspace_id).toBe('ws-init-ok');
-    expect(cfg.server_origin).toBe('https://platform.example.com');
-    expect(cfg.strategy).toBe('platform-managed');
-    expect(cfg.spec_version).toBe(3);
-    expect(typeof cfg.cache_root).toBe('string');
-    expect((cfg.cache_root as string).length).toBeGreaterThan(0);
-    expect(typeof cfg.synced_at).toBe('string');
-    expect((cfg.synced_at as string).length).toBeGreaterThan(0);
 
     // pull + post 均被调用一次
     expect(client.getSpecBundle).toHaveBeenCalledTimes(1);
     expect(client.getSpecBundle).toHaveBeenCalledWith('ws-init-ok');
     expect(client.postSpecSync).toHaveBeenCalledTimes(1);
     expect(client.postSpecSync).toHaveBeenCalledWith('ws-init-ok', expect.any(Buffer));
+
+    // D-001@v1：不再写 {rootPath}/.sillyspec-platform.json（rootPath 是 dummy，验证不产生该文件）
+    await expect(readFile(join('/tmp/init-lease-rootpath-unused', '.sillyspec-platform.json'))).rejects.toThrow();
   });
 
-  it('strategy 缺省 → platform-managed；latestSpecVersion 缺省 → spec_version=0', async () => {
+  it('latestSpecVersion 缺省 → spec_version=0', async () => {
     const client = makeClient();
     const result = await handleInitLease(client as never, {
       workspaceId: 'ws-init-defaults',
-      rootPath: rootDir,
+      rootPath: '/tmp/x',
       serverOrigin: 'http://test:8000',
     });
 
     expect(result.ok).toBe(true);
     expect(result.specVersion).toBe(0);
-    const cfg = result.platformConfig!;
-    expect(cfg.strategy).toBe('platform-managed');
-    expect(cfg.spec_version).toBe(0);
+    expect(result.daemonState!.spec_version).toBe(0);
   });
 
   it('getSpecBundle 404 → pullSpecBundle 容错 mkdir 空目录，init 仍成功（首次未扫描）', async () => {
-    // 404 容错在 pullSpecBundle 内部：抛 {status:404} 被捕获 → mkdir 空目录返回路径。
-    // handleInitLease 不感知 404，只看 pullSpecBundle 是否抛错。
     const client = makeClient({
       getSpecBundle: vi.fn().mockRejectedValue({ status: 404 }),
     });
     const result = await handleInitLease(client as never, {
       workspaceId: 'ws-init-404',
-      rootPath: rootDir,
+      rootPath: '/tmp/x',
       serverOrigin: 'http://test:8000',
       latestSpecVersion: 0,
     });
 
     expect(result.ok).toBe(true);
     expect(result.specDir).not.toBeNull(); // 404 容错返回空 specDir
-    // post 仍触发（specDir 非空 → 尝试回灌空目录，best-effort）
     expect(client.postSpecSync).toHaveBeenCalledTimes(1);
   });
 
-  it('pullSpecBundle 抛 5xx → ok=false abort，platform.json 已写', async () => {
+  it('pullSpecBundle 抛 5xx → ok=false abort，daemonState 已写（步骤 1 完成）', async () => {
     const client = makeClient({
       getSpecBundle: vi.fn().mockRejectedValue({ status: 500, bodyText: 'boom' }),
     });
     const result = await handleInitLease(client as never, {
       workspaceId: 'ws-init-5xx',
-      rootPath: rootDir,
+      rootPath: '/tmp/x',
       serverOrigin: 'http://test:8000',
       latestSpecVersion: 2,
     });
 
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/spec_bundle_pull_failed/);
-    // platform.json 已在步骤 1 写入（abort 不回滚）
-    const cfg = await readPlatformConfig(rootDir);
-    expect(cfg).not.toBeNull();
-    expect(cfg!.workspace_id).toBe('ws-init-5xx');
+    // daemonState 在 pull 失败返回中仍透传（步骤 1 已完成）
+    expect(result.daemonState).not.toBeNull();
+    expect(result.daemonState!.spec_version).toBe(2);
     // post 不应被调用（pull 失败 abort 在 post 之前）
     expect(client.postSpecSync).not.toHaveBeenCalled();
   });
@@ -154,62 +139,55 @@ describe('handleInitLease / platform.json 读写 (task-07)', () => {
     });
     const result = await handleInitLease(client as never, {
       workspaceId: 'ws-init-postfail',
-      rootPath: rootDir,
+      rootPath: '/tmp/x',
       serverOrigin: 'http://test:8000',
       latestSpecVersion: 1,
     });
 
-    // post 失败仅 warn，不改写 ok
     expect(result.ok).toBe(true);
     expect(result.specVersion).toBe(1);
   });
 
-  it('writePlatformConfig + readPlatformConfig 往返一致', async () => {
-    const written = await writePlatformConfig(rootDir, {
-      workspace_id: 'ws-rt',
-      server_origin: 'http://x',
-      strategy: 'repo-mirrored',
-      spec_version: 7,
-      cache_root: '/home/me/.sillyhub/daemon/specs/ws-rt',
-    });
-    expect(written.synced_at).toBeTruthy();
+  // ── writeDaemonState 单元（取代旧 writePlatformConfig/readPlatformConfig 往返用例）──
+  // 直接传 tmp specCacheRoot（不经 resolveSpecDir），验证落盘 2 字段。
 
-    const read = await readPlatformConfig(rootDir);
-    expect(read).toEqual(written);
+  it('writeDaemonState 写 2 字段并落盘到 {specCacheRoot}/.runtime/spec-version.json', async () => {
+    const specCacheRoot = await mkdtemp(join(tmpdir(), 'wds-root-'));
+    try {
+      const written = await writeDaemonState(specCacheRoot, { spec_version: 7 });
+      expect(written.spec_version).toBe(7);
+      expect(typeof written.synced_at).toBe('string');
+
+      const st = JSON.parse(
+        await readFile(join(specCacheRoot, DAEMON_STATE_FILENAME), 'utf-8'),
+      ) as Record<string, unknown>;
+      expect(st.spec_version).toBe(7);
+      expect(st.synced_at).toBe(written.synced_at);
+      // D-001@v1：只 2 字段，无旧 6 字段残留
+      expect(st.workspace_id).toBeUndefined();
+      expect(st.server_origin).toBeUndefined();
+    } finally {
+      await rm(specCacheRoot, { recursive: true, force: true });
+    }
   });
 
-  it('readPlatformConfig 文件不存在 → null', async () => {
-    const read = await readPlatformConfig(rootDir);
-    expect(read).toBeNull();
+  it('writeDaemonState 缺 specCacheRoot → 抛错（init lease 必带 workspaceId 解析缓存根）', async () => {
+    await expect(writeDaemonState('', { spec_version: 0 })).rejects.toThrow(/specCacheRoot/);
   });
 
-  it('writePlatformConfig 缺 rootPath → 抛错（init lease 必带 root_path）', async () => {
-    await expect(
-      writePlatformConfig('', {
-        workspace_id: 'ws',
-        server_origin: 'http://x',
-        strategy: 'platform-managed',
-        spec_version: 0,
-        cache_root: '/c',
-      }),
-    ).rejects.toThrow(/rootPath/);
-  });
+  it('writeDaemonState 不破坏缓存目录既有内容', async () => {
+    const specCacheRoot = await mkdtemp(join(tmpdir(), 'wds-keep-'));
+    try {
+      await mkdir(join(specCacheRoot, 'docs'), { recursive: true });
+      await writeFile(join(specCacheRoot, 'docs', 'keep.md'), 'keep me');
 
-  it('已存在的 rootPath 写 platform.json 不破坏既有目录内容', async () => {
-    // rootPath 下已有其他文件 → writePlatformConfig 不应清空
-    await mkdir(join(rootDir, 'sub'), { recursive: true });
-    await writeFile(join(rootDir, 'sub', 'keep.md'), 'keep me');
+      await writeDaemonState(specCacheRoot, { spec_version: 0 });
 
-    await writePlatformConfig(rootDir, {
-      workspace_id: 'ws-keep',
-      server_origin: 'http://x',
-      strategy: 'platform-managed',
-      spec_version: 0,
-      cache_root: '/c',
-    });
-
-    const kept = await readFile(join(rootDir, 'sub', 'keep.md'), 'utf-8');
-    expect(kept).toBe('keep me');
+      const kept = await readFile(join(specCacheRoot, 'docs', 'keep.md'), 'utf-8');
+      expect(kept).toBe('keep me');
+    } finally {
+      await rm(specCacheRoot, { recursive: true, force: true });
+    }
   });
 });
 
@@ -312,26 +290,19 @@ function makeInitLease(overrides: Partial<LeaseCtx> = {}): LeaseCtx {
     // @ts-expect-error mode 不在 LeaseCtx 接口（鸭子类型探测，task-07 未改 types.ts）
     mode: 'init',
     workspaceId: 'ws-init-1',
-    rootPath: '', // 测试运行时注入 tmp 目录
+    rootPath: '/tmp/init-lease-rootpath', // D-001@v1：rootPath 不再被 daemon 写，仅 lease payload 完整性
     ...overrides,
   } as LeaseCtx & { mode: string };
 }
 
 describe("TaskRunner.runLease mode='init' 分支 (task-07)", () => {
-  let rootDir: string;
-
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
-    rootDir = await mkdtemp(join(tmpdir(), 'init-lease-runner-'));
-  });
-
-  afterEach(async () => {
-    await rm(rootDir, { recursive: true, force: true });
   });
 
   it('mode=init → 不 spawn agent（getBackend/spawn 不调），终态 completed', async () => {
     const { runner } = setupRunner();
-    const lease = makeInitLease({ rootPath: rootDir });
+    const lease = makeInitLease();
 
     const result = await runner.runLease(lease);
 
@@ -355,10 +326,10 @@ describe("TaskRunner.runLease mode='init' 分支 (task-07)", () => {
     expect(result.stats!.init_synced_at.length).toBeGreaterThan(0);
   });
 
-  it('platform_config 透传 latest_spec_version=5 → stats.init_synced_spec_version=5 + platform.json.spec_version=5', async () => {
+  it('platform_config 透传 latest_spec_version=5 → stats.init_synced_spec_version=5', async () => {
     const { runner } = setupRunner();
     const lease = makeInitLease({
-      rootPath: rootDir,
+      workspaceId: 'ws-runner-ver',
       // @ts-expect-error platform_config 鸭子类型（backend task-06 下发）
       platform_config: {
         server_origin: 'https://hub.example.com',
@@ -370,20 +341,16 @@ describe("TaskRunner.runLease mode='init' 分支 (task-07)", () => {
     const result = await runner.runLease(lease);
 
     expect(result.success).toBe(true);
+    // D-001@v1：spec_version 透传到 stats（落盘到 resolveSpecDir('ws-runner-ver')/.runtime/，
+    //   由 afterAll 统一清理，不在此读文件验证——避免 mock homedir 穿透问题）
     expect(result.stats!.init_synced_spec_version).toBe(5);
-
-    const cfg = JSON.parse(
-      await readFile(join(rootDir, PLATFORM_CONFIG_FILENAME), 'utf-8'),
-    ) as Record<string, unknown>;
-    expect(cfg.spec_version).toBe(5);
-    expect(cfg.server_origin).toBe('https://hub.example.com');
-    expect(cfg.strategy).toBe('repo-mirrored');
+    // init_daemon_state 取代旧 init_platform_config（free-form stats，D-001@v1）
+    expect(result.stats).toMatchObject({ init_synced: true });
   });
 
   it('缺 workspaceId → failed，stats.init_synced=false', async () => {
     const { runner } = setupRunner();
     const lease = makeInitLease({
-      rootPath: rootDir,
       workspaceId: undefined,
     });
 
@@ -401,7 +368,7 @@ describe("TaskRunner.runLease mode='init' 分支 (task-07)", () => {
         getSpecBundle: vi.fn().mockRejectedValue({ status: 500, bodyText: 'boom' }),
       }),
     });
-    const lease = makeInitLease({ rootPath: rootDir });
+    const lease = makeInitLease();
 
     const result = await runner.runLease(lease);
 
@@ -430,3 +397,6 @@ describe("TaskRunner.runLease mode='init' 分支 (task-07)", () => {
     expect(spawn).toHaveBeenCalled();
   });
 });
+
+// 防止 "homedir 未使用" lint（清理路径预留扩展用）
+void homedir;

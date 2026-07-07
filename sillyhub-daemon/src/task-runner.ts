@@ -376,7 +376,7 @@ export class TaskRunner {
     try {
       // ── init lease 分支（task-07 / D-002/D-009）：mode='init' → 不启 agent ──────────
       // daemon 拉到 init lease（kind=batch + mode='init'，backend task-06 start_init_dispatch
-      // 下发）：写 .sillyspec-platform.json（6 字段）到成员 rootPath → pullSpecBundle 拉文档
+      // 下发）：写 daemon 状态文件（2 字段）到 resolveSpecDir(workspaceId)/.runtime/（D-001@v1）→ pullSpecBundle 拉文档
       // 缓存 → postSpecSync 回灌本地改动 → 提前 return TaskRunnerResult（不 spawn agent）。
       // 完整编排抽到 spec-sync.handleInitLease（纯函数 + client 参数注入，D-007@v1）。
       //
@@ -411,7 +411,7 @@ export class TaskRunner {
       // 自身的 .sillyspec 执行，对齐 design §5 E-01。
       //
       // task-11（D-010 日常保鲜）：pull 前比对 lease 下发的 latest_spec_version 与本地
-      // `.sillyspec-platform.json.spec_version`。一致 → 跳过 pull（specRoot 直接指向本地
+      // `.runtime/spec-version.json.spec_version`（D-001@v1）。一致 → 跳过 pull（specRoot 直接指向本地
       // 缓存目录，agent 读已有内容）；不一致 / 本地无版本记录 → pullSpecBundle 刷新，
       // 成功后 bumpLocalSpecVersion 回写新版本。lease 未透传 latest_spec_version（旧
       // backend / server-local）→ 保持旧行为（pullSpecBundle 内 existingSpecRoot 等既有逻辑）。
@@ -424,7 +424,7 @@ export class TaskRunner {
           (ctx as { latest_spec_version?: number }).latest_spec_version;
         let skipPullDueToVersion = false;
         if (wsId && !existingSpecRoot && leaseSpecVersion !== undefined) {
-          const localVersion = await readLocalSpecVersion(ctx.rootPath);
+          const localVersion = await readLocalSpecVersion(resolveSpecDir(wsId));
           if (!shouldRefreshSpec(localVersion, leaseSpecVersion)) {
             // 版本一致：跳过 pull，specRoot 指向本地缓存（resolveSpecDir 已做路径校验，
             // 缓存目录可能尚未存在——agent 读时由 sillyspec 自身处理，对齐 pull 404 容错语义）。
@@ -445,7 +445,7 @@ export class TaskRunner {
           // pull 成功（specDir 非空）+ lease 带了 latest_spec_version → 回写本地版本保鲜。
           // 仅 daemon-client（wsId 非空）路径有意义；server-local pullSpecBundle 返回 null 跳过。
           if (specRoot && wsId && leaseSpecVersion !== undefined) {
-            await bumpLocalSpecVersion(ctx.rootPath, leaseSpecVersion);
+            await bumpLocalSpecVersion(resolveSpecDir(wsId), leaseSpecVersion);
           }
         }
       } catch (e) {
@@ -685,7 +685,7 @@ export class TaskRunner {
   // ── init lease 轻量分支（task-07 / D-002/D-009，不启 agent）──────────────────
 
   /**
-   * 处理 init lease：写 .sillyspec-platform.json + pull 文档 + post 本地改动。
+   * 处理 init lease：写 daemon 状态文件（D-001@v1，2 字段到 .runtime/spec-version.json）+ pull 文档 + post 本地改动。
    *
    * 与 ``runLease`` 并列但**严格不启 agent**（与 ``runChangeWrite`` 同范式的轻量分支）：
    *   - 不调 workspace.prepareWorkspace / getBackend / spawn / heartbeat（init 不跑 agent）；
@@ -769,8 +769,8 @@ export class TaskRunner {
       init_synced_at: initSyncedAt,
       init_synced_spec_version: result.specVersion,
     };
-    if (result.platformConfig) {
-      stats.init_platform_config = result.platformConfig;
+    if (result.daemonState) {
+      stats.init_daemon_state = result.daemonState;
     }
     if (!result.ok && result.error) {
       stats.init_error = result.error;

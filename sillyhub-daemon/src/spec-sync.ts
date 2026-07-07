@@ -224,49 +224,47 @@ export class SpecPushBeforePullError extends Error {
  *
  * 两路信号任一命中即视为「本地有未回灌改动」：
  *   1. specDir/.runtime/pending_push 标记存在（postSpecSync 失败时 daemon 写入的兜底标记）。
- *   2. specDir 本地最新文件 mtime 新于 rootPath/.sillyspec-platform.json 的 synced_at
- *      （或 platform.json 不存在 / 缺 synced_at 时，只要本地有内容即视为有改动）。
+ *   2. specDir 本地最新 spec 文档 mtime 新于 specDir/.runtime/spec-version.json 的 synced_at
+ *      （D-001@v1：synced_at 迁到 daemon 状态文件；newestMtime 跳过 .runtime/ 子目录，
+ *      只比 spec 文档）。状态文件不存在 / 缺 synced_at 时，只要本地有内容即视为有改动。
  *
  * 纯文件系统判定，无 client 依赖。任何 stat/readFile 失败均视为「未检测到未回灌」
  * （保守，不阻塞 pull）；测试可注入自定义 checker 绕过文件系统副作用。
  *
- * @param specDir 本地 spec 目录（pullSpecBundle 解析的 specDir）
- * @param opts.rootPath 源项目根路径（读 .sillyspec-platform.json.synced_at）
+ * @param specDir 本地 spec 目录（pullSpecBundle 解析的 specDir = resolveSpecDir(wsId)）
  */
-export async function hasUnsyncedLocalChanges(
-  specDir: string,
-  opts: { rootPath?: string } = {},
-): Promise<boolean> {
+export async function hasUnsyncedLocalChanges(specDir: string): Promise<boolean> {
   // 信号 1：pending_push 标记（postSpecSync 失败兜底）。
   if (await pathExists(join(specDir, '.runtime', 'pending_push'))) {
     return true;
   }
-  // 信号 2：本地 spec mtime 新于 platform.json.synced_at。
-  // 无 platform.json / 无 synced_at 字段时，只要本地有内容（非空）即视为未回灌
-  // （首次初始化前手改本地）。
+  // 信号 2：本地 spec mtime 新于 daemon 状态文件的 synced_at（D-001@v1：从
+  // .runtime/spec-version.json 读，不再读 .sillyspec-platform.json）。
+  // 无状态文件 / 无 synced_at 时，只要本地有内容（非空）即视为未回灌（首次初始化前手改本地）。
   const localMtime = await newestMtime(specDir);
   if (localMtime === null) return false; // 本地 specDir 不存在 / 空 → 无本地改动可丢
-  const platformPath = opts.rootPath ? join(opts.rootPath, '.sillyspec-platform.json') : null;
+  const statePath = join(specDir, DAEMON_STATE_FILENAME);
   let syncedAtMs: number | null = null;
-  if (platformPath) {
-    try {
-      const raw = await readFile(platformPath, 'utf-8');
-      const obj = JSON.parse(raw) as { synced_at?: string };
-      if (obj.synced_at) {
-        const t = Date.parse(obj.synced_at);
-        if (!Number.isNaN(t)) syncedAtMs = t;
-      }
-    } catch {
-      // platform.json 不存在 / 解析失败 → syncedAtMs 保持 null（下方「本地有内容」兜底）。
+  try {
+    const raw = await readFile(statePath, 'utf-8');
+    const obj = JSON.parse(raw) as { synced_at?: string };
+    if (obj.synced_at) {
+      const t = Date.parse(obj.synced_at);
+      if (!Number.isNaN(t)) syncedAtMs = t;
     }
+  } catch {
+    // 状态文件不存在 / 解析失败 → syncedAtMs 保持 null（下方「本地有内容」兜底）。
   }
   if (syncedAtMs === null) {
-    return true; // platform.json 缺失但本地有内容 → 视为有未回灌改动
+    return true; // 状态文件缺失但本地有内容 → 视为有未回灌改动
   }
   return localMtime > syncedAtMs;
 }
 
-/** 取目录树中最新的 mtime（ms）。目录不存在 / 空 / 全失败 → null。 */
+/** 取目录树中最新的 mtime（ms）。目录不存在 / 空 / 全失败 → null。
+ *  跳过 `.runtime/` 子目录（D-001@v1：daemon 运行时产物如 spec-version.json / pending_push
+ *  在 specDir/.runtime/ 下，不计入 spec 文档改动判定，否则 synced_at 自身会被 newestMtime 捕获
+ *  导致 hasUnsyncedLocalChanges 恒判 true）。*/
 async function newestMtime(dir: string): Promise<number | null> {
   let newest: number | null = null;
   async function recurse(d: string): Promise<void> {
@@ -277,6 +275,7 @@ async function newestMtime(dir: string): Promise<number | null> {
       return;
     }
     for (const name of names) {
+      if (name === '.runtime') continue; // 跳过 daemon 运行时产物（D-001@v1）
       const abs = join(d, name);
       let st;
       try {
@@ -654,7 +653,7 @@ function isHubHttp404(e: unknown): boolean {
 // ── spec_version 保鲜（D-010 / task-11）──────────────────────────────────────
 //
 // daemon 每次 agent/scan 任务执行前比对 lease payload 的 latest_spec_version 与本地
-// `rootPath/.sillyspec-platform.json.spec_version`：不一致 → pullSpecBundle 刷新缓存；
+// `resolveSpecDir(wsId)/.runtime/spec-version.json.spec_version`（D-001@v1 迁移）：不一致 → pullSpecBundle 刷新缓存；
 // 一致 → 跳过 pull（避免无谓整树覆盖）。pull 成功后 bumpLocalSpecVersion 把新版本回写
 // platform.json，保持「本地缓存对应的文档版本」字段新鲜（design §5 日常保鲜 / §10 W3）。
 //
@@ -664,11 +663,15 @@ function isHubHttp404(e: unknown): boolean {
 // 覆盖：design.md §5（日常保鲜）/ §10 W3（A 重扫递增、B 落后自动 pull）/ §6 spec_version
 // 字段语义；decisions.md D-010。
 
-/** 平台配置文件名（写入成员 rootPath 根目录，gitignore 已含）。design §7。 */
-export const PLATFORM_CONFIG_FILENAME = '.sillyspec-platform.json';
+/**
+ * daemon 状态文件相对路径（相对于 spec 缓存根 resolveSpecDir(wsId)，即 ~/.sillyhub/daemon/specs/<ws>）。
+ * D-001@v1：取代旧 PLATFORM_CONFIG_FILENAME——.sillyspec-platform.json 交 sillyspec 工具独占，
+ * daemon 自己的 spec_version/synced_at 状态独立到 .runtime/spec-version.json。
+ */
+export const DAEMON_STATE_FILENAME = '.runtime/spec-version.json';
 
 /**
- * 读本地 `.sillyspec-platform.json.spec_version`（D-010 保鲜比对值）。
+ * 读本地 daemon 状态文件的 `spec_version`（D-010 保鲜比对值；D-001@v1 迁到 .runtime/spec-version.json）。
  *
  * 行为：
  *   - 文件不存在 / 解析失败 / 缺 spec_version 字段 / 非有限整数 → 返回 null
@@ -678,14 +681,14 @@ export const PLATFORM_CONFIG_FILENAME = '.sillyspec-platform.json';
  * 纯文件系统读取，无 client 依赖。任何 IO/JSON 异常吞掉返回 null（保守：宁可多 pull
  * 一次，不因读配置错中断任务）。
  *
- * @param rootPath 成员本地项目根路径（lease payload 透传的 rootPath / root_path）
+ * @param specCacheRoot daemon spec 缓存根（resolveSpecDir(wsId)）
  */
-export async function readLocalSpecVersion(rootPath: string | undefined): Promise<number | null> {
-  if (!rootPath) return null;
-  const platformPath = join(rootPath, PLATFORM_CONFIG_FILENAME);
+export async function readLocalSpecVersion(specCacheRoot: string | undefined): Promise<number | null> {
+  if (!specCacheRoot) return null;
+  const statePath = join(specCacheRoot, DAEMON_STATE_FILENAME);
   let raw: string;
   try {
-    raw = await readFile(platformPath, 'utf-8');
+    raw = await readFile(statePath, 'utf-8');
   } catch {
     return null; // 文件不存在 / 不可读 → 无版本记录
   }
@@ -726,164 +729,110 @@ export function shouldRefreshSpec(
 }
 
 /**
- * pull 成功后把新 spec_version 回写本地 `.sillyspec-platform.json`（保鲜，D-010）。
+ * pull 成功后把新 spec_version 回写本地 daemon 状态文件（保鲜，D-010；D-001@v1 迁到
+ * .runtime/spec-version.json）。
  *
- * 保持文件其他字段不变（workspace_id/server_origin/strategy/cache_root 由 task-07 init
- * lease 写入），仅更新 spec_version + synced_at（ISO 8601 UTC）。文件不存在时跳过
- * （不主动创建——platform.json 完整写入是 init lease 的职责，本函数只在已初始化项目上
- * 保鲜版本号，避免半成品配置文件污染 rootPath）。
+ * 仅更新 spec_version + synced_at（ISO 8601 UTC）。文件不存在时跳过（不主动创建——
+ * 状态文件完整写入是 init lease writeDaemonState 的职责，本函数只在已初始化项目上
+ * 保鲜版本号，避免半成品状态文件污染缓存目录）。
  *
  * 失败语义：read/parse/write 任一异常 → 仅 warn 不抛（保鲜是 best-effort，失败不影响
  * pull 已落地的缓存可用性；下次任务比对仍会因版本旧而再 pull，自愈）。
  *
- * @param rootPath 成员本地项目根路径
+ * @param specCacheRoot daemon spec 缓存根（resolveSpecDir(wsId)）
  * @param newVersion pull 拉到的最新 spec_version（lease 的 latest_spec_version）
  */
 export async function bumpLocalSpecVersion(
-  rootPath: string | undefined,
+  specCacheRoot: string | undefined,
   newVersion: number,
 ): Promise<void> {
-  if (!rootPath) return;
-  const platformPath = join(rootPath, PLATFORM_CONFIG_FILENAME);
+  if (!specCacheRoot) return;
+  const statePath = join(specCacheRoot, DAEMON_STATE_FILENAME);
   let raw: string;
   try {
-    raw = await readFile(platformPath, 'utf-8');
+    raw = await readFile(statePath, 'utf-8');
   } catch {
-    // platform.json 不存在（未初始化）→ 不主动创建，跳过（task-07 init lease 负责）
+    // 状态文件不存在（未初始化）→ 不主动创建，跳过（init lease writeDaemonState 负责）
     return;
   }
   try {
     const obj = JSON.parse(raw) as Record<string, unknown>;
     obj.spec_version = newVersion;
     obj.synced_at = new Date().toISOString();
-    await writeFile(platformPath, JSON.stringify(obj, null, 2) + '\n', 'utf-8');
+    await writeFile(statePath, JSON.stringify(obj, null, 2) + '\n', 'utf-8');
   } catch (e) {
-    console.warn('spec_sync: bump_local_spec_version_failed', rootPath, newVersion, e);
+    console.warn('spec_sync: bump_local_spec_version_failed', specCacheRoot, newVersion, e);
   }
 }
 
-// ── .sillyspec-platform.json 完整读写 + init lease 编排（D-002/D-009 / task-07）──────
+// ── daemon 状态文件 + init lease 编排（D-001@v1 / task-01~05）──────────────────
 //
-// init lease 处理（design §5 / §7 / §9 生命周期契约）：daemon 拉到 init lease →
-//   1. 写 6 字段 `.sillyspec-platform.json` 到成员 rootPath（workspace_id / server_origin /
-//      strategy / spec_version / cache_root / synced_at）；
+// D-001@v1：daemon 退出 .sillyspec-platform.json 写入（交 sillyspec 工具独占），
+// 自己的 spec_version 保鲜状态独立到 ~/.sillyhub/daemon/specs/<ws>/.runtime/spec-version.json。
+//
+// init lease 处理（design §5 / §9 生命周期契约）：daemon 拉到 init lease →
+//   1. writeDaemonState：写 2 字段 daemon 状态文件（spec_version + synced_at）到缓存根 .runtime/；
 //   2. pullSpecBundle（复用，含 task-12 pull 前回灌保护）；
 //   3. postSpecSync（若本地有改动 / pull 拿到内容，回灌到服务器权威 spec_root）；
 //   4. 返回 { ok, spec_version } 供调用方 complete lease 上报 init_synced_at /
 //      init_synced_spec_version（backend 更新 WorkspaceMemberRuntime）。
 //
-// 与 task-11 保鲜的关系：task-11 的 readLocalSpecVersion/bumpLocalSpecVersion 只读写
-// spec_version 单字段（已初始化项目保鲜用）；本节 writePlatformConfig 是 init lease 的
-// 完整首写（6 字段一次性落盘）。两者复用 PLATFORM_CONFIG_FILENAME 常量。
+// 与保鲜的关系：readLocalSpecVersion/bumpLocalSpecVersion 读写状态文件 spec_version
+// 单字段（已初始化项目保鲜用）；本节 writeDaemonState 是 init lease 的完整首写
+//（2 字段一次性落盘）。三者复用 DAEMON_STATE_FILENAME 常量。
 //
-// 覆盖：design.md §7（platform.json schema）/ §9（init lease 8 事件）/ §10 W2；
-// decisions.md D-002（init 重定义）/ D-009（init lease 下发）。
+// 覆盖：design.md §7（daemon 状态 schema）/ §9（init lease 事件）/ §10 W2；
+// decisions.md D-001@v1（daemon 退出 platform.json）/ D-002（init 重定义）/ D-009（init lease 下发）。
 
 /**
- * `.sillyspec-platform.json` 完整 schema（design §7）。
+ * daemon 状态文件 schema（D-001@v1）。
  *
- * 写到成员本地 rootPath 根目录（daemon 写，gitignore 已含该文件）。
+ * 写到 daemon spec 缓存根的 .runtime/spec-version.json（~/.sillyhub/daemon/specs/<ws>/.runtime/）。
  * 字段：
- *   - workspace_id：该本地项目归属的工作区。
- *   - server_origin：平台地址（daemon pull/push 用，与 config.server_url 一致）。
- *   - strategy：spec 同步策略三值（platform-managed / repo-mirrored / repo-native）。
  *   - spec_version：本地缓存对应的文档版本（D-010 保鲜比对值，pull 后回写）。
- *   - cache_root：daemon 本地 spec 缓存路径（~/.sillyhub/daemon/specs/<ws>）。
  *   - synced_at：上次同步时间（ISO 8601 UTC）。
  */
-export interface PlatformConfig {
-  workspace_id: string;
-  server_origin: string;
-  strategy: string;
+export interface DaemonState {
   spec_version: number;
-  cache_root: string;
   synced_at: string;
 }
 
 /**
- * 读 `{rootPath}/.sillyspec-platform.json` 完整配置。
- *
- * 文件不存在 / 读失败 / JSON 解析失败 → 返回 null（视为未初始化）。成功返回 PlatformConfig
- * 6 字段（字段缺失时按 schema 兜底：spec_version 缺失=0，其余缺失=空串）。
- *
- * 纯文件系统读取，无 client 依赖。与 readLocalSpecVersion 的差异：本函数读完整 6 字段
- * （init lease / 状态查询用），readLocalSpecVersion 只读 spec_version 单字段（保鲜比对用）。
- *
- * @param rootPath 成员本地项目根路径
- */
-export async function readPlatformConfig(
-  rootPath: string | undefined,
-): Promise<PlatformConfig | null> {
-  if (!rootPath) return null;
-  const platformPath = join(rootPath, PLATFORM_CONFIG_FILENAME);
-  let raw: string;
-  try {
-    raw = await readFile(platformPath, 'utf-8');
-  } catch {
-    return null; // 文件不存在 / 不可读 → 未初始化
-  }
-  let obj: Record<string, unknown>;
-  try {
-    obj = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return null; // 损坏 JSON → 视为未初始化（不抛，调用方保守触发重写）
-  }
-  const specVersionRaw = obj.spec_version;
-  const specVersion =
-    typeof specVersionRaw === 'number' && Number.isFinite(specVersionRaw) && Number.isInteger(specVersionRaw)
-      ? specVersionRaw
-      : 0;
-  return {
-    workspace_id: typeof obj.workspace_id === 'string' ? obj.workspace_id : '',
-    server_origin: typeof obj.server_origin === 'string' ? obj.server_origin : '',
-    strategy: typeof obj.strategy === 'string' ? obj.strategy : '',
-    spec_version: specVersion,
-    cache_root: typeof obj.cache_root === 'string' ? obj.cache_root : '',
-    synced_at: typeof obj.synced_at === 'string' ? obj.synced_at : '',
-  };
-}
-
-/**
- * 写 `{rootPath}/.sillyspec-platform.json`（init lease 完整首写，6 字段）。
+ * 写 `{specCacheRoot}/.runtime/spec-version.json`（init lease 完整首写，2 字段）。
  *
  * 行为：
- *   - rootPath 缺失 → 抛错（init lease 必带 root_path，缺失是 lease 构造异常）。
- *   - 先 mkdir rootPath（recursive，容忍已存在），再 writeFile（utf-8，2 空格缩进 + 尾换行）。
- *   - synced_at 用 ISO 8601 UTC（new Date().toISOString()）。
+ *   - specCacheRoot 缺失 → 抛错（init lease 必带 workspaceId 可解析缓存根，缺失是异常）。
+ *   - 先 mkdir {specCacheRoot}/.runtime（recursive，容忍已存在），再 writeFile（utf-8，2 空格缩进 + 尾换行）。
+ *   - synced_at 用 ISO 8601 UTC（new Date().toISOString()，可由调用方覆盖）。
  *
- * 与 bumpLocalSpecVersion 的差异：bump 只在已存在文件上 patch spec_version + synced_at
- * （保鲜，不主动创建）；本函数是 init lease 的完整首写，一次性落 6 字段。后续保鲜仍走
+ * 与 bumpLocalSpecVersion 的差异：bump 只在已存在状态文件上 patch spec_version + synced_at
+ * （保鲜，不主动创建）；本函数是 init lease 的完整首写，一次性落 2 字段。后续保鲜仍走
  * bumpLocalSpecVersion（不破坏其他字段）。
  *
  * 失败语义：IO 异常 → 向上抛（init lease 失败 = lease 终态 failed，由调用方 catch 决定
- * complete 上报 init_failed）。不吞错（与保鲜 best-effort 不同：init 写失败意味着客户端
- * 永远不知道归属工作区，后续 pull/push 全失效，必须显式失败）。
+ * complete 上报 init_failed）。不吞错（与保鲜 best-effort 不同：init 写失败意味着 daemon
+ * 无版本基线，保鲜机制失效，必须显式失败）。
  *
- * @param rootPath 成员本地项目根路径（lease payload 透传）
- * @param config 6 字段配置（workspace_id / server_origin / strategy / spec_version /
- *                cache_root / synced_at；synced_at 可省略，缺省取当前时间）
+ * @param specCacheRoot daemon spec 缓存根（resolveSpecDir(workspaceId)）
+ * @param state 2 字段状态（spec_version 必填；synced_at 可省略，缺省取当前时间）
  */
-export async function writePlatformConfig(
-  rootPath: string,
-  config: Omit<PlatformConfig, 'synced_at'> & { synced_at?: string },
-): Promise<PlatformConfig> {
-  if (!rootPath) {
-    throw new Error('writePlatformConfig: rootPath is required for init lease');
+export async function writeDaemonState(
+  specCacheRoot: string,
+  state: Omit<DaemonState, 'synced_at'> & { synced_at?: string },
+): Promise<DaemonState> {
+  if (!specCacheRoot) {
+    throw new Error('writeDaemonState: specCacheRoot is required for init lease');
   }
-  const full: PlatformConfig = {
-    workspace_id: config.workspace_id,
-    server_origin: config.server_origin,
-    strategy: config.strategy || 'platform-managed',
+  const full: DaemonState = {
     spec_version:
-      typeof config.spec_version === 'number' && Number.isFinite(config.spec_version)
-        ? Math.max(0, Math.trunc(config.spec_version))
+      typeof state.spec_version === 'number' && Number.isFinite(state.spec_version)
+        ? Math.max(0, Math.trunc(state.spec_version))
         : 0,
-    cache_root: config.cache_root,
-    synced_at: config.synced_at ?? new Date().toISOString(),
+    synced_at: state.synced_at ?? new Date().toISOString(),
   };
-  const platformPath = join(rootPath, PLATFORM_CONFIG_FILENAME);
-  await mkdir(rootPath, { recursive: true });
-  await writeFile(platformPath, JSON.stringify(full, null, 2) + '\n', 'utf-8');
+  const statePath = join(specCacheRoot, DAEMON_STATE_FILENAME);
+  await mkdir(join(specCacheRoot, '.runtime'), { recursive: true });
+  await writeFile(statePath, JSON.stringify(full, null, 2) + '\n', 'utf-8');
   return full;
 }
 
@@ -891,11 +840,11 @@ export async function writePlatformConfig(
  * init lease 处理参数（handleInitLease 入参）。
  *
  * 来源：lease payload（backend task-06 start_init_dispatch 下发）。
- *   - workspaceId：归属工作区（必填，pull/push 路由 key）。
- *   - rootPath：成员本地项目根路径（必填，写 platform.json + repo-mirrored/native 读源）。
- *   - serverOrigin：平台地址（写 platform.json.server_origin；缺省时由调用方注入 config.server_url）。
+ *   - workspaceId：归属工作区（必填，pull/push 路由 key + 解析 specCacheRoot 写状态文件）。
+ *   - rootPath：成员本地项目根路径（必填，pull repo-mirrored/native 读源；D-001@v1 后不再写此目录）。
+ *   - serverOrigin：平台地址（D-001@v1 后不再持久化到状态文件，仅 lease 上下文用）。
  *   - strategy：spec 同步策略三值（缺省 platform-managed）。
- *   - latestSpecVersion：lease 下发的服务器当前 spec_version（写 platform.json.spec_version）。
+ *   - latestSpecVersion：lease 下发的服务器当前 spec_version（写状态文件.spec_version）。
  */
 export interface HandleInitLeaseParams {
   workspaceId: string;
@@ -908,17 +857,17 @@ export interface HandleInitLeaseParams {
 /**
  * init lease 处理结果（handleInitLease 出参）。
  *
- * - ok=true：platform.json 已写 + pull/post 完成，specVersion 为最终落盘的版本号（=
+ * - ok=true：daemon 状态文件已写 + pull/post 完成，specVersion 为最终落盘的版本号（=
  *   latestSpecVersion 兜底 0，供 complete 上报 init_synced_spec_version）。
- * - ok=false：任一步失败（写 platform.json / pull / post）；error 含失败原因；specVersion
+ * - ok=false：任一步失败（写状态文件 / pull / post）；error 含失败原因；specVersion
  *   兜底 0（complete 上报 0 让 backend 记录「初始化完成但版本未知」，前端可据此引导重扫）。
  */
 export interface HandleInitLeaseResult {
   ok: boolean;
   specVersion: number;
   error?: string;
-  /** platform.json 完整内容（ok=true 时非 null）。 */
-  platformConfig: PlatformConfig | null;
+  /** daemon 状态文件内容（ok=true 时非 null）。D-001@v1：取代旧 platformConfig。 */
+  daemonState: DaemonState | null;
   /** pullSpecBundle 返回的本地 specDir（null=未 pull / wsId 缺 / client 未实现）。 */
   specDir: string | null;
 }
@@ -927,17 +876,17 @@ export interface HandleInitLeaseResult {
  * init lease 完整处理（design §5 / §9 生命周期：config_written → bundle_pulled → local_pushed）。
  *
  * 编排 4 步（顺序严格，任一硬失败即 abort）：
- *   1. **writePlatformConfig**：写 6 字段 `.sillyspec-platform.json` 到 rootPath。
+ *   1. **writeDaemonState**：写 2 字段 daemon 状态文件到 {resolveSpecDir(workspaceId)}/.runtime/。
  *      spec_version 取 latestSpecVersion（lease 下发）兜底 0。失败 → ok=false abort
- *      （platform.json 是客户端归属凭证，写失败后续全失效，不降级）。
+ *      （状态文件是 daemon 保鲜基线，写失败后续保鲜失效，不降级）。D-001@v1：不再写 .sillyspec-platform.json。
  *   2. **pullSpecBundle**：拉服务器权威 spec 到本地缓存（~/.sillyhub/daemon/specs/<ws>）。
  *      内部含 task-12 pull 前回灌保护（hasUnsyncedLocalChanges）+ task-11 三分支 strategy。
  *      失败 → ok=false abort（pull 失败客户端无缓存可用，init 无意义）。404 容错在
  *      pullSpecBundle 内部已处理（首次 scan backend 无 bundle → mkdir 空目录，不算失败）。
  *   3. **postSpecSync**：若 pull 拿到 specDir 且本地有改动 → 回灌到服务器。失败**不 abort**
- *      （R-03：sync 失败仅 warn，platform.json 已写、pull 缓存已就位，init 主体成功；
+ *      （R-03：sync 失败仅 warn，状态文件已写、pull 缓存已就位，init 主体成功；
  *      本地改动下次任务前会再被 pull 前回灌保护触发重试，自愈）。
- *   4. 返回结果：specVersion = platform.json 落盘的 spec_version（= latestSpecVersion 兜底 0），
+ *   4. 返回结果：specVersion = 状态文件落盘的 spec_version（= latestSpecVersion 兜底 0），
  *      供调用方 complete lease 上报 init_synced_spec_version。
  *
  * 设计取舍：
@@ -960,23 +909,20 @@ export async function handleInitLease(
     typeof params.latestSpecVersion === 'number' && Number.isFinite(params.latestSpecVersion)
       ? Math.max(0, Math.trunc(params.latestSpecVersion))
       : 0;
+  const specCacheRoot = resolveSpecDir(params.workspaceId);
 
-  // 步骤 1：写 platform.json（硬失败 abort）。
-  let platformConfig: PlatformConfig;
+  // 步骤 1：写 daemon 状态文件（硬失败 abort）。D-001@v1：取代旧 writePlatformConfig。
+  let daemonState: DaemonState;
   try {
-    platformConfig = await writePlatformConfig(params.rootPath, {
-      workspace_id: params.workspaceId,
-      server_origin: params.serverOrigin,
-      strategy,
+    daemonState = await writeDaemonState(specCacheRoot, {
       spec_version: specVersion,
-      cache_root: resolveSpecDir(params.workspaceId),
     });
   } catch (e) {
     return {
       ok: false,
       specVersion,
-      error: `platform_config_write_failed: ${(e as Error)?.message ?? String(e)}`,
-      platformConfig: null,
+      error: `daemon_state_write_failed: ${(e as Error)?.message ?? String(e)}`,
+      daemonState: null,
       specDir: null,
     };
   }
@@ -990,12 +936,12 @@ export async function handleInitLease(
     });
   } catch (e) {
     // pull 失败（5xx / 网络 / SpecPushBeforePullError）→ init 主体失败。
-    // platform.json 已写（步骤 1），但缓存不可用，complete 上报 failed 让前端引导重试。
+    // 状态文件已写（步骤 1），但缓存不可用，complete 上报 failed 让前端引导重试。
     return {
       ok: false,
       specVersion,
       error: `spec_bundle_pull_failed: ${(e as Error)?.message ?? String(e)}`,
-      platformConfig,
+      daemonState,
       specDir: null,
     };
   }
@@ -1009,16 +955,16 @@ export async function handleInitLease(
         console.info('spec_sync: init_lease_post_ok', params.workspaceId, resp);
       }
     } catch (e) {
-      // R-03：sync 失败仅 warn 不 abort（platform.json + pull 缓存已就位，init 主体成功）。
+      // R-03：sync 失败仅 warn 不 abort（状态文件 + pull 缓存已就位，init 主体成功）。
       console.warn('spec_sync: init_lease_post_failed', params.workspaceId, e);
     }
   }
 
-  // 步骤 4：返回成功（specVersion = platform.json 落盘值）。
+  // 步骤 4：返回成功（specVersion = 状态文件落盘值）。
   return {
     ok: true,
-    specVersion: platformConfig.spec_version,
-    platformConfig,
+    specVersion: daemonState.spec_version,
+    daemonState,
     specDir,
   };
 }

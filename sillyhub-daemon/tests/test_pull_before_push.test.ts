@@ -177,10 +177,10 @@ describe('hasUnsyncedLocalChanges (task-12 默认判定器)', () => {
     expect(await hasUnsyncedLocalChanges(dir)).toBe(true);
   });
 
-  it('有本地内容但无 platform.json → true（首次初始化前手改）', async () => {
+  it('有本地内容但无状态文件 → true（首次初始化前手改；D-001@v1）', async () => {
     await mkdir(join(dir, 'docs'), { recursive: true });
     await writeFile(join(dir, 'docs', 'a.md'), 'x');
-    expect(await hasUnsyncedLocalChanges(dir, { rootPath: '/nonexistent-root' })).toBe(true);
+    expect(await hasUnsyncedLocalChanges(dir)).toBe(true);
   });
 
   it('specDir 不存在 → false（无本地改动可丢）', async () => {
