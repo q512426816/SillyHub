@@ -347,3 +347,12 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
   - lib/daemon.ts: browseFolder 增 initialPath 形参，body.initial_path 发送。
   - page.tsx: handleBrowseNative 增 currentPath 形参，按钮 onClick 传当前 path。
 结果：已完成 + 部署。ruff/tsc/build 全过。backend+frontend rebuild + daemon 重启。点「浏览」时对话框默认定位到输入框已有目录（路径存在时）。
+
+## ql-20260707-004-d5e8 | 2026-07-07 11:18:53 | workspace 项目组件页去掉头部【概览/组件/变更/成员】tab 行
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/workspaces/[id]/layout.tsx
+需求：/workspaces/{id}/components 项目组件页头部不要显示 WorkspaceTabs 的【概览/组件/变更/成员】tab 行（同 changes 页处理）。
+现状：layout.tsx 仅 changes 路径返回 fragment（无 main wrapper + 无 WorkspaceTabs），其他路径（含 components）都包 WorkspaceTabs 显示 tab 行。components 页自带 PageContainer，不需要外层 tab。
+方案：layout.tsx 的 isStandalone 判断从仅 changes 扩展为 changes 或 components 路径，两者都返回 <>{children}</> fragment（DOM 对齐 admin/roles，dashboard layout main 直接接 page）。
+结果：已完成 + 部署。tsc 零错。frontend --build --force-recreate 重建部署（首次 --build 缓存未重建，--force-recreate 后容器 03:20 StartedAt 确认新镜像）。用户刷新 /workspaces/{id}/components 应不再显示头部 tab 行。代码未提交。

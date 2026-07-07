@@ -13,10 +13,13 @@ export default function WorkspaceDetailLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  // 变更中心页完全脱离 workspace layout（不加 main wrapper，不加 WorkspaceTabs），
-  // DOM 结构与 admin/roles 完全一致：dashboard layout main → page。
-  // 这样宽度由 dashboard layout 的 max-w-[1440px] 统一管理，不会多一层 wrapper。
-  if (pathname.includes(`/workspaces/${params.id}/changes`)) {
+  // ql-20260707-004：变更中心页 + 项目组件页脱离 workspace layout（不加 main wrapper，
+  // 不加 WorkspaceTabs），DOM 与 admin/roles 一致（dashboard layout main → page），
+  // 宽度由 dashboard layout max-w-[1440px] 统一管理，且不显示头部 tab 行。
+  // 用户反馈 components 页自带 PageContainer，不需要外层 WorkspaceTabs 的【概览/组件/变更/成员】。
+  const isStandalone = pathname.includes(`/workspaces/${params.id}/changes`) ||
+    pathname.includes(`/workspaces/${params.id}/components`);
+  if (isStandalone) {
     return <>{children}</>;
   }
   return (
