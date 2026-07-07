@@ -40,6 +40,11 @@ from app.modules.workspace.schema import (
     WorkspaceUpdate,
 )
 from app.modules.workspace.service import WorkspaceService
+from app.modules.workspace.skills_view_service import (
+    McpConfigViewResponse,
+    SkillsViewResponse,
+    SkillsViewService,
+)
 from app.modules.workspace.topology import TopologyBuilder, TopologyResponse
 
 router = APIRouter(prefix="/workspaces", tags=["workspace"])
@@ -306,6 +311,40 @@ async def list_components(
     service = ComponentCatalogService(session)
     components = await service.list_components(workspace_id)
     return ComponentCatalogService.to_response(components)
+
+
+@router.get("/{workspace_id}/skills", response_model=SkillsViewResponse)
+async def list_workspace_skills(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+) -> SkillsViewResponse:
+    """列出 workspace specDir/skills/ 下的自定义 skill 名 + 文件清单（只读）。
+
+    task-06 / FR-07 / D-006：经 SpecPathResolver 定位 specDir，只读列目录。
+    NFR-05：daemon-client 经 HostFsDelegate RPC 读；server-local 直接 Path 读。
+    membership 校验由 ``require_permission(WORKSPACE_READ)`` + ``{workspace_id}`` 路径参数
+    自动完成（非成员 403）。无 skills/ 子目录返回空列表不报错。
+    """
+    service = SkillsViewService(session)
+    return await service.list_skills(workspace_id)
+
+
+@router.get("/{workspace_id}/mcp-config", response_model=McpConfigViewResponse)
+async def get_workspace_mcp_config(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+) -> McpConfigViewResponse:
+    """读 workspace specDir/.mcp.json（只读，env secret 脱敏）。
+
+    task-06 / FR-08 / D-006：经 SpecPathResolver 定位 specDir，只读 ``.mcp.json``。
+    NFR-05：daemon-client 经 HostFsDelegate RPC 读；server-local 直接 Path 读。
+    env 中 token/key/secret/password 类字段遮蔽（D-008，复用 settings/router 的
+    ``_redact_mcp_env``）。无文件返回空 ``{mcpServers: {}}`` 不报错。
+    """
+    service = SkillsViewService(session)
+    return await service.get_mcp_config(workspace_id)
 
 
 @router.post("/{workspace_id}/rescan", response_model=ScanResponse)

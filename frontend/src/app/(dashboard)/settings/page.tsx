@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import Link from "next/link";
+import { Boxes, BookOpen, KeyRound, Network } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -381,6 +383,35 @@ function KVRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+/* ---------- Entry Cards（子页入口，task-09 MCP） ---------- */
+
+function EntryCard({
+  href,
+  icon,
+  title,
+  desc,
+}: {
+  href: string;
+  icon: ReactNode;
+  title: string;
+  desc: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="group rounded-lg border bg-card p-4 shadow-sm transition hover:border-primary/50 hover:shadow-md"
+    >
+      <div className="flex items-center gap-2">
+        <span className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-50 text-blue-700">
+          {icon}
+        </span>
+        <span className="text-sm font-medium group-hover:text-primary">{title}</span>
+      </div>
+      <p className="mt-2 text-[11px] text-muted-foreground">{desc}</p>
+    </Link>
+  );
+}
+
 /* ---------- Main Page ---------- */
 
 export default function SettingsPage() {
@@ -408,6 +439,33 @@ export default function SettingsPage() {
         <h1 className="mt-0.5">设置</h1>
         <p className="text-xs text-muted-foreground">平台配置、安全策略</p>
       </header>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <EntryCard
+          href="/settings/skills"
+          icon={<BookOpen className="h-4 w-4" />}
+          title="技能管理"
+          desc="查看平台 SillySpec 技能 + 管理自定义技能"
+        />
+        <EntryCard
+          href="/settings/mcp"
+          icon={<Network className="h-4 w-4" />}
+          title="MCP 配置"
+          desc="平台默认 MCP 配置与 server 白名单"
+        />
+        <EntryCard
+          href="/settings/api-keys"
+          icon={<KeyRound className="h-4 w-4" />}
+          title="API 密钥"
+          desc="守护进程长期凭证签发与吊销"
+        />
+        <EntryCard
+          href="/settings/git-identities"
+          icon={<Boxes className="h-4 w-4" />}
+          title="Git 身份"
+          desc="提交身份与签名配置"
+        />
+      </div>
 
       <div className="flex gap-4 border-b">
         {TABS.map((t) => (

@@ -83,6 +83,7 @@ async def db_engine() -> AsyncIterator[Any]:
     from app.modules.ppm.task import model as _ppm_task_model  # noqa: F401
     from app.modules.scan_docs import conflict_model as _scan_conflict_model  # noqa: F401
     from app.modules.scan_docs import model as _scan_docs_model  # noqa: F401
+    from app.modules.skills import model as _skills_model  # noqa: F401
     from app.modules.spec_workspace import model as _spec_ws_model  # noqa: F401
     from app.modules.task import model as _task_model  # noqa: F401
     from app.modules.tool_gateway import tool_policy as _tool_policy_model  # noqa: F401

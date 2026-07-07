@@ -16,7 +16,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rm, writeFile, readdir, copyFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile, readdir, copyFile, stat } from 'node:fs/promises';
 import { join, dirname, relative, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { gunzipSync } from 'node:zlib';
@@ -238,11 +238,36 @@ export async function syncSkills(
     return { synced: false, skipped: false };
   }
 
-  // 5. 解压到临时目录，成功后原子替换（解压失败不破坏现有 skills）
+  // 5. 解压到临时目录，成功后原子替换最终目录（task-07 / FR-06：删除同步）。
+  //    旧实现解压到 tmpDir 后从不提升到 skillsDir()——skills 实际从未安装 + 删除不清理。
+  //    现改为：tmp 解压成功 → 清 skillsDir() 下旧 skill 子目录（保留 manifest.json + .tmp-extract）
+  //    → 把 tmpDir/* 移入 skillsDir()/。tmp 失败不影响现有 skills（零回归）。
   const tmpDir = join(skillsDir(), '.tmp-extract');
   await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
   const ok = await extractSkillsBundle(bundleBytes, tmpDir, log);
   if (!ok) {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+    return { synced: false, skipped: false };
+  }
+
+  // 5.5 提升 tmpDir → skillsDir()（清旧 + 移新）
+  try {
+    await mkdir(skillsDir(), { recursive: true });
+    // 清 skillsDir() 下旧 skill 子目录（保留 manifest.json 文件 + .tmp-extract 目录）
+    const existing = await readdir(skillsDir(), { withFileTypes: true }).catch(() => []);
+    for (const entry of existing) {
+      if (entry.name === '.tmp-extract' || entry.name === 'manifest.json') continue;
+      const p = join(skillsDir(), entry.name);
+      await rm(p, { recursive: true, force: true }).catch(() => undefined);
+    }
+    // 移 tmpDir/* → skillsDir()/
+    const extracted = await readdir(tmpDir, { withFileTypes: true }).catch(() => []);
+    for (const entry of extracted) {
+      await rename(join(tmpDir, entry.name), join(skillsDir(), entry.name));
+    }
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+  } catch (e) {
+    log('error', 'skill_promote_failed', { error: String(e) });
     await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
     return { synced: false, skipped: false };
   }

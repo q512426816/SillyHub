@@ -9,6 +9,8 @@ const TABS = [
   { key: "overview", label: "概览", path: "" },
   { key: "components", label: "组件", path: "/components" },
   { key: "changes", label: "变更", path: "/changes" },
+  { key: "skills", label: "Skills", path: "/skills" },
+  { key: "mcp", label: "MCP", path: "/mcp" },
   { key: "members", label: "成员", path: "/members" },
 ] as const;
 

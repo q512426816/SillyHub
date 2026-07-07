@@ -2040,16 +2040,18 @@ async def get_pending_leases(
 @router.get("/skills/latest/manifest")
 async def get_skills_manifest(
     user: Annotated[Any, Depends(get_current_principal)],
+    session: SessionDep,
 ) -> dict[str, Any]:
     """Return sillyspec skills manifest (version + file list + sha256 per file).
 
     daemon skill-manager 用来判定是否需重新拉取 bundle（版本漂移）。
+    合并代码库 ``sillyspec-*`` + DB ``CustomSkill``（task-03，每个 → ``<name>/SKILL.md``）。
     源目录无 skills 时返回 404。
     """
     from app.modules.agent.skills_bundle_service import build_skills_manifest
 
     del user  # 仅做认证，不使用
-    manifest = build_skills_manifest()
+    manifest = await build_skills_manifest(session=session)
     if not manifest.get("files"):
         raise HTTPException(status_code=404, detail="No skills found")
     return manifest
@@ -2058,16 +2060,17 @@ async def get_skills_manifest(
 @router.get("/skills/latest/bundle")
 async def get_skills_bundle(
     user: Annotated[Any, Depends(get_current_principal)],
+    session: SessionDep,
 ) -> StreamingResponse:
     """Return sillyspec-skills.tar.gz binary stream for daemon download.
 
-    bundle 含 skills_bundle_dir 下所有 sillyspec-* skill 目录，打包为 gzip tar。
+    bundle 含代码库 ``sillyspec-*`` skill 目录 + DB ``CustomSkill``，打包为 gzip tar。
     无 skills 时返回 404。
     """
     from app.modules.agent.skills_bundle_service import build_skills_bundle
 
     del user  # 仅做认证，不使用
-    bundle = build_skills_bundle()
+    bundle = await build_skills_bundle(session=session)
     if not bundle:
         raise HTTPException(status_code=404, detail="No skills found")
     return StreamingResponse(
@@ -2077,3 +2080,53 @@ async def get_skills_bundle(
             "Content-Disposition": "attachment; filename=sillyspec-skills.tar.gz",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# 2026-07-07-skills-mcp-management-ui task-05：daemon 拉 MCP 平台配置端点。
+# daemon skill-manager / mcp-config 启动时拉平台默认 mcpServers + 白名单，
+# 注入 claude 启动 env（design D-004）。与 task-04 admin GET（/api/platform-
+# settings/mcp）的区别：本端点给 daemon 用，**返回原值不脱敏**（daemon 需
+# 真实 env 才能注入 claude），admin GET 返回遮蔽值（D-008）。
+# 认证走 get_current_principal（daemon X-API-Key，同 skills/latest/* 端点）。
+# ---------------------------------------------------------------------------
+
+
+@router.get("/mcp/config")
+async def get_daemon_mcp_config(
+    session: SessionDep,
+    user: Annotated[Any, Depends(get_current_principal)],
+) -> dict[str, Any]:
+    """返回平台默认 MCP 配置 + server 白名单（**原值不脱敏**，design D-004）。
+
+    daemon 启动 skill-manager / mcp-config 时拉取，用于：
+      * ``platform_default.mcpServers`` → 注入 claude 启动 ``env``（真实值，
+        secret 类 env key 不遮蔽，区别 admin GET D-008）；
+      * ``whitelist`` → 仅放行白名单内的 server。
+
+    无配置时返回空结构 ``{"platform_default": {"mcpServers": {}}, "whitelist": []}``，
+    不报错（daemon 按"无平台默认"处理）。
+    """
+    from app.modules.settings.router import (
+        MCP_PLATFORM_DEFAULT_KEY,
+        MCP_WHITELIST_KEY,
+        _read_setting_json,
+    )
+
+    del user  # 仅做认证（daemon X-API-Key），不使用
+    platform_default = await _read_setting_json(
+        session, MCP_PLATFORM_DEFAULT_KEY, {"mcpServers": {}}
+    )
+    # 防御：DB 里若是非 dict 脏数据，归一为空结构而非原样透传。
+    if not isinstance(platform_default, dict):
+        platform_default = {"mcpServers": {}}
+    if not isinstance(platform_default.get("mcpServers"), dict):
+        platform_default = {**platform_default, "mcpServers": {}}
+
+    raw_whitelist = await _read_setting_json(session, MCP_WHITELIST_KEY, [])
+    whitelist = [str(x) for x in raw_whitelist] if isinstance(raw_whitelist, list) else []
+
+    return {
+        "platform_default": platform_default,
+        "whitelist": whitelist,
+    }

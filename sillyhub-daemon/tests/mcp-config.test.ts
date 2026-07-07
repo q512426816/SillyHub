@@ -9,7 +9,7 @@
 //
 // @module mcp-config.test
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   mergeMcpConfigs,
   validateMcpServers,
@@ -101,6 +101,44 @@ describe('mcp-config: hasAnyMcpServers', () => {
 describe('mcp-config: loadPlatformMcpConfig', () => {
   it('文件不存在 → 空配置不抛', async () => {
     const cfg = await loadPlatformMcpConfig();
+    expect(cfg.mcpServers).toBeDefined();
+  });
+});
+
+// task-07: backend 拉 + 回落
+import { fetchPlatformMcpConfig, loadPlatformMcpConfigFromBackend } from '../src/mcp-config.js';
+
+describe('mcp-config: fetchPlatformMcpConfig（task-07 backend 拉）', () => {
+  it('200 + platform_default → 返回 mcpServers', async () => {
+    const body = { platform_default: { mcpServers: { web: { command: 'w', args: [] } } } };
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(body), { status: 200 }),
+    );
+    const cfg = await fetchPlatformMcpConfig('http://hub:8000', 'tok');
+    expect(cfg?.mcpServers.web).toBeDefined();
+    // 带 Authorization header
+    const calledUrl = String(spy.mock.calls[0]?.[0]);
+    expect(calledUrl).toContain('/api/daemon/mcp/config');
+    spy.mockRestore();
+  });
+
+  it('非 200 → null', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('x', { status: 500 }));
+    const cfg = await fetchPlatformMcpConfig('http://hub:8000', 'tok');
+    expect(cfg).toBeNull();
+  });
+
+  it('网络错 → null 不抛', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('net'));
+    const cfg = await fetchPlatformMcpConfig('http://hub:8000', 'tok');
+    expect(cfg).toBeNull();
+  });
+});
+
+describe('mcp-config: loadPlatformMcpConfigFromBackend 回落', () => {
+  it('backend 拉 null → 回落本地文件（不抛）', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('net'));
+    const cfg = await loadPlatformMcpConfigFromBackend('http://hub:8000', null);
     expect(cfg.mcpServers).toBeDefined();
   });
 });

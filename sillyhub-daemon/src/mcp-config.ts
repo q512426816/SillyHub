@@ -60,6 +60,57 @@ export async function loadPlatformMcpConfig(
 }
 
 /**
+ * task-07（2026-07-07-skills-mcp-management-ui / D-004）：从 backend 拉平台 MCP 配置。
+ * 调 `GET /api/daemon/mcp/config`（daemon token 认证），返回 platform_default 的 mcpServers。
+ * 网络/非 200/解析失败 → 返回 null（调用方回落本地文件 fallback）。
+ *
+ * @param serverUrl  backend 根 URL
+ * @param token      daemon Bearer token（与 lease/heartbeat 同源）
+ */
+export async function fetchPlatformMcpConfig(
+  serverUrl: string,
+  token: string | null,
+  logger?: McpConfigLogger,
+): Promise<McpConfig | null> {
+  const url = `${serverUrl.replace(/\/$/, '')}/api/daemon/mcp/config`;
+  try {
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const resp = await fetch(url, { headers });
+    if (!resp.ok) {
+      logger?.('warn', 'mcp_config_fetch_failed', { url, status: resp.status });
+      return null;
+    }
+    const body = (await resp.json()) as {
+      platform_default?: { mcpServers?: Record<string, unknown> };
+    };
+    const mcpServers = (body.platform_default?.mcpServers ?? {}) as Record<string, McpServerConfig>;
+    return { mcpServers };
+  } catch (e) {
+    logger?.('warn', 'mcp_config_fetch_unreachable', { url, error: String(e) });
+    return null;
+  }
+}
+
+/**
+ * task-07：加载平台 MCP 配置——先尝试 backend 拉（最新，admin UI 配置源），
+ * 失败回落本地文件 `~/.sillyhub/daemon/mcp.json`（offline / 旧 backend 兼容）。
+ */
+export async function loadPlatformMcpConfigFromBackend(
+  serverUrl: string,
+  token: string | null,
+  logger?: McpConfigLogger,
+): Promise<McpConfig> {
+  const fetched = await fetchPlatformMcpConfig(serverUrl, token, logger);
+  if (fetched !== null) {
+    logger?.('debug', 'mcp_config_loaded_from_backend');
+    return fetched;
+  }
+  logger?.('debug', 'mcp_config_fallback_local_file');
+  return loadPlatformMcpConfig(logger);
+}
+
+/**
  * 读取 workspace 级 `.mcp.json`（specDir/docs/<ws>/.mcp.json 或 workspace specDir）。
  * 文件不存在/解析失败 → 返回空配置。
  */

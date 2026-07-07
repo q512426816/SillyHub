@@ -24,4 +24,30 @@ export const queryKeys = {
   daemonVersion: {
     all: ["daemonVersion"] as const,
   },
+  // 2026-07-07-skills-mcp-management-ui task-10：workspace 详情只读 skills / .mcp.json 视图。
+  // 两个独立查询（不同端点、不同失效节奏），按 workspaceId 分桶。
+  workspaceSkillsView: {
+    all: ["workspaceSkillsView"] as const,
+    detail: (workspaceId: string) =>
+      ["workspaceSkillsView", "detail", workspaceId] as const,
+  },
+  workspaceMcpConfig: {
+    all: ["workspaceMcpConfig"] as const,
+    detail: (workspaceId: string) =>
+      ["workspaceMcpConfig", "detail", workspaceId] as const,
+  },
+  // 2026-07-07-skills-mcp-management-ui task-08：自定义 skills CRUD + 平台
+  // skills manifest（只读）。customSkills.all = 列表缓存；manifest = 平台
+  // sillyspec skills 分发清单（version + files）。mutation 双 invalidate
+  // 因为 DB 自定义 skill 内容会进 manifest version hash（design §5.1）。
+  customSkills: {
+    all: ["customSkills"] as const,
+    manifest: ["customSkills", "manifest"] as const,
+  },
+  // 2026-07-07-skills-mcp-management-ui task-09：MCP 平台默认配置（admin GET
+    // 遮蔽 env secret）+ 白名单（server 名列表）。两个独立端点，独立缓存。
+  mcpSettings: {
+    config: ["mcpSettings", "config"] as const,
+    whitelist: ["mcpSettings", "whitelist"] as const,
+  },
 } as const;
