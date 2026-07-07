@@ -3,6 +3,13 @@ set -eu
 
 mkdir -p "${HOME:-/app}/.claude"
 mkdir -p /data/spec-workspaces
+# 2026-07-07-daemon-skill-execution task-07：把镜像内 /app/sillyspec-skills/ 软链到
+# /app/.claude/skills（claude-data volume 挂在 /app/.claude 遮盖镜像 COPY 内容，
+# 故镜像把 skills 放非 volume 路径 /app/sillyspec-skills，启动时软链进 volume）。
+# 幂等：每次启动确保软链存在（容器重启不影响，volume 里软链可能被清）。
+if [ -d /app/sillyspec-skills ] && [ ! -e "${HOME:-/app}/.claude/skills" ]; then
+  ln -s /app/sillyspec-skills "${HOME:-/app}/.claude/skills"
+fi
 chown -R app:app /data/spec-workspaces 2>/dev/null || true
 
 python - <<'PY'

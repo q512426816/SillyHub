@@ -88,8 +88,12 @@ COPY --from=daemon scripts/install.sh /app/daemon-dist/install.sh
 
 # 2026-07-07-daemon-skill-execution task-07：sillyspec skills 进镜像（server-local 模式
 # 容器内 claude 自带 skills 调 /sillyspec-* 跑 stage 流程，不经 daemon skill-manager 同步）。
-# 源路径经 docker-compose additional_contexts "skills: ../" 指向仓库根的 .claude/skills/。
-COPY --from=skills .claude/skills/ /app/.claude/skills/
+# compose additional_contexts "skills: ../.claude/skills" 直接指向 skills 目录本身。
+# COPY 到 /app/sillyspec-skills/（非 volume 路径）而非 /app/.claude/skills/——后者被
+# claude-data named volume 遮盖（volume 9h 前创建无 skills/，不会重拷镜像内容）。
+# docker-entrypoint.sh 启动时软链 /app/.claude/skills → /app/sillyspec-skills 让 claude 找到；
+# backend skills_bundle_dir config 默认 /app/sillyspec-skills 供 manifest/bundle 端点读。
+COPY --from=skills . /app/sillyspec-skills/
 
 RUN mkdir -p /app/.cache /app/.config /app/.claude /tmp/.npm /data/spec-workspaces \
  && chown -R app:app /app /tmp/.npm /data/spec-workspaces \

@@ -47,10 +47,12 @@ class Settings(BaseSettings):
     daemon_dist_dir: Path = Path("/app/daemon-dist")
 
     # 2026-07-07-daemon-skill-execution task-06：sillyspec skills 打包源目录。
-    # 镜像内路径由 Dockerfile COPY .claude/skills/ → /app/.claude/skills/（task-07）。
+    # 镜像内路径由 Dockerfile COPY → /app/sillyspec-skills/（task-07）。
+    # 不放 /app/.claude/skills/——该路径被 claude-data named volume 遮盖（volume 早于
+    # skills COPY 创建，不会重拷镜像内容），改放非 volume 路径，entrypoint 软链给 claude。
     # 测试经 monkeypatch 覆盖 skills_bundle_service.get_settings 指向 tmp_path。
     skills_bundle_dir: Path = Field(
-        default=Path("/app/.claude/skills"),
+        default=Path("/app/sillyspec-skills"),
         description="Directory containing sillyspec-* skill subdirectories for bundle packaging.",
     )
 
