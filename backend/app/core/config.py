@@ -46,6 +46,14 @@ class Settings(BaseSettings):
     # the backend image; override to a tmp_path in tests.
     daemon_dist_dir: Path = Path("/app/daemon-dist")
 
+    # 2026-07-07-daemon-skill-execution task-06：sillyspec skills 打包源目录。
+    # 镜像内路径由 Dockerfile COPY .claude/skills/ → /app/.claude/skills/（task-07）。
+    # 测试经 monkeypatch 覆盖 skills_bundle_service.get_settings 指向 tmp_path。
+    skills_bundle_dir: Path = Field(
+        default=Path("/app/.claude/skills"),
+        description="Directory containing sillyspec-* skill subdirectories for bundle packaging.",
+    )
+
     # ── Auth (task-04a) ────────────────────────────────────────────────
     auth_access_ttl_minutes: int = Field(
         30,

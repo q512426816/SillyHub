@@ -146,21 +146,23 @@ async def test_put_allowed_roots_pushes_policy_update(
     assert resp.status_code == 200, resp.text
 
     # send_policy_update invoked exactly once. HEAD: routing by daemon_id
-    # (= daemon_instance.id), roots read from daemon_instance, payload_runtime_id
+    # (= daemon_instance.id), roots read from runtime.allowed_roots (per-runtime,
+    # 2026-07-06-allowed-roots-per-runtime design §3), payload_runtime_id
     # carries the provider runtime_id (design §5.3).
     hub.send_policy_update.assert_awaited_once()
     call_args = hub.send_policy_update.await_args.args
     call_kwargs = hub.send_policy_update.await_args.kwargs
     assert call_args[0] == instance.id  # daemon_id routing key
-    assert call_args[1] == new_roots  # roots from daemon_instance.allowed_roots
+    assert call_args[1] == new_roots  # roots from runtime.allowed_roots
     version = call_args[2]
     assert isinstance(version, int)
     assert version >= 1
     assert call_kwargs["payload_runtime_id"] == rt.id  # provider discriminator
 
-    # DB actually persisted on daemon_instance (allowed_roots lives there now).
-    await db_session.refresh(instance)
-    assert list(instance.allowed_roots) == new_roots
+    # DB persisted on runtime (per-runtime 隔离：PUT 写 runtime.allowed_roots，
+    # 不写 instance——instance.allowed_roots 仅 daemon 心跳上报机器级 default)。
+    await db_session.refresh(rt)
+    assert list(rt.allowed_roots) == new_roots
 
 
 @pytest.mark.asyncio
@@ -202,8 +204,9 @@ async def test_put_allowed_roots_version_monotonic_across_writes(
 ) -> None:
     """Two successive PUTs yield strictly increasing version numbers.
 
-    Version derives from daemon_instance.updated_at (the row actually bumped by
-    update_allowed_roots), so successive writes are monotonic.
+    Version derives from runtime.updated_at (the row actually bumped by
+    update_allowed_roots per 2026-07-06-allowed-roots-per-runtime design §3),
+    so successive writes are monotonic.
     """
     admin = await _create_user(db_session, is_platform_admin=True)
     await _grant_platform_permission(db_session, admin.id, Permission.RUNTIME_ADMIN)

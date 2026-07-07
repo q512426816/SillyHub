@@ -6,8 +6,8 @@
 //   - 4 个 case：
 //     case1: fetch 注入 claude_md/repo_url/branch/tool_config → ctx 覆盖 + runLease 收到
 //     case2: fetch 抛 HubHttpError(500) → 仍调 runLease，ctx 回落 undefined，lease 不中断
-//     case3: ctx.claudeMd 非空 → TaskRunner.runLease 写 .claude/CLAUDE.md（spy fs/promises.writeFile）
-//     case4: ctx.claudeMd 空字符串 → writeFile 不被调
+//     case3: ctx.claudeMd 非空 → TaskRunner.runLease 不再写 .claude/CLAUDE.md（task-02 删除）
+//     case4: ctx.claudeMd 空字符串 → writeFile（CLAUDE.md）不被调
 //
 // case1/2 在 Daemon 编排层测（mock TaskRunner，断言 runLease 收到的 ctx）；
 // case3/4 在 TaskRunner 编排层测（mock HubClient/workspace/credential，断言 fs.writeFile 调用）。
@@ -414,15 +414,14 @@ describe('task-05 execution-context: daemon 编排层', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// case3 + case4: TaskRunner 编排层 —— CLAUDE.md 写入生效 / 空不写
-// 用 vi.spyOn(fs/promises, 'writeFile') 验证写入语义（对齐 task-05 §实现要求 5）。
+// case3: TaskRunner 编排层 —— CLAUDE.md 写入不再发生（task-02 删除写 CLAUDE.md）
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('task-05 execution-context: TaskRunner CLAUDE.md 写入', () => {
+describe('task-05 execution-context: TaskRunner CLAUDE.md 写入不再发生', () => {
   /** 路径尾段 `.claude/CLAUDE.md` 在当前 OS 的形态。 */
   const claudeMdTail = `.claude${sep}CLAUDE.md`;
 
-  it('case3: ctx.claudeMd 非空 → fs.writeFile 被调用且内容含 claudeMd 文本', async () => {
+  it('case3: ctx.claudeMd 非空 → 不再写入 .claude/CLAUDE.md（task-02 删除写 CLAUDE.md 逻辑）', async () => {
     fsWriteFileMock.mockClear();
     const fakeChild = createFakeChild();
     mockSpawnReturn(fakeChild);
@@ -432,18 +431,15 @@ describe('task-05 execution-context: TaskRunner CLAUDE.md 写入', () => {
     const p = runner.runLease(lease);
     await waitForSpawn();
     fakeChild._emitExit(0);
-    await p;
+    const result = await p;
 
-    // 至少一次 writeFile，且某次调用的第一个参数路径以 .claude/CLAUDE.md 结尾
-    expect(fsWriteFileMock).toHaveBeenCalled();
+    // task-02: writeFile（CLAUDE.md）不应被调用（不再写 CLAUDE.md）
     const claudeCalls = fsWriteFileMock.mock.calls.filter(
       (c) => String(c[0]).endsWith(claudeMdTail),
     );
-    expect(claudeCalls.length).toBeGreaterThanOrEqual(1);
-    // 第二参数（内容）含 '# Hi'
-    const writtenContent = claudeCalls[0]![1];
-    expect(String(writtenContent)).toContain('# Hi');
-    expect(String(writtenContent)).toContain('Project instructions.');
+    expect(claudeCalls).toHaveLength(0);
+    // runLease 仍正常完成（claudeMd 不再影响执行）
+    expect(result.status).toBe('completed');
   });
 
   it('case4: ctx.claudeMd 为空字符串 → fs.writeFile（CLAUDE.md）不被调用', async () => {
@@ -463,6 +459,95 @@ describe('task-05 execution-context: TaskRunner CLAUDE.md 写入', () => {
       (c) => String(c[0]).endsWith(claudeMdTail),
     );
     expect(claudeCalls).toHaveLength(0);
+  });
+});
+
+// ── task-02（D-007）：stage_meta 注入 STAGE_META env + skill 调用 prompt 构造 ──────
+describe('task-02 stage_meta: STAGE_META env 注入 + skill prompt 构造', () => {
+  it('ctx.stage_meta 非空 → spawn opts.env.STAGE_META 含序列化 JSON', async () => {
+    const mockedSpawn = vi.mocked(spawn);
+    mockedSpawn.mockClear();
+    const fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    const { runner } = setupRunner();
+
+    const stage_meta = {
+      change_id: 'chg-1',
+      stage: 'verify',
+      skill_name: 'sillyspec-verify',
+      workspace_id: 'ws-1',
+      spec_root_ref: '/data/.sillyspec',
+    };
+    const lease = makeLease({
+      stage_meta,
+      stage_dispatch: true,
+      prompt: '/sillyspec-verify --change chg-1 --stage verify',
+    } as Partial<LeaseCtx>);
+    const p = runner.runLease(lease);
+    await waitForSpawn();
+    fakeChild._emitExit(0);
+    await p;
+
+    expect(mockedSpawn.mock.calls.length).toBeGreaterThanOrEqual(1);
+    const lastCall = mockedSpawn.mock.calls[mockedSpawn.mock.calls.length - 1]!;
+    const opts = lastCall[2] as { env?: Record<string, string | undefined> };
+    expect(opts.env?.STAGE_META).toBeDefined();
+    const parsed = JSON.parse(opts.env!.STAGE_META!);
+    expect(parsed.change_id).toBe('chg-1');
+    expect(parsed.skill_name).toBe('sillyspec-verify');
+  });
+
+  it('stage_dispatch=true 且 prompt 空 → 构造 skill 调用指令 prompt', async () => {
+    const mockedSpawn = vi.mocked(spawn);
+    mockedSpawn.mockClear();
+    const fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    const { runner } = setupRunner();
+
+    const stage_meta = {
+      change_id: 'chg-2',
+      stage: 'plan',
+      skill_name: 'sillyspec-plan',
+      workspace_id: 'ws-2',
+      spec_root_ref: '',
+    };
+    const lease = makeLease({
+      stage_meta,
+      stage_dispatch: true,
+      prompt: '',
+    } as Partial<LeaseCtx>);
+    const p = runner.runLease(lease);
+    await waitForSpawn();
+    fakeChild._emitExit(0);
+    await p;
+
+    const adapter = getBackend('claude') as { buildArgs: (o: { prompt: string }) => string[] };
+    expect(adapter.buildArgs).toHaveBeenCalled();
+    const lastCall = (adapter.buildArgs as unknown as { mock: { calls: unknown[][] } }).mock.calls.at(
+      -1,
+    )![0] as { prompt: string };
+    expect(lastCall.prompt).toContain('/sillyspec-plan');
+    expect(lastCall.prompt).toContain('--change chg-2');
+    expect(lastCall.prompt).toContain('--stage plan');
+  });
+
+  it('非 stage lease（stage_meta 空）→ spawn env 不含 STAGE_META（零回归）', async () => {
+    const mockedSpawn = vi.mocked(spawn);
+    mockedSpawn.mockClear();
+    const fakeChild = createFakeChild();
+    mockSpawnReturn(fakeChild);
+    const { runner } = setupRunner();
+
+    const lease = makeLease({ prompt: '普通任务 prompt' });
+    const p = runner.runLease(lease);
+    await waitForSpawn();
+    fakeChild._emitExit(0);
+    await p;
+
+    expect(mockedSpawn.mock.calls.length).toBeGreaterThanOrEqual(1);
+    const lastCall = mockedSpawn.mock.calls[mockedSpawn.mock.calls.length - 1]!;
+    const opts = lastCall[2] as { env?: Record<string, string | undefined> };
+    expect(opts.env?.STAGE_META).toBeUndefined();
   });
 });
 

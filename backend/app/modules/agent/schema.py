@@ -74,6 +74,21 @@ class ExecutionContextResponse(BaseModel):
             "daemon 不可达，daemon 自行经 bundle 端点拉到本地。grill X-001 修正。"
         ),
     )
+    # task-02（2026-07-07-daemon-skill-execution / D-007）：stage 投递元数据。
+    # StageDispatchMeta：{change_id, stage, skill_name, workspace_id, spec_root_ref}。
+    # 仅 stage 类型 run 非空（build_stage_bundle 构造）；task/scan run 为 None。
+    # daemon 注入 STAGE_META 环境变量 + 构造 skill 调用 prompt。
+    stage_meta: dict | None = Field(
+        default=None,
+        description=(
+            "stage 投递元数据（StageDispatchMeta）。仅 stage 类型 run 携带；daemon 注入 "
+            "STAGE_META 环境变量并据此构造 skill 调用 prompt。task/scan run 为 None。"
+        ),
+    )
+    stage_dispatch: bool | None = Field(
+        default=None,
+        description="是否 stage 投递（daemon 用它判定是否构造 skill 调用 prompt）。",
+    )
 
 
 class QuickChatRequest(BaseModel):

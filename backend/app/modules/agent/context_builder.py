@@ -262,6 +262,17 @@ async def build_stage_bundle(
     spec_ws = (await session.execute(sw_stmt)).scalar_one_or_none()
     spec_root: str | None = spec_ws.spec_root if spec_ws else None
 
+    # 2026-07-07-daemon-skill-execution task-01 / D-007：构造 stage_meta（StageDispatchMeta）。
+    # backend → daemon → claude → skill 的投递元数据。daemon 注入 STAGE_META 环境变量
+    # （skill 从 process.env 读，应对 prompt 截断）+ 空 prompt 时构造 skill 调用指令。
+    stage_meta = {
+        "change_id": str(change_id),
+        "stage": stage,
+        "skill_name": f"sillyspec-{stage}",  # e.g. "sillyspec-verify"
+        "workspace_id": str(workspace_id),
+        "spec_root_ref": spec_root or "",
+    }
+
     # Step 5 — 组装 AgentSpecBundle
     bundle = AgentSpecBundle(
         # 核心 context
@@ -293,6 +304,8 @@ async def build_stage_bundle(
         spec_root=spec_root,
         step_prompt=step_prompt,
         read_only=read_only,
+        # task-01：stage 投递元数据
+        stage_meta=stage_meta,
     )
 
     # Step 6 — 记录日志并返回

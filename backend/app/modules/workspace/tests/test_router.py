@@ -398,8 +398,8 @@ async def test_init_endpoint_returns_lease(
     client: AsyncClient,
     auth_headers: dict[str, str],
 ) -> None:
-    """POST /api/workspaces/{workspace_id}/init creates an init-mode interactive
-    lease and returns lease_id / runtime_id / claim_token.
+    """POST /api/workspaces/{workspace_id}/init creates an init-mode batch lease
+    (kind='batch', metadata.mode='init') and returns lease_id / runtime_id / claim_token.
 
     This is the HTTP-level integration test complementing the service-level
     coverage in test_start_init_dispatch.py.
@@ -477,7 +477,9 @@ async def test_init_endpoint_returns_lease(
     assert uuid.UUID(body["runtime_id"])
     # claim_token is secrets.token_hex(32) → 64 hex chars
     assert len(body["claim_token"]) == 64, f"claim_token length: {len(body['claim_token'])}"
-    # lease is pending (interactive)
+    # lease is pending, kind='batch'（daemon 端 init lease 走 task-runner batch
+    # runLease 探测 mode='init'；kind='interactive' 会被 interactive handler 拒，
+    # 见 b5dda23f8 + daemon task-runner.ts:378）。
     from app.modules.daemon.model import DaemonTaskLease
 
     lease = (
@@ -491,5 +493,5 @@ async def test_init_endpoint_returns_lease(
     )
     assert lease is not None
     assert lease.status == "pending"
-    assert lease.kind == "interactive"
+    assert lease.kind == "batch"
     assert lease.runtime_id == rt.id

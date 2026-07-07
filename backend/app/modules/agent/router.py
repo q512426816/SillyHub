@@ -236,6 +236,28 @@ async def get_execution_context(
 
     claude_md = render_bundle_to_claude_md(bundle)
 
+    # task-02（2026-07-07-daemon-skill-execution / D-001/D-005/D-007）：stage 投递重构。
+    # stage 类型 run 不再把完整 stage prompt 塞进 claude_md（避免覆盖 worktree CLAUDE.md，
+    # patch 基准不一致 → does not match index 冲突）。改为：
+    #   - claude_md 留空（stage run 不写 CLAUDE.md，worktree 原项目规则保留）
+    #   - prompt 改为 skill 调用指令（/<skill_name> --change <id> --stage <stage>），
+    #     stage run 总是用 skill 调用指令（lease_meta.prompt 是旧式 stage prompt，已废弃）
+    #   - stage_meta + stage_dispatch 透传 bundle 数据，daemon 注入 STAGE_META env
+    # task/scan run 保持原 claude_md 渲染（零回归）。
+    stage_meta_out: dict | None = None
+    stage_dispatch_out: bool | None = None
+    if run_type == "stage":
+        claude_md = ""
+        stage_meta_out = getattr(bundle, "stage_meta", None)
+        stage_dispatch_out = True
+        if stage_meta_out and stage_meta_out.get("skill_name"):
+            parts = [f"/{stage_meta_out['skill_name']}"]
+            if stage_meta_out.get("change_id"):
+                parts.append(f"--change {stage_meta_out['change_id']}")
+            if stage_meta_out.get("stage"):
+                parts.append(f"--stage {stage_meta_out['stage']}")
+            lease_meta["prompt"] = " ".join(parts)
+
     # task-07 / grill X-001：按 path_source 条件赋值 spec_root。
     # - daemon-client → None（backend 机器路径不可达，daemon 自行解 bundle 到本地）。
     # - server-local + scan → lease_meta["spec_root"]（与 scan bundle 内现状 1:1）。
@@ -274,6 +296,9 @@ async def get_execution_context(
         # spec_root 按上面 path_source / run_type 分支赋值。
         workspace_id=workspace_id,
         spec_root=response_spec_root,
+        # task-02：stage 投递元数据 + stage_dispatch 透传（仅 stage run 非空）。
+        stage_meta=stage_meta_out,
+        stage_dispatch=stage_dispatch_out,
     )
 
 

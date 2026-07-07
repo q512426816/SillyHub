@@ -100,6 +100,11 @@ class AgentSpecBundle:
     runtime_root: str | None = None  # runtime dir (scan-runs, workflow-runs, etc.)
     step_prompt: str | None = None  # SillySpec CLI current step prompt
     read_only: bool = False  # read-only mode (analyze only, no writes)
+    # 2026-07-07-daemon-skill-execution task-01 / D-007：stage 投递元数据。
+    # StageDispatchMeta：{change_id, stage, skill_name, workspace_id, spec_root_ref}。
+    # build_stage_bundle 构造，daemon 注入 STAGE_META 环境变量 + 构造 skill 调用 prompt。
+    # 可选字段（默认 None），向后兼容既有调用方。
+    stage_meta: dict[str, str] | None = None
 
 
 @dataclass

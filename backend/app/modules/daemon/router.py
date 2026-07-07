@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
@@ -549,10 +550,11 @@ async def update_runtime_allowed_roots(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    # 2026-07-03-daemon-entity-binding：allowed_roots 已上提到 daemon_instances
-    # （design §4.1/§4.2）。update_allowed_roots 经 runtime.daemon_instance_id 写
-    # daemon_instance.allowed_roots + bump instance.updated_at，但 runtime 行本身
-    # 不变 → 这里读 daemon_instance 拿最新 roots 与 updated_at。
+    # 2026-07-06-allowed-roots-per-runtime：PUT 写 runtime.allowed_roots +
+    # bump runtime.updated_at（design §3，per-runtime 隔离，不再写 instance）。
+    # WS 路由键仍按 daemon_instance.id（design §5.3）；version + roots 都从 runtime
+    # 读（写入实际发生在 runtime 行）。instance 仅用于 daemon_id 路由 + 后续
+    # _runtime_read 填 daemon_version/build_id。
     from app.modules.daemon.model import DaemonInstance
 
     instance = (
@@ -562,17 +564,12 @@ async def update_runtime_allowed_roots(
     )
 
     # task-08：best-effort WS push（daemon 离线不阻断 PUT，心跳兜底 R-07）。
-    # version 派生自 daemon_instance.updated_at（写入实际发生的行，epoch 毫秒，单调）。
-    if instance is not None:
-        version = _derive_policy_version(instance.updated_at)
-        roots_to_push = list(runtime.allowed_roots or [])
-        daemon_id = instance.id
-    else:
-        # runtime 无关联 daemon_instance（迁移过渡 / 测试 fixture）→ 仍推一个
-        # 前向 version，避免 PUT 路径空推。daemon_id 退化为 runtime.id。
-        version = _derive_policy_version(runtime.updated_at)
-        roots_to_push = list(runtime.allowed_roots or [])
-        daemon_id = runtime.id
+    # version 派生自 runtime.updated_at（service update_allowed_roots 实际 bump 的
+    # 行，epoch 毫秒，单调）。roots 亦从 runtime 读（per-runtime 隔离）。
+    version = _derive_policy_version(runtime.updated_at)
+    roots_to_push = list(runtime.allowed_roots or [])
+    # 无关联 daemon_instance（迁移过渡 / 测试 fixture）→ daemon_id 退化为 runtime.id。
+    daemon_id = instance.id if instance is not None else runtime.id
 
     # Lazy import（与 list_dir / self_update 一致）：ws_hub 单例经
     # get_daemon_ws_hub 取，测试 per-test patch 不会被模块顶部 import 绑死。
@@ -2031,3 +2028,52 @@ async def get_pending_leases(
             }
         )
     return out
+
+
+# ---------------------------------------------------------------------------
+# 2026-07-07-daemon-skill-execution task-06：platform sillyspec skills 分发端点。
+# daemon skill-manager（task-03）启动时查 manifest 比对版本，新则拉 bundle 解压。
+# 仿 daemon install bundle 分发：tar.gz + manifest（version=内容 sha256 前缀 + 文件 sha256）。
+# ---------------------------------------------------------------------------
+
+
+@router.get("/skills/latest/manifest")
+async def get_skills_manifest(
+    user: Annotated[Any, Depends(get_current_principal)],
+) -> dict[str, Any]:
+    """Return sillyspec skills manifest (version + file list + sha256 per file).
+
+    daemon skill-manager 用来判定是否需重新拉取 bundle（版本漂移）。
+    源目录无 skills 时返回 404。
+    """
+    from app.modules.agent.skills_bundle_service import build_skills_manifest
+
+    del user  # 仅做认证，不使用
+    manifest = build_skills_manifest()
+    if not manifest.get("files"):
+        raise HTTPException(status_code=404, detail="No skills found")
+    return manifest
+
+
+@router.get("/skills/latest/bundle")
+async def get_skills_bundle(
+    user: Annotated[Any, Depends(get_current_principal)],
+) -> StreamingResponse:
+    """Return sillyspec-skills.tar.gz binary stream for daemon download.
+
+    bundle 含 skills_bundle_dir 下所有 sillyspec-* skill 目录，打包为 gzip tar。
+    无 skills 时返回 404。
+    """
+    from app.modules.agent.skills_bundle_service import build_skills_bundle
+
+    del user  # 仅做认证，不使用
+    bundle = build_skills_bundle()
+    if not bundle:
+        raise HTTPException(status_code=404, detail="No skills found")
+    return StreamingResponse(
+        io.BytesIO(bundle),
+        media_type="application/gzip",
+        headers={
+            "Content-Disposition": "attachment; filename=sillyspec-skills.tar.gz",
+        },
+    )

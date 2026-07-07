@@ -167,6 +167,21 @@ created_at: 2026-07-05 16:33:00
 遗留：① 端到端部署验证（daemon bundle + backend rebuild + 重启 daemon，用户重触发 dispatch 看 429 attempt 是否回流前端）；② pendingForwards 在 sillyhub-daemon 单测无专门覆盖（靠 typecheck + 全套回归守护）。
 坑：pendingForwards 类型 Promise<void>[] 报 TS2345（submitMessages 返回 Promise<unknown>），改 Promise<unknown>[] 过；catch 后的 promise 永远 resolve（allSettled 不 reject，吞掉 forward 失败仅 warn 不阻塞）。
 
+## ql-20260707-001-a3e7 | 2026-07-07 14:20:38 | 修 pytest 2 处失败：allowed_roots PUT version 派生取错对象（bug）+ init lease kind 测试陈旧断言 interactive
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/router.py, backend/app/modules/daemon/tests/test_allowed_roots_policy_push.py, backend/app/modules/workspace/tests/test_router.py, backend/app/modules/agent/service.py
+依据：
+- 根因1（实现 bug）：router.py:567 PUT allowed-roots version 派生取 instance.updated_at，但 per-runtime 设计下 service update_allowed_roots(runtime/service.py:606-607) 只 bump runtime.allowed_roots + runtime.updated_at 不碰 instance → instance.updated_at 永不递增 → version 不单调（test_put_allowed_roots_version_monotonic_across_writes 必挂）。归档 design 2026-07-06-allowed-roots-per-runtime §3（L88/L148/L199）+ 测试 docstring（L9-10）+ router docstring（L539）均要求 runtime.updated_at；router 代码与自身 docstring 矛盾，笔误 bug。
+- 根因2（测试陈旧）：test_init_endpoint_returns_lease（a691e393）断言 lease.kind=='interactive'；b5dda23f8（ql-20260706-005）按 daemon 端约束改 kind='batch'（task-runner.ts:378 init lease 走 batch runLease 探测 mode='init'；daemon.ts:2685 interactive_missing_fields 拒缺 session_id/run_id/prompt 的 init lease）并端到端验证通过，漏改测试 + service docstring。
+修法：
+- router.py：version 统一 _derive_policy_version(runtime.updated_at)；合并 if/else（roots+version 都从 runtime，daemon_id 路由键仍按 instance.id / 兜底 runtime.id）；更新过时注释。
+- test_allowed_roots_policy_push.py：断言 instance.allowed_roots → rt.allowed_roots；更新注释/docstring（L148-150/L204-206）。
+- test_init_endpoint_returns_lease：断言 interactive → batch + 更新 docstring/注释。
+- service.py start_init_dispatch：同步过时 docstring（interactive → batch）。
+测试：4 直测通过（allowed_roots 3 + init 1）；daemon+workspace 模块 633 passed 零回归。未重跑全量（改动局部 + 上次全量 2381 项确认仅此 2 失败均已修 + grep 确认无其他测试依赖 instance.updated_at version 派生 / interactive init kind）。
+关联 [[component-readonly-split-change]] 预存 init 债 + [[scan-stage-interactive-dispatch]]。
+
 
 
 

@@ -1618,15 +1618,15 @@ class AgentService:
         workspace_id: uuid.UUID,
         actor_user_id: uuid.UUID,
     ) -> dict:
-        """Create an init-mode interactive lease for the given workspace and actor.
+        """Create an init-mode batch lease (kind='batch', metadata.mode='init') for the given workspace and actor.
 
         This is the automated 'Initialize' flow (2026-07-02-workspace-config-flow
         D-002/D-009)::
 
           1. Ensure the spec workspace container exists (``ensure_spec_workspace``).
           2. Resolve the member binding for ``runtime_id`` + ``root_path``.
-          3. Create an interactive lease with ``mode='init'`` and a payload
-             containing ``platform_config{server_origin, strategy}`` and
+          3. Create a batch-kind lease (kind='batch') with ``mode='init'`` and a
+             payload containing ``platform_config{server_origin, strategy}`` and
              ``latest_spec_version``.
           4. Wake the target daemon so it picks up the lease.
 

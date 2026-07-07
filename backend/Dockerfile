@@ -86,6 +86,11 @@ COPY --from=builder /build /app
 COPY --from=daemon build/bundle/sillyhub-daemon.js /app/daemon-dist/sillyhub-daemon.js
 COPY --from=daemon scripts/install.sh /app/daemon-dist/install.sh
 
+# 2026-07-07-daemon-skill-execution task-07：sillyspec skills 进镜像（server-local 模式
+# 容器内 claude 自带 skills 调 /sillyspec-* 跑 stage 流程，不经 daemon skill-manager 同步）。
+# 源路径经 docker-compose additional_contexts "skills: ../" 指向仓库根的 .claude/skills/。
+COPY --from=skills .claude/skills/ /app/.claude/skills/
+
 RUN mkdir -p /app/.cache /app/.config /app/.claude /tmp/.npm /data/spec-workspaces \
  && chown -R app:app /app /tmp/.npm /data/spec-workspaces \
  && sed -i 's/\r$//' /app/docker-entrypoint.sh /app/daemon-dist/install.sh \

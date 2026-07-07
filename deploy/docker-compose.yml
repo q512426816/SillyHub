@@ -40,8 +40,11 @@ services:
       dockerfile: Dockerfile
       # 宿主机预构建的 daemon 分发物（install.sh + sillyhub-daemon.js）；
       # 部署前需 cd sillyhub-daemon && pnpm bundle 产出 build/bundle/。
+      # 2026-07-07-daemon-skill-execution task-07：skills 上下文指向仓库根，
+      # Dockerfile COPY --from=skills .claude/skills/ → /app/.claude/skills/（server-local）。
       additional_contexts:
         daemon: ../sillyhub-daemon
+        skills: ../
       args:
         CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.158}
         # 空 → 取最新 sillyspec；填值 → pin。

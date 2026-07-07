@@ -265,6 +265,16 @@ export interface LeaseCtx {
   /** 凭据/工具配置，渲染成环境变量。 */
   toolConfig?: ToolConfig;
   /**
+   * task-02（2026-07-07-daemon-skill-execution / D-007）：stage 投递元数据。
+   * StageDispatchMeta：{change_id, stage, skill_name, workspace_id, spec_root_ref}。
+   * backend build_stage_bundle 构造，经 execution-context 下发。daemon 注入 STAGE_META
+   * 环境变量（skill 从 process.env 读）+ stage_dispatch 且 prompt 空时构造 skill 调用指令。
+   * 保留 snake_case 与 backend/execution-context 一致（task-runner duck typing 读）。
+   */
+  stage_meta?: Record<string, unknown>;
+  /** task-02：是否 stage 投递（控制 skill prompt 构造分支）。 */
+  stage_dispatch?: boolean;
+  /**
    * claim_lease 颁发的令牌（WS 流程由 task-20 startLease 前注入；
    * poll 流程由 TaskRunner 内部 _claimTokens map 兜底）。
    * submitMessages / startLease / complete 必须携带，对齐 Python claim_token。
@@ -346,6 +356,14 @@ export interface ExecutionContextPayload {
   allowed_paths?: string[];
   /** 凭据/工具配置，渲染成环境变量（snake_case Record<string,string>）。 */
   tool_config?: Record<string, string>;
+  /**
+   * task-02（2026-07-07-daemon-skill-execution / D-007）：stage 投递元数据。
+   * StageDispatchMeta snake_case：{change_id, stage, skill_name, workspace_id, spec_root_ref}。
+   * daemon 透传到 ctx.stage_meta，注入 STAGE_META 环境变量 + 构造 skill 调用 prompt。
+   */
+  stage_meta?: Record<string, unknown>;
+  /** task-02：是否 stage 投递。 */
+  stage_dispatch?: boolean;
   /** 当前会话 id。 */
   session_id?: string;
   /** ql-20260617-009：workspace 标识 + 真实代码目录（host path）。 */

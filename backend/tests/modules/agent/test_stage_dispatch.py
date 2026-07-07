@@ -132,6 +132,14 @@ async def test_build_stage_bundle_returns_valid_bundle(
     assert "Test proposal content" in bundle.proposal
     assert bundle.read_only is False
     assert bundle.step_prompt is None
+    # task-01：stage_meta 五字段
+    assert bundle.stage_meta is not None
+    assert bundle.stage_meta["change_id"] == str(fake_change.id)
+    assert bundle.stage_meta["stage"] == "propose"
+    assert bundle.stage_meta["skill_name"] == "sillyspec-propose"
+    assert bundle.stage_meta["workspace_id"] == str(fake_workspace.id)
+    assert bundle.stage_meta["spec_root_ref"] == "/data/workspaces/test/.sillyspec"
+    assert len(bundle.stage_meta) == 5
 
 
 @pytest.mark.asyncio

@@ -8,7 +8,7 @@
  *
  * 9 步编排链：
  *   1. workspace.prepareWorkspace(name, repoUrl, branch) → workDir
- *   2. claudeMd 非空 → 写 ${workDir}/.claude/CLAUDE.md
+ *   2. stage_dispatch → STAGE_META env + skill prompt（task-02 不再写 CLAUDE.md）
  *   3. credential.buildEnv(toolConfig) → env
  *   4. getBackend(provider) → adapter
  *   5. client.startLease(leaseId, claimToken)
@@ -340,7 +340,7 @@ export class TaskRunner {
    *
    * 对齐 Python `execute_task(payload)`（task_runner.py:77-245）：
    * 1. workspace.prepareWorkspace
-   * 2. 写 CLAUDE.md
+   * 2. stage_dispatch → STAGE_META env + skill prompt（task-02 不再写 CLAUDE.md）
    * 3. credential.buildEnv
    * 4. getBackend(provider)
    * 5. client.startLease
@@ -452,17 +452,6 @@ export class TaskRunner {
         console.warn('task_runner: spec_bundle_pull_failed', leaseId, e);
       }
 
-      // 步骤 2：claudeMd 非空 → 写 .claude/CLAUDE.md
-      if (ctx.claudeMd && ctx.claudeMd.length > 0) {
-        try {
-          const claudeDir = join(workDir, '.claude');
-          await mkdir(claudeDir, { recursive: true });
-          await writeFile(join(claudeDir, 'CLAUDE.md'), ctx.claudeMd, 'utf-8');
-        } catch (e) {
-          // 写 CLAUDE.md 失败不致命，仅 warn（对齐 Python 仅 log 不 raise）
-          console.warn('task_runner: claude_md_write_failed', e);
-        }
-      }
 
       // 步骤 3：spawn env 构造（task-09 接入 buildSpawnEnv）
       // 三层合并：tool_config.env > claude token（credentials.json + process.env 兜底）
@@ -527,6 +516,21 @@ export class TaskRunner {
       }
 
       const spawnEnv = buildSpawnEnv(ctx, { credential: this.credential });
+
+      // task-02 (2026-07-07-daemon-skill-execution): stage_dispatch 分支
+      // backend 拼 stage prompt 已废弃，改为传 stage_meta（StageDispatchMeta）。
+      // daemon 注入 STAGE_META env + 构造 skill 调用 prompt。
+      // stage_meta 通过 duck typing 读取（AgentSpecBundle.stage_meta 透传至 lease payload）。
+      const stageMeta = (ctx as { stage_meta?: Record<string, unknown> }).stage_meta;
+      const stageDispatch = (ctx as { stage_dispatch?: boolean }).stage_dispatch;
+      if (stageMeta !== undefined) {
+        spawnEnv['STAGE_META'] = JSON.stringify(stageMeta);
+      }
+      // stage_dispatch 且 prompt 为空/DAU → 用 skill 指令替代 prompt（设计 §5.1）。
+      // prompt 已有值（非 stage_dispatch / 非空）→ 保持原逻辑零回归。
+      const effectivePrompt = (stageDispatch && (!ctx.prompt || ctx.prompt.trim() === ''))
+        ? buildSkillPrompt(stageMeta)
+        : (ctx.prompt ?? '');
       const maxRetries = resolveMaxRetries(this.config);
 
       // task-16（D-003 冻结语义）：allowed_roots 在 spawn 前取一次 PolicyCache 快照，
@@ -563,7 +567,7 @@ export class TaskRunner {
               model: effectiveCtx.model,
               sessionId: effectiveCtx.sessionId,
               resumeSessionId: effectiveCtx.resumeSessionId,
-              prompt: ctx.prompt ?? '',
+              prompt: effectivePrompt,
               // task-16：per-runtime allowed_roots（PolicyCache.get 快照，spawn 时冻结）。
               allowedRoots: frozenAllowedRoots,
               toolConfig: ctx.toolConfig as
@@ -577,7 +581,7 @@ export class TaskRunner {
           args,
           opts: { cwd: workDir, env: spawnEnv },
           adapter,
-          prompt: ctx.prompt ?? '',
+          prompt: effectivePrompt,
           ctx: effectiveCtx,
           signal: ac.signal,
           outputParts,
@@ -634,10 +638,24 @@ export class TaskRunner {
       }
 
       // 步骤 9：汇总 TaskResult
-      const success = result.status === 'completed' && result.exitCode === 0;
-      const finalStatus: TaskStatus = success ? 'completed' : result.status;
-      const output = this._truncate(outputParts.join(''), MAX_OUTPUT);
-      const errorOut = this._truncate(result.error ?? '', MAX_ERROR);
+      let success = result.status === 'completed' && result.exitCode === 0;
+      let finalStatus: TaskStatus = success ? 'completed' : result.status;
+      const outputRaw = outputParts.join('');
+      let output = this._truncate(outputRaw, MAX_OUTPUT);
+      let errorOut = this._truncate(result.error ?? '', MAX_ERROR);
+
+      // task-08（NFR-01 / D-001 兜底）：stage lease 检测 claude 是否成功调 skill。
+      // 输出含 "skill not found" 等明确失败标记 → 标 failed + 报错（不静默放过）。
+      // 非 stage lease（stageMeta 空）→ 不检测，零回归。
+      if (success && stageMeta !== undefined && !detectSkillInvoked(outputRaw, stageMeta)) {
+        const skillName = typeof stageMeta.skill_name === 'string' ? stageMeta.skill_name : '<unknown>';
+        const stageName = typeof stageMeta.stage === 'string' ? stageMeta.stage : '<unknown>';
+        const skillErr = `stage '${stageName}' 必须调用 skill '${skillName}'，但 claude 未成功调用（输出含 skill not found 或无 skill 调用痕迹）`;
+        console.warn('task_runner: skill_not_invoked', leaseId, { stage: stageName, skill: skillName });
+        success = false;
+        finalStatus = 'failed';
+        errorOut = skillErr;
+      }
 
       return this._finish(leaseId, startTime, success, result.exitCode, finalStatus, output, errorOut, sessionId, {
         diff,
@@ -2370,6 +2388,79 @@ export function isSpawnLevelFailure(
     return SPAWN_FAILURE_PATTERNS.test(r.error ?? '');
   }
   return false;
+}
+
+/**
+ * task-02 (2026-07-07-daemon-skill-execution): 构造 skill 调用 prompt。
+ *
+ * stage_dispatch 模式时，claude 不再收完整的 stage prompt（违反 D-005），
+ * 改为简短 skill 指令 —— claude 启动后自动加载对应 skill 跑流程。
+ *
+ * 格式（设计 §5.1.1）：
+ *   /{skill_name} --change {change_id} --stage {stage}
+ *
+ * stageMeta 缺 skill_name → 返回空串（无可用的 skill 指令）。
+ * change_id / stage 缺 → 省略对应参数（不阻塞 skill 启动）。
+ *
+ * 纯函数，不修改入参。
+ */
+export function buildSkillPrompt(
+  stageMeta?: Record<string, unknown>,
+): string {
+  if (!stageMeta) return '';
+  const skillName = typeof stageMeta.skill_name === 'string' && stageMeta.skill_name
+    ? stageMeta.skill_name
+    : '';
+  const changeId = typeof stageMeta.change_id === 'string' && stageMeta.change_id
+    ? stageMeta.change_id
+    : '';
+  const stage = typeof stageMeta.stage === 'string' && stageMeta.stage
+    ? stageMeta.stage
+    : '';
+  if (!skillName) return '';
+
+  let prompt = `/${skillName}`;
+  if (changeId) prompt += ` --change ${changeId}`;
+  if (stage) prompt += ` --stage ${stage}`;
+  return prompt;
+}
+
+/**
+ * task-08（NFR-01 / design §5.1.1 gap 2）：检测 claude 是否成功调用了 skill。
+ *
+ * stage 投递（stageMeta.skill_name 非空）时，stage lease 收尾调用：
+ *   - 输出含明确失败标记（skill not found / No skill named / unknown skill /
+ *     skill 'x' not found）→ false（应标 failed）
+ *   - 输出含 skill 调用痕迹（/<skill_name> 或 skill 名字符串）→ true
+ *   - 灰区（无失败标记也无 skill 痕迹）→ 默认 true（不误杀，第①层 prompt 强指令是主保障）
+ *
+ * 非 stage lease（stageMeta 空 / 无 skill_name）→ true（不检测，零回归）。
+ *
+ * 纯函数，便于单测。
+ */
+export function detectSkillInvoked(
+  output: string,
+  stageMeta?: Record<string, unknown>,
+): boolean {
+  if (!stageMeta) return true;
+  const skillName = typeof stageMeta.skill_name === 'string' ? stageMeta.skill_name : '';
+  if (!skillName) return true; // 无 skill_name 不检测
+  const lower = output.toLowerCase();
+  // 明确失败标记
+  const failMarkers = [
+    'skill not found',
+    'no skill named',
+    'unknown skill',
+    `skill '${skillName}' not found`,
+    `skill "${skillName}" not found`,
+  ];
+  if (failMarkers.some((m) => lower.includes(m.toLowerCase()))) return false;
+  // skill 调用痕迹
+  if (lower.includes(`/${skillName.toLowerCase()}`) || lower.includes(skillName.toLowerCase())) {
+    return true;
+  }
+  // 灰区 → 不误杀
+  return true;
 }
 
 // ── task-16 (2026-06-24-runtime-usage-stats)：batch usage 兜底合并 ───────────

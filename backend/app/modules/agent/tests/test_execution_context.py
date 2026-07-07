@@ -223,7 +223,13 @@ async def test_get_execution_context_task_run(client, db_session, tmp_path):
 
 
 async def test_get_execution_context_stage_run(client, db_session, tmp_path):
-    """AC-02/08：stage run（lease.metadata.stage 标记）→ 200，stage_dispatch bundle。"""
+    """AC-02/08：stage run（lease.metadata.stage 标记）→ 200，stage_dispatch bundle。
+
+    task-02（2026-07-07-daemon-skill-execution）：stage 投递重构后——
+    - claude_md 留空（不覆盖 worktree CLAUDE.md，D-005）
+    - prompt 改为 skill 调用指令 /<skill_name> --change <id> --stage <stage>（D-001/D-007）
+    - stage_meta + stage_dispatch 透传（daemon 注入 STAGE_META env）
+    """
     owner = await _make_user(db_session)
     run_id = await _make_run(
         db_session,
@@ -232,7 +238,7 @@ async def test_get_execution_context_stage_run(client, db_session, tmp_path):
         run_type="stage",
         lease_meta={
             "stage": "plan",
-            "prompt": "生成计划",
+            "prompt": "生成计划",  # 旧式 stage prompt，stage run 改用 skill 调用指令覆盖
             "step_prompt": "current step",
             "read_only": False,
         },
@@ -243,10 +249,16 @@ async def test_get_execution_context_stage_run(client, db_session, tmp_path):
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["claude_md"]
-    assert body["prompt"] == "生成计划"
-    # stage bundle 的 task_key 形如 "stage:plan"，渲染进 claude_md
-    assert "stage:plan" in body["claude_md"]
+    # task-02/D-005：stage run claude_md 留空（不写 worktree CLAUDE.md）
+    assert body["claude_md"] == ""
+    # task-02/D-001：prompt 改为 skill 调用指令（覆盖旧式 stage prompt）
+    assert body["prompt"].startswith("/sillyspec-plan")
+    assert "--stage plan" in body["prompt"]
+    # task-02/D-007：stage_meta + stage_dispatch 透传
+    assert body["stage_meta"] is not None
+    assert body["stage_meta"]["stage"] == "plan"
+    assert body["stage_meta"]["skill_name"] == "sillyspec-plan"
+    assert body["stage_dispatch"] is True
 
 
 async def test_get_execution_context_scan_run(client, db_session, tmp_path):

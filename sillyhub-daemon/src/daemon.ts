@@ -66,6 +66,8 @@ import { HostFsHandler } from './host-fs-handler.js';
 import { buildSpawnEnv } from './spawn-env.js';
 // 2026-06-24 preflight：启动前预检 sillyspec 版本 + daemon 自更新（失败不阻断启动）。
 import { runPreflight } from './preflight.js';
+// 2026-07-07-daemon-skill-execution task-03：skill-manager，启动同步平台 sillyspec skills。
+import { syncSkills } from './skill-manager.js';
 // daemon 自身构建标识（release=git SHA），register 时上报供服务端判定是否需推送自更新。
 import { BUILD_ID } from './build-id.js';
 // 2026-06-24-daemon-network-resilience task-10/12：网络层重试编排（submit 重试 + 终态轻量重试）。
@@ -782,6 +784,17 @@ export class Daemon {
     //（query resume）→ reconnecting→active。失败隔离 + backend rejected 删记录。
     // 未注入 persistence/recoveryClient → 跳过（Wave1/2 行为，向后兼容）。
     await this._recoverSessionsOnBoot();
+
+    // task-03（2026-07-07-daemon-skill-execution）：同步平台 sillyspec skills。
+    // 在 agent 探测之后、三循环启动之前。skills 版本比对 + bundle 拉取 + 解压。
+    // 失败不阻断启动（同步失败不影响已有 skill 集，下一轮启动重试）。
+    try {
+      await syncSkills(this._serverOrigin(), (level, msg, data) => {
+        this._logger[level](msg, data);
+      });
+    } catch (e) {
+      this._logger.warn('skill_sync_failed', { error: e });
+    }
 
     // 3. 启动三循环
     this._fire((signal) => this._heartbeatLoop(signal));
@@ -3093,6 +3106,13 @@ export class Daemon {
         (rawExec.claudeMd as string | undefined) ??
         (rawExec.claude_md as string | undefined) ??
         payload.claudeMd,
+      // task-02（D-007）：stage_meta 透传（snake_case 保留，task-runner duck typing 读）。
+      stage_meta:
+        (rawExec.stage_meta as Record<string, unknown> | undefined) ??
+        payload.stage_meta,
+      stage_dispatch:
+        (rawExec.stage_dispatch as boolean | undefined) ??
+        payload.stage_dispatch,
       provider:
         (rawExec.provider as string | undefined) ??
         (rawExec.agent_type as string | undefined) ??
@@ -3214,6 +3234,9 @@ export class Daemon {
       repoUrl: execCtx?.repo_url ?? execPayload.repoUrl,
       branch: execCtx?.branch ?? execPayload.branch,
       claudeMd: execCtx?.claude_md ?? execPayload.claudeMd,
+      // task-02（D-007）：stage_meta + stage_dispatch 透传。
+      stage_meta: execCtx?.stage_meta ?? execPayload.stage_meta,
+      stage_dispatch: execCtx?.stage_dispatch ?? execPayload.stage_dispatch,
       provider: resolvedProvider,
       // toolConfig：fetch.tool_config 是 snake_case Record，payload.toolConfig 是 camelCase；
       // fetch 优先（端点是 task-03 之后的最新源）
