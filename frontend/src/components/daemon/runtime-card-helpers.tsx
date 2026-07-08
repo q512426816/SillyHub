@@ -29,6 +29,8 @@ import {
   type DaemonRuntimeRead,
   type DaemonVersionInfo,
   type RuntimeUsageItem,
+  type RuntimeUsagePoint,
+  type RuntimeUsageWindow,
 } from "@/lib/daemon";
 
 export type BadgeVariant = "default" | "success" | "outline" | "warning" | "destructive";
@@ -391,4 +393,61 @@ export function DaemonVersionBadge({
 }) {
   const state = getDaemonVersionBadgeState(buildId, latest);
   return <Badge variant={state.variant}>{state.label}</Badge>;
+}
+
+/**
+ * buildSparkSeries —— 把 getRuntimesUsage 的 daily（只含有 run 的桶）补全成完整
+ * 时间序列，供 sparkline 渲染连续 N 天趋势（ql-20260708-001）。
+ *
+ * backend _build_daily_sql GROUP BY bucket 只返有数据的桶，无数据桶不返；
+ * 7d/30d 前端降采样到日桶（按 UTC date sum 同日所有桶）+ 补全最近 N 天（缺失天 0 值），
+ * 让 sparkline 显示完整趋势而非零星几点。1d 保持原桶（20min，点数已密）。
+ */
+export function buildSparkSeries(
+  daily: RuntimeUsagePoint[],
+  window: RuntimeUsageWindow,
+): RuntimeUsagePoint[] {
+  if (window === "1d") return daily;
+  const days = window === "7d" ? 7 : 30;
+  // 降采样：按 UTC date（YYYY-MM-DD）sum 到日桶。
+  const byDay = new Map<string, RuntimeUsagePoint>();
+  for (const p of daily) {
+    const dayKey = p.ts.slice(0, 10);
+    const existing = byDay.get(dayKey);
+    if (existing) {
+      existing.input_tokens += p.input_tokens;
+      existing.output_tokens += p.output_tokens;
+      existing.cache_read_tokens = (existing.cache_read_tokens ?? 0) + (p.cache_read_tokens ?? 0);
+      existing.cache_creation_tokens =
+        (existing.cache_creation_tokens ?? 0) + (p.cache_creation_tokens ?? 0);
+      existing.total_cost_usd = (existing.total_cost_usd ?? 0) + (p.total_cost_usd ?? 0);
+    } else {
+      byDay.set(dayKey, {
+        ts: `${dayKey}T00:00:00Z`,
+        input_tokens: p.input_tokens,
+        output_tokens: p.output_tokens,
+        cache_read_tokens: p.cache_read_tokens ?? 0,
+        cache_creation_tokens: p.cache_creation_tokens ?? 0,
+        total_cost_usd: p.total_cost_usd ?? 0,
+      });
+    }
+  }
+  // 补全：最近 N 天（UTC 自然日，缺失天 0 值）。
+  const now = new Date();
+  const result: RuntimeUsagePoint[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i));
+    const dayKey = d.toISOString().slice(0, 10);
+    result.push(
+      byDay.get(dayKey) ?? {
+        ts: `${dayKey}T00:00:00Z`,
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_creation_tokens: 0,
+        total_cost_usd: 0,
+      },
+    );
+  }
+  return result;
 }

@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 
 import {
   AgentsList,
+  buildSparkSeries,
   formatCache,
   formatCost,
   formatTokens,
@@ -174,7 +175,10 @@ export function RuntimeCard({
           <UsageStat label="费用" value={costLabel} tone="cost" />
         </div>
         <div className="mt-1.5">
-          <RuntimeUsageLineChart points={usage?.daily ?? []} loading={usageLoading} />
+          <RuntimeUsageLineChart
+            points={buildSparkSeries(usage?.daily ?? [], usageWindow)}
+            loading={usageLoading}
+          />
         </div>
       </div>
 

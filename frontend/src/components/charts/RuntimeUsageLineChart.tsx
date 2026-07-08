@@ -47,6 +47,25 @@ export interface RuntimeUsageLineChartProps {
   loading?: boolean;
 }
 
+/** sparkline tooltip 标题格式化：ts(ISO) → 友好（日桶 MM/DD，小时桶 MM/DD HH:mm）。
+ * buildSparkSeries 7d/30d 日桶 ts 以 T00:00:00Z 结尾 → 只显月日；
+ * 1d 小时桶 ts 含时分 → 月日时分。 */
+function formatSparkTooltipHeader(params: unknown): string {
+  const ts = Array.isArray(params)
+    ? (params[0] as { axisValue?: unknown } | undefined)?.axisValue
+    : (params as { axisValue?: unknown } | undefined)?.axisValue;
+  if (typeof ts !== "string" || !ts) return "";
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  const isDayBucket = ts.endsWith("T00:00:00Z");
+  return d.toLocaleString(
+    "zh-CN",
+    isDayBucket
+      ? { month: "2-digit", day: "2-digit" }
+      : { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" },
+  );
+}
+
 export function RuntimeUsageLineChart({
   points,
   height = 120,
@@ -59,7 +78,22 @@ export function RuntimeUsageLineChart({
     return {
       tooltip: {
         trigger: "axis",
-        valueFormatter: (v) => `${Number(v ?? 0).toLocaleString()} tokens`,
+        formatter: (params: unknown) => {
+          const ps = (
+            Array.isArray(params) ? params : [params]
+          ) as Array<{
+            axisValue?: unknown;
+            marker?: string;
+            seriesName?: string;
+            value?: number;
+          }>;
+          const header = formatSparkTooltipHeader(ps);
+          const lines = ps.map(
+            (p) =>
+              `${p.marker ?? ""} ${p.seriesName ?? ""}: ${Number(p.value ?? 0).toLocaleString()} tokens`,
+          );
+          return [header, ...lines].join("<br/>");
+        },
       },
       legend: { data: ["输入", "输出"], top: 0, textStyle: { fontSize: 10 } },
       grid: { left: 8, right: 8, top: 24, bottom: 8, containLabel: false },

@@ -2149,7 +2149,7 @@ export class Daemon {
         '}\n';
       const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
       return new Promise<{ path: string }>((resolve, reject) => {
-        exec(`powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`, {
+        exec(`powershell -NoProfile -Sta -EncodedCommand ${encoded}`, {
           encoding: 'utf8',
           timeout: 180000,
           windowsHide: false,

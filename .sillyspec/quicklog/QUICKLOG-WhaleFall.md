@@ -356,3 +356,11 @@ commit：13403c71(feat runtimes allowed_roots 完整变更) + d3153988(fix inter
 现状：layout.tsx 仅 changes 路径返回 fragment（无 main wrapper + 无 WorkspaceTabs），其他路径（含 components）都包 WorkspaceTabs 显示 tab 行。components 页自带 PageContainer，不需要外层 tab。
 方案：layout.tsx 的 isStandalone 判断从仅 changes 扩展为 changes 或 components 路径，两者都返回 <>{children}</> fragment（DOM 对齐 admin/roles，dashboard layout main 直接接 page）。
 结果：已完成 + 部署。tsc 零错。frontend --build --force-recreate 重建部署（首次 --build 缓存未重建，--force-recreate 后容器 03:20 StartedAt 确认新镜像）。用户刷新 /workspaces/{id}/components 应不再显示头部 tab 行。代码未提交。
+
+## ql-20260708-001-b7e4 | 2026-07-08 13:35:00 | runtime 卡 sparkline 补全 7d/30d 完整序列（降采样日桶 + 缺失天补 0）
+状态：进行中
+关联变更：（无）
+文件：frontend/src/components/daemon/runtime-card-helpers.tsx、frontend/src/components/daemon/runtime-card.tsx
+需求：/runtimes 页 runtime 卡 sparkline 统计 7d 用量，但 daily 只返有 run 的桶（无数据桶不返），折线只显零星几点，不像连续 7 天趋势。
+现状：backend _bucket_unit 7d=小时桶，_build_daily_sql GROUP BY bucket 只返有 run 的桶（无 generate_series 补全）；前端 RuntimeUsageLineChart 直接用 daily，缺桶不补 0。
+方案：前端补全——runtime-card-helpers 加 buildSparkSeries(daily, window)：7d/30d 降采样到日桶（UTC date sum 同日）+ 补全最近 N 天（缺失天 0）；1d 保持。RuntimeCard 用它喂 sparkline。不动 backend。

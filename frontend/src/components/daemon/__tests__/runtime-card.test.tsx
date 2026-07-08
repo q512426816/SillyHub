@@ -15,9 +15,11 @@ import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { RuntimeCard } from "@/components/daemon/runtime-card";
+import { buildSparkSeries } from "@/components/daemon/runtime-card-helpers";
 import type {
   DaemonRuntimeRead,
   RuntimeUsageItem,
+  RuntimeUsagePoint,
 } from "@/lib/daemon";
 
 function makeRuntime(overrides: Record<string, unknown> = {}): DaemonRuntimeRead {
@@ -243,5 +245,45 @@ describe("RuntimeCard（task-07 / FR-01 / FR-04）", () => {
       expect(container.textContent).toMatch(/会话/);
       expect(container.textContent).toMatch(/协议/);
     });
+  });
+});
+
+describe("buildSparkSeries（ql-20260708-001 补全 sparkline 序列）", () => {
+  // beforeEach 已 vi.setSystemTime("2026-07-07T12:00:00Z")，7d 窗 = 07-01..07-07（UTC 自然日）。
+  it("7d：小时桶降采样到 7 日桶（sum 同日）+ 补全缺失天（0 值）", () => {
+    const daily: RuntimeUsagePoint[] = [
+      { ts: "2026-07-06T07:00:00Z", input_tokens: 100, output_tokens: 10, cache_read_tokens: 1, cache_creation_tokens: 0, total_cost_usd: 1 },
+      { ts: "2026-07-06T08:00:00Z", input_tokens: 50, output_tokens: 5, cache_read_tokens: 0, cache_creation_tokens: 0, total_cost_usd: 0.5 },
+      { ts: "2026-07-07T00:00:00Z", input_tokens: 200, output_tokens: 20, cache_read_tokens: 2, cache_creation_tokens: 0, total_cost_usd: 2 },
+    ];
+    const result = buildSparkSeries(daily, "7d");
+    expect(result).toHaveLength(7);
+    expect(result.every((p) => p.ts.endsWith("T00:00:00Z"))).toBe(true);
+    // 07-06：100+50=150 input、10+5=15 output、1 cache、1+0.5=1.5 cost（同日小时桶 sum）。
+    const d0606 = result.find((p) => p.ts.startsWith("2026-07-06"));
+    expect(d0606?.input_tokens).toBe(150);
+    expect(d0606?.output_tokens).toBe(15);
+    expect(d0606?.cache_read_tokens).toBe(1);
+    expect(d0606?.total_cost_usd).toBe(1.5);
+    // 07-07：200 input。
+    const d0607 = result.find((p) => p.ts.startsWith("2026-07-07"));
+    expect(d0607?.input_tokens).toBe(200);
+    // 07-01..05 缺失补 0。
+    const d0601 = result.find((p) => p.ts.startsWith("2026-07-01"));
+    expect(d0601?.input_tokens).toBe(0);
+    expect(d0601?.total_cost_usd).toBe(0);
+  });
+
+  it("1d：保持原 daily 不补全（点数已密，直接返回同引用）", () => {
+    const daily: RuntimeUsagePoint[] = [
+      { ts: "2026-07-07T10:00:00Z", input_tokens: 5, output_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, total_cost_usd: 0 },
+    ];
+    expect(buildSparkSeries(daily, "1d")).toBe(daily);
+  });
+
+  it("30d：空 daily → 补全 30 个 0 点", () => {
+    const result = buildSparkSeries([], "30d");
+    expect(result).toHaveLength(30);
+    expect(result.every((p) => p.input_tokens === 0 && p.total_cost_usd === 0)).toBe(true);
   });
 });
