@@ -235,7 +235,7 @@ function SummaryCard({
 }) {
   const toneClass = {
     neutral: "border-slate-200 bg-white text-slate-700",
-    online: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    online: "border-emerald-500 bg-emerald-50 text-emerald-700",
     warning: "border-amber-200 bg-amber-50 text-amber-700",
     offline: "border-slate-200 bg-slate-50 text-slate-600",
     disabled: "border-rose-200 bg-rose-50 text-rose-700",
@@ -951,19 +951,23 @@ export default function RuntimesPage() {
                     useEffect 重发 getRuntimesUsage(新窗) → 所有卡片用量区同步刷新。
                   */}
                   <div className="flex items-center gap-1.5">
-                    <div className="flex items-center gap-1 rounded-md border bg-card p-0.5">
+                    <div className="flex items-center gap-0.5 rounded-md border border-slate-300 bg-white p-0.5">
                       {(Object.keys(WINDOW_LABELS) as RuntimeUsageWindow[]).map((w) => (
-                        <Button
+                        <button
                           key={w}
-                          size="sm"
-                          variant={usageWindow === w ? "default" : "outline"}
-                          className="h-7 px-2.5 text-xs"
+                          type="button"
                           onClick={() => setUsageWindow(w)}
                           aria-label={`切换用量统计时间窗为${WINDOW_LABELS[w]}`}
                           title={`切换用量统计时间窗为${WINDOW_LABELS[w]}`}
+                          className={cn(
+                            "rounded px-2.5 py-1 text-[11.5px] font-semibold transition-colors",
+                            usageWindow === w
+                              ? "bg-blue-600 text-white"
+                              : "text-slate-500 hover:text-slate-700",
+                          )}
                         >
                           {WINDOW_LABELS[w]}
-                        </Button>
+                        </button>
                       ))}
                     </div>
                     <Button
@@ -990,13 +994,13 @@ export default function RuntimesPage() {
                     placeholder="搜索主机名/别名/提供方"
                     value={query}
                     onChange={(e) => updateFilter(setQuery)(e.target.value)}
-                    className="h-8 min-w-[12rem] flex-1 rounded border bg-card px-2 text-xs"
+                    className="h-8 min-w-[12rem] flex-1 rounded border border-slate-300 bg-white px-2 text-xs text-slate-700 placeholder:text-slate-400"
                   />
                   <select
                     aria-label="筛选提供方"
                     value={providerFilter}
                     onChange={(e) => updateFilter(setProviderFilter)(e.target.value)}
-                    className="h-8 rounded border bg-card px-2 text-xs"
+                    className="h-8 rounded border border-slate-300 bg-white px-2 text-xs text-slate-700"
                   >
                     <option value="">全部提供方</option>
                     {Object.entries(PROVIDER_META).map(([key, meta]) => (
@@ -1009,7 +1013,7 @@ export default function RuntimesPage() {
                     aria-label="筛选状态"
                     value={statusFilter}
                     onChange={(e) => updateFilter(setStatusFilter)(e.target.value)}
-                    className="h-8 rounded border bg-card px-2 text-xs"
+                    className="h-8 rounded border border-slate-300 bg-white px-2 text-xs text-slate-700"
                   >
                     <option value="">全部状态</option>
                     <option value="online">在线</option>
@@ -1022,7 +1026,7 @@ export default function RuntimesPage() {
                       aria-label="筛选人员"
                       value={ownerUserId ?? ""}
                       onChange={(e) => updateFilter(setOwnerUserId)(e.target.value || null)}
-                      className="h-8 rounded border bg-card px-2 text-xs"
+                      className="h-8 rounded border border-slate-300 bg-white px-2 text-xs text-slate-700"
                     >
                       <option value="">全部人员</option>
                       {userOptions.map((u) => (
@@ -1035,7 +1039,7 @@ export default function RuntimesPage() {
                 </div>
                 <div
                   data-testid="runtime-list-scroll"
-                  className="space-y-3 pr-1"
+                  className="space-y-4 pr-1"
                 >
                   {machines.map((machine) => (
                     <MachineCard

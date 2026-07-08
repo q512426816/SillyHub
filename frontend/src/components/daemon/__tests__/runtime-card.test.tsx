@@ -201,8 +201,8 @@ describe("RuntimeCard（task-07 / FR-01 / FR-04）", () => {
       expect(screen.getByRole("button", { name: /^移除$/ })).toBeInTheDocument();
       // 别名按钮（文本「别名」）。
       expect(screen.getByRole("button", { name: /^别名$/ })).toBeInTheDocument();
-      // 升级到最新版按钮（文本「升级到最新版」）。
-      expect(screen.getByRole("button", { name: /升级到最新版/ })).toBeInTheDocument();
+      // 升级按钮（文本「升级」，对齐 prototype .btn-outline btn-tiny）。
+      expect(screen.getByRole("button", { name: /^升级$/ })).toBeInTheDocument();
     });
 
     it("审计日志 href 指向 /runtimes/{id}/audit", () => {
@@ -237,10 +237,10 @@ describe("RuntimeCard（task-07 / FR-01 / FR-04）", () => {
       // C-002：RuntimeCard 不渲染「Daemon 版本」meta 行（信息上提 MachineCard）。
       // 用 queryByText 在整个卡片作用域反向断言该 label 文本不存在。
       expect(screen.queryByText("Daemon 版本")).not.toBeInTheDocument();
-      // 运行环境/心跳/版本/协议/会话 等 meta label 仍在
-      expect(container.textContent).toMatch(/运行环境/);
-      expect(container.textContent).toMatch(/心跳/);
+      // 版本/会话/协议 meta label 仍在（对齐 prototype rt-meta 3 列；
+      // 运行环境/心跳/可执行路径 上提机器头或不渲染，不再断言）。
       expect(container.textContent).toMatch(/版本/);
+      expect(container.textContent).toMatch(/会话/);
       expect(container.textContent).toMatch(/协议/);
     });
   });

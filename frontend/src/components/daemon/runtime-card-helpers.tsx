@@ -36,6 +36,8 @@ export type BadgeVariant = "default" | "success" | "outline" | "warning" | "dest
 export type StatusMeta = {
   label: string;
   badge: BadgeVariant;
+  /** 精确 Tailwind 色阶 badge className（对齐 prototype .badge.*，不依赖 shadcn variant）。 */
+  badgeClass: string;
   dot: string;
   iconBg: string;
   icon: LucideIcon;
@@ -110,7 +112,8 @@ export function getStatusMeta(status: string | null): StatusMeta {
       return {
         label: "在线",
         badge: "success",
-        dot: "bg-emerald-500",
+        badgeClass: "bg-emerald-50 text-emerald-700",
+        dot: "bg-emerald-600",
         iconBg: "bg-emerald-50 text-emerald-700",
         icon: Wifi,
       };
@@ -118,6 +121,7 @@ export function getStatusMeta(status: string | null): StatusMeta {
       return {
         label: "维护中",
         badge: "warning",
+        badgeClass: "bg-amber-50 text-amber-700",
         dot: "bg-amber-500",
         iconBg: "bg-amber-50 text-amber-700",
         icon: Wrench,
@@ -126,14 +130,16 @@ export function getStatusMeta(status: string | null): StatusMeta {
       return {
         label: "离线",
         badge: "outline",
+        badgeClass: "bg-slate-100 text-slate-600",
         dot: "bg-slate-400",
-        iconBg: "bg-slate-100 text-slate-600",
+        iconBg: "bg-slate-100 text-slate-500",
         icon: WifiOff,
       };
     case "disabled":
       return {
         label: "禁用",
         badge: "destructive",
+        badgeClass: "bg-rose-50 text-rose-700",
         dot: "bg-rose-500",
         iconBg: "bg-rose-50 text-rose-700",
         icon: Ban,
@@ -142,8 +148,9 @@ export function getStatusMeta(status: string | null): StatusMeta {
       return {
         label: status ?? "未知",
         badge: "outline",
+        badgeClass: "bg-slate-100 text-slate-600",
         dot: "bg-slate-400",
-        iconBg: "bg-slate-100 text-slate-600",
+        iconBg: "bg-slate-100 text-slate-500",
         icon: CircleDashed,
       };
   }
@@ -231,14 +238,14 @@ export function formatCache(item: RuntimeUsageItem | undefined): string {
 
 export function ProviderBadge({ provider }: { provider: string | null }) {
   const tone = getProviderTone(provider);
+  // 对齐 prototype .pbadge：无 dot，仅 provider 名 + 精确色阶边框/底/字。
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded border px-2 py-0.5 text-[11px] font-medium",
+        "inline-flex items-center rounded border px-2 py-0.5 text-[11px] font-semibold",
         tone?.badge ?? "border-slate-200 bg-slate-50 text-slate-600",
       )}
     >
-      <span className={cn("h-1.5 w-1.5 rounded-full", tone?.dot ?? "bg-slate-400")} />
       {getProviderLabel(provider)}
     </span>
   );
@@ -306,11 +313,25 @@ export function RuntimeMeta({ label, children }: { label: string; children: Reac
  * 类 RuntimeMeta 但更紧凑(4 列网格内):label 10px + value 14px 加粗 + truncate 防溢出。
  * 借鉴 SummaryCard 的 label/value 排版风格。
  */
-export function UsageStat({ label, value }: { label: string; value: string }) {
+export function UsageStat({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  /** tone 对齐 prototype .ustat .uv：cost=蓝、muted=灰（无数据）、default=深字。 */
+  tone?: "default" | "cost" | "muted";
+}) {
+  const valueColor = {
+    default: "text-slate-900",
+    cost: "text-blue-700",
+    muted: "text-slate-400 font-medium",
+  }[tone];
   return (
     <div className="min-w-0">
-      <p className="text-[10px] font-medium uppercase text-muted-foreground">{label}</p>
-      <p className="mt-0.5 truncate text-sm font-semibold text-foreground">{value}</p>
+      <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className={cn("mt-0.5 truncate text-[13px] font-bold tabular-nums", valueColor)}>{value}</p>
     </div>
   );
 }

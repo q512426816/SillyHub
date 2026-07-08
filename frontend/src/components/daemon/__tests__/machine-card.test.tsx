@@ -206,8 +206,8 @@ describe("MachineCard（task-08 / FR-4）", () => {
       online_runtime_count: 1,
     });
     const { container } = renderCard(<MachineCard {...defaultProps(machine)} />);
-    // runtime 数胶囊是 bg-muted span（与费用蓝色胶囊区分）。限定到该胶囊断言文本。
-    const badge = container.querySelector("span.bg-muted");
+    // runtime 数胶囊是 bg-slate-100 span（与费用蓝色胶囊区分）。限定到该胶囊断言文本。
+    const badge = container.querySelector("span.bg-slate-100");
     expect(badge).not.toBeNull();
     const text = badge!.textContent ?? "";
     // 在线 1 / 总数 2 runtime（节点分开，但胶囊 textContent 含全部）。
