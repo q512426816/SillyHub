@@ -2896,6 +2896,23 @@ export class Daemon {
     }
     // transport !== 'tar'（shared）→ 跳过 pull + 不 set specSyncCtx（onSessionEnd 自然跳过 sync）。
 
+    // 2026-07-08：派发 prompt 记入 agent 日志。claude 秒退（529/init 失败）时，
+    // agent 日志只有 SYSTEM:init + error，看不到实际发了什么。提交 prompt 为 user_input
+    // 日志条目，不管 claude 成功失败都能在 UI 看到「派发了什么指令」。
+    try {
+      await this._client.submitMessages(
+        leaseId,
+        execPayload.claimToken ?? '',
+        firstRunId,
+        [{ event_type: 'user_input', content: prompt, channel: 'user_input' }],
+      );
+    } catch (e) {
+      this._logger.warn('interactive_prompt_log_failed', {
+        lease_id: leaseId,
+        error: (e as Error)?.message ?? String(e),
+      });
+    }
+
     try {
       await this._sessionManager.create({
         sessionId,
