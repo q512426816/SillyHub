@@ -464,6 +464,19 @@ export class TaskRunner {
         console.warn('task_runner: link_skills_failed', leaseId, e);
       }
 
+      // 步骤 2.8（2026-07-08）：派发 prompt 记入 agent 日志——batch 路径。
+      // claude 秒退（529/init 失败）时 agent 日志只有 SYSTEM:init + error，看不到实际
+      // 派发了什么。提交 prompt 为 user_input 日志条目（与 interactive 路径对齐）。
+      if (ctx.agentRunId && claimToken) {
+        try {
+          await this.client.submitMessages(leaseId, claimToken, ctx.agentRunId, [
+            { event_type: 'user_input', content: ctx.prompt ?? '(空 prompt)', channel: 'user_input' },
+          ]);
+        } catch (e) {
+          console.warn('task_runner: prompt_log_failed', leaseId, e);
+        }
+      }
+
       // 步骤 3：spawn env 构造（task-09 接入 buildSpawnEnv）
       // 三层合并：tool_config.env > claude token（credentials.json + process.env 兜底）
       // > process.env 副本。token 绝不入日志/Redis/HTTP（R-09 不泄漏铁律）。
