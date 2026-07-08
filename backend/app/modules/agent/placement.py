@@ -266,6 +266,14 @@ class RunPlacementService:
         if workspace_slug:
             metadata["workspace_slug"] = workspace_slug
 
+        # 2026-07-08：interactive lease 必须带 session_id + run_id（daemon
+        # _startInteractiveSession 缺这两个字段会 interactive_missing_fields 早返回）。
+        # dispatch_to_daemon 原来走 batch 不需要这些；改 kind=interactive 后必须补。
+        if "session_id" not in metadata:
+            metadata["session_id"] = str(uuid.uuid4())
+        if "run_id" not in metadata:
+            metadata["run_id"] = str(agent_run_id)
+
         await self._session.execute(
             text(
                 """
