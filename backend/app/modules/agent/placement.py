@@ -269,10 +269,37 @@ class RunPlacementService:
         # 2026-07-08：interactive lease 必须带 session_id + run_id（daemon
         # _startInteractiveSession 缺这两个字段会 interactive_missing_fields 早返回）。
         # dispatch_to_daemon 原来走 batch 不需要这些；改 kind=interactive 后必须补。
+        # 同时创建 AgentSession 行让 UI 会话列表能看到。
+        interactive_session_id = uuid.uuid4()
         if "session_id" not in metadata:
-            metadata["session_id"] = str(uuid.uuid4())
+            metadata["session_id"] = str(interactive_session_id)
         if "run_id" not in metadata:
             metadata["run_id"] = str(agent_run_id)
+
+        # 创建 AgentSession（UI 会话列表需要）
+        await self._session.execute(
+            text(
+                """
+                INSERT INTO agent_sessions
+                    (id, user_id, runtime_id, lease_id, provider, status, created_at)
+                VALUES
+                    (:sid, :user_id, :runtime_id, :lease_id, :provider, 'pending', :now)
+                """
+            ),
+            {
+                "sid": interactive_session_id.hex,
+                "user_id": user_id.hex if hasattr(user_id, "hex") else str(user_id),
+                "runtime_id": runtime_id.hex,
+                "lease_id": lease_id.hex,
+                "provider": provider or "claude",
+                "now": now,
+            },
+        )
+        # 关联 AgentRun → AgentSession
+        await self._session.execute(
+            text("UPDATE agent_runs SET agent_session_id = :sid WHERE id = :rid"),
+            {"sid": str(interactive_session_id), "rid": agent_run_id.hex},
+        )
 
         await self._session.execute(
             text(
