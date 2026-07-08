@@ -48,6 +48,27 @@ interface LocalManifest {
   version: string;
 }
 
+/**
+ * skill-manager 调 backend skills/MCP 端点的鉴权凭证（对齐 hub-client HubClientAuth）。
+ * apiKey → X-API-Key（daemon 长期凭证，--api-key）；token → Authorization: Bearer。
+ * 两者都给时 apiKey 优先（与 hub-client._headers 一致）。
+ */
+export interface SkillAuth {
+  apiKey?: string | null;
+  token?: string | null;
+}
+
+/** 构造鉴权 headers（apiKey 优先 X-API-Key，否则 token Bearer；都无 → 空）。 */
+function skillAuthHeaders(auth?: SkillAuth): Record<string, string> {
+  const h: Record<string, string> = {};
+  if (auth?.apiKey) {
+    h['X-API-Key'] = auth.apiKey;
+  } else if (auth?.token) {
+    h['Authorization'] = `Bearer ${auth.token}`;
+  }
+  return h;
+}
+
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export type SkillManagerLogger = (
   level: LogLevel,
@@ -79,11 +100,12 @@ export async function getLocalSkillsVersion(): Promise<string | null> {
  */
 export async function fetchRemoteManifest(
   serverUrl: string,
+  auth?: SkillAuth,
   logger?: SkillManagerLogger,
 ): Promise<SkillsManifest | null> {
   const url = `${serverUrl.replace(/\/$/, '')}/api/daemon/skills/latest/manifest`;
   try {
-    const resp = await fetch(url);
+    const resp = await fetch(url, { headers: skillAuthHeaders(auth) });
     if (!resp.ok) {
       logger?.('warn', 'skill_manifest_fetch_failed', { url, status: resp.status });
       return null;
@@ -103,11 +125,12 @@ export async function fetchRemoteManifest(
  */
 export async function fetchSkillsBundle(
   serverUrl: string,
+  auth?: SkillAuth,
   logger?: SkillManagerLogger,
 ): Promise<ArrayBuffer | null> {
   const url = `${serverUrl.replace(/\/$/, '')}/api/daemon/skills/latest/bundle`;
   try {
-    const resp = await fetch(url);
+    const resp = await fetch(url, { headers: skillAuthHeaders(auth) });
     if (!resp.ok) {
       logger?.('warn', 'skill_bundle_fetch_failed', { url, status: resp.status });
       return null;
@@ -200,20 +223,23 @@ export async function extractSkillsBundle(
  */
 export async function syncSkills(
   serverUrl: string,
+  auth: SkillAuth,
   logger?: SkillManagerLogger,
 ): Promise<{ synced: boolean; skipped: boolean }>;
 export async function syncSkills(
   serverUrl: string,
+  auth: SkillAuth,
   logger: SkillManagerLogger,
 ): Promise<{ synced: boolean; skipped: boolean }>;
 export async function syncSkills(
   serverUrl: string,
+  auth: SkillAuth,
   logger?: SkillManagerLogger,
 ): Promise<{ synced: boolean; skipped: boolean }> {
   const log = logger ?? (() => undefined);
 
   // 1. 拉 remote manifest
-  const remote = await fetchRemoteManifest(serverUrl, log);
+  const remote = await fetchRemoteManifest(serverUrl, auth, log);
   if (!remote) {
     return { synced: false, skipped: false };
   }
@@ -226,7 +252,7 @@ export async function syncSkills(
   }
 
   // 3. 拉 bundle
-  const bundle = await fetchSkillsBundle(serverUrl, log);
+  const bundle = await fetchSkillsBundle(serverUrl, auth, log);
   if (!bundle) {
     return { synced: false, skipped: false };
   }

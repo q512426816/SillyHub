@@ -788,10 +788,15 @@ export class Daemon {
     // task-03（2026-07-07-daemon-skill-execution）：同步平台 sillyspec skills。
     // 在 agent 探测之后、三循环启动之前。skills 版本比对 + bundle 拉取 + 解压。
     // 失败不阻断启动（同步失败不影响已有 skill 集，下一轮启动重试）。
+    // 2026-07-08 修复：传 auth（apiKey 优先 X-API-Key），否则 manifest 端点 401。
     try {
-      await syncSkills(this._serverOrigin(), (level, msg, data) => {
-        this._logger[level](msg, data);
-      });
+      await syncSkills(
+        this._serverOrigin(),
+        { apiKey: this._config.api_key, token: this._config.token },
+        (level, msg, data) => {
+          this._logger[level](msg, data);
+        },
+      );
     } catch (e) {
       this._logger.warn('skill_sync_failed', { error: e });
     }

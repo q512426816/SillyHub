@@ -67,7 +67,7 @@ describe('skill-manager: fetchRemoteManifest', () => {
   it('网络错误 → null 不抛', async () => {
     const logs: unknown[] = [];
     const logger = (_l: string, _m: string, d?: unknown) => logs.push(d);
-    const r = await fetchRemoteManifest('http://nonexistent.invalid', logger as never);
+    const r = await fetchRemoteManifest('http://nonexistent.invalid', undefined, logger as never);
     expect(r).toBeNull();
     expect(logs.length).toBeGreaterThan(0);
   });
@@ -165,7 +165,7 @@ describe('skill-manager: syncSkills', () => {
 
   it('remote manifest 不可达 → synced=false 不抛', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network'));
-    const r = await syncSkills('http://test.invalid');
+    const r = await syncSkills('http://test.invalid', { apiKey: 'test-key' });
     expect(r.synced).toBe(false);
     fetchSpy.mockRestore();
   });
@@ -179,7 +179,7 @@ describe('skill-manager: syncSkills', () => {
       .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
       .mockResolvedValueOnce(new Response(tarGz, { status: 200 }));
-    const r = await syncSkills('http://test.invalid');
+    const r = await syncSkills('http://test.invalid', { apiKey: 'test-key' });
     expect(r.synced).toBe(true);
     // 本地版本记录
     const home = tmpHome;
@@ -202,7 +202,7 @@ describe('skill-manager: syncSkills', () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(new Response(JSON.stringify(manifest), { status: 200 }));
-    const r = await syncSkills('http://test.invalid');
+    const r = await syncSkills('http://test.invalid', { apiKey: 'test-key' });
     expect(r.skipped).toBe(true);
     expect(r.synced).toBe(false);
     // fetch 只调一次（manifest，不拉 bundle）
@@ -338,5 +338,39 @@ describe('skill-manager: linkSkillsToWorkdir', () => {
     await linkSkillsToWorkdir(workdir);
     expect(await pathExists(join(workdir, '.claude', 'skills', '.tmp-extract'))).toBe(false);
     expect(await pathExists(join(workdir, '.claude', 'skills', 'real-skill', 'SKILL.md'))).toBe(true);
+  });
+});
+
+// ── auth header 传递（2026-07-08 修复 401：skill 同步需带鉴权）──────────────
+describe('skill-manager: fetch 带 auth header', () => {
+  it('apiKey → X-API-Key header', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ version: 'v1' }), { status: 200 }),
+    );
+    await fetchRemoteManifest('http://hub', { apiKey: 'shk_live_xxx' });
+    const opts = spy.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect((opts?.headers as Record<string, string>)?.['X-API-Key']).toBe('shk_live_xxx');
+    spy.mockRestore();
+  });
+
+  it('token → Authorization Bearer header', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ version: 'v1' }), { status: 200 }),
+    );
+    await fetchRemoteManifest('http://hub', { token: 'jwt-yyy' });
+    const opts = spy.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect((opts?.headers as Record<string, string>)?.['Authorization']).toBe('Bearer jwt-yyy');
+    spy.mockRestore();
+  });
+
+  it('apiKey + token 都给 → apiKey 优先（X-API-Key）', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ version: 'v1' }), { status: 200 }),
+    );
+    await fetchRemoteManifest('http://hub', { apiKey: 'k', token: 't' });
+    const opts = spy.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect((opts?.headers as Record<string, string>)?.['X-API-Key']).toBe('k');
+    expect((opts?.headers as Record<string, string>)?.['Authorization']).toBeUndefined();
+    spy.mockRestore();
   });
 });
