@@ -270,9 +270,9 @@ class RunPlacementService:
             text(
                 """
                 INSERT INTO daemon_task_leases
-                    (id, agent_run_id, runtime_id, status, metadata, created_at, updated_at)
+                    (id, agent_run_id, runtime_id, status, kind, metadata, created_at, updated_at)
                 VALUES
-                    (:id, :agent_run_id, :runtime_id, 'pending', :metadata, :now, :now)
+                    (:id, :agent_run_id, :runtime_id, 'pending', 'interactive', :metadata, :now, :now)
                 """
             ),
             {
