@@ -10,6 +10,7 @@
 //   5. fileChange 无可识别路径 → fail-closed decline（design §13 #9 降级）。
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+vi.mock('../src/skill-manager.js', () => ({ linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })) }));
 
 let mockAdapter: Record<string, unknown> = {};
 

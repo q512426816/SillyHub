@@ -19,6 +19,7 @@
 // R-10：重试清空 ctx.resumeSessionId（避免 --resume 重复 side-effect）。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+vi.mock('../src/skill-manager.js', () => ({ linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })) }));
 
 let mockAdapter: Record<string, unknown> = {};
 

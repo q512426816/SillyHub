@@ -21,6 +21,7 @@
 //   - 守护 §0：stage 经 batch（TaskRunner.runLease），不构造 interactive session
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+vi.mock('../../src/skill-manager.js', () => ({ linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })) }));
 
 // ── vi.mock spec-sync.ts：替换为 spy（E 组只验 task-runner 调用契约）────────────
 // pullSpecBundle 默认 resolve 到非 null 路径（让 task-runner 走 sync 分支：specRoot 非空）。

@@ -24,6 +24,12 @@ vi.mock('../src/adapters/index.js', () => ({
   getBackend: vi.fn((_provider: string) => mockAdapter),
 }));
 
+// 2026-07-08: task-runner spawn 前调 linkSkillsToWorkdir（读真实 HOME skills 目录），
+// 测试环境 HOME 有污染 → 引入不可控 IO 致 spawn 时序变化 → timeout。mock 为 no-op。
+vi.mock('../src/skill-manager.js', () => ({
+  linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })),
+}));
+
 import { spawn } from 'node:child_process';
 import { TaskRunner } from '../src/task-runner.js';
 import { createFakeChild, readStdin, waitForSpawn } from './helpers/fake-child.js';

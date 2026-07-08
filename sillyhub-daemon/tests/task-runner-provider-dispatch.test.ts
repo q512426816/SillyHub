@@ -35,6 +35,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+vi.mock('../src/skill-manager.js', () => ({ linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })) }));
 
 // vi.mock 必须在 import 之前（vitest hoist）。
 let mockAdapter: Record<string, unknown> = {};

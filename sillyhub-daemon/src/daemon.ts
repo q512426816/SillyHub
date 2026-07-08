@@ -1824,6 +1824,10 @@ export class Daemon {
     // （runtimes: [{runtime_id, allowed_roots}]），各 runtime 独立同步 PolicyCache。
     const runtimesRaw = obj.runtimes;
     if (Array.isArray(runtimesRaw)) {
+      // 2026-07-08：只在 roots 真变化时 set + 打日志。旧实现每次心跳无条件 log
+      // → allowed_roots_synced_per_runtime spam（心跳 N 秒一次 × runtime 数）。
+      // 变化检测：JSON.stringify 对比缓存内 allowedRoots，相同则跳过 set 与日志。
+      let changed = 0;
       for (const item of runtimesRaw) {
         if (!item || typeof item !== 'object') continue;
         const rt = item as Record<string, unknown>;
@@ -1837,11 +1841,19 @@ export class Daemon {
           .map((p) => p.replace(/^~(?=$|[/\\])/, homedir()));
         const union = new Set<string>(expanded);
         union.add(homedir());
-        this._policyCache.set(runtimeId, normalizeAllowedRoots([...union]));
+        const normalized = normalizeAllowedRoots([...union]);
+        const existing = this._policyCache.get(runtimeId)?.allowedRoots;
+        if (JSON.stringify(existing) !== JSON.stringify(normalized)) {
+          this._policyCache.set(runtimeId, normalized);
+          changed++;
+        }
       }
-      this._logger.info('allowed_roots_synced_per_runtime', {
-        count: runtimesRaw.length,
-      });
+      if (changed > 0) {
+        this._logger.info('allowed_roots_synced_per_runtime', {
+          count: runtimesRaw.length,
+          changed,
+        });
+      }
       return;
     }
     // 兼容旧 backend（allowed_roots 单值 → 同步到所有 runtime，过渡期）

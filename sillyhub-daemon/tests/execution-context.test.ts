@@ -15,6 +15,7 @@
 // @module execution-context.test
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
+vi.mock('../src/skill-manager.js', () => ({ linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })) }));
 import { Daemon } from '../src/daemon.js';
 import type { DaemonConfig } from '../src/config.js';
 import { MSG } from '../src/protocol.js';

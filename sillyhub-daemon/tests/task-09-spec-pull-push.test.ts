@@ -16,6 +16,7 @@
 //     下不可靠，会立即返回导致 exit emit 早于 spawn → 死锁）。
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+vi.mock('../src/skill-manager.js', () => ({ linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })) }));
 import { tmpdir } from 'node:os';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';

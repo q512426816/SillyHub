@@ -16,6 +16,7 @@
 // vitest.config.ts: globals=false → 显式 import；include=tests/**/*.test.ts。
 
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+vi.mock('../src/skill-manager.js', () => ({ linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })) }));
 import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';

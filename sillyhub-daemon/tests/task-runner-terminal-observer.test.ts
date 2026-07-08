@@ -23,6 +23,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+vi.mock('../src/skill-manager.js', () => ({ linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })) }));
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir as osTmpdir } from 'node:os';
 import { existsSync } from 'node:fs';

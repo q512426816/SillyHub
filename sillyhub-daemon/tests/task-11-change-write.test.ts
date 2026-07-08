@@ -14,6 +14,7 @@
 //   - 真实 node:fs/promises 写入（验证文件落地 + 跨平台路径）。
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+vi.mock('../src/skill-manager.js', () => ({ linkSkillsToWorkdir: vi.fn(async () => ({ linked: 0, skipped: true })) }));
 import { mkdtemp, rm, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
