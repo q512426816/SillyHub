@@ -2104,17 +2104,19 @@ export class Daemon {
       // 这里直接传空白名单，让 file-rpc.listDir 跳过权限校验（只做存在+目录检查）。
       return listDir(path, null, '', []);
     });
-    // ql-20260706-006：弹出系统原生文件夹选择对话框（PowerShell FolderBrowserDialog）。
-    // daemon 是用户机器上的本地进程，可直接调系统对话框；选中的完整路径经 WS 回传。
-    // 仅 Windows 支持（PowerShell + System.Windows.Forms）。其他平台抛 unsupported。
-    // 多屏适配：按鼠标当前位置建隐藏父窗口，对话框在鼠标所在屏幕弹（不是总在主屏）。
+    // ql-20260708-002：弹系统原生文件夹选择对话框。改用 Shell.Application.BrowseForFolder
+    //（COM SHBrowseForFolder），不再用 System.Windows.Forms.FolderBrowserDialog。
+    // 根因：FolderBrowserDialog.ShowDialog 在 PowerShell 子进程（exec 启动）里缺消息循环，
+    // ShowDialog 卡死不弹窗 → daemon exec 等 180s → backend DaemonRpcTimeout 504 → next
+    // proxy 30s 500。BrowseForFolder 走 COM 不依赖 WinForms 消息循环，正常弹窗 + 返回。
+    // initial_path 作为 RootFolder（定位到该目录；空则从"此电脑"开始）。仅 Windows。
     // 用 -EncodedCommand（UTF-16LE base64）避免引号转义 + 原生支持中文描述/路径。
     ws.registerRpcHandler('browse_folder', async (params) => {
       if (platform() !== 'win32') {
         throw new RpcError('unsupported', 'browse_folder only supported on Windows');
       }
       // ql-20260707-003：若前端传入 initialPath（当前输入框已有值），对话框默认定位到该目录。
-      // 展开 ~ → homedir；PS 单引号转义（' → ''）后嵌入脚本，Test-Path 校验存在才设 SelectedPath。
+      // 展开 ~ → homedir；PS 单引号转义（' → ''）后嵌入脚本，Test-Path 校验存在才作 RootFolder。
       const initialRaw =
         typeof (params as { initial_path?: unknown } | undefined)?.initial_path === 'string'
           ? (params as { initial_path?: string }).initial_path!.trim()
@@ -2123,29 +2125,15 @@ export class Daemon {
       const psSafe = initialAbs.replace(/'/g, "''");
       const psScript =
         '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n' +
-        'Add-Type -AssemblyName System.Windows.Forms\n' +
-        'Add-Type -AssemblyName System.Drawing\n' +
         "$initial = '" + psSafe + "'\n" +
-        '$cursor = [System.Windows.Forms.Cursor]::Position\n' +
-        '$screen = [System.Windows.Forms.Screen]::FromPoint($cursor)\n' +
-        '$dummy = New-Object System.Windows.Forms.Form\n' +
-        "$dummy.StartPosition = 'Manual'\n" +
-        '$dummy.Location = $screen.Bounds.Location\n' +
-        '$dummy.Size = New-Object System.Drawing.Size(1, 1)\n' +
-        '$dummy.ShowInTaskbar = $false\n' +
-        '$dummy.Opacity = 0\n' +
-        '$dummy.Show() | Out-Null\n' +
-        '$dummy.Hide()\n' +
-        '$d = New-Object System.Windows.Forms.FolderBrowserDialog\n' +
-        "$d.Description = '选择要添加为可写目录的文件夹'\n" +
-        '$d.ShowNewFolderButton = $true\n' +
+        "$root = ''\n" +
         'if ($initial -and (Test-Path -LiteralPath $initial -PathType Container)) {\n' +
-        '  $d.SelectedPath = (Resolve-Path -LiteralPath $initial).Path\n' +
+        '  $root = $initial\n' +
         '}\n' +
-        '$r = $d.ShowDialog($dummy)\n' +
-        '$dummy.Close()\n' +
-        'if ($r -eq [System.Windows.Forms.DialogResult]::OK) {\n' +
-        '  [Console]::Out.WriteLine($d.SelectedPath)\n' +
+        '$shell = New-Object -ComObject Shell.Application\n' +
+        "$folder = $shell.BrowseForFolder(0, '选择要添加为可写目录的文件夹', 0x0040, $root)\n" +
+        'if ($folder -ne $null) {\n' +
+        '  [Console]::Out.WriteLine($folder.Self.Path)\n' +
         '}\n';
       const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
       return new Promise<{ path: string }>((resolve, reject) => {
