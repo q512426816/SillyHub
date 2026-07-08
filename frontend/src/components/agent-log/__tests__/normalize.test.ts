@@ -491,3 +491,36 @@ describe("task-14: thinking 跨断点去重（normalize 集成）", () => {
     expect(result[2]?.mergedThinkingContent).toBe("段2a");
   });
 });
+
+describe("tool_result 按 parent_tool_use_id 精确配对 (2026-07-09-agent-log-display-fix / D-007)", () => {
+  it("stdout [TOOL_RESULT] + parent_tool_use_id 命中 → 合并进 tool_call 卡片并 hidden", () => {
+    const logs: AgentRunLogEntry[] = [
+      makeLog(
+        "tool_call",
+        JSON.stringify({ tool: "Bash", tool_use_id: "call_001", args: { command: "ls" } }),
+        "tc1",
+      ),
+      {
+        ...makeLog("stdout", "[TOOL_RESULT] file1.txt\nfile2.txt", "tr1"),
+        parent_tool_use_id: "call_001",
+      },
+    ];
+    const result = normalizeLogs(logs);
+    // tool_call 卡片（tc1）接收 mergedToolResult
+    expect(result[0]?.mergedToolResult).toBeTruthy();
+    // result 行（tr1）hidden（已合并进卡片）
+    const tr = result.find((p) => p.log.id === "tr1");
+    expect(tr?.hidden).toBe(true);
+  });
+
+  it("parent_tool_use_id 缺失 → 退化到 lastToolSourceIdx 启发式（兼容旧日志）", () => {
+    const logs: AgentRunLogEntry[] = [
+      makeLog("tool_call", JSON.stringify({ tool: "Bash", args: { command: "ls" } }), "tc1"),
+      makeLog("stdout", "[TOOL_RESULT] output", "tr1"),
+    ];
+    const result = normalizeLogs(logs);
+    const tr = result.find((p) => p.log.id === "tr1");
+    // 无 id 但紧邻 tool_call → 退化合并（现有行为不变）
+    expect(tr?.hidden).toBe(true);
+  });
+});

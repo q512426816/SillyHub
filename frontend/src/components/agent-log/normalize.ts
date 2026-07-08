@@ -345,6 +345,9 @@ export function classifyLog(
   }
   const text = content ?? "";
   if (text.includes("[TOOL_RESULT]")) return "tool_result";
+  // 2026-07-09-agent-log-display-fix / FR-10：[TOOL_USE] stdout 行归 tool_call
+  // （历史降级——新 daemon 不再发 stdout [TOOL_USE]，旧日志兼容）
+  if (text.startsWith("[TOOL_USE]")) return "tool_call";
   if (text.startsWith("[THINKING]")) return "thinking";
   if (text.startsWith("[ASSISTANT]")) return "assistant";
   if (text.startsWith("[SYSTEM")) return "system";
@@ -370,13 +373,10 @@ export function normalizeLogs(logs: AgentRunLogEntry[]): ProcessedLog[] {
 }
 
 function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
-  // ql-20260620：过滤 daemon 已知的低价值高频 system 日志（旧 daemon 仍会推送）。
-  const NOISE_PREFIXES = ["[SYSTEM:thinking_tokens]"];
-  const filtered = logs.filter((log) => {
-    const c = asString(log.content_redacted);
-    return !NOISE_PREFIXES.some((p) => c.startsWith(p));
-  });
-  const result: ProcessedLog[] = filtered.map((log) => ({ log, hidden: false }));
+  // 2026-07-09-agent-log-display-fix / D-002@v2：不再 filter 删除 [SYSTEM:thinking_tokens]，
+  // 改为 viewer 折叠渲染（信息完整性优先）。所有日志保留进 normalize，classifyLog
+  // 归 system/thinking 语义类，viewer 渲染为折叠摘要行可展开。
+  const result: ProcessedLog[] = logs.map((log) => ({ log, hidden: false }));
   let lastToolSourceIdx = -1;
   // ql-20260617-011：连续 [THINKING]-only stdout 合并到首条（SSE 追加效果）
   let lastThinkingIdx = -1;
@@ -596,9 +596,19 @@ function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
     // ── [TOOL_RESULT] handling (no TOOL_USE) ──
     if (!hasToolUse && hasToolResult) {
       const body = extractToolResultBody(content);
-
-      if (lastToolSourceIdx >= 0) {
-        // Merge into previous tool source
+      // task-05 / D-007：优先按 parent_tool_use_id 精确配对（新日志 daemon 带 id）
+      const resultToolUseId = current.log.parent_tool_use_id ?? undefined;
+      let matchedIdx = -1;
+      if (resultToolUseId) {
+        const candidate = toolUseIdIndex.get(resultToolUseId);
+        if (candidate !== undefined) matchedIdx = candidate;
+      }
+      if (matchedIdx >= 0 && result[matchedIdx]) {
+        // 精确配对命中：合并到对应 tool_call 卡片
+        mergeToolResult(result[matchedIdx]!, body, current.log);
+        current.hidden = true;
+      } else if (lastToolSourceIdx >= 0) {
+        // 退化：合并到最近 tool source（旧日志/id 缺失）
         const tc = result[lastToolSourceIdx];
         if (tc) mergeToolResult(tc, body, current.log);
         current.hidden = true;
@@ -607,7 +617,6 @@ function normalizeLogsImpl(logs: AgentRunLogEntry[]): ProcessedLog[] {
         if (body) {
           current.parsedToolResult = body;
         }
-        // Don't hide — rendered as ToolResultCard
       }
     }
   }

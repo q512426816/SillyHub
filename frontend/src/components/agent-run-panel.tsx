@@ -123,7 +123,9 @@ function TokenUsageBadge({
       <span className="text-zinc-300">|</span>
       <span title="缓存读取">⚡ {formatTokenCount(cacheRead)}</span>
       <span className="text-zinc-300">|</span>
-      <span title="缓存写入">✎ {formatTokenCount(cacheCreation)}</span>
+      {/* task-09 / D-004@v2 B 分支：cache_creation 全表恒 0（task-01 实证前按 Claude
+          不返回兜底），显示"—"而非误导性"0"。实证后若 A 分支有真值，formatTokenCount 正常。 */}
+      <span title="缓存写入">✎ {cacheCreation && cacheCreation > 0 ? formatTokenCount(cacheCreation) : "—"}</span>
     </span>
   );
 }
